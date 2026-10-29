@@ -214,7 +214,8 @@ elif [ ${#U2[@]} -gt 0 ] && [ "$EXEC_OK" != 1 ]; then
 fi
 
 START="$(date -u +%s)"
-log_ship() { mkdir -p "$OUT_DIR"; printf '%s\t%s\t%s\t%s\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$TAG" "$(git rev-parse --short HEAD)" "$*" "${PARTS[*]}" >> "$OUT_DIR/ships.log"; }
+# The commit this ship took at its start: HEAD may have moved meanwhile (another session's commit).
+log_ship() { mkdir -p "$OUT_DIR"; printf '%s\t%s\t%s\t%s\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$TAG" "${HEAD_SHA:0:7}" "$*" "${PARTS[*]}" >> "$OUT_DIR/ships.log"; }
 
 # --- the maintenance window and Telegram (the header: TELEGRAM) -----------------------------------
 MAINT_ON=() STARTED=0 DONE_NOTES=() WARNED=0
