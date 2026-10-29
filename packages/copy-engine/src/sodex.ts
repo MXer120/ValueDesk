@@ -738,10 +738,12 @@ export class SodexClient {
    * The account's fills on one market since `since` (GET .../trades, weight 25: read only when
    * a copied position changed outside the copier). SoDEX's own fills carry their origin in the
    * client order id: a liquidation is "liquidation:<id>" (docs/research/07 G7), the copier's
-   * stops "vds-...".
+   * stops "vds-...". `until`: none after it (SoDEX's endTime, inclusive), so the page of 100
+   * holds a short window.
    */
-  async fills(address: string, symbol: string, since: number): Promise<Array<{ clOrdID: string | null; side: 'buy' | 'sell'; qty: number; price: number; time: number }>> {
-    const path = `/api/v1/perps/accounts/${address.toLowerCase()}/trades?symbol=${encodeURIComponent(symbol)}&startTime=${Math.max(0, Math.floor(since))}&limit=100`;
+  async fills(address: string, symbol: string, since: number, until?: number): Promise<Array<{ clOrdID: string | null; side: 'buy' | 'sell'; qty: number; price: number; time: number }>> {
+    const end = until !== undefined && Number.isFinite(until) ? `&endTime=${Math.max(0, Math.floor(until))}` : '';
+    const path = `/api/v1/perps/accounts/${address.toLowerCase()}/trades?symbol=${encodeURIComponent(symbol)}&startTime=${Math.max(0, Math.floor(since))}${end}&limit=100`;
     const rows = await this.get<unknown>(path, weightFor(path, 100));
     const list = Array.isArray(rows) ? rows : ((rows as { trades?: unknown[] } | null)?.trades ?? []);
     return (list as Array<Record<string, unknown>>)

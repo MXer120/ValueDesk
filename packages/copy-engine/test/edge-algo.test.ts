@@ -139,11 +139,25 @@ class Exchange implements AlgoSink {
   /** The socket's order updates are held back (a slow or dropped stream) until release(). */
   mute = false;
   late: Array<Partial<OrderUpdate> & { clOrdID: string }> = [];
+  /** The socket carries no order update at all (dropped, never replayed): only the REST reads tell. */
+  deaf = false;
+  /** The algo's own fills, as SoDEX's trades list them (by client order id). */
+  own: Array<{ clOrdID: string | null; side: 'buy' | 'sell'; qty: number; price: number; time: number }> = [];
+  /** Whether a trades read lists the algo's own fills too (off: only `fills`, as the tests before it expect). */
+  tradesOwn = false;
+  /**
+   * A backend behind (SoDEX mainnet 2026-10-29): a read for which this answers true leaves the
+   * orders in `hidden` out - from the open orders, the history and the trades alike.
+   */
+  staleRead: ((what: 'open' | 'history' | 'trades') => boolean) | null = null;
+  hidden = new Set<string>();
+  reads = { open: 0, history: 0, trades: 0 };
   constructor(private readonly m: FakeMarket) {}
   get all(): ChildRequest[] {
     return this.placed.flat();
   }
   private up(u: Partial<OrderUpdate> & { clOrdID: string }): void {
+    if (this.deaf) return;
     if (this.mute) this.late.push(u);
     else setImmediate(() => this.m.order(u));
   }
@@ -165,6 +179,7 @@ class Exchange implements AlgoSink {
         let qty = reaches ? Number(o.quantity) : 0;
         if (o.reduceOnly) qty = Math.min(qty, Math.max(0, o.side === 'sell' ? this.position : -this.position));
         this.position += (o.side === 'buy' ? 1 : -1) * qty;
+        if (qty > 0) this.own.push({ clOrdID: o.clOrdID, side: o.side, qty, price: touch, time: Date.now() });
         const status = qty >= Number(o.quantity) - 1e-12 ? 'FILLED' : 'CANCELED';
         this.history.set(o.clOrdID, { clOrdID: o.clOrdID, orderId: '1', status, executedQty: qty, executedValue: qty * touch });
         this.up({ clOrdID: o.clOrdID, symbol: mk.name, status, filledQty: qty, filledValue: qty * touch, maker: false });
@@ -215,12 +230,23 @@ class Exchange implements AlgoSink {
     if (done) this.resting.delete(id);
     const h = this.history.get(id)!;
     Object.assign(h, { status: done ? 'FILLED' : 'PARTIALLY_FILLED', executedQty: r.filled, executedValue: r.filled * Number(r.price) });
+    this.own.push({ clOrdID: id, side: r.side, qty, price: Number(r.price), time: Date.now() });
+    if (this.deaf) return;
     this.m.order({ clOrdID: id, symbol: r.symbol, status: done ? 'FILLED' : 'PARTIALLY_FILLED', filledQty: r.filled, filledValue: r.filled * Number(r.price), maker: true });
   }
   /** What the order look-ups answer: the open orders (stops included), or the history. */
   rows(history: boolean): Row[] {
-    if (history) return [...this.history.values()].map((r) => ({ ...r }));
-    return [...this.history.values()].filter((r) => this.resting.has(r.clOrdID) || this.liveStops.has(r.clOrdID)).map((r) => ({ ...r }));
+    this.reads[history ? 'history' : 'open']++;
+    const stale = this.staleRead?.(history ? 'history' : 'open') === true;
+    const seen = (r: Row) => !(stale && this.hidden.has(r.clOrdID));
+    if (history) return [...this.history.values()].filter(seen).map((r) => ({ ...r }));
+    return [...this.history.values()].filter((r) => (this.resting.has(r.clOrdID) || this.liveStops.has(r.clOrdID)) && seen(r)).map((r) => ({ ...r }));
+  }
+  /** What a trades read answers (GET .../trades from `since`, to `until` when given). */
+  trades(since: number, until?: number) {
+    this.reads.trades++;
+    const stale = this.staleRead?.('trades') === true;
+    return [...this.fills, ...(this.tradesOwn ? this.own : [])].filter((f) => f.time >= since - 1_000 && (until === undefined || f.time <= until) && !(stale && f.clOrdID !== null && this.hidden.has(f.clOrdID)));
   }
   /** Every live stop's size (SoDEX's view): what protects the position now. */
   stopSizes(kind: 'tp' | 'sl'): number[] {
@@ -248,9 +274,9 @@ function runtimeFor(r: Rig): AlgoRuntime {
       if (r.ex.down) throw new Error('fetch failed (SoDEX unreachable)');
       return { equity: 1_000_000, positions: { 'BTC-USD': { size: r.ex.readAs ? r.ex.readAs() : r.ex.position, entry: 60_000, leverage: 1, leverageReported: true } } };
     },
-    fills: async (_owner: string, _symbol: string, since: number) => {
+    fills: async (_owner: string, _symbol: string, since: number, until?: number) => {
       if (r.ex.down) throw new Error('fetch failed (SoDEX unreachable)');
-      return r.ex.fills.filter((f) => f.time >= since - 1_000);
+      return r.ex.trades(since, until);
     },
     get: async () => [],
   } as unknown as SodexClient;
@@ -333,7 +359,12 @@ test('SoDEX down mid-algo: the slice it was sending is never sent again blind; o
   assert.equal(lost[0]!.state, 'unknown');
   assert.ok(x.status !== 'failed', 'an outage does not fail the algo');
   r.ex.down = false;
-  for (let i = 0; i < 20 && !['done', 'expired', 'failed'].includes(r.rt.get(a.id)!.status); i++) await tick(r, 10_000);
+  // SoDEX lists it nowhere (it never got there): that alone proves nothing, so it is cancelled by its id and
+  // settled only once 20 min of SoDEX's trades agree it filled nothing (settleUnlisted) - nothing is sent meanwhile.
+  for (let i = 0; i < 10; i++) await tick(r, 10_000);
+  assert.equal(r.ex.all.length, 1, 'held while SoDEX lists it nowhere');
+  assert.ok(r.ex.cancelled.includes(lost[0]!.clOrdID), 'cancelled by its id');
+  for (let i = 0; i < 200 && !['done', 'expired', 'failed'].includes(r.rt.get(a.id)!.status); i++) await tick(r, 10_000);
   x = r.rt.get(a.id)!;
   assert.equal(x.status, 'done');
   assert.ok(near(x.filled, 0.004), `filled ${x.filled}`);
@@ -1027,4 +1058,136 @@ test('stale: a time-sliced close sizes itself on reads that agree; reads that di
   x = await step(r, a.id, 20_000);
   assert.equal(x.k.total, 0.004, 'sized on the reads that agree');
   assert.equal(x.k.closeSide, 'sell');
+});
+
+/**
+ * A child SoDEX's reads leave out is never taken as over for that alone (settleStale, settleUnlisted):
+ * on 2026-10-29 the order history and the trades lagged the fills by tens of seconds and some backends
+ * answered minutes behind, so a child that rests or fills can be missing from every read. Booked as
+ * over, unfilled, the algo would send another in its place and both could fill. Before the fix a child
+ * missing for 2 minutes (or listed in the history at all, even as NEW) was taken as over.
+ */
+const ONE_CLIP = { kind: 'iceberg', quantity: '0.002', displayQty: '0.002', price: 59_990 };
+
+/** The clip rests on SoDEX, the socket drops every order update from now on, and the runner restarts: it knows the clip only from SoDEX's reads, which leave it out when `staleRead` says so. */
+async function restingThenBlind(r: Rig): Promise<{ a: AlgoRecord; clip: ChildRequest }> {
+  const a = await add(r, ONE_CLIP);
+  await step(r, a.id);
+  const clip = r.ex.all[0]!;
+  assert.ok(r.ex.resting.has(clip.clOrdID));
+  r.ex.deaf = true;
+  r.ex.tradesOwn = true;
+  r.ex.hidden.add(clip.clOrdID);
+  await crashAndRestart(r);
+  assert.equal(r.rt.get(a.id)!.children[0]!.state, 'unknown');
+  return { a, clip };
+}
+
+const childOf = (r: Rig, a: AlgoRecord, id: string) => r.rt.get(a.id)!.children.find((c) => c.clOrdID === id)!;
+
+test('stale: a resting child the reads alternately leave out (the history lists it NEW) stays live: nothing is sent in its place, its size cannot be cut under it, and it fills to the exact size', async () => {
+  const r = await rig();
+  const { a, clip } = await restingThenBlind(r);
+  await assert.rejects(r.rt.update(a.id, { quantity: '0.0015' }), /An order is filling right now: the new size must be more than 0\.002/);
+  let n = 0;
+  r.ex.staleRead = () => n++ % 2 === 0;
+  for (let i = 0; i < 30; i++) {
+    await step(r, a.id, 10_000);
+    assert.equal(r.ex.all.length, 1, `nothing sent in its place (step ${i})`);
+  }
+  assert.equal(childOf(r, a, clip.clOrdID).state, 'open', 'a fresh read listed it resting');
+  r.ex.deaf = false;
+  r.ex.fill(clip.clOrdID, 0.002);
+  await settle();
+  const x = await step(r, a.id, 1_000);
+  assert.equal(x.status, 'done');
+  assert.ok(near(x.filled, 0.002) && near(r.ex.position, 0.002), `filled ${x.filled}, position ${r.ex.position}`);
+  assert.equal(r.ex.all.length, 1);
+});
+
+test('stale: a resting child fills in part while every read leaves it out for 10 min: cancelled by its id, nothing sent in its place, then settled from the history for its fill - only the rest goes again', async () => {
+  const r = await rig();
+  const { a, clip } = await restingThenBlind(r);
+  const fresh = clock + 10 * 60_000;
+  let n = 0;
+  r.ex.staleRead = () => clock < fresh || n++ % 2 === 0;
+  await step(r, a.id, 10_000);
+  // Half of it fills: the socket says nothing, and every read leaves the order and its fill out.
+  r.ex.fill(clip.clOrdID, 0.001);
+  let reads = { ...r.ex.reads };
+  for (let i = 0; i < 58; i++) {
+    const x = await step(r, a.id, 10_000);
+    assert.equal(r.ex.all.length, 1, `nothing sent in its place (step ${i})`);
+    assert.ok(r.ex.position <= 0.002 + 1e-12 && x.filled <= 0.002 + 1e-12);
+    if (i === 20) reads = { ...r.ex.reads };
+  }
+  // Minutes 3.5 to 9.7 (37 steps of 10 s): one open-orders read and one history or trades read per 20 s, not one per step.
+  assert.ok(r.ex.reads.open - reads.open <= 20, `open-orders reads ${r.ex.reads.open - reads.open}`);
+  assert.ok(r.ex.reads.history - reads.history + r.ex.reads.trades - reads.trades <= 20, `history ${r.ex.reads.history - reads.history}, trades ${r.ex.reads.trades - reads.trades}`);
+  assert.ok(r.ex.cancelled.includes(clip.clOrdID), 'cancelled by its id (placed 2 min before)');
+  assert.equal(r.ex.resting.has(clip.clOrdID), false);
+  assert.equal(childOf(r, a, clip.clOrdID).state, 'unknown', 'still live in full: never settled on absence');
+  assert.ok((await texts(r, a.id)).some((t) => /SoDEX does not list clip 1: cancelled by its id/.test(t)));
+  // The reads catch up (every other one fresh): the history lists it cancelled with its fill - settled; the rest goes again.
+  for (let i = 0; i < 12 && r.ex.all.length === 1; i++) await step(r, a.id, 10_000);
+  let x = r.rt.get(a.id)!;
+  assert.equal(r.ex.all.length, 2);
+  assert.equal(r.ex.all[1]!.quantity, '0.001', 'only what did not fill');
+  assert.equal(childOf(r, a, clip.clOrdID).state, 'done');
+  assert.ok(near(x.filled, 0.001));
+  r.ex.deaf = false;
+  r.ex.fill(r.ex.all[1]!.clOrdID, 0.001);
+  await settle();
+  x = await step(r, a.id, 1_000);
+  assert.equal(x.status, 'done');
+  assert.ok(near(x.filled, 0.002) && near(r.ex.position, 0.002), `filled ${x.filled}, position ${r.ex.position}`);
+});
+
+test('stale: a child that filled in full while the open orders and the history leave it out is over for the fill SoDEX\'s trades show - nothing sent again', async () => {
+  const r = await rig();
+  const { a, clip } = await restingThenBlind(r);
+  // Its order rows never come back (past the history's page); every other trades read is behind.
+  let n = 0;
+  r.ex.staleRead = (what) => what !== 'trades' || n++ % 2 === 0;
+  await step(r, a.id, 10_000);
+  r.ex.fill(clip.clOrdID, 0.002);
+  let x = r.rt.get(a.id)!;
+  for (let i = 0; i < 40 && x.status !== 'done'; i++) {
+    x = await step(r, a.id, 10_000);
+    assert.equal(r.ex.all.length, 1, `nothing sent in its place (step ${i})`);
+  }
+  assert.equal(x.status, 'done');
+  assert.ok(near(x.filled, 0.002) && near(r.ex.position, 0.002), `filled ${x.filled}, position ${r.ex.position}`);
+  assert.ok((await texts(r, a.id)).some((t) => /SoDEX's trades show clip 1 filled in full/.test(t)));
+});
+
+test('stale: an unlisted child whose trades alternate stale and fresh is never settled while they disagree; once 3 reads agree (after its cancel and 20 min) it is over for that fill and only the rest goes again', async () => {
+  const r = await rig();
+  const { a, clip } = await restingThenBlind(r);
+  let n = 0;
+  r.ex.staleRead = (what) => what !== 'trades' || n++ % 2 === 0;
+  await step(r, a.id, 10_000);
+  r.ex.fill(clip.clOrdID, 0.001);
+  // 40 minutes: its cancel at 2 min, the 20-min wait, and the trades still alternate (0, 0.001, 0, ...).
+  for (let i = 0; i < 120; i++) {
+    await step(r, a.id, 20_000);
+    assert.equal(r.ex.all.length, 1, `nothing sent in its place (step ${i})`);
+  }
+  let x = r.rt.get(a.id)!;
+  assert.equal(childOf(r, a, clip.clOrdID).state, 'unknown');
+  assert.ok(near(x.filled, 0.001), `what a fresh trades read showed is booked (${x.filled})`);
+  assert.ok(r.ex.cancelled.includes(clip.clOrdID));
+  // The trades agree from now on: over after CONFIRM_READS more agreeing reads, for the 0.001 they show.
+  r.ex.staleRead = (what) => what !== 'trades';
+  for (let i = 0; i < 12 && r.ex.all.length === 1; i++) await step(r, a.id, 20_000);
+  x = r.rt.get(a.id)!;
+  assert.equal(childOf(r, a, clip.clOrdID).state, 'done');
+  assert.equal(r.ex.all.length, 2);
+  assert.equal(r.ex.all[1]!.quantity, '0.001', 'only what did not fill');
+  r.ex.deaf = false;
+  r.ex.fill(r.ex.all[1]!.clOrdID, 0.001);
+  await settle();
+  x = await step(r, a.id, 1_000);
+  assert.equal(x.status, 'done');
+  assert.ok(near(x.filled, 0.002) && near(r.ex.position, 0.002), `filled ${x.filled}, position ${r.ex.position}`);
 });

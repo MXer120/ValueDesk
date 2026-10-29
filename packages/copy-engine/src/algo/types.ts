@@ -486,6 +486,14 @@ export interface ChildOrder {
   tag: string;
   /** An exit: a SoDEX position stop (reduce-only market order) that fires when the mark reaches `price`. */
   exit?: 'tp' | 'sl';
+  /**
+   * An `unknown` child SoDEX's reads list nowhere - not in the open orders, not in the order
+   * history (runtime.ts settleUnlisted): `at` the first such read; `cancelAt` when SoDEX took a
+   * cancel by its client id (from then on it can neither rest nor fill); `fill` what SoDEX's
+   * trades showed it filled, and `agree` how many trades reads in a row after the wait showed that.
+   * Gone once any read or update lists it.
+   */
+  unlisted?: { at: number; cancelAt?: number; fill?: number; agree?: number };
 }
 
 /** An algo: what the trader asked for, and where it stands. One JSON document. */
