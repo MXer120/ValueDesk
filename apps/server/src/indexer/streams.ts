@@ -15,7 +15,9 @@
  * for 90 s is replaced, reconnects back off 1 s to 30 s with jitter. The
  * first message per market after subscribing is a snapshot of recent prints;
  * `Dedup` drops what was already seen, so a reconnect never counts a print
- * twice.
+ * twice. A handshake not done in 15 s, or a close not done in 10 s, is cut,
+ * so a socket never hangs between up and down; every close and connect error
+ * is logged (`log`), with how long it was up.
  *
  * `since` is when the stream last came up whole (null while down). A tracked
  * trader's fills are complete from then on; the indexer only trusts that
@@ -49,6 +51,20 @@ const PING_MS = 30_000;
 const STALE_MS = 90_000;
 const RECONNECT_BASE_MS = 1_000;
 const RECONNECT_CAP_MS = 30_000;
+/** A handshake still open after this is given up: ws has no default, and a stuck one held the socket for good. */
+const HANDSHAKE_MS = 15_000;
+/** A socket left closing this long is cut: otherwise its close event - and the reconnect - may never come. */
+const CLOSING_MS = 10_000;
+/** After an HTTP 429 on connect the next try waits at least this long (Lighter: a static 60 s cooldown). */
+const RATE_LIMITED_MS = 60_000;
+
+/** The indexer's log line for a stream (main.ts prints the rest under the same prefix). */
+export const streamLog = (line: string): void => console.log(`[indexer] ${line}`);
+
+const dur = (ms: number): string => {
+  const s = Math.round(ms / 1000);
+  return s < 120 ? `${s} s` : s < 7200 ? `${Math.round(s / 60)} min` : `${Math.floor(s / 3600)} h ${Math.round((s % 3600) / 60)} min`;
+};
 const MARKETS_REFRESH_MS = 6 * 60 * 60_000;
 
 /** Remembers the last `cap` ids. */
@@ -83,14 +99,32 @@ export class LiveSocket {
   upSince: number | null = null;
   private openedAt = 0;
   private lastPingAt = 0;
+  private closingAt = 0;
+  private limitedUntil = 0;
+  /** Why the socket is going: the last connect error, or what tick() saw. */
+  private why: string | null = null;
 
   constructor(
     private readonly url: string,
     private readonly ping: string,
     private readonly subscribe: (send: (msg: unknown) => void) => void | Promise<void>,
     private readonly onMessage: (msg: unknown) => void,
-    private readonly opts: { pingMs?: number; onClose?: () => void } = {},
+    private readonly opts: {
+      pingMs?: number;
+      /** Silent this long: replaced (default STALE_MS). */
+      staleMs?: number;
+      /** false: no permessage-deflate - frames are parsed as they come, never held for the zlib pool (LighterStream). */
+      deflate?: boolean;
+      /** For the log lines. */
+      name?: string;
+      log?: (line: string) => void;
+      onClose?: () => void;
+    } = {},
   ) {}
+
+  private say(line: string): void {
+    this.opts.log?.(`stream ${this.opts.name ?? this.url}: ${line}`);
+  }
 
   start(): void {
     if (this.running) return;
@@ -122,8 +156,9 @@ export class LiveSocket {
 
   private connect(): void {
     if (!this.running || this.ws) return;
-    const ws = new WebSocket(this.url);
+    const ws = new WebSocket(this.url, { perMessageDeflate: this.opts.deflate !== false, handshakeTimeout: HANDSHAKE_MS });
     this.ws = ws;
+    this.closingAt = 0;
     ws.on('open', () => {
       this.attempt = 0;
       this.openedAt = this.lastMessageAt = Date.now();
@@ -143,22 +178,43 @@ export class LiveSocket {
         this.onMessage(msg);
       } catch { /* one bad print never takes the socket down */ }
     });
-    ws.on('close', () => {
+    ws.on('close', (code, reason) => {
       if (this.ws === ws) this.ws = null;
+      const wasUp = this.upSince;
       this.upSince = null;
+      this.closingAt = 0;
       this.opts.onClose?.();
       if (!this.running) return;
       const base = Math.min(RECONNECT_CAP_MS, RECONNECT_BASE_MS * 2 ** this.attempt++);
-      this.reconnectTimer = setTimeout(() => this.connect(), base / 2 + Math.random() * (base / 2));
+      const wait = Math.max(base / 2 + Math.random() * (base / 2), this.limitedUntil - Date.now());
+      const said = reason?.length ? ` "${reason.toString().slice(0, 120)}"` : '';
+      this.say(`closed ${code}${said}${wasUp !== null ? ` after ${dur(Date.now() - wasUp)} up` : ' before data came'}${this.why ? ` (${this.why})` : ''}; again in ${dur(wait)}`);
+      this.why = null;
+      this.reconnectTimer = setTimeout(() => this.connect(), wait);
       this.reconnectTimer.unref?.();
     });
-    ws.on('error', () => {});
+    ws.on('error', (e) => {
+      this.why = String((e as Error)?.message ?? e).slice(0, 160);
+      // Too many requests: the venue's cooldown is waited out, not hammered (each try may extend it).
+      if (/Unexpected server response: 429/.test(this.why)) this.limitedUntil = Date.now() + RATE_LIMITED_MS;
+    });
   }
 
   private tick(): void {
     const ws = this.ws;
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    if (Date.now() - this.lastMessageAt > STALE_MS) {
+    if (!ws) return;
+    if (ws.readyState === WebSocket.CLOSING) {
+      if (!this.closingAt) this.closingAt = Date.now();
+      else if (Date.now() - this.closingAt > CLOSING_MS) {
+        this.why = 'its close never finished';
+        ws.terminate();
+      }
+      return;
+    }
+    if (ws.readyState !== WebSocket.OPEN) return;
+    const staleMs = this.opts.staleMs ?? STALE_MS;
+    if (Date.now() - this.lastMessageAt > staleMs) {
+      this.why = `nothing came for ${dur(Date.now() - this.lastMessageAt)}`;
       ws.terminate();
       return;
     }
@@ -208,6 +264,7 @@ export class HlStream {
         }
       },
       (msg) => this.handle(msg),
+      { name: 'hyperliquid', log: streamLog },
     );
   }
 
@@ -311,6 +368,7 @@ export class SodexStream {
             if (symbols.length) send({ op: 'subscribe', params: { channel: 'trade', symbols } });
           },
           (msg) => this.handle(msg),
+          { name: `sodex-${engine}`, log: streamLog },
         ),
     );
   }
@@ -394,6 +452,7 @@ export class ArcusStream {
         for (const id of (await markets()).slice(0, 100)) send({ type: 'subscribe', channel: 'trades', id });
       },
       (msg) => this.handle(msg),
+      { name: 'arcus', log: streamLog },
     );
   }
 
@@ -460,11 +519,26 @@ export function lighterPrint(t: LighterWsTrade, symbolOf: (marketId: number) => 
  * 2026-09-29: each print names both accounts (`ask_account_id`,
  * `bid_account_id` - sub-account indices). The venue limits messages per IP
  * ("Too Many Websocket Messages", "Too Many Inflight Messages" when a burst
- * of subscribes goes out), so every socket's subscribes go through one slow
- * shared pacer, each is confirmed (`subscribed/trade`) and re-sent if not,
- * and pings are sparse. `since` is set only once EVERY market is confirmed:
- * a stream missing markets would undercount, and the indexer trusts `since`.
+ * of subscribes goes out; documented 2026-10: 200 client messages a minute,
+ * 50 in flight), so every socket's subscribes go through one shared pacer,
+ * each is confirmed (`subscribed/trade`) and re-sent if not. `since` is set
+ * only once EVERY market is confirmed: a stream missing markets would
+ * undercount, and the indexer trusts `since`.
+ *
+ * Why it dropped (2026-10-29, incidents 22 and 25): Lighter compresses its
+ * frames (permessage-deflate), ws inflates them on the shared zlib thread pool,
+ * and while that pool or this thread is busy ws stops reading the socket -
+ * server 1 held 0.5-2.9 MB unread on two of the sockets. Lighter cuts a client
+ * whose writes block ("writes to slow clients time out after 250 ms"), and the
+ * socket then sat silent until the 90 s stale check, after which 120 markets
+ * re-subscribed at one per 700 ms. Now: no deflate (frames are parsed as they
+ * come; a busy thread only fills the kernel buffer), a ping every 20 s and 45 s
+ * of silence to call a socket dead, sockets of 56 markets and one subscribe
+ * per 400 ms - one socket is whole again in about 25 s, all four in under 2 min.
  */
+/** Lighter's messages that need no word in the log. */
+const LIGHTER_QUIET = new Set(['update/trade', 'subscribed/trade', 'connected', 'pong']);
+
 export class LighterStream {
   private sockets: LiveSocket[] = [];
   private dedup = new Dedup();
@@ -475,15 +549,22 @@ export class LighterStream {
   private readyAt: Array<number | null> = [];
   private timer?: NodeJS.Timeout;
   private lastSend = 0;
-  /** Subscribe messages wait this long between them, across every socket. */
-  static SEND_GAP_MS = 700;
-  static PER_SOCKET = 120;
+  /** When each socket's subscribes started (its last open), for the log. */
+  private openAt: number[] = [];
+  /** Lighter's other messages (errors), by type: how many, so the log names each type without flooding. */
+  private others = new Map<string, number>();
+  /** Subscribe messages wait this long between them, across every socket: at most 150 a minute, beside the pings (Lighter: 200). */
+  static SEND_GAP_MS = 400;
+  static PER_SOCKET = 56;
   static CONFIRM_MS = 20_000;
+  static PING_MS = 20_000;
+  static STALE_MS = 45_000;
 
   constructor(
     private readonly onPrint: (p: Print) => void,
     private readonly markets: () => Promise<Map<number, string>>,
     private readonly url: string,
+    private readonly log: (line: string) => void = streamLog,
   ) {}
 
   private symbols = new Map<number, string>();
@@ -523,13 +604,17 @@ export class LighterStream {
           this.sentAt[i] = new Map();
           this.readyAt[i] = null;
           this.sendFns[i] = send;
+          this.openAt[i] = Date.now();
         },
         (msg) => this.handle(i, msg),
-        { pingMs: 50_000, onClose: () => { this.sendFns[i] = null; this.readyAt[i] = null; } },
+        {
+          pingMs: LighterStream.PING_MS, staleMs: LighterStream.STALE_MS, deflate: false, name: `lighter#${i + 1}`, log: this.log,
+          onClose: () => { this.sendFns[i] = null; this.readyAt[i] = null; },
+        },
       ));
     });
     for (const s of this.sockets) s.start();
-    this.timer = setInterval(() => this.pump(), 250);
+    this.timer = setInterval(() => this.pump(), 100);
     this.timer.unref?.();
   }
 
@@ -564,13 +649,24 @@ export class LighterStream {
   /** One raw message on socket `i`. Public for tests. */
   handle(i: number, msg: unknown): void {
     const m = msg as { type?: string; channel?: string; trades?: unknown; liquidation_trades?: unknown };
+    // Anything but prints, confirmations and the socket's own chatter is Lighter telling us something (an error, a limit).
+    const kind = typeof m?.type === 'string' ? m.type : 'no-type';
+    if (!LIGHTER_QUIET.has(kind)) {
+      const n = (this.others.get(kind) ?? 0) + 1;
+      this.others.set(kind, n);
+      if (n <= 3 || n % 100 === 0) this.log(`stream lighter#${i + 1}: Lighter said (${kind} #${n}) ${JSON.stringify(msg).slice(0, 200)}`);
+    }
     if (typeof m?.type !== 'string' || typeof m.channel !== 'string' || !m.channel.startsWith('trade:')) return;
     if (m.type === 'subscribed/trade') {
       const id = Number(m.channel.slice(6));
       const conf = this.confirmed[i];
       if (conf && Number.isInteger(id)) {
         conf.add(id);
-        if (this.readyAt[i] == null && this.groups[i]!.every((g) => conf.has(g))) this.readyAt[i] = Date.now();
+        if (this.readyAt[i] == null && this.groups[i]!.every((g) => conf.has(g))) {
+          this.readyAt[i] = Date.now();
+          const took = this.openAt[i] ? ` in ${Math.round((this.readyAt[i]! - this.openAt[i]!) / 1000)} s` : '';
+          this.log(`stream lighter#${i + 1}: all ${conf.size} markets confirmed${took}`);
+        }
       }
     }
     if (m.type !== 'update/trade' && m.type !== 'subscribed/trade') return;

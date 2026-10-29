@@ -324,7 +324,7 @@ test('lanes: shares are of the spend, so cheap reserved reads get their share of
 
 test('Lighter stream: prints name both sub-accounts; up only once every market is confirmed', async () => {
   const got: Print[] = [];
-  const st = new LighterStream((p) => got.push(p), async () => new Map([[0, 'ETH'], [1, 'BTC']]), 'ws://127.0.0.1:9');
+  const st = new LighterStream((p) => got.push(p), async () => new Map([[0, 'ETH'], [1, 'BTC']]), 'ws://127.0.0.1:9', () => {});
   (st as unknown as { groups: number[][]; confirmed: Array<Set<number>>; readyAt: Array<number | null> }).groups = [[0, 1]];
   (st as unknown as { confirmed: Array<Set<number>> }).confirmed = [new Set()];
   (st as unknown as { readyAt: Array<number | null> }).readyAt = [null];

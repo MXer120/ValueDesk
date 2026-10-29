@@ -1,0 +1,102 @@
+/**
+ * The streams' sockets (indexer/streams.ts LiveSocket, LighterStream) against a local server:
+ * Lighter's sockets refuse permessage-deflate (2026-10-29: inflating on the shared zlib pool
+ * paused reading, and Lighter cut the slow reader), every close is logged with why and how long
+ * it was up, a 429 on connect waits out the venue's cooldown, and what Lighter says besides
+ * prints reaches the log.
+ *   npx tsx --test test/liveSocket.test.ts
+ */
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { createServer, type IncomingMessage } from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { WebSocketServer } from 'ws';
+import { LighterStream, LiveSocket } from '../src/indexer/streams.js';
+
+async function until(cond: () => boolean, ms = 3000): Promise<void> {
+  const end = Date.now() + ms;
+  while (!cond()) {
+    if (Date.now() > end) throw new Error('timed out');
+    await new Promise((r) => setTimeout(r, 10));
+  }
+}
+
+async function wsServer() {
+  const wss = new WebSocketServer({ port: 0, perMessageDeflate: true });
+  await new Promise<void>((r) => wss.once('listening', () => r()));
+  const upgrades: IncomingMessage[] = [];
+  wss.on('headers', (_h, req) => upgrades.push(req));
+  return { wss, upgrades, url: `ws://127.0.0.1:${(wss.address() as AddressInfo).port}` };
+}
+
+test('deflate: false offers no compression (Lighter); the default still does', async () => {
+  const { wss, upgrades, url } = await wsServer();
+  const plain = new LiveSocket(url, '{}', () => {}, () => {}, { deflate: false });
+  const usual = new LiveSocket(url, '{}', () => {}, () => {});
+  try {
+    plain.start();
+    await until(() => upgrades.length === 1);
+    usual.start();
+    await until(() => upgrades.length === 2);
+    assert.equal(upgrades[0]!.headers['sec-websocket-extensions'], undefined, 'no permessage-deflate offered');
+    assert.match(String(upgrades[1]!.headers['sec-websocket-extensions']), /permessage-deflate/);
+  } finally {
+    plain.stop();
+    usual.stop();
+    wss.close();
+  }
+});
+
+test('a close is logged: its code, its reason, how long the socket was up', async () => {
+  const { wss, url } = await wsServer();
+  wss.on('connection', (c) => {
+    c.send('{"type":"connected"}');
+    setTimeout(() => c.close(4001, 'bye'), 50);
+  });
+  const lines: string[] = [];
+  const s = new LiveSocket(url, '{}', () => {}, () => {}, { name: 'lighter#1', log: (l) => lines.push(l) });
+  try {
+    s.start();
+    await until(() => lines.length > 0);
+    assert.match(lines[0]!, /^stream lighter#1: closed 4001 "bye" after \d+ s up; again in \d+ s$/);
+  } finally {
+    s.stop();
+    wss.close();
+  }
+});
+
+test('an HTTP 429 on connect: logged, and the next try waits out the cooldown (60 s)', async () => {
+  const http = createServer((_req, res) => res.end());
+  http.on('upgrade', (_req, socket) => socket.end('HTTP/1.1 429 Too Many Requests\r\nContent-Length: 0\r\n\r\n'));
+  await new Promise<void>((r) => http.listen(0, '127.0.0.1', () => r()));
+  const lines: string[] = [];
+  const s = new LiveSocket(`ws://127.0.0.1:${(http.address() as AddressInfo).port}`, '{}', () => {}, () => {}, { name: 'lighter#2', log: (l) => lines.push(l) });
+  try {
+    s.start();
+    await until(() => lines.length > 0);
+    assert.match(lines[0]!, /closed 1006 before data came \(Unexpected server response: 429\); again in 60 s/);
+  } finally {
+    s.stop();
+    http.close();
+  }
+});
+
+test('Lighter: what it says besides prints is logged (three of a kind, then every 100th); a whole socket says how long it took', () => {
+  const lines: string[] = [];
+  const st = new LighterStream(() => {}, async () => new Map([[0, 'ETH']]), 'ws://127.0.0.1:9', (l) => lines.push(l));
+  const raw = st as unknown as { groups: number[][]; confirmed: Array<Set<number>>; readyAt: Array<number | null>; openAt: number[] };
+  raw.groups = [[0]];
+  raw.confirmed = [new Set()];
+  raw.readyAt = [null];
+  raw.openAt = [Date.now() - 3000];
+  for (let n = 0; n < 5; n++) st.handle(0, { type: 'error', error: { code: 30003, message: 'Too Many Websocket Messages' } });
+  st.handle(0, { type: 'connected', session_id: 'x' });
+  st.handle(0, { type: 'pong' });
+  st.handle(0, { type: 'subscribed/trade', channel: 'trade:0', trades: [] });
+  assert.equal(lines.filter((l) => /Lighter said \(error #\d\)/.test(l)).length, 3, 'three of a kind');
+  assert.match(lines[0]!, /^stream lighter#1: Lighter said \(error #1\) \{"type":"error","error":\{"code":30003,"message":"Too Many Websocket Messages"\}\}$/);
+  assert.ok(!lines.some((l) => /connected|pong/.test(l)), 'its chatter is quiet');
+  assert.match(lines.at(-1)!, /^stream lighter#1: all 1 markets confirmed in 3 s$/);
+  assert.equal(LighterStream.PER_SOCKET, 56);
+  assert.ok(60_000 / LighterStream.SEND_GAP_MS + 4 * (60_000 / LighterStream.PING_MS) <= 200, 'within Lighter\'s 200 messages a minute');
+});
