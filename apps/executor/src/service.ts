@@ -67,6 +67,7 @@ import {
   type QueueStats,
   type OrderSink,
   type RegionPolicy,
+  type EngineNotice,
   type SessionGrant,
   type SignedCopyRequest,
   type SiteTermsRecord,
@@ -258,6 +259,8 @@ export class ExecutorService {
       // The stricter of the country declared when the copy started and the one in the wallet's current terms.
       policyFor: (s) => screenPolicy(this.policyNow(s.owner, s.country, s.observedCountry), s.owner, s.settings.leader.address),
       keyProblem: async (s) => this.guard.holdOf({ kind: 'copy', id: s.id, owner: s.owner }) ?? this.keyProblem(s.owner),
+      // A copy halted, held, stopped or closed outside the copier: kept for the follower to read after signing in.
+      onNotice: (n) => db.addNotice(n),
       brake: () => this.brakeText('copies'),
     });
     const oracleFeed = new OracleFeed({ fetch: deps.fetch });
@@ -276,6 +279,8 @@ export class ExecutorService {
       // A sweep's reference price: the shared oracle (oracle.ts) - Binance futures and spot, Bitget,
       // Hyperliquid, OKX and Bybit, each read at most once a second per coin for every algo here.
       oracle: (coin) => oracleFeed.quotes(coin),
+      // An algo failed, stopped, held or finished: kept for the follower to read after signing in.
+      onNotice: (n) => db.addNotice(n),
     });
   }
 
@@ -967,6 +972,11 @@ export class ExecutorService {
       } else throw new ApiError(400, 'op', 'op must be pause, resume, cancel, cancel-all or update.');
     }
     return { algos: touched.map((a) => this.algos.view(a.id)).filter((v): v is AlgoView => v !== null) };
+  }
+
+  /** What the wallet should hear of: its copies' and algos' notices, newest first (db.ts notices). */
+  notices(owner: string, q: { limit?: number; before?: number; grades?: readonly string[] }): EngineNotice[] {
+    return this.db.notices(owner, q);
   }
 
   algoList(owner: string): AlgoView[] {

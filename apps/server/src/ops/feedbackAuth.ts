@@ -20,7 +20,7 @@ import { keccak_256 } from '@noble/hashes/sha3';
 import { concat, domainSeparator, hexToBytes, recoverAddress, utf8, word } from '../signing/eip712.js';
 import { SessionTokens } from '../folders/auth.js';
 import {
-  FEEDBACK_SIGN_IN_DOMAIN, FEEDBACK_SIGN_IN_STATEMENT, FEEDBACK_SIGN_IN_TTL_MS, FEEDBACK_SIGN_IN_TYPE, ZERO_ADDRESS, type FeedbackSignIn,
+  FEEDBACK_SIGN_IN_DOMAIN, FEEDBACK_SIGN_IN_STATEMENTS, FEEDBACK_SIGN_IN_TTL_MS, FEEDBACK_SIGN_IN_TYPE, ZERO_ADDRESS, type FeedbackSignIn,
 } from './feedbackSignIn.js';
 
 export const FEEDBACK_SESSION_TTL_MS = 30 * 86_400_000;
@@ -54,7 +54,7 @@ export function checkFeedbackSignIn(raw: unknown, now = Date.now()): FeedbackSig
   const q = raw as Record<string, unknown>;
   const owner = typeof q.owner === 'string' ? q.owner.toLowerCase() : '';
   if (!ADDRESS.test(owner)) return { ok: false, error: 'owner must be a 0x address' };
-  if (q.statement !== FEEDBACK_SIGN_IN_STATEMENT) return { ok: false, error: 'this is not the feedback sign-in; reload the page and sign again' };
+  if (typeof q.statement !== 'string' || !FEEDBACK_SIGN_IN_STATEMENTS.includes(q.statement)) return { ok: false, error: 'this is not the feedback sign-in; reload the page and sign again' };
   if (typeof q.nonce !== 'string' || !NONCE.test(q.nonce)) return { ok: false, error: 'nonce must be 32 hex characters' };
   if (typeof q.issuedAt !== 'string' || !STAMP.test(q.issuedAt)) return { ok: false, error: 'issuedAt must be a time in ms' };
   if (typeof q.expiresAt !== 'string' || !STAMP.test(q.expiresAt)) return { ok: false, error: 'expiresAt must be a time in ms' };
@@ -68,7 +68,7 @@ export function checkFeedbackSignIn(raw: unknown, now = Date.now()): FeedbackSig
   if (issuedAt - now > 5 * 60_000) return { ok: false, error: 'the sign-in time is too far ahead; check your clock' };
   let signer: string;
   try {
-    const digest = feedbackSignInDigest({ owner, statement: FEEDBACK_SIGN_IN_STATEMENT, nonce: q.nonce, issuedAt: q.issuedAt, expiresAt: q.expiresAt, chainId });
+    const digest = feedbackSignInDigest({ owner, statement: q.statement, nonce: q.nonce, issuedAt: q.issuedAt, expiresAt: q.expiresAt, chainId });
     signer = recoverAddress(digest, hexToBytes(q.signature)).toLowerCase();
   } catch {
     return { ok: false, error: 'the signature cannot be read' };

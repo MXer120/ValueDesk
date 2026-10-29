@@ -195,12 +195,12 @@ test('the edge stand-in forwards /api like CloudFront: secret, viewer address, G
 
 test('the allow-list is read from the server source and matched like the gate', () => {
   const routes = hostedRoutes();
-  assert.equal(routes.length, 64, 'apps/server/src/hosted.ts HOSTED_ROUTES: 64 routes (32 of the index, the live liquidation socket and the positions of a wallet among them, 18 of the knowledge folders, the builder volume, the status page and its feed, 8 of feedback with the wallet sign-in and the unread dot, client errors)');
+  assert.equal(routes.length, 67, 'apps/server/src/hosted.ts HOSTED_ROUTES: 67 routes (33 of the index, the live liquidation socket, the positions of a wallet and one history cell at a time among them, 18 of the knowledge folders, the builder volume, the status page and its feed, 8 of feedback with the wallet sign-in and the unread dot, 2 of the inbox of a signed-in wallet, client errors)');
   assert.ok(matchRoute(routes, 'GET', '/api/vs/live'), 'the Live Feed finds the stream a channel has on air');
-  // The index is GET only; a POST only ever changes a wallet's own knowledge folders, or sends feedback
-  // or an error report. One path is not under /api/: the live heatmap's WebSocket, which the browser opens
+  // The index is GET only; a POST only ever changes a wallet's own knowledge folders or inbox, or sends
+  // feedback or an error report. One path is not under /api/: the live heatmap's WebSocket, which the browser opens
   // straight to the instance (no edge).
-  const postable = (u) => u.startsWith('/api/folders/') || u === '/api/vs/feedback' || u.startsWith('/api/vs/feedback/') || u === '/api/vs/client-errors';
+  const postable = (u) => u.startsWith('/api/folders/') || u === '/api/vs/feedback' || u.startsWith('/api/vs/feedback/') || u.startsWith('/api/vs/inbox/') || u === '/api/vs/client-errors';
   assert.ok(routes.every((r) => (r.url.startsWith('/api/') || r.url === '/ws/liq') && (r.method === 'GET' || postable(r.url))));
   assert.ok(matchRoute(routes, 'POST', '/api/vs/feedback/upload'), 'a screenshot is uploaded');
   assert.ok(matchRoute(routes, 'GET', '/api/vs/status'), 'the status page');

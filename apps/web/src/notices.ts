@@ -5,7 +5,11 @@
  * the visitor's feedback (feedback/FeedbackHost.tsx). Ordinary transfers stay in
  * the list without lighting the mark.
  */
-export type NoticeKind = 'deposit' | 'withdraw' | 'error' | 'system' | 'info' | 'reply';
+export type NoticeKind = 'deposit' | 'withdraw' | 'error' | 'system' | 'info' | 'reply' | 'algo' | 'copy';
+/** How much a notice matters (the bell's View filters on it): info, warn, error. */
+export type NoticeGrade = 'info' | 'warn' | 'error';
+/** Where an algo or copy notice came from: this browser's runner, the hosted executor, or the wallet's inbox on the server. */
+export type NoticeOrigin = 'browser' | 'executor' | 'inbox';
 
 export interface Notice {
   id: string;
@@ -17,10 +21,19 @@ export interface Notice {
   read: boolean;
   /** For a `reply`: the feedback thread it belongs to (feedback/threads.ts) - the row opens that chat. */
   ref?: string;
+  /** An algo or copy notice (copy-engine notices.ts): its grade, wallet and origin. Others take theirs from the kind (gradeOf). */
+  grade?: NoticeGrade;
+  owner?: string;
+  origin?: NoticeOrigin;
 }
 
+const KIND_GRADE: Record<NoticeKind, NoticeGrade> = { deposit: 'info', withdraw: 'info', error: 'error', system: 'warn', info: 'info', reply: 'info', algo: 'warn', copy: 'warn' };
+/** A notice's grade: its own, else its kind's. */
+export const gradeOf = (n: Pick<Notice, 'kind' | 'grade'>): NoticeGrade => n.grade ?? KIND_GRADE[n.kind] ?? 'info';
+
 const KEY = 'vs.notices.v1';
-const CAP = 40;
+// The last 200 on this browser; the wallet's inbox on the server keeps every algo and copy notice (inbox.ts).
+const CAP = 200;
 const SETUP_ID = 'system:setup';
 const INDEX_ID = 'system:index';
 
@@ -65,10 +78,19 @@ export function subscribeNotices(fn: () => void): () => void {
   return () => { listeners.delete(fn); };
 }
 
-export function pushNotice(row: Omit<Notice, 'id' | 'time' | 'read'> & { id?: string }): void {
+export function pushNotice(row: Omit<Notice, 'id' | 'time' | 'read'> & { id?: string; time?: number }): void {
   const id = row.id ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
   const next = read().filter((n) => n.id !== id);
-  write([{ ...row, id, time: Date.now(), read: false }, ...next]);
+  write([{ ...row, id, time: row.time ?? Date.now(), read: false }, ...next].sort((a, b) => b.time - a.time));
+}
+
+/** Notices that may already be here (the inbox, the executor): new ids only, read as they were, newest first. */
+export function mergeNotices(rows: ReadonlyArray<Omit<Notice, 'read'> & { read?: boolean }>): number {
+  const cur = read();
+  const have = new Set(cur.map((n) => n.id));
+  const add = rows.filter((r) => !have.has(r.id)).map((r) => ({ ...r, read: r.read ?? false }));
+  if (add.length) write([...add, ...cur].sort((a, b) => b.time - a.time));
+  return add.length;
 }
 
 export function markNoticesRead(): void {

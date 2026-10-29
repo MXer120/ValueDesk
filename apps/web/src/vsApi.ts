@@ -33,7 +33,7 @@ import type {
 import { VenueError, venues } from './exchange/venues';
 import { serverGetJson } from './serverFetch';
 import type { CalendarEvent, CalendarSource } from '@sign/valuedesk/calendar.js';
-import type { LiqHeatmap, LiqHistory, LiqWallets, WalletLiq } from '@sign/indexer/liqRead.js';
+import type { LiqAt, LiqHeatmap, LiqHistory, LiqWallets, WalletLiq } from '@sign/indexer/liqRead.js';
 import type { CohortDetailResponse, CohortFilter, CohortFocusResponse, CohortId, CohortMapResponse, CohortRange, CohortWalletsResponse, CohortsResponse, WalletSort } from '@sign/valuedesk/cohorts/model.js';
 
 export type { CalendarEvent, CalendarSource };
@@ -184,6 +184,9 @@ export const vsApi = {
   /** The levels over time: the indexer's 15-minute snapshots (hourly past 3 days). */
   liquidationHistory: (coin: string, venues: readonly Venue[], range: '1d' | '2d' | '7d' | '30d', signal?: AbortSignal, wallets: readonly string[] = []) =>
     unwrap<LiqHistory>(`/api/vs/liquidations/history${qs({ coin, venues: venues.join(','), range, wallets: wallets.length ? wallets.join(',') : undefined })}`, signal),
+  /** One cell of the history: the positions liquidating in [from, to) at time t, as they stood then (the change log). */
+  liquidationAt: (coin: string, venues: readonly Venue[], t: number, from: number, to: number, side: 'long' | 'short' | 'both', signal?: AbortSignal, wallets: readonly string[] = []) =>
+    unwrap<LiqAt>(`/api/vs/liquidations/at${qs({ coin, venues: venues.join(','), t, from, to, side, wallets: wallets.length ? wallets.join(',') : undefined })}`, signal),
   /** The positions of some wallets (up to 10) on every coin, with their liquidation prices. */
   liquidationPositions: (wallets: readonly string[], venues: readonly Venue[], signal?: AbortSignal) =>
     unwrap<{ wallets: string[]; positions: WalletLiq[] }>(`/api/vs/liquidations/positions${qs({ wallets: wallets.join(','), venues: venues.join(',') })}`, signal),

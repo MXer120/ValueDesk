@@ -15,6 +15,7 @@ import {
   type ActivityEntry,
   type CopyAction,
   type CopyView,
+  type EngineNotice,
   type ExecutorInfo,
   type KeyInfo,
   type MeResponse,
@@ -162,6 +163,8 @@ export class ExecutorClient {
   importKey = (token: string, name: string, envelope: KeyImportEnvelope) => this.call<{ key: KeyInfo }>('POST', '/keys/import', { token, body: { name, envelope } });
   activity = (token: string, id: string, limit = 300) => this.call<{ entries: ActivityEntry[] }>('GET', `/copies/${encodeURIComponent(id)}/activity?limit=${limit}`, { token });
   consents = (token: string) => this.call<{ consents: Array<{ action: string; payload: string; at: number; digest: string }> }>('GET', '/consents', { token });
+  /** What the wallet should hear of: its copies' and algos' notices on this executor, newest first (copy-engine notices.ts). */
+  notices = (token: string, limit = 200) => this.call<{ notices: EngineNotice[] }>('GET', `/notices?limit=${limit}`, { token });
 
   /* ----------------------------------------------------------- writes ----- */
 

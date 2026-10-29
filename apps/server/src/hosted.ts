@@ -105,6 +105,7 @@ export const HOSTED_ROUTES: readonly HostedRoute[] = [
   { method: 'GET', url: '/api/vs/liquidations', cls: 'read' },
   { method: 'GET', url: '/api/vs/liquidations/wallets', cls: 'read' },
   { method: 'GET', url: '/api/vs/liquidations/history', cls: 'read' },
+  { method: 'GET', url: '/api/vs/liquidations/at', cls: 'read' },
   { method: 'GET', url: '/api/vs/liquidations/positions', cls: 'read' },
   // ...and live: one WebSocket per viewer, straight from the browser to the instance (routes/liqWs.ts).
   { method: 'GET', url: '/ws/liq', cls: 'read' },
@@ -163,6 +164,9 @@ export const HOSTED_ROUTES: readonly HostedRoute[] = [
   { method: 'GET', url: '/api/vs/feedback/image', cls: 'read' },
   // A wallet's signature for its feedback chat (ops/feedbackAuth.ts), like the folders' sign-in.
   { method: 'POST', url: '/api/vs/feedback/session', cls: 'auth' },
+  // A signed-in wallet's inbox: its browser-run algos' and copies' notices (ops/inbox.ts, routes/reports.ts).
+  { method: 'POST', url: '/api/vs/inbox/add', cls: 'write' },
+  { method: 'POST', url: '/api/vs/inbox/list', cls: 'write' },
   { method: 'POST', url: '/api/vs/client-errors', cls: 'write' },
   // The builder fee a wallet owes, signed (routes/builder.ts, docs/BUILDER-TIERS.md §3). Asking is a
   // read of this server's own ledger and one signature. A hint is what later costs SoDEX reads from

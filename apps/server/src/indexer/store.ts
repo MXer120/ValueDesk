@@ -79,6 +79,52 @@ export function defaultDbPath(): string {
 /** History kinds a coverage row can describe. HL has one fill history; SoDEX one per engine plus closes. */
 export type HistoryKind = 'fills' | 'perps' | 'spot' | 'closes';
 
+/** What a liquidation change log row keeps about its position besides side, level and size (null: not known, or a row before 2026-10-29). */
+export interface LiqLogExtra {
+  /** The venue's symbol ("BTC", "xyz:TSLA", "BTC-USD"). */
+  sym?: string | null;
+  /** Signed size in the coin (long > 0). */
+  sz?: number | null;
+  entry?: number | null;
+  /** The mark price at the row's time. */
+  mark?: number | null;
+  /** Isolated (true) or cross (false). */
+  iso?: boolean | null;
+  /** The leverage the venue margins it at. */
+  lev?: number | null;
+  /** The account's perps equity, and the cross cash its liquidation prices are figured from. */
+  eq?: number | null;
+  cash?: number | null;
+  /** When the account's book was last read from the venue (a print moves it in between). */
+  readAt?: number | null;
+}
+
+/** One position as it stood at a time, with when its run began and what happened next (store.liqAt). */
+export interface LiqAtRow {
+  aid: number;
+  address: string;
+  venue: number;
+  /** The row in force: its time, side (1 long, -1 short), level, USD at the level. */
+  t: number;
+  side: number;
+  liq: number;
+  usd: number;
+  sym: string | null;
+  sz: number | null;
+  entry: number | null;
+  mark: number | null;
+  /** 1 isolated, 0 cross, null not known. */
+  iso: number | null;
+  lev: number | null;
+  eq: number | null;
+  cash: number | null;
+  readAt: number | null;
+  /** When this run of the position began (its first row after its last close). */
+  since: number;
+  /** Its next row after the time asked (usd 0: it closed), or null: unchanged since. */
+  next: { t: number; side: number; liq: number; usd: number; mark: number | null } | null;
+}
+
 export interface FillRow {
   venue: Venue;
   address: string;
@@ -334,6 +380,9 @@ CREATE TABLE IF NOT EXISTS liq_log (
   aid INTEGER NOT NULL, coin TEXT NOT NULL, venue INTEGER NOT NULL, t INTEGER NOT NULL,
   side INTEGER NOT NULL, liq REAL NOT NULL, usd INTEGER NOT NULL,
   PRIMARY KEY (aid, coin, venue, t)) WITHOUT ROWID;
+-- Who sat in one price cell at one time (liqAt): every row of a coin by level, then each
+-- position's state at that time by its key.
+CREATE INDEX IF NOT EXISTS liq_log_cell ON liq_log (coin, liq, t);
 -- The last logged state of every open position: what the next step compares with, across a restart.
 CREATE TABLE IF NOT EXISTS liq_cur (
   aid INTEGER NOT NULL, coin TEXT NOT NULL, venue INTEGER NOT NULL,
@@ -388,6 +437,18 @@ const ADDED_COLUMNS: ReadonlyArray<[string, string, string]> = [
   // stablecoins), and when a read last looked at the spot state (cohortSource.ts).
   ['cohort_book', 'collateral', 'REAL'],
   ['cohort_book', 'spot_at', 'INTEGER'],
+  // The liquidation change log's position as it stood (cohortTracker.ts logLevels, from 2026-10-29):
+  // the venue's symbol, signed size, entry, the mark then, isolated or cross with its leverage,
+  // the account's perps equity and cross cash, and when its book was last read. Null before.
+  ['liq_log', 'sym', 'TEXT'],
+  ['liq_log', 'sz', 'REAL'],
+  ['liq_log', 'entry', 'REAL'],
+  ['liq_log', 'mark', 'REAL'],
+  ['liq_log', 'iso', 'INTEGER'],
+  ['liq_log', 'lev', 'REAL'],
+  ['liq_log', 'eq', 'REAL'],
+  ['liq_log', 'cash', 'REAL'],
+  ['liq_log', 'read_at', 'INTEGER'],
   // The account's cross cash for its liquidation prices (valuedesk/liquidations/math.ts).
   ['cohort_book', 'cash', 'REAL'],
   // What a day row must carry once its raw rows are gone (retention): how many
@@ -2808,6 +2869,11 @@ export class IndexStore {
     return out;
   }
 
+  /** The change log's first step (null: empty). A whole scan: once, at the writer's first step. */
+  liqLogFrom(): number | null {
+    return (this.q('SELECT MIN(t) AS t FROM liq_log').get() as { t: number | null }).t;
+  }
+
   /** Every open position's last logged state. */
   liqCur(): Array<{ aid: number; coin: string; venue: number; side: number; liq: number; usd: number; t: number }> {
     return this.q('SELECT aid, coin, venue, side, liq, usd, t FROM liq_cur').all() as Array<{ aid: number; coin: string; venue: number; side: number; liq: number; usd: number; t: number }>;
@@ -2821,8 +2887,8 @@ export class IndexStore {
   putLiqLog(
     t: number,
     newAddrs: readonly string[],
-    changed: ReadonlyArray<{ aid: number | string; coin: string; venue: number; side: number; liq: number; usd: number }>,
-    closed: ReadonlyArray<{ aid: number; coin: string; venue: number }>,
+    changed: ReadonlyArray<{ aid: number | string; coin: string; venue: number; side: number; liq: number; usd: number } & LiqLogExtra>,
+    closed: ReadonlyArray<{ aid: number; coin: string; venue: number; mark?: number | null }>,
   ): Map<string, number> {
     const ids = new Map<string, number>();
     this.tx(() => {
@@ -2831,16 +2897,19 @@ export class IndexStore {
         const r = addr.get(a) as { id: number };
         ids.set(a, r.id);
       }
-      const log = this.q('INSERT OR REPLACE INTO liq_log (aid, coin, venue, t, side, liq, usd) VALUES (?, ?, ?, ?, ?, ?, ?)');
+      const log = this.q(`INSERT OR REPLACE INTO liq_log (aid, coin, venue, t, side, liq, usd, sym, sz, entry, mark, iso, lev, eq, cash, read_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
       const cur = this.q('INSERT OR REPLACE INTO liq_cur (aid, coin, venue, side, liq, usd, t) VALUES (?, ?, ?, ?, ?, ?, ?)');
+      const n = (v: number | null | undefined) => (v === undefined || v === null || !Number.isFinite(v) ? null : v);
       for (const c of changed) {
         const aid = typeof c.aid === 'number' ? c.aid : ids.get(c.aid)!;
-        log.run(aid, c.coin, c.venue, t, c.side, c.liq, c.usd);
+        log.run(aid, c.coin, c.venue, t, c.side, c.liq, c.usd, c.sym ?? null, n(c.sz), n(c.entry), n(c.mark),
+          c.iso === undefined || c.iso === null ? null : c.iso ? 1 : 0, n(c.lev), n(c.eq), n(c.cash), n(c.readAt));
         cur.run(aid, c.coin, c.venue, c.side, c.liq, c.usd, t);
       }
       const del = this.q('DELETE FROM liq_cur WHERE aid = ? AND coin = ? AND venue = ?');
       for (const c of closed) {
-        log.run(c.aid, c.coin, c.venue, t, 0, 0, 0);
+        log.run(c.aid, c.coin, c.venue, t, 0, 0, 0, null, 0, null, n(c.mark), null, null, null, null, null);
         del.run(c.aid, c.coin, c.venue);
       }
     });
@@ -2865,6 +2934,35 @@ export class IndexStore {
       out.push(...(after.all(aid, coin, fromT) as Row[]));
     }
     return out.sort((a, b) => a.t - b.t);
+  }
+
+  /**
+   * Every position whose liquidation level stood in [lo, hi) at time `t` on `venues`, by its
+   * row in force then: the positions with any row of that coin in the range up to `t` (the cell
+   * index), then each one's last row up to `t` by its key - kept when it is open, in the range
+   * and on that side. Each comes with when its current run began (the row after its last close)
+   * and its next row after `t` (what happened next: a move, a close - null while unchanged).
+   */
+  liqAt(coin: string, venues: readonly number[], t: number, lo: number, hi: number, side: 1 | -1 | 0 = 0): LiqAtRow[] {
+    const cand = this.q('SELECT DISTINCT aid, venue FROM liq_log WHERE coin = ? AND liq >= ? AND liq < ? AND t <= ?').all(coin, lo, hi, t) as Array<{ aid: number; venue: number }>;
+    const at = this.q(`SELECT l.aid, a.address, l.venue, l.t, l.side, l.liq, l.usd, l.sym, l.sz, l.entry, l.mark, l.iso, l.lev, l.eq, l.cash, l.read_at
+      FROM liq_log l JOIN liq_addr a ON a.id = l.aid WHERE l.aid = ? AND l.coin = ? AND l.venue = ? AND l.t <= ? ORDER BY l.t DESC LIMIT 1`);
+    const lastClose = this.q('SELECT MAX(t) AS t FROM liq_log WHERE aid = ? AND coin = ? AND venue = ? AND t <= ? AND usd = 0');
+    const since = this.q('SELECT MIN(t) AS t FROM liq_log WHERE aid = ? AND coin = ? AND venue = ? AND t > ? AND t <= ?');
+    const next = this.q('SELECT t, side, liq, usd, mark FROM liq_log WHERE aid = ? AND coin = ? AND venue = ? AND t > ? ORDER BY t LIMIT 1');
+    const want = new Set(venues);
+    const out: LiqAtRow[] = [];
+    for (const c of cand) {
+      if (want.size && !want.has(c.venue)) continue;
+      const r = at.get(c.aid, coin, c.venue, t) as (Omit<LiqAtRow, 'since' | 'next'> & { read_at: number | null }) | undefined;
+      if (!r || r.usd <= 0 || r.liq < lo || r.liq >= hi || (side && r.side !== side)) continue;
+      const closedAt = (lastClose.get(c.aid, coin, c.venue, t) as { t: number | null }).t ?? -1;
+      const first = (since.get(c.aid, coin, c.venue, closedAt, t) as { t: number | null }).t;
+      const nx = next.get(c.aid, coin, c.venue, t) as LiqAtRow['next'] | undefined;
+      const { read_at, ...rest } = r;
+      out.push({ ...rest, readAt: read_at, since: first ?? r.t, next: nx ?? null });
+    }
+    return out.sort((a, b) => b.usd - a.usd);
   }
 
   /**

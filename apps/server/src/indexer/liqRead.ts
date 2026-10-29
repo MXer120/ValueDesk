@@ -22,6 +22,7 @@ import { marketsNow, venueMarkets, type VenueMarkets } from '../valuedesk/liquid
 import { shownLabel } from '../valuedesk/labels.js';
 import { cohortBooksNow } from './read.js';
 import { reader } from './reader.js';
+import type { LiqAtRow } from './store.js';
 import { liqFeed } from './liqFeed.js';
 import { LIQ_ACC_META } from './cohortTracker.js';
 
@@ -413,6 +414,110 @@ export async function liqWallets(coin: string, venues: readonly Venue[], side: '
     };
   }).sort((a, b) => b.usd - a.usd);
   return { coin, side, from, to, price: g.price, total: r2(rows.reduce((a, x) => a + x.usd, 0)), count: rows.length, wallets: rows.slice(0, limit) };
+}
+
+/** One position as it stood at a past time (liqAt). */
+export interface LiqAtPosition {
+  venue: Venue;
+  address: string;
+  label: string | null;
+  side: 'long' | 'short';
+  liq: number;
+  /** USD at the level, as the history sums it. */
+  usd: number;
+  /** The level against the price then (-0.031: 3.1% below). */
+  dist: number | null;
+  /** The change log's row in force then, and what it kept (null: not known, or a row before 2026-10-29). */
+  t: number;
+  sym: string | null;
+  sz: number | null;
+  entry: number | null;
+  mark: number | null;
+  iso: boolean | null;
+  lev: number | null;
+  eq: number | null;
+  cash: number | null;
+  readAt: number | null;
+  /** When this run of the position began. */
+  since: number;
+  /**
+   * What happened next: its next row - a move of level or size, a flip, a close (with the
+   * price then and whether that was within 1% of its level) - or null while unchanged.
+   */
+  next: { t: number; kind: 'changed' | 'flipped' | 'closed'; liq: number | null; usd: number; mark: number | null; nearLevel: boolean | null } | null;
+}
+
+export interface LiqAt {
+  coin: string;
+  venues: Venue[];
+  /** The time asked, and the history's snapshot in force then: its time and price (null: none). */
+  t: number;
+  snapT: number | null;
+  price: number | null;
+  from: number;
+  to: number;
+  side: 'long' | 'short' | 'both';
+  long: { usd: number; count: number };
+  short: { usd: number; count: number };
+  count: number;
+  /** The largest `limit`. */
+  positions: LiqAtPosition[];
+  /** The change log's first step: before it no position can be told (null: no log yet). */
+  logFrom: number | null;
+}
+
+/**
+ * Who sat in the price cell [from, to) of `coin` at time `t`: each position by the change log's
+ * row in force then (store.liqAt) - side, level, size, entry, mark, margin, account - with when
+ * its run began and what it did next. As the history's cells: a long whose level the price then
+ * had crossed (a short below it) is past, not counted.
+ */
+export function liqAt(coin: string, venues: readonly Venue[], t: number, from: number, to: number, side: 'long' | 'short' | 'both', wallets: readonly string[] = [], limit = 100): LiqAt | null {
+  const s = reader();
+  if (!s) return null;
+  let snap: { t: number; p: number } | null = null;
+  try {
+    for (const r of s.liqHist(coin, t - 3 * 3_600_000)) {
+      if (r.t > t) break;
+      try { snap = { t: r.t, p: (JSON.parse(r.data) as LiqSnap).p }; } catch { /* a bad row: the one before stands */ }
+    }
+  } catch { /* the tables arrive with the indexer's first start */ }
+  const price = snap?.p ?? null;
+  let rows: LiqAtRow[] = [];
+  try {
+    rows = s.liqAt(coin, venues.map((v) => VENUES.indexOf(v)), t, from, to, side === 'long' ? 1 : side === 'short' ? -1 : 0);
+  } catch { /* as above */ }
+  const only = wallets.length ? new Set(wallets.map((w) => w.toLowerCase())) : null;
+  const out: LiqAtPosition[] = [];
+  const long = { usd: 0, count: 0 };
+  const short = { usd: 0, count: 0 };
+  for (const r of rows) {
+    if (only && !only.has(r.address.toLowerCase())) continue;
+    if (price !== null && (r.side > 0 ? r.liq >= price : r.liq <= price)) continue;
+    const venue = VENUES[r.venue]!;
+    const sideName = r.side > 0 ? 'long' : 'short';
+    const agg = r.side > 0 ? long : short;
+    agg.usd += r.usd;
+    agg.count++;
+    const nx = r.next;
+    out.push({
+      venue, address: r.address, label: shownLabel(r.address, null), side: sideName, liq: r.liq, usd: r.usd,
+      dist: price ? r.liq / price - 1 : null,
+      t: r.t, sym: r.sym, sz: r.sz, entry: r.entry, mark: r.mark, iso: r.iso === null ? null : r.iso === 1, lev: r.lev, eq: r.eq, cash: r.cash, readAt: r.readAt,
+      since: r.since,
+      next: nx ? {
+        t: nx.t, kind: nx.usd === 0 ? 'closed' : nx.side !== r.side ? 'flipped' : 'changed', liq: nx.usd === 0 ? null : nx.liq, usd: nx.usd, mark: nx.mark,
+        nearLevel: nx.usd === 0 && nx.mark !== null ? Math.abs(nx.mark / r.liq - 1) <= 0.01 : null,
+      } : null,
+    });
+  }
+  out.sort((a, b) => b.usd - a.usd);
+  const from0 = s.getMeta('liq_log_from');
+  return {
+    coin, venues: [...venues], t, snapT: snap?.t ?? null, price, from, to, side,
+    long: { usd: r2(long.usd), count: long.count }, short: { usd: r2(short.usd), count: short.count }, count: out.length,
+    positions: out.slice(0, limit), logFrom: from0 ? Number(from0) : null,
+  };
 }
 
 const RANGE_MS = { '1d': 86_400_000, '2d': 2 * 86_400_000, '7d': 7 * 86_400_000, '30d': 30 * 86_400_000 } as const;

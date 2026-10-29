@@ -9,7 +9,10 @@
  */
 
 export const FEEDBACK_SIGN_IN_DOMAIN = { name: 'ValueDesk Feedback', version: '1' } as const;
-export const FEEDBACK_SIGN_IN_STATEMENT = 'Open my ValueDesk feedback chat in this browser. Free: a signature, never a transaction.';
+/** What the wallet signs to open its feedback chat and its inbox (ops/inbox.ts: its algos' and copies' notices). */
+export const FEEDBACK_SIGN_IN_STATEMENT = 'Open my ValueDesk feedback chat and notifications in this browser. Free: a signature, never a transaction.';
+/** The statement before 2026-10-29 (the chat alone): still taken, so a page loaded before the change can sign in. */
+export const FEEDBACK_SIGN_IN_STATEMENTS: readonly string[] = [FEEDBACK_SIGN_IN_STATEMENT, 'Open my ValueDesk feedback chat in this browser. Free: a signature, never a transaction.'];
 export const FEEDBACK_SIGN_IN_TYPE = 'FeedbackSignIn(address owner,string statement,string nonce,uint64 issuedAt,uint64 expiresAt)';
 /** How long a signed sign-in may be used after it was made. */
 export const FEEDBACK_SIGN_IN_TTL_MS = 10 * 60_000;

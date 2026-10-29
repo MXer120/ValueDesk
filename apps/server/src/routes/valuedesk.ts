@@ -51,7 +51,7 @@ import { ACCOUNT_DETAIL, arcusProvider, lighterProvider, nameSpotFills, tradexyz
 import { applyCachedCurves, attachPodiumCurves } from '../valuedesk/curves.js';
 import { attachStats, boardPage, cohortDetail, cohortFocus, cohortMap, cohortWallets, cohortsReady, cohortsRead, indexerStatus, netPage } from '../indexer/read.js';
 import { isCohortId, isSector, type CohortFilter, type CohortRange, type WalletSort } from '../valuedesk/cohorts/model.js';
-import { isLiqRange, liqHeatmap, liqHeatmapOf, liqHistory, liqWallets, walletLiqs } from '../indexer/liqRead.js';
+import { isLiqRange, liqAt, liqHeatmap, liqHeatmapOf, liqHistory, liqWallets, walletLiqs } from '../indexer/liqRead.js';
 import { watchAddresses } from '../indexer/host.js';
 import { BOARD_WINDOWS, type BoardWindow } from '../valuedesk/types.js';
 import { buildExplore } from '../valuedesk/explore.js';
@@ -515,6 +515,30 @@ export async function valuedeskRoutes(app: FastifyInstance) {
       if (!coin) throw bad('coin= is required');
       const ws = walletsOf(q);
       const body = liqHistory(coin, cohortVenues(q), isLiqRange(q.range) ? q.range : '1d', ws);
+      if (!body) return fail(reply, new NotAvailable('The index is not running yet'));
+      return { ok: true, ...body };
+    } catch (e) {
+      return fail(reply, e);
+    }
+  });
+
+  /**
+   * Who sat in one cell of the history: `coin`'s positions liquidating in [`from`, `to`) at time `t`
+   * (ms), `side` long / short / both, by the change log - level, size, entry, mark, margin, account,
+   * since when and what happened next (indexer/liqRead.ts liqAt).
+   */
+  app.get('/api/vs/liquidations/at', async (req, reply) => {
+    try {
+      const q = req.query as Q;
+      const coin = cohortFilter(q).coin;
+      const t = Number(q.t);
+      const from = Number(q.from);
+      const to = Number(q.to);
+      if (!coin) throw bad('coin= is required');
+      if (!(t > 0) || t > Date.now() + 60_000) throw bad('t= must be a time in ms, not in the future');
+      if (!(from >= 0) || !(to > from)) throw bad('from= and to= must be a price range');
+      const side = q.side === 'long' || q.side === 'short' ? q.side : 'both';
+      const body = liqAt(coin, cohortVenues(q), t, from, to, side, walletsOf(q));
       if (!body) return fail(reply, new NotAvailable('The index is not running yet'));
       return { ok: true, ...body };
     } catch (e) {

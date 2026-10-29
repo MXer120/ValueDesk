@@ -22,6 +22,7 @@ import { App } from './App';
 import { installGlobalLogging } from './log';
 import { installErrorReporting } from './errorReport';
 import { installChunkErrorReload } from './lazyPage';
+import { captureBoot } from './algo/tabLife';
 import { SiteGate } from './legal/LegalGate';
 import { loadViewerGeo } from './legal/geo';
 import './styles.css';
@@ -34,6 +35,8 @@ installGlobalLogging();
 installErrorReporting();
 // A release replaced the file names while this tab was open: load the current build once (lazyPage.ts).
 installChunkErrorReload();
+// Before anything runs: whether this page is a reload of the tab that ran the browser algos, or that tab was closed (algo/tabLife.ts).
+captureBoot();
 // Where this visitor is, as the edge sees it (legal/geo.ts): one small request, answered by the /api function.
 void loadViewerGeo();
 

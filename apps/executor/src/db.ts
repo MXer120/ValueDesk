@@ -35,7 +35,7 @@ export function sqlite(): typeof import('node:sqlite') {
   if (!m?.DatabaseSync) throw new Error(`The ValueDesk copier needs Node.js 22.13 or newer (this is ${process.version}). Get it from https://nodejs.org, then start it again.`);
   return m;
 }
-import type { ActivityEntry, AlgoEvent, AlgoRecord, AlgoStore, CopyStore, SubState, Subscription, TermsRecord } from '../../../packages/copy-engine/src/index.ts';
+import type { ActivityEntry, AlgoEvent, AlgoRecord, AlgoStore, CopyStore, EngineNotice, SubState, Subscription, TermsRecord } from '../../../packages/copy-engine/src/index.ts';
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL) WITHOUT ROWID;
@@ -75,6 +75,13 @@ CREATE TABLE IF NOT EXISTS algos (id TEXT PRIMARY KEY, owner TEXT NOT NULL, json
 CREATE INDEX IF NOT EXISTS algos_owner ON algos (owner);
 CREATE TABLE IF NOT EXISTS algo_events (id TEXT PRIMARY KEY, algo_id TEXT NOT NULL, owner TEXT NOT NULL, at INTEGER NOT NULL, json TEXT NOT NULL) WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS algo_events_algo ON algo_events (algo_id, at);
+-- What a follower should hear of (copy-engine notices.ts: a copy halted, an algo failed or stopped...),
+-- read after signing in (GET /api/copy/v1/notices). Kept: nothing deletes them for being old.
+CREATE TABLE IF NOT EXISTS notices (
+  owner TEXT NOT NULL, id TEXT NOT NULL, source TEXT NOT NULL, ref TEXT NOT NULL, kind TEXT NOT NULL, grade TEXT NOT NULL,
+  title TEXT NOT NULL, body TEXT NOT NULL, at INTEGER NOT NULL, paper INTEGER NOT NULL,
+  PRIMARY KEY (owner, id)) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS notices_at ON notices (owner, at);
 CREATE TABLE IF NOT EXISTS audit (
   seq INTEGER PRIMARY KEY AUTOINCREMENT,
   at INTEGER NOT NULL,
@@ -459,6 +466,27 @@ export class ExecutorDb implements CopyStore, AlgoStore {
       if (/UNIQUE/i.test(String(e))) return false;
       throw e;
     }
+  }
+
+  /** A notice for its wallet, once (its id). Never throws: a notice must not stop what raised it. */
+  addNotice(n: EngineNotice): void {
+    try {
+      this.q('INSERT OR IGNORE INTO notices (owner, id, source, ref, kind, grade, title, body, at, paper) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+        .run(n.owner, n.id, n.source, n.ref, n.kind, n.grade, n.title, n.body, n.at, n.paper ? 1 : 0);
+    } catch {
+      /* a full disk: the health check says so */
+    }
+  }
+
+  /** A wallet's notices, newest first: up to `limit` (200 at most) before `before`, of `grades` (all when empty). */
+  notices(owner: string, q: { before?: number; limit?: number; grades?: readonly string[] } = {}): EngineNotice[] {
+    const grades = (q.grades ?? []).filter((g) => g === 'info' || g === 'warn' || g === 'error');
+    const gradeSql = grades.length ? ` AND grade IN (${grades.map(() => '?').join(', ')})` : '';
+    const limit = Math.max(1, Math.min(200, Math.floor(q.limit ?? 100)));
+    return (this.db.prepare(`SELECT * FROM notices WHERE owner = ? AND at < ?${gradeSql} ORDER BY at DESC LIMIT ?`).all(owner, q.before ?? Number.MAX_SAFE_INTEGER, ...grades, limit) as Row[]).map((r) => ({
+      id: String(r.id), owner: String(r.owner), source: String(r.source) as EngineNotice['source'], ref: String(r.ref), kind: String(r.kind) as EngineNotice['kind'],
+      grade: String(r.grade) as EngineNotice['grade'], title: String(r.title), body: String(r.body), at: Number(r.at), paper: Number(r.paper) === 1,
+    }));
   }
 
   consents(owner: string, limit = 200): ConsentRow[] {

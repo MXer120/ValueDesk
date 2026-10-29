@@ -55,6 +55,7 @@ import {
 import { effectiveLeverage, type RegionPolicy } from './policy.ts';
 import type { HyperliquidClient, SodexClient } from './sodex.ts';
 import type { CopyStore } from './store.ts';
+import { copyClosedNotice, copyNotice, type EngineNotice } from './notices.ts';
 import type {
   ActivityEntry,
   DetachReason,
@@ -110,6 +111,8 @@ export interface RuntimeHost {
   confirm?(sub: Subscription, intents: Intent[], event: LeaderEvent): Promise<boolean>;
   /** Something about this subscription changed (state, activity, status). */
   onChange?(subId: string): void;
+  /** A copy halted, was held, paused or stopped without the follower asking, or a copied position was closed by its stop or outside the copier (notices.ts). */
+  onNotice?(n: EngineNotice): void;
   log: Logger;
 }
 
@@ -334,6 +337,7 @@ export class CopyRuntime {
     this.subs.set(id, next);
     await this.host.store.saveSubscription(next);
     await this.activity(next, { kind: 'status', reason: status, detail: reason });
+    this.notice(copyNotice(next, status, reason));
     if (status === 'active') void this.refreshFollower(next.owner);
     // A stopped copy's SoDEX stops are not touched here: stopCopy cancels those of the
     // positions it closed, and the positions it keeps keep theirs.
@@ -742,12 +746,9 @@ export class CopyRuntime {
           const why = this.closedWhy(s, p, mark, sym);
           for (const lsym of this.leaderSymbolsFor(s, sym)) if (st.leaderPos[lsym]) st.detached[lsym] = why;
           this.cancelStops(s, sym);
-          await this.activity(s, {
-            kind: 'status',
-            reason: why === 'own-position' ? 'closed-outside' : why,
-            symbol: sym,
-            detail: why === 'own-position' ? 'This copied position was closed outside the copier (by you, or by SoDEX). It resumes when the leader is flat.' : `Your ${why} closed this copied position.`,
-          });
+          const detail = why === 'own-position' ? 'This copied position was closed outside the copier (by you, or by SoDEX). It resumes when the leader is flat.' : `Your ${why} closed this copied position.`;
+          await this.activity(s, { kind: 'status', reason: why === 'own-position' ? 'closed-outside' : why, symbol: sym, detail });
+          this.notice(copyClosedNotice(s, sym, why, detail));
           this.dirty.add(s.id);
         } else if (Math.abs(actual.size - p.size) > 1e-12 * Math.max(1, Math.abs(p.size))) {
           st.owned[sym] = { size: actual.size, entry: actual.entry || p.entry, openedAt: p.openedAt };
@@ -1267,6 +1268,16 @@ export class CopyRuntime {
       const st = this.states.get(id);
       if (st) await this.host.store.saveState(st).catch((e) => this.host.log.error('copy: state not saved', { sub: id, error: String(e) }));
       this.host.onChange?.(id);
+    }
+  }
+
+  /** The follower hears of it (notices.ts); a host that throws never stops the copy. */
+  private notice(n: EngineNotice | null): void {
+    if (!n) return;
+    try {
+      this.host.onNotice?.(n);
+    } catch (e) {
+      this.host.log.warn('copy: notice not taken', { error: String(e) });
     }
   }
 

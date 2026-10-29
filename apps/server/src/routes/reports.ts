@@ -46,6 +46,7 @@ import { FeedbackStore, FullError, TOKEN_RE, bearer, feedbackDbPath, tokenHash, 
 import { FeedbackSessions, checkFeedbackSignIn, sessionBearer } from '../ops/feedbackAuth.js';
 import { IMAGE_TYPES, MAX_IMAGE_BYTES, checkImage } from '../ops/imageCheck.js';
 import { BATCH_BODY_LIMIT, ClientErrorStore, alertText, parseBatch } from '../ops/clientErrors.js';
+import { InboxStore, parseInboxBatch, type InboxGrade } from '../ops/inbox.js';
 
 const MINUTE = 60_000;
 
@@ -98,6 +99,8 @@ export const TELEGRAM_CHANNEL: OwnerChannel = {
 export interface ReportRouteOptions {
   /** The feedback store (tests); default one opened on first use. */
   feedbackStore?: FeedbackStore;
+  /** The wallets' inboxes (tests); default ops/inbox.ts inbox.db. */
+  inbox?: InboxStore;
   /** The wallet sessions (tests); default the key beside feedback.db. */
   sessions?: FeedbackSessions;
   /** The error store (tests); default one opened on first use. */
@@ -131,6 +134,8 @@ export async function reportRoutes(app: FastifyInstance, opts: ReportRouteOption
   const errorStore = (): ClientErrorStore => (errors ??= new ClientErrorStore());
   let threads = opts.feedbackStore ?? null;
   const feedbackStore = (): FeedbackStore => (threads ??= new FeedbackStore());
+  let inboxOpen = opts.inbox ?? null;
+  const inbox = (): InboxStore => (inboxOpen ??= new InboxStore());
   let sessionsOpen = opts.sessions ?? null;
   const sessions = (): FeedbackSessions => (sessionsOpen ??= FeedbackSessions.beside(feedbackDbPath()));
 
@@ -280,6 +285,31 @@ export async function reportRoutes(app: FastifyInstance, opts: ReportRouteOption
     const t = bearer(req.headers.authorization);
     if (!t) return reply.code(401).send({ ok: false, error: 'a browser token is required (Authorization: Bearer)' });
     return { ok: true, unread: feedbackStore().unread(t) };
+  });
+
+  // A signed-in wallet's inbox (ops/inbox.ts): its browser-run algos' and copies' notices, kept on the server. The
+  // browser that ran them sends them; only that wallet reads them back - with the feedback chat's wallet session.
+  app.post('/api/vs/inbox/add', { bodyLimit: 64 * 1024 }, async (req, reply) => {
+    reply.header('Cache-Control', 'no-store');
+    const wait = limited('read', clientKey(req.ip));
+    if (wait !== null) return tooMany(reply, wait);
+    const wallet = readerOf(req, reply);
+    if (!wallet) return reply;
+    const parsed = parseInboxBatch(jsonBody(req.body), wallet, now());
+    if (!parsed.ok) return reply.code(400).send({ ok: false, error: parsed.error });
+    return { ok: true, added: inbox().add(wallet, parsed.notices, now()) };
+  });
+
+  app.post('/api/vs/inbox/list', { bodyLimit: 1024 }, async (req, reply) => {
+    reply.header('Cache-Control', 'no-store');
+    const wait = limited('read', clientKey(req.ip));
+    if (wait !== null) return tooMany(reply, wait);
+    const wallet = readerOf(req, reply);
+    if (!wallet) return reply;
+    const b = (jsonBody(req.body) ?? {}) as { before?: unknown; limit?: unknown; grades?: unknown };
+    const before = Number(b.before);
+    const grades = Array.isArray(b.grades) ? b.grades.filter((g): g is InboxGrade => g === 'info' || g === 'warn' || g === 'error') : [];
+    return { ok: true, wallet, notices: inbox().list(wallet, { before: before > 0 ? before : undefined, limit: Number(b.limit) || 100, grades }) };
   });
 
   app.post('/api/vs/feedback/session', { bodyLimit: 4096 }, async (req, reply) => {

@@ -43,6 +43,7 @@ import { logger } from '../log';
 import { openBrowserStore, type BrowserStore } from './browserStore';
 import { copyKeyRegistered } from './sodexSetup';
 import { holdReloadWhile } from '../lazyPage';
+import { takeEngineNotice } from '../engineNotices';
 
 const log = logger('copy');
 
@@ -318,6 +319,8 @@ class BrowserCopier {
       },
       confirm: (s, intents, event) => this.askConfirm(s, intents, event),
       onChange: () => this.schedulePublish(),
+      // Halted, held, stopped, a position closed outside the copier: the bell, the wallet's inbox (engineNotices.ts).
+      onNotice: (n) => takeEngineNotice(n),
     });
     await this.runtime.start();
     this.role = 'runner';

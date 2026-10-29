@@ -50,6 +50,7 @@ import {
   type TrailState,
 } from './math.ts';
 import { combineOracle, type OracleVenue, type VenueQuote } from '../oracle.ts';
+import { algoNotice, type EngineNotice } from '../notices.ts';
 import { SWEEP_MAX_AGE_MS, sweepRefFor, sweepStep } from './sweep.ts';
 import { bandRefused, exitLevels, scaleLadder, swarmClips, twapSchedule, vwapSchedule } from './plan.ts';
 import { checkLimits, limitLeverage, oiHeadroom, oiRoomWords, positionCapUsd, limitRefusal, type AlgoLimitNotice, type LimitRefusal } from './limits.ts';
@@ -166,6 +167,8 @@ export interface AlgoHost {
   oracle?(coin: string, venues?: readonly OracleVenue[]): Promise<VenueQuote[]>;
   log: Logger;
   onChange?(id: string): void;
+  /** An algo failed, ended, finished, or was stopped or held without the follower asking (notices.ts): the bell, the inbox. */
+  onNotice?(n: EngineNotice): void;
   /** false: no timers (tests drive `tick`). */
   autoTick?: boolean;
 }
@@ -574,6 +577,19 @@ export class AlgoRuntime {
     delete a.k.pausedFrom;
     await this.setStatus(a, back, null);
     for (const c of this.linkedOf(a)) if (c.status === 'paused') await this.resume(c.id);
+    return a;
+  }
+
+  /**
+   * Stop an algo for a reason that is not the follower's (the browser tab that ran it was
+   * closed): ended as a cancel is - its resting children cancelled on SoDEX, its exits kept for
+   * what filled - with `reason` in its log and in the notice the follower gets.
+   */
+  async stopFor(id: string, reason: string): Promise<AlgoRecord> {
+    const a = this.need(id);
+    if (FINAL_STATUSES.has(a.status)) return a;
+    for (const c of this.linkedOf(a)) if (!FINAL_STATUSES.has(c.status)) await this.stopFor(c.id, reason);
+    await this.end(a, 'cancelled', reason);
     return a;
   }
 
@@ -2942,6 +2958,17 @@ export class AlgoRuntime {
 
   /* -------------------------------------------------------------- status ----- */
 
+  /** The follower hears of it (notices.ts algoNotice decides what is worth it); a host that throws never stops the algo. */
+  private notice(a: AlgoRecord, status: AlgoStatus, reason: string | null): void {
+    const n = algoNotice(a, status, reason);
+    if (!n) return;
+    try {
+      this.host.onNotice?.(n);
+    } catch (e) {
+      this.host.log.warn('algo: notice not taken', { error: String(e) });
+    }
+  }
+
   private async setStatus(a: AlgoRecord, status: AlgoStatus, reason: string | null): Promise<void> {
     if (a.status === status && a.statusReason === reason) return;
     // An ended algo stays ended (a step that was in flight when it was cancelled cannot bring it back).
@@ -2953,6 +2980,7 @@ export class AlgoRuntime {
     await this.save(a);
     if (changed && status !== 'running') await this.event(a, 'status', reason ?? status);
     else if (reason && changed) await this.event(a, 'status', reason);
+    if (changed) this.notice(a, status, reason);
     this.host.onChange?.(a.id);
   }
 
@@ -3012,6 +3040,7 @@ export class AlgoRuntime {
     a.updatedAt = a.endedAt;
     await this.save(a);
     await this.event(a, 'status', reason);
+    this.notice(a, status, reason);
     if (status === 'cancelled' && this.liveExits(a).length) await this.event(a, 'info', 'Its exits stay on SoDEX for what filled; cancel them in your open orders if you do not want them.');
     this.syncWatch();
     this.host.onChange?.(a.id);

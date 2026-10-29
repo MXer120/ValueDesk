@@ -19,6 +19,7 @@
  *   GET  /api/copy/v1/consents                   Bearer                      -> the wallet's signed instructions
  *   GET  /api/copy/v1/algos                      Bearer                      -> the wallet's algo orders
  *   GET  /api/copy/v1/algos/:id/events           Bearer, ?limit=&before=
+ *   GET  /api/copy/v1/notices                    Bearer, ?limit=&before=&grades=warn,error -> what the wallet should hear of
  *   POST /api/copy/v1/algos                      {request: algo-start}
  *   POST /api/copy/v1/algos/action               {request: algo-action}
  *
@@ -281,6 +282,11 @@ export function createExecutorServer(svc: ExecutorService, cfg: ExecutorConfig, 
       if (req.method === 'GET' && route === '/me') return send(res, 200, svc.me(svc.authenticate(bearer(req)), ctx));
       if (req.method === 'GET' && route === '/consents') return send(res, 200, { consents: svc.consents(svc.authenticate(bearer(req))) });
       if (req.method === 'GET' && route === '/algos') return send(res, 200, { algos: svc.algoList(svc.authenticate(bearer(req))) });
+      if (req.method === 'GET' && route === '/notices') {
+        const owner = svc.authenticate(bearer(req));
+        const grades = (url.searchParams.get('grades') ?? '').split(',').filter(Boolean);
+        return send(res, 200, { notices: svc.notices(owner, { ...page(url), grades }) });
+      }
       const algoEv = /^\/algos\/([A-Za-z0-9_-]{1,40})\/events$/.exec(route);
       if (req.method === 'GET' && algoEv) {
         const owner = svc.authenticate(bearer(req));

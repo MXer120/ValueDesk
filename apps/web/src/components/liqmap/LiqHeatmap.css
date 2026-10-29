@@ -350,3 +350,9 @@
 .lqm-view-pos li.is-short > span:nth-child(2) { color: var(--pos); }
 .lqm-view-who { display: inline-flex; align-items: center; gap: 5px; color: var(--text); font-weight: 600; }
 .lqm-view-dist { color: var(--dim); text-align: right; }
+
+/* The historical view's details (AtDetails): both sides' sums on one line, and each position's margin, since and next. */
+.lqm-det-list--at + * { margin-top: 0; }
+.lqm-det:has(.lqm-det-list--at) .lqm-det-sum { flex-direction: row; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; }
+.lqm-det:has(.lqm-det-list--at) .lqm-det-sum strong { font-size: 16px; }
+.lqm-det-more { grid-column: 1 / -1; color: var(--dim); font-size: 10.5px; line-height: 1.4; }

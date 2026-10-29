@@ -74,7 +74,7 @@ import {
   OUTAGE_GAP_MS, readRange, rebuildHour, rebuildSample, resumedAfterOutage, sizeProxy, venueOfSymbol,
   type Bridge, type RebuildCheck, type RebuildWallet, type Span, type WalletHist,
 } from './cohortRebuild.js';
-import type { BookPosition, CohortPnlRow } from './store.js';
+import type { BookPosition, CohortPnlRow, LiqLogExtra } from './store.js';
 import { accountLiqs, addDrift, calibrate, emptyDrift, feeCash, fillCash, fundingCash, niceStep, type DriftStats, type Tiers } from '../valuedesk/liquidations/math.js';
 import { hlInfo } from '../valuedesk/hyperliquid/index.js';
 import { ARCUS_FEES_COST, ASK_MIN_USD, BASE_FEES, FEES_TTL_MS, HL_FEES_COST, SODEX_FEES_COST, arcusFees, fillRate, hlFees, sodexFees, spotSellRate, xyzScales, type FeeRates, type MarketScale } from './feeRates.js';
@@ -1825,6 +1825,8 @@ export class CohortTracker {
   private logLevels(t: number, coins: ReadonlySet<string>): void {
     const s = this.d.store;
     if (!this.levelState) {
+      // Where the log begins, for the history's details (liqRead.ts liqAt: nothing before it is by position).
+      if (!s.getMeta('liq_log_from')) s.setMeta('liq_log_from', String(s.liqLogFrom() ?? t));
       this.levelAddr = s.liqAddrs();
       this.levelState = new Map();
       for (const r of s.liqCur()) this.levelState.set(`${r.aid}|${r.coin}|${r.venue}`, { side: r.side, liq: r.liq, usd: r.usd });
@@ -1833,7 +1835,7 @@ export class CohortTracker {
     const addr = this.levelAddr!;
     const byCoin = this.live.positionsByCoin(0, NO_WALLETS);
     // One state per address, coin and venue: two symbols of one coin on one venue keep the larger.
-    const now = new Map<string, { aid: number | string; coin: string; venue: number; side: number; liq: number; usd: number }>();
+    const now = new Map<string, { aid: number | string; coin: string; venue: number; side: number; liq: number; usd: number; address: string; v: Venue } & LiqLogExtra>();
     const fresh = new Set<string>();
     for (const coin of coins) {
       for (const x of byCoin.get(coin) ?? []) {
@@ -1844,21 +1846,22 @@ export class CohortTracker {
         const usd = Math.round(x.usd);
         const prev = now.get(key);
         if (prev && prev.usd >= usd) continue;
-        now.set(key, { aid: id, coin, venue: vi, side: x.long ? 1 : -1, liq: +x.liq.toPrecision(8), usd });
+        now.set(key, { aid: id, coin, venue: vi, side: x.long ? 1 : -1, liq: +x.liq.toPrecision(8), usd, address: x.address, v: x.venue });
       }
     }
-    const changed: Array<{ aid: number | string; coin: string; venue: number; side: number; liq: number; usd: number }> = [];
+    const changed: Array<{ aid: number | string; coin: string; venue: number; side: number; liq: number; usd: number; address: string; v: Venue } & LiqLogExtra> = [];
     for (const [key, x] of now) {
       const was = state.get(key);
       if (was && was.side === x.side && Math.abs(x.liq - was.liq) <= LIQ_LOG_MOVE * was.liq && Math.abs(x.usd - was.usd) <= USD_LOG_MOVE * Math.max(1, was.usd)) continue;
-      changed.push(x);
+      // The rest of the position as it stands, from its book (only for the rows written).
+      changed.push(Object.assign(x, this.logExtra(x.v, x.address, x.coin)));
     }
-    const closed: Array<{ aid: number; coin: string; venue: number }> = [];
+    const closed: Array<{ aid: number; coin: string; venue: number; mark: number | null }> = [];
     for (const key of state.keys()) {
       if (now.has(key)) continue;
       const [aid, coin, venue] = key.split('|');
       if (!coins.has(coin!)) continue;
-      closed.push({ aid: Number(aid), coin: coin!, venue: Number(venue) });
+      closed.push({ aid: Number(aid), coin: coin!, venue: Number(venue), mark: this.coinPx.get(coin!)?.px ?? null });
     }
     if (!changed.length && !closed.length) return;
     const ids = s.putLiqLog(t, [...fresh], changed, closed);
@@ -1873,6 +1876,24 @@ export class CohortTracker {
       this.levelPrunedAt = t;
     }
     this.levelRows = changed.length + closed.length;
+  }
+
+  /**
+   * What the change log keeps of a position besides its level (store LiqLogExtra), from the
+   * account's book now: its symbol (the largest of the coin's, as the level keeps), signed size,
+   * entry, the mark, isolated or cross and the leverage, the account's equity and cross cash, and
+   * when the book was read.
+   */
+  private logExtra(venue: Venue, address: string, coin: string): LiqLogExtra {
+    const b = this.books.get(venue)?.get(address);
+    if (!b) return {};
+    let sym: string | null = null;
+    for (const [s, p] of b.pos) if (p.szi && liqCoin(s) === coin && (sym === null || Math.abs(p.szi) > Math.abs(b.pos.get(sym)!.szi))) sym = s;
+    const acct = { eq: b.equity, cash: b.cash ?? null, readAt: b.at };
+    if (sym === null) return acct;
+    const p = b.pos.get(sym)!;
+    // LiqPos: `iso` present (a number, or null when not known) is isolated; absent is cross.
+    return { ...acct, sym, sz: p.szi, entry: p.entry, mark: this.marks.get(`${venue}|${sym}`) ?? null, iso: p.iso !== undefined, lev: p.lev ?? null };
   }
 
   private async recordLiq(): Promise<void> {

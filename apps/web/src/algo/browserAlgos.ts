@@ -56,6 +56,8 @@ import { PAPER_OWNER, needsRunner, noteRunnerLoaded, setLiveAlgos } from './algo
 import { openAlgoStore, type BrowserAlgoStore } from './algoStore';
 import { noteLimitNotices } from './limitNotices';
 import { holdReloadWhile } from '../lazyPage';
+import { takeEngineNotice } from '../engineNotices';
+import { closedBeforeBoot, keepAlive } from './tabLife';
 
 const log = logger('algo');
 const CHANNEL = 'vd-algo';
@@ -125,6 +127,8 @@ class BrowserAlgos {
   role: AlgoRole = 'off';
   owner: string | null = null;
   views: AlgoView[] = [];
+  /** While this tab runs the algos: its notes for the next start (tabLife.ts). */
+  private stopAlive: (() => void) | null = null;
   persistent = true;
 
   private runtime: AlgoRuntime | null = null;
@@ -384,8 +388,20 @@ class BrowserAlgos {
       },
       log,
       onChange: () => this.schedulePublish(),
+      // Failed, stopped, held, finished: the bell, a toast for an error, the wallet's inbox (engineNotices.ts).
+      onNotice: (n) => takeEngineNotice(n),
     });
     await this.runtime.start();
+    // The tab that ran them was closed, not reloaded (tabLife.ts): they stop for good - their resting
+    // children are cancelled, what filled keeps its exits - and the follower hears of it.
+    if (closedBeforeBoot(owner)) {
+      for (const a of this.runtime.list(owner)) {
+        if (FINAL_STATUSES.has(a.status)) continue;
+        await this.runtime.stopFor(a.id, 'Stopped: the browser tab that ran it was closed.').catch((e) => log.warn('algo: not stopped after its tab closed', { id: a.id, error: String(e) }));
+      }
+    }
+    this.stopAlive?.();
+    this.stopAlive = keepAlive(owner);
     this.role = 'runner';
     await this.refreshViews();
     this.schedulePublish();
@@ -393,6 +409,8 @@ class BrowserAlgos {
   }
 
   private async stopRuntime(): Promise<void> {
+    this.stopAlive?.();
+    this.stopAlive = null;
     const rt = this.runtime;
     this.runtime = null;
     if (rt) await rt.stop().catch(() => {});

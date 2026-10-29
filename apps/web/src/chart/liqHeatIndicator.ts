@@ -73,7 +73,7 @@ export function snapshotFor(times: readonly number[], t: number, barMs: number):
 }
 
 /** The bar length the chart's data shows (the gap between its last two bars). */
-function barMsOf(list: readonly KLineData[]): number {
+export function barMsOf(list: readonly KLineData[]): number {
   for (let i = list.length - 1; i > 0; i--) {
     const d = list[i]!.timestamp - list[i - 1]!.timestamp;
     if (d > 0) return d;

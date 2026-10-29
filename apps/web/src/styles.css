@@ -549,6 +549,16 @@ button.navicon { position: relative; min-height: 0; }
 .navnotes__copy { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .navnotes__k { font-size: var(--fs-xs); color: var(--text); font-weight: 500; }
 .navnotes__b { color: var(--muted); font-size: var(--fs-micro); line-height: 1.4; }
+/* The head carries View (the grade / source filter, Notices.tsx); a row its time and where it came from; the inbox sign-in. */
+.navnotes__head { display: flex; align-items: center; justify-content: space-between; }
+.navnotes__view { min-height: 0; padding: 2px 8px; border: 1px solid transparent; border-radius: var(--radius-full); background: none; color: var(--muted); font-size: var(--fs-micro); letter-spacing: 0.04em; text-transform: uppercase; cursor: pointer; }
+.navnotes__view:hover, .navnotes__view.is-on { color: var(--text); background: color-mix(in srgb, var(--text) 8%, transparent); }
+.navnotes__t { color: var(--dim); font-size: var(--fs-micro); font-variant-numeric: tabular-nums; }
+.navnotes__mark.is-error { color: var(--neg); background: color-mix(in srgb, var(--neg) 16%, transparent); }
+.navnotes__mark.is-warn { color: var(--warn); background: color-mix(in srgb, var(--warn) 16%, transparent); }
+.navnotes__inbox { display: flex; flex-direction: column; gap: 6px; margin: 8px 2px 2px; padding: 8px; border-radius: 10px; background: color-mix(in srgb, var(--text) 4%, transparent); color: var(--muted); font-size: var(--fs-micro); line-height: 1.45; }
+.navnotes__sign { align-self: flex-start; min-height: 0; padding: 3px 10px; font-size: var(--fs-micro); }
+.navnotes__err { color: var(--neg); }
 
 
 /* The one bordered control in the bar, and the border is the GRADIENT hairline

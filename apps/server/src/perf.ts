@@ -88,6 +88,8 @@ export const CACHE_POLICIES: Readonly<Record<string, CachePolicy>> = {
   '/api/vs/liquidations/positions': BOARD,
   // Snapshots are written every 15 minutes.
   '/api/vs/liquidations/history': { cacheControl: 'public, max-age=300, stale-while-revalidate=300' },
+  // One cell at a past time: the log does not change behind it (the newest step may still fill in).
+  '/api/vs/liquidations/at': { cacheControl: 'public, max-age=300, stale-while-revalidate=300' },
   '/api/vs/whales': LIVE,
   '/api/vs/positioning': LIVE,
   // The process already holds the page for five minutes. The edge may keep a minute of it.

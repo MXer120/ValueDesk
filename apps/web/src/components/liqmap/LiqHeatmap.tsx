@@ -13,7 +13,7 @@
  * (server indexer/liqRead.ts) - the heatmap is only as complete as that.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react';
-import type { LiqHeatmap as HeatApi, LiqHistory, LiqWallets } from '@sign/indexer/liqRead.js';
+import type { LiqAt, LiqHeatmap as HeatApi, LiqHistory, LiqWallets } from '@sign/indexer/liqRead.js';
 import { api, type Engine, type Kline } from '../../api';
 import { useStored } from '../../hooks';
 import { SCAN_VENUES, VENUE_LABEL, vsApi, type Venue } from '../../vsApi';
@@ -26,7 +26,7 @@ import { WalletView, type Side } from './WalletView';
 import { Chart } from '../Chart';
 import type { Chart as KChart } from 'klinecharts';
 import { CANDLE_PANE_ID } from '../../chart/theme';
-import { HEAT_FLOOR, LIQ_HEAT, heatScale, liqHeatTemplate, type HeatData, type HeatPoint } from '../../chart/liqHeatIndicator';
+import { HEAT_FLOOR, LIQ_HEAT, barMsOf, heatScale, liqHeatTemplate, snapshotFor, type HeatData, type HeatPoint } from '../../chart/liqHeatIndicator';
 import { shortAddr } from '../../format';
 import { fmtFixed, fmtNum } from '../../numStyle';
 import './LiqHeatmap.css';
@@ -160,7 +160,8 @@ function cumulative(h: Heat, unit: Unit): { long: Array<[number, number]>; short
   return { long, short };
 }
 
-interface Pick { from: number; to: number; side: 'long' | 'short' }
+/** A picked cell: its price range and side - and, in the historical view, the snapshot's time it is of. */
+interface Pick { from: number; to: number; side: 'long' | 'short'; at?: number }
 
 /** Pixels a bucket takes on screen per resolution: the bucket width follows the zoom and the timeframe. */
 const RES_PX: Record<Res, number> = { fine: 2, medium: 5, coarse: 12 };
@@ -212,7 +213,7 @@ export function LiqHeatmap({ symbol, engine, instance, address = null }: { symbo
   const wkey = wallets.join(',');
   const coin = coinOfSymbol(symbol);
   const [pick, setPick] = useState<Pick | null>(null);
-  useEffect(() => setPick(null), [coin, chosen.join(','), prefs.res, wkey]);
+  useEffect(() => setPick(null), [coin, chosen.join(','), prefs.res, wkey, prefs.view]);
 
   const vkey = chosen.join(',');
   // Live over the WebSocket (a second apart); over HTTP, a read a minute, while the socket is down.
@@ -272,7 +273,7 @@ export function LiqHeatmap({ symbol, engine, instance, address = null }: { symbo
       )}
       <div className="lqm-body">
         {prefs.view === 'history' ? (
-          <HistoryView coin={coin} venues={chosen} engine={engine} symbol={symbol} wallets={wallets} side={side} />
+          <HistoryView coin={coin} venues={chosen} engine={engine} symbol={symbol} wallets={wallets} side={side} onPick={setPick} />
         ) : !h ? (
           <p className="lqm-empty">{heat.error ? `Liquidation levels unavailable: ${heat.error}` : 'Reading the books…'}</p>
         ) : !h.price || !h.buckets.length ? (
@@ -283,6 +284,7 @@ export function LiqHeatmap({ symbol, engine, instance, address = null }: { symbo
           <ChartView h={h} unit={prefs.unit} res={prefs.res} streamK={streamK} onWant={setWantK} engine={engine} symbol={symbol} tf={prefs.tf} onPick={setPick} pick={pick} />
         )}
         {pick && h && prefs.view !== 'history' && <Details coin={coin} venues={chosen} pick={pick} price={h.price} wallets={wallets} onClose={() => setPick(null)} />}
+        {pick?.at !== undefined && prefs.view === 'history' && <AtDetails coin={coin} venues={chosen} pick={pick as Required<Pick>} wallets={wallets} onClose={() => setPick(null)} />}
       </div>
       {raw && prefs.view !== 'history' && <Coverage h={raw} coin={coin} />}
     </div>
@@ -737,9 +739,9 @@ function ChartView({ h: base, unit, res, streamK, onWant, engine, symbol, tf, on
  * timeframes, scroll and zoom, auto / log / percentage scale, the clock (UTC or local) -
  * and the cells follow them, as nothing else on it: no drawings, studies or order lines.
  * The snapshots are 15-minutely for 3 days and hourly to 30: a shorter bar repeats the
- * snapshot in force when it closed.
+ * snapshot in force when it closed. A click on a cell opens who sat in it then (AtDetails).
  */
-function HistoryView({ coin, venues, engine, symbol, wallets, side }: { coin: string; venues: Venue[]; engine: Engine; symbol: string; wallets: string[]; side: Side }) {
+function HistoryView({ coin, venues, engine, symbol, wallets, side, onPick }: { coin: string; venues: Venue[]; engine: Engine; symbol: string; wallets: string[]; side: Side; onPick: (p: Pick) => void }) {
   const wkey = wallets.join(',');
   const r = usePolled<LiqHistory>(
     `${coin}|${venues.join(',')}|30d|${wkey}`,
@@ -773,8 +775,39 @@ function HistoryView({ coin, venues, engine, symbol, wallets, side }: { coin: st
     : !r.data ? 'Reading the snapshots…'
       : !points.length ? (wallets.length ? `No snapshots of ${coin} for ${wallets.length === 1 ? 'this wallet' : 'these wallets'} in this range: every position's level is kept from 28 Oct 2026, 15-minutely for 3 days and hourly to 30.` : `No snapshots of ${coin} yet: the index keeps every coin SoDEX lists, a snapshot every 15 minutes.`)
         : null;
+  // A click (not a drag) on a cell: that bar's snapshot and the cell of it under the pointer - the
+  // positions in it, as they stood then, open beside the chart (AtDetails).
+  const down = useRef<{ x: number; y: number } | null>(null);
+  const pickAt = (clientX: number, clientY: number) => {
+    if (!kc || !points.length) return;
+    const dom = (kc.getDom() as HTMLElement | null) ?? null;
+    const pane = kc.getSize(CANDLE_PANE_ID);
+    if (!dom || !pane) return;
+    const r = dom.getBoundingClientRect();
+    const x = clientX - r.left;
+    const y = clientY - r.top;
+    if (y < pane.top || y > pane.top + pane.height || x < pane.left || x > pane.left + pane.width) return;
+    const [pt] = kc.convertFromPixel([{ x, y }], { paneId: CANDLE_PANE_ID, absolute: true }) as Array<{ dataIndex?: number; value?: number }>;
+    const list = kc.getDataList();
+    const bar = pt?.dataIndex !== undefined ? list[pt.dataIndex] : undefined;
+    const price = pt?.value;
+    if (!bar || price === undefined || !Number.isFinite(price)) return;
+    const i = snapshotFor(points.map((q) => q.t), bar.timestamp, barMsOf(list));
+    const snap = i >= 0 ? points[i]! : null;
+    if (!snap) return;
+    const lo = Math.floor(price / snap.st) * snap.st;
+    onPick({ from: lo, to: lo + snap.st, side: price < snap.p ? 'long' : 'short', at: snap.t });
+  };
   return (
-    <div className="lqm-hist2">
+    <div
+      className="lqm-hist2"
+      onPointerDownCapture={(e) => { down.current = e.button === 0 ? { x: e.clientX, y: e.clientY } : null; }}
+      onPointerUpCapture={(e) => {
+        const d = down.current;
+        down.current = null;
+        if (d && Math.hypot(e.clientX - d.x, e.clientY - d.y) < 4) pickAt(e.clientX, e.clientY);
+      }}
+    >
       <Chart engine={engine} symbol={symbol} bare onChartReady={setKc} />
       <div className="lqm-hist2-key" onPointerDown={(e) => e.stopPropagation()}>
         <span className="lqm-hist-scale" title="Liquidation notional per cell (USD at the liquidation price): low to high">
@@ -788,6 +821,84 @@ function HistoryView({ coin, venues, engine, symbol, wallets, side }: { coin: st
   );
 }
 const EMPTY_POINTS: HeatPoint[] = [];
+
+// --- details of a past cell ---------------------------------------------------------------
+
+const whenFmt = (t: number) => new Date(t).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+
+/** What a position did after the time asked, in a few words. */
+function nextText(p: LiqAt['positions'][number]): string {
+  const n = p.next;
+  if (!n) return 'unchanged since';
+  if (n.kind === 'closed') return `closed ${whenFmt(n.t)}${n.nearLevel ? ' near its level (likely liquidated)' : n.mark !== null ? ` at ${fmtPx(n.mark)}` : ''}`;
+  if (n.kind === 'flipped') return `flipped ${whenFmt(n.t)}`;
+  return `level ${fmtPx(n.liq!)} from ${whenFmt(n.t)}`;
+}
+
+/**
+ * The historical view's details: who sat in the picked cell at the snapshot's time, by the change
+ * log - each position's size, entry, margin and account then, since when it was open and what it
+ * did next. Positions are kept from the log's first step (28 Oct 2026); before that only the cells.
+ */
+function AtDetails({ coin, venues, pick, wallets, onClose }: { coin: string; venues: Venue[]; pick: Required<Pick>; wallets: string[]; onClose: () => void }) {
+  const [side, setSide] = useState<'long' | 'short' | 'both'>(pick.side);
+  useEffect(() => setSide(pick.side), [pick]);
+  const fetcher = useCallback((s: AbortSignal) => vsApi.liquidationAt(coin, venues, pick.at, pick.from, pick.to, side, s, wallets), [coin, venues, pick, side, wallets]);
+  const r = usePolled<LiqAt>(`at|${coin}|${venues.join(',')}|${pick.at}|${pick.from}|${pick.to}|${side}|${wallets.join(',')}`, fetcher, 5 * 60_000);
+  const d = r.data;
+  const before = d?.logFrom !== null && d?.logFrom !== undefined && pick.at < d.logFrom;
+  return (
+    <aside className="lqm-det" aria-label="Liquidation details then">
+      <header>
+        <b>Liquidations then</b>
+        <button type="button" aria-label="Close" onClick={onClose}>×</button>
+      </header>
+      <dl>
+        <dt>Price range</dt><dd>{fmtPx(pick.from)} – {fmtPx(pick.to)}</dd>
+        <dt>As of</dt><dd>{whenFmt(d?.snapT ?? pick.at)}</dd>
+        <dt>Price then</dt><dd>{d?.price ? `${fmtPx(d.price)} (${pct((pick.from + pick.to) / 2 / d.price - 1)})` : '–'}</dd>
+      </dl>
+      <div className="lqm-seg lqm-det-side" role="group" aria-label="Side">
+        <button type="button" className={side === 'long' ? 'is-on' : ''} onClick={() => setSide('long')}>Longs</button>
+        <button type="button" className={side === 'short' ? 'is-on' : ''} onClick={() => setSide('short')}>Shorts</button>
+        <button type="button" className={side === 'both' ? 'is-on' : ''} onClick={() => setSide('both')}>Both</button>
+      </div>
+      <p className="lqm-det-sum">
+        {d ? `${d.count} position${d.count === 1 ? '' : 's'}` : 'Reading…'}
+        {d && <strong className="is-long">{fmtUsdShort(d.long.usd)}</strong>}
+        {d && <strong className="is-short">{fmtUsdShort(d.short.usd)}</strong>}
+      </p>
+      <ol className="lqm-det-list lqm-det-list--at">
+        {r.error && !d && <li className="lqm-empty">{r.error}</li>}
+        {d && before && <li className="lqm-empty">Positions are kept from {whenFmt(d.logFrom!)}; this cell is from before that.</li>}
+        {d && !before && !d.positions.length && <li className="lqm-empty">None in this cell then.</li>}
+        {d?.positions.map((p) => (
+          <li key={`${p.venue}|${p.address}`} className={p.side === 'long' ? 'is-long' : 'is-short'}>
+            <span className="lqm-det-who" title={`${VENUE_LABEL[p.venue]} · ${p.address}`}>
+              <VenueLogo venue={p.venue} size={12} />
+              {p.label ?? shortAddr(p.address)}
+            </span>
+            <span className="lqm-det-usd">{fmtUsdShort(p.usd)}</span>
+            <span className="lqm-det-sz">
+              {p.sz !== null ? `${fmtSize(Math.abs(p.sz))} ${coin}` : p.side === 'long' ? 'Long' : 'Short'} @ {fmtPx(p.liq)}
+              {p.entry !== null && ` · entry ${fmtPx(p.entry)}`}
+            </span>
+            <span className="lqm-det-dist">{p.dist === null ? '' : `${fmtFixed(Math.abs(p.dist) * 100, 1)}% away`}</span>
+            <span className="lqm-det-more">
+              {[
+                p.iso === null ? null : p.iso ? `isolated${p.lev ? ` ${fmtFixed(p.lev, 0)}×` : ''}` : `cross${p.lev ? ` ${fmtFixed(p.lev, 0)}×` : ''}`,
+                p.eq !== null ? `equity ${fmtUsdShort(p.eq)}` : null,
+                `since ${whenFmt(p.since)}`,
+                nextText(p),
+              ].filter(Boolean).join(' · ')}
+            </span>
+          </li>
+        ))}
+        {d && d.count > d.positions.length && <li className="lqm-empty">and {d.count - d.positions.length} smaller</li>}
+      </ol>
+    </aside>
+  );
+}
 
 // --- details ------------------------------------------------------------------------------
 
