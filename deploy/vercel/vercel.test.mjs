@@ -624,6 +624,10 @@ test('feedback and error reports: POST and the thread token pass, a screenshot u
       assert.equal((await request(port, '/api/vs/client-errors', { method: 'POST', body: 'x'.repeat(16 * 1024 + 1), headers: { 'content-type': 'text/plain' } })).status, 413);
       assert.equal(seen.length, before, 'neither reached the origin');
       assert.equal(proxy.isReportsPath('/api/vs/feedbackx'), false);
+      // A signed-in wallet's inbox passes like the chat; a batch of notices may be up to 64 KiB.
+      assert.equal(proxy.isReportsPath('/api/vs/inbox/add'), true);
+      assert.equal(proxy.isReportsPath('/api/vs/inboxx'), false);
+      assert.equal(proxy.bodyLimitFor('/api/vs/inbox/add'), 64 * 1024);
       assert.equal((await request(port, '/api/vs/leaderboard', { method: 'POST', body: '{}' })).status, 405, 'other index paths stay GET only');
     });
   } finally {

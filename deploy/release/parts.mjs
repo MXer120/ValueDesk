@@ -95,7 +95,7 @@ export function reach(entries, files, read) {
 const IGNORED = [
   /\.md$/i, /^docs\//, /(^|\/)test\//, /\.test\.[a-z]+$/, /^\.github\//, /^\.claude\//, /^research_notes\//, /^reports\//,
   /^inspimages\//, /^contracts\//, /(^|\/)\.gitignore$/, /^apps\/web\/e2e\//, /^apps\/web\/tools\//, /^apps\/server\/tools\//,
-  /^apps\/executor\/tools\//, /^deploy\/(release|ci|aws|vercel|\.out)\//,
+  /^apps\/executor\/tools\//, /^deploy\/(release|ci|aws|\.out)\//,
 ];
 const DEPS = /^(package-lock\.json|package\.json|apps\/[^/]+\/package\.json|packages\/[^/]+\/package\.json)$/;
 
@@ -111,6 +111,8 @@ export function classify(changed, graphs) {
     if (DEPS.test(f)) { for (const p of ['web', 'api', 'indexer', 'executor']) add(p, f); continue; }
     if (/^deploy\/server\/bin\//.test(f)) { if (/\.test\.[a-z]+$/.test(f)) ignored.push(f); else add('bin', f); continue; }
     if (/^deploy\/server\//.test(f)) { add('infra', f); continue; }
+    // The Vercel function and its config ship with every web deploy: the web's.
+    if (/^deploy\/vercel\//.test(f) && !/\.test\.[a-z]+$/.test(f)) { add('web', f); continue; }
     if (IGNORED.some((re) => re.test(f))) { ignored.push(f); continue; }
     let placed = false;
     for (const p of ['api', 'indexer', 'executor', 'web']) if (graphs[p]?.has(f)) { add(p, f); placed = true; }

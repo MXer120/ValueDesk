@@ -62,14 +62,15 @@ test('by part: graphs first, then the folder; dependencies every service; bin an
     'packages/copy-engine/src/index.ts', 'apps/web/src/App.tsx', 'apps/web/index.html', 'package-lock.json',
     'deploy/server/bin/release.sh', 'deploy/server/bin/release.test.mjs', 'deploy/server/units/valuescan-api.service',
     'apps/server/test/a.test.ts', 'docs/x.md', 'ROADMAP.md', 'deploy/release/ship.sh',
+    'deploy/vercel/api-proxy.cjs', 'deploy/vercel/vercel.test.mjs',
   ], graphs);
   assert.deepEqual(parts.api, ['apps/server/src/routes/a.ts', 'apps/server/src/shared.ts', 'apps/server/src/orphan.ts', 'package-lock.json']);
   assert.deepEqual(parts.indexer, ['apps/server/src/indexer/engine.ts', 'apps/server/src/shared.ts', 'apps/server/src/orphan.ts', 'package-lock.json']);
   assert.deepEqual(parts.executor, ['packages/copy-engine/src/index.ts', 'package-lock.json']);
-  assert.deepEqual(parts.web, ['apps/web/src/App.tsx', 'apps/web/index.html', 'package-lock.json']);
+  assert.deepEqual(parts.web, ['apps/web/src/App.tsx', 'apps/web/index.html', 'package-lock.json', 'deploy/vercel/api-proxy.cjs'], 'the Vercel function ships with the web');
   assert.deepEqual(parts.bin, ['deploy/server/bin/release.sh']);
   assert.deepEqual(parts.infra, ['deploy/server/units/valuescan-api.service']);
-  assert.deepEqual(ignored.sort(), ['ROADMAP.md', 'apps/server/test/a.test.ts', 'deploy/release/ship.sh', 'deploy/server/bin/release.test.mjs', 'docs/x.md'].sort());
+  assert.deepEqual(ignored.sort(), ['ROADMAP.md', 'apps/server/test/a.test.ts', 'deploy/release/ship.sh', 'deploy/server/bin/release.test.mjs', 'deploy/vercel/vercel.test.mjs', 'docs/x.md'].sort());
 });
 
 const GIT = spawnSync('git', ['--version']).status === 0 ? false : 'needs git';

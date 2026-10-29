@@ -114,10 +114,13 @@ const isCopyPath = (path) => String(path ?? '').startsWith(COPY_PREFIX);
 /** The knowledge folders' paths (apps/server/src/routes/folders.ts): /api/folders and below. */
 const isFoldersPath = (path) => { const p = String(path ?? ''); return p === '/api/folders' || p.startsWith('/api/folders/'); };
 /**
- * Feedback (a visitor's own conversation, its screenshots) and client error reports
- * (apps/server/src/routes/reports.ts): POST passes, the thread token passes, nothing is cached.
+ * Feedback (a visitor's own conversation, its screenshots), client error reports and a signed-in
+ * wallet's inbox (apps/server/src/routes/reports.ts, ops/inbox.ts): POST passes, the thread token or
+ * wallet session passes, nothing is cached.
  */
-const isReportsPath = (path) => { const p = String(path ?? ''); return p === '/api/vs/feedback' || p.startsWith('/api/vs/feedback/') || p === '/api/vs/client-errors'; };
+const isReportsPath = (path) => { const p = String(path ?? ''); return p === '/api/vs/feedback' || p.startsWith('/api/vs/feedback/') || p.startsWith('/api/vs/inbox/') || p === '/api/vs/client-errors'; };
+/** A browser's batch of its algos' and copies' notices (the API takes 64 KiB). */
+const INBOX_ADD_LIMIT = 64 * 1024;
 /** A screenshot, one per request (apps/server src/ops/imageCheck.ts: 2 MiB, and the request around it). */
 const FEEDBACK_UPLOAD_LIMIT = 2 * 1024 * 1024 + 16 * 1024 + 1024;
 /** A feedback message, a thread read, an error report. */
@@ -132,6 +135,7 @@ const FOLDERS_UPLOAD_LIMIT = Math.floor(4.25 * 1024 * 1024) + 1024;
 function bodyLimitFor(path) {
   if (path === '/api/folders/upload/put') return FOLDERS_UPLOAD_LIMIT;
   if (path === '/api/vs/feedback/upload') return FEEDBACK_UPLOAD_LIMIT;
+  if (path === '/api/vs/inbox/add') return INBOX_ADD_LIMIT;
   if (isReportsPath(path)) return REPORTS_BODY_LIMIT;
   if (isFoldersPath(path)) return FOLDERS_BODY_LIMIT;
   return BODY_LIMIT;
