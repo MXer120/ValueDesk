@@ -9571,10 +9571,12 @@ var SodexClient = class {
    * The account's fills on one market since `since` (GET .../trades, weight 25: read only when
    * a copied position changed outside the copier). SoDEX's own fills carry their origin in the
    * client order id: a liquidation is "liquidation:<id>" (docs/research/07 G7), the copier's
-   * stops "vds-...".
+   * stops "vds-...". `until`: none after it (SoDEX's endTime, inclusive), so the page of 100
+   * holds a short window.
    */
-  async fills(address, symbol2, since) {
-    const path = `/api/v1/perps/accounts/${address.toLowerCase()}/trades?symbol=${encodeURIComponent(symbol2)}&startTime=${Math.max(0, Math.floor(since))}&limit=100`;
+  async fills(address, symbol2, since, until) {
+    const end = until !== void 0 && Number.isFinite(until) ? `&endTime=${Math.max(0, Math.floor(until))}` : "";
+    const path = `/api/v1/perps/accounts/${address.toLowerCase()}/trades?symbol=${encodeURIComponent(symbol2)}&startTime=${Math.max(0, Math.floor(since))}${end}&limit=100`;
     const rows2 = await this.get(path, weightFor(path, 100));
     const list = Array.isArray(rows2) ? rows2 : rows2?.trades ?? [];
     return list.filter((r) => !r.symbol || r.symbol === symbol2).map((r) => ({
@@ -14155,6 +14157,9 @@ var STOP_DRAIN_MS = 8e3;
 var STALE_IOC_MS = 8e3;
 var SENDING_MAX_MS = 2e4;
 var HISTORY_EVERY_MS = 2e4;
+var UNLISTED_CANCEL_MS = 12e4;
+var UNLISTED_SETTLE_MS = 20 * 6e4;
+var FILLS_PAGE = 100;
 var DONE_KEPT = 60;
 var MAX_CONSEC_REJECTS = 25;
 var LIMIT_RETRY_MS = 6e4;
@@ -14212,6 +14217,8 @@ var AlgoRuntime = class {
   leverageSet = /* @__PURE__ */ new Map();
   problems = /* @__PURE__ */ new Map();
   lastHistoryAt = 0;
+  /** The next history turn reads SoDEX's trades for unlisted children instead (never both in one burst: docs/ARCH-traffic.md). */
+  tradesTurn = false;
   lookupBusy = false;
   /** pollOrders' state: a read in flight, when the last one left, when each algo was read, the algos to read whatever the socket follows (it was down). */
   polling = false;
@@ -14625,7 +14632,7 @@ var AlgoRuntime = class {
       if (a.spec.kind === "twap" && a.spec.closeShare !== null) throw new Error("A close is sized from the position: its size cannot be changed.");
       const want = Number(patch.quantity);
       if (want <= a.filled) throw new Error("The new size must be more than what has filled.");
-      const taking = this.live(a).filter((c) => c.tif === "ioc" || c.cancelling).reduce((x, c) => x + Math.max(0, c.quantity - c.filled), 0);
+      const taking = this.live(a).filter((c) => c.tif === "ioc" || c.cancelling || c.state === "unknown").reduce((x, c) => x + Math.max(0, c.quantity - c.filled), 0);
       if (a.filled + taking >= want - 1e-12) throw new Error(`An order is filling right now: the new size must be more than ${dec3(a.filled + taking)}.`);
     }
     const spec = parseAlgoSpec(next);
@@ -16220,6 +16227,7 @@ var AlgoRuntime = class {
     }
     if (u.orderId) c.orderId = u.orderId;
     c.updatedAt = Date.now();
+    delete c.unlisted;
     if (FINAL_ORDER.test(u.status)) {
       c.state = "done";
       c.cancelling = false;
@@ -16641,7 +16649,9 @@ var AlgoRuntime = class {
   /**
    * Settle children SoDEX has not told us about: an IOC with no final update,
    * a cancel with no answer, a write with no answer. Open orders first; the
-   * order history (drip-limited) only when an order is gone from them.
+   * order history (drip-limited) only when an order is gone from them. Only a
+   * final order in the history settles a child: one listed nowhere is never
+   * taken as over for its absence (settleUnlisted).
    */
   async settleStale(a, m, now) {
     if (a.spec.paper || this.lookupBusy) return;
@@ -16650,6 +16660,7 @@ var AlgoRuntime = class {
     for (const x of a.exitOrders ?? []) if (x.state === "sending" && now - x.placedAt > SENDING_MAX_MS) x.state = "unknown";
     const staleExits = (a.exitOrders ?? []).filter((x) => x.state === "unknown" || x.state === "open" && x.cancelling && now - x.updatedAt > STALE_IOC_MS);
     if (!stale.length && !staleExits.length) return;
+    if (!staleExits.length && stale.every((c) => c.unlisted) && now - this.lastHistoryAt < HISTORY_EVERY_MS) return;
     this.lookupBusy = true;
     try {
       const open = await this.lookupOrders(a, m.name, false);
@@ -16676,6 +16687,7 @@ var AlgoRuntime = class {
           c.state = "open";
           c.orderId = row.orderId;
           c.updatedAt = now;
+          delete c.unlisted;
           if (c.cancelling) {
             c.cancelling = false;
             await this.cancelChildren(a, m, [c]);
@@ -16684,25 +16696,32 @@ var AlgoRuntime = class {
       }
       if ((missing.length || missingExits.length) && now - this.lastHistoryAt >= HISTORY_EVERY_MS) {
         this.lastHistoryAt = now;
-        const hist = await this.lookupOrders(a, m.name, true);
-        for (const x of missingExits) {
-          const row = hist.find((r) => r.clOrdID === x.clOrdID);
-          if (row && row.executedQty > 1e-12) {
-            this.onExitUpdate(a, x, { clOrdID: x.clOrdID, orderId: row.orderId, symbol: m.name, status: "FILLED", filledQty: row.executedQty, filledValue: row.executedValue, maker: false, reason: null, at: now });
-          } else if (row || now - x.placedAt > 12e4) {
-            x.state = "done";
-            x.cancelling = false;
-            if (Number(a.k.exitsSize ?? 0) > 0 && !this.liveExits(a).some((y) => !y.cancelling)) a.k.exitsSize = 0;
+        const unlisted = missing.filter((c) => c.unlisted && now - c.placedAt >= UNLISTED_CANCEL_MS);
+        if (unlisted.length && this.tradesTurn) {
+          this.tradesTurn = false;
+          await this.settleUnlisted(a, m, unlisted, now);
+        } else {
+          this.tradesTurn = true;
+          const hist = await this.lookupOrders(a, m.name, true);
+          for (const x of missingExits) {
+            const row = hist.find((r) => r.clOrdID === x.clOrdID);
+            if (row && row.executedQty > 1e-12) {
+              this.onExitUpdate(a, x, { clOrdID: x.clOrdID, orderId: row.orderId, symbol: m.name, status: "FILLED", filledQty: row.executedQty, filledValue: row.executedValue, maker: false, reason: null, at: now });
+            } else if (row || now - x.placedAt > 12e4) {
+              x.state = "done";
+              x.cancelling = false;
+              if (Number(a.k.exitsSize ?? 0) > 0 && !this.liveExits(a).some((y) => !y.cancelling)) a.k.exitsSize = 0;
+            }
           }
-        }
-        for (const c of missing) {
-          const row = hist.find((r) => r.clOrdID === c.clOrdID);
-          if (row) this.applyFill(a, c, row.executedQty, row.executedValue, null);
-          if (row || now - c.placedAt > 12e4) {
-            if (!row) await this.event(a, "info", `SoDEX does not list ${c.tag}; counted as filled ${dec3(c.filled)}.`, c);
-            c.state = "done";
-            c.cancelling = false;
-            this.onChildDone(a, c);
+          for (const c of missing) {
+            const row = hist.find((r) => r.clOrdID === c.clOrdID);
+            if (!row) {
+              c.unlisted ??= { at: now };
+              continue;
+            }
+            this.applyFill(a, c, row.executedQty, row.executedValue, null);
+            delete c.unlisted;
+            if (FINAL_ORDER.test(row.status.toUpperCase())) this.settleChild(a, c);
           }
         }
       }
@@ -16712,6 +16731,81 @@ var AlgoRuntime = class {
     } finally {
       this.lookupBusy = false;
     }
+  }
+  /** A child SoDEX accounted for (a final order, or filled in full): over, for what it filled. */
+  settleChild(a, c) {
+    c.state = "done";
+    c.cancelling = false;
+    delete c.unlisted;
+    this.onChildDone(a, c);
+  }
+  /**
+   * Children neither SoDEX's open orders nor its order history list. That proves nothing: on
+   * 2026-10-29 the history and the trades lagged the fills by tens of seconds and some backends
+   * answered with an account 10-17 min old, so an order that rests or fills can be missing from
+   * every read for minutes - booked as over, it and the child sent in its place could both fill.
+   * So one stays live in full (pendingQty: the algo sends nothing in its place). Placed
+   * UNLISTED_CANCEL_MS ago (younger, it is only asked of the history again), it is accounted for
+   * from SoDEX's trades, by its client id, on every other history turn:
+   *   - what the trades show it filled is booked; filled in full, it is over (it cannot fill more);
+   *   - else it is cancelled by its id: from SoDEX's answer on it can neither rest nor fill (one
+   *     SoDEX never had answers "not found", which the sink takes);
+   *   - UNLISTED_SETTLE_MS after that cancel it is over for what the trades show, once CONFIRM_READS
+   *     more trades reads agree on that fill with no read listing it in between (confirm.ts) - the
+   *     trades read ends shortly after the cancel, and a full page confirms nothing.
+   * Any read or update that lists it meanwhile books it as usual and starts this over.
+   */
+  async settleUnlisted(a, m, list, now) {
+    const since = Math.min(...list.map((c) => c.placedAt)) - EXITS_FILLS_SLACK_MS;
+    const until = list.every((c) => c.unlisted?.cancelAt !== void 0) ? Math.max(...list.map((c) => c.unlisted.cancelAt)) + EXITS_FILLS_SLACK_MS : void 0;
+    let fills = null;
+    try {
+      fills = await this.host.sodex.fills(a.owner, m.name, since, until);
+    } catch (e) {
+      this.host.log.warn("algo: fills read failed", { algo: a.id, symbol: m.name, error: String(e) });
+    }
+    const full = fills !== null && fills.length >= FILLS_PAGE;
+    for (const c of list) {
+      const u = c.unlisted ??= { at: now };
+      let seen = null;
+      if (fills) {
+        const own = fills.filter((f) => f.clOrdID === c.clOrdID);
+        seen = own.reduce((x, f) => x + f.qty, 0);
+        if (own.length) this.applyFill(a, c, seen, own.reduce((x, f) => x + f.qty * f.price, 0), null);
+        if (c.filled >= c.quantity - 1e-12) {
+          await this.event(a, "info", `SoDEX's trades show ${c.tag} filled in full (${dec3(c.filled)}).`, c);
+          this.settleChild(a, c);
+          continue;
+        }
+      }
+      if (u.cancelAt === void 0) {
+        const sink = this.host.sinkFor(a);
+        if (!sink) continue;
+        try {
+          await sink.cancel(a, m, [c.clOrdID]);
+        } catch (e) {
+          this.host.log.warn("algo: cancel of an unlisted child failed", { algo: a.id, child: c.clOrdID, error: String(e) });
+          continue;
+        }
+        u.cancelAt = Date.now();
+        c.cancelling = true;
+        c.updatedAt = u.cancelAt;
+        await this.event(a, "info", `SoDEX does not list ${c.tag}: cancelled by its id, so it can neither rest nor fill. Nothing is sent in its place until SoDEX's trades agree on what it filled (about ${Math.round(UNLISTED_SETTLE_MS / 6e4)} min).`, c);
+        continue;
+      }
+      if (now - u.cancelAt < UNLISTED_SETTLE_MS) continue;
+      if (seen === null || full) {
+        delete u.agree;
+        if (full) this.host.log.warn("algo: the trades read for an unlisted child is a full page; not settled on it", { algo: a.id, child: c.clOrdID });
+        continue;
+      }
+      u.agree = u.fill !== void 0 && sizeView(u.fill) === sizeView(seen) ? (u.agree ?? 0) + 1 : 1;
+      u.fill = seen;
+      if (u.agree <= CONFIRM_READS) continue;
+      await this.event(a, "info", `SoDEX never listed ${c.tag} again after its cancel; its trades agree it filled ${dec3(c.filled)}, so it is over.`, c);
+      this.settleChild(a, c);
+    }
+    this.dirty.add(a.id);
   }
   async lookupOrders(a, symbol2, history) {
     if (this.host.lookup) return this.host.lookup(a, symbol2, history);
