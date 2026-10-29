@@ -297,7 +297,7 @@ export const ALGO_SCENARIOS: Scenario[] = [
     timeoutMs: 12 * MIN,
     cost: (U) => ({ takerUsd: 2 * U, makerUsd: 0, peakUsd: 3 * U }),
     async run(t) {
-      const v0 = await t.start({ kind: 'vwap', quantity: await t.qty(3 * t.U), durationMs: 15 * MIN, slices: 15, lookbackDays: 7, adaptive: true, exec: { style: 'taker', slippageBps: 20 } });
+      const v0 = await t.start({ kind: 'vwap', quantity: await t.qty(3 * t.U), durationMs: 15 * MIN, slices: 3, lookbackDays: 7, adaptive: true, exec: { style: 'taker', slippageBps: 20 } });
       await t.waitAlgo(v0.algo.id, 'the VWAP filled its first child', (v) => v.algo.filled > 0, { timeoutMs: 10 * MIN });
       await t.exec.algoAct('cancel', v0.algo.id);
       const v = await t.waitEnded(v0.algo.id, 20_000);
@@ -312,7 +312,7 @@ export const ALGO_SCENARIOS: Scenario[] = [
     timeoutMs: 20 * MIN,
     cost: (U) => ({ takerUsd: 6 * U, makerUsd: 0, peakUsd: 3 * U }),
     async run(t) {
-      const v0 = await t.start({ kind: 'vwap', quantity: await t.qty(3 * t.U), durationMs: 15 * MIN, slices: 15, lookbackDays: 7, exec: { style: 'taker', slippageBps: 20 } });
+      const v0 = await t.start({ kind: 'vwap', quantity: await t.qty(3 * t.U), durationMs: 15 * MIN, slices: 3, lookbackDays: 7, exec: { style: 'taker', slippageBps: 20 } });
       const v = await t.waitAlgo(v0.algo.id, 'the VWAP is done', done, { timeoutMs: 18 * MIN });
       await filledAsBooked(t, v);
     },
