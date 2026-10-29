@@ -577,7 +577,7 @@ if [ "$MOVE_MAIN" = 1 ]; then
   say "main -> $TAG"
   "${G[@]}" push -q origin "$HEAD_SHA:refs/heads/main"
   if [ "$WEB" = 1 ]; then
-    note "waiting for Vercel's Production deployment of $(git rev-parse --short HEAD)"
+    note "waiting for Vercel's Production deployment of ${HEAD_SHA:0:7}"
     state=""
     for _ in $(seq 1 60); do
       id="$(gh_api "$REPO/deployments?sha=$HEAD_SHA&environment=Production" | json 'v && v[0] ? v[0].id : ""')"

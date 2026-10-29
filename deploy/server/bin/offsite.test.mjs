@@ -8,7 +8,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -218,15 +218,19 @@ test('the drill opens the newest copy with a key from stdin and leaves nothing b
   try {
     assert.equal(bash('backup-offsite.sh', ['push', 'api-state'], envOf(w)).status, 0);
     const key = readFileSync(w.key, 'utf8');
-    const before = readdirSync(tmpdir()).length;
+    // The drill's scratch is /var/tmp/vs-drill.* (backup-restore.sh): none of it may stay. Not a count of
+    // the shared temp directory - suites running beside this one fill it (Vercel's gate, 2026-10-29).
+    const drills = () => (existsSync('/var/tmp') ? readdirSync('/var/tmp').filter((f) => f.startsWith('vs-drill.')) : []);
+    const before = drills();
     const d = spawnSync('bash', [sh(join(HERE, 'backup-restore.sh')), 'drill', 'api-state', '--key-stdin'], { encoding: 'utf8', env: envOf(w), input: key });
     if (d.status !== 0 && /vs-drill/.test(d.stderr) && process.platform === 'win32') return; // no /var/tmp on this Windows
     assert.equal(d.status, 0, `${d.stdout}\n${d.stderr}`);
     assert.match(d.stdout, /DRILL PASSED/);
-    assert.ok(readdirSync(tmpdir()).length <= before + 1);
+    assert.deepEqual(drills().filter((f) => !before.includes(f)), [], 'no drill scratch left behind');
     const wrong = spawnSync('bash', [sh(join(HERE, 'backup-restore.sh')), 'drill', 'api-state', '--key-stdin'], { encoding: 'utf8', env: envOf(w), input: `${'0'.repeat(64)}\n` });
     assert.notEqual(wrong.status, 0);
     assert.match(wrong.stderr, /another key|could not decrypt/);
+    assert.deepEqual(drills().filter((f) => !before.includes(f)), [], 'nor after a wrong key');
   } finally {
     rmSync(w.root, { recursive: true, force: true });
   }
