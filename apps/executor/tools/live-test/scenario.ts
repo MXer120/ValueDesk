@@ -6,6 +6,7 @@
  */
 import type { DepGroup } from './hash.ts';
 import type { T } from './harness.ts';
+import type { LeaderVenueName } from './leader.ts';
 import type { Capability } from './target.ts';
 
 /**
@@ -27,7 +28,7 @@ export interface Cost {
   walletSignatures?: number;
 }
 
-export type Section = 'setup' | 'algo' | 'copy';
+export type Section = 'setup' | 'algo' | 'copy' | 'fee';
 
 export interface Scenario {
   id: string;
@@ -48,6 +49,8 @@ export interface Scenario {
   slow?: boolean;
   /** Needs the leader wallet. */
   leader?: boolean;
+  /** Runs only with a leader on this venue (LIVE_LEADER_VENUE): with another it is skipped, with why. */
+  leaderVenue?: LeaderVenueName;
   /** What the target must let the runner do (target.ts): on a target that cannot, it is skipped, with why. */
   needs?: Capability[];
   /** How a dry run exercises it: on paper with its checks / its spec accepted and stopped / a copy's lifecycle without leader trades. */
@@ -55,4 +58,9 @@ export interface Scenario {
   timeoutMs: number;
   cost(U: number): Cost;
   run(t: T): Promise<void>;
+}
+
+/** Why a scenario does not run with the run's leader venue (it is written for another one), or null. */
+export function leaderSkip(s: { leaderVenue?: LeaderVenueName }, venue: LeaderVenueName): string | null {
+  return s.leaderVenue && s.leaderVenue !== venue ? `it needs a leader on ${s.leaderVenue === 'hyperliquid' ? 'Hyperliquid (LIVE_LEADER_VENUE=hyperliquid)' : 'SoDEX'}` : null;
 }

@@ -15,10 +15,17 @@
  * files - the checkout is the nearest record of what was released, so a local
  * change re-runs it too. Browser runs the web app's own runtime: its hash adds
  * those files (the `web` group).
+ *
+ * PER LEADER VENUE (leader.ts). The copy scenarios also hash the leader's
+ * driver (the `leader` group: leader.ts and the Hyperliquid client), and with
+ * a Hyperliquid leader the venue too: a pass with a SoDEX leader never stands
+ * for one with a Hyperliquid leader. With a SoDEX leader the hash stays what it
+ * was before venues.
  */
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
+import type { LeaderVenueName } from './leader.ts';
 import type { TargetName } from './target.ts';
 
 /** What the hash groups are made of (repository-relative folders or files; folders are walked for .ts files). */
@@ -45,25 +52,31 @@ export const DEP_GROUPS = {
   /**
    * The harness itself (its drivers and checks): changed checks are new code too. The scenario
    * files are not in it: each scenario hashes its own file (`source`), so editing the copy
-   * scenarios does not re-run the algo ones.
+   * scenarios does not re-run the algo ones. Nor is the leader's driver (`leader`).
    */
   harness: ['apps/executor/tools/live-test'],
+  /** The leader the copy scenarios trade: its venues (SoDEX through exchange.ts, Hyperliquid's own client). */
+  leader: ['apps/executor/tools/live-test/leader.ts', 'apps/executor/tools/live-test/hyperliquid.ts'],
   /** The web app's runtime of algos and copies, and its trading layer: what the browser target runs. */
   web: ['apps/web/src/algo', 'apps/web/src/copy', 'apps/web/src/trading'],
 } as const;
 
 /** Folders of a group that are left out of it (hashed per scenario instead). */
-const GROUP_SKIP: Partial<Record<keyof typeof DEP_GROUPS, string[]>> = { harness: ['apps/executor/tools/live-test/scenarios/'] };
+const GROUP_SKIP: Partial<Record<keyof typeof DEP_GROUPS, readonly string[]>> = {
+  harness: ['apps/executor/tools/live-test/scenarios/', ...DEP_GROUPS.leader],
+};
 
 export type DepGroup = keyof typeof DEP_GROUPS;
 
 /** Groups only some targets run (and hash): the web runtime is the browser target's alone. */
 const TARGET_GROUPS: Partial<Record<DepGroup, readonly TargetName[]>> = { web: ['browser'] };
 
-/** What a hash is taken for: the target, and (hosted) the release it names. */
+/** What a hash is taken for: the target, (hosted) the release it names, and where the leader trades. */
 export interface HashTarget {
   name: TargetName;
   release?: string | null;
+  /** The leader's venue (LIVE_LEADER_VENUE); default sodex. */
+  leader?: LeaderVenueName;
 }
 
 const SKIP_DIRS = new Set(['node_modules', '.state', '.git', 'dist', '.cache']);
@@ -125,15 +138,17 @@ export class CodeHashes {
 
   /**
    * A scenario's hash: its groups (always core and harness, and the target's own), the file it
-   * is written in, the target (but self, whose hash stays what it was before targets), its id
-   * and its revision. 16 hex digits are plenty to tell versions apart.
+   * is written in, the target (but self, whose hash stays what it was before targets), for a
+   * scenario with the leader its venue (but SoDEX, as before venues), its id and its revision.
+   * 16 hex digits are plenty to tell versions apart.
    */
-  scenario(s: { id: string; deps: readonly DepGroup[]; source?: string; rev?: number }): string {
+  scenario(s: { id: string; deps: readonly DepGroup[]; source?: string; rev?: number; leader?: boolean }): string {
     const groups = [...new Set<DepGroup>(['core', 'harness', ...s.deps, ...this.used(['web'])])].sort();
     const h = createHash('sha256');
     for (const g of groups) h.update(`${g}:${this.group(g)}\n`);
     if (s.source) h.update(`source:${hashFiles(this.repo, [s.source])}\n`);
     if (this.target.name !== 'self') h.update(`target:${this.target.name}@${this.target.release ?? ''}\n`);
+    if (s.leader && (this.target.leader ?? 'sodex') !== 'sodex') h.update(`leader:${this.target.leader}\n`);
     h.update(`${s.id}#${s.rev ?? 1}`);
     return h.digest('hex').slice(0, 16);
   }

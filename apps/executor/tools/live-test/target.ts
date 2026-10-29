@@ -6,8 +6,9 @@
  *   self     a real executor process started on this machine from this
  *            checkout (executor.ts), for the follower wallet only. The runner
  *            can kill it hard and start it again on the same data, and it
- *            charges the copy fee ladder's top step (it reads no follower
- *            volume). What the suite always did; the default.
+ *            reads the follower's volume from the runner's own stub
+ *            (feeStub.ts): $0, the copy fee ladder's top step, unless a fee
+ *            scenario sets another. What the suite always did; the default.
  *   hosted   ValueDesk's own executor, through the site's edge
  *            (https://www.valuedesk.so/api/copy/v1: Vercel adds the origin
  *            secret and the viewer's country, which server 2 needs). Its ids
@@ -51,15 +52,16 @@ export interface TargetCapabilities {
   /** Paper specs only: a live run on it is refused at the start. */
   paperOnly?: boolean;
   /**
-   * Its builder fee is the copy ladder's top step by construction - it reads no follower volume (a
-   * local executor) - so the fee checks know the exact rate. Without it any step of the ladder the
-   * exchange shows is accepted, and noted.
+   * The follower's volume it charges the copy fee step of is the runner's to set: a local executor
+   * reads it from the runner's loopback stub (feeStub.ts; $0, the ladder's top step, unless a fee
+   * scenario sets another), so the fee checks know the exact rate, and the fee scenarios can walk
+   * the ladder. Without it any step of the ladder the exchange shows is accepted, and noted.
    */
   localFeeStub: boolean;
 }
 
 /** What a scenario may need of a target. */
-export type Capability = 'restart' | 'kill';
+export type Capability = 'restart' | 'kill' | 'localFeeStub';
 
 export const CAPABILITIES: Readonly<Record<TargetName, TargetCapabilities>> = {
   self: { restart: true, kill: true, localFeeStub: true },
@@ -68,7 +70,11 @@ export const CAPABILITIES: Readonly<Record<TargetName, TargetCapabilities>> = {
   browser: { restart: false, kill: false, paperOnly: true, localFeeStub: false },
 };
 
-const CAN: Record<Capability, string> = { restart: 'kill the executor and start it again on the same data', kill: 'kill the executor hard' };
+const CAN: Record<Capability, string> = {
+  restart: 'kill the executor and start it again on the same data',
+  kill: 'kill the executor hard',
+  localFeeStub: 'answer the executor\'s reads of the follower\'s volume (the copy fee step) itself',
+};
 
 /** Why a scenario cannot run on a target (what it needs that the target lacks), or null. */
 export function cannotRun(s: { needs?: readonly Capability[] }, target: TargetName, caps: TargetCapabilities = CAPABILITIES[target]): string | null {
@@ -81,6 +87,8 @@ export interface ExecutorApi {
   info(): Promise<ExecutorInfo>;
   acceptTerms(country: string, termsHash: string): Promise<MeResponse>;
   me(): Promise<MeResponse>;
+  /** A new session (the executor reads the follower's volume, the copy fee step, on each). */
+  signIn(): Promise<void>;
   createKey(days: number): Promise<{ address: string; name: string; maxDays: number; days: number }>;
   verifyKey(): Promise<MeResponse['key']>;
   importKey(name: string, envelope: unknown): Promise<MeResponse['key']>;
@@ -391,6 +399,9 @@ export class BrowserTarget implements ExecutorTarget {
   }
   async me() {
     return this.d().me();
+  }
+  async signIn() {
+    return this.d().signIn();
   }
   async createKey(days: number) {
     return this.d().createKey(days);

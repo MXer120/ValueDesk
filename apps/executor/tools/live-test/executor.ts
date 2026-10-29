@@ -11,6 +11,8 @@
  * (requests signed for it cannot be replayed to ValueDesk's executor) and, for
  * a live run only, EXECUTOR_LIVE_ALGOS=1. A dry run leaves real algo orders
  * off in the executor too: a paper spec that came out live would be refused.
+ * It reads the follower's volume (the copy fee step) from the runner's
+ * loopback stub (feeStub.ts), as a hosted executor reads the API server's.
  *
  * Its environment is built from scratch: the env file's private keys are never
  * in it.
@@ -49,6 +51,11 @@ export interface ExecutorOptions {
   dataDir: string;
   logFile: string;
   executorId: string;
+  /**
+   * Where it reads the follower's 14-day volume (its copy fee step) and the token it sends: the
+   * runner's loopback stub (feeStub.ts) as EXECUTOR_BUILDER_URL. Absent: it reads none (the first step).
+   */
+  builderVolume?: { url: string; token: string } | null;
 }
 
 /** A free loopback port (the OS picks one; it is released before the executor binds it). */
@@ -112,6 +119,7 @@ export class ExecutorProcess {
       EXECUTOR_ALLOWED_ORIGINS: 'http://localhost',
       LOG_LEVEL: 'info',
       ...(this.o.mode === 'live' ? { EXECUTOR_LIVE_ALGOS: '1' } : {}),
+      ...(this.o.builderVolume ? { EXECUTOR_BUILDER_URL: this.o.builderVolume.url, EXECUTOR_BUILDER_TOKEN: this.o.builderVolume.token } : {}),
     };
     // One process (no tsx wrapper), so a kill stops the executor itself and not just a launcher.
     const loader = import.meta.resolve('tsx');
@@ -265,6 +273,16 @@ export class ExecutorClient implements ExecutorApi {
   async session(): Promise<string> {
     if (!this.token) this.token = (await this.post<{ token: string }>('/session', 'session', {})).token;
     return this.token;
+  }
+
+  /**
+   * A new session, as the web app opens one when it connects. The executor reads the
+   * follower's volume (the copy fee step) on every new one; a session survives a
+   * restart (it is signed, not stored), so a fee scenario asks for a new one.
+   */
+  async signIn(): Promise<void> {
+    this.token = null;
+    await this.session();
   }
 
   info(): Promise<ExecutorInfo> {

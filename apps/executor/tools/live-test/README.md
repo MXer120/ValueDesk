@@ -7,24 +7,31 @@ fees, positions, leverage, API keys, builder approvals). It is what the unit and
 (`packages/copy-engine/test/audit-*.test.ts`, `apps/executor/test/audit*.test.ts`) cannot show: that the exchange
 agrees.
 
-It costs about $1.25 in fees and spread (see `--budget`); most of the deposit is margin that comes back.
+It costs about $1.50 to $1.70 in fees and spread (see `--budget`); most of the deposit is margin that comes back.
 
 ## What you prepare (once)
 
 1. **Two dedicated wallets** that hold nothing else (fresh ones are best):
-   - the **follower**: the account the algos and copies trade in;
+   - the **follower**: the account the algos and copies trade in, on SoDEX;
    - the **leader**: a second wallet you control; the runner trades it itself so the follower has a real
-     trade to copy. Without it, the copy scenarios are skipped.
-2. **Deposit USDC on SoDEX** into both (sodex.com). How much: run `--budget` (below). With BTC-USD at the
-   prices of 2026-10-27 it asks about **$70 for the follower and $35 for the leader**, of which about
-   **$1.25 is spent** (fees, builder fee, spread) and the rest is margin that comes back.
+     trade to copy - on SoDEX (the default) or on Hyperliquid (`LIVE_LEADER_VENUE=hyperliquid`, see
+     "A leader on Hyperliquid"). Without it, the copy scenarios are skipped.
+2. **Deposit USDC**: the follower on SoDEX (sodex.com); the leader on SoDEX too, or - for a Hyperliquid
+   leader - into its **Hyperliquid perps account** (app.hyperliquid.xyz; the runner reads that account's
+   value, `clearinghouseState`). How much: run `--budget` (below), with `LIVE_LEADER_VENUE=hyperliquid` in the
+   environment for a Hyperliquid leader. With BTC-USD at the prices of 2026-10-29 it asks about **$70 for the
+   follower, and $35 for a SoDEX leader or $40 for a Hyperliquid one**, of which about **$1.46 (SoDEX leader)
+   or $1.66 (Hyperliquid leader) is spent** (fees, builder fee, spread; a Hyperliquid leader pays $0.31 of it
+   on Hyperliquid, at its 4.5 bp taker fee) and the rest is margin that comes back.
 3. **The env file**: copy `.env.example` to `.env.live` in this folder and fill it in. Git ignores it; never
    commit it, never paste it anywhere.
 
    | Name | What |
    |---|---|
    | `LIVE_FOLLOWER_KEY` | the follower wallet's private key (64 hex characters) |
-   | `LIVE_LEADER_KEY` | the leader wallet's private key (empty: copy scenarios skipped) |
+   | `LIVE_LEADER_VENUE` | where the leader trades: `sodex` (default) or `hyperliquid` (the environment may set it too) |
+   | `LIVE_LEADER_KEY` | a SoDEX leader's private key (empty: copy scenarios skipped) |
+   | `LIVE_HL_LEADER_KEY` | a Hyperliquid leader's private key, only with `LIVE_LEADER_VENUE=hyperliquid` (empty: copy scenarios skipped) |
    | `LIVE_COUNTRY` | your country of residence, two letters, as you declare it in ValueDesk (EEA: the 2x cap applies, and the suite checks it) |
    | `LIVE_ACCEPT_TERMS` | the copy terms version you read and accept, e.g. `2026-10-27.2`: the runner signs the terms in your name with it |
 
@@ -39,8 +46,9 @@ ValueDesk's copy setup asks your wallet to sign - and nothing else:
   run starts a fresh executor;
 - it approves the ValueDesk builder fee ceiling (2.5 bp, the copy ladder's top step) on the follower's account,
   only if the approval there is lower;
-- it registers a key of its own on each wallet (`vd-livetest-ops`, `vd-livetest-leader`, one day) for the
-  leader's trades and the cleanup;
+- it registers a key of its own on each SoDEX wallet (`vd-livetest-ops`, `vd-livetest-leader`, one day) for
+  the leader's trades and the cleanup (a Hyperliquid leader registers nothing: its own key signs its orders,
+  and nothing but IOCs, cancels and leverage changes can be signed with it here);
 - `setup.key-import` registers one more one-day key (`vd-livetest-imp`) to test bringing your own key.
 
 These names replace keys of the same name on those wallets - another reason to use dedicated wallets. The
@@ -63,7 +71,7 @@ Options:
 |---|---|
 | `--only <list>` | comma-separated scenario ids (`twap.exits`), prefixes (`scale.*`), kinds (`twap`) or sections (`algo`, `copy`); the bootstrap (`setup.terms`, `setup.key`, `setup.builder`) always runs |
 | `--force` | run even what already passed on this code |
-| `--slow` | include the slow scenarios (`vwap.full` 15 min) |
+| `--slow` | include the slow scenarios (`vwap.full` 15 min, `fee.keep-last` 12 min) |
 | `--dry` | paper: every spec goes out with `paper: true` to an executor whose real orders are off; checks read the executor's paper book |
 | `--budget` | print the budget and stop |
 | `--target <t>` | the executor the scenarios run against: `self` (default), `hosted` or `browser` (see "Targets") |
@@ -79,24 +87,27 @@ What one run does:
 
 1. Reads SoDEX's market rules and book, picks the cheaper of BTC-USD and ETH-USD as the main market (the other
    carries the basket's second leg), prints the budget.
-2. Checks the env file, the country (a blocked region stops here), that both wallets have a SoDEX account and
-   hold enough, stops an executor a crashed run left behind, and registers its own keys.
+2. Checks the env file, the country (a blocked region stops here), that both wallets have an account (the
+   leader's on its venue) and hold enough, stops an executor a crashed run left behind, and registers its own
+   keys.
 3. **Start-up cleanup**: if the last run may have left orders or positions (a crash, Ctrl+C twice), it flattens
-   both wallets on the test markets first. If it finds positions or orders it never recorded sending, it refuses
-   to start and says what it found (`--adopt` clears them).
+   both wallets on the test markets first (a Hyperliquid leader: on every coin it holds). If it finds positions
+   or orders it never recorded sending, it refuses to start and says what it found (`--adopt` clears them).
 4. Starts a real executor (`apps/executor/src/main.ts`, self-hosted for the follower wallet, its own executor id
-   `vd-livetest-live`, a random loopback port, a new data folder under `.state/`, `EXECUTOR_LIVE_ALGOS=1`).
+   `vd-livetest-live`, a random loopback port, a new data folder under `.state/`, `EXECUTOR_LIVE_ALGOS=1`, the
+   follower's volume read from the runner's own stub - "The fee ladder").
 5. Runs the scenarios in order. After **every** scenario, also a failed one, it cleans up: the executor's kill
-   switch, every copy stopped and closed, then straight on SoDEX every order and stop cancelled and every
-   position closed (reduce-only), on both wallets, read back flat. A cleanup that cannot read the accounts flat
-   stops the run.
+   switch, every copy stopped and closed, then straight on SoDEX (and Hyperliquid, for a leader there) every
+   order and stop cancelled and every position closed (reduce-only), on both wallets, read back flat. A cleanup
+   that cannot read the accounts flat stops the run.
 6. At the end: a last cleanup, the executor stopped, its data folder deleted, the results printed.
 
 ## The scenarios
 
-53 by default, 54 with `--slow`. Sizes are in U = SoDEX's $10 minimum order value plus 20% ($12): every child
-order is just big enough. Each scenario says what it confirms on the exchange (`title` and `confirms` in
-`scenarios/*.ts`).
+63 by default, of which 59 run with a SoDEX leader (the 4 written for a Hyperliquid leader are skipped) and all
+63 with a Hyperliquid leader; `--slow` adds 2. Sizes are in U = SoDEX's $10 minimum order value plus 20% ($12):
+every child order is just big enough (and above Hyperliquid's $10 minimum for a leader there). Each scenario
+says what it confirms on the exchange (`title` and `confirms` in `scenarios/*.ts`).
 
 - **setup** (4): terms with the declared country; the executor's key registered and listed by SoDEX; the builder
   approval; a key you made yourself imported and trading.
@@ -122,7 +133,16 @@ order is just big enough. Each scenario says what it confirms on the exchange (`
   (catch-up, no order twice), counter-trade, a reduction below SoDEX's minimum (reduce-only is exempt), the copy's
   amount changed between two trades, the copy's stop firing on SoDEX (at the region's highest leverage and the
   tightest stops; inconclusive, not failed, when the market does not move far enough in 20 minutes). The fixed-amount
-  scenario also times every copy: leader fill to copy fill by SoDEX's own timestamps, median under 1 s.
+  scenario also times every copy: leader fill to copy fill by the venues' own timestamps, median under 1 s with a
+  SoDEX leader (one clock), under 2 s with a Hyperliquid one (two clocks; see below).
+- **Copy trading with a Hyperliquid leader only** (4): open, add, reduce, close of the leader's BTC copied on
+  BTC-USD at the same notional (fixed ratio 1x: sized by notional, not units; the activity names the leader's coin
+  and the SoDEX market); three slices sent back to back, each copied once (batched or not), the follower ending at
+  the leader's notional; a coin SoDEX does not list (the most traded such coin on Hyperliquid, chosen at run time;
+  skipped if there is none) skipped as `not-on-sodex` with nothing sent; kPEPE (a thousand PEPE a unit) copied on
+  SoDEX's 1000PEPE-USD or KPEPE-USD at the leader's notional - only if SoDEX lists one at run time, else skipped.
+- **The fee ladder** (6, +1 slow; self target only): one scenario per step of the copy fee ladder, and two for a
+  failing volume source ("The fee ladder", below).
 
 ## Targets
 
@@ -132,8 +152,8 @@ skipped for, with why (`needs` in `scenarios/*.ts`; `target.ts`).
 
 | Target | What runs | Covers | Skips |
 |---|---|---|---|
-| `self` (default) | a real executor process started here from this checkout (`apps/executor/src/main.ts`, self-hosted for the follower, `EXECUTOR_LIVE_ALGOS=1` for a live run) | everything: 53 scenarios (54 with `--slow`) | nothing |
-| `hosted` | ValueDesk's own executor on server 2, through the site: `https://www.valuedesk.so/api/copy/v1` (Vercel's function adds the origin secret and your country, which the server needs) | every scenario that does not restart the executor | `twap.restart`, `iceberg.restart`, `scale.restart`, `copy.restart` (it cannot be killed from here) |
+| `self` (default) | a real executor process started here from this checkout (`apps/executor/src/main.ts`, self-hosted for the follower, `EXECUTOR_LIVE_ALGOS=1` for a live run, the follower's volume from the runner's stub) | everything: 59 scenarios with a SoDEX leader, 63 with a Hyperliquid one (2 more with `--slow`) | nothing |
+| `hosted` | ValueDesk's own executor on server 2, through the site: `https://www.valuedesk.so/api/copy/v1` (Vercel's function adds the origin secret and your country, which the server needs) | every scenario that does not restart the executor or set the follower's volume | `twap.restart`, `iceberg.restart`, `scale.restart`, `copy.restart` (it cannot be killed from here), the `fee.*` scenarios (its volume is its ledger's) |
 | `browser` | the web app's own runtime (`apps/web/src/algo`, `copy`, `trading`) in a page, through the web test bridge | - | not here yet: it needs a `BrowserDriver` (below); paper only until it says otherwise |
 
 **Hosted** in detail:
@@ -175,6 +195,56 @@ files. Its capabilities (nothing restarted, paper only) widen when the bridge sa
 target's state says it may have left orders or positions on the same follower (run that target again: its start-up
 cleanup flattens them). Never run two targets at once on the same wallets.
 
+## A leader on Hyperliquid
+
+With `LIVE_LEADER_VENUE=hyperliquid` (env file or environment) and `LIVE_HL_LEADER_KEY`, the leader is a
+Hyperliquid wallet and every copy scenario follows it there: the copy's settings name `venue: hyperliquid`, the
+leader's trades go to its coin of the SoDEX market (BTC-USD -> BTC, ETH-USD -> ETH), and the copier hears of them
+from Hyperliquid's `userFills` stream. `hyperliquid.ts` is the runner's own small Hyperliquid client:
+
+- **What it signs**, with the leader's master key, Hyperliquid's "L1 action" scheme as the official Python SDK
+  builds it: the action msgpack-encoded (keys in the SDK's order), the nonce (ms) as 8 bytes, `0x00` (no vault),
+  keccak256 of that as the `connectionId` of an EIP-712 `Agent(string source, bytes32 connectionId)`, source `a`,
+  domain `Exchange` / `1` / chain 1337 / the zero address. **Only** an IOC (reduce-only for a close), a cancel and
+  a leverage change can be signed: anything else (a withdrawal, a transfer, an agent, a TWAP, another order type,
+  a builder) is refused before it is signed. The unit tests pin the SDK's own published vectors.
+- **What it sets**: 2x leverage on each coin before the leader's first trade there (cross where the coin allows it;
+  the budget's margin is costed at 2x). Sizes are floored to the coin's `szDecimals`, prices rounded to 5
+  significant figures and at most 6 - `szDecimals` decimals; every leader order is at least Hyperliquid's $10.
+- **The pre-flight** reads the leader's perps account value (`clearinghouseState`); **the cleanup** cancels and
+  closes on every coin the leader holds or has an order on (also one a crash left behind), reduce-only.
+- **Latency over two clocks**: the leader's fill is on Hyperliquid's clock, the copy's on SoDEX's. The runner logs
+  each copied order's delay and Hyperliquid's clock against this machine's (measured on the leader's own orders:
+  fill time less the middle of the request, within half its round trip); SoDEX's clock is not measured. The limits
+  are looser for it: median under 2 s, slowest under 5 s (SoDEX leader: 1 s / 3 s) - still far under the copier's
+  60 s reconcile, so a copy that missed the stream fails.
+- **What it costs**: Hyperliquid's base-tier taker fee, 4.5 bp, and half its book's spread on every leader trade
+  (`--budget` reads its book); no builder fee. Fund **USDC in the leader's Hyperliquid perps account**: `--budget`
+  says how much (about $40 on 2026-10-29).
+- **Four more scenarios** run only with it (`copy.hl-*`, above); with a SoDEX leader they are skipped, with why. A
+  pass with one leader never stands for the other (the copy scenarios' hash names the venue).
+
+## The fee ladder
+
+The builder fee of an executor's orders is the copy ladder's step of the follower's verified 14-day volume
+(`COPY_FEE_LADDER`: 2.5 / 2 / 1.5 / 1.2 / 1 bp from $0 / 100k / 500k / 2M / 10M), which a hosted executor reads
+from the API server (`EXECUTOR_BUILDER_URL`, `GET /api/vs/builder/volume` with the internal token). On `--target
+self` the runner answers those reads itself: `feeStub.ts`, a loopback stub given to the executor it starts, which
+checks every read as the server would (the token, the follower, the builder, 14 days) and answers $0 (the first
+step, what every other scenario is checked for) unless a fee scenario sets another volume or a failure.
+
+- `fee.tier-0` ... `fee.tier-10m`: for each step its executor's `/info` lists, the volume just under the boundary
+  (the step below) and at it, each after a restart of the executor (it keeps an answer 10 minutes) and a new
+  session (which reads the volume), then one market buy of U and a reduce-only sell of it; SoDEX's order history
+  must name the step's builder `feeRate` on both orders and its fills charge it (`builderFee`).
+- `fee.fail-first`: the stub failing from the first read - the first (dearest) step.
+- `fee.keep-last` (`--slow`, 12 min): a good answer, then the stub failing: once the answer is 10 minutes old the
+  executor asks again, fails, and keeps the step it had.
+
+The follower's approval stays at the top step (`setup.builder`), which covers every step. The cleanup after each fee
+scenario sets the stub back to $0 and restarts the executor, so the next scenario starts on the first step. A dry run
+reads the step from the executor's own book (what it charged beyond SoDEX's taker fee); SoDEX's fields are live only.
+
 ## Resume, and reading the results
 
 The results are in `.state/live-<target>.json` (`.state/dry-<target>.json` for `--dry`; a practice run never marks
@@ -186,8 +256,9 @@ that held, notes, and the fees SoDEX charged it.
 - **Run it again** to resume: what **passed on the same code** is skipped; failed, inconclusive (the market did
   not do what the scenario waited for in time - a take-profit not reached, a quiet tape), interrupted and never
   run scenarios run. The hash covers the engine and executor files a scenario depends on and the harness (copy
-  scenarios: the copy runtime, planner, feeds; algo scenarios: the algo engine; both: the SoDEX layer, the
-  executor), so a code change re-runs exactly what it may have broken.
+  scenarios: the copy runtime, planner, feeds, the leader's driver `leader.ts` and `hyperliquid.ts`, and the
+  leader's venue; algo scenarios: the algo engine; both: the SoDEX layer, the executor), so a code change re-runs
+  exactly what it may have broken.
 - `--only twap.exits --force` runs one scenario again on purpose.
 - The executor's log of a run is `.state/executor-live-<time>.log`.
 - On screen: each check as it holds (`ok ...`), `-- live only` for what a dry run cannot check, and a RESULTS table.
@@ -200,7 +271,9 @@ that held, notes, and the fees SoDEX charged it.
   exits. Wait for it.
 - **Ctrl+C twice** (or a crash, a power cut): the runner stops at once. The state file still says which scenario
   was running and that the account may be exposed; **the next start flattens first**. If you do not want to run
-  again, close the positions and cancel the orders on sodex.com yourself (BTC-USD and ETH-USD, both wallets).
+  again, close the positions and cancel the orders on sodex.com yourself (BTC-USD and ETH-USD, both wallets; with
+  a Hyperliquid leader also the follower's 1000PEPE-USD or KPEPE-USD, and the leader's every coin on
+  app.hyperliquid.xyz).
 - The protective stops (exits, copy stop-losses) are held by SoDEX, not by this runner: an open position keeps
   them while nothing runs.
 - The executor is a separate process; the runner stops it on every way out it can, and the next start stops one
@@ -221,10 +294,14 @@ close) only check that the executor accepts their spec.
 | File | |
 |---|---|
 | `run.ts` | the runner (options, bootstrap, the loop, the cleanup after every scenario) |
-| `scenarios/setup.ts`, `scenarios/algos.ts`, `scenarios/copy.ts` | the catalogue; `catalogue.ts` puts them in order |
+| `scenarios/setup.ts`, `scenarios/algos.ts`, `scenarios/copy.ts`, `scenarios/fees.ts` | the catalogue; `catalogue.ts` puts them in order |
 | `harness.ts` | what a scenario works with (`T`): sizes, checks, the follower's account (SoDEX or paper), the leader, restarts |
 | `exchange.ts` | SoDEX reads, and the harness's own writes (registration, approval, IOCs, cancels) |
+| `leader.ts` | the leader on its venue (`SodexLeader`, `HyperliquidLeader`): its trades, fills, equity, and its cleanup |
+| `hyperliquid.ts` | the Hyperliquid client: reads, and the leader's IOCs, cancels and leverage (msgpack, L1 signing, the guard) |
+| `feeStub.ts` | the loopback stand-in for the API server's volume route (self target) |
 | `executor.ts` | the executor process and its signed API |
 | `target.ts` | the targets (`self`, `hosted`, `browser`): what each can do, the hosted pacing and refusals, the browser seam |
 | `cleanup.ts`, `state.ts`, `hash.ts`, `budget.ts` | flattening, the state file, the code hash, the budget |
-| `../../test/live-test-runner.test.ts` | unit tests of the runner's rules (resume, skip, hash, crash repair, cleanup, budget, targets) |
+| `../../test/live-test-runner.test.ts` | unit tests of the runner's rules (resume, skip, hash, crash repair, cleanup, budget, targets, leader venues, the fee stub and scenarios) |
+| `../../test/live-test-hyperliquid.test.ts` | unit tests of the Hyperliquid client (the SDK's signing vectors, rounding, the guard, the wire) and leader |

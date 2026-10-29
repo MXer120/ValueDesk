@@ -36,7 +36,6 @@ import {
 } from '@copy-engine';
 import { destroyTradingKey, generateTradingKey, signingKeyFrom, type SigningKeyRef } from '@sodex-core';
 import { tradingConfig } from '../trading/config';
-import { currentTerms } from '../trading/terms';
 import { nonces } from '../trading/session';
 import { openVault, type KeyVault, type StoredKey } from '../trading/vault';
 import { logger } from '../log';
@@ -81,6 +80,25 @@ type Msg =
   | { t: 'changed'; owner: string };
 
 const CONFIRM_MS = 60_000;
+
+/**
+ * THE COPY FEE this browser's orders carry, tenths of a bp: the copy ladder's
+ * top step (COPY_FEE_MAX, 2.5 bp), whatever the follower's volume.
+ *
+ * The ladder's step is that of the follower's verified volume of the last
+ * COPY_FEE_WINDOW_DAYS (14) days, and the executors read it from the builder
+ * ledger: on the API server's GET /api/vs/builder/volume, which answers only
+ * the internal token (a browser cannot ask it). The signed fee terms
+ * (trading/terms.ts) carry a volume too, but it is display data - not signed,
+ * so it decides no fee - and counted over the server's own window (lifetime,
+ * or 1 to 90 days), not necessarily 14. With no source here that is both
+ * verified and of the ladder's window, the browser charges the top step, as a
+ * self-hosted executor (which reads no volume either) does, rather than a step
+ * from the wrong number. The follower's approval (COPY_FEE_MAX) covers it.
+ */
+export function browserCopyFee(): number {
+  return copyFeeFor(null);
+}
 
 const lockManager = (): { request: (name: string, cb: () => Promise<void>) => Promise<void> } | null => {
   const l = (navigator as unknown as { locks?: { request: (name: string, cb: () => Promise<void>) => Promise<void> } }).locks;
@@ -302,7 +320,7 @@ class BrowserCopier {
       hlMode: 'user',
       log,
       sinkFor: (s) => (s.settings.paper ? paper : this.signer ? new KeySink(sodex, () => this.signer, nonces(), cfg.chainId) : null),
-      builderFor: async (s) => (cfg.builder ? { id: cfg.builder.id, fee: copyFeeFor(currentTerms(s.owner)?.display.volumeUsd ?? null) } : null),
+      builderFor: async () => (cfg.builder ? { id: cfg.builder.id, fee: browserCopyFee() } : null),
       policyFor: (s) => regionPolicy(s.country, s.observedCountry ?? this.viewerCountry),
       keyProblem: async (s) => {
         const k = this.key;

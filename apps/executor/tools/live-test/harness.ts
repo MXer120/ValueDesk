@@ -12,9 +12,17 @@
  * - a fee SoDEX charged, a post-only order it refused, the leverage it set, a
  * stop it holds, a leader's real trade - is wrapped in `t.live(...)`: counted
  * in a dry run as "not checked here", never as passed.
+ *
+ * THE LEADER trades on SoDEX or on Hyperliquid (leader.ts, LIVE_LEADER_VENUE).
+ * A scenario names SoDEX markets (`t.leader({ buyUsd }, 'BTC-USD')`); the
+ * harness trades the leader's own market of it ('BTC' on Hyperliquid), or one
+ * only the leader's venue has (`t.leaderTrade`, a Hyperliquid coin).
  */
 import type { AlgoView, CopyView, MarketInfo } from '../../../../packages/copy-engine/src/index.ts';
 import type { FillInfo, OrderInfo, SodexReads, SodexWallet } from './exchange.ts';
+import type { VolumeStub } from './feeStub.ts';
+import { hlCoinOf, type HyperliquidInfo } from './hyperliquid.ts';
+import type { LeaderTrade, LeaderVenue, LeaderVenueName } from './leader.ts';
 import type { ExecutorApi, ExecutorTarget } from './target.ts';
 
 /** The market did not do what the scenario waited for (a price never reached in time): run it again later. */
@@ -34,11 +42,17 @@ export class CheckFailed extends Error {
 export interface Env {
   mode: 'live' | 'dry';
   reads: SodexReads;
-  /** Live only: the follower and the leader, with the harness's own key on each. */
+  /** Live only: the follower (with the harness's own key) and the leader, on its venue. */
   follower: SodexWallet | null;
-  leader: SodexWallet | null;
+  leader: LeaderVenue | null;
   followerAddress: string;
   leaderAddress: string;
+  /** Where the leader trades (LIVE_LEADER_VENUE): what the copies' settings name. */
+  leaderVenue: LeaderVenueName;
+  /** Hyperliquid's public reads, with a Hyperliquid leader (also in a dry run, which has no leader to trade). */
+  hl: HyperliquidInfo | null;
+  /** The follower's volume as the executor reads it (self target: the runner's stub; else null). */
+  feeStub: VolumeStub | null;
   /** The executor the scenarios run against (--target): its API, and what the runner can do to it. */
   target: ExecutorTarget;
   /** The leverage ceiling of the region (the stricter of the declared country and the one the target sees; EEA: 2), null = none. */
@@ -53,9 +67,10 @@ export interface Env {
   /** The steps of the executor's copy fee ladder (its /info), tenths of a bp. */
   builderLadder: number[];
   /**
-   * The fee its orders carry, where it is known here: a local executor reads no follower volume, so
-   * the ladder's first step. null: the step of a volume only the executor knows (ValueDesk's own) -
-   * any step of the ladder is accepted, the same on every order, and noted.
+   * The fee its orders carry, where it is known here: a local executor reads the follower's volume
+   * from the runner's stub, $0 unless a fee scenario sets another, so the ladder's first step. null:
+   * the step of a volume only the executor knows (ValueDesk's own) - any step of the ladder is
+   * accepted, the same on every order, and noted.
    */
   orderFee: number | null;
   main: MarketInfo;
@@ -365,8 +380,7 @@ export class T {
    * the known one (Env.orderFee), or - where only the executor knows the follower's volume - one step
    * of its ladder, the same on every order, which is noted and used by the fill checks after it.
    */
-  checkOrderFees(orders: OrderInfo[]): number {
-    const want = this.env.orderFee;
+  checkOrderFees(orders: OrderInfo[], want: number | null = this.env.orderFee): number {
     if (want !== null) {
       this.check(orders.every((o) => o.builderFee === want), `each order names the builder fee ${want} (${want / 10} bp)`, orders.map((o) => o.builderFee));
       return want;
@@ -433,46 +447,90 @@ export class T {
 
   /* ----------------------------------------------------------- the leader ----- */
 
-  /** The leader trades `usd` (or closes): real IOCs on the leader wallet. Dry: there is no leader to trade with. */
+  /** The leader's trades of this scenario (what its fills carry, and when this machine sent them), for the clocks. */
+  readonly leaderTrades: LeaderTrade[] = [];
+
+  /** The leader's market of a SoDEX market: the same on SoDEX, the coin on Hyperliquid ('BTC-USD' -> 'BTC'). */
+  leaderSymbol(sodexSymbol = this.main.name): string {
+    return this.env.leader?.symbolFor(sodexSymbol) ?? (this.env.leaderVenue === 'hyperliquid' ? hlCoinOf(sodexSymbol) : sodexSymbol);
+  }
+
+  /** The leader trades `usd` (or closes) on its market of a SoDEX market: real IOCs on the leader wallet. Dry: there is no leader to trade with. */
   async leader(action: { buyUsd?: number; sellUsd?: number; close?: boolean }, symbol = this.main.name): Promise<void> {
+    return this.leaderTrade(action, this.leaderSymbol(symbol));
+  }
+
+  /** The same, on a market in the leader venue's own names (a Hyperliquid coin SoDEX may not list). */
+  async leaderTrade(action: { buyUsd?: number; sellUsd?: number; close?: boolean }, leaderSymbol: string): Promise<void> {
     this.alive();
     const what = action.close ? 'closes' : action.buyUsd ? `buys $${action.buyUsd}` : `sells $${action.sellUsd}`;
     if (this.dry || !this.env.leader) {
       this.checks.liveOnly += 1;
-      this.env.log(`    -- live only: the leader ${what} ${symbol}`);
+      this.env.log(`    -- live only: the leader ${what} ${leaderSymbol}`);
       return;
     }
     const L = this.env.leader;
-    const before = await L.position(symbol);
+    const before = await L.position(leaderSymbol);
     if (action.close) {
-      if (before) await L.close(symbol, before);
-    } else if (action.buyUsd) await L.iocUsd(symbol, 'buy', action.buyUsd, { tag: 'leader' });
-    else if (action.sellUsd) await L.iocUsd(symbol, 'sell', action.sellUsd, { tag: 'leader' });
-    const after = await this.waitFor(`the leader's trade (${what}) shows on SoDEX`, async () => {
-      const p = await L.position(symbol);
+      if (before) await L.close(leaderSymbol, before);
+    } else if (action.buyUsd) this.leaderTrades.push(await L.buyUsd(leaderSymbol, action.buyUsd));
+    else if (action.sellUsd) this.leaderTrades.push(await L.sellUsd(leaderSymbol, action.sellUsd));
+    const after = await this.waitFor(`the leader's trade (${what}) shows on ${L.where}`, async () => {
+      const p = await L.position(leaderSymbol);
       return p !== before || (action.close && p === 0) ? { p } : null;
     }, { timeoutMs: 20_000, everyMs: 750 });
-    this.note(`leader ${what}: position ${before} -> ${after.p}`);
+    this.note(`leader ${what} ${leaderSymbol}: position ${before} -> ${after.p}`);
   }
 
-  /** The leader's own fills since the scenario began (SoDEX's record, its timestamps). */
+  /**
+   * The leader works an order in `n` slices of `usd`, sent back to back (each waits only for
+   * its own answer), as a TWAP or a person clicking would: the copier sees them close together.
+   */
+  async leaderSlices(side: 'buy' | 'sell', usd: number, n: number, symbol = this.main.name): Promise<void> {
+    this.alive();
+    const ls = this.leaderSymbol(symbol);
+    if (this.dry || !this.env.leader) {
+      this.checks.liveOnly += 1;
+      this.env.log(`    -- live only: the leader ${side === 'buy' ? 'buys' : 'sells'} ${n} slices of $${usd} ${ls}`);
+      return;
+    }
+    const L = this.env.leader;
+    const before = await L.position(ls);
+    for (let i = 0; i < n; i++) {
+      this.alive();
+      this.leaderTrades.push(side === 'buy' ? await L.buyUsd(ls, usd) : await L.sellUsd(ls, usd));
+    }
+    const after = await this.waitFor(`the leader's ${n} slices show on ${L.where}`, async () => {
+      const p = await L.position(ls);
+      return p !== before ? { p } : null;
+    }, { timeoutMs: 20_000, everyMs: 750 });
+    this.note(`leader ${side === 'buy' ? 'bought' : 'sold'} ${n} x $${usd} ${ls}: position ${before} -> ${after.p}`);
+  }
+
+  /** The leader's own fills of a SoDEX market's counterpart since the scenario began (its venue's record and clock). */
   async leaderFills(symbol = this.main.name): Promise<FillInfo[]> {
     if (!this.env.leader) return [];
-    return this.env.reads.fills(this.env.leaderAddress, symbol, this.startedAt);
+    return this.env.leader.fills(this.leaderSymbol(symbol), this.startedAt);
   }
 
+  /** The leader's position on a SoDEX market's counterpart, signed USD at its venue's price. */
   async leaderUsd(symbol = this.main.name): Promise<number> {
+    return this.leaderUsdOf(this.leaderSymbol(symbol));
+  }
+
+  /** The same, on a market in the leader venue's own names. */
+  async leaderUsdOf(leaderSymbol: string): Promise<number> {
     if (!this.env.leader) return 0;
-    const [p, q] = await Promise.all([this.env.leader.position(symbol), this.quote(symbol)]);
-    return p * q.mark;
+    const [p, mark] = await Promise.all([this.env.leader.position(leaderSymbol), this.env.leader.mark(leaderSymbol)]);
+    return p * mark;
   }
 
   /* ----------------------------------------------------------- copies ----- */
 
-  /** Copy rules for the leader wallet: paper exactly when the run is dry. */
+  /** Copy rules for the leader wallet, on its venue: paper exactly when the run is dry. */
   settings(x: Record<string, unknown>): Record<string, unknown> {
     return {
-      leader: { venue: 'sodex', address: this.env.leaderAddress },
+      leader: { venue: this.env.leaderVenue, address: this.env.leaderAddress },
       assetAllow: [this.main.base],
       stopLossPct: null,
       takeProfitPct: null,

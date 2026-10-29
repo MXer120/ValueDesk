@@ -16,6 +16,15 @@
  * needs what a target cannot do (a hard restart of ValueDesk's executor) is
  * skipped there, with why. Each target keeps its own state file.
  *
+ * THE LEADER (leader.ts) trades on SoDEX (default) or on Hyperliquid
+ * (LIVE_LEADER_VENUE=hyperliquid, its key LIVE_HL_LEADER_KEY): the copy
+ * scenarios follow it there; the few written for a Hyperliquid leader are
+ * skipped with a SoDEX one, with why.
+ *
+ * THE FEE STUB (feeStub.ts, self target only): the executor started here reads
+ * the follower's 14-day volume from the runner, $0 (the copy fee ladder's
+ * first step) unless a fee scenario sets another; the cleanup sets it back.
+ *
  * ORDER OF A RUN. Read SoDEX's market rules and book and pick the cheapest of
  * BTC-USD and ETH-USD; print the budget. (Live:) check the env file, the
  * region (the declared country, and the one the target sees), that no other
@@ -38,16 +47,20 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { secp256k1 } from '@noble/curves/secp256k1';
 import { bytesToHex, hexToBytes, keccak256, utf8 } from '../../../../packages/sodex-core/src/index.ts';
-import { COPY_FEE_MAX, COPY_TERMS_VERSION, canonicalJSON, copyFeeFor, regionPolicy, type MarketInfo } from '../../../../packages/copy-engine/src/index.ts';
-import { computeBudget, formatBudget, pickMarket } from './budget.ts';
+import { COPY_FEE_MAX, COPY_TERMS_VERSION, MarketBook, canonicalJSON, copyFeeFor, regionPolicy, type MarketInfo } from '../../../../packages/copy-engine/src/index.ts';
+import { computeBudget, formatBudget, halfSpreadFrac, pickMarket, type LeaderCosts } from './budget.ts';
 import { CATALOGUE, countByKind } from './catalogue.ts';
 import { flatten, startDecision, type FlattenVenue } from './cleanup.ts';
 import { egress } from '../../src/net.ts';
 import { SodexReads, SodexWallet } from './exchange.ts';
 import { CopyWallet, ExecutorProcess } from './executor.ts';
+import { VolumeStub } from './feeStub.ts';
 import { CheckFailed, Inconclusive, T, Unavailable, type Env } from './harness.ts';
 import { CodeHashes } from './hash.ts';
-import type { Scenario } from './scenario.ts';
+import { HL_MIN_ORDER_USD, HL_TAKER_FEE, HyperliquidExchange, HyperliquidInfo, hlCoinOf } from './hyperliquid.ts';
+import { HyperliquidLeader, SodexLeader, leaderKeyName, leaderVenueOf, type LeaderVenue, type LeaderVenueName } from './leader.ts';
+import { leaderSkip, type Scenario } from './scenario.ts';
+import { K_COIN } from './scenarios/copy.ts';
 import { decide, exposedOn, loadState, markDone, markRunning, noteRun, saveState, selected, stateFileOf, type Mode, type RunState } from './state.ts';
 import { BrowserTarget, CAPABILITIES, HostedTarget, SelfTarget, TARGETS, cannotRun, targetName, type ExecutorTarget, type TargetName } from './target.ts';
 
@@ -81,6 +94,9 @@ const HELP = `live-test: algo orders and copy trading with real money on SoDEX m
   --adopt         at start, flatten positions/orders on the test markets this runner never recorded sending
   --env <file>    the env file with the keys (default: .env.live in this folder)
   --keep-data     keep the executor's data folder at the end (it holds the executor's sealed key)
+
+  The leader trades on SoDEX unless LIVE_LEADER_VENUE=hyperliquid (env file or environment):
+  then on Hyperliquid, with LIVE_HL_LEADER_KEY.
 `;
 
 function parseArgs(argv: string[]): Args {
@@ -171,8 +187,11 @@ async function stopStale(state: RunState): Promise<void> {
   state.executor = null;
 }
 
-/** The target's executor, its client signed by the follower's wallet. Self: a new data folder every run (nothing of a crashed run is resumed by it). */
-function makeTarget(name: TargetName, o: { mode: Mode; owner: string; wallet: CopyWallet; stamp: string }): ExecutorTarget {
+/**
+ * The target's executor, its client signed by the follower's wallet. Self: a new data folder every
+ * run (nothing of a crashed run is resumed by it), the follower's volume read from the runner's stub.
+ */
+function makeTarget(name: TargetName, o: { mode: Mode; owner: string; wallet: CopyWallet; stamp: string; feeStub: VolumeStub | null }): ExecutorTarget {
   if (name === 'hosted') return new HostedTarget(o.wallet, o.mode);
   if (name === 'browser') return new BrowserTarget(o.mode);
   const proc = new ExecutorProcess({
@@ -181,8 +200,17 @@ function makeTarget(name: TargetName, o: { mode: Mode; owner: string; wallet: Co
     dataDir: join(STATE_DIR, `executor-${o.mode}-${o.stamp}`),
     logFile: join(STATE_DIR, `executor-${o.mode}-${o.stamp}.log`),
     executorId: `vd-livetest-${o.mode}`,
+    builderVolume: o.feeStub ? { url: o.feeStub.url, token: o.feeStub.token } : null,
   });
   return new SelfTarget(proc, o.wallet, o.mode);
+}
+
+/** What the leader pays on its venue, for the budget: Hyperliquid's taker fee and its book now (SoDEX: the main market's, the default). */
+async function leaderCostsOf(venue: LeaderVenueName, main: MarketInfo, hl: HyperliquidInfo | null): Promise<LeaderCosts | undefined> {
+  if (venue !== 'hyperliquid' || !hl) return undefined;
+  const coin = hlCoinOf(main.name);
+  const book = await hl.book(coin).catch(() => null);
+  return { venue, market: coin, takerFee: HL_TAKER_FEE, halfSpread: book ? halfSpreadFrac(book) : null, minOrderUsd: HL_MIN_ORDER_USD };
 }
 
 async function main(): Promise<number> {
@@ -207,26 +235,38 @@ async function main(): Promise<number> {
   const env = { ...readEnvFile(args.envFile), ...Object.fromEntries(Object.entries(process.env).filter(([k]) => k.startsWith('LIVE_')) as Array<[string, string]>) };
   // An empty LIVE_COUNTRY= (the env file's template) is none: a dry run then declares SG.
   const country = (env.LIVE_COUNTRY?.trim() || (args.dry ? 'SG' : '')).toUpperCase();
+  // Where the leader trades, and its key there (LIVE_LEADER_KEY on SoDEX, LIVE_HL_LEADER_KEY on Hyperliquid).
+  const leaderVenue = leaderVenueOf(env.LIVE_LEADER_VENUE);
+  const leaderKey = env[leaderKeyName(leaderVenue)]?.trim() || '';
+  const hl = leaderVenue === 'hyperliquid' ? new HyperliquidInfo(egress(null).fetch) : null;
   // --budget costs the whole suite, leader included; a live run without a leader key skips the copy scenarios.
-  const hasLeader = args.dry || args.budget || !!env.LIVE_LEADER_KEY;
+  const hasLeader = args.dry || args.budget || !!leaderKey;
+  // With a Hyperliquid leader, copy.hl-k-prefix copies kPEPE into SoDEX's thousand-unit market (where SoDEX lists one): the cleanup flattens the follower there too.
+  const book = new MarketBook();
+  book.load(all);
+  const kMarket = leaderVenue === 'hyperliquid' ? book.sodexMarketFor('hyperliquid', K_COIN) : null;
+  const testMarkets = [...new Set([main.name, second.name, ...(kMarket ? [kMarket.name] : [])])];
 
   const list = CATALOGUE.filter((s) => (args.slow || !s.slow) && (s.always || selected(args.only, s)));
-  // What the target cannot do (a hard restart of ValueDesk's executor) is skipped there: not costed.
+  // What the target cannot do (a hard restart of ValueDesk's executor), and what another leader venue is for, are skipped: not costed.
   const lacking = list.filter((s) => cannotRun(s, args.target, caps));
-  const budget = computeBudget(list.filter((s) => (!s.leader || hasLeader) && !lacking.includes(s)), {
+  const otherVenue = list.filter((s) => leaderSkip(s, leaderVenue));
+  const budget = computeBudget(list.filter((s) => (!s.leader || hasLeader) && !lacking.includes(s) && !otherVenue.includes(s)), {
     main,
     book: pick.book,
     U,
     builderRate: COPY_FEE_MAX / 100_000,
-    builderWhy: caps.localFeeStub ? undefined : 'the copy ladder\'s top step, the most it charges: ValueDesk\'s executor charges the step of the follower\'s 14-day volume',
+    builderWhy: caps.localFeeStub ? 'the copy ladder\'s top step: the runner\'s stub answers $0 of volume, and the fee scenarios, which walk the ladder, are costed at the top step too' : 'the copy ladder\'s top step, the most it charges: ValueDesk\'s executor charges the step of the follower\'s 14-day volume',
     leverage: 2,
+    leader: await leaderCostsOf(leaderVenue, main, hl),
   });
   log('');
   log(formatBudget(budget));
   log('');
   for (const c of countByKind(list)) log(`  ${c.section.padEnd(6)} ${c.kind.padEnd(12)} ${c.n}`);
-  log(`  ${list.length} scenarios selected${args.slow ? '' : ' (slow ones left out; --slow adds them)'}, target ${args.target}`);
+  log(`  ${list.length} scenarios selected${args.slow ? '' : ' (slow ones left out; --slow adds them)'}, target ${args.target}, leader on ${leaderVenue === 'hyperliquid' ? 'Hyperliquid' : 'SoDEX'}`);
   for (const s of lacking) log(`  - ${s.id} is skipped on this target: ${cannotRun(s, args.target, caps)}`);
+  for (const s of otherVenue) log(`  - ${s.id} is skipped with this leader: ${leaderSkip(s, leaderVenue)}`);
   if (args.budget) return 0;
 
   if (caps.paperOnly && !args.dry) throw new Error(`The ${args.target} target runs paper only for now: use --dry.`);
@@ -234,17 +274,21 @@ async function main(): Promise<number> {
     throw new Error(`The runner signs the copy terms ${COPY_TERMS_VERSION} in your name. Read them (ValueDesk -> Copy -> terms, or apps/web/src/legal/copyTerms.ts) and set LIVE_ACCEPT_TERMS=${COPY_TERMS_VERSION} in ${args.envFile}.`);
   }
 
-  // Wallets: live, the owner's two; dry, throwaway keys that never touch SoDEX.
+  // Wallets: live, the owner's two; dry, throwaway keys that never touch SoDEX or Hyperliquid.
   const fpk = args.dry ? secp256k1.utils.randomPrivateKey() : privateKey(env.LIVE_FOLLOWER_KEY, 'LIVE_FOLLOWER_KEY');
-  const lpk = args.dry ? secp256k1.utils.randomPrivateKey() : env.LIVE_LEADER_KEY ? privateKey(env.LIVE_LEADER_KEY, 'LIVE_LEADER_KEY') : null;
+  const lpk = args.dry ? secp256k1.utils.randomPrivateKey() : leaderKey ? privateKey(leaderKey, leaderKeyName(leaderVenue)) : null;
   const followerW = args.dry ? null : new SodexWallet('follower', fpk, reads);
-  const leaderW = args.dry || !lpk ? null : new SodexWallet('leader', lpk, reads);
+  const leader: LeaderVenue | null =
+    args.dry || !lpk ? null : leaderVenue === 'hyperliquid' ? new HyperliquidLeader(new HyperliquidExchange(lpk, hl!, egress(null).fetch), log) : new SodexLeader(new SodexWallet('leader', lpk, reads));
   const followerAddress = followerW?.address ?? new CopyWallet(fpk).address;
-  const leaderAddress = leaderW?.address ?? (lpk ? new CopyWallet(lpk).address : '0x0000000000000000000000000000000000000001');
-  if (leaderW && leaderW.address === followerAddress) throw new Error('LIVE_LEADER_KEY and LIVE_FOLLOWER_KEY are the same wallet: the leader must be a second wallet');
+  const leaderAddress = leader?.address ?? (lpk ? new CopyWallet(lpk).address : '0x0000000000000000000000000000000000000001');
+  if (leader && leader.address === followerAddress) throw new Error(`${leaderKeyName(leaderVenue)} and LIVE_FOLLOWER_KEY are the same wallet: the leader must be a second wallet`);
 
+  // Self: the executor reads the follower's volume (its copy fee step) from the runner's own stub.
+  const feeStub = caps.localFeeStub ? new VolumeStub(followerAddress) : null;
+  await feeStub?.start();
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const target = makeTarget(args.target, { mode, owner: followerAddress, wallet: new CopyWallet(fpk), stamp });
+  const target = makeTarget(args.target, { mode, owner: followerAddress, wallet: new CopyWallet(fpk), stamp, feeStub });
   started = target;
 
   // The region rule is the stricter of the declared country and the one the target sees the requests come from (ValueDesk's: its edge's).
@@ -268,24 +312,30 @@ async function main(): Promise<number> {
   state.follower = followerAddress;
   await stopStale(state);
   saveState(stateFile, state);
-  log(`follower ${followerAddress}${leaderW || args.dry ? `, leader ${leaderAddress}` : ' (no leader key: copy scenarios are skipped)'}, country ${country}${observed && observed !== country ? ` (seen from ${observed})` : ''} (${policy.region}${policy.maxLeverage ? `, ${policy.maxLeverage}x cap` : ''}), mode ${mode}, target ${target.name}`);
+  log(`follower ${followerAddress}${leader || args.dry ? `, leader ${leaderAddress} on ${leaderVenue === 'hyperliquid' ? 'Hyperliquid' : 'SoDEX'}` : ` (no ${leaderKeyName(leaderVenue)}: copy scenarios are skipped)`}, country ${country}${observed && observed !== country ? ` (seen from ${observed})` : ''} (${policy.region}${policy.maxLeverage ? `, ${policy.maxLeverage}x cap` : ''}), mode ${mode}, target ${target.name}`);
 
   const venues: FlattenVenue[] = [];
+  const holds = (name: string, where: string, account: string, equity: number, need: number, deposit: number) => {
+    log(`${name} on ${where}: ${account}, equity $${equity.toFixed(2)} (the suite needs about $${need.toFixed(2)}; at least $${deposit.toFixed(0)} recommended)`);
+    if (equity < need) throw new Error(`${name} holds $${equity.toFixed(2)} on ${where}; the suite needs about $${need.toFixed(2)}. Deposit more (see --budget).`);
+  };
   if (followerW) {
-    for (const w of [followerW, leaderW].filter((x): x is SodexWallet => x !== null)) {
-      if (!(await w.load())) throw new Error(`${w.name} ${w.address} has no SoDEX account: deposit USDC on SoDEX first`);
-      const { equity } = await reads.equity(w.address);
-      const need = w === followerW ? budget.total.peakMarginUsd + budget.total.spentUsd : budget.total.leaderPeakMarginUsd + budget.total.leaderUsd;
-      log(`${w.name}: account ${w.accountId}, equity $${equity.toFixed(2)} (the suite needs about $${need.toFixed(2)}; at least $${(w === followerW ? budget.total.depositFollowerUsd : budget.total.depositLeaderUsd).toFixed(0)} recommended)`);
-      if (equity < need) throw new Error(`${w.name} holds $${equity.toFixed(2)}; the suite needs about $${need.toFixed(2)}. Deposit more (see --budget).`);
-      // The harness's own key on the wallet, for the leader's trades and the cleanup (one day; re-made every run).
-      await w.ownKey(w === followerW ? 'vd-livetest-ops' : 'vd-livetest-leader');
-      venues.push(w);
+    if (!(await followerW.load())) throw new Error(`follower ${followerW.address} has no SoDEX account: deposit USDC on SoDEX first`);
+    holds('follower', 'SoDEX', `account ${followerW.accountId}`, (await reads.equity(followerW.address)).equity, budget.total.peakMarginUsd + budget.total.spentUsd, budget.total.depositFollowerUsd);
+    // The harness's own key on the wallet, for the cleanup (one day; re-made every run).
+    await followerW.ownKey('vd-livetest-ops');
+    venues.push(followerW);
+    if (leader) {
+      const pf = await leader.preflight();
+      holds('leader', leader.where, pf.account, pf.equity, budget.total.leaderPeakMarginUsd + budget.total.leaderUsd, budget.total.depositLeaderUsd);
+      // SoDEX: the harness's own key on it, for its trades and the cleanup. Hyperliquid: its master key signs.
+      await leader.prepare();
+      venues.push(leader);
     }
     // START-UP CLEANUP.
     let orders = 0;
     let positions = 0;
-    for (const v of venues) for (const s of [main.name, second.name]) {
+    for (const v of venues) for (const s of v.markets ? await v.markets(testMarkets) : testMarkets) {
       orders += (await v.openOrders(s)).length;
       positions += (await v.position(s)) !== 0 ? 1 : 0;
     }
@@ -295,7 +345,7 @@ async function main(): Promise<number> {
     }
     if (d === 'flatten') {
       log(`start-up cleanup: ${state.exposure ? `exposure recorded since ${new Date(state.exposure.since).toISOString()} (${state.exposure.by})` : '--adopt'}: flattening`);
-      const r = await flatten(venues, [main.name, second.name]);
+      const r = await flatten(venues, testMarkets);
       for (const l of r.lines) log(`  ${l}`);
       if (!r.ok) throw new Error(`the start-up cleanup could not flatten: ${JSON.stringify(r.left)}. Close these on sodex.com, then run again.`);
       state.exposure = null;
@@ -312,14 +362,18 @@ async function main(): Promise<number> {
   if (!info.open) log('! it takes no new followers right now: what needs a new copy is inconclusive');
   if (info.brake) log(`! the operator's brake is on (${[info.brake.copies ? 'copies' : '', info.brake.algos ? 'algos' : ''].filter(Boolean).join(', ')}): ${info.brake.reason}. What it holds is inconclusive.`);
   const ladder = (info.builder?.ladder ?? []).map((s) => s.fee);
+  if (feeStub) feeStub.builder = info.builder?.id ?? null;
 
   const henv: Env = {
     mode,
     reads,
     follower: followerW,
-    leader: leaderW,
+    leader,
     followerAddress,
     leaderAddress,
+    leaderVenue,
+    hl,
+    feeStub,
     target,
     regionMaxLeverage: policy.maxLeverage,
     country,
@@ -327,7 +381,7 @@ async function main(): Promise<number> {
     builderId: info.builder?.id ?? 0,
     builderFee: ladder.length ? Math.max(...ladder) : COPY_FEE_MAX,
     builderLadder: ladder,
-    // A local executor reads no follower volume: its orders carry the ladder's first step. ValueDesk's reads it from its own ledger.
+    // A local executor reads the runner's stub ($0 but in the fee scenarios): its orders carry the ladder's first step. ValueDesk's reads its own ledger.
     orderFee: caps.localFeeStub && info.builder ? copyFeeFor(null, info.builder.ladder) : null,
     main,
     second,
@@ -349,7 +403,7 @@ async function main(): Promise<number> {
     abandon?.(new Error('stopped by Ctrl+C'));
   });
 
-  const hashes = new CodeHashes(REPO, { name: target.name, release: target.release(info) });
+  const hashes = new CodeHashes(REPO, { name: target.name, release: target.release(info), leader: leaderVenue });
   const tally = { passed: 0, failed: 0, skipped: 0, inconclusive: 0, ran: 0 };
   let stopRun: string | null = null;
 
@@ -359,10 +413,16 @@ async function main(): Promise<number> {
       log('  the executor is not running: starting it again for the cleanup');
       await target.start().catch((e) => log(`  ! could not start it: ${String(e)}`));
     } else if (!up.ok) log(`  ! ${target.where} does not answer (${up.why ?? ''}): its kill switch is tried anyway`);
+    // A fee scenario leaves the stub on another step, and the executor holds that answer 10 minutes: back to $0, and a restart forgets it.
+    if (feeStub?.reset() && target.capabilities.restart) {
+      log('  the volume stub answers $0 again: restarting the executor so it forgets the last answer');
+      await target.kill();
+      await target.start().catch((e) => log(`  ! could not start it: ${String(e)}`));
+    }
     await target.stopEverything();
     if (!venues.length) return true;
     await new Promise((r) => setTimeout(r, 2_000));
-    const r = await flatten(venues, [main.name, second.name]);
+    const r = await flatten(venues, testMarkets);
     for (const l of r.lines) log(`    cleanup: ${l}`);
     if (!r.ok) log(`  ! CLEANUP COULD NOT FLATTEN: ${JSON.stringify(r.left)}`);
     return r.ok;
@@ -376,8 +436,15 @@ async function main(): Promise<number> {
       log(`- ${s.id}: skip (${d.why})`);
       continue;
     }
+    const otherLeader = leaderSkip(s, leaderVenue);
+    if (otherLeader) {
+      markDone(state, s.id, 'skipped', { error: otherLeader });
+      tally.skipped += 1;
+      log(`- ${s.id}: skipped (${otherLeader})`);
+      continue;
+    }
     if (s.leader && !hasLeader) {
-      markDone(state, s.id, 'skipped', { error: 'no LIVE_LEADER_KEY in the env file' });
+      markDone(state, s.id, 'skipped', { error: `no ${leaderKeyName(leaderVenue)} in the env file` });
       tally.skipped += 1;
       log(`- ${s.id}: skipped (no leader key)`);
       continue;
@@ -423,7 +490,7 @@ async function main(): Promise<number> {
     if (mode === 'live') {
       try {
         feesUsd = 0;
-        for (const sym of new Set([main.name, second.name])) for (const f of await reads.fills(followerAddress, sym, t.startedAt)) feesUsd += f.fee;
+        for (const sym of testMarkets) for (const f of await reads.fills(followerAddress, sym, t.startedAt)) feesUsd += f.fee;
       } catch {
         feesUsd = null;
       }
@@ -444,6 +511,7 @@ async function main(): Promise<number> {
   // The end: nothing left running, nothing left on SoDEX, the executor stopped.
   await cleanup().catch(() => false);
   await target.stop();
+  await feeStub?.stop();
   state.executor = null;
   if (target.dataDir && !args.keepData) {
     try {

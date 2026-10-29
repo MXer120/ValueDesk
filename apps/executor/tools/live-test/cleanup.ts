@@ -7,9 +7,10 @@
  * being cleared. Then, straight on SoDEX with the harness's own key, on each
  * test market: every open order is cancelled (resting children, the exits and
  * copy stops SoDEX holds), the position is closed with a reduce-only IOC, and
- * the account is read again. That repeats until a read finds nothing - or the
- * attempts run out, and the cleanup says so loudly: the exposure flag stays
- * set and the runner stops.
+ * the account is read again. A Hyperliquid leader the same way on Hyperliquid,
+ * with its own key, on every coin it holds. That repeats until a read finds
+ * nothing - or the attempts run out, and the cleanup says so loudly: the
+ * exposure flag stays set and the runner stops.
  *
  * It is written against a small interface (FlattenVenue) so its rules are
  * tested without SoDEX (test/live-test-runner.test.ts).
@@ -26,6 +27,14 @@ export interface VenueOrder {
 export interface FlattenVenue {
   /** Which account (for the log): 'follower' / 'leader'. */
   readonly name: string;
+  /**
+   * The markets to flatten on this account, in its own names, given the run's
+   * test markets (SoDEX names). Absent: the test markets as they are. A
+   * Hyperliquid leader names its coins, and every coin it holds or has an
+   * order on (leader.ts). A read that fails throws: the round counts it as
+   * not flat and tries again.
+   */
+  markets?(symbols: readonly string[]): Promise<readonly string[]>;
   openOrders(symbol: string): Promise<VenueOrder[]>;
   /** Signed base size; 0 when flat. A read that fails throws (unknown is never flat). */
   position(symbol: string): Promise<number>;
@@ -71,7 +80,16 @@ export async function flatten(venues: readonly FlattenVenue[], symbols: readonly
     left = [];
     let acted = false;
     for (const v of venues) {
-      for (const sym of symbols) {
+      let own: readonly string[] = symbols;
+      try {
+        if (v.markets) own = await v.markets(symbols);
+      } catch (e) {
+        // Which markets it holds is unknown: not flat. Read again next round.
+        lines.push(`round ${round}: ${v.name}: its markets could not be read (${short(e)})`);
+        left.push({ venue: v.name, symbol: '(its markets)', position: NaN, orders: NaN });
+        continue;
+      }
+      for (const sym of own) {
         let orders: VenueOrder[] | null = null;
         let pos: number | null = null;
         try {

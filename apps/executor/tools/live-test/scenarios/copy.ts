@@ -2,7 +2,8 @@
  * Copy trading on a real exchange: a LEADER wallet the owner controls, traded
  * by the harness itself (real IOCs with its own key), and the follower's copy
  * on the executor. What only SoDEX shows: the leader's fill reaching the copier
- * over SoDEX's public trade stream, the copy's own fills and fees, reduce-only
+ * over SoDEX's public trade stream (Hyperliquid's userFills stream for a
+ * Hyperliquid leader), the copy's own fills and fees, reduce-only
  * reductions (also below the minimum order value), the copy's stop-loss and
  * take-profit held by SoDEX as position stops, the leverage set, and a copier
  * that was down catching up without doubling an order.
@@ -10,16 +11,32 @@
  * A dry run cannot trade the leader (it has no funds): it runs each copy's
  * lifecycle on paper - start, pause, resume, change, restart, stop - and
  * counts the follower's expected positions as "live only".
+ *
+ * THE LEADER'S VENUE (LIVE_LEADER_VENUE, leader.ts). Every scenario here runs
+ * with a SoDEX leader or a Hyperliquid one: the leader's trades go to its own
+ * market of the SoDEX market ('BTC' for 'BTC-USD'), and the copy's settings
+ * name its venue. A few run only with a Hyperliquid leader (`leaderVenue`):
+ * what only a second venue shows - its coins mapped to SoDEX's markets by
+ * notional (a thousand-unit kPEPE to SoDEX's 1000PEPE / KPEPE market), a coin
+ * SoDEX does not list skipped, a leader working an order in slices.
  */
-import { SKIP_REASONS } from '../../../../../packages/copy-engine/src/index.ts';
-import { Inconclusive, type T } from '../harness.ts';
+import { MarketBook, RECONCILE_MS, SKIP_REASONS, coinOf } from '../../../../../packages/copy-engine/src/index.ts';
+import { Inconclusive, Unavailable, type T } from '../harness.ts';
 import type { Scenario } from '../scenario.ts';
 
 const SOURCE = 'apps/executor/tools/live-test/scenarios/copy.ts';
 const MIN = 60_000;
 
+/** The thousand-unit coin of copy.hl-k-prefix: the cleanup flattens the follower on its SoDEX market too (run.ts). */
+export const K_COIN = 'kPEPE';
+
 function copy(id: string, title: string, confirms: string, o: Partial<Scenario> & Pick<Scenario, 'cost' | 'run' | 'timeoutMs'>): Scenario {
-  return { id, section: 'copy', kind: 'copy', title, confirms, deps: ['copy'], source: SOURCE, dry: 'lifecycle', leader: true, ...o };
+  return { id, section: 'copy', kind: 'copy', title, confirms, deps: ['copy', 'leader'], source: SOURCE, dry: 'lifecycle', leader: true, ...o };
+}
+
+/** A scenario only a Hyperliquid leader can show. */
+function hlCopy(id: string, title: string, confirms: string, o: Partial<Scenario> & Pick<Scenario, 'cost' | 'run' | 'timeoutMs'>): Scenario {
+  return copy(id, title, confirms, { leaderVenue: 'hyperliquid', ...o });
 }
 
 /** The copier needs a moment to seed the leader from SoDEX before a trade counts. */
@@ -46,24 +63,83 @@ async function copyStops(t: T) {
 }
 
 /**
- * How long each copied order took: from the leader's fill to the follower's
- * copy of it, both by SoDEX's own timestamps (one clock). The copier sees the
- * leader on the public trade stream and merges prints for 150 ms; the rest is
- * the order's way to SoDEX. Each copy order is paired with the last leader
- * fill before it.
+ * How fast a copy must follow, leader fill to copy fill, by the venues' own
+ * timestamps.
+ *
+ * A SoDEX leader is on SoDEX's clock like the copy (one clock): the copier sees
+ * it on the public trade stream, merges prints for 150 ms, and the rest is the
+ * order's way to SoDEX - median under 1 s, slowest under 3 s.
+ *
+ * A Hyperliquid leader's fill is on Hyperliquid's clock and the copy's on
+ * SoDEX's, so every number also carries the offset between the two clocks
+ * (Hyperliquid's against this machine's is measured on the leader's own orders
+ * and logged; SoDEX's is not measured here), and the copier hears of the fill
+ * from Hyperliquid's userFills stream, whose delay this suite does not measure
+ * either. So twice the time, plus two seconds for the slowest: median under
+ * 2 s, slowest under 5 s - still far under the reconcile every RECONCILE_MS
+ * (60 s), so a copy that missed the stream and waited for the reconcile fails.
+ * In the pairing a copy may also look up to `pairSlackMs` past its own time for
+ * its leader fill (a Hyperliquid clock up to half a second ahead of SoDEX's).
+ */
+const LATENCY = {
+  sodex: { medianMs: 1_000, slowestMs: 3_000, pairSlackMs: 0 },
+  hyperliquid: { medianMs: 2_000, slowestMs: 5_000, pairSlackMs: 500 },
+} as const;
+
+/**
+ * How long each copied order took: each copy order (its first fill: one order
+ * can print as several) paired with the last leader fill before it.
  */
 async function copyLatencies(t: T): Promise<number[]> {
   const leader = (await t.leaderFills()).map((f) => f.time).sort((a, b) => a - b);
   const mine = (await t.account.fills(t.main.name)).filter((f) => f.clOrdID?.startsWith('vdc-'));
-  // One order can print as several fills: its first fill counts.
+  const slack = LATENCY[t.env.leaderVenue].pairSlackMs;
   const first = new Map<string, number>();
   for (const f of mine) first.set(f.orderId, Math.min(first.get(f.orderId) ?? Infinity, f.time));
   const out: number[] = [];
   for (const at of first.values()) {
-    const before = leader.filter((x) => x <= at);
+    const before = leader.filter((x) => x <= at + slack);
     if (before.length) out.push(at - before[before.length - 1]!);
   }
   return out.sort((a, b) => a - b);
+}
+
+/**
+ * The leader venue's clock against this machine's, from the leader's own
+ * orders of this scenario: each fill's time less the middle of the request
+ * that placed it, within half that request's round trip. The median, or null.
+ */
+async function leaderClockOffset(t: T): Promise<{ ms: number; within: number } | null> {
+  const fills = await t.leaderFills();
+  const seen: Array<{ ms: number; within: number }> = [];
+  for (const tr of t.leaderTrades) {
+    const f = fills.find((x) => x.orderId === tr.ref || x.clOrdID === tr.ref);
+    if (f) seen.push({ ms: f.time - (tr.sentAt + tr.answeredAt) / 2, within: (tr.answeredAt - tr.sentAt) / 2 });
+  }
+  if (!seen.length) return null;
+  seen.sort((a, b) => a.ms - b.ms);
+  return seen[Math.floor(seen.length / 2)]!;
+}
+
+/** Each copied order within the leader venue's limits (LATENCY); a Hyperliquid leader's clock offset logged with them. */
+async function checkLatencies(t: T, atLeast: number): Promise<void> {
+  const lim = LATENCY[t.env.leaderVenue];
+  const ms = await copyLatencies(t);
+  if (t.env.leaderVenue === 'hyperliquid') {
+    const off = await leaderClockOffset(t);
+    t.note(`leader fill (Hyperliquid's clock) to copy fill (SoDEX's clock): ${ms.map((x) => `${x} ms`).join(', ')}; Hyperliquid's clock against this machine's: ${off ? `${off.ms >= 0 ? '+' : ''}${Math.round(off.ms)} ms (+/- ${Math.round(off.within)} ms)` : 'not measured'}`);
+  } else t.note(`leader fill to copy fill: ${ms.map((x) => `${x} ms`).join(', ')}`);
+  t.check(ms.length >= atLeast, `${ms.length} copied orders timed`);
+  const median = ms[Math.floor(ms.length / 2)] ?? Infinity;
+  t.check(median < lim.medianMs, `median ${median} ms (under ${lim.medianMs / 1000} s)`);
+  t.check((ms[ms.length - 1] ?? Infinity) < lim.slowestMs, `slowest ${ms[ms.length - 1]} ms (under ${lim.slowestMs / 1000} s, the copier's reconcile is every ${RECONCILE_MS / 1000} s)`);
+}
+
+/** SoDEX's market list as the copier maps a leader's market to it. */
+async function sodexBook(t: T): Promise<MarketBook> {
+  const b = new MarketBook();
+  b.load(await t.env.reads.markets());
+  return b;
 }
 
 async function legs(t: T, id: string): Promise<string[]> {
@@ -99,14 +175,7 @@ export const COPY_SCENARIOS: Scenario[] = [
         const l = await legs(t, c.subscription.id);
         t.check(['open', 'increase', 'decrease', 'close'].every((x) => l.includes(x)), `legs: ${l.join(', ')}`);
       });
-      await t.live('each leader fill is copied in under a second', async () => {
-        const ms = await copyLatencies(t);
-        t.note(`leader fill to copy fill: ${ms.map((x) => `${x} ms`).join(', ')}`);
-        t.check(ms.length >= 4, `${ms.length} copied orders timed`);
-        const median = ms[Math.floor(ms.length / 2)] ?? Infinity;
-        t.check(median < 1_000, `median ${median} ms (under 1 s)`);
-        t.check((ms[ms.length - 1] ?? Infinity) < 3_000, `slowest ${ms[ms.length - 1]} ms (under 3 s)`);
-      });
+      await t.live(`each leader fill is copied in under ${LATENCY[t.env.leaderVenue].medianMs / 1000} s (median)`, () => checkLatencies(t, 4));
     },
   }),
   copy('copy.fixed-ratio-flip', 'Fixed ratio 1x: the leader flips from long to short', 'a flip is copied as a reduce-only close and a fresh open in one batch: the follower ends short, never doubled', {
@@ -127,11 +196,11 @@ export const COPY_SCENARIOS: Scenario[] = [
       await t.expectFollowerUsd(0, 'the follower closed with the leader');
     },
   }),
-  copy('copy.proportional', 'Proportional to the leader\'s equity', 'the leader\'s real account value on SoDEX sizes the copy', {
+  copy('copy.proportional', 'Proportional to the leader\'s equity', 'the leader\'s real account value on its venue sizes the copy', {
     timeoutMs: 5 * MIN,
     cost: (U) => ({ takerUsd: 2.4 * U, makerUsd: 0, peakUsd: 1.2 * U, leaderTakerUsd: 2 * U, leaderPeakUsd: U }),
     async run(t) {
-      const eq = t.env.leader ? (await t.env.reads.equity(t.env.leaderAddress)).equity : 100;
+      const eq = t.env.leader ? await t.env.leader.equity() : 100;
       if (!(eq > 0)) throw new Inconclusive('the leader\'s account value could not be read');
       const alloc = Math.max(10, Math.round(eq * 1.2 * 100) / 100);
       const c = await t.subscribe({ sizingMode: 'proportional', allocationUsd: alloc, maxLeverage: 2 });
@@ -334,7 +403,111 @@ export const COPY_SCENARIOS: Scenario[] = [
       await t.expectFollowerUsd(0, 'the follower closed with the leader');
     },
   }),
+
+  /* ---------------------------------------------- a Hyperliquid leader only ----- */
+  hlCopy('copy.hl-follow', 'A Hyperliquid leader opens, adds, reduces and closes (fixed ratio 1x)', 'each Hyperliquid fill of the leader\'s BTC is copied on SoDEX\'s BTC-USD at the same notional (sized by notional, not by units); reductions reduce-only', {
+    timeoutMs: 8 * MIN,
+    cost: (U) => ({ takerUsd: 4 * U, makerUsd: 0, peakUsd: 2 * U, leaderTakerUsd: 4 * U, leaderPeakUsd: 2 * U }),
+    async run(t) {
+      const c = await t.subscribe({ sizingMode: 'fixedRatio', ratio: 1, maxLeverage: 2 });
+      const id = c.subscription.id;
+      t.check(c.subscription.settings.leader.venue === 'hyperliquid', 'the executor follows the leader on Hyperliquid');
+      await ready(t, id);
+      await t.leader({ buyUsd: t.U });
+      await t.expectFollowerUsd(await t.leaderUsd(), 'the follower opened the leader\'s notional', { tol: 0.25 });
+      await t.leader({ buyUsd: t.U });
+      await t.expectFollowerUsd(await t.leaderUsd(), 'the follower added with the leader', { tol: 0.25 });
+      await t.leader({ sellUsd: t.U });
+      await t.expectFollowerUsd(await t.leaderUsd(), 'the follower reduced with the leader', { tol: 0.3 });
+      await t.leader({ close: true });
+      await t.expectFollowerUsd(0, 'the follower closed with the leader');
+      await t.live(`every copy order answers the leader's ${t.leaderSymbol()} and went to ${t.main.name}, the legs in order`, async () => {
+        const orders = (await t.exec.activity(id)).filter((e) => e.kind === 'order').reverse();
+        t.check(orders.length >= 4, `${orders.length} copy orders`);
+        t.check(orders.every((e) => e.symbol === t.main.name && e.leader?.symbol === t.leaderSymbol()), 'each names the leader\'s coin and the SoDEX market', orders.map((e) => `${e.leader?.symbol}->${e.symbol}`));
+        const l = orders.map((e) => e.reason);
+        t.check(['open', 'increase', 'decrease', 'close'].every((x) => l.includes(x)), `legs: ${l.join(', ')}`);
+      });
+      await t.live('SoDEX: the reductions were reduce-only, the opens and adds not', async () => {
+        const os = await copyOrders(t);
+        t.check(os.filter((o) => o.side === 'sell').every((o) => o.reduceOnly) && os.filter((o) => o.side === 'buy').every((o) => !o.reduceOnly), 'sells reduce-only, buys not', os.map((o) => `${o.side}${o.reduceOnly ? ' ro' : ''}`));
+      });
+    },
+  }),
+  hlCopy('copy.hl-slices', 'A Hyperliquid leader buys in three slices sent back to back', 'slices close together are copied batched or one by one, but each exactly once: the follower ends at the leader\'s notional, no copy order twice', {
+    timeoutMs: 7 * MIN,
+    cost: (U) => ({ takerUsd: 6 * U, makerUsd: 0, peakUsd: 3 * U, leaderTakerUsd: 6 * U, leaderPeakUsd: 3 * U }),
+    async run(t) {
+      const slices = 3;
+      const c = await t.subscribe({ sizingMode: 'fixedRatio', ratio: 1, maxLeverage: 2 });
+      await ready(t, c.subscription.id);
+      await t.leaderSlices('buy', t.U, slices);
+      // The stream's merge window (150 ms) and the reconcile catch what came in between: give it one reconcile.
+      await t.expectFollowerUsd(await t.leaderUsd(), `the follower caught up with all ${slices} slices`, { tol: 0.25, timeoutMs: RECONCILE_MS + 30_000 });
+      await t.live('each slice was copied once: one to three copy orders, none twice', async () => {
+        const buys = (await copyOrders(t)).filter((o) => o.side === 'buy');
+        const ids = buys.map((o) => o.clOrdID);
+        t.check(buys.length >= 1 && buys.length <= slices, `${buys.length} copy order(s) for ${slices} slices`);
+        t.check(new Set(ids).size === ids.length, 'all distinct');
+        t.note(`${slices} leader slices became ${buys.length} copy order(s)`);
+      });
+      await t.leader({ close: true });
+      await t.expectFollowerUsd(0, 'the follower closed with the leader');
+    },
+  }),
+  hlCopy('copy.hl-not-on-sodex', 'A Hyperliquid leader trades a coin SoDEX does not list', 'the copy skips it as not-on-sodex and sends nothing (the coin: the most traded one on Hyperliquid without a SoDEX market, at run time)', {
+    timeoutMs: 5 * MIN,
+    cost: (U) => ({ takerUsd: 0, makerUsd: 0, peakUsd: 0, leaderTakerUsd: 2 * U, leaderPeakUsd: U }),
+    async run(t) {
+      const coin = await notOnSodex(t);
+      if (!coin) throw new Unavailable('every coin Hyperliquid lists has a SoDEX market now');
+      t.note(`${coin}: listed on Hyperliquid, no SoDEX market`);
+      const c = await t.subscribe({ sizingMode: 'fixedNotional', fixedNotionalUsd: t.U, maxLeverage: 2, assetAllow: [coinOf('hyperliquid', coin)] });
+      const id = c.subscription.id;
+      await ready(t, id);
+      await t.leaderTrade({ buyUsd: t.U }, coin);
+      await t.live(`the copy skips ${coin} as not on SoDEX and places nothing`, async () => {
+        await t.waitFor('a not-on-sodex skip in the activity', async () => ((await t.exec.activity(id)).some((e) => e.kind === 'skip' && e.reason === 'not-on-sodex') ? true : null), { timeoutMs: 45_000 });
+        t.check(!(await t.exec.activity(id)).some((e) => e.kind === 'order' || e.kind === 'error'), 'no copy order, no error');
+      });
+      await t.leaderTrade({ close: true }, coin);
+    },
+  }),
+  hlCopy('copy.hl-k-prefix', 'A Hyperliquid leader trades kPEPE (a thousand PEPE a unit)', 'kPEPE is copied on SoDEX\'s 1000PEPE-USD or KPEPE-USD at the leader\'s notional, and closed with it (only where SoDEX lists one at run time)', {
+    timeoutMs: 6 * MIN,
+    cost: (U) => ({ takerUsd: 2 * U, makerUsd: 0, peakUsd: U, leaderTakerUsd: 2 * U, leaderPeakUsd: U }),
+    async run(t) {
+      const hl = t.env.hl;
+      if (!hl) throw new Unavailable('no Hyperliquid reads (the leader is not on Hyperliquid)');
+      const k = (await hl.assets()).find((a) => a.name === K_COIN);
+      if (!k || k.isDelisted) throw new Unavailable(`Hyperliquid lists no ${K_COIN} now`);
+      const m = (await sodexBook(t)).sodexMarketFor('hyperliquid', K_COIN);
+      if (!m) throw new Unavailable(`SoDEX lists neither 1000PEPE-USD nor KPEPE-USD now`);
+      t.note(`${K_COIN} maps to SoDEX's ${m.name}`);
+      const c = await t.subscribe({ sizingMode: 'fixedRatio', ratio: 1, maxLeverage: 2, assetAllow: [coinOf('hyperliquid', K_COIN)] });
+      await ready(t, c.subscription.id);
+      await t.leaderTrade({ buyUsd: t.U }, K_COIN);
+      await t.expectFollowerUsd(await t.leaderUsdOf(K_COIN), `the follower holds the leader's notional on ${m.name}`, { symbol: m.name, tol: 0.3 });
+      await t.leaderTrade({ close: true }, K_COIN);
+      await t.expectFollowerUsd(0, `the follower closed ${m.name} with the leader`, { symbol: m.name });
+    },
+  }),
 ];
 
+/**
+ * The most traded Hyperliquid coin (24 h notional) that SoDEX lists no market
+ * for, as the copier maps it; one step of its size worth at most a quarter of U,
+ * so the leader's order stays near U. Null: there is none now.
+ */
+async function notOnSodex(t: T): Promise<string | null> {
+  const hl = t.env.hl;
+  if (!hl) throw new Unavailable('no Hyperliquid reads (the leader is not on Hyperliquid)');
+  const book = await sodexBook(t);
+  const cands = (await hl.volumes())
+    .filter((a) => a.name && !a.isDelisted && a.markPx > 0 && 10 ** -a.szDecimals * a.markPx <= t.U / 4 && !book.sodexMarketFor('hyperliquid', a.name))
+    .sort((a, b) => b.dayNtlVlm - a.dayNtlVlm);
+  return cands[0]?.name ?? null;
+}
+
 /** Keep the import: SKIP_REASONS names what the activity checks look for. */
-export const COPY_SKIPS_CHECKED: ReadonlyArray<keyof typeof SKIP_REASONS> = ['max-leverage', 'after-take-profit', 'after-stop-loss'];
+export const COPY_SKIPS_CHECKED: ReadonlyArray<keyof typeof SKIP_REASONS> = ['max-leverage', 'after-take-profit', 'after-stop-loss', 'not-on-sodex'];

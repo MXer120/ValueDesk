@@ -4,8 +4,11 @@
  * repair of the state file, the cleanup that must leave the accounts flat
  * before anything else happens, the start-up decision, the budget, the
  * catalogue, and the targets (what each can do, what is skipped where, the
- * hosted pacing and refusals, one target at a time per wallet). None of it
- * touches SoDEX or ValueDesk's executor.
+ * hosted pacing and refusals, one target at a time per wallet), the leader's
+ * venue (what is skipped with which leader, what the leader trades, its hash,
+ * its cost), and the fee ladder's stub and scenarios. None of it touches SoDEX,
+ * Hyperliquid or ValueDesk's executor (the Hyperliquid client's own tests:
+ * live-test-hyperliquid.test.ts).
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -16,15 +19,22 @@ import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { secp256k1 } from '@noble/curves/secp256k1';
-import { ALGO_KINDS, COPY_FEE_LADDER, type MarketInfo } from '../../../packages/copy-engine/src/index.ts';
-import { computeBudget, pickMarket } from '../tools/live-test/budget.ts';
+import { ALGO_KINDS, COPY_FEE_LADDER, copyFeeFor, type AlgoView, type FetchLike, type MarketInfo, type WebSocketLike } from '../../../packages/copy-engine/src/index.ts';
+import { loadConfig } from '../src/config.ts';
+import { ExecutorDb } from '../src/db.ts';
+import { Secrets } from '../src/secrets.ts';
+import { ExecutorService } from '../src/service.ts';
+import { computeBudget, formatBudget, pickMarket } from '../tools/live-test/budget.ts';
 import { CATALOGUE } from '../tools/live-test/catalogue.ts';
 import { flatten, startDecision, type FlattenVenue, type VenueOrder } from '../tools/live-test/cleanup.ts';
 import type { FillInfo, OrderInfo } from '../tools/live-test/exchange.ts';
 import { CopyWallet, ExecutorError, assertPaper, type ExecutorProcess } from '../tools/live-test/executor.ts';
+import { DEFAULT_VOLUME, VOLUME_PATH, VolumeStub } from '../tools/live-test/feeStub.ts';
 import { CheckFailed, Inconclusive, T, Unavailable, type Env } from '../tools/live-test/harness.ts';
 import { CodeHashes, filesOf, hashFiles } from '../tools/live-test/hash.ts';
-import type { Scenario } from '../tools/live-test/scenario.ts';
+import { HL_MIN_ORDER_USD, HL_TAKER_FEE } from '../tools/live-test/hyperliquid.ts';
+import type { LeaderTrade, LeaderVenue } from '../tools/live-test/leader.ts';
+import { leaderSkip, type Scenario } from '../tools/live-test/scenario.ts';
 import { decide, emptyState, exposedOn, loadState, markDone, markRunning, noteRun, saveState, selected, stateFileOf } from '../tools/live-test/state.ts';
 import { BrowserTarget, CAPABILITIES, HostedTarget, Pacer, SelfTarget, TARGETS, cannotRun, hostedRefusal, targetName, type BrowserDriver, type ExecutorTarget } from '../tools/live-test/target.ts';
 
@@ -394,7 +404,8 @@ test('targets: --target takes self, hosted or browser; self can do everything, h
 
 test('targets: a scenario that restarts the executor declares it, and is skipped (with why) exactly where the target cannot', () => {
   const restarts = CATALOGUE.filter((s) => s.run.toString().includes('t.restart('));
-  assert.deepEqual(restarts.map((s) => s.id).sort(), ['copy.restart', 'iceberg.restart', 'scale.restart', 'twap.restart']);
+  const fees = CATALOGUE.filter((s) => s.section === 'fee').map((s) => s.id);
+  assert.deepEqual(restarts.map((s) => s.id).sort(), ['copy.restart', 'iceberg.restart', 'scale.restart', 'twap.restart', ...fees].sort(), 'the fee scenarios restart it so it forgets the volume it holds');
   for (const s of CATALOGUE) assert.equal(s.needs?.includes('restart') ?? false, restarts.includes(s), `${s.id} declares needs: ['restart'] exactly when it restarts`);
   for (const s of CATALOGUE) assert.equal(cannotRun(s, 'self'), null, `${s.id} runs on self`);
   for (const t of ['hosted', 'browser'] as const) {
@@ -637,4 +648,323 @@ test('hash per target: self\'s is what it was before targets; hosted adds the re
   assert.equal(new CodeHashes(d).all(), new CodeHashes(d, { name: 'self' }).all());
   assert.notEqual(new CodeHashes(d, { name: 'hosted', release: '1.1.0' }).all(), new CodeHashes(d).all());
   rmSync(d, { recursive: true, force: true });
+});
+
+/* ----------------------------------------------------------- the leader ----- */
+
+test('leader venue: every copy scenario runs with either leader; the Hyperliquid-only ones are skipped with a SoDEX leader, with why', () => {
+  const hlOnly = CATALOGUE.filter((s) => s.leaderVenue === 'hyperliquid').map((s) => s.id).sort();
+  assert.deepEqual(hlOnly, ['copy.hl-follow', 'copy.hl-k-prefix', 'copy.hl-not-on-sodex', 'copy.hl-slices']);
+  for (const s of CATALOGUE) {
+    assert.equal(leaderSkip(s, 'hyperliquid'), null, `${s.id} runs with a Hyperliquid leader`);
+    assert.equal(leaderSkip(s, 'sodex') !== null, hlOnly.includes(s.id), `${s.id} with a SoDEX leader`);
+  }
+  assert.match(leaderSkip({ leaderVenue: 'hyperliquid' }, 'sodex') ?? '', /it needs a leader on Hyperliquid \(LIVE_LEADER_VENUE=hyperliquid\)/);
+  for (const s of CATALOGUE.filter((x) => x.section === 'copy')) {
+    assert.ok(s.leader && s.deps.includes('leader'), `${s.id} needs the leader and hashes its driver`);
+    assert.ok((s.cost(12).leaderTakerUsd ?? 0) > 0, `${s.id} costs the leader's trades`);
+  }
+});
+
+/** A leader that records what it is asked to do; its positions in USD at a mark of 1. */
+class FakeLeader implements LeaderVenue {
+  readonly venue = 'hyperliquid' as const;
+  readonly name = 'leader';
+  readonly where = 'Hyperliquid';
+  readonly address = '0x' + 'ab'.repeat(20);
+  pos: Record<string, number> = {};
+  calls: string[] = [];
+  symbolFor(s: string) {
+    return s.replace(/-USD$/, '');
+  }
+  async preflight() {
+    return { account: 'Hyperliquid perps', equity: 50 };
+  }
+  async prepare() {}
+  async equity() {
+    return 50;
+  }
+  async mark() {
+    return 1;
+  }
+  private trade(sym: string, usd: number): LeaderTrade {
+    this.calls.push(`${usd > 0 ? 'buy' : 'sell'} ${sym} ${Math.abs(usd)}`);
+    this.pos[sym] = (this.pos[sym] ?? 0) + usd;
+    return { ref: String(this.calls.length), sentAt: 1, answeredAt: 2 };
+  }
+  async buyUsd(sym: string, usd: number) {
+    return this.trade(sym, usd);
+  }
+  async sellUsd(sym: string, usd: number) {
+    return this.trade(sym, -usd);
+  }
+  async fills() {
+    return [];
+  }
+  async openOrders() {
+    return [];
+  }
+  async position(s: string) {
+    return this.pos[s] ?? 0;
+  }
+  async cancel() {}
+  async close(s: string, size: number) {
+    this.calls.push(`close ${s} ${size}`);
+    this.pos[s] = 0;
+  }
+}
+
+test('leader: T trades the leader\'s own market of a SoDEX market (or one only its venue has), names its venue in the copy settings, keeps its trades for the clocks', async () => {
+  const L = new FakeLeader();
+  const env = { mode: 'live', leader: L, leaderVenue: 'hyperliquid', leaderAddress: L.address, main: MKT('BTC-USD'), second: MKT('ETH-USD'), timeScale: 0, log: () => undefined, target: { gone: () => null } } as unknown as Env;
+  const t = new T(env, 'x');
+  await t.leader({ buyUsd: 12 });
+  await t.leaderSlices('buy', 12, 3);
+  assert.equal(await t.leaderUsd(), 48);
+  await t.leader({ sellUsd: 12 });
+  await t.leaderTrade({ buyUsd: 12 }, 'kPEPE');
+  assert.equal(await t.leaderUsdOf('kPEPE'), 12);
+  await t.leader({ close: true });
+  await t.leaderTrade({ close: true }, 'kPEPE');
+  assert.deepEqual(L.calls, ['buy BTC 12', 'buy BTC 12', 'buy BTC 12', 'buy BTC 12', 'sell BTC 12', 'buy kPEPE 12', 'close BTC 36', 'close kPEPE 12']);
+  assert.equal(t.leaderTrades.length, 6, 'every IOC the leader sent, closes aside');
+  assert.deepEqual(t.settings({}).leader, { venue: 'hyperliquid', address: L.address });
+  assert.equal(t.leaderSymbol('ETH-USD'), 'ETH');
+  // A dry run has no leader to trade: nothing is sent, the venue's names still apply.
+  const dry = new T({ ...env, mode: 'dry', leader: null } as unknown as Env, 'y');
+  await dry.leaderSlices('buy', 12, 3);
+  await dry.leaderTrade({ buyUsd: 12 }, 'kPEPE');
+  assert.equal(dry.checks.liveOnly, 2);
+  assert.equal(dry.leaderSymbol(), 'BTC');
+  assert.equal(new T({ ...env, mode: 'dry', leader: null, leaderVenue: 'sodex' } as unknown as Env, 'z').leaderSymbol(), 'BTC-USD');
+});
+
+test('hash: the leader\'s driver re-runs the copy scenarios only; a pass with a Hyperliquid leader never stands for a SoDEX one', () => {
+  const d = tmp();
+  const put = (rel: string, text: string) => {
+    mkdirSync(join(d, rel, '..'), { recursive: true });
+    writeFileSync(join(d, rel), text);
+  };
+  put('apps/executor/src/service.ts', 'exec v1');
+  put('apps/executor/tools/live-test/harness.ts', 'harness v1');
+  put('apps/executor/tools/live-test/leader.ts', 'leader v1');
+  put('apps/executor/tools/live-test/hyperliquid.ts', 'hl v1');
+  put('apps/executor/tools/live-test/scenarios/algos.ts', 'algos v1');
+  put('apps/executor/tools/live-test/scenarios/copy.ts', 'copy v1');
+  const algoS = { id: 'twap.a', deps: ['algo' as const], source: 'apps/executor/tools/live-test/scenarios/algos.ts' };
+  const copyS = { id: 'copy.a', deps: ['copy' as const, 'leader' as const], source: 'apps/executor/tools/live-test/scenarios/copy.ts', leader: true };
+  const h = (leader?: 'sodex' | 'hyperliquid') => {
+    const c = new CodeHashes(d, { name: 'self', leader });
+    return { a: c.scenario(algoS), c: c.scenario(copyS) };
+  };
+  const base = h();
+  assert.deepEqual(h('sodex'), base, 'a SoDEX leader hashes as before venues');
+  const hl = h('hyperliquid');
+  assert.equal(hl.a, base.a, 'the algo scenarios do not care where the leader is');
+  assert.notEqual(hl.c, base.c);
+  put('apps/executor/tools/live-test/hyperliquid.ts', 'hl v2');
+  const afterHl = h();
+  assert.equal(afterHl.a, base.a, 'the Hyperliquid client is not the algo scenarios\' code');
+  assert.notEqual(afterHl.c, base.c);
+  put('apps/executor/tools/live-test/leader.ts', 'leader v2');
+  const afterLeader = h();
+  assert.equal(afterLeader.a, base.a);
+  assert.notEqual(afterLeader.c, afterHl.c);
+  put('apps/executor/tools/live-test/harness.ts', 'harness v2');
+  const afterHarness = h();
+  assert.notEqual(afterHarness.a, base.a, 'the harness still re-runs everything');
+  assert.notEqual(afterHarness.c, afterLeader.c);
+  rmSync(d, { recursive: true, force: true });
+});
+
+test('cleanup: an account that names its own markets is flattened on them (a Hyperliquid leader\'s coins); one whose markets cannot be read is not flat', async () => {
+  const f = new FakeVenue('follower', { 'BTC-USD': 0.001 }, {});
+  const l = Object.assign(new FakeVenue('leader', { BTC: 0.002, kPEPE: -5 }, {}), { markets: async (s: readonly string[]) => [...s.map((x) => x.replace(/-USD$/, '')), 'kPEPE'] });
+  const r = await flatten([f, l], ['BTC-USD'], { sleep: noSleep });
+  assert.equal(r.ok, true);
+  assert.deepEqual(f.calls, ['close BTC-USD 0.001']);
+  assert.deepEqual(l.calls, ['close BTC 0.002', 'close kPEPE -5']);
+  let down = 2;
+  const blind = Object.assign(new FakeVenue('leader', { BTC: 0.002 }, {}), {
+    markets: async (s: readonly string[]) => (down-- > 0 ? Promise.reject(new Error('Hyperliquid did not answer')) : s.map((x) => x.replace(/-USD$/, ''))),
+  });
+  const r2 = await flatten([blind], ['BTC-USD'], { attempts: 2, sleep: noSleep });
+  assert.equal(r2.ok, false, 'unknown is never flat');
+  assert.deepEqual(r2.left, [{ venue: 'leader', symbol: '(its markets)', position: NaN, orders: NaN }]);
+  assert.match(r2.lines.join('\n'), /its markets could not be read \(Hyperliquid did not answer\)/);
+  const r3 = await flatten([blind], ['BTC-USD'], { sleep: noSleep });
+  assert.equal(r3.ok, true, 'read again, it is cleared');
+  assert.deepEqual(blind.calls, ['close BTC 0.002']);
+});
+
+test('budget: a Hyperliquid leader is costed at its 4.5 bp and its own spread, its deposit named on Hyperliquid, its $10 minimum stated', () => {
+  const sc: Scenario = { id: 'copy.x', section: 'copy', kind: 'copy', title: '', confirms: '', deps: [], source: '', dry: 'lifecycle', timeoutMs: 1, leader: true, cost: (U) => ({ takerUsd: 2 * U, makerUsd: 0, peakUsd: U, leaderTakerUsd: 2 * U, leaderPeakUsd: U }), run: async () => undefined };
+  const input = { main: MKT('BTC-USD'), book: { bid: 99.99, ask: 100.01 }, U: 12, builderRate: 0.00025, leverage: 2, buffer: 1 };
+  const sodex = computeBudget([sc], input);
+  assert.ok(Math.abs(sodex.rows[0]!.leaderUsd - 24 * (0.0004 + 0.0001)) < 1e-12, 'a SoDEX leader as before');
+  assert.equal(sodex.leaderWhere, 'SoDEX');
+  const hl = computeBudget([sc], { ...input, leader: { venue: 'hyperliquid', market: 'BTC', takerFee: HL_TAKER_FEE, halfSpread: 0.00002, minOrderUsd: HL_MIN_ORDER_USD } });
+  assert.ok(Math.abs(hl.rows[0]!.leaderUsd - 24 * (0.00045 + 0.00002)) < 1e-12);
+  assert.equal(hl.rows[0]!.feesUsd, sodex.rows[0]!.feesUsd, 'the follower pays the same');
+  assert.equal(hl.total.leaderTraded, 24);
+  assert.equal(hl.leaderWhere, 'Hyperliquid');
+  assert.match(hl.assumptions.join('\n'), /the leader trades on Hyperliquid \(BTC\): taker 4\.50 bp \(its base tier\), half spread 0\.200 bp on its book now, no builder; its minimum order \$10, every leader order is at least U \(\$12\)/);
+  assert.match(formatBudget(hl), /deposit at least: follower \$\d+\.\d+ on SoDEX, leader \$\d+\.\d+ on Hyperliquid/);
+  const small = computeBudget([sc], { ...input, U: 8, leader: { venue: 'hyperliquid', market: 'BTC', takerFee: HL_TAKER_FEE, halfSpread: null, minOrderUsd: HL_MIN_ORDER_USD } });
+  assert.match(small.assumptions.join('\n'), /its book not read: SoDEX's half spread used.*every leader order is raised to it \(U is \$8\)/);
+});
+
+/* --------------------------------------------------------- the fee ladder ----- */
+
+const FOLLOWER = '0x' + 'ab'.repeat(20);
+const volumeUrl = (q: Record<string, string>) => `${VOLUME_PATH}?${new URLSearchParams(q).toString()}`;
+
+test('fee stub: it answers what it is set to, asked as the API server is asked; any other ask is answered as the server would and recorded as a problem', () => {
+  const stub = new VolumeStub(FOLLOWER);
+  stub.builder = 234812;
+  const ask = { address: '0x' + 'AB'.repeat(20), builder: '234812', days: '14' };
+  const ok = stub.judge(volumeUrl(ask), stub.token);
+  assert.deepEqual([ok.status, ok.body, ok.read.problem], [200, { ok: true, usd: 0, days: 14 }, null], '$0 by default, the address in any case');
+  stub.answer = { usd: 600_000 };
+  assert.deepEqual(stub.judge(volumeUrl(ask), stub.token).body, { ok: true, usd: 600_000, days: 14 });
+  stub.answer = { status: 500 };
+  const failed = stub.judge(volumeUrl(ask), stub.token);
+  assert.deepEqual([failed.status, failed.read.problem], [500, null], 'a failure it was told to give is not a problem');
+  const problems: Array<[string, ReturnType<VolumeStub['judge']>, number, RegExp]> = [
+    ['no token', stub.judge(volumeUrl(ask), undefined), 404, /without the internal token/],
+    ['another token', stub.judge(volumeUrl(ask), 'x'), 404, /without the internal token/],
+    ['another wallet', stub.judge(volumeUrl({ ...ask, address: '0x' + 'cd'.repeat(20) }), stub.token), 400, /not the follower/],
+    ['another builder', stub.judge(volumeUrl({ ...ask, builder: '1' }), stub.token), 400, /for builder 1, not 234812/],
+    ['another window', stub.judge(volumeUrl({ ...ask, days: '30' }), stub.token), 400, /over 30 days, not the ladder's 14/],
+    ['no window', stub.judge(volumeUrl({ address: ask.address, builder: ask.builder }), stub.token), 400, /over null days/],
+    ['another path', stub.judge('/api/vs/builder/terms', stub.token), 404, /asked \/api\/vs\/builder\/terms/],
+  ];
+  for (const [what, r, status, why] of problems) {
+    assert.equal(r.status, status, what);
+    assert.match(r.read.problem ?? '', why, what);
+  }
+  assert.equal(stub.reset(), true, 'it was not the default');
+  assert.deepEqual(stub.answer, DEFAULT_VOLUME);
+  assert.equal(stub.reset(), false, 'already the default: no restart needed');
+});
+
+const silent = { debug() {}, info() {}, warn() {}, error() {} };
+const noWs = (): WebSocketLike => ({ readyState: 0, send() {}, close() {}, onopen: null, onmessage: null, onclose: null, onerror: null });
+
+test('fee stub: the executor\'s own volume read passes every check, over loopback http (a self executor takes the URL), and a failure keeps the last answer', async () => {
+  const stub = new VolumeStub(FOLLOWER);
+  stub.builder = 234812;
+  await stub.start();
+  const dir = mkdtempSync(join(tmpdir(), 'vd-live-stub-'));
+  const db = new ExecutorDb(':memory:');
+  try {
+    const cfg = loadConfig({ EXECUTOR_DATA_DIR: dir, EXECUTOR_KIND: 'self', EXECUTOR_OWNER: FOLLOWER, EXECUTOR_BUILDER_ID: '234812', EXECUTOR_BUILDER_URL: stub.url, EXECUTOR_BUILDER_TOKEN: stub.token });
+    const svc = new ExecutorService(cfg, db, new Secrets(dir), { fetch: fetch as unknown as FetchLike, factory: noWs, log: silent });
+    const fresh = (o: string) => (svc as unknown as { freshVolume(o: string): Promise<number | null> }).freshVolume(o);
+    stub.answer = { usd: 2_000_000 };
+    assert.equal(await fresh(FOLLOWER), 2_000_000);
+    assert.equal(copyFeeFor(2_000_000), 12, 'the fourth step');
+    assert.deepEqual(stub.problems(), []);
+    assert.equal(stub.reads.length, 1);
+    stub.answer = { status: 500 };
+    const realNow = Date.now;
+    Date.now = () => realNow() + 11 * 60_000;
+    try {
+      assert.equal(await fresh(FOLLOWER), 2_000_000, 'asked again after 10 minutes, failed, kept');
+    } finally {
+      Date.now = realNow;
+    }
+    assert.deepEqual(stub.reads.map((r) => r.status), [200, 500]);
+  } finally {
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
+    await stub.stop();
+  }
+});
+
+test('fee scenarios: one per step of the ladder, on the self target only (the stub and a restart), after everything else; keep-last is slow', () => {
+  const fees = CATALOGUE.filter((s) => s.section === 'fee');
+  assert.deepEqual(fees.filter((s) => s.id.startsWith('fee.tier-')).map((s) => s.id), ['fee.tier-0', 'fee.tier-100k', 'fee.tier-500k', 'fee.tier-2m', 'fee.tier-10m']);
+  assert.equal(COPY_FEE_LADDER.length, 5);
+  assert.deepEqual(fees.filter((s) => s.slow).map((s) => s.id), ['fee.keep-last']);
+  for (const s of fees) {
+    assert.deepEqual([...(s.needs ?? [])].sort(), ['localFeeStub', 'restart'], s.id);
+    assert.equal(cannotRun(s, 'self'), null);
+    for (const t of ['hosted', 'browser'] as const) assert.match(cannotRun(s, t) ?? '', /answer the executor's reads of the follower's volume \(the copy fee step\) itself/);
+    assert.ok(!s.leader && s.dry === 'full' && s.kind === 'fee', s.id);
+    assert.ok(s.cost(12).takerUsd > 0 && s.cost(12).peakUsd === 12, `${s.id} costs one U at a time`);
+  }
+  assert.ok(CATALOGUE.findIndex((s) => s.section === 'fee') > CATALOGUE.map((s) => s.section).lastIndexOf('copy'), 'the ladder comes last');
+});
+
+/**
+ * An executor as far as the fee scenarios use it: on a new session it reads the follower's volume
+ * from the stub (as service.ts: held until a restart, a failure keeps the last answer), and a
+ * paper algo fills at once at 100, charged SoDEX's taker fee and the step of that volume.
+ */
+function feeExecutor(stub: VolumeStub, takerFee: number) {
+  let held: number | null = null;
+  const reads: Array<number | null> = [];
+  const algos = new Map<string, AlgoView>();
+  const exec = {
+    name: 'self',
+    capabilities: CAPABILITIES.self,
+    gone: () => null,
+    async kill() {
+      held = null;
+    },
+    async start() {},
+    async info() {
+      return { builder: { id: 234812, ladder: COPY_FEE_LADDER.map((s) => ({ ...s })), windowDays: 14 } };
+    },
+    async signIn() {
+      const r = stub.judge(volumeUrl({ address: FOLLOWER, builder: '234812', days: '14' }), stub.token);
+      stub.reads.push(r.read);
+      if (r.status === 200) held = (r.body as { usd: number }).usd;
+      reads.push(held);
+    },
+    async algoStart(spec: Record<string, unknown>) {
+      const qty = Number((spec.then as { quantity: string }).quantity);
+      const id = `a${String(algos.size + 1).padStart(12, '0')}`;
+      const v = { algo: { id, spec, status: 'done', filled: qty, filledValue: qty * 100, fees: qty * 100 * (takerFee + copyFeeFor(held) / 100_000), createdAt: Date.now(), children: [] }, exits: [] } as unknown as AlgoView;
+      algos.set(id, v);
+      return v;
+    },
+    async algo(id: string) {
+      return algos.get(id)!;
+    },
+  };
+  return { exec: exec as unknown as ExecutorTarget, reads, algos };
+}
+
+test('fee scenarios on paper: each step\'s boundary is read just under (the step below) and at it, after a restart; a ledger failing from the start is the first step', async () => {
+  const stub = new VolumeStub(FOLLOWER);
+  const main = MKT('BTC-USD');
+  const fx = feeExecutor(stub, main.takerFee);
+  const lines: string[] = [];
+  const env = { mode: 'dry', main, second: MKT('ETH-USD'), childUsd: 12, timeScale: 0, log: (l: string) => lines.push(l), target: fx.exec, feeStub: stub, reads: { quote: async () => ({ bid: 100, ask: 100.1, mid: 100.05, mark: 100 }) } } as unknown as Env;
+  const run = async (id: string, e: Env = env) => {
+    const t = new T(e, id);
+    await CATALOGUE.find((x) => x.id === id)!.run(t);
+    return t;
+  };
+  const t0 = await run('fee.tier-0');
+  assert.deepEqual(fx.reads, [0]);
+  assert.match(lines.join('\n'), /ok the executor charged buy a\d+ builder fee 25 \(2\.5 bp\)/);
+  assert.equal(t0.checks.liveOnly, 1, 'SoDEX\'s order history and fills are live only');
+  await run('fee.tier-100k');
+  await run('fee.tier-10m');
+  assert.deepEqual(fx.reads, [0, 99_999, 100_000, 9_999_999, 10_000_000]);
+  assert.match(lines.join('\n'), /builder fee 12 \(1\.2 bp\)[\s\S]*builder fee 10 \(1 bp\)/, 'just under $10M the step below, at it the last step');
+  stub.answer = { usd: 600_000 };
+  await run('fee.fail-first');
+  assert.deepEqual(fx.reads.slice(-1), [null], 'nothing known after the restart');
+  assert.deepEqual(stub.problems(), []);
+  // A round: a market buy of U, then a market sell of what it filled (reduce-only only live).
+  const specs = [...fx.algos.values()].map((v) => v.algo.spec as unknown as { side: string; reduceOnly?: boolean; paper: boolean; then: { type: string } });
+  assert.ok(specs.every((s) => s.paper === true && s.then.type === 'market'));
+  assert.deepEqual(specs.slice(0, 2).map((s) => [s.side, s.reduceOnly ?? false]), [['buy', false], ['sell', false]]);
+  // An executor that charged another rate fails the check.
+  const wrong = feeExecutor(stub, main.takerFee + 0.0001);
+  await assert.rejects(run('fee.tier-0', { ...env, target: wrong.exec } as unknown as Env), /the executor charged buy .* builder fee 25/);
 });

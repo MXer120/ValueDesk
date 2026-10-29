@@ -8,7 +8,8 @@
  *   SPENT (gone):   taker notional x (taker fee + builder fee + half the spread)
  *                 + maker notional x (maker fee + builder fee)
  *                 + the leader's taker notional x (taker fee + half the spread)
- *                   (the leader's orders carry no builder);
+ *                   (the leader's orders carry no builder), at its venue's fee
+ *                   and book: SoDEX's, or Hyperliquid's 4.5 bp and its book;
  *   PEAK MARGIN:    the largest exposure at once / the leverage it is held at,
  *                   plus a buffer for the move while it is open and the fees.
  *
@@ -40,6 +41,20 @@ export interface BudgetInput {
   riskMove?: number;
   /** Margin buffer over the peak (1.5 = 50% more). */
   buffer?: number;
+  /** Where the leader trades and what it pays there. Default: SoDEX, the main market's taker fee and spread. */
+  leader?: LeaderCosts;
+}
+
+/** The leader's venue, for its share of the budget. */
+export interface LeaderCosts {
+  venue: 'sodex' | 'hyperliquid';
+  /** Its market of the main one ('BTC' on Hyperliquid). */
+  market: string;
+  takerFee: number;
+  /** Half its book's spread, a fraction (null: its book could not be read; the main market's is used). */
+  halfSpread: number | null;
+  /** Its minimum order value, USD. */
+  minOrderUsd: number;
 }
 
 export interface BudgetRow {
@@ -59,7 +74,9 @@ export interface BudgetRow {
 export interface Budget {
   rows: BudgetRow[];
   bySection: Record<string, { spentUsd: number; peakMarginUsd: number; leaderPeakMarginUsd: number; traded: number }>;
-  total: { spentUsd: number; feesUsd: number; spreadUsd: number; leaderUsd: number; traded: number; peakMarginUsd: number; leaderPeakMarginUsd: number; riskUsd: number; depositFollowerUsd: number; depositLeaderUsd: number; walletSignatures: number };
+  total: { spentUsd: number; feesUsd: number; spreadUsd: number; leaderUsd: number; leaderTraded: number; traded: number; peakMarginUsd: number; leaderPeakMarginUsd: number; riskUsd: number; depositFollowerUsd: number; depositLeaderUsd: number; walletSignatures: number };
+  /** Where the leader's deposit goes: 'SoDEX' or 'Hyperliquid'. */
+  leaderWhere: string;
   assumptions: string[];
 }
 
@@ -80,14 +97,18 @@ export function computeBudget(list: readonly Scenario[], i: BudgetInput): Budget
   const maker = i.main.makerFee ?? i.main.takerFee;
   const buffer = i.buffer ?? 1.5;
   const risk = i.riskMove ?? 0.005;
+  const L: LeaderCosts = i.leader ?? { venue: 'sodex', market: i.main.name, takerFee: i.main.takerFee, halfSpread: hs, minOrderUsd: i.main.minNotional };
+  const leaderRate = L.takerFee + (L.halfSpread ?? hs);
   const rows: BudgetRow[] = [];
   let sigs = 0;
+  let leaderTraded = 0;
   for (const s of list) {
     const c = s.cost(i.U);
     sigs += c.walletSignatures ?? 0;
+    leaderTraded += c.leaderTakerUsd ?? 0;
     const fees = c.takerUsd * (i.main.takerFee + i.builderRate) + c.makerUsd * (maker + i.builderRate);
     const spread = c.takerUsd * hs;
-    const leader = (c.leaderTakerUsd ?? 0) * (i.main.takerFee + hs);
+    const leader = (c.leaderTakerUsd ?? 0) * leaderRate;
     const lev = Math.max(1, Math.min(c.leverage ?? i.leverage, i.leverage));
     rows.push({
       id: s.id,
@@ -126,6 +147,7 @@ export function computeBudget(list: readonly Scenario[], i: BudgetInput): Budget
       feesUsd: sum((r) => r.feesUsd),
       spreadUsd: sum((r) => r.spreadUsd),
       leaderUsd: sum((r) => r.leaderUsd),
+      leaderTraded,
       traded: sum((r) => r.traded),
       peakMarginUsd: peak,
       leaderPeakMarginUsd: lpeak,
@@ -134,7 +156,13 @@ export function computeBudget(list: readonly Scenario[], i: BudgetInput): Budget
       depositLeaderUsd: deposit(lpeak, sum((r) => r.leaderUsd)),
       walletSignatures: sigs,
     },
+    leaderWhere: L.venue === 'hyperliquid' ? 'Hyperliquid' : 'SoDEX',
     assumptions: [
+      ...(L.venue === 'hyperliquid'
+        ? [
+            `the leader trades on Hyperliquid (${L.market}): taker ${(L.takerFee * 1e4).toFixed(2)} bp (its base tier), ${L.halfSpread !== null ? `half spread ${(L.halfSpread * 1e4).toFixed(3)} bp on its book now` : `its book not read: SoDEX's half spread used`}, no builder; its minimum order $${L.minOrderUsd}${i.U < L.minOrderUsd ? `: every leader order is raised to it (U is $${i.U})` : `, every leader order is at least U ($${i.U})`}; margin at the 2x the runner sets on its coins`,
+          ]
+        : []),
       `market ${i.main.name}: taker ${(i.main.takerFee * 1e4).toFixed(2)} bp, maker ${(maker * 1e4).toFixed(2)} bp, min order $${i.main.minNotional}, step ${i.main.stepSize}, tick ${i.main.tickSize} (SoDEX's public market list)`,
       `book now: bid ${i.book.bid} / ask ${i.book.ask}, half spread ${(hs * 1e4).toFixed(3)} bp`,
       `builder fee ${(i.builderRate * 1e4).toFixed(2)} bp on every follower order (${i.builderWhy ?? 'the copy ladder\'s top step: no 14-day volume known to a local executor'}); none on the leader's`,
@@ -160,9 +188,9 @@ export function formatBudget(b: Budget): string {
   }
   const t = b.total;
   out.push('');
-  out.push(`(a) MONEY SPENT (gone): ${usd(t.spentUsd)}  = fees and builder ${usd(t.feesUsd)} + spread ${usd(t.spreadUsd)} + the leader's ${usd(t.leaderUsd)}  on ${usd(t.traded)} traded`);
+  out.push(`(a) MONEY SPENT (gone): ${usd(t.spentUsd)}  = fees and builder ${usd(t.feesUsd)} + spread ${usd(t.spreadUsd)} + the leader's ${usd(t.leaderUsd)}  on ${usd(t.traded)} traded (the leader's ${usd(t.leaderTraded)} on ${b.leaderWhere})`);
   out.push(`(b) PEAK MARGIN (held, returned): follower ${usd(t.peakMarginUsd)}, leader ${usd(t.leaderPeakMarginUsd)}`);
-  out.push(`    deposit at least: follower ${usd(t.depositFollowerUsd)}, leader ${usd(t.depositLeaderUsd)} (the buffered peak, plus what is spent, plus $10)`);
+  out.push(`    deposit at least: follower ${usd(t.depositFollowerUsd)} on SoDEX, leader ${usd(t.depositLeaderUsd)} on ${b.leaderWhere} (the buffered peak, plus what is spent, plus $10)`);
   out.push(`    price risk while a position is open: about +/- ${usd(t.riskUsd)} on the largest scenario`);
   out.push(`    wallet signatures (free): ${t.walletSignatures} plus one key registration per wallet per run`);
   out.push('');
