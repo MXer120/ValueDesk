@@ -50,7 +50,7 @@ import {
   type TrailState,
 } from './math.ts';
 import { combineOracle, type OracleVenue, type VenueQuote } from '../oracle.ts';
-import { algoNotice, type EngineNotice } from '../notices.ts';
+import { algoClosedNotice, algoNotice, type EngineNotice } from '../notices.ts';
 import { SWEEP_MAX_AGE_MS, sweepRefFor, sweepStep } from './sweep.ts';
 import { bandRefused, exitLevels, scaleLadder, swarmClips, twapSchedule, vwapSchedule } from './plan.ts';
 import { checkLimits, limitLeverage, oiHeadroom, oiRoomWords, positionCapUsd, limitRefusal, type AlgoLimitNotice, type LimitRefusal } from './limits.ts';
@@ -119,6 +119,10 @@ const POSITIONS_MS = 5_000;
 const ACCOUNT_MS = 10_000;
 /** While an entry is filling, its exits are resized at most this often. */
 const EXITS_RESIZE_MS = 5_000;
+/** An ended algo's exits are held against its position this often (one positions read per wallet, weight 5): gone, closed outside it, they are cancelled (watchExits). */
+const EXITS_WATCH_MS = 60_000;
+/** A position read counts for that only when it started this long after the exits were placed (SoDEX's account follows the fills). */
+const EXITS_SETTLE_MS = 3_000;
 
 export interface AlgoHost {
   store: AlgoStore;
@@ -237,13 +241,17 @@ export class AlgoRuntime {
   /** Algos that raised a hold in the step now running (steps of one algo never overlap). */
   private heldNow = new Set<string>();
   private eventSeq = 0;
-  /** Each owner's positions and account, read at most every few seconds (conditions, closes, the leverage ceiling). */
-  private positionsOf = new Map<string, { at: number; data: Record<string, { size: number; entry: number; leverage?: number }>; loading: boolean }>();
+  /** Each owner's positions and account, read at most every few seconds (conditions, closes, the leverage ceiling); `from`: when that read left. */
+  private positionsOf = new Map<string, { at: number; from?: number; data: Record<string, { size: number; entry: number; leverage?: number }>; loading: boolean }>();
   private accounts = new Map<string, { at: number; equity: number; gross: number }>();
   /** Algos whose exits are being placed or resized right now. */
   private exitsBusy = new Set<string>();
   /** Algos whose final exits were asked for while a placement was out: placed again once it is back. */
   private exitsAgain = new Set<string>();
+  /** Ended algos whose exits are being held against the position right now, when each was last, and when its position was last found held (watchExits). */
+  private exitsWatching = new Set<string>();
+  private exitsWatchAt = new Map<string, number>();
+  private exitsHeldAt = new Map<string, number>();
   private paper = new Map<string, PaperOrder>();
   private timers: unknown[] = [];
   private running = false;
@@ -824,10 +832,14 @@ export class AlgoRuntime {
   tick(now = Date.now()): void {
     this.checkPaperExits();
     for (const a of this.algos.values()) {
-      // An ended algo is not stepped, but its exits still follow what it filled (a resize whose cancel came late, a refusal tried again).
-      if (FINAL_STATUSES.has(a.status) && this.exitsDue(a, now)) {
+      // An ended algo is not stepped, but its exits still follow what it filled (a resize whose cancel came late, a refusal tried
+      // again), and are held against its position: gone, closed outside it, they are cancelled instead (watchExits).
+      if (FINAL_STATUSES.has(a.status)) {
         const m = this.markets.get(a.spec.symbol);
-        if (m) void this.syncExits(a, m, true).catch((e) => this.host.log.error('algo: exits failed', { algo: a.id, error: String(e) }));
+        if (m && this.exitsWatchDue(a, now)) void this.watchExits(a, m, now).catch((e) => this.host.log.error('algo: exits watch failed', { algo: a.id, error: String(e) }));
+        else if (m && !this.exitsWatching.has(a.id) && !this.exitsUnchecked(a) && this.exitsDue(a, now)) {
+          void this.syncExits(a, m, true).catch((e) => this.host.log.error('algo: exits failed', { algo: a.id, error: String(e) }));
+        }
       }
       if (FINAL_STATUSES.has(a.status) || this.busy.has(a.id)) continue;
       this.busy.add(a.id);
@@ -2059,7 +2071,8 @@ export class AlgoRuntime {
 
   private async loadPositions(a: AlgoRecord): Promise<Record<string, { size: number; entry: number; leverage?: number }> | null> {
     const prev = this.positionsOf.get(a.owner);
-    this.positionsOf.set(a.owner, { at: prev?.at ?? 0, data: prev?.data ?? {}, loading: true });
+    const from = Date.now();
+    this.positionsOf.set(a.owner, { at: prev?.at ?? 0, from: prev?.from, data: prev?.data ?? {}, loading: true });
     try {
       let data: Record<string, { size: number; entry: number; leverage?: number }>;
       if (this.host.positions) data = await this.host.positions(a);
@@ -2067,11 +2080,11 @@ export class AlgoRuntime {
         const snap = await this.host.sodex.follower(a.owner);
         data = Object.fromEntries(Object.entries(snap.positions).map(([s, p]) => [s, { size: p.size, entry: p.entry, ...(p.leverageReported ? { leverage: p.leverage } : {}) }]));
       }
-      this.positionsOf.set(a.owner, { at: Date.now(), data, loading: false });
+      this.positionsOf.set(a.owner, { at: Date.now(), from, data, loading: false });
       return data;
     } catch (e) {
       this.host.log.warn('algo: positions read failed', { owner: a.owner, error: String(e) });
-      this.positionsOf.set(a.owner, { at: prev?.at ?? 0, data: prev?.data ?? {}, loading: false });
+      this.positionsOf.set(a.owner, { at: prev?.at ?? 0, from: prev?.from, data: prev?.data ?? {}, loading: false });
       return null;
     }
   }
@@ -2605,6 +2618,7 @@ export class AlgoRuntime {
       if (refused) {
         const n = Number(a.k.exitsRefused ?? 0) + 1;
         a.k.exitsRefused = n;
+        a.k.exitsRefusedAt = now;
         // The pair goes out whole again next time.
         a.k.exitsSize = 0;
         if (n >= EXITS_MAX_REFUSALS) {
@@ -2637,6 +2651,121 @@ export class AlgoRuntime {
     if (size < Math.max(Number(m.stepSize), Number(m.minQuantity) || 0)) return false;
     const standing = this.liveExits(a).filter((x) => !x.cancelling);
     return !standing.length || Math.abs(size - Number(a.k.exitsSize ?? 0)) >= Number(m.stepSize) / 2;
+  }
+
+  /**
+   * Whether an ended live algo's exits are to be held against its position now: they rest on
+   * SoDEX (every EXITS_WATCH_MS, the first read one that left EXITS_SETTLE_MS after they were
+   * placed), SoDEX cancelled them (once), or a pair is about to go out again after SoDEX refused
+   * or expired one (once per refusal, before it is placed: it may have had nothing to reduce).
+   */
+  private exitsWatchDue(a: AlgoRecord, now: number): boolean {
+    const s = a.spec;
+    if (s.paper || !s.exits || !opensPosition(s) || a.filled <= 0 || a.k.exitsOutside || a.k.exitsGaveUp) return false;
+    if (this.exitsWatching.has(a.id) || this.exitsBusy.has(a.id)) return false;
+    const placed = Math.max(0, ...(a.exitOrders ?? []).map((x) => x.placedAt));
+    if (now < placed + EXITS_SETTLE_MS) return false;
+    const last = this.exitsWatchAt.get(a.id) ?? 0;
+    const periodic = now - last >= EXITS_WATCH_MS;
+    if (a.k.exitsDone) return a.k.exitsPulled === true && periodic;
+    if (this.exitsUnchecked(a) && now >= Number(a.k.exitsRetryAt ?? 0) && (periodic || last < Number(a.k.exitsRefusedAt ?? 0))) return true;
+    return periodic && this.liveExits(a).some((x) => x.state === 'open' && !x.cancelling);
+  }
+
+  /** A refused or expired pair whose position was not found held since: it is not placed again before (watchExits). */
+  private exitsUnchecked(a: AlgoRecord): boolean {
+    return !a.spec.paper && !a.k.exitsDone && Number(a.k.exitsRefused ?? 0) > 0 && Number(a.k.exitsRefusedAt ?? 0) >= (this.exitsHeldAt.get(a.id) ?? 0);
+  }
+
+  /**
+   * An ended algo's exits held against its position (exitsWatchDue). Flat, or on the other side:
+   * the position the exits protect is gone, closed outside the algo (a liquidation, or by hand),
+   * so they are cancelled, not placed again, and the trader is told (exitsOutside). Still held:
+   * a pair that is due goes out again. A position that cannot be read changes nothing.
+   */
+  private async watchExits(a: AlgoRecord, m: MarketInfo, now: number): Promise<void> {
+    this.exitsWatching.add(a.id);
+    this.exitsWatchAt.set(a.id, now);
+    try {
+      const placed = Math.max(0, ...(a.exitOrders ?? []).map((x) => x.placedAt));
+      const size = await this.positionSince(a, m.name, placed + EXITS_SETTLE_MS);
+      const held = size === null ? null : (a.spec.side === 'buy' ? size : -size) >= Number(m.stepSize) / 2;
+      if (held === false) return await this.exitsOutside(a, m, now);
+      // Held, or not readable (the exits then go on protecting it).
+      this.exitsHeldAt.set(a.id, now);
+      if (a.k.exitsPulled) {
+        // The trader cancelled them (the position is still there): as the log says, they are not placed again.
+        if (held) delete a.k.exitsPulled;
+        return;
+      }
+      if (!a.k.exitsDone && this.exitsDue(a, Date.now())) await this.syncExits(a, m, true);
+    } finally {
+      this.exitsWatching.delete(a.id);
+    }
+  }
+
+  /** The owner's signed position on `symbol` from a read that left at `from` or later (one is made when the last is older). null: not readable. */
+  private async positionSince(a: AlgoRecord, symbol: string, from: number): Promise<number | null> {
+    try {
+      if (this.host.position) return await this.host.position(a, symbol);
+      const hit = this.positionsOf.get(a.owner);
+      const book = hit && !hit.loading && (hit.from ?? 0) >= from && Date.now() - hit.at <= POSITIONS_MS ? hit.data : await this.loadPositions(a);
+      return book ? (book[symbol]?.size ?? 0) : null;
+    } catch (e) {
+      this.host.log.warn('algo: position read failed', { algo: a.id, error: String(e) });
+      return null;
+    }
+  }
+
+  /**
+   * The position an ended algo's exits protect is gone. An exit that fired while its update was
+   * lost is asked of SoDEX's order history first (it closed the position: booked, the other one
+   * cancelled). Otherwise it was closed outside the algo: what rests is cancelled, nothing is
+   * placed again, the log says why and the trader gets an error notice.
+   */
+  private async exitsOutside(a: AlgoRecord, m: MarketInfo, now: number): Promise<void> {
+    const live = this.liveExits(a).filter((x) => !x.cancelling);
+    if (live.length) {
+      // The history is drip-limited: asked again at the next watch when another read just went.
+      if (this.lookupBusy || now - this.lastHistoryAt < HISTORY_EVERY_MS) return;
+      this.lastHistoryAt = now;
+      let hist: Awaited<ReturnType<AlgoRuntime['lookupOrders']>>;
+      try {
+        hist = await this.lookupOrders(a, m.name, true);
+      } catch (e) {
+        this.host.log.warn('algo: order lookup failed', { algo: a.id, error: String(e) });
+        return;
+      }
+      let fired = false;
+      for (const x of live) {
+        const row = hist.find((r) => r.clOrdID === x.clOrdID);
+        if (row && row.executedQty > 1e-12) {
+          this.onExitUpdate(a, x, { clOrdID: x.clOrdID, orderId: row.orderId, symbol: m.name, status: 'FILLED', filledQty: row.executedQty, filledValue: row.executedValue, maker: false, reason: null, at: now });
+          fired = true;
+        }
+      }
+      if (fired) return;
+    }
+    const pulled = a.k.exitsPulled === true;
+    a.k.exitsDone = true;
+    a.k.exitsOutside = true;
+    delete a.k.exitsPulled;
+    await this.cancelExits(a, m, live);
+    const what = live.length
+      ? `its ${live.map((x) => x.tag).join(' and ')} ${live.length === 1 ? 'is' : 'are'} cancelled on SoDEX and not placed again`
+      : pulled
+        ? 'its exits, cancelled on SoDEX, are not placed again'
+        : 'its exits are not placed again';
+    const text = `Your ${m.name} position is gone: it was closed outside this algo (a liquidation, or by hand), so ${what}.`;
+    await this.event(a, 'error', text);
+    await this.save(a);
+    try {
+      this.host.onNotice?.(algoClosedNotice(a, text));
+    } catch (e) {
+      this.host.log.warn('algo: notice not taken', { error: String(e) });
+    }
+    this.syncWatch();
+    this.host.onChange?.(a.id);
   }
 
   private async cancelExits(a: AlgoRecord, m: MarketInfo, list: ChildOrder[]): Promise<void> {
@@ -2691,10 +2820,14 @@ export class AlgoRuntime {
       if (!x.cancelling && x.filled <= 1e-12 && x.state !== 'done' && !a.k.exitsDone) {
         if (/^CANCEL/.test(u.status)) {
           a.k.exitsDone = true;
+          // By the trader, or by SoDEX with the position (a liquidation): an ended algo asks the position once (watchExits).
+          a.k.exitsPulled = true;
           void this.event(a, 'info', `The ${x.tag} was cancelled on SoDEX; its exits are not placed again.`);
         } else {
+          // Nothing to reduce, maybe: an ended algo asks the position before it places a pair again (watchExits).
           const n = Number(a.k.exitsRefused ?? 0) + 1;
           a.k.exitsRefused = n;
+          a.k.exitsRefusedAt = Date.now();
           a.k.exitsSize = 0;
           a.k.exitsRetryAt = Date.now() + EXITS_RETRY_MS * 2 ** (n - 1);
           if (n >= EXITS_MAX_REFUSALS) a.k.exitsGaveUp = true;

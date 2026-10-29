@@ -10,11 +10,12 @@
  * again by itself and follows the leader again once the leader is flat there (or flips), with
  * the copy's own leverage set again first; isolated, only that market goes and the copy's other
  * positions stay managed; cross, SoDEX may take every market, each told. Partly, the copy holds
- * what SoDEX left, books the part that went, sends nothing by itself, and on the leader's next
- * add goes back to its target. A runtime runs against a faked SoDEX (REST and the trade stream),
- * as audit-copy.test.ts does. An assertion that starts "BUG:" failed before its fix
- * (docs/TESTING-MATRIX.md names it); a "FINDING" is a test.todo holding a case the engine does
- * not handle yet.
+ * what SoDEX left, books the part that went, tells the follower (unless its own reduction
+ * explains it), sends nothing by itself, and on the leader's next add goes back to its target.
+ * Why it went is read from SoDEX's fills: a liquidation ("liquidation:" fill) is an error, the
+ * copy's own stop (its client id filled) is info, and without a fill the stop is never named. A
+ * runtime runs against a faked SoDEX (REST and the trade stream), as audit-copy.test.ts does. An
+ * assertion or test that starts "BUG" failed before its fix (docs/TESTING-MATRIX.md names it).
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -61,11 +62,13 @@ class FakeWs implements WebSocketLike {
 
 type Pos = { s: string; sz: string; ep: string; l: number; m: string };
 
-/** SoDEX as the copier reads it: the leader's and the follower's positions (perps /state P[]), the marks, the builder approval. */
+/** SoDEX as the copier reads it: the leader's and the follower's positions (perps /state P[]), the marks, the builder approval, the follower's fills. */
 interface World {
   leader: Array<{ s: string; sz: string; ep: string }>;
   follower: Pos[];
   marks: Record<string, number>;
+  /** The follower's fills (GET .../trades); absent: the read fails (404). */
+  fills?: Array<{ symbol: string; clOrdID: string; side: 'BUY' | 'SELL'; price: string; quantity: string; time: number }>;
 }
 
 const world = (o: Partial<World> = {}): World => ({ leader: [], follower: [], marks: { 'BTC-USD': 80_000, 'ETH-USD': 2_000 }, ...o });
@@ -84,6 +87,7 @@ function fakeFetch(w: World): FetchLike {
     if (path === `/api/v1/perps/accounts/${LEADER}/state`) return ok({ aid: LEADER_ID, av: '100000', P: JSON.parse(JSON.stringify(w.leader)) });
     if (path === `/api/v1/perps/accounts/${FOLLOWER}/state`) return ok({ aid: FOLLOWER_ID, av: '5000', am: '5000', P: JSON.parse(JSON.stringify(w.follower)) });
     if (path === `/api/v1/user/${FOLLOWER}/builders`) return ok({ perps: [{ userID: FOLLOWER_ID, builderID: 9, feeRate: 25 }], spot: [] });
+    if (path.startsWith(`/api/v1/perps/accounts/${FOLLOWER}/trades?`) && w.fills) return ok(w.fills);
     return { status: 404, ok: false, text: async () => '{"code":404,"message":"not found"}' };
   };
 }
@@ -124,9 +128,8 @@ function recordingSink() {
   return { sink, placed, stops, cancels, leverage: () => leverage, orders: () => placed.flat() };
 }
 
-function runtime(w: World, sink: OrderSink) {
+function runtime(w: World, sink: OrderSink, store = new MemoryStore()) {
   const fetch = fakeFetch(w);
-  const store = new MemoryStore();
   const notices: EngineNotice[] = [];
   const rt = new CopyRuntime({
     store,
@@ -156,6 +159,14 @@ const leaderSells = (qty: string, s = 'BTC-USD', price = String(s === 'BTC-USD' 
 /** The copy's own order filled, as the public stream shows it (the follower took liquidity). */
 const followerBought = (qty: string, s = 'BTC-USD', price = String(s === 'BTC-USD' ? 80_000 : 2_000)) => sodexWs().push(print('BUY', qty, price, FOLLOWER_ID, 1002, s));
 
+/** SoDEX's takeover fill (its own, no order of the follower's) and a fill of one of the follower's orders, as GET .../trades lists them. */
+const liquidationFill = (qty: string, price = '78800', s = 'BTC-USD') => ({ symbol: s, clOrdID: `liquidation:${++tid}`, side: 'SELL' as const, price, quantity: qty, time: Date.now() });
+const fillOf = (clOrdID: string, qty: string, price: string, s = 'BTC-USD') => ({ symbol: s, clOrdID, side: 'SELL' as const, price, quantity: qty, time: Date.now() });
+/** The copy's orders sent, no longer matched to the stream (as after PENDING_MS: their fills were missed). */
+const forgetPending = (rt: CopyRuntime) => {
+  for (const p of (rt as unknown as { pending: Array<{ until: number }> }).pending) p.until = 0;
+};
+
 const size = (rt: CopyRuntime, id: string, sym = 'BTC-USD') => rt.view(id)!.positions.find((p) => p.symbol === sym)?.size ?? 0;
 /** The copy's SoDEX stops are placed 2 s after a fill (a timer); here at once. */
 const placeStops = (rt: CopyRuntime, id: string, sym: string) => (rt as unknown as { refreshStops(id: string, s: string): Promise<void> }).refreshStops(id, sym);
@@ -166,8 +177,8 @@ async function ready(): Promise<void> {
 }
 
 /** A live copy that holds 0.01 BTC copied from the leader's 1 BTC (proportional: $1,000 of the leader's $100,000), with its SoDEX stop-loss. */
-async function holding(o: { id: string; settings?: Parameters<typeof sub>[0] }) {
-  const w = world();
+async function holding(o: { id: string; settings?: Parameters<typeof sub>[0]; fills?: World['fills'] }) {
+  const w = world({ fills: o.fills });
   const rec = recordingSink();
   const { rt, store, notices } = runtime(w, rec.sink);
   await rt.start();
@@ -307,29 +318,202 @@ test('liquidated in part: the copy holds what SoDEX left (the part that went boo
   }
 });
 
-test.todo('FINDING partial liquidation: a copied position SoDEX reduced (a partial liquidation, ADL, a part closed by hand) is adopted without a word - no activity line, no notice; telling it apart from a close of the copier\'s own whose fill the stream missed needs the copier to remember its recent reductions', async () => {
-  const { w, rt, store, notices, s } = await holding({ id: 'liq-part-told' });
+test('BUG partial liquidation: a copied position SoDEX made smaller (a partial liquidation, ADL, a part closed by hand) is told - an activity line and a notice - once; what the copy does next is unchanged', async () => {
+  const { w, rec, rt, store, notices, s } = await holding({ id: 'liq-part-told' });
   try {
+    const n0 = rec.orders().length;
     w.follower = [{ s: 'BTC-USD', sz: '0.006', ep: '80000', l: 5, m: 'ISOLATED' }];
     await rt.refreshFollower(FOLLOWER);
-    const said = (await store.activity({ subId: s.id })).some((e) => e.symbol === 'BTC-USD' && /outside|reduced|liquidat/i.test(e.detail ?? ''));
-    assert.ok(said && notices.some((n) => n.ref === 'liq-part-told:BTC-USD'), 'the follower is told SoDEX took part of the copied position');
+    assert.equal(size(rt, s.id), 0.006, 'the books follow SoDEX');
+    const said = (await store.activity({ subId: s.id })).filter((e) => e.symbol === 'BTC-USD' && e.reason === 'reduced-outside');
+    assert.equal(said.length, 1, 'one activity line');
+    assert.match(said[0]!.detail ?? '', /^0\.004 of this copied position was closed outside the copier \(by you, or by SoDEX: a partial liquidation or ADL\); the copy holds the 0\.006 left\.$/);
+    assert.equal(said[0]!.size, 0.004);
+    const told = notices.filter((n) => n.ref === 'liq-part-told:BTC-USD');
+    assert.deepEqual(told.map((n) => [n.source, n.kind, n.grade]), [['copy', 'reduced', 'warn']], 'the follower is told SoDEX took part of the copied position');
+    // Told once: a re-read and a reconcile with nothing new say nothing more, and send nothing.
+    await rt.refreshFollower(FOLLOWER);
+    await rt.reconcileAll();
+    await wait(100);
+    assert.equal(notices.filter((n) => n.ref === 'liq-part-told:BTC-USD').length, 1);
+    assert.equal(rec.orders().length, n0, 'no order: the copy does not "repair" the position by itself');
+    assert.equal(notices.filter((n) => n.kind === 'closed').length, 0, 'not closed');
   } finally {
     await rt.stop();
   }
 });
 
-test.todo('FINDING stop-loss vs liquidation: a position liquidated past the copy\'s stop-loss level (its SoDEX stop did not fire: refused, cancelled, or the copier was down) is told as "Your stop-loss closed this copied position" (info) - closedWhy reads the mark only, not SoDEX\'s fills (a "liquidation:" clOrdID) or whether the copy\'s own stop filled', async () => {
-  // Proportional at 5x, stop-loss at 50% of the margin: 10% under the entry, 72,000.
-  const { w, rt, notices, s } = await holding({ id: 'liq-past-sl' });
+test('partial liquidation seen in SoDEX\'s fills ("liquidation:"): told as SoDEX liquidating part of the position, an error', async () => {
+  const { w, rt, store, notices, s } = await holding({ id: 'liq-part-fill', fills: [] });
   try {
-    rt.markets.setMark('BTC-USD', 71_000);
-    w.follower = [];
+    w.fills = [liquidationFill('0.004')];
+    w.follower = [{ s: 'BTC-USD', sz: '0.006', ep: '80000', l: 5, m: 'ISOLATED' }];
     await rt.refreshFollower(FOLLOWER);
-    assert.deepEqual(notices.filter((n) => n.kind === 'closed').map((n) => n.grade), ['error'], 'a liquidation is an error, even past the stop-loss level');
-    assert.equal(size(rt, s.id), 0);
+    const said = (await store.activity({ subId: s.id })).find((e) => e.reason === 'reduced-outside');
+    assert.equal(said?.detail, 'SoDEX liquidated 0.004 of this copied position; the copy holds the 0.006 left.');
+    const told = notices.filter((n) => n.ref === 'liq-part-fill:BTC-USD');
+    assert.deepEqual(told.map((n) => [n.kind, n.grade]), [['reduced', 'error']]);
+    assert.match(told[0]!.title, /^BTC-USD partly liquidated in the copy of /);
   } finally {
     await rt.stop();
+  }
+});
+
+test('a reduction of the copier\'s own whose fill the stream missed is not told as one made outside it; the part it does not explain is', async () => {
+  const { w, rec, rt, store, notices, s } = await holding({ id: 'own-cut' });
+  try {
+    // The leader trims to 0.8: the copy sends its reduce-only 0.002, and the stream never shows the fill.
+    leaderSells('0.2');
+    w.leader = [{ s: 'BTC-USD', sz: '0.8', ep: '80000' }];
+    assert.ok(await until(() => rec.orders().some((i) => i.leg === 'decrease')), 'the copy reduces');
+    const cut = rec.orders().find((i) => i.leg === 'decrease')!;
+    assert.deepEqual([cut.side, cut.reduceOnly, cut.quantity], ['sell', true, '0.002']);
+    forgetPending(rt);
+    w.follower = [{ s: 'BTC-USD', sz: '0.008', ep: '80000', l: 5, m: 'ISOLATED' }];
+    await rt.refreshFollower(FOLLOWER);
+    assert.equal(size(rt, s.id), 0.008, 'the books follow SoDEX');
+    assert.equal((await store.activity({ subId: s.id })).filter((e) => e.reason === 'reduced-outside').length, 0, 'no "outside" line for its own reduction');
+    assert.equal(notices.filter((n) => n.kind === 'reduced').length, 0, 'no notice');
+    // Then SoDEX takes 0.003 more: that is told, and only that.
+    w.follower = [{ s: 'BTC-USD', sz: '0.005', ep: '80000', l: 5, m: 'ISOLATED' }];
+    await rt.refreshFollower(FOLLOWER);
+    const said = (await store.activity({ subId: s.id })).filter((e) => e.reason === 'reduced-outside');
+    assert.deepEqual(said.map((e) => e.size), [0.003]);
+    assert.equal(notices.filter((n) => n.kind === 'reduced').length, 1);
+  } finally {
+    await rt.stop();
+  }
+
+  // Its own reduction missed and SoDEX's cut in one read: the part its order does not explain is told.
+  const b = await holding({ id: 'own-cut-both' });
+  try {
+    leaderSells('0.2');
+    b.w.leader = [{ s: 'BTC-USD', sz: '0.8', ep: '80000' }];
+    assert.ok(await until(() => b.rec.orders().some((i) => i.leg === 'decrease')));
+    forgetPending(b.rt);
+    b.w.follower = [{ s: 'BTC-USD', sz: '0.006', ep: '80000', l: 5, m: 'ISOLATED' }];
+    await b.rt.refreshFollower(FOLLOWER);
+    const said = (await b.store.activity({ subId: b.s.id })).filter((e) => e.reason === 'reduced-outside');
+    assert.deepEqual(said.map((e) => e.size), [0.002], 'only the 0.002 its order does not explain');
+  } finally {
+    await b.rt.stop();
+  }
+
+  // A reduction whose fill the stream did show explains nothing later: a cut after it is told whole.
+  const c = await holding({ id: 'own-cut-seen' });
+  try {
+    leaderSells('0.2');
+    c.w.leader = [{ s: 'BTC-USD', sz: '0.8', ep: '80000' }];
+    assert.ok(await until(() => c.rec.orders().some((i) => i.leg === 'decrease')));
+    sodexWs().push(print('SELL', '0.002', '80000', 1002, FOLLOWER_ID, 'BTC-USD'));
+    assert.ok(await until(() => size(c.rt, c.s.id) === 0.008), 'its fill is booked from the stream');
+    c.w.follower = [{ s: 'BTC-USD', sz: '0.006', ep: '80000', l: 5, m: 'ISOLATED' }];
+    await c.rt.refreshFollower(FOLLOWER);
+    const said = (await c.store.activity({ subId: c.s.id })).filter((e) => e.reason === 'reduced-outside');
+    assert.deepEqual(said.map((e) => e.size), [0.002]);
+  } finally {
+    await c.rt.stop();
+  }
+});
+
+test('BUG stop-loss vs liquidation: a position liquidated past the copy\'s stop-loss level (its SoDEX stop did not fire) is told as a liquidation, an error - from SoDEX\'s "liquidation:" fill, never from the mark', async () => {
+  // Proportional at 5x, stop-loss at 50% of the margin: 10% under the entry, 72,000.
+  const { w, rec, rt, store, notices, s } = await holding({ id: 'liq-past-sl', fills: [] });
+  try {
+    rt.markets.setMark('BTC-USD', 71_000);
+    w.fills = [liquidationFill('0.01', '71000')];
+    w.follower = [];
+    await rt.refreshFollower(FOLLOWER);
+    assert.equal(size(rt, s.id), 0);
+    const told = notices.filter((n) => n.kind === 'closed');
+    assert.deepEqual(told.map((n) => n.grade), ['error'], 'a liquidation is an error, even past the stop-loss level');
+    assert.match(told[0]!.title, /^BTC-USD liquidated in the copy of /);
+    const said = (await store.activity({ subId: s.id })).find((e) => e.kind === 'status' && e.symbol === 'BTC-USD');
+    assert.deepEqual([said?.reason, said?.detail], ['closed-outside', 'SoDEX liquidated this copied position, so it was closed outside the copier. Its stops on SoDEX are cancelled; it resumes when the leader is flat.']);
+    assert.ok(await until(() => rec.cancels.includes(rec.stops[0]!.clOrdID)), 'its stop-loss on SoDEX is cancelled');
+  } finally {
+    await rt.stop();
+  }
+
+  // SoDEX's fills not readable: past the stop's level it is still not told as the stop (that needs its fill).
+  const b = await holding({ id: 'liq-past-sl-unread' });
+  try {
+    b.rt.markets.setMark('BTC-USD', 71_000);
+    b.w.follower = [];
+    await b.rt.refreshFollower(FOLLOWER);
+    assert.deepEqual(b.notices.filter((n) => n.kind === 'closed').map((n) => n.grade), ['error']);
+    assert.ok((await b.store.activity({ subId: b.s.id })).some((e) => e.reason === 'closed-outside' && /closed outside the copier \(by you, or by SoDEX\)/.test(e.detail ?? '')));
+  } finally {
+    await b.rt.stop();
+  }
+});
+
+test('the copy\'s own SoDEX stop-loss filled (its client id in SoDEX\'s fills): told as its stop-loss, info; the leader\'s next add is skipped as after a stop', async () => {
+  const { w, rec, rt, store, notices, s } = await holding({ id: 'own-sl', fills: [] });
+  try {
+    rt.markets.setMark('BTC-USD', 72_000);
+    w.fills = [fillOf(rec.stops[0]!.clOrdID, '0.01', '72000')];
+    w.follower = [];
+    await rt.refreshFollower(FOLLOWER);
+    assert.deepEqual(notices.filter((n) => n.kind === 'closed').map((n) => [n.grade, n.body]), [['info', 'Your stop-loss closed this copied position.']]);
+    assert.ok((await store.activity({ subId: s.id })).some((e) => e.kind === 'status' && e.reason === 'stop-loss'));
+    const n0 = rec.orders().length;
+    leaderBuys('0.5');
+    w.leader = [{ s: 'BTC-USD', sz: '1.5', ep: '80000' }];
+    await wait(200);
+    assert.equal(rec.orders().length, n0, 'not reopened while the leader holds');
+    assert.ok((await store.activity({ subId: s.id })).some((e) => e.kind === 'skip' && e.reason === 'after-stop-loss'), 'skipped as after its stop-loss');
+  } finally {
+    await rt.stop();
+  }
+
+  // The mark at the stop's level but SoDEX's fills show someone else's close (by hand): closed outside, an error.
+  const b = await holding({ id: 'by-hand-at-sl', fills: [] });
+  try {
+    b.rt.markets.setMark('BTC-USD', 72_000);
+    b.w.fills = [fillOf('my-own-order', '0.01', '72000')];
+    b.w.follower = [];
+    await b.rt.refreshFollower(FOLLOWER);
+    assert.deepEqual(b.notices.filter((n) => n.kind === 'closed').map((n) => n.grade), ['error']);
+  } finally {
+    await b.rt.stop();
+  }
+});
+
+test('liquidated with no stop set: told as a liquidation (error), nothing to cancel on SoDEX', async () => {
+  const { w, rec, rt, notices, s } = await holding({ id: 'liq-no-stop', settings: { stopLossPct: null, takeProfitPct: null }, fills: [] });
+  try {
+    assert.equal(rec.stops.length, 0, 'no stop rests on SoDEX');
+    w.fills = [liquidationFill('0.01')];
+    w.follower = [];
+    await rt.refreshFollower(FOLLOWER);
+    await wait(50);
+    assert.equal(size(rt, s.id), 0);
+    assert.deepEqual(notices.filter((n) => n.kind === 'closed').map((n) => [n.ref, n.grade]), [['liq-no-stop:BTC-USD', 'error']]);
+    assert.match(notices.find((n) => n.kind === 'closed')!.body, /^SoDEX liquidated this copied position/);
+    assert.equal(rec.cancels.length, 0, 'nothing cancelled');
+  } finally {
+    await rt.stop();
+  }
+});
+
+test('liquidated in full while the copier was restarting: the next copier books it from the stored copy, tells it as a liquidation and cancels the stored stop', async () => {
+  const { w, rec, rt, store, s } = await holding({ id: 'liq-restart', fills: [] });
+  await rt.stop();
+  // While no copier runs, SoDEX takes the position over.
+  w.marks['BTC-USD'] = 78_800;
+  w.follower = [];
+  w.fills = [liquidationFill('0.01')];
+  const next = runtime(w, rec.sink, store);
+  try {
+    await next.rt.start();
+    assert.ok(await until(() => next.notices.some((n) => n.kind === 'closed')), 'told after the restart');
+    assert.deepEqual(next.notices.filter((n) => n.kind === 'closed').map((n) => [n.ref, n.grade]), [['liq-restart:BTC-USD', 'error']]);
+    assert.equal(size(next.rt, s.id), 0, 'the stored position is booked closed');
+    assert.ok(await until(() => rec.cancels.includes(rec.stops[0]!.clOrdID)), 'the stop-loss the store kept is cancelled on SoDEX');
+    assert.ok((await store.activity({ subId: s.id })).some((e) => e.reason === 'closed-outside' && /^SoDEX liquidated/.test(e.detail ?? '')));
+  } finally {
+    await next.rt.stop();
   }
 });
 

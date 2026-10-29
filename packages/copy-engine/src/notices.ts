@@ -1,8 +1,8 @@
 /**
  * What a follower should hear of, from either engine, as one notice: an algo that failed,
- * was stopped or held without being asked, or finished; a copy halted, blocked, paused or
- * stopped without being asked, a copied position closed by its stop or outside the copier, a
- * leader's coin the copy cannot follow on SoDEX (not listed, or another asset there), or a
+ * was stopped or held without being asked, or finished, or whose position was closed outside it;
+ * a copy halted, blocked, paused or stopped without being asked, a copied position closed by its
+ * stop or outside the copier (a liquidation included) or made smaller outside it, a leader's coin the copy cannot follow on SoDEX (not listed, or another asset there), or a
  * copied position on a market SoDEX has since delisted. What the follower did themself
  * (pause, cancel, stop) is not a notice - they know.
  *
@@ -14,10 +14,10 @@ import type { AlgoRecord, AlgoStatus } from './algo/types.ts';
 import { ALGO_NAMES } from './algo/spec.ts';
 import type { AssetVerdict, Subscription, SubscriptionStatus } from './types.ts';
 
-/** How much it matters: info (finished, closed by its stop), warn (stopped or held by the engine), error (failed, halted, a position closed outside). */
+/** How much it matters: info (finished, closed by its stop), warn (stopped or held by the engine, made smaller outside), error (failed, halted, a position closed outside, a liquidation). */
 export type NoticeGrade = 'info' | 'warn' | 'error';
 export type NoticeSource = 'algo' | 'copy';
-export type NoticeKind = 'done' | 'ended' | 'failed' | 'stopped' | 'held' | 'halted' | 'blocked' | 'paused' | 'closed' | 'different-asset' | 'same-asset' | 'not-copied' | 'delisted';
+export type NoticeKind = 'done' | 'ended' | 'failed' | 'stopped' | 'held' | 'halted' | 'blocked' | 'paused' | 'closed' | 'reduced' | 'different-asset' | 'same-asset' | 'not-copied' | 'delisted';
 
 export interface EngineNotice {
   /** Stable for one event: `${source}:${ref}:${kind}:${at}` - a repeat is the same notice. */
@@ -65,6 +65,14 @@ export function algoNotice(a: AlgoRecord, status: AlgoStatus, reason: string | n
   }
 }
 
+/**
+ * An ended algo's position gone while its exits still rested (error): closed outside it - a
+ * liquidation, or by hand. Its exits are cancelled and not placed again.
+ */
+export function algoClosedNotice(a: AlgoRecord, body: string, at = Date.now()): EngineNotice {
+  return mk({ owner: a.owner, source: 'algo', ref: a.id, kind: 'closed', grade: 'error', title: `${algoName(a)}: position closed outside it`, body, at, paper: !!a.spec.paper });
+}
+
 /** A copy's status change as a notice, or null (it went on, or the follower did it). */
 export function copyNotice(s: Subscription, status: SubscriptionStatus, reason: string | null, at = Date.now()): EngineNotice | null {
   const body = reason ?? '';
@@ -87,7 +95,21 @@ export function copyClosedNotice(s: Subscription, symbol: string, why: string, d
   const byStop = why === 'stop-loss' || why === 'take-profit';
   return mk({
     owner: s.owner, source: 'copy', ref: `${s.id}:${symbol}`, kind: 'closed', grade: byStop ? 'info' : 'error',
-    title: `${symbol} closed in the copy of ${who}`, body: detail, at, paper: !!s.settings.paper,
+    title: why === 'liquidation' ? `${symbol} liquidated in the copy of ${who}` : `${symbol} closed in the copy of ${who}`, body: detail, at, paper: !!s.settings.paper,
+  });
+}
+
+/**
+ * A copied position SoDEX shows smaller than the copy's books, not by an order of the copier's:
+ * a partial liquidation (error), its own stop in part (info), or by the follower or SoDEX - a
+ * part closed by hand, ADL (warn). The copy goes on with what is left.
+ */
+export function copyReducedNotice(s: Subscription, symbol: string, why: string, detail: string, at = Date.now()): EngineNotice {
+  const who = leaderShort(s);
+  const grade = why === 'liquidation' ? 'error' : why === 'stop-loss' || why === 'take-profit' ? 'info' : 'warn';
+  return mk({
+    owner: s.owner, source: 'copy', ref: `${s.id}:${symbol}`, kind: 'reduced', grade,
+    title: why === 'liquidation' ? `${symbol} partly liquidated in the copy of ${who}` : `${symbol} made smaller in the copy of ${who}`, body: detail, at, paper: !!s.settings.paper,
   });
 }
 

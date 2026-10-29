@@ -772,8 +772,9 @@ test('the exits of an algo are reduce-only stops: whatever happens to the positi
   assert.ok(signed.orders.length === 2 && signed.orders.every((o) => o.reduceOnly === true), 'signed reduce-only');
 });
 
-test('liquidated, SoDEX pulling the exits with the position: they end and are never placed again; nothing else is sent', async () => {
+test('liquidated, SoDEX pulling the exits with the position: they end and are never placed again; nothing else is sent; the trader is told the position is gone', async () => {
   const r = await rig();
+  const notices = noticesOf(r);
   const a = await bracketWithExits(r);
   const orders = r.ex.all.length;
   const batches = r.ex.stops.length;
@@ -790,17 +791,40 @@ test('liquidated, SoDEX pulling the exits with the position: they end and are ne
   assert.equal(r.ex.all.length, orders, 'no order is sent');
   assert.ok(x.exitOrders!.every((e) => e.state === 'done'), 'its exits are over');
   assert.ok((await texts(r, a.id)).some((t) => /cancelled on SoDEX; its exits are not placed again/.test(t)), 'its log says SoDEX cancelled them');
+  assert.deepEqual(notices.filter((n) => n.ref === a.id && n.kind === 'closed').map((n) => [n.kind, n.grade]), [['closed', 'error']], 'and that the position was closed outside the algo');
+  assert.match(notices.find((n) => n.kind === 'closed')!.body, /its exits, cancelled on SoDEX, are not placed again/);
 });
 
-test.todo('FINDING liquidated, algo: an algo whose filled position was liquidated (closed outside it) is never told - its exits stay on SoDEX for a position that is gone (they would close a later position on that market, opened by anything else), when one triggers and SoDEX refuses it (nothing to reduce) a new pair is placed for what the algo filled, and no event or notice names it', async () => {
+test('the trader cancelled the exits on SoDEX, the position still held: no notice, and they are not placed again', async () => {
   const r = await rig();
-  const notices: EngineNotice[] = [];
-  (r.rt as unknown as { host: { onNotice?: (n: EngineNotice) => void } }).host.onNotice = (n) => notices.push(n);
+  const notices = noticesOf(r);
   const a = await bracketWithExits(r);
   const batches = r.ex.stops.length;
-  // SoDEX takes the position over and leaves the stops; later the stop-loss triggers with nothing to reduce.
+  for (const id of [...r.ex.liveStops.keys()]) {
+    r.ex.liveStops.delete(id);
+    r.ex.history.get(id)!.status = 'CANCELED';
+    r.market.order({ clOrdID: id, status: 'CANCELED' });
+  }
+  for (let i = 0; i < 6; i++) await tick(r, 10_000);
+  assert.equal(r.ex.stops.length, batches);
+  assert.equal(notices.filter((n) => n.ref === a.id && n.kind === 'closed').length, 0);
+});
+
+/** The trader's notices, as the host takes them (the algo's own 'done' among them; the tests read its 'closed' ones). */
+function noticesOf(r: Rig): EngineNotice[] {
+  const notices: EngineNotice[] = [];
+  (r.rt as unknown as { host: { onNotice?: (n: EngineNotice) => void } }).host.onNotice = (n) => notices.push(n);
+  return notices;
+}
+
+test('BUG liquidated, algo: SoDEX takes the position over and leaves the exits; the stop-loss then expires with nothing to reduce - no pair is placed again, the take-profit left is cancelled, the trader is told', async () => {
+  const r = await rig();
+  const notices = noticesOf(r);
+  const a = await bracketWithExits(r);
+  const batches = r.ex.stops.length;
+  const orders = r.ex.all.length;
+  // SoDEX takes the position over and leaves the stops; the stop-loss triggers with nothing to reduce before the engine looked.
   r.ex.position = 0;
-  for (let i = 0; i < 3; i++) await tick(r, 10_000);
   const sl = [...r.ex.liveStops.values()].find((s) => s.kind === 'sl')!;
   r.ex.liveStops.delete(sl.clOrdID);
   r.ex.history.get(sl.clOrdID)!.status = 'EXPIRED';
@@ -808,5 +832,108 @@ test.todo('FINDING liquidated, algo: an algo whose filled position was liquidate
   for (let i = 0; i < 12; i++) await tick(r, 10_000);
   assert.equal(r.ex.stops.length, batches, 'no exit placed again for a position that is gone');
   assert.equal(r.ex.liveStops.size, 0, 'what it left on SoDEX is cancelled');
-  assert.ok(notices.some((n) => n.ref === a.id && n.grade === 'error'), 'the trader is told the position was closed outside the algo');
+  assert.equal(r.ex.all.length, orders, 'no order is sent');
+  const told = notices.filter((n) => n.ref === a.id && n.kind === 'closed');
+  assert.deepEqual(told.map((n) => [n.source, n.grade]), [['algo', 'error']], 'the trader is told the position was closed outside the algo, once');
+  assert.match(told[0]!.body, /closed outside this algo \(a liquidation, or by hand\).*take-profit is cancelled/);
+  const x = r.rt.get(a.id)!;
+  assert.equal(x.status, 'done', 'it keeps its final status');
+  assert.ok(x.exitOrders!.every((e) => e.state === 'done'), 'its exits are over');
+  assert.ok((await texts(r, a.id)).some((t) => /position is gone: it was closed outside this algo/.test(t)), 'its log says why');
+});
+
+test('liquidated, algo, the exits still resting: the engine finds the position gone and cancels both, places nothing, tells the trader once', async () => {
+  const r = await rig();
+  const notices = noticesOf(r);
+  const a = await bracketWithExits(r);
+  const batches = r.ex.stops.length;
+  r.ex.position = 0;
+  for (let i = 0; i < 3; i++) await tick(r, 10_000);
+  assert.equal(r.ex.liveStops.size, 0, 'both exits are cancelled on SoDEX');
+  assert.equal(r.ex.cancelled.length, 2);
+  for (let i = 0; i < 12; i++) await tick(r, 10_000);
+  assert.equal(r.ex.stops.length, batches, 'no exit placed again');
+  assert.deepEqual(notices.filter((n) => n.ref === a.id && n.kind === 'closed').map((n) => [n.kind, n.grade]), [['closed', 'error']], 'one error notice');
+  assert.match(notices.find((n) => n.kind === 'closed')!.body, /take-profit and stop-loss are cancelled on SoDEX and not placed again/);
+  // A later position on that market (opened by anything else) is not touched by them.
+  r.ex.position = 0.005;
+  for (let i = 0; i < 6; i++) await tick(r, 10_000);
+  assert.equal(r.ex.stops.length, batches);
+  assert.equal(r.ex.cancelled.length, 2);
+});
+
+test('liquidated, algo with only a take-profit: the one exit is cancelled once the position is gone, and the trader is told', async () => {
+  const r = await rig();
+  const notices = noticesOf(r);
+  const a = await add(r, { kind: 'bracket', quantity: '0.002', entry: 'market', slippageBps: 20, exits: { tpPct: 0.1 } });
+  await step(r, a.id);
+  assert.equal((await step(r, a.id, 500)).status, 'done');
+  assert.deepEqual([...r.ex.liveStops.values()].map((s) => s.kind), ['tp']);
+  r.ex.position = 0;
+  for (let i = 0; i < 4; i++) await tick(r, 10_000);
+  assert.equal(r.ex.liveStops.size, 0, 'the take-profit is cancelled');
+  assert.equal(r.ex.stops.length, 1, 'nothing placed again');
+  assert.deepEqual(notices.filter((n) => n.ref === a.id && n.kind === 'closed').map((n) => n.grade), ['error']);
+  assert.match(notices.find((n) => n.kind === 'closed')!.body, /its take-profit is cancelled on SoDEX/);
+});
+
+test('liquidated, algo, the position flipped to the other side outside it: the exits of the long are cancelled as for a position gone', async () => {
+  const r = await rig();
+  const notices = noticesOf(r);
+  const a = await bracketWithExits(r);
+  r.ex.position = -0.003;
+  for (let i = 0; i < 3; i++) await tick(r, 10_000);
+  assert.equal(r.ex.liveStops.size, 0);
+  assert.equal(notices.filter((n) => n.ref === a.id && n.kind === 'closed').length, 1);
+});
+
+test('the position still held (or not readable), algo: its exits stay; one that expires is placed again after the wait, as before', async () => {
+  const r = await rig();
+  const notices = noticesOf(r);
+  const a = await bracketWithExits(r);
+  const batches = r.ex.stops.length;
+  for (let i = 0; i < 6; i++) await tick(r, 10_000);
+  assert.equal(r.ex.liveStops.size, 2, 'held: both exits stay');
+  assert.equal(r.ex.cancelled.length, 0);
+  // SoDEX unreachable: nothing is concluded from a read that failed.
+  r.ex.down = true;
+  for (let i = 0; i < 3; i++) await tick(r, 10_000);
+  r.ex.down = false;
+  assert.equal(r.ex.liveStops.size, 2);
+  // An expired stop-loss with the position still there: the pair goes out again once the wait is over.
+  const sl = [...r.ex.liveStops.values()].find((s) => s.kind === 'sl')!;
+  r.ex.liveStops.delete(sl.clOrdID);
+  r.ex.history.get(sl.clOrdID)!.status = 'EXPIRED';
+  r.market.order({ clOrdID: sl.clOrdID, status: 'EXPIRED', reason: 'trigger price out of range' });
+  for (let i = 0; i < 6; i++) await tick(r, 10_000);
+  assert.equal(r.ex.stops.length, batches + 1, 'placed again');
+  assert.equal(r.ex.liveStops.size, 2);
+  assert.equal(notices.filter((n) => n.ref === a.id && n.kind === 'closed').length, 0, 'nothing to tell');
+});
+
+test('the stop-loss fired while its update was lost (the position flat because of it): booked from SoDEX\'s history as its fill, the take-profit cancelled, no "closed outside" notice', async () => {
+  const r = await rig();
+  const notices = noticesOf(r);
+  const a = await bracketWithExits(r);
+  const sl = [...r.ex.liveStops.values()].find((s) => s.kind === 'sl')!;
+  // SoDEX fires it; the socket never says so.
+  r.ex.liveStops.delete(sl.clOrdID);
+  Object.assign(r.ex.history.get(sl.clOrdID)!, { status: 'FILLED', executedQty: 0.002, executedValue: 0.002 * 54_000 });
+  r.ex.position = 0;
+  for (let i = 0; i < 4; i++) await tick(r, 10_000);
+  const x = r.rt.get(a.id)!;
+  assert.equal(x.exitOrders!.find((e) => e.clOrdID === sl.clOrdID)!.filled, 0.002, 'the stop-loss fill is booked');
+  assert.equal(r.ex.liveStops.size, 0, 'the take-profit is cancelled (one cancels the other)');
+  assert.equal(notices.filter((n) => n.ref === a.id && n.kind === 'closed').length, 0, 'not told as closed outside');
+});
+
+test('liquidated, algo, while no runner ran: the next runner finds the position gone and cancels the exits the store kept', async () => {
+  const r = await rig();
+  const a = await bracketWithExits(r);
+  r.ex.position = 0;
+  await crashAndRestart(r);
+  const notices = noticesOf(r);
+  for (let i = 0; i < 3; i++) await tick(r, 10_000);
+  assert.equal(r.ex.liveStops.size, 0);
+  assert.deepEqual(notices.filter((n) => n.ref === a.id && n.kind === 'closed').map((n) => [n.kind, n.grade]), [['closed', 'error']]);
 });
