@@ -86,6 +86,7 @@ What we need to know, and to ask for where it is not planned:
 8. Are two sub-accounts of one parent trading with each other an ordinary trade, not a self-trade, for self-trade
    prevention and surveillance?
 9. Is each sub-account margined and liquidated on its own, like any account?
+10. How many sub-accounts may one parent hold? We need one per user, so thousands; Hyperliquid caps a master at 50.
 
 ## 7. Restricted keys for contract accounts
 
