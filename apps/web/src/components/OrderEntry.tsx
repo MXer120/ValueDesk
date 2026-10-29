@@ -1236,10 +1236,10 @@ export function OrderEntry({
     : effectiveTif === 'gtx' && crossesNow
       ? { text: `Post only: at this price it would take, so SoDEX would reject it. Set a price ${side === 'buy' ? 'below the best ask' : 'above the best bid'}.`, block: true }
       : effectiveTif === 'ioc' && !crossesNow
+        // A limit through the touch simply fills up to its price as a taker (GTC: the rest rests, IOC: the
+        // rest is cancelled) - normal, so not said on the ticket (owner, 2026-10-29); the preview shows the fill.
         ? { text: 'IOC: nothing fills at this price, so it would be cancelled at once.' }
-        : crossesNow
-          ? { text: effectiveTif === 'ioc' ? 'Fills now as a taker up to this price; the rest is cancelled.' : 'Fills now as a taker up to this price; the rest rests on the book.' }
-          : null;
+        : null;
   const estSlip = liveQty <= 0
     ? 0
     : !levels?.length
