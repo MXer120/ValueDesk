@@ -16,7 +16,7 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import {
   NOTICE_LIMITS, NOTICE_SHOW_DAYS, STATUS_SERVICES, cleanText, closingStage, healthNotices, noticePhase, parseNotice, stagesOf,
-  type HealthNotice, type Impact, type Notice, type NoticeKind, type NoticeStage, type ServiceId,
+  type HealthNotice, type Impact, type Notice, type NoticeKind, type NoticePart, type NoticeStage, type ServiceId,
 } from './statusModel.js';
 
 export const NOTICE_SCHEMA = `
@@ -52,6 +52,10 @@ export interface NewNotice {
   endsAt?: number;
   text?: string;
   stage?: NoticeStage;
+  /** A maintenance: what it does to each service (statusModel.ts NoticePart). */
+  parts?: readonly NoticePart[];
+  /** A maintenance: in progress past its end until completed (statusModel.ts Notice.holdOpen). */
+  holdOpen?: boolean;
 }
 
 export interface NoticeChange {
@@ -187,6 +191,8 @@ export class NoticeStore {
         kind: 'maintenance', title, impact: null, components, startsAt: o.startsAt, endsAt: o.endsAt,
         closedAt: stage === 'completed' ? now : null,
         updates: [{ at: now, stage, text }],
+        ...(o.parts?.length ? { parts: [...o.parts] } : {}),
+        ...(o.holdOpen ? { holdOpen: true } : {}),
       };
     }
     return this.tx(() => {

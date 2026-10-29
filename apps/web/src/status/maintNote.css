@@ -1,0 +1,79 @@
+/* The maintenance notification (status/MaintNote.tsx). It lives in the toasts' pin
+   (toast.tsx #vs-toast-pin) and uses the toast card: blue while an update runs, green
+   with a checkmark once it is done. Its parts and countdown open on hover, keyboard
+   focus or a tap. */
+
+.toast.mn-note {
+  --tone: #5b8def;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+  cursor: default;
+  border-color: color-mix(in srgb, var(--tone) 45%, var(--line));
+  background: color-mix(in srgb, var(--tone) 9%, var(--glass-pop-bg));
+}
+.toast.mn-note--done { --tone: var(--pos); }
+.mn-note__top { display: flex; align-items: center; gap: 12px; min-width: 0; cursor: pointer; }
+.mn-note__left { color: var(--text); font-variant-numeric: tabular-nums; }
+
+/* Closed until hover, keyboard focus, or a tap on the card. */
+.mn-note__more {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 180ms var(--ease-out);
+}
+.mn-note:hover .mn-note__more,
+.mn-note:focus-within .mn-note__more,
+.mn-note.is-open .mn-note__more { grid-template-rows: 1fr; }
+.mn-note__panel {
+  overflow: hidden;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 10px;
+  font-size: var(--fs-xs);
+  line-height: 16px;
+}
+.mn-note__name { color: var(--text); font-weight: 600; }
+.mn-note__parts { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.mn-note__part {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 8px;
+}
+.mn-note__dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.mn-note__svc { min-width: 0; overflow: hidden; color: var(--text); text-overflow: ellipsis; white-space: nowrap; }
+.mn-note__state { color: var(--muted); white-space: nowrap; }
+.mn-note__why { grid-column: 2 / -1; margin-top: 2px; color: var(--muted); }
+.mn-note__part.is-down .mn-note__dot { background: var(--neg); }
+.mn-note__part.is-down .mn-note__state { color: var(--neg); }
+.mn-note__part.is-partial .mn-note__dot,
+.mn-note__part.is-affected .mn-note__dot { background: var(--warn); }
+.mn-note__part.is-partial .mn-note__state,
+.mn-note__part.is-affected .mn-note__state { color: var(--warn); }
+.mn-note__part.is-none .mn-note__dot { background: color-mix(in srgb, var(--pos) 60%, transparent); }
+.mn-note--done .mn-note__part .mn-note__dot { background: var(--pos); }
+.mn-note--done .mn-note__part .mn-note__state { color: var(--muted); }
+.mn-note__eta { margin: 0; color: var(--muted); }
+.mn-note__eta b { color: var(--text); font-family: var(--font-num); font-variant-numeric: tabular-nums; }
+.mn-note__link { align-self: flex-start; color: var(--muted); text-decoration: none; }
+.mn-note__link:hover { color: var(--text); }
+
+/* Docked in the navbar's lane (shell.css): a pill like the rest; the details drop below it. */
+.toasts.is-docked .toast.mn-note { height: auto; min-height: 38px; padding-bottom: 0; justify-content: center; overflow: visible; }
+.toasts.is-docked .mn-note__top { gap: 8px; height: 36px; }
+.toasts.is-docked .mn-note__more {
+  position: absolute; top: calc(100% + 6px); right: 0; z-index: 5; width: 320px; padding: 0 12px;
+  border-radius: 12px; background: var(--glass-pop-bg); -webkit-backdrop-filter: var(--glass-pop-blur); backdrop-filter: var(--glass-pop-blur);
+  box-shadow: var(--depth-3, 0 12px 32px rgba(0, 0, 0, 0.5));
+}
+.toasts.is-docked .mn-note__panel { padding: 0; }
+.toasts.is-docked .mn-note:hover .mn-note__panel,
+.toasts.is-docked .mn-note:focus-within .mn-note__panel,
+.toasts.is-docked .mn-note.is-open .mn-note__panel { padding: 12px 0; }
+
+@media (prefers-reduced-motion: reduce) {
+  .mn-note__more { transition: none; }
+}

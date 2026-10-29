@@ -112,6 +112,21 @@ export interface NoticeUpdate {
   text: string;
 }
 
+/**
+ * What a maintenance does to one service while it runs, as the app's notification
+ * names it: down (it does not work meanwhile), partial (it works, but paused for a
+ * moment or behind), none (not affected).
+ */
+export const PART_IMPACTS = ['down', 'partial', 'none'] as const;
+export type PartImpact = (typeof PART_IMPACTS)[number];
+
+export interface NoticePart {
+  id: ServiceId;
+  impact: PartImpact;
+  /** One line for the visitor: what they notice there (may be empty). */
+  text: string;
+}
+
 export interface Notice {
   id: number;
   kind: NoticeKind;
@@ -127,9 +142,19 @@ export interface Notice {
   closedAt: number | null;
   /** Oldest first. */
   updates: NoticeUpdate[];
+  /** A maintenance: what it does to each service, in the page's order (a release's: ops/shipNotice.ts). Absent: only `components` are known. */
+  parts?: NoticePart[];
+  /**
+   * A maintenance that stays in progress past its planned end until it is completed by
+   * hand - a release completes its own when it is done (deploy/release/ship.sh) - and
+   * by the clock HOLD_OPEN_MS after the planned end at the latest.
+   */
+  holdOpen?: boolean;
 }
 
-export const NOTICE_LIMITS = { title: 120, text: 1000, updates: 50 } as const;
+export const NOTICE_LIMITS = { title: 120, text: 1000, updates: 50, partText: 200 } as const;
+/** How long a held-open maintenance may run past its planned end (ship.sh's maintenance window: maint.sh on 60). */
+export const HOLD_OPEN_MS = 60 * 60_000;
 /** How long a closed notice stays on the page (and in the report). */
 export const NOTICE_SHOW_DAYS = STATUS_DAYS;
 
@@ -170,6 +195,18 @@ export function cleanText(v: unknown, max: number): string {
 
 const isTime = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && v > 1_500_000_000_000 && v < 4_000_000_000_000;
 
+/** A maintenance's parts, checked one by one, each service once, in the page's order; null when none is one. */
+export function parseParts(v: unknown): NoticePart[] | null {
+  if (!Array.isArray(v)) return null;
+  const byId = new Map<ServiceId, NoticePart>();
+  for (const p of v as Array<Partial<NoticePart> | null>) {
+    if (!p || !isServiceId(p.id) || !(PART_IMPACTS as readonly unknown[]).includes(p.impact) || byId.has(p.id)) continue;
+    byId.set(p.id, { id: p.id, impact: p.impact as PartImpact, text: cleanText(p.text, NOTICE_LIMITS.partText) });
+  }
+  const out = STATUS_SERVICES.flatMap((s) => (byId.has(s.id) ? [byId.get(s.id)!] : []));
+  return out.length ? out : null;
+}
+
 /** A notice read from storage or the network, checked field by field; null when it is not one. */
 export function parseNotice(v: unknown): Notice | null {
   const n = v as Partial<Notice> | null;
@@ -191,7 +228,18 @@ export function parseNotice(v: unknown): Notice | null {
     updates.push({ at: u.at, stage: u.stage, text: cleanText(u.text, NOTICE_LIMITS.text) });
   }
   if (!updates.length) return null;
-  return { id: n.id, kind: n.kind, title, impact, components, startsAt: n.startsAt, endsAt, closedAt: isTime(n.closedAt) ? n.closedAt : null, updates };
+  const parts = n.kind === 'maintenance' ? parseParts(n.parts) : null;
+  return {
+    id: n.id, kind: n.kind, title, impact, components, startsAt: n.startsAt, endsAt, closedAt: isTime(n.closedAt) ? n.closedAt : null, updates,
+    ...(parts ? { parts } : {}),
+    ...(n.kind === 'maintenance' && n.holdOpen === true ? { holdOpen: true } : {}),
+  };
+}
+
+/** When a maintenance completes by the clock: its planned end, or - held open - HOLD_OPEN_MS after it. Null for an incident. */
+export function clockEnd(n: Notice): number | null {
+  if (n.kind !== 'maintenance' || n.endsAt === null) return null;
+  return n.holdOpen ? n.endsAt + HOLD_OPEN_MS : n.endsAt;
 }
 
 export type NoticePhase = 'active' | 'resolved' | 'upcoming' | 'in_progress' | 'completed';
@@ -200,7 +248,8 @@ export type NoticePhase = 'active' | 'resolved' | 'upcoming' | 'in_progress' | '
 export function noticePhase(n: Notice, now: number): NoticePhase {
   if (n.kind === 'incident') return n.closedAt !== null && n.closedAt <= now ? 'resolved' : 'active';
   if (n.closedAt !== null && n.closedAt <= now) return 'completed';
-  if (n.endsAt !== null && now >= n.endsAt) return 'completed';
+  const end = clockEnd(n);
+  if (end !== null && now >= end) return 'completed';
   if (now >= n.startsAt) return 'in_progress';
   const last = n.updates.at(-1)?.stage;
   return last === 'in_progress' || last === 'verifying' ? 'in_progress' : 'upcoming';
@@ -219,7 +268,7 @@ export function noticeSpan(n: Notice, now: number): [number, number] {
     const early = n.updates.find((u) => u.stage === 'in_progress' || u.stage === 'verifying');
     if (early && early.at < from) from = early.at;
   }
-  const end = n.closedAt ?? n.endsAt ?? now;
+  const end = n.closedAt ?? clockEnd(n) ?? now;
   return [from, Math.max(from, Math.min(end, now))];
 }
 
@@ -259,7 +308,7 @@ export function dayToneWith(d: DayTuple, onDay: readonly Notice[]): DayToneShown
   return tone;
 }
 
-/** One open notice as /api/health carries it (the app's one-line banner). */
+/** One notice as /api/health carries it (the app's banner and its maintenance notification). */
 export interface HealthNotice {
   id: number;
   kind: NoticeKind;
@@ -268,14 +317,29 @@ export interface HealthNotice {
   phase: NoticePhase;
   startsAt: number;
   endsAt: number | null;
+  /** The services it touches (absent from an older server). */
+  components?: ServiceId[];
+  /** A maintenance: when it was completed by hand; null while open (absent from an older server). */
+  closedAt?: number | null;
+  /** A maintenance's parts (Notice.parts), when it names them. */
+  parts?: NoticePart[];
+  /** In progress past its planned end until it is completed (Notice.holdOpen). */
+  holdOpen?: boolean;
 }
 
 /** How soon an upcoming maintenance is announced in the app. */
 export const ANNOUNCE_AHEAD_MS = 24 * 3_600_000;
+/**
+ * How long a completed maintenance is still listed, after the open ones: a tab that
+ * showed it in progress turns its notification green from it.
+ */
+export const DONE_LISTED_MS = 2 * 3_600_000;
 
 /**
- * What the app's banner shows: open incidents (the worst first), maintenance in
- * progress, then maintenance starting within ANNOUNCE_AHEAD_MS; at most `max`.
+ * What the app shows: open incidents (the worst first), maintenance in progress, then
+ * maintenance starting within ANNOUNCE_AHEAD_MS - at most `max` of these - and after
+ * them the maintenance completed within DONE_LISTED_MS (at most 3), the latest first.
+ * The banner reads only the open and upcoming ones (an older app too).
  */
 export function healthNotices(notices: readonly Notice[], now: number, max = 3): HealthNotice[] {
   const rank = (n: Notice): number => {
@@ -285,12 +349,24 @@ export function healthNotices(notices: readonly Notice[], now: number, max = 3):
     if (p === 'upcoming' && n.startsAt - now <= ANNOUNCE_AHEAD_MS) return 4;
     return -1;
   };
-  return notices
+  const doneAt = (n: Notice): number => n.closedAt ?? clockEnd(n) ?? n.startsAt;
+  const open = notices
     .map((n) => ({ n, r: rank(n) }))
     .filter((x) => x.r >= 0)
     .sort((a, b) => a.r - b.r || a.n.startsAt - b.n.startsAt)
     .slice(0, max)
-    .map(({ n }) => ({ id: n.id, kind: n.kind, title: n.title, impact: n.impact, phase: noticePhase(n, now), startsAt: n.startsAt, endsAt: n.endsAt }));
+    .map(({ n }) => n);
+  const done = notices
+    .filter((n) => n.kind === 'maintenance' && n.startsAt <= now && noticePhase(n, now) === 'completed' && doneAt(n) >= now - DONE_LISTED_MS)
+    .sort((a, b) => doneAt(b) - doneAt(a))
+    .slice(0, 3);
+  return [...open, ...done].map((n) => ({
+    id: n.id, kind: n.kind, title: n.title, impact: n.impact, phase: noticePhase(n, now), startsAt: n.startsAt, endsAt: n.endsAt,
+    components: n.components,
+    ...(n.kind === 'maintenance' ? { closedAt: n.closedAt } : {}),
+    ...(n.parts ? { parts: n.parts } : {}),
+    ...(n.holdOpen ? { holdOpen: true } : {}),
+  }));
 }
 
 // --- times, as the page, the feed and the owner's commands write them (always UTC) ---

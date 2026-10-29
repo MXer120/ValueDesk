@@ -12,13 +12,23 @@ One command from a committed HEAD to every place it runs: the next tag, GitHub's
 the server tarball to server 1 (indexer, API) and server 2 (executor) within the laptop's
 upload cap, the operations scripts (`deploy/server/bin`) into `/opt/valuescan/bin`, each
 service restarted only when code it imports changed (`parts.mjs` reads the import graphs),
-a rollback at once when one does not come back healthy, a maintenance notice on the status
-page around an indexer restart, and finally `main` - so Vercel publishes the web after the
-servers it calls. The header of `ship.sh` lists every step and what each restart costs
-(measured: no failed request for the web, the API or the executor; the indexer's boards
-are about two minutes staler). Units, Caddy and env templates are never shipped: it names
-them, and `bootstrap-instance.sh` installs them. Every ship is a line in
-`deploy/.out/ships.log`.
+a rollback at once when one does not come back healthy, a maintenance notice around the
+restarts, and finally `main` - so Vercel publishes the web after the servers it calls. The
+header of `ship.sh` lists every step and what each restart costs (measured: no failed
+request for the web, the API or the executor; the indexer's boards are about two minutes
+staler). Units, Caddy and env templates are never shipped: it names them, and
+`bootstrap-instance.sh` installs them. Every ship is a line in `deploy/.out/ships.log`.
+
+**The maintenance notice.** A ship that restarts anything posts one maintenance on the
+status page (`status.sh ship <tag> --parts=...`, `apps/server/src/ops/shipNotice.ts`): each
+part down, partly down or not affected, and the expected end from the measured costs. The
+app shows it as a blue notification with a countdown (hover: the parts), keeps it until the
+user clicks it away, and turns it green with a checkmark when `ship.sh` completes it - at
+the end, or after a rollback that left everything as before (`apps/web/src/status/MaintNote.tsx`).
+It stays in progress past its expected end until then, an hour at most. Left not working
+(a failed rollback, the executor held, no board build), it gets an update and stays open:
+`status.sh resolve <id>` once it is fixed. A web-only ship has no downtime and posts none;
+`--no-notice` posts none either.
 
 **The copy executor** (live copies and algos, with the followers' keys) is restarted only
 with its own yes (`--executor-ok` beside `--yes`), and behind guards: the new code is

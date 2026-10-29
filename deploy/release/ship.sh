@@ -6,7 +6,7 @@
 #   bash deploy/release/ship.sh --dry-run        the plan only - nothing is tagged, pushed or released
 #   bash deploy/release/ship.sh --yes            no question (the owner's go is already given)
 #   bash deploy/release/ship.sh --tag=v0.2.60    this tag instead of the next one (or the one HEAD already has)
-#   bash deploy/release/ship.sh --no-notice      no maintenance notice on the status page for an indexer restart
+#   bash deploy/release/ship.sh --no-notice      no maintenance notice (status page + the app's notification) for the restarts
 #   bash deploy/release/ship.sh --yes --executor-ok   with --yes, the copy executor is restarted only with this too
 #
 # THE COPY EXECUTOR runs followers' live copies and algos with their keys, so its release has guards of its own
@@ -30,10 +30,9 @@
 #      (scp -l 8000), its checksum checked on arrival;
 #   5. the operations scripts (deploy/server/bin) from the tarball into /opt/valuescan/bin where they differ -
 #      a release used to leave them to be installed by hand;
-#   6. server 1: release.sh --units=<indexer,api - those that changed>. An indexer restart first posts a
-#      maintenance notice on the status page (so its pause is not an incident) and completes it when the
-#      indexer has built its boards again. Server 2: release.sh --units=executor. A unit that does not come
-#      back healthy is rolled back to the release before at once, and ship.sh stops;
+#   6. the maintenance notice (THE NOTICE below), then server 1: release.sh --units=<indexer,api - those that
+#      changed>, waiting for the indexer to build its boards again; server 2: release.sh --units=executor. A
+#      unit that does not come back healthy is rolled back to the release before at once, and ship.sh stops;
 #   7. main moves to the tag (fast-forward) - Vercel builds and publishes the web - and, when the web changed,
 #      it waits for GitHub to show that Production deployment as successful and the site answering.
 #      The web goes last on purpose: what it calls already runs the new code when it appears.
@@ -48,13 +47,22 @@
 # The windows close after the server steps; one left open (the laptop died) ends by itself after 60 minutes.
 # A ship that restarts nothing (web only, scripts only) sends nothing.
 #
+# THE NOTICE: a ship that restarts anything posts one maintenance on the status page (`status.sh ship`,
+# apps/server/src/ops/shipNotice.ts), before the first restart: every part named down, partly down or not
+# affected, and the expected end from the measurements below. The app shows it as a blue notification with a
+# countdown, and turns it green when ship.sh completes it - when the restarts are over, or after a rollback
+# that left everything as it was. It stays in progress past its expected end until then (an hour at most).
+# When something is left not working (a rollback that failed, an executor held, no board build), it gets an
+# update saying so and stays open: the owner completes it (status.sh resolve <id>). A web-only ship posts none.
+#
 # DOWNTIME (measured on v0.2.57, 2026-10-28):
 #   web       none: Vercel switches atomically; an open tab whose files a deploy replaced reloads once (lazyPage.ts)
 #   api       no failed request: the API is away ~6 s and Caddy holds each request meanwhile (lb_try_duration
 #             15 s); the heatmap's WebSocket reconnects
 #   executor  no failed request: back in seconds, Caddy holds its requests up to 20 s; copies and algos wait
 #   indexer   the site keeps serving the last boards, ~2 min staler (start ~35 s, first build ~70 s); the
-#             streams' gap is read again. Hence the maintenance notice.
+#             streams' gap is read again (Lighter's re-subscribe 3.5-8 min); after midnight UTC the first
+#             build took 5-8 min. The notice's expected end counts these (shipNotice.ts SHIP_EFFECTS).
 #
 # NOT DONE HERE: units, Caddy, env templates, bootstrap (deploy/server outside bin) - ship.sh says so and
 # leaves them to bootstrap-instance.sh; the web's rollback (Vercel: promote the deployment before, or ship a revert).
@@ -179,7 +187,7 @@ cost() {
     web) echo "none (Vercel switches at once)" ;;
     api) echo "~6 s, requests held by Caddy - none fail" ;;
     executor) echo "seconds, requests held by Caddy; copies and algos wait" ;;
-    indexer) echo "boards ~2 min staler; maintenance notice $( [ "$NOTICE" = 1 ] && echo on || echo off)" ;;
+    indexer) echo "boards ~2 min staler" ;;
   esac
 }
 say "plan: $TAG ($(git rev-parse --short HEAD)$([ "$NEW_TAG" = 1 ] && echo ", new tag"))"
@@ -189,7 +197,10 @@ for p in indexer api executor web; do
   printf '  %-9s %-9s %-30s %s\n' "$p" "$where" "${WHY[$p]:-}" "$(cost "$p")" >&2
 done
 [ "$BIN" = 0 ] || note "  bin       both      /opt/valuescan/bin from the tarball where it differs"
-if [ ${#U1[@]} -gt 0 ] || [ ${#U2[@]} -gt 0 ]; then note "  telegram  MAINTENANCE started + done (a maintenance window on both servers over the restarts)"; fi
+if [ ${#U1[@]} -gt 0 ] || [ ${#U2[@]} -gt 0 ]; then
+  note "  telegram  MAINTENANCE started + done (a maintenance window on both servers over the restarts)"
+  note "  notice    $([ "$NOTICE" = 1 ] && echo "status page + the app's notification: maintenance over the restarts, completed when done" || echo "off (--no-notice)")"
+fi
 if [ ${#U2[@]} -gt 0 ]; then
   EXEC0="$(exec_health)"
   note "  executor now: $(printf '%s' "$EXEC0" | json 'v ? `${v.copies} copies (${v.active} active), ${v.algos} algos running, ${v.queue ? v.queue.waiting + v.queue.inFlight : "?"} orders in the send queue, brake ${v.brake ? "ON" : "off"}${v.ok ? "" : " - NOT HEALTHY NOW"}` : "NOT ANSWERING"')"
@@ -247,6 +258,8 @@ on_exit() {
   [ $rc = 0 ] || log_ship "FAILED (exit $rc)"
   if [ $rc != 0 ] && [ "$STARTED" = 1 ]; then
     maint_close
+    # Stopped before it was done, nothing left broken (a check refused the switch): everything runs normally.
+    if [ "$NOTICE_OK" = 1 ]; then notice_done "The update stopped before it was finished; everything runs normally."; fi
     tell failure "$TAG stopped: ${LAST_ERROR:-ship.sh ended with exit $rc}"
   fi
 }
@@ -321,8 +334,31 @@ console.log([s.lastBuildAt ?? 0, s.lastBuildMs ?? 0, l?.confirmed ?? -1, l?.mark
 EOF
 }
 
-NOTICE_ID=""
+# --- the maintenance notice (the header: THE NOTICE) ------------------------------------------------
+NOTICE_ID="" NOTICE_OK=1 NOTICE_STILL=""
 status_cmd() { remote "$S1" "sudo bash /opt/valuescan/bin/status.sh $*"; }
+notice_post() {
+  [ "$NOTICE" = 1 ] || return 0
+  local parts out
+  parts="$(IFS=,; echo "${U1[*]}${U1[*]:+${U2[*]:+,}}${U2[*]}")"
+  [ "$WEB" = 0 ] || parts="$parts,web"
+  # A server 1 whose release has no `status.sh ship` yet (older than this code): the plain maintenance.
+  out="$(status_cmd "ship '$TAG' --parts=$parts" 2>/dev/null)" \
+    || out="$(status_cmd "maintenance 'Update $TAG' --start=now --end=+15m --components=$(IFS=,; echo "${U1[*]}${U1[*]:+${U2[*]:+,}}${U2[*]}") 'We are updating ValueDesk; it should take a few minutes. Copies and algo orders may pause for a moment, and leaderboards may be a few minutes behind.'" 2>/dev/null)" \
+    || { note "!! no maintenance notice posted (status.sh on server 1)"; return 0; }
+  NOTICE_ID="$(printf '%s' "$out" | grep -o '#[0-9]*' | head -1 | tr -d '#')"
+  note "status page: maintenance #${NOTICE_ID:-?} posted ($parts)"
+}
+# One word for the remote shell: single-quoted, an apostrophe in it kept.
+sq() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
+# Words on its timeline; it stays open.
+notice_note() { [ -z "$NOTICE_ID" ] || status_cmd "update $NOTICE_ID $(sq "$*")" >/dev/null || note "!! notice #$NOTICE_ID not updated"; }
+# Completed: the app's notification turns green.
+notice_done() {
+  [ -n "$NOTICE_ID" ] || return 0
+  if status_cmd "resolve $NOTICE_ID $(sq "$*")" >/dev/null; then note "status page: maintenance #$NOTICE_ID completed"; NOTICE_ID=""
+  else note "!! notice #$NOTICE_ID not completed: sudo bash /opt/valuescan/bin/status.sh resolve $NOTICE_ID"; fi
+}
 
 release_on() {   # host, units (comma list)
   local host="$1" units="$2" cur
@@ -334,11 +370,17 @@ release_on() {   # host, units (comma list)
   cur="$(remote "$host" 'sudo /opt/valuescan/bin/release.sh --status' | sed -n 's/^current: *//p')"
   if [ "$cur" = "$TAG" ]; then
     note "!! $units did not come back on $TAG - rolling back to the release before"
-    remote "$host" "sudo /opt/valuescan/bin/release.sh --rollback --units=$units" || note "!! the rollback failed too - look at it now: deploy/release/remote.sh, docs/INCIDENT-RUNBOOK.md"
+    if remote "$host" "sudo /opt/valuescan/bin/release.sh --rollback --units=$units"; then
+      notice_done "The update was rolled back; everything runs as before."
+    else
+      note "!! the rollback failed too - look at it now: deploy/release/remote.sh, docs/INCIDENT-RUNBOOK.md"
+      NOTICE_OK=0
+      notice_note "The update did not go through and we are on it; some parts may not work normally until it is fixed."
+    fi
   else
     note "!! $TAG did not install on $host; nothing was switched (current: $cur)"
+    notice_done "The update was not applied; everything runs as before."
   fi
-  if [ -n "$NOTICE_ID" ]; then status_cmd "resolve $NOTICE_ID 'The update was rolled back; everything runs as before.'" >/dev/null || true; fi
   die "$units on $host: not shipped"
 }
 
@@ -370,18 +412,13 @@ if [ ${#U1[@]} -gt 0 ] || [ ${#U2[@]} -gt 0 ]; then
   if [ ${#U2[@]} -gt 0 ]; then where="${where:+$where; }executor on server 2"; fi
   if [ "$WEB" = 1 ]; then where="$where; then the web"; fi
   tell maintenance "$TAG started: $where. Health alerts about these are held until it is done (60 min at most); anything else alerts as always."
+  notice_post
 fi
 
 if [ ${#U1[@]} -gt 0 ]; then
   say "server 1 ($S1): ${U1[*]}"
   t0=0
-  if want indexer; then
-    t0="$(remote "$S1" 'date +%s%3N')"
-    if [ "$NOTICE" = 1 ]; then
-      NOTICE_ID="$(status_cmd "maintenance 'Indexer update' --start=now --end=+30m --components=indexer 'Leaderboards, cohorts and the heatmap stay up; their figures may be a few minutes behind while the indexer restarts.'" | grep -o '#[0-9]*' | head -1 | tr -d '#')"
-      note "status page: maintenance #${NOTICE_ID:-?} posted"
-    fi
-  fi
+  if want indexer; then t0="$(remote "$S1" 'date +%s%3N')"; fi
   release_on "$S1" "$(IFS=,; echo "${U1[*]}")"
   if want api; then done_note "api back"; fi
   if want indexer; then
@@ -395,14 +432,15 @@ if [ ${#U1[@]} -gt 0 ]; then
       if [ -n "$built" ] && [ $((i - since)) -ge 30 ]; then break; fi
       sleep 20
     done
-    if [ -n "$NOTICE_ID" ]; then
-      if [ -n "$whole" ]; then msg="Done: leaderboards and cohorts are current again."
-      elif [ -n "$built" ]; then
-        names="$(printf '%s' "$down" | sed 's/sodex/SoDEX/; s/hyperliquid/Hyperliquid/; s/tradexyz/trade.xyz/; s/arcus/Arcus/; s/,/, /g')"
-        if [ "${markets:--1}" -gt 0 ]; then names="${names/lighter/Lighter ($conf of $markets markets)}"; else names="${names/lighter/Lighter}"; fi
-        msg="Leaderboards and cohorts are current again. Still reconnecting: $names - their newest trades may show a few minutes late."
-      else msg="The indexer restarted; its first rebuild is taking longer than usual."; fi
-      status_cmd "resolve $NOTICE_ID '$msg'" >/dev/null && note "status page: maintenance #$NOTICE_ID completed"
+    if [ -n "$whole" ]; then notice_note "Leaderboards and cohorts are current again."
+    elif [ -n "$built" ]; then
+      names="$(printf '%s' "$down" | sed 's/sodex/SoDEX/; s/hyperliquid/Hyperliquid/; s/tradexyz/trade.xyz/; s/arcus/Arcus/; s/,/, /g')"
+      if [ "${markets:--1}" -gt 0 ]; then names="${names/lighter/Lighter ($conf of $markets markets)}"; else names="${names/lighter/Lighter}"; fi
+      NOTICE_STILL="Still reconnecting: $names - their newest trades may show a few minutes late."
+      notice_note "Leaderboards and cohorts are current again. $NOTICE_STILL"
+    else
+      NOTICE_OK=0
+      notice_note "The indexer restarted; its first rebuild is taking longer than usual. Leaderboards and cohorts may be behind until it is done."
     fi
     if [ -n "$built" ]; then
       done_note "indexer: boards built again $(( (built - t0) / 1000 )) s after the restart$([ -n "$whole" ] && echo ", every stream up" || echo ", still reconnecting: $down")"
@@ -433,12 +471,15 @@ exec_rollback() {   # why
     h="$(exec_health)"
     if [ "$(exec_healthy "$h")" = 1 ]; then
       restore_brake
+      notice_done "The copy executor's update was rolled back; copies and algo orders run as before."
       die "executor: $TAG rolled back - it runs the release before ($(counts "$h")), copies and algos resumed"
     fi
     sleep 2
   done
   # Held longer than an update now: an operator's brake (Telegram "🛑 BRAKE"), in words for followers.
   remote "$S2" "sudo bash /opt/valuescan/bin/brake.sh on copies,algos 'An update of the copy executor did not go through: copies and algos are held until it is fixed. Stops resting on SoDEX stay.'" >&2 || true
+  NOTICE_OK=0
+  notice_note "The copy executor's update did not go through: copies and algo orders are held until it is fixed. Stops already on SoDEX stay."
   die "executor: $TAG rolled back but the executor is NOT healthy ($h). The brake stays ON: copies and algos are held. Now: docs/INCIDENT-RUNBOOK.md"
 }
 ship_executor() {
@@ -485,6 +526,8 @@ fi
 
 # The restarts are over: what fails from here on is a failure.
 maint_close
+if [ "$NOTICE_OK" = 1 ]; then notice_done "Done: everything runs normally again.${NOTICE_STILL:+ $NOTICE_STILL}"
+else notice_note "The update is installed, but not everything is back to normal yet; we are on it."; fi
 
 # --- 7. the web -----------------------------------------------------------------------------------
 if [ "$MOVE_MAIN" = 1 ]; then

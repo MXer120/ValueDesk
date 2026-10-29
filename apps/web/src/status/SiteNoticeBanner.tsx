@@ -12,6 +12,10 @@
  * posting it. And when /api/health itself has not answered for HEALTH_DOWN_MS - the
  * data service down, so no notice can reach the app - the line says so on its own.
  * Silent otherwise. Plain text only; the full story is on /status.
+ *
+ * Maintenance IN PROGRESS is not this line's: it is the blue notification with its
+ * countdown (MaintNote.tsx), which turns green when it is done. Scheduled maintenance
+ * and incidents stay here.
  */
 import { useEffect, useState } from 'react';
 import { STATUS_PATH } from '../router';
@@ -52,8 +56,11 @@ export function navAlertOf(health: unknown, down: boolean): NavAlert {
   return null;
 }
 
+/** What the line shows: the open incidents and upcoming maintenance (maintenance in progress is MaintNote's). */
+export const bannerNoticesOf = (health: unknown) => healthNoticesOf(health).filter((n) => !(n.kind === 'maintenance' && n.phase === 'in_progress'));
+
 export function SiteNoticeBanner({ health, down = false, onOpenStatus }: { health: unknown; down?: boolean; onOpenStatus?: () => void }) {
-  const list = down ? [] : healthNoticesOf(health);
+  const list = down ? [] : bannerNoticesOf(health);
   if (!down && !list.length) return null;
   const urgent = down || list.some((n) => n.kind === 'incident' || n.phase === 'in_progress');
   const href = down ? STATUS_PATH : `${STATUS_PATH}#notice-${list[0]!.id}`;

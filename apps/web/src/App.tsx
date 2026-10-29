@@ -15,6 +15,7 @@ import type { TradeContext } from './dashboard';
 import { MaintenanceBanner } from './components/MaintenanceBanner';
 import { SiteNoticeBanner, navAlertOf, useHealthDown } from './status/SiteNoticeBanner';
 import { UpdateHeldBanner } from './status/UpdateHeldBanner';
+import { MaintNote } from './status/MaintNote';
 import { BrakeBanner } from './components/BrakeBanner';
 import type { Eip1193Provider } from './wallet';
 import { AccountController } from './components/account/AccountController';
@@ -630,6 +631,10 @@ function AppShell() {
         </Guarded>
         <Guarded name="Indexing">
           <IndexPrompt address={address} />
+        </Guarded>
+        {/* Maintenance as a notification: blue with its countdown while an update runs, green once done (status/MaintNote.tsx). */}
+        <Guarded name="Maintenance notice">
+          <MaintNote health={health} onOpenStatus={openStatus} />
         </Guarded>
         {/* The first-visit clickwrap (legal/acceptance.ts): until this browser accepts the
             current terms - with a connected wallet, ticked and signed in one step. Not over

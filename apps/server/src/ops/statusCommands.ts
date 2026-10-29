@@ -7,6 +7,9 @@
  *   update <id> [<stage>] ["<message>"] [--title=..] [--impact=..] [--components=..] [--start=..] [--end=..]
  *   resolve <id> ["<message>"]                 an incident resolved, a maintenance completed
  *   maintenance "<title>" --start=<when> --end=<when> --components=<ids|all> ["<message>"]
+ *   ship <tag> --parts=indexer,api,executor,web  a release's maintenance (deploy/release/ship.sh): what it
+ *                                              does to each part, when it should be over (ops/shipNotice.ts);
+ *                                              in progress until it is resolved
  *   list [--all]                               open, upcoming and the last closed ones
  *   show <id>                                  one notice and its timeline
  *   delete <id>                                off the page entirely (the CLI only)
@@ -24,6 +27,7 @@ import {
 
 export { fmtUtc, fmtWindow };
 import { NoticeError, type NoticeStore } from './statusNotices.js';
+import { shipNotice, shipPartsOf, type ShipPart } from './shipNotice.js';
 
 export interface CommandResult {
   code: 0 | 1 | 2;
@@ -161,6 +165,7 @@ export function noticeLine(n: Notice, now: number): string {
 /** A notice with its timeline, newest update first. */
 export function noticeText(n: Notice, now: number): string {
   const lines = [noticeLine(n, now)];
+  if (n.parts) lines.push(`  parts: ${n.parts.map((p) => `${p.id} ${p.impact}`).join(', ')}${n.holdOpen ? ' (open until resolved)' : ''}`);
   for (const u of [...n.updates].reverse()) lines.push(`  ${fmtUtc(u.at)}  ${STAGE_TEXT[u.stage]}${u.text ? ` - ${u.text.replace(/\n/g, ' ')}` : ''}`);
   return lines.join('\n');
 }
@@ -182,7 +187,7 @@ const impactOf = (v: string | undefined): Impact | undefined => {
 
 const ALIASES: Record<string, string> = {
   maint: 'maintenance', maintenance: 'maintenance', incident: 'incident', update: 'update', resolve: 'resolve',
-  complete: 'resolve', list: 'list', status: 'list', ls: 'list', show: 'show', delete: 'delete', help: 'help',
+  complete: 'resolve', ship: 'ship', list: 'list', status: 'list', ls: 'list', show: 'show', delete: 'delete', help: 'help',
 };
 
 export interface CommandOptions {
@@ -238,6 +243,22 @@ export function runStatusCommand(argv: readonly string[], store: NoticeStore, o:
           text: words.join(' '),
         }, now);
         return { code: 0, changed: true, text: `scheduled ${noticeText(n, now)}\n${page}` };
+      }
+
+      case 'ship': {
+        const p = parse(rest, ['parts']);
+        const [tag, ...extra] = p.words;
+        if (!tag || extra.length) throw new NoticeError('usage: ship <tag> --parts=indexer,api,executor,web');
+        let parts: ShipPart[];
+        try {
+          parts = shipPartsOf(str(p, 'parts') ?? '');
+        } catch (e) {
+          throw new NoticeError(e instanceof Error ? e.message : String(e));
+        }
+        const draft = shipNotice(tag, parts, now);
+        if (!draft) return { code: 1, text: `nothing to post: ${parts.join(', ') || 'no part'} restarts nothing` };
+        const n = store.create(draft, now);
+        return { code: 0, changed: true, text: `posted ${noticeText(n, now)}\n${page}` };
       }
 
       case 'update': {

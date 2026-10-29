@@ -191,7 +191,8 @@ export const noticeKindText = (n: Notice): string => (n.kind === 'incident' ? `$
 
 /** When it was (or is): "27 Oct 14:02 – 15:10 UTC", "since 27 Oct 14:02 UTC", a maintenance's window. */
 export function noticeTimes(n: Notice, now: number): string {
-  if (n.kind === 'maintenance') return fmtWindow(n.startsAt, n.closedAt !== null && n.closedAt < n.endsAt! ? Math.max(n.closedAt, n.startsAt + 60_000) : n.endsAt!);
+  // Completed early - or, held open (a release's), whenever it was: its real end.
+  if (n.kind === 'maintenance') return fmtWindow(n.startsAt, n.closedAt !== null && (n.closedAt < n.endsAt! || n.holdOpen) ? Math.max(n.closedAt, n.startsAt + 60_000) : n.endsAt!);
   if (n.closedAt === null) return `since ${fmtUtc(n.startsAt)}`;
   const [from, to] = noticeSpan(n, now);
   return fmtWindow(from, to);
