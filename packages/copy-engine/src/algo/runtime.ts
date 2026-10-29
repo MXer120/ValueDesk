@@ -865,6 +865,8 @@ export class AlgoRuntime {
       const brake = this.host.brake?.(a) ?? null;
       if (brake) {
         await this.hold(a, `Held: ${brake}`);
+        // Nothing new is sent, but what filled meanwhile (a child left resting) still gets its exits: they only protect (brake.ts).
+        if (!this.stopped(a)) await this.syncExits(a, m, false);
         return;
       }
       const problem = await this.problemOf(a, now);
