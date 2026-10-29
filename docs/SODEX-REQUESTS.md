@@ -69,21 +69,23 @@ moves custody and the users' margin into one account. We would rather not do tha
 
 ## 6. Member sub-accounts bound to the member
 
-Sub-accounts under a master account owned by our contract, one per user, bound to that user so that the master
-never holds their funds:
-- created for the wallet that asks (our contract calls it for `msg.sender`; `createSubAccount` is owner-only today);
-- API keys for it registered and revoked only by the member's own signature, never by the master;
-- withdrawals from it paid only to the member's wallet, transfers only to the member's own accounts; the master
-  cannot sign anything for it;
-- deposits credited to it directly;
-- the member can detach it into an ordinary account of their own, open positions included;
-- its own limits: API keys, open orders and address-based actions counted per member sub-account, not per master
-  (the docs count keys per master account, and open orders and address actions per user);
-- members are separate parties for self-trade prevention and trade surveillance: two members' orders meeting on
-  the book are an ordinary trade.
+We hear sub-accounts are coming to SoDEX. ValueDesk would use them under a contract-owned parent account, one
+sub-account per user: all members share the parent's fee tier, and each keeps their own margin, keys and money.
+What we need to know, and to ask for where it is not planned:
 
-Please confirm that such sub-accounts count toward the master's fee tier and staking discount ("each user has a
-single fee tier"), and that each is margined, liquidated and rate-limited on its own.
+1. Can a contract-owned parent create sub-accounts through the gateway, one for each wallet that asks?
+2. Can keys on a sub-account be registered by the member's own signature, or by the parent for that one
+   sub-account only, so the key cannot sign for any other account?
+3. Where does a sub-account's withdrawal land? We need it paid to the member, or to the parent with the
+   sub-account's id in the `Withdraw` event, so our contract pays exactly that member.
+4. Can deposits be credited to a sub-account directly?
+5. Can a member detach their sub-account into an ordinary account of their own, open positions included?
+6. Do sub-accounts share the parent's fee tier and staking discount ("each user has a single fee tier")?
+7. Are API keys (5 per master account today), open orders (1,000 per user) and address-based actions counted per
+   sub-account?
+8. Are two sub-accounts of one parent trading with each other an ordinary trade, not a self-trade, for self-trade
+   prevention and surveillance?
+9. Is each sub-account margined and liquidated on its own, like any account?
 
 ## 7. Restricted keys for contract accounts
 
