@@ -29,7 +29,8 @@
 import { GATEWAY_WS_ORIGIN, type Network } from '../../sodex-core/src/index.ts';
 import { timers, type Logger, type WebSocketFactory } from './io.ts';
 import { LiveSocket } from './socket.ts';
-import type { LeaderEvent, LeaderRef, LeaderVenue } from './types.ts';
+import type { LeaderEvent, LeaderRead, LeaderRef, LeaderVenue } from './types.ts';
+import { hlDexOf } from './markets.ts';
 import { HL_WS_URL } from './sodex.ts';
 
 export const COALESCE_MS = 150;
@@ -74,6 +75,7 @@ export class LeaderBook {
     return this.seededAt.has(key(l));
   }
 
+  /** When the leader was seeded, by its venue's clock where the read said (Hyperliquid), else the local one: stream prints before it are in the seed. */
   seedTime(l: LeaderRef): number | null {
     return this.seededAt.get(key(l)) ?? null;
   }
@@ -125,15 +127,22 @@ export class LeaderBook {
     return { leader: { venue: l.venue, address: l.address.toLowerCase() }, symbol, before, after, price, time, id, source: 'stream' };
   }
 
-  /** A position change to `after` (a source that knows the total). */
+  /**
+   * A position change to `after` (a source that knows the total). `before` is the
+   * source's own position before the change (Hyperliquid's `startPosition`), which
+   * the event carries over the book's when the book missed something; null = the
+   * book's. Nothing happens when the book already has `after`: a fill the seed or
+   * a reconcile already counted.
+   */
   applyTotal(l: LeaderRef, symbol: string, before: number | null, after: number, price: number, time: number, id: string): LeaderEvent | null {
     if (!this.seeded(l) || !Number.isFinite(after)) return null;
     this.notePrint(l, symbol, false);
     const m = this.map(l);
-    const b = before ?? m.get(symbol) ?? 0;
+    const had = m.get(symbol) ?? 0;
     if (after === 0) m.delete(symbol);
     else m.set(symbol, after);
-    if (b === after) return null;
+    const b = before !== null && Number.isFinite(before) ? before : had;
+    if (had === after || b === after) return null;
     return { leader: { venue: l.venue, address: l.address.toLowerCase() }, symbol, before: b, after, price, time, id, source: 'stream' };
   }
 
@@ -143,27 +152,30 @@ export class LeaderBook {
    * market that differs. With `readStart` (when the REST read began), a market
    * a stream print reached since then, or whose prints are still being merged,
    * is left as the stream has it.
+   *
+   * A Hyperliquid read names the dexes it covers (`read.dexes`): a market on any
+   * other dex - not asked for, or its read failed - is left as the stream has it,
+   * never taken for flat. A read that missed a dex it asked for (`read.partial`)
+   * does not seed: the seed is what marks positions "pre-existing", and one it
+   * did not see would later be copied as new. Returns null when it did not seed.
    */
-  resync(
-    l: LeaderRef,
-    positions: Record<string, number>,
-    equity: number | null,
-    marks: Record<string, number>,
-    now: number,
-    priceOf: (symbol: string) => number | null,
-    readStart?: number,
-  ): LeaderEvent[] {
+  resync(l: LeaderRef, read: LeaderRead, now: number, priceOf: (symbol: string) => number | null, readStart?: number): LeaderEvent[] | null {
     const k = key(l);
+    const { positions, equity, marks } = read;
     if (equity !== null) this.eq.set(k, { value: equity, at: now });
     if (!this.seededAt.has(k)) {
-      this.seededAt.set(k, now);
+      if (read.partial) return null;
+      // On the venue's clock, which its stream's prints carry, just after the answer (a value far off the local clock is not one).
+      this.seededAt.set(k, read.asOf !== undefined && Math.abs(read.asOf - now) < 10 * 60_000 ? read.asOf + 1 : now);
       this.pos.set(k, new Map(Object.entries(positions).filter(([, v]) => v !== 0)));
       return [];
     }
+    const covered = read.dexes ? new Set(read.dexes) : null;
     const m = this.map(l);
     const out: LeaderEvent[] = [];
     const symbols = new Set([...m.keys(), ...Object.keys(positions)]);
     for (const s of symbols) {
+      if (covered && !covered.has(hlDexOf(s))) continue;
       if (readStart !== undefined) {
         const printed = this.printedAt.get(`${k}|${s}`);
         if ((printed !== undefined && printed >= readStart) || this.merging.has(`${k}|${s}`)) continue;
@@ -471,6 +483,11 @@ export class HyperliquidFeed {
 
   private handle(m: unknown): void {
     const msg = m as { channel?: string; data?: unknown };
+    if (msg.channel === 'error') {
+      // A refused subscription (e.g. more than HL_USER_LIMIT users from this IP, other tabs and apps included).
+      this.o.log?.warn('hyperliquid: the stream refused a request; those leaders rely on reconciliation', { error: String(msg.data).slice(0, 300) });
+      return;
+    }
     if (msg.channel === 'userFills') {
       const d = msg.data as { isSnapshot?: boolean; user?: string; fills?: Array<Record<string, unknown>> } | undefined;
       if (!d || d.isSnapshot || !d.user) return;
@@ -485,7 +502,7 @@ export class HyperliquidFeed {
         const px = Number(f.px);
         const start = Number(f.startPosition);
         const time = Number(f.time);
-        const id = `hl:${String(f.tid ?? f.hash ?? `${coin}:${time}`)}`;
+        const id = `hl:${coin}:${String(f.tid ?? f.hash ?? time)}`;
         if (!coin || !(sz > 0) || !(px > 0) || !Number.isFinite(start) || !this.seen.add(id)) continue;
         if (seed !== null && time < seed) continue;
         if (coin.startsWith('@') || coin.includes('/')) continue;
@@ -502,7 +519,8 @@ export class HyperliquidFeed {
       }
       for (const g of byOrder.values()) {
         const after = Math.abs(g.after) < 1e-12 ? 0 : g.after;
-        const e = this.o.book.applyTotal(l, g.coin, null, after, g.notional / g.qty, g.time, g.id);
+        // Hyperliquid's own position before the order: exact, where the book may have missed something.
+        const e = this.o.book.applyTotal(l, g.coin, g.before, after, g.notional / g.qty, g.time, g.id);
         if (e) this.o.sink.leader(e);
       }
       return;
@@ -510,7 +528,7 @@ export class HyperliquidFeed {
     if (msg.channel === 'trades' && Array.isArray(msg.data)) {
       for (const t of msg.data as Array<{ coin?: string; px?: string; sz?: string; time?: number; tid?: number; users?: [string, string] }>) {
         if (!t.coin || !Array.isArray(t.users)) continue;
-        const id = `hl:${t.tid ?? `${t.coin}:${t.time}`}`;
+        const id = `hl:${t.coin}:${t.tid ?? t.time}`;
         if (!this.seen.add(id)) continue;
         const px = Number(t.px);
         const sz = Number(t.sz);

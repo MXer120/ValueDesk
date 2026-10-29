@@ -23,7 +23,7 @@ import {
 } from '../../sodex-core/src/index.ts';
 import { abortController, sleep, timers, type FetchLike, type ResponseLike } from './io.ts';
 import { parseMarkets } from './markets.ts';
-import type { FollowerSnapshot, MarginChoice, MarketInfo } from './types.ts';
+import type { FollowerSnapshot, LeaderRead, MarginChoice, MarketInfo } from './types.ts';
 
 export class OutcomeUnknownError extends Error {
   override name = 'OutcomeUnknownError';
@@ -735,7 +735,7 @@ export class SodexClient {
   }
 
   /** Leader positions on SoDEX, symbol -> signed size, plus equity. */
-  async leaderPositions(address: string): Promise<{ positions: Record<string, number>; equity: number | null; marks: Record<string, number> }> {
+  async leaderPositions(address: string): Promise<LeaderRead> {
     const st = await this.perpsState(address);
     const positions: Record<string, number> = {};
     const marks: Record<string, number> = {};
@@ -843,24 +843,170 @@ export class HyperliquidClient {
     throw last;
   }
 
-  /** Perp positions (coin -> signed size) and account value. */
-  async leaderPositions(address: string): Promise<{ positions: Record<string, number>; equity: number | null; marks: Record<string, number> }> {
-    const st = await this.post<{
-      marginSummary?: { accountValue?: string };
-      assetPositions?: Array<{ position?: { coin?: string; szi?: string; positionValue?: string } }>;
-    }>({ type: 'clearinghouseState', user: address.toLowerCase() });
+  /** Account mode per address (from its spot state): a unified one's perps run on its spot. */
+  private modes = new Map<string, { unified: boolean; at: number }>();
+  private spotPx: { at: number; value: Promise<Map<string, number> | null> } | null = null;
+
+  /** The HIP-3 dexes (perpDexs; the main dex is not one of them). */
+  async perpDexs(): Promise<string[]> {
+    const rows = await this.post<Array<{ name?: string } | null> | null>({ type: 'perpDexs' });
+    return (Array.isArray(rows) ? rows : []).flatMap((d) => (d?.name ? [d.name] : []));
+  }
+
+  /** The live perps of one dex ('' = the main dex), as its trade stream names them: 'BTC', 'xyz:TSLA'. */
+  async perpCoins(dex: string): Promise<string[]> {
+    const meta = await this.post<{ universe?: Array<{ name?: string; isDelisted?: boolean }> } | null>(dex ? { type: 'meta', dex } : { type: 'meta' });
+    return (meta?.universe ?? []).filter((u) => u.name && !u.isDelisted).map((u) => u.name!);
+  }
+
+  /**
+   * Perp positions (coin -> signed size) on the main dex and each HIP-3 dex in `dexes`
+   * (one clearinghouseState each: every dex is its own margin book), merged; HL names a
+   * HIP-3 coin with its dex ('xyz:TSLA'). The main dex is the one read that cannot fail:
+   * it throws. Another dex that fails is left out of `dexes` and the read is `partial`.
+   *
+   * EQUITY - what proportional sizing divides the leader's positions by - is the account's
+   * PERP EQUITY, as the server's size cohorts count it (apps/server/src/valuedesk/cohorts/
+   * model.ts perpEquity, checked against Hyperdash 2026-10-03 and 2026-10-24):
+   *  - a unified or portfolio-margin account (its spot state has
+   *    tokenToAvailableAfterMaintenance): its spot holdings, stablecoins at $1 and every
+   *    other token at its spot price. One pool backs every dex, and each dex's account
+   *    value is only the margin in use there - which made copies of such a leader far
+   *    too large.
+   *  - a standard account: the account values of the dexes read, summed (main, xyz and
+   *    any other dex in `dexes`). Its spot is not perps margin and is not counted.
+   * Null - the last known equity is kept - when a dex read failed, when the spot state
+   * could not be read and the account's mode is not known, or when a unified account
+   * holds other tokens than stablecoins and no spot prices could be read: an equity
+   * counted short sizes copies too large.
+   * The spot state is read every time for a unified account and every
+   * HL_MODE_RECHECK_MS for a standard one (to see it change mode).
+   */
+  async leaderPositions(address: string, dexes: readonly string[] = HL_DEXES, now = Date.now()): Promise<LeaderRead> {
+    const user = address.toLowerCase();
+    const want = [...new Set(['', ...dexes])];
+    const mode = this.modes.get(user);
+    const readSpot = !mode || mode.unified || now - mode.at >= HL_MODE_RECHECK_MS;
+    const [spotR, ...stateR] = await Promise.allSettled([
+      readSpot ? this.post<HlSpotState | null>({ type: 'spotClearinghouseState', user }) : Promise.resolve(null),
+      ...want.map((dex) => this.post<HlState | null>(dex ? { type: 'clearinghouseState', user, dex } : { type: 'clearinghouseState', user })),
+    ]);
+    const main = stateR[0]!;
+    if (main.status === 'rejected') throw main.reason;
     const positions: Record<string, number> = {};
     const marks: Record<string, number> = {};
-    for (const ap of st?.assetPositions ?? []) {
-      const p = ap.position;
-      const sz = Number(p?.szi);
-      if (p?.coin && Number.isFinite(sz) && sz !== 0) {
-        positions[p.coin] = sz;
-        const pv = Number(p.positionValue);
-        if (Number.isFinite(pv) && pv > 0) marks[p.coin] = pv / Math.abs(sz);
+    const read: string[] = [];
+    let valueSum = 0;
+    let asOf = -Infinity;
+    stateR.forEach((r, i) => {
+      if (r.status !== 'fulfilled') return;
+      read.push(want[i]!);
+      const st = r.value;
+      for (const ap of st?.assetPositions ?? []) {
+        const p = ap.position;
+        const sz = Number(p?.szi);
+        if (p?.coin && Number.isFinite(sz) && sz !== 0) {
+          positions[p.coin] = sz;
+          const pv = Number(p.positionValue);
+          if (Number.isFinite(pv) && pv > 0) marks[p.coin] = pv / Math.abs(sz);
+        }
       }
+      const av = Number(st?.marginSummary?.accountValue ?? 0);
+      valueSum = Number.isFinite(av) && Number.isFinite(valueSum) ? valueSum + av : NaN;
+      const t = Number(st?.time);
+      // The latest answer: a print after it is in none of them (one between two answers is missed, not counted twice).
+      if (Number.isFinite(t) && t > 0) asOf = Math.max(asOf, t);
+    });
+    const partial = read.length < want.length;
+    let unified = mode?.unified ?? null;
+    let collateral: number | null = null;
+    if (readSpot && spotR.status === 'fulfilled') {
+      const spot = spotR.value;
+      unified = Array.isArray(spot?.tokenToAvailableAfterMaintenance);
+      this.modes.set(user, { unified, at: now });
+      if (unified) collateral = hlSpotCollateral(spot, await this.spotPrices(now));
     }
-    const av = Number(st?.marginSummary?.accountValue);
-    return { positions, equity: Number.isFinite(av) ? av : null, marks };
+    const equity = unified === null ? null : unified ? collateral : partial || !Number.isFinite(valueSum) ? null : valueSum;
+    return { positions, equity, marks, dexes: read, partial, ...(asOf > 0 ? { asOf } : {}) };
   }
+
+  /** Spot tokens' prices in USDC (spotMetaAndAssetCtxs, weight 20), kept SPOT_PRICES_MS; null when they cannot be read. */
+  private spotPrices(now: number): Promise<Map<string, number> | null> {
+    if (this.spotPx && now - this.spotPx.at < SPOT_PRICES_MS) return this.spotPx.value;
+    const value = this.post<HlSpotMetaCtxs | null>({ type: 'spotMetaAndAssetCtxs' })
+      .then((raw) => {
+        const px = hlSpotPrices(raw);
+        return px.size ? px : null;
+      })
+      .catch(() => null);
+    this.spotPx = { at: now, value };
+    void value.then((px) => {
+      if (!px && this.spotPx?.value === value) this.spotPx = null;
+    });
+    return value;
+  }
+}
+
+/** Hyperliquid's main perp dex ('') and trade.xyz's HIP-3 dex: read for every Hyperliquid leader. */
+export const HL_DEXES: readonly string[] = ['', 'xyz'];
+/** A standard account's spot state is read again this often, to see it turn unified. */
+export const HL_MODE_RECHECK_MS = 10 * 60_000;
+const SPOT_PRICES_MS = 5 * 60_000;
+
+interface HlState {
+  marginSummary?: { accountValue?: string };
+  assetPositions?: Array<{ position?: { coin?: string; szi?: string; positionValue?: string } }>;
+  time?: number;
+}
+
+export interface HlSpotState {
+  balances?: Array<{ coin?: string; token?: number; total?: string }>;
+  /** Present only on a unified or portfolio-margin account: the tokens its perps run on. */
+  tokenToAvailableAfterMaintenance?: Array<[number, string]>;
+}
+
+export type HlSpotMetaCtxs = [
+  { tokens?: Array<{ name?: string; index?: number }>; universe?: Array<{ tokens?: [number, number]; index?: number }> },
+  Array<{ markPx?: string | null; midPx?: string | null }>,
+];
+
+/** Stablecoins counted at $1 as perps collateral. */
+const STABLE_COLLATERAL = /^(USDC|USDT0?|USDE|USDH|USDG)$/i;
+
+/** Spot tokens' prices in USDC (token name -> mark): the pairs quoted in USDC (token 0). */
+export function hlSpotPrices(raw: HlSpotMetaCtxs | null | undefined): Map<string, number> {
+  const out = new Map<string, number>();
+  if (!Array.isArray(raw)) return out;
+  const [meta, ctxs] = raw;
+  const name = new Map((meta?.tokens ?? []).map((t) => [Number(t.index), String(t.name ?? '')]));
+  for (const u of meta?.universe ?? []) {
+    const [base, quote] = u.tokens ?? [];
+    if (quote !== 0 || base === undefined) continue;
+    const c = ctxs?.[Number(u.index)];
+    const p = Number(c?.markPx ?? c?.midPx);
+    const n = name.get(Number(base));
+    if (n && Number.isFinite(p) && p > 0 && !out.has(n)) out.set(n, p);
+  }
+  return out;
+}
+
+/**
+ * A unified / portfolio-margin account's perp equity: its spot holdings, stablecoins at $1,
+ * other tokens at their spot price (`px`; one without a USDC pair counts 0), as
+ * apps/server/src/indexer/cohortSource.ts spotCollateral. Null for a standard account, and -
+ * unlike the server, which then counts the stablecoins alone - when it holds other tokens
+ * and no prices could be read: counted short, it would size copies too large.
+ */
+export function hlSpotCollateral(st: HlSpotState | null | undefined, px: ReadonlyMap<string, number> | null): number | null {
+  if (!Array.isArray(st?.tokenToAvailableAfterMaintenance)) return null;
+  let sum = 0;
+  for (const b of st?.balances ?? []) {
+    const coin = String(b.coin ?? '');
+    const total = Number(b.total);
+    if (!Number.isFinite(total) || total === 0) continue;
+    if (STABLE_COLLATERAL.test(coin)) sum += total;
+    else if (!px) return null;
+    else sum += total * (px.get(coin) ?? 0);
+  }
+  return sum;
 }

@@ -120,6 +120,12 @@ export function coinOf(venue: LeaderVenue, leaderSymbol: string): string {
   return bare.replace(/^k(?=[A-Z])/, '').toUpperCase();
 }
 
+/** The Hyperliquid dex of a coin: 'xyz:TSLA' -> 'xyz' (a HIP-3 dex), 'BTC' -> '' (the main dex). */
+export function hlDexOf(coin: string): string {
+  const i = coin.indexOf(':');
+  return i > 0 ? coin.slice(0, i) : '';
+}
+
 /** Whether a leader market is spot (never copied). */
 export function isSpotSymbol(venue: LeaderVenue, leaderSymbol: string): boolean {
   if (venue === 'sodex') return leaderSymbol.includes('_') || /^v[A-Z]/.test(leaderSymbol);

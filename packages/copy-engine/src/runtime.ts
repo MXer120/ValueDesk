@@ -37,7 +37,7 @@
 import { bytesToHex, keccak256, utf8, type BuilderParams, type Network } from '../../sodex-core/src/index.ts';
 import { LeaderBook, SodexFeed, HyperliquidFeed, type FollowerFill } from './feeds.ts';
 import { randomId, sleep, timers, type Logger, type WebSocketFactory } from './io.ts';
-import { MarketBook, floorQuantity, limitPrice, snapPrice } from './markets.ts';
+import { MarketBook, floorQuantity, hlDexOf, limitPrice, snapPrice } from './markets.ts';
 import type { OrderSink, SendResult } from './orders.ts';
 import {
   applyFill,
@@ -53,7 +53,7 @@ import {
   unrealized,
 } from './planner.ts';
 import { effectiveLeverage, type RegionPolicy } from './policy.ts';
-import type { HyperliquidClient, SodexClient } from './sodex.ts';
+import { HL_DEXES, type HyperliquidClient, type SodexClient } from './sodex.ts';
 import type { CopyStore } from './store.ts';
 import { copyClosedNotice, copyNotice, type EngineNotice } from './notices.ts';
 import type {
@@ -62,6 +62,7 @@ import type {
   FollowerSnapshot,
   Intent,
   LeaderEvent,
+  LeaderRead,
   LeaderRef,
   MarketInfo,
   SkipReason,
@@ -75,6 +76,12 @@ export const FOLLOWER_REFRESH_MS = 30_000;
 export const GUARD_MS = 2_000;
 export const READY_CHECK_MS = 10 * 60_000;
 export const MARKETS_REFRESH_MS = 10 * 60_000;
+/** Firehose mode: Hyperliquid's coin list is read again this often (new listings, new HIP-3 dexes). */
+export const HL_COINS_REFRESH_MS = 10 * 60_000;
+/** ... and this soon after a read failed or left the list empty, doubling up to HL_COINS_REFRESH_MS. */
+export const HL_COINS_RETRY_MS = 30_000;
+/** Hyperliquid allows 1,000 websocket subscriptions per IP. */
+export const HL_MAX_COINS = 990;
 /** How long a sent order may still be matched to fills on the stream. */
 const PENDING_MS = 30_000;
 /** Why a copy with approval 'confirm' cannot run on a host that has no one to ask. */
@@ -190,6 +197,12 @@ export class CopyRuntime {
   private sodexFeed: SodexFeed | null = null;
   private hlFeed: HyperliquidFeed | null = null;
   private hlCoins: string[] = [];
+  /** Firehose mode: each Hyperliquid dex's live coins ('' = the main dex), as last read. */
+  private hlCoinsByDex = new Map<string, string[]>();
+  private hlCoinsTimer: unknown = null;
+  private hlCoinsRetry = HL_COINS_RETRY_MS;
+  /** Copies whose leader could not be read when they started (or were restored): caught up once it is seeded. */
+  private awaitingSeed = new Set<string>();
   private running = false;
   private feedUp = { sodex: false, hyperliquid: false };
   private dirty = new Set<string>();
@@ -251,6 +264,7 @@ export class CopyRuntime {
     this.timers = [];
     for (const t of this.refreshTimers.values()) timers.cancel(t);
     for (const t of this.stopTimers.values()) timers.cancel(t);
+    timers.cancel(this.hlCoinsTimer);
     this.sodexFeed?.stop();
     this.hlFeed?.stop();
     await Promise.allSettled([...this.queues.values()]);
@@ -279,6 +293,8 @@ export class CopyRuntime {
     await this.host.store.saveSubscription(s);
     await this.syncFeeds();
     await this.seedLeader(s.settings.leader);
+    // Not readable now: once it is, what the leader holds then is pre-existing to this copy (catchUp).
+    if (!this.leaders.seeded(s.settings.leader)) this.awaitingSeed.add(s.id);
     const positions = this.leaders.positions(s.settings.leader);
     st.leaderPos = { ...positions };
     st.leaderEquity = this.leaders.equity(s.settings.leader)?.value ?? null;
@@ -964,7 +980,10 @@ export class CopyRuntime {
     const s = this.subs.get(subId);
     if (!s || s.status === 'stopped') return;
     const l = s.settings.leader;
-    if (!this.leaders.seeded(l)) return;
+    if (!this.leaders.seeded(l)) {
+      this.awaitingSeed.add(subId);
+      return;
+    }
     const st = this.stateOf(s);
     const now = Date.now();
     const current = this.leaders.positions(l);
@@ -1146,7 +1165,6 @@ export class CopyRuntime {
     this.sodexFeed?.setLeaders(sodex);
     const hl = leaders.filter((x) => x.venue === 'hyperliquid');
     if (hl.length && !this.hlFeed && this.running) {
-      if (this.host.hlMode === 'firehose') this.hlCoins = await this.hyperliquidCoins();
       this.hlFeed = new HyperliquidFeed({
         factory: this.host.factory,
         book: this.leaders,
@@ -1162,33 +1180,119 @@ export class CopyRuntime {
         },
       });
       this.hlFeed.start();
+      if (this.host.hlMode === 'firehose') void this.refreshHlCoins();
     }
     this.hlFeed?.setLeaders(hl);
     for (const l of leaders) if (!this.leaders.seeded(l)) await this.seedLeader(l);
   }
 
-  private async hyperliquidCoins(): Promise<string[]> {
-    try {
-      const meta = await this.host.hyperliquid.post<{ universe?: Array<{ name?: string; isDelisted?: boolean }> }>({ type: 'meta' });
-      return (meta.universe ?? []).filter((u) => u.name && !u.isDelisted).map((u) => u.name!);
-    } catch (e) {
-      this.host.log.warn('copy: hyperliquid coin list failed', { error: String(e) });
-      return [];
-    }
+  /** Firehose mode: read the coin list, subscribe what is new, and plan the next read. */
+  private async refreshHlCoins(): Promise<void> {
+    timers.cancel(this.hlCoinsTimer);
+    this.hlCoinsTimer = null;
+    const ok = await this.loadHlCoins();
+    if (!this.running) return;
+    this.hlFeed?.refreshCoins();
+    const ms = ok ? HL_COINS_REFRESH_MS : this.hlCoinsRetry;
+    this.hlCoinsRetry = ok ? HL_COINS_RETRY_MS : Math.min(this.hlCoinsRetry * 2, HL_COINS_REFRESH_MS);
+    this.hlCoinsTimer = timers.after(ms, () => void this.refreshHlCoins());
   }
 
-  private async readLeader(l: LeaderRef): Promise<{ positions: Record<string, number>; equity: number | null; marks: Record<string, number> }> {
-    return l.venue === 'sodex' ? this.host.sodex.leaderPositions(l.address) : this.host.hyperliquid.leaderPositions(l.address);
+  /**
+   * Firehose mode: the coins whose `trades` the feed follows - every live perp of
+   * Hyperliquid's main dex and of every HIP-3 dex (perpDexs, then meta per dex; trade.xyz
+   * is 'xyz'), those that map to a SoDEX market first, at most HL_MAX_COINS. A dex whose
+   * read fails keeps the coins it had. True when every read answered and the list is not empty.
+   */
+  private async loadHlCoins(): Promise<boolean> {
+    const hl = this.host.hyperliquid;
+    let ok = true;
+    let dexes: string[];
+    try {
+      dexes = ['', ...(await hl.perpDexs())];
+      for (const d of [...this.hlCoinsByDex.keys()]) if (!dexes.includes(d)) this.hlCoinsByDex.delete(d);
+    } catch (e) {
+      ok = false;
+      dexes = [...new Set([...HL_DEXES, ...this.hlCoinsByDex.keys()])];
+      this.host.log.warn('copy: hyperliquid dex list failed', { error: String(e) });
+    }
+    await Promise.all(
+      dexes.map(async (dex) => {
+        try {
+          this.hlCoinsByDex.set(dex, await hl.perpCoins(dex));
+        } catch (e) {
+          ok = false;
+          this.host.log.warn('copy: hyperliquid coin list failed', { dex: dex || 'main', error: String(e) });
+        }
+      }),
+    );
+    const all = [...new Set([...this.hlCoinsByDex.values()].flat())];
+    const listed = (c: string) => this.markets.sodexMarketFor('hyperliquid', c) !== null;
+    const coins = [...all.filter(listed), ...all.filter((c) => !listed(c))];
+    if (coins.length > HL_MAX_COINS) {
+      this.host.log.warn('copy: more Hyperliquid coins than one IP may follow; coins SoDEX does not list are left out first', { coins: coins.length, limit: HL_MAX_COINS });
+    }
+    this.hlCoins = coins.slice(0, HL_MAX_COINS);
+    if (!this.hlCoins.length) {
+      this.host.log.error('copy: the Hyperliquid coin list is empty; Hyperliquid leaders move only by reconciliation until it loads', { reconcileMs: RECONCILE_MS });
+    }
+    return ok && this.hlCoins.length > 0;
+  }
+
+  private async readLeader(l: LeaderRef): Promise<LeaderRead> {
+    return l.venue === 'sodex' ? this.host.sodex.leaderPositions(l.address) : this.host.hyperliquid.leaderPositions(l.address, this.hlDexesFor(l));
+  }
+
+  /**
+   * The Hyperliquid dexes to read for a leader: the main dex and trade.xyz (HL_DEXES), and
+   * any other HIP-3 dex where the leader (as the books have it) or one of its copies holds
+   * a market SoDEX lists - so a position the stream learned there is reconciled, not left.
+   */
+  private hlDexesFor(l: LeaderRef): string[] {
+    const out = new Set(HL_DEXES);
+    const symbols = new Set(Object.keys(this.leaders.positions(l)));
+    for (const s of this.subs.values()) {
+      if (lk(s.settings.leader) === lk(l)) for (const sym of Object.keys(this.states.get(s.id)?.leaderPos ?? {})) symbols.add(sym);
+    }
+    for (const sym of symbols) {
+      const dex = hlDexOf(sym);
+      if (dex && !out.has(dex) && this.markets.sodexMarketFor('hyperliquid', sym)) out.add(dex);
+    }
+    return [...out];
   }
 
   private async seedLeader(l: LeaderRef): Promise<void> {
     if (this.leaders.seeded(l)) return;
     try {
-      const r = await this.readLeader(l);
-      this.leaders.resync(l, r.positions, r.equity, r.marks, Date.now(), (sym) => this.priceFor(l.venue, sym));
+      this.resyncLeader(l, await this.readLeader(l));
     } catch (e) {
       this.host.log.warn('copy: leader read failed', { leader: lk(l), error: String(e) });
     }
+  }
+
+  /**
+   * A leader read into the books: its 'reconcile' events (none when it seeds), or null when
+   * it could not seed (a dex it asked for failed). Seeded, the copies that waited for it
+   * (awaitingSeed) are caught up: what the leader holds now is pre-existing to a new one.
+   */
+  private resyncLeader(l: LeaderRef, r: LeaderRead, readStart?: number): LeaderEvent[] | null {
+    const wasSeeded = this.leaders.seeded(l);
+    const events = this.leaders.resync(l, r, Date.now(), (sym) => this.priceFor(l.venue, sym), readStart);
+    if (events === null) {
+      this.host.log.warn('copy: leader not seeded: a Hyperliquid dex could not be read', { leader: lk(l), read: r.dexes ?? null });
+      return null;
+    }
+    if (!wasSeeded) {
+      for (const id of [...this.awaitingSeed]) {
+        const s = this.subs.get(id);
+        if (!s) this.awaitingSeed.delete(id);
+        else if (lk(s.settings.leader) === lk(l)) {
+          this.awaitingSeed.delete(id);
+          this.catchUp(id);
+        }
+      }
+    }
+    return events;
   }
 
   private reconciling = false;
@@ -1202,8 +1306,8 @@ export class CopyRuntime {
         try {
           // The answer is as old as the read's start: markets the stream changed since are left to it.
           const readStart = Date.now();
-          const r = await this.readLeader(l);
-          const events = this.leaders.resync(l, r.positions, r.equity, r.marks, Date.now(), (sym) => this.priceFor(l.venue, sym), readStart);
+          const events = this.resyncLeader(l, await this.readLeader(l), readStart);
+          if (events === null) continue;
           const eq = this.leaders.equity(l);
           for (const s of this.list()) {
             if (lk(s.settings.leader) !== lk(l)) continue;

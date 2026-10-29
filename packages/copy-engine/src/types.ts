@@ -182,6 +182,22 @@ export interface SubState {
   skips: number;
 }
 
+/** A REST read of a leader's account: what seeds and reconciles the LeaderBook. */
+export interface LeaderRead {
+  /** Leader market -> signed size (open positions only). */
+  positions: Record<string, number>;
+  /** What proportional sizing divides by (HyperliquidClient.leaderPositions says what it is there); null = not known from this read. */
+  equity: number | null;
+  /** Leader market -> a price seen in the read. */
+  marks: Record<string, number>;
+  /** Hyperliquid: the dexes the read covers ('' = the main dex). A market on any other dex was not read. Absent: the whole account. */
+  dexes?: string[];
+  /** Hyperliquid: a dex asked for could not be read. */
+  partial?: boolean;
+  /** When the venue answered, by its own clock (Hyperliquid's `time`): fills up to it are in the read. */
+  asOf?: number;
+}
+
 /** One change of a leader position, from a stream or a reconciliation. */
 export interface LeaderEvent {
   leader: LeaderRef;
