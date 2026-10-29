@@ -11740,6 +11740,7 @@ var PENDING_MS = 3e4;
 var RECENT_ORDERS_MS = 10 * 6e4;
 var FILLS_SLACK_MS = 6e4;
 var OUTSIDE_NO_FILL_MS = 15 * 6e4;
+var OWN_FILL_TRUST_MS = 12e4;
 var amount = (n) => String(Number(n.toPrecision(6)));
 var CONFIRM_UNAVAILABLE = '"Ask me each time" needs a copier that can ask you (the browser copier). Choose automatic approval to copy here.';
 var QUIET_SKIPS = /* @__PURE__ */ new Set(["duplicate", "at-target", "no-follower-position", "spot-not-copied"]);
@@ -11774,6 +11775,15 @@ var CopyRuntime = class {
    * reduction (its fill missed), not one made outside it.
    */
   recentShrink = /* @__PURE__ */ new Map();
+  /**
+   * The copier's own fills of the last OWN_FILL_TRUST_MS, per `${owner}|${symbol}`: when, the largest
+   * position they moved through (signed) and where they left it. A read that still shows a size from
+   * that stretch is SoDEX's
+   * account read lagging the fill, not a position of the follower's own (live run 2026-10-29: a read
+   * 5 s after the copy's close still showed it, and the leader's next buy was skipped as the
+   * follower's own).
+   */
+  ownFills = /* @__PURE__ */ new Map();
   leverageSet = /* @__PURE__ */ new Map();
   /**
    * `${subId}|${symbol}` -> a change outside the copier that reads agree on, held back because
@@ -12171,6 +12181,32 @@ var CopyRuntime = class {
       }
     }
   }
+  /**
+   * A read taken moments after the copier closed a market can still show the position (SoDEX's account
+   * reads lag its fills, even several in a row): for OWN_FILL_TRUST_MS after the copier's own close, a
+   * read showing (up to) what it held before keeps the copier's flat view - it is never adopted back.
+   */
+  withoutLaggingCloses(owner, snap, prev) {
+    const now = Date.now();
+    let out = snap;
+    for (const [k, own] of this.ownFills) {
+      if (now - own.at > OWN_FILL_TRUST_MS) {
+        this.ownFills.delete(k);
+        continue;
+      }
+      const i = k.indexOf("|");
+      if (k.slice(0, i) !== owner || Math.abs(own.after) >= 1e-12) continue;
+      const sym = k.slice(i + 1);
+      const read = out.positions[sym]?.size ?? 0;
+      if (!read || Math.sign(read) !== Math.sign(own.peak) || Math.abs(read) > Math.abs(own.peak) + 1e-12) continue;
+      const positions = { ...out.positions };
+      if (prev?.positions[sym]) positions[sym] = prev.positions[sym];
+      else delete positions[sym];
+      out = { ...out, positions };
+      this.host.log.debug("copy: a read still shows a position the copier closed moments ago; kept flat", { owner, symbol: sym, read });
+    }
+    return out;
+  }
   /** Who holds the follower's position on `symbol` when this copy does not. */
   heldBy(s, symbol2) {
     if (this.stateOf(s).owned[symbol2]) return "nobody";
@@ -12181,7 +12217,11 @@ var CopyRuntime = class {
     }
     if (s.settings.paper) return "nobody";
     const f = this.followers.get(s.owner);
-    return f?.positions[symbol2] ? "follower" : "nobody";
+    const held2 = f?.positions[symbol2]?.size ?? 0;
+    if (!held2) return "nobody";
+    const own = this.ownFills.get(`${s.owner}|${symbol2}`);
+    if (own && Date.now() - own.at <= OWN_FILL_TRUST_MS && Math.abs(own.after) < 1e-12 && Math.sign(held2) === Math.sign(own.peak) && Math.abs(held2) <= Math.abs(own.peak) + 1e-12) return "nobody";
+    return "follower";
   }
   async execute(s, market, intents, reference, leader) {
     const st = this.stateOf(s);
@@ -12325,6 +12365,23 @@ var CopyRuntime = class {
       });
       this.host.onChange?.(s.id);
     }
+    const booked = f.qty - left;
+    const owner = this.followerAccounts.get(f.accountId);
+    const snap = owner ? this.followers.get(owner) : void 0;
+    if (owner && snap && booked > 1e-12) {
+      const before = snap.positions[f.symbol];
+      const before0 = before?.size;
+      const size = (before?.size ?? 0) + (f.side === "buy" ? booked : -booked);
+      const positions = { ...snap.positions };
+      if (Math.abs(size) < 1e-12) delete positions[f.symbol];
+      else positions[f.symbol] = { size, entry: before?.entry ?? f.price, leverage: before?.leverage ?? 1, leverageReported: before?.leverageReported ?? false, marginMode: before?.marginMode ?? "cross" };
+      this.followers.set(owner, { ...snap, positions });
+      const k = `${owner}|${f.symbol}`;
+      const was = this.ownFills.get(k);
+      const big = (a, b) => Math.abs(b) > Math.abs(a) ? b : a;
+      const peak = [before0 ?? 0, size].reduce(big, was && now - was.at <= OWN_FILL_TRUST_MS ? was.peak : 0);
+      this.ownFills.set(k, { at: now, peak, after: size });
+    }
   }
   /* ------------------------------------------------------------- follower ----- */
   scheduleRefresh(owner, ms) {
@@ -12389,6 +12446,7 @@ var CopyRuntime = class {
       snap = c.value;
     }
     const lastRead = prev?.at ?? 0;
+    snap = this.withoutLaggingCloses(owner, snap, prev);
     this.followers.set(owner, snap);
     const inFlight = (subId, sym) => {
       const now = Date.now();
