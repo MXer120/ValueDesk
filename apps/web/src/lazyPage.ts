@@ -41,6 +41,8 @@ export interface LazyPage<P extends object> {
 /** Test seam: the reload, the retry delay, the clock and the storage. */
 export const lazyPageEnv = {
   reload: (): void => window.location.reload(),
+  /** When a reload to the current build was asked for (reloadUnderway), 0: never. */
+  reloadingAt: 0,
   retryDelayMs: 400,
   now: (): number => Date.now(),
   storage: (): Storage | null => {
@@ -113,9 +115,21 @@ export function reloadForChunkError(): boolean {
     /* storage full or disabled: the loop guard is best-effort */
   }
   log.warn('reloading to fetch the current build after a page chunk failed to load');
+  lazyPageEnv.reloadingAt = lazyPageEnv.now();
   lazyPageEnv.reload();
   return true;
 }
+
+/**
+ * A reload to the current build is under way. Until the page goes, a dynamic import
+ * whose `vite:preloadError` was taken over (installChunkErrorReload) resolves to
+ * nothing: what loads it waits for the reload instead of rendering that ("Cannot read
+ * properties of undefined (reading 'default')" in the order entry, 2026-10-29), and the
+ * error reporter sends nothing in between.
+ */
+export const reloadUnderway = (): boolean => lazyPageEnv.reloadingAt > 0 && lazyPageEnv.now() - lazyPageEnv.reloadingAt < RELOAD_GRACE_MS;
+/** A page goes within a moment of reload(); one still here after this did not, and loads as before. */
+const RELOAD_GRACE_MS = 4_000;
 
 /**
  * Every OTHER lazily loaded module (the trading actions behind Cancel all, the
@@ -165,8 +179,11 @@ export function lazyChunk<T extends ComponentType<any>>(load: () => Promise<{ de
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function loadChunk<T extends ComponentType<any>>(load: () => Promise<{ default: T }>): Promise<{ default: T }> {
   try {
-    return await load();
+    const m = await load();
+    if (!m && reloadUnderway()) return NEVER;
+    return m;
   } catch (first) {
+    if (reloadUnderway()) return NEVER;
     if (!isChunkError(first)) throw first;
     await sleep(lazyPageEnv.retryDelayMs);
     try {
@@ -192,6 +209,8 @@ export function lazyPage<P extends object>(name: string, load: () => Promise<Com
     try {
       return await load();
     } catch (first) {
+      // Its module came back empty because a reload is under way (`.then((m) => m.X)` threw): wait for it.
+      if (reloadUnderway()) return NEVER;
       log.warn(`loading the ${name} page failed, retrying once`, { error: String(first) });
       await sleep(lazyPageEnv.retryDelayMs);
       return load();

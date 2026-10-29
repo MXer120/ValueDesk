@@ -25,6 +25,7 @@
  */
 import { browserFamily, errorFingerprint, framesFromStack, scrubName, scrubRoute, scrubShort, scrubText } from '@sign/ops/scrub.js';
 import { BUILD_ID } from './buildInfo';
+import { reloadUnderway } from './lazyPage';
 
 export type ReportKind = 'error' | 'rejection' | 'boundary';
 
@@ -185,6 +186,8 @@ export class ErrorReporter {
  * for noise (IGNORE), judged on the raw message and stack before they are scrubbed.
  */
 export function capture(kind: ReportKind, thrown: unknown, extra: { message?: string; boundary?: string } = {}): Omit<PendingError, 'count'> | null {
+  // The page is reloading to the current build: what breaks in between is the old build going.
+  if (reloadUnderway()) return null;
   const err = thrown instanceof Error ? thrown : null;
   const raw =
     err?.message ??

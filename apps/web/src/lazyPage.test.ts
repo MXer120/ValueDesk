@@ -1,6 +1,7 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { StaleBuild, holdReloadWhile, installChunkErrorReload, isChunkError, lazyPage, lazyPageEnv, loadChunk, reloadForChunkError, reloadHeldBy } from './lazyPage';
+import { StaleBuild, holdReloadWhile, installChunkErrorReload, isChunkError, lazyPage, lazyPageEnv, loadChunk, reloadForChunkError, reloadHeldBy, reloadUnderway } from './lazyPage';
+import { capture } from './errorReport';
 
 /** An in-memory sessionStorage for the reload guard. */
 function memoryStorage(): Storage {
@@ -26,6 +27,7 @@ beforeEach(() => {
   lazyPageEnv.retryDelayMs = 0;
   lazyPageEnv.now = () => clock;
   lazyPageEnv.storage = () => storage;
+  lazyPageEnv.reloadingAt = 0;
 });
 
 const Hello = (p: { name: string }) => `hello ${p.name}` as unknown as JSX.Element;
@@ -142,6 +144,24 @@ test('any lazily loaded module that fails (vite:preloadError, a release replaced
   assert.equal(reloads, 2);
 });
 
+test('while that reload is under way, a part whose import came back empty waits for it: no crash, no report', async () => {
+  // Live 2026-10-29 after v0.2.85: the order entry's boundary caught "Cannot read properties of undefined
+  // (reading 'default')" - the preload error was taken over, so its import resolved to nothing.
+  const target = new EventTarget();
+  installChunkErrorReload(target as unknown as Window);
+  target.dispatchEvent(new Event('vite:preloadError', { cancelable: true }));
+  assert.equal(reloads, 1);
+  assert.equal(reloadUnderway(), true);
+  const settled = (p: Promise<unknown>) => Promise.race([p.then(() => 'settled', () => 'settled'), new Promise((r) => setTimeout(() => r('waiting'), 30))]);
+  const chunk = loadChunk(async () => undefined as unknown as { default: typeof Hello });
+  assert.equal(await settled(chunk), 'waiting', 'the lazy part stays suspended until the page goes');
+  const Page = lazyPage('empty', async () => (undefined as unknown as { X: typeof Hello }).X);
+  const first = render(Page, { name: 'x' });
+  assert.ok(isThenable(first.thrown), 'the page suspends');
+  assert.equal(await settled(Page.preload()), 'waiting', 'and is never shown as failed');
+  assert.equal(capture('boundary', new TypeError("Cannot read properties of undefined (reading 'default')"), { boundary: 'Order entry' }), null, 'nothing is reported while the old build goes');
+});
+
 test('a release never reloads a tab that runs live algos or copies: it is held, and says so', () => {
   let algos = 2;
   const stopA = holdReloadWhile(() => (algos ? `${algos} live algos` : null));
@@ -168,6 +188,8 @@ test('a part of a page from an older build (AlgoTable after a release): one retr
   void loadChunk(gone);
   await new Promise((r) => setTimeout(r, 5));
   assert.equal(reloads, 1, 'gone twice: the tab reloads to the current build');
+  assert.equal(await Promise.race([loadChunk(gone).then(() => 'settled'), new Promise((r) => setTimeout(() => r('waiting'), 20))]), 'waiting', 'while it reloads, a part asked for waits');
+  lazyPageEnv.reloadingAt = 0; // the page that loaded after it: its own module state
   const note = await loadChunk(gone);
   assert.equal(note.default, StaleBuild, 'reloaded a moment ago: the note, not a loop and not the boundary');
   await assert.rejects(loadChunk(() => Promise.reject(new Error('boom'))), /boom/, 'any other error is thrown as before');
