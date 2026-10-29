@@ -50,7 +50,7 @@ import { fmtFixed, fmtNum, fmtPlain } from './numStyle';
 /** Length of the rolling volume window the tiers are measured over. Published as 14D. */
 export const VOLUME_WINDOW_DAYS = 14;
 
-export const FEE_DOC_URL = 'https://sodex.com/documentation/trading-mechanics/trading-fees';
+export const FEE_DOC_URL = 'https://docs.sodex.com/documentation/trading-mechanics/trading-fees';
 export const FEE_DOC_RETRIEVED = '2026-08-26';
 
 export type FeeEngine = 'spot' | 'perps';

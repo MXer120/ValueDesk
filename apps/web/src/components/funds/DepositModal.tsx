@@ -431,7 +431,7 @@ function TransferCrypto({ owner, mirror, onMirror, configs, firstDeposit }: {
           </div>
 
           <div>
-            <Label aside={<a className="fx-link" href="https://sodex.com/documentation/for-developers/developers/mirror-protocol/lifecycle/custody-deposits" target="_blank" rel="noreferrer" tabIndex={readable ? undefined : -1}>Terms apply</a>}>
+            <Label aside={<a className="fx-link" href="https://docs.sodex.com/documentation/for-developers/developers/mirror-protocol/lifecycle/custody-deposits" target="_blank" rel="noreferrer" tabIndex={readable ? undefined : -1}>Terms apply</a>}>
               Your deposit address <Info title="Your own SoDEX deposit address on this chain, checked against the ValueChain registry." />
             </Label>
             <div className="fx-addr">

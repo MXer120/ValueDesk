@@ -42,3 +42,42 @@ users needs each user's order history, which is limited to about four requests a
   wallet signatures. One combined action for the restricted key would halve the prompts.
 - The documented plain `AddAPIKey` registration is rejected on mainnet; the web app's
   `UserSignedAddAPIKeyAction` on `/exchange` works. The documentation could say which one is current.
+
+## 5. A fee tier for a builder's flow (broker tier)
+
+**Why we ask.** SoDEX's fee tier is per user and needs more than $5 M of 14-day volume for the first step. Most of
+our users trade far less, so every one of them pays tier 0 (4.0 bp taker) plus our builder fee. Together they
+trade through one builder. See [research/10-pooled-fee-account.md](research/10-pooled-fee-account.md).
+
+**What we ask for.** Orders that carry builder 234812 are charged at the tier of the builder's combined 14-day
+volume over those orders (or at a fixed rate agreed for the builder), while each user keeps trading in their own
+account. A user's own tier applies when it is better. As an alternative, a rebate of the difference paid to the
+builder, which we pass on to the users.
+
+**What it changes.** Users get a lower fee without handing anyone their funds, and SoDEX gets the volume that a
+lower fee brings. Without it, the only way to reach the tier is to pool users' funds into one account (§6-9), which
+moves custody and the users' margin into one account. We would rather not do that.
+
+## 6. Sub-accounts for a contract-owned master
+
+If §5 is not possible: `createSubAccount` for a master account owned by our contract, one sub-account per user.
+Please confirm that sub-accounts count toward the master's fee tier ("each user has a single fee tier"), that each
+sub-account is margined and liquidated on its own, that it has its own order-rate limits, and that internal
+transfers between the master and its sub-accounts will be enabled (both engine pages say "not supported yet").
+
+## 7. Restricted keys for contract accounts
+
+`addAPIKey` on the gateway takes no permissions and no expiry. We ask for the same restrictions the REST
+registration has, and two more: a trade-only key that cannot withdraw or transfer, and a close-only key (reduce-only
+orders and cancels) for a rescue party.
+
+## 8. A close-and-withdraw call from the owning contract
+
+An EVM-side gateway call, usable only by the contract that owns the account: cancel all orders, close all positions
+reduce-only at the market, withdraw the balance to the contract. A contract could then let its users leave after a
+timelocked outage of its operator without anyone holding a key - the exit Hyperliquid contracts already have.
+
+## 9. Limits for a pooled account
+
+A pooled account carries many users: more than 5 API keys (one per signing process), and higher order-rate,
+open-order (1,000 per user) and address-action limits than one person needs, as SoDEX's market-maker accounts have.
