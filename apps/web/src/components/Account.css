@@ -590,7 +590,11 @@
   top: 0;
   z-index: 1;
   height: 30px;
-  background: var(--bg-panel);
+  /* Never --bg-panel alone: in the glass look a panel clears it to transparent, and scrolled rows
+     showed through the column names. A card of its own, with the pop-ups' blur behind it. */
+  background: color-mix(in srgb, var(--bg-elevated) 92%, transparent);
+  -webkit-backdrop-filter: var(--glass-pop-blur);
+  backdrop-filter: var(--glass-pop-blur);
   box-shadow: inset 0 -1px 0 var(--panel-line);
   color: var(--muted);
   font-weight: 400;
