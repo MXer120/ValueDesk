@@ -826,6 +826,14 @@ const EMPTY_POINTS: HeatPoint[] = [];
 
 const whenFmt = (t: number) => new Date(t).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 
+/** Isolated with its leverage, or cross with its effective one (notional over the account's equity, "~"). */
+function marginText(p: LiqAt['positions'][number]): string | null {
+  if (p.iso === null) return null;
+  if (p.iso) return `isolated${p.lev ? ` ${fmtFixed(p.lev, 0)}×` : ''}`;
+  const eff = p.lev ?? (p.sz !== null && p.mark !== null && p.eq && p.eq > 0 ? (Math.abs(p.sz) * p.mark) / p.eq : null);
+  return `cross${eff ? ` ~${fmtFixed(eff, eff < 10 ? 1 : 0)}×` : ''}`;
+}
+
 /** What a position did after the time asked, in a few words. */
 function nextText(p: LiqAt['positions'][number]): string {
   const n = p.next;
@@ -886,7 +894,7 @@ function AtDetails({ coin, venues, pick, wallets, onClose }: { coin: string; ven
             <span className="lqm-det-dist">{p.dist === null ? '' : `${fmtFixed(Math.abs(p.dist) * 100, 1)}% away`}</span>
             <span className="lqm-det-more">
               {[
-                p.iso === null ? null : p.iso ? `isolated${p.lev ? ` ${fmtFixed(p.lev, 0)}×` : ''}` : `cross${p.lev ? ` ${fmtFixed(p.lev, 0)}×` : ''}`,
+                marginText(p),
                 p.eq !== null ? `equity ${fmtUsdShort(p.eq)}` : null,
                 `since ${whenFmt(p.since)}`,
                 nextText(p),

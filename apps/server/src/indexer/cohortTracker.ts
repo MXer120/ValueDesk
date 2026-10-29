@@ -431,6 +431,8 @@ const PERP_SINCE_META = 'cohort_pnl_perp_since';
 const PNL_FLOW_META = 'cohort_pnl_flow';
 const PNL_FLOW_SAVE_MS = 5 * 60_000;
 /** A position's level is logged again once it moved this much (relative), or its USD this much: the history draws 0.25% cells. */
+/** Set once every open position has been written with the extra fields (logLevels). */
+const LIQ_LOG_FULL_META = 'liq_log_full_v2';
 const LIQ_LOG_MOVE = 0.0005;
 const USD_LOG_MOVE = 0.002;
 const NO_WALLETS: ReadonlySet<string> = new Set();
@@ -1849,10 +1851,13 @@ export class CohortTracker {
         now.set(key, { aid: id, coin, venue: vi, side: x.long ? 1 : -1, liq: +x.liq.toPrecision(8), usd, address: x.address, v: x.venue });
       }
     }
+    // Once: every open position written in full, so each carries the fields the log keeps since 2026-10-29
+    // (size, entry, margin, account) - not only the ones that changed since. About 170k rows, one step.
+    const full = !s.getMeta(LIQ_LOG_FULL_META);
     const changed: Array<{ aid: number | string; coin: string; venue: number; side: number; liq: number; usd: number; address: string; v: Venue } & LiqLogExtra> = [];
     for (const [key, x] of now) {
       const was = state.get(key);
-      if (was && was.side === x.side && Math.abs(x.liq - was.liq) <= LIQ_LOG_MOVE * was.liq && Math.abs(x.usd - was.usd) <= USD_LOG_MOVE * Math.max(1, was.usd)) continue;
+      if (!full && was && was.side === x.side && Math.abs(x.liq - was.liq) <= LIQ_LOG_MOVE * was.liq && Math.abs(x.usd - was.usd) <= USD_LOG_MOVE * Math.max(1, was.usd)) continue;
       // The rest of the position as it stands, from its book (only for the rows written).
       changed.push(Object.assign(x, this.logExtra(x.v, x.address, x.coin)));
     }
@@ -1865,6 +1870,7 @@ export class CohortTracker {
     }
     if (!changed.length && !closed.length) return;
     const ids = s.putLiqLog(t, [...fresh], changed, closed);
+    if (full) s.setMeta(LIQ_LOG_FULL_META, String(t));
     for (const [a, id] of ids) addr.set(a, id);
     for (const x of changed) {
       const aid = typeof x.aid === 'number' ? x.aid : ids.get(x.aid)!;
