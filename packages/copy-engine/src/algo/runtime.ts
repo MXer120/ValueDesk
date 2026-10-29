@@ -2533,13 +2533,24 @@ export class AlgoRuntime {
         await this.cancelExits(a, m, live);
         if (!final) return;
       }
-      const lv = exitLevels(s.side, s.exits, a.filledValue / a.filled);
+      const avg = a.filledValue / a.filled;
+      const lv = exitLevels(s.side, s.exits, avg);
       const close: Side = s.side === 'buy' ? 'sell' : 'buy';
       const stops: StopRequest[] = [];
       const xs: ChildOrder[] = [];
       for (const kind of ['tp', 'sl'] as const) {
         const p = kind === 'tp' ? lv.tp : lv.sl;
         if (p === null || !(p > 0)) continue;
+        // A price exit the fills ended up past (a take-profit under a long's average, a stop over it)
+        // would close the position the moment it lands: not sent, and said once.
+        const above = (s.side === 'buy') === (kind === 'tp');
+        if (above ? p <= avg : p >= avg) {
+          if (a.k[`exitSkip_${kind}`] !== p) {
+            a.k[`exitSkip_${kind}`] = p;
+            await this.event(a, 'error', `The ${kind === 'tp' ? 'take-profit' : 'stop-loss'} at ${p} is on the wrong side of the average fill ${snapPrice(avg, m)}: not placed, it would close the position at once.`);
+          }
+          continue;
+        }
         const clOrdID = this.clOrdIdFor(a);
         const triggerPrice = snapPrice(p, m);
         stops.push({ clOrdID, side: close, quantity: dec(size), triggerPrice, kind });

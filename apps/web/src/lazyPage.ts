@@ -24,7 +24,7 @@
  * build. Past that, the error goes to the nearest error boundary instead of
  * looping.
  */
-import { createElement, type ComponentType, type ReactElement } from 'react';
+import { createElement, lazy, type ComponentType, type LazyExoticComponent, type ReactElement } from 'react';
 import { logger } from './log';
 
 const log = logger('pages');
@@ -134,6 +134,52 @@ export function installChunkErrorReload(target: Pick<Window, 'addEventListener'>
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 /** Thrown while a reload is under way: keeps the tree suspended, no error UI. */
 const NEVER = new Promise<never>(() => {});
+
+/** What a browser says when a module it was asked for is not there (a deploy renamed it). */
+export const isChunkError = (e: unknown): boolean =>
+  /Failed to fetch dynamically imported module|Importing a module script failed|error loading dynamically imported module|Unable to preload/i.test(String((e as { message?: unknown })?.message ?? e));
+
+/** In place of a part that could not load from an older build, while a reload is not wanted. */
+function StaleBuild(): ReactElement {
+  return createElement('p', { className: 'stale-build', role: 'status' },
+    'A new version of ValueDesk is out: reload the page to open this.',
+    createElement('button', { type: 'button', className: 'stale-build__btn', onClick: () => lazyPageEnv.reload() }, 'Reload'));
+}
+
+/**
+ * React.lazy for a part of a page (the algo table, the algo ticket, the editors, ...),
+ * with the deploy case handled here rather than left to `vite:preloadError`, which
+ * does not fire for every chunk: a tab opened on build A that asks for a file of build A
+ * after build B replaced it got a 404 and the error boundary ("Failed to fetch dynamically
+ * imported module: /assets/AlgoTable-....js", owner's report 2026-10-29). Now: one retry,
+ * then the same once-a-minute reload as the pages - or, when the tab must not reload (a
+ * browser algo runs here) or just did, a line and a Reload button in place of the part.
+ * Any other error is thrown as before.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function lazyChunk<T extends ComponentType<any>>(load: () => Promise<{ default: T }>): LazyExoticComponent<T> {
+  return lazy(() => loadChunk(load));
+}
+
+/** lazyChunk's loader (the tests drive it): the module, a reload under way (never settles), or the reload note. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function loadChunk<T extends ComponentType<any>>(load: () => Promise<{ default: T }>): Promise<{ default: T }> {
+  try {
+    return await load();
+  } catch (first) {
+    if (!isChunkError(first)) throw first;
+    await sleep(lazyPageEnv.retryDelayMs);
+    try {
+      return await load();
+    } catch (again) {
+      if (!isChunkError(again)) throw again;
+      if (reloadForChunkError()) return NEVER;
+      log.warn('a part of the page is from an older build and could not load; showing a reload note', { error: String(again) });
+      return { default: StaleBuild as unknown as T };
+    }
+  }
+}
+export { StaleBuild };
 
 export function lazyPage<P extends object>(name: string, load: () => Promise<ComponentType<P>>): LazyPage<P> {
   let Comp: ComponentType<P> | null = null;

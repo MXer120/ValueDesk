@@ -127,6 +127,10 @@ test('bracket: an entry with exits; exits on the wrong side of the price are ref
   assert.ok(checkAlgoSpec({ kind: 'bracket', symbol: 'BTC-USD', side: 'buy', quantity: '0.01', entry: 'market' }).errors.exits);
   const lim = planAlgo(S({ kind: 'bracket', quantity: '0.01', entry: 'limit', price: 59_000, exits: { tpPct: 0.02 } }), BTC, ctx());
   close(lim.exits!.tp!, 60_180);
+  // A buy-limit under the market: its exits guard the entry, not the price now.
+  const under = planAlgo(S({ kind: 'bracket', quantity: '0.01', entry: 'limit', price: 59_000, exits: { tpPrice: 59_800, slPrice: 59_600 } }), BTC, ctx());
+  assert.ok(!under.errors.some((e) => /take-profit/.test(e)), 'a take-profit above the entry is fine, though under the market');
+  assert.ok(under.errors.some((e) => /stop-loss 59600 is on the wrong side of the expected entry \(59000\)/.test(e)), 'a stop over the entry would fire on the fill');
 });
 
 test('exits: levels from the average fill for a short, a price wins over a distance, and no exits on what opens nothing', () => {

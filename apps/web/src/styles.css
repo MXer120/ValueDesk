@@ -3196,3 +3196,8 @@ button.coh-pick__btn,
   box-shadow: var(--depth-3);
 }
 .modal, .modal.fx, .cp, .cdlg { border-radius: var(--radius-page); }
+
+/* lazyPage.ts lazyChunk: a part of the page from an older build, while a reload is not wanted. */
+.stale-build { display: flex; align-items: center; gap: var(--sp-2); margin: 0; padding: 10px 12px; color: var(--muted); font-size: var(--fs-xs); }
+.stale-build__btn { height: 24px; padding: 0 10px; border: 1px solid var(--panel-line); border-radius: var(--radius-md); background: transparent; color: var(--text); font: inherit; cursor: pointer; }
+.stale-build__btn:hover { border-color: var(--line); }

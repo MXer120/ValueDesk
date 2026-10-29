@@ -13,7 +13,7 @@
  * Every button carries its name as a tooltip and an accessible name; the
  * notifications and settings menus open to the right of the rail (shell.css).
  */
-import { Suspense, lazy, useEffect, useState, type MouseEvent, type ReactNode } from 'react';
+import { Suspense, useEffect, useState, type MouseEvent, type ReactNode } from 'react';
 import { BrandMark } from './BrandMark';
 import { SettingsMenu } from './SettingsMenu';
 import { AddressMenu } from './NavBar';
@@ -31,9 +31,10 @@ import { historyLabel } from '../dashboard/storage';
 import { MENU_ICONS, TabMenu, menuAt, type TabMenuItem } from '../dashboard/tabExtras';
 import { useMoneyNotice } from './funds/moneyNotice';
 import { FOLDER_ICON } from '../folders/icons';
+import { lazyChunk } from '../lazyPage';
 
 /* Knowledge's button and its quick drop: fetched only once Knowledge is on (folders/access.ts). */
-const KnowledgeRailButton = lazy(() => import('../folders/QuickDrop').then((m) => ({ default: m.KnowledgeRailButton })));
+const KnowledgeRailButton = lazyChunk(() => import('../folders/QuickDrop').then((m) => ({ default: m.KnowledgeRailButton })));
 
 export function SideBar({ address, hasLayout, dashLocked, onOpenSearch, tab, onNavigate, knowledge = false }: {
   address: string | null;

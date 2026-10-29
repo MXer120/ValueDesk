@@ -29,7 +29,7 @@
  * to the rows each table already holds (accountTables/filters.ts), persist per
  * tab (`vs.acct.filter.<tab>`), and the counts in the tab labels follow them.
  */
-import { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
+import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { useLiveAlgos } from '../algo/algoBus';
 import { api, type Engine, type Symbol as MarketSymbol } from '../api';
 import { useAccountResource } from '../accountFeeds';
@@ -44,6 +44,7 @@ import {
   type BandTab, type TableFilter,
 } from './accountTables/filters';
 import { FilterBar, NO_META, type BandMeta, type CardView } from './accountTables/FilterBar';
+import { lazyChunk } from '../lazyPage';
 
 export interface AccountTabsProps {
   engine: Engine;
@@ -69,7 +70,7 @@ export interface AccountTabsProps {
 }
 
 /** Algo orders (TWAP, VWAP, ...): the runner signs orders, so its table loads when the tab is opened. */
-const AlgoTable = lazy(() => import('./algo/AlgoTable'));
+const AlgoTable = lazyChunk(() => import('./algo/AlgoTable'));
 
 const TABS: BandTab[] = [
   'positions', 'orders', 'balances', 'order-history', 'trade-history', 'funding-history', 'position-history', 'account-history',

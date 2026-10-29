@@ -1,6 +1,6 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { holdReloadWhile, installChunkErrorReload, lazyPage, lazyPageEnv, reloadForChunkError, reloadHeldBy } from './lazyPage';
+import { StaleBuild, holdReloadWhile, installChunkErrorReload, isChunkError, lazyPage, lazyPageEnv, loadChunk, reloadForChunkError, reloadHeldBy } from './lazyPage';
 
 /** An in-memory sessionStorage for the reload guard. */
 function memoryStorage(): Storage {
@@ -157,4 +157,20 @@ test('a release never reloads a tab that runs live algos or copies: it is held, 
   assert.equal(reloadHeldBy(), 'a running algo or copy', 'a hold that cannot answer holds');
   stopA(); stopB(); stopC();
   assert.equal(reloadHeldBy(), null);
+});
+
+test('a part of a page from an older build (AlgoTable after a release): one retry, then a reload - or, held or just reloaded, the reload note, never the error screen', async () => {
+  const gone = () => Promise.reject(new TypeError('Failed to fetch dynamically imported module: /assets/AlgoTable-XzbNlZd5.js'));
+  let calls = 0;
+  const once = await loadChunk(async () => { calls++; if (calls === 1) throw new TypeError('Failed to fetch dynamically imported module: /x.js'); return { default: Hello }; });
+  assert.equal(once.default, Hello, 'a blip: the retry loads it');
+  assert.equal(reloads, 0);
+  void loadChunk(gone);
+  await new Promise((r) => setTimeout(r, 5));
+  assert.equal(reloads, 1, 'gone twice: the tab reloads to the current build');
+  const note = await loadChunk(gone);
+  assert.equal(note.default, StaleBuild, 'reloaded a moment ago: the note, not a loop and not the boundary');
+  await assert.rejects(loadChunk(() => Promise.reject(new Error('boom'))), /boom/, 'any other error is thrown as before');
+  assert.ok(isChunkError(new TypeError('Importing a module script failed.')));
+  assert.ok(!isChunkError(new Error('network')));
 });

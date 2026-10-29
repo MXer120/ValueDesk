@@ -377,14 +377,18 @@ export function planAlgo(s: AlgoSpec, m: MarketInfo, ctx: AlgoPlanContext): Algo
       break;
     }
   }
-  // Exits: where they sit against the average fill this plan expects, and never on the wrong side of the price now.
+  // Exits: where they sit against the average fill this plan expects, and never on the wrong side of THAT
+  // fill - they are placed once the entry has filled, so the entry, not the price now, is what they guard
+  // (a buy-limit bracket at 79,000 under a 80,000 market: a stop at 79,500 would fire on the fill, a
+  // take-profit at 79,500 is fine - the check against the price now had both the wrong way round).
   if (s.exits && px) {
     const ref = out.avgPrice ?? (s.kind === 'bracket' && s.entry === 'limit' && s.price ? s.price : px);
     const lv = exitLevels(s.side, s.exits, ref);
     out.exits = lv;
     const long = s.side === 'buy';
-    if (s.exits.tpPrice !== null && (long ? s.exits.tpPrice <= px : s.exits.tpPrice >= px)) out.errors.push(`The take-profit ${s.exits.tpPrice} is on the wrong side of the price now: it would fire at once.`);
-    if (s.exits.slPrice !== null && (long ? s.exits.slPrice >= px : s.exits.slPrice <= px)) out.errors.push(`The stop-loss ${s.exits.slPrice} is on the wrong side of the price now: it would fire at once.`);
+    const at = ref === px ? 'the price now' : 'the expected entry';
+    if (s.exits.tpPrice !== null && (long ? s.exits.tpPrice <= ref : s.exits.tpPrice >= ref)) out.errors.push(`The take-profit ${s.exits.tpPrice} is on the wrong side of ${at} (${ref}): it would fire at once.`);
+    if (s.exits.slPrice !== null && (long ? s.exits.slPrice >= ref : s.exits.slPrice <= ref)) out.errors.push(`The stop-loss ${s.exits.slPrice} is on the wrong side of ${at} (${ref}): it would fire at once.`);
   }
   // Every child an order SoDEX takes: under its smallest or over its largest is an error with the fix (sizes.ts).
   const sizes = checkSizes(s, m, { price: px, seed: ctx.seed, now: ctx.now, positionSize: pos, profile: ctx.profile ?? null, market: ctx.market, prices: ctx.prices });

@@ -12,7 +12,7 @@
  * The editors are their own chunks: the page opens without them, and only the
  * one an item needs is fetched.
  */
-import { lazy, Suspense, useCallback, useEffect, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
+import { Suspense, useCallback, useEffect, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import type { BoardData, DocData, FolderItem, ItemSummary, SavedNewsData, SheetData, TweetData } from '@sign/folders/types.js';
 import { MENU_ICONS } from '../dashboard/tabExtras';
 import { foldersApi } from '../folders/api';
@@ -22,10 +22,11 @@ import { change, foldersState, putSummary, useFolders } from '../folders/state';
 import type { ChartSnapshot } from '../folders/bridge';
 import { ChartView, FileView, KindIcon, KIND_LABEL, NewsView } from './views';
 import { TweetView } from './tweets';
+import { lazyChunk } from '../lazyPage';
 
-const DocEditor = lazy(() => import('./doc/DocEditor'));
-const SheetEditor = lazy(() => import('./sheet/SheetEditor'));
-const BoardEditor = lazy(() => import('./board/BoardEditor'));
+const DocEditor = lazyChunk(() => import('./doc/DocEditor'));
+const SheetEditor = lazyChunk(() => import('./sheet/SheetEditor'));
+const BoardEditor = lazyChunk(() => import('./board/BoardEditor'));
 
 const Wait = () => <p className="fx-wait kn-wait"><span className="fx-spin" aria-hidden="true" />Loading…</p>;
 

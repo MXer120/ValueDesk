@@ -13,17 +13,18 @@
  *      second chart instance (the mobile carousel mounts one too) goes
  *      straight to klinecharts instead of failing the same way again.
  */
-import { Component, lazy, Suspense, useCallback, useEffect, useState, type ComponentType, type ReactNode } from 'react';
+import { Component, Suspense, useCallback, useEffect, useState, type ComponentType, type ReactNode } from 'react';
 import type { ChartProps } from '../../components/Chart';
 import { FEED_LOADING, FeedOverlay } from '../FeedOverlay';
 import { TV_ENABLED } from './flag';
 import { loadTradingView, peekTradingView } from './loader';
 import { logger } from '../../log';
 import { reportBoundaryError } from '../../errorReport';
+import { lazyChunk } from '../../lazyPage';
 
 const log = logger('chart.tv');
 
-const TvChart = lazy(() => import('./TvChart').then((m) => ({ default: m.TvChart })));
+const TvChart = lazyChunk(() => import('./TvChart').then((m) => ({ default: m.TvChart })));
 
 /** Why TradingView is not in use this page load, once decided. */
 let brokenReason: string | null = null;

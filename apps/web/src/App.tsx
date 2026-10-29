@@ -1,5 +1,5 @@
 import './cssOrder';
-import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { PrivacyProvider } from './privacy';
 import { NavBar, scanHref } from './components/NavBar';
 import { SideBar } from './components/SideBar';
@@ -29,7 +29,7 @@ import { restoreTrading } from './trading/session';
 import { ToastProvider } from './toast';
 import { FillToasts } from './components/FillToasts';
 import { FeedbackHost } from './feedback/FeedbackHost';
-import { lazyPage, type LazyPage } from './lazyPage';
+import { lazyPage, type LazyPage, lazyChunk } from './lazyPage';
 import { primeFirstReads } from './serverFetch';
 import type { Venue } from './vsApi';
 import { OPEN_LEGAL_EVENT, RegionBanner, TermsGate } from './legal/LegalGate';
@@ -61,9 +61,9 @@ const TradeDashboard = lazyPage('trade', () => import('./dashboard/TradeDashboar
 const Explore = lazyPage('explore', () => import('./components/explore/Explore').then((m) => m.Explore));
 const CopyPage = lazyPage('copy', () => import('./components/copy/CopyPage').then((m) => m.CopyPage));
 /** Live copy trading (copy/CopyRunner.tsx): mounted on every page, loaded after it. */
-const CopyRunner = lazy(() => import('./copy/CopyRunner'));
+const CopyRunner = lazyChunk(() => import('./copy/CopyRunner'));
 /** Algo orders run in this browser (algo/AlgoRunner.tsx): mounted on every page, loaded after it. */
-const AlgoRunner = lazy(() => import('./algo/AlgoRunner'));
+const AlgoRunner = lazyChunk(() => import('./algo/AlgoRunner'));
 const LeaderboardPage = lazyPage('leaderboard', () => import('./components/leaderboard/LeaderboardPage').then((m) => m.LeaderboardPage));
 const PortfolioDashboard = lazyPage('portfolio', () => import('./dashboard/PortfolioDashboard').then((m) => m.PortfolioDashboard));
 const ScanDashboard = lazyPage('scan', () => import('./dashboard/ScanDashboard').then((m) => m.ScanDashboard));
@@ -71,7 +71,7 @@ const ScanDashboard = lazyPage('scan', () => import('./dashboard/ScanDashboard')
    the Dev panel turned it on for the owner's wallet (folders/access.ts): then not even fetched. */
 const KnowledgePage = lazyPage('knowledge', () => import('./knowledge/KnowledgePage').then((m) => m.KnowledgePage));
 /* The folders' sign-in and save sheet (folders/FoldersHost.tsx): fetched only once Knowledge is on. */
-const FoldersHost = lazy(() => import('./folders/FoldersHost').then((m) => ({ default: m.FoldersHost })));
+const FoldersHost = lazyChunk(() => import('./folders/FoldersHost').then((m) => ({ default: m.FoldersHost })));
 /* The market strip below is shown on no page today, so this never loads. */
 const TickerBar = lazyPage('ticker', () => import('./components/Market').then((m) => m.TickerBar));
 /* Impressum, privacy policy, terms (src/legal): one chunk for the three, loaded

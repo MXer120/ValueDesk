@@ -44,7 +44,7 @@
  * now match nothing and can be deleted by whoever owns that file.
  */
 import { fmtFixed, fmtNum, toInputText } from '../numStyle';
-import { Suspense, lazy, useCallback, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { Suspense, useCallback, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import { api, type Engine, type OrderBook, type Symbol } from '../api';
 import { sharedBook } from '../exchange/bookShare';
@@ -67,19 +67,20 @@ import { useVenueFees } from './useVenueFees';
 import { fmtRate, withBuilder } from '../fees';
 import { DraftInput, decimalInput, integerInput, tickInput, trimZeros } from './numberInput';
 import { Collapse } from './motion';
-import { notifyTrade } from '../toast';
+import { notify, notifyTrade } from '../toast';
 import { ApproveLabel } from './funds/ui';
 import { builderRateToFraction, mulDecimal, roundToStep } from '@sodex-core';
 import { limitImpact, publishOrderImpact, type RawTake } from '../orderImpact';
 import { publishDraftOrders, type DraftLine } from '../draftOrders';
 import { fmtSlip, pctAsUnit, unitAsPct, useSlipUnit } from '../slipUnit';
+import { lazyChunk } from '../lazyPage';
 
 /** A market order cannot ask for more than this. The field refuses anything higher. */
 const SLIP_CAP_PCT = 2.5;
 import './OrderEntry.css';
 
 /** The algo half of the ticket (TWAP, VWAP, ... - components/algo): loaded the first time Algo is picked. */
-const AlgoTicket = lazy(() => import('./algo/AlgoTicket'));
+const AlgoTicket = lazyChunk(() => import('./algo/AlgoTicket'));
 
 interface Props {
   engine: Engine;
@@ -1069,24 +1070,57 @@ export function OrderEntry({
     return side === 'buy' ? effectivePrice + pnl / q : effectivePrice - pnl / q;
   };
 
-  /** The money field's displayed value, in whichever unit is selected. */
-  const exitAmountText = (target: string): string => {
+  /*
+   * GAIN AND LOSS ARE MAGNITUDES. "Loss 100" is a $100 loss: the stop goes on the
+   * losing side of entry. The field used to read it as +$100 of PnL and put the
+   * stop on the profit side - above entry on a long, a stop that fires at once
+   * (owner, 2026-10-29). The sign comes from the field, never from the number.
+   */
+  type Exit = 'tp' | 'sl';
+  const exitSign = (e: Exit) => (e === 'tp' ? 1 : -1);
+
+  /** The money field's displayed value, in whichever unit is selected: what is gained or lost. */
+  const exitAmountText = (target: string, e: Exit): string => {
     const pnl = pnlAtPrice(target);
     if (pnl === null) return '';
-    if (exitUnit === 'usd') return pnl.toFixed(2);
-    return exitBasis > 0 ? ((pnl / exitBasis) * 100).toFixed(2) : '';
+    const v = pnl * exitSign(e);
+    if (exitUnit === 'usd') return v.toFixed(2);
+    return exitBasis > 0 ? ((v / exitBasis) * 100).toFixed(2) : '';
   };
 
+  /** The trigger price for a gain or loss of `v` (in `unit`), from the ticket as it is now. */
+  const exitPriceFor = (v: number, unit: 'usd' | 'pct', e: Exit): string | null => {
+    const size = Math.abs(v);
+    const pnl = exitSign(e) * (unit === 'usd' ? size : (size / 100) * exitBasis);
+    const t = priceAtPnl(pnl);
+    return t === null || !(t > 0) ? null : toFieldPrice(t);
+  };
+
+  /*
+   * A typed Gain or Loss is what the trader meant, so it is HELD: when the entry
+   * moves (a market order follows the last price), or the size or leverage
+   * changes, the trigger price is solved again - live - instead of the amount
+   * drifting under a frozen price. Typing a price lets go of it.
+   */
+  const [exitHold, setExitHold] = useState<Record<Exit, { v: number; unit: 'usd' | 'pct' } | null>>({ tp: null, sl: null });
+
   /** Typing in the money field back-solves the trigger price. */
-  const setExitFromAmount = (raw: string, apply: (price: string) => void): void => {
-    if (raw.trim() === '') { apply(''); return; }
+  const setExitFromAmount = (raw: string, e: Exit): void => {
+    const apply = e === 'tp' ? setTpPrice : setSlPrice;
+    if (raw.trim() === '') { setExitHold((h) => ({ ...h, [e]: null })); apply(''); return; }
     const v = Number(raw);
     if (!Number.isFinite(v)) return;
-    const pnl = exitUnit === 'usd' ? v : (v / 100) * exitBasis;
-    const t = priceAtPnl(pnl);
-    if (t === null || !(t > 0)) return;
-    apply(toFieldPrice(t));
+    setExitHold((h) => ({ ...h, [e]: { v, unit: exitUnit } }));
+    const t = exitPriceFor(v, exitUnit, e);
+    if (t !== null) apply(t);
   };
+  const tpHeldPrice = exitHold.tp ? exitPriceFor(exitHold.tp.v, exitHold.tp.unit, 'tp') : null;
+  const slHeldPrice = exitHold.sl ? exitPriceFor(exitHold.sl.v, exitHold.sl.unit, 'sl') : null;
+  useEffect(() => { if (tpHeldPrice !== null && tpHeldPrice !== tpPrice) setTpPrice(tpHeldPrice); }, [tpHeldPrice]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (slHeldPrice !== null && slHeldPrice !== slPrice) setSlPrice(slHeldPrice); }, [slHeldPrice]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Cleared from elsewhere (placed, reset, another market): nothing is held any more.
+  useEffect(() => { if (!tpPrice) setExitHold((h) => (h.tp ? { ...h, tp: null } : h)); }, [tpPrice]);
+  useEffect(() => { if (!slPrice) setExitHold((h) => (h.sl ? { ...h, sl: null } : h)); }, [slPrice]);
 
   // --- slippage, walked against real depth ----------------------------------
   //
@@ -1421,6 +1455,37 @@ export function OrderEntry({
    * in words (owner, 2026-10-25): red on or past it - the exchange liquidates first -
    * orange close to it. Only a stop on the wrong side of entry still gets a line.
    */
+  /*
+   * An exit on the wrong side of entry - a stop above a long's entry, a take-profit
+   * below it - would trigger as soon as the order fills. Said as a notification, not
+   * a line in the ticket (owner, 2026-10-29), and said again whenever it changes, as
+   * the entry, the side or the prices move; settled for 0.6 s so typing a price
+   * digit by digit does not raise one for every keystroke.
+   */
+  const tpWrongSide = engine === 'perps' && useTp && effectivePrice > 0
+    && (side === 'buy' ? num(tpPrice) <= effectivePrice : num(tpPrice) >= effectivePrice);
+  /*
+   * A Stop order is judged by its own side and kind against the last price: a buy
+   * stop-loss (closing a short, or a breakout entry) triggers ABOVE the market, a
+   * buy take-profit below it; a sell the other way round. The exits' check above
+   * reads a stop as a new position's at the last price, which called a buy
+   * stop-loss over the market "at or above entry" - its normal place.
+   */
+  const lastPx = num(lastPrice);
+  const stopOrderWrong = type === 'stop' && !isAlgo && num(stopPrice) > 0 && lastPx > 0
+    && ((side === 'buy') === (stopKind === 'sl') ? num(stopPrice) <= lastPx : num(stopPrice) >= lastPx);
+  const exitWarning = useSl && stopCheck?.severity === 'error' && stopCheck.message
+    ? stopCheck.message
+    : tpWrongSide
+      ? side === 'buy' ? 'Take profit is at or below entry — it would trigger immediately.' : 'Take profit is at or above entry — it would trigger immediately.'
+      : stopOrderWrong
+        ? `A ${side} ${stopKind === 'sl' ? 'stop-loss' : 'take-profit'} triggers ${(side === 'buy') === (stopKind === 'sl') ? 'above' : 'below'} the market: at ${stopPrice} it would trigger immediately.`
+        : null;
+  useEffect(() => {
+    if (!exitWarning) return;
+    const t = setTimeout(() => notify('warn', exitWarning), 600);
+    return () => clearTimeout(t);
+  }, [exitWarning]);
   const slTone = stopCheck?.verdict === 'at-liquidation' || stopCheck?.verdict === 'beyond-liquidation'
     ? ' is-liq'
     : stopCheck?.verdict === 'near-liquidation' ? ' is-near-liq' : '';
@@ -2273,7 +2338,7 @@ export function OrderEntry({
                     autoComplete="off"
                     className="oe-input"
                     value={toInputText(tpPrice)}
-                    onChange={(e) => setTpPrice(tickInput(e.target.value, sym?.tickSize, tpPrice))}
+                    onChange={(e) => { setExitHold((h) => ({ ...h, tp: null })); setTpPrice(tickInput(e.target.value, sym?.tickSize, tpPrice)); }}
                     inputMode="decimal"
                     placeholder="0"
                   />
@@ -2283,9 +2348,10 @@ export function OrderEntry({
                   <DraftInput
                     id={`${uid}-tp-amt`}
                     className="oe-input"
-                    value={exitAmountText(tpPrice)}
-                    onDraft={(t) => setExitFromAmount(t, setTpPrice)}
-                    sanitize={(raw) => decimalInput(raw, { signed: true })}
+                    value={exitAmountText(tpPrice, 'tp')}
+                    onDraft={(t) => setExitFromAmount(t, 'tp')}
+                    // A size of gain or loss: no sign (the field says which).
+                    sanitize={(raw) => decimalInput(raw)}
                     inputMode="decimal"
                     placeholder="0"
                   />
@@ -2299,7 +2365,7 @@ export function OrderEntry({
                     autoComplete="off"
                     className="oe-input"
                     value={toInputText(slPrice)}
-                    onChange={(e) => setSlPrice(tickInput(e.target.value, sym?.tickSize, slPrice))}
+                    onChange={(e) => { setExitHold((h) => ({ ...h, sl: null })); setSlPrice(tickInput(e.target.value, sym?.tickSize, slPrice)); }}
                     inputMode="decimal"
                     placeholder="0"
                   />
@@ -2309,9 +2375,10 @@ export function OrderEntry({
                   <DraftInput
                     id={`${uid}-sl-amt`}
                     className="oe-input"
-                    value={exitAmountText(slPrice)}
-                    onDraft={(t) => setExitFromAmount(t, setSlPrice)}
-                    sanitize={(raw) => decimalInput(raw, { signed: true })}
+                    value={exitAmountText(slPrice, 'sl')}
+                    onDraft={(t) => setExitFromAmount(t, 'sl')}
+                    // A size of gain or loss: no sign (the field says which).
+                    sanitize={(raw) => decimalInput(raw)}
                     inputMode="decimal"
                     placeholder="0"
                   />
@@ -2331,7 +2398,6 @@ export function OrderEntry({
             <strong>{shortAddr(signingAddress ?? undefined)}</strong>.
           </p>
         )}
-        {stopCheck?.severity === 'error' && stopCheck.message && <p className="status err">{stopCheck.message}</p>}
 
         {/* 6. The irreversible control.
          *

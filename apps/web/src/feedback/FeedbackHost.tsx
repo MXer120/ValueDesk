@@ -24,7 +24,7 @@
  * The dialog's code (and the seed-phrase word list it checks against) loads on
  * the first open, not with the app.
  */
-import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { pushNotice } from '../notices';
 import { notify } from '../toast';
 import type { Eip1193Provider } from '../wallet';
@@ -33,8 +33,9 @@ import { FeedbackMenu } from './FeedbackMenu';
 import { connectedWallet } from './context';
 import { heldSession, markSessionSeen } from './session';
 import { REPLY_EVENT, pollUnread, pollWallet, setUnread, threads } from './threads';
+import { lazyChunk } from '../lazyPage';
 
-const FeedbackDialog = lazy(() => import('./FeedbackDialog').then((m) => ({ default: m.FeedbackDialog })));
+const FeedbackDialog = lazyChunk(() => import('./FeedbackDialog').then((m) => ({ default: m.FeedbackDialog })));
 
 export const POLL_MS = 60_000;
 

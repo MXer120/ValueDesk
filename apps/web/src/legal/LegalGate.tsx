@@ -22,7 +22,7 @@
  *   <ReownSwitch>       the Cookies page: allow or withdraw Reown's usage reports.
  *   openLegalPage()     any component: show a legal page in place (App listens).
  */
-import { lazy, Suspense, useCallback, useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react';
+import { Suspense, useCallback, useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 import { Modal } from '../components/Modal';
 import { countryName } from '../copy/countries';
 import { LEGAL_LABELS, LEGAL_PAGES, legalForPath, pathForLegal, type LegalPage } from '../router';
@@ -49,6 +49,7 @@ import { LOCATION_UNKNOWN, useGeoSettled, useViewerAccess, useViewerGeo } from '
 import { regionBannerText } from './notices';
 import { siteAccess } from './jurisdictions.mjs';
 import { screeningOf, useScreening } from './screening';
+import { lazyChunk } from '../lazyPage';
 import './gate.css';
 
 /* ------------------------------------------------------------ open a page ----- */
@@ -95,7 +96,7 @@ export function LegalText({ text, onOpen }: { text: string; onOpen?: (p: LegalPa
 
 /* ---------------------------------------------------------- the site gate ----- */
 
-const LegalViewLazy = lazy(() => import('./LegalView').then((m) => ({ default: m.LegalView })));
+const LegalViewLazy = lazyChunk(() => import('./LegalView').then((m) => ({ default: m.LegalView })));
 
 /** In a sanctioned place: the legal pages and the notice, nothing of the app. */
 export function SiteGate({ children }: { children: ReactNode }) {

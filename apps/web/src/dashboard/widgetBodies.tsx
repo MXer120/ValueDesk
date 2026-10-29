@@ -9,7 +9,7 @@
  * `instance` is a duplicate tab's own settings key (`news#2`); `bp` is the
  * breakpoint, for the widgets that draw differently on a phone.
  */
-import { lazy, Suspense, type ReactNode } from 'react';
+import { Suspense, type ReactNode } from 'react';
 import { LiveChart, LiveOrderEntry, LiveSizeCalc } from './livePrice';
 import { Book, MarketStrip, TickerBar, Trades } from '../components/Market';
 import { AccountPanel, History, OpenOrders, Positions } from '../components/Account';
@@ -35,8 +35,9 @@ import { MarketHeat, Watchlist, WhaleTrades } from './terminalWidgets';
 import { newsProps } from './newsProps';
 import type { TradeContext } from './registry';
 import type { BreakpointName } from './types';
+import { lazyChunk } from '../lazyPage';
 
-const AlgoTable = lazy(() => import('../components/algo/AlgoTable'));
+const AlgoTable = lazyChunk(() => import('../components/algo/AlgoTable'));
 
 export interface WidgetBody {
   content: ReactNode;
