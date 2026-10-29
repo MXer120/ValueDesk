@@ -13,10 +13,19 @@
  * The master wallet's private key (from the env file) signs only two kinds of
  * thing, both what the web app asks a wallet to sign: an API key registration
  * (the executor's key, the harness's own key) and the builder-fee approval.
+ *
+ * WRITES. The engine's SoDEX client sends only what a copier sends (orders,
+ * cancels, leverage: copy-engine sodex.ts ALLOWED_WRITES) and refuses the rest
+ * before signing reaches the wire. The harness also registers keys, approves the
+ * builder and moves a position's isolated margin (the liquidation scenarios), as
+ * the web app does for its user: those go straight to SoDEX's gateway
+ * (SodexReads.write), everything else through the engine's client and its queue.
  */
 import { secp256k1 } from '@noble/curves/secp256k1';
 import {
   DAY_MS,
+  GATEWAY_ORIGIN,
+  MarginMode,
   OrderSide,
   OrderType,
   SODEX_CHAIN_ID,
@@ -29,6 +38,7 @@ import {
   generateTradingKey,
   hexToBytes,
   nonceKey,
+  parseEnvelope,
   perpsActions,
   prepareApiKeyRegistrationExchange,
   prepareBuilderFeeApproval,
@@ -37,12 +47,13 @@ import {
   signingKeyFrom,
   unwrapList,
   failedOrders,
+  type BuiltRequest,
   type NonceManager,
   type OrderResult,
   type SignableAction,
   type SigningKeyRef,
 } from '../../../../packages/sodex-core/src/index.ts';
-import { SodexClient, WeightBudget, floorQuantity, limitPrice, type FetchLike, type MarketInfo } from '../../../../packages/copy-engine/src/index.ts';
+import { ALLOWED_WRITES, SodexClient, WeightBudget, floorQuantity, limitPrice, type FetchLike, type MarketInfo } from '../../../../packages/copy-engine/src/index.ts';
 import type { FlattenVenue, VenueOrder } from './cleanup.ts';
 
 export const CHAIN_ID = SODEX_CHAIN_ID.mainnet;
@@ -118,9 +129,21 @@ export class SodexReads {
   readonly client: SodexClient;
   private marketsCache: MarketInfo[] | null = null;
 
-  constructor(fetch: FetchLike) {
+  constructor(private readonly fetch: FetchLike) {
     // A small share of SoDEX's per-IP budget: the executor on this machine needs the rest.
     this.client = new SodexClient({ network: 'mainnet', fetch, budget: new WeightBudget(300, 0.9) });
+  }
+
+  /**
+   * One signed write. What a copier sends (orders, cancels, leverage) goes through the engine's
+   * client and its queue; what only a wallet's owner sends (a key registration, the builder
+   * approval, isolated margin) straight to the gateway: the engine's client refuses those by design.
+   * SoDEX's refusal (an error envelope) throws, with its words.
+   */
+  async write<V = unknown>(req: Pick<BuiltRequest, 'method' | 'gatewayPath' | 'headers' | 'body'>): Promise<V> {
+    if (ALLOWED_WRITES.some((w) => w.method === req.method && w.path === req.gatewayPath)) return this.client.send<V>(req);
+    const res = await this.fetch(`${GATEWAY_ORIGIN.mainnet}${req.gatewayPath}`, { method: req.method, headers: req.headers, body: req.body, signal: AbortSignal.timeout(15_000) });
+    return parseEnvelope<V>(res.status, await res.text(), req.gatewayPath);
   }
 
   /**
@@ -190,6 +213,39 @@ export class SodexReads {
     if (p && typeof p.l === 'number') return { leverage: p.l, marginMode: p.m === 'ISOLATED' ? 'isolated' : 'cross' };
     const s = (st?.S ?? []).find((x) => x.s === symbol);
     return s ? { leverage: s.l, marginMode: s.m === 'ISOLATED' ? 'isolated' : 'cross' } : null;
+  }
+
+  /**
+   * The open position on the market as SoDEX's account state has it (perps /state P[]): size,
+   * margin mode and leverage, its isolated margin (`iw`) and SoDEX's own liquidation price (`lp`).
+   * Null: no position. A field SoDEX did not send is null.
+   */
+  async risk(address: string, symbol: string): Promise<{ size: number; entry: number; leverage: number | null; marginMode: 'cross' | 'isolated'; margin: number | null; liqPrice: number | null } | null> {
+    const st = await this.state(address);
+    if (!st) throw new Error('SoDEX returned no account state');
+    const p = ((st.P ?? []) as unknown as Array<Record<string, unknown>>).find((x) => x.s === symbol && n(x.sz) !== 0);
+    if (!p) return null;
+    const opt = (v: unknown) => (v === undefined || v === null || v === '' ? null : n(v));
+    const marginMode = p.m === 'ISOLATED' ? 'isolated' : 'cross';
+    let margin = marginMode === 'isolated' ? opt(p.iw) : null;
+    if (marginMode === 'isolated' && margin === null) {
+      // Older answers leave `iw` out: the open position's initialMargin is its isolated margin (as the web's live checks read it).
+      const rows = unwrapList<Record<string, unknown>>(await this.client.get<unknown>(`/api/v1/perps/accounts/${address.toLowerCase()}/positions`).catch(() => null), 'positions');
+      margin = opt(rows.find((r) => r.symbol === symbol && n(r.size) !== 0)?.initialMargin);
+    }
+    return { size: n(p.sz), entry: n(p.ep), leverage: typeof p.l === 'number' ? p.l : null, marginMode, margin, liqPrice: opt(p.lp) };
+  }
+
+  /** The account's latest closed positions (perps positions/history; drip-limited): a takeover is `isTakenOver`. */
+  async closedPositions(address: string, limit = 10): Promise<Array<{ symbol: string; isTakenOver: boolean; takeOverPrice: number; realizedPnL: number; updatedAt: number }>> {
+    const data = await this.historyGet(`/api/v1/perps/accounts/${address.toLowerCase()}/positions/history?limit=${limit}`);
+    return unwrapList<Record<string, unknown>>(data, 'positions').map((r) => ({
+      symbol: String(r.symbol ?? ''),
+      isTakenOver: r.isTakenOver === true,
+      takeOverPrice: n(r.takeOverPrice),
+      realizedPnL: n(r.realizedPnL),
+      updatedAt: n(r.updatedAt),
+    }));
   }
 
   /** Open orders on the market, stops included: the /orders list and the state's O[], merged. */
@@ -296,7 +352,7 @@ export class SodexWallet implements FlattenVenue {
       expiryPolicy: { maxTtlMs: Math.max(days, 1) * DAY_MS + DAY_MS },
     });
     const [req] = assembleExchangeRequests(prepared, walletSign(prepared.digest, this.master), { base: '' });
-    await this.reads.client.send({ method: req!.method, gatewayPath: req!.gatewayPath, headers: req!.headers, body: req!.body });
+    await this.reads.write({ method: req!.method, gatewayPath: req!.gatewayPath, headers: req!.headers, body: req!.body });
     return { expiresAt };
   }
 
@@ -326,7 +382,7 @@ export class SodexWallet implements FlattenVenue {
       signatureChainId: CHAIN_ID,
     });
     const req = assembleWalletSignedRequest(prepared, walletSign(prepared.digest, this.master), { base: '' });
-    await this.reads.client.send({ method: req.method, gatewayPath: req.gatewayPath, headers: req.headers, body: req.body });
+    await this.reads.write({ method: req.method, gatewayPath: req.gatewayPath, headers: req.headers, body: req.body });
     let seen: number | null = null;
     for (const wait of [0, 500, 1_000, 2_000, 3_000, 5_000, 8_000]) {
       if (wait) await new Promise((r) => setTimeout(r, wait));
@@ -339,7 +395,23 @@ export class SodexWallet implements FlattenVenue {
   private async send(action: SignableAction): Promise<unknown> {
     if (!this.key) throw new Error(`${this.name}: the harness key is not registered yet`);
     const req = await signAndBuildWithNonceManager(action, this.key, { chainId: CHAIN_ID, nonces: this.nonces, base: '' });
-    return this.reads.client.send(req);
+    return this.reads.write(req);
+  }
+
+  /**
+   * The market's leverage and margin mode on this account (updateLeverage), as the trader sets it
+   * on sodex.com - also on an open position, where SoDEX allows it (a margin mode never changes
+   * under an open position). SoDEX's refusal throws.
+   */
+  async setLeverage(symbol: string, leverage: number, mode: 'cross' | 'isolated'): Promise<void> {
+    const m = await this.reads.market(symbol);
+    await this.send(perpsActions.updateLeverage(this.accountId, m.id, leverage, mode === 'isolated' ? MarginMode.ISOLATED : MarginMode.CROSS));
+  }
+
+  /** Add (positive) or take out (negative) isolated margin on the open position, USDC (updateMargin). SoDEX's refusal throws. */
+  async moveMargin(symbol: string, amount: string): Promise<void> {
+    const m = await this.reads.market(symbol);
+    await this.send(perpsActions.updateMargin(this.accountId, m.id, amount));
   }
 
   /**

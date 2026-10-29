@@ -33,7 +33,9 @@ import {
   type RegionPolicy,
   type SodexClient,
   type StopRequest,
+  type EngineNotice,
   regionPolicy,
+  stopsAction,
 } from '../src/index.ts';
 import { BTC, ETH, FOLLOWER } from './helpers.ts';
 
@@ -744,4 +746,67 @@ test('overfill guard: partial fills in every step of a maker TWAP and a chase - 
     assert.ok(near(x.filled, 0.006), `${spec.kind} filled ${x.filled}`);
     assert.ok(near(r.ex.position, 0.006), `${spec.kind}: SoDEX holds ${r.ex.position}`);
   }
+});
+
+/* ================================================ the position liquidated ===== */
+
+/**
+ * SoDEX liquidates by a takeover (docs/research/07 G7): the position goes, in a fill of SoDEX's own,
+ * and no order of the algo's fills. Whether SoDEX cancels the position stops with it is not known
+ * yet (the live suite's liq.algo-exits reads it); both ways are here.
+ */
+async function bracketWithExits(r: Rig) {
+  const a = await add(r, { kind: 'bracket', quantity: '0.002', entry: 'market', slippageBps: 20, exits: { tpPct: 0.1, slPct: 0.1 } });
+  await step(r, a.id);
+  const x = await step(r, a.id, 500);
+  assert.equal(x.status, 'done');
+  assert.equal(r.ex.liveStops.size, 2, 'a take-profit and a stop-loss rest on SoDEX');
+  return a;
+}
+
+test('the exits of an algo are reduce-only stops: whatever happens to the position, they can never open one', async () => {
+  const r = await rig();
+  const a = await bracketWithExits(r);
+  assert.ok(r.rt.get(a.id)!.exitOrders!.every((x) => x.reduceOnly), 'booked reduce-only');
+  const signed = stopsAction(ACCOUNT, BTC, r.ex.stops.flat(), null).params as { orders: Array<{ reduceOnly: boolean }> };
+  assert.ok(signed.orders.length === 2 && signed.orders.every((o) => o.reduceOnly === true), 'signed reduce-only');
+});
+
+test('liquidated, SoDEX pulling the exits with the position: they end and are never placed again; nothing else is sent', async () => {
+  const r = await rig();
+  const a = await bracketWithExits(r);
+  const orders = r.ex.all.length;
+  const batches = r.ex.stops.length;
+  r.ex.position = 0;
+  for (const id of [...r.ex.liveStops.keys()]) {
+    r.ex.liveStops.delete(id);
+    r.ex.history.get(id)!.status = 'CANCELED';
+    r.market.order({ clOrdID: id, status: 'CANCELED' });
+  }
+  for (let i = 0; i < 12; i++) await tick(r, 10_000);
+  const x = r.rt.get(a.id)!;
+  assert.equal(x.status, 'done', 'it keeps its final status');
+  assert.equal(r.ex.stops.length, batches, 'no exit is placed again');
+  assert.equal(r.ex.all.length, orders, 'no order is sent');
+  assert.ok(x.exitOrders!.every((e) => e.state === 'done'), 'its exits are over');
+  assert.ok((await texts(r, a.id)).some((t) => /cancelled on SoDEX; its exits are not placed again/.test(t)), 'its log says SoDEX cancelled them');
+});
+
+test.todo('FINDING liquidated, algo: an algo whose filled position was liquidated (closed outside it) is never told - its exits stay on SoDEX for a position that is gone (they would close a later position on that market, opened by anything else), when one triggers and SoDEX refuses it (nothing to reduce) a new pair is placed for what the algo filled, and no event or notice names it', async () => {
+  const r = await rig();
+  const notices: EngineNotice[] = [];
+  (r.rt as unknown as { host: { onNotice?: (n: EngineNotice) => void } }).host.onNotice = (n) => notices.push(n);
+  const a = await bracketWithExits(r);
+  const batches = r.ex.stops.length;
+  // SoDEX takes the position over and leaves the stops; later the stop-loss triggers with nothing to reduce.
+  r.ex.position = 0;
+  for (let i = 0; i < 3; i++) await tick(r, 10_000);
+  const sl = [...r.ex.liveStops.values()].find((s) => s.kind === 'sl')!;
+  r.ex.liveStops.delete(sl.clOrdID);
+  r.ex.history.get(sl.clOrdID)!.status = 'EXPIRED';
+  r.market.order({ clOrdID: sl.clOrdID, status: 'EXPIRED', reason: 'reduce only: no position' });
+  for (let i = 0; i < 12; i++) await tick(r, 10_000);
+  assert.equal(r.ex.stops.length, batches, 'no exit placed again for a position that is gone');
+  assert.equal(r.ex.liveStops.size, 0, 'what it left on SoDEX is cancelled');
+  assert.ok(notices.some((n) => n.ref === a.id && n.grade === 'error'), 'the trader is told the position was closed outside the algo');
 });

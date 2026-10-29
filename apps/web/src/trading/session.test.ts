@@ -305,6 +305,26 @@ test('cancel-all reads open orders fresh and cancels them in one signed request'
   assert.deepEqual(del.body.cancels.map((c: any) => c.orderID), [11, 12]);
 });
 
+test('cancel-all: an order on a market SoDEX no longer lists is left out and named; the others are still cancelled', async () => {
+  await enableTrading({ owner: OWNER, provider: wallet });
+  sent = [];
+  reply = (s) =>
+    s.url.includes('/orders?') || s.url.endsWith('/orders')
+      ? s.method === 'GET'
+        ? ok({ orders: [{ si: 7, i: 11 }, { symbol: 'GONE-USD', i: 12 }] })
+        : ok([{ code: 0, clOrdID: '' }])
+      : undefined;
+  const r = await cancelAll('perps');
+  assert.equal(r.cancelled, 1);
+  assert.deepEqual(r.skipped, ['GONE-USD']);
+  assert.deepEqual(sent.find((s) => s.method === 'DELETE')!.body.cancels.map((c: any) => c.orderID), [11]);
+  // Only such orders: nothing to send, and the refusal says why and where to cancel them.
+  sent = [];
+  reply = (s) => (s.url.includes('/orders') && s.method === 'GET' ? ok({ orders: [{ symbol: 'GONE-USD', i: 12 }] }) : undefined);
+  await assert.rejects(cancelAll('perps'), /no longer lists \(GONE-USD\)\. Cancel them on sodex\.com/);
+  assert.equal(sent.filter((s) => s.method === 'DELETE').length, 0);
+});
+
 // --- the legal gate (legalGate.ts), where every action is signed ----------------
 
 test('terms not accepted, or a close-only place: an opening order asks the terms popup and is not sent when it is closed; a close, a cancel and a withdrawal never ask and still go', async () => {

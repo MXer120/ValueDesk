@@ -8597,7 +8597,7 @@ var MarketBook = class {
   }
   /** The SoDEX market a leader's market maps to, or null when SoDEX lists none. */
   sodexMarketFor(venue, leaderSymbol) {
-    for (const name of candidateNames(venue, leaderSymbol)) {
+    for (const name of sodexNamesFor(venue, leaderSymbol)) {
       const hit = this.get(name);
       if (hit) return hit;
     }
@@ -8618,7 +8618,7 @@ function isSpotSymbol(venue, leaderSymbol) {
   if (venue === "sodex") return leaderSymbol.includes("_") || /^v[A-Z]/.test(leaderSymbol);
   return leaderSymbol.startsWith("@") || leaderSymbol.includes("/");
 }
-function candidateNames(venue, leaderSymbol) {
+function sodexNamesFor(venue, leaderSymbol) {
   const s = leaderSymbol.trim();
   if (venue === "sodex") return [s];
   const bare = s.includes(":") ? s.slice(s.indexOf(":") + 1) : s;
@@ -8626,6 +8626,7 @@ function candidateNames(venue, leaderSymbol) {
   if (k) return [`1000${k[1]}-USD`, `K${k[1]}-USD`, `${bare.toUpperCase()}-USD`];
   return [`${bare.toUpperCase()}-USD`];
 }
+var notListedLine = (coin) => `${coin} is not listed on SoDEX, so it can't be traded here.`;
 var toDec = (n) => canonicalDecimal(numberToPlainString(Number(n.toPrecision(12))));
 function addStep(value, step) {
   const scale = Math.max((value.split(".")[1] ?? "").length, (step.split(".")[1] ?? "").length);
@@ -11621,6 +11622,33 @@ function copyAssetNotice(s, leaderSymbol, v, at = Date.now()) {
     body: `${prices}: not the same asset, so nothing new is opened on ${v.market}. A position the copy holds there still follows the leader's reductions and closes.`
   });
 }
+function copyNotCopiedNotice(s, leaderSymbol, at = Date.now()) {
+  return mk({
+    owner: s.owner,
+    source: "copy",
+    ref: `${s.id}:${leaderSymbol}`,
+    kind: "not-copied",
+    grade: "info",
+    at,
+    paper: !!s.settings.paper,
+    title: `${leaderSymbol} is not copied in the copy of ${leaderShort(s)}`,
+    body: `Not copied: ${leaderSymbol} isn't listed on SoDEX - the leader's trades on it are skipped.`
+  });
+}
+function copyDelistedNotice(s, symbol2, size, at = Date.now()) {
+  return mk({
+    owner: s.owner,
+    source: "copy",
+    ref: `${s.id}:${symbol2}`,
+    kind: "delisted",
+    grade: "warn",
+    at,
+    paper: !!s.settings.paper,
+    title: `${symbol2} is no longer listed on SoDEX (copy of ${leaderShort(s)})`,
+    body: delistedDetail(symbol2, size)
+  });
+}
+var delistedDetail = (symbol2, size) => `${symbol2} is no longer listed on SoDEX. The copy still holds a ${size > 0 ? "long" : "short"} position of ${px(Math.abs(size))} there, and ValueDesk will not trade it any more: the copy does not close, reduce or add to it. What to do with it is yours to decide on SoDEX.`;
 
 // ../../packages/copy-engine/src/runtime.ts
 var RECONCILE_MS = 6e4;
@@ -11706,6 +11734,7 @@ var CopyRuntime = class {
     this.sodexFeed.start();
     await this.syncFeeds();
     for (const s of [...this.subs.values()]) await this.applyLocalRules(s.id);
+    await this.noteDelisted().catch((e) => this.host.log.warn("copy: delisting check failed", { error: String(e) }));
     for (const id of restored) this.catchUp(id);
     for (const s of this.subs.values()) if (this.live(s)) void this.checkReady(s);
     this.timers.push(
@@ -11941,6 +11970,7 @@ var CopyRuntime = class {
       ...market && e.leader.venue === "hyperliquid" ? { sameAsset: asset?.same ?? null } : {}
     });
     if (asset && (plan.skip === "different-asset" || asset.same)) this.noteAsset(s, e.symbol, asset);
+    if (plan.skip === "not-on-sodex") this.noteNotCopied(s, e.symbol);
     const detail = plan.skip === "different-asset" && asset ? assetDetail(e.symbol, asset) : null;
     st.leaderPos[e.symbol] = plan.leaderAfter;
     if (plan.leaderAfter === 0) delete st.leaderPos[e.symbol];
@@ -11985,6 +12015,46 @@ var CopyRuntime = class {
       else (st.differentAssets ??= {})[leaderSymbol] = Date.now();
       this.dirty.add(s.id);
       this.notice(copyAssetNotice(s, leaderSymbol, v));
+    }
+  }
+  /**
+   * A copy hears once per leader market that SoDEX lists none for it, the first time a trade
+   * of the leader's there is skipped (st.notCopied keeps what it was told, across restarts);
+   * its activity keeps a line for every skipped trade. A market the copy still holds a position
+   * on (SoDEX delisted it) has its own notice (noteDelisted).
+   */
+  noteNotCopied(s, leaderSymbol) {
+    const st = this.stateOf(s);
+    if (st.notCopied?.[leaderSymbol] !== void 0) return;
+    if (sodexNamesFor(s.settings.leader.venue, leaderSymbol).some((n) => st.owned[n])) return;
+    (st.notCopied ??= {})[leaderSymbol] = Date.now();
+    this.dirty.add(s.id);
+    this.notice(copyNotCopiedNotice(s, leaderSymbol));
+  }
+  /**
+   * A copied position on a market SoDEX no longer lists: the copier does not close it, reduce
+   * it or add to it any more (closeStrays, the guards and the planner all need the market), and
+   * the follower is told once - a notice and a line in the copy's activity. A delisting is the
+   * follower's to act on (owner, 2026-10-29). Told again only after SoDEX lists the market again
+   * and drops it once more. A market list that could not be read (empty) says nothing.
+   */
+  async noteDelisted() {
+    if (!this.markets.size) return;
+    for (const s of this.list()) {
+      if (s.status === "stopped") continue;
+      const st = this.stateOf(s);
+      for (const sym of Object.keys(st.delisted ?? {})) {
+        if (!this.markets.get(sym) && st.owned[sym]) continue;
+        delete st.delisted[sym];
+        this.dirty.add(s.id);
+      }
+      for (const [sym, p] of Object.entries(st.owned)) {
+        if (this.markets.get(sym) || st.delisted?.[sym] !== void 0 || !(Math.abs(p.size) > 1e-12)) continue;
+        (st.delisted ??= {})[sym] = Date.now();
+        this.dirty.add(s.id);
+        await this.activity(s, { kind: "status", reason: "delisted", symbol: sym, detail: delistedDetail(sym, p.size) });
+        this.notice(copyDelistedNotice(s, sym, p.size));
+      }
     }
   }
   /**
@@ -12214,11 +12284,13 @@ var CopyRuntime = class {
           const why = this.closedWhy(s, p, mark, sym);
           for (const lsym of this.leaderSymbolsFor(s, sym)) if (st.leaderPos[lsym]) st.detached[lsym] = why;
           this.cancelStops(s, sym);
+          this.leverageSet.delete(`${s.owner}|${sym}`);
           const detail = why === "own-position" ? "This copied position was closed outside the copier (by you, or by SoDEX). It resumes when the leader is flat." : `Your ${why} closed this copied position.`;
           await this.activity(s, { kind: "status", reason: why === "own-position" ? "closed-outside" : why, symbol: sym, detail });
           this.notice(copyClosedNotice(s, sym, why, detail));
           this.dirty.add(s.id);
         } else if (Math.abs(actual.size - p.size) > 1e-12 * Math.max(1, Math.abs(p.size))) {
+          if (Math.abs(actual.size) < Math.abs(p.size)) st.realizedPnl += (p.size - actual.size) * (mark - p.entry);
           st.owned[sym] = { size: actual.size, entry: actual.entry || p.entry, openedAt: p.openedAt };
           this.scheduleStops(s, sym);
           this.dirty.add(s.id);
@@ -12758,6 +12830,7 @@ var CopyRuntime = class {
     } catch (e) {
       this.host.log.warn("copy: market list failed", { error: String(e) });
     }
+    await this.noteDelisted().catch((e) => this.host.log.warn("copy: delisting check failed", { error: String(e) }));
   }
   /* ---------------------------------------------------------------- books ----- */
   stateOf(s) {
@@ -13992,13 +14065,19 @@ var AlgoRuntime = class {
     const o = owner?.toLowerCase();
     return [...this.algos.values()].filter((a) => !o || a.owner === o).sort((x, y) => y.createdAt - x.createdAt);
   }
-  /** Start an algo. The spec is validated here as everywhere (parseAlgoSpec); its market must be listed. */
+  /**
+   * Start an algo. The spec is validated here as everywhere (parseAlgoSpec); every market it
+   * names must be listed - its own, a basket's legs, a conditional's markets and the algo it
+   * starts - or nothing starts (never on another market). A list that could not be read is
+   * said as that, not as "not listed".
+   */
   async add(n) {
     const spec = parseAlgoSpec(n.spec);
     if (!this.markets.size) await this.loadMarkets();
+    if (!this.markets.size) throw new Error("SoDEX's market list could not be read, so the market cannot be checked. Try again in a moment.");
     for (const sym of algoSymbols(spec)) {
       const m2 = this.markets.get(sym);
-      if (!m2) throw new Error(`${sym} is not listed on SoDEX perps.`);
+      if (!m2) throw new Error(notListedLine(sym));
     }
     const m = this.markets.get(spec.symbol);
     if (m.status !== "TRADING") throw new Error(`SoDEX is not trading ${m.name} right now.`);
@@ -16533,6 +16612,7 @@ var Brake = class {
   file;
   onChange;
   state = null;
+  /** What the file was when last read: its time, size and identity (-1: none, -2: unreadable). */
   mtime = -1;
   checkedAt = 0;
   /** The brake now (null: off). Cheap: re-reads at most once a second. */
@@ -16561,8 +16641,9 @@ var Brake = class {
         this.mtime = -1;
         next = null;
       } else {
-        if (st.mtimeMs === this.mtime) return;
-        this.mtime = st.mtimeMs;
+        const seen = `${st.mtimeMs}:${st.size}:${st.ino}`;
+        if (seen === this.mtime) return;
+        this.mtime = seen;
         next = parseBrake(readFileSync3(this.file, "utf8"));
       }
     } catch (e) {

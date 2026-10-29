@@ -6,8 +6,10 @@
  * leader trades Hyperliquid coins: 'BTC' -> 'BTC-USD'; a builder-deployed
  * market 'xyz:TSLA' -> 'TSLA-USD'; a thousand-unit coin 'kPEPE' ->
  * '1000PEPE-USD' or 'KPEPE-USD' where SoDEX lists one. A coin SoDEX does not
- * list is not copied. Because the two venues' units can differ, the planner
- * sizes copies by NOTIONAL and converts at the SoDEX price, never by units.
+ * list is not copied - never onto another market - and the follower is told
+ * (notices.ts 'not-copied'; before a copy starts, `uncopyable`). Because the
+ * two venues' units can differ, the planner sizes copies by NOTIONAL and
+ * converts at the SoDEX price, never by units.
  *
  * SAME ASSET. A ticker is not an asset: trade.xyz's QNT is not SoDEX's QNT-USD,
  * and a HIP-3 index quoted at a tenth of SoDEX's is another contract. A
@@ -188,7 +190,7 @@ export class MarketBook {
 
   /** The SoDEX market a leader's market maps to, or null when SoDEX lists none. */
   sodexMarketFor(venue: LeaderVenue, leaderSymbol: string): MarketInfo | null {
-    for (const name of candidateNames(venue, leaderSymbol)) {
+    for (const name of sodexNamesFor(venue, leaderSymbol)) {
       const hit = this.get(name);
       if (hit) return hit;
     }
@@ -216,13 +218,57 @@ export function isSpotSymbol(venue: LeaderVenue, leaderSymbol: string): boolean 
   return leaderSymbol.startsWith('@') || leaderSymbol.includes('/');
 }
 
-function candidateNames(venue: LeaderVenue, leaderSymbol: string): string[] {
+/** The SoDEX market names a leader's market may map to, in the order they are tried (MarketBook.sodexMarketFor). */
+export function sodexNamesFor(venue: LeaderVenue, leaderSymbol: string): string[] {
   const s = leaderSymbol.trim();
   if (venue === 'sodex') return [s];
   const bare = s.includes(':') ? s.slice(s.indexOf(':') + 1) : s;
   const k = /^k([A-Z0-9]+)$/.exec(bare);
   if (k) return [`1000${k[1]}-USD`, `K${k[1]}-USD`, `${bare.toUpperCase()}-USD`];
   return [`${bare.toUpperCase()}-USD`];
+}
+
+/**
+ * The one line every place that refuses a market SoDEX does not list says (the order ticket, an
+ * algo's start): 'PURR is not listed on SoDEX, so it can't be traded here.'
+ */
+export const notListedLine = (coin: string): string => `${coin} is not listed on SoDEX, so it can't be traded here.`;
+
+/** Why a leader's market cannot be copied: SoDEX lists no market for it, or the one of its name is another asset. */
+export type UncopyableReason = 'not-on-sodex' | 'different-asset';
+
+export interface Uncopyable {
+  /** The leader venue's market name, as the leader trades it: 'PURR', 'kPEPE', 'xyz:TSLA', 'BTC-USD'. */
+  symbol: string;
+  reason: UncopyableReason;
+  /** 'different-asset': the two prices compared. */
+  verdict?: AssetVerdict;
+}
+
+/**
+ * Of a leader's markets (the positions they hold, the coins they traded lately), the ones a copy
+ * cannot follow on SoDEX: those the planner skips as 'not-on-sodex', and those it holds back as
+ * 'different-asset' - the latter only where `book` holds fresh prices of both venues to compare
+ * (sameAsset), so nothing is claimed without them. Spot markets are left out (a copy follows
+ * perps only, and says that apart). Each market once, in the order given; nothing for an empty
+ * `book` (a market list that could not be read says nothing about what SoDEX lists).
+ */
+export function uncopyable(venue: LeaderVenue, symbols: readonly string[], book: MarketBook, now = Date.now()): Uncopyable[] {
+  if (!book.size) return [];
+  const out: Uncopyable[] = [];
+  const seen = new Set<string>();
+  for (const raw of symbols) {
+    const symbol = raw.trim();
+    if (!symbol || seen.has(symbol) || isSpotSymbol(venue, symbol)) continue;
+    seen.add(symbol);
+    if (!book.sodexMarketFor(venue, symbol)) {
+      out.push({ symbol, reason: 'not-on-sodex' });
+      continue;
+    }
+    const v = book.sameAsset(venue, symbol, now);
+    if (v && !v.same) out.push({ symbol, reason: 'different-asset', verdict: v });
+  }
+  return out;
 }
 
 /* -------------------------------------------------------------- decimals ----- */

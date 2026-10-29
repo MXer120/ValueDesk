@@ -84,6 +84,10 @@
 }
 .scan-head .scan-head__copy { align-self: center; display: inline-flex; gap: 6px; margin-left: 8px; }
 .scan-head .scan-head__nocopy { align-self: center; margin-left: 8px; color: var(--dim); font-size: var(--fs-xs); }
+/* Beside the two buttons: how many of the trader's positions a copy cannot follow (copy/useNotCopyable.tsx). */
+.scan-head .scan-head__uncopyable { position: relative; align-self: center; max-width: 360px; margin-left: 8px; padding: 4px 8px; background: transparent; color: var(--dim); }
+.scan-head .scan-head__uncopyable > summary { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.scan-head .scan-head__uncopyable[open] > ul { position: absolute; z-index: 20; right: 0; top: 100%; min-width: 260px; padding: 8px 12px 8px 24px; border-radius: 8px; background: var(--bg-elevated); box-shadow: var(--depth-2); }
 
 /* An inactive venue stays clickable. --disabled is the gray; --muted is the
    word, one step up so the label is still readable on the selected tab. */

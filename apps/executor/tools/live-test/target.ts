@@ -37,7 +37,7 @@
  * skipped for, with why. Nothing else about a scenario changes; it reaches the
  * target as `t.exec` (harness.ts).
  */
-import type { AlgoEvent, AlgoView, ActivityEntry, CopyView, ExecutorInfo, MeResponse } from '../../../../packages/copy-engine/src/index.ts';
+import type { AlgoEvent, AlgoView, ActivityEntry, CopyView, EngineNotice, ExecutorInfo, MeResponse } from '../../../../packages/copy-engine/src/index.ts';
 import { ExecutorClient, assertPaper, type CopyWallet, type ExecutorError, type ExecutorProcess } from './executor.ts';
 import { Inconclusive, Unavailable } from './harness.ts';
 import type { ExecutorRecord, Mode } from './state.ts';
@@ -115,6 +115,8 @@ export interface ExecutorApi {
   copyAct(action: 'update' | 'pause' | 'resume' | 'stop' | 'stop-all', payload: Record<string, unknown>): Promise<CopyView[]>;
   copy(id: string): Promise<CopyView>;
   activity(id: string, limit?: number): Promise<ActivityEntry[]>;
+  /** What it keeps for the wallet to hear of (an executor's GET /notices); absent where they are not read from here (the browser's bell). */
+  notices?(limit?: number): Promise<EngineNotice[]>;
   /** Everything this wallet runs there stops: the kill switch for algos, every copy stopped and closed. */
   stopEverything(): Promise<void>;
 }

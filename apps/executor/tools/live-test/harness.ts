@@ -435,6 +435,20 @@ export class T {
     }, { timeoutMs: 20_000 });
   }
 
+  /**
+   * Act on the follower's SoDEX account with the harness's own key, as its owner would on sodex.com
+   * (leverage, isolated margin: SodexWallet). Live only: a dry run counts it as not done and gets null.
+   */
+  async onFollower<V>(what: string, fn: (w: SodexWallet) => Promise<V>): Promise<V | null> {
+    this.alive();
+    if (this.dry || !this.env.follower) {
+      this.checks.liveOnly += 1;
+      this.env.log(`    -- live only: ${what}`);
+      return null;
+    }
+    return fn(this.env.follower);
+  }
+
   /** Wait until the follower's position (signed USD at the mark) is within `tol` of `usd`. Live only. */
   async expectFollowerUsd(usd: number, what: string, o: { tol?: number; timeoutMs?: number; symbol?: string } = {}): Promise<void> {
     const symbol = o.symbol ?? this.main.name;

@@ -12,13 +12,16 @@
  * (copy/TraderCard.tsx CopyButton), opening the copy setup for this trader on
  * the copy page (/copy?address=&venue=&direction=). Scan is the one trader page:
  * a trader picked on the copy page opens here. A venue a copy cannot follow
- * (Lighter, Arcus, trade.xyz) says so in their place.
+ * (Lighter, Arcus, trade.xyz) says so in their place. Beside the buttons, how
+ * many of the trader's open positions a copy could not follow on SoDEX (not
+ * listed there, or another asset of the same name), with the list behind it.
  */
 import { VenueLogo } from '../VenueLogo';
 import { SCAN_VENUES, VENUE_LABEL, type Venue } from '../../vsApi';
 import type { Presence } from './useVs';
 import { CopyButton } from '../copy/TraderCard';
 import { isCopyable } from '../copy/gridModel';
+import { NotCopyableNote, useNotCopyable } from '../copy/useNotCopyable';
 import './scan.css';
 
 export interface ScanHeaderProps {
@@ -28,6 +31,9 @@ export interface ScanHeaderProps {
   /** The scanned address; null while nothing is scanned. */
   scanned: string | null;
   onNewSearch?: () => void;
+  /** The scanned trader's open positions on `venue` and when they were read (their profile, which the page reads anyway). */
+  positions?: ReadonlyArray<{ symbol: string; markPx: number | null }> | null;
+  positionsAt?: number | null;
 }
 
 /** The sentence beside the tabs, or null when there is nothing worth saying. */
@@ -53,8 +59,10 @@ const TITLE: Record<Presence, string> = {
   loading: 'Checking…',
 };
 
-export function ScanHeader({ venue, onVenue, presence, scanned, onNewSearch }: ScanHeaderProps) {
+export function ScanHeader({ venue, onVenue, presence, scanned, onNewSearch, positions = null, positionsAt = null }: ScanHeaderProps) {
   const note = scanned ? presenceNote(venue, presence) : null;
+  const copyVenue = venue === 'sodex' || venue === 'hyperliquid' ? venue : null;
+  const notCopyable = useNotCopyable({ enabled: !!scanned && copyVenue !== null, venue: copyVenue ?? 'hyperliquid', positions, positionsAt, fills: null });
   const copy = (direction: 'copy' | 'counter') => {
     if (!scanned) return;
     window.location.href = `/copy?address=${encodeURIComponent(scanned)}&venue=${venue}&direction=${direction}`;
@@ -93,10 +101,13 @@ export function ScanHeader({ venue, onVenue, presence, scanned, onNewSearch }: S
             <button type="button" className="dash-tab" onClick={onNewSearch}>New search</button>
           )}
           {scanned && (isCopyable(venue) ? (
-            <span className="scan-head__copy">
-              <CopyButton kind="counter" label="Counter-trade" title="Take the other side of every trade" onClick={() => copy('counter')} />
-              <CopyButton kind="copy" label="Copy trader" title={`Set up copying ${VENUE_LABEL[venue]} trades from this address`} onClick={() => copy('copy')} />
-            </span>
+            <>
+              <NotCopyableNote n={notCopyable} className="scan-head__uncopyable" />
+              <span className="scan-head__copy">
+                <CopyButton kind="counter" label="Counter-trade" title="Take the other side of every trade" onClick={() => copy('counter')} />
+                <CopyButton kind="copy" label="Copy trader" title={`Set up copying ${VENUE_LABEL[venue]} trades from this address`} onClick={() => copy('copy')} />
+              </span>
+            </>
           ) : (
             <span className="scan-head__nocopy">Copying {VENUE_LABEL[venue]} traders is not supported yet</span>
           ))}

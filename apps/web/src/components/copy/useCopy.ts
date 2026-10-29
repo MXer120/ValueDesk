@@ -8,7 +8,8 @@
  * change is the follower's own signature.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useStored } from '../../hooks';
+import { useStored, useSymbolList } from '../../hooks';
+import { copyableMarket } from './notCopyable';
 import { logLoadFailure, useLoadFailedToast } from '../LoadFailed';
 import {
   vsApi, VsError, type TraderProfile, type Venue, type VsFill, type Window,
@@ -239,14 +240,20 @@ export function useCopyContext({ address, provider, onScan }: CopyPageProps): Co
 
   /* ---- the backtest, recomputed on change, debounced ---- */
 
+  const sodexPerps = useSymbolList('perps', true);
+  const perpRows = sodexPerps.data?.engine === 'perps' ? (sodexPerps.data.symbols as unknown as unknown[]) : null;
+  const copyable = useMemo(() => (venue === 'sodex' || venue === 'hyperliquid' ? copyableMarket(venue, perpRows) : null), [venue, perpRows]);
   const prepared = useMemo(() => {
     if (!fills.data) return null;
     // Positions are needed to recover each fill's position-before; without
     // them (venue did not answer yet, or at all) the engine rebuilds forward.
     const positions = profile.data ? profile.data.positions : profile.loading ? undefined : null;
     if (positions === undefined) return null;
-    return toSimFills(venue, fills.data, { positions });
-  }, [fills.data, profile.data, profile.loading, venue]);
+    const out = toSimFills(venue, fills.data, { positions });
+    // A coin SoDEX doesn't list is never copied, so the backtest leaves its fills out as a live copy would.
+    if (!copyable) return out;
+    return { ...out, fills: out.fills.filter((f) => copyable(f.symbol)) };
+  }, [fills.data, profile.data, profile.loading, venue, copyable]);
 
   const [sim, setSim] = useState<SimState>({
     result: null, busy: false, error: null, fillCount: 0, truncated: false, reconstruction: null, inWorker: false,

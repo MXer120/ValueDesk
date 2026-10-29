@@ -44,7 +44,7 @@ import { collateralSplit, crossAccountLeverage, crossMarginRatio } from '../acco
 import { useAccountTotals } from './account/useAccountTotals';
 import { PanelHeading } from '../dashboard/Panel';
 import { useAsync, useChannel, useStatus, useTickers } from '../hooks';
-import { notifyTrade } from '../toast';
+import { notify, notifyTrade } from '../toast';
 import { coinLabel, fmt, fmtBalance, fmtDateTime, fmtPrice, fmtQty, fmtUsd, num, pick } from '../format';
 import { Private } from '../privacy';
 import { estimateLiquidationPrice } from '../risk';
@@ -999,6 +999,8 @@ function OpenOrdersInner({
     try {
       const r = await api.cancelAll(engine);
       notifyTrade('cancelled', { title: 'Orders cancelled', detail: `${r.cancelled} open order${r.cancelled === 1 ? '' : 's'} on ${engine === 'perps' ? 'Futures' : 'Spot'}` });
+      // Orders on a market SoDEX no longer lists cannot be cancelled from here: said, not dropped.
+      if (r.skipped?.length) notify('warn', `Not cancelled: ${r.skipped.join(', ')} - SoDEX no longer lists ${r.skipped.length === 1 ? 'this market' : 'these markets'}. Cancel ${r.skipped.length === 1 ? 'it' : 'them'} on sodex.com.`);
       onChanged();
       refresh();
     } catch (e) {

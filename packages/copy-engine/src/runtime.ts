@@ -37,7 +37,7 @@
 import { bytesToHex, keccak256, utf8, type BuilderParams, type Network } from '../../sodex-core/src/index.ts';
 import { LeaderBook, SodexFeed, HyperliquidFeed, type FollowerFill } from './feeds.ts';
 import { randomId, sleep, timers, type Logger, type WebSocketFactory } from './io.ts';
-import { MarketBook, floorQuantity, hlDexOf, limitPrice, snapPrice } from './markets.ts';
+import { MarketBook, floorQuantity, hlDexOf, limitPrice, snapPrice, sodexNamesFor } from './markets.ts';
 import type { OrderSink, SendResult } from './orders.ts';
 import {
   applyFill,
@@ -55,7 +55,7 @@ import {
 import { effectiveLeverage, type RegionPolicy } from './policy.ts';
 import { HL_DEXES, type HyperliquidClient, type SodexClient } from './sodex.ts';
 import type { CopyStore } from './store.ts';
-import { copyAssetNotice, copyClosedNotice, copyNotice, type EngineNotice } from './notices.ts';
+import { copyAssetNotice, copyClosedNotice, copyDelistedNotice, copyNotCopiedNotice, copyNotice, delistedDetail, type EngineNotice } from './notices.ts';
 import type {
   ActivityEntry,
   AssetVerdict,
@@ -119,7 +119,10 @@ export interface RuntimeHost {
   confirm?(sub: Subscription, intents: Intent[], event: LeaderEvent): Promise<boolean>;
   /** Something about this subscription changed (state, activity, status). */
   onChange?(subId: string): void;
-  /** A copy halted, was held, paused or stopped without the follower asking, or a copied position was closed by its stop or outside the copier (notices.ts). */
+  /**
+   * A copy halted, was held, paused or stopped without the follower asking, a copied position was closed by its stop or
+   * outside the copier, a leader's coin cannot be copied (not on SoDEX, another asset there), or a market it holds was delisted (notices.ts).
+   */
   onNotice?(n: EngineNotice): void;
   log: Logger;
 }
@@ -247,6 +250,8 @@ export class CopyRuntime {
     this.sodexFeed.start();
     await this.syncFeeds();
     for (const s of [...this.subs.values()]) await this.applyLocalRules(s.id);
+    // A notice is never a reason not to start (as on every market reload below).
+    await this.noteDelisted().catch((e) => this.host.log.warn('copy: delisting check failed', { error: String(e) }));
     for (const id of restored) this.catchUp(id);
     for (const s of this.subs.values()) if (this.live(s)) void this.checkReady(s);
     this.timers.push(
@@ -514,6 +519,7 @@ export class CopyRuntime {
       ...(market && e.leader.venue === 'hyperliquid' ? { sameAsset: asset?.same ?? null } : {}),
     });
     if (asset && (plan.skip === 'different-asset' || asset.same)) this.noteAsset(s, e.symbol, asset);
+    if (plan.skip === 'not-on-sodex') this.noteNotCopied(s, e.symbol);
     const detail = plan.skip === 'different-asset' && asset ? assetDetail(e.symbol, asset) : null;
     st.leaderPos[e.symbol] = plan.leaderAfter;
     if (plan.leaderAfter === 0) delete st.leaderPos[e.symbol];
@@ -559,6 +565,48 @@ export class CopyRuntime {
       else (st.differentAssets ??= {})[leaderSymbol] = Date.now();
       this.dirty.add(s.id);
       this.notice(copyAssetNotice(s, leaderSymbol, v));
+    }
+  }
+
+  /**
+   * A copy hears once per leader market that SoDEX lists none for it, the first time a trade
+   * of the leader's there is skipped (st.notCopied keeps what it was told, across restarts);
+   * its activity keeps a line for every skipped trade. A market the copy still holds a position
+   * on (SoDEX delisted it) has its own notice (noteDelisted).
+   */
+  private noteNotCopied(s: Subscription, leaderSymbol: string): void {
+    const st = this.stateOf(s);
+    if (st.notCopied?.[leaderSymbol] !== undefined) return;
+    if (sodexNamesFor(s.settings.leader.venue, leaderSymbol).some((n) => st.owned[n])) return;
+    (st.notCopied ??= {})[leaderSymbol] = Date.now();
+    this.dirty.add(s.id);
+    this.notice(copyNotCopiedNotice(s, leaderSymbol));
+  }
+
+  /**
+   * A copied position on a market SoDEX no longer lists: the copier does not close it, reduce
+   * it or add to it any more (closeStrays, the guards and the planner all need the market), and
+   * the follower is told once - a notice and a line in the copy's activity. A delisting is the
+   * follower's to act on (owner, 2026-10-29). Told again only after SoDEX lists the market again
+   * and drops it once more. A market list that could not be read (empty) says nothing.
+   */
+  private async noteDelisted(): Promise<void> {
+    if (!this.markets.size) return;
+    for (const s of this.list()) {
+      if (s.status === 'stopped') continue;
+      const st = this.stateOf(s);
+      for (const sym of Object.keys(st.delisted ?? {})) {
+        if (!this.markets.get(sym) && st.owned[sym]) continue;
+        delete st.delisted![sym];
+        this.dirty.add(s.id);
+      }
+      for (const [sym, p] of Object.entries(st.owned)) {
+        if (this.markets.get(sym) || st.delisted?.[sym] !== undefined || !(Math.abs(p.size) > 1e-12)) continue;
+        (st.delisted ??= {})[sym] = Date.now();
+        this.dirty.add(s.id);
+        await this.activity(s, { kind: 'status', reason: 'delisted', symbol: sym, detail: delistedDetail(sym, p.size) });
+        this.notice(copyDelistedNotice(s, sym, p.size));
+      }
     }
   }
 
@@ -810,11 +858,18 @@ export class CopyRuntime {
           const why = this.closedWhy(s, p, mark, sym);
           for (const lsym of this.leaderSymbolsFor(s, sym)) if (st.leaderPos[lsym]) st.detached[lsym] = why;
           this.cancelStops(s, sym);
+          // SoDEX's leverage there may no longer be the copy's (raised by hand before a liquidation):
+          // it is set again before the next order that opens, never assumed.
+          this.leverageSet.delete(`${s.owner}|${sym}`);
           const detail = why === 'own-position' ? 'This copied position was closed outside the copier (by you, or by SoDEX). It resumes when the leader is flat.' : `Your ${why} closed this copied position.`;
           await this.activity(s, { kind: 'status', reason: why === 'own-position' ? 'closed-outside' : why, symbol: sym, detail });
           this.notice(copyClosedNotice(s, sym, why, detail));
           this.dirty.add(s.id);
         } else if (Math.abs(actual.size - p.size) > 1e-12 * Math.max(1, Math.abs(p.size))) {
+          // Smaller on SoDEX (a partial liquidation, ADL, a part closed by hand, a close of the copier's
+          // whose fill the stream missed): the part that went is booked at the mark, as a whole close
+          // outside is, so the copy's equity does not keep a loss that was taken.
+          if (Math.abs(actual.size) < Math.abs(p.size)) st.realizedPnl += (p.size - actual.size) * (mark - p.entry);
           st.owned[sym] = { size: actual.size, entry: actual.entry || p.entry, openedAt: p.openedAt };
           this.scheduleStops(s, sym);
           this.dirty.add(s.id);
@@ -1397,6 +1452,8 @@ export class CopyRuntime {
     } catch (e) {
       this.host.log.warn('copy: market list failed', { error: String(e) });
     }
+    // A copied position on a market that left the list: the follower hears of it once.
+    await this.noteDelisted().catch((e) => this.host.log.warn('copy: delisting check failed', { error: String(e) }));
   }
 
   /* ---------------------------------------------------------------- books ----- */

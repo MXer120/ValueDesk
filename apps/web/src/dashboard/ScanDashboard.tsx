@@ -226,6 +226,8 @@ export function ScanDashboard(props: Omit<PortfolioProps, 'address'> & { address
     context.historyNote = historyNote;
     context.liveEquity = sodexProfile.data?.summary.accountValue ?? base.model.account?.accountValue ?? null;
   }
+  /* The profile of the venue on screen a copy can follow: the header says which of its positions a copy could not. */
+  const copyProfile = venue === 'sodex' ? sodexProfile.data : venue === 'hyperliquid' ? hlProfile.data : null;
   const presence: Partial<Record<Venue, Presence>> = {
     sodex: sodexPresence === 'unknown' && sodexFallback ? sodexFallback : sodexPresence,
     hyperliquid: switchStanding(hlProfile),
@@ -295,7 +297,10 @@ export function ScanDashboard(props: Omit<PortfolioProps, 'address'> & { address
 
   return (
     <div className="scanv">
-      <ScanHeader venue={venue} onVenue={onVenue} presence={presence} scanned={scanned} onNewSearch={backToSearch} />
+      <ScanHeader
+        venue={venue} onVenue={onVenue} presence={presence} scanned={scanned} onNewSearch={backToSearch}
+        positions={copyProfile?.positions ?? null} positionsAt={copyProfile?.updatedAt ?? null}
+      />
       {venue === 'sodex' ? (
         <Dashboard
           key="sodex"

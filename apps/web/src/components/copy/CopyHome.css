@@ -688,6 +688,11 @@
 .cpy-mstats dd.pos { color: var(--pos); }
 .cpy-mstats dd.neg { color: var(--neg); }
 .cpy-mstats .cpy-wr { align-items: flex-start; }
+/* The trader's markets a copy cannot follow on SoDEX (useNotCopyable.tsx): one line, the list under it. */
+.cpy-nocopy { margin: 0; padding: 8px 12px; border-radius: 8px; background: color-mix(in srgb, var(--warn) 9%, transparent); color: var(--text); font-size: var(--fs-xs); line-height: 1.45; }
+.cpy-nocopy > summary { cursor: pointer; }
+.cpy-nocopy > ul { margin: 6px 0 0; padding-left: 16px; color: var(--muted); }
+.cpy-nocopy b { color: var(--text); font-weight: 600; }
 .cpy-mgroup { display: flex; flex-direction: column; gap: 6px; }
 .cpy-mmain .cpy-h,
 .cpy-mmain .cpy-alloc__k { margin: 0 0 2px; color: var(--muted); font-size: var(--fs-micro); font-weight: 600; letter-spacing: var(--ls-caps); text-transform: uppercase; }

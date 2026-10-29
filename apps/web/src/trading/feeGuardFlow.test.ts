@@ -38,7 +38,7 @@ import {
   type OrderRow,
 } from '@sodex-core';
 import { gateway as exchangeGateway } from '../exchange/sodexGateway';
-import { changeOrder, changeRoute, modifyOrder, placeOrder, recreateOrder, replaceOrder, ticketFromOpenOrder } from './actions';
+import { changeOrder, changeRoute, modifyOrder, placeAlgoChildren, placeOrder, recreateOrder, replaceOrder, setLeverage, ticketFromOpenOrder } from './actions';
 import { _setBuilderPollDelaysForTests } from './builderApproval';
 import { setTradingConfig, type BuilderConfig } from './config';
 import { builderNow } from './feeGuard';
@@ -801,4 +801,17 @@ test('approving the fee on its own after a revocation (the key options): the nex
   assert.deepEqual(wallet.asked.slice(asked), ['ApproveBuilderFeeAction'], 'one signature, no new key');
   await perps();
   assert.deepEqual(accepted('perps').at(-1)!.body.builder, ours(15), 'the wallet\'s tier, not the default');
+});
+
+test('a market SoDEX does not list: no order, algo child or leverage change is signed for it - refused in one plain line, never sent to another market', async () => {
+  await enable();
+  await termsSettled();
+  world.sent = [];
+  const asked = wallet.asked.length;
+  const notListed = (e: unknown) => e instanceof OrderValidationError && e.message === "PURR is not listed on SoDEX, so it can't be traded here.";
+  await assert.rejects(placeOrder('perps', { symbol: 'PURR-USD', side: 'buy', price: '0.2', quantity: '100' }), notListed);
+  await assert.rejects(placeAlgoChildren('PURR-USD', [{ clOrdID: 'vda-1', side: 'buy', price: '0.2', quantity: '100', tif: 'ioc', reduceOnly: false }]), notListed);
+  await assert.rejects(setLeverage('PURR-USD', 5, 'cross'), notListed);
+  assert.equal(writes().length, 0, 'nothing was signed or sent');
+  assert.equal(wallet.asked.length, asked, 'and the wallet was asked for nothing');
 });

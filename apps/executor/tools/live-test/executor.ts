@@ -36,6 +36,7 @@ import {
   type AlgoView,
   type CopyAction,
   type CopyView,
+  type EngineNotice,
   type ExecutorInfo,
   type MeResponse,
 } from '../../../../packages/copy-engine/src/index.ts';
@@ -359,6 +360,11 @@ export class ExecutorClient implements ExecutorApi {
 
   async activity(id: string, limit = 200): Promise<ActivityEntry[]> {
     return (await this.call<{ entries: ActivityEntry[] }>('GET', `/copies/${id}/activity?limit=${limit}`, undefined, true)).entries;
+  }
+
+  /** What the executor keeps for the wallet to hear of (GET /notices), newest first. */
+  async notices(limit = 50): Promise<EngineNotice[]> {
+    return (await this.call<{ notices: EngineNotice[] }>('GET', `/notices?limit=${limit}`, undefined, true)).notices;
   }
 
   /** Everything this wallet runs here stops: the kill switch for algos, every copy stopped and closed. */

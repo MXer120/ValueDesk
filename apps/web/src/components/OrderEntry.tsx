@@ -49,7 +49,8 @@ import { createPortal } from 'react-dom';
 import { api, type Engine, type OrderBook, type Symbol } from '../api';
 import { sharedBook } from '../exchange/bookShare';
 import { useAccountResource } from '../accountFeeds';
-import { useAsync, useChannel, useStatus, useStored } from '../hooks';
+import { useAsync, useChannel, useStatus, useStored, useSymbolList } from '../hooks';
+import { knownUnlisted, notListed } from '../trading/listed';
 import { ALGO_MENU, menuName, type UiKind } from './algo/menu';
 import { AlgoIcon } from './algo/AlgoIcon';
 import type { AlgoTicketHandle, AlgoTicketState } from './algo/AlgoTicket';
@@ -936,6 +937,11 @@ export function OrderEntry({
 
   /* An algo is sized and valued like a market order (at the last price); its own rules price each child. */
   const isAlgo = type === 'algo';
+  /* A market SoDEX's list does not carry (one delisted while this tab was open, a stale stored one):
+     nothing can be placed on it here - no order, no algo, no leverage - and the ticket says why. The
+     trade page moves to a listed market once it sees this too (App.tsx); signing refuses it as well. */
+  const symbolList = useSymbolList(engine);
+  const unlisted = knownUnlisted(symbol, engine, symbolList.data);
   /* A paper algo in this browser signs nothing: no wallet or trading key stands before its Start. */
   const paperAlgo = isAlgo && algoState.walletFree;
   /* Where the legal gate would refuse this order (trading/legalGate.ts) - a restricted
@@ -1521,10 +1527,11 @@ export function OrderEntry({
   const liveNotional = sizingPx * liveQty;
   const liveBelow = minNotional !== null && liveNotional > 0 && liveNotional < num(minNotional);
   const liveAbove = maxNotional !== null && liveNotional > num(maxNotional);
-  const canSend = !busy && unlocked && !accountMismatch && !liveBelow && !liveAbove
+  const canSend = !busy && !unlisted && unlocked && !accountMismatch && !liveBelow && !liveAbove
     && liveQty > 0 && (marketExec || num(price) > 0) && !(type === 'stop' && !stopPrice) && !tifNote?.block;
 
   async function place(side: 'buy' | 'sell') {
+    if (unlisted) return show('err', notListed(symbol));
     if (!unlocked) return show('err', 'Enable trading first.');
     if (!marketExec && !(num(price) > 0)) return show('err', 'Enter a price.');
     if (tifNote?.block) return show('err', tifNote.text);
@@ -1653,7 +1660,7 @@ export function OrderEntry({
    * with the exchange is the same class of bug as the account mismatch above.
    */
   async function pushLeverage(nextLev: number, nextMode: 'cross' | 'isolated') {
-    if (!unlocked || !(nextLev > 0)) return;
+    if (unlisted || !unlocked || !(nextLev > 0)) return;
     // Not `busy`: that flag is the Long/Short button's "Working…" state, and
     // changing leverage or margin mode is not placing an order.
     try {
@@ -2416,6 +2423,7 @@ export function OrderEntry({
 
         {/* Guardrails sit ABOVE the two buttons they guard. The size bound
             is the amount field's own border and the line under it. */}
+        {unlisted && <p className="status err">{notListed(symbol)}</p>}
         {accountMismatch && (
           <p className="status err">
             Trading disabled: viewing{' '}
@@ -2436,10 +2444,10 @@ export function OrderEntry({
           <button
             type="button"
             className={`oe-side__btn is-${side}${btnGate?.busy && !algoBlocked ? ' is-wait' : ''}`}
-            onClick={algoBlocked ? undefined : btnGate ? btnGate.act : isAlgo ? () => void algoRef.current?.start() : () => place(side)}
-            disabled={algoBlocked ? true : btnGate ? btnGate.busy : isAlgo ? !algoState.ready || (accountMismatch && !paperAlgo) : !canSend}
+            onClick={unlisted || algoBlocked ? undefined : btnGate ? btnGate.act : isAlgo ? () => void algoRef.current?.start() : () => place(side)}
+            disabled={unlisted || algoBlocked ? true : btnGate ? btnGate.busy : isAlgo ? !algoState.ready || (accountMismatch && !paperAlgo) : !canSend}
             aria-busy={btnGate?.busy || busy || undefined}
-            title={algoBlocked ? `${algoState.blocked}. Open Advanced to run it elsewhere.` : btnGate?.why ?? (isAlgo ? algoState.why ?? undefined : undefined)}
+            title={unlisted ? notListed(symbol) : algoBlocked ? `${algoState.blocked}. Open Advanced to run it elsewhere.` : btnGate?.why ?? (isAlgo ? algoState.why ?? undefined : undefined)}
           >
             {algoBlocked
               ? algoState.blocked

@@ -269,7 +269,8 @@ const LEG_LABEL: Record<string, string> = {
 };
 
 function entryText(e: ActivityEntry): string {
-  if (e.kind === 'skip') return (SKIP_REASONS as Record<string, string>)[e.reason] ?? skipReasonLabel(e.reason);
+  // Why, in words - with what the copier saw when it says more (a different asset's two prices).
+  if (e.kind === 'skip') return `${(SKIP_REASONS as Record<string, string>)[e.reason] ?? skipReasonLabel(e.reason)}${e.detail ? ` (${e.detail})` : ''}`;
   if (e.kind === 'error') return `${e.reason === 'outcome-unknown' ? 'No answer from SoDEX' : 'Rejected'}${e.detail ? `: ${e.detail}` : ''}`;
   if (e.kind === 'status') return e.detail ?? STATUS_LABEL[e.reason] ?? e.reason;
   return LEG_LABEL[e.reason] ?? e.reason;

@@ -27,7 +27,8 @@ import { goToWallet } from './components/account/actions';
 import { useWalletBridge } from './components/account/useWallet';
 import { configureFromHealth } from './trading/config';
 import { restoreTrading } from './trading/session';
-import { ToastProvider } from './toast';
+import { ToastProvider, notify } from './toast';
+import { linkedMarket, notListed } from './trading/listed';
 import { FillToasts } from './components/FillToasts';
 import { FeedbackHost } from './feedback/FeedbackHost';
 import { lazyPage, type LazyPage, lazyChunk } from './lazyPage';
@@ -337,7 +338,7 @@ function AppShell() {
   );
 
   const { session, refresh: refreshSession } = useSession();
-  const { symbols, byName } = useSymbols(engine);
+  const { symbols, byName, listEngine } = useSymbols(engine);
   const { state: connState, upstream } = useConnState();
   const { data: health, error: healthError } = useAsync(() => api.health(), [], { pollMs: 30_000 });
   /* The data service not answering for a while: the status line says so on every page (status/SiteNoticeBanner.tsx). */
@@ -355,17 +356,39 @@ function AppShell() {
   const sym = byName.get(symbol);
   const bump = useCallback(() => setRefreshToken((n) => n + 1), []);
 
+  /* A link to a market (/trade?symbol=BTC-USD, a position card's "Trade" link) opens that market,
+     not the one stored from before; the address is cleaned at once, so a reload keeps the market
+     picked since. One SoDEX does not list is refused by the check below, in words. */
+  useEffect(() => {
+    const linked = linkedMarket(window.location.search);
+    if (!linked) return;
+    const q = new URLSearchParams(window.location.search);
+    q.delete('symbol');
+    const rest = q.toString();
+    window.history.replaceState(window.history.state, '', `${window.location.pathname}${rest ? `?${rest}` : ''}${window.location.hash}`);
+    setEngine(linked.engine);
+    setSymbol(linked.symbol);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Keep the selected symbol valid when the engine changes.
   //
   // Keyed on the first symbol's NAME, not on symbols.length: two engines can
   // return lists of equal length (and spot/perps counts drift as markets are
   // listed), which would leave the previous engine's symbol selected and every
   // panel requesting a market that does not exist on the new engine.
-  const symbolsFingerprint = `${engine}:${symbols[0]?.name ?? ''}:${symbols.length}`;
+  //
+  // NEVER SILENTLY ON ANOTHER MARKET (owner, 2026-10-29). A market SoDEX does not
+  // list - a stored one since delisted, a link, a saved chart, a market delisted
+  // while this tab was open - cannot be traded here: the trade page shows the
+  // default market instead and says why (trading/listed.ts). Judged only on this
+  // engine's own list: for a moment after a switch the poll still holds the other's.
+  const symbolsFingerprint = `${engine}:${listEngine ?? ''}:${symbols[0]?.name ?? ''}:${symbols.length}`;
   useEffect(() => {
-    if (symbols.length === 0) return;
+    if (symbols.length === 0 || listEngine !== engine) return;
     if (!byName.has(symbol)) {
       const fallback = byName.has(DEFAULT_SYMBOL[engine]) ? DEFAULT_SYMBOL[engine] : symbols[0]!.name;
+      if (symbol) notify('warn', `${notListed(symbol)} Showing ${byName.get(fallback)?.displayName ?? fallback} instead.`);
       setSymbol(fallback);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -24,6 +24,11 @@ export interface Cost {
   leverage?: number;
   leaderTakerUsd?: number;
   leaderPeakUsd?: number;
+  /**
+   * Margin the scenario may lose to a liquidation SoDEX makes (the position's isolated margin, at
+   * most what the scenario lets it hold while it waits): an upper bound, spent (budget.ts).
+   */
+  lostUsd?: number;
   /** Signed requests sent to SoDEX by the master wallet (registrations, approvals): free, counted for the record. */
   walletSignatures?: number;
 }
@@ -53,8 +58,12 @@ export interface Scenario {
   leaderVenue?: LeaderVenueName;
   /** What the target must let the runner do (target.ts): on a target that cannot, it is skipped, with why. */
   needs?: Capability[];
-  /** How a dry run exercises it: on paper with its checks / its spec accepted and stopped / a copy's lifecycle without leader trades. */
-  dry: 'full' | 'spec' | 'lifecycle';
+  /**
+   * How a dry run exercises it: on paper with its checks / its spec accepted and stopped / a copy's
+   * lifecycle without leader trades / not at all ('live': what it waits for has no paper form - a
+   * liquidation needs SoDEX's margin - so a dry run skips it, with why).
+   */
+  dry: 'full' | 'spec' | 'lifecycle' | 'live';
   timeoutMs: number;
   cost(U: number): Cost;
   run(t: T): Promise<void>;

@@ -131,7 +131,8 @@ export function useSymbols(engine: Engine) {
   const { data, error } = useSymbolList(engine);
   const symbols = data?.symbols ?? [];
   const byName = new Map<string, Symbol>(symbols.map((s) => [s.name, s]));
-  return { symbols, byName, error };
+  /* Whose list it is: for a moment after an engine switch the poll still holds the other engine's. */
+  return { symbols, byName, error, listEngine: data?.engine ?? null };
 }
 
 /**

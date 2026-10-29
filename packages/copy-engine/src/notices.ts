@@ -1,8 +1,10 @@
 /**
  * What a follower should hear of, from either engine, as one notice: an algo that failed,
  * was stopped or held without being asked, or finished; a copy halted, blocked, paused or
- * stopped without being asked, or a copied position closed by its stop or outside the copier.
- * What the follower did themself (pause, cancel, stop) is not a notice - they know.
+ * stopped without being asked, a copied position closed by its stop or outside the copier, a
+ * leader's coin the copy cannot follow on SoDEX (not listed, or another asset there), or a
+ * copied position on a market SoDEX has since delisted. What the follower did themself
+ * (pause, cancel, stop) is not a notice - they know.
  *
  * The engines raise it through their host (AlgoHost / CopyHost `onNotice`): the browser puts it
  * in the bell and, once the wallet is verified, in its inbox on the server; the executor keeps
@@ -15,7 +17,7 @@ import type { AssetVerdict, Subscription, SubscriptionStatus } from './types.ts'
 /** How much it matters: info (finished, closed by its stop), warn (stopped or held by the engine), error (failed, halted, a position closed outside). */
 export type NoticeGrade = 'info' | 'warn' | 'error';
 export type NoticeSource = 'algo' | 'copy';
-export type NoticeKind = 'done' | 'ended' | 'failed' | 'stopped' | 'held' | 'halted' | 'blocked' | 'paused' | 'closed' | 'different-asset' | 'same-asset';
+export type NoticeKind = 'done' | 'ended' | 'failed' | 'stopped' | 'held' | 'halted' | 'blocked' | 'paused' | 'closed' | 'different-asset' | 'same-asset' | 'not-copied' | 'delisted';
 
 export interface EngineNotice {
   /** Stable for one event: `${source}:${ref}:${kind}:${at}` - a repeat is the same notice. */
@@ -108,3 +110,31 @@ export function copyAssetNotice(s: Subscription, leaderSymbol: string, v: AssetV
         body: `${prices}: not the same asset, so nothing new is opened on ${v.market}. A position the copy holds there still follows the leader's reductions and closes.`,
       });
 }
+
+/**
+ * A leader's market SoDEX lists no market for (info): the first time the copy skips one of the
+ * leader's trades there, once per copy and coin - the activity keeps a line for every trade.
+ */
+export function copyNotCopiedNotice(s: Subscription, leaderSymbol: string, at = Date.now()): EngineNotice {
+  return mk({
+    owner: s.owner, source: 'copy', ref: `${s.id}:${leaderSymbol}`, kind: 'not-copied', grade: 'info', at, paper: !!s.settings.paper,
+    title: `${leaderSymbol} is not copied in the copy of ${leaderShort(s)}`,
+    body: `Not copied: ${leaderSymbol} isn't listed on SoDEX - the leader's trades on it are skipped.`,
+  });
+}
+
+/**
+ * A copied position on a market SoDEX no longer lists (warn), once: the copier does not close it
+ * or trade it any more - a delisting is the follower's to act on (owner, 2026-10-29).
+ */
+export function copyDelistedNotice(s: Subscription, symbol: string, size: number, at = Date.now()): EngineNotice {
+  return mk({
+    owner: s.owner, source: 'copy', ref: `${s.id}:${symbol}`, kind: 'delisted', grade: 'warn', at, paper: !!s.settings.paper,
+    title: `${symbol} is no longer listed on SoDEX (copy of ${leaderShort(s)})`,
+    body: delistedDetail(symbol, size),
+  });
+}
+
+/** The words of a delisting, for the notice and the copy's activity. */
+export const delistedDetail = (symbol: string, size: number): string =>
+  `${symbol} is no longer listed on SoDEX. The copy still holds a ${size > 0 ? 'long' : 'short'} position of ${px(Math.abs(size))} there, and ValueDesk will not trade it any more: the copy does not close, reduce or add to it. What to do with it is yours to decide on SoDEX.`;

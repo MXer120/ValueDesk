@@ -2,7 +2,8 @@
  * Edge cases of copy trading (planner.ts, runtime.ts) a tester would otherwise
  * meet first (docs/TESTING-MATRIX.md has the whole list): a leader flip whose
  * new side is under SoDEX's minimum, ADL on the leader's side and on the
- * follower's, a market halted or delisted while a copy holds it, SoDEX down
+ * follower's, a market halted or delisted while a copy holds it (delisted: left
+ * as it is, and the follower told once), SoDEX down
  * when the leader closes, and the builder approval lowered under the fee
  * mid-run. The planner tests are pure; the runtime ones run a copier against
  * a faked SoDEX (REST and the trade stream), as runtime.test.ts does.
@@ -18,6 +19,7 @@ import {
   planLeaderEvent,
   regionPolicy,
   type FetchLike,
+  type EngineNotice,
   type Intent,
   type OrderSink,
   type PlanContext,
@@ -143,7 +145,7 @@ async function until(cond: () => boolean, ms = 3000): Promise<boolean> {
   return true;
 }
 
-function runtime(w: World, sinkFor: (s: Subscription) => OrderSink | null) {
+function runtime(w: World, sinkFor: (s: Subscription) => OrderSink | null, notices: EngineNotice[] = []) {
   const store = new MemoryStore();
   const rt = new CopyRuntime({
     store,
@@ -156,6 +158,7 @@ function runtime(w: World, sinkFor: (s: Subscription) => OrderSink | null) {
     builderFor: async () => ({ id: 9, fee: 25 }),
     policyFor: (s) => regionPolicy(s.country, s.observedCountry),
     log: { debug() {}, info() {}, warn() {}, error() {} },
+    onNotice: (n) => notices.push(n),
   });
   return { rt, store };
 }
@@ -236,9 +239,10 @@ test('a leader close while the market is halted is not sent into the halt; once 
   }
 });
 
-test.todo('FINDING delisted: a copy that still holds a position on a market SoDEX no longer lists is never closed or told (closeStrays skips a market it cannot find) - what SoDEX does with positions on a delisting is unconfirmed', async () => {
+test('delisted: a copy that still holds a position on a market SoDEX no longer lists is not closed or traded by the copier (a delisting is the follower\'s to act on), and the follower is told once', async () => {
   const w: World = { leader: [], builderRate: 25, status: 'TRADING' };
-  const { rt, store } = runtime(w, () => new PaperSink());
+  const notices: EngineNotice[] = [];
+  const { rt, store } = runtime(w, () => new PaperSink(), notices);
   await rt.start();
   try {
     const s = await rt.add(sub({ paper: true }, { id: 'gone1' }));
@@ -251,8 +255,24 @@ test.todo('FINDING delisted: a copy that still holds a position on a market SoDE
     await reloadMarkets(rt);
     await rt.reconcileAll();
     await wait(300);
-    const said = (await store.activity({ subId: s.id })).some((x) => /BTC-USD/.test(x.detail ?? '') && /listed|delist/i.test(x.detail ?? ''));
-    assert.ok(size(rt, s.id) === 0 || said, 'closed, or the follower is told the market is gone');
+    assert.equal(size(rt, s.id), 0.01, 'the copier leaves the position as it is');
+    const said = (await store.activity({ subId: s.id })).filter((x) => x.kind === 'status' && x.reason === 'delisted');
+    assert.equal(said.length, 1, 'a line in the copy\'s activity');
+    assert.match(said[0]!.detail ?? '', /^BTC-USD is no longer listed on SoDEX\. The copy still holds a long position of 0\.01 there, and ValueDesk will not trade it any more/);
+    const told = notices.filter((n) => n.kind === 'delisted');
+    assert.deepEqual(told.map((n) => [n.grade, n.ref, n.title]), [['warn', 'gone1:BTC-USD', 'BTC-USD is no longer listed on SoDEX (copy of 0x1111…1111)']]);
+    // The leader's close there is a "Not copied" line, not another notice: the delisting already said it.
+    assert.ok((await store.activity({ subId: s.id })).some((x) => x.kind === 'skip' && x.reason === 'not-on-sodex'));
+    assert.equal(notices.filter((n) => n.kind === 'not-copied').length, 0);
+    // The next reads of the list do not tell it again.
+    await reloadMarkets(rt);
+    await reloadMarkets(rt);
+    assert.equal(notices.filter((n) => n.kind === 'delisted').length, 1, 'told once');
+    // Listed again, it is an ordinary market once more: the copy follows its leader (flat) and closes it.
+    w.delisted = false;
+    await reloadMarkets(rt);
+    await rt.reconcileAll();
+    assert.ok(await until(() => size(rt, s.id) === 0, 1500), `the copy still holds ${size(rt, s.id)} once SoDEX lists it again`);
   } finally {
     await rt.stop();
   }

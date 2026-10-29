@@ -10,6 +10,7 @@
  *                 + the leader's taker notional x (taker fee + half the spread)
  *                   (the leader's orders carry no builder), at its venue's fee
  *                   and book: SoDEX's, or Hyperliquid's 4.5 bp and its book;
+ *                 + the margin a liquidation scenario may lose (its own bound);
  *   PEAK MARGIN:    the largest exposure at once / the leverage it is held at,
  *                   plus a buffer for the move while it is open and the fees.
  *
@@ -64,6 +65,8 @@ export interface BudgetRow {
   feesUsd: number;
   spreadUsd: number;
   leaderUsd: number;
+  /** Margin lost to a liquidation (an upper bound; 0 for every other scenario). */
+  lostUsd: number;
   spentUsd: number;
   peakUsd: number;
   marginUsd: number;
@@ -74,7 +77,7 @@ export interface BudgetRow {
 export interface Budget {
   rows: BudgetRow[];
   bySection: Record<string, { spentUsd: number; peakMarginUsd: number; leaderPeakMarginUsd: number; traded: number }>;
-  total: { spentUsd: number; feesUsd: number; spreadUsd: number; leaderUsd: number; leaderTraded: number; traded: number; peakMarginUsd: number; leaderPeakMarginUsd: number; riskUsd: number; depositFollowerUsd: number; depositLeaderUsd: number; walletSignatures: number };
+  total: { spentUsd: number; feesUsd: number; spreadUsd: number; leaderUsd: number; lostUsd: number; leaderTraded: number; traded: number; peakMarginUsd: number; leaderPeakMarginUsd: number; riskUsd: number; depositFollowerUsd: number; depositLeaderUsd: number; walletSignatures: number };
   /** Where the leader's deposit goes: 'SoDEX' or 'Hyperliquid'. */
   leaderWhere: string;
   assumptions: string[];
@@ -109,6 +112,7 @@ export function computeBudget(list: readonly Scenario[], i: BudgetInput): Budget
     const fees = c.takerUsd * (i.main.takerFee + i.builderRate) + c.makerUsd * (maker + i.builderRate);
     const spread = c.takerUsd * hs;
     const leader = (c.leaderTakerUsd ?? 0) * leaderRate;
+    const lost = c.lostUsd ?? 0;
     const lev = Math.max(1, Math.min(c.leverage ?? i.leverage, i.leverage));
     rows.push({
       id: s.id,
@@ -117,7 +121,8 @@ export function computeBudget(list: readonly Scenario[], i: BudgetInput): Budget
       feesUsd: fees,
       spreadUsd: spread,
       leaderUsd: leader,
-      spentUsd: fees + spread + leader,
+      lostUsd: lost,
+      spentUsd: fees + spread + leader + lost,
       peakUsd: c.peakUsd,
       marginUsd: (c.peakUsd / lev) * buffer,
       leaderMarginUsd: ((c.leaderPeakUsd ?? 0) / i.leverage) * buffer,
@@ -147,6 +152,7 @@ export function computeBudget(list: readonly Scenario[], i: BudgetInput): Budget
       feesUsd: sum((r) => r.feesUsd),
       spreadUsd: sum((r) => r.spreadUsd),
       leaderUsd: sum((r) => r.leaderUsd),
+      lostUsd: sum((r) => r.lostUsd),
       leaderTraded,
       traded: sum((r) => r.traded),
       peakMarginUsd: peak,
@@ -170,6 +176,11 @@ export function computeBudget(list: readonly Scenario[], i: BudgetInput): Budget
       `margin at ${i.leverage}x (the EEA cap and the copies' 2x; an algo that keeps SoDEX's default leverage needs less), x${buffer} buffer; peaks are per scenario (each ends flat)`,
       `price risk: a ${(risk * 100).toFixed(1)}% move on the largest scenario's exposure, either way (not a cost on average)`,
       'ETH-USD legs (baskets) are costed at the main market\'s fees (the same on SoDEX: 4 bp / 1.2 bp)',
+      ...(rows.some((r) => r.lostUsd > 0)
+        ? [
+            `a liquidation scenario loses the position's isolated margin: costed at its bound (the most margin it waits with, 5% of the position), about $${(i.U / Math.max(1, i.main.maxLeverage)).toFixed(2)} when SoDEX lets the harness take it to ${i.main.maxLeverage}x (the market's maximum); SoDEX's takeover fill itself was fee-free in the one case the repository verified (docs/research/07-gaps-sodex-contract.md, G7); a further liquidation fee is not documented: unknown, not costed`,
+          ]
+        : []),
     ],
   };
 }
@@ -188,7 +199,7 @@ export function formatBudget(b: Budget): string {
   }
   const t = b.total;
   out.push('');
-  out.push(`(a) MONEY SPENT (gone): ${usd(t.spentUsd)}  = fees and builder ${usd(t.feesUsd)} + spread ${usd(t.spreadUsd)} + the leader's ${usd(t.leaderUsd)}  on ${usd(t.traded)} traded (the leader's ${usd(t.leaderTraded)} on ${b.leaderWhere})`);
+  out.push(`(a) MONEY SPENT (gone): ${usd(t.spentUsd)}  = fees and builder ${usd(t.feesUsd)} + spread ${usd(t.spreadUsd)} + the leader's ${usd(t.leaderUsd)}${t.lostUsd > 0 ? ` + margin lost to liquidations at most ${usd(t.lostUsd)}` : ''}  on ${usd(t.traded)} traded (the leader's ${usd(t.leaderTraded)} on ${b.leaderWhere})`);
   out.push(`(b) PEAK MARGIN (held, returned): follower ${usd(t.peakMarginUsd)}, leader ${usd(t.leaderPeakMarginUsd)}`);
   out.push(`    deposit at least: follower ${usd(t.depositFollowerUsd)} on SoDEX, leader ${usd(t.depositLeaderUsd)} on ${b.leaderWhere} (the buffered peak, plus what is spent, plus $10)`);
   out.push(`    price risk while a position is open: about +/- ${usd(t.riskUsd)} on the largest scenario`);

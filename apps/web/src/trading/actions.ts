@@ -70,6 +70,7 @@ import {
   requireSigner,
 } from './session';
 import { ensureTerms, feeNow, hintTerms } from './terms';
+import { notListed } from './listed';
 import { logger } from '../log';
 
 const log = logger('trade');
@@ -88,11 +89,16 @@ async function symbols(engine: Engine): Promise<MarketSymbol[]> {
   return list;
 }
 
+/**
+ * A market's rules from SoDEX's list. EVERY signed order, leverage change and algo child looks
+ * its market up here first, so one SoDEX does not list is refused before anything is signed -
+ * in plain words (listed.ts), and never swapped for another market.
+ */
 export async function symbolFor(engine: Engine, ref: string): Promise<MarketSymbol> {
   const want = String(ref).toUpperCase();
   const list = await symbols(engine);
   const hit = list.find((s) => s.name.toUpperCase() === want || s.displayName.toUpperCase() === want);
-  if (!hit) throw new OrderValidationError(`unknown ${engine} market ${ref}`);
+  if (!hit) throw new OrderValidationError(notListed(String(ref)));
   return hit;
 }
 
@@ -331,13 +337,30 @@ export async function cancelAll(engine: Engine, symbol?: string) {
   // (found by the live run: three resting orders stayed on the book).
   const ids = new Map<string, number>();
   const open: OpenOrderRef[] = [];
+  // An order on a market SoDEX no longer lists (delisted while it rested) has no market record to
+  // resolve its id from: it is left out and named, and every other order is still cancelled - one
+  // such order used to make the whole cancel-all throw and cancel nothing (owner, 2026-10-29).
+  const skipped = new Set<string>();
   for (const o of listed) {
     let symbolID = o.symbolID ?? o.si;
     if (typeof symbolID !== 'number' && typeof o.symbol === 'string') {
-      if (!ids.has(o.symbol)) ids.set(o.symbol, (await symbolFor(engine, o.symbol)).id);
+      if (!ids.has(o.symbol)) {
+        try {
+          ids.set(o.symbol, (await symbolFor(engine, o.symbol)).id);
+        } catch {
+          ids.set(o.symbol, Number.NaN);
+        }
+      }
       symbolID = ids.get(o.symbol);
+      if (!Number.isFinite(symbolID)) {
+        skipped.add(o.symbol);
+        continue;
+      }
     }
     open.push({ ...o, symbolID });
+  }
+  if (!open.length && skipped.size) {
+    throw new OrderValidationError(`Nothing was cancelled: the open orders are on markets SoDEX no longer lists (${[...skipped].join(', ')}). Cancel them on sodex.com.`);
   }
   const actions = cancelManyActions(engine, s.meta.accountId, open);
   if (!actions.length) throw new OrderValidationError('SoDEX listed open orders, but none could be matched to a market - nothing was cancelled. Reload and try again.');
@@ -347,7 +370,7 @@ export async function cancelAll(engine: Engine, symbol?: string) {
     checkBatch(r, 'cancel-all');
     results.push(r);
   }
-  return { cancelled: open.length, result: results.length === 1 ? results[0] : results };
+  return { cancelled: open.length, skipped: [...skipped], result: results.length === 1 ? results[0] : results };
 }
 
 export async function modifyOrder(b: {

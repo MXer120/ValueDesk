@@ -176,6 +176,16 @@ export interface SubState {
    * (MarketBook.sameAsset; a notice); removed, with a notice, once the two prices agree again.
    */
   differentAssets?: Record<string, number>;
+  /**
+   * Leader-venue symbol -> when this copy was told that SoDEX lists no market for it, so the
+   * leader's trades there are skipped (a notice, once per copy and coin).
+   */
+  notCopied?: Record<string, number>;
+  /**
+   * SoDEX symbol -> when this copy was told that SoDEX no longer lists a market it holds a
+   * position on (a notice, once); removed once SoDEX lists it again or the position is gone.
+   */
+  delisted?: Record<string, number>;
   /** Highest copy equity seen (for the drawdown stop). */
   peakEquity: number;
   /** Event ids already handled, newest last (bounded). */
@@ -270,7 +280,7 @@ export interface Intent {
 /** Stable ids for why a leader change produced no order. */
 export const SKIP_REASONS = {
   'spot-not-copied': 'Spot trades are not copied (perps only)',
-  'not-on-sodex': 'This market is not listed on SoDEX perps',
+  'not-on-sodex': "Not copied: SoDEX doesn't list this coin, so the leader's trades on it are skipped",
   'different-asset': "SoDEX's market of this name is a different asset (priced far from the leader's): nothing new is copied there, closes still are",
   'market-halted': 'SoDEX is not trading this market right now',
   'asset-not-allowed': 'Not on your list of coins to copy',

@@ -35,6 +35,7 @@ import {
   SIZING_MODES, TAKER_RATE, fmtRate, fmtSignedPct, fmtSignedUsd, workedExample, type SetupField, type SetupState,
 } from './setup';
 import { FILL_LIMIT, type CopyContext } from './useCopy';
+import { NotCopyableNote, useNotCopyable } from './useNotCopyable';
 import { fmtFixed, localize, toInputText } from '../../numStyle';
 
 const isRejection = (e: unknown): boolean => e instanceof WalletError && /reject|denied|cancel/i.test(e.message);
@@ -157,6 +158,15 @@ function RulesStep({ c, row, errs }: { c: CopyContext; row: TraderRow | null; er
   const example = workedExample(c.parsed, c.profile.data ?? null, (sym) => coinOf(c.venue, sym));
   const eea = regionPolicy(c.live.terms?.country ?? null, c.live.viewerCountry).maxLeverage === EEA_MAX_LEVERAGE;
   const counter = c.setup.direction === 'counter';
+  // Which of their positions and recent coins a copy cannot follow on SoDEX, before it starts (owner, 2026-10-29).
+  const copyVenue = c.venue === 'sodex' || c.venue === 'hyperliquid' ? c.venue : null;
+  const notCopyable = useNotCopyable({
+    enabled: copyVenue !== null,
+    venue: copyVenue ?? 'hyperliquid',
+    positions: c.profile.data?.positions ?? null,
+    positionsAt: c.profile.data?.updatedAt ?? null,
+    fills: c.fills.data,
+  });
 
   return (
     <div className="cpy-mgrid">
@@ -166,6 +176,7 @@ function RulesStep({ c, row, errs }: { c: CopyContext; row: TraderRow | null; er
           <div><dt>30D PnL</dt><dd className={pnl30 === null ? '' : pnl30 >= 0 ? 'pos' : 'neg'}>{fmtSignedUsd(pnl30, 0)}</dd></div>
           <div><dt>Win rate</dt><dd><WinRate value={wr} closes={closes} /></dd></div>
         </dl>
+        <NotCopyableNote n={notCopyable} />
 
         <div className="cpy-dir" role="radiogroup" aria-label="Direction">
           {(['copy', 'counter'] as const).map((d) => (

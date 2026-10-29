@@ -21,7 +21,7 @@
  */
 import { canonicalDecimal, numberToPlainString, type Network } from '../../../sodex-core/src/index.ts';
 import { randomId, timers, type Logger, type WebSocketFactory } from '../io.ts';
-import { MarketBook, snapPrice } from '../markets.ts';
+import { MarketBook, notListedLine, snapPrice } from '../markets.ts';
 import type { RegionPolicy } from '../policy.ts';
 import type { SodexClient } from '../sodex.ts';
 import type { MarketInfo } from '../types.ts';
@@ -439,13 +439,19 @@ export class AlgoRuntime {
     return [...this.algos.values()].filter((a) => !o || a.owner === o).sort((x, y) => y.createdAt - x.createdAt);
   }
 
-  /** Start an algo. The spec is validated here as everywhere (parseAlgoSpec); its market must be listed. */
+  /**
+   * Start an algo. The spec is validated here as everywhere (parseAlgoSpec); every market it
+   * names must be listed - its own, a basket's legs, a conditional's markets and the algo it
+   * starts - or nothing starts (never on another market). A list that could not be read is
+   * said as that, not as "not listed".
+   */
   async add(n: NewAlgo): Promise<AlgoRecord> {
     const spec = parseAlgoSpec(n.spec);
     if (!this.markets.size) await this.loadMarkets();
+    if (!this.markets.size) throw new Error("SoDEX's market list could not be read, so the market cannot be checked. Try again in a moment.");
     for (const sym of algoSymbols(spec)) {
       const m = this.markets.get(sym);
-      if (!m) throw new Error(`${sym} is not listed on SoDEX perps.`);
+      if (!m) throw new Error(notListedLine(sym));
     }
     const m = this.markets.get(spec.symbol)!;
     if (m.status !== 'TRADING') throw new Error(`SoDEX is not trading ${m.name} right now.`);

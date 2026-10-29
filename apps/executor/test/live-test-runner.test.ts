@@ -27,7 +27,7 @@ import { ExecutorService } from '../src/service.ts';
 import { computeBudget, formatBudget, pickMarket } from '../tools/live-test/budget.ts';
 import { CATALOGUE } from '../tools/live-test/catalogue.ts';
 import { flatten, startDecision, type FlattenVenue, type VenueOrder } from '../tools/live-test/cleanup.ts';
-import type { FillInfo, OrderInfo } from '../tools/live-test/exchange.ts';
+import { SodexReads, type FillInfo, type OrderInfo } from '../tools/live-test/exchange.ts';
 import { CopyWallet, ExecutorError, assertPaper, type ExecutorProcess } from '../tools/live-test/executor.ts';
 import { DEFAULT_VOLUME, VOLUME_PATH, VolumeStub } from '../tools/live-test/feeStub.ts';
 import { CheckFailed, Inconclusive, T, Unavailable, type Env } from '../tools/live-test/harness.ts';
@@ -35,6 +35,7 @@ import { CodeHashes, filesOf, hashFiles } from '../tools/live-test/hash.ts';
 import { HL_MIN_ORDER_USD, HL_TAKER_FEE } from '../tools/live-test/hyperliquid.ts';
 import type { LeaderTrade, LeaderVenue } from '../tools/live-test/leader.ts';
 import { leaderSkip, type Scenario } from '../tools/live-test/scenario.ts';
+import { LIQ_MAX_MARGIN } from '../tools/live-test/scenarios/liquidation.ts';
 import { decide, emptyState, exposedOn, loadState, markDone, markRunning, noteRun, saveState, selected, stateFileOf } from '../tools/live-test/state.ts';
 import { BrowserTarget, CAPABILITIES, HostedTarget, Pacer, SelfTarget, TARGETS, cannotRun, hostedRefusal, targetName, type BrowserDriver, type ExecutorTarget } from '../tools/live-test/target.ts';
 
@@ -976,4 +977,41 @@ test('fee scenarios on paper: each step\'s boundary is read just under (the step
   // An executor that charged another rate fails the check.
   const wrong = feeExecutor(stub, main.takerFee + 0.0001);
   await assert.rejects(run('fee.tier-0', { ...env, target: wrong.exec } as unknown as Env), /the executor charged buy .* builder fee 25/);
+});
+
+/* ---------------------------------------------------------- liquidations ----- */
+
+test('liquidation scenarios: slow, live only (a dry run skips them, saying why), on every target, and costed with the margin a liquidation loses', async () => {
+  const liq = CATALOGUE.filter((s) => s.kind === 'liq');
+  assert.deepEqual(liq.map((s) => s.id), ['liq.algo-exits', 'liq.copy-follower']);
+  assert.ok(liq.every((s) => s.slow && s.dry === 'live'), 'slow and live only');
+  for (const t of TARGETS) for (const s of liq) assert.equal(cannotRun(s, t), null, `${s.id} runs on ${t}: only SoDEX-side actions are the harness's`);
+  assert.ok(CATALOGUE.findIndex((s) => s.section === 'fee') > CATALOGUE.findIndex((s) => s.id === 'liq.copy-follower'), 'before the fee ladder');
+  for (const s of liq) {
+    const c = s.cost(12);
+    assert.ok((c.lostUsd ?? 0) > 0 && (c.lostUsd ?? 0) <= 12 * LIQ_MAX_MARGIN, `${s.id} costs the margin it may lose, at most ${LIQ_MAX_MARGIN} of the position`);
+    const env = { mode: 'dry', main: MKT('BTC-USD'), second: MKT('ETH-USD'), timeScale: 0, log: () => undefined, target: { gone: () => null } } as unknown as Env;
+    await assert.rejects(s.run(new T(env, s.id)), (e: unknown) => e instanceof Unavailable && /live only/.test(e.message));
+  }
+  const b = computeBudget(liq, { main: MKT('BTC-USD'), book: { bid: 99.99, ask: 100.01 }, U: 12, builderRate: 0.00025, leverage: 2 });
+  assert.ok(Math.abs(b.total.lostUsd - 2 * 12 * LIQ_MAX_MARGIN) < 1e-12);
+  assert.ok(b.rows.every((r) => Math.abs(r.spentUsd - (r.feesUsd + r.spreadUsd + r.leaderUsd + r.lostUsd)) < 1e-12), 'spent counts the margin lost');
+  assert.match(formatBudget(b), /margin lost to liquidations at most \$1\.20/);
+  assert.match(formatBudget(b), /takeover fill itself was fee-free .* not documented: unknown, not costed/);
+});
+
+test('the harness\'s own writes: what a copier sends goes through the engine\'s client; a key registration, the builder approval and isolated margin straight to the gateway, which the engine\'s client refuses', async () => {
+  const seen: string[] = [];
+  const fetch: FetchLike = async (url, init) => {
+    seen.push(`${init?.method ?? 'GET'} ${url}`);
+    const refuse = url.endsWith('/trade/margin') && (init?.body ?? '').includes('"-99"');
+    return { status: 200, ok: true, text: async () => JSON.stringify(refuse ? { code: 1001, error: 'insufficient margin' } : { code: 0, data: { ok: 1 } }) };
+  };
+  const reads = new SodexReads(fetch);
+  const req = (gatewayPath: string, amount = '-1') => ({ method: 'POST' as const, gatewayPath, headers: {}, body: JSON.stringify({ type: 'updateMargin', params: { accountID: 1, symbolID: 1, amount } }) });
+  await assert.rejects(reads.client.send(req('/api/v1/perps/trade/margin')), /not an action this copier sends/, 'the engine\'s client never sends it');
+  assert.deepEqual(await reads.write(req('/api/v1/perps/trade/margin')), { ok: 1 });
+  assert.deepEqual(await reads.write(req('/api/v1/perps/accounts/api-keys')), { ok: 1 });
+  await assert.rejects(reads.write(req('/api/v1/perps/trade/margin', '-99')), /insufficient margin/, 'SoDEX\'s refusal throws with its words');
+  assert.deepEqual(seen, ['POST https://mainnet-gw.sodex.dev/api/v1/perps/trade/margin', 'POST https://mainnet-gw.sodex.dev/api/v1/perps/accounts/api-keys', 'POST https://mainnet-gw.sodex.dev/api/v1/perps/trade/margin']);
 });

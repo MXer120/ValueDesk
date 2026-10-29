@@ -2,17 +2,18 @@
  * Every scenario, in the order they run. The order keeps the margin low: each
  * scenario ends flat (the cleanup), so the account's peak is the largest single
  * scenario, never a sum. The bootstrap comes first, the algo kinds next, copy
- * trading (which needs the leader) after them, and the fee ladder last (it puts
- * the executor on other fee steps; the cleanup puts it back on the first).
- * Slow ones only with --slow.
+ * trading (which needs the leader) after them, the liquidations (slow) next,
+ * and the fee ladder last (it puts the executor on other fee steps; the cleanup
+ * puts it back on the first). Slow ones only with --slow.
  */
 import type { Scenario } from './scenario.ts';
 import { SETUP_SCENARIOS } from './scenarios/setup.ts';
 import { ALGO_SCENARIOS } from './scenarios/algos.ts';
 import { COPY_SCENARIOS } from './scenarios/copy.ts';
+import { LIQ_SCENARIOS } from './scenarios/liquidation.ts';
 import { FEE_SCENARIOS } from './scenarios/fees.ts';
 
-export const CATALOGUE: readonly Scenario[] = [...SETUP_SCENARIOS, ...ALGO_SCENARIOS, ...COPY_SCENARIOS, ...FEE_SCENARIOS];
+export const CATALOGUE: readonly Scenario[] = [...SETUP_SCENARIOS, ...ALGO_SCENARIOS, ...COPY_SCENARIOS, ...LIQ_SCENARIOS, ...FEE_SCENARIOS];
 
 {
   const ids = new Set<string>();
