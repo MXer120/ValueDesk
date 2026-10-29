@@ -146,29 +146,20 @@ test('a notice card: title, impact, components, times and the timeline newest fi
   assert.match(m, /Data API, Indexer · 27 Oct 13:00 – 14:00 UTC/);
 });
 
-test('the app banner: from /api/health, silent without a notice, plain text', () => {
+test('the app banner: scheduled maintenance only, from /api/health, plain text - incidents are notifications (IncidentNote.tsx)', () => {
   assert.equal(render(createElement(SiteNoticeBanner, { health: { ok: true } })), '');
   assert.equal(render(createElement(SiteNoticeBanner, { health: null })), '');
   assert.equal(render(createElement(SiteNoticeBanner, { health: { notices: [{ id: 1, kind: 'bogus', title: 'x', phase: 'active', startsAt: T0 }] } })), '');
-  const health = {
-    notices: [
-      { id: 7, kind: 'incident', title: 'Copies are <late>', impact: 'major', phase: 'active', startsAt: T0, endsAt: null },
-      { id: 8, kind: 'maintenance', title: 'DB', impact: null, phase: 'upcoming', startsAt: T0 + H, endsAt: T0 + 2 * H },
-    ],
-  };
-  const html = render(createElement(SiteNoticeBanner, { health }));
-  assert.match(html, /class="banner warn banner--status"/);
-  assert.match(html, /Incident: Copies are &lt;late&gt;/);
+  const incident = { id: 7, kind: 'incident', title: 'Copies are <late>', impact: 'major', phase: 'active', startsAt: T0, endsAt: null };
+  const upcoming = (id: number, title: string) => ({ id, kind: 'maintenance', title, impact: null, phase: 'upcoming', startsAt: T0 + H, endsAt: T0 + 2 * H });
+  assert.equal(render(createElement(SiteNoticeBanner, { health: { notices: [incident] } })), '', 'no bar for an incident (owner, 2026-10-29)');
+  const html = render(createElement(SiteNoticeBanner, { health: { notices: [incident, upcoming(8, 'DB <move>'), upcoming(9, 'Cache')] } }));
+  assert.match(html, /class="banner info banner--status"/);
+  assert.match(html, /Scheduled maintenance: DB &lt;move&gt;/);
+  assert.doesNotMatch(html, /Copies are/);
   assert.match(html, /\(and 1 more\)/);
-  assert.match(html, /href="\/status#notice-7"/);
+  assert.match(html, /href="\/status#notice-8"/);
   assert.equal(D.healthNoticeText({ id: 8, kind: 'maintenance', title: 'DB', impact: null, phase: 'upcoming', startsAt: T0 + H, endsAt: T0 + 2 * H }), 'Scheduled maintenance: DB, 27 Oct 13:00 – 14:00 UTC');
   assert.equal(D.healthNoticeText({ id: 8, kind: 'maintenance', title: 'DB', impact: null, phase: 'in_progress', startsAt: T0, endsAt: T0 + H }), 'Maintenance in progress: DB, until 13:00 UTC');
   assert.equal(D.healthNoticeText({ id: 9, kind: 'incident', title: 'All down', impact: 'critical', phase: 'active', startsAt: T0, endsAt: null }), 'Outage: All down');
-  const info = render(createElement(SiteNoticeBanner, { health: { notices: [health.notices[1]] } }));
-  assert.match(info, /class="banner info banner--status"/);
-  // The data service not answering: the line on its own, to the status page.
-  const down = render(createElement(SiteNoticeBanner, { health: null, down: true }));
-  assert.match(down, /class="banner warn banner--status"/);
-  assert.match(down, /Our data service is not answering/);
-  assert.ok(down.includes('href="/status"'), 'to the status page');
 });

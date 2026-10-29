@@ -16,6 +16,7 @@ import { MaintenanceBanner } from './components/MaintenanceBanner';
 import { SiteNoticeBanner, navAlertOf, useHealthDown } from './status/SiteNoticeBanner';
 import { UpdateHeldBanner } from './status/UpdateHeldBanner';
 import { MaintNote } from './status/MaintNote';
+import { IncidentNote } from './status/IncidentNote';
 import { BrakeBanner } from './components/BrakeBanner';
 import type { Eip1193Provider } from './wallet';
 import { AccountController } from './components/account/AccountController';
@@ -341,7 +342,7 @@ function AppShell() {
   const { symbols, byName, listEngine } = useSymbols(engine);
   const { state: connState, upstream } = useConnState();
   const { data: health, error: healthError } = useAsync(() => api.health(), [], { pollMs: 30_000 });
-  /* The data service not answering for a while: the status line says so on every page (status/SiteNoticeBanner.tsx). */
+  /* The data service not answering for a while: a notification says so on every page (status/IncidentNote.tsx). */
   const healthDown = useHealthDown(healthError);
   // Browser trading follows the backend's network (the one its market data and
   // account ids come from), then the connected wallet: load that wallet's key
@@ -536,8 +537,8 @@ function AppShell() {
           the same call to action on screen twice. The order entry panel carries
           that state now ("Read-only - unlock a signing key"). */}
       <Guarded name="Maintenance">
-        {/* Our own incidents and maintenance (status/), from /api/health: no request of its own. */}
-        <SiteNoticeBanner health={health} down={healthDown} onOpenStatus={openStatus} />
+        {/* Our own scheduled maintenance (status/), from /api/health: no request of its own. */}
+        <SiteNoticeBanner health={health} onOpenStatus={openStatus} />
         <UpdateHeldBanner />
         <MaintenanceBanner />
       </Guarded>
@@ -658,6 +659,10 @@ function AppShell() {
         {/* Maintenance as a notification: blue with its countdown while an update runs, green once done (status/MaintNote.tsx). */}
         <Guarded name="Maintenance notice">
           <MaintNote health={health} onOpenStatus={openStatus} />
+        </Guarded>
+        {/* Incidents, and the data service not answering, as notifications too (status/IncidentNote.tsx). */}
+        <Guarded name="Incident notice">
+          <IncidentNote health={health} down={healthDown} onOpenStatus={openStatus} />
         </Guarded>
         {/* The first-visit clickwrap (legal/acceptance.ts): until this browser accepts the
             current terms - with a connected wallet, ticked and signed in one step. Not over

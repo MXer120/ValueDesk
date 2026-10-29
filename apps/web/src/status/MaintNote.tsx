@@ -41,8 +41,8 @@ function writeMaint(s: MaintState): void {
   }
 }
 
-/** The toasts' pin (toast.tsx), found again when the rail moves between the corner and the navbar's lane. */
-function usePin(): HTMLElement | null {
+/** The toasts' pin (toast.tsx), found again when the rail moves between the corner and the navbar's lane. Also the incident cards' (IncidentNote.tsx). */
+export function usePin(): HTMLElement | null {
   const [pin, setPin] = useState<HTMLElement | null>(null);
   useEffect(() => {
     const find = () => setPin(document.getElementById('vs-toast-pin'));
@@ -207,7 +207,7 @@ function WrenchMark() {
   );
 }
 
-function WarnMark() {
+export function WarnMark() {
   return (
     <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
       <path d="M8 2.4 14.2 13.2H1.8Z" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />

@@ -188,7 +188,7 @@ test('the card: blue with its parts and the estimate, green with a checkmark whe
   assert.match(heldHtml, /did not go through: copies and algo orders are held/);
 });
 
-test('the banner leaves maintenance in progress to the notification; upcoming and incidents stay there', () => {
+test('the banner leaves maintenance in progress to the notification; upcoming stays there', () => {
   assert.equal(render(createElement(SiteNoticeBanner, { health: health(live()) })), '');
   assert.match(render(createElement(SiteNoticeBanner, { health: health(live({ phase: 'upcoming', startsAt: T0 + H, endsAt: T0 + 2 * H })) })), /Scheduled maintenance/);
   assert.equal(render(createElement(SiteNoticeBanner, { health: health(live({ phase: 'completed' })) })), '');

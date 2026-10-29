@@ -1,7 +1,8 @@
-/* The maintenance notification (status/MaintNote.tsx). It lives in the toasts' pin
-   (toast.tsx #vs-toast-pin) and uses the toast card: blue while an update runs, green
-   with a checkmark once it is done. Its parts and countdown open on hover, keyboard
-   focus or a tap. */
+/* The maintenance notification (status/MaintNote.tsx) and the incident one
+   (status/IncidentNote.tsx). They live in the toasts' pin (toast.tsx #vs-toast-pin) and
+   use the toast card: blue while an update runs, green with a checkmark once it is done,
+   amber for an incident, red for an outage. Their details open on hover, keyboard focus
+   or a tap. */
 
 .toast.mn-note {
   --tone: #5b8def;
@@ -15,6 +16,8 @@
 .toast.mn-note--done { --tone: var(--pos); }
 /* Rolled back, or ended without the word that all is well: the incident colour, never green. */
 .toast.mn-note--warn { --tone: var(--warn); }
+/* An outage, or the data service not answering (IncidentNote.tsx). */
+.toast.mn-note--down { --tone: var(--neg); }
 .mn-note__top { display: flex; align-items: center; gap: 12px; min-width: 0; cursor: pointer; }
 .mn-note__left { color: var(--text); font-variant-numeric: tabular-nums; }
 

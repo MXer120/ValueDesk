@@ -1,21 +1,19 @@
 /**
- * The status page's open incidents and maintenance, in one line at the top of every
- * page, in the maintenance banner's place and look (components/MaintenanceBanner.tsx).
- * The whole line is the link to the status page (owner, 2026-10-28: "when there is
- * downtime a notification should appear on any page that brings them to the status
- * page").
+ * The status page's scheduled maintenance, in one line at the top of every page, in the
+ * maintenance banner's place and look (components/MaintenanceBanner.tsx). The whole line
+ * is the link to the status page (owner, 2026-10-28: "when there is downtime a
+ * notification should appear on any page that brings them to the status page").
  *
  * No request of its own: the notices ride on /api/health, which the shell already
  * reads every 30 s (App.tsx; the server reads them at most every 30 s,
- * apps/server/src/ops/statusNotices.ts). The probes open and resolve incidents by
- * themselves (ops/statusAuto.ts), so an outage they see shows here without anyone
- * posting it. And when /api/health itself has not answered for HEALTH_DOWN_MS - the
- * data service down, so no notice can reach the app - the line says so on its own.
- * Silent otherwise. Plain text only; the full story is on /status.
+ * apps/server/src/ops/statusNotices.ts). Silent otherwise. Plain text only; the full
+ * story is on /status.
  *
- * Maintenance IN PROGRESS is not this line's: it is the blue notification with its
- * countdown (MaintNote.tsx), which turns green when it is done. Scheduled maintenance
- * and incidents stay here.
+ * Not this line's: maintenance IN PROGRESS is the blue notification with its countdown
+ * (MaintNote.tsx), which turns green when it is done; incidents, and the data service not
+ * answering for HEALTH_DOWN_MS (useHealthDown), are notification cards too
+ * (IncidentNote.tsx; owner, 2026-10-29: "this shouldnt be a bar but a normal
+ * notification").
  */
 import { useEffect, useState } from 'react';
 import { STATUS_PATH } from '../router';
@@ -56,16 +54,15 @@ export function navAlertOf(health: unknown, down: boolean): NavAlert {
   return null;
 }
 
-/** What the line shows: the open incidents and upcoming maintenance (maintenance in progress is MaintNote's). */
-export const bannerNoticesOf = (health: unknown) => healthNoticesOf(health).filter((n) => !(n.kind === 'maintenance' && n.phase === 'in_progress'));
+/** What the line shows: upcoming maintenance (in progress is MaintNote's, incidents IncidentNote's). */
+export const bannerNoticesOf = (health: unknown) => healthNoticesOf(health).filter((n) => n.kind === 'maintenance' && n.phase === 'upcoming');
 
-export function SiteNoticeBanner({ health, down = false, onOpenStatus }: { health: unknown; down?: boolean; onOpenStatus?: () => void }) {
-  const list = down ? [] : bannerNoticesOf(health);
-  if (!down && !list.length) return null;
-  const urgent = down || list.some((n) => n.kind === 'incident' || n.phase === 'in_progress');
-  const href = down ? STATUS_PATH : `${STATUS_PATH}#notice-${list[0]!.id}`;
+export function SiteNoticeBanner({ health, onOpenStatus }: { health: unknown; onOpenStatus?: () => void }) {
+  const list = bannerNoticesOf(health);
+  if (!list.length) return null;
+  const href = `${STATUS_PATH}#notice-${list[0]!.id}`;
   return (
-    <div className={`banner ${urgent ? 'warn' : 'info'} banner--status`} role="status">
+    <div className="banner info banner--status" role="status">
       <a
         className="banner-inner banner-hit"
         href={href}
@@ -74,18 +71,12 @@ export function SiteNoticeBanner({ health, down = false, onOpenStatus }: { healt
           e.preventDefault();
           onOpenStatus();
           // The notice's anchor on the status page's address: the page scrolls to it once drawn.
-          if (href !== STATUS_PATH) window.history.replaceState(null, '', href);
+          window.history.replaceState(null, '', href);
         }}
       >
         <span className="banner-text">
-          {down ? (
-            <>Our data service is not answering - prices, positions and other figures may be out of date.</>
-          ) : (
-            <>
-              {healthNoticeText(list[0]!)}
-              {list.length > 1 && <span className="muted"> (and {list.length - 1} more)</span>}
-            </>
-          )}
+          {healthNoticeText(list[0]!)}
+          {list.length > 1 && <span className="muted"> (and {list.length - 1} more)</span>}
         </span>
         <span className="link">Status page →</span>
       </a>
