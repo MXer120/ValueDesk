@@ -29,8 +29,15 @@ function algo(id: string, kind: string, title: string, confirms: string, o: Part
 
 /** The algo ended done with its whole quantity, and SoDEX's own fills add up to what the executor booked. */
 async function filledAsBooked(t: T, v: AlgoView, symbol = t.main.name): Promise<void> {
-  const fills = await t.algoFills(v.algo.id, symbol);
-  const sum = fills.reduce((x, f) => x + f.qty, 0);
+  // SoDEX's fill history can lag its matching by tens of seconds (2026-10-29: 1 of 2 slices listed):
+  // read again until it holds what the executor booked, then check what it holds.
+  const total = async () => (await t.algoFills(v.algo.id, symbol)).reduce((x, f) => x + f.qty, 0);
+  const sum = await t
+    .waitFor(`${t.where}'s fills catch up with what the executor booked`, async () => {
+      const s = await total();
+      return near(s, v.algo.filled, stepOf(t) / 2) ? s : null;
+    }, { timeoutMs: 60_000, everyMs: 5_000 })
+    .catch(() => total());
   t.check(near(sum, v.algo.filled, stepOf(t) / 2), `the fills ${t.where} reports (${sum}) add up to what the executor booked (${v.algo.filled})`);
   // A DCA (and a basket) is sized in USD: its target in base units is only an estimate at today's price.
   const fixedSize = v.algo.spec.kind !== 'dca' && v.algo.spec.kind !== 'basket';

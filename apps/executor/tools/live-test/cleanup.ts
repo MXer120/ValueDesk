@@ -122,6 +122,13 @@ export async function flatten(venues: readonly FlattenVenue[], symbols: readonly
             await v.close(sym, pos);
           } catch (e) {
             lines.push(`round ${round}: ${v.name} ${sym}: close failed (${short(e)})`);
+            // SoDEX's matching engine has no position there: the account read lags it (2026-10-29: a
+            // flat account read as long for minutes). Its answer wins over the stale read.
+            if (/position not found/i.test(short(e)) && !orders?.length) {
+              const i = left.findIndex((x) => x.venue === v.name && x.symbol === sym);
+              if (i >= 0) left.splice(i, 1);
+              lines.push(`round ${round}: ${v.name} ${sym}: SoDEX holds no position there (its account read lags): flat`);
+            }
           }
         }
       }

@@ -115,8 +115,20 @@ class LiveAccount implements Account {
   fills(symbol: string) {
     return this.env.reads.fills(this.env.followerAddress, symbol, this.since);
   }
-  history(symbol: string) {
-    return this.env.reads.history(this.env.followerAddress, symbol, this.since);
+  /**
+   * SoDEX's order history can lag its fills by tens of seconds (2026-10-29: 0 of 3 TWAP slices
+   * listed after they filled). An order with a fill is in the history once it has caught up, so a
+   * read missing one is read again, for up to a minute; what it lists then is what is checked.
+   */
+  async history(symbol: string): Promise<OrderInfo[]> {
+    const until = Date.now() + 60_000;
+    for (;;) {
+      const [orders, fills] = await Promise.all([this.env.reads.history(this.env.followerAddress, symbol, this.since), this.fills(symbol)]);
+      const listed = new Set(orders.map((o) => o.orderId));
+      const missing = fills.filter((f) => f.orderId && !listed.has(f.orderId));
+      if (missing.length === 0 || Date.now() > until) return orders;
+      await new Promise((r) => setTimeout(r, 5_000));
+    }
   }
 }
 
