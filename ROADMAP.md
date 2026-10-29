@@ -53,6 +53,21 @@ them early, with the date and what happens to positions and resting orders. Toda
 a copy holding a delisted market is neither closed nor told (`edge-copy.test.ts`).
 - Needs: SoDEX's announcement source (sodex.com / alpha-biz, or their channel) read by the API, matched to markets.
 
+### Lower fees through a pooled contract account - owner, 2026-10-29
+HyperLink-style: users' trades go through one SoDEX identity owned by our contract, so all users share one fee
+tier (combined 14-day volume) and one SOSO staking discount. The goal is fees below sodex.com for everyone, with no
+custody and as little risk as possible. Normal trades, algos and copies all run through our UI. Design and
+comparison: `docs/research/10-pooled-fee-account.md`; build plan for today's SoDEX:
+`docs/research/11-pooled-account-build-plan.md`.
+- **Target: member sub-accounts** on SoDEX's coming sub-accounts. Our immutable contract is the parent; each user
+  gets their own sub-account with their own keys, margin and withdrawals. SoDEX liquidates each one alone, and the
+  contract holds nothing. Waits for SoDEX's answers (`docs/SODEX-REQUESTS.md` §6, ten questions).
+- **Fallback: one shared pool account** (works on today's SoDEX). Trading key only in a TEE; it signs only
+  user-signed orders; public ledger; payouts only to depositors; a dead-man exit package (up to ~1.5 days); our
+  own liquidation and an insurance fund. Needs counsel, SoDEX's OK and raised limits, audits, capital.
+- First, for both: a contract-owned SoDEX account on testnet, SOSO staked by a contract (discount checked), the fee
+  model, the app trading an account that is not the wallet's own. Out: a SoDEX fee group for our builder (owner).
+
 ## Where things are
 
 | Area | Location |
