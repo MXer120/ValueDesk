@@ -226,6 +226,7 @@ import {
 import { hub } from '../ws';
 import '../chart/chart.css';
 import { useLoadFailedToast } from './LoadFailed';
+import { shownError } from './readState';
 import { notify } from '../toast';
 import { logger, recentLogs } from '../log';
 import { plotViolation, readPlot, type Violation } from '../chart/invariant';
@@ -1054,9 +1055,11 @@ function Chart({
   const positions = useAccountResource(posKey, () => api.positions(address!), 10_000);
 
   /* Failures land in the toast rail, not in a line of red prose that reflows
-     the chart panel every time a poll misses. */
-  useLoadFailedToast(orders.error, 'Open orders', orders.refresh);
-  useLoadFailedToast(positions.error, 'Positions', positions.refresh);
+     the chart panel every time a poll misses - and only when there are no
+     lines to draw: a refresh that misses keeps the last good ones (readState.ts),
+     and the next poll or push usually lands. */
+  useLoadFailedToast(shownError(orders), 'Open orders', orders.refresh);
+  useLoadFailedToast(shownError(positions), 'Positions', positions.refresh);
   const refreshOrders = orders.refresh;
   const refreshPositions = positions.refresh;
   useEffect(() => {

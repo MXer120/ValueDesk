@@ -2987,6 +2987,14 @@ input[inputmode="decimal"], input[inputmode="numeric"],
 }
 .load-failed__fb:hover { border-color: var(--line); color: var(--text); }
 .load-failed__fb svg { width: 14px; height: 14px; }
+/* A failed refresh under data kept on screen (LoadFailed.tsx Updating): one quiet line, no card. */
+.load-updating {
+  margin: 0;
+  padding: 4px var(--sp-2);
+  color: var(--dim);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-xs);
+}
 
 /* ---------------------------------------------------------------------------
    TOASTS, redrawn (toast.tsx ToastCard): the pop-up glass, a 32px lead - the

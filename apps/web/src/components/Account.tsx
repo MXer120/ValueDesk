@@ -55,6 +55,8 @@ import { planExit, type ExitExisting } from './tpsl';
 import './Account.css';
 import { CoinIcon, CoinLabel } from './CoinIcon';
 import { HistoryTable, ReadFailed } from './AccountHistory';
+import { Updating } from './LoadFailed';
+import { readShown } from './readState';
 import {
   DEFAULT_FILTER, TAB_CAPS, applyFilter, directionOfPosition, directionOfSide, marginOf, sourceOf,
   type TableFilter,
@@ -514,7 +516,9 @@ function PositionsInner({
 }: Ctx & { showTitle?: boolean; onCount?: (n: number) => void }) {
   // Shared with Chart.tsx and OrderEntry.tsx - see accountFeeds.ts.
   const posKey = address && engine === 'perps' ? `pos:${address}` : null;
-  const { data, error, loading, refresh } = useAccountResource(posKey, () => api.positions(address!), 10_000);
+  const { data, error, loading, refresh, at } = useAccountResource(posKey, () => api.positions(address!), 10_000);
+  // A failed refresh keeps the positions on screen (readState.ts); only none at all is "couldn't load".
+  const read = readShown({ data, error });
   const { msg, show, fromError } = useStatus();
   const [busy, setBusy] = useState(false);
   const { confirm, dialog } = useConfirm();
@@ -720,8 +724,9 @@ function PositionsInner({
       {showTitle && <div className="acct-head"><h2>Positions</h2></div>}
       {!address ? <Note>Connect a wallet to see open positions.</Note> : (
         <>
-        {error && <ReadFailed what="Positions" error={error} onRetry={refresh} />}
-        {positions.length === 0 ? (!error && (open.length > 0
+        {read === 'failed' && <ReadFailed what="Positions" error={error} onRetry={refresh} />}
+        {read === 'updating' && <Updating what="Positions" error={error} at={at} />}
+        {positions.length === 0 ? (read !== 'failed' && (open.length > 0
           ? <FilteredEmpty onReset={onResetView} />
           : <Note>{loading ? 'Loading…' : 'No open positions.'}</Note>)) : (
         <table className="acct-table acct-t acct-pos">
@@ -911,7 +916,9 @@ function OpenOrdersInner({
   // Shared with Chart.tsx - see accountFeeds.ts. The FULL list; the band's
   // filters narrow it here.
   const ordersKey = address ? `orders:${engine}:${address}` : null;
-  const { data, error, loading, refresh } = useAccountResource(ordersKey, () => api.openOrders(engine, address!), 10_000);
+  const { data, error, loading, refresh, at } = useAccountResource(ordersKey, () => api.openOrders(engine, address!), 10_000);
+  // A failed refresh keeps the orders on screen (readState.ts); only none at all is "couldn't load".
+  const read = readShown({ data, error });
   const { msg, show, fromError } = useStatus();
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState<any>(null);
@@ -1015,8 +1022,9 @@ function OpenOrdersInner({
       )}
       {!address ? <Note>Connect a wallet to see open orders.</Note> : (
         <>
-        {error && <ReadFailed what="Open orders" error={error} onRetry={refresh} />}
-        {orders.length === 0 ? (!error && (all.length > 0
+        {read === 'failed' && <ReadFailed what="Open orders" error={error} onRetry={refresh} />}
+        {read === 'updating' && <Updating what="Open orders" error={error} at={at} />}
+        {orders.length === 0 ? (read !== 'failed' && (all.length > 0
           ? <FilteredEmpty onReset={onResetView} />
           : <Note>{loading ? 'Loading…' : 'No open orders.'}</Note>)) : (
         <table className="acct-table acct-t">

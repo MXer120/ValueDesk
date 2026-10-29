@@ -8,7 +8,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  HISTORY, collateralSplit, countNew, crossAccountLeverage, crossMarginRatio, flowStatus, formatCollateralRatio, fromUnits, historyQuery,
+  HISTORY, collateralSplit, countNew, crossAccountLeverage, crossMarginRatio, fetchAccountFlows, flowStatus, formatCollateralRatio, fromUnits, historyQuery,
   mapAccountFlow, mapFundTransfer, marginUsage, rowMarginUsd,
   mergeRows, nextCursor, timeline, toMs, txUrl, type LedgerRow, type TokenBook,
 } from './accountData';
@@ -303,4 +303,44 @@ test('fills: one trade id on two markets is two rows (the id is per market), the
   assert.equal(countNew(page, next, spec.idOf), 1);
   assert.equal(mergeRows(page, next, spec.idOf, spec.timeOf).length, 5);
   assert.equal(spec.idOf({ orderID: 7, time: 9, quantity: '1' }), '7:9:1', 'without a trade id: order, time and size');
+});
+
+test('alpha-biz: a read that got no answer, or a 5xx, is tried once more; a refusal is final', async () => {
+  const real = globalThis.fetch;
+  const flows = { code: '0', data: { accountFlows: [], total: 0 } };
+  const reply = (status: number, body: unknown) => new Response(JSON.stringify(body), { status });
+  try {
+    // A dropped connection, then the answer: the ledger loads.
+    let n = 0;
+    globalThis.fetch = (async () => {
+      n++;
+      if (n === 1) throw new TypeError('Failed to fetch');
+      return reply(200, flows);
+    }) as typeof fetch;
+    assert.deepEqual(await fetchAccountFlows(ME, 0), { rows: [], raw: 0, done: true });
+    assert.equal(n, 2);
+    // A 502, then the answer.
+    n = 0;
+    globalThis.fetch = (async () => (++n === 1 ? reply(502, { message: 'bad gateway' }) : reply(200, flows))) as typeof fetch;
+    await fetchAccountFlows(ME, 0);
+    assert.equal(n, 2);
+    // Twice no answer: the failure is reported, after one retry only.
+    n = 0;
+    globalThis.fetch = (async () => {
+      n++;
+      throw new TypeError('Failed to fetch');
+    }) as typeof fetch;
+    await assert.rejects(fetchAccountFlows(ME, 0));
+    assert.equal(n, 2);
+    // A definite answer that is not success (a 400, an error code) is not asked again.
+    n = 0;
+    globalThis.fetch = (async () => {
+      n++;
+      return reply(400, { code: '400', message: 'bad account' });
+    }) as typeof fetch;
+    await assert.rejects(fetchAccountFlows(ME, 0), /HTTP 400/);
+    assert.equal(n, 1);
+  } finally {
+    globalThis.fetch = real;
+  }
 });

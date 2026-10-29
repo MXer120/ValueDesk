@@ -11,6 +11,7 @@ import { EmptyState } from './EmptyState';
 import { FEEDBACK_LABEL, FeedbackIcon, openFeedback } from '../feedback/FeedbackButton';
 import { describeElement } from '../feedback/element';
 import { MENU_ICONS, TabMenu, menuAt } from '../dashboard/tabExtras';
+import { updatingLine } from './readState';
 
 const log = logger('load');
 
@@ -36,6 +37,31 @@ export function useLoadFailedToast(error: unknown, what: string, retry?: () => v
     if (error) logLoadFailure(what, error);
   }, [error, what]);
   useErrorToast(error ? couldntLoad(what) : null, what, retry);
+}
+
+/**
+ * Under data kept through a failed refresh (readState.ts): not the failure
+ * card, only a quiet "Updating…" - with the copy's age once it is a minute
+ * old. The reason goes to the console, as for LoadFailed. `at`: when the data
+ * on screen was read.
+ */
+export function Updating({ what, error, at, className }: { what: string; error: unknown; at?: number | null; className?: string }) {
+  const detail = error instanceof Error ? error.message : String(error);
+  useEffect(() => { logLoadFailure(what, error); }, [what, detail]); // eslint-disable-line react-hooks/exhaustive-deps
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 30_000);
+    return () => window.clearInterval(id);
+  }, []);
+  return (
+    <p
+      className={`load-updating${className ? ` ${className}` : ''}`}
+      role="status"
+      title={`The last refresh of ${what.toLowerCase()} did not come through; this is the copy from before. It refreshes on its own.`}
+    >
+      {updatingLine(now, at)}
+    </p>
+  );
 }
 
 /**

@@ -21,7 +21,8 @@
  * that blanks all four (three per minute was seen to trip it).
  * They are never replayed after a failure that could have been that 1015: one
  * refusal stops every history read of every tab for HISTORY_COOL (doubling
- * while refusals continue).
+ * while refusals continue). A read asked for meanwhile waits that out in its
+ * queue, as it would wait for a slot - none is sent before it ends.
  *
  * Signed writes do not come through here (trading/gateway.ts sends them once,
  * never retried); they are only counted against the budget.
@@ -42,7 +43,7 @@ import {
   weightFor,
 } from '@sign/sodex/restCore.js';
 import { noteRateLimited } from '@sign/valuedesk/sodex/util.js';
-import { RateLimitedError, UnreachableError, isAbort, isRateLimitError } from './errors';
+import { RateLimitedError, UnreachableError, isAbort, isOffline, isRateLimitError } from './errors';
 import { RequestGate } from './gate';
 import { gatewayOrigin } from './hosts';
 import { SharedCooldowns, SharedLedger, defaultLedgerDeps, type LedgerDeps } from './ledger';
@@ -76,7 +77,16 @@ const READ_TIMEOUT_MS = 20_000;
  * one retry, not twenty seconds of "Loading...".
  */
 const QUICK_READ_TIMEOUT_MS = 8_000;
-/** How long a read may wait for the per-IP weight budget (the server's WeightBudget waited 30 s). */
+/**
+ * ...and all of such a read - its wait for a cooldown and for the budget, and
+ * both attempts - ends within this, under the 20 s the page waits (api.ts): a
+ * read is never still queued, or sent, after the page that asked gave up on
+ * it. A normal answer takes about 0.3 s (measured 2026-10-29).
+ */
+export const QUICK_READ_MAX_MS = 18_000;
+/** No attempt of such a read is started with less than this left of it. */
+const MIN_ATTEMPT_MS = 2_000;
+/** How long a history read may wait for the per-IP weight budget (the server's WeightBudget waited 30 s). */
 const BUDGET_WAIT_MS = 30_000;
 /**
  * How long a history read for something on screen may queue for its drip slot:
@@ -87,6 +97,18 @@ const DRIP_WAIT_MS = 2 * HISTORY_DRIP.windowMs + 5_000;
 const BULK_DRIP_WAIT_MS = 5 * 60_000;
 /** ...and a background history read (it waits behind everything on screen). */
 const BACKGROUND_DRIP_WAIT_MS = 15 * 60_000;
+
+/** How long a history read of `priority` may wait for its slot (and for a history cooldown to end). */
+const dripWaitOf = (priority: HistoryPriority): number =>
+  priority === 'visible' ? DRIP_WAIT_MS : priority === 'bulk' ? BULK_DRIP_WAIT_MS : BACKGROUND_DRIP_WAIT_MS;
+
+/**
+ * The longest a history read for something on screen can take here: the
+ * per-IP budget, its turn for a slot (a cooldown included), and its one long
+ * attempt. A caller's own deadline for such a read (api.ts) is at least this,
+ * or it would give up on a read that is still on its way.
+ */
+export const VISIBLE_HISTORY_MAX_MS = BUDGET_WAIT_MS + DRIP_WAIT_MS + READ_TIMEOUT_MS;
 
 const HISTORY_RE = /\/accounts\/[^/]+\/(orders\/history|trades|fundings|funding-history|positions\/history)(\?|$)/;
 const TRADES_RE = /\/accounts\/[^/]+\/trades(\?|$)/;
@@ -102,6 +124,8 @@ export interface GatewayClientOptions {
   now?: () => number;
   /** Whether this tab is off screen (history reads from a hidden tab are background). */
   hidden?: () => boolean;
+  /** Whether the browser says it has no network (errors.ts isOffline). */
+  offline?: () => boolean;
 }
 
 export interface GwGetOptions {
@@ -144,11 +168,13 @@ export class GatewayClient {
   private readonly deps: LedgerDeps;
   private readonly fetchImpl: typeof fetch;
   private readonly origin: () => string;
+  private readonly offline: () => boolean;
 
   constructor(o: GatewayClientOptions = {}) {
     this.deps = o.deps ?? defaultLedgerDeps();
     this.fetchImpl = o.fetchImpl ?? ((...a) => fetch(...a));
     this.origin = o.origin ?? gatewayOrigin;
+    this.offline = o.offline ?? isOffline;
     this.gate = new RequestGate(2_000, o.now ?? this.deps.now);
     // No lock per request: this budget has room to spare (see ledger.ts `atomic`).
     this.budget = new SharedLedger('sodex-gw', GATEWAY_WEIGHT_PER_MIN, GATEWAY_WINDOW_MS, this.deps, false);
@@ -209,20 +235,35 @@ export class GatewayClient {
     const attempts = Math.max(1, o.attempts ?? RETRY_ATTEMPTS);
     const host = new URL(this.origin()).host;
 
+    const priority = o.priority ?? 'visible';
+    const dripWait = dripWaitOf(priority);
+    // A read that is not dripped ends - waits, attempts and all - by `until` (QUICK_READ_MAX_MS).
+    const until = drip ? Infinity : this.deps.now() + QUICK_READ_MAX_MS;
+    /** Whether another attempt, `after` ms from now, would still have its minimum time. */
+    const roomFor = (after: number) => this.deps.now() + after + MIN_ATTEMPT_MS <= until;
     for (let attempt = 1; ; attempt++) {
       const cool = this.cooldownLeft(path);
-      if (cool > COOL_WAIT_MAX_MS) throw new RateLimitedError(host, cool);
-      if (cool > 0) await this.deps.sleep(cool);
-      await this.budget.take(weight, BUDGET_WAIT_MS, o.signal);
       if (drip) {
-        const priority = o.priority ?? 'visible';
-        const maxWait = priority === 'visible' ? DRIP_WAIT_MS : priority === 'bulk' ? BULK_DRIP_WAIT_MS : BACKGROUND_DRIP_WAIT_MS;
-        await this.historyQueue.take(priority, maxWait, o.signal, () => {
-          // A refusal seen while this read waited for its slot (another read,
-          // another tab) closes history for every read: this one takes no slot
-          // and is not sent into the cooldown.
+        // A history read waits a cooldown out in its queue (below); one that
+        // outlasts all this read may wait is refused now, before any budget.
+        if (cool > dripWait) throw new RateLimitedError(host, cool, 'history reads');
+      } else {
+        if (cool > COOL_WAIT_MAX_MS || (cool > 0 && !roomFor(cool))) throw new RateLimitedError(host, cool);
+        if (cool > 0) await this.deps.sleep(cool);
+      }
+      // Waiting for the budget past the read's end would only send it after nobody waits for it.
+      await this.budget.take(weight, drip ? BUDGET_WAIT_MS : Math.min(BUDGET_WAIT_MS, until - MIN_ATTEMPT_MS - this.deps.now()), o.signal);
+      if (drip) {
+        const queued = this.deps.now();
+        await this.historyQueue.take(priority, dripWait, o.signal, () => {
+          // A refusal (this tab's or another's) closes history for every read:
+          // this one takes no slot and is not sent until the cooldown is over.
+          // It waits for that as long as its priority may wait - a table on
+          // screen shows "Loading…" for a minute rather than "couldn't load"
+          // with a Retry that cannot work yet - and gives up at its next look
+          // once the cooldown outlasts that.
           const left = this.cooldownLeft(path);
-          if (left > COOL_WAIT_MAX_MS) throw new RateLimitedError(host, left, 'history reads');
+          if (left > 0 && this.deps.now() - queued + left > dripWait) throw new RateLimitedError(host, left, 'history reads');
           return left;
         });
       }
@@ -237,7 +278,7 @@ export class GatewayClient {
       const timer = setTimeout(() => {
         timedOut = true;
         ctl.abort();
-      }, drip ? READ_TIMEOUT_MS : QUICK_READ_TIMEOUT_MS);
+      }, drip ? READ_TIMEOUT_MS : Math.max(MIN_ATTEMPT_MS, Math.min(QUICK_READ_TIMEOUT_MS, until - this.deps.now())));
       let status = 0;
       let text = '';
       o.onSent?.();
@@ -255,16 +296,18 @@ export class GatewayClient {
         if (o.signal?.aborted && isAbort(e)) throw e;
         // No readable answer. A drip path is never replayed: that is what a
         // Cloudflare 1015 looks like from a browser (which answers at once - a
-        // read that merely ran out of time is not one, and closes nothing).
-        if (drip && timedOut) throw new UnreachableError(host, true);
+        // read that merely ran out of time is not one, and closes nothing; nor
+        // is one sent while the browser had no network at all).
+        if (drip && (timedOut || this.offline())) throw new UnreachableError(host, timedOut);
         if (drip) {
           this.cooldowns.hit(endpoint);
           const ms = this.historyCool.hit(HISTORY_COOL_KEY);
           noteRateLimited();
           throw new RateLimitedError(host, ms, 'history reads');
         }
-        if (attempt >= Math.min(attempts, 2)) throw new UnreachableError(host, timedOut);
-        await this.deps.sleep(retryDelayMs(attempt));
+        const delay = retryDelayMs(attempt);
+        if (attempt >= Math.min(attempts, 2) || !roomFor(delay)) throw new UnreachableError(host, timedOut);
+        await this.deps.sleep(delay);
         continue;
       } finally {
         clearTimeout(timer);
@@ -284,8 +327,9 @@ export class GatewayClient {
           noteRateLimited();
           throw e;
         }
-        if (attempt >= attempts || !isTransient(e)) throw e;
-        await this.deps.sleep(retryDelayMs(attempt));
+        const delay = retryDelayMs(attempt);
+        if (attempt >= attempts || !isTransient(e) || !roomFor(delay)) throw e;
+        await this.deps.sleep(delay);
       }
     }
   }

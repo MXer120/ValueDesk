@@ -682,30 +682,63 @@ const BIZ_TIMEOUT_MS = 12_000;
 /** alpha-biz answers on the network sodex.com runs on; only read it there. */
 export const ledgerAvailable = (): boolean => tradingConfig().network === 'mainnet';
 
-async function bizRead<T>(path: string, body: unknown): Promise<T> {
+/**
+ * A read that got no answer, or a 5xx: tried once more after BIZ_RETRY_MS
+ * (a dropped connection, SoDEX's bad second), so one blip is not "Account
+ * history couldn't load.". A read that ran out of time, or any other answer,
+ * is final. These are POSTs, but reads: a repeat changes nothing.
+ */
+const BIZ_RETRY_MS = 400;
+
+class BizUnanswered extends Error {
+  override name = 'BizUnanswered';
+}
+
+async function bizReadOnce<T>(path: string, body: unknown): Promise<T> {
   const ctl = new AbortController();
-  const timer = setTimeout(() => ctl.abort(), BIZ_TIMEOUT_MS);
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    ctl.abort();
+  }, BIZ_TIMEOUT_MS);
   try {
-    const res = await fetch(`${BIZ_HISTORY_ORIGIN}${path}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify(body),
-      signal: ctl.signal,
-      mode: 'cors',
-      credentials: 'omit',
-      referrerPolicy: 'no-referrer',
-      cache: 'no-store',
-    });
+    let res: Response;
+    try {
+      res = await fetch(`${BIZ_HISTORY_ORIGIN}${path}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify(body),
+        signal: ctl.signal,
+        mode: 'cors',
+        credentials: 'omit',
+        referrerPolicy: 'no-referrer',
+        cache: 'no-store',
+      });
+    } catch (e) {
+      if (timedOut) throw e;
+      throw new BizUnanswered(`${path}: no answer (${(e as Error)?.message ?? String(e)})`);
+    }
     const text = await res.text();
     let json: any = null;
     try { json = text ? JSON.parse(text) : null; } catch { /* reported below */ }
     // `code` is "0" on account_flow and 0 on combined_transfers.
     if (!res.ok || !json || String(json.code) !== '0') {
-      throw new Error(`${path}: HTTP ${res.status}${json?.message ? ` ${json.message}` : ''}`);
+      const msg = `${path}: HTTP ${res.status}${json?.message ? ` ${json.message}` : ''}`;
+      throw res.status >= 500 ? new BizUnanswered(msg) : new Error(msg);
     }
     return json.data as T;
   } finally {
     clearTimeout(timer);
+  }
+}
+
+async function bizRead<T>(path: string, body: unknown): Promise<T> {
+  try {
+    return await bizReadOnce<T>(path, body);
+  } catch (e) {
+    if (!(e instanceof BizUnanswered)) throw e;
+    await new Promise((r) => setTimeout(r, BIZ_RETRY_MS));
+    return bizReadOnce<T>(path, body);
   }
 }
 

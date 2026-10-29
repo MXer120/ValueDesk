@@ -16,7 +16,8 @@ import { PanelTabs, type PanelTab } from '../../dashboard/Panel';
 import { DASH, fmtDateTime, fmtPrice, fmtQty, fmtUsd } from '../../format';
 import { Private, usePrivacy } from '../../privacy';
 import { vsApi, type Venue, type VsBalance, type VsFill, type VsFunding, type VsOrder, type VsPosition } from '../../vsApi';
-import { LoadFailed } from '../LoadFailed';
+import { LoadFailed, Updating } from '../LoadFailed';
+import { readShown } from '../readState';
 import { Card } from '../portfolio/parts';
 import { CoinIcon } from '../CoinIcon';
 import { FilteredEmpty, FilteredHint, MarketCell, Note, Pill, SidePill, StatusCell, Unit, signedPct, signedUsd } from '../accountTables/cells';
@@ -57,11 +58,14 @@ function sodexStatus(o: VsOrder): string {
 
 function Section<T>({ read, what, empty, children }: { read: VsRead<T[]>; what: string; empty: string; children: (rows: T[]) => ReactNode }) {
   if (read.unavailable) return <Note>{`${what} are not public on this venue without the account's own key.`}</Note>;
-  if (read.error) return <LoadFailed what={what} onRetry={read.refresh} />;
+  // A refresh that failed keeps the rows read before it (readState.ts).
+  const shown = readShown(read);
+  if (shown === 'failed') return <LoadFailed what={what} onRetry={read.refresh} />;
   if (!read.settled) return <Note>Loading…</Note>;
   const rows = read.data ?? [];
-  if (!rows.length) return <Note>{empty}</Note>;
-  return <>{children(rows)}</>;
+  const note = shown === 'updating' ? <Updating what={what} error={read.error} /> : null;
+  if (!rows.length) return <>{note}<Note>{empty}</Note></>;
+  return <>{note}{children(rows)}</>;
 }
 
 // --- tables ------------------------------------------------------------------------------

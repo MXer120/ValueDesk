@@ -6,10 +6,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { SodexApiError } from '@sodex-core';
-import { weightFor } from '@sign/sodex/restCore.js';
+import { GATEWAY_WEIGHT_PER_MIN, weightFor } from '@sign/sodex/restCore.js';
 import { RateLimitedError, UnreachableError } from './errors';
-import { GatewayClient, HISTORY_COOL, HISTORY_DRIP } from './sodexGateway';
-import type { KeyValueStore, LedgerDeps } from './ledger';
+import { GatewayClient, HISTORY_COOL, HISTORY_DRIP, QUICK_READ_MAX_MS, type GatewayClientOptions } from './sodexGateway';
+import { BudgetWaitError, type KeyValueStore, type LedgerDeps } from './ledger';
 
 const A = '0x48d98beb9dfce0a24f284e7653f05609b058ad96';
 const ORIGIN = 'https://gw.test';
@@ -27,7 +27,7 @@ interface Rig {
   reply: (path: string) => Response | Promise<Response> | 'throw';
 }
 
-function rig(store: KeyValueStore = memStore(), clock = { t: 1_000_000 }): Rig {
+function rig(store: KeyValueStore = memStore(), clock = { t: 1_000_000 }, extra: Partial<GatewayClientOptions> = {}): Rig {
   const deps: LedgerDeps = { store, locks: null, now: () => clock.t, sleep: async (ms) => void (clock.t += ms) };
   const r = {} as Rig;
   r.clock = clock;
@@ -41,7 +41,7 @@ function rig(store: KeyValueStore = memStore(), clock = { t: 1_000_000 }): Rig {
     if (out === 'throw') throw new TypeError('Failed to fetch');
     return out;
   }) as typeof fetch;
-  r.client = new GatewayClient({ deps, fetchImpl, origin: () => ORIGIN, now: () => clock.t });
+  r.client = new GatewayClient({ deps, fetchImpl, origin: () => ORIGIN, now: () => clock.t, offline: () => false, ...extra });
   return r;
 }
 
@@ -103,13 +103,13 @@ test('gateway: an unreadable failure on a history path is treated as a 1015 - ne
   await assert.rejects(r.client.get(`/api/v1/perps/accounts/${A}/trades?limit=100`), RateLimitedError);
   assert.equal(r.calls.length, 1);
   assert.ok(r.client.cooldownLeft(`/api/v1/perps/accounts/${A}/trades`) >= HISTORY_COOL.baseMs);
-  // Every history read of every engine now waits it out, without asking.
+  const coolEnd = r.clock.t + r.client.cooldownLeft(`/api/v1/perps/accounts/${A}/trades`);
+  // Every history read of every engine now waits it out before it asks - a
+  // table on screen says "Loading…" for a minute, not "couldn't load".
   r.reply = () => ok([]);
-  await assert.rejects(r.client.get(`/api/v1/spot/accounts/${A}/orders/history?limit=100`), RateLimitedError);
-  assert.equal(r.calls.length, 1, 'no history read goes out into a possible 1015');
-  r.clock.t += HISTORY_COOL.baseMs;
   await r.client.get(`/api/v1/spot/accounts/${A}/orders/history?limit=100`);
-  assert.equal(r.calls.length, 2, 'after the cooldown, history reads resume');
+  assert.equal(r.calls.length, 2);
+  assert.ok(r.calls[1]!.t >= coolEnd, 'no history read goes out into a possible 1015: it left once the cooldown was over');
   r.reply = () => 'throw';
   // Elsewhere a dropped connection is tried once more, then reported as unreachable.
   await assert.rejects(r.client.get('/api/v1/perps/markets/tickers'), UnreachableError);
@@ -218,25 +218,70 @@ function vrig() {
     if (out === 'throw') throw new TypeError('Failed to fetch');
     return out;
   }) as typeof fetch;
-  const client = new GatewayClient({ deps, fetchImpl, origin: () => ORIGIN, now: () => vt.clock.t, hidden: () => false });
+  const client = new GatewayClient({ deps, fetchImpl, origin: () => ORIGIN, now: () => vt.clock.t, hidden: () => false, offline: () => false });
   return { vt, client, calls, state };
 }
 
-test('gateway: a history read waiting for its slot is not sent into a cooldown that opened meanwhile', async () => {
+test('gateway: a history read waiting for its slot is held through a cooldown that opened meanwhile - never sent into it', async () => {
   const r = vrig();
   const trades = (n: number) => `/api/v1/perps/accounts/${A}/trades?limit=100&endTime=${n}`;
   await r.vt.until(Promise.all([r.client.get(trades(1)), r.client.get(trades(2))])); // the drip is full
-  const t0 = r.vt.clock.t;
   const outcome = r.client.get(trades(3)).then(() => 'sent' as const, (e: unknown) => e);
   await r.vt.until(r.vt.sleep(10_000));
   assert.equal(r.calls.length, 2, 'the third waits for a slot');
   // A refusal elsewhere (another tab's read, a 1015): history closes for HISTORY_COOL.
   r.client.historyCool.hit('history');
-  const e = await r.vt.until(outcome);
-  assert.ok(e instanceof RateLimitedError, 'it ends as rate-limited, like a read started now would');
-  assert.ok(r.vt.clock.t - t0 < 12_000, 'at its next look, not a minute later');
-  assert.equal(r.calls.length, 2, 'never sent');
-  assert.equal(r.client.historyDrip.spent(), 2, 'and no slot taken');
+  const coolEnd = r.vt.clock.t + HISTORY_COOL.baseMs;
+  assert.equal(await r.vt.until(outcome), 'sent', 'a table on screen waits the minute out instead of failing');
+  assert.equal(r.calls.length, 3);
+  assert.ok(r.calls[2]!.t >= coolEnd, 'sent only once the cooldown was over');
+
+  // A cooldown that outlasts all a read may wait ends it at its next look - no slot, never sent.
+  await r.vt.until(r.client.get(trades(4))); // the drip is full again
+  const spent = r.client.historyDrip.spent();
+  const held = r.client.get(trades(5)).then(() => 'sent' as const, (e: unknown) => e);
+  await r.vt.until(r.vt.sleep(5_000));
+  for (let i = 0; i < 3; i++) r.client.historyCool.hit('history'); // refusals continue: 4 min and more
+  const t1 = r.vt.clock.t;
+  const e = await r.vt.until(held);
+  assert.ok(e instanceof RateLimitedError, 'rate-limited, like a read started now');
+  assert.ok(r.vt.clock.t - t1 < 2_000, 'at its next look, not minutes later');
+  assert.equal(r.calls.length, 4, 'never sent');
+  assert.equal(r.client.historyDrip.spent(), spent, 'and no slot taken');
+  // ...and a read asked for now is refused at once, before it spends any budget.
+  const budget = r.client.budget.spent();
+  await assert.rejects(r.vt.until(r.client.get(trades(6))), RateLimitedError);
+  assert.equal(r.client.budget.spent(), budget);
+});
+
+test('gateway: a history read that fails while the browser is offline closes nothing - it never left', async () => {
+  const r = rig(memStore(), { t: 1_000_000 }, { offline: () => true });
+  const path = `/api/v1/perps/accounts/${A}/trades?limit=100`;
+  r.reply = () => 'throw';
+  await assert.rejects(r.client.get(path), UnreachableError);
+  assert.equal(r.calls.length, 1, 'not replayed');
+  assert.equal(r.client.cooldownLeft(path), 0, 'no history cooldown: a dropped network is not a 1015');
+});
+
+test('gateway: a quick read never waits for the budget past its deadline - nothing is sent after the page gave up', async () => {
+  const r = rig();
+  const state = `/api/v1/perps/accounts/${A}/state`;
+  // The whole minute's budget was spent 35 s ago (other tabs): it frees in 25 s,
+  // after the 20 s the page waits. Before, the read waited for it and was sent
+  // at 25 s with nobody waiting for the answer.
+  r.clock.t -= 35_000;
+  await r.client.budget.charge(GATEWAY_WEIGHT_PER_MIN);
+  r.clock.t += 35_000;
+  const t0 = r.clock.t;
+  await assert.rejects(r.client.get(state), BudgetWaitError);
+  assert.equal(r.calls.length, 0, 'never sent');
+  assert.equal(r.clock.t, t0, 'refused at once, not after waiting');
+  // Freeing within its deadline, it waits and goes.
+  r.clock.t += 15_000;
+  const t1 = r.clock.t;
+  await r.client.get(state);
+  assert.equal(r.calls.length, 1);
+  assert.ok(r.calls[0]!.t - t1 >= 10_000 && r.calls[0]!.t - t1 <= QUICK_READ_MAX_MS, 'sent when the budget freed, inside its deadline');
 });
 
 test('gateway: a reader that leaves drops a history read still waiting for its slot; one already sent completes and is kept', async () => {

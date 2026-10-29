@@ -10,6 +10,7 @@ import { account } from './exchange/sodexAccount';
 import { market, MarketRequestError } from './exchange/sodexMarket';
 import { BudgetWaitError } from './exchange/ledger';
 import { RateLimitedError, UnreachableError } from './exchange/errors';
+import { VISIBLE_HISTORY_MAX_MS, isTransient } from './exchange/sodexGateway';
 import { network } from './exchange/hosts';
 import { DepositAddressRequestError, deposits } from './exchange/deposits';
 import { rpcCall } from './trading/rpc';
@@ -495,10 +496,16 @@ export interface PlaceOrderInput {
  * (ApiError: message, status, hint, code, source), so every panel's error text
  * is unchanged.
  */
-function toApiError(e: unknown): ApiError {
+export function toApiError(e: unknown): ApiError {
   if (e instanceof ApiError) return e;
   if (e instanceof SodexApiError) {
-    return new ApiError(e.message, e.httpStatus >= 400 ? e.httpStatus : 400, e.hint, e.code, 'sodex');
+    // A failure that outlived the gateway's retries but is SoDEX's bad moment
+    // (an HTTP 200 "internal error" envelope) is a 503, not a 400: a 4xx tells
+    // the chart that retrying cannot help (feedHealth.ts isFatalStatus), and it
+    // would show "Chart couldn't load." at once for a gateway hiccup. A rate
+    // limit in such an envelope stays a 429.
+    const status = e.httpStatus >= 400 ? e.httpStatus : e.code === 429 ? 429 : isTransient(e) ? 503 : 400;
+    return new ApiError(e.message, status, e.hint, e.code, 'sodex');
   }
   if (e instanceof MarketRequestError) return new ApiError(e.message, e.status, undefined, undefined, 'validation');
   if (e instanceof DepositAddressRequestError) return new ApiError(e.message, e.statusCode);
@@ -534,8 +541,13 @@ async function direct<T>(what: string, fn: () => Promise<T>, deadlineMs = REQUES
   }
 }
 
-/** History reads can wait for their slot: at most 2 per minute per IP on /trades and /orders/history together. */
-const HISTORY_DEADLINE_MS = 130_000;
+/**
+ * History reads can wait for their slot - at most 2 per minute per IP on
+ * /trades and /orders/history together - and for a history cooldown to end:
+ * as long as the gateway lets a read for the screen wait, and a second more,
+ * so its own answer (or its own reason) is the one that arrives.
+ */
+const HISTORY_DEADLINE_MS = VISIBLE_HISTORY_MAX_MS + 1_000;
 
 /** The browser-trading module, loaded on first use (see placeOrder below). */
 const trading = () => import('./trading/actions');

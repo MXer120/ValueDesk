@@ -35,6 +35,8 @@ interface FeedState<T> {
   data: T | null;
   error: string | null;
   loading: boolean;
+  /** When `data` was read (a REST answer or a push), ms; null before the first. */
+  at: number | null;
 }
 
 interface Feed<T> extends FeedState<T> {
@@ -89,9 +91,10 @@ function startLive<T>(key: string, feed: Feed<T>): void {
     }
     f.liveAt = Date.now();
     f.data = next as T;
+    f.at = f.liveAt;
     f.error = null;
     f.loading = false;
-    lastData.set(key, next);
+    lastData.set(key, { data: next, at: f.at });
     notify(f);
   });
 }
@@ -120,10 +123,10 @@ const feeds = new Map<string, Feed<any>>();
  * a tab (or a page) shows what was there at once and only checks for updates,
  * instead of a spinner and a fresh read every time.
  */
-const lastData = new Map<string, unknown>();
+const lastData = new Map<string, { data: unknown; at: number }>();
 
 function notify<T>(feed: Feed<T>): void {
-  const snapshot: FeedState<T> = { data: feed.data, error: feed.error, loading: feed.loading };
+  const snapshot: FeedState<T> = { data: feed.data, error: feed.error, loading: feed.loading, at: feed.at };
   for (const s of feed.subs) s(snapshot);
 }
 
@@ -140,8 +143,9 @@ function pump<T>(key: string, force = false): void {
     .then((data) => {
       feed.restAt = Date.now();
       feed.data = data;
+      feed.at = feed.restAt;
       feed.error = null;
-      lastData.set(key, data);
+      lastData.set(key, { data, at: feed.at });
     })
     .catch((e) => {
       feed.error = e instanceof Error ? e.message : String(e);
@@ -180,9 +184,9 @@ export function useAccountResource<T>(
 
   const blank = (k: string | null): FeedState<T> => {
     const f = k ? feeds.get(k) : undefined;
-    if (f) return { data: f.data, error: f.error, loading: f.loading };
-    const kept = k ? (lastData.get(k) as T | undefined) : undefined;
-    return kept !== undefined ? { data: kept, error: null, loading: false } : { data: null, error: null, loading: !!k };
+    if (f) return { data: f.data, error: f.error, loading: f.loading, at: f.at };
+    const kept = k ? lastData.get(k) : undefined;
+    return kept ? { data: kept.data as T, error: null, loading: false, at: kept.at } : { data: null, error: null, loading: !!k, at: null };
   };
   const [state, setState] = useState<FeedState<T>>(() => blank(key));
   // The book (or the wallet) changed. Show that key's own cache on this
@@ -202,9 +206,9 @@ export function useAccountResource<T>(
     const call = fetcherRef.current;
     let feed = feeds.get(key) as Feed<T> | undefined;
     if (!feed) {
-      const kept = lastData.get(key) as T | undefined;
+      const kept = lastData.get(key);
       feed = {
-        data: kept ?? null, error: null, loading: kept === undefined, subs: new Set(),
+        data: (kept?.data as T | undefined) ?? null, at: kept?.at ?? null, error: null, loading: kept === undefined, subs: new Set(),
         fetchers: new Set(), fetcher: () => call(),
       };
       feeds.set(key, feed);
@@ -221,7 +225,7 @@ export function useAccountResource<T>(
     }
     const sub = (s: FeedState<T>) => setState(s);
     feed.subs.add(sub);
-    setState({ data: feed.data, error: feed.error, loading: feed.loading });
+    setState({ data: feed.data, error: feed.error, loading: feed.loading, at: feed.at });
 
     // First subscriber owns the timer; the rest ride along - identical
     // contract to useTickers in Market.tsx.

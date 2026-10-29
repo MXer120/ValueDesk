@@ -46,6 +46,14 @@ export function isRateLimitError(e: unknown): boolean {
   );
 }
 
+/**
+ * The browser says it has no network at all (`navigator.onLine` false - it is
+ * only ever wrong the other way). A request that failed then was not refused:
+ * it never left, and it opens no rate-limit cooldown (a laptop waking up, a
+ * Wi-Fi switch).
+ */
+export const isOffline = (): boolean => (globalThis as { navigator?: { onLine?: boolean } }).navigator?.onLine === false;
+
 /** A caller cancelled (AbortController), as opposed to a failure. */
 export const isAbort = (e: unknown): boolean => (e as { name?: string } | null)?.name === 'AbortError';
 

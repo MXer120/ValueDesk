@@ -458,6 +458,8 @@
    columns, like the rest of the panel's content. The line itself is the shared
    `.load-failed` (styles.css). */
 .acct .load-failed { padding-left: var(--acct-inset); padding-right: var(--acct-inset); }
+/* ...and so does the quiet "Updating…" over rows kept through a failed refresh. */
+.acct .load-updating { padding-left: var(--acct-inset); padding-right: var(--acct-inset); }
 
 /* The segmented Spot / Perps switch (a history's own tab switch still uses it). */
 .acct-head .segmented { flex: 0 0 auto; }
