@@ -5,7 +5,9 @@
  *
  *   incident "<title>" --components=<ids|all> [--impact=minor|major|critical] [--start=<when>] ["<message>"]
  *   update <id> [<stage>] ["<message>"] [--title=..] [--impact=..] [--components=..] [--start=..] [--end=..]
- *   resolve <id> ["<message>"]                 an incident resolved, a maintenance completed
+ *   resolve <id> ["<message>"]                 an incident resolved, a maintenance completed (`ok`: the app turns
+ *     [--outcome=ok|rolled_back]               it green; `rolled_back`: the update was undone - never green)
+ *   update <id> --parts=executor:down,...       a maintenance's parts as they stand now (what is still affected)
  *   maintenance "<title>" --start=<when> --end=<when> --components=<ids|all> ["<message>"]
  *   ship <tag> --parts=indexer,api,executor,web  a release's maintenance (deploy/release/ship.sh): what it
  *                                              does to each part, when it should be over (ops/shipNotice.ts);
@@ -21,13 +23,13 @@
  * (an incident); scheduled, in_progress, verifying, completed (a maintenance).
  */
 import {
-  IMPACTS, IMPACT_TEXT, STAGE_TEXT, fmtUtc, fmtWindow, noticePhase, stagesOf,
-  type Impact, type Notice, type NoticeStage,
+  IMPACTS, IMPACT_TEXT, OUTCOMES, STAGE_TEXT, fmtUtc, fmtWindow, noticePhase, stagesOf,
+  type Impact, type Notice, type NoticeOutcome, type NoticeStage,
 } from './statusModel.js';
 
 export { fmtUtc, fmtWindow };
 import { NoticeError, type NoticeStore } from './statusNotices.js';
-import { shipNotice, shipPartsOf, type ShipPart } from './shipNotice.js';
+import { partChangesOf, shipNotice, shipPartsOf, type ShipPart } from './shipNotice.js';
 
 export interface CommandResult {
   code: 0 | 1 | 2;
@@ -165,7 +167,7 @@ export function noticeLine(n: Notice, now: number): string {
 /** A notice with its timeline, newest update first. */
 export function noticeText(n: Notice, now: number): string {
   const lines = [noticeLine(n, now)];
-  if (n.parts) lines.push(`  parts: ${n.parts.map((p) => `${p.id} ${p.impact}`).join(', ')}${n.holdOpen ? ' (open until resolved)' : ''}`);
+  if (n.parts) lines.push(`  parts: ${n.parts.map((p) => `${p.id} ${p.impact}`).join(', ')}${n.holdOpen ? ' (open until resolved)' : ''}${n.outcome ? ` - completed ${n.outcome}` : ''}`);
   for (const u of [...n.updates].reverse()) lines.push(`  ${fmtUtc(u.at)}  ${STAGE_TEXT[u.stage]}${u.text ? ` - ${u.text.replace(/\n/g, ' ')}` : ''}`);
   return lines.join('\n');
 }
@@ -262,7 +264,7 @@ export function runStatusCommand(argv: readonly string[], store: NoticeStore, o:
       }
 
       case 'update': {
-        const p = parse(rest, ['title', 'impact', 'components', 'start', 'end', 'stage']);
+        const p = parse(rest, ['title', 'impact', 'components', 'start', 'end', 'stage', 'parts']);
         const [idWord, ...more] = p.words;
         const id = idOf(idWord);
         const current = store.get(id);
@@ -279,8 +281,16 @@ export function runStatusCommand(argv: readonly string[], store: NoticeStore, o:
         const end = str(p, 'end');
         const startsAt = start === undefined ? undefined : parseWhen(start, now, { prefer: current.kind === 'incident' ? 'past' : 'future' });
         const components = str(p, 'components');
+        const partsWord = str(p, 'parts');
+        let parts;
+        try {
+          parts = partsWord === undefined ? undefined : partChangesOf(partsWord);
+        } catch (e) {
+          throw new NoticeError(e instanceof Error ? e.message : String(e));
+        }
         const text = more.join(' ');
         const change = {
+          parts,
           stage,
           text: text || undefined,
           title: str(p, 'title'),
@@ -289,15 +299,17 @@ export function runStatusCommand(argv: readonly string[], store: NoticeStore, o:
           startsAt,
           endsAt: end === undefined ? undefined : parseWhen(end, now, { base: startsAt ?? current.startsAt, prefer: 'future' }),
         };
-        if (Object.values(change).every((v) => v === undefined)) throw new NoticeError('nothing to update: give a stage, a message or a change (--title, --impact, --components, --start, --end)');
+        if (Object.values(change).every((v) => v === undefined)) throw new NoticeError('nothing to update: give a stage, a message or a change (--title, --impact, --components, --start, --end, --parts)');
         const n = store.update(id, change, now);
         return { code: 0, changed: true, text: `updated ${noticeText(n, now)}` };
       }
 
       case 'resolve': {
-        const p = parse(rest, []);
+        const p = parse(rest, ['outcome']);
         const [idWord, ...words] = p.words;
-        const n = store.resolve(idOf(idWord), words.join(' ') || undefined, now);
+        const outcome = str(p, 'outcome')?.toLowerCase().replace(/-/g, '_');
+        if (outcome !== undefined && !(OUTCOMES as readonly string[]).includes(outcome)) throw new NoticeError(`the outcome is ${OUTCOMES.join(' or ')}, not "${outcome}"`);
+        const n = store.resolve(idOf(idWord), words.join(' ') || undefined, now, outcome as NoticeOutcome | undefined);
         return { code: 0, changed: true, text: `${n.kind === 'incident' ? 'resolved' : 'completed'} ${noticeText(n, now)}` };
       }
 

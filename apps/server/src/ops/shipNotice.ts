@@ -7,8 +7,8 @@
  * it (apps/web/src/status/maintState.ts). It is held open past its planned end until then
  * (Notice.holdOpen), so a release that takes longer is never shown as done.
  */
-import { STATUS_SERVICES, type NoticePart, type PartImpact, type ServiceId } from './statusModel.js';
-import type { NewNotice } from './statusNotices.js';
+import { PART_IMPACTS, STATUS_SERVICES, type NoticePart, type PartImpact, type ServiceId } from './statusModel.js';
+import type { NewNotice, PartChange } from './statusNotices.js';
 
 /** What ship.sh releases (its parts), and the service on the status page each one is. */
 export const SHIP_PARTS = { web: 'website', api: 'api', indexer: 'indexer', executor: 'executor' } as const satisfies Record<string, ServiceId>;
@@ -46,6 +46,25 @@ export function shipPartsOf(list: string): ShipPart[] {
     out.add(p as ShipPart);
   }
   return [...out];
+}
+
+/**
+ * What changed for some parts, as ship.sh says it (`executor:down,indexer:partial`; ship parts or
+ * the status page's services): their impact now, their words left as they were.
+ */
+export function partChangesOf(list: string): PartChange[] {
+  const out = new Map<ServiceId, PartChange>();
+  for (const raw of list.split(',')) {
+    const w = raw.trim().toLowerCase();
+    if (!w) continue;
+    const [name, impact] = w.split(':');
+    const id = (name! in SHIP_PARTS ? SHIP_PARTS[name as ShipPart] : name) as ServiceId;
+    if (!STATUS_SERVICES.some((s) => s.id === id)) throw new Error(`unknown part "${name}" (${Object.keys(SHIP_PARTS).join(', ')})`);
+    if (!(PART_IMPACTS as readonly string[]).includes(impact ?? '')) throw new Error(`"${raw.trim()}": the impact is ${PART_IMPACTS.join(', ')} (part:impact)`);
+    out.set(id, { id, impact: impact as PartImpact });
+  }
+  if (!out.size) throw new Error('name the parts: --parts=executor:down,indexer:partial');
+  return [...out.values()];
 }
 
 /** How long a release of these parts should take from now, minutes. */

@@ -49,11 +49,15 @@
 #
 # THE NOTICE: a ship that restarts anything posts one maintenance on the status page (`status.sh ship`,
 # apps/server/src/ops/shipNotice.ts), before the first restart: every part named down, partly down or not
-# affected, and the expected end from the measurements below. The app shows it as a blue notification with a
-# countdown, and turns it green when ship.sh completes it - when the restarts are over, or after a rollback
-# that left everything as it was. It stays in progress past its expected end until then (an hour at most).
-# When something is left not working (a rollback that failed, an executor held, no board build), it gets an
-# update saying so and stays open: the owner completes it (status.sh resolve <id>). A web-only ship posts none.
+# affected, and the expected end from the measurements below - an estimate, and the app says so. The app shows
+# it blue while it runs (past the estimate: "taking longer than expected") and turns it green ONLY when ship.sh
+# completes it `ok`: the restarts are over AND every restarted part passed the final checks (the API answers,
+# the executor is healthy with its SoDEX feed up and the brake as it was, the indexer built its boards). A
+# rollback completes it `rolled_back` - amber in the app, never green - and so does a ship that stopped before
+# it was finished with nothing broken. When something is left not working (a failed rollback, the executor
+# held, no board build, a final check failing), it gets an update naming the parts still affected and stays
+# open, blue: the owner completes it (status.sh resolve <id>). It stays in progress past its expected end until
+# then (an hour at most on the status page). A web-only ship posts none.
 #
 # DOWNTIME (measured on v0.2.57, 2026-10-28):
 #   web       none: Vercel switches atomically; an open tab whose files a deploy replaced reloads once (lazyPage.ts)
@@ -258,8 +262,9 @@ on_exit() {
   [ $rc = 0 ] || log_ship "FAILED (exit $rc)"
   if [ $rc != 0 ] && [ "$STARTED" = 1 ]; then
     maint_close
-    # Stopped before it was done, nothing left broken (a check refused the switch): everything runs normally.
-    if [ "$NOTICE_OK" = 1 ]; then notice_done "The update stopped before it was finished; everything runs normally."; fi
+    # Stopped before it was done, nothing left broken (a check refused the switch): everything runs as
+    # before - not "done" (never green): the update is not what runs.
+    if [ "$NOTICE_OK" = 1 ]; then notice_done rolled_back "The update stopped before it was finished; everything runs as before."; fi
     tell failure "$TAG stopped: ${LAST_ERROR:-ship.sh ended with exit $rc}"
   fi
 }
@@ -353,11 +358,39 @@ notice_post() {
 sq() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
 # Words on its timeline; it stays open.
 notice_note() { [ -z "$NOTICE_ID" ] || status_cmd "update $NOTICE_ID $(sq "$*")" >/dev/null || note "!! notice #$NOTICE_ID not updated"; }
-# Completed: the app's notification turns green.
-notice_done() {
+# Still affected: those parts' impact now (`executor:down,indexer:partial`) and why; it stays open, blue.
+notice_affected() {   # parts, words
   [ -n "$NOTICE_ID" ] || return 0
-  if status_cmd "resolve $NOTICE_ID $(sq "$*")" >/dev/null; then note "status page: maintenance #$NOTICE_ID completed"; NOTICE_ID=""
+  local parts="$1"; shift
+  status_cmd "update $NOTICE_ID --parts=$parts $(sq "$*")" >/dev/null || notice_note "$*"
+}
+# Completed, and how: `ok` - every restarted part checked healthy (the app turns it green); `rolled_back` -
+# undone, everything as before (amber, never green). A server 1 without outcomes (older than v0.2.74): a
+# plain resolve for `ok`, words only for a rollback (it stays open for the owner).
+notice_done() {   # outcome, words
+  [ -n "$NOTICE_ID" ] || return 0
+  local outcome="$1"; shift
+  if status_cmd "resolve $NOTICE_ID --outcome=$outcome $(sq "$*")" >/dev/null 2>&1 \
+    || { [ "$outcome" = ok ] && status_cmd "resolve $NOTICE_ID $(sq "$*")" >/dev/null; }; then
+    note "status page: maintenance #$NOTICE_ID completed ($outcome)"; NOTICE_ID=""
+  elif [ "$outcome" != ok ]; then notice_note "$*"; note "!! notice #$NOTICE_ID left open: sudo bash /opt/valuescan/bin/status.sh resolve $NOTICE_ID --outcome=$outcome"
   else note "!! notice #$NOTICE_ID not completed: sudo bash /opt/valuescan/bin/status.sh resolve $NOTICE_ID"; fi
+}
+# The checks before the notice may say "done" (it turns green only then): every restarted part healthy
+# again. Prints the parts still affected (`api:down,executor:partial`), nothing when all is well.
+final_checks() {
+  local bad="" h
+  if want api; then
+    remote "$S1" 'curl -fsS --max-time 5 http://127.0.0.1:8797/api/health >/dev/null' 2>/dev/null || bad="${bad:+$bad,}api:down"
+  fi
+  if want indexer && [ -z "${built:-}" ]; then bad="${bad:+$bad,}indexer:partial"; fi
+  if [ ${#U2[@]} -gt 0 ]; then
+    h="$(exec_health)"
+    if [ "$(exec_healthy "$h")" != 1 ]; then bad="${bad:+$bad,}executor:down"
+    # The brake as it was before: off when it was off, on when it was on.
+    elif [ "$(printf '%s' "$h" | json 'v && v.brake ? 1 : 0')" != "$([ -n "$BRAKE0" ] && echo 1 || echo 0)" ]; then bad="${bad:+$bad,}executor:partial"; fi
+  fi
+  printf '%s' "$bad"
 }
 
 release_on() {   # host, units (comma list)
@@ -371,15 +404,15 @@ release_on() {   # host, units (comma list)
   if [ "$cur" = "$TAG" ]; then
     note "!! $units did not come back on $TAG - rolling back to the release before"
     if remote "$host" "sudo /opt/valuescan/bin/release.sh --rollback --units=$units"; then
-      notice_done "The update was rolled back; everything runs as before."
+      notice_done rolled_back "The update was rolled back; everything runs as before."
     else
       note "!! the rollback failed too - look at it now: deploy/release/remote.sh, docs/INCIDENT-RUNBOOK.md"
       NOTICE_OK=0
-      notice_note "The update did not go through and we are on it; some parts may not work normally until it is fixed."
+      notice_affected "${units//,/:down,}:down" "The update did not go through and we are on it; these parts may not work normally until it is fixed."
     fi
   else
     note "!! $TAG did not install on $host; nothing was switched (current: $cur)"
-    notice_done "The update was not applied; everything runs as before."
+    notice_done rolled_back "The update was not applied; everything runs as before."
   fi
   die "$units on $host: not shipped"
 }
@@ -440,7 +473,7 @@ if [ ${#U1[@]} -gt 0 ]; then
       notice_note "Leaderboards and cohorts are current again. $NOTICE_STILL"
     else
       NOTICE_OK=0
-      notice_note "The indexer restarted; its first rebuild is taking longer than usual. Leaderboards and cohorts may be behind until it is done."
+      notice_affected indexer:partial "The indexer restarted; its first rebuild is taking longer than usual. Leaderboards and cohorts may be behind until it is done."
     fi
     if [ -n "$built" ]; then
       done_note "indexer: boards built again $(( (built - t0) / 1000 )) s after the restart$([ -n "$whole" ] && echo ", every stream up" || echo ", still reconnecting: $down")"
@@ -471,7 +504,7 @@ exec_rollback() {   # why
     h="$(exec_health)"
     if [ "$(exec_healthy "$h")" = 1 ]; then
       restore_brake
-      notice_done "The copy executor's update was rolled back; copies and algo orders run as before."
+      notice_done rolled_back "The copy executor's update was rolled back; copies and algo orders run as before."
       die "executor: $TAG rolled back - it runs the release before ($(counts "$h")), copies and algos resumed"
     fi
     sleep 2
@@ -479,7 +512,7 @@ exec_rollback() {   # why
   # Held longer than an update now: an operator's brake (Telegram "🛑 BRAKE"), in words for followers.
   remote "$S2" "sudo bash /opt/valuescan/bin/brake.sh on copies,algos 'An update of the copy executor did not go through: copies and algos are held until it is fixed. Stops resting on SoDEX stay.'" >&2 || true
   NOTICE_OK=0
-  notice_note "The copy executor's update did not go through: copies and algo orders are held until it is fixed. Stops already on SoDEX stay."
+  notice_affected executor:down "The copy executor's update did not go through: copies and algo orders are held until it is fixed. Stops already on SoDEX stay."
   die "executor: $TAG rolled back but the executor is NOT healthy ($h). The brake stays ON: copies and algos are held. Now: docs/INCIDENT-RUNBOOK.md"
 }
 ship_executor() {
@@ -526,8 +559,18 @@ fi
 
 # The restarts are over: what fails from here on is a failure.
 maint_close
-if [ "$NOTICE_OK" = 1 ]; then notice_done "Done: everything runs normally again.${NOTICE_STILL:+ $NOTICE_STILL}"
-else notice_note "The update is installed, but not everything is back to normal yet; we are on it."; fi
+# Green only when every restarted part is healthy again (the header: THE NOTICE).
+if [ ${#U1[@]} -gt 0 ] || [ ${#U2[@]} -gt 0 ]; then
+  AFFECTED="$(final_checks)"
+  if [ -n "$AFFECTED" ]; then
+    NOTICE_OK=0 WARNED=1
+    note "!! not healthy after the restarts: $AFFECTED"
+    done_note "NOT healthy after the restarts: $AFFECTED"
+  fi
+  if [ "$NOTICE_OK" = 1 ]; then notice_done ok "Done: everything runs normally again.${NOTICE_STILL:+ $NOTICE_STILL}"
+  elif [ -n "$AFFECTED" ]; then notice_affected "$AFFECTED" "The update is installed, but these parts are not back to normal yet; we are on it."
+  else notice_note "The update is installed, but not everything is back to normal yet; we are on it."; fi
+fi
 
 # --- 7. the web -----------------------------------------------------------------------------------
 if [ "$MOVE_MAIN" = 1 ]; then

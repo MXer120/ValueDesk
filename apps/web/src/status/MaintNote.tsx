@@ -1,10 +1,12 @@
 /**
  * The maintenance notification: a card in the notifications' corner (toast.tsx's pin,
  * docked in the navbar's lane where the bar has one), blue while an update runs, with
- * the expected end and its countdown; green with a checkmark once the update is done.
- * Hover, keyboard focus or a tap opens what each part goes through - down, partly down,
- * not affected - and the countdown. In progress, only its X takes it away; done, it goes
- * by itself after MAINT_DONE_MS like any good-news notification (owner, 2026-10-29). The
+ * its estimated end ("expected by 14:32 · about 4 min left"; past it, "taking longer than
+ * expected", still blue); green with a checkmark only once the server says it was
+ * completed ok; amber when it was rolled back or ended unconfirmed. Hover, keyboard focus
+ * or a tap opens what each part goes through - down, partly down, not affected - the
+ * server's latest words and the estimate. Blue and amber go only by the X; green goes by
+ * itself after MAINT_DONE_MS like any good-news notification (owner, 2026-10-29). The
  * logic and what this browser remembers: maintState.ts.
  *
  * No request of its own: the maintenance rides on /api/health, which the shell reads
@@ -77,12 +79,13 @@ export function MaintNote({ health, onOpenStatus }: { health: unknown; onOpenSta
     return () => window.removeEventListener('storage', on);
   }, []);
   const shown = maintShown(state);
-  const live = shown.some((s) => s.doneAt === null && s.endsAt !== null);
+  const live = shown.some((s) => s.end === null && s.endsAt !== null);
   const [now, setNow] = useState(Date.now);
   useEffect(() => {
     setNow(Date.now());
     if (!live) return;
-    const t = window.setInterval(() => setNow(Date.now()), 1000);
+    // The estimate is said in minutes: a few seconds of lag is nothing.
+    const t = window.setInterval(() => setNow(Date.now()), 5000);
     return () => window.clearInterval(t);
   }, [live]);
   const pin = usePin();
@@ -144,7 +147,7 @@ export function MaintCard({ s, now, onDismiss, onOpenStatus, timeZone }: {
         }}
       >
         <span className="toast__ic" aria-hidden="true">
-          <span className="toast__glyph">{v.tone === 'done' ? <CheckMark /> : <WrenchMark />}</span>
+          <span className="toast__glyph">{v.tone === 'done' ? <CheckMark /> : v.tone === 'warn' ? <WarnMark /> : <WrenchMark />}</span>
         </span>
         <div className="toast__body">
           <span className="toast__title">{v.title}</span>
@@ -167,22 +170,16 @@ export function MaintCard({ s, now, onDismiss, onOpenStatus, timeZone }: {
                 <li key={r.id} className={`mn-note__part is-${r.impact}`}>
                   <i className="mn-note__dot" aria-hidden="true" />
                   <span className="mn-note__svc">{r.name}</span>
-                  <span className="mn-note__state">{v.tone === 'done' && r.impact !== 'none' ? 'Back to normal' : PART_TEXT[r.impact]}</span>
-                  {r.text && v.tone === 'live' && <span className="mn-note__why">{r.text}</span>}
+                  <span className="mn-note__state">
+                    {r.impact === 'none' ? PART_TEXT.none : s.end === 'ok' ? 'Back to normal' : s.end === 'rolled_back' ? 'As before' : PART_TEXT[r.impact]}
+                  </span>
+                  {r.text && (s.end === null || s.end === 'unconfirmed') && <span className="mn-note__why">{r.text}</span>}
                 </li>
               ))}
             </ul>
           )}
-          {v.tone === 'live' ? (
-            v.when && (
-              <p className="mn-note__eta">
-                Expected end {v.when}
-                {v.left ? <> · <b>{v.left}</b> left</> : <> · taking a little longer</>}
-              </p>
-            )
-          ) : (
-            <p className="mn-note__eta">Completed {v.when}.</p>
-          )}
+          {s.note && v.tone !== 'done' && <p className="mn-note__note">{s.note}</p>}
+          {v.eta && <p className="mn-note__eta">{v.eta}</p>}
           <a
             className="mn-note__link"
             href={href}
@@ -206,6 +203,16 @@ function WrenchMark() {
   return (
     <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
       <path d="M10.6 2.4a3.3 3.3 0 0 0-3.9 4.3L2.6 10.8a1.3 1.3 0 0 0 1.8 1.8l4.1-4.1a3.3 3.3 0 0 0 4.3-3.9l-2 2-1.9-.4-.4-1.9Z" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function WarnMark() {
+  return (
+    <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+      <path d="M8 2.4 14.2 13.2H1.8Z" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+      <path d="M8 6.4v3" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      <circle cx="8" cy="11.3" r="0.8" fill="currentColor" />
     </svg>
   );
 }

@@ -127,6 +127,15 @@ export interface NoticePart {
   text: string;
 }
 
+/**
+ * How a maintenance was completed, by hand or by a release (deploy/release/ship.sh): `ok` -
+ * done, and every part it restarted checked healthy again; `rolled_back` - the update was
+ * undone, everything runs as before. Absent: completed by the clock (its window ended), or
+ * by a server older than this. Only `ok` is "back to normal" in the app (maintState.ts).
+ */
+export const OUTCOMES = ['ok', 'rolled_back'] as const;
+export type NoticeOutcome = (typeof OUTCOMES)[number];
+
 export interface Notice {
   id: number;
   kind: NoticeKind;
@@ -150,6 +159,8 @@ export interface Notice {
    * by the clock HOLD_OPEN_MS after the planned end at the latest.
    */
   holdOpen?: boolean;
+  /** A maintenance completed by hand or by a release: how (NoticeOutcome). */
+  outcome?: NoticeOutcome;
 }
 
 export const NOTICE_LIMITS = { title: 120, text: 1000, updates: 50, partText: 200 } as const;
@@ -233,6 +244,7 @@ export function parseNotice(v: unknown): Notice | null {
     id: n.id, kind: n.kind, title, impact, components, startsAt: n.startsAt, endsAt, closedAt: isTime(n.closedAt) ? n.closedAt : null, updates,
     ...(parts ? { parts } : {}),
     ...(n.kind === 'maintenance' && n.holdOpen === true ? { holdOpen: true } : {}),
+    ...(n.kind === 'maintenance' && isTime(n.closedAt) && (OUTCOMES as readonly unknown[]).includes(n.outcome) ? { outcome: n.outcome } : {}),
   };
 }
 
@@ -325,6 +337,10 @@ export interface HealthNotice {
   parts?: NoticePart[];
   /** In progress past its planned end until it is completed (Notice.holdOpen). */
   holdOpen?: boolean;
+  /** How it was completed (Notice.outcome); absent while open, or completed by the clock. */
+  outcome?: NoticeOutcome;
+  /** Its latest words, once there is more than the first (what is still affected, how it ended); at most 200 characters. */
+  note?: string;
 }
 
 /** How soon an upcoming maintenance is announced in the app. */
@@ -366,6 +382,8 @@ export function healthNotices(notices: readonly Notice[], now: number, max = 3):
     ...(n.kind === 'maintenance' ? { closedAt: n.closedAt } : {}),
     ...(n.parts ? { parts: n.parts } : {}),
     ...(n.holdOpen ? { holdOpen: true } : {}),
+    ...(n.outcome ? { outcome: n.outcome } : {}),
+    ...(n.kind === 'maintenance' && n.updates.length > 1 && n.updates.at(-1)!.text ? { note: cleanText(n.updates.at(-1)!.text, 200) } : {}),
   }));
 }
 

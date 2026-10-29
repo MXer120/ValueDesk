@@ -12,7 +12,7 @@ import { StatusStore } from '../src/ops/status.js';
 import {
   DONE_LISTED_MS, HOLD_OPEN_MS, healthNotices, noticePhase, noticeSpan, parseNotice, type Notice,
 } from '../src/ops/statusModel.js';
-import { SHIP_EFFECTS, shipMinutes, shipNotice, shipPartsOf } from '../src/ops/shipNotice.js';
+import { SHIP_EFFECTS, partChangesOf, shipMinutes, shipNotice, shipPartsOf } from '../src/ops/shipNotice.js';
 import { runStatusCommand } from '../src/ops/statusCommands.js';
 import { tempDir } from './builderFakes.js';
 
@@ -137,5 +137,60 @@ test('command: ship posts it, resolve completes it, show names the parts', () =>
   assert.match(runStatusCommand(['ship', 'v0.2.71', '--parts=db'], s.notices, { now: T0 }).text, /unknown part "db"/);
   assert.equal(runStatusCommand(['ship', '--parts=api'], s.notices, { now: T0 }).code, 2);
   assert.equal(s.notices.all().length, 1);
+  s.close();
+});
+
+test('completed how: ok (the app turns green) or rolled back (never green); by the clock, no outcome at all', () => {
+  const s = new StatusStore(dbPath());
+  const post = () => s.notices.create(shipNotice('v0.2.74', ['executor', 'api'], T0)!, T0);
+  const a = post();
+  assert.equal(s.notices.resolve(a.id, undefined, T0 + 5 * MIN).outcome, 'ok', 'completed by hand or by ship.sh after its checks');
+  const [ha] = healthNotices([s.notices.get(a.id)!], T0 + 6 * MIN);
+  assert.equal(ha!.outcome, 'ok');
+  assert.equal(ha!.note, 'The maintenance is complete.', 'the latest words, once there are more than the first');
+  const b = post();
+  const rb = runStatusCommand(['resolve', String(b.id), '--outcome=rolled-back'], s.notices, { now: T0 + 5 * MIN });
+  assert.equal(rb.code, 0, rb.text);
+  assert.equal(s.notices.get(b.id)!.outcome, 'rolled_back');
+  assert.equal(s.notices.get(b.id)!.updates.at(-1)!.text, 'The update was rolled back; everything runs as before.');
+  assert.match(runStatusCommand(['resolve', String(b.id), '--outcome=maybe'], s.notices, { now: T0 }).text, /outcome is ok or rolled_back/);
+  // Opened again: how it was closed is forgotten.
+  assert.equal('outcome' in s.notices.update(b.id, { stage: 'in_progress', text: 'Again.' }, T0 + 6 * MIN), false);
+  // Its window ended (a ship that died, an hour past its end): completed by the clock, with no outcome.
+  const c = post();
+  const late = c.endsAt! + HOLD_OPEN_MS;
+  assert.equal(noticePhase(c, late), 'completed');
+  const [hc] = healthNotices([c], late);
+  assert.equal(hc!.phase, 'completed');
+  assert.equal('outcome' in hc! || 'note' in hc!, false, 'never "back to normal" on the clock');
+  // An incident has no outcome.
+  const inc = s.notices.create({ kind: 'incident', title: 'x', components: ['api'] }, T0);
+  assert.throws(() => s.notices.resolve(inc.id, undefined, T0, 'ok'), /only a maintenance has an outcome/);
+  assert.equal('outcome' in s.notices.resolve(inc.id, undefined, T0), false);
+  // A stored outcome without a completion is not one.
+  assert.equal('outcome' in parseNotice({ ...c, outcome: 'ok' })!, false);
+  s.close();
+});
+
+test('what is still affected: update --parts sets parts impact now (the plan\'s words go with a changed impact); the note says why', () => {
+  const s = new StatusStore(dbPath());
+  const n = s.notices.create(shipNotice('v0.2.74', ['executor', 'indexer'], T0)!, T0);
+  const r = runStatusCommand(['update', String(n.id), '--parts=executor:down', 'The update of the copy executor did not go through: copies and algo orders are held.'], s.notices, { now: T0 + 3 * MIN });
+  assert.equal(r.code, 0, r.text);
+  const u = s.notices.get(n.id)!;
+  assert.deepEqual(u.parts!.map((p) => `${p.id}:${p.impact}`), ['website:none', 'api:none', 'executor:down', 'indexer:partial']);
+  assert.equal(u.parts!.find((p) => p.id === 'executor')!.text, '', 'down now: the planned "pause for about a minute" would contradict it');
+  assert.equal(u.parts!.find((p) => p.id === 'indexer')!.text, SHIP_EFFECTS.indexer.text, 'untouched: its words kept');
+  runStatusCommand(['update', String(n.id), '--parts=indexer:partial'], s.notices, { now: T0 + 4 * MIN });
+  assert.equal(s.notices.get(n.id)!.parts!.find((p) => p.id === 'indexer')!.text, SHIP_EFFECTS.indexer.text, 'the same impact: its words kept');
+  assert.equal(noticePhase(u, T0 + 3 * MIN), 'in_progress', 'still open');
+  const [h] = healthNotices([u], T0 + 3 * MIN);
+  assert.equal(h!.note, 'The update of the copy executor did not go through: copies and algo orders are held.');
+  assert.deepEqual(partChangesOf('web:none, indexer:partial').map((p) => `${p.id}:${p.impact}`), ['website:none', 'indexer:partial'], 'ship parts or services');
+  assert.throws(() => partChangesOf('executor'), /part:impact/);
+  assert.throws(() => partChangesOf('db:down'), /unknown part "db"/);
+  assert.match(runStatusCommand(['update', String(n.id), '--parts=executor:gone'], s.notices, { now: T0 }).text, /impact is down, partial, none/);
+  const inc = s.notices.create({ kind: 'incident', title: 'x', components: ['api'] }, T0);
+  assert.match(runStatusCommand(['update', String(inc.id), '--parts=api:down'], s.notices, { now: T0 }).text, /only a maintenance has parts/);
   s.close();
 });

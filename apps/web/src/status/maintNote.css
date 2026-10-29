@@ -13,6 +13,8 @@
   background: color-mix(in srgb, var(--tone) 9%, var(--glass-pop-bg));
 }
 .toast.mn-note--done { --tone: var(--pos); }
+/* Rolled back, or ended without the word that all is well: the incident colour, never green. */
+.toast.mn-note--warn { --tone: var(--warn); }
 .mn-note__top { display: flex; align-items: center; gap: 12px; min-width: 0; cursor: pointer; }
 .mn-note__left { color: var(--text); font-variant-numeric: tabular-nums; }
 
@@ -56,6 +58,7 @@
 .mn-note__part.is-none .mn-note__dot { background: color-mix(in srgb, var(--pos) 60%, transparent); }
 .mn-note--done .mn-note__part .mn-note__dot { background: var(--pos); }
 .mn-note--done .mn-note__part .mn-note__state { color: var(--muted); }
+.mn-note__note { margin: 0; color: var(--text); }
 .mn-note__eta { margin: 0; color: var(--muted); }
 .mn-note__eta b { color: var(--text); font-family: var(--font-num); font-variant-numeric: tabular-nums; }
 .mn-note__link { align-self: flex-start; color: var(--muted); text-decoration: none; }

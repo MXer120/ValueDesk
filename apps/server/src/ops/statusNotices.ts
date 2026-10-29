@@ -16,7 +16,7 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import {
   NOTICE_LIMITS, NOTICE_SHOW_DAYS, STATUS_SERVICES, cleanText, closingStage, healthNotices, noticePhase, parseNotice, stagesOf,
-  type HealthNotice, type Impact, type Notice, type NoticeKind, type NoticePart, type NoticeStage, type ServiceId,
+  type HealthNotice, type Impact, type Notice, type NoticeKind, type NoticeOutcome, type NoticePart, type NoticeStage, type ServiceId,
 } from './statusModel.js';
 
 export const NOTICE_SCHEMA = `
@@ -58,7 +58,14 @@ export interface NewNotice {
   holdOpen?: boolean;
 }
 
+/** A part's impact now; its words stay as they were while its impact does (they described the plan), unless given. */
+export type PartChange = Pick<NoticePart, 'id' | 'impact'> & { text?: string };
+
 export interface NoticeChange {
+  /** A maintenance: what changed for some of its parts (merged into Notice.parts by service). */
+  parts?: readonly PartChange[];
+  /** A maintenance completed: how (statusModel.ts NoticeOutcome). */
+  outcome?: NoticeOutcome;
   stage?: NoticeStage;
   text?: string;
   title?: string;
@@ -219,6 +226,15 @@ export class NoticeStore {
         if (!next.title) throw new NoticeError('a title cannot be empty');
       }
       if (c.components !== undefined) next.components = componentsOf(c.components);
+      if (c.parts !== undefined) {
+        if (n.kind !== 'maintenance') throw new NoticeError('only a maintenance has parts');
+        const byId = new Map((n.parts ?? []).map((p) => [p.id, p]));
+        for (const p of c.parts) {
+          const was = byId.get(p.id);
+          byId.set(p.id, { id: p.id, impact: p.impact, text: cleanText(p.text ?? (was?.impact === p.impact ? was.text : ''), NOTICE_LIMITS.partText) });
+        }
+        next.parts = STATUS_SERVICES.flatMap((s) => (byId.has(s.id) ? [byId.get(s.id)!] : []));
+      }
       if (c.impact !== undefined) {
         if (n.kind !== 'incident') throw new NoticeError('only an incident has an impact');
         next.impact = c.impact;
@@ -238,19 +254,32 @@ export class NoticeStore {
         if (next.updates.length >= NOTICE_LIMITS.updates) throw new NoticeError(`#${id} has ${NOTICE_LIMITS.updates} updates already: post a new one`);
         const stage = c.stage ?? n.updates.at(-1)!.stage;
         next.updates.push({ at: now, stage, text: text ?? '' });
-        // Closing it closes it; any other stage after that opens it again.
+        // Closing it closes it; any other stage after that opens it again (and forgets how it was closed).
         next.closedAt = stage === closingStage(n.kind) ? n.closedAt ?? now : null;
+        if (next.closedAt === null) delete next.outcome;
+      }
+      if (c.outcome !== undefined) {
+        if (n.kind !== 'maintenance' || next.closedAt === null) throw new NoticeError('an outcome is how a maintenance was completed: resolve it with --outcome');
+        next.outcome = c.outcome;
       }
       return this.write(next, now);
     });
   }
 
-  /** Resolve an incident, or complete a maintenance (early, or on time). */
-  resolve(id: number, text: string | undefined, now = Date.now()): Notice {
+  /**
+   * Resolve an incident, or complete a maintenance (early, or on time). A maintenance is
+   * completed `ok` - done, its parts healthy: the app turns it green - unless `outcome` says
+   * otherwise (a release that was rolled back).
+   */
+  resolve(id: number, text: string | undefined, now = Date.now(), outcome?: NoticeOutcome): Notice {
     const n = this.get(id);
     if (!n) throw new NoticeError(`there is no notice #${id}`);
-    const fallback = n.kind === 'incident' ? 'This incident has been resolved.' : 'The maintenance is complete.';
-    return this.update(id, { stage: closingStage(n.kind), text: cleanText(text ?? '', NOTICE_LIMITS.text) || fallback }, now);
+    const fallback = n.kind === 'incident' ? 'This incident has been resolved.' : outcome === 'rolled_back' ? 'The update was rolled back; everything runs as before.' : 'The maintenance is complete.';
+    if (n.kind === 'incident' && outcome !== undefined) throw new NoticeError('an incident is resolved; only a maintenance has an outcome');
+    return this.update(id, {
+      stage: closingStage(n.kind), text: cleanText(text ?? '', NOTICE_LIMITS.text) || fallback,
+      ...(n.kind === 'maintenance' ? { outcome: outcome ?? 'ok' } : {}),
+    }, now);
   }
 
   /** Take a notice off the page entirely (posted by mistake). */

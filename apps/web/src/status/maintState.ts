@@ -3,7 +3,12 @@
  * maintenance as a BLUE notification with the expected time; hovering shows which parts
  * are fully down, partly down or not affected, and a countdown to the expected end. It
  * stays until the user clicks it away - that is the only way it goes - and when the
- * update is done and everything is back to normal it turns GREEN with a checkmark.
+ * update is done and everything is back to normal it turns GREEN with a checkmark. Later the
+ * same day: the time is an ESTIMATE ("expected by 14:32", "about 4 min"), past it the card
+ * says it takes longer and stays blue; and it turns green ONLY when the server says the
+ * maintenance was completed `ok` - by ship.sh after its health checks, or by hand - never on
+ * a timer or its end time. A rollback, or a maintenance that ended without that word, is
+ * amber (the incident style), with what is still affected; green goes by itself.
  *
  * What it reads: the maintenance on /api/health (the shell polls it every 30 s), which
  * lists maintenance in progress and, for DONE_LISTED_MS after, the completed ones
@@ -11,13 +16,13 @@
  * (ship.sh, ops/shipNotice.ts) and completes it when it is done.
  *
  * What it keeps, in this browser (MAINT_KEY): each maintenance it showed in progress,
- * when it saw it completed, and whether it was clicked away. So a reload keeps a green
- * one green, one clicked away stays away (in every tab), and a completed maintenance this
- * browser never saw in progress is not shown at all - there is nothing to turn green.
+ * how and when it saw it end, and whether it was clicked away. So a reload keeps the card
+ * as it was, one clicked away stays away (in every tab), and a completed maintenance this
+ * browser never saw in progress is not shown at all.
  */
 import {
   STATUS_SERVICES, isServiceId, parseParts,
-  type HealthNotice, type NoticePart, type PartImpact, type ServiceId,
+  type HealthNotice, type NoticeOutcome, type NoticePart, type PartImpact, type ServiceId,
 } from '@sign/ops/statusModel.js';
 
 export const MAINT_KEY = 'vs.maint.v1';
@@ -36,12 +41,30 @@ export interface MaintSeen {
   /** What it does to each part; null when it names only the parts it touches (`components`). */
   parts: NoticePart[] | null;
   components: ServiceId[];
+  /** Its latest words from the server (what is still affected, how it ended); null for none. */
+  note: string | null;
   /** When this browser first saw it in progress. */
   seenAt: number;
-  /** When it was completed (green from then); null while in progress. */
+  /** When it ended; null while in progress. */
   doneAt: number | null;
+  /**
+   * How it ended, as this browser saw it: `ok` completed ok by the server (green), `rolled_back`
+   * (amber), `unconfirmed` - a release's maintenance that ended without its word, by the clock
+   * (amber) - or `ended`: any other end (a window that ran out, gone from the list), not shown.
+   */
+  end: MaintEnd | null;
   /** Clicked away: not shown again, in any tab. */
   dismissed: boolean;
+}
+
+export type MaintEnd = 'ok' | 'rolled_back' | 'unconfirmed' | 'ended';
+const ENDS: readonly MaintEnd[] = ['ok', 'rolled_back', 'unconfirmed', 'ended'];
+
+/** How a completed maintenance ended for the card: green only on the server's `ok`. */
+export function endOf(n: { outcome?: NoticeOutcome; closedAt?: number | null; holdOpen?: boolean }, holdOpen: boolean): MaintEnd {
+  if (n.outcome === 'ok' && typeof n.closedAt === 'number') return 'ok';
+  if (n.outcome === 'rolled_back') return 'rolled_back';
+  return holdOpen || n.holdOpen ? 'unconfirmed' : 'ended';
 }
 
 export type MaintState = MaintSeen[];
@@ -62,6 +85,8 @@ export function maintNoticesOf(health: unknown): HealthNotice[] {
       closedAt: typeof v.closedAt === 'number' ? v.closedAt : null,
       ...(parts ? { parts } : {}),
       ...(v.holdOpen === true ? { holdOpen: true } : {}),
+      ...(v.outcome === 'ok' || v.outcome === 'rolled_back' ? { outcome: v.outcome } : {}),
+      ...(typeof v.note === 'string' && v.note.trim() ? { note: v.note.trim().slice(0, 200) } : {}),
     });
   }
   return out;
@@ -92,15 +117,16 @@ export function maintStep(prev: MaintState, health: unknown, now: number): Maint
     const had = byId.get(n.id);
     const facts = {
       id: n.id, title: n.title, startsAt: n.startsAt, endsAt: n.endsAt, holdOpen: n.holdOpen === true,
-      parts: n.parts ?? null, components: n.components ?? [],
+      parts: n.parts ?? null, components: n.components ?? [], note: n.note ?? null,
     };
-    if (n.phase === 'in_progress') put({ ...facts, seenAt: had?.seenAt ?? now, doneAt: null, dismissed: had?.dismissed ?? false });
-    // Completed: green - only where it was shown in progress.
-    else if (had && had.doneAt === null) put({ ...had, ...facts, doneAt: n.closedAt ?? now });
+    if (n.phase === 'in_progress') put({ ...facts, seenAt: had?.seenAt ?? now, doneAt: null, end: null, dismissed: had?.dismissed ?? false });
+    // Completed - only where it was shown in progress: green on the server's `ok` alone (endOf).
+    else if (had && had.end === null) put({ ...had, ...facts, doneAt: n.closedAt ?? now, end: endOf(n, had.holdOpen) });
   }
-  // Shown in progress and gone from a complete answer: completed longer ago than it is listed, or taken off.
+  // Shown in progress and gone from a complete answer (completed longer ago than it is listed, or
+  // taken off): how it ended is not known here, so the card just goes - never green.
   if (openCount(health) < OPEN_LISTED) {
-    for (const s of byId.values()) if (s.doneAt === null && !listed.some((n) => n.id === s.id)) put({ ...s, doneAt: now });
+    for (const s of byId.values()) if (s.end === null && !listed.some((n) => n.id === s.id)) put({ ...s, doneAt: now, end: 'ended' });
   }
   if (!changed) return prev;
   return [...byId.values()].sort((a, b) => a.seenAt - b.seenAt || a.id - b.id).slice(-MAINT_KEEP);
@@ -118,9 +144,9 @@ export function withDismissals(mine: MaintState, theirs: MaintState): MaintState
   return mine.map((s) => (gone.has(s.id) ? { ...s, dismissed: true } : s));
 }
 
-/** What is shown: not clicked away, the first seen first (two at most). */
+/** What is shown: not clicked away nor ended unseen, the first seen first (two at most). */
 export function maintShown(state: MaintState): MaintSeen[] {
-  return state.filter((s) => !s.dismissed).slice(0, 2);
+  return state.filter((s) => !s.dismissed && s.end !== 'ended').slice(0, 2);
 }
 
 /** The stored state, checked; [] for anything else. */
@@ -132,10 +158,14 @@ export function parseMaint(raw: string | null): MaintState {
     return v.flatMap((x): MaintSeen[] => {
       const s = x as Partial<MaintSeen> | null;
       if (!s || typeof s.id !== 'number' || typeof s.title !== 'string' || typeof s.startsAt !== 'number' || typeof s.seenAt !== 'number') return [];
+      const doneAt = typeof s.doneAt === 'number' ? s.doneAt : null;
+      // Kept before `end` existed (v0.2.71-73): ended then meant completed by the server.
+      const end = ENDS.includes(s.end as MaintEnd) ? (s.end as MaintEnd) : doneAt !== null ? 'ok' : null;
       return [{
         id: s.id, title: s.title, startsAt: s.startsAt, endsAt: typeof s.endsAt === 'number' ? s.endsAt : null, holdOpen: s.holdOpen === true,
         parts: parseParts(s.parts), components: Array.isArray(s.components) ? s.components.filter(isServiceId) : [],
-        seenAt: s.seenAt, doneAt: typeof s.doneAt === 'number' ? s.doneAt : null, dismissed: s.dismissed === true,
+        note: typeof s.note === 'string' && s.note ? s.note.slice(0, 200) : null,
+        seenAt: s.seenAt, doneAt: end === null ? null : doneAt ?? s.seenAt, end, dismissed: s.dismissed === true,
       }];
     }).slice(-MAINT_KEEP);
   } catch {
@@ -160,12 +190,16 @@ export function maintParts(s: MaintSeen): Array<{ id: ServiceId; name: string; i
   return rows.sort((a, b) => rank[a.impact] - rank[b.impact]);
 }
 
-/** "4:05" under an hour, "1 h 05 min" above; null once it is over. */
+/**
+ * What is left of the ESTIMATE, as an estimate: "about 4 min", "about 1 h 05 min", "under a
+ * minute"; null once the estimate is past - never 0, never negative.
+ */
 export function leftText(ms: number): string | null {
   if (!(ms > 0)) return null;
-  const sec = Math.ceil(ms / 1000);
-  if (sec >= 3600) return `${Math.floor(sec / 3600)} h ${String(Math.floor((sec % 3600) / 60)).padStart(2, '0')} min`;
-  return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
+  if (ms < 60_000) return 'under a minute';
+  const min = Math.ceil(ms / 60_000);
+  if (min >= 60) return `about ${Math.floor(min / 60)} h ${String(min % 60).padStart(2, '0')} min`;
+  return `about ${min} min`;
 }
 
 /** "14:32" on the viewer's clock (or `timeZone`'s). */
@@ -174,14 +208,15 @@ export function clockOf(ms: number, timeZone?: string): string {
 }
 
 export interface MaintView {
-  tone: 'live' | 'done';
+  /** live: blue, in progress; done: green, completed ok; warn: amber - rolled back, or ended unconfirmed. */
+  tone: 'live' | 'done' | 'warn';
   title: string;
   /** The line under the title. */
   line: string;
-  /** The countdown, while there is one ("4:05"). */
+  /** What is left of the estimate ("about 4 min"), while there is any. */
   left: string | null;
-  /** The expected end, or when it was completed: "14:32" and, where the viewer's clock is not UTC, "(13:32 UTC)". */
-  when: string | null;
+  /** The line on hover about the time: the estimate, or when it ended. */
+  eta: string | null;
 }
 
 /** What the card says at `now`. */
@@ -191,14 +226,15 @@ export function maintView(s: MaintSeen, now: number, timeZone?: string): MaintVi
     const utc = clockOf(ms, 'UTC');
     return local === utc ? `${utc} UTC` : `${local} (${utc} UTC)`;
   };
-  if (s.doneAt !== null) {
-    return { tone: 'done', title: 'Maintenance complete', line: 'Everything runs normally again.', left: null, when: at(s.doneAt) };
+  const ended = s.doneAt ?? now;
+  if (s.end === 'ok') return { tone: 'done', title: 'Maintenance complete', line: 'Everything runs normally again.', left: null, eta: `Completed ${at(ended)}.` };
+  if (s.end === 'rolled_back') return { tone: 'warn', title: 'Update rolled back', line: 'Everything runs as before.', left: null, eta: `Rolled back ${at(ended)}.` };
+  if (s.end === 'unconfirmed') {
+    return { tone: 'warn', title: 'Maintenance ended', line: 'Not confirmed: some parts may not work normally.', left: null, eta: `Ended ${at(ended)} without the word that all is well again.` };
   }
-  const left = s.endsAt === null ? null : leftText(s.endsAt - now);
-  const line = s.endsAt === null
-    ? 'In progress'
-    : left
-      ? `Back by ${clockOf(s.endsAt, timeZone)}`
-      : 'Taking a little longer than planned';
-  return { tone: 'live', title: 'Maintenance', line, left, when: s.endsAt === null ? null : at(s.endsAt) };
+  if (s.endsAt === null) return { tone: 'live', title: 'Maintenance', line: 'In progress', left: null, eta: null };
+  const left = leftText(s.endsAt - now);
+  return left
+    ? { tone: 'live', title: 'Maintenance', line: `Expected by ${clockOf(s.endsAt, timeZone)}`, left, eta: `Expected by ${at(s.endsAt)}, ${left} left - an estimate, not a promise.` }
+    : { tone: 'live', title: 'Maintenance', line: 'Taking longer than expected', left: null, eta: `It was expected by ${at(s.endsAt)}; it is taking longer than expected.` };
 }

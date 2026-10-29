@@ -21,12 +21,16 @@ staler). Units, Caddy and env templates are never shipped: it names them, and
 
 **The maintenance notice.** A ship that restarts anything posts one maintenance on the
 status page (`status.sh ship <tag> --parts=...`, `apps/server/src/ops/shipNotice.ts`): each
-part down, partly down or not affected, and the expected end from the measured costs. The
-app shows it as a blue notification with a countdown (hover: the parts), keeps it until the
-user clicks it away, and turns it green with a checkmark when `ship.sh` completes it - at
-the end, or after a rollback that left everything as before (`apps/web/src/status/MaintNote.tsx`).
-It stays in progress past its expected end until then, an hour at most. Left not working
-(a failed rollback, the executor held, no board build), it gets an update and stays open:
+part down, partly down or not affected, and the expected end from the measured costs - an
+estimate, and the app says so. The app shows it as a blue notification ("expected by 14:32 ·
+about 4 min left"; past it, "taking longer than expected"; hover: the parts), kept until the
+user clicks it away. It turns green with a checkmark - and goes by itself after a few
+seconds - ONLY when `ship.sh` completes it `ok`: the restarts are over and its final checks
+pass (the API answers, the executor is healthy with its SoDEX feed up and the brake as it
+was, the indexer built its boards). A rollback completes it `rolled_back`: amber, never green
+(`apps/web/src/status/MaintNote.tsx`). Left not working (a failed rollback, the executor
+held, no board build, a failing final check), it gets an update naming the parts still
+affected (`status.sh update <id> --parts=executor:down "..."`) and stays open, blue:
 `status.sh resolve <id>` once it is fixed. A web-only ship has no downtime and posts none;
 `--no-notice` posts none either.
 
