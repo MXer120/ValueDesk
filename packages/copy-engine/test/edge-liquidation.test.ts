@@ -696,3 +696,25 @@ test('stale: an active copy whose builder approval one read misses stays active;
     await rt.stop();
   }
 });
+
+test('stale: right after the copy\'s own close, a read still showing the position is not the follower\'s own - the leader\'s next open is copied', async () => {
+  // Live run 2026-10-29 (copy.size-change): the copy closed with the leader, a read 5 s later still showed
+  // the position, and the leader's next buy was skipped as the follower's own position.
+  const { w, rec, rt, store, s } = await holding({ id: 'stale-own-close' });
+  try {
+    const held = size(rt, s.id);
+    leaderSells('1');
+    w.leader = [];
+    assert.ok(await until(() => rec.placed.length === 2), 'the copy closes with the leader');
+    sodexWs().push(print('SELL', String(held), '80000', 1002, FOLLOWER_ID, 'BTC-USD'));
+    assert.ok(await until(() => size(rt, s.id) === 0), 'its fill closed the books');
+    // SoDEX's account read lags: every read still shows the position the copy just closed.
+    await rt.refreshFollower(FOLLOWER);
+    leaderBuys('1');
+    w.leader = [{ s: 'BTC-USD', sz: '1', ep: '80000' }];
+    assert.ok(await until(() => rec.placed.length === 3), 'the leader\'s next open is copied');
+    assert.ok(!(await store.activity({ subId: s.id })).some((e) => e.kind === 'skip' && e.reason === 'own-position'), 'never skipped as the follower\'s own');
+  } finally {
+    await rt.stop();
+  }
+});
