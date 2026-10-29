@@ -56,6 +56,8 @@ import type { AlgoTicketHandle, AlgoTicketState } from './algo/AlgoTicket';
 import { DASH, USD_WHOLE_FROM, fmt, fmtPrice, fmtQty, fmtQuote, num, pick, precisionOf, shortAddr, coinLabel } from '../format';
 import { useMask } from '../privacy';
 import { checkStopAgainstLiquidation, estimateLiquidationPrice } from '../risk';
+import { exitEntryFor } from './exitEntry';
+import { mergeBookSide } from './bookDepth';
 import { useConfirm } from './Modal';
 import { ReviewPosition, setReviewSuppressed, shouldReview, type ReviewOrder } from './ReviewPosition';
 import { useLegalTradeGate, useTradeGate } from './account/useTradeGate';
@@ -1045,13 +1047,12 @@ export function OrderEntry({
    * nothing, whereas "this trade risks 40% of what it ties up" is the figure
    * leverage actually changes. Spot has no margin, so there it is return on cost.
    */
-  const exitBasis = engine === 'perps' && lev > 0 ? notional / lev : notional;
-
+  // The entry they are solved from is `exitEntryPx` (exitEntry.ts), set below with the book walk.
   const pnlAtPrice = (target: string): number | null => {
     const t = num(target);
     const q = num(quantity);
-    if (!(t > 0 && effectivePrice > 0 && q > 0)) return null;
-    return (side === 'buy' ? t - effectivePrice : effectivePrice - t) * q;
+    if (!(t > 0 && exitEntryPx > 0 && q > 0)) return null;
+    return (side === 'buy' ? t - exitEntryPx : exitEntryPx - t) * q;
   };
 
   /*
@@ -1066,8 +1067,8 @@ export function OrderEntry({
 
   const priceAtPnl = (pnl: number): number | null => {
     const q = num(quantity);
-    if (!(effectivePrice > 0 && q > 0)) return null;
-    return side === 'buy' ? effectivePrice + pnl / q : effectivePrice - pnl / q;
+    if (!(exitEntryPx > 0 && q > 0)) return null;
+    return side === 'buy' ? exitEntryPx + pnl / q : exitEntryPx - pnl / q;
   };
 
   /*
@@ -1114,10 +1115,6 @@ export function OrderEntry({
     const t = exitPriceFor(v, exitUnit, e);
     if (t !== null) apply(t);
   };
-  const tpHeldPrice = exitHold.tp ? exitPriceFor(exitHold.tp.v, exitHold.tp.unit, 'tp') : null;
-  const slHeldPrice = exitHold.sl ? exitPriceFor(exitHold.sl.v, exitHold.sl.unit, 'sl') : null;
-  useEffect(() => { if (tpHeldPrice !== null && tpHeldPrice !== tpPrice) setTpPrice(tpHeldPrice); }, [tpHeldPrice]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { if (slHeldPrice !== null && slHeldPrice !== slPrice) setSlPrice(slHeldPrice); }, [slHeldPrice]); // eslint-disable-line react-hooks/exhaustive-deps
   // Cleared from elsewhere (placed, reset, another market): nothing is held any more.
   useEffect(() => { if (!tpPrice) setExitHold((h) => (h.tp ? { ...h, tp: null } : h)); }, [tpPrice]);
   useEffect(() => { if (!slPrice) setExitHold((h) => (h.sl ? { ...h, sl: null } : h)); }, [slPrice]);
@@ -1160,7 +1157,17 @@ export function OrderEntry({
   // one made this a second upstream subscription to the same book, its pushes
   // all arriving twice. Without it this is the book panel's own subscription.
   useChannel(engine, subscribeBook ? { channel: 'l2Book', symbol } : null, (d) => {
-    if (d?.b || d?.a) setBook({ bids: d.b ?? [], asks: d.a ?? [], updateID: d.u, blockTime: d.E });
+    // Merged side by side as the book panel does (bookDepth.ts mergeBookSide): a push without one side
+    // used to empty that side here until the next, and the walk - the slippage, the TP/SL entry - fell
+    // back to the last trade for that moment.
+    if (d?.b || d?.a) {
+      setBook((prev) => ({
+        bids: d.b ? mergeBookSide(prev?.bids ?? [], d.b, 'bid') : (prev?.bids ?? []),
+        asks: d.a ? mergeBookSide(prev?.asks ?? [], d.a, 'ask') : (prev?.asks ?? []),
+        updateID: d.u,
+        blockTime: d.E,
+      }));
+    }
   });
 
   /*
@@ -1216,6 +1223,22 @@ export function OrderEntry({
     ? walkBook(levels, liveQty, side, marketExec ? null : limitPx)
     : { avg: null, takes: [] as RawTake[] };
   const touch = side === 'buy' ? bestAsk : bestBid;
+  // The TP/SL entry: the walk of this size for a market order, on every book push (exitEntry.ts).
+  const exitEntryPx = exitEntryFor({
+    type, stopExec, limitPrice: num(price), stopPrice: num(stopPrice), walkAvg: walked.avg, touch, last: num(lastPrice),
+  });
+  /*
+   * The percentage is return on margin at that entry (the comment above `pnlAtPrice`): the order's
+   * value at the entry the exits are solved from, over the leverage; spot, over nothing.
+   */
+  const exitNotional = exitEntryPx * num(quantity);
+  const exitBasis = engine === 'perps' && lev > 0 ? exitNotional / lev : exitNotional;
+  // A held Gain/Loss: its trigger price solved again for this render's entry, in place before the
+  // frame is painted (a layout effect), so the field never shows a price a book push already moved.
+  const tpHeldPrice = exitHold.tp ? exitPriceFor(exitHold.tp.v, exitHold.tp.unit, 'tp') : null;
+  const slHeldPrice = exitHold.sl ? exitPriceFor(exitHold.sl.v, exitHold.sl.unit, 'sl') : null;
+  useLayoutEffect(() => { if (tpHeldPrice !== null && tpHeldPrice !== tpPrice) setTpPrice(tpHeldPrice); }, [tpHeldPrice]); // eslint-disable-line react-hooks/exhaustive-deps
+  useLayoutEffect(() => { if (slHeldPrice !== null && slHeldPrice !== slPrice) setSlPrice(slHeldPrice); }, [slHeldPrice]); // eslint-disable-line react-hooks/exhaustive-deps
   // What the book draws for a limit: the levels a marketable one takes, like a
   // market, and what would rest on its own side - by its TIF (orderImpact.ts limitImpact).
   // Only an order that goes to the book now: a stop waits for its trigger and an
@@ -1448,7 +1471,7 @@ export function OrderEntry({
   useEffect(() => () => publishDraftOrders(null), []);
   const stopCheck =
     engine === 'perps' && activeSl > 0 && effectivePrice > 0
-      ? checkStopAgainstLiquidation(activeSl, { ...riskBase, side })
+      ? checkStopAgainstLiquidation(activeSl, { ...riskBase, side, ...(useSl && exitEntryPx > 0 ? { entryPrice: exitEntryPx } : {}) })
       : null;
   /*
    * A stop against the estimated liquidation price is said by the SL field itself, not
@@ -1462,8 +1485,8 @@ export function OrderEntry({
    * the entry, the side or the prices move; settled for 0.6 s so typing a price
    * digit by digit does not raise one for every keystroke.
    */
-  const tpWrongSide = engine === 'perps' && useTp && effectivePrice > 0
-    && (side === 'buy' ? num(tpPrice) <= effectivePrice : num(tpPrice) >= effectivePrice);
+  const tpWrongSide = engine === 'perps' && useTp && exitEntryPx > 0
+    && (side === 'buy' ? num(tpPrice) <= exitEntryPx : num(tpPrice) >= exitEntryPx);
   /*
    * A Stop order is judged by its own side and kind against the last price: a buy
    * stop-loss (closing a short, or a breakout entry) triggers ABOVE the market, a

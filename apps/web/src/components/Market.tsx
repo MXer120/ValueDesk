@@ -45,6 +45,7 @@ import {
   bucketOf,
   depthFiguresThrough,
   fmtNotional,
+  mergeBookSide,
   rowFigures,
   withCumulative,
   type BookFormat,
@@ -1184,32 +1185,8 @@ const sellShare = (v: number): number => 100 - v;
 
 const fmtIncrement = (v: number, tickSize?: string): string => (v >= 1 ? fmt(v, 0) : fmt(v, precisionOf(tickSize)));
 
-/**
- * Merge a fresh WS top-N snapshot into a deeper REST-sourced ladder.
- *
- * The WS push is always shallower than the real book (see BOOK_REST_DEPTH
- * above), so replacing `old` wholesale - which is what this used to do -
- * throws away every level REST fetched beyond N the instant the first push
- * arrives. Instead: take the fresh levels as the new near end, and keep
- * whatever the old ladder had PAST the fresh batch's worst price - the part
- * WS cannot see and only the next REST poll will actually refresh.
- *
- * ASKS ASCEND, BIDS DESCEND, so "the fresh batch's worst price" is its LAST
- * entry either way - the boundary check just picks which side of it the old
- * tail has to fall on to avoid overlapping (and therefore double-counting) a
- * price the fresh batch already covers.
- */
-function mergeBookSide(
-  old: [string, string][],
-  fresh: [string, string][],
-  side: 'bid' | 'ask',
-): [string, string][] {
-  if (!fresh.length) return old;
-  if (!old.length) return fresh;
-  const boundary = num(fresh[fresh.length - 1]![0]);
-  const tail = old.filter(([p]) => (side === 'ask' ? num(p) > boundary : num(p) < boundary));
-  return [...fresh, ...tail];
-}
+// `mergeBookSide` lives in ./bookDepth with the rest of the book's pure maths: the order ticket merges its
+// pushes the same way (OrderEntry.tsx), so its walk never sees a side a one-sided push left out.
 
 // `BookLevel`, `aggregate` and `withCumulative` live in ./bookDepth - pure and
 // unit-tested there, and shared with the hover popup's cumulative maths so the

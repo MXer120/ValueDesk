@@ -7,7 +7,8 @@
  */
 import type { CopyModeId } from './live';
 
-export const MODE_ORDER: readonly CopyModeId[] = ['browser', 'hosted', 'self'];
+// The default first (useCopy.ts runOn): ValueDesk's executor, then this browser, then a copier of your own.
+export const MODE_ORDER: readonly CopyModeId[] = ['hosted', 'browser', 'self'];
 
 const NAME: Record<CopyModeId, string> = { browser: 'This browser', hosted: 'ValueDesk executor', self: 'Self-hosted' };
 const WHEN: Record<CopyModeId, string> = { browser: 'While this tab is open', hosted: 'Around the clock · Tokyo', self: 'On your own machine' };

@@ -168,7 +168,10 @@ export function useCopyContext({ address, provider, onScan }: CopyPageProps): Co
   const [stored, setStored] = useStored<SetupState>('vs.copy.setup', DEFAULT_SETUP);
   const setup = useMemo(() => normaliseSetup(stored), [stored]);
   const live = useLiveCopy(address, provider);
-  const [runOn, setRunOn] = useStored<CopyModeId>('vs.copy.runOn', 'browser');
+  // ValueDesk's executor by default (owner, 2026-10-29): a copy runs 24/7 without a tab; the browser and a
+  // self-hosted copier stay one click away, and a choice made before is kept. Not set up yet: starting opens
+  // the setup at the step that is missing (terms, sign-in, key, fee approval), as the algo ticket does.
+  const [runOn, setRunOn] = useStored<CopyModeId>('vs.copy.runOn', 'hosted');
   const [setupOpen, setSetupOpen] = useState(false);
   const [setupStarts, setSetupStarts] = useState(false);
 

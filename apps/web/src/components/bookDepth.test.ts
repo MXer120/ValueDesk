@@ -485,3 +485,13 @@ test('the default 1.234,56 format: the same exact digits, its own marks', () => 
     setNumStyle('comma-dot');
   }
 });
+
+test('mergeBookSide: a push replaces the near end, keeps the deeper tail, and an empty side changes nothing', async () => {
+  const { mergeBookSide } = await import('./bookDepth');
+  const old: [string, string][] = [['100', '1'], ['101', '2'], ['102', '3'], ['103', '4']];
+  assert.deepEqual(mergeBookSide(old, [['100.5', '9'], ['101', '1']], 'ask'), [['100.5', '9'], ['101', '1'], ['102', '3'], ['103', '4']]);
+  assert.deepEqual(mergeBookSide(old, [], 'ask'), old, 'a push without this side keeps it (the ticket used to empty it)');
+  assert.deepEqual(mergeBookSide([], [['99', '1']], 'bid'), [['99', '1']]);
+  const bids: [string, string][] = [['99', '1'], ['98', '2'], ['97', '3']];
+  assert.deepEqual(mergeBookSide(bids, [['99.5', '1'], ['98', '5']], 'bid'), [['99.5', '1'], ['98', '5'], ['97', '3']]);
+});
