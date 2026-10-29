@@ -1,5 +1,7 @@
 /**
- * The transfer just sent, hung under the sheet. No history. An up arrow on a
+ * The transfer just sent, under the Transfer button inside the sheet (`inline`;
+ * `edge` hangs it under a Modal's bottom border, which no sheet uses now: out
+ * there it covered the page's bottom tabs). No history. An up arrow on a
  * finished result collapses it once; after that the arrow and the panel are gone.
  */
 import { fmtDecimalString } from '../../numStyle';
@@ -31,7 +33,7 @@ export function TransferStatus({
   mode: DockMode;
   liveId: string | null;
   onMode: (mode: DockMode) => void;
-  /** `edge` sits on the sheet's bottom border. `inline` is the deposit sheet's embedded panel. */
+  /** `inline` sits inside the sheet, under its button. `edge` sits on a Modal's bottom border (Modal `dock`). */
   variant?: 'edge' | 'inline';
   owner?: string | null;
 }) {

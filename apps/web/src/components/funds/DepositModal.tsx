@@ -27,7 +27,7 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'reac
 import { Modal } from '../Modal';
 import { AutoHeight, Collapse, FadeView } from '../motion';
 import { api, type MirrorAsset } from '../../api';
-import { getTradingState, refreshAccount, subscribeTrading } from '../../trading/session';
+import { getTradingState, nudgeAccountCheck, subscribeTrading } from '../../trading/session';
 import { cachedAssetConfigs, chainLabel, type CoinConfig } from '../../trading/funds';
 import { formatUnits, parseUnits } from '../../trading/onboard';
 import { readGateway } from '../../trading/gateway';
@@ -56,7 +56,6 @@ interface Props {
 type View = 'choose' | 'wallet' | 'transfer';
 /** "Transfer from ValueChain" starts at the wallet, into Spot. */
 const WALLET_PRESET = { from: 'evm', to: 'spot' } as const;
-const ACCOUNT_POLL_MS = 5000;
 const ADDRESS_POLL_MS = 8000;
 /** How many more reads while SoDEX issues a new chain's address (sodex.com: every 5 s, about 30 times). */
 const ISSUING_MAX_POLLS = 30;
@@ -104,15 +103,22 @@ export function DepositModal({ open, onClose, address, provider, onEnable }: Pro
   useEffect(() => {
     if (open) setView('choose');
   }, [open]);
-  // A first deposit is remembered - also when the account check answers only
-  // after the sheet opened.
-  useEffect(() => {
-    if (open && noAccount) setOpening(true);
-  }, [open, noAccount]);
+  // Another wallet starts over. Declared before the effect below: effects run
+  // in order, and this reset used to run after it on the first render, so a
+  // sheet that mounted open on a new wallet forgot its first deposit.
   useEffect(() => {
     setOpening(false);
     setMirror(null);
   }, [owner]);
+  // A first deposit is remembered - also when the account check answers only
+  // after the sheet opened - and the session's watch for the account to open
+  // (trading/accountWatch.ts, app-wide, also once this sheet is closed) looks
+  // at its fast pace again.
+  useEffect(() => {
+    if (!open || !noAccount) return;
+    setOpening(true);
+    nudgeAccountCheck(owner);
+  }, [open, noAccount, owner]);
 
   // The wallet's ValueChain USDC (the address menu's read, usually already there) and SoDEX's config.
   useEffect(() => {
@@ -150,22 +156,6 @@ export function DepositModal({ open, onClose, address, provider, onEnable }: Pro
       window.clearTimeout(timer);
     };
   }, [open, owner, view]);
-
-  // A first deposit: watch for the account to open (also while closed).
-  useEffect(() => {
-    if (!owner || !opening || (mine && trading.accountStatus === 'ready')) return;
-    let stop = false;
-    let timer: number | undefined;
-    const tick = async () => {
-      await refreshAccount(owner);
-      if (!stop) timer = window.setTimeout(tick, ACCOUNT_POLL_MS);
-    };
-    void tick();
-    return () => {
-      stop = true;
-      window.clearTimeout(timer);
-    };
-  }, [owner, opening, mine, trading.accountStatus]);
 
   const vcUsdc = wallet?.rows.find((r) => r.chain === 'VALUECHAIN' && r.symbol === 'USDC');
   /** Known once ValueChain answered (a chain with nothing on it has no row). */
@@ -279,6 +269,8 @@ function TransferCrypto({ owner, mirror, onMirror, configs, firstDeposit }: {
   useEffect(() => {
     if (!watch || (watch.stage !== 'done' && watch.stage !== 'failed') || told.current === watch.row.id) return;
     told.current = watch.row.id;
+    // A first deposit that landed opens the account: look now, not at the watch's next turn.
+    if (watch.stage === 'done') nudgeAccountCheck(owner, true);
     const what = `Deposit of ${watch.row.amount ?? ''} ${watch.row.coin}`.replace(/  +/g, ' ');
     announceMoney({ kind: 'deposit', status: watch.stage === 'done' ? 'done' : 'failed', text: `${what} ${watch.stage === 'done' ? 'completed' : 'failed'}` });
   }, [watch]);

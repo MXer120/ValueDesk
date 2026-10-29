@@ -1202,6 +1202,13 @@ button.fx-dock__up .fx-chev {
 @keyframes fx-once-spin { to { --fx-once: 360deg; } }
 .fx-dock--inline .fx-dock__clip,
 .fx-dock--inline .fx-dock__panel { width: 100%; }
+/* Inside the sheet it is a card of its own: round on every corner, no shadow
+   cast outside the sheet. */
+.fx-dock--inline { margin-top: 0; }
+.fx-dock--inline .fx-dock__panel {
+  border-radius: var(--radius-md);
+  box-shadow: none;
+}
 .fx-move {
   display: flex;
   align-items: center;

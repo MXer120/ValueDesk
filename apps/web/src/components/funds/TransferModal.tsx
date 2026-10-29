@@ -17,12 +17,15 @@
  * account.
  *
  * TransferPanel is the whole body, so the Deposit sheet's "Transfer from
- * ValueChain" is this same panel starting at EVM -> Spot. A transfer is NOT a
+ * ValueChain" is this same panel starting at EVM -> Spot. The transfer just
+ * sent shows inside the sheet, under the button (TransferStatus.tsx); it used
+ * to hang below the sheet's bottom edge, where it covered the page's own
+ * bottom tabs (Trade History, ...) through the light scrim. A transfer is NOT a
  * deposit: it only moves funds between the account's own Spot, Perps and EVM,
  * so a wallet SoDEX has never seen gets a pointer to Deposit instead.
  */
 import { fmtDecimalString, toInputText } from '../../numStyle';
-import { useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { Modal } from '../Modal';
 import { getTradingState, subscribeTrading } from '../../trading/session';
 import { confirmMoneyMove } from '../../trading/keyLock';
@@ -67,44 +70,15 @@ interface Props {
 
 const ACCOUNTS: FundsAccount[] = ['spot', 'perps', 'evm'];
 
-interface TransferDockApi {
-  onStart: (id: string) => void;
-  onCancel: () => void;
-  /** Direction change or a fresh sheet: drop the last result so the panel is not left green. */
-  onReset: () => void;
-}
-
 export function TransferModal({ open, onClose, address, provider, onEnable, preset }: Props) {
   const owner = address?.toLowerCase() ?? null;
-  const [mode, setMode] = useState<DockMode>('collapsed');
-  const [liveId, setLiveId] = useState<string | null>(null);
-  // Each opening starts collapsed. The log itself survives.
-  useEffect(() => {
-    if (!open) {
-      setMode('collapsed');
-      setLiveId(null);
-    }
-  }, [open]);
-  const status = useMemo<TransferDockApi>(() => ({
-    onStart: (id) => { setLiveId(id); setMode('live'); },
-    onCancel: () => setMode('collapsed'),
-    onReset: () => { setLiveId(null); setMode('collapsed'); },
-  }), []);
-  // Modal mounts its body only while open: every opening starts fresh from its preset.
+  // Modal mounts its body only while open: every opening starts fresh from its preset, its status collapsed.
   return (
-    <Modal
-      open={open}
-      title="Transfer"
-      onClose={onClose}
-      size="md"
-      className="fx fx-money"
-      dock={<TransferStatus mode={mode} liveId={liveId} onMode={setMode} owner={owner} />}
-      dockOpen={mode !== 'collapsed'}
-    >
+    <Modal open={open} title="Transfer" onClose={onClose} size="md" className="fx fx-money">
       {!owner ? (
         <NoWallet line="Connect a wallet to move funds between your accounts." compact />
       ) : (
-        <TransferPanel owner={owner} provider={provider} onEnable={onEnable} preset={preset} status={status} />
+        <TransferPanel owner={owner} provider={provider} onEnable={onEnable} preset={preset} />
       )}
     </Modal>
   );
@@ -119,8 +93,6 @@ export function TransferPanel(props: {
   onEnable: () => Promise<boolean>;
   /** Where it starts (the address menu's ⇅ opens Spot -> Perps; the Deposit sheet EVM -> Spot). */
   preset?: TransferPreset | null;
-  /** Set when the parent Modal draws the status dock. The deposit sheet omits it. */
-  status?: TransferDockApi;
 }) {
   if (useAccountExists(props.owner) === false) {
     return (
@@ -133,12 +105,11 @@ export function TransferPanel(props: {
   return <TransferForm {...props} />;
 }
 
-function TransferForm({ owner, provider, onEnable, preset, status }: {
+function TransferForm({ owner, provider, onEnable, preset }: {
   owner: string;
   provider: Eip1193Provider | null;
   onEnable: () => Promise<boolean>;
   preset?: TransferPreset | null;
-  status?: TransferDockApi;
 }) {
   const trading = useSyncExternalStore(subscribeTrading, getTradingState, getTradingState);
   const enabled = trading.owner === owner && trading.status === 'enabled';
@@ -155,7 +126,7 @@ function TransferForm({ owner, provider, onEnable, preset, status }: {
   const busyLabel = useStepLabel();
   const [error, setError] = useState<string | null>(null);
   const [glare, setGlare] = useState(false);
-  /** Only used when this panel is embedded (the deposit sheet) and draws its own status. */
+  /** The transfer just sent, shown under the button until dismissed (TransferStatus.tsx). */
   const [mode, setMode] = useState<DockMode>('collapsed');
   const [liveId, setLiveId] = useState<string | null>(null);
   /** Bumped after every attempt, so balances are re-read whatever happened. */
@@ -189,7 +160,11 @@ function TransferForm({ owner, provider, onEnable, preset, status }: {
     };
   }, [owner, coin, reads]);
 
-  const resetDock = () => status?.onReset();
+  /** Direction change: drop the last result so the panel is not left green. */
+  const resetDock = () => {
+    setLiveId(null);
+    setMode('collapsed');
+  };
   /** Picking the other side's account swaps the two, so From and To never match. */
   const pickFrom = (a: FundsAccount) => {
     if (a === from) return;
@@ -238,17 +213,28 @@ function TransferForm({ owner, provider, onEnable, preset, status }: {
   const needsKey = transferNeedsKey(from, to);
   const needsWallet = transferNeedsWallet(from);
   const cta = needsKey && !enabled ? 'Enable Trading' : 'Transfer';
+  /** What the form says now - read after the wallet prompts, which outlast the render that started them. */
+  const form = useRef({ amount, from, to, coin: coin?.coin });
+  form.current = { amount, from, to, coin: coin?.coin };
 
   async function submit() {
     if (!coin) return;
     if (cta === 'Enable Trading') {
       setEnabling(true);
+      let on = false;
       try {
-        await onEnable();
+        on = await onEnable();
       } finally {
         setEnabling(false);
       }
-      return;
+      // The transfer that was asked for goes on by itself once trading is on:
+      // nobody presses Transfer a second time. Not when enabling did not finish,
+      // nothing valid was typed yet, or the form was changed during the prompts.
+      const t = getTradingState();
+      const f = form.current;
+      if (!on || t.owner !== owner || t.status !== 'enabled') return;
+      if (!amount || problem || amtUnits <= 0n || (needsWallet && !provider)) return;
+      if (f.amount !== amount || f.from !== from || f.to !== to || f.coin !== coin.coin) return;
     }
     // The user lock (trading/keyLock.ts) asks again before money moves; cancel = nothing happens.
     if (!(await confirmMoneyMove(owner, `Transfer ${showText(amtUnits)} ${coin.coin}`))) return;
@@ -264,8 +250,8 @@ function TransferForm({ owner, provider, onEnable, preset, status }: {
     if (opening) setStep(opening);
     setBusy(true);
     setError(null);
-    if (status) status.onStart(id);
-    else { setLiveId(id); setMode('live'); }
+    setLiveId(id);
+    setMode('live');
     setGlare(true);
     window.setTimeout(() => setGlare(false), 750);
     try {
@@ -281,12 +267,11 @@ function TransferForm({ owner, provider, onEnable, preset, status }: {
     } catch (e) {
       if (isUserRejection(e)) {
         dropTransfer(id);
-        if (status) status.onCancel();
-        else setMode('collapsed');
+        setMode('collapsed');
       } else {
+        // The status under the button turns red with SoDEX's or the wallet's reason (not repeated below it).
         const message = e instanceof WalletError || e instanceof RangeError ? e.message : String((e as Error)?.message ?? e);
         finishTransfer(id, 'failed', message);
-        setError(message);
       }
     } finally {
       setStep(null);
@@ -399,7 +384,7 @@ function TransferForm({ owner, provider, onEnable, preset, status }: {
         </>
       )}
       {error && <p className="fx-note fx-note--err">{error}</p>}
-      {!status && <TransferStatus variant="inline" mode={mode} liveId={liveId} onMode={setMode} owner={owner} />}
+      <TransferStatus variant="inline" mode={mode} liveId={liveId} onMode={setMode} owner={owner} />
     </AutoHeight>
   );
 }

@@ -101,7 +101,9 @@ import { followTerms } from './terms';
 import { OutcomeUnknownError, readGateway, sendSigned } from './gateway';
 import { KeyLockedError, openVault, type KeyVault, type StoredKey } from './vault';
 import { lockKind, lockNow, onLockEvent, requestUnlock, setLockResealer, touch as touchLock, userKeyFor } from './keyLock';
+import { createAccountWatch } from './accountWatch';
 import { addOrSwitchChain, getChainId, isUserRejection, signTypedData, type Eip1193Provider } from '../wallet';
+import { isHidden, onShown } from '../exchange/visibility';
 import { logger } from '../log';
 
 const log = logger('trade');
@@ -229,6 +231,7 @@ const announce = (owner: string, network: Network) => channel?.postMessage({ own
 
 function set(next: TradingState): void {
   state = next;
+  followAccount();
   for (const l of listeners) {
     try {
       l();
@@ -236,6 +239,43 @@ function set(next: TradingState): void {
       log.error('trading state listener failed', { error: String(e) });
     }
   }
+}
+
+/*
+ * A wallet with no account yet is looked up again until its first deposit
+ * opens one (accountWatch.ts) - wherever that deposit was made - so every
+ * "deposit first" in the app turns into the normal view without a reload.
+ * Only in a browser: outside one (tests, tooling) nothing here may keep the
+ * process alive or read on its own.
+ */
+const inBrowser = typeof window !== 'undefined' && typeof document !== 'undefined';
+const accountWatch = createAccountWatch({
+  check: (owner) => refreshAccount(owner),
+  setTimer: (fn, ms) => setTimeout(fn, ms),
+  clearTimer: (t) => clearTimeout(t as ReturnType<typeof setTimeout>),
+  now: () => Date.now(),
+  hidden: isHidden,
+});
+let accountWatchWired = false;
+
+function followAccount(): void {
+  if (!inBrowser) return;
+  if (!accountWatchWired) {
+    accountWatchWired = true;
+    // Back from the wallet, sodex.com or an exchange: look at once.
+    window.addEventListener('focus', () => accountWatch.shown());
+    onShown(() => accountWatch.shown());
+  }
+  accountWatch.follow(state.owner && state.accountStatus === 'none' ? state.owner : null);
+}
+
+/**
+ * A first deposit may be on its way for `owner` (the Deposit sheet opened on
+ * it, or saw the deposit land): look the account up again soon - `now`: at
+ * once - and start the watch's waits over.
+ */
+export function nudgeAccountCheck(owner: string | null, now = false): void {
+  if (owner && state.owner === owner.toLowerCase()) accountWatch.nudge(now);
 }
 
 export const getTradingState = (): TradingState => state;
@@ -459,7 +499,7 @@ export async function sodexAccountId(owner: string): Promise<number> {
 
 /**
  * Look the connected wallet's account up again (on connect, and while the
- * Create-account dialog waits for the first deposit to land).
+ * first deposit is awaited: accountWatch.ts).
  */
 export async function refreshAccount(owner: string | null = state.owner): Promise<AccountStatus> {
   if (!owner) return 'unknown';
@@ -1287,6 +1327,7 @@ export function _resetTradingForTests(v?: KeyVault): void {
   dropSigner();
   accounts.clear();
   state = OFF(null);
+  accountWatch.follow(null);
   vaultP = v ? Promise.resolve(v) : null;
   nonceMgr = createMemoryNonceManager();
 }
