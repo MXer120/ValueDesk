@@ -7,14 +7,16 @@
  *   npx tsx apps/executor/tools/live-test/run.ts               the live run (resumes where it stopped)
  *
  * Options: --target self|hosted|browser (default self)  --only <ids,kinds,sections,prefix.*>
- *          --force  --slow  --adopt  --env <file> (default .env.live here)  --keep-data  --help
+ *          --force  --slow  --adopt  --env <file> (default .env.live here)  --keep-data
+ *          --web <origin>  --headed (browser target)  --help
  *
  * THE TARGET (target.ts) is the executor the scenarios run against: self, an
  * executor process started here from this checkout (what the suite always
  * did); hosted, ValueDesk's own executor through the site; browser, the web
- * app's runtime through the web test bridge (not here yet). A scenario that
- * needs what a target cannot do (a hard restart of ValueDesk's executor) is
- * skipped there, with why. Each target keeps its own state file.
+ * app's runtime in a tab of Microsoft Edge on the local dev web, through the
+ * web test bridge (browserDriver.ts) - the dev web must be running already. A
+ * scenario that needs what a target cannot do (a hard restart of ValueDesk's
+ * executor) is skipped there, with why. Each target keeps its own state file.
  *
  * THE LEADER (leader.ts) trades on SoDEX (default) or on Hyperliquid
  * (LIVE_LEADER_VENUE=hyperliquid, its key LIVE_HL_LEADER_KEY): the copy
@@ -53,6 +55,7 @@ import { CATALOGUE, countByKind } from './catalogue.ts';
 import { flatten, startDecision, type FlattenVenue } from './cleanup.ts';
 import { egress } from '../../src/net.ts';
 import { SodexReads, SodexWallet } from './exchange.ts';
+import { WebBridgeDriver, devWebFor, openWebSession } from './browserDriver.ts';
 import { CopyWallet, ExecutorProcess } from './executor.ts';
 import { VolumeStub } from './feeStub.ts';
 import { CheckFailed, Inconclusive, T, Unavailable, type Env } from './harness.ts';
@@ -79,6 +82,10 @@ interface Args {
   only: string[] | null;
   envFile: string;
   target: TargetName;
+  /** The browser target's dev web (else VS_E2E_WEB, else the first local Vite port serving ValueDesk). */
+  web: string | null;
+  /** The browser target: show Edge. */
+  headed: boolean;
 }
 
 const HELP = `live-test: algo orders and copy trading with real money on SoDEX mainnet (README.md)
@@ -87,7 +94,9 @@ const HELP = `live-test: algo orders and copy trading with real money on SoDEX m
   --dry           run every scenario on paper against live data (throwaway wallets, no funds)
   --target <t>    the executor the scenarios run against: self (default: one started here from this
                   checkout), hosted (ValueDesk's executor, through www.valuedesk.so), browser (the web
-                  app's runtime, through the web test bridge)
+                  app's runtime in Microsoft Edge on the local dev web, which must be running)
+  --web <origin>  browser target: the dev web (default: VS_E2E_WEB, else 127.0.0.1:5180-5183)
+  --headed        browser target: show Edge
   --only <list>   comma-separated ids (twap.taker-buy), prefixes (twap.*), kinds (twap) or sections (algo, copy)
   --force         run even what passed on this code
   --slow          include the slow scenarios (vwap.full, copy.tp-fires)
@@ -100,7 +109,7 @@ const HELP = `live-test: algo orders and copy trading with real money on SoDEX m
 `;
 
 function parseArgs(argv: string[]): Args {
-  const a: Args = { dry: false, budget: false, force: false, slow: false, adopt: false, keepData: false, only: null, envFile: join(HERE, '.env.live'), target: 'self' };
+  const a: Args = { dry: false, budget: false, force: false, slow: false, adopt: false, keepData: false, only: null, envFile: join(HERE, '.env.live'), target: 'self', web: null, headed: false };
   for (let i = 0; i < argv.length; i++) {
     const x = argv[i]!;
     if (x === '--dry') a.dry = true;
@@ -112,6 +121,8 @@ function parseArgs(argv: string[]): Args {
     else if (x === '--only') a.only = (argv[++i] ?? '').split(',').map((s) => s.trim()).filter(Boolean);
     else if (x === '--env') a.envFile = resolve(argv[++i] ?? '');
     else if (x === '--target') a.target = targetName(argv[++i]);
+    else if (x === '--web') a.web = (argv[++i] ?? '').trim() || null;
+    else if (x === '--headed') a.headed = true;
     else if (x === '--help' || x === '-h') {
       process.stdout.write(HELP);
       process.exit(0);
@@ -190,10 +201,19 @@ async function stopStale(state: RunState): Promise<void> {
 /**
  * The target's executor, its client signed by the follower's wallet. Self: a new data folder every
  * run (nothing of a crashed run is resumed by it), the follower's volume read from the runner's stub.
+ * Browser: a tab of Edge on the dev web, whose test wallet holds the follower's key in this process
+ * (the page sees addresses and signatures only); a new browser profile every run.
  */
-function makeTarget(name: TargetName, o: { mode: Mode; owner: string; wallet: CopyWallet; stamp: string; feeStub: VolumeStub | null }): ExecutorTarget {
+function makeTarget(
+  name: TargetName,
+  o: { mode: Mode; owner: string; wallet: CopyWallet; stamp: string; feeStub: VolumeStub | null; browser: { web: string; key: Uint8Array; headed: boolean } | null },
+): ExecutorTarget {
   if (name === 'hosted') return new HostedTarget(o.wallet, o.mode);
-  if (name === 'browser') return new BrowserTarget(o.mode);
+  if (name === 'browser') {
+    const b = o.browser!;
+    const session = () => openWebSession(REPO, { origin: b.web, privateKey: bytesToHex(b.key), live: o.mode === 'live', headed: b.headed, log: (l) => log(`  ${l}`) });
+    return new BrowserTarget(o.mode, new WebBridgeDriver({ mode: o.mode, origin: b.web, follower: o.owner, session, log }));
+  }
   const proc = new ExecutorProcess({
     mode: o.mode,
     owner: o.owner,
@@ -256,7 +276,11 @@ async function main(): Promise<number> {
     book: pick.book,
     U,
     builderRate: COPY_FEE_MAX / 100_000,
-    builderWhy: caps.localFeeStub ? 'the copy ladder\'s top step: the runner\'s stub answers $0 of volume, and the fee scenarios, which walk the ladder, are costed at the top step too' : 'the copy ladder\'s top step, the most it charges: ValueDesk\'s executor charges the step of the follower\'s 14-day volume',
+    builderWhy: caps.localFeeStub
+      ? 'the copy ladder\'s top step: the runner\'s stub answers $0 of volume, and the fee scenarios, which walk the ladder, are costed at the top step too'
+      : args.target === 'browser'
+        ? 'the copy ladder\'s top step: a browser charges it on copies, and the dev web builder\'s trading fee on an algo\'s children'
+        : 'the copy ladder\'s top step, the most it charges: ValueDesk\'s executor charges the step of the follower\'s 14-day volume',
     leverage: 2,
     leader: await leaderCostsOf(leaderVenue, main, hl),
   });
@@ -270,6 +294,9 @@ async function main(): Promise<number> {
   if (args.budget) return 0;
 
   if (caps.paperOnly && !args.dry) throw new Error(`The ${args.target} target runs paper only for now: use --dry.`);
+  // The browser target runs in the local dev web, which the runner never starts itself: it must answer, and serve this checkout.
+  const web = args.target === 'browser' ? await devWebFor(REPO, args.web) : null;
+  if (web) log(`dev web ${web} (this checkout's), in Microsoft Edge${args.headed ? ' (shown)' : ''}`);
   if (!args.dry && env.LIVE_ACCEPT_TERMS !== COPY_TERMS_VERSION) {
     throw new Error(`The runner signs the copy terms ${COPY_TERMS_VERSION} in your name. Read them (ValueDesk -> Copy -> terms, or apps/web/src/legal/copyTerms.ts) and set LIVE_ACCEPT_TERMS=${COPY_TERMS_VERSION} in ${args.envFile}.`);
   }
@@ -288,7 +315,7 @@ async function main(): Promise<number> {
   const feeStub = caps.localFeeStub ? new VolumeStub(followerAddress) : null;
   await feeStub?.start();
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const target = makeTarget(args.target, { mode, owner: followerAddress, wallet: new CopyWallet(fpk), stamp, feeStub });
+  const target = makeTarget(args.target, { mode, owner: followerAddress, wallet: new CopyWallet(fpk), stamp, feeStub, browser: web ? { web, key: fpk, headed: args.headed } : null });
   started = target;
 
   // The region rule is the stricter of the declared country and the one the target sees the requests come from (ValueDesk's: its edge's).
@@ -353,7 +380,7 @@ async function main(): Promise<number> {
     }
   }
 
-  // The target: self starts its executor process here; hosted reads ValueDesk's /info and /health.
+  // The target: self starts its executor process here; hosted reads ValueDesk's /info and /health; browser opens the page.
   await target.start();
   state.executor = target.processRecord();
   saveState(stateFile, state);

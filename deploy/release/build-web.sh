@@ -58,6 +58,11 @@ VITE_VARS=(
   VITE_ALLOW_MAINNET_TRADING VITE_TRADING_DISABLED VITE_TRADING_KEY_TTL_H
   VITE_CHART VITE_FEEDBACK_URL
 )
+# Variables for a dev server only (apps/web/.env.local), exported EMPTY to every build whatever a
+# file says; a settings file that names one is refused. VITE_LIVE_ALGOS_WALLETS lets the live test
+# suite's wallets start real algo orders on the dev server (apps/web/src/algo/liveAlgos.ts, which a
+# build for a deployment does not read anyway).
+DEV_ONLY_VARS=(VITE_LIVE_ALGOS_WALLETS)
 
 WEB_ENV="${WEB_ENV_FILE:-deploy/release/web.env}"
 if [ -f "$WEB_ENV" ]; then
@@ -75,6 +80,12 @@ for v in "${VITE_VARS[@]}"; do
   esac
   export "$v=$value"
 done
+for v in "${DEV_ONLY_VARS[@]}"; do
+  if [ -f "$WEB_ENV" ] && grep -qE "^[[:space:]]*(export[[:space:]]+)?$v[[:space:]]*=" "$WEB_ENV"; then
+    die "$WEB_ENV sets $v, which is for a dev server only (apps/web/.env.local) - remove it"
+  fi
+  export "$v="
+done
 # A public build never makes the builder fee optional (apps/web/src/trading/config.ts).
 if [ "$PUBLIC" = 1 ] && [ "$VITE_BUILDER_REQUIRED" = 0 ]; then
   die "VITE_BUILDER_REQUIRED=0 (the fee optional) is for test builds only - not with --public"
@@ -86,7 +97,7 @@ fi
 
 # Vite also reads apps/web/.env, .env.local, .env.production and .env.production.local.
 # Variables exported above win over those files; a VITE_* name we do not export would not.
-known=" ${VITE_VARS[*]} "
+known=" ${VITE_VARS[*]} ${DEV_ONLY_VARS[*]} "
 for f in apps/web/.env apps/web/.env.local apps/web/.env.production apps/web/.env.production.local; do
   [ -f "$f" ] || continue
   while IFS= read -r name; do
@@ -99,6 +110,7 @@ for v in "${VITE_VARS[@]}"; do
   shown="${!v}"; [ -n "$shown" ] || shown="(empty)"
   note "  $v=$shown"
 done
+for v in "${DEV_ONLY_VARS[@]}"; do note "  $v=(empty: a dev server's only)"; done
 run npm --prefix apps/web run build
 
 DIST=apps/web/dist

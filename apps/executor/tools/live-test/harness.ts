@@ -13,6 +13,10 @@
  * stop it holds, a leader's real trade - is wrapped in `t.live(...)`: counted
  * in a dry run as "not checked here", never as passed.
  *
+ * ON THE BROWSER TARGET the "executor" is the web app's runtime in a tab
+ * (browserDriver.ts): its restart is a reload of the page, and it can also
+ * close the tab (closeTab), after which the app stops the tab's algos.
+ *
  * THE LEADER trades on SoDEX or on Hyperliquid (leader.ts, LIVE_LEADER_VENUE).
  * A scenario names SoDEX markets (`t.leader({ buyUsd }, 'BTC-USD')`); the
  * harness trades the leader's own market of it ('BTC' on Hyperliquid), or one
@@ -558,15 +562,33 @@ export class T {
   /**
    * Kill the executor hard, do `whileDown`, start it again on the same data, and wait until it lists
    * what it had. Only where the target lets the runner (a scenario that calls it declares needs: ['restart']).
+   * The browser target's restart is a reload: the page goes away and comes back in the same profile.
    */
   async restart(o: { downMs?: number; whileDown?: () => Promise<void> } = {}): Promise<void> {
     const target = this.env.target;
     if (!target.capabilities.restart) throw new Unavailable(`the ${target.name} target cannot be restarted from here`);
-    this.note('killing the executor (no shutdown code runs)');
+    const hard = target.capabilities.kill;
+    this.note(hard ? 'killing the executor (no shutdown code runs)' : 'the page goes away, as on a reload (its pagehide runs)');
     await target.kill();
     if (o.whileDown) await o.whileDown();
     if (o.downMs) await new Promise((r) => setTimeout(r, o.downMs));
     await target.start();
-    this.note('the executor is up again on the same data folder');
+    this.note(hard ? 'the executor is up again on the same data folder' : 'the page is back in the same profile (its storage kept)');
+  }
+
+  /**
+   * Close the browser tab that runs the algos, wait `downMs` (not scaled for a dry run: the web app
+   * tells a close from a reload by the time), and open the app again in a new tab. Only where the
+   * target lets the runner (needs: ['tabClose']).
+   */
+  async closeTab(o: { downMs: number }): Promise<void> {
+    const target = this.env.target;
+    if (!target.capabilities.tabClose || !target.closeTab) throw new Unavailable(`the ${target.name} target has no browser tab to close`);
+    this.alive();
+    this.note('closing the tab that runs the algos');
+    await target.closeTab();
+    await new Promise((r) => setTimeout(r, o.downMs));
+    await target.start();
+    this.note(`the app is open again in a new tab, ${Math.round(o.downMs / 1000)} s later`);
   }
 }

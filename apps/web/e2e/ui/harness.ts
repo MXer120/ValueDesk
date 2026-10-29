@@ -115,28 +115,10 @@ export function uiSuite(file = process.argv[1] ?? 'spec') {
 
   async function newEnv(path: string, o: OpenOptions): Promise<TestEnv> {
     if (!browser) throw new Error('the browser did not start');
-    const ctx = await browser.newContext({
-      viewport: { width: 1600, height: 1000 },
-      locale: 'en-US',
-      timezoneId: 'UTC',
-      colorScheme: 'dark',
-      serviceWorkers: 'block',
-    });
-    ctx.setDefaultTimeout(15_000);
-    await ctx.addInitScript({ content: NAME_SHIM });
-    // Vite's HMR socket answered here and never forwarded: other sessions editing the shared dev
-    // tree must not hot-swap modules (or remount the app) under a running test.
-    await ctx.routeWebSocket(
-      (u) => u.pathname === '/' && u.searchParams.has('token'),
-      (ws) => {
-        ws.send(JSON.stringify({ type: 'connected' }));
-        ws.onMessage(() => {});
-      },
-    );
     const key = LIVE ? process.env.VS_E2E_KEY?.trim() : undefined;
     if (LIVE && !key) throw new Error('--live needs VS_E2E_KEY');
     const wallet = createTestWallet({ privateKey: key });
-    await wallet.install(ctx);
+    const ctx = await newUiContext(browser, wallet, o.storage);
     const errors: string[] = [];
     const watch = (p: Page) => {
       p.on('console', (m) => {
@@ -149,15 +131,6 @@ export function uiSuite(file = process.argv[1] ?? 'spec') {
     ctx.on('page', watch);
     await meter(page);
     ctx.on('page', (p) => void meter(p));
-    {
-      const seed = { 'vs.numberFormat': NUM_STYLE, ...o.storage };
-      await ctx.addInitScript((s: Record<string, string>) => {
-        // Only on the first load of each origin: a later reload keeps what the app wrote.
-        if (sessionStorage.getItem('vs.e2e.seeded')) return;
-        sessionStorage.setItem('vs.e2e.seeded', '1');
-        for (const [k, v] of Object.entries(s)) localStorage.setItem(k, v);
-      }, seed);
-    }
     await o.setup?.(ctx, page);
     const env: TestEnv = {
       origin,
@@ -208,6 +181,42 @@ export function uiSuite(file = process.argv[1] ?? 'spec') {
   }
 
   return { test, get origin() { return origin; } };
+}
+
+/**
+ * A fresh browser context as every spec gets one, and the live suite's browser target too
+ * (bridgeSession.ts): empty storage, en-US, UTC, 1600x1000, service workers blocked, the `__name`
+ * shim, Vite's HMR socket answered here, the wallet installed, and `storage` (with the pinned
+ * number format) written before the app's first script on the first load of the origin.
+ */
+export async function newUiContext(browser: Browser, wallet: TestWallet, storage: Record<string, string> = {}): Promise<BrowserContext> {
+  const ctx = await browser.newContext({
+    viewport: { width: 1600, height: 1000 },
+    locale: 'en-US',
+    timezoneId: 'UTC',
+    colorScheme: 'dark',
+    serviceWorkers: 'block',
+  });
+  ctx.setDefaultTimeout(15_000);
+  await ctx.addInitScript({ content: NAME_SHIM });
+  // Vite's HMR socket answered here and never forwarded: other sessions editing the shared dev
+  // tree must not hot-swap modules (or remount the app) under a running test.
+  await ctx.routeWebSocket(
+    (u) => u.pathname === '/' && u.searchParams.has('token'),
+    (ws) => {
+      ws.send(JSON.stringify({ type: 'connected' }));
+      ws.onMessage(() => {});
+    },
+  );
+  await wallet.install(ctx);
+  const seed = { 'vs.numberFormat': NUM_STYLE, ...storage };
+  await ctx.addInitScript((s: Record<string, string>) => {
+    // Only on the first load of each origin: a later reload keeps what the app wrote.
+    if (sessionStorage.getItem('vs.e2e.seeded')) return;
+    sessionStorage.setItem('vs.e2e.seeded', '1');
+    for (const [k, v] of Object.entries(s)) localStorage.setItem(k, v);
+  }, seed);
+  return ctx;
 }
 
 /* ------------------------------------------------------------------ the app's gates ----- */

@@ -80,7 +80,7 @@ async function call<T>(client: ExecutorClient, method: 'GET' | 'POST', path: str
 
 /** Start an algo on an executor: one wallet signature over the spec. */
 export async function startOn(mode: ExecutorMode, spec: unknown, seed: number): Promise<AlgoView> {
-  requirePaperAlgo(spec);
+  requirePaperAlgo(spec, getLiveCopy().owner);
   const { owner, provider } = needWallet();
   const client = clientFor(mode);
   const info = getLiveCopy()[mode].info;

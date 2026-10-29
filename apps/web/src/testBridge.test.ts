@@ -53,10 +53,11 @@ test('the bridge installs only on the dev server', () => {
   assert.equal(dev.__vsTest, first, 'installed once');
 });
 
-test('the seam keeps its shape (version 1): a change here is a new version for the live suite', () => {
+test('the seam keeps its shape (version 2): a change here is a new version for the live suite', () => {
   const b = createTestBridge();
-  assert.equal(b.version, 1);
+  assert.equal(b.version, 2);
+  assert.equal(typeof b.about, 'function');
   assert.deepEqual(Object.keys(b.algos).sort(), ['cancel', 'cancelAll', 'check', 'events', 'follow', 'list', 'owner', 'pause', 'resume', 'role', 'start', 'update']);
-  assert.deepEqual(Object.keys(b.copier).sort(), ['answer', 'confirms', 'events', 'key', 'list', 'owner', 'pause', 'resume', 'role', 'start', 'stop', 'stopAll']);
+  assert.deepEqual(Object.keys(b.copier).sort(), ['acceptTerms', 'answer', 'confirms', 'events', 'key', 'list', 'makeKey', 'owner', 'pause', 'resume', 'role', 'start', 'stop', 'stopAll', 'terms', 'update', 'verifyKey']);
   for (const fn of [...Object.values(b.algos), ...Object.values(b.copier)]) assert.equal(typeof fn, 'function');
 });

@@ -469,7 +469,7 @@ class BrowserAlgos {
     let id: string | undefined;
     switch (cmd.op) {
       case 'add': {
-        requirePaperAlgo(cmd.spec);
+        requirePaperAlgo(cmd.spec, this.owner);
         const s = requireSignerOrPaper(cmd.spec, this.owner!);
         const a = await rt.add({
           owner: this.owner!,
@@ -500,7 +500,7 @@ class BrowserAlgos {
         // (the runtime also refuses any field but the limit, bounds, spread guard, label and size).
         const a = rt.get(cmd.id);
         if (!a) throw new Error('No such algo.');
-        requirePaperAlgo({ ...a.spec, ...cmd.patch });
+        requirePaperAlgo({ ...a.spec, ...cmd.patch }, this.owner);
         await rt.update(cmd.id, cmd.patch);
         break;
       }

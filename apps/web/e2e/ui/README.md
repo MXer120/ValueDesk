@@ -86,17 +86,22 @@ answered as a user's Reject (4001), so a flow can be walked to the wallet withou
 ## The test bridge (`window.__vsTest`, `src/testBridge.ts`)
 
 Dev only: `main.tsx` imports it inside `if (import.meta.env.DEV)`, which a production build drops together with
-the module (`src/testBridge.test.ts` proves it, in web-unit). Version 1; every answer is plain JSON.
+the module (`src/testBridge.test.ts` proves it, in web-unit). Version 2; every answer is plain JSON.
 
 ```ts
 await page.evaluate(() => window.__vsTest!.algos.start(spec));   // follows the wallet or the paper book, as the ticket's Start does
+// about():  the wallet, network, builder and its fees, brake, copy terms, region, whether real algos are on for the wallet
 // algos:  role owner follow check start list pause resume cancel cancelAll update events
-// copier: role owner key start(settings) list pause resume stop stopAll events confirms answer
+// copier: role owner key terms acceptTerms(country) makeKey verifyKey start(settings) list update pause resume stop stopAll events confirms answer
 ```
 
-It is the seam for a later live-suite "browser target". Live algos and copies stay behind the UI's own gates
-(`liveAlgos.ts`, the copy key): the bridge adds no way around them, and `algoTicket.spec.ts` checks that a live
-spec is refused.
+Version 2 added `about`, `copier.acceptTerms`, `terms`, `update`, `makeKey` and `verifyKey` for the live suite's
+browser target (`apps/executor/tools/live-test`, `--target browser`), whose page is `bridgeSession.ts` here: these
+specs' Edge, context (`newUiContext`) and wallet, driven by the live runner. Live algos and copies stay behind the
+UI's own gates (`liveAlgos.ts`, the copy key): the bridge adds no way around them, and `algoTicket.spec.ts` checks
+that a live spec is refused. A key `makeKey` made is kept only once SoDEX lists it under the wallet (the wallet
+registered it). Real algos start on a dev server only for the wallets in `VITE_LIVE_ALGOS_WALLETS`
+(`apps/web/.env.local`), never in a build for a deployment.
 
 ## What each spec covers
 

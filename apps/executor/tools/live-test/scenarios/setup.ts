@@ -82,7 +82,8 @@ export const SETUP_SCENARIOS: Scenario[] = [
     cost: () => ({ takerUsd: 0, makerUsd: 0, peakUsd: 0, walletSignatures: 1 }),
     async run(t) {
       const info = await t.exec.info();
-      t.check(info.builder?.id === t.env.builderId, `the executor's orders carry builder ${info.builder?.id}`);
+      // None (a dev web without VITE_BUILDER_ID, on the browser target; a live run there refuses it) is 0, as the runner counts it.
+      t.check((info.builder?.id ?? 0) === t.env.builderId, `the executor's orders carry builder ${info.builder?.id ?? 'none'}`);
       await t.live(`SoDEX lists an approval of builder ${t.env.builderId} at >= ${t.env.builderFee / 10} bp`, async () => {
         let rate = await t.env.reads.builderApproval(t.env.followerAddress, t.env.builderId);
         t.note(`approval before: ${rate ?? 'none'}`);
@@ -99,6 +100,8 @@ export const SETUP_SCENARIOS: Scenario[] = [
     confirms: 'an imported key that SoDEX lists under its own name signs real orders; the executor\'s own key is registered again after',
     deps: [],
     source: SOURCE,
+    // A browser makes its own copy key: nothing is imported into it.
+    needs: ['keyImport'],
     dry: 'spec',
     timeoutMs: 4 * 60_000,
     cost: (U) => ({ takerUsd: 4 * U, makerUsd: 0, peakUsd: 2 * U, walletSignatures: 2 }),

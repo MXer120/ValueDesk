@@ -22,9 +22,16 @@
  *            algo orders reach it only for a wallet the owner lets
  *            (EXECUTOR_LIVE_ALGOS_WALLETS on server 2). What it records stays:
  *            the terms, the keys, the algos and copies of the wallets used.
- *   browser  the web app's own runtime (apps/web/src/algo, copy, trading),
- *            through the dev-only web test bridge (BrowserDriver below). Not
- *            here yet: starting it says so.
+ *   browser  the web app's own runtime (apps/web/src/algo, copy, trading) in a
+ *            tab of Microsoft Edge on the local dev web, through the dev-only
+ *            web test bridge (BrowserDriver below; browserDriver.ts). Its
+ *            restart is a reload: the page goes away and comes back in the
+ *            same profile, which the web app keeps its algos running through
+ *            (tabLife.ts) - not hard, so `kill` stays false. It also closes the
+ *            tab (tabClose), after which the app stops them for good. It makes
+ *            its own copy key: nothing is imported into it. Real algo orders
+ *            start there only for a wallet the dev web lets
+ *            (VITE_LIVE_ALGOS_WALLETS in apps/web/.env.local).
  *
  * What a target cannot do, a scenario that needs it (`needs`, scenario.ts) is
  * skipped for, with why. Nothing else about a scenario changes; it reaches the
@@ -45,7 +52,7 @@ export function targetName(v: string | undefined): TargetName {
 }
 
 export interface TargetCapabilities {
-  /** Killed hard and started again on the same data, by the runner (the restart scenarios). */
+  /** Stopped and started again on the same data, by the runner (the restart scenarios): killed hard where `kill`; the browser reloads. */
   restart: boolean;
   /** Killed hard by the runner (no shutdown code runs). */
   kill: boolean;
@@ -58,22 +65,28 @@ export interface TargetCapabilities {
    * the ladder. Without it any step of the ladder the exchange shows is accepted, and noted.
    */
   localFeeStub: boolean;
+  /** It takes a SoDEX key the follower made (key import); a browser makes its own copy key. */
+  keyImport: boolean;
+  /** The runner closes the browser tab that runs the algos and opens the app again later (ExecutorTarget.closeTab). */
+  tabClose: boolean;
 }
 
 /** What a scenario may need of a target. */
-export type Capability = 'restart' | 'kill' | 'localFeeStub';
+export type Capability = 'restart' | 'kill' | 'localFeeStub' | 'keyImport' | 'tabClose';
 
 export const CAPABILITIES: Readonly<Record<TargetName, TargetCapabilities>> = {
-  self: { restart: true, kill: true, localFeeStub: true },
-  hosted: { restart: false, kill: false, localFeeStub: false },
-  // Until the web test bridge says what it can do: the narrowest set - nothing restarted, paper only.
-  browser: { restart: false, kill: false, paperOnly: true, localFeeStub: false },
+  self: { restart: true, kill: true, localFeeStub: true, keyImport: true, tabClose: false },
+  hosted: { restart: false, kill: false, localFeeStub: false, keyImport: true, tabClose: false },
+  // A restart is a reload of the page (not hard); real algos need the dev web's VITE_LIVE_ALGOS_WALLETS, copies nothing.
+  browser: { restart: true, kill: false, localFeeStub: false, keyImport: false, tabClose: true },
 };
 
 const CAN: Record<Capability, string> = {
   restart: 'kill the executor and start it again on the same data',
   kill: 'kill the executor hard',
   localFeeStub: 'answer the executor\'s reads of the follower\'s volume (the copy fee step) itself',
+  keyImport: 'be given a SoDEX key the follower made (key import)',
+  tabClose: 'close the browser tab that runs the algos and open the app again',
 };
 
 /** Why a scenario cannot run on a target (what it needs that the target lacks), or null. */
@@ -118,8 +131,13 @@ export interface ExecutorTarget extends ExecutorApi {
   start(): Promise<void>;
   /** The end of a run: nothing of it left running here. ValueDesk's executor runs on. */
   stop(): Promise<void>;
-  /** Kill it hard, no shutdown code runs (capability kill); start() brings it back on the same data. */
+  /**
+   * Take it down for a restart; start() brings it back on the same data. Hard, no shutdown code
+   * runs, where capability kill; the browser's page navigates away instead (a reload's first half).
+   */
   kill(): Promise<void>;
+  /** Close the browser tab that runs the algos (capability tabClose); start() opens the app again in a new one. */
+  closeTab?(): Promise<void>;
   /** Whether it answers now. */
   health(): Promise<{ ok: boolean; why?: string }>;
   /** Set when it went away on its own (a local process that exited): why. A scenario waiting on it fails with it. */
@@ -334,18 +352,28 @@ export class HostedTarget extends ExecutorClient implements ExecutorTarget {
 /**
  * THE SEAM FOR THE BROWSER TARGET. The web app's own runtime in a page, driven
  * through the dev-only test bridge (window.__vsTest) and the browser tooling
- * that live in apps/web (e2e) - built elsewhere; no browser automation lives in
- * this folder. A driver answers the same calls as the executor's API, so every
- * scenario runs unchanged, and opens and closes the page. The harness's checks
- * still read SoDEX (live) or the runtime's paper book through these calls (dry).
+ * that live in apps/web (e2e/ui); browserDriver.ts is the driver, and loads the
+ * page from there - no browser automation lives in this folder. A driver
+ * answers the same calls as the executor's API, in its shapes, so every
+ * scenario runs unchanged, and opens, leaves and closes the page. The
+ * harness's checks still read SoDEX (live) or the runtime's paper book through
+ * these calls (dry).
  */
 export interface BrowserDriver extends ExecutorApi {
-  /** Open the page with the follower's wallet, and wait until the runtime answers. */
+  /** Where the page runs, for the log. */
+  readonly where?: string;
+  /** Open the page with the follower's wallet (again, after leave), and wait until the runtime answers. */
   open(): Promise<void>;
-  /** Close the page (its runtime stops). */
+  /** The page goes away: 'reload' navigates it away (open() then reloads it), 'close' closes the tab (open() opens a new one). */
+  leave(how: 'reload' | 'close'): Promise<void>;
+  /** The end: the browser closed (its runtime stops). */
   close(): Promise<void>;
   /** Whether the page and its runtime answer. */
   ready(): Promise<boolean>;
+  /** Set when the browser went away on its own (closed, crashed): why. */
+  gone?(): string | null;
+  /** The country the page's ValueDesk executor sees it in (the region rule), or null; read without the page. */
+  viewerCountry?(): Promise<string | null>;
 }
 
 const NO_BRIDGE = 'the browser target needs the web test bridge (apps/web e2e): pass a BrowserDriver to BrowserTarget';
@@ -353,13 +381,17 @@ const NO_BRIDGE = 'the browser target needs the web test bridge (apps/web e2e): 
 export class BrowserTarget implements ExecutorTarget {
   readonly name = 'browser' as const;
   readonly capabilities = CAPABILITIES.browser;
-  readonly where = 'the web app\'s runtime in a browser (the web test bridge)';
   readonly dataDir = null;
 
   constructor(
     private readonly mode: Mode,
     private readonly driver: BrowserDriver | null = null,
   ) {}
+
+  get where(): string {
+    const w = this.driver?.where;
+    return typeof w === 'string' ? w : 'the web app\'s runtime in a browser (the web test bridge)';
+  }
 
   private d(): BrowserDriver {
     if (!this.driver) throw new Error(NO_BRIDGE);
@@ -372,17 +404,24 @@ export class BrowserTarget implements ExecutorTarget {
   async stop(): Promise<void> {
     await this.driver?.close();
   }
+  /** A restart's first half: the page navigates away, as on a reload (its pagehide runs: not hard). start() loads it again. */
   async kill(): Promise<void> {
-    throw new Unavailable('the browser target cannot be killed hard');
+    await this.d().leave('reload');
+  }
+  /** The tab closes; start() opens the app in a new one, in the same profile. */
+  async closeTab(): Promise<void> {
+    await this.d().leave('close');
   }
   async health(): Promise<{ ok: boolean; why?: string }> {
     return this.driver && (await this.driver.ready()) ? { ok: true } : { ok: false, why: this.driver ? 'the page does not answer' : NO_BRIDGE };
   }
   gone(): string | null {
-    return null;
+    const g = this.driver?.gone?.();
+    return typeof g === 'string' ? g : null;
   }
+  /** The country the dev web's ValueDesk executor sees the page in: the region rule takes the stricter of it and the declared one. */
   async observedCountry(): Promise<string | null> {
-    return null;
+    return (await this.driver?.viewerCountry?.()) ?? null;
   }
   release(): string | null {
     return null;

@@ -36,7 +36,9 @@ It costs about $1.50 to $1.70 in fees and spread (see `--budget`); most of the d
    | `LIVE_ACCEPT_TERMS` | the copy terms version you read and accept, e.g. `2026-10-27.2`: the runner signs the terms in your name with it |
 
    The keys are read into the runner's memory only. They are never written anywhere, never put in any
-   process's environment, and never sent to the executor.
+   process's environment, and never sent to the executor. On `--target browser` the follower's key is also handed,
+   in the same process, to the page's test wallet, which signs what the app asks within its policy: the page never
+   sees it.
 
 You do **not** need to register anything yourself: with the private keys it holds, the runner does what
 ValueDesk's copy setup asks your wallet to sign - and nothing else:
@@ -75,6 +77,8 @@ Options:
 | `--dry` | paper: every spec goes out with `paper: true` to an executor whose real orders are off; checks read the executor's paper book |
 | `--budget` | print the budget and stop |
 | `--target <t>` | the executor the scenarios run against: `self` (default), `hosted` or `browser` (see "Targets") |
+| `--web <origin>` | browser target: the dev web to run in (default `VS_E2E_WEB`, else the first of 127.0.0.1:5180-5183 serving ValueDesk) |
+| `--headed` | browser target: show the Edge window (default headless) |
 | `--adopt` | at start, close positions / cancel orders on the test markets that this runner never recorded sending (otherwise it refuses to touch them) |
 | `--env <file>` | another env file |
 | `--keep-data` | keep the executor's data folder at the end (it holds the executor's sealed key) |
@@ -104,19 +108,20 @@ What one run does:
 
 ## The scenarios
 
-63 by default, of which 59 run with a SoDEX leader (the 4 written for a Hyperliquid leader are skipped) and all
-63 with a Hyperliquid leader; `--slow` adds 2. Sizes are in U = SoDEX's $10 minimum order value plus 20% ($12):
+64 by default, of which 60 run with a SoDEX leader (the 4 written for a Hyperliquid leader are skipped) and all
+64 with a Hyperliquid leader; `--slow` adds 2. One (`twap.tab-close`) runs on the browser target only. Sizes are in U = SoDEX's $10 minimum order value plus 20% ($12):
 every child order is just big enough (and above Hyperliquid's $10 minimum for a leader there). Each scenario
 says what it confirms on the exchange (`title` and `confirms` in `scenarios/*.ts`).
 
 - **setup** (4): terms with the declared country; the executor's key registered and listed by SoDEX; the builder
   approval; a key you made yourself imported and trading.
-- **TWAP** (10): taker buy (builder fee on every order and fill), maker sell (GTX fills are maker), cancel mid-way,
+- **TWAP** (11): taker buy (builder fee on every order and fill), maker sell (GTX fills are maker), cancel mid-way,
   pause/resume, time-sliced reduce-only close of a position, exits (SoDEX stops placed after the first fill,
-  resized to the full fill, pulled by a cancel), minimum order size (just over SoDEX's minimum; below it: failed,
-  nothing sent), limit price respected, executor killed mid-schedule (no child twice, no overfill), size change
+  resized to the full fill, pulled by a cancel), minimum order size (just over SoDEX's minimum; below it: refused at
+  the start with the minimum named, nothing sent), limit price respected, executor killed mid-schedule (no child twice, no overfill), size change
   (lowered under a resting child: pulled and sent again at the new size; raised after the first fill: ends filled at
-  the new size).
+  the new size); on the browser target only, the tab that runs it closed for 30 s (the app, opened again, stops it
+  for good: cancelled, no child after the close, nothing resting, what filled stays).
 - **VWAP** (1, +1 slow), **POV** (1), **Iceberg** (2: pegged post-only clips one at a time; resting clip survives a
   restart, same order, tracked), **Chase** (2), **Scale** (4: ladder at the planned prices; the ticket's DCA ladder
   paused and resumed; a partial fill; restart with resting levels), **DCA** (2), **Swarm** (1), **Conditional**
@@ -152,9 +157,9 @@ skipped for, with why (`needs` in `scenarios/*.ts`; `target.ts`).
 
 | Target | What runs | Covers | Skips |
 |---|---|---|---|
-| `self` (default) | a real executor process started here from this checkout (`apps/executor/src/main.ts`, self-hosted for the follower, `EXECUTOR_LIVE_ALGOS=1` for a live run, the follower's volume from the runner's stub) | everything: 59 scenarios with a SoDEX leader, 63 with a Hyperliquid one (2 more with `--slow`) | nothing |
-| `hosted` | ValueDesk's own executor on server 2, through the site: `https://www.valuedesk.so/api/copy/v1` (Vercel's function adds the origin secret and your country, which the server needs) | every scenario that does not restart the executor or set the follower's volume | `twap.restart`, `iceberg.restart`, `scale.restart`, `copy.restart` (it cannot be killed from here), the `fee.*` scenarios (its volume is its ledger's) |
-| `browser` | the web app's own runtime (`apps/web/src/algo`, `copy`, `trading`) in a page, through the web test bridge | - | not here yet: it needs a `BrowserDriver` (below); paper only until it says otherwise |
+| `self` (default) | a real executor process started here from this checkout (`apps/executor/src/main.ts`, self-hosted for the follower, `EXECUTOR_LIVE_ALGOS=1` for a live run, the follower's volume from the runner's stub) | everything but the browser's own: 59 scenarios with a SoDEX leader, 63 with a Hyperliquid one (2 more with `--slow`) | `twap.tab-close` (no browser tab) |
+| `hosted` | ValueDesk's own executor on server 2, through the site: `https://www.valuedesk.so/api/copy/v1` (Vercel's function adds the origin secret and your country, which the server needs) | every scenario that does not restart the executor or set the follower's volume | `twap.restart`, `iceberg.restart`, `scale.restart`, `copy.restart` (it cannot be killed from here), the `fee.*` scenarios (its volume is its ledger's), `twap.tab-close` |
+| `browser` | the web app's own runtime (`apps/web/src/algo`, `copy`, `trading`) in a tab of Microsoft Edge on the local dev web, through the web test bridge (`browserDriver.ts`) | every algo and copy scenario, the restarts as reloads of the page, and `twap.tab-close`: 53 with a SoDEX leader, 57 with a Hyperliquid one (1 more with `--slow`) | the `fee.*` scenarios (a browser reads no volume: it charges fixed fees), `setup.key-import` (a browser makes its own copy key) |
 
 **Hosted** in detail:
 
@@ -185,11 +190,56 @@ in `EXECUTOR_LIVE_ALGOS_WALLETS` (comma-separated addresses; `*` would be every 
 `EXECUTOR_LIVE_ALGOS=1` would open real algo orders to everyone - not needed for this. Taking the address out
 again stops new real algos for it; running ones go on. Copy trading needs nothing.
 
-**Browser**: the seam is `BrowserTarget` in `target.ts`, which takes a `BrowserDriver` - the executor's API calls
-(the same as `ExecutorApi`) plus `open`, `close` and `ready` of the page. The driver is the web test bridge (a
-dev-only `window.__vsTest` in the web app and its browser tooling in `apps/web` e2e, built there, not in this
-folder). Without one, `--target browser` stops at the start with that message. Its hash adds the web runtime's
-files. Its capabilities (nothing restarted, paper only) widen when the bridge says what it can do.
+**Browser** runs the algos and copies where a user who picks "This browser" runs them: the web app's own runtime
+in a tab. What you need:
+
+1. **The dev web running**, from this checkout - the runner never starts it: in the Claude app the preview
+   `valuescan-web` (`.claude/launch.json`), or `npm run dev` in `apps/web` (http://127.0.0.1:5180). The runner
+   finds it as the UI specs do (`--web <origin>`, else `VS_E2E_WEB`, else the first of 127.0.0.1:5180-5183 that
+   serves ValueDesk from Vite), checks that it serves this checkout (the engine's files under this folder), and
+   refuses to start otherwise, saying how to start it. Its "ValueDesk executor" is the local one
+   (`valuescan-executor`, 127.0.0.1:8799 behind Vite's `/api/copy`): the copy terms signature is recorded there; with
+   it not running the page retries the record later, which changes nothing here.
+2. **Microsoft Edge installed** (it is on Windows): the UI specs' launcher (`apps/web/e2e/ui/browser.ts`), which
+   never downloads a browser. Headless; `--headed` shows the window.
+3. **For a live run**, in `apps/web/.env.local`, then restart the dev web:
+   - `VITE_LIVE_ALGOS_WALLETS=<the follower's address>` (comma-separated; read on a dev server only, see
+     `apps/web/src/algo/liveAlgos.ts`): real algo orders are off in the web app for everyone else. Without it every
+     algo scenario of a live run is `inconclusive` with that reason; copies need nothing.
+   - the builder lines as `deploy/vercel/production.settings` has them (`VITE_BUILDER_ID`, `VITE_BUILDER_FEE_PERPS`,
+     ...): a dev web without a builder charges no builder fee, and a live run refuses it at the start.
+
+```
+node node_modules/tsx/dist/cli.mjs apps/executor/tools/live-test/run.ts --dry --target browser --only setup,twap
+node node_modules/tsx/dist/cli.mjs apps/executor/tools/live-test/run.ts --target browser
+```
+
+How it maps (`browserDriver.ts`; the page is `apps/web/e2e/ui/bridgeSession.ts`, loaded through tsx with the web
+app's own tsconfig - no browser code lives in this folder):
+
+- **The page**: a fresh Edge profile every run, the app at `/trade`, the welcome gate accepted, the wallet connected
+  through Connect > MetaMask. The wallet is the UI specs' test wallet (`apps/web/e2e/ui/wallet.ts`): it holds the
+  follower's key in the runner's process (a dry run's throwaway one) and signs only what the app's setup flows sign
+  (the trading key, the builder approval, ValueDesk's terms, the copy terms); the page sees addresses and signatures,
+  never the key. ValueDesk's own terms popup is clicked through when a call opens it. A live run enables trading on
+  the order ticket (one `trading-key` signature: a trading key on the follower's SoDEX account).
+- **The calls** go to the dev-only test bridge (`window.__vsTest`, `apps/web/src/testBridge.ts`, version 2), and come
+  back in the executor's shapes: the algo and copy views are the engine's own; the info and `/me` are put together
+  from what the page runs with. A browser has no session (`signIn` does nothing). **The copy key** is made in the page,
+  registered by the follower's wallet as the harness registers an executor's key (`vd-copy-browser`, perps, one day),
+  and kept in the browser's vault once SoDEX lists it. **Its fees** are no ladder: an algo's children carry the dev web
+  builder's trading fee, a copy's orders the copy ladder's top step (2.5 bp); the info lists those two and the fee
+  checks accept exactly them.
+- **A restart is a reload**: the page navigates away and comes back in the same profile. The web app keeps a tab's
+  algos running through a reload (`apps/web/src/algo/tabLife.ts`: back within 20 s); it is not a hard kill (the
+  page's own `pagehide` runs), so the target cannot be killed hard. `twap.tab-close` closes the tab instead and opens
+  the app again 30 s later, when the app must stop the algo for good.
+- **Skipped**: the `fee.*` scenarios (a browser reads no 14-day volume; the runner's stub is for an executor it
+  starts) and `setup.key-import` (a browser makes its own copy key).
+- **Bandwidth**: the page streams SoDEX's market data for as long as the run keeps it open; no browser or package is
+  downloaded.
+
+Its hash adds the web runtime's files (`apps/web/src/algo`, `copy`, `trading`).
 
 **One target at a time per wallet**: each target keeps its own state, and a live start refuses while another
 target's state says it may have left orders or positions on the same follower (run that target again: its start-up
@@ -287,7 +337,9 @@ itself. It runs every scenario's actions and the checks a paper book can answer 
 children, exits, resting orders, pause/resume, restart with the same data); what only SoDEX can answer is counted
 as "live only". Copy scenarios run their lifecycle (start, pause, resume, change, restart, stop) without leader
 trades - a dry leader has no funds. Scenarios that need a real position first (a reduce-only close, a conditional
-close) only check that the executor accepts their spec.
+close) only check that the executor accepts their spec. On `--target browser` the throwaway wallet is the page's
+wallet too: it signs ValueDesk's terms and the copy terms (recorded by the dev web's local executor), and nothing
+reaches SoDEX.
 
 ## Files
 
@@ -302,6 +354,8 @@ close) only check that the executor accepts their spec.
 | `feeStub.ts` | the loopback stand-in for the API server's volume route (self target) |
 | `executor.ts` | the executor process and its signed API |
 | `target.ts` | the targets (`self`, `hosted`, `browser`): what each can do, the hosted pacing and refusals, the browser seam |
+| `browserDriver.ts` | the browser target's driver: the executor's API mapped onto the web test bridge, the dev web check, the page loaded from `apps/web/e2e/ui/bridgeSession.ts` |
 | `cleanup.ts`, `state.ts`, `hash.ts`, `budget.ts` | flattening, the state file, the code hash, the budget |
 | `../../test/live-test-runner.test.ts` | unit tests of the runner's rules (resume, skip, hash, crash repair, cleanup, budget, targets, leader venues, the fee stub and scenarios) |
 | `../../test/live-test-hyperliquid.test.ts` | unit tests of the Hyperliquid client (the SDK's signing vectors, rounding, the guard, the wire) and leader |
+| `../../test/live-test-browser.test.ts` | unit tests of the browser driver's mapping (a fake page: no browser) and of the browser target's reload and closed tab |

@@ -393,13 +393,13 @@ test('abandon: once the runner stops waiting for a scenario (timeout, Ctrl+C), i
 
 /* ---------------------------------------------------------------- targets ----- */
 
-test('targets: --target takes self, hosted or browser; self can do everything, hosted and browser no restart, browser paper only', () => {
+test('targets: --target takes self, hosted or browser; self can do all but close a tab, hosted no restart, browser a reload but no hard kill', () => {
   assert.deepEqual([...TARGETS], ['self', 'hosted', 'browser']);
   assert.equal(targetName('hosted'), 'hosted');
   assert.throws(() => targetName('cloud'), /--target must be self, hosted, browser/);
-  assert.deepEqual(CAPABILITIES.self, { restart: true, kill: true, localFeeStub: true });
-  assert.deepEqual([CAPABILITIES.hosted.restart, CAPABILITIES.hosted.kill, CAPABILITIES.hosted.localFeeStub, CAPABILITIES.hosted.paperOnly ?? false], [false, false, false, false]);
-  assert.equal(CAPABILITIES.browser.paperOnly, true);
+  assert.deepEqual(CAPABILITIES.self, { restart: true, kill: true, localFeeStub: true, keyImport: true, tabClose: false });
+  assert.deepEqual([CAPABILITIES.hosted.restart, CAPABILITIES.hosted.kill, CAPABILITIES.hosted.localFeeStub, CAPABILITIES.hosted.paperOnly ?? false, CAPABILITIES.hosted.keyImport], [false, false, false, false, true]);
+  assert.deepEqual(CAPABILITIES.browser, { restart: true, kill: false, localFeeStub: false, keyImport: false, tabClose: true }, 'live too: real algos as the dev web lets them (VITE_LIVE_ALGOS_WALLETS)');
 });
 
 test('targets: a scenario that restarts the executor declares it, and is skipped (with why) exactly where the target cannot', () => {
@@ -407,11 +407,20 @@ test('targets: a scenario that restarts the executor declares it, and is skipped
   const fees = CATALOGUE.filter((s) => s.section === 'fee').map((s) => s.id);
   assert.deepEqual(restarts.map((s) => s.id).sort(), ['copy.restart', 'iceberg.restart', 'scale.restart', 'twap.restart', ...fees].sort(), 'the fee scenarios restart it so it forgets the volume it holds');
   for (const s of CATALOGUE) assert.equal(s.needs?.includes('restart') ?? false, restarts.includes(s), `${s.id} declares needs: ['restart'] exactly when it restarts`);
-  for (const s of CATALOGUE) assert.equal(cannotRun(s, 'self'), null, `${s.id} runs on self`);
-  for (const t of ['hosted', 'browser'] as const) {
-    assert.deepEqual(CATALOGUE.filter((s) => cannotRun(s, t)).map((s) => s.id).sort(), restarts.map((s) => s.id).sort());
-    assert.match(cannotRun({ needs: ['restart'] }, t) ?? '', new RegExp(`the ${t} target cannot kill the executor and start it again on the same data`));
+  const tabs = CATALOGUE.filter((s) => s.run.toString().includes('t.closeTab('));
+  assert.deepEqual(tabs.map((s) => s.id), ['twap.tab-close']);
+  for (const s of CATALOGUE) assert.equal(s.needs?.includes('tabClose') ?? false, tabs.includes(s), `${s.id} declares needs: ['tabClose'] exactly when it closes the tab`);
+  const imports = CATALOGUE.filter((s) => s.run.toString().includes('importKey('));
+  assert.deepEqual(imports.map((s) => s.id), ['setup.key-import']);
+  for (const s of CATALOGUE) assert.equal(s.needs?.includes('keyImport') ?? false, imports.includes(s), `${s.id} declares needs: ['keyImport'] exactly when it imports a key`);
+  for (const t of ['self', 'hosted'] as const) {
+    assert.deepEqual(CATALOGUE.filter((s) => cannotRun(s, t) && !tabs.includes(s)).map((s) => s.id).sort(), t === 'self' ? [] : restarts.map((s) => s.id).sort());
+    assert.match(cannotRun(tabs[0]!, t) ?? '', new RegExp(`the ${t} target cannot close the browser tab that runs the algos`));
   }
+  assert.match(cannotRun({ needs: ['restart'] }, 'hosted') ?? '', /the hosted target cannot kill the executor and start it again on the same data/);
+  // The browser reloads for a restart: it skips only what needs the runner's fee stub, and the key import.
+  assert.deepEqual(CATALOGUE.filter((s) => cannotRun(s, 'browser')).map((s) => s.id).sort(), [...fees, 'setup.key-import'].sort());
+  assert.match(cannotRun(imports[0]!, 'browser') ?? '', /the browser target cannot be given a SoDEX key the follower made \(key import\)/);
 });
 
 test('restart: on a target that cannot, T.restart is skipped as unavailable and kills nothing; a crash of a local executor ends a wait at once', async () => {

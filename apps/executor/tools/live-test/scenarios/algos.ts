@@ -167,7 +167,7 @@ export const ALGO_SCENARIOS: Scenario[] = [
       await positionIs(t, v.algo.filled, 'cancelling the ended algo pulls its exits and leaves the position');
     },
   }),
-  algo('twap.min-size', 'twap', 'TWAP at SoDEX\'s minimum order value, and one below it', 'children just over SoDEX\'s minNotional are accepted; an order too small ever to send ends failed with nothing sent', {
+  algo('twap.min-size', 'twap', 'TWAP at SoDEX\'s minimum order value, and one below it', 'children just over SoDEX\'s minNotional are accepted; an order too small ever to send is refused at the start, the minimum named, and nothing is sent', {
     timeoutMs: 4 * MIN,
     cost: (U) => ({ takerUsd: 2 * 2 * 10.6, makerUsd: 0, peakUsd: 2 * 10.6 + 0 * U }),
     async run(t) {
@@ -179,10 +179,14 @@ export const ALGO_SCENARIOS: Scenario[] = [
       const v = await t.waitAlgo(v0.algo.id, 'the minimum-size TWAP is done', done, { timeoutMs: 3 * MIN });
       await filledAsBooked(t, v);
       t.check(v.algo.rejects === 0, `SoDEX refused none of its children (${v.algo.rejects})`);
-      const tiny = await t.start({ kind: 'twap', quantity: (Math.ceil((t.main.minNotional * 0.6) / q.bid / step) * step).toFixed(dec), durationMs: MIN, slices: 1, exec: { style: 'taker', slippageBps: 20 } });
-      const tv = await t.waitEnded(tiny.algo.id, 90_000);
-      t.check(tv.algo.status === 'failed', `an order below the minimum ends failed (${tv.algo.status}: ${tv.algo.statusReason ?? ''})`);
-      t.check(tv.algo.filled === 0 && tv.algo.childCount === 0, 'and nothing was sent for it');
+      // Too small ever to send: the engine refuses it at the start with the ticket's words (sizes.ts checkSizes, since 2026-10-28).
+      const listed = (await t.exec.algos()).length;
+      const refused = await t.start({ kind: 'twap', quantity: (Math.ceil((t.main.minNotional * 0.6) / q.bid / step) * step).toFixed(dec), durationMs: MIN, slices: 1, exec: { style: 'taker', slippageBps: 20 } }).then(
+        (v) => `it started (${v.algo.id})`,
+        (e: unknown) => (e instanceof Error ? e.message : String(e)),
+      );
+      t.check(/under SoDEX's (\$[\d.,]+ minimum|smallest order)/.test(refused), `an order below the minimum is refused at the start, the minimum named (${refused.slice(0, 160)})`);
+      t.check((await t.exec.algos()).length === listed, 'and nothing was started or sent for it');
     },
   }),
   algo('twap.limit-price', 'twap', 'TWAP with a limit price below the market', 'no child is sent past the limit while the real book is above it', {
@@ -220,6 +224,26 @@ export const ALGO_SCENARIOS: Scenario[] = [
         t.check(new Set(ids).size === ids.length, `${ids.length} orders, all distinct`);
       });
       await positionIs(t, v.algo.filled, 'after the restart');
+    },
+  }),
+  algo('twap.tab-close', 'twap', 'TWAP in a browser tab that is closed, the app opened again later', 'the web app stops a closed tab\'s algo for good when it opens again (tabLife.ts): nothing more is sent, nothing rests on SoDEX, what filled stays', {
+    needs: ['tabClose'],
+    timeoutMs: 4 * MIN,
+    cost: (U) => ({ takerUsd: 2 * U, makerUsd: 0, peakUsd: 4 * U }),
+    async run(t) {
+      const qty = await t.qty(4 * t.U);
+      const v0 = await t.start({ kind: 'twap', quantity: qty, durationMs: 4 * MIN, slices: 4, timeJitter: 0, exec: { style: 'taker', slippageBps: 20 } });
+      await t.waitAlgo(v0.algo.id, 'the first slice filled', (v) => v.algo.filled > 0, { timeoutMs: 60_000 });
+      const before = await t.view(v0.algo.id);
+      // Longer than the 20 s within which the app takes a page that went away for a reload (tabLife.ts RELOAD_MS); the next slice is a minute away.
+      await t.closeTab({ downMs: 30_000 });
+      const v = await t.waitAlgo(v0.algo.id, 'the TWAP is stopped once the app opens again', (x) => ended(x), { timeoutMs: 60_000 });
+      t.check(v.algo.status === 'cancelled' && /tab that ran it was closed/.test(v.algo.statusReason ?? ''), `it ended cancelled, saying the tab was closed (${v.algo.status}: ${v.algo.statusReason ?? ''})`);
+      t.check(v.algo.children.length === before.algo.children.length, `no child was sent after the tab closed (${before.algo.children.length} -> ${v.algo.children.length})`);
+      t.check(v.algo.filled < Number(qty), `it stopped short: ${v.algo.filled} of ${qty}`);
+      await nothingResting(t, v.algo.id);
+      await filledAsBooked(t, v);
+      await positionIs(t, v.algo.filled, 'after the tab closed');
     },
   }),
   algo('twap.size-change', 'twap', 'TWAP size lowered and raised while running', 'lowered under what rests, the resting child is pulled and sent again at the new size; raised mid-schedule, the rest is spread over the slices to come and it ends filled at the new size', {
