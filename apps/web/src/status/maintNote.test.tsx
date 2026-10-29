@@ -12,7 +12,8 @@ installViteStubs();
 const { createElement } = await import('react');
 const render = await staticMarkup();
 const M = await import('./maintState');
-const { MaintCard } = await import('./MaintNote');
+const { MaintCard, MAINT_DONE_MS } = await import('./MaintNote');
+const { TTL } = await import('../toast');
 const { SiteNoticeBanner } = await import('./SiteNoticeBanner');
 type MaintSeen = import('./maintState').MaintSeen;
 
@@ -137,6 +138,10 @@ test('the card: blue with its parts and countdown, green with a checkmark when d
   assert.match(done, /Back to normal/);
   assert.match(done, /Completed 14:07 UTC\./);
   assert.doesNotMatch(done, /pause for about a minute/, 'done: no more what-to-expect lines');
+  // Done, it goes by itself as good news does (its timer bar); in progress, only the X takes it.
+  assert.equal(MAINT_DONE_MS, TTL.ok);
+  assert.match(done, new RegExp(`class="toast__timer" style="animation-duration:${MAINT_DONE_MS}ms"`));
+  assert.doesNotMatch(html, /toast__timer/, 'in progress: no timer');
 });
 
 test('the banner leaves maintenance in progress to the notification; upcoming and incidents stay there', () => {

@@ -182,7 +182,7 @@ interface Api {
 const Ctx = createContext<Api | null>(null);
 
 /** Errors stay until dismissed; everything else clears itself. */
-const TTL: Record<Severity, number> = { error: 0, warn: 12_000, info: 6_000, ok: 4_000 };
+export const TTL: Record<Severity, number> = { error: 0, warn: 12_000, info: 6_000, ok: 4_000 };
 const MAX = 4;
 
 export function ToastProvider({ children }: { children: ReactNode }) {

@@ -3,7 +3,8 @@
  * docked in the navbar's lane where the bar has one), blue while an update runs, with
  * the expected end and its countdown; green with a checkmark once the update is done.
  * Hover, keyboard focus or a tap opens what each part goes through - down, partly down,
- * not affected - and the countdown. Only its X takes it away (owner, 2026-10-29). The
+ * not affected - and the countdown. In progress, only its X takes it away; done, it goes
+ * by itself after MAINT_DONE_MS like any good-news notification (owner, 2026-10-29). The
  * logic and what this browser remembers: maintState.ts.
  *
  * No request of its own: the maintenance rides on /api/health, which the shell reads
@@ -12,11 +13,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { STATUS_PATH } from '../router';
+import { TTL } from '../toast';
 import {
   MAINT_KEY, PART_TEXT, maintDismiss, maintParts, maintShown, maintStep, maintView, parseMaint, withDismissals,
   type MaintSeen, type MaintState,
 } from './maintState';
 import './maintNote.css';
+
+/** How long the green "Maintenance complete" stays: as long as any good news (toast.tsx TTL.ok). */
+export const MAINT_DONE_MS = TTL.ok;
 
 function readMaint(): MaintState {
   try {
@@ -103,17 +108,33 @@ export function MaintCard({ s, now, onDismiss, onOpenStatus, timeZone }: {
   const [open, setOpen] = useState(false);
   const [leaving, setLeaving] = useState(false);
   const v = maintView(s, now, timeZone);
+  const done = v.tone === 'done';
   const rows = maintParts(s);
   const href = `${STATUS_PATH}#notice-${s.id}`;
   const close = () => {
     setLeaving(true);
     window.setTimeout(onDismiss, 170);
   };
+  /* Done, it goes by itself as good news does (toast.tsx), held while the pointer is on it: the time
+     left is kept and runs on when it leaves, as the timer bar does. In progress, only the X takes it. */
+  const [held, setHeld] = useState(false);
+  const left = useRef(MAINT_DONE_MS);
+  useEffect(() => {
+    if (!done || held || leaving) return;
+    const from = Date.now();
+    const t = window.setTimeout(close, left.current);
+    return () => {
+      window.clearTimeout(t);
+      left.current = Math.max(0, left.current - (Date.now() - from));
+    };
+  }, [done, held, leaving]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <aside
       className={`toast mn-note mn-note--${v.tone}${open ? ' is-open' : ''}${leaving ? ' is-leaving' : ''}`}
       role="status"
       aria-label={`${v.title}: ${v.line}`}
+      onMouseEnter={() => setHeld(true)}
+      onMouseLeave={() => setHeld(false)}
     >
       <div
         className="mn-note__top"
@@ -176,6 +197,7 @@ export function MaintCard({ s, now, onDismiss, onOpenStatus, timeZone }: {
           </a>
         </div>
       </div>
+      {done && !leaving && <span className="toast__timer" style={{ animationDuration: `${MAINT_DONE_MS}ms` }} />}
     </aside>
   );
 }

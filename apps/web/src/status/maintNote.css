@@ -61,19 +61,39 @@
 .mn-note__link { align-self: flex-start; color: var(--muted); text-decoration: none; }
 .mn-note__link:hover { color: var(--text); }
 
-/* Docked in the navbar's lane (shell.css): a pill like the rest; the details drop below it. */
-.toasts.is-docked .toast.mn-note { height: auto; min-height: 38px; padding-bottom: 0; justify-content: center; overflow: visible; }
+/* The timer of a done card holds while the pointer is on it, as its time left does (MaintNote.tsx). */
+.mn-note:hover .toast__timer { animation-play-state: paused; }
+
+/* Docked in the navbar's lane (shell.css): a pill like the rest; the details drop below it as the
+   app's glass pop-up (styles.css .menu-popup, Account.css .acctf-pop). The pill has no blur of its
+   own there - it is nearly opaque in the lane anyway - because a backdrop-filter on it would make it
+   its panel's backdrop root: the panel would blur nothing and show the page through. Closed, the
+   panel is not drawn at all (a 0-high box still drew its ring and shadow as a grey line). */
+.toasts.is-docked .toast.mn-note {
+  height: auto; min-height: 38px; padding-bottom: 0; justify-content: center; overflow: visible;
+  -webkit-backdrop-filter: none; backdrop-filter: none;
+}
 .toasts.is-docked .mn-note__top { gap: 8px; height: 36px; }
 .toasts.is-docked .mn-note__more {
   position: absolute; top: calc(100% + 6px); right: 0; z-index: 5; width: 320px; padding: 0 12px;
-  border-radius: 12px; background: var(--glass-pop-bg); -webkit-backdrop-filter: var(--glass-pop-blur); backdrop-filter: var(--glass-pop-blur);
-  box-shadow: var(--depth-3, 0 12px 32px rgba(0, 0, 0, 0.5));
+  border: 1px solid var(--line); border-radius: 10px;
+  background: var(--glass-pop-bg); -webkit-backdrop-filter: var(--glass-pop-blur); backdrop-filter: var(--glass-pop-blur);
+  box-shadow: var(--shadow-modal);
+  visibility: hidden; opacity: 0;
+  transition: grid-template-rows 180ms var(--ease-out), opacity 120ms var(--ease-out), visibility 0s linear 180ms;
 }
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .toasts.is-docked .mn-note__more { background: var(--bg-elevated); }
+}
+.toasts.is-docked .mn-note:hover .mn-note__more,
+.toasts.is-docked .mn-note:focus-within .mn-note__more,
+.toasts.is-docked .mn-note.is-open .mn-note__more { visibility: visible; opacity: 1; transition-delay: 0s; }
 .toasts.is-docked .mn-note__panel { padding: 0; }
 .toasts.is-docked .mn-note:hover .mn-note__panel,
 .toasts.is-docked .mn-note:focus-within .mn-note__panel,
 .toasts.is-docked .mn-note.is-open .mn-note__panel { padding: 12px 0; }
 
 @media (prefers-reduced-motion: reduce) {
-  .mn-note__more { transition: none; }
+  .mn-note__more,
+  .toasts.is-docked .mn-note__more { transition: none; }
 }
