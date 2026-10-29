@@ -555,7 +555,13 @@ test('fees: self checks the ladder\'s top step exactly; hosted accepts one step 
   await assert.rejects(hosted.checkBuilderFee([fill(25)]), CheckFailed, 'the fills are charged the orders\' step');
   assert.throws(() => mk(null).checkOrderFees([order(20), order(15)]), CheckFailed, 'not the same on every order');
   assert.throws(() => mk(null).checkOrderFees([order(22)]), CheckFailed, 'not a step of the ladder');
-  assert.throws(() => mk(null).checkOrderFees([order(null)]), CheckFailed, 'no builder on the order');
+  // SoDEX's order history names no builder (2026-10-29): nothing to check there, the fills carry it.
+  const unnamed = mk(null);
+  assert.equal(unnamed.checkOrderFees([order(null), order(null)]), null);
+  assert.equal(unnamed.feeRate, null, 'no step taken from orders that name none');
+  assert.match(unnamed.notes.join('\n'), /names no builder on these 2 orders/);
+  assert.equal(mk(25).checkOrderFees([order(null)]), 25, 'the known fee stays the one the fills are checked by');
+  assert.throws(() => mk(25).checkOrderFees([order(null), order(20)]), CheckFailed, 'an order that names one is still held to it');
   // No order check before: the step nearest the fills' own.
   const fresh = mk(null);
   await fresh.checkBuilderFee([fill(15), fill(15)]);
