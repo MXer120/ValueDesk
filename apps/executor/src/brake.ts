@@ -64,7 +64,8 @@ export function parseBrake(text: string): BrakeState | null {
 
 export class Brake {
   private state: BrakeState | null = null;
-  private mtime = -1;
+  /** What the file was when last read: its time, size and identity (-1: none, -2: unreadable). */
+  private mtime: number | string = -1;
   private checkedAt = 0;
 
   /**
@@ -107,8 +108,12 @@ export class Brake {
         this.mtime = -1;
         next = null;
       } else {
-        if (st.mtimeMs === this.mtime) return;
-        this.mtime = st.mtimeMs;
+        // Time, size and identity, not the time alone: two writes inside one clock tick (a brake set and
+        // changed at once, or a coarse file system) keep the time but not the size, and an atomic
+        // replace (brake.sh writes a new file and moves it in) is a new file.
+        const seen = `${st.mtimeMs}:${st.size}:${st.ino}`;
+        if (seen === this.mtime) return;
+        this.mtime = seen;
         next = parseBrake(readFileSync(this.file, 'utf8'));
       }
     } catch (e) {
