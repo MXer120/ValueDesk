@@ -15,7 +15,7 @@
  */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { useLatched } from '../components/motion';
-import { GridLayout, verticalCompactor, type Layout } from 'react-grid-layout';
+import { GridLayout, verticalCompactor, type Layout, type LayoutItem } from 'react-grid-layout';
 import { createScaledStrategy } from 'react-grid-layout/core';
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
@@ -23,7 +23,7 @@ import './dashboard.css';
 
 import { Guarded } from '../components/ErrorBoundary';
 import { EditMode, type PreviewGesture } from './EditMode';
-import { cellAt, clearColumnSpan, DRAG_COMMIT_PX, fillGaps, placementAt, slotBlocks, upsertPlacement } from './editPlace';
+import { clearColumnSpan, DRAG_COMMIT_PX, dropPlan, fillGaps, firstFit, pointAt, slotBlocks, upsertPlacement, type DropItem, type DropPlan } from './editPlace';
 import { LayoutMenu } from './LayoutMenu';
 import { panelSettings } from '../settingsBus';
 import { PanelChrome } from './Panel';
@@ -38,6 +38,7 @@ import { SeamLayer } from './SeamLayer';
 import type { SeamBox } from './seams';
 import { TRADE_PRESETS } from './presets';
 import { faceFor } from './widgetCatalog';
+import { Sketch } from './sketches';
 import type { DashboardConfig, PanelDefinition } from './types';
 import { describeElement, type ElementInfo } from '../feedback/element';
 import { openFeedback } from '../feedback/FeedbackButton';
@@ -66,6 +67,9 @@ import { openFeedback } from '../feedback/FeedbackButton';
  * price line, which is the right way round.
  */
 const MIN_FIT_H = 764;
+
+/** The placeholder a palette drag shows in the grid. */
+const DROP_KEY = '__drop__';
 
 export interface DashboardProps<C> {
   config: DashboardConfig;
@@ -549,6 +553,267 @@ export function Dashboard<C>({ config, panels, context, className }: DashboardPr
     };
   }, [editing, previewing, scrollRef]);
 
+
+  /* A widget dragged in from the palette. While it is over the page the grid shows
+     where and how big it lands (`drop`: a placeholder in the live grid, a split pane
+     already at its new size); the drop commits that plan. A press that does not move
+     adds it under the layout. */
+  const dragRef = useRef<{ id: string; name: string; sx: number; sy: number; moved: boolean } | null>(null);
+  const [drop, setDrop] = useState<{ id: string; name: string; plan: DropPlan } | null>(null);
+  /* Trash mode: a click on a panel removes it. Removals and adds this edit session
+     can be undone, newest first (Ctrl+Z or the toast). */
+  const [trash, setTrash] = useState(false);
+  const undoRef = useRef<{ slot: string | undefined; before: Pick<SavedDashboard, 'layouts' | 'hidden' | 'shown'> }[]>([]);
+  const [undoTip, setUndoTip] = useState<{ text: string; n: number } | null>(null);
+  /** A panel dragged off the page: released there, it is removed. */
+  const [leaving, setLeaving] = useState<string | null>(null);
+  const liveRef = useRef({
+    saved, layout, bp, metrics, rowHeight, hiddenSet, panels, persist, context,
+  });
+  liveRef.current = { saved, layout, bp, metrics, rowHeight, hiddenSet, panels, persist, context };
+
+  const panelName = useCallback((id: string): string => {
+    const p = liveRef.current.panels.find((x) => x.id === id);
+    if (!p) return id;
+    return faceFor(id)?.name ?? (typeof p.title === 'function' ? p.title(liveRef.current.context) : p.title);
+  }, []);
+
+  /** Persist `next`, keeping what it replaces for Undo. */
+  const commitEdit = useCallback((next: SavedDashboard, text: string) => {
+    const live = liveRef.current;
+    undoRef.current = [
+      ...undoRef.current.filter((u) => u.slot === live.saved.activeSlot).slice(-19),
+      { slot: live.saved.activeSlot, before: { layouts: live.saved.layouts, hidden: live.saved.hidden, shown: live.saved.shown } },
+    ];
+    live.persist(next);
+    setUndoTip((t) => ({ text, n: (t?.n ?? 0) + 1 }));
+  }, []);
+
+  const removePanel = useCallback((id: string) => {
+    const live = liveRef.current;
+    if (live.hiddenSet.has(id)) return;
+    const hidden = new Set(live.saved.hidden ?? []);
+    const shown = new Set(live.saved.shown ?? []);
+    hidden.add(id);
+    shown.delete(id);
+    commitEdit({ ...live.saved, hidden: [...hidden], shown: [...shown] }, `Removed ${panelName(id)}`);
+  }, [commitEdit, panelName]);
+
+  const undo = useCallback(() => {
+    const live = liveRef.current;
+    const stack = undoRef.current.filter((u) => u.slot === live.saved.activeSlot);
+    const last = stack.pop();
+    undoRef.current = stack;
+    if (!last) return;
+    live.persist({ ...live.saved, ...last.before });
+    setUndoTip(stack.length ? (t) => ({ text: 'Undone', n: (t?.n ?? 0) + 1 }) : null);
+  }, []);
+
+  /** The new panel's size and limits at this breakpoint (its designed placement, else a default). */
+  const addSpec = (id: string) => {
+    const live = liveRef.current;
+    const panel = live.panels.find((p) => p.id === id);
+    if (!panel) return null;
+    const designed = config.layouts[live.bp].find((p) => p.i === id);
+    // Not in the designed layout (a palette widget): a third of the width, a readable height.
+    const fallback = { i: id, x: 0, y: 0, w: Math.min(live.metrics.cols, Math.max(panel.minW ?? 8, Math.round(live.metrics.cols / 3))), h: Math.max(panel.minH ?? 6, 18) };
+    const item = resolveLayout([panel], [designed ?? fallback], undefined, live.metrics.cols, { rowHeight: live.rowHeight, margin: live.metrics.margin })[0];
+    if (!item) return null;
+    return { i: id, w: item.w, h: item.h, minW: item.minW, minH: item.minH, maxW: item.maxW, maxH: item.maxH };
+  };
+  const dropItems = (): DropItem[] => liveRef.current.layout.map((item) => {
+    const handles = item.resizeHandles ?? ['se'];
+    const resizable = item.isResizable !== false && item.static !== true;
+    return {
+      i: item.i, x: item.x, y: item.y, w: item.w, h: item.h,
+      minW: item.minW, minH: item.minH, maxW: item.maxW, maxH: item.maxH,
+      growW: resizable && handles.some((hd) => hd.includes('e') || hd.includes('w')),
+      growH: resizable && handles.some((hd) => hd.includes('n') || hd.includes('s')),
+      fixed: item.static === true,
+    };
+  });
+  /** Persist a drop plan: the panes it moved or split, and the new one shown. */
+  const commitPlan = (id: string, plan: DropPlan, text: string) => {
+    const live = liveRef.current;
+    let base = live.saved.layouts[live.bp] ?? toPlacements(live.layout);
+    for (const p of plan.placements) base = upsertPlacement(base, p);
+    const hidden = new Set(live.saved.hidden ?? []);
+    const shown = new Set(live.saved.shown ?? []);
+    hidden.delete(id);
+    shown.add(id);
+    commitEdit({ ...live.saved, hidden: [...hidden], shown: [...shown], layouts: { ...live.saved.layouts, [live.bp]: base } }, text);
+  };
+  /** Click (or Enter) on a palette card: the first free spot it fits, else under the layout. */
+  const addBelow = (id: string) => {
+    const live = liveRef.current;
+    if (!live.hiddenSet.has(id)) return;
+    const spec = addSpec(id);
+    if (!spec) return;
+    const at = firstFit(live.layout, spec.w, spec.h, live.metrics.cols);
+    const box = { i: id, x: at.x, y: at.y, w: spec.w, h: spec.h };
+    commitPlan(id, { placements: [...toPlacements(live.layout), box], box, target: null }, `Added ${panelName(id)}`);
+  };
+
+  const startDrag = (id: string, name: string, x: number, y: number) => {
+    if (!hiddenSet.has(id)) return;
+    dragRef.current = { id, name, sx: x, sy: y, moved: false };
+    setGhost({ name, x, y });
+    setOverDelete(false);
+    setOverPage(false);
+  };
+
+  /** Over the page (the scaled canvas), and not over edit chrome floating above it. */
+  const overCanvas = (x: number, y: number): boolean => {
+    const el = scrollRef.current;
+    if (!el) return false;
+    const r = el.getBoundingClientRect();
+    if (x < r.left || x >= r.right || y < r.top || y >= r.bottom) return false;
+    const hit = document.elementFromPoint(x, y);
+    return !hit?.closest('.dash-edit-root');
+  };
+
+  useEffect(() => {
+    let planKey = '';
+    const planAt = (d: { id: string }, clientX: number, clientY: number): DropPlan | null => {
+      const live = liveRef.current;
+      const grid = scrollRef.current?.querySelector('.dash-grid');
+      if (!(grid instanceof HTMLElement)) return null;
+      const spec = addSpec(d.id);
+      if (!spec) return null;
+      const at = pointAt(clientX, clientY, grid, live.metrics.cols, live.rowHeight, live.metrics.margin, live.metrics.containerPadding);
+      return dropPlan(dropItems(), at, spec, live.metrics.cols);
+    };
+    const clear = () => {
+      planKey = '';
+      setDrop(null);
+    };
+    const end = (e: PointerEvent) => {
+      const d = dragRef.current;
+      if (!d) return;
+      dragRef.current = null;
+      setGhost(null);
+      setOverDelete(false);
+      setOverPage(false);
+      clear();
+      if (!liveRef.current.hiddenSet.has(d.id)) return;
+      if (!d.moved) {
+        if (e.type === 'pointerup') addBelow(d.id);
+        return;
+      }
+      if (!overCanvas(e.clientX, e.clientY)) return;
+      const plan = planAt(d, e.clientX, e.clientY);
+      if (plan) commitPlan(d.id, plan, `Added ${d.name}`);
+    };
+    const move = (e: PointerEvent) => {
+      const d = dragRef.current;
+      if (!d) return;
+      if (!d.moved && Math.hypot(e.clientX - d.sx, e.clientY - d.sy) < DRAG_COMMIT_PX) return;
+      d.moved = true;
+      setGhost({ name: d.name, x: e.clientX, y: e.clientY });
+      const onPage = overCanvas(e.clientX, e.clientY);
+      setOverPage((v) => (v === onPage ? v : onPage));
+      const plan = onPage ? planAt(d, e.clientX, e.clientY) : null;
+      const key = plan ? JSON.stringify([plan.box, plan.target]) : '';
+      if (key === planKey) return;
+      planKey = key;
+      setDrop(plan ? { id: d.id, name: d.name, plan } : null);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', end);
+    window.addEventListener('pointercancel', end);
+    return () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', end);
+      window.removeEventListener('pointercancel', end);
+    };
+    // The handlers read everything live through liveRef.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [config, scrollRef]);
+
+  useEffect(() => {
+    if (arrange) return;
+    setTrash(false);
+    setLeaving(null);
+    if (!dragRef.current) return;
+    dragRef.current = null;
+    setGhost(null);
+    setDrop(null);
+    setOverDelete(false);
+    setOverPage(false);
+  }, [arrange]);
+  // Leaving edit mode ends its undo: what Done changed is in the layout history (storage.ts).
+  useEffect(() => {
+    if (editing) return;
+    undoRef.current = [];
+    setUndoTip(null);
+  }, [editing]);
+  useEffect(() => {
+    if (!undoTip) return;
+    const t = window.setTimeout(() => setUndoTip(null), 6000);
+    return () => window.clearTimeout(t);
+  }, [undoTip]);
+
+  /* A panel dragged by the grid itself: off the page (onto the palette, the remove
+     zone or the edge) it is removed on release instead of moved. */
+  const pointOf = (e: Event): { x: number; y: number } | null => {
+    if ('clientX' in e && typeof (e as MouseEvent).clientX === 'number') return { x: (e as MouseEvent).clientX, y: (e as MouseEvent).clientY };
+    const t = (e as TouchEvent).changedTouches?.[0] ?? (e as TouchEvent).touches?.[0];
+    return t ? { x: t.clientX, y: t.clientY } : null;
+  };
+  const onGridDrag = useCallback((_l: Layout, _o: LayoutItem | null, item: LayoutItem | null, _p: LayoutItem | null, e: Event) => {
+    if (!item || !editing) return;
+    const pt = pointOf(e);
+    if (!pt) return;
+    const off = !overCanvas(pt.x, pt.y);
+    setLeaving((v) => (off ? item.i : v === item.i ? null : v));
+    setOverDelete((v) => (v === off ? v : off));
+    setGhost(off ? { name: `Remove ${panelName(item.i)}`, x: pt.x, y: pt.y } : null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editing, panelName]);
+  const onGridDragStop = useCallback((_l: Layout, _o: LayoutItem | null, item: LayoutItem | null, _p: LayoutItem | null, e: Event) => {
+    setLeaving(null);
+    setOverDelete(false);
+    setGhost(null);
+    const pt = pointOf(e);
+    if (editing && item && pt && !overCanvas(pt.x, pt.y)) {
+      removePanel(item.i);
+      return;
+    }
+    if (editing && item && _o && (_o.x !== item.x || _o.y !== item.y)) {
+      // A move is an edit like any other: Undo puts it back.
+      const live = liveRef.current;
+      undoRef.current = [...undoRef.current.slice(-19), { slot: live.saved.activeSlot, before: { layouts: live.saved.layouts, hidden: live.saved.hidden, shown: live.saved.shown } }];
+    }
+    dirty.current = true;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editing, removePanel]);
+
+  // Trash mode: a press on a panel removes it, and nothing inside it reacts.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || !trash || !arrange) return;
+    const panelOf = (e: Event) => (e.target instanceof Element ? e.target.closest('[data-panel]')?.getAttribute('data-panel') ?? null : null);
+    const block = (e: Event) => {
+      if (!panelOf(e)) return;
+      e.preventDefault();
+      e.stopPropagation();
+    };
+    const click = (e: MouseEvent) => {
+      const id = panelOf(e);
+      if (!id) return;
+      e.preventDefault();
+      e.stopPropagation();
+      removePanel(id);
+    };
+    const types = ['pointerdown', 'mousedown', 'touchstart', 'dblclick'] as const;
+    for (const t of types) el.addEventListener(t, block, true);
+    el.addEventListener('click', click, true);
+    return () => {
+      for (const t of types) el.removeEventListener(t, block, true);
+      el.removeEventListener('click', click, true);
+    };
+  }, [trash, arrange, scrollRef, removePanel]);
+
   useEffect(() => {
     const typing = (): boolean => {
       const el = document.activeElement;
@@ -561,7 +826,14 @@ export function Dashboard<C>({ config, panels, context, className }: DashboardPr
         if (!editing || typing() || menuAt) return;
         e.preventDefault();
         e.stopPropagation();
-        endEdit();
+        // The first Escape leaves trash mode, the next one edit mode.
+        if (trash) setTrash(false);
+        else endEdit();
+        return;
+      }
+      if (editing && (e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z' && !typing()) {
+        e.preventDefault();
+        undo();
         return;
       }
       const backslash = e.key === '\\' || e.code === 'Backslash';
@@ -575,113 +847,20 @@ export function Dashboard<C>({ config, panels, context, className }: DashboardPr
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [editing, sticky, holding, menuAt, enterEdit, endEdit]);
+  }, [editing, sticky, holding, menuAt, enterEdit, endEdit, trash, undo]);
 
-  const dragRef = useRef<{ kind: 'add' | 'move'; id: string; name: string; sx: number; sy: number } | null>(null);
-  const liveRef = useRef({
-    saved, layout, bp, metrics, rowHeight, hiddenSet, panels, persist,
-  });
-  liveRef.current = { saved, layout, bp, metrics, rowHeight, hiddenSet, panels, persist };
-
-  const startDrag = (kind: 'add' | 'move', id: string, name: string, x: number, y: number) => {
-    if (kind === 'add' && !hiddenSet.has(id)) return;
-    dragRef.current = { kind, id, name, sx: x, sy: y };
-    setGhost({ name, x, y });
-    setOverDelete(false);
-    setOverPage(false);
-  };
-
-  useEffect(() => {
-    const hideId = (id: string) => {
-      const live = liveRef.current;
-      const hidden = new Set(live.saved.hidden ?? []);
-      const shown = new Set(live.saved.shown ?? []);
-      hidden.add(id);
-      shown.delete(id);
-      live.persist({ ...live.saved, hidden: [...hidden], shown: [...shown] });
-    };
-    const dropAt = (id: string, clientX: number, clientY: number, reveal: boolean) => {
-      const live = liveRef.current;
-      const grid = scrollRef.current?.querySelector('.dash-grid');
-      if (!(grid instanceof HTMLElement)) return;
-      const panel = live.panels.find((p) => p.id === id);
-      if (!panel) return;
-      const shownNow = live.layout.find((item) => item.i === id);
-      const designed = config.layouts[live.bp].find((p) => p.i === id);
-      const w = shownNow?.w ?? designed?.w ?? Math.min(live.metrics.cols, Math.max(panel.minW ?? 8, 12));
-      const h = shownNow?.h ?? designed?.h ?? Math.max(panel.minH ?? 6, 10);
-      const placed = placementAt(
-        id,
-        cellAt(clientX, clientY, grid, live.metrics.cols, live.rowHeight, live.metrics.margin, live.metrics.containerPadding),
-        w,
-        h,
-        live.metrics.cols,
-      );
-      const base = live.saved.layouts[live.bp] ?? toPlacements(live.layout);
-      const hidden = new Set(live.saved.hidden ?? []);
-      const shown = new Set(live.saved.shown ?? []);
-      if (reveal) {
-        hidden.delete(id);
-        shown.add(id);
-      }
-      live.persist({
-        ...live.saved,
-        hidden: [...hidden],
-        shown: [...shown],
-        layouts: { ...live.saved.layouts, [live.bp]: upsertPlacement(base, placed) },
-      });
-    };
-    const end = (e: PointerEvent) => {
-      const d = dragRef.current;
-      if (!d) return;
-      dragRef.current = null;
-      setGhost(null);
-      setOverDelete(false);
-      setOverPage(false);
-      const hit = document.elementFromPoint(e.clientX, e.clientY);
-      const onDelete = !!hit?.closest('.dash-edit-delete');
-      const onPage = !!hit?.closest('.dash-scroll');
-      if (d.kind === 'move' && onDelete) {
-        hideId(d.id);
-        return;
-      }
-      if (!onPage) return;
-      if (d.kind === 'add') {
-        if (!liveRef.current.hiddenSet.has(d.id)) return;
-        dropAt(d.id, e.clientX, e.clientY, true);
-        return;
-      }
-      if (Math.hypot(e.clientX - d.sx, e.clientY - d.sy) < DRAG_COMMIT_PX) return;
-      dropAt(d.id, e.clientX, e.clientY, false);
-    };
-    const move = (e: PointerEvent) => {
-      const d = dragRef.current;
-      if (!d) return;
-      setGhost({ name: d.name, x: e.clientX, y: e.clientY });
-      const hit = document.elementFromPoint(e.clientX, e.clientY);
-      const nextDel = !!hit?.closest('.dash-edit-delete');
-      const nextPage = !nextDel && !!hit?.closest('.dash-scroll');
-      setOverDelete((v) => (v === nextDel ? v : nextDel));
-      setOverPage((v) => (v === nextPage ? v : nextPage));
-    };
-    window.addEventListener('pointermove', move);
-    window.addEventListener('pointerup', end);
-    window.addEventListener('pointercancel', end);
-    return () => {
-      window.removeEventListener('pointermove', move);
-      window.removeEventListener('pointerup', end);
-      window.removeEventListener('pointercancel', end);
-    };
-  }, [config, scrollRef]);
-
-  useEffect(() => {
-    if (arrange) return;
-    if (!dragRef.current) return;
-    dragRef.current = null;
-    setGhost(null);
-    setOverDelete(false);
-    setOverPage(false);
-  }, [arrange]);
+  /* The grid as drawn: during a palette drag, the plan's panes and a placeholder
+     where the new widget lands. */
+  const gridLayout = useMemo<Layout>(() => {
+    if (!drop) return layout;
+    const at = new Map(drop.plan.placements.map((p) => [p.i, p]));
+    const items = layout.map((item) => {
+      const p = at.get(item.i);
+      return p ? { ...item, x: p.x, y: p.y, w: p.w, h: p.h } : item;
+    });
+    const b = drop.plan.box;
+    return [...items, { i: DROP_KEY, x: b.x, y: b.y, w: b.w, h: b.h, isDraggable: false, isResizable: false }];
+  }, [layout, drop]);
 
   const gridConfig = useMemo(
     () => ({
@@ -695,7 +874,8 @@ export function Dashboard<C>({ config, panels, context, className }: DashboardPr
 
   const dragConfig = useMemo(
     () => ({
-      enabled: !locked && !previewing,
+      // Edit mode is for arranging: the lock (a guard against a stray drag) holds outside it.
+      enabled: (arrange && !trash) || (!editing && !locked),
       // Drags start ONLY on panel chrome: the hover-revealed strip along a
       // panel's top edge, and the empty space in a tab bar. Without this,
       // selecting a price in the order book or scrubbing the chart crosshair
@@ -705,12 +885,12 @@ export function Dashboard<C>({ config, panels, context, className }: DashboardPr
       // because the bottom bar's market filter is a checkbox inside one.
       cancel: '.dash-nodrag, button, input, select, textarea, label, a',
     }),
-    [locked, previewing],
+    [locked, arrange, editing, trash],
   );
 
   const resizeConfig = useMemo(
-    () => ({ enabled: !locked && !previewing, handles: ['se'] as const }),
-    [locked, previewing],
+    () => ({ enabled: (arrange && !trash) || (!editing && !locked), handles: ['se'] as const }),
+    [locked, arrange, editing, trash],
   );
 
   const hasSaved = Object.keys(saved.layouts).length > 0 || activeBlank;
@@ -771,7 +951,7 @@ export function Dashboard<C>({ config, panels, context, className }: DashboardPr
   useEffect(() => () => { if (swapTimer.current !== null) window.clearTimeout(swapTimer.current); }, []);
 
   return (
-    <div className={`dash${locked ? ' is-locked' : ''}${arrange ? ' is-arrange' : ''}${overPage && ghost ? ' is-drop' : ''}${swap ? ' is-switching' : ''}${seaming ? ' is-seaming' : ''}${className ? ` ${className}` : ''}`}>
+    <div className={`dash${locked && !arrange ? ' is-locked' : ''}${arrange ? ' is-arrange' : ''}${arrange && trash ? ' is-trash' : ''}${overPage && ghost ? ' is-drop' : ''}${swap ? ' is-switching' : ''}${seaming ? ' is-seaming' : ''}${className ? ` ${className}` : ''}`}>
       {/* The hover-revealed "Lock layout"/"Reset layout" text strip that used
           to live here is gone, not renamed - LayoutMenu.tsx now carries both
           actions (plus panel visibility and, when the caller wants one, a
@@ -796,12 +976,13 @@ export function Dashboard<C>({ config, panels, context, className }: DashboardPr
           <GridLayout
             className="dash-grid"
             width={box.width}
-            layout={layout}
+            layout={gridLayout}
             gridConfig={gridConfig}
             dragConfig={dragConfig}
             resizeConfig={resizeConfig}
             onLayoutChange={onLayoutChange}
-            onDragStop={markDirty}
+            onDrag={onGridDrag}
+            onDragStop={onGridDragStop}
             onResizeStop={markDirty}
             compactor={verticalCompactor}
             positionStrategy={arrange ? createScaledStrategy(0.64) : undefined}
@@ -828,6 +1009,8 @@ export function Dashboard<C>({ config, panels, context, className }: DashboardPr
                     // reads as air rather than as a rendering fault.
                     panel.resize === 'horizontal' ? 'dash-panel--strip' : '',
                     swap?.has(panel.id) ? 'is-entering' : '',
+                    leaving === panel.id ? 'is-leaving' : '',
+                    drop?.plan.target?.split && drop.plan.target.i === panel.id ? 'is-split' : '',
                   ].filter(Boolean).join(' ')}
                   role="group"
                   aria-label={name}
@@ -841,6 +1024,12 @@ export function Dashboard<C>({ config, panels, context, className }: DashboardPr
                 </div>
               );
             })}
+            {drop && (
+              <div key={DROP_KEY} className="dash-drop" aria-hidden="true">
+                <span className="dash-drop__screen"><Sketch id={drop.id} /></span>
+                <span className="dash-drop__name">{drop.name}</span>
+              </div>
+            )}
           </GridLayout>
         )}
         {box.width > 0 && seamsOn && (
@@ -901,12 +1090,18 @@ export function Dashboard<C>({ config, panels, context, className }: DashboardPr
           widgets={eligible.map((p) => ({
             id: p.id,
             name: faceFor(p.id)?.name ?? (typeof p.title === 'function' ? p.title(context) : p.title),
+            blurb: faceFor(p.id)?.blurb,
             present: !hiddenSet.has(p.id),
           }))}
           quiet={previewing}
           sticky={sticky}
           overDelete={overDelete}
           ghost={ghost}
+          trash={trash}
+          onTrash={setTrash}
+          undoTip={undoTip}
+          onUndo={undo}
+          onWidgetAdd={addBelow}
           onSwitch={(id) => {
             setSaved((prev) => {
               const next = activateSlot(prev, id);
@@ -1002,7 +1197,7 @@ export function Dashboard<C>({ config, panels, context, className }: DashboardPr
             });
           }}
           onPreview={onPreview}
-          onWidgetPointerDown={startDrag.bind(null, 'add')}
+          onWidgetPointerDown={startDrag}
         />
       )}
     </div>

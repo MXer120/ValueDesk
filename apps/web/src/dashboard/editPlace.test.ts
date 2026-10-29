@@ -5,7 +5,7 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { clearColumnSpan, fillGaps, type FillItem } from './editPlace';
+import { clearColumnSpan, dropPlan, fillGaps, firstFit, type DropItem, type FillItem } from './editPlace';
 import { positionSize } from './widgetCatalog';
 
 const at = (items: FillItem[], id: string): FillItem => {
@@ -162,4 +162,59 @@ test('a panel that cannot grow in width keeps it', () => {
   assert.equal(at(out, 'strip').w, 2);
   assert.equal(at(out, 'rest').x, 2);
   assert.equal(at(out, 'rest').w, 8);
+});
+
+/* A widget dragged in from the palette (dropPlan). */
+const pane = (i: string, x: number, y: number, w: number, h: number, more: Partial<DropItem> = {}): DropItem => ({ i, x, y, w, h, minW: 4, minH: 4, ...more });
+
+test('a drop near a pane\'s right edge splits it: the new widget takes the right half', () => {
+  const plan = dropPlan([pane('chart', 0, 0, 24, 20)], { x: 22, y: 10 }, { i: 'news', w: 12, h: 10, minW: 4, minH: 4 }, 48);
+  assert.deepEqual(plan.target, { i: 'chart', side: 'right', split: true });
+  assert.deepEqual(plan.box, { i: 'news', x: 12, y: 0, w: 12, h: 20 });
+  assert.deepEqual(plan.placements.find((p) => p.i === 'chart'), { i: 'chart', x: 0, y: 0, w: 12, h: 20 });
+  noOverlap(plan.placements);
+});
+
+test('a drop near the top splits it top and bottom', () => {
+  const plan = dropPlan([pane('chart', 0, 0, 24, 20)], { x: 12, y: 1 }, { i: 'news', w: 12, h: 10 }, 48);
+  assert.deepEqual(plan.target, { i: 'chart', side: 'top', split: true });
+  assert.deepEqual(plan.box, { i: 'news', x: 0, y: 0, w: 24, h: 10 });
+  assert.deepEqual(plan.placements.find((p) => p.i === 'chart'), { i: 'chart', x: 0, y: 10, w: 24, h: 10 });
+});
+
+test('a pane too narrow to halve is split the other way', () => {
+  const plan = dropPlan([pane('book', 0, 0, 6, 20)], { x: 5.8, y: 9 }, { i: 'news', w: 12, h: 10, minW: 4, minH: 4 }, 48);
+  assert.equal(plan.target?.side === 'top' || plan.target?.side === 'bottom', true);
+  assert.equal(plan.target?.split, true);
+  assert.equal(plan.box.w, 6);
+  noOverlap(plan.placements);
+});
+
+test('a strip whose height is its content is not split top and bottom', () => {
+  const plan = dropPlan([pane('markets', 0, 0, 48, 3, { minH: 1, growH: false })], { x: 24, y: 0.2 }, { i: 'news', w: 12, h: 10, minW: 4, minH: 4 }, 48);
+  // Wider than tall: the nearest edge is the top, which it may not change; the side split is tried next.
+  assert.equal(plan.target?.split, false);
+  assert.equal(plan.box.y, 0);
+  assert.equal(plan.placements.find((p) => p.i === 'markets')?.y, 10);
+});
+
+test('no room to split: a row of its own under the pane, the panes below moved down', () => {
+  const items = [pane('a', 0, 0, 6, 6, { minW: 6, minH: 6 }), pane('b', 0, 6, 48, 10)];
+  const plan = dropPlan(items, { x: 3, y: 5 }, { i: 'news', w: 12, h: 8, minW: 8, minH: 6 }, 48);
+  assert.deepEqual(plan.target, { i: 'a', side: 'bottom', split: false });
+  assert.deepEqual(plan.box, { i: 'news', x: 0, y: 6, w: 8, h: 8 });
+  assert.equal(plan.placements.find((p) => p.i === 'b')?.y, 14);
+  noOverlap(plan.placements);
+});
+
+test('in free space it lands centred on the pointer at its size, inside the columns', () => {
+  const plan = dropPlan([], { x: 46, y: 3.5 }, { i: 'news', w: 12, h: 10 }, 48);
+  assert.equal(plan.target, null);
+  assert.deepEqual(plan.box, { i: 'news', x: 36, y: 3, w: 12, h: 10 });
+});
+
+test('a clicked widget takes the first free spot it fits, else goes under everything', () => {
+  const items = [{ x: 0, y: 0, w: 32, h: 10 }, { x: 0, y: 10, w: 48, h: 10 }];
+  assert.deepEqual(firstFit(items, 16, 10, 48), { x: 32, y: 0 });
+  assert.deepEqual(firstFit(items, 20, 10, 48), { x: 0, y: 20 });
 });

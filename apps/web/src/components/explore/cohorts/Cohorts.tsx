@@ -511,7 +511,9 @@ function useChartFor(): (coin: string) => string | null {
   }, [symbols]);
 }
 
-export function Cohorts({ onScan, onOpenSymbol }: { onScan: (address: string) => void; onOpenSymbol?: (symbol: string) => void }) {
+/** `embedded`: a widget on another page (the terminal) - its view stays out of that page's URL and scroll. */
+export function Cohorts({ onScan, onOpenSymbol, embedded = false }: { onScan: (address: string) => void; onOpenSymbol?: (symbol: string) => void; embedded?: boolean }) {
+  const write = (patch: Record<string, string | null>, push = true) => { if (!embedded) writeParams(patch, push); };
   const chartFor = useChartFor();
   const [stored, setStored] = useStored<Venue[]>('vs.cohorts.venues', [...SCAN_VENUES]);
   const venues = useMemo(() => {
@@ -519,21 +521,22 @@ export function Cohorts({ onScan, onOpenSymbol }: { onScan: (address: string) =>
     return v.length ? SCAN_VENUES.filter((x) => v.includes(x)) : [...SCAN_VENUES];
   }, [stored]);
   const [cohort, setCohort] = useState<CohortId | null>(() => {
-    const c = readParam('cohort');
+    const c = embedded ? null : readParam('cohort');
     return isCohortId(c) ? c : null;
   });
   const [range, setRangeState] = useState<CohortRange>(() => {
-    const r = readParam('range');
+    const r = embedded ? null : readParam('range');
     return r === '1d' || r === '30d' ? r : '7d';
   });
-  const [filter, setFilterState] = useState<CohortFilter>(filterFromUrl);
-  const [section, setSection] = useState<Section>(sectionFromUrl);
-  const [focus, setFocus] = useState<CohortFilter | null>(focusFromUrl);
+  const [filter, setFilterState] = useState<CohortFilter>(() => (embedded ? {} : filterFromUrl()));
+  const [section, setSection] = useState<Section>(() => (embedded ? 'cohorts' : sectionFromUrl()));
+  const [focus, setFocus] = useState<CohortFilter | null>(() => (embedded ? null : focusFromUrl()));
   const viewState = useCohortViewState();
   const page: ViewPage = section === 'map' ? (focus ? 'focus' : 'map') : cohort ? 'detail' : 'overview';
   // An asset page has a price, a sector page an asset map - never both.
   const viewOmit = page === 'focus' ? [focus?.coin ? 'assets' : 'price'] : [];
   useEffect(() => {
+    if (embedded) return;
     const onPop = () => {
       const c = readParam('cohort');
       setCohort(isCohortId(c) ? c : null);
@@ -549,15 +552,15 @@ export function Cohorts({ onScan, onOpenSymbol }: { onScan: (address: string) =>
     setCohort(id);
     setSection('cohorts');
     setFocus(null);
-    writeParams({ cohort: id, section: null, focus: null });
-    window.scrollTo({ top: 0 });
+    write({ cohort: id, section: null, focus: null });
+    if (!embedded) window.scrollTo({ top: 0 });
   };
   /** The market map, or one of its asset / sector pages. */
   const openMap = (f: CohortFilter | null) => {
     setSection('map');
     setFocus(f);
-    writeParams({ section: 'map', focus: focusParam(f), cohort: null });
-    window.scrollTo({ top: 0 });
+    write({ section: 'map', focus: focusParam(f), cohort: null });
+    if (!embedded) window.scrollTo({ top: 0 });
   };
   /** From an asset page: that cohort, filtered to the asset. */
   const openCohortOn = (id: CohortId, f: CohortFilter) => {
@@ -565,16 +568,16 @@ export function Cohorts({ onScan, onOpenSymbol }: { onScan: (address: string) =>
     setCohort(id);
     setSection('cohorts');
     setFocus(null);
-    writeParams({ cohort: id, section: null, focus: null, sector: f.sector ?? null, coin: f.coin ?? null });
-    window.scrollTo({ top: 0 });
+    write({ cohort: id, section: null, focus: null, sector: f.sector ?? null, coin: f.coin ?? null });
+    if (!embedded) window.scrollTo({ top: 0 });
   };
   const setRange = (r: CohortRange) => {
     setRangeState(r);
-    writeParams({ range: r === '7d' ? null : r }, false);
+    write({ range: r === '7d' ? null : r }, false);
   };
   const setFilter = (f: CohortFilter) => {
     setFilterState(f);
-    writeParams({ sector: f.sector ?? null, coin: f.coin ?? null }, false);
+    write({ sector: f.sector ?? null, coin: f.coin ?? null }, false);
   };
 
   const listKey = `${venues.join(',')}|${filter.sector ?? ''}|${filter.coin ?? ''}`;

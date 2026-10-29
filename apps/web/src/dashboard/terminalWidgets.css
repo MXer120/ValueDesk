@@ -1,0 +1,37 @@
+/* The terminal's own small widgets (terminalWidgets.tsx): compact rows in the
+   app's table type, a click opens the market or the wallet. */
+.tw { display: flex; flex-direction: column; min-height: 100%; padding: 6px 0; font-size: var(--fs-xs); }
+.tw__bar { display: flex; justify-content: flex-end; padding: 4px 12px 8px; }
+.tw__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) 1fr 0.8fr;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+}
+.tw__row--5 { grid-template-columns: minmax(0, 1.3fr) 0.6fr 0.9fr 0.9fr 0.9fr; }
+.tw__head { color: var(--dim); font-size: var(--fs-micro); }
+.tw__head > :not(:first-child),
+.tw__num { text-align: right; font-variant-numeric: tabular-nums; }
+button.tw__btn {
+  width: 100%;
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+}
+button.tw__btn:hover { background: color-mix(in srgb, var(--text) 5%, transparent); }
+button.tw__btn.is-on { background: color-mix(in srgb, var(--text) 8%, transparent); }
+.tw__name { display: flex; align-items: center; gap: 7px; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.tw__dim { color: var(--muted); }
+.tw .pos { color: var(--pos); }
+.tw .neg { color: var(--neg); }
+
+/* Explore's heatmap is 380px tall on its page; in a panel it fills the panel. */
+.tw-heat { height: 100%; padding: 6px; box-sizing: border-box; }
+.tw-heat .mk-heat { height: 100%; }
+/* A page's own card (the portfolio's, Explore's) inside a terminal panel. */
+.tw-scope { min-height: 100%; }

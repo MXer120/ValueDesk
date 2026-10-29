@@ -387,10 +387,11 @@ function Card({ v, place, onActed }: { v: AlgoView; place: Place; onActed?: () =
 
 type Show = 'all' | 'running' | 'ended';
 
-export default function AlgoTable({ address }: { address: string | null }) {
+/** `initialShow`: which runs it opens on (the terminal's Current TWAPs widget opens on the running ones). */
+export default function AlgoTable({ address, initialShow = 'all' }: { address: string | null; initialShow?: Show }) {
   const { role, views: here } = useAlgos(address);
   const remote = useExecutorAlgos(address);
-  const [show, setShow] = useState<Show>('all');
+  const [show, setShow] = useState<Show>(initialShow);
   const all: Array<{ v: AlgoView; place: Place }> = [
     ...here.map((v) => ({ v, place: 'browser' as const })),
     ...remote.hosted.map((v) => ({ v, place: 'hosted' as const })),

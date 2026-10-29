@@ -50,6 +50,7 @@ import './components/OrderEntry.css';
 import './dashboard/carousel.css';
 import './components/Stats.css';
 import './dashboard/sourceWidgets.css';
+import './dashboard/terminalWidgets.css';
 import './components/IndexPrompt.css';
 import './components/Points.css';
 import './components/account/ConnectDialog.css';

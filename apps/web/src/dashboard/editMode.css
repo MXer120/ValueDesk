@@ -319,22 +319,42 @@ button.dash-edit-plus {
   line-height: var(--lh-micro);
 }
 
-.dash-edit-delete {
+/* The remove target, which is also the trash mode's switch: drag a panel onto
+   it, or press it and click panels on the page. */
+button.dash-edit-delete {
   flex: none;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  width: 100%;
+  min-height: 0;
   margin-top: var(--sp-2);
-  padding: var(--sp-4) var(--sp-2);
-  border: 1px solid var(--panel-line);
+  padding: 10px 12px;
+  border: 1px dashed color-mix(in srgb, var(--text) 22%, transparent);
   border-radius: var(--radius-sm);
-  color: var(--dim);
+  background: none;
+  color: var(--muted);
   font-size: var(--fs-ctl);
   line-height: var(--ctl-lh);
-  text-align: center;
+  text-align: left;
+  transition: border-color 140ms, color 140ms, background 140ms;
 }
-.dash-edit-delete.is-over {
+button.dash-edit-delete > svg { flex: none; }
+button.dash-edit-delete > span { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+button.dash-edit-delete small { color: var(--dim); font-size: var(--fs-micro); line-height: 1.35; }
+button.dash-edit-delete:hover { color: var(--text); border-color: color-mix(in srgb, var(--text) 40%, transparent); }
+button.dash-edit-delete.is-on,
+button.dash-edit-delete.is-over {
   border-style: solid;
   border-color: var(--neg);
   color: var(--neg);
+  background: color-mix(in srgb, var(--neg) 10%, transparent);
 }
+button.dash-edit-delete.is-on small,
+button.dash-edit-delete.is-over small { color: color-mix(in srgb, var(--neg) 70%, var(--muted)); }
+button.dash-edit-delete:focus-visible { outline: 1px solid var(--focus); outline-offset: 2px; }
 
 .dash-edit-bar {
   position: relative;
@@ -451,3 +471,198 @@ button.dash-edit-bar__btn kbd {
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
   .dash-edit-confirm { background: var(--bg-elevated); }
 }
+
+/* The palette's search: the tab sidebar's field (dashboard.css .tabside__find), with its key. */
+.dash-edit-find.tabside__find { flex: none; margin: 0; }
+.dash-edit-find.tabside__find input {
+  height: 34px;
+  padding: 0 34px 0 32px;
+  border: 1px solid color-mix(in srgb, var(--text) 10%, transparent);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-xs);
+}
+.dash-edit-find.tabside__find input:focus { outline: none; border-color: color-mix(in srgb, var(--text) 28%, transparent); }
+.dash-edit-find.tabside__find input::-webkit-search-cancel-button { display: none; }
+.dash-edit-find kbd {
+  position: absolute;
+  right: 9px;
+  padding: 0 5px;
+  border: 1px solid var(--line);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 15px;
+  pointer-events: none;
+}
+.dash-edit-find input:focus ~ kbd { display: none; }
+.dash-edit-palette__none { padding: 16px 4px; }
+button.dash-edit-linkbtn {
+  display: inline;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.dash-edit-wcard:focus-visible { outline: 1px solid var(--focus); outline-offset: 2px; }
+.dash-edit-wcard:not(.is-present):hover { border-color: color-mix(in srgb, var(--text) 26%, var(--panel-line)); }
+.dash-edit-wcard__blurb {
+  display: -webkit-box;
+  margin-top: 2px;
+  overflow: hidden;
+  color: var(--dim);
+  font-size: var(--fs-micro);
+  line-height: 1.35;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+/* Where a widget dragged from the palette lands: a placeholder in the live grid
+   at the size it gets, the pane it splits already at its new size. */
+.dash-drop {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 12px;
+  border: 2px dashed var(--accent);
+  border-radius: var(--radius-sm, 6px);
+  background: color-mix(in srgb, var(--accent) 9%, var(--bg-panel));
+  color: var(--text);
+  pointer-events: none;
+  animation: dash-drop-in 160ms var(--ease-out, ease) both;
+}
+.dash-drop__screen {
+  position: relative;
+  width: min(220px, 70%);
+  aspect-ratio: 16 / 10;
+  max-height: 60%;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 14%, transparent);
+}
+.dash-drop__name { font-size: 15px; font-weight: 600; text-align: center; }
+@keyframes dash-drop-in { from { opacity: 0; transform: scale(0.97); } }
+.dash.is-arrange .dash-grid > .react-grid-item { transition: transform 180ms var(--ease-out, ease), width 180ms var(--ease-out, ease), height 180ms var(--ease-out, ease); }
+.dash.is-arrange .dash-grid > .react-grid-item.react-draggable-dragging,
+.dash.is-arrange .dash-grid > .react-grid-item.resizing { transition: none; }
+.dash-panel.is-split { box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 55%, transparent); }
+
+/* A panel dragged off the page: it goes when released. */
+.dash-panel.is-leaving {
+  opacity: 0.45;
+  box-shadow: 0 0 0 2px var(--neg);
+}
+.dash-edit-ghost.is-remove {
+  border-color: var(--neg);
+  color: var(--neg);
+}
+
+/* Trash mode: nothing inside a panel reacts; the panel under the pointer turns red
+   and a click removes it. */
+.dash.is-trash .dash-panel { cursor: pointer; }
+.dash.is-trash .dash-panel > * { pointer-events: none; }
+.dash.is-trash .dash-panel::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  border-radius: inherit;
+  pointer-events: none;
+  transition: background 120ms, box-shadow 120ms;
+}
+.dash.is-trash .dash-panel:hover::after {
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23ef4a3c' stroke-width='1.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 4.5h10M6.5 4.5V3.3c0-.5.3-.8.8-.8h1.4c.5 0 .8.3.8.8v1.2M4.5 4.5l.6 8c.1.6.5 1 1.1 1h3.6c.6 0 1-.4 1.1-1l.6-8M6.8 7v4M9.2 7v4'/%3E%3C/svg%3E") center / 56px no-repeat,
+    color-mix(in srgb, var(--neg) 16%, transparent);
+  box-shadow: inset 0 0 0 2px var(--neg);
+}
+.dash.is-trash .dash-panel__grip,
+.dash.is-trash .react-resizable-handle { display: none !important; }
+
+/* The last add or removal, with its Undo: over the edit bar. */
+.dash-edit-toast {
+  position: fixed;
+  z-index: 75;
+  left: calc((100vw - var(--edit-palette-w)) / 2);
+  bottom: calc(var(--sp-6) + 52px);
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 6px 6px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--glass-pop-bg, var(--bg-panel));
+  -webkit-backdrop-filter: var(--glass-pop-blur);
+  backdrop-filter: var(--glass-pop-blur);
+  box-shadow: var(--shadow-pop);
+  color: var(--text);
+  font-size: var(--fs-ctl);
+  animation: dash-toast-in 180ms var(--ease-out, ease) both;
+}
+.dash-edit-toast button {
+  min-height: 0;
+  padding: 4px 10px;
+  border-radius: 8px;
+  font-size: var(--fs-ctl);
+}
+.dash-edit-toast kbd {
+  margin-right: 6px;
+  padding: 0 5px;
+  border: 1px solid var(--line);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 15px;
+}
+@keyframes dash-toast-in { from { opacity: 0; transform: translate(-50%, 6px); } }
+@media (prefers-reduced-motion: reduce) {
+  .dash-drop, .dash-edit-toast { animation: none; }
+  .dash.is-arrange .dash-grid > .react-grid-item { transition: none; }
+}
+
+/* Add a tab: every market for a chart tab, as a compact list (dashboard.css has the window). */
+.tabside__markets {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
+  gap: 6px;
+}
+button.tabside__market {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  min-height: 0;
+  padding: 7px 9px;
+  border: 1px solid color-mix(in srgb, var(--text) 6%, transparent);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--text) 3%, transparent);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-xs);
+  text-align: left;
+}
+button.tabside__market:hover { background: color-mix(in srgb, var(--text) 7%, transparent); }
+button.tabside__market > span:first-of-type { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tabside__star { color: var(--muted); font-size: 11px; }
+.tabside__full {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--neg) 12%, transparent);
+  color: var(--text);
+  font-size: var(--fs-xs);
+}
+.dash-edit-wcard.tabside__card:disabled,
+button.tabside__market:disabled { opacity: 0.45; cursor: default; }

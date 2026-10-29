@@ -281,10 +281,12 @@ export interface LeaderboardPageProps {
   address: string | null;
   onScan: (address: string, venue?: Venue) => void;
   onOpenCopy: (address: string, venue: Venue) => void;
+  /** A widget on another page (the terminal): its view is not read from or written to that page's URL. */
+  embedded?: boolean;
 }
 
-export function LeaderboardPage({ address, onScan }: LeaderboardPageProps) {
-  const [view, setView] = useState<LbView>(() => parseView(window.location.search));
+export function LeaderboardPage({ address, onScan, embedded = false }: LeaderboardPageProps) {
+  const [view, setView] = useState<LbView>(() => parseView(embedded ? '' : window.location.search));
   const [statSort, setStatSort] = useState<SortKey | null>(null);
   const [board, setBoard] = useState<AssetBoard>('all');
   const [minTrades, setMinTrades] = useState<0 | 2>(2);
@@ -305,11 +307,12 @@ export function LeaderboardPage({ address, onScan }: LeaderboardPageProps) {
   };
 
   useEffect(() => {
+    if (embedded) return;
     const next = writeView(window.location.search, view, DEFAULT_VIEW);
     if (next !== window.location.search) {
       window.history.replaceState(window.history.state, '', `${window.location.pathname}${next}${window.location.hash}`);
     }
-  }, [view]);
+  }, [view, embedded]);
 
   useEffect(() => {
     setDraft((d) => (d.trim() === view.q ? d : view.q));

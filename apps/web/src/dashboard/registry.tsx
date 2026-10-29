@@ -22,7 +22,7 @@
  * region's accessible name and the name an error boundary reports under.
  */
 import type { Engine, Symbol as MarketSymbol } from '../api';
-import { LiveChart, LiveOrderEntry, LiveSizeCalc } from './livePrice';
+import { LiveChart, LiveOrderEntry } from './livePrice';
 import { Book, MarketStrip, TickerBar, Trades } from '../components/Market';
 import { AccountPanel } from '../components/Account';
 import { MobileCarousel } from './MobileCarousel';
@@ -32,16 +32,8 @@ import { FeeTier } from '../components/FeeTier';
 import { Stats } from '../components/Stats';
 import type { BreakpointName, PanelDefinition } from './types';
 import { EXTRA_WIDGET_IDS, faceFor } from './widgetCatalog';
-import { SourceWidget } from './sourceWidgets';
-import { LiveFeed } from '../components/livefeed/LiveFeed';
-import { FedLive } from '../components/fedlive/FedLive';
-import { FOMC_ODDS_ON, FedWatch } from '../components/macro/FedWatch';
-import { IndicatorWidget } from '../components/macro/IndicatorView';
-import { EtfFlows } from '../components/macro/EtfFlows';
-import { NewsFeed } from '../components/news/NewsFeed';
-import { LiqHeatmap } from '../components/liqmap/LiqHeatmap';
-import { newsProps } from './newsProps';
-import { coinLabel } from '../format';
+import { FOMC_ODDS_ON } from '../components/macro/FedWatch';
+import { widgetBody, widgetBodyShape } from './widgetBodies';
 import { ChartCard, TradeAccountBand } from './tradeTabs';
 
 /**
@@ -433,49 +425,22 @@ export const TRADE_PANELS: PanelDefinition<TradeContext>[] = [
   },
 
   ...EXTRA_WIDGET_IDS.map((id): PanelDefinition<TradeContext> => {
-    const face = faceFor(id);
-    const name = face?.name ?? id;
+    const name = faceFor(id)?.name ?? id;
     const quick = id === 'quick';
-    // The two news widgets draw their own insets and scroll inside themselves.
-    const own = id === 'news' || id === 'livefeed' || id === 'fedlive' || id === 'fedwatch' || id === 'indicator' || id === 'etfflows' || id === 'liqmap';
+    // Each draws what its page draws, with that page's props (widgetBodies.tsx); the
+    // body's scroll and insets are the widget's own. `probe` reads them without a context.
+    const probe = widgetBodyShape(id);
     return {
       id,
       title: name,
       defaultHidden: true,
       minW: quick ? 8 : 10,
       minH: quick ? 12 : 8,
-      pad: !quick && !own,
-      scroll: own ? 'hidden' : 'auto',
+      pad: probe.pad,
+      scroll: probe.scroll,
       // The FOMC odds are off until the markets license them (FedWatch.tsx).
       when: quick ? (_c, bp) => !isNarrow(bp) : id === 'fedwatch' ? () => FOMC_ODDS_ON : undefined,
-      render: (c) => {
-        if (id === 'sizecalc') return <LiveSizeCalc price={c.price} />;
-        if (id === 'livefeed') return <LiveFeed />;
-        if (id === 'fedlive') return <FedLive />;
-        if (id === 'fedwatch') return <FedWatch />;
-        if (id === 'indicator') return <IndicatorWidget />;
-        if (id === 'etfflows') return <EtfFlows />;
-        if (id === 'liqmap') return <LiqHeatmap symbol={c.symbol} engine={c.engine} address={c.address} />;
-        if (id === 'news') return <NewsFeed {...newsProps(c)} />;
-        if (quick) {
-          return (
-            <LiveOrderEntry
-              engine={c.engine}
-              symbol={c.symbol}
-              sym={c.sym}
-              network={c.network}
-              unlocked={c.unlocked}
-              showTitle={false}
-              connectedAddress={c.address}
-              signingAddress={c.signingAddress}
-              price={c.price}
-              onPrice={c.onPrice}
-              onPlaced={c.onChanged}
-            />
-          );
-        }
-        return <SourceWidget id={id} title={name} />;
-      },
+      render: (c, bp) => widgetBody(id, c, { bp })?.content ?? null,
     };
   }),
 ];

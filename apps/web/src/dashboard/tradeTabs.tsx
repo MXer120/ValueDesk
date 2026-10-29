@@ -9,59 +9,41 @@
  * market's tab shows that market's figures; a widget tab keeps the market on
  * screen's), and the body fades across a switch.
  */
-import { useCallback, useState, type ReactNode } from 'react';
-import { LiveChart, LiveSizeCalc } from './livePrice';
-import { TickerBar, Trades } from '../components/Market';
+import { useCallback, useState } from 'react';
+import { LiveChart } from './livePrice';
+import { TickerBar } from '../components/Market';
 import { AccountTabs } from '../components/AccountTabs';
-import { FeeTier } from '../components/FeeTier';
-import { Stats } from '../components/Stats';
-import { LiveFeed } from '../components/livefeed/LiveFeed';
-import { FedLive } from '../components/fedlive/FedLive';
-import { FOMC_ODDS_ON, FedWatch } from '../components/macro/FedWatch';
-import { IndicatorWidget } from '../components/macro/IndicatorView';
-import { EtfFlows } from '../components/macro/EtfFlows';
-import { NewsFeed } from '../components/news/NewsFeed';
-import { LiqHeatmap } from '../components/liqmap/LiqHeatmap';
-import { FundingScanner } from '../components/explore/FundingScanner';
-import { coinLabel } from '../format';
+import { FOMC_ODDS_ON } from '../components/macro/FedWatch';
 import { useStored } from '../hooks';
 import type { PanelTab } from './Panel';
 import {
-  AddTabButton, MENU_ICONS, TAB_WIDGETS, TabMenu, TabSidebar, assetOf, baseOf, copyOf, extraKey, isExtraKey, menuAt, useExtraTabs,
+  AddTabButton, MENU_ICONS, TabMenu, TabSidebar, assetOf, baseOf, copyOf, extraKey, isExtraKey, menuAt, useExtraTabs,
   type TabMenuItem,
 } from './tabExtras';
 import type { TradeContext } from './registry';
-import { newsProps } from './newsProps';
+import { tabWidgetIds, faceFor } from './widgetCatalog';
+import { widgetBody, widgetIdOf } from './widgetBodies';
 
-/** One widget as a tab body; a duplicate keeps its own settings (`instance`). */
-function widgetTab(id: string, c: TradeContext): { content: ReactNode; scroll: PanelTab['scroll'] } {
+/** One widget as a tab body (widgetBodies.tsx, as on a panel); a duplicate keeps its own settings (`instance`). */
+function widgetTab(id: string, c: TradeContext): { content: PanelTab['content']; scroll: PanelTab['scroll'] } {
   const n = copyOf(id);
-  const instance = n ? String(n) : undefined;
-  switch (baseOf(id)) {
-    case 'trades': return { content: <Trades engine={c.engine} symbol={c.symbol} sym={c.sym} showTitle={false} onOpenScan={c.onOpenScan} />, scroll: 'auto' };
-    case 'news': return { content: <NewsFeed {...newsProps(c)} instance={instance} />, scroll: 'hidden' };
-    case 'livefeed': return { content: <LiveFeed instance={instance} />, scroll: 'hidden' };
-    case 'fedlive': return { content: <FedLive />, scroll: 'hidden' };
-    case 'fedwatch': return { content: <FedWatch instance={instance} />, scroll: 'hidden' };
-    case 'indicator': return { content: <IndicatorWidget instance={instance} />, scroll: 'hidden' };
-    case 'etfflows': return { content: <EtfFlows instance={instance} />, scroll: 'hidden' };
-    case 'funding': return { content: <FundingScanner enabled mode="compact" onOpenSymbol={(s) => c.onSelectSymbol?.(s)} />, scroll: 'auto' };
-    case 'liqmap': return { content: <LiqHeatmap symbol={c.symbol} engine={c.engine} instance={instance} address={c.address} />, scroll: 'hidden' };
-    case 'sizecalc': return { content: <LiveSizeCalc price={c.price} />, scroll: 'auto' };
-    case 'feetier': return { content: <FeeTier address={c.address} engine={c.engine} />, scroll: 'auto' };
-    case 'venue': return { content: <Stats address={c.address} showTitle={false} />, scroll: 'auto' };
-    default: return { content: null, scroll: 'auto' };
-  }
+  const w = widgetBody(baseOf(id), c, { instance: n ? String(n) : undefined });
+  return { content: w?.content ?? null, scroll: w?.scroll ?? 'auto' };
 }
 
+/** A widget id a tab can show: any of the catalog's (and the tape's older tab id). */
+const isWidget = (id: string) => !!faceFor(widgetIdOf(baseOf(id)));
 /** A tab's name: the widget's, with its copy number. */
-const widgetName = (id: string) => `${TAB_WIDGETS[baseOf(id)] ?? baseOf(id)}${copyOf(id) ? ` ${copyOf(id)}` : ''}`;
+const widgetName = (id: string) => {
+  const f = faceFor(widgetIdOf(baseOf(id)));
+  return `${f?.tab ?? f?.name ?? baseOf(id)}${copyOf(id) ? ` ${copyOf(id)}` : ''}`;
+};
 
-// The FOMC odds are off until the markets license them (FedWatch.tsx): not offered as a tab.
-const offered = (ids: string[]) => ids.filter((id) => id !== 'fedwatch' || FOMC_ODDS_ON);
-const BAND_WIDGETS = offered(['trades', 'news', 'livefeed', 'fedlive', 'fedwatch', 'indicator', 'etfflows', 'funding', 'liqmap', 'sizecalc', 'feetier', 'venue']);
+// Every widget, on both panels, bar the panel itself (widgetCatalog.ts tabWidgetIds).
+const BAND_WIDGETS = tabWidgetIds('positions', FOMC_ODDS_ON);
 const CHART_SEED = ['liqmap'];
-const CHART_WIDGETS = offered(['livefeed', 'fedlive', 'fedwatch', 'indicator', 'etfflows', 'news', 'trades', 'funding', 'liqmap']);
+const CHART_WIDGETS = tabWidgetIds('chart', FOMC_ODDS_ON);
+const TAB_MAX = 8;
 
 const accountCtx = (c: TradeContext) => ({
   engine: c.engine,
@@ -74,11 +56,11 @@ const accountCtx = (c: TradeContext) => ({
 
 /** The account band with its extra tabs (the bottom panel). */
 export function TradeAccountBand({ c }: { c: TradeContext }) {
-  const extra = useExtraTabs('band');
+  const extra = useExtraTabs('band', TAB_MAX);
   const [side, setSide] = useState(false);
   const [menu, setMenu] = useState<{ at: { x: number; y: number }; key: string } | null>(null);
   const [select, setSelect] = useState<{ key: string; n: number } | null>(null);
-  const ids = extra.ids.filter((id) => TAB_WIDGETS[baseOf(id)]);
+  const ids = extra.ids.filter(isWidget);
   const show = (id: string | null) => { if (id) setSelect((s) => ({ key: extraKey(id), n: (s?.n ?? 0) + 1 })); };
   const tabs: PanelTab[] = ids.map((id) => {
     const w = widgetTab(id, c);
@@ -112,6 +94,7 @@ export function TradeAccountBand({ c }: { c: TradeContext }) {
         <TabSidebar
           title="Add a tab · Account"
           widgets={BAND_WIDGETS}
+          full={extra.ids.length >= TAB_MAX}
           onAdd={(id) => { show(extra.add(id)); setSide(false); }}
           onClose={() => setSide(false)}
         />
@@ -123,11 +106,11 @@ export function TradeAccountBand({ c }: { c: TradeContext }) {
 /** The chart card: the coin row (with the tabs at its end), then the chart or the tab's widget. */
 export function ChartCard({ c }: { c: TradeContext }) {
   // The liquidation heatmap is the chart's second tab unless closed (2026-10-27).
-  const extra = useExtraTabs('chart', 8, CHART_SEED);
+  const extra = useExtraTabs('chart', TAB_MAX, CHART_SEED);
   const [active, setActive] = useStored<string>('vs.tabs.chart.active', 'main');
   const [side, setSide] = useState(false);
   const [menu, setMenu] = useState<{ at: { x: number; y: number }; id: string } | null>(null);
-  const ids = extra.ids.filter((id) => TAB_WIDGETS[baseOf(id)] || (assetOf(id) && c.byName.has(assetOf(id)!)));
+  const ids = extra.ids.filter((id) => isWidget(id) || (assetOf(id) && c.byName.has(assetOf(id)!)));
   const on = active !== 'main' && ids.includes(active) ? active : 'main';
   const asset = assetOf(on);
   const symbol = asset ?? c.symbol;
@@ -155,7 +138,11 @@ export function ChartCard({ c }: { c: TradeContext }) {
     const n = a === c.symbol ? (copyOf(id) ?? 1) + 1 : copyOf(id);
     return `${c.byName.get(a)?.displayName ?? a}${n ? ` ${n}` : ''}`;
   };
-  const markets = [...c.byName.values()].map((s) => ({ name: s.name, label: s.displayName ?? s.name }));
+  // Every market, the starred ones first.
+  const starred = new Set(c.favorites.filter((k) => k.startsWith(`${c.engine}:`)).map((k) => k.slice(c.engine.length + 1)));
+  const markets = [...c.byName.values()]
+    .map((s) => ({ name: s.name, label: s.displayName ?? s.name, starred: starred.has(s.name) }))
+    .sort((a, b) => Number(b.starred) - Number(a.starred));
 
   const tabs = (
     <div className="chart-tabs dash-nodrag" role="tablist" aria-label="Chart tabs">
@@ -230,6 +217,7 @@ export function ChartCard({ c }: { c: TradeContext }) {
           title="Add a tab · Chart"
           widgets={CHART_WIDGETS}
           markets={markets}
+          full={extra.ids.length >= TAB_MAX}
           onAdd={(id) => { add(id); setSide(false); }}
           onClose={() => setSide(false)}
         />

@@ -3,9 +3,10 @@
  * chart card on the trade page.
  *
  * The + opens the widget sidebar edit mode uses (the same window, cards and
- * sketches, EditMode.tsx), listing the widgets that work as a tab there - and,
- * on the chart, other markets' charts; a card adds its tab. A right-click on a
- * tab offers Close tab, Add widget and Duplicate. Kept per panel on this
+ * sketches, EditMode.tsx), listing every widget of the catalog (bar the panel
+ * itself) by group, and on the chart every market for another chart, starred
+ * ones first; one search narrows both, and a card adds its tab. A right-click
+ * on a tab offers Close tab, Add widget and Duplicate. Kept per panel on this
  * browser; a duplicate (`news#2`) keeps its own settings.
  */
 import { Fragment, useEffect, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
@@ -14,23 +15,8 @@ import { useStored } from '../hooks';
 import { Sketch } from './sketches';
 import './editMode.css';
 
-/** Widgets a tab can hold; which panel offers which is the caller's list. */
-export const TAB_WIDGETS: Record<string, string> = {
-  trades: 'Trades',
-  news: 'News',
-  livefeed: 'Live feed',
-  fedlive: 'Fed live',
-  fedwatch: 'FOMC odds',
-  indicator: 'Indicator',
-  etfflows: 'ETF flows',
-  funding: 'Funding spreads',
-  liqmap: 'Liq. heatmap',
-  sizecalc: 'Position size',
-  feetier: 'Fee tier',
-  venue: 'Venue status',
-};
-/** The edit palette's sketch for each (widgetCatalog ids). */
-const SKETCH: Record<string, string> = { trades: 'tape', news: 'news', livefeed: 'livefeed', fedlive: 'livefeed', fedwatch: 'tape', indicator: 'funding', etfflows: 'funding', funding: 'funding', liqmap: 'liq', sizecalc: 'sizecalc', feetier: 'feetier', venue: 'venue' };
+import { WIDGET_GROUPS, faceFor, matchesWidget } from './widgetCatalog';
+import { CoinIcon } from '../components/CoinIcon';
 
 export { assetOf, baseOf, copyOf, extraKey, isExtraKey, nextCopy } from './tabIds';
 import { nextCopy } from './tabIds';
@@ -183,11 +169,14 @@ export const menuAt = (e: ReactMouseEvent) => {
  * the widgets that work as a tab here, as the same cards with their sketches,
  * and on the chart a search for another market's chart. A card adds its tab.
  */
-export function TabSidebar({ title, widgets, markets, onAdd, onClose }: {
+export function TabSidebar({ title, widgets, markets, full = false, onAdd, onClose }: {
   title: string;
+  /** Catalog ids (widgetCatalog.ts), in palette order. */
   widgets: readonly string[];
-  /** Markets a chart tab can show (the chart card only). */
-  markets?: readonly { name: string; label: string }[];
+  /** Markets a chart tab can show (the chart card only), starred first. */
+  markets?: readonly { name: string; label: string; starred?: boolean }[];
+  /** The panel holds as many tabs as it can: say so instead of a card that does nothing. */
+  full?: boolean;
   onAdd: (id: string) => void;
   onClose: () => void;
 }) {
@@ -208,7 +197,18 @@ export function TabSidebar({ title, widgets, markets, onAdd, onClose }: {
     };
   }, [onClose]);
   const term = q.trim().toUpperCase();
-  const found = markets && term ? markets.filter((m) => m.label.toUpperCase().includes(term) || m.name.toUpperCase().includes(term)).slice(0, 10) : [];
+  const found = markets ? (term ? markets.filter((m) => m.label.toUpperCase().includes(term) || m.name.toUpperCase().includes(term)) : markets) : [];
+  const groups = WIDGET_GROUPS
+    .map((group) => ({
+      group,
+      ids: widgets.filter((id) => {
+        const f = faceFor(id);
+        return f?.group === group && matchesWidget(q, f.name, f.blurb, f.group);
+      }),
+    }))
+    .filter((g) => g.ids.length > 0);
+  const first = groups[0]?.ids[0];
+  const add = (id: string) => { if (!full) onAdd(id); };
 
   return createPortal(
     <div className="tabside-root">
@@ -221,44 +221,57 @@ export function TabSidebar({ title, widgets, markets, onAdd, onClose }: {
             <svg viewBox="0 0 12 12" width="11" height="11" aria-hidden="true"><path d="m3 3 6 6M9 3 3 9" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>
           </button>
         </header>
+        <label className="tabside__find">
+          <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" strokeWidth="1.4" /><path d="m10.5 10.5 3 3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" /></svg>
+          <input
+            type="search"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder={markets ? 'Search widgets and markets' : 'Search widgets'}
+            aria-label={markets ? 'Search widgets and markets for a tab' : 'Search widgets for a tab'}
+            autoFocus
+            spellCheck={false}
+            autoComplete="off"
+            onKeyDown={(e) => {
+              if (e.key !== 'Enter') return;
+              if (first) add(first);
+              else if (found[0]) add(`asset:${found[0].name}`);
+            }}
+          />
+        </label>
+        {full && <p className="tabside__full" role="status">This panel holds 8 tabs. Close one (right-click it) to add another.</p>}
         <div className="dash-edit-palette__list tabside__list">
-          {markets && (
+          {groups.map(({ group, ids }) => (
+            <section key={group} className="dash-edit-palette__group">
+              <p>{group}</p>
+              <div className="dash-edit-palette__grid" role="list">
+                {ids.map((id) => (
+                  <button key={id} type="button" role="listitem" className="dash-edit-wcard tabside__card" disabled={full} title={faceFor(id)?.blurb} onClick={() => add(id)}>
+                    <span className="dash-edit-card__screen" aria-hidden="true"><Sketch id={id} /></span>
+                    <span className="dash-edit-wcard__row"><span className="dash-edit-widget__name">{faceFor(id)?.name ?? id}</span></span>
+                    <span className="dash-edit-wcard__blurb">{faceFor(id)?.blurb}</span>
+                  </button>
+                ))}
+              </div>
+            </section>
+          ))}
+          {markets && found.length > 0 && (
             <section className="dash-edit-palette__group">
-              <p>Charts</p>
-              <label className="tabside__find">
-                <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" strokeWidth="1.4" /><path d="m10.5 10.5 3 3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" /></svg>
-                <input
-                  value={q}
-                  onChange={(e) => setQ(e.target.value)}
-                  placeholder="Another market: ETH, SOL, HYPE…"
-                  aria-label="Find a market for a chart tab"
-                  autoFocus
-                  onKeyDown={(e) => { if (e.key === 'Enter' && found[0]) onAdd(`asset:${found[0].name}`); }}
-                />
-              </label>
-              {found.length > 0 && (
-                <div className="dash-edit-palette__grid" role="list">
-                  {found.map((m) => (
-                    <button key={m.name} type="button" role="listitem" className="dash-edit-wcard tabside__card" onClick={() => onAdd(`asset:${m.name}`)}>
-                      <span className="dash-edit-card__screen" aria-hidden="true"><Sketch id="chart" /></span>
-                      <span className="dash-edit-wcard__row"><span className="dash-edit-widget__name">{m.label}</span></span>
-                    </button>
-                  ))}
-                </div>
-              )}
+              <p>Charts of other markets</p>
+              <div className="tabside__markets" role="list">
+                {found.map((m) => (
+                  <button key={m.name} type="button" role="listitem" className="tabside__market" disabled={full} onClick={() => add(`asset:${m.name}`)}>
+                    <CoinIcon coin={m.name} size={16} />
+                    <span>{m.label}</span>
+                    {m.starred && <span className="tabside__star" aria-label="Starred">★</span>}
+                  </button>
+                ))}
+              </div>
             </section>
           )}
-          <section className="dash-edit-palette__group">
-            <p>Widgets</p>
-            <div className="dash-edit-palette__grid" role="list">
-              {widgets.map((id) => (
-                <button key={id} type="button" role="listitem" className="dash-edit-wcard tabside__card" onClick={() => onAdd(id)}>
-                  <span className="dash-edit-card__screen" aria-hidden="true"><Sketch id={SKETCH[id] ?? id} /></span>
-                  <span className="dash-edit-wcard__row"><span className="dash-edit-widget__name">{TAB_WIDGETS[id] ?? id}</span></span>
-                </button>
-              ))}
-            </div>
-          </section>
+          {groups.length === 0 && found.length === 0 && (
+            <p className="dash-edit-palette__empty dash-edit-palette__none">Nothing matches “{q.trim()}”.</p>
+          )}
         </div>
         <p className="tabside__hint">A card adds it as a tab. Right-click a tab to close or duplicate it.</p>
       </aside>

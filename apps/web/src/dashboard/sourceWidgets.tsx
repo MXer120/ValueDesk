@@ -1,12 +1,12 @@
 /**
- * Venue source for market-wide widgets, and the position-size calculator.
- * All is the default: a widget shows SoDEX and Hyperliquid together until
- * the trader picks one venue. The choice is remembered on this browser.
+ * Venue source for market-wide widgets (whale trades), and the position-size
+ * calculator. All is the default: a widget shows SoDEX and Hyperliquid
+ * together until the trader picks one venue. The choice is remembered on this
+ * browser.
  */
 import { decimalInput } from '../components/numberInput';
 import { useState } from 'react';
 import { positionSize } from './widgetCatalog';
-import { Sketch } from './sketches';
 import './sourceWidgets.css';
 import { fmtNum, toInputText } from '../numStyle';
 
@@ -22,7 +22,7 @@ export function readSource(id: string): VenueSource {
   return 'all';
 }
 
-function writeSource(id: string, source: VenueSource) {
+export function writeSource(id: string, source: VenueSource) {
   try { localStorage.setItem(SOURCE_KEY(id), source); } catch { /* private mode */ }
 }
 
@@ -32,35 +32,22 @@ const SOURCE_LABEL: Record<VenueSource, string> = {
   hl: 'Hyperliquid',
 };
 
-export function SourceWidget({ id, title }: { id: string; title: string }) {
-  const [source, setSource] = useState<VenueSource>(() => readSource(id));
-  const pick = (next: VenueSource) => {
-    setSource(next);
-    writeSource(id, next);
-  };
+/** All / SoDEX / Hyperliquid, for a widget whose feed can be read per venue. */
+export function SourcePick({ label, value, onChange }: { label: string; value: VenueSource; onChange: (next: VenueSource) => void }) {
   return (
-    <section className="wg">
-      <header className="wg__bar">
-        <strong>{title}</strong>
-        <div className="wg-src" role="group" aria-label={`${title} source`}>
-          {(['all', 'sodex', 'hl'] as const).map((id_) => (
-            <button
-              key={id_}
-              type="button"
-              className={`wg-src__btn${source === id_ ? ' is-on' : ''}`}
-              aria-pressed={source === id_}
-              onClick={() => pick(id_)}
-            >
-              {SOURCE_LABEL[id_]}
-            </button>
-          ))}
-        </div>
-      </header>
-      <div className="wg__stage" aria-hidden="true">
-        <Sketch id={id} />
-      </div>
-      <p className="wg__src">{SOURCE_LABEL[source]}</p>
-    </section>
+    <div className="wg-src" role="group" aria-label={label}>
+      {(['all', 'sodex', 'hl'] as const).map((id) => (
+        <button
+          key={id}
+          type="button"
+          className={`wg-src__btn${value === id ? ' is-on' : ''}`}
+          aria-pressed={value === id}
+          onClick={() => onChange(id)}
+        >
+          {SOURCE_LABEL[id]}
+        </button>
+      ))}
+    </div>
   );
 }
 
