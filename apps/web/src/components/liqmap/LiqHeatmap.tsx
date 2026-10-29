@@ -234,7 +234,7 @@ export function LiqHeatmap({ symbol, engine, instance, address = null }: { symbo
           side={side}
           venues={chosen}
           self={address}
-          bars={prefs.view !== 'history' ? { res, unit, coin, width: barWidth !== null ? `${fmtPx(barWidth)}` : null } : null}
+          bars={prefs.view !== 'history' ? { res, unit, coin, width: barWidth !== null ? `$${fmtPx(barWidth)}` : null } : null}
           onChange={(p) => set(p)}
           onReset={() => set({ wallets: [], side: 'both', res: 'fine', unit: 'usd' })}
         />
