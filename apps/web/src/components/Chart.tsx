@@ -86,6 +86,7 @@ import {
   DEFAULT_INDICATORS,
   INDICATOR_INFO,
   STORAGE_KEY as INDICATORS_KEY,
+  indicatorShort,
   indicatorTitle,
   legendName,
   sanitizeSpecs,
@@ -94,7 +95,9 @@ import {
   type IndicatorSpec,
 } from '../chart/indicators';
 import { IndicatorLegend } from '../chart/IndicatorLegend';
-import { LIQ_HEAT } from '../chart/liqHeatIndicator';
+import { LIQ_HEAT, liqHeatTemplate } from '../chart/liqHeatIndicator';
+import { LiqIndicatorFeed } from '../chart/liqIndicators';
+import { LIQ_INDICATORS, liqMapTemplate } from '../chart/liqMap';
 import { IndicatorSettings } from '../chart/IndicatorSettings';
 import {
   DRAWING_OVERLAYS,
@@ -551,6 +554,8 @@ export interface ChartProps {
    * The chart and its controls only - timeframes, scroll, zoom, the scales, the clock - with
    * nothing of the user's on it: no drawings, studies, news, fills or order lines, and none of
    * their settings touched (the liquidation heatmap's historical view draws its cells on it).
+   * Always the traded price (no Latest / Mark / Index switch) and the chart view only (no
+   * Depth or Market info).
    */
   bare?: boolean;
 
@@ -833,7 +838,8 @@ function Chart({
    */
   const [priceSource, setPriceSource] = useStored<PriceSource>('vs.chart.priceSource', 'latest');
   const sourceOk = engine === 'perps' && !NO_MARK_INDEX.has(interval);
-  const src: PriceSource = priceSource !== 'latest' && sourceOk ? priceSource : 'latest';
+  // A bare chart (the liquidation heatmap's historical view) has no switch: always the traded price.
+  const src: PriceSource = !bare && priceSource !== 'latest' && sourceOk ? priceSource : 'latest';
   // A timeframe change that drops Mark/Index (1m, 3m, 8h, 3D) says so. The
   // first run is the stored choice meeting the default 1m chart — that toast
   // would fire on every visit, so it waits for a change.
@@ -843,8 +849,8 @@ function Chart({
       skipSourceNotice.current = false;
       return;
     }
-    if (priceSource !== 'latest' && !sourceOk) notify('info', markIndexNotice(engine, interval));
-  }, [interval, engine, sourceOk, priceSource]);
+    if (!bare && priceSource !== 'latest' && !sourceOk) notify('info', markIndexNotice(engine, interval));
+  }, [interval, engine, sourceOk, priceSource, bare]);
   const seriesTicker = src === 'latest' ? symbol : `${symbol}@${src}`;
   /** Which of the toolbar's views is showing - see VIEWS above. The
    *  klinecharts canvas stays mounted regardless (see the render below): it
@@ -890,6 +896,13 @@ function Chart({
   const [indicators, setIndicators] = useState<ActiveIndicator[]>([]);
   /** The Indicators menu's search box. */
   const [indQuery, setIndQuery] = useState('');
+  /** What the menu offers (the liquidation layers on perps only), and what matches the search, A to Z. */
+  const offerable = supported.indicators.filter((n) => engine === 'perps' || !LIQ_INDICATORS.has(n));
+  const indMatch = (name: string) => {
+    const q = indQuery.trim().toLowerCase();
+    return !q || name.toLowerCase().includes(q) || indicatorTitle(name).toLowerCase().includes(q);
+  };
+  const offered = offerable.filter(indMatch).sort((a, b) => indicatorTitle(a).localeCompare(indicatorTitle(b)));
   /** The footer's % A L (chart/yScale.ts). */
   const [scale, dispatchScale] = useReducer(scaleReducer, INITIAL_SCALE);
   /** A, for the pointer handlers below, which are bound once. */
@@ -1673,6 +1686,10 @@ function Chart({
       registerDrawingOverlays(kc);
       // The chart's own marks (fills, news): registered, never offered as tools.
       registerMarkOverlays(kc);
+      // The liquidation heatmap's layers as studies (chart/liqIndicators.tsx): before the
+      // Indicators menu reads getSupportedIndicators() below, so they are in it.
+      kc.registerIndicator(liqHeatTemplate);
+      kc.registerIndicator(liqMapTemplate);
       // Same shape: registers the x-axis whose tick filter drops a time label
       // that would be drawn half outside the canvas. Must land before init, so
       // the name is in the registry by the time the axis is overridden below.
@@ -2508,9 +2525,9 @@ function Chart({
     const c = chart.current;
     if (!ready || !c) return;
     // Idempotent: whatever this instance already carries is taken off first.
-    // Idempotent: whatever this instance already carries is taken off first - but a layer a
-    // caller drew on it (the liquidation heatmap: chart/liqHeatIndicator.ts) is the caller's.
-    for (const i of c.getIndicators()) if (i.name !== LIQ_HEAT) c.removeIndicator({ id: i.id, paneId: i.paneId });
+    // Idempotent: whatever this instance already carries is taken off first - but on a bare chart
+    // a layer the caller drew on it (the liquidation heatmap: chart/liqHeatIndicator.ts) is the caller's.
+    for (const i of c.getIndicators()) if (!(bare && i.name === LIQ_HEAT)) c.removeIndicator({ id: i.id, paneId: i.paneId });
     const specs = bare ? [] : sanitizeSpecs(snapViewRef.current?.indicators ?? storedRef.current, new Set(lib.current?.getSupportedIndicators() ?? []));
     const out: ActiveIndicator[] = [];
     const paneOf = new Map<string, string>([['main', CANDLE_PANE_ID]]);
@@ -4199,9 +4216,19 @@ function Chart({
               Indicators
             </button>
           {mm.value === 'indicators' && (
-            <div className={`menu-popup kc-menu-wide${mm.closing ? ' is-closing' : ''}`} onAnimationEnd={mm.onExit}>
-              <div className="kc-section">
-                <div className="kc-menu-label">On the chart</div>
+            // The app's View panel look (ViewPop: title, labelled sections, the same search field).
+            <div
+              className={`menu-popup kc-menu-wide kc-ind-pop${mm.closing ? ' is-closing' : ''}`}
+              onAnimationEnd={mm.onExit}
+              // No taller than the chart card below it (the card clips what overflows): the Add list takes what is left.
+              ref={(el) => {
+                const card = el?.closest('.kc-panel');
+                if (el && card) el.style.maxHeight = `${Math.max(220, Math.floor(card.getBoundingClientRect().bottom - el.getBoundingClientRect().top - 8))}px`;
+              }}
+            >
+              <div className="kc-ind-head"><span>Indicators</span></div>
+              <div className="kc-ind-sec">
+                <div className="kc-ind-lbl"><span>On the chart</span>{indicators.length > 0 && <span className="kc-ind-aside">{indicators.length}</span>}</div>
                 <div className="kc-menu-list">
                   {indicators.length === 0 && <div className="kc-empty">None</div>}
                   {indicators.map((ind) => (
@@ -4241,34 +4268,36 @@ function Chart({
                 </div>
               </div>
 
-              <div className="kc-section">
+              <div className="kc-ind-sec">
+                <div className="kc-ind-lbl"><span>Add</span></div>
                 <input
                   className="kc-ind-search"
                   type="search"
-                  placeholder={`Search ${supported.indicators.length} indicators`}
+                  placeholder={`Search ${offerable.length} indicators`}
                   aria-label="Search indicators"
                   value={indQuery}
                   onChange={(e) => setIndQuery(e.target.value)}
                   autoFocus
                 />
-                <div className="kc-menu-list kc-scroll">
-                  {supported.indicators
-                    .filter((name) => {
-                      const q = indQuery.trim().toLowerCase();
-                      return !q || name.toLowerCase().includes(q) || indicatorTitle(name).toLowerCase().includes(q);
-                    })
-                    .sort((a, b) => indicatorTitle(a).localeCompare(indicatorTitle(b)))
-                    .map((name) => (
-                      <button
-                        key={name}
-                        className="kc-ind-add"
-                        disabled={indicators.some((i) => i.name === name)}
-                        onClick={() => addIndicator(name)}
-                      >
-                        <span>{indicatorTitle(name)}</span>
-                        <span className="kc-ind-short">{name}</span>
-                      </button>
-                    ))}
+                <div className="kc-scroll kc-ind-list">
+                  {/* The liquidation layers first, on their own; then the studies, A to Z. */}
+                  {([['Liquidations', offered.filter((n) => LIQ_INDICATORS.has(n))], ['Studies', offered.filter((n) => !LIQ_INDICATORS.has(n))]] as const).map(([label, names]) => names.length > 0 && (
+                    <div key={label} className="kc-ind-group" role="group" aria-label={label}>
+                      <div className="kc-ind-lbl is-sub"><span>{label}</span></div>
+                      {names.map((name) => (
+                        <button
+                          key={name}
+                          className="kc-ind-add"
+                          disabled={indicators.some((i) => i.name === name)}
+                          onClick={() => addIndicator(name)}
+                        >
+                          <span>{indicatorTitle(name)}</span>
+                          <span className="kc-ind-short">{indicatorShort(name)}</span>
+                        </button>
+                      ))}
+                    </div>
+                  ))}
+                  {offerable.length > 0 && offered.length === 0 && <div className="kc-empty">No indicator matches.</div>}
                 </div>
               </div>
             </div>
@@ -4287,7 +4316,7 @@ function Chart({
            * to switch to, and a segment that silently redrew the same data
            * under a different name would be a lie about the source. Shown-and-
            * explained beats both a dead toggle and a missing half-control. */}
-          <div className="kc-seg" role="group" aria-label="Price source">
+          {!bare && <div className="kc-seg" role="group" aria-label="Price source">
             {(['latest', 'mark', 'index'] as const).map((s) => {
               const off = s !== 'latest' && !sourceOk;
               return (
@@ -4315,7 +4344,7 @@ function Chart({
                 </button>
               );
             })}
-          </div>
+          </div>}
         </div>
 
         {/* Transient strip. It lives in the flexible middle so that a hint
@@ -4333,7 +4362,8 @@ function Chart({
           {/* The view group. A single tab was worse than four: with nothing
               beside it there was no active/inactive contrast, so "Chart" read
               as a label rather than as the selected one of a set. */}
-          {VIEWS.map((v) => (
+          {/* A bare chart is the chart view only: no Depth or Market info. */}
+          {!bare && VIEWS.map((v) => (
             <button
               key={v.id}
               className={`kc-view${v.id === view ? ' on' : ''}`}
@@ -4490,6 +4520,7 @@ function Chart({
         <div ref={marqueeEl} className="kc-marquee" aria-hidden />
         <SelectionMarks chart={ready ? chart.current : null} ids={multi} left={holder.current?.offsetLeft ?? 0} top={holder.current?.offsetTop ?? 0} />
         {!bare && <DraftOrderLines chart={ready ? chart.current : null} engine={engine} symbol={symbol} left={holder.current?.offsetLeft ?? 0} top={holder.current?.offsetTop ?? 0} />}
+        {!bare && <LiqIndicatorFeed chart={ready ? chart.current : null} engine={engine} symbol={symbol} names={indicators.map((i) => i.name)} ids={indicators.map((i) => i.id).join(',')} />}
         {!bare && newsLayer.value && (
           <NewsMarkers
             chart={ready ? chart.current : null}

@@ -112,6 +112,8 @@ interface ParamInfo {
   list?: { label: string; max: number; min: number };
   /** The study reads one price, so the user may pick which (`SOURCES`). */
   source?: true;
+  /** What the Indicators menu shows beside the title (default: the library's name). */
+  short?: string;
 }
 
 /** Every built-in klinecharts 10.0.2 indicator, with names for its inputs. */
@@ -143,13 +145,18 @@ export const INDICATOR_INFO: Record<string, ParamInfo> = {
   BRAR: { title: 'BRAR', params: ['Length'] },
   CR: { title: 'CR energy', params: ['Length', 'MA 1', 'MA 2', 'MA 3', 'MA 4'] },
   AO: { title: 'Awesome oscillator', params: ['Fast length', 'Slow length'] },
+  // Ours: the liquidation heatmap's layers (chart/liqIndicators.tsx).
+  VS_LIQHEAT: { title: 'Liquidation heatmap', params: [], short: 'LIQ HEAT' },
+  VS_LIQMAP: { title: 'Liquidation map', params: [], short: 'LIQ MAP' },
 };
 
 export const indicatorTitle = (name: string): string => INDICATOR_INFO[name]?.title ?? name;
+export const indicatorShort = (name: string): string => INDICATOR_INFO[name]?.short ?? name;
 
 /** The legend's short name: "Volume", "MA 5 10 30", "MACD 12 26 9". */
 export function legendName(name: string, calcParams: readonly unknown[], source?: PriceSource): string {
-  const base = name === 'VOL' ? 'Volume' : name;
+  // Ours carry no library short name worth showing: their title ("Liquidation map").
+  const base = name === 'VOL' ? 'Volume' : name.startsWith('VS_') ? indicatorTitle(name) : name;
   const params = calcParams.filter((p) => typeof p === 'number' || typeof p === 'string');
   const parts = [base, ...params.map(String)];
   if (source && source !== 'close') parts.push(source);

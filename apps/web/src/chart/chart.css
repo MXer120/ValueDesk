@@ -1108,18 +1108,74 @@ html.kc-drag * {
 .kc-ind-ctl button:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 .kc-ind-ctl .kc-ind-rm:hover { color: var(--neg); }
 
-/* The Indicators menu: search, then every study by its full name. */
-.kc-ind-search {
-  width: 100%;
-  margin-bottom: var(--sp-2);
+/* The Indicators menu, drawn as the app's View panel (ViewPop, Account.css .acctf-pop): a
+   title, labelled sections 14px apart, the same search field and rows. Every rule carries
+   `.kc-toolbar` so it out-specifies the strip's own `.kc-toolbar button` base and the global
+   `.menu-popup` plate (whose 190px minimum used to win over .kc-menu-wide). */
+.kc-toolbar .menu-popup.kc-ind-pop {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 316px;
+  max-width: calc(100vw - 16px);
+  padding: 14px;
+  border-radius: 10px;
+  color: var(--text);
   font-size: var(--fs-xs);
 }
-.kc-menu-list > button.kc-ind-add {
+.kc-ind-head > span { font-size: var(--fs-base); font-weight: 500; color: var(--text); }
+.kc-ind-lbl {
   display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
+.kc-ind-lbl.is-sub { margin: 8px 8px 4px; color: var(--dim); font-size: var(--fs-micro); }
+.kc-ind-group:first-child .kc-ind-lbl.is-sub { margin-top: 4px; }
+.kc-ind-aside { color: var(--dim); font-size: var(--fs-micro); }
+.kc-ind-pop .kc-row { min-height: 30px; padding: 0 4px 0 8px; border-radius: 6px; }
+.kc-ind-pop .kc-row:hover { background: rgba(255, 255, 255, 0.05); }
+.kc-toolbar .kc-ind-pop .kc-ind-search {
+  width: 100%;
+  height: 30px;
+  margin: 0 0 6px;
+  padding: 0 10px;
+  border: 1px solid var(--panel-line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-xs);
+}
+.kc-toolbar .kc-ind-pop .kc-ind-search:hover { border-color: var(--line); }
+.kc-toolbar .kc-ind-pop .kc-ind-search:focus { border-color: var(--muted); outline: none; box-shadow: none; }
+/* The panel is held to the chart card (Chart.tsx sets its max-height); the Add list takes the
+   height left and scrolls, so the panel never runs past the card. */
+.kc-ind-pop > .kc-ind-sec:last-child { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+.kc-ind-pop > .kc-ind-head,
+.kc-ind-pop > .kc-ind-sec:not(:last-child),
+.kc-ind-pop > .kc-ind-sec:last-child > :not(.kc-ind-list) { flex: none; }
+.kc-toolbar .kc-ind-pop .kc-ind-list { display: flex; flex-direction: column; gap: 1px; flex: 1 1 auto; min-height: 90px; max-height: 320px; }
+.kc-toolbar .kc-ind-pop button.kc-ind-add {
+  display: flex;
+  align-items: center;
   justify-content: space-between;
   gap: var(--sp-3);
+  width: 100%;
+  min-height: 30px;
+  padding: 0 8px;
+  border-radius: 6px;
+  color: var(--text);
+  font-size: var(--fs-xs);
+  line-height: 1.3;
+  text-align: left;
 }
-.kc-ind-short { color: var(--dim); font-family: var(--font-num); }
+.kc-toolbar .kc-ind-pop button.kc-ind-add:hover:not(:disabled) { background: rgba(255, 255, 255, 0.05); color: var(--text); }
+.kc-toolbar .kc-ind-pop button.kc-ind-add:disabled { color: var(--dim); }
+.kc-ind-short { flex: none; color: var(--dim); font-family: var(--font-num); font-size: var(--fs-micro); }
 
 /* --- time zone (footer clock) --------------------------------------------- */
 

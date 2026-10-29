@@ -83,7 +83,7 @@ export function barMsOf(list: readonly KLineData[]): number {
 
 export const liqHeatTemplate: IndicatorTemplate<unknown, unknown, HeatData> = {
   name: LIQ_HEAT,
-  shortName: 'Liquidations',
+  shortName: 'Liq. heatmap',
   series: 'price',
   // Under the candles: the cells are a backdrop the price moves through.
   zLevel: -1,

@@ -22,18 +22,17 @@ import { VenueLogo } from '../VenueLogo';
 import { fmtPx, fmtUsdShort } from '../explore/model';
 import { usePolled } from '../explore/cohorts/parts';
 import { useLiveHeat } from './liveHeat';
-import { WalletView, type Side } from './WalletView';
+import { WalletView, type Res, type Side, type Unit } from './WalletView';
 import { Chart } from '../Chart';
 import type { Chart as KChart } from 'klinecharts';
 import { CANDLE_PANE_ID } from '../../chart/theme';
 import { HEAT_FLOOR, LIQ_HEAT, barMsOf, heatScale, liqHeatTemplate, snapshotFor, type HeatData, type HeatPoint } from '../../chart/liqHeatIndicator';
+import { coinOfSymbol, groupFor } from '../../chart/liqMap';
 import { shortAddr } from '../../format';
 import { fmtFixed, fmtNum } from '../../numStyle';
 import './LiqHeatmap.css';
 
 type View = 'live' | 'chart' | 'history';
-type Res = 'fine' | 'medium' | 'coarse';
-type Unit = 'usd' | 'coin';
 const TFS = ['1m', '5m', '15m', '1h', '4h', '1D'] as const;
 type Tf = (typeof TFS)[number];
 
@@ -49,12 +48,7 @@ interface Prefs {
 }
 const DEFAULTS: Prefs = { view: 'live', res: 'fine', unit: 'usd', venues: [...SCAN_VENUES], tf: '1h', wallets: [], side: 'both' };
 
-/** A market's coin, as the server nets it (cohorts/model.ts coinOf): `BTC-USD` -> BTC, `vETH_vUSDC` -> ETH, `xyz:TSLA` -> TSLA. */
-export function coinOfSymbol(symbol: string): string {
-  const tail = symbol.includes(':') ? symbol.slice(symbol.indexOf(':') + 1) : symbol;
-  const head = tail.split(/[-/_]/)[0] ?? tail;
-  return head.replace(/^v(?=[A-Z])/, '').toUpperCase();
-}
+export { coinOfSymbol };
 
 /** [low price, long USD, short USD, long size, short size, long n, short n]. */
 type Bucket = [number, number, number, number, number, number, number];
@@ -163,31 +157,6 @@ function cumulative(h: Heat, unit: Unit): { long: Array<[number, number]>; short
 /** A picked cell: its price range and side - and, in the historical view, the snapshot's time it is of. */
 interface Pick { from: number; to: number; side: 'long' | 'short'; at?: number }
 
-/** Pixels a bucket takes on screen per resolution: the bucket width follows the zoom and the timeframe. */
-const RES_PX: Record<Res, number> = { fine: 2, medium: 5, coarse: 12 };
-/** Multiples of the server's bucket a group may span: the widths stay round numbers. */
-const MULTIPLES = [1, 2, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000];
-
-/** How many server buckets make one on screen: `span` of price across `px` pixels. */
-export function groupFor(step: number, span: number, px: number, res: Res): number {
-  const want = (span * RES_PX[res]) / Math.max(1, px);
-  return MULTIPLES.find((k) => step * k >= want) ?? MULTIPLES[MULTIPLES.length - 1]!;
-}
-
-/**
- * The bar width a view draws, in the server's buckets, told to the stream a quarter
- * second after it settles (a zoom subscribes again at the new width); drawn at once
- * from what is held meanwhile.
- */
-function useStreamWidth(rawStep: number, span: number, px: number, res: Res, onWant: (k: number) => void): number {
-  const want = groupFor(rawStep, span, px, res);
-  useEffect(() => {
-    const t = setTimeout(() => onWant(want), 250);
-    return () => clearTimeout(t);
-  }, [want, onWant]);
-  return want;
-}
-
 /** Buckets summed `k` server buckets at a time. */
 export function regroup(h: Heat, k: number): Heat {
   if (k <= 1) return h;
@@ -230,6 +199,17 @@ export function LiqHeatmap({ symbol, engine, instance, address = null }: { symbo
   const apiData = wallets.length ? heat.data : live.data ?? heat.data;
   const raw = useMemo(() => (apiData ? fromApi(apiData, side) : null), [apiData, side]);
   const h = raw;
+  const res: Res = prefs.res === 'medium' || prefs.res === 'coarse' ? prefs.res : 'fine';
+  const unit: Unit = prefs.unit === 'coin' ? 'coin' : 'usd';
+  // The bar width in server buckets: from the price and the resolution only (groupFor), told to the
+  // stream a quarter second after it settles; drawn at once from what is held meanwhile.
+  const rawStep = h ? h.step / streamK : 0;
+  const want = h?.price && rawStep > 0 ? groupFor(rawStep, h.price, res) : wantK;
+  useEffect(() => {
+    const t = setTimeout(() => setWantK(want), 250);
+    return () => clearTimeout(t);
+  }, [want]);
+  const barWidth = h?.price && rawStep > 0 ? rawStep * want : null;
 
   return (
     <div className="lqm">
@@ -243,26 +223,21 @@ export function LiqHeatmap({ symbol, engine, instance, address = null }: { symbo
         </div>
         <span className="lqm-coin" title="The market on screen">{coin}</span>
         <span className="lqm-grow" />
-        <PlatformSelect options={SCAN_VENUES} value={chosen} onChange={(v) => set({ venues: v })} align="end" />
-        <WalletView wallets={wallets} onWallets={(w) => set({ wallets: w })} side={side} onSide={(x) => set({ side: x })} venues={chosen} self={address} />
-        {prefs.view !== 'history' && (
-          <div className="lqm-seg" aria-label="Bucket size">
-            {(['fine', 'medium', 'coarse'] as const).map((r) => (
-              <button key={r} type="button" aria-pressed={prefs.res === r} className={prefs.res === r ? 'is-on' : ''} onClick={() => set({ res: r })}>{r[0]!.toUpperCase() + r.slice(1)}</button>
-            ))}
-          </div>
-        )}
         {prefs.view === 'chart' && (
           <div className="lqm-seg" aria-label="Timeframe">
             {TFS.map((t) => <button key={t} type="button" aria-pressed={prefs.tf === t} className={prefs.tf === t ? 'is-on' : ''} onClick={() => set({ tf: t })}>{t}</button>)}
           </div>
         )}
-        {prefs.view !== 'history' && (
-          <div className="lqm-seg" aria-label="Unit">
-            <button type="button" aria-pressed={prefs.unit === 'coin'} className={prefs.unit === 'coin' ? 'is-on' : ''} onClick={() => set({ unit: 'coin' })}>{coin}</button>
-            <button type="button" aria-pressed={prefs.unit === 'usd'} className={prefs.unit === 'usd' ? 'is-on' : ''} onClick={() => set({ unit: 'usd' })}>USD</button>
-          </div>
-        )}
+        <PlatformSelect options={SCAN_VENUES} value={chosen} onChange={(v) => set({ venues: v })} align="end" />
+        <WalletView
+          wallets={wallets}
+          side={side}
+          venues={chosen}
+          self={address}
+          bars={prefs.view !== 'history' ? { res, unit, coin, width: barWidth !== null ? `${fmtPx(barWidth)}` : null } : null}
+          onChange={(p) => set(p)}
+          onReset={() => set({ wallets: [], side: 'both', res: 'fine', unit: 'usd' })}
+        />
       </div>
       {prefs.view !== 'history' && (
         <div className="lqm-legend">
@@ -279,9 +254,9 @@ export function LiqHeatmap({ symbol, engine, instance, address = null }: { symbo
         ) : !h.price || !h.buckets.length ? (
           <p className="lqm-empty">{wallets.length ? (wallets.length === 1 ? 'This wallet holds' : 'These wallets hold') + ` no ${coin} position with a liquidation price` : `No tracked ${coin} positions with a liquidation price`} on {chosen.length === SCAN_VENUES.length ? 'any platform' : chosen.map((v) => VENUE_LABEL[v]).join(', ')}.</p>
         ) : prefs.view === 'live' ? (
-          <LiveView h={h} unit={prefs.unit} res={prefs.res} streamK={streamK} onWant={setWantK} onPick={setPick} pick={pick} />
+          <LiveView h={h} unit={unit} want={want} streamK={streamK} onPick={setPick} pick={pick} />
         ) : (
-          <ChartView h={h} unit={prefs.unit} res={prefs.res} streamK={streamK} onWant={setWantK} engine={engine} symbol={symbol} tf={prefs.tf} onPick={setPick} pick={pick} />
+          <ChartView h={h} unit={unit} want={want} streamK={streamK} engine={engine} symbol={symbol} tf={prefs.tf} onPick={setPick} pick={pick} />
         )}
         {pick && h && prefs.view !== 'history' && <Details coin={coin} venues={chosen} pick={pick} price={h.price} wallets={wallets} onClose={() => setPick(null)} />}
         {pick?.at !== undefined && prefs.view === 'history' && <AtDetails coin={coin} venues={chosen} pick={pick as Required<Pick>} wallets={wallets} onClose={() => setPick(null)} />}
@@ -346,16 +321,6 @@ function useDrag(onDrag: (dx: number, dy: number, start: { x: number; y: number 
   };
 }
 
-function ZoomButtons({ onIn, onOut, onReset, hint }: { onIn: () => void; onOut: () => void; onReset: () => void; hint: string }) {
-  return (
-    <div className="lqm-zoom" onPointerDown={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}>
-      <button type="button" title="Zoom in" aria-label="Zoom in" onClick={onIn}>+</button>
-      <button type="button" title="Zoom out" aria-label="Zoom out" onClick={onOut}>−</button>
-      <button type="button" title={`Reset the axes (or double-click). ${hint}`} aria-label="Reset the axes" onClick={onReset}>⟲</button>
-    </div>
-  );
-}
-
 /** The bucket with liquidations nearest a price, within `tol` (else the bucket at it, empty). */
 function nearestBucket(h: Heat, shown: readonly Bucket[], price: number, tol: number): { from: number; b: Bucket | null } {
   let b: Bucket | null = null;
@@ -372,7 +337,8 @@ const sideOf = (b: Bucket | null, from: number, step: number, p: number): 'long'
 
 const M = { l: 56, r: 60, t: 10, b: 24 };
 
-function LiveView({ h: base, unit, res, streamK, onWant, onPick, pick }: { h: Heat; unit: Unit; res: Res; streamK: number; onWant: (k: number) => void; onPick: (p: Pick) => void; pick: Pick | null }) {
+/** Wheel zooms the price, drag pans; wheel on a side axis scales it; a double-click resets the axes. */
+function LiveView({ h: base, unit, want, streamK, onPick, pick }: { h: Heat; unit: Unit; want: number; streamK: number; onPick: (p: Pick) => void; pick: Pick | null }) {
   const [el, setEl] = useState<HTMLDivElement | null>(null);
   const [ref, { w, h: ht }] = useSize<HTMLDivElement>();
   const bind = useCallback((x: HTMLDivElement | null) => { ref(x); setEl(x); }, [ref]);
@@ -403,7 +369,6 @@ function LiveView({ h: base, unit, res, streamK, onWant, onPick, pick }: { h: He
   const win = view ?? (auto && clamp(auto));
   const p = base.price!;
   const [lo, hi] = win ?? [p * 0.5, p * 1.5];
-  const want = useStreamWidth(base.step / streamK, hi - lo, W, res, onWant);
   const k = Math.max(1, Math.round(want / streamK));
   const h = useMemo(() => regroup(base, k), [base, k]);
   const shown = h.buckets.filter((b) => b[0] + h.step > lo && b[0] < hi);
@@ -518,7 +483,6 @@ function LiveView({ h: base, unit, res, streamK, onWant, onPick, pick }: { h: He
           )}
         </svg>
       )}
-      <ZoomButtons onIn={() => zoom(0.7, p >= lo && p <= hi ? (p - lo) / (hi - lo) : 0.5)} onOut={() => zoom(1 / 0.7, p >= lo && p <= hi ? (p - lo) / (hi - lo) : 0.5)} onReset={reset} hint="Wheel zooms the price, drag pans; wheel or drag on a side axis scales it." />
       {hover !== null && !drag.dragging() && (
         <div className="lqm-tip" style={{ left: Math.min(w - 210, Math.max(0, x(hover) + 12)), top: M.t + 6 }}>
           <b>{fmtPx(hover)} – {fmtPx(hover + h.step)}</b>
@@ -544,7 +508,8 @@ const CANDLES = 500;
 /** Where the chart view starts: four empty slots right of the newest candle. */
 const CHART_BACK = -4;
 
-function ChartView({ h: base, unit, res, streamK, onWant, engine, symbol, tf, onPick, pick }: { h: Heat; unit: Unit; res: Res; streamK: number; onWant: (k: number) => void; engine: Engine; symbol: string; tf: Tf; onPick: (p: Pick) => void; pick: Pick | null }) {
+/** Wheel zooms time, wheel on the price scale (or Shift+wheel) zooms price, drag pans; a double-click resets. */
+function ChartView({ h: base, unit, want, streamK, engine, symbol, tf, onPick, pick }: { h: Heat; unit: Unit; want: number; streamK: number; engine: Engine; symbol: string; tf: Tf; onPick: (p: Pick) => void; pick: Pick | null }) {
   const [el, setEl] = useState<HTMLDivElement | null>(null);
   const [ref, { w, h: ht }] = useSize<HTMLDivElement>();
   const bind = useCallback((x: HTMLDivElement | null) => { ref(x); setEl(x); }, [ref]);
@@ -591,7 +556,6 @@ function ChartView({ h: base, unit, res, streamK, onWant, engine, symbol, tf, on
   const [lo, hi] = yv ?? [aLo - padY, aHi + padY];
   const y = (v: number) => M.t + H - ((v - lo) / (hi - lo)) * H;
   const priceAt = (py: number) => lo + ((M.t + H - py) / H) * (hi - lo);
-  const want = useStreamWidth(base.step / streamK, hi - lo, H, res, onWant);
   const group = Math.max(1, Math.round(want / streamK));
   const h = useMemo(() => regroup(base, group), [base, group]);
   const shown = h.buckets.filter((b) => b[0] + h.step > lo && b[0] < hi);
@@ -713,7 +677,6 @@ function ChartView({ h: base, unit, res, streamK, onWant, engine, symbol, tf, on
           {!n && <text x={ML + W / 2} y={M.t + H / 2} textAnchor="middle" className="lqm-ax">{k.error ? 'No candles for this market' : 'Loading candles…'}</text>}
         </svg>
       )}
-      <ZoomButtons onIn={() => zoomY(0.7, p >= lo && p <= hi ? p : undefined)} onOut={() => zoomY(1 / 0.7, p >= lo && p <= hi ? p : undefined)} onReset={reset} hint="Wheel zooms time, wheel on the price scale (or Shift+wheel) zooms price; drag pans." />
       {hover !== null && !drag.dragging() && (
         <div className="lqm-tip" style={{ right: R + MR, top: Math.min(ht - 120, Math.max(0, y(hover) - 20)) }}>
           <b>{fmtPx(hover)} – {fmtPx(hover + h.step)}</b>

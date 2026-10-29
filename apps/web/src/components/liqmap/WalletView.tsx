@@ -1,9 +1,10 @@
 /**
  * The liquidation heatmap's "View" (the portfolio pages' View panel: ViewPop + FilterBar
- * `Section` / `Seg`): which wallets the map shows - every one, or up to MAX_WALLETS picked by
+ * `Section` / `Seg`, opened by the same button as everywhere else): in the live and chart views
+ * the bars' size (fine, medium, coarse: a fixed share of the price) and their unit (the coin or
+ * USD); in every view which wallets the map shows - every one, or up to MAX_WALLETS picked by
  * search, from the address book, the connected wallet or a pasted address - which side, and
- * the picked wallets' positions on every coin with their liquidation prices. The pick holds
- * for every view (live, chart, historical) and is kept per panel.
+ * the picked wallets' positions on every coin with their liquidation prices. Kept per panel.
  */
 import { useMemo, useRef, useState } from 'react';
 import type { WalletLiq } from '@sign/indexer/liqRead.js';
@@ -19,44 +20,67 @@ import { fmtFixed } from '../../numStyle';
 
 export const MAX_WALLETS = 10;
 export type Side = 'both' | 'long' | 'short';
+export type Res = 'fine' | 'medium' | 'coarse';
+export type Unit = 'usd' | 'coin';
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 
-export function WalletView({ wallets, onWallets, side, onSide, venues, self }: {
+/** What the View changes (one write, so a reset is never half a reset). */
+export interface ViewChange { wallets?: string[]; side?: Side; res?: Res; unit?: Unit }
+
+const SlidersGlyph = () => (
+  <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M2 4.5h12M2 11.5h12" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" opacity="0.55" /><circle cx="10.5" cy="4.5" r="1.8" fill="var(--bg-panel)" stroke="currentColor" strokeWidth="1.3" /><circle cx="5.5" cy="11.5" r="1.8" fill="var(--bg-panel)" stroke="currentColor" strokeWidth="1.3" /></svg>
+);
+
+export function WalletView({ wallets, side, venues, self, bars, onChange, onReset }: {
   wallets: string[];
-  onWallets: (w: string[]) => void;
   side: Side;
-  onSide: (s: Side) => void;
   venues: Venue[];
   /** The connected wallet, offered first. */
   self: string | null;
+  /** The live and chart views' bars: their size and unit, and how wide a bar is now (price); null in the historical view. */
+  bars: { res: Res; unit: Unit; coin: string; width: string | null } | null;
+  onChange: (c: ViewChange) => void;
+  onReset: () => void;
 }) {
   const btn = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
-  const count = wallets.length + (side === 'both' ? 0 : 1);
+  const count = wallets.length + (side === 'both' ? 0 : 1) + (bars && bars.res !== 'fine' ? 1 : 0) + (bars && bars.unit !== 'usd' ? 1 : 0);
   return (
     <>
       <button
         ref={btn}
         type="button"
-        className={`lqm-view${count ? ' is-on' : ''}`}
+        className={`acctf-view${open ? ' is-open' : ''}${count > 0 ? ' is-active' : ''}`}
         aria-haspopup="dialog"
         aria-expanded={open}
-        title="Wallets and side: show only some wallets' liquidations"
+        title={wallets.length ? `Showing ${wallets.length === 1 ? shortAddr(wallets[0]!) : `${wallets.length} wallets`}` : undefined}
         onClick={() => setOpen((o) => !o)}
       >
-        View{wallets.length ? ` · ${wallets.length === 1 ? shortAddr(wallets[0]!) : `${wallets.length} wallets`}` : ''}
+        <SlidersGlyph />
+        <span>View</span>
+        {count > 0 && <span className="acctf-count">{count}</span>}
       </button>
       <ViewPop
         open={open}
         anchor={btn}
         onClose={() => setOpen(false)}
-        onReset={() => { onWallets([]); onSide('both'); }}
+        onReset={onReset}
         resetDisabled={count === 0}
       >
+        {bars && (
+          <>
+            <Section label="Bars" aside={bars.width ? <span className="lqm-view-n">{bars.width} each</span> : undefined}>
+              <Seg<Res> value={bars.res} onChange={(res) => onChange({ res })} options={[['fine', 'Fine'], ['medium', 'Medium'], ['coarse', 'Coarse']]} />
+            </Section>
+            <Section label="Unit">
+              <Seg<Unit> value={bars.unit} onChange={(unit) => onChange({ unit })} options={[['coin', bars.coin], ['usd', 'USD']]} />
+            </Section>
+          </>
+        )}
         <Section label="Side">
-          <Seg<Side> value={side} onChange={onSide} options={[['both', 'Both'], ['long', 'Longs'], ['short', 'Shorts']]} tones={{ long: 'neg', short: 'pos' }} />
+          <Seg<Side> value={side} onChange={(s) => onChange({ side: s })} options={[['both', 'Both'], ['long', 'Longs'], ['short', 'Shorts']]} tones={{ long: 'neg', short: 'pos' }} />
         </Section>
-        <WalletPicker wallets={wallets} onWallets={onWallets} self={self} />
+        <WalletPicker wallets={wallets} onWallets={(w) => onChange({ wallets: w })} self={self} />
         {wallets.length > 0 && <Positions wallets={wallets} venues={venues} />}
       </ViewPop>
     </>
