@@ -39,6 +39,8 @@ installChunkErrorReload();
 captureBoot();
 // Where this visitor is, as the edge sees it (legal/geo.ts): one small request, answered by the /api function.
 void loadViewerGeo();
+// window.__vsTest for the UI specs (testBridge.ts): the dev server only - a production build drops this branch and the module.
+if (import.meta.env.DEV) void import('./testBridge').then((m) => m.installTestBridge());
 
 /**
  * The root re-renders when the number format changes (Settings > Appearance):

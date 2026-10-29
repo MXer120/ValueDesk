@@ -1,0 +1,7 @@
+// Type-checks the UI specs, which sit outside apps/web's own "include".
+// From apps/web:  npx tsc --noEmit -p e2e/ui
+// testBridge.ts is in for its `window.__vsTest` declaration (the specs call it in page.evaluate).
+{
+  "extends": "../../tsconfig.json",
+  "include": ["./**/*.ts", "../../src/vite-env.d.ts", "../../src/testBridge.ts"]
+}

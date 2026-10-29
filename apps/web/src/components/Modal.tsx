@@ -18,7 +18,7 @@
  *    input, which is the bug the symbol-search modal originally had;
  *  - the dialog is labelled by its own title element.
  */
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { usePresence } from './motion';
 
@@ -60,6 +60,8 @@ export function Modal({
   dock, dockOpen = false,
 }: ModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
+  /* Its own id: two modals open at once (the copy window and the terms it asks for) each keep their name. */
+  const titleId = useId();
   const rowRef = useRef<HTMLDivElement>(null);
   const stackRef = useRef<HTMLDivElement>(null);
   const asideRef = useRef<HTMLDivElement>(null);
@@ -160,7 +162,7 @@ export function Modal({
       className={`modal modal-${size}${className ? ` ${className}` : ''}`}
       role="dialog"
       aria-modal="true"
-      aria-labelledby="modal-title"
+      aria-labelledby={titleId}
       tabIndex={-1}
     >
       <div className="modal-head">
@@ -169,7 +171,7 @@ export function Modal({
             <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M10 3 5 8l5 5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
           </button>
         )}
-        <h2 id="modal-title">{title}</h2>
+        <h2 id={titleId}>{title}</h2>
         <button className="modal-close" onClick={onClose} aria-label="Close">×</button>
       </div>
       <div className="modal-body">{children}</div>

@@ -20,9 +20,10 @@
 // and guide tests (apps/web/e2e/live, apps/web/e2e/guide, top level only), and every
 // deploy/**/*.test.mjs. A test file added tomorrow is run tomorrow.
 //
-// NEVER RUN HERE: apps/web/e2e/live/native (a browser and a wallet), and
-// apps/executor/tools/live-test (real money on SoDEX mainnet). Neither matches the
-// patterns above, and both are refused by name as well.
+// NEVER RUN HERE: apps/web/e2e/live/native (a browser and a wallet), apps/web/e2e/ui
+// (the UI specs: Microsoft Edge driving the dev web, e2e/ui/run.ts), and
+// apps/executor/tools/live-test (real money on SoDEX mainnet). None matches the
+// patterns above, and all three are refused by name as well.
 //
 // Tests are node:test, TypeScript through tsx (not vitest). Each suite's full output
 // goes to deploy/.out/ci/<suite>.log; a failed suite prints its failing tests and the
@@ -80,8 +81,8 @@ const has = (p) => existsSync(join(ROOT, p));
 const TS_TEST = /\.test\.tsx?$/;
 const MJS_TEST = /\.test\.mjs$/;
 const topLevel = (f) => !f.includes('/');
-// Refused whatever the patterns say: a browser with a wallet, and real money.
-const FORBIDDEN = [/^apps\/web\/e2e\/live\/native\//, /^apps\/executor\/tools\/live-test\//];
+// Refused whatever the patterns say: a browser (with a wallet, or driving the dev web), and real money.
+const FORBIDDEN = [/^apps\/web\/e2e\/live\/native\//, /^apps\/web\/e2e\/ui\//, /^apps\/executor\/tools\/live-test\//];
 
 export function discover() {
   const suites = [];

@@ -268,9 +268,10 @@ function ViewPanel({
   );
 }
 
+/** A titled block of a View pop-up; named by its label, so a choice inside it (Seg's "All") says which "All" it is. */
 export function Section({ label, aside, children }: { label: string; aside?: ReactNode; children: ReactNode }) {
   return (
-    <div className="acctf-sec">
+    <div className="acctf-sec" role="group" aria-label={label}>
       <div className="acctf-lbl"><span>{label}</span>{aside}</div>
       {children}
     </div>

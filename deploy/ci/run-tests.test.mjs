@@ -13,12 +13,13 @@ test('every workspace is found - the executor too, which no npm workspace and no
   }
 });
 
-test('nothing that trades or needs a wallet is ever run: the live tests and the native e2e stay out', () => {
+test('nothing that trades or needs a wallet or a browser is ever run: the live tests, the native e2e and the UI specs stay out', () => {
   for (const s of discover()) {
     for (const f of s.files ?? []) {
       const p = `${s.cwd}/${f}`;
-      assert.doesNotMatch(p, /tools\/live-test\/|e2e\/live\/native\//, p);
+      assert.doesNotMatch(p, /tools\/live-test\/|e2e\/live\/native\/|e2e\/ui\//, p);
     }
+    for (const p of s.projects ?? []) assert.ok(!String(p ?? '').includes('e2e/ui'), `${s.id} type-checks e2e/ui`);
   }
   const deploy = discover().find((s) => s.id === 'deploy-tests');
   assert.ok(deploy.files.includes('deploy/server/bin/healthcheck.test.mjs'));
