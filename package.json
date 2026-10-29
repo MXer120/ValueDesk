@@ -15,7 +15,8 @@
     "typecheck": "npm --prefix apps/server run typecheck && npm --prefix apps/web run typecheck",
     "build": "npm --prefix apps/web run build",
     "predev": "node scripts/preflight.mjs",
-    "indexer": "npm --prefix apps/server run indexer"
+    "indexer": "npm --prefix apps/server run indexer",
+    "live-tests": "node --import tsx apps/executor/tools/live-test/all.ts"
   },
   "devDependencies": {
     "concurrently": "^9.1.0"

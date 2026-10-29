@@ -61,9 +61,15 @@ export const DEP_GROUPS = {
   web: ['apps/web/src/algo', 'apps/web/src/copy', 'apps/web/src/trading'],
 } as const;
 
-/** Folders of a group that are left out of it (hashed per scenario instead). */
+/**
+ * The driver that runs the targets one after another (all.ts): it starts the runner as a child
+ * and reads its output, and no scenario runs any of it, so a change to it re-runs nothing.
+ */
+export const DRIVER_FILES = ['apps/executor/tools/live-test/all.ts', 'apps/executor/tools/live-test/allParts.ts'] as const;
+
+/** Folders of a group that are left out of it (hashed per scenario instead, or not code a scenario runs). */
 const GROUP_SKIP: Partial<Record<keyof typeof DEP_GROUPS, readonly string[]>> = {
-  harness: ['apps/executor/tools/live-test/scenarios/', ...DEP_GROUPS.leader],
+  harness: ['apps/executor/tools/live-test/scenarios/', ...DEP_GROUPS.leader, ...DRIVER_FILES],
 };
 
 export type DepGroup = keyof typeof DEP_GROUPS;

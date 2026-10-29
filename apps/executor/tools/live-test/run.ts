@@ -64,7 +64,7 @@ import { HL_MIN_ORDER_USD, HL_TAKER_FEE, HyperliquidExchange, HyperliquidInfo, h
 import { HyperliquidLeader, SodexLeader, leaderKeyName, leaderVenueOf, type LeaderVenue, type LeaderVenueName } from './leader.ts';
 import { leaderSkip, type Scenario } from './scenario.ts';
 import { K_COIN } from './scenarios/copy.ts';
-import { decide, exposedOn, loadState, markDone, markRunning, noteRun, saveState, selected, stateFileOf, type Mode, type RunState } from './state.ts';
+import { decide, exposedOn, loadState, markDone, markRunning, noteRun, resultKey, saveState, selected, stateFileOf, type Mode, type RunState } from './state.ts';
 import { BrowserTarget, CAPABILITIES, HostedTarget, SelfTarget, TARGETS, cannotRun, targetName, type ExecutorTarget, type TargetName } from './target.ts';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -455,36 +455,38 @@ async function main(): Promise<number> {
     return r.ok;
   };
 
+  // Where each result is kept: a copy scenario with a Hyperliquid leader apart from the same one with a SoDEX leader (state.ts resultKey).
+  const key = (s: Scenario) => resultKey(s, leaderVenue);
   for (const s of list) {
     if (stopRun || interrupts) break;
     const hash = hashes.scenario(s);
-    const d = decide(state, s, hash, { only: args.only, force: args.force });
+    const d = decide(state, s, hash, { only: args.only, force: args.force, key: key(s) });
     if (!d.run) {
       log(`- ${s.id}: skip (${d.why})`);
       continue;
     }
     const otherLeader = leaderSkip(s, leaderVenue);
     if (otherLeader) {
-      markDone(state, s.id, 'skipped', { error: otherLeader });
+      markDone(state, key(s), 'skipped', { error: otherLeader });
       tally.skipped += 1;
       log(`- ${s.id}: skipped (${otherLeader})`);
       continue;
     }
     if (s.leader && !hasLeader) {
-      markDone(state, s.id, 'skipped', { error: `no ${leaderKeyName(leaderVenue)} in the env file` });
+      markDone(state, key(s), 'skipped', { error: `no ${leaderKeyName(leaderVenue)} in the env file` });
       tally.skipped += 1;
       log(`- ${s.id}: skipped (no leader key)`);
       continue;
     }
     const lacks = cannotRun(s, target.name, target.capabilities);
     if (lacks) {
-      markDone(state, s.id, 'skipped', { error: lacks });
+      markDone(state, key(s), 'skipped', { error: lacks });
       tally.skipped += 1;
       log(`- ${s.id}: skipped (${lacks})`);
       continue;
     }
     log(`\n> ${s.id}: ${s.title} [${d.why}]`);
-    markRunning(state, s.id, hash);
+    markRunning(state, key(s), hash);
     if (mode === 'live') state.exposure ??= { since: Date.now(), by: s.id };
     saveState(stateFile, state);
     tally.ran += 1;
@@ -527,7 +529,7 @@ async function main(): Promise<number> {
       error = `${error ? `${error}; ` : ''}the cleanup could not read the accounts flat`;
       stopRun = 'a cleanup did not leave the accounts flat';
     } else if (mode === 'live') state.exposure = null;
-    markDone(state, s.id, status, { error, notes: t.notes, checks: t.checks, feesUsd });
+    markDone(state, key(s), status, { error, notes: t.notes, checks: t.checks, feesUsd });
     saveState(stateFile, state);
     tally[status === 'passed' ? 'passed' : status === 'failed' ? 'failed' : status === 'skipped' ? 'skipped' : 'inconclusive'] += 1;
     log(`< ${s.id}: ${status.toUpperCase()} (${t.checks.passed} checks${t.checks.liveOnly ? `, ${t.checks.liveOnly} live-only not checked` : ''}${feesUsd !== null ? `, fees $${feesUsd.toFixed(4)}` : ''})${error ? `: ${error}` : ''}`);
@@ -552,7 +554,7 @@ async function main(): Promise<number> {
 
   log('\nRESULTS');
   for (const s of list) {
-    const r = state.scenarios[s.id];
+    const r = state.scenarios[key(s)];
     if (!r) continue;
     log(`  ${r.status.padEnd(12)} ${s.id.padEnd(30)} ${r.checks.passed} checks${r.checks.liveOnly ? ` (+${r.checks.liveOnly} live-only)` : ''}${r.feesUsd !== null ? `  fees $${r.feesUsd.toFixed(4)}` : ''}${r.error ? `  ${r.error.split('\n')[0]!.slice(0, 140)}` : ''}`);
   }

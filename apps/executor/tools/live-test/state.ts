@@ -18,6 +18,10 @@
  * RESUME. A scenario that passed on the same code (its hash: the engine and
  * executor files it depends on, and the harness itself) in the same mode on the
  * same target is skipped; failed, inconclusive, interrupted and never-run ones run.
+ * A copy scenario run with a Hyperliquid leader is kept under its own key
+ * (resultKey: `<id>@hyperliquid`), so a run with each leader resumes on its own
+ * and neither overwrites the other's result; what does not involve the leader is
+ * the same with either and kept once.
  *
  * ONE TARGET AT A TIME PER WALLET. A live start reads the other targets' files
  * too (exposedOn): if one says the follower's account may be exposed there, it
@@ -25,6 +29,7 @@
  */
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync, unlinkSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import type { LeaderVenueName } from './leader.ts';
 import type { TargetName } from './target.ts';
 
 export type Mode = 'live' | 'dry';
@@ -219,17 +224,29 @@ export function selected(only: readonly string[] | null, s: { id: string; kind: 
   });
 }
 
+/**
+ * The key a scenario's result is kept under: its id, but a scenario with the
+ * leader run with a leader on another venue than SoDEX is kept apart
+ * (`copy.fixed@hyperliquid`). With one key for both, a run with one leader
+ * overwrote the other's pass (so each ran everything again), and one that skips a
+ * scenario written for the other leader recorded it skipped on that one's code.
+ */
+export function resultKey(s: { id: string; leader?: boolean }, leaderVenue: LeaderVenueName = 'sodex'): string {
+  return s.leader && leaderVenue !== 'sodex' ? `${s.id}@${leaderVenue}` : s.id;
+}
+
 export type Decision = { run: true; why: string } | { run: false; why: string };
 
 /**
  * Whether to run a scenario now: not selected -> no; `always` (the bootstrap) or
  * `force` -> yes; passed on this very code hash -> no; anything else -> yes.
+ * `key`: where its result is kept (resultKey; default its id).
  */
-export function decide(state: RunState, s: { id: string; kind: string; section: string; always?: boolean }, hash: string, o: { only: readonly string[] | null; force: boolean }): Decision {
+export function decide(state: RunState, s: { id: string; kind: string; section: string; always?: boolean }, hash: string, o: { only: readonly string[] | null; force: boolean; key?: string }): Decision {
   if (!selected(o.only, s) && !s.always) return { run: false, why: 'not selected' };
   if (s.always) return { run: true, why: 'runs every time (bootstrap)' };
   if (o.force) return { run: true, why: '--force' };
-  const r = state.scenarios[s.id];
+  const r = state.scenarios[o.key ?? s.id];
   if (!r || r.status === 'pending') return { run: true, why: 'never run' };
   if (r.status === 'passed' && r.hash === hash) return { run: false, why: `passed on this code (${new Date(r.endedAt ?? 0).toISOString()})` };
   if (r.status === 'passed') return { run: true, why: 'passed on other code: the engine, the executor or the harness changed since' };
