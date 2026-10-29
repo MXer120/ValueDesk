@@ -111,7 +111,11 @@ import {
   type TicketShared,
   type Unit,
 } from './draft';
-import { blockedState, noticeFor, readExecutor, writeExecutor, type Place } from './executor';
+import { BROWSER_ONLY_LINE, blockedState, browserOnly, noticeFor, readExecutor, runPlace, writeExecutor, type Place } from './executor';
+import { legalStateFor } from '../../trading/legalGate';
+import { useViewerAccess, useViewerGeo } from '../../legal/geo';
+import { useAcceptanceRevision } from '../../legal/acceptance';
+import { useScreening } from '../../legal/screening';
 import { engineKind, fmtDuration, menuName, usesAmount, type UiKind } from './menu';
 import { AlgoIcon } from './AlgoIcon';
 import { feeRange, feeSplit, feeWords } from './fees';
@@ -256,15 +260,26 @@ function Switch({ label, checked, onChange, title }: { label: string; checked: b
   );
 }
 
-/** Where it runs, kept across reloads and kinds (executor.ts). */
-function useExecutor(): [Place, (v: Place) => void] {
+/**
+ * Where it runs, kept across reloads and kinds (executor.ts). From a close-only place (or an unknown
+ * country, as the order button treats it: useTradeGate.ts) this browser alone, whatever is stored:
+ * the third value says so, and a pick there changes nothing stored.
+ */
+function useExecutor(address: string | null): [Place, (v: Place) => void, boolean] {
   const [place, setPlace] = useState<Place>(readExecutor);
+  useViewerAccess();
+  useViewerGeo();
+  useAcceptanceRevision();
+  useScreening(address);
+  const only = browserOnly(legalStateFor(address));
   return [
-    place,
+    runPlace(place, only),
     (v: Place) => {
+      if (only) return;
       setPlace(v);
       writeExecutor(v);
     },
+    only,
   ];
 }
 
@@ -335,7 +350,7 @@ interface Props extends TicketShared {
 
 const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, ref) {
   const [d, setD] = useState<Draft>(loadDraft);
-  const [place, setPlace] = useExecutor();
+  const [place, setPlace, onlyBrowser] = useExecutor(p.address);
   const [advOpen, setAdvOpen] = useState(false);
   const [seed, setSeed] = useState(newSeed);
   const [candles, setCandles] = useState<Candle[] | null>(null);
@@ -1091,7 +1106,7 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
         hasOrder
         canReset={changes.length > 0}
         onReset={() => setD((x) => resetAdvanced(kind, x))}
-        runsOn={<RunsOn place={place} onChange={setPlace} paper={d.paper} setPaper={(v) => set({ paper: v })} />}
+        runsOn={<RunsOn place={place} onChange={setPlace} onlyBrowser={onlyBrowser} paper={d.paper} setPaper={(v) => set({ paper: v })} />}
       >
         <TicketSettings
           kind={kind} d={d} set={set} side={p.side} base={base} mid={mid ?? null} dcaFirstLive={dcaTouch ? roundTick(dcaTouch) : null} roundTick={roundTick} err={err}
@@ -1444,21 +1459,25 @@ const PLACE_CARDS: ReadonlyArray<readonly [Place, string, string]> = [
   ['self', 'Self-hosted', 'Runs on the copier you host yourself.'],
 ];
 
-/** The pop-up's first section: where it runs (kept across reloads and kinds, executor.ts), then the practice run. */
-function RunsOn({ place, onChange, paper, setPaper }: {
-  place: Place; onChange: (v: Place) => void; paper: boolean; setPaper: (v: boolean) => void;
+/**
+ * The pop-up's first section: where it runs (kept across reloads and kinds, executor.ts), then the practice run.
+ * `onlyBrowser`: from a close-only place the executor and the copier are unavailable, said in one line.
+ */
+export function RunsOn({ place, onChange, onlyBrowser = false, paper, setPaper }: {
+  place: Place; onChange: (v: Place) => void; onlyBrowser?: boolean; paper: boolean; setPaper: (v: boolean) => void;
 }) {
   return (
     <section className="algo-group" aria-label="Runs on">
       <div className="stg__label">Executor</div>
       <div className="stg__choices is-three algo-places" role="radiogroup" aria-label="Runs on">
         {PLACE_CARDS.map(([v, t, line]) => (
-          <button key={v} type="button" role="radio" aria-checked={place === v} className={`stg__choice${place === v ? ' is-on' : ''}`} onClick={() => onChange(v)}>
+          <button key={v} type="button" role="radio" aria-checked={place === v} disabled={onlyBrowser && v !== 'browser'} className={`stg__choice${place === v ? ' is-on' : ''}`} onClick={() => onChange(v)}>
             <b>{t}</b>
             <small>{line}</small>
           </button>
         ))}
       </div>
+      {onlyBrowser && <p className="stg__note">{BROWSER_ONLY_LINE}</p>}
       <div className="stg__label">Practice</div>
       <div className="stg__card">
         <ASwitch

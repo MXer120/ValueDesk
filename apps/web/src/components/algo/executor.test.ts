@@ -1,6 +1,7 @@
 /**
  * Where algo orders run: ValueDesk by default, kept under its own key, the
- * old draft's choice moved over once.
+ * old draft's choice moved over once; this browser alone from a close-only
+ * place, the stored choice untouched (AlgoTicket.test.ts renders it).
  * Run (from apps/web): npx tsx --test src/components/algo/executor.test.ts
  */
 import { test } from 'node:test';
@@ -74,6 +75,40 @@ test('blocked: an executor that cannot start, with or without a wallet; never co
   assert.equal(key?.short, 'Self-hosted copier key missing');
   assert.match(key!.message, /Or open Advanced/);
   assert.equal(blockedState('hosted', { ready: false, why: 'Accept the terms of the ValueDesk executor in Copy → Set up.' }, true)?.short, 'ValueDesk executor not set up');
+});
+
+test('only this browser from a close-only place, or where the country is unknown; not open, not blocked', async () => {
+  const { browserOnly } = await import('./executor');
+  assert.equal(browserOnly({ access: { level: 'close-only' } }), true);
+  assert.equal(browserOnly({ access: { level: 'close-only' }, located: true }), true);
+  // Unknown country: the order button treats it as close-only (useTradeGate.ts), so does the place.
+  assert.equal(browserOnly({ access: { level: 'open' }, located: false }), true);
+  assert.equal(browserOnly({ access: { level: 'open' }, located: true }), false);
+  assert.equal(browserOnly({ access: { level: 'open' } }), false);
+  // A blocked place runs nothing anywhere: the button says "Not available", the place is left alone.
+  assert.equal(browserOnly({ access: { level: 'blocked' } }), false);
+  assert.equal(browserOnly({ access: { level: 'blocked' }, located: false }), false);
+  assert.equal(browserOnly(null), false);
+  assert.equal(browserOnly(undefined), false);
+});
+
+test('where only the browser may run it, it runs there whatever is stored; the stored choice is not touched', async () => {
+  const { runPlace, blockedState, BROWSER_ONLY_LINE } = await import('./executor');
+  // The copy terms a close-only place cannot sign no longer stand before a closing algo.
+  const terms = { ready: false, why: 'Accept the terms of the ValueDesk executor in Copy → Set up.' };
+  assert.equal(blockedState(runPlace('hosted', false), terms, true)?.short, 'ValueDesk executor not set up');
+  assert.equal(blockedState(runPlace('hosted', true), terms, true), null);
+  assert.equal(blockedState(runPlace('self', true), terms, true), null);
+  for (const stored of ['hosted', 'browser', 'self'] as const) {
+    assert.equal(runPlace(stored, true), 'browser');
+    assert.equal(runPlace(stored, false), stored);
+  }
+  const store = memStore();
+  writeExecutor('hosted', store);
+  assert.equal(runPlace(readExecutor(store), true), 'browser');
+  assert.equal(store.map.get(EXECUTOR_KEY), '"hosted"', 'the choice made elsewhere is kept for later');
+  assert.equal(runPlace(readExecutor(store), false), 'hosted');
+  assert.equal(BROWSER_ONLY_LINE, 'From your region, algos run in this browser and can only close or reduce positions.');
 });
 
 test('the blocked notice is raised once per state', async () => {

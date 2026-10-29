@@ -6,6 +6,9 @@
  *
  * The draft used to carry it (`place` in vs.algo.draft.v1): the first read
  * with no key of its own moves that value over, once.
+ *
+ * From a close-only place an algo runs in this browser whatever is stored
+ * (browserOnly, runPlace), and the stored choice is left as it was.
  */
 import { DRAFT_KEY } from './draft';
 
@@ -19,6 +22,28 @@ export const PLACES: ReadonlyArray<readonly [Place, string, string]> = [
   ['browser', 'Browser', 'In this browser, signed with your trading key: keep a ValueDesk tab open'],
   ['self', 'Self-hosted', 'On the copier you run yourself'],
 ];
+
+/** What the executor cards say where only this browser may run an algo (browserOnly). */
+export const BROWSER_ONLY_LINE = 'From your region, algos run in this browser and can only close or reduce positions.';
+
+/**
+ * Whether only this browser may run an algo for a wallet in `st` (trading/legalGate.ts legalStateFor):
+ * a close-only place (the US and its territories, the UK, Canada: legal/jurisdictions.mjs), or a
+ * country the edge could not tell, which the order button treats as close-only (useTradeGate.ts).
+ * An algo that only closes may run there (copy-engine algoClosesOnly; an opening one stays refused
+ * by the legal gate), but not on the ValueDesk executor or a self-hosted copier: both need the copy
+ * terms, which a close-only place cannot sign (owner, 2026-10-29). A blocked place runs nothing,
+ * so this is not the thing to say there.
+ */
+export function browserOnly(st: { access: { level: string }; located?: boolean } | null | undefined): boolean {
+  if (!st) return false;
+  return st.access.level === 'close-only' || (st.access.level === 'open' && st.located === false);
+}
+
+/** Where the algo runs: the stored choice, or this browser where only it may (the stored choice is kept for later). */
+export function runPlace(stored: Place, onlyBrowser: boolean): Place {
+  return onlyBrowser ? 'browser' : stored;
+}
 
 /**
  * Whether the ticket is blocked because the chosen executor cannot start the
