@@ -28,7 +28,7 @@ export { SANCTIONS_LIST_META };
 export function screenPolicy(policy: RegionPolicy, ...addresses: Array<string | null | undefined>): RegionPolicy {
   const hit = sanctionedOf(addresses);
   if (hit === null) return policy;
-  return { ...policy, region: 'blocked', allowed: false, maxLeverage: null, reason: hit === 0 ? SANCTIONED_WALLET_REASON : SANCTIONED_LEADER_REASON };
+  return { ...policy, region: 'blocked', allowed: false, closeOnly: false, maxLeverage: null, reason: hit === 0 ? SANCTIONED_WALLET_REASON : SANCTIONED_LEADER_REASON };
 }
 
 // ---- shared with apps/server/src/builder/sanctions.ts below this line ----

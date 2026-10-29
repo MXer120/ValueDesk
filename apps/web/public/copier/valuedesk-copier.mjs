@@ -4000,6 +4000,15 @@ function builderUrl(raw) {
   if (u.protocol !== "https:" && u.hostname !== "127.0.0.1" && u.hostname !== "localhost") throw new Error("EXECUTOR_BUILDER_URL must be https (or a loopback address)");
   return u.toString();
 }
+function liveAlgoWalletsFrom(raw) {
+  const s = raw?.trim() ?? "";
+  if (!s) return [];
+  if (s === "*") return "*";
+  const list = s.split(",").map((a) => a.trim().toLowerCase()).filter(Boolean);
+  for (const a of list) if (!ADDRESS.test(a)) throw new Error(`EXECUTOR_LIVE_ALGOS_WALLETS holds "${a.slice(0, 12)}...", which is not a wallet address`);
+  return list;
+}
+var liveAlgosFor = (cfg, owner) => cfg.liveAlgos || cfg.liveAlgoWallets === "*" || cfg.liveAlgoWallets.includes(owner.toLowerCase());
 function loadConfig(env = process.env) {
   const rawKind = (env.EXECUTOR_KIND ?? "self").trim();
   if (rawKind !== "hosted" && rawKind !== "self") throw new Error(`EXECUTOR_KIND must be hosted or self (got "${env.EXECUTOR_KIND}")`);
@@ -4046,6 +4055,7 @@ function loadConfig(env = process.env) {
     logLevel: level === "debug" || level === "warn" || level === "error" ? level : "info",
     executorId,
     liveAlgos: env.EXECUTOR_LIVE_ALGOS === "1",
+    liveAlgoWallets: liveAlgoWalletsFrom(env.EXECUTOR_LIVE_ALGOS_WALLETS),
     brakeFile: brake === "none" ? null : brake ? resolve(brake) : kind === "hosted" ? "/var/lib/valuescan/brake.json" : join(dataDir, "brake.json"),
     allowedHosts: env.EXECUTOR_ALLOWED_HOSTS?.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean) ?? [],
     alertTelegramToken: env.ALERT_TELEGRAM_TOKEN?.trim() || null,
@@ -8161,9 +8171,11 @@ function regionPolicy(declared, observed) {
   if (region === "blocked") {
     const us = country !== null && US_REGIONS.includes(country);
     const named = country !== null ? CLOSE_ONLY_NAMES[country] : void 0;
+    const sanctioned = [d, o].some((c) => c !== null && SANCTIONED.includes(c));
     return {
       region,
       allowed: false,
+      closeOnly: !sanctioned && country !== null && CLOSE_ONLY_REGIONS.includes(country),
       maxLeverage: null,
       reason: us ? "Copy trading is not available to residents of the United States or its territories, or to anyone connecting from there." : named ? `Copy trading is not available to residents of ${named}, or to anyone connecting from there.` : "Copy trading is not available in your country or from where you are connecting.",
       country,
@@ -8306,7 +8318,7 @@ var SANCTIONED_ADDRESSES = [
 function screenPolicy(policy, ...addresses) {
   const hit = sanctionedOf(addresses);
   if (hit === null) return policy;
-  return { ...policy, region: "blocked", allowed: false, maxLeverage: null, reason: hit === 0 ? SANCTIONED_WALLET_REASON : SANCTIONED_LEADER_REASON };
+  return { ...policy, region: "blocked", allowed: false, closeOnly: false, maxLeverage: null, reason: hit === 0 ? SANCTIONED_WALLET_REASON : SANCTIONED_LEADER_REASON };
 }
 var LISTED = new Set(SANCTIONED_ADDRESSES.map((a) => a.toLowerCase()));
 var EXTRA = /* @__PURE__ */ new Set();
@@ -8545,6 +8557,10 @@ function coinOf(venue, leaderSymbol) {
   if (venue === "sodex") return s.replace(/-USD$/i, "").toUpperCase();
   const bare = s.includes(":") ? s.slice(s.indexOf(":") + 1) : s;
   return bare.replace(/^k(?=[A-Z])/, "").toUpperCase();
+}
+function hlDexOf(coin) {
+  const i = coin.indexOf(":");
+  return i > 0 ? coin.slice(0, i) : "";
 }
 function isSpotSymbol(venue, leaderSymbol) {
   if (venue === "sodex") return leaderSymbol.includes("_") || /^v[A-Z]/.test(leaderSymbol);
@@ -9553,24 +9569,134 @@ var HyperliquidClient = class {
     }
     throw last;
   }
-  /** Perp positions (coin -> signed size) and account value. */
-  async leaderPositions(address) {
-    const st = await this.post({ type: "clearinghouseState", user: address.toLowerCase() });
+  /** Account mode per address (from its spot state): a unified one's perps run on its spot. */
+  modes = /* @__PURE__ */ new Map();
+  spotPx = null;
+  /** The HIP-3 dexes (perpDexs; the main dex is not one of them). */
+  async perpDexs() {
+    const rows2 = await this.post({ type: "perpDexs" });
+    return (Array.isArray(rows2) ? rows2 : []).flatMap((d) => d?.name ? [d.name] : []);
+  }
+  /** The live perps of one dex ('' = the main dex), as its trade stream names them: 'BTC', 'xyz:TSLA'. */
+  async perpCoins(dex) {
+    const meta = await this.post(dex ? { type: "meta", dex } : { type: "meta" });
+    return (meta?.universe ?? []).filter((u) => u.name && !u.isDelisted).map((u) => u.name);
+  }
+  /**
+   * Perp positions (coin -> signed size) on the main dex and each HIP-3 dex in `dexes`
+   * (one clearinghouseState each: every dex is its own margin book), merged; HL names a
+   * HIP-3 coin with its dex ('xyz:TSLA'). The main dex is the one read that cannot fail:
+   * it throws. Another dex that fails is left out of `dexes` and the read is `partial`.
+   *
+   * EQUITY - what proportional sizing divides the leader's positions by - is the account's
+   * PERP EQUITY, as the server's size cohorts count it (apps/server/src/valuedesk/cohorts/
+   * model.ts perpEquity, checked against Hyperdash 2026-10-03 and 2026-10-24):
+   *  - a unified or portfolio-margin account (its spot state has
+   *    tokenToAvailableAfterMaintenance): its spot holdings, stablecoins at $1 and every
+   *    other token at its spot price. One pool backs every dex, and each dex's account
+   *    value is only the margin in use there - which made copies of such a leader far
+   *    too large.
+   *  - a standard account: the account values of the dexes read, summed (main, xyz and
+   *    any other dex in `dexes`). Its spot is not perps margin and is not counted.
+   * Null - the last known equity is kept - when a dex read failed, when the spot state
+   * could not be read and the account's mode is not known, or when a unified account
+   * holds other tokens than stablecoins and no spot prices could be read: an equity
+   * counted short sizes copies too large.
+   * The spot state is read every time for a unified account and every
+   * HL_MODE_RECHECK_MS for a standard one (to see it change mode).
+   */
+  async leaderPositions(address, dexes = HL_DEXES, now = Date.now()) {
+    const user = address.toLowerCase();
+    const want = [.../* @__PURE__ */ new Set(["", ...dexes])];
+    const mode = this.modes.get(user);
+    const readSpot = !mode || mode.unified || now - mode.at >= HL_MODE_RECHECK_MS;
+    const [spotR, ...stateR] = await Promise.allSettled([
+      readSpot ? this.post({ type: "spotClearinghouseState", user }) : Promise.resolve(null),
+      ...want.map((dex) => this.post(dex ? { type: "clearinghouseState", user, dex } : { type: "clearinghouseState", user }))
+    ]);
+    const main2 = stateR[0];
+    if (main2.status === "rejected") throw main2.reason;
     const positions = {};
     const marks = {};
-    for (const ap of st?.assetPositions ?? []) {
-      const p = ap.position;
-      const sz = Number(p?.szi);
-      if (p?.coin && Number.isFinite(sz) && sz !== 0) {
-        positions[p.coin] = sz;
-        const pv = Number(p.positionValue);
-        if (Number.isFinite(pv) && pv > 0) marks[p.coin] = pv / Math.abs(sz);
+    const read = [];
+    let valueSum = 0;
+    let asOf = -Infinity;
+    stateR.forEach((r, i) => {
+      if (r.status !== "fulfilled") return;
+      read.push(want[i]);
+      const st = r.value;
+      for (const ap of st?.assetPositions ?? []) {
+        const p = ap.position;
+        const sz = Number(p?.szi);
+        if (p?.coin && Number.isFinite(sz) && sz !== 0) {
+          positions[p.coin] = sz;
+          const pv = Number(p.positionValue);
+          if (Number.isFinite(pv) && pv > 0) marks[p.coin] = pv / Math.abs(sz);
+        }
       }
+      const av = Number(st?.marginSummary?.accountValue ?? 0);
+      valueSum = Number.isFinite(av) && Number.isFinite(valueSum) ? valueSum + av : NaN;
+      const t = Number(st?.time);
+      if (Number.isFinite(t) && t > 0) asOf = Math.max(asOf, t);
+    });
+    const partial = read.length < want.length;
+    let unified = mode?.unified ?? null;
+    let collateral = null;
+    if (readSpot && spotR.status === "fulfilled") {
+      const spot = spotR.value;
+      unified = Array.isArray(spot?.tokenToAvailableAfterMaintenance);
+      this.modes.set(user, { unified, at: now });
+      if (unified) collateral = hlSpotCollateral(spot, await this.spotPrices(now));
     }
-    const av = Number(st?.marginSummary?.accountValue);
-    return { positions, equity: Number.isFinite(av) ? av : null, marks };
+    const equity = unified === null ? null : unified ? collateral : partial || !Number.isFinite(valueSum) ? null : valueSum;
+    return { positions, equity, marks, dexes: read, partial, ...asOf > 0 ? { asOf } : {} };
+  }
+  /** Spot tokens' prices in USDC (spotMetaAndAssetCtxs, weight 20), kept SPOT_PRICES_MS; null when they cannot be read. */
+  spotPrices(now) {
+    if (this.spotPx && now - this.spotPx.at < SPOT_PRICES_MS) return this.spotPx.value;
+    const value = this.post({ type: "spotMetaAndAssetCtxs" }).then((raw) => {
+      const px = hlSpotPrices(raw);
+      return px.size ? px : null;
+    }).catch(() => null);
+    this.spotPx = { at: now, value };
+    void value.then((px) => {
+      if (!px && this.spotPx?.value === value) this.spotPx = null;
+    });
+    return value;
   }
 };
+var HL_DEXES = ["", "xyz"];
+var HL_MODE_RECHECK_MS = 10 * 6e4;
+var SPOT_PRICES_MS = 5 * 6e4;
+var STABLE_COLLATERAL = /^(USDC|USDT0?|USDE|USDH|USDG)$/i;
+function hlSpotPrices(raw) {
+  const out = /* @__PURE__ */ new Map();
+  if (!Array.isArray(raw)) return out;
+  const [meta, ctxs] = raw;
+  const name = new Map((meta?.tokens ?? []).map((t) => [Number(t.index), String(t.name ?? "")]));
+  for (const u of meta?.universe ?? []) {
+    const [base2, quote2] = u.tokens ?? [];
+    if (quote2 !== 0 || base2 === void 0) continue;
+    const c = ctxs?.[Number(u.index)];
+    const p = Number(c?.markPx ?? c?.midPx);
+    const n = name.get(Number(base2));
+    if (n && Number.isFinite(p) && p > 0 && !out.has(n)) out.set(n, p);
+  }
+  return out;
+}
+function hlSpotCollateral(st, px) {
+  if (!Array.isArray(st?.tokenToAvailableAfterMaintenance)) return null;
+  let sum = 0;
+  for (const b of st?.balances ?? []) {
+    const coin = String(b.coin ?? "");
+    const total = Number(b.total);
+    if (!Number.isFinite(total) || total === 0) continue;
+    if (STABLE_COLLATERAL.test(coin)) sum += total;
+    else if (!px) return null;
+    else sum += total * (px.get(coin) ?? 0);
+  }
+  return sum;
+}
 
 // ../../packages/copy-engine/src/socket.ts
 var LiveSocket = class {
@@ -9713,6 +9839,7 @@ var LeaderBook = class {
   seeded(l) {
     return this.seededAt.has(key(l));
   }
+  /** When the leader was seeded, by its venue's clock where the read said (Hyperliquid), else the local one: stream prints before it are in the seed. */
   seedTime(l) {
     return this.seededAt.get(key(l)) ?? null;
   }
@@ -9755,15 +9882,22 @@ var LeaderBook = class {
     else m.set(symbol2, after);
     return { leader: { venue: l.venue, address: l.address.toLowerCase() }, symbol: symbol2, before, after, price: price2, time: time2, id, source: "stream" };
   }
-  /** A position change to `after` (a source that knows the total). */
+  /**
+   * A position change to `after` (a source that knows the total). `before` is the
+   * source's own position before the change (Hyperliquid's `startPosition`), which
+   * the event carries over the book's when the book missed something; null = the
+   * book's. Nothing happens when the book already has `after`: a fill the seed or
+   * a reconcile already counted.
+   */
   applyTotal(l, symbol2, before, after, price2, time2, id) {
     if (!this.seeded(l) || !Number.isFinite(after)) return null;
     this.notePrint(l, symbol2, false);
     const m = this.map(l);
-    const b = before ?? m.get(symbol2) ?? 0;
+    const had = m.get(symbol2) ?? 0;
     if (after === 0) m.delete(symbol2);
     else m.set(symbol2, after);
-    if (b === after) return null;
+    const b = before !== null && Number.isFinite(before) ? before : had;
+    if (had === after || b === after) return null;
     return { leader: { venue: l.venue, address: l.address.toLowerCase() }, symbol: symbol2, before: b, after, price: price2, time: time2, id, source: "stream" };
   }
   /**
@@ -9772,19 +9906,29 @@ var LeaderBook = class {
    * market that differs. With `readStart` (when the REST read began), a market
    * a stream print reached since then, or whose prints are still being merged,
    * is left as the stream has it.
+   *
+   * A Hyperliquid read names the dexes it covers (`read.dexes`): a market on any
+   * other dex - not asked for, or its read failed - is left as the stream has it,
+   * never taken for flat. A read that missed a dex it asked for (`read.partial`)
+   * does not seed: the seed is what marks positions "pre-existing", and one it
+   * did not see would later be copied as new. Returns null when it did not seed.
    */
-  resync(l, positions, equity, marks, now, priceOf, readStart) {
+  resync(l, read, now, priceOf, readStart) {
     const k = key(l);
+    const { positions, equity, marks } = read;
     if (equity !== null) this.eq.set(k, { value: equity, at: now });
     if (!this.seededAt.has(k)) {
-      this.seededAt.set(k, now);
+      if (read.partial) return null;
+      this.seededAt.set(k, read.asOf !== void 0 && Math.abs(read.asOf - now) < 10 * 6e4 ? read.asOf + 1 : now);
       this.pos.set(k, new Map(Object.entries(positions).filter(([, v]) => v !== 0)));
       return [];
     }
+    const covered = read.dexes ? new Set(read.dexes) : null;
     const m = this.map(l);
     const out = [];
     const symbols = /* @__PURE__ */ new Set([...m.keys(), ...Object.keys(positions)]);
     for (const s of symbols) {
+      if (covered && !covered.has(hlDexOf(s))) continue;
       if (readStart !== void 0) {
         const printed = this.printedAt.get(`${k}|${s}`);
         if (printed !== void 0 && printed >= readStart || this.merging.has(`${k}|${s}`)) continue;
@@ -10046,6 +10190,10 @@ var HyperliquidFeed = class {
   }
   handle(m) {
     const msg = m;
+    if (msg.channel === "error") {
+      this.o.log?.warn("hyperliquid: the stream refused a request; those leaders rely on reconciliation", { error: String(msg.data).slice(0, 300) });
+      return;
+    }
     if (msg.channel === "userFills") {
       const d = msg.data;
       if (!d || d.isSnapshot || !d.user) return;
@@ -10059,7 +10207,7 @@ var HyperliquidFeed = class {
         const px = Number(f.px);
         const start = Number(f.startPosition);
         const time2 = Number(f.time);
-        const id = `hl:${String(f.tid ?? f.hash ?? `${coin}:${time2}`)}`;
+        const id = `hl:${coin}:${String(f.tid ?? f.hash ?? time2)}`;
         if (!coin || !(sz > 0) || !(px > 0) || !Number.isFinite(start) || !this.seen.add(id)) continue;
         if (seed !== null && time2 < seed) continue;
         if (coin.startsWith("@") || coin.includes("/")) continue;
@@ -10076,7 +10224,7 @@ var HyperliquidFeed = class {
       }
       for (const g2 of byOrder.values()) {
         const after = Math.abs(g2.after) < 1e-12 ? 0 : g2.after;
-        const e = this.o.book.applyTotal(l, g2.coin, null, after, g2.notional / g2.qty, g2.time, g2.id);
+        const e = this.o.book.applyTotal(l, g2.coin, g2.before, after, g2.notional / g2.qty, g2.time, g2.id);
         if (e) this.o.sink.leader(e);
       }
       return;
@@ -10084,7 +10232,7 @@ var HyperliquidFeed = class {
     if (msg.channel === "trades" && Array.isArray(msg.data)) {
       for (const t of msg.data) {
         if (!t.coin || !Array.isArray(t.users)) continue;
-        const id = `hl:${t.tid ?? `${t.coin}:${t.time}`}`;
+        const id = `hl:${t.coin}:${t.tid ?? t.time}`;
         if (!this.seen.add(id)) continue;
         const px = Number(t.px);
         const sz = Number(t.sz);
@@ -11289,6 +11437,7 @@ function checkAlgoSpec(input, depth = 0) {
   }
   return { spec: Object.keys(e).length ? null : spec, errors: e };
 }
+var algoClosesOnly = (s) => s.reduceOnly || s.kind === "conditional" && (s.then.type === "close" || s.then.type === "algo" && algoClosesOnly(s.then.algo));
 var opensPosition = (s) => !s.reduceOnly && s.kind !== "trailing" && s.kind !== "basket" && !(s.kind === "conditional" && (s.then.type === "close" || s.then.type === "algo"));
 function parseAlgoSpec(input) {
   const r = checkAlgoSpec(input);
@@ -11408,6 +11557,9 @@ var FOLLOWER_REFRESH_MS = 3e4;
 var GUARD_MS = 2e3;
 var READY_CHECK_MS = 10 * 6e4;
 var MARKETS_REFRESH_MS = 10 * 6e4;
+var HL_COINS_REFRESH_MS = 10 * 6e4;
+var HL_COINS_RETRY_MS = 3e4;
+var HL_MAX_COINS = 990;
 var PENDING_MS = 3e4;
 var CONFIRM_UNAVAILABLE = '"Ask me each time" needs a copier that can ask you (the browser copier). Choose automatic approval to copy here.';
 var QUIET_SKIPS = /* @__PURE__ */ new Set(["duplicate", "at-target", "no-follower-position", "spot-not-copied"]);
@@ -11442,6 +11594,12 @@ var CopyRuntime = class {
   sodexFeed = null;
   hlFeed = null;
   hlCoins = [];
+  /** Firehose mode: each Hyperliquid dex's live coins ('' = the main dex), as last read. */
+  hlCoinsByDex = /* @__PURE__ */ new Map();
+  hlCoinsTimer = null;
+  hlCoinsRetry = HL_COINS_RETRY_MS;
+  /** Copies whose leader could not be read when they started (or were restored): caught up once it is seeded. */
+  awaitingSeed = /* @__PURE__ */ new Set();
   running = false;
   feedUp = { sodex: false, hyperliquid: false };
   dirty = /* @__PURE__ */ new Set();
@@ -11497,6 +11655,7 @@ var CopyRuntime = class {
     this.timers = [];
     for (const t of this.refreshTimers.values()) timers.cancel(t);
     for (const t of this.stopTimers.values()) timers.cancel(t);
+    timers.cancel(this.hlCoinsTimer);
     this.sodexFeed?.stop();
     this.hlFeed?.stop();
     await Promise.allSettled([...this.queues.values()]);
@@ -11521,6 +11680,7 @@ var CopyRuntime = class {
     await this.host.store.saveSubscription(s);
     await this.syncFeeds();
     await this.seedLeader(s.settings.leader);
+    if (!this.leaders.seeded(s.settings.leader)) this.awaitingSeed.add(s.id);
     const positions = this.leaders.positions(s.settings.leader);
     st.leaderPos = { ...positions };
     st.leaderEquity = this.leaders.equity(s.settings.leader)?.value ?? null;
@@ -12147,7 +12307,10 @@ var CopyRuntime = class {
     const s = this.subs.get(subId);
     if (!s || s.status === "stopped") return;
     const l = s.settings.leader;
-    if (!this.leaders.seeded(l)) return;
+    if (!this.leaders.seeded(l)) {
+      this.awaitingSeed.add(subId);
+      return;
+    }
     const st = this.stateOf(s);
     const now = Date.now();
     const current = this.leaders.positions(l);
@@ -12313,7 +12476,6 @@ var CopyRuntime = class {
     this.sodexFeed?.setLeaders(sodex);
     const hl = leaders.filter((x) => x.venue === "hyperliquid");
     if (hl.length && !this.hlFeed && this.running) {
-      if (this.host.hlMode === "firehose") this.hlCoins = await this.hyperliquidCoins();
       this.hlFeed = new HyperliquidFeed({
         factory: this.host.factory,
         book: this.leaders,
@@ -12329,30 +12491,113 @@ var CopyRuntime = class {
         }
       });
       this.hlFeed.start();
+      if (this.host.hlMode === "firehose") void this.refreshHlCoins();
     }
     this.hlFeed?.setLeaders(hl);
     for (const l of leaders) if (!this.leaders.seeded(l)) await this.seedLeader(l);
   }
-  async hyperliquidCoins() {
+  /** Firehose mode: read the coin list, subscribe what is new, and plan the next read. */
+  async refreshHlCoins() {
+    timers.cancel(this.hlCoinsTimer);
+    this.hlCoinsTimer = null;
+    const ok = await this.loadHlCoins();
+    if (!this.running) return;
+    this.hlFeed?.refreshCoins();
+    const ms = ok ? HL_COINS_REFRESH_MS : this.hlCoinsRetry;
+    this.hlCoinsRetry = ok ? HL_COINS_RETRY_MS : Math.min(this.hlCoinsRetry * 2, HL_COINS_REFRESH_MS);
+    this.hlCoinsTimer = timers.after(ms, () => void this.refreshHlCoins());
+  }
+  /**
+   * Firehose mode: the coins whose `trades` the feed follows - every live perp of
+   * Hyperliquid's main dex and of every HIP-3 dex (perpDexs, then meta per dex; trade.xyz
+   * is 'xyz'), those that map to a SoDEX market first, at most HL_MAX_COINS. A dex whose
+   * read fails keeps the coins it had. True when every read answered and the list is not empty.
+   */
+  async loadHlCoins() {
+    const hl = this.host.hyperliquid;
+    let ok = true;
+    let dexes;
     try {
-      const meta = await this.host.hyperliquid.post({ type: "meta" });
-      return (meta.universe ?? []).filter((u) => u.name && !u.isDelisted).map((u) => u.name);
+      dexes = ["", ...await hl.perpDexs()];
+      for (const d of [...this.hlCoinsByDex.keys()]) if (!dexes.includes(d)) this.hlCoinsByDex.delete(d);
     } catch (e) {
-      this.host.log.warn("copy: hyperliquid coin list failed", { error: String(e) });
-      return [];
+      ok = false;
+      dexes = [.../* @__PURE__ */ new Set([...HL_DEXES, ...this.hlCoinsByDex.keys()])];
+      this.host.log.warn("copy: hyperliquid dex list failed", { error: String(e) });
     }
+    await Promise.all(
+      dexes.map(async (dex) => {
+        try {
+          this.hlCoinsByDex.set(dex, await hl.perpCoins(dex));
+        } catch (e) {
+          ok = false;
+          this.host.log.warn("copy: hyperliquid coin list failed", { dex: dex || "main", error: String(e) });
+        }
+      })
+    );
+    const all = [...new Set([...this.hlCoinsByDex.values()].flat())];
+    const listed = (c) => this.markets.sodexMarketFor("hyperliquid", c) !== null;
+    const coins3 = [...all.filter(listed), ...all.filter((c) => !listed(c))];
+    if (coins3.length > HL_MAX_COINS) {
+      this.host.log.warn("copy: more Hyperliquid coins than one IP may follow; coins SoDEX does not list are left out first", { coins: coins3.length, limit: HL_MAX_COINS });
+    }
+    this.hlCoins = coins3.slice(0, HL_MAX_COINS);
+    if (!this.hlCoins.length) {
+      this.host.log.error("copy: the Hyperliquid coin list is empty; Hyperliquid leaders move only by reconciliation until it loads", { reconcileMs: RECONCILE_MS });
+    }
+    return ok && this.hlCoins.length > 0;
   }
   async readLeader(l) {
-    return l.venue === "sodex" ? this.host.sodex.leaderPositions(l.address) : this.host.hyperliquid.leaderPositions(l.address);
+    return l.venue === "sodex" ? this.host.sodex.leaderPositions(l.address) : this.host.hyperliquid.leaderPositions(l.address, this.hlDexesFor(l));
+  }
+  /**
+   * The Hyperliquid dexes to read for a leader: the main dex and trade.xyz (HL_DEXES), and
+   * any other HIP-3 dex where the leader (as the books have it) or one of its copies holds
+   * a market SoDEX lists - so a position the stream learned there is reconciled, not left.
+   */
+  hlDexesFor(l) {
+    const out = new Set(HL_DEXES);
+    const symbols = new Set(Object.keys(this.leaders.positions(l)));
+    for (const s of this.subs.values()) {
+      if (lk(s.settings.leader) === lk(l)) for (const sym of Object.keys(this.states.get(s.id)?.leaderPos ?? {})) symbols.add(sym);
+    }
+    for (const sym of symbols) {
+      const dex = hlDexOf(sym);
+      if (dex && !out.has(dex) && this.markets.sodexMarketFor("hyperliquid", sym)) out.add(dex);
+    }
+    return [...out];
   }
   async seedLeader(l) {
     if (this.leaders.seeded(l)) return;
     try {
-      const r = await this.readLeader(l);
-      this.leaders.resync(l, r.positions, r.equity, r.marks, Date.now(), (sym) => this.priceFor(l.venue, sym));
+      this.resyncLeader(l, await this.readLeader(l));
     } catch (e) {
       this.host.log.warn("copy: leader read failed", { leader: lk(l), error: String(e) });
     }
+  }
+  /**
+   * A leader read into the books: its 'reconcile' events (none when it seeds), or null when
+   * it could not seed (a dex it asked for failed). Seeded, the copies that waited for it
+   * (awaitingSeed) are caught up: what the leader holds now is pre-existing to a new one.
+   */
+  resyncLeader(l, r, readStart) {
+    const wasSeeded = this.leaders.seeded(l);
+    const events = this.leaders.resync(l, r, Date.now(), (sym) => this.priceFor(l.venue, sym), readStart);
+    if (events === null) {
+      this.host.log.warn("copy: leader not seeded: a Hyperliquid dex could not be read", { leader: lk(l), read: r.dexes ?? null });
+      return null;
+    }
+    if (!wasSeeded) {
+      for (const id of [...this.awaitingSeed]) {
+        const s = this.subs.get(id);
+        if (!s) this.awaitingSeed.delete(id);
+        else if (lk(s.settings.leader) === lk(l)) {
+          this.awaitingSeed.delete(id);
+          this.catchUp(id);
+        }
+      }
+    }
+    return events;
   }
   reconciling = false;
   /** Re-read every followed leader: what the stream missed becomes a 'reconcile' event. */
@@ -12363,8 +12608,8 @@ var CopyRuntime = class {
       for (const l of this.followedLeaders()) {
         try {
           const readStart = Date.now();
-          const r = await this.readLeader(l);
-          const events = this.leaders.resync(l, r.positions, r.equity, r.marks, Date.now(), (sym) => this.priceFor(l.venue, sym), readStart);
+          const events = this.resyncLeader(l, await this.readLeader(l), readStart);
+          if (events === null) continue;
           const eq = this.leaders.equity(l);
           for (const s of this.list()) {
             if (lk(s.settings.leader) !== lk(l)) continue;
@@ -14015,6 +14260,7 @@ var AlgoRuntime = class {
       const brake = this.host.brake?.(a) ?? null;
       if (brake) {
         await this.hold(a, `Held: ${brake}`);
+        if (!this.stopped(a)) await this.syncExits(a, m, false);
         return;
       }
       const problem = await this.problemOf(a, now);
@@ -14024,7 +14270,7 @@ var AlgoRuntime = class {
         return;
       }
       const policy = this.host.policyFor?.(a) ?? null;
-      if (policy && !policy.allowed) {
+      if (policy && !policy.allowed && !(policy.closeOnly && algoClosesOnly(s))) {
         await this.hold(a, `Held: ${policy.reason ?? "not available in your region."}`);
         return;
       }
@@ -15526,13 +15772,22 @@ var AlgoRuntime = class {
         await this.cancelExits(a, m, live);
         if (!final) return;
       }
-      const lv = exitLevels(s.side, s.exits, a.filledValue / a.filled);
+      const avg = a.filledValue / a.filled;
+      const lv = exitLevels(s.side, s.exits, avg);
       const close = s.side === "buy" ? "sell" : "buy";
       const stops = [];
       const xs = [];
       for (const kind of ["tp", "sl"]) {
         const p = kind === "tp" ? lv.tp : lv.sl;
         if (p === null || !(p > 0)) continue;
+        const above = s.side === "buy" === (kind === "tp");
+        if (above ? p <= avg : p >= avg) {
+          if (a.k[`exitSkip_${kind}`] !== p) {
+            a.k[`exitSkip_${kind}`] = p;
+            await this.event(a, "error", `The ${kind === "tp" ? "take-profit" : "stop-loss"} at ${p} is on the wrong side of the average fill ${snapPrice(avg, m)}: not placed, it would close the position at once.`);
+          }
+          continue;
+        }
         const clOrdID = this.clOrdIdFor(a);
         const triggerPrice = snapPrice(p, m);
         stops.push({ clOrdID, side: close, quantity: dec3(size), triggerPrice, kind });
@@ -17347,7 +17602,7 @@ var ExecutorService = class {
     if (live.length + adds > this.cfg.maxAlgosPerOwner) {
       throw new ApiError(429, "limit", adds > 1 ? `At most ${this.cfg.maxAlgosPerOwner} algo orders run at once here, and this basket runs ${adds} (itself and one per market). ${live.length ? "Cancel one first, or use fewer markets." : "Use fewer markets."}` : `At most ${this.cfg.maxAlgosPerOwner} algo orders run at once here. Cancel one first.`);
     }
-    if (!this.cfg.liveAlgos && specsOf(spec, payload.spec).some((x) => !x.paper)) throw new ApiError(403, "paper-only", "Real algo orders are off for now. Turn on Practice run to try one against the live market.");
+    if (!liveAlgosFor(this.cfg, owner) && specsOf(spec, payload.spec).some((x) => !x.paper)) throw new ApiError(403, "paper-only", "Real algo orders are off for now. Turn on Practice run to try one against the live market.");
     let accountId = 0;
     if (!spec.paper) {
       this.needNoBrake("algos");
@@ -17872,9 +18127,9 @@ async function main() {
     const shownHost = cfg.host === "0.0.0.0" || cfg.host === "::" ? "127.0.0.1" : cfg.host;
     process.stdout.write(selfBanner({ url: `http://${shownHost}:${cfg.port}`, dataDir: cfg.dataDir, owner: svc.owner(), code: svc.pairingCode }));
   }
-  db.audit("process", null, null, { event: "start", pid: process.pid, kind: cfg.kind, id: svc.executorId, network: cfg.network, liveAlgos: cfg.liveAlgos, brake: svc.brake.current() });
+  db.audit("process", null, null, { event: "start", pid: process.pid, kind: cfg.kind, id: svc.executorId, network: cfg.network, liveAlgos: cfg.liveAlgos, liveAlgoWallets: cfg.liveAlgoWallets, brake: svc.brake.current() });
   await svc.start();
-  log.info("executor up", { kind: cfg.kind, id: svc.executorId, network: cfg.network, listen: `${cfg.host}:${cfg.port}`, data: cfg.dataDir, egress: out.localAddress ?? "default route", liveAlgos: cfg.liveAlgos });
+  log.info("executor up", { kind: cfg.kind, id: svc.executorId, network: cfg.network, listen: `${cfg.host}:${cfg.port}`, data: cfg.dataDir, egress: out.localAddress ?? "default route", liveAlgos: cfg.liveAlgos, liveAlgoWallets: cfg.liveAlgoWallets });
   const prune = setInterval(() => {
     try {
       const days = Number(process.env.EXECUTOR_ACTIVITY_DAYS);

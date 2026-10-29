@@ -24,7 +24,7 @@
  * The draft and its spec live in draft.ts; where it runs, in executor.ts.
  */
 import { fmtFixed, fmtNum, fmtPlain, toInputText } from '../../numStyle';
-import { LIVE_ALGOS, LIVE_ALGOS_OFF } from '../../algo/liveAlgos';
+import { LIVE_ALGOS_OFF, liveAlgosFor } from '../../algo/liveAlgos';
 import { createContext, forwardRef, useContext, useEffect, useId, useImperativeHandle, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react';
 import {
   ALGO_NAMES,
@@ -39,6 +39,7 @@ import {
   planAlgo,
   volumeProfile,
   isWeekend,
+  algoClosesOnly,
   type AlgoKind,
   type AlgoPlan,
   type AlgoSpec,
@@ -284,6 +285,8 @@ export interface AlgoTicketState {
   sided: boolean;
   /** The chosen executor cannot start it (unreachable, not set up, key missing): the button's short reason. Never for a missing wallet. */
   blocked: string | null;
+  /** It can only make a position smaller (copy-engine algoClosesOnly): a close-only place may start it. */
+  closesOnly?: boolean;
 }
 
 export interface AlgoTicketHandle {
@@ -534,8 +537,10 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
   // An executor needs the copy setup's steps (terms, sign-in, fee, key); the browser needs none of them.
   const copy = useSyncExternalStore(subscribeLiveCopy, getLiveCopy, getLiveCopy);
   const walletFree = place === 'browser' && d.paper;
+  // Real algos are off, but for a dev server's test wallets (liveAlgos.ts).
+  const liveOk = liveAlgosFor(p.address);
   const where =
-    !d.paper && !LIVE_ALGOS
+    !d.paper && !liveOk
       ? { ready: false, why: LIVE_ALGOS_OFF }
       : place === 'browser'
       ? !p.address && !d.paper ? { ready: false, why: 'Connect a wallet to run it live, or turn on Practice run in Advanced.' } : { ready: true, why: null }
@@ -576,7 +581,8 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
           : where;
   const block = blockedState(place, execOwn, !!p.address);
   const blocked = block?.short ?? null;
-  useEffect(() => p.onState({ ready, label, why, needsAmount, walletFree, sided, blocked, paper: d.paper, impact: firstImpact }), [ready, label, why, needsAmount, walletFree, sided, blocked, d.paper, firstKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  const closesOnly = check.spec ? algoClosesOnly(check.spec) : false;
+  useEffect(() => p.onState({ ready, label, why, needsAmount, walletFree, sided, blocked, paper: d.paper, impact: firstImpact, closesOnly }), [ready, label, why, needsAmount, walletFree, sided, blocked, d.paper, firstKey, closesOnly]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // The executor's trouble is a notification, not a line on the panel: raised
   // once when it begins or changes, after it has held a moment (the executor's
@@ -1028,7 +1034,7 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
             {!ready && (why || where.why) && (
               <p className="algo-sum__why">
                 {why ?? where.why}
-                {!d.paper && !LIVE_ALGOS && (
+                {!d.paper && !liveOk && (
                   <button type="button" className="acctf-view" onClick={() => set({ paper: true })}>Turn on Practice run</button>
                 )}
               </p>

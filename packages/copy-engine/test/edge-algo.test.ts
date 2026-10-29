@@ -541,7 +541,7 @@ test.todo('FINDING delisted: the resting children of an algo whose market vanish
   assert.equal(r.ex.resting.size, 0, 'its resting clip is cancelled when it ends');
 });
 
-test.todo('FINDING region: a reduce-only algo (a time-sliced close) of a wallet whose region is close-only (US) is held like an opening one; the copy planner lets closes through (owner call)', async () => {
+test('region: a close-only place (US) may close - a reduce-only algo runs there, its slices reduce-only (owner, 2026-10-29)', async () => {
   const r = await rig();
   r.ex.position = 0.004;
   r.policy = regionPolicy('US', null);
@@ -549,6 +549,28 @@ test.todo('FINDING region: a reduce-only algo (a time-sliced close) of a wallet 
   await step(r, a.id);
   assert.equal(r.ex.all.length, 1, 'the first reduce-only slice goes out');
   assert.ok(r.ex.all.every((c) => c.reduceOnly));
+});
+
+test('region: in a close-only place an opening algo is still held; a sanctioned country (declared or seen) holds a close too', async () => {
+  const open = await rig();
+  open.policy = regionPolicy('US', null);
+  const o = await add(open, { kind: 'twap', side: 'buy', quantity: '0.004', durationMs: 120_000, slices: 2, exec: { style: 'taker' } });
+  await step(open, o.id);
+  assert.equal(open.ex.all.length, 0, 'nothing opens from the US');
+  assert.match(open.rt.get(o.id)!.statusReason ?? '', /United States/, 'held with the region named');
+
+  for (const [declared, seen] of [['RU', null], ['US', 'IR']] as const) {
+    const r = await rig();
+    r.ex.position = 0.004;
+    r.policy = regionPolicy(declared, seen);
+    assert.equal(r.policy.closeOnly, false, `${declared}/${seen}: not close-only`);
+    const a = await add(r, { kind: 'twap', side: 'sell', closeShare: 1, durationMs: 120_000, slices: 2, exec: { style: 'taker' } });
+    await step(r, a.id);
+    assert.equal(r.ex.all.length, 0, `${declared}/${seen}: held`);
+  }
+  assert.equal(regionPolicy('GB', 'DE').closeOnly, true, 'the UK is close-only');
+  assert.equal(regionPolicy('DE', 'CA').closeOnly, true, 'seen in Canada: close-only');
+  assert.equal(regionPolicy('DE', null).closeOnly, undefined, 'an allowed place: no flag');
 });
 
 /* ================================================== restart during exits ===== */

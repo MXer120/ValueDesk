@@ -91,6 +91,12 @@ export interface RegionPolicy {
   country: string | null;
   /** Declared and observed differ. */
   mismatch: boolean;
+  /**
+   * Refused, but closing is still allowed: a close-only place (the US and its territories, the UK, Canada),
+   * and neither the declared nor the seen country sanctioned. Reduce-only algos run there (algo/spec.ts
+   * algoClosesOnly); copies stay refused. Absent: false.
+   */
+  closeOnly?: boolean;
 }
 
 const ISO2 = /^[A-Z]{2}$/;
@@ -130,9 +136,12 @@ export function regionPolicy(declared: string | null | undefined, observed?: str
   if (region === 'blocked') {
     const us = country !== null && US_REGIONS.includes(country);
     const named = country !== null ? CLOSE_ONLY_NAMES[country] : undefined;
+    // Close-only, not sanctioned: either country on the sanctions list (declared or seen) closes that door too.
+    const sanctioned = [d, o].some((c) => c !== null && SANCTIONED.includes(c));
     return {
       region,
       allowed: false,
+      closeOnly: !sanctioned && country !== null && CLOSE_ONLY_REGIONS.includes(country),
       maxLeverage: null,
       reason: us
         ? 'Copy trading is not available to residents of the United States or its territories, or to anyone connecting from there.'

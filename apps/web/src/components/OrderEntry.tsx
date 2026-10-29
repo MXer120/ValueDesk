@@ -941,7 +941,9 @@ export function OrderEntry({
   /* Where the legal gate would refuse this order (trading/legalGate.ts) - a restricted
      place, or terms the wallet has not signed - the button says so; a reduce-only order
      or a spot sell only closes, and stays possible. */
-  const opening = isAlgo || (engine === 'perps' ? !reduceOnly : side === 'buy');
+  // An algo that can only make a position smaller is a close: a close-only place (the US, the UK, Canada)
+  // may start it, as it may place a reduce-only order (owner, 2026-10-29).
+  const opening = isAlgo ? !algoState.closesOnly : (engine === 'perps' ? !reduceOnly : side === 'buy');
   const legalBtn = useLegalTradeGate(unlocked ? connectedAddress : null, opening);
   const btnGate = paperAlgo ? null : gate ?? legalBtn;
   /* The algo's executor cannot start it: the ticket turns orange and the button

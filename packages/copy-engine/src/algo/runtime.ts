@@ -56,7 +56,7 @@ import { bandRefused, exitLevels, scaleLadder, swarmClips, twapSchedule, vwapSch
 import { checkLimits, limitLeverage, oiHeadroom, oiRoomWords, positionCapUsd, limitRefusal, type AlgoLimitNotice, type LimitRefusal } from './limits.ts';
 import { checkSizes, coins, maxWords, minWords, money } from './sizes.ts';
 import type { AlgoSink, ChildRequest, ChildResult, StopRequest } from './sink.ts';
-import { ALGO_NAMES, algoQuantity, algoSymbols, opensPosition, parseAlgoSpec } from './spec.ts';
+import { ALGO_NAMES, algoClosesOnly, algoQuantity, algoSymbols, opensPosition, parseAlgoSpec } from './spec.ts';
 import type { AlgoStore } from './store.ts';
 import {
   FINAL_STATUSES,
@@ -876,9 +876,10 @@ export class AlgoRuntime {
         await this.hold(a, problem);
         return;
       }
-      // The region rules apply to live algos as to copies: a blocked region holds it (policy.ts).
+      // The region rules apply to live algos as to copies: a blocked region holds it (policy.ts) - but a
+      // close-only place may close: an algo that only makes a position smaller runs there (owner, 2026-10-29).
       const policy = this.host.policyFor?.(a) ?? null;
-      if (policy && !policy.allowed) {
+      if (policy && !policy.allowed && !(policy.closeOnly && algoClosesOnly(s))) {
         await this.hold(a, `Held: ${policy.reason ?? 'not available in your region.'}`);
         return;
       }

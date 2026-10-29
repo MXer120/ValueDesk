@@ -623,6 +623,15 @@ export function checkAlgoSpec(input: unknown, depth = 0): AlgoSpecCheck {
   return { spec: Object.keys(e).length ? null : spec, errors: e };
 }
 
+/**
+ * Whether an algo can only make a position smaller: reduce-only itself (a close, a whole-position trailing
+ * stop), or a conditional whose action closes or starts an algo that does. A close-only place (the US, the
+ * UK, Canada) may run exactly these - its users can close any position (owner, 2026-10-29); everything else
+ * is held there (policy.ts RegionPolicy.closeOnly, runtime.ts).
+ */
+export const algoClosesOnly = (s: AlgoSpec): boolean =>
+  s.reduceOnly || (s.kind === 'conditional' && (s.then.type === 'close' || (s.then.type === 'algo' && algoClosesOnly(s.then.algo))));
+
 /** Whether an algo opens (or adds to) a position, so exits can follow it. */
 export const opensPosition = (s: AlgoSpec): boolean =>
   !s.reduceOnly && s.kind !== 'trailing' && s.kind !== 'basket' && !(s.kind === 'conditional' && (s.then.type === 'close' || s.then.type === 'algo'));

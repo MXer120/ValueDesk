@@ -34,6 +34,15 @@ shown over time against the price. Longs entered below the price and shorts ente
   temporary S3 read policy again, and storage per coin and hour as bands (not per position).
 - Not planned: BTC's own on-chain (UTXO) version - that needs a Bitcoin node and UTXO index, or Glassnode's data.
 
+### SoDEX announcements on the site - owner, 2026-10-29
+SoDEX's own announcements (delistings, new listings, maintenance, rule changes) shown where they matter: in the
+bell and as a banner on the affected market, the ticket, open positions, running algos and copies on that market.
+A delisting is the trader's to act on (owner): ValueDesk does not close positions or cancel orders for it - it tells
+them early, with the date and what happens to positions and resting orders. Today's engine behaviour, pinned as
+`test.todo` findings: an algo whose market vanished keeps its resting children (`packages/copy-engine/test/edge-algo.test.ts`),
+a copy holding a delisted market is neither closed nor told (`edge-copy.test.ts`).
+- Needs: SoDEX's announcement source (sodex.com / alpha-biz, or their channel) read by the API, matched to markets.
+
 ## Where things are
 
 | Area | Location |
