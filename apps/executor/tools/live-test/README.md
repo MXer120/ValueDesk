@@ -1,10 +1,11 @@
 # Live test: algo orders and copy trading with real money
 
 A test suite that runs every algo order kind and copy trading **on SoDEX mainnet with real orders**, through a
-real executor process started on your computer, and checks every result against **SoDEX's own account data**
-(open orders and stops, order history, fills and their fees, positions, leverage, API keys, builder approvals).
-It is what the unit and audit tests (`packages/copy-engine/test/audit-*.test.ts`, `apps/executor/test/audit*.test.ts`)
-cannot show: that the exchange agrees.
+real executor - by default one started on your computer, or ValueDesk's own executor (`--target`, below) - and
+checks every result against **SoDEX's own account data** (open orders and stops, order history, fills and their
+fees, positions, leverage, API keys, builder approvals). It is what the unit and audit tests
+(`packages/copy-engine/test/audit-*.test.ts`, `apps/executor/test/audit*.test.ts`) cannot show: that the exchange
+agrees.
 
 It costs about $1.25 in fees and spread (see `--budget`); most of the deposit is margin that comes back.
 
@@ -34,7 +35,8 @@ You do **not** need to register anything yourself: with the private keys it hold
 ValueDesk's copy setup asks your wallet to sign - and nothing else:
 
 - it registers the executor's key on the follower's SoDEX account (name `vd-copy-self`, perps only, valid
-  one day) - every run, since every run starts a fresh executor;
+  one day; on `--target hosted` the name ValueDesk's executor gives, `vd-copy-tokyo`) - every run, since every
+  run starts a fresh executor;
 - it approves the ValueDesk builder fee ceiling (2.5 bp, the copy ladder's top step) on the follower's account,
   only if the approval there is lower;
 - it registers a key of its own on each wallet (`vd-livetest-ops`, `vd-livetest-leader`, one day) for the
@@ -64,6 +66,7 @@ Options:
 | `--slow` | include the slow scenarios (`vwap.full` 15 min) |
 | `--dry` | paper: every spec goes out with `paper: true` to an executor whose real orders are off; checks read the executor's paper book |
 | `--budget` | print the budget and stop |
+| `--target <t>` | the executor the scenarios run against: `self` (default), `hosted` or `browser` (see "Targets") |
 | `--adopt` | at start, close positions / cancel orders on the test markets that this runner never recorded sending (otherwise it refuses to touch them) |
 | `--env <file>` | another env file |
 | `--keep-data` | keep the executor's data folder at the end (it holds the executor's sealed key) |
@@ -121,11 +124,64 @@ order is just big enough. Each scenario says what it confirms on the exchange (`
   tightest stops; inconclusive, not failed, when the market does not move far enough in 20 minutes). The fixed-amount
   scenario also times every copy: leader fill to copy fill by SoDEX's own timestamps, median under 1 s.
 
+## Targets
+
+`--target` picks the executor that takes the signed requests. The catalogue, the checks against SoDEX and the
+cleanup are the same on every target; what a target cannot let the runner do, the scenarios that need it are
+skipped for, with why (`needs` in `scenarios/*.ts`; `target.ts`).
+
+| Target | What runs | Covers | Skips |
+|---|---|---|---|
+| `self` (default) | a real executor process started here from this checkout (`apps/executor/src/main.ts`, self-hosted for the follower, `EXECUTOR_LIVE_ALGOS=1` for a live run) | everything: 53 scenarios (54 with `--slow`) | nothing |
+| `hosted` | ValueDesk's own executor on server 2, through the site: `https://www.valuedesk.so/api/copy/v1` (Vercel's function adds the origin secret and your country, which the server needs) | every scenario that does not restart the executor | `twap.restart`, `iceberg.restart`, `scale.restart`, `copy.restart` (it cannot be killed from here) |
+| `browser` | the web app's own runtime (`apps/web/src/algo`, `copy`, `trading`) in a page, through the web test bridge | - | not here yet: it needs a `BrowserDriver` (below); paper only until it says otherwise |
+
+**Hosted** in detail:
+
+- The executor id and the key name come from its `/info` (`valuedesk-mainnet-tokyo`, `vd-copy-tokyo`); the run
+  refuses anything that does not answer as ValueDesk's mainnet executor, or whose `/health` is not ok.
+- **The region** is the stricter of `LIVE_COUNTRY` and the country its edge sees you in (as for every follower):
+  from Germany the 2x EEA cap applies whatever you declare, and the checks expect it.
+- **Its fee** is the step of the follower's 14-day volume, which only its own ledger knows: the checks accept any
+  step of the ladder its `/info` lists, the same on every order, and note the one SoDEX showed (`self` charges the
+  top step, 2.5 bp, and is checked for exactly that).
+- **Its limits** (240 reads and 40 writes a minute per address, 12 key checks a minute per wallet) are shared with
+  anyone behind your address, so the runner paces itself under them (200 / 30 / 10); a run takes a little longer.
+- **When it cannot take something now**, that is not a failure of the code: closed to new followers or the
+  operator's brake (503) is `inconclusive` (it runs again next time), a region or sanctions refusal (451) is
+  `skipped` with its words.
+- **Real algo orders** reach it only for wallets the owner lets (below); until then every algo scenario of a live
+  run is `inconclusive` with that reason. Copies need nothing extra.
+- **What it records stays.** ValueDesk's production database keeps the signed terms, the keys, the algos and copies
+  of the wallets used - also a `--dry` run's throwaway wallet, which accepts the terms there; a dry run sends paper
+  specs only. The kill switch and the "stop all copies" of every cleanup apply to everything the follower runs on
+  ValueDesk's executor: use the dedicated wallets only.
+- The hash a pass is tied to adds the version its `/info` names (and a commit, once `/info` carries one) to this
+  checkout's files, so a pass on `hosted` re-runs after a local change too. A release that does not change that
+  version is not seen: run with `--force` after one.
+
+**What the owner sets up for hosted** (once, on server 2, `/etc/valuescan/executor.env`): the follower's address
+in `EXECUTOR_LIVE_ALGOS_WALLETS` (comma-separated addresses; `*` would be every wallet), and restart the executor.
+`EXECUTOR_LIVE_ALGOS=1` would open real algo orders to everyone - not needed for this. Taking the address out
+again stops new real algos for it; running ones go on. Copy trading needs nothing.
+
+**Browser**: the seam is `BrowserTarget` in `target.ts`, which takes a `BrowserDriver` - the executor's API calls
+(the same as `ExecutorApi`) plus `open`, `close` and `ready` of the page. The driver is the web test bridge (a
+dev-only `window.__vsTest` in the web app and its browser tooling in `apps/web` e2e, built there, not in this
+folder). Without one, `--target browser` stops at the start with that message. Its hash adds the web runtime's
+files. Its capabilities (nothing restarted, paper only) widen when the bridge says what it can do.
+
+**One target at a time per wallet**: each target keeps its own state, and a live start refuses while another
+target's state says it may have left orders or positions on the same follower (run that target again: its start-up
+cleanup flattens them). Never run two targets at once on the same wallets.
+
 ## Resume, and reading the results
 
-The results are in `.state/live.json` (`.state/dry.json` for `--dry`; a practice run never marks a real one
-passed). Per scenario: `status` (passed, failed, inconclusive, skipped, pending), the `hash` of the code it ran
-on, times, attempts, the error, the checks that held, notes, and the fees SoDEX charged it.
+The results are in `.state/live-<target>.json` (`.state/dry-<target>.json` for `--dry`; a practice run never marks
+a real one passed, a pass on one target never stands for another). A `self` state from before targets
+(`.state/live.json`, `.state/dry.json`) is renamed to its new name the first time. Per scenario: `status` (passed,
+failed, inconclusive, skipped, pending), the `hash` of the code it ran on, times, attempts, the error, the checks
+that held, notes, and the fees SoDEX charged it.
 
 - **Run it again** to resume: what **passed on the same code** is skipped; failed, inconclusive (the market did
   not do what the scenario waited for in time - a take-profit not reached, a quiet tape), interrupted and never
@@ -169,5 +225,6 @@ close) only check that the executor accepts their spec.
 | `harness.ts` | what a scenario works with (`T`): sizes, checks, the follower's account (SoDEX or paper), the leader, restarts |
 | `exchange.ts` | SoDEX reads, and the harness's own writes (registration, approval, IOCs, cancels) |
 | `executor.ts` | the executor process and its signed API |
+| `target.ts` | the targets (`self`, `hosted`, `browser`): what each can do, the hosted pacing and refusals, the browser seam |
 | `cleanup.ts`, `state.ts`, `hash.ts`, `budget.ts` | flattening, the state file, the code hash, the budget |
-| `../../test/live-test-runner.test.ts` | unit tests of the runner's rules (resume, skip, hash, crash repair, cleanup, budget) |
+| `../../test/live-test-runner.test.ts` | unit tests of the runner's rules (resume, skip, hash, crash repair, cleanup, budget, targets) |

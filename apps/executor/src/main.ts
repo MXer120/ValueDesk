@@ -156,9 +156,9 @@ async function main(): Promise<void> {
     const shownHost = cfg.host === '0.0.0.0' || cfg.host === '::' ? '127.0.0.1' : cfg.host;
     process.stdout.write(selfBanner({ url: `http://${shownHost}:${cfg.port}`, dataDir: cfg.dataDir, owner: svc.owner(), code: svc.pairingCode }));
   }
-  db.audit('process', null, null, { event: 'start', pid: process.pid, kind: cfg.kind, id: svc.executorId, network: cfg.network, liveAlgos: cfg.liveAlgos, brake: svc.brake.current() });
+  db.audit('process', null, null, { event: 'start', pid: process.pid, kind: cfg.kind, id: svc.executorId, network: cfg.network, liveAlgos: cfg.liveAlgos, liveAlgoWallets: cfg.liveAlgoWallets, brake: svc.brake.current() });
   await svc.start();
-  log.info('executor up', { kind: cfg.kind, id: svc.executorId, network: cfg.network, listen: `${cfg.host}:${cfg.port}`, data: cfg.dataDir, egress: out.localAddress ?? 'default route', liveAlgos: cfg.liveAlgos });
+  log.info('executor up', { kind: cfg.kind, id: svc.executorId, network: cfg.network, listen: `${cfg.host}:${cfg.port}`, data: cfg.dataDir, egress: out.localAddress ?? 'default route', liveAlgos: cfg.liveAlgos, liveAlgoWallets: cfg.liveAlgoWallets });
 
   const prune = setInterval(() => {
     try {

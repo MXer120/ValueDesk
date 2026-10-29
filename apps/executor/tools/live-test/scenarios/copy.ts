@@ -92,7 +92,7 @@ export const COPY_SCENARIOS: Scenario[] = [
         const sells = os.filter((o) => o.side === 'sell');
         t.check(sells.length >= 2 && sells.every((o) => o.reduceOnly), 'every reduction was reduce-only');
         t.check(os.filter((o) => o.side === 'buy').every((o) => !o.reduceOnly), 'opens and adds were not');
-        t.check(os.every((o) => o.builderFee === 25), 'every copy order carries the 2.5 bp builder fee', os.map((o) => o.builderFee));
+        t.checkOrderFees(os);
       });
       await t.checkBuilderFee((await t.account.fills(t.main.name)).filter((f) => f.clOrdID?.startsWith('vdc-')));
       await t.live('the activity log names the legs in order', async () => {
@@ -261,6 +261,7 @@ export const COPY_SCENARIOS: Scenario[] = [
     },
   }),
   copy('copy.restart', 'Executor killed while copying; the leader adds while it is down', 'after the restart the copy catches up to the leader from SoDEX (reconcile) with no order sent twice', {
+    needs: ['restart'],
     timeoutMs: 7 * MIN,
     cost: (U) => ({ takerUsd: 4 * U, makerUsd: 0, peakUsd: 2 * U, leaderTakerUsd: 4 * U, leaderPeakUsd: 2 * U }),
     async run(t) {

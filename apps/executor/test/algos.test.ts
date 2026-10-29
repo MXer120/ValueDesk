@@ -7,7 +7,7 @@ import type { AddressInfo } from 'node:net';
 import { secp256k1 } from '@noble/curves/secp256k1';
 import { bytesToHex, hexToBytes, privateKeyToAddress } from '../../../packages/sodex-core/src/index.ts';
 import { COPY_TERMS_VERSION, buildCopyRequest, copyRequestDigest, limitNoticeOf, parseAlgoSpec, parseMarkets, planAlgo, type AlgoFeed, type CopyAction, type FetchLike, type WebSocketLike } from '../../../packages/copy-engine/src/index.ts';
-import { loadConfig, type ExecutorConfig } from '../src/config.ts';
+import { liveAlgoWalletsFrom, loadConfig, type ExecutorConfig } from '../src/config.ts';
 import { ExecutorDb } from '../src/db.ts';
 import { Secrets } from '../src/secrets.ts';
 import { createExecutorServer } from '../src/server.ts';
@@ -328,4 +328,37 @@ test('algos: at the open-interest cap an executor algo holds, and the notice wit
   await svc.algos.stepNow(v.algo.id, Date.now());
   assert.notEqual(svc.algoList(w.address)[0]!.algo.status, 'waiting');
   await cleanup();
+});
+
+test('algos: EXECUTOR_LIVE_ALGOS_WALLETS lets real algo orders start for the wallets it names only; * for every wallet; EXECUTOR_LIVE_ALGOS=1 still for everyone', async () => {
+  const listed = new Wallet();
+  const other = new Wallet();
+  const ctx = { viewerCountry: 'SG' };
+  const live = { ...TWAP, paper: false };
+  // A real start that passes the gate goes on to the key check: no key is registered here, so 412 key.
+  const starts = async (env: Record<string, string>) => {
+    const { svc, cleanup } = make(env);
+    const out: string[] = [];
+    for (const w of [listed, other]) {
+      svc.acceptTerms(w.sign(svc.executorId, 'accept-terms', TERMS), ctx);
+      out.push(await code(svc.algoStart(w.sign(svc.executorId, 'algo-start', { spec: live, seed: 1 }), ctx)));
+    }
+    await cleanup();
+    return out;
+  };
+  assert.deepEqual(await starts({}), ['403:paper-only', '403:paper-only'], 'unset: nobody');
+  assert.deepEqual(await starts({ EXECUTOR_LIVE_ALGOS_WALLETS: ` ${listed.address.toUpperCase().replace('0X', '0x')} ` }), ['412:key', '403:paper-only'], 'the listed wallet only (any case, spaces trimmed)');
+  assert.deepEqual(await starts({ EXECUTOR_LIVE_ALGOS_WALLETS: '*' }), ['412:key', '412:key']);
+  assert.deepEqual(await starts({ EXECUTOR_LIVE_ALGOS: '1' }), ['412:key', '412:key']);
+  assert.deepEqual(await starts({ EXECUTOR_LIVE_ALGOS: '1', EXECUTOR_LIVE_ALGOS_WALLETS: listed.address }), ['412:key', '412:key'], 'EXECUTOR_LIVE_ALGOS=1 is everyone, whatever the list says');
+  // A conditional's own algo counts too: a paper conditional that would start a real algo is refused for a wallet not listed.
+  const { svc, cleanup } = make({ EXECUTOR_LIVE_ALGOS_WALLETS: listed.address });
+  svc.acceptTerms(other.sign(svc.executorId, 'accept-terms', TERMS), ctx);
+  const cond = { kind: 'conditional', symbol: 'BTC-USD', side: 'buy', conditions: [{ type: 'price', symbol: 'BTC-USD', source: 'mark', op: 'above', value: '1' }], then: { type: 'algo', algo: { ...TWAP, paper: false } }, paper: true };
+  assert.equal(await code(svc.algoStart(other.sign(svc.executorId, 'algo-start', { spec: cond, seed: 1 }), ctx)), '403:paper-only');
+  assert.equal(await code(svc.algoStart(other.sign(svc.executorId, 'algo-start', { spec: TWAP, seed: 2 }), ctx)), 'ok', 'practice runs always can');
+  await cleanup();
+  assert.deepEqual(liveAlgoWalletsFrom(undefined), []);
+  assert.deepEqual(liveAlgoWalletsFrom(` ${listed.address}, ,${other.address.toUpperCase().replace('0X', '0x')}`), [listed.address, other.address]);
+  assert.throws(() => loadConfig({ EXECUTOR_LIVE_ALGOS_WALLETS: `${listed.address},0x123`, EXECUTOR_DATA_DIR: tmpdir() }), /not a wallet address/);
 });

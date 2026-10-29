@@ -6,6 +6,7 @@
  */
 import type { DepGroup } from './hash.ts';
 import type { T } from './harness.ts';
+import type { Capability } from './target.ts';
 
 /**
  * What one scenario costs, in USD at the follower (and the leader), with
@@ -47,6 +48,8 @@ export interface Scenario {
   slow?: boolean;
   /** Needs the leader wallet. */
   leader?: boolean;
+  /** What the target must let the runner do (target.ts): on a target that cannot, it is skipped, with why. */
+  needs?: Capability[];
   /** How a dry run exercises it: on paper with its checks / its spec accepted and stopped / a copy's lifecycle without leader trades. */
   dry: 'full' | 'spec' | 'lifecycle';
   timeoutMs: number;

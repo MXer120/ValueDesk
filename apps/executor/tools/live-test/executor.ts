@@ -14,6 +14,10 @@
  *
  * Its environment is built from scratch: the env file's private keys are never
  * in it.
+ *
+ * The signed client (ExecutorClient) is the same for every target (target.ts):
+ * this process, or ValueDesk's own executor through the site's edge, with the
+ * pacing and the refusals that one needs.
  */
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createWriteStream, mkdirSync, type WriteStream } from 'node:fs';
@@ -34,6 +38,7 @@ import {
   type MeResponse,
 } from '../../../../packages/copy-engine/src/index.ts';
 import { walletSign } from './exchange.ts';
+import type { ExecutorApi } from './target.ts';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const EXECUTOR_DIR = join(HERE, '..', '..');
@@ -200,24 +205,35 @@ export function assertPaper(spec: Record<string, unknown>): void {
   if (then?.type === 'algo' && then.algo && then.algo.paper !== undefined && then.algo.paper !== true) throw new Error('dry run: refusing a conditional whose algo is not paper');
 }
 
+export interface ClientOptions {
+  /** Waits before each request, so a shared executor's limits per client are never reached (target.ts Pacer). */
+  pace?: (kind: 'read' | 'write' | 'key-check') => Promise<void>;
+  /** An answer that means the executor cannot take this now (closed, the brake, a region): the error to throw instead. */
+  refusal?: (e: ExecutorError) => Error | null;
+}
+
 /** The executor's API as the web app uses it, signed by the follower's wallet. */
-export class ExecutorClient {
+export class ExecutorClient implements ExecutorApi {
   private token: string | null = null;
 
   constructor(
-    private readonly proc: ExecutorProcess,
+    /** Where it answers: this machine's process, or ValueDesk's executor behind the site. */
+    private readonly at: { readonly base: string },
     readonly wallet: CopyWallet,
-    readonly executorId: string,
+    /** What requests are signed for (ValueDesk's executor: read from its /info when the target starts). */
+    public executorId: string,
     readonly mode: 'live' | 'dry',
+    private readonly o: ClientOptions = {},
   ) {}
 
-  private async call<T>(method: 'GET' | 'POST', path: string, body?: unknown, auth = false): Promise<T> {
+  protected async call<T>(method: 'GET' | 'POST', path: string, body?: unknown, auth = false): Promise<T> {
     for (let attempt = 0; ; attempt++) {
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (auth) headers.Authorization = `Bearer ${await this.session()}`;
+      await this.o.pace?.(path === '/keys/verify' ? 'key-check' : method === 'POST' ? 'write' : 'read');
       let res: Response;
       try {
-        res = await fetch(this.proc.base + path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(60_000) });
+        res = await fetch(this.at.base + path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(60_000) });
       } catch (e) {
         if (attempt < 3) {
           await new Promise((r) => setTimeout(r, 1_000));
@@ -236,11 +252,13 @@ export class ExecutorClient {
         this.token = null;
         continue;
       }
-      throw new ExecutorError(res.status, String(data.code ?? res.status), `${path}: ${res.status} ${data.code ?? ''} ${data.error ?? ''}`.trim());
+      const err = new ExecutorError(res.status, String(data.code ?? res.status), `${path}: ${res.status} ${data.code ?? ''} ${data.error ?? ''}`.trim());
+      throw this.o.refusal?.(err) ?? err;
     }
   }
 
   private post<T>(path: string, action: CopyAction, payload: unknown): Promise<T> {
+    if (!this.executorId) throw new Error('the executor id is not known yet: the target was not started');
     return this.call<T>('POST', path, { request: this.wallet.sign(this.executorId, action, payload) });
   }
 

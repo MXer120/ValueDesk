@@ -8,10 +8,18 @@
  * without changing it changes nothing. Paths are hashed relative to the
  * repository and in sorted order, so the folder a checkout lives in does not
  * matter.
+ *
+ * PER TARGET (target.ts). Self runs this checkout's executor: its hash is what
+ * it always was. Hosted runs ValueDesk's released executor: its hash adds the
+ * version its /info names (and a commit, once /info carries one) to the same
+ * files - the checkout is the nearest record of what was released, so a local
+ * change re-runs it too. Browser runs the web app's own runtime: its hash adds
+ * those files (the `web` group).
  */
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
+import type { TargetName } from './target.ts';
 
 /** What the hash groups are made of (repository-relative folders or files; folders are walked for .ts files). */
 export const DEP_GROUPS = {
@@ -40,12 +48,23 @@ export const DEP_GROUPS = {
    * scenarios does not re-run the algo ones.
    */
   harness: ['apps/executor/tools/live-test'],
+  /** The web app's runtime of algos and copies, and its trading layer: what the browser target runs. */
+  web: ['apps/web/src/algo', 'apps/web/src/copy', 'apps/web/src/trading'],
 } as const;
 
 /** Folders of a group that are left out of it (hashed per scenario instead). */
 const GROUP_SKIP: Partial<Record<keyof typeof DEP_GROUPS, string[]>> = { harness: ['apps/executor/tools/live-test/scenarios/'] };
 
 export type DepGroup = keyof typeof DEP_GROUPS;
+
+/** Groups only some targets run (and hash): the web runtime is the browser target's alone. */
+const TARGET_GROUPS: Partial<Record<DepGroup, readonly TargetName[]>> = { web: ['browser'] };
+
+/** What a hash is taken for: the target, and (hosted) the release it names. */
+export interface HashTarget {
+  name: TargetName;
+  release?: string | null;
+}
 
 const SKIP_DIRS = new Set(['node_modules', '.state', '.git', 'dist', '.cache']);
 
@@ -81,7 +100,15 @@ export function hashFiles(repo: string, files: readonly string[]): string {
 /** One hash per group, read once per run. */
 export class CodeHashes {
   private readonly cache = new Map<DepGroup, string>();
-  constructor(readonly repo: string) {}
+  constructor(
+    readonly repo: string,
+    readonly target: HashTarget = { name: 'self' },
+  ) {}
+
+  /** The groups of these this target runs. */
+  private used(groups: readonly DepGroup[]): DepGroup[] {
+    return groups.filter((g) => TARGET_GROUPS[g]?.includes(this.target.name) ?? true);
+  }
 
   group(g: DepGroup): string {
     let v = this.cache.get(g);
@@ -97,23 +124,24 @@ export class CodeHashes {
   }
 
   /**
-   * A scenario's hash: its groups (always core and harness), the file it is written in,
-   * its id and its revision. 16 hex digits are plenty to tell versions apart.
+   * A scenario's hash: its groups (always core and harness, and the target's own), the file it
+   * is written in, the target (but self, whose hash stays what it was before targets), its id
+   * and its revision. 16 hex digits are plenty to tell versions apart.
    */
   scenario(s: { id: string; deps: readonly DepGroup[]; source?: string; rev?: number }): string {
-    const groups = [...new Set<DepGroup>(['core', 'harness', ...s.deps])].sort();
+    const groups = [...new Set<DepGroup>(['core', 'harness', ...s.deps, ...this.used(['web'])])].sort();
     const h = createHash('sha256');
     for (const g of groups) h.update(`${g}:${this.group(g)}\n`);
     if (s.source) h.update(`source:${hashFiles(this.repo, [s.source])}\n`);
+    if (this.target.name !== 'self') h.update(`target:${this.target.name}@${this.target.release ?? ''}\n`);
     h.update(`${s.id}#${s.rev ?? 1}`);
     return h.digest('hex').slice(0, 16);
   }
 
-  /** The whole code base the suite covers, for the run log. */
+  /** The whole code base the suite covers on this target, for the run log. */
   all(): string {
-    return createHash('sha256')
-      .update((Object.keys(DEP_GROUPS) as DepGroup[]).map((g) => this.group(g)).join(','))
-      .digest('hex')
-      .slice(0, 16);
+    const h = createHash('sha256').update(this.used(Object.keys(DEP_GROUPS) as DepGroup[]).map((g) => this.group(g)).join(','));
+    if (this.target.name !== 'self') h.update(`,target:${this.target.name}@${this.target.release ?? ''}`);
+    return h.digest('hex').slice(0, 16);
   }
 }

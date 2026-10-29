@@ -18,7 +18,10 @@
  *   EXECUTOR_ID              the executor id requests are signed for (default: hosted
  *                            valuedesk-<network>-tokyo, the one every registered key names; set
  *                            another for staging so a signed request cannot be replayed between them)
- *   EXECUTOR_LIVE_ALGOS      1 = real (non-paper) algo orders may start; default off (practice only)
+ *   EXECUTOR_LIVE_ALGOS      1 = real (non-paper) algo orders may start, for every wallet; default off (practice only)
+ *   EXECUTOR_LIVE_ALGOS_WALLETS  while EXECUTOR_LIVE_ALGOS is off, the wallets real algo orders may start for:
+ *                            comma-separated 0x addresses, or * for every wallet; unset: none (e.g. the
+ *                            owner's live test, apps/executor/tools/live-test --target hosted, for its follower)
  *   EXECUTOR_BRAKE_FILE      the operator's emergency brake (brake.ts; default: hosted
  *                            /var/lib/valuescan/brake.json, self <data dir>/brake.json; 'none' = no brake)
  *   EXECUTOR_TRUST_EDGE      hosted: 1 = read the viewer's address and country from the edge's headers
@@ -68,8 +71,10 @@ export interface ExecutorConfig {
   logLevel: 'debug' | 'info' | 'warn' | 'error';
   /** The executor id requests are signed for; null = the default (hosted: by network; self: its own, kept in its data). */
   executorId: string | null;
-  /** Real (non-paper) algo orders may start. Off unless EXECUTOR_LIVE_ALGOS=1. */
+  /** Real (non-paper) algo orders may start, for every wallet. Off unless EXECUTOR_LIVE_ALGOS=1. */
   liveAlgos: boolean;
+  /** Besides: the wallets (lowercase) real algo orders may start for, or '*' for every wallet (EXECUTOR_LIVE_ALGOS_WALLETS). */
+  liveAlgoWallets: readonly string[] | '*';
   /** The emergency brake's file (brake.ts); null: none. */
   brakeFile: string | null;
   /** Self-hosted: Host header names allowed besides loopback names and IP literals. */
@@ -111,6 +116,20 @@ function builderUrl(raw: string | undefined): string | null {
   if (u.protocol !== 'https:' && u.hostname !== '127.0.0.1' && u.hostname !== 'localhost') throw new Error('EXECUTOR_BUILDER_URL must be https (or a loopback address)');
   return u.toString();
 }
+
+/** EXECUTOR_LIVE_ALGOS_WALLETS: unset is no wallet; '*' every wallet; else a list of addresses. */
+export function liveAlgoWalletsFrom(raw: string | undefined): readonly string[] | '*' {
+  const s = raw?.trim() ?? '';
+  if (!s) return [];
+  if (s === '*') return '*';
+  const list = s.split(',').map((a) => a.trim().toLowerCase()).filter(Boolean);
+  for (const a of list) if (!ADDRESS.test(a)) throw new Error(`EXECUTOR_LIVE_ALGOS_WALLETS holds "${a.slice(0, 12)}...", which is not a wallet address`);
+  return list;
+}
+
+/** Whether real (non-paper) algo orders may start for this wallet: every wallet with EXECUTOR_LIVE_ALGOS=1, else the ones EXECUTOR_LIVE_ALGOS_WALLETS names. */
+export const liveAlgosFor = (cfg: Pick<ExecutorConfig, 'liveAlgos' | 'liveAlgoWallets'>, owner: string): boolean =>
+  cfg.liveAlgos || cfg.liveAlgoWallets === '*' || cfg.liveAlgoWallets.includes(owner.toLowerCase());
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): ExecutorConfig {
   const rawKind = (env.EXECUTOR_KIND ?? 'self').trim();
@@ -160,6 +179,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ExecutorConfig
     logLevel: level === 'debug' || level === 'warn' || level === 'error' ? level : 'info',
     executorId,
     liveAlgos: env.EXECUTOR_LIVE_ALGOS === '1',
+    liveAlgoWallets: liveAlgoWalletsFrom(env.EXECUTOR_LIVE_ALGOS_WALLETS),
     brakeFile: brake === 'none' ? null : brake ? resolve(brake) : kind === 'hosted' ? '/var/lib/valuescan/brake.json' : join(dataDir, 'brake.json'),
     allowedHosts: env.EXECUTOR_ALLOWED_HOSTS?.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean) ?? [],
     alertTelegramToken: env.ALERT_TELEGRAM_TOKEN?.trim() || null,

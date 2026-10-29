@@ -1,25 +1,34 @@
 /**
  * The real-money test suite of algo orders and copy trading, on SoDEX mainnet,
- * through a real local executor. See README.md in this folder.
+ * through a real executor. See README.md in this folder.
  *
  *   npx tsx apps/executor/tools/live-test/run.ts --budget      what it costs; nothing is signed
  *   npx tsx apps/executor/tools/live-test/run.ts --dry         the whole suite on paper (no funds, no keys)
  *   npx tsx apps/executor/tools/live-test/run.ts               the live run (resumes where it stopped)
  *
- * Options: --only <ids,kinds,sections,prefix.*>  --force  --slow  --adopt
- *          --env <file> (default .env.live here)  --keep-data  --help
+ * Options: --target self|hosted|browser (default self)  --only <ids,kinds,sections,prefix.*>
+ *          --force  --slow  --adopt  --env <file> (default .env.live here)  --keep-data  --help
+ *
+ * THE TARGET (target.ts) is the executor the scenarios run against: self, an
+ * executor process started here from this checkout (what the suite always
+ * did); hosted, ValueDesk's own executor through the site; browser, the web
+ * app's runtime through the web test bridge (not here yet). A scenario that
+ * needs what a target cannot do (a hard restart of ValueDesk's executor) is
+ * skipped there, with why. Each target keeps its own state file.
  *
  * ORDER OF A RUN. Read SoDEX's market rules and book and pick the cheapest of
  * BTC-USD and ETH-USD; print the budget. (Live:) check the env file, the
- * wallets' SoDEX accounts and that they hold enough; stop an executor a
- * crashed run left behind; register the harness's own key on each wallet; the
- * START-UP CLEANUP (cleanup.ts) - flatten what a crashed run left, refuse what
- * this runner never sent. Start the executor. Then each scenario in catalogue
- * order: skip what passed on this code, mark it running (saved), run it with
- * its timeout, and ALWAYS clean up after it - executor kill switch, every copy
- * stopped and closed, every order cancelled and position closed on SoDEX,
- * read back flat - before the next one starts. A cleanup that cannot read the
- * accounts flat stops the run with the exposure flag set.
+ * region (the declared country, and the one the target sees), that no other
+ * target's run left the wallets exposed, the wallets' SoDEX accounts and that
+ * they hold enough; stop an executor a crashed run left behind; register the
+ * harness's own key on each wallet; the START-UP CLEANUP (cleanup.ts) -
+ * flatten what a crashed run left, refuse what this runner never sent. Start
+ * the target. Then each scenario in catalogue order: skip what passed on this
+ * code, mark it running (saved), run it with its timeout, and ALWAYS clean up
+ * after it - executor kill switch, every copy stopped and closed, every order
+ * cancelled and position closed on SoDEX, read back flat - before the next one
+ * starts. A cleanup that cannot read the accounts flat stops the run with the
+ * exposure flag set.
  *
  * Ctrl+C once: the running scenario is abandoned, the cleanup runs, the state
  * is saved, the runner exits. Twice: it exits at once; the next start flattens.
@@ -29,17 +38,18 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { secp256k1 } from '@noble/curves/secp256k1';
 import { bytesToHex, hexToBytes, keccak256, utf8 } from '../../../../packages/sodex-core/src/index.ts';
-import { COPY_FEE_MAX, COPY_TERMS_VERSION, canonicalJSON, regionPolicy, type MarketInfo } from '../../../../packages/copy-engine/src/index.ts';
+import { COPY_FEE_MAX, COPY_TERMS_VERSION, canonicalJSON, copyFeeFor, regionPolicy, type MarketInfo } from '../../../../packages/copy-engine/src/index.ts';
 import { computeBudget, formatBudget, pickMarket } from './budget.ts';
 import { CATALOGUE, countByKind } from './catalogue.ts';
 import { flatten, startDecision, type FlattenVenue } from './cleanup.ts';
 import { egress } from '../../src/net.ts';
 import { SodexReads, SodexWallet } from './exchange.ts';
-import { CopyWallet, ExecutorClient, ExecutorProcess } from './executor.ts';
+import { CopyWallet, ExecutorProcess } from './executor.ts';
 import { CheckFailed, Inconclusive, T, Unavailable, type Env } from './harness.ts';
 import { CodeHashes } from './hash.ts';
 import type { Scenario } from './scenario.ts';
-import { decide, loadState, markDone, markRunning, noteRun, saveState, selected, type Mode, type RunState } from './state.ts';
+import { decide, exposedOn, loadState, markDone, markRunning, noteRun, saveState, selected, stateFileOf, type Mode, type RunState } from './state.ts';
+import { BrowserTarget, CAPABILITIES, HostedTarget, SelfTarget, TARGETS, cannotRun, targetName, type ExecutorTarget, type TargetName } from './target.ts';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..', '..', '..', '..');
@@ -55,12 +65,16 @@ interface Args {
   keepData: boolean;
   only: string[] | null;
   envFile: string;
+  target: TargetName;
 }
 
 const HELP = `live-test: algo orders and copy trading with real money on SoDEX mainnet (README.md)
 
   --budget        print what the suite costs and stop (no keys needed, nothing signed)
   --dry           run every scenario on paper against live data (throwaway wallets, no funds)
+  --target <t>    the executor the scenarios run against: self (default: one started here from this
+                  checkout), hosted (ValueDesk's executor, through www.valuedesk.so), browser (the web
+                  app's runtime, through the web test bridge)
   --only <list>   comma-separated ids (twap.taker-buy), prefixes (twap.*), kinds (twap) or sections (algo, copy)
   --force         run even what passed on this code
   --slow          include the slow scenarios (vwap.full, copy.tp-fires)
@@ -70,7 +84,7 @@ const HELP = `live-test: algo orders and copy trading with real money on SoDEX m
 `;
 
 function parseArgs(argv: string[]): Args {
-  const a: Args = { dry: false, budget: false, force: false, slow: false, adopt: false, keepData: false, only: null, envFile: join(HERE, '.env.live') };
+  const a: Args = { dry: false, budget: false, force: false, slow: false, adopt: false, keepData: false, only: null, envFile: join(HERE, '.env.live'), target: 'self' };
   for (let i = 0; i < argv.length; i++) {
     const x = argv[i]!;
     if (x === '--dry') a.dry = true;
@@ -81,6 +95,7 @@ function parseArgs(argv: string[]): Args {
     else if (x === '--keep-data') a.keepData = true;
     else if (x === '--only') a.only = (argv[++i] ?? '').split(',').map((s) => s.trim()).filter(Boolean);
     else if (x === '--env') a.envFile = resolve(argv[++i] ?? '');
+    else if (x === '--target') a.target = targetName(argv[++i]);
     else if (x === '--help' || x === '-h') {
       process.stdout.write(HELP);
       process.exit(0);
@@ -115,8 +130,8 @@ async function termsHash(): Promise<string> {
 
 const log = (s: string) => process.stdout.write(`${s}\n`);
 
-/** The executor this run started: killed on any way out, so no executor outlives the runner. */
-let started: ExecutorProcess | null = null;
+/** The target this run started: stopped on any way out, so no executor process outlives the runner. */
+let started: ExecutorTarget | null = null;
 
 function pidAlive(pid: number): boolean {
   try {
@@ -156,10 +171,24 @@ async function stopStale(state: RunState): Promise<void> {
   state.executor = null;
 }
 
+/** The target's executor, its client signed by the follower's wallet. Self: a new data folder every run (nothing of a crashed run is resumed by it). */
+function makeTarget(name: TargetName, o: { mode: Mode; owner: string; wallet: CopyWallet; stamp: string }): ExecutorTarget {
+  if (name === 'hosted') return new HostedTarget(o.wallet, o.mode);
+  if (name === 'browser') return new BrowserTarget(o.mode);
+  const proc = new ExecutorProcess({
+    mode: o.mode,
+    owner: o.owner,
+    dataDir: join(STATE_DIR, `executor-${o.mode}-${o.stamp}`),
+    logFile: join(STATE_DIR, `executor-${o.mode}-${o.stamp}.log`),
+    executorId: `vd-livetest-${o.mode}`,
+  });
+  return new SelfTarget(proc, o.wallet, o.mode);
+}
+
 async function main(): Promise<number> {
   const args = parseArgs(process.argv.slice(2));
   const mode: Mode = args.dry ? 'dry' : 'live';
-  const stateFile = join(STATE_DIR, `${mode}.json`);
+  const caps = CAPABILITIES[args.target];
   const reads = new SodexReads(egress(null).fetch);
 
   // Markets and the book: the cheapest of the candidates is the main one, the other carries basket legs.
@@ -176,30 +205,34 @@ async function main(): Promise<number> {
   log(`main market ${main.name} (taker + half spread ${pick.costBps.toFixed(2)} bp), second ${second.name}, child order $${U}`);
 
   const env = { ...readEnvFile(args.envFile), ...Object.fromEntries(Object.entries(process.env).filter(([k]) => k.startsWith('LIVE_')) as Array<[string, string]>) };
-  const country = (env.LIVE_COUNTRY ?? (args.dry ? 'SG' : '')).trim().toUpperCase();
-  const policy = regionPolicy(country || null);
+  // An empty LIVE_COUNTRY= (the env file's template) is none: a dry run then declares SG.
+  const country = (env.LIVE_COUNTRY?.trim() || (args.dry ? 'SG' : '')).toUpperCase();
   // --budget costs the whole suite, leader included; a live run without a leader key skips the copy scenarios.
   const hasLeader = args.dry || args.budget || !!env.LIVE_LEADER_KEY;
 
   const list = CATALOGUE.filter((s) => (args.slow || !s.slow) && (s.always || selected(args.only, s)));
-  const budget = computeBudget(list.filter((s) => !s.leader || hasLeader), { main, book: pick.book, U, builderRate: COPY_FEE_MAX / 100_000, leverage: 2 });
+  // What the target cannot do (a hard restart of ValueDesk's executor) is skipped there: not costed.
+  const lacking = list.filter((s) => cannotRun(s, args.target, caps));
+  const budget = computeBudget(list.filter((s) => (!s.leader || hasLeader) && !lacking.includes(s)), {
+    main,
+    book: pick.book,
+    U,
+    builderRate: COPY_FEE_MAX / 100_000,
+    builderWhy: caps.localFeeStub ? undefined : 'the copy ladder\'s top step, the most it charges: ValueDesk\'s executor charges the step of the follower\'s 14-day volume',
+    leverage: 2,
+  });
   log('');
   log(formatBudget(budget));
   log('');
   for (const c of countByKind(list)) log(`  ${c.section.padEnd(6)} ${c.kind.padEnd(12)} ${c.n}`);
-  log(`  ${list.length} scenarios selected${args.slow ? '' : ' (slow ones left out; --slow adds them)'}`);
+  log(`  ${list.length} scenarios selected${args.slow ? '' : ' (slow ones left out; --slow adds them)'}, target ${args.target}`);
+  for (const s of lacking) log(`  - ${s.id} is skipped on this target: ${cannotRun(s, args.target, caps)}`);
   if (args.budget) return 0;
 
-  if (!policy.allowed && !args.dry) throw new Error(`LIVE_COUNTRY=${country || '(missing)'}: ${policy.reason ?? 'copying is not allowed there'}`);
+  if (caps.paperOnly && !args.dry) throw new Error(`The ${args.target} target runs paper only for now: use --dry.`);
   if (!args.dry && env.LIVE_ACCEPT_TERMS !== COPY_TERMS_VERSION) {
     throw new Error(`The runner signs the copy terms ${COPY_TERMS_VERSION} in your name. Read them (ValueDesk -> Copy -> terms, or apps/web/src/legal/copyTerms.ts) and set LIVE_ACCEPT_TERMS=${COPY_TERMS_VERSION} in ${args.envFile}.`);
   }
-
-  const { state, report } = loadState(stateFile, mode);
-  if (report.corrupt) log(`! the state file could not be read: ${report.corrupt}; treating the account as exposed`);
-  for (const id of report.interrupted) log(`! ${id} was interrupted by a crash: it is failed and runs again; the start-up cleanup flattens first`);
-  await stopStale(state);
-  saveState(stateFile, state);
 
   // Wallets: live, the owner's two; dry, throwaway keys that never touch SoDEX.
   const fpk = args.dry ? secp256k1.utils.randomPrivateKey() : privateKey(env.LIVE_FOLLOWER_KEY, 'LIVE_FOLLOWER_KEY');
@@ -209,7 +242,33 @@ async function main(): Promise<number> {
   const followerAddress = followerW?.address ?? new CopyWallet(fpk).address;
   const leaderAddress = leaderW?.address ?? (lpk ? new CopyWallet(lpk).address : '0x0000000000000000000000000000000000000001');
   if (leaderW && leaderW.address === followerAddress) throw new Error('LIVE_LEADER_KEY and LIVE_FOLLOWER_KEY are the same wallet: the leader must be a second wallet');
-  log(`follower ${followerAddress}${leaderW || args.dry ? `, leader ${leaderAddress}` : ' (no leader key: copy scenarios are skipped)'}, country ${country} (${policy.region}${policy.maxLeverage ? `, ${policy.maxLeverage}x cap` : ''}), mode ${mode}`);
+
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const target = makeTarget(args.target, { mode, owner: followerAddress, wallet: new CopyWallet(fpk), stamp });
+  started = target;
+
+  // The region rule is the stricter of the declared country and the one the target sees the requests come from (ValueDesk's: its edge's).
+  const observed = await target.observedCountry();
+  const policy = regionPolicy(country || null, observed);
+  if (!policy.allowed && !args.dry) throw new Error(`LIVE_COUNTRY=${country || '(missing)'}${observed ? `, seen from ${observed}` : ''}: ${policy.reason ?? 'copying is not allowed there'}`);
+
+  // One target at a time per wallet: a run on another target that may have left orders or positions on these wallets stops this one.
+  if (mode === 'live') {
+    for (const other of TARGETS) {
+      if (other === args.target) continue;
+      const why = exposedOn(stateFileOf(STATE_DIR, mode, other), followerAddress);
+      if (why) throw new Error(`The last run on the ${other} target may have left orders or positions on these wallets: ${why}. Run --target ${other} again first (its start-up cleanup flattens them), or close them on sodex.com and run it once to clear its record.`);
+    }
+  }
+
+  const stateFile = stateFileOf(STATE_DIR, mode, args.target);
+  const { state, report } = loadState(stateFile, mode, Date.now(), args.target);
+  if (report.corrupt) log(`! the state file could not be read: ${report.corrupt}; treating the account as exposed`);
+  for (const id of report.interrupted) log(`! ${id} was interrupted by a crash: it is failed and runs again; the start-up cleanup flattens first`);
+  state.follower = followerAddress;
+  await stopStale(state);
+  saveState(stateFile, state);
+  log(`follower ${followerAddress}${leaderW || args.dry ? `, leader ${leaderAddress}` : ' (no leader key: copy scenarios are skipped)'}, country ${country}${observed && observed !== country ? ` (seen from ${observed})` : ''} (${policy.region}${policy.maxLeverage ? `, ${policy.maxLeverage}x cap` : ''}), mode ${mode}, target ${target.name}`);
 
   const venues: FlattenVenue[] = [];
   if (followerW) {
@@ -244,18 +303,15 @@ async function main(): Promise<number> {
     }
   }
 
-  // The executor: a new data folder every run (nothing of a crashed run is resumed by it).
-  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const dataDir = join(STATE_DIR, `executor-${mode}-${stamp}`);
-  const executorId = `vd-livetest-${mode}`;
-  const proc = new ExecutorProcess({ mode, owner: followerAddress, dataDir, logFile: join(STATE_DIR, `executor-${mode}-${stamp}.log`), executorId });
-  started = proc;
-  await proc.start();
-  state.executor = { pid: proc.pid ?? 0, port: proc.port, executorId, dataDir, startedAt: Date.now() };
+  // The target: self starts its executor process here; hosted reads ValueDesk's /info and /health.
+  await target.start();
+  state.executor = target.processRecord();
   saveState(stateFile, state);
-  const exec = new ExecutorClient(proc, new CopyWallet(fpk), executorId, mode);
-  const info = await exec.info();
-  log(`executor ${info.executorId} v${info.version} on ${proc.base} (log ${proc.o.logFile})`);
+  const info = await target.info();
+  log(`executor ${info.executorId} v${info.version} on ${target.where}`);
+  if (!info.open) log('! it takes no new followers right now: what needs a new copy is inconclusive');
+  if (info.brake) log(`! the operator's brake is on (${[info.brake.copies ? 'copies' : '', info.brake.algos ? 'algos' : ''].filter(Boolean).join(', ')}): ${info.brake.reason}. What it holds is inconclusive.`);
+  const ladder = (info.builder?.ladder ?? []).map((s) => s.fee);
 
   const henv: Env = {
     mode,
@@ -264,13 +320,15 @@ async function main(): Promise<number> {
     leader: leaderW,
     followerAddress,
     leaderAddress,
-    exec,
-    proc,
+    target,
     regionMaxLeverage: policy.maxLeverage,
     country,
     termsHash: await termsHash(),
     builderId: info.builder?.id ?? 0,
-    builderFee: COPY_FEE_MAX,
+    builderFee: ladder.length ? Math.max(...ladder) : COPY_FEE_MAX,
+    builderLadder: ladder,
+    // A local executor reads no follower volume: its orders carry the ladder's first step. ValueDesk's reads it from its own ledger.
+    orderFee: caps.localFeeStub && info.builder ? copyFeeFor(null, info.builder.ladder) : null,
     main,
     second,
     childUsd: U,
@@ -291,16 +349,17 @@ async function main(): Promise<number> {
     abandon?.(new Error('stopped by Ctrl+C'));
   });
 
-  const hashes = new CodeHashes(REPO);
+  const hashes = new CodeHashes(REPO, { name: target.name, release: target.release(info) });
   const tally = { passed: 0, failed: 0, skipped: 0, inconclusive: 0, ran: 0 };
   let stopRun: string | null = null;
 
   const cleanup = async (): Promise<boolean> => {
-    if (!proc.running) {
+    const up = await target.health();
+    if (!up.ok && target.capabilities.restart) {
       log('  the executor is not running: starting it again for the cleanup');
-      await proc.start().catch((e) => log(`  ! could not start it: ${String(e)}`));
-    }
-    if (proc.running) await exec.stopEverything();
+      await target.start().catch((e) => log(`  ! could not start it: ${String(e)}`));
+    } else if (!up.ok) log(`  ! ${target.where} does not answer (${up.why ?? ''}): its kill switch is tried anyway`);
+    await target.stopEverything();
     if (!venues.length) return true;
     await new Promise((r) => setTimeout(r, 2_000));
     const r = await flatten(venues, [main.name, second.name]);
@@ -321,6 +380,13 @@ async function main(): Promise<number> {
       markDone(state, s.id, 'skipped', { error: 'no LIVE_LEADER_KEY in the env file' });
       tally.skipped += 1;
       log(`- ${s.id}: skipped (no leader key)`);
+      continue;
+    }
+    const lacks = cannotRun(s, target.name, target.capabilities);
+    if (lacks) {
+      markDone(state, s.id, 'skipped', { error: lacks });
+      tally.skipped += 1;
+      log(`- ${s.id}: skipped (${lacks})`);
       continue;
     }
     log(`\n> ${s.id}: ${s.title} [${d.why}]`);
@@ -371,22 +437,22 @@ async function main(): Promise<number> {
     saveState(stateFile, state);
     tally[status === 'passed' ? 'passed' : status === 'failed' ? 'failed' : status === 'skipped' ? 'skipped' : 'inconclusive'] += 1;
     log(`< ${s.id}: ${status.toUpperCase()} (${t.checks.passed} checks${t.checks.liveOnly ? `, ${t.checks.liveOnly} live-only not checked` : ''}${feesUsd !== null ? `, fees $${feesUsd.toFixed(4)}` : ''})${error ? `: ${error}` : ''}`);
-    if (s.always && status === 'failed') stopRun = `the bootstrap step ${s.id} failed`;
+    // The bootstrap is what every other scenario stands on: if it did not pass (failed, or the target refused it), nothing else runs.
+    if (s.always && status !== 'passed') stopRun = `the bootstrap step ${s.id} ${status === 'failed' ? 'failed' : `did not pass (${status})`}`;
   }
 
   // The end: nothing left running, nothing left on SoDEX, the executor stopped.
   await cleanup().catch(() => false);
-  await proc.kill();
-  proc.close();
+  await target.stop();
   state.executor = null;
-  if (!args.keepData) {
+  if (target.dataDir && !args.keepData) {
     try {
-      rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+      rmSync(target.dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
     } catch {
-      log(`(the executor's data folder ${dataDir} could not be removed; delete it yourself)`);
+      log(`(the executor's data folder ${target.dataDir} could not be removed; delete it yourself)`);
     }
   }
-  noteRun(state, { at: Date.now(), codeHash: hashes.all(), selected: list.length, passed: tally.passed, failed: tally.failed, skipped: tally.skipped });
+  noteRun(state, { at: Date.now(), target: target.name, codeHash: hashes.all(), selected: list.length, passed: tally.passed, failed: tally.failed, skipped: tally.skipped });
   saveState(stateFile, state);
 
   log('\nRESULTS');
@@ -405,7 +471,7 @@ main().then(
   (code) => process.exit(code),
   async (e) => {
     process.stderr.write(`\n${e instanceof Error ? e.message : String(e)}\n`);
-    await started?.kill().catch(() => undefined);
+    await started?.stop().catch(() => undefined);
     process.exit(1);
   },
 );

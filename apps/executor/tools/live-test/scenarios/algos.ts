@@ -62,10 +62,10 @@ export const ALGO_SCENARIOS: Scenario[] = [
       await nothingResting(t, v.algo.id);
       await positionIs(t, v.algo.filled, 'after the TWAP');
       t.check(v.algo.children.every((c) => c.tif === 'ioc'), 'every slice went out as an IOC');
-      await t.live('every child order carried the builder at 2.5 bp', async () => {
+      await t.live(`every child order carried the builder at ${t.feeText}`, async () => {
         const mine = (await t.account.history(t.main.name)).filter((o) => o.clOrdID?.startsWith(`va-${v.algo.id.slice(1, 13)}-`));
         t.check(mine.length >= 3, `SoDEX lists the ${mine.length} slices`);
-        t.check(mine.every((o) => o.builderFee === 25), 'each order names the builder fee 25 (2.5 bp)', mine.map((o) => o.builderFee));
+        t.checkOrderFees(mine);
       });
       await t.checkBuilderFee(await t.algoFills(v.algo.id));
     },
@@ -203,6 +203,7 @@ export const ALGO_SCENARIOS: Scenario[] = [
     },
   }),
   algo('twap.restart', 'twap', 'TWAP with the executor killed mid-schedule', 'after a hard kill and restart the schedule finishes to the exact quantity: no child sent twice, no overfill', {
+    needs: ['restart'],
     timeoutMs: 6 * MIN,
     cost: (U) => ({ takerUsd: 8 * U, makerUsd: 0, peakUsd: 4 * U }),
     async run(t) {
@@ -327,6 +328,7 @@ export const ALGO_SCENARIOS: Scenario[] = [
     },
   }),
   algo('iceberg.restart', 'iceberg', 'Iceberg resting away from the market, executor killed and restarted', 'the clip resting on SoDEX through the restart is the same order afterwards, tracked, not placed twice; a cancel pulls it', {
+    needs: ['restart'],
     timeoutMs: 4 * MIN,
     cost: (U) => ({ takerUsd: 0, makerUsd: 0, peakUsd: 2 * U }),
     async run(t) {
@@ -442,6 +444,7 @@ export const ALGO_SCENARIOS: Scenario[] = [
     },
   }),
   algo('scale.restart', 'scale', 'Scale ladder resting, executor killed and restarted', 'the resting levels survive the restart on SoDEX, the executor tracks them, and none is placed twice', {
+    needs: ['restart'],
     timeoutMs: 3 * MIN,
     cost: (U) => ({ takerUsd: 0, makerUsd: 0, peakUsd: 3 * U }),
     async run(t) {

@@ -1,7 +1,9 @@
 /**
- * The live test's memory: one JSON file per mode (.state/live.json,
- * .state/dry.json), so a practice run can never mark a real-money scenario
- * passed.
+ * The live test's memory: one JSON file per mode and target
+ * (.state/live-self.json, .state/dry-hosted.json, ...), so a practice run can
+ * never mark a real-money scenario passed, and a pass on one executor never
+ * stands for another. A self state from before targets (.state/live.json) is
+ * renamed to its new name the first time (stateFileOf).
  *
  * CRASH SAFETY. The file is written whole to a temporary file and renamed over
  * the old one, so a crash mid-write leaves the previous version, never half a
@@ -14,11 +16,16 @@
  * the account is treated as exposed too: unknown is never read as flat.
  *
  * RESUME. A scenario that passed on the same code (its hash: the engine and
- * executor files it depends on, and the harness itself) in the same mode is
- * skipped; failed, inconclusive, interrupted and never-run ones run.
+ * executor files it depends on, and the harness itself) in the same mode on the
+ * same target is skipped; failed, inconclusive, interrupted and never-run ones run.
+ *
+ * ONE TARGET AT A TIME PER WALLET. A live start reads the other targets' files
+ * too (exposedOn): if one says the follower's account may be exposed there, it
+ * refuses - that target's own next run flattens it first.
  */
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync, unlinkSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { dirname, join } from 'node:path';
+import type { TargetName } from './target.ts';
 
 export type Mode = 'live' | 'dry';
 
@@ -48,6 +55,8 @@ export interface ScenarioResult {
 }
 
 export interface ExecutorRecord {
+  /** The target that started it (only self starts a process). */
+  target: TargetName;
   pid: number;
   port: number;
   executorId: string;
@@ -58,16 +67,38 @@ export interface ExecutorRecord {
 export interface RunState {
   version: 1;
   mode: Mode;
+  /** The executor the scenarios ran against (target.ts); a file from before targets is self's. */
+  target: TargetName;
+  /** The follower wallet of the last run (a state of another wallet does not block this one: exposedOn). */
+  follower: string | null;
   scenarios: Record<string, ScenarioResult>;
   /** Set while live orders may be on SoDEX (from the first order of a scenario to a cleanup that read the accounts flat). */
   exposure: { since: number; by: string } | null;
   /** The executor process this runner started, so a crashed run's executor can be found and stopped. */
   executor: ExecutorRecord | null;
   /** The last runs, newest last (at most 50). */
-  runs: Array<{ at: number; codeHash: string; selected: number; passed: number; failed: number; skipped: number }>;
+  runs: Array<{ at: number; target: TargetName; codeHash: string; selected: number; passed: number; failed: number; skipped: number }>;
 }
 
-export const emptyState = (mode: Mode): RunState => ({ version: 1, mode, scenarios: {}, exposure: null, executor: null, runs: [] });
+export const emptyState = (mode: Mode, target: TargetName = 'self'): RunState => ({ version: 1, mode, target, follower: null, scenarios: {}, exposure: null, executor: null, runs: [] });
+
+/**
+ * The state file of a mode on a target: <dir>/<mode>-<target>.json. A self
+ * state from before targets (<dir>/<mode>.json) is renamed to it the first
+ * time, so what passed there still counts; if the rename is refused, the old
+ * name is read (never an empty state in place of one that may record exposure).
+ */
+export function stateFileOf(dir: string, mode: Mode, target: TargetName): string {
+  const file = join(dir, `${mode}-${target}.json`);
+  const old = join(dir, `${mode}.json`);
+  if (target !== 'self' || existsSync(file) || !existsSync(old)) return file;
+  try {
+    renameSync(old, file);
+    return file;
+  } catch {
+    return old;
+  }
+}
 
 export const emptyResult = (): ScenarioResult => ({ status: 'pending', hash: null, startedAt: null, endedAt: null, attempts: 0, error: null, checks: { passed: 0, liveOnly: 0 }, notes: [], feesUsd: null });
 
@@ -79,18 +110,19 @@ export interface LoadReport {
 
 /**
  * Read the state, repairing what a crash left: `running` becomes `failed`
- * (interrupted) and sets the exposure flag; an unreadable file is moved to
- * `<file>.corrupt-<time>` and an empty state with the exposure flag set is
- * returned.
+ * (interrupted) and sets the exposure flag; an unreadable file (or another
+ * mode's or target's) is moved to `<file>.corrupt-<time>` and an empty state
+ * with the exposure flag set is returned.
  */
-export function loadState(file: string, mode: Mode, now = Date.now()): { state: RunState; report: LoadReport } {
+export function loadState(file: string, mode: Mode, now = Date.now(), target: TargetName = 'self'): { state: RunState; report: LoadReport } {
   const report: LoadReport = { interrupted: [], corrupt: null };
-  if (!existsSync(file)) return { state: emptyState(mode), report };
+  if (!existsSync(file)) return { state: emptyState(mode, target), report };
   let state: RunState;
   try {
     const raw = JSON.parse(readFileSync(file, 'utf8')) as Partial<RunState>;
     if (raw.version !== 1 || raw.mode !== mode || !raw.scenarios || typeof raw.scenarios !== 'object') throw new Error('not a live-test state file of this mode');
-    state = { ...emptyState(mode), ...raw, scenarios: { ...raw.scenarios } } as RunState;
+    if ((raw.target ?? 'self') !== target) throw new Error(`a state file of the ${raw.target} target, not ${target}`);
+    state = { ...emptyState(mode, target), ...raw, scenarios: { ...raw.scenarios } } as RunState;
   } catch (e) {
     const aside = `${file}.corrupt-${now}`;
     try {
@@ -99,10 +131,12 @@ export function loadState(file: string, mode: Mode, now = Date.now()): { state: 
       /* left where it is; it is overwritten by the next save */
     }
     report.corrupt = `${String(e instanceof Error ? e.message : e)} (kept as ${aside})`;
-    const fresh = emptyState(mode);
+    const fresh = emptyState(mode, target);
     fresh.exposure = { since: now, by: 'unreadable state file' };
     return { state: fresh, report };
   }
+  state.runs = (state.runs ?? []).map((r) => ({ ...r, target: r.target ?? target }));
+  if (state.executor) state.executor = { ...state.executor, target: state.executor.target ?? target };
   for (const [id, r] of Object.entries(state.scenarios)) {
     const full = { ...emptyResult(), ...r };
     if (full.status === 'running') {
@@ -115,6 +149,28 @@ export function loadState(file: string, mode: Mode, now = Date.now()): { state: 
     state.scenarios[id] = full;
   }
   return { state, report };
+}
+
+/**
+ * Whether another target's state file (read as it is: nothing repaired, nothing
+ * moved) says the follower's account may be exposed there - an exposure
+ * recorded, a scenario a crash left running, or a file that cannot be read
+ * (unknown is never flat). A state of another follower wallet does not count.
+ * Returns why, or null.
+ */
+export function exposedOn(file: string, follower: string): string | null {
+  if (!existsSync(file)) return null;
+  let raw: Partial<RunState>;
+  try {
+    raw = JSON.parse(readFileSync(file, 'utf8')) as Partial<RunState>;
+  } catch {
+    return `its state file ${file} cannot be read`;
+  }
+  if (raw.follower && raw.follower.toLowerCase() !== follower.toLowerCase()) return null;
+  if (raw.exposure) return `it recorded orders or positions that may still be out, since ${new Date(raw.exposure.since).toISOString()} (${raw.exposure.by})`;
+  const running = Object.entries(raw.scenarios ?? {}).filter(([, r]) => r?.status === 'running').map(([id]) => id);
+  if (running.length) return `${running.join(', ')} was left running by a crash`;
+  return null;
 }
 
 /** Write the whole state atomically (temporary file, then rename over the old one). */

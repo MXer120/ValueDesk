@@ -75,7 +75,7 @@ import {
   type WebSocketFactory,
 } from '../../../packages/copy-engine/src/index.ts';
 import { SODEX_CHAIN_ID, createMemoryNonceManager, privateKeyToAddress, type SigningKeyRef } from '../../../packages/sodex-core/src/index.ts';
-import type { ExecutorConfig } from './config.ts';
+import { liveAlgosFor, type ExecutorConfig } from './config.ts';
 import { sqlite, type ExecutorDb, type KeyRow } from './db.ts';
 import { auditedAlgoSink, auditedOrderSink } from './audited.ts';
 import { Brake, type BrakeState } from './brake.ts';
@@ -920,9 +920,9 @@ export class ExecutorService {
     if (live.length + adds > this.cfg.maxAlgosPerOwner) {
       throw new ApiError(429, 'limit', adds > 1 ? `At most ${this.cfg.maxAlgosPerOwner} algo orders run at once here, and this basket runs ${adds} (itself and one per market). ${live.length ? 'Cancel one first, or use fewer markets.' : 'Use fewer markets.'}` : `At most ${this.cfg.maxAlgosPerOwner} algo orders run at once here. Cancel one first.`);
     }
-    // Real orders are off unless this executor is set to take them (EXECUTOR_LIVE_ALGOS=1) - for the
-    // algo itself and for one a conditional would start.
-    if (!this.cfg.liveAlgos && specsOf(spec, payload.spec).some((x) => !x.paper)) throw new ApiError(403, 'paper-only', 'Real algo orders are off for now. Turn on Practice run to try one against the live market.');
+    // Real orders are off unless this executor is set to take them from every wallet (EXECUTOR_LIVE_ALGOS=1)
+    // or from this one (EXECUTOR_LIVE_ALGOS_WALLETS) - for the algo itself and for one a conditional would start.
+    if (!liveAlgosFor(this.cfg, owner) && specsOf(spec, payload.spec).some((x) => !x.paper)) throw new ApiError(403, 'paper-only', 'Real algo orders are off for now. Turn on Practice run to try one against the live market.');
     let accountId = 0;
     if (!spec.paper) {
       this.needNoBrake('algos');

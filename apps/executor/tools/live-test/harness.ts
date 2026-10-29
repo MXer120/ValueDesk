@@ -1,8 +1,9 @@
 /**
- * What a scenario has to work with: the executor (signed requests, a hard
- * restart), the follower's account as SoDEX reports it, the leader wallet the
- * harness trades itself, sizes derived from SoDEX's own market rules, and
- * checks that are counted and named.
+ * What a scenario has to work with: the executor of the run's target
+ * (target.ts: signed requests, a hard restart where the target allows one), the
+ * follower's account as SoDEX reports it, the leader wallet the harness trades
+ * itself, sizes derived from SoDEX's own market rules, and checks that are
+ * counted and named.
  *
  * ONE SCENARIO, TWO MODES. A live run reads every check from SoDEX. A dry run
  * (--dry) sends the same specs with `paper: true` to an executor whose real
@@ -14,7 +15,7 @@
  */
 import type { AlgoView, CopyView, MarketInfo } from '../../../../packages/copy-engine/src/index.ts';
 import type { FillInfo, OrderInfo, SodexReads, SodexWallet } from './exchange.ts';
-import type { ExecutorClient, ExecutorProcess } from './executor.ts';
+import type { ExecutorApi, ExecutorTarget } from './target.ts';
 
 /** The market did not do what the scenario waited for (a price never reached in time): run it again later. */
 export class Inconclusive extends Error {
@@ -38,17 +39,25 @@ export interface Env {
   leader: SodexWallet | null;
   followerAddress: string;
   leaderAddress: string;
-  exec: ExecutorClient;
-  proc: ExecutorProcess;
-  /** The leverage ceiling of the declared country (EEA: 2), null = none. */
+  /** The executor the scenarios run against (--target): its API, and what the runner can do to it. */
+  target: ExecutorTarget;
+  /** The leverage ceiling of the region (the stricter of the declared country and the one the target sees; EEA: 2), null = none. */
   regionMaxLeverage: number | null;
   /** The country of residence the owner declares with the terms (the env file). */
   country: string;
   /** keccak256 of the copy terms text the web app shows (apps/web/src/legal/copyTerms.ts). */
   termsHash: string;
-  /** The builder the executor's orders carry, and the fee ceiling the follower must approve (tenths of a bp). */
+  /** The builder the executor's orders carry, and the fee ceiling the follower must approve (tenths of a bp: the ladder's top step). */
   builderId: number;
   builderFee: number;
+  /** The steps of the executor's copy fee ladder (its /info), tenths of a bp. */
+  builderLadder: number[];
+  /**
+   * The fee its orders carry, where it is known here: a local executor reads no follower volume, so
+   * the ladder's first step. null: the step of a volume only the executor knows (ValueDesk's own) -
+   * any step of the ladder is accepted, the same on every order, and noted.
+   */
+  orderFee: number | null;
   main: MarketInfo;
   second: MarketInfo;
   /** USD per child order: SoDEX's minimum plus headroom, so a price move during the scenario keeps it above the minimum. */
@@ -100,7 +109,7 @@ class PaperAccount implements Account {
   ) {}
 
   private async mine(): Promise<AlgoView[]> {
-    return (await this.env.exec.algos()).filter((v) => v.algo.createdAt >= this.since - 1_000);
+    return (await this.env.target.algos()).filter((v) => v.algo.createdAt >= this.since - 1_000);
   }
 
   async position(symbol: string): Promise<number> {
@@ -111,7 +120,7 @@ class PaperAccount implements Account {
       size += signOf(s.side) * v.algo.filled;
       for (const x of v.exits ?? []) size -= signOf(s.side) * x.filled;
     }
-    for (const c of (await this.env.exec.me()).copies) {
+    for (const c of (await this.env.target.me()).copies) {
       if (c.subscription.createdAt < this.since - 1_000) continue;
       for (const p of c.positions) if (p.symbol === symbol) size += p.size;
     }
@@ -139,7 +148,7 @@ class PaperAccount implements Account {
     const out: FillInfo[] = [];
     for (const v of await this.mine()) {
       if (v.algo.spec.symbol !== symbol) continue;
-      for (const e of await this.env.exec.events(v.algo.id, 500)) {
+      for (const e of await this.env.target.events(v.algo.id, 500)) {
         if (e.kind !== 'fill' || !e.qty || !e.price) continue;
         out.push({ clOrdID: e.clOrdID, orderId: e.clOrdID ?? '', side: e.side ?? v.algo.spec.side, price: e.price, qty: e.qty, fee: 0, builderFee: 0, maker: false, time: e.at });
       }
@@ -174,6 +183,8 @@ export class T {
   /** Algos and copies this scenario started (the cleanup stops them first). */
   readonly algos: string[] = [];
   readonly copies: string[] = [];
+  /** The builder fee SoDEX showed on this scenario's orders, where it is not known beforehand (checkOrderFees). */
+  feeRate: number | null = null;
   /**
    * Set by the runner when it stops waiting for this scenario (its timeout, Ctrl+C): the scenario's
    * code may still be running, but from then on it can place nothing - every action throws - so the
@@ -200,8 +211,8 @@ export class T {
   get where(): string {
     return this.dry ? 'the paper book' : 'SoDEX';
   }
-  get exec(): ExecutorClient {
-    return this.env.exec;
+  get exec(): ExecutorApi {
+    return this.env.target;
   }
   get main(): MarketInfo {
     return this.env.main;
@@ -246,7 +257,8 @@ export class T {
     let last: unknown = null;
     for (;;) {
       this.alive();
-      if (this.env.proc.exited) throw new CheckFailed(`the executor process exited (code ${this.env.proc.exited.code}) while waiting for: ${what}`);
+      const gone = this.env.target.gone();
+      if (gone) throw new CheckFailed(`${gone} while waiting for: ${what}`);
       try {
         const v = await fn();
         if (v) {
@@ -343,13 +355,47 @@ export class T {
     return (await this.account.fills(symbol)).filter((f) => f.clOrdID?.startsWith(p));
   }
 
-  /** Every builder fee SoDEX charged on these fills is the copy ladder's top step (2.5 bp) of their value, within rounding. */
-  async checkBuilderFee(fills: FillInfo[], rateTenthsBp = 25): Promise<void> {
-    await this.live(`SoDEX charged the ${rateTenthsBp / 10} bp builder fee on every fill`, async () => {
+  /** The builder fee the orders should carry, in words: '2.5 bp', or (not known here) 'a step of its fee ladder'. */
+  get feeText(): string {
+    return this.env.orderFee !== null ? `${this.env.orderFee / 10} bp` : 'a step of its fee ladder';
+  }
+
+  /**
+   * Every one of these orders (SoDEX's history) names the builder fee the executor should charge:
+   * the known one (Env.orderFee), or - where only the executor knows the follower's volume - one step
+   * of its ladder, the same on every order, which is noted and used by the fill checks after it.
+   */
+  checkOrderFees(orders: OrderInfo[]): number {
+    const want = this.env.orderFee;
+    if (want !== null) {
+      this.check(orders.every((o) => o.builderFee === want), `each order names the builder fee ${want} (${want / 10} bp)`, orders.map((o) => o.builderFee));
+      return want;
+    }
+    const rates = [...new Set(orders.map((o) => o.builderFee))];
+    const rate = rates.length === 1 ? rates[0]! : null;
+    this.check(rate !== null && this.env.builderLadder.includes(rate), `each order names the same builder fee, a step of the ladder ${this.env.builderLadder.join('/')}`, rates);
+    this.feeRate = rate;
+    this.note(`the executor charges builder fee ${rate} (${rate! / 10} bp)`);
+    return rate!;
+  }
+
+  /**
+   * Every builder fee SoDEX charged on these fills is the rate the orders carry, of their value, within
+   * rounding: the known one, the one an order check saw, or else the ladder step nearest the first fill's.
+   */
+  async checkBuilderFee(fills: FillInfo[], rateTenthsBp: number | null = this.feeRate ?? this.env.orderFee): Promise<void> {
+    await this.live(rateTenthsBp !== null ? `SoDEX charged the ${rateTenthsBp / 10} bp builder fee on every fill` : 'SoDEX charged one step of the builder fee ladder on every fill', async () => {
       this.check(fills.length > 0, 'there are fills to check the builder fee on');
+      let rate = rateTenthsBp;
+      if (rate === null) {
+        const f = fills[0]!;
+        const seen = (f.builderFee / (f.qty * f.price)) * 100_000;
+        rate = this.env.builderLadder.reduce((a, b) => (Math.abs(b - seen) < Math.abs(a - seen) ? b : a), this.env.builderLadder[0] ?? 0);
+        this.note(`the fills show builder fee ${rate} (${rate / 10} bp), the ladder step nearest ${seen.toFixed(1)}`);
+      }
       for (const f of fills) {
-        const want = (f.qty * f.price * rateTenthsBp) / 100_000;
-        this.check(Math.abs(f.builderFee - want) <= Math.max(want * 0.15, 1e-6), `builder fee ${f.builderFee} on ${f.qty} @ ${f.price} is ${rateTenthsBp / 10} bp`, { want });
+        const want = (f.qty * f.price * rate) / 100_000;
+        this.check(Math.abs(f.builderFee - want) <= Math.max(want * 0.15, 1e-6), `builder fee ${f.builderFee} on ${f.qty} @ ${f.price} is ${rate / 10} bp`, { want });
       }
     });
   }
@@ -451,13 +497,18 @@ export class T {
 
   /* ---------------------------------------------------------- restarts ----- */
 
-  /** Kill the executor hard, do `whileDown`, start it again on the same data, and wait until it lists what it had. */
+  /**
+   * Kill the executor hard, do `whileDown`, start it again on the same data, and wait until it lists
+   * what it had. Only where the target lets the runner (a scenario that calls it declares needs: ['restart']).
+   */
   async restart(o: { downMs?: number; whileDown?: () => Promise<void> } = {}): Promise<void> {
+    const target = this.env.target;
+    if (!target.capabilities.restart) throw new Unavailable(`the ${target.name} target cannot be restarted from here`);
     this.note('killing the executor (no shutdown code runs)');
-    await this.env.proc.kill();
+    await target.kill();
     if (o.whileDown) await o.whileDown();
     if (o.downMs) await new Promise((r) => setTimeout(r, o.downMs));
-    await this.env.proc.start();
+    await target.start();
     this.note('the executor is up again on the same data folder');
   }
 }

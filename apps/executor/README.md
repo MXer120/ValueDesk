@@ -99,7 +99,8 @@ a new key and pair again). By default:
 | `SODEX_NETWORK` | `mainnet` | or `testnet` |
 | `EXECUTOR_BUILDER_ID` | `234812` | the builder orders carry; `0` for none |
 | `EXECUTOR_KEY_TTL_DAYS` | `180` | the longest key lifetime you may register (at most 180) |
-| `EXECUTOR_LIVE_ALGOS` | off | `1` lets real (non-practice) algo orders start; practice runs always can |
+| `EXECUTOR_LIVE_ALGOS` | off | `1` lets real (non-practice) algo orders start, for every wallet; practice runs always can |
+| `EXECUTOR_LIVE_ALGOS_WALLETS` | none | while `EXECUTOR_LIVE_ALGOS` is off, the wallets real algo orders may start for: comma-separated `0x` addresses, or `*` for every wallet (the live test's follower, `tools/live-test --target hosted`) |
 | `EXECUTOR_ALLOWED_ORIGINS` | ValueDesk's site and `localhost:5180` | which web pages may call it |
 | `EXECUTOR_ALLOWED_HOSTS` | none | host names (besides `localhost` and IP addresses) the copier answers under; any other name gets 421 (a guard against DNS rebinding) |
 | `ALERT_TELEGRAM_TOKEN`, `ALERT_TELEGRAM_CHAT_ID` | off | a Telegram bot and chat for error alerts (refused orders, rate limits, a key that does not open, a crash) |

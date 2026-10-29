@@ -2,23 +2,31 @@
  * The live test runner's own rules (apps/executor/tools/live-test): what is
  * resumed and what is skipped, the code hash a pass is tied to, the crash
  * repair of the state file, the cleanup that must leave the accounts flat
- * before anything else happens, the start-up decision, the budget, and the
- * catalogue. None of it touches SoDEX.
+ * before anything else happens, the start-up decision, the budget, the
+ * catalogue, and the targets (what each can do, what is skipped where, the
+ * hosted pacing and refusals, one target at a time per wallet). None of it
+ * touches SoDEX or ValueDesk's executor.
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ALGO_KINDS, type MarketInfo } from '../../../packages/copy-engine/src/index.ts';
+import { secp256k1 } from '@noble/curves/secp256k1';
+import { ALGO_KINDS, COPY_FEE_LADDER, type MarketInfo } from '../../../packages/copy-engine/src/index.ts';
 import { computeBudget, pickMarket } from '../tools/live-test/budget.ts';
 import { CATALOGUE } from '../tools/live-test/catalogue.ts';
 import { flatten, startDecision, type FlattenVenue, type VenueOrder } from '../tools/live-test/cleanup.ts';
-import { assertPaper } from '../tools/live-test/executor.ts';
-import { T, type Env } from '../tools/live-test/harness.ts';
+import type { FillInfo, OrderInfo } from '../tools/live-test/exchange.ts';
+import { CopyWallet, ExecutorError, assertPaper, type ExecutorProcess } from '../tools/live-test/executor.ts';
+import { CheckFailed, Inconclusive, T, Unavailable, type Env } from '../tools/live-test/harness.ts';
 import { CodeHashes, filesOf, hashFiles } from '../tools/live-test/hash.ts';
 import type { Scenario } from '../tools/live-test/scenario.ts';
-import { decide, emptyState, loadState, markDone, markRunning, saveState, selected } from '../tools/live-test/state.ts';
+import { decide, emptyState, exposedOn, loadState, markDone, markRunning, noteRun, saveState, selected, stateFileOf } from '../tools/live-test/state.ts';
+import { BrowserTarget, CAPABILITIES, HostedTarget, Pacer, SelfTarget, TARGETS, cannotRun, hostedRefusal, targetName, type BrowserDriver, type ExecutorTarget } from '../tools/live-test/target.ts';
 
 const tmp = () => mkdtempSync(join(tmpdir(), 'vd-live-test-'));
 
@@ -362,7 +370,7 @@ test('dry: every spec a dry run sends is paper, the inner algo of a conditional 
 });
 
 test('abandon: once the runner stops waiting for a scenario (timeout, Ctrl+C), its code can send nothing more', async () => {
-  const env = { mode: 'dry', main: MKT('BTC-USD'), second: MKT('ETH-USD'), timeScale: 0, log: () => undefined, proc: { exited: null } } as unknown as Env;
+  const env = { mode: 'dry', main: MKT('BTC-USD'), second: MKT('ETH-USD'), timeScale: 0, log: () => undefined, target: { gone: () => null } } as unknown as Env;
   const t = new T(env, 'x');
   t.abandon('timed out');
   await assert.rejects(t.start({ kind: 'twap' }), /abandoned \(timed out\)/);
@@ -371,4 +379,262 @@ test('abandon: once the runner stops waiting for a scenario (timeout, Ctrl+C), i
   await assert.rejects(t.openPosition('buy', 12), /abandoned/);
   await assert.rejects(t.sleep(0), /abandoned/);
   await assert.rejects(t.waitFor('x', async () => true, { timeoutMs: 10 }), /abandoned/);
+});
+
+/* ---------------------------------------------------------------- targets ----- */
+
+test('targets: --target takes self, hosted or browser; self can do everything, hosted and browser no restart, browser paper only', () => {
+  assert.deepEqual([...TARGETS], ['self', 'hosted', 'browser']);
+  assert.equal(targetName('hosted'), 'hosted');
+  assert.throws(() => targetName('cloud'), /--target must be self, hosted, browser/);
+  assert.deepEqual(CAPABILITIES.self, { restart: true, kill: true, localFeeStub: true });
+  assert.deepEqual([CAPABILITIES.hosted.restart, CAPABILITIES.hosted.kill, CAPABILITIES.hosted.localFeeStub, CAPABILITIES.hosted.paperOnly ?? false], [false, false, false, false]);
+  assert.equal(CAPABILITIES.browser.paperOnly, true);
+});
+
+test('targets: a scenario that restarts the executor declares it, and is skipped (with why) exactly where the target cannot', () => {
+  const restarts = CATALOGUE.filter((s) => s.run.toString().includes('t.restart('));
+  assert.deepEqual(restarts.map((s) => s.id).sort(), ['copy.restart', 'iceberg.restart', 'scale.restart', 'twap.restart']);
+  for (const s of CATALOGUE) assert.equal(s.needs?.includes('restart') ?? false, restarts.includes(s), `${s.id} declares needs: ['restart'] exactly when it restarts`);
+  for (const s of CATALOGUE) assert.equal(cannotRun(s, 'self'), null, `${s.id} runs on self`);
+  for (const t of ['hosted', 'browser'] as const) {
+    assert.deepEqual(CATALOGUE.filter((s) => cannotRun(s, t)).map((s) => s.id).sort(), restarts.map((s) => s.id).sort());
+    assert.match(cannotRun({ needs: ['restart'] }, t) ?? '', new RegExp(`the ${t} target cannot kill the executor and start it again on the same data`));
+  }
+});
+
+test('restart: on a target that cannot, T.restart is skipped as unavailable and kills nothing; a crash of a local executor ends a wait at once', async () => {
+  const kills: string[] = [];
+  const hosted = { name: 'hosted', capabilities: CAPABILITIES.hosted, kill: async () => kills.push('kill'), start: async () => undefined, gone: () => null } as unknown as ExecutorTarget;
+  const t = new T({ mode: 'dry', timeScale: 0, log: () => undefined, target: hosted } as unknown as Env, 'x');
+  await assert.rejects(t.restart(), (e: unknown) => e instanceof Unavailable && /the hosted target cannot be restarted/.test(e.message));
+  assert.deepEqual(kills, []);
+  const crashed = new T({ mode: 'dry', timeScale: 0, log: () => undefined, target: { gone: () => 'the executor process exited (code 1)' } } as unknown as Env, 'y');
+  await assert.rejects(crashed.waitFor('the TWAP is done', async () => null, { timeoutMs: 60_000 }), (e: unknown) => e instanceof CheckFailed && e.message === 'the executor process exited (code 1) while waiting for: the TWAP is done');
+});
+
+test('self target: its own kill (a restart scenario: the leader trades while it is down) is not "gone"; a crash is', async () => {
+  const proc = {
+    o: { executorId: 'vd-livetest-dry', dataDir: 'd', logFile: 'l' },
+    exited: null as null | { code: number | null },
+    running: true,
+    async kill() {
+      this.exited = { code: null };
+      this.running = false;
+    },
+    async start() {
+      this.exited = null;
+      this.running = true;
+    },
+  };
+  const s = new SelfTarget(proc as unknown as ExecutorProcess, new CopyWallet(secp256k1.utils.randomPrivateKey()), 'dry');
+  assert.equal(s.executorId, 'vd-livetest-dry');
+  await s.kill();
+  assert.equal(s.gone(), null, 'killed on purpose: a wait while it is down goes on');
+  assert.equal((await s.health()).ok, false);
+  await s.start();
+  proc.exited = { code: 3 };
+  assert.equal(s.gone(), 'the executor process exited (code 3)');
+});
+
+test('hosted pacing: no minute ever holds more requests than the pace allows', async () => {
+  let now = 0;
+  const sent: number[] = [];
+  const p = new Pacer(3, { now: () => now, sleep: async (ms) => void (now += ms) });
+  for (let i = 0; i < 10; i++) {
+    await p.take();
+    sent.push(now);
+  }
+  assert.deepEqual(sent.slice(0, 3), [0, 0, 0], 'the first ones go at once');
+  for (const a of sent) assert.ok(sent.filter((b) => b >= a && b < a + 60_000).length <= 3, `the minute from ${a} holds at most 3`);
+});
+
+test('hosted refusals: closed, the brake and real algos not let for this wallet are inconclusive; a region refusal is skipped; anything else is the error itself', () => {
+  const e = (status: number, code: string) => new ExecutorError(status, code, `/x: ${status} ${code}`);
+  assert.ok(hostedRefusal(e(503, 'closed')) instanceof Inconclusive);
+  assert.ok(hostedRefusal(e(503, 'brake')) instanceof Inconclusive);
+  const po = hostedRefusal(e(403, 'paper-only'));
+  assert.ok(po instanceof Inconclusive && /EXECUTOR_LIVE_ALGOS_WALLETS/.test(po.message));
+  assert.ok(hostedRefusal(e(451, 'region')) instanceof Unavailable);
+  assert.ok(hostedRefusal(e(451, 'sanctioned')) instanceof Unavailable);
+  for (const [s, c] of [[503, 'other'], [400, 'spec'], [403, 'owner'], [412, 'key'], [429, 'rate']] as const) assert.equal(hostedRefusal(e(s, c)), null, `${s} ${c}`);
+});
+
+test('hosted target: ids from its /info, requests signed for that id, a closed executor\'s refusal thrown as inconclusive, a self executor refused', async () => {
+  let info: Record<string, unknown> = { kind: 'hosted', network: 'mainnet', executorId: 'valuedesk-mainnet-tokyo', keyName: 'vd-copy-tokyo', version: '1.1.0', viewerCountry: 'DE' };
+  const signedFor: string[] = [];
+  const srv = createServer((req, res) => {
+    res.setHeader('Content-Type', 'application/json');
+    if (req.url === '/api/copy/v1/info') return void res.end(JSON.stringify(info));
+    if (req.url === '/api/copy/v1/health') return void res.end(JSON.stringify({ ok: true }));
+    let body = '';
+    req.on('data', (c: Buffer) => (body += c.toString()));
+    req.on('end', () => {
+      signedFor.push((JSON.parse(body) as { request: { executor: string } }).request.executor);
+      res.statusCode = 503;
+      res.end(JSON.stringify({ code: 'closed', error: 'The ValueDesk executor takes no new orders right now.' }));
+    });
+  });
+  await new Promise<void>((r) => srv.listen(0, '127.0.0.1', () => r()));
+  const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}/api/copy/v1`;
+  try {
+    const h = new HostedTarget(new CopyWallet(secp256k1.utils.randomPrivateKey()), 'dry', base);
+    assert.equal(await h.observedCountry(), 'DE');
+    await assert.rejects(h.algoStart({ kind: 'twap', paper: true }), /not known yet/, 'nothing is signed before /info named the id');
+    await h.start();
+    assert.deepEqual([h.executorId, h.keyName], ['valuedesk-mainnet-tokyo', 'vd-copy-tokyo']);
+    assert.equal(h.release(info as never), '1.1.0');
+    assert.equal(h.release({ ...info, commit: 'f222f14' } as never), '1.1.0+f222f14');
+    await assert.rejects(h.algoStart({ kind: 'twap', paper: true }), (x: unknown) => x instanceof Inconclusive && /takes nothing new right now/.test(x.message));
+    assert.deepEqual(signedFor, ['valuedesk-mainnet-tokyo']);
+    await assert.rejects(h.algoStart({ kind: 'twap', paper: false }), /dry run: refusing a spec that is not paper/);
+    assert.equal(signedFor.length, 1, 'a dry run on hosted sends paper only: refused before signing');
+    await assert.rejects(h.kill(), Unavailable);
+    info = { ...info, kind: 'self' };
+    await assert.rejects(new HostedTarget(new CopyWallet(secp256k1.utils.randomPrivateKey()), 'dry', base).start(), /not ValueDesk's executor on mainnet/);
+  } finally {
+    srv.close();
+  }
+});
+
+test('browser target: without the web test bridge it stops at the start, saying so; given a driver, every call goes to it', async () => {
+  const b = new BrowserTarget('dry');
+  await assert.rejects(b.start(), /the browser target needs the web test bridge \(apps\/web e2e\)/);
+  await assert.rejects(b.info(), /web test bridge/);
+  assert.equal((await b.health()).ok, false);
+  await b.stop();
+  await b.stopEverything();
+  const calls: string[] = [];
+  const driver = new Proxy({}, { get: (_, k) => async () => (calls.push(String(k)), k === 'ready' ? true : []) }) as unknown as BrowserDriver;
+  const d = new BrowserTarget('dry', driver);
+  await d.start();
+  await d.algoAct('cancel-all');
+  assert.equal((await d.health()).ok, true);
+  await assert.rejects(d.algoStart({ kind: 'twap', paper: false }), /not paper/, 'a dry run sends the page paper only');
+  await assert.rejects(d.subscribe({ paper: false }), /not paper/);
+  assert.deepEqual(calls, ['open', 'algoAct', 'ready']);
+});
+
+test('fees: self checks the ladder\'s top step exactly; hosted accepts one step of the ladder, the same on every order, notes it and checks the fills by it', async () => {
+  const order = (fee: number | null): OrderInfo => ({ orderId: '1', clOrdID: 'va-x-1', side: 'buy', price: 100, qty: 1, filled: 1, tif: 'IOC', type: 'LIMIT', status: 'FILLED', reduceOnly: false, stop: null, builderFee: fee, createdAt: 0 });
+  const fill = (rate: number): FillInfo => ({ clOrdID: 'va-x-1', orderId: '1', side: 'buy', price: 100, qty: 1, fee: 0, builderFee: (100 * rate) / 100_000, maker: false, time: 0 });
+  const ladder = COPY_FEE_LADDER.map((s) => s.fee);
+  const mk = (orderFee: number | null) => new T({ mode: 'live', log: () => undefined, builderLadder: ladder, orderFee, target: { gone: () => null } } as unknown as Env, 'x');
+  const self = mk(25);
+  assert.equal(self.feeText, '2.5 bp');
+  assert.equal(self.checkOrderFees([order(25), order(25)]), 25);
+  assert.throws(() => mk(25).checkOrderFees([order(20)]), CheckFailed);
+  await self.checkBuilderFee([fill(25)]);
+  const hosted = mk(null);
+  assert.equal(hosted.feeText, 'a step of its fee ladder');
+  assert.equal(hosted.checkOrderFees([order(20), order(20)]), 20);
+  assert.equal(hosted.feeRate, 20);
+  assert.match(hosted.notes.join('\n'), /builder fee 20 \(2 bp\)/);
+  await hosted.checkBuilderFee([fill(20), fill(20)]);
+  await assert.rejects(hosted.checkBuilderFee([fill(25)]), CheckFailed, 'the fills are charged the orders\' step');
+  assert.throws(() => mk(null).checkOrderFees([order(20), order(15)]), CheckFailed, 'not the same on every order');
+  assert.throws(() => mk(null).checkOrderFees([order(22)]), CheckFailed, 'not a step of the ladder');
+  assert.throws(() => mk(null).checkOrderFees([order(null)]), CheckFailed, 'no builder on the order');
+  // No order check before: the step nearest the fills' own.
+  const fresh = mk(null);
+  await fresh.checkBuilderFee([fill(15), fill(15)]);
+  assert.match(fresh.notes.join('\n'), /builder fee 15/);
+});
+
+test('state per target: <mode>-<target>.json; a self state from before targets is renamed to its new name and still counts', () => {
+  const d = tmp();
+  assert.equal(stateFileOf(d, 'live', 'hosted'), join(d, 'live-hosted.json'));
+  const old = { version: 1, mode: 'live', scenarios: { 'twap.a': { status: 'passed', hash: 'h1', endedAt: 1 } }, exposure: null, executor: null, runs: [{ at: 1, codeHash: 'c', selected: 1, passed: 1, failed: 0, skipped: 0 }] };
+  writeFileSync(join(d, 'live.json'), JSON.stringify(old));
+  assert.equal(stateFileOf(d, 'live', 'hosted'), join(d, 'live-hosted.json'));
+  assert.ok(existsSync(join(d, 'live.json')), 'only self takes the old file');
+  const f = stateFileOf(d, 'live', 'self');
+  assert.equal(f, join(d, 'live-self.json'));
+  assert.ok(!existsSync(join(d, 'live.json')) && existsSync(f));
+  const { state, report } = loadState(f, 'live', 5, 'self');
+  assert.equal(report.corrupt, null);
+  assert.equal(state.target, 'self');
+  assert.equal(state.follower, null);
+  assert.equal(state.runs[0]!.target, 'self');
+  assert.equal(decide(state, S('twap.a'), 'h1', { only: null, force: false }).run, false, 'what passed before targets is still passed on the same code');
+  assert.equal(stateFileOf(d, 'live', 'self'), f, 'once renamed, the new name is used');
+  rmSync(d, { recursive: true, force: true });
+});
+
+test('state per target: another target\'s file is never read as this one\'s (kept aside, read as exposed); runs name their target', () => {
+  const d = tmp();
+  const f = join(d, 'live-self.json');
+  saveState(f, emptyState('live', 'hosted'));
+  const r = loadState(f, 'live', 7, 'self');
+  assert.match(r.report.corrupt ?? '', /hosted target/);
+  assert.deepEqual(r.state.exposure, { since: 7, by: 'unreadable state file' });
+  const s = emptyState('dry', 'hosted');
+  noteRun(s, { at: 1, target: 'hosted', codeHash: 'x', selected: 1, passed: 1, failed: 0, skipped: 0 });
+  saveState(join(d, 'dry-hosted.json'), s);
+  const back = loadState(join(d, 'dry-hosted.json'), 'dry', 1, 'hosted').state;
+  assert.equal(back.target, 'hosted');
+  assert.equal(back.runs[0]!.target, 'hosted');
+  rmSync(d, { recursive: true, force: true });
+});
+
+test('one target at a time per wallet: another target\'s recorded exposure, a scenario a crash left running there, or its unreadable file stops a start; another wallet\'s or a clean one does not', () => {
+  const d = tmp();
+  const me = `0x${'a'.repeat(40)}`;
+  const f = join(d, 'live-hosted.json');
+  assert.equal(exposedOn(f, me), null, 'no file');
+  const s = emptyState('live', 'hosted');
+  s.follower = me;
+  saveState(f, s);
+  assert.equal(exposedOn(f, me), null, 'clean');
+  s.exposure = { since: 0, by: 'twap.exits' };
+  saveState(f, s);
+  assert.match(exposedOn(f, me) ?? '', /may still be out.*twap\.exits/);
+  assert.equal(exposedOn(f, `0x${'b'.repeat(40)}`), null, 'a state of another follower wallet');
+  s.follower = null;
+  saveState(f, s);
+  assert.ok(exposedOn(f, `0x${'b'.repeat(40)}`), 'a state that names no wallet (from before targets) counts for any');
+  s.exposure = null;
+  s.follower = me;
+  markRunning(s, 'scale.restart', 'h');
+  saveState(f, s);
+  assert.match(exposedOn(f, me) ?? '', /scale\.restart was left running by a crash/);
+  assert.equal(JSON.parse(readFileSync(f, 'utf8')).scenarios['scale.restart'].status, 'running', 'read as it is: nothing repaired');
+  writeFileSync(f, '{"version":1,');
+  assert.match(exposedOn(f, me) ?? '', /cannot be read/);
+  rmSync(d, { recursive: true, force: true });
+});
+
+test('hash per target: self\'s is what it was before targets; hosted adds the release /info names; browser adds the web runtime\'s files', () => {
+  const d = tmp();
+  const put = (rel: string, text: string) => {
+    mkdirSync(join(d, rel, '..'), { recursive: true });
+    writeFileSync(join(d, rel), text);
+  };
+  put('packages/copy-engine/src/algo/runtime.ts', 'algo v1');
+  put('apps/executor/src/service.ts', 'exec v1');
+  put('apps/executor/tools/live-test/harness.ts', 'harness v1');
+  put('apps/executor/tools/live-test/scenarios/algos.ts', 'algos v1');
+  put('apps/web/src/algo/browserAlgos.ts', 'web v1');
+  const s = { id: 'twap.a', deps: ['algo' as const], source: 'apps/executor/tools/live-test/scenarios/algos.ts' };
+  const c = new CodeHashes(d);
+  const before = createHash('sha256');
+  for (const g of ['algo', 'core', 'harness'] as const) before.update(`${g}:${c.group(g)}\n`);
+  before.update(`source:${hashFiles(d, [s.source])}\n`);
+  before.update('twap.a#1');
+  const self = c.scenario(s);
+  assert.equal(self, before.digest('hex').slice(0, 16), 'self: the hash of before targets, so what passed there still counts');
+  assert.equal(new CodeHashes(d, { name: 'self' }).scenario(s), self);
+  const hosted = (release: string) => new CodeHashes(d, { name: 'hosted', release }).scenario(s);
+  const h1 = hosted('1.1.0');
+  assert.notEqual(h1, self, 'a pass on self never stands for hosted');
+  assert.notEqual(hosted('1.2.0'), h1, 'another release of ValueDesk\'s executor runs it again');
+  const browser = () => new CodeHashes(d, { name: 'browser' }).scenario(s);
+  const b1 = browser();
+  put('apps/web/src/algo/browserAlgos.ts', 'web v2');
+  assert.notEqual(browser(), b1, 'a change to the web runtime runs it again on browser');
+  assert.equal(new CodeHashes(d).scenario(s), self, 'but not on self');
+  assert.equal(hosted('1.1.0'), h1, 'nor on hosted');
+  assert.equal(new CodeHashes(d).all(), new CodeHashes(d, { name: 'self' }).all());
+  assert.notEqual(new CodeHashes(d, { name: 'hosted', release: '1.1.0' }).all(), new CodeHashes(d).all());
+  rmSync(d, { recursive: true, force: true });
 });
