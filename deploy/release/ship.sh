@@ -300,6 +300,7 @@ if [ ${#U1[@]} -gt 0 ] || [ "$BIN" = 1 ]; then
   say "server 1 ($S1): ${U1[*]:-bin only}"
   upload "$S1"
   sync_bin "$S1" >&2
+  [ ${#U1[@]} -gt 0 ] || remote "$S1" "sudo rm -f $INBOX/$(basename "$TARBALL") $INBOX/$(basename "$TARBALL").sha256"
   if [ ${#U1[@]} -gt 0 ]; then
     t0=0
     if want indexer; then
@@ -399,7 +400,7 @@ if [ ${#U2[@]} -gt 0 ] || [ "$BIN" = 1 ]; then
   say "server 2 ($S2): ${U2[*]:-bin only}"
   upload "$S2"
   sync_bin "$S2" >&2
-  [ ${#U2[@]} -eq 0 ] || ship_executor
+  if [ ${#U2[@]} -gt 0 ]; then ship_executor; else remote "$S2" "sudo rm -f $INBOX/$(basename "$TARBALL") $INBOX/$(basename "$TARBALL").sha256"; fi
 fi
 
 # --- 7. the web -----------------------------------------------------------------------------------
