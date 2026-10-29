@@ -4,6 +4,7 @@
 // and the one-time setup (telegram-setup.sh). Node's own fetch, no package.
 //
 //   node telegram.mjs send "text"     one message (the text may also come on stdin: send -)
+//   node telegram.mjs send --kind=failure "text"   the same, its first line labelled (LABELS below)
 //   node telegram.mjs chats           the chats that wrote to the bot lately (getUpdates):
 //                                     id, kind, name - for finding the chat id once
 //
@@ -17,13 +18,38 @@
 // every error message passes through scrub() before anybody sees it. A message itself
 // must never carry a secret either; the callers send check names and short notes.
 //
-// As a module: import { sendTelegram } from './telegram.mjs'.
+// WHAT A MESSAGE IS, on its first line (owner, 2026-10-29: "for TG I need to know the difference
+// between maintenance caused and actual failure"). Every operations message starts with one of:
+//   🔧 MAINTENANCE  planned work - a release (ship.sh), a brake set --maintenance: expected, it goes on by itself
+//   🛑 BRAKE        trading stopped by hand (brake.sh on): an operator's decision, not planned work
+//   🚨 FAILURE      something broke that nobody planned: look at it
+//   ✅ RECOVERED    back to normal after a failure or a brake
+//   ℹ️ INFO          about the alerts themselves (muted, on again)
+// The copy executor's alerts (apps/executor/src/alerts.ts) use the same five. The API's own messages
+// (feedback, client errors, status commands: apps/server/src/ops/telegram.ts) are not alerts and stay as they are.
+//
+// As a module: import { labelled, sendTelegram } from './telegram.mjs'.
 
 const DEFAULT_API = 'https://api.telegram.org';
 const TOKEN_RE = /^\d{5,}:[A-Za-z0-9_-]{30,}$/;
 const CHAT_RE = /^(-?\d{1,20}|@[A-Za-z][A-Za-z0-9_]{4,31})$/;
 // Telegram's limit is 4096 characters per message.
 const MAX_TEXT = 4000;
+
+export const LABELS = Object.freeze({
+  maintenance: '🔧 MAINTENANCE',
+  brake: '🛑 BRAKE',
+  failure: '🚨 FAILURE',
+  recovered: '✅ RECOVERED',
+  info: 'ℹ️ INFO',
+});
+
+/** "🚨 FAILURE · text": the label of `kind` (a key of LABELS) before the text. */
+export function labelled(kind, text) {
+  const label = LABELS[kind];
+  if (!label) throw new Error(`unknown kind "${kind}" (${Object.keys(LABELS).join(', ')})`);
+  return `${label} · ${String(text ?? '').trim()}`;
+}
 
 /** The API base: https only, or plain http on loopback (the tests' stand-in). */
 export function apiBase(value) {
@@ -119,7 +145,10 @@ export async function recentChats({ token, api, timeoutMs = 15_000, fetchImpl = 
 // --- command line ----------------------------------------------------------------------------------
 const isMain = Boolean(process.argv[1]) && import.meta.url === (await import('node:url')).pathToFileURL(process.argv[1]).href;
 if (isMain) {
-  const [cmd, arg] = process.argv.slice(2);
+  const args = process.argv.slice(2);
+  const cmd = args[0];
+  const kind = args.find((a) => a.startsWith('--kind='))?.slice(7);
+  const arg = args.slice(1).find((a) => !a.startsWith('--kind='));
   const token = (process.env.ALERT_TELEGRAM_TOKEN ?? '').trim();
   const chatId = (process.env.ALERT_TELEGRAM_CHAT_ID ?? '').trim();
   const api = process.env.ALERT_TELEGRAM_API;
@@ -129,7 +158,9 @@ if (isMain) {
       text = '';
       for await (const chunk of process.stdin) text += chunk;
     }
-    const r = await sendTelegram({ token, chatId, text, api });
+    let r;
+    if (kind !== undefined && !LABELS[kind]) r = { ok: false, error: `unknown --kind "${kind}" (${Object.keys(LABELS).join(', ')})` };
+    else r = await sendTelegram({ token, chatId, text: kind && text.trim() ? labelled(kind, text) : text, api });
     if (!r.ok) {
       console.error(`telegram: not sent: ${r.error}`);
       process.exitCode = 1;
@@ -146,7 +177,7 @@ if (isMain) {
       for (const c of r.chats) console.log(`${c.id}\t${c.kind}\t${c.name}`);
     }
   } else {
-    console.error('usage: telegram.mjs send "text" | send - (text on stdin) | chats');
+    console.error('usage: telegram.mjs send [--kind=maintenance|brake|failure|recovered|info] "text" | send - (text on stdin) | chats');
     process.exitCode = 2;
   }
 }

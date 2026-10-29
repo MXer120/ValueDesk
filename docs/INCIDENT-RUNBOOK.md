@@ -6,6 +6,13 @@ phone-sized brain: the first section is all most incidents need.
 Servers: **server 1** `almalinux@161.97.154.121` (France: API, indexer; what the site reads) and **server 2**
 `almalinux@13.140.77.201` (Tokyo: the copy and algo executor). SSH key `~/.ssh/valuescan-contabo`.
 Alerts arrive on Telegram (deploy/server/bin/healthcheck.mjs, the cross-server watch and the GitHub watcher).
+Their first line says what they are: **🔧 MAINTENANCE** is planned work (a ship: started, done - nothing to
+do), **🛑 BRAKE** is a brake set by hand, **🚨 FAILURE** is what this runbook is for, **✅ RECOVERED** is back
+to normal, **ℹ️ INFO** is about the alerts themselves. A FAILURE that says "maintenance ... ended N min ago:
+still failing after it" came right after a ship: start with that ship (`deploy/.out/ships.log`,
+`deploy/release/rollback.sh`). Doing planned work by hand? Open a window first so it is not a FAILURE:
+`sudo bash /opt/valuescan/bin/maint.sh on 30 "what" <parts>` on each server, `maint.sh off` when done
+(deploy/release/README.md, "Telegram").
 
 ## The first five minutes
 

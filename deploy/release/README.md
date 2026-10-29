@@ -32,6 +32,29 @@ up. Anything else rolls back with copies and algos still held; they resume only 
 healthy executor. **The web** never reloads a tab by itself while that tab runs live
 browser algos or copies (`lazyPage.ts`): it says an update is waiting instead.
 
+**Telegram** tells maintenance from failure on the first line of every operations message
+(`deploy/server/bin/telegram.mjs` LABELS; the executor's alerts and the off-box watcher use
+the same five):
+
+| First line | What it is | What to do |
+|---|---|---|
+| 🔧 MAINTENANCE | planned work: a ship (started, done), a brake set `--maintenance` | nothing - it goes on by itself |
+| 🛑 BRAKE | trading stopped by hand (`brake.sh on`): an operator's decision | lift it when the cause is fixed |
+| 🚨 FAILURE | something broke that nobody planned (a health check, the executor, the outside watcher, a ship that stopped half-way) | look at it: `docs/INCIDENT-RUNBOOK.md` |
+| ✅ RECOVERED | back to normal after a failure or a brake | nothing |
+| ℹ️ INFO | about the alerts themselves (muted after 30 an hour, on again) | nothing |
+
+Before it restarts anything, `ship.sh` opens a maintenance window on both servers
+(`deploy/server/bin/maint.sh on 60 "<tag>" <parts>` - they watch each other): their health
+checks hold the alerts of the parts being released (a stale board while the indexer
+restarts), and the brake over the executor's restart is planned work, so neither the brake
+nor the executor says anything. A ship that restarts something sends exactly two messages,
+`🔧 MAINTENANCE · v0.2.63 started: ...` and `... done in N min: ...` - or one
+`🚨 FAILURE · v0.2.63 stopped: <why>`. The windows close after the server steps (one left
+open ends by itself within the hour); a check still failing then is a FAILURE that says it
+came right after the maintenance. For work by hand, open one yourself:
+`sudo bash /opt/valuescan/bin/maint.sh on 30 "Caddy config" api` ... `maint.sh off`.
+
 The scripts below are its pieces, and what it does by hand.
 
 ## The scripts

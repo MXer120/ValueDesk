@@ -111,7 +111,7 @@ notify_failure() {   # set, reason
   if [ -f "$f" ] && [ $(( $(now_s) - $(stat -c %Y "$f") )) -lt 21600 ]; then return 0; fi
   : > "$f"
   if [ -n "${ALERT_TELEGRAM_TOKEN:-}" ] && [ -f "$HERE/telegram.mjs" ]; then
-    "$NODE" "$HERE/telegram.mjs" send "ValueDesk BACKUP FAILED - $OFFSITE_LABEL: the off-server copy '$1' to ${OFFSITE_HOST:-the other server} failed: $2 (journalctl -u valuescan-offsite)" || true
+    "$NODE" "$HERE/telegram.mjs" send --kind=failure "backup - $OFFSITE_LABEL: the off-server copy '$1' to ${OFFSITE_HOST:-the other server} failed: $2 (journalctl -u valuescan-offsite)" || true
   fi
 }
 

@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { secp256k1 } from '@noble/curves/secp256k1';
 import { bytesToHex, hexToBytes, privateKeyToAddress } from '../../../packages/sodex-core/src/index.ts';
 import { COPY_TERMS_VERSION, buildCopyRequest, copyRequestDigest, type CopyAction, type FetchLike, type MarketInfo, type OrderSink, type WebSocketLike } from '../../../packages/copy-engine/src/index.ts';
+import { Alerts } from '../src/alerts.ts';
 import { auditedOrderSink } from '../src/audited.ts';
 import { Brake, parseBrake } from '../src/brake.ts';
 import { loadConfig } from '../src/config.ts';
@@ -52,9 +53,12 @@ const code = async (p: Promise<unknown>): Promise<string> => {
 
 test('brake file: missing or both off is off; anything else - a typo, garbage, "yes" - is on', () => {
   assert.equal(parseBrake('{"copies": false, "algos": false}'), null);
-  assert.deepEqual(parseBrake('{"copies": true, "algos": false, "reason": "x", "since": 5}'), { copies: true, algos: false, reason: 'x', since: 5 });
+  assert.deepEqual(parseBrake('{"copies": true, "algos": false, "reason": "x", "since": 5}'), { copies: true, algos: false, reason: 'x', since: 5, cause: 'operator' });
+  assert.equal(parseBrake('{"copies": true, "cause": "maintenance"}')?.cause, 'maintenance');
+  assert.equal(parseBrake('{"copies": true, "cause": "maint"}')?.cause, 'operator', 'only the exact word is planned work');
   const garbled = parseBrake('{"copies": tru');
   assert.ok(garbled && garbled.copies && garbled.algos);
+  assert.equal(garbled.cause, 'operator', 'a garbled file is an emergency stop');
   const yes = parseBrake('{"copies": "yes", "algos": false}');
   assert.ok(yes?.copies && !yes.algos);
   assert.ok(parseBrake('[]')?.copies);
@@ -95,6 +99,33 @@ test('brake on the executor: new live copies, algos, resumes and size changes ar
   // Stopping always goes through.
   assert.equal(await code(svc.algoAct(w.sign(svc.executorId, 'algo-action', { op: 'cancel', id: paper.algo.id }), ctx)), 'ok');
   assert.ok(db.auditRows({ kind: 'brake' }).length >= 1);
+  await svc.stop();
+  db.close();
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('brake alerts: an operator brake is told on Telegram (on and off); a maintenance brake only in the audit log', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'vd-brake-tg-'));
+  const file = join(dir, 'brake.json');
+  const cfg = loadConfig({ EXECUTOR_DATA_DIR: dir, EXECUTOR_KIND: 'hosted', EXECUTOR_EDGE: 'none', EXECUTOR_BRAKE_FILE: file });
+  const db = new ExecutorDb(':memory:');
+  const alerts = new Alerts({ sender: async () => true, label: 'test executor', dedupeMs: 0 });
+  // Already on at start (ship.sh: the new process comes up under the brake): no alert for planned work.
+  writeFileSync(file, JSON.stringify({ copies: true, algos: true, reason: 'Updating the copy executor.', since: 1, cause: 'maintenance' }));
+  const svc = new ExecutorService(cfg, db, new Secrets(dir), { fetch: fakeFetch(), factory: noWs, log: silent, alerts });
+  let t = Date.now();
+  const tick = () => svc.brake.current((t += 2_000));
+  rmSync(file);
+  tick();
+  assert.deepEqual(alerts.sent, [], 'planned work: neither on nor off is an alert');
+  writeFileSync(file, JSON.stringify({ copies: true, algos: true, reason: 'Investigating a fill problem.', since: 2 }));
+  tick();
+  rmSync(file);
+  tick();
+  assert.equal(alerts.sent.length, 2);
+  assert.match(alerts.sent[0]!, /^🛑 BRAKE · BRAKE ON - test executor\nCopies held, algos held\. Reason: Investigating a fill problem\.$/);
+  assert.match(alerts.sent[1]!, /^✅ RECOVERED · Brake off - test executor\n/);
+  assert.ok(db.auditRows({ kind: 'brake' }).length >= 4, 'the audit log has every change, planned or not');
   await svc.stop();
   db.close();
   rmSync(dir, { recursive: true, force: true });

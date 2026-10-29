@@ -2,7 +2,7 @@
  * The operator's emergency brake and global stop, read from a small JSON file
  * the operator writes on the server (deploy/server/bin/brake.sh):
  *
- *   {"copies": true, "algos": true, "reason": "Investigating a fill problem.", "since": 1761580800000}
+ *   {"copies": true, "algos": true, "reason": "Investigating a fill problem.", "since": 1761580800000, "cause": "operator"}
  *
  * While `copies` is on, no live copy sends an order; while `algos` is on, every
  * live algo is held (nothing new is sent). Stops already resting on SoDEX stay,
@@ -18,6 +18,11 @@
  * FAIL CLOSED. A file that exists but cannot be read or parsed is a brake on
  * everything: an operator who meant to switch it on and made a typo has still
  * switched it on. Only a missing file, or one with both switches false, is off.
+ *
+ * WHY IT IS ON. "cause" is "maintenance" for planned work (ship.sh over an executor restart:
+ * brake.sh on --maintenance); anything else - none, a typo, a garbled file - is an operator's
+ * emergency stop. Only that one is an alert of the executor's (service.ts): planned work is
+ * told on Telegram by whoever set it.
  */
 import { readFileSync, statSync } from 'node:fs';
 
@@ -28,7 +33,11 @@ export interface BrakeState {
   reason: string;
   /** When it was switched on (ms), as the file says. */
   since: number | null;
+  /** Planned work, or an operator's emergency stop. */
+  cause: BrakeCause;
 }
+
+export type BrakeCause = 'maintenance' | 'operator';
 
 const READ_EVERY_MS = 1_000;
 const DEFAULT_REASON = 'ValueDesk has paused trading on this executor for now.';
@@ -39,9 +48,9 @@ export function parseBrake(text: string): BrakeState | null {
   try {
     raw = JSON.parse(text);
   } catch {
-    return { copies: true, algos: true, reason: `${DEFAULT_REASON} (the brake file cannot be read)`, since: null };
+    return { copies: true, algos: true, reason: `${DEFAULT_REASON} (the brake file cannot be read)`, since: null, cause: 'operator' };
   }
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { copies: true, algos: true, reason: `${DEFAULT_REASON} (the brake file is not an object)`, since: null };
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { copies: true, algos: true, reason: `${DEFAULT_REASON} (the brake file is not an object)`, since: null, cause: 'operator' };
   const r = raw as Record<string, unknown>;
   // Anything but an explicit false is on: {"copies": "yes"} brakes.
   const copies = r.copies !== false;
@@ -49,7 +58,8 @@ export function parseBrake(text: string): BrakeState | null {
   if (!copies && !algos) return null;
   const reason = typeof r.reason === 'string' && r.reason.trim() ? r.reason.trim().slice(0, 300) : DEFAULT_REASON;
   const since = typeof r.since === 'number' && Number.isFinite(r.since) ? r.since : null;
-  return { copies, algos, reason, since };
+  const cause: BrakeCause = r.cause === 'maintenance' ? 'maintenance' : 'operator';
+  return { copies, algos, reason, since, cause };
 }
 
 export class Brake {
@@ -104,7 +114,7 @@ export class Brake {
     } catch (e) {
       // There, but unreadable (permissions): on, and read again next time.
       this.mtime = -2;
-      next = { copies: true, algos: true, reason: `${DEFAULT_REASON} (the brake file cannot be read: ${(e as NodeJS.ErrnoException).code ?? 'error'})`, since: null };
+      next = { copies: true, algos: true, reason: `${DEFAULT_REASON} (the brake file cannot be read: ${(e as NodeJS.ErrnoException).code ?? 'error'})`, since: null, cause: 'operator' };
     }
     const before = this.state;
     this.state = next;

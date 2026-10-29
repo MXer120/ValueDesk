@@ -8,7 +8,7 @@ import { spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { apiBase, checkSettings, recentChats, scrub, sendTelegram } from './telegram.mjs';
+import { LABELS, apiBase, checkSettings, labelled, recentChats, scrub, sendTelegram } from './telegram.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const TOKEN = `7${String(Math.floor(Math.random() * 1e9)).padStart(9, '0')}:${randomBytes(27).toString('base64url')}`;
@@ -90,4 +90,47 @@ test('the command line refuses to run without settings and prints no token', () 
   assert.match(r.stderr, /not sent: ALERT_TELEGRAM_TOKEN is not set/);
   const u = spawnSync(process.execPath, [join(HERE, 'telegram.mjs'), 'bogus'], { encoding: 'utf8' });
   assert.equal(u.status, 2);
+});
+
+test('labels: each kind names what a message is on its first line; an unknown kind is refused', () => {
+  assert.deepEqual(Object.keys(LABELS), ['maintenance', 'brake', 'failure', 'recovered', 'info']);
+  assert.equal(labelled('failure', ' server 1\nfailing: index '), '🚨 FAILURE · server 1\nfailing: index');
+  assert.equal(labelled('maintenance', 'v0.2.63 started'), '🔧 MAINTENANCE · v0.2.63 started');
+  assert.equal(labelled('recovered', 'x'), '✅ RECOVERED · x');
+  assert.throws(() => labelled('panic', 'x'), /unknown kind "panic"/);
+  const r = spawnSync(process.execPath, [join(HERE, 'telegram.mjs'), 'send', '--kind=panic', 'hello'], {
+    encoding: 'utf8', env: { ...process.env, ALERT_TELEGRAM_TOKEN: TOKEN, ALERT_TELEGRAM_CHAT_ID: '123456789' },
+  });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /not sent: unknown --kind "panic"/);
+  assert.ok(!r.stderr.includes(TOKEN));
+});
+
+test('the command line labels the text it sends with --kind, from an argument or stdin', async () => {
+  const http = await import('node:http');
+  const got = [];
+  const s = http.createServer((req, res) => {
+    let b = '';
+    req.on('data', (d) => { b += d; });
+    req.on('end', () => { got.push(JSON.parse(b).text); res.writeHead(200, { 'content-type': 'application/json' }); res.end('{"ok":true,"result":{}}'); });
+  });
+  await new Promise((ok) => s.listen(0, '127.0.0.1', ok));
+  const { spawn } = await import('node:child_process');
+  const run = (args, input) => new Promise((done) => {
+    const c = spawn(process.execPath, [join(HERE, 'telegram.mjs'), 'send', ...args], {
+      env: { ...process.env, ALERT_TELEGRAM_TOKEN: TOKEN, ALERT_TELEGRAM_CHAT_ID: '123456789', ALERT_TELEGRAM_API: `http://127.0.0.1:${s.address().port}` },
+      stdio: ['pipe', 'ignore', 'ignore'],
+    });
+    c.stdin.end(input ?? '');
+    c.once('exit', done);
+  });
+  try {
+    assert.equal(await run(['--kind=maintenance', 'v0.2.63 started']), 0);
+    assert.equal(await run(['--kind=failure', '-'], 'v0.2.63 stopped: CI failed\n'), 0);
+    assert.equal(await run(['plain']), 0);
+    assert.deepEqual(got, ['🔧 MAINTENANCE · v0.2.63 started', '🚨 FAILURE · v0.2.63 stopped: CI failed', 'plain']);
+  } finally {
+    s.closeAllConnections?.();
+    await new Promise((r) => s.close(r));
+  }
 });

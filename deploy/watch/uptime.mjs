@@ -22,6 +22,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { labelled } from '../server/bin/telegram.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_URLS = 'site=https://www.valuedesk.so/,api=https://www.valuedesk.so/api/health,copy=https://www.valuedesk.so/api/copy/v1/health';
@@ -78,16 +79,18 @@ export function decide(prev, results, now) {
   const lines = (names) => names.map((n) => `- ${n}: ${results[n]?.note ?? ''}`).join('\n');
   let message = null;
   let lastAlertAt = p.lastAlertAt;
+  // The first line says what it is (telegram.mjs LABELS); a release never takes the public site down, so
+  // nothing seen from here is maintenance.
   if (fresh.length) {
-    message = `ValueDesk DOWN (seen from outside, GitHub)\n${lines(isDown)}`;
+    message = `${labelled('failure', 'ValueDesk down (seen from outside, GitHub)')}\n${lines(isDown)}`;
   } else if (isDown.length && now - p.lastAlertAt > REALERT_MS) {
     const since = Math.min(...isDown.map((n) => down[n]));
-    message = `ValueDesk STILL DOWN for ${Math.round((now - since) / 360_000) / 10} h (seen from outside)\n${lines(isDown)}`;
+    message = `${labelled('failure', `ValueDesk still down for ${Math.round((now - since) / 360_000) / 10} h (seen from outside)`)}\n${lines(isDown)}`;
   } else if (!isDown.length && back.length) {
     const since = Math.min(...back.map((n) => p.down[n]));
-    message = `ValueDesk UP again (seen from outside): ${back.join(', ')} after ${Math.max(1, Math.round((now - since) / 60_000))} min`;
+    message = labelled('recovered', `ValueDesk up again (seen from outside): ${back.join(', ')} after ${Math.max(1, Math.round((now - since) / 60_000))} min`);
   } else if (back.length) {
-    message = `ValueDesk partly back: ${back.join(', ')} up again; still down:\n${lines(isDown)}`;
+    message = `${labelled('failure', `ValueDesk partly back: ${back.join(', ')} up again; still down:`)}\n${lines(isDown)}`;
   }
   if (message) lastAlertAt = now;
   return { message, next: { down, lastAlertAt, at: now } };

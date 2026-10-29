@@ -320,10 +320,28 @@ test('alerts: at most 30 an hour, then one muted note, and the count of what was
   const h = alertHarness(30);
   for (let i = 0; i < 40; i++) h.alerts.raise('sub-held', `copy:c${i}`, `held ${i}`);
   assert.equal(h.sent.length, 31);
-  assert.match(h.sent[30]!, /Alerts muted/);
+  assert.match(h.sent[30]!, /^ℹ️ INFO · Alerts muted/);
   h.tick(61 * 60_000);
   h.alerts.flush();
-  assert.match(h.sent.at(-1)!, /Alerts on again[\s\S]*10 alert\(s\) were not sent/);
+  assert.match(h.sent.at(-1)!, /^ℹ️ INFO · Alerts on again[\s\S]*10 alert\(s\) were not sent/);
+});
+
+test('alerts: the first line says what it is - a failure, back to normal, or a brake set by hand', () => {
+  const h = alertHarness();
+  h.alerts.raise('order-rejected', 'copy:c1', 'no margin');
+  h.alerts.raise('sodex-up', '', 'SoDEX answers again.');
+  h.alerts.raise('brake-on', '', 'Copies held.');
+  h.alerts.raise('crash-restart', '', 'last run did not stop cleanly');
+  assert.deepEqual(h.sent.map((t) => t.split('\n')[0]), [
+    '🚨 FAILURE · Order refused - test-exec (testnet)',
+    '✅ RECOVERED · SoDEX reachable again - test-exec (testnet)',
+    '🛑 BRAKE · BRAKE ON - test-exec (testnet)',
+    '🚨 FAILURE · STARTED AFTER A CRASH - test-exec (testnet)',
+  ]);
+  h.alerts.raise('order-rejected', 'copy:c1', 'again');
+  h.tick(10 * 60_000);
+  h.alerts.flush();
+  assert.match(h.sent.at(-1)!, /^🚨 FAILURE · Order refused - test-exec \(testnet\)\nx 1 more/, 'the count of repeats keeps the label');
 });
 
 test('alerts: no secret, no full wallet in a message; off without a well-formed token and chat', async () => {

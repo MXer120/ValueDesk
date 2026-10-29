@@ -239,8 +239,9 @@ export class ExecutorService {
     });
     this.brake = new Brake(cfg.brakeFile, (now, before) => {
       db.audit('brake', null, null, { now, before });
-      if (now) deps.alerts?.raise('brake-on', '', `Copies ${now.copies ? 'held' : 'running'}, algos ${now.algos ? 'held' : 'running'}. Reason: ${now.reason}`);
-      else if (before) deps.alerts?.raise('brake-off', '', 'The emergency brake is off; trading goes on.');
+      // Planned work (cause 'maintenance': ship.sh) is told by whoever set it; an operator's brake is an alert.
+      if (now && now.cause !== 'maintenance') deps.alerts?.raise('brake-on', '', `Copies ${now.copies ? 'held' : 'running'}, algos ${now.algos ? 'held' : 'running'}. Reason: ${now.reason}`);
+      else if (!now && before && before.cause !== 'maintenance') deps.alerts?.raise('brake-off', '', 'The emergency brake is off; trading goes on.');
       if (now) deps.log.warn('executor: the emergency brake is ON', { copies: now.copies, algos: now.algos, reason: now.reason });
       else if (before) deps.log.warn('executor: the emergency brake is off', {});
     });

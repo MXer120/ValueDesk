@@ -342,12 +342,12 @@ test('Telegram: an alert on the second failing pass names the server and the che
     const r2 = await run(e(bad));
     assert.equal(tg.sent.length, 1, 'the second is');
     assert.equal(tg.sent[0].chat_id, '123456789');
-    assert.match(tg.sent[0].text, /^ValueDesk ALERT - server 1 \(France, API\)\nfailing: lockdown\n- lockdown: a non-hosted route/);
+    assert.match(tg.sent[0].text, /^🚨 FAILURE · server 1 \(France, API\)\nfailing: lockdown\n- lockdown: a non-hosted route/);
     await run(e(bad));
     assert.equal(tg.sent.length, 1, 'no repeat on every pass');
     const r4 = await run(e(good));
     assert.equal(tg.sent.length, 2);
-    assert.match(tg.sent[1].text, /^ValueDesk RECOVERED - server 1 \(France, API\)\nevery check passes again \(was failing: lockdown; for \d+ min\)$/);
+    assert.match(tg.sent[1].text, /^✅ RECOVERED · server 1 \(France, API\)\nevery check passes again \(was failing: lockdown; for \d+ min\)$/);
     for (const r of [r0, r1, r2, r4]) {
       const all = `${r.err}${JSON.stringify(r.report)}`;
       assert.ok(!all.includes(tg.token) && !all.includes(SECRET), 'neither the bot token nor the origin secret is ever printed');
@@ -375,7 +375,7 @@ test('Telegram: an alert that could not be delivered is tried again on the next 
     tg.setFail(false);
     await run(e);
     assert.equal(tg.sent.length, 1, 'delivered on the next pass');
-    assert.match(tg.sent[0].text, /ValueDesk ALERT/);
+    assert.match(tg.sent[0].text, /^🚨 FAILURE · /);
   } finally {
     await bad.close();
     await tg.close();
@@ -399,10 +399,69 @@ test('Telegram: a check that newly fails while already alerted is news (after tw
     assert.match(tg.sent[1].text, /now also failing: index\n/);
     await run(env(f, worse, { ...tg.env, HEALTH_REALERT_H: '0.000001' }));
     assert.equal(tg.sent.length, 3);
-    assert.match(tg.sent[2].text, /^ValueDesk STILL FAILING \(\d+ min\)/);
+    assert.match(tg.sent[2].text, /^🚨 FAILURE · still failing \(\d+ min\) - /);
   } finally {
     await bad.close();
     await worse.close();
+    await tg.close();
+    rmSync(f.dir, { recursive: true, force: true });
+  }
+});
+
+test('maintenance: a window holds the failing checks of the parts it names; closed, they are a FAILURE "after it"', async () => {
+  const f = fixture();
+  const bad = await api({ notHosted: true }); // lockdown fails: a check of the API's
+  const tg = await telegram();
+  const maint = join(f.dir, 'state', 'maintenance.json');
+  const e = () => env(f, bad, { ...tg.env, HEALTH_MAINT_FILE: maint });
+  try {
+    writeFileSync(maint, JSON.stringify({ what: 'v0.2.63', parts: ['indexer', 'api'], since: Date.now(), until: Date.now() + 3_600_000, by: 'test' }));
+    const r1 = await run(e());
+    assert.equal(r1.status, 1, 'the pass itself still fails');
+    assert.equal(r1.report.maintenance, 'v0.2.63');
+    assert.deepEqual(r1.report.held, ['lockdown']);
+    await run(e());
+    await run(e());
+    assert.equal(tg.sent.length, 0, 'held: three failing passes, nothing sent');
+    // maint.sh off: the window kept as maintenance.last.json, with its end.
+    rmSync(maint);
+    writeFileSync(join(f.dir, 'state', 'maintenance.last.json'), JSON.stringify({ what: 'v0.2.63', parts: ['indexer', 'api'], since: Date.now() - 600_000, until: Date.now() + 3_000_000, ended: Date.now() - 120_000 }));
+    const r4 = await run(e());
+    assert.equal(r4.report.held, undefined);
+    assert.equal(tg.sent.length, 0, 'judged as any other from now on: one pass is not an alert');
+    await run(e());
+    assert.equal(tg.sent.length, 1);
+    assert.match(tg.sent[0].text, /^🚨 FAILURE · .*\nfailing: lockdown\n[\s\S]*\n\(maintenance v0\.2\.63 ended 2 min ago: still failing after it\)$/);
+  } finally {
+    await bad.close();
+    await tg.close();
+    rmSync(f.dir, { recursive: true, force: true });
+  }
+});
+
+test('maintenance: a failure of a part the window does not name alerts as always and says so; a window whose time is up holds nothing', async () => {
+  const f = fixture();
+  const bad = await api({ notHosted: true });
+  const tg = await telegram();
+  const maint = join(f.dir, 'state', 'maintenance.json');
+  const e = () => env(f, bad, { ...tg.env, HEALTH_MAINT_FILE: maint });
+  try {
+    writeFileSync(maint, JSON.stringify({ what: 'v0.2.63', parts: ['executor'], since: Date.now(), until: Date.now() + 3_600_000 }));
+    const r1 = await run(e());
+    assert.deepEqual(r1.report.held, [], 'lockdown is not the executor');
+    await run(e());
+    assert.equal(tg.sent.length, 1);
+    assert.match(tg.sent[0].text, /^🚨 FAILURE · [\s\S]*\(maintenance v0\.2\.63 is running - executor - this is not part of it\)$/);
+    rmSync(join(f.dir, 'state', 'health-state.json'));
+    tg.sent.length = 0;
+    writeFileSync(maint, JSON.stringify({ what: 'v0.2.64', parts: ['api'], since: Date.now() - 7_200_000, until: Date.now() - 60_000 }));
+    const r3 = await run(e());
+    assert.equal(r3.report.held, undefined, 'its time is up: as if closed then');
+    await run(e());
+    assert.equal(tg.sent.length, 1);
+    assert.match(tg.sent[0].text, /\(maintenance v0\.2\.64 ended 1 min ago: still failing after it\)$/);
+  } finally {
+    await bad.close();
     await tg.close();
     rmSync(f.dir, { recursive: true, force: true });
   }

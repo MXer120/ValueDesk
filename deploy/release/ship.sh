@@ -39,6 +39,15 @@
 #      The web goes last on purpose: what it calls already runs the new code when it appears.
 # Each ship is a line in deploy/.out/ships.log.
 #
+# TELEGRAM: what a ship is, on the first line of each message (deploy/server/bin/telegram.mjs LABELS). Before
+# it restarts anything, it opens a maintenance window on both servers (maint.sh on - they watch each other):
+# their health checks hold the alerts of the parts being released, and the brake over the executor's restart is
+# planned work (brake.sh on --maintenance), so neither the brake nor the executor says anything of it. Telegram
+# gets two messages: "🔧 MAINTENANCE · vX started: ..." and "🔧 MAINTENANCE · vX done in N min: ..." - or,
+# when it stopped half-way, "🚨 FAILURE · vX stopped: <why>" (the window closed, so what still fails alerts).
+# The windows close after the server steps; one left open (the laptop died) ends by itself after 60 minutes.
+# A ship that restarts nothing (web only, scripts only) sends nothing.
+#
 # DOWNTIME (measured on v0.2.57, 2026-10-28):
 #   web       none: Vercel switches atomically; an open tab whose files a deploy replaced reloads once (lazyPage.ts)
 #   api       no failed request: the API is away ~6 s and Caddy holds each request meanwhile (lb_try_duration
@@ -55,6 +64,9 @@
 set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 . "$(dirname "${BASH_SOURCE[0]}")/test-gate.sh"
+# lib.sh's, keeping the reason for the Telegram message of a ship that stopped (on_exit).
+LAST_ERROR=""
+die() { LAST_ERROR="$*"; echo "error: $*" >&2; exit 1; }
 
 S1="${VS_SERVER1:-almalinux@161.97.154.121}"
 S2="${VS_SERVER2:-almalinux@13.140.77.201}"
@@ -177,6 +189,7 @@ for p in indexer api executor web; do
   printf '  %-9s %-9s %-30s %s\n' "$p" "$where" "${WHY[$p]:-}" "$(cost "$p")" >&2
 done
 [ "$BIN" = 0 ] || note "  bin       both      /opt/valuescan/bin from the tarball where it differs"
+if [ ${#U1[@]} -gt 0 ] || [ ${#U2[@]} -gt 0 ]; then note "  telegram  MAINTENANCE started + done (a maintenance window on both servers over the restarts)"; fi
 if [ ${#U2[@]} -gt 0 ]; then
   EXEC0="$(exec_health)"
   note "  executor now: $(printf '%s' "$EXEC0" | json 'v ? `${v.copies} copies (${v.active} active), ${v.algos} algos running, ${v.queue ? v.queue.waiting + v.queue.inFlight : "?"} orders in the send queue, brake ${v.brake ? "ON" : "off"}${v.ok ? "" : " - NOT HEALTHY NOW"}` : "NOT ANSWERING"')"
@@ -202,7 +215,41 @@ fi
 
 START="$(date -u +%s)"
 log_ship() { mkdir -p "$OUT_DIR"; printf '%s\t%s\t%s\t%s\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$TAG" "$(git rev-parse --short HEAD)" "$*" "${PARTS[*]}" >> "$OUT_DIR/ships.log"; }
-trap 'rc=$?; [ $rc = 0 ] || log_ship "FAILED (exit $rc)"' EXIT
+
+# --- the maintenance window and Telegram (the header: TELEGRAM) -----------------------------------
+MAINT_ON=() STARTED=0 DONE_NOTES=() WARNED=0
+# One Telegram message, labelled on the server (maint.sh tell); by server 1, by server 2 when 1 does not answer.
+tell() {   # kind, text
+  local h
+  for h in "$S1" "$S2"; do
+    if printf '%s' "$2" | remote "$h" "sudo bash /opt/valuescan/bin/maint.sh tell $1 -" >/dev/null 2>&1; then return 0; fi
+  done
+  note "  (Telegram not reached - $1: ${2%%$'\n'*})"
+}
+maint_open() {   # parts (comma list)
+  local h
+  for h in "$S1" "$S2"; do
+    if remote "$h" "sudo bash /opt/valuescan/bin/maint.sh on 60 '$TAG' $1" >&2; then MAINT_ON+=("$h")
+    else note "!! no maintenance window on $h: its health check alerts about $TAG as about a failure"; fi
+  done
+}
+maint_close() {
+  local h
+  for h in ${MAINT_ON[@]+"${MAINT_ON[@]}"}; do
+    remote "$h" 'sudo bash /opt/valuescan/bin/maint.sh off' >&2 || note "!! the maintenance window on $h is still open (it ends by itself within the hour): sudo bash /opt/valuescan/bin/maint.sh off"
+  done
+  MAINT_ON=()
+}
+done_note() { DONE_NOTES+=("$*"); }
+on_exit() {
+  local rc=$?
+  [ $rc = 0 ] || log_ship "FAILED (exit $rc)"
+  if [ $rc != 0 ] && [ "$STARTED" = 1 ]; then
+    maint_close
+    tell failure "$TAG stopped: ${LAST_ERROR:-ship.sh ended with exit $rc}"
+  fi
+}
+trap on_exit EXIT
 
 # --- 2. the tag -----------------------------------------------------------------------------------
 if [ "$NEW_TAG" = 1 ] || ! git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
@@ -296,42 +343,72 @@ release_on() {   # host, units (comma list)
 
 if [ ${#U1[@]} -gt 0 ] || [ ${#U2[@]} -gt 0 ] || [ "$BIN" = 1 ]; then need_tarball; fi
 
+# Both servers' tarball and scripts first (one upload after the other: the laptop's cap): maint.sh and brake.sh
+# are the tag's before anything restarts.
 if [ ${#U1[@]} -gt 0 ] || [ "$BIN" = 1 ]; then
-  say "server 1 ($S1): ${U1[*]:-bin only}"
+  say "server 1 ($S1): upload, scripts"
   upload "$S1"
   sync_bin "$S1" >&2
   [ ${#U1[@]} -gt 0 ] || remote "$S1" "sudo rm -f $INBOX/$(basename "$TARBALL") $INBOX/$(basename "$TARBALL").sha256"
-  if [ ${#U1[@]} -gt 0 ]; then
-    t0=0
-    if want indexer; then
-      t0="$(remote "$S1" 'date +%s%3N')"
-      if [ "$NOTICE" = 1 ]; then
-        NOTICE_ID="$(status_cmd "maintenance 'Indexer update' --start=now --end=+30m --components=indexer 'Leaderboards, cohorts and the heatmap stay up; their figures may be a few minutes behind while the indexer restarts.'" | grep -o '#[0-9]*' | head -1 | tr -d '#')"
-        note "status page: maintenance #${NOTICE_ID:-?} posted"
-      fi
+fi
+if [ ${#U2[@]} -gt 0 ] || [ "$BIN" = 1 ]; then
+  say "server 2 ($S2): upload, scripts"
+  upload "$S2"
+  sync_bin "$S2" >&2
+  [ ${#U2[@]} -gt 0 ] || remote "$S2" "sudo rm -f $INBOX/$(basename "$TARBALL") $INBOX/$(basename "$TARBALL").sha256"
+fi
+[ "$BIN" = 0 ] || done_note "scripts updated on both servers"
+
+# The maintenance window over the restarts, and the first of the two messages.
+if [ ${#U1[@]} -gt 0 ] || [ ${#U2[@]} -gt 0 ]; then
+  say "maintenance window: $TAG"
+  maint_open "$(IFS=,; echo "${U1[*]}${U1[*]:+${U2[*]:+,}}${U2[*]}")"
+  STARTED=1
+  where=""
+  if [ ${#U1[@]} -gt 0 ]; then where="$(IFS=,; echo "${U1[*]}" | sed 's/,/, /g') on server 1"; fi
+  if [ ${#U2[@]} -gt 0 ]; then where="${where:+$where; }executor on server 2"; fi
+  if [ "$WEB" = 1 ]; then where="$where; then the web"; fi
+  tell maintenance "$TAG started: $where. Health alerts about these are held until it is done (60 min at most); anything else alerts as always."
+fi
+
+if [ ${#U1[@]} -gt 0 ]; then
+  say "server 1 ($S1): ${U1[*]}"
+  t0=0
+  if want indexer; then
+    t0="$(remote "$S1" 'date +%s%3N')"
+    if [ "$NOTICE" = 1 ]; then
+      NOTICE_ID="$(status_cmd "maintenance 'Indexer update' --start=now --end=+30m --components=indexer 'Leaderboards, cohorts and the heatmap stay up; their figures may be a few minutes behind while the indexer restarts.'" | grep -o '#[0-9]*' | head -1 | tr -d '#')"
+      note "status page: maintenance #${NOTICE_ID:-?} posted"
     fi
-    release_on "$S1" "$(IFS=,; echo "${U1[*]}")"
-    if want indexer; then
-      note "waiting for the indexer's first build on $TAG"
-      # Up to 30 minutes for the first build, then up to 10 more for every stream to be whole.
-      built="" whole="" since=0
-      for i in $(seq 1 90); do
-        read -r at ms conf markets down < <(indexer_state || echo "0 0 -1 -1 ?")
-        if [ -z "$built" ] && [ "${at:-0}" -gt "$t0" ]; then built="$at"; since="$i"; note "boards built again $(( (at - t0) / 1000 )) s after the restart (that build: $(( ms / 1000 )) s)"; fi
-        if [ -n "$built" ] && [ "$down" = "-" ]; then whole=1; break; fi
-        if [ -n "$built" ] && [ $((i - since)) -ge 30 ]; then break; fi
-        sleep 20
-      done
-      if [ -n "$NOTICE_ID" ]; then
-        if [ -n "$whole" ]; then msg="Done: leaderboards and cohorts are current again."
-        elif [ -n "$built" ]; then
-          names="$(printf '%s' "$down" | sed 's/sodex/SoDEX/; s/hyperliquid/Hyperliquid/; s/tradexyz/trade.xyz/; s/arcus/Arcus/; s/,/, /g')"
-          if [ "${markets:--1}" -gt 0 ]; then names="${names/lighter/Lighter ($conf of $markets markets)}"; else names="${names/lighter/Lighter}"; fi
-          msg="Leaderboards and cohorts are current again. Still reconnecting: $names - their newest trades may show a few minutes late."
-        else msg="The indexer restarted; its first rebuild is taking longer than usual."; fi
-        status_cmd "resolve $NOTICE_ID '$msg'" >/dev/null && note "status page: maintenance #$NOTICE_ID completed"
-      fi
-      [ -n "$built" ] || note "!! no board build within 30 minutes of the restart - check the indexer (deploy/release/remote.sh logs indexer)"
+  fi
+  release_on "$S1" "$(IFS=,; echo "${U1[*]}")"
+  if want api; then done_note "api back"; fi
+  if want indexer; then
+    note "waiting for the indexer's first build on $TAG"
+    # Up to 30 minutes for the first build, then up to 10 more for every stream to be whole.
+    built="" whole="" since=0
+    for i in $(seq 1 90); do
+      read -r at ms conf markets down < <(indexer_state || echo "0 0 -1 -1 ?")
+      if [ -z "$built" ] && [ "${at:-0}" -gt "$t0" ]; then built="$at"; since="$i"; note "boards built again $(( (at - t0) / 1000 )) s after the restart (that build: $(( ms / 1000 )) s)"; fi
+      if [ -n "$built" ] && [ "$down" = "-" ]; then whole=1; break; fi
+      if [ -n "$built" ] && [ $((i - since)) -ge 30 ]; then break; fi
+      sleep 20
+    done
+    if [ -n "$NOTICE_ID" ]; then
+      if [ -n "$whole" ]; then msg="Done: leaderboards and cohorts are current again."
+      elif [ -n "$built" ]; then
+        names="$(printf '%s' "$down" | sed 's/sodex/SoDEX/; s/hyperliquid/Hyperliquid/; s/tradexyz/trade.xyz/; s/arcus/Arcus/; s/,/, /g')"
+        if [ "${markets:--1}" -gt 0 ]; then names="${names/lighter/Lighter ($conf of $markets markets)}"; else names="${names/lighter/Lighter}"; fi
+        msg="Leaderboards and cohorts are current again. Still reconnecting: $names - their newest trades may show a few minutes late."
+      else msg="The indexer restarted; its first rebuild is taking longer than usual."; fi
+      status_cmd "resolve $NOTICE_ID '$msg'" >/dev/null && note "status page: maintenance #$NOTICE_ID completed"
+    fi
+    if [ -n "$built" ]; then
+      done_note "indexer: boards built again $(( (built - t0) / 1000 )) s after the restart$([ -n "$whole" ] && echo ", every stream up" || echo ", still reconnecting: $down")"
+    else
+      note "!! no board build within 30 minutes of the restart - check the indexer (deploy/release/remote.sh logs indexer)"
+      done_note "indexer: NO board build within 30 minutes of the restart - check it (deploy/release/remote.sh logs indexer)"
+      WARNED=1
     fi
   fi
 fi
@@ -359,6 +436,8 @@ exec_rollback() {   # why
     fi
     sleep 2
   done
+  # Held longer than an update now: an operator's brake (Telegram "🛑 BRAKE"), in words for followers.
+  remote "$S2" "sudo bash /opt/valuescan/bin/brake.sh on copies,algos 'An update of the copy executor did not go through: copies and algos are held until it is fixed. Stops resting on SoDEX stay.'" >&2 || true
   die "executor: $TAG rolled back but the executor is NOT healthy ($h). The brake stays ON: copies and algos are held. Now: docs/INCIDENT-RUNBOOK.md"
 }
 ship_executor() {
@@ -380,9 +459,10 @@ ship_executor() {
     [ "$(exec_health | json 'v && v.queue ? v.queue.waiting + v.queue.inFlight : 0')" = 0 ] && break
     sleep 2
   done
-  # e. the brake over the restart: the new process sends nothing until it is checked
+  # e. the brake over the restart: the new process sends nothing until it is checked. Planned work
+  #    (--maintenance): neither brake.sh nor the executor tells Telegram of it - this ship's messages do.
   BRAKE0="$(remote "$S2" "cat $BRAKE_FILE 2>/dev/null || true")"
-  remote "$S2" "sudo bash /opt/valuescan/bin/brake.sh on copies,algos 'Updating the copy executor: copies and algos go on within a minute.'" >&2
+  remote "$S2" "sudo bash /opt/valuescan/bin/brake.sh on --maintenance copies,algos 'Updating the copy executor: copies and algos go on within a minute.'" >&2
   # f. switch and restart
   remote "$S2" "sudo /opt/valuescan/bin/release.sh $TAG --units=executor --from=$tb && sudo rm -f $tb $tb.sha256" >&2 || exec_rollback "it did not come back healthy"
   # g. the same copies and algos and its SoDEX feed up, then trading as it was
@@ -394,14 +474,16 @@ ship_executor() {
   [ -n "$ok" ] || exec_rollback "after 90 s it reports $(counts "$h1") (before: $(counts "$h")), healthy: $(exec_healthy "$h1")"
   restore_brake
   note "executor on $TAG: $(counts "$h1"), the brake back as it was"
+  done_note "executor: $(counts "$h1") as before, the brake back as it was$([ -n "$BRAKE0" ] && echo " (ON: it was on before)")"
 }
 
-if [ ${#U2[@]} -gt 0 ] || [ "$BIN" = 1 ]; then
-  say "server 2 ($S2): ${U2[*]:-bin only}"
-  upload "$S2"
-  sync_bin "$S2" >&2
-  if [ ${#U2[@]} -gt 0 ]; then ship_executor; else remote "$S2" "sudo rm -f $INBOX/$(basename "$TARBALL") $INBOX/$(basename "$TARBALL").sha256"; fi
+if [ ${#U2[@]} -gt 0 ]; then
+  say "server 2 ($S2): executor"
+  ship_executor
 fi
+
+# The restarts are over: what fails from here on is a failure.
+maint_close
 
 # --- 7. the web -----------------------------------------------------------------------------------
 if [ "$MOVE_MAIN" = 1 ]; then
@@ -424,8 +506,15 @@ if [ "$MOVE_MAIN" = 1 ]; then
     rm -f "$OUT_DIR/site-check.html"
     [ "$code" = 200 ] || die "$SITE answers $code after the deployment"
     note "web live on $SITE"
+    done_note "web live"
   fi
 fi
 
 log_ship "ok"
-say "shipped $TAG in $(( ($(date -u +%s) - START) / 60 )) min: ${PARTS[*]:-}$([ "$BIN" = 1 ] && echo " bin")"
+took="$(( ($(date -u +%s) - START) / 60 ))"
+say "shipped $TAG in $took min: ${PARTS[*]:-}$([ "$BIN" = 1 ] && echo " bin")"
+if [ "$STARTED" = 1 ]; then
+  summary="$(printf '%s; ' ${DONE_NOTES[@]+"${DONE_NOTES[@]}"})"
+  if [ "$WARNED" = 1 ]; then tell failure "$TAG shipped in $took min, but not all is well: ${summary%; }"
+  else tell maintenance "$TAG done in $took min: ${summary%; }"; fi
+fi

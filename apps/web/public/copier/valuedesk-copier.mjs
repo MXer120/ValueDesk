@@ -2713,7 +2713,7 @@ var require_websocket = __commonJS({
        *     not to skip UTF-8 validation for text and close messages
        * @private
        */
-      setSocket(socket, head, options) {
+      setSocket(socket, head2, options) {
         const receiver = new Receiver2({
           allowSynchronousEvents: options.allowSynchronousEvents,
           binaryType: this.binaryType,
@@ -2740,7 +2740,7 @@ var require_websocket = __commonJS({
         sender.onerror = senderOnError;
         if (socket.setTimeout) socket.setTimeout(0);
         if (socket.setNoDelay) socket.setNoDelay();
-        if (head.length > 0) socket.unshift(head);
+        if (head2.length > 0) socket.unshift(head2);
         socket.on("close", socketOnClose);
         socket.on("data", socketOnData);
         socket.on("end", socketOnEnd);
@@ -3201,7 +3201,7 @@ var require_websocket = __commonJS({
           );
         }
       });
-      req.on("upgrade", (res, socket, head) => {
+      req.on("upgrade", (res, socket, head2) => {
         websocket.emit("upgrade", res);
         if (websocket.readyState !== WebSocket2.CONNECTING) return;
         req = websocket._req = null;
@@ -3261,7 +3261,7 @@ var require_websocket = __commonJS({
           }
           websocket._extensions[PerMessageDeflate2.extensionName] = perMessageDeflate;
         }
-        websocket.setSocket(socket, head, {
+        websocket.setSocket(socket, head2, {
           allowSynchronousEvents: opts.allowSynchronousEvents,
           generateMask: opts.generateMask,
           maxBufferedChunks: opts.maxBufferedChunks,
@@ -3680,8 +3680,8 @@ var require_websocket_server = __commonJS({
           this._removeListeners = addListeners(this._server, {
             listening: this.emit.bind(this, "listening"),
             error: this.emit.bind(this, "error"),
-            upgrade: (req, socket, head) => {
-              this.handleUpgrade(req, socket, head, emitConnection);
+            upgrade: (req, socket, head2) => {
+              this.handleUpgrade(req, socket, head2, emitConnection);
             }
           });
         }
@@ -3776,7 +3776,7 @@ var require_websocket_server = __commonJS({
        * @param {Function} cb Callback
        * @public
        */
-      handleUpgrade(req, socket, head, cb) {
+      handleUpgrade(req, socket, head2, cb) {
         socket.on("error", socketOnError);
         const key2 = req.headers["sec-websocket-key"];
         const upgrade = req.headers.upgrade;
@@ -3855,7 +3855,7 @@ var require_websocket_server = __commonJS({
                 protocols,
                 req,
                 socket,
-                head,
+                head2,
                 cb
               );
             });
@@ -3863,7 +3863,7 @@ var require_websocket_server = __commonJS({
           }
           if (!this.options.verifyClient(info)) return abortHandshake(socket, 401);
         }
-        this.completeUpgrade(extensions, key2, protocols, req, socket, head, cb);
+        this.completeUpgrade(extensions, key2, protocols, req, socket, head2, cb);
       }
       /**
        * Upgrade the connection to WebSocket.
@@ -3878,7 +3878,7 @@ var require_websocket_server = __commonJS({
        * @throws {Error} If called more than once with the same socket
        * @private
        */
-      completeUpgrade(extensions, key2, protocols, req, socket, head, cb) {
+      completeUpgrade(extensions, key2, protocols, req, socket, head2, cb) {
         if (!socket.readable || !socket.writable) return socket.destroy();
         if (socket[kWebSocket]) {
           throw new Error(
@@ -3912,7 +3912,7 @@ var require_websocket_server = __commonJS({
         this.emit("headers", headers, req);
         socket.write(headers.concat("\r\n").join("\r\n"));
         socket.removeListener("error", socketOnError);
-        ws.setSocket(socket, head, {
+        ws.setSocket(socket, head2, {
           allowSynchronousEvents: this.options.allowSynchronousEvents,
           maxBufferedChunks: this.options.maxBufferedChunks,
           maxFragments: this.options.maxFragments,
@@ -4176,6 +4176,13 @@ CREATE TABLE IF NOT EXISTS algos (id TEXT PRIMARY KEY, owner TEXT NOT NULL, json
 CREATE INDEX IF NOT EXISTS algos_owner ON algos (owner);
 CREATE TABLE IF NOT EXISTS algo_events (id TEXT PRIMARY KEY, algo_id TEXT NOT NULL, owner TEXT NOT NULL, at INTEGER NOT NULL, json TEXT NOT NULL) WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS algo_events_algo ON algo_events (algo_id, at);
+-- What a follower should hear of (copy-engine notices.ts: a copy halted, an algo failed or stopped...),
+-- read after signing in (GET /api/copy/v1/notices). Kept: nothing deletes them for being old.
+CREATE TABLE IF NOT EXISTS notices (
+  owner TEXT NOT NULL, id TEXT NOT NULL, source TEXT NOT NULL, ref TEXT NOT NULL, kind TEXT NOT NULL, grade TEXT NOT NULL,
+  title TEXT NOT NULL, body TEXT NOT NULL, at INTEGER NOT NULL, paper INTEGER NOT NULL,
+  PRIMARY KEY (owner, id)) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS notices_at ON notices (owner, at);
 CREATE TABLE IF NOT EXISTS audit (
   seq INTEGER PRIMARY KEY AUTOINCREMENT,
   at INTEGER NOT NULL,
@@ -4460,6 +4467,31 @@ var ExecutorDb = class {
       if (/UNIQUE/i.test(String(e))) return false;
       throw e;
     }
+  }
+  /** A notice for its wallet, once (its id). Never throws: a notice must not stop what raised it. */
+  addNotice(n) {
+    try {
+      this.q("INSERT OR IGNORE INTO notices (owner, id, source, ref, kind, grade, title, body, at, paper) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(n.owner, n.id, n.source, n.ref, n.kind, n.grade, n.title, n.body, n.at, n.paper ? 1 : 0);
+    } catch {
+    }
+  }
+  /** A wallet's notices, newest first: up to `limit` (200 at most) before `before`, of `grades` (all when empty). */
+  notices(owner, q = {}) {
+    const grades = (q.grades ?? []).filter((g2) => g2 === "info" || g2 === "warn" || g2 === "error");
+    const gradeSql = grades.length ? ` AND grade IN (${grades.map(() => "?").join(", ")})` : "";
+    const limit = Math.max(1, Math.min(200, Math.floor(q.limit ?? 100)));
+    return this.db.prepare(`SELECT * FROM notices WHERE owner = ? AND at < ?${gradeSql} ORDER BY at DESC LIMIT ?`).all(owner, q.before ?? Number.MAX_SAFE_INTEGER, ...grades, limit).map((r) => ({
+      id: String(r.id),
+      owner: String(r.owner),
+      source: String(r.source),
+      ref: String(r.ref),
+      kind: String(r.kind),
+      grade: String(r.grade),
+      title: String(r.title),
+      body: String(r.body),
+      at: Number(r.at),
+      paper: Number(r.paper) === 1
+    }));
   }
   consents(owner, limit = 200) {
     return this.q("SELECT * FROM consents WHERE owner = ? ORDER BY seq DESC LIMIT ?").all(owner, limit).map((r) => ({
@@ -6543,9 +6575,9 @@ function weierstrass(curveDef) {
     },
     fromBytes(bytes) {
       const len = bytes.length;
-      const head = bytes[0];
+      const head2 = bytes[0];
       const tail = bytes.subarray(1);
-      if (len === compressedLen && (head === 2 || head === 3)) {
+      if (len === compressedLen && (head2 === 2 || head2 === 3)) {
         const x = bytesToNumberBE(tail);
         if (!inRange(x, _1n5, Fp.ORDER))
           throw new Error("Point is not on curve");
@@ -6558,11 +6590,11 @@ function weierstrass(curveDef) {
           throw new Error("Point is not on curve" + suffix);
         }
         const isYOdd = (y & _1n5) === _1n5;
-        const isHeadOdd = (head & 1) === 1;
+        const isHeadOdd = (head2 & 1) === 1;
         if (isHeadOdd !== isYOdd)
           y = Fp.neg(y);
         return { x, y };
-      } else if (len === uncompressedLen && head === 4) {
+      } else if (len === uncompressedLen && head2 === 4) {
         const x = Fp.fromBytes(tail.subarray(0, Fp.BYTES));
         const y = Fp.fromBytes(tail.subarray(Fp.BYTES, 2 * Fp.BYTES));
         return { x, y };
@@ -7978,18 +8010,18 @@ var Secrets = class {
     return createHmac("sha256", this.sessionKey).update(body).digest("base64url");
   }
 };
-function plainOf(head, final) {
+function plainOf(head2, final) {
   let tail;
   try {
     tail = final();
   } catch (e) {
-    head.fill(0);
+    head2.fill(0);
     throw e;
   }
-  const out = new Uint8Array(head.length + tail.length);
-  out.set(head, 0);
-  out.set(tail, head.length);
-  head.fill(0);
+  const out = new Uint8Array(head2.length + tail.length);
+  out.set(head2, 0);
+  out.set(tail, head2.length);
+  head2.fill(0);
   tail.fill(0);
   return out;
 }
@@ -10196,1143 +10228,230 @@ var PaperSink = class {
   }
 };
 
-// ../../packages/copy-engine/src/runtime.ts
-var RECONCILE_MS = 6e4;
-var FOLLOWER_REFRESH_MS = 3e4;
-var GUARD_MS = 2e3;
-var READY_CHECK_MS = 10 * 6e4;
-var MARKETS_REFRESH_MS = 10 * 6e4;
-var PENDING_MS = 3e4;
-var CONFIRM_UNAVAILABLE = '"Ask me each time" needs a copier that can ask you (the browser copier). Choose automatic approval to copy here.';
-var QUIET_SKIPS = /* @__PURE__ */ new Set(["duplicate", "at-target", "no-follower-position", "spot-not-copied"]);
-var lk = (l) => `${l.venue}:${l.address.toLowerCase()}`;
-function shuffle(a) {
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a;
-}
-var CopyRuntime = class {
-  constructor(host2) {
-    this.host = host2;
-  }
-  host;
-  markets = new MarketBook();
-  leaders = new LeaderBook();
-  subs = /* @__PURE__ */ new Map();
-  states = /* @__PURE__ */ new Map();
-  followers = /* @__PURE__ */ new Map();
-  followerAccounts = /* @__PURE__ */ new Map();
-  sodexIds = /* @__PURE__ */ new Map();
-  queues = /* @__PURE__ */ new Map();
-  pending = [];
-  /** `${subId}|${symbol}` -> the last order that opened or added, so a fill the stream missed is still adopted. */
-  recentGrow = /* @__PURE__ */ new Map();
-  leverageSet = /* @__PURE__ */ new Map();
-  refreshTimers = /* @__PURE__ */ new Map();
-  stopTimers = /* @__PURE__ */ new Map();
-  timers = [];
-  sodexFeed = null;
-  hlFeed = null;
-  hlCoins = [];
-  running = false;
-  feedUp = { sodex: false, hyperliquid: false };
-  dirty = /* @__PURE__ */ new Set();
-  /* ------------------------------------------------------------ lifecycle ----- */
-  async start() {
-    if (this.running) return;
-    this.running = true;
-    await this.loadMarkets();
-    const restored = [];
-    for (const s of await this.host.store.subscriptions()) {
-      this.subs.set(s.id, s);
-      const saved = await this.host.store.state(s.id);
-      this.states.set(s.id, saved ?? freshState(s.id, s.settings.allocationUsd));
-      if (saved) restored.push(s.id);
-    }
-    this.sodexFeed = new SodexFeed({
-      network: this.host.network,
-      factory: this.host.factory,
-      book: this.leaders,
-      log: this.host.log,
-      symbols: () => this.markets.all().map((m) => m.name),
-      sink: {
-        leader: (e) => this.onLeaderEvent(e),
-        follower: (f) => this.onFollowerFill(f),
-        mark: (s, p, at) => this.markets.setMark(s, p, at),
-        state: (_f, up) => {
-          this.feedUp.sodex = up;
-          if (up) void this.reconcileAll();
-        }
-      }
-    });
-    this.sodexFeed.start();
-    await this.syncFeeds();
-    for (const s of [...this.subs.values()]) await this.applyLocalRules(s.id);
-    for (const id of restored) this.catchUp(id);
-    for (const s of this.subs.values()) if (this.live(s)) void this.checkReady(s);
-    this.timers.push(
-      timers.every(RECONCILE_MS, () => void this.reconcileAll()),
-      timers.every(FOLLOWER_REFRESH_MS, () => void this.refreshAllFollowers()),
-      timers.every(GUARD_MS, () => void this.runGuards()),
-      timers.every(READY_CHECK_MS, () => {
-        for (const s of this.subs.values()) if (this.live(s)) void this.checkReady(s);
-      }),
-      timers.every(MARKETS_REFRESH_MS, () => void this.loadMarkets().then(() => this.sodexFeed?.refreshSymbols())),
-      timers.every(5e3, () => void this.flush())
-    );
-    void this.reconcileAll();
-    void this.refreshAllFollowers();
-  }
-  async stop() {
-    this.running = false;
-    for (const t of this.timers) timers.cancel(t);
-    this.timers = [];
-    for (const t of this.refreshTimers.values()) timers.cancel(t);
-    for (const t of this.stopTimers.values()) timers.cancel(t);
-    this.sodexFeed?.stop();
-    this.hlFeed?.stop();
-    await Promise.allSettled([...this.queues.values()]);
-    await this.flush();
-  }
-  /* ------------------------------------------------------- subscriptions ----- */
-  get(id) {
-    return this.subs.get(id) ?? null;
-  }
-  list(owner) {
-    return [...this.subs.values()].filter((s) => !owner || s.owner === owner.toLowerCase());
-  }
-  /**
-   * Start a subscription. The leader is read now: positions it already holds
-   * are joined (copyExisting) or left alone until it is flat on them.
-   */
-  async add(sub) {
-    const s = { ...sub, owner: sub.owner.toLowerCase() };
-    this.subs.set(s.id, s);
-    const st = freshState(s.id, s.settings.allocationUsd);
-    this.states.set(s.id, st);
-    await this.host.store.saveSubscription(s);
-    await this.syncFeeds();
-    await this.seedLeader(s.settings.leader);
-    const positions = this.leaders.positions(s.settings.leader);
-    st.leaderPos = { ...positions };
-    st.leaderEquity = this.leaders.equity(s.settings.leader)?.value ?? null;
-    st.leaderEquityAt = this.leaders.equity(s.settings.leader)?.at ?? null;
-    const now = Date.now();
-    if (!s.settings.copyExisting) {
-      for (const sym of Object.keys(positions)) st.detached[sym] = "pre-existing";
-    }
-    await this.host.store.saveState(st);
-    await this.activity(s, { kind: "status", reason: s.status, detail: s.settings.paper ? "Paper copy started." : "Copying started." });
-    await this.applyLocalRules(s.id);
-    if (this.live(s)) await this.checkReady(s);
-    if (s.settings.copyExisting) {
-      for (const [sym, size] of Object.entries(positions)) {
-        const price2 = this.priceFor(s.settings.leader.venue, sym) ?? 0;
-        this.dispatch(s, { leader: s.settings.leader, symbol: sym, before: 0, after: size, price: price2, time: now, id: `join:${sym}:${now}`, source: "reconcile" });
-      }
-    }
-    void this.refreshFollower(s.owner);
-    return s;
-  }
-  /** New rules for a running subscription (the leader cannot change: that is a new subscription). */
-  async update(id, patch) {
-    const s = this.need(id);
-    if (patch.settings && lk(patch.settings.leader) !== lk(s.settings.leader)) throw new Error("The trader of a copy cannot change; start a new copy instead.");
-    if (patch.settings && patch.settings.paper !== s.settings.paper) throw new Error("A copy cannot switch between paper and live; start a new copy instead.");
-    if (patch.settings && (patch.settings.direction ?? "copy") !== (s.settings.direction ?? "copy")) {
-      throw new Error("A copy cannot switch between copying and counter-trading; start a new copy instead.");
-    }
-    if (patch.settings?.approval === "confirm" && !this.host.confirm) throw new Error(CONFIRM_UNAVAILABLE);
-    if (patch.settings && patch.settings.allocationUsd !== s.settings.allocationUsd) {
-      const st = this.stateOf(s);
-      st.peakEquity = Math.max(0, st.peakEquity + patch.settings.allocationUsd - s.settings.allocationUsd);
-      this.dirty.add(id);
-    }
-    const next = { ...s, ...patch, updatedAt: Date.now() };
-    this.subs.set(id, next);
-    await this.host.store.saveSubscription(next);
-    await this.activity(next, { kind: "status", reason: "updated", detail: "Copy rules changed." });
-    await this.applyLocalRules(id);
-    const cur = this.need(id);
-    if (this.live(cur) && cur.status === "blocked") await this.checkReady(cur);
-    return this.need(id);
-  }
-  async setStatus(id, status, reason) {
-    const s = this.need(id);
-    if (s.status === "stopped" && status !== "stopped") throw new Error("A stopped copy cannot be restarted; start a new copy.");
-    if (s.status === status && s.statusReason === reason) return s;
-    const next = { ...s, status, statusReason: reason, updatedAt: Date.now() };
-    this.subs.set(id, next);
-    await this.host.store.saveSubscription(next);
-    await this.activity(next, { kind: "status", reason: status, detail: reason });
-    if (status === "active") void this.refreshFollower(next.owner);
-    if (status === "stopped") await this.syncFeeds();
-    this.host.onChange?.(id);
-    return next;
-  }
-  pause = (id) => this.setStatus(id, "paused", "Paused by you.");
-  async resume(id) {
-    const s = this.need(id);
-    if (s.status === "halted" || s.status === "blocked") {
-      if (s.status === "halted") {
-        const st = this.stateOf(s);
-        st.peakEquity = copyEquity(s.settings, st, (m) => this.markets.mark(m));
-        this.dirty.add(s.id);
-      }
-    }
-    const next = await this.setStatus(id, "active", null);
-    await this.applyLocalRules(id);
-    if (this.live(next)) await this.checkReady(this.need(id));
-    this.enqueue(next.owner, () => this.closeStrays(id));
-    return this.need(id);
-  }
-  /**
-   * Stop a copy for good. With `close`, its positions are closed at the market (reduce-only);
-   * it says "positions closed" only for positions known to be flat, and the SoDEX stop-loss of
-   * a position that may still be open is kept. Without `close`, the positions and their SoDEX
-   * stops stay as they are (the copier no longer manages them).
-   */
-  async stopCopy(id, o) {
-    const s = this.need(id);
-    if (!o.close) return this.setStatus(id, "stopped", "Stopped by you; positions kept.");
-    const open = await this.closeAll(s, "stop-all");
-    const keep = new Set(open);
-    this.cancelStopsWhere(s, (sym) => !keep.has(sym));
-    return this.setStatus(
-      id,
-      "stopped",
-      open.length ? `Stopped by you; not confirmed closed: ${open.join(", ")}. ${open.length > 1 ? "They" : "It"} may still be open on SoDEX, with any stop-loss the copier placed there; check your SoDEX account.` : "Stopped by you; positions closed."
-    );
-  }
-  /** The kill switch: every copy of `owner` stops. */
-  async stopAll(owner, o) {
-    const out = [];
-    for (const s of this.list(owner)) if (s.status !== "stopped") out.push(await this.stopCopy(s.id, o));
-    return out;
-  }
-  view(id) {
-    const s = this.subs.get(id);
-    if (!s) return null;
-    const st = this.stateOf(s);
-    const markOf = (m) => this.markets.mark(m, 10 * 6e4);
-    const equity = copyEquity(s.settings, st, markOf);
-    const policy = this.host.policyFor(s);
-    const positions = Object.entries(st.owned).map(([sym, p]) => {
-      const mark = markOf(sym);
-      const m = this.markets.get(sym);
-      const lev = m ? effectiveLeverage(s.settings.maxLeverage, policy, m.maxLeverage) : s.settings.maxLeverage;
-      return {
-        symbol: sym,
-        size: p.size,
-        entry: p.entry,
-        mark,
-        notionalUsd: Math.abs(p.size) * (mark ?? p.entry),
-        unrealizedPnl: mark === null ? 0 : p.size * (mark - p.entry),
-        stopLoss: guardTrigger("stop-loss", p, s.settings, lev),
-        takeProfit: guardTrigger("take-profit", p, s.settings, lev)
-      };
-    });
-    const gross = grossNotional(st, markOf);
-    const peak = Math.max(st.peakEquity, equity);
-    return {
-      subscription: s,
-      equity,
-      pnl: equity - s.settings.allocationUsd,
-      pnlPct: s.settings.allocationUsd > 0 ? (equity - s.settings.allocationUsd) / s.settings.allocationUsd : 0,
-      realizedPnl: st.realizedPnl,
-      unrealizedPnl: unrealized(st, markOf),
-      fees: st.fees,
-      grossNotional: gross,
-      leverage: equity > 0 ? gross / equity : 0,
-      peakEquity: peak,
-      drawdownPct: peak > 0 ? Math.max(0, (peak - equity) / peak) : 0,
-      positions,
-      leader: { positions: this.leaders.positions(s.settings.leader), equity: this.leaders.equity(s.settings.leader)?.value ?? null },
-      orders: st.orders,
-      skips: st.skips,
-      lastEventAt: st.lastEventAt,
-      feeds: { sodex: this.feedUp.sodex, hyperliquid: this.hlFeed ? this.feedUp.hyperliquid : null }
-    };
-  }
-  /* --------------------------------------------------------------- events ----- */
-  onLeaderEvent(e) {
-    for (const s of shuffle(this.list())) {
-      if (lk(s.settings.leader) !== lk(e.leader)) continue;
-      if (s.status === "stopped") continue;
-      this.dispatch(s, e);
-    }
-  }
-  dispatch(s, e) {
-    const market = this.markets.sodexMarketFor(e.leader.venue, e.symbol);
-    const mark = market ? this.markets.mark(market.name) : null;
-    this.enqueue(s.owner, () => this.process(s.id, e, market, mark));
-  }
-  enqueue(owner, fn) {
-    const prev = this.queues.get(owner) ?? Promise.resolve();
-    const next = prev.then(fn).catch((err) => this.host.log.error("copy: a step failed", { owner, error: String(err) }));
-    this.queues.set(owner, next);
-    void next.finally(() => {
-      if (this.queues.get(owner) === next) this.queues.delete(owner);
-    });
-  }
-  async process(subId, e, market, mark) {
-    let s = this.subs.get(subId);
-    if (!s || s.status === "stopped") return;
-    if (s.status === "active" && this.localProblem(s)) {
-      await this.applyLocalRules(s.id);
-      s = this.need(subId);
-    }
-    const st = this.stateOf(s);
-    const markOf = (sym) => market && sym === market.name && mark !== null ? mark : this.markets.mark(sym);
-    const plan = planLeaderEvent({
-      sub: s,
-      state: st,
-      event: e,
-      market,
-      markOf,
-      policy: this.host.policyFor(s),
-      heldBy: market ? this.heldBy(s, market.name) : "nobody",
-      // A paper copy is not gated on the follower's real account.
-      follower: this.live(s) ? this.followers.get(s.owner) ?? null : null,
-      inFlight: this.inFlightOf(s.id)
-    });
-    st.leaderPos[e.symbol] = plan.leaderAfter;
-    if (plan.leaderAfter === 0) delete st.leaderPos[e.symbol];
-    if (plan.attach) delete st.detached[e.symbol];
-    if (plan.detach) st.detached[e.symbol] = plan.detach;
-    if (plan.skip !== "duplicate") noteSeen(st, e.id);
-    st.lastEventAt = e.time;
-    const leader = { symbol: e.symbol, before: e.before ?? 0, after: e.after, price: e.price, time: e.time };
-    if (!plan.intents.length) {
-      if (plan.skip && plan.skip !== "duplicate") st.skips++;
-      if (plan.skip && !QUIET_SKIPS.has(plan.skip)) await this.activity(s, { kind: "skip", reason: plan.skip, symbol: market?.name ?? e.symbol, leader });
-      this.dirty.add(s.id);
-      return;
-    }
-    if (s.settings.approval === "confirm" && this.host.confirm) {
-      let yes = false;
-      try {
-        yes = await this.host.confirm(s, plan.intents, e);
-      } catch {
-        yes = false;
-      }
-      if (!yes) {
-        st.skips++;
-        await this.activity(s, { kind: "skip", reason: "declined", symbol: market.name, leader });
-        this.dirty.add(s.id);
-        return;
-      }
-    }
-    await this.execute(s, market, plan.intents, markOf(market.name) ?? e.price, leader);
-    if (plan.skip && !QUIET_SKIPS.has(plan.skip)) await this.activity(s, { kind: "skip", reason: plan.skip, symbol: market.name, leader });
-  }
-  /** Who holds the follower's position on `symbol` when this copy does not. */
-  heldBy(s, symbol2) {
-    if (this.stateOf(s).owned[symbol2]) return "nobody";
-    for (const o of this.list(s.owner)) {
-      if (o.id === s.id || o.status === "stopped") continue;
-      if (o.settings.paper !== s.settings.paper) continue;
-      if (this.stateOf(o).owned[symbol2]) return "other-copy";
-    }
-    if (s.settings.paper) return "nobody";
-    const f = this.followers.get(s.owner);
-    return f?.positions[symbol2] ? "follower" : "nobody";
-  }
-  async execute(s, market, intents, reference, leader) {
-    const st = this.stateOf(s);
-    const sink = this.host.sinkFor(s);
-    if (!sink) {
-      if (s.status === "active") await this.setStatus(s.id, "blocked", "The copy key is not available here.");
-      return [];
-    }
-    const brake = sink.paper ? null : this.host.brake?.(s) ?? null;
-    if (brake) {
-      await this.activity(s, { kind: "error", reason: "brake", symbol: market.name, detail: `Not copied: ${brake}`, leader });
-      this.dirty.add(s.id);
-      return [];
-    }
-    const builder = await this.host.builderFor(s).catch(() => null);
-    let send = intents;
-    if (!sink.paper && intents.some((i) => !i.reduceOnly) && !await this.ensureLeverage(s, market, sink)) {
-      send = intents.filter((i) => i.reduceOnly);
-      const lev = effectiveLeverage(s.settings.maxLeverage, this.host.policyFor(s), market.maxLeverage);
-      await this.activity(s, {
-        kind: "error",
-        reason: "leverage-not-set",
-        symbol: market.name,
-        detail: `SoDEX did not take the copy's leverage (${lev}x) on ${market.name}; nothing is opened or added there until it does.`,
-        leader
-      });
-      if (!send.length) {
-        this.dirty.add(s.id);
-        return [];
-      }
-    }
-    const results = await sink.place(s.accountId, market, send, builder, reference);
-    for (let i = 0; i < send.length; i++) {
-      const it = send[i];
-      const r = results[i] ?? { clOrdID: it.clOrdID, ok: false, orderId: null, error: "no result", outcomeUnknown: false };
-      st.orders += r.ok ? 1 : 0;
-      await this.activity(s, {
-        kind: r.ok ? "order" : "error",
-        reason: r.ok ? it.leg : r.outcomeUnknown ? "outcome-unknown" : "rejected",
-        detail: r.ok ? it.clampedBy ? `Smaller than the rule asked: ${it.clampedBy}.` : null : r.error,
-        symbol: it.symbol,
-        side: it.side,
-        size: Number(it.quantity),
-        price: Number(it.limitPrice),
-        notionalUsd: it.notionalUsd,
-        reduceOnly: it.reduceOnly,
-        clOrdID: it.clOrdID,
-        orderId: r.orderId,
-        builderFee: builder?.fee ?? 0,
-        leader
-      });
-      if (r.paperFill) {
-        const fee = r.paperFill.qty * r.paperFill.price * (market.takerFee + (builder?.fee ?? 0) / 1e5);
-        this.fillBooks(s, it.symbol, it.side, r.paperFill.qty, r.paperFill.price, fee, it.reduceOnly);
-        await this.activity(s, {
-          kind: "fill",
-          reason: it.leg,
-          symbol: it.symbol,
-          side: it.side,
-          size: r.paperFill.qty,
-          price: r.paperFill.price,
-          notionalUsd: r.paperFill.qty * r.paperFill.price,
-          reduceOnly: it.reduceOnly,
-          clOrdID: it.clOrdID,
-          builderFee: builder?.fee ?? 0,
-          leader
-        });
-      } else if (r.ok || r.outcomeUnknown) {
-        if (!it.reduceOnly) this.recentGrow.set(`${s.id}|${it.symbol}`, { side: it.side, at: Date.now() });
-        this.pending.push({
-          subId: s.id,
-          symbol: it.symbol,
-          side: it.side,
-          reduceOnly: it.reduceOnly,
-          remaining: Number(it.quantity),
-          clOrdID: it.clOrdID,
-          until: Date.now() + PENDING_MS,
-          builderFee: builder?.fee ?? 0,
-          leg: it.leg
-        });
-      }
-    }
-    if (!sink.paper) this.scheduleRefresh(s.owner, 1500);
-    this.dirty.add(s.id);
-    this.host.onChange?.(s.id);
-    return results;
-  }
-  /** Apply a fill to the copy's books; a reduce-only fill never opens the other side. */
-  fillBooks(s, symbol2, side, qty2, price2, fee, reduceOnly) {
-    const st = this.stateOf(s);
-    let q = qty2;
-    if (reduceOnly) {
-      const held2 = Math.abs(st.owned[symbol2]?.size ?? 0);
-      q = Math.min(q, held2);
-      if (!(q > 0)) return;
-    }
-    applyFill(st, symbol2, side, q, price2, fee, Date.now());
-    const left = st.owned[symbol2];
-    const m = this.markets.get(symbol2);
-    if (reduceOnly && left && m && floorQuantity(left.size, m) === "0") {
-      st.realizedPnl += left.size * (price2 - left.entry);
-      delete st.owned[symbol2];
-    }
-    if (st.owned[symbol2]) this.recentGrow.delete(`${s.id}|${symbol2}`);
-    this.dirty.add(s.id);
-    if (!s.settings.paper) this.scheduleStops(s, symbol2);
-  }
-  onFollowerFill(f) {
-    if (!f.taker) return;
-    const now = Date.now();
-    this.pending = this.pending.filter((p) => p.until > now && p.remaining > 1e-12);
-    let left = f.qty;
-    for (const p of this.pending) {
-      if (left <= 0) break;
-      if (p.symbol !== f.symbol || p.side !== f.side) continue;
-      const s = this.subs.get(p.subId);
-      if (!s || s.accountId !== f.accountId) continue;
-      const q = Math.min(left, p.remaining);
-      p.remaining -= q;
-      left -= q;
-      const m = this.markets.get(p.symbol);
-      const fee = q * f.price * ((m?.takerFee ?? 4e-4) + p.builderFee / 1e5);
-      this.fillBooks(s, p.symbol, p.side, q, f.price, fee, p.reduceOnly);
-      void this.activity(s, {
-        kind: "fill",
-        reason: p.leg,
-        symbol: p.symbol,
-        side: p.side,
-        size: q,
-        price: f.price,
-        notionalUsd: q * f.price,
-        reduceOnly: p.reduceOnly,
-        clOrdID: p.clOrdID,
-        builderFee: p.builderFee
-      });
-      this.host.onChange?.(s.id);
-    }
-  }
-  /* ------------------------------------------------------------- follower ----- */
-  scheduleRefresh(owner, ms) {
-    if (this.refreshTimers.has(owner)) return;
-    this.refreshTimers.set(
-      owner,
-      timers.after(ms, () => {
-        this.refreshTimers.delete(owner);
-        void this.refreshFollower(owner);
-      })
-    );
-  }
-  async refreshAllFollowers() {
-    const owners = new Set(this.list().filter((s) => this.live(s) && s.status !== "stopped").map((s) => s.owner));
-    for (const o of owners) await this.refreshFollower(o);
-  }
-  /** Re-read the follower's account; the copy's positions follow what SoDEX says. */
-  async refreshFollower(owner) {
-    const subs = this.list(owner).filter((s) => this.live(s) && s.status !== "stopped");
-    if (!subs.length) return;
-    let snap;
-    try {
-      snap = await this.host.sodex.follower(owner);
-    } catch (e) {
-      this.host.log.warn("copy: follower read failed", { owner, error: String(e) });
-      return;
-    }
-    this.followers.set(owner, snap);
-    if (snap.accountId) this.followerAccounts.set(snap.accountId, owner);
-    this.sodexFeed?.setFollowers([...this.followerAccounts.keys()]);
-    const now = Date.now();
-    const inFlight = (subId, sym) => this.pending.some((x) => x.subId === subId && x.symbol === sym && x.until > now && x.remaining > 1e-12);
-    for (const s of subs) {
-      const st = this.stateOf(s);
-      for (const [k, g2] of this.recentGrow) {
-        if (!k.startsWith(`${s.id}|`)) continue;
-        const sym = k.slice(s.id.length + 1);
-        if (now - g2.at > 10 * 6e4) {
-          this.recentGrow.delete(k);
-          continue;
-        }
-        const actual = snap.positions[sym];
-        if (st.owned[sym] || !actual || inFlight(s.id, sym) || Math.sign(actual.size) !== (g2.side === "buy" ? 1 : -1)) continue;
-        if (this.list(s.owner).some((o) => o.id !== s.id && this.states.get(o.id)?.owned[sym])) continue;
-        st.owned[sym] = { size: actual.size, entry: actual.entry, openedAt: g2.at };
-        this.recentGrow.delete(k);
-        this.scheduleStops(s, sym);
-        this.dirty.add(s.id);
-      }
-      for (const [sym, p] of Object.entries(st.owned)) {
-        if (inFlight(s.id, sym)) continue;
-        const actual = snap.positions[sym];
-        const mark = this.markets.mark(sym) ?? p.entry;
-        if (!actual || Math.sign(actual.size) !== Math.sign(p.size)) {
-          st.realizedPnl += p.size * (mark - p.entry);
-          delete st.owned[sym];
-          this.recentGrow.delete(`${s.id}|${sym}`);
-          const why = this.closedWhy(s, p, mark, sym);
-          for (const lsym of this.leaderSymbolsFor(s, sym)) if (st.leaderPos[lsym]) st.detached[lsym] = why;
-          this.cancelStops(s, sym);
-          await this.activity(s, {
-            kind: "status",
-            reason: why === "own-position" ? "closed-outside" : why,
-            symbol: sym,
-            detail: why === "own-position" ? "This copied position was closed outside the copier (by you, or by SoDEX). It resumes when the leader is flat." : `Your ${why} closed this copied position.`
-          });
-          this.dirty.add(s.id);
-        } else if (Math.abs(actual.size - p.size) > 1e-12 * Math.max(1, Math.abs(p.size))) {
-          st.owned[sym] = { size: actual.size, entry: actual.entry || p.entry, openedAt: p.openedAt };
-          this.scheduleStops(s, sym);
-          this.dirty.add(s.id);
-        }
-      }
-    }
-  }
-  closedWhy(s, p, mark, sym) {
-    const m = this.markets.get(sym);
-    const lev = m ? effectiveLeverage(s.settings.maxLeverage, this.host.policyFor(s), m.maxLeverage) : s.settings.maxLeverage;
-    const sl = guardTrigger("stop-loss", p, s.settings, lev);
-    const tp = guardTrigger("take-profit", p, s.settings, lev);
-    if (sl !== null && (p.size > 0 ? mark <= sl * 1.002 : mark >= sl * 0.998)) return "stop-loss";
-    if (tp !== null && (p.size > 0 ? mark >= tp * 0.998 : mark <= tp * 1.002)) return "take-profit";
-    return "own-position";
-  }
-  /** Leader symbols (in this copy's books) that map to a SoDEX market. */
-  leaderSymbolsFor(s, sodexSymbol) {
-    const st = this.stateOf(s);
-    return Object.keys(st.leaderPos).filter((l) => this.markets.sodexMarketFor(s.settings.leader.venue, l)?.name === sodexSymbol);
-  }
-  /**
-   * Set the copy's leverage and margin mode on the market before an order that opens or adds.
-   * Remembered only once SoDEX took it; a failure is tried once more at once, and then again
-   * before the next such order. False: not set (the caller sends nothing that opens).
-   */
-  async ensureLeverage(s, market, sink) {
-    const policy = this.host.policyFor(s);
-    const leverage = effectiveLeverage(s.settings.maxLeverage, policy, market.maxLeverage);
-    const k = `${s.owner}|${market.name}`;
-    const want = { leverage, margin: s.settings.marginMode };
-    const had = this.leverageSet.get(k);
-    if (had && had.leverage === want.leverage && had.margin === want.margin) return true;
-    if (this.followers.get(s.owner)?.positions[market.name] && !this.stateOf(s).owned[market.name]) return true;
-    for (let attempt = 0; attempt < 2; attempt++) {
-      try {
-        await sink.setLeverage(s.accountId, market, leverage, s.settings.marginMode);
-        this.leverageSet.set(k, want);
-        return true;
-      } catch (e) {
-        this.host.log.warn("copy: leverage not set", { owner: s.owner, symbol: market.name, leverage, attempt, error: String(e) });
-      }
-    }
-    this.leverageSet.delete(k);
-    return false;
-  }
-  /* --------------------------------------------------------------- guards ----- */
-  async runGuards() {
-    for (const s of this.list()) {
-      if (s.status === "stopped") continue;
-      const st = this.stateOf(s);
-      if (!Object.keys(st.owned).length) {
-        st.peakEquity = Math.max(st.peakEquity, copyEquity(s.settings, st, (m) => this.markets.mark(m)));
-        continue;
-      }
-      const g2 = planGuards({
-        sub: s,
-        state: st,
-        markets: (m) => this.markets.get(m),
-        markOf: (m) => this.markets.mark(m),
-        policy: this.host.policyFor(s),
-        now: Date.now()
-      });
-      if (g2.peak !== st.peakEquity) {
-        st.peakEquity = g2.peak;
-        this.dirty.add(s.id);
-      }
-      if (!g2.intents.length && !g2.halt) continue;
-      const now = Date.now();
-      const intents = g2.intents.filter((i) => !this.pending.some((p) => p.subId === s.id && p.symbol === i.symbol && p.reduceOnly && p.until > now));
-      const byMarket = /* @__PURE__ */ new Map();
-      for (const i of intents) byMarket.set(i.symbol, [...byMarket.get(i.symbol) ?? [], i]);
-      this.enqueue(s.owner, async () => {
-        for (const [sym, list] of byMarket) {
-          const m = this.markets.get(sym);
-          if (!m) continue;
-          const results = await this.execute(s, m, list, this.markets.mark(sym) ?? Number(list[0].limitPrice), null);
-          const why = g2.closed[sym];
-          if (why && results.some((r) => r.ok || r.outcomeUnknown)) for (const lsym of this.leaderSymbolsFor(s, sym)) st.detached[lsym] = why;
-        }
-        if (g2.halt) await this.setStatus(s.id, "halted", `Your drawdown stop (${Math.round((s.settings.drawdownStopPct ?? 0) * 100)}%) closed this copy.`);
-      });
-    }
-  }
-  /**
-   * Close every position of the copy at the market (reduce-only). Resolves with the markets
-   * not known to be flat afterwards: refused, unpriced, or (live) still on SoDEX when re-read.
-   */
-  async closeAll(s, leg) {
-    const st = this.stateOf(s);
-    const tag = `${leg}:${Date.now()}`;
-    return new Promise((resolve2) => {
-      this.enqueue(s.owner, async () => {
-        const open = [];
-        const sent = [];
-        try {
-          for (const [sym, p] of Object.entries(st.owned)) {
-            const m = this.markets.get(sym);
-            const mark = this.markets.mark(sym);
-            if (!m || mark === null) {
-              open.push(sym);
-              continue;
-            }
-            const q = floorQuantity(p.size, m);
-            if (q === "0") continue;
-            const side = p.size > 0 ? "sell" : "buy";
-            const clOrdID = clientOrderId(s.id, `${tag}:${sym}`, leg);
-            const [r] = await this.execute(s, m, [{ symbol: sym, side, quantity: q, limitPrice: limitPrice(side, mark, Math.max(100, s.settings.slippageBps), m, mark), reduceOnly: true, leg, notionalUsd: Number(q) * mark, clampedBy: null, clOrdID }], mark, null);
-            if (r?.paperFill) {
-              if (st.owned[sym]) open.push(sym);
-            } else if (r && (r.ok || r.outcomeUnknown)) sent.push(sym);
-            else open.push(sym);
-          }
-          if (sent.length) open.push(...await this.stillOpenOnSodex(s, sent));
-          resolve2(open);
-        } catch (e) {
-          resolve2([.../* @__PURE__ */ new Set([...open, ...sent, ...Object.keys(st.owned)])]);
-          throw e;
-        }
-      });
-    });
-  }
-  /** Of `symbols`, those the follower's SoDEX account still holds (re-read up to three times; unread counts as held). */
-  async stillOpenOnSodex(s, symbols) {
-    let open = symbols;
-    let read = false;
-    for (let attempt = 0; attempt < 3 && open.length; attempt++) {
-      if (attempt) await sleep(500);
-      try {
-        const snap = await this.host.sodex.follower(s.owner);
-        this.followers.set(s.owner, snap);
-        open = open.filter((sym) => !!snap.positions[sym]);
-        read = true;
-      } catch (e) {
-        this.host.log.warn("copy: follower read failed", { owner: s.owner, error: String(e) });
-      }
-    }
-    return read ? open : symbols;
-  }
-  /**
-   * Close what a copy holds where its leader is flat or on the other side (reduce-only): a
-   * close that filled only in part, a close missed while the copy was paused or while no
-   * copier ran. Not for a paused copy (its positions stay as they are), nor for a market with
-   * one of its orders in flight or a leader print still being merged (the stream is about to
-   * say more). A synchronous fill (paper) that leaves some open is tried again at once; a live
-   * close is booked from the stream, and what it leaves is tried at the next reconcile.
-   */
-  async closeStrays(subId) {
-    const s = this.subs.get(subId);
-    if (!s || s.status === "stopped" || s.status === "paused") return;
-    const l = s.settings.leader;
-    if (!this.leaders.seeded(l)) return;
-    const st = this.stateOf(s);
-    const dir = directionSign(s.settings);
-    const now = Date.now();
-    const want = /* @__PURE__ */ new Map();
-    const leaderSymbols = /* @__PURE__ */ new Map();
-    const book = this.leaders.positions(l);
-    for (const lsym of /* @__PURE__ */ new Set([...Object.keys(book), ...Object.keys(st.leaderPos)])) {
-      const m = this.markets.sodexMarketFor(l.venue, lsym);
-      if (!m) continue;
-      leaderSymbols.set(m.name, [...leaderSymbols.get(m.name) ?? [], lsym]);
-      if (book[lsym]) want.set(m.name, dir * Math.sign(book[lsym]));
-    }
-    const inFlight = this.inFlightOf(s.id);
-    for (const sym of Object.keys(st.owned)) {
-      const p0 = st.owned[sym];
-      if (!p0 || Math.abs(p0.size) < 1e-12) continue;
-      const expected = want.get(sym) ?? 0;
-      if (expected !== 0 && expected === Math.sign(p0.size)) continue;
-      if (inFlight[sym]) continue;
-      const lsyms = leaderSymbols.get(sym) ?? (l.venue === "sodex" ? [sym] : []);
-      if (lsyms.some((x) => this.leaders.isMerging(l, x))) continue;
-      const m = this.markets.get(sym);
-      const mark = this.markets.mark(sym);
-      if (!m || mark === null) continue;
-      for (let attempt = 0; attempt < 20; attempt++) {
-        const p = st.owned[sym];
-        if (!p) break;
-        const q = floorQuantity(p.size, m);
-        if (q === "0") break;
-        const side = p.size > 0 ? "sell" : "buy";
-        const clOrdID = clientOrderId(s.id, `sweep:${sym}:${now}:${attempt}`, "reconcile");
-        const intent = { symbol: sym, side, quantity: q, limitPrice: limitPrice(side, mark, s.settings.slippageBps, m, mark), reduceOnly: true, leg: "reconcile", notionalUsd: Number(q) * mark, clampedBy: null, clOrdID };
-        const [r] = await this.execute(s, m, [intent], mark, null);
-        if (!r?.paperFill || !(r.paperFill.qty > 0)) break;
-      }
-    }
-  }
-  /**
-   * After a restart: what the leader did while no copier ran. Every market where the saved
-   * leader position differs from the leader's position now is planned as a 'reconcile' event,
-   * as a missed print is while running - except a position opened meanwhile, which is
-   * pre-existing (joined only with "copy existing"), as when a copy starts.
-   */
-  catchUp(subId) {
-    const s = this.subs.get(subId);
-    if (!s || s.status === "stopped") return;
-    const l = s.settings.leader;
-    if (!this.leaders.seeded(l)) return;
-    const st = this.stateOf(s);
-    const now = Date.now();
-    const current = this.leaders.positions(l);
-    for (const sym of /* @__PURE__ */ new Set([...Object.keys(st.leaderPos), ...Object.keys(current)])) {
-      const before = st.leaderPos[sym] ?? 0;
-      const after = current[sym] ?? 0;
-      if (Math.abs(before - after) <= 1e-9 * Math.max(1, Math.abs(before), Math.abs(after))) continue;
-      if (before === 0 && !s.settings.copyExisting) {
-        st.leaderPos[sym] = after;
-        st.detached[sym] = "pre-existing";
-        this.dirty.add(s.id);
-        continue;
-      }
-      const price2 = this.priceFor(l.venue, sym) ?? 0;
-      this.dispatch(s, { leader: l, symbol: sym, before, after, price: price2, time: now, id: `restart:${sym}:${now}`, source: "reconcile" });
-    }
-  }
-  /** SoDEX symbol -> signed size of this copy's orders sent but not booked yet. */
-  inFlightOf(subId) {
-    const now = Date.now();
-    const out = {};
-    for (const p of this.pending) {
-      if (p.subId !== subId || p.until <= now || !(p.remaining > 1e-12)) continue;
-      out[p.symbol] = (out[p.symbol] ?? 0) + (p.side === "buy" ? p.remaining : -p.remaining);
-    }
-    return out;
-  }
-  /* -------------------------------------------------- SoDEX position stops ----- */
-  scheduleStops(s, symbol2) {
-    if (s.settings.paper || s.settings.stopLossPct === null && s.settings.takeProfitPct === null) return;
-    const k = `${s.id}|${symbol2}`;
-    timers.cancel(this.stopTimers.get(k));
-    this.stopTimers.set(
-      k,
-      timers.after(2e3, () => {
-        this.stopTimers.delete(k);
-        this.enqueue(s.owner, () => this.refreshStops(s.id, symbol2));
-      })
-    );
-  }
-  /** Keep one SoDEX stop-loss (and take-profit) per copied position, sized to it. */
-  async refreshStops(subId, symbol2) {
-    const s = this.subs.get(subId);
-    if (!s || s.status === "stopped") return;
-    const st = this.stateOf(s);
-    const sink = this.host.sinkFor(s);
-    const m = this.markets.get(symbol2);
-    if (!sink || sink.paper || !m) return;
-    const p = st.owned[symbol2];
-    const cur = st.stops[symbol2];
-    if (p && cur && Math.abs(cur.size - p.size) < 1e-12) return;
-    if (cur) {
-      for (const id of [cur.sl, cur.tp]) if (id) await sink.cancel(s.accountId, m, id).catch((e) => this.host.log.warn("copy: stop not cancelled", { id, error: String(e) }));
-      delete st.stops[symbol2];
-    }
-    if (!p) return;
-    const q = floorQuantity(p.size, m);
-    if (q === "0") return;
-    const lev = effectiveLeverage(s.settings.maxLeverage, this.host.policyFor(s), m.maxLeverage);
-    const builder = await this.host.builderFor(s).catch(() => null);
-    const next = { sl: null, tp: null, size: p.size, at: Date.now() };
-    for (const kind of ["stop-loss", "take-profit"]) {
-      const trigger = guardTrigger(kind, p, s.settings, lev);
-      if (trigger === null) continue;
-      const clOrdID = `vds-${bytesToHex2(keccak256(utf8(`${s.id}|${symbol2}|${kind}|${p.size}|${next.at}`))).slice(2, 26)}`;
-      const r = await sink.placeStop(s.accountId, m, { clOrdID, side: p.size > 0 ? "sell" : "buy", quantity: q, triggerPrice: snapPrice(trigger, m), kind }, builder);
-      if (r.ok) next[kind === "stop-loss" ? "sl" : "tp"] = clOrdID;
-      else await this.activity(s, { kind: "error", reason: `${kind}-not-placed`, symbol: symbol2, detail: r.error });
-    }
-    st.stops[symbol2] = next;
-    this.dirty.add(s.id);
-  }
-  cancelStops(s, symbol2) {
-    if (s.settings.paper || !this.stateOf(s).stops[symbol2]) return;
-    this.enqueue(s.owner, () => this.refreshStops(s.id, symbol2));
-  }
-  /** Cancel the SoDEX stops the copier placed on the markets `which` picks. */
-  cancelStopsWhere(s, which) {
-    for (const sym of Object.keys(this.stateOf(s).stops)) {
-      if (!which(sym)) continue;
-      this.enqueue(s.owner, async () => {
-        const st = this.stateOf(s);
-        const cur = st.stops[sym];
-        const sink = this.host.sinkFor(s);
-        const m = this.markets.get(sym);
-        if (!cur || !sink || !m) return;
-        for (const id of [cur.sl, cur.tp]) if (id) await sink.cancel(s.accountId, m, id).catch(() => {
-        });
-        delete st.stops[sym];
-        this.dirty.add(s.id);
-      });
-    }
-  }
-  /* ----------------------------------------------------------- readiness ----- */
-  /** A live copy needs its key registered and a builder approval covering the copy fee. */
-  async checkReady(s0) {
-    const s = this.subs.get(s0.id);
-    if (!s || s.settings.paper || s.status === "stopped" || s.status === "paused" || s.status === "halted") return;
-    let problem = this.localProblem(s);
-    if (!problem) {
-      try {
-        problem = await this.host.keyProblem?.(s) ?? null;
-        if (!problem) {
-          const builder = await this.host.builderFor(s);
-          if (builder) {
-            const approved = await this.host.sodex.builderApproval(s.owner, Number(builder.id));
-            if (approved === null || approved < builder.fee) {
-              problem = `Your SoDEX account does not approve the ValueDesk copy fee (${builder.fee / 10} bp). Approve it in copy setup.`;
-            }
-          }
-        }
-      } catch (e) {
-        this.host.log.warn("copy: readiness check failed", { sub: s.id, error: String(e) });
-        return;
-      }
-    }
-    const cur = this.subs.get(s.id);
-    if (!cur || cur.status === "stopped" || cur.status === "paused" || cur.status === "halted") return;
-    try {
-      if (problem && (cur.status !== "blocked" || cur.statusReason !== problem)) await this.setStatus(cur.id, "blocked", problem);
-      else if (!problem && cur.status === "blocked") await this.setStatus(cur.id, "active", null);
-    } catch (e) {
-      this.host.log.warn("copy: readiness status not set", { sub: cur.id, error: String(e) });
-    }
-  }
-  /** Why this copier may not trade a copy, known without asking SoDEX: the region, or "ask me each time" with nobody to ask. */
-  localProblem(s) {
-    const policy = this.host.policyFor(s);
-    if (!policy.allowed) return policy.reason ?? "Copy trading is not available in your region.";
-    if (s.settings.approval === "confirm" && !this.host.confirm) return CONFIRM_UNAVAILABLE;
-    return null;
-  }
-  /**
-   * Block a copy for a local problem. A paper copy blocked by one resumes once it is gone
-   * (a live one through checkReady, which also checks its key and fee approval).
-   */
-  async applyLocalRules(id) {
-    const s = this.subs.get(id);
-    if (!s || s.status === "stopped" || s.status === "paused" || s.status === "halted") return;
-    const problem = this.localProblem(s);
-    if (problem) {
-      if (s.status !== "blocked" || s.statusReason !== problem) await this.setStatus(id, "blocked", problem);
-    } else if (s.status === "blocked" && !this.live(s)) await this.setStatus(id, "active", null);
-  }
-  /* ------------------------------------------------------------- leaders ----- */
-  followedLeaders() {
-    const seen = /* @__PURE__ */ new Map();
-    for (const s of this.subs.values()) if (s.status !== "stopped") seen.set(lk(s.settings.leader), s.settings.leader);
-    return [...seen.values()];
-  }
-  /** Point the feeds at the followed leaders (and start Hyperliquid's when one is needed). */
-  async syncFeeds() {
-    const leaders = this.followedLeaders();
-    const sodex = [];
-    for (const l of leaders.filter((x) => x.venue === "sodex")) {
-      let id = this.sodexIds.get(l.address);
-      if (id === void 0) {
-        id = await this.host.sodex.accountId(l.address).catch(() => 0);
-        if (id) this.sodexIds.set(l.address, id);
-      }
-      sodex.push({ ref: l, accountId: id });
-    }
-    this.sodexFeed?.setLeaders(sodex);
-    const hl = leaders.filter((x) => x.venue === "hyperliquid");
-    if (hl.length && !this.hlFeed && this.running) {
-      if (this.host.hlMode === "firehose") this.hlCoins = await this.hyperliquidCoins();
-      this.hlFeed = new HyperliquidFeed({
-        factory: this.host.factory,
-        book: this.leaders,
-        mode: this.host.hlMode,
-        coins: () => this.hlCoins,
-        log: this.host.log,
-        sink: {
-          leader: (e) => this.onLeaderEvent(e),
-          state: (_f, up) => {
-            this.feedUp.hyperliquid = up;
-            if (up) void this.reconcileAll();
-          }
-        }
-      });
-      this.hlFeed.start();
-    }
-    this.hlFeed?.setLeaders(hl);
-    for (const l of leaders) if (!this.leaders.seeded(l)) await this.seedLeader(l);
-  }
-  async hyperliquidCoins() {
-    try {
-      const meta = await this.host.hyperliquid.post({ type: "meta" });
-      return (meta.universe ?? []).filter((u) => u.name && !u.isDelisted).map((u) => u.name);
-    } catch (e) {
-      this.host.log.warn("copy: hyperliquid coin list failed", { error: String(e) });
-      return [];
-    }
-  }
-  async readLeader(l) {
-    return l.venue === "sodex" ? this.host.sodex.leaderPositions(l.address) : this.host.hyperliquid.leaderPositions(l.address);
-  }
-  async seedLeader(l) {
-    if (this.leaders.seeded(l)) return;
-    try {
-      const r = await this.readLeader(l);
-      this.leaders.resync(l, r.positions, r.equity, r.marks, Date.now(), (sym) => this.priceFor(l.venue, sym));
-    } catch (e) {
-      this.host.log.warn("copy: leader read failed", { leader: lk(l), error: String(e) });
-    }
-  }
-  reconciling = false;
-  /** Re-read every followed leader: what the stream missed becomes a 'reconcile' event. */
-  async reconcileAll() {
-    if (this.reconciling || !this.running) return;
-    this.reconciling = true;
-    try {
-      for (const l of this.followedLeaders()) {
-        try {
-          const readStart = Date.now();
-          const r = await this.readLeader(l);
-          const events = this.leaders.resync(l, r.positions, r.equity, r.marks, Date.now(), (sym) => this.priceFor(l.venue, sym), readStart);
-          const eq = this.leaders.equity(l);
-          for (const s of this.list()) {
-            if (lk(s.settings.leader) !== lk(l)) continue;
-            const st = this.stateOf(s);
-            if (eq) {
-              st.leaderEquity = eq.value;
-              st.leaderEquityAt = eq.at;
-            }
-            st.lastReconcileAt = Date.now();
-            this.dirty.add(s.id);
-          }
-          for (const e of events) this.onLeaderEvent(e);
-          for (const s of this.list()) if (lk(s.settings.leader) === lk(l) && s.status !== "stopped") this.enqueue(s.owner, () => this.closeStrays(s.id));
-        } catch (e) {
-          this.host.log.warn("copy: reconcile read failed", { leader: lk(l), error: String(e) });
-        }
-      }
-    } finally {
-      this.reconciling = false;
-    }
-  }
-  /** A price for a leader market: the SoDEX mark of the market it maps to. */
-  priceFor(venue, leaderSymbol) {
-    const m = this.markets.sodexMarketFor(venue, leaderSymbol);
-    return m ? this.markets.mark(m.name, 10 * 6e4) : null;
-  }
-  async loadMarkets() {
-    try {
-      const list = await this.host.sodex.markets();
-      if (list.length) this.markets.load(list);
-      for (const p of await this.host.sodex.markPrices()) this.markets.setMark(p.symbol, p.price);
-    } catch (e) {
-      this.host.log.warn("copy: market list failed", { error: String(e) });
-    }
-  }
-  /* ---------------------------------------------------------------- books ----- */
-  stateOf(s) {
-    let st = this.states.get(s.id);
-    if (!st) this.states.set(s.id, st = freshState(s.id, s.settings.allocationUsd));
-    return st;
-  }
-  live(s) {
-    return !s.settings.paper;
-  }
-  need(id) {
-    const s = this.subs.get(id);
-    if (!s) throw new Error("No such copy.");
-    return s;
-  }
-  async flush() {
-    const ids = [...this.dirty];
-    this.dirty.clear();
-    for (const id of ids) {
-      const st = this.states.get(id);
-      if (st) await this.host.store.saveState(st).catch((e) => this.host.log.error("copy: state not saved", { sub: id, error: String(e) }));
-      this.host.onChange?.(id);
-    }
-  }
-  async activity(s, e) {
-    const entry = {
-      id: randomId("a"),
-      subId: s.id,
-      owner: s.owner,
-      at: Date.now(),
-      detail: null,
-      symbol: null,
-      side: null,
-      size: null,
-      price: null,
-      notionalUsd: null,
-      reduceOnly: null,
-      clOrdID: null,
-      orderId: null,
-      builderFee: null,
-      leader: null,
-      paper: s.settings.paper,
-      ...e
-    };
-    await this.host.store.addActivity(entry).catch((err) => this.host.log.error("copy: activity not saved", { error: String(err) }));
-    this.host.onChange?.(s.id);
-  }
-};
-
-// ../../packages/copy-engine/src/api.ts
-var COPY_DOMAIN = { name: "ValueDesk Copy", version: "1" };
-var COPY_TERMS_EXECUTOR = "valuedesk-copy-terms";
-var SITE_TERMS_EXECUTOR = "valuedesk-site-terms";
-var COPY_ACTIONS = ["session", "accept-terms", "accept-site-terms", "create-key", "delete-key", "subscribe", "update", "pause", "resume", "stop", "stop-all", "algo-start", "algo-action"];
-var COPY_REQUEST_FIELDS = [
-  { name: "action", type: "string" },
-  { name: "owner", type: "address" },
-  { name: "executor", type: "string" },
-  { name: "payload", type: "string" },
-  { name: "nonce", type: "uint64" },
-  { name: "deadline", type: "uint64" }
-];
-function canonicalJSON(v) {
-  if (v === null || typeof v !== "object") return JSON.stringify(v);
-  if (Array.isArray(v)) return `[${v.map((x) => canonicalJSON(x === void 0 ? null : x)).join(",")}]`;
-  const o = v;
-  return `{${Object.keys(o).filter((k) => o[k] !== void 0).sort().map((k) => `${JSON.stringify(k)}:${canonicalJSON(o[k])}`).join(",")}}`;
-}
-function copyRequestTypedData(r) {
-  return {
-    domain: { name: COPY_DOMAIN.name, version: COPY_DOMAIN.version, chainId: r.chainId, verifyingContract: ZERO_ADDRESS },
-    types: {
-      EIP712Domain: [
-        { name: "name", type: "string" },
-        { name: "version", type: "string" },
-        { name: "chainId", type: "uint256" },
-        { name: "verifyingContract", type: "address" }
-      ],
-      CopyRequest: COPY_REQUEST_FIELDS
-    },
-    primaryType: "CopyRequest",
-    message: {
-      action: r.action,
-      owner: r.owner.toLowerCase(),
-      executor: r.executor,
-      payload: r.payload,
-      nonce: r.nonce,
-      deadline: r.deadline
-    }
+// ../../packages/copy-engine/src/algo/math.ts
+var DAY_MS2 = 864e5;
+function makeRng(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = a + 1831565813 >>> 0;
+    let t = a;
+    t = Math.imul(t ^ t >>> 15, t | 1);
+    t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
   };
 }
-var copyRequestDigest = (r) => bytesToHex2(hashTypedData(copyRequestTypedData(r)));
-var REQUEST_TTL_MS = 5 * 6e4;
-var TERMS_TTL_MS = 365 * 864e5;
-var isStatement = (action2) => action2 === "accept-terms" || action2 === "accept-site-terms";
-var MAX_WINDOW_MS = (action2) => isStatement(action2) ? TERMS_TTL_MS + 864e5 : 60 * 6e4;
-var ADDRESS3 = /^0x[0-9a-f]{40}$/;
-function verifyCopyRequest(r, o) {
-  const now = o.now ?? Date.now();
-  if (!r || typeof r !== "object") return { ok: false, error: "missing signed request" };
-  const q = r;
-  const action2 = q.action;
-  if (!COPY_ACTIONS.includes(action2)) return { ok: false, error: "unknown action" };
-  const owner = typeof q.owner === "string" ? q.owner.toLowerCase() : "";
-  if (!ADDRESS3.test(owner)) return { ok: false, error: "owner must be a 0x address" };
-  if (q.executor !== o.executor) return { ok: false, error: "this request was signed for another executor" };
-  if (typeof q.payload !== "string" || q.payload.length > 16384) return { ok: false, error: "payload must be a JSON string under 16 KB" };
-  if (typeof q.nonce !== "string" || !/^\d{1,16}$/.test(q.nonce)) return { ok: false, error: "nonce must be a decimal string" };
-  if (typeof q.deadline !== "string" || !/^\d{1,16}$/.test(q.deadline)) return { ok: false, error: "deadline must be a decimal string" };
-  const chainId = Number(q.chainId);
-  if (!Number.isSafeInteger(chainId) || chainId <= 0) return { ok: false, error: "chainId must be a positive integer" };
-  if (typeof q.signature !== "string" || !/^0x[0-9a-fA-F]{130}$/.test(q.signature)) return { ok: false, error: "signature must be 65 bytes of hex" };
-  const nonce = Number(q.nonce);
-  const deadline = Number(q.deadline);
-  if (deadline < now) return { ok: false, error: "this request has expired; sign it again (if it keeps happening, check your computer's clock: it may be behind)" };
-  if (deadline - nonce > MAX_WINDOW_MS(action2)) return { ok: false, error: "this request is valid for longer than allowed" };
-  const skew = o.maxAgeMs ?? 15 * 6e4;
-  if (nonce - now > skew || !isStatement(action2) && now - nonce > skew) return { ok: false, error: "the request time is too far from now; check your clock" };
-  let payload;
-  try {
-    payload = JSON.parse(q.payload);
-  } catch {
-    return { ok: false, error: "payload is not JSON" };
-  }
-  if (canonicalJSON(payload) !== q.payload) return { ok: false, error: "payload is not in canonical form" };
-  const req = { action: action2, owner, executor: o.executor, payload: q.payload, nonce: q.nonce, deadline: q.deadline, chainId };
-  const digest = copyRequestDigest(req);
-  let signer;
-  try {
-    signer = recoverAddress(hexToBytes2(digest), hexToBytes2(q.signature)).toLowerCase();
-  } catch {
-    return { ok: false, error: "the signature cannot be read" };
-  }
-  if (signer !== owner) return { ok: false, error: "the signature is not from this wallet" };
-  return { ok: true, digest, payload };
+var newSeed = () => Math.floor(Math.random() * 4294967295) >>> 0;
+var jitter2 = (v, share, rand) => share > 0 ? v * (1 + (rand() * 2 - 1) * share) : v;
+function normalise(w) {
+  const pos = w.map((x) => Number.isFinite(x) && x > 0 ? x : 0);
+  const sum = pos.reduce((a, b) => a + b, 0);
+  if (!(sum > 0)) return w.map(() => 1 / Math.max(1, w.length));
+  return pos.map((x) => x / sum);
 }
-var ALGO_UPDATE_FIELDS = ["quantity", "limitPrice", "maxSpreadBps", "label"];
-var EXECUTOR_FEATURES = ["counter", "site-terms", "key-import", "algo-update"];
+function curveWeights(n, urgency, sizeJitter, rand) {
+  const k = Math.max(-1, Math.min(1, urgency)) * 3;
+  const w = [];
+  for (let i = 0; i < n; i++) {
+    const x = n <= 1 ? 0 : i / (n - 1);
+    w.push(jitter2(Math.exp(-k * x), sizeJitter, rand));
+  }
+  return normalise(w);
+}
+function sliceTimes(start, durationMs, n, timeJitter, rand) {
+  const step = durationMs / n;
+  const out = [];
+  let prev = start - 1;
+  for (let i = 0; i < n; i++) {
+    let t = start + i * step;
+    if (i > 0 && timeJitter > 0) t += (rand() * 2 - 1) * timeJitter * step;
+    t = Math.max(prev + 1, Math.min(start + durationMs - 1, t));
+    out.push(Math.round(t));
+    prev = t;
+  }
+  return out;
+}
+function dueShare(times, weights, now) {
+  let s = 0;
+  for (let i = 0; i < times.length; i++) if (times[i] <= now) s += weights[i] ?? 0;
+  return Math.min(1, s);
+}
+function nextSlice(times, now) {
+  for (let i = 0; i < times.length; i++) if (times[i] > now) return i;
+  return -1;
+}
+function allocateSteps(total, weights, step) {
+  const units = Math.floor(total / step + 1e-9);
+  const w = normalise(weights);
+  const raw = w.map((x) => x * units);
+  const out = raw.map((x) => Math.floor(x + 1e-9));
+  let left = units - out.reduce((a, b) => a + b, 0);
+  const order = raw.map((x, i) => ({ i, f: x - Math.floor(x + 1e-9) })).sort((a, b) => b.f - a.f || a.i - b.i);
+  for (let j = 0; left > 0 && order.length; j = (j + 1) % order.length, left--) out[order[j].i] += 1;
+  return out.map((u) => u * step);
+}
+var isWeekend = (t) => {
+  const d = new Date(t).getUTCDay();
+  return d === 0 || d === 6;
+};
+function median(xs) {
+  if (!xs.length) return 0;
+  const s = [...xs].sort((a, b) => a - b);
+  const m = s.length >> 1;
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+}
+function volumeProfile(candles, candleMs, start, durationMs, slices, lookbackDays) {
+  const byBucket = /* @__PURE__ */ new Map();
+  for (const c of candles) if (Number.isFinite(c.v) && c.v >= 0) byBucket.set(Math.floor(c.t / candleMs) * candleMs, c.v);
+  const volIn = (a, b) => {
+    let sum = 0;
+    let seen = false;
+    for (let t = Math.floor(a / candleMs) * candleMs; t < b; t += candleMs) {
+      const v = byBucket.get(t);
+      if (v === void 0) continue;
+      seen = true;
+      const lo = Math.max(a, t);
+      const hi = Math.min(b, t + candleMs);
+      if (hi > lo) sum += v * (hi - lo) / candleMs;
+    }
+    return seen ? sum : null;
+  };
+  const step = durationMs / slices;
+  const matchDays = lookbackDays >= 14;
+  const expected = [];
+  const daysSeen = /* @__PURE__ */ new Set();
+  for (let i = 0; i < slices; i++) {
+    const a = start + i * step;
+    const b = a + step;
+    const same = [];
+    const all = [];
+    for (let d = 1; d <= lookbackDays; d++) {
+      const v = volIn(a - d * DAY_MS2, b - d * DAY_MS2);
+      if (v === null) continue;
+      daysSeen.add(d);
+      all.push(v);
+      if (!matchDays || isWeekend(a - d * DAY_MS2) === isWeekend(a)) same.push(v);
+    }
+    expected.push(median(same.length >= 3 ? same : all));
+  }
+  const mean = expected.reduce((x, y) => x + y, 0) / Math.max(1, expected.length);
+  const floored = expected.map((v) => Math.max(v, mean / 10));
+  return { weights: normalise(floored), expected: floored, days: daysSeen.size };
+}
+function profileCandles(lookbackDays) {
+  return lookbackDays > 28 ? { interval: "30m", ms: 30 * 6e4 } : { interval: "15m", ms: 15 * 6e4 };
+}
+function adaptiveShare(staticShare, marketSoFar, expectedTotal) {
+  if (!(expectedTotal > 0) || staticShare >= 1) return Math.min(1, staticShare);
+  const live = marketSoFar / expectedTotal;
+  const blend = 0.5 * staticShare + 0.5 * live;
+  return Math.min(1, Math.max(staticShare * 0.5, Math.min(staticShare * 2, blend)));
+}
+function ladderWeights(n, distribution, skew, sizeJitter, rand) {
+  const w = [];
+  for (let i = 0; i < n; i++) {
+    const x = n <= 1 ? 0 : i / (n - 1);
+    let v = 1;
+    if (distribution === "linear") v = 1 + (skew - 1) * x;
+    else if (distribution === "exponential") v = Math.pow(skew, x);
+    else if (distribution === "bell") v = Math.exp(-0.5 * Math.pow((x - 0.5) / 0.22, 2));
+    w.push(jitter2(Math.max(v, 1e-6), sizeJitter, rand));
+  }
+  return normalise(w);
+}
+function ladderPrices(from, to, n, spacing, tickSize) {
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const x = n <= 1 ? 0 : i / (n - 1);
+    let p;
+    if (spacing === "geometric" && from > 0 && to > 0) p = from * Math.pow(to / from, x);
+    else {
+      const f = spacing === "front" ? x * x : spacing === "back" ? 1 - (1 - x) * (1 - x) : x;
+      p = from + (to - from) * f;
+    }
+    const s = snapNearest(p, tickSize);
+    if (!out.includes(s)) out.push(s);
+  }
+  return out;
+}
+var dec2 = (n) => {
+  const s = Number(n.toPrecision(12)).toString();
+  if (!/e/i.test(s)) return s;
+  return Number(n.toPrecision(12)).toFixed(20).replace(/0+$/, "").replace(/\.$/, "");
+};
+function snapNearest(p, tickSize) {
+  return Number(roundToStep(dec2(Math.max(p, 0)), tickSize, "nearest"));
+}
+function snapDown(p, tickSize) {
+  return Number(roundToStep(dec2(Math.max(p, 0)), tickSize, "floor"));
+}
+function snapUp(p, tickSize) {
+  const down = snapDown(p, tickSize);
+  const tick = Number(tickSize);
+  return down + 1e-12 < p ? Number(roundToStep(dec2(down + tick), tickSize, "nearest")) : down;
+}
+var mid = (q) => (q.bid + q.ask) / 2;
+var spreadBps = (q) => (q.ask - q.bid) / mid(q) * 1e4;
+function makerPrice(side, q, offsetTicks, offsetBps, m, limit) {
+  const tick = Number(m.tickSize);
+  let p;
+  if (side === "buy") {
+    p = offsetBps !== null ? q.bid * (1 - offsetBps / 1e4) : q.bid - offsetTicks * tick;
+    p = Math.min(p, q.ask - tick);
+    if (limit !== null) p = Math.min(p, limit);
+    return snapDown(p, m.tickSize);
+  }
+  p = offsetBps !== null ? q.ask * (1 + offsetBps / 1e4) : q.ask + offsetTicks * tick;
+  p = Math.max(p, q.bid + tick);
+  if (limit !== null) p = Math.max(p, limit);
+  return snapUp(p, m.tickSize);
+}
+function takerPrice(side, q, slippageBps, m, mark, limit, from = null) {
+  const touch = side === "buy" ? q.ask : q.bid;
+  let p = Number(limitPrice(side, from !== null && from > 0 ? from : touch, slippageBps, m, mark));
+  if (limit !== null) {
+    if (side === "buy" && limit < touch) return null;
+    if (side === "sell" && limit > touch) return null;
+    p = side === "buy" ? Math.min(p, snapDown(limit, m.tickSize)) : Math.max(p, snapUp(limit, m.tickSize));
+  }
+  return p;
+}
+var withinLimit = (side, price2, limit) => limit === null || (side === "buy" ? price2 <= limit : price2 >= limit);
+function minChildQty(m, price2) {
+  const step = Number(m.stepSize);
+  const minQ = Math.max(step, Number(m.minQuantity) || 0);
+  const byValue = price2 > 0 ? Math.ceil(m.minNotional / price2 / step - 1e-9) * step : minQ;
+  return Math.max(minQ, byValue);
+}
+function maxOrderQty(m, price2) {
+  const step = Number(m.stepSize);
+  const byQty = Number(m.maxQuantity) > 0 ? Number(m.maxQuantity) : Infinity;
+  const byValue = m.maxNotional && price2 > 0 ? m.maxNotional / price2 : Infinity;
+  const most = Math.min(byQty, byValue);
+  return Number.isFinite(most) ? Math.floor(most / step + 1e-9) * step : Infinity;
+}
+var floorStep = (q, m) => {
+  const step = Number(m.stepSize);
+  return Math.floor(q / step + 1e-9) * step;
+};
+function povDue(rate, others) {
+  if (!(rate > 0) || !(others > 0)) return 0;
+  return others * rate / (1 - Math.min(rate, 0.99));
+}
+var DEFAULT_EXEC = { style: "hybrid", slippageBps: 30, offsetTicks: 0, chaseTicks: 2, makerShare: 0.6 };
+function trail(s, side, price2, o) {
+  let { armed, extreme } = s;
+  if (!armed) {
+    const a = o.activationPrice;
+    armed = a === null || (side === "sell" ? price2 >= a : price2 <= a);
+    if (armed) extreme = price2;
+  }
+  if (!armed) return { state: { armed, extreme }, stop: null, fired: false };
+  extreme = extreme === null ? price2 : side === "sell" ? Math.max(extreme, price2) : Math.min(extreme, price2);
+  const dist = o.trailAbs !== null ? o.trailAbs : extreme * (o.trailPct ?? 0);
+  const stop = side === "sell" ? extreme - dist : extreme + dist;
+  const fired = side === "sell" ? price2 <= stop : price2 >= stop;
+  return { state: { armed, extreme }, stop, fired };
+}
 
 // ../../packages/copy-engine/src/oracle.ts
 var ORACLE_VENUES = [
@@ -11360,7 +10479,7 @@ var isOracleVenue = (v) => typeof v === "string" && ORACLE_VENUES.includes(v);
 var ORACLE_MAX_AGE_MS = 5e3;
 var ORACLE_CACHE_MS = 1e3;
 var VENUE_TIMEOUT_MS = 2e3;
-var median = (xs) => {
+var median2 = (xs) => {
   if (!xs.length) return null;
   const s = [...xs].sort((a, b) => a - b);
   const m = s.length >> 1;
@@ -11386,7 +10505,7 @@ function combineOracle(quotes, now, opts = {}) {
     mids.push(q.mid);
     fairs.push(q.mark !== null && q.mark > 0 && Number.isFinite(q.mark) ? q.mark : q.mid);
   }
-  return { mid: median(mids), fair: median(fairs), used, stale, missing: want.filter((v) => !seen.has(v)) };
+  return { mid: median2(mids), fair: median2(fairs), used, stale, missing: want.filter((v) => !seen.has(v)) };
 }
 var g = globalThis;
 async function getJson(fetch2, url, init = {}) {
@@ -11622,231 +10741,6 @@ var SLIP_FROM_NAMES = {
   oracleFair: "Oracle fair price"
 };
 var FINAL_STATUSES = /* @__PURE__ */ new Set(["done", "cancelled", "expired", "failed"]);
-
-// ../../packages/copy-engine/src/algo/math.ts
-var DAY_MS2 = 864e5;
-function makeRng(seed) {
-  let a = seed >>> 0;
-  return () => {
-    a = a + 1831565813 >>> 0;
-    let t = a;
-    t = Math.imul(t ^ t >>> 15, t | 1);
-    t ^= t + Math.imul(t ^ t >>> 7, t | 61);
-    return ((t ^ t >>> 14) >>> 0) / 4294967296;
-  };
-}
-var newSeed = () => Math.floor(Math.random() * 4294967295) >>> 0;
-var jitter2 = (v, share, rand) => share > 0 ? v * (1 + (rand() * 2 - 1) * share) : v;
-function normalise(w) {
-  const pos = w.map((x) => Number.isFinite(x) && x > 0 ? x : 0);
-  const sum = pos.reduce((a, b) => a + b, 0);
-  if (!(sum > 0)) return w.map(() => 1 / Math.max(1, w.length));
-  return pos.map((x) => x / sum);
-}
-function curveWeights(n, urgency, sizeJitter, rand) {
-  const k = Math.max(-1, Math.min(1, urgency)) * 3;
-  const w = [];
-  for (let i = 0; i < n; i++) {
-    const x = n <= 1 ? 0 : i / (n - 1);
-    w.push(jitter2(Math.exp(-k * x), sizeJitter, rand));
-  }
-  return normalise(w);
-}
-function sliceTimes(start, durationMs, n, timeJitter, rand) {
-  const step = durationMs / n;
-  const out = [];
-  let prev = start - 1;
-  for (let i = 0; i < n; i++) {
-    let t = start + i * step;
-    if (i > 0 && timeJitter > 0) t += (rand() * 2 - 1) * timeJitter * step;
-    t = Math.max(prev + 1, Math.min(start + durationMs - 1, t));
-    out.push(Math.round(t));
-    prev = t;
-  }
-  return out;
-}
-function dueShare(times, weights, now) {
-  let s = 0;
-  for (let i = 0; i < times.length; i++) if (times[i] <= now) s += weights[i] ?? 0;
-  return Math.min(1, s);
-}
-function nextSlice(times, now) {
-  for (let i = 0; i < times.length; i++) if (times[i] > now) return i;
-  return -1;
-}
-function allocateSteps(total, weights, step) {
-  const units = Math.floor(total / step + 1e-9);
-  const w = normalise(weights);
-  const raw = w.map((x) => x * units);
-  const out = raw.map((x) => Math.floor(x + 1e-9));
-  let left = units - out.reduce((a, b) => a + b, 0);
-  const order = raw.map((x, i) => ({ i, f: x - Math.floor(x + 1e-9) })).sort((a, b) => b.f - a.f || a.i - b.i);
-  for (let j = 0; left > 0 && order.length; j = (j + 1) % order.length, left--) out[order[j].i] += 1;
-  return out.map((u) => u * step);
-}
-var isWeekend = (t) => {
-  const d = new Date(t).getUTCDay();
-  return d === 0 || d === 6;
-};
-function median2(xs) {
-  if (!xs.length) return 0;
-  const s = [...xs].sort((a, b) => a - b);
-  const m = s.length >> 1;
-  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
-}
-function volumeProfile(candles, candleMs, start, durationMs, slices, lookbackDays) {
-  const byBucket = /* @__PURE__ */ new Map();
-  for (const c of candles) if (Number.isFinite(c.v) && c.v >= 0) byBucket.set(Math.floor(c.t / candleMs) * candleMs, c.v);
-  const volIn = (a, b) => {
-    let sum = 0;
-    let seen = false;
-    for (let t = Math.floor(a / candleMs) * candleMs; t < b; t += candleMs) {
-      const v = byBucket.get(t);
-      if (v === void 0) continue;
-      seen = true;
-      const lo = Math.max(a, t);
-      const hi = Math.min(b, t + candleMs);
-      if (hi > lo) sum += v * (hi - lo) / candleMs;
-    }
-    return seen ? sum : null;
-  };
-  const step = durationMs / slices;
-  const matchDays = lookbackDays >= 14;
-  const expected = [];
-  const daysSeen = /* @__PURE__ */ new Set();
-  for (let i = 0; i < slices; i++) {
-    const a = start + i * step;
-    const b = a + step;
-    const same = [];
-    const all = [];
-    for (let d = 1; d <= lookbackDays; d++) {
-      const v = volIn(a - d * DAY_MS2, b - d * DAY_MS2);
-      if (v === null) continue;
-      daysSeen.add(d);
-      all.push(v);
-      if (!matchDays || isWeekend(a - d * DAY_MS2) === isWeekend(a)) same.push(v);
-    }
-    expected.push(median2(same.length >= 3 ? same : all));
-  }
-  const mean = expected.reduce((x, y) => x + y, 0) / Math.max(1, expected.length);
-  const floored = expected.map((v) => Math.max(v, mean / 10));
-  return { weights: normalise(floored), expected: floored, days: daysSeen.size };
-}
-function profileCandles(lookbackDays) {
-  return lookbackDays > 28 ? { interval: "30m", ms: 30 * 6e4 } : { interval: "15m", ms: 15 * 6e4 };
-}
-function adaptiveShare(staticShare, marketSoFar, expectedTotal) {
-  if (!(expectedTotal > 0) || staticShare >= 1) return Math.min(1, staticShare);
-  const live = marketSoFar / expectedTotal;
-  const blend = 0.5 * staticShare + 0.5 * live;
-  return Math.min(1, Math.max(staticShare * 0.5, Math.min(staticShare * 2, blend)));
-}
-function ladderWeights(n, distribution, skew, sizeJitter, rand) {
-  const w = [];
-  for (let i = 0; i < n; i++) {
-    const x = n <= 1 ? 0 : i / (n - 1);
-    let v = 1;
-    if (distribution === "linear") v = 1 + (skew - 1) * x;
-    else if (distribution === "exponential") v = Math.pow(skew, x);
-    else if (distribution === "bell") v = Math.exp(-0.5 * Math.pow((x - 0.5) / 0.22, 2));
-    w.push(jitter2(Math.max(v, 1e-6), sizeJitter, rand));
-  }
-  return normalise(w);
-}
-function ladderPrices(from, to, n, spacing, tickSize) {
-  const out = [];
-  for (let i = 0; i < n; i++) {
-    const x = n <= 1 ? 0 : i / (n - 1);
-    let p;
-    if (spacing === "geometric" && from > 0 && to > 0) p = from * Math.pow(to / from, x);
-    else {
-      const f = spacing === "front" ? x * x : spacing === "back" ? 1 - (1 - x) * (1 - x) : x;
-      p = from + (to - from) * f;
-    }
-    const s = snapNearest(p, tickSize);
-    if (!out.includes(s)) out.push(s);
-  }
-  return out;
-}
-var dec2 = (n) => {
-  const s = Number(n.toPrecision(12)).toString();
-  if (!/e/i.test(s)) return s;
-  return Number(n.toPrecision(12)).toFixed(20).replace(/0+$/, "").replace(/\.$/, "");
-};
-function snapNearest(p, tickSize) {
-  return Number(roundToStep(dec2(Math.max(p, 0)), tickSize, "nearest"));
-}
-function snapDown(p, tickSize) {
-  return Number(roundToStep(dec2(Math.max(p, 0)), tickSize, "floor"));
-}
-function snapUp(p, tickSize) {
-  const down = snapDown(p, tickSize);
-  const tick = Number(tickSize);
-  return down + 1e-12 < p ? Number(roundToStep(dec2(down + tick), tickSize, "nearest")) : down;
-}
-var mid = (q) => (q.bid + q.ask) / 2;
-var spreadBps = (q) => (q.ask - q.bid) / mid(q) * 1e4;
-function makerPrice(side, q, offsetTicks, offsetBps, m, limit) {
-  const tick = Number(m.tickSize);
-  let p;
-  if (side === "buy") {
-    p = offsetBps !== null ? q.bid * (1 - offsetBps / 1e4) : q.bid - offsetTicks * tick;
-    p = Math.min(p, q.ask - tick);
-    if (limit !== null) p = Math.min(p, limit);
-    return snapDown(p, m.tickSize);
-  }
-  p = offsetBps !== null ? q.ask * (1 + offsetBps / 1e4) : q.ask + offsetTicks * tick;
-  p = Math.max(p, q.bid + tick);
-  if (limit !== null) p = Math.max(p, limit);
-  return snapUp(p, m.tickSize);
-}
-function takerPrice(side, q, slippageBps, m, mark, limit, from = null) {
-  const touch = side === "buy" ? q.ask : q.bid;
-  let p = Number(limitPrice(side, from !== null && from > 0 ? from : touch, slippageBps, m, mark));
-  if (limit !== null) {
-    if (side === "buy" && limit < touch) return null;
-    if (side === "sell" && limit > touch) return null;
-    p = side === "buy" ? Math.min(p, snapDown(limit, m.tickSize)) : Math.max(p, snapUp(limit, m.tickSize));
-  }
-  return p;
-}
-var withinLimit = (side, price2, limit) => limit === null || (side === "buy" ? price2 <= limit : price2 >= limit);
-function minChildQty(m, price2) {
-  const step = Number(m.stepSize);
-  const minQ = Math.max(step, Number(m.minQuantity) || 0);
-  const byValue = price2 > 0 ? Math.ceil(m.minNotional / price2 / step - 1e-9) * step : minQ;
-  return Math.max(minQ, byValue);
-}
-function maxOrderQty(m, price2) {
-  const step = Number(m.stepSize);
-  const byQty = Number(m.maxQuantity) > 0 ? Number(m.maxQuantity) : Infinity;
-  const byValue = m.maxNotional && price2 > 0 ? m.maxNotional / price2 : Infinity;
-  const most = Math.min(byQty, byValue);
-  return Number.isFinite(most) ? Math.floor(most / step + 1e-9) * step : Infinity;
-}
-var floorStep = (q, m) => {
-  const step = Number(m.stepSize);
-  return Math.floor(q / step + 1e-9) * step;
-};
-function povDue(rate, others) {
-  if (!(rate > 0) || !(others > 0)) return 0;
-  return others * rate / (1 - Math.min(rate, 0.99));
-}
-var DEFAULT_EXEC = { style: "hybrid", slippageBps: 30, offsetTicks: 0, chaseTicks: 2, makerShare: 0.6 };
-function trail(s, side, price2, o) {
-  let { armed, extreme } = s;
-  if (!armed) {
-    const a = o.activationPrice;
-    armed = a === null || (side === "sell" ? price2 >= a : price2 <= a);
-    if (armed) extreme = price2;
-  }
-  if (!armed) return { state: { armed, extreme }, stop: null, fired: false };
-  extreme = extreme === null ? price2 : side === "sell" ? Math.max(extreme, price2) : Math.min(extreme, price2);
-  const dist = o.trailAbs !== null ? o.trailAbs : extreme * (o.trailPct ?? 0);
-  const stop = side === "sell" ? extreme - dist : extreme + dist;
-  const fired = side === "sell" ? price2 <= stop : price2 >= stop;
-  return { state: { armed, extreme }, stop, fired };
-}
 
 // ../../packages/copy-engine/src/algo/spec.ts
 var AlgoSpecError = class extends Error {
@@ -12448,6 +11342,1211 @@ var ALGO_NAMES = {
   sweep: "Fill fast"
 };
 
+// ../../packages/copy-engine/src/notices.ts
+var leaderShort = (s) => `${s.settings.leader.address.slice(0, 6)}\u2026${s.settings.leader.address.slice(-4)}`;
+var mk = (n) => ({ ...n, id: `${n.source}:${n.ref}:${n.kind}:${n.at}` });
+function algoName(a) {
+  const s = a.spec;
+  if (s.kind === "basket") return `Basket of ${s.legs.length} markets`;
+  return `${ALGO_NAMES[s.kind]} ${"side" in s && s.side === "sell" ? "sell" : "buy"} on ${"symbol" in s ? s.symbol : ""}`.trim();
+}
+function algoNotice(a, status, reason, at = Date.now()) {
+  const what = algoName(a);
+  const body = reason ?? "";
+  const base2 = { owner: a.owner, source: "algo", ref: a.id, body, at, paper: !!a.spec.paper };
+  switch (status) {
+    case "failed":
+      return mk({ ...base2, kind: "failed", grade: "error", title: `${what} failed` });
+    case "cancelled":
+      return /^Cancelled by you/.test(body) ? null : mk({ ...base2, kind: "stopped", grade: "warn", title: `${what} stopped` });
+    case "expired":
+      return mk({ ...base2, kind: "ended", grade: "info", title: `${what} ended` });
+    case "done":
+      return mk({ ...base2, kind: "done", grade: "info", title: `${what} done` });
+    case "paused":
+      return /^Paused by you/.test(body) ? null : mk({ ...base2, kind: "held", grade: "warn", title: `${what} paused` });
+    default:
+      return null;
+  }
+}
+function copyNotice(s, status, reason, at = Date.now()) {
+  const body = reason ?? "";
+  const who = leaderShort(s);
+  const base2 = { owner: s.owner, source: "copy", ref: s.id, body, at, paper: !!s.settings.paper };
+  switch (status) {
+    case "halted":
+      return mk({ ...base2, kind: "halted", grade: "error", title: `Copy of ${who} halted` });
+    case "blocked":
+      return mk({ ...base2, kind: "blocked", grade: "warn", title: `Copy of ${who} is held` });
+    case "stopped":
+      return /^Stopped by you/.test(body) ? null : mk({ ...base2, kind: "stopped", grade: "warn", title: `Copy of ${who} stopped` });
+    case "paused":
+      return /^Paused by you/.test(body) ? null : mk({ ...base2, kind: "paused", grade: "warn", title: `Copy of ${who} paused` });
+    default:
+      return null;
+  }
+}
+function copyClosedNotice(s, symbol2, why, detail, at = Date.now()) {
+  const who = leaderShort(s);
+  const byStop = why === "stop-loss" || why === "take-profit";
+  return mk({
+    owner: s.owner,
+    source: "copy",
+    ref: `${s.id}:${symbol2}`,
+    kind: "closed",
+    grade: byStop ? "info" : "error",
+    title: `${symbol2} closed in the copy of ${who}`,
+    body: detail,
+    at,
+    paper: !!s.settings.paper
+  });
+}
+
+// ../../packages/copy-engine/src/runtime.ts
+var RECONCILE_MS = 6e4;
+var FOLLOWER_REFRESH_MS = 3e4;
+var GUARD_MS = 2e3;
+var READY_CHECK_MS = 10 * 6e4;
+var MARKETS_REFRESH_MS = 10 * 6e4;
+var PENDING_MS = 3e4;
+var CONFIRM_UNAVAILABLE = '"Ask me each time" needs a copier that can ask you (the browser copier). Choose automatic approval to copy here.';
+var QUIET_SKIPS = /* @__PURE__ */ new Set(["duplicate", "at-target", "no-follower-position", "spot-not-copied"]);
+var lk = (l) => `${l.venue}:${l.address.toLowerCase()}`;
+function shuffle(a) {
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+var CopyRuntime = class {
+  constructor(host2) {
+    this.host = host2;
+  }
+  host;
+  markets = new MarketBook();
+  leaders = new LeaderBook();
+  subs = /* @__PURE__ */ new Map();
+  states = /* @__PURE__ */ new Map();
+  followers = /* @__PURE__ */ new Map();
+  followerAccounts = /* @__PURE__ */ new Map();
+  sodexIds = /* @__PURE__ */ new Map();
+  queues = /* @__PURE__ */ new Map();
+  pending = [];
+  /** `${subId}|${symbol}` -> the last order that opened or added, so a fill the stream missed is still adopted. */
+  recentGrow = /* @__PURE__ */ new Map();
+  leverageSet = /* @__PURE__ */ new Map();
+  refreshTimers = /* @__PURE__ */ new Map();
+  stopTimers = /* @__PURE__ */ new Map();
+  timers = [];
+  sodexFeed = null;
+  hlFeed = null;
+  hlCoins = [];
+  running = false;
+  feedUp = { sodex: false, hyperliquid: false };
+  dirty = /* @__PURE__ */ new Set();
+  /* ------------------------------------------------------------ lifecycle ----- */
+  async start() {
+    if (this.running) return;
+    this.running = true;
+    await this.loadMarkets();
+    const restored = [];
+    for (const s of await this.host.store.subscriptions()) {
+      this.subs.set(s.id, s);
+      const saved = await this.host.store.state(s.id);
+      this.states.set(s.id, saved ?? freshState(s.id, s.settings.allocationUsd));
+      if (saved) restored.push(s.id);
+    }
+    this.sodexFeed = new SodexFeed({
+      network: this.host.network,
+      factory: this.host.factory,
+      book: this.leaders,
+      log: this.host.log,
+      symbols: () => this.markets.all().map((m) => m.name),
+      sink: {
+        leader: (e) => this.onLeaderEvent(e),
+        follower: (f) => this.onFollowerFill(f),
+        mark: (s, p, at) => this.markets.setMark(s, p, at),
+        state: (_f, up) => {
+          this.feedUp.sodex = up;
+          if (up) void this.reconcileAll();
+        }
+      }
+    });
+    this.sodexFeed.start();
+    await this.syncFeeds();
+    for (const s of [...this.subs.values()]) await this.applyLocalRules(s.id);
+    for (const id of restored) this.catchUp(id);
+    for (const s of this.subs.values()) if (this.live(s)) void this.checkReady(s);
+    this.timers.push(
+      timers.every(RECONCILE_MS, () => void this.reconcileAll()),
+      timers.every(FOLLOWER_REFRESH_MS, () => void this.refreshAllFollowers()),
+      timers.every(GUARD_MS, () => void this.runGuards()),
+      timers.every(READY_CHECK_MS, () => {
+        for (const s of this.subs.values()) if (this.live(s)) void this.checkReady(s);
+      }),
+      timers.every(MARKETS_REFRESH_MS, () => void this.loadMarkets().then(() => this.sodexFeed?.refreshSymbols())),
+      timers.every(5e3, () => void this.flush())
+    );
+    void this.reconcileAll();
+    void this.refreshAllFollowers();
+  }
+  async stop() {
+    this.running = false;
+    for (const t of this.timers) timers.cancel(t);
+    this.timers = [];
+    for (const t of this.refreshTimers.values()) timers.cancel(t);
+    for (const t of this.stopTimers.values()) timers.cancel(t);
+    this.sodexFeed?.stop();
+    this.hlFeed?.stop();
+    await Promise.allSettled([...this.queues.values()]);
+    await this.flush();
+  }
+  /* ------------------------------------------------------- subscriptions ----- */
+  get(id) {
+    return this.subs.get(id) ?? null;
+  }
+  list(owner) {
+    return [...this.subs.values()].filter((s) => !owner || s.owner === owner.toLowerCase());
+  }
+  /**
+   * Start a subscription. The leader is read now: positions it already holds
+   * are joined (copyExisting) or left alone until it is flat on them.
+   */
+  async add(sub) {
+    const s = { ...sub, owner: sub.owner.toLowerCase() };
+    this.subs.set(s.id, s);
+    const st = freshState(s.id, s.settings.allocationUsd);
+    this.states.set(s.id, st);
+    await this.host.store.saveSubscription(s);
+    await this.syncFeeds();
+    await this.seedLeader(s.settings.leader);
+    const positions = this.leaders.positions(s.settings.leader);
+    st.leaderPos = { ...positions };
+    st.leaderEquity = this.leaders.equity(s.settings.leader)?.value ?? null;
+    st.leaderEquityAt = this.leaders.equity(s.settings.leader)?.at ?? null;
+    const now = Date.now();
+    if (!s.settings.copyExisting) {
+      for (const sym of Object.keys(positions)) st.detached[sym] = "pre-existing";
+    }
+    await this.host.store.saveState(st);
+    await this.activity(s, { kind: "status", reason: s.status, detail: s.settings.paper ? "Paper copy started." : "Copying started." });
+    await this.applyLocalRules(s.id);
+    if (this.live(s)) await this.checkReady(s);
+    if (s.settings.copyExisting) {
+      for (const [sym, size] of Object.entries(positions)) {
+        const price2 = this.priceFor(s.settings.leader.venue, sym) ?? 0;
+        this.dispatch(s, { leader: s.settings.leader, symbol: sym, before: 0, after: size, price: price2, time: now, id: `join:${sym}:${now}`, source: "reconcile" });
+      }
+    }
+    void this.refreshFollower(s.owner);
+    return s;
+  }
+  /** New rules for a running subscription (the leader cannot change: that is a new subscription). */
+  async update(id, patch) {
+    const s = this.need(id);
+    if (patch.settings && lk(patch.settings.leader) !== lk(s.settings.leader)) throw new Error("The trader of a copy cannot change; start a new copy instead.");
+    if (patch.settings && patch.settings.paper !== s.settings.paper) throw new Error("A copy cannot switch between paper and live; start a new copy instead.");
+    if (patch.settings && (patch.settings.direction ?? "copy") !== (s.settings.direction ?? "copy")) {
+      throw new Error("A copy cannot switch between copying and counter-trading; start a new copy instead.");
+    }
+    if (patch.settings?.approval === "confirm" && !this.host.confirm) throw new Error(CONFIRM_UNAVAILABLE);
+    if (patch.settings && patch.settings.allocationUsd !== s.settings.allocationUsd) {
+      const st = this.stateOf(s);
+      st.peakEquity = Math.max(0, st.peakEquity + patch.settings.allocationUsd - s.settings.allocationUsd);
+      this.dirty.add(id);
+    }
+    const next = { ...s, ...patch, updatedAt: Date.now() };
+    this.subs.set(id, next);
+    await this.host.store.saveSubscription(next);
+    await this.activity(next, { kind: "status", reason: "updated", detail: "Copy rules changed." });
+    await this.applyLocalRules(id);
+    const cur = this.need(id);
+    if (this.live(cur) && cur.status === "blocked") await this.checkReady(cur);
+    return this.need(id);
+  }
+  async setStatus(id, status, reason) {
+    const s = this.need(id);
+    if (s.status === "stopped" && status !== "stopped") throw new Error("A stopped copy cannot be restarted; start a new copy.");
+    if (s.status === status && s.statusReason === reason) return s;
+    const next = { ...s, status, statusReason: reason, updatedAt: Date.now() };
+    this.subs.set(id, next);
+    await this.host.store.saveSubscription(next);
+    await this.activity(next, { kind: "status", reason: status, detail: reason });
+    this.notice(copyNotice(next, status, reason));
+    if (status === "active") void this.refreshFollower(next.owner);
+    if (status === "stopped") await this.syncFeeds();
+    this.host.onChange?.(id);
+    return next;
+  }
+  pause = (id) => this.setStatus(id, "paused", "Paused by you.");
+  async resume(id) {
+    const s = this.need(id);
+    if (s.status === "halted" || s.status === "blocked") {
+      if (s.status === "halted") {
+        const st = this.stateOf(s);
+        st.peakEquity = copyEquity(s.settings, st, (m) => this.markets.mark(m));
+        this.dirty.add(s.id);
+      }
+    }
+    const next = await this.setStatus(id, "active", null);
+    await this.applyLocalRules(id);
+    if (this.live(next)) await this.checkReady(this.need(id));
+    this.enqueue(next.owner, () => this.closeStrays(id));
+    return this.need(id);
+  }
+  /**
+   * Stop a copy for good. With `close`, its positions are closed at the market (reduce-only);
+   * it says "positions closed" only for positions known to be flat, and the SoDEX stop-loss of
+   * a position that may still be open is kept. Without `close`, the positions and their SoDEX
+   * stops stay as they are (the copier no longer manages them).
+   */
+  async stopCopy(id, o) {
+    const s = this.need(id);
+    if (!o.close) return this.setStatus(id, "stopped", "Stopped by you; positions kept.");
+    const open = await this.closeAll(s, "stop-all");
+    const keep = new Set(open);
+    this.cancelStopsWhere(s, (sym) => !keep.has(sym));
+    return this.setStatus(
+      id,
+      "stopped",
+      open.length ? `Stopped by you; not confirmed closed: ${open.join(", ")}. ${open.length > 1 ? "They" : "It"} may still be open on SoDEX, with any stop-loss the copier placed there; check your SoDEX account.` : "Stopped by you; positions closed."
+    );
+  }
+  /** The kill switch: every copy of `owner` stops. */
+  async stopAll(owner, o) {
+    const out = [];
+    for (const s of this.list(owner)) if (s.status !== "stopped") out.push(await this.stopCopy(s.id, o));
+    return out;
+  }
+  view(id) {
+    const s = this.subs.get(id);
+    if (!s) return null;
+    const st = this.stateOf(s);
+    const markOf = (m) => this.markets.mark(m, 10 * 6e4);
+    const equity = copyEquity(s.settings, st, markOf);
+    const policy = this.host.policyFor(s);
+    const positions = Object.entries(st.owned).map(([sym, p]) => {
+      const mark = markOf(sym);
+      const m = this.markets.get(sym);
+      const lev = m ? effectiveLeverage(s.settings.maxLeverage, policy, m.maxLeverage) : s.settings.maxLeverage;
+      return {
+        symbol: sym,
+        size: p.size,
+        entry: p.entry,
+        mark,
+        notionalUsd: Math.abs(p.size) * (mark ?? p.entry),
+        unrealizedPnl: mark === null ? 0 : p.size * (mark - p.entry),
+        stopLoss: guardTrigger("stop-loss", p, s.settings, lev),
+        takeProfit: guardTrigger("take-profit", p, s.settings, lev)
+      };
+    });
+    const gross = grossNotional(st, markOf);
+    const peak = Math.max(st.peakEquity, equity);
+    return {
+      subscription: s,
+      equity,
+      pnl: equity - s.settings.allocationUsd,
+      pnlPct: s.settings.allocationUsd > 0 ? (equity - s.settings.allocationUsd) / s.settings.allocationUsd : 0,
+      realizedPnl: st.realizedPnl,
+      unrealizedPnl: unrealized(st, markOf),
+      fees: st.fees,
+      grossNotional: gross,
+      leverage: equity > 0 ? gross / equity : 0,
+      peakEquity: peak,
+      drawdownPct: peak > 0 ? Math.max(0, (peak - equity) / peak) : 0,
+      positions,
+      leader: { positions: this.leaders.positions(s.settings.leader), equity: this.leaders.equity(s.settings.leader)?.value ?? null },
+      orders: st.orders,
+      skips: st.skips,
+      lastEventAt: st.lastEventAt,
+      feeds: { sodex: this.feedUp.sodex, hyperliquid: this.hlFeed ? this.feedUp.hyperliquid : null }
+    };
+  }
+  /* --------------------------------------------------------------- events ----- */
+  onLeaderEvent(e) {
+    for (const s of shuffle(this.list())) {
+      if (lk(s.settings.leader) !== lk(e.leader)) continue;
+      if (s.status === "stopped") continue;
+      this.dispatch(s, e);
+    }
+  }
+  dispatch(s, e) {
+    const market = this.markets.sodexMarketFor(e.leader.venue, e.symbol);
+    const mark = market ? this.markets.mark(market.name) : null;
+    this.enqueue(s.owner, () => this.process(s.id, e, market, mark));
+  }
+  enqueue(owner, fn) {
+    const prev = this.queues.get(owner) ?? Promise.resolve();
+    const next = prev.then(fn).catch((err) => this.host.log.error("copy: a step failed", { owner, error: String(err) }));
+    this.queues.set(owner, next);
+    void next.finally(() => {
+      if (this.queues.get(owner) === next) this.queues.delete(owner);
+    });
+  }
+  async process(subId, e, market, mark) {
+    let s = this.subs.get(subId);
+    if (!s || s.status === "stopped") return;
+    if (s.status === "active" && this.localProblem(s)) {
+      await this.applyLocalRules(s.id);
+      s = this.need(subId);
+    }
+    const st = this.stateOf(s);
+    const markOf = (sym) => market && sym === market.name && mark !== null ? mark : this.markets.mark(sym);
+    const plan = planLeaderEvent({
+      sub: s,
+      state: st,
+      event: e,
+      market,
+      markOf,
+      policy: this.host.policyFor(s),
+      heldBy: market ? this.heldBy(s, market.name) : "nobody",
+      // A paper copy is not gated on the follower's real account.
+      follower: this.live(s) ? this.followers.get(s.owner) ?? null : null,
+      inFlight: this.inFlightOf(s.id)
+    });
+    st.leaderPos[e.symbol] = plan.leaderAfter;
+    if (plan.leaderAfter === 0) delete st.leaderPos[e.symbol];
+    if (plan.attach) delete st.detached[e.symbol];
+    if (plan.detach) st.detached[e.symbol] = plan.detach;
+    if (plan.skip !== "duplicate") noteSeen(st, e.id);
+    st.lastEventAt = e.time;
+    const leader = { symbol: e.symbol, before: e.before ?? 0, after: e.after, price: e.price, time: e.time };
+    if (!plan.intents.length) {
+      if (plan.skip && plan.skip !== "duplicate") st.skips++;
+      if (plan.skip && !QUIET_SKIPS.has(plan.skip)) await this.activity(s, { kind: "skip", reason: plan.skip, symbol: market?.name ?? e.symbol, leader });
+      this.dirty.add(s.id);
+      return;
+    }
+    if (s.settings.approval === "confirm" && this.host.confirm) {
+      let yes = false;
+      try {
+        yes = await this.host.confirm(s, plan.intents, e);
+      } catch {
+        yes = false;
+      }
+      if (!yes) {
+        st.skips++;
+        await this.activity(s, { kind: "skip", reason: "declined", symbol: market.name, leader });
+        this.dirty.add(s.id);
+        return;
+      }
+    }
+    await this.execute(s, market, plan.intents, markOf(market.name) ?? e.price, leader);
+    if (plan.skip && !QUIET_SKIPS.has(plan.skip)) await this.activity(s, { kind: "skip", reason: plan.skip, symbol: market.name, leader });
+  }
+  /** Who holds the follower's position on `symbol` when this copy does not. */
+  heldBy(s, symbol2) {
+    if (this.stateOf(s).owned[symbol2]) return "nobody";
+    for (const o of this.list(s.owner)) {
+      if (o.id === s.id || o.status === "stopped") continue;
+      if (o.settings.paper !== s.settings.paper) continue;
+      if (this.stateOf(o).owned[symbol2]) return "other-copy";
+    }
+    if (s.settings.paper) return "nobody";
+    const f = this.followers.get(s.owner);
+    return f?.positions[symbol2] ? "follower" : "nobody";
+  }
+  async execute(s, market, intents, reference, leader) {
+    const st = this.stateOf(s);
+    const sink = this.host.sinkFor(s);
+    if (!sink) {
+      if (s.status === "active") await this.setStatus(s.id, "blocked", "The copy key is not available here.");
+      return [];
+    }
+    const brake = sink.paper ? null : this.host.brake?.(s) ?? null;
+    if (brake) {
+      await this.activity(s, { kind: "error", reason: "brake", symbol: market.name, detail: `Not copied: ${brake}`, leader });
+      this.dirty.add(s.id);
+      return [];
+    }
+    const builder = await this.host.builderFor(s).catch(() => null);
+    let send = intents;
+    if (!sink.paper && intents.some((i) => !i.reduceOnly) && !await this.ensureLeverage(s, market, sink)) {
+      send = intents.filter((i) => i.reduceOnly);
+      const lev = effectiveLeverage(s.settings.maxLeverage, this.host.policyFor(s), market.maxLeverage);
+      await this.activity(s, {
+        kind: "error",
+        reason: "leverage-not-set",
+        symbol: market.name,
+        detail: `SoDEX did not take the copy's leverage (${lev}x) on ${market.name}; nothing is opened or added there until it does.`,
+        leader
+      });
+      if (!send.length) {
+        this.dirty.add(s.id);
+        return [];
+      }
+    }
+    const results = await sink.place(s.accountId, market, send, builder, reference);
+    for (let i = 0; i < send.length; i++) {
+      const it = send[i];
+      const r = results[i] ?? { clOrdID: it.clOrdID, ok: false, orderId: null, error: "no result", outcomeUnknown: false };
+      st.orders += r.ok ? 1 : 0;
+      await this.activity(s, {
+        kind: r.ok ? "order" : "error",
+        reason: r.ok ? it.leg : r.outcomeUnknown ? "outcome-unknown" : "rejected",
+        detail: r.ok ? it.clampedBy ? `Smaller than the rule asked: ${it.clampedBy}.` : null : r.error,
+        symbol: it.symbol,
+        side: it.side,
+        size: Number(it.quantity),
+        price: Number(it.limitPrice),
+        notionalUsd: it.notionalUsd,
+        reduceOnly: it.reduceOnly,
+        clOrdID: it.clOrdID,
+        orderId: r.orderId,
+        builderFee: builder?.fee ?? 0,
+        leader
+      });
+      if (r.paperFill) {
+        const fee = r.paperFill.qty * r.paperFill.price * (market.takerFee + (builder?.fee ?? 0) / 1e5);
+        this.fillBooks(s, it.symbol, it.side, r.paperFill.qty, r.paperFill.price, fee, it.reduceOnly);
+        await this.activity(s, {
+          kind: "fill",
+          reason: it.leg,
+          symbol: it.symbol,
+          side: it.side,
+          size: r.paperFill.qty,
+          price: r.paperFill.price,
+          notionalUsd: r.paperFill.qty * r.paperFill.price,
+          reduceOnly: it.reduceOnly,
+          clOrdID: it.clOrdID,
+          builderFee: builder?.fee ?? 0,
+          leader
+        });
+      } else if (r.ok || r.outcomeUnknown) {
+        if (!it.reduceOnly) this.recentGrow.set(`${s.id}|${it.symbol}`, { side: it.side, at: Date.now() });
+        this.pending.push({
+          subId: s.id,
+          symbol: it.symbol,
+          side: it.side,
+          reduceOnly: it.reduceOnly,
+          remaining: Number(it.quantity),
+          clOrdID: it.clOrdID,
+          until: Date.now() + PENDING_MS,
+          builderFee: builder?.fee ?? 0,
+          leg: it.leg
+        });
+      }
+    }
+    if (!sink.paper) this.scheduleRefresh(s.owner, 1500);
+    this.dirty.add(s.id);
+    this.host.onChange?.(s.id);
+    return results;
+  }
+  /** Apply a fill to the copy's books; a reduce-only fill never opens the other side. */
+  fillBooks(s, symbol2, side, qty2, price2, fee, reduceOnly) {
+    const st = this.stateOf(s);
+    let q = qty2;
+    if (reduceOnly) {
+      const held2 = Math.abs(st.owned[symbol2]?.size ?? 0);
+      q = Math.min(q, held2);
+      if (!(q > 0)) return;
+    }
+    applyFill(st, symbol2, side, q, price2, fee, Date.now());
+    const left = st.owned[symbol2];
+    const m = this.markets.get(symbol2);
+    if (reduceOnly && left && m && floorQuantity(left.size, m) === "0") {
+      st.realizedPnl += left.size * (price2 - left.entry);
+      delete st.owned[symbol2];
+    }
+    if (st.owned[symbol2]) this.recentGrow.delete(`${s.id}|${symbol2}`);
+    this.dirty.add(s.id);
+    if (!s.settings.paper) this.scheduleStops(s, symbol2);
+  }
+  onFollowerFill(f) {
+    if (!f.taker) return;
+    const now = Date.now();
+    this.pending = this.pending.filter((p) => p.until > now && p.remaining > 1e-12);
+    let left = f.qty;
+    for (const p of this.pending) {
+      if (left <= 0) break;
+      if (p.symbol !== f.symbol || p.side !== f.side) continue;
+      const s = this.subs.get(p.subId);
+      if (!s || s.accountId !== f.accountId) continue;
+      const q = Math.min(left, p.remaining);
+      p.remaining -= q;
+      left -= q;
+      const m = this.markets.get(p.symbol);
+      const fee = q * f.price * ((m?.takerFee ?? 4e-4) + p.builderFee / 1e5);
+      this.fillBooks(s, p.symbol, p.side, q, f.price, fee, p.reduceOnly);
+      void this.activity(s, {
+        kind: "fill",
+        reason: p.leg,
+        symbol: p.symbol,
+        side: p.side,
+        size: q,
+        price: f.price,
+        notionalUsd: q * f.price,
+        reduceOnly: p.reduceOnly,
+        clOrdID: p.clOrdID,
+        builderFee: p.builderFee
+      });
+      this.host.onChange?.(s.id);
+    }
+  }
+  /* ------------------------------------------------------------- follower ----- */
+  scheduleRefresh(owner, ms) {
+    if (this.refreshTimers.has(owner)) return;
+    this.refreshTimers.set(
+      owner,
+      timers.after(ms, () => {
+        this.refreshTimers.delete(owner);
+        void this.refreshFollower(owner);
+      })
+    );
+  }
+  async refreshAllFollowers() {
+    const owners = new Set(this.list().filter((s) => this.live(s) && s.status !== "stopped").map((s) => s.owner));
+    for (const o of owners) await this.refreshFollower(o);
+  }
+  /** Re-read the follower's account; the copy's positions follow what SoDEX says. */
+  async refreshFollower(owner) {
+    const subs = this.list(owner).filter((s) => this.live(s) && s.status !== "stopped");
+    if (!subs.length) return;
+    let snap;
+    try {
+      snap = await this.host.sodex.follower(owner);
+    } catch (e) {
+      this.host.log.warn("copy: follower read failed", { owner, error: String(e) });
+      return;
+    }
+    this.followers.set(owner, snap);
+    if (snap.accountId) this.followerAccounts.set(snap.accountId, owner);
+    this.sodexFeed?.setFollowers([...this.followerAccounts.keys()]);
+    const now = Date.now();
+    const inFlight = (subId, sym) => this.pending.some((x) => x.subId === subId && x.symbol === sym && x.until > now && x.remaining > 1e-12);
+    for (const s of subs) {
+      const st = this.stateOf(s);
+      for (const [k, g2] of this.recentGrow) {
+        if (!k.startsWith(`${s.id}|`)) continue;
+        const sym = k.slice(s.id.length + 1);
+        if (now - g2.at > 10 * 6e4) {
+          this.recentGrow.delete(k);
+          continue;
+        }
+        const actual = snap.positions[sym];
+        if (st.owned[sym] || !actual || inFlight(s.id, sym) || Math.sign(actual.size) !== (g2.side === "buy" ? 1 : -1)) continue;
+        if (this.list(s.owner).some((o) => o.id !== s.id && this.states.get(o.id)?.owned[sym])) continue;
+        st.owned[sym] = { size: actual.size, entry: actual.entry, openedAt: g2.at };
+        this.recentGrow.delete(k);
+        this.scheduleStops(s, sym);
+        this.dirty.add(s.id);
+      }
+      for (const [sym, p] of Object.entries(st.owned)) {
+        if (inFlight(s.id, sym)) continue;
+        const actual = snap.positions[sym];
+        const mark = this.markets.mark(sym) ?? p.entry;
+        if (!actual || Math.sign(actual.size) !== Math.sign(p.size)) {
+          st.realizedPnl += p.size * (mark - p.entry);
+          delete st.owned[sym];
+          this.recentGrow.delete(`${s.id}|${sym}`);
+          const why = this.closedWhy(s, p, mark, sym);
+          for (const lsym of this.leaderSymbolsFor(s, sym)) if (st.leaderPos[lsym]) st.detached[lsym] = why;
+          this.cancelStops(s, sym);
+          const detail = why === "own-position" ? "This copied position was closed outside the copier (by you, or by SoDEX). It resumes when the leader is flat." : `Your ${why} closed this copied position.`;
+          await this.activity(s, { kind: "status", reason: why === "own-position" ? "closed-outside" : why, symbol: sym, detail });
+          this.notice(copyClosedNotice(s, sym, why, detail));
+          this.dirty.add(s.id);
+        } else if (Math.abs(actual.size - p.size) > 1e-12 * Math.max(1, Math.abs(p.size))) {
+          st.owned[sym] = { size: actual.size, entry: actual.entry || p.entry, openedAt: p.openedAt };
+          this.scheduleStops(s, sym);
+          this.dirty.add(s.id);
+        }
+      }
+    }
+  }
+  closedWhy(s, p, mark, sym) {
+    const m = this.markets.get(sym);
+    const lev = m ? effectiveLeverage(s.settings.maxLeverage, this.host.policyFor(s), m.maxLeverage) : s.settings.maxLeverage;
+    const sl = guardTrigger("stop-loss", p, s.settings, lev);
+    const tp = guardTrigger("take-profit", p, s.settings, lev);
+    if (sl !== null && (p.size > 0 ? mark <= sl * 1.002 : mark >= sl * 0.998)) return "stop-loss";
+    if (tp !== null && (p.size > 0 ? mark >= tp * 0.998 : mark <= tp * 1.002)) return "take-profit";
+    return "own-position";
+  }
+  /** Leader symbols (in this copy's books) that map to a SoDEX market. */
+  leaderSymbolsFor(s, sodexSymbol) {
+    const st = this.stateOf(s);
+    return Object.keys(st.leaderPos).filter((l) => this.markets.sodexMarketFor(s.settings.leader.venue, l)?.name === sodexSymbol);
+  }
+  /**
+   * Set the copy's leverage and margin mode on the market before an order that opens or adds.
+   * Remembered only once SoDEX took it; a failure is tried once more at once, and then again
+   * before the next such order. False: not set (the caller sends nothing that opens).
+   */
+  async ensureLeverage(s, market, sink) {
+    const policy = this.host.policyFor(s);
+    const leverage = effectiveLeverage(s.settings.maxLeverage, policy, market.maxLeverage);
+    const k = `${s.owner}|${market.name}`;
+    const want = { leverage, margin: s.settings.marginMode };
+    const had = this.leverageSet.get(k);
+    if (had && had.leverage === want.leverage && had.margin === want.margin) return true;
+    if (this.followers.get(s.owner)?.positions[market.name] && !this.stateOf(s).owned[market.name]) return true;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        await sink.setLeverage(s.accountId, market, leverage, s.settings.marginMode);
+        this.leverageSet.set(k, want);
+        return true;
+      } catch (e) {
+        this.host.log.warn("copy: leverage not set", { owner: s.owner, symbol: market.name, leverage, attempt, error: String(e) });
+      }
+    }
+    this.leverageSet.delete(k);
+    return false;
+  }
+  /* --------------------------------------------------------------- guards ----- */
+  async runGuards() {
+    for (const s of this.list()) {
+      if (s.status === "stopped") continue;
+      const st = this.stateOf(s);
+      if (!Object.keys(st.owned).length) {
+        st.peakEquity = Math.max(st.peakEquity, copyEquity(s.settings, st, (m) => this.markets.mark(m)));
+        continue;
+      }
+      const g2 = planGuards({
+        sub: s,
+        state: st,
+        markets: (m) => this.markets.get(m),
+        markOf: (m) => this.markets.mark(m),
+        policy: this.host.policyFor(s),
+        now: Date.now()
+      });
+      if (g2.peak !== st.peakEquity) {
+        st.peakEquity = g2.peak;
+        this.dirty.add(s.id);
+      }
+      if (!g2.intents.length && !g2.halt) continue;
+      const now = Date.now();
+      const intents = g2.intents.filter((i) => !this.pending.some((p) => p.subId === s.id && p.symbol === i.symbol && p.reduceOnly && p.until > now));
+      const byMarket = /* @__PURE__ */ new Map();
+      for (const i of intents) byMarket.set(i.symbol, [...byMarket.get(i.symbol) ?? [], i]);
+      this.enqueue(s.owner, async () => {
+        for (const [sym, list] of byMarket) {
+          const m = this.markets.get(sym);
+          if (!m) continue;
+          const results = await this.execute(s, m, list, this.markets.mark(sym) ?? Number(list[0].limitPrice), null);
+          const why = g2.closed[sym];
+          if (why && results.some((r) => r.ok || r.outcomeUnknown)) for (const lsym of this.leaderSymbolsFor(s, sym)) st.detached[lsym] = why;
+        }
+        if (g2.halt) await this.setStatus(s.id, "halted", `Your drawdown stop (${Math.round((s.settings.drawdownStopPct ?? 0) * 100)}%) closed this copy.`);
+      });
+    }
+  }
+  /**
+   * Close every position of the copy at the market (reduce-only). Resolves with the markets
+   * not known to be flat afterwards: refused, unpriced, or (live) still on SoDEX when re-read.
+   */
+  async closeAll(s, leg) {
+    const st = this.stateOf(s);
+    const tag = `${leg}:${Date.now()}`;
+    return new Promise((resolve2) => {
+      this.enqueue(s.owner, async () => {
+        const open = [];
+        const sent = [];
+        try {
+          for (const [sym, p] of Object.entries(st.owned)) {
+            const m = this.markets.get(sym);
+            const mark = this.markets.mark(sym);
+            if (!m || mark === null) {
+              open.push(sym);
+              continue;
+            }
+            const q = floorQuantity(p.size, m);
+            if (q === "0") continue;
+            const side = p.size > 0 ? "sell" : "buy";
+            const clOrdID = clientOrderId(s.id, `${tag}:${sym}`, leg);
+            const [r] = await this.execute(s, m, [{ symbol: sym, side, quantity: q, limitPrice: limitPrice(side, mark, Math.max(100, s.settings.slippageBps), m, mark), reduceOnly: true, leg, notionalUsd: Number(q) * mark, clampedBy: null, clOrdID }], mark, null);
+            if (r?.paperFill) {
+              if (st.owned[sym]) open.push(sym);
+            } else if (r && (r.ok || r.outcomeUnknown)) sent.push(sym);
+            else open.push(sym);
+          }
+          if (sent.length) open.push(...await this.stillOpenOnSodex(s, sent));
+          resolve2(open);
+        } catch (e) {
+          resolve2([.../* @__PURE__ */ new Set([...open, ...sent, ...Object.keys(st.owned)])]);
+          throw e;
+        }
+      });
+    });
+  }
+  /** Of `symbols`, those the follower's SoDEX account still holds (re-read up to three times; unread counts as held). */
+  async stillOpenOnSodex(s, symbols) {
+    let open = symbols;
+    let read = false;
+    for (let attempt = 0; attempt < 3 && open.length; attempt++) {
+      if (attempt) await sleep(500);
+      try {
+        const snap = await this.host.sodex.follower(s.owner);
+        this.followers.set(s.owner, snap);
+        open = open.filter((sym) => !!snap.positions[sym]);
+        read = true;
+      } catch (e) {
+        this.host.log.warn("copy: follower read failed", { owner: s.owner, error: String(e) });
+      }
+    }
+    return read ? open : symbols;
+  }
+  /**
+   * Close what a copy holds where its leader is flat or on the other side (reduce-only): a
+   * close that filled only in part, a close missed while the copy was paused or while no
+   * copier ran. Not for a paused copy (its positions stay as they are), nor for a market with
+   * one of its orders in flight or a leader print still being merged (the stream is about to
+   * say more). A synchronous fill (paper) that leaves some open is tried again at once; a live
+   * close is booked from the stream, and what it leaves is tried at the next reconcile.
+   */
+  async closeStrays(subId) {
+    const s = this.subs.get(subId);
+    if (!s || s.status === "stopped" || s.status === "paused") return;
+    const l = s.settings.leader;
+    if (!this.leaders.seeded(l)) return;
+    const st = this.stateOf(s);
+    const dir = directionSign(s.settings);
+    const now = Date.now();
+    const want = /* @__PURE__ */ new Map();
+    const leaderSymbols = /* @__PURE__ */ new Map();
+    const book = this.leaders.positions(l);
+    for (const lsym of /* @__PURE__ */ new Set([...Object.keys(book), ...Object.keys(st.leaderPos)])) {
+      const m = this.markets.sodexMarketFor(l.venue, lsym);
+      if (!m) continue;
+      leaderSymbols.set(m.name, [...leaderSymbols.get(m.name) ?? [], lsym]);
+      if (book[lsym]) want.set(m.name, dir * Math.sign(book[lsym]));
+    }
+    const inFlight = this.inFlightOf(s.id);
+    for (const sym of Object.keys(st.owned)) {
+      const p0 = st.owned[sym];
+      if (!p0 || Math.abs(p0.size) < 1e-12) continue;
+      const expected = want.get(sym) ?? 0;
+      if (expected !== 0 && expected === Math.sign(p0.size)) continue;
+      if (inFlight[sym]) continue;
+      const lsyms = leaderSymbols.get(sym) ?? (l.venue === "sodex" ? [sym] : []);
+      if (lsyms.some((x) => this.leaders.isMerging(l, x))) continue;
+      const m = this.markets.get(sym);
+      const mark = this.markets.mark(sym);
+      if (!m || mark === null) continue;
+      for (let attempt = 0; attempt < 20; attempt++) {
+        const p = st.owned[sym];
+        if (!p) break;
+        const q = floorQuantity(p.size, m);
+        if (q === "0") break;
+        const side = p.size > 0 ? "sell" : "buy";
+        const clOrdID = clientOrderId(s.id, `sweep:${sym}:${now}:${attempt}`, "reconcile");
+        const intent = { symbol: sym, side, quantity: q, limitPrice: limitPrice(side, mark, s.settings.slippageBps, m, mark), reduceOnly: true, leg: "reconcile", notionalUsd: Number(q) * mark, clampedBy: null, clOrdID };
+        const [r] = await this.execute(s, m, [intent], mark, null);
+        if (!r?.paperFill || !(r.paperFill.qty > 0)) break;
+      }
+    }
+  }
+  /**
+   * After a restart: what the leader did while no copier ran. Every market where the saved
+   * leader position differs from the leader's position now is planned as a 'reconcile' event,
+   * as a missed print is while running - except a position opened meanwhile, which is
+   * pre-existing (joined only with "copy existing"), as when a copy starts.
+   */
+  catchUp(subId) {
+    const s = this.subs.get(subId);
+    if (!s || s.status === "stopped") return;
+    const l = s.settings.leader;
+    if (!this.leaders.seeded(l)) return;
+    const st = this.stateOf(s);
+    const now = Date.now();
+    const current = this.leaders.positions(l);
+    for (const sym of /* @__PURE__ */ new Set([...Object.keys(st.leaderPos), ...Object.keys(current)])) {
+      const before = st.leaderPos[sym] ?? 0;
+      const after = current[sym] ?? 0;
+      if (Math.abs(before - after) <= 1e-9 * Math.max(1, Math.abs(before), Math.abs(after))) continue;
+      if (before === 0 && !s.settings.copyExisting) {
+        st.leaderPos[sym] = after;
+        st.detached[sym] = "pre-existing";
+        this.dirty.add(s.id);
+        continue;
+      }
+      const price2 = this.priceFor(l.venue, sym) ?? 0;
+      this.dispatch(s, { leader: l, symbol: sym, before, after, price: price2, time: now, id: `restart:${sym}:${now}`, source: "reconcile" });
+    }
+  }
+  /** SoDEX symbol -> signed size of this copy's orders sent but not booked yet. */
+  inFlightOf(subId) {
+    const now = Date.now();
+    const out = {};
+    for (const p of this.pending) {
+      if (p.subId !== subId || p.until <= now || !(p.remaining > 1e-12)) continue;
+      out[p.symbol] = (out[p.symbol] ?? 0) + (p.side === "buy" ? p.remaining : -p.remaining);
+    }
+    return out;
+  }
+  /* -------------------------------------------------- SoDEX position stops ----- */
+  scheduleStops(s, symbol2) {
+    if (s.settings.paper || s.settings.stopLossPct === null && s.settings.takeProfitPct === null) return;
+    const k = `${s.id}|${symbol2}`;
+    timers.cancel(this.stopTimers.get(k));
+    this.stopTimers.set(
+      k,
+      timers.after(2e3, () => {
+        this.stopTimers.delete(k);
+        this.enqueue(s.owner, () => this.refreshStops(s.id, symbol2));
+      })
+    );
+  }
+  /** Keep one SoDEX stop-loss (and take-profit) per copied position, sized to it. */
+  async refreshStops(subId, symbol2) {
+    const s = this.subs.get(subId);
+    if (!s || s.status === "stopped") return;
+    const st = this.stateOf(s);
+    const sink = this.host.sinkFor(s);
+    const m = this.markets.get(symbol2);
+    if (!sink || sink.paper || !m) return;
+    const p = st.owned[symbol2];
+    const cur = st.stops[symbol2];
+    if (p && cur && Math.abs(cur.size - p.size) < 1e-12) return;
+    if (cur) {
+      for (const id of [cur.sl, cur.tp]) if (id) await sink.cancel(s.accountId, m, id).catch((e) => this.host.log.warn("copy: stop not cancelled", { id, error: String(e) }));
+      delete st.stops[symbol2];
+    }
+    if (!p) return;
+    const q = floorQuantity(p.size, m);
+    if (q === "0") return;
+    const lev = effectiveLeverage(s.settings.maxLeverage, this.host.policyFor(s), m.maxLeverage);
+    const builder = await this.host.builderFor(s).catch(() => null);
+    const next = { sl: null, tp: null, size: p.size, at: Date.now() };
+    for (const kind of ["stop-loss", "take-profit"]) {
+      const trigger = guardTrigger(kind, p, s.settings, lev);
+      if (trigger === null) continue;
+      const clOrdID = `vds-${bytesToHex2(keccak256(utf8(`${s.id}|${symbol2}|${kind}|${p.size}|${next.at}`))).slice(2, 26)}`;
+      const r = await sink.placeStop(s.accountId, m, { clOrdID, side: p.size > 0 ? "sell" : "buy", quantity: q, triggerPrice: snapPrice(trigger, m), kind }, builder);
+      if (r.ok) next[kind === "stop-loss" ? "sl" : "tp"] = clOrdID;
+      else await this.activity(s, { kind: "error", reason: `${kind}-not-placed`, symbol: symbol2, detail: r.error });
+    }
+    st.stops[symbol2] = next;
+    this.dirty.add(s.id);
+  }
+  cancelStops(s, symbol2) {
+    if (s.settings.paper || !this.stateOf(s).stops[symbol2]) return;
+    this.enqueue(s.owner, () => this.refreshStops(s.id, symbol2));
+  }
+  /** Cancel the SoDEX stops the copier placed on the markets `which` picks. */
+  cancelStopsWhere(s, which) {
+    for (const sym of Object.keys(this.stateOf(s).stops)) {
+      if (!which(sym)) continue;
+      this.enqueue(s.owner, async () => {
+        const st = this.stateOf(s);
+        const cur = st.stops[sym];
+        const sink = this.host.sinkFor(s);
+        const m = this.markets.get(sym);
+        if (!cur || !sink || !m) return;
+        for (const id of [cur.sl, cur.tp]) if (id) await sink.cancel(s.accountId, m, id).catch(() => {
+        });
+        delete st.stops[sym];
+        this.dirty.add(s.id);
+      });
+    }
+  }
+  /* ----------------------------------------------------------- readiness ----- */
+  /** A live copy needs its key registered and a builder approval covering the copy fee. */
+  async checkReady(s0) {
+    const s = this.subs.get(s0.id);
+    if (!s || s.settings.paper || s.status === "stopped" || s.status === "paused" || s.status === "halted") return;
+    let problem = this.localProblem(s);
+    if (!problem) {
+      try {
+        problem = await this.host.keyProblem?.(s) ?? null;
+        if (!problem) {
+          const builder = await this.host.builderFor(s);
+          if (builder) {
+            const approved = await this.host.sodex.builderApproval(s.owner, Number(builder.id));
+            if (approved === null || approved < builder.fee) {
+              problem = `Your SoDEX account does not approve the ValueDesk copy fee (${builder.fee / 10} bp). Approve it in copy setup.`;
+            }
+          }
+        }
+      } catch (e) {
+        this.host.log.warn("copy: readiness check failed", { sub: s.id, error: String(e) });
+        return;
+      }
+    }
+    const cur = this.subs.get(s.id);
+    if (!cur || cur.status === "stopped" || cur.status === "paused" || cur.status === "halted") return;
+    try {
+      if (problem && (cur.status !== "blocked" || cur.statusReason !== problem)) await this.setStatus(cur.id, "blocked", problem);
+      else if (!problem && cur.status === "blocked") await this.setStatus(cur.id, "active", null);
+    } catch (e) {
+      this.host.log.warn("copy: readiness status not set", { sub: cur.id, error: String(e) });
+    }
+  }
+  /** Why this copier may not trade a copy, known without asking SoDEX: the region, or "ask me each time" with nobody to ask. */
+  localProblem(s) {
+    const policy = this.host.policyFor(s);
+    if (!policy.allowed) return policy.reason ?? "Copy trading is not available in your region.";
+    if (s.settings.approval === "confirm" && !this.host.confirm) return CONFIRM_UNAVAILABLE;
+    return null;
+  }
+  /**
+   * Block a copy for a local problem. A paper copy blocked by one resumes once it is gone
+   * (a live one through checkReady, which also checks its key and fee approval).
+   */
+  async applyLocalRules(id) {
+    const s = this.subs.get(id);
+    if (!s || s.status === "stopped" || s.status === "paused" || s.status === "halted") return;
+    const problem = this.localProblem(s);
+    if (problem) {
+      if (s.status !== "blocked" || s.statusReason !== problem) await this.setStatus(id, "blocked", problem);
+    } else if (s.status === "blocked" && !this.live(s)) await this.setStatus(id, "active", null);
+  }
+  /* ------------------------------------------------------------- leaders ----- */
+  followedLeaders() {
+    const seen = /* @__PURE__ */ new Map();
+    for (const s of this.subs.values()) if (s.status !== "stopped") seen.set(lk(s.settings.leader), s.settings.leader);
+    return [...seen.values()];
+  }
+  /** Point the feeds at the followed leaders (and start Hyperliquid's when one is needed). */
+  async syncFeeds() {
+    const leaders = this.followedLeaders();
+    const sodex = [];
+    for (const l of leaders.filter((x) => x.venue === "sodex")) {
+      let id = this.sodexIds.get(l.address);
+      if (id === void 0) {
+        id = await this.host.sodex.accountId(l.address).catch(() => 0);
+        if (id) this.sodexIds.set(l.address, id);
+      }
+      sodex.push({ ref: l, accountId: id });
+    }
+    this.sodexFeed?.setLeaders(sodex);
+    const hl = leaders.filter((x) => x.venue === "hyperliquid");
+    if (hl.length && !this.hlFeed && this.running) {
+      if (this.host.hlMode === "firehose") this.hlCoins = await this.hyperliquidCoins();
+      this.hlFeed = new HyperliquidFeed({
+        factory: this.host.factory,
+        book: this.leaders,
+        mode: this.host.hlMode,
+        coins: () => this.hlCoins,
+        log: this.host.log,
+        sink: {
+          leader: (e) => this.onLeaderEvent(e),
+          state: (_f, up) => {
+            this.feedUp.hyperliquid = up;
+            if (up) void this.reconcileAll();
+          }
+        }
+      });
+      this.hlFeed.start();
+    }
+    this.hlFeed?.setLeaders(hl);
+    for (const l of leaders) if (!this.leaders.seeded(l)) await this.seedLeader(l);
+  }
+  async hyperliquidCoins() {
+    try {
+      const meta = await this.host.hyperliquid.post({ type: "meta" });
+      return (meta.universe ?? []).filter((u) => u.name && !u.isDelisted).map((u) => u.name);
+    } catch (e) {
+      this.host.log.warn("copy: hyperliquid coin list failed", { error: String(e) });
+      return [];
+    }
+  }
+  async readLeader(l) {
+    return l.venue === "sodex" ? this.host.sodex.leaderPositions(l.address) : this.host.hyperliquid.leaderPositions(l.address);
+  }
+  async seedLeader(l) {
+    if (this.leaders.seeded(l)) return;
+    try {
+      const r = await this.readLeader(l);
+      this.leaders.resync(l, r.positions, r.equity, r.marks, Date.now(), (sym) => this.priceFor(l.venue, sym));
+    } catch (e) {
+      this.host.log.warn("copy: leader read failed", { leader: lk(l), error: String(e) });
+    }
+  }
+  reconciling = false;
+  /** Re-read every followed leader: what the stream missed becomes a 'reconcile' event. */
+  async reconcileAll() {
+    if (this.reconciling || !this.running) return;
+    this.reconciling = true;
+    try {
+      for (const l of this.followedLeaders()) {
+        try {
+          const readStart = Date.now();
+          const r = await this.readLeader(l);
+          const events = this.leaders.resync(l, r.positions, r.equity, r.marks, Date.now(), (sym) => this.priceFor(l.venue, sym), readStart);
+          const eq = this.leaders.equity(l);
+          for (const s of this.list()) {
+            if (lk(s.settings.leader) !== lk(l)) continue;
+            const st = this.stateOf(s);
+            if (eq) {
+              st.leaderEquity = eq.value;
+              st.leaderEquityAt = eq.at;
+            }
+            st.lastReconcileAt = Date.now();
+            this.dirty.add(s.id);
+          }
+          for (const e of events) this.onLeaderEvent(e);
+          for (const s of this.list()) if (lk(s.settings.leader) === lk(l) && s.status !== "stopped") this.enqueue(s.owner, () => this.closeStrays(s.id));
+        } catch (e) {
+          this.host.log.warn("copy: reconcile read failed", { leader: lk(l), error: String(e) });
+        }
+      }
+    } finally {
+      this.reconciling = false;
+    }
+  }
+  /** A price for a leader market: the SoDEX mark of the market it maps to. */
+  priceFor(venue, leaderSymbol) {
+    const m = this.markets.sodexMarketFor(venue, leaderSymbol);
+    return m ? this.markets.mark(m.name, 10 * 6e4) : null;
+  }
+  async loadMarkets() {
+    try {
+      const list = await this.host.sodex.markets();
+      if (list.length) this.markets.load(list);
+      for (const p of await this.host.sodex.markPrices()) this.markets.setMark(p.symbol, p.price);
+    } catch (e) {
+      this.host.log.warn("copy: market list failed", { error: String(e) });
+    }
+  }
+  /* ---------------------------------------------------------------- books ----- */
+  stateOf(s) {
+    let st = this.states.get(s.id);
+    if (!st) this.states.set(s.id, st = freshState(s.id, s.settings.allocationUsd));
+    return st;
+  }
+  live(s) {
+    return !s.settings.paper;
+  }
+  need(id) {
+    const s = this.subs.get(id);
+    if (!s) throw new Error("No such copy.");
+    return s;
+  }
+  async flush() {
+    const ids = [...this.dirty];
+    this.dirty.clear();
+    for (const id of ids) {
+      const st = this.states.get(id);
+      if (st) await this.host.store.saveState(st).catch((e) => this.host.log.error("copy: state not saved", { sub: id, error: String(e) }));
+      this.host.onChange?.(id);
+    }
+  }
+  /** The follower hears of it (notices.ts); a host that throws never stops the copy. */
+  notice(n) {
+    if (!n) return;
+    try {
+      this.host.onNotice?.(n);
+    } catch (e) {
+      this.host.log.warn("copy: notice not taken", { error: String(e) });
+    }
+  }
+  async activity(s, e) {
+    const entry = {
+      id: randomId("a"),
+      subId: s.id,
+      owner: s.owner,
+      at: Date.now(),
+      detail: null,
+      symbol: null,
+      side: null,
+      size: null,
+      price: null,
+      notionalUsd: null,
+      reduceOnly: null,
+      clOrdID: null,
+      orderId: null,
+      builderFee: null,
+      leader: null,
+      paper: s.settings.paper,
+      ...e
+    };
+    await this.host.store.addActivity(entry).catch((err) => this.host.log.error("copy: activity not saved", { error: String(err) }));
+    this.host.onChange?.(s.id);
+  }
+};
+
+// ../../packages/copy-engine/src/api.ts
+var COPY_DOMAIN = { name: "ValueDesk Copy", version: "1" };
+var COPY_TERMS_EXECUTOR = "valuedesk-copy-terms";
+var SITE_TERMS_EXECUTOR = "valuedesk-site-terms";
+var COPY_ACTIONS = ["session", "accept-terms", "accept-site-terms", "create-key", "delete-key", "subscribe", "update", "pause", "resume", "stop", "stop-all", "algo-start", "algo-action"];
+var COPY_REQUEST_FIELDS = [
+  { name: "action", type: "string" },
+  { name: "owner", type: "address" },
+  { name: "executor", type: "string" },
+  { name: "payload", type: "string" },
+  { name: "nonce", type: "uint64" },
+  { name: "deadline", type: "uint64" }
+];
+function canonicalJSON(v) {
+  if (v === null || typeof v !== "object") return JSON.stringify(v);
+  if (Array.isArray(v)) return `[${v.map((x) => canonicalJSON(x === void 0 ? null : x)).join(",")}]`;
+  const o = v;
+  return `{${Object.keys(o).filter((k) => o[k] !== void 0).sort().map((k) => `${JSON.stringify(k)}:${canonicalJSON(o[k])}`).join(",")}}`;
+}
+function copyRequestTypedData(r) {
+  return {
+    domain: { name: COPY_DOMAIN.name, version: COPY_DOMAIN.version, chainId: r.chainId, verifyingContract: ZERO_ADDRESS },
+    types: {
+      EIP712Domain: [
+        { name: "name", type: "string" },
+        { name: "version", type: "string" },
+        { name: "chainId", type: "uint256" },
+        { name: "verifyingContract", type: "address" }
+      ],
+      CopyRequest: COPY_REQUEST_FIELDS
+    },
+    primaryType: "CopyRequest",
+    message: {
+      action: r.action,
+      owner: r.owner.toLowerCase(),
+      executor: r.executor,
+      payload: r.payload,
+      nonce: r.nonce,
+      deadline: r.deadline
+    }
+  };
+}
+var copyRequestDigest = (r) => bytesToHex2(hashTypedData(copyRequestTypedData(r)));
+var REQUEST_TTL_MS = 5 * 6e4;
+var TERMS_TTL_MS = 365 * 864e5;
+var isStatement = (action2) => action2 === "accept-terms" || action2 === "accept-site-terms";
+var MAX_WINDOW_MS = (action2) => isStatement(action2) ? TERMS_TTL_MS + 864e5 : 60 * 6e4;
+var ADDRESS3 = /^0x[0-9a-f]{40}$/;
+function verifyCopyRequest(r, o) {
+  const now = o.now ?? Date.now();
+  if (!r || typeof r !== "object") return { ok: false, error: "missing signed request" };
+  const q = r;
+  const action2 = q.action;
+  if (!COPY_ACTIONS.includes(action2)) return { ok: false, error: "unknown action" };
+  const owner = typeof q.owner === "string" ? q.owner.toLowerCase() : "";
+  if (!ADDRESS3.test(owner)) return { ok: false, error: "owner must be a 0x address" };
+  if (q.executor !== o.executor) return { ok: false, error: "this request was signed for another executor" };
+  if (typeof q.payload !== "string" || q.payload.length > 16384) return { ok: false, error: "payload must be a JSON string under 16 KB" };
+  if (typeof q.nonce !== "string" || !/^\d{1,16}$/.test(q.nonce)) return { ok: false, error: "nonce must be a decimal string" };
+  if (typeof q.deadline !== "string" || !/^\d{1,16}$/.test(q.deadline)) return { ok: false, error: "deadline must be a decimal string" };
+  const chainId = Number(q.chainId);
+  if (!Number.isSafeInteger(chainId) || chainId <= 0) return { ok: false, error: "chainId must be a positive integer" };
+  if (typeof q.signature !== "string" || !/^0x[0-9a-fA-F]{130}$/.test(q.signature)) return { ok: false, error: "signature must be 65 bytes of hex" };
+  const nonce = Number(q.nonce);
+  const deadline = Number(q.deadline);
+  if (deadline < now) return { ok: false, error: "this request has expired; sign it again (if it keeps happening, check your computer's clock: it may be behind)" };
+  if (deadline - nonce > MAX_WINDOW_MS(action2)) return { ok: false, error: "this request is valid for longer than allowed" };
+  const skew = o.maxAgeMs ?? 15 * 6e4;
+  if (nonce - now > skew || !isStatement(action2) && now - nonce > skew) return { ok: false, error: "the request time is too far from now; check your clock" };
+  let payload;
+  try {
+    payload = JSON.parse(q.payload);
+  } catch {
+    return { ok: false, error: "payload is not JSON" };
+  }
+  if (canonicalJSON(payload) !== q.payload) return { ok: false, error: "payload is not in canonical form" };
+  const req = { action: action2, owner, executor: o.executor, payload: q.payload, nonce: q.nonce, deadline: q.deadline, chainId };
+  const digest = copyRequestDigest(req);
+  let signer;
+  try {
+    signer = recoverAddress(hexToBytes2(digest), hexToBytes2(q.signature)).toLowerCase();
+  } catch {
+    return { ok: false, error: "the signature cannot be read" };
+  }
+  if (signer !== owner) return { ok: false, error: "the signature is not from this wallet" };
+  return { ok: true, digest, payload };
+}
+var ALGO_UPDATE_FIELDS = ["quantity", "limitPrice", "maxSpreadBps", "label"];
+var EXECUTOR_FEATURES = ["counter", "site-terms", "key-import", "algo-update"];
+
 // ../../packages/copy-engine/src/algo/sizes.ts
 function money(n) {
   const a = Math.abs(n);
@@ -12793,22 +12892,22 @@ function checkLimits(m, x) {
       out.errors.push(`Your ${m.name} position would be about ${money(Math.abs(after) * x.price)}, over SoDEX's limit of ${money(cap)}${lev}.${held2}${left} ${most > cap + 1e-6 ? "Use a smaller size or lower leverage." : "Use a smaller size."}`);
     }
   }
-  const head = oiHeadroom(m, x.oi, x.price);
-  if (head) out.maxByOi = closes + head.room;
-  if (head && grows > 0) {
-    const roomUsd = head.room * x.price;
-    const share = head.room > 0 ? grows / head.room : Infinity;
-    const used = head.cap > 0 ? head.open / head.cap : 1;
-    const oi = { share, roomUsd, roomQty: head.room, used };
-    if (head.room <= 0) {
+  const head2 = oiHeadroom(m, x.oi, x.price);
+  if (head2) out.maxByOi = closes + head2.room;
+  if (head2 && grows > 0) {
+    const roomUsd = head2.room * x.price;
+    const share = head2.room > 0 ? grows / head2.room : Infinity;
+    const used = head2.cap > 0 ? head2.open / head2.cap : 1;
+    const oi = { share, roomUsd, roomQty: head2.room, used };
+    if (head2.room <= 0) {
       out.oi = { level: "over", ...oi, roomUsd: 0, roomQty: 0 };
       out.warnings.push(`Open interest on ${m.name} is at SoDEX's cap: nothing can be added market-wide until it drops, and SoDEX refuses orders that open more.`);
     } else if (share >= 1 - 1e-9) {
       out.oi = { level: "over", ...oi };
-      out.warnings.push(`This order would hit SoDEX's open-interest cap on ${m.name}: it adds about ${money(grows * x.price)}, and only about ${money(roomUsd)} (${coins2(head.room)} ${m.base}) can still be added market-wide. SoDEX refuses what goes over the cap.`);
+      out.warnings.push(`This order would hit SoDEX's open-interest cap on ${m.name}: it adds about ${money(grows * x.price)}, and only about ${money(roomUsd)} (${coins2(head2.room)} ${m.base}) can still be added market-wide. SoDEX refuses what goes over the cap.`);
     } else if (share >= OI_NEAR_SHARE) {
       out.oi = { level: "near", ...oi };
-      out.warnings.push(`${oiRoomWords(m, head, x.price)} This order would use ${Math.round(share * 100)}% of that.`);
+      out.warnings.push(`${oiRoomWords(m, head2, x.price)} This order would use ${Math.round(share * 100)}% of that.`);
     }
   }
   return out;
@@ -12821,10 +12920,10 @@ function limitRefusal(error, symbol2) {
   if (/(too many|max(imum)?( number of)?|limit (of|on)) (open |active |pending )?orders|open[\s_-]?orders?[^.]*\b(limit|exceed|max)/i.test(e)) return { kind: "orders", text: "SoDEX's limit on open orders is reached." };
   return null;
 }
-function oiRoomWords(m, head, price2) {
-  const used = head.cap > 0 ? Math.min(100, Math.floor(head.open / head.cap * 100)) : 100;
-  if (head.room <= 0) return `Open interest on ${m.name} is at SoDEX's cap: nothing can be added market-wide until it drops.`;
-  return `Open interest on ${m.name} is at ${used}% of SoDEX's cap: about ${money(head.room * price2)} (${coins2(head.room)} ${m.base}) can still be added market-wide.`;
+function oiRoomWords(m, head2, price2) {
+  const used = head2.cap > 0 ? Math.min(100, Math.floor(head2.open / head2.cap * 100)) : 100;
+  if (head2.room <= 0) return `Open interest on ${m.name} is at SoDEX's cap: nothing can be added market-wide until it drops.`;
+  return `Open interest on ${m.name} is at ${used}% of SoDEX's cap: about ${money(head2.room * price2)} (${coins2(head2.room)} ${m.base}) can still be added market-wide.`;
 }
 
 // ../../packages/copy-engine/src/algo/sweep.ts
@@ -13578,8 +13677,8 @@ var AlgoRuntime = class {
     await this.startSizes(a);
     await this.startLimits(a);
     if (spec.triggerPrice !== null) {
-      const mk = this.market.mark(spec.symbol)?.mark ?? null;
-      if (mk !== null) a.k.triggerFrom = mk;
+      const mk2 = this.market.mark(spec.symbol)?.mark ?? null;
+      if (mk2 !== null) a.k.triggerFrom = mk2;
     }
     this.algos.set(a.id, a);
     await this.host.store.saveAlgo(a);
@@ -13634,8 +13733,8 @@ var AlgoRuntime = class {
   }
   /** A market's mark and open interest: the feed's, else read once from SoDEX (a market not watched yet). null: not known. */
   async refOf(symbol2) {
-    const mk = this.market.mark(symbol2);
-    if (mk) return { mark: mk.mark, oi: mk.oi };
+    const mk2 = this.market.mark(symbol2);
+    if (mk2) return { mark: mk2.mark, oi: mk2.oi };
     try {
       const rows2 = await this.host.sodex.markPrices();
       const r = rows2.find((x) => x.symbol.toUpperCase() === symbol2.toUpperCase());
@@ -13661,6 +13760,18 @@ var AlgoRuntime = class {
     delete a.k.pausedFrom;
     await this.setStatus(a, back, null);
     for (const c of this.linkedOf(a)) if (c.status === "paused") await this.resume(c.id);
+    return a;
+  }
+  /**
+   * Stop an algo for a reason that is not the follower's (the browser tab that ran it was
+   * closed): ended as a cancel is - its resting children cancelled on SoDEX, its exits kept for
+   * what filled - with `reason` in its log and in the notice the follower gets.
+   */
+  async stopFor(id, reason) {
+    const a = this.need(id);
+    if (FINAL_STATUSES.has(a.status)) return a;
+    for (const c of this.linkedOf(a)) if (!FINAL_STATUSES.has(c.status)) await this.stopFor(c.id, reason);
+    await this.end(a, "cancelled", reason);
     return a;
   }
   /**
@@ -13936,8 +14047,8 @@ var AlgoRuntime = class {
       const began = await this.begin(a, m, now);
       if (!began || this.stopped(a)) return;
     }
-    const mk = this.market.mark(s.symbol)?.mark ?? mid(q);
-    const b = s.upper && mk >= s.upper.price ? { ...s.upper, which: "upper" } : s.lower && mk <= s.lower.price ? { ...s.lower, which: "lower" } : null;
+    const mk2 = this.market.mark(s.symbol)?.mark ?? mid(q);
+    const b = s.upper && mk2 >= s.upper.price ? { ...s.upper, which: "upper" } : s.lower && mk2 <= s.lower.price ? { ...s.lower, which: "lower" } : null;
     if (b) {
       const words = `the price is ${b.which === "upper" ? "at or above" : "at or below"} your ${b.which} bound of ${b.price}`;
       if (b.then === "stop" || s.kind === "scale") {
@@ -13955,36 +14066,36 @@ var AlgoRuntime = class {
       }
     }
     this.heldNow.delete(a.id);
-    await this.stepKind(a, m, q, mk, now);
+    await this.stepKind(a, m, q, mk2, now);
     if (!this.heldNow.has(a.id) && !FINAL_STATUSES.has(a.status)) await this.run(a);
     if (!FINAL_STATUSES.has(a.status)) await this.syncExits(a, m, false);
   }
-  async stepKind(a, m, q, mk, now) {
+  async stepKind(a, m, q, mk2, now) {
     const s = a.spec;
     switch (s.kind) {
       case "twap":
       case "vwap":
-        return this.stepSchedule(a, m, q, mk, now);
+        return this.stepSchedule(a, m, q, mk2, now);
       case "pov":
-        return this.stepPov(a, m, q, mk, now);
+        return this.stepPov(a, m, q, mk2, now);
       case "dca":
-        return this.stepDca(a, m, q, mk, now);
+        return this.stepDca(a, m, q, mk2, now);
       case "iceberg":
         return this.stepIceberg(a, m, q, now);
       case "chase":
-        return this.stepChase(a, m, q, mk, now);
+        return this.stepChase(a, m, q, mk2, now);
       case "scale":
         return this.stepScale(a, m, q, now);
       case "swarm":
-        return this.stepSwarm(a, m, q, mk, now);
+        return this.stepSwarm(a, m, q, mk2, now);
       case "conditional":
-        return this.stepConditional(a, m, q, mk, now);
+        return this.stepConditional(a, m, q, mk2, now);
       case "trailing":
-        return this.stepTrailing(a, m, q, mk, now);
+        return this.stepTrailing(a, m, q, mk2, now);
       case "basket":
         return this.stepBasket(a);
       case "bracket":
-        return this.stepBracket(a, m, q, mk);
+        return this.stepBracket(a, m, q, mk2);
       case "sweep":
         return this.stepSweep(a, m, now);
     }
@@ -13996,8 +14107,8 @@ var AlgoRuntime = class {
     if (from === "mid") return mid(q);
     const now = Date.now();
     if (from === "mark" || from === "index") {
-      const mk = this.market.mark(symbol2);
-      const p2 = mk && now - mk.at <= SWEEP_MAX_AGE_MS ? from === "mark" ? mk.mark : mk.index : null;
+      const mk2 = this.market.mark(symbol2);
+      const p2 = mk2 && now - mk2.at <= SWEEP_MAX_AGE_MS ? from === "mark" ? mk2.mark : mk2.index : null;
       return p2 && p2 > 0 ? p2 : void 0;
     }
     const c = combineOracle(this.oracleFor(symbol2.replace(/-USD$/, ""), now), now, { maxAgeMs: SWEEP_MAX_AGE_MS });
@@ -14077,14 +14188,14 @@ var AlgoRuntime = class {
     const s = a.spec;
     if (s.startAt !== null && now < s.startAt) return false;
     if (s.triggerPrice !== null) {
-      const mk = this.market.mark(s.symbol)?.mark ?? null;
-      if (mk === null) return false;
+      const mk2 = this.market.mark(s.symbol)?.mark ?? null;
+      if (mk2 === null) return false;
       if (typeof a.k.triggerFrom !== "number") {
-        a.k.triggerFrom = mk;
+        a.k.triggerFrom = mk2;
         this.dirty.add(a.id);
       }
       const from = a.k.triggerFrom;
-      const hit = from >= s.triggerPrice ? mk <= s.triggerPrice : mk >= s.triggerPrice;
+      const hit = from >= s.triggerPrice ? mk2 <= s.triggerPrice : mk2 >= s.triggerPrice;
       if (!hit) return false;
       await this.event(a, "info", `The mark reached your start price of ${s.triggerPrice}.`);
     }
@@ -14165,7 +14276,7 @@ var AlgoRuntime = class {
    * filled by now, `late` how much of it is overdue (taken at once), the rest
    * of what is due may rest as one post-only child at the touch.
    */
-  async work(a, m, q, mk, o) {
+  async work(a, m, q, mk2, o) {
     const s = a.spec;
     const side = o.side ?? s.side;
     const reduceOnly = o.reduceOnly ?? s.reduceOnly;
@@ -14198,7 +14309,7 @@ var AlgoRuntime = class {
       }
       if (Date.now() - Number(a.k.missAt ?? 0) < TAKER_RETRY_MS) return;
       const from = this.slipBase(s.symbol, o.exec, q);
-      const price3 = from === void 0 ? null : takerPrice(side, q, o.exec.slippageBps, m, mk, limit, from);
+      const price3 = from === void 0 ? null : takerPrice(side, q, o.exec.slippageBps, m, mk2, limit, from);
       const minAt = Math.max(minQ, minChildQty(m, price3 !== null ? Math.min(ref, price3) : ref));
       const most = Math.min(capOf(minAt), part, price3 !== null ? maxOrderQty(m, price3) : Infinity);
       let qty2 = floorStep(lateNeed, m);
@@ -14259,7 +14370,7 @@ var AlgoRuntime = class {
     return side === "buy" ? price2 >= q.bid : price2 <= q.ask;
   }
   /* ----------------------------------------------------------- the kinds ----- */
-  async stepSchedule(a, m, q, mk, now) {
+  async stepSchedule(a, m, q, mk2, now) {
     const s = a.spec;
     const total = typeof a.k.total === "number" ? a.k.total : Number(s.quantity);
     const closeSide = a.k.closeSide;
@@ -14296,7 +14407,7 @@ var AlgoRuntime = class {
       const mine = (a.k.recent ?? []).filter((x) => x[0] > now - win).reduce((x, y) => x + y[1], 0);
       part = Math.max(0, vol * s.maxParticipation - mine);
     }
-    await this.work(a, m, q, mk, {
+    await this.work(a, m, q, mk2, {
       due: finishing ? total : this.scheduleDue(a, total, share),
       late: finishing ? total : this.scheduleDue(a, total, lateShare),
       total,
@@ -14319,7 +14430,7 @@ var AlgoRuntime = class {
     for (const [t, d] of h) if (t <= at) v = d;
     return v;
   }
-  async stepPov(a, m, q, mk, now) {
+  async stepPov(a, m, q, mk2, now) {
     const s = a.spec;
     const total = Number(s.quantity);
     if (this.isDone(a, m)) return this.end(a, "done", "Filled.");
@@ -14332,7 +14443,7 @@ var AlgoRuntime = class {
     const h = this.dueHistory(a, now, due);
     const late = s.exec.style === "taker" ? due : s.exec.style === "hybrid" ? this.dueAgo(h, now - LATE_MS) : 0;
     const finishing = ended || a.k.rush === true;
-    await this.work(a, m, q, mk, {
+    await this.work(a, m, q, mk2, {
       due: finishing ? total : due,
       late: finishing ? total : late,
       total,
@@ -14350,7 +14461,7 @@ var AlgoRuntime = class {
    * as its own order. SoDEX refusing one more resting order (its open-order or
    * margin limits) holds the algo with the reason (onLimit), never merges.
    */
-  async stepDca(a, m, q, mk, now) {
+  async stepDca(a, m, q, mk2, now) {
     const s = a.spec;
     const start = a.startedAt;
     let done = Number(a.k.done ?? 0);
@@ -14363,14 +14474,14 @@ var AlgoRuntime = class {
     const tagOf = (n) => `order ${n}/${s.orders}`;
     while (done + skipped < s.orders && start + (done + skipped) * s.intervalMs <= now && spent < budget - 1e-9) {
       const px = s.side === "buy" ? q.ask : q.bid;
-      const outside = s.limitPrice !== null && (s.side === "buy" ? mk > s.limitPrice : mk < s.limitPrice);
+      const outside = s.limitPrice !== null && (s.side === "buy" ? mk2 > s.limitPrice : mk2 < s.limitPrice);
       if (outside) {
         if (s.outOfBand === "wait") {
           await this.hold(a, `Waiting: the price is ${s.side === "buy" ? "above" : "below"} your limit of ${s.limitPrice}.`);
           break;
         }
         skipped++;
-        await this.event(a, "skip", `Order ${done + skipped} of ${s.orders} skipped: the price ${mk} is ${s.side === "buy" ? "above" : "below"} your limit.`);
+        await this.event(a, "skip", `Order ${done + skipped} of ${s.orders} skipped: the price ${mk2} is ${s.side === "buy" ? "above" : "below"} your limit.`);
         continue;
       }
       let usd = s.perOrderUsd;
@@ -14395,7 +14506,7 @@ var AlgoRuntime = class {
     const over = done + skipped >= s.orders || spent >= budget - 1e-9;
     const liveOf = (n) => this.live(a).filter((c) => c.tag === tagOf(n));
     const leftOf = (i) => i.qty - i.filled - liveOf(i.n).reduce((x, c) => x + c.filled, 0);
-    const open = insts.filter((i) => leftOf(i) >= minChildQty(m, mk) - 1e-12 || liveOf(i.n).length);
+    const open = insts.filter((i) => leftOf(i) >= minChildQty(m, mk2) - 1e-12 || liveOf(i.n).length);
     if (over && !open.length && !this.live(a).length) return this.end(a, "done", `${done} order${done === 1 ? "" : "s"} filled${skipped ? `, ${skipped} skipped` : ""}.`);
     const list = [];
     const lateAfter = Math.min(LATE_MS * 4, s.exec.makerShare * s.intervalMs);
@@ -14418,7 +14529,7 @@ var AlgoRuntime = class {
           await this.hold(a, `Held: no fresh ${SLIP_FROM_NAMES[s.exec.slipFrom ?? "touch"].toLowerCase()} to measure your max slippage from.`);
           return;
         }
-        const price2 = takerPrice(s.side, q, s.exec.slippageBps, m, mk, s.limitPrice, from);
+        const price2 = takerPrice(s.side, q, s.exec.slippageBps, m, mk2, s.limitPrice, from);
         if (price2 === null) {
           await this.hold(a, `Held: the price is past your limit of ${s.limitPrice}.`);
           return;
@@ -14484,7 +14595,7 @@ var AlgoRuntime = class {
       a.k.clip = clip;
     });
   }
-  async stepChase(a, m, q, mk, now) {
+  async stepChase(a, m, q, mk2, now) {
     const s = a.spec;
     const total = Number(s.quantity);
     const live = this.live(a);
@@ -14508,7 +14619,7 @@ var AlgoRuntime = class {
         this.dirty.add(a.id);
       }
       const why = a.k.endWhy === "cap" ? `The price moved past your max chase of ${s.maxChaseBps} bp` : "Time is up";
-      if (how === "take") return this.work(a, m, q, mk, { due: total, late: total, total, exec: { style: "taker", slippageBps: 50, offsetTicks: 0, chaseTicks: 1, makerShare: 0.5 }, tag: "take the rest" });
+      if (how === "take") return this.work(a, m, q, mk2, { due: total, late: total, total, exec: { style: "taker", slippageBps: 50, offsetTicks: 0, chaseTicks: 1, makerShare: 0.5 }, tag: "take the rest" });
       if (how === "rest") {
         const c = live.find((x) => x.tif !== "ioc");
         if (c) c.tag = "left resting";
@@ -14579,7 +14690,7 @@ var AlgoRuntime = class {
     if (this.isDone(a, m)) return this.end(a, "done", "Every level filled.");
     return this.end(a, "expired", `${dec3(total - a.filled)} ${m.base} of the ladder did not fill (cancelled or refused).`);
   }
-  async stepSwarm(a, m, q, mk, now) {
+  async stepSwarm(a, m, q, mk2, now) {
     const s = a.spec;
     const total = Number(s.quantity);
     if (this.live(a).length) return;
@@ -14587,7 +14698,7 @@ var AlgoRuntime = class {
     const waveAt = Number(a.k.waveAt ?? 0);
     if (now < waveAt && !a.k.rush) return;
     if (s.maxSpreadBps !== null && spreadBps(q) > s.maxSpreadBps) return this.hold(a, `Held: the spread (${spreadBps(q).toFixed(1)} bp) is wider than your ${s.maxSpreadBps} bp.`);
-    const price2 = takerPrice(s.side, q, s.slippageBps, m, mk, s.limitPrice);
+    const price2 = takerPrice(s.side, q, s.slippageBps, m, mk2, s.limitPrice);
     if (price2 === null) return this.hold(a, `Held: the price is past your limit of ${s.limitPrice}.`);
     const clips = a.k.clips ?? [];
     let next = Number(a.k.next ?? 0);
@@ -14647,9 +14758,9 @@ var AlgoRuntime = class {
       a.k.wave = n;
     });
   }
-  async stepConditional(a, m, q, mk, now) {
+  async stepConditional(a, m, q, mk2, now) {
     const s = a.spec;
-    if (a.k.fired) return this.act(a, m, q, mk);
+    if (a.k.fired) return this.act(a, m, q, mk2);
     if (s.expiresAt !== null && now >= s.expiresAt) return this.end(a, "expired", "Its time ran out before the conditions held.");
     const ok = s.conditions.map((c, i) => this.conditionHolds(a, c, i, now));
     a.k.ok = ok;
@@ -14664,19 +14775,19 @@ var AlgoRuntime = class {
     a.k.fired = now;
     await this.save(a);
     await this.event(a, "info", `Conditions held${s.holdMs ? ` for ${Math.round(s.holdMs / 1e3)} s` : ""}: acting.`);
-    return this.act(a, m, q, mk);
+    return this.act(a, m, q, mk2);
   }
   /**
    * What a fired conditional does. Every branch may run again after a
    * restart: whatever it sent was in the store before it left (send), so it
    * picks up from there instead of acting twice.
    */
-  async act(a, m, q, mk) {
+  async act(a, m, q, mk2) {
     const s = a.spec;
     const t = s.then;
     if (t.type === "market") {
       if (typeof a.k.takeQty !== "number") a.k.takeQty = Number(t.quantity);
-      return this.afterFire(a, m, q, mk);
+      return this.afterFire(a, m, q, mk2);
     }
     if (t.type === "close") {
       if (typeof a.k.takeQty !== "number") {
@@ -14688,7 +14799,7 @@ var AlgoRuntime = class {
         a.k.closeSide = pos > 0 ? "sell" : "buy";
         this.dirty.add(a.id);
       }
-      return this.afterFire(a, m, q, mk);
+      return this.afterFire(a, m, q, mk2);
     }
     if (t.type === "limit") {
       if (!a.children.length) {
@@ -14723,7 +14834,7 @@ var AlgoRuntime = class {
     }
   }
   /** A fired conditional or trailing stop: take `k.takeQty` (a chase first, for a trailing stop that asks for one). */
-  async afterFire(a, m, q, mk) {
+  async afterFire(a, m, q, mk2) {
     const s = a.spec;
     const total = Number(a.k.takeQty ?? 0);
     if (!(total > 0)) return this.end(a, "expired", "Nothing to send.");
@@ -14731,7 +14842,7 @@ var AlgoRuntime = class {
     const side = a.k.closeSide ?? s.side;
     const slip = s.kind === "conditional" && (s.then.type === "market" || s.then.type === "close") ? s.then.slippageBps : s.kind === "trailing" ? s.slippageBps : 50;
     const chasing = s.kind === "trailing" && s.exit === "chase" && Date.now() - Number(a.k.fired) < s.chaseMs;
-    await this.work(a, m, q, mk, {
+    await this.work(a, m, q, mk2, {
       side,
       reduceOnly: a.k.closeSide !== void 0 ? true : void 0,
       due: total,
@@ -14742,13 +14853,13 @@ var AlgoRuntime = class {
       minRepriceMs: 1e3
     });
   }
-  async stepTrailing(a, m, q, mk, now) {
+  async stepTrailing(a, m, q, mk2, now) {
     const s = a.spec;
     if (a.k.fired) {
       if (typeof a.k.takeQty !== "number" && !await this.trailingSize(a, m)) return;
-      return this.afterFire(a, m, q, mk);
+      return this.afterFire(a, m, q, mk2);
     }
-    const price2 = s.source === "last" ? this.market.last(s.symbol)?.price ?? mk : mk;
+    const price2 = s.source === "last" ? this.market.last(s.symbol)?.price ?? mk2 : mk2;
     const st = a.k.trail ?? { armed: false, extreme: null };
     const r = trail(st, s.side, price2, s);
     const wasArmed = st.armed;
@@ -14761,7 +14872,7 @@ var AlgoRuntime = class {
     await this.save(a);
     await this.event(a, "info", `Fired: ${s.source} ${price2} reached the stop at ${r.stop?.toFixed(6).replace(/\.?0+$/, "")}.`);
     if (!await this.trailingSize(a, m)) return;
-    return this.afterFire(a, m, q, mk);
+    return this.afterFire(a, m, q, mk2);
   }
   /**
    * A fired trailing stop's size: its own, or the whole position it closes.
@@ -14862,12 +14973,12 @@ var AlgoRuntime = class {
     }
   }
   /** A bracket: the entry (a taker with a slippage cap, or one resting limit); its exits follow what fills. */
-  async stepBracket(a, m, q, mk) {
+  async stepBracket(a, m, q, mk2) {
     const s = a.spec;
     const total = Number(s.quantity);
     if (!this.live(a).length && this.isDone(a, m)) return this.end(a, "done", s.paper ? "Entered; its exits are watched on the paper book." : "Entered; its exits are on SoDEX.");
     if (s.entry === "market") {
-      return this.work(a, m, q, mk, { due: total, late: total, total, exec: { style: "taker", slippageBps: s.slippageBps, offsetTicks: 0, chaseTicks: 1, makerShare: 0.5 }, tag: "entry" });
+      return this.work(a, m, q, mk2, { due: total, late: total, total, exec: { style: "taker", slippageBps: s.slippageBps, offsetTicks: 0, chaseTicks: 1, makerShare: 0.5 }, tag: "entry" });
     }
     if (!a.k.placed) {
       if (this.live(a).length) return;
@@ -14883,16 +14994,16 @@ var AlgoRuntime = class {
   }
   /* ---------------------------------------------------------- conditions ----- */
   conditionHolds(a, c, i, now) {
-    const mk = this.market;
+    const mk2 = this.market;
     switch (c.type) {
       case "time":
         return now >= c.at;
       case "price": {
-        const p = mk.price(c.symbol, c.source);
+        const p = mk2.price(c.symbol, c.source);
         return p !== null && (c.op === "above" ? p >= c.value : p <= c.value);
       }
       case "cross": {
-        const p = mk.price(c.symbol, c.source);
+        const p = mk2.price(c.symbol, c.source);
         if (p === null) return false;
         const key2 = `x${i}`;
         const other = c.dir === "up" ? p < c.value : p > c.value;
@@ -14903,34 +15014,34 @@ var AlgoRuntime = class {
         return a.k[key2] === true;
       }
       case "move": {
-        const p = mk.price(c.symbol, c.source);
-        const then = mk.priceAgo(c.symbol, c.source, c.windowMs);
+        const p = mk2.price(c.symbol, c.source);
+        const then = mk2.priceAgo(c.symbol, c.source, c.windowMs);
         if (p === null || then === null || !(then > 0)) return false;
         const ch = p / then - 1;
         return c.dir === "up" ? ch >= c.pct : c.dir === "down" ? ch <= -c.pct : Math.abs(ch) >= c.pct;
       }
       case "funding": {
-        const f = mk.mark(c.symbol)?.funding ?? null;
+        const f = mk2.mark(c.symbol)?.funding ?? null;
         return f !== null && (c.op === "above" ? f >= c.value : f <= c.value);
       }
       case "oi": {
-        const now0 = mk.mark(c.symbol)?.oi ?? null;
-        const then = mk.oiAgo(c.symbol, c.windowMs);
+        const now0 = mk2.mark(c.symbol)?.oi ?? null;
+        const then = mk2.oiAgo(c.symbol, c.windowMs);
         if (now0 === null || then === null || !(then > 0)) return false;
         const ch = now0 / then - 1;
         return c.dir === "up" ? ch >= c.pct : c.dir === "down" ? ch <= -c.pct : Math.abs(ch) >= c.pct;
       }
       case "spread": {
-        const q = mk.quote(c.symbol);
+        const q = mk2.quote(c.symbol);
         if (!q) return false;
         const b = spreadBps(q);
         return c.op === "above" ? b >= c.bps : b <= c.bps;
       }
       case "volume":
-        return mk.volume(c.symbol, c.windowMs).usd >= c.aboveUsd;
+        return mk2.volume(c.symbol, c.windowMs).usd >= c.aboveUsd;
       case "ratio": {
-        const x = mk.mark(c.symbol)?.mark ?? null;
-        const y = mk.mark(c.other)?.mark ?? null;
+        const x = mk2.mark(c.symbol)?.mark ?? null;
+        const y = mk2.mark(c.other)?.mark ?? null;
         if (x === null || y === null || !(y > 0)) return false;
         return c.op === "above" ? x / y >= c.value : x / y <= c.value;
       }
@@ -14952,7 +15063,7 @@ var AlgoRuntime = class {
             return Math.abs(size) <= c.value;
           case "pnlAbove":
           case "pnlBelow": {
-            const px = mk.mark(c.symbol)?.mark ?? null;
+            const px = mk2.mark(c.symbol)?.mark ?? null;
             if (px === null || size === 0) return false;
             const pnl = size * (px - p.entry);
             return c.op === "pnlAbove" ? pnl >= c.value : pnl <= c.value;
@@ -15195,12 +15306,12 @@ var AlgoRuntime = class {
       return list;
     }
     const kind = lim.maxByOi < lim.maxByPosition ? "oi" : "position";
-    const head = oiHeadroom(m, oiNow, price2);
+    const head2 = oiHeadroom(m, oiNow, price2);
     const cap = positionCapUsd(m, lev);
     const roomQty = Math.max(0, lim.maxByPosition - working);
     const can = roomQty < Number(m.stepSize) ? "nothing more can be added" : `about ${money(roomQty * price2)} (${coins2(roomQty)} ${m.base}) can still be added`;
     const posWords = cap === null ? "" : `Your ${m.name} position is about ${money(Math.abs(pos ?? 0) * price2)}${pos ? ` ${pos > 0 ? "long" : "short"}` : ""} and SoDEX's limit${lev !== null ? ` at ${lev}x` : ""} is ${money(cap)}: ${can}.`;
-    const room = kind === "oi" && head ? oiRoomWords(m, head, price2) : posWords;
+    const room = kind === "oi" && head2 ? oiRoomWords(m, head2, price2) : posWords;
     const one = list.length === 1 ? list[0] : null;
     const cut = one ? floorStep(Math.max(0, most), m) : 0;
     if (one && cut >= minChildQty(m, one.price)) {
@@ -15212,7 +15323,7 @@ var AlgoRuntime = class {
       await this.limitNotice(a, m, kind, "cut", text);
       return [{ ...one, quantity: cut }];
     }
-    const left = kind === "oi" ? head?.room ?? 0 : roomQty;
+    const left = kind === "oi" ? head2?.room ?? 0 : roomQty;
     const none = left < Number(m.stepSize);
     const small = one ? ` That is under ${minWords(m, one.price)}.` : ` That is too little for the next ${list.length} orders, which go out together.`;
     const fresh = kind === "oi" ? `Held: ${room || `open interest on ${m.name} is at SoDEX's cap.`}${none ? "" : small} Nothing goes out until there is ${none ? "" : "more "}room.` : `Held: ${room || `your ${m.name} position is at SoDEX's limit.`}${none ? "" : small} It goes on when there is room (a smaller position, or lower leverage).`;
@@ -15259,9 +15370,9 @@ var AlgoRuntime = class {
     const wait = Math.min(LIMIT_RETRY_MS * 2 ** (n - 1), 15 * 6e4);
     a.k.limitUntil = Date.now() + wait;
     const m = this.markets.get(a.spec.symbol);
-    const mk = this.market.mark(a.spec.symbol);
-    const head = m && mk && lim.kind === "oi" ? oiHeadroom(m, mk.oi, mk.mark) : null;
-    const room = head && m && mk ? ` ${oiRoomWords(m, head, mk.mark)}` : "";
+    const mk2 = this.market.mark(a.spec.symbol);
+    const head2 = m && mk2 && lim.kind === "oi" ? oiHeadroom(m, mk2.oi, mk2.mark) : null;
+    const room = head2 && m && mk2 ? ` ${oiRoomWords(m, head2, mk2.mark)}` : "";
     a.k.limitReason = `Held: ${lim.text}${room} Trying again in ${Math.round(wait / 6e4)} min.`;
     this.dirty.add(a.id);
     if (m) await this.limitNotice(a, m, lim.kind, "held", `SoDEX refused an order: ${lim.text}${room} It tries again in ${Math.round(wait / 6e4)} min.`);
@@ -15563,11 +15674,11 @@ var AlgoRuntime = class {
       if (!a.spec.paper || a.k.exitsDone) continue;
       const live = this.liveExits(a).filter((x) => x.state === "open" && !x.cancelling);
       if (!live.length) continue;
-      const mk = this.market.mark(a.spec.symbol)?.mark ?? null;
-      if (mk === null) continue;
+      const mk2 = this.market.mark(a.spec.symbol)?.mark ?? null;
+      if (mk2 === null) continue;
       const long = a.spec.side === "buy";
-      const hit = live.find((x) => x.exit === "tp" ? long ? mk >= x.price : mk <= x.price : long ? mk <= x.price : mk >= x.price);
-      if (hit) this.onOrderUpdate({ clOrdID: hit.clOrdID, orderId: hit.orderId, symbol: a.spec.symbol, status: "FILLED", filledQty: hit.quantity, filledValue: hit.quantity * mk, maker: false, reason: null, at: Date.now() });
+      const hit = live.find((x) => x.exit === "tp" ? long ? mk2 >= x.price : mk2 <= x.price : long ? mk2 <= x.price : mk2 >= x.price);
+      if (hit) this.onOrderUpdate({ clOrdID: hit.clOrdID, orderId: hit.orderId, symbol: a.spec.symbol, status: "FILLED", filledQty: hit.quantity, filledValue: hit.quantity * mk2, maker: false, reason: null, at: Date.now() });
     }
   }
   onChildDone(a, c) {
@@ -15800,6 +15911,16 @@ var AlgoRuntime = class {
     }
   }
   /* -------------------------------------------------------------- status ----- */
+  /** The follower hears of it (notices.ts algoNotice decides what is worth it); a host that throws never stops the algo. */
+  notice(a, status, reason) {
+    const n = algoNotice(a, status, reason);
+    if (!n) return;
+    try {
+      this.host.onNotice?.(n);
+    } catch (e) {
+      this.host.log.warn("algo: notice not taken", { error: String(e) });
+    }
+  }
   async setStatus(a, status, reason) {
     if (a.status === status && a.statusReason === reason) return;
     if (FINAL_STATUSES.has(a.status)) return;
@@ -15810,6 +15931,7 @@ var AlgoRuntime = class {
     await this.save(a);
     if (changed && status !== "running") await this.event(a, "status", reason ?? status);
     else if (reason && changed) await this.event(a, "status", reason);
+    if (changed) this.notice(a, status, reason);
     this.host.onChange?.(a.id);
   }
   /** A line in the algo's activity, once per algo: a child size it had to decide as it runs (sizes.ts head). */
@@ -15862,6 +15984,7 @@ var AlgoRuntime = class {
     a.updatedAt = a.endedAt;
     await this.save(a);
     await this.event(a, "status", reason);
+    this.notice(a, status, reason);
     if (status === "cancelled" && this.liveExits(a).length) await this.event(a, "info", "Its exits stay on SoDEX for what filled; cancel them in your open orders if you do not want them.");
     this.syncWatch();
     this.host.onChange?.(a.id);
@@ -16016,16 +16139,17 @@ function parseBrake(text) {
   try {
     raw = JSON.parse(text);
   } catch {
-    return { copies: true, algos: true, reason: `${DEFAULT_REASON} (the brake file cannot be read)`, since: null };
+    return { copies: true, algos: true, reason: `${DEFAULT_REASON} (the brake file cannot be read)`, since: null, cause: "operator" };
   }
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { copies: true, algos: true, reason: `${DEFAULT_REASON} (the brake file is not an object)`, since: null };
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { copies: true, algos: true, reason: `${DEFAULT_REASON} (the brake file is not an object)`, since: null, cause: "operator" };
   const r = raw;
   const copies = r.copies !== false;
   const algos = r.algos !== false;
   if (!copies && !algos) return null;
   const reason = typeof r.reason === "string" && r.reason.trim() ? r.reason.trim().slice(0, 300) : DEFAULT_REASON;
   const since = typeof r.since === "number" && Number.isFinite(r.since) ? r.since : null;
-  return { copies, algos, reason, since };
+  const cause = r.cause === "maintenance" ? "maintenance" : "operator";
+  return { copies, algos, reason, since, cause };
 }
 var Brake = class {
   /**
@@ -16074,7 +16198,7 @@ var Brake = class {
       }
     } catch (e) {
       this.mtime = -2;
-      next = { copies: true, algos: true, reason: `${DEFAULT_REASON} (the brake file cannot be read: ${e.code ?? "error"})`, since: null };
+      next = { copies: true, algos: true, reason: `${DEFAULT_REASON} (the brake file cannot be read: ${e.code ?? "error"})`, since: null, cause: "operator" };
     }
     const before = this.state;
     this.state = next;
@@ -16297,6 +16421,30 @@ var LABEL = {
   "audit-broken": "AUDIT CHAIN BROKEN",
   "queue-slow": "CLOSES AND STOPS WAITING"
 };
+var LABELS = {
+  maintenance: "\u{1F527} MAINTENANCE",
+  brake: "\u{1F6D1} BRAKE",
+  failure: "\u{1F6A8} FAILURE",
+  recovered: "\u2705 RECOVERED",
+  info: "\u2139\uFE0F INFO"
+};
+var CLASS = {
+  "order-rejected": "failure",
+  "key-decrypt": "failure",
+  "key-refused": "failure",
+  "sodex-down": "failure",
+  "sodex-up": "recovered",
+  "rate-limited": "failure",
+  "rate-cleared": "recovered",
+  "brake-on": "brake",
+  "brake-off": "recovered",
+  "sub-held": "failure",
+  "crash-restart": "failure",
+  fatal: "failure",
+  "audit-broken": "failure",
+  "queue-slow": "failure"
+};
+var head = (c, what) => `${LABELS[c]} \xB7 ${what}`;
 var shortWallet = (a) => /^0x[0-9a-fA-F]{40}$/.test(a) ? `${a.slice(0, 6)}\u2026${a.slice(-4)}` : a;
 function scrub(text) {
   let t = text.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "");
@@ -16373,7 +16521,7 @@ var Alerts = class {
       if (w) this.followUp(key2, w);
       this.windows.set(key2, { firstAt: now, more: 0, lastText: text, kind });
       if (this.windows.size > 5e3) this.flush();
-      this.emit(`${LABEL[kind]} - ${this.o.label}
+      this.emit(`${head(CLASS[kind], `${LABEL[kind]} - ${this.o.label}`)}
 ${text}`);
     } catch {
     }
@@ -16393,7 +16541,7 @@ ${text}`);
     await Promise.race([Promise.allSettled([...this.inflight]), new Promise((r) => setTimeout(r, ms).unref?.())]);
   }
   followUp(_key, w) {
-    if (w.more > 0) this.emit(`${LABEL[w.kind]} - ${this.o.label}
+    if (w.more > 0) this.emit(`${head(CLASS[w.kind], `${LABEL[w.kind]} - ${this.o.label}`)}
 x ${w.more} more in the last ${Math.round((this.o.dedupeMs ?? DEDUPE_MS) / 6e4)} min. Last:
 ${w.lastText}`);
     w.more = 0;
@@ -16403,7 +16551,7 @@ ${w.lastText}`);
     if (this.muted && this.sentAt.length < (this.o.perHour ?? PER_HOUR)) {
       const dropped = this.muted.dropped;
       this.muted = null;
-      if (dropped) this.send(`Alerts on again - ${this.o.label}
+      if (dropped) this.send(`${head("info", `Alerts on again - ${this.o.label}`)}
 ${dropped} alert(s) were not sent while muted; the executor's log has them.`, now);
     }
   }
@@ -16416,7 +16564,7 @@ ${dropped} alert(s) were not sent while muted; the executor's log has them.`, no
     }
     if (this.sentAt.length >= (this.o.perHour ?? PER_HOUR)) {
       this.muted = { since: now, dropped: 1 };
-      this.send(`Alerts muted - ${this.o.label}
+      this.send(`${head("info", `Alerts muted - ${this.o.label}`)}
 More than ${this.o.perHour ?? PER_HOUR} alerts in an hour; the next are dropped until the hour is over (the executor's log keeps them).`, now);
       return;
     }
@@ -16547,8 +16695,8 @@ var ExecutorService = class {
     });
     this.brake = new Brake(cfg.brakeFile, (now, before) => {
       db.audit("brake", null, null, { now, before });
-      if (now) deps.alerts?.raise("brake-on", "", `Copies ${now.copies ? "held" : "running"}, algos ${now.algos ? "held" : "running"}. Reason: ${now.reason}`);
-      else if (before) deps.alerts?.raise("brake-off", "", "The emergency brake is off; trading goes on.");
+      if (now && now.cause !== "maintenance") deps.alerts?.raise("brake-on", "", `Copies ${now.copies ? "held" : "running"}, algos ${now.algos ? "held" : "running"}. Reason: ${now.reason}`);
+      else if (!now && before && before.cause !== "maintenance") deps.alerts?.raise("brake-off", "", "The emergency brake is off; trading goes on.");
       if (now) deps.log.warn("executor: the emergency brake is ON", { copies: now.copies, algos: now.algos, reason: now.reason });
       else if (before) deps.log.warn("executor: the emergency brake is off", {});
     });
@@ -16567,6 +16715,8 @@ var ExecutorService = class {
       // The stricter of the country declared when the copy started and the one in the wallet's current terms.
       policyFor: (s) => screenPolicy(this.policyNow(s.owner, s.country, s.observedCountry), s.owner, s.settings.leader.address),
       keyProblem: async (s) => this.guard.holdOf({ kind: "copy", id: s.id, owner: s.owner }) ?? this.keyProblem(s.owner),
+      // A copy halted, held, stopped or closed outside the copier: kept for the follower to read after signing in.
+      onNotice: (n) => db.addNotice(n),
       brake: () => this.brakeText("copies")
     });
     const oracleFeed = new OracleFeed({ fetch: deps.fetch });
@@ -16584,7 +16734,9 @@ var ExecutorService = class {
       policyFor: (a) => this.algoPolicy(a),
       // A sweep's reference price: the shared oracle (oracle.ts) - Binance futures and spot, Bitget,
       // Hyperliquid, OKX and Bybit, each read at most once a second per coin for every algo here.
-      oracle: (coin) => oracleFeed.quotes(coin)
+      oracle: (coin) => oracleFeed.quotes(coin),
+      // An algo failed, stopped, held or finished: kept for the follower to read after signing in.
+      onNotice: (n) => db.addNotice(n)
     });
   }
   cfg;
@@ -17244,6 +17396,10 @@ var ExecutorService = class {
     }
     return { algos: touched.map((a) => this.algos.view(a.id)).filter((v) => v !== null) };
   }
+  /** What the wallet should hear of: its copies' and algos' notices, newest first (db.ts notices). */
+  notices(owner, q) {
+    return this.db.notices(owner, q);
+  }
   algoList(owner) {
     return this.algos.list(owner).map((a) => this.algos.view(a.id)).filter((v) => v !== null);
   }
@@ -17360,9 +17516,9 @@ function rateKey(ip) {
   const width = (p) => p.reduce((n, g2) => n + (g2.includes(".") ? 2 : 1), 0);
   let groups;
   if (gap >= 0) {
-    const head = a.slice(0, gap) ? a.slice(0, gap).split(":") : [];
+    const head2 = a.slice(0, gap) ? a.slice(0, gap).split(":") : [];
     const tail = a.slice(gap + 2) ? a.slice(gap + 2).split(":") : [];
-    groups = [...head, ...Array(Math.max(0, 8 - width(head) - width(tail))).fill("0"), ...tail];
+    groups = [...head2, ...Array(Math.max(0, 8 - width(head2) - width(tail))).fill("0"), ...tail];
   } else groups = a.split(":");
   return `${groups.slice(0, 4).map((g2) => g2.includes(".") ? "0" : (Number.parseInt(g2, 16) || 0).toString(16)).join(":")}::/64`;
 }
@@ -17545,6 +17701,11 @@ function createExecutorServer(svc, cfg, log) {
       if (req.method === "GET" && route === "/me") return send(res, 200, svc.me(svc.authenticate(bearer(req)), ctx));
       if (req.method === "GET" && route === "/consents") return send(res, 200, { consents: svc.consents(svc.authenticate(bearer(req))) });
       if (req.method === "GET" && route === "/algos") return send(res, 200, { algos: svc.algoList(svc.authenticate(bearer(req))) });
+      if (req.method === "GET" && route === "/notices") {
+        const owner = svc.authenticate(bearer(req));
+        const grades = (url.searchParams.get("grades") ?? "").split(",").filter(Boolean);
+        return send(res, 200, { notices: svc.notices(owner, { ...page(url), grades }) });
+      }
       const algoEv = /^\/algos\/([A-Za-z0-9_-]{1,40})\/events$/.exec(route);
       if (req.method === "GET" && algoEv) {
         const owner = svc.authenticate(bearer(req));
@@ -17716,7 +17877,8 @@ async function main() {
   log.info("executor up", { kind: cfg.kind, id: svc.executorId, network: cfg.network, listen: `${cfg.host}:${cfg.port}`, data: cfg.dataDir, egress: out.localAddress ?? "default route", liveAlgos: cfg.liveAlgos });
   const prune = setInterval(() => {
     try {
-      const n = db?.pruneActivity(Number(process.env.EXECUTOR_ACTIVITY_DAYS ?? 365)) ?? 0;
+      const days = Number(process.env.EXECUTOR_ACTIVITY_DAYS);
+      const n = days > 0 ? db?.pruneActivity(days) ?? 0 : 0;
       if (n) log.info("activity pruned", { rows: n });
     } catch (e) {
       log.warn("activity prune failed", { error: String(e) });
@@ -17724,8 +17886,8 @@ async function main() {
   }, 6 * 60 * 6e4);
   prune.unref();
   const anchor = () => {
-    const head = db?.auditRows({ limit: 1 })[0];
-    if (head) log.info("audit head", { seq: head.seq, at: head.at, hash: head.hash });
+    const head2 = db?.auditRows({ limit: 1 })[0];
+    if (head2) log.info("audit head", { seq: head2.seq, at: head2.at, hash: head2.hash });
   };
   anchor();
   const anchoring = setInterval(() => {

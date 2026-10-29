@@ -2,7 +2,8 @@
 # The emergency brake on BOTH servers, from this laptop (docs/INCIDENT-RUNBOOK.md):
 #
 #   bash deploy/release/brake.sh on "Investigating a fill problem."            everything, everywhere
-#   bash deploy/release/brake.sh on copies,algos "Executor maintenance."       only what is named
+#   bash deploy/release/brake.sh on copies,algos "Investigating fills."        only what is named
+#   bash deploy/release/brake.sh on --maintenance copies,algos "Updating."     planned work: 🔧 MAINTENANCE on Telegram, not 🛑 BRAKE
 #   bash deploy/release/brake.sh off
 #   bash deploy/release/brake.sh status
 #
@@ -16,7 +17,7 @@ S2="${VS_SERVER2:-almalinux@13.140.77.201}"
 KEY="${VS_SSH_KEY:-$HOME/.ssh/valuescan-contabo}"
 BIN="${VS_BRAKE_BIN:-/opt/valuescan/bin/brake.sh}"
 
-[ $# -ge 1 ] || { sed -n '2,7p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+[ $# -ge 1 ] || { sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 
 quoted=""
 for a in "$@"; do quoted+=" $(printf '%q' "$a")"; done

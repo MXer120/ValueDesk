@@ -68,6 +68,37 @@ const LABEL: Record<AlertKind, string> = {
   'queue-slow': 'CLOSES AND STOPS WAITING',
 };
 
+/**
+ * What a message is, on its first line - the five labels of the servers' scripts
+ * (deploy/server/bin/telegram.mjs LABELS, which says what each means). Nothing here is
+ * planned work: the brake of a release (cause 'maintenance', brake.ts) raises no alert.
+ */
+export type AlertClass = 'maintenance' | 'brake' | 'failure' | 'recovered' | 'info';
+export const LABELS: Record<AlertClass, string> = {
+  maintenance: '🔧 MAINTENANCE',
+  brake: '🛑 BRAKE',
+  failure: '🚨 FAILURE',
+  recovered: '✅ RECOVERED',
+  info: 'ℹ️ INFO',
+};
+export const CLASS: Record<AlertKind, AlertClass> = {
+  'order-rejected': 'failure',
+  'key-decrypt': 'failure',
+  'key-refused': 'failure',
+  'sodex-down': 'failure',
+  'sodex-up': 'recovered',
+  'rate-limited': 'failure',
+  'rate-cleared': 'recovered',
+  'brake-on': 'brake',
+  'brake-off': 'recovered',
+  'sub-held': 'failure',
+  'crash-restart': 'failure',
+  fatal: 'failure',
+  'audit-broken': 'failure',
+  'queue-slow': 'failure',
+};
+const head = (c: AlertClass, what: string): string => `${LABELS[c]} · ${what}`;
+
 /** 0x1234…abcd: enough to tell wallets apart in a chat, not the address. */
 export const shortWallet = (a: string): string => (/^0x[0-9a-fA-F]{40}$/.test(a) ? `${a.slice(0, 6)}…${a.slice(-4)}` : a);
 
@@ -172,7 +203,7 @@ export class Alerts {
       if (w) this.followUp(key, w);
       this.windows.set(key, { firstAt: now, more: 0, lastText: text, kind });
       if (this.windows.size > 5_000) this.flush();
-      this.emit(`${LABEL[kind]} - ${this.o.label}\n${text}`);
+      this.emit(`${head(CLASS[kind], `${LABEL[kind]} - ${this.o.label}`)}\n${text}`);
     } catch {
       /* an alert never throws into its caller */
     }
@@ -195,7 +226,7 @@ export class Alerts {
   }
 
   private followUp(_key: string, w: Window): void {
-    if (w.more > 0) this.emit(`${LABEL[w.kind]} - ${this.o.label}\nx ${w.more} more in the last ${Math.round((this.o.dedupeMs ?? DEDUPE_MS) / 60_000)} min. Last:\n${w.lastText}`);
+    if (w.more > 0) this.emit(`${head(CLASS[w.kind], `${LABEL[w.kind]} - ${this.o.label}`)}\nx ${w.more} more in the last ${Math.round((this.o.dedupeMs ?? DEDUPE_MS) / 60_000)} min. Last:\n${w.lastText}`);
     w.more = 0;
   }
 
@@ -204,7 +235,7 @@ export class Alerts {
     if (this.muted && this.sentAt.length < (this.o.perHour ?? PER_HOUR)) {
       const dropped = this.muted.dropped;
       this.muted = null;
-      if (dropped) this.send(`Alerts on again - ${this.o.label}\n${dropped} alert(s) were not sent while muted; the executor's log has them.`, now);
+      if (dropped) this.send(`${head('info', `Alerts on again - ${this.o.label}`)}\n${dropped} alert(s) were not sent while muted; the executor's log has them.`, now);
     }
   }
 
@@ -217,7 +248,7 @@ export class Alerts {
     }
     if (this.sentAt.length >= (this.o.perHour ?? PER_HOUR)) {
       this.muted = { since: now, dropped: 1 };
-      this.send(`Alerts muted - ${this.o.label}\nMore than ${this.o.perHour ?? PER_HOUR} alerts in an hour; the next are dropped until the hour is over (the executor's log keeps them).`, now);
+      this.send(`${head('info', `Alerts muted - ${this.o.label}`)}\nMore than ${this.o.perHour ?? PER_HOUR} alerts in an hour; the next are dropped until the hour is over (the executor's log keeps them).`, now);
       return;
     }
     this.send(text, now);

@@ -53,7 +53,21 @@
 // /etc/valuescan/alert.env, deploy/server/bin/telegram.mjs) and/or the SNS topic
 // ALERT_TOPIC_ARN (AWS only). A message names the server (HEALTH_SERVER_NAME) and the
 // failing checks with their notes; nothing secret is ever in one. When no channel
-// takes the message it is tried again on the next pass.
+// takes the message it is tried again on the next pass. Its first line says what it is
+// (telegram.mjs LABELS): "🚨 FAILURE · <server>" or "✅ RECOVERED · <server>".
+//
+// MAINTENANCE. While a maintenance window is open on this server (maint.sh on - ship.sh
+// opens one on both servers before it restarts anything; HEALTH_MAINT_FILE, default
+// /var/lib/valuescan/maintenance.json), a failing check of a part it names is expected:
+// it is held - not alerted, not counted - and the JSON line lists it under `held`. Which
+// part a check belongs to: api, lockdown -> api; index, indexer -> api and indexer;
+// executor -> executor; units -> the parts among HEALTH_UNITS (valuescan-<part>.service);
+// peer:<name> -> executor when the name says executor or copy, api when it says api;
+// disk, backup, tls -> none (never held). A check that was alerted before the window
+// opened stays alerted. Once the window is closed (or its time is up) a held check is
+// judged as any other - two failing passes, then a FAILURE - and for 30 minutes the
+// message says it came right after the maintenance. A failure of anything else alerts
+// during a window as always, and says it is not part of it.
 //
 // It never opens the index: the file is only stat()ed for its size. So the unit
 // needs no write access to the index directory (a WAL reader would: its -shm).
@@ -68,7 +82,7 @@ import https from 'node:https';
 import { hostname } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import tls from 'node:tls';
-import { sendTelegram } from './telegram.mjs';
+import { labelled, sendTelegram } from './telegram.mjs';
 
 const env = (k, d = '') => (process.env[k] ?? '').trim() || d;
 const num = (k, d) => {
@@ -97,6 +111,9 @@ const DISK_PCT = num('HEALTH_DISK_PCT', 80);
 const BACKUP_MAX_AGE_H = num('HEALTH_BACKUP_MAX_AGE_H', 36);
 const CERT_MIN_DAYS = num('HEALTH_CERT_MIN_DAYS', 14);
 const REALERT_MS = num('HEALTH_REALERT_H', 6) * 3600_000;
+const MAINT_FILE = env('HEALTH_MAINT_FILE', '/var/lib/valuescan/maintenance.json');
+// How long after a window a failure is said to have come right after it.
+const AFTER_MAINT_MS = 30 * 60_000;
 
 const ALL_CHECKS = ['api', 'lockdown', 'index', 'indexer', 'disk', 'backup', 'executor', 'tls', 'units'];
 const CHECKS = list('HEALTH_CHECKS').length ? list('HEALTH_CHECKS') : ALL_CHECKS;
@@ -286,12 +303,15 @@ await check('tls', async () => {
   return days < CERT_MIN_DAYS ? { ok: false, note: `the certificate expires in ${days} days (renewal is failing)` } : { ok: true, note: `certificate from ${issuer}, ${days} days left` };
 });
 
+/** The units the `units` check asks systemd about. */
+function unitNames() {
+  const names = list('HEALTH_UNITS');
+  if (names.length) return names;
+  return ['valuescan-indexer.service', 'valuescan-api.service', 'caddy.service', ...(EXECUTOR_URL ? ['valuescan-executor.service'] : [])];
+}
+
 await check('units', async () => {
-  let names = list('HEALTH_UNITS');
-  if (!names.length) {
-    names = ['valuescan-indexer.service', 'valuescan-api.service', 'caddy.service'];
-    if (EXECUTOR_URL) names.push('valuescan-executor.service');
-  }
+  const names = unitNames();
   const out = spawnSync(env('HEALTH_SYSTEMCTL', 'systemctl'), ['is-active', ...names], { encoding: 'utf8', timeout: 5000 });
   if (out.error || !out.stdout) return { ok: true, warn: true, note: 'systemd could not be asked' };
   const states = out.stdout.trim().split('\n');
@@ -328,7 +348,56 @@ await Promise.all(PEERS.map(async (p) => {
 const failed = Object.entries(results).filter(([, r]) => !r.ok).map(([k]) => k);
 const warned = Object.entries(results).filter(([, r]) => r.ok && r.warn).map(([k]) => k);
 const healthy = failed.length === 0;
-console.log(JSON.stringify({ ok: healthy, server: SERVER_NAME, failed, warned, checks: results }));
+
+// --- maintenance (the header: MAINTENANCE) ------------------------------------------------
+
+const readJson = (f) => {
+  try {
+    return JSON.parse(readFileSync(f, 'utf8'));
+  } catch {
+    return null;
+  }
+};
+/** A window as maint.sh writes it, or null for anything else. */
+function asWindow(w) {
+  if (!w || typeof w !== 'object' || !Number.isFinite(Number(w.until))) return null;
+  const at = (v) => (Number.isFinite(Number(v)) && v !== null ? Number(v) : null);
+  return {
+    what: String(w.what ?? 'maintenance').slice(0, 80),
+    parts: Array.isArray(w.parts) ? w.parts.filter((p) => typeof p === 'string') : [],
+    until: Number(w.until),
+    ended: at(w.ended),
+  };
+}
+const openOrNot = asWindow(readJson(MAINT_FILE));
+/** The window open now, or null. */
+const MAINT = openOrNot && openOrNot.until > now ? openOrNot : null;
+/** The last window, once closed: maint.sh off keeps it (with `ended`); one whose time ran out ended then. */
+const MAINT_LAST = MAINT ? null : openOrNot ? { ...openOrNot, ended: openOrNot.until } : asWindow(readJson(MAINT_FILE.replace(/\.json$/, '.last.json')));
+
+/** The parts a check belongs to (the header lists them). */
+function partsOfCheck(k) {
+  if (k === 'api' || k === 'lockdown') return ['api'];
+  if (k === 'index' || k === 'indexer') return ['api', 'indexer'];
+  if (k === 'executor') return ['executor'];
+  if (k === 'units') return unitNames().map((u) => /^valuescan-(api|indexer|executor)\.service$/.exec(u)?.[1]).filter(Boolean);
+  if (k.startsWith('peer:')) {
+    const n = k.slice(5);
+    if (/executor|copy/i.test(n)) return ['executor'];
+    if (/api/i.test(n)) return ['api'];
+  }
+  return [];
+}
+
+const STATE_FILE = join(STATE_DIR, 'health-state.json');
+let prev = {};
+try {
+  prev = JSON.parse(readFileSync(STATE_FILE, 'utf8'));
+} catch { /* first pass */ }
+// Expected while the window is open - unless it was alerted before it opened.
+const held = MAINT ? failed.filter((k) => partsOfCheck(k).some((p) => MAINT.parts.includes(p)) && !(prev.alertedFailed ?? []).includes(k)) : [];
+const alerting = failed.filter((k) => !held.includes(k));
+console.log(JSON.stringify({ ok: healthy, server: SERVER_NAME, failed, warned, ...(MAINT ? { maintenance: MAINT.what, held } : {}), checks: results }));
 
 // --- alerts on a change of state ---------------------------------------------------------
 
@@ -358,20 +427,30 @@ function decide(prev, { healthy, failed, now }) {
 
 const mins = (ms) => (ms < 3600_000 ? `${Math.max(1, Math.round(ms / 60_000))} min` : `${Math.round(ms / 360_000) / 10} h`);
 
+/** A failure's last line: during a window it is not part of, or right after one. */
+function maintNote() {
+  if (MAINT) return `\n(maintenance ${MAINT.what} is running - ${MAINT.parts.join(', ')} - this is not part of it)`;
+  if (MAINT_LAST?.ended && now - MAINT_LAST.ended >= 0 && now - MAINT_LAST.ended < AFTER_MAINT_MS) {
+    return `\n(maintenance ${MAINT_LAST.what} ended ${mins(now - MAINT_LAST.ended)} ago: still failing after it)`;
+  }
+  return '';
+}
+
 function message(d) {
-  const failLines = failed.map((k) => `- ${k}: ${results[k]?.note ?? ''}`);
+  const failLines = alerting.map((k) => `- ${k}: ${results[k]?.note ?? ''}`);
   switch (d.kind) {
     case 'alert':
-      return `ValueDesk ALERT - ${SERVER_NAME}\nfailing: ${failed.join(', ')}\n${failLines.join('\n')}`;
+      return `${labelled('failure', SERVER_NAME)}\nfailing: ${alerting.join(', ')}\n${failLines.join('\n')}${maintNote()}`;
     case 'more':
-      return `ValueDesk ALERT - ${SERVER_NAME}\nnow also failing: ${d.fresh.join(', ')}\n${failLines.join('\n')}`;
+      return `${labelled('failure', SERVER_NAME)}\nnow also failing: ${d.fresh.join(', ')}\n${failLines.join('\n')}${maintNote()}`;
     case 'reminder':
-      return `ValueDesk STILL FAILING (${mins(now - d.next.since)}) - ${SERVER_NAME}\nfailing: ${failed.join(', ')}\n${failLines.join('\n')}`;
+      return `${labelled('failure', `still failing (${mins(now - d.next.since)}) - ${SERVER_NAME}`)}\nfailing: ${alerting.join(', ')}\n${failLines.join('\n')}${maintNote()}`;
     case 'recovered': {
       const parts = [];
       if (d.was?.length) parts.push(`was failing: ${d.was.join(', ')}`);
       if (d.sinceAt) parts.push(`for ${mins(now - d.sinceAt)}`);
-      return `ValueDesk RECOVERED - ${SERVER_NAME}\nevery check passes again${parts.length ? ` (${parts.join('; ')})` : ''}`;
+      const which = held.length ? `every check passes again but those of maintenance ${MAINT.what} (${held.join(', ')})` : 'every check passes again';
+      return `${labelled('recovered', SERVER_NAME)}\n${which}${parts.length ? ` (${parts.join('; ')})` : ''}`;
     }
     default:
       return '';
@@ -380,12 +459,8 @@ function message(d) {
 
 try {
   mkdirSync(STATE_DIR, { recursive: true });
-  const file = join(STATE_DIR, 'health-state.json');
-  let prev = {};
-  try {
-    prev = JSON.parse(readFileSync(file, 'utf8'));
-  } catch { /* first pass */ }
-  const d = decide(prev, { healthy, failed, now });
+  const file = STATE_FILE;
+  const d = decide(prev, { healthy: alerting.length === 0, failed: alerting, now });
   let next = d.next;
   if (d.kind) {
     const text = message(d);

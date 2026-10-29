@@ -16,22 +16,22 @@ test('down, still down (no repeat), another one down, reminder after six hours, 
   assert.equal(d.message, null);
   s = d.next;
   d = decide(s, { site: up, api: down, copy: up }, t0 + 1 * 60_000);
-  assert.match(d.message, /^ValueDesk DOWN \(seen from outside, GitHub\)\n- api: answered 502/);
+  assert.match(d.message, /^🚨 FAILURE · ValueDesk down \(seen from outside, GitHub\)\n- api: answered 502/);
   s = d.next;
   d = decide(s, { site: up, api: down, copy: up }, t0 + 31 * 60_000);
   assert.equal(d.message, null, 'no message every round');
   s = d.next;
   d = decide(s, { site: up, api: down, copy: down }, t0 + 61 * 60_000);
-  assert.match(d.message, /DOWN[\s\S]*- api:[\s\S]*- copy:/, 'a second one down is news');
+  assert.match(d.message, /^🚨 FAILURE · ValueDesk down[\s\S]*- api:[\s\S]*- copy:/, 'a second one down is news');
   s = d.next;
   d = decide(s, { site: up, api: down, copy: down }, t0 + 61 * 60_000 + 6 * H + 1);
-  assert.match(d.message, /^ValueDesk STILL DOWN for 7 h/);
+  assert.match(d.message, /^🚨 FAILURE · ValueDesk still down for 7 h/);
   s = d.next;
   d = decide(s, { site: up, api: up, copy: down }, t0 + 8 * H);
-  assert.match(d.message, /partly back: api up again; still down:\n- copy/);
+  assert.match(d.message, /^🚨 FAILURE · ValueDesk partly back: api up again; still down:\n- copy/);
   s = d.next;
   d = decide(s, { site: up, api: up, copy: up }, t0 + 9 * H);
-  assert.match(d.message, /^ValueDesk UP again \(seen from outside\): copy after \d+ min$/);
+  assert.match(d.message, /^✅ RECOVERED · ValueDesk up again \(seen from outside\): copy after \d+ min$/);
   assert.deepEqual(d.next.down, {});
 });
 

@@ -19,7 +19,11 @@ deploy/server/
     backup-index.mjs       the consistent copy itself (VACUUM INTO, read-only)
     restore.sh             put a backup (or a seed) in place
     healthcheck.mjs        one health pass (run every minute by a timer); alerts to Telegram
-    telegram.mjs           sends a Telegram message (the health check, the off-server copies, the uptime watcher)
+    telegram.mjs           sends a Telegram message (the health check, the off-server copies, the uptime watcher),
+                           its first line labelled: MAINTENANCE, BRAKE, FAILURE, RECOVERED, INFO
+    maint.sh               a maintenance window (ship.sh opens one over its restarts): the health check holds
+                           the alerts of the parts it names; `tell` sends one labelled message
+    brake.sh               the emergency brake on this server; --maintenance for planned work
     telegram-setup.sh      writes /etc/valuescan/alert.env once: token, chat id, a test message
     backup-offsite.sh      the off-server copies, encrypted, to the other server (every 15 min by a timer)
     backup-receive.sh      the receiving end: the forced command of the vsbackup user

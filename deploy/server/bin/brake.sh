@@ -3,8 +3,15 @@
 #
 #   sudo bash brake.sh on "Investigating a fill problem."              everything: trading, copies, algos
 #   sudo bash brake.sh on copies,algos "Executor maintenance."         only what is named
+#   sudo bash brake.sh on --maintenance copies,algos "Updating ..."    planned work, not an emergency (ship.sh)
 #   sudo bash brake.sh off                                             lift it
 #   sudo bash brake.sh status                                          what it is now
+#
+# WHY IT IS ON ("cause" in the file; telegram.mjs LABELS). By hand it is an operator's emergency stop:
+# "🛑 BRAKE · on (...)" on Telegram, and lifted "✅ RECOVERED · brake lifted". With --maintenance it is
+# planned work: "🔧 MAINTENANCE · brake on / lifted" - and nothing at all while a maintenance window is open
+# here (maint.sh), whose opener says it (ship.sh: started, done, stopped). The executor alerts only an
+# operator's brake (apps/executor/src/brake.ts cause).
 #
 # From the laptop, both servers at once: bash deploy/release/brake.sh on "reason" (docs/INCIDENT-RUNBOOK.md).
 #
@@ -26,18 +33,36 @@
 set -euo pipefail
 
 FILE="${VALUEDESK_BRAKE_FILE:-/var/lib/valuescan/brake.json}"
+MAINT_FILE="${VALUEDESK_MAINT_FILE:-/var/lib/valuescan/maintenance.json}"
 ALERT_ENV="${ALERT_ENV:-/etc/valuescan/alert.env}"
 
 die() { echo "brake: $*" >&2; exit 1; }
 
-notify() {
+# The labels of telegram.mjs (LABELS): the brake does not depend on node to be heard.
+label() {
+  case "$1" in
+    maintenance) printf '🔧 MAINTENANCE' ;;
+    brake) printf '🛑 BRAKE' ;;
+    recovered) printf '✅ RECOVERED' ;;
+  esac
+}
+
+notify() {   # kind, text
   # Telegram, best effort: the brake never waits on it.
   [ -r "$ALERT_ENV" ] || return 0
   # shellcheck disable=SC1090
   ( set -a; . "$ALERT_ENV"; set +a
     [ -n "${ALERT_TELEGRAM_TOKEN:-}" ] && [ -n "${ALERT_TELEGRAM_CHAT_ID:-}" ] || exit 0
     curl --limit-rate 1M -fsS -m 10 -o /dev/null "https://api.telegram.org/bot${ALERT_TELEGRAM_TOKEN}/sendMessage" \
-      --data-urlencode "chat_id=${ALERT_TELEGRAM_CHAT_ID}" --data-urlencode "text=$1" ) || echo "brake: (Telegram not reached)" >&2
+      --data-urlencode "chat_id=${ALERT_TELEGRAM_CHAT_ID}" --data-urlencode "text=$(label "$1") · $2" ) || echo "brake: (Telegram not reached)" >&2
+}
+
+# A maintenance window open here (maint.sh): its time not up yet.
+window_open() {
+  [ -r "$MAINT_FILE" ] || return 1
+  local until
+  until="$(sed -n 's/.*"until": *\([0-9]*\).*/\1/p' "$MAINT_FILE" | head -1)"
+  [ -n "$until" ] && [ "$until" -gt "$(date +%s%3N)" ]
 }
 
 write() {
@@ -57,6 +82,8 @@ json_string() {
 case "${1:-}" in
   on)
     shift
+    cause=operator
+    if [ "${1:-}" = --maintenance ]; then cause=maintenance; shift; fi
     what="all"
     if [ $# -ge 2 ]; then what="$1"; shift; fi
     reason="${1:-}"
@@ -74,15 +101,23 @@ case "${1:-}" in
     done
     [ "$(id -u)" = 0 ] || die "run it with sudo"
     mkdir -p "$(dirname "$FILE")"
-    write "{\"trading\": $t, \"copies\": $c, \"algos\": $a, \"reason\": $(json_string "$reason"), \"since\": $(date +%s%3N), \"by\": $(json_string "${SUDO_USER:-$USER}@$(hostname)")}"
-    echo "brake ON on $(hostname): trading=$t copies=$c algos=$a - $reason"
-    notify "ValueDesk BRAKE ON ($(hostname)): trading=$t copies=$c algos=$a - $reason"
+    by="${SUDO_USER:-$USER}@$(hostname)"
+    write "{\"trading\": $t, \"copies\": $c, \"algos\": $a, \"reason\": $(json_string "$reason"), \"since\": $(date +%s%3N), \"by\": $(json_string "$by"), \"cause\": \"$cause\"}"
+    echo "brake ON on $(hostname) ($cause): trading=$t copies=$c algos=$a - $reason"
+    if [ "$cause" = operator ]; then notify brake "on ($(hostname), by $by): trading=$t copies=$c algos=$a - $reason"
+    elif window_open; then echo "brake: (no Telegram: a maintenance window is open here - its opener reports it)"
+    else notify maintenance "brake on ($(hostname)): trading=$t copies=$c algos=$a - $reason"; fi
     ;;
   off)
     [ "$(id -u)" = 0 ] || die "run it with sudo"
+    if [ ! -e "$FILE" ]; then echo "brake already off on $(hostname)"; exit 0; fi
+    was=operator
+    grep -q '"cause": *"maintenance"' "$FILE" 2>/dev/null && was=maintenance
     rm -f "$FILE"
     echo "brake off on $(hostname)"
-    notify "ValueDesk brake lifted ($(hostname))"
+    if [ "$was" = operator ]; then notify recovered "brake lifted ($(hostname)): trading goes on"
+    elif window_open; then echo "brake: (no Telegram: a maintenance window is open here - its opener reports it)"
+    else notify maintenance "brake lifted ($(hostname))"; fi
     ;;
   status)
     if [ -e "$FILE" ]; then cat "$FILE"; else echo "off (no $FILE)"; fi
