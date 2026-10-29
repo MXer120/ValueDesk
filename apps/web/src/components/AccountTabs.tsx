@@ -28,6 +28,8 @@
  * bar and shows only what can narrow the active tab. Its filters are applied
  * to the rows each table already holds (accountTables/filters.ts), persist per
  * tab (`vs.acct.filter.<tab>`), and the counts in the tab labels follow them.
+ * Its View pop-up also holds the IDs switch (accountTables/IdCell.tsx): an IDs
+ * column on every table with SoDEX records, the Algos tab's included.
  */
 import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { useLiveAlgos } from '../algo/algoBus';
@@ -40,7 +42,7 @@ import { AccountLedger, AllBalances, EngineSwitch } from './AccountHistory';
 import { PanelTabs, type PanelTab } from '../dashboard/Panel';
 import { Private, usePrivacy } from '../privacy';
 import {
-  DEFAULT_FILTER, TAB_CAPS, applyFilter, directionOfPosition, directionOfSide, marginOf, readFilter, sourceOf,
+  DEFAULT_FILTER, NO_CAPS, TAB_CAPS, applyFilter, directionOfPosition, directionOfSide, marginOf, readFilter, sourceOf,
   type BandTab, type TableFilter,
 } from './accountTables/filters';
 import { FilterBar, NO_META, type BandMeta, type CardView } from './accountTables/FilterBar';
@@ -281,7 +283,16 @@ export function AccountTabs({
   ];
 
   const actions = (active: string): ReactNode => {
-    if (active === 'algos' || active.startsWith('x:')) return null;
+    if (active.startsWith('x:')) return null;
+    // The Algos tab has no filters; its View pop-up holds the IDs switch alone.
+    if (active === 'algos') {
+      return (
+        <FilterBar
+          caps={NO_CAPS} filter={DEFAULT_FILTER} onFilter={() => {}} marketLabel={null}
+          currentOnly={false} onCurrentOnly={() => {}} meta={NO_META} ids
+        />
+      );
+    }
     const t = (TABS as string[]).includes(active) ? (active as BandTab) : 'positions';
     if (t === 'balances') {
       return (
@@ -294,7 +305,8 @@ export function AccountTabs({
     const caps = TAB_CAPS[t];
     const te = tabEngine(t);
     const showMarket = !!current && caps.market && te === current.engine;
-    if (!caps.market && !caps.margin && !caps.side && !caps.source && !caps.time && !meta[t]?.staleAt) return null;
+    const ids = t !== 'account-history';
+    if (!ids && !caps.market && !caps.margin && !caps.side && !caps.source && !caps.time && !meta[t]?.staleAt) return null;
     return (
       <FilterBar
         caps={caps}
@@ -308,6 +320,7 @@ export function AccountTabs({
         engineChoice={accountScope && (t === 'orders' || t === 'order-history' || t === 'trade-history') ? { value: picked, onChange: setPicked } : undefined}
         view={t === 'position-history' ? (view === 'list' ? 'list' : 'card') : undefined}
         onView={t === 'position-history' ? setView : undefined}
+        ids={ids}
       />
     );
   };

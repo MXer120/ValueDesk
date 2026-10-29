@@ -66,6 +66,8 @@ import {
 } from './accountTables/cells';
 import type { BandMeta } from './accountTables/FilterBar';
 import { SortTh, sortRows, useTableSort } from './accountTables/sort';
+import { IdsCell, IdsTh, useShowIds } from './accountTables/IdCell';
+import { orderSupport, positionSupport } from './accountTables/ids';
 
 /**
  * The glyph for "we have no value for this". One glyph, used everywhere, and
@@ -540,6 +542,7 @@ function PositionsInner({
   const ordersFeed = useAccountResource(ordersKey, () => api.openOrders('perps', address!), 10_000);
   const { sort, toggle } = useTableSort();
   const [posEdit, setPosEdit] = useState<PosEdit | null>(null);
+  const [showIds] = useShowIds();
 
   async function close(p: any) {
     const symbol = symbolOf(p);
@@ -741,6 +744,7 @@ function PositionsInner({
               <SortTh k="upnl" label="PnL" numeric sort={sort} onSort={toggle} className="num" title="Derived here: (mark − entry) × size, signed by direction; the % is against the position's margin. The venue does not publish an unrealised PnL for a position." />
               <SortTh k="margin" label="Margin" numeric sort={sort} onSort={toggle} className="num" />
               <th>TP/SL</th>
+              {showIds && <IdsTh />}
               {!readOnly && <th className="acct-actions" aria-label="Close" />}
             </tr>
           </thead>
@@ -846,6 +850,12 @@ function PositionsInner({
                       </button>
                     )}
                   </td>
+                  {showIds && (
+                    <IdsCell
+                      ids={[['Position', 'Position ID', pick(p, 'id')]]}
+                      details={() => positionSupport(p, { market: sym?.displayName ?? symbol, unit, account: address })}
+                    />
+                  )}
                   {!readOnly && <td className="acct-actions">
                     <button
                       type="button"
@@ -936,6 +946,7 @@ function OpenOrdersInner({
   );
   useEffect(() => onCount?.(orders.length), [orders.length, onCount]);
   const { sort, toggle } = useTableSort();
+  const [showIds] = useShowIds();
   const shownOrders = sortRows(orders, sort, (o, key) => {
     const sym = byName.get(symbolOf(o));
     const px = num(pick(o, 'price', 'p'));
@@ -1041,6 +1052,7 @@ function OpenOrdersInner({
               <SortTh k="filled" label="Filled" numeric sort={sort} onSort={toggle} className="num" />
               <SortTh k="value" label="Value" numeric sort={sort} onSort={toggle} className="num" />
               <SortTh k="placed" label="Placed" numeric sort={sort} onSort={toggle} className="num" />
+              {showIds && <IdsTh />}
               {!readOnly && (
                 <th className="acct-actions">
                   <button type="button" className="acct-act acct-act--danger" onClick={cancelAll} disabled={busy || !unlocked || orders.length === 0}>
@@ -1089,6 +1101,15 @@ function OpenOrdersInner({
                   <td className="num">{qty(filled, sym?.stepSize)}</td>
                   <td className="num">{value === null ? EM : fmtUsd(value)}</td>
                   <td className="num acct-time">{when(pick(o, 'createdAt', 'T', 'time'))}</td>
+                  {showIds && (
+                    <IdsCell
+                      ids={[['Order', 'Order ID', pick(o, 'orderID', 'i', 'orderId')], ['Client', 'Client order ID', pick(o, 'clOrdID', 'c')]]}
+                      details={() => orderSupport(o, {
+                        market: sym?.displayName ?? symbol, engine, unit, account: address, open: true,
+                        type: `${orderTypeText(o)}${tif ? ` · ${tif}` : ''}`,
+                      })}
+                    />
+                  )}
                   {!readOnly && <td className="acct-actions">
                     {/* Spot and perps alike: changeOrder picks SoDEX's request for the order (trading/actions.ts). */}
                     <button type="button" className="acct-act" onClick={() => setEditing(o)} disabled={busy || !unlocked}>

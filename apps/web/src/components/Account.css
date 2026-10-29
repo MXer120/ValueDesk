@@ -1256,3 +1256,57 @@ button.acctf-view.is-active { color: var(--text); border-color: var(--line); }
 .bal-more.is-open svg { transform: rotate(180deg); }
 .bal-more:hover { color: var(--text); }
 .bal-sub td { padding-top: 2px; padding-bottom: 2px; }
+
+/* ===========================================================================
+   IDS - the optional "IDs" column (accountTables/IdCell.tsx), switched on in
+   the View pop-up. Each id short, in the numeral face, as a hairline-free chip
+   that copies the whole id; two rows to a column so a row keeps its 32px.
+   ======================================================================== */
+.acct-table.acct-t th.acct-ids,
+.acct-table.acct-t td.acct-ids { width: 1%; white-space: nowrap; }
+.acct-ids__in { display: inline-flex; align-items: center; gap: 8px; vertical-align: middle; }
+.acct-ids__list {
+  display: inline-grid;
+  grid-auto-flow: column;
+  grid-template-rows: repeat(2, auto);
+  gap: 0 10px;
+  justify-items: start;
+}
+.acct-id {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 14px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-size: var(--fs-micro);
+  font-weight: 400;
+  line-height: 14px;
+  cursor: pointer;
+}
+.acct-id__k { color: var(--dim); }
+.acct-id__v { color: var(--text); font-family: var(--font-num); font-variant-numeric: tabular-nums; }
+.acct-id__ic { flex: none; opacity: 0.6; }
+.acct-id:hover .acct-id__ic,
+.acct-id:focus-visible .acct-id__ic { opacity: 1; color: var(--text); }
+.acct-id:hover .acct-id__v { text-decoration: underline; text-decoration-color: var(--line); }
+/* "Copy details" - the row chip, also outside a table (a Position History card). */
+.acct-ids__details {
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--panel-line);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--fs-micro);
+  font-weight: 400;
+  line-height: 20px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.acct-ids__details:hover { color: var(--text); border-color: var(--line); }
+.acct-table.acct-t .acct-act.acct-ids__details { height: 22px; padding: 0 8px; font-size: var(--fs-micro); line-height: 20px; }
+.acct-card__ids { margin-top: 10px; }

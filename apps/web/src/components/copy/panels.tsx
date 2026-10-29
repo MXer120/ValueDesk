@@ -29,6 +29,7 @@ import { VENUE_LABEL } from '../../vsApi';
 import { PanelTabs } from '../../dashboard/Panel';
 import { Card, Group, Row, Stat } from '../portfolio/parts';
 import { CoinLabel } from '../CoinIcon';
+import { IdChip } from '../accountTables/IdCell';
 import { skipReasonLabel, type SimTrade } from './sim';
 import { fmtSignedPct, fmtSignedUsd, fmtSize } from './setup';
 import type { CopyContext } from './useCopy';
@@ -230,7 +231,8 @@ function MyCopies({ c, rows, onActivity }: { c: CopyContext; rows: CopyRow[]; on
                 <td className="num">{v.positions.length ? `${v.positions.length} · ${fmtUsd(v.grossNotional, 0)}` : DASH}</td>
                 <td className="num copy-time">{fmtDay(s.createdAt)}</td>
                 <td>
-                  <span className={`copy-status copy-status--${s.status}`}>{STATUS_LABEL[s.status] ?? s.status}</span>
+                  <span className={`copy-status copy-status--${s.status}`}>{STATUS_LABEL[s.status] ?? s.status}</span>{' '}
+                  <IdChip label="ID" what="Copy ID" id={s.id} />
                   {s.statusReason && s.status !== 'active' && <span className="copy-reason">{s.statusReason}</span>}
                 </td>
                 <td className="num">
@@ -330,6 +332,7 @@ function CopyActivity({ row, rows, onPick }: { row: CopyRow | null; rows: CopyRo
         <span className="muted">
           {shortAddr(row.view.subscription.settings.leader.address)} · {MODE_LABEL[row.mode]} · {fmt(row.view.orders, 0)} orders, {fmt(row.view.skips, 0)} skipped
         </span>
+        <IdChip label="Copy ID" what="Copy ID" id={row.view.subscription.id} />
         <button type="button" className="pf-ctl" onClick={csv} disabled={!entries.length}>Export CSV</button>
       </div>
       <table className="acct-table">

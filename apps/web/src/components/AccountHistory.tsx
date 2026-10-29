@@ -51,6 +51,8 @@ import {
   FilteredEmpty, FilteredHint, LoadMore, MarketCell, Note, Pill, SidePill, SourcePill, StatusCell, Unit, amount, orderTypeText, signedPct, signedUsd, tifText, toneOf,
 } from './accountTables/cells';
 import { StatusIcon } from './accountTables/StatusIcon';
+import { IdsBlock, IdsCell, IdsTh, useShowIds } from './accountTables/IdCell';
+import { closedSupport, fundingSupport, orderSupport, tradeSupport } from './accountTables/ids';
 import type { BandMeta } from './accountTables/FilterBar';
 import type { StatusKind, StatusTone } from './accountTables/orderStatus';
 import { pollEvery } from '../exchange/visibility';
@@ -615,17 +617,17 @@ export function HistoryTable({
 
   let body: ReactNode = null;
   if (rows.length > 0) {
-    if (kind === 'orders') body = <OrdersTable rows={rows} byName={byName} engine={eng} />;
-    else if (kind === 'trades') body = <TradesTable rows={rows} byName={byName} engine={eng} />;
-    else if (kind === 'funding') body = <FundingTable rows={rows} byName={byName} />;
+    if (kind === 'orders') body = <OrdersTable rows={rows} byName={byName} engine={eng} account={address} />;
+    else if (kind === 'trades') body = <TradesTable rows={rows} byName={byName} engine={eng} account={address} />;
+    else if (kind === 'funding') body = <FundingTable rows={rows} byName={byName} account={address} />;
     else {
       const funding = fundingByPosition(fh);
       // Cards <-> list cross-fade in place (motion.tsx CrossFade).
       body = (
         <CrossFade viewKey={cardView ? 'cards' : 'list'}>
           {cardView
-            ? <div className="acct-cards">{rows.map((p) => <PositionCard key={HISTORY.positions.idOf(p)} p={p} byName={byName} funding={funding} />)}</div>
-            : <ClosedTable rows={rows} byName={byName} funding={funding} />}
+            ? <div className="acct-cards">{rows.map((p) => <PositionCard key={HISTORY.positions.idOf(p)} p={p} byName={byName} funding={funding} account={address} />)}</div>
+            : <ClosedTable rows={rows} byName={byName} funding={funding} account={address} />}
         </CrossFade>
       );
     }
@@ -662,8 +664,12 @@ export function HistoryTable({
 
 // --- the four views ------------------------------------------------------------------
 
-function OrdersTable({ rows, byName, engine }: { rows: any[]; byName: Map<string, MarketSymbol>; engine: 'spot' | 'perps' }) {
+/** The account a table reads: "Copy details" names it. */
+interface Acct { account: string | null }
+
+function OrdersTable({ rows, byName, engine, account }: { rows: any[]; byName: Map<string, MarketSymbol>; engine: 'spot' | 'perps' } & Acct) {
   const { sort, toggle } = useTableSort();
+  const [showIds] = useShowIds();
   const shown = sortRows(rows, sort, (o, key) => {
     const filled = num(pick(o, 'executedQty'));
     const px = num(pick(o, 'price'));
@@ -691,6 +697,7 @@ function OrdersTable({ rows, byName, engine }: { rows: any[]; byName: Map<string
           <SortTh k="filled" label="Filled" numeric sort={sort} onSort={toggle} className="num" />
           <SortTh k="value" label="Value" numeric sort={sort} onSort={toggle} className="num" />
           <SortTh k="placed" label="Placed" numeric sort={sort} onSort={toggle} className="num" />
+          {showIds && <IdsTh />}
         </tr>
       </thead>
       <tbody>
@@ -732,6 +739,15 @@ function OrdersTable({ rows, byName, engine }: { rows: any[]; byName: Map<string
               <td className="num">{filled > 0 ? qty(filled, sym?.stepSize) : <span className="acct-dim">0</span>}</td>
               <td className="num">{value > 0 ? fmtUsd(value) : DASH}</td>
               <td className="num acct-time">{when(pick(o, 'createdAt'))}</td>
+              {showIds && (
+                <IdsCell
+                  ids={[['Order', 'Order ID', pick(o, 'orderID')], ['Client', 'Client order ID', pick(o, 'clOrdID')]]}
+                  details={() => orderSupport(o, {
+                    market: sym?.displayName ?? symbol, engine, unit, account,
+                    type: `${orderTypeText(o)}${tif ? ` · ${tif}` : ''}`,
+                  })}
+                />
+              )}
             </tr>
           );
         })}
@@ -740,8 +756,9 @@ function OrdersTable({ rows, byName, engine }: { rows: any[]; byName: Map<string
   );
 }
 
-function TradesTable({ rows, byName, engine }: { rows: any[]; byName: Map<string, MarketSymbol>; engine: 'spot' | 'perps' }) {
+function TradesTable({ rows, byName, engine, account }: { rows: any[]; byName: Map<string, MarketSymbol>; engine: 'spot' | 'perps' } & Acct) {
   const { sort, toggle } = useTableSort();
+  const [showIds] = useShowIds();
   const shown = sortRows(rows, sort, (t, key) => {
     const px = num(pick(t, 'price'));
     const q = num(pick(t, 'quantity'));
@@ -765,6 +782,7 @@ function TradesTable({ rows, byName, engine }: { rows: any[]; byName: Map<string
           <SortTh k="fee" label="Fee" numeric sort={sort} onSort={toggle} className="num" />
           <SortTh k="role" label="Role" sort={sort} onSort={toggle} />
           <SortTh k="time" label="Time" numeric sort={sort} onSort={toggle} className="num" />
+          {showIds && <IdsTh />}
         </tr>
       </thead>
       <tbody>
@@ -796,6 +814,12 @@ function TradesTable({ rows, byName, engine }: { rows: any[]; byName: Map<string
               </td>
               <td className="acct-word acct-dim">{maker === true ? 'Maker' : maker === false ? 'Taker' : DASH}</td>
               <td className="num acct-time">{when(pick(t, 'time'))}</td>
+              {showIds && (
+                <IdsCell
+                  ids={[['Trade', 'Trade ID', pick(t, 'tradeID')], ['Order', 'Order ID', pick(t, 'orderID')], ['Client', 'Client order ID', pick(t, 'clOrdID')]]}
+                  details={() => tradeSupport(t, { market: sym?.displayName ?? symbol, engine, unit, account })}
+                />
+              )}
             </tr>
           );
         })}
@@ -804,8 +828,9 @@ function TradesTable({ rows, byName, engine }: { rows: any[]; byName: Map<string
   );
 }
 
-function FundingTable({ rows, byName }: { rows: any[]; byName: Map<string, MarketSymbol> }) {
+function FundingTable({ rows, byName, account }: { rows: any[]; byName: Map<string, MarketSymbol> } & Acct) {
   const { sort, toggle } = useTableSort();
+  const [showIds] = useShowIds();
   const shown = sortRows(rows, sort, (f, key) => {
     if (key === 'market') return String(pick(f, 'symbol') ?? '');
     if (key === 'payment') return num(pick(f, 'fundingFee'));
@@ -819,6 +844,7 @@ function FundingTable({ rows, byName }: { rows: any[]; byName: Map<string, Marke
           <SortTh k="market" label="Market" sort={sort} onSort={toggle} />
           <SortTh k="payment" label="Payment" numeric sort={sort} onSort={toggle} className="num" />
           <SortTh k="time" label="Time" numeric sort={sort} onSort={toggle} className="num" />
+          {showIds && <IdsTh />}
         </tr>
       </thead>
       <tbody>
@@ -838,6 +864,12 @@ function FundingTable({ rows, byName }: { rows: any[]; byName: Map<string, Marke
                 {fee === undefined ? DASH : <Unit value={`${num(fee) > 0 ? '+' : ''}${amount(fee, undefined)}`} unit={coin || undefined} />}
               </td>
               <td className="num acct-time">{when(pick(f, 'timestamp'))}</td>
+              {showIds && (
+                <IdsCell
+                  ids={[['Position', 'Position ID', pick(f, 'positionID')]]}
+                  details={() => fundingSupport(f, { market: byName.get(symbol)?.displayName ?? symbol, account })}
+                />
+              )}
             </tr>
           );
         })}
@@ -932,9 +964,10 @@ function closedOf(p: any, byName: Map<string, MarketSymbol>, funding: FundingInd
 const TRADE_LINK = (symbol: string) => `/trade?symbol=${encodeURIComponent(symbol)}`;
 
 /** Image 15: the market line, a row of big figures, a row of small ones. A hairline between cards, no box. */
-function PositionCard({ p, byName, funding }: { p: any; byName: Map<string, MarketSymbol>; funding: FundingIndex }) {
+function PositionCard({ p, byName, funding, account }: { p: any; byName: Map<string, MarketSymbol>; funding: FundingIndex } & Acct) {
   const c = closedOf(p, byName, funding);
   const mask = useMask('history');
+  const [showIds] = useShowIds();
   const pill = c.margin ? MARGIN_WORD[c.margin] : undefined;
   const Big = ({ label, value, tone, title }: { label: string; value: string; tone: string; title?: string }) => (
     <div className="acct-card__m" title={title}>
@@ -974,13 +1007,22 @@ function PositionCard({ p, byName, funding }: { p: any; byName: Map<string, Mark
         <Small label="Opened" value={when(c.opened)} />
         <Small label="Closed" value={c.open ? 'Open' : when(c.closed)} />
       </div>
+      {showIds && (
+        <footer className="acct-card__ids">
+          <IdsBlock
+            ids={[['Position', 'Position ID', pick(p, 'id')]]}
+            details={() => closedSupport(p, { market: c.sym?.displayName ?? c.symbol, unit: c.unit, account })}
+          />
+        </footer>
+      )}
     </article>
   );
 }
 
 /** The slim view: the card's figures as an ordinary table. */
-function ClosedTable({ rows, byName, funding }: { rows: any[]; byName: Map<string, MarketSymbol>; funding: FundingIndex }) {
+function ClosedTable({ rows, byName, funding, account }: { rows: any[]; byName: Map<string, MarketSymbol>; funding: FundingIndex } & Acct) {
   const { sort, toggle } = useTableSort();
+  const [showIds] = useShowIds();
   const shown = sortRows(rows, sort, (p, key) => {
     const c = closedOf(p, byName, funding);
     if (key === 'market') return c.symbol;
@@ -1011,6 +1053,7 @@ function ClosedTable({ rows, byName, funding }: { rows: any[]; byName: Map<strin
           <SortTh k="vol" label="Closed vol." numeric sort={sort} onSort={toggle} className="num" />
           <SortTh k="opened" label="Opened" numeric sort={sort} onSort={toggle} className="num" />
           <SortTh k="closed" label="Closed" numeric sort={sort} onSort={toggle} className="num" />
+          {showIds && <IdsTh />}
         </tr>
       </thead>
       <tbody>
@@ -1034,6 +1077,12 @@ function ClosedTable({ rows, byName, funding }: { rows: any[]; byName: Map<strin
               <td className="num"><Unit value={qty(c.closedVol, c.sym?.stepSize)} unit={c.unit} /></td>
               <td className="num acct-time">{when(c.opened)}</td>
               <td className="num acct-time">{c.open ? 'Open' : when(c.closed)}</td>
+              {showIds && (
+                <IdsCell
+                  ids={[['Position', 'Position ID', pick(p, 'id')]]}
+                  details={() => closedSupport(p, { market: c.sym?.displayName ?? c.symbol, unit: c.unit, account })}
+                />
+              )}
             </tr>
           );
         })}

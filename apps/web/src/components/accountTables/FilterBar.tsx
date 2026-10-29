@@ -10,7 +10,7 @@
  * opens UPWARDS when there is no room below. Its sections are the Withdraw
  * sheet's source tiles at control size (`.fx-srct`: a hairline, --muted until
  * chosen, then a --text ring over a 7% --text fill); only the sections that can
- * narrow the active tab are drawn.
+ * narrow the active tab are drawn, plus the IDs switch where rows carry ids.
  */
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { usePresence } from '../motion';
@@ -19,6 +19,7 @@ import {
   DEFAULT_FILTER, activeCount, dayEnd, dayStart, sliderDomain, timeWindow, ymd,
   type MarginFilter, type Preset, type SideFilter, type SourceFilter, type TabCaps, type TableFilter,
 } from './filters';
+import { useShowIds } from './IdCell';
 
 /** What the active table tells the bar about its rows. */
 export interface BandMeta {
@@ -51,16 +52,18 @@ export interface FilterBarProps {
   onView?: (v: CardView) => void;
   /** Spot or Perps, for a table that exists on both (the portfolio's): the first View section. */
   engineChoice?: { value: 'spot' | 'perps'; onChange: (e: 'spot' | 'perps') => void };
+  /** The tab's rows carry SoDEX ids: the View pop-up offers the IDs column (IdCell.tsx). */
+  ids?: boolean;
 }
 
 export function FilterBar({
-  caps, filter, onFilter, marketLabel, currentOnly, onCurrentOnly, meta, spot = false, view, onView, engineChoice,
+  caps, filter, onFilter, marketLabel, currentOnly, onCurrentOnly, meta, spot = false, view, onView, engineChoice, ids = false,
 }: FilterBarProps) {
   const [open, setOpen] = useState(false);
   const pres = usePresence(open);
   const btn = useRef<HTMLButtonElement>(null);
   const n = activeCount(filter, caps);
-  const showView = !!engineChoice || caps.margin || caps.side || caps.source || caps.time;
+  const showView = !!engineChoice || ids || caps.margin || caps.side || caps.source || caps.time;
 
   return (
     <div className="acctf">
@@ -98,6 +101,7 @@ export function FilterBar({
       {pres.mounted && (
         <ViewPanel
           engineChoice={engineChoice}
+          ids={ids}
           closing={pres.closing}
           onExited={pres.done}
           anchor={btn}
@@ -156,9 +160,10 @@ const W = 316;
 const GAP = 6;
 
 function ViewPanel({
-  anchor, caps, filter, onFilter, meta, spot, onClose, closing = false, onExited, engineChoice,
+  anchor, caps, filter, onFilter, meta, spot, onClose, closing = false, onExited, engineChoice, ids,
 }: {
   engineChoice?: FilterBarProps['engineChoice'];
+  ids: boolean;
   closing?: boolean;
   onExited?: () => void;
   anchor: RefObject<HTMLButtonElement | null>;
@@ -208,6 +213,7 @@ function ViewPanel({
 
   const set = (patch: Partial<TableFilter>) => onFilter({ ...filter, ...patch });
   const n = activeCount(filter, caps);
+  const [showIds, setShowIds] = useShowIds();
 
   return createPortal(
     <div
@@ -263,6 +269,16 @@ function ViewPanel({
         </Section>
       )}
       {caps.time && <Timeframe filter={filter} onFilter={onFilter} meta={meta} />}
+      {/* Not a filter: it hides no row, so Reset and the badge leave it alone. */}
+      {ids && (
+        <Section label="IDs">
+          <Seg<'hide' | 'show'>
+            value={showIds ? 'show' : 'hide'}
+            onChange={(v) => setShowIds(v === 'show')}
+            options={[['hide', 'Hidden'], ['show', 'Shown']]}
+          />
+        </Section>
+      )}
     </div>,
     document.body,
   );

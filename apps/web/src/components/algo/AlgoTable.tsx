@@ -10,6 +10,10 @@
  *
  * Cancel all is the kill switch: every running algo is cancelled and its
  * resting children pulled from SoDEX; what filled stays filled.
+ *
+ * IDS. The algo's id is in its facts (and its window); opened, it lists the
+ * child orders it holds with their clOrdID and SoDEX order ID. The band's View
+ * pop-up adds an IDs column with "Copy details" (accountTables/IdCell.tsx).
  */
 import { fmtFixed, fmtNum, localize, toInputText } from '../../numStyle';
 import { decimalInput } from '../numberInput';
@@ -24,6 +28,8 @@ import { AlgoIcon } from './AlgoIcon';
 import { RunningWindow } from './RunningWindow';
 import { CoinIcon } from '../CoinIcon';
 import { SidePill } from '../accountTables/cells';
+import { IdChip, IdsCell, IdsTh, useShowIds } from '../accountTables/IdCell';
+import { algoSupport } from '../accountTables/ids';
 import './algo.css';
 
 type Place = 'browser' | ExecutorMode;
@@ -187,7 +193,33 @@ function Log({ id, live, place }: { id: string; live: boolean; place: Place }) {
   );
 }
 
-function Card({ v, place, onActed }: { v: AlgoView; place: Place; onActed?: () => void }) {
+/** The child orders the algo holds (open ones and the last few done), newest first, with their ids. */
+function Children({ v }: { v: AlgoView }) {
+  const a = v.algo;
+  const kids = [...a.children, ...(a.exitOrders ?? [])].sort((p, q) => q.placedAt - p.placedAt);
+  if (!kids.length) return null;
+  return (
+    <ul className="algo-log algo-kids" aria-label="Child orders">
+      {kids.map((c) => (
+        <li key={c.clOrdID} className={c.filled > 0 ? 'is-fill' : ''}>
+          <time>{fmtTime(c.placedAt)}</time>
+          <span>
+            {c.exit ? (c.exit === 'tp' ? 'Take-profit' : 'Stop-loss') : c.tag}: {c.side === 'buy' ? 'Buy' : 'Sell'} {fmtQ(c.quantity)} at {fmtPx(c.price)}
+            {c.filled > 0 ? ` (filled ${fmtQ(c.filled)})` : ''} · {CHILD_STATE[c.state] ?? c.state}
+          </span>
+          <span className="algo-kids__ids">
+            <IdChip label="Order" what="Order ID" id={c.orderId} />
+            <IdChip label="Client" what="Client order ID" id={c.clOrdID} />
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+const CHILD_STATE: Record<string, string> = { sending: 'sending', open: 'on SoDEX', done: 'done', unknown: 'no answer yet' };
+
+function Card({ v, place, onActed, showIds, account }: { v: AlgoView; place: Place; onActed?: () => void; showIds: boolean; account: string | null }) {
   const [open, setOpen] = useState(false);
   const [win, setWin] = useState(false);
   const [sizing, setSizing] = useState(false);
@@ -208,6 +240,8 @@ function Card({ v, place, onActed }: { v: AlgoView; place: Place; onActed?: () =
   const facts = (
     <>
           <dl className="algo-card__facts">
+            <dt>Algo ID</dt>
+            <dd><IdChip label="Algo" what="Algo ID" id={a.id} /></dd>
             <dt>Started</dt>
             <dd>{a.startedAt ? fmtTime(a.startedAt) : s.startAt ? `at ${fmtTime(s.startAt)}` : s.triggerPrice ? `at ${fmtPx(s.triggerPrice)}` : DASH}</dd>
             {v.endsAt && (
@@ -336,6 +370,17 @@ function Card({ v, place, onActed }: { v: AlgoView; place: Place; onActed?: () =
         <td className={`num ${arr.cls}`} title="Average fill against the mid when it started; positive is better for you">{arr.text}</td>
         <td className="acct-word algo-tr__now" title={v.working ?? undefined}>{(live ? v.working ?? next ?? ends : ends) ?? DASH}</td>
         <td className="num acct-time">{a.startedAt ? fmtTime(a.startedAt) : s.startAt ? `at ${fmtTime(s.startAt)}` : DASH}</td>
+        {showIds && (
+          <IdsCell
+            ids={[['Algo', 'Algo ID', a.id]]}
+            details={() => algoSupport(v, {
+              name: s.kind === 'basket' ? ALGO_NAMES[s.kind] : menuName(uiKindOf(s)),
+              status: exitsLive ? 'Exits live' : STATUS_WORD[a.status] ?? a.status,
+              place: PLACE_WORD[place],
+              account,
+            })}
+          />
+        )}
         <td className="acct-actions" onClick={(e) => e.stopPropagation()}>
           <button type="button" className="acct-act" onClick={() => setWin(true)} title="Its own window: the live chart, every order and the log">Open</button>
           {live && a.status !== 'paused' && <button type="button" className="acct-act" onClick={() => doAct('pause')} title="Pause: its resting children are pulled; nothing new is sent">Pause</button>}
@@ -371,11 +416,12 @@ function Card({ v, place, onActed }: { v: AlgoView; place: Place; onActed?: () =
       </tr>
       {open && (
         <tr className="algo-tr__more">
-          <td colSpan={9}>
+          <td colSpan={showIds ? 10 : 9}>
             <div className="algo-card__body">
               {sizing && canSize && <SizeForm v={v} place={place} onDone={() => { setSizing(false); onActed?.(); }} />}
               {a.statusReason && <p className="algo-card__reason">{a.statusReason}</p>}
               {facts}
+              <Children v={v} />
               <Log id={a.id} live={live} place={place} />
             </div>
           </td>
@@ -392,6 +438,7 @@ export default function AlgoTable({ address, initialShow = 'all' }: { address: s
   const { role, views: here } = useAlgos(address);
   const remote = useExecutorAlgos(address);
   const [show, setShow] = useState<Show>(initialShow);
+  const [showIds] = useShowIds();
   const all: Array<{ v: AlgoView; place: Place }> = [
     ...here.map((v) => ({ v, place: 'browser' as const })),
     ...remote.hosted.map((v) => ({ v, place: 'hosted' as const })),
@@ -461,12 +508,13 @@ export default function AlgoTable({ address, initialShow = 'all' }: { address: s
                 <th className="num" title="Average fill against the mid when it started; positive is better for you">vs arrival</th>
                 <th>Now</th>
                 <th className="num">Started</th>
+                {showIds && <IdsTh />}
                 <th className="acct-actions" aria-label="Actions" />
               </tr>
             </thead>
             <tbody>
               {shown.map((r) => (
-                <Card key={`${r.place}:${r.v.algo.id}`} v={r.v} place={r.place} onActed={r.place === 'browser' ? undefined : remote.reload} />
+                <Card key={`${r.place}:${r.v.algo.id}`} v={r.v} place={r.place} onActed={r.place === 'browser' ? undefined : remote.reload} showIds={showIds} account={address} />
               ))}
             </tbody>
           </table>

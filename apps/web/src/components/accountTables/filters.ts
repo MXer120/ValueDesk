@@ -51,6 +51,9 @@ export const TAB_CAPS: Record<BandTab, TabCaps> = {
   'account-history':  { market: false, margin: false, side: false, source: false, time: true },
 };
 
+/** A tab no filter bites on (the Algos tab: its View pop-up holds only the IDs switch). */
+export const NO_CAPS: TabCaps = { market: false, margin: false, side: false, source: false, time: false };
+
 /** A tab with anything to put in the View panel. */
 export const hasView = (c: TabCaps): boolean => c.margin || c.side || c.source || c.time;
 

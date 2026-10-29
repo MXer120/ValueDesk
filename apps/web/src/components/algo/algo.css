@@ -729,3 +729,8 @@ select.algo-sf__pick option { background: #1c1b1a; }
 .algo-slide__knob:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
 .algo-slide.is-off { opacity: 0.45; }
 .algo-slide.is-off .algo-slide__knob { cursor: not-allowed; }
+
+/* The child orders an opened algo holds, with their ids (IdCell.tsx IdChip). */
+.algo-kids li { grid-template-columns: 54px 1fr auto; align-items: center; }
+.algo-kids__ids { display: inline-flex; gap: 10px; }
+.algo-card__facts .acct-id { height: auto; }
