@@ -45,6 +45,8 @@ users needs each user's order history, which is limited to about four requests a
 
 ## 5. A fee group for a builder's flow (fee tier and staking)
 
+*Not sent: the owner dropped this request on 2026-10-29. Kept for the record.*
+
 **Why we ask.** SoDEX's fee tier is per user and needs more than $5 M of 14-day volume for the first step. Most of
 our users trade far less, so every one of them pays tier 0 (4.0 bp taker) plus our builder fee. Together they
 trade through one builder. See [research/10-pooled-fee-account.md](research/10-pooled-fee-account.md).
@@ -67,21 +69,25 @@ moves custody and the users' margin into one account. We would rather not do tha
 
 ## 6. Member sub-accounts bound to the member
 
-If §5 is not possible: sub-accounts under a master account owned by our contract, one per user, bound to that user
-so that the master never holds their funds:
+Sub-accounts under a master account owned by our contract, one per user, bound to that user so that the master
+never holds their funds:
 - created for the wallet that asks (our contract calls it for `msg.sender`; `createSubAccount` is owner-only today);
 - API keys for it registered and revoked only by the member's own signature, never by the master;
 - withdrawals from it paid only to the member's wallet, transfers only to the member's own accounts; the master
   cannot sign anything for it;
 - deposits credited to it directly;
-- the member can detach it into an ordinary account of their own, open positions included.
+- the member can detach it into an ordinary account of their own, open positions included;
+- its own limits: API keys, open orders and address-based actions counted per member sub-account, not per master
+  (the docs count keys per master account, and open orders and address actions per user);
+- members are separate parties for self-trade prevention and trade surveillance: two members' orders meeting on
+  the book are an ordinary trade.
 
 Please confirm that such sub-accounts count toward the master's fee tier and staking discount ("each user has a
 single fee tier"), and that each is margined, liquidated and rate-limited on its own.
 
 ## 7. Restricted keys for contract accounts
 
-§7-9 matter only for a shared pool account, if §5 and §6 are not possible.
+§7-9 matter only for a shared pool account, if §6 is not possible.
 
 `addAPIKey` on the gateway takes no permissions and no expiry. We ask for the same restrictions the REST
 registration has, and two more: a trade-only key that cannot withdraw or transfer, and a close-only key (reduce-only
