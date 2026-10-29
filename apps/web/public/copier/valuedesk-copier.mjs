@@ -8099,6 +8099,30 @@ function randomId(prefix = "") {
   return prefix + s.slice(0, 16);
 }
 
+// ../../packages/copy-engine/src/confirm.ts
+var CONFIRM_READS = 2;
+var CONFIRM_GAP_MS = 2e3;
+async function confirmRead(first, read, view, o = {}) {
+  const want = view(first);
+  const seen = [want];
+  let last = first;
+  for (let i = 0; i < (o.reads ?? CONFIRM_READS); i++) {
+    const gap = o.gapMs ?? CONFIRM_GAP_MS;
+    if (gap > 0) await sleep(gap);
+    try {
+      last = await read();
+    } catch (e) {
+      seen.push(`read failed: ${String(e instanceof Error ? e.message : e).slice(0, 120)}`);
+      return { ok: false, seen };
+    }
+    const v = view(last);
+    seen.push(v);
+    if (v !== want) return { ok: false, seen };
+  }
+  return { ok: true, value: last };
+}
+var sizeView = (n) => n === null || n === void 0 ? "unread" : String(Number((n || 0).toPrecision(12)));
+
 // ../../packages/copy-engine/src/policy.ts
 var COPY_TERMS_VERSION = "2026-10-28";
 var US_REGIONS = ["US", "PR", "VI", "GU", "AS", "MP", "UM"];
@@ -9999,25 +10023,40 @@ var LeaderBook = class {
       this.pos.set(k, new Map(Object.entries(positions).filter(([, v]) => v !== 0)));
       return [];
     }
-    const covered = read.dexes ? new Set(read.dexes) : null;
     const m = this.map(l);
     const out = [];
-    const symbols = /* @__PURE__ */ new Set([...m.keys(), ...Object.keys(positions)]);
-    for (const s of symbols) {
+    for (const s of this.differs(l, read, readStart)) {
+      const before = m.get(s) ?? 0;
+      const after = positions[s] ?? 0;
+      if (after === 0) m.delete(s);
+      else m.set(s, after);
+      const price2 = marks[s] ?? priceOf(s) ?? 0;
+      out.push({ leader: { venue: l.venue, address: l.address.toLowerCase() }, symbol: s, before, after, price: price2, time: now, id: `rc:${s}:${now}`, source: "reconcile" });
+    }
+    return out;
+  }
+  /**
+   * The markets a resync with `read` would move (a 'reconcile' event each), by the same rules;
+   * none before the leader is seeded. Nothing changes here: the runtime asks it to know what a
+   * confirming read must agree on (confirm.ts).
+   */
+  differs(l, read, readStart) {
+    const k = key(l);
+    if (!this.seededAt.has(k)) return [];
+    const covered = read.dexes ? new Set(read.dexes) : null;
+    const m = this.pos.get(k) ?? /* @__PURE__ */ new Map();
+    const out = [];
+    for (const s of /* @__PURE__ */ new Set([...m.keys(), ...Object.keys(read.positions)])) {
       if (covered && !covered.has(hlDexOf(s))) continue;
       if (readStart !== void 0) {
         const printed = this.printedAt.get(`${k}|${s}`);
         if (printed !== void 0 && printed >= readStart || this.merging.has(`${k}|${s}`)) continue;
       }
       const before = m.get(s) ?? 0;
-      const after = positions[s] ?? 0;
+      const after = read.positions[s] ?? 0;
       if (!Number.isFinite(after)) continue;
-      const tol = 1e-9 * Math.max(1, Math.abs(before), Math.abs(after));
-      if (Math.abs(before - after) <= tol) continue;
-      if (after === 0) m.delete(s);
-      else m.set(s, after);
-      const price2 = marks[s] ?? priceOf(s) ?? 0;
-      out.push({ leader: { venue: l.venue, address: l.address.toLowerCase() }, symbol: s, before, after, price: price2, time: now, id: `rc:${s}:${now}`, source: "reconcile" });
+      if (Math.abs(before - after) <= 1e-9 * Math.max(1, Math.abs(before), Math.abs(after))) continue;
+      out.push(s);
     }
     return out;
   }
@@ -11698,6 +11737,7 @@ var HL_MAX_COINS = 990;
 var PENDING_MS = 3e4;
 var RECENT_ORDERS_MS = 10 * 6e4;
 var FILLS_SLACK_MS = 6e4;
+var OUTSIDE_NO_FILL_MS = 15 * 6e4;
 var amount = (n) => String(Number(n.toPrecision(6)));
 var CONFIRM_UNAVAILABLE = '"Ask me each time" needs a copier that can ask you (the browser copier). Choose automatic approval to copy here.';
 var QUIET_SKIPS = /* @__PURE__ */ new Set(["duplicate", "at-target", "no-follower-position", "spot-not-copied"]);
@@ -11733,6 +11773,14 @@ var CopyRuntime = class {
    */
   recentShrink = /* @__PURE__ */ new Map();
   leverageSet = /* @__PURE__ */ new Map();
+  /**
+   * `${subId}|${symbol}` -> a change outside the copier that reads agree on, held back because
+   * SoDEX's trades showed no fill that made the position smaller: since when, and the read before
+   * it (where its fills are read from).
+   */
+  outsideSeen = /* @__PURE__ */ new Map();
+  /** One follower read (and what it adopts) at a time per wallet: a confirming read takes seconds. */
+  refreshing = /* @__PURE__ */ new Map();
   refreshTimers = /* @__PURE__ */ new Map();
   stopTimers = /* @__PURE__ */ new Map();
   timers = [];
@@ -12287,12 +12335,35 @@ var CopyRuntime = class {
       })
     );
   }
+  refreshingAll = false;
+  /** Every live follower, one after another; a round still running (confirming reads take seconds) is not started again. */
   async refreshAllFollowers() {
-    const owners = new Set(this.list().filter((s) => this.live(s) && s.status !== "stopped").map((s) => s.owner));
-    for (const o of owners) await this.refreshFollower(o);
+    if (this.refreshingAll) return;
+    this.refreshingAll = true;
+    try {
+      const owners = new Set(this.list().filter((s) => this.live(s) && s.status !== "stopped").map((s) => s.owner));
+      for (const o of owners) await this.refreshFollower(o);
+    } finally {
+      this.refreshingAll = false;
+    }
   }
-  /** Re-read the follower's account; the copy's positions follow what SoDEX says. */
+  /**
+   * Re-read the follower's account; the copy's positions follow what SoDEX says. A change the
+   * copier did not make (a position gone, smaller, larger, or an open of its own whose fill the
+   * stream missed) is adopted only once CONFIRM_READS more reads agree on it (confirm.ts) - on a
+   * disagreement nothing is adopted this round - and a position gone or smaller only with a fill
+   * in SoDEX's trades that made it so (OUTSIDE_NO_FILL_MS). One read at a time per wallet.
+   */
   async refreshFollower(owner) {
+    const run = (this.refreshing.get(owner) ?? Promise.resolve()).then(() => this.refreshFollowerNow(owner));
+    const tail = run.catch(() => void 0);
+    this.refreshing.set(owner, tail);
+    void tail.then(() => {
+      if (this.refreshing.get(owner) === tail) this.refreshing.delete(owner);
+    });
+    return run;
+  }
+  async refreshFollowerNow(owner) {
     const subs = this.list(owner).filter((s) => this.live(s) && s.status !== "stopped");
     if (!subs.length) return;
     let snap;
@@ -12302,14 +12373,28 @@ var CopyRuntime = class {
       this.host.log.warn("copy: follower read failed", { owner, error: String(e) });
       return;
     }
-    const lastRead = this.followers.get(owner)?.at ?? 0;
-    this.followers.set(owner, snap);
     if (snap.accountId) this.followerAccounts.set(snap.accountId, owner);
     this.sodexFeed?.setFollowers([...this.followerAccounts.keys()]);
-    const now = Date.now();
-    const inFlight = (subId, sym) => this.pending.some((x) => x.subId === subId && x.symbol === sym && x.until > now && x.remaining > 1e-12);
+    const prev = this.followers.get(owner) ?? null;
+    const odd = this.unexplained(subs, snap, prev);
+    if (odd.length) {
+      const view = (f) => odd.map((sym) => `${sym} ${sizeView(f.positions[sym]?.size ?? 0)}`).join(", ");
+      const c = await confirmRead(snap, () => this.host.sodex.follower(owner), view, { gapMs: this.host.confirmGapMs });
+      if (!c.ok) {
+        this.host.log.warn("copy: SoDEX's reads of the follower disagree; nothing adopted this round", { owner, symbols: odd, reads: c.seen });
+        return;
+      }
+      snap = c.value;
+    }
+    const lastRead = prev?.at ?? 0;
+    this.followers.set(owner, snap);
+    const inFlight = (subId, sym) => {
+      const now = Date.now();
+      return this.pending.some((x) => x.subId === subId && x.symbol === sym && x.until > now && x.remaining > 1e-12);
+    };
     for (const s of subs) {
       const st = this.stateOf(s);
+      const now = Date.now();
       for (const [k, g2] of this.recentGrow) {
         if (!k.startsWith(`${s.id}|`)) continue;
         const sym = k.slice(s.id.length + 1);
@@ -12328,38 +12413,61 @@ var CopyRuntime = class {
       for (const [sym, p] of Object.entries(st.owned)) {
         if (inFlight(s.id, sym)) continue;
         const actual = snap.positions[sym];
+        const k = `${s.id}|${sym}`;
+        const gone = !actual || Math.sign(actual.size) !== Math.sign(p.size);
+        const smaller = !gone && Math.abs(p.size) - Math.abs(actual.size) > 1e-12 * Math.max(1, Math.abs(p.size));
+        if (!gone && !(Math.abs(actual.size - p.size) > 1e-12 * Math.max(1, Math.abs(p.size)))) {
+          this.outsideSeen.delete(k);
+          continue;
+        }
+        const lot = Number(this.markets.get(sym)?.stepSize) || 1e-12;
+        const drop = gone ? Math.abs(p.size) : Math.abs(p.size) - Math.abs(actual.size);
+        const outside = gone ? drop : drop - this.ownShrink(s.id, sym, drop, true);
+        let evidence = null;
+        if (gone || smaller && outside >= lot / 2) {
+          const seen = this.outsideSeen.get(k);
+          const size = p.size;
+          const since = Math.max(p.openedAt, seen?.lastRead ?? lastRead) - FILLS_SLACK_MS;
+          evidence = await this.outsideFills(s, sym, since, p.size);
+          if (st.owned[sym]?.size !== size || inFlight(s.id, sym)) continue;
+          if (evidence === "none") {
+            const at = seen && seen.size === (actual?.size ?? 0) ? seen.at : Date.now();
+            if (Date.now() - at < OUTSIDE_NO_FILL_MS) {
+              this.outsideSeen.set(k, { at, lastRead: seen?.lastRead ?? lastRead, size: actual?.size ?? 0 });
+              this.host.log.debug("copy: a change outside the copier with no fill in SoDEX's trades yet; not booked this round", { owner, sub: s.id, symbol: sym, books: p.size, read: actual?.size ?? 0 });
+              continue;
+            }
+            this.host.log.warn("copy: a change outside the copier booked without a fill in SoDEX's trades", { owner, sub: s.id, symbol: sym, books: p.size, read: actual?.size ?? 0, sinceMs: Date.now() - at });
+          }
+        }
+        this.outsideSeen.delete(k);
         const mark = this.markets.mark(sym) ?? p.entry;
-        const since = Math.max(p.openedAt, lastRead) - FILLS_SLACK_MS;
-        if (!actual || Math.sign(actual.size) !== Math.sign(p.size)) {
+        const why = evidence === null ? "own-position" : this.outsideWhy(evidence, st.stops[sym] ?? null);
+        if (gone) {
           st.realizedPnl += p.size * (mark - p.entry);
           delete st.owned[sym];
-          this.recentGrow.delete(`${s.id}|${sym}`);
-          this.recentShrink.delete(`${s.id}|${sym}`);
-          const stops = st.stops[sym] ?? null;
+          this.recentGrow.delete(k);
+          this.recentShrink.delete(k);
           const detach = this.leaderSymbolsFor(s, sym).filter((lsym) => st.leaderPos[lsym]);
-          for (const lsym of detach) st.detached[lsym] = "own-position";
+          for (const lsym of detach) st.detached[lsym] = why === "liquidation" ? "own-position" : why;
           this.cancelStops(s, sym);
           this.leverageSet.delete(`${s.owner}|${sym}`);
           this.dirty.add(s.id);
-          const why = await this.outsideWhy(s, sym, since, stops);
-          for (const lsym of detach) if (st.detached[lsym]) st.detached[lsym] = why === "liquidation" ? "own-position" : why;
           const detail = why === "liquidation" ? "SoDEX liquidated this copied position, so it was closed outside the copier. Its stops on SoDEX are cancelled; it resumes when the leader is flat." : why === "own-position" ? "This copied position was closed outside the copier (by you, or by SoDEX). It resumes when the leader is flat." : `Your ${why} closed this copied position.`;
           await this.activity(s, { kind: "status", reason: why === "own-position" || why === "liquidation" ? "closed-outside" : why, symbol: sym, detail });
           this.notice(copyClosedNotice(s, sym, why, detail));
-        } else if (Math.abs(actual.size - p.size) > 1e-12 * Math.max(1, Math.abs(p.size))) {
-          const drop = Math.abs(p.size) - Math.abs(actual.size);
+        } else {
           if (drop > 0) st.realizedPnl += (p.size - actual.size) * (mark - p.entry);
           st.owned[sym] = { size: actual.size, entry: actual.entry || p.entry, openedAt: p.openedAt };
           this.scheduleStops(s, sym);
           this.dirty.add(s.id);
-          const lot = Number(this.markets.get(sym)?.stepSize) || 1e-12;
-          const outside = drop - this.ownShrink(s.id, sym, drop);
-          if (outside >= lot / 2) {
-            const why = await this.outsideWhy(s, sym, since, st.stops[sym] ?? null);
-            const part = `${amount(outside)} of this copied position`;
+          if (!smaller) continue;
+          const told = drop - this.ownShrink(s.id, sym, drop);
+          if (told >= lot / 2) {
+            const part = `${amount(told)} of this copied position`;
             const left = `the copy holds the ${amount(Math.abs(actual.size))} left`;
             const detail = why === "liquidation" ? `SoDEX liquidated ${part}; ${left}.` : why === "own-position" ? `${part[0].toUpperCase()}${part.slice(1)} was closed outside the copier (by you, or by SoDEX: a partial liquidation or ADL); ${left}.` : `Your ${why} closed ${part}; ${left}.`;
-            await this.activity(s, { kind: "status", reason: "reduced-outside", symbol: sym, size: outside, detail });
+            await this.activity(s, { kind: "status", reason: "reduced-outside", symbol: sym, size: told, detail });
             this.notice(copyReducedNotice(s, sym, why, detail));
           }
         }
@@ -12367,10 +12475,39 @@ var CopyRuntime = class {
     }
   }
   /**
+   * The markets where the follower's account, as `snap` reads it, is not what the copier expects:
+   * a copied position (one with no order of the copier's in flight) of another size or gone, an
+   * open of the copier's that `snap` would adopt, or any other market changed since the last read.
+   * These are what a confirming read must agree on (refreshFollower). Empty: nothing to confirm.
+   */
+  unexplained(subs, snap, prev) {
+    const now = Date.now();
+    const odd = /* @__PURE__ */ new Set();
+    const books = /* @__PURE__ */ new Map();
+    const moving = /* @__PURE__ */ new Set();
+    for (const s of subs) {
+      const st = this.stateOf(s);
+      for (const p of this.pending) if (p.subId === s.id && p.until > now && p.remaining > 1e-12) moving.add(p.symbol);
+      for (const [sym, p] of Object.entries(st.owned)) books.set(sym, (books.get(sym) ?? 0) + p.size);
+      for (const [k, g2] of this.recentGrow) {
+        if (!k.startsWith(`${s.id}|`) || now - g2.at > RECENT_ORDERS_MS) continue;
+        const sym = k.slice(s.id.length + 1);
+        if (!st.owned[sym] && snap.positions[sym]) odd.add(sym);
+      }
+    }
+    for (const sym of /* @__PURE__ */ new Set([...Object.keys(snap.positions), ...books.keys(), ...Object.keys(prev?.positions ?? {})])) {
+      if (moving.has(sym)) continue;
+      const read = snap.positions[sym]?.size ?? 0;
+      const want = books.has(sym) ? books.get(sym) : prev ? prev.positions[sym]?.size ?? 0 : read;
+      if (Math.abs(read - want) > 1e-12 * Math.max(1, Math.abs(want))) odd.add(sym);
+    }
+    return [...odd].sort();
+  }
+  /**
    * Of a drop of `drop` in a copied position, how much the copier's own recent reduce-only
    * orders explain (their fills the stream did not show); that much of them is used up.
    */
-  ownShrink(subId, sym, drop) {
+  ownShrink(subId, sym, drop, peek = false) {
     const k = `${subId}|${sym}`;
     const now = Date.now();
     const list = (this.recentShrink.get(k) ?? []).filter((x) => now - x.at <= RECENT_ORDERS_MS && x.left > 1e-12);
@@ -12378,29 +12515,41 @@ var CopyRuntime = class {
     for (const x of list) {
       if (used >= drop - 1e-12) break;
       const q = Math.min(x.left, drop - used);
-      x.left -= q;
+      if (!peek) x.left -= q;
       used += q;
     }
+    if (peek) return used;
     const kept = list.filter((x) => x.left > 1e-12);
     if (kept.length) this.recentShrink.set(k, kept);
     else this.recentShrink.delete(k);
     return used;
   }
   /**
-   * Why a copied position went (or got smaller) outside the copier's orders, from SoDEX's fills
-   * since `since`: a liquidation (SoDEX's own fill "liquidation:<id>"), the copy's SoDEX stop-loss
-   * or take-profit (its client id filled), or otherwise the follower or SoDEX ('own-position') -
-   * also when the fills cannot be read. The copy's stop is never named without its fill, so a
-   * liquidation past the stop's level is not told as the stop.
+   * SoDEX's fills of the follower on `sym` since `since` that made a position of `size` smaller
+   * (sells of a long, buys of a short): the positive evidence a change outside the copier needs
+   * (refreshFollower). 'none': read, and no such fill (yet: the trades lag the matching);
+   * 'unread': they could not be read (the change is then taken on the reads alone, as told by
+   * outsideWhy).
    */
-  async outsideWhy(s, sym, since, stops) {
-    let fills;
+  async outsideFills(s, sym, since, size) {
     try {
-      fills = await this.host.sodex.fills(s.owner, sym, since);
+      const fills = await this.host.sodex.fills(s.owner, sym, since);
+      const cut = fills.filter((f) => f.side === (size > 0 ? "sell" : "buy"));
+      return cut.length ? cut : "none";
     } catch (e) {
       this.host.log.warn("copy: fills read failed", { owner: s.owner, symbol: sym, error: String(e) });
-      return "own-position";
+      return "unread";
     }
+  }
+  /**
+   * Why a copied position went (or got smaller) outside the copier's orders, from SoDEX's fills
+   * that cut it: a liquidation (SoDEX's own fill "liquidation:<id>"), the copy's SoDEX stop-loss
+   * or take-profit (its client id filled), or otherwise the follower or SoDEX ('own-position') -
+   * also when the fills could not be read. The copy's stop is never named without its fill, so a
+   * liquidation past the stop's level is not told as the stop.
+   */
+  outsideWhy(fills, stops) {
+    if (!Array.isArray(fills)) return "own-position";
     if (fills.some((f) => f.clOrdID?.startsWith("liquidation:"))) return "liquidation";
     if (stops?.sl && fills.some((f) => f.clOrdID === stops.sl)) return "stop-loss";
     if (stops?.tp && fills.some((f) => f.clOrdID === stops.tp)) return "take-profit";
@@ -12512,7 +12661,12 @@ var CopyRuntime = class {
       });
     });
   }
-  /** Of `symbols`, those the follower's SoDEX account still holds (re-read up to three times; unread counts as held). */
+  /**
+   * Of `symbols`, those the follower's SoDEX account still holds (re-read up to three times; unread
+   * counts as held). A market read flat whose close the stream has not shown filled (the copy's
+   * books still hold it) needs CONFIRM_READS more reads that agree: its stop-loss is cancelled on
+   * the strength of it, and a backend that missed a fill reads an account wrong (confirm.ts).
+   */
   async stillOpenOnSodex(s, symbols) {
     let open = symbols;
     let read = false;
@@ -12527,7 +12681,26 @@ var CopyRuntime = class {
         this.host.log.warn("copy: follower read failed", { owner: s.owner, error: String(e) });
       }
     }
-    return read ? open : symbols;
+    if (!read) return symbols;
+    const st = this.stateOf(s);
+    const unsure = symbols.filter((sym) => !open.includes(sym) && st.owned[sym]);
+    for (let i = 0; i < CONFIRM_READS && unsure.length; i++) {
+      const gap = this.host.confirmGapMs ?? CONFIRM_GAP_MS;
+      if (gap > 0) await sleep(gap);
+      let held2;
+      try {
+        const snap = await this.host.sodex.follower(s.owner);
+        held2 = unsure.filter((sym) => !!snap.positions[sym]);
+      } catch (e) {
+        this.host.log.warn("copy: follower read failed", { owner: s.owner, error: String(e) });
+        held2 = unsure;
+      }
+      if (held2.length) {
+        this.host.log.warn("copy: SoDEX's reads disagree on a close; not taken as flat", { owner: s.owner, sub: s.id, symbols: unsure });
+        return [...open, ...unsure];
+      }
+    }
+    return open;
   }
   /**
    * Close what a copy holds where its leader is flat or on the other side (reduce-only): a
@@ -12698,7 +12871,16 @@ var CopyRuntime = class {
         if (!problem) {
           const builder = await this.host.builderFor(s);
           if (builder) {
-            const approved = await this.host.sodex.builderApproval(s.owner, Number(builder.id));
+            let approved = await this.host.sodex.builderApproval(s.owner, Number(builder.id));
+            const covers = (x) => x !== null && x >= builder.fee;
+            if (!covers(approved) && s.status === "active") {
+              const c = await confirmRead(approved, () => this.host.sodex.builderApproval(s.owner, Number(builder.id)), (x) => covers(x) ? "approved" : "missing", { gapMs: this.host.confirmGapMs });
+              if (!c.ok) {
+                this.host.log.warn("copy: SoDEX's reads of the builder approval disagree; the copy stays as it is", { sub: s.id, reads: c.seen });
+                return;
+              }
+              approved = c.value;
+            }
             if (approved === null || approved < builder.fee) {
               problem = `Your SoDEX account does not approve the ValueDesk copy fee (${builder.fee / 10} bp). Approve it in copy setup.`;
             }
@@ -12838,6 +13020,32 @@ var CopyRuntime = class {
     return l.venue === "sodex" ? this.host.sodex.leaderPositions(l.address) : this.host.hyperliquid.leaderPositions(l.address, this.hlDexesFor(l));
   }
   /**
+   * A leader read the books may take. A SoDEX leader's account is read from backends that
+   * disagree (confirm.ts): a read that would move the books (a reconcile event: the copies open,
+   * add, reduce or close on it), or seed them other than its copies have it, is taken only once
+   * CONFIRM_READS more reads agree on those markets; null: they did not (nothing this round).
+   * Hyperliquid's reads are taken as they come.
+   */
+  async readLeaderConfirmed(l, readStart) {
+    const first = await this.readLeader(l);
+    if (l.venue !== "sodex") return first;
+    let odd;
+    if (this.leaders.seeded(l)) odd = this.leaders.differs(l, first, readStart);
+    else {
+      const saved = new Set(Object.keys(first.positions));
+      const copies = this.list().filter((s) => lk(s.settings.leader) === lk(l) && s.status !== "stopped" && (s.settings.copyExisting || Object.keys(this.stateOf(s).leaderPos).length > 0));
+      for (const s of copies) for (const sym of Object.keys(this.stateOf(s).leaderPos)) saved.add(sym);
+      odd = [...saved].filter((sym) => copies.some((s) => Math.abs((this.stateOf(s).leaderPos[sym] ?? 0) - (first.positions[sym] ?? 0)) > 1e-9 * Math.max(1, Math.abs(first.positions[sym] ?? 0))));
+    }
+    if (!odd.length) return first;
+    odd.sort();
+    const view = (r) => odd.map((sym) => `${sym} ${sizeView(r.positions[sym] ?? 0)}`).join(", ");
+    const c = await confirmRead(first, () => this.readLeader(l), view, { gapMs: this.host.confirmGapMs });
+    if (c.ok) return c.value;
+    this.host.log.warn("copy: SoDEX's reads of a leader disagree; not reconciled this round", { leader: lk(l), symbols: odd, reads: c.seen });
+    return null;
+  }
+  /**
    * The Hyperliquid dexes to read for a leader: the main dex and trade.xyz (HL_DEXES), and
    * any other HIP-3 dex where the leader (as the books have it) or one of its copies holds
    * a market SoDEX lists - so a position the stream learned there is reconciled, not left.
@@ -12857,7 +13065,8 @@ var CopyRuntime = class {
   async seedLeader(l) {
     if (this.leaders.seeded(l)) return;
     try {
-      this.resyncLeader(l, await this.readLeader(l));
+      const r = await this.readLeaderConfirmed(l);
+      if (r) this.resyncLeader(l, r);
     } catch (e) {
       this.host.log.warn("copy: leader read failed", { leader: lk(l), error: String(e) });
     }
@@ -12897,7 +13106,9 @@ var CopyRuntime = class {
       for (const l of this.followedLeaders()) {
         try {
           const readStart = Date.now();
-          const events = this.resyncLeader(l, await this.readLeader(l), readStart);
+          const read = await this.readLeaderConfirmed(l, readStart);
+          if (!read) continue;
+          const events = this.resyncLeader(l, read, readStart);
           if (events === null) continue;
           const eq = this.leaders.equity(l);
           for (const s of this.list()) {
@@ -13960,6 +14171,9 @@ var ACCOUNT_MS = 1e4;
 var EXITS_RESIZE_MS = 5e3;
 var EXITS_WATCH_MS = 6e4;
 var EXITS_SETTLE_MS = 3e3;
+var EXITS_FILLS_SLACK_MS = 3e4;
+var EXITS_NO_FILL_MS = 15 * 6e4;
+var CONFIRM_RETRY_MS = 15e3;
 var LIVE = /* @__PURE__ */ new Set(["sending", "open", "unknown"]);
 var FINAL_ORDER = /^(FILLED|CANCELED|CANCELLED|REJECTED|EXPIRED|REPLACED)$/;
 var levelOf = (c) => {
@@ -14020,6 +14234,10 @@ var AlgoRuntime = class {
   exitsWatching = /* @__PURE__ */ new Set();
   exitsWatchAt = /* @__PURE__ */ new Map();
   exitsHeldAt = /* @__PURE__ */ new Map();
+  /** Ended algos whose position reads agree is gone while SoDEX's trades show no fill that cut it: since when (exitsGone). */
+  exitsFlatSince = /* @__PURE__ */ new Map();
+  /** Algos whose position reads disagreed: not read again for a decision before this (positionConfirmed). */
+  confirmRetryAt = /* @__PURE__ */ new Map();
   paper = /* @__PURE__ */ new Map();
   timers = [];
   running = false;
@@ -14762,11 +14980,11 @@ var AlgoRuntime = class {
     a.arrival = q ? mid(q) : this.market.mark(s.symbol)?.mark ?? null;
     if (s.kind === "twap") {
       if (s.closeShare !== null) {
-        const pos = await this.positionOf(a, s.symbol);
+        const pos = await this.positionConfirmed(a, s.symbol);
         if (FINAL_STATUSES.has(a.status)) return false;
-        if (pos === null) {
+        if (pos === null || pos === "disagree") {
           a.startedAt = null;
-          await this.hold(a, `Waiting: your position on ${m.name} could not be read; trying again.`);
+          await this.hold(a, pos === null ? `Waiting: your position on ${m.name} could not be read; trying again.` : `Waiting: SoDEX's reads of your position on ${m.name} disagree; reading again.`);
           return false;
         }
         const size = floorStep(Math.abs(pos) * s.closeShare, m);
@@ -15325,6 +15543,8 @@ var AlgoRuntime = class {
     }
     if (typeof a.k.holdSince !== "number") a.k.holdSince = now;
     if (now - a.k.holdSince < s.holdMs) return;
+    if (!s.paper && s.conditions.some((c) => c.type === "position") && !await this.positionsAgree(a, s, now)) return;
+    if (this.stopped(a)) return;
     a.k.fired = now;
     await this.save(a);
     await this.event(a, "info", `Conditions held${s.holdMs ? ` for ${Math.round(s.holdMs / 1e3)} s` : ""}: acting.`);
@@ -15344,9 +15564,10 @@ var AlgoRuntime = class {
     }
     if (t.type === "close") {
       if (typeof a.k.takeQty !== "number") {
-        const pos = await this.positionOf(a, s.symbol);
+        const pos = await this.positionConfirmed(a, s.symbol);
         if (this.stopped(a)) return;
         if (pos === null) return this.hold(a, `Fired; your position on ${s.symbol} could not be read - trying again.`);
+        if (pos === "disagree") return this.hold(a, `Fired; SoDEX's reads of your position on ${s.symbol} disagree - reading again.`);
         if (!pos) return this.end(a, "expired", `There was no position on ${s.symbol} to close.`);
         a.k.takeQty = floorStep(Math.abs(pos) * t.share, m);
         a.k.closeSide = pos > 0 ? "sell" : "buy";
@@ -15439,10 +15660,10 @@ var AlgoRuntime = class {
       a.k.takeQty = Number(s.quantity);
       return true;
     }
-    const pos = await this.positionOf(a, s.symbol);
+    const pos = await this.positionConfirmed(a, s.symbol);
     if (this.stopped(a)) return false;
-    if (pos === null) {
-      await this.hold(a, `Fired; your position on ${s.symbol} could not be read - trying again.`);
+    if (pos === null || pos === "disagree") {
+      await this.hold(a, pos === null ? `Fired; your position on ${s.symbol} could not be read - trying again.` : `Fired; SoDEX's reads of your position on ${s.symbol} disagree - reading again.`);
       return false;
     }
     const right = s.side === "sell" ? pos > 0 : pos < 0;
@@ -16200,7 +16421,8 @@ var AlgoRuntime = class {
       const placed = Math.max(0, ...(a.exitOrders ?? []).map((x) => x.placedAt));
       const size = await this.positionSince(a, m.name, placed + EXITS_SETTLE_MS);
       const held2 = size === null ? null : (a.spec.side === "buy" ? size : -size) >= Number(m.stepSize) / 2;
-      if (held2 === false) return await this.exitsOutside(a, m, now);
+      if (held2 === false) return await this.exitsGone(a, m, size, placed) ? await this.exitsOutside(a, m, now) : void 0;
+      if (held2) this.exitsFlatSince.delete(a.id);
       this.exitsHeldAt.set(a.id, now);
       if (a.k.exitsPulled) {
         if (held2) delete a.k.exitsPulled;
@@ -16210,6 +16432,42 @@ var AlgoRuntime = class {
     } finally {
       this.exitsWatching.delete(a.id);
     }
+  }
+  /**
+   * Whether the position an ended algo's exits protect is gone, as a read (`size`) says: only when
+   * CONFIRM_READS more reads agree on its size (confirm.ts) and SoDEX's trades hold a fill since the
+   * exits were placed that cut it - a liquidation, the trader's close. A backend that missed the
+   * opening fills reads the account flat while it holds the position: cancelling the exits then
+   * would leave a real position without its take-profit and stop-loss. Reads that agree with no
+   * such fill (the trades lag the matching, or cannot be read) are taken after EXITS_NO_FILL_MS.
+   */
+  async exitsGone(a, m, size, placed) {
+    const c = await confirmRead(size, () => this.positionOf(a, m.name), sizeView, { gapMs: this.host.confirmGapMs });
+    if (!c.ok) {
+      this.host.log.warn("algo: SoDEX's reads of the position disagree; the exits stay", { algo: a.id, symbol: m.name, reads: c.seen });
+      return false;
+    }
+    const close = a.spec.side === "buy" ? "sell" : "buy";
+    let cut = null;
+    try {
+      cut = (await this.host.sodex.fills(a.owner, m.name, placed - EXITS_FILLS_SLACK_MS)).some((f) => f.side === close);
+    } catch (e) {
+      this.host.log.warn("algo: fills read failed", { algo: a.id, symbol: m.name, error: String(e) });
+    }
+    if (cut) {
+      this.exitsFlatSince.delete(a.id);
+      return true;
+    }
+    const now = Date.now();
+    const since = this.exitsFlatSince.get(a.id) ?? now;
+    this.exitsFlatSince.set(a.id, since);
+    if (now - since >= EXITS_NO_FILL_MS) {
+      this.host.log.warn("algo: the position reads gone without a fill that cut it; its exits are taken as outside it", { algo: a.id, symbol: m.name, sinceMs: now - since, fills: cut === null ? "unread" : "none" });
+      this.exitsFlatSince.delete(a.id);
+      return true;
+    }
+    this.host.log.debug("algo: the position reads gone, with no fill in SoDEX's trades that cut it yet; the exits stay", { algo: a.id, symbol: m.name, fills: cut === null ? "unread" : "none" });
+    return false;
   }
   /** The owner's signed position on `symbol` from a read that left at `from` or later (one is made when the last is older). null: not readable. */
   async positionSince(a, symbol2, from) {
@@ -16470,6 +16728,49 @@ var AlgoRuntime = class {
   positionLeverage(a, symbol2) {
     const p = this.positionsOf.get(a.owner)?.data[symbol2];
     return p && p.size !== 0 && typeof p.leverage === "number" && p.leverage > 0 ? p.leverage : null;
+  }
+  /**
+   * The owner's position on `symbol` for a decision that is not taken back - the size of a close
+   * (it closes that much), an algo ended for want of a position: read, then confirmed by
+   * CONFIRM_READS more reads that agree on it (confirm.ts). null: not readable; 'disagree': the
+   * reads did not agree (read again on a later step, no sooner than CONFIRM_RETRY_MS). Paper uses
+   * its own position, as positionOf does.
+   */
+  async positionConfirmed(a, symbol2) {
+    if (a.spec.paper) return this.positionOf(a, symbol2);
+    if (Date.now() < (this.confirmRetryAt.get(a.id) ?? 0)) return "disagree";
+    const first = await this.positionOf(a, symbol2);
+    if (first === null) return null;
+    const c = await confirmRead(first, () => this.positionOf(a, symbol2), sizeView, { gapMs: this.host.confirmGapMs });
+    if (c.ok) {
+      this.confirmRetryAt.delete(a.id);
+      return c.value;
+    }
+    this.confirmRetryAt.set(a.id, Date.now() + CONFIRM_RETRY_MS);
+    this.host.log.warn("algo: SoDEX's reads of the position disagree; nothing decided on it this step", { algo: a.id, symbol: symbol2, reads: c.seen });
+    return "disagree";
+  }
+  /**
+   * A conditional with a position condition fires (once, for good) only when CONFIRM_READS more
+   * reads of the positions, CONFIRM_GAP_MS apart, still meet its conditions: a backend that is
+   * behind reads a position closed minutes ago, or none where one was just opened (confirm.ts).
+   */
+  async positionsAgree(a, s, now) {
+    if (Date.now() < (this.confirmRetryAt.get(a.id) ?? 0)) return false;
+    for (let i = 0; i < CONFIRM_READS; i++) {
+      const gap = this.host.confirmGapMs ?? CONFIRM_GAP_MS;
+      if (gap > 0) await sleep(gap);
+      const book = await this.loadPositions(a);
+      if (this.stopped(a)) return false;
+      const ok = book ? s.conditions.map((c, j) => this.conditionHolds(a, c, j, now)) : [];
+      if (!book || !(s.match === "all" ? ok.every(Boolean) : ok.some(Boolean))) {
+        this.confirmRetryAt.set(a.id, Date.now() + CONFIRM_RETRY_MS);
+        this.host.log.warn("algo: a position condition held on one read of SoDEX and not on the next; not fired", { algo: a.id, read: i + 2 });
+        return false;
+      }
+    }
+    this.confirmRetryAt.delete(a.id);
+    return true;
   }
   async positionOf(a, symbol2) {
     const paperPos = a.k.paperPos;
@@ -17350,7 +17651,9 @@ var SIGNER_IDLE_MS = 2 * 6e4;
 var VOLUMES_MAX = 2e4;
 var SESSION_TTL_MS = 12 * 60 * 6e4;
 var VOLUME_TTL_MS = 10 * 6e4;
-var KEY_RECHECK_MS = 10 * 6e4;
+var KEY_READS = 3;
+var KEY_READ_GAP_MS = 3e3;
+var KEY_REFUSED_AT = 0;
 var ExecutorService = class {
   constructor(cfg, db, secrets, deps) {
     this.cfg = cfg;
@@ -17366,7 +17669,7 @@ var ExecutorService = class {
       keyRefused: (owner) => {
         this.forgetSigner(owner);
         const k = db.key(owner, "active");
-        if (k) db.markKey(owner, "active", k.registered, k.expiresAt, 0);
+        if (k) db.markKey(owner, "active", k.registered, k.expiresAt, KEY_REFUSED_AT);
       }
     });
     this.brake = new Brake(cfg.brakeFile, (now, before) => {
@@ -17393,7 +17696,9 @@ var ExecutorService = class {
       keyProblem: async (s) => this.guard.holdOf({ kind: "copy", id: s.id, owner: s.owner }) ?? this.keyProblem(s.owner),
       // A copy halted, held, stopped or closed outside the copier: kept for the follower to read after signing in.
       onNotice: (n) => db.addNotice(n),
-      brake: () => this.brakeText("copies")
+      brake: () => this.brakeText("copies"),
+      // Reads that confirm a change outside the copier (copy-engine confirm.ts), as far apart as the key reads.
+      confirmGapMs: deps.readGapMs
     });
     const oracleFeed = new OracleFeed({ fetch: deps.fetch });
     this.algos = new AlgoRuntime({
@@ -17412,7 +17717,8 @@ var ExecutorService = class {
       // Hyperliquid, OKX and Bybit, each read at most once a second per coin for every algo here.
       oracle: (coin) => oracleFeed.quotes(coin),
       // An algo failed, stopped, held or finished: kept for the follower to read after signing in.
-      onNotice: (n) => db.addNotice(n)
+      onNotice: (n) => db.addNotice(n),
+      confirmGapMs: deps.readGapMs
     });
   }
   cfg;
@@ -17701,7 +18007,7 @@ var ExecutorService = class {
         } catch {
           throw new ApiError(400, "key", "That is not a SoDEX API private key.");
         }
-        const r = await this.sodex.keyRegistered(owner, name, address);
+        const r = await this.keyRead(owner, name, address);
         if (!r.ok) throw new ApiError(412, "not-registered", r.expiresAt ? "That key has expired on SoDEX. Make a new one." : "SoDEX does not list this key on your account under that name. Check the name and that you made it with this wallet.");
         const latest = Date.now() + this.cfg.keyTtlDaysMax * 864e5 + KEY_TTL_SLACK_MS;
         if (!r.expiresAt || r.expiresAt > latest) throw new ApiError(412, "key-ttl", `That key is valid for longer than ${this.cfg.keyTtlDaysMax} days. Make one that expires within ${this.cfg.keyTtlDaysMax} days.`);
@@ -17730,11 +18036,18 @@ var ExecutorService = class {
     this.deps.log.info("copy key created", { owner, key: address });
     return { address, name: this.keyName, maxDays: this.cfg.keyTtlDaysMax, days };
   }
-  /** Ask SoDEX whether the follower registered the key; a registered pending key becomes the active one. */
-  async verifyKey(owner) {
+  /**
+   * Ask SoDEX whether the follower registered the key; a registered pending key becomes the active one.
+   * `confirm`: a refusal follows when no key is registered (a live copy or algo starting), so a key SoDEX
+   * does not list is read KEY_READS times first; the site's polling (POST /keys/verify) reads once a
+   * call and a miss there changes nothing. An active key once seen registered is kept until it expires
+   * (trustedKey): no read takes it away.
+   */
+  async verifyKey(owner, o = {}) {
     const pending = this.db.key(owner, "pending");
+    const usable = this.trustedKey(this.db.key(owner, "active"));
     if (pending) {
-      const r = await this.sodex.keyRegistered(owner, pending.name, pending.address);
+      const r = await this.keyRead(owner, pending.name, pending.address, o.confirm && !usable ? KEY_READS : 1);
       const latest = Date.now() + this.cfg.keyTtlDaysMax * 864e5 + KEY_TTL_SLACK_MS;
       if (r.ok && (!r.expiresAt || r.expiresAt > latest)) {
         this.deps.log.warn("copy key refused: registered for longer than allowed", { owner, key: pending.address, expiresAt: r.expiresAt });
@@ -17746,11 +18059,34 @@ var ExecutorService = class {
       }
     }
     const active = this.db.key(owner, "active");
-    if (active && (!pending || this.db.key(owner, "pending"))) {
-      const r = await this.sodex.keyRegistered(owner, active.name, active.address);
-      this.db.markKey(owner, "active", r.ok, r.expiresAt, Date.now());
+    if (active && (!pending || this.db.key(owner, "pending")) && !this.trustedKey(active)) {
+      const r = await this.keyRead(owner, active.name, active.address, o.confirm ? KEY_READS : 1);
+      if (r.ok || o.confirm) this.db.markKey(owner, "active", r.ok, r.ok ? r.expiresAt : r.expiresAt ?? active.expiresAt, Date.now());
     }
     return this.keyInfo(owner);
+  }
+  /**
+   * A key once seen registered on SoDEX (its address, under its name, with its expiry) is trusted
+   * until that expiry, unless SoDEX refused a signed action with it since (KEY_REFUSED_AT). SoDEX's
+   * key list is read from backends that disagree (one served a list 17 minutes old, 2026-10-29), so a
+   * read that misses a trusted key is a stale backend, not a revocation: a revoked key shows itself
+   * when SoDEX refuses what it signs (guard.ts), and is read again then.
+   */
+  trustedKey(k, now = Date.now()) {
+    return !!k && k.registered && k.checkedAt !== KEY_REFUSED_AT && (!k.expiresAt || k.expiresAt > now);
+  }
+  /**
+   * SoDEX's answer for one key, read up to `reads` times (KEY_READ_GAP_MS apart) while it does not
+   * list it: the first read that lists it wins; it is missing only when every read agrees.
+   */
+  async keyRead(owner, name, address, reads = KEY_READS) {
+    let r = await this.sodex.keyRegistered(owner, name, address);
+    for (let i = 1; i < reads && !r.ok; i++) {
+      await sleep(this.deps.readGapMs ?? KEY_READ_GAP_MS);
+      r = await this.sodex.keyRegistered(owner, name, address);
+      if (r.ok) this.deps.log.warn("executor: SoDEX listed a key on a later read (an earlier read was stale)", { owner, key: address, read: i + 1 });
+    }
+    return r;
   }
   /**
    * Stop every copy and algo and forget the keys. The follower revokes the key on SoDEX with their wallet.
@@ -17772,16 +18108,17 @@ var ExecutorService = class {
     const k = this.db.key(owner, "active");
     if (!k) return "No copy key is registered for this executor. Approve one in copy setup.";
     const now = Date.now();
-    if (!k.registered || !k.checkedAt || now - k.checkedAt > KEY_RECHECK_MS) {
-      const r = await this.sodex.keyRegistered(owner, k.name, k.address);
-      this.db.markKey(owner, "active", r.ok, r.expiresAt, now);
-      if (!r.ok) {
-        this.forgetSigner(owner);
-        return r.expiresAt && r.expiresAt <= now ? "The copy key expired. Approve a new one in copy setup." : "The copy key is no longer registered on SoDEX (revoked or replaced). Approve a new one in copy setup.";
-      }
-      return null;
+    if (k.expiresAt && k.expiresAt <= now) {
+      this.forgetSigner(owner);
+      return "The copy key expired. Approve a new one in copy setup.";
     }
-    if (k.expiresAt && k.expiresAt <= now) return "The copy key expired. Approve a new one in copy setup.";
+    if (this.trustedKey(k, now)) return null;
+    const r = await this.keyRead(owner, k.name, k.address);
+    this.db.markKey(owner, "active", r.ok, r.ok ? r.expiresAt : r.expiresAt ?? k.expiresAt, now);
+    if (!r.ok) {
+      this.forgetSigner(owner);
+      return r.expiresAt && r.expiresAt <= now ? "The copy key expired. Approve a new one in copy setup." : "The copy key is no longer registered on SoDEX (revoked or replaced). Approve a new one in copy setup.";
+    }
     return null;
   }
   signer(owner) {
@@ -17876,7 +18213,7 @@ var ExecutorService = class {
     let accountId = 0;
     if (!settings.paper) {
       this.needNoBrake("copies");
-      await this.verifyKey(owner);
+      await this.verifyKey(owner, { confirm: true });
       const k = this.db.key(owner, "active");
       if (!k || !k.registered) throw new ApiError(412, "key", 'Register the copy key on SoDEX first (copy setup, "Approve agent").');
       accountId = await this.sodex.accountId(owner);
@@ -18027,7 +18364,7 @@ var ExecutorService = class {
     let accountId = 0;
     if (!spec.paper) {
       this.needNoBrake("algos");
-      await this.verifyKey(owner);
+      await this.verifyKey(owner, { confirm: true });
       const k = this.db.key(owner, "active");
       if (!k || !k.registered) throw new ApiError(412, "key", `Register this executor's key on SoDEX first (copy setup, "Approve agent").`);
       accountId = await this.sodex.accountId(owner);
