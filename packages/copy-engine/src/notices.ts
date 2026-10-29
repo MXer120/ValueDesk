@@ -10,12 +10,12 @@
  */
 import type { AlgoRecord, AlgoStatus } from './algo/types.ts';
 import { ALGO_NAMES } from './algo/spec.ts';
-import type { Subscription, SubscriptionStatus } from './types.ts';
+import type { AssetVerdict, Subscription, SubscriptionStatus } from './types.ts';
 
 /** How much it matters: info (finished, closed by its stop), warn (stopped or held by the engine), error (failed, halted, a position closed outside). */
 export type NoticeGrade = 'info' | 'warn' | 'error';
 export type NoticeSource = 'algo' | 'copy';
-export type NoticeKind = 'done' | 'ended' | 'failed' | 'stopped' | 'held' | 'halted' | 'blocked' | 'paused' | 'closed';
+export type NoticeKind = 'done' | 'ended' | 'failed' | 'stopped' | 'held' | 'halted' | 'blocked' | 'paused' | 'closed' | 'different-asset' | 'same-asset';
 
 export interface EngineNotice {
   /** Stable for one event: `${source}:${ref}:${kind}:${at}` - a repeat is the same notice. */
@@ -87,4 +87,24 @@ export function copyClosedNotice(s: Subscription, symbol: string, why: string, d
     owner: s.owner, source: 'copy', ref: `${s.id}:${symbol}`, kind: 'closed', grade: byStop ? 'info' : 'error',
     title: `${symbol} closed in the copy of ${who}`, body: detail, at, paper: !!s.settings.paper,
   });
+}
+
+/** A price as the notice reads it: six significant digits. */
+const px = (n: number): string => String(Number(n.toPrecision(6)));
+
+/**
+ * A leader's Hyperliquid market whose SoDEX market of the same name is a different asset
+ * (warn: nothing new is copied there), or the same again once the two prices agree (info).
+ */
+export function copyAssetNotice(s: Subscription, leaderSymbol: string, v: AssetVerdict, at = Date.now()): EngineNotice {
+  const who = leaderShort(s);
+  const apart = `${(Math.abs(v.deviation) * 100).toFixed(1)}% apart`;
+  const prices = `Hyperliquid's ${leaderSymbol} is at ${px(v.leaderPrice)}, SoDEX's ${v.market} at ${px(v.sodexPrice)} (${apart})`;
+  const base = { owner: s.owner, source: 'copy' as const, ref: `${s.id}:${leaderSymbol}`, at, paper: !!s.settings.paper };
+  return v.same
+    ? mk({ ...base, kind: 'same-asset', grade: 'info', title: `${leaderSymbol} is copied again in the copy of ${who}`, body: `${prices}: the same asset again, so the leader's next changes there are copied.` })
+    : mk({
+        ...base, kind: 'different-asset', grade: 'warn', title: `${leaderSymbol} is not copied in the copy of ${who}`,
+        body: `${prices}: not the same asset, so nothing new is opened on ${v.market}. A position the copy holds there still follows the leader's reductions and closes.`,
+      });
 }

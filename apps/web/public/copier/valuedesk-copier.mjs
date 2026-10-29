@@ -6233,11 +6233,11 @@ function weierstrassPoints(opts) {
     return true;
   });
   class Point2 {
-    constructor(px, py, pz) {
-      this.px = px;
+    constructor(px2, py, pz) {
+      this.px = px2;
       this.py = py;
       this.pz = pz;
-      if (px == null || !Fp.isValid(px))
+      if (px2 == null || !Fp.isValid(px2))
         throw new Error("x required");
       if (py == null || !Fp.isValid(py))
         throw new Error("y required");
@@ -8518,9 +8518,24 @@ function parseMarkets(rows2) {
   }
   return out;
 }
+var ASSET_DIFFERENT_ABOVE = 0.05;
+var ASSET_SAME_BELOW = 0.03;
+var ASSET_PRICE_MAX_AGE_MS = 9e4;
+function hlUnits(coin) {
+  const bare = coin.includes(":") ? coin.slice(coin.indexOf(":") + 1) : coin;
+  return /^k[A-Z0-9]/.test(bare) || /^1000[A-Z]/.test(bare) ? 1e3 : 1;
+}
+function sodexUnits(name, coin) {
+  const kCoin = /^k[A-Z0-9]/.test(coin.includes(":") ? coin.slice(coin.indexOf(":") + 1) : coin);
+  return /^1000[A-Z]/.test(name) || kCoin && /^K[A-Z0-9]/.test(name) ? 1e3 : 1;
+}
 var MarketBook = class {
   byName = /* @__PURE__ */ new Map();
   marks = /* @__PURE__ */ new Map();
+  /** Hyperliquid coin -> its latest price seen (per contract, as Hyperliquid quotes it). */
+  leaderPx = /* @__PURE__ */ new Map();
+  /** Hyperliquid coin -> the last same-asset verdict. */
+  assets = /* @__PURE__ */ new Map();
   loadedAt = 0;
   load(markets, now = Date.now()) {
     this.byName = new Map(markets.map((m) => [m.name.toUpperCase(), m]));
@@ -8542,6 +8557,43 @@ var MarketBook = class {
   mark(symbol2, maxAgeMs = 6e4, now = Date.now()) {
     const m = this.marks.get(symbol2.toUpperCase());
     return m && now - m.at <= maxAgeMs ? m.price : null;
+  }
+  /**
+   * A price Hyperliquid gave for one of its markets: a leader's fill, or the mark in a
+   * position read. An older price never replaces a newer one.
+   */
+  observeLeaderPrice(venue, leaderSymbol, price2, at = Date.now()) {
+    if (venue !== "hyperliquid" || !Number.isFinite(price2) || !(price2 > 0)) return;
+    const prev = this.leaderPx.get(leaderSymbol);
+    if (prev && prev.at > at) return;
+    this.leaderPx.set(leaderSymbol, { price: price2, at });
+  }
+  /**
+   * Whether a Hyperliquid market is the same asset as the SoDEX market it maps to: the
+   * price of one coin on each (a 1000-coin contract counted per coin) within
+   * ASSET_DIFFERENT_ABOVE, and once apart within ASSET_SAME_BELOW again. Compared only on
+   * prices seen within ASSET_PRICE_MAX_AGE_MS: without them the last verdict stands, and
+   * there is none (null) until both venues have priced it fresh. Null too for a SoDEX
+   * leader (its markets are SoDEX's own) and a market SoDEX does not list.
+   */
+  sameAsset(venue, leaderSymbol, now = Date.now()) {
+    if (venue !== "hyperliquid") return null;
+    const m = this.sodexMarketFor(venue, leaderSymbol);
+    if (!m) return null;
+    const prior = this.assets.get(leaderSymbol);
+    const last = prior && prior.market === m.name ? prior : null;
+    const fresh = (x) => !!x && Math.abs(now - x.at) <= ASSET_PRICE_MAX_AGE_MS;
+    const hl = this.leaderPx.get(leaderSymbol);
+    const sx = this.marks.get(m.name.toUpperCase());
+    if (!fresh(hl) || !fresh(sx)) return last;
+    const leaderPrice = hl.price / hlUnits(leaderSymbol);
+    const sodexPrice = sx.price / sodexUnits(m.name, leaderSymbol);
+    const deviation = leaderPrice / sodexPrice - 1;
+    const off = Math.abs(deviation);
+    const same = off > ASSET_DIFFERENT_ABOVE ? false : off < ASSET_SAME_BELOW ? true : last?.same ?? true;
+    const v = { same, market: m.name, leaderPrice, sodexPrice, deviation, at: Math.min(hl.at, sx.at) };
+    this.assets.set(leaderSymbol, v);
+    return v;
   }
   /** The SoDEX market a leader's market maps to, or null when SoDEX lists none. */
   sodexMarketFor(venue, leaderSymbol) {
@@ -8709,6 +8761,7 @@ function planLeaderEvent(ctx) {
   if (reduceOnly && isFlat(F)) return none(lAfter === 0 ? "no-follower-position" : stopSkip, { attach });
   const coin = coinOf(s.leader.venue, lSym);
   const filtered = s.assetAllow.length > 0 && !s.assetAllow.includes(coin) ? "asset-not-allowed" : s.assetDeny.includes(coin) ? "asset-denied" : null;
+  const unlike = ctx.sameAsset === false ? "different-asset" : ctx.sameAsset === null ? "no-price" : null;
   const ref = ctx.markOf(market.name) ?? (s.leader.venue === "sodex" && event.price > 0 ? event.price : null);
   if (ref === null) return none("no-price", { attach });
   const equity = copyEquity(s, state, ctx.markOf);
@@ -8746,6 +8799,10 @@ function planLeaderEvent(ctx) {
   const grow = (from, desired, leg) => {
     if (reduceOnly) {
       skip = stopSkip;
+      return null;
+    }
+    if (unlike) {
+      skip = unlike;
       return null;
     }
     if (filtered) {
@@ -8931,8 +8988,8 @@ function guardTrigger(kind, p, settings, leverage) {
   const pct = kind === "stop-loss" ? settings.stopLossPct : settings.takeProfitPct;
   if (pct === null || isFlat(p.size) || !(p.entry > 0)) return null;
   const dir = kind === "stop-loss" ? -1 : 1;
-  const px = p.entry * (1 + sign(p.size) * dir * pct / Math.max(1, leverage));
-  return px > 0 ? px : null;
+  const px2 = p.entry * (1 + sign(p.size) * dir * pct / Math.max(1, leverage));
+  return px2 > 0 ? px2 : null;
 }
 function freshState(subId, allocationUsd) {
   return {
@@ -9655,12 +9712,12 @@ var HyperliquidClient = class {
   spotPrices(now) {
     if (this.spotPx && now - this.spotPx.at < SPOT_PRICES_MS) return this.spotPx.value;
     const value = this.post({ type: "spotMetaAndAssetCtxs" }).then((raw) => {
-      const px = hlSpotPrices(raw);
-      return px.size ? px : null;
+      const px2 = hlSpotPrices(raw);
+      return px2.size ? px2 : null;
     }).catch(() => null);
     this.spotPx = { at: now, value };
-    void value.then((px) => {
-      if (!px && this.spotPx?.value === value) this.spotPx = null;
+    void value.then((px2) => {
+      if (!px2 && this.spotPx?.value === value) this.spotPx = null;
     });
     return value;
   }
@@ -9684,7 +9741,7 @@ function hlSpotPrices(raw) {
   }
   return out;
 }
-function hlSpotCollateral(st, px) {
+function hlSpotCollateral(st, px2) {
   if (!Array.isArray(st?.tokenToAvailableAfterMaintenance)) return null;
   let sum = 0;
   for (const b of st?.balances ?? []) {
@@ -9692,8 +9749,8 @@ function hlSpotCollateral(st, px) {
     const total = Number(b.total);
     if (!Number.isFinite(total) || total === 0) continue;
     if (STABLE_COLLATERAL.test(coin)) sum += total;
-    else if (!px) return null;
-    else sum += total * (px.get(coin) ?? 0);
+    else if (!px2) return null;
+    else sum += total * (px2.get(coin) ?? 0);
   }
   return sum;
 }
@@ -10204,20 +10261,20 @@ var HyperliquidFeed = class {
       for (const f of d.fills ?? []) {
         const coin = String(f.coin ?? "");
         const sz = Number(f.sz);
-        const px = Number(f.px);
+        const px2 = Number(f.px);
         const start = Number(f.startPosition);
         const time2 = Number(f.time);
         const id = `hl:${coin}:${String(f.tid ?? f.hash ?? time2)}`;
-        if (!coin || !(sz > 0) || !(px > 0) || !Number.isFinite(start) || !this.seen.add(id)) continue;
+        if (!coin || !(sz > 0) || !(px2 > 0) || !Number.isFinite(start) || !this.seen.add(id)) continue;
         if (seed !== null && time2 < seed) continue;
         if (coin.startsWith("@") || coin.includes("/")) continue;
         const signed = f.side === "B" ? sz : -sz;
         const k = `${coin}|${String(f.oid ?? time2)}`;
         const g2 = byOrder.get(k);
-        if (!g2) byOrder.set(k, { coin, before: start, after: start + signed, notional: sz * px, qty: sz, time: time2, id });
+        if (!g2) byOrder.set(k, { coin, before: start, after: start + signed, notional: sz * px2, qty: sz, time: time2, id });
         else {
           g2.after += signed;
-          g2.notional += sz * px;
+          g2.notional += sz * px2;
           g2.qty += sz;
           g2.time = Math.max(g2.time, time2);
         }
@@ -10234,10 +10291,10 @@ var HyperliquidFeed = class {
         if (!t.coin || !Array.isArray(t.users)) continue;
         const id = `hl:${t.coin}:${t.tid ?? t.time}`;
         if (!this.seen.add(id)) continue;
-        const px = Number(t.px);
+        const px2 = Number(t.px);
         const sz = Number(t.sz);
         const time2 = t.time ?? Date.now();
-        if (!(px > 0) || !(sz > 0)) continue;
+        if (!(px2 > 0) || !(sz > 0)) continue;
         const [buyer, seller] = [t.users[0]?.toLowerCase(), t.users[1]?.toLowerCase()];
         if (buyer === seller) continue;
         for (const [addr, signed] of [[buyer, sz], [seller, -sz]]) {
@@ -10246,7 +10303,7 @@ var HyperliquidFeed = class {
           const seed = this.o.book.seedTime(l);
           if (seed !== null && time2 >= seed) {
             this.o.book.notePrint(l, t.coin, true);
-            this.coalesce.add(l, t.coin, signed, px, time2, id);
+            this.coalesce.add(l, t.coin, signed, px2, time2, id);
           }
         }
       }
@@ -10363,8 +10420,8 @@ var PaperSink = class {
   n = 0;
   async place(_accountId, _market, intents, _builder, reference) {
     return intents.map((i) => {
-      const px = i.side === "buy" ? reference * 1.0001 : reference * 0.9999;
-      return { clOrdID: i.clOrdID, ok: true, orderId: `paper-${++this.n}`, error: null, outcomeUnknown: false, paperFill: { qty: Number(i.quantity), price: px } };
+      const px2 = i.side === "buy" ? reference * 1.0001 : reference * 0.9999;
+      return { clOrdID: i.clOrdID, ok: true, orderId: `paper-${++this.n}`, error: null, outcomeUnknown: false, paperFill: { qty: Number(i.quantity), price: px2 } };
     });
   }
   async setLeverage() {
@@ -11550,6 +11607,20 @@ function copyClosedNotice(s, symbol2, why, detail, at = Date.now()) {
     paper: !!s.settings.paper
   });
 }
+var px = (n) => String(Number(n.toPrecision(6)));
+function copyAssetNotice(s, leaderSymbol, v, at = Date.now()) {
+  const who = leaderShort(s);
+  const apart = `${(Math.abs(v.deviation) * 100).toFixed(1)}% apart`;
+  const prices = `Hyperliquid's ${leaderSymbol} is at ${px(v.leaderPrice)}, SoDEX's ${v.market} at ${px(v.sodexPrice)} (${apart})`;
+  const base2 = { owner: s.owner, source: "copy", ref: `${s.id}:${leaderSymbol}`, at, paper: !!s.settings.paper };
+  return v.same ? mk({ ...base2, kind: "same-asset", grade: "info", title: `${leaderSymbol} is copied again in the copy of ${who}`, body: `${prices}: the same asset again, so the leader's next changes there are copied.` }) : mk({
+    ...base2,
+    kind: "different-asset",
+    grade: "warn",
+    title: `${leaderSymbol} is not copied in the copy of ${who}`,
+    body: `${prices}: not the same asset, so nothing new is opened on ${v.market}. A position the copy holds there still follows the leader's reductions and closes.`
+  });
+}
 
 // ../../packages/copy-engine/src/runtime.ts
 var RECONCILE_MS = 6e4;
@@ -11564,6 +11635,7 @@ var PENDING_MS = 3e4;
 var CONFIRM_UNAVAILABLE = '"Ask me each time" needs a copier that can ask you (the browser copier). Choose automatic approval to copy here.';
 var QUIET_SKIPS = /* @__PURE__ */ new Set(["duplicate", "at-target", "no-follower-position", "spot-not-copied"]);
 var lk = (l) => `${l.venue}:${l.address.toLowerCase()}`;
+var assetDetail = (leaderSymbol, v) => `Hyperliquid ${leaderSymbol} ${Number(v.leaderPrice.toPrecision(6))}, SoDEX ${v.market} ${Number(v.sodexPrice.toPrecision(6))}: ${(Math.abs(v.deviation) * 100).toFixed(1)}% apart`;
 function shuffle(a) {
   for (let i = a.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
@@ -11825,6 +11897,7 @@ var CopyRuntime = class {
   }
   /* --------------------------------------------------------------- events ----- */
   onLeaderEvent(e) {
+    if (e.source === "stream") this.markets.observeLeaderPrice(e.leader.venue, e.symbol, e.price, Math.min(e.time, Date.now()));
     for (const s of shuffle(this.list())) {
       if (lk(s.settings.leader) !== lk(e.leader)) continue;
       if (s.status === "stopped") continue;
@@ -11834,7 +11907,8 @@ var CopyRuntime = class {
   dispatch(s, e) {
     const market = this.markets.sodexMarketFor(e.leader.venue, e.symbol);
     const mark = market ? this.markets.mark(market.name) : null;
-    this.enqueue(s.owner, () => this.process(s.id, e, market, mark));
+    const asset = market ? this.markets.sameAsset(e.leader.venue, e.symbol) : null;
+    this.enqueue(s.owner, () => this.process(s.id, e, market, mark, asset));
   }
   enqueue(owner, fn) {
     const prev = this.queues.get(owner) ?? Promise.resolve();
@@ -11844,7 +11918,7 @@ var CopyRuntime = class {
       if (this.queues.get(owner) === next) this.queues.delete(owner);
     });
   }
-  async process(subId, e, market, mark) {
+  async process(subId, e, market, mark, asset = null) {
     let s = this.subs.get(subId);
     if (!s || s.status === "stopped") return;
     if (s.status === "active" && this.localProblem(s)) {
@@ -11863,8 +11937,11 @@ var CopyRuntime = class {
       heldBy: market ? this.heldBy(s, market.name) : "nobody",
       // A paper copy is not gated on the follower's real account.
       follower: this.live(s) ? this.followers.get(s.owner) ?? null : null,
-      inFlight: this.inFlightOf(s.id)
+      inFlight: this.inFlightOf(s.id),
+      ...market && e.leader.venue === "hyperliquid" ? { sameAsset: asset?.same ?? null } : {}
     });
+    if (asset && (plan.skip === "different-asset" || asset.same)) this.noteAsset(s, e.symbol, asset);
+    const detail = plan.skip === "different-asset" && asset ? assetDetail(e.symbol, asset) : null;
     st.leaderPos[e.symbol] = plan.leaderAfter;
     if (plan.leaderAfter === 0) delete st.leaderPos[e.symbol];
     if (plan.attach) delete st.detached[e.symbol];
@@ -11874,7 +11951,7 @@ var CopyRuntime = class {
     const leader = { symbol: e.symbol, before: e.before ?? 0, after: e.after, price: e.price, time: e.time };
     if (!plan.intents.length) {
       if (plan.skip && plan.skip !== "duplicate") st.skips++;
-      if (plan.skip && !QUIET_SKIPS.has(plan.skip)) await this.activity(s, { kind: "skip", reason: plan.skip, symbol: market?.name ?? e.symbol, leader });
+      if (plan.skip && !QUIET_SKIPS.has(plan.skip)) await this.activity(s, { kind: "skip", reason: plan.skip, symbol: market?.name ?? e.symbol, leader, detail });
       this.dirty.add(s.id);
       return;
     }
@@ -11893,7 +11970,41 @@ var CopyRuntime = class {
       }
     }
     await this.execute(s, market, plan.intents, markOf(market.name) ?? e.price, leader);
-    if (plan.skip && !QUIET_SKIPS.has(plan.skip)) await this.activity(s, { kind: "skip", reason: plan.skip, symbol: market.name, leader });
+    if (plan.skip && !QUIET_SKIPS.has(plan.skip)) await this.activity(s, { kind: "skip", reason: plan.skip, symbol: market.name, leader, detail });
+  }
+  /**
+   * A copy hears once that a leader market of its is not copied as a different asset (when
+   * that holds back a change, or a position it holds there), and once that it is copied
+   * again when the prices agree (st.differentAssets keeps what it was told, across restarts).
+   */
+  noteAsset(s, leaderSymbol, v) {
+    const st = this.stateOf(s);
+    const told = st.differentAssets?.[leaderSymbol] !== void 0;
+    if (v.same === told) {
+      if (v.same) delete st.differentAssets[leaderSymbol];
+      else (st.differentAssets ??= {})[leaderSymbol] = Date.now();
+      this.dirty.add(s.id);
+      this.notice(copyAssetNotice(s, leaderSymbol, v));
+    }
+  }
+  /**
+   * After a read of a Hyperliquid leader: the same-asset check again for what its copies
+   * hold or were told about, so a market whose prices part stops growing and one whose
+   * prices meet again is copied again - each told to the copy.
+   */
+  recheckAssets(l) {
+    if (l.venue !== "hyperliquid") return;
+    const book = this.leaders.positions(l);
+    for (const s of this.list()) {
+      if (lk(s.settings.leader) !== lk(l) || s.status === "stopped") continue;
+      const st = this.stateOf(s);
+      for (const sym of /* @__PURE__ */ new Set([...Object.keys(book), ...Object.keys(st.differentAssets ?? {})])) {
+        const v = this.markets.sameAsset(l.venue, sym);
+        if (!v) continue;
+        if (!v.same && !st.owned[v.market]) continue;
+        this.noteAsset(s, sym, v);
+      }
+    }
   }
   /** Who holds the follower's position on `symbol` when this copy does not. */
   heldBy(s, symbol2) {
@@ -12582,6 +12693,8 @@ var CopyRuntime = class {
    */
   resyncLeader(l, r, readStart) {
     const wasSeeded = this.leaders.seeded(l);
+    const readAt = Date.now();
+    for (const [sym, price2] of Object.entries(r.marks)) this.markets.observeLeaderPrice(l.venue, sym, price2, readAt);
     const events = this.leaders.resync(l, r, Date.now(), (sym) => this.priceFor(l.venue, sym), readStart);
     if (events === null) {
       this.host.log.warn("copy: leader not seeded: a Hyperliquid dex could not be read", { leader: lk(l), read: r.dexes ?? null });
@@ -12622,6 +12735,7 @@ var CopyRuntime = class {
             this.dirty.add(s.id);
           }
           for (const e of events) this.onLeaderEvent(e);
+          this.recheckAssets(l);
           for (const s of this.list()) if (lk(s.settings.leader) === lk(l) && s.status !== "stopped") this.enqueue(s.owner, () => this.closeStrays(s.id));
         } catch (e) {
           this.host.log.warn("copy: reconcile read failed", { leader: lk(l), error: String(e) });
@@ -12894,70 +13008,70 @@ function oneOrder(qty2, price2, m, what = "The order") {
 }
 function checkSizes(s, m, ctx) {
   const out = { errors: [], notes: [] };
-  const px = ctx.price !== null && ctx.price > 0 ? ctx.price : null;
+  const px2 = ctx.price !== null && ctx.price > 0 ? ctx.price : null;
   const step = Number(m.stepSize);
   const start = Math.max(ctx.now ?? 0, s.startAt ?? ctx.now ?? 0);
-  const minUsdWords = px ? minWords(m, px) : `SoDEX's ${money(m.minNotional)} minimum`;
+  const minUsdWords = px2 ? minWords(m, px2) : `SoDEX's ${money(m.minNotional)} minimum`;
   switch (s.kind) {
     case "twap": {
       const pos = ctx.positionSize ?? null;
       const total = s.closeShare !== null ? pos ? floorStep(Math.abs(pos) * s.closeShare, m) : null : Number(s.quantity);
-      if (!px || !total) break;
+      if (!px2 || !total) break;
       const minSlice = s.minSliceQty !== null ? Number(s.minSliceQty) : 0;
       const maxSlice = s.maxSliceQty !== null ? Number(s.maxSliceQty) : Infinity;
-      if (s.maxSliceQty !== null && maxSlice > maxOrderQty(m, px) + 1e-12) out.errors.push(`Your largest slice (${s.maxSliceQty} ${m.base}, about ${money(maxSlice * px)}) is over ${maxWords(m, px)}. Lower it to ${qtyText(maxOrderQty(m, px))} ${m.base} or less.`);
+      if (s.maxSliceQty !== null && maxSlice > maxOrderQty(m, px2) + 1e-12) out.errors.push(`Your largest slice (${s.maxSliceQty} ${m.base}, about ${money(maxSlice * px2)}) is over ${maxWords(m, px2)}. Lower it to ${qtyText(maxOrderQty(m, px2))} ${m.base} or less.`);
       const most = Math.floor(s.durationMs / ALGO_LIMITS.twap.minIntervalMs);
       const sizes = (k) => {
         const { weights } = twapSchedule({ ...s, slices: k }, start, ctx.seed);
         const raw = allocateSteps(total, weights, step);
-        if (!minSlice && !Number.isFinite(maxSlice)) return raw.map((qty2) => ({ qty: qty2, price: px }));
+        if (!minSlice && !Number.isFinite(maxSlice)) return raw.map((qty2) => ({ qty: qty2, price: px2 }));
         const kept = sliceBounds(raw, minSlice, maxSlice, step);
         const carry = raw.reduce((a, b) => a + b, 0) - kept.reduce((a, b) => a + b, 0);
-        return [...kept, ...carry > step * 1.5 ? [carry] : []].map((qty2) => ({ qty: qty2, price: px }));
+        return [...kept, ...carry > step * 1.5 ? [carry] : []].map((qty2) => ({ qty: qty2, price: px2 }));
       };
-      if (s.maxSliceQty !== null && maxSlice < minChildQty(m, px) - 1e-12) out.errors.push(`Your largest slice (${s.maxSliceQty} ${m.base}, about ${money(maxSlice * px)}) is under ${minUsdWords}. Raise it to at least ${qtyText(minChildQty(m, px))} ${m.base}.`);
-      else if (total < minChildQty(m, px) - 1e-12) out.errors.push(`The whole order is about ${money(total * px)}, under ${minUsdWords}. Raise the size to at least ${moneyUp(minChildQty(m, px) * px)}.`);
+      if (s.maxSliceQty !== null && maxSlice < minChildQty(m, px2) - 1e-12) out.errors.push(`Your largest slice (${s.maxSliceQty} ${m.base}, about ${money(maxSlice * px2)}) is under ${minUsdWords}. Raise it to at least ${qtyText(minChildQty(m, px2))} ${m.base}.`);
+      else if (total < minChildQty(m, px2) - 1e-12) out.errors.push(`The whole order is about ${money(total * px2)}, under ${minUsdWords}. Raise the size to at least ${moneyUp(minChildQty(m, px2) * px2)}.`);
       else out.errors.push(...scheduleCheck({ unit: "slice", count: s.slices, counts: { min: 1, max: Math.min(ALGO_LIMITS.twap.slices.max, most) }, sizes, total, m }));
       scheduleNotes(s, out);
       break;
     }
     case "vwap": {
       const total = Number(s.quantity);
-      if (!px || !total) break;
+      if (!px2 || !total) break;
       const most = Math.floor(s.durationMs / ALGO_LIMITS.vwap.minIntervalMs);
       const sizes = (k) => {
         const { weights } = vwapSchedule({ ...s, slices: k }, start, ctx.seed, k === s.slices ? ctx.profile ?? null : null);
-        return allocateSteps(total, weights, step).map((qty2) => ({ qty: qty2, price: px }));
+        return allocateSteps(total, weights, step).map((qty2) => ({ qty: qty2, price: px2 }));
       };
-      if (total < minChildQty(m, px) - 1e-12) out.errors.push(`The whole order is about ${money(total * px)}, under ${minUsdWords}. Raise the size to at least ${moneyUp(minChildQty(m, px) * px)}.`);
+      if (total < minChildQty(m, px2) - 1e-12) out.errors.push(`The whole order is about ${money(total * px2)}, under ${minUsdWords}. Raise the size to at least ${moneyUp(minChildQty(m, px2) * px2)}.`);
       else out.errors.push(...scheduleCheck({ unit: "slice", count: s.slices, counts: { min: ALGO_LIMITS.vwap.slices.min, max: Math.min(ALGO_LIMITS.vwap.slices.max, most) }, sizes, total, m }));
       scheduleNotes(s, out);
       break;
     }
     case "swarm": {
       const total = Number(s.quantity);
-      if (!px || !total) break;
-      const sizes = (k) => swarmClips({ ...s, clips: k }, m, ctx.seed).map((qty2) => ({ qty: qty2, price: px }));
-      if (total < minChildQty(m, px) - 1e-12) out.errors.push(`The whole order is about ${money(total * px)}, under ${minUsdWords}. Raise the size to at least ${moneyUp(minChildQty(m, px) * px)}.`);
+      if (!px2 || !total) break;
+      const sizes = (k) => swarmClips({ ...s, clips: k }, m, ctx.seed).map((qty2) => ({ qty: qty2, price: px2 }));
+      if (total < minChildQty(m, px2) - 1e-12) out.errors.push(`The whole order is about ${money(total * px2)}, under ${minUsdWords}. Raise the size to at least ${moneyUp(minChildQty(m, px2) * px2)}.`);
       else out.errors.push(...scheduleCheck({ unit: "clip", count: s.clips, counts: ALGO_LIMITS.swarm.clips, sizes, total, m }));
       break;
     }
     case "pov": {
       const total = Number(s.quantity);
-      if (!px || !total) break;
-      const minQ = minChildQty(m, px);
-      const maxQ = maxOrderQty(m, px);
-      if (total < minQ - 1e-12) out.errors.push(`The whole order is about ${money(total * px)}, under ${minUsdWords}. Raise the size to at least ${moneyUp(minQ * px)}.`);
+      if (!px2 || !total) break;
+      const minQ = minChildQty(m, px2);
+      const maxQ = maxOrderQty(m, px2);
+      if (total < minQ - 1e-12) out.errors.push(`The whole order is about ${money(total * px2)}, under ${minUsdWords}. Raise the size to at least ${moneyUp(minQ * px2)}.`);
       const cap = s.maxChildQty !== null ? Number(s.maxChildQty) : null;
-      if (cap !== null && cap < minQ - 1e-12) out.errors.push(`Your largest child (${s.maxChildQty} ${m.base}, about ${money(cap * px)}) is under ${minUsdWords}. Raise it to at least ${qtyText(minQ)} ${m.base}.`);
-      if (cap !== null && cap > maxQ + 1e-12) out.errors.push(`Your largest child (${s.maxChildQty} ${m.base}, about ${money(cap * px)}) is over ${maxWords(m, px)}. Lower it to ${qtyText(maxQ)} ${m.base} or less.`);
-      const largest = cap !== null ? `your largest child (${s.maxChildQty} ${m.base})` : Number.isFinite(maxQ) ? maxWords(m, px) : null;
+      if (cap !== null && cap < minQ - 1e-12) out.errors.push(`Your largest child (${s.maxChildQty} ${m.base}, about ${money(cap * px2)}) is under ${minUsdWords}. Raise it to at least ${qtyText(minQ)} ${m.base}.`);
+      if (cap !== null && cap > maxQ + 1e-12) out.errors.push(`Your largest child (${s.maxChildQty} ${m.base}, about ${money(cap * px2)}) is over ${maxWords(m, px2)}. Lower it to ${qtyText(maxQ)} ${m.base} or less.`);
+      const largest = cap !== null ? `your largest child (${s.maxChildQty} ${m.base})` : Number.isFinite(maxQ) ? maxWords(m, px2) : null;
       out.notes.push(`POV sizes each order from the market's volume as it runs: what is due waits until it reaches ${minUsdWords}${largest ? `, and no order is over ${largest}` : ""}.`);
       break;
     }
     case "iceberg": {
       const total = Number(s.quantity);
-      const price2 = s.price ?? px;
+      const price2 = s.price ?? px2;
       if (!price2 || !total) break;
       const minQ = minChildQty(m, price2);
       const maxQ = maxOrderQty(m, price2);
@@ -12974,28 +13088,28 @@ function checkSizes(s, m, ctx) {
     }
     case "chase":
     case "sweep": {
-      if (px) out.errors.push(...oneOrder(Number(s.quantity), px, m));
+      if (px2) out.errors.push(...oneOrder(Number(s.quantity), px2, m));
       break;
     }
     case "bracket": {
-      const price2 = s.entry === "limit" ? s.price : px;
+      const price2 = s.entry === "limit" ? s.price : px2;
       if (price2) out.errors.push(...oneOrder(Number(s.quantity), price2, m, "The entry"));
       break;
     }
     case "trailing": {
-      if (s.quantity !== null && px) out.errors.push(...oneOrder(Number(s.quantity), px, m));
-      else if (s.quantity === null && px) closeNote(ctx.positionSize ?? null, 1, m, px, out);
+      if (s.quantity !== null && px2) out.errors.push(...oneOrder(Number(s.quantity), px2, m));
+      else if (s.quantity === null && px2) closeNote(ctx.positionSize ?? null, 1, m, px2, out);
       break;
     }
     case "conditional": {
       const t = s.then;
-      if (t.type === "market" && px) out.errors.push(...oneOrder(Number(t.quantity), px, m));
+      if (t.type === "market" && px2) out.errors.push(...oneOrder(Number(t.quantity), px2, m));
       else if (t.type === "limit") out.errors.push(...oneOrder(Number(t.quantity), t.price, m));
-      else if (t.type === "close" && px) closeNote(ctx.positionSize ?? null, t.share, m, px, out);
+      else if (t.type === "close" && px2) closeNote(ctx.positionSize ?? null, t.share, m, px2, out);
       else if (t.type === "algo") {
         const sym = t.algo.symbol;
         const am = sym === m.name ? m : ctx.market?.(sym) ?? null;
-        const ap = sym === m.name ? px : ctx.prices?.(sym) ?? null;
+        const ap = sym === m.name ? px2 : ctx.prices?.(sym) ?? null;
         if (am) {
           const inner = checkSizes(t.algo, am, { ...ctx, price: ap, positionSize: sym === m.name ? ctx.positionSize : null });
           out.errors.push(...inner.errors.map((e) => `When it fires: ${e}`));
@@ -13030,11 +13144,11 @@ function checkSizes(s, m, ctx) {
     case "dca": {
       const per = s.perOrderUsd;
       const minQty = Number(m.minQuantity) || 0;
-      const minUsd = Math.max(m.minNotional, px ? minQty * px : 0);
-      if (per < minUsd - 1e-9) out.errors.push(`Each order would be ${money(per)}, under ${px ? minWords(m, px) : `SoDEX's ${money(m.minNotional)} minimum`}. Raise it to at least ${moneyUp(minUsd)}.`);
+      const minUsd = Math.max(m.minNotional, px2 ? minQty * px2 : 0);
+      if (per < minUsd - 1e-9) out.errors.push(`Each order would be ${money(per)}, under ${px2 ? minWords(m, px2) : `SoDEX's ${money(m.minNotional)} minimum`}. Raise it to at least ${moneyUp(minUsd)}.`);
       const boost = s.dipPct !== null ? s.dipMultiplier : 1;
-      const maxUsd = Math.min(m.maxNotional ?? Infinity, px && Number(m.maxQuantity) > 0 ? Number(m.maxQuantity) * px : Infinity);
-      const words = px ? maxWords(m, px) : `SoDEX's ${money(m.maxNotional ?? Infinity)} per order on ${m.name}`;
+      const maxUsd = Math.min(m.maxNotional ?? Infinity, px2 && Number(m.maxQuantity) > 0 ? Number(m.maxQuantity) * px2 : Infinity);
+      const words = px2 ? maxWords(m, px2) : `SoDEX's ${money(m.maxNotional ?? Infinity)} per order on ${m.name}`;
       if (per > maxUsd + 1e-6) out.errors.push(`Each order would be ${money(per)}, over ${words}. Use at most ${moneyDown(maxUsd)} per order.`);
       else if (per * boost > maxUsd + 1e-6) out.errors.push(`With the dip boost (${boost}x), an order would be ${money(per * boost)}, over ${words}. Use at most ${moneyDown(maxUsd / boost)} per order, or a smaller boost.`);
       if (s.maxTotalUsd !== null && s.maxTotalUsd < per * s.orders * boost - 1e-6) {
@@ -13051,7 +13165,7 @@ function checkSizes(s, m, ctx) {
       const unit = s.style === "swarm" ? "clip" : "slice";
       s.legs.forEach((l, i) => {
         const lm = l.symbol === m.name ? m : ctx.market?.(l.symbol) ?? null;
-        const lp = l.symbol === m.name ? px : ctx.prices?.(l.symbol) ?? null;
+        const lp = l.symbol === m.name ? px2 : ctx.prices?.(l.symbol) ?? null;
         if (lm && lp) {
           const qty2 = floorStep(l.usd / lp, lm);
           const seed = ctx.seed + i + 1 >>> 0;
@@ -13087,11 +13201,11 @@ function scheduleNotes(s, out) {
   if (s.exec.style !== "taker") out.notes.push("A slice that has not filled when the next one is due rests together with it as one order.");
   if (s.maxParticipation !== null) out.notes.push(`With max participation, what the market's volume does not allow yet waits and goes out with a later slice.`);
 }
-function closeNote(pos, share, m, px, out) {
+function closeNote(pos, share, m, px2, out) {
   if (!pos) return;
   const take = floorStep(Math.abs(pos) * share, m);
-  const maxQ = maxOrderQty(m, px);
-  if (take > maxQ + 1e-12) out.notes.push(`Closing about ${money(take * px)} is over ${maxWords(m, px)}: it closes in ${Math.ceil(take / maxQ - 1e-9)} orders, one after the other.`);
+  const maxQ = maxOrderQty(m, px2);
+  if (take > maxQ + 1e-12) out.notes.push(`Closing about ${money(take * px2)} is over ${maxWords(m, px2)}: it closes in ${Math.ceil(take / maxQ - 1e-9)} orders, one after the other.`);
 }
 
 // ../../packages/copy-engine/src/algo/limits.ts
@@ -14719,7 +14833,7 @@ var AlgoRuntime = class {
     const insts = a.k.inst;
     const tagOf = (n) => `order ${n}/${s.orders}`;
     while (done + skipped < s.orders && start + (done + skipped) * s.intervalMs <= now && spent < budget - 1e-9) {
-      const px = s.side === "buy" ? q.ask : q.bid;
+      const px2 = s.side === "buy" ? q.ask : q.bid;
       const outside = s.limitPrice !== null && (s.side === "buy" ? mk2 > s.limitPrice : mk2 < s.limitPrice);
       if (outside) {
         if (s.outOfBand === "wait") {
@@ -14732,13 +14846,13 @@ var AlgoRuntime = class {
       }
       let usd = s.perOrderUsd;
       const avg = a.filled > 0 ? a.filledValue / a.filled : null;
-      if (s.dipPct !== null && avg !== null && (s.side === "buy" ? px <= avg * (1 - s.dipPct) : px >= avg * (1 + s.dipPct))) {
+      if (s.dipPct !== null && avg !== null && (s.side === "buy" ? px2 <= avg * (1 - s.dipPct) : px2 >= avg * (1 + s.dipPct))) {
         usd *= s.dipMultiplier;
-        await this.event(a, "info", `Dip boost: ${s.dipMultiplier}x this order (the price is ${(Math.abs(px / avg - 1) * 100).toFixed(1)}% from your average).`);
+        await this.event(a, "info", `Dip boost: ${s.dipMultiplier}x this order (the price is ${(Math.abs(px2 / avg - 1) * 100).toFixed(1)}% from your average).`);
       }
       usd = Math.min(usd, budget - spent);
-      const raw = floorStep(usd / px, m);
-      const qty2 = raw < minChildQty(m, px) && usd >= m.minNotional - 1e-9 ? minChildQty(m, px) : raw;
+      const raw = floorStep(usd / px2, m);
+      const qty2 = raw < minChildQty(m, px2) && usd >= m.minNotional - 1e-9 ? minChildQty(m, px2) : raw;
       done++;
       spent += usd;
       target += qty2;
@@ -15162,10 +15276,10 @@ var AlgoRuntime = class {
         if (!lm) return this.end(a, "failed", `${l.symbol} is not listed on SoDEX perps; no leg was started.`);
         if (lm.status !== "TRADING") return this.end(a, "failed", `SoDEX is not trading ${lm.name} right now; no leg was started.`);
         const lq = this.market.quote(l.symbol);
-        const px = this.market.mark(l.symbol)?.mark ?? (lq ? mid(lq) : null);
-        if (!px) return this.hold(a, `Waiting for a price of ${l.symbol}.`);
-        const qty2 = floorStep(l.usd / px, lm);
-        if (qty2 < minChildQty(lm, px)) return this.end(a, "failed", `${l.symbol}: $${l.usd} is under SoDEX's minimum order.`);
+        const px2 = this.market.mark(l.symbol)?.mark ?? (lq ? mid(lq) : null);
+        if (!px2) return this.hold(a, `Waiting for a price of ${l.symbol}.`);
+        const qty2 = floorStep(l.usd / px2, lm);
+        if (qty2 < minChildQty(lm, px2)) return this.end(a, "failed", `${l.symbol}: $${l.usd} is under SoDEX's minimum order.`);
         const common = { symbol: l.symbol, side: l.side, reduceOnly: s.reduceOnly, leverage: s.leverage, marginMode: s.marginMode, paper: s.paper, maxSpreadBps: s.maxSpreadBps, label: `${s.label ?? "Basket"}: ${l.symbol}` };
         const spec = s.style === "swarm" ? { ...common, kind: "swarm", quantity: dec3(qty2), clips: s.clips, inFlight: s.inFlight, waveMs: s.waveMs, sizeJitter: 0.2, slippageBps: s.slippageBps, retries: 2 } : { ...common, kind: "twap", quantity: dec3(qty2), durationMs: s.durationMs, slices: s.slices, sizeJitter: 0.15, timeJitter: 0.2, exec: { style: "taker", slippageBps: s.slippageBps }, finish: "take" };
         try {
@@ -15309,9 +15423,9 @@ var AlgoRuntime = class {
             return Math.abs(size) <= c.value;
           case "pnlAbove":
           case "pnlBelow": {
-            const px = mk2.mark(c.symbol)?.mark ?? null;
-            if (px === null || size === 0) return false;
-            const pnl = size * (px - p.entry);
+            const px2 = mk2.mark(c.symbol)?.mark ?? null;
+            if (px2 === null || size === 0) return false;
+            const pnl = size * (px2 - p.entry);
             return c.op === "pnlAbove" ? pnl >= c.value : pnl <= c.value;
           }
         }

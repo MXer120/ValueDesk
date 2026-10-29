@@ -171,6 +171,11 @@ export interface SubState {
    * Absent in states saved before it existed: it is then taken from the copy's size.
    */
   ratios?: Record<string, number>;
+  /**
+   * Leader-venue symbol -> when this copy was told that its SoDEX market is a different asset
+   * (MarketBook.sameAsset; a notice); removed, with a notice, once the two prices agree again.
+   */
+  differentAssets?: Record<string, number>;
   /** Highest copy equity seen (for the drawdown stop). */
   peakEquity: number;
   /** Event ids already handled, newest last (bounded). */
@@ -180,6 +185,21 @@ export interface SubState {
   /** Orders placed / skipped since the start. */
   orders: number;
   skips: number;
+}
+
+/** A Hyperliquid market against the SoDEX market of its name (MarketBook.sameAsset). */
+export interface AssetVerdict {
+  /** The two prices agree: the same asset. */
+  same: boolean;
+  /** The SoDEX market compared. */
+  market: string;
+  /** Per one coin (a 1000-coin contract's price over 1000), on each venue. */
+  leaderPrice: number;
+  sodexPrice: number;
+  /** leaderPrice / sodexPrice - 1. */
+  deviation: number;
+  /** When the older of the two prices was seen. */
+  at: number;
 }
 
 /** A REST read of a leader's account: what seeds and reconciles the LeaderBook. */
@@ -251,6 +271,7 @@ export interface Intent {
 export const SKIP_REASONS = {
   'spot-not-copied': 'Spot trades are not copied (perps only)',
   'not-on-sodex': 'This market is not listed on SoDEX perps',
+  'different-asset': "SoDEX's market of this name is a different asset (priced far from the leader's): nothing new is copied there, closes still are",
   'market-halted': 'SoDEX is not trading this market right now',
   'asset-not-allowed': 'Not on your list of coins to copy',
   'asset-denied': 'On your list of coins never to copy',

@@ -118,6 +118,14 @@ export interface PlanContext {
    * change before the first order is booked is not copied again on top of it.
    */
   inFlight?: Record<string, number>;
+  /**
+   * Whether the leader's market is the same asset as `market` (MarketBook.sameAsset): false
+   * when the two venues price it far apart, null when that could not be checked on fresh
+   * prices yet. Either way nothing new is opened there ('different-asset' / 'no-price'):
+   * the copy only follows the leader's reductions and closes. Absent (a SoDEX leader, whose
+   * market is SoDEX's own): no check.
+   */
+  sameAsset?: boolean | null;
 }
 
 export interface Plan {
@@ -241,6 +249,8 @@ export function planLeaderEvent(ctx: PlanContext): Plan {
   const coin = coinOf(s.leader.venue, lSym);
   const filtered: SkipReason | null =
     s.assetAllow.length > 0 && !s.assetAllow.includes(coin) ? 'asset-not-allowed' : s.assetDeny.includes(coin) ? 'asset-denied' : null;
+  // Never on a market that may be another asset; a reduction or close is never held by it.
+  const unlike: SkipReason | null = ctx.sameAsset === false ? 'different-asset' : ctx.sameAsset === null ? 'no-price' : null;
 
   const ref = ctx.markOf(market.name) ?? (s.leader.venue === 'sodex' && event.price > 0 ? event.price : null);
   if (ref === null) return none('no-price', { attach });
@@ -290,6 +300,10 @@ export function planLeaderEvent(ctx: PlanContext): Plan {
     // |desired| > |from|, same sign (from may be 0).
     if (reduceOnly) {
       skip = stopSkip;
+      return null;
+    }
+    if (unlike) {
+      skip = unlike;
       return null;
     }
     if (filtered) {

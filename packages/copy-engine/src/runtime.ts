@@ -55,9 +55,10 @@ import {
 import { effectiveLeverage, type RegionPolicy } from './policy.ts';
 import { HL_DEXES, type HyperliquidClient, type SodexClient } from './sodex.ts';
 import type { CopyStore } from './store.ts';
-import { copyClosedNotice, copyNotice, type EngineNotice } from './notices.ts';
+import { copyAssetNotice, copyClosedNotice, copyNotice, type EngineNotice } from './notices.ts';
 import type {
   ActivityEntry,
+  AssetVerdict,
   DetachReason,
   FollowerSnapshot,
   Intent,
@@ -169,6 +170,10 @@ interface Pending {
 }
 
 const lk = (l: LeaderRef): string => `${l.venue}:${l.address.toLowerCase()}`;
+
+/** The two prices of a 'different-asset' skip, for its activity line. */
+const assetDetail = (leaderSymbol: string, v: AssetVerdict): string =>
+  `Hyperliquid ${leaderSymbol} ${Number(v.leaderPrice.toPrecision(6))}, SoDEX ${v.market} ${Number(v.sodexPrice.toPrecision(6))}: ${(Math.abs(v.deviation) * 100).toFixed(1)}% apart`;
 
 function shuffle<T>(a: T[]): T[] {
   for (let i = a.length - 1; i > 0; i--) {
@@ -458,6 +463,8 @@ export class CopyRuntime {
   /* --------------------------------------------------------------- events ----- */
 
   private onLeaderEvent(e: LeaderEvent): void {
+    // A Hyperliquid print is Hyperliquid's price (a reconcile's may be SoDEX's): the same-asset check compares it.
+    if (e.source === 'stream') this.markets.observeLeaderPrice(e.leader.venue, e.symbol, e.price, Math.min(e.time, Date.now()));
     for (const s of shuffle(this.list())) {
       if (lk(s.settings.leader) !== lk(e.leader)) continue;
       if (s.status === 'stopped') continue;
@@ -469,7 +476,8 @@ export class CopyRuntime {
     // Captured once: every follower of this change gets the same reference price.
     const market = this.markets.sodexMarketFor(e.leader.venue, e.symbol);
     const mark = market ? this.markets.mark(market.name) : null;
-    this.enqueue(s.owner, () => this.process(s.id, e, market, mark));
+    const asset = market ? this.markets.sameAsset(e.leader.venue, e.symbol) : null;
+    this.enqueue(s.owner, () => this.process(s.id, e, market, mark, asset));
   }
 
   private enqueue(owner: string, fn: () => Promise<void>): void {
@@ -481,7 +489,7 @@ export class CopyRuntime {
     });
   }
 
-  private async process(subId: string, e: LeaderEvent, market: MarketInfo | null, mark: number | null): Promise<void> {
+  private async process(subId: string, e: LeaderEvent, market: MarketInfo | null, mark: number | null, asset: AssetVerdict | null = null): Promise<void> {
     let s = this.subs.get(subId);
     if (!s || s.status === 'stopped') return;
     // The region and the approval mode are checked on every change, not only by the readiness
@@ -503,7 +511,10 @@ export class CopyRuntime {
       // A paper copy is not gated on the follower's real account.
       follower: this.live(s) ? (this.followers.get(s.owner) ?? null) : null,
       inFlight: this.inFlightOf(s.id),
+      ...(market && e.leader.venue === 'hyperliquid' ? { sameAsset: asset?.same ?? null } : {}),
     });
+    if (asset && (plan.skip === 'different-asset' || asset.same)) this.noteAsset(s, e.symbol, asset);
+    const detail = plan.skip === 'different-asset' && asset ? assetDetail(e.symbol, asset) : null;
     st.leaderPos[e.symbol] = plan.leaderAfter;
     if (plan.leaderAfter === 0) delete st.leaderPos[e.symbol];
     if (plan.attach) delete st.detached[e.symbol];
@@ -513,7 +524,7 @@ export class CopyRuntime {
     const leader = { symbol: e.symbol, before: e.before ?? 0, after: e.after, price: e.price, time: e.time };
     if (!plan.intents.length) {
       if (plan.skip && plan.skip !== 'duplicate') st.skips++;
-      if (plan.skip && !QUIET_SKIPS.has(plan.skip)) await this.activity(s, { kind: 'skip', reason: plan.skip, symbol: market?.name ?? e.symbol, leader });
+      if (plan.skip && !QUIET_SKIPS.has(plan.skip)) await this.activity(s, { kind: 'skip', reason: plan.skip, symbol: market?.name ?? e.symbol, leader, detail });
       this.dirty.add(s.id);
       return;
     }
@@ -532,7 +543,44 @@ export class CopyRuntime {
       }
     }
     await this.execute(s, market!, plan.intents, markOf(market!.name) ?? e.price, leader);
-    if (plan.skip && !QUIET_SKIPS.has(plan.skip)) await this.activity(s, { kind: 'skip', reason: plan.skip, symbol: market!.name, leader });
+    if (plan.skip && !QUIET_SKIPS.has(plan.skip)) await this.activity(s, { kind: 'skip', reason: plan.skip, symbol: market!.name, leader, detail });
+  }
+
+  /**
+   * A copy hears once that a leader market of its is not copied as a different asset (when
+   * that holds back a change, or a position it holds there), and once that it is copied
+   * again when the prices agree (st.differentAssets keeps what it was told, across restarts).
+   */
+  private noteAsset(s: Subscription, leaderSymbol: string, v: AssetVerdict): void {
+    const st = this.stateOf(s);
+    const told = st.differentAssets?.[leaderSymbol] !== undefined;
+    if (v.same === told) {
+      if (v.same) delete st.differentAssets![leaderSymbol];
+      else (st.differentAssets ??= {})[leaderSymbol] = Date.now();
+      this.dirty.add(s.id);
+      this.notice(copyAssetNotice(s, leaderSymbol, v));
+    }
+  }
+
+  /**
+   * After a read of a Hyperliquid leader: the same-asset check again for what its copies
+   * hold or were told about, so a market whose prices part stops growing and one whose
+   * prices meet again is copied again - each told to the copy.
+   */
+  private recheckAssets(l: LeaderRef): void {
+    if (l.venue !== 'hyperliquid') return;
+    const book = this.leaders.positions(l);
+    for (const s of this.list()) {
+      if (lk(s.settings.leader) !== lk(l) || s.status === 'stopped') continue;
+      const st = this.stateOf(s);
+      for (const sym of new Set([...Object.keys(book), ...Object.keys(st.differentAssets ?? {})])) {
+        const v = this.markets.sameAsset(l.venue, sym);
+        if (!v) continue;
+        // A market the copy holds nothing on is told when a change there is held back.
+        if (!v.same && !st.owned[v.market]) continue;
+        this.noteAsset(s, sym, v);
+      }
+    }
   }
 
   /** Who holds the follower's position on `symbol` when this copy does not. */
@@ -1277,6 +1325,9 @@ export class CopyRuntime {
    */
   private resyncLeader(l: LeaderRef, r: LeaderRead, readStart?: number): LeaderEvent[] | null {
     const wasSeeded = this.leaders.seeded(l);
+    // Hyperliquid's marks of the positions read: what the same-asset check compares.
+    const readAt = Date.now();
+    for (const [sym, price] of Object.entries(r.marks)) this.markets.observeLeaderPrice(l.venue, sym, price, readAt);
     const events = this.leaders.resync(l, r, Date.now(), (sym) => this.priceFor(l.venue, sym), readStart);
     if (events === null) {
       this.host.log.warn('copy: leader not seeded: a Hyperliquid dex could not be read', { leader: lk(l), read: r.dexes ?? null });
@@ -1320,6 +1371,7 @@ export class CopyRuntime {
             this.dirty.add(s.id);
           }
           for (const e of events) this.onLeaderEvent(e);
+          this.recheckAssets(l);
           // Then what a copy still holds where the leader is flat or on the other side.
           for (const s of this.list()) if (lk(s.settings.leader) === lk(l) && s.status !== 'stopped') this.enqueue(s.owner, () => this.closeStrays(s.id));
         } catch (e) {

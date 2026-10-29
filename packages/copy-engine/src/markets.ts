@@ -9,13 +9,20 @@
  * list is not copied. Because the two venues' units can differ, the planner
  * sizes copies by NOTIONAL and converts at the SoDEX price, never by units.
  *
+ * SAME ASSET. A ticker is not an asset: trade.xyz's QNT is not SoDEX's QNT-USD,
+ * and a HIP-3 index quoted at a tenth of SoDEX's is another contract. A
+ * Hyperliquid market is copied onto the SoDEX market of its name only while
+ * the two venues price one coin alike (`sameAsset`); otherwise nothing new is
+ * opened there ('different-asset'), and a position already copied still
+ * follows the leader's reductions and closes.
+ *
  * PRICES. Copied orders are IOC limits at the SoDEX mark moved by the
  * follower's slippage cap, snapped INWARD to the tick (a buy rounds down, a
  * sell up, so the cap is never exceeded) and kept inside SoDEX's limit band
  * (buyLimitUpRatio / sellLimitDownRatio around the mark).
  */
 import { canonicalDecimal, decimalCompare, numberToPlainString, roundToStep } from '../../sodex-core/src/index.ts';
-import type { LeaderVenue, MarketInfo } from './types.ts';
+import type { AssetVerdict, LeaderVenue, MarketInfo } from './types.ts';
 
 const num = (v: unknown, fallback = NaN): number => {
   const n = typeof v === 'string' ? Number(v) : typeof v === 'number' ? v : NaN;
@@ -69,10 +76,48 @@ export function parseMarkets(rows: unknown): MarketInfo[] {
   return out;
 }
 
+/**
+ * When a Hyperliquid market and the SoDEX market of its name are the same asset, by
+ * how far their prices for one coin are apart. Measured 2026-10-29 13:07 UTC on every
+ * tradable Hyperliquid perp (main dex and all ten HIP-3 dexes) that maps to a SoDEX
+ * market, Hyperliquid's mark against SoDEX's: 98 of 100 pairs within 0.56% (main dex:
+ * 50 pairs, at most 0.20%; trade.xyz: 40 of 41 within 0.56%; kPEPE, kBONK and kSHIB
+ * against 1000PEPE/1000BONK/1000SHIB-USD within 0.07%), and the two collisions far
+ * apart - xyz:QNT (a different asset) 80.5% below QNT-USD, mkts:US500 (an index at a
+ * tenth of the scale) 90.0% below US500-USD. 5% is nine times the widest gap between
+ * the same assets, for a weekend or a fast market where the two venues' marks lag one
+ * another, and sixteen times under the nearest collision. (Delisted Hyperliquid markets,
+ * whose stale books were up to 90% off, are left out of the count: nothing trades there.)
+ */
+export const ASSET_DIFFERENT_ABOVE = 0.05;
+/**
+ * ... and once apart, the same again only within this: a market at the line does not
+ * flip at every look (in between, the last verdict stands).
+ */
+export const ASSET_SAME_BELOW = 0.03;
+/** A price older than this is not compared: a stale price is no evidence either way. */
+export const ASSET_PRICE_MAX_AGE_MS = 90_000;
+
+/** How many coins one contract of a Hyperliquid market is: 1000 for kPEPE (and a HIP-3 1000PEPE), else 1. */
+function hlUnits(coin: string): number {
+  const bare = coin.includes(':') ? coin.slice(coin.indexOf(':') + 1) : coin;
+  return /^k[A-Z0-9]/.test(bare) || /^1000[A-Z]/.test(bare) ? 1000 : 1;
+}
+
+/** ... and of the SoDEX market it maps to: 1000PEPE-USD, or KPEPE-USD for a k-coin (KAS-USD is Kaspa). */
+function sodexUnits(name: string, coin: string): number {
+  const kCoin = /^k[A-Z0-9]/.test(coin.includes(':') ? coin.slice(coin.indexOf(':') + 1) : coin);
+  return /^1000[A-Z]/.test(name) || (kCoin && /^K[A-Z0-9]/.test(name)) ? 1000 : 1;
+}
+
 /** The markets and their latest mark prices. One per copier, refreshed on a timer. */
 export class MarketBook {
   private byName = new Map<string, MarketInfo>();
   private marks = new Map<string, { price: number; at: number }>();
+  /** Hyperliquid coin -> its latest price seen (per contract, as Hyperliquid quotes it). */
+  private leaderPx = new Map<string, { price: number; at: number }>();
+  /** Hyperliquid coin -> the last same-asset verdict. */
+  private assets = new Map<string, AssetVerdict>();
   loadedAt = 0;
 
   load(markets: readonly MarketInfo[], now = Date.now()): void {
@@ -100,6 +145,45 @@ export class MarketBook {
   mark(symbol: string, maxAgeMs = 60_000, now = Date.now()): number | null {
     const m = this.marks.get(symbol.toUpperCase());
     return m && now - m.at <= maxAgeMs ? m.price : null;
+  }
+
+  /**
+   * A price Hyperliquid gave for one of its markets: a leader's fill, or the mark in a
+   * position read. An older price never replaces a newer one.
+   */
+  observeLeaderPrice(venue: LeaderVenue, leaderSymbol: string, price: number, at = Date.now()): void {
+    if (venue !== 'hyperliquid' || !Number.isFinite(price) || !(price > 0)) return;
+    const prev = this.leaderPx.get(leaderSymbol);
+    if (prev && prev.at > at) return;
+    this.leaderPx.set(leaderSymbol, { price, at });
+  }
+
+  /**
+   * Whether a Hyperliquid market is the same asset as the SoDEX market it maps to: the
+   * price of one coin on each (a 1000-coin contract counted per coin) within
+   * ASSET_DIFFERENT_ABOVE, and once apart within ASSET_SAME_BELOW again. Compared only on
+   * prices seen within ASSET_PRICE_MAX_AGE_MS: without them the last verdict stands, and
+   * there is none (null) until both venues have priced it fresh. Null too for a SoDEX
+   * leader (its markets are SoDEX's own) and a market SoDEX does not list.
+   */
+  sameAsset(venue: LeaderVenue, leaderSymbol: string, now = Date.now()): AssetVerdict | null {
+    if (venue !== 'hyperliquid') return null;
+    const m = this.sodexMarketFor(venue, leaderSymbol);
+    if (!m) return null;
+    const prior = this.assets.get(leaderSymbol);
+    const last = prior && prior.market === m.name ? prior : null;
+    const fresh = (x: { at: number } | undefined): x is { price: number; at: number } => !!x && Math.abs(now - x.at) <= ASSET_PRICE_MAX_AGE_MS;
+    const hl = this.leaderPx.get(leaderSymbol);
+    const sx = this.marks.get(m.name.toUpperCase());
+    if (!fresh(hl) || !fresh(sx)) return last;
+    const leaderPrice = hl.price / hlUnits(leaderSymbol);
+    const sodexPrice = sx.price / sodexUnits(m.name, leaderSymbol);
+    const deviation = leaderPrice / sodexPrice - 1;
+    const off = Math.abs(deviation);
+    const same = off > ASSET_DIFFERENT_ABOVE ? false : off < ASSET_SAME_BELOW ? true : (last?.same ?? true);
+    const v: AssetVerdict = { same, market: m.name, leaderPrice, sodexPrice, deviation, at: Math.min(hl.at, sx.at) };
+    this.assets.set(leaderSymbol, v);
+    return v;
   }
 
   /** The SoDEX market a leader's market maps to, or null when SoDEX lists none. */
