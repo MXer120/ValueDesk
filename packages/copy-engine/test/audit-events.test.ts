@@ -187,6 +187,7 @@ function runtimeFor(r: Rig, market: FakeMarket, sink: FakeSink): AlgoRuntime {
     get: async () => [],
   } as unknown as SodexClient;
   return new AlgoRuntime({
+    confirmGapMs: 0,
     store: r.store,
     sodex,
     network: 'mainnet',

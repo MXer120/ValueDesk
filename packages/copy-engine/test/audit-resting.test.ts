@@ -200,6 +200,7 @@ interface Rig {
 function runtime(r: Pick<Rig, 'market' | 'sink' | 'store' | 'policy' | 'account'>): AlgoRuntime {
   const sodex = { markets: async () => [BTC, ETH], follower: async () => ({ positions: {} }), get: async () => [] } as unknown as SodexClient;
   return new AlgoRuntime({
+    confirmGapMs: 0,
     store: r.store,
     sodex,
     network: 'mainnet',

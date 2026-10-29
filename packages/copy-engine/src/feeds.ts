@@ -170,25 +170,41 @@ export class LeaderBook {
       this.pos.set(k, new Map(Object.entries(positions).filter(([, v]) => v !== 0)));
       return [];
     }
-    const covered = read.dexes ? new Set(read.dexes) : null;
     const m = this.map(l);
     const out: LeaderEvent[] = [];
-    const symbols = new Set([...m.keys(), ...Object.keys(positions)]);
-    for (const s of symbols) {
+    for (const s of this.differs(l, read, readStart)) {
+      const before = m.get(s) ?? 0;
+      const after = positions[s] ?? 0;
+      if (after === 0) m.delete(s);
+      else m.set(s, after);
+      const price = marks[s] ?? priceOf(s) ?? 0;
+      out.push({ leader: { venue: l.venue, address: l.address.toLowerCase() }, symbol: s, before, after, price, time: now, id: `rc:${s}:${now}`, source: 'reconcile' });
+    }
+    return out;
+  }
+
+  /**
+   * The markets a resync with `read` would move (a 'reconcile' event each), by the same rules;
+   * none before the leader is seeded. Nothing changes here: the runtime asks it to know what a
+   * confirming read must agree on (confirm.ts).
+   */
+  differs(l: LeaderRef, read: LeaderRead, readStart?: number): string[] {
+    const k = key(l);
+    if (!this.seededAt.has(k)) return [];
+    const covered = read.dexes ? new Set(read.dexes) : null;
+    const m = this.pos.get(k) ?? new Map<string, number>();
+    const out: string[] = [];
+    for (const s of new Set([...m.keys(), ...Object.keys(read.positions)])) {
       if (covered && !covered.has(hlDexOf(s))) continue;
       if (readStart !== undefined) {
         const printed = this.printedAt.get(`${k}|${s}`);
         if ((printed !== undefined && printed >= readStart) || this.merging.has(`${k}|${s}`)) continue;
       }
       const before = m.get(s) ?? 0;
-      const after = positions[s] ?? 0;
+      const after = read.positions[s] ?? 0;
       if (!Number.isFinite(after)) continue;
-      const tol = 1e-9 * Math.max(1, Math.abs(before), Math.abs(after));
-      if (Math.abs(before - after) <= tol) continue;
-      if (after === 0) m.delete(s);
-      else m.set(s, after);
-      const price = marks[s] ?? priceOf(s) ?? 0;
-      out.push({ leader: { venue: l.venue, address: l.address.toLowerCase() }, symbol: s, before, after, price, time: now, id: `rc:${s}:${now}`, source: 'reconcile' });
+      if (Math.abs(before - after) <= 1e-9 * Math.max(1, Math.abs(before), Math.abs(after))) continue;
+      out.push(s);
     }
     return out;
   }

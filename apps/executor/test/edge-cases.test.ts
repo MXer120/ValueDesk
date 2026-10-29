@@ -96,7 +96,7 @@ test('the trading key expiring mid-run: a running algo is held with "The copy ke
     Date.now = () => t0 + 6 * 60_000;
     assert.match((await priv(svc).algoProblem({ owner: a.address })) ?? '', /The copy key expired/);
     Date.now = realNow;
-    // After the window: SoDEX is asked again, lists the key as expired, and the opened key is dropped.
+    // After it: the expiry SoDEX gave is still what counts (a listed key is trusted until it expires, stale-reads.test.ts), and the opened key is dropped.
     const b = await keyed(svc, w, t0 + 30 * 60_000);
     assert.ok(priv(svc).signer(b.address), 'the key opens while valid');
     Date.now = () => t0 + 31 * 60_000;

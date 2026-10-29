@@ -73,6 +73,7 @@ import {
   type SiteTermsRecord,
   type Subscription,
   type WebSocketFactory,
+  sleep,
 } from '../../../packages/copy-engine/src/index.ts';
 import { SODEX_CHAIN_ID, createMemoryNonceManager, privateKeyToAddress, type SigningKeyRef } from '../../../packages/sodex-core/src/index.ts';
 import { liveAlgosFor, type ExecutorConfig } from './config.ts';
@@ -173,6 +174,14 @@ export interface ServiceDeps {
   log: Logger;
   /** The operator's alerts (alerts.ts); none: nothing is sent. */
   alerts?: Alerts;
+  /**
+   * The pause between two reads of SoDEX that confirm a key is missing
+   * (default KEY_READ_GAP_MS), and between those that confirm a position
+   * change (copy-engine confirm.ts, default CONFIRM_GAP_MS); tests pass 0. SoDEX's gateway answers from
+   * backends that disagree: one of them served a key list 17 minutes old
+   * (2026-10-29), so one read that misses a key proves nothing.
+   */
+  readGapMs?: number;
 }
 
 /**
@@ -187,7 +196,18 @@ const VOLUMES_MAX = 20_000;
 const SESSION_TTL_MS = 12 * 60 * 60_000;
 /** How long a follower's volume (the copy fee step) is used before it is read again. */
 const VOLUME_TTL_MS = 10 * 60_000;
-const KEY_RECHECK_MS = 10 * 60_000;
+/**
+ * A key SoDEX does not list is read this many times, KEY_READ_GAP_MS apart,
+ * before anything is refused or taken away for it (one stale backend answered
+ * 4 of 6 reads on 2026-10-29; nothing in its answer tells it apart).
+ */
+const KEY_READS = 3;
+const KEY_READ_GAP_MS = 3_000;
+/**
+ * The `checkedAt` of a key SoDEX refused a signed action for (guard.ts, keyRefused):
+ * it is no longer trusted from having been listed, and is read again (KEY_READS).
+ */
+const KEY_REFUSED_AT = 0;
 
 export class ExecutorService {
   readonly executorId: string;
@@ -232,9 +252,9 @@ export class ExecutorService {
       held: (t, reason, until, wallet) => this.onHeld(t, reason, until, wallet),
       keyRefused: (owner) => {
         this.forgetSigner(owner);
-        // Checked against SoDEX again on the next readiness check (keyProblem reads it when checkedAt is old).
+        // SoDEX itself refused it: no longer trusted from having been listed; the next readiness check reads it again.
         const k = db.key(owner, 'active');
-        if (k) db.markKey(owner, 'active', k.registered, k.expiresAt, 0);
+        if (k) db.markKey(owner, 'active', k.registered, k.expiresAt, KEY_REFUSED_AT);
       },
     });
     this.brake = new Brake(cfg.brakeFile, (now, before) => {
@@ -263,6 +283,8 @@ export class ExecutorService {
       // A copy halted, held, stopped or closed outside the copier: kept for the follower to read after signing in.
       onNotice: (n) => db.addNotice(n),
       brake: () => this.brakeText('copies'),
+      // Reads that confirm a change outside the copier (copy-engine confirm.ts), as far apart as the key reads.
+      confirmGapMs: deps.readGapMs,
     });
     const oracleFeed = new OracleFeed({ fetch: deps.fetch });
     this.algos = new AlgoRuntime({
@@ -282,6 +304,7 @@ export class ExecutorService {
       oracle: (coin) => oracleFeed.quotes(coin),
       // An algo failed, stopped, held or finished: kept for the follower to read after signing in.
       onNotice: (n) => db.addNotice(n),
+      confirmGapMs: deps.readGapMs,
     });
   }
 
@@ -573,7 +596,7 @@ export class ExecutorService {
         } catch {
           throw new ApiError(400, 'key', 'That is not a SoDEX API private key.');
         }
-        const r = await this.sodex.keyRegistered(owner, name, address);
+        const r = await this.keyRead(owner, name, address);
         if (!r.ok) throw new ApiError(412, 'not-registered', r.expiresAt ? 'That key has expired on SoDEX. Make a new one.' : 'SoDEX does not list this key on your account under that name. Check the name and that you made it with this wallet.');
         const latest = Date.now() + this.cfg.keyTtlDaysMax * 86_400_000 + KEY_TTL_SLACK_MS;
         if (!r.expiresAt || r.expiresAt > latest) throw new ApiError(412, 'key-ttl', `That key is valid for longer than ${this.cfg.keyTtlDaysMax} days. Make one that expires within ${this.cfg.keyTtlDaysMax} days.`);
@@ -604,11 +627,18 @@ export class ExecutorService {
     return { address, name: this.keyName, maxDays: this.cfg.keyTtlDaysMax, days };
   }
 
-  /** Ask SoDEX whether the follower registered the key; a registered pending key becomes the active one. */
-  async verifyKey(owner: string): Promise<KeyInfo | null> {
+  /**
+   * Ask SoDEX whether the follower registered the key; a registered pending key becomes the active one.
+   * `confirm`: a refusal follows when no key is registered (a live copy or algo starting), so a key SoDEX
+   * does not list is read KEY_READS times first; the site's polling (POST /keys/verify) reads once a
+   * call and a miss there changes nothing. An active key once seen registered is kept until it expires
+   * (trustedKey): no read takes it away.
+   */
+  async verifyKey(owner: string, o: { confirm?: boolean } = {}): Promise<KeyInfo | null> {
     const pending = this.db.key(owner, 'pending');
+    const usable = this.trustedKey(this.db.key(owner, 'active'));
     if (pending) {
-      const r = await this.sodex.keyRegistered(owner, pending.name, pending.address);
+      const r = await this.keyRead(owner, pending.name, pending.address, o.confirm && !usable ? KEY_READS : 1);
       const latest = Date.now() + this.cfg.keyTtlDaysMax * 86_400_000 + KEY_TTL_SLACK_MS;
       if (r.ok && (!r.expiresAt || r.expiresAt > latest)) {
         // The terms promise a key lives at most keyTtlDaysMax days: one registered for longer is not used.
@@ -621,11 +651,37 @@ export class ExecutorService {
       }
     }
     const active = this.db.key(owner, 'active');
-    if (active && (!pending || this.db.key(owner, 'pending'))) {
-      const r = await this.sodex.keyRegistered(owner, active.name, active.address);
-      this.db.markKey(owner, 'active', r.ok, r.expiresAt, Date.now());
+    if (active && (!pending || this.db.key(owner, 'pending')) && !this.trustedKey(active)) {
+      const r = await this.keyRead(owner, active.name, active.address, o.confirm ? KEY_READS : 1);
+      // A miss on one read (the site's polling) changes nothing; one every read agrees on marks it unregistered.
+      if (r.ok || o.confirm) this.db.markKey(owner, 'active', r.ok, r.ok ? r.expiresAt : (r.expiresAt ?? active.expiresAt), Date.now());
     }
     return this.keyInfo(owner);
+  }
+
+  /**
+   * A key once seen registered on SoDEX (its address, under its name, with its expiry) is trusted
+   * until that expiry, unless SoDEX refused a signed action with it since (KEY_REFUSED_AT). SoDEX's
+   * key list is read from backends that disagree (one served a list 17 minutes old, 2026-10-29), so a
+   * read that misses a trusted key is a stale backend, not a revocation: a revoked key shows itself
+   * when SoDEX refuses what it signs (guard.ts), and is read again then.
+   */
+  private trustedKey(k: KeyRow | null, now = Date.now()): boolean {
+    return !!k && k.registered && k.checkedAt !== KEY_REFUSED_AT && (!k.expiresAt || k.expiresAt > now);
+  }
+
+  /**
+   * SoDEX's answer for one key, read up to `reads` times (KEY_READ_GAP_MS apart) while it does not
+   * list it: the first read that lists it wins; it is missing only when every read agrees.
+   */
+  private async keyRead(owner: string, name: string, address: string, reads = KEY_READS): Promise<{ ok: boolean; expiresAt: number | null }> {
+    let r = await this.sodex.keyRegistered(owner, name, address);
+    for (let i = 1; i < reads && !r.ok; i++) {
+      await sleep(this.deps.readGapMs ?? KEY_READ_GAP_MS);
+      r = await this.sodex.keyRegistered(owner, name, address);
+      if (r.ok) this.deps.log.warn('executor: SoDEX listed a key on a later read (an earlier read was stale)', { owner, key: address, read: i + 1 });
+    }
+    return r;
   }
 
   /**
@@ -649,16 +705,19 @@ export class ExecutorService {
     const k = this.db.key(owner, 'active');
     if (!k) return 'No copy key is registered for this executor. Approve one in copy setup.';
     const now = Date.now();
-    if (!k.registered || !k.checkedAt || now - k.checkedAt > KEY_RECHECK_MS) {
-      const r = await this.sodex.keyRegistered(owner, k.name, k.address);
-      this.db.markKey(owner, 'active', r.ok, r.expiresAt, now);
-      if (!r.ok) {
-        this.forgetSigner(owner);
-        return r.expiresAt && r.expiresAt <= now ? 'The copy key expired. Approve a new one in copy setup.' : 'The copy key is no longer registered on SoDEX (revoked or replaced). Approve a new one in copy setup.';
-      }
-      return null;
+    if (k.expiresAt && k.expiresAt <= now) {
+      // SoDEX's own expiry, known since it was listed: no read needed, and the opened key is not kept.
+      this.forgetSigner(owner);
+      return 'The copy key expired. Approve a new one in copy setup.';
     }
-    if (k.expiresAt && k.expiresAt <= now) return 'The copy key expired. Approve a new one in copy setup.';
+    // Seen registered and not refused by SoDEX since: no read takes it away (trustedKey).
+    if (this.trustedKey(k, now)) return null;
+    const r = await this.keyRead(owner, k.name, k.address);
+    this.db.markKey(owner, 'active', r.ok, r.ok ? r.expiresAt : (r.expiresAt ?? k.expiresAt), now);
+    if (!r.ok) {
+      this.forgetSigner(owner);
+      return r.expiresAt && r.expiresAt <= now ? 'The copy key expired. Approve a new one in copy setup.' : 'The copy key is no longer registered on SoDEX (revoked or replaced). Approve a new one in copy setup.';
+    }
     return null;
   }
 
@@ -766,7 +825,7 @@ export class ExecutorService {
     let accountId = 0;
     if (!settings.paper) {
       this.needNoBrake('copies');
-      await this.verifyKey(owner);
+      await this.verifyKey(owner, { confirm: true });
       const k = this.db.key(owner, 'active');
       if (!k || !k.registered) throw new ApiError(412, 'key', 'Register the copy key on SoDEX first (copy setup, "Approve agent").');
       accountId = await this.sodex.accountId(owner);
@@ -926,7 +985,7 @@ export class ExecutorService {
     let accountId = 0;
     if (!spec.paper) {
       this.needNoBrake('algos');
-      await this.verifyKey(owner);
+      await this.verifyKey(owner, { confirm: true });
       const k = this.db.key(owner, 'active');
       if (!k || !k.registered) throw new ApiError(412, 'key', 'Register this executor\'s key on SoDEX first (copy setup, "Approve agent").');
       accountId = await this.sodex.accountId(owner);

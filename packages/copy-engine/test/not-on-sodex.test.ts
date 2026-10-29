@@ -166,6 +166,7 @@ async function until(cond: () => boolean | Promise<boolean>, ms = 3000): Promise
 function runtime(store: MemoryStore, hl: Array<[string, number, number]>, notices: EngineNotice[]) {
   const fetch = fakeFetch(hl);
   return new CopyRuntime({
+    confirmGapMs: 0,
     store,
     sodex: new SodexClient({ network: 'mainnet', fetch }),
     hyperliquid: new HyperliquidClient(fetch),
@@ -281,6 +282,7 @@ test('the notices: not copied (info) and delisted (warn), in words, within what 
 function algoRuntime(markets: MarketInfo[]): AlgoRuntime {
   const quiet = { onOrder() {}, onPrint() {}, onState() {} } as unknown as AlgoMarket;
   return new AlgoRuntime({
+    confirmGapMs: 0,
     store: new MemoryAlgoStore(),
     sodex: { markets: async () => markets } as unknown as SodexClientType,
     network: 'mainnet',

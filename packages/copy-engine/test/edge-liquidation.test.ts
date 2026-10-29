@@ -69,6 +69,8 @@ interface World {
   marks: Record<string, number>;
   /** The follower's fills (GET .../trades); absent: the read fails (404). */
   fills?: Array<{ symbol: string; clOrdID: string; side: 'BUY' | 'SELL'; price: string; quantity: string; time: number }>;
+  /** The follower's approved fee for the builder, tenths of a bp, per read (absent: 25; null: none). */
+  approval?: () => number | null;
 }
 
 const world = (o: Partial<World> = {}): World => ({ leader: [], follower: [], marks: { 'BTC-USD': 80_000, 'ETH-USD': 2_000 }, ...o });
@@ -86,7 +88,10 @@ function fakeFetch(w: World): FetchLike {
     if (path === `/api/v1/user/${LEADER}/subaccounts`) return ok({ primaryAccountID: LEADER_ID });
     if (path === `/api/v1/perps/accounts/${LEADER}/state`) return ok({ aid: LEADER_ID, av: '100000', P: JSON.parse(JSON.stringify(w.leader)) });
     if (path === `/api/v1/perps/accounts/${FOLLOWER}/state`) return ok({ aid: FOLLOWER_ID, av: '5000', am: '5000', P: JSON.parse(JSON.stringify(w.follower)) });
-    if (path === `/api/v1/user/${FOLLOWER}/builders`) return ok({ perps: [{ userID: FOLLOWER_ID, builderID: 9, feeRate: 25 }], spot: [] });
+    if (path === `/api/v1/user/${FOLLOWER}/builders`) {
+      const rate = w.approval ? w.approval() : 25;
+      return ok({ perps: rate === null ? [] : [{ userID: FOLLOWER_ID, builderID: 9, feeRate: rate }], spot: [] });
+    }
     if (path.startsWith(`/api/v1/perps/accounts/${FOLLOWER}/trades?`) && w.fills) return ok(w.fills);
     return { status: 404, ok: false, text: async () => '{"code":404,"message":"not found"}' };
   };
@@ -132,6 +137,7 @@ function runtime(w: World, sink: OrderSink, store = new MemoryStore()) {
   const fetch = fakeFetch(w);
   const notices: EngineNotice[] = [];
   const rt = new CopyRuntime({
+    confirmGapMs: 0,
     store,
     sodex: new SodexClient({ network: 'mainnet', fetch }),
     hyperliquid: new HyperliquidClient(fetch),
@@ -528,6 +534,164 @@ test('a liquidation while the copy is paused or blocked is booked the same (the 
     assert.equal(size(rt, s.id), 0);
     assert.deepEqual(notices.filter((n) => n.kind === 'closed').map((n) => n.grade), ['error']);
     assert.equal(rt.get(s.id)!.status, 'paused');
+  } finally {
+    await rt.stop();
+  }
+});
+
+/* ===================================== SoDEX's reads disagree (2026-10-29) ===== */
+
+/**
+ * SoDEX's gateway answers an account from backends that disagree: on mainnet 2026-10-29 four of six
+ * GET .../state reads seconds apart showed a BTC-USD position closed minutes before, with fresh marks
+ * and equity, and nothing tells the backends apart. A change of the follower's position the copier did
+ * not make is acted on only when two more reads agree on it; a position gone or smaller only with a
+ * fill in SoDEX's trades that cut it (copy-engine confirm.ts, refreshFollower). `alternate` makes the
+ * world answer each read of `key` from the next function in turn: a stale backend and a fresh one.
+ */
+function alternate<K extends 'follower' | 'leader'>(w: World, key: K, reads: Array<() => World[K]>): void {
+  let n = 0;
+  Object.defineProperty(w, key, {
+    configurable: true,
+    get: () => reads[n++ % reads.length]!(),
+    // Set again by the test: one answer for every read from then on.
+    set: (v: World[K]) => Object.defineProperty(w, key, { configurable: true, writable: true, enumerable: true, value: v }),
+  });
+}
+const followerSold = (qty: string, s = 'BTC-USD', price = String(s === 'BTC-USD' ? 80_000 : 2_000)) => sodexWs().push(print('SELL', qty, price, 1002, FOLLOWER_ID, s));
+
+test('stale: liquidated, but the reads alternate between a stale backend (still held) and a fresh one (flat): nothing is booked until they agree, then once', async () => {
+  const { w, rec, rt, notices, s } = await holding({ id: 'stale-liq', fills: [] });
+  try {
+    const held = w.follower;
+    w.fills = [liquidationFill('0.01')];
+    alternate(w, 'follower', [() => [], () => held]);
+    for (let i = 0; i < 3; i++) await rt.refreshFollower(FOLLOWER);
+    assert.equal(size(rt, s.id), 0.01, 'the books hold the position while the reads disagree');
+    assert.equal(notices.filter((n) => n.kind === 'closed').length, 0, 'nothing told');
+    assert.equal(rec.cancels.length, 0, 'its stop-loss stays on SoDEX');
+    // The backends agree: flat.
+    w.follower = [];
+    await rt.refreshFollower(FOLLOWER);
+    assert.equal(size(rt, s.id), 0);
+    assert.deepEqual(notices.filter((n) => n.kind === 'closed').map((n) => n.grade), ['error'], 'told once, as a liquidation');
+    assert.ok(await until(() => rec.cancels.includes(rec.stops[0]!.clOrdID)), 'and its stop-loss cancelled');
+  } finally {
+    await rt.stop();
+  }
+});
+
+test('stale: a backend that missed the opening fill reads flat while SoDEX holds the position (no fill cut it): never booked closed, its stop-loss never cancelled, nothing told', async () => {
+  const { w, rec, rt, store, notices, s } = await holding({ id: 'stale-flat', fills: [] });
+  try {
+    const held = w.follower;
+    // Every other read stale: disagree.
+    alternate(w, 'follower', [() => [], () => held]);
+    for (let i = 0; i < 3; i++) await rt.refreshFollower(FOLLOWER);
+    // Every read stale (they agree), but SoDEX's trades hold no fill that cut the position.
+    w.follower = [];
+    for (let i = 0; i < 3; i++) await rt.refreshFollower(FOLLOWER);
+    assert.equal(size(rt, s.id), 0.01, 'the copy still holds it');
+    assert.equal(rec.cancels.length, 0, 'its stop-loss is not cancelled');
+    assert.equal(notices.length, 0, 'nothing told');
+    assert.ok(!(await store.activity({ subId: s.id })).some((e) => e.kind === 'status' && e.symbol === 'BTC-USD'), 'no "closed outside" line');
+    // The fresh backend again: nothing to do, and the leader's close is still copied from the books.
+    w.follower = held;
+    await rt.refreshFollower(FOLLOWER);
+    const n0 = rec.orders().length;
+    leaderSells('1');
+    w.leader = [];
+    assert.ok(await until(() => rec.orders().length === n0 + 1), 'the leader\'s close is copied');
+    assert.deepEqual([rec.orders().at(-1)!.side, rec.orders().at(-1)!.reduceOnly], ['sell', true]);
+  } finally {
+    await rt.stop();
+  }
+});
+
+test('stale: a backend that shows the position larger (before a close of the copier\'s the stream showed) or smaller (before an add) is never adopted - no doubling, no shrinking, nothing told', async () => {
+  const { w, rec, rt, notices, s } = await holding({ id: 'stale-size', fills: [] });
+  try {
+    const held = w.follower;
+    const as = (sz: string) => [{ ...held[0]!, sz }];
+    const n0 = rec.orders().length;
+    const stops0 = rec.stops.length;
+    alternate(w, 'follower', [() => as('0.02'), () => held]);
+    for (let i = 0; i < 3; i++) await rt.refreshFollower(FOLLOWER);
+    assert.equal(size(rt, s.id), 0.01, 'not doubled');
+    alternate(w, 'follower', [() => as('0.005'), () => held]);
+    for (let i = 0; i < 3; i++) await rt.refreshFollower(FOLLOWER);
+    assert.equal(size(rt, s.id), 0.01, 'not shrunk');
+    // Smaller on every read, but no fill in SoDEX's trades cut it: still not.
+    w.follower = as('0.005');
+    await rt.refreshFollower(FOLLOWER);
+    assert.equal(size(rt, s.id), 0.01, 'not shrunk without a fill');
+    assert.equal(notices.length, 0);
+    await wait(2_200); // the copy's stops are resized 2 s after a change: none came
+    assert.equal(rec.stops.length, stops0, 'its stop-loss not resized');
+    assert.equal(rec.orders().length, n0, 'nothing sent');
+    // A part closed by hand, in SoDEX's fills: now it is told, once.
+    w.fills = [fillOf('by-hand-1', '0.005', '80000')];
+    await rt.refreshFollower(FOLLOWER);
+    assert.equal(size(rt, s.id), 0.005);
+    assert.deepEqual(notices.filter((n) => n.kind === 'reduced').map((n) => n.grade), ['warn'], 'by hand: a warning');
+    // Larger on every read (an add by hand): adopted, as before - three reads agree.
+    w.follower = as('0.008');
+    await rt.refreshFollower(FOLLOWER);
+    assert.equal(size(rt, s.id), 0.008);
+  } finally {
+    await rt.stop();
+  }
+});
+
+test('stale: a SoDEX leader read from a backend that still shows a position it closed is not reconciled - the copy is never reopened', async () => {
+  const { w, rec, rt, s } = await holding({ id: 'stale-leader', fills: [] });
+  try {
+    const n0 = rec.orders().length;
+    // The leader closes on the stream; the copy closes, and its fill is on the stream.
+    leaderSells('1');
+    w.leader = [];
+    assert.ok(await until(() => rec.orders().length === n0 + 1), 'the close is copied');
+    followerSold(rec.orders().at(-1)!.quantity);
+    assert.ok(await until(() => size(rt, s.id) === 0), 'and booked');
+    w.follower = [];
+    // Reconciles read the leader from both backends: the stale one shows the 1 BTC it closed.
+    alternate(w, 'leader', [() => [{ s: 'BTC-USD', sz: '1', ep: '80000' }], () => []]);
+    for (let i = 0; i < 4; i++) {
+      await rt.reconcileAll();
+      await wait(20);
+    }
+    assert.equal(rec.orders().length, n0 + 1, 'nothing reopened');
+    assert.equal(size(rt, s.id), 0);
+  } finally {
+    await rt.stop();
+  }
+});
+
+test('stale: stopped with "close", a read shows the position flat before the stream shows the close filled, the next read held: not taken as closed, its stop-loss kept', async () => {
+  const { w, rec, rt, s } = await holding({ id: 'stale-stop', fills: [] });
+  try {
+    const held = w.follower;
+    alternate(w, 'follower', [() => [], () => held]);
+    const stopped = await rt.stopCopy(s.id, { close: true });
+    assert.equal(stopped.status, 'stopped');
+    assert.match(stopped.statusReason ?? '', /not confirmed closed: BTC-USD/);
+    assert.ok(!rec.cancels.includes(rec.stops[0]!.clOrdID), 'its stop-loss stays on SoDEX');
+  } finally {
+    await rt.stop();
+  }
+});
+
+test('stale: an active copy whose builder approval one read misses stays active; reads that all miss it block it', async () => {
+  const { w, rt, s } = await holding({ id: 'stale-approval', fills: [] });
+  try {
+    let n = 0;
+    w.approval = () => (n++ % 2 === 0 ? null : 25);
+    await rt.checkReady(rt.get(s.id)!);
+    assert.equal(rt.get(s.id)!.status, 'active', 'one stale read does not block it');
+    w.approval = () => null;
+    await rt.checkReady(rt.get(s.id)!);
+    assert.equal(rt.get(s.id)!.status, 'blocked');
+    assert.match(rt.get(s.id)!.statusReason ?? '', /does not approve the ValueDesk copy fee/);
   } finally {
     await rt.stop();
   }

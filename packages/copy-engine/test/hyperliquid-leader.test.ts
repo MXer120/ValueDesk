@@ -148,6 +148,7 @@ function runtime(w: HlWorld, o: { hlMode?: 'user' | 'firehose'; log?: Logger } =
   const store = new MemoryStore();
   const paper = new PaperSink();
   const rt = new CopyRuntime({
+    confirmGapMs: 0,
     store,
     sodex: new SodexClient({ network: 'mainnet', fetch }),
     hyperliquid: new HyperliquidClient(fetch),

@@ -202,6 +202,7 @@ async function rig(markets: MarketInfo[] = [BTC, ETH]): Promise<Rig> {
       return { positions: { 'BTC-USD': { size: position.size, entry: position.entry, leverage: position.leverage ?? 1, leverageReported: position.leverage !== undefined } } };
     }, get: async () => [] } as unknown as SodexClient;
   r.rt = new AlgoRuntime({
+    confirmGapMs: 0,
     store,
     sodex,
     network: 'mainnet',
@@ -583,6 +584,7 @@ test('pause pulls the resting child; resume carries on; restarts ask SoDEX about
   await r.rt.stop();
   // A new runner on the same books: the child that was open is not trusted until SoDEX says.
   const again = new AlgoRuntime({
+    confirmGapMs: 0,
     store: r.store,
     sodex: { markets: async () => [BTC], get: async () => [] } as unknown as SodexClient,
     network: 'mainnet',
