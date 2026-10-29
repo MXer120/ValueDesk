@@ -34,6 +34,16 @@ shown over time against the price. Longs entered below the price and shorts ente
   temporary S3 read policy again, and storage per coin and hour as bands (not per position).
 - Not planned: BTC's own on-chain (UTXO) version - that needs a Bitcoin node and UTXO index, or Glassnode's data.
 
+### Copying Lighter, Arcus and trade.xyz traders - owner, 2026-10-29
+Copies follow SoDEX and Hyperliquid traders today (`packages/copy-engine` LeaderVenue). Lighter, Arcus and trade.xyz
+traders are to be copyable too. **For launch they are read-only:** their traders, positions, PnL and liquidation
+levels are shown and analysed (indexer, Scan, heatmap, cohorts) as now, but "Copy" stays off for them.
+- Lighter, Arcus: a leader feed each (fills or positions, as `feeds.ts` HyperliquidFeed does), the coin -> SoDEX
+  market map, equity for proportional sizing, and the same-asset price check copies already use.
+- trade.xyz: its traders are Hyperliquid addresses on the HIP-3 `xyz` dex - the Hyperliquid feed reads `xyz` positions
+  now (2026-10-29); what is left is mapping `xyz:` coins to SoDEX markets that are the same asset.
+- Live suite (`apps/executor/tools/live-test`): a leader per venue, as the Hyperliquid leader there.
+
 ### SoDEX announcements on the site - owner, 2026-10-29
 SoDEX's own announcements (delistings, new listings, maintenance, rule changes) shown where they matter: in the
 bell and as a banner on the affected market, the ticket, open positions, running algos and copies on that market.

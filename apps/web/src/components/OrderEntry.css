@@ -129,6 +129,10 @@
   border-radius: var(--radius-card);
   padding: var(--sp-2) var(--oe-inset) var(--oe-inset);
 }
+/* Inside a dashboard panel the card sits 1px in, behind the panel's own 1px border: one pixel
+   less corner, so the green (or red) wash and rim follow the gray frame's curve exactly instead
+   of meeting it a pixel off at every corner (owner, 2026-10-29). */
+.dash-panel__body > .panel.oe { border-radius: calc(var(--radius-card) - 1px); }
 .panel.oe.is-sell,
 .dash-panel__body > .panel.oe.is-sell { --oe-tint: var(--neg); }
 .oe-fx {
