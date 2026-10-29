@@ -418,6 +418,7 @@ export async function devWebFor(repo: string, explicit?: string | null): Promise
 
 /** The page: Edge on the dev web with the follower's wallet (apps/web/e2e/ui/bridgeSession.ts). The key stays in this process. */
 export async function openWebSession(repo: string, o: { origin: string; privateKey: string; live: boolean; headed?: boolean; log?: (line: string) => void }): Promise<WebSession> {
-  const { openBridgeSession } = await webModule<{ openBridgeSession: (x: typeof o) => Promise<WebSession> }>(repo, 'e2e/ui/bridgeSession.ts');
-  return openBridgeSession(o);
+  const { openBridgeSession } = await webModule<{ openBridgeSession: (x: typeof o & { shotDir?: string }) => Promise<WebSession> }>(repo, 'e2e/ui/bridgeSession.ts');
+  // A failed step's screenshot lands next to the run's logs.
+  return openBridgeSession({ ...o, shotDir: join(repo, 'apps', 'executor', 'tools', 'live-test', '.state') });
 }

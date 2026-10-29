@@ -151,6 +151,25 @@ test('positions open when copying starts are left alone until the leader is flat
   await rt.stop();
 });
 
+test('a leader no copy follows is read afresh by the next copy: what it held while unfollowed is not taken for its positions now', async () => {
+  // Live run 2026-10-29: a copy stopped, the leader closed while nobody followed it, and the next copy of it
+  // took the stale long for a pre-existing position - so it left the leader's next buy uncopied.
+  const w: World = { leaderPositions: [{ s: 'BTC-USD', sz: '2', ep: '79000' }], followerPositions: [], builderRate: 25, mark: 80_000 };
+  const paper = new PaperSink();
+  const { rt } = runtime(w, () => paper);
+  await rt.start();
+  const first = await rt.add(sub({ paper: true }, { id: 'p-stale-1' }));
+  await rt.stopCopy(first.id, { close: false });
+  w.leaderPositions = []; // closed while unfollowed: no feed carries it
+  const s = await rt.add(sub({ paper: true }, { id: 'p-stale-2' }));
+  assert.deepEqual(rt.view(s.id)!.leader.positions, {}, 'the new copy reads the leader flat');
+  await until(() => sodexWs()?.readyState === 1);
+  await until(() => sodexWs().sent.some((m) => (m as { params?: { channel?: string } }).params?.channel === 'trade'));
+  sodexWs().push(print(20, 'BUY', '1', '80000', LEADER_ID, 1002));
+  await until(() => rt.view(s.id)!.positions.length === 1);
+  await rt.stop();
+});
+
 test('a live copy without a covering builder approval is blocked, and unblocks once approved', async () => {
   const w: World = { leaderPositions: [], followerPositions: [], builderRate: 15, mark: 80_000 };
   const sent: Intent[][] = [];

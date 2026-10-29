@@ -84,7 +84,12 @@ async function round(t: T, want: number, what: string): Promise<void> {
     t.check(Math.abs(seen - want) < 0.5, `the executor charged ${v.algo.spec.side} ${v.algo.id} builder fee ${want} (${want / 10} bp)`, { seen: Number(seen.toFixed(2)) });
   }
   await t.live(`SoDEX's order history names builder fee ${want} on both orders, and its fills charge it`, async () => {
-    const mine = (await t.account.history(t.main.name)).filter((o) => [buy, sell].some((v) => o.clOrdID?.startsWith(algoPrefix(v.algo.id))));
+    // SoDEX's order history can lag the fills by some seconds (2026-10-29: 0 of 2 listed 22 s after).
+    const ofRound = async () => (await t.account.history(t.main.name)).filter((o) => [buy, sell].some((v) => o.clOrdID?.startsWith(algoPrefix(v.algo.id))));
+    const mine = await t.waitFor('SoDEX lists both orders of the round', async () => {
+      const os = await ofRound();
+      return os.length >= 2 ? os : null;
+    }, { timeoutMs: 60_000, everyMs: 5_000 });
     t.check(mine.length >= 2, `SoDEX lists ${mine.length} orders of the round`);
     t.checkOrderFees(mine, want);
     await t.checkBuilderFee([...(await t.algoFills(buy.algo.id)), ...(await t.algoFills(sell.algo.id))], want);

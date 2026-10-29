@@ -150,8 +150,10 @@ class FakeSink implements AlgoSink {
       setImmediate(() => this.m.order({ clOrdID: id, status: 'CANCELED', filledQty: r?.filled ?? 0, filledValue: (r?.filled ?? 0) * Number(r?.price ?? 0) }));
     }
   }
-  async setLeverage(_a: AlgoRecord, _m: unknown, lev: number): Promise<void> {
+  margins: string[] = [];
+  async setLeverage(_a: AlgoRecord, _m: unknown, lev: number, margin?: string): Promise<void> {
     this.leverage.push(lev);
+    this.margins.push(margin ?? '');
   }
   stops: StopRequest[][] = [];
   async placeStops(_a: AlgoRecord, _m: unknown, stops: StopRequest[]): Promise<ChildResult[]> {
@@ -689,6 +691,21 @@ test('a position condition: it fires on the position as SoDEX reports it, read i
   await step(r, b.id, 6_000);
   await step(r, b.id, 500);
   assert.equal(r.sink.all.length, 2);
+});
+
+test('leverage: a later algo on the same market asking another margin mode or leverage sends it again; the same one is not re-sent', async () => {
+  // Live run 2026-10-29: an isolated swarm after a cross algo on BTC-USD stayed cross - leverage was set once per market.
+  const r = await rig();
+  const a = await add(r, { kind: 'twap', quantity: '0.002', durationMs: 120_000, slices: 2, leverage: 3, marginMode: 'cross', exec: { style: 'taker' } });
+  await step(r, a.id);
+  const b = await add(r, { kind: 'twap', quantity: '0.002', durationMs: 120_000, slices: 2, leverage: 3, marginMode: 'isolated', exec: { style: 'taker' } });
+  await step(r, b.id);
+  const c = await add(r, { kind: 'twap', quantity: '0.002', durationMs: 120_000, slices: 2, leverage: 3, marginMode: 'isolated', exec: { style: 'taker' } });
+  await step(r, c.id);
+  const d = await add(r, { kind: 'twap', quantity: '0.002', durationMs: 120_000, slices: 2, leverage: 5, marginMode: 'isolated', exec: { style: 'taker' } });
+  await step(r, d.id);
+  assert.deepEqual(r.sink.leverage, [3, 3, 5]);
+  assert.deepEqual(r.sink.margins, ['cross', 'isolated', 'isolated']);
 });
 
 test('region rules: a blocked region holds a live algo; the EEA 2x ceiling caps the leverage and the gross exposure', async () => {

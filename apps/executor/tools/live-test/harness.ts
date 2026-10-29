@@ -384,12 +384,19 @@ export class T {
    * the known one (Env.orderFee), or - where only the executor knows the follower's volume - one step
    * of its ladder, the same on every order, which is noted and used by the fill checks after it.
    */
-  checkOrderFees(orders: OrderInfo[], want: number | null = this.env.orderFee): number {
-    if (want !== null) {
-      this.check(orders.every((o) => o.builderFee === want), `each order names the builder fee ${want} (${want / 10} bp)`, orders.map((o) => o.builderFee));
+  checkOrderFees(orders: OrderInfo[], want: number | null = this.env.orderFee): number | null {
+    // SoDEX's order history no longer names the builder (2026-10-29: no `builder` field on any row),
+    // so an order without one proves nothing; the builder fee each fill paid (checkBuilderFee) does.
+    const named = orders.filter((o) => o.builderFee !== null);
+    if (named.length === 0) {
+      this.note(`SoDEX's order history names no builder on these ${orders.length} orders: the fills' builder fee is the check`);
       return want;
     }
-    const rates = [...new Set(orders.map((o) => o.builderFee))];
+    if (want !== null) {
+      this.check(named.every((o) => o.builderFee === want), `each order names the builder fee ${want} (${want / 10} bp)`, named.map((o) => o.builderFee));
+      return want;
+    }
+    const rates = [...new Set(named.map((o) => o.builderFee))];
     const rate = rates.length === 1 ? rates[0]! : null;
     this.check(rate !== null && this.env.builderLadder.includes(rate), `each order names the same builder fee, a step of the ladder ${this.env.builderLadder.join('/')}`, rates);
     this.feeRate = rate;

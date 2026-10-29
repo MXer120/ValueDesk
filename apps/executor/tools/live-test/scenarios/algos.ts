@@ -628,7 +628,11 @@ export const ALGO_SCENARIOS: Scenario[] = [
       await positionIs(t, 0, 'after the take-profit');
       await t.live('SoDEX\'s history: the take-profit filled, the stop-loss was cancelled', async () => {
         const mine = (await t.account.history(t.main.name)).filter((o) => o.clOrdID?.startsWith(`va-${v.algo.id.slice(1, 13)}-`) && o.stop);
-        t.check(mine.some((o) => o.stop!.kind === 'tp' && o.filled > 0), 'a filled TAKE_PROFIT', mine.map((o) => `${o.stop!.kind} ${o.status}`));
+        // A take-profit that fired reads TRIGGERED with nothing executed on the trigger order itself
+        // (2026-10-29): the market order it starts does the fill, so the fills prove it.
+        t.check(mine.some((o) => o.stop!.kind === 'tp' && (o.filled > 0 || o.status === 'TRIGGERED')), 'a fired TAKE_PROFIT', mine.map((o) => `${o.stop!.kind} ${o.status}`));
+        const closes = (await t.algoFills(v.algo.id)).filter((f) => f.side === 'sell');
+        t.check(closes.length > 0, `the take-profit's sell filled on SoDEX (${closes.length} fills)`);
         t.check(mine.filter((o) => o.stop!.kind === 'sl').every((o) => o.filled === 0), 'the STOP_LOSS never filled');
       });
     },

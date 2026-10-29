@@ -35,6 +35,8 @@ export interface BridgeSessionOptions {
   live: boolean;
   headed?: boolean;
   log?: (line: string) => void;
+  /** Where a failed step saves a screenshot of the page (none: no screenshot). */
+  shotDir?: string;
 }
 
 export interface BridgeSession {
@@ -149,7 +151,29 @@ export async function openBridgeSession(o: BridgeSessionOptions): Promise<Bridge
     const enable = t.g.getByRole('button', { name: 'Enable trading' });
     await enable.waitFor({ state: 'visible', timeout: 30_000 });
     await enable.click();
-    await until(p, async () => (await about(p)).trading.status === 'enabled', 'trading to be enabled in the page', 90_000);
+    const seen = errors.length;
+    try {
+      // A fresh profile has not signed ValueDesk's terms: Enable trading asks for them first (requireTerms).
+      let termsSigned = false;
+      await until(p, async () => {
+        if (!termsSigned && (await signSiteTermsIfAsked(p))) {
+          termsSigned = true;
+          log('ValueDesk\'s terms signed in the page');
+          if (await enable.isVisible().catch(() => false)) await enable.click().catch(() => {});
+        }
+        return (await about(p)).trading.status === 'enabled';
+      }, 'trading to be enabled in the page', 90_000);
+    } catch (e) {
+      // What the page said and what the wallet was asked: "timed out" alone does not say why.
+      const said = errors.slice(seen).slice(-4).join(' | ') || 'no console error';
+      const status = await about(p).then((a) => a.trading.status).catch(() => 'unreadable');
+      const asked = wallet.log.slice(-3).map((r) => `${r.kind ?? r.method} ${r.outcome}${r.reason ? ` (${r.reason})` : ''}`).join(', ') || 'nothing';
+      const shot = o.shotDir ? `${o.shotDir}/enable-trading-${Date.now()}.png` : null;
+      if (shot) await p.screenshot({ path: shot }).catch(() => {});
+      const dialogs = await p.locator('[role="dialog"]').allInnerTexts().catch(() => [] as string[]);
+      const open = dialogs.map((d) => d.replace(/\s+/g, ' ').slice(0, 160)).join(' || ') || 'no dialog open';
+      throw new Error(`${String((e as Error)?.message ?? e)} - trading ${status}; page: ${said}; wallet asked: ${asked}; on screen: ${open}${shot ? `; screenshot ${shot}` : ''}`);
+    }
     log('trading enabled in the page (its trading key registered on SoDEX by the wallet)');
   }
 

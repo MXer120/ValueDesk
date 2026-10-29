@@ -222,7 +222,8 @@ export class AlgoRuntime {
   private byClOrd = new Map<string, string>();
   private busy = new Set<string>();
   private dirty = new Set<string>();
-  private leverageSet = new Set<string>();
+  /** The leverage and margin mode last sent per owner and market: an algo asking for others sends them again. */
+  private leverageSet = new Map<string, string>();
   private problems = new Map<string, { at: number; problem: string | null; unchecked?: boolean }>();
   private lastHistoryAt = 0;
   private lookupBusy = false;
@@ -2166,9 +2167,15 @@ export class AlgoRuntime {
     // The region's leverage ceiling (EEA 2x): on the leverage set, and on the gross exposure an opening child may reach.
     const ceiling = !s.paper ? (this.host.policyFor?.(a)?.maxLeverage ?? null) : null;
     const leverage = ceiling !== null ? Math.min(s.leverage ?? ceiling, ceiling) : s.leverage;
-    if (sink && opening && leverage !== null && !this.leverageSet.has(`${a.owner}|${m.name}`)) {
-      this.leverageSet.add(`${a.owner}|${m.name}`);
-      await sink.setLeverage(a, m, Math.min(leverage, m.maxLeverage), s.marginMode ?? 'cross').catch((e) => this.event(a, 'error', `Leverage not set: ${e instanceof Error ? e.message : String(e)}`));
+    const lev = leverage !== null ? Math.min(leverage, m.maxLeverage) : null;
+    const want = lev !== null ? `${lev}|${s.marginMode ?? 'cross'}` : null;
+    if (sink && opening && lev !== null && this.leverageSet.get(`${a.owner}|${m.name}`) !== want) {
+      this.leverageSet.set(`${a.owner}|${m.name}`, want!);
+      await sink.setLeverage(a, m, lev, s.marginMode ?? 'cross').catch((e) => {
+        // Not set: the next opening child asks again.
+        this.leverageSet.delete(`${a.owner}|${m.name}`);
+        this.event(a, 'error', `Leverage not set: ${e instanceof Error ? e.message : String(e)}`);
+      });
     }
     if (opening && ceiling !== null) {
       const acct = await this.accountOf(a);

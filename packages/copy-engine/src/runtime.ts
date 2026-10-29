@@ -1247,6 +1247,9 @@ export class CopyRuntime {
 
   /* ------------------------------------------------------------- leaders ----- */
 
+  /** The leaders the feeds were last pointed at (syncFeeds). */
+  private fedLeaders = new Map<string, LeaderRef>();
+
   private followedLeaders(): LeaderRef[] {
     const seen = new Map<string, LeaderRef>();
     for (const s of this.subs.values()) if (s.status !== 'stopped') seen.set(lk(s.settings.leader), s.settings.leader);
@@ -1256,6 +1259,12 @@ export class CopyRuntime {
   /** Point the feeds at the followed leaders (and start Hyperliquid's when one is needed). */
   private async syncFeeds(): Promise<void> {
     const leaders = this.followedLeaders();
+    // A leader no copy follows any more is no longer fed: what the book holds of it goes stale, and a
+    // later copy of it would take that for its positions now (live run 2026-10-29: a flat leader read
+    // as long, so the new copy took its next buy for a pre-existing position). It is read afresh then.
+    const now = new Set(leaders.map(lk));
+    for (const [k, l] of this.fedLeaders) if (!now.has(k)) this.leaders.forget(l);
+    this.fedLeaders = new Map(leaders.map((l) => [lk(l), l]));
     const sodex: Array<{ ref: LeaderRef; accountId: number }> = [];
     for (const l of leaders.filter((x) => x.venue === 'sodex')) {
       let id = this.sodexIds.get(l.address);
