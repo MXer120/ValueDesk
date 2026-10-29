@@ -20,7 +20,8 @@
  * the tape trades through them), and nothing is signed or sent.
  */
 import { canonicalDecimal, numberToPlainString, type Network } from '../../../sodex-core/src/index.ts';
-import { randomId, timers, type Logger, type WebSocketFactory } from '../io.ts';
+import { CONFIRM_READS, CONFIRM_GAP_MS, confirmRead, sizeView } from '../confirm.ts';
+import { randomId, sleep, timers, type Logger, type WebSocketFactory } from '../io.ts';
 import { MarketBook, notListedLine, snapPrice } from '../markets.ts';
 import type { RegionPolicy } from '../policy.ts';
 import type { SodexClient } from '../sodex.ts';
@@ -123,6 +124,16 @@ const EXITS_RESIZE_MS = 5_000;
 const EXITS_WATCH_MS = 60_000;
 /** A position read counts for that only when it started this long after the exits were placed (SoDEX's account follows the fills). */
 const EXITS_SETTLE_MS = 3_000;
+/** The fills that cut an ended algo's position are read from this long before its exits were placed (the clocks differ). */
+const EXITS_FILLS_SLACK_MS = 30_000;
+/**
+ * A position that reads agree is gone, with no fill in SoDEX's trades that cut it, has its exits
+ * cancelled only after this: the trades lag the matching by tens of seconds, and a backend that
+ * missed the opening fills reads the account flat while it holds the position (confirm.ts).
+ */
+const EXITS_NO_FILL_MS = 15 * 60_000;
+/** After SoDEX's reads of a position disagreed, an algo reads it again for a decision no sooner than this. */
+const CONFIRM_RETRY_MS = 15_000;
 
 export interface AlgoHost {
   store: AlgoStore;
@@ -149,6 +160,8 @@ export interface AlgoHost {
   position?(a: AlgoRecord, symbol: string): Promise<number | null>;
   /** The owner's positions: signed size and entry per market (default: read from SoDEX). Position conditions read these. */
   positions?(a: AlgoRecord): Promise<Record<string, { size: number; entry: number; leverage?: number }>>;
+  /** The pause between reads of SoDEX that confirm a position (confirm.ts CONFIRM_GAP_MS; tests pass 0). */
+  confirmGapMs?: number;
   /**
    * The region rules for a live algo (policy.ts regionPolicy): a blocked
    * region holds it; a leverage ceiling (EEA 2x) caps the leverage it sets and
@@ -252,6 +265,10 @@ export class AlgoRuntime {
   private exitsWatching = new Set<string>();
   private exitsWatchAt = new Map<string, number>();
   private exitsHeldAt = new Map<string, number>();
+  /** Ended algos whose position reads agree is gone while SoDEX's trades show no fill that cut it: since when (exitsGone). */
+  private exitsFlatSince = new Map<string, number>();
+  /** Algos whose position reads disagreed: not read again for a decision before this (positionConfirmed). */
+  private confirmRetryAt = new Map<string, number>();
   private paper = new Map<string, PaperOrder>();
   private timers: unknown[] = [];
   private running = false;
@@ -1100,14 +1117,14 @@ export class AlgoRuntime {
     a.arrival = q ? mid(q) : (this.market.mark(s.symbol)?.mark ?? null);
     if (s.kind === 'twap') {
       if (s.closeShare !== null) {
-        // A time-sliced close: its size and side are the position's, now.
-        const pos = await this.positionOf(a, s.symbol);
+        // A time-sliced close: its size and side are the position's, now (reads that agree: positionConfirmed).
+        const pos = await this.positionConfirmed(a, s.symbol);
         // Cancelled while the position was read: it stays cancelled.
         if (FINAL_STATUSES.has(a.status)) return false;
-        if (pos === null) {
+        if (pos === null || pos === 'disagree') {
           // A read that failed is not "no position": it stays scheduled and reads again on the next step.
           a.startedAt = null;
-          await this.hold(a, `Waiting: your position on ${m.name} could not be read; trying again.`);
+          await this.hold(a, pos === null ? `Waiting: your position on ${m.name} could not be read; trying again.` : `Waiting: SoDEX's reads of your position on ${m.name} disagree; reading again.`);
           return false;
         }
         const size = floorStep(Math.abs(pos) * s.closeShare, m);
@@ -1729,6 +1746,8 @@ export class AlgoRuntime {
     }
     if (typeof a.k.holdSince !== 'number') a.k.holdSince = now;
     if (now - (a.k.holdSince as number) < s.holdMs) return;
+    if (!s.paper && s.conditions.some((c) => c.type === 'position') && !(await this.positionsAgree(a, s, now))) return;
+    if (this.stopped(a)) return;
     a.k.fired = now;
     // Written before it acts: after a crash it carries on from here, it never fires a second time.
     await this.save(a);
@@ -1750,10 +1769,11 @@ export class AlgoRuntime {
     }
     if (t.type === 'close') {
       if (typeof a.k.takeQty !== 'number') {
-        const pos = await this.positionOf(a, s.symbol);
+        const pos = await this.positionConfirmed(a, s.symbol);
         if (this.stopped(a)) return;
         // A read that failed is not "no position": it holds and reads again on the next step; only a confirmed 0 ends it.
         if (pos === null) return this.hold(a, `Fired; your position on ${s.symbol} could not be read - trying again.`);
+        if (pos === 'disagree') return this.hold(a, `Fired; SoDEX's reads of your position on ${s.symbol} disagree - reading again.`);
         if (!pos) return this.end(a, 'expired', `There was no position on ${s.symbol} to close.`);
         a.k.takeQty = floorStep(Math.abs(pos) * t.share, m);
         a.k.closeSide = pos > 0 ? 'sell' : 'buy';
@@ -1856,10 +1876,10 @@ export class AlgoRuntime {
       a.k.takeQty = Number(s.quantity);
       return true;
     }
-    const pos = await this.positionOf(a, s.symbol);
+    const pos = await this.positionConfirmed(a, s.symbol);
     if (this.stopped(a)) return false;
-    if (pos === null) {
-      await this.hold(a, `Fired; your position on ${s.symbol} could not be read - trying again.`);
+    if (pos === null || pos === 'disagree') {
+      await this.hold(a, pos === null ? `Fired; your position on ${s.symbol} could not be read - trying again.` : `Fired; SoDEX's reads of your position on ${s.symbol} disagree - reading again.`);
       return false;
     }
     const right = s.side === 'sell' ? pos > 0 : pos < 0;
@@ -2690,8 +2710,10 @@ export class AlgoRuntime {
       const placed = Math.max(0, ...(a.exitOrders ?? []).map((x) => x.placedAt));
       const size = await this.positionSince(a, m.name, placed + EXITS_SETTLE_MS);
       const held = size === null ? null : (a.spec.side === 'buy' ? size : -size) >= Number(m.stepSize) / 2;
-      if (held === false) return await this.exitsOutside(a, m, now);
+      // Gone on one read is not gone (exitsGone): nothing is done this round unless more says so.
+      if (held === false) return (await this.exitsGone(a, m, size!, placed)) ? await this.exitsOutside(a, m, now) : undefined;
       // Held, or not readable (the exits then go on protecting it).
+      if (held) this.exitsFlatSince.delete(a.id);
       this.exitsHeldAt.set(a.id, now);
       if (a.k.exitsPulled) {
         // The trader cancelled them (the position is still there): as the log says, they are not placed again.
@@ -2702,6 +2724,43 @@ export class AlgoRuntime {
     } finally {
       this.exitsWatching.delete(a.id);
     }
+  }
+
+  /**
+   * Whether the position an ended algo's exits protect is gone, as a read (`size`) says: only when
+   * CONFIRM_READS more reads agree on its size (confirm.ts) and SoDEX's trades hold a fill since the
+   * exits were placed that cut it - a liquidation, the trader's close. A backend that missed the
+   * opening fills reads the account flat while it holds the position: cancelling the exits then
+   * would leave a real position without its take-profit and stop-loss. Reads that agree with no
+   * such fill (the trades lag the matching, or cannot be read) are taken after EXITS_NO_FILL_MS.
+   */
+  private async exitsGone(a: AlgoRecord, m: MarketInfo, size: number, placed: number): Promise<boolean> {
+    const c = await confirmRead<number | null>(size, () => this.positionOf(a, m.name), sizeView, { gapMs: this.host.confirmGapMs });
+    if (!c.ok) {
+      this.host.log.warn('algo: SoDEX\'s reads of the position disagree; the exits stay', { algo: a.id, symbol: m.name, reads: c.seen });
+      return false;
+    }
+    const close: Side = a.spec.side === 'buy' ? 'sell' : 'buy';
+    let cut: boolean | null = null;
+    try {
+      cut = (await this.host.sodex.fills(a.owner, m.name, placed - EXITS_FILLS_SLACK_MS)).some((f) => f.side === close);
+    } catch (e) {
+      this.host.log.warn('algo: fills read failed', { algo: a.id, symbol: m.name, error: String(e) });
+    }
+    if (cut) {
+      this.exitsFlatSince.delete(a.id);
+      return true;
+    }
+    const now = Date.now();
+    const since = this.exitsFlatSince.get(a.id) ?? now;
+    this.exitsFlatSince.set(a.id, since);
+    if (now - since >= EXITS_NO_FILL_MS) {
+      this.host.log.warn('algo: the position reads gone without a fill that cut it; its exits are taken as outside it', { algo: a.id, symbol: m.name, sinceMs: now - since, fills: cut === null ? 'unread' : 'none' });
+      this.exitsFlatSince.delete(a.id);
+      return true;
+    }
+    this.host.log.debug('algo: the position reads gone, with no fill in SoDEX\'s trades that cut it yet; the exits stay', { algo: a.id, symbol: m.name, fills: cut === null ? 'unread' : 'none' });
+    return false;
   }
 
   /** The owner's signed position on `symbol` from a read that left at `from` or later (one is made when the last is older). null: not readable. */
@@ -2990,6 +3049,51 @@ export class AlgoRuntime {
   private positionLeverage(a: AlgoRecord, symbol: string): number | null {
     const p = this.positionsOf.get(a.owner)?.data[symbol];
     return p && p.size !== 0 && typeof p.leverage === 'number' && p.leverage > 0 ? p.leverage : null;
+  }
+
+  /**
+   * The owner's position on `symbol` for a decision that is not taken back - the size of a close
+   * (it closes that much), an algo ended for want of a position: read, then confirmed by
+   * CONFIRM_READS more reads that agree on it (confirm.ts). null: not readable; 'disagree': the
+   * reads did not agree (read again on a later step, no sooner than CONFIRM_RETRY_MS). Paper uses
+   * its own position, as positionOf does.
+   */
+  private async positionConfirmed(a: AlgoRecord, symbol: string): Promise<number | null | 'disagree'> {
+    if (a.spec.paper) return this.positionOf(a, symbol);
+    if (Date.now() < (this.confirmRetryAt.get(a.id) ?? 0)) return 'disagree';
+    const first = await this.positionOf(a, symbol);
+    if (first === null) return null;
+    const c = await confirmRead<number | null>(first, () => this.positionOf(a, symbol), sizeView, { gapMs: this.host.confirmGapMs });
+    if (c.ok) {
+      this.confirmRetryAt.delete(a.id);
+      return c.value;
+    }
+    this.confirmRetryAt.set(a.id, Date.now() + CONFIRM_RETRY_MS);
+    this.host.log.warn('algo: SoDEX\'s reads of the position disagree; nothing decided on it this step', { algo: a.id, symbol, reads: c.seen });
+    return 'disagree';
+  }
+
+  /**
+   * A conditional with a position condition fires (once, for good) only when CONFIRM_READS more
+   * reads of the positions, CONFIRM_GAP_MS apart, still meet its conditions: a backend that is
+   * behind reads a position closed minutes ago, or none where one was just opened (confirm.ts).
+   */
+  private async positionsAgree(a: AlgoRecord, s: Extract<AlgoSpec, { kind: 'conditional' }>, now: number): Promise<boolean> {
+    if (Date.now() < (this.confirmRetryAt.get(a.id) ?? 0)) return false;
+    for (let i = 0; i < CONFIRM_READS; i++) {
+      const gap = this.host.confirmGapMs ?? CONFIRM_GAP_MS;
+      if (gap > 0) await sleep(gap);
+      const book = await this.loadPositions(a);
+      if (this.stopped(a)) return false;
+      const ok = book ? s.conditions.map((c, j) => this.conditionHolds(a, c, j, now)) : [];
+      if (!book || !(s.match === 'all' ? ok.every(Boolean) : ok.some(Boolean))) {
+        this.confirmRetryAt.set(a.id, Date.now() + CONFIRM_RETRY_MS);
+        this.host.log.warn('algo: a position condition held on one read of SoDEX and not on the next; not fired', { algo: a.id, read: i + 2 });
+        return false;
+      }
+    }
+    this.confirmRetryAt.delete(a.id);
+    return true;
   }
 
   private async positionOf(a: AlgoRecord, symbol: string): Promise<number | null> {

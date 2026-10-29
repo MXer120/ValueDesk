@@ -305,6 +305,7 @@ function runtime(w: World, sinkFor: (s: Subscription) => OrderSink | null, extra
   const fetch = fakeFetch(w);
   const store = extra.store ?? new MemoryStore();
   const rt = new CopyRuntime({
+    confirmGapMs: 0,
     store,
     sodex: new SodexClient({ network: 'mainnet', fetch }),
     hyperliquid: new HyperliquidClient(fetch),

@@ -128,6 +128,10 @@ class Exchange implements AlgoSink {
   history = new Map<string, Row>();
   /** The follower's position on SoDEX (BTC-USD), signed. */
   position = 0;
+  /** The follower's fills on SoDEX that no order of the algo's made (GET .../trades): a liquidation's, the trader's own. */
+  fills: Array<{ clOrdID: string | null; side: 'buy' | 'sell'; qty: number; price: number; time: number }> = [];
+  /** What a positions read answers, when set (a stale backend); else `position`. */
+  readAs: (() => number) | null = null;
   /** SoDEX unreachable: every request throws, as fetch does. */
   down = false;
   /** Whether a cancel is confirmed on the socket (false: the update is lost). */
@@ -196,6 +200,12 @@ class Exchange implements AlgoSink {
     }
     return stops.map((s) => ({ clOrdID: s.clOrdID, ok: true, orderId: '2', error: null, outcomeUnknown: false }));
   }
+  /** SoDEX's takeover of the position (a liquidation: its own fill, "liquidation:<id>"), to `to`. */
+  liquidate(to = 0): void {
+    const qty = this.position - to;
+    this.fills.push({ clOrdID: `liquidation:${this.fills.length + 1}`, side: qty > 0 ? 'sell' : 'buy', qty: Math.abs(qty), price: 54_000, time: Date.now() });
+    this.position = to;
+  }
   /** A resting order fills (part or all, `qty` more). */
   fill(id: string, qty: number): void {
     const r = this.resting.get(id)!;
@@ -236,11 +246,16 @@ function runtimeFor(r: Rig): AlgoRuntime {
     markets: async () => r.markets,
     follower: async () => {
       if (r.ex.down) throw new Error('fetch failed (SoDEX unreachable)');
-      return { equity: 1_000_000, positions: { 'BTC-USD': { size: r.ex.position, entry: 60_000, leverage: 1, leverageReported: true } } };
+      return { equity: 1_000_000, positions: { 'BTC-USD': { size: r.ex.readAs ? r.ex.readAs() : r.ex.position, entry: 60_000, leverage: 1, leverageReported: true } } };
+    },
+    fills: async (_owner: string, _symbol: string, since: number) => {
+      if (r.ex.down) throw new Error('fetch failed (SoDEX unreachable)');
+      return r.ex.fills.filter((f) => f.time >= since - 1_000);
     },
     get: async () => [],
   } as unknown as SodexClient;
   return new AlgoRuntime({
+    confirmGapMs: 0,
     store: r.store,
     sodex,
     network: 'mainnet',
@@ -778,7 +793,7 @@ test('liquidated, SoDEX pulling the exits with the position: they end and are ne
   const a = await bracketWithExits(r);
   const orders = r.ex.all.length;
   const batches = r.ex.stops.length;
-  r.ex.position = 0;
+  r.ex.liquidate();
   for (const id of [...r.ex.liveStops.keys()]) {
     r.ex.liveStops.delete(id);
     r.ex.history.get(id)!.status = 'CANCELED';
@@ -824,7 +839,7 @@ test('BUG liquidated, algo: SoDEX takes the position over and leaves the exits; 
   const batches = r.ex.stops.length;
   const orders = r.ex.all.length;
   // SoDEX takes the position over and leaves the stops; the stop-loss triggers with nothing to reduce before the engine looked.
-  r.ex.position = 0;
+  r.ex.liquidate();
   const sl = [...r.ex.liveStops.values()].find((s) => s.kind === 'sl')!;
   r.ex.liveStops.delete(sl.clOrdID);
   r.ex.history.get(sl.clOrdID)!.status = 'EXPIRED';
@@ -847,7 +862,7 @@ test('liquidated, algo, the exits still resting: the engine finds the position g
   const notices = noticesOf(r);
   const a = await bracketWithExits(r);
   const batches = r.ex.stops.length;
-  r.ex.position = 0;
+  r.ex.liquidate();
   for (let i = 0; i < 3; i++) await tick(r, 10_000);
   assert.equal(r.ex.liveStops.size, 0, 'both exits are cancelled on SoDEX');
   assert.equal(r.ex.cancelled.length, 2);
@@ -869,7 +884,7 @@ test('liquidated, algo with only a take-profit: the one exit is cancelled once t
   await step(r, a.id);
   assert.equal((await step(r, a.id, 500)).status, 'done');
   assert.deepEqual([...r.ex.liveStops.values()].map((s) => s.kind), ['tp']);
-  r.ex.position = 0;
+  r.ex.liquidate();
   for (let i = 0; i < 4; i++) await tick(r, 10_000);
   assert.equal(r.ex.liveStops.size, 0, 'the take-profit is cancelled');
   assert.equal(r.ex.stops.length, 1, 'nothing placed again');
@@ -881,7 +896,7 @@ test('liquidated, algo, the position flipped to the other side outside it: the e
   const r = await rig();
   const notices = noticesOf(r);
   const a = await bracketWithExits(r);
-  r.ex.position = -0.003;
+  r.ex.liquidate(-0.003);
   for (let i = 0; i < 3; i++) await tick(r, 10_000);
   assert.equal(r.ex.liveStops.size, 0);
   assert.equal(notices.filter((n) => n.ref === a.id && n.kind === 'closed').length, 1);
@@ -919,6 +934,7 @@ test('the stop-loss fired while its update was lost (the position flat because o
   // SoDEX fires it; the socket never says so.
   r.ex.liveStops.delete(sl.clOrdID);
   Object.assign(r.ex.history.get(sl.clOrdID)!, { status: 'FILLED', executedQty: 0.002, executedValue: 0.002 * 54_000 });
+  r.ex.fills.push({ clOrdID: sl.clOrdID, side: 'sell', qty: 0.002, price: 54_000, time: Date.now() });
   r.ex.position = 0;
   for (let i = 0; i < 4; i++) await tick(r, 10_000);
   const x = r.rt.get(a.id)!;
@@ -930,10 +946,85 @@ test('the stop-loss fired while its update was lost (the position flat because o
 test('liquidated, algo, while no runner ran: the next runner finds the position gone and cancels the exits the store kept', async () => {
   const r = await rig();
   const a = await bracketWithExits(r);
-  r.ex.position = 0;
+  r.ex.liquidate();
   await crashAndRestart(r);
   const notices = noticesOf(r);
   for (let i = 0; i < 3; i++) await tick(r, 10_000);
   assert.equal(r.ex.liveStops.size, 0);
   assert.deepEqual(notices.filter((n) => n.ref === a.id && n.kind === 'closed').map((n) => [n.kind, n.grade]), [['closed', 'error']]);
+});
+
+/* ================================== SoDEX's reads disagree (2026-10-29) ===== */
+
+/**
+ * SoDEX's gateway answers an account from backends that disagree: on mainnet 2026-10-29 four of six
+ * state reads seconds apart showed a position closed minutes before, and a backend that missed a fill
+ * reads the account without it. An ended algo's exits are cancelled for a position gone only when reads
+ * agree on it and SoDEX's trades hold a fill that cut it (copy-engine confirm.ts, watchExits).
+ */
+test('stale: a read shows flat while SoDEX holds the position (a backend that missed the opening fills): the exits are never cancelled and no notice goes out', async () => {
+  const r = await rig();
+  const notices = noticesOf(r);
+  const a = await bracketWithExits(r);
+  const batches = r.ex.stops.length;
+  // Every other read is the stale backend's: flat.
+  let n = 0;
+  r.ex.readAs = () => (n++ % 2 === 0 ? 0 : r.ex.position);
+  for (let i = 0; i < 12; i++) await tick(r, 10_000);
+  assert.equal(r.ex.liveStops.size, 2, 'both exits still rest on SoDEX');
+  assert.equal(r.ex.cancelled.length, 0, 'nothing cancelled');
+  assert.equal(r.ex.stops.length, batches, 'nothing placed again either');
+  assert.equal(notices.filter((n) => n.ref === a.id && n.kind === 'closed').length, 0, 'no "position gone" notice');
+  assert.ok(n >= 2, `the position was read (${n} reads)`);
+});
+
+test('stale: every read shows flat while SoDEX holds the position, and no fill cut it: the exits stay (the trades are the evidence); only after 15 minutes of agreeing reads are they taken as outside it', async () => {
+  const r = await rig();
+  const notices = noticesOf(r);
+  const a = await bracketWithExits(r);
+  r.ex.readAs = () => 0;
+  for (let i = 0; i < 12; i++) await tick(r, 10_000);
+  assert.equal(r.ex.liveStops.size, 2, 'both exits stay: no fill in SoDEX\'s trades cut the position');
+  assert.equal(notices.filter((n) => n.ref === a.id && n.kind === 'closed').length, 0);
+  // Minutes on, still no fill: still nothing.
+  for (let i = 0; i < 3; i++) await tick(r, 60_000);
+  assert.equal(r.ex.liveStops.size, 2);
+  // Reads that agree for 15 minutes, with no fill: taken as gone (the trades never showed one).
+  for (let i = 0; i < 14; i++) await tick(r, 60_000);
+  assert.equal(r.ex.liveStops.size, 0, 'cancelled at last');
+  assert.equal(notices.filter((n) => n.ref === a.id && n.kind === 'closed').length, 1);
+});
+
+test('stale: SoDEX liquidated the position, the reads alternate fresh (flat) and stale (still held): nothing until they agree, then the exits go once', async () => {
+  const r = await rig();
+  const notices = noticesOf(r);
+  const a = await bracketWithExits(r);
+  r.ex.liquidate();
+  // Reads alternate: the fresh backend flat, the stale one still showing the position.
+  let n = 0;
+  r.ex.readAs = () => (n++ % 2 === 0 ? 0 : 0.002);
+  await tick(r, 10_000);
+  await tick(r, 10_000);
+  assert.equal(r.ex.liveStops.size, 2, 'reads that disagree change nothing');
+  // The backends catch up: every read flat.
+  r.ex.readAs = null;
+  for (let i = 0; i < 8; i++) await tick(r, 10_000);
+  assert.equal(r.ex.liveStops.size, 0, 'both exits cancelled once the reads agree and the liquidation fill is there');
+  assert.deepEqual(notices.filter((n) => n.ref === a.id && n.kind === 'closed').map((n) => n.grade), ['error']);
+});
+
+test('stale: a time-sliced close sizes itself on reads that agree; reads that disagree hold it, never close the stale size', async () => {
+  const r = await rig();
+  r.ex.position = 0.004;
+  // The stale backend shows the position as it was before half of it was closed by hand.
+  let n = 0;
+  r.ex.readAs = () => (n++ % 2 === 0 ? 0.008 : 0.004);
+  const a = await add(r, { kind: 'twap', side: 'sell', closeShare: 1, durationMs: 120_000, slices: 2, exec: { style: 'taker' } });
+  let x = await step(r, a.id);
+  assert.notEqual(x.status, 'running', 'not started on reads that disagree');
+  assert.equal(r.ex.all.length, 0, 'nothing sent');
+  r.ex.readAs = null;
+  x = await step(r, a.id, 20_000);
+  assert.equal(x.k.total, 0.004, 'sized on the reads that agree');
+  assert.equal(x.k.closeSide, 'sell');
 });

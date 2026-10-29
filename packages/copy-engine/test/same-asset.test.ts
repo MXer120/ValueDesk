@@ -233,6 +233,7 @@ function runtime(hl: HlPositions, sodexMarks: Record<string, number>) {
   const store = new MemoryStore();
   const notices: EngineNotice[] = [];
   const rt = new CopyRuntime({
+    confirmGapMs: 0,
     store,
     sodex: new SodexClient({ network: 'mainnet', fetch }),
     hyperliquid: new HyperliquidClient(fetch),

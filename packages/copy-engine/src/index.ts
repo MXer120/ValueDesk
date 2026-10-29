@@ -4,6 +4,7 @@
  */
 export * from './types.ts';
 export * from './io.ts';
+export * from './confirm.ts';
 export * from './policy.ts';
 export * from './sanctions.ts';
 export * from './settings.ts';

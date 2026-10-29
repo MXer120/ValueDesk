@@ -195,7 +195,7 @@ async function rig(): Promise<Rig> {
     },
     get: async () => [],
   } as unknown as SodexClient;
-  r.rt = new AlgoRuntime({ store, sodex, network: 'mainnet', market, sinkFor: () => sink, log: silentLogger, autoTick: false, lookup: async () => [] });
+  r.rt = new AlgoRuntime({ confirmGapMs: 0, store, sodex, network: 'mainnet', market, sinkFor: () => sink, log: silentLogger, autoTick: false, lookup: async () => [] });
   await r.rt.start();
   market.set('BTC-USD', 60_000, 60_010);
   market.set('ETH-USD', 3_000, 3_001);

@@ -192,6 +192,7 @@ interface RigOpts {
 function runtimeOn(r: Omit<Rig, 'rt'>, o: RigOpts = {}): AlgoRuntime {
   const sodex = { markets: async () => [BTC, ETH], follower: async () => ({ positions: { 'BTC-USD': { size: r.position.size, entry: r.position.entry } } }), get: async () => [] } as unknown as SodexClient;
   return new AlgoRuntime({
+    confirmGapMs: 0,
     store: r.store,
     sodex,
     network: 'mainnet',

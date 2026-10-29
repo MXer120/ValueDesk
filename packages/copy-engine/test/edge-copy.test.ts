@@ -148,6 +148,7 @@ async function until(cond: () => boolean, ms = 3000): Promise<boolean> {
 function runtime(w: World, sinkFor: (s: Subscription) => OrderSink | null, notices: EngineNotice[] = []) {
   const store = new MemoryStore();
   const rt = new CopyRuntime({
+    confirmGapMs: 0,
     store,
     sodex: new SodexClient({ network: 'mainnet', fetch: fakeFetch(w) }),
     hyperliquid: new HyperliquidClient(fakeFetch(w)),
