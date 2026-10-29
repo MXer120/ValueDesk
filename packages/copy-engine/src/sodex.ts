@@ -734,6 +734,28 @@ export class SodexClient {
     return followerFromState(await this.perpsState(address), now);
   }
 
+  /**
+   * The account's fills on one market since `since` (GET .../trades, weight 25: read only when
+   * a copied position changed outside the copier). SoDEX's own fills carry their origin in the
+   * client order id: a liquidation is "liquidation:<id>" (docs/research/07 G7), the copier's
+   * stops "vds-...".
+   */
+  async fills(address: string, symbol: string, since: number): Promise<Array<{ clOrdID: string | null; side: 'buy' | 'sell'; qty: number; price: number; time: number }>> {
+    const path = `/api/v1/perps/accounts/${address.toLowerCase()}/trades?symbol=${encodeURIComponent(symbol)}&startTime=${Math.max(0, Math.floor(since))}&limit=100`;
+    const rows = await this.get<unknown>(path, weightFor(path, 100));
+    const list = Array.isArray(rows) ? rows : ((rows as { trades?: unknown[] } | null)?.trades ?? []);
+    return (list as Array<Record<string, unknown>>)
+      .filter((r) => !r.symbol || r.symbol === symbol)
+      .map((r) => ({
+        clOrdID: typeof r.clOrdID === 'string' && r.clOrdID ? r.clOrdID : null,
+        side: String(r.side).toUpperCase() === 'SELL' ? ('sell' as const) : ('buy' as const),
+        qty: Number(r.quantity) || 0,
+        price: Number(r.price) || 0,
+        time: Number(r.time) || 0,
+      }))
+      .filter((f) => !f.time || f.time >= since - 1_000);
+  }
+
   /** Leader positions on SoDEX, symbol -> signed size, plus equity. */
   async leaderPositions(address: string): Promise<LeaderRead> {
     const st = await this.perpsState(address);

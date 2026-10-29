@@ -429,6 +429,8 @@ test('exits: refused, they are tried again after 30 s, 60 s, ... and given up af
   r.sink.refuseStops = 99;
   const a = await add(r, { kind: 'bracket', quantity: '0.002', entry: 'market', slippageBps: 20, exits: { slPct: 0.01 } });
   await step(r, a.id); // entry fills, the bracket ends, exits refused
+  // SoDEX holds what the entry filled: an ended algo asks the position before it places a refused pair again.
+  r.position = { size: 0.002, entry: 60_010 };
   for (let i = 0; i < 700; i++) {
     clock += 1_000;
     r.rt.tick(clock);

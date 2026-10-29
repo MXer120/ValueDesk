@@ -1,10 +1,10 @@
 /**
  * The follower's notices (notices.ts): what an algo or a copy raises - failed, stopped, held,
- * halted, closed - and what it does not (what the follower did themself), with a stable id.
+ * halted, closed, made smaller, liquidated - and what it does not (what the follower did themself), with a stable id.
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { algoNotice, copyClosedNotice, copyNotice, type AlgoRecord, type Subscription } from '../src/index.ts';
+import { algoClosedNotice, algoNotice, copyClosedNotice, copyNotice, copyReducedNotice, type AlgoRecord, type Subscription } from '../src/index.ts';
 
 const W = '0x00000000000000000000000000000000000000aa';
 const algo = { id: 'al_1', owner: W, spec: { kind: 'twap', side: 'sell', symbol: 'BTC-USD', paper: false } } as unknown as AlgoRecord;
@@ -32,4 +32,18 @@ test('a copy: halted an error, held / paused / stopped by the engine a warning; 
   const outside = copyClosedNotice(copy, 'ETH-USD', 'own-position', 'Closed outside the copier.', 5);
   assert.deepEqual([outside.grade, outside.kind, outside.ref, outside.id], ['error', 'closed', 'cp_1:ETH-USD', 'copy:cp_1:ETH-USD:closed:5']);
   assert.equal(copyClosedNotice(copy, 'ETH-USD', 'stop-loss', 'Your stop-loss closed it.').grade, 'info');
+});
+
+test('a liquidation is an error, whole or in part; a part closed outside by the follower or SoDEX a warning, by the copy\'s stop info', () => {
+  const liq = copyClosedNotice(copy, 'ETH-USD', 'liquidation', 'SoDEX liquidated this copied position.', 5);
+  assert.deepEqual([liq.grade, liq.kind, liq.title], ['error', 'closed', 'ETH-USD liquidated in the copy of 0x1234…5678']);
+  const part = copyReducedNotice(copy, 'ETH-USD', 'liquidation', 'SoDEX liquidated 0.4 of this copied position.', 6);
+  assert.deepEqual([part.grade, part.kind, part.ref, part.id, part.title], ['error', 'reduced', 'cp_1:ETH-USD', 'copy:cp_1:ETH-USD:reduced:6', 'ETH-USD partly liquidated in the copy of 0x1234…5678']);
+  assert.equal(copyReducedNotice(copy, 'ETH-USD', 'own-position', 'x').grade, 'warn');
+  assert.equal(copyReducedNotice(copy, 'ETH-USD', 'stop-loss', 'x').grade, 'info');
+});
+
+test('an algo whose position was closed outside it: an error, on the algo', () => {
+  const n = algoClosedNotice(algo, 'Your BTC-USD position is gone.', 7);
+  assert.deepEqual([n.source, n.ref, n.kind, n.grade, n.title, n.id], ['algo', 'al_1', 'closed', 'error', 'TWAP sell on BTC-USD: position closed outside it', 'algo:al_1:closed:7']);
 });
