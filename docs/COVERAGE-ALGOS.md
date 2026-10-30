@@ -186,3 +186,14 @@ Found, not changed (owner's call):
 - **A wide spread** (the spread guard holding): SoDEX's book is not ours to widen; R holds it on a faked book, live runs
   set the guard and change it.
 - **Liquidations**: the slow live scenarios (`liq.*`) let SoDEX liquidate $12 on purpose; see the live-test README.
+
+## Dry runs of the matrix (2026-10-30, `run.ts --dry --only mx.*`)
+
+- **self**: 36 of 36 passed (on paper, against SoDEX mainnet's live book and tape).
+- **hosted** (ValueDesk's executor, the release deployed then): 34 of 36. The two that fail are bugs 2 and 3 above
+  (`mx.scale.size-change`, `mx.bracket.limit-resize`): fixed here, not yet released; they pass once it is. Two
+  first-run failures were the scenarios' own and are fixed (a check against the arrival price; a time check that read
+  this machine's clock against the executor's, which runs a few seconds apart).
+- **browser**: not run. The runner's bootstrap stops before any scenario, at the test wallet's connect step
+  (`apps/web/e2e/ui/harness.ts`: the `Wallet` button in the `Tools` rail not visible within 30 s in headless Edge), on
+  a dev web served from this checkout: the same for every scenario of the suite, not one of these.
