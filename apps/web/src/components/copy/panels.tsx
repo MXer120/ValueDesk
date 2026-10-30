@@ -17,15 +17,15 @@
  *  - Traders are shown by public, objective numbers, the same for everyone:
  *    nothing here recommends a trader to anyone.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { SKIP_REASONS, type ActivityEntry, type CopyView } from '@copy-engine';
 import { MODE_LABEL } from '../../copy/CopySetupSheet';
-import { commandCopy, copyActivity, copyRows, stopAllCopies, type CopyRow } from '../../copy/live';
+import { commandCopy, copyActivity, copyRows, stopAllCopies, type CopyRow, type LiveCopy } from '../../copy/live';
 import { notify, notifyError } from '../../toast';
 import { pollEvery } from '../../exchange/visibility';
 import { useConfirm } from '../Modal';
 import { DASH, fmt, fmtUsd, shortAddr, signClass } from '../../format';
-import { VENUE_LABEL } from '../../vsApi';
+import { VENUE_LABEL, type Venue } from '../../vsApi';
 import { PanelTabs } from '../../dashboard/Panel';
 import { Card, Group, Row, Stat } from '../portfolio/parts';
 import { CoinLabel } from '../CoinIcon';
@@ -79,39 +79,64 @@ const fmtDay = (ms: number): string =>
 
 /* ============================================================ copies ====== */
 
+/** What the copies table needs: the live copy state, the wallet, and where a trader opens. */
+export interface CopiesSource {
+  live: LiveCopy;
+  wallet: string | null;
+  onScan: (address: string, venue?: Venue) => void;
+}
+
 export function CopiesPanel({ c }: { c: CopyContext }) {
   const trades = c.sim.result?.fills ?? [];
-  const rows = copyRows(c.live);
+  return (
+    <Card className="pf-card--band">
+      <div className="dash pf-band">
+        <CopiesTabs src={c} extra={[{
+          key: 'trades',
+          label: `Backtest trades${trades.length ? ` (${fmt(trades.length, 0)})` : ''}`,
+          content: <TradeLog trades={trades} />,
+        }]} />
+      </div>
+    </Card>
+  );
+}
+
+/**
+ * Managing the copies: My copies (Pause, Resume, Stop, Close, Stop all) and each
+ * copy's Activity. The Portfolio page's My copies card opens it ("Manage copies").
+ */
+export function CopiesManager({ src }: { src: CopiesSource }) {
+  return (
+    <div className="dash pf-band">
+      <CopiesTabs src={src} />
+    </div>
+  );
+}
+
+function CopiesTabs({ src, extra = [] }: { src: CopiesSource; extra?: Array<{ key: string; label: string; content: ReactNode }> }) {
+  const rows = copyRows(src.live);
   const running = rows.filter((r) => r.view.subscription.status !== 'stopped');
   const [picked, setPicked] = useState<string | null>(null);
   const [tab, setTab] = useState<string>('mine');
   const sel = rows.find((r) => r.view.subscription.id === picked) ?? null;
   return (
-    <Card className="pf-card--band">
-      <div className="dash pf-band">
-        <PanelTabs
-          active={tab}
-          onChange={setTab}
-          tabs={[
-            {
-              key: 'mine',
-              label: `My copies (${running.length})`,
-              content: <MyCopies c={c} rows={rows} onActivity={(id) => { setPicked(id); setTab('activity'); }} />,
-            },
-            {
-              key: 'activity',
-              label: sel ? `Activity · ${shortAddr(sel.view.subscription.settings.leader.address)}` : 'Activity',
-              content: <CopyActivity row={sel} rows={rows} onPick={setPicked} />,
-            },
-            {
-              key: 'trades',
-              label: `Backtest trades${trades.length ? ` (${fmt(trades.length, 0)})` : ''}`,
-              content: <TradeLog trades={trades} />,
-            },
-          ]}
-        />
-      </div>
-    </Card>
+    <PanelTabs
+      active={tab}
+      onChange={setTab}
+      tabs={[
+        {
+          key: 'mine',
+          label: `My copies (${running.length})`,
+          content: <MyCopies src={src} rows={rows} onActivity={(id) => { setPicked(id); setTab('activity'); }} />,
+        },
+        {
+          key: 'activity',
+          label: sel ? `Activity · ${shortAddr(sel.view.subscription.settings.leader.address)}` : 'Activity',
+          content: <CopyActivity row={sel} rows={rows} onPick={setPicked} />,
+        },
+        ...extra,
+      ]}
+    />
   );
 }
 
@@ -125,7 +150,7 @@ function sizingOf(v: CopyView): string {
   return s.direction === 'counter' ? `Counter · ${size}` : size;
 }
 
-function MyCopies({ c, rows, onActivity }: { c: CopyContext; rows: CopyRow[]; onActivity: (id: string) => void }) {
+function MyCopies({ src: c, rows, onActivity }: { src: CopiesSource; rows: CopyRow[]; onActivity: (id: string) => void }) {
   const { confirm, dialog } = useConfirm();
   const [busy, setBusy] = useState<string | null>(null);
   const live = rows.filter((r) => r.view.subscription.status !== 'stopped');

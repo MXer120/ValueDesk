@@ -192,6 +192,30 @@ export function toCopySettings(p: ParsedSetup, s: SetupState, leader: { venue: L
   };
 }
 
+/** Copy rules the engine keeps as fractions, which the copy window takes in percent. */
+const PCT_FIELDS = new Set(['ratio', 'stopLossPct', 'takeProfitPct', 'drawdownStopPct']);
+const USD_FIELDS = new Set(['allocationUsd', 'fixedNotionalUsd', 'maxPositionUsd']);
+const RANGE = /^(.+) must be between (-?\d+(?:\.\d+)?) and (-?\d+(?:\.\d+)?)\.$/;
+
+/**
+ * The engine's rule check (checkSettings) in the copy window's units. It states its
+ * limits as fractions: a 0,5 % stop loss read "Stop loss must be between 0.01 and 1.",
+ * under a field typed in percent. Now "between 1 % and 100 %"; dollar limits as
+ * dollars, the slippage cap in bps, numbers in the app's format.
+ */
+export function copyErrorInWords(field: string, message: string): string {
+  const m = RANGE.exec(message);
+  if (!m) return message;
+  const [, label, a, b] = m;
+  const min = Number(a);
+  const max = Number(b);
+  const n = (v: number) => localize(formatNumber(v, 'en-US', { maximumFractionDigits: 4 }));
+  if (PCT_FIELDS.has(field)) return `${label} must be between ${n(min * 100)} % and ${n(max * 100)} %.`;
+  if (USD_FIELDS.has(field)) return `${label} must be between ${fmtUsd(min, 0)} and ${fmtUsd(max, 0)}.`;
+  if (field === 'slippageBps') return `${label} must be between ${n(min)} and ${n(max)} bps.`;
+  return `${label} must be between ${n(min)} and ${n(max)}.`;
+}
+
 const num = (s: string): number | null => {
   const t = s.replace(/[,\s$%]/g, '');
   if (t === '') return null;

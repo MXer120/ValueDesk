@@ -70,6 +70,7 @@ import { pctAsUnit, unitAsPct, useSlipUnit, type SlipUnit } from '../../slipUnit
 import { MarketSelect, MiniSelect } from './MarketSelect';
 import { coinOf, useOracle } from '../../algo/oracle';
 import {
+  BASKET_LEG_USD,
   advancedChanges,
   autoSlices,
   cond,
@@ -2146,7 +2147,7 @@ function BasketLegs({ d, set }: { d: Draft; set: (p: Partial<Draft>) => void }) 
         ))}
       </ol>
       {d.legs.length < 10 && (
-        <button type="button" className="algo-add" onClick={() => set({ legs: [...d.legs, { symbol: '', side: 'buy', usd: '100' }] })}>
+        <button type="button" className="algo-add" onClick={() => set({ legs: [...d.legs, { symbol: '', side: 'buy', usd: BASKET_LEG_USD }] })}>
           + Add a market
         </button>
       )}

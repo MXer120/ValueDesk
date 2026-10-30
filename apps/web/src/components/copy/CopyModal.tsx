@@ -108,6 +108,8 @@ export function CopyModal({ c, open, row, onClose, onStarted }: CopyModalProps) 
       <span className="cpy-mfoot__note">
         {step === 1
           ? (errs.length ? <span className="cpy-mfoot__err">{errs[0]}</span> : 'Next: where the copier runs and what it trades with.')
+          // A rule that is wrong (the amount to trade with is on this step) says so here: Start is off for it, and "Ready" would not be true.
+          : errs.length ? <span className="cpy-mfoot__err">{errs[0]}</span>
           : ready ? (c.setup.paper ? 'Ready: a paper copy sends nothing to SoDEX.' : 'Ready to start.') : counterBlocked ? 'This copier cannot counter-trade.' : 'Finish the steps on the right first.'}
       </span>
       <span className="cpy-mfoot__acts">
@@ -375,7 +377,7 @@ function RunStep({ c }: { c: CopyContext }) {
       <div className="cpy-mmain">
         <div className="cpy-alloc">
           <label className="cpy-alloc__k" htmlFor={`${uid}-alloc`}>Trade with</label>
-          <span className={`cpy-alloc__box${c.parsed.errors.allocation ? ' is-bad' : ''}`}>
+          <span className={`cpy-alloc__box${c.parsed.errors.allocation || c.copyErrors.some((x) => x.startsWith('Allocation')) ? ' is-bad' : ''}`}>
             <input
               id={`${uid}-alloc`}
               value={toInputText(c.setup.allocation)}

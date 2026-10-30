@@ -56,6 +56,23 @@ test('every kind, untouched, is a spec the engine accepts', () => {
   }
 });
 
+test('an untouched basket plans: its default legs are large enough for its randomised clips', () => {
+  // $100 a leg in 10 clips was ~$10 a clip, the smaller ones under the $10 minimum: refused before it could start.
+  const ETH = { ...BTC, id: 2, name: 'ETH-USD', base: 'ETH', tickSize: '0.01', stepSize: '0.0001', minQuantity: '0.0001' } as unknown as MarketInfo;
+  const s = checkAlgoSpec(draftToSpec('basket', untouched('basket'), shared, NOW)).spec!;
+  for (const seed of [1, 2, 3, 4, 5]) {
+    const plan = planAlgo(s, BTC, {
+      now: NOW, price: 77_000, seed,
+      prices: (sym) => (sym === 'ETH-USD' ? 2_200 : 77_000),
+      market: (sym) => (sym === 'ETH-USD' ? ETH : BTC),
+    });
+    assert.deepEqual(plan.errors, [], `seed ${seed}`);
+  }
+  const old = checkAlgoSpec(draftToSpec('basket', { ...untouched('basket'), legs: legs('BTC-USD', 'buy').map((l) => ({ ...l, usd: '100' })) }, shared, NOW)).spec!;
+  const refused = planAlgo(old, BTC, { now: NOW, price: 77_000, seed: 1, prices: (sym) => (sym === 'ETH-USD' ? 2_200 : 77_000), market: (sym) => (sym === 'ETH-USD' ? ETH : BTC) });
+  assert.match(refused.errors.join(' '), /under SoDEX's \$10 minimum/, 'the old default was refused');
+});
+
 test('slices follow the duration, one a minute, until set', () => {
   assert.equal(autoSlices('30', 'm'), '30');
   assert.equal(autoSlices('4', 'h'), '240');

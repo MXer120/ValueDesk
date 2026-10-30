@@ -12,8 +12,8 @@ export const SIZE = 0.005;
 /** Every kind the Algo menu offers (components/algo/menu.ts ALGO_MENU), in its order. */
 export const KINDS = ['TWAP', 'Chase TWAP', 'VWAP', 'POV', 'Iceberg', 'Chase', 'Scale', 'DCA', 'Swarm', 'Conditional', 'Trailing stop', 'Fill fast', 'Bracket', 'Basket'];
 
-export function algo(page: Page) {
-  const t = ticket(page);
+export function algo(page: Page, root?: Locator) {
+  const t = ticket(page, root);
   const tabs = t.g.getByRole('tablist', { name: 'Order type' });
   const menu = page.getByRole('listbox', { name: 'Algo order type' });
   const a = {
@@ -31,7 +31,8 @@ export function algo(page: Page) {
     settings: (kind: string) => page.getByRole('dialog', { name: `${kind} settings` }),
     async open(kind: string, section?: string) {
       const d = a.settings(kind);
-      if (!(await d.isVisible())) await t.g.getByRole('button', { name: 'Advanced', exact: true }).click();
+      // Its name carries a count once a setting differs from the defaults ("Advanced 1 changed").
+      if (!(await d.isVisible())) await t.g.getByRole('button', { name: /^Advanced/ }).click();
       await d.waitFor({ state: 'visible' });
       if (section) {
         await d.getByRole('navigation', { name: `${kind} settings sections` }).getByRole('button', { name: section, exact: true }).click();

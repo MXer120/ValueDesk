@@ -151,8 +151,9 @@ export function uiSuite(file = process.argv[1] ?? 'spec') {
 
   async function goto(page: Page, at: string, path: string, o: Omit<OpenOptions, 'setup'>): Promise<void> {
     await page.goto(at + path, { waitUntil: 'domcontentloaded' });
-    if (o.welcome !== false) await acceptWelcome(page);
+    // The dock first: at phone width it lies over the welcome gate's checkbox.
     await hideDevPanel(page);
+    if (o.welcome !== false) await acceptWelcome(page);
     if (o.connect) await connectWallet(page);
   }
 

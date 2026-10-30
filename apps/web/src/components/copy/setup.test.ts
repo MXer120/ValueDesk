@@ -6,10 +6,11 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { TraderProfile, VsPosition } from '../../vsApi';
 import {
-  DEFAULT_SETUP, COPY_BUILDER_TENTHS_BPS, TAKER_RATE, fmtRate, fmtSignedPct, fmtSize, largestPosition,
+  DEFAULT_SETUP, COPY_BUILDER_TENTHS_BPS, TAKER_RATE, copyErrorInWords, fmtRate, fmtSignedPct, fmtSize, largestPosition,
   normaliseSetup, parseCoins, parseSetup, readTarget, toCopySettings, windowStart, workedExample, type SetupState,
 } from './setup';
 import { setNumStyle } from '../../numStyle';
+import { checkSettings } from '@copy-engine';
 import { fmtRate as rate, fmtSignedPct as signedPct, fmtSize as size } from './setup';
 
 test('formatting in the default number format (1.234,56): trimmed sizes keep their decimal comma', () => {
@@ -158,4 +159,19 @@ test('counter-trade: the worked example takes the other side, and the signed rul
   assert.equal(rules.direction, 'counter');
   assert.equal(toCopySettings(parseSetup(setup()), setup(), { venue: 'sodex', address: '0x' + '1'.repeat(40) }).direction, 'copy');
   assert.equal(normaliseSetup({ direction: 'sideways' as never }).direction, 'copy');
+});
+
+test('the engine rule limits in the copy window units: percent, dollars, bps', () => {
+  setNumStyle('dot-comma');
+  // A 0,5 % stop loss passes the form (above 0) and fails the engine (at least 1 %), which said it in fractions.
+  const s = parseSetup({ ...DEFAULT_SETUP, stopLoss: '0.5', drawdown: '150' });
+  assert.equal(s.errors.drawdown, 'Drawdown stop can be at most 100.');
+  const r = checkSettings(toCopySettings(parseSetup({ ...DEFAULT_SETUP, stopLoss: '0.5' }), { ...DEFAULT_SETUP, stopLoss: '0.5' }, { venue: 'sodex', address: '0x' + '1'.repeat(40) }));
+  assert.equal(r.errors.stopLossPct, 'Stop loss must be between 0.01 and 1.', 'what the engine says');
+  assert.equal(copyErrorInWords('stopLossPct', r.errors.stopLossPct!), 'Stop loss must be between 1 % and 100 %.');
+  assert.equal(copyErrorInWords('takeProfitPct', 'Take profit must be between 0.01 and 100.'), 'Take profit must be between 1 % and 10.000 %.');
+  assert.equal(copyErrorInWords('ratio', 'Ratio must be between 0.0001 and 10.'), 'Ratio must be between 0,01 % and 1.000 %.');
+  assert.equal(copyErrorInWords('allocationUsd', 'Allocation must be between 10 and 10000000.'), 'Allocation must be between $10 and $10.000.000.');
+  assert.equal(copyErrorInWords('slippageBps', 'Slippage cap must be between 1 and 500.'), 'Slippage cap must be between 1 and 500 bps.');
+  assert.equal(copyErrorInWords('assetDeny', 'BTC is on both lists.'), 'BTC is on both lists.');
 });

@@ -48,6 +48,10 @@ export interface FakeAccountOptions {
   balance?: number;
   /** The builder approvals SoDEX lists from the start (default none). */
   builders?: Array<{ builderID: number; feeRate: number }>;
+  /** A perps position the account holds (one-way: a positive size is long). */
+  position?: { symbol: string; size: string; entry: string; leverage: number };
+  /** A resting perps limit order. */
+  openOrder?: { symbol: string; side: 'BUY' | 'SELL'; price: string; quantity: string };
 }
 
 export interface FakeSodex {
@@ -102,6 +106,17 @@ export async function fakeSodexAccount(ctx: BrowserContext, address: string, o: 
     { name: 'default', type: 'EVM', publicKey: me, expiresAt: 0 },
     ...keys.map((k) => ({ name: k.name, type: 'EVM', publicKey: k.publicKey, expiresAt: k.expiresAt })),
   ];
+  /** Seeded rows, gone once a write closes or cancels them (a reduce-only order, a cancel). */
+  let held = o.position ? { ...o.position } : null;
+  let resting = o.openOrder ? { ...o.openOrder, orderID: 777_001, clOrdID: 'e2e-resting-1' } : null;
+  const positions = () => (held ? [{
+    id: 555_001, symbol: held.symbol, positionSide: 'BOTH', size: held.size, avgEntryPrice: held.entry, leverage: held.leverage,
+    marginMode: 'CROSS', initialMargin: String((Number(held.size) * Number(held.entry)) / held.leverage), unrealizedProfit: '0', liquidationPrice: '0',
+  }] : []);
+  const orders = () => (resting ? [{
+    orderID: resting.orderID, clOrdID: resting.clOrdID, symbol: resting.symbol, side: resting.side, type: 'LIMIT', timeInForce: 'GTC',
+    price: resting.price, quantity: resting.quantity, origQty: resting.quantity, filledQuantity: '0', status: 'NEW', reduceOnly: false, createdAt: Date.now() - 60_000,
+  }] : []);
   const builderRows = () => builders.map((b) => ({ userID: accountId, builderID: b.builderID, feeRate: b.feeRate }));
 
   /** A read about this wallet: the fake account's answer, or null to let SoDEX answer. */
@@ -114,7 +129,9 @@ export async function fakeSodexAccount(ctx: BrowserContext, address: string, o: 
     if (p.endsWith(`/user/${me}/builders`)) return { spot: builderRows(), perps: builderRows() };
     if (p.endsWith(`/user/${me}/api-keys`)) return { spot: keyRows(), perps: keyRows() };
     if (/\/(perps|spot)\/accounts\/[^/]+\/api-keys$/.test(p)) return keyRows();
-    if (/\/(perps|spot)\/accounts\/[^/]+\/(orders|positions)$/.test(p)) return [];
+    if (/\/perps\/accounts\/[^/]+\/positions$/.test(p)) return positions();
+    if (/\/perps\/accounts\/[^/]+\/orders$/.test(p)) return orders();
+    if (/\/spot\/accounts\/[^/]+\/(orders|positions)$/.test(p)) return [];
     if (/\/(perps|spot)\/accounts\/[^/]+\/balances$/.test(p)) return [];
     return null;
   }
@@ -150,7 +167,10 @@ export async function fakeSodexAccount(ctx: BrowserContext, address: string, o: 
       }
       return ok({});
     }
+    if (/\/trade\/orders(\/batch)?$/.test(url.pathname) && req.method() === 'DELETE') resting = null;
     if (/\/trade\/orders(\/batch)?$/.test(url.pathname) && req.method() === 'POST') {
+      // A reduce-only market order closes the seeded position (as it would fill).
+      if (((body as { orders?: Array<{ reduceOnly?: boolean; type?: number; modifier?: number }> })?.orders ?? []).some((l) => l.reduceOnly && l.type === 2 && l.modifier === 1)) held = null;
       const legs = ((body as { orders?: Array<{ clOrdID?: string }> })?.orders ?? []) as Array<{ clOrdID?: string }>;
       const err = rejectNext;
       rejectNext = null;

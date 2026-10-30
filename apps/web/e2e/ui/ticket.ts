@@ -7,8 +7,9 @@ import { dec, num, readValue, typeInto, until, waitValue } from './harness';
 
 export type OrderType = 'Market' | 'Limit' | 'Stop' | 'Algo';
 
-export function ticket(page: Page) {
-  const g = page.getByRole('group', { name: 'Order entry' });
+/** oot: where the ticket is - the desktop panel Order entry by default; at phone width the carousel's Trade page. */
+export function ticket(page: Page, root?: Locator) {
+  const g = root ?? page.getByRole('group', { name: 'Order entry' });
   const box = (name: string) => g.getByRole('textbox', { name, exact: true });
   const t = {
     g,
