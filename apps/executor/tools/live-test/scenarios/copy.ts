@@ -85,6 +85,12 @@ const LATENCY = {
   sodex: { medianMs: 1_000, slowestMs: 3_000, pairSlackMs: 0 },
   hyperliquid: { medianMs: 2_000, slowestMs: 5_000, pairSlackMs: 500 },
 } as const;
+/**
+ * The limits are the hosted executor's, which runs next to SoDEX (Tokyo). A self-hosted copier or a browser
+ * copies from wherever it runs: this machine's link to SoDEX's trade stream adds its own delay and jitter
+ * (2026-10-29 from Germany: 0-0.7 s between the leader's fill and the order leaving, by the stream alone).
+ */
+const OFFSITE_SLACK_MS = 1_000;
 
 /**
  * How long each copied order took: each copy order (its first fill: one order
@@ -123,7 +129,9 @@ async function leaderClockOffset(t: T): Promise<{ ms: number; within: number } |
 
 /** Each copied order within the leader venue's limits (LATENCY); a Hyperliquid leader's clock offset logged with them. */
 async function checkLatencies(t: T, atLeast: number): Promise<void> {
-  const lim = LATENCY[t.env.leaderVenue];
+  const base = LATENCY[t.env.leaderVenue];
+  const slack = t.env.target.name === 'hosted' ? 0 : OFFSITE_SLACK_MS;
+  const lim = { ...base, medianMs: base.medianMs + slack, slowestMs: base.slowestMs + slack };
   const ms = await copyLatencies(t);
   if (t.env.leaderVenue === 'hyperliquid') {
     const off = await leaderClockOffset(t);
