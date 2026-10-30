@@ -10,10 +10,11 @@ import type { Scenario } from './scenario.ts';
 import { SETUP_SCENARIOS } from './scenarios/setup.ts';
 import { ALGO_SCENARIOS } from './scenarios/algos.ts';
 import { COPY_SCENARIOS } from './scenarios/copy.ts';
+import { COPY_MATRIX_SCENARIOS } from './scenarios/copy-matrix.ts';
 import { LIQ_SCENARIOS } from './scenarios/liquidation.ts';
 import { FEE_SCENARIOS } from './scenarios/fees.ts';
 
-export const CATALOGUE: readonly Scenario[] = [...SETUP_SCENARIOS, ...ALGO_SCENARIOS, ...COPY_SCENARIOS, ...LIQ_SCENARIOS, ...FEE_SCENARIOS];
+export const CATALOGUE: readonly Scenario[] = [...SETUP_SCENARIOS, ...ALGO_SCENARIOS, ...COPY_SCENARIOS, ...COPY_MATRIX_SCENARIOS, ...LIQ_SCENARIOS, ...FEE_SCENARIOS];
 
 {
   const ids = new Set<string>();

@@ -117,6 +117,12 @@ export interface ExecutorApi {
   activity(id: string, limit?: number): Promise<ActivityEntry[]>;
   /** What it keeps for the wallet to hear of (an executor's GET /notices); absent where they are not read from here (the browser's bell). */
   notices?(limit?: number): Promise<EngineNotice[]>;
+  /**
+   * "Ask me each time": the copied trades waiting for the follower's answer, and the answer, as the
+   * prompt at the bottom of the page gives it. The browser only: an executor has nobody to ask (absent).
+   */
+  copyConfirms?(): Promise<Array<{ id: string; subId: string; symbol: string; expiresAt: number }>>;
+  answerCopyConfirm?(id: string, yes: boolean): Promise<void>;
   /** Everything this wallet runs there stops: the kill switch for algos, every copy stopped and closed. */
   stopEverything(): Promise<void>;
 }
@@ -486,6 +492,12 @@ export class BrowserTarget implements ExecutorTarget {
   }
   async activity(id: string, limit?: number) {
     return this.d().activity(id, limit);
+  }
+  async copyConfirms() {
+    return (await this.d().copyConfirms?.()) ?? [];
+  }
+  async answerCopyConfirm(id: string, yes: boolean) {
+    await this.d().answerCopyConfirm?.(id, yes);
   }
   async stopEverything(): Promise<void> {
     if (this.driver) await this.driver.stopEverything();

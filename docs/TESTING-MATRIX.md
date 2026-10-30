@@ -6,6 +6,9 @@ finds every `*.test.ts` by itself). The **live suite** (`apps/executor/tools/liv
 mainnet) is never run by CI; its scenarios are named by id, from `scenarios/algos.ts`, `copy.ts` or
 `setup.ts`.
 
+Copy trading option by option (every setting value, leader and follower event and lifecycle step, on every run
+place): `docs/COVERAGE-COPY.md`.
+
 Paths: `ce/` = `packages/copy-engine/test/`, `ex/` = `apps/executor/test/`, `web/` = `apps/web/src/`.
 Tests marked **new** were added with this matrix (`ce/edge-algo.test.ts`, `ce/edge-copy.test.ts`,
 `ex/edge-cases.test.ts`, `web/algo/edge-tabLife.test.ts`, `web/edge-lazyChunk.test.ts`). A name starting

@@ -138,8 +138,11 @@ export interface RuntimeHost {
    * its leader; what the leader did meanwhile is not copied after the fact.
    */
   brake?(sub: Subscription): string | null;
-  /** Approval mode 'confirm': ask the follower; resolve false to decline. */
-  confirm?(sub: Subscription, intents: Intent[], event: LeaderEvent): Promise<boolean>;
+  /**
+   * Approval mode 'confirm': ask the follower; resolve true to place the orders, false when the
+   * follower declined, 'timeout' when nobody answered in time (logged as such, not as declined).
+   */
+  confirm?(sub: Subscription, intents: Intent[], event: LeaderEvent): Promise<boolean | 'timeout'>;
   /** Something about this subscription changed (state, activity, status). */
   onChange?(subId: string): void;
   /**
@@ -199,6 +202,14 @@ interface Pending {
 type CutFills = Array<{ clOrdID: string | null; qty?: number; price?: number }> | 'none' | 'unread';
 
 const lk = (l: LeaderRef): string => `${l.venue}:${l.address.toLowerCase()}`;
+
+/** Whether a change of a copy moves the triggers of its SoDEX stops (stop-loss, take-profit, leverage, region). */
+const stopsChanged = (a: Subscription, b: Subscription): boolean =>
+  a.settings.stopLossPct !== b.settings.stopLossPct ||
+  a.settings.takeProfitPct !== b.settings.takeProfitPct ||
+  a.settings.maxLeverage !== b.settings.maxLeverage ||
+  a.country !== b.country ||
+  a.observedCountry !== b.observedCountry;
 
 /** The two prices of a 'different-asset' skip, for its activity line. */
 const assetDetail = (leaderSymbol: string, v: AssetVerdict): string =>
@@ -413,6 +424,13 @@ export class CopyRuntime {
     this.subs.set(id, next);
     await this.host.store.saveSubscription(next);
     await this.activity(next, { kind: 'status', reason: 'updated', detail: 'Copy rules changed.' });
+    // The SoDEX stops of the copy's positions follow the new rules at once: their triggers depend on
+    // the stop-loss, the take-profit and the leverage (the follower's cap, the region's). Without this a
+    // stop the follower turned off stayed on SoDEX and could still close the position, and one turned
+    // on or moved waited for the copy's next fill.
+    if (this.live(next) && stopsChanged(s, next)) {
+      for (const sym of Object.keys(this.stateOf(next).owned)) this.enqueue(next.owner, () => this.refreshStops(id, sym, true));
+    }
     // A new region or approval mode may block the copy, or lift what blocked it.
     await this.applyLocalRules(id);
     const cur = this.need(id);
@@ -609,15 +627,15 @@ export class CopyRuntime {
       return;
     }
     if (s.settings.approval === 'confirm' && this.host.confirm) {
-      let yes = false;
+      let answer: boolean | 'timeout' = false;
       try {
-        yes = await this.host.confirm(s, plan.intents, e);
+        answer = await this.host.confirm(s, plan.intents, e);
       } catch {
-        yes = false;
+        answer = false;
       }
-      if (!yes) {
+      if (answer !== true) {
         st.skips++;
-        await this.activity(s, { kind: 'skip', reason: 'declined', symbol: market!.name, leader });
+        await this.activity(s, { kind: 'skip', reason: answer === 'timeout' ? 'confirm-timeout' : 'declined', symbol: market!.name, leader });
         this.dirty.add(s.id);
         return;
       }
@@ -1635,8 +1653,11 @@ export class CopyRuntime {
     );
   }
 
-  /** Keep one SoDEX stop-loss (and take-profit) per copied position, sized to it. */
-  private async refreshStops(subId: string, symbol: string): Promise<void> {
+  /**
+   * Keep one SoDEX stop-loss (and take-profit) per copied position, sized to it. `force`: placed
+   * again even at the same size (the rules that set their triggers changed).
+   */
+  private async refreshStops(subId: string, symbol: string, force = false): Promise<void> {
     const s = this.subs.get(subId);
     if (!s || s.status === 'stopped') return;
     const st = this.stateOf(s);
@@ -1645,7 +1666,7 @@ export class CopyRuntime {
     if (!sink || sink.paper || !m) return;
     const p = st.owned[symbol];
     const cur = st.stops[symbol];
-    if (p && cur && Math.abs(cur.size - p.size) < 1e-12) return;
+    if (!force && p && cur && Math.abs(cur.size - p.size) < 1e-12) return;
     if (cur) {
       for (const id of [cur.sl, cur.tp]) if (id) await sink.cancel(s.accountId, m, id).catch((e) => this.host.log.warn('copy: stop not cancelled', { id, error: String(e) }));
       delete st.stops[symbol];
@@ -1655,7 +1676,8 @@ export class CopyRuntime {
     if (q === '0') return;
     const lev = effectiveLeverage(s.settings.maxLeverage, this.host.policyFor(s), m.maxLeverage);
     const builder = await this.host.builderFor(s).catch(() => null);
-    const next = { sl: null as string | null, tp: null as string | null, size: p.size, at: Date.now() };
+    // Later than the stops it replaces, so their client ids (which hash it) never repeat within one millisecond.
+    const next = { sl: null as string | null, tp: null as string | null, size: p.size, at: Math.max(Date.now(), (cur?.at ?? 0) + 1) };
     for (const kind of ['stop-loss', 'take-profit'] as const) {
       const trigger = guardTrigger(kind, p, s.settings, lev);
       if (trigger === null) continue;
