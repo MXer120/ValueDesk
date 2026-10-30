@@ -268,6 +268,39 @@ test('BUG "ask me each time" answered yes, no, with an error or not at all: only
   }
 });
 
+test('BUG live run 2026-10-30: "ask me each time", the leader\'s close not answered: the next reconcile does not close it anyway; automatic again, it does', async () => {
+  // copym.confirm in the browser: the close timed out (confirm-timeout), and closeStrays sent it at the
+  // next reconcile without asking.
+  const w = world();
+  const answers: Array<boolean | 'timeout'> = [true, 'timeout'];
+  const confirm: RuntimeHost['confirm'] = async () => answers.shift() ?? 'timeout';
+  const { rt, store } = runtime(w, () => new PaperSink(), { confirm });
+  await rt.start();
+  try {
+    const s = await rt.add(sub({ paper: true, approval: 'confirm' }, { id: 'ask-close' }));
+    await ready();
+    w.leader = [{ s: 'BTC-USD', sz: '1', ep: '80000' }];
+    buys(LEADER_ID, '1');
+    assert.ok(await until(() => size(rt, s.id) === 0.01), 'yes: copied');
+    w.leader = [];
+    sells(LEADER_ID, '1');
+    let timedOut = false;
+    for (let i = 0; i < 60 && !timedOut; i++) {
+      timedOut = (await skips(store, s.id)).includes('confirm-timeout');
+      if (!timedOut) await wait(50);
+    }
+    assert.ok(timedOut, 'the close was asked about and not answered');
+    await rt.reconcileAll();
+    await wait(300);
+    assert.equal(size(rt, s.id), 0.01, 'not closed without asking');
+    await rt.update(s.id, { settings: { ...rt.get(s.id)!.settings, approval: 'auto' } });
+    await rt.reconcileAll();
+    assert.ok(await until(() => size(rt, s.id) === 0), `automatic again, the copy closes what the leader closed: ${size(rt, s.id)}`);
+  } finally {
+    await rt.stop();
+  }
+});
+
 test('"ask me each time" where nobody can ask (an executor): started held with the reason; switching a running copy to it is refused; back to automatic it runs', async () => {
   const w = world();
   const { rt, store } = runtime(w, () => new PaperSink());

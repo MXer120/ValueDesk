@@ -158,6 +158,12 @@ export interface SubState {
   owned: Record<string, OwnedPosition>;
   /** Leader-venue symbol -> why it is detached. */
   detached: Record<string, DetachReason>;
+  /**
+   * "Ask me each time": SoDEX symbol -> when the follower last said no (or let the question time out)
+   * to a trade there. The copy's own clean-up (closeStrays) never sends there by itself; a yes on that
+   * market, or automatic approval, clears it. Absent in states saved before 2026-10-30.
+   */
+  declined?: Record<string, number>;
   /** Protective SoDEX stop orders the copier placed: SoDEX symbol -> their client ids and the size they cover. */
   stops: Record<string, { sl: string | null; tp: string | null; size: number; at: number }>;
   /** Realised PnL of copied positions, USD (gross, fees apart). */
