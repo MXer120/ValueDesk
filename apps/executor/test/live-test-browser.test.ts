@@ -287,7 +287,7 @@ test('the viewer country is read where the page reads it (the dev web\'s /api/co
 /* --------------------------------------------------------------- the target ----- */
 
 test('browser target: a restart is a reload, a closed tab comes back in a new one; nothing is killed hard, nothing imported, the fee stub is self\'s', async () => {
-  assert.deepEqual(CAPABILITIES.browser, { restart: true, kill: false, localFeeStub: false, keyImport: false, tabClose: true });
+  assert.deepEqual(CAPABILITIES.browser, { restart: true, kill: false, localFeeStub: false, keyImport: false, tabClose: true, ui: true });
   const { d, f } = driverOf({});
   const b = new BrowserTarget('dry', d);
   assert.match(b.where, /Microsoft Edge \(http:\/\/127\.0\.0\.1:5180, the test bridge\)/);

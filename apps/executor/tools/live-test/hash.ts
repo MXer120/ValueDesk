@@ -59,6 +59,11 @@ export const DEP_GROUPS = {
   leader: ['apps/executor/tools/live-test/leader.ts', 'apps/executor/tools/live-test/hyperliquid.ts'],
   /** The web app's runtime of algos and copies, and its trading layer: what the browser target runs. */
   web: ['apps/web/src/algo', 'apps/web/src/copy', 'apps/web/src/trading'],
+  /**
+   * The pages the UI scenarios work (scenarios/ui.ts, the browser target): the components (.tsx too),
+   * the account reads behind the tables, and the steps that click them (e2e/ui/uiSteps.ts).
+   */
+  ui: ['apps/web/src/components', 'apps/web/src/exchange', 'apps/web/src/api.ts', 'apps/web/src/accountFeeds.ts', 'apps/web/e2e/ui/uiSteps.ts', 'apps/web/e2e/ui/ticket.ts', 'apps/web/e2e/ui/algo.ts'],
 } as const;
 
 /**
@@ -75,7 +80,7 @@ const GROUP_SKIP: Partial<Record<keyof typeof DEP_GROUPS, readonly string[]>> = 
 export type DepGroup = keyof typeof DEP_GROUPS;
 
 /** Groups only some targets run (and hash): the web runtime is the browser target's alone. */
-const TARGET_GROUPS: Partial<Record<DepGroup, readonly TargetName[]>> = { web: ['browser'] };
+const TARGET_GROUPS: Partial<Record<DepGroup, readonly TargetName[]>> = { web: ['browser'], ui: ['browser'] };
 
 /** What a hash is taken for: the target, (hosted) the release it names, and where the leader trades. */
 export interface HashTarget {
@@ -87,16 +92,20 @@ export interface HashTarget {
 
 const SKIP_DIRS = new Set(['node_modules', '.state', '.git', 'dist', '.cache']);
 
-/** Every .ts file under `rel` (a file or a folder), repository-relative with forward slashes, sorted. */
-export function filesOf(repo: string, rel: string): string[] {
+/** Groups whose React components count too (.tsx); the others hash .ts only, as they always did. */
+const TSX_GROUPS: ReadonlySet<DepGroup> = new Set<DepGroup>(['ui']);
+
+/** Every .ts file (and .tsx with `tsx`) under `rel` (a file or a folder), repository-relative with forward slashes, sorted. */
+export function filesOf(repo: string, rel: string, tsx = false): string[] {
   const abs = join(repo, rel);
   if (!existsSync(abs)) return [];
   const out: string[] = [];
+  const code = tsx ? /\.(ts|tsx|mts|json)$/ : /\.(ts|mts|json)$/;
   const walk = (p: string) => {
     const st = statSync(p);
     if (st.isDirectory()) {
       for (const name of readdirSync(p)) if (!SKIP_DIRS.has(name)) walk(join(p, name));
-    } else if (st.isFile() && /\.(ts|mts|json)$/.test(p) && !/\.(test)\.ts$/.test(p)) {
+    } else if (st.isFile() && code.test(p) && !/\.(test)\.tsx?$/.test(p)) {
       out.push(relative(repo, p).split(sep).join('/'));
     }
   };
@@ -135,7 +144,7 @@ export class CodeHashes {
       const skip = GROUP_SKIP[g] ?? [];
       v = hashFiles(
         this.repo,
-        DEP_GROUPS[g].flatMap((rel) => filesOf(this.repo, rel)).filter((f) => !skip.some((p) => f.startsWith(p))),
+        DEP_GROUPS[g].flatMap((rel) => filesOf(this.repo, rel, TSX_GROUPS.has(g))).filter((f) => !skip.some((p) => f.startsWith(p))),
       );
       this.cache.set(g, v);
     }

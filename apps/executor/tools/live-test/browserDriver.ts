@@ -84,6 +84,8 @@ export interface PageKey {
 export interface WebSession {
   readonly address: string;
   call(path: string, args?: unknown[]): Promise<unknown>;
+  /** One step a person takes on the page (apps/web/e2e/ui/uiSteps.ts), by name. */
+  ui?(step: string, args?: unknown): Promise<unknown>;
   ready(): Promise<boolean>;
   leave(how: 'reload' | 'close'): Promise<void>;
   reopen(): Promise<void>;
@@ -372,6 +374,16 @@ export class WebBridgeDriver implements BrowserDriver {
 
   async answerCopyConfirm(id: string, yes: boolean): Promise<void> {
     await this.call('copier.answer', [id, yes]);
+  }
+
+  /** A step a person takes on the page: the order ticket, the account tables, the copy window, the Algos table (uiSteps.ts). */
+  async ui(step: string, args: Record<string, unknown> = {}): Promise<unknown> {
+    const s = this.page();
+    if (!s.ui) throw new Unavailable('this page session takes no UI steps');
+    this.log(`    . on the page: ${step} ${JSON.stringify(args)}`);
+    return s.ui(step, args).catch((e) => {
+      throw pageRefusal(e);
+    });
   }
 
   /** The kill switch for algos, every copy stopped and closed: what the page has (nothing, when it is not open). */

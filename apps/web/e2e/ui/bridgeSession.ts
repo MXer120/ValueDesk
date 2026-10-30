@@ -24,6 +24,7 @@ import { TEST_BRIDGE_VERSION } from '../../src/testBridge';
 import { launchEdge } from './browser';
 import { acceptWelcome, connectWallet, hideDevPanel, newUiContext, until } from './harness';
 import { ticket } from './ticket';
+import { runUiStep } from './uiSteps';
 import { createTestWallet, type WalletRecord } from './wallet';
 
 export interface BridgeSessionOptions {
@@ -44,6 +45,12 @@ export interface BridgeSession {
   readonly address: string;
   /** One bridge call: `path` names it (`algos.start`, `about`). While it runs, ValueDesk's terms popup is signed if it opens. */
   call(path: string, args?: unknown[]): Promise<unknown>;
+  /**
+   * One step a person takes on the page (uiSteps.ts: the order ticket, the account tables, the copy
+   * window, Manage copies, the copy prompt, the algo ticket, the Algos table), by name, with its args.
+   * ValueDesk's terms popup is signed the same way if it opens meanwhile.
+   */
+  ui(step: string, args?: unknown): Promise<unknown>;
   /** The page is there and its bridge answers. */
   ready(): Promise<boolean>;
   /** The page goes away: 'reload' navigates the tab away (a reload's first half), 'close' closes the tab. */
@@ -191,23 +198,38 @@ export async function openBridgeSession(o: BridgeSessionOptions): Promise<Bridge
     throw e;
   }
 
+  /** Run `fn` on the page while ValueDesk's terms popup is signed whenever it opens. */
+  async function withTerms<V>(fn: (p: Page) => Promise<V>): Promise<V> {
+    const p = need();
+    let running = true;
+    const terms = (async () => {
+      while (running) {
+        if (await signSiteTermsIfAsked(p).catch(() => false)) log('signed ValueDesk\'s terms in their popup, as a person does');
+        await new Promise((r) => setTimeout(r, 250));
+      }
+    })();
+    try {
+      return await fn(p);
+    } finally {
+      running = false;
+      await terms;
+    }
+  }
+
   return {
     address: wallet.address,
-    async call(path, args = []) {
-      const p = need();
-      let running = true;
-      const terms = (async () => {
-        while (running) {
-          if (await signSiteTermsIfAsked(p).catch(() => false)) log('signed ValueDesk\'s terms in their popup, as a person does');
-          await new Promise((r) => setTimeout(r, 250));
+    call: (path, args = []) => withTerms((p) => callIn(p, path, args)),
+    async ui(step, args) {
+      return withTerms(async (p) => {
+        try {
+          return await runUiStep(p, step, args);
+        } catch (e) {
+          // What was on screen, for the log: "timed out" alone does not say why.
+          const shot = o.shotDir ? `${o.shotDir}/ui-${step.replace(/[^a-z0-9]+/gi, '-')}-${Date.now()}.png` : null;
+          if (shot) await p.screenshot({ path: shot }).catch(() => {});
+          throw new Error(`${String((e as Error)?.message ?? e).split('\n')[0]}${shot ? ` (screenshot ${shot})` : ''}`);
         }
-      })();
-      try {
-        return await callIn(p, path, args);
-      } finally {
-        running = false;
-        await terms;
-      }
+      });
     },
     async ready() {
       if (lost || left || !page || page.isClosed()) return false;

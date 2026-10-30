@@ -69,16 +69,22 @@ export interface TargetCapabilities {
   keyImport: boolean;
   /** The runner closes the browser tab that runs the algos and opens the app again later (ExecutorTarget.closeTab). */
   tabClose: boolean;
+  /**
+   * The runner works ValueDesk's own pages as a person does (ExecutorTarget.ui; apps/web/e2e/ui/uiSteps.ts):
+   * the order ticket and its review, the account tables, the copy window, Manage copies, the copy
+   * prompt, the algo ticket and the Algos table.
+   */
+  ui: boolean;
 }
 
 /** What a scenario may need of a target. */
-export type Capability = 'restart' | 'kill' | 'localFeeStub' | 'keyImport' | 'tabClose';
+export type Capability = 'restart' | 'kill' | 'localFeeStub' | 'keyImport' | 'tabClose' | 'ui';
 
 export const CAPABILITIES: Readonly<Record<TargetName, TargetCapabilities>> = {
-  self: { restart: true, kill: true, localFeeStub: true, keyImport: true, tabClose: false },
-  hosted: { restart: false, kill: false, localFeeStub: false, keyImport: true, tabClose: false },
+  self: { restart: true, kill: true, localFeeStub: true, keyImport: true, tabClose: false, ui: false },
+  hosted: { restart: false, kill: false, localFeeStub: false, keyImport: true, tabClose: false, ui: false },
   // A restart is a reload of the page (not hard); real algos need the dev web's VITE_LIVE_ALGOS_WALLETS, copies nothing.
-  browser: { restart: true, kill: false, localFeeStub: false, keyImport: false, tabClose: true },
+  browser: { restart: true, kill: false, localFeeStub: false, keyImport: false, tabClose: true, ui: true },
 };
 
 const CAN: Record<Capability, string> = {
@@ -87,6 +93,7 @@ const CAN: Record<Capability, string> = {
   localFeeStub: 'answer the executor\'s reads of the follower\'s volume (the copy fee step) itself',
   keyImport: 'be given a SoDEX key the follower made (key import)',
   tabClose: 'close the browser tab that runs the algos and open the app again',
+  ui: 'work ValueDesk\'s own pages (the order ticket, the account tables, the copy window, the Algos table) as a person does',
 };
 
 /** Why a scenario cannot run on a target (what it needs that the target lacks), or null. */
@@ -146,6 +153,8 @@ export interface ExecutorTarget extends ExecutorApi {
   kill(): Promise<void>;
   /** Close the browser tab that runs the algos (capability tabClose); start() opens the app again in a new one. */
   closeTab?(): Promise<void>;
+  /** One step a person takes on ValueDesk's pages, by name (capability ui; apps/web/e2e/ui/uiSteps.ts UI_STEPS). */
+  ui?(step: string, args?: Record<string, unknown>): Promise<unknown>;
   /** Whether it answers now. */
   health(): Promise<{ ok: boolean; why?: string }>;
   /** Set when it went away on its own (a local process that exited): why. A scenario waiting on it fails with it. */
@@ -382,6 +391,8 @@ export interface BrowserDriver extends ExecutorApi {
   gone?(): string | null;
   /** The country the page's ValueDesk executor sees it in (the region rule), or null; read without the page. */
   viewerCountry?(): Promise<string | null>;
+  /** One step a person takes on the page (apps/web/e2e/ui/uiSteps.ts), by name; absent: the driver drives no page. */
+  ui?(step: string, args?: Record<string, unknown>): Promise<unknown>;
 }
 
 const NO_BRIDGE = 'the browser target needs the web test bridge (apps/web e2e): pass a BrowserDriver to BrowserTarget';
@@ -419,6 +430,17 @@ export class BrowserTarget implements ExecutorTarget {
   /** The tab closes; start() opens the app in a new one, in the same profile. */
   async closeTab(): Promise<void> {
     await this.d().leave('close');
+  }
+  /** A step on the page, as a person takes it. A dry run's page holds a throwaway wallet: what it starts is paper, its ticket has no SoDEX account. */
+  async ui(step: string, args: Record<string, unknown> = {}): Promise<unknown> {
+    const d = this.d();
+    if (!d.ui) throw new Unavailable('this browser driver drives no page');
+    if (this.mode === 'dry') {
+      if (/^(ticket|orders|positions)\./.test(step)) throw new Error(`dry run: refusing ${step} (the order ticket and the account tables trade on SoDEX)`);
+      if (step === 'copy.start' && args.paper !== true) throw new Error('dry run: refusing a copy that is not paper');
+      if (step === 'algo.bracket' && args.practice !== true) throw new Error('dry run: refusing an algo that is not a practice run');
+    }
+    return d.ui(step, args);
   }
   async health(): Promise<{ ok: boolean; why?: string }> {
     return this.driver && (await this.driver.ready()) ? { ok: true } : { ok: false, why: this.driver ? 'the page does not answer' : NO_BRIDGE };

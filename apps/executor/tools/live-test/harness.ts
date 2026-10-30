@@ -610,6 +610,21 @@ export class T {
   }
 
   /**
+   * One step a person takes on ValueDesk's own pages (apps/web/e2e/ui/uiSteps.ts UI_STEPS), by name:
+   * the order ticket and its review, the account tables' Cancel and Close, the copy window, Manage
+   * copies, the copy prompt, the algo ticket, the Algos table. Only where the target drives a page
+   * (needs: ['ui']); the UI specs run the same steps against the fake SoDEX (uiSteps.spec.ts).
+   */
+  async ui<V = Record<string, unknown>>(step: string, args: Record<string, unknown> = {}): Promise<V> {
+    const target = this.env.target;
+    if (!target.capabilities.ui || !target.ui) throw new Unavailable(`the ${target.name} target has no page to work`);
+    this.alive();
+    const v = (await target.ui(step, args)) as V;
+    this.alive();
+    return v;
+  }
+
+  /**
    * Close the browser tab that runs the algos, wait `downMs` (not scaled for a dry run: the web app
    * tells a close from a reload by the time), and open the app again in a new tab. Only where the
    * target lets the runner (needs: ['tabClose']).
