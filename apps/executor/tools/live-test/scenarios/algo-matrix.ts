@@ -105,8 +105,10 @@ export const ALGO_MATRIX_SCENARIOS: Scenario[] = [
       await filledAsBooked(t, v);
       const kids = v.algo.children;
       t.check(kids.every((c) => c.tif === 'ioc' && c.side === 'sell'), 'every slice an IOC sell');
-      const arrival = v.algo.arrival!;
-      t.check(kids.every((c) => c.price >= arrival * (1 - 0.0035)), `no slice priced more than the cap under the mid (${kids.map((c) => c.price).join(', ')} vs ${arrival})`);
+      // Each IOC's limit is the mid when it went out less 20 bp: within that (and the half spread) of where it filled.
+      // (Not of the arrival price: the market moves over the minute.)
+      const filled = kids.filter((c) => c.filled > 0);
+      t.check(filled.every((c) => c.price >= (c.value / c.filled) * (1 - 0.0025)), `every slice priced within the cap under the mid it went out at (${filled.map((c) => `${c.price} filled at ${(c.value / c.filled).toFixed(1)}`).join(', ')})`);
       t.check(kids.filter((c) => c.tag !== 'finish').every((c) => c.quantity <= Number(field(v.algo.spec, 'maxSliceQty')) + stepOf(t) / 2), 'no slice over the largest');
       await positionIs(t, -v.algo.filled, 'after the TWAP');
     },
