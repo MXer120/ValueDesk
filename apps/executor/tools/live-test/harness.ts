@@ -81,6 +81,8 @@ export interface Env {
   second: MarketInfo;
   /** The market that moved most at the run's start (pickVolatile): for scenarios that wait for a level to be reached. Absent: the main one. */
   volatile?: MarketInfo;
+  /** The market where a position at maximum leverage is liquidated soonest (pickLiquidation). Absent: the main one. */
+  liquid?: MarketInfo;
   /** USD per child order: SoDEX's minimum plus headroom, so a price move during the scenario keeps it above the minimum. */
   childUsd: number;
   /** Shorter waits for a dry run. */
@@ -257,9 +259,13 @@ export class T {
   get volatile(): MarketInfo {
     return this.env.volatile ?? this.env.main;
   }
+  /** The market the liquidation scenarios trade (the main one when none qualified). */
+  get liquid(): MarketInfo {
+    return this.env.liquid ?? this.env.main;
+  }
   /** A test market by its name. */
   market(symbol: string): MarketInfo {
-    return [this.main, this.second, this.volatile].find((m) => m.name === symbol) ?? this.second;
+    return [this.main, this.second, this.volatile, this.liquid].find((m) => m.name === symbol) ?? this.second;
   }
   get U(): number {
     return this.env.childUsd;

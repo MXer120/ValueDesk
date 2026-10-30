@@ -24,7 +24,7 @@ import { loadConfig } from '../src/config.ts';
 import { ExecutorDb } from '../src/db.ts';
 import { Secrets } from '../src/secrets.ts';
 import { ExecutorService } from '../src/service.ts';
-import { computeBudget, formatBudget, pickMarket, pickVolatile } from '../tools/live-test/budget.ts';
+import { computeBudget, formatBudget, pickLiquidation, pickMarket, pickVolatile } from '../tools/live-test/budget.ts';
 import { CATALOGUE } from '../tools/live-test/catalogue.ts';
 import { flatten, startDecision, type FlattenVenue, type VenueOrder } from '../tools/live-test/cleanup.ts';
 import { SodexReads, type FillInfo, type OrderInfo } from '../tools/live-test/exchange.ts';
@@ -346,6 +346,18 @@ test('the take-profit market: the one whose one-minute ranges average highest, a
   assert.equal(v?.m.name, 'DOGE-USD');
   assert.ok(Math.abs(v!.rangeBps - 40) < 1e-6, `${v?.rangeBps}`);
   assert.equal(pickVolatile([]), null, 'none: the run falls back to the main market');
+});
+
+test('the liquidation market: the highest max leverage x one-minute range (the distance to liquidation is about 1 / max leverage)', () => {
+  const k = (rangeFrac: number) => Array.from({ length: 10 }, () => ({ h: 100 * (1 + rangeFrac), l: 100, c: 100 }));
+  const book = { bid: 100, ask: 100.01 };
+  const v = pickLiquidation([
+    { m: MKT('BTC-USD', { tickSize: '0.01', maxLeverage: 40 }), book, candles: k(0.0003) }, // 40 x 3 bp = 120
+    { m: MKT('SOL-USD', { tickSize: '0.01', maxLeverage: 20 }), book, candles: k(0.001) }, // 20 x 10 bp = 200
+    { m: MKT('HYPE-USD', { tickSize: '0.01', maxLeverage: 10 }), book, candles: k(0.0018) }, // 10 x 18 bp = 180
+  ]);
+  assert.equal(v?.m.name, 'SOL-USD');
+  assert.ok(Math.abs(v!.score - 200) < 1e-6, `${v?.score}`);
 });
 
 test('budget: spent is fees + builder + half spread (+ the leader\'s fee and spread); peak margin is the largest scenario, not the sum', () => {

@@ -50,8 +50,8 @@ function riskText(r: Risk, mark: number): string {
 
 /** The follower's position on the main market as SoDEX's account state has it. */
 async function risk(t: T): Promise<Risk> {
-  const r = await t.env.reads.risk(t.env.followerAddress, t.main.name);
-  if (!r) throw new CheckFailed(`the follower holds no position on ${t.main.name} any more`);
+  const r = await t.env.reads.risk(t.env.followerAddress, t.liquid.name);
+  if (!r) throw new CheckFailed(`the follower holds no position on ${t.liquid.name} any more`);
   return r;
 }
 
@@ -69,7 +69,7 @@ async function takeMargin(t: T, tries: number): Promise<number> {
     const a = (Math.floor(amount * 100) / 100).toFixed(2);
     const before = r.margin;
     try {
-      await t.onFollower(`take $${a} of isolated margin out`, (w) => w.moveMargin(t.main.name, `-${a}`));
+      await t.onFollower(`take $${a} of isolated margin out`, (w) => w.moveMargin(t.liquid.name, `-${a}`));
     } catch (e) {
       refusal = (e instanceof Error ? e.message : String(e)).slice(0, 160);
     }
@@ -91,18 +91,18 @@ async function takeMargin(t: T, tries: number): Promise<number> {
  */
 async function nearLiquidation(t: T): Promise<Risk> {
   let r = await risk(t);
-  t.note(`before: ${riskText(r, (await t.quote()).mark)}`);
+  t.note(`before: ${riskText(r, (await t.quote(t.liquid.name)).mark)}`);
   if (r.marginMode !== 'isolated') throw new Inconclusive(`cannot get near liquidation: the position is on cross margin (the whole account backs it)`);
-  const max = t.main.maxLeverage;
+  const max = t.liquid.maxLeverage;
   try {
-    await t.onFollower(`${t.main.name} at ${max}x isolated`, (w) => w.setLeverage(t.main.name, max, 'isolated'));
+    await t.onFollower(`${t.liquid.name} at ${max}x isolated`, (w) => w.setLeverage(t.liquid.name, max, 'isolated'));
   } catch (e) {
     t.note(`SoDEX refused ${max}x on the open position: ${(e instanceof Error ? e.message : String(e)).slice(0, 160)}`);
   }
   r = await risk(t);
-  t.note(`at the market's maximum leverage: ${riskText(r, (await t.quote()).mark)}`);
+  t.note(`at the market's maximum leverage: ${riskText(r, (await t.quote(t.liquid.name)).mark)}`);
   const taken = await takeMargin(t, 12);
-  const mark = (await t.quote()).mark;
+  const mark = (await t.quote(t.liquid.name)).mark;
   r = await risk(t);
   t.note(`$${taken.toFixed(4)} of margin taken out: ${riskText(r, mark)}`);
   const d = distance(r, mark);
@@ -119,15 +119,15 @@ async function nearLiquidation(t: T): Promise<Risk> {
  * TIGHTEN_EVERY_MS; inconclusive after LIQ_WAIT_MS. What the follower holds then, and when.
  */
 async function liquidated(t: T, size0: number): Promise<{ left: number; at: number }> {
-  const step = Number(t.main.stepSize);
+  const step = Number(t.liquid.stepSize);
   let tightenAt = Date.now() + TIGHTEN_EVERY_MS;
   return t.waitFor(`SoDEX liquidates the position (within ${LIQ_WAIT_MS / MIN} min)`, async () => {
-    const p = await t.account.position(t.main.name);
+    const p = await t.account.position(t.liquid.name);
     if (Math.abs(p) < Math.abs(size0) - step / 2) return { left: p, at: Date.now() };
     if (Date.now() >= tightenAt) {
       tightenAt = Date.now() + TIGHTEN_EVERY_MS;
       const taken = await takeMargin(t, 4);
-      t.note(`still open${taken > 0 ? `, $${taken.toFixed(4)} more margin taken out` : ''}: ${riskText(await risk(t), (await t.quote()).mark)}`);
+      t.note(`still open${taken > 0 ? `, $${taken.toFixed(4)} more margin taken out` : ''}: ${riskText(await risk(t), (await t.quote(t.liquid.name)).mark)}`);
     }
     return null;
   }, { timeoutMs: LIQ_WAIT_MS, everyMs: 5_000, inconclusive: true });
@@ -136,11 +136,11 @@ async function liquidated(t: T, size0: number): Promise<{ left: number; at: numb
 /** SoDEX's own record of it: its fill "liquidation:<id>" (no order of ours) and the taken-over position. */
 async function sodexRecord(t: T, left: number, size0: number): Promise<void> {
   const fills = await t.waitFor('SoDEX\'s fills show the liquidation (a fill "liquidation:<id>", no order of the follower\'s)', async () => {
-    const f = (await t.account.fills(t.main.name)).filter((x) => x.clOrdID?.startsWith('liquidation:'));
+    const f = (await t.account.fills(t.liquid.name)).filter((x) => x.clOrdID?.startsWith('liquidation:'));
     return f.length ? f : null;
   }, { timeoutMs: 60_000, everyMs: 5_000 });
   t.note(`liquidation fill(s): ${fills.map((f) => `${f.side} ${f.qty} @ ${f.price}, fee ${f.fee}`).join('; ')}; the follower holds ${left} of ${size0}`);
-  const taken = (await t.env.reads.closedPositions(t.env.followerAddress).catch(() => [])).find((h) => h.symbol === t.main.name && h.isTakenOver);
+  const taken = (await t.env.reads.closedPositions(t.env.followerAddress).catch(() => [])).find((h) => h.symbol === t.liquid.name && h.isTakenOver);
   t.note(taken ? `positions/history: taken over at ${taken.takeOverPrice}, realized ${taken.realizedPnL}` : 'positions/history lists no taken-over position on the market (yet)');
 }
 
@@ -148,22 +148,22 @@ async function sodexRecord(t: T, left: number, size0: number): Promise<void> {
 async function restoreLeverage(t: T, before: { leverage: number; marginMode: 'cross' | 'isolated' } | null): Promise<void> {
   const w = t.env.follower;
   if (t.dry || !w) return;
-  const want = before ?? { leverage: t.expectedLeverage(2), marginMode: 'isolated' as const };
+  const want = before ?? { leverage: t.expectedLeverage(2, t.liquid), marginMode: 'isolated' as const };
   try {
-    const p = await t.env.reads.position(t.env.followerAddress, t.main.name);
+    const p = await t.env.reads.position(t.env.followerAddress, t.liquid.name);
     // A margin mode never changes under an open position: closed first (reduce-only; the cleanup would close it next).
-    if (p !== 0) await w.close(t.main.name, p);
-    for (let i = 0; i < 10 && (await t.env.reads.position(t.env.followerAddress, t.main.name)) !== 0; i++) await new Promise((r) => setTimeout(r, 1_000));
-    await w.setLeverage(t.main.name, want.leverage, want.marginMode);
-    t.note(`${t.main.name} back at ${want.leverage}x ${want.marginMode}`);
+    if (p !== 0) await w.close(t.liquid.name, p);
+    for (let i = 0; i < 10 && (await t.env.reads.position(t.env.followerAddress, t.liquid.name)) !== 0; i++) await new Promise((r) => setTimeout(r, 1_000));
+    await w.setLeverage(t.liquid.name, want.leverage, want.marginMode);
+    t.note(`${t.liquid.name} back at ${want.leverage}x ${want.marginMode}`);
   } catch (e) {
-    t.note(`! ${t.main.name}'s leverage not put back to ${want.leverage}x ${want.marginMode}: ${(e instanceof Error ? e.message : String(e)).slice(0, 160)}`);
+    t.note(`! ${t.liquid.name}'s leverage not put back to ${want.leverage}x ${want.marginMode}: ${(e instanceof Error ? e.message : String(e)).slice(0, 160)}`);
   }
 }
 
 /** The copy's position stops on SoDEX (client ids vds-). */
 async function copyStops(t: T) {
-  return (await t.account.openOrders(t.main.name)).filter((o) => o.clOrdID?.startsWith('vds-') && o.stop);
+  return (await t.account.openOrders(t.liquid.name)).filter((o) => o.clOrdID?.startsWith('vds-') && o.stop);
 }
 
 /** An error notice for `ref` where the target's notices are read from here (an executor's GET /notices); the browser's are its bell. */
@@ -192,20 +192,20 @@ export const LIQ_SCENARIOS: Scenario[] = [
     cost: (U) => ({ takerUsd: 2 * U, makerUsd: 0, peakUsd: U, leverage: 2, lostUsd: U * LIQ_MAX_MARGIN }),
     async run(t) {
       if (t.dry) throw new Unavailable(LIVE_ONLY);
-      const before = await t.env.reads.leverage(t.env.followerAddress, t.main.name);
+      const before = await t.env.reads.leverage(t.env.followerAddress, t.liquid.name);
       try {
         // Exits 20% away: both far past the liquidation once the position is at the market's maximum leverage.
-        const v0 = await t.start({ kind: 'bracket', quantity: await t.qty(t.U), entry: 'market', slippageBps: 30, leverage: t.expectedLeverage(2), marginMode: 'isolated', exits: { tpPct: 0.2, slPct: 0.2 } });
+        const v0 = await t.start({ kind: 'bracket', symbol: t.liquid.name, quantity: await t.qty(t.U, t.liquid.name), entry: 'market', slippageBps: 30, leverage: t.expectedLeverage(2, t.liquid), marginMode: 'isolated', exits: { tpPct: 0.2, slPct: 0.2 } });
         const id = v0.algo.id;
         await t.waitAlgo(id, 'the entry filled', (x) => x.algo.filled > 0, { timeoutMs: 30_000 });
-        await t.waitFor(`take-profit and stop-loss rest on ${t.where}`, async () => ((await t.algoOrders(id)).filter((o) => o.stop).length === 2 ? true : null), { timeoutMs: 45_000 });
-        const size0 = await t.account.position(t.main.name);
+        await t.waitFor(`take-profit and stop-loss rest on ${t.where}`, async () => ((await t.algoOrders(id, t.liquid.name)).filter((o) => o.stop).length === 2 ? true : null), { timeoutMs: 45_000 });
+        const size0 = await t.account.position(t.liquid.name);
         await nearLiquidation(t);
         const { left, at } = await liquidated(t, size0);
         await sodexRecord(t, left, size0);
         // What SoDEX did with the position's stops, and what the algo says - once it had a minute to hear.
         await t.sleep(60_000);
-        const hist = (await t.account.history(t.main.name)).filter((o) => o.clOrdID?.startsWith(algoPrefix(id)) && o.stop);
+        const hist = (await t.account.history(t.liquid.name)).filter((o) => o.clOrdID?.startsWith(algoPrefix(id)) && o.stop);
         t.note(`SoDEX's history of the exits: ${hist.map((o) => `${o.stop!.kind} ${o.status} filled ${o.filled}`).join('; ') || 'none listed'}`);
         const v = await t.view(id);
         t.note(`the algo: ${v.algo.status}, exits ${(v.exits ?? []).map((e) => `${e.kind}${e.live ? ' live' : ' over'}`).join(', ') || 'none'}; last events: ${(await t.exec.events(id, 5)).map((e) => e.text).join(' | ')}`);
@@ -215,8 +215,8 @@ export const LIQ_SCENARIOS: Scenario[] = [
           t.note(`a partial liquidation: ${left} left; the exits, sized to what the algo filled, are reduce-only and close no more than that`);
           return;
         }
-        t.check((await t.account.position(t.main.name)) === 0, 'still flat: no exit opened anything (they are reduce-only)');
-        const resting = (await t.algoOrders(id)).filter((o) => o.stop);
+        t.check((await t.account.position(t.liquid.name)) === 0, 'still flat: no exit opened anything (they are reduce-only)');
+        const resting = (await t.algoOrders(id, t.liquid.name)).filter((o) => o.stop);
         t.check(resting.length === 0, 'no exit of the algo is left resting on SoDEX for the position that is gone (ce/edge-algo.test.ts "FINDING liquidated, algo" while it is)', resting.map((o) => `${o.stop!.kind} ${o.qty}`));
       } finally {
         await restoreLeverage(t, before);
@@ -227,7 +227,7 @@ export const LIQ_SCENARIOS: Scenario[] = [
     id: 'liq.copy-follower',
     section: 'copy',
     kind: 'liq',
-    title: 'The follower\'s copied position liquidated by SoDEX',
+    title: 'The follower\'s copied short liquidated by SoDEX',
     confirms: 'SoDEX liquidates a copied position (its "liquidation:" fill, the account flat); the copy calls it closed outside the copier with an error notice, pulls its SoDEX stops, opens nothing by itself, and copies the leader\'s next open at its own leverage again',
     deps: ['copy', 'leader'],
     source: SOURCE,
@@ -239,56 +239,57 @@ export const LIQ_SCENARIOS: Scenario[] = [
     cost: (U) => ({ takerUsd: 3 * U, makerUsd: 0, peakUsd: U, leverage: 2, leaderTakerUsd: 6 * U, leaderPeakUsd: 2 * U, lostUsd: U * LIQ_MAX_MARGIN }),
     async run(t) {
       if (t.dry) throw new Unavailable(LIVE_ONLY);
-      const before = await t.env.reads.leverage(t.env.followerAddress, t.main.name);
-      const lev = t.expectedLeverage(2);
+      const before = await t.env.reads.leverage(t.env.followerAddress, t.liquid.name);
+      const lev = t.expectedLeverage(2, t.liquid);
       try {
         // Its stops far out (90% of the margin, 100% of it as profit): SoDEX holds them, so the copier has stops to pull when the position goes.
-        const c = await t.subscribe({ sizingMode: 'fixedNotional', fixedNotionalUsd: t.U, maxLeverage: 2, marginMode: 'isolated', stopLossPct: 0.9, takeProfitPct: 1 });
+        // A short: liq.algo-exits holds a long, so whichever way the market goes one of the two is liquidated.
+        const c = await t.subscribe({ sizingMode: 'fixedNotional', fixedNotionalUsd: t.U, maxLeverage: 2, marginMode: 'isolated', stopLossPct: 0.9, takeProfitPct: 1, assetAllow: [t.liquid.base] });
         const id = c.subscription.id;
         await t.waitFor('the copy is active and its leader seeded', async () => ((await t.exec.copy(id)).subscription.status === 'active' ? true : null), { timeoutMs: 30_000 });
         await t.sleep(5_000);
-        await t.leader({ buyUsd: t.U });
-        await t.expectFollowerUsd(t.U, 'the follower copied the leader\'s long');
-        const l0 = await t.env.reads.leverage(t.env.followerAddress, t.main.name);
+        await t.leader({ sellUsd: t.U }, t.liquid.name);
+        await t.expectFollowerUsd(-t.U, 'the follower copied the leader\'s short', { symbol: t.liquid.name });
+        const l0 = await t.env.reads.leverage(t.env.followerAddress, t.liquid.name);
         t.check(l0?.leverage === lev && l0.marginMode === 'isolated', `SoDEX holds the copy at ${lev}x isolated (its cap and the region's)`, l0);
         await t.waitFor('the copy\'s stop-loss and take-profit rest on SoDEX', async () => ((await copyStops(t)).length === 2 ? true : null), { timeoutMs: 60_000 });
-        const size0 = await t.account.position(t.main.name);
+        const size0 = await t.account.position(t.liquid.name);
         await nearLiquidation(t);
         const { left, at } = await liquidated(t, size0);
         await sodexRecord(t, left, size0);
         if (left !== 0) {
           // In part: the copy holds what SoDEX left and buys nothing back by itself (the rest is ce/edge-liquidation.test.ts).
-          const step = Number(t.main.stepSize);
+          const step = Number(t.liquid.stepSize);
           await t.waitFor(`the copy holds what SoDEX left (${left})`, async () => {
-            const p = (await t.exec.copy(id)).positions.find((x) => x.symbol === t.main.name)?.size ?? 0;
+            const p = (await t.exec.copy(id)).positions.find((x) => x.symbol === t.liquid.name)?.size ?? 0;
             return Math.abs(p - left) <= step / 2 || p === 0 ? true : null;
           }, { timeoutMs: 90_000 });
           await t.sleep(RECONCILE_MS + 15_000);
-          const sent = (await t.account.history(t.main.name)).filter((o) => o.clOrdID?.startsWith('vdc-') && o.createdAt > at);
+          const sent = (await t.account.history(t.liquid.name)).filter((o) => o.clOrdID?.startsWith('vdc-') && o.createdAt > at);
           t.check(sent.length === 0, 'no copy order since the partial liquidation: nothing bought back by itself', sent.map((o) => o.clOrdID));
-          await t.leader({ close: true });
-          await t.expectFollowerUsd(0, 'the copy closes what is left with the leader');
+          await t.leader({ close: true }, t.liquid.name);
+          await t.expectFollowerUsd(0, 'the copy closes what is left with the leader', { symbol: t.liquid.name });
           return;
         }
         // In full: the copier's view of it.
-        await t.waitFor('the copy\'s activity says it was closed outside the copier', async () => ((await t.exec.activity(id)).some((e) => e.kind === 'status' && e.reason === 'closed-outside' && e.symbol === t.main.name) ? true : null), { timeoutMs: 90_000 });
-        await errorNotice(t, `${id}:${t.main.name}`);
+        await t.waitFor('the copy\'s activity says it was closed outside the copier', async () => ((await t.exec.activity(id)).some((e) => e.kind === 'status' && e.reason === 'closed-outside' && e.symbol === t.liquid.name) ? true : null), { timeoutMs: 90_000 });
+        await errorNotice(t, `${id}:${t.liquid.name}`);
         await t.waitFor('no copy stop is left on SoDEX', async () => ((await copyStops(t)).length === 0 ? true : null), { timeoutMs: 60_000 });
         // Not opened again by itself: a reconcile goes by, and the leader adds meanwhile.
-        await t.leader({ buyUsd: t.U });
+        await t.leader({ sellUsd: t.U }, t.liquid.name);
         await t.sleep(RECONCILE_MS + 15_000);
-        t.check((await t.account.position(t.main.name)) === 0, 'still flat: the copy opened nothing by itself, nor on the leader\'s add');
-        const sent = (await t.account.history(t.main.name)).filter((o) => o.clOrdID?.startsWith('vdc-') && o.createdAt > at);
+        t.check((await t.account.position(t.liquid.name)) === 0, 'still flat: the copy opened nothing by itself, nor on the leader\'s add');
+        const sent = (await t.account.history(t.liquid.name)).filter((o) => o.clOrdID?.startsWith('vdc-') && o.createdAt > at);
         t.check(sent.length === 0, 'no copy order on SoDEX since the liquidation', sent.map((o) => o.clOrdID));
         t.check((await t.exec.activity(id)).some((e) => e.kind === 'skip' && e.reason === 'own-position' && e.at > at), 'the leader\'s add is skipped, and said: the market waits for the leader to be flat');
         // The leader closes and opens again: copied, at the copy's leverage again (not the one the harness set).
-        await t.leader({ close: true });
-        await t.leader({ buyUsd: t.U });
-        await t.expectFollowerUsd(t.U, 'the copy follows the leader\'s next open');
-        const l1 = await t.env.reads.leverage(t.env.followerAddress, t.main.name);
+        await t.leader({ close: true }, t.liquid.name);
+        await t.leader({ sellUsd: t.U }, t.liquid.name);
+        await t.expectFollowerUsd(-t.U, 'the copy follows the leader\'s next open', { symbol: t.liquid.name });
+        const l1 = await t.env.reads.leverage(t.env.followerAddress, t.liquid.name);
         t.check(l1?.leverage === lev && l1.marginMode === 'isolated', `SoDEX holds the new copy at ${lev}x isolated again`, l1);
-        await t.leader({ close: true });
-        await t.expectFollowerUsd(0, 'and closes it with the leader');
+        await t.leader({ close: true }, t.liquid.name);
+        await t.expectFollowerUsd(0, 'and closes it with the leader', { symbol: t.liquid.name });
       } finally {
         await restoreLeverage(t, before);
       }

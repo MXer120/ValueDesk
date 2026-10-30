@@ -112,6 +112,20 @@ export function pickVolatile(candidates: Array<{ m: MarketInfo; book: BookSnapsh
   return scored[0] ?? null;
 }
 
+/**
+ * The market where a position held at the market's maximum leverage is liquidated soonest: the time for the price to
+ * cover the distance to the liquidation (about 1 / max leverage) goes with (distance / volatility)^2, so the highest
+ * max leverage x one-minute range wins. BTC at 40x waited 60 min on 2026-10-30 (1.5% away, the price never got there).
+ */
+export function pickLiquidation(candidates: Array<{ m: MarketInfo; book: BookSnapshot; candles: Array<{ h: number; l: number; c: number }> }>, maxSpreadBps = 3, maxTickBps = 1.5): { m: MarketInfo; score: number } | null {
+  const scored = candidates
+    .filter((c) => c.m.status === 'TRADING' && c.book.bid > 0 && c.book.ask > c.book.bid && halfSpreadFrac(c.book) * 2 * 10_000 <= maxSpreadBps && c.candles.length >= 5)
+    .filter((c) => (Number(c.m.tickSize) / ((c.book.bid + c.book.ask) / 2)) * 10_000 <= maxTickBps)
+    .map((c) => ({ m: c.m, score: c.m.maxLeverage * (c.candles.reduce((a, k) => a + (k.h - k.l) / k.c, 0) / c.candles.length) * 10_000 }))
+    .sort((a, b) => b.score - a.score);
+  return scored[0] ?? null;
+}
+
 export function computeBudget(list: readonly Scenario[], i: BudgetInput): Budget {
   const hs = halfSpreadFrac(i.book);
   const maker = i.main.makerFee ?? i.main.takerFee;
