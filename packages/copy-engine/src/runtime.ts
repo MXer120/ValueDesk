@@ -903,7 +903,7 @@ export class CopyRuntime {
       delete st.owned[symbol];
     }
     if (st.owned[symbol]) this.recentGrow.delete(`${s.id}|${symbol}`);
-    this.dirty.add(s.id);
+    this.saveBooks(s.id);
     if (!s.settings.paper) this.scheduleStops(s, symbol);
   }
 
@@ -1067,7 +1067,7 @@ export class CopyRuntime {
     delete st.owned[sym];
     this.stopFired.set(k, { at: Date.now(), why: 'own-position' });
     this.ownFlat(s.owner, sym, p.size);
-    this.dirty.add(s.id);
+    this.saveBooks(s.id);
     this.host.log.info('copy: SoDEX holds no position where the copier closed; booked flat', { owner: s.owner, sub: s.id, symbol: sym, books: p.size });
     const evidence = await this.outsideFills(s, sym, p.openedAt - FILLS_SLACK_MS, p.size);
     const why = this.outsideWhy(evidence, stops);
@@ -1124,6 +1124,7 @@ export class CopyRuntime {
     const st = this.stateOf(s);
     const k = `${s.id}|${sym}`;
     delete st.owned[sym];
+    this.saveBooks(s.id);
     this.recentGrow.delete(k);
     this.recentShrink.delete(k);
     this.outsideSeen.delete(k);
@@ -1238,7 +1239,7 @@ export class CopyRuntime {
         st.owned[sym] = { size: actual.size, entry: actual.entry, openedAt: g.at };
         this.recentGrow.delete(k);
         this.scheduleStops(s, sym);
-        this.dirty.add(s.id);
+        this.saveBooks(s.id);
       }
       for (const [sym, p] of Object.entries(st.owned)) {
         if (inFlight(s.id, sym)) continue;
@@ -1287,7 +1288,7 @@ export class CopyRuntime {
           if (drop > 0) st.realizedPnl += (p.size - actual!.size) * (mark - p.entry);
           st.owned[sym] = { size: actual!.size, entry: actual!.entry || p.entry, openedAt: p.openedAt };
           this.scheduleStops(s, sym);
-          this.dirty.add(s.id);
+          this.saveBooks(s.id);
           if (!smaller) continue;
           // What the copier's own reductions do not explain went outside it, and is told. What the
           // copy does next is unchanged: it holds what is left, and the leader's next add sizes it again.
@@ -2064,6 +2065,18 @@ export class CopyRuntime {
     const s = this.subs.get(id);
     if (!s) throw new Error('No such copy.');
     return s;
+  }
+
+  /**
+   * The copy's books changed (a fill, a position booked in or out): saved now, not at the next flush (5 s).
+   * An executor killed in between - a crash, a release's restart - came back without the position and never
+   * closed it with the leader (live run 2026-10-30, copym.restart-close: killed 2.4 s after the copy's fill).
+   * It stays dirty, so the next flush writes it again whatever order the saves land in.
+   */
+  private saveBooks(id: string): void {
+    this.dirty.add(id);
+    const st = this.states.get(id);
+    if (st) void this.host.store.saveState(st).catch((e) => this.host.log.error('copy: state not saved', { sub: id, error: String(e) }));
   }
 
   private async flush(): Promise<void> {

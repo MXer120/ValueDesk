@@ -397,6 +397,34 @@ test('BUG runtime: a leader close that happened while the copier was down is nev
   }
 });
 
+test('BUG live run 2026-10-30: the copier killed seconds after a fill (no clean stop) comes back holding it, and closes it with the leader', async () => {
+  // copym.restart-close on self: the executor was killed 2.4 s after the copy's fill; the books were only
+  // saved every 5 s, so the next copier held nothing and never closed what the leader closed meanwhile.
+  const w = world();
+  const store = new MemoryStore();
+  const first = runtime(w, () => new PaperSink(), { store });
+  await first.rt.start();
+  const s = await first.rt.add(sub({ paper: true }, { id: 'kill-after-fill' }));
+  await ready();
+  leaderBuys('1');
+  assert.ok(await until(() => size(first.rt, s.id) === 0.01), 'the copy filled');
+  await wait(20);
+  // Killed: no stop(), no flush - only what was saved already is there.
+  const saved = await store.state(s.id);
+  assert.equal(saved?.owned['BTC-USD']?.size, 0.01, `saved at once: ${JSON.stringify(saved?.owned)}`);
+  w.leader = [];
+  const second = runtime(w, () => new PaperSink(), { store });
+  await second.rt.start();
+  try {
+    await ready();
+    await second.rt.reconcileAll();
+    assert.ok(await until(() => size(second.rt, s.id) === 0, 1000), `the copy still holds ${size(second.rt, s.id)} BTC; the leader closed while it was down`);
+  } finally {
+    await second.rt.stop();
+    await first.rt.stop().catch(() => undefined);
+  }
+});
+
 test('BUG runtime: a leader close while the copy was paused leaves the copy\'s position open after it resumes', async () => {
   const w = world();
   const { rt } = runtime(w, () => new PaperSink());
