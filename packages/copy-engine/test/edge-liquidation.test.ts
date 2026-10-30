@@ -107,8 +107,11 @@ async function until(cond: () => boolean, ms = 3000): Promise<boolean> {
   return true;
 }
 
-/** A live sink that records what it is asked to do: orders, leverage, stops (with their size) and cancels. */
-function recordingSink() {
+/**
+ * A live sink that records what it is asked to do: orders, leverage, stops (with their size) and cancels.
+ * `refuse` answers an order as SoDEX refusing it (its error), or null to take it.
+ */
+function recordingSink(refuse?: (i: Intent) => string | null) {
   const placed: Intent[][] = [];
   const stops: Array<{ clOrdID: string; quantity: string; kind: string }> = [];
   const cancels: string[] = [];
@@ -117,7 +120,10 @@ function recordingSink() {
     paper: false,
     async place(_a, _m, intents): Promise<SendResult[]> {
       placed.push(intents);
-      return intents.map((i) => ({ clOrdID: i.clOrdID, ok: true, orderId: '1', error: null, outcomeUnknown: false }));
+      return intents.map((i) => {
+        const error = refuse?.(i) ?? null;
+        return { clOrdID: i.clOrdID, ok: !error, orderId: error ? null : '1', error, outcomeUnknown: false };
+      });
     },
     async setLeverage() {
       leverage++;
@@ -183,9 +189,9 @@ async function ready(): Promise<void> {
 }
 
 /** A live copy that holds 0.01 BTC copied from the leader's 1 BTC (proportional: $1,000 of the leader's $100,000), with its SoDEX stop-loss. */
-async function holding(o: { id: string; settings?: Parameters<typeof sub>[0]; fills?: World['fills'] }) {
+async function holding(o: { id: string; settings?: Parameters<typeof sub>[0]; fills?: World['fills']; refuse?: (i: Intent) => string | null }) {
   const w = world({ fills: o.fills });
-  const rec = recordingSink();
+  const rec = recordingSink(o.refuse);
   const { rt, store, notices } = runtime(w, rec.sink);
   await rt.start();
   const s = await rt.add(sub(o.settings ?? {}, { id: o.id }));
@@ -714,6 +720,156 @@ test('stale: right after the copy\'s own close, a read still showing the positio
     w.leader = [{ s: 'BTC-USD', sz: '1', ep: '80000' }];
     assert.ok(await until(() => rec.placed.length === 3), 'the leader\'s next open is copied');
     assert.ok(!(await store.activity({ subId: s.id })).some((e) => e.kind === 'skip' && e.reason === 'own-position'), 'never skipped as the follower\'s own');
+  } finally {
+    await rt.stop();
+  }
+});
+
+/* ======================= the copy's own stop fires on SoDEX (2026-10-29) ===== */
+
+/**
+ * Live run 2026-10-29 (copy.tp-fires, self-hosted executor): the copy's SoDEX stop fired, and the copier
+ * did not notice. Its fill came on the stream as a taker fill of the follower's that matched no order of
+ * the copier's (dropped); the copier's own guard then sent a reduce-only close, which SoDEX refused with
+ * "position not found: 1"; the reads disagreed (a stale backend still showed the position), so nothing
+ * was adopted; and the leader's next add was copied as an increase, where it must be skipped after the
+ * stop. The copier's own evidence - the stop's fill, SoDEX's refusal - moves the books now, never a read.
+ */
+const notFound = (i: Intent) => (i.reduceOnly ? 'position not found: 1' : null);
+
+test('BUG live run 2026-10-29: the copy\'s own stop-loss fills on the stream (no order of the copier\'s), the reads disagree, the leader adds: booked closed at once, the add skipped as after the stop, no increase sent', async () => {
+  // Proportional at 5x, stop-loss at 50% of the margin: 72,000.
+  const { w, rec, rt, store, notices, s } = await holding({ id: 'own-sl-stream', fills: [] });
+  try {
+    const held = w.follower;
+    const sl = rec.stops[0]!.clOrdID;
+    const n0 = rec.orders().length;
+    // SoDEX fires the stop: the follower sells 0.01 as taker at 71,990; no order of the copier's is in flight.
+    followerSold('0.01', 'BTC-USD', '71990');
+    assert.ok(await until(() => size(rt, s.id) === 0), 'BUG: the stop\'s own fill closes the copied position in the books at once');
+    assert.ok(Math.abs(rt.view(s.id)!.realizedPnl - 0.01 * (71_990 - 80_000)) < 1e-9, `booked at the fill price (${rt.view(s.id)!.realizedPnl})`);
+    assert.ok(await until(() => notices.some((n) => n.kind === 'closed')));
+    assert.deepEqual(notices.filter((n) => n.kind === 'closed').map((n) => [n.grade, n.body]), [['info', 'Your stop-loss closed this copied position.']]);
+    assert.ok((await store.activity({ subId: s.id })).some((e) => e.kind === 'status' && e.reason === 'stop-loss'), 'its activity says its stop-loss closed it');
+    assert.ok(await until(() => rec.cancels.includes(sl)), 'its stop on SoDEX is let go with the position');
+    // SoDEX's reads disagree (a stale backend still shows the position) and its trades lag: nothing new there.
+    alternate(w, 'follower', [() => held, () => []]);
+    await rt.refreshFollower(FOLLOWER);
+    assert.equal(size(rt, s.id), 0, 'a stale read does not reopen it');
+    // The leader adds: skipped after the stop, nothing sent.
+    leaderBuys('0.5');
+    w.leader = [{ s: 'BTC-USD', sz: '1.5', ep: '80000' }];
+    await wait(300);
+    assert.equal(rec.orders().length, n0, 'BUG: no increase is sent after the copy\'s own stop fired');
+    assert.ok((await store.activity({ subId: s.id })).some((e) => e.kind === 'skip' && e.reason === 'after-stop-loss'), 'BUG: the add is skipped as after its stop-loss');
+    // Every read stale now (they agree on the closed position): still not adopted back, nothing told as outside.
+    w.follower = held;
+    await rt.refreshFollower(FOLLOWER);
+    assert.equal(size(rt, s.id), 0, 'never reopened, doubled or shrunk by a stale read');
+    const lines = await store.activity({ subId: s.id });
+    assert.ok(!lines.some((e) => e.reason === 'reduced-outside' || e.reason === 'closed-outside'), 'the books are not confused: nothing "outside"');
+    assert.equal(notices.filter((n) => n.kind === 'closed' || n.kind === 'reduced').length, 1, 'told once');
+  } finally {
+    await rt.stop();
+  }
+});
+
+test('BUG SoDEX refuses the copier\'s close with "position not found" (its stop fired, the stream missed the fill): booked flat at once, told as its stop-loss from SoDEX\'s trades, never sent again; the leader\'s next add is skipped', async () => {
+  const { w, rec, rt, store, notices, s } = await holding({ id: 'refused-nf', fills: [], refuse: notFound });
+  try {
+    const held = w.follower;
+    const sl = rec.stops[0]!.clOrdID;
+    // SoDEX's trades show the stop's fill; its reads disagree.
+    w.fills = [fillOf(sl, '0.01', '71900')];
+    alternate(w, 'follower', [() => held, () => []]);
+    // The mark past the stop-loss: the copier's own guard closes too, and SoDEX refuses (the position is gone).
+    rt.markets.setMark('BTC-USD', 71_900);
+    assert.ok(await until(() => rec.orders().some((i) => i.leg === 'stop-loss'), 4_000), 'the copier\'s guard sends its stop-loss close');
+    assert.ok(await until(() => size(rt, s.id) === 0), 'BUG: SoDEX\'s refusal books the market flat');
+    assert.ok((await store.activity({ subId: s.id })).some((e) => e.kind === 'error' && e.reason === 'rejected' && /position not found/.test(e.detail ?? '')), 'the refusal is in the activity');
+    assert.ok(await until(() => notices.some((n) => n.kind === 'closed')));
+    assert.deepEqual(notices.filter((n) => n.kind === 'closed').map((n) => [n.grade, n.body]), [['info', 'Your stop-loss closed this copied position.']], 'told as its stop-loss, from SoDEX\'s trades');
+    assert.ok(Math.abs(rt.view(s.id)!.realizedPnl - 0.01 * (71_900 - 80_000)) < 1e-9, `booked at the stop's fill price (${rt.view(s.id)!.realizedPnl})`);
+    assert.ok(await until(() => rec.cancels.includes(sl)));
+    // A guard pass and a reconcile later: the close is not sent again.
+    await wait(2_300);
+    await rt.reconcileAll();
+    await wait(100);
+    assert.equal(rec.orders().filter((i) => i.reduceOnly).length, 1, 'BUG: the refused close is not sent again');
+    // The leader adds: skipped after the stop.
+    const n0 = rec.orders().length;
+    leaderBuys('0.5');
+    w.leader = [{ s: 'BTC-USD', sz: '1.5', ep: '80000' }];
+    await wait(300);
+    assert.equal(rec.orders().length, n0, 'BUG: no increase is sent');
+    assert.ok((await store.activity({ subId: s.id })).some((e) => e.kind === 'skip' && e.reason === 'after-stop-loss'), 'the add is skipped as after its stop-loss');
+    // Reads that all show the position now (stale) are not adopted back.
+    w.follower = held;
+    await rt.refreshFollower(FOLLOWER);
+    assert.equal(size(rt, s.id), 0);
+  } finally {
+    await rt.stop();
+  }
+
+  // The leader's reduction refused the same way, SoDEX's trades showing nothing yet: flat, closed outside, not sent again.
+  const b = await holding({ id: 'refused-nf-cut', fills: [], refuse: notFound });
+  try {
+    const n0 = b.rec.orders().length;
+    leaderSells('0.5');
+    b.w.leader = [{ s: 'BTC-USD', sz: '0.5', ep: '80000' }];
+    assert.ok(await until(() => size(b.rt, b.s.id) === 0), 'BUG: booked flat on the refusal');
+    assert.equal(b.rec.orders().length, n0 + 1);
+    assert.ok(await until(() => b.notices.some((n) => n.kind === 'closed')));
+    assert.deepEqual(b.notices.filter((n) => n.kind === 'closed').map((n) => n.grade), ['error'], 'no fill names the stop: closed outside, an error');
+    leaderBuys('0.5');
+    b.w.leader = [{ s: 'BTC-USD', sz: '1', ep: '80000' }];
+    await wait(300);
+    assert.equal(b.rec.orders().length, n0 + 1, 'nothing sent again, nothing added');
+    assert.ok((await b.store.activity({ subId: b.s.id })).some((e) => e.kind === 'skip' && e.reason === 'own-position'));
+  } finally {
+    await b.rt.stop();
+  }
+});
+
+test('BUG the copy\'s take-profit fires on SoDEX, filled in two prints on the stream: booked at their price, told as its take-profit (info), its stop-loss cancelled, the leader\'s next add skipped as after a take-profit', async () => {
+  // Take-profit at 50% of the margin at 5x: 88,000; the stop-loss at 72,000.
+  const { w, rec, rt, store, notices, s } = await holding({ id: 'own-tp-stream', settings: { takeProfitPct: 0.5 }, fills: [] });
+  try {
+    assert.deepEqual(rec.stops.map((x) => x.kind), ['stop-loss', 'take-profit']);
+    const [sl, tp] = [rec.stops[0]!.clOrdID, rec.stops[1]!.clOrdID];
+    const n0 = rec.orders().length;
+    followerSold('0.004', 'BTC-USD', '88010');
+    await wait(50);
+    assert.equal(size(rt, s.id), 0.01, 'a part of the stop\'s size is not booked yet');
+    followerSold('0.006', 'BTC-USD', '88020');
+    assert.ok(await until(() => size(rt, s.id) === 0), 'BUG: the take-profit\'s fill closes the copied position in the books');
+    const pnl = 0.004 * 8_010 + 0.006 * 8_020;
+    assert.ok(Math.abs(rt.view(s.id)!.realizedPnl - pnl) < 1e-6, `booked at the prints' price (${rt.view(s.id)!.realizedPnl})`);
+    assert.ok(await until(() => notices.some((n) => n.kind === 'closed')));
+    assert.deepEqual(notices.filter((n) => n.kind === 'closed').map((n) => [n.grade, n.body]), [['info', 'Your take-profit closed this copied position.']]);
+    assert.ok((await store.activity({ subId: s.id })).some((e) => e.kind === 'status' && e.reason === 'take-profit'));
+    assert.ok(await until(() => rec.cancels.includes(sl)), 'its stop-loss on SoDEX is cancelled');
+    assert.ok(rec.cancels.includes(tp));
+    leaderBuys('0.5');
+    w.leader = [{ s: 'BTC-USD', sz: '1.5', ep: '80000' }];
+    await wait(300);
+    assert.equal(rec.orders().length, n0, 'BUG: no increase is sent');
+    assert.ok((await store.activity({ subId: s.id })).some((e) => e.kind === 'skip' && e.reason === 'after-take-profit'), 'BUG: skipped as after its take-profit');
+  } finally {
+    await rt.stop();
+  }
+});
+
+test('a closing print of the follower\'s away from both of the copy\'s stops (a close by hand), or larger than them, is not taken as its stop: left to the reads and SoDEX\'s trades', async () => {
+  const { rt, notices, s } = await holding({ id: 'by-hand-print', settings: { takeProfitPct: 0.5 }, fills: [] });
+  try {
+    followerSold('0.01', 'BTC-USD', '80000');
+    await wait(100);
+    assert.equal(size(rt, s.id), 0.01, 'not booked from the stream');
+    followerSold('0.02', 'BTC-USD', '71000');
+    await wait(100);
+    assert.equal(size(rt, s.id), 0.01);
+    assert.equal(notices.length, 0);
   } finally {
     await rt.stop();
   }
