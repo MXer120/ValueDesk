@@ -77,6 +77,7 @@ import { limitImpact, publishOrderImpact, type RawTake } from '../orderImpact';
 import { publishDraftOrders, type DraftLine } from '../draftOrders';
 import { fmtSlip, pctAsUnit, unitAsPct, useSlipUnit } from '../slipUnit';
 import { lazyChunk } from '../lazyPage';
+import { accountLeverage } from '../trading/accountLeverage';
 
 /** A market order cannot ask for more than this. The field refuses anything higher. */
 const SLIP_CAP_PCT = 2.5;
@@ -904,6 +905,24 @@ export function OrderEntry({
   const acct = useAccountResource(acctKey, () => api.state(engine, connectedAddress!), 20_000);
   const available = readAvailable(acct.data, engine, sym?.quoteCoin, sym?.baseCoin, side, marginMode);
 
+  /*
+   * THE LEVERAGE SODEX HOLDS. SoDEX keeps a leverage and margin mode per market and account; an
+   * order uses those, whatever the ticket says. The ticket used to start at the market's initial
+   * leverage (20x) whatever the account had set (2x on sodex.com, or here earlier), so it showed -
+   * and priced margin and liquidation at - a leverage SoDEX would not use. It now takes the
+   * account's own for the market once the account state answers, until the user changes it here
+   * (then theirs is what is sent and kept). A market SoDEX holds nothing for keeps the ticket's.
+   */
+  const held = engine === 'perps' ? accountLeverage((acct.data as { state?: unknown } | null)?.state, symbol) : null;
+  const levTouched = useRef<string | null>(null);
+  const levKey = `${connectedAddress ?? ''}|${symbol}`;
+  useEffect(() => {
+    if (!held || levTouched.current === levKey) return;
+    setLeverage(String(clampLev(held.leverage)));
+    setMarginMode(held.marginMode);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [levKey, held?.leverage, held?.marginMode]);
+
   // Current position in THIS market, for the read-out. Shared with the
   // Positions panel and Chart.tsx via accountFeeds.ts - previously documented
   // here as "one extra request every 15s" when both were mounted; now zero.
@@ -1677,6 +1696,7 @@ export function OrderEntry({
   }
 
   function chooseMargin(mode: 'cross' | 'isolated') {
+    levTouched.current = levKey;
     setMarginMode(mode);
     setPop(null);
     void pushLeverage(lev, mode);
@@ -1684,6 +1704,7 @@ export function OrderEntry({
 
   function commitLeverage() {
     const next = clampLev(levDraft);
+    levTouched.current = levKey;
     setLeverage(String(next));
     setPop(null);
     void pushLeverage(next, marginMode);

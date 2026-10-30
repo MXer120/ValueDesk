@@ -15,7 +15,6 @@ import type { Page } from 'playwright-core';
 import { dec, num, typeInto, uiSuite, until, waitValue } from './harness';
 import { ticket, toast } from './ticket';
 import { enableTrading, placeViaReview, sideButton, type Leg } from './trade';
-import { pickMarket } from './uiSteps';
 import type { FakeSodex, FakeWrite } from './sodexFake';
 
 const h = uiSuite(import.meta.filename);
@@ -349,13 +348,13 @@ h.test('sizing with a balance: MAX and the percentage are balance x leverage at 
 h.test('spot: Buy / Sell, Market and Limit only, no leverage or TP/SL; a spot order is a batch on the spot engine', async (env) => {
   const sx = await enableTrading(env);
   const { page } = env;
+  // Futures / Spot in the bar, on every screen: a phone's bar had no switch (spot only through the search).
   const kind = page.getByRole('radiogroup', { name: 'Market type' });
-  if (await kind.isVisible().catch(() => false)) await kind.getByRole('radio', { name: 'Spot', exact: true }).click();
-  else {
-    // A phone's bar has no Futures / Spot switch: a spot market is picked in the market search.
-    await pickMarket(page, 'BTC', 'spot');
-    await page.getByRole('button', { name: /spot: change market$/ }).first().waitFor({ state: 'visible', timeout: 20_000 });
-  }
+  await kind.waitFor({ state: 'visible', timeout: 20_000 });
+  const box = (await kind.boundingBox())!;
+  assert.ok(box.x >= 0 && box.x + box.width <= page.viewportSize()!.width, 'the switch lies within the screen');
+  await kind.getByRole('radio', { name: 'Spot', exact: true }).click();
+  await page.getByRole('button', { name: /spot: change market$/ }).first().waitFor({ state: 'visible', timeout: 20_000 });
   const t = ticket(page);
   const dir = t.g.getByRole('radiogroup', { name: 'Direction' });
   await dir.getByRole('radio', { name: 'Buy', exact: true }).waitFor({ state: 'visible' });

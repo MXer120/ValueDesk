@@ -416,7 +416,7 @@ test('targets: a scenario that restarts the executor declares it, and is skipped
   for (const s of CATALOGUE) assert.equal(s.needs?.includes('keyImport') ?? false, imports.includes(s), `${s.id} declares needs: ['keyImport'] exactly when it imports a key`);
   // The page's own controls (scenarios/ui.ts): every scenario that works the page declares it, and only the browser can.
   const pages = CATALOGUE.filter((s) => /\bt\.ui\(|startCopyInWindow\(/.test(s.run.toString()));
-  assert.deepEqual(pages.map((s) => s.id).sort(), ['algo.ui-cancel-exits', 'copy.ui-close', 'copy.ui-confirm', 'ticket.leverage', 'ticket.limit-cancel', 'ticket.market-close', 'ticket.tpsl']);
+  assert.deepEqual(pages.map((s) => s.id).sort(), ['algo.ui-cancel-exits', 'copy.ui-close', 'copy.ui-confirm', 'position.tpsl-sheet', 'spot.order', 'ticket.cancel-all', 'ticket.leverage', 'ticket.limit-cancel', 'ticket.market-close', 'ticket.modify', 'ticket.stop', 'ticket.tpsl']);
   for (const s of CATALOGUE) assert.equal(s.needs?.includes('ui') ?? false, pages.includes(s), `${s.id} declares needs: ['ui'] exactly when it works the page`);
   for (const t of ['self', 'hosted'] as const) {
     assert.deepEqual(CATALOGUE.filter((s) => cannotRun(s, t) && !tabs.includes(s) && !pages.includes(s)).map((s) => s.id).sort(), t === 'self' ? [] : restarts.map((s) => s.id).sort());

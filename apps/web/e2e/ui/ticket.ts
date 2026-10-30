@@ -15,7 +15,7 @@ export function ticket(page: Page, root?: Locator) {
   const t = {
     g,
     tab: (name: OrderType) => g.getByRole('tablist', { name: 'Order type' }).getByRole('tab', { name, exact: true }),
-    direction: (name: 'Long' | 'Short') => g.getByRole('radiogroup', { name: 'Direction' }).getByRole('radio', { name, exact: true }),
+    direction: (name: 'Long' | 'Short' | 'Buy' | 'Sell') => g.getByRole('radiogroup', { name: 'Direction' }).getByRole('radio', { name, exact: true }),
     price: box('Price'),
     amount: box('Amount'),
     trigger: box('Trigger'),

@@ -436,7 +436,7 @@ export class BrowserTarget implements ExecutorTarget {
     const d = this.d();
     if (!d.ui) throw new Unavailable('this browser driver drives no page');
     if (this.mode === 'dry') {
-      if (/^(ticket|orders|positions)\./.test(step)) throw new Error(`dry run: refusing ${step} (the order ticket and the account tables trade on SoDEX)`);
+      if (/^(ticket|orders|positions|spot)\./.test(step)) throw new Error(`dry run: refusing ${step} (the order ticket and the account tables trade on SoDEX)`);
       if (step === 'copy.start' && args.paper !== true) throw new Error('dry run: refusing a copy that is not paper');
       if (step === 'algo.bracket' && args.practice !== true) throw new Error('dry run: refusing an algo that is not a practice run');
     }

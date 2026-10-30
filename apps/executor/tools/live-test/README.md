@@ -162,9 +162,9 @@ What one run does:
 
 ## The scenarios
 
-131 by default, of which 126 run with a SoDEX leader (the 5 written for a Hyperliquid leader are skipped) and all
-131 with a Hyperliquid leader; `--slow` adds 5. Nine run on the browser target only: `twap.tab-close`, `copym.tab-close`
-and the seven that work ValueDesk's own pages ("ValueDesk's pages", below). Sizes are in U = SoDEX's $10 minimum order value plus 20% ($12):
+136 by default, of which 131 run with a SoDEX leader (the 5 written for a Hyperliquid leader are skipped) and all
+136 with a Hyperliquid leader; `--slow` adds 5. Fourteen run on the browser target only: `twap.tab-close`, `copym.tab-close`
+and the twelve that work ValueDesk's own pages ("ValueDesk's pages", below). Sizes are in U = SoDEX's $10 minimum order value plus 20% ($12):
 every child order is just big enough (and above Hyperliquid's $10 minimum for a leader there). Each scenario
 says what it confirms on the exchange (`title` and `confirms` in `scenarios/*.ts`).
 
@@ -226,7 +226,7 @@ says what it confirms on the exchange (`title` and `confirms` in `scenarios/*.ts
   copied position, brought near liquidation by the harness and liquidated by SoDEX ("Liquidations", below).
 - **The fee ladder** (6, +1 slow; self target only): one scenario per step of the copy fee ladder, and two for a
   failing volume source ("The fee ladder", below).
-- **ValueDesk's pages** (7, browser target only; `scenarios/ui.ts`, `needs: ['ui']`): the runner clicks the page as a
+- **ValueDesk's pages** (12, browser target only; `scenarios/ui.ts`, `needs: ['ui']`): the runner clicks the page as a
   person does, with the steps of `apps/web/e2e/ui/uiSteps.ts`, and checks SoDEX. Each is U, ends flat with nothing
   resting, and has a 3-minute timeout.
   - `ticket.limit-cancel`: a limit buy 2% under the bid through the order ticket and its review rests on SoDEX at the
@@ -246,10 +246,24 @@ says what it confirms on the exchange (`title` and `confirms` in `scenarios/*.ts
     leader's open is copied; Manage copies' Close ("Stop and close positions") stops it and closes reduce-only.
   - `copy.ui-confirm`: the same with "Ask before each trade": the page's prompt, Copy it sends the open, Skip sends
     nothing (declined), the leader's close answered Copy it closes the follower; exactly one copy buy reaches SoDEX.
+  - `ticket.stop`: a stop-market buy 5% over the ask and a stop-limit buy (trigger 5.5%, limit 6%, GTC) from the
+    ticket's Stop tab rest on SoDEX as triggers at the typed prices, unfired; the open orders' Cancel takes each off.
+  - `ticket.modify`: a limit 3% under the bid, changed with the open orders' Modify to 4% under and 2U; SoDEX shows
+    exactly the new price and size (replaced in place, or cancelled and placed again where the builder fee needs it:
+    noted); Cancel.
+  - `ticket.cancel-all`: limits 2% and 3% under the bid; the open orders' Cancel all (asked first) takes both off.
+  - `position.tpsl-sheet`: a market buy of U; the positions table's TP/SL sheet rests a take-profit 2% over and a
+    stop-loss 2% under the mark as reduce-only sells of the position at the sheet's prices; changed once (2.5%), SoDEX
+    holds only the new two; after Close no stop is left (if SoDEX keeps them they are cancelled through the open
+    orders, and that is noted).
+  - `spot.order`: Market type Spot, the main coin's USDC market, a market buy of U and the sell back of what it bought
+    (dust under one step stays). **It needs vUSDC in the follower's SoDEX spot account**, about $13; the deposit is on
+    perps. Without it the scenario is skipped and says so: move $15 from perps to spot on sodex.com (Transfer) or with
+    ValueDesk's transfer, then run it again. The runner's cleanup flattens perps only; this one sells back by itself.
 
-  A dry run skips the four `ticket.*` (its throwaway wallet has no SoDEX account; the UI specs run those steps
-  against the fake SoDEX) and runs the other three on paper (a paper copy, a practice bracket) through the same
-  clicks.
+  A dry run skips the `ticket.*`, `position.tpsl-sheet` and `spot.order` scenarios (its throwaway wallet has no SoDEX
+  account; the UI specs run those steps against the fake SoDEX) and runs the other three on paper (a paper copy, a
+  practice bracket) through the same clicks.
 
 ## Targets
 
@@ -259,9 +273,9 @@ skipped for, with why (`needs` in `scenarios/*.ts`; `target.ts`).
 
 | Target | What runs | Covers | Skips |
 |---|---|---|---|
-| `self` (default) | a real executor process started here from this checkout (`apps/executor/src/main.ts`, self-hosted for the follower, `EXECUTOR_LIVE_ALGOS=1` for a live run, the follower's volume from the runner's stub) | everything but the browser's own: 117 scenarios with a SoDEX leader, 122 with a Hyperliquid one (5 more with `--slow`) | `twap.tab-close`, `copym.tab-close` (no browser tab), the seven UI scenarios (`ticket.*`, `algo.ui-cancel-exits`, `copy.ui-*`: no page) |
-| `hosted` | ValueDesk's own executor on server 2, through the site: `https://www.valuedesk.so/api/copy/v1` (Vercel's function adds the origin secret and your country, which the server needs) | every scenario that does not restart the executor or set the follower's volume | `twap.restart`, `iceberg.restart`, `scale.restart`, `copy.restart`, `copym.restart-close` (it cannot be killed from here), the `fee.*` scenarios (its volume is its ledger's), `twap.tab-close`, `copym.tab-close`, the seven UI scenarios |
-| `browser` | the web app's own runtime (`apps/web/src/algo`, `copy`, `trading`) in a tab of Microsoft Edge on the local dev web, through the web test bridge (`browserDriver.ts`) | every algo and copy scenario, the restarts as reloads of the page, `twap.tab-close` and `copym.tab-close`, and the seven that click ValueDesk's own pages: 119 with a SoDEX leader, 124 with a Hyperliquid one (4 more with `--slow`) | the `fee.*` scenarios (a browser reads no volume: it charges fixed fees), `setup.key-import` (a browser makes its own copy key) |
+| `self` (default) | a real executor process started here from this checkout (`apps/executor/src/main.ts`, self-hosted for the follower, `EXECUTOR_LIVE_ALGOS=1` for a live run, the follower's volume from the runner's stub) | everything but the browser's own: 117 scenarios with a SoDEX leader, 122 with a Hyperliquid one (5 more with `--slow`) | `twap.tab-close`, `copym.tab-close` (no browser tab), the twelve UI scenarios (`ticket.*`, `position.tpsl-sheet`, `spot.order`, `algo.ui-cancel-exits`, `copy.ui-*`: no page) |
+| `hosted` | ValueDesk's own executor on server 2, through the site: `https://www.valuedesk.so/api/copy/v1` (Vercel's function adds the origin secret and your country, which the server needs) | every scenario that does not restart the executor or set the follower's volume | `twap.restart`, `iceberg.restart`, `scale.restart`, `copy.restart`, `copym.restart-close` (it cannot be killed from here), the `fee.*` scenarios (its volume is its ledger's), `twap.tab-close`, `copym.tab-close`, the twelve UI scenarios |
+| `browser` | the web app's own runtime (`apps/web/src/algo`, `copy`, `trading`) in a tab of Microsoft Edge on the local dev web, through the web test bridge (`browserDriver.ts`) | every algo and copy scenario, the restarts as reloads of the page, `twap.tab-close` and `copym.tab-close`, and the twelve that click ValueDesk's own pages: 124 with a SoDEX leader, 129 with a Hyperliquid one (4 more with `--slow`) | the `fee.*` scenarios (a browser reads no volume: it charges fixed fees), `setup.key-import` (a browser makes its own copy key) |
 
 **Hosted** in detail:
 

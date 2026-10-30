@@ -71,6 +71,10 @@ export interface FakeAccountOptions {
   stateful?: boolean;
   /** A leader wallet the fake answers reads for, whose trades `leaderTrade` prints on the routed stream. */
   leader?: { address: string };
+  /** Leverage settings SoDEX holds for the account from the start (its state's S list), as sodex.com or an earlier session set them. */
+  leverage?: Array<{ symbol: string; leverage: number; marginMode: 'cross' | 'isolated' }>;
+  /** Stateful spot: what the spot account holds from the start, by coin (default: the balance in vUSDC only). */
+  spot?: Record<string, number>;
 }
 
 /** A resting order of the stateful account, as SoDEX lists one. */
@@ -110,6 +114,8 @@ export interface FakeSodex {
   resting(symbol?: string): FakeOrder[];
   /** Stateful: the leverage and margin mode last set on a market (null: never). */
   leverage(symbol: string): { leverage: number; marginMode: 'cross' | 'isolated' } | null;
+  /** Stateful spot: what the spot account holds of a coin (vUSDC, vBTC). */
+  spotBalance(coin: string): number;
   /** The fake leader's account id and position, and one trade of it: its position moves and a print goes out on the stream. */
   readonly leaderAccountId: number;
   leaderPosition(symbol: string): number;
@@ -154,6 +160,10 @@ export async function fakeSodexAccount(ctx: BrowserContext, address: string, o: 
   /** The page's routed gateway sockets (the stream), for prints. */
   const streams = new Set<{ send: (m: string) => void }>();
   let printId = Date.now();
+  for (const x of o.leverage ?? []) lev.set(x.symbol, { leverage: x.leverage, marginMode: x.marginMode === 'isolated' ? 'ISOLATED' : 'CROSS' });
+  /** Spot: coins held (stateful moves them with fills), and the spot markets learnt from SoDEX (id -> name, base, quote). */
+  const spotCoins = new Map<string, number>(Object.entries(o.spot ?? { vUSDC: Number(balance) }));
+  const spotMarkets = new Map<number, { name: string; base: string; quote: string }>();
   if (stateful && o.position) pos.set(o.position.symbol, { size: Number(o.position.size), entry: Number(o.position.entry) });
 
   const perpsState = () => ({
@@ -162,14 +172,14 @@ export async function fakeSodexAccount(ctx: BrowserContext, address: string, o: 
     B: [{ i: 0, a: 'vUSDC', wb: balance, co: '0', mr: '0', px: '1', aw: balance, at: balance, wm: '0', am: balance }],
     P: stateful ? [...pos.entries()].filter(([, p]) => p.size !== 0).map(([sym, p]) => ({ s: sym, sz: String(p.size), ep: String(p.entry), l: lev.get(sym)?.leverage ?? 10, m: lev.get(sym)?.marginMode ?? 'CROSS' })) : [],
     O: [], TO: [],
-    S: stateful ? [...lev.entries()].map(([sym, x]) => ({ s: sym, l: x.leverage, m: x.marginMode })) : [],
+    S: [...lev.entries()].map(([sym, x]) => ({ s: sym, l: x.leverage, m: x.marginMode })),
   });
   const leaderState = () => ({
     user: leader, aid: leaderAccountId, uid: leaderAccountId, av: '50000', am: '50000',
     B: [], O: [], TO: [], S: [],
     P: [...leaderPos.entries()].filter(([, q]) => q !== 0).map(([sym, q]) => ({ s: sym, sz: String(q), ep: '0', l: 2, m: 'CROSS' })),
   });
-  const spotState = () => ({ user: me, aid: accountId, uid: accountId, B: [{ i: 0, a: 'vUSDC', t: balance, l: '0' }], O: [], TO: [] });
+  const spotState = () => ({ user: me, aid: accountId, uid: accountId, B: [...spotCoins.entries()].map(([a, t], i) => ({ i, a, t: String(Number(t.toFixed(10))), l: '0' })), O: [], TO: [] });
   const keyRows = () => [
     { name: 'default', type: 'EVM', publicKey: me, expiresAt: 0 },
     ...keys.map((k) => ({ name: k.name, type: 'EVM', publicKey: k.publicKey, expiresAt: k.expiresAt })),
@@ -253,6 +263,45 @@ export async function fakeSodexAccount(ctx: BrowserContext, address: string, o: 
       }
       return ok({});
     }
+    if (stateful && engine === 'perps' && url.pathname.endsWith('/trade/orders/replace')) {
+      // SoDEX's replace: a resting limit gets a new price and size (a new client id), the same order.
+      const rows = ((b as { orders?: Array<{ clOrdID: string; origOrderID?: number; origClOrdID?: string; price?: string; quantity?: string }> }).orders ?? []);
+      return ok(rows.map((r) => {
+        const x = book.find((y) => (r.origOrderID !== undefined && r.origOrderID !== null && y.orderID === Number(r.origOrderID)) || (!!r.origClOrdID && y.clOrdID === r.origClOrdID));
+        if (!x) return { code: 1001, clOrdID: r.clOrdID, error: 'order not found' };
+        if (r.price) x.price = r.price;
+        if (r.quantity) x.quantity = r.quantity;
+        x.clOrdID = r.clOrdID;
+        return { code: 0, clOrdID: r.clOrdID, orderID: x.orderID };
+      }));
+    }
+    if (stateful && engine === 'perps' && url.pathname.endsWith('/trade/orders/modify')) {
+      // SoDEX's modify: a take-profit / stop-loss gets a new trigger (and size, limit price), in place.
+      const r = b as { orderID?: number; clOrdID?: string; price?: string; quantity?: string; stopPrice?: string };
+      const x = book.find((y) => (r.orderID !== undefined && r.orderID !== null && y.orderID === Number(r.orderID)) || (!!r.clOrdID && y.clOrdID === r.clOrdID));
+      if (x) {
+        if (r.stopPrice) x.stopPrice = r.stopPrice;
+        if (r.quantity) x.quantity = r.quantity;
+        if (r.price) x.price = r.price;
+      }
+      return ok({});
+    }
+    if (stateful && engine === 'spot' && /\/trade\/orders\/batch$/.test(url.pathname) && req.method() === 'POST') {
+      // Spot: a market (or IOC) order fills, moving the coins - the quote at its limit price where it names
+      // one (a spot market order names none: then the base only moves); a resting one is answered only.
+      const rows = ((b as { orders?: Array<{ symbolID: number; clOrdID: string; side: number; type: number; timeInForce?: number; price?: string; quantity?: string; funds?: string }> }).orders ?? []);
+      return ok(rows.map((r) => {
+        const m = spotMarkets.get(Number(r.symbolID));
+        const px = Number(r.price ?? 0);
+        const qty = Number(r.quantity ?? 0) || (px > 0 ? Number(r.funds ?? 0) / px : 0);
+        if (m && (r.type === 2 || r.timeInForce === 3) && qty > 0) {
+          const d = r.side === 1 ? 1 : -1;
+          spotCoins.set(m.base, (spotCoins.get(m.base) ?? 0) + d * qty);
+          if (px > 0) spotCoins.set(m.quote, (spotCoins.get(m.quote) ?? 0) - d * qty * px);
+        }
+        return { code: 0, clOrdID: r.clOrdID, orderID: ++orderId };
+      }));
+    }
     if (stateful && engine === 'perps' && url.pathname.endsWith('/trade/leverage')) {
       const sym = symbolNames.get(Number(b.symbolID));
       if (sym) lev.set(sym, { leverage: Number(b.leverage), marginMode: Number(b.marginMode) === 1 ? 'ISOLATED' : 'CROSS' });
@@ -287,6 +336,15 @@ export async function fakeSodexAccount(ctx: BrowserContext, address: string, o: 
 
   /** symbolID -> name from SoDEX's public perps market list (a GET of public data; a failure leaves orders on "#<id>"). */
   async function learnSymbols(origin: string): Promise<void> {
+    try {
+      const sr = await fetch(`${origin}/api/v1/spot/markets/symbols`, { signal: AbortSignal.timeout(10_000) });
+      const sp = (await sr.json()) as { data?: unknown };
+      for (const x of (Array.isArray(sp.data) ? sp.data : []) as Array<{ id?: number; name?: string; baseCoin?: string; quoteCoin?: string }>) {
+        if (typeof x.id === 'number' && x.name && x.baseCoin && x.quoteCoin) spotMarkets.set(x.id, { name: x.name, base: x.baseCoin, quote: x.quoteCoin });
+      }
+    } catch {
+      /* spot fills wait for the next write */
+    }
     try {
       const r = await fetch(`${origin}/api/v1/perps/markets/symbols`, { signal: AbortSignal.timeout(10_000) });
       const parsed = (await r.json()) as { data?: unknown } | unknown[];
@@ -368,7 +426,7 @@ export async function fakeSodexAccount(ctx: BrowserContext, address: string, o: 
       // NEVER FORWARDED: whatever the path, a write is answered here.
       if (req.method() !== 'GET') {
         // An order names its market by id: SoDEX's public market list says which (read once, from here).
-        if (stateful && symbolNames.size === 0) await learnSymbols(url.origin);
+        if (stateful && (symbolNames.size === 0 || spotMarkets.size === 0)) await learnSymbols(url.origin);
         return route.fulfill(write(req, url));
       }
       const data = read(url.pathname);
@@ -406,6 +464,7 @@ export async function fakeSodexAccount(ctx: BrowserContext, address: string, o: 
       const x = lev.get(symbol);
       return x ? { leverage: x.leverage, marginMode: x.marginMode === 'ISOLATED' ? 'isolated' : 'cross' } : null;
     },
+    spotBalance: (coin) => spotCoins.get(coin) ?? 0,
     leaderAccountId,
     leaderPosition: (symbol) => leaderPos.get(symbol) ?? 0,
     leaderTrade(symbol, side, qty, price) {

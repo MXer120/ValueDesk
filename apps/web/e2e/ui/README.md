@@ -108,7 +108,9 @@ throwaway key SoDEX has never seen, so a write that got past the route would be 
 **Stateful** (`stateful: true`): the account moves with the writes as SoDEX would answer them - a GTC or post-only
 limit rests until a cancel, a market or IOC order fills at its own limit price into the position, a stop (or an
 entry's attached TP/SL) rests as a stop, a reduce-only fill that leaves a market flat takes its stops along, a
-leverage change is kept (`position()`, `resting()`, `leverage()`). Orders name their market by id: the fake reads
+leverage change is kept (`position()`, `resting()`, `leverage()`); SoDEX's replace and modify requests change a resting
+order in place; a spot market order moves the spot coins (`spot: { vUSDC: 100 }` to start, `spotBalance()`). Any fake
+can start with leverage settings SoDEX already holds (`leverage: [{ symbol, leverage, marginMode }]`). Orders name their market by id: the fake reads
 SoDEX's public market list once to name them. **A fake leader** (`leader: { address }`): its account id and positions
 are answered, and the gateway's websockets opened in the page are routed through the fake (SoDEX's frames pass both
 ways); `leaderTrade(symbol, side, qty, price)` prints the leader's trade on the public `trade` stream as SoDEX does
@@ -119,7 +121,7 @@ moment after the order is answered, so the copier books them.
 
 What a person does on a page, one step at a time, by name and with plain JSON in and out: `market.select`,
 `ticket.limit`, `ticket.market` (with TP/SL as Gain and Loss in %), `ticket.leverage`, `orders.cancel`,
-`positions.close`, `copy.start` (the copy window from the trader's link), `copy.manage` (Portfolio > Manage copies:
+`positions.close`, `orders.modify`, `orders.cancelAll`, `ticket.stop`, `positions.tpsl` (the TP/SL sheet), `spot.order` (Market type Spot, a spot market), `copy.start` (the copy window from the trader's link), `copy.manage` (Portfolio > Manage copies:
 Close or Stop), `copy.answer` (the "Copy this trade?" prompt), `algo.bracket` (the algo ticket's slide) and
 `algo.cancelExits` (the Algos table). The live suite's browser target runs them with real money
 (`bridgeSession.ts ui()`, `apps/executor/tools/live-test/scenarios/ui.ts`); `uiSteps.spec.ts` runs the same steps
@@ -161,7 +163,7 @@ registered it). Real algos start on a dev server only for the wallets in `VITE_L
 | `accountActions.spec.ts` | the fake account seeded with a position and a resting order: Close (asked first, one reduce-only market sell), the position TP/SL sheet (wrong side refused, two reduce-only stops), Cancel and Cancel all on open orders |
 | `algoFlow.spec.ts` | every kind started as a practice run from its own fields, the spec the engine got checked field by field; refusals (no amount, a field out of range in its own units, an iceberg without a visible size, a real run with real algos off); the Algos table's Pause, Resume, Size, ID chip, Open, Cancel, Cancel all and its tabs; a practice Fill fast to its end and its notice in the bell; every preview; phone width |
 | `copyFlow.spec.ts` | every rule of the copy window as the copy runs with it (sizing modes, limits, behaviour, risk controls, coin lists, margin, ask-each-trade, the amount), its refusals in their own units, counter-trade; Portfolio > My copies > Manage copies: Pause, Resume, Activity, Stop (asked first), Stop all |
-| `uiSteps.spec.ts` | the live browser target's steps against the stateful fake and a fake leader: a limit 2% under the bid rests and the open orders' Cancel takes it off; a market buy fills and Close sells it reduce-only; an entry with TP/SL rests two reduce-only stops at the prices the ticket shows; the leverage popover and margin mode are sent, kept and set back; a copy from the copy window follows the leader's trade and Manage copies' Close sells reduce-only; "Ask before each trade": Copy it sends, Skip sends nothing; a bracket from the algo ticket, Cancel then Cancel exits in the Algos table |
+| `uiSteps.spec.ts` | the live browser target's steps against the stateful fake and a fake leader: a limit 2% under the bid rests and the open orders' Cancel takes it off; a market buy fills and Close sells it reduce-only; an entry with TP/SL rests two reduce-only stops at the prices the ticket shows; the leverage popover and margin mode are sent, kept and set back; a copy from the copy window follows the leader's trade and Manage copies' Close sells reduce-only; "Ask before each trade": Copy it sends, Skip sends nothing; a bracket from the algo ticket, Cancel then Cancel exits in the Algos table; a stop-market and a stop-limit rest as triggers, cancelled; Modify changes a limit's price and size; Cancel all; the TP/SL sheet set, changed, closed; a spot buy and sell back (stateful spot balances); the ticket starting at the leverage the account holds |
 | `staleBuild.spec.ts` | a part missing from the build (its module answers 404): one retry, one reload, then the note "A new version of ValueDesk is out" with a Reload button, not the error boundary; a tab running an algo is not reloaded: the note at once, and the "update held" banner names what a reload would stop |
 
 Against the dev web the "ValueDesk executor" is the local one (127.0.0.1:8799 behind Vite's `/api/copy`

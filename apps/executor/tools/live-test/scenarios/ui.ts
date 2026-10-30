@@ -210,7 +210,183 @@ export const UI_TICKET_SCENARIOS: Scenario[] = [
       }
     },
   }),
+
+  ticketScenario('ticket.stop', 'Order ticket: a stop-market and a stop-limit buy 5% over the market, then Cancel', 'SoDEX rests the ticket\'s stop orders as triggers at the typed prices (a stop-market, and a stop-limit with its limit and GTC), unfired; the open orders\' Cancel takes each off', {
+    cost: (U) => ({ takerUsd: 0, makerUsd: 0, peakUsd: 2 * U }),
+    async run(t) {
+      if (t.dry) throw new Unavailable(LIVE_ONLY);
+      const sym = t.main.name;
+      const q = await t.quote();
+      const quantity = Number(await t.qty(t.U));
+      const trigger = t.tick(q.ask * 1.05, sym, 'up');
+      const r1 = await t.ui<{ placed: string }>('ticket.stop', { symbol: sym, side: 'buy', quantity, trigger, kind: 'sl' });
+      t.note(`the ticket: "${r1.placed}"`);
+      const limTrigger = t.tick(q.ask * 1.055, sym, 'up');
+      const limit = t.tick(q.ask * 1.06, sym, 'up');
+      const r2 = await t.ui<{ placed: string }>('ticket.stop', { symbol: sym, side: 'buy', quantity, trigger: limTrigger, kind: 'sl', limitPrice: limit });
+      t.note(`the ticket: "${r2.placed}"`);
+      const both = await t.waitFor('both stops rest on SoDEX', async () => {
+        const s = await stops(t);
+        const m = s.find((o) => near(o.stop!.trigger, trigger, tickOf(t) / 2));
+        const l = s.find((o) => near(o.stop!.trigger, limTrigger, tickOf(t) / 2));
+        return m && l ? { m, l } : null;
+      }, { timeoutMs: 30_000 });
+      for (const [o, what] of [[both.m, 'stop-market'], [both.l, 'stop-limit']] as const) {
+        t.check(o.side === 'buy' && near(o.qty, quantity, stepOf(t) / 2) && o.filled === 0, `the ${what} is a buy of ${quantity}, unfired (${o.side} ${o.qty}, filled ${o.filled})`);
+      }
+      t.check(/MARKET|^2$/i.test(both.m.type), `the stop-market executes at the market (${both.m.type})`);
+      t.check(/LIMIT|^1$/i.test(both.l.type) && near(both.l.price, limit, tickOf(t) / 2), `the stop-limit carries its limit ${limit} (${both.l.type} @ ${both.l.price})`);
+      await t.ui('orders.cancel', { symbol: sym, price: limTrigger });
+      await t.ui('orders.cancel', { symbol: sym, price: trigger });
+      await t.waitFor('no stop is left on SoDEX', async () => ((await stops(t)).length === 0 ? true : null), { timeoutMs: 30_000 });
+      t.check((await t.account.position(sym)) === 0, 'nothing filled: the follower holds nothing');
+    },
+  }),
+
+  ticketScenario('ticket.modify', 'Open orders: a resting limit\'s price and size changed with Modify, then Cancel', 'SoDEX shows the new price and size the open orders\' Modify sends (as SoDEX\'s replace, or a cancel and a new order where the builder fee requires it), and nothing of the old order; Cancel takes it off', {
+    cost: (U) => ({ takerUsd: 0, makerUsd: 0, peakUsd: 2 * U }),
+    async run(t) {
+      if (t.dry) throw new Unavailable(LIVE_ONLY);
+      const sym = t.main.name;
+      const q = await t.quote();
+      const price = t.tick(q.bid * 0.97, sym, 'down');
+      const quantity = Number(await t.qty(t.U));
+      await t.ui('ticket.limit', { symbol: sym, side: 'buy', price, quantity });
+      const o = await t.waitFor(`the limit rests at ${price}`, async () => (await t.account.openOrders(sym)).find((x) => !x.stop && near(x.price, price, tickOf(t) / 2)) ?? null, { timeoutMs: 30_000 });
+      const newPrice = t.tick(q.bid * 0.96, sym, 'down');
+      const newQuantity = Number(await t.qty(2 * t.U));
+      const r = await t.ui<{ said: string }>('orders.modify', { symbol: sym, price, newPrice, newQuantity });
+      t.note(`Modify: "${r.said || 'saved'}"`);
+      const n = await t.waitFor(`SoDEX shows the order at ${newPrice} for ${newQuantity}`, async () => {
+        const all = (await t.account.openOrders(sym)).filter((x) => !x.stop && x.side === 'buy');
+        const hit = all.find((x) => near(x.price, newPrice, tickOf(t) / 2) && near(x.qty, newQuantity, stepOf(t) / 2));
+        return hit && all.length === 1 ? hit : null;
+      }, { timeoutMs: 30_000 });
+      t.note(n.orderId === o.orderId ? 'the same order, replaced in place' : `a new order (${o.orderId} -> ${n.orderId}): cancel and place again`);
+      t.check(n.filled === 0, 'nothing of it filled');
+      await t.ui('orders.cancel', { symbol: sym, price: newPrice });
+      await t.waitFor('nothing rests on SoDEX', async () => ((await t.account.openOrders(sym)).length === 0 ? true : null), { timeoutMs: 30_000 });
+    },
+  }),
+
+  ticketScenario('ticket.cancel-all', 'Open orders: two resting limits, both removed with Cancel all', 'the open orders\' Cancel all (asked first) takes every order of the account off SoDEX: two limits 2% and 3% under the bid are gone', {
+    cost: (U) => ({ takerUsd: 0, makerUsd: 0, peakUsd: 2 * U }),
+    async run(t) {
+      if (t.dry) throw new Unavailable(LIVE_ONLY);
+      const sym = t.main.name;
+      const q = await t.quote();
+      const quantity = Number(await t.qty(t.U));
+      const prices = [t.tick(q.bid * 0.98, sym, 'down'), t.tick(q.bid * 0.97, sym, 'down')];
+      for (const price of prices) await t.ui('ticket.limit', { symbol: sym, side: 'buy', price, quantity });
+      await t.waitFor('both limits rest on SoDEX', async () => {
+        const all = await t.account.openOrders(sym);
+        return prices.every((p) => all.some((x) => !x.stop && near(x.price, p, tickOf(t) / 2))) ? true : null;
+      }, { timeoutMs: 30_000 });
+      const r = await t.ui<{ asked: string }>('orders.cancelAll');
+      t.note(`asked: "${r.asked.slice(0, 120)}"`);
+      await t.waitFor('nothing rests on SoDEX', async () => ((await t.account.openOrders(sym)).length === 0 ? true : null), { timeoutMs: 30_000 });
+      t.check((await t.account.position(sym)) === 0, 'nothing filled');
+    },
+  }),
+
+  ticketScenario('position.tpsl-sheet', 'Positions: TP and SL set in the TP/SL sheet, changed once, then Close', 'the positions table\'s TP/SL sheet rests a reduce-only take-profit and stop-loss of the position\'s size on SoDEX at the sheet\'s prices, moves both when changed, and after Close no stop is left (cancelled through the open orders if SoDEX keeps them)', {
+    cost: (U) => ({ takerUsd: 2 * U, makerUsd: 0, peakUsd: U }),
+    async run(t) {
+      if (t.dry) throw new Unavailable(LIVE_ONLY);
+      const sym = t.main.name;
+      const quantity = Number(await t.qty(t.U));
+      await t.ui('ticket.market', { symbol: sym, side: 'buy', quantity });
+      const p = await positionWhen(t, 'the position is on SoDEX', (x) => x > 0);
+      const at = async (tp: number, sl: number, what: string) => {
+        const s = await t.waitFor(what, async () => {
+          const all = await stops(t);
+          const a = all.find((o) => o.stop!.kind === 'tp' && near(o.stop!.trigger, tp, tickOf(t) / 2));
+          const b = all.find((o) => o.stop!.kind === 'sl' && near(o.stop!.trigger, sl, tickOf(t) / 2));
+          return a && b && all.length === 2 ? [a, b] : null;
+        }, { timeoutMs: 30_000 });
+        for (const o of s) t.check(o.side === 'sell' && o.reduceOnly && (o.qty === 0 || near(o.qty, p, stepOf(t) / 2)), `the ${o.stop!.kind} is a reduce-only sell of the position (${o.qty})`);
+      };
+      const q = await t.quote();
+      const [tp, sl] = [t.tick(q.mark * 1.02, sym, 'up'), t.tick(q.mark * 0.98, sym, 'down')];
+      await t.ui('positions.tpsl', { symbol: sym, tp, sl });
+      await at(tp, sl, `SoDEX holds the take-profit at ${tp} and the stop-loss at ${sl}`);
+      const [tp2, sl2] = [t.tick(q.mark * 1.025, sym, 'up'), t.tick(q.mark * 0.975, sym, 'down')];
+      const r = await t.ui<{ was: { tp: number; sl: number } }>('positions.tpsl', { symbol: sym, tp: tp2, sl: sl2 });
+      t.check(near(r.was.tp, tp, tickOf(t) / 2) && near(r.was.sl, sl, tickOf(t) / 2), `the sheet opened with the exits working (${r.was.tp} / ${r.was.sl})`);
+      await at(tp2, sl2, `changed: SoDEX holds them at ${tp2} and ${sl2}, and only them`);
+      await t.ui('positions.close', { symbol: sym });
+      await positionWhen(t, 'Close left the follower flat on SoDEX', (x) => x === 0);
+      const left = await t.waitFor('no stop is left on SoDEX', async () => ((await stops(t)).length === 0 ? true : null), { timeoutMs: 20_000 }).catch(() => null);
+      if (!left) {
+        const kept = await stops(t);
+        t.note(`SoDEX kept ${kept.length} stop(s) of the closed position (${kept.map((o) => `${o.stop!.kind} @ ${o.stop!.trigger}`).join(', ')}): cancelled through the open orders`);
+        for (const o of kept) await t.ui('orders.cancel', { symbol: sym, price: o.stop!.trigger });
+        await t.waitFor('no stop is left on SoDEX after the cancels', async () => ((await stops(t)).length === 0 ? true : null), { timeoutMs: 30_000 });
+      }
+    },
+  }),
+
+  ticketScenario('spot.order', 'Spot: a buy of U through the ticket\'s Spot, and the sell back', 'SoDEX\'s spot market fills the ticket\'s spot market buy of U (signed by the same trading key, on the spot engine) and its sell of what was bought; the spot account ends where it began (less fees and the dust under one step)', {
+    cost: (U) => ({ takerUsd: 2 * U, makerUsd: 0, peakUsd: U, leverage: 1 }),
+    async run(t) {
+      if (t.dry) throw new Unavailable(LIVE_ONLY);
+      const c = t.env.reads.client;
+      const markets = unwrapRows(await c.get<unknown>('/api/v1/spot/markets/symbols'));
+      const m = markets.find((x) => x.baseCoin === `v${t.main.base}` && x.quoteCoin === 'vUSDC' && x.status === 'TRADING');
+      if (!m) throw new Unavailable(`SoDEX lists no tradeable spot market of ${t.main.base} against USDC`);
+      const step = Number(m.stepSize);
+      const coins = async () => {
+        const st = (await c.get<{ B?: Array<{ a?: string; t?: string; l?: string }> } | null>(`/api/v1/spot/accounts/${t.env.followerAddress.toLowerCase()}/state`)) ?? {};
+        const free = (a: string) => (st.B ?? []).filter((x) => x.a === a).reduce((s, x) => s + Number(x.t ?? 0) - Number(x.l ?? 0), 0);
+        return { quote: free('vUSDC'), base: free(String(m.baseCoin)) };
+      };
+      const b0 = await coins();
+      const need = t.U * 1.1;
+      if (b0.quote < need) {
+        throw new Unavailable(`spot needs about $${need.toFixed(2)} of vUSDC in the follower's SoDEX SPOT account, which holds $${b0.quote.toFixed(2)}: the deposit is on perps. Move $15 from perps to spot (sodex.com > Transfer, or ValueDesk's Transfer between accounts) and run it again; nothing else is needed (Enable trading registered the trading key on spot too). It sells back what it buys; the $15 stays on spot afterwards.`);
+      }
+      const px = await (async () => {
+        const q = unwrapRows(await c.get<unknown>(`/api/v1/spot/markets/tickers?symbol=${encodeURIComponent(String(m.name))}`).catch(() => null));
+        return Number(q[0]?.lastPx ?? q[0]?.lastPrice ?? 0) || (await t.quote()).ask;
+      })();
+      const quantity = Number((Math.ceil(t.U / px / step) * step).toFixed(8));
+      t.note(`${m.displayName}: buying ${quantity} at about ${px}; spot holds $${b0.quote.toFixed(2)} and ${b0.base} ${m.baseCoin}`);
+      let bought = 0;
+      try {
+        const buy = await t.ui<{ placed: string; quantity: number }>('spot.order', { display: m.displayName, side: 'buy', quantity });
+        t.note(`the ticket: "${buy.placed}"`);
+        const b1 = await t.waitFor(`the spot account holds the ${m.baseCoin} bought`, async () => {
+          const x = await coins();
+          return x.base - b0.base >= quantity * 0.99 ? x : null;
+        }, { timeoutMs: 45_000 });
+        bought = b1.base - b0.base;
+        t.check(b0.quote - b1.quote > t.U * 0.9, `it paid about $${t.U} of vUSDC ($${(b0.quote - b1.quote).toFixed(2)})`);
+        const sellQty = Number((Math.floor(bought / step) * step).toFixed(8));
+        const sell = await t.ui<{ placed: string }>('spot.order', { display: m.displayName, side: 'sell', quantity: sellQty });
+        t.note(`the ticket: "${sell.placed}"`);
+        const b2 = await t.waitFor(`the ${m.baseCoin} is sold back`, async () => {
+          const x = await coins();
+          return x.base - b0.base < step ? x : null;
+        }, { timeoutMs: 45_000 });
+        bought = 0;
+        t.note(`spot ends with ${b2.base} ${m.baseCoin} (began with ${b0.base}; under one step left is dust) and $${b2.quote.toFixed(2)} (spent $${(b0.quote - b2.quote).toFixed(4)})`);
+        t.check(b0.quote - b2.quote < t.U * 0.01, `the round trip cost under 1% of U ($${(b0.quote - b2.quote).toFixed(4)})`);
+      } finally {
+        // The runner's cleanup flattens perps only: what this bought and did not sell is sold here.
+        if (bought >= step) {
+          const rest = Number((Math.floor(bought / step) * step).toFixed(8));
+          await t.ui('spot.order', { display: m.displayName, side: 'sell', quantity: rest }).catch((e) => t.note(`! selling back ${rest} ${m.baseCoin} failed: ${String((e as Error)?.message ?? e)} - sell it on sodex.com`));
+        }
+      }
+    },
+  }),
 ];
+
+/** A SoDEX list answer (an array, or `{ data: [...] }` already unwrapped by the client) as rows. */
+function unwrapRows(v: unknown): Array<Record<string, string | undefined> & { displayName?: string; baseCoin?: string; quoteCoin?: string; name?: string; status?: string; stepSize?: string; lastPx?: string; lastPrice?: string }> {
+  const list = Array.isArray(v) ? v : Array.isArray((v as { data?: unknown } | null)?.data) ? (v as { data: unknown[] }).data : [];
+  return list.filter((x) => x && typeof x === 'object') as never;
+}
 
 export const UI_ALGO_SCENARIOS: Scenario[] = [
   {

@@ -172,6 +172,9 @@
   transition: background 140ms, color 140ms, box-shadow 140ms;
 }
 .nav-seg > button:hover { color: var(--text); }
+/* In a bar without the rail (a phone): the first row, after the wordmark and More, at the row's end; compact. */
+.nav-seg--bar { margin-left: auto; padding: 2px; }
+.nav-seg--bar > button { height: 30px; padding: 0 12px; }
 .nav-seg > button.is-on {
   background: #2b2b2e;
   color: var(--text);

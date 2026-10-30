@@ -12,6 +12,12 @@
  *   copy.ui-close          a copy from the copy window follows the leader; Manage copies' Close closes it
  *   copy.ui-confirm        "Ask before each trade": the prompt's Copy it sends, Skip does not
  *   algo.ui-cancel-exits   a bracket from the algo ticket; the Algos table pulls its exits
+ *   ticket.stop            a stop-market and a stop-limit far from the market rest as triggers; cancelled
+ *   ticket.modify          a resting limit's price and size changed with Modify; cancelled
+ *   ticket.cancel-all      two resting limits, both gone with Cancel all
+ *   position.tpsl-sheet    the positions' TP/SL sheet: two reduce-only stops, changed once; Close
+ *   spot.order             a spot market buy and the sell back, through the ticket's Spot
+ * and the ticket starting at the leverage SoDEX holds for the account.
  */
 import assert from 'node:assert/strict';
 import type { Page } from 'playwright-core';
@@ -254,3 +260,108 @@ h.test('algo.ui-cancel-exits: a bracket from the algo ticket; the Algos table\'s
   assert.equal(r.next, null, 'nothing left to cancel on the row');
   await until(page, async () => !((await view())?.exits ?? []).some((x) => x.live), 'no exit is live', 20_000);
 }, { timeout: 150_000 });
+
+h.test('ticket.stop: a stop-market and a stop-limit far above the market rest as triggers at the typed prices; Cancel takes each off', async (env) => {
+  const sx = await trading(env);
+  const { page } = env;
+  const { last, qty } = await sizes(page);
+  const q = round5(qty);
+  const trigger = Math.ceil(last * 1.05);
+  const r = await UI_STEPS['ticket.stop'](page, { symbol: SYM, side: 'buy', quantity: q, trigger, kind: 'sl' });
+  assert.match(r.placed, /^Stop long placed/);
+  const [m] = legs(sx.orders()[0]!);
+  assert.deepEqual([m!.modifier, m!.side, m!.type, Number(m!.stopPrice), m!.stopType, Number(m!.quantity)], [2, 1, 2, trigger, 1, q], 'a stop-market buy at the trigger');
+  const limit = Math.ceil(last * 1.06);
+  await UI_STEPS['ticket.stop'](page, { symbol: SYM, side: 'buy', quantity: q, trigger: trigger + 1, kind: 'sl', limitPrice: limit });
+  const [l] = legs(sx.orders()[1]!);
+  assert.deepEqual([l!.modifier, l!.type, Number(l!.stopPrice), Number(l!.price), l!.timeInForce], [2, 1, trigger + 1, limit, 1], 'a stop-limit: its trigger, its limit, GTC');
+  assert.deepEqual(sx.resting(SYM).map((x) => [x.type, x.stopType, Number(x.stopPrice)]).sort(), [['LIMIT', 'STOP_LOSS', trigger + 1], ['MARKET', 'STOP_LOSS', trigger]].sort(), 'both rest as triggers');
+  await UI_STEPS['orders.cancel'](page, { symbol: SYM, price: trigger + 1 });
+  await until(page, () => sx.resting(SYM).length === 1, 'the stop-limit cancelled', 20_000);
+  await UI_STEPS['orders.cancel'](page, { symbol: SYM, price: trigger });
+  await until(page, () => sx.resting(SYM).length === 0, 'nothing rests', 20_000);
+  assert.equal(sx.position(SYM), 0);
+}, { timeout: 150_000 });
+
+h.test('ticket.modify: a resting limit\'s price and size changed with the open orders\' Modify; then cancelled', async (env) => {
+  const sx = await trading(env);
+  const { page } = env;
+  const { last, qty } = await sizes(page);
+  const price = Math.floor(last * 0.97);
+  await UI_STEPS['ticket.limit'](page, { symbol: SYM, side: 'buy', price, quantity: round5(qty) });
+  await until(page, () => sx.resting(SYM).length === 1, 'the limit rests');
+  const newPrice = Math.floor(last * 0.96);
+  const newQty = round5(qty * 2);
+  const r = await UI_STEPS['orders.modify'](page, { symbol: SYM, price, newPrice, newQuantity: newQty });
+  await until(page, () => sx.resting(SYM).length === 1 && Number(sx.resting(SYM)[0]!.price) === newPrice, `the order at ${newPrice}`, 20_000);
+  const o = sx.resting(SYM)[0]!;
+  assert.deepEqual([Number(o.price), Number(o.quantity), o.side], [newPrice, newQty, 'BUY'], `the new price and size (${JSON.stringify(r)})`);
+  await UI_STEPS['orders.cancel'](page, { symbol: SYM, price: newPrice });
+  await until(page, () => sx.resting(SYM).length === 0, 'nothing rests', 20_000);
+}, { timeout: 150_000 });
+
+h.test('ticket.cancel-all: two resting limits, both gone with Cancel all (asked first)', async (env) => {
+  const sx = await trading(env);
+  const { page } = env;
+  const { last, qty } = await sizes(page);
+  await UI_STEPS['ticket.limit'](page, { symbol: SYM, side: 'buy', price: Math.floor(last * 0.98), quantity: round5(qty) });
+  await UI_STEPS['ticket.limit'](page, { symbol: SYM, side: 'buy', price: Math.floor(last * 0.97), quantity: round5(qty) });
+  await until(page, () => sx.resting(SYM).length === 2, 'two limits rest');
+  const mark = sx.mark();
+  const r = await UI_STEPS['orders.cancelAll'](page);
+  assert.match(r.asked, /open order/i);
+  await until(page, () => sx.resting(SYM).length === 0, 'both cancelled', 20_000);
+  const dels = sx.since(mark).filter((w) => w.method === 'DELETE');
+  assert.ok(dels.length >= 1 && dels.every((w) => sx.signer(w) === sx.keys[0]!.publicKey), 'signed by the trading key');
+}, { timeout: 150_000 });
+
+h.test('position.tpsl-sheet: the positions\' TP/SL sheet rests two reduce-only stops at its prices, changes them once; Close', async (env) => {
+  const sx = await trading(env);
+  const { page } = env;
+  const { last, qty } = await sizes(page);
+  const q = round5(qty);
+  await UI_STEPS['ticket.market'](page, { symbol: SYM, side: 'buy', quantity: q });
+  await until(page, () => sx.position(SYM) === q, 'the position');
+  const stopsAt = () => sx.resting(SYM).filter((x) => x.stopType).map((x) => [x.stopType, Number(x.stopPrice), x.side, x.reduceOnly, Number(x.quantity)]).sort();
+  const [tp, sl] = [Math.ceil(last * 1.02), Math.floor(last * 0.98)];
+  await UI_STEPS['positions.tpsl'](page, { symbol: SYM, tp, sl });
+  await until(page, () => stopsAt().length === 2, 'two stops', 20_000);
+  assert.deepEqual(stopsAt(), [['STOP_LOSS', sl, 'SELL', true, q], ['TAKE_PROFIT', tp, 'SELL', true, q]], 'reduce-only sells of the position at the sheet\'s prices');
+  // Changed once: the sheet opens with them and sends the new prices.
+  const [tp2, sl2] = [Math.ceil(last * 1.025), Math.floor(last * 0.975)];
+  const r = await UI_STEPS['positions.tpsl'](page, { symbol: SYM, tp: tp2, sl: sl2 });
+  assert.deepEqual(r.was, { tp, sl }, 'the sheet showed the exits working');
+  await until(page, () => JSON.stringify(stopsAt().map((x) => x[1])) === JSON.stringify([sl2, tp2]), 'the stops moved', 20_000);
+  assert.equal(stopsAt().length, 2, 'still two');
+  await UI_STEPS['positions.close'](page, { symbol: SYM });
+  await until(page, () => sx.position(SYM) === 0 && stopsAt().length === 0, 'flat, no stop left', 20_000);
+}, { timeout: 150_000 });
+
+h.test('spot.order: the ticket\'s Spot - a market buy of BTC/USDC and the sell back of what it bought', async (env) => {
+  const sx = await enableTrading(env, { stateful: true, spot: { vUSDC: 100 } });
+  const { page } = env;
+  const { last } = await sizes(page);
+  const q = round5(Math.ceil(12 / last / 0.00001) * 0.00001);
+  const buy = await UI_STEPS['spot.order'](page, { display: 'BTC/USDC', side: 'buy', quantity: q });
+  assert.match(buy.placed, /^Market buy placed/);
+  const w = sx.orders().at(-1)!;
+  assert.equal(w.path, '/api/v1/spot/trade/orders/batch', 'a spot batch');
+  await until(page, () => Math.abs(sx.spotBalance('vBTC') - q) < 1e-9, `the BTC bought (${JSON.stringify(w.body)})`, 10_000);
+  const sell = await UI_STEPS['spot.order'](page, { display: 'BTC/USDC', side: 'sell', quantity: q });
+  assert.match(sell.placed, /^Market sell placed/);
+  await until(page, () => Math.abs(sx.spotBalance('vBTC')) < 1e-9, 'all of it sold', 10_000);
+  // Back on Futures afterwards.
+  assert.equal(await page.getByRole('radiogroup', { name: 'Market type' }).getByRole('radio', { name: 'Futures', exact: true }).getAttribute('aria-checked'), 'true');
+}, { timeout: 150_000 });
+
+h.test('the ticket starts at the leverage and margin mode SoDEX holds for the market, not the market\'s initial 20x', async (env) => {
+  await enableTrading(env, { leverage: [{ symbol: SYM, leverage: 3, marginMode: 'isolated' }] });
+  const t = ticket(env.page);
+  await t.ready();
+  await until(env.page, async () => (await t.value(t.leverage)) === '3x', 'the ticket at 3x', 30_000);
+  await t.g.getByRole('button', { name: 'Isolated', exact: true }).waitFor({ state: 'visible' });
+  // Changed here, the user's choice is kept: the next account answer does not set it back.
+  await UI_STEPS['ticket.leverage'](env.page, { symbol: SYM, leverage: 2 });
+  await env.page.waitForTimeout(12_000);
+  assert.equal(await t.value(t.leverage), '2x', 'still the 2x set here');
+}, { timeout: 120_000 });

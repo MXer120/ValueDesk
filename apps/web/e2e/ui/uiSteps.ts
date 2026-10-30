@@ -245,6 +245,134 @@ export const UI_STEPS = {
     return { row: text };
   },
 
+  /**
+   * Open orders: the row at `price`, its Modify; the new price and size typed in its form, Save.
+   * Answers what the form said ("Modified." / "Changed: ... placed again ...").
+   */
+  async 'orders.modify'(page: Page, a: { symbol: string; price: number; newPrice: number; newQuantity: number }) {
+    await tradePage(page);
+    const activity = page.getByRole('group', { name: 'Account activity' });
+    await activity.getByRole('tab', { name: /^Open Orders/ }).click();
+    const rows = activity.locator('tbody tr').filter({ hasText: a.symbol.split('-')[0]! });
+    const row = await rowWithPrice(page, rows, a.price, `an open order of ${a.symbol} at ${a.price}`);
+    await row.getByRole('button', { name: 'Modify', exact: true }).click();
+    const form = activity.locator('.acct-modify').filter({ hasText: /^Modify / });
+    await form.waitFor({ state: 'visible' });
+    await typeInto(form.getByRole('textbox', { name: 'Price', exact: true }), dec(a.newPrice));
+    await typeInto(form.getByRole('textbox', { name: 'Size', exact: true }), dec(a.newQuantity));
+    await form.getByRole('button', { name: 'Save', exact: true }).click();
+    let said = '';
+    await until(page, async () => {
+      if (!(await form.isVisible().catch(() => false))) return true; // saved: the form closes
+      said = ((await form.locator('p.status').allInnerTexts().catch(() => [] as string[])).join(' ')).trim();
+      if (said && !/^Working/i.test(said)) throw new Error(`the Modify form says: ${said}`);
+      return false;
+    }, 'the change to be saved', 30_000);
+    return { said };
+  },
+
+  /** Open orders: Cancel all, asked first, "Cancel every open order". */
+  async 'orders.cancelAll'(page: Page) {
+    await tradePage(page);
+    const activity = page.getByRole('group', { name: 'Account activity' });
+    await activity.getByRole('tab', { name: /^Open Orders/ }).click();
+    await activity.getByRole('button', { name: 'Cancel all', exact: true }).click({ timeout: 30_000 });
+    const ask = page.getByRole('dialog', { name: 'Cancel all perps orders' });
+    await ask.waitFor({ state: 'visible' });
+    const asked = ((await ask.textContent()) ?? '').replace(/\s+/g, ' ').trim();
+    await ask.getByRole('button', { name: 'Cancel every open order', exact: true }).click();
+    await ask.waitFor({ state: 'hidden', timeout: 20_000 });
+    return { asked };
+  },
+
+  /** A stop order through the ticket: trigger, kind, executes as market or (with `limitPrice`) a limit; its review. */
+  async 'ticket.stop'(page: Page, a: { symbol: string; side: Side; quantity: number; trigger: number; kind: 'sl' | 'tp'; limitPrice?: number }) {
+    await selectMarket(page, a.symbol);
+    const t = ticket(page);
+    await t.ready();
+    await t.type('Stop');
+    await t.direction(dir(a.side)).check();
+    await t.setUnit(await baseUnitOf(t.unit));
+    await typeInto(t.amount, dec(a.quantity));
+    await waitValue(t.amount, (v) => num(v) === a.quantity, `the amount ${a.quantity}`);
+    await t.kind.selectOption(a.kind);
+    await typeInto(t.trigger, dec(a.trigger));
+    await waitValue(t.trigger, (v) => num(v) === a.trigger, `the trigger ${a.trigger}`);
+    await t.executesAs.selectOption(a.limitPrice ? 'limit' : 'market');
+    if (a.limitPrice) {
+      await t.price.waitFor({ state: 'visible' });
+      await typeInto(t.price, dec(a.limitPrice));
+      await waitValue(t.price, (v) => num(v) === a.limitPrice, `the limit ${a.limitPrice}`);
+      await t.pickTif('GTC');
+    }
+    return place(page);
+  },
+
+  /**
+   * Positions: the market's TP/SL sheet ("Edit TP/SL on BTC-USD"), the take-profit and stop-loss
+   * prices typed (an exit already working is changed), Confirm.
+   */
+  async 'positions.tpsl'(page: Page, a: { symbol: string; tp: number; sl: number }) {
+    await tradePage(page);
+    const activity = page.getByRole('group', { name: 'Account activity' });
+    await activity.getByRole('tab', { name: /^Positions/ }).click();
+    const edit = activity.getByRole('button', { name: `Edit TP/SL on ${a.symbol}` });
+    await edit.waitFor({ state: 'visible', timeout: 30_000 });
+    await edit.click();
+    const sheet = page.getByRole('dialog', { name: 'Take Profit & Stop Loss' });
+    await sheet.waitFor({ state: 'visible' });
+    const tp = sheet.getByRole('textbox', { name: 'Take Profit price' });
+    const sl = sheet.getByRole('textbox', { name: 'Stop Loss price' });
+    const was = { tp: num(await tp.inputValue()), sl: num(await sl.inputValue()) };
+    await typeInto(tp, dec(a.tp));
+    await typeInto(sl, dec(a.sl));
+    const confirm = sheet.getByRole('button', { name: 'Confirm', exact: true });
+    await until(page, async () => await confirm.isEnabled(), 'Confirm on the sheet', 10_000).catch(async () => {
+      throw new Error(`the TP/SL sheet will not confirm: ${((await sheet.textContent()) ?? '').replace(/\s+/g, ' ').slice(0, 300)}`);
+    });
+    await confirm.click();
+    await sheet.waitFor({ state: 'hidden', timeout: 30_000 }).catch(async () => {
+      throw new Error(`the TP/SL sheet stayed open: ${((await sheet.textContent()) ?? '').replace(/\s+/g, ' ').slice(0, 300)}`);
+    });
+    return { was };
+  },
+
+  /**
+   * A spot order through the ticket: Market type Spot, the market picked through the search (a spot
+   * market's name, "BTC/USDC"), a market buy or sell of `quantity` (in the coin) or of `pct` of the
+   * balance; its review. Back to Futures after.
+   */
+  async 'spot.order'(page: Page, a: { display: string; side: Side; quantity?: number; pct?: number }) {
+    await tradePage(page);
+    const kind = page.getByRole('radiogroup', { name: 'Market type' });
+    await kind.getByRole('radio', { name: 'Spot', exact: true }).click();
+    const btn = page.getByRole('button', { name: /(futures|spot): change market$/ }).first();
+    const want = `${a.display.toUpperCase()} SPOT`;
+    await until(page, async () => /spot: change market$/.test((await btn.getAttribute('aria-label')) ?? ''), 'a spot market on the trade page', 20_000);
+    if (!((await btn.getAttribute('aria-label')) ?? '').toUpperCase().startsWith(want)) {
+      await pickMarket(page, a.display.split('/')[0]!, 'spot');
+      await until(page, async () => ((await btn.getAttribute('aria-label')) ?? '').toUpperCase().startsWith(want), `${a.display} on the trade page`, 20_000);
+    }
+    const t = ticket(page);
+    try {
+      await t.ready();
+      await t.type('Market');
+      await t.direction(a.side === 'buy' ? 'Buy' : 'Sell').check();
+      await t.setUnit(await baseUnitOf(t.unit));
+      if (a.pct !== undefined) {
+        await typeInto(t.pct, dec(a.pct));
+        await waitValue(t.amount, (v) => num(v) > 0, 'the amount from the percentage');
+      } else {
+        await typeInto(t.amount, dec(a.quantity ?? 0));
+        await waitValue(t.amount, (v) => num(v) === a.quantity, `the amount ${a.quantity}`);
+      }
+      const quantity = num(await t.value(t.amount));
+      return { ...(await place(page)), quantity };
+    } finally {
+      await kind.getByRole('radio', { name: 'Futures', exact: true }).click().catch(() => {});
+    }
+  },
+
   /** Positions: the market's Close (x), asked first, "Close at market". */
   async 'positions.close'(page: Page, a: { symbol: string }) {
     await tradePage(page);

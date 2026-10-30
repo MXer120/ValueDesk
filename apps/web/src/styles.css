@@ -2926,6 +2926,10 @@ input[inputmode="decimal"], input[inputmode="numeric"],
    under the bar's real height (NavBar.tsx --navbar-live). Found by the UI specs' phone run. */
 @media (max-width: 760px) {
   .toasts:not(.is-docked) { top: calc(var(--navbar-live, var(--navbar-h)) + var(--sp-2)); }
+  /* And under an open dialog, not over it: on a phone the dialog spans the screen, and the
+     indexing card lay over the terms' "I confirm" box and took its tap. On a wide screen the
+     stack is docked in the bar, which an open dialog already covers. */
+  :root:has([aria-modal='true']) .toasts:not(.is-docked) { z-index: 90; }
 }
 
 /* The address menu opens in this corner (NavBar.tsx): the stack steps left of

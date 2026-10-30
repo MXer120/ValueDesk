@@ -94,6 +94,12 @@ h.test('toasts never lie over the bar: docked in its lane, or (a phone) under it
   }
   // A tap on a page link reaches it (trial: every actionability check, nothing clicked).
   await page.getByRole('link', { name: 'Portfolio', exact: true }).first().click({ trial: true, timeout: 5_000 });
+  // An open dialog is above the toasts: on a phone the indexing card lay over the terms' "I confirm" box.
+  await page.getByRole('button', { name: 'Settings', exact: true }).first().click();
+  await page.getByRole('dialog', { name: 'Settings' }).waitFor({ state: 'visible' });
+  const c = (await card.boundingBox())!;
+  const top = await page.evaluate(([x, y]) => !!document.elementFromPoint(x!, y!)?.closest('.toasts'), [c.x + c.width / 2, c.y + c.height / 2]);
+  assert.equal(top, false, 'the toast is not the topmost thing under the open dialog');
 }, { storage: { 'vs.notices.v1': NOTICES } });
 
 h.test('View > Grade: all, warnings + errors, errors', async ({ page }) => {
