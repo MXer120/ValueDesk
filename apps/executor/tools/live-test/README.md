@@ -162,8 +162,9 @@ What one run does:
 
 ## The scenarios
 
-124 by default, of which 119 run with a SoDEX leader (the 5 written for a Hyperliquid leader are skipped) and all
-124 with a Hyperliquid leader; `--slow` adds 5. Two (`twap.tab-close`, `copym.tab-close`) run on the browser target only. Sizes are in U = SoDEX's $10 minimum order value plus 20% ($12):
+131 by default, of which 126 run with a SoDEX leader (the 5 written for a Hyperliquid leader are skipped) and all
+131 with a Hyperliquid leader; `--slow` adds 5. Nine run on the browser target only: `twap.tab-close`, `copym.tab-close`
+and the seven that work ValueDesk's own pages ("ValueDesk's pages", below). Sizes are in U = SoDEX's $10 minimum order value plus 20% ($12):
 every child order is just big enough (and above Hyperliquid's $10 minimum for a leader there). Each scenario
 says what it confirms on the exchange (`title` and `confirms` in `scenarios/*.ts`).
 
@@ -225,6 +226,30 @@ says what it confirms on the exchange (`title` and `confirms` in `scenarios/*.ts
   copied position, brought near liquidation by the harness and liquidated by SoDEX ("Liquidations", below).
 - **The fee ladder** (6, +1 slow; self target only): one scenario per step of the copy fee ladder, and two for a
   failing volume source ("The fee ladder", below).
+- **ValueDesk's pages** (7, browser target only; `scenarios/ui.ts`, `needs: ['ui']`): the runner clicks the page as a
+  person does, with the steps of `apps/web/e2e/ui/uiSteps.ts`, and checks SoDEX. Each is U, ends flat with nothing
+  resting, and has a 3-minute timeout.
+  - `ticket.limit-cancel`: a limit buy 2% under the bid through the order ticket and its review rests on SoDEX at the
+    price and size typed (GTC, unfilled); the open orders table's Cancel takes it off.
+  - `ticket.market-close`: a market buy of U fills into a position of that size (builder fee on its fills); the
+    positions table's Close and its confirm is one reduce-only sell, flat.
+  - `ticket.tpsl`: a market buy with TP and SL (Gain and Loss in %, 1% from the entry each way): both rest on SoDEX as
+    reduce-only stops of the position's size at exactly the prices the ticket showed; Close leaves no stop behind
+    (if SoDEX keeps them, it fails and says so: Close does not cancel them).
+  - `ticket.leverage`: the ticket's leverage popover sets the market to a leverage at or under the region's 2x, other
+    than SoDEX's, in SoDEX's margin mode; SoDEX shows it; set back the same way (straight on SoDEX if that fails).
+  - `algo.ui-cancel-exits`: a real bracket (market entry, TP and SL 2%) from the algo ticket, run in this browser;
+    after the entry both exits rest on SoDEX; the Algos table's Cancel (while it runs: it ends, its exits stay, the
+    row says "Exits live") and then Cancel exits take them off SoDEX; the position stays.
+  - `copy.ui-close`: a copy started in the copy window ($ per trade U, 2x, the main market, isolated, this browser;
+    every step of the place done by the bootstrap; if the window cannot start it, the bridge does, noted); the
+    leader's open is copied; Manage copies' Close ("Stop and close positions") stops it and closes reduce-only.
+  - `copy.ui-confirm`: the same with "Ask before each trade": the page's prompt, Copy it sends the open, Skip sends
+    nothing (declined), the leader's close answered Copy it closes the follower; exactly one copy buy reaches SoDEX.
+
+  A dry run skips the four `ticket.*` (its throwaway wallet has no SoDEX account; the UI specs run those steps
+  against the fake SoDEX) and runs the other three on paper (a paper copy, a practice bracket) through the same
+  clicks.
 
 ## Targets
 
@@ -234,9 +259,9 @@ skipped for, with why (`needs` in `scenarios/*.ts`; `target.ts`).
 
 | Target | What runs | Covers | Skips |
 |---|---|---|---|
-| `self` (default) | a real executor process started here from this checkout (`apps/executor/src/main.ts`, self-hosted for the follower, `EXECUTOR_LIVE_ALGOS=1` for a live run, the follower's volume from the runner's stub) | everything but the browser's own: 117 scenarios with a SoDEX leader, 122 with a Hyperliquid one (5 more with `--slow`) | `twap.tab-close`, `copym.tab-close` (no browser tab) |
-| `hosted` | ValueDesk's own executor on server 2, through the site: `https://www.valuedesk.so/api/copy/v1` (Vercel's function adds the origin secret and your country, which the server needs) | every scenario that does not restart the executor or set the follower's volume | `twap.restart`, `iceberg.restart`, `scale.restart`, `copy.restart`, `copym.restart-close` (it cannot be killed from here), the `fee.*` scenarios (its volume is its ledger's), `twap.tab-close`, `copym.tab-close` |
-| `browser` | the web app's own runtime (`apps/web/src/algo`, `copy`, `trading`) in a tab of Microsoft Edge on the local dev web, through the web test bridge (`browserDriver.ts`) | every algo and copy scenario, the restarts as reloads of the page, `twap.tab-close` and `copym.tab-close`: 112 with a SoDEX leader, 117 with a Hyperliquid one (4 more with `--slow`) | the `fee.*` scenarios (a browser reads no volume: it charges fixed fees), `setup.key-import` (a browser makes its own copy key) |
+| `self` (default) | a real executor process started here from this checkout (`apps/executor/src/main.ts`, self-hosted for the follower, `EXECUTOR_LIVE_ALGOS=1` for a live run, the follower's volume from the runner's stub) | everything but the browser's own: 117 scenarios with a SoDEX leader, 122 with a Hyperliquid one (5 more with `--slow`) | `twap.tab-close`, `copym.tab-close` (no browser tab), the seven UI scenarios (`ticket.*`, `algo.ui-cancel-exits`, `copy.ui-*`: no page) |
+| `hosted` | ValueDesk's own executor on server 2, through the site: `https://www.valuedesk.so/api/copy/v1` (Vercel's function adds the origin secret and your country, which the server needs) | every scenario that does not restart the executor or set the follower's volume | `twap.restart`, `iceberg.restart`, `scale.restart`, `copy.restart`, `copym.restart-close` (it cannot be killed from here), the `fee.*` scenarios (its volume is its ledger's), `twap.tab-close`, `copym.tab-close`, the seven UI scenarios |
+| `browser` | the web app's own runtime (`apps/web/src/algo`, `copy`, `trading`) in a tab of Microsoft Edge on the local dev web, through the web test bridge (`browserDriver.ts`) | every algo and copy scenario, the restarts as reloads of the page, `twap.tab-close` and `copym.tab-close`, and the seven that click ValueDesk's own pages: 119 with a SoDEX leader, 124 with a Hyperliquid one (4 more with `--slow`) | the `fee.*` scenarios (a browser reads no volume: it charges fixed fees), `setup.key-import` (a browser makes its own copy key) |
 
 **Hosted** in detail:
 
@@ -311,12 +336,21 @@ app's own tsconfig - no browser code lives in this folder):
   algos running through a reload (`apps/web/src/algo/tabLife.ts`: back within 20 s); it is not a hard kill (the
   page's own `pagehide` runs), so the target cannot be killed hard. `twap.tab-close` closes the tab instead and opens
   the app again 30 s later, when the app must stop the algo for good.
+- **The page's own controls** (`t.ui(step, args)`, capability `ui`): a step of `apps/web/e2e/ui/uiSteps.ts` run in the
+  page by name (`bridgeSession.ts ui`), by ARIA role and name: the market picked through the market search, the ticket
+  and its review, Cancel and Close in the account tables, the copy window from the trader's link
+  (`/copy?address=&venue=`), Manage copies on Portfolio, the "Copy this trade?" prompt, the algo ticket's slide and the
+  Algos table. Other pages are reached in the tab (history and popstate, as the nav does): no reload, the runners go
+  on. A step that fails leaves a screenshot next to the run's logs. A dry run's page refuses the ticket steps and
+  any copy or algo that is not paper.
 - **Skipped**: the `fee.*` scenarios (a browser reads no 14-day volume; the runner's stub is for an executor it
   starts) and `setup.key-import` (a browser makes its own copy key).
 - **Bandwidth**: the page streams SoDEX's market data for as long as the run keeps it open; no browser or package is
   downloaded.
 
-Its hash adds the web runtime's files (`apps/web/src/algo`, `copy`, `trading`).
+Its hash adds the web runtime's files (`apps/web/src/algo`, `copy`, `trading`); a UI scenario's also the pages it
+clicks (`apps/web/src/components` with its `.tsx`, `exchange`, `api.ts`, `accountFeeds.ts`) and the steps
+(`apps/web/e2e/ui/uiSteps.ts`, `ticket.ts`, `algo.ts`).
 
 **One target at a time per wallet**: each target keeps its own state, and a live start refuses while another
 target's state says it may have left orders or positions on the same follower (run that target again: its start-up
@@ -470,7 +504,7 @@ reaches SoDEX.
 |---|---|
 | `START-LIVE-TESTS.cmd`, `all.ts` | every target one after another, each part in its own process (preflight, plan, retries, progress, summary: "Start here"); `allParts.ts` holds its logic. Not in any scenario's hash: changing them re-runs nothing |
 | `run.ts` | the runner (options, bootstrap, the loop, the cleanup after every scenario) |
-| `scenarios/setup.ts`, `scenarios/algos.ts`, `scenarios/algo-matrix.ts`, `scenarios/copy.ts`, `scenarios/copy-matrix.ts`, `scenarios/liquidation.ts`, `scenarios/fees.ts` | the catalogue; `catalogue.ts` puts them in order |
+| `scenarios/setup.ts`, `scenarios/algos.ts`, `scenarios/algo-matrix.ts`, `scenarios/copy.ts`, `scenarios/copy-matrix.ts`, `scenarios/liquidation.ts`, `scenarios/fees.ts`, `scenarios/ui.ts` | the catalogue; `catalogue.ts` puts them in order (`ui.ts`: the browser target's clicks on ValueDesk's pages, whose steps are `apps/web/e2e/ui/uiSteps.ts`) |
 | `harness.ts` | what a scenario works with (`T`): sizes, checks, the follower's account (SoDEX or paper), the leader, restarts |
 | `exchange.ts` | SoDEX reads, and the harness's own writes (registration, approval, IOCs, cancels, leverage and isolated margin): what a copier sends through the engine's client, the rest (which that client refuses by design) straight to SoDEX's gateway |
 | `leader.ts` | the leader on its venue (`SodexLeader`, `HyperliquidLeader`): its trades, fills, equity, and its cleanup |

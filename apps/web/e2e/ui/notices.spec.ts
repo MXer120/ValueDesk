@@ -8,7 +8,7 @@
  */
 import assert from 'node:assert/strict';
 import type { Page } from 'playwright-core';
-import { uiSuite, until } from './harness';
+import { connectWallet, uiSuite, until } from './harness';
 
 const h = uiSuite(import.meta.filename);
 
@@ -70,10 +70,30 @@ h.test('an unread error marks the bell, and opening it reads it', async ({ page 
   await until(page, async () => /^Notifications, \d+ unread$/.test((await b.button.getAttribute('aria-label')) ?? ''), 'the unread mark');
   await b.open();
   await b.expect(ALL, 'every row, newest first');
-  // Open, the panel's scrim covers the page (and the bell): it is what closes it.
-  await page.getByRole('button', { name: 'Close notifications' }).click();
+  // The list opens on the screen, whole: on a phone it ran off the left edge (the bell sits mid-bar there).
+  const box = (await b.panel.boundingBox())!;
+  const screen = page.viewportSize()!;
+  assert.ok(box.x >= 0 && box.x + box.width <= screen.width, `the list lies within the ${screen.width}px screen (x ${Math.round(box.x)} to ${Math.round(box.x + box.width)})`);
+  // Open, the panel's scrim covers the page (and the bell): it is what closes it - tapped beside the list.
+  const below = box.y + box.height + 4 < screen.height - 4;
+  await page.getByRole('button', { name: 'Close notifications' }).click({ position: below ? { x: screen.width / 2, y: screen.height - 4 } : { x: 4, y: screen.height - 4 } });
   await b.panel.waitFor({ state: 'hidden' });
   await until(page, async () => (await b.button.getAttribute('aria-label')) === 'Notifications', 'the mark to clear');
+}, { storage: { 'vs.notices.v1': NOTICES } });
+
+h.test('toasts never lie over the bar: docked in its lane, or (a phone) under it - its links and wallet button take taps', async ({ page }) => {
+  await connectWallet(page);
+  // Connecting starts the indexing card, which stays for minutes: the toast that sat over a phone's header.
+  const card = page.locator('.toasts .toast').first();
+  await card.waitFor({ state: 'visible', timeout: 30_000 });
+  const docked = await page.locator('.toasts').first().evaluate((el) => el.classList.contains('is-docked'));
+  if (!docked) {
+    const bar = (await page.getByRole('banner').boundingBox())!;
+    const box = (await card.boundingBox())!;
+    assert.ok(box.y >= bar.y + bar.height - 1, `the toast (top ${Math.round(box.y)}) starts under the bar (bottom ${Math.round(bar.y + bar.height)})`);
+  }
+  // A tap on a page link reaches it (trial: every actionability check, nothing clicked).
+  await page.getByRole('link', { name: 'Portfolio', exact: true }).first().click({ trial: true, timeout: 5_000 });
 }, { storage: { 'vs.notices.v1': NOTICES } });
 
 h.test('View > Grade: all, warnings + errors, errors', async ({ page }) => {

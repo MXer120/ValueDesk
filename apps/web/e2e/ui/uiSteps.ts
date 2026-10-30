@@ -35,28 +35,37 @@ export async function inApp(page: Page, path: string): Promise<void> {
 /** The trade page, with the order ticket ready. */
 async function tradePage(page: Page): Promise<void> {
   if (new URL(page.url()).pathname !== '/trade') await inApp(page, '/trade');
-  await ticket(page).g.waitFor({ state: 'visible', timeout: 30_000 });
+  await ticket(page).show();
 }
 
 /**
- * The market on the trade page: its header button names it ("BTC-USD futures: change market");
- * another one is picked through the market search, as a person types it there.
+ * A market picked as a person picks one: the header's market button ("BTC-USD futures: change
+ * market") opens the search, `query` is typed, and the first result of that kind (a perp's
+ * second line says "Perp", a spot market's "Spot") whose name starts with it is chosen.
  */
+export async function pickMarket(page: Page, query: string, kind: 'perp' | 'spot'): Promise<void> {
+  await page.getByRole('button', { name: /(futures|spot): change market$/ }).first().click();
+  const search = page.getByRole('dialog', { name: 'Search traders and markets' });
+  await search.waitFor({ state: 'visible' });
+  await typeInto(search.getByRole('combobox', { name: 'Search traders, markets, pages or addresses' }), query);
+  const esc = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const row = search.getByRole('option').filter({ hasText: new RegExp(`^\\s*${esc}`, 'i') }).filter({ hasText: kind === 'perp' ? /Perp/ : /Spot/ }).first();
+  await row.waitFor({ state: 'visible', timeout: 20_000 });
+  await row.click();
+  await search.waitFor({ state: 'hidden', timeout: 10_000 });
+}
+
+/** The perps market on the trade page (its header button names it); another one picked through the search. */
 export async function selectMarket(page: Page, symbol: string): Promise<void> {
   await tradePage(page);
-  const base = symbol.split(/[-_/]/)[0]!.toUpperCase();
-  const btn = page.getByRole('button', { name: /futures: change market$/ }).first();
+  const btn = page.getByRole('button', { name: /(futures|spot): change market$/ }).first();
   await btn.waitFor({ state: 'visible', timeout: 30_000 });
-  const showing = async () => ((await btn.getAttribute('aria-label')) ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '');
-  const want = symbol.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const showing = async () => ((await btn.getAttribute('aria-label')) ?? '').toUpperCase();
+  const want = `${symbol.toUpperCase()} FUTURES`;
   if ((await showing()).startsWith(want)) return;
-  await btn.click();
-  const search = page.getByRole('dialog', { name: 'Search markets' });
-  await search.waitFor({ state: 'visible' });
-  await typeInto(search.getByRole('textbox', { name: 'Search markets' }), symbol);
-  await page.waitForTimeout(400);
-  await search.getByRole('textbox', { name: 'Search markets' }).press('Enter');
-  await until(page, async () => (await showing()).startsWith(want) || (await showing()).startsWith(base), `the market ${symbol} on the trade page`, 20_000);
+  await pickMarket(page, symbol, 'perp');
+  await until(page, async () => (await showing()).startsWith(want), `the market ${symbol} on the trade page (the button says ${await showing()})`, 20_000);
+  await ticket(page).show();
 }
 
 export type Side = 'buy' | 'sell';
@@ -230,8 +239,9 @@ export const UI_STEPS = {
     const rows = activity.locator('tbody tr').filter({ hasText: a.symbol.split('-')[0]! });
     const row = await rowWithPrice(page, rows, a.price, `an open order of ${a.symbol} at ${a.price}`);
     const text = ((await row.textContent()) ?? '').replace(/\s+/g, ' ').trim();
+    const said = await toast(page, /cancel/i).count();
     await row.getByRole('button', { name: 'Cancel', exact: true }).click();
-    await until(page, async () => (await toast(page, /cancel/i).count()) > 0 || !(await row.isVisible().catch(() => false)), 'the cancel to be sent', 20_000);
+    await until(page, async () => (await toast(page, /cancel/i).count()) > said || !(await row.isVisible().catch(() => false)), 'the cancel to be sent', 20_000);
     return { row: text };
   },
 

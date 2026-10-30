@@ -13,12 +13,18 @@
  * the next page used to cover the chart's price scale, so the pages are
  * full width.
  */
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import './carousel.css';
 
 interface Page {
   key: string;
   label: string;
+  /**
+   * What the page is called to assistive tech (its tabpanel's name), when the tab's short label
+   * is not the name the same content has elsewhere: the ticket is "Order entry" on every screen,
+   * as its desktop panel is, so a screen reader (and a test) finds it by one name.
+   */
+  name?: string;
   content: ReactNode;
   /** 'auto' for content that scrolls internally (the order ticket); 'hidden'
    *  for content that measures its own box, same contract as PanelScroll. */
@@ -26,6 +32,7 @@ interface Page {
 }
 
 export function MobileCarousel({ pages }: { pages: Page[] }) {
+  const uid = useId();
   const trackRef = useRef<HTMLDivElement>(null);
   const pageRefs = useRef<Array<HTMLDivElement | null>>([]);
   const [active, setActive] = useState(0);
@@ -88,12 +95,17 @@ export function MobileCarousel({ pages }: { pages: Page[] }) {
           same 41px bar, same 14px/400 muted->text, same amber stub marker -
           so this reads as the SAME tab language the rest of the app already
           uses, not a second one invented for one screen size. */}
+      {/* The WAI-ARIA tabs pattern, whole: each tab controls its page, each page is a named
+          tabpanel. Without it the three pages were one unnamed stretch inside the "Order book and
+          trades" panel, and the ticket - "Order entry" on a wide screen - had no name on a phone. */}
       <div className="dash-tabs__bar dash-panel__handle" role="tablist">
         {pages.map((p, i) => (
           <button
             key={p.key}
             type="button"
             role="tab"
+            id={`${uid}-tab-${p.key}`}
+            aria-controls={`${uid}-page-${p.key}`}
             aria-selected={i === active}
             className={`dash-tab${i === active ? ' is-active' : ''}`}
             onClick={() => goTo(i)}
@@ -107,6 +119,9 @@ export function MobileCarousel({ pages }: { pages: Page[] }) {
           <div
             key={p.key}
             ref={(el) => { pageRefs.current[i] = el; }}
+            id={`${uid}-page-${p.key}`}
+            role="tabpanel"
+            aria-label={p.name ?? p.label}
             className={`mcarousel__page${p.scroll === 'hidden' ? ' mcarousel__page--fit' : ''}`}
           >
             {p.content}

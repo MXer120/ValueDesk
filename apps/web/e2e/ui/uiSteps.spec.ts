@@ -40,6 +40,15 @@ async function trading(env: TestEnv, leader = false): Promise<FakeSodex> {
   return enableTrading(env, { stateful: true, ...(leader ? { leader: { address: LEADER } } : {}) });
 }
 
+h.test('market.select: the live run\'s market (BTC-USD or ETH-USD, whichever is cheaper) is picked through the search, and back', async ({ page }) => {
+  await ticket(page).ready();
+  const btn = page.getByRole('button', { name: /futures: change market$/ }).first();
+  await UI_STEPS['market.select'](page, { symbol: 'ETH-USD' });
+  assert.match((await btn.getAttribute('aria-label')) ?? '', /^ETH-USD futures/);
+  await UI_STEPS['market.select'](page, { symbol: SYM });
+  assert.match((await btn.getAttribute('aria-label')) ?? '', /^BTC-USD futures/);
+}, { timeout: 90_000 });
+
 h.test('ticket.limit-cancel: a limit 2% under the bid rests at the price typed; the open orders\' Cancel takes it off', async (env) => {
   const sx = await trading(env);
   const { page } = env;

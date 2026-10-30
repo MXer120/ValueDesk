@@ -513,6 +513,19 @@ button.navicon { position: relative; min-height: 0; }
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
   .navnotes__panel { background: var(--bg-elevated); }
 }
+/* On a phone the bell sits mid-bar (there is no rail): hung from its right edge, the list ran
+   about 100px off the left of a 375px screen, its titles cut. There it spans the screen under
+   the bar (found by the UI specs' phone run, notices.spec.ts). */
+@media (max-width: 760px) {
+  .navbar:not(.navbar--rail) .navnotes__panel {
+    position: fixed;
+    top: calc(var(--navbar-live, var(--navbar-h)) + 8px);
+    left: 8px;
+    right: 8px;
+    width: auto;
+    max-height: calc(100vh - var(--navbar-live, var(--navbar-h)) - 24px);
+  }
+}
 .navnotes__head {
   margin: 4px 6px 8px;
   color: var(--muted);
@@ -2906,6 +2919,14 @@ input[inputmode="decimal"], input[inputmode="numeric"],
   gap: var(--sp-2);
 }
 .toasts__live:empty { display: none; }
+
+/* On a phone there is no rail to dock in, and the bar is three rows (brand, icons and the
+   wallet, the page links): 56px down, the stack - the indexing card stays for minutes - lay
+   over the bell, the wallet button and the page links and took their taps. There it starts
+   under the bar's real height (NavBar.tsx --navbar-live). Found by the UI specs' phone run. */
+@media (max-width: 760px) {
+  .toasts:not(.is-docked) { top: calc(var(--navbar-live, var(--navbar-h)) + var(--sp-2)); }
+}
 
 /* The address menu opens in this corner (NavBar.tsx): the stack steps left of
    it while it is open, or hides where there is no room beside it. */

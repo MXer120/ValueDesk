@@ -15,8 +15,9 @@ Start the dev servers first (`.claude/launch.json`: `valuescan-web`, plus `value
 `valuescan-executor` for the copy specs). Then, from `apps/web`:
 
 ```powershell
-npx tsx e2e/ui/run.ts                    # every spec, headless, throwaway wallet
+npx tsx e2e/ui/run.ts                    # every spec, headless, throwaway wallet: on a desktop, then on a phone
 npx tsx e2e/ui/run.ts --only tpsl,copy   # spec files whose name contains a word
+npx tsx e2e/ui/run.ts --viewport phone   # only at a phone's 375x812
 npx tsx e2e/ui/run.ts --headed --slow 250
 npx tsx e2e/ui/run.ts --list
 ```
@@ -27,6 +28,7 @@ npx tsx e2e/ui/run.ts --list
 | `--headed`, `--slow <ms>` | show the browser; wait this long per action |
 | `--web <origin>` | the dev web (else `VS_E2E_WEB`, else the first of 127.0.0.1:5180-5183 that serves ValueDesk from Vite) |
 | `--jobs <n>` | spec files at a time, each in its own Edge (default 2, at most 4) |
+| `--viewport <v>` | `desktop` (1600x1000), `phone` (375x812, touch, a phone's user agent: mobile emulation in the same Edge) or `both` (default: desktop, then phone) |
 | `--live --confirm <address>` | the funded wallet in `VS_E2E_KEY`; `--confirm` must be its address |
 
 Exit codes: `0` passed, `1` a test failed, `2` refused to start (no dev web, no Edge, `--live` without its key
@@ -39,7 +41,9 @@ Type-check: `npx tsc --noEmit -p e2e/ui`.
 its pages received from hosts other than this machine (responses and WebSocket frames, counted over CDP; Web
 Workers are not counted). Measured 2026-10-29, a full run: about 16 MB in 83 s (~1.6 Mbit/s on average) - 13.7 MB
 of it `copySetup` (the copy window's Hyperliquid fill replay, 1-2 MB each time it opens), the other specs
-0.2-0.8 MB each (SoDEX market data). The dev web itself is local and does not count.
+0.2-0.8 MB each (SoDEX market data). The dev web itself is local and does not count. Measured 2026-10-30, both
+screens (the default since the phone pass), 11 spec files, `--jobs 3`: about 77 MB in 7.5 min (~1.4 Mbit/s), most of
+it `copySetup` and `copyFlow` (12-15 MB each per screen, the same replay); `--viewport desktop` halves it.
 
 **Not in CI.** `deploy/ci/run-tests.mjs` never runs these (they need a browser and a dev server) and refuses
 `apps/web/e2e/ui/` by name, as it does `e2e/live/native`.
@@ -59,6 +63,12 @@ welcome gate is accepted with "Only necessary" and the dev build's Developer doc
 is answered by the test and never forwarded**: other sessions editing the shared tree must not hot-swap modules
 or remount the app under a running test (seen: a remount mid-test threw `removeChild`). A test sees the code as
 it was when its page loaded.
+
+**On a phone** (`--viewport phone`, `harness.ts PHONE`): the context is 375x812 with `isMobile`, touch and an Android
+Edge user agent, and the specs' output and failure files carry `@phone`. The helpers find each control where a phone
+shows it: the order ticket is the trade page carousel's Trade page (`ticket().show()` taps that tab; the page is the
+tabpanel "Order entry"), and Connect wallet is the header's button (there is no Tools rail). The specs themselves are
+the same on both screens.
 
 ## The wallet (`wallet.ts`)
 
@@ -95,6 +105,27 @@ balance, a seeded position and a resting order, `rejectNextOrder(error)`. `enabl
 Enable trading and answers the terms and the builder-fee dialog; `placeViaReview` presses Place. The wallet is still a
 throwaway key SoDEX has never seen, so a write that got past the route would be refused there too.
 
+**Stateful** (`stateful: true`): the account moves with the writes as SoDEX would answer them - a GTC or post-only
+limit rests until a cancel, a market or IOC order fills at its own limit price into the position, a stop (or an
+entry's attached TP/SL) rests as a stop, a reduce-only fill that leaves a market flat takes its stops along, a
+leverage change is kept (`position()`, `resting()`, `leverage()`). Orders name their market by id: the fake reads
+SoDEX's public market list once to name them. **A fake leader** (`leader: { address }`): its account id and positions
+are answered, and the gateway's websockets opened in the page are routed through the fake (SoDEX's frames pass both
+ways); `leaderTrade(symbol, side, qty, price)` prints the leader's trade on the public `trade` stream as SoDEX does
+(buyer and seller account ids), which the browser copier follows; the follower's own fills are printed there too, a
+moment after the order is answered, so the copier books them.
+
+## The UI steps (`uiSteps.ts`)
+
+What a person does on a page, one step at a time, by name and with plain JSON in and out: `market.select`,
+`ticket.limit`, `ticket.market` (with TP/SL as Gain and Loss in %), `ticket.leverage`, `orders.cancel`,
+`positions.close`, `copy.start` (the copy window from the trader's link), `copy.manage` (Portfolio > Manage copies:
+Close or Stop), `copy.answer` (the "Copy this trade?" prompt), `algo.bracket` (the algo ticket's slide) and
+`algo.cancelExits` (the Algos table). The live suite's browser target runs them with real money
+(`bridgeSession.ts ui()`, `apps/executor/tools/live-test/scenarios/ui.ts`); `uiSteps.spec.ts` runs the same steps
+against the stateful fake. Other pages are reached in the tab (history and popstate, as the nav does), so the
+runners in it go on.
+
 Coverage of every control against these suites, and what only real money shows: `docs/COVERAGE-UI.md`.
 
 ## The test bridge (`window.__vsTest`, `src/testBridge.ts`)
@@ -130,6 +161,7 @@ registered it). Real algos start on a dev server only for the wallets in `VITE_L
 | `accountActions.spec.ts` | the fake account seeded with a position and a resting order: Close (asked first, one reduce-only market sell), the position TP/SL sheet (wrong side refused, two reduce-only stops), Cancel and Cancel all on open orders |
 | `algoFlow.spec.ts` | every kind started as a practice run from its own fields, the spec the engine got checked field by field; refusals (no amount, a field out of range in its own units, an iceberg without a visible size, a real run with real algos off); the Algos table's Pause, Resume, Size, ID chip, Open, Cancel, Cancel all and its tabs; a practice Fill fast to its end and its notice in the bell; every preview; phone width |
 | `copyFlow.spec.ts` | every rule of the copy window as the copy runs with it (sizing modes, limits, behaviour, risk controls, coin lists, margin, ask-each-trade, the amount), its refusals in their own units, counter-trade; Portfolio > My copies > Manage copies: Pause, Resume, Activity, Stop (asked first), Stop all |
+| `uiSteps.spec.ts` | the live browser target's steps against the stateful fake and a fake leader: a limit 2% under the bid rests and the open orders' Cancel takes it off; a market buy fills and Close sells it reduce-only; an entry with TP/SL rests two reduce-only stops at the prices the ticket shows; the leverage popover and margin mode are sent, kept and set back; a copy from the copy window follows the leader's trade and Manage copies' Close sells reduce-only; "Ask before each trade": Copy it sends, Skip sends nothing; a bracket from the algo ticket, Cancel then Cancel exits in the Algos table |
 | `staleBuild.spec.ts` | a part missing from the build (its module answers 404): one retry, one reload, then the note "A new version of ValueDesk is out" with a Reload button, not the error boundary; a tab running an algo is not reloaded: the note at once, and the "update held" banner names what a reload would stop |
 
 Against the dev web the "ValueDesk executor" is the local one (127.0.0.1:8799 behind Vite's `/api/copy`
@@ -153,4 +185,5 @@ With `--live` the throwaway-only tests are skipped and these run:
 - `copySetup`: the fee and key steps ask the wallet for exactly `ApproveBuilderFeeAction` and
   `UserSignedAddAPIKeyAction`, and **the wallet rejects both**: nothing is registered.
 
-No test places an order, live or not.
+No spec places a real order, live or not (`uiSteps.spec.ts` places them on the fake account). Real orders through
+these pages are the live suite's: `apps/executor/tools/live-test`, `--target browser`, `scenarios/ui.ts`.

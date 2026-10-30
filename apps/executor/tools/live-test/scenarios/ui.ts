@@ -67,7 +67,8 @@ async function startCopyInWindow(t: T, o: { ask?: boolean } = {}): Promise<strin
       ask: o.ask === true,
       paper: t.dry,
       isolated: true,
-      allocationUsd: 100,
+      // Within the follower's deposit (about $70, --budget): the window weighs the amount against the account.
+      allocationUsd: 50,
     }));
     t.note(`copy ${id} started through the copy window`);
   } catch (e) {
@@ -111,7 +112,7 @@ export const UI_TICKET_SCENARIOS: Scenario[] = [
       t.note(`the ticket: "${r.placed}"`);
       t.check(/BUY \/ LONG/.test(r.review) && /limit @/.test(r.review), 'the review showed a limit buy', r.review.slice(0, 160));
       const o = await t.waitFor(`the limit rests on SoDEX at ${price} for ${quantity}`, async () => (await t.account.openOrders(sym)).find((x) => !x.stop && x.side === 'buy' && near(x.price, price, tickOf(t) / 2) && near(x.qty, quantity, stepOf(t) / 2)) ?? null, { timeoutMs: 30_000 });
-      t.check(!o.reduceOnly && /GTC/i.test(o.tif), `a plain GTC limit (${o.tif}${o.reduceOnly ? ', reduce-only' : ''})`);
+      t.check(!o.reduceOnly && /^(GTC|1)$/i.test(o.tif), `a plain GTC limit (${o.tif}${o.reduceOnly ? ', reduce-only' : ''})`);
       t.check(o.filled === 0, 'nothing of it filled (2% under the bid)');
       await t.ui('orders.cancel', { symbol: sym, price });
       await t.waitFor('the order is gone from SoDEX', async () => ((await t.account.openOrders(sym)).some((x) => x.orderId === o.orderId) ? null : true), { timeoutMs: 30_000 });

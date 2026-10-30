@@ -288,6 +288,7 @@ export const TRADE_PANELS: PanelDefinition<TradeContext>[] = [
             { key: 'book', label: 'Order Book', scroll: 'hidden', content: bookTrades },
             {
               key: 'exec',
+              name: 'Order entry',
               label: 'Trade',
               scroll: 'auto',
               content: (
