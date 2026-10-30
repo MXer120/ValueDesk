@@ -12375,7 +12375,7 @@ var CopyRuntime = class {
     if (!s.settings.paper) this.scheduleStops(s, symbol2);
   }
   onFollowerFill(f) {
-    if (!f.taker) return;
+    if (!f.taker) return this.handFill(f);
     const now = Date.now();
     this.pending = this.pending.filter((p) => p.until > now && p.remaining > 1e-12);
     let left = f.qty;
@@ -12407,6 +12407,7 @@ var CopyRuntime = class {
       this.host.onChange?.(s.id);
     }
     const stop = left > 1e-12 ? this.stopFill(f, left) : 0;
+    if (left - stop > 1e-12) this.handFill(f);
     const booked = f.qty - left + stop;
     const owner = this.followerAccounts.get(f.accountId);
     const snap = owner ? this.followers.get(owner) : void 0;
@@ -12524,6 +12525,17 @@ var CopyRuntime = class {
     st.realizedPnl += p.size * (price2 - p.entry);
     this.stopFired.set(k, { at: Date.now(), why: why === "liquidation" ? "own-position" : why });
     await this.closedOutside(s, sym, why);
+  }
+  /**
+   * A fill of the follower's that no order or SoDEX stop of the copier's explains: a trade by hand. From
+   * here a read showing a position on that market is the follower's own, not a read lagging the copier's
+   * close (withoutLaggingCloses, heldBy) - live run 2026-10-30 (copym.own-position): a long opened by hand
+   * a minute after the copy closed one as large was taken for that lagging read, and the leader's open
+   * was not skipped as own-position.
+   */
+  handFill(f) {
+    const owner = this.followerAccounts.get(f.accountId);
+    if (owner) this.ownFills.delete(`${owner}|${f.symbol}`);
   }
   /**
    * The copier knows the follower holds nothing on `sym` (where it held `peak`): its view of the account
