@@ -725,6 +725,38 @@ test('stale: right after the copy\'s own close, a read still showing the positio
   }
 });
 
+for (const how of ['taker', 'maker'] as const) {
+  test(`BUG live run 2026-10-30: a long opened by hand (${how}) a minute after the copy closed one as large is the follower's own - the leader's next open is skipped as own-position, nothing sent`, async () => {
+    // copym.own-position after copym.confirm: the copy closed a BTC long, the follower bought one by hand,
+    // and the read showing it was taken for a read lagging the copy's close.
+    const { w, rec, rt, store, s } = await holding({ id: `hand-after-close-${how}` });
+    try {
+      const held = size(rt, s.id);
+      leaderSells('1');
+      w.leader = [];
+      assert.ok(await until(() => rec.placed.length === 2), 'the copy closes with the leader');
+      sodexWs().push(print('SELL', String(held), '80000', 1002, FOLLOWER_ID, 'BTC-USD'));
+      assert.ok(await until(() => size(rt, s.id) === 0), 'its fill closed the books');
+      // The follower buys the same size by hand: no order of the copier's explains the fill.
+      sodexWs().push(how === 'taker' ? print('BUY', String(held), '80010', FOLLOWER_ID, 1002, 'BTC-USD') : print('SELL', String(held), '80010', FOLLOWER_ID, 1002, 'BTC-USD'));
+      w.follower = [{ s: 'BTC-USD', sz: String(held), ep: '80010', l: 5, m: 'ISOLATED' }];
+      await new Promise((r) => setTimeout(r, 50));
+      await rt.refreshFollower(FOLLOWER);
+      leaderBuys('1');
+      w.leader = [{ s: 'BTC-USD', sz: '1', ep: '80000' }];
+      let skippedOwn = false;
+      for (let i = 0; i < 60 && !skippedOwn; i++) {
+        skippedOwn = (await store.activity({ subId: s.id })).some((e) => e.kind === 'skip' && e.reason === 'own-position');
+        if (!skippedOwn) await new Promise((r) => setTimeout(r, 50));
+      }
+      assert.ok(skippedOwn, 'skipped as the follower\'s own position');
+      assert.equal(rec.placed.length, 2, 'nothing sent on top of the follower\'s own long');
+    } finally {
+      await rt.stop();
+    }
+  });
+}
+
 /* ======================= the copy's own stop fires on SoDEX (2026-10-29) ===== */
 
 /**
