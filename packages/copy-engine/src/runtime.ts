@@ -98,6 +98,12 @@ const FILLS_SLACK_MS = 60_000;
 const OUTSIDE_NO_FILL_MS = 15 * 60_000;
 /** How long the copier's own fill outweighs a disagreeing account read (SoDEX's reads can lag by tens of seconds). */
 const OWN_FILL_TRUST_MS = 120_000;
+/** The follower's unmatched closing prints within this long of the first are summed: SoDEX may fill one stop in several. */
+const STOP_PRINTS_MS = 10_000;
+/** How far (a fraction of the trigger) a print may sit on the near side of a stop's trigger and still be that stop's fill. */
+const STOP_PRICE_TOLERANCE = 0.003;
+/** SoDEX's answer to a reduce-only order where its matching holds no position (live run 2026-10-29: "position not found: 1"). */
+const NO_POSITION = /position not found|no position|nothing to reduce/i;
 /** A size as an activity line reads it: six significant digits. */
 const amount = (n: number): string => String(Number(n.toPrecision(6)));
 /** Why a copy with approval 'confirm' cannot run on a host that has no one to ask. */
@@ -190,13 +196,17 @@ interface Pending {
 }
 
 /** SoDEX's fills that cut a copied position, read for a change outside the copier: none yet, or unreadable. */
-type CutFills = Array<{ clOrdID: string | null }> | 'none' | 'unread';
+type CutFills = Array<{ clOrdID: string | null; qty?: number; price?: number }> | 'none' | 'unread';
 
 const lk = (l: LeaderRef): string => `${l.venue}:${l.address.toLowerCase()}`;
 
 /** The two prices of a 'different-asset' skip, for its activity line. */
 const assetDetail = (leaderSymbol: string, v: AssetVerdict): string =>
   `Hyperliquid ${leaderSymbol} ${Number(v.leaderPrice.toPrecision(6))}, SoDEX ${v.market} ${Number(v.sodexPrice.toPrecision(6))}: ${(Math.abs(v.deviation) * 100).toFixed(1)}% apart`;
+
+/** A reduce-only order SoDEX refused because its matching holds no position there: positive evidence the market is flat. */
+const noPosition = (i: Pick<Intent, 'reduceOnly'>, r: Pick<SendResult, 'ok' | 'outcomeUnknown' | 'error'>): boolean =>
+  i.reduceOnly && !r.ok && !r.outcomeUnknown && NO_POSITION.test(r.error ?? '');
 
 function shuffle<T>(a: T[]): T[] {
   for (let i = a.length - 1; i > 0; i--) {
@@ -233,6 +243,18 @@ export class CopyRuntime {
    * follower's own).
    */
   private ownFills = new Map<string, { at: number; peak: number; after: number }>();
+  /**
+   * `${subId}|${symbol}` -> the follower's closing prints on a market where the copy keeps a SoDEX stop,
+   * matched to no order of the copier's and not yet as large as the stop: SoDEX may fill one stop in
+   * several prints (stopFill).
+   */
+  private stopPrints = new Map<string, { qty: number; notional: number; at: number }>();
+  /**
+   * `${subId}|${symbol}` -> the copier saw that market close by itself: its own SoDEX stop filled on the
+   * stream, or SoDEX refused a close there with "position not found". Until the books (and the market's
+   * detach) have caught up, no leader change opens or adds there (process, execute).
+   */
+  private stopFired = new Map<string, { at: number; why: DetachReason }>();
   private leverageSet = new Map<string, { leverage: number; margin: string }>();
   /**
    * `${subId}|${symbol}` -> a change outside the copier that reads agree on, held back because
@@ -547,6 +569,15 @@ export class CopyRuntime {
       s = this.need(subId);
     }
     const st = this.stateOf(s);
+    // The copy's own stop closed this market moments ago (its fill on the stream, or SoDEX refusing a close there):
+    // a change of a position the leader held waits for the leader to be flat there, whatever the books show yet.
+    const firedKey = market ? `${s.id}|${market.name}` : '';
+    const fired = market ? this.stopFired.get(firedKey) : undefined;
+    if (fired) {
+      this.stopFired.delete(firedKey);
+      if (Date.now() - fired.at <= OWN_FILL_TRUST_MS && !st.detached[e.symbol] && (e.before ?? st.leaderPos[e.symbol] ?? 0) !== 0) st.detached[e.symbol] = fired.why;
+    }
+    const plannedAt = Date.now();
     const markOf = (sym: string) => (market && sym === market.name && mark !== null ? mark : this.markets.mark(sym));
     const plan = planLeaderEvent({
       sub: s,
@@ -591,7 +622,7 @@ export class CopyRuntime {
         return;
       }
     }
-    await this.execute(s, market!, plan.intents, markOf(market!.name) ?? e.price, leader);
+    await this.execute(s, market!, plan.intents, markOf(market!.name) ?? e.price, leader, plannedAt);
     if (plan.skip && !QUIET_SKIPS.has(plan.skip)) await this.activity(s, { kind: 'skip', reason: plan.skip, symbol: market!.name, leader, detail });
   }
 
@@ -725,6 +756,7 @@ export class CopyRuntime {
     intents: Intent[],
     reference: number,
     leader: ActivityEntry['leader'],
+    plannedAt = Date.now(),
   ): Promise<SendResult[]> {
     const st = this.stateOf(s);
     const sink = this.host.sinkFor(s);
@@ -757,7 +789,20 @@ export class CopyRuntime {
         return [];
       }
     }
+    // The copy's own stop closed the market while this was planned (or the leverage set): what opens or adds is not sent.
+    const fired = this.stopFired.get(`${s.id}|${market.name}`);
+    if (fired && fired.at >= plannedAt && send.some((i) => !i.reduceOnly)) {
+      send = send.filter((i) => i.reduceOnly);
+      st.skips++;
+      const reason: SkipReason = fired.why === 'stop-loss' ? 'after-stop-loss' : fired.why === 'take-profit' ? 'after-take-profit' : 'own-position';
+      await this.activity(s, { kind: 'skip', reason, symbol: market.name, leader });
+      if (!send.length) {
+        this.dirty.add(s.id);
+        return [];
+      }
+    }
     const results = await sink.place(s.accountId, market, send, builder, reference);
+    const refused = new Set<string>();
     for (let i = 0; i < send.length; i++) {
       const it = send[i]!;
       const r = results[i] ?? { clOrdID: it.clOrdID, ok: false, orderId: null, error: 'no result', outcomeUnknown: false };
@@ -777,6 +822,7 @@ export class CopyRuntime {
         builderFee: builder?.fee ?? 0,
         leader,
       });
+      if (!sink.paper && noPosition(it, r)) refused.add(it.symbol);
       if (r.paperFill) {
         const fee = r.paperFill.qty * r.paperFill.price * (market.takerFee + (builder?.fee ?? 0) / 100_000);
         this.fillBooks(s, it.symbol, it.side, r.paperFill.qty, r.paperFill.price, fee, it.reduceOnly);
@@ -812,6 +858,8 @@ export class CopyRuntime {
         });
       }
     }
+    // Not sent again: SoDEX holds nothing there, and the books say so from now on.
+    for (const sym of refused) await this.refusedNoPosition(s, sym);
     if (!sink.paper) this.scheduleRefresh(s.owner, 1_500);
     this.dirty.add(s.id);
     this.host.onChange?.(s.id);
@@ -874,7 +922,9 @@ export class CopyRuntime {
       });
       this.host.onChange?.(s.id);
     }
-    const booked = f.qty - left;
+    // What no order of the copier's explains may be its own SoDEX stop firing.
+    const stop = left > 1e-12 ? this.stopFill(f, left) : 0;
+    const booked = f.qty - left + stop;
     const owner = this.followerAccounts.get(f.accountId);
     const snap = owner ? this.followers.get(owner) : undefined;
     if (owner && snap && booked > 1e-12) {
@@ -892,6 +942,175 @@ export class CopyRuntime {
       const peak = [before0 ?? 0, size].reduce(big, was && now - was.at <= OWN_FILL_TRUST_MS ? was.peak : 0);
       this.ownFills.set(k, { at: now, peak, after: size });
     }
+  }
+
+  /**
+   * A taker fill of the follower's that no order of the copier's explains, on the closing side of a
+   * copied position with a SoDEX stop of the copy's resting: that stop firing, once the prints (summed
+   * over STOP_PRINTS_MS) come to the stop's size, to half a lot, at a price the stop fires at (a long's
+   * stop-loss at or under its trigger, its take-profit at or over it, to STOP_PRICE_TOLERANCE; the nearer
+   * when both could be) - or the stream names the stop's client id. Booked at once, at the fill price:
+   * closed in the books and left until the leader is flat (closedOutside), without waiting for an account
+   * read (which lags the fill and can come from a stale backend: live run 2026-10-29) or SoDEX's trades.
+   * Returns the quantity booked as the stop's fill (0: none).
+   */
+  private stopFill(f: FollowerFill, qty: number): number {
+    const now = Date.now();
+    for (const s of this.list()) {
+      if (s.accountId !== f.accountId || s.settings.paper || s.status === 'stopped') continue;
+      const st = this.stateOf(s);
+      const p = st.owned[f.symbol];
+      const stops = st.stops[f.symbol];
+      const m = this.markets.get(f.symbol);
+      if (!p || !stops || !(stops.sl || stops.tp) || !m || f.side !== (p.size > 0 ? 'sell' : 'buy')) continue;
+      const k = `${s.id}|${f.symbol}`;
+      const was = this.stopPrints.get(k);
+      const prior = was && now - was.at <= STOP_PRINTS_MS ? was : { qty: 0, notional: 0, at: now };
+      const total = prior.qty + qty;
+      const notional = prior.notional + qty * f.price;
+      const price = notional / total;
+      const lot = Number(m.stepSize) || 1e-12;
+      // The stop closes what it was placed for, and (reduce-only) at most what the copy holds.
+      const want = Math.min(Number(floorQuantity(stops.size, m)) || Math.abs(stops.size), Math.abs(p.size));
+      const kind = this.firedStop(s, p, stops, m, f.clOrdID, price);
+      if (!kind || total > want + lot / 2) {
+        this.stopPrints.delete(k);
+        continue;
+      }
+      if (total < want - lot / 2) {
+        this.stopPrints.set(k, { qty: total, notional, at: prior.at });
+        return 0;
+      }
+      this.stopPrints.delete(k);
+      this.stopFired.set(k, { at: now, why: kind });
+      this.host.log.info('copy: the copy\'s own SoDEX stop filled on the stream; booked', { owner: s.owner, sub: s.id, symbol: f.symbol, kind, qty: total, price });
+      this.fillBooks(s, f.symbol, f.side, total, price, total * price * m.takerFee, true);
+      const rest = st.owned[f.symbol];
+      if (!rest) {
+        void this.closedOutside(s, f.symbol, kind);
+      } else {
+        // A stop placed before an add was resized closes only what it was placed for: the rest is not added to
+        // again while the leader holds, and the guards close it at their next pass.
+        for (const lsym of this.leaderSymbolsFor(s, f.symbol).filter((x) => st.leaderPos[x])) st.detached[lsym] = kind;
+        const detail = `Your ${kind} closed ${amount(total)} of this copied position; the copy holds the ${amount(Math.abs(rest.size))} left.`;
+        void this.activity(s, { kind: 'status', reason: 'reduced-outside', symbol: f.symbol, size: total, detail });
+        this.notice(copyReducedNotice(s, f.symbol, kind, detail));
+      }
+      this.host.onChange?.(s.id);
+      return total;
+    }
+    return 0;
+  }
+
+  /** Which of the copy's SoDEX stops on a position a closing print at `price` is (stopFill), or null: neither. */
+  private firedStop(
+    s: Subscription,
+    p: { size: number; entry: number },
+    stops: { sl: string | null; tp: string | null },
+    m: MarketInfo,
+    clOrdID: string | null,
+    price: number,
+  ): 'stop-loss' | 'take-profit' | null {
+    if (clOrdID) return clOrdID === stops.sl ? 'stop-loss' : clOrdID === stops.tp ? 'take-profit' : null;
+    const lev = effectiveLeverage(s.settings.maxLeverage, this.host.policyFor(s), m.maxLeverage);
+    let best: 'stop-loss' | 'take-profit' | null = null;
+    let gap = Infinity;
+    for (const [kind, id] of [['stop-loss', stops.sl], ['take-profit', stops.tp]] as const) {
+      if (!id) continue;
+      const trigger = guardTrigger(kind, p, s.settings, lev);
+      if (trigger === null) continue;
+      // How far the print is past the trigger, the way the stop fires.
+      const past = Math.sign(p.size) * (kind === 'stop-loss' ? trigger - price : price - trigger);
+      if (past < -STOP_PRICE_TOLERANCE * trigger) continue;
+      if (Math.abs(price - trigger) < gap) {
+        best = kind;
+        gap = Math.abs(price - trigger);
+      }
+    }
+    return best;
+  }
+
+  /**
+   * SoDEX refused a reduce-only order of the copier's with "position not found": its matching holds no
+   * position there. Unlike an account read (which lags, or comes from a stale backend: confirm.ts), that is
+   * positive evidence, so the market is booked flat at once and nothing is sent there to close it again;
+   * SoDEX's trades say why (the copy's own stop, a liquidation, or outside the copier: outsideWhy), and the
+   * market is left as for a position gone from the reads (closedOutside).
+   */
+  private async refusedNoPosition(s: Subscription, sym: string): Promise<void> {
+    const st = this.stateOf(s);
+    const p = st.owned[sym];
+    if (!p) return;
+    const k = `${s.id}|${sym}`;
+    const stops = st.stops[sym] ?? null;
+    // Flat in the books before SoDEX's trades are read: nothing planned meanwhile opens or adds there.
+    delete st.owned[sym];
+    this.stopFired.set(k, { at: Date.now(), why: 'own-position' });
+    this.ownFlat(s.owner, sym, p.size);
+    this.dirty.add(s.id);
+    this.host.log.info('copy: SoDEX holds no position where the copier closed; booked flat', { owner: s.owner, sub: s.id, symbol: sym, books: p.size });
+    const evidence = await this.outsideFills(s, sym, p.openedAt - FILLS_SLACK_MS, p.size);
+    const why = this.outsideWhy(evidence, stops);
+    // Booked at the price of the fills that name why, else at the mark (as a position gone from the reads is).
+    const named = Array.isArray(evidence)
+      ? evidence.filter((f) => (why === 'liquidation' ? !!f.clOrdID?.startsWith('liquidation:') : !!f.clOrdID && f.clOrdID === (why === 'stop-loss' ? stops?.sl : why === 'take-profit' ? stops?.tp : null)))
+      : [];
+    const q = named.reduce((a, f) => a + (f.qty ?? 0), 0);
+    const price = q > 0 ? named.reduce((a, f) => a + (f.qty ?? 0) * (f.price ?? 0), 0) / q : (this.markets.mark(sym) ?? p.entry);
+    st.realizedPnl += p.size * (price - p.entry);
+    this.stopFired.set(k, { at: Date.now(), why: why === 'liquidation' ? 'own-position' : why });
+    await this.closedOutside(s, sym, why);
+  }
+
+  /**
+   * The copier knows the follower holds nothing on `sym` (where it held `peak`): its view of the account
+   * says so, and for OWN_FILL_TRUST_MS a read still showing (up to) that size is a read lagging, not
+   * adopted back (withoutLaggingCloses, heldBy).
+   */
+  private ownFlat(owner: string, sym: string, peak: number): void {
+    const now = Date.now();
+    const snap = this.followers.get(owner);
+    const read = snap?.positions[sym]?.size ?? 0;
+    if (snap && read) {
+      const positions = { ...snap.positions };
+      delete positions[sym];
+      this.followers.set(owner, { ...snap, positions });
+    }
+    const k = `${owner}|${sym}`;
+    const was = this.ownFills.get(k);
+    const big = (a: number, b: number) => (Math.abs(b) > Math.abs(a) ? b : a);
+    const top = [peak, Math.sign(read) === Math.sign(peak) ? read : 0].reduce(big, was && now - was.at <= OWN_FILL_TRUST_MS ? was.peak : 0);
+    this.ownFills.set(k, { at: now, peak: top, after: 0 });
+  }
+
+  /**
+   * A copied position SoDEX no longer holds, gone outside the copier's own orders (the copy's SoDEX stop,
+   * the follower, a liquidation), its close already booked: never reopened by itself from now on, its
+   * stops on SoDEX cancelled, and the follower told. All but the activity line and the notice happen at once.
+   */
+  private async closedOutside(s: Subscription, sym: string, why: DetachReason | 'liquidation'): Promise<void> {
+    const st = this.stateOf(s);
+    const k = `${s.id}|${sym}`;
+    delete st.owned[sym];
+    this.recentGrow.delete(k);
+    this.recentShrink.delete(k);
+    this.outsideSeen.delete(k);
+    // Never reopened by itself, from now on.
+    const detach = this.leaderSymbolsFor(s, sym).filter((lsym) => st.leaderPos[lsym]);
+    for (const lsym of detach) st.detached[lsym] = why === 'liquidation' ? 'own-position' : why;
+    this.cancelStops(s, sym);
+    // SoDEX's leverage there may no longer be the copy's (raised by hand before a liquidation):
+    // it is set again before the next order that opens, never assumed.
+    this.leverageSet.delete(`${s.owner}|${sym}`);
+    this.dirty.add(s.id);
+    const detail =
+      why === 'liquidation'
+        ? 'SoDEX liquidated this copied position, so it was closed outside the copier. Its stops on SoDEX are cancelled; it resumes when the leader is flat.'
+        : why === 'own-position'
+          ? 'This copied position was closed outside the copier (by you, or by SoDEX). It resumes when the leader is flat.'
+          : `Your ${why} closed this copied position.`;
+    await this.activity(s, { kind: 'status', reason: why === 'own-position' || why === 'liquidation' ? 'closed-outside' : why, symbol: sym, detail });
+    this.notice(copyClosedNotice(s, sym, why, detail));
   }
 
   /* ------------------------------------------------------------- follower ----- */
@@ -1027,25 +1246,7 @@ export class CopyRuntime {
         if (gone) {
           // Closed outside the copier's own orders: a SoDEX stop, the follower, or a liquidation.
           st.realizedPnl += p.size * (mark - p.entry);
-          delete st.owned[sym];
-          this.recentGrow.delete(k);
-          this.recentShrink.delete(k);
-          // Never reopened by itself, from now on.
-          const detach = this.leaderSymbolsFor(s, sym).filter((lsym) => st.leaderPos[lsym]);
-          for (const lsym of detach) st.detached[lsym] = why === 'liquidation' ? 'own-position' : why;
-          this.cancelStops(s, sym);
-          // SoDEX's leverage there may no longer be the copy's (raised by hand before a liquidation):
-          // it is set again before the next order that opens, never assumed.
-          this.leverageSet.delete(`${s.owner}|${sym}`);
-          this.dirty.add(s.id);
-          const detail =
-            why === 'liquidation'
-              ? 'SoDEX liquidated this copied position, so it was closed outside the copier. Its stops on SoDEX are cancelled; it resumes when the leader is flat.'
-              : why === 'own-position'
-                ? 'This copied position was closed outside the copier (by you, or by SoDEX). It resumes when the leader is flat.'
-                : `Your ${why} closed this copied position.`;
-          await this.activity(s, { kind: 'status', reason: why === 'own-position' || why === 'liquidation' ? 'closed-outside' : why, symbol: sym, detail });
-          this.notice(copyClosedNotice(s, sym, why, detail));
+          await this.closedOutside(s, sym, why);
         } else {
           // Smaller on SoDEX (a partial liquidation, ADL, a part closed by hand, a close of the copier's
           // whose fill the stream missed): the part that went is booked at the mark, as a whole close
@@ -1229,9 +1430,14 @@ export class CopyRuntime {
           if (!m) continue;
           const results = await this.execute(s, m, list, this.markets.mark(sym) ?? Number(list[0]!.limitPrice), null);
           // Detached only once SoDEX took the close: a refused one is tried again at the next pass, and
-          // whatever an accepted one leaves open is closed with the leader (planner.ts).
+          // whatever an accepted one leaves open is closed with the leader (planner.ts). Refused as "position
+          // not found", it is not: the market is flat (execute booked it, detached as SoDEX's trades tell);
+          // where that left it attached (the books were flat already: the stop's fill), it is detached here.
           const why = g.closed[sym];
           if (why && results.some((r) => r.ok || r.outcomeUnknown)) for (const lsym of this.leaderSymbolsFor(s, sym)) st.detached[lsym] = why;
+          else if (why && list.some((it, i) => results[i] && noPosition(it, results[i]!))) {
+            for (const lsym of this.leaderSymbolsFor(s, sym)) if (st.leaderPos[lsym] && !st.detached[lsym]) st.detached[lsym] = why;
+          }
         }
         if (g.halt) await this.setStatus(s.id, 'halted', `Your drawdown stop (${Math.round((s.settings.drawdownStopPct ?? 0) * 100)}%) closed this copy.`);
       });
@@ -1265,7 +1471,8 @@ export class CopyRuntime {
             if (r?.paperFill) {
               if (st.owned[sym]) open.push(sym);
             } else if (r && (r.ok || r.outcomeUnknown)) sent.push(sym);
-            else open.push(sym);
+            // Refused as "position not found": SoDEX holds nothing there, and the books say so (execute).
+            else if (st.owned[sym]) open.push(sym);
           }
           if (sent.length) open.push(...(await this.stillOpenOnSodex(s, sent)));
           resolve(open);
