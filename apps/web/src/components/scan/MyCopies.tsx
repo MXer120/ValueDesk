@@ -2,15 +2,25 @@
  * My copies: what this wallet copies, in every mode (copy/live.ts), as the
  * portfolio summarises it. Equity and PnL are each copy's own books - its
  * allocation, the fills the copier saw and the marks it read - added up.
+ *
+ * "Manage copies" opens the copies table (components/copy/CopiesDialog.tsx):
+ * Pause, Resume, Stop, Close and each copy's activity. Before, it led to the Copy
+ * page, which has no copies table since 2026-10-26: nothing on the site could stop
+ * a running copy.
  */
-import { useSyncExternalStore } from 'react';
+import { Suspense, useState, useSyncExternalStore } from 'react';
 import { Card, Group, Row } from '../portfolio/parts';
 import { DASH, fmt, fmtUsd, signClass } from '../../format';
 import { copyRows, getLiveCopy, subscribeLiveCopy } from '../../copy/live';
+import { lazyChunk } from '../../lazyPage';
+
+const CopiesDialog = lazyChunk(() => import('../copy/CopiesDialog'));
 
 export function MyCopiesCard() {
   const live = useSyncExternalStore(subscribeLiveCopy, getLiveCopy, getLiveCopy);
-  const running = copyRows(live).filter((r) => r.view.subscription.status !== 'stopped');
+  const [manage, setManage] = useState(false);
+  const rows = copyRows(live);
+  const running = rows.filter((r) => r.view.subscription.status !== 'stopped');
   const real = running.filter((r) => !r.view.subscription.settings.paper);
   const allocated = real.reduce((a, r) => a + r.view.subscription.settings.allocationUsd, 0);
   const pnl = real.reduce((a, r) => a + r.view.pnl, 0);
@@ -25,10 +35,21 @@ export function MyCopiesCard() {
       </Group>
       {running.length > real.length && <p className="pf-note">{running.length - real.length} paper {running.length - real.length === 1 ? 'copy' : 'copies'} running as well.</p>}
       <div className="pf-actions">
+        {/* Any copy, paper or stopped ones included, is managed here; the grid finds new traders. */}
+        {rows.length > 0 && (
+          <button type="button" className="pf-btn" onClick={() => setManage(true)}>
+            Manage copies
+          </button>
+        )}
         <button type="button" className="pf-btn" onClick={() => { window.location.href = '/copy'; }}>
-          {none ? 'Find traders to copy' : 'Manage copies'}
+          Find traders to copy
         </button>
       </div>
+      {manage && (
+        <Suspense fallback={null}>
+          <CopiesDialog open={manage} onClose={() => setManage(false)} />
+        </Suspense>
+      )}
     </Card>
   );
 }

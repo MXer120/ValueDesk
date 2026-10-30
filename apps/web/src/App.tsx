@@ -39,6 +39,7 @@ import { OPEN_LEGAL_EVENT, RegionBanner, TermsGate } from './legal/LegalGate';
 import { knowledgeOnAtBoot, useKnowledge } from './folders/access';
 import { registerChartOpener } from './folders/bridge';
 import { setLastPrice } from './lastPrice';
+import { priceSeeder } from './priceSeed';
 
 const DEFAULT_SYMBOL: Record<Engine, string> = { perps: 'BTC-USD', spot: 'vBTC_vUSDC' };
 
@@ -266,6 +267,12 @@ function AppShell() {
       .catch(() => { window.location.href = scanHref(); });
   }, []);
   const [price, setPrice] = useState('');
+  /* A price the user sets wins over the book's seed after a market switch (priceSeed.ts). */
+  const priceSeed = useMemo(() => priceSeeder(), []);
+  const onPrice = useCallback((p: string, how?: 'snap') => {
+    if (how !== 'snap') priceSeed.typed();
+    setPrice(p);
+  }, [priceSeed]);
   /* The last price lives in lastPrice.ts, not here: see there. */
   /* The live wallet's EIP-1193 provider, for everything that signs or sends:
      enable trading, Money, Deposit, Points, Copy. Null = read-only. */
@@ -399,17 +406,21 @@ function AppShell() {
     hub.connect();
   }, []);
 
-  // Seed the price field from the book when switching markets.
+  // Seed the price field from the book when switching markets - unless the user set a
+  // price while the book was on its way (priceSeed.ts).
   useEffect(() => {
     let cancelled = false;
+    priceSeed.start();
     api
       .orderbook(engine, symbol, 1)
       .then(({ book }) => {
         if (cancelled) return;
         const mid = book.bids?.[0]?.[0] ?? book.asks?.[0]?.[0];
-        if (mid) setPrice(mid);
+        if (priceSeed.settle() && mid) setPrice(mid);
       })
-      .catch(() => {});
+      .catch(() => {
+        if (!cancelled) priceSeed.settle();
+      });
     return () => {
       cancelled = true;
     };
@@ -461,7 +472,7 @@ function AppShell() {
       favorites,
       positionCount: posCount,
       orderCount: orderCount,
-      onPrice: setPrice,
+      onPrice,
       onLastPrice: setLastPrice,
       onChanged: bump,
       onToggleFavorite: toggleFavorite,
@@ -475,7 +486,7 @@ function AppShell() {
     [
       engine, symbol, sym, health?.network, session?.unlocked, session?.session?.address,
       address, byName, refreshToken, price, favorites, posCount, orderCount,
-      bump, toggleFavorite, openSearch, setTab, openScanAccountId, setSymbol,
+      bump, toggleFavorite, openSearch, setTab, openScanAccountId, setSymbol, onPrice,
     ],
   );
 

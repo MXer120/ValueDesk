@@ -73,7 +73,7 @@ export interface TradeContext {
   favorites: string[];
   positionCount: number;
   orderCount: number;
-  onPrice: (p: string) => void;
+  onPrice: (p: string, how?: 'snap') => void;
   onLastPrice: (p: string) => void;
   onChanged: () => void;
   onToggleFavorite: (key: string) => void;

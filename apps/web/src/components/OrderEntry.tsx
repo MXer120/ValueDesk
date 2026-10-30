@@ -54,7 +54,7 @@ import { knownUnlisted, notListed } from '../trading/listed';
 import { ALGO_MENU, menuName, type UiKind } from './algo/menu';
 import { AlgoIcon } from './algo/AlgoIcon';
 import type { AlgoTicketHandle, AlgoTicketState } from './algo/AlgoTicket';
-import { DASH, USD_WHOLE_FROM, fmt, fmtPrice, fmtQty, fmtQuote, num, pick, precisionOf, shortAddr, coinLabel } from '../format';
+import { DASH, fmt, fmtExactQuote, fmtPrice, fmtQty, fmtQuote, num, pick, precisionOf, shortAddr, coinLabel } from '../format';
 import { useMask } from '../privacy';
 import { checkStopAgainstLiquidation, estimateLiquidationPrice } from '../risk';
 import { exitEntryFor } from './exitEntry';
@@ -103,7 +103,8 @@ interface Props {
   /** Address the backend's unlocked key actually signs as - drives every WRITE. */
   signingAddress?: string | null;
   price: string;
-  onPrice: (p: string) => void;
+  /** 'snap': the ticket put the same price on the market's tick - not a price the user chose. */
+  onPrice: (p: string, how?: 'snap') => void;
   lastPrice?: string;
   onPlaced: () => void;
 }
@@ -932,7 +933,7 @@ export function OrderEntry({
   useEffect(() => {
     if (!sym?.tickSize || price === '') return;
     const next = tickInput(price, sym.tickSize);
-    if (next !== price) onPrice(next);
+    if (next !== price) onPrice(next, 'snap');
   }, [price, sym?.tickSize, onPrice]);
 
   /* An algo is sized and valued like a market order (at the last price); its own rules price each child. */
@@ -2657,19 +2658,3 @@ const SwapIcon = () => (
       strokeLinecap="round" strokeLinejoin="round" />
   </svg>
 );
-
-/**
- * An exact decimal string as a quote value: grouped, at least two decimals,
- * every further decimal it really has (trailing zeros dropped).
- */
-function fmtExactQuote(v: string, quoteCoin: string | undefined | null): string {
-  const n = Number(v);
-  // Five figures and up: no cents. The exact-decimal path below is for the
-  // smaller notionals, where a fraction is the difference between two orders.
-  if (Number.isFinite(n) && Math.abs(n) >= USD_WHOLE_FROM) return fmtQuote(n, quoteCoin, 0);
-  const neg = v.startsWith('-');
-  const [w = '0', f = ''] = (neg ? v.slice(1) : v).split('.');
-  const frac = f.replace(/0+$/, '').padEnd(2, '0');
-  const body = `${w.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}.${frac}`;
-  return fmtQuote(0, quoteCoin).replace(/0\.00/, `${neg ? '−' : ''}${body}`);
-}

@@ -83,6 +83,20 @@ other typed data) is refused with 4100 and recorded:
 `wallet.log` / `wallet.since(mark)` say what was asked and how it was answered; a kind in `wallet.reject` is
 answered as a user's Reject (4001), so a flow can be walked to the wallet without anything being signed.
 
+## The fake SoDEX account (`sodexFake.ts`, `trade.ts`)
+
+For the specs that need trading enabled without funds: `fakeSodexAccount(ctx, address)` routes SoDEX's trading
+gateway (`mainnet-gw` / `testnet-gw.sodex.dev`) in the browser context. **Every request that is not a GET is answered
+there (`route.fulfill`) and never forwarded**; reads about the wallet (account id, state, builder approvals, API keys,
+positions, open orders) come from a small in-memory account, all other reads (markets, books) from SoDEX. Each write
+is recorded with its headers and decoded body, and `signer(w)` recovers who signed it from the same EIP-712 digest
+SoDEX checks. A key registration or builder approval the wallet signed is listed back, as SoDEX would. Options: a
+balance, a seeded position and a resting order, `rejectNextOrder(error)`. `enableTrading(env)` connects, presses
+Enable trading and answers the terms and the builder-fee dialog; `placeViaReview` presses Place. The wallet is still a
+throwaway key SoDEX has never seen, so a write that got past the route would be refused there too.
+
+Coverage of every control against these suites, and what only real money shows: `docs/COVERAGE-UI.md`.
+
 ## The test bridge (`window.__vsTest`, `src/testBridge.ts`)
 
 Dev only: `main.tsx` imports it inside `if (import.meta.env.DEV)`, which a production build drops together with
@@ -112,6 +126,10 @@ registered it). Real algos start on a dev server only for the wallets in `VITE_L
 | `algoTicket.spec.ts` | all 14 kinds in the menu, each opens its settings (Order, Runs on, Summary); ValueDesk executor is the default run place ("not set up" without a wallet), this browser and self-hosted can be picked; practice in this browser needs no wallet, real asks for one; the exits switch; a practice TWAP started by the Summary's slide (a slide short of the end starts nothing) shows in the Algos tab, and the bridge pauses, resumes and cancels it; the bridge starts the same spec on its own and refuses it live |
 | `notices.spec.ts` | the unread mark and reading it; View > Grade (all, warnings + errors, errors), View > About (algos + copies, account, other), both together, "Nothing for this view."; the View is kept across a reload and Reset clears it |
 | `copySetup.spec.ts` | the copy window's rules (live until Paper is picked) and run places (ValueDesk executor by default, this browser, self-hosted) with their own steps; the executor sign-in is one `session` signature and a rejection changes nothing; the copy terms take four statements, then ValueDesk's terms and the copy terms, one signature each; without a SoDEX account the fee and key stop at "deposit first" before the wallet is asked anything; a paper copy in this browser needs no fee and no key, signs nothing to start, and the bridge sees, pauses and stops it |
+| `orderFlow.spec.ts` | with trading enabled on the fake SoDEX account (below): Enable trading signs ValueDesk's terms, the builder fee and one trading key (both engines); limit, market, stop-market, stop-limit, a TP/SL bracket and a spot order go out as the review shows them - each signed body decoded, its signer the registered key, the builder within the approval; the liquidation acknowledgement, Back to ticket, "don't show again", a rejection inside an accepted batch, leverage and margin-mode changes, MAX and % from a balance, USDC sizing, the exact Order value; refusals that sign nothing |
+| `accountActions.spec.ts` | the fake account seeded with a position and a resting order: Close (asked first, one reduce-only market sell), the position TP/SL sheet (wrong side refused, two reduce-only stops), Cancel and Cancel all on open orders |
+| `algoFlow.spec.ts` | every kind started as a practice run from its own fields, the spec the engine got checked field by field; refusals (no amount, a field out of range in its own units, an iceberg without a visible size, a real run with real algos off); the Algos table's Pause, Resume, Size, ID chip, Open, Cancel, Cancel all and its tabs; a practice Fill fast to its end and its notice in the bell; every preview; phone width |
+| `copyFlow.spec.ts` | every rule of the copy window as the copy runs with it (sizing modes, limits, behaviour, risk controls, coin lists, margin, ask-each-trade, the amount), its refusals in their own units, counter-trade; Portfolio > My copies > Manage copies: Pause, Resume, Activity, Stop (asked first), Stop all |
 | `staleBuild.spec.ts` | a part missing from the build (its module answers 404): one retry, one reload, then the note "A new version of ValueDesk is out" with a Reload button, not the error boundary; a tab running an algo is not reloaded: the note at once, and the "update held" banner names what a reload would stop |
 
 Against the dev web the "ValueDesk executor" is the local one (127.0.0.1:8799 behind Vite's `/api/copy`

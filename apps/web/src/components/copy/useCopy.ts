@@ -19,7 +19,7 @@ import { simulate, toSimFills, type Reconstruction, type SimResult } from './sim
 import { checkSettings, type CopySettings } from '@copy-engine';
 import { readiness, startCopy as startLiveCopy, useLiveCopy, type CopyModeId, type LiveCopy } from '../../copy/live';
 import {
-  DEFAULT_SETUP, COPY_BUILDER_TENTHS_BPS, normaliseSetup, parseSetup, readTarget, toCopySettings, windowStart,
+  DEFAULT_SETUP, COPY_BUILDER_TENTHS_BPS, copyErrorInWords, normaliseSetup, parseSetup, readTarget, toCopySettings, windowStart,
   isAddress, type ParsedSetup, type SetupState,
 } from './setup';
 
@@ -312,7 +312,8 @@ export function useCopyContext({ address, provider, onScan }: CopyPageProps): Co
     if (!leader || (venue !== 'sodex' && venue !== 'hyperliquid')) return { settings: null as CopySettings | null, errors: leader ? ['Copies follow SoDEX and Hyperliquid traders only.'] : [] };
     if (Object.keys(parsed.errors).length) return { settings: null, errors: Object.values(parsed.errors) as string[] };
     const r = checkSettings(toCopySettings(parsed, setup, { venue, address: leader }));
-    return { settings: r.settings, errors: Object.values(r.errors) as string[] };
+    // In the window's units (percent, dollars), not the engine's fractions (setup.ts copyErrorInWords).
+    return { settings: r.settings, errors: Object.entries(r.errors).map(([k, v]) => copyErrorInWords(k, v as string)) };
   }, [leader, venue, parsed, setup]);
 
   const openSetup = useCallback((start = false) => { setSetupStarts(start); setSetupOpen(true); }, []);

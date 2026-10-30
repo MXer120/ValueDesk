@@ -264,9 +264,15 @@ export const cond = (symbol: string, over: Partial<CondDraft> = {}): CondDraft =
   type: 'price', symbol, source: 'mark', op: 'below', dir: 'either', value: '', pct: '1', windowMin: '5', bps: '10', usd: '1000000', other: 'BTC-USD', inMin: '60', pos: 'flat', ...over,
 });
 
+/**
+ * A new basket's two legs. $200 each: a default basket works each market in 10 randomised
+ * swarm clips, and at $100 those were about $10 each - the smaller half under SoDEX's $10
+ * minimum, so an untouched basket could not start ("4 of the 10 clips would be under...").
+ */
+export const BASKET_LEG_USD = '200';
 export const legs = (symbol: string, side: 'buy' | 'sell'): LegDraft[] => [
-  { symbol, side, usd: '100' },
-  { symbol: symbol === 'ETH-USD' ? 'BTC-USD' : 'ETH-USD', side: side === 'buy' ? 'sell' : 'buy', usd: '100' },
+  { symbol, side, usd: BASKET_LEG_USD },
+  { symbol: symbol === 'ETH-USD' ? 'BTC-USD' : 'ETH-USD', side: side === 'buy' ? 'sell' : 'buy', usd: BASKET_LEG_USD },
 ];
 
 export const DEFAULT: Draft = {

@@ -9,7 +9,7 @@ import {
   NUM_STYLE_DEFAULT, fmtDecimalString, fmtFixed, fmtNum, fmtPlain, getNumStyle, localize, parseNumInput,
   setNumStyle, subscribeNumStyle, toInputText, type NumStyle,
 } from './numStyle';
-import { fmt, fmtBalance, fmtPct, fmtPrice, fmtQuote, fmtUsd } from './format';
+import { fmt, fmtBalance, fmtExactQuote, fmtPct, fmtPrice, fmtQuote, fmtUsd } from './format';
 
 const NBSP = ' ';
 
@@ -157,4 +157,21 @@ test('every parsed value is machine format: "." decimal, no grouping', () => {
       if (r.ok) assert.match(r.value, /^-?\d+(\.\d+)?$/, `${t} in ${style} -> ${r.value}`);
     }
   }
+});
+
+test('the order value (fmtExactQuote) follows the setting: not "$0,00" in the default format', () => {
+  // The order ticket's Order value: price x size as an exact decimal string. It patched the "0.00"
+  // of fmtQuote(0), which the default format writes "0,00": every order under $10,000 read "$0,00".
+  setNumStyle('dot-comma');
+  assert.equal(fmtExactQuote('46.238', 'vUSDC'), '$46,238');
+  assert.equal(fmtExactQuote('1052.6375', 'USDC'), '$1.052,6375');
+  assert.equal(fmtExactQuote('8.5', 'USDC'), '$8,50');
+  assert.equal(fmtExactQuote('-12.3', 'USDC'), '−$12,30');
+  assert.equal(fmtExactQuote('125000.75', 'USDC'), '$125.001', 'five figures and up: no cents');
+  assert.equal(fmtExactQuote('2.5', 'BTC'), '2,50 BTC');
+  setNumStyle('comma-dot');
+  assert.equal(fmtExactQuote('1052.6375', 'USDC'), '$1,052.6375');
+  setNumStyle('space-comma');
+  assert.equal(fmtExactQuote('1052.6375', 'USDC'), `$1${NBSP}052,6375`);
+  setNumStyle('dot-comma');
 });
