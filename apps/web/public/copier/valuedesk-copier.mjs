@@ -11741,6 +11741,7 @@ var RECENT_ORDERS_MS = 10 * 6e4;
 var FILLS_SLACK_MS = 6e4;
 var OUTSIDE_NO_FILL_MS = 15 * 6e4;
 var OWN_FILL_TRUST_MS = 12e4;
+var LEVERAGE_TRUST_MS = 6e4;
 var STOP_PRINTS_MS = 1e4;
 var STOP_PRICE_TOLERANCE = 3e-3;
 var NO_POSITION = /position not found|no position|nothing to reduce/i;
@@ -12823,12 +12824,13 @@ var CopyRuntime = class {
     const k = `${s.owner}|${market.name}`;
     const want = { leverage, margin: s.settings.marginMode };
     const had = this.leverageSet.get(k);
-    if (had && had.leverage === want.leverage && had.margin === want.margin) return true;
+    const fresh = had && (this.stateOf(s).owned[market.name] || Date.now() - had.at < (this.host.leverageTrustMs ?? LEVERAGE_TRUST_MS));
+    if (had && fresh && had.leverage === want.leverage && had.margin === want.margin) return true;
     if (this.followers.get(s.owner)?.positions[market.name] && !this.stateOf(s).owned[market.name]) return true;
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
         await sink.setLeverage(s.accountId, market, leverage, s.settings.marginMode);
-        this.leverageSet.set(k, want);
+        this.leverageSet.set(k, { ...want, at: Date.now() });
         return true;
       } catch (e) {
         this.host.log.warn("copy: leverage not set", { owner: s.owner, symbol: market.name, leverage, attempt, error: String(e) });
@@ -16277,10 +16279,10 @@ var AlgoRuntime = class {
     const leverage = ceiling !== null ? Math.min(s.leverage ?? ceiling, ceiling) : s.leverage;
     const lev = leverage !== null ? Math.min(leverage, m.maxLeverage) : null;
     const want = lev !== null ? `${lev}|${s.marginMode ?? "cross"}` : null;
-    if (sink && opening && lev !== null && this.leverageSet.get(`${a.owner}|${m.name}`) !== want) {
-      this.leverageSet.set(`${a.owner}|${m.name}`, want);
+    if (sink && opening && lev !== null && this.leverageSet.get(`${a.id}|${m.name}`) !== want) {
+      this.leverageSet.set(`${a.id}|${m.name}`, want);
       await sink.setLeverage(a, m, lev, s.marginMode ?? "cross").catch((e) => {
-        this.leverageSet.delete(`${a.owner}|${m.name}`);
+        this.leverageSet.delete(`${a.id}|${m.name}`);
         this.event(a, "error", `Leverage not set: ${e instanceof Error ? e.message : String(e)}`);
       });
     }
