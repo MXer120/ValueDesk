@@ -365,6 +365,15 @@ export class WebBridgeDriver implements BrowserDriver {
     return this.call<ActivityEntry[]>('copier.events', [id, limit]);
   }
 
+  /** The "copy this trade?" prompts waiting for an answer, and the answer (copier.confirms / answer). */
+  copyConfirms(): Promise<Array<{ id: string; subId: string; symbol: string; expiresAt: number }>> {
+    return this.call('copier.confirms');
+  }
+
+  async answerCopyConfirm(id: string, yes: boolean): Promise<void> {
+    await this.call('copier.answer', [id, yes]);
+  }
+
   /** The kill switch for algos, every copy stopped and closed: what the page has (nothing, when it is not open). */
   async stopEverything(): Promise<void> {
     if (!(await this.ready())) return;

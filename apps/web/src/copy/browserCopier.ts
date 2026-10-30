@@ -124,7 +124,7 @@ class BrowserCopier {
   private listeners = new Set<() => void>();
   private channel: BroadcastChannel | null = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel(CHANNEL) : null;
   private waiting = new Map<string, { resolve: () => void; reject: (e: Error) => void }>();
-  private confirmResolvers = new Map<string, (yes: boolean) => void>();
+  private confirmResolvers = new Map<string, (yes: boolean | 'timeout') => void>();
   private poll: ReturnType<typeof setInterval> | null = null;
   private publishTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -489,20 +489,21 @@ class BrowserCopier {
 
   /* ------------------------------------------------------- confirmation ----- */
 
-  private askConfirm(sub: Subscription, intents: Intent[], event: LeaderEvent): Promise<boolean> {
+  private askConfirm(sub: Subscription, intents: Intent[], event: LeaderEvent): Promise<boolean | 'timeout'> {
     const id = randomId('q');
     const item: PendingConfirm = { id, sub, intents, event, expiresAt: Date.now() + CONFIRM_MS };
     this.confirms = [...this.confirms, item];
     this.emit();
-    return new Promise<boolean>((resolve) => {
-      const done = (yes: boolean) => {
+    return new Promise<boolean | 'timeout'>((resolve) => {
+      const done = (yes: boolean | 'timeout') => {
         if (!this.confirmResolvers.delete(id)) return;
         this.confirms = this.confirms.filter((c) => c.id !== id);
         this.emit();
         resolve(yes);
       };
       this.confirmResolvers.set(id, done);
-      setTimeout(() => done(false), CONFIRM_MS);
+      // Unanswered: the copy's activity says "not confirmed in time", not that the follower declined.
+      setTimeout(() => done('timeout'), CONFIRM_MS);
     });
   }
 

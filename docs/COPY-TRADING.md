@@ -96,14 +96,16 @@ limit are unchanged; the leader's own books (positions, the leader curve) stay r
   (unless "copy existing"); a market the follower holds by hand is left alone.
 - Stop-loss / take-profit: copier-side at the marks AND as SoDEX position stops
   (reduce-only, mark trigger) so they hold while no copier runs; drawdown stop
-  halts the copy.
+  halts the copy. A change of the stop-loss, take-profit, leverage or region
+  places the SoDEX stops again at once (one turned off is cancelled).
 - A live copy is `blocked` (and resumes by itself) without a registered key, a
   builder approval of at least 0.025%, or an allowed region. The region is checked
   first, without SoDEX, and again on every leader change, so a failed SoDEX read
   never leaves a blocked region copying.
 - "Ask me each time" needs a copier that can ask (the browser): on the hosted or a
   self-hosted executor a new copy with it starts `blocked` with that reason, and
-  changing a running copy to it is refused.
+  changing a running copy to it is refused. In the browser a trade nobody answers
+  within 60 s is not sent, and the activity says "Not confirmed in time".
 - A `blocked` or `halted` copy places nothing new but still follows the leader's
   reductions and closes (reduce-only), and its stop-loss / take-profit / drawdown
   guards keep running.

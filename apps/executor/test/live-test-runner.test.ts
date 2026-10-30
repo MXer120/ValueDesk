@@ -406,17 +406,17 @@ test('targets: --target takes self, hosted or browser; self can do all but close
 test('targets: a scenario that restarts the executor declares it, and is skipped (with why) exactly where the target cannot', () => {
   const restarts = CATALOGUE.filter((s) => s.run.toString().includes('t.restart('));
   const fees = CATALOGUE.filter((s) => s.section === 'fee').map((s) => s.id);
-  assert.deepEqual(restarts.map((s) => s.id).sort(), ['copy.restart', 'iceberg.restart', 'scale.restart', 'twap.restart', ...fees].sort(), 'the fee scenarios restart it so it forgets the volume it holds');
+  assert.deepEqual(restarts.map((s) => s.id).sort(), ['copy.restart', 'copym.restart-close', 'iceberg.restart', 'scale.restart', 'twap.restart', ...fees].sort(), 'the fee scenarios restart it so it forgets the volume it holds');
   for (const s of CATALOGUE) assert.equal(s.needs?.includes('restart') ?? false, restarts.includes(s), `${s.id} declares needs: ['restart'] exactly when it restarts`);
   const tabs = CATALOGUE.filter((s) => s.run.toString().includes('t.closeTab('));
-  assert.deepEqual(tabs.map((s) => s.id), ['twap.tab-close']);
+  assert.deepEqual(tabs.map((s) => s.id).sort(), ['copym.tab-close', 'twap.tab-close']);
   for (const s of CATALOGUE) assert.equal(s.needs?.includes('tabClose') ?? false, tabs.includes(s), `${s.id} declares needs: ['tabClose'] exactly when it closes the tab`);
   const imports = CATALOGUE.filter((s) => s.run.toString().includes('importKey('));
   assert.deepEqual(imports.map((s) => s.id), ['setup.key-import']);
   for (const s of CATALOGUE) assert.equal(s.needs?.includes('keyImport') ?? false, imports.includes(s), `${s.id} declares needs: ['keyImport'] exactly when it imports a key`);
   for (const t of ['self', 'hosted'] as const) {
     assert.deepEqual(CATALOGUE.filter((s) => cannotRun(s, t) && !tabs.includes(s)).map((s) => s.id).sort(), t === 'self' ? [] : restarts.map((s) => s.id).sort());
-    assert.match(cannotRun(tabs[0]!, t) ?? '', new RegExp(`the ${t} target cannot close the browser tab that runs the algos`));
+    for (const tab of tabs) assert.match(cannotRun(tab, t) ?? '', new RegExp(`the ${t} target cannot close the browser tab that runs the algos`));
   }
   assert.match(cannotRun({ needs: ['restart'] }, 'hosted') ?? '', /the hosted target cannot kill the executor and start it again on the same data/);
   // The browser reloads for a restart: it skips only what needs the runner's fee stub, and the key import.
@@ -670,7 +670,7 @@ test('hash per target: self\'s is what it was before targets; hosted adds the re
 
 test('leader venue: every copy scenario runs with either leader; the Hyperliquid-only ones are skipped with a SoDEX leader, with why', () => {
   const hlOnly = CATALOGUE.filter((s) => s.leaderVenue === 'hyperliquid').map((s) => s.id).sort();
-  assert.deepEqual(hlOnly, ['copy.hl-follow', 'copy.hl-k-prefix', 'copy.hl-not-on-sodex', 'copy.hl-slices']);
+  assert.deepEqual(hlOnly, ['copy.hl-follow', 'copy.hl-k-prefix', 'copy.hl-not-on-sodex', 'copy.hl-slices', 'copym.hl-different-asset']);
   for (const s of CATALOGUE) {
     assert.equal(leaderSkip(s, 'hyperliquid'), null, `${s.id} runs with a Hyperliquid leader`);
     assert.equal(leaderSkip(s, 'sodex') !== null, hlOnly.includes(s.id), `${s.id} with a SoDEX leader`);
