@@ -1651,6 +1651,18 @@ export class AlgoRuntime {
       if (how === 'take') return this.work(a, m, q, mk, { due: total, late: total, total, exec: { style: 'taker', slippageBps: 50, offsetTicks: 0, chaseTicks: 1, makerShare: 0.5 }, tag: 'take the rest' });
       if (how === 'rest') {
         const c = live.find((x) => x.tif !== 'ioc');
+        // Time ran out in the middle of a re-price: wait for the cancel to settle, then leave the rest at the
+        // price it would have gone back at - never end with nothing resting when the trader chose "rest".
+        if (c && (c.state !== 'open' || c.cancelling)) return;
+        if (!c && !a.k.restSent && !this.isDone(a, m)) {
+          const price = makerPrice(s.side, q, s.offsetTicks, s.offsetBps, m, cap);
+          const qty = floorStep(Math.min(total - a.filled, maxOrderQty(m, price)), m);
+          if (qty >= minChildQty(m, price)) {
+            a.k.restSent = true;
+            await this.send(a, m, [{ side: s.side, price, quantity: qty, tif: 'gtx', tag: 'left resting' }]);
+            return;
+          }
+        }
         if (c) c.tag = 'left resting';
         return this.end(a, 'expired', c ? `${why}: left resting at ${c.price} on SoDEX, as you chose.` : `${why}.`, { keep: c ? [c.clOrdID] : [] });
       }

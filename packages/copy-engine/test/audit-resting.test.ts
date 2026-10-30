@@ -853,6 +853,28 @@ test('chase: on timeout "rest" leaves the order on SoDEX (and does not cancel it
   assert.ok(near(r.rt.get(a.id)!.filled, 0.001), 'its fills still count');
 });
 
+test('chase: time up right after a re-price cancel, "rest" still leaves the order on SoDEX (at the price it would go back at)', async () => {
+  // Live 2026-10-30 (mx.chase.buy-rest, dry on self): the chase re-priced every 2 s, the time ran out between
+  // the cancel and the new order, and it ended with nothing resting.
+  const r = await rig();
+  const a = await add(r, { kind: 'chase', quantity: '0.002', timeoutMs: 5_000, minRepriceMs: 250, onEnd: 'rest' });
+  await step(r, a.id);
+  r.market.set('BTC-USD', 60_005, 60_015);
+  await step(r, a.id, 4_000);
+  assert.equal(r.sink.cancelled.length, 1, 're-priced: the first order is cancelled');
+  assert.equal(r.sink.resting.size, 0);
+  await step(r, a.id, 1_000);
+  await step(r, a.id, 500);
+  const x = r.rt.get(a.id)!;
+  assert.equal(x.status, 'expired');
+  assert.equal(r.sink.resting.size, 1, 'one order left resting');
+  const left = [...r.sink.resting.values()][0]!;
+  assert.deepEqual([left.price, left.quantity, left.tif], ['60005', '0.002', 'gtx']);
+  assert.match(x.statusReason ?? '', /left resting at 60005/);
+  await step(r, a.id, 1_000);
+  assert.equal(r.sink.cancelled.length, 1, 'and it is not cancelled after the end');
+});
+
 test('chase: on timeout "take" cancels the resting order first, then takes within the limit price', async () => {
   const r = await rig();
   const a = await add(r, { kind: 'chase', quantity: '0.002', timeoutMs: 5_000, onEnd: 'take', limitPrice: 60_020 });
