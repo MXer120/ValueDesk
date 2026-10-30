@@ -32,6 +32,11 @@ beforeEach(() => {
 });
 
 const Part = () => null;
+/** Wait (up to 2 s) for `cond`: on a busy machine the retry's timer can come after a fixed few ms. */
+async function until(cond: () => boolean, ms = 2000): Promise<void> {
+  const end = Date.now() + ms;
+  while (!cond() && Date.now() < end) await new Promise((r) => setTimeout(r, 5));
+}
 
 test('every browser\'s words for a file a release removed are a stale chunk; other errors are not', () => {
   for (const words of [
@@ -83,14 +88,14 @@ test('an error that is not a missing file is thrown at once, without a retry; a 
 test('a stale chunk twice reloads once; asked again a minute later (still stale) it reloads again - never a loop inside the minute', async () => {
   const gone = () => Promise.reject(new TypeError('Failed to fetch dynamically imported module: /assets/x.js'));
   void loadChunk(gone);
-  await new Promise((r) => setTimeout(r, 5));
+  await until(() => reloads > 0);
   assert.equal(reloads, 1);
   clock += 30_000;
   assert.equal((await loadChunk(gone)).default, StaleBuild, 'within the minute: the note');
   assert.equal(reloads, 1);
   clock += 31_000;
   void loadChunk(gone);
-  await new Promise((r) => setTimeout(r, 5));
+  await until(() => reloads > 1);
   assert.equal(reloads, 2);
   assert.equal((await loadChunk(async () => ({ default: Part }))).default, Part, 'a part that loads is the part');
 });

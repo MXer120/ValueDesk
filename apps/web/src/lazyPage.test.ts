@@ -32,6 +32,11 @@ beforeEach(() => {
 
 const Hello = (p: { name: string }) => `hello ${p.name}` as unknown as JSX.Element;
 const isThenable = (x: unknown): x is PromiseLike<unknown> => !!x && typeof (x as { then?: unknown }).then === 'function';
+/** Wait (up to 2 s) for `cond`: on a busy machine the retry's timer can come after a fixed few ms. */
+async function until(cond: () => boolean, ms = 2000): Promise<void> {
+  const end = Date.now() + ms;
+  while (!cond() && Date.now() < end) await new Promise((r) => setTimeout(r, 5));
+}
 
 /** Render once: the element it returns, or what it threw. */
 function render<P extends object>(Page: (p: P) => unknown, props: P): { el?: unknown; thrown?: unknown } {
@@ -186,7 +191,7 @@ test('a part of a page from an older build (AlgoTable after a release): one retr
   assert.equal(once.default, Hello, 'a blip: the retry loads it');
   assert.equal(reloads, 0);
   void loadChunk(gone);
-  await new Promise((r) => setTimeout(r, 5));
+  await until(() => reloads > 0);
   assert.equal(reloads, 1, 'gone twice: the tab reloads to the current build');
   assert.equal(await Promise.race([loadChunk(gone).then(() => 'settled'), new Promise((r) => setTimeout(() => r('waiting'), 20))]), 'waiting', 'while it reloads, a part asked for waits');
   lazyPageEnv.reloadingAt = 0; // the page that loaded after it: its own module state
