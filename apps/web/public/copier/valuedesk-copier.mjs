@@ -15669,6 +15669,16 @@ var AlgoRuntime = class {
       if (how === "take") return this.work(a, m, q, mk2, { due: total, late: total, total, exec: { style: "taker", slippageBps: 50, offsetTicks: 0, chaseTicks: 1, makerShare: 0.5 }, tag: "take the rest" });
       if (how === "rest") {
         const c = live.find((x) => x.tif !== "ioc");
+        if (c && (c.state !== "open" || c.cancelling)) return;
+        if (!c && !a.k.restSent && !this.isDone(a, m)) {
+          const price3 = makerPrice(s.side, q, s.offsetTicks, s.offsetBps, m, cap);
+          const qty3 = floorStep(Math.min(total - a.filled, maxOrderQty(m, price3)), m);
+          if (qty3 >= minChildQty(m, price3)) {
+            a.k.restSent = true;
+            await this.send(a, m, [{ side: s.side, price: price3, quantity: qty3, tif: "gtx", tag: "left resting" }]);
+            return;
+          }
+        }
         if (c) c.tag = "left resting";
         return this.end(a, "expired", c ? `${why}: left resting at ${c.price} on SoDEX, as you chose.` : `${why}.`, { keep: c ? [c.clOrdID] : [] });
       }
