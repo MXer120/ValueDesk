@@ -672,29 +672,31 @@ export const COPY_MATRIX_SCENARIOS: Scenario[] = [
   cm('copym.drawdown', 'The drawdown stop fires on SoDEX prices (1% of a $10 copy)', 'the copy\'s equity falls 1% under its peak: it closes its position (drawdown-stop, reduce-only) and halts with an error notice; a halted copy copies no add; resumed it runs again', {
     slow: true,
     // What takes time is the market: the copy holds up to 4U on $10, so 1% of it is a move of 0.2-0.5% against it.
+    // So it trades the market that moved most when the run started (t.volatile): 20 quiet BTC minutes did not do it (2026-10-30).
     timeoutMs: 24 * MIN,
     cost: (U) => ({ takerUsd: 8 * U, makerUsd: 0, peakUsd: 4 * U, leaderTakerUsd: 4 * U, leaderPeakUsd: 2 * U }),
     async run(t) {
       const lev = t.expectedLeverage(5);
       const amount = Math.floor(Math.min(4 * t.U, lev * 10 * 0.95));
-      const c = await t.subscribe({ sizingMode: 'fixedNotional', fixedNotionalUsd: amount, allocationUsd: 10, maxLeverage: lev, drawdownStopPct: 0.01 });
+      const sym = t.volatile.name;
+      const c = await t.subscribe({ sizingMode: 'fixedNotional', fixedNotionalUsd: amount, allocationUsd: 10, maxLeverage: lev, drawdownStopPct: 0.01, assetAllow: [t.volatile.base] });
       const id = c.subscription.id;
-      t.note(`$${amount} at ${lev}x on a $10 copy: 1% of it is a ${((0.1 / amount) * 100).toFixed(2)}% move against it, less its fees`);
+      t.note(`$${amount} at ${lev}x on a $10 copy: 1% of it is a ${((0.1 / amount) * 100).toFixed(2)}% move against it, less its fees; on ${sym}`);
       await ready(t, id);
-      await t.leader({ buyUsd: t.U });
-      await t.expectFollowerUsd(amount, `the follower holds $${amount}`);
+      await t.leader({ buyUsd: t.U }, sym);
+      await t.expectFollowerUsd(amount, `the follower holds $${amount}`, { symbol: sym });
       await t.live('the drawdown stop halts the copy and closes it', async () => {
         await t.waitFor('the copy is halted by its drawdown stop', async () => ((await t.exec.copy(id)).subscription.status === 'halted' ? true : null), { timeoutMs: 20 * MIN, everyMs: 5_000, inconclusive: true });
-        await t.expectFollowerUsd(0, 'the halted copy is flat', { timeoutMs: 45_000 });
+        await t.expectFollowerUsd(0, 'the halted copy is flat', { timeoutMs: 45_000, symbol: sym });
         t.check((await legs(t, id)).includes('drawdown-stop'), 'closed by a drawdown-stop order');
         await noticeOf(t, id, 'halted', 'error');
-        await t.leader({ buyUsd: t.U });
+        await t.leader({ buyUsd: t.U }, sym);
         await skipped(t, id, 'halted');
-        await stillFlat(t, 'a halted copy copies no add', t.main.name, 0);
+        await stillFlat(t, 'a halted copy copies no add', sym, 0);
       });
       await t.exec.copyAct('resume', { id });
       await status(t, id, 'active');
-      await t.leader({ close: true });
+      await t.leader({ close: true }, sym);
     },
   }),
 

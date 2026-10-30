@@ -296,10 +296,11 @@ export const COPY_SCENARIOS: Scenario[] = [
     cost: (U) => ({ takerUsd: 2 * U, makerUsd: 0, peakUsd: U, leaderTakerUsd: 4 * U, leaderPeakUsd: 2 * U }),
     async run(t) {
       const lev = t.expectedLeverage(50);
-      const c = await t.subscribe({ sizingMode: 'fixedNotional', fixedNotionalUsd: t.U, maxLeverage: lev, stopLossPct: 0.01, takeProfitPct: 0.01 });
+      const sym = t.volatile.name;
+      // The run's copies allow only the main market's coin (harness subscribe): this one trades the volatile market's.
+      const c = await t.subscribe({ sizingMode: 'fixedNotional', fixedNotionalUsd: t.U, maxLeverage: lev, stopLossPct: 0.01, takeProfitPct: 0.01, assetAllow: [t.volatile.base] });
       t.note(`at ${lev}x a 1% move of the margin is ${(1 / lev).toFixed(2)}% of the price`);
       await ready(t, c.subscription.id);
-      const sym = t.volatile.name;
       t.note(`on ${sym}, the market that moved most`);
       await t.leader({ buyUsd: t.U }, sym);
       await t.expectFollowerUsd(t.U, 'the follower opened', { symbol: sym });
