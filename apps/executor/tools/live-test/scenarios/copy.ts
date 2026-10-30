@@ -97,8 +97,17 @@ const OFFSITE_SLACK_MS = 1_000;
  * can print as several) paired with the last leader fill before it.
  */
 async function copyLatencies(t: T): Promise<number[]> {
-  const leader = (await t.leaderFills()).map((f) => f.time).sort((a, b) => a - b);
   const mine = (await t.account.fills(t.main.name)).filter((f) => f.clOrdID?.startsWith('vdc-'));
+  // SoDEX's trade history can lag (2026-10-30: the leader's fills not listed yet, so nothing was timed):
+  // read the leader's again until it lists at least one fill per copy order, for up to a minute.
+  const orders = new Set(mine.map((f) => f.orderId)).size;
+  const fills = await t
+    .waitFor('SoDEX lists the leader\'s fills', async () => {
+      const fs = await t.leaderFills();
+      return new Set(fs.map((f) => f.orderId)).size >= orders ? fs : null;
+    }, { timeoutMs: 60_000, everyMs: 5_000 })
+    .catch(() => t.leaderFills());
+  const leader = fills.map((f) => f.time).sort((a, b) => a - b);
   const slack = LATENCY[t.env.leaderVenue].pairSlackMs;
   const first = new Map<string, number>();
   for (const f of mine) first.set(f.orderId, Math.min(first.get(f.orderId) ?? Infinity, f.time));
