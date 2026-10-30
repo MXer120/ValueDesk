@@ -11940,6 +11940,10 @@ var CopyRuntime = class {
       this.dirty.add(id);
     }
     const next = { ...s, ...patch, updatedAt: Date.now() };
+    if (next.settings.approval !== "confirm" && this.stateOf(s).declined) {
+      delete this.stateOf(s).declined;
+      this.dirty.add(id);
+    }
     this.subs.set(id, next);
     await this.host.store.saveSubscription(next);
     await this.activity(next, { kind: "status", reason: "updated", detail: "Copy rules changed." });
@@ -12126,10 +12130,12 @@ var CopyRuntime = class {
       }
       if (answer !== true) {
         st.skips++;
+        (st.declined ??= {})[market.name] = Date.now();
         await this.activity(s, { kind: "skip", reason: answer === "timeout" ? "confirm-timeout" : "declined", symbol: market.name, leader });
         this.dirty.add(s.id);
         return;
       }
+      if (st.declined?.[market.name]) delete st.declined[market.name];
     }
     await this.execute(s, market, plan.intents, markOf(market.name) ?? e.price, leader, plannedAt);
     if (plan.skip && !QUIET_SKIPS.has(plan.skip)) await this.activity(s, { kind: "skip", reason: plan.skip, symbol: market.name, leader, detail });
@@ -12983,6 +12989,7 @@ var CopyRuntime = class {
       const expected = want.get(sym) ?? 0;
       if (expected !== 0 && expected === Math.sign(p0.size)) continue;
       if (inFlight[sym]) continue;
+      if (s.settings.approval === "confirm" && st.declined?.[sym]) continue;
       const lsyms = leaderSymbols.get(sym) ?? (l.venue === "sodex" ? [sym] : []);
       if (lsyms.some((x) => this.leaders.isMerging(l, x))) continue;
       const m = this.markets.get(sym);
