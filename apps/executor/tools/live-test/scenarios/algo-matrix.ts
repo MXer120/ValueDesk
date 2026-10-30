@@ -196,7 +196,8 @@ export const ALGO_MATRIX_SCENARIOS: Scenario[] = [
     async run(t) {
       const q = await t.quote();
       const far = await t.start({ kind: 'twap', quantity: await t.qty(t.U), durationMs: MIN, slices: 1, triggerPrice: t.tick(q.mark * 0.9, t.main.name, 'down'), exec: { style: 'taker', slippageBps: 20 } });
-      const later = await t.start({ kind: 'twap', quantity: await t.qty(t.U), durationMs: MIN, slices: 1, startAt: Date.now() + 40_000, exec: { style: 'taker', slippageBps: 20 } });
+      const startAt = Date.now() + 40_000;
+      const later = await t.start({ kind: 'twap', quantity: await t.qty(t.U), durationMs: MIN, slices: 1, startAt, exec: { style: 'taker', slippageBps: 20 } });
       await t.sleep(20_000);
       for (const x of [far, later]) {
         const v = await t.view(x.algo.id);
@@ -204,7 +205,10 @@ export const ALGO_MATRIX_SCENARIOS: Scenario[] = [
         t.check((await t.algoOrders(x.algo.id)).length === 0, `nothing of ${x.algo.id} on ${t.where}`);
       }
       const v = await t.waitAlgo(later.algo.id, 'the later TWAP started and is done', done, { timeoutMs: 90_000 });
-      t.check(v.algo.startedAt !== null && v.algo.startedAt >= later.algo.createdAt + 39_000 * (t.dry ? 0.5 : 1) - 5_000, 'it started at its time');
+      // The start time is the trader's (this machine's clock); the executor starts once its own clock reaches it.
+      // Against its own createdAt the wait looks shorter by however far the two clocks are apart (ValueDesk's ran
+      // 6-7 s ahead of this laptop's on 2026-10-30), so it is checked against the time it was given.
+      t.check(v.algo.startedAt !== null && v.algo.startedAt >= startAt - 1_000, `it started at its time (${v.algo.startedAt === null ? 'never' : `${Math.round((v.algo.startedAt - startAt) / 1000)} s after it`})`);
       await filledAsBooked(t, v);
       await t.exec.algoAct('cancel', far.algo.id);
       const f = await t.waitEnded(far.algo.id, 20_000);
