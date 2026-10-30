@@ -168,7 +168,10 @@ class Sink implements AlgoSink {
       this.up({ clOrdID: id, status: 'CANCELED', filledQty: r?.filled ?? 0, filledValue: (r?.filled ?? 0) * Number(r?.price ?? 0) });
     }
   }
-  async setLeverage(): Promise<void> {}
+  leverageCalls = 0;
+  async setLeverage(): Promise<void> {
+    this.leverageCalls++;
+  }
   async placeStops(_a: AlgoRecord, _m: unknown, stops: StopRequest[]): Promise<ChildResult[]> {
     this.stops.push(stops);
     for (const s of stops) this.up({ clOrdID: s.clOrdID, status: 'NEW' });
@@ -873,6 +876,20 @@ test('chase: time up right after a re-price cancel, "rest" still leaves the orde
   assert.match(x.statusReason ?? '', /left resting at 60005/);
   await step(r, a.id, 1_000);
   assert.equal(r.sink.cancelled.length, 1, 'and it is not cancelled after the end');
+});
+
+test('BUG live run 2026-10-30: each algo sets its leverage and margin mode at its first opening child, not trusting what an earlier algo on the market set (the follower may have changed it since)', async () => {
+  const r = await rig();
+  const a = await add(r, { kind: 'chase', quantity: '0.002', leverage: 2, marginMode: 'isolated' });
+  await step(r, a.id);
+  assert.equal(r.sink.leverageCalls, 1, 'the first algo sets it');
+  await step(r, a.id, 2_500);
+  assert.equal(r.sink.leverageCalls, 1, 'not again for its own next child');
+  await r.rt.cancel(a.id);
+  await settle();
+  const b = await add(r, { kind: 'chase', quantity: '0.002', leverage: 2, marginMode: 'isolated' });
+  await step(r, b.id);
+  assert.equal(r.sink.leverageCalls, 2, 'the next algo sets it again');
 });
 
 test('chase: on timeout "take" cancels the resting order first, then takes within the limit price', async () => {

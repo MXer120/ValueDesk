@@ -301,11 +301,12 @@ async function until(cond: () => boolean, ms = 3000): Promise<boolean> {
   return true;
 }
 
-function runtime(w: World, sinkFor: (s: Subscription) => OrderSink | null, extra: { store?: MemoryStore; confirm?: boolean } = {}) {
+function runtime(w: World, sinkFor: (s: Subscription) => OrderSink | null, extra: { store?: MemoryStore; confirm?: boolean; leverageTrustMs?: number } = {}) {
   const fetch = fakeFetch(w);
   const store = extra.store ?? new MemoryStore();
   const rt = new CopyRuntime({
     confirmGapMs: 0,
+    ...(extra.leverageTrustMs !== undefined ? { leverageTrustMs: extra.leverageTrustMs } : {}),
     store,
     sodex: new SodexClient({ network: 'mainnet', fetch }),
     hyperliquid: new HyperliquidClient(fetch),
@@ -600,6 +601,42 @@ test('BUG runtime (live): a failed leverage change is remembered as done and nev
     leaderBuys('1');
     assert.ok(await until(() => rec.placed.length === 2));
     assert.ok(rec.leverage() >= 2, `setLeverage was tried ${rec.leverage()} time(s); the first failed and the copy kept opening at the account's leverage`);
+  } finally {
+    await rt.stop();
+  }
+});
+
+test('BUG live run 2026-10-30: opening again from flat, the copy sets its leverage and margin mode again (the follower may have changed them meanwhile); adding to its own position it does not', async () => {
+  // liq.copy-follower on ValueDesk's executor: BTC was put back to 2x cross between two copies; the copier trusted the
+  // isolated it had set before and opened the copy on cross.
+  const w = world();
+  const rec = recordingSink();
+  const { rt } = runtime(w, () => rec.sink, { leverageTrustMs: 0 });
+  await rt.start();
+  try {
+    await rt.add(sub({}, { id: 'lev-again', country: 'DE' }));
+    await ready();
+    leaderBuys('1');
+    assert.ok(await until(() => rec.placed.length === 1));
+    assert.equal(rec.leverage(), 1, 'set before the first open');
+    // The copy's fills, as the stream shows them: its books hold the position.
+    const q = String(rec.placed[0]![0]!.quantity);
+    sodexWs().push(print('BUY', q, '80000', FOLLOWER_ID, 1002));
+    await wait(200);
+    leaderBuys('1');
+    assert.ok(await until(() => rec.placed.length === 2));
+    assert.equal(rec.leverage(), 1, 'an add to its own position: the mode is locked by the position, not sent again');
+    sodexWs().push(print('BUY', String(rec.placed[1]![0]!.quantity), '80000', FOLLOWER_ID, 1002));
+    await wait(200);
+    w.leader = [];
+    leaderSells('2');
+    assert.ok(await until(() => rec.placed.length === 3), 'closed with the leader');
+    sodexWs().push(print('SELL', String(rec.placed[2]![0]!.quantity), '80000', 1002, FOLLOWER_ID));
+    await wait(200);
+    w.leader = [{ s: 'BTC-USD', sz: '1', ep: '80000' }];
+    leaderBuys('1');
+    assert.ok(await until(() => rec.placed.length === 4), 'opened again');
+    assert.equal(rec.leverage(), 2, 'from flat again: leverage and margin mode set again before the open');
   } finally {
     await rt.stop();
   }

@@ -2277,11 +2277,14 @@ export class AlgoRuntime {
     const leverage = ceiling !== null ? Math.min(s.leverage ?? ceiling, ceiling) : s.leverage;
     const lev = leverage !== null ? Math.min(leverage, m.maxLeverage) : null;
     const want = lev !== null ? `${lev}|${s.marginMode ?? 'cross'}` : null;
-    if (sink && opening && lev !== null && this.leverageSet.get(`${a.owner}|${m.name}`) !== want) {
-      this.leverageSet.set(`${a.owner}|${m.name}`, want!);
+    // Per algo: each sets its leverage and margin mode at its first opening child. Shared by the wallet's algos on the
+    // market, one algo trusted what an earlier one set although the follower may have changed it since (the same
+    // live run as the copier's: an isolated position opened on cross, 2026-10-30).
+    if (sink && opening && lev !== null && this.leverageSet.get(`${a.id}|${m.name}`) !== want) {
+      this.leverageSet.set(`${a.id}|${m.name}`, want!);
       await sink.setLeverage(a, m, lev, s.marginMode ?? 'cross').catch((e) => {
         // Not set: the next opening child asks again.
-        this.leverageSet.delete(`${a.owner}|${m.name}`);
+        this.leverageSet.delete(`${a.id}|${m.name}`);
         this.event(a, 'error', `Leverage not set: ${e instanceof Error ? e.message : String(e)}`);
       });
     }

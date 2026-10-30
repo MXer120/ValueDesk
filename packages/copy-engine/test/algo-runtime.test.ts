@@ -695,8 +695,9 @@ test('a position condition: it fires on the position as SoDEX reports it, read i
   assert.equal(r.sink.all.length, 2);
 });
 
-test('leverage: a later algo on the same market asking another margin mode or leverage sends it again; the same one is not re-sent', async () => {
+test('leverage: every algo sends its leverage and margin mode at its first opening child, whatever an earlier algo on the market set', async () => {
   // Live run 2026-10-29: an isolated swarm after a cross algo on BTC-USD stayed cross - leverage was set once per market.
+  // Live run 2026-10-30: the same one is sent again too - the follower may have changed it on SoDEX between the algos.
   const r = await rig();
   const a = await add(r, { kind: 'twap', quantity: '0.002', durationMs: 120_000, slices: 2, leverage: 3, marginMode: 'cross', exec: { style: 'taker' } });
   await step(r, a.id);
@@ -706,8 +707,8 @@ test('leverage: a later algo on the same market asking another margin mode or le
   await step(r, c.id);
   const d = await add(r, { kind: 'twap', quantity: '0.002', durationMs: 120_000, slices: 2, leverage: 5, marginMode: 'isolated', exec: { style: 'taker' } });
   await step(r, d.id);
-  assert.deepEqual(r.sink.leverage, [3, 3, 5]);
-  assert.deepEqual(r.sink.margins, ['cross', 'isolated', 'isolated']);
+  assert.deepEqual(r.sink.leverage, [3, 3, 3, 5]);
+  assert.deepEqual(r.sink.margins, ['cross', 'isolated', 'isolated', 'isolated']);
 });
 
 test('region rules: a blocked region holds a live algo; the EEA 2x ceiling caps the leverage and the gross exposure', async () => {

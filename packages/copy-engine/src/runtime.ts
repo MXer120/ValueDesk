@@ -98,6 +98,8 @@ const FILLS_SLACK_MS = 60_000;
 const OUTSIDE_NO_FILL_MS = 15 * 60_000;
 /** How long the copier's own fill outweighs a disagreeing account read (SoDEX's reads can lag by tens of seconds). */
 const OWN_FILL_TRUST_MS = 120_000;
+/** How long a leverage and margin mode set from flat are taken as still SoDEX's (ensureLeverage). */
+const LEVERAGE_TRUST_MS = 60_000;
 /** The follower's unmatched closing prints within this long of the first are summed: SoDEX may fill one stop in several. */
 const STOP_PRINTS_MS = 10_000;
 /** How far (a fraction of the trigger) a print may sit on the near side of a stop's trigger and still be that stop's fill. */
@@ -130,6 +132,8 @@ export interface RuntimeHost {
   keyProblem?(sub: Subscription): Promise<string | null>;
   /** The pause between reads of SoDEX that confirm a change (confirm.ts CONFIRM_GAP_MS; tests pass 0). */
   confirmGapMs?: number;
+  /** How long a leverage and margin mode the copier set are taken as still SoDEX's where the copy holds nothing (LEVERAGE_TRUST_MS; tests pass 0). */
+  leverageTrustMs?: number;
   /**
    * The operator's emergency brake: while it returns a reason, a live copy sends
    * no order at all (it is asked before every batch, so it bites at once). Stops
@@ -266,7 +270,7 @@ export class CopyRuntime {
    * detach) have caught up, no leader change opens or adds there (process, execute).
    */
   private stopFired = new Map<string, { at: number; why: DetachReason }>();
-  private leverageSet = new Map<string, { leverage: number; margin: string }>();
+  private leverageSet = new Map<string, { leverage: number; margin: string; at: number }>();
   /**
    * `${subId}|${symbol}` -> a change outside the copier that reads agree on, held back because
    * SoDEX's trades showed no fill that made the position smaller: since when, and the read before
@@ -1419,13 +1423,17 @@ export class CopyRuntime {
     const k = `${s.owner}|${market.name}`;
     const want = { leverage, margin: s.settings.marginMode };
     const had = this.leverageSet.get(k);
-    if (had && had.leverage === want.leverage && had.margin === want.margin) return true;
+    // Taken as still set while the copy holds a position there (SoDEX keeps the mode of an open position) or for a
+    // minute: from flat, the follower may have changed it meanwhile (the ticket, sodex.com) - an isolated copy then
+    // opened on cross, the whole account behind it (live run 2026-10-30, liq.copy-follower on ValueDesk's executor).
+    const fresh = had && (this.stateOf(s).owned[market.name] || Date.now() - had.at < (this.host.leverageTrustMs ?? LEVERAGE_TRUST_MS));
+    if (had && fresh && had.leverage === want.leverage && had.margin === want.margin) return true;
     // SoDEX refuses a margin-mode change while a position is open; the leverage then stays as it is.
     if (this.followers.get(s.owner)?.positions[market.name] && !this.stateOf(s).owned[market.name]) return true;
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
         await sink.setLeverage(s.accountId, market, leverage, s.settings.marginMode);
-        this.leverageSet.set(k, want);
+        this.leverageSet.set(k, { ...want, at: Date.now() });
         return true;
       } catch (e) {
         this.host.log.warn('copy: leverage not set', { owner: s.owner, symbol: market.name, leverage, attempt, error: String(e) });
