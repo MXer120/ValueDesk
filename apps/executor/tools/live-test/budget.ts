@@ -95,6 +95,23 @@ export function pickMarket(candidates: Array<{ m: MarketInfo; book: BookSnapshot
   return scored[0]!;
 }
 
+/**
+ * The market that moves most: for the scenarios that need the market to reach a level (a take-profit firing). Among
+ * markets trading with a spread of at most `maxSpreadBps`, the one whose last minutes' one-minute ranges (high - low,
+ * over the close) average highest. A quiet BTC hour left the copy's 0.5% stop (the EEA's 2x) and a bracket's 4 bp
+ * take-profit untouched for 10-20 min, inconclusive again and again (2026-10-30); a market that moves settles them.
+ * Its tick must be fine too (at most `maxTickBps` of the price): on 1000PEPE-USD one tick is about 19 bp, so a level
+ * "4 bp away" rounds to a whole tick and the mark (15 bp under the ask there) had to rise 0.2% (2026-10-30).
+ */
+export function pickVolatile(candidates: Array<{ m: MarketInfo; book: BookSnapshot; candles: Array<{ h: number; l: number; c: number }> }>, maxSpreadBps = 3, maxTickBps = 1.5): { m: MarketInfo; rangeBps: number } | null {
+  const scored = candidates
+    .filter((c) => c.m.status === 'TRADING' && c.book.bid > 0 && c.book.ask > c.book.bid && halfSpreadFrac(c.book) * 2 * 10_000 <= maxSpreadBps && c.candles.length >= 5)
+    .filter((c) => (Number(c.m.tickSize) / ((c.book.bid + c.book.ask) / 2)) * 10_000 <= maxTickBps)
+    .map((c) => ({ m: c.m, rangeBps: (c.candles.reduce((a, k) => a + (k.h - k.l) / k.c, 0) / c.candles.length) * 10_000 }))
+    .sort((a, b) => b.rangeBps - a.rangeBps);
+  return scored[0] ?? null;
+}
+
 export function computeBudget(list: readonly Scenario[], i: BudgetInput): Budget {
   const hs = halfSpreadFrac(i.book);
   const maker = i.main.makerFee ?? i.main.takerFee;

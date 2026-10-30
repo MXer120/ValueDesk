@@ -79,6 +79,8 @@ export interface Env {
   orderFee: number | null;
   main: MarketInfo;
   second: MarketInfo;
+  /** The market that moved most at the run's start (pickVolatile): for scenarios that wait for a level to be reached. Absent: the main one. */
+  volatile?: MarketInfo;
   /** USD per child order: SoDEX's minimum plus headroom, so a price move during the scenario keeps it above the minimum. */
   childUsd: number;
   /** Shorter waits for a dry run. */
@@ -251,6 +253,14 @@ export class T {
   get second(): MarketInfo {
     return this.env.second;
   }
+  /** The market that moved most when the run started (the main one when none qualified). */
+  get volatile(): MarketInfo {
+    return this.env.volatile ?? this.env.main;
+  }
+  /** A test market by its name. */
+  market(symbol: string): MarketInfo {
+    return [this.main, this.second, this.volatile].find((m) => m.name === symbol) ?? this.second;
+  }
   get U(): number {
     return this.env.childUsd;
   }
@@ -312,7 +322,7 @@ export class T {
 
   /** Base quantity worth at least `usd` at the current touch (rounded UP to the step, so it never falls under). */
   async qty(usd: number, symbol = this.main.name): Promise<string> {
-    const m = symbol === this.main.name ? this.main : this.second;
+    const m = this.market(symbol);
     const q = await this.env.reads.quote(symbol);
     const step = Number(m.stepSize);
     const decimals = (m.stepSize.split('.')[1] ?? '').length;
@@ -325,7 +335,7 @@ export class T {
 
   /** A price snapped to the market's tick. */
   tick(price: number, symbol = this.main.name, mode: 'down' | 'up' | 'near' = 'near'): number {
-    const m = symbol === this.main.name ? this.main : this.second;
+    const m = this.market(symbol);
     const t = Number(m.tickSize);
     const k = price / t;
     const r = mode === 'down' ? Math.floor(k) : mode === 'up' ? Math.ceil(k) : Math.round(k);

@@ -24,7 +24,7 @@ import { loadConfig } from '../src/config.ts';
 import { ExecutorDb } from '../src/db.ts';
 import { Secrets } from '../src/secrets.ts';
 import { ExecutorService } from '../src/service.ts';
-import { computeBudget, formatBudget, pickMarket } from '../tools/live-test/budget.ts';
+import { computeBudget, formatBudget, pickMarket, pickVolatile } from '../tools/live-test/budget.ts';
 import { CATALOGUE } from '../tools/live-test/catalogue.ts';
 import { flatten, startDecision, type FlattenVenue, type VenueOrder } from '../tools/live-test/cleanup.ts';
 import { SodexReads, type FillInfo, type OrderInfo } from '../tools/live-test/exchange.ts';
@@ -331,6 +331,21 @@ test('budget: the cheapest market is the one with the lowest taker fee plus half
   ]);
   assert.equal(p.m.name, 'BTC-USD');
   assert.throws(() => pickMarket([{ m: MKT('BTC-USD', { status: 'HALT' }), book: { bid: 1, ask: 2 } }]));
+});
+
+test('the take-profit market: the one whose one-minute ranges average highest, among those trading with a tight spread', () => {
+  const k = (rangeFrac: number, n = 10) => Array.from({ length: n }, () => ({ h: 100 * (1 + rangeFrac), l: 100, c: 100 }));
+  const v = pickVolatile([
+    { m: MKT('SOL-USD', { tickSize: '0.01' }), book: { bid: 100, ask: 100.01 }, candles: k(0.002) },
+    { m: MKT('DOGE-USD', { tickSize: '0.01' }), book: { bid: 100, ask: 100.01 }, candles: k(0.004) },
+    { m: MKT('PUMP-USD', { tickSize: '0.01' }), book: { bid: 100, ask: 100.1 }, candles: k(0.02) }, // 10 bp wide: left out
+    { m: MKT('HYPE-USD', { status: 'HALT', tickSize: '0.01' }), book: { bid: 100, ask: 100.01 }, candles: k(0.05) }, // not trading
+    { m: MKT('SUI-USD', { tickSize: '0.01' }), book: { bid: 100, ask: 100.01 }, candles: k(0.05, 3) }, // too few candles
+    { m: MKT('1000PEPE-USD', { tickSize: '0.2' }), book: { bid: 100, ask: 100.01 }, candles: k(0.05) }, // a tick of 20 bp: left out
+  ]);
+  assert.equal(v?.m.name, 'DOGE-USD');
+  assert.ok(Math.abs(v!.rangeBps - 40) < 1e-6, `${v?.rangeBps}`);
+  assert.equal(pickVolatile([]), null, 'none: the run falls back to the main market');
 });
 
 test('budget: spent is fees + builder + half spread (+ the leader\'s fee and spread); peak margin is the largest scenario, not the sum', () => {

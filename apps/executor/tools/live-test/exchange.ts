@@ -173,6 +173,12 @@ export class SodexReads {
     return m;
   }
 
+  /** The last `limit` one-minute candles: high, low, close. */
+  async candles(symbol: string, limit = 30): Promise<Array<{ h: number; l: number; c: number }>> {
+    const rows = await this.client.get<Array<{ h: string; l: string; c: string }>>(`/api/v1/perps/markets/${symbol}/klines?interval=1m&limit=${limit}`);
+    return (rows ?? []).map((r) => ({ h: n(r.h), l: n(r.l), c: n(r.c) })).filter((r) => r.c > 0 && r.h >= r.l);
+  }
+
   /** Best bid and ask, the mid, and the mark. */
   async quote(symbol: string): Promise<{ bid: number; ask: number; mid: number; mark: number }> {
     const rows = await this.client.get<Array<{ symbol: string; bidPx: string; askPx: string }>>('/api/v1/perps/markets/bookTickers');

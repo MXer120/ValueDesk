@@ -40,15 +40,17 @@ export const DEP_GROUPS = {
     'packages/copy-engine/src/policy.ts',
     'packages/copy-engine/src/api.ts',
     'packages/copy-engine/src/orders.ts',
-    'packages/copy-engine/src/types.ts',
-    'packages/copy-engine/src/store.ts',
     'packages/copy-engine/src/index.ts',
     'apps/executor/src',
   ],
   /** Algo orders. */
-  algo: ['packages/copy-engine/src/algo', 'packages/copy-engine/src/oracle.ts', 'packages/copy-engine/src/priceGuard.ts'],
-  /** Copy trading. */
-  copy: ['packages/copy-engine/src/runtime.ts', 'packages/copy-engine/src/planner.ts', 'packages/copy-engine/src/feeds.ts', 'packages/copy-engine/src/settings.ts'],
+  algo: ['packages/copy-engine/src/algo', 'packages/copy-engine/src/oracle.ts', 'packages/copy-engine/src/priceGuard.ts', 'packages/copy-engine/src/store.ts'],
+  /**
+   * Copy trading. types.ts and store.ts are the copy's state and storage: the algo engine takes only types from types.ts,
+   * gone at run time (store.ts's structuredCopy it runs, so store.ts is in the algo group too) - so a change to a copy's state reruns the copy scenarios, not the algo ones (2026-10-30: one field
+   * added to SubState reran all 124 scenarios on two targets, 4.4 h, where the 44 copy ones were what it touched).
+   */
+  copy: ['packages/copy-engine/src/runtime.ts', 'packages/copy-engine/src/planner.ts', 'packages/copy-engine/src/feeds.ts', 'packages/copy-engine/src/settings.ts', 'packages/copy-engine/src/types.ts', 'packages/copy-engine/src/store.ts'],
   /**
    * The harness itself (its drivers and checks): changed checks are new code too. The scenario
    * files are not in it: each scenario hashes its own file (`source`), so editing the copy

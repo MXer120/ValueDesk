@@ -623,22 +623,26 @@ export const ALGO_SCENARIOS: Scenario[] = [
     timeoutMs: 13 * MIN,
     cost: (U) => ({ takerUsd: 2 * U, makerUsd: 0, peakUsd: U }),
     async run(t) {
-      const q = await t.quote();
-      const v0 = await t.start({ kind: 'bracket', quantity: await t.qty(t.U), entry: 'market', slippageBps: 30, exits: { tpPrice: t.tick(q.ask * 1.0004, t.main.name, 'up'), slPrice: t.tick(q.bid * 0.996, t.main.name, 'down') } });
+      // On the market that moved most when the run started: on a quiet BTC the price fell 15 bp and never rose the 4 bp
+      // in 10 min (2026-10-30, three times inconclusive).
+      const sym = t.volatile.name;
+      const q = await t.quote(sym);
+      // SoDEX fires its stops on the mark, which can sit under the ask: the level is 4 bp over the higher of the two.
+      const v0 = await t.start({ kind: 'bracket', symbol: sym, quantity: await t.qty(t.U, sym), entry: 'market', slippageBps: 30, exits: { tpPrice: t.tick(Math.max(q.ask, q.mark) * 1.0004, sym, 'up'), slPrice: t.tick(Math.min(q.bid, q.mark) * 0.996, sym, 'down') } });
       const v = await t.waitAlgo(v0.algo.id, 'the entry filled', (x) => x.algo.filled > 0, { timeoutMs: 30_000 });
-      await t.waitFor(`take-profit and stop-loss rest on ${t.where}`, async () => ((await t.algoOrders(v.algo.id)).filter((o) => o.stop).length === 2 ? true : null), { timeoutMs: 45_000 });
+      await t.waitFor(`take-profit and stop-loss rest on ${t.where}`, async () => ((await t.algoOrders(v.algo.id, sym)).filter((o) => o.stop).length === 2 ? true : null), { timeoutMs: 45_000 });
       await t.waitFor('the take-profit filled and the stop-loss is gone', async () => {
         const x = await t.view(v.algo.id);
         const tp = x.exits?.find((e) => e.kind === 'tp');
-        return tp && tp.filled > 0 && (await t.algoOrders(v.algo.id)).length === 0 ? x : null;
+        return tp && tp.filled > 0 && (await t.algoOrders(v.algo.id, sym)).length === 0 ? x : null;
       }, { timeoutMs: 10 * MIN, everyMs: 3_000, inconclusive: true });
-      await positionIs(t, 0, 'after the take-profit');
+      await positionIs(t, 0, 'after the take-profit', sym);
       await t.live('SoDEX\'s history: the take-profit filled, the stop-loss was cancelled', async () => {
-        const mine = (await t.account.history(t.main.name)).filter((o) => o.clOrdID?.startsWith(`va-${v.algo.id.slice(1, 13)}-`) && o.stop);
+        const mine = (await t.account.history(sym)).filter((o) => o.clOrdID?.startsWith(`va-${v.algo.id.slice(1, 13)}-`) && o.stop);
         // A take-profit that fired reads TRIGGERED with nothing executed on the trigger order itself
         // (2026-10-29): the market order it starts does the fill, so the fills prove it.
         t.check(mine.some((o) => o.stop!.kind === 'tp' && (o.filled > 0 || o.status === 'TRIGGERED')), 'a fired TAKE_PROFIT', mine.map((o) => `${o.stop!.kind} ${o.status}`));
-        const closes = (await t.algoFills(v.algo.id)).filter((f) => f.side === 'sell');
+        const closes = (await t.algoFills(v.algo.id, sym)).filter((f) => f.side === 'sell');
         t.check(closes.length > 0, `the take-profit's sell filled on SoDEX (${closes.length} fills)`);
         t.check(mine.filter((o) => o.stop!.kind === 'sl').every((o) => o.filled === 0), 'the STOP_LOSS never filled');
       });

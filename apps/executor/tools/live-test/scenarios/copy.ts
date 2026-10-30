@@ -291,22 +291,25 @@ export const COPY_SCENARIOS: Scenario[] = [
     // The stop is SoDEX's own order and fires the moment the mark crosses it; what takes time is the market reaching it.
     // At the highest leverage the region allows and the tightest stops (1% of the margin each way) that is a small move;
     // under the EEA's 2x it is 0.5% either way, which can take a while: inconclusive, not failed, if the market sits still.
-    timeoutMs: 22 * MIN,
+    // So it runs on the market that moved most when the run started (t.volatile), not on BTC (20 quiet minutes, 2026-10-30).
+    timeoutMs: 17 * MIN,
     cost: (U) => ({ takerUsd: 2 * U, makerUsd: 0, peakUsd: U, leaderTakerUsd: 4 * U, leaderPeakUsd: 2 * U }),
     async run(t) {
       const lev = t.expectedLeverage(50);
       const c = await t.subscribe({ sizingMode: 'fixedNotional', fixedNotionalUsd: t.U, maxLeverage: lev, stopLossPct: 0.01, takeProfitPct: 0.01 });
       t.note(`at ${lev}x a 1% move of the margin is ${(1 / lev).toFixed(2)}% of the price`);
       await ready(t, c.subscription.id);
-      await t.leader({ buyUsd: t.U });
-      await t.expectFollowerUsd(t.U, 'the follower opened');
+      const sym = t.volatile.name;
+      t.note(`on ${sym}, the market that moved most`);
+      await t.leader({ buyUsd: t.U }, sym);
+      await t.expectFollowerUsd(t.U, 'the follower opened', { symbol: sym });
       await t.live('a stop fires and the copy is flat while the leader is not', async () => {
-        await t.waitFor('the follower is flat (its stop fired)', async () => ((await t.account.position(t.main.name)) === 0 ? true : null), { timeoutMs: 20 * MIN, everyMs: 2_000, inconclusive: true });
-        t.check((await t.leaderUsd()) > 0, 'the leader still holds');
-        await t.leader({ buyUsd: t.U });
+        await t.waitFor('the follower is flat (its stop fired)', async () => ((await t.account.position(sym)) === 0 ? true : null), { timeoutMs: 14 * MIN, everyMs: 2_000, inconclusive: true });
+        t.check((await t.leaderUsd(sym)) > 0, 'the leader still holds');
+        await t.leader({ buyUsd: t.U }, sym);
         await t.waitFor('the add is skipped after the stop', async () => ((await t.exec.activity(c.subscription.id)).some((e) => e.kind === 'skip' && (e.reason === 'after-take-profit' || e.reason === 'after-stop-loss')) ? true : null), { timeoutMs: 45_000 });
       });
-      await t.leader({ close: true });
+      await t.leader({ close: true }, sym);
     },
   }),
   copy('copy.pause-resume-close', 'Paused while the leader closes, then resumed', 'a paused copy keeps its position while the leader closes; on resume the stray position is closed', {

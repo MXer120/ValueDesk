@@ -50,7 +50,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { secp256k1 } from '@noble/curves/secp256k1';
 import { bytesToHex, hexToBytes, keccak256, utf8 } from '../../../../packages/sodex-core/src/index.ts';
 import { COPY_FEE_MAX, COPY_TERMS_VERSION, MarketBook, canonicalJSON, copyFeeFor, regionPolicy, type MarketInfo } from '../../../../packages/copy-engine/src/index.ts';
-import { computeBudget, formatBudget, halfSpreadFrac, pickMarket, type LeaderCosts } from './budget.ts';
+import { computeBudget, formatBudget, halfSpreadFrac, pickMarket, pickVolatile, type LeaderCosts } from './budget.ts';
 import { CATALOGUE, countByKind } from './catalogue.ts';
 import { flatten, startDecision, type FlattenVenue } from './cleanup.ts';
 import { egress } from '../../src/net.ts';
@@ -71,6 +71,8 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..', '..', '..', '..');
 const STATE_DIR = join(HERE, '.state');
 const CANDIDATES = ['BTC-USD', 'ETH-USD'];
+/** Liquid markets that move more than BTC: the take-profit scenarios run on whichever moved most (pickVolatile). */
+const VOLATILE_CANDIDATES = ['SOL-USD', 'XRP-USD', 'DOGE-USD', 'SUI-USD', 'AVAX-USD', 'HYPE-USD', '1000PEPE-USD', 'PUMP-USD'];
 
 interface Args {
   dry: boolean;
@@ -251,6 +253,19 @@ async function main(): Promise<number> {
   const second = cands.find((c) => c.m.name !== main.name)?.m ?? main;
   const U = Math.ceil(main.minNotional * 1.2);
   log(`main market ${main.name} (taker + half spread ${pick.costBps.toFixed(2)} bp), second ${second.name}, child order $${U}`);
+  const vols: Array<{ m: MarketInfo; book: { bid: number; ask: number }; candles: Array<{ h: number; l: number; c: number }> }> = [];
+  for (const s of VOLATILE_CANDIDATES) {
+    const m = all.find((x) => x.name === s);
+    if (!m || m.minNotional * 1.2 > U * 1.5) continue;
+    try {
+      vols.push({ m, book: await reads.quote(s), candles: await reads.candles(s) });
+    } catch {
+      /* not quoted now: left out */
+    }
+  }
+  const vol = pickVolatile(vols);
+  const volatile = vol?.m ?? main;
+  log(vol ? `the take-profit scenarios run on ${volatile.name}: it moved most (one-minute ranges ${vol.rangeBps.toFixed(1)} bp on average over 30 min)` : `no faster market qualified: the take-profit scenarios run on ${main.name}`);
 
   const env = { ...readEnvFile(args.envFile), ...Object.fromEntries(Object.entries(process.env).filter(([k]) => k.startsWith('LIVE_')) as Array<[string, string]>) };
   // An empty LIVE_COUNTRY= (the env file's template) is none: a dry run then declares SG.
@@ -265,7 +280,7 @@ async function main(): Promise<number> {
   const book = new MarketBook();
   book.load(all);
   const kMarket = leaderVenue === 'hyperliquid' ? book.sodexMarketFor('hyperliquid', K_COIN) : null;
-  const testMarkets = [...new Set([main.name, second.name, ...(kMarket ? [kMarket.name] : [])])];
+  const testMarkets = [...new Set([main.name, second.name, volatile.name, ...(kMarket ? [kMarket.name] : [])])];
 
   const list = CATALOGUE.filter((s) => (args.slow || !s.slow) && (s.always || selected(args.only, s)));
   // What the target cannot do (a hard restart of ValueDesk's executor), and what another leader venue is for, are skipped: not costed.
@@ -412,6 +427,7 @@ async function main(): Promise<number> {
     orderFee: caps.localFeeStub && info.builder ? copyFeeFor(null, info.builder.ladder) : null,
     main,
     second,
+    volatile,
     childUsd: U,
     timeScale: args.dry ? 0.5 : 1,
     log,
