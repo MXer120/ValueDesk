@@ -42,6 +42,9 @@ import {
   nextSlice,
   povDue,
   profileCandles,
+  snapDown,
+  snapNearest,
+  snapUp,
   spreadBps,
   takerPrice,
   trail,
@@ -226,6 +229,9 @@ const levelOf = (c: Pick<ChildOrder, 'tag'>): number => {
   return x ? Number(x[1]) - 1 : -1;
 };
 
+/** How long a sweep waits for the oracle's first answer before it takes SoDEX's mark as the fallback. */
+const ORACLE_FIRST_WAIT_MS = 3_000;
+
 /** A refused exit is tried again after this, doubling each time, and given up after EXITS_MAX_REFUSALS. */
 const EXITS_RETRY_MS = 30_000;
 const EXITS_MAX_REFUSALS = 5;
@@ -234,6 +240,13 @@ const EXITS_MAX_REFUSALS = 5;
 const UPDATABLE: ReadonlySet<string> = new Set(['limitPrice', 'upper', 'lower', 'maxSpreadBps', 'label', 'quantity']);
 
 const dec = (n: number): string => canonicalDecimal(numberToPlainString(Number(n.toPrecision(12))));
+
+/** A price on the tick: as it is when it is on it (float dust aside), else rounded the trader's way (a buy down, a sell up). */
+function onTick(p: number, side: Side, tickSize: string): number {
+  const k = p / Number(tickSize);
+  if (Math.abs(k - Math.round(k)) < 1e-6) return snapNearest(p, tickSize);
+  return side === 'buy' ? snapDown(p, tickSize) || Number(tickSize) : snapUp(p, tickSize);
+}
 
 interface PaperOrder {
   algoId: string;
@@ -289,7 +302,7 @@ export class AlgoRuntime {
   private timers: unknown[] = [];
   private running = false;
   /** The sweep oracle's last quotes per coin, and the read in flight. */
-  private oracleQuotes = new Map<string, { quotes: VenueQuote[]; at: number; busy: boolean }>();
+  private oracleQuotes = new Map<string, { quotes: VenueQuote[]; at: number; busy: boolean; first: number }>();
 
   constructor(private readonly host: AlgoHost) {
     if (host.market) this.market = host.market;
@@ -760,6 +773,22 @@ export class AlgoRuntime {
       const m = this.markets.get(spec.symbol);
       if (pull.length && m) await this.cancelChildren(a, m, pull);
     }
+    if (patch.quantity !== undefined && a.startedAt !== null) {
+      // What rests at a size of its own goes back for the new one: a ladder's levels are cut from its size (each is put
+      // back for its new size less what it filled), a bracket's limit entry is the size. Each is placed again once SoDEX
+      // confirmed the old one gone - as after a pause. Without this a raise was never worked and a lowered entry ended it.
+      const m = this.markets.get(spec.symbol);
+      const resting = this.live(a).filter((c) => c.tif !== 'ioc' && !c.cancelling && c.state === 'open');
+      if (spec.kind === 'scale') {
+        if (resting.length && m) await this.cancelChildren(a, m, resting);
+        delete a.k.queue;
+        a.k.placed = false;
+      } else if (spec.kind === 'bracket' && spec.entry === 'limit') {
+        const entry = resting.filter((c) => c.tag === 'entry');
+        if (entry.length && m) await this.cancelChildren(a, m, entry);
+        a.k.placed = false;
+      }
+    }
     await this.save(a);
     await this.event(a, 'info', 'Changed by you.');
     return a;
@@ -1032,10 +1061,10 @@ export class AlgoRuntime {
   /** The oracle's quotes for a coin, read again in the background at most once a second (a step never waits on it). */
   private oracleFor(coin: string, now: number, venues?: readonly OracleVenue[]): VenueQuote[] {
     // Per coin and venue set: a browser's API gives several venues only as their combined price.
-    const key = `${coin}|${venues?.length ? [...venues].sort().join(',') : '*'}`;
+    const key = this.oracleKey(coin, venues);
     let o = this.oracleQuotes.get(key);
     if (!o) {
-      o = { quotes: [], at: 0, busy: false };
+      o = { quotes: [], at: 0, busy: false, first: now };
       this.oracleQuotes.set(key, o);
     }
     if (this.host.oracle && !o.busy && now - o.at >= 1_000) {
@@ -1057,6 +1086,20 @@ export class AlgoRuntime {
     return o.quotes;
   }
 
+  private oracleKey(coin: string, venues?: readonly OracleVenue[]): string {
+    return `${coin}|${venues?.length ? [...venues].sort().join(',') : '*'}`;
+  }
+
+  /**
+   * Whether the oracle has not answered for this coin and venue set yet: its first read is still on its
+   * way (oracleFor never waits). A failed read counts as an answer, after which SoDEX's mark is the fallback.
+   */
+  private oracleUnread(coin: string, now: number, venues?: readonly OracleVenue[]): boolean {
+    const o = this.oracleQuotes.get(this.oracleKey(coin, venues));
+    // Not for long: an oracle that does not answer within a few seconds is one that is not fresh.
+    return !!this.host.oracle && (!o || (o.at === 0 && now - o.first < ORACLE_FIRST_WAIT_MS));
+  }
+
   /** Fill fast (sweep.ts): an IOC at the band edge for the rest, each round re-priced from the reference. */
   private async stepSweep(a: AlgoRecord, m: MarketInfo, now: number): Promise<void> {
     const s = a.spec as Extract<AlgoSpec, { kind: 'sweep' }>;
@@ -1065,7 +1108,11 @@ export class AlgoRuntime {
     // SoDEX's own prices only when the spec asks for them or as the fallback: the oracle is not read for a mark or index sweep.
     const own = s.reference === 'mark' || s.reference === 'index';
     const book = this.market.quote(s.symbol);
-    const ref = sweepRefFor(s, own ? [] : this.oracleFor(coin, now, s.venues), mark ? { mark: mark.mark, index: mark.index, at: mark.at } : null, now, SWEEP_MAX_AGE_MS);
+    const quotes = own ? [] : this.oracleFor(coin, now, s.venues);
+    // The oracle's first answer is on its way: the round waits for it (a step or two), rather than going
+    // out on SoDEX's own mark - the fallback for an oracle that is not fresh, not for one not asked yet.
+    if (!own && this.oracleUnread(coin, now, s.venues)) return;
+    const ref = sweepRefFor(s, quotes, mark ? { mark: mark.mark, index: mark.index, at: mark.at } : null, now, SWEEP_MAX_AGE_MS);
     const act = sweepStep({
       side: s.side,
       total: Number(s.quantity),
@@ -2257,7 +2304,9 @@ export class AlgoRuntime {
     const reqs: ChildRequest[] = [];
     for (const x of list) {
       const clOrdID = this.clOrdIdFor(a);
-      const price = Number(dec(x.price));
+      // On SoDEX's tick, never worse for the trader: a price a trader typed (an iceberg's, a bracket's or a
+      // conditional's limit) may be off it, and SoDEX takes only prices on it. A buy rounds down, a sell up.
+      const price = Number(dec(onTick(x.price, x.side, m.tickSize)));
       const quantity = Number(dec(x.quantity));
       const c: ChildOrder = { clOrdID, orderId: null, side: x.side, price, quantity, tif: x.tif, reduceOnly: x.reduceOnly ?? s.reduceOnly, filled: 0, value: 0, state: 'sending', placedAt: now, updatedAt: now, cancelling: false, tag: x.tag };
       children.push(c);
@@ -2507,8 +2556,16 @@ export class AlgoRuntime {
     // SoDEX told of it: whatever the reads missed, it is accounted for as usual again.
     delete c.unlisted;
     if (FINAL_ORDER.test(u.status)) {
+      const ours = c.cancelling;
       c.state = 'done';
       c.cancelling = false;
+      // An order the algo ended leaving on SoDEX (a conditional's limit, a chase left resting) that SoDEX took off itself -
+      // a post-only price that would have taken, a margin check - no longer rests: the algo says so, not "it rests on SoDEX".
+      if (was !== 'done' && !ours && c.filled <= 1e-12 && FINAL_STATUSES.has(a.status) && ((a.k.kept as string[] | undefined) ?? []).includes(c.clOrdID)) {
+        const how = u.status === 'REJECTED' ? 'rejected' : 'cancelled';
+        a.statusReason = `${a.statusReason ? `${a.statusReason} ` : ''}SoDEX then ${how} it${u.reason ? ` (${u.reason})` : ''}: nothing filled, nothing rests.`;
+        void this.event(a, 'error', `SoDEX ${how} ${c.tag} at ${c.price}${u.reason ? `: ${u.reason}` : ''}; it no longer rests (nothing filled).`, c);
+      }
       if (c.tif === 'ioc' && c.filled <= 1e-12) a.k.missAt = Date.now();
       if (u.status === 'REJECTED' && was !== 'done') {
         a.rejects++;

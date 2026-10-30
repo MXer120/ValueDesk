@@ -80,6 +80,8 @@ a trailing stop (refused there) or a basket; a short's take-profit distance must
 - A pause or a cancel that lands while a step is in flight wins: nothing more is sent, an ended algo stays
   ended, and an order whose answer comes back after the cancel is cancelled again. A cancel also pulls
   children still on their way or `unknown` (by client id: harmless if they do not exist).
+- **Every price is on SoDEX's tick**: a price the trader typed off it (an iceberg's fixed price, a bracket's limit
+  entry, a conditional's limit) is put on it in the trader's favour (a buy rounds down, a sell up).
 - No child is over SoDEX's max quantity or max order value (a larger amount goes out over several
   children); none is under its minimum at the child's own price (a sell's limit is under the bid); a
   largest slice / child under SoDEX's minimum is raised to it. Fill fast never prices a round past the
@@ -88,7 +90,12 @@ a trailing stop (refused there) or a basket; a short's take-profit distance must
   size**; anything else (paper, side, market, kind, reduce-only...) is refused - that was signed and checked
   when it started. In the browser the live gate (`requirePaperAlgo`) checks the changed spec too.
 - A size change never leaves more working than the new size: resting children past it are
-  pulled (the last placed first); a schedule spreads the change over what is still to come.
+  pulled (the last placed first); a schedule spreads the change over what is still to come. A ladder's levels and a
+  bracket's limit entry go back on SoDEX at their new sizes (once SoDEX confirms the old ones gone), so a raise is
+  worked too. The signed executor API changes the size, the limit price, the spread guard and the label (not the
+  bounds, which the engine and the browser runner would take).
+- **Fill fast waits for the oracle's first answer** (at most 3 s) before its first round; an oracle that has not
+  answered by then, or is not fresh, falls back to SoDEX's mark as before.
 - **One limit order over SoDEX's largest order is refused at start**: a scale level, a bracket's limit
   entry or a conditional's limit over the max quantity or max order value (a TWAP splits a large amount);
   a bracket's limit entry and a conditional's limit price past the limit price are refused too.
