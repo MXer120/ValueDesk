@@ -14422,10 +14422,16 @@ var levelOf = (c) => {
   const x = /^level (\d+)\//.exec(c.tag);
   return x ? Number(x[1]) - 1 : -1;
 };
+var ORACLE_FIRST_WAIT_MS = 3e3;
 var EXITS_RETRY_MS = 3e4;
 var EXITS_MAX_REFUSALS = 5;
 var UPDATABLE = /* @__PURE__ */ new Set(["limitPrice", "upper", "lower", "maxSpreadBps", "label", "quantity"]);
 var dec3 = (n) => canonicalDecimal(numberToPlainString(Number(n.toPrecision(12))));
+function onTick(p, side, tickSize) {
+  const k = p / Number(tickSize);
+  if (Math.abs(k - Math.round(k)) < 1e-6) return snapNearest(p, tickSize);
+  return side === "buy" ? snapDown(p, tickSize) || Number(tickSize) : snapUp(p, tickSize);
+}
 var AlgoRuntime = class {
   constructor(host2) {
     this.host = host2;
@@ -14892,6 +14898,19 @@ var AlgoRuntime = class {
       const m = this.markets.get(spec.symbol);
       if (pull.length && m) await this.cancelChildren(a, m, pull);
     }
+    if (patch.quantity !== void 0 && a.startedAt !== null) {
+      const m = this.markets.get(spec.symbol);
+      const resting = this.live(a).filter((c) => c.tif !== "ioc" && !c.cancelling && c.state === "open");
+      if (spec.kind === "scale") {
+        if (resting.length && m) await this.cancelChildren(a, m, resting);
+        delete a.k.queue;
+        a.k.placed = false;
+      } else if (spec.kind === "bracket" && spec.entry === "limit") {
+        const entry = resting.filter((c) => c.tag === "entry");
+        if (entry.length && m) await this.cancelChildren(a, m, entry);
+        a.k.placed = false;
+      }
+    }
     await this.save(a);
     await this.event(a, "info", "Changed by you.");
     return a;
@@ -15132,10 +15151,10 @@ var AlgoRuntime = class {
   }
   /** The oracle's quotes for a coin, read again in the background at most once a second (a step never waits on it). */
   oracleFor(coin, now, venues) {
-    const key2 = `${coin}|${venues?.length ? [...venues].sort().join(",") : "*"}`;
+    const key2 = this.oracleKey(coin, venues);
     let o = this.oracleQuotes.get(key2);
     if (!o) {
-      o = { quotes: [], at: 0, busy: false };
+      o = { quotes: [], at: 0, busy: false, first: now };
       this.oracleQuotes.set(key2, o);
     }
     if (this.host.oracle && !o.busy && now - o.at >= 1e3) {
@@ -15151,6 +15170,17 @@ var AlgoRuntime = class {
     }
     return o.quotes;
   }
+  oracleKey(coin, venues) {
+    return `${coin}|${venues?.length ? [...venues].sort().join(",") : "*"}`;
+  }
+  /**
+   * Whether the oracle has not answered for this coin and venue set yet: its first read is still on its
+   * way (oracleFor never waits). A failed read counts as an answer, after which SoDEX's mark is the fallback.
+   */
+  oracleUnread(coin, now, venues) {
+    const o = this.oracleQuotes.get(this.oracleKey(coin, venues));
+    return !!this.host.oracle && (!o || o.at === 0 && now - o.first < ORACLE_FIRST_WAIT_MS);
+  }
   /** Fill fast (sweep.ts): an IOC at the band edge for the rest, each round re-priced from the reference. */
   async stepSweep(a, m, now) {
     const s = a.spec;
@@ -15158,7 +15188,9 @@ var AlgoRuntime = class {
     const mark = this.market.mark(s.symbol);
     const own = s.reference === "mark" || s.reference === "index";
     const book = this.market.quote(s.symbol);
-    const ref = sweepRefFor(s, own ? [] : this.oracleFor(coin, now, s.venues), mark ? { mark: mark.mark, index: mark.index, at: mark.at } : null, now, SWEEP_MAX_AGE_MS);
+    const quotes = own ? [] : this.oracleFor(coin, now, s.venues);
+    if (!own && this.oracleUnread(coin, now, s.venues)) return;
+    const ref = sweepRefFor(s, quotes, mark ? { mark: mark.mark, index: mark.index, at: mark.at } : null, now, SWEEP_MAX_AGE_MS);
     const act2 = sweepStep({
       side: s.side,
       total: Number(s.quantity),
@@ -16240,7 +16272,7 @@ var AlgoRuntime = class {
     const reqs = [];
     for (const x of list) {
       const clOrdID = this.clOrdIdFor(a);
-      const price2 = Number(dec3(x.price));
+      const price2 = Number(dec3(onTick(x.price, x.side, m.tickSize)));
       const quantity = Number(dec3(x.quantity));
       const c = { clOrdID, orderId: null, side: x.side, price: price2, quantity, tif: x.tif, reduceOnly: x.reduceOnly ?? s.reduceOnly, filled: 0, value: 0, state: "sending", placedAt: now, updatedAt: now, cancelling: false, tag: x.tag };
       children.push(c);
@@ -16466,8 +16498,14 @@ var AlgoRuntime = class {
     c.updatedAt = Date.now();
     delete c.unlisted;
     if (FINAL_ORDER.test(u.status)) {
+      const ours = c.cancelling;
       c.state = "done";
       c.cancelling = false;
+      if (was !== "done" && !ours && c.filled <= 1e-12 && FINAL_STATUSES.has(a.status) && (a.k.kept ?? []).includes(c.clOrdID)) {
+        const how = u.status === "REJECTED" ? "rejected" : "cancelled";
+        a.statusReason = `${a.statusReason ? `${a.statusReason} ` : ""}SoDEX then ${how} it${u.reason ? ` (${u.reason})` : ""}: nothing filled, nothing rests.`;
+        void this.event(a, "error", `SoDEX ${how} ${c.tag} at ${c.price}${u.reason ? `: ${u.reason}` : ""}; it no longer rests (nothing filled).`, c);
+      }
       if (c.tif === "ioc" && c.filled <= 1e-12) a.k.missAt = Date.now();
       if (u.status === "REJECTED" && was !== "done") {
         a.rejects++;
