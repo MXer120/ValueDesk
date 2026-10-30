@@ -301,6 +301,15 @@ export function indexPool(venue: Venue): { rows: TraderRow[]; updatedAt: number 
 const RANGE_MS: Record<CohortRange, number> = { '1d': 86_400_000, '7d': 7 * 86_400_000, '30d': 30 * 86_400_000 };
 const SPARK_POINTS = 96;
 export const LOAD_TTL_MS = 60_000;
+/**
+ * No answer comes from a load older than this: cohortsReady rebuilds and waits for it. Once
+ * nobody had asked for KEEP_WARM_MS the rebuilds stopped and the next read was answered from
+ * the load in use, however old - 18 to 21 hours on 2026-10-30 (a wallet list showing a 500 BTC
+ * long closed the evening before, BTC priced at 78,809 against 77,200).
+ */
+export const STALE_MAX_MS = 2 * LOAD_TTL_MS;
+/** How long cohortsReady waits for a rebuild before answering from what it has. */
+export const READY_WAIT_MS = 10_000;
 /** Rows per statement while a load is built. */
 const LOAD_PAGE = 2_000;
 /** A rebuild from behind gives the thread back after this much work. */
@@ -672,6 +681,7 @@ export function cohortsRead(venues: readonly Venue[], f: CohortFilter): CohortsR
     venues: [...venues],
     filter: f,
     at: load.booksAt,
+    asOf: load.at,
     coverage: Object.fromEntries(venues.map((v) => [v, load.coverage[v]])),
     coins,
     cohorts: stats.map(({ markets: _m, ...rest }) => ({
@@ -691,7 +701,7 @@ export function cohortDetail(venues: readonly Venue[], cohort: CohortId, range: 
   const stat = statsOf(load, venues, f).cohorts.find((x) => x.id === cohort)!;
   const series = history(s, scopeKey(venues), Date.now() - RANGE_MS[range], f, cohort).get(cohort) ?? [];
   return {
-    venues: [...venues], filter: f, at: load.booksAt, range, cohort: stat,
+    venues: [...venues], filter: f, at: load.booksAt, asOf: load.at, range, cohort: stat,
     series: thin(series, 500), coverage: Object.fromEntries(venues.map((v) => [v, load.coverage[v]])),
   };
 }
@@ -816,7 +826,7 @@ export function cohortWallets(
   if (o.sort !== 'winRate') {
     try { attachWinRates(s, page, range); } catch { /* decoration */ }
   }
-  return { total: rows.length, range, rows: page };
+  return { total: rows.length, asOf: load.at, range, rows: page };
 }
 
 /** The indexer's own status line (lanes, streams), for diagnostics. */
@@ -837,6 +847,27 @@ export function indexerStatus(): unknown {
  * place: synchronous, it held the whole API 15 s and more after a restart (2026-10-28), and a
  * page that asked then saw "Cohorts couldn't load" or waited half a minute.
  */
-export async function cohortsReady(): Promise<void> {
-  if (!cohortLoad && inflight) await inflight.catch(() => undefined);
+export async function cohortsReady(waitMs = READY_WAIT_MS): Promise<void> {
+  if (!cohortLoad) {
+    if (inflight) await inflight.catch(() => undefined);
+    return;
+  }
+  // Older than STALE_MAX_MS (the rebuilds stopped while nobody asked, or failed): a rebuild now,
+  // and the answer waits for it - up to `waitMs`, then the load in use answers, its asOf shown.
+  if (Date.now() - cohortLoad.at <= STALE_MAX_MS) return;
+  const s = reader();
+  if (!s) return;
+  lastAsked = Date.now();
+  if (!rebuilding && Date.now() - rebuildFailedAt >= 10_000) {
+    if (rebuildTimer) { clearTimeout(rebuildTimer); rebuildTimer = null; }
+    void rebuildBehind(s);
+  }
+  const p = inflight;
+  if (!p) return;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  await Promise.race([
+    p.catch(() => undefined),
+    new Promise<void>((r) => { timer = setTimeout(r, waitMs); timer.unref?.(); }),
+  ]);
+  if (timer) clearTimeout(timer);
 }

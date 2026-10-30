@@ -36,7 +36,8 @@ export function mergeDelta(h: LiqHeatmap, d: { at: number; p: number; b: Row[]; 
   const coverage = { ...h.coverage };
   for (const [v, c] of Object.entries(d.cov ?? {}) as Array<[Venue, number[]]>) {
     const was = coverage[v];
-    if (was) coverage[v] = { ...was, long: c[0]!, short: c[1]!, longKnown: c[2]!, shortKnown: c[3]!, positions: c[4]! };
+    // [long, short, long priced, short priced, positions, past (the snapshot's stands), long none, short none] (server live.ts Cov; older: five).
+    if (was) coverage[v] = { ...was, long: c[0]!, short: c[1]!, longKnown: c[2]!, shortKnown: c[3]!, positions: c[4]!, ...(c.length >= 8 ? { longNone: c[6]!, shortNone: c[7]! } : {}) };
   }
   return { ...h, at: d.at, price: d.p, buckets: [...by.values()].sort((a, b) => a[0] - b[0]), coverage };
 }

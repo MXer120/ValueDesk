@@ -38,6 +38,13 @@ export interface VenueCoverage {
   /** Of that, the size with a known liquidation price. */
   longKnown: number;
   shortKnown: number;
+  /**
+   * Of that, the size for which no liquidation price exists (the venue says so, or the account
+   * carries the position to zero: most low-leverage longs) - known, just never liquidated. The
+   * rest without a price is not known yet. Absent from an indexer before 2026-10-30.
+   */
+  longNone?: number;
+  shortNone?: number;
   positions: number;
   /** Size whose liquidation price the price has already crossed (being liquidated, or a book a print has not reached): not in the buckets. */
   past: number;
@@ -62,6 +69,8 @@ export interface LiqHeatmap {
   buckets: Array<[number, number, number, number, number]>;
   outside: { long: number; short: number; longN: number; shortN: number };
   coverage: Partial<Record<Venue, VenueCoverage>>;
+  /** The wallet filter only: when the cohort load its positions come from was built (ms). */
+  asOf?: number;
 }
 
 export interface LiqWallet {
@@ -84,6 +93,8 @@ export interface LiqWallets {
   total: number;
   count: number;
   wallets: LiqWallet[];
+  /** When the cohort load these positions come from was built (ms). */
+  asOf: number;
 }
 
 export interface LiqHistory {
@@ -135,8 +146,14 @@ function accuracyOf(): Partial<Record<Venue, { cur: DriftStats; prev: DriftStats
 function shownAccuracy(a: { cur: DriftStats; prev: DriftStats | null } | undefined): (DriftStats & { window: 'today' | 'yesterday' }) | null {
   if (!a?.cur) return null;
   const enough = (d: DriftStats) => d.checked + d.n >= 300;
-  if (!enough(a.cur) && a.prev && a.prev.checked + a.prev.n > a.cur.checked + a.cur.n) return { ...emptyDrift(0), ...a.prev, window: 'yesterday' };
-  return { ...emptyDrift(0), ...a.cur, window: 'today' };
+  // usd01 (by USD within 0.1%) only where the day kept it from its start.
+  const of = (d: DriftStats, window: 'today' | 'yesterday') => {
+    const out: DriftStats & { window: 'today' | 'yesterday' } = { ...emptyDrift(0), ...d, window };
+    if (d.usd01 === undefined) delete out.usd01;
+    return out;
+  };
+  if (!enough(a.cur) && a.prev && a.prev.checked + a.prev.n > a.cur.checked + a.cur.n) return of(a.prev, 'yesterday');
+  return of(a.cur, 'today');
 }
 
 /** The venue's markets of a coin: its symbols, with open interest and price. */
@@ -173,7 +190,7 @@ async function gather(coin: string, venues: readonly Venue[]): Promise<Gathered 
     const wallets = idx?.get(venue) ?? [];
     const cov: VenueCoverage = {
       oi: mk.length ? mk.reduce((a, x) => a + x.oi, 0) : null, oiUsd: null,
-      long: 0, short: 0, longKnown: 0, shortKnown: 0, positions: 0, past: 0,
+      long: 0, short: 0, longKnown: 0, shortKnown: 0, longNone: 0, shortNone: 0, positions: 0, past: 0,
       price: null, accuracy: shownAccuracy(acc[venue]), computed: venue === 'arcus', ...(m ? {} : { noRules: true }),
     };
     const main = mk.slice().sort((a, b) => b.oi - a.oi)[0];
@@ -183,7 +200,7 @@ async function gather(coin: string, venues: readonly Venue[]): Promise<Gathered 
     for (const l of coinLevels(venue, wallets, coin, priceOf, tiersFor)) {
       cov.positions++;
       const a = Math.abs(l.szi);
-      if (l.szi > 0) { cov.long += a; if (l.liq !== null) cov.longKnown += a; } else { cov.short += a; if (l.liq !== null) cov.shortKnown += a; }
+      if (l.szi > 0) { cov.long += a; if (l.liq !== null) cov.longKnown += a; else if (l.none) cov.longNone! += a; } else { cov.short += a; if (l.liq !== null) cov.shortKnown += a; else if (l.none) cov.shortNone! += a; }
       levels.push(l);
     }
     for (const [address, w] of wallets) if (w.label) labels.set(`${venue}|${address}`, w.label);
@@ -218,7 +235,8 @@ function nowRow(coin: string): { at: number; row: LiqNow | null } | null {
 /** One coin's levels on one venue, from the live feed or a minute row. */
 interface VenueSrc {
   b: Iterable<[number, number, number, number, number]>;
-  c: ArrayLike<number>;
+  /** Coverage as live.ts Cov / levels.ts LiqNowVenue.c (older sources: shorter, the rest read as 0). */
+  c: ArrayLike<number | undefined>;
   o: ArrayLike<number>;
 }
 
@@ -241,14 +259,24 @@ export function heatOf(
     const oi = mk.length ? mk.reduce((n, y) => n + y.oi, 0) : null;
     coverage[venue] = {
       oi, oiUsd: oi !== null && price !== null ? oi * price : null,
-      long: x?.c[0] ?? 0, short: x?.c[1] ?? 0, longKnown: x?.c[2] ?? 0, shortKnown: x?.c[3] ?? 0, positions: x?.c[4] ?? 0, past: x?.c[5] ?? 0,
+      long: x?.c[0] ?? 0, short: x?.c[1] ?? 0, longKnown: x?.c[2] ?? 0, shortKnown: x?.c[3] ?? 0, longNone: x?.c[6] ?? 0, shortNone: x?.c[7] ?? 0, positions: x?.c[4] ?? 0, past: x?.c[5] ?? 0,
       price, accuracy: shownAccuracy(acc[venue]), computed: venue === 'arcus', ...(m ? {} : { noRules: true }),
     };
     if (!x) continue;
+    // The live engine leaves past to the reader (live.ts): its coverage carries no past figure
+    // (the feed has none, its liq_now rows write 0) and its buckets keep the levels the price
+    // has crossed. Those are counted here at the price answered with, by the same test the web
+    // uses to leave them out of the bars (size = USD over the 0.02% bucket's middle).
+    const p = src.p !== null && src.p > 0 ? src.p : null;
+    let past = 0;
     for (const [i, l, sh, ln, sn] of x.b) {
       const e = sum.get(i);
       if (e) { e[1] += l; e[2] += sh; e[3] += ln; e[4] += sn; } else sum.set(i, [i, l, sh, ln, sn]);
+      if (p === null) continue;
+      if (l > 0 && i * src.st >= p) past += l / ((i + 0.5) * src.st);
+      if (sh > 0 && (i + 1) * src.st <= p) past += sh / ((i + 0.5) * src.st);
     }
+    if (past > 0) coverage[venue]!.past = +((x.c[5] ?? 0) + past).toPrecision(6);
     outside.long += x.o[0]!; outside.short += x.o[1]!; outside.longN += x.o[2]!; outside.shortN += x.o[3]!;
   }
   return {
@@ -312,7 +340,7 @@ export async function liqHeatmapOf(coin: string, venues: readonly Venue[], walle
   const coverage: Partial<Record<Venue, VenueCoverage>> = {};
   for (const v of venues) {
     const c = g.coverage[v];
-    if (c) coverage[v] = { ...c, long: 0, short: 0, longKnown: 0, shortKnown: 0, positions: 0, past: 0 };
+    if (c) coverage[v] = { ...c, long: 0, short: 0, longKnown: 0, shortKnown: 0, longNone: 0, shortNone: 0, positions: 0, past: 0 };
   }
   for (const l of g.levels) {
     if (!only.has(l.address)) continue;
@@ -321,7 +349,7 @@ export async function liqHeatmapOf(coin: string, venues: readonly Venue[], walle
     const long = l.szi > 0;
     if (c) {
       c.positions++;
-      if (long) { c.long += a; if (l.liq !== null) c.longKnown += a; } else { c.short += a; if (l.liq !== null) c.shortKnown += a; }
+      if (long) { c.long += a; if (l.liq !== null) c.longKnown += a; else if (l.none) c.longNone! += a; } else { c.short += a; if (l.liq !== null) c.shortKnown += a; else if (l.none) c.shortNone! += a; }
     }
     if (l.liq === null || !p) continue;
     if (long ? l.liq >= p : l.liq <= p) { if (c) c.past += a; continue; }
@@ -337,7 +365,7 @@ export async function liqHeatmapOf(coin: string, venues: readonly Venue[], walle
   }
   return {
     coin, venues: [...venues], at: g.load.at, price: p, step: st,
-    buckets: [...sum.values()].sort((x, y) => x[0] - y[0]), outside, coverage,
+    buckets: [...sum.values()].sort((x, y) => x[0] - y[0]), outside, coverage, asOf: g.load.at,
   };
 }
 
@@ -357,7 +385,7 @@ export interface WalletLiq {
 }
 
 /** Every position of `wallets` on `venues`, largest first. */
-export async function walletLiqs(wallets: readonly string[], venues: readonly Venue[]): Promise<WalletLiq[] | null> {
+export async function walletLiqs(wallets: readonly string[], venues: readonly Venue[]): Promise<{ asOf: number; positions: WalletLiq[] } | null> {
   const load = cohortBooksNow();
   if (!load) return null;
   const markets = await marketsFor(venues);
@@ -383,7 +411,7 @@ export async function walletLiqs(wallets: readonly string[], venues: readonly Ve
       }
     }
   }
-  return out.sort((a, b) => (b.usd ?? 0) - (a.usd ?? 0));
+  return { asOf: load.at, positions: out.sort((a, b) => (b.usd ?? 0) - (a.usd ?? 0)) };
 }
 
 export async function liqHeatmap(coin: string, venues: readonly Venue[]): Promise<LiqHeatmap | null> {
@@ -413,7 +441,7 @@ export async function liqWallets(coin: string, venues: readonly Venue[], side: '
       szi: l.szi, liq: l.liq!, usd: r2(usd), dist: g.price ? l.liq! / g.price - 1 : null,
     };
   }).sort((a, b) => b.usd - a.usd);
-  return { coin, side, from, to, price: g.price, total: r2(rows.reduce((a, x) => a + x.usd, 0)), count: rows.length, wallets: rows.slice(0, limit) };
+  return { coin, side, from, to, price: g.price, total: r2(rows.reduce((a, x) => a + x.usd, 0)), count: rows.length, wallets: rows.slice(0, limit), asOf: g.load.at };
 }
 
 /** One position as it stood at a past time (liqAt). */

@@ -85,6 +85,7 @@ import { LiqFeedServer } from './liqFeed.js';
 import { deflateRawSync } from 'node:zlib';
 import { loadSeeds, type Seeds } from './archiveSeed.js';
 import { mayPrune } from '../retention.js';
+import { OI_EXCESS, oiCheck, oiOver, oiRereads, oiStatus } from './oiCheck.js';
 
 const envNum = (name: string, dflt: number, min: number, max: number): number => {
   const n = Number(process.env[name]);
@@ -146,6 +147,15 @@ const TRADED_MAX = 400_000;
 /** Where a newly opened market's margin mode is the account's choice, and how soon its book is read again. */
 const OPENED_REREAD: ReadonlySet<Venue> = new Set(['hyperliquid', 'tradexyz', 'sodex']);
 const OPENED_REREAD_MS = 2 * 60_000;
+/** Crossed books held between beats at most (a burst after a start is read over the next passes). */
+const CROSSED_MAX = 50_000;
+/** Per venue, the newest print time the saved books hold (printApplies after a restart). */
+const PRINTS_THROUGH_META = 'cohort_prints_through';
+/** The open interest check (checkOi): how often, and how many holders of a coin over it are read per check. */
+const OI_CHECK_MS = 5 * 60_000;
+const OI_REREAD_BATCH: Record<Venue, number> = { hyperliquid: 200, tradexyz: 100, sodex: 50, arcus: 50, lighter: 60 };
+const OI_PRIO = 870;
+const OI_LOG_EVERY_MS = 60 * 60_000;
 /** A trade.xyz market whose terms are not read yet: the usual xyz market's (scale 1, growth mode). */
 const XYZ_SCALE_UNKNOWN: MarketScale = { scale: 1, growth: true };
 /** A beat's budget for `pending` changed accounts: the base, doubled from 10k waiting on. */
@@ -217,27 +227,49 @@ export function staleEquity(book: Pick<Book, 'equity' | 'collateral' | 'at'>, no
   return notional > MAX_LEVERAGE * eq && age >= STALE_LEVERAGE_MS;
 }
 
+/** Position notional above this multiple of the perps account value: the equity is uncertain (needsSpot). */
+export const SPOT_LEVERAGE = 5;
+
 /**
- * A Hyperliquid read with positions also reads the spot state when the
- * leaderboard's account value (perps + spot + staked) is well above the perps
- * account value: the gap may be a unified account's collateral. Off the
- * leaderboard the two are the same figure, and nothing is read.
+ * Whether a Hyperliquid read with positions also reads the spot state (weight 2): whenever the
+ * account's equity is uncertain - a unified / portfolio-margin account runs its perps on its spot,
+ * and its perps account value is only the margin in use there.
+ *
+ *   - a book already found unified (`unified`): every read looks again, so its collateral follows
+ *     the schedule of its reads instead of standing as first read (0xb8e4...a206, 2026-10-30:
+ *     $96,459 kept against $110,785 now - medium instead of large);
+ *   - off the leaderboard (`total` null): nothing says what its spot holds (0x591e...9657, $952K
+ *     perps value against $5.75M of spot - large instead of apex; 0xcb84...52cd, whale);
+ *   - position notional above SPOT_LEVERAGE times the perps value;
+ *   - on the leaderboard, its account value (perps + spot + staked) well above the perps value.
  */
-export function needsSpot(total: number | null | undefined, perpsValue: number | null, positions: number): boolean {
-  if (!positions || total == null || !(total > 0)) return false;
+export function needsSpot(total: number | null | undefined, perpsValue: number | null, positions: number, o: { notional?: number; unified?: boolean } = {}): boolean {
+  if (!positions) return false;
+  if (o.unified) return true;
+  if (total == null || !(total > 0)) return true;
+  if ((o.notional ?? 0) > SPOT_LEVERAGE * Math.max(0, perpsValue ?? 0)) return true;
   return total - Math.max(0, perpsValue ?? 0) > Math.max(1_000, 0.1 * total);
+}
+
+/** A read's position notional at its own marks (needsSpot). */
+export function readNotional(r: { positions: ReadonlyArray<{ symbol: string; szi: number; entry: number | null }>; marks: ReadonlyArray<[string, number]> }): number {
+  const mk = new Map(r.marks);
+  let n = 0;
+  for (const p of r.positions) n += Math.abs(p.szi) * (mk.get(p.symbol) ?? p.entry ?? 0);
+  return n;
 }
 
 /** From here a unified account's spot is valued token by token (cohortSource.ts spotCollateral); before, stablecoins only. */
 export const SPOT_VALUE_SINCE = Date.UTC(2026, 9, 25);
 
 /**
- * A Hyperliquid book whose spot state should be read: never looked at while the
- * leaderboard says the account holds more than its perps (needsSpot), or a
- * unified account's spot valued by the rule before SPOT_VALUE_SINCE (once).
+ * A Hyperliquid book whose spot state should be read ahead of its schedule: never looked at
+ * while its equity is uncertain (needsSpot: `total` is the leaderboard's account value, null off
+ * it; `notional` the book's now), or a unified account's spot valued by the rule before
+ * SPOT_VALUE_SINCE (once). A book found unified is looked at again by every read after.
  */
-export function spotDue(book: { spotAt?: number | null; collateral?: number | null; equity: number | null; pos: { size: number } }, total: number | null | undefined): boolean {
-  if (book.spotAt == null) return needsSpot(total, book.equity, book.pos.size);
+export function spotDue(book: { spotAt?: number | null; collateral?: number | null; equity: number | null; pos: { size: number } }, total: number | null | undefined, notional?: number): boolean {
+  if (book.spotAt == null) return needsSpot(total, book.equity, book.pos.size, { notional });
   return book.collateral != null && book.spotAt < SPOT_VALUE_SINCE && book.pos.size > 0;
 }
 
@@ -265,11 +297,49 @@ export function pollTtl(equity: number): number {
  * How often a book is read again for its liquidation prices, by its notional: what
  * prints and prices cannot move (spot collateral, fees, deposits) drifts them. Found
  * 2026-10-28: a 2,613 BTC short read 6 h before stood 1.9% from Hyperliquid's figure,
- * the largest level on the BTC map. $5M+ every 30 min, $1M+ every 2 h; smaller books
- * keep their reconcile (6 h to 7 days).
+ * the largest level on the BTC map.
+ *
+ * 2026-10-30, Hyperliquid against its own liquidationPx (drift between reads, 76.8% within 0.1%
+ * overall): the $5M+ positions (read every 30 min) 31 of 36 within 0.1%; positions of $50K-$3M
+ * (read at their reconcile, 3 to 7 days) 18 of 30 within 0.1% and 23 within 1% - 29 of the 30
+ * the right size, so the drift is margin no print shows (transfers, spot collateral). Now: $5M+
+ * every 15 min, $1M+ hourly, $250K+ every 6 h, $50K+ daily (about 40 more reads a minute, weight
+ * 2 each, of the lane's 400); smaller books keep their reconcile.
  */
 export function liqRefreshTtl(notional: number): number {
-  return notional >= 5_000_000 ? 30 * 60_000 : notional >= 1_000_000 ? 2 * 60 * 60_000 : Infinity;
+  return notional >= 5_000_000 ? 15 * 60_000
+    : notional >= 1_000_000 ? 60 * 60_000
+      : notional >= 250_000 ? 6 * 60 * 60_000
+        : notional >= 50_000 ? 24 * 60 * 60_000
+          : Infinity;
+}
+
+/**
+ * A book whose positions changed by a fill since its read: its cross figures move with every
+ * fill, and what the fill did to its margin (fees, an isolated top-up, a flip) is the model's
+ * until a read says. From $250K of notional, read again 15 min after the read - only once per
+ * read (the read clears it), so an account trading all day is read every 15 min at most.
+ */
+export const FILLED_REREAD_MS = 15 * 60_000;
+export const FILLED_REREAD_MIN = 250_000;
+export function liqChangedDue(book: { at: number; filledAt?: number }, notional: number, now: number): boolean {
+  return book.filledAt !== undefined && book.filledAt > book.at && notional >= FILLED_REREAD_MIN && now - book.at >= FILLED_REREAD_MS;
+}
+
+/**
+ * A book the live engine priced with a level the price has already crossed (a long at or above
+ * its price, a short at or below): proof its figures are stale - a liquidation or a close the
+ * stream missed, margin moved, fees, a transfer. Audit 2026-10-30: $29.7M of BTC longs on
+ * Hyperliquid priced above the price, up to $226,960. Read again first, the most notional
+ * first, unless it was read within CROSSED_MIN_AGE_MS (the venue itself may be liquidating it:
+ * a crossed level just read is the venue's, not ours to chase in a loop).
+ */
+export const CROSSED_MIN_AGE_MS = 10 * 60_000;
+export function crossedDue(bookAt: number | undefined, now: number): boolean {
+  return bookAt === undefined || now - bookAt >= CROSSED_MIN_AGE_MS;
+}
+export function crossedPrio(usd: number): number {
+  return 1_700 + Math.min(200, Math.max(0, Math.round(Math.log10(Math.max(1, usd)) * 20)));
 }
 
 export function liqBacklogPrio(notional: number, equity: number | null): number {
@@ -302,8 +372,12 @@ export interface Book {
   liqMiss?: boolean;
   /** A market it did not hold was opened since the read (its margin mode and leverage are unknown): read again soon. */
   opened?: boolean;
-  /** When the snapshot was read. */
+  /** When the snapshot was read (its answer came back). */
   at: number;
+  /** When its read was asked (this process only): a print before it is in the read already (printApplies). */
+  reqAt?: number;
+  /** When a print last moved it (this process only): liqChangedDue. */
+  filledAt?: number;
   /** Hyperliquid: a unified account's stablecoin collateral (model.ts perpEquity), when the read looked. */
   collateral?: number | null;
   /** Hyperliquid: when the read looked at the spot state. */
@@ -341,6 +415,34 @@ export function realizedOf(book: Pick<Book, 'pos'>, symbol: string, d: number, p
   return Math.min(Math.abs(d), Math.abs(cur.szi)) * (px - cur.entry) * Math.sign(cur.szi);
 }
 
+/**
+ * A book outside its venue's tail sample (sampleRule) that still holds positions: read again once
+ * its schedule says so (`ttl`), lowest of all reads. Until 2026-10-30 it was never read again, and
+ * kept whatever it held in the live map for good (Lighter samples 10% of its small wallets).
+ */
+export function tailBookDue(book: { at: number; pos: { size: number } } | undefined, now: number, ttl: number): boolean {
+  return !!book && book.pos.size > 0 && now - book.at >= ttl;
+}
+
+/** A print this much before a read was asked is in the read for certain (clocks: the venue's against ours). */
+export const PRINT_SKEW_MS = 2_000;
+
+/**
+ * Whether a print still moves a book: not when the book's read already holds it (the print is
+ * older than the read was asked, by PRINT_SKEW_MS), and not when it is a print this indexer
+ * applied before a restart (`replayBefore`: the newest print time the saved books hold) - each
+ * stream's first message per market after subscribing is a snapshot of recent prints, and the
+ * dedup that drops it on a reconnect starts empty in a new process. Applied twice, a print grows a
+ * position that was closed (Lighter, 2026-10-30: books 155-205% of the open interest).
+ */
+export function printApplies(book: { reqAt?: number }, t: number, replayBefore: number): boolean {
+  // Not a time in ms (a venue that ever sent seconds): nothing to compare, applied as before.
+  if (!(t > 1e11)) return true;
+  if (t <= replayBefore) return false;
+  if (book.reqAt !== undefined && t < book.reqAt - PRINT_SKEW_MS) return false;
+  return true;
+}
+
 /** Which prints move which venue's books: spot never, and a HIP-3 market only its own dex's book. */
 function bookable(venue: Venue, symbol: string): boolean {
   if (symbol.includes('/') || symbol.startsWith('@')) return false;
@@ -351,7 +453,10 @@ function bookable(venue: Venue, symbol: string): boolean {
 
 interface Member {
   pnl: number | null;
+  /** Hyperliquid: the leaderboard's account value when `ranked`, else the last read's perps value. */
   equity: number | null;
+  /** Hyperliquid: on the leaderboard (its equity counts spot and staked too). */
+  ranked?: boolean;
   label: string | null;
   pnlRange?: Partial<Record<CohortRange, number | null>>;
 }
@@ -492,7 +597,23 @@ export class CohortTracker {
     tiersOf: (venue, symbol) => marketsNow(venue)?.tiers.get(symbol) ?? null,
     priceOfCoin: (coin) => this.coinPx.get(coin)?.px ?? null,
     wanted: (coin) => this.sodexCoins.has(coin),
+    crossed: (venue, address, usd) => {
+      const k = `${venue}|${address}`;
+      if (this.crossed.size < CROSSED_MAX) this.crossed.set(k, Math.max(usd, this.crossed.get(k) ?? 0));
+    },
   });
+  /** Per venue, the newest print time applied (saved with the books: PRINTS_THROUGH_META), and the one the saved books held at the start. */
+  private printsThrough = new Map<Venue, number>();
+  private replayBefore = new Map<Venue, number>();
+  private printsSkipped = 0;
+  /** The last open interest check (checkOi): per venue, the worst ratio and the coins over. */
+  private oiLast: { at: number; venues: ReturnType<typeof oiStatus>; queued: number } | null = null;
+  /** venue|coin -> when its excess was last logged. */
+  private oiLogged = new Map<string, number>();
+  /** Books priced with a crossed level since the last beat (venue|address -> USD), read again first (liveTick). */
+  private crossed = new Map<string, number>();
+  /** Crossed books queued for a read since the start (status). */
+  private crossedQueued = 0;
   /**
    * The coins the heatmap covers: every perp SoDEX lists (liqCoin of its symbols, so
    * Hyperliquid's kPEPE counts as 1000PEPE). The owner, 2026-10-25: maps for SoDEX's
@@ -655,6 +776,12 @@ export class CohortTracker {
       }
     }
     for (const [k, px] of s.cohortMarks()) { this.marks.set(k, px); this.noteCoinPx(k, px); }
+    // Prints the saved books already hold: a stream's snapshot of recent prints after this start
+    // must not apply them again (printApplies).
+    try {
+      const saved = JSON.parse(s.getMeta(PRINTS_THROUGH_META) ?? '{}') as Record<string, number>;
+      for (const v of VENUES) if (Number(saved[v]) > 0) { this.replayBefore.set(v, Number(saved[v])); this.printsThrough.set(v, Number(saved[v])); }
+    } catch { /* none saved: as before */ }
     this.lastSeriesT = s.cohortSeriesLastT();
     this.lastMixT = s.cohortMixLastT();
     this.lastLiqT = s.liqHistLastT();
@@ -689,6 +816,7 @@ export class CohortTracker {
     every(6 * 60 * 60_000, () => this.loadSpotPairs(), 'coh:spot');
     every(60 * 60_000, () => this.loadXyzScales(), 'coh:xyzfees');
     every(PNL_FLOW_SAVE_MS, () => this.saveFlows(), 'coh:pnlflow');
+    every(OI_CHECK_MS, () => this.checkOi(), 'coh:oi');
     void this.loadXyzScales().catch((e) => (this.lastError = `xyz fee terms: ${String(e)}`));
     void this.loadSpotPairs().catch((e) => (this.lastError = `spot pairs: ${String(e)}`));
     // The live engine: every book in at the start (priced a few thousand a second), then what changes.
@@ -761,6 +889,7 @@ export class CohortTracker {
     this.dirtyMarks.add(mk);
     const books = this.books.get(p.venue);
     if (!books) return;
+    if (p.t > (this.printsThrough.get(p.venue) ?? 0)) this.printsThrough.set(p.venue, p.t);
     for (const [acct, d] of [[p.buyer, p.sz], [p.seller, -p.sz]] as const) {
       const address = addressOf(acct);
       if (!address) continue;
@@ -770,11 +899,13 @@ export class CohortTracker {
         if (!this.wanted.has(k)) this.wanted.set(k, this.d.now());
         continue;
       }
+      if (!printApplies(book, p.t, this.replayBefore.get(p.venue) ?? 0)) { this.printsSkipped++; continue; }
       if (!book.pos.has(p.symbol) && OPENED_REREAD.has(p.venue)) book.opened = true;
       const fee = this.fillFee(p, address, d > 0);
       if (p.venue === 'hyperliquid') this.addFlow(address, realizedOf(book, p.symbol, d, p.px) - fee);
       feeCash(book, p.symbol, fee);
       applyFill(book, p.symbol, d, p.px);
+      book.filledAt = this.d.now();
       this.live.touch(p.venue, address);
       this.dirtyBooks.add(`${p.venue}|${address}`);
       this.applied++;
@@ -899,7 +1030,8 @@ export class CohortTracker {
       planMs: this.planMs,
       recordMs: this.recordMs,
       liqMs: this.liqMs,
-      liq: { boost: this.liqBoost, due: Object.fromEntries(this.liqDue), live: { ready: this.liveReady, pending: this.live.pending, ms: this.liveMs, readers: this.feed.readers, error: this.feed.lastError }, nowAt: this.lastNowAt || null, since: this.startedAt },
+      printsSkipped: this.printsSkipped,
+      liq: { crossedQueued: this.crossedQueued, oi: this.oiLast, boost: this.liqBoost, due: Object.fromEntries(this.liqDue), live: { ready: this.liveReady, pending: this.live.pending, ms: this.liveMs, readers: this.feed.readers, error: this.feed.lastError }, nowAt: this.lastNowAt || null, since: this.startedAt },
       hlc: { queued: this.hlc.size, done: this.hlc.done, failed: this.hlc.failed, lastError: this.hlc.lastError },
       pnl: { perpSince: this.perpSince, due: this.pnlDue, flows: this.pnlFlow.size, imported: this.pnlImported },
       levels: { open: this.levelState?.size ?? null, lastRows: this.levelRows },
@@ -937,6 +1069,7 @@ export class CohortTracker {
       if (m.equity != null) cur.equity = m.equity;
       if (m.label != null) cur.label = m.label;
       if (m.pnlRange) cur.pnlRange = m.pnlRange;
+      if (m.ranked) cur.ranked = true;
       out.set(a, cur);
     };
     const num = (v: number | undefined) => (v === undefined || Number.isNaN(v) ? null : v);
@@ -952,7 +1085,7 @@ export class CohortTracker {
           const p = pnl[i]!;
           const av = accountValue[i]!;
           put(addresses[i]!, {
-            pnl: Number.isNaN(p) ? null : p, equity: Number.isNaN(av) ? null : av, label: labels[i] ?? null,
+            pnl: Number.isNaN(p) ? null : p, equity: Number.isNaN(av) ? null : av, label: labels[i] ?? null, ranked: !Number.isNaN(av),
             pnlRange: { '1d': num(d1?.[i]), '7d': num(d7?.[i]), '30d': num(d30?.[i]) },
           });
         }
@@ -1192,10 +1325,13 @@ export class CohortTracker {
     return this.hlc;
   }
 
-  /** `total`: the member's account value (Hyperliquid: the leaderboard's), for needsSpot. */
+  /** `total`: the leaderboard's account value (Hyperliquid; null off it), for needsSpot. */
   private readOne(venue: Venue, address: string, total: number | null): Promise<PositionRead> {
     switch (venue) {
-      case 'hyperliquid': return hlPositions(address, undefined, (r) => needsSpot(total, r.equity, r.positions.length));
+      case 'hyperliquid': {
+        const prev = this.books.get('hyperliquid')?.get(address);
+        return hlPositions(address, undefined, (r) => needsSpot(total, r.equity, r.positions.length, { notional: readNotional(r), unified: prev?.collateral != null }));
+      }
       case 'tradexyz': return hlPositions(address, 'xyz');
       case 'sodex': return sodexPositions(address);
       case 'lighter': return lighterPositions(address, this.d.lighter.pacer);
@@ -1544,11 +1680,17 @@ export class CohortTracker {
         const traded = this.wanted.has(`${venue}|${address}`);
         // A wallet never read and never valued: the archive's notional orders it among the others.
         const size = Math.round(Math.log10(Math.max(1, eq || (book ? 0 : this.seeds.get(venue)?.get(address) ?? 0))) * 100);
-        // A tail wallet outside the sample is never read, traded or not (it would count twice).
-        if (!sampleRule(TAIL_RATE[venue], address, eq).counts) return;
+        // A tail wallet outside the sample is never read, traded or not (it would count twice) - but a
+        // book it already has (read while it was larger, or before the sample) still holds positions
+        // the live map counts: it is read again on its schedule, and a read that finds them closed drops them.
+        if (!sampleRule(TAIL_RATE[venue], address, eq).counts) {
+          const follows = streamed && (venue !== 'lighter' || (this.d.lighter.known?.(address) ?? false));
+          if (tailBookDue(book, now, follows ? reconcileTtl(eq, venue) : pollTtl(eq))) due.push([address, 300 + Math.round(Math.log10(Math.max(1, eq)) * 100)]);
+          return;
+        }
         const push = (prio: number) => {
           due.push([address, prio]);
-          if (venue === 'hyperliquid') totals.set(address, m?.equity ?? null);
+          if (venue === 'hyperliquid') totals.set(address, m?.ranked ? m.equity : null);
         };
         if (!book) {
           // Never read: one the stream saw trade, or one the archive found holding $1K or more, before
@@ -1578,8 +1720,11 @@ export class CohortTracker {
         else if (follows && eq >= floor && book.at < gap) push(900 + size);
         // Read before the last outage ended: it missed that outage's prints, at any size.
         else if (follows && book.at < this.staleBefore) push(900 + size);
-        // Read before the spot state was looked at, and the leaderboard says it may matter.
-        else if (venue === 'hyperliquid' && spotDue(book, m?.equity)) push(900 + size);
+        // Read before the spot state was looked at, and its equity uncertain: the leaderboard sees more
+        // first; off it (needsSpot), below the heatmap's refreshes, largest first.
+        else if (venue === 'hyperliquid' && spotDue(book, m?.ranked ? m.equity : null, notional(book))) push((m?.ranked ? 900 : 860) + size);
+        // A book of $250K+ a fill moved since its read: its figures are the model's until a read (liqChangedDue).
+        else if (book.pos.size && liqKnown(book) && this.holdsSodexCoin(book) && liqChangedDue(book, notional(book), now)) push(885 + size);
         // A large book whose liquidation prices sit on the heatmap: read again sooner than its reconcile (liqRefreshTtl).
         else if (book.pos.size && liqKnown(book) && age >= liqRefreshTtl(notional(book)) && this.holdsSodexCoin(book)) push(880 + size);
         else if (age >= (follows ? reconcileTtl(eq, venue) : pollTtl(eq))) push(400 + size);
@@ -1611,34 +1756,43 @@ export class CohortTracker {
       this.liqDue.set(venue, liqDue);
       due.sort((a, b) => b[1] - a[1]);
       this.dueLeft.set(venue, Math.max(0, due.length - (QUEUE_CAP - queued)));
-      for (const [address, prio] of due.slice(0, QUEUE_CAP - queued)) {
-        lane.add({
-          key: `coh:${venue}:${address}`,
-          prio,
-          run: async () => {
-            const r = await this.readOne(venue, address, totals.get(address) ?? null);
-            if (venue === 'lighter' && r.indices?.length) this.d.lighter.learn?.(address, r.indices);
-            const at = this.d.now();
-            const book: Book = {
-              equity: r.equity, at, collateral: r.collateral ?? null, spotAt: r.spotAt ?? null,
-              pos: new Map(r.positions.map((p) => [p.symbol, { szi: p.szi, entry: p.entry }])),
-            };
-            await this.liquidationSide(venue, r, books.get(address), book);
-            books.set(address, book);
-            // The read holds every spot trade before it: what waited for the account's mode is in it.
-            if (venue === 'hyperliquid') this.spotPending.delete(address);
-            this.live.touch(venue, address);
-            this.dirtyBooks.add(`${venue}|${address}`);
-            this.wanted.delete(`${venue}|${address}`);
-            for (const [sym, px] of r.marks) {
-              const mk = `${venue}|${sym}`;
-              if (!this.marks.has(mk)) { this.marks.set(mk, px); this.dirtyMarks.add(mk); }
-            }
-            return READ_COST[venue] + (r.extraCost ?? 0);
-          },
-        });
-      }
+      for (const [address, prio] of due.slice(0, QUEUE_CAP - queued)) this.queueRead(venue, address, prio, totals.get(address) ?? null);
     }
+  }
+
+  /**
+   * One book read, queued on its venue's lane (one task per wallet: a second ask raises its
+   * priority). The read replaces the book whole: what the venue no longer reports is gone.
+   * `total`: Hyperliquid's leaderboard account value (null off it), for needsSpot.
+   */
+  private queueRead(venue: Venue, address: string, prio: number, total: number | null): void {
+    const books = this.books.get(venue)!;
+    this.laneOf(venue).add({
+      key: `coh:${venue}:${address}`,
+      prio,
+      run: async () => {
+        const reqAt = this.d.now();
+        const r = await this.readOne(venue, address, total);
+        if (venue === 'lighter' && r.indices?.length) this.d.lighter.learn?.(address, r.indices);
+        const at = this.d.now();
+        const book: Book = {
+          equity: r.equity, at, reqAt, collateral: r.collateral ?? null, spotAt: r.spotAt ?? null,
+          pos: new Map(r.positions.map((p) => [p.symbol, { szi: p.szi, entry: p.entry }])),
+        };
+        await this.liquidationSide(venue, r, books.get(address), book);
+        books.set(address, book);
+        // The read holds every spot trade before it: what waited for the account's mode is in it.
+        if (venue === 'hyperliquid') this.spotPending.delete(address);
+        this.live.touch(venue, address);
+        this.dirtyBooks.add(`${venue}|${address}`);
+        this.wanted.delete(`${venue}|${address}`);
+        for (const [sym, px] of r.marks) {
+          const mk = `${venue}|${sym}`;
+          if (!this.marks.has(mk)) { this.marks.set(mk, px); this.dirtyMarks.add(mk); }
+        }
+        return READ_COST[venue] + (r.extraCost ?? 0);
+      },
+    });
   }
 
   /**
@@ -1716,6 +1870,7 @@ export class CohortTracker {
         }
         this.dirtyBooks.clear();
         s.putCohortBooks(rows);
+        s.setMeta(PRINTS_THROUGH_META, JSON.stringify(Object.fromEntries(this.printsThrough)));
       }
       if (this.liqAccDirty) {
         this.liqAccDirty = false;
@@ -1797,6 +1952,61 @@ export class CohortTracker {
   }
 
   /** Every LIVE_TICK_MS: price what changed (a bounded slice), and send the changes to the API. */
+  /**
+   * The books' size per coin and venue (the live engine's totals) against the venue's open
+   * interest (oiCheck.ts): over OI_EXCESS it is logged (once an hour per coin), shown in the
+   * status (cohorts.liq.oi) and the coin's holders on that venue are read again, oldest first.
+   */
+  private async checkOi(): Promise<void> {
+    if (!this.liveReady) return;
+    const totals = this.live.totals();
+    const markets = new Map<Venue, Map<string, number>>();
+    for (const v of VENUES) {
+      const m = await venueMarkets(v, { oi: true }).catch(() => null);
+      const per = new Map<string, number>();
+      for (const [symbol, x] of m?.oi ?? []) {
+        const c = liqCoin(symbol);
+        per.set(c, (per.get(c) ?? 0) + x.oi);
+      }
+      markets.set(v, per);
+    }
+    const rows = oiCheck(totals, (v, coin) => markets.get(v)?.get(coin) ?? null);
+    const now = this.d.now();
+    let queued = 0;
+    for (const r of oiOver(rows)) {
+      const k = `${r.venue}|${r.coin}`;
+      if (now - (this.oiLogged.get(k) ?? 0) >= OI_LOG_EVERY_MS) {
+        this.oiLogged.set(k, now);
+        console.warn(`cohorts: ${r.venue} ${r.coin} books hold ${(r.ratio * 100).toFixed(1)}% of the open interest (long ${r.long.toPrecision(6)}, short ${r.short.toPrecision(6)}, open ${r.oi.toPrecision(6)}; over ${Math.round(OI_EXCESS * 100)}%): reading its holders again`);
+      }
+      const books = this.books.get(r.venue);
+      if (!books) continue;
+      for (const address of oiRereads(books, r.coin, liqCoin, now, OI_REREAD_BATCH[r.venue])) {
+        const m = this.members.get(r.venue)?.get(address);
+        this.queueRead(r.venue, address, OI_PRIO, r.venue === 'hyperliquid' && m?.ranked ? m.equity : null);
+        queued++;
+      }
+    }
+    this.oiLast = { at: now, venues: oiStatus(rows), queued };
+  }
+
+  /** The books the engine found crossed: read again first (crossedPrio), a recent read excepted (crossedDue). */
+  private rereadCrossed(): void {
+    if (!this.crossed.size) return;
+    const now = this.d.now();
+    for (const [k, usd] of this.crossed) {
+      const i = k.indexOf('|');
+      const venue = k.slice(0, i) as Venue;
+      const address = k.slice(i + 1);
+      const book = this.books.get(venue)?.get(address);
+      if (!book || !crossedDue(book.at, now)) continue;
+      const m = this.members.get(venue)?.get(address);
+      this.queueRead(venue, address, crossedPrio(usd), venue === 'hyperliquid' && m?.ranked ? m.equity : null);
+      this.crossedQueued++;
+    }
+    this.crossed.clear();
+  }
+
   private liveTick(): void {
     const t0 = Date.now();
     this.refreshSodexCoins();
@@ -1810,6 +2020,7 @@ export class CohortTracker {
     // for 16 hours (the heatmap answered from that one).
     if (this.liveBarrier === null) this.liveBarrier = this.live.processed + this.live.pending;
     const left = this.live.work(LIVE_SLICE, liveBudget(this.live.pending));
+    this.rereadCrossed();
     if (!this.liveReady && (!left || this.live.processed >= this.liveBarrier)) this.liveReady = true;
     const deltas = this.live.flush();
     this.feed.send(deltas, { at: this.d.now(), ready: this.liveReady });

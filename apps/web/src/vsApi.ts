@@ -189,7 +189,7 @@ export const vsApi = {
     unwrap<LiqAt>(`/api/vs/liquidations/at${qs({ coin, venues: venues.join(','), t, from, to, side, wallets: wallets.length ? wallets.join(',') : undefined })}`, signal),
   /** The positions of some wallets (up to 10) on every coin, with their liquidation prices. */
   liquidationPositions: (wallets: readonly string[], venues: readonly Venue[], signal?: AbortSignal) =>
-    unwrap<{ wallets: string[]; positions: WalletLiq[] }>(`/api/vs/liquidations/positions${qs({ wallets: wallets.join(','), venues: venues.join(',') })}`, signal),
+    unwrap<{ wallets: string[]; asOf?: number; positions: WalletLiq[] }>(`/api/vs/liquidations/positions${qs({ wallets: wallets.join(','), venues: venues.join(',') })}`, signal),
 
   /** Every cohort for a set of venues (netted over them), under a sector / coin filter. */
   cohorts: (venues: readonly Venue[], f: CohortFilter, signal?: AbortSignal) =>

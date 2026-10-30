@@ -173,7 +173,7 @@ test('the spot state: unified collateral in stablecoins; a standard account has 
   assert.equal(needsSpot(252.9e6, 159e6, 17), true, 'the leaderboard sees far more than the perps value');
   assert.equal(needsSpot(1_050_000, 1_000_000, 3), false, 'within 10%');
   assert.equal(needsSpot(5e6, 0, 0), false, 'no positions: nothing to size');
-  assert.equal(needsSpot(null, 0, 3), false, 'off the leaderboard');
+  assert.equal(needsSpot(null, 0, 3), true, 'off the leaderboard: its equity is uncertain (unifiedSpot.test.ts)');
 });
 
 test('a book read empty or small, holding more since, is read again - not in a loop', () => {

@@ -391,7 +391,11 @@ const INDEXER_STATUS = {
   hlBudget: 870,
   cohorts: {
     lastError: `cohort flush: ${WALLET}`,
-    liq: { boost: false, live: { ready: true, pending: 12, ms: 40, error: `liq feed: ${WALLET}` }, nowAt: 1_790_000_000_900, since: 1_789_999_000_000 },
+    liq: {
+      boost: false, live: { ready: true, pending: 12, ms: 40, error: `liq feed: ${WALLET}` }, nowAt: 1_790_000_000_900, since: 1_789_999_000_000,
+      // The open interest check (checkOi): per venue the worst ratio, with coins and sizes that stay inside.
+      oi: { at: 1, queued: 3, venues: { lighter: { worst: 2.0544, over: 3, coins: [{ coin: 'SOL', ratio: 2.0544, long: 177_098, short: 326_713, oi: 159_030 }] }, hyperliquid: { worst: 1.0062, over: 0, coins: [] } } },
+    },
   },
   at: 1_790_000_001_000,
   pid: 4242,
@@ -750,7 +754,7 @@ test('index health: numbers and booleans picked by name - no address, error text
     lastBuildAt: 1_790_000_000_500,
     lastBuildMs: 432,
     errorSinceStart: true,
-    liq: { ready: true, pending: 12, nowAt: 1_790_000_000_900, since: 1_789_999_000_000 },
+    liq: { ready: true, pending: 12, nowAt: 1_790_000_000_900, since: 1_789_999_000_000, oiPct: { lighter: 205, hyperliquid: 101 } },
   });
   const sent = JSON.stringify(h);
   for (const secret of ['0x', WALLET, '4242', 'pid', 'valuescan-index', '/var/lib', '429', '1015', 'locked', 'hang up', 'rebuild', 'spent', 'hlBudget', '870', 'tracked', '5000']) {

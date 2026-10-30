@@ -123,8 +123,11 @@ const own = (p: LiqPos, px: number, t: Tiers) => p.szi * px - mmOf(t, Math.abs(p
 /**
  * Every position's liquidation price in one account (aligned with `pos`; null =
  * none, or not known). `cash` null = the account's cross cash is not known.
+ * `none`, when given, is filled aligned with `pos`: true where the null is "no
+ * liquidation price exists" (the venue says so, or the account carries the position
+ * to zero) rather than "not known" (no cash, no price, no margin rules).
  */
-export function accountLiqs(cash: number | null, pos: readonly LiqPos[], priceOf: PriceOf, tiersFor: TiersFor): Array<number | null> {
+export function accountLiqs(cash: number | null, pos: readonly LiqPos[], priceOf: PriceOf, tiersFor: TiersFor, none?: boolean[]): Array<number | null> {
   // The cross positions' part, once: each position takes its own share back out.
   let cross = 0;
   let crossOk = cash !== null && Number.isFinite(cash);
@@ -137,15 +140,28 @@ export function accountLiqs(cash: number | null, pos: readonly LiqPos[], priceOf
     cross += v;
     return v;
   });
+  if (none) none.length = 0;
   return pos.map((p, i) => {
-    if (p.fix != null) return p.fix > 0 ? p.fix : null;
+    if (none) none[i] = false;
+    if (p.fix != null) {
+      if (p.fix > 0) return p.fix;
+      if (none) none[i] = true;
+      return null;
+    }
     const t = tiersFor(p.symbol);
     if (!t?.length) return null;
     const px = priceOf(p.symbol);
     const now = px !== null && px > 0 ? Math.abs(p.szi) * px : undefined;
-    if (p.iso !== undefined) return p.iso === null ? null : solveLiq(t, p.szi, p.iso, now);
-    if (!crossOk) return null;
-    return solveLiq(t, p.szi, cash! + cross - parts[i]!, now);
+    let out: number | null;
+    if (p.iso !== undefined) {
+      if (p.iso === null) return null;
+      out = solveLiq(t, p.szi, p.iso, now);
+    } else {
+      if (!crossOk) return null;
+      out = solveLiq(t, p.szi, cash! + cross - parts[i]!, now);
+    }
+    if (out === null && none) none[i] = true;
+    return out;
   });
 }
 
@@ -344,14 +360,15 @@ export interface DriftStats {
   within01: number;
   within1: number;
   within5: number;
-  /** The same weighted by notional (USD at the venue's figure). */
+  /** The same weighted by notional (USD at the venue's figure): all, within 0.1% (absent before 2026-10-30), within 1%. */
   usd: number;
+  usd01?: number;
   usd1: number;
   /** Positions whose size the read found changed (prints the stream missed). */
   moved: number;
 }
 
-export const emptyDrift = (since: number): DriftStats => ({ since, checked: 0, matched: 0, n: 0, within01: 0, within1: 0, within5: 0, usd: 0, usd1: 0, moved: 0 });
+export const emptyDrift = (since: number): DriftStats => ({ since, checked: 0, matched: 0, n: 0, within01: 0, within1: 0, within5: 0, usd: 0, usd01: 0, usd1: 0, moved: 0 });
 
 /** Add one comparison: the book's figure `was` against the venue's `now` for a position of `usd` notional. */
 export function addDrift(d: DriftStats, was: number | null, now: number | null, usd: number): void {
@@ -359,7 +376,8 @@ export function addDrift(d: DriftStats, was: number | null, now: number | null, 
   d.n++;
   d.usd += usd;
   const err = now === null || was === null ? Infinity : Math.abs(was - now) / now;
-  if (err <= 0.001) d.within01++;
+  // usd01 only where the day began with it (a day saved before 2026-10-30 would show a part as the whole).
+  if (err <= 0.001) { d.within01++; if (d.usd01 !== undefined) d.usd01 += usd; }
   if (err <= 0.01) { d.within1++; d.usd1 += usd; }
   if (err <= 0.05) d.within5++;
 }

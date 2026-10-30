@@ -81,7 +81,8 @@ export class LiqFeedServer {
 
 export interface LiveVenue {
   b: Map<number, [number, number, number, number]>;
-  c: [number, number, number, number, number];
+  /** The engine's coverage (live.ts Cov; an older indexer sends the first five). */
+  c: number[];
   o: [number, number, number, number];
 }
 
@@ -197,7 +198,7 @@ export class LiqFeedState extends EventEmitter {
     const covered = new Set<Venue>();
     for (const [venue, x] of Object.entries(d.v) as Array<[Venue, NonNullable<LiveDelta['v'][Venue]>]>) {
       let v = c.v.get(venue);
-      if (!v) { v = { b: new Map(), c: [0, 0, 0, 0, 0], o: [0, 0, 0, 0] }; c.v.set(venue, v); }
+      if (!v) { v = { b: new Map(), c: [0, 0, 0, 0, 0, 0, 0, 0], o: [0, 0, 0, 0] }; c.v.set(venue, v); }
       const idx: number[] = [];
       for (const [i, l, s, ln, sn] of x.b) {
         if (!ln && !sn) v.b.delete(i);

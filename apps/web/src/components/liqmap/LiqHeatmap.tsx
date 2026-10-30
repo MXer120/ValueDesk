@@ -29,6 +29,8 @@ import { CANDLE_PANE_ID } from '../../chart/theme';
 import { HEAT_FLOOR, LIQ_HEAT, barMsOf, heatScale, liqHeatTemplate, snapshotFor, type HeatData, type HeatPoint } from '../../chart/liqHeatIndicator';
 import { coinOfSymbol, groupFor } from '../../chart/liqMap';
 import { shortAddr } from '../../format';
+import { asOfText } from '../../asOf';
+import { coverageText } from './coverageText';
 import { fmtFixed, fmtNum } from '../../numStyle';
 import './LiqHeatmap.css';
 
@@ -889,7 +891,8 @@ function Details({ coin, venues, pick, price, wallets, onClose }: { coin: string
       <dl>
         <dt>Price range</dt><dd>{fmtPx(pick.from)} – {fmtPx(pick.to)}</dd>
         <dt>From current</dt><dd>{price ? pct(mid / price - 1) : '–'}</dd>
-        <dt>As of</dt><dd>{new Date().toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</dd>
+        {/* When the positions listed were taken (the cohort load), not the time on this screen. */}
+        <dt>As of</dt><dd>{asOfText(d?.asOf)?.slice('As of '.length) ?? '…'}</dd>
       </dl>
       <div className="lqm-seg lqm-det-side">
         <button type="button" className={side === 'long' ? 'is-on' : ''} onClick={() => setSide('long')}>Longs</button>
@@ -927,28 +930,14 @@ function Coverage({ h, coin }: { h: Heat; coin: string }) {
   return (
     <div className="lqm-cov" aria-label="Coverage">
       {rows.map(([v, c]) => {
-        const held = (c.long + c.short) / 2;
-        const share = c.oi ? held / c.oi : null;
-        const known = c.long + c.short > 0 ? (c.longKnown + c.shortKnown) / (c.long + c.short) : null;
-        const acc = c.accuracy;
-        const matched = acc && acc.checked ? acc.matched / acc.checked : null;
-        const tracked = acc && acc.n ? acc.within1 / acc.n : null;
-        const title = [
-          `${VENUE_LABEL[v]} ${coin}: the books hold ${fmtSize(c.long)} long and ${fmtSize(c.short)} short in ${c.positions} positions`,
-          c.past > 0 ? `${fmtSize(c.past)} ${coin} more is past its liquidation price (being liquidated, or a book not caught up yet): not in the bars` : '',
-          c.oi !== null ? `against open interest of ${fmtSize(c.oi)} ${coin}${c.oiUsd ? ` (${fmtUsdShort(c.oiUsd)})` : ''}` : 'open interest unavailable',
-          known !== null ? `${fmtFixed(known * 100, 1)}% of that size has a known liquidation price` : '',
-          c.computed ? `${VENUE_LABEL[v]} publishes no liquidation price: computed from its maintenance margin rules` : '',
-          matched !== null ? `At reads ${acc!.window === 'today' ? 'today' : 'yesterday'}: ${acc!.matched} of ${acc!.checked} venue figures reproduced to 0.01%` : '',
-          tracked !== null ? `At re-reads: ${fmtFixed(tracked * 100, 1)}% of ${acc!.n} figures within 1% of the venue's new one (${acc!.moved} positions had changed size)` : '',
-          c.noRules ? 'The market list could not be read: no levels' : '',
-        ].filter(Boolean).join('\n');
+        // Honest labels (coverageText.ts): accuracy is the drift between reads; "priced" leaves out positions that never liquidate.
+        const t = coverageText(c, VENUE_LABEL[v], coin, fmtSize);
         return (
-          <span key={v} className="lqm-cov-row" title={title}>
+          <span key={v} className="lqm-cov-row" title={t.lines.join('\n')}>
             <VenueLogo venue={v} size={12} />
-            <span>{share === null ? 'OI –' : `${share > 1.05 ? '>100' : Math.round(share * 100)}% of OI`}</span>
-            {known !== null && known < 0.995 && <span className="lqm-cov-dim">{Math.round(known * 100)}% priced</span>}
-            <span className="lqm-cov-dim">{c.computed ? 'computed' : matched !== null ? `${fmtFixed(matched * 100, matched >= 0.9995 ? 0 : 1)}% exact` : 'checking'}</span>
+            <span>{t.share}</span>
+            {t.priced && <span className="lqm-cov-dim">{t.priced}</span>}
+            <span className="lqm-cov-dim">{t.accuracy}</span>
           </span>
         );
       })}

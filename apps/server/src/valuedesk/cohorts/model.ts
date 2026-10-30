@@ -729,6 +729,8 @@ export interface CohortsResponse {
   filter: CohortFilter;
   /** When positions were last folded in (ms); 0 while the first pass runs. */
   at: number;
+  /** When the cohort load this answer comes from was built (ms): at most read.ts STALE_MAX_MS old, and shown. */
+  asOf: number;
   cohorts: CohortCard[];
   coverage: Partial<Record<Venue, VenueCoverage>>;
   /** Every coin held in this scope, largest first, for the asset picker. */
@@ -750,6 +752,8 @@ export interface CohortDetailResponse {
   venues: Venue[];
   filter: CohortFilter;
   at: number;
+  /** When the cohort load was built (ms). */
+  asOf: number;
   range: CohortRange;
   cohort: CohortStat;
   series: CohortPoint[];
@@ -758,6 +762,8 @@ export interface CohortDetailResponse {
 
 export interface CohortWalletsResponse {
   total: number;
+  /** When the cohort load was built (ms). */
+  asOf: number;
   /** The range `pnlRange` and the win rate cover. */
   range: CohortRange;
   rows: CohortWalletRow[];

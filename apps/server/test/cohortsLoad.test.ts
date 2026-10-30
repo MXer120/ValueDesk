@@ -14,7 +14,7 @@ import { join } from 'node:path';
 
 import { IndexStore } from '../src/indexer/store.js';
 import { TAIL_RATE } from '../src/indexer/cohortTracker.js';
-import { KEEP_WARM_MS, LOAD_TTL_MS, _cohortLoad, cohortDetail, cohortFocus, cohortMap, cohortWallets, cohortsReady, cohortsRead, warmCohorts } from '../src/indexer/read.js';
+import { KEEP_WARM_MS, LOAD_TTL_MS, STALE_MAX_MS, _cohortLoad, cohortDetail, cohortFocus, cohortMap, cohortWallets, cohortsReady, cohortsRead, warmCohorts } from '../src/indexer/read.js';
 import {
   MARGIN_SIBLING, aggregate, cohortsOf, holdsPosition, perpEquity, sampledVenue, scopeKey, scopeWallets, sumCohorts, walletRow,
   type CohortFilter, type NettedWallet, type WalletVenue,
@@ -251,19 +251,36 @@ test('a rebuild that fails leaves the load in use and waits before it tries agai
   assert.equal(_cohortLoad.state().armed, true, 'the next attempt is on a timer, not in a loop');
 });
 
-test('once nobody has asked for a while the rebuilds stop; the next read is answered from the old load at once and a rebuild starts behind it', async () => {
+test('once nobody has asked for a while the rebuilds stop; a load older than STALE_MAX_MS is never served: cohortsReady rebuilds and waits', async () => {
   _cohortLoad.reset();
-  const before = cohortsRead(TWO, NONE);
+  const before = cohortsRead(TWO, NONE)!;
   _cohortLoad.age(KEEP_WARM_MS + 1_000);
   await _cohortLoad.rebuild();
   assert.deepEqual(_cohortLoad.built, { inPlace: 1, behind: 0 }, 'nothing was rebuilt for nobody');
   assert.equal(_cohortLoad.state().armed, false);
-  assert.deepEqual(cohortsRead(TWO, NONE), before, 'answered from the load it has: no build inside the request');
-  assert.deepEqual(_cohortLoad.built, { inPlace: 1, behind: 0 });
-  assert.equal(_cohortLoad.state().rebuilding, true, 'a rebuild from behind is under way');
+  assert.ok(Date.now() - _cohortLoad.state().at > STALE_MAX_MS, 'the load in use is past STALE_MAX_MS');
+  // The route waits first (valuedesk.ts): the answer comes from a fresh load, never the old one.
+  await cohortsReady();
+  assert.deepEqual(_cohortLoad.built, { inPlace: 1, behind: 1 }, 'rebuilt from behind, and waited for');
+  const now = cohortsRead(TWO, NONE)!;
+  assert.ok(Date.now() - now.asOf < 5_000, `asOf ${Date.now() - now.asOf} ms old`);
+  assert.ok(now.asOf > before.asOf);
+  assert.equal(_cohortLoad.state().armed, true, 'and the next one is scheduled');
+});
+
+test('a load within STALE_MAX_MS answers at once; a rebuild that outlasts the wait is not waited for past it', async () => {
+  _cohortLoad.reset();
+  cohortsRead(TWO, NONE);
+  _cohortLoad.age(STALE_MAX_MS - 5_000);
+  await cohortsReady();
+  assert.deepEqual(_cohortLoad.built, { inPlace: 1, behind: 0 }, 'young enough: nothing rebuilt');
+  _cohortLoad.age(KEEP_WARM_MS + STALE_MAX_MS);
+  const t0 = Date.now();
+  await cohortsReady(0); // a wait of nothing: answers from the load in use, a rebuild under way
+  assert.ok(Date.now() - t0 < 1_000);
+  assert.equal(_cohortLoad.state().rebuilding, true, 'the rebuild was started');
   while (_cohortLoad.state().rebuilding) await new Promise((r) => setTimeout(r, 5));
   assert.deepEqual(_cohortLoad.built, { inPlace: 1, behind: 1 });
-  assert.equal(_cohortLoad.state().armed, true, 'and the next one is scheduled');
 });
 
 test('at the start the default page is built from behind, so its first read builds nothing', async () => {

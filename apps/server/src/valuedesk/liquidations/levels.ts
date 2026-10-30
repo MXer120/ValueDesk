@@ -38,6 +38,8 @@ export interface LevelPos {
   symbol: string;
   szi: number;
   liq: number | null;
+  /** `liq` null because no liquidation price exists (the venue says so, or the account carries it to zero), not because it is not known. */
+  none?: boolean;
 }
 
 export interface AccountIn {
@@ -60,10 +62,11 @@ export function* coinLevels(
   for (const [address, a] of accounts) {
     const ps = a.positions;
     if (!ps?.length || !ps.some((p) => liqCoin(p.symbol) === coin)) continue;
-    const liq = accountLiqs(a.cash ?? null, ps, priceOf, tiersFor);
+    const none: boolean[] = [];
+    const liq = accountLiqs(a.cash ?? null, ps, priceOf, tiersFor, none);
     for (let i = 0; i < ps.length; i++) {
       const p = ps[i]!;
-      if (liqCoin(p.symbol) === coin && p.szi) yield { venue, address, symbol: p.symbol, szi: p.szi, liq: liq[i] ?? null };
+      if (liqCoin(p.symbol) === coin && p.szi) yield { venue, address, symbol: p.symbol, szi: p.szi, liq: liq[i] ?? null, ...(none[i] ? { none: true } : {}) };
     }
   }
 }
@@ -149,12 +152,14 @@ export interface LiqNowVenue {
   /** [bucket index, long USD, short USD, long n, short n] (sizes are USD / price within the 0.02% bucket). */
   b: Array<[number, number, number, number, number]>;
   /**
-   * [long size, short size, long size priced, short size priced, positions, past]:
+   * [long size, short size, long size priced, short size priced, positions, past, long none, short none]:
    * `past` is the size whose liquidation price the price has already crossed (a long
    * priced above it, a short below) - being liquidated, or a book a print has not
-   * reached yet. It is counted here and left out of the buckets.
+   * reached yet. It is counted here and left out of the buckets (the live engine
+   * writes 0 and leaves it to the reader: liqRead.ts heatOf). `none`: size for which
+   * no liquidation price exists (rows before 2026-10-30 end at `past`).
    */
-  c: [number, number, number, number, number, number];
+  c: [number, number, number, number, number, number, number, number];
   /** Outside the buckets: [long USD, short USD, long n, short n]. */
   o: [number, number, number, number];
 }
@@ -221,7 +226,7 @@ export class LevelsBuilder {
       for (const [venue, x] of c.v) {
         v[venue] = {
           b: [...x.b].sort((a, b) => a[0] - b[0]).map(([i, b]) => [i, Math.round(b[0]!), Math.round(b[1]!), b[2]!, b[3]!]),
-          c: [sig(x.c[0]!), sig(x.c[1]!), sig(x.c[2]!), sig(x.c[3]!), x.c[4]!, sig(x.c[5]!)],
+          c: [sig(x.c[0]!), sig(x.c[1]!), sig(x.c[2]!), sig(x.c[3]!), x.c[4]!, sig(x.c[5]!), 0, 0],
           o: [Math.round(x.o[0]!), Math.round(x.o[1]!), x.o[2]!, x.o[3]!],
         };
       }

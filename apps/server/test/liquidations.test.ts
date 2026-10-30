@@ -11,7 +11,7 @@ import {
 } from '../src/valuedesk/liquidations/math.js';
 import { LevelsBuilder, bucketize, coinLevels, liqCoin, snapOfNow, type LevelPos } from '../src/valuedesk/liquidations/levels.js';
 import { hlTiers, lighterMarkets, sodexTiers } from '../src/valuedesk/liquidations/rules.js';
-import { applyFill, liqBacklogPrio, liqRefreshTtl, type Book } from '../src/indexer/cohortTracker.js';
+import { FILLED_REREAD_MIN, FILLED_REREAD_MS, applyFill, liqBacklogPrio, liqChangedDue, liqRefreshTtl, type Book } from '../src/indexer/cohortTracker.js';
 import { IndexStore } from '../src/indexer/store.js';
 
 const near = (a: number | null, b: number, tol = 1e-6) => assert.ok(a !== null && Math.abs(a - b) <= tol * Math.abs(b), `${a} vs ${b}`);
@@ -198,7 +198,7 @@ test('minute rows: every coin per venue, past liquidations kept out, snapshots f
   assert.equal(btc.st, 0.2);
   const hl = btc.v.hyperliquid!;
   assert.deepEqual(hl.b, [[4000, 800, 0, 1, 0]]);
-  assert.deepEqual(hl.c, [5, 0, 3, 0, 4, 1]);
+  assert.deepEqual(hl.c, [5, 0, 3, 0, 4, 1, 0, 0], "no none sizes: LevelsBuilder is given none");
   assert.deepEqual(hl.o, [100, 0, 1, 0]);
   assert.deepEqual(btc.v.lighter!.b, [[5500, 0, 1100, 0, 1]]);
   const snap = snapOfNow(btc);
@@ -223,6 +223,8 @@ test('drift counts', () => {
   addDrift(d, 100, 103, 1000);
   addDrift(d, null, 50, 10);
   assert.deepEqual([d.n, d.within01, d.within1, d.within5, d.usd, d.usd1], [3, 1, 1, 2, 2010, 1000]);
+  // By USD within 0.1% too (the coverage line shows it beside the count; 2026-10-30).
+  assert.equal(d.usd01, 1000);
 });
 
 test('store: books keep the cash and the extras; snapshots thin and prune', () => {
@@ -270,13 +272,26 @@ test('books without liquidation data are read by what they add to the map: notio
 });
 
 test('large books are read again for their liquidation prices sooner than their reconcile', () => {
-  assert.equal(liqRefreshTtl(10_000_000), 30 * 60_000);
-  assert.equal(liqRefreshTtl(2_000_000), 2 * 60 * 60_000);
-  assert.equal(liqRefreshTtl(500_000), Infinity);
+  // 2026-10-30: $50K-$3M positions read at their reconcile (3-7 days) were 18 of 30 within 0.1% of
+  // Hyperliquid's figure, the $5M+ ones read every 30 min 31 of 36. Every tier is read sooner now.
+  assert.equal(liqRefreshTtl(10_000_000), 15 * 60_000);
+  assert.equal(liqRefreshTtl(2_000_000), 60 * 60_000);
+  assert.equal(liqRefreshTtl(500_000), 6 * 60 * 60_000, 'was never: its reconcile, 3 days');
+  assert.equal(liqRefreshTtl(80_000), 24 * 60 * 60_000, 'was never: its reconcile, 7 days');
+  assert.equal(liqRefreshTtl(20_000), Infinity);
+});
+
+test('a $250K+ book a fill moved since its read is read again 15 minutes after it, once per read', () => {
+  const at = 1_000_000;
+  assert.equal(liqChangedDue({ at }, 1e6, at + FILLED_REREAD_MS), false, 'no fill since the read');
+  assert.equal(liqChangedDue({ at, filledAt: at + 5 }, 1e6, at + FILLED_REREAD_MS - 1), false, 'too soon after the read');
+  assert.equal(liqChangedDue({ at, filledAt: at + 5 }, 1e6, at + FILLED_REREAD_MS), true);
+  assert.equal(liqChangedDue({ at, filledAt: at + 5 }, FILLED_REREAD_MIN - 1, at + FILLED_REREAD_MS), false, 'too small');
+  assert.equal(liqChangedDue({ at: at + 10, filledAt: at + 5 }, 1e6, at + FILLED_REREAD_MS * 2), false, 'the read came after the fill');
 });
 
 test('a snapshot keeps no level the price had crossed: no long above it, no short below', () => {
-  const row = { p: 1000, st: 1, v: { hyperliquid: { b: [[1200, 50, 0, 1, 0], [800, 0, 70, 0, 1], [900, 30, 0, 1, 0], [1100, 0, 40, 0, 1]] as Array<[number, number, number, number, number]>, c: [0, 0, 0, 0, 0, 0] as [number, number, number, number, number, number], o: [0, 0, 0, 0] as [number, number, number, number] } } };
+  const row = { p: 1000, st: 1, v: { hyperliquid: { b: [[1200, 50, 0, 1, 0], [800, 0, 70, 0, 1], [900, 30, 0, 1, 0], [1100, 0, 40, 0, 1]] as Array<[number, number, number, number, number]>, c: [0, 0, 0, 0, 0, 0, 0, 0] as [number, number, number, number, number, number, number, number], o: [0, 0, 0, 0] as [number, number, number, number] } } };
   const snap = snapOfNow(row);
   const cells = (snap.v.hyperliquid ?? []).map(([i, l, s]) => [i * snap.st, l, s]);
   assert.deepEqual(cells, [[900, 30, 0], [1100, 0, 40]]);

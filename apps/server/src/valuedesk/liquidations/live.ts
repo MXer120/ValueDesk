@@ -35,14 +35,20 @@ export interface LiveAccount {
   positions: ReadonlyArray<LiqPos>;
 }
 
-/** What one position added: coin, epoch, venue, long, size, then where (bucket index, or -1 outside, -2 not priced) and USD. */
+/**
+ * What one position added: coin, epoch, venue, long, size, then where (bucket index, or -1
+ * outside, -2 not priced, -3 no liquidation price exists) and USD.
+ */
 type Entry = { coin: string; ep: number; long: boolean; a: number; at: number; usd: number };
 
 interface VenueAgg {
   /** bucket index -> [long USD, short USD, long n, short n]. */
   b: Map<number, [number, number, number, number]>;
-  /** [long size, short size, long size priced, short size priced, positions]. */
-  c: [number, number, number, number, number];
+  /**
+   * [long size, short size, long size priced, short size priced, positions, past (0: the reader's,
+   * liqRead.ts heatOf), long size with no liquidation price, short size with none] - as liq_now (levels.ts).
+   */
+  c: Cov;
   /** Outside the buckets: [long USD, short USD, long n, short n]. */
   o: [number, number, number, number];
 }
@@ -72,8 +78,12 @@ export interface LiveDelta {
   ep: number;
   /** True: every bucket of the coin is here (a new layout); false: only the changed ones. */
   whole: boolean;
-  v: Partial<Record<Venue, { b: Array<[number, number, number, number, number]>; c?: [number, number, number, number, number]; o?: [number, number, number, number] }>>;
+  v: Partial<Record<Venue, { b: Array<[number, number, number, number, number]>; c?: Cov; o?: [number, number, number, number] }>>;
 }
+
+/** The coverage tuple (VenueAgg.c). */
+export type Cov = [number, number, number, number, number, number, number, number];
+const emptyCov = (): Cov => [0, 0, 0, 0, 0, 0, 0, 0];
 
 const MOVE = NOW_STEP;
 const round = (x: number) => Math.round(x);
@@ -103,6 +113,13 @@ export class LiqLive {
     priceOfCoin: (coin: string) => number | null;
     /** The coins kept (the ones SoDEX lists); others are priced as part of an account's margin, never bucketed. */
     wanted?: (coin: string) => boolean;
+    /**
+     * An account priced with a level the price has already crossed (a long at or above its
+     * market's price, a short at or below): its book is stale - a liquidation the stream missed,
+     * margin moved, a fee or a transfer - and the venue should be asked again. `usd`: the crossed
+     * positions' notional at their levels. Called once per pricing of the account.
+     */
+    crossed?: (venue: Venue, address: string, usd: number) => void;
   }) {}
 
   /** The account changed (a print, a read): re-priced at the next flush. */
@@ -202,7 +219,7 @@ export class LiqLive {
           else { sent.b.delete(i); b.push([i, 0, 0, 0, 0]); }
         }
         const e: NonNullable<LiveDelta['v'][Venue]> = { b };
-        const cov: [number, number, number, number, number] = [sig(x.c[0]), sig(x.c[1]), sig(x.c[2]), sig(x.c[3]), x.c[4]];
+        const cov: Cov = [sig(x.c[0]), sig(x.c[1]), sig(x.c[2]), sig(x.c[3]), x.c[4], 0, sig(x.c[6]), sig(x.c[7])];
         const ck = cov.join(',');
         if (c.whole || (c.dirtyC.has(venue) && ck !== sent.c)) {
           e.c = cov;
@@ -232,11 +249,22 @@ export class LiqLive {
         if (x.c[4] <= 0) continue; // a venue whose last position here closed
         v[venue] = {
           b: [...x.b].sort((m, n) => m[0] - n[0]).map(([i, y]) => [i, round(y[0]), round(y[1]), y[2], y[3]]),
-          c: [sig(x.c[0]), sig(x.c[1]), sig(x.c[2]), sig(x.c[3]), x.c[4], 0],
+          c: [sig(x.c[0]), sig(x.c[1]), sig(x.c[2]), sig(x.c[3]), x.c[4], 0, sig(x.c[6]), sig(x.c[7])],
           o: [round(x.o[0]), round(x.o[1]), x.o[2], x.o[3]],
         };
       }
       out.set(coin, { p: this.o.priceOfCoin(coin) ?? c.p0, st: c.st, v });
+    }
+    return out;
+  }
+
+  /** Per coin and venue, the size the books hold: [long, short] in coins (the open interest check). */
+  totals(): Map<string, Map<Venue, [number, number]>> {
+    const out = new Map<string, Map<Venue, [number, number]>>();
+    for (const [coin, c] of this.coins) {
+      const m = new Map<Venue, [number, number]>();
+      for (const [venue, x] of c.v) if (x.c[4] > 0) m.set(venue, [x.c[0], x.c[1]]);
+      if (m.size) out.set(coin, m);
     }
     return out;
   }
@@ -277,12 +305,13 @@ export class LiqLive {
     const c = this.coins.get(e.coin);
     if (!c || c.ep !== e.ep) return; // laid out again since: nothing of it is in the new layout
     let x = c.v.get(venue);
-    if (!x) { x = { b: new Map(), c: [0, 0, 0, 0, 0], o: [0, 0, 0, 0] }; c.v.set(venue, x); }
+    if (!x) { x = { b: new Map(), c: emptyCov(), o: [0, 0, 0, 0] }; c.v.set(venue, x); }
     const L = e.long;
     x.c[L ? 0 : 1] += sign * e.a;
     x.c[4] += sign;
     c.dirtyC.add(venue);
     if (e.at === -2) return;
+    if (e.at === -3) { x.c[L ? 6 : 7] += sign * e.a; return; }
     x.c[L ? 2 : 3] += sign * e.a;
     if (e.at === -1) {
       x.o[L ? 0 : 1] += sign * e.usd;
@@ -313,7 +342,18 @@ export class LiqLive {
       for (const set of this.holders.values()) set.delete(key);
       return;
     }
-    const liq = acct.priced ? accountLiqs(acct.cash, ps, (s) => this.o.priceOf(venue, s), (s) => this.o.tiersOf(venue, s)) : ps.map(() => null);
+    const none: boolean[] = [];
+    const liq = acct.priced ? accountLiqs(acct.cash, ps, (s) => this.o.priceOf(venue, s), (s) => this.o.tiersOf(venue, s), none) : ps.map(() => null);
+    // A level the price has crossed: the book is stale (crossed). Every position counts, mapped or not.
+    if (this.o.crossed && acct.priced) {
+      let usd = 0;
+      ps.forEach((p, j) => {
+        const l = liq[j];
+        const px = l ? this.o.priceOf(venue, p.symbol) : null;
+        if (l && px && px > 0 && (p.szi > 0 ? l >= px : l <= px)) usd += Math.abs(p.szi) * l;
+      });
+      if (usd > 0) this.o.crossed(venue, address, usd);
+    }
     const entries: Entry[] = [];
     ps.forEach((p, j) => {
       const coinName = liqCoin(p.symbol);
@@ -325,7 +365,7 @@ export class LiqLive {
       h.add(key);
       const l = liq[j] ?? null;
       const a = Math.abs(p.szi);
-      const at = l === null || !(l > 0) ? -2 : l < c.lo || l >= c.hi ? -1 : Math.floor(l / c.st);
+      const at = l === null || !(l > 0) ? (none[j] ? -3 : -2) : l < c.lo || l >= c.hi ? -1 : Math.floor(l / c.st);
       const e: Entry = { coin: coinName, ep: c.ep, long: p.szi > 0, a, at, usd: l ? a * l : 0 };
       this.apply(venue, e, 1);
       entries.push(e);

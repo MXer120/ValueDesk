@@ -665,7 +665,14 @@ export interface IndexerHealth {
    * accounts wait, when it last wrote the levels the API falls back on (null: not since its
    * start), and when it started. Null: the indexer runs no cohorts.
    */
-  liq: { ready: boolean; pending: number | null; nowAt: number | null; since: number | null } | null;
+  liq: {
+    ready: boolean; pending: number | null; nowAt: number | null; since: number | null;
+    /**
+     * Per venue, the books' largest size on one side of a coin against the venue's open interest,
+     * in percent (cohortTracker.ts checkOi; over 105 is reconciled). Absent before 2026-10-30.
+     */
+    oiPct?: Record<string, number | null>;
+  } | null;
 }
 
 /** A venue or lane name. Never an address (0x...), a path or anything long. */
@@ -728,7 +735,13 @@ function liqHealth(cohorts: unknown): IndexerHealth['liq'] {
   const liq = isRecord(cohorts) && isRecord(cohorts.liq) ? cohorts.liq : null;
   if (!liq) return null;
   const live = isRecord(liq.live) ? liq.live : {};
-  return { ready: live.ready === true, pending: amount(live.pending), nowAt: stamp(liq.nowAt), since: stamp(liq.since) };
+  const out: NonNullable<IndexerHealth['liq']> = { ready: live.ready === true, pending: amount(live.pending), nowAt: stamp(liq.nowAt), since: stamp(liq.since) };
+  const oi = isRecord(liq.oi) && isRecord(liq.oi.venues) ? liq.oi.venues : null;
+  if (oi) {
+    out.oiPct = {};
+    for (const [venue, v] of namedEntries(oi)) out.oiPct[venue] = amount(isRecord(v) && typeof v.worst === 'number' ? v.worst * 100 : null);
+  }
+  return out;
 }
 
 // --- response headers --------------------------------------------------------------------

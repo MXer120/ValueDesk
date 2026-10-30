@@ -467,6 +467,8 @@ export async function valuedeskRoutes(app: FastifyInstance) {
       const coin = cohortFilter(q).coin;
       if (!coin) throw bad('coin= is required');
       const ws = walletsOf(q);
+      // The wallet filter reads the cohort load: never an old one (read.ts STALE_MAX_MS).
+      if (ws.length) await cohortsReady();
       const body = ws.length ? await liqHeatmapOf(coin, cohortVenues(q), ws) : await liqHeatmap(coin, cohortVenues(q));
       if (!body) return fail(reply, new NotAvailable('The index is not running yet'));
       return { ok: true, ...body };
@@ -485,6 +487,7 @@ export async function valuedeskRoutes(app: FastifyInstance) {
       if (!coin) throw bad('coin= is required');
       if (q.side !== 'long' && q.side !== 'short') throw bad('side= must be long or short');
       if (!(from >= 0) || !(to > from)) throw bad('from= and to= must be a price range');
+      await cohortsReady();
       const body = await liqWallets(coin, cohortVenues(q), q.side, from, to, 25, walletsOf(q));
       if (!body) return fail(reply, new NotAvailable('The index is not running yet'));
       return { ok: true, ...body };
@@ -499,9 +502,10 @@ export async function valuedeskRoutes(app: FastifyInstance) {
       const q = req.query as Q;
       const ws = walletsOf(q);
       if (!ws.length) throw bad('wallets= is required: up to 10 0x addresses, comma separated');
+      await cohortsReady();
       const body = await walletLiqs(ws, cohortVenues(q));
       if (!body) return fail(reply, new NotAvailable('The index is not running yet'));
-      return { ok: true, wallets: ws, positions: body };
+      return { ok: true, wallets: ws, asOf: body.asOf, positions: body.positions };
     } catch (e) {
       return fail(reply, e);
     }

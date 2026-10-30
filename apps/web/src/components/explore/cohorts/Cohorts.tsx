@@ -24,6 +24,7 @@ import { SCAN_VENUES, vsApi, type Venue } from '../../../vsApi';
 import { useStored, useSymbols } from '../../../hooks';
 import { DASH, marketName, shortAddr } from '../../../format';
 import { winRateView } from '../../../winRateView';
+import { asOfText } from '../../../asOf';
 import { fmtFixed } from '../../../numStyle';
 import { emptyCohortsLine } from './emptyCopy';
 import { CoinIcon } from '../../CoinIcon';
@@ -190,7 +191,8 @@ function Overview({ data, onOpen }: { data: CohortsResponse | null; onOpen: (id:
     ...(v.show('overview', 'pnl') ? PNL_COHORTS : []),
     ...(v.show('overview', 'size') ? SIZE_COHORTS : []),
   ].filter((d) => v.cohortOn(d.id) && isEmpty(d)));
-  return pnl || size ? <>{line && <p className="lbp-note">{line}</p>}{pnl}{size}</> : <AllHidden />;
+  const asOf = asOfText(data?.asOf);
+  return pnl || size ? <>{line && <p className="lbp-note">{line}</p>}{pnl}{size}{asOf && <p className="lbp-note coh-asof">{asOf}</p>}</> : <AllHidden />;
 }
 
 /* --- one cohort ----------------------------------------------------------------------------- */
@@ -314,6 +316,7 @@ function WalletsTable({ venues, id, filter, range, onScan }: { venues: readonly 
           </tbody>
         </table>
       </div>
+      {asOfText(data.asOf) && <p className="lbp-note coh-asof">{asOfText(data.asOf)}</p>}
       {data.rows.length < data.total && (
         <div className="acct-more">
           <button type="button" className="acct-morebtn" disabled={r.loading} onClick={() => setPages((p) => p + 1)}>
