@@ -104,6 +104,24 @@ export function fmtQuote(
     : `${sign}${body} ${coinLabel(quoteCoin) || ''}`.trim();
 }
 
+/**
+ * An exact decimal string ("1052.6375": price x size as decimal strings) as a quote
+ * value: grouped, at least two decimals, every further decimal it really has
+ * (trailing zeros dropped), in the app's number format. Five figures and up: no cents.
+ */
+export function fmtExactQuote(v: string, quoteCoin: string | undefined | null): string {
+  const n = Number(v);
+  if (Number.isFinite(n) && Math.abs(n) >= USD_WHOLE_FROM) return fmtQuote(n, quoteCoin, 0);
+  const neg = v.startsWith('-');
+  const [w = '0', f = ''] = (neg ? v.slice(1) : v).split('.');
+  const frac = f.replace(/0+$/, '').padEnd(2, '0');
+  // Written in en-US, then in the user's format: "1.052,6375" by default. (It patched
+  // "0.00" inside fmtQuote(0) before, which in the default format is "0,00": "$0,00".)
+  const body = localize(`${w.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}.${frac}`);
+  const sign = neg ? MINUS : '';
+  return isDollarQuote(quoteCoin) ? `${sign}$${body}` : `${sign}${body} ${coinLabel(quoteCoin) || ''}`.trim();
+}
+
 export function fmtPct(v: number | string | undefined | null, dp = 2): string {
   if (v === undefined || v === null || v === '') return DASH;
   const n = typeof v === 'number' ? v : Number.parseFloat(v);

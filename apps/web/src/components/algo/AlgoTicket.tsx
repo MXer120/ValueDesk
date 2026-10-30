@@ -120,6 +120,7 @@ import { engineKind, fmtDuration, menuName, usesAmount, type UiKind } from './me
 import { AlgoIcon } from './AlgoIcon';
 import { feeRange, feeSplit, feeWords } from './fees';
 import { SlideConfirm } from './SlideConfirm';
+import { errorsInWords } from './errorWords';
 import '../SettingsMenu.css';
 import './algo.css';
 
@@ -540,7 +541,9 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
   // Field errors are shown at once; the ticket's own Amount speaks for itself when it is empty.
   // A typed DCA list with an item that cannot be read (or may be two prices run together): said under the box, and nothing starts.
   const listError = kind === 'dca' && d.dcaLevels === 'list' ? parsePriceList(d.dcaPrices).error : null;
-  const fieldErrors: Record<string, string> = listError ? { ...check.errors, prices: listError } : check.errors;
+  // In the units the fields show (minutes, %, bp), not the engine's ms and fractions (errorWords.ts).
+  const worded = useMemo(() => errorsInWords(check.errors), [check.errors]);
+  const fieldErrors: Record<string, string> = listError ? { ...worded, prices: listError } : worded;
   const inline = INLINE_ERRORS[kind];
   const err = (...keys: string[]) => errFor(fieldErrors, ...keys);
   const restErrors = [
