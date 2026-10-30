@@ -564,6 +564,13 @@ async function main(): Promise<number> {
   return tally.failed || stopRun ? 1 : 0;
 }
 
+// The engine's SoDEX client waits (its send pump, retries, sleeps) on timers that never keep a process
+// alive - right for a server, not for this runner: once a restart scenario killed the executor (its child
+// process was the last handle), a wait on one of them left Node with nothing to do and it exited 0 in the
+// middle of the scenario (live run 2026-10-30, copym.restart-close, 2 of 3 attempts). The runner is kept
+// alive until main() settles; every way out ends in process.exit.
+setInterval(() => undefined, 60_000);
+
 main().then(
   (code) => process.exit(code),
   async (e) => {
