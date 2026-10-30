@@ -509,7 +509,10 @@ export const ALGO_MATRIX_SCENARIOS: Scenario[] = [
         then: { type: 'limit', quantity: await t.qty(t.U), price: t.tick(q.bid * 0.99, t.main.name, 'down'), postOnly: false },
       });
       const v = await t.waitAlgo(v0.algo.id, 'it fired and placed the limit', done, { timeoutMs: 90_000, inconclusive: true });
-      t.check(Date.now() >= at - 1_000, 'not before its time');
+      // The executor's clock decides the time condition (ValueDesk's may run a few seconds off this machine's); the
+      // other three hold at once, so firing at about the time (not at once) is what shows the time condition held it back.
+      const firedAt = v.algo.endedAt ?? Date.now();
+      t.check(firedAt >= at - 5_000, `not before its time (fired ${Math.round((firedAt - v.algo.createdAt) / 1000)} s after its start, the time ${Math.round((at - v.algo.createdAt) / 1000)} s)`);
       const rest = await resting(t, v0.algo.id, 1, 'the limit rests after the conditional is done', 20_000);
       await t.live('as GTC', async () => t.check(rest[0]!.tif === 'GTC', rest[0]!.tif));
       t.check(v.algo.status === 'done', 'done');
