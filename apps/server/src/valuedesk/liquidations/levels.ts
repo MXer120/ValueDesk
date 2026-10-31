@@ -160,10 +160,19 @@ export function trimRow<T extends number[]>(r: T, min = 5): T {
 
 // --- snapshots (liq_hist) -----------------------------------------------------------------
 
+/** Levels between these shares of the price are kept (NOW_LO / NOW_HI, declared before the snapshots use them). */
+const NOW_LO_SHARE = 0.2;
+const NOW_HI_SHARE = 3;
+
 /** A snapshot's bucket width, as a share of the price then. */
 export const HIST_STEP = 0.0025;
-/** A snapshot keeps levels within this share of the price either side. */
-export const HIST_SPAN = 0.4;
+/**
+ * A snapshot keeps the levels the minute rows keep: NOW_LO to NOW_HI times the price. Until
+ * 2026-10-31 only 0.6x-1.4x, so Historical zoomed out ran out of levels where Live still had them
+ * (owner: "as far as one zoomed out it just ended"). Far levels are few: the rows stay sparse.
+ */
+export const HIST_LO = NOW_LO_SHARE;
+export const HIST_HI = NOW_HI_SHARE;
 
 /** One coin's snapshot: price, step, and per venue its rows (SnapRow: [bucket index, long USD, short USD, ...bands from 2026-10-31]). */
 export interface LiqSnap {
@@ -183,8 +192,8 @@ export interface LiqSnap {
  */
 export const NOW_STEP = 0.0002;
 /** Levels between these shares of the price are bucketed; the rest is counted as outside. */
-export const NOW_LO = 0.2;
-export const NOW_HI = 3;
+export const NOW_LO = NOW_LO_SHARE;
+export const NOW_HI = NOW_HI_SHARE;
 
 /** One coin's levels on one venue: buckets, what the books hold, what lies outside. */
 export interface LiqNowVenue {
@@ -283,11 +292,11 @@ export class LevelsBuilder {
   }
 }
 
-/** A snapshot for the historical view from a coin's minute row: HIST_STEP buckets within HIST_SPAN of the price. */
+/** A snapshot for the historical view from a coin's minute row: HIST_STEP buckets from HIST_LO to HIST_HI times the price. */
 export function snapOfNow(row: LiqNow): LiqSnap {
   const st = niceStep(row.p * HIST_STEP);
-  const lo = row.p * (1 - HIST_SPAN);
-  const hi = row.p * (1 + HIST_SPAN);
+  const lo = row.p * HIST_LO;
+  const hi = row.p * HIST_HI;
   const v: LiqSnap['v'] = {};
   for (const [venue, x] of Object.entries(row.v) as Array<[Venue, LiqNowVenue]>) {
     const m = new Map<number, number[]>();

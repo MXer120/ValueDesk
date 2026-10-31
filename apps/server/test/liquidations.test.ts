@@ -297,6 +297,13 @@ test('a snapshot keeps no level the price had crossed: no long above it, no shor
   assert.deepEqual(cells, [[900, 30, 0], [1100, 0, 40]]);
 });
 
+test('a snapshot keeps the levels as far out as the minute row does (0.2x-3x): until 2026-10-31 only 0.6x-1.4x, and Historical ran out zoomed out', () => {
+  const row = { p: 1000, st: 1, v: { hyperliquid: { b: [[250, 20, 0, 1, 0], [500, 30, 0, 1, 0], [1500, 0, 40, 0, 1], [2500, 0, 50, 0, 1], [100, 9, 0, 1, 0], [3500, 0, 9, 0, 1]] as Array<[number, number, number, number, number]>, c: [0, 0, 0, 0, 0, 0, 0, 0] as [number, number, number, number, number, number, number, number], o: [0, 0, 0, 0] as [number, number, number, number] } } };
+  const snap = snapOfNow(row);
+  const cells = (snap.v.hyperliquid ?? []).map(([i, l, s]) => [i * snap.st, l, s]);
+  assert.deepEqual(cells, [[250, 20, 0], [500, 30, 0], [1500, 0, 40], [2500, 0, 50]], 'a long at 0.25x and a short at 2.5x kept; 0.1x and 3.5x outside, as in the minute row');
+});
+
 test('a fill fee comes out of the cross cash, or out of an isolated position margin, and the account value', () => {
   const book: FillBook & { equity: number } = { cash: 10_000, equity: 10_000, pos: new Map([['BTC', { szi: 1, entry: 80_000 }], ['ETH', { szi: 2, entry: 3_000, iso: 600, lev: 10 }]]) };
   feeCash(book, 'BTC', 36);
