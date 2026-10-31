@@ -24,6 +24,7 @@ import { tailCountRate, tailOf } from './cohortTracker.js';
 import { labelMatches, shownLabel } from '../valuedesk/labels.js';
 import { winRateOf } from '../valuedesk/winRate.js';
 import { sampledVenue, COHORT_RANGES, type CohortWalletRow as WalletRow } from '../valuedesk/cohorts/model.js';
+import { isInternal } from '../valuedesk/internalWallets.js';
 
 export interface IndexState {
   /** Every board behind this page is final (no unchecked wallet outranks a pick). */
@@ -439,6 +440,8 @@ function* loadSteps(s: IndexStore, now: number, ahead: ReadonlyArray<{ venues: r
     // A tail still being read in full counts as its old sample until (nearly) all of it is (cohortTracker tailCountRate).
     const rate = tailCountRate(venue, tailOf(members, (a) => books.has(a)));
     for (const address of new Set([...members.keys(), ...books.keys()])) {
+      // A venue's own accounts are neither in a cohort nor on the map (internalWallets.ts).
+      if (isInternal(venue, address)) continue;
       const mem = members.get(address);
       const b = books.get(address);
       const w = sampledVenue(rate, address, mem && {

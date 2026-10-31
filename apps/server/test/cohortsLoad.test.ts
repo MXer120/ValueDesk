@@ -14,6 +14,7 @@ import { join } from 'node:path';
 
 import { IndexStore } from '../src/indexer/store.js';
 import { tailCountRate, tailOf } from '../src/indexer/cohortTracker.js';
+import { INTERNAL_WALLETS } from '../src/valuedesk/internalWallets.js';
 import { KEEP_WARM_MS, LOAD_TTL_MS, STALE_MAX_MS, _cohortLoad, cohortDetail, cohortFocus, cohortMap, cohortWallets, cohortsReady, cohortsRead, warmCohorts } from '../src/indexer/read.js';
 import {
   MARGIN_SIBLING, aggregate, cohortsOf, holdsPosition, perpEquity, sampledVenue, scopeKey, scopeWallets, sumCohorts, walletRow,
@@ -366,4 +367,19 @@ test('a read while the start warm-up builds waits for it (no second load built i
   assert.deepEqual(_cohortLoad.built, { inPlace: 0, behind: 1 });
   await warm;
   await cohortsReady(); // with a load in hand it does not wait
+});
+
+test('a venue\'s own accounts (internalWallets.ts) are in no cohort and no load: SoDEX\'s mirrored BTC pair', async () => {
+  _cohortLoad.reset();
+  const before = cohortsRead(ALL, NONE)!;
+  const [a, b] = [...INTERNAL_WALLETS.sodex!];
+  const big = (address: string, szi: number) => ({ venue: 'sodex' as const, address: address!, equity: 10_800_000, positions: [{ symbol: 'BTC-USD', szi, entry: 84_390 }], at: Date.now() + 20 });
+  writer.putCohortMembers('sodex', [a!, b!].map((address) => ({ address, pnl: 1_000_000, equity: 10_800_000, label: null, pnl1d: null, pnl7d: null, pnl30d: null })), Date.now());
+  writer.putCohortBooks([big(a!, -908.65525), big(b!, 908.65525)]);
+  _cohortLoad.age(LOAD_TTL_MS + 1);
+  await _cohortLoad.rebuild();
+  const after = cohortsRead(ALL, NONE)!;
+  assert.equal(after.coverage.sodex!.members, before.coverage.sodex!.members, 'neither is a wallet of the load');
+  assert.deepEqual(after.cohorts, before.cohorts, 'every cohort as before: their $77M long and short are not counted');
+  writer.dropCohortMembers('sodex', [a!, b!]);
 });
