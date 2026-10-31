@@ -9,14 +9,15 @@ import { signAction } from '../wallet';
 import { useWallet } from '../WalletPicker';
 import { isUserRejection } from '../../wallet';
 import { ago, short, when } from '../format';
-import { Badge, Note, PageHead, useAdmin } from '../ui';
+import { Badge, Note, PageHead, Seg, useAdmin } from '../ui';
 import type { TicketMessage, TicketRow, TicketStatus } from '../types';
 
 const STATUS_TONE: Record<TicketStatus, 'warn' | 'dim' | 'pos'> = { open: 'warn', waiting: 'dim', closed: 'pos' };
 
 export function Tickets({ selected }: { selected: number | null }) {
   const list = useAdmin<{ tickets: TicketRow[] }>('tickets', {}, 30_000);
-  const [status, setStatus] = useState<TicketStatus | 'all'>('open');
+  // Opened by a link to one ticket: every ticket, so that one is in the list whatever its status.
+  const [status, setStatus] = useState<TicketStatus | 'all'>(selected ? 'all' : 'open');
   const [category, setCategory] = useState('all');
   const [q, setQ] = useState('');
   const tickets = list.data?.tickets ?? [];
@@ -28,20 +29,19 @@ export function Tickets({ selected }: { selected: number | null }) {
   for (const t of tickets) counts[t.status] += 1;
   return (
     <>
-      <PageHead title="Tickets" loaded={list}>
-        <input className="ad-input ad-input--small" placeholder="Search text, wallet, #id" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search tickets" />
-      </PageHead>
+      <PageHead title="Tickets" line="Feedback chats from visitors. Answering or changing a status asks the builder wallet to sign that exact change." loaded={list} />
       {list.error && <Note kind="error">{list.error}</Note>}
-      <div className="ad-filters" role="group" aria-label="Status">
-        {(['open', 'waiting', 'closed', 'all'] as const).map((s) => (
-          <button key={s} type="button" className={`ad-chip${status === s ? ' is-on' : ''}`} onClick={() => setStatus(s)}>
-            {s}{s !== 'all' ? ` ${counts[s]}` : ` ${tickets.length}`}
-          </button>
-        ))}
-        <select className="ad-input ad-input--small" value={category} onChange={(e) => setCategory(e.target.value)} aria-label="Category">
-          <option value="all">every category</option>
-          {categories.map((c) => <option key={c} value={c}>{c}</option>)}
-        </select>
+      <div className="ad-filters">
+        <Seg
+          label="Status"
+          value={status}
+          onChange={setStatus}
+          options={(['open', 'waiting', 'closed', 'all'] as const).map((s) => ({ value: s, label: <>{s[0]!.toUpperCase() + s.slice(1)} <span className="ad-count">{s === 'all' ? tickets.length : counts[s]}</span></> }))}
+        />
+        {categories.length > 1 && (
+          <Seg label="Category" value={category} onChange={setCategory} options={[{ value: 'all', label: 'Every kind' }, ...categories.map((c) => ({ value: c, label: c[0]!.toUpperCase() + c.slice(1) }))]} />
+        )}
+        <input className="ad-input ad-input--small ad-right" placeholder="Search text, wallet, #id" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search tickets" />
       </div>
       <div className="ad-split">
         <ul className="ad-ticketlist">
@@ -59,7 +59,7 @@ export function Tickets({ selected }: { selected: number | null }) {
               </a>
             </li>
           ))}
-          {!shown.length && !list.loading && <li className="ad-dim ad-pad">No ticket here.</li>}
+          {!shown.length && !list.loading && <li className="ad-dim ad-pad">{q ? 'No ticket matches the search.' : status === 'all' ? 'No feedback yet.' : `No ${status} tickets.`}</li>}
         </ul>
         <div className="ad-thread">{selected ? <Thread id={selected} onChanged={list.reload} /> : <p className="ad-dim ad-pad">Pick a ticket.</p>}</div>
       </div>

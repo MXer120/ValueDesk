@@ -18,7 +18,7 @@ export function Overview() {
   const errors = [tickets.error, builder.error, analytics.error, status.error].filter(Boolean);
   return (
     <>
-      <PageHead title="Overview" />
+      <PageHead title="Overview" line="What needs you now, and today's numbers (UTC)." />
       {errors.map((e) => <Note key={e} kind="error">{e}</Note>)}
       <div className="ad-tiles">
         <Tile label="Open tickets" value={<a href="#/tickets">{int(open.length)}</a>} tone={open.length ? 'warn' : undefined} sub={open[0] ? `newest ${ago(open[0].lastAt)}` : 'nothing waiting for you'} />

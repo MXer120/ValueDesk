@@ -32,13 +32,15 @@ export function Audit() {
   const chain = audit.data?.chain;
   return (
     <>
-      <PageHead title="Audit & sessions" loaded={audit} />
+      <PageHead title="Audit & sessions" line="Every sign-in, refusal and change, each row chained to the one before; the sessions open now." loaded={audit} />
       {audit.error && <Note kind="error">{audit.error}</Note>}
       <Panel title="Open sessions" actions={<button type="button" className="ad-btn" onClick={() => void revoke()} disabled={busy}>{busy ? 'Signing…' : 'Sign out everywhere'}</button>}>
-        <table className="ad-table ad-table--compact">
-          <thead><tr><th>Id</th><th>Wallet</th><th>Since</th><th>Ends</th><th>Client</th><th>Country</th></tr></thead>
-          <tbody>{(me.data?.sessions ?? []).map((s) => <tr key={s.id}><td className="ad-mono">{s.id}</td><td className="ad-mono">{short(s.wallet)}</td><td>{when(s.createdAt)}</td><td>{when(s.expiresAt)}</td><td className="ad-mono">{s.client}</td><td>{s.country ?? '–'}</td></tr>)}</tbody>
-        </table>
+        <div className="ad-tablewrap">
+          <table className="ad-table ad-table--compact">
+            <thead><tr><th>Id</th><th>Wallet</th><th>Since</th><th>Ends</th><th>Client</th><th>Country</th></tr></thead>
+            <tbody>{(me.data?.sessions ?? []).map((s) => <tr key={s.id}><td className="ad-mono">{s.id}</td><td className="ad-mono">{short(s.wallet)}</td><td>{when(s.createdAt)}</td><td>{when(s.expiresAt)}</td><td className="ad-mono">{s.client}</td><td>{s.country ?? '–'}</td></tr>)}</tbody>
+          </table>
+        </div>
         {error && <p className="ad-error" role="alert">{error}</p>}
       </Panel>
       <Panel title="Audit log" actions={chain && (chain.brokenAt === null ? <Badge tone="pos">chain intact · {chain.rows} rows</Badge> : <Badge tone="neg">chain broken at row {chain.brokenAt}</Badge>)}>

@@ -90,6 +90,7 @@ export function AdminApp() {
             <div className="ad-dim">{connected ? `wallet: ${connected.name}` : 'wallet not connected (asked for at the first change)'}</div>
             <button type="button" className="ad-btn" onClick={signOut}>Sign out</button>
           </div>
+          <button type="button" className="ad-btn ad-nav__out" onClick={signOut}>Sign out</button>
         </aside>
         <main className="ad-main">{PAGES.find((p) => p.id === page)!.render(arg)}</main>
       </div>
@@ -127,16 +128,18 @@ function SignIn({ connected, onConnected }: { connected: Connected | null; onCon
   return (
     <div className="ad-signin">
       <div className="ad-signin__card">
-        <div className="ad-brand">ValueDesk <span>Dev</span></div>
-        <h1>Sign in</h1>
-        <p className="ad-dim">The builder wallet's signature and the admin password open this suite for 24 hours. Each change you make asks the wallet again.</p>
+        <div className="ad-signin__hero">
+          <div className="ad-brand">ValueDesk <span>Dev</span></div>
+          <h1>Sign in</h1>
+          <p>The builder wallet's signature and the admin password open this suite for 24 hours. Each change you make asks the wallet again.</p>
+        </div>
         <ol className="ad-steps">
           <li className={connected ? 'is-done' : undefined}>
-            <div className="ad-steps__title">1. Connect the builder wallet</div>
+            <div className="ad-steps__title"><span className="ad-steps__n">{connected ? '✓' : '1'}</span>Connect the builder wallet</div>
             {connected ? <div className="ad-mono">{connected.name}: {short(connected.address)}</div> : <WalletPicker onConnected={onConnected} />}
           </li>
           <li>
-            <div className="ad-steps__title">2. Password, then sign</div>
+            <div className="ad-steps__title"><span className="ad-steps__n">2</span>Password, then sign</div>
             <form onSubmit={(e) => { e.preventDefault(); void submit(); }}>
               <input
                 type="password"

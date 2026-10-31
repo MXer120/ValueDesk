@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import { BarChart } from '../BarChart';
 import { ago, dayLabel, duration, int, pct, short } from '../format';
-import { CountList, Note, PageHead, Panel, Tile, useAdmin } from '../ui';
+import { CountList, Note, PageHead, Panel, Seg, Tile, useAdmin } from '../ui';
 import type { AnalyticsSummary, RecentVisit } from '../types';
 
 const regionNames = (() => {
@@ -21,10 +21,8 @@ export function Analytics() {
   const t = a?.totals;
   return (
     <>
-      <PageHead title="Analytics" loaded={r}>
-        <select className="ad-input ad-input--small" value={days} onChange={(e) => setDays(Number(e.target.value))} aria-label="Days shown">
-          {[1, 7, 30, 90, 365].map((d) => <option key={d} value={d}>{d === 1 ? 'today (UTC)' : `last ${d} days`}</option>)}
-        </select>
+      <PageHead title="Analytics" line="How ValueDesk is used - only visitors who allowed analytics are counted. Kept on ValueDesk's own server, no IP addresses." loaded={r}>
+        <Seg label="Days shown" value={days} onChange={setDays} options={[{ value: 1, label: 'Today' }, ...[7, 30, 90, 365].map((d) => ({ value: d, label: d === 365 ? '1 year' : `${d} days` }))]} />
       </PageHead>
       {r.error && <Note kind="error">{r.error}</Note>}
       {a && t && (

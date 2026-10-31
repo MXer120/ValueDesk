@@ -10,6 +10,8 @@ import '@fontsource/ibm-plex-sans/500.css';
 import '@fontsource/asap/400.css';
 import '@fontsource/asap/500.css';
 import '../styles.css';
+// The app's own segmented switch (lbp-seg), not one of the suite's.
+import '../components/leaderboard/LeaderboardPage.css';
 import './admin.css';
 import { AdminApp } from './AdminApp';
 

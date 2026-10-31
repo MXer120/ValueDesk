@@ -13,7 +13,7 @@ export function Status() {
   const s = r.data?.status ?? null;
   return (
     <>
-      <PageHead title="Status" loaded={r} />
+      <PageHead title="Status" line="Servers, indexer, executor, brake, releases and errors from browsers - read from what the servers publish, every 30 s." loaded={r} />
       {r.error && <Note kind="error">{r.error}</Note>}
       {s && (
         <>
@@ -102,7 +102,15 @@ function Executor({ v }: { v: EverythingStatus['executor'] }) {
           <div><dt>Algo orders running</dt><dd>{int(num(h.algos))}</dd></div>
           <div><dt>SoDEX feed</dt><dd>{rec(h.feeds).sodex ? 'up' : 'down'}</dd></div>
           <div><dt>Brake</dt><dd>{h.brake ? <span className="ad-warn">on: {['trading', 'copies', 'algos'].filter((k) => brake[k]).join(', ')}{typeof brake.reason === 'string' ? ` - ${brake.reason}` : ''}</span> : 'off'}</dd></div>
-          {Object.keys(queue).length > 0 && <div><dt>Send queue</dt><dd>{Object.entries(queue).map(([k, x]) => `${k} ${typeof x === 'object' && x !== null ? JSON.stringify(x) : String(x)}`).join(' · ')}</dd></div>}
+          {Object.keys(queue).length > 0 && (
+            <div>
+              <dt>Send queue</dt>
+              <dd>
+                {int(num(queue.waiting))} waiting · {int(num(queue.inFlight))} in flight · oldest {duration(num(queue.oldestMs))} · cooldown {duration(num(queue.cooldownMs))} · {int(num(queue.sent))} sent · {int(num(queue.resent))} resent
+                {Object.values(rec(queue.byClass)).some((n) => num(n)) && <span className="ad-dim"> ({Object.entries(rec(queue.byClass)).filter(([, n]) => num(n)).map(([k, n]) => `${k} ${int(num(n))}`).join(', ')})</span>}
+              </dd>
+            </div>
+          )}
         </dl>
       )}
     </Panel>

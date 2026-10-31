@@ -55,19 +55,33 @@ export function Panel({ title, actions, children, wide }: { title: ReactNode; ac
   );
 }
 
-export function PageHead({ title, loaded, children }: { title: string; loaded?: Pick<Loaded<unknown>, 'loading' | 'at' | 'reload' | 'error'>; children?: ReactNode }) {
+/** The page's hero (the Status and Excluded pages' frame): what it is, one line on it, when it was updated. */
+export function PageHead({ title, line, loaded, children }: { title: string; line?: string; loaded?: Pick<Loaded<unknown>, 'loading' | 'at' | 'reload' | 'error'>; children?: ReactNode }) {
   return (
-    <div className="ad-pagehead">
-      <h1 className="ad-pagehead__title">{title}</h1>
-      <div className="ad-pagehead__tools">
-        {children}
-        {loaded && (
-          <>
-            <span className="ad-dim">{loaded.loading ? 'Loading…' : loaded.at ? `as of ${new Date(loaded.at).toISOString().slice(11, 19)} UTC` : ''}</span>
-            <button type="button" className="ad-btn" onClick={loaded.reload}>Reload</button>
-          </>
-        )}
+    <header className="ad-hero">
+      <div className="ad-hero__text">
+        <h1 className="ad-hero__title">{title}</h1>
+        {line && <p className="ad-hero__line">{line}</p>}
       </div>
+      {loaded && (
+        <button type="button" className="ad-updated" onClick={loaded.reload} title="Load again">
+          {loaded.loading ? 'Loading…' : loaded.at ? `Updated ${new Date(loaded.at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}` : 'Load'}
+        </button>
+      )}
+      {children && <div className="ad-hero__tools">{children}</div>}
+    </header>
+  );
+}
+
+/** The app's own segmented switch (the leaderboard's lbp-seg). */
+export function Seg<T extends string | number>({ label, value, options, onChange }: { label: string; value: T; options: ReadonlyArray<{ value: T; label: ReactNode }>; onChange: (v: T) => void }) {
+  return (
+    <div className="lbp-seg" role="radiogroup" aria-label={label}>
+      {options.map((o) => (
+        <button key={String(o.value)} type="button" role="radio" aria-checked={o.value === value} className={o.value === value ? 'is-on' : ''} onClick={() => onChange(o.value)}>
+          {o.label}
+        </button>
+      ))}
     </div>
   );
 }

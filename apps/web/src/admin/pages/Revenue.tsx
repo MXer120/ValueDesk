@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import { BarChart } from '../BarChart';
 import { bp, dayLabel, int, usd, usdShort, when } from '../format';
-import { Note, PageHead, Panel, Tile, useAdmin } from '../ui';
+import { Note, PageHead, Panel, Seg, Tile, useAdmin } from '../ui';
 import type { BuilderOverview } from '../types';
 
 export function Revenue() {
@@ -11,10 +11,8 @@ export function Revenue() {
   const b = r.data?.builder ?? null;
   return (
     <>
-      <PageHead title="Volume & fees" loaded={r}>
-        <select className="ad-input ad-input--small" value={days} onChange={(e) => setDays(Number(e.target.value))} aria-label="Days shown">
-          {[7, 30, 90].map((d) => <option key={d} value={d}>last {d} days</option>)}
-        </select>
+      <PageHead title="Volume & fees" line="Volume routed through ValueDesk's SoDEX builder and the builder fees it earned - counted from SoDEX fills, verified on its explorer." loaded={r}>
+        <Seg label="Days shown" value={days} onChange={setDays} options={[7, 30, 90].map((d) => ({ value: d, label: `${d} days` }))} />
       </PageHead>
       {r.error && <Note kind="error">{r.error}</Note>}
       {r.data && !b && <Note>The builder ledger is off on this server (no builder-tiers.json, or no builder.db yet).</Note>}

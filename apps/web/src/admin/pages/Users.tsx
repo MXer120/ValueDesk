@@ -61,7 +61,7 @@ export function Users() {
   };
   return (
     <>
-      <PageHead title="Users" loaded={r}>
+      <PageHead title="Users" line="Every wallet ValueDesk knows: what the builder ledger counted, what analytics saw, who wrote feedback." loaded={r}>
         <input className="ad-input ad-input--small" placeholder="0x… or account id" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search wallets" />
         <button type="button" className="ad-btn" onClick={csv} disabled={!shown.length}>CSV</button>
       </PageHead>
