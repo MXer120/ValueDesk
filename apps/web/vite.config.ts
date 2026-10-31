@@ -275,6 +275,16 @@ export default defineConfig({
   },
   build: {
     rollupOptions: {
+      /*
+       * Two pages: the site, and the owner's admin suite (admin.html, src/admin/) - served
+       * only on dev.valuedesk.so by the Vercel routes (deploy/vercel/package.mjs ADMIN_HOST).
+       * Its own entry, so none of it is in the site's bundle. The site's key stays `index`, so its entry
+       * chunk keeps the name it always had (assets/index-*.js).
+       */
+      input: {
+        index: fileURLToPath(new URL('./index.html', import.meta.url)),
+        admin: fileURLToPath(new URL('./admin.html', import.meta.url)),
+      },
       output: {
         /*
          * React in a chunk of its own. It changes far less often than our code,

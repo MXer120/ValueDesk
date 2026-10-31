@@ -11,10 +11,10 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
-import { headersFor, rewrite } from '../smoke/prod-headers.mjs';
+import { ADMIN_CSP, adminHeadersFor, headersFor, rewrite } from '../smoke/prod-headers.mjs';
 import { LEGAL_PATHS, SANCTIONED_CODES, SANCTIONED_REGIONS, edgeBlockList } from '../../apps/web/src/legal/jurisdictions.mjs';
 import {
-  FUNCTION_PATH, GEO_API_HEADERS, GEO_PAGE_HEADERS, HEADER_CLASSES, checkDist, config, functionConfig, geoRoutes, packageSite, routes,
+  ADMIN_HOST, FUNCTION_PATH, GEO_API_HEADERS, GEO_PAGE_HEADERS, HEADER_CLASSES, checkDist, config, functionConfig, geoRoutes, packageSite, routes,
 } from './package.mjs';
 
 const require = createRequire(import.meta.url);
@@ -59,7 +59,10 @@ function route(path, staticFiles, requestHeaders = {}) {
     }
     const re = new RegExp(r.src, r.caseSensitive ? '' : 'i');
     if (!re.test(path)) continue;
-    if (r.has && !r.has.every((h) => h.type === 'header' && matches(requestHeaders[h.key], h.value))) continue;
+    // `host` is the domain asked for (Vercel matches it on the Host header).
+    const holds = (h) => (h.type === 'host' ? requestHeaders.host === h.value : h.type === 'header' && matches(requestHeaders[h.key], h.value));
+    if (r.has && !r.has.every(holds)) continue;
+    if (r.missing && r.missing.some(holds)) continue;
     if (r.continue) {
       if (phase !== 'start') continue;
       Object.assign(headers, r.headers);
@@ -685,4 +688,98 @@ test('the origin setting must be https (http only to loopback) and an origin onl
   assert.match(o({ VALUESCAN_ORIGIN_URL: 'http://1-2-3-4.sslip.io' }).error, /https/);
   assert.match(o({ VALUESCAN_ORIGIN_URL: 'https://x.example/api' }).error, /nothing after the host/);
   assert.match(o({}).error, /not set/);
+});
+
+// --- the admin suite's host (dev.valuedesk.so) -------------------------------------------------------
+
+const DEV_HOST = { host: ADMIN_HOST };
+const ADMIN_STATIC = new Set([...STATIC, '/admin.html', '/assets/admin-abc.js', '/assets/admin-abc.css']);
+
+test('the admin host: its page for every app route, its own headers from one route, nothing else of the site', () => {
+  for (const path of ['/', '/tickets', '/users/0xabc', '/status']) {
+    const r = route(path, ADMIN_STATIC, DEV_HOST);
+    assert.equal(r.served, '/admin.html', path);
+    assert.equal(r.matchedHeaderRoutes.length, 1, `${path}: ${r.matchedHeaderRoutes.join(' | ')}`);
+    assert.deepEqual(r.headers, adminHeadersFor(path), path);
+    assert.equal(r.headers['Cache-Control'], 'no-store');
+    assert.equal(r.headers['X-Robots-Tag'], 'noindex, nofollow');
+  }
+  const asset = route('/assets/admin-abc.js', ADMIN_STATIC, DEV_HOST);
+  assert.equal(asset.served, '/assets/admin-abc.js');
+  assert.equal(asset.matchedHeaderRoutes.length, 1);
+  assert.equal(asset.headers['Cache-Control'], 'public, max-age=31536000, immutable');
+  assert.equal(asset.headers['Content-Security-Policy'], ADMIN_CSP);
+  assert.equal(route('/admin.html', ADMIN_STATIC, DEV_HOST).served, '/admin.html');
+  for (const path of ['/index.html', '/scan/index.html', '/robots.txt', '/logos/btc.svg', '/third-party-licenses.txt']) {
+    assert.equal(route(path, ADMIN_STATIC, DEV_HOST).status, 404, `${path}: no file of the site on the admin host`);
+  }
+  assert.equal(route('/api/admin/me', ADMIN_STATIC, DEV_HOST).fn, true);
+  // Its policy lets the page reach its own API and a wallet - nothing else.
+  assert.match(ADMIN_CSP, /connect-src 'self' wss:\/\/relay\.walletconnect\.org https:\/\/api\.web3modal\.org;/);
+  assert.match(ADMIN_CSP, /script-src 'self';/);
+});
+
+test('every other host: the admin page is a 404, and the site is served as before', () => {
+  for (const host of [undefined, 'www.valuedesk.so', 'valuedeskapp.vercel.app']) {
+    const h = host ? { host } : {};
+    assert.equal(route('/admin.html', ADMIN_STATIC, h).status, 404, `${host}: /admin.html`);
+    assert.equal(route('/tickets', ADMIN_STATIC, h).served, '/index.html');
+    assert.deepEqual(route('/trade', ADMIN_STATIC, h).headers, headersFor('/trade'));
+  }
+});
+
+test('the function: /api/admin/* only through the admin host, POST and the session through, the country added, never cached', async () => {
+  const seen = [];
+  const origin = await listen((req, res) => {
+    let size = 0;
+    req.on('data', (c) => { size += c.length; });
+    req.on('end', () => {
+      seen.push({ method: req.method, url: req.url, headers: req.headers, size });
+      res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'public, max-age=30' });
+      res.end('{}');
+    });
+  });
+  try {
+    await withProxy({ VALUESCAN_ORIGIN_URL: `http://127.0.0.1:${origin.port}`, VALUESCAN_ORIGIN_SECRET: SECRET }, async (port) => {
+      const dev = { host: ADMIN_HOST, 'content-type': 'application/json', authorization: 'Bearer vda_x', origin: `https://${ADMIN_HOST}`, 'x-vercel-ip-country': 'DE' };
+      const ok = await request(port, '/api/admin/me', { method: 'POST', body: '{}', headers: dev });
+      assert.equal(ok.status, 200);
+      assert.equal(ok.headers['cache-control'], 'no-store');
+      const h = seen.at(-1).headers;
+      assert.equal(h.authorization, 'Bearer vda_x');
+      assert.equal(h.origin, `https://${ADMIN_HOST}`);
+      assert.equal(h['x-viewer-country'], 'DE');
+      const before = seen.length;
+      assert.equal((await request(port, '/api/admin/me', { method: 'POST', body: '{}', headers: { ...dev, host: 'www.valuedesk.so' } })).status, 404, 'not through the site');
+      assert.equal((await request(port, '/api/vs/leaderboard', { headers: { host: ADMIN_HOST } })).status, 404, 'the admin host reaches nothing else');
+      assert.equal((await request(port, '/api/admin/ticket/reply', { method: 'POST', body: 'x'.repeat(32 * 1024 + 1), headers: dev })).status, 413);
+      assert.equal(seen.length, before, 'none reached the origin');
+    });
+  } finally {
+    await origin.close();
+  }
+});
+
+test('the function: the own analytics of the app is a POST with the country and region, never cached', async () => {
+  const seen = [];
+  const origin = await listen((req, res) => {
+    req.resume();
+    req.on('end', () => {
+      seen.push({ method: req.method, headers: req.headers });
+      res.writeHead(204);
+      res.end();
+    });
+  });
+  try {
+    await withProxy({ VALUESCAN_ORIGIN_URL: `http://127.0.0.1:${origin.port}`, VALUESCAN_ORIGIN_SECRET: SECRET }, async (port) => {
+      const r = await request(port, '/api/vs/a', { method: 'POST', body: '{}', headers: { 'content-type': 'text/plain', 'x-vercel-ip-country': 'DE', 'x-vercel-ip-country-region': 'RP', 'x-viewer-country': 'US' } });
+      assert.equal(r.status, 204);
+      assert.equal(seen[0].headers['x-viewer-country'], 'DE', "Vercel's, never the client's own");
+      assert.equal(seen[0].headers['x-viewer-region'], 'RP');
+      assert.equal(seen[0].headers['user-agent'], undefined);
+      assert.equal(proxy.bodyLimitFor('/api/vs/a'), 16 * 1024);
+    });
+  } finally {
+    await origin.close();
+  }
 });

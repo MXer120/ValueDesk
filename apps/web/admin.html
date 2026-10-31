@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="robots" content="noindex, nofollow" />
+    <!--
+      The owner's admin suite (dev.valuedesk.so; src/admin/). Served only on that host
+      (deploy/vercel/package.mjs ADMIN_HOST), with its own header policy
+      (deploy/smoke/prod-headers.mjs ADMIN_CSP). This meta policy is the same list, for
+      the dev server: its own API and a wallet, nothing else.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://api.web3modal.org; font-src 'self'; frame-src https://verify.walletconnect.org; connect-src 'self' ws://127.0.0.1:* wss://relay.walletconnect.org https://api.web3modal.org; form-action 'none'; base-uri 'none'; object-src 'none'"
+    />
+    <meta name="referrer" content="no-referrer" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>ValueDesk Dev</title>
+  </head>
+  <body>
+    <div id="admin-root"></div>
+    <script type="module" src="/src/admin/main.tsx"></script>
+  </body>
+</html>

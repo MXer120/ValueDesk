@@ -32,6 +32,7 @@ import { DEFAULT_SELF_URL, ExecutorClient, ExecutorError, hostedExecutor, selfBa
 import { MAX_BROWSER_KEY_DAYS, approveCopyFee, copyFeeApproval, copyKeyRegistered, registerCopyKey, revokeCopyKey } from './sodexSetup';
 import { acceptCopyTerms, localTerms, recordPendingTerms, sendTermsTo, type LocalTerms } from './terms';
 import { requireTermsOrThrow } from '../legal/acceptance';
+import { track } from '../analytics/tracker';
 
 const log = logger('copy');
 
@@ -391,6 +392,7 @@ export async function startCopy(mode: CopyModeId, settings: CopySettings): Promi
   if (mode === 'browser') {
     await browserCopier.start({ owner, settings, country: t.country, termsVersion: COPY_TERMS_VERSION });
     syncBrowser();
+    track('copy.start', { mode, direction: settings.direction });
     return;
   }
   const client = mode === 'hosted' ? hostedExecutor : selfClient;
@@ -402,6 +404,7 @@ export async function startCopy(mode: CopyModeId, settings: CopySettings): Promi
   });
   const token = client.token(owner);
   if (token) await loadMe(mode, token);
+  track('copy.start', { mode, direction: settings.direction });
 }
 
 export type CopyCommand = 'pause' | 'resume' | 'stop' | 'stop-close';
@@ -409,6 +412,7 @@ export type CopyCommand = 'pause' | 'resume' | 'stop' | 'stop-close';
 export async function commandCopy(mode: CopyModeId, id: string, cmd: CopyCommand): Promise<void> {
   // Resuming copies again: the terms first. Pausing and stopping never wait for them.
   if (cmd === 'resume' && state.owner) await requireTermsOrThrow({ owner: state.owner, reason: 'resume this copy' });
+  if (cmd === 'stop' || cmd === 'stop-close') track('copy.stop', { mode });
   if (mode === 'browser') {
     if (cmd === 'pause') await browserCopier.pause(id);
     else if (cmd === 'resume') await browserCopier.resume(id);

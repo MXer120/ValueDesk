@@ -282,6 +282,20 @@ test('the allow-list is exactly docs/ARCH-traffic.md section 5', () => {
       'GET /api/vs/status/feed read',
       'GET /api/vs/whales read',
       'GET /ws/liq read',
+      'POST /api/admin/analytics admin',
+      'POST /api/admin/audit admin',
+      'POST /api/admin/builder admin',
+      'POST /api/admin/me admin',
+      'POST /api/admin/session admin',
+      'POST /api/admin/sessions/revoke admin',
+      'POST /api/admin/signout admin',
+      'POST /api/admin/status admin',
+      'POST /api/admin/ticket admin',
+      'POST /api/admin/ticket/image admin',
+      'POST /api/admin/ticket/reply admin',
+      'POST /api/admin/ticket/status admin',
+      'POST /api/admin/tickets admin',
+      'POST /api/admin/users admin',
       'POST /api/folders/erase write',
       'POST /api/folders/folder/create write',
       'POST /api/folders/folder/delete write',
@@ -295,6 +309,7 @@ test('the allow-list is exactly docs/ARCH-traffic.md section 5', () => {
       'POST /api/folders/upload/finish write',
       'POST /api/folders/upload/put write',
       'POST /api/folders/upload/start write',
+      'POST /api/vs/a write',
       'POST /api/vs/client-errors write',
       'POST /api/vs/feedback write',
       'POST /api/vs/feedback/poll write',
@@ -325,7 +340,9 @@ test('the allow-list holds no custodial, per-user, diagnostic or websocket route
     // and a signed-in wallet keeps its own algos' and copies' notices in its inbox (ops/inbox.ts).
     if (r.url === '/api/vs/feedback/image') assert.ok(r.method === 'GET' && r.cls === 'read', r.url);
     else if (r.url === '/api/vs/feedback/session') assert.ok(r.method === 'POST' && r.cls === 'auth', r.url);
-    else if (r.url.startsWith('/api/vs/feedback') || r.url.startsWith('/api/vs/inbox/') || r.url === '/api/vs/client-errors') assert.ok(r.method === 'POST' && r.cls === 'write', r.url);
+    else if (r.url.startsWith('/api/vs/feedback') || r.url.startsWith('/api/vs/inbox/') || r.url === '/api/vs/client-errors' || r.url === '/api/vs/a') assert.ok(r.method === 'POST' && r.cls === 'write', r.url);
+    // The owner's admin suite (routes/admin.ts): POST only, its own class (the suite's Origin, its own limits).
+    else if (r.url.startsWith('/api/admin/')) assert.ok(r.method === 'POST' && r.cls === 'admin', r.url);
     else if (!r.url.startsWith('/api/folders/')) assert.equal(r.method, 'GET', `${r.method} ${r.url}: hosted mode is read-only`);
     else if (r.method === 'POST') assert.ok(r.cls === 'write' || (r.cls === 'auth' && r.url === '/api/folders/session'), r.url);
   }

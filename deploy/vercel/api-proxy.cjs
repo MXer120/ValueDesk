@@ -35,6 +35,13 @@
 //     reports it (x-vercel-ip-country, two letters, or nothing). The executor
 //     applies the country rules by it (EXECUTOR_TRUST_EDGE=1). A client's own
 //     X-Viewer-Country is never passed on: no header outside the lists above is.
+//   - The app's own analytics (POST /api/vs/a, sent only after the visitor allowed it):
+//     POST + Content-Type, 16 KB, never cached, with X-Viewer-Country and X-Viewer-Region
+//     (x-vercel-ip-country-region) - the API keeps those, never an IP address.
+//   - The owner's admin suite (/api/admin/*, every route a POST with a session token):
+//     only on the admin host (VALUESCAN_ADMIN_HOSTS, default dev.valuedesk.so) - a 404
+//     on any other - and that host reaches no other /api path. POST, Content-Type and
+//     Authorization, 32 KB, never cached, X-Viewer-Country for its audit log.
 //   - Streams the answer back byte for byte: status, Content-Encoding (the API
 //     compresses), ETag, Cache-Control, Vary - minus hop-by-hop headers and any
 //     Set-Cookie.
@@ -118,7 +125,24 @@ const isFoldersPath = (path) => { const p = String(path ?? ''); return p === '/a
  * wallet's inbox (apps/server/src/routes/reports.ts, ops/inbox.ts): POST passes, the thread token or
  * wallet session passes, nothing is cached.
  */
-const isReportsPath = (path) => { const p = String(path ?? ''); return p === '/api/vs/feedback' || p.startsWith('/api/vs/feedback/') || p.startsWith('/api/vs/inbox/') || p === '/api/vs/client-errors'; };
+const isReportsPath = (path) => { const p = String(path ?? ''); return p === '/api/vs/feedback' || p.startsWith('/api/vs/feedback/') || p.startsWith('/api/vs/inbox/') || p === '/api/vs/client-errors' || p === ANALYTICS_PATH; };
+/** The app's own analytics (apps/server/src/routes/analytics.ts): a POST, the viewer's country and region added. */
+const ANALYTICS_PATH = '/api/vs/a';
+/**
+ * The owner's admin suite (apps/server/src/routes/admin.ts): every route a POST with a session token.
+ * Reached ONLY through the admin host (VALUESCAN_ADMIN_HOSTS, default dev.valuedesk.so) - anywhere else
+ * a 404 here - and the admin host reaches nothing else. The API checks the Origin and the session itself.
+ */
+const isAdminPath = (path) => String(path ?? '').startsWith('/api/admin/');
+/** A sign-in, an answer to a ticket: small. */
+const ADMIN_BODY_LIMIT = 32 * 1024;
+/** The hosts the admin suite is served on, lower case. */
+const adminHostsFrom = (env) => String(env.VALUESCAN_ADMIN_HOSTS ?? 'dev.valuedesk.so').split(',').map((h) => h.trim().toLowerCase()).filter(Boolean);
+/** The host a request was made to (Vercel sets Host to the domain the visitor asked for), without a port. */
+function requestHost(headers) {
+  const h = headers.host;
+  return String(Array.isArray(h) ? h[0] : h ?? '').split(',')[0].trim().toLowerCase().replace(/:\d+$/, '');
+}
 /** A browser's batch of its algos' and copies' notices (the API takes 64 KiB). */
 const INBOX_ADD_LIMIT = 64 * 1024;
 /** A screenshot, one per request (apps/server src/ops/imageCheck.ts: 2 MiB, and the request around it). */
@@ -126,7 +150,7 @@ const FEEDBACK_UPLOAD_LIMIT = 2 * 1024 * 1024 + 16 * 1024 + 1024;
 /** A feedback message, a thread read, an error report. */
 const REPORTS_BODY_LIMIT = 16 * 1024;
 /** One wallet's or one follower's: a token passes, a POST passes, nothing is cached. */
-const isPrivatePath = (path) => isCopyPath(path) || isFoldersPath(path) || isReportsPath(path);
+const isPrivatePath = (path) => isCopyPath(path) || isFoldersPath(path) || isReportsPath(path) || isAdminPath(path);
 /** A folder item (a sheet or a board at most; apps/server routes/folders.ts CREATE_BODY_LIMIT). */
 const FOLDERS_BODY_LIMIT = 1792 * 1024;
 /** A file uploaded to a folder (apps/server folders/limits.ts FILE_BYTES_CEILING, and a little room). */
@@ -136,6 +160,7 @@ function bodyLimitFor(path) {
   if (path === '/api/folders/upload/put') return FOLDERS_UPLOAD_LIMIT;
   if (path === '/api/vs/feedback/upload') return FEEDBACK_UPLOAD_LIMIT;
   if (path === '/api/vs/inbox/add') return INBOX_ADD_LIMIT;
+  if (isAdminPath(path)) return ADMIN_BODY_LIMIT;
   if (isReportsPath(path)) return REPORTS_BODY_LIMIT;
   if (isFoldersPath(path)) return FOLDERS_BODY_LIMIT;
   return BODY_LIMIT;
@@ -309,6 +334,10 @@ async function handler(req, res) {
     if (method !== 'GET' && method !== 'HEAD') return sendJson(res, 405, { error: 'method not allowed', source: 'edge' }, { allow: 'GET, HEAD' });
     return sendJson(res, 200, { country, region });
   }
+  // The admin suite only on its own host, and that host nothing else.
+  if (isAdminPath(path) !== adminHostsFrom(process.env).includes(requestHost(req.headers))) {
+    return sendJson(res, 404, { error: 'not found', source: 'edge' });
+  }
   if (geoBlocked(geoBlockFrom(process.env), country, region)) {
     return sendJson(res, 451, { error: 'ValueDesk is not available in your country or region: the sanctions and legal restrictions that apply there do not allow us to offer it.', code: 'region', source: 'edge' });
   }
@@ -344,7 +373,8 @@ async function handler(req, res) {
   }
   const viewer = viewerAddress(req.headers);
   if (viewer) headers['x-forwarded-for'] = viewer;
-  if (copy && country) headers['x-viewer-country'] = country;
+  if ((copy || isAdminPath(path) || path === ANALYTICS_PATH) && country) headers['x-viewer-country'] = country;
+  if (path === ANALYTICS_PATH && region) headers['x-viewer-region'] = region;
   if (body !== undefined) headers['content-length'] = String(body.length);
 
   let upstream;
@@ -403,3 +433,6 @@ module.exports.BODY_LIMIT = BODY_LIMIT;
 module.exports.bodyLimitFor = bodyLimitFor;
 module.exports.isFoldersPath = isFoldersPath;
 module.exports.isReportsPath = isReportsPath;
+module.exports.isAdminPath = isAdminPath;
+module.exports.requestHost = requestHost;
+module.exports.adminHostsFrom = adminHostsFrom;

@@ -387,6 +387,18 @@ Against this inventory, HOSTED_ROUTES should be:
   and `Content-Type` and `Authorization` under `/api/vs/feedback` (body up to 2,113,536 bytes on
   `/upload`, 16 KB elsewhere) and POST + `Content-Type` on `/api/vs/client-errors` (8 KB), never
   cached; an image answer is up to 2 MiB (docs/GO-LIVE.md).
+- **Add**: `POST /api/vs/a` (cls `write`, 16 KB, `application/json` or `text/plain`): the app's own
+  analytics, sent only after the visitor allowed analytics (ops/analyticsModel.ts says what one batch
+  holds; routes/analytics.ts). The Vercel function lets POST + `Content-Type` through on this path and adds
+  `X-Viewer-Country` / `X-Viewer-Region` from its edge; no IP address is stored, nothing is cached.
+- **Add**: the owner's admin suite on dev.valuedesk.so (routes/admin.ts, cls `admin`), 14 routes, every
+  one a POST: `/api/admin/session` (the builder wallet's `AdminSignIn` + the password, for a 24 h
+  session), `/me`, `/signout`, `/sessions/revoke`, `/tickets`, `/ticket`, `/ticket/image`,
+  `/ticket/reply`, `/ticket/status`, `/builder`, `/users`, `/analytics`, `/status`, `/audit`. The gate
+  takes only the suite's Origin for them (VALUESCAN_ADMIN_ORIGINS, never the site's); the route answers
+  404 to everything while no admin password is set, needs the session on every route but the sign-in and
+  a fresh `AdminAction` signature on every write. The Vercel function passes POST, `Content-Type` and
+  `Authorization` under `/api/admin/` only for requests to the dev host, never cached.
 - **Remove** (the web no longer calls them): `/api/vs/price`, `/api/vs/trader`,
   `/api/vs/fills`, `/api/vs/account`, `/api/external/leaderboard`,
   `/api/external/leaderboard/rank`, `/api/external/resolve-account`,

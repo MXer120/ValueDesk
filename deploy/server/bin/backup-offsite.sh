@@ -12,7 +12,8 @@
 #   api-state   server 1: the builder fee ledger (builder.db, a consistent copy), the
 #               builder-terms signing key, the fee tiers, the visitors' feedback chats and
 #               error reports (feedback.db with feedback-images/, client-errors.db), the status page's
-#               history and incidents (status-history.json), the small caches of the
+#               history and incidents (status-history.json), the admin suite's record and the
+#               app's own analytics (admin.db, analytics.db), the small caches of the
 #               state directory, /etc/valuescan (configuration and its secrets, without
 #               offsite/) and the Caddyfile.            When it changed; at least daily.
 #   folders     server 1: the knowledge folders (folders.db, their session key, the
@@ -224,6 +225,11 @@ tar_set() {   # set, force  (api-state, folders, executor)
       # session key (feedback-auth/): without it people only sign in once more.
       [ -f "$STATE_DIR/feedback.db" ] && add_db "$STATE_DIR/feedback.db"
       [ -d "$STATE_DIR/feedback-images" ] && add_path "$STATE_DIR/feedback-images"
+      # The admin suite's record (apps/server/src/admin/store.ts: audit chain, ticket statuses, the fee
+      # orders it keeps beyond the ledger's cap) and the app's own analytics (ops/analytics.ts). Not the
+      # admin password's hash (admin-auth/): after a restore the owner sets it again.
+      [ -f "$STATE_DIR/admin.db" ] && add_db "$STATE_DIR/admin.db"
+      [ -f "$STATE_DIR/analytics.db" ] && add_db "$STATE_DIR/analytics.db"
       local f
       # status-history.json: the status page's finished days and incidents (apps/server/src/ops/status.ts writeHistory).
       for f in builder-terms.key builder-tiers.json etf-flows.json release-results.json device.key feedback.jsonl status-history.json; do

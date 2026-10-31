@@ -122,6 +122,7 @@ import { AlgoIcon } from './AlgoIcon';
 import { feeRange, feeSplit, feeWords } from './fees';
 import { SlideConfirm } from './SlideConfirm';
 import { errorsInWords } from './errorWords';
+import { track } from '../../analytics/tracker';
 import '../SettingsMenu.css';
 import './algo.css';
 
@@ -643,6 +644,7 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
       } else {
         await startOn(place, spec, seed);
       }
+      track('algo.start', { kind, place, paper: !!spec.paper });
       notify('ok', `${menuName(kind)} started${spec.paper ? ' (paper)' : ''}${place === 'hosted' ? ' on the ValueDesk executor' : place === 'self' ? ' on your copier' : ''}. Follow it in the Algos tab.`);
       placedDraft.current = draftKey;
       publishDraftOrders(null);

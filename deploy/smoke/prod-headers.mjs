@@ -142,6 +142,42 @@ export function headersFor(pathname) {
   };
 }
 
+// --- the admin suite (dev.valuedesk.so) -----------------------------------------------------------
+
+/**
+ * The owner's admin suite (apps/web/admin.html, apps/web/src/admin/), served on its own host by the
+ * Vercel routes (deploy/vercel/package.mjs ADMIN_HOST) - never by CloudFront, so not in edge.yaml or
+ * the CSP table above. Its own page talks to its own /api/admin/* and to a wallet: an extension
+ * (nothing to allow) or WalletConnect (relay, the wallet list, the verify frame). Nothing else - no
+ * venue, no RPC, no player, no third-party report.
+ */
+export const ADMIN_CSP = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob: https://api.web3modal.org",
+  "font-src 'self'",
+  'frame-src https://verify.walletconnect.org',
+  "connect-src 'self' wss://relay.walletconnect.org https://api.web3modal.org",
+  "form-action 'none'",
+  "base-uri 'none'",
+  "object-src 'none'",
+  "manifest-src 'self'",
+  "frame-ancestors 'none'",
+  'upgrade-insecure-requests',
+].join('; ');
+
+/** Every header an admin host response carries: never indexed, never cached but its hashed assets. */
+export function adminHeadersFor(pathname) {
+  return {
+    ...HEADERS,
+    'Referrer-Policy': 'no-referrer',
+    'X-Robots-Tag': 'noindex, nofollow',
+    'Content-Security-Policy': ADMIN_CSP,
+    'Cache-Control': pathname.startsWith('/assets/') ? 'public, max-age=31536000, immutable' : 'no-store',
+  };
+}
+
 // Run directly: print the table for deploy/aws/validate_offline.py.
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href && process.argv.includes('--json')) {
   process.stdout.write(JSON.stringify({ csp: CSP, headers: HEADERS }));

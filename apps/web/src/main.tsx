@@ -25,6 +25,7 @@ import { installChunkErrorReload } from './lazyPage';
 import { captureBoot } from './algo/tabLife';
 import { SiteGate } from './legal/LegalGate';
 import { loadViewerGeo } from './legal/geo';
+import { startAnalytics } from './analytics/tracker';
 import './styles.css';
 import { useNumStyle } from './numStyle';
 
@@ -39,6 +40,8 @@ installChunkErrorReload();
 captureBoot();
 // Where this visitor is, as the edge sees it (legal/geo.ts): one small request, answered by the /api function.
 void loadViewerGeo();
+// ValueDesk's own usage analytics (analytics/tracker.ts): nothing at all - no storage, no request - until the visitor allows it.
+startAnalytics();
 // window.__vsTest for the UI specs (testBridge.ts): the dev server only - a production build drops this branch and the module.
 if (import.meta.env.DEV) void import('./testBridge').then((m) => m.installTestBridge());
 

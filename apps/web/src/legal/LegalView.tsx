@@ -14,9 +14,9 @@
  */
 import { useLayoutEffect, useRef, type MouseEvent, type ReactNode } from 'react';
 import { LEGAL_LABELS, LEGAL_PAGES, legalForPath, type LegalPage } from '../router';
-import { EMBED_SECTION_TITLE, REOWN_SECTION_TITLE } from './cookies';
+import { ANALYTICS_SECTION_TITLE, EMBED_SECTION_TITLE, REOWN_SECTION_TITLE } from './cookies';
 import { LEGAL_DOCS } from './docs';
-import { EmbedSwitches, ReownSwitch } from './LegalGate';
+import { AnalyticsSwitch, EmbedSwitches, ReownSwitch } from './LegalGate';
 import { MARKER_INLINE, isDraft, type Block } from './model';
 import './legal.css';
 
@@ -67,6 +67,7 @@ export function LegalView({ page, onOpen }: LegalViewProps) {
               {/* The one control on a legal page: withdrawing consent for a video platform. */}
               {page === 'cookies' && s.title === EMBED_SECTION_TITLE && <EmbedSwitches />}
               {page === 'cookies' && s.title === REOWN_SECTION_TITLE && <ReownSwitch />}
+              {page === 'cookies' && s.title === ANALYTICS_SECTION_TITLE && <AnalyticsSwitch />}
             </section>
           ))}
           <p className="legal-updated">

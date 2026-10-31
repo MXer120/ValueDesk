@@ -195,12 +195,13 @@ test('the edge stand-in forwards /api like CloudFront: secret, viewer address, G
 
 test('the allow-list is read from the server source and matched like the gate', () => {
   const routes = hostedRoutes();
-  assert.equal(routes.length, 68, 'apps/server/src/hosted.ts HOSTED_ROUTES: 68 routes (34 of the index with the excluded wallets, the live liquidation socket, the positions of a wallet and one history cell at a time among them, 18 of the knowledge folders, the builder volume, the status page and its feed, 8 of feedback with the wallet sign-in and the unread dot, 2 of the inbox of a signed-in wallet, client errors)');
+  assert.equal(routes.length, 83, 'apps/server/src/hosted.ts HOSTED_ROUTES: 83 routes (34 of the index with the excluded wallets, the live liquidation socket, the positions of a wallet and one history cell at a time among them, 18 of the knowledge folders, the builder volume, the status page and its feed, 8 of feedback with the wallet sign-in and the unread dot, 2 of the inbox of a signed-in wallet, client errors, the own analytics of the app, 14 of the admin suite on dev.valuedesk.so)');
   assert.ok(matchRoute(routes, 'GET', '/api/vs/live'), 'the Live Feed finds the stream a channel has on air');
   // The index is GET only; a POST only ever changes a wallet's own knowledge folders or inbox, or sends
-  // feedback or an error report. One path is not under /api/: the live heatmap's WebSocket, which the browser opens
-  // straight to the instance (no edge).
-  const postable = (u) => u.startsWith('/api/folders/') || u === '/api/vs/feedback' || u.startsWith('/api/vs/feedback/') || u.startsWith('/api/vs/inbox/') || u === '/api/vs/client-errors';
+  // feedback, an error report or the app's own analytics - or is the owner's admin suite (every route of it a POST).
+  // One path is not under /api/: the live heatmap's WebSocket, which the browser opens straight to the instance (no edge).
+  const postable = (u) => u.startsWith('/api/folders/') || u === '/api/vs/feedback' || u.startsWith('/api/vs/feedback/') || u.startsWith('/api/vs/inbox/') || u === '/api/vs/client-errors'
+    || u === '/api/vs/a' || u.startsWith('/api/admin/');
   assert.ok(routes.every((r) => (r.url.startsWith('/api/') || r.url === '/ws/liq') && (r.method === 'GET' || postable(r.url))));
   assert.ok(matchRoute(routes, 'POST', '/api/vs/feedback/upload'), 'a screenshot is uploaded');
   assert.ok(matchRoute(routes, 'GET', '/api/vs/status'), 'the status page');

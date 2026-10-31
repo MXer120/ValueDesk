@@ -25,6 +25,10 @@
 //     2. the headers of every other path - deploy/smoke/prod-headers.mjs, the same table
 //        deploy/aws/edge.yaml is validated against: the security headers, the CSP of the
 //        path's class (site, /scan/*, /logos/* + /addrbook/*) and Cache-Control
+//     1b. the admin host (ADMIN_HOST, dev.valuedesk.so): its own headers (prod-headers.mjs
+//        adminHeadersFor), its own page (/admin.html) for every app route, its assets - and
+//        no other file of the site; the site's own routes never apply there, and on every
+//        other host /admin.html is a 404
 //     3. /scan/      -> /scan/index.html (the redirect page for old links)
 //     4. the files of the build
 //     5. a path whose last segment has no dot -> /index.html (the app's routes)
@@ -33,7 +37,7 @@
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, extname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { CSP, HEADERS, headersFor } from '../smoke/prod-headers.mjs';
+import { CSP, HEADERS, adminHeadersFor, headersFor } from '../smoke/prod-headers.mjs';
 import { LEGAL_PATHS, edgeBlockList } from '../../apps/web/src/legal/jurisdictions.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -79,6 +83,22 @@ export const HEADER_CLASSES = [
   [`^${NOT_HTML}/scan/${DOT_LAST}`, '/scan/x.js'],
 ];
 
+// --- the admin suite's host ------------------------------------------------------------------------
+
+/** The owner's admin suite (apps/web/src/admin/): this host gets its page, and only it does. */
+export const ADMIN_HOST = 'dev.valuedesk.so';
+const ON_ADMIN = [{ type: 'host', value: ADMIN_HOST }];
+
+/** The admin host's routes: headers (two classes), anything but its page and assets a 404, every app route its page. */
+export function adminRoutes() {
+  return [
+    { src: `^/assets/${DOT_LAST}`, has: ON_ADMIN, headers: adminHeadersFor('/assets/x.js'), continue: true, caseSensitive: true },
+    { src: '^/(?!assets/).*$', has: ON_ADMIN, headers: adminHeadersFor('/'), continue: true, caseSensitive: true },
+    { src: `^/(?!assets/|admin\\.html$|favicon\\.svg$)${DOT_LAST}`, has: ON_ADMIN, dest: '/admin-not-found', status: 404, caseSensitive: true },
+    { src: `^/${NO_DOT_LAST}`, has: ON_ADMIN, dest: '/admin.html', caseSensitive: true },
+  ];
+}
+
 // --- the sanctioned places (jurisdictions.mjs) ----------------------------------------------------
 
 /** What a visitor from a blocked place still gets: the legal pages and what they load. */
@@ -116,7 +136,11 @@ export function routes() {
     ...geoRoutes(),
     // The index API: only the function, which forwards the API's own headers.
     { src: '^/api/.*$', dest: FUNCTION_PATH, caseSensitive: true },
-    ...HEADER_CLASSES.map(([src, sample]) => ({ src, headers: headersFor(sample), continue: true, caseSensitive: true })),
+    // The admin suite's host: its own page and headers, nothing of the site.
+    ...adminRoutes(),
+    ...HEADER_CLASSES.map(([src, sample]) => ({ src, missing: ON_ADMIN, headers: headersFor(sample), continue: true, caseSensitive: true })),
+    // ...and the admin page is no page of the site.
+    { src: '^/admin\\.html$', missing: ON_ADMIN, dest: '/admin-not-found', status: 404, caseSensitive: true },
     // public/scan/index.html forwards links saved from the old Scan page.
     { src: '^/scan/$', dest: '/scan/index.html', caseSensitive: true },
     // /scan without the slash is the app's route. Vercel's filesystem step would serve

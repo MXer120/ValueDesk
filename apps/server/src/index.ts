@@ -37,7 +37,16 @@ import { builderRoutes } from './routes/builder.js';
 import { foldersRoutes } from './routes/folders.js';
 import { reportRoutes } from './routes/reports.js';
 import { statusRoutes } from './routes/status.js';
-import { proberEnabled, siteNoticeReader } from './ops/status.js';
+import { adminRoutes } from './routes/admin.js';
+import { analyticsRoutes, analyticsStore } from './routes/analytics.js';
+import { adminOriginsFrom } from './admin/auth.js';
+import { fetchExecutorHealth } from './admin/statusView.js';
+import { openLedger } from './admin/builderStats.js';
+import { builderDbPath, dataDir } from './builder/paths.js';
+import { builderService } from './builder/service.js';
+import { indexerStatus } from './indexer/read.js';
+import { ClientErrorStore } from './ops/clientErrors.js';
+import { StatusStore, proberEnabled, siteNoticeReader } from './ops/status.js';
 import { hexToBytes, privateKeyToAddress } from './signing/eip712.js';
 import { canMoveFunds } from './signing/actions.js';
 import { OrderValidationError, SymbolNotFoundError } from './sodex/symbols.js';
@@ -159,6 +168,8 @@ app.setErrorHandler((err, _req, reply) => {
 const siteBrake = siteBrakeReader(process.env.VALUEDESK_BRAKE_FILE?.trim() || (HOSTED ? '/var/lib/valuescan/brake.json' : null));
 // The status page's open incidents and maintenance (ops/statusNotices.ts) for the app's banner: one read per 30 s.
 const siteNotices = siteNoticeReader(HOSTED);
+// The admin suite's own origins (VALUESCAN_ADMIN_ORIGINS, default https://dev.valuedesk.so): its routes take no other.
+const ADMIN_ORIGINS = adminOriginsFrom(process.env.VALUESCAN_ADMIN_ORIGINS);
 
 app.get('/api/health', async () => (HOSTED
   // Hosted: only what the web reads (trading/config.ts configureFromHealth).
@@ -229,6 +240,29 @@ await app.register(foldersRoutes);
 // and the public status page's data (routes/status.ts).
 await app.register(reportRoutes);
 await app.register(statusRoutes);
+// The app's own analytics, after consent (routes/analytics.ts), and the owner's admin suite on
+// dev.valuedesk.so (routes/admin.ts) - off (404) until an admin password is set on this server.
+await app.register(analyticsRoutes, { trustGeo: HOSTED });
+let adminLedger: ReturnType<typeof openLedger> = null;
+let adminStatusDb: StatusStore | null = null;
+let adminErrorsDb: ClientErrorStore | null = null;
+await app.register(adminRoutes, {
+  hosted: HOSTED,
+  origins: ADMIN_ORIGINS,
+  analytics: analyticsStore,
+  ledger: () => (adminLedger ??= openLedger(builderDbPath())),
+  tiers: () => builderService().tiers.current(),
+  status: {
+    report: () => (adminStatusDb ??= new StatusStore()).report(),
+    indexer: indexerStatus,
+    brake: () => siteBrake(),
+    errors: () => (adminErrorsDb ??= new ClientErrorStore()).top({ limit: 50, order: 'recent' }),
+    executor: () => fetchExecutorHealth(process.env.VALUESCAN_ADMIN_EXECUTOR_HEALTH_URL?.trim() || 'https://www.valuedesk.so/api/copy/v1/health'),
+    home: process.env.VS_HOME?.trim() || '/opt/valuescan',
+    dataDir: dataDir(),
+  },
+  syncTimer: HOSTED,
+});
 
 // --- browser websocket -------------------------------------------------------
 
@@ -299,7 +333,7 @@ app.addHook('onSend', async (_req, reply, payload) => {
  * the route allow-list (plus the health route a caller on the instance may
  * read), the site Origin for a state-changing route, per-client limits.
  */
-if (HOSTED) installHostedGate(app, { cfg: HOSTED_CONFIG, site: SITE_ORIGINS });
+if (HOSTED) installHostedGate(app, { cfg: HOSTED_CONFIG, site: SITE_ORIGINS, admin: ADMIN_ORIGINS });
 else app.addHook('onRequest', async (req, reply) => {
   if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return;
   if (!isAllowedOrigin(req.headers.origin, ALLOWED_ORIGINS)) {

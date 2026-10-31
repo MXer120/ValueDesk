@@ -58,8 +58,12 @@ import { isSiteOrigin, normaliseOrigin } from './origin.js';
  *            here, per wallet in the route (routes/folders.ts), and only ever
  *            with the site's Origin. Also a visitor's feedback and client error
  *            reports (routes/reports.ts), which the route limits far tighter still.
+ * `admin`    the owner's admin suite (routes/admin.ts, dev.valuedesk.so): every route a
+ *            POST that needs the SUITE's Origin exactly (GateOptions.admin), never the
+ *            site's; counted as `read` here, and the route adds its own sign-in limits,
+ *            a session on every route and a fresh signature on every write.
  */
-export type RateClass = 'read' | 'upstream' | 'auth' | 'write';
+export type RateClass = 'read' | 'upstream' | 'auth' | 'write' | 'admin';
 
 export interface HostedRoute {
   method: 'GET' | 'POST';
@@ -169,6 +173,8 @@ export const HOSTED_ROUTES: readonly HostedRoute[] = [
   { method: 'POST', url: '/api/vs/inbox/add', cls: 'write' },
   { method: 'POST', url: '/api/vs/inbox/list', cls: 'write' },
   { method: 'POST', url: '/api/vs/client-errors', cls: 'write' },
+  // The app's own analytics, sent only after the visitor allowed it (routes/analytics.ts, ops/analyticsModel.ts).
+  { method: 'POST', url: '/api/vs/a', cls: 'write' },
   // The builder fee a wallet owes, signed (routes/builder.ts, docs/BUILDER-TIERS.md §3). Asking is a
   // read of this server's own ledger and one signature. A hint is what later costs SoDEX reads from
   // this server's address, so a request that carries one counts as `upstream` too.
@@ -203,6 +209,23 @@ export const HOSTED_ROUTES: readonly HostedRoute[] = [
   { method: 'POST', url: '/api/folders/upload/put', cls: 'write' },
   { method: 'POST', url: '/api/folders/upload/finish', cls: 'write' },
   { method: 'POST', url: '/api/folders/erase', cls: 'write' },
+  // The owner's admin suite (routes/admin.ts), served on dev.valuedesk.so: a 404 while no admin
+  // password is set on this server; otherwise the builder wallet's signature + the password for a
+  // 24 h session, and a fresh signature for each write.
+  { method: 'POST', url: '/api/admin/session', cls: 'admin' },
+  { method: 'POST', url: '/api/admin/me', cls: 'admin' },
+  { method: 'POST', url: '/api/admin/signout', cls: 'admin' },
+  { method: 'POST', url: '/api/admin/sessions/revoke', cls: 'admin' },
+  { method: 'POST', url: '/api/admin/tickets', cls: 'admin' },
+  { method: 'POST', url: '/api/admin/ticket', cls: 'admin' },
+  { method: 'POST', url: '/api/admin/ticket/image', cls: 'admin' },
+  { method: 'POST', url: '/api/admin/ticket/reply', cls: 'admin' },
+  { method: 'POST', url: '/api/admin/ticket/status', cls: 'admin' },
+  { method: 'POST', url: '/api/admin/builder', cls: 'admin' },
+  { method: 'POST', url: '/api/admin/users', cls: 'admin' },
+  { method: 'POST', url: '/api/admin/analytics', cls: 'admin' },
+  { method: 'POST', url: '/api/admin/status', cls: 'admin' },
+  { method: 'POST', url: '/api/admin/audit', cls: 'admin' },
 ];
 
 /**
@@ -554,6 +577,8 @@ export interface GateOptions {
   cfg: HostedConfig;
   /** Normalised site origins (siteOriginsFrom). */
   site: readonly string[];
+  /** The admin suite's origins (admin/auth.ts adminOriginsFrom): the only ones an `admin` route takes. None: those routes refuse every POST. */
+  admin?: readonly string[];
   routes?: readonly HostedRoute[];
   /** Routes answered to a caller on this instance only (default ON_INSTANCE_ROUTES). */
   onInstance?: readonly HostedRoute[];
@@ -587,7 +612,7 @@ export function installHostedGate(app: FastifyInstance, o: GateOptions): KeyedLi
     if (!route) return reply.code(404).send({ error: 'not found', source: 'server' });
     const repeated = repeatedParam(req.query);
     if (repeated) return reply.code(400).send({ error: `query parameter "${repeated}" is repeated`, source: 'validation' });
-    if (route.method === 'POST' && !isSiteOrigin(req.headers.origin, o.site)) {
+    if (route.method === 'POST' && !isSiteOrigin(req.headers.origin, route.cls === 'admin' ? o.admin ?? [] : o.site)) {
       return reply.code(403).send({ error: 'origin not allowed', source: 'server' });
     }
     for (const { key, limit } of limitsFor(route, req.query, o.cfg.limits, clientKey(req.ip))) {

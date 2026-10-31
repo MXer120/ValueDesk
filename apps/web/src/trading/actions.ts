@@ -72,6 +72,7 @@ import {
 import { ensureTerms, feeNow, hintTerms } from './terms';
 import { notListed } from './listed';
 import { logger } from '../log';
+import { track } from '../analytics/tracker';
 
 const log = logger('trade');
 
@@ -224,6 +225,8 @@ export async function placeOrder(engine: Engine, t: OrderTicket) {
     throw e;
   }
   log.info('order placed', { engine, symbol: sym.name, legs: built.orderCount, ...(builder ? { builderFee: builder.fee } : {}) });
+  // The app's own analytics, only with the visitor's consent (analytics/tracker.ts): no symbol, size or price.
+  track('order.place', { engine, legs: built.orderCount });
   // It may have filled: the server is told to look at this wallet's volume (debounced, terms.ts).
   if (builder) hintTerms(s.meta.owner);
   return { engine, symbol: built.symbol, orderCount: built.orderCount, result };
@@ -323,6 +326,7 @@ export async function cancelOrder(engine: Engine, b: { symbol: string; orderID?:
   const sym = await symbolFor(engine, b.symbol);
   const result = await signAndSend(cancelOrderAction(engine, sym, s.meta.accountId, b), 'cancel');
   checkBatch(result, 'cancel');
+  track('order.cancel', { engine });
   return { result };
 }
 

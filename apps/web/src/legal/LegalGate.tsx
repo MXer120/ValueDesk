@@ -20,6 +20,7 @@
  *                       country is unknown); not dismissible (notices.ts).
  *   <EmbedSwitches>     the Cookies page: withdraw consent for a video platform.
  *   <ReownSwitch>       the Cookies page: allow or withdraw Reown's usage reports.
+ *   <AnalyticsSwitch>   the Cookies page: allow or withdraw ValueDesk's own usage analytics.
  *   openLegalPage()     any component: show a legal page in place (App listens).
  */
 import { Suspense, useCallback, useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react';
@@ -45,6 +46,7 @@ import {
 } from './acceptance';
 import { EMBED_PLATFORMS, EMBED_PROVIDERS, allEmbedsAllowed, allowAllEmbeds, revokeEmbed, useEmbedConsent } from './embeds';
 import { allowReownReports, reownReportsAllowed, revokeReownReports, useReownReportsAllowedAt } from './reownConsent';
+import { allowAnalytics, analyticsAllowed, revokeAnalytics, useAnalyticsAllowedAt } from './analyticsConsent';
 import { LOCATION_UNKNOWN, useGeoSettled, useViewerAccess, useViewerGeo } from './geo';
 import { regionBannerText } from './notices';
 import { siteAccess } from './jurisdictions.mjs';
@@ -200,6 +202,7 @@ function TermsForm({ signer, offerOptional, onOpen, onDone }: TermsFormProps) {
       if (all) {
         allowAllEmbeds();
         allowReownReports();
+        allowAnalytics();
       }
       onDone(signer ? 'signed' : 'confirmed');
     } catch (e) {
@@ -245,7 +248,7 @@ function TermsForm({ signer, offerOptional, onOpen, onDone }: TermsFormProps) {
       {offerOptional ? (
         <>
           <p className="lg-small lg-extras">
-            &ldquo;Accept all&rdquo; also allows the Live Feed&rsquo;s video players and usage reports to Reown. <LegalLink page="cookies" onOpen={onOpen}>Details</LegalLink>
+            &ldquo;Accept all&rdquo; also allows ValueDesk&rsquo;s own usage analytics (on its own server, no third party), the Live Feed&rsquo;s video players and usage reports to Reown. <LegalLink page="cookies" onOpen={onOpen}>Details</LegalLink>
           </p>
           <div className="lg-pair">
             <button type="button" className="lg-cta lg-cta--secondary" disabled={!ready} aria-busy={busy === 'necessary' || undefined} onClick={() => void accept(false)}>{label(false)}</button>
@@ -368,7 +371,7 @@ export function TermsGate({ hidden, onOpen, address, provider }: {
       <TermsForm
         key={signer ? `sign:${signer.owner}` : 'confirm'}
         signer={signer}
-        offerOptional={!allEmbedsAllowed() || !reownReportsAllowed()}
+        offerOptional={!allEmbedsAllowed() || !reownReportsAllowed() || !analyticsAllowed()}
         onOpen={onOpen}
         onDone={() => (pending ? finish(true) : setTick((n) => n + 1))}
       />
@@ -481,6 +484,24 @@ export function ReownSwitch() {
   );
 }
 
+
+/** The Cookies page's switch for ValueDesk's own usage analytics (analyticsConsent.ts, analytics/tracker.ts). */
+export function AnalyticsSwitch() {
+  const at = useAnalyticsAllowedAt();
+  return (
+    <ul className="lg-embeds">
+      <li>
+        <span>
+          <b>ValueDesk usage analytics</b>{' '}
+          {at !== null ? `allowed on ${new Date(at).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' })}` : 'not allowed - nothing is measured'}
+        </span>
+        {at !== null
+          ? <button type="button" className="fx-link" onClick={revokeAnalytics}>Withdraw consent</button>
+          : <button type="button" className="fx-link" onClick={() => allowAnalytics()}>Allow</button>}
+      </li>
+    </ul>
+  );
+}
 
 /** The Cookies page's switches: which platforms' players may load, and withdrawing that. */
 export function EmbedSwitches() {

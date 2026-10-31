@@ -105,6 +105,23 @@ export interface ImageRow {
   height: number;
 }
 
+/** A chat as the admin suite lists it (adminThreads). */
+export interface AdminThreadRow {
+  id: number;
+  category: string;
+  /** The wallet the chat is kept on (proven), or null. */
+  wallet: string | null;
+  /** For a chat on no wallet: the address its latest message only claimed, if any. */
+  claimedWallet: string | null;
+  createdAt: number;
+  lastAt: number;
+  messages: number;
+  ownerMessages: number;
+  lastFrom: Sender | null;
+  lastText: string;
+  images: number;
+}
+
 export class FullError extends Error {}
 /** A thread token whose chat is kept on a wallet: only the wallet's proof opens it. */
 export class LockedError extends Error {}
@@ -437,6 +454,77 @@ export class FeedbackStore {
     return old.length;
   }
 
+  // --- the admin suite's view (routes/admin.ts): every chat, the owner's eyes only -----------
+
+  /** Every chat that was not moved into another, newest activity first, with what its list row shows. */
+  adminThreads(limit = 1000): AdminThreadRow[] {
+    const rows = this.db.prepare(
+      `SELECT t.id, t.category, t.owner_wallet, t.created_at, t.last_at,
+         (SELECT COUNT(*) FROM messages m WHERE m.thread_id = t.id) AS n,
+         (SELECT COUNT(*) FROM messages m WHERE m.thread_id = t.id AND m.sender = 'owner') AS owner_n,
+         (SELECT sender FROM messages m WHERE m.thread_id = t.id ORDER BY m.id DESC LIMIT 1) AS last_sender,
+         (SELECT text FROM messages m WHERE m.thread_id = t.id ORDER BY m.id DESC LIMIT 1) AS last_text,
+         (SELECT wallet FROM messages m WHERE m.thread_id = t.id AND m.wallet IS NOT NULL ORDER BY m.id DESC LIMIT 1) AS claimed,
+         (SELECT COUNT(*) FROM images i JOIN messages m ON m.id = i.message_id WHERE m.thread_id = t.id) AS images
+       FROM threads t WHERE t.merged_into IS NULL ORDER BY t.last_at DESC LIMIT ?`,
+    ).all(Math.max(1, Math.min(5000, limit))) as Array<{
+      id: number; category: string; owner_wallet: string | null; created_at: number; last_at: number; n: number; owner_n: number;
+      last_sender: Sender | null; last_text: string | null; claimed: string | null; images: number;
+    }>;
+    return rows.map((r) => ({
+      id: Number(r.id),
+      category: r.category,
+      wallet: r.owner_wallet,
+      claimedWallet: r.owner_wallet ? null : r.claimed,
+      createdAt: Number(r.created_at),
+      lastAt: Number(r.last_at),
+      messages: Number(r.n),
+      ownerMessages: Number(r.owner_n),
+      lastFrom: r.last_sender,
+      lastText: (r.last_text ?? '').slice(0, 280),
+      images: Number(r.images),
+    }));
+  }
+
+  /** One chat by id (after any move), or null. */
+  threadById(id: number): ThreadRow | null {
+    let r = this.byId(id);
+    for (let hops = 0; r && r.merged_into !== null && hops < 4; hops++) r = this.byId(Number(r.merged_into));
+    return r ? rowOf(r) : null;
+  }
+
+  /** A chat's messages with the page info each was sent with (ops/feedback.ts context) - for the owner. */
+  adminMessages(threadId: number, limit = 1000): Array<MessageRow & { wallet: string | null; context: unknown }> {
+    const extra = new Map(
+      (this.db.prepare('SELECT id, wallet, context FROM messages WHERE thread_id = ?').all(threadId) as Array<{ id: number; wallet: string | null; context: string | null }>)
+        .map((r) => [Number(r.id), { wallet: r.wallet, context: parseJson(r.context) }]),
+    );
+    return this.messages(threadId, limit).map((m) => ({ ...m, ...(extra.get(m.id) ?? { wallet: null, context: null }) }));
+  }
+
+  /**
+   * The owner's answer written in the admin suite: into the chat as an owner
+   * message, as a Telegram reply is (addOwnerReply) - the visitor's unread dot
+   * and bell see it the same way. The Telegram copy, if any, is mapped after.
+   */
+  addOwnerMessage(threadId: number, text: string, now = Date.now()): { threadId: number; messageId: number } | null {
+    const t = this.threadById(threadId);
+    if (!t) return null;
+    const r = this.db.prepare('INSERT INTO messages (thread_id, sender, text, at, tg_id) VALUES (?, ?, ?, ?, NULL)').run(t.id, 'owner', text, now);
+    this.db.prepare('UPDATE threads SET last_at = ? WHERE id = ?').run(now, t.id);
+    return { threadId: t.id, messageId: Number(r.lastInsertRowid) };
+  }
+
+  /** A screenshot of a chat by id, for the owner: its bytes and kind, only if it belongs to that chat. */
+  adminImage(threadId: number, id: string): { row: ImageRow; bytes: Buffer } | null {
+    if (!/^[0-9a-f]{24}$/.test(id)) return null;
+    const r = this.db.prepare('SELECT i.id, i.kind, i.bytes, i.width, i.height FROM images i JOIN messages m ON m.id = i.message_id WHERE i.id = ? AND m.thread_id = ?').get(id, threadId) as
+      | { id: string; kind: ImageKind; bytes: number; width: number; height: number }
+      | undefined;
+    const bytes = r ? this.imageBytes(r.id) : null;
+    return r && bytes ? { row: { id: r.id, kind: r.kind, bytes: Number(r.bytes), width: Number(r.width), height: Number(r.height) }, bytes } : null;
+  }
+
   getMeta(key: string): string | null {
     const r = this.db.prepare('SELECT value FROM meta WHERE key = ?').get(key) as { value: string } | undefined;
     return r?.value ?? null;
@@ -448,6 +536,15 @@ export class FeedbackStore {
 
   close(): void {
     this.db.close();
+  }
+}
+
+function parseJson(raw: string | null): unknown {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
   }
 }
 

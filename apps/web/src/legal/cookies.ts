@@ -3,7 +3,9 @@
  * one place. DRAFT for the owner (the date; see model.ts).
  *
  * The facts, as of 2026-10-24 (privacy.ts section 6 says the same in short):
- *   - no document.cookie anywhere in the app, no analytics, no advertising;
+ *   - no document.cookie anywhere in the app, no advertising, no third-party
+ *     analytics; ValueDesk's own usage analytics only with consent (section 5,
+ *     legal/analyticsConsent.ts, analytics/tracker.ts - owner, 2026-10-31);
  *   - every entry the app writes to localStorage / sessionStorage / IndexedDB
  *     has a name that starts with "vs", "vd" or "valuescan" (a grep over
  *     apps/web/src); the trading key vault, the browser copier and the browser
@@ -23,6 +25,8 @@ import type { LegalDoc } from './model';
 export const EMBED_SECTION_TITLE = '3. Third-party players in the Live Feed';
 /** The section LegalView puts the Reown switch under (reownConsent.ts). */
 export const REOWN_SECTION_TITLE = '4. Usage reports to Reown when you connect a wallet';
+/** The section LegalView puts the analytics switch under (analyticsConsent.ts). */
+export const ANALYTICS_SECTION_TITLE = '5. ValueDesk\'s own usage analytics, with your consent';
 
 export const COOKIES: LegalDoc = {
   page: 'cookies',
@@ -30,17 +34,17 @@ export const COOKIES: LegalDoc = {
   lang: 'en',
   updated: '[[OWNER: date, e.g. 1 November 2026]]',
   intro: [
-    { p: 'In short: ValueDesk sets no cookies of its own and uses no advertising or tracking of its own. It keeps what its functions need in your browser\'s own storage, on your device. Third-party video players, and the usage reports Reown\'s wallet software sends when you connect a wallet, only run after you allow them. Details on all personal data: [Privacy policy](/privacy).' },
+    { p: 'In short: ValueDesk sets no cookies of its own, uses no advertising and no third-party tracking. It keeps what its functions need in your browser\'s own storage, on your device. ValueDesk\'s own usage analytics - kept on its own server, shared with no one - third-party video players, and the usage reports Reown\'s wallet software sends when you connect a wallet, only run after you allow them. Details on all personal data: [Privacy policy](/privacy).' },
   ],
   sections: [
     {
-      title: '1. No cookies of our own, no tracking',
+      title: '1. No cookies of our own, no third-party tracking',
       blocks: [
         {
           ul: [
             'ValueDesk itself sets no cookies - neither on this site nor through its servers.',
-            'There is no analytics of our own, no advertising, no tracking pixel, no fingerprinting and no social media plugin, and no data is sold or shared for advertising. The one third-party usage report - Reown\'s, when you connect a wallet - is sent only with your consent (section 4).',
-            'ValueDesk\'s servers do not recognise you from one visit to the next: there are no accounts. The only identifiers they hand out are the sign-in tokens your wallet\'s signature obtains for the copy executor and for your knowledge folders, which your browser sends to those two only (section 2).',
+            'There is no advertising, no tracking pixel, no fingerprinting, no social media plugin and no analytics service of a third party, and no data is sold or shared for advertising. ValueDesk measures how its site is used only if you allow it, on its own server (section 5). The one third-party usage report - Reown\'s, when you connect a wallet - is sent only with your consent (section 4).',
+            'Without your consent to analytics, ValueDesk\'s servers do not recognise you from one visit to the next: there are no accounts. The only identifiers they hand out are the sign-in tokens your wallet\'s signature obtains for the copy executor and for your knowledge folders, which your browser sends to those two only (section 2). With it, a random visitor number in your browser tells a returning visitor (section 5).',
           ],
         },
       ],
@@ -59,6 +63,7 @@ export const COOKIES: LegalDoc = {
             '**Trading, algo orders and copy trading in this browser:** the trading key and the copy key, each encrypted with a key your browser generates and cannot export, valid for at most seven days; your algo orders and copy rules, their state and their activity log.',
             '**Your knowledge folders:** the sign-in token for your wallet\'s folders, valid for seven days. Your browser sends it with each request to your folders - the one entry here that ValueDesk\'s server reads. The folders themselves are kept on ValueDesk\'s server ([Privacy policy](/privacy), section 12).',
             '**For the current tab only:** a deposit or withdrawal in progress, diagnostic settings, a session with ValueDesk\'s copy executor.',
+            '**Your consent choices:** whether you allowed ValueDesk\'s usage analytics, Reown\'s usage reports and each video player, and when. With analytics allowed, also its visitor and visit numbers (section 5) - those need your consent and are deleted when you withdraw it.',
           ],
         },
         { p: 'Legal basis: § 25(2) no. 2 TDDDG - this storage is strictly necessary to provide the functions you ask for, so it needs no consent - and, for any personal data in it, Art. 6(1)(b) and (f) GDPR.' },
@@ -79,13 +84,33 @@ export const COOKIES: LegalDoc = {
       ],
     },
     {
-      title: '5. Other services your browser connects to',
+      title: ANALYTICS_SECTION_TITLE,
+      blocks: [
+        { p: 'If you allow it - with "Accept all" in the terms window, or with the switch below - ValueDesk measures how its site is used, to learn which features help you and where people get stuck. It runs on ValueDesk\'s own server only (Contabo, France, reached through ValueDesk\'s function at Vercel); no analytics company, advertising network or other third party receives it. What is recorded:' },
+        {
+          ul: [
+            'the pages you open - the page\'s path only, with wallet addresses and other identifiers in it replaced, and no search terms - and how long each page is visible;',
+            'which features you use, by name - for example "placed an order", "started an algo order", "opened deposit" - with a few words of detail such as the venue or the kind of algo, never amounts, prices, wallet addresses or anything you type;',
+            'where a visit came from: the domain of the site that linked to ValueDesk, the campaign tags of the link (utm_source, utm_medium, utm_campaign) and the first page you opened;',
+            'your country and region, as Vercel determines them from your IP address for the regional rules ([Privacy policy](/privacy), section 3); your IP address itself is not stored for analytics;',
+            'the type of device (desktop, tablet, phone), the screen size, the browser and operating system with their main version, the language, the time zone and the colour theme;',
+            'how fast pages load and respond, as your browser measures it;',
+            'the address of a wallet you connect, so that how you use ValueDesk can be seen beside the trading volume and builder fees ValueDesk counts for that wallet anyway ([Privacy policy](/privacy), section 7);',
+            'a random visitor number kept in your browser (local storage, "vd.an.v1", replaced by a new one after 13 months) to tell new from returning visitors, and a random number for the current visit (session storage, "vd.an.visit"), which ends with the tab or after 30 minutes without use.',
+          ],
+        },
+        { p: 'Not recorded: your IP address, cookies, what you type, the contents of forms, mouse movements, recordings of your screen, and anything about other websites. Only the operator of ValueDesk can see the data. It is kept [[OWNER: how long analytics data is kept, e.g. 25 months - nothing is deleted automatically until this is set]].' },
+        { p: 'Legal basis: your consent (§ 25(1) TDDDG for the visitor number in your browser and for reading the details above, Art. 6(1)(a) GDPR for the processing). Without it nothing is measured, and the site works the same. You can withdraw it at any time with the switch below, with effect for the future: nothing more is sent, and the visitor number is deleted from your browser. Details: [Privacy policy](/privacy), section 13.' },
+      ],
+    },
+    {
+      title: '6. Other services your browser connects to',
       blocks: [
         { p: 'Market data, your account and your orders come straight from SoDEX, Hyperliquid, Lighter, Arcus and public blockchain nodes; your wallet connects through its extension or Reown / WalletConnect. These connections set no cookies on this site, but each service receives your IP address. Which services, and why: [Privacy policy](/privacy), section 8.' },
       ],
     },
     {
-      title: '6. Deleting it',
+      title: '7. Deleting it',
       blocks: [
         { p: 'You can delete everything ValueDesk keeps in your browser at any time by clearing this site\'s data in your browser\'s settings. Settings, lists and keys are then gone from this device; your funds are not affected, because they stay in your wallet and your SoDEX account. Signing out removes the trading key at once.' },
         { p: 'Your knowledge folders are not in your browser but on ValueDesk\'s server: delete an item or a folder in the folders, or everything at once with "Delete everything" in the folders\' menu ([Privacy policy](/privacy), section 12).' },
