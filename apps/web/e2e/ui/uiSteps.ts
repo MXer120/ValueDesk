@@ -84,6 +84,22 @@ async function place(page: Page, last?: () => Promise<void>): Promise<{ review: 
     throw new Error(`${(e as Error).message}${hints ? `; the ticket says: ${hints}` : ''} (button: ${(await btn.getAttribute('title')) ?? ((await btn.textContent()) ?? '').trim()})`);
   });
   const toasts = await toast(page, /placed/).count();
+  // A new "placed" toast is watched for as it is added: the stack holds four (toast.tsx MAX), so with it full the
+  // new one pushes the oldest out and the count of "placed" toasts can stay the same (live 2026-10-31, ticket.stop:
+  // the stop orders were on SoDEX, the step timed out).
+  await page.evaluate(() => {
+    const w = window as unknown as { __placedAdded?: number; __placedObs?: MutationObserver };
+    w.__placedObs?.disconnect();
+    w.__placedAdded = 0;
+    w.__placedObs = new MutationObserver((ms) => {
+      for (const m of ms) for (const n of m.addedNodes) {
+        if (!(n instanceof HTMLElement)) continue;
+        const el = n.matches('.toast') ? n : n.querySelector('.toast');
+        if (el && /placed/.test(el.textContent ?? '')) w.__placedAdded = (w.__placedAdded ?? 0) + 1;
+      }
+    });
+    w.__placedObs.observe(document.body, { childList: true, subtree: true });
+  }).catch(() => {});
   // "Don't show this review again" was ticked in this browser: the button sends it at once.
   const reviewed = await page.evaluate(() => localStorage.getItem('opentrade.review.suppress') !== '1').catch(() => true);
   if (!reviewed) await last?.();
@@ -102,7 +118,8 @@ async function place(page: Page, last?: () => Promise<void>): Promise<{ review: 
   const status = t.g.locator('p.status');
   let placed = '';
   await until(page, async () => {
-    if ((await toast(page, /placed/).count()) > toasts) {
+    const added = await page.evaluate(() => (window as unknown as { __placedAdded?: number }).__placedAdded ?? 0).catch(() => 0);
+    if (added > 0 || (await toast(page, /placed/).count()) > toasts) {
       placed = ((await toast(page, /placed/).last().textContent()) ?? '').trim();
       return true;
     }
@@ -292,6 +309,8 @@ export const UI_STEPS = {
     await t.ready();
     await t.type('Stop');
     await t.direction(dir(a.side)).check();
+    // The ticket keeps the TP/SL switch as the last order left it (ticket.tpsl turns it on): a plain stop has none.
+    if ((await t.exits.getAttribute('aria-checked')) === 'true') await t.exits.click();
     await t.setUnit(await baseUnitOf(t.unit));
     await typeInto(t.amount, dec(a.quantity));
     await waitValue(t.amount, (v) => num(v) === a.quantity, `the amount ${a.quantity}`);
