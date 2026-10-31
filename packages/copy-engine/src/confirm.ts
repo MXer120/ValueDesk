@@ -13,8 +13,8 @@
  * So one read that shows a change nobody here made proves nothing. It is acted
  * on only when CONFIRM_READS more reads, CONFIRM_GAP_MS apart, agree with it;
  * on any disagreement nothing is done this round. The confirming reads are made
- * only then - a state read is weight 5 of SoDEX's 1200 a minute per IP - never
- * on every tick.
+ * only then - a state read is weight 5 of SoDEX's per-IP limit a minute
+ * (6,000 on 2026-10-31) - never on every tick.
  */
 import { sleep } from './io.ts';
 

@@ -78,10 +78,11 @@ type Entry = [at: number, w: number];
 export class SharedLedger {
   private mem: Entry[] = [];
   private readonly storeKey: string;
+  private max: number;
 
   constructor(
     readonly name: string,
-    readonly limit: number,
+    limit: number,
     readonly windowMs: number,
     private readonly deps: LedgerDeps = defaultLedgerDeps(),
     /**
@@ -92,6 +93,20 @@ export class SharedLedger {
     readonly atomic = true,
   ) {
     this.storeKey = `vs:ledger:${name}`;
+    this.max = limit;
+  }
+
+  /** Units allowed per window: the one it was made with, or what the exchange last reported (`setLimit`). */
+  get limit(): number {
+    return this.max;
+  }
+
+  /**
+   * A new allowance, from the next take on (the exchange reported its limit).
+   * Kept per tab, not in the shared ledger: every tab hears it on its own first answer.
+   */
+  setLimit(n: number): void {
+    if (Number.isInteger(n) && n > 0) this.max = n;
   }
 
   private read(now: number): Entry[] {

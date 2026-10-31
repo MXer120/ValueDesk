@@ -368,7 +368,7 @@ function paced<Q, R>(fetchPage: (q: Q) => Promise<R>): (q: Q) => Promise<R> {
         throw new Error('SoDEX is rate limiting this server - the walk resumes later.');
       }
       const gap = lastWalkPage + WALK_GAP_MS - Date.now();
-      const wait = Math.max(gap, sodex.budgetSpent() > 600 ? 3_000 : 0);
+      const wait = Math.max(gap, sodex.budgetSpent() > sodex.weightLimit() / 2 ? 3_000 : 0);
       if (wait <= 0) break;
       await new Promise((r) => setTimeout(r, wait));
     }

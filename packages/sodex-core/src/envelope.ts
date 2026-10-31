@@ -220,5 +220,38 @@ export function weightFor(path: string, limit = 0): number {
 
 /** Weight the gateway bills for a signed write. */
 export const SIGNED_WRITE_WEIGHT = 1;
-/** Documented REST budget per IP. */
+/**
+ * REST budget per IP before SoDEX has said otherwise: the documented 1,200 a
+ * minute. The gateway reports the real one on every answer (x-ratelimit-limit:
+ * 6,000 on 2026-10-31), and the budgets adopt that (reportedRateLimit).
+ */
 export const REST_WEIGHT_PER_MINUTE = 1200;
+/** A reported limit outside this range is a broken header, not a new limit. */
+export const REPORTED_LIMIT_MIN = 600;
+export const REPORTED_LIMIT_MAX = 60_000;
+
+/** What one gateway answer says about the per-IP budget. */
+export interface ReportedRateLimit {
+  /** Weight per minute per IP (x-ratelimit-limit). */
+  limit: number;
+  /** Weight the IP has left this minute (x-ratelimit-remaining), null when absent or unreadable. */
+  remaining: number | null;
+}
+
+/**
+ * SoDEX's x-ratelimit-* headers, read: null unless the limit is an integer in
+ * REPORTED_LIMIT_MIN..MAX. `remaining` is kept only as an integer 0..limit.
+ * (A browser sees neither unless the gateway exposes them to CORS: on
+ * 2026-10-31 it exposes only Content-Length, so a browser keeps its default.)
+ */
+export function reportedRateLimit(get: ((name: string) => string | null | undefined) | undefined): ReportedRateLimit | null {
+  if (!get) return null;
+  const int = (raw: string | null | undefined): number | null => {
+    const s = (raw ?? '').trim();
+    return /^\d{1,7}$/.test(s) ? Number(s) : null;
+  };
+  const limit = int(get('x-ratelimit-limit'));
+  if (limit === null || limit < REPORTED_LIMIT_MIN || limit > REPORTED_LIMIT_MAX) return null;
+  const rem = int(get('x-ratelimit-remaining'));
+  return { limit, remaining: rem !== null && rem <= limit ? rem : null };
+}

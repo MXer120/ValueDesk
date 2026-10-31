@@ -97,6 +97,47 @@ test('gateway: Cloudflare 1015 (a plain-text 429) opens the cooldown too', async
   assert.equal(r.calls.length, 1);
 });
 
+/** An answer with SoDEX's rate-limit headers (6000/min on 2026-10-31), when the browser may read them. */
+const okLimited = (data: unknown, limit: string, remaining?: string, status = 200) =>
+  new Response(status === 200 ? JSON.stringify({ code: 0, data }) : 'error code: 1015', {
+    status,
+    headers: { 'x-ratelimit-limit': limit, ...(remaining !== undefined ? { 'x-ratelimit-remaining': remaining } : {}) },
+  });
+
+test('gateway: the budget follows the limit the gateway reports; a broken one is ignored', async () => {
+  const r = rig();
+  assert.equal(r.client.budget.limit, GATEWAY_WEIGHT_PER_MIN, '1200 until an answer says otherwise');
+  r.reply = () => okLimited([], '6000');
+  await r.client.get(`/api/v1/perps/accounts/${A}/state`);
+  assert.equal(r.client.budget.limit, 6000);
+  // A minute the old limit would have refused now fits.
+  await r.client.budget.charge(4000);
+  await r.client.get(`/api/v1/spot/accounts/${A}/state`);
+  assert.equal(r.calls.length, 2);
+  for (const v of ['599', '60001', '6e3', 'x']) {
+    r.reply = () => okLimited([], v, '0');
+    const before = r.client.budget.spent();
+    await r.client.get(`/api/v1/perps/accounts/${A}/positions`);
+    assert.equal(r.client.budget.limit, 6000, `'${v}'`);
+    assert.equal(r.client.budget.spent(), before + 5, `'${v}': nothing booked`);
+  }
+});
+
+test("gateway: weight the IP spent beyond every tab's ledger is booked - never past the limit; a 429 still cools down", async () => {
+  const r = rig();
+  r.reply = () => okLimited([], '6000', '5000'); // 1000 spent this minute; ours is 5
+  await r.client.get(`/api/v1/perps/accounts/${A}/state`);
+  assert.equal(r.client.budget.spent(), 1000);
+  r.reply = () => okLimited([], '6000', '6000'); // more left than we count: nothing is freed
+  await r.client.get(`/api/v1/spot/accounts/${A}/state`);
+  assert.equal(r.client.budget.spent(), 1005);
+  r.reply = () => okLimited([], '6000', '0', 429);
+  await assert.rejects(r.client.get(`/api/v1/perps/accounts/${A}/orders`));
+  assert.equal(r.client.budget.spent(), 6000, 'booked up to the limit, not beyond');
+  assert.ok(r.client.cooldownLeft(`/api/v1/perps/accounts/${A}/orders`) >= 15_000, 'the cooldown opens exactly as before');
+  assert.equal(r.calls.length, 3, 'never replayed');
+});
+
 test('gateway: an unreadable failure on a history path is treated as a 1015 - never replayed', async () => {
   const r = rig();
   r.reply = () => 'throw';

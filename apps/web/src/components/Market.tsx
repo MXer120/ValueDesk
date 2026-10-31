@@ -2969,8 +2969,9 @@ export function Trades({
   // (see App.tsx/Account.tsx/Money.tsx): those are for slow-moving account
   // data, this is standing in for a feed that is otherwise realtime. But not
   // faster than 5s either - server/src/sodex/rest.ts costs a `trades` call at
-  // 20 + limit/20 against a SHARED 1200/min upstream budget every other
-  // request on this venue draws from too; at limit 50 that is 22 units/call,
+  // 20 + limit/20 against a SHARED upstream budget (1200/min then; SoDEX's
+  // reported limit now) every other request on this venue draws from too; at
+  // limit 50 that is 22 units/call,
   // and a 2s interval was measured pulling a 429 by burning ~660 units/min,
   // over half that whole shared budget, on this one poll alone.
   const [dataSource, setDataSource] = useStored<'ws' | 'rest'>('ot.tape.datasource', 'ws');

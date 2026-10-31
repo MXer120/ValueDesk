@@ -350,6 +350,7 @@ class BrowserAlgos {
   private async startRuntime(owner: string): Promise<void> {
     const cfg = tradingConfig();
     const fetchFn = (url: string, init?: RequestInit) => fetch(url, { ...init, credentials: 'omit', mode: 'cors', cache: 'no-store' });
+    // Half of this IP's REST budget (the app's own reads draw on the rest); half of the limit SoDEX reports, once it does.
     const sodex = new SodexClient({ network: cfg.network, gateway: cfg.gateway, fetch: fetchFn as never, budget: new WeightBudget(600) });
     const store = this.store!;
     this.runtime = new AlgoRuntime({

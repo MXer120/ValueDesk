@@ -2,8 +2,8 @@
  * SoDEX, as the copier talks to it: public reads, and signed writes it never
  * retries.
  *
- * READS go through one weight budget per client (SoDEX allows 1,200 weight a
- * minute per IP; reads use at most 75% of it, see WeightBudget) and are
+ * READS go through one weight budget per client (SoDEX's per-IP weight a
+ * minute, as its answers report it; reads use at most 75% of it, see WeightBudget) and are
  * retried on a transient failure - never on a 429, which opens a cooldown for
  * every caller. WRITES are sent once, closes and stops before openings when
  * the budget is tight, and only the actions in ALLOWED_WRITES. A write that got no answer, or an
@@ -16,7 +16,9 @@ import {
   SodexApiError,
   approvedBuilderRates,
   isTransientFailure,
+  REST_WEIGHT_PER_MINUTE,
   parseEnvelope,
+  reportedRateLimit,
   weightFor,
   type BuiltRequest,
   type Network,
@@ -69,8 +71,10 @@ const jitter = (ms: number, rnd: () => number = Math.random): number => Math.rou
  * The per-IP REST budget every caller of one client shares (copies, algos,
  * key checks), and SoDEX's rate-limit cooldown.
  *
- * SoDEX allows 1,200 weight a minute per IP. Every follower's request leaves
- * the executor from one address, so this is the budget of all of them:
+ * SoDEX allows a weight a minute per IP that every answer reports
+ * (x-ratelimit-limit: 6,000 on 2026-10-31; the documented 1,200 until the first
+ * answer says so - see `learn`). Every follower's request leaves the executor
+ * from one address, so this is the budget of all of them:
  *   - reads wait until they fit under `readShare` (default 75 %);
  *   - an opening write goes only while the minute stays under `openShare`
  *     (92 %) and no cooldown runs - otherwise it is refused (LocalRefusal),
@@ -83,17 +87,66 @@ const jitter = (ms: number, rnd: () => number = Math.random): number => Math.rou
  * answer that is not a 429 ends it. Replaying into a ban is what keeps it on.
  */
 export class WeightBudget {
-  private spent: Array<{ at: number; w: number }> = [];
+  /** `ext`: weight SoDEX says others on this IP spent (see `learn`), not ours. */
+  private spent: Array<{ at: number; w: number; ext?: true }> = [];
   private coolUntil = 0;
   private coolMs = 0;
   private lastProtectAt = 0;
+  private limit: number;
+  /**
+   * The part of the IP's limit this budget is for: a budget made for 600 of
+   * the documented 1,200 (the browser copier's, which shares the IP with the
+   * app) keeps half of whatever SoDEX reports.
+   */
+  readonly ipShare: number;
   /** Told when a cooldown opens or ends. */
   onEvent: ((e: GateEvent) => void) | null = null;
   constructor(
-    readonly perMinute = 1200,
+    perMinute = REST_WEIGHT_PER_MINUTE,
     readonly readShare = 0.75,
     readonly openShare = 0.92,
-  ) {}
+  ) {
+    this.limit = perMinute;
+    this.ipShare = Math.min(1, perMinute / REST_WEIGHT_PER_MINUTE);
+  }
+
+  /** This budget's weight a minute now: its share of the limit SoDEX last reported, or the one it was made with. */
+  get perMinute(): number {
+    return this.limit;
+  }
+
+  /**
+   * One gateway answer's x-ratelimit-* headers.
+   *
+   * The limit becomes the reported one (times `ipShare`), so the read and open
+   * lines stay the same share of whatever SoDEX allows; a header that is not
+   * an integer in 600..60,000 changes nothing.
+   *
+   * `remaining` books what others spent: SoDEX counts the whole IP (every
+   * follower of an executor, every tab of a browser, other processes on the
+   * box), we count only our own. When it has spent more this minute than our
+   * own window holds, the difference is booked as weight we did not send -
+   * beyond what the rest of the IP is entitled to when this budget is only a
+   * share of it. It can only add weight (never free any: our window is sliding
+   * and SoDEX's resets on the minute, so ours is the stricter one), and the
+   * booking expires like our own after 60 s.
+   */
+  learn(get: ((name: string) => string | null) | undefined, now = Date.now()): void {
+    const r = reportedRateLimit(get);
+    if (!r) return;
+    this.limit = Math.max(1, Math.floor(r.limit * this.ipShare));
+    if (r.remaining === null) return;
+    this.used(now);
+    let own = 0;
+    let booked = 0;
+    for (const x of this.spent) {
+      if (x.ext) booked += x.w;
+      else own += x.w;
+    }
+    const others = r.limit - r.remaining - own;
+    const owed = Math.min(this.limit, others - (r.limit - this.limit));
+    if (owed > booked) this.spent.push({ at: now, w: owed - booked, ext: true });
+  }
 
   used(now = Date.now()): number {
     while (this.spent.length && now - this.spent[0]!.at >= 60_000) this.spent.shift();
@@ -614,6 +667,8 @@ export class SodexClient {
    * the caller); anything else below 500 proves SoDEX is there and lifts it.
    */
   private observe(res: ResponseLike, text: string, path: string, sentAt: number): void {
+    // Every answer (a 429 too) says what SoDEX allows this IP and what is left of it.
+    this.budget.learn(res.headers ? (name) => res.headers!.get(name) : undefined);
     if (isIpRateLimited(res.status, text)) {
       this.reached();
       this.budget.penalise(path, retryAfterMs(res.headers?.get('retry-after')), Date.now(), Math.random, sentAt);

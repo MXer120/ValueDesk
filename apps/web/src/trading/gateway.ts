@@ -75,8 +75,10 @@ export async function sendSigned<T = unknown>(req: SignedHttpRequest, what: stri
   } finally {
     clearTimeout(timer);
   }
-  // Counted against this browser's per-IP budget (never delayed, never retried).
+  // Counted against this browser's per-IP budget (never delayed, never retried),
+  // and its rate-limit headers read like a read's.
   exchangeGateway.chargeWrite(1);
+  exchangeGateway.learn(res.headers);
   const text = await res.text().catch(() => '');
   const ms = Math.round(performance.now() - t0);
   // A server error or an unreadable answer is NOT a "no": the engine may have

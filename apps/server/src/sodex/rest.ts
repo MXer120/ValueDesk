@@ -4,8 +4,10 @@
  * Responsibilities that specifically belong on the server side:
  *  - Nonce monotonicity. Nonces must strictly increase per API key; only a single
  *    process can guarantee that. N browser tabs racing would collide.
- *  - Weight budgeting. The gateway allows 1200 weight/minute/IP. Every browser
- *    client shares this process's IP, so the budget is enforced here.
+ *  - Weight budgeting. The gateway allows a weight a minute per IP that every
+ *    answer reports (6000 on 2026-10-31; the budget starts at the documented
+ *    1200 and adopts the reported one). Every browser client shares this
+ *    process's IP, so the budget is enforced here.
  *  - Holding the signing key. It never reaches the browser.
  */
 import { NET, enginePath, type Engine } from '../config.js';
@@ -14,11 +16,14 @@ import {
   COOL_BASE_MS,
   COOL_MAX_MS,
   COOL_WAIT_MAX_MS,
+  GATEWAY_WEIGHT_PER_MIN,
   RETRY_ATTEMPTS,
   TRANSIENT_ENVELOPE_RE,
   endpointOf,
+  reportedRateLimit,
   retryDelayMs,
   ttlFor,
+  unbookedWeight,
   unwrapList,
   weightFor,
 } from './restCore.js';
@@ -125,9 +130,30 @@ export function isTransientFailure(err: unknown): boolean {
 
 // --- weight budget -----------------------------------------------------------
 
-class WeightBudget {
+export class WeightBudget {
   private used: Array<{ at: number; w: number }> = [];
-  constructor(private readonly limit = 1200, private readonly windowMs = 60_000) {}
+  constructor(private limit = GATEWAY_WEIGHT_PER_MIN, private readonly windowMs = 60_000) {}
+
+  /** Weight a minute now: what the gateway last reported, or the documented 1200 until it has. */
+  get perMinute(): number {
+    return this.limit;
+  }
+
+  /**
+   * One gateway answer's x-ratelimit-* headers: the limit becomes the reported
+   * one (a header that is not an integer in 600..60000 changes nothing), and
+   * weight the IP spent beyond this window - the indexer, the executor's
+   * neighbours, anything else behind this address - is booked as if it were
+   * ours, so the next request waits instead of drawing a 429. Booking only
+   * adds weight; it can never let more through than the limit.
+   */
+  learn(get: ((name: string) => string | null) | undefined, now = Date.now()): void {
+    const r = reportedRateLimit(get);
+    if (!r) return;
+    this.limit = r.limit;
+    const owed = unbookedWeight(r, this.spent(now));
+    if (owed > 0) this.used.push({ at: now, w: owed });
+  }
 
   private prune(now: number) {
     const cutoff = now - this.windowMs;
@@ -280,7 +306,7 @@ const addrKey = (address: string): string => address.trim().toLowerCase();
  *
  * The budget, the response cache and the nonce counter are all per-instance and
  * all of them are really per-IP or per-process facts, not per-account ones:
- *  - the gateway's 1200 weight/minute is billed per IP, and every account here
+ *  - the gateway's weight a minute is billed per IP, and every account here
  *    shares this process's IP, so a second client would fork the budget into two
  *    halves that each believe they have the whole allowance;
  *  - the market-data cache is account-independent, and duplicating it would
@@ -498,7 +524,7 @@ export class SodexClient {
       if (cool > COOL_WAIT_MAX_MS) throw new SodexApiError(429, 'Rate limited - backing off.', 429, path);
       if (cool > 0) await new Promise((r) => setTimeout(r, cool));
       // Every attempt pays its own weight - a retry is a real extra request against
-      // the shared 1200/min budget. The first attempt of a signed write skips this
+      // the shared per-minute budget. The first attempt of a signed write skips this
       // because `signed` deliberately reserved the weight before taking its nonce.
       if (attempt > 1 || !opts.weightReserved) await this.budget.take(weight);
       try {
@@ -537,6 +563,8 @@ export class SodexClient {
       signal: AbortSignal.timeout(30_000),
     });
 
+    // Every answer (a 429 too) carries the IP's limit and what is left of it.
+    this.budget.learn((name) => res.headers.get(name));
     const text = await res.text();
 
     // A completely empty body on a 2xx is the gateway's bare ack for some writes.
@@ -677,6 +705,11 @@ export class SodexClient {
 
   weightSpent(): number {
     return this.budget.spent();
+  }
+
+  /** The gateway's weight a minute for this IP, as it last reported it (1200 before its first answer). */
+  weightLimit(): number {
+    return this.budget.perMinute;
   }
 
   clearCache(): void {

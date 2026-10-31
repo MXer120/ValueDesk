@@ -17,7 +17,8 @@ import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils';
  *
  * History pages are billed `20 + limit/20`, so a 1000-row page costs 70 weight
  * (0.07/row) while a 100-row page costs 25 (0.25/row). Paging small would burn
- * three and a half times the shared 1200/min budget for the same history.
+ * three and a half times the weight of the shared per-minute budget for the
+ * same history.
  *
  * The budget is shared with the live UI polls, so a long walk does slow the rest
  * of the app down while it runs. That is the deliberate trade: the alternative is

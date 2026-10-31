@@ -87,7 +87,7 @@ export interface StatusFooterProps {
   /** The browser wallet address, which may exist with no stored key at all. */
   address: string | null;
   /** `/api/health`; untyped upstream, so read defensively. */
-  health: { weightSpent?: number; hub?: { clients?: number } } | null;
+  health: { weightSpent?: number; weightLimit?: number; hub?: { clients?: number } } | null;
   onGoToWallet: () => void;
   /** The statistics page is gone; the footer button shows only when a destination is given. */
   onGoToStats?: () => void;
@@ -195,7 +195,7 @@ export function StatusFooter({
   // names the connection state. Compiled out of a production build entirely by
   // the `import.meta.env.DEV` fence, exactly as the old inline readout was.
   const connTitle = import.meta.env.DEV
-    ? `Connection: ${connWord} · REST weight ${health?.weightSpent ?? '—'}/1200 per min · ${health?.hub?.clients ?? '—'} hub client(s)`
+    ? `Connection: ${connWord} · REST weight ${health?.weightSpent ?? '—'}/${health?.weightLimit ?? '—'} per min · ${health?.hub?.clients ?? '—'} hub client(s)`
     : `Connection: ${connWord}`;
 
   /* The footer chip is on screen on every page, so it is the address most

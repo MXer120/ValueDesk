@@ -8,9 +8,58 @@
  * fetch, no Node, no DOM here.
  */
 
-/** The gateway's documented REST budget: 1200 weight per minute per IP. */
+/**
+ * The gateway's REST budget per IP before it has said otherwise: the documented
+ * 1200 weight a minute. Every answer reports the real one (x-ratelimit-limit:
+ * 6000 on 2026-10-31), and the budgets adopt it (reportedRateLimit) - this is
+ * only where they start, and what they keep when a header is missing.
+ */
 export const GATEWAY_WEIGHT_PER_MIN = 1200;
 export const GATEWAY_WINDOW_MS = 60_000;
+/** A reported limit outside this range is a broken header, not a new limit. */
+export const REPORTED_LIMIT_MIN = 600;
+export const REPORTED_LIMIT_MAX = 60_000;
+
+/** What one gateway answer says about the per-IP budget. */
+export interface ReportedRateLimit {
+  /** Weight per minute per IP (x-ratelimit-limit). */
+  limit: number;
+  /** Weight the IP has left this minute (x-ratelimit-remaining), null when absent or unreadable. */
+  remaining: number | null;
+}
+
+/**
+ * The gateway's x-ratelimit-* headers, read: null unless the limit is an
+ * integer in REPORTED_LIMIT_MIN..MAX; `remaining` is kept only as an integer
+ * 0..limit. The copy engine has the same reader (sodex-core envelope.ts).
+ *
+ * A browser sees neither header unless the gateway exposes them to CORS: on
+ * 2026-10-31 it exposes only Content-Length, so the browser's budget keeps
+ * GATEWAY_WEIGHT_PER_MIN until that changes.
+ */
+export function reportedRateLimit(get: ((name: string) => string | null | undefined) | undefined): ReportedRateLimit | null {
+  if (!get) return null;
+  const int = (raw: string | null | undefined): number | null => {
+    const s = (raw ?? '').trim();
+    return /^\d{1,7}$/.test(s) ? Number(s) : null;
+  };
+  const limit = int(get('x-ratelimit-limit'));
+  if (limit === null || limit < REPORTED_LIMIT_MIN || limit > REPORTED_LIMIT_MAX) return null;
+  const rem = int(get('x-ratelimit-remaining'));
+  return { limit, remaining: rem !== null && rem <= limit ? rem : null };
+}
+
+/**
+ * Weight others on the IP spent that a budget has not booked yet: what SoDEX
+ * says the IP spent this minute (limit - remaining) beyond everything in the
+ * budget's own window (`spent`, earlier bookings included). Never negative.
+ * SoDEX's minute resets on the clock while a budget's window slides, so the
+ * window holds at least SoDEX's minute: this can under-book, never over-free.
+ */
+export function unbookedWeight(r: ReportedRateLimit, spent: number): number {
+  if (r.remaining === null) return 0;
+  return Math.max(0, Math.min(r.limit, r.limit - r.remaining - spent));
+}
 
 /**
  * Normalise a list response to a bare array.
@@ -95,7 +144,7 @@ export function weightFor(path: string, limit = 0): number {
   // the published table documents and which 404s. The live route is `/fundings`
   // (see routes/account.ts, verified against testnet), so funding pages fell
   // through to the flat 5 below: a limit=500 funding page was billed 5 instead of
-  // 45, quietly overdrawing the shared 1200/min budget and inviting a 429 that
+  // 45, quietly overdrawing the shared per-minute budget and inviting a 429 that
   // looks like it came from nowhere. `positions/history` scales identically and
   // was missing for the same reason. `funding-history` is kept in case the
   // gateway ever honours the documented spelling.

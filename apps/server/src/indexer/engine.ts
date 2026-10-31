@@ -24,7 +24,7 @@
 import { hlInfo, hlLeaderboard } from '../valuedesk/hyperliquid/index.js';
 import type { LbSnapshot } from '../valuedesk/hyperliquid/leaderboard.js';
 import { sodex } from '../sodex/rest.js';
-import { gatewayWeightSpent } from '../valuedesk/sodex/gateway.js';
+import { gatewayWeightLimit, gatewayWeightSpent } from '../valuedesk/sodex/gateway.js';
 import { knownAddress, resolveIds, seedAddress } from '../valuedesk/sodex/resolver.js';
 import { cooldownLeftMs } from '../valuedesk/sodex/util.js';
 import { VENUES, WINDOWS, type BoardWindow, type Venue, type Window } from '../valuedesk/types.js';
@@ -339,8 +339,10 @@ export class Indexer {
   constructor(readonly store: IndexStore, private readonly now: () => number = Date.now) {
     this.hl = new Lane({ name: 'hl', perMin: INDEXER_ENV.hlWeightPerMin() });
     // SoDEX gateway lanes count requests. Both stand back while any cooldown
-    // runs (the trading UI shares the IP) and pause 15 minutes after a 429.
-    const sodexGate = () => Math.max(cooldownLeftMs(), sodex.cooldownLeft(), gatewayWeightSpent() > 400 ? 5_000 : 0);
+    // runs (the trading UI shares the IP) or this process has spent a third of
+    // the gateway's minute (the limit SoDEX reports: 6000 on 2026-10-31), and
+    // pause 15 minutes after a 429.
+    const sodexGate = () => Math.max(cooldownLeftMs(), sodex.cooldownLeft(), gatewayWeightSpent() > gatewayWeightLimit() / 3 ? 5_000 : 0);
     this.sgw = new Lane({ name: 'sgw', perMin: INDEXER_ENV.sodexClosesPerMin(), gate: sodexGate, rateLimitPauseMs: 15 * 60_000 });
     // The indexer's only SoDEX `/trades` reader (off unless VALUESCAN_INDEX_SODEX_TRADES
     // is set). Each task reads ONE page (syncTrades maxPages: 1) and the lane then

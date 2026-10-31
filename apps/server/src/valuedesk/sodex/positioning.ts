@@ -23,7 +23,8 @@
  * one's perps state is read from the gateway (weight 5, so about 1,000 weight
  * for 200 wallets) and the open positions are summed per symbol.
  *
- * Politeness, because the running Valuetrade UI shares this IP's 1200/min:
+ * Politeness, because the running Valuetrade UI shares this IP's per-minute
+ * weight (the limit SoDEX reports: 6000 on 2026-10-31):
  *  - 3 reads in flight, >=150 ms apart;
  *  - before each read, wait while this process has already spent more than
  *    half the minute's budget, so interactive requests always keep headroom;
@@ -40,7 +41,7 @@ import { boardHoldings, type Holdings } from '../../indexer/held.js';
 import { apiOnly } from '../env.js';
 import { NotAvailable, type Positioning, type VsPosition } from '../types.js';
 import { LB_PAGE_SIZE, lbPage } from './data.js';
-import { gatewayWeightSpent, markPrices, perpsState } from './gateway.js';
+import { gatewayWeightLimit, gatewayWeightSpent, markPrices, perpsState } from './gateway.js';
 import { aggregatePositioning, lowerAddress, markMap, statePositions, symbolMatches } from './mappers.js';
 import { seedAddress } from './resolver.js';
 import { Limiter, TtlCache, coolingDown, sleep, within } from './util.js';
@@ -49,8 +50,8 @@ export const TRACKED_TOP = 100;
 export const TRACKED_WORST = 100;
 const TTL_MS = 4 * 60_000;
 const MAX_LB_PAGES = 4;
-/** Leave at least this much of the 1200/min gateway budget to everything else. */
-const WEIGHT_CEILING = 600;
+/** Leave at least this share of the gateway's per-minute budget to everything else. */
+const WEIGHT_CEILING_SHARE = 0.5;
 const BUDGET_WAIT_MS = 20_000;
 /** A crawl that read fewer accounts than this share is not published. */
 const MIN_COVERAGE = 0.5;
@@ -74,7 +75,7 @@ const KEY = 'positioning';
 
 async function budgetRoom(): Promise<void> {
   const t0 = Date.now();
-  while (gatewayWeightSpent() > WEIGHT_CEILING && Date.now() - t0 < BUDGET_WAIT_MS) await sleep(1_000);
+  while (gatewayWeightSpent() > gatewayWeightLimit() * WEIGHT_CEILING_SHARE && Date.now() - t0 < BUDGET_WAIT_MS) await sleep(1_000);
 }
 
 async function pnlSlice(order: 'asc' | 'desc', n: number): Promise<string[]> {

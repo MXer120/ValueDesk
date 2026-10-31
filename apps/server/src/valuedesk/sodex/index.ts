@@ -13,7 +13,8 @@
  * Read-only by construction: public GETs, the gateway's public account reads,
  * one public WebSocket and SoDEX's public id->address lookup. Nothing here
  * signs, orders or registers anything. Gateway reads go through the shared
- * `sodex` client, so they count against the same 1200/min budget as the UI.
+ * `sodex` client, so they count against the same per-minute budget as the UI
+ * (the limit SoDEX reports, sodex/rest.ts).
  *
  * WHAT A PUBLIC SERVER SPENDS ON WHALES AND POSITIONING, whatever the number
  * of visitors: positioning nothing (a read of the index file); whales one

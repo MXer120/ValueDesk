@@ -171,6 +171,7 @@ app.get('/api/health', async () => (HOSTED
   chain: { chainId: CHAIN.chainId, name: CHAIN.name, explorerUrl: CHAIN.explorerUrl },
   serverSigning: SERVER_SIGNING,
   weightSpent: sodex.weightSpent(),
+  weightLimit: sodex.weightLimit(),
   hub: hubStats(),
   // Machine-local details (file paths, key sessions) exist only in the local,
   // server-signing setup - never on a hosted server.

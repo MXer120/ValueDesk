@@ -20,7 +20,7 @@
  * one tab at a time, under a Web Lock. A tab that waits reads what the walking
  * tab stored as it goes, so both show the same progress.
  */
-import { GATEWAY_WEIGHT_PER_MIN, unwrapList } from '@sign/sodex/restCore.js';
+import { unwrapList } from '@sign/sodex/restCore.js';
 import { normaliseFunding, normaliseTrade, type NormalRow, type PageQuery } from '@sign/historyRows.js';
 import {
   MemoryHistoryStore,
@@ -137,7 +137,7 @@ export function createAllTime(d: AllTimeDeps): AllTime {
       }
       // A `/trades` page only when a background history read may go (historyQueue.ts):
       // the walk spends its turn when the page can actually be sent, not before.
-      const busy = gateway.budget.spent() > GATEWAY_WEIGHT_PER_MIN / 2 || (drip !== null && !gateway.historyQueue.backgroundMayGo());
+      const busy = gateway.budget.spent() > gateway.budget.limit / 2 || (drip !== null && !gateway.historyQueue.backgroundMayGo());
       if (!busy) {
         const wait = await walkGap.tryTake(1);
         if (wait === 0) return;

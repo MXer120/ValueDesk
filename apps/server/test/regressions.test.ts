@@ -10,7 +10,8 @@ import assert from 'node:assert/strict';
 
 import { normaliseOrder, OrderValidationError, type Symbol } from '../src/sodex/symbols.js';
 import { isAllowedOrigin } from '../src/origin.js';
-import { isTransientFailure, weightFor, SodexApiError } from '../src/sodex/rest.js';
+import { isTransientFailure, weightFor, SodexApiError, SodexClient, WeightBudget } from '../src/sodex/rest.js';
+import { GATEWAY_WEIGHT_PER_MIN, reportedRateLimit, unbookedWeight } from '../src/sodex/restCore.js';
 
 const BTC: Symbol = {
   id: 1, name: 'BTC-USD', displayName: 'BTC-USD', baseCoin: 'BTC', quoteCoin: 'vUSDC',
@@ -167,7 +168,7 @@ test('funding history is priced at the paged-history weight, not the flat floor'
   // The published reference calls this `funding-history`; the live route is
   // `/fundings`. While the weight regex only knew the documented spelling, a
   // limit=500 funding page was billed 5 instead of 45 and quietly overdrew the
-  // shared 1200/min budget.
+  // shared per-minute budget.
   const real = '/api/v1/perps/accounts/0xabc/fundings';
   assert.equal(weightFor(real, 500), 45);
   assert.equal(weightFor(real, 1000), 70);
@@ -181,5 +182,60 @@ test('the measured weight curve is preserved exactly', () => {
   const p = '/api/v1/perps/accounts/0xabc/orders/history';
   for (const [limit, expected] of [[1, 20], [20, 21], [100, 25], [200, 30], [500, 45], [1000, 70]] as [number, number][]) {
     assert.equal(weightFor(p, limit), expected, `limit ${limit}`);
+  }
+});
+
+// --- the gateway's reported rate limit (x-ratelimit-*, 6000/min on 2026-10-31) --
+
+const hdrs = (h: Record<string, string>) => (name: string) => h[name.toLowerCase()] ?? null;
+
+test('the reported limit is read only as an integer in 600..60000; remaining only within it', () => {
+  assert.deepEqual(reportedRateLimit(hdrs({ 'x-ratelimit-limit': '6000', 'x-ratelimit-remaining': '5995' })), { limit: 6000, remaining: 5995 });
+  assert.deepEqual(reportedRateLimit(hdrs({ 'x-ratelimit-limit': '6000', 'x-ratelimit-remaining': '6001' })), { limit: 6000, remaining: null });
+  assert.deepEqual(reportedRateLimit(hdrs({ 'x-ratelimit-limit': '6000' })), { limit: 6000, remaining: null });
+  for (const v of ['599', '60001', '0', '-1', '6000.5', '6e3', 'x', '']) assert.equal(reportedRateLimit(hdrs({ 'x-ratelimit-limit': v })), null, `'${v}'`);
+  assert.equal(reportedRateLimit(undefined), null);
+  assert.equal(unbookedWeight({ limit: 6000, remaining: 5000 }, 100), 900);
+  assert.equal(unbookedWeight({ limit: 6000, remaining: 5000 }, 1500), 0, 'never negative: nothing is freed');
+  assert.equal(unbookedWeight({ limit: 6000, remaining: 0 }, 0), 6000, 'never beyond the limit');
+  assert.equal(unbookedWeight({ limit: 6000, remaining: null }, 0), 0);
+});
+
+test('the server budget adopts the reported limit, ignores a broken one, and books what others on the IP spent', async () => {
+  const b = new WeightBudget();
+  assert.equal(b.perMinute, GATEWAY_WEIGHT_PER_MIN);
+  b.learn(hdrs({ 'x-ratelimit-limit': '70000', 'x-ratelimit-remaining': '0' }));
+  assert.equal(b.perMinute, 1200);
+  assert.equal(b.spent(), 0);
+  b.learn(hdrs({ 'x-ratelimit-limit': '6000' }));
+  assert.equal(b.perMinute, 6000);
+  // 1500 fits now; it would have waited under 1200.
+  await b.take(1500);
+  b.learn(hdrs({ 'x-ratelimit-limit': '6000', 'x-ratelimit-remaining': '4000' })); // 2000 spent, 1500 ours
+  assert.equal(b.spent(), 2000);
+  b.learn(hdrs({ 'x-ratelimit-limit': '6000', 'x-ratelimit-remaining': '0' }));
+  assert.equal(b.spent(), 6000, 'booked up to the limit, not beyond');
+});
+
+test('the server client learns the limit from an answer; a 429 still opens the cooldown', async () => {
+  const real = globalThis.fetch;
+  let status = 200;
+  globalThis.fetch = (async () =>
+    new Response(status === 200 ? JSON.stringify({ code: 0, data: [] }) : 'error code: 1015', {
+      status,
+      headers: { 'x-ratelimit-limit': '6000', 'x-ratelimit-remaining': status === 200 ? '5998' : '0' },
+    })) as typeof globalThis.fetch;
+  try {
+    const c = new SodexClient('https://test.invalid', 1);
+    assert.equal(c.weightLimit(), 1200);
+    await c.get('/api/v1/perps/accounts/0xabc/state');
+    assert.equal(c.weightLimit(), 6000);
+    assert.equal(c.weightSpent(), 5, 'our 5 and nobody else: nothing booked');
+    status = 429;
+    await assert.rejects(c.get('/api/v1/perps/accounts/0xdef/orders'), (e: unknown) => e instanceof SodexApiError && e.httpStatus === 429);
+    assert.ok(c.cooldownLeft('/api/v1/perps/accounts/0xdef/orders') > 10_000);
+    assert.equal(c.weightLimit(), 6000);
+  } finally {
+    globalThis.fetch = real;
   }
 });

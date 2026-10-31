@@ -45,7 +45,9 @@
  * WEIGHT
  * ------
  * Documented gateway budget is 1,200 weight/minute (envelope.ts
- * REST_WEIGHT_PER_MINUTE). A history page costs 20 + floor(limit/20)
+ * REST_WEIGHT_PER_MINUTE; SoDEX reported 6,000 on 2026-10-31, and the indexer's
+ * cap follows what the gateway client learns). The speed presets below stay
+ * sized for 1,200. A history page costs 20 + floor(limit/20)
  * (weightFor on orders/history, trades, fundings, positions/history).
  * limit 100 → 25, so the budget is 48 pages/minute. A 1s pause at that
  * weight would be 1,500/minute and overdraws it, which is why Default is
@@ -63,8 +65,9 @@ export const HOURLY_KEEP = 14 * 24;
 export const DAILY_KEEP = 800;
 
 /**
- * SoDEX REST budget, per IP, per minute. Matches envelope.ts
- * REST_WEIGHT_PER_MINUTE. The indexer treats this as a hard cap.
+ * SoDEX REST budget, per IP, per minute, as documented. Matches envelope.ts
+ * REST_WEIGHT_PER_MINUTE. The presets' spacing (budgetGapMs) is sized from it;
+ * the indexer's hard cap is the gateway client's limit (this, until it learns SoDEX's).
  */
 export const WEIGHT_PER_MIN = 1200;
 

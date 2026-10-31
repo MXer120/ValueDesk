@@ -18,7 +18,7 @@
  */
 import { NET, NETWORK } from '../config.js';
 import { sodex } from '../sodex/rest.js';
-import { gatewayWeightSpent, gwGet } from '../valuedesk/sodex/gateway.js';
+import { gatewayWeightLimit, gatewayWeightSpent, gwGet } from '../valuedesk/sodex/gateway.js';
 import { cooldownLeftMs } from '../valuedesk/sodex/util.js';
 import { TiersSource, defaultFee, type Fee, type LogLike, type TiersConfig } from './config.js';
 import { EXPLORER_BASE } from './explorer.js';
@@ -331,6 +331,7 @@ export function liveIo(base: string = explorerBase(process.env.VALUESCAN_BUILDER
     },
     cooldownMs: (path) => Math.max(cooldownLeftMs(), sodex.cooldownLeft(path)),
     weightSpent: () => gatewayWeightSpent(),
+    weightLimit: () => gatewayWeightLimit(),
   };
 }
 

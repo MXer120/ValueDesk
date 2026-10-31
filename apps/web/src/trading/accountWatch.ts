@@ -14,8 +14,9 @@
  *     (`nudge`: the Deposit sheet opened on this wallet, or saw a deposit land).
  *
  * Nothing is looked up while the tab is hidden. One look is the subaccounts
- * read plus at most two engine-state reads (weight 15 of the 1200/min per-IP
- * budget): the steady once a minute is about 1% of it.
+ * read plus at most two engine-state reads (weight 15 of the per-IP budget,
+ * which is at least the documented 1200/min - SoDEX reported 6000 on
+ * 2026-10-31): the steady once a minute is at most about 1% of it.
  *
  * Read-only; the caller's `check` does the looking and updates the status,
  * which ends the watch (`follow(null)`).

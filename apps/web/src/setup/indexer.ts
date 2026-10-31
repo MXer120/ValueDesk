@@ -5,7 +5,8 @@
  * the backend, deposits and withdrawals via alpha-biz account_flow. Pacing is
  * vs.setup.indexSpeed. The gap between starts is at least the preset delay and
  * at least budgetGapMs(), so a rolling minute never spends more than the
- * documented 1,200 weight. A 429 pushes the next start out (2s, doubled, cap
+ * gateway's limit (the documented 1,200 until the gateway client has read
+ * SoDEX's own from an answer). A 429 pushes the next start out (2s, doubled, cap
  * 30s) and does not tighten that loop.
  *
  * Ledger rows that are still pending or in review are not consumed: the catch-up
@@ -17,8 +18,9 @@ import {
   LEDGER_PAGE, fetchAccountFlows, fetchHistoryPage, ledgerAvailable,
   type HistoryEngine, type HistoryKind, type LedgerRow,
 } from '../accountData';
+import { gateway } from '../exchange/sodexGateway';
 import {
-  SPEEDS, WEIGHT_PER_MIN, budgetGapMs, emptyIndex, foldFlows, foldPage, historyWeight, indexKey,
+  SPEEDS, budgetGapMs, emptyIndex, foldFlows, foldPage, historyWeight, indexKey,
   parseIndex, readSpeed, saveIndex, type SpeedId,
   type FlowRow, type GwStream, type Pass, type SpeedPreset, type StoredIndex,
 } from './stats';
@@ -130,7 +132,7 @@ function budgetWait(weight: number, now: number): number {
   while (stamps.length > 0 && stamps[0]!.at <= cutoff) stamps.shift();
   let used = 0;
   for (const s of stamps) used += s.w;
-  if (used + weight <= WEIGHT_PER_MIN) return 0;
+  if (used + weight <= gateway.budget.limit) return 0;
   const oldest = stamps[0];
   return oldest ? Math.max(0, oldest.at + 60_000 - now) : 0;
 }

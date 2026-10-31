@@ -217,7 +217,7 @@ export function useCopyContext({ address, provider, onScan }: CopyPageProps): Co
    * earlier fills become the replay's warm-up (they rebuild the leader's
    * positions and are not copied), so switching windows costs no request. Only
    * "All" asks for more. A fill walk is the most expensive read these venues
-   * have, and it shares the 1200-weight budget with the running app.
+   * have, and it shares the per-IP weight budget with the running app.
    *
    * Both edges are ROUNDED to five minutes, because the providers cache fills
    * by (address, from, to, limit) and a `from` that moved with the clock made

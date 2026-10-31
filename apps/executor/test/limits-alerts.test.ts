@@ -105,6 +105,110 @@ test('gate: the last share of the minute is kept for closes and stops', async ()
   assert.ok(b.used() > 100);
 });
 
+/** Response headers as SoDEX's gateway sends them (2026-10-31: limit 6000 per IP per minute). */
+const rl = (h: Record<string, string>) => (name: string) => h[name.toLowerCase()] ?? null;
+
+test('gate: the budget adopts the limit SoDEX reports; 1200 until it does', () => {
+  const b = new WeightBudget();
+  assert.equal(b.perMinute, 1200);
+  b.learn(rl({ 'x-ratelimit-limit': '6000' }));
+  assert.equal(b.perMinute, 6000);
+  b.learn(rl({ 'x-ratelimit-limit': '3000' }));
+  assert.equal(b.perMinute, 3000, 'a lower report is adopted too');
+  b.learn(undefined);
+  b.learn(rl({}));
+  assert.equal(b.perMinute, 3000, 'no header: kept');
+});
+
+test('gate: a reported limit that is not an integer in 600..60000 is ignored', () => {
+  const b = new WeightBudget();
+  for (const v of ['599', '60001', '0', '-6000', '6000.5', '6e3', 'lots', '', ' ', '99999999']) {
+    b.learn(rl({ 'x-ratelimit-limit': v, 'x-ratelimit-remaining': '0' }));
+    assert.equal(b.perMinute, 1200, `'${v}'`);
+    assert.equal(b.used(), 0, `'${v}': nothing booked from a header that was refused`);
+  }
+  b.learn(rl({ 'x-ratelimit-limit': '600' }));
+  assert.equal(b.perMinute, 600);
+  b.learn(rl({ 'x-ratelimit-limit': '60000' }));
+  assert.equal(b.perMinute, 60_000);
+});
+
+test('gate: the read and open shares scale with the reported limit; protective writes still go past it', async () => {
+  const b = new WeightBudget(1200, 0.75, 0.92);
+  b.learn(rl({ 'x-ratelimit-limit': '6000' }));
+  b.charge(5519); // 0.92 x 6000 = 5520
+  await b.admitWrite(1, 'open');
+  await assert.rejects(b.admitWrite(1, 'open'), /nearly spent/);
+  await b.admitWrite(500, 'protect');
+  assert.ok(b.used() > 6000);
+  // Reads stop at 75 %: 4500 of 6000.
+  const r = new WeightBudget();
+  r.learn(rl({ 'x-ratelimit-limit': '6000' }));
+  r.charge(4495);
+  await r.take(5);
+  assert.equal(r.used(), 4500);
+  // A budget made for half the documented limit (the browser copier's 600) keeps half of the reported one.
+  const half = new WeightBudget(600);
+  half.learn(rl({ 'x-ratelimit-limit': '6000' }));
+  assert.equal(half.perMinute, 3000);
+  // The send queue reads the same limit: an opening order goes until 92 % of it.
+  const q = new SendQueue(b, new AccountRate());
+  const fresh = new WeightBudget();
+  fresh.learn(rl({ 'x-ratelimit-limit': '6000' }));
+  fresh.charge(5000);
+  assert.equal(await new SendQueue(fresh, new AccountRate()).submit('open', 7, 1, async () => 'sent'), 'sent', '5001 of 6000: it goes (it would not under 1200)');
+  await assert.rejects(q.submit('open', 7, 1, async () => 'sent'), /nearly spent/);
+});
+
+test("gate: what SoDEX says others on the IP spent is booked, never more than the limit, and never frees any of ours", async () => {
+  const b = new WeightBudget();
+  const t = Date.now();
+  b.charge(100, t);
+  // SoDEX: 6000 - 5000 = 1000 spent this minute; ours is 100, so others spent 900.
+  b.learn(rl({ 'x-ratelimit-limit': '6000', 'x-ratelimit-remaining': '5000' }), t);
+  assert.equal(b.used(t), 1000);
+  // The same answer again books nothing more: the 900 is already in the window.
+  b.learn(rl({ 'x-ratelimit-limit': '6000', 'x-ratelimit-remaining': '5000' }), t);
+  assert.equal(b.used(t), 1000);
+  // SoDEX saying more remains than we count frees nothing (its minute resets on the clock, ours slides).
+  b.learn(rl({ 'x-ratelimit-limit': '6000', 'x-ratelimit-remaining': '6000' }), t);
+  assert.equal(b.used(t), 1000);
+  // Everything spent: booked up to the limit, not beyond it; a remaining above the limit is ignored.
+  const c = new WeightBudget();
+  c.learn(rl({ 'x-ratelimit-limit': '6000', 'x-ratelimit-remaining': '0' }), t);
+  assert.equal(c.used(t), 6000);
+  c.learn(rl({ 'x-ratelimit-limit': '6000', 'x-ratelimit-remaining': '0' }), t);
+  assert.equal(c.used(t), 6000);
+  await assert.rejects(c.admitWrite(1, 'open'), /nearly spent/);
+  const d = new WeightBudget();
+  d.learn(rl({ 'x-ratelimit-limit': '6000', 'x-ratelimit-remaining': '7000' }), t);
+  assert.equal(d.used(t), 0);
+  // The booking leaves the window after 60 s like our own weight.
+  assert.equal(c.used(t + 60_000), 0);
+  // A budget for half the IP books only what eats into its own half: the rest of the IP may spend 3000.
+  const half = new WeightBudget(600);
+  half.learn(rl({ 'x-ratelimit-limit': '6000', 'x-ratelimit-remaining': '3500' }), t); // others 2500: within their half
+  assert.equal(half.used(t), 0);
+  half.learn(rl({ 'x-ratelimit-limit': '6000', 'x-ratelimit-remaining': '1000' }), t); // others 5000: 2000 into ours
+  assert.equal(half.used(t), 2000);
+});
+
+test('client: the limit is learned from every answer, a 429 included, and a 429 still cools down', async () => {
+  const six = { 'x-ratelimit-limit': '6000', 'x-ratelimit-remaining': '5995', 'x-ratelimit-reset': String(Math.ceil(Date.now() / 60_000) * 60) };
+  const s = scripted([{ status: 200, body: '{"code":0,"data":[]}', headers: six }]);
+  const c = new SodexClient({ network: 'testnet', fetch: s.fetch });
+  await c.markPrices();
+  assert.equal(c.budget.perMinute, 6000);
+  assert.equal(c.budget.used(), 5, 'ours (2) and the 3 others spent');
+  const t = scripted([{ status: 429, body: 'error code: 1015', headers: { ...six, 'x-ratelimit-remaining': '0', 'retry-after': '30' } }]);
+  const d = new SodexClient({ network: 'testnet', fetch: t.fetch });
+  await assert.rejects(d.markPrices(), /429/);
+  assert.equal(d.budget.perMinute, 6000);
+  assert.ok(d.budget.cooldownLeft() >= 29_000 && d.budget.cooldownLeft() <= 30_000, 'the cooldown opens exactly as before');
+  assert.equal(t.calls.length, 1, 'not retried into the ban');
+  await assert.rejects(d.send({ method: 'POST', gatewayPath: '/api/v1/perps/trade/orders', headers: {}, body: '{"accountID":42,"orders":[{"reduceOnly":false}]}' }), (e: unknown) => e instanceof LocalRefusal);
+});
+
 test("gate: an account's opening orders stop at 90% of SoDEX's 20/s and 600/min; closes use all of it", async () => {
   const r = new AccountRate(20, 600, 0.9);
   for (let i = 0; i < 18; i++) await r.admit(42, 1, 'open');

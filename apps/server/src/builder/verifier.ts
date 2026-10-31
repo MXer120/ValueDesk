@@ -36,7 +36,7 @@
  * Every queue is bounded, and a full one drops the newest hint: the app leaves
  * another one after the next fill.
  */
-import { weightFor, unwrapList } from '../sodex/restCore.js';
+import { GATEWAY_WEIGHT_PER_MIN, weightFor, unwrapList } from '../sodex/restCore.js';
 import { KeyedLimiter, type Limit } from '../rateLimit.js';
 import { ENGINES, defaultFee, type Engine, type LogLike, type TiersConfig } from './config.js';
 import { OrderState, applyFills, dayOf, defaultsOf, feeOwedAt, judgeOrder, readFill, type FeeRow, type Fill, type OrderRow } from './counting.js';
@@ -109,8 +109,8 @@ const CHECKS_PER_PAGE = 2;
 const ORDER_RETAIN_MS = 30 * 86_400_000;
 const MAX_ORDER_ROWS = 2_000;
 
-/** The gateway budget this process shares (1200 weight a minute): the verifier waits while most of it is in use. */
-const WEIGHT_BUSY = 800;
+/** The verifier waits while more than this share of the gateway budget this process shares is in use. */
+const WEIGHT_BUSY_SHARE = 2 / 3;
 
 /** Names our app registers its trading key under (apps/web/src/trading/session.ts tradingKeyName). */
 export const APP_KEY_NAME = /^valuescan-/;
@@ -141,6 +141,8 @@ export interface VerifierIo {
   cooldownMs(path: string): number;
   /** Gateway weight this process spent in the last minute. */
   weightSpent(): number;
+  /** The gateway's weight a minute, as it last reported it (absent: the documented GATEWAY_WEIGHT_PER_MIN). */
+  weightLimit?(): number;
 }
 
 export interface VerifierOptions {
@@ -449,7 +451,7 @@ export class Verifier {
     const cool = this.io.cooldownMs(path);
     const now = this.now();
     if (cool > 0) return now + cool + 250;
-    return this.io.weightSpent() > WEIGHT_BUSY ? now + 5_000 : 0;
+    return this.io.weightSpent() > (this.io.weightLimit?.() ?? GATEWAY_WEIGHT_PER_MIN) * WEIGHT_BUSY_SHARE ? now + 5_000 : 0;
   }
 
   private historyReady(): number {

@@ -54,7 +54,7 @@ import { RateLimitedError, isRateLimit } from './util.js';
 
 export const PROFILE_SOURCE = 'SoDEX account state + portfolio chart';
 
-/** Fills per engine per request. 5 pages x 70 weight x 2 engines is already 700 of the 1200/min budget. */
+/** Fills per engine per request. 5 pages x 70 weight x 2 engines is 700 weight: over half the documented 1200/min, an eighth of the 6000 SoDEX reported on 2026-10-31. */
 export const MAX_FILLS = 5_000;
 
 /** Every read a profile and a fill list need. */

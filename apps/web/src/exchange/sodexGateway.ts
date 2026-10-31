@@ -4,8 +4,11 @@
  * Every rule here is the server's (sodex/restCore.ts, imported, not copied):
  * the documented weight of each path, the per-path cache lifetimes, the retry
  * policy for reads, and the 15 s -> 5 min cooldown after a rate limit. What
- * changes is whose budget it is: the 1200 weight/minute is now the user's own
- * IP's, counted over every tab they have open (ledger.ts).
+ * changes is whose budget it is: the weight a minute is now the user's own
+ * IP's, counted over every tab they have open (ledger.ts). It starts at the
+ * documented 1200 and follows the limit the gateway reports (`learn`) - when
+ * the browser can read it: on 2026-10-31 SoDEX reports 6000 but does not
+ * expose the header to CORS, so a browser stays at 1200 until it does.
  *
  * HARD RULE, kept from the server: SoDEX's Cloudflare answers
  * `/accounts/{a}/trades` and `/orders/history` with 1015 once one IP asks too
@@ -38,8 +41,10 @@ import {
   TRANSIENT_ENVELOPE_RE,
   endpointOf,
   limitOf,
+  reportedRateLimit,
   retryDelayMs,
   ttlFor,
+  unbookedWeight,
   weightFor,
 } from '@sign/sodex/restCore.js';
 import { noteRateLimited } from '@sign/valuedesk/sodex/util.js';
@@ -222,6 +227,22 @@ export class GatewayClient {
     void this.budget.charge(weight);
   }
 
+  /**
+   * One gateway answer's x-ratelimit-* headers (a read's or a signed write's).
+   * The budget's limit becomes the reported one (a header that is not an
+   * integer in 600..60000 changes nothing), and what the IP spent beyond every
+   * tab's ledger - the copier's and algos' own clients, the user's other
+   * devices - is booked, so the next read waits rather than drawing a 429.
+   * Booking only adds weight; nothing lets more through than the limit.
+   */
+  learn(headers: { get(name: string): string | null } | null | undefined): void {
+    const r = reportedRateLimit(headers ? (name) => headers.get(name) : undefined);
+    if (!r) return;
+    this.budget.setLimit(r.limit);
+    const owed = unbookedWeight(r, this.budget.spent());
+    if (owed > 0) void this.budget.charge(owed);
+  }
+
   /** ms until `path`'s endpoint may be asked again. */
   cooldownLeft(path: string): number {
     const own = this.cooldowns.left(endpointOf(path));
@@ -291,6 +312,7 @@ export class GatewayClient {
           referrerPolicy: 'no-referrer',
         });
         status = res.status;
+        this.learn(res.headers);
         text = await res.text();
       } catch (e) {
         if (o.signal?.aborted && isAbort(e)) throw e;
