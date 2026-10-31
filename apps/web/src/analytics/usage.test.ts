@@ -1,5 +1,5 @@
 /**
- * The app's own analytics (tracker.ts): nothing - no storage, no request - before
+ * The app's own analytics (usage.ts): nothing - no storage, no request - before
  * consent; after it, page views, feature names from the list only, routes without
  * addresses; withdrawing stops it and deletes the ids. Run in a small stand-in for
  * the browser (no DOM library).
@@ -45,7 +45,7 @@ globalThis.fetch = (async (url: string) => {
 }) as typeof fetch;
 
 const { allowAnalytics, analyticsDecided, revokeAnalytics, _resetAnalyticsConsentForTests } = await import('../legal/analyticsConsent');
-const { startAnalytics, track, routeOf, browserOf, sourceOf, randomId, _queueForTests, _resetForTests } = await import('./tracker');
+const { startAnalytics, track, routeOf, browserOf, sourceOf, randomId, _queueForTests, _resetForTests } = await import('./usage');
 
 test('before consent: no id stored, nothing queued, nothing sent', () => {
   _resetAnalyticsConsentForTests();

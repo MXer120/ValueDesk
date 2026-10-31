@@ -6,7 +6,7 @@
  * terms popup (next to an equally visible "Only necessary", never pre-selected,
  * never a condition of the terms - LegalGate.tsx), or the switch on the Cookies
  * page, where it is withdrawn too. Withdrawing stops the tracker at once and
- * deletes its visitor number from this browser (analytics/tracker.ts listens).
+ * deletes its visitor number from this browser (analytics/usage.ts listens).
  * Kept in this browser only. A "no" is kept too ("Only necessary" in the terms popup,
  * "No thanks" in the prompt, a withdrawal), so that nobody is asked twice
  * (AnalyticsPrompt.tsx asks only those who never decided).

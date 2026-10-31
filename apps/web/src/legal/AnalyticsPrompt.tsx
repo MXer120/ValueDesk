@@ -8,7 +8,7 @@
  * analyticsDecided). "No thanks" and "Allow" are the same size side by side, as in
  * the terms popup (gate.css lg-pair: refusing exactly as easy as allowing). Either
  * answer is kept; closing it with the cross only hides it for this page load.
- * Nothing is measured before "Allow" (analytics/tracker.ts).
+ * Nothing is measured before "Allow" (analytics/usage.ts).
  */
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { allowAnalytics, analyticsDecided, declineAnalytics, subscribeAnalyticsConsent } from './analyticsConsent';

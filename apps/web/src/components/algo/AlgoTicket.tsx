@@ -122,7 +122,7 @@ import { AlgoIcon } from './AlgoIcon';
 import { feeRange, feeSplit, feeWords } from './fees';
 import { SlideConfirm } from './SlideConfirm';
 import { errorsInWords } from './errorWords';
-import { track } from '../../analytics/tracker';
+import { track } from '../../analytics/usage';
 import '../SettingsMenu.css';
 import './algo.css';
 

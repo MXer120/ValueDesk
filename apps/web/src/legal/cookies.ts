@@ -5,7 +5,7 @@
  * The facts, as of 2026-10-24 (privacy.ts section 6 says the same in short):
  *   - no document.cookie anywhere in the app, no advertising, no third-party
  *     analytics; ValueDesk's own usage analytics only with consent (section 5,
- *     legal/analyticsConsent.ts, analytics/tracker.ts - owner, 2026-10-31);
+ *     legal/analyticsConsent.ts, analytics/usage.ts - owner, 2026-10-31);
  *   - every entry the app writes to localStorage / sessionStorage / IndexedDB
  *     has a name that starts with "vs", "vd" or "valuescan" (a grep over
  *     apps/web/src); the trading key vault, the browser copier and the browser

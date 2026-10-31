@@ -71,6 +71,6 @@ party of any kind. Retention: `[[OWNER]]` in the privacy text - nothing is delet
 - Server: `apps/server/src/admin/` (signIn, auth, store, builderStats, statusView), `routes/admin.ts`,
   `routes/analytics.ts`, `ops/analytics.ts`, `ops/analyticsModel.ts`, `tools/admin-password.ts`,
   `deploy/server/bin/admin-password.sh`; tests `apps/server/test/admin.test.ts`.
-- Web: `apps/web/admin.html`, `apps/web/src/admin/` (page), `apps/web/src/analytics/tracker.ts`,
+- Web: `apps/web/admin.html`, `apps/web/src/admin/` (page), `apps/web/src/analytics/usage.ts`,
   `apps/web/src/legal/analyticsConsent.ts`, Cookies section 5, Privacy section 13.
 - Edge: `deploy/vercel/api-proxy.cjs`, `deploy/vercel/package.mjs`, `deploy/smoke/prod-headers.mjs`.

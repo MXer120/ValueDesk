@@ -488,7 +488,7 @@ export function ReownSwitch() {
 }
 
 
-/** The Cookies page's switch for ValueDesk's own usage analytics (analyticsConsent.ts, analytics/tracker.ts). */
+/** The Cookies page's switch for ValueDesk's own usage analytics (analyticsConsent.ts, analytics/usage.ts). */
 export function AnalyticsSwitch() {
   const at = useAnalyticsAllowedAt();
   return (

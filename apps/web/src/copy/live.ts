@@ -32,7 +32,7 @@ import { DEFAULT_SELF_URL, ExecutorClient, ExecutorError, hostedExecutor, selfBa
 import { MAX_BROWSER_KEY_DAYS, approveCopyFee, copyFeeApproval, copyKeyRegistered, registerCopyKey, revokeCopyKey } from './sodexSetup';
 import { acceptCopyTerms, localTerms, recordPendingTerms, sendTermsTo, type LocalTerms } from './terms';
 import { requireTermsOrThrow } from '../legal/acceptance';
-import { track } from '../analytics/tracker';
+import { track } from '../analytics/usage';
 
 const log = logger('copy');
 
