@@ -21,6 +21,19 @@
  * press began, or page coordinates). A press an overlay took (an order line,
  * a drawing, a tool being placed) is left exactly as the library handles it.
  *
+ * THE AXIS MATHS OFF THE CHART. The pan reads the distance from the press, so
+ * it keeps the pointer's own speed anywhere. The two axis drags do not: the
+ * time axis zooms by press pageX / pageX and the price axis scales by pageY /
+ * press pageY, ratios to the page's origin. On the axis that is a gentle
+ * curve; carried beyond it (which only this file does) the time axis raced
+ * ever faster towards the page's left edge, did nothing at 0 and flipped
+ * past the window's edge, and the price range went to 0 and inside out above
+ * the window (owner 2026-10-31: "goes really fast" once outside the chart).
+ * So an owned axis drag hands the library a page coordinate rewritten to
+ * the same first-order pace, kept straight: the time axis gains one scale
+ * unit per press-pageX px travelled (bar space grows by the same factor per
+ * px everywhere) and the price range scales exponentially, never through 0.
+ *
  * While such a drag is on, the page does not select text under the pointer
  * and keeps the cursor the drag began with (`html.kc-drag`, chart.css), and
  * the crosshair is hidden whenever the pointer is off the pane being panned.
@@ -43,10 +56,21 @@ interface Found {
 }
 type Handler = (e: unknown) => unknown;
 
+/** A drag this file owns; an axis drag also carries where it began. */
+interface Owned extends Found {
+  /** The press's pageX (time axis) or pageY (price axis); 0 = not remapped. */
+  p0: number;
+  /** The time axis' scale so far, ours (the library's own is reset per move). */
+  s: number;
+}
+
 interface ChartEvent {
   _findWidgetByEvent: (e: unknown) => Found;
   _mouseDownWidget: Widget | null;
   _startScrollCoordinate: unknown;
+  _xAxisStartScaleDistance?: number;
+  _xAxisScale?: number;
+  _yAxisStartScaleDistance?: number;
   _chart?: { getChartStore?: () => { setCrosshair?: (c?: unknown, o?: unknown) => void } };
   mouseDownEvent: Handler;
   pressedMouseMoveEvent: Handler;
@@ -64,6 +88,20 @@ const Y_AXIS = 'yAxis';
 
 /** The cursor a drag keeps, per widget it began on (klinecharts' own). */
 const CURSOR: Record<string, string> = { [MAIN]: 'crosshair', [X_AXIS]: 'ew-resize', [Y_AXIS]: 'ns-resize' };
+
+/**
+ * The time axis' zoom scale `pageX` px into a drag pressed at `p0`. The
+ * library's p0 / pageX has slope -1/p0 at the press and a pole at pageX 0;
+ * this is its tangent there, the same pace at every distance.
+ */
+export const timeAxisScale = (p0: number, pageX: number): number => 2 - pageX / p0;
+
+/**
+ * The price-axis pageY to hand the library for a drag pressed at `p0`: its
+ * pageY / p0 factor becomes exp((pageY - p0) / p0) - the same slope at the
+ * press, positive however far above the window the pointer goes.
+ */
+export const priceAxisPageY = (p0: number, pageY: number): number => p0 * Math.exp((pageY - p0) / p0);
 
 const root = () => (typeof document !== 'undefined' ? document.documentElement : null);
 
@@ -109,9 +147,9 @@ export function dragAnywhere(c: KChart): boolean {
   const touchEnd = ev.touchEndEvent;
 
   /** The widget a mouse drag belongs to, while it is on. */
-  let mouseOwner: Found | null = null;
+  let mouseOwner: Owned | null = null;
   /** The same for a one-finger touch drag. */
-  let touchOwner: Found | null = null;
+  let touchOwner: Owned | null = null;
 
   /** Is the press that just went through a pan or an axis drag (not an overlay's)? */
   const owns = (w: Widget | null, consumed: unknown): boolean => {
@@ -119,6 +157,37 @@ export function dragAnywhere(c: KChart): boolean {
     const name = w.getName();
     if (name === MAIN) return ev._startScrollCoordinate !== null && ev._startScrollCoordinate !== undefined;
     return (name === X_AXIS || name === Y_AXIS) && consumed === false;
+  };
+
+  /** Own `w`'s drag; an axis drag keeps the press the library just stored. */
+  const own = (pane: unknown, w: Widget): Owned => {
+    const name = w.getName();
+    const at = name === X_AXIS ? ev._xAxisStartScaleDistance : name === Y_AXIS ? ev._yAxisStartScaleDistance : 0;
+    const p0 = typeof at === 'number' && Number.isFinite(at) && at > 0 ? at : 0;
+    if (!p0 && name !== MAIN) log.debug('axis drag left to the library maths: no press coordinate', { name });
+    return { pane, widget: w, p0, s: 1 };
+  };
+
+  /**
+   * The move to hand the library for an owned drag: the pan's as it is, an
+   * axis drag's with the page coordinate its ratio reads made straight (see
+   * THE AXIS MATHS OFF THE CHART above).
+   */
+  const straight = (owner: Owned, e: unknown): unknown => {
+    if (!owner.p0 || !e || typeof e !== 'object') return e;
+    const m = e as { pageX?: number; pageY?: number };
+    const name = owner.widget?.getName();
+    if (name === X_AXIS && typeof m.pageX === 'number' && typeof ev._xAxisScale === 'number') {
+      // The library zooms by (p0 / pageX - _xAxisScale) and stores the new
+      // scale. Handing it pageX = p0 with _xAxisScale set one step back makes
+      // that step exactly ours.
+      const s = timeAxisScale(owner.p0, m.pageX);
+      ev._xAxisScale = 1 - (s - owner.s);
+      owner.s = s;
+      return { ...m, pageX: owner.p0 };
+    }
+    if (name === Y_AXIS && typeof m.pageY === 'number') return { ...m, pageY: priceAxisPageY(owner.p0, m.pageY) };
+    return e;
   };
 
   const hideCrosshair = () => {
@@ -152,7 +221,7 @@ export function dragAnywhere(c: KChart): boolean {
     ev._startScrollCoordinate = null;
     const consumed = down.call(ev, e);
     const w = ev._mouseDownWidget;
-    mouseOwner = owns(w, consumed) ? { pane: w!.getPane(), widget: w } : null;
+    mouseOwner = w && owns(w, consumed) ? own(w.getPane(), w) : null;
     dragClass(!!mouseOwner, w);
     return consumed;
   };
@@ -160,7 +229,7 @@ export function dragAnywhere(c: KChart): boolean {
   ev.pressedMouseMoveEvent = function (e: unknown) {
     const owner = mouseOwner;
     if (!owner || ev._mouseDownWidget !== owner.widget) return pressedMove.call(ev, e);
-    return routed(owner, pressedMove, e);
+    return routed(owner, pressedMove, straight(owner, e));
   };
 
   ev.mouseUpEvent = function (e: unknown) {
@@ -176,12 +245,13 @@ export function dragAnywhere(c: KChart): boolean {
       ev._startScrollCoordinate = null;
       const found = find.call(ev, e);
       const consumed = touchStart.call(ev, e);
-      touchOwner = found.widget && owns(found.widget, found.widget.getName() === MAIN ? undefined : consumed) ? found : null;
+      touchOwner =
+        found.widget && owns(found.widget, found.widget.getName() === MAIN ? undefined : consumed) ? own(found.pane, found.widget) : null;
       return consumed;
     };
     ev.touchMoveEvent = function (e: unknown) {
       const owner = touchOwner;
-      return owner ? routed(owner, touchMove, e) : touchMove.call(ev, e);
+      return owner ? routed(owner, touchMove, straight(owner, e)) : touchMove.call(ev, e);
     };
     ev.touchEndEvent = function (e: unknown) {
       const owner = touchOwner;
