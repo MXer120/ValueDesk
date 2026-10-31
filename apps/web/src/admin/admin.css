@@ -4,15 +4,14 @@
    look (LeaderboardPage.css lbp-*). This sheet only adds the page around them and the few pieces
    the site has no twin for - all under .ad-.
 
-   THE WHITE VERSION (owner, 2026-10-31): the page is white, its "squares" - the navbar, every card
-   - keep the app's dark colours, so the dev suite is never mistaken for the site. Nothing sits
-   on the white itself but cards. */
+   DARK, like the site (owner, 2026-11-01: "make that dark mode" - the white page of 2026-10-31 is gone):
+   the site's page colour, its cards on it; the orange Dev tag in the navbar tells the two apart. */
 
-html, body { background: #fff; }
-.dv-root { min-height: 100vh; background: #fff; }
+html, body { background: var(--bg); }
+.dv-root { min-height: 100vh; background: var(--bg); }
 
-/* The navbar: the site's, as a dark bar across the top of the white page. */
-.dv-navbar { position: sticky; top: 0; z-index: 60; background: var(--bg); box-shadow: 0 1px 0 rgba(0, 0, 0, 0.06), 0 6px 18px rgba(0, 0, 0, 0.12); }
+/* The navbar: the site's, a bar across the top of the page. */
+.dv-navbar { position: sticky; top: 0; z-index: 60; background: var(--bg); box-shadow: 0 1px 0 var(--panel-line); }
 .dv-navbar .navlinks { margin-left: var(--sp-2); }
 .dv-navbar .navlinks a.navlink.active { color: var(--text); }
 .dv-navbar .navlinks a.navlink:hover:not(.active) { color: var(--text); }
@@ -28,7 +27,6 @@ html, body { background: #fff; }
 /* The page: the Status page's frame (st), its card a little wider where a page holds a table. */
 .dv-main { padding: var(--sp-5) var(--sp-4) var(--sp-6); }
 .dv-page { padding: 0; }
-.dv-root .st-card { box-shadow: 0 1px 2px rgba(0, 0, 0, 0.10), 0 12px 32px rgba(0, 0, 0, 0.12); }
 .dv-root .st-card.dv-card--wide { max-width: 1240px; }
 .dv-root .st-card.dv-card--narrow { max-width: 460px; }
 .dv-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 14px var(--sp-4) 0; }
