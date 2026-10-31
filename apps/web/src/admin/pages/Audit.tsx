@@ -13,6 +13,7 @@ const KIND: Record<string, string> = {
   'password.off': 'Suite turned off',
   'ticket.reply': 'Answered a ticket',
   'ticket.status': 'Changed a ticket\'s status',
+  'page.error': 'The page hit an error',
 };
 
 export function Audit() {

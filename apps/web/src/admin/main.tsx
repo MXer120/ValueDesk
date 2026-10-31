@@ -17,9 +17,16 @@ import '../status/status.css';
 import '../components/excluded/excluded.css';
 import './admin.css';
 import { AdminApp } from './AdminApp';
+import { AdminBoundary, reportPageError } from './Crash';
+
+// Anything thrown outside a render (a handler, a promise) is logged too; a render error shows the card (Crash.tsx).
+addEventListener('error', (e) => reportPageError(e.error ?? e.message, `window ${e.filename ?? ''}:${e.lineno ?? ''}`));
+addEventListener('unhandledrejection', (e) => reportPageError(e.reason, 'promise'));
 
 createRoot(document.getElementById('admin-root')!).render(
   <StrictMode>
-    <AdminApp />
+    <AdminBoundary>
+      <AdminApp />
+    </AdminBoundary>
   </StrictMode>,
 );

@@ -219,6 +219,9 @@ html, body { background: #fff; }
 .ad-modal__card h2 { margin: 0; color: var(--text); font-size: 14px; font-weight: 550; }
 .ad-modal__card p { margin: 0; color: var(--muted); font-size: 12px; }
 
+/* The crash card (Crash.tsx). */
+.ad-crash__msg { margin: 0; color: var(--text); font-family: var(--font-num); font-size: 13px; overflow-wrap: anywhere; }
+
 /* Phone: the navbar's links scroll in one row, the cards fill the width, the chat follows its list. */
 @media (max-width: 860px) {
   .ad-navbar .navbar-inner { gap: 10px; padding: 0 12px; }

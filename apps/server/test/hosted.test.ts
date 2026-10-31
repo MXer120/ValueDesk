@@ -286,6 +286,7 @@ test('the allow-list is exactly docs/ARCH-traffic.md section 5', () => {
       'POST /api/admin/audit admin',
       'POST /api/admin/builder admin',
       'POST /api/admin/me admin',
+      'POST /api/admin/page-error admin',
       'POST /api/admin/session admin',
       'POST /api/admin/sessions/revoke admin',
       'POST /api/admin/signout admin',

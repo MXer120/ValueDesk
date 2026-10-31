@@ -16,6 +16,8 @@
  *   POST /api/admin/analytics        {days?}: visitors, pages, time, places, sources, features
  *   POST /api/admin/status           the status of everything (admin/statusView.ts)
  *   POST /api/admin/audit            {before?, kind?}: the audit log, newest first
+ *   POST /api/admin/page-error       {message, stack, where, route, build, browser}: an error the page hit,
+ *                                    into the audit log (the page shows it too - apps/web/src/admin/Crash.tsx)
  *
  * THE LOCK IS HERE, NOT IN THE PAGE. In this plugin's own hook (after the hosted gate), before any handler:
  *   1. no password set on this server (admin/auth.ts): every route is a 404, as a
@@ -361,6 +363,21 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOptions 
   app.post('/api/admin/status', { bodyLimit: 1024 }, async () => {
     if (!opts.status) return { ok: true, status: null };
     return { ok: true, status: await statusOfEverything(opts.status, now()) };
+  });
+
+  /** What the page reports about an error it hit: short strings only, cut to size. */
+  const text = (v: unknown, max: number): string => (typeof v === 'string' ? v.replace(/[\u0000-\u0008\u000b-\u001f]/g, '').slice(0, max) : '');
+
+  app.post('/api/admin/page-error', { bodyLimit: 8 * 1024 }, async (req, reply) => {
+    const s = session(req);
+    const wait = limiter.take(`pageerr|${s.wallet}`, { max: 20, windowMs: 60 * MINUTE }, now());
+    if (wait !== null) return tooMany(reply, wait);
+    const b = bodyOf(req);
+    store().audit({
+      kind: 'page.error', ok: false, wallet: s.wallet, client: clientKey(req.ip), country: countryOf(req),
+      detail: { message: text(b.message, 400), where: text(b.where, 400), route: text(b.route, 80), build: text(b.build, 40), browser: text(b.browser, 200), stack: text(b.stack, 1800) },
+    }, now());
+    return { ok: true };
   });
 
   app.post('/api/admin/audit', { bodyLimit: 1024 }, async (req) => {

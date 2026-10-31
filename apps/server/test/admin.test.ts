@@ -380,3 +380,18 @@ test('analytics: nothing without consent; routes scrubbed, unknown features drop
   assert.deepEqual(store2.summary(Date.now() - 86_400_000, Date.now() + 86_400_000).countries, [{ key: '(none)', n: 1 }]);
   writeFileSync(join(dir, 'done'), '');
 });
+
+test('a page error goes into the audit log, only with a session, cut to size', async () => {
+  const s = await suite();
+  assert.equal((await s.post('/api/admin/page-error', { message: 'x' })).statusCode, 401);
+  const auth = await s.login();
+  const r = await s.post('/api/admin/page-error', { message: 'TypeError: x is undefined', stack: 'a\nb', where: 'render <Overview', route: '#/overview', build: 'abc', browser: 'Chrome', extra: 'dropped' }, auth);
+  assert.equal(r.statusCode, 200);
+  const row = s.store.auditRows({ kind: 'page.error' })[0]!;
+  assert.equal(row.ok, false);
+  assert.deepEqual(Object.keys(row.detail!).sort(), ['browser', 'build', 'message', 'route', 'stack', 'where']);
+  assert.equal(row.detail!.message, 'TypeError: x is undefined');
+  const long = await s.post('/api/admin/page-error', { message: 'm'.repeat(5000) }, auth);
+  assert.equal(long.statusCode, 200);
+  assert.equal((s.store.auditRows({ kind: 'page.error' })[0]!.detail!.message as string).length, 400);
+});
