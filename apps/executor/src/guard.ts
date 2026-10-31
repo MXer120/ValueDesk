@@ -35,18 +35,22 @@
 import type { AlgoRecord, AlgoSink, ChildRequest, ChildResult, MarginChoice, MarketInfo, OrderSink, SendResult, StopOrder, StopRequest, WeightBudget } from '../../../packages/copy-engine/src/index.ts';
 import type { BuilderParams } from '../../../packages/sodex-core/src/index.ts';
 
-export type RejectClass = 'key' | 'margin' | 'limit' | 'account-rate' | 'size' | 'unknown' | 'ip-rate' | 'local';
+export type RejectClass = 'key' | 'margin' | 'limit' | 'account-rate' | 'size' | 'gone' | 'unknown' | 'ip-rate' | 'local';
 
 /** Sort one refusal text (SoDEX's words, or the local gate's "Not sent: ..."). SoDEX does not document them, so this reads loosely. */
 export function classifyRejection(error: string | null | undefined): RejectClass {
   const e = String(error ?? '');
   if (/^Not sent:/i.test(e)) return /order rate/i.test(e) ? 'account-rate' : 'local';
   if (/HTTP 429|error code:?\s*1015/i.test(e)) return 'ip-rate';
+  // What the order was for is already gone: a close of a position SoDEX closed meanwhile (its stop, a liquidation:
+  // "position not found: 1", the only refusal on ValueDesk's executor on 2026-10-29/30, alerted as unknown) or a cancel
+  // of an order that filled or was cancelled. The engines book it themselves (refusedNoPosition, the cancel's next read).
+  if (/position not found|no (open )?position|order (not found|never placed)|already (filled|canceled|cancelled|closed)|unknown order/i.test(e)) return 'gone';
   if (/api[\s_-]?key[^.]*(not found|invalid|expired|revoked|unknown)|key not found|unknown api key|no (copy|trading) key|signature (rejected|invalid|mismatch|verification)|invalid signature|unauthori[sz]ed|trading key has expired/i.test(e)) return 'key';
   if (/insufficient|not enough (margin|balance|collateral|funds)|margin (is )?(insufficient|not enough)|available (balance|margin)/i.test(e)) return 'margin';
   if (/open[\s_-]?interest|\boi\b[^.]*\b(cap|limit|exceed)|max(imum)?[\s_-]?position|position[^.]*\b(limit|exceed|too (large|big))|risk[\s_-]?limit|too many (open )?orders|open[\s_-]?orders?[^.]*\b(limit|exceed|max)/i.test(e)) return 'limit';
   if (/rate[\s_-]?limit|too many requests|quota|request limit/i.test(e)) return 'account-rate';
-  if (/notional|tick[\s_-]?size|step[\s_-]?size|precision|price[^.]*(band|range|deviat|too (high|low)|limit)|quantity[^.]*(too small|invalid|min)|min(imum)? (qty|quantity|size)|reduce[\s_-]?only|would (increase|not reduce)|no position/i.test(e)) return 'size';
+  if (/notional|tick[\s_-]?size|step[\s_-]?size|precision|price[^.]*(band|range|deviat|too (high|low)|limit)|quantity[^.]*(too small|invalid|min)|min(imum)? (qty|quantity|size)|reduce[\s_-]?only|would (increase|not reduce)/i.test(e)) return 'size';
   return 'unknown';
 }
 
@@ -83,6 +87,7 @@ const COPY_POLICY: Record<RejectClass, Policy> = {
   limit: { strikes: 1, holdMs: 15 * 60_000, words: 'SoDEX refused an order at one of its limits (position, open interest or open orders)' },
   'account-rate': { strikes: 1, holdMs: 2 * 60_000, words: "SoDEX refused an order at this account's order rate" },
   size: { strikes: 3, holdMs: 10 * 60_000, words: 'SoDEX refused several orders of this size or price' },
+  gone: { strikes: 0, holdMs: 0, words: '' },
   unknown: { strikes: 5, holdMs: 15 * 60_000, words: 'SoDEX refused several orders' },
   'ip-rate': { strikes: 0, holdMs: 0, words: '' },
   local: { strikes: 0, holdMs: 0, words: '' },

@@ -199,6 +199,11 @@ test('guard: refusals sorted into classes', () => {
     ["Not sent: SoDEX's rate limit is cooling down (12 s left)", 'local'],
     ['Not sent: account 42 is at SoDEX\'s order rate (20 a second)', 'account-rate'],
     ['SoDEX rate limit (HTTP 429) - backing off', 'ip-rate'],
+    ['position not found: 1', 'gone'],
+    ['no position to reduce', 'gone'],
+    ['order not found', 'gone'],
+    ['order already filled', 'gone'],
+    ['order already canceled', 'gone'],
     ['code 77', 'unknown'],
   ];
   for (const [text, want] of cases) assert.equal(classifyRejection(text), want, text);
@@ -259,6 +264,20 @@ test('guard: an unknown refusal is an alert each time (deduplicated by Alerts) a
   assert.equal(h.held.length, 1);
   assert.equal(h.alerts.filter((a) => a.kind === 'order-rejected').length, 5);
   assert.equal(h.alerts.filter((a) => a.kind === 'sub-held').length, 1);
+});
+
+test('guard: "position not found" (a close of a position already gone) is no alert and holds nothing, however often (ValueDesk 2026-10-30: three Telegram alerts "for a reason the executor does not know")', () => {
+  const h = guardHarness();
+  const c = { kind: 'copy' as const, id: 'c3l01', owner: OWNER };
+  const a = { kind: 'algo' as const, id: 'a2j6p', owner: OWNER };
+  for (let i = 0; i < 10; i++) {
+    h.guard.record(c, [no('position not found: 1')]);
+    h.guard.record(a, [no('position not found: 1')]);
+    h.guard.recordError(a, new Error('order already canceled'));
+  }
+  assert.equal(h.alerts.length, 0, 'no operator alert');
+  assert.equal(h.held.length, 0, 'nothing held');
+  assert.equal(h.guard.holdOf(c), null);
 });
 
 test('guard: a refused key holds every copy and algo of the wallet and asks for the key to be checked again', () => {
