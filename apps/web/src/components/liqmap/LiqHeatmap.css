@@ -59,6 +59,8 @@
   font-size: 11px;
 }
 .lqm-legend span { display: inline-flex; align-items: center; gap: 5px; }
+/* Exact steps: where the bars come from, and how often (LiqHeatmap.tsx fineNote). */
+.lqm-legend .lqm-legend-note { margin-left: auto; font-variant-numeric: tabular-nums; }
 .lqm-sw { width: 8px; height: 8px; border-radius: 2px; display: inline-block; }
 .lqm-sw.is-long { background: var(--neg); }
 .lqm-sw.is-short { background: var(--pos); }

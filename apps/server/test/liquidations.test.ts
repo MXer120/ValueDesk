@@ -202,9 +202,11 @@ test('minute rows: every coin per venue, past liquidations kept out, snapshots f
   assert.deepEqual(hl.o, [100, 0, 1, 0]);
   assert.deepEqual(btc.v.lighter!.b, [[5500, 0, 1100, 0, 1]]);
   const snap = snapOfNow(btc);
-  assert.equal(snap.st, 2.5);
-  assert.deepEqual(snap.v.hyperliquid, [[320, 800, 0]]);
-  assert.deepEqual(snap.v.lighter, [[440, 0, 1100]]);
+  // HIST_STEP 0.125% of 1,000 (0.25% and 2.5 until 2026-10-31).
+  assert.equal(snap.st, 1);
+  assert.deepEqual(snap.v.hyperliquid, [[800, 800, 0]]);
+  assert.deepEqual(snap.v.lighter, [[1100, 0, 1100]]);
+  assert.equal(snapOfNow(btc, 0.0025).st, 2.5, 'the old width still comes out of the old share');
 });
 
 test('the same market under other names counts as one coin', () => {

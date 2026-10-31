@@ -51,7 +51,7 @@ import { ACCOUNT_DETAIL, arcusProvider, lighterProvider, nameSpotFills, tradexyz
 import { applyCachedCurves, attachPodiumCurves } from '../valuedesk/curves.js';
 import { attachStats, boardPage, cohortDetail, cohortFocus, cohortMap, cohortWallets, cohortsReady, cohortsRead, excludedNow, indexerStatus, netPage } from '../indexer/read.js';
 import { isCohortId, isSector, type CohortFilter, type CohortRange, type WalletSort } from '../valuedesk/cohorts/model.js';
-import { isLiqRange, levFilterOf, liqAt, liqHeatmap, liqHeatmapOf, liqHistory, liqWallets, walletLiqs } from '../indexer/liqRead.js';
+import { fineAskOf, isLiqRange, levFilterOf, liqAt, liqHeatmap, liqHeatmapFine, liqHeatmapOf, liqHistory, liqWallets, walletLiqs } from '../indexer/liqRead.js';
 import { watchAddresses } from '../indexer/host.js';
 import { BOARD_WINDOWS, type BoardWindow } from '../valuedesk/types.js';
 import { buildExplore } from '../valuedesk/explore.js';
@@ -458,8 +458,10 @@ export async function valuedeskRoutes(app: FastifyInstance) {
   });
 
   /**
-   * Liquidation levels of `coin` over `venues` (indexer/liqRead.ts): buckets at
-   * `res` = fine | medium | coarse, with each venue's coverage and accuracy.
+   * Liquidation levels of `coin` over `venues` (indexer/liqRead.ts): the engine's 0.02% buckets,
+   * with each venue's coverage and accuracy. `step=` with `from=` / `to=`: buckets of that width
+   * over that window, exact from the books (liqHeatmapFine; at most FINE_MAX_BUCKETS in the
+   * window), with `side=` long / short and `lev=low,mid,high` besides `wallets=`.
    */
   app.get('/api/vs/liquidations', async (req, reply) => {
     try {
@@ -467,9 +469,13 @@ export async function valuedeskRoutes(app: FastifyInstance) {
       const coin = cohortFilter(q).coin;
       if (!coin) throw bad('coin= is required');
       const ws = walletsOf(q);
-      // The wallet filter reads the cohort load: never an old one (read.ts STALE_MAX_MS).
-      if (ws.length) await cohortsReady();
-      const body = ws.length ? await liqHeatmapOf(coin, cohortVenues(q), ws) : await liqHeatmap(coin, cohortVenues(q));
+      const fine = fineAskOf(q);
+      if (typeof fine === 'string') throw bad(fine);
+      // The wallet filter and exact steps read the cohort load: never an old one (read.ts STALE_MAX_MS).
+      if (ws.length || fine) await cohortsReady();
+      const side = q.side === 'long' || q.side === 'short' ? q.side : null;
+      const body = fine ? await liqHeatmapFine(coin, cohortVenues(q), fine, { wallets: new Set(ws), side, lev: levFilterOf(q.lev) })
+        : ws.length ? await liqHeatmapOf(coin, cohortVenues(q), ws) : await liqHeatmap(coin, cohortVenues(q));
       if (!body) return fail(reply, new NotAvailable('The index is not running yet'));
       return { ok: true, ...body };
     } catch (e) {

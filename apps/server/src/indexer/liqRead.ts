@@ -22,7 +22,7 @@
 import { VENUES, type Venue } from '../valuedesk/types.js';
 import type { WalletVenue } from '../valuedesk/cohorts/model.js';
 import { LEV_BANDS, emptyDrift, levBand, niceStep, type DriftStats, type LevBand, type Tiers } from '../valuedesk/liquidations/math.js';
-import { NOW_HI, NOW_LO, NOW_STEP, addRow, coinLevels, liqCoin, rowBand, snapBand, trimRow, type LevelPos, type LiqNow, type LiqRow, type LiqSnap, type SnapRow } from '../valuedesk/liquidations/levels.js';
+import { FINE_MAX_BUCKETS, NOW_HI, NOW_LO, NOW_STEP, addRow, coinLevels, liqCoin, rowBand, snapBand, trimRow, type LevelPos, type LiqNow, type LiqRow, type LiqSnap, type SnapRow } from '../valuedesk/liquidations/levels.js';
 import { inflateRawSync } from 'node:zlib';
 import { marketsNow, venueMarkets, type VenueMarkets } from '../valuedesk/liquidations/rules.js';
 import { shownLabel } from '../valuedesk/labels.js';
@@ -383,45 +383,132 @@ const MARKETS_WAIT_MS = 3_000;
  * venue's open interest.
  */
 export async function liqHeatmapOf(coin: string, venues: readonly Venue[], wallets: readonly string[]): Promise<LiqHeatmap | null> {
-  const g = await gather(coin, venues);
+  const g = await gatherNow(coin, venues);
   if (!g) return null;
-  const only = new Set(wallets);
   const p = g.price;
-  const st = p ? niceStep(p * NOW_STEP) : 1;
+  return heatOfLevels(coin, venues, g, p ? niceStep(p * NOW_STEP) : 1, p ? p * NOW_LO : 0, p ? p * NOW_HI : 0, { wallets: new Set(wallets) });
+}
+
+/**
+ * EXACT STEPS (owner 2026-10-31: "via settings down to $1 (min tick on sodex) if the user wants?
+ * and of course for all coins"). The live engine keeps a position's bucket, not its price, at
+ * 0.02% of the price - BTC $20 - so a finer step cannot come out of its rows. The cohort load
+ * keeps the books with every position (a minute old at most), and gather prices them exactly;
+ * a step finer than the engine's is bucketed from those, for the price window on screen only
+ * (FINE_MAX_BUCKETS at most: BTC at $1 is $4,000 of it). One pass over the coin's positions,
+ * on levels kept per load (gatherNow), and edge-cached like the heatmap (perf.ts).
+ */
+export interface FineAsk {
+  step: number;
+  from: number;
+  to: number;
+}
+
+/** `step=` with `from=` / `to=`: null when no step is asked, a message when the ask is wrong (a 400). */
+export function fineAskOf(q: { step?: unknown; from?: unknown; to?: unknown }): FineAsk | null | string {
+  if (q.step === undefined || q.step === '') return null;
+  const step = Number(q.step);
+  const from = Number(q.from);
+  const to = Number(q.to);
+  if (!(step > 0) || !Number.isFinite(step)) return 'step= must be a price step above 0';
+  if (!(from >= 0) || !Number.isFinite(to) || !(to > from)) return 'from= and to= must be a price range with step=';
+  // The window's buckets, not the ones with levels: what one answer may cost is known before it is read.
+  if (Math.ceil((to - from) / step - 1e-9) > FINE_MAX_BUCKETS) return `at most ${FINE_MAX_BUCKETS} buckets of step= in from= to to=`;
+  return { step, from, to };
+}
+
+/** Which positions a heatmap counts: some wallets only, one side, some leverage bands (levFilterOf). Absent: every one. */
+export interface LevelFilter {
+  wallets?: ReadonlySet<string> | null;
+  side?: 'long' | 'short' | null;
+  lev?: ReadonlySet<LevBand> | null;
+}
+
+/** Per venue, what the books hold of the positions the wallet filter keeps (VenueCoverage's counts). */
+type Counts = Pick<VenueCoverage, 'long' | 'short' | 'longKnown' | 'shortKnown' | 'positions' | 'past'> & { longNone: number; shortNone: number };
+
+/**
+ * Levels into `step` buckets over [from, to), as the engine sums them (LiqRow: USD, counts, USD
+ * per leverage band): a long priced at or above the price (a short at or below) is past, counted
+ * per venue and left out; a level outside the window is counted in `outside`. The counts are of
+ * every position the wallet filter keeps; the side and leverage filters choose what is bucketed.
+ */
+export function levelRows(levels: Iterable<LevelPos>, price: number | null, step: number, from: number, to: number, f: LevelFilter = {}): {
+  buckets: LiqRow[];
+  outside: LiqHeatmap['outside'];
+  counts: Map<Venue, Counts>;
+} {
+  const p = price !== null && price > 0 ? price : null;
   const sum = new Map<number, LiqRow>();
   const outside = { long: 0, short: 0, longN: 0, shortN: 0 };
-  const coverage: Partial<Record<Venue, VenueCoverage>> = {};
-  for (const v of venues) {
-    const c = g.coverage[v];
-    if (c) coverage[v] = { ...c, long: 0, short: 0, longKnown: 0, shortKnown: 0, longNone: 0, shortNone: 0, positions: 0, past: 0 };
-  }
-  for (const l of g.levels) {
-    if (!only.has(l.address)) continue;
-    const c = coverage[l.venue];
+  const counts = new Map<Venue, Counts>();
+  const only = f.wallets?.size ? f.wallets : null;
+  for (const l of levels) {
+    if (only && !only.has(l.address)) continue;
+    let c = counts.get(l.venue);
+    if (!c) { c = { long: 0, short: 0, longKnown: 0, shortKnown: 0, longNone: 0, shortNone: 0, positions: 0, past: 0 }; counts.set(l.venue, c); }
     const a = Math.abs(l.szi);
     const long = l.szi > 0;
-    if (c) {
-      c.positions++;
-      if (long) { c.long += a; if (l.liq !== null) c.longKnown += a; else if (l.none) c.longNone! += a; } else { c.short += a; if (l.liq !== null) c.shortKnown += a; else if (l.none) c.shortNone! += a; }
-    }
+    c.positions++;
+    if (long) { c.long += a; if (l.liq !== null) c.longKnown += a; else if (l.none) c.longNone += a; } else { c.short += a; if (l.liq !== null) c.shortKnown += a; else if (l.none) c.shortNone += a; }
     if (l.liq === null || !p) continue;
-    if (long ? l.liq >= p : l.liq <= p) { if (c) c.past += a; continue; }
+    if (long ? l.liq >= p : l.liq <= p) { c.past += a; continue; }
+    if (f.side && f.side !== (long ? 'long' : 'short')) continue;
+    if (!inFilter(f.lev ?? null, l.lev)) continue;
     const usd = a * l.liq;
-    if (l.liq < p * NOW_LO || l.liq >= p * NOW_HI) {
+    if (l.liq < from || l.liq >= to) {
       if (long) { outside.long += usd; outside.longN++; } else { outside.short += usd; outside.shortN++; }
       continue;
     }
-    const i = Math.floor(l.liq / st);
+    const i = Math.floor(l.liq / step);
     const b = sum.get(i) ?? [i, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
     if (long) { b[1] += usd; b[3]++; } else { b[2] += usd; b[4]++; }
     const band = levBand(l.lev);
     if (band !== null) b[rowBand(long, band)]! += usd;
     sum.set(i, b);
   }
-  return {
-    coin, venues: [...venues], at: g.load.at, price: p, step: st,
-    buckets: [...sum.values()].sort((x, y) => x[0] - y[0]).map((r) => trimRow(r)), outside, coverage, asOf: g.load.at,
-  };
+  return { buckets: [...sum.values()].sort((x, y) => x[0] - y[0]).map((r) => trimRow(r)), outside, counts };
+}
+
+/** A heatmap from gathered levels: levelRows, with each venue's coverage counted over the positions kept. */
+function heatOfLevels(coin: string, venues: readonly Venue[], g: Gathered, step: number, from: number, to: number, f: LevelFilter): LiqHeatmap {
+  const r = levelRows(g.levels, g.price, step, from, to, f);
+  const coverage: Partial<Record<Venue, VenueCoverage>> = {};
+  const zero: Counts = { long: 0, short: 0, longKnown: 0, shortKnown: 0, longNone: 0, shortNone: 0, positions: 0, past: 0 };
+  for (const v of venues) {
+    const c = g.coverage[v];
+    if (c) coverage[v] = { ...c, ...(r.counts.get(v) ?? zero) };
+  }
+  // Whole dollars, as the engine's rows: BTC at $1 over $4,000 is ~1,900 rows, and 15 digits of each USD were 40% of the answer.
+  const buckets = r.buckets.map((b) => b.map((x, k) => (k === 0 || k === 3 || k === 4 ? x : Math.round(x))) as LiqRow);
+  return { coin, venues: [...venues], at: g.load.at, price: g.price, step, buckets, outside: r.outside, coverage, asOf: g.load.at };
+}
+
+/** A coin's levels at `ask.step` over [ask.from, ask.to), exact from the books (the fine route); `f` as levelRows. */
+export async function liqHeatmapFine(coin: string, venues: readonly Venue[], ask: FineAsk, f: LevelFilter = {}): Promise<(LiqHeatmap & FineAsk) | null> {
+  const g = await gatherNow(coin, venues);
+  if (!g) return null;
+  return { ...heatOfLevels(coin, venues, g, ask.step, ask.from, ask.to, f), ...ask };
+}
+
+/**
+ * gather, kept per coin and venues for as long as the cohort load it read stands (a minute):
+ * pricing every account of BTC is the cost of a fine answer, bucketing it again is not. The
+ * levels are only read after.
+ */
+const gathered = new Map<string, { at: number; read: number; g: Promise<Gathered | null> }>();
+const GATHER_KEEP_MS = 60_000;
+
+async function gatherNow(coin: string, venues: readonly Venue[]): Promise<Gathered | null> {
+  const load = cohortBooksNow();
+  if (!load) return null;
+  const key = `${coin}|${venues.join(',')}`;
+  const hit = gathered.get(key);
+  if (hit && hit.at === load.at && Date.now() - hit.read < GATHER_KEEP_MS) return hit.g;
+  const g = gather(coin, venues).catch(() => null);
+  if (gathered.size >= 64) gathered.clear();
+  gathered.set(key, { at: load.at, read: Date.now(), g });
+  return g;
 }
 
 /** A wallet's open positions, every coin, with their liquidation prices (the wallet filter's list). */

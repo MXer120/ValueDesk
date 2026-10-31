@@ -6,6 +6,10 @@
  * search, from the address book, the connected wallet or a pasted address - which side, and
  * the picked wallets' positions on every coin with their liquidation prices. Kept per panel.
  *
+ * The resolution (owner 2026-10-31, chart/liqSteps.ts): per coin, Auto (the bars above) or a fixed
+ * step in the coin's price units down to its tick on SoDEX; the historical view draws the step its
+ * snapshots keep and says so when a finer one is picked.
+ *
  * And (owner 2026-10-31) the colours - by side or by leverage - with a filter of the leverage
  * bands shown (chart/liqLev.ts), every view and the wallet lists alike; in the historical view
  * whether the levels now are laid over its right edge.
@@ -30,13 +34,23 @@ export type Unit = 'usd' | 'coin';
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 
 /** What the View changes (one write, so a reset is never half a reset). */
-export interface ViewChange { wallets?: string[]; side?: Side; res?: Res; unit?: Unit; colorBy?: ColorBy; lev?: LevBand[]; strip?: boolean }
+export interface ViewChange { wallets?: string[]; side?: Side; res?: Res; unit?: Unit; colorBy?: ColorBy; lev?: LevBand[]; strip?: boolean; step?: string }
+
+/** The resolution's choices for the coin on screen: 'auto' and the ladder's places ('0' the default), named in its price units. */
+export interface StepsView {
+  value: string;
+  options: Array<[string, string]>;
+  /** The coin's own default ('0', or 'auto' for a panel set to Medium or Coarse before the steps). */
+  initial: string;
+  /** What the view draws now, when it is not what was picked (zoomed out past the fine route's cap, or the history's own step). */
+  note: string | null;
+}
 
 const SlidersGlyph = () => (
   <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M2 4.5h12M2 11.5h12" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" opacity="0.55" /><circle cx="10.5" cy="4.5" r="1.8" fill="var(--bg-panel)" stroke="currentColor" strokeWidth="1.3" /><circle cx="5.5" cy="11.5" r="1.8" fill="var(--bg-panel)" stroke="currentColor" strokeWidth="1.3" /></svg>
 );
 
-export function WalletView({ wallets, side, venues, self, bars, colors, onChange, onReset }: {
+export function WalletView({ wallets, side, venues, self, bars, steps, colors, onChange, onReset }: {
   wallets: string[];
   side: Side;
   venues: Venue[];
@@ -44,6 +58,8 @@ export function WalletView({ wallets, side, venues, self, bars, colors, onChange
   self: string | null;
   /** The live and chart views' bars: their size and unit, and how wide a bar is now (price); null in the historical view. */
   bars: { res: Res; unit: Unit; coin: string; width: string | null } | null;
+  /** The resolution (null: no price yet). */
+  steps: StepsView | null;
   /** Colour by side or leverage, the bands shown, and the historical view's strip of the levels now (null elsewhere). */
   colors: { colorBy: ColorBy; lev: LevBand[]; strip: boolean | null };
   onChange: (c: ViewChange) => void;
@@ -51,7 +67,8 @@ export function WalletView({ wallets, side, venues, self, bars, colors, onChange
 }) {
   const btn = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
-  const count = wallets.length + (side === 'both' ? 0 : 1) + (bars && bars.res !== 'fine' ? 1 : 0) + (bars && bars.unit !== 'usd' ? 1 : 0)
+  const auto = !steps || steps.value === 'auto';
+  const count = wallets.length + (side === 'both' ? 0 : 1) + (bars && auto && bars.res !== 'fine' ? 1 : 0) + (steps && steps.value !== steps.initial ? 1 : 0) + (bars && bars.unit !== 'usd' ? 1 : 0)
     + (colors.colorBy !== 'side' ? 1 : 0) + (isAllLev(colors.lev) ? 0 : 1) + (colors.strip ? 1 : 0);
   // A band on or off; the last one on stays (none at all would be an empty map).
   const toggleLev = (b: LevBand) => {
@@ -81,11 +98,19 @@ export function WalletView({ wallets, side, venues, self, bars, colors, onChange
         onReset={onReset}
         resetDisabled={count === 0}
       >
+        {steps && (
+          <Section label="Resolution" aside={bars?.width && !auto ? <span className="lqm-view-n">{bars.width} each</span> : undefined}>
+            <Seg<string> value={steps.value} onChange={(step) => onChange({ step })} options={steps.options} />
+            {steps.note && <p className="lqm-view-empty">{steps.note}</p>}
+          </Section>
+        )}
         {bars && (
           <>
-            <Section label="Bars" aside={bars.width ? <span className="lqm-view-n">{bars.width} each</span> : undefined}>
-              <Seg<Res> value={bars.res} onChange={(res) => onChange({ res })} options={[['fine', 'Fine'], ['medium', 'Medium'], ['coarse', 'Coarse']]} />
-            </Section>
+            {auto && (
+              <Section label="Bars" aside={bars.width ? <span className="lqm-view-n">{bars.width} each</span> : undefined}>
+                <Seg<Res> value={bars.res} onChange={(res) => onChange({ res })} options={[['fine', 'Fine'], ['medium', 'Medium'], ['coarse', 'Coarse']]} />
+              </Section>
+            )}
             <Section label="Unit">
               <Seg<Unit> value={bars.unit} onChange={(unit) => onChange({ unit })} options={[['coin', bars.coin], ['usd', 'USD']]} />
             </Section>

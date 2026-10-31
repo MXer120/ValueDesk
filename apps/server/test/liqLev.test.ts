@@ -108,8 +108,8 @@ test('snapshots keep the bands of the levels they keep; an old minute row gives 
     },
   };
   const snap = snapOfNow(row);
-  assert.deepEqual(snap.v.hyperliquid, [[320, 800, 0, 0, 800], [440, 0, 1_100, 0, 0, 0, 1_000]], 'mid longs; 1,000 of the shorts low, 100 unknown');
-  assert.deepEqual(snap.v.lighter, [[320, 400, 0]], 'an old row: no bands');
+  assert.deepEqual(snap.v.hyperliquid, [[800, 800, 0, 0, 800], [1_100, 0, 1_100, 0, 0, 0, 1_000]], 'mid longs; 1,000 of the shorts low, 100 unknown');
+  assert.deepEqual(snap.v.lighter, [[800, 400, 0]], 'an old row: no bands');
 });
 
 test('the API: venues of old and new rows sum, old snapshots read as unknown, the lev= of the lists reads', async () => {

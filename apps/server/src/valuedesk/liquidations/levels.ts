@@ -164,8 +164,16 @@ export function trimRow<T extends number[]>(r: T, min = 5): T {
 const NOW_LO_SHARE = 0.2;
 const NOW_HI_SHARE = 3;
 
-/** A snapshot's bucket width, as a share of the price then. */
-export const HIST_STEP = 0.0025;
+/**
+ * A snapshot's bucket width, as a share of the price then: BTC near $80K in $100 rows. 0.0025
+ * ($200) until 2026-10-31 (owner: "instead 200usd ranges on btc 100 per default"); older
+ * snapshots keep their own `st` and the web draws each at its own. Cost, measured on the 101
+ * coins of the laptop index's newest snapshot re-bucketed both ways: 864 KB -> 1,077 KB a
+ * snapshot (1.25x; BTC 1.47x), about +20 MB of row text a day at 96 snapshots - most far
+ * levels are one position a row at either width. Finer than this comes from the books on
+ * demand (liqRead.ts liqHeatmapFine), never from history.
+ */
+export const HIST_STEP = 0.00125;
 /**
  * A snapshot keeps the levels the minute rows keep: NOW_LO to NOW_HI times the price. Until
  * 2026-10-31 only 0.6x-1.4x, so Historical zoomed out ran out of levels where Live still had them
@@ -191,6 +199,12 @@ export interface LiqSnap {
  * coarser zoomed out - so they are kept as fine as a screen ever needs.
  */
 export const NOW_STEP = 0.0002;
+/**
+ * The fine route (liqRead.ts liqHeatmapFine): buckets in one answer's window at most. A step
+ * finer than NOW_STEP is bucketed from the books for the price window on screen only; BTC at
+ * $1 is a window of $4,000, and the web coarsens its step when the screen holds more.
+ */
+export const FINE_MAX_BUCKETS = 4_000;
 /** Levels between these shares of the price are bucketed; the rest is counted as outside. */
 export const NOW_LO = NOW_LO_SHARE;
 export const NOW_HI = NOW_HI_SHARE;
@@ -292,9 +306,9 @@ export class LevelsBuilder {
   }
 }
 
-/** A snapshot for the historical view from a coin's minute row: HIST_STEP buckets from HIST_LO to HIST_HI times the price. */
-export function snapOfNow(row: LiqNow): LiqSnap {
-  const st = niceStep(row.p * HIST_STEP);
+/** A snapshot for the historical view from a coin's minute row: HIST_STEP buckets (`share` of the price) from HIST_LO to HIST_HI times the price. */
+export function snapOfNow(row: LiqNow, share = HIST_STEP): LiqSnap {
+  const st = niceStep(row.p * share);
   const lo = row.p * HIST_LO;
   const hi = row.p * HIST_HI;
   const v: LiqSnap['v'] = {};

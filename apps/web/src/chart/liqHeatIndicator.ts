@@ -107,14 +107,30 @@ export function cellOf(r: HeatPoint['b'][number], side: HeatData['side'] = 'both
  */
 export function heatScale(points: readonly HeatPoint[], side: HeatData['side'] = 'both', lev: LevFilter = LEV_BANDS): number {
   const per: number[] = [];
+  const ref = refStep(points);
   for (const q of points) {
-    const s = robustMax(q.b.map((r) => cellOf(r, side, lev).v), { q: 0.95, ratio: 3 });
+    const k = stepNorm(q, ref);
+    const s = robustMax(q.b.map((r) => cellOf(r, side, lev).v * k), { q: 0.95, ratio: 3 });
     if (s > 0) per.push(s);
   }
   if (!per.length) return 1;
   per.sort((a, b) => a - b);
   return per[per.length >> 1] || 1;
 }
+
+/**
+ * MIXED STEPS. Each snapshot keeps its own bucket width (`st`): 0.25% of the price until
+ * 2026-10-31, 0.125% after (server levels.ts HIST_STEP), and a price that moves across a round
+ * width changes it too. A cell is drawn over its own snapshot's range (cellRange), and coloured by
+ * its notional per the newest snapshot's width (stepNorm): a $200 cell of last week holds about
+ * what two $100 cells of today hold, and without this it read twice as hot where the step changed.
+ * Tooltips and details keep each cell's own figure.
+ */
+export const cellRange = (r: HeatPoint['b'][number], st: number): [number, number] => [r[0] * st, (r[0] + 1) * st];
+/** The width the colours are of: the newest snapshot's (null: none). */
+export const refStep = (points: readonly HeatPoint[]): number | null => points.at(-1)?.st ?? null;
+/** What a snapshot's cells are multiplied by to be read per `ref` of price (1 at the same width). */
+export const stepNorm = (q: HeatPoint, ref: number | null): number => (ref && q.st > 0 ? ref / q.st : 1);
 
 /** The snapshot in force at the close of a bar starting at `t` (`barMs` long): index into `times`, or -1. */
 export function snapshotFor(times: readonly number[], t: number, barMs: number): number {
@@ -197,6 +213,7 @@ export const liqHeatTemplate: IndicatorTemplate<{ lo?: number; hi?: number }, un
       const byLev = data.colorBy === 'lev';
       const scale = data.scale || 1;
       const w = Math.max(1, bar.bar + bar.gapBar);
+      const ref = refStep(data.points);
       ctx.save();
       ctx.beginPath();
       ctx.rect(0, 0, bounding.width, bounding.height);
@@ -218,13 +235,15 @@ export const liqHeatTemplate: IndicatorTemplate<{ lo?: number; hi?: number }, un
           const q = data.points[at]!;
           const x0 = edge(i);
           const x1 = edge(j);
+          const k = stepNorm(q, ref) / scale;
           for (const r of q.b) {
             const { v, bands } = cellOf(r, side, lev);
             if (!(v > 0)) continue;
-            const col = byLev ? levHeatColor(v / scale, bands) : heatColor(v / scale);
+            const col = byLev ? levHeatColor(v * k, bands) : heatColor(v * k);
             if (!col) continue;
-            const top = Math.round(yAxis.convertToPixel((r[0] + 1) * q.st));
-            const bot = Math.round(yAxis.convertToPixel(r[0] * q.st));
+            const [lo, hi] = cellRange(r, q.st);
+            const top = Math.round(yAxis.convertToPixel(hi));
+            const bot = Math.round(yAxis.convertToPixel(lo));
             if (bot < 0 || top > bounding.height) continue;
             ctx.fillStyle = col;
             ctx.fillRect(x0, top, Math.max(1, x1 - x0), Math.max(1, bot - top));

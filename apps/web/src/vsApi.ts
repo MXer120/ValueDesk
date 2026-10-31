@@ -191,9 +191,13 @@ export const vsApi = {
   live: (channel: string, signal?: AbortSignal) =>
     unwrap<{ channel: string; video: string | null }>(`/api/vs/live${qs({ channel })}`, signal).then((b) => b.video),
 
-  /** A coin's liquidation levels over a set of venues (the cohort books, priced: server indexer/liqRead.ts). */
-  liquidations: (coin: string, venues: readonly Venue[], res: 'fine' | 'medium' | 'coarse', signal?: AbortSignal, wallets: readonly string[] = []) =>
-    unwrap<LiqHeatmap>(`/api/vs/liquidations${qs({ coin, venues: venues.join(','), res, wallets: wallets.length ? wallets.join(',') : undefined })}`, signal),
+  /**
+   * A coin's liquidation levels over a set of venues (the cohort books, priced: server indexer/liqRead.ts).
+   * `fine`: buckets of `step` over [from, to), exact from the books (liqHeatmapFine; the side and leverage
+   * filters stay the widget's, so viewers of one coin share the edge's answer).
+   */
+  liquidations: (coin: string, venues: readonly Venue[], res: 'fine' | 'medium' | 'coarse', signal?: AbortSignal, wallets: readonly string[] = [], fine?: { step: number; from: number; to: number }) =>
+    unwrap<LiqHeatmap>(`/api/vs/liquidations${qs({ coin, venues: venues.join(','), res, wallets: wallets.length ? wallets.join(',') : undefined, ...(fine ? { step: fine.step, from: fine.from, to: fine.to } : {}) })}`, signal),
   /** The wallets whose longs (or shorts) liquidate in [from, to); `lev`: only those leverage bands (all three or none: every position). */
   liquidationWallets: (coin: string, venues: readonly Venue[], side: 'long' | 'short', from: number, to: number, signal?: AbortSignal, wallets: readonly string[] = [], lev: readonly string[] = []) =>
     unwrap<LiqWallets>(`/api/vs/liquidations/wallets${qs({ coin, venues: venues.join(','), side, from, to, wallets: wallets.length ? wallets.join(',') : undefined, lev: lev.length && lev.length < 3 ? lev.join(',') : undefined })}`, signal),
