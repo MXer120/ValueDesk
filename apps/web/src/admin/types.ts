@@ -77,7 +77,15 @@ export interface UserRow {
   builder: BuilderUser | null;
   activity: WalletActivity | null;
   ticket: number | null;
+  /** One of our own wallets (the builder's, the owner's test wallet). */
+  internal?: boolean;
 }
+
+/** The builder account's balances on SoDEX, in USD: what was put in, and the fees on top (routes/admin.ts). */
+export interface BuilderAccount { wallet: string; perps: number; spot: number; funded: number; at: number }
+
+/** Earned per the builder account: everything above what was put in; micro-USD for the page's formatters. */
+export const accountEarnedMicro = (a: BuilderAccount): number => Math.round((a.perps + a.spot - a.funded) * 1e6);
 
 export interface Count { key: string; n: number }
 

@@ -217,6 +217,9 @@ html, body { background: var(--bg); }
 .dv-modal__card h2 { margin: 0; color: var(--text); font-size: 14px; font-weight: 550; }
 .dv-modal__card p { margin: 0; color: var(--muted); font-size: 12px; }
 
+/* Our own wallets in the users list. */
+.dv-internal { margin-left: 8px; padding: 0 7px; border-radius: var(--radius-full); background: rgba(255, 255, 255, 0.08); color: var(--muted); font-family: var(--font-text); font-size: 11px; font-weight: 500; line-height: 18px; }
+
 /* The crash card (Crash.tsx). */
 .dv-crash__msg { margin: 0; color: var(--text); font-family: var(--font-num); font-size: 13px; overflow-wrap: anywhere; }
 

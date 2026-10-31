@@ -2,14 +2,14 @@
 import { BarChart } from '../BarChart';
 import { ago, dayLabel, int, usd, usdShort, short } from '../format';
 import { Empty, Figure, Figures, Note, Page, Pill, Section, useAdmin } from '../ui';
-import type { AnalyticsSummary, BuilderOverview, EverythingStatus, TicketRow, UserRow } from '../types';
+import { accountEarnedMicro, type AnalyticsSummary, type BuilderAccount, type BuilderOverview, type EverythingStatus, type TicketRow, type UserRow } from '../types';
 
 const STATE_TONE = { up: 'pos', degraded: 'warn', down: 'neg', unknown: 'dim' } as const;
 const STATE_WORD = { up: 'Operational', degraded: 'Degraded', down: 'Down', unknown: 'No data' } as const;
 
 export function Overview() {
   const tickets = useAdmin<{ tickets: TicketRow[] }>('tickets', {}, 60_000);
-  const builder = useAdmin<{ builder: BuilderOverview | null }>('builder', { days: 30 }, 120_000);
+  const builder = useAdmin<{ builder: BuilderOverview | null; account?: BuilderAccount | null }>('builder', { days: 30 }, 120_000);
   const analytics = useAdmin<{ analytics: AnalyticsSummary | null }>('analytics', { days: 7 }, 60_000);
   const status = useAdmin<{ status: EverythingStatus | null }>('status', {}, 60_000);
   const users = useAdmin<{ users: UserRow[] }>('users', {}, 120_000);
@@ -18,6 +18,7 @@ export function Overview() {
   const open = all.filter((t) => t.status === 'open');
   const b = builder.data?.builder;
   const a = analytics.data?.analytics?.totals;
+  const acct = builder.data?.account ?? null;
   const s = status.data?.status;
   const services = s && s.report && !('error' in s.report) ? s.report.services ?? [] : [];
   const notUp = services.filter((x) => x.state !== 'up' && x.state !== 'unknown');
@@ -42,7 +43,7 @@ export function Overview() {
       {errors.length > 0 && <Section>{errors.map((e) => <Note key={e} kind="error">{e}</Note>)}</Section>}
       <Section>
         <Figures>
-          <Figure label="Builder fees, 7 days" value={b ? usd(b.fees.d7) : '–'} sub={b ? `today ${usd(b.fees.d1)} · all time ${usd(b.fees.lifetime.perps + b.fees.lifetime.spot)}` : undefined} />
+          <Figure label="Builder fees earned" value={acct ? usd(accountEarnedMicro(acct)) : '–'} tone={acct ? 'pos' : undefined} sub={acct ? `builder account above its ${usd(acct.funded * 1e6)} start` : 'builder account not readable'} />
           <Figure label="Volume, 7 days" value={b ? usdShort(b.volume.d7) : '–'} sub={b ? `today ${usdShort(b.volume.d1)} · all time ${usdShort(b.volume.lifetime.perps + b.volume.lifetime.spot)}` : undefined} />
           <Figure label="Trading wallets, 7 days" value={b ? int(b.wallets.traded7d) : '–'} sub={b ? `${int(b.wallets.total)} on the builder ledger` : undefined} />
           <Figure label="Open tickets" value={<a href="#/tickets">{int(open.length)}</a>} tone={open.length ? 'warn' : undefined} sub={all.length ? `${int(all.length)} chat${all.length === 1 ? '' : 's'} in all` : 'no chat yet'} />

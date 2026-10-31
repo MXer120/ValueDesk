@@ -75,6 +75,8 @@ async function suite(o: Partial<AdminRouteOptions> & { password?: string | null;
   await app.register(adminRoutes, {
     store, feedback, passwordPath, admins: [admin.address], origins: [DEV], hosted: o.gate ?? false, limiter: new KeyedLimiter(),
     tell: async (t: string) => (told.push(t), told.length),
+    builderAccount: async () => null,
+    internal: [],
     ...o,
   });
   if (o.gate) {
@@ -307,7 +309,11 @@ test('builder numbers: counted volume, fees = notional x rate / 100 000, kept be
   });
   ledger.close();
   const cfg = validateTiers(testTiers(234812)).config!;
-  const s = await suite({ ledger: () => openLedger(ledgerPath), tiers: () => cfg, now: () => now });
+  const ours = '0x' + 'c'.repeat(40);
+  const s = await suite({
+    ledger: () => openLedger(ledgerPath), tiers: () => cfg, now: () => now, internal: [ours],
+    builderAccount: async () => ({ wallet: ours, perps: 105.0717, spot: 100, funded: 200, at: now }),
+  });
   const auth = await s.login();
   const b = (await s.post('/api/admin/builder', { days: 7 }, auth)).json().builder;
   // $10,000 at 1.5 bp = $1.50 = 1,500,000 micro-USD.
@@ -316,11 +322,16 @@ test('builder numbers: counted volume, fees = notional x rate / 100 000, kept be
   assert.deepEqual(b.fees.lifetime, { perps: 1_500_000, spot: 0 });
   assert.equal(b.wallets.total, 1);
   assert.equal(b.days.length, 7);
-  const users = (await s.post('/api/admin/users', {}, auth)).json().users as Array<{ address: string; builder: { fees: unknown; volume30d: number; signedFee: { perps: number } } }>;
+  // The builder account itself: every fee SoDEX credited, also on trades the ledger never saw.
+  assert.deepEqual((await s.post('/api/admin/builder', { days: 7 }, auth)).json().account, { wallet: ours, perps: 105.0717, spot: 100, funded: 200, at: now });
+  const all = (await s.post('/api/admin/users', {}, auth)).json().users as Array<{ address: string; internal: boolean; builder: { fees: unknown; volume30d: number; signedFee: { perps: number } } | null }>;
+  assert.deepEqual(all.find((u) => u.address === ours), { address: ours, builder: null, activity: null, ticket: null, internal: true }, 'our own wallet is listed, marked internal');
+  const users = all.filter((u) => !u.internal);
   assert.equal(users.length, 1);
-  assert.deepEqual(users[0]!.builder.fees, { perps: 1_500_000, spot: 0 });
-  assert.equal(users[0]!.builder.volume30d, 10_000_000_000);
-  assert.equal(users[0]!.builder.signedFee.perps, 15);
+  assert.deepEqual(users[0]!.builder!.fees, { perps: 1_500_000, spot: 0 });
+  assert.equal(users[0]!.builder!.volume30d, 10_000_000_000);
+  assert.equal(users[0]!.builder!.signedFee.perps, 15);
+  assert.equal(users[0]!.internal, false);
   // The ledger drops the order (its 2,000-row cap): the fees stay counted.
   const raw = new DatabaseSync(ledgerPath);
   raw.prepare('DELETE FROM orders').run();

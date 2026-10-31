@@ -44,8 +44,9 @@ import { FeedbackStore } from '../ops/feedbackThreads.js';
 import { IMAGE_TYPES } from '../ops/imageCheck.js';
 import type { AnalyticsStore } from '../ops/analytics.js';
 import type { TiersConfig } from '../builder/config.js';
+import { NET } from '../config.js';
 import {
-  ADMIN_SESSION_TTL_MS, adminBearer, adminOriginsFrom, adminPasswordPath, adminWalletsFrom, checkAdminAction, checkAdminSignIn,
+  ADMIN_SESSION_TTL_MS, BUILDER_WALLET, adminBearer, adminOriginsFrom, adminPasswordPath, adminWalletsFrom, checkAdminAction, checkAdminSignIn,
   newSessionToken, passwordIsSet, readPasswordHash, verifyPassword,
 } from '../admin/auth.js';
 import { AdminStore, TICKET_STATUSES, type TicketStatus } from '../admin/store.js';
@@ -95,6 +96,10 @@ export interface AdminRouteOptions {
   tell?: (text: string, replyTo?: number | null) => Promise<number | null>;
   limiter?: KeyedLimiter;
   limits?: AdminLimits;
+  /** The builder account's balances on SoDEX (tests); default a GET of the gateway, kept a minute. */
+  builderAccount?: () => Promise<BuilderAccount | null>;
+  /** Our own wallets: always listed, marked internal (VALUESCAN_ADMIN_INTERNAL_WALLETS). */
+  internal?: readonly string[];
   /** Copy the ledger's counted orders every FEE_SYNC_MS (off in tests). */
   syncTimer?: boolean;
   now?: () => number;
@@ -105,6 +110,52 @@ const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'obj
 const bodyOf = (req: FastifyRequest): Record<string, unknown> => (isRecord(req.body) ? req.body : {});
 const idOf = (v: unknown): number | null => (typeof v === 'number' && Number.isSafeInteger(v) && v > 0 ? v : null);
 
+/**
+ * What the builder account holds on SoDEX. Every builder fee is credited to it at once, on the
+ * engine of the fill (docs/BUILDER-CODES.md §5), so its balance above what was put in is what
+ * ValueDesk earned - ALL of it, also on the trades of wallets the ledger never counted (hosted
+ * copies, wallets that left no hint). The ledger's per-wallet fees are only that part.
+ */
+export interface BuilderAccount {
+  wallet: string;
+  perps: number;
+  spot: number;
+  /** What was put in (VALUESCAN_BUILDER_FUNDED_USD; 200 = 100 + 100 at the switch, 2026-10-28). */
+  funded: number;
+  at: number;
+}
+
+/** Our own wallets, lower case: the builder wallet and the owner's test wallet unless the env names others. */
+export function internalWalletsFrom(raw: string | undefined): string[] {
+  const v = (raw ?? '').trim();
+  const list = v ? v.split(',').map((x) => x.trim().toLowerCase()) : [BUILDER_WALLET, '0x04fb8f9d0d8cd5495aa47e81ca9804cdf32a277d'];
+  return list.filter((a) => /^0x[0-9a-f]{40}$/.test(a));
+}
+
+let accountCache: { at: number; value: BuilderAccount | null } | null = null;
+/** GET the builder account's vUSDC on both engines from SoDEX's public gateway; a minute's cache. */
+export async function liveBuilderAccount(builderId: number, wallet = BUILDER_WALLET, base = NET.restBase, now = Date.now()): Promise<BuilderAccount | null> {
+  if (accountCache && now - accountCache.at < 60_000) return accountCache.value;
+  const read = async (engine: 'perps' | 'spot'): Promise<number> => {
+    const r = await fetch(`${base}/api/v1/${engine}/accounts/${wallet}/balances?accountID=${builderId}`, { signal: AbortSignal.timeout(8_000), headers: { accept: 'application/json' } });
+    const j = (await r.json()) as { data?: { balances?: Array<{ coin?: string; total?: string }> } };
+    const row = j.data?.balances?.find((b) => b.coin === 'vUSDC');
+    const n = Number(row?.total);
+    if (!Number.isFinite(n)) throw new Error(`no vUSDC balance on ${engine}`);
+    return n;
+  };
+  let value: BuilderAccount | null = null;
+  try {
+    const [perps, spot] = await Promise.all([read('perps'), read('spot')]);
+    const funded = Number(process.env.VALUESCAN_BUILDER_FUNDED_USD?.trim() || 200);
+    value = { wallet, perps, spot, funded: Number.isFinite(funded) ? funded : 200, at: now };
+  } catch {
+    value = null;
+  }
+  accountCache = { at: now, value };
+  return value;
+}
+
 export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOptions = {}) {
   const now = opts.now ?? Date.now;
   const limiter = opts.limiter ?? new KeyedLimiter(5_000);
@@ -112,6 +163,7 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOptions 
   const admins = opts.admins ?? adminWalletsFrom(process.env.VALUESCAN_ADMIN_WALLETS);
   const origins = (opts.origins ?? adminOriginsFrom(process.env.VALUESCAN_ADMIN_ORIGINS)).map((o) => normaliseOrigin(o) ?? o);
   const passwordPath = opts.passwordPath ?? adminPasswordPath();
+  const internal = new Set(opts.internal ?? internalWalletsFrom(process.env.VALUESCAN_ADMIN_INTERNAL_WALLETS));
   const hosted = opts.hosted ?? false;
   const tell = opts.tell ?? ((text: string, replyTo?: number | null) => sendTelegramMessage(text, { replyTo: replyTo ?? null }));
   let storeOpen = opts.store ?? null;
@@ -332,7 +384,8 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOptions 
     const days = Math.max(7, Math.min(120, Number(bodyOf(req).days) || 30));
     const l = ledgerAndTiers();
     if (!l) return { ok: true, builder: null };
-    return { ok: true, builder: builderOverview(l.ledger, store(), l.cfg, now(), days), tiers: l.cfg.tiers, volumeDays: l.cfg.volumeDays };
+    const account = await (opts.builderAccount ?? (() => liveBuilderAccount(l.cfg.builderId)))().catch(() => null);
+    return { ok: true, builder: builderOverview(l.ledger, store(), l.cfg, now(), days), account, tiers: l.cfg.tiers, volumeDays: l.cfg.volumeDays };
   });
 
   app.post('/api/admin/users', { bodyLimit: 1024 }, async () => {
@@ -340,13 +393,14 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOptions 
     const builder = l ? builderUsers(l.ledger, store(), l.cfg, now()) : [];
     const activity = opts.analytics ? opts.analytics().walletActivity() : new Map();
     const chats = new Map(feedback().adminThreads().filter((t) => t.wallet).map((t) => [t.wallet!, t.id]));
-    const all = new Set<string>([...builder.map((u) => u.address), ...activity.keys(), ...chats.keys()]);
+    const all = new Set<string>([...builder.map((u) => u.address), ...activity.keys(), ...chats.keys(), ...internal]);
     const byAddress = new Map(builder.map((u) => [u.address, u]));
     const users = [...all].map((address) => ({
       address,
       builder: byAddress.get(address) ?? null,
       activity: activity.get(address) ?? null,
       ticket: chats.get(address) ?? null,
+      internal: internal.has(address),
     }));
     return { ok: true, users, builderId: l?.cfg.builderId ?? null };
   });

@@ -82,7 +82,7 @@ export function Users() {
           <Figure label="Wallets known" value={int(users.length)} sub={`builder ${r.data?.builderId ?? '–'}`} />
           <Figure label="Traded through ValueDesk" value={int(traded)} sub="counted builder volume above 0" />
           <Figure label="Volume, all wallets" value={usdShort(volume)} />
-          <Figure label="Builder fees paid" value={usd(fees)} />
+          <Figure label="Fees counted per wallet" value={usd(fees)} sub="ledger only - all income: Volume &amp; fees" />
         </Figures>
       </Section>
       <Section flush>
@@ -114,7 +114,7 @@ export function Users() {
                 const a = u.activity;
                 return (
                   <tr key={u.address}>
-                    <td className="dv-mono" title={u.address}>{short(u.address)}</td>
+                    <td className="dv-mono" title={u.address}>{short(u.address)}{u.internal && <span className="dv-internal">Internal</span>}</td>
                     <td className="right">{b?.accountId ?? '–'}</td>
                     <td className="right" title={b ? `perps ${usd(b.volume.perps)} · spot ${usd(b.volume.spot)}` : undefined}>{b ? usdShort(b.volume.perps + b.volume.spot) : '–'}</td>
                     <td className="right">{b ? usdShort(b.volume30d) : '–'}</td>
