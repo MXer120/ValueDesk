@@ -201,23 +201,36 @@ export const liqHeatTemplate: IndicatorTemplate<{ lo?: number; hi?: number }, un
       ctx.beginPath();
       ctx.rect(0, 0, bounding.width, bounding.height);
       ctx.clip();
-      for (let i = Math.max(0, range.realFrom); i < Math.min(list.length, range.realTo); i++) {
-        const k = list[i]!;
-        const at = snapshotFor(times, k.timestamp, barMs);
-        if (at < 0) continue;
-        const q = data.points[at]!;
-        const x = xAxis.convertTimestampToPixel(k.timestamp) - w / 2;
-        for (const r of q.b) {
-          const { v, bands } = cellOf(r, side, lev);
-          if (!(v > 0)) continue;
-          const col = byLev ? levHeatColor(v / scale, bands) : heatColor(v / scale);
-          if (!col) continue;
-          const top = yAxis.convertToPixel((r[0] + 1) * q.st);
-          const bot = yAxis.convertToPixel(r[0] * q.st);
-          if (bot < 0 || top > bounding.height) continue;
-          ctx.fillStyle = col;
-          ctx.fillRect(x, top, w, Math.max(1, bot - top));
+      // Whole pixels, edge to edge: cells at fractional x / y with translucent colours left a darker
+      // seam between every two columns (anti-aliased edges that do not add up to full cover) - the
+      // "vertical stripes" at every zoom (owner 2026-10-31). A column's edges are the midpoints
+      // between candle centres, rounded, so neighbours share one edge; the candles of one snapshot
+      // are one block (a 15-minute snapshot spans fifteen 1m candles).
+      const from = Math.max(0, range.realFrom);
+      const to = Math.min(list.length, range.realTo);
+      const cx = (i: number) => xAxis.convertTimestampToPixel(list[i]!.timestamp);
+      const edge = (i: number) => Math.round(i <= from ? cx(from) - w / 2 : i >= to ? cx(to - 1) + w / 2 : (cx(i - 1) + cx(i)) / 2);
+      for (let i = from; i < to;) {
+        const at = snapshotFor(times, list[i]!.timestamp, barMs);
+        let j = i + 1;
+        while (j < to && snapshotFor(times, list[j]!.timestamp, barMs) === at) j++;
+        if (at >= 0) {
+          const q = data.points[at]!;
+          const x0 = edge(i);
+          const x1 = edge(j);
+          for (const r of q.b) {
+            const { v, bands } = cellOf(r, side, lev);
+            if (!(v > 0)) continue;
+            const col = byLev ? levHeatColor(v / scale, bands) : heatColor(v / scale);
+            if (!col) continue;
+            const top = Math.round(yAxis.convertToPixel((r[0] + 1) * q.st));
+            const bot = Math.round(yAxis.convertToPixel(r[0] * q.st));
+            if (bot < 0 || top > bounding.height) continue;
+            ctx.fillStyle = col;
+            ctx.fillRect(x0, top, Math.max(1, x1 - x0), Math.max(1, bot - top));
+          }
         }
+        i = j;
       }
       ctx.restore();
     }
