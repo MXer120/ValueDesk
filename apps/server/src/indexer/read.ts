@@ -14,8 +14,8 @@ import type { CohortBookRow, CohortMemberRow, NetRow } from './store.js';
 import { IndexStore, type BoardRow, type HistoryKind } from './store.js';
 import { BOARD_SIZE, MIN_TRADES, windowStart, type BoardFilter, type Side } from './windows.js';
 import {
-  Aggregator, MARGIN_SIBLING, cohortsOf, filterKey, holdsPosition, longShare, perpEquity, scopeKey, scopeWalletSteps, walletRow,
-  type CohortSums,
+  Aggregator, MARGIN_SIBLING, TAIL_EQUITY, cohortsOf, filterKey, holdsPosition, longShare, netWallet, perpEquity, scopeKey, scopeWalletSteps, walletRow,
+  type CohortSums, type MarkOf,
   type CohortFocusResponse, type CohortMapResponse, type MapSector,
   type CohortDetailResponse, type CohortFilter, type CohortId, type CohortPoint, type CohortRange, type CohortWalletRow,
   type CohortWalletsResponse, type CohortsResponse, type NettedWallet, type Sector, type VenueCoverage, type WalletSort, type WalletVenue,
@@ -337,6 +337,8 @@ interface ExcludedBook {
 
 interface CohortLoad {
   at: number;
+  /** Which load this is (loadSteps counts them). */
+  gen: number;
   per: Map<Venue, Map<string, WalletVenue>>;
   marks: Map<string, number>;
   coverage: Partial<Record<Venue, VenueCoverage>>;
@@ -350,6 +352,8 @@ interface CohortLoad {
   scopes: Map<string, NettedWallet[]>;
   /** Every cohort's figures (and every holding wallet's) per set of venues and filter, likewise. */
   stats: Map<string, CohortSums>;
+  /** The rows kept between loads as this load left them; null for a load that keeps none (netted in full). */
+  state: CohortState | null;
 }
 
 /** What a rebuild nets and sums ahead: the sets and filters asked for lately. */
@@ -395,7 +399,117 @@ async function runBehind<T>(steps: Generator<void, T>): Promise<T> {
   }
 }
 
-/** A venue's rows, a page at a time, yielding between pages. */
+// --- keeping the load current ------------------------------------------------------
+//
+// INCREMENTAL (2026-10-31). Every load used to page all ~500k members and ~550k books out of
+// SQLite, build a WalletVenue for each and net every wallet again: 56% of the API's one thread
+// (profiled 18:19: paging ~19%, netting ~18%), the API at 96-133% of a core. The writer now
+// numbers every row it puts and every member it removes (store.ts COHORT_REV_SCHEMA), so a load
+// reads only what changed since the last one and keeps the rest:
+//   - the rows per venue stay in memory between loads (members, books, both in address order);
+//   - a WalletVenue is rebuilt only for an address whose member or book changed, or whose
+//     sibling book did (Hyperliquid / trade.xyz perp equity); every one of a venue's when its
+//     tail's counting rate flips (tailCountRate, kept from counters);
+//   - the per-venue maps are laid out again in the full load's order (members by address, then
+//     books with no member), reusing every WalletVenue that did not change: the heatmap and the
+//     sums iterate them, and a float sum depends on its order;
+//   - a set of venues re-nets only the addresses changed on one of its venues and the holders
+//     of a coin whose mark moved, and reuses every other netted wallet;
+//   - the sums (Aggregator) are redone over the netted list each load: summing in another order,
+//     or taking a wallet out of a float sum, would not give the full load's figures bit for bit.
+// The first load, one after a gap (tombstones pruned past it), a new sequence (a fresh or restored
+// file) or a failed load reads everything, as before. A file whose writer has no sequence yet
+// is always loaded in full. cohortsIncremental.test.ts checks every answer against a full load.
+
+/** One venue's rows and what was built from them, kept from load to load. */
+interface VenueRows {
+  members: Map<string, CohortMemberRow>;
+  books: Map<string, CohortBookRow>;
+  /** Member addresses, and book addresses, in the tables' (address) order: the full load's. */
+  memberOrder: string[];
+  bookOrder: string[];
+  /** Every address's WalletVenue except the excluded ones (internalWallets.ts). */
+  wv: Map<string, WalletVenue>;
+  /** tailOf over the members, kept per change; and the rate it gave. */
+  tail: { members: number; read: number };
+  rate: number;
+  /** symbol -> the addresses whose WalletVenue holds it: a mark that moves re-nets them. */
+  holders: Map<string, Set<string>>;
+}
+
+/** What the load keeps between loads (null: the next one is full). */
+interface CohortState {
+  epoch: string;
+  /** The write sequence's number the rows are current to. */
+  rev: number;
+  /** The load these rows built, and the one before (whose netted sets this one starts from). */
+  gen: number;
+  prevGen: number;
+  venues: Map<Venue, VenueRows>;
+  marks: Map<string, number>;
+  /** What this load changed: the addresses whose WalletVenue was rebuilt per venue, and the marks (`venue|symbol`) that moved. */
+  changed: Map<Venue, Set<string>>;
+  moved: Set<string>;
+  /** Netted wallets by address (the excluded ones too, listed in `out`), per set of venues, as of load `gen`. */
+  nets: Map<string, { gen: number; by: Map<string, NettedWallet>; out: Set<string> }>;
+}
+
+let cohortState: CohortState | null = null;
+/** Bumped by a reset: a load under way from before it keeps its rows to itself. */
+let stateToken = 0;
+let loadGen = 0;
+/** Counters for tests and diagnostics: loads read in full, and from what changed. */
+const loadKind = { full: 0, incremental: 0 };
+
+/** The order loadSteps builds venues in: Hyperliquid and trade.xyz wait for each other (model.ts perpEquity). */
+const BUILD_ORDER: readonly Venue[] = (() => {
+  const out: Venue[] = [];
+  const seen = new Set<Venue>();
+  for (const v of VENUES) {
+    seen.add(v);
+    const sib = MARGIN_SIBLING[v];
+    if (sib && !seen.has(sib)) continue;
+    out.push(v);
+    if (sib) out.push(sib);
+  }
+  return out;
+})();
+
+const byAddress = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+
+/** tailOf's share of one address: [member in the tail, and read]. */
+function tailPart(r: VenueRows, address: string): [number, number] {
+  const m = r.members.get(address);
+  if (!m || (m.equity ?? 0) >= TAIL_EQUITY) return [0, 0];
+  return [1, r.books.has(address) ? 1 : 0];
+}
+
+/** An address's WalletVenue on a venue as the full load builds it; undefined when it has no row there or is excluded. */
+function walletVenue(venue: Venue, r: VenueRows, sib: VenueRows | undefined, address: string): WalletVenue | undefined {
+  if (isExcluded(venue, address)) return undefined;
+  const mem = r.members.get(address);
+  const b = r.books.get(address);
+  if (!mem && !b) return undefined;
+  return sampledVenue(r.rate, address, mem && {
+    pnl: mem.pnl, equity: mem.equity, label: mem.label,
+    pnlRange: { '1d': mem.pnl1d ?? null, '7d': mem.pnl7d ?? null, '30d': mem.pnl30d ?? null },
+  }, b, perpEquity(venue, b, sib?.books.get(address)));
+}
+
+/** Put an address's new WalletVenue (or none) in place, keeping the holders index. */
+function setWallet(r: VenueRows, address: string, w: WalletVenue | undefined): void {
+  const old = r.wv.get(address);
+  for (const p of old?.positions ?? []) r.holders.get(p.symbol)?.delete(address);
+  if (!w) { r.wv.delete(address); return; }
+  r.wv.set(address, w);
+  for (const p of w.positions ?? []) {
+    let set = r.holders.get(p.symbol);
+    if (!set) { set = new Set(); r.holders.set(p.symbol, set); }
+    set.add(address);
+  }
+}
+
+/** A venue's rows, a page at a time, yielding between pages (the full read). */
 function* paged<V>(read: (after: string, limit: number) => Array<[string, V]>, into: Map<string, V>): Generator<void, void> {
   for (let after = ''; ;) {
     const page = read(after, LOAD_PAGE);
@@ -406,16 +520,280 @@ function* paged<V>(read: (after: string, limit: number) => Array<[string, V]>, i
   }
 }
 
+/** Every venue's rows read in full, and every WalletVenue built from them. */
+function* readAll(s: IndexStore): Generator<void, Map<Venue, VenueRows>> {
+  const venues = new Map<Venue, VenueRows>();
+  for (const venue of VENUES) {
+    const members = new Map<string, CohortMemberRow>();
+    yield* paged((after, limit) => s.cohortMembersPage(venue, after, limit).map((r): [string, CohortMemberRow] => [r.address, r]), members);
+    const books = new Map<string, CohortBookRow>();
+    yield* paged((after, limit) => s.cohortBooksPage(venue, after, limit), books);
+    // A tail still being read in full counts as its old sample until (nearly) all of it is (cohortTracker tailCountRate).
+    const tail = tailOf(members, (a) => books.has(a));
+    venues.set(venue, {
+      members, books, memberOrder: [...members.keys()], bookOrder: [...books.keys()],
+      wv: new Map(), tail, rate: tailCountRate(venue, tail), holders: new Map(),
+    });
+  }
+  for (const venue of BUILD_ORDER) {
+    const r = venues.get(venue)!;
+    const sib = MARGIN_SIBLING[venue] ? venues.get(MARGIN_SIBLING[venue]!) : undefined;
+    let n = 0;
+    for (const address of r.memberOrder) {
+      setWallet(r, address, walletVenue(venue, r, sib, address));
+      if (++n % 2_000 === 0) yield;
+    }
+    for (const address of r.bookOrder) {
+      if (r.members.has(address)) continue;
+      setWallet(r, address, walletVenue(venue, r, sib, address));
+      if (++n % 2_000 === 0) yield;
+    }
+  }
+  return venues;
+}
+
+/**
+ * What changed since `st.rev` (up to `upTo`, which the writer had committed before any of this was
+ * read), applied to `st` in place. Rows and tombstones of a venue are applied in write order: a
+ * member removed and back, or back and removed, ends as the last write left it. A row rewritten
+ * after `upTo` is skipped here and read by the next load with its new number. Returns, per venue,
+ * the addresses whose WalletVenue was rebuilt.
+ */
+function* readChanges(s: IndexStore, st: CohortState, upTo: number): Generator<void, Map<Venue, Set<string>>> {
+  const touchedBooks = new Map<Venue, Set<string>>();
+  const touched = new Map<Venue, Set<string>>();
+  for (const venue of VENUES) {
+    const r = st.venues.get(venue)!;
+    type Ev = { rev: number; address: string; member?: CohortMemberRow; book?: CohortBookRow; tomb?: 'm' | 'b' };
+    const evs: Ev[] = [];
+    for (let after = st.rev; ;) {
+      const page = s.cohortMembersSince(venue, after, upTo, LOAD_PAGE);
+      for (const x of page) evs.push({ rev: x.rev, address: x.row.address, member: x.row });
+      yield;
+      if (page.length < LOAD_PAGE) break;
+      after = page[page.length - 1]!.rev;
+    }
+    for (let after = st.rev; ;) {
+      const page = s.cohortBooksSince(venue, after, upTo, LOAD_PAGE);
+      for (const x of page) evs.push({ rev: x.rev, address: x.address, book: x.row });
+      yield;
+      if (page.length < LOAD_PAGE) break;
+      after = page[page.length - 1]!.rev;
+    }
+    for (const t of s.cohortTombsSince(venue, st.rev, upTo)) evs.push({ rev: t.rev, address: t.address, tomb: t.kind });
+    if (!evs.length) continue;
+    evs.sort((a, b) => a.rev - b.rev);
+    // Each address as it was before (its presence and its share of the tail), then the writes.
+    const was = new Map<string, { member: boolean; book: boolean }>();
+    const books = new Set<string>();
+    for (const e of evs) {
+      if (!was.has(e.address)) {
+        was.set(e.address, { member: r.members.has(e.address), book: r.books.has(e.address) });
+        const [n, read] = tailPart(r, e.address);
+        r.tail.members -= n;
+        r.tail.read -= read;
+      }
+      if (e.member) r.members.set(e.address, e.member);
+      else if (e.book) { r.books.set(e.address, e.book); books.add(e.address); }
+      else if (e.tomb === 'm') r.members.delete(e.address);
+      else if (e.tomb === 'b') { r.books.delete(e.address); books.add(e.address); }
+    }
+    const addM: string[] = [];
+    const addB: string[] = [];
+    const dropM = new Set<string>();
+    const dropB = new Set<string>();
+    for (const [address, w] of was) {
+      const [n, read] = tailPart(r, address);
+      r.tail.members += n;
+      r.tail.read += read;
+      const m = r.members.has(address);
+      const b = r.books.has(address);
+      if (m && !w.member) addM.push(address);
+      if (!m && w.member) dropM.add(address);
+      if (b && !w.book) addB.push(address);
+      if (!b && w.book) dropB.add(address);
+    }
+    r.memberOrder = reorder(r.memberOrder, addM, dropM);
+    r.bookOrder = reorder(r.bookOrder, addB, dropB);
+    touched.set(venue, new Set(was.keys()));
+    touchedBooks.set(venue, books);
+    yield;
+  }
+  // The WalletVenues to build again: every address written on the venue, and every one whose
+  // sibling book was (its perp equity reads both); all of a venue's when its tail's rate flipped.
+  const changed = new Map<Venue, Set<string>>();
+  for (const venue of BUILD_ORDER) {
+    const r = st.venues.get(venue)!;
+    const sibV = MARGIN_SIBLING[venue];
+    const sib = sibV ? st.venues.get(sibV) : undefined;
+    const rate = tailCountRate(venue, r.tail);
+    let dirty: Set<string>;
+    if (rate !== r.rate) {
+      r.rate = rate;
+      dirty = new Set([...r.wv.keys(), ...(touched.get(venue) ?? [])]);
+    } else {
+      dirty = new Set(touched.get(venue) ?? []);
+      for (const a of (sibV && touchedBooks.get(sibV)) || []) dirty.add(a);
+    }
+    let n = 0;
+    for (const address of dirty) {
+      setWallet(r, address, walletVenue(venue, r, sib, address));
+      if (++n % 2_000 === 0) yield;
+    }
+    changed.set(venue, dirty);
+  }
+  return changed;
+}
+
+/** A sorted address list without `drop`, with `add` merged in (one pass; `add` is a few thousand at most). */
+function reorder(order: string[], add: string[], drop: ReadonlySet<string>): string[] {
+  if (!add.length && !drop.size) return order;
+  const kept = drop.size ? order.filter((a) => !drop.has(a)) : order;
+  if (!add.length) return kept;
+  add.sort(byAddress);
+  const out: string[] = new Array(kept.length + add.length);
+  let i = 0;
+  let j = 0;
+  let k = 0;
+  while (i < kept.length && j < add.length) out[k++] = byAddress(kept[i]!, add[j]!) <= 0 ? kept[i++]! : add[j++]!;
+  while (i < kept.length) out[k++] = kept[i++]!;
+  while (j < add.length) out[k++] = add[j++]!;
+  return out;
+}
+
+/**
+ * The load's per-venue maps, coverage, newest book and excluded wallets from the rows, in the
+ * full load's order: venues as BUILD_ORDER, each venue's members by address, then its books with
+ * no member (a Set of members' keys then books' keys, as the full load iterated them).
+ */
+function* layOut(venues: ReadonlyMap<Venue, VenueRows>): Generator<void, Pick<CohortLoad, 'per' | 'coverage' | 'booksAt' | 'internal' | 'excluded'>> {
+  const per = new Map<Venue, Map<string, WalletVenue>>();
+  const coverage: Partial<Record<Venue, VenueCoverage>> = {};
+  let booksAt = 0;
+  const internal = new Map<string, number>();
+  const excluded = new Map<string, ExcludedBook>();
+  for (const venue of BUILD_ORDER) {
+    const r = venues.get(venue)!;
+    const m = new Map<string, WalletVenue>();
+    let covered = 0;
+    let n = 0;
+    const visit = (address: string): void => {
+      const w = r.wv.get(address);
+      if (!w) {
+        // An excluded wallet (internalWallets.ts: a venue's own account, a hedged desk) is neither in a cohort
+        // nor on the map; what it holds is taken off the venue's open interest the map's coverage is measured
+        // against (internalOiNow), and its book is kept for the page that lists it (excludedNow).
+        const b = r.books.get(address);
+        if (b) excluded.set(`${venue}|${address}`, { equity: b.equity, positions: b.positions, at: b.at });
+        for (const p of b?.positions ?? []) {
+          const k = `${venue}|${liqCoin(p.symbol)}`;
+          internal.set(k, (internal.get(k) ?? 0) + Math.abs(p.szi) / 2);
+        }
+        return;
+      }
+      // Covered = wallets whose positions count (a read tail wallet outside the sample does not).
+      if (w.positions) { covered++; booksAt = Math.max(booksAt, w.at); }
+      m.set(address, w);
+    };
+    for (const address of r.memberOrder) {
+      visit(address);
+      if (++n % 5_000 === 0) yield;
+    }
+    for (const address of r.bookOrder) {
+      if (r.members.has(address)) continue;
+      visit(address);
+      if (++n % 5_000 === 0) yield;
+    }
+    per.set(venue, m);
+    coverage[venue] = { members: m.size, covered };
+    yield;
+  }
+  return { per, coverage, booksAt, internal, excluded };
+}
+
+/** The `venue|symbol` marks that differ between two reads. */
+function movedMarks(was: ReadonlyMap<string, number>, now: ReadonlyMap<string, number>): Set<string> {
+  const out = new Set<string>();
+  for (const [k, px] of now) if (was.get(k) !== px) out.add(k);
+  for (const k of was.keys()) if (!now.has(k)) out.add(k);
+  return out;
+}
+
 /** The wallets of a set of venues, netted (kept on the load). */
 function* netSteps(load: CohortLoad, venues: readonly Venue[]): Generator<void, NettedWallet[]> {
   const key = scopeKey(venues);
   const hit = load.scopes.get(key);
   if (hit) return hit;
   const mark = (v: Venue, sym: string) => load.marks.get(`${v}|${sym}`) ?? null;
-  // Hedged desks hold books (the heatmap prices them) but no cohort counts them (internalWallets.ts).
-  const wallets = (yield* scopeWalletSteps(venues, load.per, mark)).filter((w) => !outOfCohorts(venues, w.address));
+  const st = load.state;
+  const prev = st?.nets.get(key);
+  let wallets: NettedWallet[];
+  if (st && prev && prev.gen === st.prevGen && st.gen === load.gen) {
+    wallets = yield* renet(load, st, venues, prev, mark);
+    prev.gen = load.gen;
+  } else {
+    const all = yield* scopeWalletSteps(venues, load.per, mark);
+    // Hedged desks hold books (the heatmap prices them) but no cohort counts them (internalWallets.ts).
+    const out = new Set<string>();
+    wallets = all.filter((w) => !(outOfCohorts(venues, w.address) && out.add(w.address)));
+    // Kept for the next load to start from: only while these rows are the newest (a request on the
+    // load in use while the next one is read nets from it in full, and keeps nothing).
+    if (st && st.gen === load.gen && cohortState === st) {
+      const by = new Map<string, NettedWallet>();
+      for (const w of all) by.set(w.address, w);
+      st.nets.set(key, { gen: load.gen, by, out });
+    }
+  }
   load.scopes.set(key, wallets);
   return wallets;
+}
+
+/**
+ * A set of venues netted again from the last load's: the addresses whose WalletVenue was rebuilt
+ * on one of its venues, and the holders of a coin whose mark moved, are netted anew; every other
+ * wallet is the very object netted last time. In scopeWalletSteps' order, the excluded taken out
+ * as netSteps does (whether an address is out never changes: asked once, when it is first netted;
+ * asked for every wallet of every set it was 7% of a load, a lower-casing per address and venue).
+ */
+function* renet(
+  load: CohortLoad, st: CohortState, venues: readonly Venue[], net: { by: Map<string, NettedWallet>; out: Set<string> }, mark: MarkOf,
+): Generator<void, NettedWallet[]> {
+  const { by, out } = net;
+  const inScope = new Set<Venue>(venues);
+  for (const v of venues) for (const a of st.changed.get(v) ?? []) by.delete(a);
+  for (const k of st.moved) {
+    const i = k.indexOf('|');
+    const v = k.slice(0, i) as Venue;
+    if (!inScope.has(v)) continue;
+    for (const a of st.venues.get(v)?.holders.get(k.slice(i + 1)) ?? []) by.delete(a);
+  }
+  yield;
+  const maps = venues.map((v) => load.per.get(v));
+  const list: NettedWallet[] = [];
+  let n = 0;
+  for (let i = 0; i < maps.length; i++) {
+    const m = maps[i];
+    if (!m) continue;
+    for (const address of m.keys()) {
+      let first = true;
+      for (let j = 0; j < i; j++) if (maps[j]?.has(address)) { first = false; break; }
+      if (!first) continue;
+      let w = by.get(address);
+      if (!w) {
+        const mine = new Map<Venue, WalletVenue>();
+        for (let j = 0; j < venues.length; j++) {
+          const x = maps[j]?.get(address);
+          if (x) mine.set(venues[j]!, x);
+        }
+        w = netWallet(address, mine, mark);
+        by.set(address, w);
+        if (outOfCohorts(venues, address)) out.add(address);
+      }
+      if (!out.size || !out.has(address)) list.push(w);
+      if (++n % 5_000 === 0) yield;
+    }
+  }
+  return list;
 }
 
 /** Every cohort's figures for a set of venues under a filter (kept on the load). */
@@ -436,68 +814,54 @@ function* sumSteps(load: CohortLoad, venues: readonly Venue[], f: CohortFilter):
   return stats;
 }
 
-/** One load, read and (for `ahead`) netted and summed, in steps. */
-function* loadSteps(s: IndexStore, now: number, ahead: ReadonlyArray<{ venues: readonly Venue[]; filters: readonly CohortFilter[] }>): Generator<void, CohortLoad> {
-  const per = new Map<Venue, Map<string, WalletVenue>>();
-  const coverage: Partial<Record<Venue, VenueCoverage>> = {};
-  let booksAt = 0;
-  const internal = new Map<string, number>();
-  const excluded = new Map<string, ExcludedBook>();
-  // A venue's rows, kept until it is built; Hyperliquid and trade.xyz wait for
-  // each other (their perp equity reads both books: model.ts perpEquity).
-  const raw = new Map<Venue, { members: Map<string, CohortMemberRow>; books: Map<string, CohortBookRow> }>();
-  const build = function* (venue: Venue): Generator<void, void> {
-    const { members, books } = raw.get(venue)!;
-    const sib = MARGIN_SIBLING[venue];
-    const sibBooks = sib ? raw.get(sib)?.books : undefined;
-    const m = new Map<string, WalletVenue>();
-    let covered = 0;
-    // A tail still being read in full counts as its old sample until (nearly) all of it is (cohortTracker tailCountRate).
-    const rate = tailCountRate(venue, tailOf(members, (a) => books.has(a)));
-    for (const address of new Set([...members.keys(), ...books.keys()])) {
-      // An excluded wallet (internalWallets.ts: a venue's own account, a hedged desk) is neither in a cohort
-      // nor on the map; what it holds is taken off the venue's open interest the map's coverage is measured
-      // against (internalOiNow), and its book is kept for the page that lists it (excludedNow).
-      if (isExcluded(venue, address)) {
-        const b = books.get(address);
-        if (b) excluded.set(`${venue}|${address}`, { equity: b.equity, positions: b.positions, at: b.at });
-        for (const p of books.get(address)?.positions ?? []) {
-          const k = `${venue}|${liqCoin(p.symbol)}`;
-          internal.set(k, (internal.get(k) ?? 0) + Math.abs(p.szi) / 2);
-        }
-        continue;
-      }
-      const mem = members.get(address);
-      const b = books.get(address);
-      const w = sampledVenue(rate, address, mem && {
-        pnl: mem.pnl, equity: mem.equity, label: mem.label,
-        pnlRange: { '1d': mem.pnl1d ?? null, '7d': mem.pnl7d ?? null, '30d': mem.pnl30d ?? null },
-      }, b, perpEquity(venue, b, sibBooks?.get(address)));
-      // Covered = wallets whose positions count (a read tail wallet outside the sample does not).
-      if (w.positions) { covered++; booksAt = Math.max(booksAt, b!.at); }
-      m.set(address, w);
-      if (m.size % 2_000 === 0) yield;
+/**
+ * One load, read and (for `ahead`) netted and summed, in steps. From what changed since the last
+ * one when that is known (see INCREMENTAL above); `keep` false reads in full and leaves the rows
+ * kept between loads alone (a build in place while one from behind is under way).
+ */
+function* loadSteps(
+  s: IndexStore, now: number, ahead: ReadonlyArray<{ venues: readonly Venue[]; filters: readonly CohortFilter[] }>, keep = true,
+): Generator<void, CohortLoad> {
+  const token = stateToken;
+  const seq = keep ? s.cohortRevState() : null;
+  const was = keep ? cohortState : null;
+  const gen = ++loadGen;
+  let venues: Map<Venue, VenueRows>;
+  let marks: Map<string, number>;
+  let st: CohortState | null = null;
+  if (seq && was && was.epoch === seq.epoch && seq.rev >= was.rev && was.rev >= seq.floor) {
+    try {
+      const changed = yield* readChanges(s, was, seq.rev);
+      marks = s.cohortMarks();
+      was.moved = movedMarks(was.marks, marks);
+      was.marks = marks;
+      was.changed = changed;
+      was.rev = seq.rev;
+      was.prevGen = was.gen;
+      was.gen = gen;
+      // Netted sets the last load did not keep are of no use any more.
+      for (const [k, n] of was.nets) if (n.gen !== was.prevGen) was.nets.delete(k);
+    } catch (e) {
+      // Half applied: the next load reads everything.
+      if (token === stateToken) cohortState = null;
+      throw e;
     }
-    per.set(venue, m);
-    coverage[venue] = { members: m.size, covered };
-    yield;
-  };
-  for (const venue of VENUES) {
-    const members = new Map<string, CohortMemberRow>();
-    yield* paged((after, limit) => s.cohortMembersPage(venue, after, limit).map((r): [string, CohortMemberRow] => [r.address, r]), members);
-    const books = new Map<string, CohortBookRow>();
-    yield* paged((after, limit) => s.cohortBooksPage(venue, after, limit), books);
-    raw.set(venue, { members, books });
-    const sib = MARGIN_SIBLING[venue];
-    if (sib && !raw.has(sib)) continue;
-    yield* build(venue);
-    if (sib) {
-      yield* build(sib);
-      raw.delete(sib);
-    }
-    raw.delete(venue);
+    st = was;
+    venues = was.venues;
+    loadKind.incremental++;
+  } else {
+    // In full. The sequence's number was read first: a row written while the pages are read is
+    // read again by the next load, which is harmless; one missed is not possible. A file with no
+    // sequence yet (an indexer from before it) keeps nothing: every load is full.
+    venues = yield* readAll(s);
+    marks = s.cohortMarks();
+    if (seq) st = { epoch: seq.epoch, rev: seq.rev, gen, prevGen: -1, venues, marks, changed: new Map(), moved: new Set(), nets: new Map() };
+    loadKind.full++;
   }
-  const load: CohortLoad = { at: now, per, marks: s.cohortMarks(), coverage, booksAt, internal, excluded, scopes: new Map(), stats: new Map() };
+  const laid = yield* layOut(venues);
+  if (keep && token === stateToken) cohortState = st;
+  else st = null;
+  const load: CohortLoad = { at: now, gen, ...laid, marks, scopes: new Map(), stats: new Map(), state: st };
   for (const a of ahead) {
     yield* netSteps(load, a.venues);
     for (const f of a.filters) yield* sumSteps(load, a.venues, f);
@@ -573,7 +937,9 @@ async function rebuildBehind(s: IndexStore): Promise<void> {
     built.behind++;
     lastRebuildMs = Date.now() - started;
   } catch {
-    // The load in use stays; once it expires a read builds one in place.
+    // The load in use stays; once it expires a read builds one in place. The rows kept between
+    // loads may be half way through a change: the next load reads everything.
+    cohortState = null;
     rebuildFailedAt = Date.now();
   } finally {
     rebuilding = false;
@@ -588,7 +954,9 @@ function loadCohorts(s: IndexStore): CohortLoad {
   // Nothing to answer from yet (this process has not built one, and the warm-up
   // at start has not finished): build it here.
   if (!cohortLoad) {
-    cohortLoad = runNow(loadSteps(s, now, []));
+    // While a rebuild from behind is half way through the rows kept between loads, this one reads
+    // its own (in full) and leaves them to it.
+    cohortLoad = runNow(loadSteps(s, now, [], !rebuilding));
     built.inPlace++;
   } else if (now - cohortLoad.at >= LOAD_TTL_MS && !rebuilding) {
     // It expired while nobody was asking (the rebuilds stop then). Building it
@@ -635,6 +1003,36 @@ function statsOf(load: CohortLoad, venues: readonly Venue[], f: CohortFilter): C
 /** Tests: the cohort load's state, a rebuild from behind on demand, and a clean slate. */
 export const _cohortLoad = {
   built,
+  /** Loads read in full and from what changed (cohortsIncremental.test.ts). */
+  kind: loadKind,
+  /**
+   * Run `fn` with a load read in full from the file in place of the load in use (the rows kept
+   * between loads untouched), then put the load in use back: every answer `fn` reads is a full load's.
+   */
+  withFull: <T>(fn: () => T): T => {
+    const s = reader();
+    if (!s) throw new Error('no index');
+    const was = cohortLoad;
+    cohortLoad = runNow(loadSteps(s, Date.now(), [], false));
+    try {
+      return fn();
+    } finally {
+      cohortLoad = was;
+    }
+  },
+  /** Drop the rows kept between loads: the next load reads everything (as after a gap). */
+  forget: (): void => { cohortState = null; stateToken++; },
+  /** The load in use as plain data (per venue maps with their order, and the netted wallets of `scopes`). */
+  dump: (scopes: ReadonlyArray<readonly Venue[]> = []) => {
+    const load = cohortLoad;
+    if (!load) return null;
+    return {
+      per: [...load.per].map(([v, m]) => [v, [...m]]),
+      coverage: load.coverage, booksAt: load.booksAt, marks: [...load.marks],
+      internal: [...load.internal], excluded: [...load.excluded],
+      scopes: scopes.map((v) => runNow(netSteps(load, v))),
+    };
+  },
   state: () => ({ at: cohortLoad?.at ?? 0, rebuilding, armed: rebuildTimer !== null, scopes: [...(cohortLoad?.scopes.keys() ?? [])], stats: [...(cohortLoad?.stats.keys() ?? [])] }),
   /** Run the rebuild the timer would start, now; resolves when it has been swapped in. */
   rebuild: async (): Promise<void> => {
@@ -653,6 +1051,10 @@ export const _cohortLoad = {
     if (rebuildTimer) clearTimeout(rebuildTimer);
     rebuildTimer = null;
     cohortLoad = null;
+    cohortState = null;
+    stateToken++;
+    loadKind.full = 0;
+    loadKind.incremental = 0;
     wanted.clear();
     warmKey = null;
     lastAsked = 0;

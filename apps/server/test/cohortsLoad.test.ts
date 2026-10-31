@@ -239,12 +239,16 @@ test('a read during a rebuild is answered from the load in use, expired or not',
 test('a rebuild that fails leaves the load in use and waits before it tries again', async () => {
   _cohortLoad.reset();
   const before = cohortsRead(TWO, NONE);
+  // Both readers: the full one, and the one a load kept current reads what changed with (2026-10-31).
   const real = IndexStore.prototype.cohortMembersPage;
+  const realSince = IndexStore.prototype.cohortMembersSince;
   IndexStore.prototype.cohortMembersPage = () => { throw new Error('disk I/O error'); };
+  IndexStore.prototype.cohortMembersSince = () => { throw new Error('disk I/O error'); };
   try {
     await _cohortLoad.rebuild();
   } finally {
     IndexStore.prototype.cohortMembersPage = real;
+    IndexStore.prototype.cohortMembersSince = realSince;
   }
   assert.deepEqual(_cohortLoad.built, { inPlace: 1, behind: 0 });
   assert.equal(_cohortLoad.state().rebuilding, false);
@@ -287,6 +291,7 @@ test('a load within STALE_MAX_MS answers at once; a rebuild that outlasts the wa
   await cohortsReady();
   assert.deepEqual(_cohortLoad.built, { inPlace: 1, behind: 0 }, 'young enough: nothing rebuilt');
   _cohortLoad.age(KEEP_WARM_MS + STALE_MAX_MS);
+  _cohortLoad.forget(); // a full read (a load kept current from what changed is done before any wait)
   const t0 = Date.now();
   await cohortsReady(0); // a wait of nothing: answers from the load in use, a rebuild under way
   assert.ok(Date.now() - t0 < 1_000);
@@ -326,6 +331,7 @@ test('a rebuild from behind lets other work run: no gap near the time the whole 
     ticks++;
   }, 1);
   last = performance.now();
+  _cohortLoad.forget(); // the whole build, as the first load (or one after a gap) does it
   const t1 = performance.now();
   await _cohortLoad.rebuild();
   const behindMs = performance.now() - t1;

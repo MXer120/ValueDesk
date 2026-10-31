@@ -470,6 +470,52 @@ const ADDED_COLUMNS: ReadonlyArray<[string, string, string]> = [
 const SCHEMA_TABLES: readonly string[] = [...SCHEMA.matchAll(/CREATE TABLE IF NOT EXISTS (\w+)/g)].map((m) => m[1]!);
 
 /**
+ * THE COHORT TABLES' WRITE SEQUENCE (2026-10-31). Every row put into cohort_member or cohort_book
+ * carries `rev`, one number counted up over both tables (meta COHORT_REV_META), and every member
+ * removed leaves a tombstone with the next number (cohort_tomb). So the API reads only what changed
+ * since its last load (indexer/read.ts) instead of paging all ~1M rows out every minute: that load was
+ * 56% of the API's thread on 2026-10-31 and held it at 96-133% of a core.
+ *
+ * Kept apart from SCHEMA / ADDED_COLUMNS on purpose: those gate schemaReady, and an API started
+ * before the indexer has migrated would read "no index" until it had. A reader finds the sequence
+ * by its epoch in meta instead (cohortRevState) and loads in full until it is there.
+ *
+ * ALTER TABLE ... ADD COLUMN with a constant default rewrites nothing (SQLite keeps the default in
+ * the schema); the two indexes are one pass over each table at the first start.
+ */
+const COHORT_REV_META = 'cohort_rev';
+/** A new number whenever the sequence starts over (a fresh file, a restored one): a reader then loads in full. */
+const COHORT_REV_EPOCH_META = 'cohort_rev_epoch';
+/** The newest tombstone pruned: a reader whose last load is older has missed removals and loads in full. */
+const COHORT_TOMB_FLOOR_META = 'cohort_tomb_floor';
+/** Tombstones are kept this long: the API loads every minute, so an hour is sixty loads of margin. */
+export const COHORT_TOMB_KEEP_MS = 60 * 60_000;
+const COHORT_REV_SCHEMA = `
+CREATE TABLE IF NOT EXISTS cohort_tomb (
+  venue TEXT NOT NULL, kind TEXT NOT NULL, address TEXT NOT NULL, rev INTEGER NOT NULL, at INTEGER NOT NULL,
+  PRIMARY KEY (venue, kind, address)) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS cohort_tomb_rev ON cohort_tomb (venue, rev);
+CREATE INDEX IF NOT EXISTS cohort_member_rev ON cohort_member (venue, rev);
+CREATE INDEX IF NOT EXISTS cohort_book_rev ON cohort_book (venue, rev);
+`;
+
+/** Where the cohort tables' write sequence stands (cohortRevState). */
+export interface CohortRevState {
+  /** The last number handed out: every row and tombstone up to it is committed. */
+  rev: number;
+  /** Tombstones up to this number are pruned. */
+  floor: number;
+  epoch: string;
+}
+
+/** A tombstone: `kind` 'm' a member row removed, 'b' a book row (none are removed yet). */
+export interface CohortTomb {
+  kind: 'm' | 'b';
+  address: string;
+  rev: number;
+}
+
+/**
  * The close definition the day aggregates were built with (valuedesk/winRate.ts).
  *   1 (none recorded)  one close per order id
  *   2                  runs of reducing fills
@@ -793,6 +839,7 @@ export class IndexStore {
       this.db.exec(`PRAGMA journal_size_limit = ${WAL_LIMIT_BYTES}`);
       this.db.exec(SCHEMA);
       this.addColumns();
+      this.addCohortRevs();
       this.setMeta('schema', String(SCHEMA_VERSION));
       // 2026-09-28: Arcus fills were stored with the fee inside closedPnl. Re-read them.
       if (this.getMeta('arcus_gross_pnl') !== '1') {
@@ -860,6 +907,84 @@ export class IndexStore {
         if (!/duplicate column/i.test(String(e))) throw e;
       }
     }
+  }
+
+  /** The cohort tables' write sequence (COHORT_REV_SCHEMA; the writer only). */
+  private addCohortRevs(): void {
+    for (const table of ['cohort_member', 'cohort_book']) {
+      const cols = this.db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+      if (cols.some((c) => c.name === 'rev')) continue;
+      try {
+        this.db.exec(`ALTER TABLE ${table} ADD COLUMN rev INTEGER NOT NULL DEFAULT 0`);
+      } catch (e) {
+        if (!/duplicate column/i.test(String(e))) throw e;
+      }
+    }
+    this.db.exec(COHORT_REV_SCHEMA);
+    this.tx(() => {
+      if (this.getMeta(COHORT_REV_EPOCH_META) && this.getMeta(COHORT_REV_META) !== null) return;
+      // Starting over: from above anything a row already carries (a file restored with its revs).
+      const top = this.db.prepare(`SELECT MAX(m) AS m FROM (SELECT MAX(rev) AS m FROM cohort_member UNION ALL SELECT MAX(rev) FROM cohort_book
+        UNION ALL SELECT MAX(rev) FROM cohort_tomb)`).get() as { m?: number | null } | undefined;
+      this.setMeta(COHORT_REV_META, String(Number(top?.m) || 0));
+      this.setMeta(COHORT_REV_EPOCH_META, `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`);
+    });
+  }
+
+  /**
+   * `n` numbers of the write sequence, the first returned; inside the caller's transaction. Read from
+   * meta and written back each time rather than held in memory: a second writer on the file (a test's,
+   * compact.ts) or a restored file would otherwise hand out numbers a reader has already passed. One
+   * point read and one write per batch of rows.
+   */
+  private takeRevs(n: number): number {
+    const last = Number(this.getMeta(COHORT_REV_META)) || 0;
+    this.setMeta(COHORT_REV_META, String(last + n));
+    return last + 1;
+  }
+
+  /**
+   * Where the write sequence stands, for a reader keeping a load current (indexer/read.ts); null on a
+   * file the writer has not given one yet (load in full). Rows and tombstones up to `rev` are committed.
+   */
+  cohortRevState(): CohortRevState | null {
+    try {
+      const epoch = this.getMeta(COHORT_REV_EPOCH_META);
+      const rev = this.getMeta(COHORT_REV_META);
+      if (!epoch || rev === null) return null;
+      return { rev: Number(rev) || 0, floor: Number(this.getMeta(COHORT_TOMB_FLOOR_META)) || 0, epoch };
+    } catch {
+      return null;
+    }
+  }
+
+  /** A venue's member rows written after `after` up to `upTo`, in write order, `limit` at a time. */
+  cohortMembersSince(venue: Venue, after: number, upTo: number, limit: number): Array<{ row: CohortMemberRow; rev: number }> {
+    return (this.q('SELECT address, pnl, equity, label, pnl_1d, pnl_7d, pnl_30d, rev FROM cohort_member WHERE venue = ? AND rev > ? AND rev <= ? ORDER BY rev LIMIT ?')
+      .all(venue, after, upTo, limit) as Array<Record<string, unknown>>).map((r) => ({ row: memberRow(r), rev: r.rev as number }));
+  }
+
+  /** A venue's book rows written after `after` up to `upTo`, in write order, `limit` at a time. */
+  cohortBooksSince(venue: Venue, after: number, upTo: number, limit: number): Array<{ address: string; row: CohortBookRow; rev: number }> {
+    return (this.q('SELECT address, equity, positions, at, collateral, spot_at, cash, rev FROM cohort_book WHERE venue = ? AND rev > ? AND rev <= ? ORDER BY rev LIMIT ?')
+      .all(venue, after, upTo, limit) as Array<Record<string, unknown>>).map((r) => ({ address: r.address as string, row: bookRow(r), rev: r.rev as number }));
+  }
+
+  /** A venue's tombstones after `after` up to `upTo`, in write order. */
+  cohortTombsSince(venue: Venue, after: number, upTo: number): CohortTomb[] {
+    return (this.q('SELECT kind, address, rev FROM cohort_tomb WHERE venue = ? AND rev > ? AND rev <= ? ORDER BY rev').all(venue, after, upTo) as Array<Record<string, unknown>>)
+      .map((r) => ({ kind: r.kind === 'b' ? 'b' : 'm', address: r.address as string, rev: r.rev as number }));
+  }
+
+  /**
+   * Tombstones older than COHORT_TOMB_KEEP_MS go (inside the caller's transaction). They are the
+   * sequence's bookkeeping, not data: the member itself is kept in cohort_member_gone (retention.ts).
+   */
+  private pruneTombs(now: number): void {
+    const r = this.q('SELECT MAX(rev) AS m FROM cohort_tomb WHERE at < ?').get(now - COHORT_TOMB_KEEP_MS) as { m?: number | null } | undefined;
+    if (r?.m == null) return;
+    this.q('DELETE FROM cohort_tomb WHERE rev <= ?').run(r.m);
+    this.setMeta(COHORT_TOMB_FLOOR_META, String(Math.max(r.m, Number(this.getMeta(COHORT_TOMB_FLOOR_META)) || 0)));
   }
 
   /**
@@ -2667,11 +2792,13 @@ export class IndexStore {
   // --- cohorts ------------------------------------------------------------------
 
   putCohortMembers(venue: Venue, rows: ReadonlyArray<CohortMemberRow>, at: number): void {
+    if (!rows.length) return;
     this.tx(() => {
       const ins = this.q(
-        'INSERT OR REPLACE INTO cohort_member (venue, address, pnl, equity, label, at, pnl_1d, pnl_7d, pnl_30d) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        'INSERT OR REPLACE INTO cohort_member (venue, address, pnl, equity, label, at, pnl_1d, pnl_7d, pnl_30d, rev) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
       );
-      for (const r of rows) ins.run(venue, r.address, r.pnl, r.equity, r.label, at, r.pnl1d ?? null, r.pnl7d ?? null, r.pnl30d ?? null);
+      let rev = this.takeRevs(rows.length);
+      for (const r of rows) ins.run(venue, r.address, r.pnl, r.equity, r.label, at, r.pnl1d ?? null, r.pnl7d ?? null, r.pnl30d ?? null, rev++);
     });
   }
 
@@ -2687,7 +2814,16 @@ export class IndexStore {
       const keep = this.q(`INSERT OR REPLACE INTO cohort_member_gone (venue, address, pnl, equity, label, at, pnl_1d, pnl_7d, pnl_30d, gone_at)
         SELECT venue, address, pnl, equity, label, at, pnl_1d, pnl_7d, pnl_30d, ? FROM cohort_member WHERE venue = ? AND address = ?`);
       const del = this.q('DELETE FROM cohort_member WHERE venue = ? AND address = ?');
-      for (const a of addresses) { keep.run(now, venue, a); del.run(venue, a); }
+      // A tombstone per row removed, so the API's load drops it too (COHORT_REV_SCHEMA).
+      const tomb = this.q("INSERT OR REPLACE INTO cohort_tomb (venue, kind, address, rev, at) VALUES (?, 'm', ?, ?, ?)");
+      const gone: string[] = [];
+      for (const a of addresses) {
+        keep.run(now, venue, a);
+        if (Number(del.run(venue, a).changes)) gone.push(a);
+      }
+      let rev = gone.length ? this.takeRevs(gone.length) : 0;
+      for (const a of gone) tomb.run(venue, a, rev++, now);
+      this.pruneTombs(now);
     });
   }
 
@@ -2736,9 +2872,10 @@ export class IndexStore {
     collateral?: number | null; spotAt?: number | null; cash?: number | null;
   }>): void {
     this.tx(() => {
-      const ins = this.q('INSERT OR REPLACE INTO cohort_book (venue, address, equity, positions, at, collateral, spot_at, cash) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+      const ins = this.q('INSERT OR REPLACE INTO cohort_book (venue, address, equity, positions, at, collateral, spot_at, cash, rev) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
+      let rev = rows.length ? this.takeRevs(rows.length) : 0;
       for (const r of rows) {
-        ins.run(r.venue, r.address, r.equity, JSON.stringify(r.positions.map(bookEntry)), r.at, r.collateral ?? null, r.spotAt ?? null, r.cash ?? null);
+        ins.run(r.venue, r.address, r.equity, JSON.stringify(r.positions.map(bookEntry)), r.at, r.collateral ?? null, r.spotAt ?? null, r.cash ?? null, rev++);
       }
     });
   }
