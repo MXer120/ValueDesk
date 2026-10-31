@@ -115,3 +115,29 @@ test('today\'s sum goes on from its last row, and always equals a whole re-sum: 
   check('appended after the re-read');
   s.close();
 });
+
+test('a window\'s first partial day is kept while that day\'s rows stand: a fill today keeps it, a late fill on that day replaces it', async () => {
+  const s = new IndexStore(':memory:', { aggRefreshMs: 0 });
+  const today = Math.floor(Date.now() / DAY) * DAY - DAY;
+  const d0 = today - 2 * DAY;
+  const memo = () => (s as unknown as { partialMemo: Map<string, unknown> }).partialMemo;
+  s.putFills(Array.from({ length: 20 }, (_, i) => fill({ id: `p${i}`, t: d0 + 3_600_000 + i * 60_000, oid: `po${i}`, closedPnl: i % 3 ? 1 : null })));
+  s.windowStats('hyperliquid', '0xa', 0);
+  while (s.buildAggregates(1_000) > 0) { /* build */ }
+  const from = d0 + 3_600_000 + 5 * 60_000 + 1;
+  const pause = async () => {};
+  const a = await s.windowStatsAsync('hyperliquid', '0xa', from, pause);
+  assert.deepEqual(a, scan(s, 'hyperliquid', '0xa', from));
+  const kept = memo().size;
+  assert.ok(kept >= 1, 'the partial day is kept');
+  // A fill today: the trader's version moves, the old day's does not - the same sum answers.
+  s.putFills([fill({ id: 'now', t: today + 1_000, oid: 'n' })]);
+  s.flushAggregates(1_000);
+  assert.deepEqual(await s.windowStatsAsync('hyperliquid', '0xa', from, pause), scan(s, 'hyperliquid', '0xa', from), 'after a fill today');
+  assert.equal(memo().size, kept, 'nothing summed again for it');
+  // A late fill on that old day: summed again, and right.
+  s.putFills([fill({ id: 'late', t: d0 + 7_200_000, oid: 'l', closedPnl: 3 })]);
+  s.flushAggregates(1_000);
+  assert.deepEqual(await s.windowStatsAsync('hyperliquid', '0xa', from, pause), scan(s, 'hyperliquid', '0xa', from), 'after a late fill on that day');
+  s.close();
+});

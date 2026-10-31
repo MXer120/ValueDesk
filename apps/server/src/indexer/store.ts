@@ -1279,6 +1279,9 @@ export class IndexStore {
   private markDay(venue: Venue, address: string, t: number): void {
     if (this.readOnly) return;
     const d = Math.floor(t / DAY);
+    const dk = `${venue}|${address}|${d}`;
+    this.dayVersion.set(dk, (this.dayVersion.get(dk) ?? 0) + 1);
+    if (this.dayVersion.size > 500_000) { this.dayVersion.clear(); this.partialMemo.clear(); }
     // A row at or before the last one a kept sum ate: going on from there would miss it.
     const live = this.liveDays.get(`${venue}|${address}|${d}`);
     if (live && t <= live.seen) this.liveDays.delete(`${venue}|${address}|${d}`);
@@ -1674,19 +1677,23 @@ export class IndexStore {
    * (profiled 2026-09-30).
    */
   private async partialDayAsync(venue: Venue, address: string, fromT: number, pause: () => Promise<void>): Promise<DayAgg | undefined> {
-    // A board candidate asks twice in a row with the same start (windowStatsAsync, orderCountAsync):
-    // the second answer is the first while the trader's rows are unchanged (its version).
-    const key = `${venue}|${address}|${fromT}|${this.version(venue, address)}`;
-    if (this.partialMemo.has(key)) return this.partialMemo.get(key);
+    // Kept while THAT day's rows stand (dayVersion), not the trader's: an active trader's version moves
+    // with every fill of today, and the old day was read again for every board candidate on every build -
+    // 20% of the indexer's thread after the day sums were fixed (profiled 2026-10-31). The boards ask from
+    // a start that holds for a quarter of an hour (engine.ts statsFrom), so this is read once per quarter.
     const d0 = Math.floor(fromT / DAY);
+    const key = `${venue}|${address}|${fromT}|${this.dayVersion.get(`${venue}|${address}|${d0}`) ?? 0}`;
+    if (this.partialMemo.has(key)) return this.partialMemo.get(key);
     const job = this.newJob(venue, address, fromT, (d0 + 1) * DAY);
     while (!this.step(job)) await pause();
     const out = this.finish(job).get(d0);
-    if (this.partialMemo.size >= 4_096) this.partialMemo.clear();
+    if (this.partialMemo.size >= 50_000) this.partialMemo.clear();
     this.partialMemo.set(key, out);
     return out;
   }
   private partialMemo = new Map<string, DayAgg | undefined>();
+  /** `venue|address|day` -> bumped whenever a row of that day changes (markDay): the partial sums' key. */
+  private dayVersion = new Map<string, number>();
 
   /** windowStats without long stalls (the writer's board builds). Same figures. */
   async windowStatsAsync(venue: Venue, address: string, fromT: number, pause: () => Promise<void>): Promise<WindowStats> {
@@ -1893,6 +1900,7 @@ export class IndexStore {
    * maker's month of stream rows is 100k+ rows: one DELETE held the loop.
    */
   async dropStreamRowsAsync(venue: Venue, address: string, fromT: number, toT: number, pause: () => Promise<void>): Promise<void> {
+    this.partialMemo.clear();
     const slice = this.q(
       `DELETE FROM fills WHERE (venue, address, id) IN (
          SELECT venue, address, id FROM fills WHERE venue = ? AND address = ? AND src = 0 AND t >= ? AND t <= ? LIMIT 2000)`,
@@ -2144,6 +2152,8 @@ export class IndexStore {
     const b = p.hi * DAY;
     const limit = this.slice;
     const t0 = Date.now();
+    // Raw rows go: no partial day summed from them stands (partialDayAsync keys on row changes, not deletions).
+    this.partialMemo.clear();
     const frozen = `EXISTS (SELECT 1 FROM fill_day d WHERE d.venue = r.venue AND d.address = r.address AND d.day = CAST(r.t / ${DAY} AS INTEGER) AND d.frozen = 1)`;
     const n = Number(this.q(
       `DELETE FROM fills WHERE (venue, address, id) IN (
@@ -2169,6 +2179,7 @@ export class IndexStore {
 
   /** Delete up to `limit` of a drop job's raw rows. True when none is left. */
   private dropSlice(j: DropJob, limit: number): boolean {
+    this.partialMemo.clear();
     const n = Number(this.q(
       `DELETE FROM fills WHERE (venue, address, id) IN (SELECT venue, address, id FROM fills WHERE venue = ? AND address = ? AND t < ? LIMIT ?)`,
     ).run(j.venue, j.address, j.before, limit).changes);

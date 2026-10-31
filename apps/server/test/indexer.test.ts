@@ -10,6 +10,7 @@ import { sodexCloseRow, sodexFillRow } from '../src/indexer/sodexSource.js';
 import { IndexStore, type FillRow } from '../src/indexer/store.js';
 import { Dedup, hlPrint, sodexPrint } from '../src/indexer/streams.js';
 import { DAY_MS, tradeKey, windowStart, yearStartUtc } from '../src/indexer/windows.js';
+import { statsFrom } from '../src/indexer/engine.js';
 
 const cand = (address: string, pnl: number, volume: number | null = 1): Candidate => ({ address, pnl, volume });
 
@@ -321,4 +322,13 @@ test('store: stream rows inside a REST-held range are dropped (HL ids differ bet
   s.dropStreamRows('hyperliquid', '0xa', 0, B + 200);
   assert.equal(s.fillExtent('hyperliquid', '0xa').count, 2);
   s.close();
+});
+
+test('a board window\'s stats start holds for a quarter of an hour (engine.ts statsFrom)', () => {
+  const q = 15 * 60_000;
+  const now = Date.UTC(2026, 9, 31, 12, 7, 31);
+  assert.equal(statsFrom('7d', now), Math.floor((now - 7 * 86_400_000) / q) * q);
+  assert.equal(statsFrom('7d', now + 60_000), statsFrom('7d', now), 'a minute later: the same start');
+  assert.ok(windowStart('7d', now) - statsFrom('7d', now) < q, 'at most 15 minutes earlier');
+  assert.equal(statsFrom('all', now), 0);
 });

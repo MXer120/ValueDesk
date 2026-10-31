@@ -128,6 +128,19 @@ const CACHE_MS = 5 * 60_000;
 const MAX_REUSE_MS = 30 * 60_000;
 /** Above this many cached answers, the ones too old to be reused are dropped. */
 const CACHE_MAX = 50_000;
+/**
+ * A board's window start for its trade counts and win rates: rounded down to a quarter of an hour, so
+ * it holds across the builds of that quarter and a window's first, partial day is read once per quarter
+ * (store.ts partialDayAsync keeps it while that day's rows stand). Moving with every build, it was read
+ * for every candidate on every build - 20% of the indexer's thread (profiled 2026-10-31). A window takes
+ * in up to 15 minutes more: under 1% of a day, 0.15% of a week.
+ */
+const STATS_FROM_STEP = 15 * 60_000;
+export function statsFrom(window: BoardWindow, now: number): number {
+  const f = windowStart(window, now);
+  return f > 0 ? Math.floor(f / STATS_FROM_STEP) * STATS_FROM_STEP : f;
+}
+
 /** Stream-discovered SoDEX wallets are re-queued for lookups this often per window. */
 const LOOKUP_SCAN_MS = 10 * 60_000;
 const FLUSH_MS = 5_000;
@@ -1281,7 +1294,7 @@ export class Indexer {
     now: number,
     built: Map<string, BoardRow>,
   ): Promise<string[]> {
-    const from = windowStart(window, now);
+    const from = statsFrom(window, now);
     const base = WINDOW_WEIGHT[window] * 10 + (side === 'top' ? 200 : 0) + (filter === 'active' ? 100 : 0);
     const raw = this.candidates(venue, window, side, snap, now);
     // SoDEX accounts whose analytics booked a balance as profit rank nowhere.
@@ -1430,7 +1443,7 @@ export class Indexer {
       for (let k = 0; k < Math.min(STATS_SWEEP, all.length); k++, i = (i + 1) % all.length) {
         const address = all[i]!;
         for (const window of STATS_WINDOWS) {
-          const from = windowStart(window, now);
+          const from = statsFrom(window, now);
           this.step = `sweep ${venue}`;
           const st = await this.pickStatsAsync(venue, address, window, from, now);
           const t = await this.tradeStateAsync(venue, address, window, from, now);
@@ -1471,7 +1484,7 @@ export class Indexer {
    * Returns the addresses those checks want indexed, per venue.
    */
   private async writePools(window: BoardWindow, snap: LbSnapshot | null, now: number, built: Map<string, BoardRow>): Promise<Map<Venue, Set<string>>> {
-    const from = windowStart(window, now);
+    const from = statsFrom(window, now);
     const pools = new Map<Venue, Map<string, 'top' | 'worst'>>();
     const cross = new Set<string>();
     for (const venue of VENUES) {
