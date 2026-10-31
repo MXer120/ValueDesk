@@ -86,7 +86,7 @@ export const COOKIES: LegalDoc = {
     {
       title: ANALYTICS_SECTION_TITLE,
       blocks: [
-        { p: 'If you allow it - with "Accept all" in the terms window, or with the switch below - ValueDesk measures how its site is used, to learn which features help you and where people get stuck. It runs on ValueDesk\'s own server only (Contabo, France, reached through ValueDesk\'s function at Vercel); no analytics company, advertising network or other third party receives it. What is recorded:' },
+        { p: 'If you allow it - with "Accept all" in the terms window, with "Allow" when the site asks you once (if you accepted the terms before it measured anything), or with the switch below - ValueDesk measures how its site is used, to learn which features help you and where people get stuck. It runs on ValueDesk\'s own server only (Contabo, France, reached through ValueDesk\'s function at Vercel); no analytics company, advertising network or other third party receives it. What is recorded:' },
         {
           ul: [
             'the pages you open - the page\'s path only, with wallet addresses and other identifiers in it replaced, and no search terms - and how long each page is visible;',

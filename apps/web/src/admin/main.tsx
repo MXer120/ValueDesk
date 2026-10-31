@@ -10,8 +10,11 @@ import '@fontsource/ibm-plex-sans/500.css';
 import '@fontsource/asap/400.css';
 import '@fontsource/asap/500.css';
 import '../styles.css';
-// The app's own segmented switch (lbp-seg), not one of the suite's.
+// The main app's own pieces, not the suite's: the leaderboard's switch and search (lbp-seg,
+// lbp-search), the Status page's card (st-*), the Excluded page's figures (ex-stat).
 import '../components/leaderboard/LeaderboardPage.css';
+import '../status/status.css';
+import '../components/excluded/excluded.css';
 import './admin.css';
 import { AdminApp } from './AdminApp';
 

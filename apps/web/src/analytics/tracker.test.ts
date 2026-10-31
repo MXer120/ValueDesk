@@ -44,11 +44,12 @@ globalThis.fetch = (async (url: string) => {
   return new Response(null, { status: 204 });
 }) as typeof fetch;
 
-const { allowAnalytics, revokeAnalytics, _resetAnalyticsConsentForTests } = await import('../legal/analyticsConsent');
+const { allowAnalytics, analyticsDecided, revokeAnalytics, _resetAnalyticsConsentForTests } = await import('../legal/analyticsConsent');
 const { startAnalytics, track, routeOf, browserOf, sourceOf, randomId, _queueForTests, _resetForTests } = await import('./tracker');
 
 test('before consent: no id stored, nothing queued, nothing sent', () => {
   _resetAnalyticsConsentForTests();
+  assert.equal(analyticsDecided(), false);
   startAnalytics();
   track('order.place', { engine: 'perps' });
   assert.deepEqual(local.keys(), []);
@@ -74,6 +75,7 @@ test('withdrawing: nothing more is queued and the ids are deleted', () => {
   assert.equal(local.getItem('vd.an.v1'), null);
   track('order.place');
   assert.equal(_queueForTests().length, 0);
+  assert.equal(analyticsDecided(), true, 'a withdrawal is an answer: the visitor is not asked again');
   _resetForTests();
 });
 

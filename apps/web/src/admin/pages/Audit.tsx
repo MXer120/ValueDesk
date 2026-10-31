@@ -1,68 +1,63 @@
-/** The admin audit log (admin/store.ts, hash-chained) and the open sessions. */
-import { useState } from 'react';
-import { call } from '../api';
-import { signAction } from '../wallet';
-import { useWallet } from '../WalletPicker';
-import { isUserRejection } from '../../wallet';
-import { saveSession } from '../api';
+/** The admin audit log (admin/store.ts, hash-chained) and the open sessions. Signing everyone out is in the navbar's menu. */
 import { ago, short, when } from '../format';
-import { Badge, Note, PageHead, Panel, useAdmin } from '../ui';
+import { Empty, Note, Page, Pill, Section, useAdmin } from '../ui';
 import type { AuditRow, OpenSession } from '../types';
+
+const KIND: Record<string, string> = {
+  signin: 'Signed in',
+  'signin.password': 'Wrong password',
+  'signin.signature': 'Sign-in refused',
+  signout: 'Signed out',
+  'sessions.revoke': 'Signed everyone out',
+  'password.set': 'Password set',
+  'password.off': 'Suite turned off',
+  'ticket.reply': 'Answered a ticket',
+  'ticket.status': 'Changed a ticket\'s status',
+};
 
 export function Audit() {
   const audit = useAdmin<{ rows: AuditRow[]; chain: { rows: number; brokenAt: number | null } }>('audit');
   const me = useAdmin<{ wallet: string; expiresAt: number; sessions: OpenSession[] }>('me');
-  const { ensure } = useWallet();
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const revoke = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      const c = await ensure();
-      const action = await signAction(c, 'sessions.revoke', 'all sessions', {}, 'Sign every admin session out, this one too');
-      await call('sessions/revoke', { action });
-      saveSession(null);
-    } catch (e) {
-      setError(isUserRejection(e) ? 'You declined the signature - nothing changed.' : e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
   const chain = audit.data?.chain;
+  const refused = (audit.data?.rows ?? []).filter((r) => !r.ok && Date.now() - r.at < 86_400_000).length;
   return (
-    <>
-      <PageHead title="Audit & sessions" line="Every sign-in, refusal and change, each row chained to the one before; the sessions open now." loaded={audit} />
-      {audit.error && <Note kind="error">{audit.error}</Note>}
-      <Panel title="Open sessions" actions={<button type="button" className="ad-btn" onClick={() => void revoke()} disabled={busy}>{busy ? 'Signing…' : 'Sign out everywhere'}</button>}>
-        <div className="ad-tablewrap">
-          <table className="ad-table ad-table--compact">
-            <thead><tr><th>Id</th><th>Wallet</th><th>Since</th><th>Ends</th><th>Client</th><th>Country</th></tr></thead>
+    <Page
+      title={!chain ? 'Audit log' : chain.brokenAt === null ? `Audit log intact · ${chain.rows} entries` : `Audit log broken at entry ${chain.brokenAt}`}
+      line="Every sign-in, refusal and change, each entry chained to the one before it - an entry changed or removed later shows here. And the sessions open now."
+      tone={!chain ? 'unknown' : chain.brokenAt !== null ? 'down' : refused ? 'warn' : 'pos'}
+      loaded={audit}
+      wide
+    >
+      {audit.error && <Section><Note kind="error">{audit.error}</Note></Section>}
+      <Section title="Open sessions" aside={<span className="st-ms">each ends 24 h after its sign-in</span>} flush>
+        <div className="ad-sheet">
+          <table className="ad-table">
+            <thead><tr><th>Session</th><th>Wallet</th><th>Since</th><th>Ends</th><th>Client</th><th>Country</th></tr></thead>
             <tbody>{(me.data?.sessions ?? []).map((s) => <tr key={s.id}><td className="ad-mono">{s.id}</td><td className="ad-mono">{short(s.wallet)}</td><td>{when(s.createdAt)}</td><td>{when(s.expiresAt)}</td><td className="ad-mono">{s.client}</td><td>{s.country ?? '–'}</td></tr>)}</tbody>
           </table>
         </div>
-        {error && <p className="ad-error" role="alert">{error}</p>}
-      </Panel>
-      <Panel title="Audit log" actions={chain && (chain.brokenAt === null ? <Badge tone="pos">chain intact · {chain.rows} rows</Badge> : <Badge tone="neg">chain broken at row {chain.brokenAt}</Badge>)}>
-        <div className="ad-tablewrap">
-          <table className="ad-table ad-table--compact">
+      </Section>
+      <Section title="Log" aside={refused ? <Pill tone="warn">{refused} refused in 24 h</Pill> : undefined} flush>
+        <div className="ad-sheet">
+          <table className="ad-table">
             <thead><tr><th>When</th><th>What</th><th>Result</th><th>Wallet</th><th>Client</th><th>Country</th><th>Detail</th></tr></thead>
             <tbody>
               {(audit.data?.rows ?? []).map((r) => (
                 <tr key={r.id}>
                   <td title={when(r.at)}>{ago(r.at)}</td>
-                  <td className="ad-mono">{r.kind}</td>
-                  <td>{r.ok ? <Badge tone="pos">ok</Badge> : <Badge tone="neg">refused</Badge>}</td>
+                  <td>{KIND[r.kind] ?? r.kind}</td>
+                  <td>{r.ok ? <Pill tone="pos">Done</Pill> : <Pill tone="neg">Refused</Pill>}</td>
                   <td className="ad-mono">{short(r.wallet)}</td>
                   <td className="ad-mono">{r.client ?? '–'}</td>
                   <td>{r.country ?? '–'}</td>
-                  <td className="ad-dim">{r.detail ? Object.entries(r.detail).map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : String(v)}`).join(' · ') : ''}</td>
+                  <td className="ad-quiet">{r.detail ? Object.entries(r.detail).map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : String(v)}`).join(' · ') : ''}</td>
                 </tr>
               ))}
             </tbody>
           </table>
+          {!(audit.data?.rows ?? []).length && !audit.loading && <div className="ad-sheet__none"><Empty>Nothing logged yet.</Empty></div>}
         </div>
-      </Panel>
-    </>
+      </Section>
+    </Page>
   );
 }

@@ -130,7 +130,11 @@ export interface AuditRow {
 
 export interface OpenSession { id: string; wallet: string; createdAt: number; expiresAt: number; client: string; country: string | null }
 
-export interface ServiceStatus { id: string; name: string; state: 'up' | 'degraded' | 'down' | 'unknown'; checkedAt: number | null; latencyMs: number | null; uptime: number | null }
+export interface ServiceStatus {
+  id: string; name: string; state: 'up' | 'degraded' | 'down' | 'unknown'; checkedAt: number | null; latencyMs: number | null; uptime: number | null;
+  /** The last 90 UTC days: [YYYY-MM-DD, up minutes, degraded minutes, down minutes]. */
+  days?: Array<[string, number, number, number]>;
+}
 
 export interface Notice {
   id: number;

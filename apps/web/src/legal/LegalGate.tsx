@@ -46,7 +46,7 @@ import {
 } from './acceptance';
 import { EMBED_PLATFORMS, EMBED_PROVIDERS, allEmbedsAllowed, allowAllEmbeds, revokeEmbed, useEmbedConsent } from './embeds';
 import { allowReownReports, reownReportsAllowed, revokeReownReports, useReownReportsAllowedAt } from './reownConsent';
-import { allowAnalytics, analyticsAllowed, revokeAnalytics, useAnalyticsAllowedAt } from './analyticsConsent';
+import { allowAnalytics, analyticsAllowed, analyticsDecided, declineAnalytics, revokeAnalytics, useAnalyticsAllowedAt } from './analyticsConsent';
 import { LOCATION_UNKNOWN, useGeoSettled, useViewerAccess, useViewerGeo } from './geo';
 import { regionBannerText } from './notices';
 import { siteAccess } from './jurisdictions.mjs';
@@ -203,6 +203,9 @@ function TermsForm({ signer, offerOptional, onOpen, onDone }: TermsFormProps) {
         allowAllEmbeds();
         allowReownReports();
         allowAnalytics();
+      } else if (offerOptional && !analyticsDecided()) {
+        // "Only necessary" is this visitor's answer on analytics too: never asked again (AnalyticsPrompt.tsx).
+        declineAnalytics();
       }
       onDone(signer ? 'signed' : 'confirmed');
     } catch (e) {

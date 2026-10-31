@@ -184,7 +184,8 @@ export function DayTip({ d, id, index, count }: { d: DayDetail; id?: string; ind
 }
 
 /** A service's 90 day bars, each with its day in a tooltip: hover, keyboard (arrows) or a tap. */
-function DayBars({ days, label }: { days: DayDetail[]; label: string }) {
+/** Exported for the admin suite's status page (apps/web/src/admin/pages/Status.tsx): the same bars. */
+export function DayBars({ days, label }: { days: DayDetail[]; label: string }) {
   const [active, setActive] = useState<number | null>(null);
   const wrap = useRef<HTMLDivElement>(null);
   const tipId = useId();

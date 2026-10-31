@@ -42,9 +42,9 @@ export function BarChart({ title, bars, fmt, fmtAxis }: { title: string; bars: r
         <button type="button" className="ad-link" onClick={() => setTable((t) => !t)} aria-expanded={table}>{table ? 'Chart' : 'Table'}</button>
       </figcaption>
       {table ? (
-        <table className="ad-table ad-table--compact">
-          <thead><tr><th>Day</th><th className="num">{title}</th></tr></thead>
-          <tbody>{bars.map((b) => <tr key={b.key}><td>{b.label}</td><td className="num">{fmt(b.value)}</td></tr>)}</tbody>
+        <table className="ad-table">
+          <thead><tr><th>Day</th><th className="right">{title}</th></tr></thead>
+          <tbody>{bars.map((b) => <tr key={b.key}><td>{b.label}</td><td className="right">{fmt(b.value)}</td></tr>)}</tbody>
         </table>
       ) : (
         <svg viewBox={`0 0 ${W} ${H}`} className="ad-chart__svg" role="img" aria-label={`${title} per day`} onMouseLeave={() => setHover(null)}>

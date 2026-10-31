@@ -7,7 +7,9 @@
  * never a condition of the terms - LegalGate.tsx), or the switch on the Cookies
  * page, where it is withdrawn too. Withdrawing stops the tracker at once and
  * deletes its visitor number from this browser (analytics/tracker.ts listens).
- * Kept in this browser only.
+ * Kept in this browser only. A "no" is kept too ("Only necessary" in the terms popup,
+ * "No thanks" in the prompt, a withdrawal), so that nobody is asked twice
+ * (AnalyticsPrompt.tsx asks only those who never decided).
  */
 import { useSyncExternalStore } from 'react';
 
@@ -16,23 +18,26 @@ const KEY = 'vd.consent.analytics.v1';
 const listeners = new Set<() => void>();
 /** When the visitor allowed analytics (ms), or null; undefined: not read yet. */
 let allowedAt: number | null | undefined;
+/** When the visitor said no (ms), or null. */
+let declinedAt: number | null = null;
 
 function load(): number | null {
   if (allowedAt !== undefined) return allowedAt;
   try {
-    const v = JSON.parse(localStorage.getItem(KEY) ?? 'null') as { allowedAt?: unknown } | null;
+    const v = JSON.parse(localStorage.getItem(KEY) ?? 'null') as { allowedAt?: unknown; declinedAt?: unknown } | null;
     allowedAt = typeof v?.allowedAt === 'number' && Number.isFinite(v.allowedAt) ? v.allowedAt : null;
+    declinedAt = typeof v?.declinedAt === 'number' && Number.isFinite(v.declinedAt) ? v.declinedAt : null;
   } catch {
     allowedAt = null;
   }
   return allowedAt;
 }
 
-function save(at: number | null): void {
-  allowedAt = at;
+function save(o: { allowedAt: number } | { declinedAt: number }): void {
+  allowedAt = 'allowedAt' in o ? o.allowedAt : null;
+  declinedAt = 'declinedAt' in o ? o.declinedAt : null;
   try {
-    if (at === null) localStorage.removeItem(KEY);
-    else localStorage.setItem(KEY, JSON.stringify({ allowedAt: at }));
+    localStorage.setItem(KEY, JSON.stringify(o));
   } catch {
     /* private mode: for this page only */
   }
@@ -41,8 +46,12 @@ function save(at: number | null): void {
 
 export const analyticsAllowedAt = (): number | null => load();
 export const analyticsAllowed = (): boolean => load() !== null;
-export const allowAnalytics = (now = Date.now()): void => save(load() ?? now);
-export const revokeAnalytics = (): void => save(null);
+/** The visitor answered either way (allowed, or said no / withdrew). */
+export const analyticsDecided = (): boolean => load() !== null || declinedAt !== null;
+export const allowAnalytics = (now = Date.now()): void => save({ allowedAt: load() ?? now });
+/** "No": nothing is measured, and the visitor is not asked again. A withdrawal is the same. */
+export const declineAnalytics = (now = Date.now()): void => save({ declinedAt: now });
+export const revokeAnalytics = (): void => declineAnalytics();
 
 export function subscribeAnalyticsConsent(fn: () => void): () => void {
   listeners.add(fn);
@@ -56,4 +65,5 @@ export function useAnalyticsAllowedAt(): number | null {
 /** For tests. */
 export function _resetAnalyticsConsentForTests(): void {
   allowedAt = undefined;
+  declinedAt = null;
 }

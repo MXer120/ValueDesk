@@ -24,6 +24,7 @@ import { installErrorReporting } from './errorReport';
 import { installChunkErrorReload } from './lazyPage';
 import { captureBoot } from './algo/tabLife';
 import { SiteGate } from './legal/LegalGate';
+import { AnalyticsPrompt } from './legal/AnalyticsPrompt';
 import { loadViewerGeo } from './legal/geo';
 import { startAnalytics } from './analytics/tracker';
 import './styles.css';
@@ -56,6 +57,8 @@ function Root() {
     // In a sanctioned place the app is not mounted at all: only the legal pages (legal/LegalGate.tsx).
     <SiteGate>
       <App />
+      {/* Analytics, asked once of visitors who accepted the terms before it existed (legal/AnalyticsPrompt.tsx). */}
+      <AnalyticsPrompt />
     </SiteGate>
   );
 }

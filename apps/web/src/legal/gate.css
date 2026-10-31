@@ -387,3 +387,31 @@ html .shell {
 }
 .lg-embeds li + li { border-top: 1px solid var(--panel-line); }
 .lg-embeds b { color: var(--text); font-weight: 500; }
+
+/* The analytics question (AnalyticsPrompt.tsx), for visitors who accepted the terms before it existed:
+   a glass card at the bottom right, over the page and clear of the status footer and the rail's Connect
+   button (bottom left) - the terms popup's own pair of equal buttons inside. */
+.lg-ask {
+  position: fixed; right: var(--sp-4); bottom: calc(var(--sp-4) + 28px); z-index: 90;
+  display: flex; flex-direction: column; gap: var(--sp-2);
+  width: min(360px, calc(100vw - 2 * var(--sp-3)));
+  padding: var(--sp-3) var(--sp-4) var(--sp-4);
+  border: 1px solid var(--line); border-radius: 14px;
+  background: var(--glass-pop-bg); -webkit-backdrop-filter: var(--glass-pop-blur); backdrop-filter: var(--glass-pop-blur);
+  box-shadow: var(--shadow-modal);
+  animation: pop-in var(--dur-fast) var(--ease-spring);
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .lg-ask { background: var(--bg-elevated); }
+}
+.lg-ask__head { display: flex; align-items: center; gap: var(--sp-2); }
+.lg-ask__title { margin: 0; color: var(--text); font-size: var(--fs-base); font-weight: 500; }
+.lg-ask__x {
+  display: grid; place-items: center; width: 24px; height: 24px; min-height: 0; margin-left: auto; padding: 0;
+  border: 0; border-radius: 6px; background: none; color: var(--muted); cursor: pointer;
+}
+.lg-ask__x:hover { background: rgba(255, 255, 255, 0.08); color: var(--text); }
+.lg-ask .lg-cta { min-height: 38px; font-size: var(--fs-xs); }
+@media (max-width: 600px) {
+  .lg-ask { left: var(--sp-3); right: var(--sp-3); width: auto; bottom: calc(var(--sp-3) + 56px); }
+}
