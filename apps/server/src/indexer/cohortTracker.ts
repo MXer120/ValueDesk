@@ -87,7 +87,7 @@ import { deflateRawSync } from 'node:zlib';
 import { loadSeeds, type Seeds } from './archiveSeed.js';
 import { mayPrune } from '../retention.js';
 import { OI_EXCESS, oiCheck, oiOver, oiRereads, oiStatus } from './oiCheck.js';
-import { INTERNAL_WALLETS, isInternal } from '../valuedesk/internalWallets.js';
+import { INTERNAL_WALLETS, isInternal, outOfCohorts } from '../valuedesk/internalWallets.js';
 
 const envNum = (name: string, dflt: number, min: number, max: number): number => {
   const n = Number(process.env[name]);
@@ -2203,7 +2203,8 @@ export class CohortTracker {
       const addresses = new Set([...members.keys(), ...books.keys()]);
       const rate = tailCountRate(venue, tailOf(members, (a) => books.has(a)));
       for (const address of addresses) {
-        if (isInternal(venue, address)) continue;
+        // The cohorts' history counts what the cohorts count (internalWallets.ts outOfCohorts).
+        if (outOfCohorts([venue], address)) continue;
         const b = books.get(address);
         m.set(address, sampledVenue(rate, address, members.get(address),
           b ? { equity: b.equity, at: b.at, positions: [...b.pos].map(([symbol, p]) => ({ symbol, szi: p.szi, entry: p.entry })) } : undefined,

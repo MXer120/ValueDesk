@@ -24,7 +24,7 @@ import { tailCountRate, tailOf } from './cohortTracker.js';
 import { labelMatches, shownLabel } from '../valuedesk/labels.js';
 import { winRateOf } from '../valuedesk/winRate.js';
 import { sampledVenue, COHORT_RANGES, type CohortWalletRow as WalletRow } from '../valuedesk/cohorts/model.js';
-import { isInternal } from '../valuedesk/internalWallets.js';
+import { isInternal, outOfCohorts } from '../valuedesk/internalWallets.js';
 import { liqCoin } from '../valuedesk/liquidations/levels.js';
 
 export interface IndexState {
@@ -403,7 +403,8 @@ function* netSteps(load: CohortLoad, venues: readonly Venue[]): Generator<void, 
   const hit = load.scopes.get(key);
   if (hit) return hit;
   const mark = (v: Venue, sym: string) => load.marks.get(`${v}|${sym}`) ?? null;
-  const wallets = yield* scopeWalletSteps(venues, load.per, mark);
+  // Hedged desks hold books (the heatmap prices them) but no cohort counts them (internalWallets.ts).
+  const wallets = (yield* scopeWalletSteps(venues, load.per, mark)).filter((w) => !outOfCohorts(venues, w.address));
   load.scopes.set(key, wallets);
   return wallets;
 }

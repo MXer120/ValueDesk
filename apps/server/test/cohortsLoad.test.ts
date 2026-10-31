@@ -14,8 +14,8 @@ import { join } from 'node:path';
 
 import { IndexStore } from '../src/indexer/store.js';
 import { tailCountRate, tailOf } from '../src/indexer/cohortTracker.js';
-import { INTERNAL_WALLETS } from '../src/valuedesk/internalWallets.js';
-import { KEEP_WARM_MS, LOAD_TTL_MS, STALE_MAX_MS, _cohortLoad, cohortDetail, cohortFocus, cohortMap, cohortWallets, cohortsReady, cohortsRead, internalOiNow, warmCohorts } from '../src/indexer/read.js';
+import { HEDGED_WALLETS, INTERNAL_WALLETS } from '../src/valuedesk/internalWallets.js';
+import { KEEP_WARM_MS, LOAD_TTL_MS, STALE_MAX_MS, _cohortLoad, cohortDetail, cohortFocus, cohortMap, cohortBooksNow, cohortWallets, cohortsReady, cohortsRead, internalOiNow, warmCohorts } from '../src/indexer/read.js';
 import {
   MARGIN_SIBLING, aggregate, cohortsOf, holdsPosition, perpEquity, sampledVenue, scopeKey, scopeWallets, sumCohorts, walletRow,
   type CohortFilter, type NettedWallet, type WalletVenue,
@@ -384,4 +384,18 @@ test('a venue\'s own accounts (internalWallets.ts) are in no cohort and no load:
   assert.equal(internalOiNow('sodex', 'BTC'), 908.65525, 'their one-side share of the open interest, which the heatmap takes off the SoDEX OI');
   assert.equal(internalOiNow('hyperliquid', 'BTC'), 0);
   writer.dropCohortMembers('sodex', [a!, b!]);
+});
+
+test('a hedged desk (internalWallets.ts HEDGED_WALLETS) is in no cohort, but its book stays for the heatmap', async () => {
+  _cohortLoad.reset();
+  const before = cohortsRead(ALL, NONE)!;
+  const [a] = [...HEDGED_WALLETS.hyperliquid!];
+  writer.putCohortMembers('hyperliquid', [{ address: a!, pnl: 211_000_000, equity: 196_000_000, label: null, pnl1d: null, pnl7d: null, pnl30d: null }], Date.now());
+  writer.putCohortBooks([{ venue: 'hyperliquid', address: a!, equity: 196_000_000, positions: [{ symbol: 'BTC', szi: -2_319.6, entry: 77_500 }], at: Date.now() + 30 }]);
+  _cohortLoad.age(LOAD_TTL_MS + 1);
+  await _cohortLoad.rebuild();
+  const after = cohortsRead(ALL, NONE)!;
+  assert.deepEqual(after.cohorts.map((c) => [c.id, c.wallets, c.long, c.short]), before.cohorts.map((c) => [c.id, c.wallets, c.long, c.short]), 'every cohort as before: its $180M short is not counted');
+  assert.ok(cohortBooksNow()!.per.get('hyperliquid')!.get(a!)?.positions?.length, 'the heatmap still has its book');
+  writer.dropCohortMembers('hyperliquid', [a!]);
 });
