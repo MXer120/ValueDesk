@@ -7910,6 +7910,20 @@ function weightFor(path, limit = 0) {
   if (/\/accounts\//.test(path)) return 5;
   return 5;
 }
+var REST_WEIGHT_PER_MINUTE = 1200;
+var REPORTED_LIMIT_MIN = 600;
+var REPORTED_LIMIT_MAX = 6e4;
+function reportedRateLimit(get) {
+  if (!get) return null;
+  const int2 = (raw) => {
+    const s = (raw ?? "").trim();
+    return /^\d{1,7}$/.test(s) ? Number(s) : null;
+  };
+  const limit = int2(get("x-ratelimit-limit"));
+  if (limit === null || limit < REPORTED_LIMIT_MIN || limit > REPORTED_LIMIT_MAX) return null;
+  const rem = int2(get("x-ratelimit-remaining"));
+  return { limit, remaining: rem !== null && rem <= limit ? rem : null };
+}
 
 // src/secrets.ts
 function secretFile(dir, name) {
@@ -9080,20 +9094,64 @@ var COOL_WAIT_MAX_MS = 2e4;
 var PROTECT_SPACING_MS = 1e3;
 var jitter = (ms, rnd = Math.random) => Math.round(ms * (0.8 + 0.4 * rnd()));
 var WeightBudget = class {
-  constructor(perMinute = 1200, readShare = 0.75, openShare = 0.92) {
-    this.perMinute = perMinute;
+  constructor(perMinute = REST_WEIGHT_PER_MINUTE, readShare = 0.75, openShare = 0.92) {
     this.readShare = readShare;
     this.openShare = openShare;
+    this.limit = perMinute;
+    this.ipShare = Math.min(1, perMinute / REST_WEIGHT_PER_MINUTE);
   }
-  perMinute;
   readShare;
   openShare;
+  /** `ext`: weight SoDEX says others on this IP spent (see `learn`), not ours. */
   spent = [];
   coolUntil = 0;
   coolMs = 0;
   lastProtectAt = 0;
+  limit;
+  /**
+   * The part of the IP's limit this budget is for: a budget made for 600 of
+   * the documented 1,200 (the browser copier's, which shares the IP with the
+   * app) keeps half of whatever SoDEX reports.
+   */
+  ipShare;
   /** Told when a cooldown opens or ends. */
   onEvent = null;
+  /** This budget's weight a minute now: its share of the limit SoDEX last reported, or the one it was made with. */
+  get perMinute() {
+    return this.limit;
+  }
+  /**
+   * One gateway answer's x-ratelimit-* headers.
+   *
+   * The limit becomes the reported one (times `ipShare`), so the read and open
+   * lines stay the same share of whatever SoDEX allows; a header that is not
+   * an integer in 600..60,000 changes nothing.
+   *
+   * `remaining` books what others spent: SoDEX counts the whole IP (every
+   * follower of an executor, every tab of a browser, other processes on the
+   * box), we count only our own. When it has spent more this minute than our
+   * own window holds, the difference is booked as weight we did not send -
+   * beyond what the rest of the IP is entitled to when this budget is only a
+   * share of it. It can only add weight (never free any: our window is sliding
+   * and SoDEX's resets on the minute, so ours is the stricter one), and the
+   * booking expires like our own after 60 s.
+   */
+  learn(get, now = Date.now()) {
+    const r = reportedRateLimit(get);
+    if (!r) return;
+    this.limit = Math.max(1, Math.floor(r.limit * this.ipShare));
+    if (r.remaining === null) return;
+    this.used(now);
+    let own = 0;
+    let booked = 0;
+    for (const x of this.spent) {
+      if (x.ext) booked += x.w;
+      else own += x.w;
+    }
+    const others = r.limit - r.remaining - own;
+    const owed = Math.min(this.limit, others - (r.limit - this.limit));
+    if (owed > booked) this.spent.push({ at: now, w: owed - booked, ext: true });
+  }
   used(now = Date.now()) {
     while (this.spent.length && now - this.spent[0].at >= 6e4) this.spent.shift();
     return this.spent.reduce((a, b) => a + b.w, 0);
@@ -9460,6 +9518,7 @@ var SodexClient = class {
    * the caller); anything else below 500 proves SoDEX is there and lifts it.
    */
   observe(res, text, path, sentAt) {
+    this.budget.learn(res.headers ? (name) => res.headers.get(name) : void 0);
     if (isIpRateLimited(res.status, text)) {
       this.reached();
       this.budget.penalise(path, retryAfterMs(res.headers?.get("retry-after")), Date.now(), Math.random, sentAt);
@@ -17600,11 +17659,12 @@ function classifyRejection(error) {
   const e = String(error ?? "");
   if (/^Not sent:/i.test(e)) return /order rate/i.test(e) ? "account-rate" : "local";
   if (/HTTP 429|error code:?\s*1015/i.test(e)) return "ip-rate";
+  if (/position not found|no (open )?position|order (not found|never placed)|already (filled|canceled|cancelled|closed)|unknown order/i.test(e)) return "gone";
   if (/api[\s_-]?key[^.]*(not found|invalid|expired|revoked|unknown)|key not found|unknown api key|no (copy|trading) key|signature (rejected|invalid|mismatch|verification)|invalid signature|unauthori[sz]ed|trading key has expired/i.test(e)) return "key";
   if (/insufficient|not enough (margin|balance|collateral|funds)|margin (is )?(insufficient|not enough)|available (balance|margin)/i.test(e)) return "margin";
   if (/open[\s_-]?interest|\boi\b[^.]*\b(cap|limit|exceed)|max(imum)?[\s_-]?position|position[^.]*\b(limit|exceed|too (large|big))|risk[\s_-]?limit|too many (open )?orders|open[\s_-]?orders?[^.]*\b(limit|exceed|max)/i.test(e)) return "limit";
   if (/rate[\s_-]?limit|too many requests|quota|request limit/i.test(e)) return "account-rate";
-  if (/notional|tick[\s_-]?size|step[\s_-]?size|precision|price[^.]*(band|range|deviat|too (high|low)|limit)|quantity[^.]*(too small|invalid|min)|min(imum)? (qty|quantity|size)|reduce[\s_-]?only|would (increase|not reduce)|no position/i.test(e)) return "size";
+  if (/notional|tick[\s_-]?size|step[\s_-]?size|precision|price[^.]*(band|range|deviat|too (high|low)|limit)|quantity[^.]*(too small|invalid|min)|min(imum)? (qty|quantity|size)|reduce[\s_-]?only|would (increase|not reduce)/i.test(e)) return "size";
   return "unknown";
 }
 var STRIKE_WINDOW_MS = 10 * 6e4;
@@ -17616,6 +17676,7 @@ var COPY_POLICY = {
   limit: { strikes: 1, holdMs: 15 * 6e4, words: "SoDEX refused an order at one of its limits (position, open interest or open orders)" },
   "account-rate": { strikes: 1, holdMs: 2 * 6e4, words: "SoDEX refused an order at this account's order rate" },
   size: { strikes: 3, holdMs: 10 * 6e4, words: "SoDEX refused several orders of this size or price" },
+  gone: { strikes: 0, holdMs: 0, words: "" },
   unknown: { strikes: 5, holdMs: 15 * 6e4, words: "SoDEX refused several orders" },
   "ip-rate": { strikes: 0, holdMs: 0, words: "" },
   local: { strikes: 0, holdMs: 0, words: "" }
@@ -17787,6 +17848,7 @@ function guardedAlgoSink(inner, guard, budget, retryBudgetMs = LOCAL_RETRY_BUDGE
 }
 
 // src/alerts.ts
+import { readFileSync as readFileSync4 } from "node:fs";
 var DEDUPE_MS = 10 * 6e4;
 var PER_HOUR = 30;
 var HOUR_MS2 = 60 * 6e4;
@@ -17897,6 +17959,10 @@ var Alerts = class {
    * dedupe window is one message and a count.
    */
   raise(kind, subject, text) {
+    try {
+      this.o.log?.warn("alert", { kind, text: scrub(text) });
+    } catch {
+    }
     if (!this.enabled) return;
     try {
       const now = this.now();
@@ -18002,6 +18068,16 @@ function lastRunCrashed(db) {
   if (d.event === "start") return `the run started ${new Date(last.at).toISOString()} ended without stopping (killed, out of memory, or the machine went down)`;
   if (d.event === "stop" && (d.why === "unhandled rejection" || d.why === "uncaught exception")) return `the last run stopped on an ${d.why} at ${new Date(last.at).toISOString()}`;
   return null;
+}
+function maintenanceFor(file, part, now = Date.now()) {
+  if (!file) return null;
+  try {
+    const w = JSON.parse(readFileSync4(file, "utf8"));
+    if (!(Number(w.until) > now) || !Array.isArray(w.parts) || !w.parts.includes(part)) return null;
+    return typeof w.what === "string" && w.what ? w.what.slice(0, 80) : "maintenance";
+  } catch {
+    return null;
+  }
 }
 
 // src/service.ts
@@ -19271,8 +19347,9 @@ async function main() {
   alerts.start();
   const crashed = lastRunCrashed(db);
   if (crashed) {
-    log.warn("executor: the last run crashed", { what: crashed });
-    alerts.raise("crash-restart", "", `Started again: ${crashed}.`);
+    const planned = cfg.kind === "hosted" ? maintenanceFor(process.env.EXECUTOR_MAINT_FILE?.trim() || "/var/lib/valuescan/maintenance.json", "executor") : null;
+    log.warn("executor: the last run crashed", { what: crashed, ...planned ? { maintenance: planned } : {} });
+    if (!planned) alerts.raise("crash-restart", "", `Started again: ${crashed}.`);
   }
   let auditHead = null;
   const verifyAudit = () => {
