@@ -38,6 +38,7 @@ import { SectorIcon } from './SectorIcon';
 import { BiasPill, LeanPill, Meter, POLL_MS, Picker, Split, VenueMarks, pctText, usePolled } from './parts';
 import { CrossFade, FadeView } from '../../motion';
 import { FocusPage, MarketMapPage } from './MarketSection';
+import { ExcludedButton } from './Excluded';
 import { AllHidden, CohortViewButton, CohortViewProvider, useCohortView, useCohortViewState, type ViewPage } from './view';
 import '../../leaderboard/LeaderboardPage.css';
 import '../../Account.css';
@@ -658,6 +659,7 @@ export function Cohorts({ onScan, onOpenSymbol, embedded = false }: { onScan: (a
             Positions known · {fmtCount(covered)} / {fmtCount(members)}
           </span>
         )}
+        <ExcludedButton />
         <CohortViewButton state={viewState} page={page} omit={viewOmit} />
       </div>
 

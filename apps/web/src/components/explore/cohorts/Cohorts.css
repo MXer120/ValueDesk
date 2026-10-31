@@ -22,6 +22,26 @@
   font-variant-numeric: tabular-nums;
 }
 
+.coh-excl {
+  margin-left: 8px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--dim, var(--muted));
+  font: inherit;
+  font-size: var(--fs-micro);
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.coh-excl:hover { color: var(--text); }
+.coh-excl__lead { margin: 0 0 12px; color: var(--muted); font-size: var(--fs-xs); line-height: 1.5; }
+.coh-excl__table td { vertical-align: top; }
+.coh-excl__who { display: flex; gap: 8px; align-items: flex-start; }
+.coh-excl__who > span { display: grid; gap: 2px; min-width: 0; }
+.coh-excl__who small { color: var(--muted); font-size: var(--fs-micro); }
+.coh-excl__why { white-space: normal; max-width: 420px; }
+
 .coh-body {
   display: grid;
   grid-template-columns: 250px minmax(0, 1fr);

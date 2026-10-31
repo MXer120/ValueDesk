@@ -49,7 +49,7 @@ import { hlInfo, hlLeaderboardRow, hyperliquidProvider } from '../valuedesk/hype
 import { hlPriceSeries } from '../valuedesk/hyperliquid/price.js';
 import { ACCOUNT_DETAIL, arcusProvider, lighterProvider, nameSpotFills, tradexyzProvider } from '../valuedesk/extra/providers.js';
 import { applyCachedCurves, attachPodiumCurves } from '../valuedesk/curves.js';
-import { attachStats, boardPage, cohortDetail, cohortFocus, cohortMap, cohortWallets, cohortsReady, cohortsRead, indexerStatus, netPage } from '../indexer/read.js';
+import { attachStats, boardPage, cohortDetail, cohortFocus, cohortMap, cohortWallets, cohortsReady, cohortsRead, excludedNow, indexerStatus, netPage } from '../indexer/read.js';
 import { isCohortId, isSector, type CohortFilter, type CohortRange, type WalletSort } from '../valuedesk/cohorts/model.js';
 import { isLiqRange, levFilterOf, liqAt, liqHeatmap, liqHeatmapOf, liqHistory, liqWallets, walletLiqs } from '../indexer/liqRead.js';
 import { watchAddresses } from '../indexer/host.js';
@@ -610,6 +610,19 @@ export async function valuedeskRoutes(app: FastifyInstance) {
           rankChange: row.rankChange ?? null,
         },
       };
+    } catch (e) {
+      return fail(reply, e);
+    }
+  });
+
+  /**
+   * The wallets left out of the cohorts and the liquidation heatmap (internalWallets.ts), each with why
+   * and what it holds now: nothing is left out unsaid (owner 2026-10-31).
+   */
+  app.get('/api/vs/excluded', async (_req, reply) => {
+    try {
+      await cohortsReady();
+      return { ok: true, wallets: excludedNow() };
     } catch (e) {
       return fail(reply, e);
     }

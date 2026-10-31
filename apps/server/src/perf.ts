@@ -74,6 +74,7 @@ export const CACHE_POLICIES: Readonly<Record<string, CachePolicy>> = {
   '/api/vs/cohorts': BOARD,
   '/api/vs/cohorts/detail': BOARD,
   '/api/vs/cohorts/map': BOARD,
+  '/api/vs/excluded': BOARD,
   '/api/vs/cohorts/focus': BOARD,
   '/api/vs/cohorts/wallets': BOARD,
   '/api/vs/screener': BOARD,

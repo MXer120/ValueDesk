@@ -15,7 +15,7 @@ import { join } from 'node:path';
 import { IndexStore } from '../src/indexer/store.js';
 import { tailCountRate, tailOf } from '../src/indexer/cohortTracker.js';
 import { HEDGED_WALLETS, INTERNAL_WALLETS } from '../src/valuedesk/internalWallets.js';
-import { KEEP_WARM_MS, LOAD_TTL_MS, STALE_MAX_MS, _cohortLoad, cohortDetail, cohortFocus, cohortMap, cohortBooksNow, cohortWallets, cohortsReady, cohortsRead, internalOiNow, warmCohorts } from '../src/indexer/read.js';
+import { KEEP_WARM_MS, LOAD_TTL_MS, STALE_MAX_MS, _cohortLoad, cohortDetail, cohortFocus, cohortMap, cohortBooksNow, cohortWallets, cohortsReady, cohortsRead, excludedNow, internalOiNow, warmCohorts } from '../src/indexer/read.js';
 import {
   MARGIN_SIBLING, aggregate, cohortsOf, holdsPosition, perpEquity, sampledVenue, scopeKey, scopeWallets, sumCohorts, walletRow,
   type CohortFilter, type NettedWallet, type WalletVenue,
@@ -386,7 +386,7 @@ test('a venue\'s own accounts (internalWallets.ts) are in no cohort and no load:
   writer.dropCohortMembers('sodex', [a!, b!]);
 });
 
-test('a hedged desk (internalWallets.ts HEDGED_WALLETS) is in no cohort, but its book stays for the heatmap', async () => {
+test('a hedged desk (internalWallets.ts HEDGED_WALLETS) is in no cohort and not on the heatmap, and the excluded page lists it with what it holds', async () => {
   _cohortLoad.reset();
   const before = cohortsRead(ALL, NONE)!;
   const [a] = [...HEDGED_WALLETS.hyperliquid!];
@@ -396,6 +396,9 @@ test('a hedged desk (internalWallets.ts HEDGED_WALLETS) is in no cohort, but its
   await _cohortLoad.rebuild();
   const after = cohortsRead(ALL, NONE)!;
   assert.deepEqual(after.cohorts.map((c) => [c.id, c.wallets, c.long, c.short]), before.cohorts.map((c) => [c.id, c.wallets, c.long, c.short]), 'every cohort as before: its $180M short is not counted');
-  assert.ok(cohortBooksNow()!.per.get('hyperliquid')!.get(a!)?.positions?.length, 'the heatmap still has its book');
+  assert.equal(cohortBooksNow()!.per.get('hyperliquid')!.get(a!), undefined, 'no book on the heatmap either (owner, the same day)');
+  const listed = excludedNow().find((w) => w.address === a);
+  assert.ok(listed && listed.kind === 'hedged' && listed.short > 1e8 && listed.long === 0, `listed with its short (${JSON.stringify(listed && { long: listed.long, short: listed.short })})`);
+  assert.equal(listed!.coins[0]!.coin, 'BTC');
   writer.dropCohortMembers('hyperliquid', [a!]);
 });

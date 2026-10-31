@@ -61,6 +61,22 @@ export type {
 export const VS_VENUES: readonly Venue[] = ['sodex', 'hyperliquid'];
 /** Venues Scan can open an address on (a profile and fills each). */
 export const SCAN_VENUES: readonly Venue[] = ['sodex', 'hyperliquid', 'tradexyz', 'lighter', 'arcus'];
+/** A wallet left out of the cohorts and the heatmap (server internalWallets.ts), as /api/vs/excluded answers. */
+export interface ExcludedWallet {
+  venue: Venue;
+  address: string;
+  kind: 'internal' | 'hedged';
+  label: string | null;
+  why: string;
+  since: string;
+  equity: number | null;
+  long: number;
+  short: number;
+  coins: Array<{ coin: string; usd: number }>;
+  /** When its book was read (null: none held). */
+  at: number | null;
+}
+
 export const VENUE_LABEL: Record<Venue, string> = {
   sodex: 'SoDEX',
   hyperliquid: 'Hyperliquid',
@@ -191,6 +207,8 @@ export const vsApi = {
   liquidationPositions: (wallets: readonly string[], venues: readonly Venue[], signal?: AbortSignal) =>
     unwrap<{ wallets: string[]; asOf?: number; positions: WalletLiq[] }>(`/api/vs/liquidations/positions${qs({ wallets: wallets.join(','), venues: venues.join(',') })}`, signal),
 
+  /** The wallets left out of the cohorts and the liquidation heatmap, with why and what they hold. */
+  excluded: (signal?: AbortSignal) => unwrap<{ wallets: ExcludedWallet[] }>('/api/vs/excluded', signal),
   /** Every cohort for a set of venues (netted over them), under a sector / coin filter. */
   cohorts: (venues: readonly Venue[], f: CohortFilter, signal?: AbortSignal) =>
     unwrap<CohortsResponse>(`/api/vs/cohorts${qs({ venues: venues.join(','), sector: f.sector ?? undefined, coin: f.coin ?? undefined })}`, signal),

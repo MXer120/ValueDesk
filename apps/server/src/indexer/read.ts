@@ -24,7 +24,7 @@ import { tailCountRate, tailOf } from './cohortTracker.js';
 import { labelMatches, shownLabel } from '../valuedesk/labels.js';
 import { winRateOf } from '../valuedesk/winRate.js';
 import { sampledVenue, COHORT_RANGES, type CohortWalletRow as WalletRow } from '../valuedesk/cohorts/model.js';
-import { isInternal, outOfCohorts } from '../valuedesk/internalWallets.js';
+import { EXCLUDED_WALLETS, isExcluded, outOfCohorts, type ExcludedWallet } from '../valuedesk/internalWallets.js';
 import { liqCoin } from '../valuedesk/liquidations/levels.js';
 
 export interface IndexState {
@@ -328,6 +328,13 @@ const REBUILD_LEAD_MS = 15_000;
 const WANT_SCOPES = 12;
 const WANT_FILTERS = 24;
 
+/** An excluded wallet's book as the cohort tables hold it. */
+interface ExcludedBook {
+  equity: number | null;
+  positions: ReadonlyArray<{ symbol: string; szi: number; entry: number | null }>;
+  at: number;
+}
+
 interface CohortLoad {
   at: number;
   per: Map<Venue, Map<string, WalletVenue>>;
@@ -335,8 +342,10 @@ interface CohortLoad {
   coverage: Partial<Record<Venue, VenueCoverage>>;
   /** Newest book write (ms). */
   booksAt: number;
-  /** `venue|coin` -> the open interest (coins, one side) the venue's own accounts hold (internalWallets.ts): not the traders'. */
+  /** `venue|coin` -> the open interest (coins, one side) the excluded wallets hold (internalWallets.ts): not the traders'. */
   internal: Map<string, number>;
+  /** `venue|address` -> an excluded wallet's book, for the page that lists them (excludedNow). */
+  excluded: Map<string, ExcludedBook>;
   /** Netted wallets per set of venues: built on first use, or ahead by a rebuild. */
   scopes: Map<string, NettedWallet[]>;
   /** Every cohort's figures (and every holding wallet's) per set of venues and filter, likewise. */
@@ -433,6 +442,7 @@ function* loadSteps(s: IndexStore, now: number, ahead: ReadonlyArray<{ venues: r
   const coverage: Partial<Record<Venue, VenueCoverage>> = {};
   let booksAt = 0;
   const internal = new Map<string, number>();
+  const excluded = new Map<string, ExcludedBook>();
   // A venue's rows, kept until it is built; Hyperliquid and trade.xyz wait for
   // each other (their perp equity reads both books: model.ts perpEquity).
   const raw = new Map<Venue, { members: Map<string, CohortMemberRow>; books: Map<string, CohortBookRow> }>();
@@ -445,9 +455,12 @@ function* loadSteps(s: IndexStore, now: number, ahead: ReadonlyArray<{ venues: r
     // A tail still being read in full counts as its old sample until (nearly) all of it is (cohortTracker tailCountRate).
     const rate = tailCountRate(venue, tailOf(members, (a) => books.has(a)));
     for (const address of new Set([...members.keys(), ...books.keys()])) {
-      // A venue's own accounts are neither in a cohort nor on the map (internalWallets.ts); what they hold
-      // is taken off the venue's open interest the map's coverage is measured against (internalOiNow).
-      if (isInternal(venue, address)) {
+      // An excluded wallet (internalWallets.ts: a venue's own account, a hedged desk) is neither in a cohort
+      // nor on the map; what it holds is taken off the venue's open interest the map's coverage is measured
+      // against (internalOiNow), and its book is kept for the page that lists it (excludedNow).
+      if (isExcluded(venue, address)) {
+        const b = books.get(address);
+        if (b) excluded.set(`${venue}|${address}`, { equity: b.equity, positions: b.positions, at: b.at });
         for (const p of books.get(address)?.positions ?? []) {
           const k = `${venue}|${liqCoin(p.symbol)}`;
           internal.set(k, (internal.get(k) ?? 0) + Math.abs(p.szi) / 2);
@@ -484,7 +497,7 @@ function* loadSteps(s: IndexStore, now: number, ahead: ReadonlyArray<{ venues: r
     }
     raw.delete(venue);
   }
-  const load: CohortLoad = { at: now, per, marks: s.cohortMarks(), coverage, booksAt, internal, scopes: new Map(), stats: new Map() };
+  const load: CohortLoad = { at: now, per, marks: s.cohortMarks(), coverage, booksAt, internal, excluded, scopes: new Map(), stats: new Map() };
   for (const a of ahead) {
     yield* netSteps(load, a.venues);
     for (const f of a.filters) yield* sumSteps(load, a.venues, f);
@@ -692,6 +705,33 @@ function history(s: IndexStore, scope: string, fromT: number, f: CohortFilter, c
  */
 export function internalOiNow(venue: Venue, coin: string): number {
   return cohortLoad?.internal.get(`${venue}|${coin}`) ?? 0;
+}
+
+/**
+ * Every excluded wallet (internalWallets.ts) with what it holds now, for the page that lists them:
+ * equity, long and short USD at the marks, its coins largest first. From the load in use; an empty
+ * list before there is one (never builds one).
+ */
+export function excludedNow(): Array<ExcludedWallet & { equity: number | null; long: number; short: number; coins: Array<{ coin: string; usd: number }>; at: number | null }> {
+  const load = cohortLoad;
+  return EXCLUDED_WALLETS.map((w) => {
+    const b = load?.excluded.get(`${w.venue}|${w.address}`);
+    let long = 0;
+    let short = 0;
+    const coins = new Map<string, number>();
+    for (const p of b?.positions ?? []) {
+      const px = load?.marks.get(`${w.venue}|${p.symbol}`) ?? p.entry ?? 0;
+      const usd = p.szi * px;
+      if (usd > 0) long += usd;
+      else short -= usd;
+      const c = liqCoin(p.symbol);
+      coins.set(c, (coins.get(c) ?? 0) + usd);
+    }
+    return {
+      ...w, equity: b?.equity ?? null, long, short, at: b?.at ?? null,
+      coins: [...coins].map(([coin, usd]) => ({ coin, usd })).sort((x, y) => Math.abs(y.usd) - Math.abs(x.usd)),
+    };
+  });
 }
 
 export function cohortBooksNow(): { at: number; booksAt: number; per: ReadonlyMap<Venue, ReadonlyMap<string, WalletVenue>>; marks: ReadonlyMap<string, number> } | null {

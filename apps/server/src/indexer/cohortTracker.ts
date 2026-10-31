@@ -87,7 +87,7 @@ import { deflateRawSync } from 'node:zlib';
 import { loadSeeds, type Seeds } from './archiveSeed.js';
 import { mayPrune } from '../retention.js';
 import { OI_EXCESS, oiCheck, oiOver, oiRereads, oiStatus } from './oiCheck.js';
-import { INTERNAL_WALLETS, isInternal, outOfCohorts } from '../valuedesk/internalWallets.js';
+import { excludedOf, isExcluded, outOfCohorts } from '../valuedesk/internalWallets.js';
 
 const envNum = (name: string, dflt: number, min: number, max: number): number => {
   const n = Number(process.env[name]);
@@ -622,7 +622,7 @@ export class CohortTracker {
   readonly live = new LiqLive({
     account: (venue, address) => {
       // A venue's own accounts are no level on the map (internalWallets.ts).
-      if (isInternal(venue, address)) return undefined;
+      if (isExcluded(venue, address)) return undefined;
       const b = this.books.get(venue)?.get(address);
       return b ? { cash: b.cash ?? null, priced: liqKnown(b), positions: [...b.pos].map(([symbol, p]) => ({ symbol, ...p })), equity: b.equity } : undefined;
     },
@@ -1680,7 +1680,7 @@ export class CohortTracker {
       await breath();
       const members = venue === 'hyperliquid' ? hlMembers : await this.membersOf(venue);
       // A venue's own accounts are no cohort member (internalWallets.ts): they leave the table too (saveMembers).
-      for (const a of INTERNAL_WALLETS[venue] ?? []) members.delete(a);
+      for (const a of excludedOf(venue)) members.delete(a);
       if (venue === 'tradexyz') this.accountPnl(members, hlMembers);
       await breath();
       this.members.set(venue, members);
