@@ -9,12 +9,13 @@ export type OrderType = 'Market' | 'Limit' | 'Stop' | 'Algo';
 
 /** oot: where the ticket is - the desktop panel Order entry by default; at phone width the carousel's Trade page. */
 export function ticket(page: Page, root?: Locator) {
-  const g = root ?? page.getByRole('group', { name: 'Order entry' });
+  // "Order entry": the desktop panel (a group), or on a phone the carousel's page of that name (a tabpanel).
+  const g = root ?? page.getByRole('group', { name: 'Order entry' }).or(page.getByRole('tabpanel', { name: 'Order entry' }));
   const box = (name: string) => g.getByRole('textbox', { name, exact: true });
   const t = {
     g,
     tab: (name: OrderType) => g.getByRole('tablist', { name: 'Order type' }).getByRole('tab', { name, exact: true }),
-    direction: (name: 'Long' | 'Short') => g.getByRole('radiogroup', { name: 'Direction' }).getByRole('radio', { name, exact: true }),
+    direction: (name: 'Long' | 'Short' | 'Buy' | 'Sell') => g.getByRole('radiogroup', { name: 'Direction' }).getByRole('radio', { name, exact: true }),
     price: box('Price'),
     amount: box('Amount'),
     trigger: box('Trigger'),
@@ -44,8 +45,28 @@ export function ticket(page: Page, root?: Locator) {
      * the Limit price box - its own first fill, which would overwrite a price typed before it.
      * Returns that last price. Leaves the ticket on Limit.
      */
+    /**
+     * The ticket on screen: on a phone the trade page is a carousel (Chart / Order Book / Trade)
+     * and the ticket its Trade page, brought in by that tab as a person taps it.
+     */
+    async show(): Promise<void> {
+      const tab = page.locator('.mcarousel').getByRole('tab', { name: 'Trade', exact: true });
+      let tapped = 0;
+      await until(page, async () => {
+        if (!root && (await tab.isVisible().catch(() => false)) && (await tab.getAttribute('aria-selected')) !== 'true') {
+          // A tap scrolls the carousel smoothly; tapped again only if it did not get there.
+          if (Date.now() - tapped > 2_500) {
+            await tab.click();
+            tapped = Date.now();
+          }
+          return false;
+        }
+        return t.g.isVisible();
+      }, 'the order ticket on screen', 30_000);
+    },
+
     async ready(): Promise<number> {
-      await t.g.waitFor({ state: 'visible', timeout: 30_000 });
+      await t.show();
       await until(page, async () => (await t.unit.isEnabled()) && /^Size in \S+/.test((await t.unit.getAttribute('aria-label')) ?? ''), 'the market rules to load', 30_000);
       await t.type('Limit');
       return num(await waitValue(t.price, (v) => num(v) > 0, 'the last price in the Price box', 30_000));

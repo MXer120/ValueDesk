@@ -10,10 +10,11 @@ The inventory was taken from the code on 2026-10-30 (branch `copy-trading`, afte
 
 | Suite | What it is | Where |
 |---|---|---|
-| UI specs | Playwright in the installed Edge against the local dev web; ARIA selectors; a throwaway wallet (`wallet.ts`), practice algos and paper copies. Not in CI. | `apps/web/e2e/ui/*.spec.ts`, run by `npx tsx e2e/ui/run.ts` from `apps/web` |
-| Fake SoDEX account | For the UI specs: the throwaway wallet gets a SoDEX account answered inside the browser context. Every gateway write is fulfilled there and never forwarded. Reads about the wallet come from the fake account; market data comes from SoDEX. Each write's body is decoded, and its signer is recovered from the same EIP-712 digest SoDEX checks. | `apps/web/e2e/ui/sodexFake.ts`, `trade.ts` |
+| UI specs | Playwright in the installed Edge against the local dev web; ARIA selectors; a throwaway wallet (`wallet.ts`), practice algos and paper copies. Every spec runs twice: on a 1600x1000 desktop and on a phone (375x812, touch, a phone's user agent; `--viewport`). Not in CI. | `apps/web/e2e/ui/*.spec.ts`, run by `npx tsx e2e/ui/run.ts` from `apps/web` |
+| Fake SoDEX account | For the UI specs: the throwaway wallet gets a SoDEX account answered inside the browser context. Every gateway write is fulfilled there and never forwarded. Reads about the wallet come from the fake account; market data comes from SoDEX. Each write's body is decoded, and its signer is recovered from the same EIP-712 digest SoDEX checks. Stateful (`stateful: true`): orders rest and fill, stops rest, leverage is kept. A fake leader (`leader`): its reads answered, its trades printed on the routed public `trade` stream, which the browser copier follows. | `apps/web/e2e/ui/sodexFake.ts`, `trade.ts` |
+| UI steps | What a person does on a page, one step at a time (the ticket and its review, Cancel, Close, the copy window, Manage copies, the copy prompt, the algo ticket, the Algos table). The live browser target clicks with them for real money; `uiSteps.spec.ts` runs the same steps against the stateful fake. | `apps/web/e2e/ui/uiSteps.ts` |
 | Unit | `node:test` through tsx; `deploy/ci/run-tests.mjs` suite `web-unit` | `apps/web/src/**/*.test.ts(x)` |
-| Live | Real money on SoDEX mainnet, through each executor and the browser target. Every result is checked against SoDEX's own account data. | `apps/executor/tools/live-test` (`--target browser` drives `e2e/ui/bridgeSession.ts`) |
+| Live | Real money on SoDEX mainnet, through each executor and the browser target. Every result is checked against SoDEX's own account data. | `apps/executor/tools/live-test` (`--target browser` drives `e2e/ui/bridgeSession.ts`; `scenarios/ui.ts` clicks the pages) |
 
 **Spec files:**
 - `orderTicket`: types, TIF notes, units, MAX
@@ -26,6 +27,18 @@ The inventory was taken from the code on 2026-10-30 (branch `copy-trading`, afte
 - `copyFlow` (new): every rule, refusals, counter, Manage copies
 - `notices`: the bell's filters
 - `staleBuild`
+- `uiSteps` (new): the live browser target's steps against the stateful fake: a limit and Cancel, a market buy and
+  Close, TP/SL on an entry, leverage and margin mode, a copy from the copy window closed from Manage copies, "Ask before
+  each trade" answered in the prompt, a bracket's exits pulled from the Algos table, a stop-market and a stop-limit,
+  Modify, Cancel all, the positions' TP/SL sheet set and changed, a spot buy and sell, the ticket starting at the
+  account's leverage
+
+**Live scenarios that click the pages** (`apps/executor/tools/live-test/scenarios/ui.ts`, browser target only, U =
+$12 each, under 3 minutes, flat at the end): `ticket.limit-cancel`, `ticket.market-close`, `ticket.tpsl`,
+`ticket.leverage`, `ticket.stop`, `ticket.modify`, `ticket.cancel-all`, `position.tpsl-sheet`, `spot.order`,
+`algo.ui-cancel-exits`, `copy.ui-close`, `copy.ui-confirm`. Each runs the same `uiSteps.ts` steps as
+`uiSteps.spec.ts`, and checks SoDEX's own account data. They are written and pass offline and in a dry browser run;
+the first real-money run is the parent session's.
 
 **Legend for the "Tested in" column:**
 - `UI` means a UI spec. `UI+fake` means a UI spec against the fake SoDEX account, which also checks the signed body.
@@ -40,15 +53,15 @@ The inventory was taken from the code on 2026-10-30 (branch `copy-trading`, afte
 | Direction Long / Short (Buy / Sell on spot) | side = 1 / 2 in the signed order; the labels on spot | UI+fake `orderFlow` |
 | Order type Market / Limit / Stop (Algo) | each type's own fields; spot offers Market and Limit only | UI `orderTicket`, UI+fake `orderFlow` |
 | Price, MID | the limit price on the wire is the price typed. A price typed right after a market or Futures/Spot switch is kept (bug 2). | UI `orderTicket`, UI+fake `orderFlow`, unit `priceSeed.test.ts` |
-| Trigger, Kind (stop-loss / take-profit), Executes as (market / limit), Trigger on (mark) | in the order: stopPrice, stopType, triggerType = mark, type, and a stop-limit's price and TIF | UI+fake `orderFlow` |
+| Trigger, Kind (stop-loss / take-profit), Executes as (market / limit), Trigger on (mark) | in the order: stopPrice, stopType, triggerType = mark, type, and a stop-limit's price and TIF; on SoDEX a stop-market and a stop-limit rest as triggers at the typed prices | UI+fake `orderFlow`, `uiSteps`; **live** `ticket.stop` |
 | Amount, unit toggle (coin / USDC) | coin <-> USDC at the order price; a USDC size goes out in the coin | UI `orderTicket`, UI+fake `orderFlow` |
 | MAX, % slider and box | 100 % with no balance sizes nothing; with a balance, balance x leverage / price (MAX and 25 %) | UI `orderTicket`, UI+fake `orderFlow` |
-| Leverage popover (typed, slider, presets, Confirm) | clamped to the market's maximum; Confirm sends one `/trade/leverage` signed by the trading key | UI `tpsl`, UI+fake `orderFlow` |
-| Margin mode Cross / Isolated | one leverage change with marginMode 1; the review then says "isolated" | UI+fake `orderFlow` |
+| Leverage popover (typed, slider, presets, Confirm) | starts at the leverage and margin mode SoDEX holds for the market (bug 11), kept once changed here; clamped to the market's maximum; Confirm sends one `/trade/leverage` signed by the trading key; SoDEX shows what it sent, and it is set back the same way | UI `tpsl`, UI+fake `orderFlow`, `uiSteps`; unit `accountLeverage.test.ts`; **live** `ticket.leverage` |
+| Margin mode Cross / Isolated | one leverage change with marginMode 1; the review then says "isolated" | UI+fake `orderFlow`, `uiSteps`; **live** `ticket.leverage` |
 | Reduce only | sent as reduceOnly; with TP/SL it is refused on Place before anything is signed | UI+fake `orderFlow` |
 | TIF GTC / IOC / GTX (post-only) | the notes; post-only that would take disables the button; IOC and GTC on the wire | UI `orderTicket`, UI+fake `orderFlow` |
 | TP/SL switch, TP / SL price, Gain / Loss in $ and %, the unit swap | the arithmetic; held while entry, size and leverage change; wrong-side notices | UI `tpsl`, unit `tpsl.test.ts`, `exitEntry.test.ts` |
-| TP/SL on the wire | a BRACKET entry plus two ATTACHED_STOP market legs, opposite side, reduce-only, same size, at the prices shown | UI+fake `orderFlow` |
+| TP/SL on the wire | a BRACKET entry plus two ATTACHED_STOP market legs, opposite side, reduce-only, same size, at the prices shown; on SoDEX both rest as stops at exactly those prices | UI+fake `orderFlow`, `uiSteps`; **live** `ticket.tpsl` |
 | Read-out: Order value, Margin required | the exact value in the app's number format. It read "$0,00" before (bug 1). | UI+fake `orderFlow`, unit `numStyle.test.ts` |
 | Read-out: Liq. price, Slippage (Max slippage pop-up), Fees | a market order's limit sits within the slippage cap (the default) | UI+fake `orderFlow` (cap only) |
 | The button's gates: Connect wallet, Create account, Enable trading | each label; Enable trading signs ValueDesk's terms, the builder fee and one trading key on both engines, and nothing else | UI `orderTicket`, UI+fake `orderFlow` |
@@ -62,20 +75,20 @@ The inventory was taken from the code on 2026-10-30 (branch `copy-trading`, afte
 | SoDEX rejecting inside an accepted batch | "SoDEX rejected the order: the order: ..." on the ticket; no "placed" toast | UI+fake `orderFlow` |
 | Account mismatch ("Trading disabled: viewing ..."), Unlock to trade, Close-only here, Not available, Accept the terms | the gate logic | unit `useTradeGate`/`legalGate.test.ts`, `keyLock.test.ts`; - in UI. A second account or a region cannot be made in a test browser. |
 | Unlisted market ("... is not listed on SoDEX") | the message | unit `listed.test.ts`; - in UI (every listed market is listed) |
-| Spot order | `/spot/trade/orders/batch`, signed by the same key; no leverage or TP/SL | UI+fake `orderFlow` |
-| Phone width | the ticket is the carousel's Trade page | UI `algoFlow` (phone test) |
-| **Accepted by SoDEX for real** | that SoDEX accepts the signed order (goJSON bytes, nonce window, builder cap) and that it rests or fills | **live only.** The live suite covers it for algo children and copier orders; a manual ticket order has no live scenario (see "Needs real money"). |
+| Spot order; Futures / Spot in the bar | `/spot/trade/orders/batch`, signed by the same key; no leverage or TP/SL; the Market type switch in the bar on every screen (bug 12); on SoDEX a market buy of U and the sell back move the spot account | UI+fake `orderFlow`, `uiSteps` (both `@phone`); **live** `spot.order` (needs vUSDC on spot: see "Needs real money") |
+| Phone width | the ticket is the carousel's Trade page, named "Order entry" (bug 8); every spec of this file runs at 375x812 too | UI `algoFlow` (phone test), every spec `@phone`; unit `MobileCarousel.test.tsx` |
+| **Accepted by SoDEX for real** | that SoDEX accepts the signed order (goJSON bytes, nonce window, builder cap) and that it rests or fills | **live**: a limit that rests (`ticket.limit-cancel`), a market buy that fills with the builder fee (`ticket.market-close`), an entry with TP/SL (`ticket.tpsl`), a leverage change (`ticket.leverage`), a stop-market and a stop-limit (`ticket.stop`), a spot buy and sell (`spot.order`) |
 
 ## Account tables on what the ticket made (`components/Account.tsx`, `TpSlSheet.tsx`)
 
 | Control | What is checked | Tested in |
 |---|---|---|
-| Positions: Close (x) | asked first ("SELL market, reduce-only"); "Keep position" sends nothing; then one reduce-only market sell of the whole size | UI+fake `accountActions` |
-| Positions: Edit TP/SL sheet | a TP on the wrong side is refused ("Above the mark."); then two reduce-only stop legs that sell, at the prices typed | UI+fake `accountActions`; unit `tpsl.test.ts` |
+| Positions: Close (x) | asked first ("SELL market, reduce-only"); "Keep position" sends nothing; then one reduce-only market sell of the whole size; on SoDEX the account is flat and (with TP/SL) no stop is left | UI+fake `accountActions`, `uiSteps`; **live** `ticket.market-close`, `ticket.tpsl` |
+| Positions: Edit TP/SL sheet | a TP on the wrong side is refused ("Above the mark."); then two reduce-only stop legs that sell, at the prices typed; opened again it shows them, and new prices move both (modify, or cancel and place); on SoDEX they rest at the sheet's prices, move, and none is left after Close | UI+fake `accountActions`, `uiSteps`; unit `tpsl.test.ts`; **live** `position.tpsl-sheet` |
 | Positions: margin add / remove (isolated) | - | - (needs an isolated position; the fake seeds a cross one) |
-| Open orders: Cancel | one signed DELETE naming that order, and a toast | UI+fake `accountActions` |
-| Open orders: Cancel all | asked first; "Keep them" sends nothing | UI+fake `accountActions` |
-| Open orders: Modify | - | - |
+| Open orders: Cancel | one signed DELETE naming that order, and a toast; on SoDEX the order is gone, unfilled | UI+fake `accountActions`, `uiSteps`; **live** `ticket.limit-cancel` |
+| Open orders: Cancel all | asked first; "Keep them" sends nothing; "Cancel every open order" takes two resting limits off SoDEX | UI+fake `accountActions`, `uiSteps`; **live** `ticket.cancel-all` |
+| Open orders: Modify | the form takes a new price and size, Save; SoDEX shows exactly the new values (replace, or cancel and a new order where the builder fee requires it) | UI+fake `uiSteps`; **live** `ticket.modify` |
 | Algos tab | see below | |
 
 ## Algo ticket (`components/algo/AlgoTicket.tsx`, `draft.ts`)
@@ -95,7 +108,7 @@ The inventory was taken from the code on 2026-10-30 (branch `copy-trading`, afte
 | Conditional: condition, market, price, Then | conditions[0], then.type | UI `algoFlow`, unit `draft.test.ts` |
 | Trailing stop: Trail, Start at | reduce-only forced, trailPct, source mark | UI `algoFlow` |
 | Fill fast: Max slippage | kind sweep, slippageBps | UI `algoFlow` |
-| Bracket: Entry, Take-profit, Stop-loss | entry market, exits as fractions | UI `algoFlow` |
+| Bracket: Entry, Take-profit, Stop-loss | entry market, exits as fractions; a real one from the ticket's slide puts both exits on SoDEX after its entry | UI `algoFlow`, `uiSteps`; **live** `algo.ui-cancel-exits` |
 | Basket: legs, side, USD, Each market | two legs (this market and ETH, opposite), each at the default $200. The old $100 default could not start (bug 4). | UI `algoFlow`, unit `draft.test.ts` |
 | Direction Short | side sell | UI `algoFlow` |
 | Advanced window: every kind's sections, Reset to defaults, Done | sections per kind; Reset hidden at phone width | UI `algoTicket`, `algoFlow`; unit `draft.test.ts` (advancedChanges / resetAdvanced) |
@@ -120,7 +133,7 @@ The inventory was taken from the code on 2026-10-30 (branch `copy-trading`, afte
 | Row details, Copy Algo ID | the full id on the clipboard, toast "Algo ID copied" | UI `algoFlow` |
 | Open: the window (Live / Orders / Log, Practice badge, Close) | it opens and closes | UI `algoFlow` |
 | Cancel; Cancel all | the run ends; Cancel all ends every run and leaves | UI `algoFlow` |
-| Cancel exits (an ended algo whose exits still guard) | - | **live** (`twap.exits`); a practice run's exits do not stay live |
+| Cancel exits (an ended algo whose exits still guard) | while a bracket runs after its entry the row offers Cancel: it ends, its exits stay ("Exits live"); then Cancel exits pulls them, and the row offers nothing more; on SoDEX both stops go, the position stays | UI `uiSteps` (practice); **live** `algo.ui-cancel-exits` (and `twap.exits` through the bridge) |
 | Child order IDs, Copy details (IDs shown) | - | unit (`accountTables` ids helpers); - in UI |
 | Executor rows (ValueDesk 24/7, self-hosted) and their signatures | - | **live** (hosted/self targets) |
 
@@ -129,6 +142,7 @@ The inventory was taken from the code on 2026-10-30 (branch `copy-trading`, afte
 | Control / flow | What is checked | Tested in |
 |---|---|---|
 | Open from a trader card (Copy / Counter) | the window and its steps | UI `copySetup`, `copyFlow` |
+| Open from a trader's link (`/copy?address=&venue=`, Scan's Copy) | the window for that trader, and the copy it starts follows that address | UI+fake `uiSteps`; **live** `copy.ui-close`, `copy.ui-confirm` |
 | Direction Copy / Counter-trade | the title, the note, "Start paper counter-trade" | UI `copyFlow` |
 | Sizing Mirror / % of their size / $ per trade | each mode's field and hint; fixedRatio 25 % -> ratio 0.25 | UI `copyFlow`, unit `setup.test.ts` |
 | Max leverage, Max position, Slippage cap | in the copy's settings; validation words | UI `copyFlow`, unit `setup.test.ts` |
@@ -144,7 +158,8 @@ The inventory was taken from the code on 2026-10-30 (branch `copy-trading`, afte
 | Trade with (amount), 25 / 50 / 75 % / Max chips | allocationUsd. Under the minimum, the footer says why and the box is marked (bug 6). Chips need an equity. | UI `copyFlow`; chips - |
 | Self-hosted: Copier address, Find, Pairing code, Pair; "I made an API key myself" (Key name, Private key, Use this key); Revoke | - | **live** (`setup.key-import`, self target); - in UI (needs a running copier) |
 | Start paper copy (this browser) | nothing signed; the settings the copy runs with, field by field; toasts | UI `copySetup`, `copyFlow` |
-| Start a live copy (any place), executor `subscribe` signature | - | **live** (`copy.*` scenarios) |
+| Start a live copy in this browser from the window | the copy fee and copy key approved in the window (one signature each, registered), Start copying; the rules typed are the copy's; the leader's trade is copied (an IOC signed by the copy key) | UI+fake `uiSteps`; **live** `copy.ui-close`, `copy.ui-confirm` |
+| Start a live copy on an executor, its `subscribe` signature | - | **live** (`copy.*` scenarios, through the bridge) |
 | Region blocks, EEA 2x, unknown location | the policy | unit (`copy-engine` policy tests, `legal/*.test.ts`); - in UI (the test browser's country is the edge's) |
 
 ## Copy management (`components/copy/CopiesDialog.tsx`, `panels.tsx`, Portfolio's My copies card)
@@ -156,9 +171,9 @@ The inventory was taken from the code on 2026-10-30 (branch `copy-trading`, afte
 | Row: Activity, its tab, Export CSV | the tab and the button | UI `copyFlow` |
 | Row: Stop | asked first; "Keep copying" changes nothing; then stopped, with no Pause left | UI `copyFlow` |
 | Stop all, "Also close every copied position" | asked first; "Every copy is stopped." | UI `copyFlow` |
-| Row: Close (stop and close positions) | - | **live** (`copy.stop-close`); a paper copy with a position needs a leader trade |
+| Row: Close (stop and close positions) | offered while the copy holds a position; asked first ("Stop and close positions"); the copy stops and sends one reduce-only sell; flat | UI+fake `uiSteps` (a fake leader's trade); **live** `copy.ui-close` (and `copy.stop-close` through the bridge) |
 | Changing a running copy's rules (`updateCopy`) | - | no UI exists for it (the bridge's `copier.update` only); **live** (`copy.size-change`) |
-| "Copy this trade?" prompt (Skip / Copy it) | - | needs a leader trade while it runs; **live** through the bridge's `confirms` / `answer` |
+| "Copy this trade?" prompt (Skip / Copy it) | the prompt names the leader's move; Copy it sends the copy's order, Skip sends nothing (declined in the activity); a close answered Copy it is reduce-only | UI+fake `uiSteps` (a fake leader's trades); **live** `copy.ui-confirm` (clicked), `copym.confirm` (through the bridge) |
 
 ## The bell (`components/Notices.tsx`)
 
@@ -172,18 +187,22 @@ The inventory was taken from the code on 2026-10-30 (branch `copy-trading`, afte
 
 ## Needs real money (the parent session's live browser target and the live suite)
 
-- **SoDEX accepting what the browser signs.** The fake checks the body and the signer against the same digest. Only
-  SoDEX can show that the gateway agrees: goJSON bytes, nonce window, builder fee caps, key permissions.
-  - A **manual order from the order ticket** (limit, market, stop, bracket with exits, leverage change, cancel, close)
-    has no live scenario yet. The live suite places algo children and copier orders, which share the signing and
-    sending path (`trading/actions.ts`), but not the ticket's `placeOrder` legs.
-  - The parent's live browser target can add these: one limit far from the market, then cancel it; leverage set back.
+Closed by the browser target's UI scenarios (`scenarios/ui.ts`, written 2026-10-30; their logic passes offline in
+`uiSteps.spec.ts`, desktop and phone, and in a dry browser run; the real-money run is pending): the order ticket's
+limit, market, entry with TP/SL, stop-market and stop-limit, leverage change (`ticket.*`), the open orders' Cancel,
+Modify and Cancel all (`ticket.limit-cancel`, `ticket.modify`, `ticket.cancel-all`), the positions' Close and TP/SL
+sheet (`ticket.market-close`, `position.tpsl-sheet`), a spot buy and sell (`spot.order`); exits that stay live after an
+algo ends, pulled with "Cancel exits" (`algo.ui-cancel-exits`); "Close" on a copy with positions (`copy.ui-close`); the
+copy-each-trade prompt answered by clicking (`copy.ui-confirm`).
+
+Still open:
+
+- **Spot needs funds on spot.** `spot.order` needs about $13 of vUSDC in the follower's SoDEX **spot** account; the
+  test deposit is on perps. Until $15 is moved perps -> spot (sodex.com Transfer, or ValueDesk's transfer) it is skipped
+  with exactly that reason. It sells back what it buys; the runner's cleanup flattens perps only.
+- **Isolated margin add / remove** on a position (the positions table's margin edit): no scenario and no UI spec.
 - **Fills and positions:**
-  - fills;
   - positions and liquidation estimates against SoDEX's own numbers;
-  - exits that stay live after an algo ends ("Cancel exits");
-  - "Close" on a copy with positions;
-  - the copy-each-trade prompt;
   - copy notices raised by leader events.
 - **The fee and key steps with a SoDEX account:**
   - registered for real, not rejected;
@@ -218,8 +237,48 @@ The inventory was taken from the code on 2026-10-30 (branch `copy-trading`, afte
    that grid.
    - Fixed in `CopiesDialog.tsx` and `MyCopies.tsx`; UI `copyFlow`.
 
+Found by running every UI spec at a phone's 375x812 (touch, mobile user agent; `run.ts --viewport phone`, 2026-10-30):
+
+8. **The ticket had no name on a phone.** At phone width the trade page is a carousel (Chart / Order Book / Trade)
+   inside the "Order book and trades" panel; its tabs controlled nothing and its pages were unnamed, so the order
+   ticket - "Order entry" on a wide screen - could not be found by name with a screen reader.
+   - Fixed in `dashboard/MobileCarousel.tsx` (tabs with `aria-controls`, each page a named `tabpanel`) and
+     `registry.tsx` (the Trade page is "Order entry"); unit `MobileCarousel.test.tsx`, every ticket spec `@phone`.
+9. **The notifications list ran off the screen on a phone.** The bell sits mid-bar there (no rail); its list, hung
+   from the bell's right edge, lay about 100px off the left of the screen, the titles cut.
+   - Fixed in `styles.css` (under 761px the list spans the screen under the bar); UI `notices` (the list lies within
+     the screen) `@phone`.
+10. **Toasts covered a phone's header and took its taps.** Without a rail the toast stack sat 56px down, over the
+    second and third rows of a phone's three-row bar: the bell, the wallet button and the page links. The indexing
+    card that a wallet connection starts stays for minutes, so "Portfolio" could not be tapped.
+    - Fixed in `styles.css` (under 761px the stack starts under the bar's real height, `--navbar-live`); UI `notices`
+      ("toasts never lie over the bar": a page link takes a tap) `@phone`, and `copyFlow`'s Manage copies `@phone`.
+
+Found while closing "Needs real money" (2026-10-30):
+
+11. **The ticket showed a leverage SoDEX would not use.** It started every market at the market's initial leverage
+    (20x) whatever the account held (2x set on sodex.com, or here before), and priced margin and liquidation with it,
+    while SoDEX fills the order at the account's own setting.
+    - Fixed in `components/OrderEntry.tsx` with `trading/accountLeverage.ts`: the ticket takes the leverage and margin
+      mode SoDEX holds for the market (the position's, else the market's setting) once the account state answers, and
+      keeps the user's own choice once they change it there. Unit `accountLeverage.test.ts`; UI+fake `uiSteps` ("the
+      ticket starts at the leverage ... SoDEX holds", desktop and phone).
+12. **A phone had no Futures / Spot switch.** The bar offered it only with the rail; on a phone a spot market was
+    reachable only by searching for one.
+    - Fixed in `components/NavBar.tsx` and `shell.css`: the same "Market type" switch sits in a rail-less bar's first
+      row on the trade page. UI+fake `orderFlow`'s spot test (the switch on screen, used) and `uiSteps` `spot.order`,
+      both `@phone`.
+13. **Toasts lay over an open dialog on a phone.** The indexing card, above everything, covered the terms dialog's
+    "I confirm" box and took its tap (seen as a flaky Enable trading `@phone`).
+    - Fixed in `styles.css`: under 761px, while a modal dialog is open, the stack sits under it. UI `notices` (the
+      toast is not the topmost thing under an open dialog) `@phone`.
+
 ## Seen, not changed (the owner's call)
 
+- **Cancelling a running bracket keeps its exits.** The Algos table's Cancel on a bracket whose entry filled ends it
+  and leaves its take-profit and stop-loss on SoDEX ("Exits live"); a second click, Cancel exits, pulls them. By
+  design (the engine keeps what protects a filled position), and said in its log, but two clicks for "cancel this
+  bracket". `algo.ui-cancel-exits` checks both steps on SoDEX.
 - **Unreachable code.**
   - `copy/CopySetupSheet.tsx`'s sheet (`CopySetupSheet`) never opens: `useCopy.startCopy` is not called. Its steps
     live on in the copy window.

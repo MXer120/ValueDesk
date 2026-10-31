@@ -153,6 +153,17 @@ export function NavBar({
     return () => { ro.disconnect(); root.style.removeProperty('--navbar-live'); };
   }, []);
 
+  /* Futures or Spot, on the trade page: the rail's bar shows it before the links, a bar without the rail in its first row. */
+  const marketType = tab === 'trade' && engine && onEngine ? (
+    <div className={`nav-seg${rail ? '' : ' nav-seg--bar'}`} role="radiogroup" aria-label="Market type">
+      {(['perps', 'spot'] as const).map((e) => (
+        <button key={e} type="button" role="radio" aria-checked={engine === e} className={engine === e ? 'is-on' : ''} onClick={() => onEngine(e)}>
+          {e === 'perps' ? 'Futures' : 'Spot'}
+        </button>
+      ))}
+    </div>
+  ) : null;
+
   return (
     <header ref={bar} className={`navbar${rail ? ' navbar--rail' : ''}`}>
       {/* The bar's ground over the page that scrolls behind it: blur bands under a tint (shell.css). */}
@@ -164,15 +175,9 @@ export function NavBar({
             ValueDesk
           </span>
         )}
-        {rail && tab === 'trade' && engine && onEngine && (
+        {rail && marketType && (
           <>
-            <div className="nav-seg" role="radiogroup" aria-label="Market type">
-              {(['perps', 'spot'] as const).map((e) => (
-                <button key={e} type="button" role="radio" aria-checked={engine === e} className={engine === e ? 'is-on' : ''} onClick={() => onEngine(e)}>
-                  {e === 'perps' ? 'Futures' : 'Spot'}
-                </button>
-              ))}
-            </div>
+            {marketType}
             <span className="nav-div" aria-hidden="true" />
           </>
         )}
@@ -205,6 +210,9 @@ export function NavBar({
         </nav>
         {/* More: the status page, Help & FAQ, Send feedback (owner, 2026-10-28). Outside the nav: its menu's rows are not nav links. */}
         <NavMore alert={alert} onOpenStatus={onOpenStatus} />
+        {/* Without the rail (a phone, a narrow window) the same switch sits in the bar's first row, beside
+            the wordmark: spot markets were otherwise reachable only through the market search there. */}
+        {!rail && marketType}
 
         <div className={`navstatus${rail ? ' navstatus--rail' : ''}`}>
           {/*

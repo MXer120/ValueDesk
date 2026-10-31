@@ -5,7 +5,9 @@
  * their option matrix (scenarios/algo-matrix.ts) after them, copy trading
  * (which needs the leader) after that, the liquidations (slow) next, and the
  * fee ladder last (it puts the executor on other fee steps; the cleanup puts it
- * back on the first). Slow ones only with --slow.
+ * back on the first). Slow ones only with --slow. The browser target's own UI
+ * scenarios (scenarios/ui.ts: the order ticket, the Algos table, the copy window)
+ * follow the algo matrix and the copy matrix.
  */
 import type { Scenario } from './scenario.ts';
 import { SETUP_SCENARIOS } from './scenarios/setup.ts';
@@ -15,8 +17,20 @@ import { COPY_SCENARIOS } from './scenarios/copy.ts';
 import { COPY_MATRIX_SCENARIOS } from './scenarios/copy-matrix.ts';
 import { LIQ_SCENARIOS } from './scenarios/liquidation.ts';
 import { FEE_SCENARIOS } from './scenarios/fees.ts';
+import { UI_ALGO_SCENARIOS, UI_COPY_SCENARIOS, UI_TICKET_SCENARIOS } from './scenarios/ui.ts';
 
-export const CATALOGUE: readonly Scenario[] = [...SETUP_SCENARIOS, ...ALGO_SCENARIOS, ...ALGO_MATRIX_SCENARIOS, ...COPY_SCENARIOS, ...COPY_MATRIX_SCENARIOS, ...LIQ_SCENARIOS, ...FEE_SCENARIOS];
+export const CATALOGUE: readonly Scenario[] = [
+  ...SETUP_SCENARIOS,
+  ...ALGO_SCENARIOS,
+  ...ALGO_MATRIX_SCENARIOS,
+  ...UI_TICKET_SCENARIOS,
+  ...UI_ALGO_SCENARIOS,
+  ...COPY_SCENARIOS,
+  ...COPY_MATRIX_SCENARIOS,
+  ...UI_COPY_SCENARIOS,
+  ...LIQ_SCENARIOS,
+  ...FEE_SCENARIOS,
+];
 
 {
   const ids = new Set<string>();

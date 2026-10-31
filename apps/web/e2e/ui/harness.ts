@@ -31,6 +31,23 @@ export const LIVE = process.env.VS_E2E_UI_LIVE === '1';
 const HEADED = process.env.VS_E2E_UI_HEADED === '1';
 const SLOWMO = Number(process.env.VS_E2E_UI_SLOWMO) || undefined;
 
+/**
+ * The screen the specs run on (run.ts --viewport): 'desktop' (1600x1000) or 'phone' - 375x812, a
+ * touch phone (isMobile, touch, a phone's user agent) emulated in the same Edge. At phone width the
+ * trade page is a carousel (Chart / Book / Trade), the account tables sit under it, and the Tools
+ * rail is a bar: the helpers (ticket.ts, connectWallet) find each control where a phone shows it.
+ */
+export const PHONE = process.env.VS_E2E_UI_VIEWPORT === 'phone';
+
+/** A phone as the specs emulate one: an iPhone-sized screen, touch, Edge on Android's user agent. */
+export const PHONE_DEVICE = {
+  viewport: { width: 375, height: 812 },
+  isMobile: true,
+  hasTouch: true,
+  deviceScaleFactor: 2,
+  userAgent: 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Mobile Safari/537.36 EdgA/156.0.0.0',
+} as const;
+
 export interface OpenOptions {
   /** Connect the test wallet through the app's own Connect dialog (default false). */
   connect?: boolean;
@@ -72,7 +89,7 @@ const NAME_SHIM = 'globalThis.__name = globalThis.__name || ((f) => f);';
 export function uiSuite(file = process.argv[1] ?? 'spec') {
   let browser: Browser | null = null;
   let origin = '';
-  const stem = basename(file).replace(/\.spec\.ts$/, '');
+  const stem = basename(file).replace(/\.spec\.ts$/, '') + (PHONE ? '@phone' : '');
 
   before(async () => {
     origin = process.env.VS_E2E_UI_WEB?.trim() || (await findDevWeb());
@@ -118,7 +135,7 @@ export function uiSuite(file = process.argv[1] ?? 'spec') {
     const key = LIVE ? process.env.VS_E2E_KEY?.trim() : undefined;
     if (LIVE && !key) throw new Error('--live needs VS_E2E_KEY');
     const wallet = createTestWallet({ privateKey: key });
-    const ctx = await newUiContext(browser, wallet, o.storage);
+    const ctx = await newUiContext(browser, wallet, o.storage, { phone: PHONE });
     const errors: string[] = [];
     const watch = (p: Page) => {
       p.on('console', (m) => {
@@ -190,9 +207,9 @@ export function uiSuite(file = process.argv[1] ?? 'spec') {
  * shim, Vite's HMR socket answered here, the wallet installed, and `storage` (with the pinned
  * number format) written before the app's first script on the first load of the origin.
  */
-export async function newUiContext(browser: Browser, wallet: TestWallet, storage: Record<string, string> = {}): Promise<BrowserContext> {
+export async function newUiContext(browser: Browser, wallet: TestWallet, storage: Record<string, string> = {}, o: { phone?: boolean } = {}): Promise<BrowserContext> {
   const ctx = await browser.newContext({
-    viewport: { width: 1600, height: 1000 },
+    ...(o.phone ? PHONE_DEVICE : { viewport: { width: 1600, height: 1000 } }),
     locale: 'en-US',
     timezoneId: 'UTC',
     colorScheme: 'dark',
@@ -251,13 +268,17 @@ export async function hideDevPanel(page: Page): Promise<void> {
  * answered by the test wallet. Then "Explore while we set up" on the setup sheet.
  */
 export async function connectWallet(page: Page): Promise<void> {
+  // The Tools rail on a wide screen; on a phone (no rail) the header's own button, which then names the address.
   const rail = page.getByRole('complementary', { name: 'Tools' });
-  await rail.getByRole('button', { name: 'Connect wallet' }).click();
+  const wide = await rail.getByRole('button', { name: 'Connect wallet' }).isVisible().catch(() => false);
+  const header = page.getByRole('banner');
+  await (wide ? rail : header).getByRole('button', { name: 'Connect wallet' }).click();
   const dialog = page.getByRole('dialog', { name: 'Connect' });
   await dialog.waitFor({ state: 'visible' });
   // The test wallet announced itself over EIP-6963 as io.metamask: the row says so.
   await dialog.getByRole('button', { name: 'MetaMask Installed' }).click();
-  await rail.getByRole('button', { name: /^Wallet / }).waitFor({ state: 'visible', timeout: 30_000 });
+  const connected = wide ? rail.getByRole('button', { name: /^Wallet / }) : header.getByRole('button', { name: /0x[0-9a-f]{2,}/i });
+  await connected.first().waitFor({ state: 'visible', timeout: 30_000 });
   await dismissSetup(page);
 }
 

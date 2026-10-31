@@ -33,7 +33,8 @@ export interface Cost {
   walletSignatures?: number;
 }
 
-export type Section = 'setup' | 'algo' | 'copy' | 'fee';
+/** 'ticket': the order ticket and the account tables, worked on the page (scenarios/ui.ts). */
+export type Section = 'setup' | 'ticket' | 'algo' | 'copy' | 'fee';
 
 export interface Scenario {
   id: string;
