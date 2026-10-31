@@ -37,7 +37,7 @@ import type { LeaderTrade, LeaderVenue } from '../tools/live-test/leader.ts';
 import { leaderSkip, type Scenario } from '../tools/live-test/scenario.ts';
 import { LIQ_MAX_MARGIN } from '../tools/live-test/scenarios/liquidation.ts';
 import { decide, emptyState, exposedOn, loadState, markDone, markRunning, noteRun, saveState, selected, stateFileOf } from '../tools/live-test/state.ts';
-import { BrowserTarget, CAPABILITIES, HostedTarget, Pacer, SelfTarget, TARGETS, cannotRun, hostedRefusal, targetName, type BrowserDriver, type ExecutorTarget } from '../tools/live-test/target.ts';
+import { BrowserTarget, CAPABILITIES, HostedTarget, capabilitiesOf, Pacer, SelfTarget, TARGETS, cannotRun, hostedRefusal, targetName, type BrowserDriver, type ExecutorTarget } from '../tools/live-test/target.ts';
 
 const tmp = () => mkdtempSync(join(tmpdir(), 'vd-live-test-'));
 
@@ -451,6 +451,12 @@ test('targets: a scenario that restarts the executor declares it, and is skipped
     for (const p of pages) assert.match(cannotRun(p, t) ?? '', new RegExp(`the ${t} target cannot work ValueDesk's own pages`));
   }
   assert.match(cannotRun({ needs: ['restart'] }, 'hosted') ?? '', /the hosted target cannot kill the executor and start it again on the same data/);
+  // LIVE_HOSTED_CRASH=1: ValueDesk's executor is crashed on server 2 (hostedOps.ts), so its restart scenarios run; nothing else changes.
+  const crashOn = { LIVE_HOSTED_CRASH: '1' };
+  assert.deepEqual(capabilitiesOf('hosted', crashOn), { ...CAPABILITIES.hosted, restart: true, kill: true });
+  assert.deepEqual(capabilitiesOf('self', crashOn), CAPABILITIES.self);
+  assert.deepEqual(capabilitiesOf('hosted', {}), CAPABILITIES.hosted);
+  for (const s of restarts.filter((x) => !x.needs?.includes('localFeeStub'))) assert.equal(cannotRun(s, 'hosted', capabilitiesOf('hosted', crashOn)), null, `${s.id} runs on hosted with LIVE_HOSTED_CRASH=1`);
   // The browser reloads for a restart: it skips only what needs the runner's fee stub, and the key import.
   assert.deepEqual(CATALOGUE.filter((s) => cannotRun(s, 'browser')).map((s) => s.id).sort(), [...fees, 'setup.key-import'].sort());
   assert.match(cannotRun(imports[0]!, 'browser') ?? '', /the browser target cannot be given a SoDEX key the follower made \(key import\)/);

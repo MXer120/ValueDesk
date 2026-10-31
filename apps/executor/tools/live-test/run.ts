@@ -65,7 +65,7 @@ import { HyperliquidLeader, SodexLeader, leaderKeyName, leaderVenueOf, type Lead
 import { leaderSkip, type Scenario } from './scenario.ts';
 import { K_COIN } from './scenarios/copy.ts';
 import { decide, exposedOn, loadState, markDone, markRunning, noteRun, resultKey, saveState, selected, stateFileOf, type Mode, type RunState } from './state.ts';
-import { BrowserTarget, CAPABILITIES, HostedTarget, SelfTarget, TARGETS, cannotRun, targetName, type ExecutorTarget, type TargetName } from './target.ts';
+import { BrowserTarget, HostedTarget, capabilitiesOf, SelfTarget, TARGETS, cannotRun, targetName, type ExecutorTarget, type TargetName } from './target.ts';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..', '..', '..', '..');
@@ -238,7 +238,7 @@ async function leaderCostsOf(venue: LeaderVenueName, main: MarketInfo, hl: Hyper
 async function main(): Promise<number> {
   const args = parseArgs(process.argv.slice(2));
   const mode: Mode = args.dry ? 'dry' : 'live';
-  const caps = CAPABILITIES[args.target];
+  const caps = capabilitiesOf(args.target);
   const reads = new SodexReads(egress(null).fetch);
 
   // Markets and the book: the cheapest of the candidates is the main one, the other carries basket legs.

@@ -12,8 +12,9 @@
  *   hosted   ValueDesk's own executor, through the site's edge
  *            (https://www.valuedesk.so/api/copy/v1: Vercel adds the origin
  *            secret and the viewer's country, which server 2 needs). Its ids
- *            and key name come from its /info. Nothing of it can be restarted
- *            from here, so the restart scenarios are skipped; its fee is the
+ *            and key name come from its /info. With LIVE_HOSTED_CRASH=1 the
+ *            restart scenarios crash it for real on server 2 (hostedOps.ts:
+ *            SIGKILL, systemd starts it again); without, they are skipped. Its fee is the
  *            step of the follower's 14-day volume, which only its own ledger
  *            knows, so any ladder step SoDEX shows is accepted and noted. Its
  *            limits are shared by everyone behind the same address: requests
@@ -42,6 +43,7 @@ import { ExecutorClient, assertPaper, type CopyWallet, type ExecutorError, type 
 import { Inconclusive, Unavailable } from './harness.ts';
 import type { ExecutorRecord, Mode } from './state.ts';
 import { readFileSync } from 'node:fs';
+import { HostedOps, hostedCrashOn } from './hostedOps.ts';
 
 export const TARGETS = ['self', 'hosted', 'browser'] as const;
 export type TargetName = (typeof TARGETS)[number];
@@ -97,8 +99,14 @@ const CAN: Record<Capability, string> = {
   ui: 'work ValueDesk\'s own pages (the order ticket, the account tables, the copy window, the Algos table) as a person does',
 };
 
+/** A target's capabilities in this run: the hosted executor can be crashed (and so restarted) only with LIVE_HOSTED_CRASH=1. */
+export function capabilitiesOf(target: TargetName, env: NodeJS.ProcessEnv = process.env): TargetCapabilities {
+  const c = CAPABILITIES[target];
+  return target === 'hosted' && hostedCrashOn(env) ? { ...c, restart: true, kill: true } : c;
+}
+
 /** Why a scenario cannot run on a target (what it needs that the target lacks), or null. */
-export function cannotRun(s: { needs?: readonly Capability[] }, target: TargetName, caps: TargetCapabilities = CAPABILITIES[target]): string | null {
+export function cannotRun(s: { needs?: readonly Capability[] }, target: TargetName, caps: TargetCapabilities = capabilitiesOf(target)): string | null {
   const missing = (s.needs ?? []).filter((c) => !caps[c]);
   return missing.length ? `the ${target} target cannot ${missing.map((c) => CAN[c]).join(' or ')} from here` : null;
 }
@@ -325,8 +333,12 @@ function hostedOptions() {
 
 export class HostedTarget extends ExecutorClient implements ExecutorTarget {
   readonly name = 'hosted' as const;
-  readonly capabilities = CAPABILITIES.hosted;
+  readonly capabilities = capabilitiesOf('hosted');
   readonly dataDir = null;
+  /** Crashes on server 2 (LIVE_HOSTED_CRASH=1), else null. */
+  private readonly ops: HostedOps | null = hostedCrashOn() ? new HostedOps(process.env, (s) => console.log(s)) : null;
+  /** Killed by a restart scenario: start() waits for systemd's new process. */
+  private crashed = false;
   /** The key name the follower registers for it (its /info: vd-copy-tokyo). */
   keyName = '';
 
@@ -344,6 +356,10 @@ export class HostedTarget extends ExecutorClient implements ExecutorTarget {
 
   /** Its ids from its /info (it must be ValueDesk's mainnet executor), and its /health ok. */
   async start(): Promise<void> {
+    if (this.crashed && this.ops) {
+      await this.ops.waitUp(async () => (await this.health()).ok);
+      this.crashed = false;
+    }
     const i = await this.info();
     if (i.kind !== 'hosted' || i.network !== 'mainnet') throw new Error(`${this.base} answers as a ${i.kind} executor on ${i.network}, not ValueDesk's executor on mainnet`);
     this.executorId = i.executorId;
@@ -353,11 +369,15 @@ export class HostedTarget extends ExecutorClient implements ExecutorTarget {
   }
 
   async stop(): Promise<void> {
-    /* it is ValueDesk's: what this run started there, the cleanup stopped */
+    // It is ValueDesk's: what this run started there, the cleanup stopped. A window a crash left open closes.
+    await this.ops?.close();
   }
 
+  /** A real crash on server 2 (SIGKILL; systemd starts it again by itself), with LIVE_HOSTED_CRASH=1 only. */
   async kill(): Promise<void> {
-    throw new Unavailable('ValueDesk\'s executor cannot be killed from here');
+    if (!this.ops) throw new Unavailable('ValueDesk\'s executor is crashed from here only with LIVE_HOSTED_CRASH=1');
+    await this.ops.crash();
+    this.crashed = true;
   }
 
   async health(): Promise<{ ok: boolean; why?: string }> {
