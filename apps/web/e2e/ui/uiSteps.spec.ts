@@ -337,7 +337,31 @@ h.test('position.tpsl-sheet: the positions\' TP/SL sheet rests two reduce-only s
   await until(page, () => sx.position(SYM) === 0 && stopsAt().length === 0, 'flat, no stop left', 20_000);
 }, { timeout: 150_000 });
 
-h.test('spot.order: the ticket\'s Spot - a market buy of BTC/USDC and the sell back of what it bought', async (env) => {
+h.test('position.isolated-margin: the pencil adds and removes isolated margin (asked first); a remove too large is refused and said', async (env) => {
+  const sx = await trading(env);
+  const { page } = env;
+  await UI_STEPS['ticket.leverage'](page, { symbol: SYM, leverage: 2, marginMode: 'isolated' });
+  await until(page, () => sx.leverage(SYM)?.marginMode === 'isolated', 'isolated sent');
+  const { qty } = await sizes(page);
+  const q = round5(qty);
+  await UI_STEPS['ticket.market'](page, { symbol: SYM, side: 'buy', quantity: q });
+  await until(page, () => sx.position(SYM) === q, 'the position');
+  const sent = () => sx.writes.filter((w) => w.path === '/api/v1/perps/trade/margin').map((w) => (w.body as { amount: string }).amount);
+  const add = await UI_STEPS['positions.margin'](page, { symbol: SYM, amount: 2, add: true });
+  assert.match(add.asked, /Add 2 of isolated margin on BTC-USD/);
+  assert.deepEqual(sent(), ['2'], 'the amount sent as typed');
+  assert.ok(add.after.margin! > add.before.margin! + 1.99, `the Margin cell shows $2 more (${add.before.margin} -> ${add.after.margin})`);
+  assert.ok(add.after.liq! < add.before.liq!, `Liq. moved away from the market with the margin added (${add.before.liq} -> ${add.after.liq})`);
+  const rem = await UI_STEPS['positions.margin'](page, { symbol: SYM, amount: 1, add: false });
+  assert.deepEqual(sent(), ['2', '-1'], 'a remove is sent negative');
+  assert.ok(rem.after.liq! > rem.before.liq!, `Liq. moved back with the margin removed (${rem.before.liq} -> ${rem.after.liq})`);
+  await assert.rejects(UI_STEPS['positions.margin'](page, { symbol: SYM, amount: Math.floor(rem.after.margin!), add: false }), /the positions table says: .*under-margined/);
+  const read = await UI_STEPS['positions.read'](page, { symbol: SYM });
+  assert.equal(read.after.margin, rem.after.margin, 'nothing changed after the refusal');
+  await UI_STEPS['positions.close'](page, { symbol: SYM });
+}, { timeout: 150_000 });
+
+h.test('spot.order: the ticket\'s Spot -a market buy of BTC/USDC and the sell back of what it bought', async (env) => {
   const sx = await enableTrading(env, { stateful: true, spot: { vUSDC: 100 } });
   const { page } = env;
   const { last } = await sizes(page);

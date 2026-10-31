@@ -139,8 +139,12 @@ w3m-modal[data-shared-backdrop] {
    square on the right) with the transfer button riding the Perps/Spot seam;
    then plain rows, text left and glyph right, Sign out always red.
    ------------------------------------------------------------------------ */
+/* A fixed width: sized to its content it opened with "—" for every balance and
+   widened a moment later when the amounts (and the EVM spinner) came in (owner, 2026-10-31). */
 .navaddr__menu.acct-menu {
-  min-width: 320px;
+  width: 340px;
+  max-width: calc(100vw - 24px);
+  box-sizing: border-box;
   padding: var(--sp-3);
   border-radius: 14px;
   background: var(--glass-pop-bg);

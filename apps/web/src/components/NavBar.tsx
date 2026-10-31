@@ -52,6 +52,7 @@ import { NO_ACCOUNT_TRANSFER, useAccountExists } from './account/useAccountExist
 import { useWalletSnapshot } from './account/useWallet';
 import { RegionPill } from '../legal/LegalGate';
 import { FOLDER_ICON } from '../folders/icons';
+import { FEEDBACK_LABEL, FeedbackIcon, openFeedback } from '../feedback/FeedbackButton';
 import './account/account.css';
 
 /** `/scan/index.html?address=0x...` - scan.js reads `address` (or `wallet`) off
@@ -266,7 +267,7 @@ export function NavBar({
                 {maskAddr(address)}
               </button>
               {addrPres.mounted && (
-                <AddressMenu address={address} onClose={() => setAddrMenu(false)} closing={addrPres.closing} onExited={addrPres.done} />
+                <AddressMenu address={address} onClose={() => setAddrMenu(false)} closing={addrPres.closing} onExited={addrPres.done} onPortfolio={() => onNavigate('portfolio')} />
               )}
             </div>
           ) : (
@@ -315,6 +316,8 @@ const SearchIcon = () => (
  *   Spot               [↑]
  *   EVM                [↓]      collapsed; opens smoothly to the 4 largest holdings + "& N others"
  *   ─────────────────────
+ *   Portfolio             ▦
+ *   Send feedback         💬
  *   Copy Address          ⧉
  *   Sign out              ⇥   (always red)
  *
@@ -326,9 +329,11 @@ const SearchIcon = () => (
  * The actions run in AccountController (mounted once in App.tsx), so the menu
  * closes the moment a row is pressed without cancelling anything.
  */
-export function AddressMenu({ address, onClose, closing = false, onExited }: {
+export function AddressMenu({ address, onClose, closing = false, onExited, onPortfolio }: {
   address: string;
   onClose: () => void;
+  /** The Portfolio page (owner 2026-10-31: from the wallet menu too). */
+  onPortfolio: () => void;
   /** Playing its exit (motion.css) - `onExited` unmounts it. */
   closing?: boolean;
   onExited?: () => void;
@@ -509,6 +514,14 @@ export function AddressMenu({ address, onClose, closing = false, onExited }: {
       </div>
 
       <div className="acct-menu__section">
+        <button type="button" className="navaddr__item acct-menu__row" role="menuitem" onClick={run(onPortfolio)}>
+          <span>Portfolio</span>
+          <PortfolioIcon />
+        </button>
+        <button type="button" className="navaddr__item acct-menu__row" role="menuitem" onClick={run(() => openFeedback())}>
+          <span>{FEEDBACK_LABEL}</span>
+          <FeedbackIcon />
+        </button>
         <button type="button" className="navaddr__item acct-menu__row" role="menuitem" onClick={copy}>
           <span>{copied ? 'Copied' : 'Copy Address'}</span>
           <CopyIcon />
@@ -540,6 +553,8 @@ const UploadIcon = glyph('M8 10.5V2.5M5 5.5l3-3 3 3M2.5 10v2.2c0 .7.6 1.3 1.3 1.
 const DownloadIcon = glyph('M8 2.5v8M5 7.5l3 3 3-3M2.5 10v2.2c0 .7.6 1.3 1.3 1.3h8.4c.7 0 1.3-.6 1.3-1.3V10');
 const SwapIcon = glyph('M5 2.5v11M2.5 5 5 2.5 7.5 5M11 13.5v-11M8.5 11 11 13.5 13.5 11');
 const CopyIcon = glyph('M5.5 5.5V3.8c0-.7.6-1.3 1.3-1.3h5.4c.7 0 1.3.6 1.3 1.3v5.4c0 .7-.6 1.3-1.3 1.3h-1.7M3.8 5.5h5.4c.7 0 1.3.6 1.3 1.3v5.4c0 .7-.6 1.3-1.3 1.3H3.8c-.7 0-1.3-.6-1.3-1.3V6.8c0-.7.6-1.3 1.3-1.3Z');
+/** Portfolio: a small bar chart. */
+const PortfolioIcon = glyph('M2.5 13.5h11M4.5 11V7.5M8 11V4.5M11.5 11V8');
 const SignOutIcon = glyph('M6.5 13.5H3.8c-.7 0-1.3-.6-1.3-1.3V3.8c0-.7.6-1.3 1.3-1.3h2.7M10.5 11 13.5 8l-3-3M13.5 8H6');
 const Chevron = () => (
   <svg className="acct-menu__chev" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">

@@ -89,6 +89,14 @@ export interface LiquidationInput {
    * further away. Omit (or 0) for isolated.
    */
   extraCollateral?: number;
+  /**
+   * An isolated position's margin as SoDEX holds it (the positions endpoint's
+   * `initialMargin`, the state's `iw`): what was added or removed included, and
+   * what fees and funding took. Given, it is the margin - and the price is
+   * SoDEX's own `lp` (checked against 32 isolated positions, 2026-10-31: equal
+   * in all 32; from entry, size and leverage alone 3 of them were 1-3 bp off).
+   */
+  isolatedMargin?: number;
 }
 
 /** Resolve the tier whose band contains `notional`; falls back to the last tier. */
@@ -140,7 +148,7 @@ export interface LiquidationEstimate {
 }
 
 export function estimateLiquidationPrice(input: LiquidationInput): LiquidationEstimate {
-  const { entryPrice, quantity, side, leverage, sym, extraCollateral = 0 } = input;
+  const { entryPrice, quantity, side, leverage, sym, extraCollateral = 0, isolatedMargin } = input;
   const empty: LiquidationEstimate = {
     price: null, distancePct: null, maintenanceMarginRate: null, initialMargin: null, estimated: true,
   };
@@ -156,7 +164,7 @@ export function estimateLiquidationPrice(input: LiquidationInput): LiquidationEs
   const mmr = num(tier.maintenanceMarginRate);
   const deduction = num(tier.maintenanceDeduction);
   const initialMargin = notional / leverage;
-  const margin = initialMargin + Math.max(0, extraCollateral);
+  const margin = isolatedMargin !== undefined && isolatedMargin > 0 ? isolatedMargin : initialMargin + Math.max(0, extraCollateral);
 
   const price =
     side === 'buy'

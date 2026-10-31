@@ -20,9 +20,11 @@
  * There is no `markPrice`, no `unrealizedPnl` and no `liquidationPrice`, so:
  *   - `Mark` is the live mark feed (WS `markPrice`, seeded from REST tickers).
  *   - `Unreal. PnL` is DERIVED: (mark - entry) x size, signed by direction.
- *   - `Liq.` is an ESTIMATE from risk.ts against the venue's published margin
- *     tiers. It ignores collateral held elsewhere, which can only push real
- *     liquidation FURTHER away - it errs toward warning early, never late.
+ *   - `Liq.` is computed by risk.ts against the venue's published margin
+ *     tiers. ISOLATED: from the position's own margin (`initialMargin`, which
+ *     includes margin added or removed) - SoDEX's own liquidation price, to the
+ *     digit. CROSS: an estimate that ignores collateral held elsewhere, which can
+ *     only push real liquidation FURTHER away - it warns early, never late.
  * Every other cell renders exactly what the payload holds, and an absent value
  * is an em-dash. Nothing in this file prints a 0 it was not given.
  *
@@ -715,6 +717,7 @@ function PositionsInner({
       if (!dir || !(entry > 0) || !(size > 0)) return null;
       return estimateLiquidationPrice({
         entryPrice: entry, quantity: size, side: dir === 'long' ? 'buy' : 'sell', leverage: lev, sym,
+        isolatedMargin: marginOf(pick(p, 'marginMode')) === 'isolated' && im > 0 ? im : undefined,
       }).price;
     }
     if (key === 'upnl') return upnl;
@@ -740,7 +743,7 @@ function PositionsInner({
               <SortTh k="value" label="Value" numeric sort={sort} onSort={toggle} className="num" />
               <SortTh k="entry" label="Entry" numeric sort={sort} onSort={toggle} className="num" />
               <SortTh k="mark" label="Mark" numeric sort={sort} onSort={toggle} className="num" />
-              <SortTh k="liq" label={<>Liq. <span className="acct-tag">est.</span></>} numeric sort={sort} onSort={toggle} className="num" title="Estimated from entry, size and leverage against the venue's published margin tiers. It ignores collateral held elsewhere in the account, which can only move real liquidation further away." />
+              <SortTh k="liq" label={<>Liq. <span className="acct-tag">est.</span></>} numeric sort={sort} onSort={toggle} className="num" title="Isolated: from the position's own margin against the venue's published margin tiers, which is SoDEX's own liquidation price. Cross: an estimate that ignores collateral held elsewhere in the account, which can only move real liquidation further away." />
               <SortTh k="upnl" label="PnL" numeric sort={sort} onSort={toggle} className="num" title="Derived here: (mark − entry) × size, signed by direction; the % is against the position's margin. The venue does not publish an unrealised PnL for a position." />
               <SortTh k="margin" label="Margin" numeric sort={sort} onSort={toggle} className="num" />
               <th>TP/SL</th>
@@ -777,6 +780,8 @@ function PositionsInner({
                       side: dir === 'long' ? 'buy' : 'sell',
                       leverage: lev,
                       sym,
+                      // An isolated position's initialMargin is SoDEX's iw (added and removed margin included): SoDEX's own lp.
+                      isolatedMargin: margin === 'isolated' && im > 0 ? im : undefined,
                     }).price
                   : null;
 

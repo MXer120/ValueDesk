@@ -147,7 +147,7 @@ export function SideBar({ address, hasLayout, dashLocked, onOpenSearch, tab, onN
           <SettingsMenu hasLayout={hasLayout} dashLocked={dashLocked} />
         </div>
       </nav>
-      <SideWallet address={address} />
+      <SideWallet address={address} onPortfolio={() => onNavigate('portfolio')} />
     </aside>
   );
 }
@@ -157,7 +157,7 @@ export function SideBar({ address, hasLayout, dashLocked, onOpenSearch, tab, onN
  * is none; with one, its logo, which opens the address menu (NavBar.tsx's
  * AddressMenu) beside the rail.
  */
-function SideWallet({ address }: { address: string | null }) {
+function SideWallet({ address, onPortfolio }: { address: string | null; onPortfolio: () => void }) {
   const [open, setOpen] = useState(false);
   const pres = usePresence(open);
   const pending = useAccountPending();
@@ -225,7 +225,7 @@ function SideWallet({ address }: { address: string | null }) {
       >
         <ConnectedWalletLogo size={22} />
       </button>
-      {pres.mounted && <AddressMenu address={address} onClose={() => setOpen(false)} closing={pres.closing} onExited={pres.done} />}
+      {pres.mounted && <AddressMenu address={address} onClose={() => setOpen(false)} closing={pres.closing} onExited={pres.done} onPortfolio={onPortfolio} />}
     </div>
   );
 }

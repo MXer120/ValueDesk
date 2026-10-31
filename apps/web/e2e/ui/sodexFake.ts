@@ -154,6 +154,8 @@ export async function fakeSodexAccount(ctx: BrowserContext, address: string, o: 
   const pos = new Map<string, { size: number; entry: number }>();
   const book: FakeOrder[] = [];
   const lev = new Map<string, { leverage: number; marginMode: 'CROSS' | 'ISOLATED' }>();
+  /** Stateful: isolated margin added (+) or removed (-) per market, on top of the position's initial margin. */
+  const extraMargin = new Map<string, number>();
   const leaderPos = new Map<string, number>();
   /** symbolID -> name, learnt from SoDEX's own market list as it passes. */
   const symbolNames = new Map<number, string>();
@@ -170,7 +172,7 @@ export async function fakeSodexAccount(ctx: BrowserContext, address: string, o: 
     user: me, aid: accountId, uid: accountId,
     av: balance, mm: '0', mmr: '0', am: balance, ami: '0', amw: balance, im: '0', cm: '0', oim: '0', ocm: '0',
     B: [{ i: 0, a: 'vUSDC', wb: balance, co: '0', mr: '0', px: '1', aw: balance, at: balance, wm: '0', am: balance }],
-    P: stateful ? [...pos.entries()].filter(([, p]) => p.size !== 0).map(([sym, p]) => ({ s: sym, sz: String(p.size), ep: String(p.entry), l: lev.get(sym)?.leverage ?? 10, m: lev.get(sym)?.marginMode ?? 'CROSS' })) : [],
+    P: stateful ? [...pos.entries()].filter(([, p]) => p.size !== 0).map(([sym, p]) => ({ s: sym, sz: String(p.size), ep: String(p.entry), l: lev.get(sym)?.leverage ?? 10, m: lev.get(sym)?.marginMode ?? 'CROSS', ...(lev.get(sym)?.marginMode === 'ISOLATED' ? { iw: String(marginOf(sym, p)) } : {}) })) : [],
     O: [], TO: [],
     S: [...lev.entries()].map(([sym, x]) => ({ s: sym, l: x.leverage, m: x.marginMode })),
   });
@@ -187,11 +189,16 @@ export async function fakeSodexAccount(ctx: BrowserContext, address: string, o: 
   /** Seeded rows, gone once a write closes or cancels them (a reduce-only order, a cancel). */
   let held = o.position ? { ...o.position } : null;
   let resting = o.openOrder ? { ...o.openOrder, orderID: 777_001, clOrdID: 'e2e-resting-1' } : null;
+  /** A position's margin as SoDEX reports it: the initial margin, plus what was added to an isolated one (initialMargin = iw). */
+  const marginOf = (sym: string, p: { size: number; entry: number }) => {
+    const l = lev.get(sym) ?? { leverage: 10, marginMode: 'CROSS' as const };
+    return (Math.abs(p.size) * p.entry) / l.leverage + (l.marginMode === 'ISOLATED' ? extraMargin.get(sym) ?? 0 : 0);
+  };
   const statefulPositions = () => [...pos.entries()].filter(([, p]) => p.size !== 0).map(([sym, p], i) => {
     const l = lev.get(sym) ?? { leverage: 10, marginMode: 'CROSS' as const };
     return {
       id: 555_100 + i, symbol: sym, positionSide: 'BOTH', size: String(p.size), avgEntryPrice: String(p.entry), leverage: l.leverage,
-      marginMode: l.marginMode, initialMargin: String((Math.abs(p.size) * p.entry) / l.leverage), unrealizedProfit: '0', liquidationPrice: '0',
+      marginMode: l.marginMode, initialMargin: String(marginOf(sym, p)), unrealizedProfit: '0', liquidationPrice: '0',
     };
   });
   const statefulOrders = () => book.map((b) => ({
@@ -301,6 +308,20 @@ export async function fakeSodexAccount(ctx: BrowserContext, address: string, o: 
         }
         return { code: 0, clOrdID: r.clOrdID, orderID: ++orderId };
       }));
+    }
+    if (stateful && engine === 'perps' && url.pathname.endsWith('/trade/margin')) {
+      // SoDEX's UpdateMarginRequest: a signed amount on an isolated position; a remove that leaves less than half
+      // of the initial margin is refused (the fake's stand-in for "would be under-margined").
+      const sym = symbolNames.get(Number(b.symbolID));
+      const p = sym ? pos.get(sym) : undefined;
+      const amount = Number(b.amount);
+      const refuse = (msg: string) => ({ status: 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify({ code: 1001, msg }) });
+      if (!sym || !p || p.size === 0 || lev.get(sym)?.marginMode !== 'ISOLATED') return refuse('no isolated position');
+      const initial = (Math.abs(p.size) * p.entry) / (lev.get(sym)?.leverage ?? 10);
+      const next = (extraMargin.get(sym) ?? 0) + amount;
+      if (initial + next < initial / 2) return refuse('insufficient margin: the position would be under-margined');
+      extraMargin.set(sym, next);
+      return ok({});
     }
     if (stateful && engine === 'perps' && url.pathname.endsWith('/trade/leverage')) {
       const sym = symbolNames.get(Number(b.symbolID));

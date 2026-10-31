@@ -442,6 +442,8 @@ export function derivePositions(
           sym,
           marginMode: String(pick(p, 'marginMode') ?? '').toUpperCase() === 'ISOLATED' ? 'isolated' : 'cross',
           extraCollateral: 0,
+          // Isolated: its own margin as SoDEX holds it (added / removed included) - SoDEX's own liquidation price.
+          isolatedMargin: String(pick(p, 'marginMode') ?? '').toUpperCase() === 'ISOLATED' && margin > 0 ? margin : undefined,
         }),
         takenOver: pick<boolean>(p, 'isTakenOver') === true,
       };

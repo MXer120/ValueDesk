@@ -70,7 +70,8 @@ export async function selectMarket(page: Page, symbol: string): Promise<void> {
 
 /** A positions row's Liq. (6th column) and Margin (8th): Market, Size, Value, Entry, Mark, Liq., PnL, Margin. */
 async function positionCells(row: Locator): Promise<{ liq: number | null; margin: number | null }> {
-  const cell = async (i: number) => num(((await row.locator('td').nth(i).textContent()) ?? '').replace(/[^0-9.]/g, '')) || null;
+  // The app's number format ("$6,20", "76.238,1"): num reads it.
+  const cell = async (i: number) => num((await row.locator('td').nth(i).textContent()) ?? '') || null;
   return { liq: await cell(5), margin: await cell(7) };
 }
 
@@ -415,6 +416,8 @@ export const UI_STEPS = {
     const form = activity.locator('.acct-modify').filter({ hasText: `Isolated margin · ${a.symbol}` });
     await form.waitFor({ state: 'visible' });
     await typeInto(form.getByRole('textbox', { name: 'Amount', exact: true }), dec(a.amount));
+    // The last change's status line stays 8 s (12 s an error): gone first, so the line read below is this one's.
+    await until(page, async () => (await activity.locator('p.status').count()) === 0, 'the last status line to clear', 20_000);
     await form.getByRole('button', { name: a.add ? 'Add' : 'Remove', exact: true }).click();
     const ask = page.getByRole('dialog', { name: a.add ? 'Add isolated margin' : 'Remove isolated margin' });
     await ask.waitFor({ state: 'visible' });
@@ -422,12 +425,17 @@ export const UI_STEPS = {
     await ask.getByRole('button', { name: a.add ? 'Add margin' : 'Remove margin', exact: true }).click();
     await ask.waitFor({ state: 'hidden', timeout: 20_000 });
     // The table answers in its status line (useStatus): "Margin added." / "Margin removed.", or SoDEX's refusal.
+    // (until swallows what its check throws: a refusal is kept here and thrown after.)
+    let refused = '';
     await until(page, async () => {
       if (await activity.locator('p.status.ok').filter({ hasText: /^Margin (added|removed)\./ }).count()) return true;
-      const err = (await activity.locator('p.status.err').allInnerTexts().catch(() => [] as string[])).join(' ').trim();
-      if (err) throw new Error(`the positions table says: ${err}`);
-      return false;
-    }, `the margin to be ${a.add ? 'added' : 'removed'}`, 30_000);
+      refused = (await activity.locator('p.status.err').allInnerTexts().catch(() => [] as string[])).join(' ').trim();
+      return refused !== '';
+    }, `the margin to be ${a.add ? 'added' : 'removed'}`, 30_000).catch(async (e) => {
+      const shown = ((await page.locator('p.status, [role="alert"], .toast').allInnerTexts().catch(() => [] as string[])).join(' | ')).slice(0, 300);
+      throw new Error(`${(e as Error).message}${shown ? `; the page shows: ${shown}` : ''}`);
+    });
+    if (refused) throw new Error(`the positions table says: ${refused}`);
     // The table reads the position again: wait until its Margin moved.
     await until(page, async () => ((await cells()).margin ?? 0) !== (before.margin ?? 0), 'the Margin cell to show the change', 30_000).catch(() => {});
     return { asked, before, after: await cells() };
