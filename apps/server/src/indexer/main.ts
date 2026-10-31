@@ -7,10 +7,11 @@
  */
 import { runIndexer } from './worker.js';
 import { profileOnSignal } from './cpuProfile.js';
+import { dirname, join } from 'node:path';
 
 const running = runIndexer();
 console.log(`[indexer] writing ${running.store.path}`);
-profileOnSignal(running.store.path);
+profileOnSignal(join(dirname(running.store.path), 'profiles'), 'indexer');
 
 const stop = () => {
   running.stop();

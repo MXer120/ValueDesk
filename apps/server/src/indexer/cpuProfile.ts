@@ -1,9 +1,10 @@
 /**
- * A CPU profile of the running indexer, on demand, without a restart:
+ * A CPU profile of a running process (the indexer, the API), on demand, without a restart:
  *
- *   sudo systemctl kill -s SIGUSR2 valuescan-indexer
+ *   sudo systemctl kill -s SIGUSR2 --kill-whom=main valuescan-indexer   (or valuescan-api)
  *
- * profiles its main thread for PROFILE_MS and writes `<index dir>/profiles/indexer-<time>.cpuprofile`
+ * profiles its main thread for PROFILE_MS and writes `<dir>/<name>-<time>.cpuprofile` (indexer: the
+ * index dir's profiles/; API: /var/lib/valuescan/state/profiles, which its unit may write)
  * (Chrome DevTools / speedscope read it; deploy/server/bin/profile-top.mjs sums it per function on
  * the box). Added 2026-10-31: board builds went from under a minute to 8-27 min at a UTC day change
  * with the machine idle and the indexer's one thread at 84%, and no timing said which work held it.
@@ -11,13 +12,13 @@
  */
 import { Session } from 'node:inspector/promises';
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 
 export const PROFILE_MS = 60_000;
 
 let running = false;
 
-export async function cpuProfile(indexPath: string, ms = PROFILE_MS): Promise<string | null> {
+export async function cpuProfile(dir: string, name: string, ms = PROFILE_MS): Promise<string | null> {
   if (running) return null;
   running = true;
   const session = new Session();
@@ -29,9 +30,8 @@ export async function cpuProfile(indexPath: string, ms = PROFILE_MS): Promise<st
     await session.post('Profiler.start');
     await new Promise((r) => setTimeout(r, ms));
     const { profile } = await session.post('Profiler.stop');
-    const dir = join(dirname(indexPath), 'profiles');
     mkdirSync(dir, { recursive: true });
-    const file = join(dir, `indexer-${new Date().toISOString().replace(/[:.]/g, '-')}.cpuprofile`);
+    const file = join(dir, `${name}-${new Date().toISOString().replace(/[:.]/g, '-')}.cpuprofile`);
     writeFileSync(file, JSON.stringify(profile));
     return file;
   } finally {
@@ -40,13 +40,14 @@ export async function cpuProfile(indexPath: string, ms = PROFILE_MS): Promise<st
   }
 }
 
-/** SIGUSR2: one profile of PROFILE_MS, its file logged. */
-export function profileOnSignal(indexPath: string): void {
+/** SIGUSR2: one profile of PROFILE_MS, its file logged. Not on Windows (no such signal: the dev machines). */
+export function profileOnSignal(dir: string, name: string): void {
+  if (process.platform === 'win32') return;
   process.on('SIGUSR2', () => {
-    console.log(`[indexer] SIGUSR2: profiling the main thread for ${PROFILE_MS / 1000} s`);
-    cpuProfile(indexPath).then(
-      (f) => console.log(f ? `[indexer] profile written: ${f}` : '[indexer] a profile is already running'),
-      (e) => console.log(`[indexer] profile failed: ${String(e)}`),
+    console.log(`[${name}] SIGUSR2: profiling the main thread for ${PROFILE_MS / 1000} s`);
+    cpuProfile(dir, name).then(
+      (f) => console.log(f ? `[${name}] profile written: ${f}` : `[${name}] a profile is already running`),
+      (e) => console.log(`[${name}] profile failed: ${String(e)}`),
     );
   });
 }

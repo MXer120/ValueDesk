@@ -30,6 +30,7 @@ import { mirrorRoutes } from './routes/mirror.js';
 import { externalRoutes } from './routes/external.js';
 import { statsRoutes } from './routes/stats.js';
 import { scanRoutes } from './routes/scan.js';
+import { profileOnSignal } from './indexer/cpuProfile.js';
 import { pointsAuthRoutes } from './routes/pointsAuth.js';
 import { valuedeskRoutes } from './routes/valuedesk.js';
 import { builderRoutes } from './routes/builder.js';
@@ -50,6 +51,11 @@ import { ElevationError, revokeAllElevations } from './elevation.js';
 import { classify, take } from './rateLimit.js';
 import { perfPlugin } from './perf.js';
 import { installLocalHostGate } from './localHost.js';
+
+
+// A CPU profile on demand (indexer/cpuProfile.ts): `sudo systemctl kill -s SIGUSR2 --kill-whom=main valuescan-api`. The API sat at 77-92% of a core
+// (2026-10-31) with no way to say which work; its unit may write /var/lib/valuescan/state.
+profileOnSignal(process.env.VALUESCAN_PROFILE_DIR?.trim() || '/var/lib/valuescan/state/profiles', 'api');
 
 const app = Fastify({
   logger: {
