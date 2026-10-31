@@ -149,6 +149,9 @@ const buildId = (): string => {
   return `local-${new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '')}`;
 };
 
+/** The second build (tools/build-admin.mjs): the admin page alone, added to the site's dist. */
+const ADMIN_PAGE = process.env.VS_WEB_PAGE === 'admin';
+
 export default defineConfig({
   customLogger: logger,
   plugins: [react(), trackAppOrigin(), preloadPalette(), thirdPartyLicences()],
@@ -274,17 +277,23 @@ export default defineConfig({
     },
   },
   build: {
+    // The admin build adds its page to the site's dist; it never empties it.
+    emptyOutDir: !ADMIN_PAGE,
     rollupOptions: {
       /*
-       * Two pages: the site, and the owner's admin suite (admin.html, src/admin/) - served
-       * only on dev.valuedesk.so by the Vercel routes (deploy/vercel/package.mjs ADMIN_HOST).
-       * Its own entry, so none of it is in the site's bundle. The site's key stays `index`, so its entry
-       * chunk keeps the name it always had (assets/index-*.js).
+       * Two pages, built ONE AT A TIME: the site (index.html), then the owner's admin suite
+       * (admin.html, src/admin/; served only on dev.valuedesk.so - deploy/vercel/package.mjs
+       * ADMIN_HOST) by tools/build-admin.mjs with VS_WEB_PAGE=admin into the same dist.
+       * Both in one build (v0.2.112) made Rollup move every stylesheet the two pages share -
+       * styles.css among them - into a shared CSS chunk loaded BEFORE the site's own: the
+       * cascade order cssOrder.ts pins broke, and styles.css's overrides (meant to come last)
+       * lost to the components' rules - the trade page's market strip got its panel border
+       * back (owner 2026-11-01). Built alone, the site's CSS is one sheet in its fixed order.
+       * The site's key stays `index`, so its entry chunk keeps its name (assets/index-*.js).
        */
-      input: {
-        index: fileURLToPath(new URL('./index.html', import.meta.url)),
-        admin: fileURLToPath(new URL('./admin.html', import.meta.url)),
-      },
+      input: ADMIN_PAGE
+        ? { admin: fileURLToPath(new URL('./admin.html', import.meta.url)) }
+        : { index: fileURLToPath(new URL('./index.html', import.meta.url)) },
       output: {
         /*
          * React in a chunk of its own. It changes far less often than our code,
