@@ -24,7 +24,7 @@ import { tailCountRate, tailOf } from './cohortTracker.js';
 import { labelMatches, shownLabel } from '../valuedesk/labels.js';
 import { winRateOf } from '../valuedesk/winRate.js';
 import { sampledVenue, COHORT_RANGES, type CohortWalletRow as WalletRow } from '../valuedesk/cohorts/model.js';
-import { EXCLUDED_WALLETS, isExcluded, outOfCohorts, type ExcludedWallet } from '../valuedesk/internalWallets.js';
+import { EXCLUDED_FROM, EXCLUDED_WALLETS, isExcluded, outOfCohorts, type ExcludedFrom, type ExcludedWallet } from '../valuedesk/internalWallets.js';
 import { liqCoin } from '../valuedesk/liquidations/levels.js';
 
 export interface IndexState {
@@ -1114,7 +1114,7 @@ export function internalOiNow(venue: Venue, coin: string): number {
  * equity, long and short USD at the marks, its coins largest first. From the load in use; an empty
  * list before there is one (never builds one).
  */
-export function excludedNow(): Array<ExcludedWallet & { equity: number | null; long: number; short: number; coins: Array<{ coin: string; usd: number }>; at: number | null }> {
+export function excludedNow(): Array<ExcludedWallet & { from: readonly ExcludedFrom[]; equity: number | null; long: number; short: number; coins: Array<{ coin: string; usd: number }>; at: number | null }> {
   const load = cohortLoad;
   return EXCLUDED_WALLETS.map((w) => {
     const b = load?.excluded.get(`${w.venue}|${w.address}`);
@@ -1130,7 +1130,7 @@ export function excludedNow(): Array<ExcludedWallet & { equity: number | null; l
       coins.set(c, (coins.get(c) ?? 0) + usd);
     }
     return {
-      ...w, equity: b?.equity ?? null, long, short, at: b?.at ?? null,
+      ...w, from: EXCLUDED_FROM[w.kind], equity: b?.equity ?? null, long, short, at: b?.at ?? null,
       coins: [...coins].map(([coin, usd]) => ({ coin, usd })).sort((x, y) => Math.abs(y.usd) - Math.abs(x.usd)),
     };
   });

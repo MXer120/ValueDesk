@@ -9,7 +9,7 @@
  * dropdown (.menu-popup) with its rows; Escape or a click outside closes it.
  */
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { STATUS_PATH } from '../router';
+import { EXCLUDED_PATH, STATUS_PATH } from '../router';
 import { FeedbackIcon, openFeedback } from '../feedback/FeedbackButton';
 import { openSettings } from '../settingsBus';
 
@@ -26,7 +26,7 @@ const Icon = ({ children }: { children: ReactNode }) => (
   <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{children}</svg>
 );
 
-export function NavMore({ alert = null, onOpenStatus }: { alert?: NavAlert; onOpenStatus?: () => void }) {
+export function NavMore({ alert = null, onOpenStatus, onOpenExcluded }: { alert?: NavAlert; onOpenStatus?: () => void; onOpenExcluded?: () => void }) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
 
@@ -77,6 +77,20 @@ export function NavMore({ alert = null, onOpenStatus }: { alert?: NavAlert; onOp
             <span className="menu-row__ic"><Icon><path d="M2.5 10h3l2-5 3 10 2-5h5" /></Icon></span>
             <span className="menu-row__label">Status</span>
             {alert && <span className={`navmore__hint is-${alert}`}>{ALERT_HINT[alert]}</span>}
+          </a>
+          <a
+            role="menuitem"
+            className="menu-row"
+            href={EXCLUDED_PATH}
+            onClick={(e) => {
+              if (!onOpenExcluded || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+              e.preventDefault();
+              setOpen(false);
+              onOpenExcluded();
+            }}
+          >
+            <span className="menu-row__ic"><Icon><circle cx="10" cy="10" r="7" /><path d="M5 15 15 5" /></Icon></span>
+            <span className="menu-row__label">Excluded wallets</span>
           </a>
           <button type="button" role="menuitem" className="menu-row" onClick={() => { setOpen(false); openSettings('help'); }}>
             <span className="menu-row__ic"><Icon><circle cx="10" cy="10" r="7" /><path d="M7.9 7.8a2.2 2.2 0 1 1 3 2.1c-.6.3-.9.7-.9 1.3v.4" /><path d="M10 14.2h.01" /></Icon></span>

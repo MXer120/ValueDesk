@@ -66,6 +66,8 @@ export interface ExcludedWallet {
   venue: Venue;
   address: string;
   kind: 'internal' | 'hedged' | 'mirror';
+  /** Where it is left out (from 2026-10-31; absent before: both). */
+  from?: Array<'cohorts' | 'heatmap'>;
   label: string | null;
   why: string;
   since: string;

@@ -90,10 +90,12 @@ export interface NavBarProps {
   alert?: NavAlert;
   /** Open the status page in place (App.tsx). */
   onOpenStatus?: () => void;
+  /** The excluded wallets page (More > Excluded wallets). */
+  onOpenExcluded?: () => void;
 }
 
 export function NavBar({
-  tab, onNavigate, address, hasLayout, dashLocked, onOpenSearch, rail = false, engine, onEngine, knowledge = false, alert = null, onOpenStatus,
+  tab, onNavigate, address, hasLayout, dashLocked, onOpenSearch, rail = false, engine, onEngine, knowledge = false, alert = null, onOpenStatus, onOpenExcluded,
 }: NavBarProps) {
   /*
    * Have the wallet modal's chunk in memory BEFORE the click.
@@ -210,7 +212,7 @@ export function NavBar({
           ))}
         </nav>
         {/* More: the status page, Help & FAQ, Send feedback (owner, 2026-10-28). Outside the nav: its menu's rows are not nav links. */}
-        <NavMore alert={alert} onOpenStatus={onOpenStatus} />
+        <NavMore alert={alert} onOpenStatus={onOpenStatus} onOpenExcluded={onOpenExcluded} />
         {/* Without the rail (a phone, a narrow window) the same switch sits in the bar's first row, beside
             the wordmark: spot markets were otherwise reachable only through the market search there. */}
         {!rail && marketType}

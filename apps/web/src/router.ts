@@ -117,6 +117,14 @@ export function legalForPath(pathname: string): LegalPage | null {
  */
 export const STATUS_PATH = '/status';
 
+/** The excluded wallets (components/explore/cohorts/Excluded.tsx ExcludedPage): shown like the status page, linked from More. */
+export const EXCLUDED_PATH = '/excluded';
+
+/** Whether a pathname is the excluded wallets page. */
+export function isExcludedPath(pathname: string): boolean {
+  return pathname.replace(/\/+$/, '').split('/').filter(Boolean)[0]?.toLowerCase() === 'excluded';
+}
+
 /** Whether a pathname is the status page. Tolerant like `tabForPath`. */
 export function isStatusPath(pathname: string): boolean {
   return pathname.replace(/\/+$/, '').split('/').filter(Boolean)[0]?.toLowerCase() === 'status';
@@ -155,13 +163,15 @@ export function tabForPath(pathname: string): Tab | null {
  * with the default page: pushing would put a URL that renders nothing into the
  * history stack, and going "back" to it would be a dead end.
  */
-export function useRoute(): [Tab, (tab: Tab) => void, LegalPage | null, (page: LegalPage) => void, boolean, () => void] {
+export function useRoute(): [Tab, (tab: Tab) => void, LegalPage | null, (page: LegalPage) => void, boolean, () => void, boolean, () => void] {
   const [tab, setTab] = useState<Tab>(() => tabForPath(window.location.pathname) ?? DEFAULT_TAB);
   /* A legal page is shown INSTEAD of the tab's page; `tab` keeps the default
      there, so everything keyed on it (the nav, the shortcuts) is unchanged. */
   const [legal, setLegal] = useState<LegalPage | null>(() => legalForPath(window.location.pathname));
   /* The status page, the same way. */
   const [status, setStatus] = useState<boolean>(() => isStatusPath(window.location.pathname));
+  /* The excluded wallets page, the same way. */
+  const [excluded, setExcluded] = useState<boolean>(() => isExcludedPath(window.location.pathname));
 
   useEffect(() => {
     /*
@@ -174,13 +184,14 @@ export function useRoute(): [Tab, (tab: Tab) => void, LegalPage | null, (page: L
      */
     const normalise = () => {
       const path = window.location.pathname;
-      if (tabForPath(path) === null && legalForPath(path) === null && !isStatusPath(path)) {
+      if (tabForPath(path) === null && legalForPath(path) === null && !isStatusPath(path) && !isExcludedPath(path)) {
         const seg = path.replace(/\/+$/, '').split('/').filter(Boolean)[0]?.toLowerCase() ?? '';
         window.history.replaceState(null, '', pathForTab(MOVED[seg] ?? DEFAULT_TAB));
       }
       setTab(tabForPath(window.location.pathname) ?? DEFAULT_TAB);
       setLegal(legalForPath(window.location.pathname));
       setStatus(isStatusPath(window.location.pathname));
+      setExcluded(isExcludedPath(window.location.pathname));
     };
     normalise();
     window.addEventListener('popstate', normalise);
@@ -196,6 +207,7 @@ export function useRoute(): [Tab, (tab: Tab) => void, LegalPage | null, (page: L
     setTab(next);
     setLegal(null);
     setStatus(false);
+    setExcluded(false);
   }, []);
 
   const openLegal = useCallback((page: LegalPage) => {
@@ -204,13 +216,22 @@ export function useRoute(): [Tab, (tab: Tab) => void, LegalPage | null, (page: L
     }
     setLegal(page);
     setStatus(false);
+    setExcluded(false);
   }, []);
 
   const openStatus = useCallback(() => {
     if (!isStatusPath(window.location.pathname)) window.history.pushState(null, '', STATUS_PATH);
     setLegal(null);
     setStatus(true);
+    setExcluded(false);
   }, []);
 
-  return [tab, navigate, legal, openLegal, status, openStatus];
+  const openExcluded = useCallback(() => {
+    if (!isExcludedPath(window.location.pathname)) window.history.pushState(null, '', EXCLUDED_PATH);
+    setLegal(null);
+    setStatus(false);
+    setExcluded(true);
+  }, []);
+
+  return [tab, navigate, legal, openLegal, status, openStatus, excluded, openExcluded];
 }

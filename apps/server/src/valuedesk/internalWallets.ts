@@ -104,6 +104,14 @@ for (const w of EXCLUDED_WALLETS) {
   s.add(w.address);
 }
 
+/** Where an excluded wallet is left out: every kind, both (owner 2026-10-31, mirrored pairs included). */
+export type ExcludedFrom = 'cohorts' | 'heatmap';
+export const EXCLUDED_FROM: Record<ExcludedKind, readonly ExcludedFrom[]> = {
+  internal: ['cohorts', 'heatmap'],
+  hedged: ['cohorts', 'heatmap'],
+  mirror: ['cohorts', 'heatmap'],
+};
+
 /** The excluded addresses of a venue (lower case). */
 export const excludedOf = (venue: Venue): ReadonlySet<string> => byVenue.get(venue) ?? new Set();
 
