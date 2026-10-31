@@ -59,6 +59,7 @@ import './components/FeeSchedule.css';
 import './setup/setup.css';
 import './components/dev/DevPanel.css';
 import './components/explore/Explore.css';
+import './components/excluded/excluded.css';
 import './components/leaderboard/LeaderboardPage.css';
 import './components/explore/cohorts/Cohorts.css';
 import './components/explore/markets/Markets.css';
