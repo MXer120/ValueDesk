@@ -309,6 +309,11 @@ export class Indexer {
   lastBuildAt = 0;
   /** venue -> how long its boards took in the last build (ms). */
   lastBuildVenueMs: Partial<Record<Venue, number>> = {};
+  /**
+   * The last build's steps (ms), in order. Only the total and the boards per venue were kept until
+   * 2026-10-31, when builds went from under a minute to 8-33 min and no step could be named.
+   */
+  lastBuildStepMs: Record<string, number> = {};
   lastError: string | null = null;
   /** Cohorts: members, their positions, and the figures per set of venues. */
   readonly cohorts: CohortTracker;
@@ -559,6 +564,7 @@ export class Indexer {
       lastBuildAt: this.lastBuildAt,
       lastBuildMs: this.lastBuildMs,
       lastBuildVenueMs: this.lastBuildVenueMs,
+      lastBuildStepMs: this.lastBuildStepMs,
       lastError: this.lastError,
       loopLagMs: { lastMinute: this.lag.window, sinceStart: this.lag.max, spikes: this.spikes },
       hlBudget: Math.round(hlInfo.budget.available()),
@@ -1194,23 +1200,30 @@ export class Indexer {
     if (this.building || this.stopped) return;
     this.building = true;
     const t0 = Date.now();
+    const steps: Record<string, number> = {};
+    let ts = t0;
+    const lap = (name: string) => { const t = Date.now(); steps[name] = (steps[name] ?? 0) + t - ts; ts = t; };
     try {
       const now = this.now();
       const snap = await this.hlSnapshot();
       this.coinName = await hlCoinName().catch(() => this.coinName);
+      lap('snapshot');
       this.queueLists(now);
       for (const w of WINDOWS) await this.queueLookups(w, now).catch((e) => (this.lastError = `lookups ${w}: ${String(e)}`));
       this.queueChartPool('hyperliquid', snap, now);
       this.queueChartPool('sodex', snap, now);
+      lap('lookups');
       for (const [venue, x] of this.ext) {
         try {
           await x.refresh(now);
         } catch (e) {
           this.lastError = `${venue} refresh: ${String(e)}`;
         }
+        lap(`refresh ${venue}`);
       }
-      for (const venue of VENUES) if (venue !== 'tradexyz') await this.recordCumPnl(venue, snap, now);
+      for (const venue of VENUES) if (venue !== 'tradexyz') { await this.recordCumPnl(venue, snap, now); lap(`cumPnl ${venue}`); }
       await this.pruneSome(now);
+      lap('prune');
 
       const want = new Map<Venue, Set<string>>(VENUES.map((v) => [v, new Set<string>()]));
       for (const a of this.watchedHl) want.get('hyperliquid')!.add(a);
@@ -1228,12 +1241,14 @@ export class Indexer {
           }
         }
         venueMs[venue] = Date.now() - v0;
+        lap(`boards ${venue}`);
       }
       this.lastBuildVenueMs = venueMs;
       for (const window of INDEX_WINDOWS) {
         const pending = await this.writePools(window, snap, now, built);
         for (const [venue, list] of pending) for (const a of list) want.get(venue)!.add(a);
       }
+      lap('pools');
       for (const a of this.watchedHl) this.queueHistory('hyperliquid', a, windowStart('30d', now), 50);
       for (const [venue, m] of this.watched) {
         for (const [a, w] of m) {
@@ -1243,8 +1258,11 @@ export class Indexer {
         }
       }
       this.updateTracking(want, now);
+      lap('tracking');
       await this.sweepStats(now);
+      lap('sweep');
     } finally {
+      this.lastBuildStepMs = steps;
       this.building = false;
       this.lastBuildAt = this.now();
       this.lastBuildMs = Date.now() - t0;

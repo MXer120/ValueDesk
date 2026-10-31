@@ -30,6 +30,8 @@ setInterval(() => {
       `err=${s.lanes.sgw.lastError ?? '-'} | strades q=${s.lanes.strades.queued} done=${s.lanes.strades.done} | ` +
       `sdata q=${s.lanes.sdata.queued} done=${s.lanes.sdata.done} | tracked hl=${s.tracked.hyperliquid} sodex=${s.tracked.sodex} | ` +
       `streams hl=${s.streams.hyperliquid ? 'up' : 'down'} sodex=${s.streams.sodex ? 'up' : 'down'} ` +
-      `lighter=${s.streams.lighter ? 'up' : 'down'}${lighterSubs(s.venues.lighter)} arcus=${s.streams.arcus ? 'up' : 'down'} | build ${s.lastBuildMs} ms`,
+      `lighter=${s.streams.lighter ? 'up' : 'down'}${lighterSubs(s.venues.lighter)} arcus=${s.streams.arcus ? 'up' : 'down'} | build ${s.lastBuildMs} ms` +
+      // The three slowest steps of that build (engine.ts lastBuildStepMs): the journal names what made a build slow.
+      ` (${Object.entries(s.lastBuildStepMs ?? {}).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k, v]) => `${k} ${v}`).join(', ')})`,
   );
 }, 60_000).unref();
