@@ -13,7 +13,7 @@ import { VenueLogo } from '../../VenueLogo';
 import { fmtUsdShort } from '../model';
 import { usePolled } from './parts';
 
-const KIND_LABEL: Record<ExcludedWallet['kind'], string> = { internal: 'Venue account', hedged: 'Hedged desk' };
+const KIND_LABEL: Record<ExcludedWallet['kind'], string> = { internal: 'Venue account', hedged: 'Hedged desk', mirror: 'Mirrored pair' };
 
 export function ExcludedButton() {
   const [open, setOpen] = useState(false);
@@ -27,8 +27,8 @@ export function ExcludedButton() {
       </button>
       <Modal open={open} title="Excluded wallets" size="lg" onClose={() => setOpen(false)}>
         <p className="coh-excl__lead">
-          Left out of every cohort and the liquidation heatmap: a venue's own accounts and hedged desks hold
-          positions that are no view on the market. Their open interest is also taken off the venue's,
+          Left out of every cohort and the liquidation heatmap: a venue's own accounts, hedged desks and mirrored
+          pairs (two accounts holding exact opposites) hold positions that are no view on the market. Their open interest is also taken off the venue's,
           so coverage still compares like with like.
         </p>
         {r.error && !r.data ? <p className="coh-excl__lead">The list could not be read: {r.error}</p> : null}

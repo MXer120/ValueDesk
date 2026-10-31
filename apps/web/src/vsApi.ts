@@ -65,7 +65,7 @@ export const SCAN_VENUES: readonly Venue[] = ['sodex', 'hyperliquid', 'tradexyz'
 export interface ExcludedWallet {
   venue: Venue;
   address: string;
-  kind: 'internal' | 'hedged';
+  kind: 'internal' | 'hedged' | 'mirror';
   label: string | null;
   why: string;
   since: string;
