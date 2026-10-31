@@ -835,7 +835,10 @@ function HistoryView({ coin, venues, engine, symbol, wallets, side, colorBy, lev
   // chart to work the windows out again (an extendData change alone only redraws).
   const scale = useMemo(() => heatScale(points, side, lev), [points, side, levKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const rev = useMemo(() => ++calcRev, [points, side, levKey]); // eslint-disable-line react-hooks/exhaustive-deps
-  const data = useMemo<HeatData>(() => ({ points, side, lev, colorBy, scale, fit: true, strip }), [points, side, levKey, colorBy, scale, strip]); // eslint-disable-line react-hooks/exhaustive-deps
+  // The axis fits the candles (fit off): fitted to every bar's levels as well, the candles lay flat in a
+  // tenth of the pane (owner 2026-10-31). The snapshots hold the levels 0.2x-3x the price, so zooming the
+  // price axis out shows all of them - none is cut off.
+  const data = useMemo<HeatData>(() => ({ points, side, lev, colorBy, scale, fit: false, strip }), [points, side, levKey, colorBy, scale, strip]); // eslint-disable-line react-hooks/exhaustive-deps
   const dataRef = useRef({ data, rev });
   dataRef.current = { data, rev };
   // The layer on each chart instance the chart makes (it makes a new one on a rebuild).

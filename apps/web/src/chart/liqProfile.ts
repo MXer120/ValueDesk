@@ -33,8 +33,8 @@ const LEV_KEYS = ['low', 'mid', 'high', 'unknown'] as const;
 
 /**
  * The levels now as bars growing left from the right edge of a pane, `maxW` long at most: the
- * Liquidation map indicator, and the historical view's strip (`backdrop`: a panel of its own
- * over the cells, labelled). By side the longs (red) and shorts (green) overlap; by leverage a
+ * Liquidation map indicator, and the historical view's strip (`backdrop`: labelled "Levels now", drawn
+ * straight over the cells). By side the longs (red) and shorts (green) overlap; by leverage a
  * bar is both sides stacked by band. The lengths are scaled to the rows on screen (their middle
  * inside the pane) by robustMax: a level far past the rest is drawn full, with a tick at its end,
  * and the rest keep their length.
@@ -66,11 +66,9 @@ export function drawProfile(
   ctx.beginPath();
   ctx.rect(0, 0, bounding.width, bounding.height);
   ctx.clip();
+  // Its name only: no panel behind it - the bars lie on the chart itself (owner 2026-10-31: a dark panel
+  // covered the newest candles and the heat).
   if (o.backdrop) {
-    ctx.fillStyle = 'rgba(11, 11, 16, 0.62)';
-    ctx.fillRect(x0 - W - 6, 0, W + 6, bounding.height);
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.14)';
-    ctx.fillRect(x0 - W - 6, 0, 1, bounding.height);
     ctx.fillStyle = token('--muted', '#9aa0a6');
     ctx.font = '10px system-ui, sans-serif';
     ctx.textAlign = 'right';
