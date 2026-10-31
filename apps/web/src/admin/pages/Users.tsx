@@ -2,7 +2,7 @@
  * Every wallet ValueDesk knows: those the builder ledger counted (volume, fees paid,
  * tier), those that connected while analytics was allowed (visits, time, features),
  * those with a feedback chat. A wallet only one source knows shows "–" for the others.
- * The table is the leaderboard's (ad-sheet: its head, row height, number font, hover tint).
+ * The table is the leaderboard's (dv-sheet: its head, row height, number font, hover tint).
  */
 import { useMemo, useState } from 'react';
 import { ago, bp, duration, int, short, usd, usdShort } from '../format';
@@ -61,7 +61,7 @@ export function Users() {
   const fees = users.reduce((s, u) => s + (u.builder ? u.builder.fees.perps + u.builder.fees.spot : 0), 0);
   const volume = users.reduce((s, u) => s + (u.builder ? u.builder.volume.perps + u.builder.volume.spot : 0), 0);
   const th = (k: SortKey, label: string) => (
-    <th className="right"><button type="button" className={`ad-sort${sort === k ? ' is-on' : ''}`} onClick={() => setSort(k)} aria-sort={sort === k ? 'descending' : 'none'}>{label}{sort === k ? ' ↓' : ''}</button></th>
+    <th className="right"><button type="button" className={`dv-sort${sort === k ? ' is-on' : ''}`} onClick={() => setSort(k)} aria-sort={sort === k ? 'descending' : 'none'}>{label}{sort === k ? ' ↓' : ''}</button></th>
   );
   return (
     <Page
@@ -72,7 +72,7 @@ export function Users() {
       tools={
         <>
           <Search value={q} onChange={setQ} placeholder="Search 0x… or account id" />
-          <button type="button" className="ad-btn ad-right" onClick={() => csv(shown)} disabled={!shown.length}>Download CSV</button>
+          <button type="button" className="dv-btn dv-right" onClick={() => csv(shown)} disabled={!shown.length}>Download CSV</button>
         </>
       }
     >
@@ -86,8 +86,8 @@ export function Users() {
         </Figures>
       </Section>
       <Section flush>
-        <div className="ad-sheet">
-          <table className="ad-table">
+        <div className="dv-sheet">
+          <table className="dv-table">
             <thead>
               <tr>
                 <th>Wallet</th>
@@ -114,7 +114,7 @@ export function Users() {
                 const a = u.activity;
                 return (
                   <tr key={u.address}>
-                    <td className="ad-mono" title={u.address}>{short(u.address)}</td>
+                    <td className="dv-mono" title={u.address}>{short(u.address)}</td>
                     <td className="right">{b?.accountId ?? '–'}</td>
                     <td className="right" title={b ? `perps ${usd(b.volume.perps)} · spot ${usd(b.volume.spot)}` : undefined}>{b ? usdShort(b.volume.perps + b.volume.spot) : '–'}</td>
                     <td className="right">{b ? usdShort(b.volume30d) : '–'}</td>
@@ -124,20 +124,20 @@ export function Users() {
                     <td title={b?.signedFee ? `last signed ${bp(b.signedFee.perps)} / ${bp(b.signedFee.spot)} (${ago(b.signedFee.at)})` : undefined}>
                       {b ? <>Tier {b.tier.index} · {bp(b.tier.fee.perps)}{b.tier.fee.spot !== b.tier.fee.perps ? ` / ${bp(b.tier.fee.spot)}` : ''}</> : '–'}
                     </td>
-                    <td>{b?.flags.length ? <span className="ad-warn">{b.flags.join(', ')}</span> : b?.pending ? <span className="ad-quiet">{b.pending} to check</span> : <span className="ad-quiet">–</span>}</td>
+                    <td>{b?.flags.length ? <span className="dv-warn">{b.flags.join(', ')}</span> : b?.pending ? <span className="dv-quiet">{b.pending} to check</span> : <span className="dv-quiet">–</span>}</td>
                     <td className="right">{b?.lastTradeAt ? ago(b.lastTradeAt) : '–'}</td>
                     <td className="right">{a ? int(a.visits) : '–'}</td>
                     <td className="right">{a ? duration(a.activeMs) : '–'}</td>
                     <td className="right">{a ? ago(a.lastSeen) : '–'}</td>
                     <td>{a?.countries.join(', ') || '–'}</td>
-                    <td className="ad-quiet">{a?.features.map((f) => `${f.key} ${f.n}`).join(', ') || '–'}</td>
+                    <td className="dv-quiet">{a?.features.map((f) => `${f.key} ${f.n}`).join(', ') || '–'}</td>
                     <td>{u.ticket ? <a className="st-link" href={`#/tickets/${u.ticket}`}>#{u.ticket}</a> : ''}</td>
                   </tr>
                 );
               })}
             </tbody>
           </table>
-          {!shown.length && !r.loading && <div className="ad-sheet__none"><Empty>{q ? 'No wallet matches the search.' : 'No wallet yet.'}</Empty></div>}
+          {!shown.length && !r.loading && <div className="dv-sheet__none"><Empty>{q ? 'No wallet matches the search.' : 'No wallet yet.'}</Empty></div>}
         </div>
       </Section>
       <div className="st-foot">

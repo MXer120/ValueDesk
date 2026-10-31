@@ -68,8 +68,8 @@ export function Page({ title, line, tone = 'unknown', loaded, wide, tools, child
   title: ReactNode; line?: ReactNode; tone?: Tone; loaded?: Pick<Loaded<unknown>, 'loading' | 'at' | 'reload'>; wide?: boolean; tools?: ReactNode; children: ReactNode;
 }) {
   return (
-    <div className="st ad-page">
-      <article className={`st-card${wide ? ' ad-card--wide' : ''}`}>
+    <div className="st dv-page">
+      <article className={`st-card${wide ? ' dv-card--wide' : ''}`}>
         <header className={`st-hero${ST_TONE[tone]}`}>
           <HeroIcon tone={tone} />
           <div className="st-hero__text">
@@ -87,7 +87,7 @@ export function Page({ title, line, tone = 'unknown', loaded, wide, tools, child
             </span>
           )}
         </header>
-        {tools && <div className="ad-tools">{tools}</div>}
+        {tools && <div className="dv-tools">{tools}</div>}
         {children}
       </article>
     </div>
@@ -97,9 +97,9 @@ export function Page({ title, line, tone = 'unknown', loaded, wide, tools, child
 /** A section of a card: a hairline above, the Status page's section head, its body. */
 export function Section({ title, aside, children, flush }: { title?: ReactNode; aside?: ReactNode; children: ReactNode; flush?: boolean }) {
   return (
-    <section className={`ad-section${flush ? ' ad-section--flush' : ''}`}>
+    <section className={`dv-section${flush ? ' dv-section--flush' : ''}`}>
       {(title || aside) && (
-        <div className="st-notices__head ad-section__head">
+        <div className="st-notices__head dv-section__head">
           {title && <h2 className="st-h2">{title}</h2>}
           {aside}
         </div>
@@ -111,12 +111,12 @@ export function Section({ title, aside, children, flush }: { title?: ReactNode; 
 
 /** The Excluded page's figures: up to four tiles in a row. */
 export function Figures({ children }: { children: ReactNode }) {
-  return <div className="ex-stats ad-figures">{children}</div>;
+  return <div className="ex-stats dv-figures">{children}</div>;
 }
 
 export function Figure({ label, value, sub, tone }: { label: string; value: ReactNode; sub?: ReactNode; tone?: 'warn' | 'neg' | 'pos' }) {
   return (
-    <div className={`ex-stat${tone ? ` ad-fig--${tone}` : ''}`}>
+    <div className={`ex-stat${tone ? ` dv-fig--${tone}` : ''}`}>
       <span className="ex-stat__label">{label}</span>
       <span className="ex-stat__value">{value}</span>
       {sub !== undefined && <span className="ex-stat__sub">{sub}</span>}
@@ -159,7 +159,7 @@ export function Empty({ children }: { children: ReactNode }) {
 }
 
 export function Note({ kind = 'info', children }: { kind?: 'info' | 'error' | 'warn'; children: ReactNode }) {
-  return <div className={`ad-note ad-note--${kind}`} role={kind === 'error' ? 'alert' : undefined}>{children}</div>;
+  return <div className={`dv-note dv-note--${kind}`} role={kind === 'error' ? 'alert' : undefined}>{children}</div>;
 }
 
 /** Rows of [label, count]: the share as a bar beside the number. */
@@ -170,12 +170,12 @@ export function CountList({ rows, empty = 'Nothing yet.', label = plain }: { row
   if (!rows.length) return <Empty>{empty}</Empty>;
   const total = rows.reduce((s, r) => s + r.n, 0) || 1;
   return (
-    <ul className="ad-counts">
+    <ul className="dv-counts">
       {rows.map((r) => (
         <li key={r.key}>
-          <span className="ad-counts__k">{label(r.key)}</span>
-          <span className="ad-counts__bar"><i style={{ width: `${Math.max(2, (r.n / total) * 100)}%` }} /></span>
-          <span className="ad-counts__n">{r.n.toLocaleString('en-US')}</span>
+          <span className="dv-counts__k">{label(r.key)}</span>
+          <span className="dv-counts__bar"><i style={{ width: `${Math.max(2, (r.n / total) * 100)}%` }} /></span>
+          <span className="dv-counts__n">{r.n.toLocaleString('en-US')}</span>
         </li>
       ))}
     </ul>
@@ -184,5 +184,5 @@ export function CountList({ rows, empty = 'Nothing yet.', label = plain }: { row
 
 /** Any value as a readable tree: what the status page shows for structures it does not name. */
 export function JsonView({ value }: { value: unknown }) {
-  return <pre className="ad-json">{JSON.stringify(value, null, 2)}</pre>;
+  return <pre className="dv-json">{JSON.stringify(value, null, 2)}</pre>;
 }

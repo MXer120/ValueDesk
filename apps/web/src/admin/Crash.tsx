@@ -30,8 +30,8 @@ export function reportPageError(e: unknown, where: string): void {
 export function CrashCard({ error, where }: { error: unknown; where?: string }) {
   const err = error instanceof Error ? error : new Error(String(error));
   return (
-    <div className="st ad-page ad-crash">
-      <article className="st-card ad-card--narrow">
+    <div className="st dv-page dv-crash">
+      <article className="st-card dv-card--narrow">
         <header className="st-hero is-down">
           <svg className="st-hero__icon" viewBox="0 0 20 20" width="36" height="36" aria-hidden="true">
             <circle className="st-hero__shape" cx="10" cy="10" r="8.6" />
@@ -42,14 +42,14 @@ export function CrashCard({ error, where }: { error: unknown; where?: string }) 
             <p className="st-hero__line">It was sent to the audit log. Reload, or sign out and in again.</p>
           </div>
         </header>
-        <section className="ad-section">
-          <p className="ad-crash__msg">{err.name}: {err.message}</p>
-          {where && <pre className="ad-json">{where.trim()}</pre>}
-          {err.stack && <details className="ad-details"><summary>Stack</summary><pre className="ad-json">{err.stack}</pre></details>}
+        <section className="dv-section">
+          <p className="dv-crash__msg">{err.name}: {err.message}</p>
+          {where && <pre className="dv-json">{where.trim()}</pre>}
+          {err.stack && <details className="dv-details"><summary>Stack</summary><pre className="dv-json">{err.stack}</pre></details>}
           <p className="st-ms">Build {BUILD} · {location.hash || '#/overview'}</p>
-          <div className="ad-row">
-            <button type="button" className="ad-btn ad-btn--primary" onClick={() => location.reload()}>Reload</button>
-            <button type="button" className="ad-btn" onClick={() => { saveSession(null); location.hash = ''; location.reload(); }}>Sign out</button>
+          <div className="dv-row">
+            <button type="button" className="dv-btn dv-btn--primary" onClick={() => location.reload()}>Reload</button>
+            <button type="button" className="dv-btn" onClick={() => { saveSession(null); location.hash = ''; location.reload(); }}>Sign out</button>
           </div>
         </section>
       </article>
@@ -71,7 +71,7 @@ export class AdminBoundary extends Component<{ children: ReactNode }, { error: u
   }
 
   render() {
-    if (this.state.error) return <div className="ad-root"><main className="ad-main"><CrashCard error={this.state.error} where={this.state.where} /></main></div>;
+    if (this.state.error) return <div className="dv-root"><main className="dv-main"><CrashCard error={this.state.error} where={this.state.where} /></main></div>;
     return this.props.children;
   }
 }

@@ -26,19 +26,19 @@ export function WalletPicker({ onConnected, wantAddress }: { onConnected: (c: Co
     }
   };
   return (
-    <div className="ad-wallets">
+    <div className="dv-wallets">
       {wallets.map((w) => (
-        <button key={w.uuid} type="button" className="ad-wallet" disabled={!!busy} onClick={() => void pick(w.uuid, () => connectExtension(w))}>
-          {w.icon ? <img src={w.icon} alt="" width={20} height={20} /> : <span className="ad-wallet__dot" />}
+        <button key={w.uuid} type="button" className="dv-wallet" disabled={!!busy} onClick={() => void pick(w.uuid, () => connectExtension(w))}>
+          {w.icon ? <img src={w.icon} alt="" width={20} height={20} /> : <span className="dv-wallet__dot" />}
           <span>{busy === w.uuid ? 'Waiting for the wallet…' : w.name}</span>
         </button>
       ))}
-      <button type="button" className="ad-wallet" disabled={!!busy} onClick={() => void pick('wc', connectWalletConnect)}>
-        <span className="ad-wallet__dot" />
+      <button type="button" className="dv-wallet" disabled={!!busy} onClick={() => void pick('wc', connectWalletConnect)}>
+        <span className="dv-wallet__dot" />
         <span>{busy === 'wc' ? 'Waiting for WalletConnect…' : 'WalletConnect (phone wallet)'}</span>
       </button>
-      {!wallets.length && <p className="ad-dim">No browser wallet found on this page. Install or unlock one, or use WalletConnect.</p>}
-      {error && <p className="ad-error" role="alert">{error}</p>}
+      {!wallets.length && <p className="dv-dim">No browser wallet found on this page. Install or unlock one, or use WalletConnect.</p>}
+      {error && <p className="dv-error" role="alert">{error}</p>}
     </div>
   );
 }

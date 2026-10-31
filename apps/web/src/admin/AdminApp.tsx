@@ -48,7 +48,7 @@ function Wordmark() {
     <span className="brand">
       <BrandMark />
       ValueDesk
-      <span className="ad-devtag">Dev</span>
+      <span className="dv-devtag">Dev</span>
     </span>
   );
 }
@@ -92,10 +92,10 @@ export function AdminApp() {
   const [page, arg] = route;
   return (
     <WalletContext.Provider value={{ connected, ensure }}>
-      <div className="ad-root">
-        <header className="navbar ad-navbar">
+      <div className="dv-root">
+        <header className="navbar dv-navbar">
           <div className="navbar-inner">
-            <a href="#/overview" className="ad-brandlink" aria-label="Overview"><Wordmark /></a>
+            <a href="#/overview" className="dv-brandlink" aria-label="Overview"><Wordmark /></a>
             <nav className="navlinks">
               {PAGES.map((p) => (
                 <a key={p.id} href={`#/${p.id}`} className={`navlink${p.id === page ? ' active' : ''}`} aria-current={p.id === page ? 'page' : undefined}>{p.label}</a>
@@ -106,15 +106,15 @@ export function AdminApp() {
             </div>
           </div>
         </header>
-        <main className="ad-main">{PAGES.find((p) => p.id === page)!.render(arg)}</main>
+        <main className="dv-main">{PAGES.find((p) => p.id === page)!.render(arg)}</main>
       </div>
       {asking && (
-        <div className="ad-modal" role="dialog" aria-modal="true" aria-label="Connect the builder wallet">
-          <div className="ad-modal__card">
+        <div className="dv-modal" role="dialog" aria-modal="true" aria-label="Connect the builder wallet">
+          <div className="dv-modal__card">
             <h2>Sign this change with the builder wallet</h2>
             <p>Every change needs a fresh signature from {short(session.wallet)}.</p>
             <WalletPicker wantAddress={session.wallet} onConnected={settle} />
-            <button type="button" className="ad-btn" onClick={() => settle(null)}>Cancel</button>
+            <button type="button" className="dv-btn" onClick={() => settle(null)}>Cancel</button>
           </div>
         </div>
       )}
@@ -159,15 +159,15 @@ function SessionMenu({ session, connected, ensure }: { session: AdminSession; co
   return (
     <div className="navaddr" ref={box}>
       <button type="button" className="navbtn navaddr__btn" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
-        <span className="ad-livedot" aria-hidden="true" />
+        <span className="dv-livedot" aria-hidden="true" />
         {short(session.wallet)}
       </button>
       {open && (
         <div className="menu-popup navaddr__menu" role="menu">
           <div className="navaddr__full">{session.wallet}</div>
           <div className="menu-group-label">Session</div>
-          <p className="ad-menu-line">Ends in {duration(session.expiresAt - Date.now())}</p>
-          <p className="ad-menu-line">{connected ? `Wallet for changes: ${connected.name}` : 'Wallet for changes: asked at the first change'}</p>
+          <p className="dv-menu-line">Ends in {duration(session.expiresAt - Date.now())}</p>
+          <p className="dv-menu-line">{connected ? `Wallet for changes: ${connected.name}` : 'Wallet for changes: asked at the first change'}</p>
           <div className="menu-group">
             <button type="button" role="menuitem" className="menu-row" onClick={signOut}><span className="menu-row__label">Sign out</span></button>
             <button type="button" role="menuitem" className="menu-row" disabled={busy} onClick={() => void everywhere()}>
@@ -175,7 +175,7 @@ function SessionMenu({ session, connected, ensure }: { session: AdminSession; co
               <span className="menu-row__hint">signed</span>
             </button>
           </div>
-          {error && <p className="ad-error">{error}</p>}
+          {error && <p className="dv-error">{error}</p>}
         </div>
       )}
     </div>
@@ -200,13 +200,13 @@ function SignIn({ connected, onConnected }: { connected: Connected | null; onCon
     }
   };
   return (
-    <div className="ad-root">
-      <header className="navbar ad-navbar">
+    <div className="dv-root">
+      <header className="navbar dv-navbar">
         <div className="navbar-inner"><Wordmark /></div>
       </header>
-      <main className="ad-main">
-        <div className="st ad-page">
-          <article className="st-card ad-card--narrow">
+      <main className="dv-main">
+        <div className="st dv-page">
+          <article className="st-card dv-card--narrow">
             <header className="st-hero is-unknown">
               <svg className="st-hero__icon" viewBox="0 0 20 20" width="36" height="36" aria-hidden="true">
                 <circle className="st-hero__shape" cx="10" cy="10" r="8.6" />
@@ -217,15 +217,15 @@ function SignIn({ connected, onConnected }: { connected: Connected | null; onCon
                 <p className="st-hero__line">The builder wallet's signature and the admin password open this suite for 24 hours. Each change you make asks the wallet again.</p>
               </div>
             </header>
-            <ol className="ad-steps">
+            <ol className="dv-steps">
               <li className={connected ? 'is-done' : undefined}>
-                <div className="ad-steps__title"><span className="ad-steps__n">{connected ? '✓' : '1'}</span>Connect the builder wallet</div>
-                {connected ? <div className="ad-mono ad-dim">{connected.name} · {short(connected.address)}</div> : <WalletPicker onConnected={onConnected} />}
+                <div className="dv-steps__title"><span className="dv-steps__n">{connected ? '✓' : '1'}</span>Connect the builder wallet</div>
+                {connected ? <div className="dv-mono dv-dim">{connected.name} · {short(connected.address)}</div> : <WalletPicker onConnected={onConnected} />}
               </li>
               <li>
-                <div className="ad-steps__title"><span className="ad-steps__n">2</span>Password, then sign</div>
-                <form className="ad-signin__form" onSubmit={(e) => { e.preventDefault(); void submit(); }}>
-                  <label className="lbp-search ad-password">
+                <div className="dv-steps__title"><span className="dv-steps__n">2</span>Password, then sign</div>
+                <form className="dv-signin__form" onSubmit={(e) => { e.preventDefault(); void submit(); }}>
+                  <label className="lbp-search dv-password">
                     <input
                       type="password"
                       autoComplete="current-password"
@@ -236,11 +236,11 @@ function SignIn({ connected, onConnected }: { connected: Connected | null; onCon
                       onChange={(e) => setPassword(e.target.value)}
                     />
                   </label>
-                  <button type="submit" className="ad-btn ad-btn--primary" disabled={!connected || !password || busy}>{busy ? 'Signing…' : 'Sign and sign in'}</button>
+                  <button type="submit" className="dv-btn dv-btn--primary" disabled={!connected || !password || busy}>{busy ? 'Signing…' : 'Sign and sign in'}</button>
                 </form>
               </li>
             </ol>
-            {error && <p className="ad-error ad-pad-x">{error}</p>}
+            {error && <p className="dv-error dv-pad-x">{error}</p>}
           </article>
         </div>
       </main>

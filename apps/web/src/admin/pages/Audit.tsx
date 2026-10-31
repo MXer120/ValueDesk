@@ -31,16 +31,16 @@ export function Audit() {
     >
       {audit.error && <Section><Note kind="error">{audit.error}</Note></Section>}
       <Section title="Open sessions" aside={<span className="st-ms">each ends 24 h after its sign-in</span>} flush>
-        <div className="ad-sheet">
-          <table className="ad-table">
+        <div className="dv-sheet">
+          <table className="dv-table">
             <thead><tr><th>Session</th><th>Wallet</th><th>Since</th><th>Ends</th><th>Client</th><th>Country</th></tr></thead>
-            <tbody>{(me.data?.sessions ?? []).map((s) => <tr key={s.id}><td className="ad-mono">{s.id}</td><td className="ad-mono">{short(s.wallet)}</td><td>{when(s.createdAt)}</td><td>{when(s.expiresAt)}</td><td className="ad-mono">{s.client}</td><td>{s.country ?? '–'}</td></tr>)}</tbody>
+            <tbody>{(me.data?.sessions ?? []).map((s) => <tr key={s.id}><td className="dv-mono">{s.id}</td><td className="dv-mono">{short(s.wallet)}</td><td>{when(s.createdAt)}</td><td>{when(s.expiresAt)}</td><td className="dv-mono">{s.client}</td><td>{s.country ?? '–'}</td></tr>)}</tbody>
           </table>
         </div>
       </Section>
       <Section title="Log" aside={refused ? <Pill tone="warn">{refused} refused in 24 h</Pill> : undefined} flush>
-        <div className="ad-sheet">
-          <table className="ad-table">
+        <div className="dv-sheet">
+          <table className="dv-table">
             <thead><tr><th>When</th><th>What</th><th>Result</th><th>Wallet</th><th>Client</th><th>Country</th><th>Detail</th></tr></thead>
             <tbody>
               {(audit.data?.rows ?? []).map((r) => (
@@ -48,15 +48,15 @@ export function Audit() {
                   <td title={when(r.at)}>{ago(r.at)}</td>
                   <td>{KIND[r.kind] ?? r.kind}</td>
                   <td>{r.ok ? <Pill tone="pos">Done</Pill> : <Pill tone="neg">Refused</Pill>}</td>
-                  <td className="ad-mono">{short(r.wallet)}</td>
-                  <td className="ad-mono">{r.client ?? '–'}</td>
+                  <td className="dv-mono">{short(r.wallet)}</td>
+                  <td className="dv-mono">{r.client ?? '–'}</td>
                   <td>{r.country ?? '–'}</td>
-                  <td className="ad-quiet">{r.detail ? Object.entries(r.detail).map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : String(v)}`).join(' · ') : ''}</td>
+                  <td className="dv-quiet">{r.detail ? Object.entries(r.detail).map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : String(v)}`).join(' · ') : ''}</td>
                 </tr>
               ))}
             </tbody>
           </table>
-          {!(audit.data?.rows ?? []).length && !audit.loading && <div className="ad-sheet__none"><Empty>Nothing logged yet.</Empty></div>}
+          {!(audit.data?.rows ?? []).length && !audit.loading && <div className="dv-sheet__none"><Empty>Nothing logged yet.</Empty></div>}
         </div>
       </Section>
     </Page>

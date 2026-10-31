@@ -35,23 +35,23 @@ export function BarChart({ title, bars, fmt, fmtAxis }: { title: string; bars: r
   const every = Math.max(1, Math.ceil(bars.length / 8));
   const h = hover === null ? null : bars[hover];
   return (
-    <figure className="ad-chart" aria-labelledby={`${id}-t`}>
-      <figcaption className="ad-chart__head">
-        <span id={`${id}-t`} className="ad-chart__title">{title}</span>
-        <span className="ad-chart__read" aria-live="polite">{h ? `${h.label}: ${fmt(h.value)}` : `max ${fmt(max)}`}</span>
-        <button type="button" className="ad-link" onClick={() => setTable((t) => !t)} aria-expanded={table}>{table ? 'Chart' : 'Table'}</button>
+    <figure className="dv-chart" aria-labelledby={`${id}-t`}>
+      <figcaption className="dv-chart__head">
+        <span id={`${id}-t`} className="dv-chart__title">{title}</span>
+        <span className="dv-chart__read" aria-live="polite">{h ? `${h.label}: ${fmt(h.value)}` : `max ${fmt(max)}`}</span>
+        <button type="button" className="dv-link" onClick={() => setTable((t) => !t)} aria-expanded={table}>{table ? 'Chart' : 'Table'}</button>
       </figcaption>
       {table ? (
-        <table className="ad-table">
+        <table className="dv-table">
           <thead><tr><th>Day</th><th className="right">{title}</th></tr></thead>
           <tbody>{bars.map((b) => <tr key={b.key}><td>{b.label}</td><td className="right">{fmt(b.value)}</td></tr>)}</tbody>
         </table>
       ) : (
-        <svg viewBox={`0 0 ${W} ${H}`} className="ad-chart__svg" role="img" aria-label={`${title} per day`} onMouseLeave={() => setHover(null)}>
+        <svg viewBox={`0 0 ${W} ${H}`} className="dv-chart__svg" role="img" aria-label={`${title} per day`} onMouseLeave={() => setHover(null)}>
           {[0, 0.5, 1].map((f) => (
             <g key={f}>
-              <line x1={PAD_L} x2={W} y1={y(top * f)} y2={y(top * f)} className={f === 0 ? 'ad-chart__base' : 'ad-chart__grid'} />
-              <text x={PAD_L - 6} y={y(top * f) + 4} className="ad-chart__tick" textAnchor="end">{tick(top * f)}</text>
+              <line x1={PAD_L} x2={W} y1={y(top * f)} y2={y(top * f)} className={f === 0 ? 'dv-chart__base' : 'dv-chart__grid'} />
+              <text x={PAD_L - 6} y={y(top * f) + 4} className="dv-chart__tick" textAnchor="end">{tick(top * f)}</text>
             </g>
           ))}
           {bars.map((b, i) => {
@@ -71,8 +71,8 @@ export function BarChart({ title, bars, fmt, fmtAxis }: { title: string; bars: r
               >
                 {/* The hit target is the whole band, taller than the column. */}
                 <rect x={PAD_L + i * band} y={PAD_T} width={band} height={plotH} fill="transparent" />
-                {hgt > 0 && <path d={columnPath(x, top0, barW, hgt, r)} className={hover === i ? 'ad-chart__bar is-hot' : 'ad-chart__bar'} />}
-                {i % every === 0 && <text x={PAD_L + i * band + band / 2} y={H - 6} className="ad-chart__tick" textAnchor="middle">{b.label}</text>}
+                {hgt > 0 && <path d={columnPath(x, top0, barW, hgt, r)} className={hover === i ? 'dv-chart__bar is-hot' : 'dv-chart__bar'} />}
+                {i % every === 0 && <text x={PAD_L + i * band + band / 2} y={H - 6} className="dv-chart__tick" textAnchor="middle">{b.label}</text>}
               </g>
             );
           })}

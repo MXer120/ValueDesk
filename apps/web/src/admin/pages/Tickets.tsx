@@ -41,7 +41,7 @@ export function Tickets({ selected }: { selected: number | null }) {
             label="Status"
             value={status}
             onChange={setStatus}
-            options={(['open', 'waiting', 'closed', 'all'] as const).map((s) => ({ value: s, label: <>{s === 'all' ? 'All' : STATUS_WORD[s]} <span className="ad-count">{s === 'all' ? tickets.length : counts[s]}</span></> }))}
+            options={(['open', 'waiting', 'closed', 'all'] as const).map((s) => ({ value: s, label: <>{s === 'all' ? 'All' : STATUS_WORD[s]} <span className="dv-count">{s === 'all' ? tickets.length : counts[s]}</span></> }))}
           />
           {categories.length > 1 && (
             <Seg label="Kind" value={category} onChange={setCategory} options={[{ value: 'all', label: 'Every kind' }, ...categories.map((c) => ({ value: c, label: c[0]!.toUpperCase() + c.slice(1) }))]} />
@@ -50,28 +50,28 @@ export function Tickets({ selected }: { selected: number | null }) {
         </>
       }
     >
-      {list.error && <div className="ad-section"><Note kind="error">{list.error}</Note></div>}
-      <div className="ad-split">
-        <ul className="ad-ticketlist">
+      {list.error && <div className="dv-section"><Note kind="error">{list.error}</Note></div>}
+      <div className="dv-split">
+        <ul className="dv-ticketlist">
           {shown.map((t) => (
             <li key={t.id}>
               <a href={`#/tickets/${t.id}`} className={t.id === selected ? 'is-on' : undefined}>
-                <div className="ad-ticketlist__top">
-                  <span className="ad-ticketlist__id">#{t.id}</span>
-                  <span className="ad-ticketlist__kind">{t.category}</span>
-                  <span className="st-ms ad-right">{ago(t.lastAt)}</span>
+                <div className="dv-ticketlist__top">
+                  <span className="dv-ticketlist__id">#{t.id}</span>
+                  <span className="dv-ticketlist__kind">{t.category}</span>
+                  <span className="st-ms dv-right">{ago(t.lastAt)}</span>
                 </div>
-                <div className="ad-ticketlist__text">{t.lastFrom === 'owner' ? 'You: ' : ''}{t.lastText}</div>
-                <div className="ad-ticketlist__meta">
+                <div className="dv-ticketlist__text">{t.lastFrom === 'owner' ? 'You: ' : ''}{t.lastText}</div>
+                <div className="dv-ticketlist__meta">
                   <Pill tone={STATUS_TONE[t.status]}>{STATUS_WORD[t.status]}</Pill>
                   <span>{t.wallet ? short(t.wallet) : t.claimedWallet ? `${short(t.claimedWallet)} (claimed)` : 'no wallet'} · {t.messages} message{t.messages === 1 ? '' : 's'}{t.images ? ` · ${t.images} screenshot${t.images === 1 ? '' : 's'}` : ''}</span>
                 </div>
               </a>
             </li>
           ))}
-          {!shown.length && !list.loading && <li className="ad-ticketlist__none"><Empty>{q ? 'No ticket matches the search.' : !tickets.length ? 'No visitor has written yet. A message sent with "Send feedback" on the site appears here and in Telegram.' : status === 'all' ? 'No ticket.' : `No ${STATUS_WORD[status as TicketStatus].toLowerCase()} ticket.`}</Empty></li>}
+          {!shown.length && !list.loading && <li className="dv-ticketlist__none"><Empty>{q ? 'No ticket matches the search.' : !tickets.length ? 'No visitor has written yet. A message sent with "Send feedback" on the site appears here and in Telegram.' : status === 'all' ? 'No ticket.' : `No ${STATUS_WORD[status as TicketStatus].toLowerCase()} ticket.`}</Empty></li>}
         </ul>
-        <div className="ad-thread">{selected ? <Thread id={selected} onChanged={list.reload} /> : <div className="ad-thread__none"><Empty>{tickets.length ? 'Pick a ticket on the left.' : 'Answers you write here reach the visitor\'s feedback chat and the Telegram thread.'}</Empty></div>}</div>
+        <div className="dv-thread">{selected ? <Thread id={selected} onChanged={list.reload} /> : <div className="dv-thread__none"><Empty>{tickets.length ? 'Pick a ticket on the left.' : 'Answers you write here reach the visitor\'s feedback chat and the Telegram thread.'}</Empty></div>}</div>
       </div>
     </Page>
   );
@@ -111,15 +111,15 @@ function Thread({ id, onChanged }: { id: number; onChanged: () => void }) {
     await call('ticket/status', { ...payload, action });
   });
 
-  if (t.error) return <div className="ad-thread__none"><Note kind="error">{t.error}</Note></div>;
-  if (!t.data) return <div className="ad-thread__none"><Empty>Loading…</Empty></div>;
+  if (t.error) return <div className="dv-thread__none"><Note kind="error">{t.error}</Note></div>;
+  if (!t.data) return <div className="dv-thread__none"><Empty>Loading…</Empty></div>;
   const { ticket, messages } = t.data;
   return (
-    <div className="ad-thread__inner">
-      <div className="ad-thread__head">
-        <div className="ad-thread__who">
-          <span className="ad-thread__title">#{ticket.id} · {ticket.category}</span>
-          <span className="st-ms">since {when(ticket.createdAt)} · {ticket.wallet ? <>wallet <span className="ad-mono" title={ticket.wallet}>{short(ticket.wallet)}</span> (proven)</> : 'not kept on a wallet'}</span>
+    <div className="dv-thread__inner">
+      <div className="dv-thread__head">
+        <div className="dv-thread__who">
+          <span className="dv-thread__title">#{ticket.id} · {ticket.category}</span>
+          <span className="st-ms">since {when(ticket.createdAt)} · {ticket.wallet ? <>wallet <span className="dv-mono" title={ticket.wallet}>{short(ticket.wallet)}</span> (proven)</> : 'not kept on a wallet'}</span>
         </div>
         <Pill tone={STATUS_TONE[ticket.status]}>{STATUS_WORD[ticket.status]}</Pill>
         <div className="lbp-seg" role="group" aria-label="Set the status (signed)">
@@ -130,16 +130,16 @@ function Thread({ id, onChanged }: { id: number; onChanged: () => void }) {
           ))}
         </div>
       </div>
-      <ol className="ad-messages">
+      <ol className="dv-messages">
         {messages.map((m) => <Message key={m.id} id={id} m={m} />)}
       </ol>
-      <form className="ad-reply" onSubmit={(e) => { e.preventDefault(); if (text.trim()) void reply(); }}>
-        <textarea className="ad-textarea" rows={4} maxLength={4000} placeholder="Your answer - the visitor sees it in their feedback chat; it also goes to the Telegram thread." value={text} onChange={(e) => setText(e.target.value)} aria-label="Answer" />
-        <div className="ad-row">
+      <form className="dv-reply" onSubmit={(e) => { e.preventDefault(); if (text.trim()) void reply(); }}>
+        <textarea className="dv-textarea" rows={4} maxLength={4000} placeholder="Your answer - the visitor sees it in their feedback chat; it also goes to the Telegram thread." value={text} onChange={(e) => setText(e.target.value)} aria-label="Answer" />
+        <div className="dv-row">
           <span className="st-ms">{text.length}/4000 · the signature names this ticket and this exact text</span>
-          <button type="submit" className="ad-btn ad-btn--primary ad-right" disabled={!text.trim() || !!busy}>{busy === 'reply' ? 'Waiting for the signature…' : 'Sign and send'}</button>
+          <button type="submit" className="dv-btn dv-btn--primary dv-right" disabled={!text.trim() || !!busy}>{busy === 'reply' ? 'Waiting for the signature…' : 'Sign and send'}</button>
         </div>
-        {error && <p className="ad-error" role="alert">{error}</p>}
+        {error && <p className="dv-error" role="alert">{error}</p>}
       </form>
     </div>
   );
@@ -148,17 +148,17 @@ function Thread({ id, onChanged }: { id: number; onChanged: () => void }) {
 function Message({ id, m }: { id: number; m: TicketMessage }) {
   const ctx = m.context;
   return (
-    <li className={`ad-msg ad-msg--${m.from}`}>
-      <div className="ad-msg__meta">
+    <li className={`dv-msg dv-msg--${m.from}`}>
+      <div className="dv-msg__meta">
         <b>{m.from === 'owner' ? 'ValueDesk' : 'Visitor'}</b>
         <span>{when(m.at)}</span>
         {m.from === 'user' && m.wallet && <span>{short(m.wallet)} {m.proven ? '(proven)' : '(claimed)'}</span>}
         {m.category && <span>{m.category}{m.areas.length ? `: ${m.areas.join(', ')}` : ''}</span>}
       </div>
-      <div className="ad-msg__text">{m.text}</div>
-      {m.images.length > 0 && <div className="ad-msg__imgs">{m.images.map((img) => <Shot key={img} id={id} image={img} />)}</div>}
+      <div className="dv-msg__text">{m.text}</div>
+      {m.images.length > 0 && <div className="dv-msg__imgs">{m.images.map((img) => <Shot key={img} id={id} image={img} />)}</div>}
       {ctx && (
-        <details className="ad-msg__ctx">
+        <details className="dv-msg__ctx">
           <summary>Page info</summary>
           <dl>{Object.entries(ctx).map(([k, v]) => <div key={k}><dt>{k}</dt><dd>{typeof v === 'object' ? JSON.stringify(v) : String(v)}</dd></div>)}</dl>
         </details>
@@ -182,5 +182,5 @@ function Shot({ id, image }: { id: number; image: string }) {
       if (url) URL.revokeObjectURL(url);
     };
   }, [id, image]);
-  return src ? <a href={src} target="_blank" rel="noreferrer"><img src={src} alt="Screenshot from the visitor" className="ad-shot" /></a> : <span className="st-ms">loading screenshot…</span>;
+  return src ? <a href={src} target="_blank" rel="noreferrer"><img src={src} alt="Screenshot from the visitor" className="dv-shot" /></a> : <span className="st-ms">loading screenshot…</span>;
 }

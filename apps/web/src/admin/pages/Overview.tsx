@@ -48,50 +48,50 @@ export function Overview() {
           <Figure label="Open tickets" value={<a href="#/tickets">{int(open.length)}</a>} tone={open.length ? 'warn' : undefined} sub={all.length ? `${int(all.length)} chat${all.length === 1 ? '' : 's'} in all` : 'no chat yet'} />
         </Figures>
       </Section>
-      <Section title="Volume and builder fees per day" aside={<a className="st-link ad-more" href="#/revenue">Volume & fees</a>}>
+      <Section title="Volume and builder fees per day" aside={<a className="st-link dv-more" href="#/revenue">Volume & fees</a>}>
         {b ? (
-          <div className="ad-charts">
+          <div className="dv-charts">
             <BarChart title="Volume" bars={b.days.map((d) => ({ key: d.day, label: dayLabel(d.day), value: d.perps + d.spot }))} fmt={usd} fmtAxis={usdShort} />
             <BarChart title="Fees" bars={b.days.map((d) => ({ key: d.day, label: dayLabel(d.day), value: d.feePerps + d.feeSpot }))} fmt={usd} fmtAxis={usdShort} />
           </div>
         ) : <Empty>{builder.loading ? 'Loading…' : 'The builder ledger is off on this server.'}</Empty>}
       </Section>
-      <Section title="Services" aside={<a className="st-link ad-more" href="#/status">Status</a>}>
-        <ul className="ad-rows">
+      <Section title="Services" aside={<a className="st-link dv-more" href="#/status">Status</a>}>
+        <ul className="dv-rows">
           {services.map((x) => (
             <li key={x.id}>
-              <span className="ad-rows__name">{x.name}</span>
+              <span className="dv-rows__name">{x.name}</span>
               <span className="st-ms">{x.latencyMs === null ? '' : `${int(x.latencyMs)} ms`}</span>
               <Pill tone={STATE_TONE[x.state]}>{STATE_WORD[x.state]}</Pill>
             </li>
           ))}
           <li>
-            <span className="ad-rows__name">Executor health (server 2)</span>
+            <span className="dv-rows__name">Executor health (server 2)</span>
             <span className="st-ms">{exec?.health ? `${int(exec.health.copies as number)} copies · ${int(exec.health.algos as number)} algos` : ''}</span>
             {exec ? <Pill tone={execOk ? (brake ? 'warn' : 'pos') : 'neg'}>{!execOk ? 'Not reachable' : brake ? 'Brake on' : 'Healthy'}</Pill> : <Pill tone="dim">Checking</Pill>}
           </li>
         </ul>
       </Section>
-      <div className="ad-split2">
-        <Section title="Top wallets, 30 days" aside={<a className="st-link ad-more" href="#/users">Users</a>}>
+      <div className="dv-split2">
+        <Section title="Top wallets, 30 days" aside={<a className="st-link dv-more" href="#/users">Users</a>}>
           {top.length ? (
-            <ul className="ad-rows">
+            <ul className="dv-rows">
               {top.map((u) => (
                 <li key={u.address}>
-                  <span className="ad-rows__name ad-mono" title={u.address}>{short(u.address)}</span>
+                  <span className="dv-rows__name dv-mono" title={u.address}>{short(u.address)}</span>
                   <span className="st-ms">{usd(u.builder!.fees.perps + u.builder!.fees.spot)} fees</span>
-                  <span className="ad-rows__fig">{usdShort(u.builder!.volume30d)}</span>
+                  <span className="dv-rows__fig">{usdShort(u.builder!.volume30d)}</span>
                 </li>
               ))}
             </ul>
           ) : <Empty>{users.loading ? 'Loading…' : 'No wallet traded through ValueDesk\'s builder in the last 30 days.'}</Empty>}
         </Section>
-        <Section title="Waiting for an answer" aside={<a className="st-link ad-more" href="#/tickets">Tickets</a>}>
+        <Section title="Waiting for an answer" aside={<a className="st-link dv-more" href="#/tickets">Tickets</a>}>
           {open.length ? (
-            <ul className="ad-rows">
+            <ul className="dv-rows">
               {open.slice(0, 5).map((t) => (
                 <li key={t.id}>
-                  <a className="ad-rows__name ad-rows__link" href={`#/tickets/${t.id}`}>#{t.id} {t.lastText}</a>
+                  <a className="dv-rows__name dv-rows__link" href={`#/tickets/${t.id}`}>#{t.id} {t.lastText}</a>
                   <span className="st-ms">{ago(t.lastAt)}</span>
                 </li>
               ))}
@@ -99,7 +99,7 @@ export function Overview() {
           ) : <Empty>{tickets.loading ? 'Loading…' : all.length ? 'Every chat is answered.' : 'No visitor has written yet. Messages sent with "Send feedback" land here and in Telegram.'}</Empty>}
         </Section>
       </div>
-      <Section title="Visitors, 7 days" aside={<a className="st-link ad-more" href="#/analytics">Analytics</a>}>
+      <Section title="Visitors, 7 days" aside={<a className="st-link dv-more" href="#/analytics">Analytics</a>}>
         {a && a.visits ? (
           <Figures>
             <Figure label="Visitors" value={int(a.visitors)} sub={`${int(a.newVisitors)} new`} />

@@ -31,7 +31,7 @@ export function Revenue() {
             </Figures>
           </Section>
           <Section title="Per day">
-            <div className="ad-charts">
+            <div className="dv-charts">
               <BarChart title="Volume" bars={b.days.map((d) => ({ key: d.day, label: dayLabel(d.day), value: d.perps + d.spot }))} fmt={usd} fmtAxis={usdShort} />
               <BarChart title="Fees" bars={b.days.map((d) => ({ key: d.day, label: dayLabel(d.day), value: d.feePerps + d.feeSpot }))} fmt={usd} fmtAxis={usdShort} />
             </div>
@@ -45,8 +45,8 @@ export function Revenue() {
             </Figures>
           </Section>
           <Section title={`Fee tiers, by ${r.data?.volumeDays ? `${r.data.volumeDays}-day` : 'lifetime'} counted volume`} flush>
-            <div className="ad-sheet">
-              <table className="ad-table">
+            <div className="dv-sheet">
+              <table className="dv-table">
                 <thead><tr><th>Tier</th><th className="right">From</th><th className="right">Perps</th><th className="right">Spot</th><th className="right">Wallets</th></tr></thead>
                 <tbody>{b.tiers.map((t) => <tr key={t.index}><td>Tier {t.index}</td><td className="right">${int(t.minVolumeUsd)}</td><td className="right">{bp(t.perps)}</td><td className="right">{bp(t.spot)}</td><td className="right">{int(t.wallets)}</td></tr>)}</tbody>
               </table>

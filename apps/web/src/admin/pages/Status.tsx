@@ -83,31 +83,31 @@ function Indexer({ v }: { v: Record<string, unknown> | null }) {
   const lanes = rec(v.lanes);
   return (
     <Section title="Indexer" aside={<span className="st-ms">status written {ago(num(v.at))}</span>}>
-      <dl className="ad-dl">
+      <dl className="dv-dl">
         <div><dt>Last board build</dt><dd>{ago(num(v.lastBuildAt))} · took {duration(num(v.lastBuildMs))}</dd></div>
         <div><dt>Event loop lag</dt><dd>{int(num(lag.lastMinute))} ms in the last minute · {int(num(lag.sinceStart))} ms worst since start</dd></div>
         <div><dt>Streams</dt><dd>{Object.entries(sockets).map(([k, up]) => <Pill key={k} tone={up ? 'pos' : 'neg'}>{k}</Pill>)}</dd></div>
-        {typeof v.lastError === 'string' && <div><dt>Last error</dt><dd className="ad-warn">{v.lastError}</dd></div>}
+        {typeof v.lastError === 'string' && <div><dt>Last error</dt><dd className="dv-warn">{v.lastError}</dd></div>}
       </dl>
-      <div className="ad-grid ad-grid--2">
+      <div className="dv-grid dv-grid--2">
         {steps.length > 0 && (
-          <div className="ad-sheet">
-            <table className="ad-table">
+          <div className="dv-sheet">
+            <table className="dv-table">
               <thead><tr><th>Build step</th><th className="right">Last build</th></tr></thead>
-              <tbody>{steps.slice(0, 12).map(([k, ms]) => <tr key={k}><td className="ad-mono">{k}</td><td className="right">{duration(ms)}</td></tr>)}</tbody>
+              <tbody>{steps.slice(0, 12).map(([k, ms]) => <tr key={k}><td className="dv-mono">{k}</td><td className="right">{duration(ms)}</td></tr>)}</tbody>
             </table>
           </div>
         )}
         {Object.keys(lanes).length > 0 && (
-          <div className="ad-sheet">
-            <table className="ad-table">
+          <div className="dv-sheet">
+            <table className="dv-table">
               <thead><tr><th>Lane</th><th className="right">Queued</th><th className="right">Done</th><th className="right">Failed</th></tr></thead>
-              <tbody>{Object.entries(lanes).map(([k, l]) => <tr key={k}><td className="ad-mono">{k}</td><td className="right">{int(num(rec(l).queued))}</td><td className="right">{int(num(rec(l).done))}</td><td className="right">{int(num(rec(l).failed))}</td></tr>)}</tbody>
+              <tbody>{Object.entries(lanes).map(([k, l]) => <tr key={k}><td className="dv-mono">{k}</td><td className="right">{int(num(rec(l).queued))}</td><td className="right">{int(num(rec(l).done))}</td><td className="right">{int(num(rec(l).failed))}</td></tr>)}</tbody>
             </table>
           </div>
         )}
       </div>
-      <details className="ad-details"><summary>The whole status row</summary><JsonView value={v} /></details>
+      <details className="dv-details"><summary>The whole status row</summary><JsonView value={v} /></details>
     </Section>
   );
 }
@@ -121,11 +121,11 @@ function Executor({ v }: { v: EverythingStatus['executor'] }) {
       {!v.reachable ? (
         <Note kind="error">Not reachable{v.status ? ` (HTTP ${v.status})` : v.error ? ` (${v.error})` : ''} after {int(v.ms ?? null)} ms.</Note>
       ) : (
-        <dl className="ad-dl">
+        <dl className="dv-dl">
           <div><dt>Answered in</dt><dd>{int(v.ms ?? null)} ms · database {h.db ? 'ok' : 'down'} · SoDEX feed {rec(h.feeds).sodex ? 'up' : 'down'}</dd></div>
           <div><dt>Copies</dt><dd>{int(num(h.copies))} ({int(num(h.active))} active)</dd></div>
           <div><dt>Algo orders running</dt><dd>{int(num(h.algos))}</dd></div>
-          <div><dt>Brake</dt><dd>{h.brake ? <span className="ad-warn">on: {['trading', 'copies', 'algos'].filter((k) => brake[k]).join(', ')}{typeof brake.reason === 'string' ? ` - ${brake.reason}` : ''}</span> : 'off'}</dd></div>
+          <div><dt>Brake</dt><dd>{h.brake ? <span className="dv-warn">on: {['trading', 'copies', 'algos'].filter((k) => brake[k]).join(', ')}{typeof brake.reason === 'string' ? ` - ${brake.reason}` : ''}</span> : 'off'}</dd></div>
           {Object.keys(queue).length > 0 && (
             <div>
               <dt>Send queue</dt>
@@ -146,10 +146,10 @@ function Server({ v }: { v: EverythingStatus['system'] }) {
   const disk = v.disk ? 1 - v.disk.freeBytes / v.disk.totalBytes : null;
   return (
     <Section title={`Server 1 · ${v.host}`} aside={<span className="st-ms">up {duration(v.uptimeS * 1000)}</span>}>
-      <dl className="ad-dl">
+      <dl className="dv-dl">
         <div><dt>Load</dt><dd>{v.load.map((x) => x.toFixed(2)).join(' / ')} on {v.cores} cores</dd></div>
-        <div><dt>Memory</dt><dd className={used > 0.9 ? 'ad-warn' : undefined}>{(used * 100).toFixed(0)}% of {bytes(v.memory.totalBytes)} used</dd></div>
-        <div><dt>Data disk</dt><dd className={disk !== null && disk > 0.8 ? 'ad-warn' : undefined}>{v.disk ? `${((disk ?? 0) * 100).toFixed(0)}% of ${bytes(v.disk.totalBytes)} used · ${bytes(v.disk.freeBytes)} free` : '–'}</dd></div>
+        <div><dt>Memory</dt><dd className={used > 0.9 ? 'dv-warn' : undefined}>{(used * 100).toFixed(0)}% of {bytes(v.memory.totalBytes)} used</dd></div>
+        <div><dt>Data disk</dt><dd className={disk !== null && disk > 0.8 ? 'dv-warn' : undefined}>{v.disk ? `${((disk ?? 0) * 100).toFixed(0)}% of ${bytes(v.disk.totalBytes)} used · ${bytes(v.disk.freeBytes)} free` : '–'}</dd></div>
         <div><dt>API process</dt><dd>up {duration(v.api.uptimeS * 1000)} · {bytes(v.api.rssBytes)} memory · Node {v.api.node}</dd></div>
       </dl>
     </Section>
@@ -159,15 +159,15 @@ function Server({ v }: { v: EverythingStatus['system'] }) {
 function Releases({ v, brake }: { v: EverythingStatus['releases']; brake: EverythingStatus['brake'] }) {
   return (
     <Section title="Releases and brake (server 1)">
-      <dl className="ad-dl">
-        {isErr(v) ? <div><dt>Releases</dt><dd className="ad-warn">{v.error}</dd></div> : (
+      <dl className="dv-dl">
+        {isErr(v) ? <div><dt>Releases</dt><dd className="dv-warn">{v.error}</dd></div> : (
           <>
-            <div><dt>Running</dt><dd className="ad-mono">{v.current ?? 'not a released server'}</dd></div>
-            <div><dt>Before it</dt><dd className="ad-mono">{v.previous ?? '–'}</dd></div>
+            <div><dt>Running</dt><dd className="dv-mono">{v.current ?? 'not a released server'}</dd></div>
+            <div><dt>Before it</dt><dd className="dv-mono">{v.previous ?? '–'}</dd></div>
             <div><dt>Kept</dt><dd>{v.installed.map((x) => `${x.tag} (${when(x.at)})`).join(' · ') || '–'}</dd></div>
           </>
         )}
-        <div><dt>Site brake</dt><dd>{!brake ? 'off' : isErr(brake) ? brake.error : <span className="ad-warn">on: {['trading', 'copies', 'algos'].filter((k) => (brake as Record<string, unknown>)[k]).join(', ')} - {brake.reason}</span>}</dd></div>
+        <div><dt>Site brake</dt><dd>{!brake ? 'off' : isErr(brake) ? brake.error : <span className="dv-warn">on: {['trading', 'copies', 'algos'].filter((k) => (brake as Record<string, unknown>)[k]).join(', ')} - {brake.reason}</span>}</dd></div>
       </dl>
     </Section>
   );
@@ -177,12 +177,12 @@ function Errors({ v }: { v: EverythingStatus['clientErrors'] }) {
   return (
     <Section title="Errors browsers reported" flush>
       {isErr(v) ? <Note kind="error">{v.error}</Note> : (
-        <div className="ad-sheet">
-          <table className="ad-table">
+        <div className="dv-sheet">
+          <table className="dv-table">
             <thead><tr><th>Last</th><th>Error</th><th>Page</th><th>Browser</th><th>Build</th><th className="right">Count</th></tr></thead>
-            <tbody>{v.map((e) => <tr key={e.fp}><td>{ago(e.lastAt)}</td><td>{e.name}: {e.message}</td><td className="ad-mono">{e.lastRoute}</td><td>{e.lastBrowser}</td><td className="ad-mono">{e.lastBuild}</td><td className="right">{int(e.count)}</td></tr>)}</tbody>
+            <tbody>{v.map((e) => <tr key={e.fp}><td>{ago(e.lastAt)}</td><td>{e.name}: {e.message}</td><td className="dv-mono">{e.lastRoute}</td><td>{e.lastBrowser}</td><td className="dv-mono">{e.lastBuild}</td><td className="right">{int(e.count)}</td></tr>)}</tbody>
           </table>
-          {!v.length && <div className="ad-sheet__none"><Empty>No error reported.</Empty></div>}
+          {!v.length && <div className="dv-sheet__none"><Empty>No error reported.</Empty></div>}
         </div>
       )}
     </Section>
