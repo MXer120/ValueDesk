@@ -6,9 +6,11 @@
  * docs/INDEXER.md for the environment and budgets.
  */
 import { runIndexer } from './worker.js';
+import { profileOnSignal } from './cpuProfile.js';
 
 const running = runIndexer();
 console.log(`[indexer] writing ${running.store.path}`);
+profileOnSignal(running.store.path);
 
 const stop = () => {
   running.stop();
