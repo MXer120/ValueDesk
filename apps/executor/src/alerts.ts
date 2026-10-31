@@ -24,6 +24,8 @@
  * dropped; an alert never throws into the code that raised it.
  */
 
+import { readFileSync } from 'node:fs';
+
 export type AlertKind =
   | 'order-rejected'
   | 'key-decrypt'
@@ -317,4 +319,21 @@ export function lastRunCrashed(db: { auditRows(q: { kind?: string; limit?: numbe
   if (d.event === 'start') return `the run started ${new Date(last.at).toISOString()} ended without stopping (killed, out of memory, or the machine went down)`;
   if (d.event === 'stop' && (d.why === 'unhandled rejection' || d.why === 'uncaught exception')) return `the last run stopped on an ${d.why} at ${new Date(last.at).toISOString()}`;
   return null;
+}
+
+/**
+ * The maintenance window open on this server for `part` (deploy/server/bin/maint.sh writes it:
+ * {"what", "parts": [...], "until"}), as its `what`; null when none is open for it or the file
+ * cannot be read. A run killed inside one was planned (the live suite's crash test, a person's
+ * restart): no "started after a crash" alert then, only the log line.
+ */
+export function maintenanceFor(file: string | null, part: string, now = Date.now()): string | null {
+  if (!file) return null;
+  try {
+    const w = JSON.parse(readFileSync(file, 'utf8')) as { what?: unknown; parts?: unknown; until?: unknown };
+    if (!(Number(w.until) > now) || !Array.isArray(w.parts) || !w.parts.includes(part)) return null;
+    return typeof w.what === 'string' && w.what ? w.what.slice(0, 80) : 'maintenance';
+  } catch {
+    return null;
+  }
 }

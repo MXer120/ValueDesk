@@ -12,7 +12,7 @@
  *     rebinding) and a wallet cannot spend the SoDEX budget on key checks.
  */
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { request } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -43,7 +43,7 @@ import {
   type MarketInfo,
   type WebSocketLike,
 } from '../../../packages/copy-engine/src/index.ts';
-import { Alerts, ReachWatch, lastRunCrashed, scrub, shortWallet, telegramSender } from '../src/alerts.ts';
+import { Alerts, ReachWatch, lastRunCrashed, maintenanceFor, scrub, shortWallet, telegramSender } from '../src/alerts.ts';
 import { loadConfig, type ExecutorConfig } from '../src/config.ts';
 import { ExecutorDb } from '../src/db.ts';
 import { ErrorGuard, classifyRejection, guardedAlgoSink, type GuardHost } from '../src/guard.ts';
@@ -663,4 +663,21 @@ test('alerts: every alert is in the executor log, scrubbed, also with no Telegra
   assert.equal(logged[0]!.data!.kind, 'order-rejected');
   assert.match(String(logged[0]!.data!.text), /code 77/);
   assert.doesNotMatch(String(logged[0]!.data!.text), /abababab/, 'long hex cut out');
+});
+test('a crash inside a maintenance window for the executor is planned: maintenanceFor names it, anything else is null', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'vs-maint-'));
+  try {
+    const f = join(dir, 'maintenance.json');
+    const now = 1_000_000;
+    assert.equal(maintenanceFor(f, 'executor', now), null, 'no file');
+    assert.equal(maintenanceFor(null, 'executor', now), null, 'no file configured (a self-hosted copier)');
+    writeFileSync(f, JSON.stringify({ what: 'live test: executor crash', parts: ['executor'], since: now - 1, until: now + 60_000 }));
+    assert.equal(maintenanceFor(f, 'executor', now), 'live test: executor crash');
+    assert.equal(maintenanceFor(f, 'api', now), null, 'a window for other parts');
+    assert.equal(maintenanceFor(f, 'executor', now + 60_001), null, 'a window past its end');
+    writeFileSync(f, '{garbled');
+    assert.equal(maintenanceFor(f, 'executor', now), null, 'a garbled file');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

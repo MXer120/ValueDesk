@@ -17,7 +17,7 @@ import { ExecutorDb } from './db.ts';
 import { Secrets } from './secrets.ts';
 import { createExecutorServer } from './server.ts';
 import { ApiError, ExecutorService } from './service.ts';
-import { Alerts, ReachWatch, lastRunCrashed, telegramSender } from './alerts.ts';
+import { Alerts, ReachWatch, lastRunCrashed, maintenanceFor, telegramSender } from './alerts.ts';
 
 const LEVELS = { debug: 10, info: 20, warn: 30, error: 40 } as const;
 
@@ -129,8 +129,11 @@ async function main(): Promise<void> {
   alerts.start();
   const crashed = lastRunCrashed(db);
   if (crashed) {
-    log.warn('executor: the last run crashed', { what: crashed });
-    alerts.raise('crash-restart', '', `Started again: ${crashed}.`);
+    // Killed inside a maintenance window for the executor (maint.sh: the live suite's crash test, a planned
+    // restart): planned, so the log only - every one of those kills was a Telegram FAILURE until 2026-10-31.
+    const planned = cfg.kind === 'hosted' ? maintenanceFor(process.env.EXECUTOR_MAINT_FILE?.trim() || '/var/lib/valuescan/maintenance.json', 'executor') : null;
+    log.warn('executor: the last run crashed', { what: crashed, ...(planned ? { maintenance: planned } : {}) });
+    if (!planned) alerts.raise('crash-restart', '', `Started again: ${crashed}.`);
   }
   // The whole audit chain, once at start (then hourly, only the rows added since).
   let auditHead: { seq: number; hash: string } | null = null;
