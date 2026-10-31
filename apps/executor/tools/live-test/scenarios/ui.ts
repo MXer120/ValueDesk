@@ -326,7 +326,86 @@ export const UI_TICKET_SCENARIOS: Scenario[] = [
     },
   }),
 
-  ticketScenario('spot.order', 'Spot: a buy of U through the ticket\'s Spot, and the sell back', 'SoDEX\'s spot market fills the ticket\'s spot market buy of U (signed by the same trading key, on the spot engine) and its sell of what was bought; the spot account ends where it began (less fees and the dust under one step)', {
+  ticketScenario('position.isolated-margin', 'Positions: isolated margin added and removed through the pencil; a remove too large refused; Liq. as SoDEX has it', 'on an isolated position SoDEX\'s isolated margin moves by exactly what the positions table\'s Add and Remove send, a remove that would leave it under-margined is refused and changes nothing, and the table\'s Liq. is SoDEX\'s own liquidation price after every change (within a tick)', {
+    cost: (U) => ({ takerUsd: 2 * U, makerUsd: 0, peakUsd: U }),
+    timeoutMs: 5 * MIN,
+    async run(t) {
+      if (t.dry) throw new Unavailable(LIVE_ONLY);
+      const sym = t.main.name;
+      const tick = tickOf(t);
+      const read = () => t.env.reads.leverage(t.env.followerAddress, sym);
+      // SoDEX's own view of the position: isolated margin (iw) and liquidation price (lp), which the state carries for isolated positions.
+      const sodex = async () => {
+        const st = (await t.env.reads.state(t.env.followerAddress)) as { P?: Array<{ s: string; m?: string; iw?: string; lp?: string; sz: string }> } | null;
+        const p = (st?.P ?? []).find((x) => x.s === sym && Number(x.sz) !== 0);
+        return p ? { mode: p.m, iw: Number(p.iw ?? 0), lp: Number(p.lp ?? 0) } : null;
+      };
+      const before = await read();
+      const lev = Math.min(2, t.env.regionMaxLeverage ?? 2, t.main.maxLeverage);
+      try {
+        await t.ui('ticket.leverage', { symbol: sym, leverage: lev, marginMode: 'isolated' });
+        await t.waitFor(`SoDEX shows ${lev}x isolated on ${sym}`, async () => {
+          const x = await read();
+          return x && x.leverage === lev && x.marginMode === 'isolated' ? true : null;
+        }, { timeoutMs: 30_000 });
+        const quantity = Number(await t.qty(t.U));
+        await t.ui('ticket.market', { symbol: sym, side: 'buy', quantity });
+        await positionWhen(t, 'the isolated long is on SoDEX', (x) => x > 0);
+        const s0 = await t.waitFor('SoDEX shows the position isolated, with its margin and liquidation price', async () => {
+          const s = await sodex();
+          return s && s.mode === 'ISOLATED' && s.iw > 0 && s.lp > 0 ? s : null;
+        }, { timeoutMs: 20_000 });
+        t.note(`SoDEX: isolated margin $${s0.iw.toFixed(4)}, liquidation ${s0.lp}`);
+        const liqShown = (shown: number | null, s: { lp: number }, when: string) =>
+          t.check(shown !== null && near(shown, s.lp, tick), `the table's Liq. ${when} is SoDEX's ${t.tick(s.lp, sym, 'down')} within a tick (shown ${shown})`);
+
+        const add = 2;
+        const r1 = await t.ui<{ before: { liq: number | null }; after: { liq: number | null; margin: number | null } }>('positions.margin', { symbol: sym, amount: add, add: true });
+        liqShown(r1.before.liq, s0, 'before any change');
+        const s1 = await t.waitFor(`SoDEX's isolated margin is $${add} more`, async () => {
+          const s = await sodex();
+          return s && near(s.iw, s0.iw + add, 0.01) ? s : null;
+        }, { timeoutMs: 30_000 });
+        t.check(s1.lp < s0.lp, `the liquidation price moved away from the market (${s0.lp} -> ${s1.lp})`);
+        const after1 = await t.waitFor('the table shows the new margin', async () => {
+          const r = await t.ui<{ after: { liq: number | null; margin: number | null } }>('positions.read', { symbol: sym });
+          return r.after.margin !== null && near(r.after.margin, s1.iw, 0.01) ? r.after : null;
+        }, { timeoutMs: 30_000 });
+        liqShown(after1.liq, s1, `after Add $${add}`);
+
+        const remove = 1;
+        await t.ui('positions.margin', { symbol: sym, amount: remove, add: false });
+        const s2 = await t.waitFor(`SoDEX's isolated margin is $${remove} less`, async () => {
+          const s = await sodex();
+          return s && near(s.iw, s1.iw - remove, 0.01) ? s : null;
+        }, { timeoutMs: 30_000 });
+        t.check(s2.lp > s1.lp, `the liquidation price moved back toward the market (${s1.lp} -> ${s2.lp})`);
+        const after2 = await t.waitFor('the table shows the new margin', async () => {
+          const r = await t.ui<{ after: { liq: number | null; margin: number | null } }>('positions.read', { symbol: sym });
+          return r.after.margin !== null && near(r.after.margin, s2.iw, 0.01) ? r.after : null;
+        }, { timeoutMs: 30_000 });
+        liqShown(after2.liq, s2, `after Remove $${remove}`);
+
+        // All of it but a cent: the position would be under its maintenance margin. SoDEX refuses; nothing changes.
+        const tooMuch = Math.floor((s2.iw - 0.01) * 100) / 100;
+        const refused = await t.ui('positions.margin', { symbol: sym, amount: tooMuch, add: false }).then(() => null, (e: Error) => e.message);
+        t.check(refused !== null, `removing $${tooMuch} of $${s2.iw.toFixed(2)} was refused${refused ? `: ${refused.slice(0, 160)}` : ' - it was NOT'}`);
+        const s3 = await sodex();
+        t.check(s3 !== null && near(s3.iw, s2.iw, 0.01), `SoDEX's isolated margin is unchanged after the refusal ($${s3?.iw.toFixed(4)})`);
+
+        await t.ui('positions.close', { symbol: sym });
+        await positionWhen(t, 'Close left the follower flat on SoDEX', (x) => x === 0);
+      } finally {
+        if (before && (before.leverage !== lev || before.marginMode !== 'isolated')) {
+          await t.ui('ticket.leverage', { symbol: sym, leverage: before.leverage, marginMode: before.marginMode }).catch(async () => {
+            await t.onFollower('leverage set back straight on SoDEX', (w) => w.setLeverage(sym, before.leverage, before.marginMode));
+          });
+        }
+      }
+    },
+  }),
+
+  ticketScenario('spot.order','Spot: a buy of U through the ticket\'s Spot, and the sell back', 'SoDEX\'s spot market fills the ticket\'s spot market buy of U (signed by the same trading key, on the spot engine) and its sell of what was bought; the spot account ends where it began (less fees and the dust under one step)', {
     cost: (U) => ({ takerUsd: 2 * U, makerUsd: 0, peakUsd: U, leverage: 1 }),
     async run(t) {
       if (t.dry) throw new Unavailable(LIVE_ONLY);
@@ -475,7 +554,46 @@ export const UI_COPY_SCENARIOS: Scenario[] = [
     },
   }),
 
-  copyScenario('copy.ui-confirm', '"Ask me each time" answered in the page\'s prompt: Copy it, then Skip', 'the copy window\'s "Ask before each trade" holds every copied order for the page\'s prompt: Copy it sends it to SoDEX, Skip sends nothing (declined); the leader\'s close, answered Copy it, closes the follower', {
+  copyScenario('copy.ui-notices', 'Copy notices in the bell from real trades: made smaller and closed by hand, then the leader\'s add not copied', 'a copied position the follower makes smaller and then closes by hand (the ticket, the positions table\'s Close) is told in the bell - "made smaller in the copy of …", then "closed in the copy of …" - with what is left; after that the leader\'s add is not copied until the leader is flat', {
+    cost: (U) => ({ takerUsd: 4 * U, makerUsd: 0, peakUsd: 2 * U, leaderTakerUsd: 4 * U, leaderPeakUsd: 2 * U }),
+    timeoutMs: 6 * MIN,
+    async run(t) {
+      if (t.dry) throw new Unavailable(LIVE_ONLY);
+      const sym = t.main.name;
+      const id = await startCopyInWindow(t);
+      await copyReady(t, id);
+      await t.leader({ buyUsd: t.U });
+      await t.expectFollowerUsd(t.U, 'the follower opened with the leader');
+      await t.leader({ buyUsd: t.U });
+      await t.expectFollowerUsd(2 * t.U, 'the follower added with the leader');
+      const titles = async (re: string, what: string) => t.waitFor(what, async () => {
+        const r = await t.ui<{ rows: Array<{ title: string; text: string }> }>('bell.read', { match: re });
+        return r.rows.length ? r.rows : null;
+      }, { timeoutMs: 45_000 });
+
+      const half = Number(await t.qty(t.U));
+      await t.ui('ticket.market', { symbol: sym, side: 'sell', quantity: half });
+      await t.expectFollowerUsd(t.U, 'the hand sell left half');
+      const smaller = await titles(`^${sym} made smaller in the copy of `, `the bell says ${sym} was made smaller in the copy`);
+      t.note(`bell: ${smaller[0]!.text.slice(0, 200)}`);
+      t.check(/closed outside the copier/.test(smaller[0]!.text) && /left/.test(smaller[0]!.text), 'it says the part was closed outside the copier, and what is left', smaller[0]!.text);
+
+      await t.ui('positions.close', { symbol: sym });
+      await positionWhen(t, 'Close left the follower flat on SoDEX', (x) => x === 0);
+      const closed = await titles(`^${sym} closed in the copy of `, `the bell says ${sym} was closed in the copy`);
+      t.note(`bell: ${closed[0]!.text.slice(0, 200)}`);
+      t.check(/closed outside the copier/.test(closed[0]!.text) && /resumes when the leader is flat/.test(closed[0]!.text), 'it says it was closed outside the copier and resumes when the leader is flat', closed[0]!.text);
+
+      await t.leader({ buyUsd: t.U });
+      await t.sleep(15_000);
+      t.check((await t.account.position(sym)) === 0, 'the leader\'s add after the hand close was not copied (the copy waits for the leader to be flat)');
+      await t.leader({ close: true });
+      await t.exec.copyAct('stop', { id, close: true });
+      await copyStatus(t, id, 'stopped');
+    },
+  }),
+
+  copyScenario('copy.ui-confirm','"Ask me each time" answered in the page\'s prompt: Copy it, then Skip', 'the copy window\'s "Ask before each trade" holds every copied order for the page\'s prompt: Copy it sends it to SoDEX, Skip sends nothing (declined); the leader\'s close, answered Copy it, closes the follower', {
     cost: (U) => ({ takerUsd: 2 * U, makerUsd: 0, peakUsd: U, leaderTakerUsd: 4 * U, leaderPeakUsd: 2 * U }),
     async run(t) {
       const id = await startCopyInWindow(t, { ask: true });

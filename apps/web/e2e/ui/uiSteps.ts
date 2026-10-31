@@ -68,6 +68,12 @@ export async function selectMarket(page: Page, symbol: string): Promise<void> {
   await ticket(page).show();
 }
 
+/** A positions row's Liq. (6th column) and Margin (8th): Market, Size, Value, Entry, Mark, Liq., PnL, Margin. */
+async function positionCells(row: Locator): Promise<{ liq: number | null; margin: number | null }> {
+  const cell = async (i: number) => num(((await row.locator('td').nth(i).textContent()) ?? '').replace(/[^0-9.]/g, '')) || null;
+  return { liq: await cell(5), margin: await cell(7) };
+}
+
 export type Side = 'buy' | 'sell';
 const dir = (s: Side) => (s === 'buy' ? 'Long' : 'Short');
 
@@ -390,6 +396,75 @@ export const UI_STEPS = {
     } finally {
       await kind.getByRole('radio', { name: 'Futures', exact: true }).click().catch(() => {});
     }
+  },
+
+  /**
+   * Positions: the market's isolated margin pencil ("Edit isolated margin on BTC-USD"), the amount
+   * typed, Add or Remove, asked first ("Add margin" / "Remove margin"), until the table says so (or
+   * why not, which is thrown). Answers the row's Liq. and Margin before and after (what a person reads).
+   */
+  async 'positions.margin'(page: Page, a: { symbol: string; amount: number; add: boolean }) {
+    await tradePage(page);
+    const activity = page.getByRole('group', { name: 'Account activity' });
+    await activity.getByRole('tab', { name: /^Positions/ }).click();
+    const row = activity.locator('tbody tr').filter({ has: page.getByRole('button', { name: `Edit isolated margin on ${a.symbol}` }) });
+    await row.waitFor({ state: 'visible', timeout: 30_000 });
+    const cells = () => positionCells(row);
+    const before = await cells();
+    await row.getByRole('button', { name: `Edit isolated margin on ${a.symbol}` }).click();
+    const form = activity.locator('.acct-modify').filter({ hasText: `Isolated margin · ${a.symbol}` });
+    await form.waitFor({ state: 'visible' });
+    await typeInto(form.getByRole('textbox', { name: 'Amount', exact: true }), dec(a.amount));
+    await form.getByRole('button', { name: a.add ? 'Add' : 'Remove', exact: true }).click();
+    const ask = page.getByRole('dialog', { name: a.add ? 'Add isolated margin' : 'Remove isolated margin' });
+    await ask.waitFor({ state: 'visible' });
+    const asked = ((await ask.textContent()) ?? '').replace(/\s+/g, ' ').trim();
+    await ask.getByRole('button', { name: a.add ? 'Add margin' : 'Remove margin', exact: true }).click();
+    await ask.waitFor({ state: 'hidden', timeout: 20_000 });
+    // The table answers in its status line (useStatus): "Margin added." / "Margin removed.", or SoDEX's refusal.
+    await until(page, async () => {
+      if (await activity.locator('p.status.ok').filter({ hasText: /^Margin (added|removed)\./ }).count()) return true;
+      const err = (await activity.locator('p.status.err').allInnerTexts().catch(() => [] as string[])).join(' ').trim();
+      if (err) throw new Error(`the positions table says: ${err}`);
+      return false;
+    }, `the margin to be ${a.add ? 'added' : 'removed'}`, 30_000);
+    // The table reads the position again: wait until its Margin moved.
+    await until(page, async () => ((await cells()).margin ?? 0) !== (before.margin ?? 0), 'the Margin cell to show the change', 30_000).catch(() => {});
+    return { asked, before, after: await cells() };
+  },
+
+  /**
+   * The bell: opened, its rows read (title and text, newest first), closed again. `match` keeps only
+   * the rows whose title it matches (a regular expression's source). Answers the rows and the bell's
+   * label before it opened ("Notifications, 2 unread").
+   */
+  async 'bell.read'(page: Page, a: { match?: string } = {}) {
+    const button = page.getByRole('banner').getByRole('button', { name: /^Notifications/ });
+    const panel = page.getByRole('dialog', { name: 'Notifications' });
+    await button.first().waitFor({ state: 'visible', timeout: 20_000 });
+    const label = (await button.first().getAttribute('aria-label')) ?? '';
+    if (!(await panel.isVisible())) await button.first().click();
+    await panel.waitFor({ state: 'visible' });
+    const rows = await panel.locator('.navnotes__k').evaluateAll((els) => els.map((el) => {
+      const row = el.closest('li') ?? el.parentElement;
+      return { title: (el.textContent ?? '').trim(), text: ((row?.textContent ?? '').replace(/\s+/g, ' ')).trim() };
+    }));
+    await page.keyboard.press('Escape');
+    await panel.waitFor({ state: 'hidden', timeout: 5_000 }).catch(async () => {
+      await page.getByRole('button', { name: 'Close notifications' }).click({ position: { x: 4, y: 4 } }).catch(() => {});
+    });
+    const re = a.match ? new RegExp(a.match) : null;
+    return { label, rows: re ? rows.filter((r) => re.test(r.title)) : rows };
+  },
+
+  /** Positions: the market's row as it reads now (Liq. and Margin), nothing clicked but the tab. */
+  async 'positions.read'(page: Page, a: { symbol: string }) {
+    await tradePage(page);
+    const activity = page.getByRole('group', { name: 'Account activity' });
+    await activity.getByRole('tab', { name: /^Positions/ }).click();
+    const row = activity.locator('tbody tr').filter({ has: page.getByRole('button', { name: `Close ${a.symbol} at market` }) });
+    await row.waitFor({ state: 'visible', timeout: 30_000 });
+    return { after: await positionCells(row) };
   },
 
   /** Positions: the market's Close (x), asked first, "Close at market". */
