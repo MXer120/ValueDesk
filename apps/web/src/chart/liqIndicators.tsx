@@ -19,7 +19,7 @@ import type { LiqHeatmap as HeatApi, LiqHistory } from '@sign/indexer/liqRead.js
 import type { Engine } from '../api';
 import { SCAN_VENUES, vsApi } from '../vsApi';
 import { usePolled } from '../components/explore/cohorts/parts';
-import { LIQ_HEAT, heatScale, type HeatData } from './liqHeatIndicator';
+import { LIQ_HEAT, boxed, heatScale, type HeatData } from './liqHeatIndicator';
 import { LIQ_MAP, coinOfSymbol, mapData } from './liqMap';
 
 /**
@@ -37,11 +37,11 @@ export function LiqIndicatorFeed({ chart, engine, symbol, names, ids }: { chart:
     if (!chart || !heatOn) return;
     const points = hist.data?.points ?? [];
     const data: HeatData = { points, side: 'both', scale: heatScale(points) };
-    chart.overrideIndicator({ name: LIQ_HEAT, extendData: data });
+    chart.overrideIndicator({ name: LIQ_HEAT, extendData: boxed(data) });
   }, [chart, heatOn, hist.data, ids]);
   useEffect(() => {
     if (!chart || !mapOn) return;
-    chart.overrideIndicator({ name: LIQ_MAP, extendData: mapData(now.data) });
+    chart.overrideIndicator({ name: LIQ_MAP, extendData: boxed(mapData(now.data)) });
   }, [chart, mapOn, now.data, ids]);
   return null;
 }

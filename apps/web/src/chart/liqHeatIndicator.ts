@@ -186,10 +186,22 @@ export function fitRanges(list: readonly KLineData[], d: HeatData | null | undef
   });
 }
 
+/**
+ * A layer's data as the chart holds it: in a function. klinecharts' overrideIndicator (and
+ * createIndicator) DEEP-MERGES an object `extendData` into the one held, array by array: new
+ * snapshots of fewer cells than the old kept the old cells past their end, coloured by the new
+ * scale - one wallet's $12 scale over every wallet's cells painted the whole range in the top
+ * colour (owner 2026-10-31, the wallet filter). It also deep-copied 30 days of snapshots on
+ * every update. A function is neither merged nor copied: the layer reads exactly what was handed.
+ */
+export type Boxed<T> = () => T;
+export const boxed = <T,>(v: T): Boxed<T> => () => v;
+export const unboxed = <T,>(x: unknown): T | null => (typeof x === 'function' ? (x as Boxed<T>)() : null);
+
 /** The strip of the levels now: this wide at most. */
 export const stripWidth = (paneWidth: number): number => Math.min(220, paneWidth * 0.2);
 
-export const liqHeatTemplate: IndicatorTemplate<{ lo?: number; hi?: number }, unknown, HeatData> = {
+export const liqHeatTemplate: IndicatorTemplate<{ lo?: number; hi?: number }, unknown, Boxed<HeatData>> = {
   name: LIQ_HEAT,
   shortName: 'Liq. heatmap',
   series: 'price',
@@ -198,9 +210,9 @@ export const liqHeatTemplate: IndicatorTemplate<{ lo?: number; hi?: number }, un
   // Read by the chart's price axis only (the axis fits every figure's values); never drawn:
   // draw() below returns true, which skips the library's own figures.
   figures: [{ key: 'lo' }, { key: 'hi' }],
-  calc: (list, indicator) => fitRanges(list, indicator.extendData),
+  calc: (list, indicator) => fitRanges(list, unboxed<HeatData>(indicator.extendData)),
   draw: ({ ctx, chart, indicator, bounding, xAxis, yAxis }) => {
-    const data = indicator.extendData;
+    const data = unboxed<HeatData>(indicator.extendData);
     if (!data) return true;
     const list = chart.getDataList();
     if (data.points.length && list.length) {

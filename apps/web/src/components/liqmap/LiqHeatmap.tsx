@@ -36,7 +36,7 @@ import { WalletView, type Res, type Side, type StepsView, type Unit, type ViewCh
 import { Chart } from '../Chart';
 import type { Chart as KChart } from 'klinecharts';
 import { CANDLE_PANE_ID } from '../../chart/theme';
-import { HEAT_FLOOR, LIQ_HEAT, barMsOf, cellOf, heatScale, liqHeatTemplate, refStep, snapshotFor, stepNorm, stripWidth, type HeatData, type HeatPoint } from '../../chart/liqHeatIndicator';
+import { HEAT_FLOOR, LIQ_HEAT, barMsOf, boxed, cellOf, heatScale, liqHeatTemplate, refStep, snapshotFor, stepNorm, stripWidth, type HeatData, type HeatPoint } from '../../chart/liqHeatIndicator';
 import { FINE_MAX_BUCKETS, fineWindow, stepAt, stepLabel, stepLadder, streamAsk, streamGroup, tickOf, type StepLevel } from '../../chart/liqSteps';
 import { coinOfSymbol, groupFor, mapData, type LiqMapData } from '../../chart/liqMap';
 import {
@@ -926,7 +926,7 @@ function HistoryView({ coin, venues, engine, symbol, wallets, side, colorBy, lev
     void import('klinecharts').then((lib) => {
       if (gone) return;
       lib.registerIndicator(liqHeatTemplate);
-      id = kc.createIndicator({ name: LIQ_HEAT, paneId: CANDLE_PANE_ID, extendData: dataRef.current.data, calcParams: [dataRef.current.rev] }, true);
+      id = kc.createIndicator({ name: LIQ_HEAT, paneId: CANDLE_PANE_ID, extendData: boxed(dataRef.current.data), calcParams: [dataRef.current.rev] }, true);
     });
     return () => {
       gone = true;
@@ -934,7 +934,7 @@ function HistoryView({ coin, venues, engine, symbol, wallets, side, colorBy, lev
     };
   }, [kc]);
   useEffect(() => {
-    kc?.overrideIndicator({ name: LIQ_HEAT, paneId: CANDLE_PANE_ID, extendData: data, calcParams: [rev] });
+    kc?.overrideIndicator({ name: LIQ_HEAT, paneId: CANDLE_PANE_ID, extendData: boxed(data), calcParams: [rev] });
   }, [kc, data, rev]);
   const note = r.error && !r.data ? `History unavailable: ${r.error}`
     : !r.data ? 'Reading the snapshots…'

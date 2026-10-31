@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { cellRange, heatColor, heatScale, refStep, snapshotFor, stepNorm, type HeatPoint } from './liqHeatIndicator';
+import { boxed, cellRange, heatColor, heatScale, refStep, snapshotFor, stepNorm, unboxed, type HeatData, type HeatPoint } from './liqHeatIndicator';
 
 const H = 3_600_000;
 const Q = 15 * 60_000;
@@ -46,4 +46,21 @@ test('mixed steps: each snapshot draws over its own ranges, coloured per the new
   assert.equal(heatScale(pts, 'long'), 1_000, 'one scale for both: $1,000 per $100');
   assert.equal(refStep([]), null);
   assert.equal(stepNorm(old, null), 1);
+});
+
+test('the layer reads exactly the data handed over, never merged into the old (the wallet filter)', async () => {
+  // klinecharts' own merge, as overrideIndicator applies it (its module reads `window` on load).
+  (globalThis as { window?: unknown }).window ??= { navigator: { userAgent: '' } };
+  const { utils } = await import('klinecharts');
+  const every: HeatData = { points: [{ t: 1, p: 100, st: 1, b: [[50, 900, 0], [60, 800, 0], [70, 700, 0]] }], scale: 800 };
+  const one: HeatData = { points: [{ t: 1, p: 100, st: 1, b: [[74, 12, 0]] }], scale: 12 };
+  // An object, as before: the old cells stay past the new one, coloured by the new $12 scale.
+  const raw = { extendData: structuredClone(every) as unknown };
+  utils.merge(raw, { extendData: one });
+  assert.equal((raw.extendData as HeatData).points[0]!.b.length, 3, 'the merge kept two cells no wallet holds');
+  // Boxed: replaced whole.
+  const held = { extendData: boxed(every) as unknown };
+  utils.merge(held, { extendData: boxed(one) });
+  assert.deepEqual(unboxed<HeatData>(held.extendData), one);
+  assert.equal(unboxed<HeatData>(undefined), null);
 });

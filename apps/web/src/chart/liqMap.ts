@@ -8,7 +8,7 @@
 import type { IndicatorTemplate } from 'klinecharts';
 import type { LiqHeatmap as HeatApi } from '@sign/indexer/liqRead.js';
 import type { Res } from '../components/liqmap/WalletView';
-import { LIQ_HEAT } from './liqHeatIndicator';
+import { LIQ_HEAT, unboxed, type Boxed } from './liqHeatIndicator';
 import { LEV_BANDS, addBands, shownBands, shownTotal, sideBands, type Bands, type ColorBy, type LevFilter } from './liqLev';
 import { drawProfile, type LiqMapData } from './liqProfile';
 
@@ -89,7 +89,7 @@ export function mapData(a: HeatApi | null | undefined, o: { side?: 'both' | 'lon
 }
 const NONE: Bands = [0, 0, 0, 0];
 
-export const liqMapTemplate: IndicatorTemplate<unknown, unknown, LiqMapData | null> = {
+export const liqMapTemplate: IndicatorTemplate<unknown, unknown, Boxed<LiqMapData | null>> = {
   name: LIQ_MAP,
   shortName: 'Liq. map',
   series: 'price',
@@ -98,7 +98,7 @@ export const liqMapTemplate: IndicatorTemplate<unknown, unknown, LiqMapData | nu
   figures: [],
   calc: (list) => list.map(() => ({})),
   draw: ({ ctx, indicator, bounding, yAxis }) => {
-    const d = indicator.extendData;
+    const d = unboxed<LiqMapData>(indicator.extendData);
     if (d) drawProfile(ctx, bounding, yAxis, d, { maxW: Math.min(260, bounding.width * 0.24), alpha: 0.5 });
     return true;
   },
