@@ -19,8 +19,9 @@
  * the wallet's indices are known (its first read learns them); until then,
  * and whenever that stream is down, books are re-read on a size schedule
  * (30 min for $5M+ ... 2 days for small). Below TAIL_EQUITY only a fixed 10%
- * sample of its ~100k accounts is read at all (each standing for ten; see
- * model.ts sampleRule).
+ * sample of its ~100k accounts was read until 2026-10-31 (each standing for ten;
+ * model.ts sampleRule); every one is read since, and the sample counts until
+ * nearly all are (TAIL_SAMPLED_BEFORE).
  *
  * PERP EQUITY (model.ts perpEquity) sizes the cohorts, so two more reads:
  *   - a book whose read equity cannot carry what it now holds (read while the
@@ -179,7 +180,36 @@ const SLICE_MS = 30;
 const RECORD_SLICE_MS = 150;
 
 /** Share of wallets under TAIL_EQUITY that are read (the rest are counted, not read). */
-export const TAIL_RATE: Record<Venue, number> = { hyperliquid: 1, tradexyz: 1, sodex: 1, arcus: 1, lighter: 0.1 };
+export const TAIL_RATE: Record<Venue, number> = { hyperliquid: 1, tradexyz: 1, sodex: 1, arcus: 1, lighter: 1 };
+
+/**
+ * A venue that read only a sample of its tail before (Lighter: 10% until 2026-10-31, when the owner
+ * asked for every wallet). Its tail is read in full from then on, but counted as the old sample
+ * (scaled up) until TAIL_FULL_SHARE of it has a book: counting every wallet at once would have shown
+ * Lighter's small wallets at a tenth of the truth for the days the ~140k reads take.
+ */
+export const TAIL_SAMPLED_BEFORE: Partial<Record<Venue, number>> = { lighter: 0.1 };
+/** The share of a venue's tail that must have a book before every one of them counts. */
+export const TAIL_FULL_SHARE = 0.99;
+
+/** The sampling rate the cohorts count a venue's tail with, given how much of it holds a book. */
+export function tailCountRate(venue: Venue, tail: { members: number; read: number }): number {
+  const was = TAIL_SAMPLED_BEFORE[venue];
+  if (was === undefined) return TAIL_RATE[venue];
+  return tail.members > 0 && tail.read / tail.members >= TAIL_FULL_SHARE ? TAIL_RATE[venue] : was;
+}
+
+/** A venue's tail: members under TAIL_EQUITY, and how many of them have a book. */
+export function tailOf(members: ReadonlyMap<string, { equity: number | null }>, hasBook: (address: string) => boolean): { members: number; read: number } {
+  let n = 0;
+  let read = 0;
+  for (const [address, m] of members) {
+    if ((m.equity ?? 0) >= TAIL_EQUITY) continue;
+    n++;
+    if (hasBook(address)) read++;
+  }
+  return { members: n, read };
+}
 
 /**
  * After a stream outage, books from this equity up are read again: $1M+ after
@@ -1693,6 +1723,11 @@ export class CohortTracker {
           if (venue === 'hyperliquid') totals.set(address, m?.ranked ? m.equity : null);
         };
         if (!book) {
+          // A tail wallet the old sample left out (TAIL_SAMPLED_BEFORE): read after every re-read the
+          // heatmap and the books need (880-970), above the routine reconciles (400) - ~140k Lighter
+          // wallets at 1000+ would have held Lighter's heatmap re-reads back for days.
+          const was = TAIL_SAMPLED_BEFORE[venue];
+          if (was !== undefined && eq < TAIL_EQUITY && !sampleRule(was, address, eq).counts) { push(450 + size); return; }
           // Never read: one the stream saw trade, or one the archive found holding $1K or more, before
           // any re-read. Dust from the archive (13.9k wallets under $33, 2026-10-28) waits its turn: with
           // the bonus it outranked the books still missing liquidation data, and the history rebuild,
@@ -2161,9 +2196,10 @@ export class CohortTracker {
       const sibBooks = sib ? this.books.get(sib) : undefined;
       const members = this.members.get(venue) ?? new Map<string, Member>();
       const addresses = new Set([...members.keys(), ...books.keys()]);
+      const rate = tailCountRate(venue, tailOf(members, (a) => books.has(a)));
       for (const address of addresses) {
         const b = books.get(address);
-        m.set(address, sampledVenue(TAIL_RATE[venue], address, members.get(address),
+        m.set(address, sampledVenue(rate, address, members.get(address),
           b ? { equity: b.equity, at: b.at, positions: [...b.pos].map(([symbol, p]) => ({ symbol, szi: p.szi, entry: p.entry })) } : undefined,
           perpEquity(venue, b, sibBooks?.get(address))));
         if (Date.now() - t0 > SLICE_MS) {

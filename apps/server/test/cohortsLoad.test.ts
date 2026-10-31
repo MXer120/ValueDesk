@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { IndexStore } from '../src/indexer/store.js';
-import { TAIL_RATE } from '../src/indexer/cohortTracker.js';
+import { tailCountRate, tailOf } from '../src/indexer/cohortTracker.js';
 import { KEEP_WARM_MS, LOAD_TTL_MS, STALE_MAX_MS, _cohortLoad, cohortDetail, cohortFocus, cohortMap, cohortWallets, cohortsReady, cohortsRead, warmCohorts } from '../src/indexer/read.js';
 import {
   MARGIN_SIBLING, aggregate, cohortsOf, holdsPosition, perpEquity, sampledVenue, scopeKey, scopeWallets, sumCohorts, walletRow,
@@ -92,7 +92,7 @@ function oracle(s: IndexStore) {
     for (const address of new Set([...members.keys(), ...books.keys()])) {
       const mem = members.get(address);
       const b = books.get(address);
-      const w = sampledVenue(TAIL_RATE[venue], address, mem && {
+      const w = sampledVenue(tailCountRate(venue, tailOf(members, (a) => books.has(a))), address, mem && {
         pnl: mem.pnl, equity: mem.equity, label: mem.label,
         pnlRange: { '1d': mem.pnl1d ?? null, '7d': mem.pnl7d ?? null, '30d': mem.pnl30d ?? null },
       }, b, perpEquity(venue, b, sibBooks?.get(address)));

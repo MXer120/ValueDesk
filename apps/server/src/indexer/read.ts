@@ -20,7 +20,7 @@ import {
   type CohortDetailResponse, type CohortFilter, type CohortId, type CohortPoint, type CohortRange, type CohortWalletRow,
   type CohortWalletsResponse, type CohortsResponse, type NettedWallet, type Sector, type VenueCoverage, type WalletSort, type WalletVenue,
 } from '../valuedesk/cohorts/model.js';
-import { TAIL_RATE } from './cohortTracker.js';
+import { tailCountRate, tailOf } from './cohortTracker.js';
 import { labelMatches, shownLabel } from '../valuedesk/labels.js';
 import { winRateOf } from '../valuedesk/winRate.js';
 import { sampledVenue, COHORT_RANGES, type CohortWalletRow as WalletRow } from '../valuedesk/cohorts/model.js';
@@ -436,10 +436,12 @@ function* loadSteps(s: IndexStore, now: number, ahead: ReadonlyArray<{ venues: r
     const sibBooks = sib ? raw.get(sib)?.books : undefined;
     const m = new Map<string, WalletVenue>();
     let covered = 0;
+    // A tail still being read in full counts as its old sample until (nearly) all of it is (cohortTracker tailCountRate).
+    const rate = tailCountRate(venue, tailOf(members, (a) => books.has(a)));
     for (const address of new Set([...members.keys(), ...books.keys()])) {
       const mem = members.get(address);
       const b = books.get(address);
-      const w = sampledVenue(TAIL_RATE[venue], address, mem && {
+      const w = sampledVenue(rate, address, mem && {
         pnl: mem.pnl, equity: mem.equity, label: mem.label,
         pnlRange: { '1d': mem.pnl1d ?? null, '7d': mem.pnl7d ?? null, '30d': mem.pnl30d ?? null },
       }, b, perpEquity(venue, b, sibBooks?.get(address)));
