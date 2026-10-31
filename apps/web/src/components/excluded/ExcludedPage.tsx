@@ -5,8 +5,9 @@
  *
  * Laid out as the status page is (status/status.css: one card on a page, a toned hero, rows that
  * open): a hero with what this is and when it was read; four figures (wallets, notional left out,
- * by kind, where); the kind as the app's segmented control and the venues as logo chips; then one
- * row per entry, largest first. A mirrored pair is ONE row - its two accounts only mean something
+ * by kind, where); the app's own platform dropdown (PlatformSelect) and switch (the leaderboard's
+ * lbp-seg) - no controls of the page's own; then one row per entry, largest first, the kind a dot
+ * and a word (never a coloured row edge: owner 2026-10-31). An offsetting pair is ONE row - its two accounts only mean something
  * together (they cancel out: the row says by how much) - and opens to both books side by side.
  */
 import { useMemo, useState, type ReactNode } from 'react';
@@ -17,13 +18,14 @@ import { VenueLogo } from '../VenueLogo';
 import { fmtUsdShort } from '../explore/model';
 import { usePolled } from '../explore/cohorts/parts';
 import { Modal } from '../Modal';
+import { PlatformSelect } from '../PlatformSelect';
 import './excluded.css';
 
 type Kind = ExcludedWallet['kind'];
 const KINDS: readonly Kind[] = ['internal', 'hedged', 'mirror'];
-const KIND_LABEL: Record<Kind, string> = { internal: 'Venue account', hedged: 'Hedged desk', mirror: 'Mirrored pair' };
-const KIND_PLURAL: Record<Kind, string> = { internal: 'Venue accounts', hedged: 'Hedged desks', mirror: 'Mirrored pairs' };
-const KIND_SHORT: Record<Kind, string> = { internal: 'venue', hedged: 'hedged', mirror: 'mirrored' };
+const KIND_LABEL: Record<Kind, string> = { internal: 'Venue account', hedged: 'Hedged desk', mirror: 'Offsetting pair' };
+const KIND_PLURAL: Record<Kind, string> = { internal: 'Venue accounts', hedged: 'Hedged desks', mirror: 'Offsetting pairs' };
+const KIND_SHORT: Record<Kind, string> = { internal: 'venue', hedged: 'hedged', mirror: 'offsetting' };
 const KIND_HINT: Record<Kind, string> = {
   internal: "The venue's own accounts: one book split across two, not a trade.",
   hedged: 'Desks that only hedge what they hold elsewhere: no view on the market.',
@@ -106,9 +108,11 @@ function ExcludedView({ on = true, hero = false }: { on?: boolean; hero?: boolea
   const all = useMemo(() => entriesOf(rows), [rows]);
   const venues = useMemo(() => [...new Set(all.map((e) => e.venue))], [all]);
   const [kind, setKind] = useState<Kind | 'all'>('all');
-  const [off, setOff] = useState<ReadonlySet<Venue>>(new Set());
+  // The platforms picked (null: every one listed).
+  const [picked, setPicked] = useState<Venue[] | null>(null);
+  const chosen = picked ?? venues;
   const [open, setOpen] = useState<string | null>(null);
-  const shown = all.filter((e) => (kind === 'all' || e.kind === kind) && !off.has(e.venue));
+  const shown = all.filter((e) => (kind === 'all' || e.kind === kind) && chosen.includes(e.venue));
   const notional = rows.reduce((a, w) => a + w.long + w.short, 0);
   const at = rows.reduce((a, w) => Math.max(a, w.at ?? 0), 0);
 
@@ -123,7 +127,7 @@ function ExcludedView({ on = true, hero = false }: { on?: boolean; hero?: boolea
             <h1 className="ex-hero__title">Excluded wallets</h1>
             <p className="ex-hero__line">{LEAD}</p>
           </div>
-          <span className="ex-updated">{at > 0 ? `Books read ${new Date(at).toISOString().slice(11, 16)} UTC` : ''}</span>
+          <span className="ex-updated">{at > 0 ? `Updated ${new Date(at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}` : ''}</span>
         </header>}
 
         {r.error && !r.data ? (
@@ -153,35 +157,17 @@ function ExcludedView({ on = true, hero = false }: { on?: boolean; hero?: boolea
               <Stat label="Excluded from" value={<span className="ex-from"><From what="cohorts" /><From what="heatmap" /></span>} sub="every wallet listed here" />
             </section>
 
-            <div className="ex-controls">
-              <div className="segmented ex-seg" role="tablist" aria-label="Kind">
-                {(['all', ...KINDS] as const).filter((k) => k === 'all' || all.some((e) => e.kind === k)).map((k) => {
-                  const n = k === 'all' ? all.length : all.filter((e) => e.kind === k).length;
-                  return (
-                    <button key={k} type="button" role="tab" aria-selected={kind === k} className={kind === k ? 'active' : ''} onClick={() => setKind(k)}>
+            {/* The app's own controls: the platform dropdown and the leaderboard's switch. */}
+            <div className="lbp ex-bar">
+              <div className="lbp-bar">
+                <PlatformSelect options={venues} value={chosen} onChange={(v) => setPicked(v.length === venues.length ? null : v)} />
+                <div className="lbp-seg" role="radiogroup" aria-label="Kind">
+                  {(['all', ...KINDS] as const).filter((k) => k === 'all' || all.some((e) => e.kind === k)).map((k) => (
+                    <button key={k} type="button" role="radio" aria-checked={kind === k} className={kind === k ? 'is-on' : ''} onClick={() => setKind(k)}>
                       {k === 'all' ? 'All' : KIND_PLURAL[k]}
-                      <span className="ex-seg__n">{n}</span>
                     </button>
-                  );
-                })}
-              </div>
-              <div className="ex-venues" role="group" aria-label="Venues">
-                {venues.map((v) => {
-                  const on = !off.has(v);
-                  return (
-                    <button
-                      key={v}
-                      type="button"
-                      className={`ex-venue${on ? ' is-on' : ''}`}
-                      aria-pressed={on}
-                      title={on ? `Hide ${VENUE_LABEL[v]}` : `Show ${VENUE_LABEL[v]}`}
-                      onClick={() => setOff((s) => { const n = new Set(s); if (n.has(v)) n.delete(v); else n.add(v); return n; })}
-                    >
-                      <VenueLogo venue={v} size={16} />
-                      <span>{VENUE_LABEL[v]}</span>
-                    </button>
-                  );
-                })}
+                  ))}
+                </div>
               </div>
             </div>
 
@@ -239,7 +225,7 @@ function Split({ long, short }: { long: number; short: number }) {
 function Row({ e, open, onToggle }: { e: Entry; open: boolean; onToggle: () => void }) {
   const pair = e.wallets.length === 2;
   const [a, b] = e.wallets;
-  const title = pair ? (e.kind === 'mirror' ? `${VENUE_LABEL[e.venue]} mirrored pair` : (a!.label ?? '').replace(/\s*\((long|short)\)$/i, '')) : a!.label ?? shortAddr(a!.address);
+  const title = pair ? (e.kind === 'mirror' ? `${VENUE_LABEL[e.venue]} offsetting pair` : (a!.label ?? '').replace(/\s*\((long|short)\)$/i, '')) : a!.label ?? shortAddr(a!.address);
   const net = pair ? pairNet(e) : 0;
   return (
     <li className={`ex-row is-${e.kind}${open ? ' is-open' : ''}`}>
