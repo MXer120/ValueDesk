@@ -66,6 +66,8 @@ export interface ExcludedWallet {
   venue: Venue;
   address: string;
   kind: 'internal' | 'hedged' | 'mirror';
+  /** The other half of a pair (each holds the opposite of the other): the page shows the two as one. */
+  twin?: string;
   /** Where it is left out (from 2026-10-31; absent before: both). */
   from?: Array<'cohorts' | 'heatmap'>;
   label: string | null;

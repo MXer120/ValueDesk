@@ -85,7 +85,7 @@ const LegalDoc = lazyPage('legal', () => import('./legal/LegalView').then((m) =>
 /* The status page (status/): its own small chunk, loaded like the legal pages'. */
 const StatusDoc = lazyPage('status', () => import('./status/StatusPage').then((m) => m.StatusPage));
 /* The excluded wallets (More > Excluded wallets), the same way. */
-const ExcludedDoc = lazyPage('excluded', () => import('./components/explore/cohorts/Excluded').then((m) => m.ExcludedPage));
+const ExcludedDoc = lazyPage('excluded', () => import('./components/excluded/ExcludedPage').then((m) => m.ExcludedPage));
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const PAGES: Record<Tab, LazyPage<any>> = {

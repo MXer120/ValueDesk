@@ -38,7 +38,7 @@ import { SectorIcon } from './SectorIcon';
 import { BiasPill, LeanPill, Meter, POLL_MS, Picker, Split, VenueMarks, pctText, usePolled } from './parts';
 import { CrossFade, FadeView } from '../../motion';
 import { FocusPage, MarketMapPage } from './MarketSection';
-import { ExcludedButton } from './Excluded';
+import { ExcludedButton } from '../../excluded/ExcludedPage';
 import { AllHidden, CohortViewButton, CohortViewProvider, useCohortView, useCohortViewState, type ViewPage } from './view';
 import '../../leaderboard/LeaderboardPage.css';
 import '../../Account.css';
