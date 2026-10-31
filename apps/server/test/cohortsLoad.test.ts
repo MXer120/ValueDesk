@@ -251,13 +251,24 @@ test('a rebuild that fails leaves the load in use and waits before it tries agai
   assert.equal(_cohortLoad.state().armed, true, 'the next attempt is on a timer, not in a loop');
 });
 
-test('once nobody has asked for a while the rebuilds stop; a load older than STALE_MAX_MS is never served: cohortsReady rebuilds and waits', async () => {
+test('with nobody asking the rebuilds go on: the default page stays summed ahead, a set nobody asked for lately is dropped', async () => {
+  _cohortLoad.reset();
+  await warmCohorts(ALL);
+  cohortsRead(TWO, NONE);
+  assert.ok(_cohortLoad.state().stats.includes(`${scopeKey(TWO)}|`));
+  _cohortLoad.age(KEEP_WARM_MS + 1_000);
+  await _cohortLoad.rebuild();
+  assert.deepEqual(_cohortLoad.built, { inPlace: 0, behind: 2 }, 'rebuilt although nobody asked (2026-10-31: the first visitor waited 11-16 s)');
+  assert.equal(_cohortLoad.state().armed, true, 'and the next one is scheduled');
+  assert.ok(_cohortLoad.state().stats.includes(`${scopeKey(ALL)}|`), 'the default page: summed ahead');
+  assert.ok(!_cohortLoad.state().stats.includes(`${scopeKey(TWO)}|`), 'a set nobody asked for lately: not');
+  assert.ok(Date.now() - _cohortLoad.state().at < 5_000);
+});
+
+test('a load older than STALE_MAX_MS is never served: cohortsReady rebuilds and waits', async () => {
   _cohortLoad.reset();
   const before = cohortsRead(TWO, NONE)!;
   _cohortLoad.age(KEEP_WARM_MS + 1_000);
-  await _cohortLoad.rebuild();
-  assert.deepEqual(_cohortLoad.built, { inPlace: 1, behind: 0 }, 'nothing was rebuilt for nobody');
-  assert.equal(_cohortLoad.state().armed, false);
   assert.ok(Date.now() - _cohortLoad.state().at > STALE_MAX_MS, 'the load in use is past STALE_MAX_MS');
   // The route waits first (valuedesk.ts): the answer comes from a fresh load, never the old one.
   await cohortsReady();

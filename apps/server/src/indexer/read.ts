@@ -314,7 +314,11 @@ export const READY_WAIT_MS = 10_000;
 const LOAD_PAGE = 2_000;
 /** A rebuild from behind gives the thread back after this much work. */
 const SLICE_MS = 8;
-/** Rebuilds from behind go on for this long after the last cohort read. */
+/**
+ * Sets and filters asked for are summed ahead for this long after their last read. The default
+ * page (warmCohorts' scope) is rebuilt always: until 2026-10-31 every rebuild stopped after 5 min
+ * without a read, and the next visitor waited 11-16 s for a load 25 min old.
+ */
 export const KEEP_WARM_MS = 5 * 60_000;
 /** A rebuild starts at least this long before the load in use expires (longer once the last one's time is known). */
 const REBUILD_LEAD_MS = 15_000;
@@ -350,6 +354,8 @@ let rebuilding = false;
 let inflight: Promise<unknown> | null = null;
 let rebuildTimer: ReturnType<typeof setTimeout> | null = null;
 let lastRebuildMs = 0;
+/** The default page's scope (warmCohorts): kept warm whether or not anyone reads it. */
+let warmKey: string | null = null;
 /** When a rebuild from behind last failed: the next one waits, instead of spinning. */
 let rebuildFailedAt = 0;
 /** Counters for tests and diagnostics: loads built inside a read, and from behind. */
@@ -475,7 +481,7 @@ function note(venues: readonly Venue[], f?: CohortFilter): void {
   const key = scopeKey(venues);
   let w = wanted.get(key);
   if (!w) {
-    if (wanted.size >= WANT_SCOPES) wanted.delete(oldest(wanted));
+    if (wanted.size >= WANT_SCOPES) wanted.delete(oldest(new Map([...wanted].filter(([k]) => k !== warmKey))));
     w = { venues: [...venues], askedAt: now, filters: new Map() };
     wanted.set(key, w);
   }
@@ -497,14 +503,16 @@ function oldest<T extends { askedAt: number }>(m: Map<string, T>): string {
   return key;
 }
 
-/** The sets and filters asked for within KEEP_WARM_MS (older ones are forgotten). */
+/** The sets and filters asked for within KEEP_WARM_MS (older ones are forgotten), and the default page always. */
 function wantedNow(now: number): Array<{ venues: Venue[]; filters: CohortFilter[] }> {
   const out: Array<{ venues: Venue[]; filters: CohortFilter[] }> = [];
   for (const [key, w] of wanted) {
-    if (now - w.askedAt > KEEP_WARM_MS) { wanted.delete(key); continue; }
+    const warm = key === warmKey;
+    if (!warm && now - w.askedAt > KEEP_WARM_MS) { wanted.delete(key); continue; }
     const filters: CohortFilter[] = [];
     for (const [fk, e] of w.filters) {
-      if (now - e.askedAt > KEEP_WARM_MS) w.filters.delete(fk);
+      if (warm && fk === filterKey({})) filters.push(e.f);
+      else if (now - e.askedAt > KEEP_WARM_MS) w.filters.delete(fk);
       else filters.push(e.f);
     }
     out.push({ venues: w.venues, filters });
@@ -526,8 +534,7 @@ function armRebuild(s: IndexStore): void {
 
 async function rebuildBehind(s: IndexStore): Promise<void> {
   const started = Date.now();
-  // Nobody is looking any more: stop here. The next read builds in place and re-arms.
-  if (rebuilding || started - lastAsked > KEEP_WARM_MS) return;
+  if (rebuilding) return;
   rebuilding = true;
   try {
     const p = runBehind(loadSteps(s, started, wantedNow(started)));
@@ -574,6 +581,7 @@ function loadCohorts(s: IndexStore): CohortLoad {
 export async function warmCohorts(venues: readonly Venue[]): Promise<void> {
   const s = reader();
   if (!s || cohortLoad || rebuilding) return;
+  warmKey = scopeKey(venues);
   note(venues, {});
   lastAsked = Date.now();
   await rebuildBehind(s);
@@ -616,6 +624,7 @@ export const _cohortLoad = {
     rebuildTimer = null;
     cohortLoad = null;
     wanted.clear();
+    warmKey = null;
     lastAsked = 0;
     lastRebuildMs = 0;
     rebuildFailedAt = 0;
