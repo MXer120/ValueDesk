@@ -165,6 +165,71 @@ export function accountLiqs(cash: number | null, pos: readonly LiqPos[], priceOf
   });
 }
 
+// --- leverage ---------------------------------------------------------------------------
+
+/**
+ * The heatmap's leverage bands (owner 2026-10-31: colour and filter the map by leverage).
+ * A position's distance to its liquidation is about 1/leverage less the maintenance rate, so
+ *
+ *   Low   up to 5x       ~18% or more away: swing and hedge books, rarely reached;
+ *   Mid   over 5x to 20x ~4-18% away: the usual trading range, reached in a big day;
+ *   High  over 20x       under ~4% away (BTC and ETH allow 25-50x): hit by ordinary moves.
+ *
+ * 5x and 20x are also where the venues' own leverage pickers and most traders' habits sit
+ * (3-5x "safe", 10-20x active, 25x+ the majors' maximum), so the bands read as people think.
+ */
+export const LEV_LOW_MAX = 5;
+export const LEV_MID_MAX = 20;
+/** 0 low, 1 mid, 2 high. */
+export type LevBand = 0 | 1 | 2;
+export const LEV_BANDS: readonly LevBand[] = [0, 1, 2];
+
+/** A leverage's band; null when it is not known (Infinity, a margin at or below zero, is High). */
+export function levBand(lev: number | null | undefined): LevBand | null {
+  if (lev == null || !(lev > 0)) return null;
+  return lev <= LEV_LOW_MAX ? 0 : lev <= LEV_MID_MAX ? 1 : 2;
+}
+
+/**
+ * Every position's leverage in one account (aligned with `pos`; null = not known), the
+ * leverage it really runs at the prices now - what decides how close its liquidation is:
+ *
+ *   isolated  its notional over its own margin (`iso` + s·price: the margin with its PnL in).
+ *             The venue's set leverage only where that margin is not known: it is what the
+ *             margin was opened at, and drifts as the PnL moves and margin is added.
+ *   cross     the account's cross notional over its cross equity (cash + Σ s·price over the
+ *             cross positions: the value the liquidation math reads). A cross position is
+ *             liquidated when its account is, so it runs the account's leverage, however small
+ *             it is itself; the venue's set leverage on it only caps new orders and is not used.
+ *             The read's account value (`equity`) stands in when the cash is not known (a
+ *             Lighter wallet of several sub-accounts); it may hold isolated margin too, so
+ *             such a figure reads a little low.
+ *
+ * A margin or equity at or below zero is Infinity (High: it is being liquidated).
+ */
+export function accountLevs(cash: number | null, equity: number | null | undefined, pos: readonly LiqPos[], priceOf: PriceOf): Array<number | null> {
+  let notional = 0;
+  let value = 0;
+  let ok = true;
+  for (const p of pos) {
+    if (p.iso !== undefined || !p.szi) continue;
+    const px = priceOf(p.symbol);
+    if (px === null || !(px > 0)) { ok = false; continue; }
+    notional += Math.abs(p.szi) * px;
+    value += p.szi * px;
+  }
+  const eq = ok && cash !== null && Number.isFinite(cash) ? cash + value : equity ?? null;
+  const crossLev = !ok || eq === null || !Number.isFinite(eq) || !(notional > 0) ? null : eq > 0 ? notional / eq : Infinity;
+  return pos.map((p) => {
+    if (!p.szi) return null;
+    if (p.iso === undefined) return crossLev;
+    const px = priceOf(p.symbol);
+    if (p.iso === null || px === null || !(px > 0)) return p.lev && p.lev > 0 ? p.lev : null;
+    const margin = p.iso + p.szi * px;
+    return margin > 0 ? (Math.abs(p.szi) * px) / margin : Infinity;
+  });
+}
+
 /** One position as a venue's read gives it. */
 export interface ReadPos {
   symbol: string;

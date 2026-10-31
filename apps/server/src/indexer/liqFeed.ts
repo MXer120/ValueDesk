@@ -80,7 +80,8 @@ export class LiqFeedServer {
 // --- API side ------------------------------------------------------------------------------
 
 export interface LiveVenue {
-  b: Map<number, [number, number, number, number]>;
+  /** bucket index -> the LiqRow without its index (levels.ts: [long USD, short USD, long n, short n, ...bands]). */
+  b: Map<number, number[]>;
   /** The engine's coverage (live.ts Cov; an older indexer sends the first five). */
   c: number[];
   o: [number, number, number, number];
@@ -200,9 +201,10 @@ export class LiqFeedState extends EventEmitter {
       let v = c.v.get(venue);
       if (!v) { v = { b: new Map(), c: [0, 0, 0, 0, 0, 0, 0, 0], o: [0, 0, 0, 0] }; c.v.set(venue, v); }
       const idx: number[] = [];
-      for (const [i, l, s, ln, sn] of x.b) {
-        if (!ln && !sn) v.b.delete(i);
-        else v.b.set(i, [l, s, ln, sn]);
+      for (const r of x.b) {
+        const i = r[0];
+        if (!r[3] && !r[4]) v.b.delete(i);
+        else v.b.set(i, r.slice(1));
         idx.push(i);
       }
       if (x.c) { v.c = x.c; covered.add(venue); }
@@ -215,7 +217,7 @@ export class LiqFeedState extends EventEmitter {
         const was = old!.v.get(venue);
         const now = c.v.get(venue)!;
         const diff = new Set<number>();
-        for (const i of idx) { const p = was?.b.get(i); const q = now.b.get(i); if (!p || !q || p.some((y, k) => y !== q[k])) diff.add(i); }
+        for (const i of idx) { const p = was?.b.get(i); const q = now.b.get(i); if (!p || !q || p.length !== q.length || p.some((y, k) => y !== q[k])) diff.add(i); }
         for (const i of was?.b.keys() ?? []) if (!now.b.has(i)) diff.add(i);
         venues.set(venue, [...diff]);
         if (was && was.c.every((y, k) => y === now.c[k])) covered.delete(venue);

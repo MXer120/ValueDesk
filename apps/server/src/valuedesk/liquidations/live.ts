@@ -22,10 +22,14 @@
  *
  * Whether a level is already past (a long priced above the price, a short below)
  * is left to the reader, at the price of the moment: it moves with every tick.
+ *
+ * Each bucket also sums its USD per leverage band (math.ts levBand, accountLevs): the
+ * leverage a position ran at when its account was last priced - a print, a read, or another
+ * of its cross prices moving - like its liquidation price.
  */
 import type { Venue } from '../types.js';
-import { accountLiqs, niceStep, type LiqPos, type Tiers } from './math.js';
-import { NOW_HI, NOW_LO, NOW_STEP, liqCoin, type LiqNow } from './levels.js';
+import { accountLevs, accountLiqs, levBand, niceStep, type LiqPos, type Tiers } from './math.js';
+import { NOW_HI, NOW_LO, NOW_STEP, liqCoin, rowBand, trimRow, type LiqNow, type LiqRow } from './levels.js';
 
 /** An account as the engine reads it: its cross cash (null = not priced yet) and positions. */
 export interface LiveAccount {
@@ -33,17 +37,25 @@ export interface LiveAccount {
   /** Whether the book carries liquidation data at all (cohortTracker.ts liqKnown): if not, it only counts as held. */
   priced: boolean;
   positions: ReadonlyArray<LiqPos>;
+  /** The read's account value: the cross equity for the leverage where the cash is not known. */
+  equity?: number | null;
 }
 
 /**
  * What one position added: coin, epoch, venue, long, size, then where (bucket index, or -1
- * outside, -2 not priced, -3 no liquidation price exists) and USD.
+ * outside, -2 not priced, -3 no liquidation price exists), USD and leverage band (-1: not known).
  */
-type Entry = { coin: string; ep: number; long: boolean; a: number; at: number; usd: number };
+type Entry = { coin: string; ep: number; long: boolean; a: number; at: number; usd: number; band: number };
+
+/** A bucket: a LiqRow without its index - [long USD, short USD, long n, short n, long low, mid, high, short low, mid, high]. */
+type Cell = number[];
+const newCell = (): Cell => [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+/** A cell as a row: rounded USD, trailing zeros left off. */
+const rowOf = (i: number, y: Cell): LiqRow => trimRow<LiqRow>([i, round(y[0]!), round(y[1]!), y[2]!, y[3]!, ...y.slice(4).map(round)]);
 
 interface VenueAgg {
-  /** bucket index -> [long USD, short USD, long n, short n]. */
-  b: Map<number, [number, number, number, number]>;
+  /** bucket index -> Cell. */
+  b: Map<number, Cell>;
   /**
    * [long size, short size, long size priced, short size priced, positions, past (0: the reader's,
    * liqRead.ts heatOf), long size with no liquidation price, short size with none] - as liq_now (levels.ts).
@@ -66,10 +78,10 @@ interface CoinAgg {
   /** Sent whole at the next flush (new, or laid out again). */
   whole: boolean;
   /** What was last sent per venue: bucket values, and the coverage (to skip what has not really moved). */
-  sent: Map<Venue, { b: Map<number, [number, number, number, number]>; c: string }>;
+  sent: Map<Venue, { b: Map<number, Cell>; c: string }>;
 }
 
-/** One coin's change for the stream: buckets as [index, long USD, short USD, long n, short n] (all zero = gone). */
+/** One coin's change for the stream: buckets as LiqRow (levels.ts; counts both zero = gone). */
 export interface LiveDelta {
   coin: string;
   /** The coin's price now, the bucket width, the layout's epoch. */
@@ -78,7 +90,7 @@ export interface LiveDelta {
   ep: number;
   /** True: every bucket of the coin is here (a new layout); false: only the changed ones. */
   whole: boolean;
-  v: Partial<Record<Venue, { b: Array<[number, number, number, number, number]>; c?: Cov; o?: [number, number, number, number] }>>;
+  v: Partial<Record<Venue, { b: LiqRow[]; c?: Cov; o?: [number, number, number, number] }>>;
 }
 
 /** The coverage tuple (VenueAgg.c). */
@@ -205,7 +217,7 @@ export class LiqLive {
         let sent = c.sent.get(venue);
         if (!sent || c.whole) { sent = { b: new Map(), c: '' }; c.sent.set(venue, sent); }
         const idx = c.whole ? [...x.b.keys()] : [...(c.dirtyB.get(venue) ?? [])];
-        const b: Array<[number, number, number, number, number]> = [];
+        const b: LiqRow[] = [];
         for (const i of idx.sort((m, n) => m - n)) {
           const y = x.b.get(i);
           const was = sent.b.get(i);
@@ -213,9 +225,9 @@ export class LiqLive {
           // most changes are a small trade moving a liquidation price within its bucket or into the
           // next (measured on BTC: ~130 buckets a second otherwise). The drift from what was sent stays
           // under SEND_MOVE, the counts (tooltip only) catch up, and the minute's full refresh is exact.
-          if (!c.whole && y && was && near(y[0], was[0]) && near(y[1], was[1])) continue;
+          if (!c.whole && y && was && nearCell(y, was)) continue;
           if (!y && !was && !c.whole) continue;
-          if (y) { sent.b.set(i, [y[0], y[1], y[2], y[3]]); b.push([i, round(y[0]), round(y[1]), y[2], y[3]]); }
+          if (y) { sent.b.set(i, y.slice()); b.push(rowOf(i, y)); }
           else { sent.b.delete(i); b.push([i, 0, 0, 0, 0]); }
         }
         const e: NonNullable<LiveDelta['v'][Venue]> = { b };
@@ -248,7 +260,7 @@ export class LiqLive {
       for (const [venue, x] of c.v) {
         if (x.c[4] <= 0) continue; // a venue whose last position here closed
         v[venue] = {
-          b: [...x.b].sort((m, n) => m[0] - n[0]).map(([i, y]) => [i, round(y[0]), round(y[1]), y[2], y[3]]),
+          b: [...x.b].sort((m, n) => m[0] - n[0]).map(([i, y]) => rowOf(i, y)),
           c: [sig(x.c[0]), sig(x.c[1]), sig(x.c[2]), sig(x.c[3]), x.c[4], 0, sig(x.c[6]), sig(x.c[7])],
           o: [round(x.o[0]), round(x.o[1]), x.o[2], x.o[3]],
         };
@@ -319,10 +331,12 @@ export class LiqLive {
       return;
     }
     let b = x.b.get(e.at);
-    if (!b) { b = [0, 0, 0, 0]; x.b.set(e.at, b); }
-    b[L ? 0 : 1] += sign * e.usd;
-    b[L ? 2 : 3] += sign;
-    if (b[2] <= 0 && b[3] <= 0) x.b.delete(e.at);
+    if (!b) { b = newCell(); x.b.set(e.at, b); }
+    b[L ? 0 : 1]! += sign * e.usd;
+    b[L ? 2 : 3]! += sign;
+    // The row's band field less its index.
+    if (e.band >= 0) b[rowBand(L, e.band as 0 | 1 | 2) - 1]! += sign * e.usd;
+    if (b[2]! <= 0 && b[3]! <= 0) x.b.delete(e.at);
     let s = c.dirtyB.get(venue);
     if (!s) { s = new Set(); c.dirtyB.set(venue, s); }
     s.add(e.at);
@@ -344,6 +358,8 @@ export class LiqLive {
     }
     const none: boolean[] = [];
     const liq = acct.priced ? accountLiqs(acct.cash, ps, (s) => this.o.priceOf(venue, s), (s) => this.o.tiersOf(venue, s), none) : ps.map(() => null);
+    // Only a priced book's leverage: an unpriced one is held, never bucketed.
+    const lev = acct.priced ? accountLevs(acct.cash, acct.equity, ps, (s) => this.o.priceOf(venue, s)) : null;
     // A level the price has crossed: the book is stale (crossed). Every position counts, mapped or not.
     if (this.o.crossed && acct.priced) {
       let usd = 0;
@@ -366,7 +382,7 @@ export class LiqLive {
       const l = liq[j] ?? null;
       const a = Math.abs(p.szi);
       const at = l === null || !(l > 0) ? (none[j] ? -3 : -2) : l < c.lo || l >= c.hi ? -1 : Math.floor(l / c.st);
-      const e: Entry = { coin: coinName, ep: c.ep, long: p.szi > 0, a, at, usd: l ? a * l : 0 };
+      const e: Entry = { coin: coinName, ep: c.ep, long: p.szi > 0, a, at, usd: l ? a * l : 0, band: levBand(lev?.[j]) ?? -1 };
       this.apply(venue, e, 1);
       entries.push(e);
     });
@@ -389,3 +405,5 @@ const sig = (x: number) => +x.toPrecision(6);
 /** A bucket is sent again once its USD moved this much (1%, or its positions changed). */
 const SEND_MOVE = 0.01;
 const near = (a: number, b: number) => Math.abs(a - b) <= SEND_MOVE * Math.max(Math.abs(a), Math.abs(b), 1);
+/** Every USD field of two cells within SEND_MOVE (the counts are left to catch up). */
+const nearCell = (y: Cell, was: Cell) => near(y[0]!, was[0]!) && near(y[1]!, was[1]!) && y.every((v, k) => k < 4 || near(v, was[k] ?? 0));

@@ -621,7 +621,7 @@ export class CohortTracker {
   readonly live = new LiqLive({
     account: (venue, address) => {
       const b = this.books.get(venue)?.get(address);
-      return b ? { cash: b.cash ?? null, priced: liqKnown(b), positions: [...b.pos].map(([symbol, p]) => ({ symbol, ...p })) } : undefined;
+      return b ? { cash: b.cash ?? null, priced: liqKnown(b), positions: [...b.pos].map(([symbol, p]) => ({ symbol, ...p })), equity: b.equity } : undefined;
     },
     priceOf: (venue, symbol) => this.marks.get(`${venue}|${symbol}`) ?? null,
     tiersOf: (venue, symbol) => marketsNow(venue)?.tiers.get(symbol) ?? null,

@@ -12,11 +12,17 @@
  * venue, the size the books hold against the venue's own open interest, how
  * much of it has a known liquidation price, and how the math has matched the
  * venue's figures at reads and re-reads (the tracker's DriftStats).
+ *
+ * LEVERAGE (2026-10-31). Every row carries its USD per leverage band after the counts
+ * (levels.ts LiqRow / SnapRow; math.ts levBand, accountLevs); a row from an older indexer
+ * has none, and what the bands leave of a side reads as unknown leverage. Every sum here
+ * adds rows field by field (addRow), so old and new rows mix exactly. The wallet lists take
+ * `lev=` (levFilterOf): only positions of those bands - unknown ones only with every band.
  */
 import { VENUES, type Venue } from '../valuedesk/types.js';
 import type { WalletVenue } from '../valuedesk/cohorts/model.js';
-import { emptyDrift, niceStep, type DriftStats, type Tiers } from '../valuedesk/liquidations/math.js';
-import { NOW_HI, NOW_LO, NOW_STEP, coinLevels, liqCoin, type LevelPos, type LiqNow, type LiqSnap } from '../valuedesk/liquidations/levels.js';
+import { LEV_BANDS, emptyDrift, levBand, niceStep, type DriftStats, type LevBand, type Tiers } from '../valuedesk/liquidations/math.js';
+import { NOW_HI, NOW_LO, NOW_STEP, addRow, coinLevels, liqCoin, rowBand, snapBand, trimRow, type LevelPos, type LiqNow, type LiqRow, type LiqSnap, type SnapRow } from '../valuedesk/liquidations/levels.js';
 import { inflateRawSync } from 'node:zlib';
 import { marketsNow, venueMarkets, type VenueMarkets } from '../valuedesk/liquidations/rules.js';
 import { shownLabel } from '../valuedesk/labels.js';
@@ -65,8 +71,12 @@ export interface LiqHeatmap {
   price: number | null;
   /** The bucket width; the web groups buckets by what is on screen. */
   step: number;
-  /** [bucket index (low price = index x step), long USD, short USD, long n, short n]. */
-  buckets: Array<[number, number, number, number, number]>;
+  /**
+   * [bucket index (low price = index x step), long USD, short USD, long n, short n] and, from
+   * 2026-10-31, USD per leverage band: long low, mid, high, short low, mid, high (levels.ts
+   * LiqRow; trailing zeros left off, what the bands leave of a side is unknown leverage).
+   */
+  buckets: LiqRow[];
   outside: { long: number; short: number; longN: number; shortN: number };
   coverage: Partial<Record<Venue, VenueCoverage>>;
   /** The wallet filter only: when the cohort load its positions come from was built (ms). */
@@ -82,6 +92,8 @@ export interface LiqWallet {
   usd: number;
   /** Liquidation price against the price now (-0.31 = 31% below). */
   dist: number | null;
+  /** The leverage it runs at (math.ts accountLevs; null = not known; 1000 = no margin left). Absent before 2026-10-31. */
+  lev?: number | null;
 }
 
 export interface LiqWallets {
@@ -100,13 +112,51 @@ export interface LiqWallets {
 export interface LiqHistory {
   coin: string;
   venues: Venue[];
-  /** Snapshots: time, price, step, [bucket index, long USD, short USD] summed over the venues. */
-  points: Array<{ t: number; p: number; st: number; b: Array<[number, number, number]> }>;
+  /**
+   * Snapshots: time, price, step, rows summed over the venues - [bucket index, long USD, short USD]
+   * and, from 2026-10-31, USD per leverage band (levels.ts SnapRow: long low, mid, high, short low,
+   * mid, high; trailing zeros left off).
+   */
+  points: Array<{ t: number; p: number; st: number; b: SnapRow[] }>;
   /** Coins with snapshots (the most open notional tracked). */
   coins: string[];
 }
 
 type Load = NonNullable<ReturnType<typeof cohortBooksNow>>;
+
+/**
+ * The `lev=` of the wallet lists: a comma list of low, mid, high. Null (every position, unknown
+ * leverage too) when absent, empty or naming all three: a filter shows only what it names.
+ */
+export function levFilterOf(q: unknown): ReadonlySet<LevBand> | null {
+  if (typeof q !== 'string' || !q.trim()) return null;
+  const names = ['low', 'mid', 'high'] as const;
+  const set = new Set<LevBand>();
+  for (const w of q.split(',')) { const i = names.indexOf(w.trim().toLowerCase() as typeof names[number]); if (i >= 0) set.add(i as LevBand); }
+  return set.size === 0 || set.size === 3 ? null : set;
+}
+const inFilter = (f: ReadonlySet<LevBand> | null, lev: number | null | undefined) => {
+  if (!f) return true;
+  const b = levBand(lev);
+  return b !== null && f.has(b);
+};
+
+/**
+ * A change log row's leverage, as far as the log can tell (math.ts accountLevs is the live
+ * figure): isolated, the leverage it is margined at (the log keeps no isolated margin); cross,
+ * its own notional at the mark over the account's equity - the log holds no other position of
+ * the account, so an account of several cross positions reads lower here than on the live map.
+ * Null: not known (rows before 2026-10-29 keep none of it).
+ */
+export function logLev(r: { iso: number | boolean | null; lev: number | null; sz: number | null; mark: number | null; eq: number | null }): number | null {
+  if (r.iso === null || r.iso === undefined) return null;
+  if (r.iso === true || r.iso === 1) return r.lev && r.lev > 0 ? r.lev : null;
+  if (r.sz === null || r.mark === null || !(r.mark > 0) || r.eq === null) return null;
+  return r.eq > 0 ? (Math.abs(r.sz) * r.mark) / r.eq : Infinity;
+}
+
+/** A leverage for JSON: Infinity (no margin left) as 1000, else one decimal. */
+const levOut = (x: number | null | undefined): number | null => (x == null ? null : Number.isFinite(x) ? Math.round(x * 10) / 10 : 1000);
 
 /** Per load: coin -> venue -> the wallets holding it (built once a minute, on the first ask). */
 let index: { at: number; by: Map<string, Map<Venue, Array<[string, WalletVenue]>>> } | null = null;
@@ -234,7 +284,7 @@ function nowRow(coin: string): { at: number; row: LiqNow | null } | null {
 
 /** One coin's levels on one venue, from the live feed or a minute row. */
 interface VenueSrc {
-  b: Iterable<[number, number, number, number, number]>;
+  b: Iterable<LiqRow>;
   /** Coverage as live.ts Cov / levels.ts LiqNowVenue.c (older sources: shorter, the rest read as 0). */
   c: ArrayLike<number | undefined>;
   o: ArrayLike<number>;
@@ -247,7 +297,7 @@ export function heatOf(
   markets: ReadonlyMap<Venue, VenueMarkets | null>,
 ): LiqHeatmap {
   const acc = accuracyOf();
-  const sum = new Map<number, [number, number, number, number, number]>();
+  const sum = new Map<number, LiqRow>();
   const outside = { long: 0, short: 0, longN: 0, shortN: 0 };
   const coverage: Partial<Record<Venue, VenueCoverage>> = {};
   for (const venue of venues) {
@@ -269,9 +319,11 @@ export function heatOf(
     // uses to leave them out of the bars (size = USD over the 0.02% bucket's middle).
     const p = src.p !== null && src.p > 0 ? src.p : null;
     let past = 0;
-    for (const [i, l, sh, ln, sn] of x.b) {
+    for (const r of x.b) {
+      const [i, l, sh] = r;
+      // Field by field, bands and all: a venue's row without bands adds its USD as unknown leverage.
       const e = sum.get(i);
-      if (e) { e[1] += l; e[2] += sh; e[3] += ln; e[4] += sn; } else sum.set(i, [i, l, sh, ln, sn]);
+      if (e) addRow(e, r); else sum.set(i, r.slice() as LiqRow);
       if (p === null) continue;
       if (l > 0 && i * src.st >= p) past += l / ((i + 0.5) * src.st);
       if (sh > 0 && (i + 1) * src.st <= p) past += sh / ((i + 0.5) * src.st);
@@ -281,7 +333,7 @@ export function heatOf(
   }
   return {
     coin, venues: [...venues], at: src.at, price: src.p, step: src.st,
-    buckets: [...sum.values()].sort((p, q) => p[0] - q[0]), outside, coverage,
+    buckets: [...sum.values()].sort((p, q) => p[0] - q[0]).map((r) => trimRow(r)), outside, coverage,
   };
 }
 
@@ -294,7 +346,7 @@ export function liveSrc(coin: string): Parameters<typeof heatOf>[2] | null {
     at: c.at, p: c.p, st: c.st,
     v: (venue) => {
       const x = c.v.get(venue);
-      return x && { b: [...x.b].map(([i, y]): [number, number, number, number, number] => [i, y[0], y[1], y[2], y[3]]), c: x.c, o: x.o };
+      return x && { b: [...x.b].map(([i, y]) => [i, ...y] as LiqRow), c: x.c, o: x.o };
     },
   };
 }
@@ -335,7 +387,7 @@ export async function liqHeatmapOf(coin: string, venues: readonly Venue[], walle
   const only = new Set(wallets);
   const p = g.price;
   const st = p ? niceStep(p * NOW_STEP) : 1;
-  const sum = new Map<number, [number, number, number, number, number]>();
+  const sum = new Map<number, LiqRow>();
   const outside = { long: 0, short: 0, longN: 0, shortN: 0 };
   const coverage: Partial<Record<Venue, VenueCoverage>> = {};
   for (const v of venues) {
@@ -359,13 +411,15 @@ export async function liqHeatmapOf(coin: string, venues: readonly Venue[], walle
       continue;
     }
     const i = Math.floor(l.liq / st);
-    const b = sum.get(i) ?? [i, 0, 0, 0, 0];
+    const b = sum.get(i) ?? [i, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
     if (long) { b[1] += usd; b[3]++; } else { b[2] += usd; b[4]++; }
+    const band = levBand(l.lev);
+    if (band !== null) b[rowBand(long, band)]! += usd;
     sum.set(i, b);
   }
   return {
     coin, venues: [...venues], at: g.load.at, price: p, step: st,
-    buckets: [...sum.values()].sort((x, y) => x[0] - y[0]), outside, coverage, asOf: g.load.at,
+    buckets: [...sum.values()].sort((x, y) => x[0] - y[0]).map((r) => trimRow(r)), outside, coverage, asOf: g.load.at,
   };
 }
 
@@ -426,19 +480,19 @@ export async function liqHeatmap(coin: string, venues: readonly Venue[]): Promis
 
 const r2 = (x: number) => Math.round(x * 100) / 100;
 
-/** The wallets whose `side` liquidates in [from, to), largest first. */
-export async function liqWallets(coin: string, venues: readonly Venue[], side: 'long' | 'short', from: number, to: number, limit = 25, wallets: readonly string[] = []): Promise<LiqWallets | null> {
+/** The wallets whose `side` liquidates in [from, to), largest first; `lev`: only those leverage bands (levFilterOf). */
+export async function liqWallets(coin: string, venues: readonly Venue[], side: 'long' | 'short', from: number, to: number, limit = 25, wallets: readonly string[] = [], lev: ReadonlySet<LevBand> | null = null): Promise<LiqWallets | null> {
   const g = await gather(coin, venues);
   if (!g) return null;
   const p = g.price;
   // As the buckets: a long priced above the price (a short below) is past, not a level.
   const only = wallets.length ? new Set(wallets) : null;
-  const hits = g.levels.filter((l) => (!only || only.has(l.address)) && l.liq !== null && l.liq >= from && l.liq < to && (side === 'long' ? l.szi > 0 && !(p && l.liq >= p) : l.szi < 0 && !(p && l.liq <= p)));
+  const hits = g.levels.filter((l) => (!only || only.has(l.address)) && inFilter(lev, l.lev) && l.liq !== null && l.liq >= from && l.liq < to && (side === 'long' ? l.szi > 0 && !(p && l.liq >= p) : l.szi < 0 && !(p && l.liq <= p)));
   const rows = hits.map((l): LiqWallet => {
     const usd = Math.abs(l.szi) * l.liq!;
     return {
       venue: l.venue, address: l.address, label: shownLabel(l.address, g.labels.get(`${l.venue}|${l.address}`) ?? null),
-      szi: l.szi, liq: l.liq!, usd: r2(usd), dist: g.price ? l.liq! / g.price - 1 : null,
+      szi: l.szi, liq: l.liq!, usd: r2(usd), dist: g.price ? l.liq! / g.price - 1 : null, lev: levOut(l.lev),
     };
   }).sort((a, b) => b.usd - a.usd);
   return { coin, side, from, to, price: g.price, total: r2(rows.reduce((a, x) => a + x.usd, 0)), count: rows.length, wallets: rows.slice(0, limit), asOf: g.load.at };
@@ -457,6 +511,8 @@ export interface LiqAtPosition {
   dist: number | null;
   /** The change log's row in force then, and what it kept (null: not known, or a row before 2026-10-29). */
   t: number;
+  /** The leverage its band is read from (logLev; 1000 = no margin left). Absent before 2026-10-31. */
+  levRun?: number | null;
   sym: string | null;
   sz: number | null;
   entry: number | null;
@@ -500,7 +556,7 @@ export interface LiqAt {
  * its run began and what it did next. As the history's cells: a long whose level the price then
  * had crossed (a short below it) is past, not counted.
  */
-export function liqAt(coin: string, venues: readonly Venue[], t: number, from: number, to: number, side: 'long' | 'short' | 'both', wallets: readonly string[] = [], limit = 100): LiqAt | null {
+export function liqAt(coin: string, venues: readonly Venue[], t: number, from: number, to: number, side: 'long' | 'short' | 'both', wallets: readonly string[] = [], limit = 100, lev: ReadonlySet<LevBand> | null = null): LiqAt | null {
   const s = reader();
   if (!s) return null;
   let snap: { t: number; p: number } | null = null;
@@ -522,6 +578,8 @@ export function liqAt(coin: string, venues: readonly Venue[], t: number, from: n
   for (const r of rows) {
     if (only && !only.has(r.address.toLowerCase())) continue;
     if (price !== null && (r.side > 0 ? r.liq >= price : r.liq <= price)) continue;
+    const run = logLev(r);
+    if (!inFilter(lev, run)) continue;
     const venue = VENUES[r.venue]!;
     const sideName = r.side > 0 ? 'long' : 'short';
     const agg = r.side > 0 ? long : short;
@@ -531,7 +589,7 @@ export function liqAt(coin: string, venues: readonly Venue[], t: number, from: n
     out.push({
       venue, address: r.address, label: shownLabel(r.address, null), side: sideName, liq: r.liq, usd: r.usd,
       dist: price ? r.liq / price - 1 : null,
-      t: r.t, sym: r.sym, sz: r.sz, entry: r.entry, mark: r.mark, iso: r.iso === null ? null : r.iso === 1, lev: r.lev, eq: r.eq, cash: r.cash, readAt: r.readAt,
+      t: r.t, levRun: levOut(run), sym: r.sym, sz: r.sz, entry: r.entry, mark: r.mark, iso: r.iso === null ? null : r.iso === 1, lev: r.lev, eq: r.eq, cash: r.cash, readAt: r.readAt,
       since: r.since,
       next: nx ? {
         t: nx.t, kind: nx.usd === 0 ? 'closed' : nx.side !== r.side ? 'flipped' : 'changed', liq: nx.usd === 0 ? null : nx.liq, usd: nx.usd, mark: nx.mark,
@@ -566,29 +624,30 @@ export function liqHistory(coin: string, venues: readonly Venue[], range: LiqRan
       const from = Date.now() - RANGE_MS[range];
       const ids = [...s.liqAddrIds(wallets).values()];
       const log = ids.length ? s.liqLog(ids, coin, from) : [];
-      const state = new Map<string, { side: number; liq: number; usd: number }>();
+      const state = new Map<string, { side: number; liq: number; usd: number; band: LevBand | null }>();
       let k = 0;
       for (const r of s.liqHist(coin, from)) {
         while (k < log.length && log[k]!.t <= r.t) {
           const e = log[k++]!;
           const key = `${e.aid}|${e.venue}`;
-          if (e.usd > 0) state.set(key, { side: e.side, liq: e.liq, usd: e.usd });
+          if (e.usd > 0) state.set(key, { side: e.side, liq: e.liq, usd: e.usd, band: levBand(logLev(e)) });
           else state.delete(key);
         }
         if (!state.size) continue;
         let snap: LiqSnap;
         try { snap = JSON.parse(r.data) as LiqSnap; } catch { continue; }
-        const sum = new Map<number, [number, number]>();
+        const sum = new Map<number, SnapRow>();
         for (const [key, x] of state) {
           if (!vs.has(Number(key.slice(key.indexOf('|') + 1)))) continue;
           // A level the price had crossed is past, as in the snapshot's own buckets.
           if (x.side > 0 ? x.liq >= snap.p : x.liq <= snap.p) continue;
           const i = Math.floor(x.liq / snap.st);
-          const b = sum.get(i) ?? [0, 0];
-          if (x.side > 0) b[0] += x.usd; else b[1] += x.usd;
+          const b = sum.get(i) ?? [i, 0, 0, 0, 0, 0, 0, 0, 0];
+          if (x.side > 0) b[1] += x.usd; else b[2] += x.usd;
+          if (x.band !== null) b[snapBand(x.side > 0, x.band)]! += x.usd;
           sum.set(i, b);
         }
-        if (sum.size) points.push({ t: r.t, p: snap.p, st: snap.st, b: [...sum].sort((x, y) => x[0] - y[0]).map(([i, [l, sh]]) => [i, l, sh]) });
+        if (sum.size) points.push({ t: r.t, p: snap.p, st: snap.st, b: [...sum.values()].sort((x, y) => x[0] - y[0]).map((b) => trimRow(b, 3)) });
       }
       coins = s.liqHistCoins();
     } catch { /* the tables arrive with the indexer's first start */ }
@@ -598,22 +657,30 @@ export function liqHistory(coin: string, venues: readonly Venue[], range: LiqRan
     for (const r of s.liqHist(coin, Date.now() - RANGE_MS[range])) {
       let snap: LiqSnap;
       try { snap = JSON.parse(r.data) as LiqSnap; } catch { continue; }
-      const sum = new Map<number, [number, number]>();
+      const sum = new Map<number, SnapRow>();
       for (const v of venues) {
-        for (const [i, l0, sh0] of snap.v[v] ?? []) {
+        for (const r of snap.v[v] ?? []) {
+          const i = r[0];
           // A level the price had crossed when the snapshot was taken (a long priced above it, a
           // short below) is past, not a level: snapshots before 2026-10-28 kept them, and drew
           // longs above the price line and shorts below it.
-          const l = i * snap.st >= snap.p ? 0 : l0;
-          const sh = (i + 1) * snap.st <= snap.p ? 0 : sh0;
+          const keepL = i * snap.st < snap.p;
+          const keepS = (i + 1) * snap.st > snap.p;
+          const l = keepL ? r[1] : 0;
+          const sh = keepS ? r[2] : 0;
           if (!l && !sh) continue;
-          const b = sum.get(i) ?? [0, 0];
-          b[0] += l;
-          b[1] += sh;
+          const b = sum.get(i) ?? [i, 0, 0, 0, 0, 0, 0, 0, 0];
+          b[1] += l;
+          b[2] += sh;
+          // Bands (snapshots from 2026-10-31; before, none: the side's USD is unknown leverage).
+          for (const band of LEV_BANDS) {
+            if (keepL) b[snapBand(true, band)]! += r[snapBand(true, band)] ?? 0;
+            if (keepS) b[snapBand(false, band)]! += r[snapBand(false, band)] ?? 0;
+          }
           sum.set(i, b);
         }
       }
-      points.push({ t: r.t, p: snap.p, st: snap.st, b: [...sum].sort((a, b) => a[0] - b[0]).map(([i, [l, sh]]) => [i, l, sh]) });
+      points.push({ t: r.t, p: snap.p, st: snap.st, b: [...sum.values()].sort((a, b) => a[0] - b[0]).map((b) => trimRow(b, 3)) });
     }
     coins = s.liqHistCoins();
   } catch { /* the table arrives with the indexer's first start */ }

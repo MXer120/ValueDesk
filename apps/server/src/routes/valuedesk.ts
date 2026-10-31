@@ -51,7 +51,7 @@ import { ACCOUNT_DETAIL, arcusProvider, lighterProvider, nameSpotFills, tradexyz
 import { applyCachedCurves, attachPodiumCurves } from '../valuedesk/curves.js';
 import { attachStats, boardPage, cohortDetail, cohortFocus, cohortMap, cohortWallets, cohortsReady, cohortsRead, indexerStatus, netPage } from '../indexer/read.js';
 import { isCohortId, isSector, type CohortFilter, type CohortRange, type WalletSort } from '../valuedesk/cohorts/model.js';
-import { isLiqRange, liqAt, liqHeatmap, liqHeatmapOf, liqHistory, liqWallets, walletLiqs } from '../indexer/liqRead.js';
+import { isLiqRange, levFilterOf, liqAt, liqHeatmap, liqHeatmapOf, liqHistory, liqWallets, walletLiqs } from '../indexer/liqRead.js';
 import { watchAddresses } from '../indexer/host.js';
 import { BOARD_WINDOWS, type BoardWindow } from '../valuedesk/types.js';
 import { buildExplore } from '../valuedesk/explore.js';
@@ -477,7 +477,7 @@ export async function valuedeskRoutes(app: FastifyInstance) {
     }
   });
 
-  /** The wallets whose `side` (long / short) of `coin` liquidates in [`from`, `to`). */
+  /** The wallets whose `side` (long / short) of `coin` liquidates in [`from`, `to`); `lev=low,mid,high`: only those leverage bands. */
   app.get('/api/vs/liquidations/wallets', async (req, reply) => {
     try {
       const q = req.query as Q;
@@ -488,7 +488,7 @@ export async function valuedeskRoutes(app: FastifyInstance) {
       if (q.side !== 'long' && q.side !== 'short') throw bad('side= must be long or short');
       if (!(from >= 0) || !(to > from)) throw bad('from= and to= must be a price range');
       await cohortsReady();
-      const body = await liqWallets(coin, cohortVenues(q), q.side, from, to, 25, walletsOf(q));
+      const body = await liqWallets(coin, cohortVenues(q), q.side, from, to, 25, walletsOf(q), levFilterOf(q.lev));
       if (!body) return fail(reply, new NotAvailable('The index is not running yet'));
       return { ok: true, ...body };
     } catch (e) {
@@ -529,7 +529,7 @@ export async function valuedeskRoutes(app: FastifyInstance) {
   /**
    * Who sat in one cell of the history: `coin`'s positions liquidating in [`from`, `to`) at time `t`
    * (ms), `side` long / short / both, by the change log - level, size, entry, mark, margin, account,
-   * since when and what happened next (indexer/liqRead.ts liqAt).
+   * since when and what happened next (indexer/liqRead.ts liqAt); `lev=low,mid,high`: only those leverage bands.
    */
   app.get('/api/vs/liquidations/at', async (req, reply) => {
     try {
@@ -542,7 +542,7 @@ export async function valuedeskRoutes(app: FastifyInstance) {
       if (!(t > 0) || t > Date.now() + 60_000) throw bad('t= must be a time in ms, not in the future');
       if (!(from >= 0) || !(to > from)) throw bad('from= and to= must be a price range');
       const side = q.side === 'long' || q.side === 'short' ? q.side : 'both';
-      const body = liqAt(coin, cohortVenues(q), t, from, to, side, walletsOf(q));
+      const body = liqAt(coin, cohortVenues(q), t, from, to, side, walletsOf(q), 100, levFilterOf(q.lev));
       if (!body) return fail(reply, new NotAvailable('The index is not running yet'));
       return { ok: true, ...body };
     } catch (e) {

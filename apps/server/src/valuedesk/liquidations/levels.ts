@@ -29,7 +29,7 @@ export function liqCoin(symbol: string): string {
   const c = coinOf(symbol);
   return ALIAS[c] ?? c;
 }
-import { accountLiqs, niceStep, type LiqPos, type Tiers } from './math.js';
+import { LEV_BANDS, accountLevs, accountLiqs, levBand, niceStep, type LevBand, type LiqPos, type Tiers } from './math.js';
 
 /** One position with its liquidation price (null = none, or not known). */
 export interface LevelPos {
@@ -40,10 +40,14 @@ export interface LevelPos {
   liq: number | null;
   /** `liq` null because no liquidation price exists (the venue says so, or the account carries it to zero), not because it is not known. */
   none?: boolean;
+  /** The leverage it runs at (math.ts accountLevs; null = not known, Infinity = no margin left). */
+  lev?: number | null;
 }
 
 export interface AccountIn {
   cash?: number | null;
+  /** The read's account value: the cross equity where the cash is not known (math.ts accountLevs). */
+  equity?: number | null;
   positions: readonly LiqPos[] | null;
 }
 
@@ -64,9 +68,10 @@ export function* coinLevels(
     if (!ps?.length || !ps.some((p) => liqCoin(p.symbol) === coin)) continue;
     const none: boolean[] = [];
     const liq = accountLiqs(a.cash ?? null, ps, priceOf, tiersFor, none);
+    const lev = accountLevs(a.cash ?? null, a.equity, ps, priceOf);
     for (let i = 0; i < ps.length; i++) {
       const p = ps[i]!;
-      if (liqCoin(p.symbol) === coin && p.szi) yield { venue, address, symbol: p.symbol, szi: p.szi, liq: liq[i] ?? null, ...(none[i] ? { none: true } : {}) };
+      if (liqCoin(p.symbol) === coin && p.szi) yield { venue, address, symbol: p.symbol, szi: p.szi, liq: liq[i] ?? null, ...(none[i] ? { none: true } : {}), lev: lev[i] ?? null };
     }
   }
 }
@@ -77,15 +82,16 @@ export function eachLevel(
   accounts: Iterable<[string, AccountIn]>,
   priceOf: (symbol: string) => number | null,
   tiersFor: (symbol: string) => Tiers | null,
-  on: (coin: string, szi: number, liq: number | null, px: number | null) => void,
+  on: (coin: string, szi: number, liq: number | null, px: number | null, lev: number | null) => void,
 ): void {
   for (const [, a] of accounts) {
     const ps = a.positions;
     if (!ps?.length) continue;
     const liq = accountLiqs(a.cash ?? null, ps, priceOf, tiersFor);
+    const lev = accountLevs(a.cash ?? null, a.equity, ps, priceOf);
     for (let i = 0; i < ps.length; i++) {
       const p = ps[i]!;
-      if (p.szi) on(liqCoin(p.symbol), p.szi, liq[i] ?? null, priceOf(p.symbol));
+      if (p.szi) on(liqCoin(p.symbol), p.szi, liq[i] ?? null, priceOf(p.symbol), lev[i] ?? null);
     }
   }
 }
@@ -119,6 +125,39 @@ export function bucketize(levels: Iterable<LevelPos>, step: number, lo: number, 
   return { buckets: [...by.values()].sort((a, b) => a[0] - b[0]), outside };
 }
 
+// --- rows with leverage bands --------------------------------------------------------------
+
+/**
+ * A bucket row as liq_now, the feed, the stream and the API carry it: [bucket index, long USD,
+ * short USD, long n, short n] and, from 2026-10-31, the USD in each leverage band (math.ts
+ * levBand): long low, mid, high, then short low, mid, high. Trailing zeros are left off
+ * (trimRow), so a row with no leverage known is the old five. What a side's bands leave of it
+ * is of unknown leverage: a row from an older indexer, or a position whose margin is not
+ * known. That keeps every sum exact over rows of any length (addRow: a missing field is 0),
+ * and a reader that takes the first five reads them as before.
+ */
+export type LiqRow = [number, number, number, number, number, ...number[]];
+/** Where a band's USD sits in a LiqRow. */
+export const rowBand = (long: boolean, band: LevBand): number => (long ? 5 : 8) + band;
+/**
+ * A snapshot row (liq_hist, the history API): [bucket index, long USD, short USD], then the
+ * bands as in LiqRow (long low, mid, high, short low, mid, high), trailing zeros left off.
+ */
+export type SnapRow = [number, number, number, ...number[]];
+export const snapBand = (long: boolean, band: LevBand): number => (long ? 3 : 6) + band;
+
+/** Add `y` into `x` from field 1 on (the index stays); fields past either's end count as 0. */
+export function addRow(x: number[], y: ArrayLike<number>): void {
+  for (let k = 1; k < y.length; k++) x[k] = (x[k] ?? 0) + (y[k] ?? 0);
+}
+
+/** A row with its trailing zeros left off, never shorter than `min` (5: LiqRow, 3: SnapRow). */
+export function trimRow<T extends number[]>(r: T, min = 5): T {
+  let n = r.length;
+  while (n > min && !r[n - 1]) n--;
+  return (n === r.length ? r : r.slice(0, n)) as T;
+}
+
 // --- snapshots (liq_hist) -----------------------------------------------------------------
 
 /** A snapshot's bucket width, as a share of the price then. */
@@ -126,11 +165,11 @@ export const HIST_STEP = 0.0025;
 /** A snapshot keeps levels within this share of the price either side. */
 export const HIST_SPAN = 0.4;
 
-/** One coin's snapshot: price, step, and per venue [bucket index, long USD, short USD]. */
+/** One coin's snapshot: price, step, and per venue its rows (SnapRow: [bucket index, long USD, short USD, ...bands from 2026-10-31]). */
 export interface LiqSnap {
   p: number;
   st: number;
-  v: Partial<Record<Venue, Array<[number, number, number]>>>;
+  v: Partial<Record<Venue, SnapRow[]>>;
 }
 
 
@@ -149,8 +188,8 @@ export const NOW_HI = 3;
 
 /** One coin's levels on one venue: buckets, what the books hold, what lies outside. */
 export interface LiqNowVenue {
-  /** [bucket index, long USD, short USD, long n, short n] (sizes are USD / price within the 0.02% bucket). */
-  b: Array<[number, number, number, number, number]>;
+  /** LiqRow: [bucket index, long USD, short USD, long n, short n, ...USD per leverage band] (sizes are USD / price within the 0.02% bucket). */
+  b: LiqRow[];
   /**
    * [long size, short size, long size priced, short size priced, positions, past, long none, short none]:
    * `past` is the size whose liquidation price the price has already crossed (a long
@@ -187,8 +226,8 @@ export class LevelsBuilder {
 
   constructor(private readonly priceOfCoin: (coin: string) => number | null) {}
 
-  /** One position: `px` is its own venue's price now (whether the price has crossed its liquidation). */
-  add(venue: Venue, coin: string, szi: number, liq: number | null, px: number | null): void {
+  /** One position: `px` is its own venue's price now (whether the price has crossed its liquidation); `lev` its leverage (null: not known). */
+  add(venue: Venue, coin: string, szi: number, liq: number | null, px: number | null, lev: number | null = null): void {
     let c = this.coins.get(coin);
     if (c === undefined) {
       const p = this.priceOfCoin(coin);
@@ -213,8 +252,11 @@ export class LevelsBuilder {
     }
     const i = Math.floor(liq / c.st);
     let b = v.b.get(i);
-    if (!b) { b = [0, 0, 0, 0]; v.b.set(i, b); }
+    if (!b) { b = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]; v.b.set(i, b); }
     if (long) { b[0]! += a * liq; b[2]!++; } else { b[1]! += a * liq; b[3]!++; }
+    // The row's fields less its index: a band at rowBand - 1.
+    const band = levBand(lev);
+    if (band !== null) b[rowBand(long, band) - 1]! += a * liq;
   }
 
   /** Every coin with a price, as written to liq_now. */
@@ -225,7 +267,7 @@ export class LevelsBuilder {
       const v: LiqNow['v'] = {};
       for (const [venue, x] of c.v) {
         v[venue] = {
-          b: [...x.b].sort((a, b) => a[0] - b[0]).map(([i, b]) => [i, Math.round(b[0]!), Math.round(b[1]!), b[2]!, b[3]!]),
+          b: [...x.b].sort((a, b) => a[0] - b[0]).map(([i, b]) => trimRow<LiqRow>([i, Math.round(b[0]!), Math.round(b[1]!), b[2]!, b[3]!, ...b.slice(4).map(Math.round)])),
           c: [sig(x.c[0]!), sig(x.c[1]!), sig(x.c[2]!), sig(x.c[3]!), x.c[4]!, sig(x.c[5]!), 0, 0],
           o: [Math.round(x.o[0]!), Math.round(x.o[1]!), x.o[2]!, x.o[3]!],
         };
@@ -248,21 +290,28 @@ export function snapOfNow(row: LiqNow): LiqSnap {
   const hi = row.p * (1 + HIST_SPAN);
   const v: LiqSnap['v'] = {};
   for (const [venue, x] of Object.entries(row.v) as Array<[Venue, LiqNowVenue]>) {
-    const m = new Map<number, [number, number]>();
-    for (const [i, l0, s0] of x.b) {
+    const m = new Map<number, number[]>();
+    for (const r of x.b) {
+      const i = r[0];
       const px = (i + 0.5) * row.st;
       if (px < lo || px >= hi) continue;
       // Past levels (the price has crossed them) are not kept: a long priced above the price, a short below.
-      const l = i * row.st >= row.p ? 0 : l0;
-      const s = (i + 1) * row.st <= row.p ? 0 : s0;
+      const keepL = i * row.st < row.p;
+      const keepS = (i + 1) * row.st > row.p;
+      const l = keepL ? r[1] : 0;
+      const s = keepS ? r[2] : 0;
       if (!l && !s) continue;
       const j = Math.floor(px / st);
-      const b = m.get(j) ?? [0, 0];
-      b[0] += l;
-      b[1] += s;
-      m.set(j, b);
+      let b = m.get(j);
+      if (!b) { b = [j, 0, 0, 0, 0, 0, 0, 0, 0]; m.set(j, b); }
+      b[1]! += l;
+      b[2]! += s;
+      for (const band of LEV_BANDS) {
+        if (keepL) b[snapBand(true, band)]! += r[rowBand(true, band)] ?? 0;
+        if (keepS) b[snapBand(false, band)]! += r[rowBand(false, band)] ?? 0;
+      }
     }
-    if (m.size) v[venue] = [...m].sort((a, b) => a[0] - b[0]).map(([j, [l, s]]) => [j, l, s]);
+    if (m.size) v[venue] = [...m.values()].sort((a, b) => a[0]! - b[0]!).map((b) => trimRow(b as SnapRow, 3));
   }
   return { p: row.p, st, v };
 }

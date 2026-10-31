@@ -11,8 +11,13 @@
  * The strip at the bottom says how much of each venue's open interest the books
  * hold and how well the math has matched the venue's own liquidation prices
  * (server indexer/liqRead.ts) - the heatmap is only as complete as that.
+ *
+ * View (owner 2026-10-31) colours every view by side or by leverage band and shows only
+ * the bands picked (chart/liqLev.ts); the historical view can lay the levels now over its
+ * right edge on the same price axis. Bars and cells scale to robustMax, so one giant level
+ * is drawn at full (a tick marks it, the tooltip has its figure) and the rest stay readable.
  */
-import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import type { LiqAt, LiqHeatmap as HeatApi, LiqHistory, LiqWallets } from '@sign/indexer/liqRead.js';
 import { api, type Engine, type Kline } from '../../api';
 import { useStored } from '../../hooks';
@@ -26,8 +31,12 @@ import { WalletView, type Res, type Side, type Unit } from './WalletView';
 import { Chart } from '../Chart';
 import type { Chart as KChart } from 'klinecharts';
 import { CANDLE_PANE_ID } from '../../chart/theme';
-import { HEAT_FLOOR, LIQ_HEAT, barMsOf, heatScale, liqHeatTemplate, snapshotFor, type HeatData, type HeatPoint } from '../../chart/liqHeatIndicator';
-import { coinOfSymbol, groupFor } from '../../chart/liqMap';
+import { HEAT_FLOOR, LIQ_HEAT, barMsOf, cellOf, heatScale, liqHeatTemplate, snapshotFor, stripWidth, type HeatData, type HeatPoint } from '../../chart/liqHeatIndicator';
+import { coinOfSymbol, groupFor, mapData, type LiqMapData } from '../../chart/liqMap';
+import {
+  LEV_BANDS, LEV_COLOR, LEV_LABEL, addBands, isAllLev, levBandOf, levFilterOf, levelWindow, robustMax, shownBands, shownTotal, sideBands,
+  type Bands, type ColorBy, type LevBand, type LevFilter, type LevKey,
+} from '../../chart/liqLev';
 import { shortAddr } from '../../format';
 import { asOfText } from '../../asOf';
 import { coverageText } from './coverageText';
@@ -47,34 +56,68 @@ interface Prefs {
   /** Only these wallets (none: every wallet), and which side - every view (WalletView.tsx). */
   wallets: string[];
   side: Side;
+  /** Colours by side or by leverage band, and the bands shown - every view. */
+  colorBy: ColorBy;
+  lev: LevBand[];
+  /** The historical view: the levels now laid over its right edge. */
+  strip: boolean;
 }
-const DEFAULTS: Prefs = { view: 'live', res: 'fine', unit: 'usd', venues: [...SCAN_VENUES], tf: '1h', wallets: [], side: 'both' };
+const DEFAULTS: Prefs = { view: 'live', res: 'fine', unit: 'usd', venues: [...SCAN_VENUES], tf: '1h', wallets: [], side: 'both', colorBy: 'side', lev: [...LEV_BANDS], strip: false };
 
 export { coinOfSymbol };
 
-/** [low price, long USD, short USD, long size, short size, long n, short n]. */
-type Bucket = [number, number, number, number, number, number, number];
+/**
+ * [low price, long USD, short USD, long size, short size, long n, short n, then both sides' USD
+ * by leverage band: low, mid, high, unknown] - as shown: side and leverage filter applied.
+ */
+type Bucket = [number, number, number, number, number, number, number, number, number, number, number];
 type Heat = Omit<HeatApi, 'buckets'> & { buckets: Bucket[] };
+const ZERO: Bands = [0, 0, 0, 0];
 
-/** The API's rows ([index, long USD, short USD, long n, short n]) as buckets; sizes are USD over the bucket's middle (0.02% buckets). */
-function fromApi(a: HeatApi, side: Side = 'both'): Heat {
+/**
+ * The API's rows (server levels.ts LiqRow: [index, long USD, short USD, long n, short n, ...USD
+ * per band]) as buckets; sizes are USD over the bucket's middle (0.02% buckets). Only the side and
+ * the leverage bands shown are kept (liqLev.ts shownTotal: every band on keeps the whole side).
+ */
+function fromApi(a: HeatApi, side: Side = 'both', lev: LevFilter = LEV_BANDS): Heat {
   const p = a.price;
   const buckets: Bucket[] = [];
-  for (const [i, l0, s0, ln0, sn0] of a.buckets) {
+  for (const r of a.buckets) {
+    const [i, l0, s0, ln0, sn0] = r;
     const lo = +(i * a.step).toPrecision(12);
     // A level the price has already crossed (a long priced above it, a short below) is past, not a level.
     const pastL = p !== null && lo >= p;
     const pastS = p !== null && lo + a.step <= p;
-    const l = pastL || side === 'short' ? 0 : l0;
-    const sh = pastS || side === 'long' ? 0 : s0;
+    const useL = !pastL && side !== 'short' && l0 > 0;
+    const useS = !pastS && side !== 'long' && s0 > 0;
+    const lb = useL ? sideBands(l0, r, 5) : ZERO;
+    const sb = useS ? sideBands(s0, r, 8) : ZERO;
+    const l = useL ? shownTotal(l0, lb, lev) : 0;
+    const sh = useS ? shownTotal(s0, sb, lev) : 0;
     if (!l && !sh) continue;
     const mid = lo + a.step / 2;
-    buckets.push([lo, l, sh, l / mid, sh / mid, pastL ? 0 : ln0, pastS ? 0 : sn0]);
+    const b = addBands(shownBands(lb, lev), shownBands(sb, lev));
+    buckets.push([lo, l, sh, l / mid, sh / mid, useL ? ln0 : 0, useS ? sn0 : 0, b[0], b[1], b[2], b[3]]);
   }
   return { ...a, buckets };
 }
 /** One bucket's figure in the unit shown: [long, short]. */
 const valOf = (b: Bucket, unit: Unit): [number, number] => (unit === 'usd' ? [b[1], b[2]] : [b[3], b[4]]);
+/** One bucket's figure by band in the unit shown ([low, mid, high, unknown]; in the coin, by the bucket's own USD per coin). */
+function bandsOf(b: Bucket, unit: Unit): Bands {
+  const usd: Bands = [b[7], b[8], b[9], b[10]];
+  if (unit === 'usd') return usd;
+  const f = b[1] + b[2] > 0 ? (b[3] + b[4]) / (b[1] + b[2]) : 0;
+  return [usd[0] * f, usd[1] * f, usd[2] * f, usd[3] * f];
+}
+const LEV_KEYS: readonly LevKey[] = ['low', 'mid', 'high', 'unknown'];
+/** The band colours as CSS variables (LiqHeatmap.css .lqm-bar-lev), from the one list the canvas layers use too. */
+const LEV_VARS = Object.fromEntries(LEV_KEYS.map((k) => [`--lqm-lev-${k}`, LEV_COLOR[k]])) as CSSProperties;
+/** A bar's length by colour mode: by side the larger side (they overlap), by leverage both sides stacked. */
+const barOf = (b: Bucket, unit: Unit, colorBy: ColorBy) => {
+  const [l, s] = valOf(b, unit);
+  return colorBy === 'lev' ? l + s : Math.max(l, s);
+};
 
 const fmtSize = (v: number) => (Math.abs(v) >= 1e6 ? `${fmtFixed(v / 1e6, 2)}M` : Math.abs(v) >= 1e4 ? `${fmtFixed(v / 1e3, 1)}K` : fmtNum(v, { maximumSignificantDigits: 5 }));
 const fmtVal = (v: number, unit: Unit, coin: string) => (unit === 'usd' ? fmtUsdShort(v) : `${fmtSize(v)} ${coin}`);
@@ -109,30 +152,11 @@ function ticks(lo: number, hi: number, n: number): number[] {
   return out;
 }
 
-/** The price window the levels fill, with the price inside and a margin. */
+/** The price window the levels fill, with the price inside and a margin (liqLev.ts levelWindow, as the historical view's axis). */
 function windowOf(h: Heat): [number, number] | null {
   const p = h.price;
   if (!p) return null;
-  let lo = p;
-  let hi = p;
-  let total = 0;
-  for (const b of h.buckets) total += b[1] + b[2];
-  // Leave out the thinnest tails (0.5% of the notional each side) so one far order does not flatten the rest.
-  let acc = 0;
-  for (const b of h.buckets) {
-    acc += b[1] + b[2];
-    if (acc >= total * 0.005) { lo = Math.min(lo, b[0]); break; }
-  }
-  acc = 0;
-  for (let i = h.buckets.length - 1; i >= 0; i--) {
-    const b = h.buckets[i]!;
-    acc += b[1] + b[2];
-    if (acc >= total * 0.005) { hi = Math.max(hi, b[0] + h.step); break; }
-  }
-  lo = Math.max(p * 0.4, Math.min(lo, p * 0.9));
-  hi = Math.min(p * 1.8, Math.max(hi, p * 1.1));
-  const pad = (hi - lo) * 0.02;
-  return [lo - pad, hi + pad];
+  return levelWindow(h.buckets.map((b) => [b[0], b[1] + b[2]] as const), h.step, p);
 }
 
 /** Long cumulative: everything liquidated as the price falls to each bucket; short likewise as it rises. */
@@ -167,8 +191,8 @@ export function regroup(h: Heat, k: number): Heat {
   for (const b of h.buckets) {
     const i = Math.floor(b[0] / step + 1e-9);
     let x = by.get(i);
-    if (!x) { x = [+(i * step).toPrecision(12), 0, 0, 0, 0, 0, 0]; by.set(i, x); }
-    for (let j = 1; j < 7; j++) x[j] = x[j]! + b[j]!;
+    if (!x) { x = [+(i * step).toPrecision(12), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]; by.set(i, x); }
+    for (let j = 1; j < 11; j++) x[j] = x[j]! + b[j]!;
   }
   return { ...h, step, buckets: [...by.values()].sort((a, b) => a[0] - b[0]) };
 }
@@ -181,25 +205,32 @@ export function LiqHeatmap({ symbol, engine, instance, address = null }: { symbo
   const set = (p: Partial<Prefs>) => setStored({ ...prefs, ...p });
   const wallets = (Array.isArray(prefs.wallets) ? prefs.wallets : []).filter((w): w is string => typeof w === 'string' && /^0x[0-9a-f]{40}$/.test(w)).slice(0, 10);
   const side: Side = prefs.side === 'long' || prefs.side === 'short' ? prefs.side : 'both';
+  const colorBy: ColorBy = prefs.colorBy === 'lev' ? 'lev' : 'side';
+  const lev = levFilterOf(prefs.lev);
+  const levKey = lev.join(',');
   const wkey = wallets.join(',');
   const coin = coinOfSymbol(symbol);
   const [pick, setPick] = useState<Pick | null>(null);
-  useEffect(() => setPick(null), [coin, chosen.join(','), prefs.res, wkey, prefs.view]);
+  useEffect(() => setPick(null), [coin, chosen.join(','), prefs.res, wkey, prefs.view, levKey]);
 
   const vkey = chosen.join(',');
+  // The historical view reads the levels now only for its strip.
+  const strip = prefs.view === 'history' && prefs.strip === true;
+  const needNow = prefs.view !== 'history' || strip;
   // Live over the WebSocket (a second apart); over HTTP, a read a minute, while the socket is down.
   // The stream is summed to the bar width the view draws (in server buckets); the views ask for it as they zoom.
   const [wantK, setWantK] = useState(5);
-  const live = useLiveHeat(coin, chosen, prefs.view !== 'history' && !wallets.length, wantK);
+  const live = useLiveHeat(coin, chosen, needNow && !wallets.length, wantK);
   const streamK = live.data ? live.k : 1;
   // Some wallets only: their levels read every 10 s (the stream is every wallet's).
   const heat = usePolled<HeatApi>(
-    prefs.view === 'history' || (live.connected && !wallets.length) ? null : `${coin}|${vkey}|${wkey}`,
+    !needNow || (live.connected && !wallets.length) ? null : `${coin}|${vkey}|${wkey}`,
     (s) => vsApi.liquidations(coin, chosen, 'fine', s, wallets),
     wallets.length ? 10_000 : 60_000,
   );
-  const apiData = wallets.length ? heat.data : live.data ?? heat.data;
-  const raw = useMemo(() => (apiData ? fromApi(apiData, side) : null), [apiData, side]);
+  const apiData = needNow ? (wallets.length ? heat.data : live.data ?? heat.data) : null;
+  const raw = useMemo(() => (apiData ? fromApi(apiData, side, lev) : null), [apiData, side, levKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  const stripData = useMemo(() => (strip ? mapData(apiData, { side, lev, colorBy }) : null), [strip, apiData, side, levKey, colorBy]); // eslint-disable-line react-hooks/exhaustive-deps
   const h = raw;
   const res: Res = prefs.res === 'medium' || prefs.res === 'coarse' ? prefs.res : 'fine';
   const unit: Unit = prefs.unit === 'coin' ? 'coin' : 'usd';
@@ -214,7 +245,7 @@ export function LiqHeatmap({ symbol, engine, instance, address = null }: { symbo
   const barWidth = h?.price && rawStep > 0 ? rawStep * want : null;
 
   return (
-    <div className="lqm">
+    <div className="lqm" style={LEV_VARS}>
       <div className="lqm-bar">
         <div className="lqm-seg" role="tablist" aria-label="View">
           {(['live', 'chart', 'history'] as const).map((v) => (
@@ -237,31 +268,36 @@ export function LiqHeatmap({ symbol, engine, instance, address = null }: { symbo
           venues={chosen}
           self={address}
           bars={prefs.view !== 'history' ? { res, unit, coin, width: barWidth !== null ? `$${fmtPx(barWidth)}` : null } : null}
+          colors={{ colorBy, lev, strip: prefs.view === 'history' ? strip : null }}
           onChange={(p) => set(p)}
-          onReset={() => set({ wallets: [], side: 'both', res: 'fine', unit: 'usd' })}
+          onReset={() => set({ wallets: [], side: 'both', res: 'fine', unit: 'usd', colorBy: 'side', lev: [...LEV_BANDS], strip: false })}
         />
       </div>
-      {prefs.view !== 'history' && (
+      {(prefs.view !== 'history' || colorBy === 'lev') && (
         <div className="lqm-legend">
-          <span><i className="lqm-sw is-long" />Long liquidations</span>
-          <span><i className="lqm-sw is-short" />Short liquidations</span>
+          {colorBy === 'lev' ? (
+            LEV_KEYS.filter((k) => (k === 'unknown' ? isAllLev(lev) : lev.includes(k))).map((k) => <span key={k}><i className="lqm-sw" style={{ background: LEV_COLOR[k] }} />{LEV_LABEL[k]}</span>)
+          ) : (
+            <><span><i className="lqm-sw is-long" />Long liquidations</span><span><i className="lqm-sw is-short" />Short liquidations</span></>
+          )}
           {prefs.view === 'live' && <><span><i className="lqm-ln is-long" />Cumulative longs</span><span><i className="lqm-ln is-short" />Cumulative shorts</span></>}
         </div>
       )}
       <div className="lqm-body">
         {prefs.view === 'history' ? (
-          <HistoryView coin={coin} venues={chosen} engine={engine} symbol={symbol} wallets={wallets} side={side} onPick={setPick} />
+          <HistoryView coin={coin} venues={chosen} engine={engine} symbol={symbol} wallets={wallets} side={side} colorBy={colorBy} lev={lev} strip={stripData} onPick={setPick} />
         ) : !h ? (
           <p className="lqm-empty">{heat.error ? `Liquidation levels unavailable: ${heat.error}` : 'Reading the books…'}</p>
         ) : !h.price || !h.buckets.length ? (
           <p className="lqm-empty">{wallets.length ? (wallets.length === 1 ? 'This wallet holds' : 'These wallets hold') + ` no ${coin} position with a liquidation price` : `No tracked ${coin} positions with a liquidation price`} on {chosen.length === SCAN_VENUES.length ? 'any platform' : chosen.map((v) => VENUE_LABEL[v]).join(', ')}.</p>
         ) : prefs.view === 'live' ? (
-          <LiveView h={h} unit={unit} want={want} streamK={streamK} onPick={setPick} pick={pick} />
+          <LiveView h={h} unit={unit} want={want} streamK={streamK} colorBy={colorBy} lev={lev} onPick={setPick} pick={pick} />
         ) : (
-          <ChartView h={h} unit={unit} want={want} streamK={streamK} engine={engine} symbol={symbol} tf={prefs.tf} onPick={setPick} pick={pick} />
+          <ChartView h={h} unit={unit} want={want} streamK={streamK} colorBy={colorBy} lev={lev} engine={engine} symbol={symbol} tf={prefs.tf} onPick={setPick} pick={pick} />
         )}
-        {pick && h && prefs.view !== 'history' && <Details coin={coin} venues={chosen} pick={pick} price={h.price} wallets={wallets} onClose={() => setPick(null)} />}
-        {pick?.at !== undefined && prefs.view === 'history' && <AtDetails coin={coin} venues={chosen} pick={pick as Required<Pick>} wallets={wallets} onClose={() => setPick(null)} />}
+        {/* The wallets now: a bar of the live and chart views, or of the historical view's strip. */}
+        {pick && pick.at === undefined && h && <Details coin={coin} venues={chosen} pick={pick} price={h.price} wallets={wallets} lev={lev} onClose={() => setPick(null)} />}
+        {pick?.at !== undefined && prefs.view === 'history' && <AtDetails coin={coin} venues={chosen} pick={pick as Required<Pick>} wallets={wallets} lev={lev} onClose={() => setPick(null)} />}
       </div>
       {raw && prefs.view !== 'history' && <Coverage h={raw} coin={coin} />}
     </div>
@@ -335,12 +371,38 @@ function nearestBucket(h: Heat, shown: readonly Bucket[], price: number, tol: nu
 const sideOf = (b: Bucket | null, from: number, step: number, p: number): 'long' | 'short' =>
   b && (b[1] > 0) !== (b[2] > 0) ? (b[1] > 0 ? 'long' : 'short') : from + step / 2 < p ? 'long' : 'short';
 
+/**
+ * The bar scale: robustMax of the bars on screen (liqLev.ts), so a level far past every other
+ * (SoDEX BTC's two ~$70M accounts beside levels under $0.3M) is drawn at full with a tick, and
+ * the rest keep a length to read. `top`: the largest bar, how far a side axis may scale out.
+ */
+function barScale(shown: readonly Bucket[], unit: Unit, colorBy: ColorBy): { fit: number; top: number } {
+  const v = shown.map((b) => barOf(b, unit, colorBy));
+  const top = Math.max(1e-12, ...v);
+  return { fit: Math.max(1e-12, Math.min(top, robustMax(v))), top };
+}
+
+/** A tooltip's lines by leverage band (only the bands with some), and a note when the bar or cell runs past the scale. */
+function BandLines({ v, fmt, over, lev, what = 'bar' }: { v: Bands; fmt: (x: number) => string; over: boolean; lev: LevFilter; what?: 'bar' | 'cell' }) {
+  const any = v[0] + v[1] + v[2] > 0;
+  return (
+    <>
+      {any && LEV_KEYS.map((k, i) => (v[i]! > 0 ? <span key={k} className="lqm-tip-lev"><i className="lqm-sw" style={{ background: LEV_COLOR[k] }} />{LEV_LABEL[k]} {fmt(v[i]!)}</span> : null))}
+      {!any && isAllLev(lev) && v[3] > 0 && <span className="lqm-tip-sub">Leverage not known for these positions</span>}
+      {over && <span className="lqm-tip-sub">{what === 'bar' ? 'Past the bar scale: drawn at full length' : 'Past the colour scale: drawn at full'}</span>}
+    </>
+  );
+}
+
+/** Positions per side are counted for every band together: with a band filter on they are left out. */
+const countText = (n: number, lev: LevFilter, word = ' positions') => (isAllLev(lev) ? ` · ${n}${word}` : '');
+
 // --- live ---------------------------------------------------------------------------------
 
 const M = { l: 56, r: 60, t: 10, b: 24 };
 
 /** Wheel zooms the price, drag pans; wheel on a side axis scales it; a double-click resets the axes. */
-function LiveView({ h: base, unit, want, streamK, onPick, pick }: { h: Heat; unit: Unit; want: number; streamK: number; onPick: (p: Pick) => void; pick: Pick | null }) {
+function LiveView({ h: base, unit, want, streamK, colorBy, lev, onPick, pick }: { h: Heat; unit: Unit; want: number; streamK: number; colorBy: ColorBy; lev: LevFilter; onPick: (p: Pick) => void; pick: Pick | null }) {
   const [el, setEl] = useState<HTMLDivElement | null>(null);
   const [ref, { w, h: ht }] = useSize<HTMLDivElement>();
   const bind = useCallback((x: HTMLDivElement | null) => { ref(x); setEl(x); }, [ref]);
@@ -374,9 +436,10 @@ function LiveView({ h: base, unit, want, streamK, onPick, pick }: { h: Heat; uni
   const k = Math.max(1, Math.round(want / streamK));
   const h = useMemo(() => regroup(base, k), [base, k]);
   const shown = h.buckets.filter((b) => b[0] + h.step > lo && b[0] < hi);
-  const fitBar = Math.max(1e-12, ...shown.map((b) => Math.max(...valOf(b, unit))));
+  const { fit: fitBar, top: topBar } = barScale(shown, unit, colorBy);
   const fitCum = Math.max(1e-12, ...[...cum.long, ...cum.short].filter(([px]) => px >= lo && px <= hi).map(([, v]) => v));
-  const maxBar = barMax === null ? fitBar * 1.05 : Math.min(fitBar * 1.05, Math.max(fitBar * 0.02, barMax));
+  // The left axis scales from 2% of the fit out to the largest bar (to see a giant level whole).
+  const maxBar = barMax === null ? fitBar * 1.05 : Math.min(topBar * 1.05, Math.max(fitBar * 0.02, barMax));
   const maxCum = cumMax === null ? fitCum * 1.05 : Math.min(fitCum * 1.05, Math.max(fitCum * 0.02, cumMax));
   const x = (v: number) => M.l + ((v - lo) / (hi - lo)) * W;
   const priceAt = (cx: number) => lo + ((cx - M.l) / W) * (hi - lo);
@@ -404,7 +467,7 @@ function LiveView({ h: base, unit, want, streamK, onPick, pick }: { h: Heat; uni
     const cx = e.clientX - r.left;
     const f = wheelFactor(e);
     // A side axis scales its bars up (to read small ones) and back to fit, never smaller than fit.
-    if (cx < M.l) setBarMax(Math.min(fitBar * 1.05, Math.max(fitBar * 0.02, maxBar * f)));
+    if (cx < M.l) setBarMax(Math.min(topBar * 1.05, Math.max(fitBar * 0.02, maxBar * f)));
     else if (cx > M.l + W) setCumMax(Math.min(fitCum * 1.05, Math.max(fitCum * 0.02, maxCum * f)));
     else zoom(f, (cx - M.l) / W);
   });
@@ -465,10 +528,30 @@ function LiveView({ h: base, unit, want, streamK, onPick, pick }: { h: Heat; uni
             {shown.map((b) => {
               const [l, s] = valOf(b, unit);
               const on = pick && Math.abs(pick.from - b[0]) < h.step / 2;
+              const over = barOf(b, unit, colorBy) > maxBar;
+              if (colorBy === 'lev') {
+                // Both sides stacked by band from the axis up: low, mid, high, unknown; as tall as their total.
+                const v = bandsOf(b, unit);
+                const sum = v[0] + v[1] + v[2] + v[3] || l + s;
+                const full = M.t + H - yBar(l + s);
+                let y0 = M.t + H;
+                return (
+                  <g key={b[0]} className={on ? 'is-picked' : ''}>
+                    {LEV_KEYS.map((k, i) => {
+                      const hh = (v[i]! / sum) * full;
+                      if (!(hh > 0)) return null;
+                      y0 -= hh;
+                      return <rect key={k} x={x(b[0])} y={y0} width={bw} height={hh} className={`lqm-bar-lev is-${k}`} />;
+                    })}
+                    {over && <rect x={x(b[0])} y={M.t} width={bw} height={2} className="lqm-bar-over" />}
+                  </g>
+                );
+              }
               return (
                 <g key={b[0]} className={on ? 'is-picked' : ''}>
                   {l > 0 && <rect x={x(b[0])} y={yBar(l)} width={bw} height={M.t + H - yBar(l)} className="lqm-bar-long" />}
                   {s > 0 && <rect x={x(b[0])} y={yBar(s)} width={bw} height={M.t + H - yBar(s)} className="lqm-bar-short" />}
+                  {over && <rect x={x(b[0])} y={M.t} width={bw} height={2} className="lqm-bar-over" />}
                 </g>
               );
             })}
@@ -491,8 +574,9 @@ function LiveView({ h: base, unit, want, streamK, onPick, pick }: { h: Heat; uni
           <span>{pct(hover / p - 1)} from current</span>
           {hb ? (
             <>
-              {hb[1] > 0 && <span className="is-long">Longs {fmtVal(valOf(hb, unit)[0], unit, h.coin)} · {hb[5]} positions</span>}
-              {hb[2] > 0 && <span className="is-short">Shorts {fmtVal(valOf(hb, unit)[1], unit, h.coin)} · {hb[6]} positions</span>}
+              {hb[1] > 0 && <span className="is-long">Longs {fmtVal(valOf(hb, unit)[0], unit, h.coin)}{countText(hb[5], lev)}</span>}
+              {hb[2] > 0 && <span className="is-short">Shorts {fmtVal(valOf(hb, unit)[1], unit, h.coin)}{countText(hb[6], lev)}</span>}
+              <BandLines v={bandsOf(hb, unit)} fmt={(x) => fmtVal(x, unit, h.coin)} over={barOf(hb, unit, colorBy) > maxBar} lev={lev} />
             </>
           ) : <span>No liquidations here</span>}
           <span className="lqm-tip-sub">Cumulative {hover < p ? `longs ${fmtVal(cumAt(hover, 'long'), unit, h.coin)}` : `shorts ${fmtVal(cumAt(hover, 'short'), unit, h.coin)}`}</span>
@@ -511,7 +595,7 @@ const CANDLES = 500;
 const CHART_BACK = -4;
 
 /** Wheel zooms time, wheel on the price scale (or Shift+wheel) zooms price, drag pans; a double-click resets. */
-function ChartView({ h: base, unit, want, streamK, engine, symbol, tf, onPick, pick }: { h: Heat; unit: Unit; want: number; streamK: number; engine: Engine; symbol: string; tf: Tf; onPick: (p: Pick) => void; pick: Pick | null }) {
+function ChartView({ h: base, unit, want, streamK, colorBy, lev, engine, symbol, tf, onPick, pick }: { h: Heat; unit: Unit; want: number; streamK: number; colorBy: ColorBy; lev: LevFilter; engine: Engine; symbol: string; tf: Tf; onPick: (p: Pick) => void; pick: Pick | null }) {
   const [el, setEl] = useState<HTMLDivElement | null>(null);
   const [ref, { w, h: ht }] = useSize<HTMLDivElement>();
   const bind = useCallback((x: HTMLDivElement | null) => { ref(x); setEl(x); }, [ref]);
@@ -561,7 +645,7 @@ function ChartView({ h: base, unit, want, streamK, engine, symbol, tf, onPick, p
   const group = Math.max(1, Math.round(want / streamK));
   const h = useMemo(() => regroup(base, group), [base, group]);
   const shown = h.buckets.filter((b) => b[0] + h.step > lo && b[0] < hi);
-  const fitBar = Math.max(1e-12, ...shown.map((b) => Math.max(...valOf(b, unit))));
+  const { fit: fitBar } = barScale(shown, unit, colorBy);
   const maxBar = profMax ?? fitBar;
   const fitCum = Math.max(1e-12, ...[...cum.long, ...cum.short].filter(([v]) => v >= lo && v <= hi).map(([, v]) => v));
   const x0 = ML + W; // the bars grow left from the price axis
@@ -644,10 +728,30 @@ function ChartView({ h: base, unit, want, streamK, engine, symbol, tf, onPick, p
               const [l, s] = valOf(b, unit);
               const on = pick && Math.abs(pick.from - b[0]) < h.step / 2;
               const yy = y(b[0] + h.step);
+              const over = barOf(b, unit, colorBy) > maxBar;
+              if (colorBy === 'lev') {
+                // Both sides stacked by band, growing left from the price axis: low, mid, high, unknown.
+                const v = bandsOf(b, unit);
+                const sum = v[0] + v[1] + v[2] + v[3] || l + s;
+                const full = bx(l + s);
+                let xr = x0;
+                return (
+                  <g key={b[0]} className={on ? 'is-picked' : ''}>
+                    {LEV_KEYS.map((k, i) => {
+                      const ww = (v[i]! / sum) * full;
+                      if (!(ww > 0)) return null;
+                      xr -= ww;
+                      return <rect key={k} x={xr} y={yy} width={ww} height={bh} className={`lqm-bar-lev is-${k}`} />;
+                    })}
+                    {over && <rect x={x0 - full} y={yy} width={2} height={bh} className="lqm-bar-over" />}
+                  </g>
+                );
+              }
               return (
                 <g key={b[0]} className={on ? 'is-picked' : ''}>
                   {l > 0 && <rect x={x0 - bx(l)} y={yy} width={bx(l)} height={bh} className="lqm-bar-long" />}
                   {s > 0 && <rect x={x0 - bx(s)} y={yy} width={bx(s)} height={bh} className="lqm-bar-short" />}
+                  {over && <rect x={x0 - (R - 8)} y={yy} width={2} height={bh} className="lqm-bar-over" />}
                 </g>
               );
             })}
@@ -685,8 +789,9 @@ function ChartView({ h: base, unit, want, streamK, engine, symbol, tf, onPick, p
           <span>{pct(hover / p - 1)} from current</span>
           {hb ? (
             <>
-              {hb[1] > 0 && <span className="is-long">Longs {fmtVal(valOf(hb, unit)[0], unit, h.coin)} · {hb[5]}</span>}
-              {hb[2] > 0 && <span className="is-short">Shorts {fmtVal(valOf(hb, unit)[1], unit, h.coin)} · {hb[6]}</span>}
+              {hb[1] > 0 && <span className="is-long">Longs {fmtVal(valOf(hb, unit)[0], unit, h.coin)}{countText(hb[5], lev, '')}</span>}
+              {hb[2] > 0 && <span className="is-short">Shorts {fmtVal(valOf(hb, unit)[1], unit, h.coin)}{countText(hb[6], lev, '')}</span>}
+              <BandLines v={bandsOf(hb, unit)} fmt={(x) => fmtVal(x, unit, h.coin)} over={barOf(hb, unit, colorBy) > maxBar} lev={lev} />
             </>
           ) : <span>No liquidations here</span>}
           <span className="lqm-tip-sub">Click for the wallets</span>
@@ -705,9 +810,19 @@ function ChartView({ h: base, unit, want, streamK, engine, symbol, tf, onPick, p
  * and the cells follow them, as nothing else on it: no drawings, studies or order lines.
  * The snapshots are 15-minutely for 3 days and hourly to 30: a shorter bar repeats the
  * snapshot in force when it closed. A click on a cell opens who sat in it then (AtDetails).
+ *
+ * The price axis takes in each bar's levels as the live view's window does (owner
+ * 2026-10-31: "Historical shows liquidations but not as far up and down as the live one"):
+ * the layer hands the chart each bar's window to fit (`fit`), so the candles and the cells
+ * stay on the one axis and the chart's own zoom and pan work as before. `strip`: the levels
+ * now laid over the right edge on that axis; a click there opens the wallets now (Details).
  */
-function HistoryView({ coin, venues, engine, symbol, wallets, side, onPick }: { coin: string; venues: Venue[]; engine: Engine; symbol: string; wallets: string[]; side: Side; onPick: (p: Pick) => void }) {
+function HistoryView({ coin, venues, engine, symbol, wallets, side, colorBy, lev, strip, onPick }: {
+  coin: string; venues: Venue[]; engine: Engine; symbol: string; wallets: string[]; side: Side;
+  colorBy: ColorBy; lev: LevFilter; strip: LiqMapData | null; onPick: (p: Pick) => void;
+}) {
   const wkey = wallets.join(',');
+  const levKey = lev.join(',');
   const r = usePolled<LiqHistory>(
     `${coin}|${venues.join(',')}|30d|${wkey}`,
     (s) => vsApi.liquidationHistory(coin, venues, '30d', s, wallets),
@@ -715,9 +830,14 @@ function HistoryView({ coin, venues, engine, symbol, wallets, side, onPick }: { 
   );
   const [kc, setKc] = useState<KChart | null>(null);
   const points = r.data?.points ?? EMPTY_POINTS;
-  const data = useMemo<HeatData>(() => ({ points, side, scale: heatScale(points, side) }), [points, side]);
-  const dataRef = useRef(data);
-  dataRef.current = data;
+  // The cells, their scale and the axis windows change with the snapshots, the side and the
+  // bands; the strip with the levels now (a second apart), which only redraws. `rev` tells the
+  // chart to work the windows out again (an extendData change alone only redraws).
+  const scale = useMemo(() => heatScale(points, side, lev), [points, side, levKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  const rev = useMemo(() => ++calcRev, [points, side, levKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  const data = useMemo<HeatData>(() => ({ points, side, lev, colorBy, scale, fit: true, strip }), [points, side, levKey, colorBy, scale, strip]); // eslint-disable-line react-hooks/exhaustive-deps
+  const dataRef = useRef({ data, rev });
+  dataRef.current = { data, rev };
   // The layer on each chart instance the chart makes (it makes a new one on a rebuild).
   useEffect(() => {
     if (!kc) return;
@@ -726,7 +846,7 @@ function HistoryView({ coin, venues, engine, symbol, wallets, side, onPick }: { 
     void import('klinecharts').then((lib) => {
       if (gone) return;
       lib.registerIndicator(liqHeatTemplate);
-      id = kc.createIndicator({ name: LIQ_HEAT, paneId: CANDLE_PANE_ID, extendData: dataRef.current }, true);
+      id = kc.createIndicator({ name: LIQ_HEAT, paneId: CANDLE_PANE_ID, extendData: dataRef.current.data, calcParams: [dataRef.current.rev] }, true);
     });
     return () => {
       gone = true;
@@ -734,37 +854,68 @@ function HistoryView({ coin, venues, engine, symbol, wallets, side, onPick }: { 
     };
   }, [kc]);
   useEffect(() => {
-    kc?.overrideIndicator({ name: LIQ_HEAT, paneId: CANDLE_PANE_ID, extendData: data });
-  }, [kc, data]);
+    kc?.overrideIndicator({ name: LIQ_HEAT, paneId: CANDLE_PANE_ID, extendData: data, calcParams: [rev] });
+  }, [kc, data, rev]);
   const note = r.error && !r.data ? `History unavailable: ${r.error}`
     : !r.data ? 'Reading the snapshots…'
       : !points.length ? (wallets.length ? `No snapshots of ${coin} for ${wallets.length === 1 ? 'this wallet' : 'these wallets'} in this range: every position's level is kept from 28 Oct 2026, 15-minutely for 3 days and hourly to 30.` : `No snapshots of ${coin} yet: the index keeps every coin SoDEX lists, a snapshot every 15 minutes.`)
         : null;
-  // A click (not a drag) on a cell: that bar's snapshot and the cell of it under the pointer - the
-  // positions in it, as they stood then, open beside the chart (AtDetails).
-  const down = useRef<{ x: number; y: number } | null>(null);
-  const pickAt = (clientX: number, clientY: number) => {
-    if (!kc || !points.length) return;
+  const wrap = useRef<HTMLDivElement>(null);
+  /** What is under the pointer: a cell of the snapshot in force at that bar, or a bar of the strip of the levels now. */
+  const spotAt = (clientX: number, clientY: number): Spot | null => {
+    if (!kc || !wrap.current) return null;
     const dom = (kc.getDom() as HTMLElement | null) ?? null;
     const pane = kc.getSize(CANDLE_PANE_ID);
-    if (!dom || !pane) return;
-    const r = dom.getBoundingClientRect();
-    const x = clientX - r.left;
-    const y = clientY - r.top;
-    if (y < pane.top || y > pane.top + pane.height || x < pane.left || x > pane.left + pane.width) return;
+    if (!dom || !pane) return null;
+    const rect = dom.getBoundingClientRect();
+    const x = clientX - rect.left;
+    const y = clientY - rect.top;
+    if (y < pane.top || y > pane.top + pane.height || x < pane.left || x > pane.left + pane.width) return null;
     const [pt] = kc.convertFromPixel([{ x, y }], { paneId: CANDLE_PANE_ID, absolute: true }) as Array<{ dataIndex?: number; value?: number }>;
+    const price = pt?.value;
+    if (price === undefined || !Number.isFinite(price)) return null;
+    const box = wrap.current.getBoundingClientRect();
+    const at = { x: clientX - box.left, y: clientY - box.top, price };
+    if (strip && x - pane.left >= pane.width - stripWidth(pane.width) - 6) {
+      const lo = Math.floor(price / strip.step + 1e-9) * strip.step;
+      const k = strip.rows.findIndex((row) => Math.abs(row[0] - lo) < strip.step / 2);
+      return { ...at, kind: 'now', lo, step: strip.step, p: strip.price, l: k >= 0 ? strip.rows[k]![1] : 0, s: k >= 0 ? strip.rows[k]![2] : 0, bands: (k >= 0 ? strip.bands?.[k] : null) ?? ZERO };
+    }
+    if (!points.length) return null;
     const list = kc.getDataList();
     const bar = pt?.dataIndex !== undefined ? list[pt.dataIndex] : undefined;
-    const price = pt?.value;
-    if (!bar || price === undefined || !Number.isFinite(price)) return;
+    if (!bar) return null;
     const i = snapshotFor(points.map((q) => q.t), bar.timestamp, barMsOf(list));
     const snap = i >= 0 ? points[i]! : null;
-    if (!snap) return;
-    const lo = Math.floor(price / snap.st) * snap.st;
-    onPick({ from: lo, to: lo + snap.st, side: price < snap.p ? 'long' : 'short', at: snap.t });
+    if (!snap) return null;
+    const bi = Math.floor(price / snap.st);
+    const cell = snap.b.find((row) => row[0] === bi);
+    const l = cell && side !== 'short' ? cellOf(cell, 'long', lev).v : 0;
+    const s = cell && side !== 'long' ? cellOf(cell, 'short', lev).v : 0;
+    return { ...at, kind: 'then', lo: bi * snap.st, step: snap.st, p: snap.p, t: snap.t, l, s, bands: cell ? cellOf(cell, side, lev).bands : ZERO };
   };
+  // A click (not a drag) on a cell: that bar's snapshot and the cell of it under the pointer - the
+  // positions in it, as they stood then, open beside the chart (AtDetails); on the strip, the wallets now.
+  const down = useRef<{ x: number; y: number } | null>(null);
+  const pickAt = (clientX: number, clientY: number) => {
+    const sp = spotAt(clientX, clientY);
+    if (!sp) return;
+    const sideAt = sp.price < sp.p ? 'long' : 'short';
+    onPick({ from: sp.lo, to: sp.lo + sp.step, side: sideAt, ...(sp.kind === 'then' ? { at: sp.t } : {}) });
+  };
+  const [tip, setTip] = useState<Spot | null>(null);
+  const frame = useRef(0);
+  const hover = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (e.buttons) { setTip(null); return; }
+    const { clientX, clientY } = e;
+    cancelAnimationFrame(frame.current);
+    frame.current = requestAnimationFrame(() => setTip(spotAt(clientX, clientY)));
+  };
+  useEffect(() => () => cancelAnimationFrame(frame.current), []);
+  const box = wrap.current?.getBoundingClientRect();
   return (
     <div
+      ref={wrap}
       className="lqm-hist2"
       onPointerDownCapture={(e) => { down.current = e.button === 0 ? { x: e.clientX, y: e.clientY } : null; }}
       onPointerUpCapture={(e) => {
@@ -772,19 +923,35 @@ function HistoryView({ coin, venues, engine, symbol, wallets, side, onPick }: { 
         down.current = null;
         if (d && Math.hypot(e.clientX - d.x, e.clientY - d.y) < 4) pickAt(e.clientX, e.clientY);
       }}
+      onPointerMove={hover}
+      onPointerLeave={() => { cancelAnimationFrame(frame.current); setTip(null); }}
     >
       <Chart engine={engine} symbol={symbol} bare onChartReady={setKc} />
       <div className="lqm-hist2-key" onPointerDown={(e) => e.stopPropagation()}>
-        <span className="lqm-hist-scale" title="Liquidation notional per cell (USD at the liquidation price): low to high">
-          <span>{fmtUsdShort(data.scale * HEAT_FLOOR)}</span>
-          <i aria-hidden="true" />
-          <span>{fmtUsdShort(data.scale)}+</span>
+        <span className="lqm-hist-scale" title={colorBy === 'lev' ? 'Liquidation notional per cell (USD at the liquidation price): the stronger, the more; the colour is its mix of leverage' : 'Liquidation notional per cell (USD at the liquidation price): low to high'}>
+          <span>{fmtUsdShort(scale * HEAT_FLOOR)}</span>
+          <i aria-hidden="true" className={colorBy === 'lev' ? 'is-lev' : ''} />
+          <span>{fmtUsdShort(scale)}+</span>
         </span>
         {note && <span className="lqm-hist2-note">{note}</span>}
       </div>
+      {tip && (tip.l > 0 || tip.s > 0 || tip.kind === 'now') && (
+        <div className="lqm-tip" style={{ left: Math.max(0, Math.min((box?.width ?? 400) - 220, tip.x + (tip.kind === 'now' ? -232 : 14))), top: Math.max(0, Math.min((box?.height ?? 300) - 150, tip.y - 20)) }}>
+          <b>{fmtPx(tip.lo)} – {fmtPx(tip.lo + tip.step)}</b>
+          <span>{tip.kind === 'now' ? `Now · ${pct((tip.lo + tip.step / 2) / tip.p - 1)} from current` : `${whenFmt(tip.t)} · ${pct((tip.lo + tip.step / 2) / tip.p - 1)} from the price then`}</span>
+          {tip.l > 0 && <span className="is-long">Longs {fmtUsdShort(tip.l)}</span>}
+          {tip.s > 0 && <span className="is-short">Shorts {fmtUsdShort(tip.s)}</span>}
+          {!(tip.l > 0 || tip.s > 0) && <span>No liquidations here</span>}
+          <BandLines v={tip.bands} fmt={fmtUsdShort} over={tip.kind === 'then' && tip.l + tip.s > scale} lev={lev} what="cell" />
+          <span className="lqm-tip-sub">{tip.kind === 'now' ? 'Click for the wallets now' : 'Click for the positions then'}</span>
+        </div>
+      )}
     </div>
   );
 }
+/** A place on the historical chart: a past cell (`then`) or a bar of the levels now (`now`), as shown. */
+type Spot = { x: number; y: number; price: number; lo: number; step: number; p: number; l: number; s: number; bands: Bands } & ({ kind: 'now' } | { kind: 'then'; t: number });
+let calcRev = 0;
 const EMPTY_POINTS: HeatPoint[] = [];
 
 // --- details of a past cell ---------------------------------------------------------------
@@ -813,11 +980,13 @@ function nextText(p: LiqAt['positions'][number]): string {
  * log - each position's size, entry, margin and account then, since when it was open and what it
  * did next. Positions are kept from the log's first step (28 Oct 2026); before that only the cells.
  */
-function AtDetails({ coin, venues, pick, wallets, onClose }: { coin: string; venues: Venue[]; pick: Required<Pick>; wallets: string[]; onClose: () => void }) {
+function AtDetails({ coin, venues, pick, wallets, lev, onClose }: { coin: string; venues: Venue[]; pick: Required<Pick>; wallets: string[]; lev: LevFilter; onClose: () => void }) {
   const [side, setSide] = useState<'long' | 'short' | 'both'>(pick.side);
   useEffect(() => setSide(pick.side), [pick]);
-  const fetcher = useCallback((s: AbortSignal) => vsApi.liquidationAt(coin, venues, pick.at, pick.from, pick.to, side, s, wallets), [coin, venues, pick, side, wallets]);
-  const r = usePolled<LiqAt>(`at|${coin}|${venues.join(',')}|${pick.at}|${pick.from}|${pick.to}|${side}|${wallets.join(',')}`, fetcher, 5 * 60_000);
+  const levKey = lev.join(',');
+  // Only the bands shown (the server reads each row's leverage from the change log: liqRead.ts logLev).
+  const fetcher = useCallback((s: AbortSignal) => vsApi.liquidationAt(coin, venues, pick.at, pick.from, pick.to, side, s, wallets, isAllLev(lev) ? [] : lev), [coin, venues, pick, side, wallets, levKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  const r = usePolled<LiqAt>(`at|${coin}|${venues.join(',')}|${pick.at}|${pick.from}|${pick.to}|${side}|${wallets.join(',')}|${levKey}`, fetcher, 5 * 60_000);
   const d = r.data;
   const before = d?.logFrom !== null && d?.logFrom !== undefined && pick.at < d.logFrom;
   return (
@@ -830,6 +999,7 @@ function AtDetails({ coin, venues, pick, wallets, onClose }: { coin: string; ven
         <dt>Price range</dt><dd>{fmtPx(pick.from)} – {fmtPx(pick.to)}</dd>
         <dt>As of</dt><dd>{whenFmt(d?.snapT ?? pick.at)}</dd>
         <dt>Price then</dt><dd>{d?.price ? `${fmtPx(d.price)} (${pct((pick.from + pick.to) / 2 / d.price - 1)})` : '–'}</dd>
+        {!isAllLev(lev) && <><dt>Leverage</dt><dd>{lev.map((b) => LEV_LABEL[b]).join(', ')}</dd></>}
       </dl>
       <div className="lqm-seg lqm-det-side" role="group" aria-label="Side">
         <button type="button" className={side === 'long' ? 'is-on' : ''} onClick={() => setSide('long')}>Longs</button>
@@ -849,6 +1019,7 @@ function AtDetails({ coin, venues, pick, wallets, onClose }: { coin: string; ven
           <li key={`${p.venue}|${p.address}`} className={p.side === 'long' ? 'is-long' : 'is-short'}>
             <span className="lqm-det-who" title={`${VENUE_LABEL[p.venue]} · ${p.address}`}>
               <VenueLogo venue={p.venue} size={12} />
+              <LevDot lev={p.levRun} />
               {p.label ?? shortAddr(p.address)}
             </span>
             <span className="lqm-det-usd">{fmtUsdShort(p.usd)}</span>
@@ -875,11 +1046,20 @@ function AtDetails({ coin, venues, pick, wallets, onClose }: { coin: string; ven
 
 // --- details ------------------------------------------------------------------------------
 
-function Details({ coin, venues, pick, price, wallets, onClose }: { coin: string; venues: Venue[]; pick: Pick; price: number | null; wallets: string[]; onClose: () => void }) {
+/** A position's leverage band as a dot (grey: not known), its figure on hover. */
+function LevDot({ lev }: { lev: number | null | undefined }) {
+  if (lev === undefined) return null;
+  const b = levBandOf(lev);
+  return <i className="lqm-lev-dot" style={{ background: LEV_COLOR[b ?? 'unknown'] }} title={lev === null ? 'Leverage not known' : `${lev >= 1000 ? 'No margin left' : `${fmtFixed(lev, lev < 10 ? 1 : 0)}×`} (${LEV_LABEL[b ?? 'unknown']})`} aria-hidden="true" />;
+}
+
+function Details({ coin, venues, pick, price, wallets, lev, onClose }: { coin: string; venues: Venue[]; pick: Pick; price: number | null; wallets: string[]; lev: LevFilter; onClose: () => void }) {
   const [side, setSide] = useState(pick.side);
   useEffect(() => setSide(pick.side), [pick]);
-  const fetcher = useCallback((s: AbortSignal) => vsApi.liquidationWallets(coin, venues, side, pick.from, pick.to, s, wallets), [coin, venues, side, pick, wallets]);
-  const r = usePolled<LiqWallets>(`${coin}|${venues.join(',')}|${side}|${pick.from}|${pick.to}|${wallets.join(',')}`, fetcher, 30_000);
+  const levKey = lev.join(',');
+  // Only the bands shown: the server filters, so the total and the top 25 are of those alone.
+  const fetcher = useCallback((s: AbortSignal) => vsApi.liquidationWallets(coin, venues, side, pick.from, pick.to, s, wallets, isAllLev(lev) ? [] : lev), [coin, venues, side, pick, wallets, levKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  const r = usePolled<LiqWallets>(`${coin}|${venues.join(',')}|${side}|${pick.from}|${pick.to}|${wallets.join(',')}|${levKey}`, fetcher, 30_000);
   const mid = (pick.from + pick.to) / 2;
   const d = r.data;
   return (
@@ -893,6 +1073,7 @@ function Details({ coin, venues, pick, price, wallets, onClose }: { coin: string
         <dt>From current</dt><dd>{price ? pct(mid / price - 1) : '–'}</dd>
         {/* When the positions listed were taken (the cohort load), not the time on this screen. */}
         <dt>As of</dt><dd>{asOfText(d?.asOf)?.slice('As of '.length) ?? '…'}</dd>
+        {!isAllLev(lev) && <><dt>Leverage</dt><dd>{lev.map((b) => LEV_LABEL[b]).join(', ')}</dd></>}
       </dl>
       <div className="lqm-seg lqm-det-side">
         <button type="button" className={side === 'long' ? 'is-on' : ''} onClick={() => setSide('long')}>Longs</button>
@@ -910,10 +1091,11 @@ function Details({ coin, venues, pick, price, wallets, onClose }: { coin: string
           <li key={`${w.venue}|${w.address}`} className={side === 'long' ? 'is-long' : 'is-short'}>
             <span className="lqm-det-who" title={`${VENUE_LABEL[w.venue]} · ${w.address}`}>
               <VenueLogo venue={w.venue} size={12} />
+              <LevDot lev={w.lev} />
               {w.label ?? shortAddr(w.address)}
             </span>
             <span className="lqm-det-usd">{fmtUsdShort(w.usd)}</span>
-            <span className="lqm-det-sz">{fmtSize(Math.abs(w.szi))} {coin} @ {fmtPx(w.liq)}</span>
+            <span className="lqm-det-sz">{fmtSize(Math.abs(w.szi))} {coin} @ {fmtPx(w.liq)}{w.lev != null ? ` · ${w.lev >= 1000 ? 'no margin left' : `${fmtFixed(w.lev, w.lev < 10 ? 1 : 0)}×`}` : ''}</span>
             <span className="lqm-det-dist">{w.dist === null ? '' : `${fmtFixed(Math.abs(w.dist) * 100, 1)}% away`}</span>
           </li>
         ))}

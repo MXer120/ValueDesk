@@ -29,7 +29,7 @@ function world() {
     for (const [k, b] of books) {
       const [v, a] = k.split('|') as [Venue, string];
       if (!b.priced) { for (const p of b.positions) lb.add(v, 'BTC', p.szi, null, null); continue; }
-      eachLevel(v, [[a, { cash: b.cash, positions: b.positions }]], (s) => marks.get(`${v}|${s}`) ?? null, () => T, (coin, szi, liq) => lb.add(v, coin, szi, liq, null));
+      eachLevel(v, [[a, { cash: b.cash, positions: b.positions, equity: b.equity }]], (s) => marks.get(`${v}|${s}`) ?? null, () => T, (coin, szi, liq, _px, lev) => lb.add(v, coin, szi, liq, null, lev));
     }
     return lb.rows();
   };

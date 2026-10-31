@@ -9,7 +9,8 @@
  *                                  (open interest and accuracy refreshed)
  *   {t:"d", coin, at, p, b, cov}   once a second while it moves: the buckets that changed,
  *                                  summed over the venues ([index, long USD, short USD,
- *                                  long n, short n], all zero = gone), and the venues whose
+ *                                  long n, short n, ...USD per leverage band]: levels.ts
+ *                                  LiqRow; counts zero = gone), and the venues whose
  *                                  coverage moved ([long, short, long priced, short priced, n])
  *
  * A subscription names the bucket width the viewer draws (`k` server buckets; it
@@ -29,6 +30,7 @@ import { clientKey } from '../hosted.js';
 import { liqFeed, type CoinChange } from '../indexer/liqFeed.js';
 import { heatOf, liqHeatmap, liveSrc } from '../indexer/liqRead.js';
 import { marketsNow } from '../valuedesk/liquidations/rules.js';
+import { addRow, trimRow, type LiqRow } from '../valuedesk/liquidations/levels.js';
 
 export const LIQ_WS_PATH = '/ws/liq';
 const MAX_CONNECTIONS = Number(process.env.VALUESCAN_LIQ_WS_MAX) || 5_000;
@@ -46,8 +48,8 @@ interface Group {
   k: number;
   conns: Set<WebSocket>;
   snapAt: number;
-  /** What was last sent per streamed bucket (sums over the venues), to skip moves under SEND_MOVE. */
-  sent: Map<number, [number, number, number, number]>;
+  /** What was last sent per streamed bucket (a LiqRow summed over the venues), to skip moves under SEND_MOVE. */
+  sent: Map<number, LiqRow>;
 }
 
 /** Widths a viewer may ask for, in server buckets (the web's groupFor uses the same). */
@@ -55,15 +57,20 @@ const MULTIPLES = new Set([1, 2, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000,
 /** A streamed bucket goes out again once its USD moved this much (or it appeared or went). */
 const SEND_MOVE = 0.01;
 const near = (a: number, b: number) => Math.abs(a - b) <= SEND_MOVE * Math.max(Math.abs(a), Math.abs(b), 1);
+/** Every USD field of two rows (sides and bands) within SEND_MOVE; the counts catch up. */
+const nearRow = (y: LiqRow, was: LiqRow) => {
+  for (let k = 1; k < Math.max(y.length, was.length); k++) if (k !== 3 && k !== 4 && !near(y[k] ?? 0, was[k] ?? 0)) return false;
+  return true;
+};
 
-/** Buckets summed k at a time: [index at k, long USD, short USD, long n, short n]. */
-export function aggregate(rows: ReadonlyArray<[number, number, number, number, number]>, k: number): Array<[number, number, number, number, number]> {
+/** Buckets summed k at a time: LiqRows at index i / k, bands and all. */
+export function aggregate(rows: ReadonlyArray<LiqRow>, k: number): LiqRow[] {
   if (k <= 1) return rows.slice();
-  const by = new Map<number, [number, number, number, number, number]>();
-  for (const [i, l, s, ln, sn] of rows) {
-    const j = Math.floor(i / k);
+  const by = new Map<number, LiqRow>();
+  for (const r of rows) {
+    const j = Math.floor(r[0] / k);
     const x = by.get(j);
-    if (x) { x[1] += l; x[2] += s; x[3] += ln; x[4] += sn; } else by.set(j, [j, l, s, ln, sn]);
+    if (x) addRow(x, r); else { const y = r.slice() as LiqRow; y[0] = j; by.set(j, y); }
   }
   return [...by.values()].sort((a, b) => a[0] - b[0]);
 }
@@ -84,7 +91,7 @@ async function snapshot(g: Group): Promise<string | null> {
   const heat = await liqHeatmap(g.coin, g.venues).catch(() => null);
   if (!heat) return null;
   const buckets = aggregate(heat.buckets, g.k);
-  g.sent = new Map(buckets.map(([i, l, s, ln, sn]) => [i, [l, s, ln, sn]]));
+  g.sent = new Map(buckets.map((r) => [r[0], r]));
   return JSON.stringify({ t: 's', ...heat, step: +(heat.step * g.k).toPrecision(12), k: g.k, buckets, live: liqFeed().live });
 }
 
@@ -94,24 +101,26 @@ function deltaFor(g: Group, ch: { b: Map<Venue, Set<number>>; c: Set<Venue> }): 
   if (!c) return null;
   const idx = new Set<number>();
   for (const v of g.venues) for (const i of ch.b.get(v) ?? []) idx.add(Math.floor(i / g.k));
-  const now = new Map<number, [number, number, number, number]>();
+  const now = new Map<number, LiqRow>();
   if (idx.size) {
     for (const v of g.venues) {
       for (const [i, y] of c.v.get(v)?.b ?? []) {
         const j = Math.floor(i / g.k);
         if (!idx.has(j)) continue;
+        // y is the row without its index: shifted one place, as the row it was.
+        const row = [j, ...y] as LiqRow;
         const x = now.get(j);
-        if (x) { x[0] += y[0]; x[1] += y[1]; x[2] += y[2]; x[3] += y[3]; } else now.set(j, [y[0], y[1], y[2], y[3]]);
+        if (x) addRow(x, row); else now.set(j, row);
       }
     }
   }
-  const b: Array<[number, number, number, number, number]> = [];
+  const b: LiqRow[] = [];
   for (const j of [...idx].sort((m, n) => m - n)) {
     const y = now.get(j);
     const was = g.sent.get(j);
-    if (y && was && near(y[0], was[0]) && near(y[1], was[1])) continue;
+    if (y && was && nearRow(y, was)) continue;
     if (!y && !was) continue;
-    if (y) { g.sent.set(j, y); b.push([j, Math.round(y[0]), Math.round(y[1]), y[2], y[3]]); }
+    if (y) { g.sent.set(j, y); b.push(trimRow(y.map((v, k) => (k === 3 || k === 4 || k === 0 ? v : Math.round(v))) as LiqRow)); }
     else { g.sent.delete(j); b.push([j, 0, 0, 0, 0]); }
   }
   const cov: Partial<Record<Venue, number[]>> = {};

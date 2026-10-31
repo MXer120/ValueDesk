@@ -2918,14 +2918,17 @@ export class IndexStore {
 
   /**
    * The log of some addresses for a coin from `fromT` on, oldest first - with, for each of their
-   * positions, the last row before `fromT` (its state when the range begins).
+   * positions, the last row before `fromT` (its state when the range begins). Each row carries what
+   * its leverage is read from (liqRead.ts logLev): size, mark, isolated or not, leverage, equity
+   * (null in rows before 2026-10-29).
    */
-  liqLog(aids: readonly number[], coin: string, fromT: number): Array<{ aid: number; venue: number; t: number; side: number; liq: number; usd: number }> {
-    type Row = { aid: number; venue: number; t: number; side: number; liq: number; usd: number };
+  liqLog(aids: readonly number[], coin: string, fromT: number): Array<{ aid: number; venue: number; t: number; side: number; liq: number; usd: number; sz: number | null; mark: number | null; iso: number | null; lev: number | null; eq: number | null }> {
+    type Row = { aid: number; venue: number; t: number; side: number; liq: number; usd: number; sz: number | null; mark: number | null; iso: number | null; lev: number | null; eq: number | null };
     const out: Row[] = [];
-    const before = this.q('SELECT aid, venue, t, side, liq, usd FROM liq_log WHERE aid = ? AND coin = ? AND venue = ? AND t < ? ORDER BY t DESC LIMIT 1');
+    const cols = 'aid, venue, t, side, liq, usd, sz, mark, iso, lev, eq';
+    const before = this.q(`SELECT ${cols} FROM liq_log WHERE aid = ? AND coin = ? AND venue = ? AND t < ? ORDER BY t DESC LIMIT 1`);
     const venues = this.q('SELECT DISTINCT venue FROM liq_log WHERE aid = ? AND coin = ?');
-    const after = this.q('SELECT aid, venue, t, side, liq, usd FROM liq_log WHERE aid = ? AND coin = ? AND t >= ? ORDER BY t');
+    const after = this.q(`SELECT ${cols} FROM liq_log WHERE aid = ? AND coin = ? AND t >= ? ORDER BY t`);
     for (const aid of aids) {
       for (const v of venues.all(aid, coin) as Array<{ venue: number }>) {
         const r = before.get(aid, coin, v.venue, fromT) as Row | undefined;

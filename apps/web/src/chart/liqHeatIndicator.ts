@@ -8,14 +8,26 @@
  * Each bar shows the snapshot in force at its close: the newest of the indexer's
  * snapshots (15-minutely for 3 days, hourly to 30) taken before the bar ends, if
  * it is not older than STALE_MS. A cell is a price bucket of that snapshot, its
- * colour its notional's share of the scale (`scale`, a high percentile of the
- * cells loaded) - dark violet through teal to yellow, transparent below a floor.
+ * colour its notional's share of the scale (`scale`: heatScale) - dark violet
+ * through teal to yellow, transparent below a floor - or, by leverage, its mix of
+ * bands (liqLev.ts levRgb) at a strength by the same share.
+ *
+ * The historical view also asks (`fit`) that the price axis take in each bar's levels,
+ * as the live view's window does (liqLev.ts levelWindow): the figures `lo` / `hi`
+ * below are what the chart fits its axis to, besides the candles. Nothing draws
+ * them. And it may lay the levels now over the pane's right edge (`strip`), on the
+ * same axis, so a level now lines up with its band in the history.
  */
 import type { IndicatorTemplate, KLineData } from 'klinecharts';
+import { LEV_BANDS, addBands, isAllLev, levRgb, levelWindow, robustMax, shownBands, sideBands, type Bands, type ColorBy, type LevFilter } from './liqLev';
+import { drawProfile, type LiqMapData } from './liqProfile';
 
 export const LIQ_HEAT = 'VS_LIQHEAT';
 
-/** One snapshot as the history API sends it: time, price, bucket width, [bucket, long USD, short USD]. */
+/**
+ * One snapshot as the history API sends it: time, price, bucket width, rows of [bucket, long
+ * USD, short USD] and, from 2026-10-31, USD per leverage band (server levels.ts SnapRow).
+ */
 export interface HeatPoint {
   t: number;
   p: number;
@@ -29,6 +41,14 @@ export interface HeatData {
   scale: number;
   /** Only longs, only shorts, or both. */
   side?: 'long' | 'short' | 'both';
+  /** By side (viridis, by notional) or by leverage (the cell's mix of bands); default side. */
+  colorBy?: ColorBy;
+  /** The leverage bands shown (default all). */
+  lev?: LevFilter;
+  /** The price axis takes in each bar's levels, not the candles alone (the historical view). */
+  fit?: boolean;
+  /** The levels now as a strip on the pane's right edge (the historical view's toggle). */
+  strip?: LiqMapData | null;
 }
 
 /** A snapshot older than this before a bar's end does not stand for it. */
@@ -37,7 +57,7 @@ const STALE_MS = 2 * 60 * 60_000;
 const RAMP: ReadonlyArray<[number, number, number]> = [[68, 1, 84], [59, 82, 139], [33, 145, 140], [94, 201, 98], [253, 231, 37]];
 export const HEAT_FLOOR = 0.03;
 
-/** A cell's colour by its share of the scale (null: below the floor, not drawn). */
+/** A cell's colour by its share of the scale (null: below the floor, not drawn). Past the scale: the top colour. */
 export function heatColor(x: number): string | null {
   if (!(x > HEAT_FLOOR)) return null;
   const t = Math.min(1, x);
@@ -50,13 +70,50 @@ export function heatColor(x: number): string | null {
   return `rgba(${Math.round(r1 + (r2 - r1) * k)},${Math.round(g1 + (g2 - g1) * k)},${Math.round(b1 + (b2 - b1) * k)},${a.toFixed(3)})`;
 }
 
-/** The scale: a high percentile of the cells, so one giant cluster does not wash out the rest. */
-export function heatScale(points: readonly HeatPoint[], side: HeatData['side'] = 'both'): number {
-  const v: number[] = [];
-  for (const q of points) for (const [, l, s] of q.b) v.push(side === 'long' ? l : side === 'short' ? s : l + s);
-  const nz = v.filter((x) => x > 0).sort((a, b) => a - b);
-  if (!nz.length) return 1;
-  return nz[Math.min(nz.length - 1, Math.floor(nz.length * 0.985))]! || 1;
+/** A cell's colour by its leverage mix, as strong as its share of the scale (null: below the floor). */
+export function levHeatColor(x: number, b: Bands): string | null {
+  if (!(x > HEAT_FLOOR)) return null;
+  const c = levRgb(b);
+  if (!c) return null;
+  const a = 0.2 + 0.7 * Math.min(1, x) ** 0.7;
+  return `rgba(${c[0]},${c[1]},${c[2]},${a.toFixed(3)})`;
+}
+
+const ZERO: Bands = [0, 0, 0, 0];
+
+/**
+ * One cell as shown: its notional on the side(s) and leverage bands shown, and that by band
+ * ([low, mid, high, unknown]). Every band on: the whole of each side.
+ */
+export function cellOf(r: HeatPoint['b'][number], side: HeatData['side'] = 'both', lev: LevFilter = LEV_BANDS): { v: number; bands: Bands } {
+  const all = isAllLev(lev);
+  const useL = side !== 'short' && r[1] > 0;
+  const useS = side !== 'long' && r[2] > 0;
+  const lb = useL ? shownBands(sideBands(r[1], r, 3), lev) : ZERO;
+  const sb = useS ? shownBands(sideBands(r[2], r, 6), lev) : ZERO;
+  const bands = addBands(lb, sb);
+  const v = all ? (useL ? r[1] : 0) + (useS ? r[2] : 0) : bands[0] + bands[1] + bands[2];
+  return { v, bands };
+}
+
+/**
+ * The scale: each snapshot's own robust scale (liqLev.ts robustMax: the 95th percentile of its
+ * cells, raised to the largest within 3x of it, at least two cells above), the median over the
+ * snapshots. A level that sits in every snapshot (SoDEX BTC's two $70M accounts, all of 30
+ * days) is two cells of each and never sets it, as it did once it made up the top 1.5% of every
+ * cell loaded; a one-off spike in time does not either. Checked on production 2026-10-31 (BTC,
+ * 30 days): SoDEX $52K (the whales drawn at full), every venue $83M (the percentile over every
+ * cell gave $83K and $76M).
+ */
+export function heatScale(points: readonly HeatPoint[], side: HeatData['side'] = 'both', lev: LevFilter = LEV_BANDS): number {
+  const per: number[] = [];
+  for (const q of points) {
+    const s = robustMax(q.b.map((r) => cellOf(r, side, lev).v), { q: 0.95, ratio: 3 });
+    if (s > 0) per.push(s);
+  }
+  if (!per.length) return 1;
+  per.sort((a, b) => a - b);
+  return per[per.length >> 1] || 1;
 }
 
 /** The snapshot in force at the close of a bar starting at `t` (`barMs` long): index into `times`, or -1. */
@@ -81,49 +138,91 @@ export function barMsOf(list: readonly KLineData[]): number {
   return 60_000;
 }
 
-export const liqHeatTemplate: IndicatorTemplate<unknown, unknown, HeatData> = {
+/** Each snapshot's level window (liqLev.ts levelWindow) over what is shown of it; null: nothing shown. */
+export function windowsOf(d: HeatData): Array<[number, number] | null> {
+  const hit = windows.get(d);
+  if (hit) return hit;
+  const out = d.points.map((q) => {
+    const cells: Array<[number, number]> = [];
+    for (const r of q.b) {
+      const { v } = cellOf(r, d.side, d.lev);
+      if (v > 0) cells.push([r[0] * q.st, v]);
+    }
+    if (!cells.length || !(q.p > 0)) return null;
+    cells.sort((a, b) => a[0] - b[0]);
+    return levelWindow(cells, q.st, q.p);
+  });
+  windows.set(d, out);
+  return out;
+}
+const windows = new WeakMap<HeatData, Array<[number, number] | null>>();
+
+/** Per bar: the window of the snapshot in force, for the price axis to take in (`fit` only). */
+export function fitRanges(list: readonly KLineData[], d: HeatData | null | undefined): Array<{ lo?: number; hi?: number }> {
+  if (!d?.fit || !d.points.length) return list.map(() => ({}));
+  const w = windowsOf(d);
+  const times = d.points.map((q) => q.t);
+  const barMs = barMsOf(list);
+  return list.map((k) => {
+    const i = snapshotFor(times, k.timestamp, barMs);
+    const x = i >= 0 ? w[i] : null;
+    return x ? { lo: x[0], hi: x[1] } : {};
+  });
+}
+
+/** The strip of the levels now: this wide at most. */
+export const stripWidth = (paneWidth: number): number => Math.min(220, paneWidth * 0.2);
+
+export const liqHeatTemplate: IndicatorTemplate<{ lo?: number; hi?: number }, unknown, HeatData> = {
   name: LIQ_HEAT,
   shortName: 'Liq. heatmap',
   series: 'price',
   // Under the candles: the cells are a backdrop the price moves through.
   zLevel: -1,
-  figures: [],
-  calc: (list) => list.map(() => ({})),
+  // Read by the chart's price axis only (the axis fits every figure's values); never drawn:
+  // draw() below returns true, which skips the library's own figures.
+  figures: [{ key: 'lo' }, { key: 'hi' }],
+  calc: (list, indicator) => fitRanges(list, indicator.extendData),
   draw: ({ ctx, chart, indicator, bounding, xAxis, yAxis }) => {
     const data = indicator.extendData;
-    if (!data?.points.length) return true;
+    if (!data) return true;
     const list = chart.getDataList();
-    if (!list.length) return true;
-    const range = chart.getVisibleRange();
-    const bar = chart.getBarSpace();
-    const barMs = barMsOf(list);
-    const times = data.points.map((q) => q.t);
-    const side = data.side ?? 'both';
-    const scale = data.scale || 1;
-    const w = Math.max(1, bar.bar + bar.gapBar);
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(0, 0, bounding.width, bounding.height);
-    ctx.clip();
-    for (let i = Math.max(0, range.realFrom); i < Math.min(list.length, range.realTo); i++) {
-      const k = list[i]!;
-      const at = snapshotFor(times, k.timestamp, barMs);
-      if (at < 0) continue;
-      const q = data.points[at]!;
-      const x = xAxis.convertTimestampToPixel(k.timestamp) - w / 2;
-      for (const [bi, l, s] of q.b) {
-        const v = side === 'long' ? l : side === 'short' ? s : l + s;
-        const col = heatColor(v / scale);
-        if (!col) continue;
-        const top = yAxis.convertToPixel((bi + 1) * q.st);
-        const bot = yAxis.convertToPixel(bi * q.st);
-        if (bot < 0 || top > bounding.height) continue;
-        ctx.fillStyle = col;
-        ctx.fillRect(x, top, w, Math.max(1, bot - top));
+    if (data.points.length && list.length) {
+      const range = chart.getVisibleRange();
+      const bar = chart.getBarSpace();
+      const barMs = barMsOf(list);
+      const times = data.points.map((q) => q.t);
+      const side = data.side ?? 'both';
+      const lev = data.lev ?? LEV_BANDS;
+      const byLev = data.colorBy === 'lev';
+      const scale = data.scale || 1;
+      const w = Math.max(1, bar.bar + bar.gapBar);
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(0, 0, bounding.width, bounding.height);
+      ctx.clip();
+      for (let i = Math.max(0, range.realFrom); i < Math.min(list.length, range.realTo); i++) {
+        const k = list[i]!;
+        const at = snapshotFor(times, k.timestamp, barMs);
+        if (at < 0) continue;
+        const q = data.points[at]!;
+        const x = xAxis.convertTimestampToPixel(k.timestamp) - w / 2;
+        for (const r of q.b) {
+          const { v, bands } = cellOf(r, side, lev);
+          if (!(v > 0)) continue;
+          const col = byLev ? levHeatColor(v / scale, bands) : heatColor(v / scale);
+          if (!col) continue;
+          const top = yAxis.convertToPixel((r[0] + 1) * q.st);
+          const bot = yAxis.convertToPixel(r[0] * q.st);
+          if (bot < 0 || top > bounding.height) continue;
+          ctx.fillStyle = col;
+          ctx.fillRect(x, top, w, Math.max(1, bot - top));
+        }
       }
+      ctx.restore();
     }
-    ctx.restore();
-    // Nothing of the library's own (no figures): true says the drawing is done.
+    if (data.strip) drawProfile(ctx, bounding, yAxis, data.strip, { maxW: stripWidth(bounding.width), alpha: 0.9, backdrop: true });
+    // Nothing of the library's own (the figures are for the axis): true says the drawing is done.
     return true;
   },
 };
