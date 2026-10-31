@@ -13,7 +13,7 @@
  *             of the cohorts first; of the heatmap too on the owner's word the same day.
  *
  *   mirror    accounts that hold the exact opposite of a twin (to within 1.5%): together they hold
- *             nothing. Arcus: 17 pairs (SPY / QQQ, some BTC / ETH legs), ~$21.6M a side, ~18% of
+ *             nothing. Arcus: 16 pairs (SPY / QQQ, some BTC / ETH legs), ~$21M a side, ~18% of
  *             Arcus's open interest - one twin "profitable", the other "unprofitable", tilting both
  *             cohorts (found by the audit of 2026-10-31; the 11 looser matches, 3-6% apart, stay in).
  *
@@ -81,8 +81,6 @@ export const EXCLUDED_WALLETS: readonly ExcludedWallet[] = [
   { venue: 'arcus', address: '0x42dd6252b9be3dad03220e8f730c300564d741a8', kind: 'mirror', label: 'Arcus mirrored pair', since: '2026-10-31', why: 'Holds the exact opposite of 0x1119…26f5 (~$1.16M a side): together the two hold nothing.' },
   { venue: 'arcus', address: '0xd9ad74f0102dc4d87ad091482eea7412bee017a1', kind: 'mirror', label: 'Arcus mirrored pair', since: '2026-10-31', why: 'Holds the exact opposite of 0xd98d…46e0 (~$1.09M a side): together the two hold nothing.' },
   { venue: 'arcus', address: '0xd98dd8aab4b19bd59ac743222fa5cbf0f9ec46e0', kind: 'mirror', label: 'Arcus mirrored pair', since: '2026-10-31', why: 'Holds the exact opposite of 0xd9ad…17a1 (~$1.09M a side): together the two hold nothing.' },
-  { venue: 'arcus', address: '0x92a118a8e6ba9045192cad095bea956230dd3212', kind: 'mirror', label: 'Arcus mirrored pair', since: '2026-10-31', why: 'Holds the exact opposite of 0x1782…e8a1 (~$1.02M a side): together the two hold nothing.' },
-  { venue: 'arcus', address: '0x17826e6fbdff13b2ab252d7d9ce27c90b918e8a1', kind: 'mirror', label: 'Arcus mirrored pair', since: '2026-10-31', why: 'Holds the exact opposite of 0x92a1…3212 (~$1.02M a side): together the two hold nothing.' },
   { venue: 'arcus', address: '0xbd8a4f1170abd4fcb3422d60ea1d005eb2bddcf1', kind: 'mirror', label: 'Arcus mirrored pair', since: '2026-10-31', why: 'Holds the exact opposite of 0x52a4…ebed (~$1.01M a side): together the two hold nothing.' },
   { venue: 'arcus', address: '0x52a435666e5090a837a4fc9fb784b922a1e8ebed', kind: 'mirror', label: 'Arcus mirrored pair', since: '2026-10-31', why: 'Holds the exact opposite of 0xbd8a…dcf1 (~$1.01M a side): together the two hold nothing.' },
   { venue: 'arcus', address: '0x54495c3bc5a8edc4ba8dcf9124a114997a8b633c', kind: 'mirror', label: 'Arcus mirrored pair', since: '2026-10-31', why: 'Holds the exact opposite of 0x1ce0…cbb5 (~$0.69M a side): together the two hold nothing.' },
