@@ -15,7 +15,7 @@ import { join } from 'node:path';
 import { IndexStore } from '../src/indexer/store.js';
 import { tailCountRate, tailOf } from '../src/indexer/cohortTracker.js';
 import { INTERNAL_WALLETS } from '../src/valuedesk/internalWallets.js';
-import { KEEP_WARM_MS, LOAD_TTL_MS, STALE_MAX_MS, _cohortLoad, cohortDetail, cohortFocus, cohortMap, cohortWallets, cohortsReady, cohortsRead, warmCohorts } from '../src/indexer/read.js';
+import { KEEP_WARM_MS, LOAD_TTL_MS, STALE_MAX_MS, _cohortLoad, cohortDetail, cohortFocus, cohortMap, cohortWallets, cohortsReady, cohortsRead, internalOiNow, warmCohorts } from '../src/indexer/read.js';
 import {
   MARGIN_SIBLING, aggregate, cohortsOf, holdsPosition, perpEquity, sampledVenue, scopeKey, scopeWallets, sumCohorts, walletRow,
   type CohortFilter, type NettedWallet, type WalletVenue,
@@ -381,5 +381,7 @@ test('a venue\'s own accounts (internalWallets.ts) are in no cohort and no load:
   const after = cohortsRead(ALL, NONE)!;
   assert.equal(after.coverage.sodex!.members, before.coverage.sodex!.members, 'neither is a wallet of the load');
   assert.deepEqual(after.cohorts, before.cohorts, 'every cohort as before: their $77M long and short are not counted');
+  assert.equal(internalOiNow('sodex', 'BTC'), 908.65525, 'their one-side share of the open interest, which the heatmap takes off the SoDEX OI');
+  assert.equal(internalOiNow('hyperliquid', 'BTC'), 0);
   writer.dropCohortMembers('sodex', [a!, b!]);
 });

@@ -25,6 +25,7 @@ import { labelMatches, shownLabel } from '../valuedesk/labels.js';
 import { winRateOf } from '../valuedesk/winRate.js';
 import { sampledVenue, COHORT_RANGES, type CohortWalletRow as WalletRow } from '../valuedesk/cohorts/model.js';
 import { isInternal } from '../valuedesk/internalWallets.js';
+import { liqCoin } from '../valuedesk/liquidations/levels.js';
 
 export interface IndexState {
   /** Every board behind this page is final (no unchecked wallet outranks a pick). */
@@ -334,6 +335,8 @@ interface CohortLoad {
   coverage: Partial<Record<Venue, VenueCoverage>>;
   /** Newest book write (ms). */
   booksAt: number;
+  /** `venue|coin` -> the open interest (coins, one side) the venue's own accounts hold (internalWallets.ts): not the traders'. */
+  internal: Map<string, number>;
   /** Netted wallets per set of venues: built on first use, or ahead by a rebuild. */
   scopes: Map<string, NettedWallet[]>;
   /** Every cohort's figures (and every holding wallet's) per set of venues and filter, likewise. */
@@ -428,6 +431,7 @@ function* loadSteps(s: IndexStore, now: number, ahead: ReadonlyArray<{ venues: r
   const per = new Map<Venue, Map<string, WalletVenue>>();
   const coverage: Partial<Record<Venue, VenueCoverage>> = {};
   let booksAt = 0;
+  const internal = new Map<string, number>();
   // A venue's rows, kept until it is built; Hyperliquid and trade.xyz wait for
   // each other (their perp equity reads both books: model.ts perpEquity).
   const raw = new Map<Venue, { members: Map<string, CohortMemberRow>; books: Map<string, CohortBookRow> }>();
@@ -440,8 +444,15 @@ function* loadSteps(s: IndexStore, now: number, ahead: ReadonlyArray<{ venues: r
     // A tail still being read in full counts as its old sample until (nearly) all of it is (cohortTracker tailCountRate).
     const rate = tailCountRate(venue, tailOf(members, (a) => books.has(a)));
     for (const address of new Set([...members.keys(), ...books.keys()])) {
-      // A venue's own accounts are neither in a cohort nor on the map (internalWallets.ts).
-      if (isInternal(venue, address)) continue;
+      // A venue's own accounts are neither in a cohort nor on the map (internalWallets.ts); what they hold
+      // is taken off the venue's open interest the map's coverage is measured against (internalOiNow).
+      if (isInternal(venue, address)) {
+        for (const p of books.get(address)?.positions ?? []) {
+          const k = `${venue}|${liqCoin(p.symbol)}`;
+          internal.set(k, (internal.get(k) ?? 0) + Math.abs(p.szi) / 2);
+        }
+        continue;
+      }
       const mem = members.get(address);
       const b = books.get(address);
       const w = sampledVenue(rate, address, mem && {
@@ -472,7 +483,7 @@ function* loadSteps(s: IndexStore, now: number, ahead: ReadonlyArray<{ venues: r
     }
     raw.delete(venue);
   }
-  const load: CohortLoad = { at: now, per, marks: s.cohortMarks(), coverage, booksAt, scopes: new Map(), stats: new Map() };
+  const load: CohortLoad = { at: now, per, marks: s.cohortMarks(), coverage, booksAt, internal, scopes: new Map(), stats: new Map() };
   for (const a of ahead) {
     yield* netSteps(load, a.venues);
     for (const f of a.filters) yield* sumSteps(load, a.venues, f);
@@ -673,6 +684,15 @@ function history(s: IndexStore, scope: string, fromT: number, f: CohortFilter, c
  * last prices: for the liquidation heatmap (liqRead.ts). Keeps the load warm
  * like a cohort read, without netting anything.
  */
+/**
+ * The open interest a venue's own accounts hold in a coin (coins, one side: their longs and shorts
+ * halved - SoDEX's BTC pair is 908.65525 each way, 908.65525 of the venue's OI), from the load in use;
+ * 0 before there is one (never builds one: the heatmap's request path calls it).
+ */
+export function internalOiNow(venue: Venue, coin: string): number {
+  return cohortLoad?.internal.get(`${venue}|${coin}`) ?? 0;
+}
+
 export function cohortBooksNow(): { at: number; booksAt: number; per: ReadonlyMap<Venue, ReadonlyMap<string, WalletVenue>>; marks: ReadonlyMap<string, number> } | null {
   const s = reader();
   if (!s) return null;

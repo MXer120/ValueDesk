@@ -26,7 +26,7 @@ import { NOW_HI, NOW_LO, NOW_STEP, addRow, coinLevels, liqCoin, rowBand, snapBan
 import { inflateRawSync } from 'node:zlib';
 import { marketsNow, venueMarkets, type VenueMarkets } from '../valuedesk/liquidations/rules.js';
 import { shownLabel } from '../valuedesk/labels.js';
-import { cohortBooksNow } from './read.js';
+import { cohortBooksNow, internalOiNow } from './read.js';
 import { reader } from './reader.js';
 import type { LiqAtRow } from './store.js';
 import { liqFeed } from './liqFeed.js';
@@ -239,7 +239,7 @@ async function gather(coin: string, venues: readonly Venue[]): Promise<Gathered 
     const tiersFor = (s: string): Tiers | null => m?.tiers.get(s) ?? null;
     const wallets = idx?.get(venue) ?? [];
     const cov: VenueCoverage = {
-      oi: mk.length ? mk.reduce((a, x) => a + x.oi, 0) : null, oiUsd: null,
+      oi: mk.length ? Math.max(0, mk.reduce((a, x) => a + x.oi, 0) - internalOiNow(venue, coin)) : null, oiUsd: null,
       long: 0, short: 0, longKnown: 0, shortKnown: 0, longNone: 0, shortNone: 0, positions: 0, past: 0,
       price: null, accuracy: shownAccuracy(acc[venue]), computed: venue === 'arcus', ...(m ? {} : { noRules: true }),
     };
@@ -306,7 +306,8 @@ export function heatOf(
     const x = src.v(venue);
     const main = mk.slice().sort((p, q) => q.oi - p.oi)[0];
     const price = main?.px ?? null;
-    const oi = mk.length ? mk.reduce((n, y) => n + y.oi, 0) : null;
+    // The venue's own accounts' share is not the traders' (internalWallets.ts): the books leave them out, so does the OI.
+    const oi = mk.length ? Math.max(0, mk.reduce((n, y) => n + y.oi, 0) - internalOiNow(venue, coin)) : null;
     coverage[venue] = {
       oi, oiUsd: oi !== null && price !== null ? oi * price : null,
       long: x?.c[0] ?? 0, short: x?.c[1] ?? 0, longKnown: x?.c[2] ?? 0, shortKnown: x?.c[3] ?? 0, longNone: x?.c[6] ?? 0, shortNone: x?.c[7] ?? 0, positions: x?.c[4] ?? 0, past: x?.c[5] ?? 0,
