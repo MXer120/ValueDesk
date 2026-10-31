@@ -302,24 +302,32 @@ export function NoticeLists({ notices, now, initialTab = 'current', initialOpen 
   const { current, past } = splitNotices(notices, now);
   const [tab, setTab] = useState<NoticeTab>(initialTab);
   const [openId, setOpenId] = useState<number | null>(initialOpen);
+  // Past: the newest PAST_PAGE, then a page at a time (a linked notice opens on its own page).
+  const pages = Math.max(1, Math.ceil(past.length / PAST_PAGE));
+  const [page, setPage] = useState(() => {
+    const at = initialOpen === null ? -1 : past.findIndex((n) => n.id === initialOpen);
+    return at < 0 ? 0 : Math.floor(at / PAST_PAGE);
+  });
+  const shownPage = Math.min(page, pages - 1);
+  const pastShown = past.slice(shownPage * PAST_PAGE, (shownPage + 1) * PAST_PAGE);
   useEffect(() => {
     if (scrollTo !== null) document.getElementById(`notice-${scrollTo}`)?.scrollIntoView({ block: 'start' });
     // Once, as drawn: a later link remounts this list.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  const tabs: Array<{ id: NoticeTab; label: string; count: number }> = [
-    { id: 'current', label: 'Current', count: current.length },
-    { id: 'past', label: 'Past', count: past.length },
+  const tabs: Array<{ id: NoticeTab; label: string }> = [
+    { id: 'current', label: 'Current' },
+    { id: 'past', label: 'Past' },
   ];
   return (
-    <section className="st-notices" aria-labelledby="st-notices">
+    <section className="st-notices lbp" aria-labelledby="st-notices">
       <div className="st-notices__head">
         <h2 id="st-notices" className="st-h2">Incidents and maintenance</h2>
-        <div className="segmented st-seg" role="tablist" aria-label="Incidents and maintenance">
+        {/* The app's switch (the leaderboard's lbp-seg), not one of the page's own. */}
+        <div className="lbp-seg" role="tablist" aria-label="Incidents and maintenance">
           {tabs.map((t) => (
-            <button key={t.id} type="button" role="tab" aria-selected={tab === t.id} className={tab === t.id ? 'active' : ''} onClick={() => setTab(t.id)}>
+            <button key={t.id} type="button" role="tab" aria-selected={tab === t.id} className={tab === t.id ? 'is-on' : ''} onClick={() => setTab(t.id)}>
               {t.label}
-              {t.count > 0 && <span className="st-seg__n">{t.count}</span>}
             </button>
           ))}
         </div>
@@ -331,13 +339,37 @@ export function NoticeLists({ notices, now, initialTab = 'current', initialOpen 
             : <p className="st-none">No incidents or maintenance right now.</p>
           : past.length
             ? (
+              <>
               <ul className="st-rows">
-                {past.map((n) => <NoticeRow key={n.id} n={n} now={now} open={openId === n.id} onToggle={(id) => setOpenId((o) => (o === id ? null : id))} />)}
+                {pastShown.map((n) => <NoticeRow key={n.id} n={n} now={now} open={openId === n.id} onToggle={(id) => setOpenId((o) => (o === id ? null : id))} />)}
               </ul>
+              {pages > 1 && <Pager page={shownPage} pages={pages} total={past.length} onPage={(p) => { setPage(p); setOpenId(null); }} />}
+              </>
             )
             : <p className="st-none">None in the last 90 days.</p>}
       </div>
     </section>
+  );
+}
+
+/** Past notices a page. */
+export const PAST_PAGE = 10;
+
+/** Which of the past notices are shown, and the pages, on the app's switch (lbp-seg). */
+function Pager({ page, pages, total, onPage }: { page: number; pages: number; total: number; onPage: (p: number) => void }) {
+  const from = page * PAST_PAGE + 1;
+  const to = Math.min(total, (page + 1) * PAST_PAGE);
+  return (
+    <nav className="st-pager" aria-label="Past incidents and maintenance, pages">
+      <span className="st-pager__n">{from}–{to} of {total}</span>
+      <div className="lbp-seg">
+        <button type="button" aria-label="Newer" disabled={page === 0} onClick={() => onPage(page - 1)}>‹</button>
+        {Array.from({ length: pages }, (_, i) => (
+          <button key={i} type="button" aria-current={i === page ? 'page' : undefined} className={i === page ? 'is-on' : ''} onClick={() => onPage(i)}>{i + 1}</button>
+        ))}
+        <button type="button" aria-label="Older" disabled={page === pages - 1} onClick={() => onPage(page + 1)}>›</button>
+      </div>
+    </nav>
   );
 }
 

@@ -84,18 +84,31 @@ test('a past notice is one slim row: title, kind, start, duration - its timeline
   assert.ok(open.indexOf('Identified') < open.indexOf('Investigating'), 'its timeline, newest first');
 });
 
-test('the lists: Current by default with its count, Past behind the switch', () => {
+test('the lists: Current by default, Past behind the app switch', () => {
   const past = incident({ id: 1, closedAt: T0 - 5 * MIN });
   const html = render(createElement(NoticeLists, { notices: [past], now: T0 }));
-  assert.match(html, /role="tablist"/);
-  assert.match(html, /aria-selected="true" class="active">Current</);
-  assert.match(html, />Past<span class="st-seg__n">1<\/span>/);
+  assert.match(html, /class="lbp-seg" role="tablist"/);
+  assert.match(html, /aria-selected="true" class="is-on">Current</);
+  assert.match(html, /aria-selected="false" class="">Past</);
   assert.match(html, /No incidents or maintenance right now\./);
   assert.ok(!html.includes('notice-1'), 'past rows only behind the switch');
   const shown = render(createElement(NoticeLists, { notices: [past], now: T0, initialTab: 'past', initialOpen: 1 }));
   assert.match(shown, /class="st-row is-major is-open"/);
   const open = render(createElement(NoticeLists, { notices: [incident()], now: T0 }));
   assert.match(open, /class="st-notice is-major is-open"/);
+});
+
+test('past: the newest ten, then a page at a time; a linked notice opens on its page', () => {
+  const many = Array.from({ length: 23 }, (_, i) => incident({ id: 100 + i, startsAt: T0 - (i + 2) * 60 * MIN, closedAt: T0 - (i + 1) * 60 * MIN }));
+  const first = render(createElement(NoticeLists, { notices: many, now: T0, initialTab: 'past' }));
+  assert.equal((first.match(/class="st-row /g) ?? []).length, 10);
+  assert.match(first, /1–10 of 23/);
+  assert.match(first, /aria-current="page" class="is-on">1</);
+  const linked = render(createElement(NoticeLists, { notices: many, now: T0, initialTab: 'past', initialOpen: 121 }));
+  assert.match(linked, /21–23 of 23/);
+  assert.match(linked, /id="notice-121"/);
+  const few = render(createElement(NoticeLists, { notices: many.slice(0, 4), now: T0, initialTab: 'past' }));
+  assert.ok(!few.includes('st-pager'), 'no pages for ten or fewer');
 });
 
 test('loadStatus: notices checked one by one, the rest still shows', async () => {
