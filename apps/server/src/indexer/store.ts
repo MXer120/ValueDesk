@@ -579,11 +579,13 @@ type ScanRow = { t: number; symbol: string; side: number; v: number; closed_pnl:
  * goes on, `day` = the day it is in. `touched` = days that got rows while a
  * build was in flight: summed again once it has landed.
  */
-type ScanJob = { venue: Venue; address: string; from: number; to: number; cursor: number; day: number; days: Map<number, DayAcc>; touched: Set<number> };
+type ScanJob = { venue: Venue; address: string; from: number; to: number; cursor: number; day: number; days: Map<number, DayAcc>; touched: Set<number>; seen: number; noKeep?: boolean };
 /** Rows per scan step: a few ms of work. */
 const SCAN_CHUNK = 1_000;
 /** A dirty day larger than this is summed in the background instead of at once. */
 const SYNC_DAY_ROWS = 3_000;
+/** Kept day sums to go on from (liveDays): a trader-day each, today's and yesterday's. */
+const LIVE_DAYS_MAX = 20_000;
 
 /** Hyperliquid's HIP-3 dex "xyz": its fills and held ranges are mirrored under `tradexyz`. */
 const XYZ = 'xyz:';
@@ -712,6 +714,14 @@ export class IndexStore {
   private rebuilding = new Map<string, ScanJob>();
   /** `venue|address|day`: dirty days too large to sum at once, going on in the background. */
   private dayJobs = new Map<string, ScanJob>();
+  /**
+   * `venue|address|day` -> the finished sum of today (or yesterday) as it was written, kept to go on
+   * from (refreshKey): the next sum reads only the rows after the last one it ate (`seen`). Until
+   * 2026-10-31 every refresh summed the whole day again: a market maker's day read in full every
+   * few minutes, more of it as the day went on - 29% of the indexer's thread (profiled), its board
+   * builds 8-27 min. A row at or before `seen` (markDay) drops it: that day is summed whole again.
+   */
+  private liveDays = new Map<string, ScanJob>();
   private readonly readOnly: boolean;
   /**
    * A dirty day is summed again at most this often. A market maker's "today"
@@ -1037,18 +1047,25 @@ export class IndexStore {
        ON CONFLICT (venue, address, id) DO UPDATE SET
          t = excluded.t, symbol = excluded.symbol, side = excluded.side, px = excluded.px, sz = excluded.sz,
          fee = excluded.fee, closed_pnl = excluded.closed_pnl, oid = excluded.oid, src = excluded.src
-       WHERE excluded.src >= fills.src`,
+       WHERE excluded.src > fills.src OR (excluded.src = fills.src AND (
+         excluded.t IS NOT fills.t OR excluded.symbol IS NOT fills.symbol OR excluded.side IS NOT fills.side OR
+         excluded.px IS NOT fills.px OR excluded.sz IS NOT fills.sz OR excluded.fee IS NOT fills.fee OR
+         excluded.closed_pnl IS NOT fills.closed_pnl OR excluded.oid IS NOT fills.oid))`,
     );
+    // Only a row that is new or differs marks its day (and its trader's version): a re-read of rows
+    // already held changed nothing, yet marked every day it touched dirty - and dropped the day sums
+    // kept to go on from (liveDays), so a market maker's day was summed whole again on every read.
+    const changed: FillRow[] = [];
     this.tx(() => {
       for (const f of rows) {
-        ins.run(f.venue, f.address, f.id, f.t, f.symbol, f.side, f.px, f.sz, f.fee, f.closedPnl, f.oid, f.src);
+        if (Number(ins.run(f.venue, f.address, f.id, f.t, f.symbol, f.side, f.px, f.sz, f.fee, f.closedPnl, f.oid, f.src).changes) > 0) changed.push(f);
       }
-      for (const a of new Set(rows.map((f) => `${f.venue}|${f.address}`))) {
+      for (const a of new Set(changed.map((f) => `${f.venue}|${f.address}`))) {
         const [venue, address] = a.split('|') as [Venue, string];
         this.bump(venue, address);
       }
       // In the same transaction: a day that is now behind its fills is written down with them.
-      for (const f of rows) this.markDay(f.venue, f.address, f.t);
+      for (const f of changed) this.markDay(f.venue, f.address, f.t);
     });
   }
 
@@ -1262,6 +1279,12 @@ export class IndexStore {
   private markDay(venue: Venue, address: string, t: number): void {
     if (this.readOnly) return;
     const d = Math.floor(t / DAY);
+    // A row at or before the last one a kept sum ate: going on from there would miss it.
+    const live = this.liveDays.get(`${venue}|${address}|${d}`);
+    if (live && t <= live.seen) this.liveDays.delete(`${venue}|${address}|${d}`);
+    // Likewise a background sum of that day that has already passed it: written, but not kept.
+    const bg = this.dayJobs.get(`${venue}|${address}|${d}`);
+    if (bg && t <= bg.seen) bg.noKeep = true;
     // A row changed in a stretch being summed for freezing: that sum is void.
     const j = this.job;
     if (j && j.phase === 'scan' && d >= j.lo && d < j.hi && j.venue === venue && j.address === address) j.stale = true;
@@ -1303,7 +1326,7 @@ export class IndexStore {
   // aggregates held it 2.6-7.4 s at a time (profiled 2026-09-29).
 
   private newJob(venue: Venue, address: string, from: number, to: number): ScanJob {
-    return { venue, address, from, to, cursor: from, day: Number.NaN, days: new Map(), touched: new Set() };
+    return { venue, address, from, to, cursor: from, day: Number.NaN, days: new Map(), touched: new Set(), seen: Number.NEGATIVE_INFINITY };
   }
 
   private accOf(job: ScanJob, d: number): DayAcc {
@@ -1329,6 +1352,7 @@ export class IndexStore {
 
   private eat(job: ScanJob, rows: ReadonlyArray<ScanRow>): void {
     for (const r of rows) {
+      if (r.t > job.seen) job.seen = r.t;
       const day = Math.floor(r.t / DAY);
       // Rows come in time order: a new day means the one before is complete.
       if (day !== job.day) {
@@ -1526,6 +1550,7 @@ export class IndexStore {
             this.clean(job.venue, job.address, Math.floor(job.from / DAY));
           });
           map.delete(k);
+          this.keepLive(k, job);
           this.bump(job.venue, job.address);
           continue;
         }
@@ -1568,8 +1593,8 @@ export class IndexStore {
     if (this.dayJobs.has(k)) return;
     const [venue, address, day] = k.split('|') as [Venue, string, string];
     const d = Number(day);
-    if (this.frozenDay(venue, address, d)) return this.clean(venue, address, d);
-    const job = this.newJob(venue, address, d * DAY, (d + 1) * DAY);
+    if (this.frozenDay(venue, address, d)) { this.liveDays.delete(k); return this.clean(venue, address, d); }
+    const job = this.resumeLive(k) ?? this.newJob(venue, address, d * DAY, (d + 1) * DAY);
     const t0 = Date.now();
     while (!this.step(job)) {
       // Too many rows - or too slow a disk - to sum at once: it goes on in the background.
@@ -1584,6 +1609,25 @@ export class IndexStore {
       this.writeDays(venue, address, this.finish(job));
       this.clean(venue, address, d);
     });
+    this.keepLive(k, job);
+  }
+
+  /** A kept sum of the day, set to go on after its last row (null: none - sum the day whole). */
+  private resumeLive(k: string): ScanJob | null {
+    const job = this.liveDays.get(k);
+    if (!job || !Number.isFinite(job.seen)) return null;
+    this.liveDays.delete(k);
+    job.cursor = job.seen + 1;
+    return job;
+  }
+
+  /** Keep a day's finished sum to go on from: today's and yesterday's only, LIVE_DAYS_MAX at most (the oldest go). */
+  private keepLive(k: string, job: ScanJob): void {
+    const d = Math.floor(job.from / DAY);
+    if (job.noKeep || job.to - job.from !== DAY || d < Math.floor(Date.now() / DAY) - 1) return;
+    this.liveDays.delete(k);
+    this.liveDays.set(k, job);
+    if (this.liveDays.size > LIVE_DAYS_MAX) this.liveDays.delete(this.liveDays.keys().next().value!);
   }
 
   /** Bring due dirty days up to date, for up to `budgetMs`. Returns how many stay dirty. */
@@ -1630,11 +1674,19 @@ export class IndexStore {
    * (profiled 2026-09-30).
    */
   private async partialDayAsync(venue: Venue, address: string, fromT: number, pause: () => Promise<void>): Promise<DayAgg | undefined> {
+    // A board candidate asks twice in a row with the same start (windowStatsAsync, orderCountAsync):
+    // the second answer is the first while the trader's rows are unchanged (its version).
+    const key = `${venue}|${address}|${fromT}|${this.version(venue, address)}`;
+    if (this.partialMemo.has(key)) return this.partialMemo.get(key);
     const d0 = Math.floor(fromT / DAY);
     const job = this.newJob(venue, address, fromT, (d0 + 1) * DAY);
     while (!this.step(job)) await pause();
-    return this.finish(job).get(d0);
+    const out = this.finish(job).get(d0);
+    if (this.partialMemo.size >= 4_096) this.partialMemo.clear();
+    this.partialMemo.set(key, out);
+    return out;
   }
+  private partialMemo = new Map<string, DayAgg | undefined>();
 
   /** windowStats without long stalls (the writer's board builds). Same figures. */
   async windowStatsAsync(venue: Venue, address: string, fromT: number, pause: () => Promise<void>): Promise<WindowStats> {
@@ -1959,6 +2011,7 @@ export class IndexStore {
     this.migrateFlying.delete(k);
     const prefix = `${k}|`;
     for (const d of this.dayJobs.keys()) if (d.startsWith(prefix)) this.dayJobs.delete(d);
+    for (const d of this.liveDays.keys()) if (d.startsWith(prefix)) this.liveDays.delete(d);
     for (const d of this.dirtyDays) if (d.startsWith(prefix)) this.dirtyDays.delete(d);
     if (this.job && this.job.venue === venue && this.job.address === address) this.job = null;
   }
@@ -2153,6 +2206,7 @@ export class IndexStore {
       const prefix = `${k}|`;
       const old = (d: string): boolean => d.startsWith(prefix) && Number(d.slice(prefix.length)) < j.keepDay;
       for (const d of this.dayJobs.keys()) if (old(d)) this.dayJobs.delete(d);
+      for (const d of this.liveDays.keys()) if (old(d)) this.liveDays.delete(d);
       for (const d of this.dirtyDays) if (old(d)) this.dirtyDays.delete(d);
     }
     this.bump(j.venue, j.address);
@@ -2226,6 +2280,7 @@ export class IndexStore {
     for (let d = j.lo; d < j.hi; d++) {
       this.dirtyDays.delete(prefix + d);
       this.dayJobs.delete(prefix + d);
+      this.liveDays.delete(prefix + d);
       this.refreshedAt.delete(prefix + d);
     }
     this.totals.days += days.size;

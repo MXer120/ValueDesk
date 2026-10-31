@@ -76,3 +76,42 @@ test('an active trader\'s day is summed at most once per refresh interval', () =
   assert.equal(s.windowStats('hyperliquid', '0xa', 0).trades, 2, 'within the interval: the last sum stands');
   s.close();
 });
+
+test('today\'s sum goes on from its last row, and always equals a whole re-sum: appended, same-time, late, upgraded and re-read fills', () => {
+  const s = new IndexStore(':memory:', { aggRefreshMs: 0 });
+  // Yesterday: kept like today (keepLive), and every time used here is in the past whenever the test runs.
+  const today = Math.floor(Date.now() / DAY) * DAY - DAY;
+  const live = () => (s as unknown as { liveDays: Map<string, { seen: number }> }).liveDays;
+  const check = (what: string) => {
+    s.flushAggregates(1_000);
+    assert.deepEqual(s.windowStats('hyperliquid', '0xa', today), scan(s, 'hyperliquid', '0xa', today), what);
+    assert.equal(s.orderCount('hyperliquid', '0xa', today), (scan(s, 'hyperliquid', '0xa', today) as { trades: number }).trades, `${what}: trades`);
+  };
+  const batch = (n: number, at: number, tag: string) => Array.from({ length: n }, (_, i) =>
+    fill({ id: `${tag}${i}`, t: at + i * 1_000, oid: `${tag}o${i >> 1}`, side: i % 3 ? 1 : -1, closedPnl: i % 4 === 0 ? (i % 8 ? 2 : -1) : null, symbol: i % 5 ? 'BTC' : 'ETH' }));
+  s.putFills(batch(40, today + 1_000, 'a'));
+  s.windowStats('hyperliquid', '0xa', 0);
+  while (s.buildAggregates(1_000) > 0) { /* build */ }
+  check('built');
+  // New fills after the last one: the kept sum goes on from there.
+  s.putFills(batch(30, today + 3_600_000, 'b'));
+  check('appended');
+  assert.equal(live().size, 1, 'today\'s sum is kept to go on from');
+  // A fill at the very time of the last one summed (a second fill of that block): the day is summed whole.
+  const last = live().values().next().value!.seen;
+  s.putFills([fill({ id: 'same', t: last, oid: 'so' })]);
+  check('a fill at the last time summed');
+  // A late fill hours back, and a stream print later upgraded to its REST fill (realised PnL arrives).
+  s.putFills([fill({ id: 'late', t: today + 2_000, oid: 'lo', closedPnl: 7 }), fill({ id: 'up', t: today + 7_200_000, src: 0 })]);
+  check('late fill');
+  s.putFills([fill({ id: 'up', t: today + 7_200_000, src: 1, closedPnl: -4 })]);
+  check('stream print upgraded');
+  // A re-read of rows already held changes nothing: no new version, no day marked behind.
+  const v = s.version('hyperliquid', '0xa');
+  s.putFills(batch(30, today + 3_600_000, 'b'));
+  assert.equal(s.version('hyperliquid', '0xa'), v, 'an identical re-read is no change');
+  assert.equal(live().size, 1, 'and keeps the sum to go on from');
+  s.putFills(batch(5, today + 10_800_000, 'c'));
+  check('appended after the re-read');
+  s.close();
+});
