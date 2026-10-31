@@ -41,6 +41,7 @@ import type { AlgoEvent, AlgoView, ActivityEntry, CopyView, EngineNotice, Execut
 import { ExecutorClient, assertPaper, type CopyWallet, type ExecutorError, type ExecutorProcess } from './executor.ts';
 import { Inconclusive, Unavailable } from './harness.ts';
 import type { ExecutorRecord, Mode } from './state.ts';
+import { readFileSync } from 'node:fs';
 
 export const TARGETS = ['self', 'hosted', 'browser'] as const;
 export type TargetName = (typeof TARGETS)[number];
@@ -150,6 +151,8 @@ export interface ExecutorTarget extends ExecutorApi {
   health(): Promise<{ ok: boolean; why?: string }>;
   /** Set when it went away on its own (a local process that exited): why. A scenario waiting on it fails with it. */
   gone(): string | null;
+  /** The operator alerts it raised since `fromMs` that point at a refusal nobody planned for (self: from its own log). Absent: not readable from here. */
+  refusalAlertsSince?(fromMs: number): string[];
   /** The country it sees the requests come from (ValueDesk's executor: its edge's), for the region rule; null: none. */
   observedCountry(): Promise<string | null>;
   /** What it runs that this checkout does not show (ValueDesk's executor: its version, from /info), for the code hash; null: this checkout. */
@@ -177,6 +180,27 @@ export class SelfTarget extends ExecutorClient implements ExecutorTarget {
 
   get where(): string {
     return `${this.proc.base} (log ${this.proc.o.logFile})`;
+  }
+
+  /** Its log's alert lines (alerts.ts logs every alert) of an unknown refusal or a refused key since `fromMs`. */
+  refusalAlertsSince(fromMs: number): string[] {
+    let text = '';
+    try {
+      text = readFileSync(this.proc.o.logFile, 'utf8');
+    } catch {
+      return [];
+    }
+    const out: string[] = [];
+    for (const line of text.split('\n')) {
+      if (!line.includes('"msg":"alert"')) continue;
+      try {
+        const j = JSON.parse(line) as { t?: string; kind?: string; text?: string };
+        if ((j.kind === 'order-rejected' || j.kind === 'key-refused') && Date.parse(j.t ?? '') >= fromMs) out.push(`${j.kind}: ${j.text ?? ''}`);
+      } catch {
+        /* not a JSON line */
+      }
+    }
+    return out;
   }
 
   get dataDir(): string {

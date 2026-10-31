@@ -1048,3 +1048,25 @@ test('the harness\'s own writes: what a copier sends goes through the engine\'s 
   await assert.rejects(reads.write(req('/api/v1/perps/trade/margin', '-99')), /insufficient margin/, 'SoDEX\'s refusal throws with its words');
   assert.deepEqual(seen, ['POST https://mainnet-gw.sodex.dev/api/v1/perps/trade/margin', 'POST https://mainnet-gw.sodex.dev/api/v1/perps/accounts/api-keys', 'POST https://mainnet-gw.sodex.dev/api/v1/perps/trade/margin']);
 });
+
+test('self target: the refusal alerts its executor logged since a scenario started are read back (an unknown refusal or a refused key fails the scenario)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'vd-alerts-'));
+  try {
+    const logFile = join(dir, 'executor.log');
+    const at = (iso: string, kind: string, text: string) => JSON.stringify({ t: iso, level: 'warn', msg: 'alert', kind, text });
+    writeFileSync(logFile, [
+      at('2026-10-30T10:00:00.000Z', 'order-rejected', 'Copy c0: before the scenario'),
+      '--- start 2026-10-30T10:00:01.000Z ---',
+      JSON.stringify({ t: '2026-10-30T10:00:02.000Z', level: 'info', msg: 'copy started' }),
+      at('2026-10-30T10:00:03.000Z', 'order-rejected', 'Copy c1: SoDEX refused an order for a reason the executor does not know: code 77'),
+      at('2026-10-30T10:00:04.000Z', 'crash-restart', 'Started again'),
+      at('2026-10-30T10:00:05.000Z', 'key-refused', 'SoDEX refused the key of a wallet'),
+    ].join('\n'));
+    const proc = { o: { logFile, executorId: 'vd-livetest-live', dataDir: dir }, base: 'http://127.0.0.1:1' };
+    const s = new SelfTarget(proc as unknown as ExecutorProcess, new CopyWallet(secp256k1.utils.randomPrivateKey()), 'live');
+    const got = s.refusalAlertsSince(Date.parse('2026-10-30T10:00:01.000Z'));
+    assert.deepEqual(got, ['order-rejected: Copy c1: SoDEX refused an order for a reason the executor does not know: code 77', 'key-refused: SoDEX refused the key of a wallet']);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

@@ -653,3 +653,14 @@ test('queue: closes waiting over 10 s are reported once (the alert); health show
   }
   assert.equal(await pending, 'x');
 });
+
+test('alerts: every alert is in the executor log, scrubbed, also with no Telegram configured (a self-hosted copier; the live suite reads it)', () => {
+  const logged: Array<{ msg: string; data?: Record<string, unknown> }> = [];
+  const alerts = new Alerts({ sender: null, label: 'self-hosted copier (mainnet)', log: { warn: (msg, data) => logged.push({ msg, data }) } });
+  alerts.raise('order-rejected', 'copy:c1', `Copy c1: SoDEX refused an order for a reason the executor does not know: code 77 0x${'ab'.repeat(32)}`);
+  assert.equal(logged.length, 1);
+  assert.equal(logged[0]!.msg, 'alert');
+  assert.equal(logged[0]!.data!.kind, 'order-rejected');
+  assert.match(String(logged[0]!.data!.text), /code 77/);
+  assert.doesNotMatch(String(logged[0]!.data!.text), /abababab/, 'long hex cut out');
+});

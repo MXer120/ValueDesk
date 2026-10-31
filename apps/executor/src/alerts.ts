@@ -190,6 +190,13 @@ export class Alerts {
    * dedupe window is one message and a count.
    */
   raise(kind: AlertKind, subject: string, text: string): void {
+    // Every alert is in the executor's log too (scrubbed as the message is), sent or not: a copier without Telegram, a
+    // muted hour ("the executor's log keeps them") and the live suite, which fails a scenario on an unknown refusal.
+    try {
+      this.o.log?.warn('alert', { kind, text: scrub(text) });
+    } catch {
+      /* an alert never throws into its caller */
+    }
     if (!this.enabled) return;
     try {
       const now = this.now();

@@ -553,6 +553,13 @@ async function main(): Promise<number> {
         feesUsd = null;
       }
     }
+    // An order SoDEX refused for a reason the executor does not know (or a refused key) is a failure, whatever the
+    // scenario checked: its operator alert is in the executor's log (self; alerts.ts logs every alert).
+    const alerts = mode === 'live' ? (target.refusalAlertsSince?.(t.startedAt) ?? []) : [];
+    if (alerts.length) {
+      status = 'failed';
+      error = `${error ? `${error}; ` : ''}the executor raised ${alerts.length} refusal alert(s): ${alerts.slice(0, 3).join(' | ').slice(0, 300)}`;
+    }
     if (!flat) {
       status = 'failed';
       error = `${error ? `${error}; ` : ''}the cleanup could not read the accounts flat`;
