@@ -60,7 +60,7 @@
 
 /* The app's own platform dropdown and switch (lbp-bar), on the card's gutter. */
 .ex-bar { padding: 16px var(--sp-4) 0; }
-.ex-bar .lbp-bar { margin-bottom: 0; }
+.ex-bar .lbp-bar { flex: 1 1 auto; min-width: 0; margin-bottom: 0; }
 .ex-hint { margin: 10px var(--sp-4) 0; color: var(--muted); font-size: 12px; }
 
 /* The rows. */
@@ -174,3 +174,7 @@
   .ex-books.is-pair { grid-template-columns: minmax(0, 1fr); }
   .ex-in-modal .ex-stats, .ex-in-modal .ex-bar, .ex-in-modal .ex-rows { padding-left: 0; padding-right: 0; }
 }
+
+/* The platform dropdown on the bar's right; a book not read yet, said in words. */
+.ex-bar .ex-platforms { margin-left: auto; }
+.ex-unread { display: block; color: var(--dim); font-size: 12px; text-align: right; }

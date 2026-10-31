@@ -7,7 +7,7 @@
  * open): a hero with what this is and when it was read; four figures (wallets, notional left out,
  * by kind, where); the app's own platform dropdown (PlatformSelect) and switch (the leaderboard's
  * lbp-seg) - no controls of the page's own; then one row per entry, largest first, the kind a dot
- * and a word (never a coloured row edge: owner 2026-10-31). An offsetting pair is ONE row - its two accounts only mean something
+ * and a word (never a coloured row edge: owner 2026-10-31). A delta-neutral pair is ONE row - its two accounts only mean something
  * together (they cancel out: the row says by how much) - and opens to both books side by side.
  */
 import { useMemo, useState, type ReactNode } from 'react';
@@ -23,9 +23,9 @@ import './excluded.css';
 
 type Kind = ExcludedWallet['kind'];
 const KINDS: readonly Kind[] = ['internal', 'hedged', 'mirror'];
-const KIND_LABEL: Record<Kind, string> = { internal: 'Venue account', hedged: 'Hedged desk', mirror: 'Offsetting pair' };
-const KIND_PLURAL: Record<Kind, string> = { internal: 'Venue accounts', hedged: 'Hedged desks', mirror: 'Offsetting pairs' };
-const KIND_SHORT: Record<Kind, string> = { internal: 'venue', hedged: 'hedged', mirror: 'offsetting' };
+const KIND_LABEL: Record<Kind, string> = { internal: 'Venue account', hedged: 'Hedged desk', mirror: 'Delta-neutral pair' };
+const KIND_PLURAL: Record<Kind, string> = { internal: 'Venue accounts', hedged: 'Hedged desks', mirror: 'Delta-neutral pairs' };
+const KIND_SHORT: Record<Kind, string> = { internal: 'venue', hedged: 'hedged', mirror: 'delta-neutral' };
 const KIND_HINT: Record<Kind, string> = {
   internal: "The venue's own accounts: one book split across two, not a trade.",
   hedged: 'Desks that only hedge what they hold elsewhere: no view on the market.',
@@ -114,6 +114,7 @@ function ExcludedView({ on = true, hero = false }: { on?: boolean; hero?: boolea
   const [open, setOpen] = useState<string | null>(null);
   const shown = all.filter((e) => (kind === 'all' || e.kind === kind) && chosen.includes(e.venue));
   const notional = rows.reduce((a, w) => a + w.long + w.short, 0);
+  const read = rows.filter((w) => w.at !== null).length;
   const at = rows.reduce((a, w) => Math.max(a, w.at ?? 0), 0);
 
   return (
@@ -142,7 +143,11 @@ function ExcludedView({ on = true, hero = false }: { on?: boolean; hero?: boolea
           <>
             <section className="ex-stats" aria-label="Summary">
               <Stat label="Wallets" value={String(rows.length)} sub={`${all.length} entries · ${venues.length} venues`} />
-              <Stat label="Notional left out" value={fmtUsdShort(notional)} sub="long + short, at the marks" />
+              <Stat
+                label="Notional left out"
+                value={read ? fmtUsdShort(notional) : '–'}
+                sub={read === rows.length ? 'long + short, at the marks' : read ? `${read} of ${rows.length} wallets read so far` : 'reading their positions…'}
+              />
               <Stat
                 label="By kind"
                 value={
@@ -160,7 +165,6 @@ function ExcludedView({ on = true, hero = false }: { on?: boolean; hero?: boolea
             {/* The app's own controls: the platform dropdown and the leaderboard's switch. */}
             <div className="lbp ex-bar">
               <div className="lbp-bar">
-                <PlatformSelect options={venues} value={chosen} onChange={(v) => setPicked(v.length === venues.length ? null : v)} />
                 <div className="lbp-seg" role="radiogroup" aria-label="Kind">
                   {(['all', ...KINDS] as const).filter((k) => k === 'all' || all.some((e) => e.kind === k)).map((k) => (
                     <button key={k} type="button" role="radio" aria-checked={kind === k} className={kind === k ? 'is-on' : ''} onClick={() => setKind(k)}>
@@ -168,6 +172,7 @@ function ExcludedView({ on = true, hero = false }: { on?: boolean; hero?: boolea
                     </button>
                   ))}
                 </div>
+                <PlatformSelect options={venues} value={chosen} onChange={(v) => setPicked(v.length === venues.length ? null : v)} align="end" className="ex-platforms" />
               </div>
             </div>
 
@@ -225,8 +230,10 @@ function Split({ long, short }: { long: number; short: number }) {
 function Row({ e, open, onToggle }: { e: Entry; open: boolean; onToggle: () => void }) {
   const pair = e.wallets.length === 2;
   const [a, b] = e.wallets;
-  const title = pair ? (e.kind === 'mirror' ? `${VENUE_LABEL[e.venue]} offsetting pair` : (a!.label ?? '').replace(/\s*\((long|short)\)$/i, '')) : a!.label ?? shortAddr(a!.address);
+  const title = pair ? (e.kind === 'mirror' ? `${VENUE_LABEL[e.venue]} delta-neutral pair` : (a!.label ?? '').replace(/\s*\((long|short)\)$/i, '')) : a!.label ?? shortAddr(a!.address);
   const net = pair ? pairNet(e) : 0;
+  // A book not read yet (just after the API starts, or a wallet the index has not reached): said, never $0.
+  const unread = e.wallets.every((w) => w.at === null);
   return (
     <li className={`ex-row is-${e.kind}${open ? ' is-open' : ''}`}>
       <button type="button" className="ex-row__bar" aria-expanded={open} onClick={onToggle}>
@@ -239,7 +246,9 @@ function Row({ e, open, onToggle }: { e: Entry; open: boolean; onToggle: () => v
         </span>
         <span className={`ex-kind is-${e.kind}`}>{KIND_LABEL[e.kind]}</span>
         <span className="ex-row__exp">
-          {pair ? (
+          {unread ? (
+            <span className="ex-unread">Positions not read yet</span>
+          ) : pair ? (
             <span className="ex-pairnet" title="What the two books still hold once added together">
               <span><b>{fmtUsdShort(gross(e) / 2)}</b> a side</span>
               <small>cancels to {fmtUsdShort(net)} ({((net / (gross(e) / 2 || 1)) * 100).toFixed(1)}%)</small>

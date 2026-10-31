@@ -319,8 +319,8 @@ const SearchIcon = () => (
  *   EVM                [↓]      collapsed; opens smoothly to the 4 largest holdings + "& N others"
  *   ─────────────────────
  *   Portfolio             ▦
- *   Send feedback         💬
  *   Copy Address          ⧉
+ *   Send feedback         💬   (after Copy Address: owner 2026-10-31)
  *   Sign out              ⇥   (always red)
  *
  * Perps has no action of its own (SoDEX has no route from Perps to a wallet -
@@ -520,13 +520,13 @@ export function AddressMenu({ address, onClose, closing = false, onExited, onPor
           <span>Portfolio</span>
           <PortfolioIcon />
         </button>
-        <button type="button" className="navaddr__item acct-menu__row" role="menuitem" onClick={run(() => openFeedback())}>
-          <span>{FEEDBACK_LABEL}</span>
-          <FeedbackIcon />
-        </button>
         <button type="button" className="navaddr__item acct-menu__row" role="menuitem" onClick={copy}>
           <span>{copied ? 'Copied' : 'Copy Address'}</span>
           <CopyIcon />
+        </button>
+        <button type="button" className="navaddr__item acct-menu__row" role="menuitem" onClick={run(() => openFeedback())}>
+          <span>{FEEDBACK_LABEL}</span>
+          <FeedbackIcon />
         </button>
         <button type="button" className="navaddr__item acct-menu__row acct-menu__row--out" role="menuitem" onClick={run(requestSignOut)}>
           <span>Sign out</span>
