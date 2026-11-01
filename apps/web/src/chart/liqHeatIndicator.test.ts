@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { boxed, cellAt, cellRange, cellsOf, heatColor, heatScale, refStep, snapshotFor, stepNorm, unboxed, type HeatData, type HeatPoint } from './liqHeatIndicator';
+import { boxed, cellAt, cellRange, cellsOf, snapRowsOf, heatColor, heatScale, refStep, snapshotFor, stepNorm, unboxed, type HeatData, type HeatPoint } from './liqHeatIndicator';
 
 const H = 3_600_000;
 const Q = 15 * 60_000;
@@ -83,4 +83,21 @@ test('a fine part replaces the snapshot cells inside its range, widened to whole
   assert.equal(cellsOf(q), cellsOf(q), 'kept per point');
   const plain: HeatPoint = { t: 0, p: 1, st: 1, b: [[3, 1, 0]] };
   assert.deepEqual(cellsOf(plain).map((c) => [c.lo, c.hi]), [[3, 4]]);
+});
+
+test('the live column: stream rows at the snapshot step, the levels the price crossed left out, the bands kept by side', () => {
+  // $20 rows around a price of 1,000: [index, long, short, long n, short n, long low, mid, high, short low, mid, high].
+  const rows = [
+    [45, 100, 0, 1, 0, 100],        // 900-920: a long below the price
+    [48, 50, 0, 1, 0, 0, 50],        // 960-980
+    [49, 30, 40, 1, 1, 30, 0, 0, 0, 0, 40], // 980-1000: both sides; the short below the price is past
+    [50, 70, 60, 1, 1, 0, 0, 70, 60], // 1000-1020: the long above the price is past
+    [55, 0, 25, 0, 1],               // 1100-1120
+  ];
+  const b = snapRowsOf(rows, 20, 100, 1_000);
+  assert.deepEqual(b, [
+    [9, 180, 0, 130, 50, 0, 0, 0, 0],
+    [10, 0, 60, 0, 0, 0, 60, 0, 0],
+    [11, 0, 25, 0, 0, 0, 0, 0, 0],
+  ]);
 });

@@ -6,7 +6,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { fineWindow, niceUp, stepAt, stepLabel, stepLadder, streamAsk, streamGroup, tickOf } from './liqSteps';
+import { autoStep, fineWindow, niceUp, stepAt, stepLabel, stepLadder, streamAsk, streamGroup, streamSteps, tickOf } from './liqSteps';
 
 test('each coin its own ladder: the default 0.125% of the price, a tenth, a hundredth, the SoDEX tick last', () => {
   assert.deepEqual(stepLadder(77_545, 1), [100, 10, 1], 'BTC: $100 (history kept $200), down to the $1 tick');
@@ -87,4 +87,25 @@ test('a coin\'s tick is its SoDEX perps market\'s; a coin SoDEX does not list ge
   assert.equal(tickOf('ETH', syms, 2_247), 0.1);
   assert.equal(tickOf('1000PEPE', syms, 0.004962), 0.000001);
   assert.equal(tickOf('NVDA', syms, 203.57), 0.002, 'not on SoDEX: niceStep of a hundred-thousandth');
+});
+
+test('Auto follows the zoom: the finest width the live data holds at about the cell size asked (owner 2026-11-01: "auto is bad as its just the 100 steps")', () => {
+  // BTC: the stream's $20 buckets, its fine layer's $1.
+  const near = streamSteps(20, 1);
+  assert.deepEqual(near.slice(0, 8), [1, 2, 5, 10, 20, 40, 100, 200]);
+  const far = streamSteps(20, null);
+  assert.equal(far[0], 20, 'beyond the fine layer: the stream only');
+  // A pane 200 px tall, 3 px a cell: $300 on screen wants $4.5 - $5; $3,000 wants $45 - $100; $100,000 - $2,000.
+  const at = (span: number, px = 200, per = 3) => autoStep((span / px) * per, near);
+  assert.equal(at(300), 5);
+  assert.equal(at(60), 1);
+  assert.equal(at(3_000), 100);
+  assert.equal(autoStep((100_000 / 700) * 3, far), 500, 'the live view zoomed out, 700 px wide: $428 wanted');
+  assert.equal(at(10), 1, 'finer than the finest: the finest');
+  assert.equal(autoStep(1e9, near), near.at(-1), 'coarser than every width: the coarsest');
+  assert.equal(autoStep(5, []), null);
+  // Historical: the snapshot step or its fine layers'.
+  assert.equal(autoStep((259 / 199) * 3, [100, 10, 1]), 10);
+  assert.equal(autoStep((50 / 199) * 3, [100, 10, 1]), 1);
+  assert.equal(autoStep((20_000 / 199) * 3, [100, 10, 1]), 100);
 });

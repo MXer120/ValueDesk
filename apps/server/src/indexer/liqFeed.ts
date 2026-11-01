@@ -19,6 +19,7 @@ import net from 'node:net';
 import { EventEmitter } from 'node:events';
 import type { Venue } from '../valuedesk/types.js';
 import type { LiveDelta } from '../valuedesk/liquidations/live.js';
+import type { LiqRow } from '../valuedesk/liquidations/levels.js';
 
 export const LIQ_FEED_PORT = Number(process.env.VALUESCAN_LIQ_FEED_PORT) || 8796;
 const HOST = '127.0.0.1';
@@ -93,6 +94,8 @@ export interface LiveCoin {
   ep: number;
   at: number;
   v: Map<Venue, LiveVenue>;
+  /** The fine layer (live.ts FineAgg): its step, range [lo, hi), epoch, and per venue its cells (rows without their index). */
+  f?: { st: number; lo: number; hi: number; ep: number; v: Map<Venue, Map<number, number[]>> };
 }
 
 /** A coin changed: the venues and bucket indices that did; `whole`: laid out anew (the browsers get it whole). */
@@ -101,6 +104,8 @@ export interface CoinChange {
   whole: boolean;
   venues: Map<Venue, number[]>;
   covered: Set<Venue>;
+  /** The fine layer's changed cells; `whole`: laid out anew. */
+  fine?: { whole: boolean; venues: Map<Venue, number[]> };
 }
 
 /**
@@ -191,7 +196,7 @@ export class LiqFeedState extends EventEmitter {
     const old = this.coins.get(d.coin);
     // A new layout (or a coin not seen yet): what the browsers hold of it no longer fits.
     const relayout = !old || old.ep !== d.ep;
-    const c: LiveCoin = relayout || d.whole ? { p: d.p, st: d.st, ep: d.ep, at: Date.now(), v: d.whole || relayout ? new Map() : old!.v } : old!;
+    const c: LiveCoin = relayout || d.whole ? { p: d.p, st: d.st, ep: d.ep, at: Date.now(), v: d.whole || relayout ? new Map() : old!.v, ...(old?.f && !relayout ? { f: old.f } : {}) } : old!;
     c.p = d.p;
     c.at = Date.now();
     this.coins.set(d.coin, c);
@@ -228,7 +233,28 @@ export class LiqFeedState extends EventEmitter {
         covered.add(venue);
       }
     }
-    this.emit('change', { coin: d.coin, whole: relayout, venues, covered } satisfies CoinChange);
+    const fine = d.f ? this.applyFine(c, d.f) : undefined;
+    this.emit('change', { coin: d.coin, whole: relayout, venues, covered, ...(fine ? { fine } : {}) } satisfies CoinChange);
+  }
+
+  /** The fine layer's part of a frame: a new layout of it replaces what is held. */
+  private applyFine(c: LiveCoin, f: NonNullable<LiveDelta['f']>): NonNullable<CoinChange['fine']> {
+    const whole = f.whole || !c.f || c.f.ep !== f.ep;
+    if (whole) c.f = { st: f.st, lo: f.lo, hi: f.hi, ep: f.ep, v: new Map() };
+    const held = c.f!;
+    const venues = new Map<Venue, number[]>();
+    for (const [venue, rows] of Object.entries(f.v) as Array<[Venue, LiqRow[]]>) {
+      let m = held.v.get(venue);
+      if (!m) { m = new Map(); held.v.set(venue, m); }
+      const idx: number[] = [];
+      for (const r of rows) {
+        if (!r[3] && !r[4]) m.delete(r[0]);
+        else m.set(r[0], r.slice(1));
+        idx.push(r[0]);
+      }
+      venues.set(venue, idx);
+    }
+    return { whole, venues };
   }
 }
 

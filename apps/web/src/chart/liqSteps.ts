@@ -104,3 +104,26 @@ export function fineWindow(lo: number, hi: number, step: number, cap = FINE_MAX_
   if ((to - from) / st > cap) to = from + cap * st;
   return { step: tidy(st), from: tidy(from), to: tidy(to) };
 }
+
+/** Multiples of the fine layer's cell (BTC $1) Auto may draw below the stream's own buckets. */
+const FINE_K = [1, 2, 5, 10, 20, 50, 100, 200, 500];
+
+/**
+ * The widths the live data holds, finest first: the stream's (its bucket times STREAM_K) and, when the
+ * window is within the fine layer's reach, the fine layer's below them (`fine`: its cell; BTC $1).
+ */
+export function streamSteps(base: number, fine: number | null): number[] {
+  const out = STREAM_K.map((k) => tidy(base * k));
+  if (fine && fine > 0) for (const k of FINE_K) { const s = tidy(fine * k); if (s < base * (1 - EPS)) out.push(s); }
+  return [...new Set(out)].sort((a, b) => a - b);
+}
+
+/**
+ * Auto's step (owner 2026-11-01: "auto is bad as its just the 100 steps no matter what"): the finest
+ * of `steps` at least `target` wide (the price a cell should span on screen), else the coarsest.
+ */
+export function autoStep(target: number, steps: readonly number[]): number | null {
+  const s = [...steps].filter((x) => x > 0).sort((a, b) => a - b);
+  if (!s.length) return null;
+  return s.find((x) => x >= target * (1 - EPS)) ?? s.at(-1)!;
+}

@@ -142,6 +142,32 @@ export const refStep = (points: readonly HeatPoint[]): number | null => points.a
 /** What a snapshot's cells are multiplied by to be read per `ref` of price (1 at the same width). */
 export const stepNorm = (q: HeatPoint, ref: number | null): number => (ref && q.st > 0 ? ref / q.st : 1);
 
+/**
+ * Stream rows (LiqRow at `step`) as snapshot rows (SnapRow) at `st`, as the indexer makes a snapshot
+ * (levels.ts snapOfNow): a level the price `p` has crossed is left out, a long above it or a short below.
+ */
+export function snapRowsOf(rows: ReadonlyArray<ArrayLike<number>>, step: number, st: number, p: number): HeatPoint['b'] {
+  const by = new Map<number, number[]>();
+  for (const r of rows) {
+    const lo = r[0]! * step;
+    const keepL = lo < p;
+    const keepS = lo + step > p;
+    const l = keepL ? r[1] ?? 0 : 0;
+    const s = keepS ? r[2] ?? 0 : 0;
+    if (!l && !s) continue;
+    const j = Math.floor(lo / st + 1e-9);
+    let b = by.get(j);
+    if (!b) { b = [j, 0, 0, 0, 0, 0, 0, 0, 0]; by.set(j, b); }
+    b[1]! += l;
+    b[2]! += s;
+    for (let k = 0; k < 3; k++) {
+      if (keepL) b[3 + k]! += r[5 + k] ?? 0;
+      if (keepS) b[6 + k]! += r[8 + k] ?? 0;
+    }
+  }
+  return [...by.values()].sort((a, b) => a[0]! - b[0]!) as HeatPoint['b'];
+}
+
 /** A drawn cell: its price range, its row, and the step it is of (the snapshot's or its fine part's). */
 export type HeatCell = { lo: number; hi: number; r: HeatPoint['b'][number]; st: number };
 

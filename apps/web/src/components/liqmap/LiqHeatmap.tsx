@@ -17,7 +17,8 @@
  * Resolution (owner 2026-10-31, chart/liqSteps.ts): per coin, Auto (Fine / Medium / Coarse) or a
  * fixed step in the coin's price units down to its SoDEX tick - BTC $100 by default, $10, $1. A
  * whole number of the stream's 0.02% buckets is the stream summed; finer comes from the API's
- * fine route for the window on screen, read every FINE_POLL_MS, and the legend says so.
+ * fine layer the stream carries for the window on screen (liveHeat.ts), a second apart like the
+ * buckets. Auto picks the step from the zoom: about PX_PER_CELL pixels a cell (Fine / Medium / Coarse).
  *
  * View (owner 2026-10-31) colours every view by side or by leverage band and shows only
  * the bands picked (chart/liqLev.ts); the historical view can lay the levels now over its
@@ -26,7 +27,6 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import type { LiqAt, LiqHeatmap as HeatApi, LiqHistory, LiqHistoryFine, LiqWallets } from '@sign/indexer/liqRead.js';
-import { FINE_LAYERS } from '@sign/valuedesk/liquidations/levels.js';
 import type { Engine } from '../../api';
 import { useStored, useSymbols } from '../../hooks';
 import { SCAN_VENUES, VENUE_LABEL, vsApi, type Venue } from '../../vsApi';
@@ -34,13 +34,13 @@ import { PlatformSelect } from '../PlatformSelect';
 import { VenueLogo } from '../VenueLogo';
 import { fmtPx, fmtUsdShort } from '../explore/model';
 import { usePolled } from '../explore/cohorts/parts';
-import { useLiveHeat } from './liveHeat';
+import { useLiveHeat, type FineSub } from './liveHeat';
 import { WalletView, type Res, type Side, type StepsView, type Unit, type ViewChange } from './WalletView';
 import { Chart } from '../Chart';
 import type { Chart as KChart } from 'klinecharts';
 import { CANDLE_PANE_ID } from '../../chart/theme';
-import { HEAT_FLOOR, LIQ_HEAT, barMsOf, boxed, cellAt, cellOf, heatScale, liqHeatTemplate, profileWidth, refStep, snapshotFor, stepNorm, stripWidth, type HeatData, type HeatPoint } from '../../chart/liqHeatIndicator';
-import { FINE_MAX_BUCKETS, fineWindow, niceUp, stepAt, stepLabel, stepLadder, streamAsk, streamGroup, tickOf, type StepLevel } from '../../chart/liqSteps';
+import { HEAT_FLOOR, LIQ_HEAT, barMsOf, boxed, cellAt, cellOf, heatScale, liqHeatTemplate, profileWidth, refStep, snapRowsOf, snapshotFor, stepNorm, stripWidth, type HeatData, type HeatPoint } from '../../chart/liqHeatIndicator';
+import { autoStep, fineWindow, niceUp, stepAt, stepLabel, stepLadder, streamAsk, streamGroup, streamSteps, tickOf, type StepLevel } from '../../chart/liqSteps';
 import { coinOfSymbol, groupFor, mapData, type LiqMapData } from '../../chart/liqMap';
 import {
   LEV_BANDS, LEV_COLOR, LEV_LABEL, addBands, isAllLev, levBandOf, levFilterOf, levelWindow, robustMax, shownBands, shownTotal, sideBands,
@@ -71,8 +71,12 @@ interface Prefs {
   steps: Record<string, StepLevel>;
 }
 const DEFAULTS: Prefs = { view: 'live', res: 'fine', unit: 'usd', venues: [...SCAN_VENUES], wallets: [], side: 'both', colorBy: 'side', lev: [...LEV_BANDS], strip: false, steps: {} };
-/** Exact steps (the fine route) are read this often: the books under them are a minute old at most. */
-const FINE_POLL_MS = 12_000;
+/** Exact steps from the fine route (some wallets, or past the stream's fine layer) are read this often: as the wallet filter's levels. */
+const FINE_POLL_MS = 10_000;
+/** Auto's cell height (or width, in Live): about this many pixels, by Fine / Medium / Coarse. */
+const PX_PER_CELL: Record<Res, number> = { fine: 3, medium: 6, coarse: 12 };
+/** A view narrower than this (not laid out yet) picks no step. */
+const MIN_PX = 40;
 
 export { coinOfSymbol };
 
@@ -232,17 +236,17 @@ export function LiqHeatmap({ symbol, engine, instance, address = null }: { symbo
   const coin = coinOfSymbol(symbol);
   const [pick, setPick] = useState<Pick | null>(null);
   useEffect(() => setPick(null), [coin, chosen.join(','), prefs.res, wkey, prefs.view, levKey]);
-  // The price window the view shows (it reports it): what exact steps are read for; and the
-  // historical view's time window (which snapshots' fine layers).
-  const [win, setWin] = useState<[number, number] | null>(null);
+  // The price window the view shows and the pixels it spans (it reports them): what Auto picks the
+  // step for and what exact steps are read for; and the historical view's time window.
+  const [win, setWin] = useState<[number, number, number] | null>(null);
   const [times, setTimes] = useState<[number, number] | null>(null);
   useEffect(() => { setWin(null); setTimes(null); }, [coin, prefs.view]);
-  const onWindow = useCallback((lo: number, hi: number) => setWin((w) => (w && w[0] === lo && w[1] === hi ? w : [lo, hi])), []);
+  const onWindow = useCallback((lo: number, hi: number, px: number) => setWin((w) => (w && w[0] === lo && w[1] === hi && w[2] === px ? w : [lo, hi, px])), []);
   const onTimes = useCallback((a: number, b: number) => setTimes((w) => (w && w[0] === a && w[1] === b ? w : [a, b])), []);
   const { symbols } = useSymbols('perps');
 
   const vkey = chosen.join(',');
-  // The historical view's snapshots (30 days), and its newest: width and price (the resolution's ladder and notes there).
+  // The historical view's snapshots (30 days), and its newest: width and price (the resolution's ladder there).
   const histOn = prefs.view === 'history';
   const hist = usePolled<LiqHistory>(
     histOn ? `${coin}|${vkey}|30d|${wkey}` : null,
@@ -252,86 +256,121 @@ export function LiqHeatmap({ symbol, engine, instance, address = null }: { symbo
   const coarsePts = histOn && hist.data?.coin === coin ? hist.data.points : EMPTY_POINTS;
   const newest = coarsePts.at(-1);
   const histAt = newest ? { st: newest.st, p: newest.p } : null;
-  // The historical view reads the levels now only for its strip.
-  const strip = prefs.view === 'history' && prefs.strip === true;
-  const needNow = prefs.view !== 'history' || strip;
+  // The historical view's strip of the levels now (its newest column reads them too).
+  const strip = histOn && prefs.strip === true;
   // Live over the WebSocket (a second apart); over HTTP, a read a minute, while the socket is down.
-  // The stream is summed to the bar width the view draws (in server buckets); the views ask for it as they zoom.
+  // The stream is summed to the bar width the view draws (in server buckets); the views ask for it as
+  // they zoom. A step finer than its buckets streams from its fine layer, for the window on screen
+  // (`fineSub`, settled from the render before: it needs the fine layer's step the stream sends).
   const [wantK, setWantK] = useState(5);
-  const live = useLiveHeat(coin, chosen, needNow && !wallets.length, wantK);
+  const [fineSub, setFineSub] = useState<FineSub>(null);
+  const live = useLiveHeat(coin, chosen, !wallets.length, wantK, wallets.length ? null : fineSub);
   const streamK = live.data ? live.k : 1;
   // Some wallets only: their levels read every 10 s (the stream is every wallet's).
   const heat = usePolled<HeatApi>(
-    !needNow || (live.connected && !wallets.length) ? null : `${coin}|${vkey}|${wkey}`,
+    live.connected && !wallets.length ? null : `${coin}|${vkey}|${wkey}`,
     (s) => vsApi.liquidations(coin, chosen, 'fine', s, wallets),
     wallets.length ? 10_000 : 60_000,
   );
-  const apiData = needNow ? (wallets.length ? heat.data : live.data ?? heat.data) : null;
+  const apiData = wallets.length ? heat.data : live.data ?? heat.data;
   const raw = useMemo(() => (apiData ? fromApi(apiData, side, lev) : null), [apiData, side, levKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const stripData = useMemo(() => (strip ? mapData(apiData, { side, lev, colorBy }) : null), [strip, apiData, side, levKey, colorBy]); // eslint-disable-line react-hooks/exhaustive-deps
   const h = raw;
   const res: Res = prefs.res === 'medium' || prefs.res === 'coarse' ? prefs.res : 'fine';
   const unit: Unit = prefs.unit === 'coin' ? 'coin' : 'usd';
   // The resolution: the coin's ladder from its price and SoDEX tick, the level kept for it. A panel
-  // set to Medium or Coarse before the steps keeps its bars (Auto) until a step is picked.
-  const price = h?.price ?? (prefs.view === 'history' ? histAt?.p ?? null : null);
+  // set to Medium or Coarse before the steps keeps Auto until a step is picked.
+  const price = h?.price ?? (histOn ? histAt?.p ?? null : null);
   const ladder = price ? stepLadder(price, tickOf(coin, symbols, price)) : [];
   const initial: StepLevel = res === 'fine' ? 0 : 'auto';
   const kept = prefs.steps && typeof prefs.steps === 'object' ? prefs.steps[coin] : undefined;
   const level: StepLevel = kept === 'auto' || (typeof kept === 'number' && kept >= 0) ? kept : initial;
   const picked = stepAt(level, ladder);
-  // The bar width in server buckets: from the price and the resolution only (groupFor), or the step
-  // picked when it is a whole number of them; told to the stream a quarter second after it settles,
-  // drawn at once from what is held meanwhile. A step that is not comes from the fine route, for the
-  // window on screen (fineWindow: coarser while that holds more than FINE_MAX_BUCKETS of it).
+  // The step drawn: the one picked, or Auto's (owner 2026-11-01: "auto is bad as its just the 100
+  // steps no matter what"): about PX_PER_CELL of the window's pixels a cell (Fine / Medium / Coarse
+  // under it), from the widths the live data holds - the stream's and, near the price, its fine
+  // layer's (BTC $1, $2, $5, $10...); in Historical, the snapshot's step or its fine layers'.
   const rawStep = h ? h.step / streamK : 0;
-  let want = h?.price && rawStep > 0 ? groupFor(rawStep, h.price, picked === null ? res : 'fine') : wantK;
-  let fineAsk: { step: number; from: number; to: number } | null = null;
-  let barStep: number | null = null;
-  if (picked !== null && h?.price && rawStep > 0 && prefs.view !== 'history') {
-    const k = streamGroup(picked, rawStep);
-    const fw = k ? null : win ? fineWindow(win[0], win[1], picked) : null;
-    const k2 = fw ? streamGroup(fw.step, rawStep) : null;
-    if (k) { want = k; barStep = picked; } else if (k2) { want = k2; barStep = fw!.step; } else { fineAsk = fw; barStep = fw?.step ?? null; }
+  const fm = live.fineMeta;
+  const inReach = !!(fm && win && win[0] >= fm.lo && win[1] <= fm.hi);
+  let step: number | null = picked;
+  // Only once the view has a size: unmeasured, it spans a pixel and Auto would pick the coarsest width.
+  if (level === 'auto' && win && win[2] >= MIN_PX) {
+    const target = ((win[1] - win[0]) / win[2]) * PX_PER_CELL[res];
+    step = histOn ? (histAt ? autoStep(target, [histAt.st, histAt.st / 10, histAt.st / 100]) : null)
+      : rawStep > 0 ? autoStep(target, streamSteps(rawStep, inReach ? fm!.st : null)) : null;
   }
-  useEffect(() => {
-    const t = setTimeout(() => setWantK(streamAsk(want)), 250);
-    return () => clearTimeout(t);
-  }, [want]);
-  const fineKey = fineAsk && needNow ? `${coin}|${vkey}|${wkey}|${fineAsk.step}|${fineAsk.from}|${fineAsk.to}` : null;
-  const fineR = usePolled<HeatApi>(fineKey, (s) => vsApi.liquidations(coin, chosen, 'fine', s, wallets, fineAsk ?? undefined), FINE_POLL_MS);
-  // An answer of the step asked (a window panned past stays drawn until the next one is read).
-  const fd = fineAsk && fineR.data && fineR.data.coin === coin && fineR.data.venues.join(',') === vkey && Math.abs(fineR.data.step / fineAsk.step - 1) < 1e-9 ? fineR.data : null;
-  const fine = useMemo(() => (fd ? fromApi(fd, side, lev) : null), [fd, side, levKey]); // eslint-disable-line react-hooks/exhaustive-deps
-  const barWidth = barStep ?? (h?.price && rawStep > 0 ? rawStep * want : null);
-  // Zoomed out past the cap at the step picked: drawn coarser (the stream, or the fine route at a round width), and said.
-  const coarser = picked !== null && barStep !== null && barStep > picked * (1 + 1e-9);
-  // The chart view's profile: the bars at the step drawn, the curves from the fine answer when it holds the price.
-  const chartH = prefs.view === 'chart' && h?.price && h.buckets.length ? h : null;
-  const group = Math.max(1, Math.round(want / streamK));
-  const fineOn = !!fineAsk;
-  const profile = useMemo(() => (chartH ? profileOf(fineOn && fine ? fine : regroup(chartH, group), cumSrc(chartH, fineOn ? fine : null), unit, colorBy) : null), [chartH, fineOn, fine, group, unit, colorBy]);
+  // The bar width in server buckets: from the price and Fine / Medium / Coarse until the window is
+  // known (groupFor), else the step when it is a whole number of them - told to the stream a quarter
+  // second after it settles, drawn at once from what is held meanwhile. A finer step streams from the
+  // fine layer for the window on screen (fineWindow: coarser while that holds more than
+  // FINE_MAX_BUCKETS of it); with wallets picked, or beyond the layer's reach, the fine route is read.
+  const fineSubOf = (w: { step: number; from: number; to: number }): FineSub => {
+    const fk = fm && !wallets.length && live.connected ? streamGroup(w.step, fm.st) : null;
+    if (!fk || fk > 1000) return null;
+    const from = Math.max(w.from, Math.ceil(fm!.lo / w.step) * w.step);
+    const to = Math.min(w.to, Math.floor(fm!.hi / w.step) * w.step);
+    return to > from ? { k: fk, from: +from.toPrecision(12), to: +to.toPrecision(12) } : null;
+  };
+  let want = h?.price && rawStep > 0 ? groupFor(rawStep, h.price, step === null ? res : 'fine') : wantK;
+  let fineAsk: { step: number; from: number; to: number } | null = null;
+  let sub: FineSub = null;
+  let barStep: number | null = null;
+  if (step !== null && h?.price && rawStep > 0 && !histOn) {
+    const k = streamGroup(step, rawStep);
+    const fw = k ? null : win ? fineWindow(win[0], win[1], step) : null;
+    const k2 = fw ? streamGroup(fw.step, rawStep) : null;
+    if (k) { want = k; barStep = step; } else if (k2) { want = k2; barStep = fw!.step; } else if (fw) {
+      barStep = fw.step;
+      sub = inReach ? fineSubOf(fw) : null;
+      if (!sub) fineAsk = fw;
+    }
+  }
 
   // Historical at a step finer than its snapshots keep (BTC $10, $1): their fine layers for the
   // price and time windows on screen (server liqRead.ts liqHistoryFine), merged into the snapshots
-  // they belong to (liqHeatIndicator.ts cellsOf). Every wallet only: the layers keep no addresses.
-  const finer = histOn && picked !== null && histAt !== null && picked < histAt.st * (1 - 1e-9);
+  // they belong to (liqHeatIndicator.ts cellsOf); its newest column is the stream's, fine layer and
+  // all. Every wallet only: the layers keep no addresses.
+  const finer = histOn && step !== null && histAt !== null && step < histAt.st * (1 - 1e-9);
   let histAsk: { step: number; from: number; to: number; t0: number; t1: number } | null = null;
   if (finer && !wallets.length && win && times) {
-    const fw = fineWindow(win[0], win[1], picked!);
+    const fw = fineWindow(win[0], win[1], step!);
     if (fw.step < histAt!.st * (1 - 1e-9)) {
       // The time window and half of it either side, on a grid of a quarter of it (viewers share answers, perf.ts).
       const span = Math.max(times[1] - times[0], 15 * 60_000);
       const g = Math.max(15 * 60_000, niceUp(span / 4));
       histAsk = { ...fw, t0: Math.floor((times[0] - span / 2) / g) * g, t1: Math.ceil((times[1] + span / 2) / g) * g };
+      sub = fineSubOf(fw);
     }
   }
+  // The stream at the snapshots' width in Historical (its newest column), whole buckets of it.
+  if (histOn && histAt && rawStep > 0) want = streamGroup(histAt.st, rawStep) ?? want;
+  useEffect(() => {
+    const t = setTimeout(() => setWantK(streamAsk(want)), 250);
+    return () => clearTimeout(t);
+  }, [want]);
+  const subKey = sub ? `${sub.k}|${sub.from}|${sub.to}` : '-';
+  useEffect(() => setFineSub(sub), [subKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  // The fine window streamed, when it is of the step asked (a window panned past stays drawn until the next arrives).
+  const lf = sub && live.fine && live.fine.k === sub.k ? live.fine : null;
+  const fineKey = fineAsk ? `${coin}|${vkey}|${wkey}|${fineAsk.step}|${fineAsk.from}|${fineAsk.to}` : null;
+  const fineR = usePolled<HeatApi>(fineKey, (s) => vsApi.liquidations(coin, chosen, 'fine', s, wallets, fineAsk ?? undefined), FINE_POLL_MS);
+  const fd = fineAsk && fineR.data && fineR.data.coin === coin && fineR.data.venues.join(',') === vkey && Math.abs(fineR.data.step / fineAsk.step - 1) < 1e-9 ? fineR.data : null;
+  const fineSrc = useMemo((): (HeatApi & { from?: number; to?: number }) | null => (lf && apiData ? { ...apiData, price: lf.p, step: lf.st, buckets: lf.buckets, from: lf.from, to: lf.to } : fd), [lf, apiData, fd]);
+  const fine = useMemo(() => (fineSrc && !histOn ? fromApi(fineSrc, side, lev) : null), [fineSrc, histOn, side, levKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  const fineOn = !!(lf || fineAsk);
+  const barWidth = barStep ?? (h?.price && rawStep > 0 ? rawStep * want : null);
+  // The chart view's profile: the bars at the step drawn, the curves from the fine answer when it holds the price.
+  const chartH = prefs.view === 'chart' && h?.price && h.buckets.length ? h : null;
+  const group = Math.max(1, Math.round(want / streamK));
+  const profile = useMemo(() => (chartH ? profileOf(fineOn && fine ? fine : regroup(chartH, group), cumSrc(chartH, fineOn ? fine : null), unit, colorBy) : null), [chartH, fineOn, fine, group, unit, colorBy]);
+
   const histFineKey = histAsk ? `${coin}|${vkey}|${histAsk.step}|${histAsk.from}|${histAsk.to}|${histAsk.t0}|${histAsk.t1}` : null;
   const hf = usePolled<LiqHistoryFine>(histFineKey, (s) => vsApi.liquidationHistoryFine(coin, chosen, histAsk!, s), 5 * 60_000);
   // An answer of the step asked (a window panned past stays drawn until the next one is read).
   const histFine = histAsk && hf.data && hf.data.coin === coin && hf.data.venues.join(',') === vkey && Math.abs(hf.data.step / histAsk.step - 1) < 1e-9 ? hf.data : null;
   // Only into a snapshot the history holds: a fine part newer than its answer (both are read every 5 minutes) waits for it.
-  const { points, finePts } = useMemo(() => {
+  const { points: snapPts, finePts } = useMemo(() => {
     if (!histFine?.points.length) return { points: coarsePts, finePts: null };
     const by = new Map(histFine.points.map((q) => [q.t, q]));
     const used: HeatPoint[] = [];
@@ -343,33 +382,25 @@ export function LiqHeatmap({ symbol, engine, instance, address = null }: { symbo
     });
     return { points: out, finePts: used.length ? used : null };
   }, [coarsePts, histFine]);
-  // The colours per the step drawn: a $1 cell is full at what $1 cells hold, a $100 cell around it reads as a hundred of them.
+  // The newest column: the stream now at the snapshots' step, and its fine window at the step drawn
+  // (a second apart, as the live view). Every wallet only, as the stream.
+  const livePt = useMemo((): HeatPoint | null => {
+    if (!histOn || wallets.length || !apiData?.price || !histAt || !newest || !(apiData.at > newest.t)) return null;
+    const p = apiData.price;
+    const f = lf ? { st: lf.st, lo: lf.from, hi: lf.to, b: snapRowsOf(lf.buckets, lf.st, lf.st, p) } : null;
+    return { t: apiData.at, p, st: histAt.st, b: snapRowsOf(apiData.buckets, apiData.step, histAt.st, p), f };
+  }, [histOn, wkey, apiData, histAt?.st, newest?.t, lf]); // eslint-disable-line react-hooks/exhaustive-deps
+  const points = useMemo(() => (livePt ? [...snapPts, livePt] : snapPts), [snapPts, livePt]);
+  // The colours per the step drawn (the snapshots', not the live column's: the scale holds still): a
+  // $1 cell is full at what $1 cells hold, a $100 cell around it reads as a hundred of them.
   const heatSc = useMemo(() => heatScale(finePts ?? coarsePts, side, lev), [finePts, coarsePts, side, levKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const refSt = finePts ? histFine!.step : null;
-  let histNote: string | null = null;
-  if (finer) {
-    const own = stepLabel(histAt!.st);
-    const layer = FINE_LAYERS.find((L) => histAt!.st / L.div <= picked! * (1 + 1e-9));
-    const reach = layer ? `±${fmtFixed(((layer.half * histAt!.st) / layer.div / histAt!.p) * 100, 1)}%` : null;
-    histNote = wallets.length ? `With wallets picked, Historical draws ${own} cells: its finer steps are of every wallet.`
-      : histAsk && histAsk.step > picked! * (1 + 1e-9) ? `${stepLabel(histAsk.step)} at this zoom: zoom in to under ${stepLabel((picked! * FINE_MAX_BUCKETS) / 3)} of price for ${stepLabel(picked!)}.`
-        : histAsk && !histFine ? `Reading ${stepLabel(histAsk.step)} cells…`
-          : histFine && histFine.since === null ? `${stepLabel(histFine.step)} cells are kept from now on, a snapshot every 15 minutes; until then ${own}.`
-            : histFine?.cut ? `${stepLabel(histFine.step)} cells from ${whenFmt(histFine.cut)} at this zoom (zoom in for more); before that ${own}.`
-              : histFine?.since && times && histFine.since > times[0] ? `${stepLabel(histFine.step)} cells from ${whenFmt(histFine.since)}; before that ${own}.`
-                : histFine && reach ? `${stepLabel(histFine.step)} cells within ${reach} of the price then; further out ${own}.` : null;
-  }
   const steps: StepsView | null = ladder.length ? {
     value: level === 'auto' ? 'auto' : String(Math.min(level, ladder.length - 1)),
     options: [['auto', 'Auto'], ...ladder.map((x, i): [string, string] => [String(i), stepLabel(x)])],
     initial: String(initial),
-    note: picked === null ? null
-      : prefs.view === 'history' ? histNote
-        : coarser ? `${stepLabel(barStep!)} at this zoom: zoom in to under ${stepLabel((picked * FINE_MAX_BUCKETS) / 3)} of price for ${stepLabel(picked)}.` : null,
+    note: null,
   } : null;
-  const zoomIn = coarser ? ` (zoom in for ${stepLabel(picked!)})` : '';
-  const fineNote = fineAsk ? `${stepLabel(fineAsk.step)} steps, exact from the books, read every ${FINE_POLL_MS / 1000} s${zoomIn}${fine ? '' : ' · reading…'}`
-    : coarser ? `${stepLabel(barStep!)} steps at this zoom${zoomIn}` : null;
   // What the live and chart views say instead of levels; and the historical view, instead of snapshots.
   const nowEmpty = !h ? (heat.error ? `Liquidation levels unavailable: ${heat.error}` : 'Reading the books…')
     : !h.price || !h.buckets.length ? `${wallets.length ? (wallets.length === 1 ? 'This wallet holds' : 'These wallets hold') + ` no ${coin} position with a liquidation price` : `No tracked ${coin} positions with a liquidation price`} on ${chosen.length === SCAN_VENUES.length ? 'any platform' : chosen.map((v) => VENUE_LABEL[v]).join(', ')}.`
@@ -390,7 +421,7 @@ export function LiqHeatmap({ symbol, engine, instance, address = null }: { symbo
         <div className="lqm-seg" role="tablist" aria-label="View">
           {(['live', 'chart', 'history'] as const).map((v) => (
             <button key={v} type="button" role="tab" aria-selected={prefs.view === v} className={prefs.view === v ? 'is-on' : ''} onClick={() => set({ view: v })}>
-              {v === 'live' ? <><span className={`lqm-dot${live.connected ? ' is-on' : ''}`} aria-hidden="true" title={fineAsk ? `Exact steps: read every ${FINE_POLL_MS / 1000} s (the stream is 0.02% of the price wide)` : live.connected ? 'Streaming: updates every second' : 'Not streaming: refreshed every minute'} />Live</> : v === 'chart' ? 'Chart' : 'Historical'}
+              {v === 'live' ? <><span className={`lqm-dot${live.connected ? ' is-on' : ''}`} aria-hidden="true" title={live.connected ? 'Streaming: updates every second' : 'Not streaming: refreshed every minute'} />Live</> : v === 'chart' ? 'Chart' : 'Historical'}
             </button>
           ))}
         </div>
@@ -417,7 +448,6 @@ export function LiqHeatmap({ symbol, engine, instance, address = null }: { symbo
             <><span><i className="lqm-sw is-long" />Long liquidations</span><span><i className="lqm-sw is-short" />Short liquidations</span></>
           )}
           {prefs.view === 'live' && <><span><i className="lqm-ln is-long" />Cumulative longs</span><span><i className="lqm-ln is-short" />Cumulative shorts</span></>}
-          {fineNote && prefs.view !== 'history' && <span className="lqm-legend-note" title="The stream sums the live engine's 0.02% buckets; a finer step is bucketed from every position's exact liquidation price, for the price window on screen">{fineNote}</span>}
         </div>
       )}
       <div className="lqm-body">
@@ -435,7 +465,7 @@ export function LiqHeatmap({ symbol, engine, instance, address = null }: { symbo
             strip={histOn ? stripData : profile}
             profile={!histOn}
             fmt={histOn ? fmtUsdShort : (v) => fmtVal(v, unit, coin)}
-            note={histOn ? histEmpty ?? histNote : profile ? null : nowEmpty}
+            note={histOn ? histEmpty : profile ? null : nowEmpty}
             onWindow={onWindow}
             onTimes={onTimes}
             onPick={setPick}
@@ -443,7 +473,7 @@ export function LiqHeatmap({ symbol, engine, instance, address = null }: { symbo
         ) : nowEmpty ? (
           <p className="lqm-empty">{nowEmpty}</p>
         ) : (
-          <LiveView h={h!} fine={fineAsk ? fine : null} onWindow={onWindow} unit={unit} want={want} streamK={streamK} colorBy={colorBy} lev={lev} onPick={setPick} pick={pick} />
+          <LiveView h={h!} fine={fineOn ? fine : null} onWindow={onWindow} unit={unit} want={want} streamK={streamK} colorBy={colorBy} lev={lev} onPick={setPick} pick={pick} />
         )}
         {/* The wallets now: a bar of the live and chart views, or of the historical view's strip. */}
         {pick && pick.at === undefined && h && <Details coin={coin} venues={chosen} pick={pick} price={h.price} wallets={wallets} lev={lev} onClose={() => setPick(null)} />}
@@ -550,9 +580,11 @@ const countText = (n: number, lev: LevFilter, word = ' positions') => (isAllLev(
 // --- live ---------------------------------------------------------------------------------
 
 const M = { l: 56, r: 60, t: 10, b: 24 };
+/** The live view's narrowest window, as a share of the price. */
+const MIN_SPAN = 0.0005;
 
 /** Wheel zooms the price, drag pans; wheel on a side axis scales it; a double-click resets the axes. */
-function LiveView({ h: base, fine, onWindow, unit, want, streamK, colorBy, lev, onPick, pick }: { h: Heat; fine: Heat | null; onWindow: (lo: number, hi: number) => void; unit: Unit; want: number; streamK: number; colorBy: ColorBy; lev: LevFilter; onPick: (p: Pick) => void; pick: Pick | null }) {
+function LiveView({ h: base, fine, onWindow, unit, want, streamK, colorBy, lev, onPick, pick }: { h: Heat; fine: Heat | null; onWindow: (lo: number, hi: number, px: number) => void; unit: Unit; want: number; streamK: number; colorBy: ColorBy; lev: LevFilter; onPick: (p: Pick) => void; pick: Pick | null }) {
   const [el, setEl] = useState<HTMLDivElement | null>(null);
   const [ref, { w, h: ht }] = useSize<HTMLDivElement>();
   const bind = useCallback((x: HTMLDivElement | null) => { ref(x); setEl(x); }, [ref]);
@@ -572,10 +604,12 @@ function LiveView({ h: base, fine, onWindow, unit, want, streamK, colorBy, lev, 
     for (const b of base.buckets) if (b[2] > 0) t = Math.max(t, b[0] + base.step);
     return t;
   }, [base]);
+  // Zoomed in no further than MIN_SPAN of the price (BTC ~$39: $1 cells some 16 px wide), around the middle.
   const clamp = ([a, b]: [number, number]): [number, number] => {
-    const span = Math.min(b - a, top);
-    let lo2 = a;
-    let hi2 = a + span;
+    const min = (base.price ?? 0) * MIN_SPAN;
+    const span = Math.min(Math.max(b - a, min), top);
+    let lo2 = b - a < min ? (a + b) / 2 - span / 2 : a;
+    let hi2 = lo2 + span;
     if (lo2 < 0) { lo2 = 0; hi2 = span; }
     if (hi2 > top) { hi2 = top; lo2 = top - span; }
     return [lo2, hi2];
@@ -586,7 +620,7 @@ function LiveView({ h: base, fine, onWindow, unit, want, streamK, colorBy, lev, 
   const k = Math.max(1, Math.round(want / streamK));
   // Exact steps for the window (the fine route) when asked; the window, the curves and the axis stay the stream's.
   const h = useMemo(() => fine ?? regroup(base, k), [fine, base, k]);
-  useEffect(() => onWindow(lo, hi), [lo, hi, onWindow]);
+  useEffect(() => { if (w > 0) onWindow(lo, hi, W); }, [lo, hi, w, W, onWindow]);
   const shown = h.buckets.filter((b) => b[0] + h.step > lo && b[0] < hi);
   const { fit: fitBar, top: topBar } = barScale(shown, unit, colorBy);
   const fitCum = Math.max(1e-12, ...[...cum.long, ...cum.short].filter(([px]) => px >= lo && px <= hi).map(([, v]) => v));
@@ -773,7 +807,7 @@ function ChartPanel({ engine, symbol, points, scale, refSt, side, colorBy, lev, 
   /** A figure of the strip in the unit shown. */
   fmt: (v: number) => string;
   note: string | null;
-  onWindow: (lo: number, hi: number) => void;
+  onWindow: (lo: number, hi: number, px: number) => void;
   onTimes: (t0: number, t1: number) => void;
   onPick: (p: Pick) => void;
 }) {
@@ -819,7 +853,7 @@ function ChartPanel({ engine, symbol, points, scale, refSt, side, colorBy, lev, 
       const [top, bot] = kc.convertFromPixel([{ x: 0, y: 0 }, { x: 0, y: pane.height }], { paneId: CANDLE_PANE_ID }) as Array<{ value?: number }>;
       const hi = top?.value;
       const lo = bot?.value;
-      if (lo !== undefined && hi !== undefined && Number.isFinite(lo) && Number.isFinite(hi) && hi > lo) report.current.onWindow(Math.max(0, lo), hi);
+      if (lo !== undefined && hi !== undefined && Number.isFinite(lo) && Number.isFinite(hi) && hi > lo) report.current.onWindow(Math.max(0, lo), hi, pane.height);
       const list = kc.getDataList();
       if (list.length) {
         const r = kc.getVisibleRange();
