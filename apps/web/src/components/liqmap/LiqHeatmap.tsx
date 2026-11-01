@@ -239,11 +239,17 @@ export function LiqHeatmap({ symbol, engine, instance, address = null }: { symbo
   useEffect(() => setPick(null), [coin, chosen.join(','), prefs.res, wkey, prefs.view, levKey]);
   // The price window the view shows and the pixels it spans (it reports them): what Auto picks the
   // step for and what exact steps are read for; and the historical view's time window.
-  const [win, setWin] = useState<[number, number, number] | null>(null);
-  const [times, setTimes] = useState<[number, number] | null>(null);
-  useEffect(() => { setWin(null); setTimes(null); }, [coin, prefs.view]);
-  const onWindow = useCallback((lo: number, hi: number, px: number) => setWin((w) => (w && w[0] === lo && w[1] === hi && w[2] === px ? w : [lo, hi, px])), []);
-  const onTimes = useCallback((a: number, b: number) => setTimes((w) => (w && w[0] === a && w[1] === b ? w : [a, b])), []);
+  // Kept with the coin and view they were reported for, not reset when those change: a view reports
+  // as it mounts (a child's effect runs before this one's), and the live view only again once its
+  // window moves - a reset after it left the step picked undrawn (owner 2026-11-01: "sometimes still
+  // switching to $100").
+  const winKey = `${coin}|${prefs.view}`;
+  const [winAt, setWinAt] = useState<{ k: string; w: [number, number, number] } | null>(null);
+  const [timesAt, setTimesAt] = useState<{ k: string; w: [number, number] } | null>(null);
+  const win = winAt && winAt.k === winKey ? winAt.w : null;
+  const times = timesAt && timesAt.k === winKey ? timesAt.w : null;
+  const onWindow = useCallback((lo: number, hi: number, px: number) => setWinAt((x) => (x && x.k === winKey && x.w[0] === lo && x.w[1] === hi && x.w[2] === px ? x : { k: winKey, w: [lo, hi, px] })), [winKey]);
+  const onTimes = useCallback((a: number, b: number) => setTimesAt((x) => (x && x.k === winKey && x.w[0] === a && x.w[1] === b ? x : { k: winKey, w: [a, b] })), [winKey]);
   const { symbols } = useSymbols('perps');
 
   const vkey = chosen.join(',');
