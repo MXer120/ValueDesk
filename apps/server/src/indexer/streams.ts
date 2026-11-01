@@ -557,12 +557,16 @@ export class LighterStream {
   private readyAt: Array<number | null> = [];
   private timer?: NodeJS.Timeout;
   private lastSend = 0;
+  /** The socket served first next time: they take turns. */
+  private turn = 0;
   /** When each socket's subscribes started (its last open), for the log. */
   private openAt: number[] = [];
   /** Lighter's other messages (errors), by type: how many, so the log names each type without flooding. */
   private others = new Map<string, number>();
   /** Subscribe messages wait this long between them, across every socket: at most 182 a minute, beside 12 pings (Lighter: 200). 330 ms, not 400: after a restart all 224 markets are whole again in ~75 s, under the 2-minute gap that breaks a stream's span (measured 2026-11-01: one socket's 54 markets confirm in 22 s at 400 ms with no error). */
   static SEND_GAP_MS = 330;
+  /** At most this many subscribes in one go (a late timer catching up): 182 a minute + 6 + 12 pings stays within Lighter's 200. */
+  static BURST = 6;
   static PER_SOCKET = 56;
   static CONFIRM_MS = 20_000;
   static PING_MS = 20_000;
@@ -631,27 +635,43 @@ export class LighterStream {
     for (const s of this.sockets) s.stop();
   }
 
-  /** Send the next due subscribe (one per SEND_GAP_MS over all sockets). */
+  /**
+   * Send the subscribes due: one per SEND_GAP_MS over all sockets on average, and when this
+   * timer comes late, the ones it owes at once (at most BURST). One per call before: the indexer's
+   * thread lags 2-10 s while a board builds, every late tick was a subscribe lost, and after a
+   * restart the four sockets came up about a minute apart (2026-11-01) instead of ~18 s each.
+   * The sockets take turns, so each is whole about as soon as the others.
+   */
   private pump(): void {
     const now = Date.now();
-    if (now - this.lastSend < LighterStream.SEND_GAP_MS) return;
-    for (let i = 0; i < this.groups.length; i++) {
-      const send = this.sendFns[i];
-      if (!send) continue;
-      for (const id of this.groups[i]!) {
-        if (this.confirmed[i]!.has(id)) continue;
-        const at = this.sentAt[i]!.get(id);
-        if (at !== undefined && now - at < LighterStream.CONFIRM_MS) continue;
+    let owed = Math.min(LighterStream.BURST, Math.floor((now - this.lastSend) / LighterStream.SEND_GAP_MS));
+    if (owed <= 0) return;
+    let sent = 0;
+    for (let round = 0; owed > 0; round++) {
+      let any = false;
+      for (let k = 0; k < this.groups.length && owed > 0; k++) {
+        const i = (this.turn + k) % this.groups.length;
+        const send = this.sendFns[i];
+        if (!send) continue;
+        const id = this.groups[i]!.find((g) => !this.confirmed[i]!.has(g) && !(now - (this.sentAt[i]!.get(g) ?? -Infinity) < LighterStream.CONFIRM_MS));
+        if (id === undefined) continue;
         try {
           send({ type: 'subscribe', channel: `trade/${id}` });
         } catch {
-          return;
+          owed = 0;
+          break;
         }
         this.sentAt[i]!.set(id, now);
-        this.lastSend = now;
-        return;
+        owed -= 1;
+        sent += 1;
+        any = true;
       }
+      if (!any) break;
     }
+    if (!sent) return;
+    this.turn = (this.turn + 1) % Math.max(1, this.groups.length);
+    // The budget is spent, not the time: a burst of n moves the clock on by n gaps (never ahead of now).
+    this.lastSend = Math.min(now, Math.max(this.lastSend, now - LighterStream.BURST * LighterStream.SEND_GAP_MS) + sent * LighterStream.SEND_GAP_MS);
   }
 
   /** One raw message on socket `i`. Public for tests. */

@@ -100,3 +100,34 @@ test('Lighter: what it says besides prints is logged (three of a kind, then ever
   assert.equal(LighterStream.PER_SOCKET, 56);
   assert.ok(60_000 / LighterStream.SEND_GAP_MS + 4 * (60_000 / LighterStream.PING_MS) <= 200, 'within Lighter\'s 200 messages a minute');
 });
+
+test('lighter pacing: a late timer catches up (at most BURST), the sockets take turns, and a minute stays within 200', () => {
+  const st = new LighterStream(() => {}, async () => new Map(), 'ws://127.0.0.1:9', () => {});
+  const sent: Array<[number, number]> = [];
+  const raw = st as unknown as { groups: number[][]; confirmed: Array<Set<number>>; sentAt: Array<Map<number, number>>; sendFns: Array<((m: unknown) => void) | null>; lastSend: number; pump(): void };
+  raw.groups = [0, 1, 2, 3].map((s) => Array.from({ length: 56 }, (_, k) => s * 56 + k));
+  raw.confirmed = raw.groups.map(() => new Set());
+  raw.sentAt = raw.groups.map(() => new Map());
+  raw.sendFns = raw.groups.map((_, i) => (m: unknown) => sent.push([i, Number(String((m as { channel: string }).channel).slice(6))]));
+  const real = Date.now;
+  let t = 1_000_000;
+  Date.now = () => t;
+  try {
+    raw.lastSend = t - 10 * LighterStream.SEND_GAP_MS; // the thread was busy: ten gaps owed
+    raw.pump();
+    assert.equal(sent.length, LighterStream.BURST, 'a burst, capped');
+    assert.deepEqual(new Set(sent.map(([i]) => i)), new Set([0, 1, 2, 3]), 'every socket gets its turn');
+    t += 100;
+    raw.pump();
+    assert.equal(sent.length, LighterStream.BURST, 'then the regular pace again');
+    // One minute of ticks every 100 ms, nothing confirmed back: never more than the budget.
+    sent.length = 0;
+    for (let k = 0; k < 600; k++) {
+      t += 100;
+      raw.pump();
+    }
+    assert.ok(sent.length + 4 * (60_000 / LighterStream.PING_MS) <= 200, `${sent.length} subscribes in a minute`);
+  } finally {
+    Date.now = real;
+  }
+});
