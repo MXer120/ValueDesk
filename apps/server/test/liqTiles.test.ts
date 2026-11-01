@@ -190,3 +190,48 @@ test('after a restart the index reads the metas file, not the snapshots, and ans
     T.resetLiqTiles();
   }
 });
+
+test('some wallets: their index and tiles are cut from one rebuilt history and give it back exactly', async () => {
+  const { IndexStore } = await import('../src/indexer/store.js');
+  const { liqHistory } = await import('../src/indexer/liqRead.js');
+  const T = await import('../src/indexer/liqTiles.js');
+  const s = new IndexStore(process.env.VALUESCAN_INDEX_DB!);
+  const now = Date.now();
+  const listed = liqHistory('BTC', ['hyperliquid', 'sodex'], '30d')!.points;
+  const W = [`0x${'a'.repeat(40)}`, `0x${'b'.repeat(40)}`];
+  // Two wallets open, move and close levels across the snapshots on sodex (0), hyperliquid (1) and arcus (4, not asked: left out) - types.ts VENUES.
+  const r = rng(21);
+  let ids = new Map<string, number>();
+  for (let k = 0; k < listed.length; k += 7) {
+    const t = listed[k]!.t;
+    const changed = W.flatMap((w, j) => [0, 1, 4].map((venue) => ({ aid: ids.get(w) ?? w, coin: 'BTC', venue, side: (j + venue) % 2 ? 1 : -1, liq: 78_000 * (0.3 + 2.5 * r()), usd: Math.round(1_000 + r() * 2e6), lev: 3 + r() * 40 })));
+    const got = s.putLiqLog(t, k ? [] : W, changed, k % 21 === 14 ? [{ aid: ids.get(W[0]!)!, coin: 'BTC', venue: 1 }] : []);
+    if (!k) ids = got;
+  }
+  const venues = ['hyperliquid', 'sodex'];
+  const whole = liqHistory('BTC', venues as never, '30d', W)!;
+  assert.ok(whole.points.length > 10, 'the wallets hold levels in many snapshots');
+  const idx = (await T.liqTileIndexOf('BTC', venues as never, W, now))!;
+  assert.deepEqual(idx.points, whole.points.map((q) => ({ t: q.t, p: q.p, st: q.st })), 'the index lists their snapshots');
+  assert.deepEqual(idx.scale, T.histScales(whole.points.map((q) => ({ st: q.st, sc: T.snapScales(q.b) }))), 'their scales');
+  assert.equal(Object.keys(idx.scale).length, 21);
+  for (const pl of [0, 1]) {
+    const span = T.bandSpan(idx.bw, pl);
+    const got = new Map<number, number[][]>();
+    for (let tt = Math.floor(whole.points[0]!.t / T.tileMs(0)) * T.tileMs(0); tt <= now; tt += T.tileMs(0)) {
+      const bands = new Set<number>();
+      for (const q of whole.points) for (const row of q.b) bands.add(T.bandOf(row[0], q.st, span));
+      for (const band of bands) {
+        const tile = (await T.liqTileOf('BTC', venues as never, W, { tl: 0, tt, pl, band, bw: idx.bw }, now))!;
+        for (const q of tile.points) got.set(q.t, [...(got.get(q.t) ?? []), ...q.b]);
+      }
+    }
+    for (const q of whole.points) assert.deepEqual((got.get(q.t) ?? []).sort((a, b) => a[0]! - b[0]!), q.b, `pl ${pl}: snapshot ${q.t}`);
+  }
+  // Rebuilt once: a new level within WALLET_HIST_MS is not in the answers held; after it, it is.
+  s.putLiqLog(listed.at(-1)!.t, [], [{ aid: ids.get(W[1]!)!, coin: 'BTC', venue: 1, side: 1, liq: 50_000, usd: 7_777_777 }], []);
+  const held = (await T.liqTileIndexOf('BTC', venues as never, W, now + 1_000))!;
+  assert.deepEqual(held.scale, idx.scale, 'the same answer within the minute');
+  T.resetWalletTiles();
+  s.close();
+});

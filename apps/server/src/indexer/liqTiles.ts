@@ -41,6 +41,7 @@ import { dataDir } from '../builder/paths.js';
 import type { Venue } from '../valuedesk/types.js';
 import { LEV_BANDS, type LevBand } from '../valuedesk/liquidations/math.js';
 import { snapBand, trimRow, type LiqSnap, type SnapRow } from '../valuedesk/liquidations/levels.js';
+import { liqHistory, type LiqHistory } from './liqRead.js';
 import { reader } from './reader.js';
 import type { IndexStore } from './store.js';
 
@@ -61,6 +62,8 @@ export const bandSpan = (bw: number, pl: number): number => +(bw * 4 ** pl).toPr
 export const TILE_INDEX_CACHE = 'public, max-age=60, stale-while-revalidate=120';
 /** Cache-Control: a final tile (its slot passed, or asked up to a snapshot that exists). */
 export const TILE_FINAL_CACHE = 'public, max-age=86400, stale-while-revalidate=86400';
+/** Cache-Control: the index and tiles of some wallets (rebuilt from the change log; a snapshot every 15 minutes). */
+export const TILE_WALLET_CACHE = 'public, max-age=300, stale-while-revalidate=300';
 
 /**
  * The level-0 band width for a price: the largest 1, 2 or 5 x 10^n at most BAND_SHARE of it (BTC
@@ -469,4 +472,65 @@ export function resetLiqTiles(): void {
   metasRead = false;
   if (saveTimer) clearTimeout(saveTimer);
   saveTimer = null;
+}
+
+// --- some wallets (the wallet filter) ------------------------------------------------------
+
+/**
+ * The wallet filter in tiles too (perf session 2026-11-01, the owner's "optimize everything ...
+ * loading times + device hardware usage"): its history was one answer of 30 days, re-read every
+ * five minutes. A wallet set's history is rebuilt from the change log once (liqRead.ts liqHistory
+ * with `wallets`) and kept WALLET_HIST_MS; its index and every tile are cut from that one answer,
+ * on the same grid as every wallet's. Kept TILE_WALLET_CACHE by the edge and the browser.
+ */
+export const WALLET_HIST_MS = 60_000;
+const WALLET_HIST_MAX = 32;
+const walletHists = new Map<string, { at: number; h: Promise<LiqHistory | null> }>();
+
+function walletHistory(coin: string, venues: readonly Venue[], wallets: readonly string[], now: number): Promise<LiqHistory | null> {
+  const key = `${venueKey(coin, venues)}|${[...wallets].sort().join(',')}`;
+  const hit = walletHists.get(key);
+  if (hit && now - hit.at < WALLET_HIST_MS) return hit.h;
+  if (walletHists.size >= WALLET_HIST_MAX) for (const [k, v] of walletHists) if (now - v.at >= WALLET_HIST_MS || walletHists.size >= WALLET_HIST_MAX) walletHists.delete(k);
+  const h = Promise.resolve().then(() => liqHistory(coin, venues, '30d', wallets));
+  walletHists.set(key, { at: now, h });
+  h.catch(() => walletHists.delete(key));
+  return h;
+}
+
+/** The index of some wallets' history: their snapshots (those where they held a level), the scales over them. */
+export async function liqTileIndexOf(coin: string, venues: readonly Venue[], wallets: readonly string[], now = Date.now()): Promise<LiqTileIndex | null> {
+  const h = await walletHistory(coin, venues, wallets, now);
+  if (!h) return null;
+  const last = h.points.at(-1);
+  return {
+    coin, venues: [...venues],
+    newest: last?.t ?? null,
+    slot: SLOT_MS, bw: last ? bandWidth(last.p) : 0, tLevels: T_LEVELS, pLevels: P_LEVELS,
+    points: h.points.map((q) => ({ t: q.t, p: q.p, st: q.st })),
+    scale: histScales(h.points.map((q) => ({ st: q.st, sc: snapScales(q.b) }))),
+    coins: h.coins,
+  };
+}
+
+/** One tile of some wallets' history, cut from the same answer as their index. */
+export async function liqTileOf(coin: string, venues: readonly Venue[], wallets: readonly string[], ask: TileAsk, now = Date.now()): Promise<LiqTile | null> {
+  const h = await walletHistory(coin, venues, wallets, now);
+  if (!h) return null;
+  const end = ask.tt + tileMs(ask.tl);
+  const upTo = Math.min(end - 1, ask.v ?? Number.MAX_SAFE_INTEGER);
+  const span = bandSpan(ask.bw, ask.pl);
+  const points: LiqTile['points'] = [];
+  for (const q of h.points) {
+    if (q.t < ask.tt || q.t > upTo) continue;
+    points.push({ t: q.t, p: q.p, st: q.st, b: q.b.filter((r) => bandOf(r[0], q.st, span) === ask.band) });
+  }
+  const newest = h.points.at(-1)?.t ?? null;
+  const final = newest !== null && (newest >= end || (ask.v !== undefined && newest >= ask.v));
+  return { coin, venues: [...venues], ...ask, final, points };
+}
+
+/** Tests: forget the wallet histories held. */
+export function resetWalletTiles(): void {
+  walletHists.clear();
 }

@@ -20,8 +20,9 @@
  * bucket (the same rows, so nothing is counted twice): a zoom shows what it held until its own tiles
  * arrive. A part of the window not read yet has no cells for the moment it takes.
  *
- * The wallet filter reads the one-piece history (its levels are rebuilt from the change log per
- * request), and so does every view while the tile route answers nothing (an API before it).
+ * The wallet filter reads tiles too (`wallets`: the server rebuilds the wallets' history from the
+ * change log once a minute and cuts the same tiles from it, kept five minutes); every view reads
+ * the one-piece history only while the tile route answers nothing (an API before it).
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { LiqHistory } from '@sign/indexer/liqRead.js';
@@ -66,14 +67,14 @@ function trim(keep: ReadonlySet<string>): void {
 }
 
 /** Read a tile unless held or on its way: a promise when a read starts, null when there is nothing to do. */
-function fetchTile(coin: string, venues: readonly Venue[], vkey: string, k: TileKey): Promise<void> | null {
+function fetchTile(coin: string, venues: readonly Venue[], vkey: string, k: TileKey, wallets: readonly string[]): Promise<void> | null {
   const id = tileId(coin, vkey, k);
   const h = held.get(id);
   if (h?.tile) { touch(id, h); return null; }
   if (h?.loading) return null;
   if (h && Date.now() - h.failedAt < RETRY_MS) return null;
   const entry: Held = { tile: null, rows: 0, failedAt: 0, loading: null, t0: k.t0, t1: k.t1, lo: k.lo, hi: k.hi };
-  entry.loading = vsApi.liquidationTile(coin, venues, { tl: k.tl, tt: k.tt, pl: k.pl, band: k.band, bw: k.bw, v: k.v }).then(
+  entry.loading = vsApi.liquidationTile(coin, venues, { tl: k.tl, tt: k.tt, pl: k.pl, band: k.band, bw: k.bw, v: k.v }, undefined, wallets).then(
     (tile) => {
       entry.tile = tile;
       entry.rows = tile.points.reduce((n, q) => n + q.b.length, 0);
@@ -125,13 +126,14 @@ const EMPTY: HeatPoint[] = [];
  * history, in one piece. Null coin: nothing read.
  */
 export function useHistTiles(coin: string | null, venues: readonly Venue[], view: TileWindow | null, wallets: readonly string[] = []): HistTiles {
-  const vkey = venues.join(',');
   const wkey = wallets.join(',');
-  const tiled = !!coin && !wallets.length;
-  const ir = usePolled<LiqTileIndex>(tiled ? `${coin}|${vkey}|tiles` : null, (s) => vsApi.liquidationTiles(coin!, venues, s), INDEX_POLL_MS);
-  const idx = tiled && ir.data && ir.data.coin === coin && ir.data.venues.join(',') === vkey ? ir.data : null;
-  // The one-piece history: the wallet filter, or every view while the tile route answers nothing.
-  const whole = !!coin && (!!wallets.length || (!!ir.error && !idx));
+  // The tiles held are keyed by the venues and, with the wallet filter, its wallets.
+  const vkey = wallets.length ? `${venues.join(',')}|w:${wkey}` : venues.join(',');
+  const tiled = !!coin;
+  const ir = usePolled<LiqTileIndex>(tiled ? `${coin}|${vkey}|tiles` : null, (s) => vsApi.liquidationTiles(coin!, venues, s, wallets), INDEX_POLL_MS);
+  const idx = tiled && ir.data && ir.data.coin === coin && !ir.stale ? ir.data : null;
+  // The one-piece history: every view while the tile route answers nothing.
+  const whole = !!coin && !!ir.error && !idx;
   const hr = usePolled<LiqHistory>(whole ? `${coin}|${vkey}|30d|${wkey}` : null, (s) => vsApi.liquidationHistory(coin!, venues, '30d', s, wallets), 5 * 60_000);
   const hist = whole && hr.data && hr.data.coin === coin ? hr.data : null;
 
@@ -142,11 +144,13 @@ export function useHistTiles(coin: string | null, venues: readonly Venue[], view
   const [ver, setVer] = useState(0);
   const venuesRef = useRef(venues);
   venuesRef.current = venues;
+  const walletsRef = useRef(wallets);
+  walletsRef.current = wallets;
   useEffect(() => {
     if (!idx || !want.length || !coin) return;
     let alive = true;
     const bump = () => { if (alive) setVer((v) => v + 1); };
-    const read = (ks: readonly TileKey[]) => ks.map((k) => fetchTile(coin, venuesRef.current, vkey, k)).filter((p): p is Promise<void> => !!p).map((p) => p.then(bump));
+    const read = (ks: readonly TileKey[]) => ks.map((k) => fetchTile(coin, venuesRef.current, vkey, k, walletsRef.current)).filter((p): p is Promise<void> => !!p).map((p) => p.then(bump));
     // On screen first; around it once that is in. A tile that failed is asked again while it is wanted.
     void Promise.allSettled(read(want.filter((k) => k.near))).then(() => { if (alive) read(want.filter((k) => !k.near)); });
     trim(new Set(want.map((k) => tileId(coin, vkey, k))));

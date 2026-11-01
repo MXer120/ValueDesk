@@ -214,11 +214,11 @@ export const vsApi = {
   liquidationHistory: (coin: string, venues: readonly Venue[], range: '1d' | '2d' | '7d' | '30d', signal?: AbortSignal, wallets: readonly string[] = []) =>
     unwrap<LiqHistory>(`/api/vs/liquidations/history${qs({ coin, venues: venues.join(','), range, wallets: wallets.length ? wallets.join(',') : undefined })}`, signal),
   /** The history in tiles (server indexer/liqTiles.ts): its index - every snapshot's time, price and step, and the colour scales. */
-  liquidationTiles: (coin: string, venues: readonly Venue[], signal?: AbortSignal) =>
-    unwrap<LiqTileIndex>(`/api/vs/liquidations/tiles${qs({ coin, venues: venues.join(',') })}`, signal),
+  liquidationTiles: (coin: string, venues: readonly Venue[], signal?: AbortSignal, wallets: readonly string[] = []) =>
+    unwrap<LiqTileIndex>(`/api/vs/liquidations/tiles${qs({ coin, venues: venues.join(','), wallets: wallets.length ? wallets.join(',') : undefined })}`, signal),
   /** One tile of it: the snapshots of a time slot, their rows in a price band (`v`: up to that snapshot, for the slot still filling). */
-  liquidationTile: (coin: string, venues: readonly Venue[], ask: TileAsk, signal?: AbortSignal) =>
-    unwrap<LiqTile>(`/api/vs/liquidations/tiles${qs({ coin, venues: venues.join(','), tl: ask.tl, tt: ask.tt, pl: ask.pl, band: ask.band, bw: ask.bw, v: ask.v })}`, signal),
+  liquidationTile: (coin: string, venues: readonly Venue[], ask: TileAsk, signal?: AbortSignal, wallets: readonly string[] = []) =>
+    unwrap<LiqTile>(`/api/vs/liquidations/tiles${qs({ coin, venues: venues.join(','), wallets: wallets.length ? wallets.join(',') : undefined, tl: ask.tl, tt: ask.tt, pl: ask.pl, band: ask.band, bw: ask.bw, v: ask.v })}`, signal),
   /** The history at a step finer than its snapshots keep, for a price window and a time window (the snapshots' fine layers). */
   liquidationHistoryFine: (coin: string, venues: readonly Venue[], ask: { step: number; from: number; to: number; t0: number; t1: number }, signal?: AbortSignal) =>
     unwrap<LiqHistoryFine>(`/api/vs/liquidations/history${qs({ coin, venues: venues.join(','), step: ask.step, from: ask.from, to: ask.to, t0: ask.t0, t1: ask.t1 })}`, signal),
