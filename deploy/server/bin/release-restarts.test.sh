@@ -27,6 +27,7 @@ restart_indexer_and_api() { if [ "$1" = 1 ]; then RESTARTED+="api "; else RESTAR
 restart_indexer() { RESTARTED+="indexer "; }
 restart_api() { RESTARTED+="api "; }
 restart_executor() { RESTARTED+="executor "; }
+restart_status() { RESTARTED+="status "; }
 eval "$(sed -n '/^here() {/p' "$SRC")"
 eval "$(sed -n '/^restart_units() {/,/^}/p' "$SRC")"
 
@@ -85,6 +86,11 @@ VS_UNITS=indexer check "a server with the indexer only" "indexer"
 UNITS=api,indexer check "--units=api,indexer" "indexer api" units
 UNITS=executor check "--units=executor" "executor" units
 VS_UNITS=indexer,api UNITS=indexer check "--units=indexer on server 1" "indexer" units
+# The status prober: only when named (ship.sh, when its own code changed) or --all - never with every API release.
+UNITS=status check "--units=status" "status" units
+UNITS=api check "--units=api leaves the status prober" "api" units
+UNITS=indexer,api,status check "--units=indexer,api,status" "indexer api status" units
+check "--all" "indexer api status executor" all
 CURRENT="$RELEASES/v1"
 RUNS=([valuescan-indexer.service]=v1 [valuescan-api.service]=v1 [valuescan-executor.service]=v1)
 UNITS=api check "--units=api with nothing changed" "api" units

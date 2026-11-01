@@ -5,7 +5,8 @@
 #   sudo /opt/valuescan/bin/release.sh <tag> --all        install <tag>, restart indexer, API, executor
 #   sudo /opt/valuescan/bin/release.sh <tag> --api-only   install <tag>, restart the API only
 #   sudo /opt/valuescan/bin/release.sh <tag> --executor-only   install <tag>, restart the copy executor only
-#   sudo /opt/valuescan/bin/release.sh <tag> --units=indexer,api   install <tag>, restart exactly these (deploy/release/ship.sh)
+#   sudo /opt/valuescan/bin/release.sh <tag> --units=indexer,api   install <tag>, restart exactly these (deploy/release/ship.sh;
+#                                                                  also `status`: the status prober, valuescan-status.service)
 #   sudo /opt/valuescan/bin/release.sh <tag> --install-only   install and check <tag>, switch nothing (ship.sh's executor preflight)
 #   sudo /opt/valuescan/bin/release.sh --rollback [--all|--api-only|--executor-only|--units=..]   back to the release before
 #   sudo /opt/valuescan/bin/release.sh --status           what is installed and running
@@ -265,6 +266,24 @@ restart_executor() {
   log "the executor answers /api/copy/v1/health"
 }
 
+# The status page's prober (valuescan-status.service, apps/server/src/statusMain.ts, 2026-11-01): its
+# own unit, so an API restart never leaves the status page blind. Restarted only when named (ship.sh
+# names it when its own code changed: deploy/release/parts.mjs) or by --all - never with every API
+# release; a restart costs it one round at most (its first round runs a second after it starts).
+# A server without the unit installed has nothing to restart.
+status_unit() { "$SYSTEMCTL" cat valuescan-status.service >/dev/null 2>&1; }
+restart_status() {
+  if ! status_unit; then log "the status prober (valuescan-status.service) is not installed here: nothing to restart"; return 0; fi
+  if [ ! -e "$CURRENT/apps/server/src/statusMain.ts" ]; then
+    log "this release has no status prober (apps/server/src/statusMain.ts): the running one keeps release $(release_of valuescan-status.service)"
+    return 0
+  fi
+  log "restarting the status prober"
+  "$SYSTEMCTL" restart valuescan-status.service
+  wait_active valuescan-status.service 30 || die "the status prober did not become active - journalctl -u valuescan-status -n 80"
+  log "the status prober runs release $(current_tag)"
+}
+
 here() { case ",${VS_UNITS:-indexer,api,executor}," in *,"$1",*) return 0 ;; *) return 1 ;; esac; }
 
 restart_units() {   # auto | all | api | executor | units (the list in $UNITS)
@@ -296,13 +315,14 @@ restart_units() {   # auto | all | api | executor | units (the list in $UNITS)
     units)
       case ",$UNITS," in *,indexer,*) restart_indexer ;; esac
       case ",$UNITS," in *,api,*) restart_api ;; esac
+      case ",$UNITS," in *,status,*) restart_status ;; esac
       case ",$UNITS," in *,executor,*) restart_executor ;; esac
       local u
       for u in indexer api executor; do
         case ",$UNITS," in *,"$u",*) ;; *) if here "$u"; then log "$u not named: it keeps running release $(release_of "valuescan-$u.service")"; fi ;; esac
       done
       ;;
-    all) restart_indexer_and_api 0; restart_executor ;;
+    all) restart_indexer_and_api 0; restart_status; restart_executor ;;
     api)
       restart_indexer_and_api 1
       if "$SYSTEMCTL" is-active --quiet valuescan-executor.service; then
@@ -331,13 +351,13 @@ prune() {
   local cur prev n=0 d
   cur="$(current_tag)"; prev="$(previous_tag)"
   # Newest first; keep the current, the previous and whatever a unit still runs from.
-  local running_api running_idx running_exec
+  local running_api running_idx running_exec running_status
   running_api="$(unit_release valuescan-api.service)"; running_idx="$(unit_release valuescan-indexer.service)"
-  running_exec="$(unit_release valuescan-executor.service)"
+  running_exec="$(unit_release valuescan-executor.service)"; running_status="$(unit_release valuescan-status.service)"
   while IFS= read -r d; do
     [ -n "$d" ] || continue
     n=$((n + 1))
-    if [ "$n" -le "$KEEP" ] || [ "$d" = "$cur" ] || [ "$d" = "$prev" ] || [ "$d" = "$running_api" ] || [ "$d" = "$running_idx" ] || [ "$d" = "$running_exec" ]; then continue; fi
+    if [ "$n" -le "$KEEP" ] || [ "$d" = "$cur" ] || [ "$d" = "$prev" ] || [ "$d" = "$running_api" ] || [ "$d" = "$running_idx" ] || [ "$d" = "$running_exec" ] || [ "$d" = "$running_status" ]; then continue; fi
     log "removing old release $d"
     rm -rf "${RELEASES:?}/$d"
   done < <(find "$RELEASES" -mindepth 1 -maxdepth 1 -type d ! -name '.*' -printf '%T@ %f\n' 2>/dev/null | sort -rn | awk '{print $2}')
@@ -352,6 +372,8 @@ status() {
   echo "api:       $("$SYSTEMCTL" is-active valuescan-api.service 2>/dev/null || true), release ${api:-unknown}"
   local exe; exe="$(unit_release valuescan-executor.service)"
   echo "executor:  $("$SYSTEMCTL" is-active valuescan-executor.service 2>/dev/null || true), release ${exe:-unknown}"
+  local sta; sta="$(unit_release valuescan-status.service)"
+  echo "status:    $("$SYSTEMCTL" is-active valuescan-status.service 2>/dev/null || true), release ${sta:-unknown}"
   echo "node:      $(node --version 2>/dev/null || echo missing)"
 }
 
@@ -369,8 +391,8 @@ for arg in "$@"; do
     --executor-only) [ "$MODE" = auto ] || die "$ONE_MODE"; MODE=executor ;;
     --units=*)
       [ "$MODE" = auto ] || die "$ONE_MODE"; MODE=units; UNITS="${arg#--units=}"
-      for u in ${UNITS//,/ }; do case "$u" in indexer|api|executor) ;; *) die "--units: $u is not one of indexer, api, executor" ;; esac; done
-      [ -n "${UNITS//,/}" ] || die "--units: name at least one of indexer, api, executor"
+      for u in ${UNITS//,/ }; do case "$u" in indexer|api|executor|status) ;; *) die "--units: $u is not one of indexer, api, executor, status" ;; esac; done
+      [ -n "${UNITS//,/}" ] || die "--units: name at least one of indexer, api, executor, status"
       ;;
     --from=*) FROM="${arg#--from=}" ;;
     --install-only) INSTALL_ONLY=1 ;;

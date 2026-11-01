@@ -2,7 +2,7 @@
 # deploy/release/ship.sh - THE PIPELINE: ship what changed to where it runs, from this laptop.
 #
 #   bash deploy/release/ship.sh                  what changed since what is live: the plan, one question, then ship
-#   bash deploy/release/ship.sh web api          only these parts: web, api, indexer, executor (or all)
+#   bash deploy/release/ship.sh web api          only these parts: web, api, indexer, executor, status (or all)
 #   bash deploy/release/ship.sh --dry-run        the plan only - nothing is tagged, pushed or released
 #   bash deploy/release/ship.sh --yes            no question (the owner's go is already given)
 #   bash deploy/release/ship.sh --tag=v0.2.60    this tag instead of the next one (or the one HEAD already has)
@@ -97,15 +97,15 @@ remote() { local host="$1"; shift; "${SSH[@]}" "$host" "$@"; }
 PARTS=() DRY=0 YES=0 TAG="" NOTICE=1 EXEC_OK=0
 for a in "$@"; do
   case "$a" in
-    web|api|indexer|executor) PARTS+=("$a") ;;
-    all) PARTS+=(web api indexer executor) ;;
+    web|api|indexer|executor|status) PARTS+=("$a") ;;
+    all) PARTS+=(web api indexer executor status) ;;
     --dry-run) DRY=1 ;;
     --yes) YES=1 ;;
     --executor-ok) EXEC_OK=1 ;;
     --tag=*) TAG="${a#--tag=}" ;;
     --no-notice) NOTICE=0 ;;
     -h|--help) sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-    *) die "unknown argument $a (parts: web api indexer executor all)" ;;
+    *) die "unknown argument $a (parts: web api indexer executor status all)" ;;
   esac
 done
 
@@ -137,6 +137,8 @@ st1="$(remote "$S1" 'sudo /opt/valuescan/bin/release.sh --status' 2>/dev/null)" 
 st2="$(remote "$S2" 'sudo /opt/valuescan/bin/release.sh --status' 2>/dev/null)" || die "server 2 ($S2) does not answer"
 unit_tag() { printf '%s\n' "$1" | sed -n "s/^$2: *[a-z-]*, release //p" | head -1; }
 LIVE_INDEXER="$(unit_tag "$st1" indexer)"; LIVE_API="$(unit_tag "$st1" api)"; LIVE_EXECUTOR="$(unit_tag "$st2" executor)"
+# The status prober (valuescan-status.service on server 1); empty while server 1's release.sh does not report it yet.
+LIVE_STATUS="$(unit_tag "$st1" status)"
 note "server 1: indexer ${LIVE_INDEXER:-?}, API ${LIVE_API:-?}   server 2: executor ${LIVE_EXECUTOR:-?}   web: main $(git rev-parse --short origin/main)"
 
 # A part changed when parts.mjs finds files of it between what runs and HEAD (an unknown or gone release: changed).
@@ -147,8 +149,11 @@ changed_since() {   # part, live ref
 declare -A WHY
 want() { local p; for p in "${PARTS[@]}"; do [ "$p" = "$1" ] && return 0; done; return 1; }
 if [ ${#PARTS[@]} -eq 0 ]; then
-  for p in web api indexer executor; do
-    case "$p" in web) from="origin/main" ;; api) from="$LIVE_API" ;; indexer) from="$LIVE_INDEXER" ;; executor) from="$LIVE_EXECUTOR" ;; esac
+  for p in web api indexer executor status; do
+    case "$p" in web) from="origin/main" ;; api) from="$LIVE_API" ;; indexer) from="$LIVE_INDEXER" ;; executor) from="$LIVE_EXECUTOR" ;; status) from="$LIVE_STATUS" ;; esac
+    # The status prober is compared only once server 1 reports it (release.sh --status, from this release on): before
+    # that it would count as changed on every ship. It runs in the meantime; name `status` to restart it.
+    if [ "$p" = status ] && [ -z "$from" ]; then continue; fi
     n="$(changed_since "$p" "$from")"
     if [ "$n" != 0 ]; then PARTS+=("$p"); WHY[$p]="${n} file(s) since ${from}"; fi
   done
@@ -168,8 +173,11 @@ U1=() U2=()
 want indexer && U1+=(indexer)
 want api && U1+=(api)
 want executor && U2+=(executor)
+# The status prober restarts on server 1 with the units there, but is not one of them for the maintenance
+# window and the notice: nobody notices its restart (it misses one round at most).
+STA=0; want status && STA=1
 WEB=0; want web && WEB=1
-if [ ${#U1[@]} -eq 0 ] && [ ${#U2[@]} -eq 0 ] && [ "$WEB" = 0 ] && [ "$BIN" = 0 ]; then
+if [ ${#U1[@]} -eq 0 ] && [ ${#U2[@]} -eq 0 ] && [ "$STA" = 0 ] && [ "$WEB" = 0 ] && [ "$BIN" = 0 ]; then
   note "nothing to ship: every part already runs HEAD's code"; exit 0
 fi
 # Moving main deploys the web as it is at HEAD - so main moves only when the web is shipped, or has not changed.
@@ -192,12 +200,13 @@ cost() {
     api) echo "~6 s, requests held by Caddy - none fail" ;;
     executor) echo "seconds, requests held by Caddy; copies and algos wait" ;;
     indexer) echo "boards ~2 min staler" ;;
+    status) echo "a second; the status page misses one round at most" ;;
   esac
 }
 say "plan: $TAG ($(git rev-parse --short HEAD)$([ "$NEW_TAG" = 1 ] && echo ", new tag"))"
-for p in indexer api executor web; do
+for p in indexer api status executor web; do
   want "$p" || continue
-  where=""; case "$p" in indexer|api) where="server 1" ;; executor) where="server 2" ;; web) where="Vercel" ;; esac
+  where=""; case "$p" in indexer|api|status) where="server 1" ;; executor) where="server 2" ;; web) where="Vercel" ;; esac
   printf '  %-9s %-9s %-30s %s\n' "$p" "$where" "${WHY[$p]:-}" "$(cost "$p")" >&2
 done
 [ "$BIN" = 0 ] || note "  bin       both      /opt/valuescan/bin from the tarball where it differs"
@@ -408,7 +417,9 @@ release_on() {   # host, units (comma list)
     else
       note "!! the rollback failed too - look at it now: deploy/release/remote.sh, docs/INCIDENT-RUNBOOK.md"
       NOTICE_OK=0
-      notice_affected "${units//,/:down,}:down" "The update did not go through and we are on it; these parts may not work normally until it is fixed."
+      # The status prober is no part of the status page: left out of what the notice names.
+      local shown; shown="$(printf '%s' "$units" | tr ',' '\n' | grep -vx status | paste -sd, - || true)"
+      [ -z "$shown" ] || notice_affected "${shown//,/:down,}:down" "The update did not go through and we are on it; these parts may not work normally until it is fixed."
     fi
   else
     note "!! $TAG did not install on $host; nothing was switched (current: $cur)"
@@ -417,15 +428,15 @@ release_on() {   # host, units (comma list)
   die "$units on $host: not shipped"
 }
 
-if [ ${#U1[@]} -gt 0 ] || [ ${#U2[@]} -gt 0 ] || [ "$BIN" = 1 ]; then need_tarball; fi
+if [ ${#U1[@]} -gt 0 ] || [ ${#U2[@]} -gt 0 ] || [ "$STA" = 1 ] || [ "$BIN" = 1 ]; then need_tarball; fi
 
 # Both servers' tarball and scripts first (one upload after the other: the laptop's cap): maint.sh and brake.sh
 # are the tag's before anything restarts.
-if [ ${#U1[@]} -gt 0 ] || [ "$BIN" = 1 ]; then
+if [ ${#U1[@]} -gt 0 ] || [ "$STA" = 1 ] || [ "$BIN" = 1 ]; then
   say "server 1 ($S1): upload, scripts"
   upload "$S1"
   sync_bin "$S1" >&2
-  [ ${#U1[@]} -gt 0 ] || remote "$S1" "sudo rm -f $INBOX/$(basename "$TARBALL") $INBOX/$(basename "$TARBALL").sha256"
+  [ ${#U1[@]} -gt 0 ] || [ "$STA" = 1 ] || remote "$S1" "sudo rm -f $INBOX/$(basename "$TARBALL") $INBOX/$(basename "$TARBALL").sha256"
 fi
 if [ ${#U2[@]} -gt 0 ] || [ "$BIN" = 1 ]; then
   say "server 2 ($S2): upload, scripts"
@@ -448,11 +459,13 @@ if [ ${#U1[@]} -gt 0 ] || [ ${#U2[@]} -gt 0 ]; then
   notice_post
 fi
 
-if [ ${#U1[@]} -gt 0 ]; then
-  say "server 1 ($S1): ${U1[*]}"
+if [ ${#U1[@]} -gt 0 ] || [ "$STA" = 1 ]; then
+  S1U=("${U1[@]}"); [ "$STA" = 0 ] || S1U+=(status)
+  say "server 1 ($S1): ${S1U[*]}"
   t0=0
   if want indexer; then t0="$(remote "$S1" 'date +%s%3N')"; fi
-  release_on "$S1" "$(IFS=,; echo "${U1[*]}")"
+  release_on "$S1" "$(IFS=,; echo "${S1U[*]}")"
+  if [ "$STA" = 1 ]; then done_note "status prober restarted"; fi
   if want api; then done_note "api back"; fi
   if want indexer; then
     note "waiting for the indexer's first build on $TAG"

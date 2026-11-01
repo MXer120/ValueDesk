@@ -16,5 +16,5 @@ const SKIP = spawnSync("bash", ["-c", "command -v diff >/dev/null"]).status === 
 test('a release restarts only the units whose code changed: web and tests change nothing, the copy engine only the executor; VS_UNITS and --units', { skip: SKIP }, () => {
   const r = spawnSync('bash', [join(HERE, 'release-restarts.test.sh'), join(HERE, 'release.sh')], { encoding: 'utf8' });
   assert.equal(r.status, 0, `${r.stdout}\n${r.stderr}`);
-  assert.match(r.stdout, /pass 16 fail 0/);
+  assert.match(r.stdout, /pass 20 fail 0/);
 });
