@@ -71,6 +71,8 @@ import { closeRuns, type CloseFill } from '../valuedesk/winRate.js';
 import { mayPrune } from '../retention.js';
 
 export const SCHEMA_VERSION = 1;
+/** The writer connection's page cache at most, in KiB (PRAGMA cache_size). */
+export const WRITER_CACHE_KB = 256 * 1024;
 
 export function defaultDbPath(): string {
   return process.env.VALUESCAN_INDEX_DB?.trim() || join(dirname(deviceKeyPath()), 'valuescan-index.db');
@@ -848,6 +850,11 @@ export class IndexStore {
       this.db.exec('PRAGMA journal_mode = WAL');
       this.db.exec('PRAGMA synchronous = NORMAL');
       this.db.exec(`PRAGMA journal_size_limit = ${WAL_LIMIT_BYTES}`);
+      // The writer's page cache (SQLite's default is 2 MB): the change log's quarter-hourly write of
+      // 25-40k rows into a 13M-row table held the indexer's thread 30 s on production (2026-11-01
+      // 23:15, CPU profile), each row walking pages read back through the OS. 256 MB at most, taken
+      // as used; measured on dev's file the same night: 30k rows 2.1 s -> 0.45 s.
+      this.db.exec(`PRAGMA cache_size = -${WRITER_CACHE_KB}`);
       this.db.exec(SCHEMA);
       this.addColumns();
       this.addCohortRevs();
@@ -3165,6 +3172,15 @@ export class IndexStore {
     closed: ReadonlyArray<{ aid: number; coin: string; venue: number; mark?: number | null }>,
   ): Map<string, number> {
     const ids = new Map<string, number>();
+    // In key order (aid, coin, venue): each insert lands next to the last in the log's and the
+    // state's b-trees instead of on a page of its own (dev, 30k rows: 2.1 s -> 0.66 s, with the cache 0.36 s).
+    const key = (x: { aid: number | string; coin: string; venue: number }) => [typeof x.aid === 'number' ? x.aid : Number.MAX_SAFE_INTEGER, x.coin, x.venue] as const;
+    const byKey = <T extends { aid: number | string; coin: string; venue: number }>(rows: readonly T[]): T[] => [...rows].sort((a, b) => {
+      const [p, q] = [key(a), key(b)];
+      return p[0] - q[0] || (p[1] < q[1] ? -1 : p[1] > q[1] ? 1 : 0) || p[2] - q[2];
+    });
+    changed = byKey(changed);
+    closed = byKey(closed);
     this.tx(() => {
       const addr = this.q('INSERT INTO liq_addr (address) VALUES (?) ON CONFLICT (address) DO UPDATE SET address = excluded.address RETURNING id');
       for (const a of newAddrs) {
