@@ -344,19 +344,28 @@ export function snapOfNow(row: LiqNow, share = HIST_STEP): LiqSnap {
 // --- the history's fine layers (liq_hist_fine) ----------------------------------------------
 
 /**
- * Finer than a snapshot's step, near the price (owner 2026-11-01: "historical view supports $10 &
- * $1 resolution"): with each snapshot, the levels at a tenth and a hundredth of its step (BTC
- * near $78K: $10 and $1), each over `half` of its buckets either side of the price - BTC $10 to
- * +-12.5%, $1 to +-2.5%. Past a layer's reach a snapshot is drawn at its own step (the levels
- * there were not kept finer).
+ * Finer than a snapshot's step (owner 2026-11-01: "historical view supports $10 & $1 resolution",
+ * then "want full min tick stored for full range"): with each snapshot, its levels at a tenth of
+ * its step and at the coin's SoDEX tick (the finest the view offers, web liqSteps.ts stepLadder),
+ * over the snapshot's whole range (NOW_LO-NOW_HI of the price). Kept per price band
+ * (fineBands, liq_hist_fine_band) so a window reads only its bands.
  *
  * Exact: the live engine's level of every position as its account was last priced (live.ts),
  * not its 0.02% bucket. The change log (liq_log) cannot stand in: it writes a level again only
  * once it moved 0.05% (BTC ~$39), and replaying it for a $1 window read 0.6-18 s of rows on
- * production (2026-11-01, BTC: 400-590k rows a day). Measured the same day on the 101 coins'
- * open positions: about 0.6 MB of rows a step before deflate (the snapshots: 1.3 MB of text).
+ * production (2026-11-01, BTC: 400-590k rows a day). Measured on production the same evening
+ * over the 101 coins' open positions: the tenth 855 KB and the hundredth 1,002 KB a step deflated
+ * (the earlier +-12.5% / +-2.5% layers: 268 KB), about 180 MB a day at a snapshot every 15 min.
  */
-export const FINE_LAYERS: ReadonlyArray<{ div: number; half: number }> = [{ div: 10, half: 1_000 }, { div: 100, half: 2_000 }];
+export function fineHistSteps(st: number, tick: number): number[] {
+  if (!(st > 0)) return [];
+  const t = tick > 0 && Number.isFinite(tick) ? tidy(Math.min(tick, st)) : tidy(st / 100);
+  const out: number[] = [];
+  const tenth = tidy(st / 10);
+  if (tenth > t * (1 + 1e-9)) out.push(tenth);
+  if (t < st * (1 - 1e-9)) out.push(t);
+  return out;
+}
 
 /** One fine layer of a snapshot: its step, the price range it covers, and per venue its rows (SnapRow). */
 export interface FineLayer {
@@ -377,16 +386,13 @@ export interface FinePos { venue: Venue; long: boolean; liq: number; usd: number
 const tidy = (x: number) => +x.toPrecision(12);
 
 /**
- * A coin's fine layers at price `p` with snapshot step `st` (snapOfNow's): levels the price has
- * crossed are left out, as in the snapshot. Null when no position lies in any layer.
+ * A coin's fine layers at price `p` with snapshot step `st` (snapOfNow's) and SoDEX tick `tick`
+ * (fineHistSteps), over NOW_LO-NOW_HI of the price: levels the price has crossed are left out, as
+ * in the snapshot. Null when no position lies in any layer.
  */
-export function fineSnapOf(p: number, st: number, positions: Iterable<FinePos>): FineSnap | null {
+export function fineSnapOf(p: number, st: number, positions: Iterable<FinePos>, tick = 0): FineSnap | null {
   if (!(p > 0) || !(st > 0)) return null;
-  const layers = FINE_LAYERS.map(({ div, half }) => {
-    const s = tidy(st / div);
-    const i0 = Math.floor(p / s);
-    return { st: s, i0: i0 - half, i1: i0 + half, m: new Map<Venue, Map<number, number[]>>() };
-  });
+  const layers = fineHistSteps(st, tick).map((s) => ({ st: s, i0: Math.floor((p * NOW_LO) / s), i1: Math.ceil((p * NOW_HI) / s), m: new Map<Venue, Map<number, number[]>>() }));
   let any = false;
   for (const x of positions) {
     if (!(x.liq > 0) || !(x.usd > 0)) continue;
@@ -412,4 +418,59 @@ export function fineSnapOf(p: number, st: number, positions: Iterable<FinePos>):
       return { st: L.st, lo: tidy(L.i0 * L.st), hi: tidy(L.i1 * L.st), v };
     }),
   };
+}
+
+/** The width of a fine band: the largest 1, 2 or 5 x 10^n at most FINE_BAND_SHARE of the price (BTC near $78K: $20,000). */
+export const FINE_BAND_SHARE = 0.32;
+export function fineBandWidth(p: number): number {
+  if (!(p > 0) || !Number.isFinite(p)) return 0;
+  const raw = p * FINE_BAND_SHARE;
+  const base = 10 ** Math.floor(Math.log10(raw));
+  const f = raw / base;
+  return tidy((f >= 5 ? 5 : f >= 2 ? 2 : 1) * base);
+}
+
+/**
+ * A snapshot's fine layers cut into bands of width `w` (rows by their low edge), every band the
+ * layers reach - an empty one too, so the bands read for a window cover it without a gap - each
+ * with its layers clipped to it: put back together by mergeFine.
+ */
+export function fineBands(f: FineSnap, w: number): Array<{ lo: number; hi: number; f: FineSnap }> {
+  if (!(w > 0) || !f.L.length) return [];
+  const lo0 = Math.min(...f.L.map((L) => L.lo));
+  const hi0 = Math.max(...f.L.map((L) => L.hi));
+  const out: Array<{ lo: number; hi: number; f: FineSnap }> = [];
+  for (let k = Math.floor(lo0 / w + 1e-9); k * w < hi0 - 1e-9 * w; k++) {
+    const blo = k * w;
+    const bhi = (k + 1) * w;
+    const L = f.L.map((x): FineLayer => {
+      const v: FineLayer['v'] = {};
+      for (const [venue, rows] of Object.entries(x.v) as Array<[Venue, SnapRow[]]>) {
+        const inBand = rows.filter((r) => Math.floor((r[0] * x.st) / w + 1e-9) === k);
+        if (inBand.length) v[venue] = inBand;
+      }
+      return { st: x.st, lo: tidy(Math.max(x.lo, blo)), hi: tidy(Math.min(x.hi, bhi)), v };
+    }).filter((x) => x.hi > x.lo);
+    if (L.length) out.push({ lo: tidy(Math.max(lo0, blo)), hi: tidy(Math.min(hi0, bhi)), f: { p: f.p, L } });
+  }
+  return out;
+}
+
+/** Bands of one snapshot (fineBands, any order) put back together: per step, the rows joined and the range from the lowest to the highest. */
+export function mergeFine(parts: readonly FineSnap[]): FineSnap | null {
+  if (!parts.length) return null;
+  if (parts.length === 1) return parts[0]!;
+  const by = new Map<number, FineLayer>();
+  for (const part of parts) {
+    for (const x of part.L) {
+      const L = by.get(x.st);
+      if (!L) { by.set(x.st, { st: x.st, lo: x.lo, hi: x.hi, v: Object.fromEntries(Object.entries(x.v).map(([k, r]) => [k, [...r!]])) }); continue; }
+      L.lo = Math.min(L.lo, x.lo);
+      L.hi = Math.max(L.hi, x.hi);
+      for (const [venue, rows] of Object.entries(x.v) as Array<[Venue, SnapRow[]]>) (L.v[venue] ??= []).push(...rows);
+    }
+  }
+  const L = [...by.values()].sort((a, b) => b.st - a.st);
+  for (const x of L) for (const rows of Object.values(x.v)) rows!.sort((a, b) => a[0] - b[0]);
+  return { p: parts[0]!.p, L };
 }

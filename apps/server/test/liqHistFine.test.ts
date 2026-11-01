@@ -1,15 +1,16 @@
 /**
  * Run: npx tsx --test test/liqHistFine.test.ts   (from apps/server)
  *
- * The history's fine layers (owner 2026-11-01: "historial view supports 10 & 1 resolution"):
- * with each snapshot the indexer keeps the levels at a tenth and a hundredth of its step near the
- * price (levels.ts fineSnapOf), and the history route serves them at the step asked for a price
- * window (liqRead.ts fineRowsOf). Checked against a brute-force bucketing of the same positions.
+ * The history's fine layers (owner 2026-11-01: "historial view supports 10 & 1 resolution", then
+ * "want full min tick stored for full range"): with each snapshot the indexer keeps the levels at a
+ * tenth of its step and at the coin's tick over its whole range (levels.ts fineSnapOf), in price
+ * bands (fineBands, put back by mergeFine), and the history route serves them at the step asked
+ * for a price window (liqRead.ts fineRowsOf). Checked against a brute-force bucketing of the same positions.
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { deflateRawSync, inflateRawSync } from 'node:zlib';
-import { FINE_LAYERS, fineSnapOf, snapBand, type FinePos, type FineSnap } from '../src/valuedesk/liquidations/levels.js';
+import { NOW_HI, NOW_LO, fineBandWidth, fineBands, fineHistSteps, fineSnapOf, mergeFine, snapBand, type FinePos, type FineSnap } from '../src/valuedesk/liquidations/levels.js';
 import { fineRowsOf } from '../src/indexer/liqRead.js';
 import { IndexStore } from '../src/indexer/store.js';
 import type { Venue } from '../src/valuedesk/types.js';
@@ -50,15 +51,22 @@ function brute(ps: FinePos[], step: number, lo: number, hi: number, venues: read
   return m;
 }
 
-test('the layers: a tenth and a hundredth of the step, over their reach around the price, exact per venue', () => {
+test('the steps kept: a tenth of the snapshot step and the coin tick, finest last', () => {
+  assert.deepEqual(fineHistSteps(100, 1), [10, 1], 'BTC: $10 and its $1 tick');
+  assert.deepEqual(fineHistSteps(100, 0.1), [10, 0.1], 'a tick finer than a hundredth');
+  assert.deepEqual(fineHistSteps(100, 0), [10, 1], 'no tick known: a hundredth');
+  assert.deepEqual(fineHistSteps(100, 10), [10], 'a tick of a tenth: that layer only');
+  assert.deepEqual(fineHistSteps(100, 50), [50], 'a coarse tick');
+  assert.deepEqual(fineHistSteps(100, 100), [], 'a tick of the step itself: nothing finer');
+  assert.deepEqual(fineHistSteps(0.0001, 0.000001), [0.00001, 0.000001]);
+});
+
+test('the layers: a tenth of the step and the tick, over the whole range of the snapshot, exact per venue', () => {
   const ps = positions(20_000);
-  const f = fineSnapOf(P, ST, ps)!;
-  assert.equal(f.L.length, FINE_LAYERS.length);
+  const f = fineSnapOf(P, ST, ps, 1)!;
   assert.deepEqual(f.L.map((L) => L.st), [10, 1]);
   for (const L of f.L) {
-    const half = FINE_LAYERS[f.L.indexOf(L)]!.half;
-    assert.ok(Math.abs((L.hi - L.lo) / L.st - 2 * half) < 1e-6, 'the layer spans half buckets either side');
-    assert.ok(L.lo <= P && P < L.hi, 'the price inside');
+    assert.ok(L.lo <= P * NOW_LO && L.lo > P * NOW_LO - L.st && L.hi >= P * NOW_HI && L.hi < P * NOW_HI + L.st, 'the whole range, on whole cells');
     for (const v of VS) {
       const want = brute(ps, L.st, L.lo, L.hi, [v]);
       const rows = L.v[v] ?? [];
@@ -71,13 +79,17 @@ test('the layers: a tenth and a hundredth of the step, over their reach around t
       }
     }
   }
+  assert.deepEqual(fineSnapOf(P, ST, ps, 0.5)!.L.map((L) => L.st), [10, 0.5], 'down to the tick');
   assert.equal(fineSnapOf(P, ST, []), null, 'no position: no layers');
   assert.equal(fineSnapOf(0, ST, ps), null, 'no price: no layers');
 });
 
 test('the route: the layer that serves the step, summed up to it over the window; finer than any layer: none', () => {
   const ps = positions(20_000, 9);
-  const f = fineSnapOf(P, ST, ps)!;
+  // The earlier layers (liq_hist_fine, 2026-11-01): $10 to +-12.5%, $1 to +-2.5% - still read for that day.
+  const whole = fineSnapOf(P, ST, ps, 1)!;
+  const clip = (L: FineSnap['L'][number], lo: number, hi: number) => ({ st: L.st, lo, hi, v: Object.fromEntries(Object.entries(L.v).map(([k, r]) => [k, r!.filter((x) => x[0] * L.st >= lo && x[0] * L.st < hi)])) });
+  const f: FineSnap = { p: P, L: [clip(whole.L[0]!, 67_920, 87_920), clip(whole.L[1]!, 75_929, 79_929)] };
   const all: Venue[] = [...VS];
   // $10 over a window inside the $10 layer: that layer as kept.
   const a = fineRowsOf(f, all, { step: 10, from: 75_000, to: 79_000 })!;
@@ -100,6 +112,41 @@ test('the route: the layer that serves the step, summed up to it over the window
   // Finer than the finest layer, or a window outside every layer: nothing.
   assert.equal(fineRowsOf(f, all, { step: 0.5, from: 77_000, to: 78_000 }), null);
   assert.equal(fineRowsOf(f, all, { step: 10, from: 20_000, to: 30_000 }), null);
+});
+
+test('the bands: every band the layers reach, rows by their low edge; put back together, the same layers', () => {
+  const ps = positions(20_000, 4);
+  const f = fineSnapOf(P, ST, ps, 1)!;
+  const w = fineBandWidth(P);
+  assert.equal(w, 20_000, 'BTC near $78K: $20,000 bands');
+  const bands = fineBands(f, w);
+  assert.equal(bands[0]!.lo, f.L[0]!.lo);
+  for (let k = 1; k < bands.length; k++) assert.equal(bands[k]!.lo, bands[k - 1]!.hi, 'no gap between bands');
+  assert.ok(bands.at(-1)!.hi >= f.L[1]!.hi);
+  const back = mergeFine([...bands].reverse().map((b) => b.f))!;
+  assert.deepEqual(back.L.map((L) => [L.st, L.lo, L.hi]), f.L.map((L) => [L.st, L.lo, L.hi]));
+  for (let i = 0; i < f.L.length; i++) for (const v of VS) assert.deepEqual(back.L[i]!.v[v] ?? [], f.L[i]!.v[v] ?? [], `${v} @ ${f.L[i]!.st}`);
+  // A window's bands alone serve it as the whole would.
+  const ask = { step: 5, from: 70_000, to: 85_000 };
+  const some = mergeFine(bands.filter((b) => b.lo < ask.to && b.hi > ask.from).map((b) => b.f))!;
+  assert.deepEqual(fineRowsOf(some, VS, ask), fineRowsOf(f, VS, ask));
+  assert.equal(mergeFine([]), null);
+});
+
+test('the store: bands per coin, time and price, read by window newest first, pruned and thinned with the snapshots', () => {
+  const s = new IndexStore(':memory:');
+  const H = 3_600_000;
+  const t0 = 100 * H;
+  const bands = fineBands(fineSnapOf(P, ST, positions(500), 1)!, fineBandWidth(P));
+  const rows = bands.map((b): [string, number, number, Uint8Array] => ['BTC', b.lo, b.hi, deflateRawSync(JSON.stringify(b.f))]);
+  for (const t of [t0, t0 + H / 4, t0 + H]) s.putLiqHistFineBands(t, rows);
+  assert.equal(s.liqHistFineBandFrom('BTC'), t0);
+  assert.equal(s.liqHistFineBandFrom('ETH'), null);
+  const got = s.liqHistFineBands('BTC', t0, t0 + H / 2, 70_000, 85_000);
+  assert.deepEqual([...new Set(got.map((r) => r.t))], [t0 + H / 4, t0], 'newest first');
+  assert.ok(got.every((r) => r.lo < 85_000 && r.hi > 70_000) && got.length === 4, 'only the bands of the window');
+  s.pruneLiqHist(t0, t0 + 2 * H, H);
+  assert.deepEqual([...new Set(s.liqHistFineBands('BTC', 0, Number.MAX_SAFE_INTEGER, 0, 1e9).map((r) => r.t))], [t0 + H, t0]);
 });
 
 test('the store: deflated layers per coin and time, read by window, pruned and thinned with the snapshots', () => {

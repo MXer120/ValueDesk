@@ -22,7 +22,7 @@
 import { VENUES, type Venue } from '../valuedesk/types.js';
 import type { WalletVenue } from '../valuedesk/cohorts/model.js';
 import { LEV_BANDS, emptyDrift, levBand, niceStep, type DriftStats, type LevBand, type Tiers } from '../valuedesk/liquidations/math.js';
-import { FINE_MAX_BUCKETS, NOW_HI, NOW_LO, NOW_STEP, addRow, coinLevels, liqCoin, rowBand, snapBand, trimRow, type FineSnap, type LevelPos, type LiqNow, type LiqRow, type LiqSnap, type SnapRow } from '../valuedesk/liquidations/levels.js';
+import { FINE_MAX_BUCKETS, NOW_HI, NOW_LO, NOW_STEP, addRow, mergeFine, coinLevels, liqCoin, rowBand, snapBand, trimRow, type FineSnap, type LevelPos, type LiqNow, type LiqRow, type LiqSnap, type SnapRow } from '../valuedesk/liquidations/levels.js';
 import { inflateRawSync } from 'node:zlib';
 import { marketsNow, venueMarkets, type VenueMarkets } from '../valuedesk/liquidations/rules.js';
 import { shownLabel } from '../valuedesk/labels.js';
@@ -822,10 +822,11 @@ export function fineRowsOf(f: FineSnap, venues: readonly Venue[], ask: FineAsk):
 
 /**
  * `coin`'s levels at a step finer than its snapshots keep (the historical view at $10 and $1 on
- * BTC), for the window on screen: the snapshots from `t0` to `t1`, each over the part of
- * [ask.from, ask.to) its fine layers hold (levels.ts FINE_LAYERS: near the price then). Newest
- * first up to FINE_HIST_MAX_ROWS rows; the view draws the rest at their own step and says so.
- * Every wallet only: the layers keep no addresses.
+ * BTC, down to the coin's tick), for the window on screen: the snapshots from `t0` to `t1`, each
+ * over the part of [ask.from, ask.to) its fine layers hold - the bands of liq_hist_fine_band
+ * (levels.ts fineBands: the whole range since 2026-11-01 evening), before them the day of
+ * liq_hist_fine (near the price). Newest first up to FINE_HIST_MAX_ROWS rows; the view draws the
+ * rest at their own step. Every wallet only: the layers keep no addresses.
  */
 export function liqHistoryFine(coin: string, venues: readonly Venue[], t0: number, t1: number, ask: FineAsk): LiqHistoryFine | null {
   const s = reader();
@@ -833,21 +834,42 @@ export function liqHistoryFine(coin: string, venues: readonly Venue[], t0: numbe
   const points: LiqHistFinePoint[] = [];
   let since: number | null = null;
   let cut: number | null = null;
+  let n = 0;
+  /** Adds one snapshot's rows, newest first; false once the rows would pass the cap. */
+  const add = (t: number, f: FineSnap): boolean => {
+    const x = fineRowsOf(f, venues, ask);
+    if (!x) return true;
+    if (n + x.b.length > FINE_HIST_MAX_ROWS) { cut = points.at(-1)?.t ?? t; return false; }
+    n += x.b.length;
+    points.push({ t, st: ask.step, lo: x.lo, hi: x.hi, b: x.b });
+    return true;
+  };
+  const parse = (data: Uint8Array): FineSnap | null => { try { return JSON.parse(inflateRawSync(data).toString('utf8')) as FineSnap; } catch { return null; } };
   try {
-    since = s.liqHistFineFrom(coin);
-    const rows = s.liqHistFine(coin, t0, t1);
-    let n = 0;
-    for (let k = rows.length - 1; k >= 0; k--) {
-      const r = rows[k]!;
-      let f: FineSnap;
-      try { f = JSON.parse(inflateRawSync(r.data).toString('utf8')) as FineSnap; } catch { continue; }
-      const x = fineRowsOf(f, venues, ask);
-      if (!x) continue;
-      if (n + x.b.length > FINE_HIST_MAX_ROWS) { cut = points.at(-1)?.t ?? r.t; break; }
-      n += x.b.length;
-      points.push({ t: r.t, st: ask.step, lo: x.lo, hi: x.hi, b: x.b });
+    const bandFrom = s.liqHistFineBandFrom(coin);
+    const oldFrom = s.liqHistFineFrom(coin);
+    since = bandFrom === null ? oldFrom : oldFrom === null ? bandFrom : Math.min(bandFrom, oldFrom);
+    let going = true;
+    if (bandFrom !== null) {
+      // The bands overlapping the window, newest snapshot first: each snapshot's put back together.
+      const rows = s.liqHistFineBands(coin, t0, t1, ask.from, ask.to);
+      for (let k = 0; k < rows.length && going;) {
+        const t = rows[k]!.t;
+        const parts: FineSnap[] = [];
+        for (; k < rows.length && rows[k]!.t === t; k++) { const f = parse(rows[k]!.data); if (f) parts.push(f); }
+        const f = mergeFine(parts);
+        if (f) going = add(t, f);
+      }
     }
-  } catch { /* the table arrives with the indexer's first start after 2026-11-01 */ }
+    // Before the bands: the earlier layers near the price.
+    if (going && oldFrom !== null && (bandFrom === null || oldFrom < bandFrom)) {
+      const rows = s.liqHistFine(coin, t0, Math.min(t1, bandFrom === null ? t1 : bandFrom - 1));
+      for (let k = rows.length - 1; k >= 0 && going; k--) {
+        const f = parse(rows[k]!.data);
+        if (f) going = add(rows[k]!.t, f);
+      }
+    }
+  } catch { /* the tables arrive with the indexer's first start after 2026-11-01 */ }
   points.reverse();
   return { coin, venues: [...venues], ...ask, points, since, cut };
 }

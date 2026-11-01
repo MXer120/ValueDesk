@@ -294,7 +294,7 @@ export function LiqHeatmap({ symbol, engine, instance, address = null }: { symbo
   // The step drawn: the one picked, or Auto's (owner 2026-11-01: "auto is bad as its just the 100
   // steps no matter what"): about PX_PER_CELL of the window's pixels a cell (Fine / Medium / Coarse
   // under it), from the widths the live data holds - the stream's and, near the price, its fine
-  // layer's (BTC $1, $2, $5, $10...); in Historical, the snapshot's step or its fine layers'.
+  // layer's (BTC $1, $2, $5, $10...); in Historical, the snapshot's step or the finer ones of the coin's ladder (kept down to its tick).
   const rawStep = h ? h.step / streamK : 0;
   const fm = live.fineMeta;
   const inReach = !!(fm && win && win[0] >= fm.lo && win[1] <= fm.hi);
@@ -302,7 +302,7 @@ export function LiqHeatmap({ symbol, engine, instance, address = null }: { symbo
   // Only once the view has a size: unmeasured, it spans a pixel and Auto would pick the coarsest width.
   if (level === 'auto' && win && win[2] >= MIN_PX) {
     const target = ((win[1] - win[0]) / win[2]) * PX_PER_CELL[res];
-    step = histOn ? (histAt ? autoStep(target, [histAt.st, histAt.st / 10, histAt.st / 100]) : null)
+    step = histOn ? (histAt ? autoStep(target, [histAt.st, ...ladder.filter((x) => x < histAt.st * (1 - 1e-9))]) : null)
       : rawStep > 0 ? autoStep(target, streamSteps(rawStep, inReach ? fm!.st : null)) : null;
   }
   // The bar width in server buckets: from the price and Fine / Medium / Coarse until the window is

@@ -29,6 +29,8 @@ export interface VenueMarkets {
   tiers: Map<string, Tiers>;
   /** symbol -> open interest in coins (one side) and the venue's mark. */
   oi: Map<string, { oi: number; px: number | null }>;
+  /** symbol -> price tick (SoDEX only: the heatmap's finest step, levels.ts fineHistSteps). */
+  ticks?: Map<string, number>;
   at: number;
 }
 
@@ -73,7 +75,7 @@ async function readHl(dex: string | null, withRules: boolean): Promise<Partial<V
   return withRules ? { tiers: hlTiers(meta), oi } : { oi };
 }
 
-type SodexSymbol = { name?: string; marginTiers?: Array<{ maxNotionalValue?: string; maintenanceMarginRate?: string; maintenanceDeduction?: string }> };
+type SodexSymbol = { name?: string; tickSize?: string; marginTiers?: Array<{ maxNotionalValue?: string; maintenanceMarginRate?: string; maintenanceDeduction?: string }> };
 
 /** SoDEX's tiers: each row's bound is the upper one, so a tier starts where the one before ended. */
 export function sodexTiers(list: readonly SodexSymbol[]): Map<string, Tiers> {
@@ -105,7 +107,11 @@ async function readSodex(withRules: boolean): Promise<Partial<VenueMarkets>> {
     const n = num(t.openInterest ?? null);
     if (t.symbol && n !== null) oi.set(t.symbol, { oi: n / 2, px: num(t.markPrice ?? null) });
   }
-  return withRules ? { tiers: sodexTiers(listOf<SodexSymbol>(syms)), oi } : { oi };
+  if (!withRules) return { oi };
+  const list = listOf<SodexSymbol>(syms);
+  const ticks = new Map<string, number>();
+  for (const s of list) { const t = num(s.tickSize ?? null); if (s.name && t !== null && t > 0) ticks.set(s.name, t); }
+  return { tiers: sodexTiers(list), oi, ticks };
 }
 
 type LighterBook = { symbol?: string; market_type?: string; maintenance_margin_fraction?: number; open_interest?: number; mark_price?: string };
@@ -172,7 +178,8 @@ async function refresh(venue: Venue): Promise<VenueMarkets | null> {
         : venue === 'sodex' ? await readSodex(withRules)
           : venue === 'lighter' ? await readLighter(pacers.lighter ?? lighterPacer)
             : await readArcus(pacers.arcus ?? arcusPacer);
-    const m: VenueMarkets = { tiers: got.tiers ?? st.m?.tiers ?? new Map(), oi: got.oi ?? st.m?.oi ?? new Map(), at: now };
+    const ticks = got.ticks ?? st.m?.ticks;
+    const m: VenueMarkets = { tiers: got.tiers ?? st.m?.tiers ?? new Map(), oi: got.oi ?? st.m?.oi ?? new Map(), ...(ticks ? { ticks } : {}), at: now };
     if (got.tiers) st.rulesAt = now;
     st.oiAt = now;
     st.m = m;

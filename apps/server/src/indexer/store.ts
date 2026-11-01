@@ -396,6 +396,12 @@ CREATE TABLE IF NOT EXISTS liq_hist (
 CREATE TABLE IF NOT EXISTS liq_hist_fine (
   coin TEXT NOT NULL, t INTEGER NOT NULL, data BLOB NOT NULL,
   PRIMARY KEY (coin, t)) WITHOUT ROWID;
+-- Since 2026-11-01 evening, in its place: the fine layers over the snapshot's whole range (a tenth
+-- of its step and the coin's tick), cut into price bands [lo, hi) (levels.ts fineBands), each a
+-- deflated FineSnap: a window reads only the bands it overlaps. liq_hist_fine keeps the day before.
+CREATE TABLE IF NOT EXISTS liq_hist_fine_band (
+  coin TEXT NOT NULL, t INTEGER NOT NULL, lo REAL NOT NULL, hi REAL NOT NULL, data BLOB NOT NULL,
+  PRIMARY KEY (coin, t, lo)) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS liq_now (
   coin TEXT PRIMARY KEY, at INTEGER NOT NULL, data TEXT NOT NULL) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS board_meta (
@@ -3063,6 +3069,25 @@ export class IndexStore {
     return (this.q('SELECT MIN(t) AS t FROM liq_hist_fine WHERE coin = ?').get(coin) as { t: number | null }).t;
   }
 
+  /** Fine bands of the snapshots at `t` (levels.ts fineBands): coin, price band, deflated FineSnap. */
+  putLiqHistFineBands(t: number, rows: ReadonlyArray<[string, number, number, Uint8Array]>): void {
+    this.tx(() => {
+      const ins = this.q('INSERT OR REPLACE INTO liq_hist_fine_band (coin, t, lo, hi, data) VALUES (?, ?, ?, ?, ?)');
+      for (const [coin, lo, hi, data] of rows) ins.run(coin, t, lo, hi, data);
+    });
+  }
+
+  /** One coin's fine bands from `toT` back to `fromT` that overlap [lo, hi), newest first (deflated as written). */
+  liqHistFineBands(coin: string, fromT: number, toT: number, lo: number, hi: number): Array<{ t: number; lo: number; hi: number; data: Uint8Array }> {
+    return this.q('SELECT t, lo, hi, data FROM liq_hist_fine_band WHERE coin = ? AND t >= ? AND t <= ? AND lo < ? AND hi > ? ORDER BY t DESC, lo')
+      .all(coin, fromT, toT, hi, lo) as Array<{ t: number; lo: number; hi: number; data: Uint8Array }>;
+  }
+
+  /** When a coin's fine bands begin (null: none yet). */
+  liqHistFineBandFrom(coin: string): number | null {
+    return (this.q('SELECT MIN(t) AS t FROM liq_hist_fine_band WHERE coin = ?').get(coin) as { t: number | null }).t;
+  }
+
   /** Every coin's levels now (cohortTracker.ts recordLiq), replacing the last pass; coins not in it are dropped. */
   putLiqNow(at: number, rows: ReadonlyArray<[string, Uint8Array]>): void {
     this.tx(() => {
@@ -3094,6 +3119,8 @@ export class IndexStore {
     // The fine layers go with their snapshots.
     this.q('DELETE FROM liq_hist_fine WHERE t < ?').run(beforeT);
     this.q('DELETE FROM liq_hist_fine WHERE t < ? AND t % ? != 0').run(thinBeforeT, hourMs);
+    this.q('DELETE FROM liq_hist_fine_band WHERE t < ?').run(beforeT);
+    this.q('DELETE FROM liq_hist_fine_band WHERE t < ? AND t % ? != 0').run(thinBeforeT, hourMs);
   }
 
   // --- the level change log (liq_addr, liq_log, liq_cur) ------------------------------------

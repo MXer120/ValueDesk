@@ -80,7 +80,7 @@ import { accountLiqs, addDrift, calibrate, emptyDrift, feeCash, fillCash, fundin
 import { hlInfo } from '../valuedesk/hyperliquid/index.js';
 import { ARCUS_FEES_COST, ASK_MIN_USD, BASE_FEES, FEES_TTL_MS, HL_FEES_COST, SODEX_FEES_COST, arcusFees, fillRate, hlFees, sodexFees, spotSellRate, xyzScales, type FeeRates, type MarketScale } from './feeRates.js';
 import { marketsNow, setRulesPacers, venueMarkets } from '../valuedesk/liquidations/rules.js';
-import { fineSnapOf, liqCoin, snapOfNow } from '../valuedesk/liquidations/levels.js';
+import { fineBandWidth, fineBands, fineSnapOf, liqCoin, snapOfNow } from '../valuedesk/liquidations/levels.js';
 import { LiqLive } from '../valuedesk/liquidations/live.js';
 import { LiqFeedServer } from './liqFeed.js';
 import { deflateRawSync } from 'node:zlib';
@@ -2170,17 +2170,20 @@ export class CohortTracker {
         // Every position's exact level now, per coin: the fine layers and the change log.
         const byCoin = this.live.positionsByCoin(0, NO_WALLETS);
         const hist: Array<[string, string]> = [];
-        const fine: Array<[string, Uint8Array]> = [];
+        const fine: Array<[string, number, number, Uint8Array]> = [];
+        const ticks = new Map<string, number>();
+        for (const [sym, tick] of marketsNow('sodex')?.ticks ?? []) ticks.set(liqCoin(sym), tick);
         for (const coin of keep) {
           const row = rows.get(coin);
           if (!row) continue;
           const snap = snapOfNow(row);
           hist.push([coin, JSON.stringify(snap)]);
-          const f = fineSnapOf(row.p, snap.st, byCoin.get(coin) ?? []);
-          if (f) fine.push([coin, deflateRawSync(JSON.stringify(f))]);
+          // Its fine layers over the whole range, down to the coin's tick, in price bands (levels.ts fineBands).
+          const f = fineSnapOf(row.p, snap.st, byCoin.get(coin) ?? [], ticks.get(coin) ?? 0);
+          if (f) for (const b of fineBands(f, fineBandWidth(row.p))) fine.push([coin, b.lo, b.hi, deflateRawSync(JSON.stringify(b.f))]);
         }
         if (hist.length) s.putLiqHist(t, hist);
-        if (fine.length) s.putLiqHistFine(t, fine);
+        if (fine.length) s.putLiqHistFineBands(t, fine);
         // Every position's level at the same step, as a change log (the history's wallet filter).
         this.logLevels(t, keep, byCoin);
         // Older snapshots - and the 15-minute ones thinned to hourly - go only with the owner's word.
