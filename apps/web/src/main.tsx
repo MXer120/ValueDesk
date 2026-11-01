@@ -1,4 +1,4 @@
-import { StrictMode } from 'react';
+import { StrictMode, Suspense, lazy } from 'react';
 import { createRoot } from 'react-dom/client';
 // IBM Plex Sans, self-hosted (SIL OFL). Only the two weights the UI actually
 // uses - 400 for labels, 500 for values. `body` in styles.css has named this
@@ -31,6 +31,10 @@ import { startAttention } from './attention';
 import './styles.css';
 import { useNumStyle } from './numStyle';
 
+// beta.valuedesk.so (VITE_CHANNEL=beta, deploy/vercel/beta.settings): the beta list's door before the app
+// (beta/BetaGate.tsx). The site's own build folds this to null and never contains the door.
+const BetaGate = import.meta.env.VITE_CHANNEL === 'beta' ? lazy(() => import('./beta/BetaGate')) : null;
+
 // Before the first render, so an error thrown while mounting is logged too.
 // See log.ts for levels, ?debug=<ns>, and the __vs console handle.
 installGlobalLogging();
@@ -58,7 +62,7 @@ function Root() {
   return (
     // In a sanctioned place the app is not mounted at all: only the legal pages (legal/LegalGate.tsx).
     <SiteGate>
-      <App />
+      {BetaGate ? <Suspense fallback={null}><BetaGate><App /></BetaGate></Suspense> : <App />}
       {/* Analytics, asked once of visitors who accepted the terms before it existed (legal/AnalyticsPrompt.tsx). */}
       <AnalyticsPrompt />
     </SiteGate>

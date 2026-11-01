@@ -406,3 +406,33 @@ test('a page error goes into the audit log, only with a session, cut to size', a
   assert.equal(long.statusCode, 200);
   assert.equal((s.store.auditRows({ kind: 'page.error' })[0]!.detail!.message as string).length, 400);
 });
+
+// --- the beta list (beta.valuedesk.so) --------------------------------------------------------
+
+test('beta list: a signed add and remove, for exactly that wallet, audited; the list reads it', async () => {
+  const s = await suite();
+  const auth = await s.login();
+  const tester = newWallet().address;
+  assert.deepEqual((await s.post('/api/admin/beta', {}, auth)).json().wallets, []);
+  // Unsigned, or signed for another wallet or another action: refused.
+  assert.equal((await s.post('/api/admin/beta/add', { address: tester, label: 'Max' }, auth)).statusCode, 403);
+  const other = newWallet().address;
+  assert.equal((await s.post('/api/admin/beta/add', { address: tester, label: 'Max', action: action(s.admin, 'beta.add', other, { address: other, label: 'Max' }) }, auth)).statusCode, 403);
+  assert.equal((await s.post('/api/admin/beta/add', { address: tester, label: 'Max', action: action(s.admin, 'beta.remove', tester, { address: tester, label: 'Max' }) }, auth)).statusCode, 403);
+  assert.equal((await s.post('/api/admin/beta/add', { address: 'nope', label: '', action: action(s.admin, 'beta.add', 'nope', {}) }, auth)).statusCode, 400);
+
+  const add = await s.post('/api/admin/beta/add', { address: `0x${tester.slice(2).toUpperCase()}`, label: '  Max   T. ', action: action(s.admin, 'beta.add', tester, { address: tester, label: 'Max T.' }) }, auth);
+  assert.equal(add.statusCode, 200, add.body);
+  assert.equal(add.json().added, true);
+  assert.deepEqual(s.store.betaWallets().map((w) => [w.address, w.label, w.addedBy]), [[tester, 'Max T.', s.admin.address]]);
+  // A rename keeps it once.
+  const rename = await s.post('/api/admin/beta/add', { address: tester, label: 'Max', action: action(s.admin, 'beta.add', tester, { address: tester, label: 'Max' }) }, auth);
+  assert.equal(rename.json().added, false);
+  assert.deepEqual((await s.post('/api/admin/beta', {}, auth)).json().wallets.map((w: { label: string }) => w.label), ['Max']);
+
+  const remove = await s.post('/api/admin/beta/remove', { address: tester, action: action(s.admin, 'beta.remove', tester, { address: tester }) }, auth);
+  assert.equal(remove.json().removed, true);
+  assert.deepEqual(s.store.betaWallets(), []);
+  const kinds = s.store.auditRows({ limit: 20 }).filter((r) => r.kind.startsWith('beta.')).map((r) => `${r.kind}:${r.ok}`).reverse();
+  assert.deepEqual(kinds, ['beta.add:false', 'beta.add:false', 'beta.add:false', 'beta.add:true', 'beta.add:true', 'beta.remove:true']);
+});

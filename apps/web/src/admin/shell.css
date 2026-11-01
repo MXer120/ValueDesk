@@ -1,0 +1,64 @@
+/* The admin suite's sign-in pieces, shared with the beta site's gate (apps/web/src/beta/BetaGate.tsx):
+   the wallet picker (WalletPicker.tsx), the numbered steps, the buttons, the small text styles and the
+   navbar tag (orange Dev on dev.valuedesk.so, Beta on beta.valuedesk.so). Every rule is under .dv-,
+   so its place in the site's one stylesheet (cssOrder.ts) changes nothing else. */
+
+/* The page around them: the site's navbar as a bar across the top, the Status page's card on it. */
+.dv-root { min-height: 100vh; background: var(--bg); }
+.dv-navbar { position: sticky; top: 0; z-index: 60; background: var(--bg); box-shadow: 0 1px 0 var(--panel-line); }
+.dv-navbar .navlinks { margin-left: var(--sp-2); }
+.dv-navbar .navlinks a.navlink.active { color: var(--text); }
+.dv-navbar .navlinks a.navlink:hover:not(.active) { color: var(--text); }
+.dv-main { padding: var(--sp-5) var(--sp-4) var(--sp-6); }
+.dv-page { padding: 0; }
+.dv-root .st-card.dv-card--narrow { max-width: 460px; }
+.dv-pad-x { padding: 0 var(--sp-4) var(--sp-4); }
+
+.dv-devtag {
+  margin-left: 2px; padding: 0 7px; border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--warn) 16%, transparent); color: var(--warn);
+  font-size: 11px; font-weight: 500; line-height: 18px;
+}
+/* The app's paper blue (OrderEntry.css .oe--paper): not yet for everyone. */
+.dv-devtag--beta { background: color-mix(in srgb, #4c8dff 18%, transparent); color: #4c8dff; }
+.dv-btn {
+  appearance: none; display: inline-flex; align-items: center; justify-content: center; height: 32px; padding: 0 14px;
+  border: 1px solid var(--panel-line); border-radius: 8px; background: color-mix(in srgb, var(--bg) 55%, transparent); color: var(--text);
+  font: inherit; font-size: var(--fs-xs); font-weight: 500; cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
+}
+.dv-btn:hover:not(:disabled) { border-color: var(--line); background: rgba(255, 255, 255, 0.06); }
+.dv-btn:disabled { color: var(--disabled); cursor: default; }
+.dv-btn--primary { border-color: var(--accent); background: var(--accent); color: var(--accent-text); }
+.dv-btn--primary:hover:not(:disabled) { border-color: var(--accent-hover); background: var(--accent-hover); }
+.dv-btn--primary:disabled { border-color: var(--accent-secondary); background: var(--accent-secondary); color: var(--dim); }
+.dv-error { margin: 0; color: var(--neg); font-size: 12px; }
+.dv-dim { color: var(--dim); font-size: 12px; }
+.dv-mono { font-family: var(--font-num); font-variant-numeric: tabular-nums; }
+.dv-steps { list-style: none; margin: 0; padding: 16px var(--sp-4) var(--sp-4); display: flex; flex-direction: column; gap: 18px; }
+.dv-steps__title { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; color: var(--text); font-size: 13px; font-weight: 550; }
+.dv-steps__n { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: rgba(255, 255, 255, 0.08); color: var(--text); font: 500 11px var(--font-num); }
+.dv-steps .is-done .dv-steps__n { background: color-mix(in srgb, var(--pos) 18%, transparent); color: var(--pos); }
+.dv-wallets { display: flex; flex-direction: column; gap: 6px; }
+.dv-wallet {
+  display: flex; align-items: center; gap: 10px; width: 100%; height: 42px; padding: 0 14px; appearance: none; text-align: left;
+  border: 0; border-radius: var(--radius-tile); box-shadow: var(--depth-1); background: rgba(255, 255, 255, 0.03); color: var(--text);
+  font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; transition: background-color var(--dur-fast) var(--ease-out);
+}
+.dv-wallet:hover:not(:disabled) { background: rgba(255, 255, 255, 0.07); }
+.dv-wallet:disabled { color: var(--muted); cursor: default; }
+.dv-wallet img { border-radius: 5px; }
+.dv-wallet__dot { flex: none; width: 20px; height: 20px; border-radius: 50%; background: var(--bg-control); }
+.dv-wallets .dv-dim { margin: 2px 2px 0; }
+
+@media (max-width: 860px) {
+  .dv-navbar .navbar-inner { gap: 10px; padding: 0 12px; }
+  .dv-navbar .brand .dv-devtag { font-size: 11px; }
+  .dv-main { padding: 12px 10px var(--sp-5); }
+}
+
+/* The beta site's door (apps/web/src/beta/BetaGate.tsx). */
+.dv-beta-gate__note { margin: 0 0 10px; line-height: 1.5; }
+.dv-beta-gate__sign { width: 100%; height: 38px; }
+.dv-beta-gate__actions { display: flex; flex-wrap: wrap; gap: 8px; padding-top: 16px; }
+.dv-beta-gate__actions .dv-btn { flex: 1 1 160px; text-decoration: none; }

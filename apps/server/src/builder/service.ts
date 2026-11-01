@@ -16,6 +16,7 @@
  * With no configuration file the feature is off: no database is opened, no
  * timer but the one that looks for the file, and the answer says so.
  */
+import { channelFrom } from '../beta/gate.js';
 import { NET, NETWORK } from '../config.js';
 import { sodex } from '../sodex/rest.js';
 import { gatewayWeightLimit, gatewayWeightSpent, gwGet } from '../valuedesk/sodex/gateway.js';
@@ -78,6 +79,8 @@ export interface BuilderServiceOptions {
   lookbackMs?: number;
   /** How often the two files are looked at (ms). */
   refreshMs?: number;
+  /** False: read the ledger, never verify (the beta API - the main API's verifier keeps the one ledger). */
+  verify?: boolean;
 }
 
 /** After the ledger could not be opened it is tried again this much later. */
@@ -130,7 +133,7 @@ export class BuilderService {
     if (this.started) return;
     this.started = true;
     this.load();
-    this.runtime?.verifier.start();
+    if (this.o.verify !== false) this.runtime?.verifier.start();
     this.timer = setInterval(() => void this.refresh(), this.o.refreshMs ?? 5_000);
     this.timer.unref?.();
   }
@@ -375,6 +378,7 @@ export function builderService(log: LogLike = consoleLog): BuilderService {
       approvalsPerMin: perMinFrom(process.env.VALUESCAN_BUILDER_APPROVALS_PER_MIN, APPROVALS_PER_MIN_DEFAULT, APPROVALS_PER_MIN_MAX),
       explorerPerMin: process.env.VALUESCAN_BUILDER_EXPLORER_PER_MIN?.trim() === '0' ? 0 : perMinFrom(process.env.VALUESCAN_BUILDER_EXPLORER_PER_MIN, EXPLORER_PER_MIN_DEFAULT, EXPLORER_PER_MIN_MAX),
       lookbackMs: Number.isFinite(days) && days >= 0 && days <= 90 && process.env.VALUESCAN_BUILDER_LOOKBACK_DAYS?.trim() ? days * 86_400_000 : undefined,
+      verify: channelFrom(process.env) === 'main',
     });
     instance.start();
   }

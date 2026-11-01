@@ -18,6 +18,9 @@
  *   POST /api/admin/audit            {before?, kind?}: the audit log, newest first
  *   POST /api/admin/page-error       {message, stack, where, route, build, browser}: an error the page hit,
  *                                    into the audit log (the page shows it too - apps/web/src/admin/Crash.tsx)
+ *   POST /api/admin/beta             the wallets that may use beta.valuedesk.so (beta/gate.ts reads the list)
+ *   POST /api/admin/beta/add         {address, label, action}: put a wallet on it, or rename it (signed)
+ *   POST /api/admin/beta/remove      {address, action}: take a wallet off it (signed); out within seconds
  *
  * THE LOCK IS HERE, NOT IN THE PAGE. In this plugin's own hook (after the hosted gate), before any handler:
  *   1. no password set on this server (admin/auth.ts): every route is a 404, as a
@@ -76,6 +79,8 @@ export const LOCK_AFTER = 5;
 export const LOCK_WINDOW_MS = 15 * MINUTE;
 
 export const REPLY_MAX = 4000;
+/** A beta tester's name on the Beta page. */
+export const BETA_LABEL_MAX = 60;
 /** How often the builder ledger's counted orders are copied (admin/builderStats.ts syncFeeOrders). */
 export const FEE_SYNC_MS = 5 * MINUTE;
 
@@ -432,6 +437,34 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOptions 
       detail: { message: text(b.message, 400), where: text(b.where, 400), route: text(b.route, 80), build: text(b.build, 40), browser: text(b.browser, 200), stack: text(b.stack, 1800) },
     }, now());
     return { ok: true };
+  });
+
+  // --- the beta list (beta.valuedesk.so) ------------------------------------------------------
+
+  app.post('/api/admin/beta', { bodyLimit: 1024 }, async () => ({ ok: true, wallets: store().betaWallets() }));
+
+  app.post('/api/admin/beta/add', { bodyLimit: 4 * 1024 }, async (req, reply) => {
+    const b = bodyOf(req);
+    const address = typeof b.address === 'string' ? b.address.trim().toLowerCase() : '';
+    const label = typeof b.label === 'string' ? b.label.replace(/\s+/g, ' ').trim() : '';
+    if (!/^0x[0-9a-f]{40}$/.test(address)) return reply.code(400).send({ ok: false, error: 'address must be a 0x wallet address' });
+    if (label.length > BETA_LABEL_MAX) return reply.code(400).send({ ok: false, error: `the name must be at most ${BETA_LABEL_MAX} characters` });
+    if (!signed(req, reply, 'beta.add', address, { address, label })) return reply;
+    const s = session(req);
+    const added = store().addBetaWallet(address, label, s.wallet, now());
+    store().audit({ kind: 'beta.add', ok: true, wallet: s.wallet, client: clientKey(req.ip), country: countryOf(req), detail: { address, label, added } }, now());
+    return { ok: true, added, wallets: store().betaWallets() };
+  });
+
+  app.post('/api/admin/beta/remove', { bodyLimit: 1024 }, async (req, reply) => {
+    const b = bodyOf(req);
+    const address = typeof b.address === 'string' ? b.address.trim().toLowerCase() : '';
+    if (!/^0x[0-9a-f]{40}$/.test(address)) return reply.code(400).send({ ok: false, error: 'address must be a 0x wallet address' });
+    if (!signed(req, reply, 'beta.remove', address, { address })) return reply;
+    const s = session(req);
+    const removed = store().removeBetaWallet(address);
+    store().audit({ kind: 'beta.remove', ok: true, wallet: s.wallet, client: clientKey(req.ip), country: countryOf(req), detail: { address, removed } }, now());
+    return { ok: true, removed, wallets: store().betaWallets() };
   });
 
   app.post('/api/admin/audit', { bodyLimit: 1024 }, async (req) => {

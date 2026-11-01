@@ -81,6 +81,8 @@ import './components/fedlive/FedLive.css';
 import './components/account/UnlockDialog.css';
 import './components/SettingsMenu.css';
 import './components/dialog.css';
+// The admin suite's sign-in pieces (.dv-), which the beta site's gate shows (beta/BetaGate.tsx).
+import './admin/shell.css';
 import './appearance.css';
 
 /* Not listed, on purpose: styles.css (main.tsx imports it last, after App),

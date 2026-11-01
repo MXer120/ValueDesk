@@ -1,0 +1,9 @@
+# The beta site's settings (beta.valuedesk.so, the git branch `beta`): deploy/vercel/build.sh reads
+# production.settings and then this file, so a name here wins. Nothing here is a secret either.
+
+# The web asks for a wallet on the admin suite's beta list before anything else (apps/web/src/beta/).
+VITE_CHANNEL=beta
+
+# The live heatmap's socket of the beta API: Caddy sends /ws/liq-beta to it as /ws/liq
+# (deploy/server/caddy/Caddyfile.template).
+VITE_LIQ_WS_URL=wss://api.valuedesk.so/ws/liq-beta

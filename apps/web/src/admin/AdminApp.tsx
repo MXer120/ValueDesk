@@ -26,6 +26,7 @@ import { Revenue } from './pages/Revenue';
 import { Analytics } from './pages/Analytics';
 import { Status } from './pages/Status';
 import { Audit } from './pages/Audit';
+import { Beta } from './pages/Beta';
 
 const PAGES: Array<{ id: string; label: string; render: (arg: string) => ReactNode }> = [
   { id: 'overview', label: 'Overview', render: () => <Overview /> },
@@ -34,6 +35,7 @@ const PAGES: Array<{ id: string; label: string; render: (arg: string) => ReactNo
   { id: 'revenue', label: 'Volume & fees', render: () => <Revenue /> },
   { id: 'analytics', label: 'Analytics', render: () => <Analytics /> },
   { id: 'status', label: 'Status', render: () => <Status /> },
+  { id: 'beta', label: 'Beta', render: () => <Beta /> },
   { id: 'audit', label: 'Audit', render: () => <Audit /> },
 ];
 

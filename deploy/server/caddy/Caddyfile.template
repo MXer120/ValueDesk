@@ -76,6 +76,19 @@ __ORIGIN_SITE_ADDRESSES__ {
 		}
 	}
 
+	# The beta API's socket (beta.valuedesk.so, deploy/vercel/beta.settings): the same, to
+	# the beta API (valuescan-api-beta.service), which serves it as /ws/liq.
+	@liqwsbeta path /ws/liq-beta
+	handle @liqwsbeta {
+		rewrite * /ws/liq
+		reverse_proxy 127.0.0.1:8798 {
+			header_up X-Forwarded-For {remote_host}
+			header_up -X-Viewer-Country
+			lb_try_duration 15s
+			lb_try_interval 250ms
+		}
+	}
+
 	handle @edge {
 		# Past the gate, by path. Nested handle blocks are mutually exclusive like
 		# the outer ones: the first that matches is the only one that runs.
@@ -93,6 +106,19 @@ __ORIGIN_SITE_ADDRESSES__ {
 				# instead of answered 502. Only a failed connect is retried - a request the
 				# executor received is never sent twice.
 				lb_try_duration 20s
+				lb_try_interval 250ms
+			}
+		}
+
+		# The beta site (beta.valuedesk.so): its Vercel function marks every request
+		# (deploy/vercel/api-proxy.cjs, VALUESCAN_CHANNEL=beta), and they go to the beta
+		# API (valuescan-api-beta.service), which runs the beta release and refuses all but
+		# a listed wallet's token (apps/server/src/beta/gate.ts). The copy executor above is
+		# shared: it has no beta.
+		@beta header X-VS-Channel beta
+		handle @beta {
+			reverse_proxy 127.0.0.1:8798 {
+				lb_try_duration 15s
 				lb_try_interval 250ms
 			}
 		}

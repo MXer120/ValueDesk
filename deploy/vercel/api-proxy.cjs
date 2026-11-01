@@ -78,6 +78,11 @@
 //   VALUESCAN_ORIGIN_URL     https://<origin name>  (https only; http only to loopback, for tests)
 //   VALUESCAN_ORIGIN_SECRET  the value Caddy and the API accept; a "current,next" list
 //                            is never expected here, but if given the first is sent
+//   VALUESCAN_CHANNEL        `beta` in the beta site's deployment (beta.valuedesk.so, git branch `beta`;
+//                            package.mjs writes it): every request gets `x-vs-channel: beta` - Caddy sends
+//                            it to the beta API - and the site's vs_beta cookie as `x-vs-beta` (the beta
+//                            API's lock, apps/server/src/beta/gate.ts). Every path is private there: a
+//                            beta answer is never kept by the CDN, where another visitor could get it.
 const http = require('node:http');
 const https = require('node:https');
 const net = require('node:net');
@@ -139,6 +144,22 @@ const ANALYTICS_PATH = '/api/vs/a';
 const isAdminPath = (path) => String(path ?? '').startsWith('/api/admin/');
 /** A sign-in, an answer to a ticket: small. */
 const ADMIN_BODY_LIMIT = 32 * 1024;
+/** The beta channel's sign-in (apps/server/src/routes/beta.ts): the beta site only. */
+const isBetaPath = (path) => String(path ?? '').startsWith('/api/beta/');
+/** The beta site's deployment (VALUESCAN_CHANNEL=beta). */
+const isBetaChannel = (env) => String(env.VALUESCAN_CHANNEL ?? '').trim().toLowerCase() === 'beta';
+/** The cookie the beta site keeps its token in (apps/server/src/beta/signIn.ts BETA_COOKIE), or null. */
+function betaToken(headers) {
+  const raw = headers.cookie;
+  for (const part of String(Array.isArray(raw) ? raw.join('; ') : raw ?? '').split(';')) {
+    const i = part.indexOf('=');
+    if (i > 0 && part.slice(0, i).trim() === 'vs_beta') {
+      const v = part.slice(i + 1).trim();
+      return /^0x[0-9a-f]{40}\.\d{13}\.[A-Za-z0-9_-]{43}$/.test(v) ? v : null;
+    }
+  }
+  return null;
+}
 /** The hosts the admin suite is served on, lower case. */
 const adminHostsFrom = (env) => String(env.VALUESCAN_ADMIN_HOSTS ?? 'dev.valuedesk.so').split(',').map((h) => h.trim().toLowerCase()).filter(Boolean);
 /** The host a request was made to (Vercel sets Host to the domain the visitor asked for), without a port. */
@@ -163,7 +184,7 @@ function bodyLimitFor(path) {
   if (path === '/api/folders/upload/put') return FOLDERS_UPLOAD_LIMIT;
   if (path === '/api/vs/feedback/upload') return FEEDBACK_UPLOAD_LIMIT;
   if (path === '/api/vs/inbox/add') return INBOX_ADD_LIMIT;
-  if (isAdminPath(path)) return ADMIN_BODY_LIMIT;
+  if (isAdminPath(path) || isBetaPath(path)) return ADMIN_BODY_LIMIT;
   if (isReportsPath(path)) return REPORTS_BODY_LIMIT;
   if (isFoldersPath(path)) return FOLDERS_BODY_LIMIT;
   return BODY_LIMIT;
@@ -341,11 +362,14 @@ async function handler(req, res) {
   if (isAdminPath(path) !== adminHostsFrom(process.env).includes(requestHost(req.headers))) {
     return sendJson(res, 404, { error: 'not found', source: 'edge' });
   }
+  const beta = isBetaChannel(process.env);
+  // The beta sign-in only on the beta site.
+  if (isBetaPath(path) && !beta) return sendJson(res, 404, { error: 'not found', source: 'edge' });
   if (geoBlocked(geoBlockFrom(process.env), country, region)) {
     return sendJson(res, 451, { error: 'ValueDesk is not available in your country or region: the sanctions and legal restrictions that apply there do not allow us to offer it.', code: 'region', source: 'edge' });
   }
   const copy = isCopyPath(path);
-  const priv = isPrivatePath(path);
+  const priv = beta || isPrivatePath(path);
   const methods = priv ? COPY_METHODS : ALLOWED_METHODS;
   if (!methods.has(method)) {
     return sendJson(res, 405, { error: 'method not allowed', source: 'edge' }, { allow: [...methods].join(', ') });
@@ -378,6 +402,11 @@ async function handler(req, res) {
   if (viewer) headers['x-forwarded-for'] = viewer;
   if ((copy || isAdminPath(path) || path === ANALYTICS_PATH) && country) headers['x-viewer-country'] = country;
   if (path === ANALYTICS_PATH && region) headers['x-viewer-region'] = region;
+  if (beta) {
+    headers['x-vs-channel'] = 'beta';
+    const token = betaToken(req.headers);
+    if (token) headers['x-vs-beta'] = token;
+  }
   if (body !== undefined) headers['content-length'] = String(body.length);
 
   let upstream;
@@ -439,3 +468,6 @@ module.exports.isReportsPath = isReportsPath;
 module.exports.isAdminPath = isAdminPath;
 module.exports.requestHost = requestHost;
 module.exports.adminHostsFrom = adminHostsFrom;
+module.exports.isBetaPath = isBetaPath;
+module.exports.isBetaChannel = isBetaChannel;
+module.exports.betaToken = betaToken;

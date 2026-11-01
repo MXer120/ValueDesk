@@ -34,6 +34,9 @@ import { profileOnSignal } from './indexer/cpuProfile.js';
 import { pointsAuthRoutes } from './routes/pointsAuth.js';
 import { keepValuedeskWarm, valuedeskRoutes } from './routes/valuedesk.js';
 import { builderRoutes } from './routes/builder.js';
+import { betaRoutes } from './routes/beta.js';
+import { BetaList, BetaTokens, channelFrom, installBetaGate } from './beta/gate.js';
+import { AdminStore } from './admin/store.js';
 import { foldersRoutes } from './routes/folders.js';
 import { reportRoutes } from './routes/reports.js';
 import { statusRoutes } from './routes/status.js';
@@ -170,6 +173,13 @@ const siteBrake = siteBrakeReader(process.env.VALUEDESK_BRAKE_FILE?.trim() || (H
 const siteNotices = siteNoticeReader(HOSTED);
 // The admin suite's own origins (VALUESCAN_ADMIN_ORIGINS, default https://dev.valuedesk.so): its routes take no other.
 const ADMIN_ORIGINS = adminOriginsFrom(process.env.VALUESCAN_ADMIN_ORIGINS);
+// The beta channel (beta.valuedesk.so, VALUESCAN_CHANNEL=beta): a beta token of a wallet on the admin
+// suite's beta list for every route but the health check and the sign-in (beta/gate.ts, routes/beta.ts).
+const CHANNEL = channelFrom(process.env);
+let betaAdmin: AdminStore | null = null;
+const betaLock = CHANNEL === 'beta'
+  ? { tokens: new BetaTokens(dataDir()), list: new BetaList(() => (betaAdmin ??= new AdminStore()).betaWallets().map((w) => w.address)) }
+  : null;
 
 app.get('/api/health', async () => (HOSTED
   // Hosted: only what the web reads (trading/config.ts configureFromHealth).
@@ -235,7 +245,9 @@ await app.register(valuedeskRoutes);
 await app.register(builderRoutes);
 // Knowledge folders: each wallet's own research (notes, tables, chart snapshots, news,
 // files), behind a signed sign-in - see routes/folders.ts.
-await app.register(foldersRoutes);
+await app.register(foldersRoutes, { upkeep: CHANNEL === 'main' });
+// The beta channel's sign-in (routes/beta.ts): the beta API only.
+if (betaLock) await app.register(betaRoutes, betaLock);
 // What visitors send the owner - the feedback form and client error reports (routes/reports.ts) -
 // and the public status page's data (routes/status.ts).
 await app.register(reportRoutes);
@@ -261,7 +273,8 @@ await app.register(adminRoutes, {
     home: process.env.VS_HOME?.trim() || '/opt/valuescan',
     dataDir: dataDir(),
   },
-  syncTimer: HOSTED,
+  // One copier of the ledger's orders: the main API's (the beta API shares admin.db).
+  syncTimer: HOSTED && CHANNEL === 'main',
 });
 
 // --- browser websocket -------------------------------------------------------
@@ -334,6 +347,8 @@ app.addHook('onSend', async (_req, reply, payload) => {
  * read), the site Origin for a state-changing route, per-client limits.
  */
 if (HOSTED) installHostedGate(app, { cfg: HOSTED_CONFIG, site: SITE_ORIGINS, admin: ADMIN_ORIGINS });
+// The beta channel's lock, after the gate above (beta/gate.ts).
+if (betaLock) installBetaGate(app, betaLock);
 else app.addHook('onRequest', async (req, reply) => {
   if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return;
   if (!isAllowedOrigin(req.headers.origin, ALLOWED_ORIGINS)) {

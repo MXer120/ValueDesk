@@ -57,6 +57,7 @@ VITE_VARS=(
   VITE_SODEX_NETWORK VITE_SODEX_GATEWAY
   VITE_ALLOW_MAINNET_TRADING VITE_TRADING_DISABLED VITE_TRADING_KEY_TTL_H
   VITE_CHART VITE_FEEDBACK_URL
+  VITE_CHANNEL
 )
 # Variables for a dev server only (apps/web/.env.local), exported EMPTY to every build whatever a
 # file says; a settings file that names one is refused. VITE_LIVE_ALGOS_WALLETS lets the live test

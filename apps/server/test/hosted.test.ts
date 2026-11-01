@@ -236,6 +236,7 @@ test('the allow-list is exactly docs/ARCH-traffic.md section 5', () => {
   assert.deepEqual(
     HOSTED_ROUTES.map((r) => `${r.method} ${r.url} ${r.cls}`).sort(),
     [
+      'GET /api/beta/me read',
       'GET /api/external/announcements read',
       'GET /api/external/announcements/:id upstream',
       'GET /api/external/maintenance/status read',
@@ -285,6 +286,9 @@ test('the allow-list is exactly docs/ARCH-traffic.md section 5', () => {
       'GET /ws/liq read',
       'POST /api/admin/analytics admin',
       'POST /api/admin/audit admin',
+      'POST /api/admin/beta admin',
+      'POST /api/admin/beta/add admin',
+      'POST /api/admin/beta/remove admin',
       'POST /api/admin/builder admin',
       'POST /api/admin/me admin',
       'POST /api/admin/page-error admin',
@@ -298,6 +302,7 @@ test('the allow-list is exactly docs/ARCH-traffic.md section 5', () => {
       'POST /api/admin/ticket/status admin',
       'POST /api/admin/tickets admin',
       'POST /api/admin/users admin',
+      'POST /api/beta/session auth',
       'POST /api/folders/erase write',
       'POST /api/folders/folder/create write',
       'POST /api/folders/folder/delete write',
@@ -345,6 +350,8 @@ test('the allow-list holds no custodial, per-user, diagnostic or websocket route
     else if (r.url.startsWith('/api/vs/feedback') || r.url.startsWith('/api/vs/inbox/') || r.url === '/api/vs/client-errors' || r.url === '/api/vs/a') assert.ok(r.method === 'POST' && r.cls === 'write', r.url);
     // The owner's admin suite (routes/admin.ts): POST only, its own class (the suite's Origin, its own limits).
     else if (r.url.startsWith('/api/admin/')) assert.ok(r.method === 'POST' && r.cls === 'admin', r.url);
+    // The beta channel's sign-in (routes/beta.ts, beta API only): a wallet's free signature, cls auth.
+    else if (r.url === '/api/beta/session') assert.ok(r.method === 'POST' && r.cls === 'auth', r.url);
     else if (!r.url.startsWith('/api/folders/')) assert.equal(r.method, 'GET', `${r.method} ${r.url}: hosted mode is read-only`);
     else if (r.method === 'POST') assert.ok(r.cls === 'write' || (r.cls === 'auth' && r.url === '/api/folders/session'), r.url);
   }

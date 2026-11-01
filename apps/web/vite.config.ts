@@ -257,6 +257,10 @@ export default defineConfig({
         changeOrigin: true,
         configure: (proxy) => {
           proxy.on('proxyReq', (proxyReq, req) => {
+            // The beta site's token, as the Vercel function hands it on (deploy/vercel/api-proxy.cjs): its
+            // cookie as x-vs-beta. Only a beta API (VALUESCAN_CHANNEL=beta) reads it.
+            const beta = /(?:^|;\s*)vs_beta=(0x[0-9a-f]{40}\.\d{13}\.[A-Za-z0-9_-]{43})(?:;|$)/.exec(String(req.headers.cookie ?? ''));
+            if (beta) proxyReq.setHeader('x-vs-beta', beta[1]!);
             if (!mayCarryToken(req.headers)) return;
             const t = localToken();
             if (t) proxyReq.setHeader(TOKEN_HEADER, t);

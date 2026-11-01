@@ -762,6 +762,56 @@ test('the function: /api/admin/* only through the admin host, POST and the sessi
   }
 });
 
+test('the beta deployment: its function is told the channel, the main site never', () => {
+  assert.equal(functionConfig('https://api.valuedesk.so', 'beta').environment.VALUESCAN_CHANNEL, 'beta');
+  assert.equal(functionConfig('https://api.valuedesk.so').environment.VALUESCAN_CHANNEL, undefined);
+});
+
+test('the beta site: every request to the beta API with its cookie as x-vs-beta, POST passes, nothing cached; the main site has no beta paths', async () => {
+  const seen = [];
+  const origin = await listen((req, res) => {
+    req.resume();
+    req.on('end', () => {
+      seen.push({ method: req.method, url: req.url, headers: req.headers });
+      res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'public, max-age=30' });
+      res.end('{}');
+    });
+  });
+  const token = `0x${'a'.repeat(40)}.1800000000000.${'b'.repeat(43)}`;
+  try {
+    await withProxy({ VALUESCAN_ORIGIN_URL: `http://127.0.0.1:${origin.port}`, VALUESCAN_ORIGIN_SECRET: SECRET, VALUESCAN_CHANNEL: 'beta' }, async (port) => {
+      const site = { host: 'beta.valuedesk.so', cookie: `vs_consent=1; vs_beta=${token}; other=x` };
+      const read = await request(port, '/api/vs/explore', { headers: site });
+      assert.equal(read.status, 200);
+      assert.equal(read.headers['cache-control'], 'no-store');
+      assert.equal(read.headers['vercel-cdn-cache-control'], undefined, 'never kept by the CDN');
+      let h = seen.at(-1).headers;
+      assert.equal(h['x-vs-channel'], 'beta');
+      assert.equal(h['x-vs-beta'], token);
+      assert.equal(h.cookie, undefined, 'the cookie itself never goes on');
+      const signIn = await request(port, '/api/beta/session', { method: 'POST', body: '{}', headers: { host: 'beta.valuedesk.so', 'content-type': 'application/json', origin: 'https://beta.valuedesk.so' } });
+      assert.equal(signIn.status, 200);
+      h = seen.at(-1).headers;
+      assert.equal(seen.at(-1).method, 'POST');
+      assert.equal(h['x-vs-beta'], undefined, 'no cookie, no token');
+      // A cookie that is not a token shape is not passed.
+      await request(port, '/api/vs/explore', { headers: { cookie: 'vs_beta=nope' } });
+      assert.equal(seen.at(-1).headers['x-vs-beta'], undefined);
+    });
+    await withProxy({ VALUESCAN_ORIGIN_URL: `http://127.0.0.1:${origin.port}`, VALUESCAN_ORIGIN_SECRET: SECRET, VALUESCAN_CHANNEL: undefined }, async (port) => {
+      const before = seen.length;
+      assert.equal((await request(port, '/api/beta/me', { headers: { cookie: `vs_beta=${token}` } })).status, 404);
+      await request(port, '/api/vs/explore', { headers: { cookie: `vs_beta=${token}` } });
+      assert.equal(seen.length, before + 1);
+      assert.equal(seen.at(-1).headers['x-vs-channel'], undefined);
+      assert.equal(seen.at(-1).headers['x-vs-beta'], undefined, 'the main site never sends a beta token');
+    });
+  } finally {
+    delete process.env.VALUESCAN_CHANNEL;
+    await origin.close();
+  }
+});
+
 test('the function: the own analytics of the app is a POST with the country and region, never cached', async () => {
   const seen = [];
   const origin = await listen((req, res) => {

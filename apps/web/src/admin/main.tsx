@@ -15,6 +15,7 @@ import '../styles.css';
 import '../components/leaderboard/LeaderboardPage.css';
 import '../status/status.css';
 import '../components/excluded/excluded.css';
+import './shell.css';
 import './admin.css';
 import { AdminApp } from './AdminApp';
 import { AdminBoundary, reportPageError } from './Crash';

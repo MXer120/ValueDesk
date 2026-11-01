@@ -27,6 +27,9 @@
 import { fmtDecimalString } from '../numStyle';
 import type { Engine } from '../api';
 import { BrandMark } from './BrandMark';
+
+/** beta.valuedesk.so (VITE_CHANNEL=beta): the Beta tag beside the brand, as the admin suite shows Dev. */
+const BETA = import.meta.env.VITE_CHANNEL === 'beta';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { TABS, TAB_LABELS, pathForTab, type Tab } from '../router';
 import { preloadWalletModal, warmWalletModal } from '../walletconnect';
@@ -176,8 +179,10 @@ export function NavBar({
           <span className="brand">
             <BrandMark />
             ValueDesk
+            {BETA && <span className="dv-devtag dv-devtag--beta">Beta</span>}
           </span>
         )}
+        {rail && BETA && <span className="dv-devtag dv-devtag--beta">Beta</span>}
         {rail && marketType && (
           <>
             {marketType}

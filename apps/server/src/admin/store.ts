@@ -69,6 +69,12 @@ CREATE TABLE IF NOT EXISTS fee_orders (
 ) WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS fee_orders_t ON fee_orders (builder, last_t);
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS beta_wallets (
+  address TEXT PRIMARY KEY,
+  label TEXT NOT NULL,
+  added_at INTEGER NOT NULL,
+  added_by TEXT NOT NULL
+) WITHOUT ROWID;
 `;
 
 export const TICKET_STATUSES = ['open', 'waiting', 'closed'] as const;
@@ -91,6 +97,14 @@ export interface AuditRow {
   client: string | null;
   country: string | null;
   detail: Record<string, unknown> | null;
+}
+
+/** A wallet that may use beta.valuedesk.so (the Beta page of the admin suite; beta/gate.ts reads it). */
+export interface BetaWallet {
+  address: string;
+  label: string;
+  addedAt: number;
+  addedBy: string;
 }
 
 export interface FeeOrder {
@@ -292,6 +306,26 @@ export class AdminStore {
       byDay.set(d.day, d);
     }
     return [...byDay.values()];
+  }
+
+  // --- the beta list ---------------------------------------------------------------------------
+
+  betaWallets(): BetaWallet[] {
+    const rows = this.db.prepare('SELECT address, label, added_at, added_by FROM beta_wallets ORDER BY added_at DESC').all() as Array<{ address: string; label: string; added_at: number; added_by: string }>;
+    return rows.map((r) => ({ address: r.address, label: r.label, addedAt: Number(r.added_at), addedBy: r.added_by }));
+  }
+
+  /** Add a wallet, or rename one already on the list; true when it was not on it. */
+  addBetaWallet(address: string, label: string, by: string, now = Date.now()): boolean {
+    const a = address.toLowerCase();
+    const known = this.db.prepare('SELECT 1 FROM beta_wallets WHERE address = ?').get(a) !== undefined;
+    if (known) this.db.prepare('UPDATE beta_wallets SET label = ? WHERE address = ?').run(label, a);
+    else this.db.prepare('INSERT INTO beta_wallets (address, label, added_at, added_by) VALUES (?, ?, ?, ?)').run(a, label, now, by.toLowerCase());
+    return !known;
+  }
+
+  removeBetaWallet(address: string): boolean {
+    return Number(this.db.prepare('DELETE FROM beta_wallets WHERE address = ?').run(address.toLowerCase()).changes) > 0;
   }
 
   getMeta(key: string): string | null {

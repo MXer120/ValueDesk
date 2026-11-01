@@ -391,15 +391,22 @@ Against this inventory, HOSTED_ROUTES should be:
   analytics, sent only after the visitor allowed analytics (ops/analyticsModel.ts says what one batch
   holds; routes/analytics.ts). The Vercel function lets POST + `Content-Type` through on this path and adds
   `X-Viewer-Country` / `X-Viewer-Region` from its edge; no IP address is stored, nothing is cached.
-- **Add**: the owner's admin suite on dev.valuedesk.so (routes/admin.ts, cls `admin`), 15 routes, every
+- **Add**: the owner's admin suite on dev.valuedesk.so (routes/admin.ts, cls `admin`), 18 routes, every
   one a POST: `/api/admin/session` (the builder wallet's `AdminSignIn` + the password, for a 24 h
   session), `/me`, `/signout`, `/sessions/revoke`, `/tickets`, `/ticket`, `/ticket/image`,
   `/ticket/reply`, `/ticket/status`, `/builder`, `/users`, `/analytics`, `/status`, `/audit`,
-  `/page-error` (an error the page hit, into the audit log). The gate
+  `/page-error` (an error the page hit, into the audit log), `/beta`, `/beta/add`, `/beta/remove` (the
+  wallets that may use beta.valuedesk.so; add and remove signed). The gate
   takes only the suite's Origin for them (VALUESCAN_ADMIN_ORIGINS, never the site's); the route answers
   404 to everything while no admin password is set, needs the session on every route but the sign-in and
   a fresh `AdminAction` signature on every write. The Vercel function passes POST, `Content-Type` and
   `Authorization` under `/api/admin/` only for requests to the dev host, never cached.
+- **Add**: the beta channel's sign-in (routes/beta.ts), registered by the beta API only
+  (`VALUESCAN_CHANNEL=beta`, a 404 on the main API): `POST /api/beta/session` (cls `auth`, 8 KB: a listed
+  wallet's `BetaSignIn` for a 7-day token) and `GET /api/beta/me` (cls `read`). The beta API answers every
+  other route only with the token of a wallet still on the admin suite's beta list (beta/gate.ts); the
+  beta site's Vercel function sends it as `x-vs-beta` from the site's `vs_beta` cookie and adds
+  `x-vs-channel: beta`, which Caddy routes to the beta API's port.
 - **Remove** (the web no longer calls them): `/api/vs/price`, `/api/vs/trader`,
   `/api/vs/fills`, `/api/vs/account`, `/api/external/leaderboard`,
   `/api/external/leaderboard/rank`, `/api/external/resolve-account`,

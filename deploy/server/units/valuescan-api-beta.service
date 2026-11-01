@@ -1,0 +1,96 @@
+# Installed by hand on server 1 (units are infra: ship.sh never installs them), next to
+# valuescan-api.service.
+#
+# THE BETA API (beta.valuedesk.so): the same server code as the index API, from the beta release
+# (/opt/valuescan/beta-current, release.sh --units=beta), on its own port (8798). Caddy sends it
+# what the beta site's Vercel function marks X-VS-Channel: beta, and /ws/liq-beta. With
+# VALUESCAN_CHANNEL=beta it answers nothing but to the token of a wallet on the admin suite's beta
+# list (apps/server/src/beta/gate.ts), and it runs none of the main API's background jobs (the
+# release watcher, the status prober, the Telegram poller, the fee-order copier, the folders'
+# upkeep, the builder verifier): it reads the same index and state as the main API, and the main
+# API keeps them. The indexer and the copy executor have no beta.
+#
+[Unit]
+Description=Valuescan beta API (beta.valuedesk.so: the beta release, a listed wallet's token only)
+After=network-online.target valuescan-indexer.service
+Wants=network-online.target
+RequiresMountsFor=/var/lib/valuescan
+ConditionPathExists=/opt/valuescan/beta-current/apps/server/src/index.ts
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=valuescan
+Group=valuescan
+WorkingDirectory=/opt/valuescan/beta-current/apps/server
+EnvironmentFile=/etc/valuescan/api.env
+# Only VALUESCAN_ORIGIN_SECRET, written by bootstrap.sh from SSM Parameter Store.
+EnvironmentFile=/etc/valuescan/api.secret.env
+EnvironmentFile=-/etc/valuescan/api.local.env
+# ALERT_TELEGRAM_TOKEN and ALERT_TELEGRAM_CHAT_ID (root 0600, telegram-setup.sh): the API
+# forwards visitors' feedback and new client errors to the owner (apps/server/src/ops/telegram.ts),
+# through the same bot as the health check's alerts.
+EnvironmentFile=-/etc/valuescan/alert.env
+# Last, so it wins: PORT=8798, VALUESCAN_CHANNEL=beta, the main API's singletons off, the beta origin
+# (deploy/server/env/api-beta.env.example).
+EnvironmentFile=/etc/valuescan/api-beta.env
+# The heap is set, not derived: inside MemoryMax=900M Node chose 368 MB on its own, and the API died
+# of it five times on 2026-10-03 (heap out of memory, then a 5-minute core dump with the API down).
+# Measured (local index, 2026-10-04): the cohort load keeps ~270 MB and peaks ~440 MB while it is
+# built, and it is rebuilt every minute behind the one in use - two at once. 1 GB holds that.
+ExecStart=/opt/node/current/bin/node --max-old-space-size=1024 --disable-warning=ExperimentalWarning --import tsx src/index.ts
+Restart=always
+RestartSec=3
+KillSignal=SIGTERM
+TimeoutStopSec=20
+LimitNOFILE=65536
+# Sized for a 4 GiB instance (t4g.medium). API and indexer were measured together at
+# about 0.9 GB (no split was measured). The two caps (0.9 + 1.8 GB) leave over 1 GB for the
+# system, Caddy, the health check, the nightly backup and npm during a release, so
+# a runaway is stopped inside its own unit (and restarted) before it can take the
+# box down. On 8 GiB (t4g.large) 1500M / 2G is right: a drop-in, `systemctl edit`.
+# 1 GB of heap plus Node's own memory fit under MemoryHigh. With the indexer (~0.8 GB in use, capped
+# at 1.8 GB) that leaves the 4 GiB box room for the system; a t4g.large would be comfortable.
+MemoryHigh=1300M
+MemoryMax=1500M
+# No core dump: writing one took 5 minutes, all of them without an API. A crash restarts in 3 s.
+LimitCORE=0
+SyslogIdentifier=valuescan-api-beta
+# Its request lines carry client IP addresses: they go to the journal namespace "pii",
+# which keeps 14 days as the privacy policy promises (journald/journald@pii.conf).
+# The main journal keeps a year. Read them: journalctl --namespace=pii -u valuescan-api-beta
+LogNamespace=pii
+
+# --- hardening ---
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RemoveIPC=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
+SystemCallFilter=@system-service @pkey
+SystemCallFilter=~@privileged
+SystemCallErrorNumber=EPERM
+UMask=0027
+# The API opens the index read-only (apps/server/src/indexer/reader.ts), but a
+# reader of a WAL database still maps its -shm file read-write. Nothing else is writable.
+ReadWritePaths=/var/lib/valuescan/index /var/lib/valuescan/state
+# MemoryDenyWriteExecute is deliberately NOT set: V8's JIT needs writable+executable memory.
+
+[Install]
+WantedBy=multi-user.target

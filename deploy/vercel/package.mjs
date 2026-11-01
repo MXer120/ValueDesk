@@ -158,7 +158,10 @@ export function config() {
 }
 
 /** The function's .vc-config.json. */
-export function functionConfig(originUrl) {
+/** The channels a deployment is for: the site, or beta.valuedesk.so (git branch `beta`, build.sh). */
+export const CHANNELS = ['main', 'beta'];
+
+export function functionConfig(originUrl, channel = 'main') {
   return {
     runtime: NODE_RUNTIME,
     handler: 'index.js',
@@ -168,7 +171,8 @@ export function functionConfig(originUrl) {
     regions: [FUNCTION_REGION],
     maxDuration: 35,
     // The function refuses the same places as the routes (a second check: api-proxy.cjs).
-    environment: { VALUESCAN_ORIGIN_URL: originUrl, VALUESCAN_GEO_BLOCK: JSON.stringify(edgeBlockList()) },
+    // The beta site's function sends every request to the beta API with the tester's token (api-proxy.cjs).
+    environment: { VALUESCAN_ORIGIN_URL: originUrl, VALUESCAN_GEO_BLOCK: JSON.stringify(edgeBlockList()), ...(channel === 'beta' ? { VALUESCAN_CHANNEL: 'beta' } : {}) },
   };
 }
 
@@ -202,7 +206,8 @@ export function originUrlOk(origin) {
 }
 
 /** Write <out>/.vercel/output. Returns a short summary. */
-export function packageSite({ dist, origin, out }) {
+export function packageSite({ dist, origin, out, channel = 'main' }) {
+  if (!CHANNELS.includes(channel)) throw new Error(`--channel must be one of ${CHANNELS.join(', ')} (got ${channel})`);
   const problems = checkDist(dist);
   if (problems.length) throw new Error(`the build cannot be deployed as it is:\n  ${problems.join('\n  ')}`);
   if (!originUrlOk(origin)) throw new Error(`--origin must be https://<a DNS name>, nothing after it (got ${origin})`);
@@ -214,7 +219,7 @@ export function packageSite({ dist, origin, out }) {
   mkdirSync(fn, { recursive: true });
   writeFileSync(join(fn, 'index.js'), readFileSync(join(HERE, 'api-proxy.cjs')));
   writeFileSync(join(fn, 'package.json'), `${JSON.stringify({ type: 'commonjs' })}\n`);
-  writeFileSync(join(fn, '.vc-config.json'), `${JSON.stringify(functionConfig(origin), null, 2)}\n`);
+  writeFileSync(join(fn, '.vc-config.json'), `${JSON.stringify(functionConfig(origin, channel), null, 2)}\n`);
   writeFileSync(join(output, 'config.json'), `${JSON.stringify(config(), null, 2)}\n`);
   const all = files(join(output, 'static'));
   const bytes = all.reduce((n, f) => n + statSync(f).size, 0);
@@ -229,11 +234,11 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     return [m[1], m[2]];
   }));
   if (!flags.dist || !flags.origin || !flags.out) {
-    console.error('usage: node deploy/vercel/package.mjs --dist=<built site> --origin=https://<origin name> --out=<dir>');
+    console.error('usage: node deploy/vercel/package.mjs --dist=<built site> --origin=https://<origin name> --out=<dir> [--channel=beta]');
     process.exit(2);
   }
   try {
-    const r = packageSite({ dist: resolve(flags.dist), origin: flags.origin, out: resolve(flags.out) });
+    const r = packageSite({ dist: resolve(flags.dist), origin: flags.origin, out: resolve(flags.out), channel: flags.channel ?? 'main' });
     console.log(`wrote ${r.output}: ${r.files} files (${(r.bytes / 1048576).toFixed(1)} MB), ${r.routes} routes, the /api function in ${FUNCTION_REGION} -> ${flags.origin}`);
   } catch (e) {
     console.error(`package: ${e.message}`);

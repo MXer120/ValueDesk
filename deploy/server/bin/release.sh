@@ -10,6 +10,8 @@
 #   sudo /opt/valuescan/bin/release.sh <tag> --install-only   install and check <tag>, switch nothing (ship.sh's executor preflight)
 #   sudo /opt/valuescan/bin/release.sh --rollback [--all|--api-only|--executor-only|--units=..]   back to the release before
 #   sudo /opt/valuescan/bin/release.sh --status           what is installed and running
+#   sudo /opt/valuescan/bin/release.sh <tag> --beta       install <tag> as the BETA release: beta-current -> <tag>,
+#                                                          restart the beta API only (current and every other unit untouched)
 #   sudo /opt/valuescan/bin/release.sh <tag> --from=<file.tar.gz>   the tarball is already here
 #
 # Normally started from your workstation by deploy/release/release-server.sh
@@ -56,6 +58,12 @@
 # ~220 markets, and that gap has to be re-read for the traders on the boards.
 # When a release changes nothing the indexer runs (routes, perf, hosted gate),
 # use --api-only.
+#
+# THE BETA API (beta.valuedesk.so, valuescan-api-beta.service, port 8798): it runs from its own
+# link, /opt/valuescan/beta-current, which only --beta moves - so a beta release never touches
+# `current`, the indexer, the API or the executor, and a normal release never touches the beta.
+# deploy/release/ship.sh beta releases a tag here first; ship.sh promote <tag> then releases the
+# same tag the normal way. A server without the unit installed refuses --beta.
 set -euo pipefail
 
 VS_HOME="${VS_HOME:-/opt/valuescan}"
@@ -70,6 +78,8 @@ API_URL="${API_URL:-http://127.0.0.1:8797}"
 EXECUTOR_URL="${EXECUTOR_URL:-http://127.0.0.1:8799}"
 RELEASES="$VS_HOME/releases"
 CURRENT="$VS_HOME/current"
+BETA_CURRENT="$VS_HOME/beta-current"
+BETA_URL="${BETA_URL:-http://127.0.0.1:8798}"
 KEEP="${RELEASES_KEEP:-3}"
 SERVICE_GROUP="${VS_SERVICE_GROUP:-valuescan}"
 
@@ -79,6 +89,7 @@ usage() { sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
 
 current_tag() { if [ -L "$CURRENT" ]; then basename "$(readlink -f "$CURRENT")"; fi; }
 previous_tag() { if [ -f "$RELEASES/.previous" ]; then cat "$RELEASES/.previous"; fi; }
+beta_tag() { if [ -L "$BETA_CURRENT" ]; then basename "$(readlink -f "$BETA_CURRENT")"; fi; }
 
 # Tags name directories and S3 keys: letters, digits, dot, dash, underscore.
 valid_tag() {
@@ -284,6 +295,22 @@ restart_status() {
   log "the status prober runs release $(current_tag)"
 }
 
+# The beta API: its own link and unit (see THE BETA API above).
+beta_unit() { "$SYSTEMCTL" cat valuescan-api-beta.service >/dev/null 2>&1; }
+release_beta() {
+  local tag="$1" prev
+  beta_unit || die "the beta API (valuescan-api-beta.service) is not installed here"
+  prev="$(beta_tag)"
+  ln -sfn "$RELEASES/$tag" "$BETA_CURRENT.new"
+  mv -Tf "$BETA_CURRENT.new" "$BETA_CURRENT"
+  log "beta-current -> $tag${prev:+ (was $prev)}"
+  log "restarting the beta API"
+  "$SYSTEMCTL" restart valuescan-api-beta.service
+  wait_active valuescan-api-beta.service 30 || die "the beta API did not become active - journalctl --namespace=pii -u valuescan-api-beta -n 80"
+  wait_ok "$BETA_URL/api/health" 60 || die "the beta API does not answer /api/health - journalctl --namespace=pii -u valuescan-api-beta -n 80 ; go back with: release.sh ${prev:-<tag>} --beta"
+  log "the beta API answers /api/health on release $tag"
+}
+
 here() { case ",${VS_UNITS:-indexer,api,executor}," in *,"$1",*) return 0 ;; *) return 1 ;; esac; }
 
 restart_units() {   # auto | all | api | executor | units (the list in $UNITS)
@@ -351,13 +378,14 @@ prune() {
   local cur prev n=0 d
   cur="$(current_tag)"; prev="$(previous_tag)"
   # Newest first; keep the current, the previous and whatever a unit still runs from.
-  local running_api running_idx running_exec running_status
+  local running_api running_idx running_exec running_status running_beta beta
   running_api="$(unit_release valuescan-api.service)"; running_idx="$(unit_release valuescan-indexer.service)"
   running_exec="$(unit_release valuescan-executor.service)"; running_status="$(unit_release valuescan-status.service)"
+  running_beta="$(unit_release valuescan-api-beta.service)"; beta="$(beta_tag)"
   while IFS= read -r d; do
     [ -n "$d" ] || continue
     n=$((n + 1))
-    if [ "$n" -le "$KEEP" ] || [ "$d" = "$cur" ] || [ "$d" = "$prev" ] || [ "$d" = "$running_api" ] || [ "$d" = "$running_idx" ] || [ "$d" = "$running_exec" ] || [ "$d" = "$running_status" ]; then continue; fi
+    if [ "$n" -le "$KEEP" ] || [ "$d" = "$cur" ] || [ "$d" = "$prev" ] || [ "$d" = "$running_api" ] || [ "$d" = "$running_idx" ] || [ "$d" = "$running_exec" ] || [ "$d" = "$running_status" ] || [ "$d" = "$running_beta" ] || [ "$d" = "$beta" ]; then continue; fi
     log "removing old release $d"
     rm -rf "${RELEASES:?}/$d"
   done < <(find "$RELEASES" -mindepth 1 -maxdepth 1 -type d ! -name '.*' -printf '%T@ %f\n' 2>/dev/null | sort -rn | awk '{print $2}')
@@ -374,6 +402,10 @@ status() {
   echo "executor:  $("$SYSTEMCTL" is-active valuescan-executor.service 2>/dev/null || true), release ${exe:-unknown}"
   local sta; sta="$(unit_release valuescan-status.service)"
   echo "status:    $("$SYSTEMCTL" is-active valuescan-status.service 2>/dev/null || true), release ${sta:-unknown}"
+  if beta_unit; then
+    local bet; bet="$(unit_release valuescan-api-beta.service)"
+    echo "beta:      $("$SYSTEMCTL" is-active valuescan-api-beta.service 2>/dev/null || true), release ${bet:-unknown} (beta-current $(beta_tag))"
+  fi
   echo "node:      $(node --version 2>/dev/null || echo missing)"
 }
 
@@ -381,6 +413,7 @@ TAG=""
 MODE=auto
 UNITS=""
 INSTALL_ONLY=0
+BETA=0
 ROLLBACK=0
 FROM=""
 ONE_MODE="--all, --api-only, --executor-only and --units exclude each other"
@@ -396,6 +429,7 @@ for arg in "$@"; do
       ;;
     --from=*) FROM="${arg#--from=}" ;;
     --install-only) INSTALL_ONLY=1 ;;
+    --beta) BETA=1 ;;
     --rollback) ROLLBACK=1 ;;
     --status) status; exit 0 ;;
     -h|--help) usage 0 ;;
@@ -406,6 +440,17 @@ done
 
 [ "$(id -u)" = 0 ] || [ -n "${VS_ALLOW_NON_ROOT:-}" ] || die "run as root (sudo)"
 mkdir -p "$RELEASES"
+
+if [ "$BETA" = 1 ]; then
+  [ "$ROLLBACK" = 0 ] && [ "$INSTALL_ONLY" = 0 ] && [ "$MODE" = auto ] || die "--beta takes a tag and nothing else (to go back: release.sh <the earlier tag> --beta)"
+  [ -n "$TAG" ] || usage 2
+  valid_tag "$TAG" || die "not a usable tag name: $TAG"
+  install_release "$TAG"
+  release_beta "$TAG"
+  prune
+  status
+  exit 0
+fi
 
 if [ "$ROLLBACK" = 1 ]; then
   [ -z "$TAG" ] || die "--rollback takes no tag: it goes back to the release before the current one"
