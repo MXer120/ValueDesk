@@ -47,14 +47,22 @@ export interface Print {
   fee?: { buyer: number; seller: number };
 }
 
-const PING_MS = 30_000;
-const STALE_MS = 90_000;
+/*
+ * A dead socket is found in 45 s, not 90: Arcus and SoDEX sockets went silent ("nothing came for
+ * 91-96 s") and every such drop was a degraded minute or two on the status page (owner
+ * 2026-11-01: uptime). A ping every 15 s (each answered) keeps an idle socket well inside 45 s;
+ * Lighter has run on 20 s / 45 s since 2026-10-29 with no false drop.
+ */
+const PING_MS = 15_000;
+const STALE_MS = 45_000;
+/** How often a socket is looked at (stale, closing, ping). */
+const TICK_MS = 5_000;
 const RECONNECT_BASE_MS = 1_000;
 const RECONNECT_CAP_MS = 30_000;
 /** A handshake still open after this is given up: ws has no default, and a stuck one held the socket for good. */
 const HANDSHAKE_MS = 15_000;
-/** A socket left closing this long is cut: otherwise its close event - and the reconnect - may never come. */
-const CLOSING_MS = 10_000;
+/** A socket left closing this long is cut: otherwise its close event - and the reconnect - may never come. 3 s, not 10: "its close never finished" was SoDEX's commonest drop (57 of 115 since 10-29). */
+const CLOSING_MS = 3_000;
 /** After an HTTP 429 on connect the next try waits at least this long (Lighter: a static 60 s cooldown). */
 const RATE_LIMITED_MS = 60_000;
 
@@ -130,7 +138,7 @@ export class LiveSocket {
     if (this.running) return;
     this.running = true;
     this.connect();
-    this.timer = setInterval(() => this.tick(), 10_000);
+    this.timer = setInterval(() => this.tick(), TICK_MS);
     this.timer.unref?.();
   }
 
@@ -218,7 +226,7 @@ export class LiveSocket {
       ws.terminate();
       return;
     }
-    if (Date.now() - this.lastPingAt < (this.opts.pingMs ?? 0)) return;
+    if (Date.now() - this.lastPingAt < (this.opts.pingMs ?? PING_MS)) return;
     this.lastPingAt = Date.now();
     ws.send(this.ping);
   }
@@ -553,8 +561,8 @@ export class LighterStream {
   private openAt: number[] = [];
   /** Lighter's other messages (errors), by type: how many, so the log names each type without flooding. */
   private others = new Map<string, number>();
-  /** Subscribe messages wait this long between them, across every socket: at most 150 a minute, beside the pings (Lighter: 200). */
-  static SEND_GAP_MS = 400;
+  /** Subscribe messages wait this long between them, across every socket: at most 182 a minute, beside 12 pings (Lighter: 200). 330 ms, not 400: after a restart all 224 markets are whole again in ~75 s, under the 2-minute gap that breaks a stream's span (measured 2026-11-01: one socket's 54 markets confirm in 22 s at 400 ms with no error). */
+  static SEND_GAP_MS = 330;
   static PER_SOCKET = 56;
   static CONFIRM_MS = 20_000;
   static PING_MS = 20_000;

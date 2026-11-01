@@ -482,11 +482,15 @@ export function startStatusProber(o: {
     // One round at a time: a slow round is never overlapped by the next.
     if (running) return;
     running = true;
+    // The minute is the one the round STARTED in: taken when the probes finished (up to 2 x 10 s
+    // later), a round near a minute's end landed in the next one and left a minute with no sample
+    // (three on 2026-10-31 with nothing down - owner 2026-11-01: the checker must not go blind).
+    const started = Date.now();
     try {
       const samples = await probeAll({ targets, fetch: o.fetch, indexerStatus: o.indexerStatus });
-      const at = Date.now();
+      const at = started;
       store.record(samples, at);
-      store.auto.observe(Math.floor(at / 60_000), samples, at);
+      store.auto.observe(Math.floor(at / 60_000), samples, Date.now());
       if (historyFile) writeHistory(store, historyFile);
     } catch (e) {
       o.log?.warn({ err: e instanceof Error ? e.message : String(e) }, 'status probe round failed');
@@ -494,16 +498,30 @@ export function startStatusProber(o: {
       running = false;
     }
   };
+  // A round soon after the start, then one at the start of every minute (a second in, so a
+  // timer that fires a hair early is still in its minute): each minute gets exactly one round.
+  const everyMs = o.everyMs ?? PROBE_EVERY_MS;
   const first = setTimeout(() => void tick(), o.firstAfterMs ?? 10_000);
-  const every = setInterval(() => void tick(), o.everyMs ?? PROBE_EVERY_MS);
   first.unref();
-  every.unref();
+  let next: ReturnType<typeof setTimeout> | null = null;
+  let stopped = false;
+  const schedule = () => {
+    if (stopped) return;
+    const wait = everyMs - (Date.now() % everyMs) + 1_000;
+    next = setTimeout(() => {
+      void tick();
+      schedule();
+    }, wait);
+    next.unref();
+  };
+  schedule();
   return {
     store,
     tick,
     stop: () => {
+      stopped = true;
       clearTimeout(first);
-      clearInterval(every);
+      if (next) clearTimeout(next);
     },
   };
 }

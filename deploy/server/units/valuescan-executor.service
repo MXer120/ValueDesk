@@ -54,7 +54,9 @@ EnvironmentFile=-/etc/valuescan/alert.env
 # slows this unit before MemoryMax would kill it.
 ExecStart=/opt/node/current/bin/node --max-old-space-size=384 --disable-warning=ExperimentalWarning --import tsx src/main.ts
 Restart=always
-RestartSec=5
+# 1 s, not 5: a crash cost 8-12 s with copies and algos idle (the 2026-10-31 crash tests); 5 s of
+# that was this wait. StartLimitIntervalSec=0 above keeps a crash loop from being given up on.
+RestartSec=1
 # SIGTERM: it stops its feeds, closes the database and exits (src/main.ts).
 KillSignal=SIGTERM
 TimeoutStopSec=20

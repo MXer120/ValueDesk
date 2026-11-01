@@ -1,0 +1,34 @@
+# Installed to /etc/systemd/system by deploy/server/bootstrap.sh.
+#
+# The status page's prober (apps/server/src/statusMain.ts): every minute the site, the API the
+# way a visitor reaches it, the copy executor and the indexer, into status.db. A process of its
+# own so an API release never leaves the status page blind (owner 2026-11-01: 100% uptime for
+# the status checker); restarted only when its own code changes (deploy/release/parts.mjs).
+# The API runs no prober while this does: api.env VALUESCAN_STATUS_PROBE=0.
+
+[Unit]
+Description=Valuescan status prober
+After=network-online.target valuescan-indexer.service
+Wants=network-online.target
+RequiresMountsFor=/var/lib/valuescan
+ConditionPathExists=/opt/valuescan/current/apps/server/src/statusMain.ts
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=valuescan
+Group=valuescan
+WorkingDirectory=/opt/valuescan/current/apps/server
+EnvironmentFile=/etc/valuescan/api.env
+EnvironmentFile=/etc/valuescan/api.secret.env
+EnvironmentFile=-/etc/valuescan/api.local.env
+EnvironmentFile=-/etc/valuescan/alert.env
+ExecStart=/opt/node/current/bin/node --max-old-space-size=256 --disable-warning=ExperimentalWarning --import tsx src/statusMain.ts
+Restart=always
+RestartSec=2
+KillSignal=SIGTERM
+TimeoutStopSec=10
+MemoryMax=400M
+
+[Install]
+WantedBy=multi-user.target
