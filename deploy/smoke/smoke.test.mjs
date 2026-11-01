@@ -408,14 +408,17 @@ test('a deployed site: the origin must be closed to everyone but the edge', asyn
       res.end(ok ? '{"ok":true}' : '{"error":"forbidden"}');
     });
     try {
-      const v = await probeOrigin('127.0.0.1', { edge: 'vercel', tlsPort: gated.port, apiPort: closed, executorPort: closed, httpPort: caddy80.port, timeoutMs: 1500, tlsScheme: 'http' });
+      // A closed port taken while `gated` listens: the one taken above was free then and could be the very port
+      // `gated` was given (GitHub CI, v0.2.125: 37373 was both, and "closed" answered).
+      const shut = await freePort();
+      const v = await probeOrigin('127.0.0.1', { edge: 'vercel', tlsPort: gated.port, apiPort: shut, executorPort: shut, httpPort: caddy80.port, timeoutMs: 1500, tlsScheme: 'http' });
       assert.deepEqual(v.problems, []);
       assert.equal(v.checks.tls, 'open');
       assert.equal(v.checks.gateHealth, 'answers 403 without the secret');
       assert.equal(v.checks.gateIndex, 'answers 403 without the secret');
       assert.equal(v.checks.gateCopy, 'answers 403 without the secret');
       // ... and an origin that serves without the secret is named, once per route asked.
-      const ungated = await probeOrigin('127.0.0.1', { edge: 'vercel', tlsPort: apiLike.port, apiPort: closed, executorPort: closed, httpPort: closed, timeoutMs: 1500, tlsScheme: 'http' });
+      const ungated = await probeOrigin('127.0.0.1', { edge: 'vercel', tlsPort: apiLike.port, apiPort: shut, executorPort: shut, httpPort: shut, timeoutMs: 1500, tlsScheme: 'http' });
       assert.equal(ungated.problems.length, 3, ungated.problems.join(' | '));
       assert.match(ungated.problems[0], /Caddy gate \(X-Origin-Verify\) is not in effect/);
       assert.match(ungated.problems[2], /\/api\/copy\/v1\/health answers 200 without the origin secret/);
