@@ -168,11 +168,15 @@ remote "$S1" "sudo /opt/valuescan/bin/release.sh $TAG --beta --from=$INBOX/$b &&
 
 # 4. the beta site
 say "branch beta -> $TAG"
-"${G[@]}" push -q --force origin "$HEAD_SHA:refs/heads/beta"
-note "waiting for Vercel's deployment of ${HEAD_SHA:0:7} on branch beta"
+# A commit of its own on top of the tag (the same files): Vercel builds a commit it already built for
+# another branch never again (v0.2.128, 2026-11-01: no beta deployment at all), and only a build of the
+# branch `beta` is the beta site.
+BETA_SHA="$(git -c user.name="$(git log -1 --format=%an "$HEAD_SHA")" -c user.email="$(git log -1 --format=%ae "$HEAD_SHA")" commit-tree "$HEAD_SHA^{tree}" -p "$HEAD_SHA" -m "beta: $TAG (deploy/release/ship-beta.sh)")"
+"${G[@]}" push -q --force origin "$BETA_SHA:refs/heads/beta"
+note "waiting for Vercel's deployment of ${BETA_SHA:0:7} (= $TAG) on branch beta"
 state=""
 for _ in $(seq 1 60); do
-  id="$(gh_api "$REPO/deployments?sha=$HEAD_SHA" | json 'v ? (v.find((d) => d.environment !== "Production") || {}).id || "" : ""')"
+  id="$(gh_api "$REPO/deployments?sha=$BETA_SHA" | json 'v ? (v.find((d) => d.environment !== "Production") || {}).id || "" : ""')"
   if [ -n "$id" ]; then
     state="$(gh_api "$REPO/deployments/$id/statuses" | json 'v && v[0] ? v[0].state : ""')"
     case "$state" in success|failure|error) break ;; esac
