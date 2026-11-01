@@ -4025,7 +4025,7 @@ function loadConfig(env = process.env) {
   const owner = env.EXECUTOR_OWNER?.trim() || null;
   if (owner && !ADDRESS.test(owner)) throw new Error("EXECUTOR_OWNER must be a 0x wallet address");
   const network = env.SODEX_NETWORK === "testnet" ? "testnet" : "mainnet";
-  const builderId = Number(env.EXECUTOR_BUILDER_ID ?? 234812);
+  const builderId = Number(env.EXECUTOR_BUILDER_ID?.trim() || 234812);
   if (!Number.isSafeInteger(builderId) || builderId < 0) throw new Error("EXECUTOR_BUILDER_ID must be a SoDEX account id (or 0 for none)");
   const ttl = Number(env.EXECUTOR_KEY_TTL_DAYS ?? 180);
   const level = env.LOG_LEVEL;
@@ -12329,7 +12329,14 @@ var CopyRuntime = class {
       this.dirty.add(s.id);
       return [];
     }
-    const builder = await this.host.builderFor(s).catch(() => null);
+    let builder;
+    try {
+      builder = await this.host.builderFor(s);
+    } catch (e) {
+      await this.activity(s, { kind: "error", reason: "builder", symbol: market.name, detail: `Not copied: the builder fee could not be set (${e instanceof Error ? e.message : String(e)}).`, leader });
+      this.dirty.add(s.id);
+      return [];
+    }
     let send = intents;
     if (!sink.paper && intents.some((i) => !i.reduceOnly) && !await this.ensureLeverage(s, market, sink)) {
       send = intents.filter((i) => i.reduceOnly);
@@ -14447,7 +14454,7 @@ var KeyAlgoSink = class {
   async place(a, market, orders) {
     if (!orders.length) return [];
     try {
-      const builder = await this.builder(a).catch(() => null);
+      const builder = await this.builder(a);
       return readBatch(await this.signAndSend(childrenAction(a.accountId, market, orders, builder)), orders);
     } catch (e) {
       const unknown = e instanceof OutcomeUnknownError;
@@ -14457,7 +14464,7 @@ var KeyAlgoSink = class {
   async placeStops(a, market, stops) {
     if (!stops.length) return [];
     try {
-      const builder = await this.builder(a).catch(() => null);
+      const builder = await this.builder(a);
       return readStops(await this.signAndSend(stopsAction(a.accountId, market, stops, builder)), stops);
     } catch (e) {
       const unknown = e instanceof OutcomeUnknownError;
@@ -17530,11 +17537,12 @@ function auditedOrderSink(inner, db, owner, subId) {
     }
   };
 }
-function auditedAlgoSink(inner, db) {
+function auditedAlgoSink(inner, db, builderOf) {
+  const builderNow = async (a) => builderOf ? builderRow(await builderOf(a).catch(() => null)) : void 0;
   return {
     paper: inner.paper,
     async place(a, market, orders) {
-      db.audit("order", a.owner, a.id, { via: "algo", kind: a.spec.kind, step: "send", accountId: a.accountId, symbol: market.name, orders });
+      db.audit("order", a.owner, a.id, { via: "algo", kind: a.spec.kind, step: "send", accountId: a.accountId, symbol: market.name, builder: await builderNow(a), orders });
       try {
         const out = await inner.place(a, market, orders);
         db.audit("order", a.owner, a.id, { via: "algo", step: "answer", symbol: market.name, results: out.map(resultRow) });
@@ -17545,7 +17553,7 @@ function auditedAlgoSink(inner, db) {
       }
     },
     async placeStops(a, market, stops) {
-      db.audit("stop", a.owner, a.id, { via: "algo", step: "send", accountId: a.accountId, symbol: market.name, stops });
+      db.audit("stop", a.owner, a.id, { via: "algo", step: "send", accountId: a.accountId, symbol: market.name, builder: await builderNow(a), stops });
       try {
         const out = await inner.placeStops(a, market, stops);
         db.audit("stop", a.owner, a.id, { via: "algo", step: "answer", symbol: market.name, results: out.map(resultRow) });
@@ -18776,15 +18784,11 @@ var ExecutorService = class {
   /** The sink of an algo: the key this wallet registered for this executor, the copy fee ladder as the builder. */
   algoSink(a) {
     if (!this.db.key(a.owner, "active")) return null;
+    const builderOf = async (x) => this.cfg.builderId > 0 ? { id: this.cfg.builderId, fee: copyFeeFor(await this.freshVolume(x.owner)) } : null;
     const sink = auditedAlgoSink(
-      new KeyAlgoSink(
-        this.sodex,
-        () => this.signer(a.owner),
-        this.nonces,
-        SODEX_CHAIN_ID[this.cfg.network],
-        async (x) => this.cfg.builderId > 0 ? { id: this.cfg.builderId, fee: copyFeeFor(await this.freshVolume(x.owner)) } : null
-      ),
-      this.db
+      new KeyAlgoSink(this.sodex, () => this.signer(a.owner), this.nonces, SODEX_CHAIN_ID[this.cfg.network], builderOf),
+      this.db,
+      builderOf
     );
     return guardedAlgoSink(sink, this.guard, this.sodex.budget);
   }
