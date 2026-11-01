@@ -136,7 +136,7 @@ export function useHistTiles(coin: string | null, venues: readonly Venue[], view
 
   const last = idx?.points.at(-1);
   const w = view ?? (idx && last && idx.newest !== null ? { t0: idx.newest - 86_400_000, t1: idx.newest + idx.slot, lo: last.p * 0.97, hi: last.p * 1.03 } : null);
-  const want = useMemo(() => (idx && w ? tilesFor(idx, w) : []), [idx?.newest, idx?.bw, idx?.slot, w?.t0, w?.t1, w?.lo, w?.hi]); // eslint-disable-line react-hooks/exhaustive-deps
+  const want = useMemo(() => (idx && w ? tilesFor(idx, w) : []), [idx?.newest, idx?.bw, idx?.slot, idx?.points[0]?.t, w?.t0, w?.t1, w?.lo, w?.hi]); // eslint-disable-line react-hooks/exhaustive-deps
   const wantKey = idx ? want.map((k) => tileId(coin!, vkey, k)).join(' ') : '';
   const [ver, setVer] = useState(0);
   const venuesRef = useRef(venues);

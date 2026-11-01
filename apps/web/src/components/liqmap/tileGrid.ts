@@ -8,7 +8,7 @@ import { isAllLev, type LevFilter } from '../../chart/liqLev';
 
 /** The window on screen: times (ms) and prices. */
 export interface TileWindow { t0: number; t1: number; lo: number; hi: number }
-export type TileGrid = Pick<LiqTileIndex, 'newest' | 'slot' | 'bw' | 'tLevels' | 'pLevels'>;
+export type TileGrid = Pick<LiqTileIndex, 'newest' | 'slot' | 'bw' | 'tLevels' | 'pLevels'> & Partial<Pick<LiqTileIndex, 'points'>>;
 export interface TileKey extends TileAsk {
   /** On screen (read first), or around it. */
   near: boolean;
@@ -45,7 +45,8 @@ export function tilesFor(g: TileGrid, w: TileWindow): TileKey[] {
   while (tl < g.tLevels - 1 && tSpan / tileMsOf(g, tl) > TIME_TILES) tl++;
   let pl = 0;
   while (pl < g.pLevels - 1 && pSpan / bandSpanOf(g.bw, pl) > PRICE_TILES) pl++;
-  const from = Math.max(w.t0 - tSpan * MARGIN, newest - RANGE_MS);
+  // Never before the oldest snapshot listed: a daily chart spans months, and the tiles before it are empty.
+  const from = Math.max(w.t0 - tSpan * MARGIN, newest - RANGE_MS, g.points?.[0]?.t ?? -Infinity);
   const to = Math.min(w.t1 + tSpan * MARGIN, newest + 1);
   if (!(to > from)) return [];
   const span = bandSpanOf(g.bw, pl);

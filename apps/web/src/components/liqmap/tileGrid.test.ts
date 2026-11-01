@@ -70,6 +70,11 @@ test('a window takes the tiles on screen first, few of them, and the newest slot
   assert.ok(wide.every((k) => k.pl === 2 && bandSpanOf(5000, 2) === 80_000), 'bands of $80K');
   assert.ok(wide.filter((k) => k.near).length <= 3 * 12, `few tiles: ${wide.filter((k) => k.near).length}`);
   assert.deepEqual(tilesFor({ ...g, newest: null }, { t0: 0, t1: 1, lo: 1, hi: 2 }), []);
+  // A daily chart over months with six days of snapshots: no tile before the oldest one.
+  const first = newest - 6 * 24 * H;
+  const daily = tilesFor({ ...g, points: [{ t: first, p: 78_000, st: 100 }] }, { t0: newest - 120 * 24 * H, t1: newest, lo: 60_000, hi: 130_000 });
+  assert.ok(daily.length > 0 && daily.every((k) => k.t1 > first), 'nothing before the first snapshot');
+  assert.ok(daily.length < tilesFor(g, { t0: newest - 120 * 24 * H, t1: newest, lo: 60_000, hi: 130_000 }).length);
   // Every time on screen is covered, once per band, by the tiles taken.
   for (const w of [{ t0: newest - 26 * H, t1: newest }, { t0: newest - 30 * 24 * H, t1: newest }]) {
     const got = tilesFor(g, { ...w, lo: 76_000, hi: 79_000 }).filter((k) => k.near && k.band === k.band);
