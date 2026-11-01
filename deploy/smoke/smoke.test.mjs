@@ -195,7 +195,7 @@ test('the edge stand-in forwards /api like CloudFront: secret, viewer address, G
 
 test('the allow-list is read from the server source and matched like the gate', () => {
   const routes = hostedRoutes();
-  assert.equal(routes.length, 84, 'apps/server/src/hosted.ts HOSTED_ROUTES: 84 routes (34 of the index with the excluded wallets, the live liquidation socket, the positions of a wallet and one history cell at a time among them, 18 of the knowledge folders, the builder volume, the status page and its feed, 8 of feedback with the wallet sign-in and the unread dot, 2 of the inbox of a signed-in wallet, client errors, the own analytics of the app, 15 of the admin suite on dev.valuedesk.so)');
+  assert.equal(routes.length, 85, 'apps/server/src/hosted.ts HOSTED_ROUTES: 85 routes (35 of the index with the excluded wallets, the live liquidation socket, the positions of a wallet, one history cell at a time and the history in tiles among them, 18 of the knowledge folders, the builder volume, the status page and its feed, 8 of feedback with the wallet sign-in and the unread dot, 2 of the inbox of a signed-in wallet, client errors, the own analytics of the app, 15 of the admin suite on dev.valuedesk.so)');
   assert.ok(matchRoute(routes, 'GET', '/api/vs/live'), 'the Live Feed finds the stream a channel has on air');
   // The index is GET only; a POST only ever changes a wallet's own knowledge folders or inbox, or sends
   // feedback, an error report or the app's own analytics - or is the owner's admin suite (every route of it a POST).

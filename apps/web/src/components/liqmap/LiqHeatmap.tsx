@@ -26,7 +26,7 @@
  * is drawn at full (a tick marks it, the tooltip has its figure) and the rest stay readable.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react';
-import type { LiqAt, LiqHeatmap as HeatApi, LiqHistory, LiqHistoryFine, LiqWallets } from '@sign/indexer/liqRead.js';
+import type { LiqAt, LiqHeatmap as HeatApi, LiqHistoryFine, LiqWallets } from '@sign/indexer/liqRead.js';
 import type { Engine } from '../../api';
 import { useStored, useSymbols } from '../../hooks';
 import { SCAN_VENUES, VENUE_LABEL, vsApi, type Venue } from '../../vsApi';
@@ -35,6 +35,7 @@ import { VenueLogo } from '../VenueLogo';
 import { fmtPx, fmtUsdShort } from '../explore/model';
 import { usePolled } from '../explore/cohorts/parts';
 import { useLiveHeat, type FineSub } from './liveHeat';
+import { useHistTiles } from './histTiles';
 import { WalletView, type Res, type Side, type StepsView, type Unit, type ViewChange } from './WalletView';
 import { Chart } from '../Chart';
 import type { Chart as KChart } from 'klinecharts';
@@ -246,15 +247,13 @@ export function LiqHeatmap({ symbol, engine, instance, address = null }: { symbo
   const { symbols } = useSymbols('perps');
 
   const vkey = chosen.join(',');
-  // The historical view's snapshots (30 days), and its newest: width and price (the resolution's ladder there).
+  // The historical view's snapshots (30 days): every snapshot's time, price and step and the colour
+  // scales, and the rows of the time and price window on screen and around it, in tiles (histTiles.ts;
+  // the wallet filter in one piece). Its newest: width and price (the resolution's ladder there).
   const histOn = prefs.view === 'history';
-  const hist = usePolled<LiqHistory>(
-    histOn ? `${coin}|${vkey}|30d|${wkey}` : null,
-    (s) => vsApi.liquidationHistory(coin, chosen, '30d', s, wallets),
-    5 * 60_000,
-  );
-  const coarsePts = histOn && hist.data?.coin === coin ? hist.data.points : EMPTY_POINTS;
-  const newest = coarsePts.at(-1);
+  const hist = useHistTiles(histOn ? coin : null, chosen, win && times ? { t0: times[0], t1: times[1], lo: win[0], hi: win[1] } : null, wallets);
+  const coarsePts = histOn ? hist.points : EMPTY_POINTS;
+  const newest = histOn ? hist.list.at(-1) : undefined;
   const histAt = newest ? { st: newest.st, p: newest.p } : null;
   // The historical view's strip of the levels now (its newest column reads them too).
   const strip = histOn && prefs.strip === true;
@@ -393,7 +392,8 @@ export function LiqHeatmap({ symbol, engine, instance, address = null }: { symbo
   const points = useMemo(() => (livePt ? [...snapPts, livePt] : snapPts), [snapPts, livePt]);
   // The colours per the step drawn (the snapshots', not the live column's: the scale holds still): a
   // $1 cell is full at what $1 cells hold, a $100 cell around it reads as a hundred of them.
-  const heatSc = useMemo(() => heatScale(finePts ?? coarsePts, side, lev), [finePts, coarsePts, side, levKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Over the 30 days at every price (the index's, the tiles on screen being a part of them); the fine parts' own.
+  const heatSc = useMemo(() => (finePts ? heatScale(finePts, side, lev) : hist.scale(side, lev)), [finePts, hist.scale, side, levKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const refSt = finePts ? histFine!.step : null;
   const steps: StepsView | null = ladder.length ? {
     value: level === 'auto' ? 'auto' : String(Math.min(level, ladder.length - 1)),
@@ -405,9 +405,9 @@ export function LiqHeatmap({ symbol, engine, instance, address = null }: { symbo
   const nowEmpty = !h ? (heat.error ? `Liquidation levels unavailable: ${heat.error}` : 'Reading the books…')
     : !h.price || !h.buckets.length ? `${wallets.length ? (wallets.length === 1 ? 'This wallet holds' : 'These wallets hold') + ` no ${coin} position with a liquidation price` : `No tracked ${coin} positions with a liquidation price`} on ${chosen.length === SCAN_VENUES.length ? 'any platform' : chosen.map((v) => VENUE_LABEL[v]).join(', ')}.`
       : null;
-  const histEmpty = hist.error && !hist.data ? `History unavailable: ${hist.error}`
-    : !hist.data || hist.data.coin !== coin ? 'Reading the snapshots…'
-      : !coarsePts.length ? (wallets.length ? `No snapshots of ${coin} for ${wallets.length === 1 ? 'this wallet' : 'these wallets'} in this range: every position's level is kept from 28 Oct 2026, 15-minutely for 3 days and hourly to 30.` : `No snapshots of ${coin} yet: the index keeps every coin SoDEX lists, a snapshot every 15 minutes.`)
+  const histEmpty = hist.error && !hist.ready ? `History unavailable: ${hist.error}`
+    : !hist.ready ? 'Reading the snapshots…'
+      : !hist.list.length ? (wallets.length ? `No snapshots of ${coin} for ${wallets.length === 1 ? 'this wallet' : 'these wallets'} in this range: every position's level is kept from 28 Oct 2026, 15-minutely for 3 days and hourly to 30.` : `No snapshots of ${coin} yet: the index keeps every coin SoDEX lists, a snapshot every 15 minutes.`)
         : null;
   const change = (p: ViewChange) => {
     const { step, ...rest } = p;

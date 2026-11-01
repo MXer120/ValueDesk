@@ -52,6 +52,7 @@ import { applyCachedCurves, attachPodiumCurves } from '../valuedesk/curves.js';
 import { attachStats, boardPage, cohortDetail, cohortFocus, cohortMap, cohortWallets, cohortsReady, cohortsRead, excludedNow, indexerStatus, netPage } from '../indexer/read.js';
 import { isCohortId, isSector, type CohortFilter, type CohortRange, type WalletSort } from '../valuedesk/cohorts/model.js';
 import { fineAskOf, isLiqRange, levFilterOf, liqAt, liqHeatmap, liqHeatmapFine, liqHeatmapOf, liqHistory, liqHistoryFine, liqWallets, walletLiqs } from '../indexer/liqRead.js';
+import { TILE_FINAL_CACHE, TILE_INDEX_CACHE, liqTile, liqTileIndex, tileAskOf } from '../indexer/liqTiles.js';
 import { watchAddresses } from '../indexer/host.js';
 import { BOARD_WINDOWS, type BoardWindow } from '../valuedesk/types.js';
 import { buildExplore } from '../valuedesk/explore.js';
@@ -541,6 +542,35 @@ export async function valuedeskRoutes(app: FastifyInstance) {
       }
       const body = liqHistory(coin, cohortVenues(q), isLiqRange(q.range) ? q.range : '1d', ws);
       if (!body) return fail(reply, new NotAvailable('The index is not running yet'));
+      return { ok: true, ...body };
+    } catch (e) {
+      return fail(reply, e);
+    }
+  });
+
+  /**
+   * The history in tiles, every wallet (indexer/liqTiles.ts): without `tt=`, the index - every
+   * snapshot's time, price and step over 30 days and the colour scale per filter; with `tl= tt=
+   * pl= band= bw=` (and `v=` for the slot still filling), the rows of one time slot and price band.
+   * A final tile is kept a day, the rest a minute (perf.ts `own`).
+   */
+  app.get('/api/vs/liquidations/tiles', async (req, reply) => {
+    try {
+      const q = req.query as Q;
+      const coin = cohortFilter(q).coin;
+      if (!coin) throw bad('coin= is required');
+      if (q.wallets) throw bad('wallets= is for /api/vs/liquidations/history');
+      if (q.tt === undefined) {
+        const body = await liqTileIndex(coin, cohortVenues(q));
+        if (!body) return fail(reply, new NotAvailable('The index is not running yet'));
+        reply.header('Cache-Control', TILE_INDEX_CACHE);
+        return { ok: true, ...body };
+      }
+      const ask = tileAskOf(q);
+      if (typeof ask === 'string') throw bad(ask);
+      const body = await liqTile(coin, cohortVenues(q), ask);
+      if (!body) return fail(reply, new NotAvailable('The index is not running yet'));
+      reply.header('Cache-Control', body.final ? TILE_FINAL_CACHE : TILE_INDEX_CACHE);
       return { ok: true, ...body };
     } catch (e) {
       return fail(reply, e);

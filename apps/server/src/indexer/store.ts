@@ -3027,6 +3027,24 @@ export class IndexStore {
     return this.q('SELECT t, data FROM liq_hist WHERE coin = ? AND t >= ? ORDER BY t').all(coin, fromT) as Array<{ t: number; data: string }>;
   }
 
+  /**
+   * One coin's snapshots in [fromT, toT): time and data length only (liqTiles.ts: what changed
+   * since it read them). octet_length (SQLite 3.43+) reads the length from the record header, not
+   * the 75 KB of data; liqHistMetaSlow is the same with length() for an older SQLite.
+   */
+  liqHistMeta(coin: string, fromT: number, toT: number): Array<{ t: number; n: number }> {
+    return this.q('SELECT t, octet_length(data) AS n FROM liq_hist WHERE coin = ? AND t >= ? AND t < ? ORDER BY t').all(coin, fromT, toT) as Array<{ t: number; n: number }>;
+  }
+
+  liqHistMetaSlow(coin: string, fromT: number, toT: number): Array<{ t: number; n: number }> {
+    return this.q('SELECT t, length(data) AS n FROM liq_hist WHERE coin = ? AND t >= ? AND t < ? ORDER BY t').all(coin, fromT, toT) as Array<{ t: number; n: number }>;
+  }
+
+  /** One coin's snapshot at `t` (data as written), or null. */
+  liqHistAt(coin: string, t: number): string | null {
+    return (this.q('SELECT data FROM liq_hist WHERE coin = ? AND t = ?').get(coin, t) as { data: string } | undefined)?.data ?? null;
+  }
+
   /** Fine layers of the snapshots at `t` (deflated JSON, levels.ts FineSnap). */
   putLiqHistFine(t: number, rows: ReadonlyArray<[string, Uint8Array]>): void {
     this.tx(() => {

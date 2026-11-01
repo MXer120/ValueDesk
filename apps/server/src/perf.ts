@@ -61,6 +61,12 @@ export const COMPRESS_MIN_BYTES = 1024;
 export interface CachePolicy {
   /** The Cache-Control value for a 200. */
   cacheControl: string;
+  /**
+   * The route picks per answer: a Cache-Control the handler set stands (cacheControl when it set
+   * none). The heatmap's tiles: a final tile is kept a day, the index and a slot still filling a
+   * minute (indexer/liqTiles.ts).
+   */
+  own?: boolean;
 }
 
 const BOARD: CachePolicy = { cacheControl: 'public, max-age=10, stale-while-revalidate=20' };
@@ -89,6 +95,8 @@ export const CACHE_POLICIES: Readonly<Record<string, CachePolicy>> = {
   '/api/vs/liquidations/positions': BOARD,
   // Snapshots are written every 15 minutes.
   '/api/vs/liquidations/history': { cacheControl: 'public, max-age=300, stale-while-revalidate=300' },
+  // The same in tiles (indexer/liqTiles.ts): the route says which answer is final.
+  '/api/vs/liquidations/tiles': { cacheControl: 'public, max-age=60, stale-while-revalidate=120', own: true },
   // One cell at a past time: the log does not change behind it (the newest step may still fill in).
   '/api/vs/liquidations/at': { cacheControl: 'public, max-age=300, stale-while-revalidate=300' },
   '/api/vs/whales': LIVE,
@@ -252,7 +260,8 @@ async function perf(app: FastifyInstance, opts: PerfOptions): Promise<void> {
     let etag: string | undefined;
 
     if (policy) {
-      reply.header('Cache-Control', policy.cacheControl);
+      const own = policy.own ? reply.getHeader('Cache-Control') : undefined;
+      reply.header('Cache-Control', typeof own === 'string' && own ? own : policy.cacheControl);
       etag = weakEtag(body);
       reply.header('ETag', etag);
       appendVary(reply, 'Accept-Encoding');

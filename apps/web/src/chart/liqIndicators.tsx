@@ -15,15 +15,17 @@
  */
 import { useEffect } from 'react';
 import type { Chart as KChart } from 'klinecharts';
-import type { LiqHeatmap as HeatApi, LiqHistory } from '@sign/indexer/liqRead.js';
+import type { LiqHeatmap as HeatApi } from '@sign/indexer/liqRead.js';
 import type { Engine } from '../api';
 import { SCAN_VENUES, vsApi } from '../vsApi';
 import { usePolled } from '../components/explore/cohorts/parts';
-import { LIQ_HEAT, boxed, heatScale, type HeatData } from './liqHeatIndicator';
+import { useChartWindow, useHistTiles } from '../components/liqmap/histTiles';
+import { LIQ_HEAT, boxed, type HeatData } from './liqHeatIndicator';
+import { LEV_BANDS } from './liqLev';
 import { LIQ_MAP, coinOfSymbol, mapData } from './liqMap';
 
 /**
- * Feeds the two layers while they are on the chart: the history every 5 minutes, the levels
+ * Feeds the two layers while they are on the chart: the history's tiles for the window shown, the levels
  * now every 30 s. `ids` changes whenever the chart's studies are mounted again (a rebuild, a
  * restore), so each new layer gets the data held at once.
  */
@@ -31,14 +33,15 @@ export function LiqIndicatorFeed({ chart, engine, symbol, names, ids }: { chart:
   const coin = engine === 'perps' ? coinOfSymbol(symbol) : null;
   const heatOn = !!chart && !!coin && names.includes(LIQ_HEAT);
   const mapOn = !!chart && !!coin && names.includes(LIQ_MAP);
-  const hist = usePolled<LiqHistory>(heatOn ? `${coin}|liq-hist` : null, (s) => vsApi.liquidationHistory(coin!, SCAN_VENUES, '30d', s), 5 * 60_000);
+  // The snapshots of the window on the chart, in tiles, and the scale over the 30 days (components/liqmap/histTiles.ts).
+  const view = useChartWindow(chart, heatOn);
+  const hist = useHistTiles(heatOn ? coin : null, SCAN_VENUES, view);
   const now = usePolled<HeatApi>(mapOn ? `${coin}|liq-now` : null, (s) => vsApi.liquidations(coin!, SCAN_VENUES, 'fine', s, []), 30_000);
   useEffect(() => {
     if (!chart || !heatOn) return;
-    const points = hist.data?.points ?? [];
-    const data: HeatData = { points, side: 'both', scale: heatScale(points) };
+    const data: HeatData = { points: hist.points, side: 'both', scale: hist.scale('both', LEV_BANDS) };
     chart.overrideIndicator({ name: LIQ_HEAT, extendData: boxed(data) });
-  }, [chart, heatOn, hist.data, ids]);
+  }, [chart, heatOn, hist.points, hist.scale, ids]);
   useEffect(() => {
     if (!chart || !mapOn) return;
     chart.overrideIndicator({ name: LIQ_MAP, extendData: boxed(mapData(now.data)) });

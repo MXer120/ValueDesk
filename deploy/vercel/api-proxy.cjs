@@ -50,7 +50,8 @@
 //     the API sends neither, so this function translates, the way CloudFront's API
 //     cache policy (edge.yaml ApiCachePolicy) reads the same header: a 200 that is
 //     `public, max-age=N` may be kept at the edge N seconds (at most 60; a day for a site icon,
-//     minutes for the calendar and the heatmap history: EDGE_MAX_TTL_BY_PATH), with the
+//     minutes for the calendar and the heatmap history, a day for its final tiles:
+//     EDGE_MAX_TTL_BY_PATH), with the
 //     API's stale-while-revalidate (at most 60), through Vercel-CDN-Cache-Control,
 //     which Vercel never passes on. The browser keeps the API's own Cache-Control.
 //     /api/copy/* and /api/folders* are NEVER cached: their answers belong to one
@@ -111,6 +112,8 @@ const EDGE_MAX_TTL_BY_PATH = new Map([
   ['/api/vs/logo', 86400],
   ['/api/vs/calendar', 600],
   ['/api/vs/liquidations/history', 300],
+  // The heatmap's history in tiles: a final tile never changes (apps/server/src/indexer/liqTiles.ts).
+  ['/api/vs/liquidations/tiles', 86400],
 ]);
 /** The function's own path: never forwarded (it is only ever reached through the /api rewrite). */
 const SELF = '/api/__vs_proxy';
