@@ -154,3 +154,39 @@ test('a snapshot is parsed once, and again when it is written again', async () =
   }
   s.close();
 });
+
+test('after a restart the index reads the metas file, not the snapshots, and answers the same', async () => {
+  const { IndexStore } = await import('../src/indexer/store.js');
+  const T = await import('../src/indexer/liqTiles.js');
+  process.env.VALUESCAN_LIQ_METAS_FILE = join(dir, 'metas.json');
+  try {
+    T.resetLiqTiles();
+    const s = new IndexStore(process.env.VALUESCAN_INDEX_DB!);
+    const t0 = Math.floor((Date.now() - 30 * H) / Q) * Q;
+    for (let i = 0; i < 12; i++) s.putLiqHist(t0 + i * 2 * H, [['DOGE', JSON.stringify(snapOf(0.2 + i * 0.001, 0.0005, 900 + i))]]);
+    const venues = ['hyperliquid', 'sodex'] as const;
+    const a = (await T.liqTileIndex('DOGE', [...venues]))!;
+    await T.saveLiqMetas();
+    T.resetLiqTiles(); // the API restarted
+    const parse = JSON.parse;
+    const texts: number[] = [];
+    JSON.parse = ((text: string, rev?: Parameters<typeof JSON.parse>[1]) => { texts.push(text.length); return parse(text, rev); }) as typeof JSON.parse;
+    let b;
+    try {
+      b = (await T.liqTileIndex('DOGE', [...venues], Date.now() + 20_000))!;
+    } finally {
+      JSON.parse = parse;
+    }
+    assert.equal(texts.length, 1, 'one parse: the metas file, no snapshot');
+    assert.deepEqual(b.points, a.points);
+    assert.deepEqual(b.scale, a.scale);
+    // A snapshot written again after the file is parsed again (its length moved).
+    s.putLiqHist(t0, [['DOGE', JSON.stringify(snapOf(0.25, 0.0005, 1))]]);
+    const c = (await T.liqTileIndex('DOGE', [...venues], Date.now() + 40_000))!;
+    assert.equal(c.points[0]!.p, 0.25);
+    s.close();
+  } finally {
+    delete process.env.VALUESCAN_LIQ_METAS_FILE;
+    T.resetLiqTiles();
+  }
+});

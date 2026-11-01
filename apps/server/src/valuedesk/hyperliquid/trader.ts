@@ -116,6 +116,65 @@ export function hlTrader(address: string, deps: TraderDeps): Promise<TraderProfi
   return p;
 }
 
+/**
+ * The fill windows hlPeek looks back over, shortest first: the first with a fill holds the newest.
+ * About four times longer each, so the first that has fills holds few (a trader's own pace); an
+ * empty answer is two bytes.
+ */
+export const PEEK_WINDOWS_MS = [5, 20, 80, 360, 1_440, 4 * 1_440, 16 * 1_440, 30 * 1_440].map((m) => m * 60_000);
+/** Pages hlPeek follows forward through one window (2,000 fills each) before taking the full sample. */
+const PEEK_PAGES = 5;
+
+/** What a trader card shows: the portfolio curves, the 30-day PnL curve and the newest fill's time. */
+export type CardPeek = Pick<TraderProfile, 'equity'> & { summary: Pick<TraderProfile['summary'], 'spark' | 'lastActive'> };
+
+/**
+ * A trader card's figures (web copy/TraderCard.tsx) without the profile's 2,000-fill sample: for
+ * a busy trader that sample is 754 KB (HL sends it uncompressed), and a card read it for one
+ * number - the time of the newest fill (2026-11-01: the copy page pulled 10 MB from HL in its
+ * first minute). The curves come from the same `portfolio` hlTrader reads (and caches: opening the
+ * trader reuses it). The newest fill is found exactly: the fills since PEEK_WINDOWS_MS ago, the
+ * shortest window that holds any, followed forward past HL's 2,000 an answer; none in 30 days,
+ * the sample hlTrader takes. Null: the address never did anything on HL.
+ */
+export async function hlPeek(address: string, info: InfoLike, now = Date.now()): Promise<CardPeek | null> {
+  const user = address.toLowerCase();
+  const [portfolioR, lastR] = await Promise.allSettled([
+    info.post<HlPortfolio>({ type: 'portfolio', user }, { ttlMs: PORTFOLIO_TTL_MS }),
+    newestFill(user, info, now),
+  ]);
+  if (portfolioR.status === 'rejected' && lastR.status === 'rejected') throw portfolioR.reason;
+  const portfolio = settled(portfolioR);
+  const lastActive = settled(lastR);
+  if (lastActive === null && !portfolioHasActivity(portfolio)) return null;
+  const equity = mapPortfolio(portfolio);
+  const spark = (equity['30d'] ?? []).flatMap((pt) => (pt.pnl === null ? [] : [pt.pnl]));
+  return { equity, summary: { lastActive, ...(spark.length ? { spark } : {}) } };
+}
+
+async function newestFill(user: string, info: InfoLike, now: number): Promise<number | null> {
+  const newest = (fills: readonly HlFillRaw[]) => fills.reduce<number | null>((m, f) => (typeof f.time === 'number' && (m === null || f.time > m) ? f.time : m), null);
+  for (const w of PEEK_WINDOWS_MS) {
+    // From a whole minute: the same body for a minute, so HL is asked once (the info cache).
+    let from = Math.floor((now - w) / 60_000) * 60_000;
+    let last: number | null = null;
+    let toNow = false;
+    for (let page = 0; page < PEEK_PAGES && !toNow; page++) {
+      const got = await info.post<HlFillRaw[]>({ type: 'userFillsByTime', user, startTime: from, aggregateByTime: true }, { ttlMs: SAMPLE_TTL_MS, timeoutMs: 30_000 });
+      const fills = Array.isArray(got) ? got : [];
+      const t = newest(fills);
+      if (t !== null && (last === null || t > last)) last = t;
+      // Fewer than a full answer: the window is read to now. A full one may have more after it.
+      if (fills.length < HL_FILLS_PAGE || t === null) toNow = true;
+      else from = t + 1;
+    }
+    if (!toNow) break; // still more than PEEK_PAGES answers: the sample's newest is the newest
+    if (last !== null) return last;
+  }
+  const sample = await info.post<HlFillRaw[]>({ type: 'userFills', user, aggregateByTime: true }, { ttlMs: SAMPLE_TTL_MS, timeoutMs: 30_000 });
+  return newest(Array.isArray(sample) ? sample : []);
+}
+
 const stateBody = (user: string, dex: string) =>
   dex ? { type: 'clearinghouseState', user, dex } : { type: 'clearinghouseState', user };
 

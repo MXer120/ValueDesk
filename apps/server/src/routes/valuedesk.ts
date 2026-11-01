@@ -55,8 +55,8 @@ import { fineAskOf, isLiqRange, levFilterOf, liqAt, liqHeatmap, liqHeatmapFine, 
 import { TILE_FINAL_CACHE, TILE_INDEX_CACHE, liqTile, liqTileIndex, tileAskOf } from '../indexer/liqTiles.js';
 import { watchAddresses } from '../indexer/host.js';
 import { BOARD_WINDOWS, type BoardWindow } from '../valuedesk/types.js';
-import { buildExplore } from '../valuedesk/explore.js';
-import { buildScreener } from '../valuedesk/screener.js';
+import { buildExplore, keepExploreWarm } from '../valuedesk/explore.js';
+import { buildScreener, keepScreenerWarm } from '../valuedesk/screener.js';
 import { scrubDeep, scrubLabels, shownLabel } from '../valuedesk/labels.js';
 import { COHORT_RANGES, WALLET_SORTS, type CohortRange as WalletRange } from '../valuedesk/cohorts/model.js';
 import { indexerHealth } from '../hosted.js';
@@ -144,6 +144,13 @@ function sortValue(r: TraderRow, sort: LeaderboardSort, window: Window): number 
     : sort === 'roi' ? r.roi[window]
     : r.volume[window];
   return typeof v === 'number' && Number.isFinite(v) ? v : Number.NEGATIVE_INFINITY;
+}
+
+/** Explore and the screener's pools built before their first visitor and kept built while visited (index.ts, after the start). */
+export function keepValuedeskWarm(): () => void {
+  const core = CORE_VENUES.map((v) => PROVIDERS[v]);
+  const stops = [keepExploreWarm(core), keepScreenerWarm(core)];
+  return () => { for (const stop of stops) stop(); };
 }
 
 export async function valuedeskRoutes(app: FastifyInstance) {

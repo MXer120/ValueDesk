@@ -181,11 +181,35 @@ export function wireRow(r: ScreenerRow): ScreenerRow {
   return row;
 }
 
+/** keepScreenerWarm reads the pools for this long after the last request. */
+export const SCREENER_WARM_MS = 30 * 60_000;
+let screenerAskedAt = 0;
+
+/**
+ * The core venues' pools read before the screener's first visitor and kept read while it is
+ * visited (index.ts, after the start): a cold pool is every venue's leaderboard slices, 6.8 s
+ * measured on www (2026-11-01). The pool cache's own TTL decides whether a look reads anything.
+ * Returns the stop.
+ */
+export function keepScreenerWarm(providers: readonly VenueProvider[], firstMs = 30_000): () => void {
+  const core = providers.filter((p) => isCore(p.venue));
+  const look = (boot: boolean) => {
+    if (!boot && Date.now() - screenerAskedAt > SCREENER_WARM_MS) return;
+    for (const p of core) pools.get(p).catch(() => { /* kept in the cache entry */ });
+  };
+  const first = setTimeout(() => look(true), firstMs);
+  const every = setInterval(() => look(false), 60_000);
+  first.unref?.();
+  every.unref?.();
+  return () => { clearTimeout(first); clearInterval(every); };
+}
+
 export async function buildScreener(
   providers: readonly VenueProvider[],
   query: Record<string, string | undefined>,
 ): Promise<Record<string, unknown>> {
   const q = parseScreenerQuery(query);
+  screenerAskedAt = Date.now();
 
   if (q.view === 'assets') {
     const hl = providers.some((p) => p.venue === 'hyperliquid');

@@ -30,9 +30,14 @@
  * THE API THREAD. A snapshot is parsed once per venue set (keyed by its time and data length, so a
  * snapshot written again is read again), and the loop is given back between snapshots (YIELD_MS).
  * Its rows are kept in a LRU bounded by rows (MAX_ROWS); its time, price, step and per-filter
- * scales for as long as it is listed.
+ * scales for as long as it is listed, and in a file across restarts (metasPath): the first index
+ * after the 2026-11-01 release took 7.1 s, every snapshot of 30 days parsed again for its scales.
  */
+import { readFileSync } from 'node:fs';
+import { rename, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { setImmediate as nextTurn } from 'node:timers/promises';
+import { dataDir } from '../builder/paths.js';
 import type { Venue } from '../valuedesk/types.js';
 import { LEV_BANDS, type LevBand } from '../valuedesk/liquidations/math.js';
 import { snapBand, trimRow, type LiqSnap, type SnapRow } from '../valuedesk/liquidations/levels.js';
@@ -244,7 +249,73 @@ function snapOf(s: IndexStore, coin: string, venues: readonly Venue[], vk: strin
   if (!byT) { byT = new Map(); metas.set(vk, byT); }
   byT.set(at.t, m);
   keepRows(`${vk}|${at.t}`, rows);
+  metasChanged();
   return { meta: m, rows };
+}
+
+// --- the metas across restarts -------------------------------------------------------------
+
+/** Bump when snapRows, snapScales or COMBOS change: a file of another version is not read. */
+const METAS_V = 1;
+/** Written this long after a change (a snapshot every 15 minutes; the first index adds hundreds at once). */
+const SAVE_MS = 30_000;
+
+let metasFile: string | null | undefined;
+/**
+ * The metas' file in the server's data directory (production /var/lib/valuescan/state, which the
+ * API's unit may write). VALUESCAN_LIQ_METAS_FILE names another, 'off' none; under the test runner
+ * (NODE_TEST_CONTEXT) there is none unless it is named. A meta read back is used only while its
+ * snapshot's data length is unchanged (snapOf), so a snapshot written again is parsed again.
+ */
+function metasPath(): string | null {
+  if (metasFile === undefined) {
+    const named = process.env.VALUESCAN_LIQ_METAS_FILE?.trim();
+    if (named) metasFile = named === 'off' ? null : named;
+    else if (process.env.NODE_TEST_CONTEXT) metasFile = null;
+    else { try { metasFile = join(dataDir(), 'liq-tile-metas.json'); } catch { metasFile = null; } }
+  }
+  return metasFile;
+}
+
+let metasRead = false;
+/** Once per process, before the first index or tile: the metas written before a restart. */
+function readMetas(): void {
+  if (metasRead) return;
+  metasRead = true;
+  const file = metasPath();
+  if (!file) return;
+  let saved: { v?: number; keys?: Record<string, number[][]> };
+  try { saved = JSON.parse(readFileSync(file, 'utf8')) as typeof saved; } catch { return; }
+  if (saved.v !== METAS_V || !saved.keys) return;
+  for (const [vk, list] of Object.entries(saved.keys)) {
+    if (!Array.isArray(list)) continue;
+    let byT = metas.get(vk);
+    if (!byT) { byT = new Map(); metas.set(vk, byT); }
+    for (const r of list) {
+      if (!Array.isArray(r) || r.length !== 4 + COMBOS.length || !r.every(Number.isFinite)) continue;
+      const [t, n, p, st] = r as [number, number, number, number];
+      if (!byT.has(t)) byT.set(t, { t, n, p, st, sc: Float64Array.from(r.slice(4)) });
+    }
+  }
+}
+
+let saveTimer: ReturnType<typeof setTimeout> | null = null;
+function metasChanged(): void {
+  if (saveTimer || !metasPath()) return;
+  saveTimer = setTimeout(() => { saveTimer = null; void saveLiqMetas(); }, SAVE_MS);
+  saveTimer.unref?.();
+}
+
+/** Write the metas now (a temporary file renamed over the last: never half a file). */
+export async function saveLiqMetas(): Promise<void> {
+  const file = metasPath();
+  if (!file) return;
+  const keys: Record<string, number[][]> = {};
+  for (const [vk, byT] of metas) keys[vk] = [...byT.values()].sort((a, b) => a.t - b.t).map((m) => [m.t, m.n, m.p, m.st, ...m.sc]);
+  try {
+    await writeFile(`${file}.tmp`, JSON.stringify({ v: METAS_V, keys }));
+    await rename(`${file}.tmp`, file);
+  } catch { /* a read-only directory: the metas are rebuilt after a restart, as before */ }
 }
 
 /** Each listed snapshot, read where needed, the loop given back every YIELD_MS of work. */
@@ -267,11 +338,13 @@ async function walk(s: IndexStore, coin: string, venues: readonly Venue[], list:
 function trimMetas(vk: string, listedTs: ReadonlySet<number>): void {
   const byT = metas.get(vk);
   if (!byT) return;
+  const had = byT.size;
   for (const t of byT.keys()) if (!listedTs.has(t)) byT.delete(t);
   if (byT.size > MAX_METAS) {
     const ts = [...byT.keys()].sort((a, b) => a - b);
     for (const t of ts.slice(0, ts.length - MAX_METAS)) byT.delete(t);
   }
+  if (byT.size !== had) metasChanged();
 }
 
 // --- the index and the tiles ---------------------------------------------------------------
@@ -320,6 +393,7 @@ export function liqTileIndex(coin: string, venues: readonly Venue[], now = Date.
   return shared(`i|${vk}|${Math.floor(now / 10_000)}`, async () => {
     const s = reader();
     if (!s) return null;
+    readMetas();
     let list: Array<{ t: number; n: number }> = [];
     let coins: string[] = [];
     try {
@@ -366,6 +440,7 @@ export function liqTile(coin: string, venues: readonly Venue[], ask: TileAsk): P
   return shared(`t|${vk}|${ask.tl}|${ask.tt}|${ask.pl}|${ask.band}|${ask.bw}|${ask.v ?? ''}`, async () => {
     const s = reader();
     if (!s) return null;
+    readMetas();
     const end = ask.tt + tileMs(ask.tl);
     let after: Array<{ t: number; n: number }> = [];
     try { after = listed(s, coin, ask.tt, Number.MAX_SAFE_INTEGER); } catch { /* no table yet */ }
@@ -383,11 +458,15 @@ export function liqTile(coin: string, venues: readonly Venue[], ask: TileAsk): P
   });
 }
 
-/** Tests: forget every parsed snapshot. */
+/** Tests: forget every parsed snapshot, as a restart does (the metas' file is read again). */
 export function resetLiqTiles(): void {
   metas.clear();
   rowsLru.clear();
   rowsHeld = 0;
   inflight.clear();
   lengthFn = 'octet_length';
+  metasFile = undefined;
+  metasRead = false;
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = null;
 }

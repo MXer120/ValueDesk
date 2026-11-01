@@ -52,7 +52,7 @@ import {
   twr,
 } from '../src/valuedesk/hyperliquid/mappers.js';
 import { HlPositioning } from '../src/valuedesk/hyperliquid/positioning.js';
-import { hlFills, hlTrader } from '../src/valuedesk/hyperliquid/trader.js';
+import { HL_FILLS_PAGE, hlFills, hlPeek, hlTrader } from '../src/valuedesk/hyperliquid/trader.js';
 import { HlTradeFeed, SeenIds, TradeRing, WHALE_KEEP_USD } from '../src/valuedesk/hyperliquid/whales.js';
 import type {
   HlClearinghouseState,
@@ -683,6 +683,50 @@ test('hlTrader: leaderboard row + positions (all dexes seen) + fill stats + 30d 
   assert.equal(p.source, 'Hyperliquid info API + leaderboard');
   const dexes = info.bodies.filter((b) => b.type === 'clearinghouseState').map((b) => b.dex ?? '');
   assert.deepEqual(dexes.sort(), ['', 'flx', 'xyz'], 'a dex seen in the fills is checked too');
+});
+
+/** HL over one account's fill times: userFillsByTime ascending from startTime, userFills newest first, 2,000 an answer. */
+function fillsInfo(times: number[]) {
+  const all = times.map((t, i) => fill({ tid: i + 1, oid: i + 1, time: t })).sort((a, b) => a.time - b.time);
+  return stubInfo((b) => {
+    if (b.type === 'portfolio') return PF;
+    if (b.type === 'userFillsByTime') return all.filter((f) => f.time >= (b.startTime as number)).slice(0, HL_FILLS_PAGE);
+    if (b.type === 'userFills') return [...all].reverse().slice(0, HL_FILLS_PAGE);
+    throw new Error(`unexpected ${b.type}`);
+  });
+}
+
+test('hlPeek: the newest fill exactly as the profile has it, without the 2,000-fill sample, and the same curves', async () => {
+  const now = 1_790_000_000_000;
+  const H = 3_600_000;
+  const D = 24 * H;
+  const byTime = (n: number) => Array<string>(n).fill('userFillsByTime');
+  const cases: Array<[string, number[], string[]]> = [
+    ['busy: a fill a minute ago', [now - 2 * H, now - 60_000], byTime(1)],
+    ['active this hour', [now - 3 * D, now - 2 * H, now - 10 * 60_000], byTime(2)],
+    ['quiet two days', [now - 20 * D, now - 2 * D - 5], byTime(6)],
+    ['dormant two months', [now - 90 * D, now - 61 * D], [...byTime(8), 'userFills']],
+    ['a bot: 2,500 fills in five minutes', Array.from({ length: 2500 }, (_, i) => now - 250_000 + i * 100), byTime(2)],
+    ['a bot past five pages', Array.from({ length: 11_000 }, (_, i) => now - 225_000 + i * 20), [...byTime(5), 'userFills']],
+  ];
+  for (const [what, times, asks] of cases) {
+    const info = fillsInfo(times);
+    const peek = (await hlPeek(A2, info, now))!;
+    assert.equal(peek.summary.lastActive, Math.max(...times), what);
+    assert.deepEqual(info.bodies.filter((b) => b.type !== 'portfolio').map((b) => b.type), asks, `${what}: what was asked`);
+  }
+  // The curves are the profile's own (another address than above: hlTrader keeps profiles 20 s).
+  const sample = [fill({ tid: 1, oid: 1, time: now - 60_000 })];
+  const full = (await hlTrader(A4, {
+    info: stubInfo((b) => (b.type === 'clearinghouseState' ? CH : b.type === 'portfolio' ? PF : b.type === 'userFills' ? sample : [])),
+    leaderboard: { snapshot: async () => new LbSnapshot(parseLeaderboard(LB), 0, null, 0), peek: () => null, previous: () => null },
+  }))!;
+  const peek = (await hlPeek(A4, fillsInfo([now - 60_000]), now))!;
+  assert.deepEqual(peek.equity, full.equity);
+  assert.deepEqual(peek.summary.spark, full.summary.spark);
+  assert.equal(peek.summary.lastActive, full.summary.lastActive);
+  // Nothing ever done: null, as hlTrader.
+  assert.equal(await hlPeek(A1, stubInfo((b) => (b.type === 'portfolio' ? EMPTY_PF : [])), now), null);
 });
 
 test('hlFills: one page answers a recent query, newest first, limited', async () => {

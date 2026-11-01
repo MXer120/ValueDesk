@@ -63,8 +63,14 @@ import {
  * ------------------------------------------------------------------------ */
 
 export const EXPLORE_TTL_MS = 60_000;
-/** Past the TTL an answer is served while it is rebuilt, up to this age. */
-export const EXPLORE_STALE_MAX_MS = 5 * 60_000;
+/**
+ * Past the TTL an answer is served while it is rebuilt, up to this age (5 minutes until
+ * 2026-11-01: a visit after a quiet five minutes waited for a whole build, 14.7 s measured on www;
+ * SoDEX's board, the stalest input, is an hourly snapshot).
+ */
+export const EXPLORE_STALE_MAX_MS = 30 * 60_000;
+/** keepExploreWarm rebuilds every TTL for this long after the last request. */
+export const EXPLORE_WARM_MS = 30 * 60_000;
 export const EXPLORE_FAIL_TTL_MS = 15_000;
 /** Per slice. A provider that hangs must not hang the whole page. */
 export const EXPLORE_SLICE_TIMEOUT_MS = 20_000;
@@ -460,11 +466,14 @@ interface CacheEntry {
 
 let cached: CacheEntry | null = null;
 let pending: { key: string; promise: Promise<ExploreResponse> } | null = null;
+/** The last request (keepExploreWarm keeps building for EXPLORE_WARM_MS after it). */
+let askedAt = 0;
 
 /** Tests only. */
 export function resetExploreCache(): void {
   cached = null;
   pending = null;
+  askedAt = 0;
 }
 
 function rebuild(key: string, providers: readonly VenueProvider[]): Promise<ExploreResponse> {
@@ -500,6 +509,7 @@ function rebuild(key: string, providers: readonly VenueProvider[]): Promise<Expl
 export async function buildExplore(providers: readonly VenueProvider[]): Promise<ExploreResponse> {
   const key = providers.map((p) => p.venue).join(',');
   const now = Date.now();
+  askedAt = now;
   const c = cached && cached.key === key ? cached : null;
   const recentlyFailed = c?.errorAt !== undefined && now - c.errorAt < EXPLORE_FAIL_TTL_MS;
 
@@ -513,4 +523,34 @@ export async function buildExplore(providers: readonly VenueProvider[]): Promise
   }
   if (recentlyFailed) throw c!.error;
   return rebuild(key, providers);
+}
+
+/**
+ * One look of keepExploreWarm: rebuild behind the requests when the answer is past its TTL (or
+ * missing) and someone asked within EXPLORE_WARM_MS - or `boot`. Never while a build runs or
+ * just failed. Exported for tests (`now`).
+ */
+export function exploreWarmTick(providers: readonly VenueProvider[], now = Date.now(), boot = false): Promise<ExploreResponse> | null {
+  const key = providers.map((p) => p.venue).join(',');
+  if (!boot && now - askedAt > EXPLORE_WARM_MS) return null;
+  if (pending?.key === key) return null;
+  const c = cached && cached.key === key ? cached : null;
+  if (c?.errorAt !== undefined && now - c.errorAt < EXPLORE_FAIL_TTL_MS) return null;
+  if (c?.value && now - c.at < EXPLORE_TTL_MS) return null;
+  const p = rebuild(key, providers);
+  p.catch(() => { /* recorded in the cache */ });
+  return p;
+}
+
+/**
+ * Explore built before anyone asks (the API's start: index.ts), and kept built while it is
+ * visited: the first visitor after a release or a quiet spell waited for a whole build (14.7 s
+ * measured on www, 2026-11-01). Returns the stop.
+ */
+export function keepExploreWarm(providers: readonly VenueProvider[], firstMs = 20_000): () => void {
+  const first = setTimeout(() => exploreWarmTick(providers, Date.now(), true), firstMs);
+  const every = setInterval(() => exploreWarmTick(providers), EXPLORE_TTL_MS / 2);
+  first.unref?.();
+  every.unref?.();
+  return () => { clearTimeout(first); clearInterval(every); };
 }

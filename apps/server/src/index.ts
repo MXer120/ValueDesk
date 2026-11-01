@@ -32,7 +32,7 @@ import { statsRoutes } from './routes/stats.js';
 import { scanRoutes } from './routes/scan.js';
 import { profileOnSignal } from './indexer/cpuProfile.js';
 import { pointsAuthRoutes } from './routes/pointsAuth.js';
-import { valuedeskRoutes } from './routes/valuedesk.js';
+import { keepValuedeskWarm, valuedeskRoutes } from './routes/valuedesk.js';
 import { builderRoutes } from './routes/builder.js';
 import { foldersRoutes } from './routes/folders.js';
 import { reportRoutes } from './routes/reports.js';
@@ -520,6 +520,11 @@ setTimeout(() => {
     .then(([r, t]) => r.warmCohorts(t.VENUES))
     .catch((e) => app.log.warn({ err: e }, 'cohorts warm-up failed'));
 }, 3_000).unref();
+
+// Explore and the screener's pools: built 20-30 s after the start and kept built while visited
+// (explore.ts keepExploreWarm, screener.ts keepScreenerWarm) - after a release the first visitor
+// waited for a whole build: Explore 14.7 s, the screener 6.8 s.
+keepValuedeskWarm();
 
 // Official economic results at the release second (valuedesk/releases.ts): one
 // watcher in this process, hosted or not; idle but for a minute's look at the
