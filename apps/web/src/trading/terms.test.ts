@@ -604,7 +604,8 @@ test('a malformed wallet address is never asked about', async () => {
 async function settle(until: () => boolean = () => true): Promise<void> {
   const turn = () => new Promise((r) => setImmediate(r));
   // Real time (performance.now is not mocked): WebCrypto answers from another thread, in its own time (slower when other suites run at the same time).
-  for (const t0 = performance.now(); !until() && performance.now() - t0 < 10_000; ) await turn();
+  // 30 s: on Vercel's 4-core build machine (3 suites at once) 10 s ran out twice on 2026-11-01 and kept the web from deploying.
+  for (const t0 = performance.now(); !until() && performance.now() - t0 < 30_000; ) await turn();
   for (const t0 = performance.now(); performance.now() - t0 < 20; ) await turn();
 }
 
