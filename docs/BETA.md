@@ -20,8 +20,10 @@ then promoted to everyone.
 
 ## How a request reaches the beta API
 
-1. beta.valuedesk.so is the Vercel project's domain for the git branch `beta` (preview protection skips custom
-   domains). `deploy/vercel/build.sh` builds that branch with `beta.settings` over `production.settings`
+1. beta.valuedesk.so belongs to a Vercel project of its own, `valuedesk-beta` (same repository; it builds the
+   git branch `beta` only - its ignored-build step skips every other - and has Vercel Authentication off). In
+   the main project a branch domain stays behind Vercel's login: its protection spares production domains only
+   (found 2026-11-02). `deploy/vercel/build.sh` builds that branch with `beta.settings` over `production.settings`
    (`VITE_CHANNEL=beta`, the beta socket) and marks the function `VALUESCAN_CHANNEL=beta`.
 2. The function (`deploy/vercel/api-proxy.cjs`) adds `x-vs-channel: beta` and the cookie's token as
    `x-vs-beta` to every request; on beta every answer is `no-store` (never in the CDN, where another visitor
@@ -47,5 +49,7 @@ executor; they change on promote.
   `/etc/valuescan/api-beta.env` from `deploy/server/env/api-beta.env.example`, Caddy from the template, a first
   `release.sh <tag> --beta`.
 - server 2: `https://beta.valuedesk.so` added to the executor's `EXECUTOR_ALLOWED_ORIGINS` (a restart of the executor: with its guards).
-- Vercel: domain beta.valuedesk.so on git branch `beta`; `VALUESCAN_ORIGIN_SECRET` also for Preview (branch `beta`).
+- Vercel: project `valuedesk-beta` (prj_hffR0hZbbemgGMdwj9lEwmydneGS) with the domain beta.valuedesk.so on git branch
+  `beta` and `VALUESCAN_ORIGIN_SECRET` (Preview, sensitive) - the value pasted by the owner. The main project keeps
+  the secret for Production only.
 - DNS (owner): CNAME `beta` -> `cname.vercel-dns.com`.
