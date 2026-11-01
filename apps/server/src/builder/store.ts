@@ -441,6 +441,11 @@ export class BuilderStore {
     return Number(r.changes) > 0;
   }
 
+  /** Wallets verified before (a first pass comes from their hint), not since `before`, with no hint waiting, longest first (the verifier's sweep). */
+  staleWallets(builder: number, before: number, limit: number): WalletRow[] {
+    return (this.q('SELECT * FROM wallets WHERE builder = ? AND due_at = 0 AND verified_at > 0 AND verified_at < ? ORDER BY verified_at LIMIT ?').all(builder, before, limit) as Row[]).map(walletOf);
+  }
+
   /** Wallets with a hint waiting - what a restart picks up again. */
   dueWallets(builder: number, limit: number): WalletRow[] {
     return (this.q('SELECT * FROM wallets WHERE builder = ? AND due_at > 0 ORDER BY due_at LIMIT ?').all(builder, limit) as Row[]).map(walletOf);

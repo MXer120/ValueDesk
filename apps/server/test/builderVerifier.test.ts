@@ -18,7 +18,7 @@ import { BuilderService, type TermsBody } from '../src/builder/service.js';
 import { BuilderStore } from '../src/builder/store.js';
 import { termsMessage, writeNewKeyFile } from '../src/builder/terms.js';
 import {
-  MAX_APPROVALS, MAX_JOBS, MAX_SWEEP_PAGES, OVERLAP_MS, PAGE, VERIFY_EVERY_MAX_MS, VERIFY_EVERY_MS, perMinFrom,
+  MAX_APPROVALS, MAX_JOBS, MAX_SWEEP_PAGES, OVERLAP_MS, PAGE, REVERIFY_MS, VERIFY_EVERY_MAX_MS, VERIFY_EVERY_MS, perMinFrom,
 } from '../src/builder/verifier.js';
 import { BUILDER, CHAIN, Clock, FakeSodex, MemoryLog, OTHER_BUILDER, addr, apiKey, drive, tempDir, type ApiKey } from './builderFakes.js';
 
@@ -790,6 +790,25 @@ test('failures: a page that fails is retried later, three times at most, and the
   w.ask(wallet, true);
   await drive(w.svc.verifier!, w.clock, 3 * HOUR);
   assert.ok(w.svc.store!.wallet(BUILDER, wallet)!.verifiedAt > 0);
+});
+
+test('re-read without a hint: a wallet that trades only through the executor is counted within REVERIFY_MS (10-30 gap)', async () => {
+  const w = world();
+  const { wallet, app } = trader(w, 360);
+  w.clock.advance(SEC);
+  w.sodex.order(wallet, { engine: 'perps', orderId: nextId(), at: w.clock.now(), builder: { id: BUILDER, fee: 20 }, key: app, fills: [{ price: '50000', quantity: '0.001' }] });
+  w.clock.advance(SEC);
+  await w.verify(wallet);
+  assert.equal(w.ask(wallet).volume.perpsUsd, 50);
+  // Later, an order nobody hints about (no tab open, an executor before the volume-read hint).
+  w.clock.advance(HOUR);
+  w.sodex.order(wallet, { engine: 'perps', orderId: nextId(), at: w.clock.now(), builder: { id: BUILDER, fee: 20 }, key: app, fills: [{ price: '60000', quantity: '0.001' }] });
+  await drive(w.svc.verifier!, w.clock, 30 * MIN);
+  assert.equal(w.ask(wallet).volume.perpsUsd, 50, 'nothing reads it before its re-read is due');
+  // The pump wakes every 10 min with nothing queued; a run past REVERIFY_MS queues the wallet again.
+  w.clock.advance(REVERIFY_MS);
+  await drive(w.svc.verifier!, w.clock, HOUR);
+  assert.equal(w.ask(wallet).volume.perpsUsd, 110, 'the sweep re-read it and counted the new order');
 });
 
 // --- the explorer ---------------------------------------------------------------------------------------

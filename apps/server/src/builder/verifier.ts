@@ -103,6 +103,16 @@ const EXPLORER_PAUSE_MAX_MS = 6 * 60 * 60_000;
 const NOT_FOUND_RETRY_MS = [30_000, 60_000, 90_000, 120_000, 180_000, 300_000, 600_000];
 /** Rows wait for a retry and nothing else is due: look again after this. */
 const EXPLORER_POLL_MS = 30_000;
+/**
+ * Every wallet the ledger knows is read again at least this often, hint or not (owner 2026-11-01).
+ * Hints alone missed a wallet that traded only through the hosted executor: nothing was read for it
+ * from 10-29 22:37 on while it placed ~$6,800 of copies and algos. At the history lane's pace (one
+ * page a minute) two hours keeps up with ~60 active wallets; more simply wait their turn.
+ */
+export const REVERIFY_MS = 2 * 60 * 60_000;
+/** How often the ledger is looked over for wallets past REVERIFY_MS, and how many are queued at a time. */
+const SWEEP_EVERY_MS = 10 * 60_000;
+const SWEEP_BATCH = 25;
 
 /** Builder-less orders per page put up for a look at who signed them. */
 const CHECKS_PER_PAGE = 2;
@@ -240,6 +250,8 @@ export class Verifier {
 
   private historyAt = 0;
   private historyPause = 0;
+  /** When the ledger was last looked over for wallets due a re-read (REVERIFY_MS). */
+  private sweptAt = 0;
   private limitedStreak = 0;
   private approvalAt = 0;
   private explorerAt = 0;
@@ -403,8 +415,9 @@ export class Verifier {
         }
         if (this.stopped) return;
         if (this.again || wait === 0) continue;
-        if (wait !== null) this.schedule(wait);
-        return; // nothing queued: asleep until the next hint
+        // Nothing queued: asleep until the next hint - or the next look for wallets due a re-read.
+        this.schedule(wait ?? SWEEP_EVERY_MS);
+        return;
       }
     } finally {
       this.busy = false;
@@ -423,6 +436,14 @@ export class Verifier {
       return null;
     }
     const waits: number[] = [];
+
+    // The safety net under the hints: wallets not read for REVERIFY_MS are queued again.
+    if (this.now() - this.sweptAt >= SWEEP_EVERY_MS) {
+      this.sweptAt = this.now();
+      for (const w of this.guard(() => this.store.staleWallets(cfg.builderId, this.now() - REVERIFY_MS, SWEEP_BATCH)) ?? []) {
+        if (!this.jobs.has(w.address) && !this.enqueue(w, this.now())) break;
+      }
+    }
 
     if (this.approvals.size) {
       const ready = Math.max(this.approvalAt, this.gate('/api/v1/user/{a}/builders'));
