@@ -43,9 +43,13 @@ export interface LiveAccount {
 
 /**
  * What one position added: coin, epoch, venue, long, size, then where (bucket index, or -1
- * outside, -2 not priced, -3 no liquidation price exists), USD and leverage band (-1: not known).
+ * outside, -2 not priced, -3 no liquidation price exists), USD, leverage band (-1: not known) and
+ * the level itself (0 where `at` is below zero): the history's fine layers bucket it exactly.
  */
-type Entry = { coin: string; ep: number; long: boolean; a: number; at: number; usd: number; band: number };
+type Entry = { coin: string; ep: number; long: boolean; a: number; at: number; usd: number; band: number; liq: number };
+
+/** A position as positionsByCoin lists it. */
+export interface LivePosition { venue: Venue; address: string; long: boolean; liq: number; usd: number; band: number }
 
 /** A bucket: a LiqRow without its index - [long USD, short USD, long n, short n, long low, mid, high, short low, mid, high]. */
 type Cell = number[];
@@ -182,11 +186,12 @@ export class LiqLive {
 
   /**
    * Per coin, the positions worth `minUsd` at their liquidation price - or held by a wallet in
-   * `also` - with venue, address, side and that price (the middle of its bucket: 0.02% wide).
-   * One pass over every account: the history's wallet filter takes it once a step.
+   * `also` - with venue, address, side, that price (exact, as the account was last priced; the
+   * middle of its 0.02% bucket until 2026-11-01) and the leverage band (-1: not known). One pass
+   * over every account: the change log and the history's fine layers take it once a step.
    */
-  positionsByCoin(minUsd: number, also: ReadonlySet<string>): Map<string, Array<{ venue: Venue; address: string; long: boolean; liq: number; usd: number }>> {
-    const out = new Map<string, Array<{ venue: Venue; address: string; long: boolean; liq: number; usd: number }>>();
+  positionsByCoin(minUsd: number, also: ReadonlySet<string>): Map<string, LivePosition[]> {
+    const out = new Map<string, LivePosition[]>();
     for (const [key, entries] of this.added) {
       const i = key.indexOf('|');
       const address = key.slice(i + 1);
@@ -197,7 +202,7 @@ export class LiqLive {
         if (!c || c.ep !== e.ep) continue;
         let list = out.get(e.coin);
         if (!list) { list = []; out.set(e.coin, list); }
-        list.push({ venue: key.slice(0, i) as Venue, address, long: e.long, liq: (e.at + 0.5) * c.st, usd: e.usd });
+        list.push({ venue: key.slice(0, i) as Venue, address, long: e.long, liq: e.liq > 0 ? e.liq : (e.at + 0.5) * c.st, usd: e.usd, band: e.band });
       }
     }
     return out;
@@ -382,7 +387,7 @@ export class LiqLive {
       const l = liq[j] ?? null;
       const a = Math.abs(p.szi);
       const at = l === null || !(l > 0) ? (none[j] ? -3 : -2) : l < c.lo || l >= c.hi ? -1 : Math.floor(l / c.st);
-      const e: Entry = { coin: coinName, ep: c.ep, long: p.szi > 0, a, at, usd: l ? a * l : 0, band: levBand(lev?.[j]) ?? -1 };
+      const e: Entry = { coin: coinName, ep: c.ep, long: p.szi > 0, a, at, usd: l ? a * l : 0, band: levBand(lev?.[j]) ?? -1, liq: at >= 0 ? l! : 0 };
       this.apply(venue, e, 1);
       entries.push(e);
     });

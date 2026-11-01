@@ -51,7 +51,7 @@ import { ACCOUNT_DETAIL, arcusProvider, lighterProvider, nameSpotFills, tradexyz
 import { applyCachedCurves, attachPodiumCurves } from '../valuedesk/curves.js';
 import { attachStats, boardPage, cohortDetail, cohortFocus, cohortMap, cohortWallets, cohortsReady, cohortsRead, excludedNow, indexerStatus, netPage } from '../indexer/read.js';
 import { isCohortId, isSector, type CohortFilter, type CohortRange, type WalletSort } from '../valuedesk/cohorts/model.js';
-import { fineAskOf, isLiqRange, levFilterOf, liqAt, liqHeatmap, liqHeatmapFine, liqHeatmapOf, liqHistory, liqWallets, walletLiqs } from '../indexer/liqRead.js';
+import { fineAskOf, isLiqRange, levFilterOf, liqAt, liqHeatmap, liqHeatmapFine, liqHeatmapOf, liqHistory, liqHistoryFine, liqWallets, walletLiqs } from '../indexer/liqRead.js';
 import { watchAddresses } from '../indexer/host.js';
 import { BOARD_WINDOWS, type BoardWindow } from '../valuedesk/types.js';
 import { buildExplore } from '../valuedesk/explore.js';
@@ -517,13 +517,28 @@ export async function valuedeskRoutes(app: FastifyInstance) {
     }
   });
 
-  /** `coin`'s liquidation levels over `range` (1d / 7d / 30d): the indexer's 15-minute snapshots. */
+  /**
+   * `coin`'s liquidation levels over `range` (1d / 7d / 30d): the indexer's 15-minute snapshots.
+   * With `step=` `from=` `to=` (a price window, at most FINE_MAX_BUCKETS of the step) and `t0=`
+   * `t1=` (ms): the snapshots' fine layers in that window instead (liqRead.ts liqHistoryFine).
+   */
   app.get('/api/vs/liquidations/history', async (req, reply) => {
     try {
       const q = req.query as Q;
       const coin = cohortFilter(q).coin;
       if (!coin) throw bad('coin= is required');
       const ws = walletsOf(q);
+      const fine = fineAskOf(q);
+      if (typeof fine === 'string') throw bad(fine);
+      if (fine) {
+        if (ws.length) throw bad('step= is for every wallet only');
+        const t0 = Number(q.t0);
+        const t1 = Number(q.t1);
+        if (!(t0 > 0) || !(t1 >= t0)) throw bad('t0= and t1= must be a time range in ms with step=');
+        const body = liqHistoryFine(coin, cohortVenues(q), t0, t1, fine);
+        if (!body) return fail(reply, new NotAvailable('The index is not running yet'));
+        return { ok: true, ...body };
+      }
       const body = liqHistory(coin, cohortVenues(q), isLiqRange(q.range) ? q.range : '1d', ws);
       if (!body) return fail(reply, new NotAvailable('The index is not running yet'));
       return { ok: true, ...body };

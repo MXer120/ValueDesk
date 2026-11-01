@@ -33,6 +33,12 @@ export interface HeatPoint {
   p: number;
   st: number;
   b: Array<[number, number, number, ...number[]]>;
+  /**
+   * The same snapshot at a finer step over part of its range (the history's fine layers, server
+   * liqRead.ts liqHistoryFine: BTC $10 / $1 near the price then): inside [lo, hi) these cells are
+   * drawn instead of the snapshot's own (cellsOf).
+   */
+  f?: { st: number; lo: number; hi: number; b: HeatPoint['b'] } | null;
 }
 
 export interface HeatData {
@@ -49,6 +55,10 @@ export interface HeatData {
   fit?: boolean;
   /** The levels now as a strip on the pane's right edge (the historical view's toggle). */
   strip?: LiqMapData | null;
+  /** The width the colours are of (default the newest snapshot's, refStep): the fine step while fine parts are drawn. */
+  ref?: number | null;
+  /** The strip as the chart view's profile: wider, unlabelled, with the cumulative curves (liqProfile.ts). */
+  profile?: boolean;
 }
 
 /** A snapshot older than this before a bar's end does not stand for it. */
@@ -132,6 +142,56 @@ export const refStep = (points: readonly HeatPoint[]): number | null => points.a
 /** What a snapshot's cells are multiplied by to be read per `ref` of price (1 at the same width). */
 export const stepNorm = (q: HeatPoint, ref: number | null): number => (ref && q.st > 0 ? ref / q.st : 1);
 
+/** A drawn cell: its price range, its row, and the step it is of (the snapshot's or its fine part's). */
+export type HeatCell = { lo: number; hi: number; r: HeatPoint['b'][number]; st: number };
+
+/**
+ * A snapshot's cells as drawn: its own rows, but inside its fine part's range - widened to whole
+ * cells of its own step, so the two never overlap nor leave a gap - the fine part's rows instead.
+ * Lowest first. Kept per point (a point is not changed once handed to the layer).
+ */
+export function cellsOf(q: HeatPoint): HeatCell[] {
+  const hit = cellCache.get(q);
+  if (hit) return hit;
+  const f = q.f;
+  const eps = 1e-9;
+  const flo = f ? Math.ceil(f.lo / q.st - eps) * q.st : 0;
+  const fhi = f ? Math.floor(f.hi / q.st + eps) * q.st : 0;
+  const fineOn = !!f && fhi > flo;
+  const out: HeatCell[] = [];
+  for (const r of q.b) {
+    const [lo, hi] = cellRange(r, q.st);
+    if (fineOn && lo >= flo - eps * q.st && hi <= fhi + eps * q.st) continue;
+    out.push({ lo, hi, r, st: q.st });
+  }
+  if (fineOn) {
+    for (const r of f.b) {
+      const [lo, hi] = cellRange(r, f.st);
+      if (lo < flo - eps * f.st || hi > fhi + eps * f.st) continue;
+      out.push({ lo, hi, r, st: f.st });
+    }
+    out.sort((a, b) => a.lo - b.lo);
+  }
+  cellCache.set(q, out);
+  return out;
+}
+const cellCache = new WeakMap<HeatPoint, HeatCell[]>();
+
+/** The cell of a snapshot holding `price` (null: none there). */
+export function cellAt(q: HeatPoint, price: number): HeatCell | null {
+  const cells = cellsOf(q);
+  let lo = 0;
+  let hi = cells.length - 1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    const c = cells[mid]!;
+    if (price < c.lo) hi = mid - 1;
+    else if (price >= c.hi) lo = mid + 1;
+    else return c;
+  }
+  return null;
+}
+
 /** The snapshot in force at the close of a bar starting at `t` (`barMs` long): index into `times`, or -1. */
 export function snapshotFor(times: readonly number[], t: number, barMs: number): number {
   const end = t + barMs;
@@ -200,6 +260,8 @@ export const unboxed = <T,>(x: unknown): T | null => (typeof x === 'function' ? 
 
 /** The strip of the levels now: this wide at most. */
 export const stripWidth = (paneWidth: number): number => Math.min(220, paneWidth * 0.2);
+/** The chart view's profile: this wide at most (its SVG drew 130-240 px, 28% of the width). */
+export const profileWidth = (paneWidth: number): number => Math.min(240, Math.max(Math.min(130, paneWidth * 0.4), paneWidth * 0.28));
 
 export const liqHeatTemplate: IndicatorTemplate<{ lo?: number; hi?: number }, unknown, Boxed<HeatData>> = {
   name: LIQ_HEAT,
@@ -225,7 +287,7 @@ export const liqHeatTemplate: IndicatorTemplate<{ lo?: number; hi?: number }, un
       const byLev = data.colorBy === 'lev';
       const scale = data.scale || 1;
       const w = Math.max(1, bar.bar + bar.gapBar);
-      const ref = refStep(data.points);
+      const ref = data.ref ?? refStep(data.points);
       ctx.save();
       ctx.beginPath();
       ctx.rect(0, 0, bounding.width, bounding.height);
@@ -247,13 +309,13 @@ export const liqHeatTemplate: IndicatorTemplate<{ lo?: number; hi?: number }, un
           const q = data.points[at]!;
           const x0 = edge(i);
           const x1 = edge(j);
-          const k = stepNorm(q, ref) / scale;
-          for (const r of q.b) {
+          for (const { lo, hi, r, st } of cellsOf(q)) {
             const { v, bands } = cellOf(r, side, lev);
             if (!(v > 0)) continue;
+            // Per the newest snapshot's width: a $1 cell is read as a hundredth of a $100 one.
+            const k = (ref && st > 0 ? ref / st : 1) / scale;
             const col = byLev ? levHeatColor(v * k, bands) : heatColor(v * k);
             if (!col) continue;
-            const [lo, hi] = cellRange(r, q.st);
             const top = Math.round(yAxis.convertToPixel(hi));
             const bot = Math.round(yAxis.convertToPixel(lo));
             if (bot < 0 || top > bounding.height) continue;
@@ -265,7 +327,11 @@ export const liqHeatTemplate: IndicatorTemplate<{ lo?: number; hi?: number }, un
       }
       ctx.restore();
     }
-    if (data.strip) drawProfile(ctx, bounding, yAxis, data.strip, { maxW: stripWidth(bounding.width), alpha: 0.9, backdrop: true });
+    if (data.strip) {
+      // The chart view's profile steps back under the candles (they are the same red and green), as its SVG did.
+      if (data.profile) drawProfile(ctx, bounding, yAxis, data.strip, { maxW: profileWidth(bounding.width), alpha: 0.5, cum: true });
+      else drawProfile(ctx, bounding, yAxis, data.strip, { maxW: stripWidth(bounding.width), alpha: 0.9, backdrop: true });
+    }
     // Nothing of the library's own (the figures are for the axis): true says the drawing is done.
     return true;
   },

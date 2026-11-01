@@ -4,8 +4,10 @@
  *
  *   Live        notional per price bucket - longs (red) below the price, shorts
  *               (green) above - with the cumulative curves on a second axis.
- *   Chart       the same levels as horizontal bars beside the market's candles.
- *   Historical  the levels over time, from the indexer's 15-minute snapshots.
+ *   Chart       the same levels as horizontal bars beside the market's candles, on the
+ *               app's own chart (ChartPanel): it zooms, scrolls and scales as the trade chart.
+ *   Historical  the levels over time, from the indexer's 15-minute snapshots, on that chart;
+ *               finer than they keep (BTC $10, $1), from their fine layers near the price.
  *
  * A bar opens its wallets (address, size @ liquidation price, USD, distance).
  * The strip at the bottom says how much of each venue's open interest the books
@@ -23,8 +25,9 @@
  * is drawn at full (a tick marks it, the tooltip has its figure) and the rest stay readable.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react';
-import type { LiqAt, LiqHeatmap as HeatApi, LiqHistory, LiqWallets } from '@sign/indexer/liqRead.js';
-import { api, type Engine, type Kline } from '../../api';
+import type { LiqAt, LiqHeatmap as HeatApi, LiqHistory, LiqHistoryFine, LiqWallets } from '@sign/indexer/liqRead.js';
+import { FINE_LAYERS } from '@sign/valuedesk/liquidations/levels.js';
+import type { Engine } from '../../api';
 import { useStored, useSymbols } from '../../hooks';
 import { SCAN_VENUES, VENUE_LABEL, vsApi, type Venue } from '../../vsApi';
 import { PlatformSelect } from '../PlatformSelect';
@@ -36,8 +39,8 @@ import { WalletView, type Res, type Side, type StepsView, type Unit, type ViewCh
 import { Chart } from '../Chart';
 import type { Chart as KChart } from 'klinecharts';
 import { CANDLE_PANE_ID } from '../../chart/theme';
-import { HEAT_FLOOR, LIQ_HEAT, barMsOf, boxed, cellOf, heatScale, liqHeatTemplate, refStep, snapshotFor, stepNorm, stripWidth, type HeatData, type HeatPoint } from '../../chart/liqHeatIndicator';
-import { FINE_MAX_BUCKETS, fineWindow, stepAt, stepLabel, stepLadder, streamAsk, streamGroup, tickOf, type StepLevel } from '../../chart/liqSteps';
+import { HEAT_FLOOR, LIQ_HEAT, barMsOf, boxed, cellAt, cellOf, heatScale, liqHeatTemplate, profileWidth, refStep, snapshotFor, stepNorm, stripWidth, type HeatData, type HeatPoint } from '../../chart/liqHeatIndicator';
+import { FINE_MAX_BUCKETS, fineWindow, niceUp, stepAt, stepLabel, stepLadder, streamAsk, streamGroup, tickOf, type StepLevel } from '../../chart/liqSteps';
 import { coinOfSymbol, groupFor, mapData, type LiqMapData } from '../../chart/liqMap';
 import {
   LEV_BANDS, LEV_COLOR, LEV_LABEL, addBands, isAllLev, levBandOf, levFilterOf, levelWindow, robustMax, shownBands, shownTotal, sideBands,
@@ -50,15 +53,12 @@ import { fmtFixed, fmtNum } from '../../numStyle';
 import './LiqHeatmap.css';
 
 type View = 'live' | 'chart' | 'history';
-const TFS = ['1m', '5m', '15m', '1h', '4h', '1D'] as const;
-type Tf = (typeof TFS)[number];
 
 interface Prefs {
   view: View;
   res: Res;
   unit: Unit;
   venues: Venue[];
-  tf: Tf;
   /** Only these wallets (none: every wallet), and which side - every view (WalletView.tsx). */
   wallets: string[];
   side: Side;
@@ -70,7 +70,7 @@ interface Prefs {
   /** The resolution per coin (liqSteps.ts): Auto or a place on the coin's ladder; a coin not here has the default. */
   steps: Record<string, StepLevel>;
 }
-const DEFAULTS: Prefs = { view: 'live', res: 'fine', unit: 'usd', venues: [...SCAN_VENUES], tf: '1h', wallets: [], side: 'both', colorBy: 'side', lev: [...LEV_BANDS], strip: false, steps: {} };
+const DEFAULTS: Prefs = { view: 'live', res: 'fine', unit: 'usd', venues: [...SCAN_VENUES], wallets: [], side: 'both', colorBy: 'side', lev: [...LEV_BANDS], strip: false, steps: {} };
 /** Exact steps (the fine route) are read this often: the books under them are a minute old at most. */
 const FINE_POLL_MS = 12_000;
 
@@ -232,15 +232,26 @@ export function LiqHeatmap({ symbol, engine, instance, address = null }: { symbo
   const coin = coinOfSymbol(symbol);
   const [pick, setPick] = useState<Pick | null>(null);
   useEffect(() => setPick(null), [coin, chosen.join(','), prefs.res, wkey, prefs.view, levKey]);
-  // The price window the live or chart view shows (it reports it): what exact steps are read for.
+  // The price window the view shows (it reports it): what exact steps are read for; and the
+  // historical view's time window (which snapshots' fine layers).
   const [win, setWin] = useState<[number, number] | null>(null);
-  useEffect(() => setWin(null), [coin, prefs.view]);
+  const [times, setTimes] = useState<[number, number] | null>(null);
+  useEffect(() => { setWin(null); setTimes(null); }, [coin, prefs.view]);
   const onWindow = useCallback((lo: number, hi: number) => setWin((w) => (w && w[0] === lo && w[1] === hi ? w : [lo, hi])), []);
-  /** The historical view's newest snapshot: its width and price (the resolution's note there). */
-  const [histAt, setHistAt] = useState<{ st: number; p: number } | null>(null);
+  const onTimes = useCallback((a: number, b: number) => setTimes((w) => (w && w[0] === a && w[1] === b ? w : [a, b])), []);
   const { symbols } = useSymbols('perps');
 
   const vkey = chosen.join(',');
+  // The historical view's snapshots (30 days), and its newest: width and price (the resolution's ladder and notes there).
+  const histOn = prefs.view === 'history';
+  const hist = usePolled<LiqHistory>(
+    histOn ? `${coin}|${vkey}|30d|${wkey}` : null,
+    (s) => vsApi.liquidationHistory(coin, chosen, '30d', s, wallets),
+    5 * 60_000,
+  );
+  const coarsePts = histOn && hist.data?.coin === coin ? hist.data.points : EMPTY_POINTS;
+  const newest = coarsePts.at(-1);
+  const histAt = newest ? { st: newest.st, p: newest.p } : null;
   // The historical view reads the levels now only for its strip.
   const strip = prefs.view === 'history' && prefs.strip === true;
   const needNow = prefs.view !== 'history' || strip;
@@ -295,17 +306,78 @@ export function LiqHeatmap({ symbol, engine, instance, address = null }: { symbo
   const barWidth = barStep ?? (h?.price && rawStep > 0 ? rawStep * want : null);
   // Zoomed out past the cap at the step picked: drawn coarser (the stream, or the fine route at a round width), and said.
   const coarser = picked !== null && barStep !== null && barStep > picked * (1 + 1e-9);
+  // The chart view's profile: the bars at the step drawn, the curves from the fine answer when it holds the price.
+  const chartH = prefs.view === 'chart' && h?.price && h.buckets.length ? h : null;
+  const group = Math.max(1, Math.round(want / streamK));
+  const fineOn = !!fineAsk;
+  const profile = useMemo(() => (chartH ? profileOf(fineOn && fine ? fine : regroup(chartH, group), cumSrc(chartH, fineOn ? fine : null), unit, colorBy) : null), [chartH, fineOn, fine, group, unit, colorBy]);
+
+  // Historical at a step finer than its snapshots keep (BTC $10, $1): their fine layers for the
+  // price and time windows on screen (server liqRead.ts liqHistoryFine), merged into the snapshots
+  // they belong to (liqHeatIndicator.ts cellsOf). Every wallet only: the layers keep no addresses.
+  const finer = histOn && picked !== null && histAt !== null && picked < histAt.st * (1 - 1e-9);
+  let histAsk: { step: number; from: number; to: number; t0: number; t1: number } | null = null;
+  if (finer && !wallets.length && win && times) {
+    const fw = fineWindow(win[0], win[1], picked!);
+    if (fw.step < histAt!.st * (1 - 1e-9)) {
+      // The time window and half of it either side, on a grid of a quarter of it (viewers share answers, perf.ts).
+      const span = Math.max(times[1] - times[0], 15 * 60_000);
+      const g = Math.max(15 * 60_000, niceUp(span / 4));
+      histAsk = { ...fw, t0: Math.floor((times[0] - span / 2) / g) * g, t1: Math.ceil((times[1] + span / 2) / g) * g };
+    }
+  }
+  const histFineKey = histAsk ? `${coin}|${vkey}|${histAsk.step}|${histAsk.from}|${histAsk.to}|${histAsk.t0}|${histAsk.t1}` : null;
+  const hf = usePolled<LiqHistoryFine>(histFineKey, (s) => vsApi.liquidationHistoryFine(coin, chosen, histAsk!, s), 5 * 60_000);
+  // An answer of the step asked (a window panned past stays drawn until the next one is read).
+  const histFine = histAsk && hf.data && hf.data.coin === coin && hf.data.venues.join(',') === vkey && Math.abs(hf.data.step / histAsk.step - 1) < 1e-9 ? hf.data : null;
+  // Only into a snapshot the history holds: a fine part newer than its answer (both are read every 5 minutes) waits for it.
+  const { points, finePts } = useMemo(() => {
+    if (!histFine?.points.length) return { points: coarsePts, finePts: null };
+    const by = new Map(histFine.points.map((q) => [q.t, q]));
+    const used: HeatPoint[] = [];
+    const out = coarsePts.map((q): HeatPoint => {
+      const f = by.get(q.t);
+      if (!f) return q;
+      used.push({ t: q.t, p: q.p, st: f.st, b: f.b });
+      return { ...q, f: { st: f.st, lo: f.lo, hi: f.hi, b: f.b } };
+    });
+    return { points: out, finePts: used.length ? used : null };
+  }, [coarsePts, histFine]);
+  // The colours per the step drawn: a $1 cell is full at what $1 cells hold, a $100 cell around it reads as a hundred of them.
+  const heatSc = useMemo(() => heatScale(finePts ?? coarsePts, side, lev), [finePts, coarsePts, side, levKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  const refSt = finePts ? histFine!.step : null;
+  let histNote: string | null = null;
+  if (finer) {
+    const own = stepLabel(histAt!.st);
+    const layer = FINE_LAYERS.find((L) => histAt!.st / L.div <= picked! * (1 + 1e-9));
+    const reach = layer ? `±${fmtFixed(((layer.half * histAt!.st) / layer.div / histAt!.p) * 100, 1)}%` : null;
+    histNote = wallets.length ? `With wallets picked, Historical draws ${own} cells: its finer steps are of every wallet.`
+      : histAsk && histAsk.step > picked! * (1 + 1e-9) ? `${stepLabel(histAsk.step)} at this zoom: zoom in to under ${stepLabel((picked! * FINE_MAX_BUCKETS) / 3)} of price for ${stepLabel(picked!)}.`
+        : histAsk && !histFine ? `Reading ${stepLabel(histAsk.step)} cells…`
+          : histFine && histFine.since === null ? `${stepLabel(histFine.step)} cells are kept from now on, a snapshot every 15 minutes; until then ${own}.`
+            : histFine?.cut ? `${stepLabel(histFine.step)} cells from ${whenFmt(histFine.cut)} at this zoom (zoom in for more); before that ${own}.`
+              : histFine?.since && times && histFine.since > times[0] ? `${stepLabel(histFine.step)} cells from ${whenFmt(histFine.since)}; before that ${own}.`
+                : histFine && reach ? `${stepLabel(histFine.step)} cells within ${reach} of the price then; further out ${own}.` : null;
+  }
   const steps: StepsView | null = ladder.length ? {
     value: level === 'auto' ? 'auto' : String(Math.min(level, ladder.length - 1)),
     options: [['auto', 'Auto'], ...ladder.map((x, i): [string, string] => [String(i), stepLabel(x)])],
     initial: String(initial),
     note: picked === null ? null
-      : prefs.view === 'history' ? (histAt && picked < histAt.st * (1 - 1e-9) ? `Historical draws ${stepLabel(histAt.st)} cells, the step its snapshots keep; finer steps show in Live and Chart.` : null)
+      : prefs.view === 'history' ? histNote
         : coarser ? `${stepLabel(barStep!)} at this zoom: zoom in to under ${stepLabel((picked * FINE_MAX_BUCKETS) / 3)} of price for ${stepLabel(picked)}.` : null,
   } : null;
   const zoomIn = coarser ? ` (zoom in for ${stepLabel(picked!)})` : '';
   const fineNote = fineAsk ? `${stepLabel(fineAsk.step)} steps, exact from the books, read every ${FINE_POLL_MS / 1000} s${zoomIn}${fine ? '' : ' · reading…'}`
     : coarser ? `${stepLabel(barStep!)} steps at this zoom${zoomIn}` : null;
+  // What the live and chart views say instead of levels; and the historical view, instead of snapshots.
+  const nowEmpty = !h ? (heat.error ? `Liquidation levels unavailable: ${heat.error}` : 'Reading the books…')
+    : !h.price || !h.buckets.length ? `${wallets.length ? (wallets.length === 1 ? 'This wallet holds' : 'These wallets hold') + ` no ${coin} position with a liquidation price` : `No tracked ${coin} positions with a liquidation price`} on ${chosen.length === SCAN_VENUES.length ? 'any platform' : chosen.map((v) => VENUE_LABEL[v]).join(', ')}.`
+      : null;
+  const histEmpty = hist.error && !hist.data ? `History unavailable: ${hist.error}`
+    : !hist.data || hist.data.coin !== coin ? 'Reading the snapshots…'
+      : !coarsePts.length ? (wallets.length ? `No snapshots of ${coin} for ${wallets.length === 1 ? 'this wallet' : 'these wallets'} in this range: every position's level is kept from 28 Oct 2026, 15-minutely for 3 days and hourly to 30.` : `No snapshots of ${coin} yet: the index keeps every coin SoDEX lists, a snapshot every 15 minutes.`)
+        : null;
   const change = (p: ViewChange) => {
     const { step, ...rest } = p;
     if (step === undefined) { set(rest); return; }
@@ -324,11 +396,6 @@ export function LiqHeatmap({ symbol, engine, instance, address = null }: { symbo
         </div>
         <span className="lqm-coin" title="The market on screen">{coin}</span>
         <span className="lqm-grow" />
-        {prefs.view === 'chart' && (
-          <div className="lqm-seg" aria-label="Timeframe">
-            {TFS.map((t) => <button key={t} type="button" aria-pressed={prefs.tf === t} className={prefs.tf === t ? 'is-on' : ''} onClick={() => set({ tf: t })}>{t}</button>)}
-          </div>
-        )}
         <PlatformSelect options={SCAN_VENUES} value={chosen} onChange={(v) => set({ venues: v })} align="end" />
         <WalletView
           wallets={wallets}
@@ -354,16 +421,29 @@ export function LiqHeatmap({ symbol, engine, instance, address = null }: { symbo
         </div>
       )}
       <div className="lqm-body">
-        {prefs.view === 'history' ? (
-          <HistoryView coin={coin} venues={chosen} engine={engine} symbol={symbol} wallets={wallets} side={side} colorBy={colorBy} lev={lev} strip={stripData} onPick={setPick} onNewest={setHistAt} />
-        ) : !h ? (
-          <p className="lqm-empty">{heat.error ? `Liquidation levels unavailable: ${heat.error}` : 'Reading the books…'}</p>
-        ) : !h.price || !h.buckets.length ? (
-          <p className="lqm-empty">{wallets.length ? (wallets.length === 1 ? 'This wallet holds' : 'These wallets hold') + ` no ${coin} position with a liquidation price` : `No tracked ${coin} positions with a liquidation price`} on {chosen.length === SCAN_VENUES.length ? 'any platform' : chosen.map((v) => VENUE_LABEL[v]).join(', ')}.</p>
-        ) : prefs.view === 'live' ? (
-          <LiveView h={h} fine={fineAsk ? fine : null} onWindow={onWindow} unit={unit} want={want} streamK={streamK} colorBy={colorBy} lev={lev} onPick={setPick} pick={pick} />
+        {prefs.view !== 'live' ? (
+          // One chart for Chart and Historical: switching keeps its timeframe, zoom and scale.
+          <ChartPanel
+            engine={engine}
+            symbol={symbol}
+            points={histOn ? points : EMPTY_POINTS}
+            scale={histOn ? heatSc : 1}
+            refSt={histOn ? refSt : null}
+            side={side}
+            colorBy={colorBy}
+            lev={lev}
+            strip={histOn ? stripData : profile}
+            profile={!histOn}
+            fmt={histOn ? fmtUsdShort : (v) => fmtVal(v, unit, coin)}
+            note={histOn ? histEmpty ?? histNote : profile ? null : nowEmpty}
+            onWindow={onWindow}
+            onTimes={onTimes}
+            onPick={setPick}
+          />
+        ) : nowEmpty ? (
+          <p className="lqm-empty">{nowEmpty}</p>
         ) : (
-          <ChartView h={h} fine={fineAsk ? fine : null} onWindow={onWindow} unit={unit} want={want} streamK={streamK} colorBy={colorBy} lev={lev} engine={engine} symbol={symbol} tf={prefs.tf} onPick={setPick} pick={pick} />
+          <LiveView h={h!} fine={fineAsk ? fine : null} onWindow={onWindow} unit={unit} want={want} streamK={streamK} colorBy={colorBy} lev={lev} onPick={setPick} pick={pick} />
         )}
         {/* The wallets now: a bar of the live and chart views, or of the historical view's strip. */}
         {pick && pick.at === undefined && h && <Details coin={coin} venues={chosen} pick={pick} price={h.price} wallets={wallets} lev={lev} onClose={() => setPick(null)} />}
@@ -659,263 +739,54 @@ function LiveView({ h: base, fine, onWindow, unit, want, streamK, colorBy, lev, 
   );
 }
 
-// --- chart --------------------------------------------------------------------------------
-
-const TF_POLL: Record<Tf, number> = { '1m': 10_000, '5m': 20_000, '15m': 30_000, '1h': 60_000, '4h': 60_000, '1D': 120_000 };
-const CANDLES = 500;
-/** Where the chart view starts: four empty slots right of the newest candle. */
-const CHART_BACK = -4;
-
-/** Wheel zooms time, wheel on the price scale (or Shift+wheel) zooms price, drag pans; a double-click resets. */
-function ChartView({ h: base, fine, onWindow, unit, want, streamK, colorBy, lev, engine, symbol, tf, onPick, pick }: { h: Heat; fine: Heat | null; onWindow: (lo: number, hi: number) => void; unit: Unit; want: number; streamK: number; colorBy: ColorBy; lev: LevFilter; engine: Engine; symbol: string; tf: Tf; onPick: (p: Pick) => void; pick: Pick | null }) {
-  const [el, setEl] = useState<HTMLDivElement | null>(null);
-  const [ref, { w, h: ht }] = useSize<HTMLDivElement>();
-  const bind = useCallback((x: HTMLDivElement | null) => { ref(x); setEl(x); }, [ref]);
-  const [hover, setHover] = useState<number | null>(null);
-  const k = usePolled<Kline[]>(`${engine}|${symbol}|${tf}`, () => api.klines(engine, symbol, tf, CANDLES).then((r) => r.klines), TF_POLL[tf]);
-  const candles = useMemo(() => (k.data ?? []).map((c) => ({ t: c.t, o: +c.o, h: +c.h, l: +c.l, c: +c.c })).filter((c) => c.h > 0).sort((a, b) => a.t - b.t), [k.data]);
-  const cum = useMemo(() => cumulative(cumSrc(base, fine), unit), [base, fine, unit]);
-  /**
-   * Candle slots shown, and how many slots back from the newest the view ends: below zero the
-   * view runs past the newest candle into empty slots, as far as most of the width - room on the
-   * right to see the levels next to the price; dragging moves it either way.
-   */
-  const [span, setSpan] = useState(120);
-  const [back, setBack] = useState(CHART_BACK);
-  /** The price axis: null follows the candles shown. */
-  const [yv, setYv] = useState<[number, number] | null>(null);
-  const [profMax, setProfMax] = useState<number | null>(null);
-  useEffect(() => { setYv(null); setBack(CHART_BACK); setProfMax(null); }, [base.coin, tf]);
-  const p = base.price!;
-  const R = Math.min(240, Math.max(130, w * 0.28));
-  const ML = 8;
-  const MR = 62;
-  const W = Math.max(1, w - ML - MR);
-  const H = Math.max(1, ht - M.t - M.b);
-  /** Where the profile's hover and click begin: its bars grow left from the price axis over the last R pixels. */
-  const cw = Math.max(1, W - R);
-  const n = candles.length;
-  const nShow = Math.max(10, Math.min(Math.max(10, n), Math.round(span)));
-  // The window in candle slots, [start, end): end past n is empty slots after the newest candle. The
-  // candles run the whole width up to the price axis, over the profile, wherever the view is moved.
-  const end = n - back;
-  const start = end - nShow;
-  const first = Math.max(0, Math.floor(start));
-  const vis = candles.slice(first, Math.max(first, Math.min(n, Math.ceil(end))));
-  const slot = W / nShow;
-  /** The middle of candle slot `i` (an index into `candles`). */
-  const xAt = (i: number) => ML + slot * (i - start + 0.5);
-  const panBack = (b: number) => Math.max(-Math.floor(nShow * 0.85), Math.min(Math.max(0, n - 10), b));
-  // The price axis by default: the candles shown with room either side (12% of the price), so the levels near the price show.
-  let aLo = p * 0.88;
-  let aHi = p * 1.12;
-  for (const c of vis) { aLo = Math.min(aLo, c.l); aHi = Math.max(aHi, c.h); }
-  const padY = (aHi - aLo) * 0.08;
-  const [lo, hi] = yv ?? [aLo - padY, aHi + padY];
-  const y = (v: number) => M.t + H - ((v - lo) / (hi - lo)) * H;
-  const priceAt = (py: number) => lo + ((M.t + H - py) / H) * (hi - lo);
-  const group = Math.max(1, Math.round(want / streamK));
-  const h = useMemo(() => fine ?? regroup(base, group), [fine, base, group]);
-  useEffect(() => onWindow(lo, hi), [lo, hi, onWindow]);
-  const shown = h.buckets.filter((b) => b[0] + h.step > lo && b[0] < hi);
-  const { fit: fitBar } = barScale(shown, unit, colorBy);
-  const maxBar = profMax ?? fitBar;
-  const fitCum = Math.max(1e-12, ...[...cum.long, ...cum.short].filter(([v]) => v >= lo && v <= hi).map(([, v]) => v));
-  const x0 = ML + W; // the bars grow left from the price axis
-  const bx = (v: number) => Math.min(1, v / maxBar) * (R - 8);
-  const cx = (v: number) => x0 - Math.min(1, v / fitCum) * (R - 8);
-  const ph = (h.step / (hi - lo)) * H;
-  const bh = Math.max(1, ph > 4 ? ph - 0.5 : ph);
-  const area = (pts: Array<[number, number]>) => {
-    const inWin = pts.filter(([v]) => v >= lo - h.step && v <= hi + h.step);
-    if (!inWin.length) return null;
-    let d = `M${x0},${y(p)}`;
-    for (const [v, c] of inWin) d += ` V${y(v)} H${cx(c)}`;
-    const line = d;
-    return { line, fill: `${d} V${y(inWin.at(-1)![0])} H${x0} Z` };
-  };
-  const longA = area(cum.long);
-  const shortA = area(cum.short);
-  const ys = ticks(lo, hi, Math.max(2, Math.floor(H / 45)));
-  const fmtT = (t: number) => {
-    const d = new Date(t);
-    return tf === '1D' ? d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
-  };
-  const zoomY = (f: number, at = (lo + hi) / 2) => setYv(zoomAt([lo, hi], at, f));
-  const zoomT = (f: number) => setSpan((s) => Math.max(10, Math.min(Math.max(10, n), s * f)));
-  useWheel(el, (e) => {
-    const r = el!.getBoundingClientRect();
-    const px = e.clientX - r.left;
-    const py = e.clientY - r.top;
-    const f = wheelFactor(e);
-    if (px > ML + W || e.shiftKey) zoomY(f, priceAt(py));
-    else zoomT(f);
-  });
-  const drag = useDrag((dx, dy, start) => {
-    setHover(null);
-    if (start.x > ML + W) { zoomY(Math.exp(dy / 150)); return; }
-    setBack((b) => panBack(b + dx / slot));
-    const d = (dy / H) * (hi - lo);
-    setYv([lo + d, hi + d]);
-  }, (px, py) => {
-    if (px < ML + cw - 4 || px > ML + W || py < M.t || py > M.t + H) return;
-    const { from, b } = nearestBucket(h, shown, priceAt(py), (8 / H) * (hi - lo));
-    setHover(from);
-    onPick({ from, to: from + h.step, side: sideOf(b, from, h.step, p) });
-  });
-  const move = (e: ReactPointerEvent<HTMLDivElement>) => {
-    if (drag.onPointerMoveDrag(e)) return;
-    const r = e.currentTarget.getBoundingClientRect();
-    const py = e.clientY - r.top;
-    const px = e.clientX - r.left;
-    if (px < ML + cw - 4 || px > ML + W || py < M.t || py > M.t + H) { setHover(null); return; }
-    setHover(Math.floor(priceAt(py) / h.step) * h.step);
-  };
-  const reset = () => { setYv(null); setBack(CHART_BACK); setSpan(120); setProfMax(null); };
-  const hb = hover !== null ? h.buckets.find((b) => Math.abs(b[0] - hover) < h.step / 2) ?? null : null;
-  return (
-    <div
-      ref={bind}
-      className={`lqm-plot is-chart${drag.dragging() ? ' is-drag' : ''}`}
-      onPointerDown={drag.onPointerDown}
-      onPointerMove={move}
-      onPointerUp={drag.onPointerUp}
-      onPointerLeave={() => setHover(null)}
-      onDoubleClick={reset}
-    >
-      {w > 0 && (
-        <svg width={w} height={ht} role="img" aria-label={`${h.coin} candles with liquidation levels`}>
-          <defs><clipPath id="lqm-clip-chart"><rect x={ML} y={M.t} width={W} height={H} /></clipPath></defs>
-          {ys.map((v) => (
-            <g key={v}>
-              <line x1={ML} x2={ML + W} y1={y(v)} y2={y(v)} className="lqm-grid" />
-              <text x={ML + W + 6} y={y(v) + 3} className="lqm-ax">{fmtPx(v)}</text>
-            </g>
-          ))}
-          <rect x={ML + W} y={M.t} width={MR} height={H} className="lqm-axis-hit is-y" />
-          <g clipPath="url(#lqm-clip-chart)">
-            {/* The profile first, the candles over it. */}
-            {shortA && <path d={shortA.fill} className="lqm-area is-short" />}
-            {longA && <path d={longA.fill} className="lqm-area is-long" />}
-            {shown.map((b) => {
-              const [l, s] = valOf(b, unit);
-              const on = pick && Math.abs(pick.from - b[0]) < h.step / 2;
-              const yy = y(b[0] + h.step);
-              const over = barOf(b, unit, colorBy) > maxBar;
-              if (colorBy === 'lev') {
-                // Both sides stacked by band, growing left from the price axis: low, mid, high, unknown.
-                const v = bandsOf(b, unit);
-                const sum = v[0] + v[1] + v[2] + v[3] || l + s;
-                const full = bx(l + s);
-                let xr = x0;
-                return (
-                  <g key={b[0]} className={on ? 'is-picked' : ''}>
-                    {LEV_KEYS.map((k, i) => {
-                      const ww = (v[i]! / sum) * full;
-                      if (!(ww > 0)) return null;
-                      xr -= ww;
-                      return <rect key={k} x={xr} y={yy} width={ww} height={bh} className={`lqm-bar-lev is-${k}`} />;
-                    })}
-                    {over && <rect x={x0 - full} y={yy} width={2} height={bh} className="lqm-bar-over" />}
-                  </g>
-                );
-              }
-              return (
-                <g key={b[0]} className={on ? 'is-picked' : ''}>
-                  {l > 0 && <rect x={x0 - bx(l)} y={yy} width={bx(l)} height={bh} className="lqm-bar-long" />}
-                  {s > 0 && <rect x={x0 - bx(s)} y={yy} width={bx(s)} height={bh} className="lqm-bar-short" />}
-                  {over && <rect x={x0 - (R - 8)} y={yy} width={2} height={bh} className="lqm-bar-over" />}
-                </g>
-              );
-            })}
-            {shortA && <path d={shortA.line} className="lqm-cum is-short" />}
-            {longA && <path d={longA.line} className="lqm-cum is-long" />}
-            {vis.map((c, i) => {
-              const xc = xAt(first + i);
-              const up = c.c >= c.o;
-              return (
-                <g key={c.t} className={up ? 'lqm-up' : 'lqm-down'}>
-                  <line x1={xc} x2={xc} y1={y(c.h)} y2={y(c.l)} />
-                  <rect x={xc - Math.max(0.5, slot * 0.35)} width={Math.max(1, slot * 0.7)} y={y(Math.max(c.o, c.c))} height={Math.max(1, Math.abs(y(c.o) - y(c.c)))} />
-                </g>
-              );
-            })}
-            <line x1={ML} x2={ML + W} y1={y(p)} y2={y(p)} className="lqm-now" />
-            {hover !== null && <rect x={ML} y={y(hover + h.step)} width={W} height={Math.max(2, bh)} className="lqm-hover" />}
-          </g>
-          {vis.length > 0 && ticks(0, vis.length - 1, Math.max(2, Math.floor((slot * vis.length) / 90))).map((i) => {
-            const c = vis[Math.round(i)];
-            return c ? <text key={`t${i}`} x={xAt(first + Math.round(i))} y={M.t + H + 16} className="lqm-ax" textAnchor="middle">{fmtT(c.t)}</text> : null;
-          })}
-          {p >= lo && p <= hi && (
-            <g transform={`translate(${ML + W + 2},${y(p) - 9})`}>
-              <rect width={MR - 4} height={18} rx={3} className="lqm-now-tag is-solid" />
-              <text x={(MR - 4) / 2} y={13} textAnchor="middle" className="lqm-now-text">{fmtPx(p)}</text>
-            </g>
-          )}
-          {!n && <text x={ML + W / 2} y={M.t + H / 2} textAnchor="middle" className="lqm-ax">{k.error ? 'No candles for this market' : 'Loading candles…'}</text>}
-        </svg>
-      )}
-      {hover !== null && !drag.dragging() && (
-        <div className="lqm-tip" style={{ right: R + MR, top: Math.min(ht - 120, Math.max(0, y(hover) - 20)) }}>
-          <b>{fmtPx(hover)} – {fmtPx(hover + h.step)}</b>
-          <span>{pct(hover / p - 1)} from current</span>
-          {hb ? (
-            <>
-              {hb[1] > 0 && <span className="is-long">Longs {fmtVal(valOf(hb, unit)[0], unit, h.coin)}{countText(hb[5], lev, '')}</span>}
-              {hb[2] > 0 && <span className="is-short">Shorts {fmtVal(valOf(hb, unit)[1], unit, h.coin)}{countText(hb[6], lev, '')}</span>}
-              <BandLines v={bandsOf(hb, unit)} fmt={(x) => fmtVal(x, unit, h.coin)} over={barOf(hb, unit, colorBy) > maxBar} lev={lev} />
-            </>
-          ) : <span>No liquidations here</span>}
-          <span className="lqm-tip-sub">Click for the wallets</span>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// --- history ------------------------------------------------------------------------------
+// --- chart and history: the app's own chart ----------------------------------------------------
 
 /**
- * The historical view: the app's own chart (Chart.tsx, `bare`) with the levels over time
- * drawn on its candle pane (chart/liqHeatIndicator.ts). Every control is the chart's -
- * timeframes, scroll and zoom, auto / log / percentage scale, the clock (UTC or local) -
- * and the cells follow them, as nothing else on it: no drawings, studies or order lines.
- * The snapshots are 15-minutely for 3 days and hourly to 30: a shorter bar repeats the
- * snapshot in force when it closed. A click on a cell opens who sat in it then (AtDetails).
+ * The chart and historical views: the app's own chart (Chart.tsx, `bare`) with the levels drawn on
+ * its candle pane (chart/liqHeatIndicator.ts). Every control is the chart's - timeframes, wheel
+ * zoom and drag with the price axis following, auto / log / percentage scale, the clock (UTC or
+ * local) - exactly as on the trade page's chart, and the levels follow them (owner 2026-11-01:
+ * "scrolling in out in chart & historical is different than normal chart ... we dont have % A L
+ * switches & utc time"; the chart view drew its own SVG until then). No drawings, studies or
+ * order lines.
  *
- * The price axis takes in each bar's levels as the live view's window does (owner
- * 2026-10-31: "Historical shows liquidations but not as far up and down as the live one"):
- * the layer hands the chart each bar's window to fit (`fit`), so the candles and the cells
- * stay on the one axis and the chart's own zoom and pan work as before. `strip`: the levels
- * now laid over the right edge on that axis; a click there opens the wallets now (Details).
+ *   chart     the levels now as a profile growing left from the price axis, with the cumulative
+ *             curves (`strip` drawn as the `profile`), at the resolution picked.
+ *   history   the levels over time as cells behind the candles (`points`): the indexer's
+ *             snapshots, 15-minutely for 3 days and hourly to 30 - a shorter bar repeats the
+ *             snapshot in force at its close - with their fine layers where a finer step is
+ *             picked (cellsOf). `strip`: the levels now over the right edge, on the same axis.
+ *
+ * One chart for both: switching view keeps its timeframe, zoom and scale. It reports the price
+ * window on screen (`onWindow`: what exact steps are read for) and the time window (`onTimes`:
+ * which snapshots' fine layers). A click on a cell opens who sat in it then (AtDetails); on the
+ * strip or the profile, the wallets now (Details).
  */
-function HistoryView({ coin, venues, engine, symbol, wallets, side, colorBy, lev, strip, onPick, onNewest }: {
-  coin: string; venues: Venue[]; engine: Engine; symbol: string; wallets: string[]; side: Side;
-  colorBy: ColorBy; lev: LevFilter; strip: LiqMapData | null; onPick: (p: Pick) => void;
-  /** The newest snapshot's width and price (null: none): the resolution's note. */
-  onNewest: (x: { st: number; p: number } | null) => void;
+function ChartPanel({ engine, symbol, points, scale, refSt, side, colorBy, lev, strip, profile, fmt, note, onWindow, onTimes, onPick }: {
+  engine: Engine; symbol: string;
+  /** The snapshots drawn (none in the chart view), the notional a cell is full at, and the width that is of (null: the newest snapshot's). */
+  points: HeatPoint[]; scale: number; refSt: number | null;
+  side: Side; colorBy: ColorBy; lev: LevFilter;
+  strip: LiqMapData | null;
+  /** The strip as the chart view's profile (wider, with the cumulative curves). */
+  profile: boolean;
+  /** A figure of the strip in the unit shown. */
+  fmt: (v: number) => string;
+  note: string | null;
+  onWindow: (lo: number, hi: number) => void;
+  onTimes: (t0: number, t1: number) => void;
+  onPick: (p: Pick) => void;
 }) {
-  const wkey = wallets.join(',');
   const levKey = lev.join(',');
-  const r = usePolled<LiqHistory>(
-    `${coin}|${venues.join(',')}|30d|${wkey}`,
-    (s) => vsApi.liquidationHistory(coin, venues, '30d', s, wallets),
-    5 * 60_000,
-  );
   const [kc, setKc] = useState<KChart | null>(null);
-  const points = r.data?.points ?? EMPTY_POINTS;
-  // The cells, their scale and the axis windows change with the snapshots, the side and the
-  // bands; the strip with the levels now (a second apart), which only redraws. `rev` tells the
-  // chart to work the windows out again (an extendData change alone only redraws).
-  const scale = useMemo(() => heatScale(points, side, lev), [points, side, levKey]); // eslint-disable-line react-hooks/exhaustive-deps
-  const newest = points.at(-1);
-  useEffect(() => onNewest(newest ? { st: newest.st, p: newest.p } : null), [newest?.st, newest?.p, onNewest]); // eslint-disable-line react-hooks/exhaustive-deps
+  // The cells, their scale and the strip change with the snapshots, the side and the bands; the
+  // strip with the levels now (a second apart), which only redraws. `rev` tells the chart to work
+  // the bars out again (an extendData change alone only redraws).
   const rev = useMemo(() => ++calcRev, [points, side, levKey]); // eslint-disable-line react-hooks/exhaustive-deps
   // The axis fits the candles (fit off): fitted to every bar's levels as well, the candles lay flat in a
   // tenth of the pane (owner 2026-10-31). The snapshots hold the levels 0.2x-3x the price, so zooming the
   // price axis out shows all of them - none is cut off.
-  const data = useMemo<HeatData>(() => ({ points, side, lev, colorBy, scale, fit: false, strip }), [points, side, levKey, colorBy, scale, strip]); // eslint-disable-line react-hooks/exhaustive-deps
+  const data = useMemo<HeatData>(() => ({ points, side, lev, colorBy, scale, fit: false, strip, ref: refSt, profile }), [points, side, levKey, colorBy, scale, strip, refSt, profile]); // eslint-disable-line react-hooks/exhaustive-deps
   const dataRef = useRef({ data, rev });
   dataRef.current = { data, rev };
   // The layer on each chart instance the chart makes (it makes a new one on a rebuild).
@@ -936,11 +807,33 @@ function HistoryView({ coin, venues, engine, symbol, wallets, side, colorBy, lev
   useEffect(() => {
     kc?.overrideIndicator({ name: LIQ_HEAT, paneId: CANDLE_PANE_ID, extendData: boxed(data), calcParams: [rev] });
   }, [kc, data, rev]);
-  const note = r.error && !r.data ? `History unavailable: ${r.error}`
-    : !r.data ? 'Reading the snapshots…'
-      : !points.length ? (wallets.length ? `No snapshots of ${coin} for ${wallets.length === 1 ? 'this wallet' : 'these wallets'} in this range: every position's level is kept from 28 Oct 2026, 15-minutely for 3 days and hourly to 30.` : `No snapshots of ${coin} yet: the index keeps every coin SoDEX lists, a snapshot every 15 minutes.`)
-        : null;
+  // The price and time windows on screen, read off the chart's own axes a few times a second: a
+  // wheel, a drag, a scale switch or a new bar all move them, and none of them tells.
+  const report = useRef({ onWindow, onTimes });
+  report.current = { onWindow, onTimes };
+  useEffect(() => {
+    if (!kc) return;
+    const read = () => {
+      const pane = kc.getSize(CANDLE_PANE_ID);
+      if (!pane || !(pane.height > 0)) return;
+      const [top, bot] = kc.convertFromPixel([{ x: 0, y: 0 }, { x: 0, y: pane.height }], { paneId: CANDLE_PANE_ID }) as Array<{ value?: number }>;
+      const hi = top?.value;
+      const lo = bot?.value;
+      if (lo !== undefined && hi !== undefined && Number.isFinite(lo) && Number.isFinite(hi) && hi > lo) report.current.onWindow(Math.max(0, lo), hi);
+      const list = kc.getDataList();
+      if (list.length) {
+        const r = kc.getVisibleRange();
+        const a = list[Math.max(0, Math.min(list.length - 1, Math.floor(r.realFrom)))]!.timestamp;
+        const b = list[Math.max(0, Math.min(list.length - 1, Math.ceil(r.realTo) - 1))]!.timestamp + barMsOf(list);
+        report.current.onTimes(a, b);
+      }
+    };
+    read();
+    const t = window.setInterval(read, 400);
+    return () => window.clearInterval(t);
+  }, [kc]);
   const wrap = useRef<HTMLDivElement>(null);
+  const stripW = profile ? profileWidth : stripWidth;
   /** What is under the pointer: a cell of the snapshot in force at that bar, or a bar of the strip of the levels now. */
   const spotAt = (clientX: number, clientY: number): Spot | null => {
     if (!kc || !wrap.current) return null;
@@ -956,7 +849,7 @@ function HistoryView({ coin, venues, engine, symbol, wallets, side, colorBy, lev
     if (price === undefined || !Number.isFinite(price)) return null;
     const box = wrap.current.getBoundingClientRect();
     const at = { x: clientX - box.left, y: clientY - box.top, price };
-    if (strip && x - pane.left >= pane.width - stripWidth(pane.width) - 6) {
+    if (strip && x - pane.left >= pane.width - stripW(pane.width) - 6) {
       const lo = Math.floor(price / strip.step + 1e-9) * strip.step;
       const k = strip.rows.findIndex((row) => Math.abs(row[0] - lo) < strip.step / 2);
       return { ...at, kind: 'now', lo, step: strip.step, p: strip.price, l: k >= 0 ? strip.rows[k]![1] : 0, s: k >= 0 ? strip.rows[k]![2] : 0, bands: (k >= 0 ? strip.bands?.[k] : null) ?? ZERO };
@@ -968,11 +861,12 @@ function HistoryView({ coin, venues, engine, symbol, wallets, side, colorBy, lev
     const i = snapshotFor(points.map((q) => q.t), bar.timestamp, barMsOf(list));
     const snap = i >= 0 ? points[i]! : null;
     if (!snap) return null;
-    const bi = Math.floor(price / snap.st);
-    const cell = snap.b.find((row) => row[0] === bi);
-    const l = cell && side !== 'short' ? cellOf(cell, 'long', lev).v : 0;
-    const s = cell && side !== 'long' ? cellOf(cell, 'short', lev).v : 0;
-    return { ...at, kind: 'then', lo: bi * snap.st, step: snap.st, p: snap.p, t: snap.t, l, s, bands: cell ? cellOf(cell, side, lev).bands : ZERO };
+    const cell = cellAt(snap, price);
+    const st = cell ? cell.st : snap.st;
+    const lo = cell ? cell.lo : Math.floor(price / st) * st;
+    const l = cell && side !== 'short' ? cellOf(cell.r, 'long', lev).v : 0;
+    const s = cell && side !== 'long' ? cellOf(cell.r, 'short', lev).v : 0;
+    return { ...at, kind: 'then', lo, step: st, p: snap.p, t: snap.t, l, s, bands: cell ? cellOf(cell.r, side, lev).bands : ZERO };
   };
   // A click (not a drag) on a cell: that bar's snapshot and the cell of it under the pointer - the
   // positions in it, as they stood then, open beside the chart (AtDetails); on the strip, the wallets now.
@@ -993,6 +887,8 @@ function HistoryView({ coin, venues, engine, symbol, wallets, side, colorBy, lev
   };
   useEffect(() => () => cancelAnimationFrame(frame.current), []);
   const box = wrap.current?.getBoundingClientRect();
+  const over = (sp: Spot) => sp.kind === 'then' && (sp.l + sp.s) * stepNorm({ st: sp.step } as HeatPoint, refSt ?? refStep(points)) > scale;
+  const fmtTip = (v: number) => (tip?.kind === 'now' ? fmt(v) : fmtUsdShort(v));
   return (
     <div
       ref={wrap}
@@ -1007,32 +903,49 @@ function HistoryView({ coin, venues, engine, symbol, wallets, side, colorBy, lev
       onPointerLeave={() => { cancelAnimationFrame(frame.current); setTip(null); }}
     >
       <Chart engine={engine} symbol={symbol} bare onChartReady={setKc} />
-      <div className="lqm-hist2-key" onPointerDown={(e) => e.stopPropagation()}>
-        <span className="lqm-hist-scale" title={colorBy === 'lev' ? 'Liquidation notional per cell (USD at the liquidation price): the stronger, the more; the colour is its mix of leverage' : 'Liquidation notional per cell (USD at the liquidation price): low to high'}>
-          <span>{fmtUsdShort(scale * HEAT_FLOOR)}</span>
-          <i aria-hidden="true" className={colorBy === 'lev' ? 'is-lev' : ''} />
-          <span>{fmtUsdShort(scale)}+</span>
-        </span>
-        {note && <span className="lqm-hist2-note">{note}</span>}
-      </div>
+      {(!profile || note) && (
+        <div className="lqm-hist2-key" onPointerDown={(e) => e.stopPropagation()}>
+          {!profile && (
+            <span className="lqm-hist-scale" title={colorBy === 'lev' ? 'Liquidation notional per cell (USD at the liquidation price): the stronger, the more; the colour is its mix of leverage' : 'Liquidation notional per cell (USD at the liquidation price): low to high'}>
+              <span>{fmtUsdShort(scale * HEAT_FLOOR)}</span>
+              <i aria-hidden="true" className={colorBy === 'lev' ? 'is-lev' : ''} />
+              <span>{fmtUsdShort(scale)}+</span>
+            </span>
+          )}
+          {note && <span className="lqm-hist2-note">{note}</span>}
+        </div>
+      )}
       {tip && (tip.l > 0 || tip.s > 0 || tip.kind === 'now') && (
         <div className="lqm-tip" style={{ left: Math.max(0, Math.min((box?.width ?? 400) - 220, tip.x + (tip.kind === 'now' ? -232 : 14))), top: Math.max(0, Math.min((box?.height ?? 300) - 150, tip.y - 20)) }}>
           <b>{fmtPx(tip.lo)} – {fmtPx(tip.lo + tip.step)}</b>
           <span>{tip.kind === 'now' ? `Now · ${pct((tip.lo + tip.step / 2) / tip.p - 1)} from current` : `${whenFmt(tip.t)} · ${pct((tip.lo + tip.step / 2) / tip.p - 1)} from the price then`}</span>
-          {tip.l > 0 && <span className="is-long">Longs {fmtUsdShort(tip.l)}</span>}
-          {tip.s > 0 && <span className="is-short">Shorts {fmtUsdShort(tip.s)}</span>}
+          {tip.l > 0 && <span className="is-long">Longs {fmtTip(tip.l)}</span>}
+          {tip.s > 0 && <span className="is-short">Shorts {fmtTip(tip.s)}</span>}
           {!(tip.l > 0 || tip.s > 0) && <span>No liquidations here</span>}
-          <BandLines v={tip.bands} fmt={fmtUsdShort} over={tip.kind === 'then' && (tip.l + tip.s) * stepNorm({ st: tip.step } as HeatPoint, refStep(points)) > scale} lev={lev} what="cell" />
+          <BandLines v={tip.bands} fmt={fmtTip} over={over(tip)} lev={lev} what="cell" />
           <span className="lqm-tip-sub">{tip.kind === 'now' ? 'Click for the wallets now' : 'Click for the positions then'}</span>
         </div>
       )}
     </div>
   );
 }
-/** A place on the historical chart: a past cell (`then`) or a bar of the levels now (`now`), as shown. */
+/** A place on the chart: a past cell (`then`) or a bar of the levels now (`now`), as shown. */
 type Spot = { x: number; y: number; price: number; lo: number; step: number; p: number; l: number; s: number; bands: Bands } & ({ kind: 'now' } | { kind: 'then'; t: number });
 let calcRev = 0;
 const EMPTY_POINTS: HeatPoint[] = [];
+
+/** The chart view's profile: the bars shown in the unit shown, with the cumulative curves (from `cumFrom`). */
+function profileOf(h: Heat, cumFrom: Heat, unit: Unit, colorBy: ColorBy): LiqMapData | null {
+  if (!h.price) return null;
+  return {
+    price: h.price,
+    step: h.step,
+    rows: h.buckets.map((b): [number, number, number] => { const [l, s] = valOf(b, unit); return [b[0], l, s]; }),
+    bands: h.buckets.map((b) => bandsOf(b, unit)),
+    colorBy,
+    cum: cumulative(cumFrom, unit),
+  };
+}
 
 // --- details of a past cell ---------------------------------------------------------------
 

@@ -391,6 +391,11 @@ CREATE TABLE IF NOT EXISTS liq_cur (
 CREATE TABLE IF NOT EXISTS liq_hist (
   coin TEXT NOT NULL, t INTEGER NOT NULL, data TEXT NOT NULL,
   PRIMARY KEY (coin, t)) WITHOUT ROWID;
+-- Each snapshot's fine layers (levels.ts FineSnap: a tenth and a hundredth of its step near the
+-- price, exact from the live engine), deflated JSON: the historical view's $10 and $1 on BTC.
+CREATE TABLE IF NOT EXISTS liq_hist_fine (
+  coin TEXT NOT NULL, t INTEGER NOT NULL, data BLOB NOT NULL,
+  PRIMARY KEY (coin, t)) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS liq_now (
   coin TEXT PRIMARY KEY, at INTEGER NOT NULL, data TEXT NOT NULL) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS board_meta (
@@ -3022,6 +3027,24 @@ export class IndexStore {
     return this.q('SELECT t, data FROM liq_hist WHERE coin = ? AND t >= ? ORDER BY t').all(coin, fromT) as Array<{ t: number; data: string }>;
   }
 
+  /** Fine layers of the snapshots at `t` (deflated JSON, levels.ts FineSnap). */
+  putLiqHistFine(t: number, rows: ReadonlyArray<[string, Uint8Array]>): void {
+    this.tx(() => {
+      const ins = this.q('INSERT OR REPLACE INTO liq_hist_fine (coin, t, data) VALUES (?, ?, ?)');
+      for (const [coin, data] of rows) ins.run(coin, t, data);
+    });
+  }
+
+  /** One coin's fine layers from `fromT` to `toT`, oldest first (deflated as written). */
+  liqHistFine(coin: string, fromT: number, toT: number): Array<{ t: number; data: Uint8Array }> {
+    return this.q('SELECT t, data FROM liq_hist_fine WHERE coin = ? AND t >= ? AND t <= ? ORDER BY t').all(coin, fromT, toT) as Array<{ t: number; data: Uint8Array }>;
+  }
+
+  /** When a coin's fine layers begin (null: none yet). */
+  liqHistFineFrom(coin: string): number | null {
+    return (this.q('SELECT MIN(t) AS t FROM liq_hist_fine WHERE coin = ?').get(coin) as { t: number | null }).t;
+  }
+
   /** Every coin's levels now (cohortTracker.ts recordLiq), replacing the last pass; coins not in it are dropped. */
   putLiqNow(at: number, rows: ReadonlyArray<[string, Uint8Array]>): void {
     this.tx(() => {
@@ -3046,10 +3069,13 @@ export class IndexStore {
     return r?.t ?? 0;
   }
 
-  /** Drop everything before `beforeT`, and between it and `thinBeforeT` all but the hourly snapshots. */
+  /** Drop everything before `beforeT`, and between it and `thinBeforeT` all but the hourly snapshots (and their fine layers). */
   pruneLiqHist(beforeT: number, thinBeforeT: number, hourMs: number): void {
     this.q('DELETE FROM liq_hist WHERE t < ?').run(beforeT);
     this.q('DELETE FROM liq_hist WHERE t < ? AND t % ? != 0').run(thinBeforeT, hourMs);
+    // The fine layers go with their snapshots.
+    this.q('DELETE FROM liq_hist_fine WHERE t < ?').run(beforeT);
+    this.q('DELETE FROM liq_hist_fine WHERE t < ? AND t % ? != 0').run(thinBeforeT, hourMs);
   }
 
   // --- the level change log (liq_addr, liq_log, liq_cur) ------------------------------------

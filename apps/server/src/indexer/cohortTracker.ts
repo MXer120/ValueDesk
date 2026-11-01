@@ -80,7 +80,7 @@ import { accountLiqs, addDrift, calibrate, emptyDrift, feeCash, fillCash, fundin
 import { hlInfo } from '../valuedesk/hyperliquid/index.js';
 import { ARCUS_FEES_COST, ASK_MIN_USD, BASE_FEES, FEES_TTL_MS, HL_FEES_COST, SODEX_FEES_COST, arcusFees, fillRate, hlFees, sodexFees, spotSellRate, xyzScales, type FeeRates, type MarketScale } from './feeRates.js';
 import { marketsNow, setRulesPacers, venueMarkets } from '../valuedesk/liquidations/rules.js';
-import { liqCoin, snapOfNow } from '../valuedesk/liquidations/levels.js';
+import { fineSnapOf, liqCoin, snapOfNow } from '../valuedesk/liquidations/levels.js';
 import { LiqLive } from '../valuedesk/liquidations/live.js';
 import { LiqFeedServer } from './liqFeed.js';
 import { deflateRawSync } from 'node:zlib';
@@ -2075,7 +2075,7 @@ export class CohortTracker {
    * (liq_cur, read once at the first step): a restart neither repeats every position nor misses
    * what closed while it was down. Pruned daily to LIQ_KEEP_MS (a row superseded before then).
    */
-  private logLevels(t: number, coins: ReadonlySet<string>): void {
+  private logLevels(t: number, coins: ReadonlySet<string>, byCoin: ReturnType<LiqLive['positionsByCoin']>): void {
     const s = this.d.store;
     if (!this.levelState) {
       // Where the log begins, for the history's details (liqRead.ts liqAt: nothing before it is by position).
@@ -2086,7 +2086,6 @@ export class CohortTracker {
     }
     const state = this.levelState;
     const addr = this.levelAddr!;
-    const byCoin = this.live.positionsByCoin(0, NO_WALLETS);
     // One state per address, coin and venue: two symbols of one coin on one venue keep the larger.
     const now = new Map<string, { aid: number | string; coin: string; venue: number; side: number; liq: number; usd: number; address: string; v: Venue } & LiqLogExtra>();
     const fresh = new Set<string>();
@@ -2168,14 +2167,22 @@ export class CohortTracker {
       const t = Math.floor(now / LIQ_STEP_MS) * LIQ_STEP_MS;
       if (t > this.lastLiqT) {
         const keep = this.sodexCoins;
+        // Every position's exact level now, per coin: the fine layers and the change log.
+        const byCoin = this.live.positionsByCoin(0, NO_WALLETS);
         const hist: Array<[string, string]> = [];
+        const fine: Array<[string, Uint8Array]> = [];
         for (const coin of keep) {
           const row = rows.get(coin);
-          if (row) hist.push([coin, JSON.stringify(snapOfNow(row))]);
+          if (!row) continue;
+          const snap = snapOfNow(row);
+          hist.push([coin, JSON.stringify(snap)]);
+          const f = fineSnapOf(row.p, snap.st, byCoin.get(coin) ?? []);
+          if (f) fine.push([coin, deflateRawSync(JSON.stringify(f))]);
         }
         if (hist.length) s.putLiqHist(t, hist);
+        if (fine.length) s.putLiqHistFine(t, fine);
         // Every position's level at the same step, as a change log (the history's wallet filter).
-        this.logLevels(t, keep);
+        this.logLevels(t, keep, byCoin);
         // Older snapshots - and the 15-minute ones thinned to hourly - go only with the owner's word.
         if (mayPrune('liq-history')) s.pruneLiqHist(now - LIQ_KEEP_MS, now - LIQ_THIN_MS, 60 * 60_000);
         this.lastLiqT = t;

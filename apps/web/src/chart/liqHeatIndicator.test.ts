@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { boxed, cellRange, heatColor, heatScale, refStep, snapshotFor, stepNorm, unboxed, type HeatData, type HeatPoint } from './liqHeatIndicator';
+import { boxed, cellAt, cellRange, cellsOf, heatColor, heatScale, refStep, snapshotFor, stepNorm, unboxed, type HeatData, type HeatPoint } from './liqHeatIndicator';
 
 const H = 3_600_000;
 const Q = 15 * 60_000;
@@ -63,4 +63,24 @@ test('the layer reads exactly the data handed over, never merged into the old (t
   utils.merge(held, { extendData: boxed(one) });
   assert.deepEqual(unboxed<HeatData>(held.extendData), one);
   assert.equal(unboxed<HeatData>(undefined), null);
+});
+
+test('a fine part replaces the snapshot cells inside its range, widened to whole cells: no overlap, no gap', () => {
+  // $100 cells 770-790 (77,000-79,000); $10 cells over 77,050-78,350, which covers $100 cells 771-782 whole.
+  const q: HeatPoint = {
+    t: 0, p: 77_900, st: 100,
+    b: Array.from({ length: 20 }, (_, k) => [770 + k, 1_000, 0] as [number, number, number]),
+    f: { st: 10, lo: 77_050, hi: 78_350, b: [[7_700, 5, 0], [7_710, 7, 0], [7_789, 9, 0], [7_834, 11, 0], [7_835, 13, 0]] },
+  };
+  const cells = cellsOf(q);
+  // Coarse 770 (77,000-77,100: not whole inside), 771-782 out, 783-789 kept; fine 7,710-7,829 in, 7,700 and 7,834+ out.
+  assert.deepEqual(cells.filter((c) => c.st === 100).map((c) => c.r[0]), [770, 783, 784, 785, 786, 787, 788, 789]);
+  assert.deepEqual(cells.filter((c) => c.st === 10).map((c) => c.r[0]), [7_710, 7_789]);
+  for (let k = 1; k < cells.length; k++) assert.ok(cells[k]!.lo >= cells[k - 1]!.hi - 1e-9, 'lowest first, none overlapping');
+  assert.equal(cellAt(q, 77_105)?.r[0], 7_710, 'a price in the fine range: its fine cell');
+  assert.equal(cellAt(q, 77_125), null, 'an empty fine cell: none (the coarse one is not drawn there)');
+  assert.equal(cellAt(q, 78_450)?.r[0], 784, 'outside it: the snapshot cell');
+  assert.equal(cellsOf(q), cellsOf(q), 'kept per point');
+  const plain: HeatPoint = { t: 0, p: 1, st: 1, b: [[3, 1, 0]] };
+  assert.deepEqual(cellsOf(plain).map((c) => [c.lo, c.hi]), [[3, 4]]);
 });

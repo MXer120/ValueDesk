@@ -16,6 +16,11 @@ export interface LiqMapData {
   rows: Array<[number, number, number]>;
   bands?: Bands[];
   colorBy?: ColorBy;
+  /**
+   * The cumulative curves (the chart view): everything liquidated as the price falls to each
+   * level (longs, [price, sum] from the price down) and as it rises (shorts, from the price up).
+   */
+  cum?: { long: Array<[number, number]>; short: Array<[number, number]> } | null;
 }
 
 /** A CSS colour token of the page (canvas needs the value), read once. */
@@ -44,9 +49,10 @@ export function drawProfile(
   bounding: { width: number; height: number },
   yAxis: { convertToPixel: (v: number) => number },
   d: LiqMapData,
-  o: { maxW: number; alpha: number; backdrop?: boolean },
+  o: { maxW: number; alpha: number; backdrop?: boolean; cum?: boolean },
 ): void {
   if (!d.rows.length) return;
+  if (o.cum && d.cum) drawCum(ctx, bounding, yAxis, d, o.maxW);
   const lev = d.colorBy === 'lev' && !!d.bands;
   const shown: Array<[number, number, number, number, number]> = [];
   const vals: number[] = [];
@@ -110,3 +116,53 @@ export function drawProfile(
   ctx.restore();
 }
 
+
+/**
+ * The cumulative curves behind the bars, growing left from the right edge as they do: a step line
+ * and a light area per side from the price outward, scaled to the largest sum on screen.
+ */
+function drawCum(
+  ctx: CanvasRenderingContext2D,
+  bounding: { width: number; height: number },
+  yAxis: { convertToPixel: (v: number) => number },
+  d: LiqMapData,
+  maxW: number,
+): void {
+  const c = d.cum!;
+  const x0 = bounding.width;
+  const yp = yAxis.convertToPixel(d.price);
+  const inView = (pts: Array<[number, number]>) => pts.filter(([v]) => { const y = yAxis.convertToPixel(v); return y >= -bounding.height && y <= bounding.height * 2; });
+  const sides = [[inView(c.long), token('--neg', '#f6465d')], [inView(c.short), token('--pos', '#2ebd85')]] as const;
+  let max = 0;
+  for (const [pts] of sides) for (const [v, sum] of pts) { const y = yAxis.convertToPixel(v); if (y >= 0 && y <= bounding.height) max = Math.max(max, sum); }
+  if (!(max > 0)) return;
+  const xOf = (sum: number) => x0 - Math.min(1, sum / max) * (maxW - 8);
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, 0, bounding.width, bounding.height);
+  ctx.clip();
+  ctx.lineWidth = 1.25;
+  for (const [pts, col] of sides) {
+    if (!pts.length) continue;
+    ctx.beginPath();
+    ctx.moveTo(x0, yp);
+    // A step line: along the price to each level, then out to its sum.
+    let x = x0;
+    for (const [v, sum] of pts) {
+      const y = yAxis.convertToPixel(v);
+      ctx.lineTo(x, y);
+      x = xOf(sum);
+      ctx.lineTo(x, y);
+    }
+    const yEnd = yAxis.convertToPixel(pts.at(-1)![0]);
+    ctx.strokeStyle = col;
+    ctx.globalAlpha = 0.9;
+    ctx.stroke();
+    ctx.lineTo(x0, yEnd);
+    ctx.closePath();
+    ctx.fillStyle = col;
+    ctx.globalAlpha = 0.08;
+    ctx.fill();
+  }
+  ctx.restore();
+}

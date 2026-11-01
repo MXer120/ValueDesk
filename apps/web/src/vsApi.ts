@@ -33,7 +33,7 @@ import type {
 import { VenueError, venues } from './exchange/venues';
 import { serverGetJson } from './serverFetch';
 import type { CalendarEvent, CalendarSource } from '@sign/valuedesk/calendar.js';
-import type { LiqAt, LiqHeatmap, LiqHistory, LiqWallets, WalletLiq } from '@sign/indexer/liqRead.js';
+import type { LiqAt, LiqHeatmap, LiqHistory, LiqHistoryFine, LiqWallets, WalletLiq } from '@sign/indexer/liqRead.js';
 import type { CohortDetailResponse, CohortFilter, CohortFocusResponse, CohortId, CohortMapResponse, CohortRange, CohortWalletsResponse, CohortsResponse, WalletSort } from '@sign/valuedesk/cohorts/model.js';
 
 export type { CalendarEvent, CalendarSource };
@@ -208,6 +208,9 @@ export const vsApi = {
   /** The levels over time: the indexer's 15-minute snapshots (hourly past 3 days). */
   liquidationHistory: (coin: string, venues: readonly Venue[], range: '1d' | '2d' | '7d' | '30d', signal?: AbortSignal, wallets: readonly string[] = []) =>
     unwrap<LiqHistory>(`/api/vs/liquidations/history${qs({ coin, venues: venues.join(','), range, wallets: wallets.length ? wallets.join(',') : undefined })}`, signal),
+  /** The history at a step finer than its snapshots keep, for a price window and a time window (the snapshots' fine layers). */
+  liquidationHistoryFine: (coin: string, venues: readonly Venue[], ask: { step: number; from: number; to: number; t0: number; t1: number }, signal?: AbortSignal) =>
+    unwrap<LiqHistoryFine>(`/api/vs/liquidations/history${qs({ coin, venues: venues.join(','), step: ask.step, from: ask.from, to: ask.to, t0: ask.t0, t1: ask.t1 })}`, signal),
   /** One cell of the history: the positions liquidating in [from, to) at time t, as they stood then (the change log). */
   liquidationAt: (coin: string, venues: readonly Venue[], t: number, from: number, to: number, side: 'long' | 'short' | 'both', signal?: AbortSignal, wallets: readonly string[] = [], lev: readonly string[] = []) =>
     unwrap<LiqAt>(`/api/vs/liquidations/at${qs({ coin, venues: venues.join(','), t, from, to, side, wallets: wallets.length ? wallets.join(',') : undefined, lev: lev.length && lev.length < 3 ? lev.join(',') : undefined })}`, signal),

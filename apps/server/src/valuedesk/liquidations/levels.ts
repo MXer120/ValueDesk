@@ -338,3 +338,76 @@ export function snapOfNow(row: LiqNow, share = HIST_STEP): LiqSnap {
   }
   return { p: row.p, st, v };
 }
+
+// --- the history's fine layers (liq_hist_fine) ----------------------------------------------
+
+/**
+ * Finer than a snapshot's step, near the price (owner 2026-11-01: "historical view supports $10 &
+ * $1 resolution"): with each snapshot, the levels at a tenth and a hundredth of its step (BTC
+ * near $78K: $10 and $1), each over `half` of its buckets either side of the price - BTC $10 to
+ * +-12.5%, $1 to +-2.5%. A screen holds FINE_MAX_BUCKETS of a step at most, so a window wider
+ * than a layer's would be drawn coarser anyway.
+ *
+ * Exact: the live engine's level of every position as its account was last priced (live.ts),
+ * not its 0.02% bucket. The change log (liq_log) cannot stand in: it writes a level again only
+ * once it moved 0.05% (BTC ~$39), and replaying it for a $1 window read 0.6-18 s of rows on
+ * production (2026-11-01, BTC: 400-590k rows a day). Measured the same day on the 101 coins'
+ * open positions: about 0.6 MB of rows a step before deflate (the snapshots: 1.3 MB of text).
+ */
+export const FINE_LAYERS: ReadonlyArray<{ div: number; half: number }> = [{ div: 10, half: 1_000 }, { div: 100, half: 2_000 }];
+
+/** One fine layer of a snapshot: its step, the price range it covers, and per venue its rows (SnapRow). */
+export interface FineLayer {
+  st: number;
+  lo: number;
+  hi: number;
+  v: Partial<Record<Venue, SnapRow[]>>;
+}
+/** A snapshot's fine layers, finest last (liq_hist_fine, deflated JSON). */
+export interface FineSnap {
+  p: number;
+  L: FineLayer[];
+}
+
+/** A position as the fine layers read it (live.ts LivePosition): band -1 is not known. */
+export interface FinePos { venue: Venue; long: boolean; liq: number; usd: number; band: number }
+
+const tidy = (x: number) => +x.toPrecision(12);
+
+/**
+ * A coin's fine layers at price `p` with snapshot step `st` (snapOfNow's): levels the price has
+ * crossed are left out, as in the snapshot. Null when no position lies in any layer.
+ */
+export function fineSnapOf(p: number, st: number, positions: Iterable<FinePos>): FineSnap | null {
+  if (!(p > 0) || !(st > 0)) return null;
+  const layers = FINE_LAYERS.map(({ div, half }) => {
+    const s = tidy(st / div);
+    const i0 = Math.floor(p / s);
+    return { st: s, i0: i0 - half, i1: i0 + half, m: new Map<Venue, Map<number, number[]>>() };
+  });
+  let any = false;
+  for (const x of positions) {
+    if (!(x.liq > 0) || !(x.usd > 0)) continue;
+    if (x.long ? x.liq >= p : x.liq <= p) continue;
+    for (const L of layers) {
+      const i = Math.floor(x.liq / L.st);
+      if (i < L.i0 || i >= L.i1) continue;
+      let v = L.m.get(x.venue);
+      if (!v) { v = new Map(); L.m.set(x.venue, v); }
+      let b = v.get(i);
+      if (!b) { b = [i, 0, 0, 0, 0, 0, 0, 0, 0]; v.set(i, b); }
+      b[x.long ? 1 : 2]! += x.usd;
+      if (x.band >= 0 && x.band <= 2) b[snapBand(x.long, x.band as LevBand)]! += x.usd;
+      any = true;
+    }
+  }
+  if (!any) return null;
+  return {
+    p,
+    L: layers.map((L) => {
+      const v: FineLayer['v'] = {};
+      for (const [venue, m] of L.m) v[venue] = [...m.values()].sort((a, b) => a[0]! - b[0]!).map((b) => trimRow(b.map(Math.round) as SnapRow, 3));
+      return { st: L.st, lo: tidy(L.i0 * L.st), hi: tidy(L.i1 * L.st), v };
+    }),
+  };
+}
