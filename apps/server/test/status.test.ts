@@ -61,6 +61,24 @@ test('probes: up, degraded and down for each service', async () => {
   assert.equal(stale[3]!.state, 'down', 'an indexer that stopped publishing is down');
 });
 
+test('probes: no answer is asked once more before it counts; a bad answer is not', async () => {
+  const seen: Array<{ url: string; headers: Record<string, string> }> = [];
+  let drops = 1;
+  const flaky = (async (url: string, init: RequestInit) => {
+    seen.push({ url, headers: {} });
+    if (url.endsWith('/api/copy/v1/health') && drops-- > 0) throw new Error('ECONNRESET');
+    return fakeFetch(ALL_UP)(url, init);
+  }) as unknown as typeof fetch;
+  const r = await probeAll({ targets: TARGETS, fetch: flaky, retryMs: 0 });
+  assert.equal(r.find((s) => s.service === 'executor')!.state, 'up', 'one dropped connection is not a down minute');
+  assert.equal(seen.filter((s) => s.url.endsWith('/api/copy/v1/health')).length, 2);
+  const bad: Array<{ url: string; headers: Record<string, string> }> = [];
+  await probeAll({ targets: TARGETS, retryMs: 0, fetch: fakeFetch({ ...ALL_UP, 'https://site.test/api/health': { status: 502, body: '{}' } }, bad) });
+  assert.equal(bad.filter((s) => s.url.endsWith('/api/health')).length, 1, 'a 502 is an answer: not asked again');
+  const down = await probeAll({ targets: TARGETS, retryMs: 0, fetch: fakeFetch({}) });
+  assert.equal(down.find((s) => s.service === 'executor')!.state, 'down', 'twice no answer: down');
+});
+
 test('probes: the executor directly gets the origin secret, the public site never does', async () => {
   // The health check's EXECUTOR_URL (loopback on the executor's own box) is not this probe's.
   assert.deepEqual(probeTargetsFromEnv({ EXECUTOR_URL: 'http://127.0.0.1:8799' }), { site: 'https://www.valuedesk.so', executor: 'https://www.valuedesk.so', executorSecret: null });

@@ -254,13 +254,19 @@ export class FakeSodex implements VerifierIo {
     throw new Error(`unexpected gateway request in a test: ${path}`);
   }
 
+  /** Answer an unknown order with HTTP 404 (mainnet) instead of a 200 body. */
+  notFoundStatus = false;
+
   async explorer(path: string): Promise<unknown> {
     this.calls.push({ kind: 'explorer', path, at: this.clock.now() });
     const f = this.failure('explorer');
     if (f !== undefined) throw f === 'timeout' ? new Error('The operation was aborted due to timeout') : new ExplorerError(f, `the explorer answered HTTP ${f}`);
     const m = /^\/api\/v1\/(perps|spot)\/transaction\?account_id=(\d+)&order_id=(\d+)$/.exec(path);
     if (!m) throw new Error(`unexpected explorer request in a test: ${path}`);
-    return this.txs.get(`${m[1]}:${m[2]}:${m[3]}`) ?? { code: 404, message: 'record not found', data: null };
+    const tx = this.txs.get(`${m[1]}:${m[2]}:${m[3]}`);
+    // Mainnet (2026-11-01) answers an order it does not know with HTTP 404, not a 200 body.
+    if (!tx && this.notFoundStatus) throw new ExplorerError(404, 'the explorer answered HTTP 404');
+    return tx ?? { code: 404, message: 'record not found', data: null };
   }
 
   cooldownMs(): number {

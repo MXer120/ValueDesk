@@ -799,7 +799,15 @@ export class CopyRuntime {
       this.dirty.add(s.id);
       return [];
     }
-    const builder = await this.host.builderFor(s).catch(() => null);
+    // A failed builder lookup holds the copy back (the reconcile retries it) - never an order without our builder.
+    let builder: Awaited<ReturnType<typeof this.host.builderFor>>;
+    try {
+      builder = await this.host.builderFor(s);
+    } catch (e) {
+      await this.activity(s, { kind: 'error', reason: 'builder', symbol: market.name, detail: `Not copied: the builder fee could not be set (${e instanceof Error ? e.message : String(e)}).`, leader });
+      this.dirty.add(s.id);
+      return [];
+    }
     let send = intents;
     if (!sink.paper && intents.some((i) => !i.reduceOnly) && !(await this.ensureLeverage(s, market, sink))) {
       // Never open at whatever leverage the account happens to have (the EEA 2x cap, the

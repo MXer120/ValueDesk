@@ -390,15 +390,30 @@ const jsonOk = (body: string): boolean | null => {
   }
 };
 
+/**
+ * No answer at all is asked once more, PROBE_RETRY_MS later, before it counts: a single dropped
+ * connection on the way to the executor in Tokyo made a "down" minute (three on 2026-11-01, the
+ * executor fine and its own checks green) - an incident on the status page for nothing.
+ * An answer, good or bad, is never asked again.
+ */
+export const PROBE_RETRY_MS = 2_000;
+
+async function timedRetry(fetchImpl: Fetch, url: string, headers: Record<string, string> = {}, retryMs = PROBE_RETRY_MS): Promise<{ res: Response; ms: number; body: string } | null> {
+  const first = await timed(fetchImpl, url, headers);
+  if (first) return first;
+  if (retryMs > 0) await new Promise((r) => setTimeout(r, retryMs));
+  return timed(fetchImpl, url, headers);
+}
+
 /** Probe every service once. Never throws: a failed probe is a `down` sample. */
-export async function probeAll(o: { targets: ProbeTargets; fetch?: Fetch; indexerStatus?: () => unknown; now?: () => number }): Promise<Sample[]> {
+export async function probeAll(o: { targets: ProbeTargets; fetch?: Fetch; indexerStatus?: () => unknown; now?: () => number; retryMs?: number }): Promise<Sample[]> {
   const f = o.fetch ?? fetch;
   const now = o.now ?? Date.now;
   const { site, executor, executorSecret } = o.targets;
   const [web, api, exec] = await Promise.all([
-    timed(f, `${site}/`),
-    timed(f, `${site}/api/health`, { Accept: 'application/json' }),
-    timed(f, `${executor}/api/copy/v1/health`, { Accept: 'application/json', ...(executorSecret ? { 'X-Origin-Verify': executorSecret } : {}) }),
+    timedRetry(f, `${site}/`, {}, o.retryMs),
+    timedRetry(f, `${site}/api/health`, { Accept: 'application/json' }, o.retryMs),
+    timedRetry(f, `${executor}/api/copy/v1/health`, { Accept: 'application/json', ...(executorSecret ? { 'X-Origin-Verify': executorSecret } : {}) }, o.retryMs),
   ]);
   const out: Sample[] = [];
   out.push({

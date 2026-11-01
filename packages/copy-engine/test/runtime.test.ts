@@ -79,7 +79,7 @@ async function until(cond: () => boolean, ms = 3000): Promise<void> {
   }
 }
 
-function runtime(w: World, sinkFor: (s: Subscription) => OrderSink | null) {
+function runtime(w: World, sinkFor: (s: Subscription) => OrderSink | null, builderFor: () => Promise<{ id: number; fee: number } | null> = async () => ({ id: 9, fee: 25 })) {
   const fetch = fakeFetch(w);
   const store = new MemoryStore();
   const rt = new CopyRuntime({
@@ -91,7 +91,7 @@ function runtime(w: World, sinkFor: (s: Subscription) => OrderSink | null) {
     network: 'mainnet',
     hlMode: 'user',
     sinkFor,
-    builderFor: async () => ({ id: 9, fee: 25 }),
+    builderFor,
     policyFor: (s) => regionPolicy(s.country, s.observedCountry),
     log: { debug() {}, info() {}, warn() {}, error() {} },
   });
@@ -203,6 +203,41 @@ test('a live copy without a covering builder approval is blocked, and unblocks o
   // The follower's own fill on the public stream books the copy at the real price.
   sodexWs().push(print(21, 'BUY', '0.01', '80010', FOLLOWER_ID, 1002));
   await until(() => (rt.view(s.id)?.positions[0]?.entry ?? 0) === 80_010);
+  await rt.stop();
+});
+
+test('a builder lookup that fails holds the copy back - never an order without our builder', async () => {
+  const w: World = { leaderPositions: [], followerPositions: [], builderRate: 25, mark: 80_000 };
+  const sent: Array<{ intents: Intent[]; builder: unknown }> = [];
+  const sink: OrderSink = {
+    paper: false,
+    async place(_a, _m, intents, builder): Promise<SendResult[]> {
+      sent.push({ intents, builder });
+      return intents.map((i) => ({ clOrdID: i.clOrdID, ok: true, orderId: '1', error: null, outcomeUnknown: false }));
+    },
+    async setLeverage() {},
+    async placeStop(_a, _m, st) {
+      return { clOrdID: st.clOrdID, ok: true, orderId: null, error: null, outcomeUnknown: false };
+    },
+    async cancel() {},
+  };
+  let broken = false;
+  const { rt, store } = runtime(w, () => sink, async () => {
+    if (broken) throw new Error('ledger unreachable');
+    return { id: 9, fee: 25 };
+  });
+  await rt.start();
+  const s = await rt.add(sub({}, { id: 'b1' }));
+  assert.equal(rt.get(s.id)!.status, 'active');
+  await until(() => sodexWs()?.readyState === 1);
+  await wait(20);
+  broken = true;
+  sodexWs().push(print(30, 'BUY', '1', '80000', LEADER_ID, 1002));
+  const log = async () => (await store.activity({ subId: s.id })).filter((e) => e.reason === 'builder');
+  const t0 = Date.now();
+  while (!(await log()).length && Date.now() - t0 < 3000) await wait(10);
+  assert.equal(sent.length, 0, 'nothing sent without the builder');
+  assert.match((await log())[0]!.detail ?? '', /builder fee could not be set/);
   await rt.stop();
 });
 

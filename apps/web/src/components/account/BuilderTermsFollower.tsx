@@ -12,6 +12,7 @@
  * A fill only ever makes the app ASK. What the answer may do is decided where
  * it is verified (terms.ts): nothing in this stream can lower a fee.
  */
+import { useEffect } from 'react';
 import { useChannel } from '../../hooks';
 import { hintTerms, termsPossible } from '../../trading/terms';
 
@@ -38,5 +39,11 @@ export function BuilderTermsFollower({ address }: { address: string | null }) {
   const who = termsPossible() ? address : null;
   useFillHint('perps', who);
   useFillHint('spot', who);
+  // Once per connected wallet and visit, fill or not: a wallet that traded only through the
+  // executor (hosted or self-hosted) is counted the first time its owner opens the site
+  // (owner 2026-11-01: only 2 wallets were in the ledger). A wallet without our builder approved writes nothing.
+  useEffect(() => {
+    if (who) hintTerms(who);
+  }, [who]);
   return null;
 }

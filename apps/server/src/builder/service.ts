@@ -254,6 +254,23 @@ export class BuilderService {
     }
   }
 
+  /**
+   * A wallet may have traded where the site did not see it - through the hosted executor or a
+   * self-hosted copier, with no tab open (owner 2026-11-01: only 2 wallets counted). The
+   * executor's volume read (routes/builder.ts, internal token only) leaves this hint, so every
+   * follower it trades for is verified like a site user. Same rules as a terms hint: a wallet
+   * without our builder approved writes nothing. Never throws.
+   */
+  hint(address: string, client: string): void {
+    const rt = this.tiers.current() ? this.open() : null;
+    if (!rt) return;
+    try {
+      rt.verifier.hint(address, client);
+    } catch (e) {
+      this.o.log.warn({ err: e instanceof Error ? e.message : String(e) }, 'builder tiers: a hint could not be taken');
+    }
+  }
+
   /** Answer one request. Never throws: a ledger that cannot be read means the default fee. */
   terms(req: TermsRequest): TermsBody {
     const cfg = this.tiers.current();

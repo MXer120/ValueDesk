@@ -43,6 +43,7 @@ import { OrderState, applyFills, dayOf, defaultsOf, feeOwedAt, judgeOrder, readF
 import { explorerPath, orderFacts, readExplorerTx } from './explorer.js';
 import type { BuilderStore, Evidence, WalletRow } from './store.js';
 import { mayPrune } from '../retention.js';
+import { COPY_LADDER_DAYS, ENGINE_ORDER_ID, copyLadderFee } from './tiers.js';
 
 // --- budgets and bounds ---------------------------------------------------------------
 
@@ -696,26 +697,33 @@ export class Verifier {
     try {
       body = await this.io.explorer(explorerPath(engine, w.accountId, row.orderId));
     } catch (e) {
-      // Not a 200, or no answer: stop asking, for longer each time. The order waits; its wallet goes to the back.
-      const at = this.now();
-      this.explorerStreak += 1;
-      this.explorerPause = at + Math.min(EXPLORER_PAUSE_MAX_MS, EXPLORER_PAUSE_MS * 2 ** (this.explorerStreak - 1));
-      const tries = row.tries + 1;
-      const gaveUp = tries > NOT_FOUND_RETRY_MS.length;
-      this.guard(() => {
-        this.store.setMeta('explorer_pause', String(this.explorerPause));
-        this.store.setMeta('explorer_streak', String(this.explorerStreak));
-        this.store.commitLookup({
-          builder, address: w.address, gen: w.createdAt, engine,
-          row: { ...row, tries, nextAt: this.explorerPause, state: gaveUp ? (row.state === OrderState.check ? OrderState.checked : OrderState.unknown) : row.state },
-          closed: gaveUp, addMicro: 0, byDay: new Map(), underpaid: { n: 0, at: 0 }, tampered: { n: 0, at: 0 }, misses: w.misses + 1, now: at, evidence: [],
+      body = undefined;
+      // A 404 is the explorer ANSWERING that it does not know this one order - not the explorer being down.
+      // Taken as "not known (yet)" below: that order waits its own retries, the lane goes on. Before
+      // (owner 2026-11-01), one order the explorer never knew paused the lane for up to 6 h, was asked
+      // first again after each pause, and held 76 orders behind it from 10-29 22:35 on: nothing counted for days.
+      if (!(e instanceof ExplorerError && e.status === 404)) {
+        // Not a 200, or no answer: stop asking, for longer each time. The order waits; its wallet goes to the back.
+        const at = this.now();
+        this.explorerStreak += 1;
+        this.explorerPause = at + Math.min(EXPLORER_PAUSE_MAX_MS, EXPLORER_PAUSE_MS * 2 ** (this.explorerStreak - 1));
+        const tries = row.tries + 1;
+        const gaveUp = tries > NOT_FOUND_RETRY_MS.length;
+        this.guard(() => {
+          this.store.setMeta('explorer_pause', String(this.explorerPause));
+          this.store.setMeta('explorer_streak', String(this.explorerStreak));
+          this.store.commitLookup({
+            builder, address: w.address, gen: w.createdAt, engine,
+            row: { ...row, tries, nextAt: this.explorerPause, state: gaveUp ? (row.state === OrderState.check ? OrderState.checked : OrderState.unknown) : row.state },
+            closed: gaveUp, addMicro: 0, byDay: new Map(), underpaid: { n: 0, at: 0 }, tampered: { n: 0, at: 0 }, misses: w.misses + 1, now: at, evidence: [],
+          });
         });
-      });
-      this.log.warn(
-        { status: e instanceof ExplorerError ? e.status : null, err: e instanceof Error ? e.message : String(e), pausedForS: Math.round((this.explorerPause - at) / 1000) },
-        'builder verifier: the explorer did not answer with a 200 - the lane is paused',
-      );
-      return;
+        this.log.warn(
+          { status: e instanceof ExplorerError ? e.status : null, err: e instanceof Error ? e.message : String(e), pausedForS: Math.round((this.explorerPause - at) / 1000) },
+          'builder verifier: the explorer did not answer with a 200 - the lane is paused',
+        );
+        return;
+      }
     }
     if (this.explorerStreak) {
       this.explorerStreak = 0;
@@ -752,7 +760,15 @@ export class Verifier {
       return;
     }
 
-    const owed = feeOwedAt(this.store.feeHistory(builder, w.address), this.defaults(cfg), engine, facts.createdAt);
+    const siteOwed = feeOwedAt(this.store.feeHistory(builder, w.address), this.defaults(cfg), engine, facts.createdAt);
+    // An order of the copy or algo engines names the copy ladder's fee, not the site's: owed is the
+    // lower of the two (owner 2026-11-01 - a follower on a lower ladder step was flagged underpaid).
+    // The ladder's volume is the wallet's 14 days up to now, a little more than at the order: lenient, never stricter.
+    let owed = siteOwed;
+    if (row.clOrdID !== null && ENGINE_ORDER_ID.test(row.clOrdID)) {
+      const v = this.store.windowMicro(builder, w.address, dayOf(facts.createdAt) - (COPY_LADDER_DAYS - 1));
+      owed = Math.min(siteOwed, copyLadderFee((v.perps + v.spot) / 1e6));
+    }
     const keys = this.store.keysOf(w.address);
     const verdict = judgeOrder(row, facts, { builderId: builder, owed, appKeys: new Set(keys.keys()), since: this.store.since() });
     const proof = (kind: Evidence['kind']): Evidence => ({

@@ -75,7 +75,7 @@ import {
   type WebSocketFactory,
   sleep,
 } from '../../../packages/copy-engine/src/index.ts';
-import { SODEX_CHAIN_ID, createMemoryNonceManager, privateKeyToAddress, type SigningKeyRef } from '../../../packages/sodex-core/src/index.ts';
+import { SODEX_CHAIN_ID, createMemoryNonceManager, privateKeyToAddress, type BuilderParams, type SigningKeyRef } from '../../../packages/sodex-core/src/index.ts';
 import { liveAlgosFor, type ExecutorConfig } from './config.ts';
 import { sqlite, type ExecutorDb, type KeyRow } from './db.ts';
 import { auditedAlgoSink, auditedOrderSink } from './audited.ts';
@@ -905,11 +905,12 @@ export class ExecutorService {
   /** The sink of an algo: the key this wallet registered for this executor, the copy fee ladder as the builder. */
   private algoSink(a: AlgoRecord): AlgoSink | null {
     if (!this.db.key(a.owner, 'active')) return null;
+    const builderOf = async (x: AlgoRecord): Promise<BuilderParams | null> =>
+      this.cfg.builderId > 0 ? { id: this.cfg.builderId, fee: copyFeeFor(await this.freshVolume(x.owner)) } : null;
     const sink = auditedAlgoSink(
-      new KeyAlgoSink(this.sodex, () => this.signer(a.owner), this.nonces, SODEX_CHAIN_ID[this.cfg.network], async (x) =>
-        this.cfg.builderId > 0 ? { id: this.cfg.builderId, fee: copyFeeFor(await this.freshVolume(x.owner)) } : null,
-      ),
+      new KeyAlgoSink(this.sodex, () => this.signer(a.owner), this.nonces, SODEX_CHAIN_ID[this.cfg.network], builderOf),
       this.db,
+      builderOf,
     );
     return guardedAlgoSink(sink, this.guard, this.sodex.budget);
   }

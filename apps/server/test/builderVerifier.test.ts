@@ -824,6 +824,25 @@ test('explorer: any answer that is not a 200 stops the lane, for longer each tim
   assert.equal(t.volume.pending, false);
 });
 
+test('explorer: an HTTP 404 for one order never stops the lane - the orders behind it are counted (10-29 stall)', async () => {
+  const w = world();
+  const { wallet, app } = trader(w, 345);
+  w.sodex.notFoundStatus = true;
+  w.clock.advance(SEC);
+  const lost = nextId();
+  w.sodex.order(wallet, { engine: 'perps', orderId: lost, at: w.clock.now(), builder: { id: BUILDER, fee: 20 }, key: app, fills: [{ price: '50000', quantity: '0.001' }] });
+  w.sodex.txs.clear(); // the explorer never knew this one
+  w.clock.advance(SEC);
+  w.sodex.order(wallet, { engine: 'perps', orderId: nextId(), at: w.clock.now(), builder: { id: BUILDER, fee: 20 }, key: app, fills: [{ price: '60000', quantity: '0.001' }] });
+  w.clock.advance(SEC);
+  w.ask(wallet, true);
+  await drive(w.svc.verifier!, w.clock, 30 * MIN);
+  const t = w.ask(wallet);
+  assert.equal(t.volume.perpsUsd, 60, 'the known order counted within minutes, not after a 6-hour pause');
+  assert.ok(!w.log.lines.some((l) => /lane is paused/.test(l.msg)), 'a 404 pauses nothing');
+  assert.equal(w.svc.store!.order(BUILDER, wallet, 'perps', `BTC-USD:${lost}`)!.state, OrderState.unknown, 'the unknown one: retried, then given up');
+});
+
 test('explorer: an order it does not know is asked for again a few times, then given up - and never counted', async () => {
   const w = world();
   const { wallet, app } = trader(w, 350);

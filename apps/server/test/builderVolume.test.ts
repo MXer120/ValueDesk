@@ -55,6 +55,23 @@ test('builder volume: the token holder gets the wallet\'s volume in the window, 
   }
 });
 
+test('builder volume: a read by the executor enrolls a wallet the ledger does not know yet (a follower with no tab open)', async () => {
+  const { app, svc } = await setup();
+  try {
+    const stranger = '0x00000000000000000000000000000000000000a1';
+    assert.equal(svc.verifier!.queues.approvals, 0);
+    const r = await app.inject({ method: 'GET', url: `/api/vs/builder/volume?address=${stranger}&builder=${BUILDER}&days=14`, headers: { 'x-internal-token': TOKEN } });
+    assert.deepEqual(r.json(), { ok: true, usd: 0, days: 14 });
+    assert.equal(svc.verifier!.queues.approvals, 1, 'its approval is read next; approved, it gets a row and is verified');
+    // Refused reads leave nothing.
+    await app.inject({ method: 'GET', url: `/api/vs/builder/volume?address=0x00000000000000000000000000000000000000a2&builder=${BUILDER}` });
+    assert.equal(svc.verifier!.queues.approvals, 1);
+  } finally {
+    await app.close();
+    svc.stop();
+  }
+});
+
 test('builder volume: without the token (or with a wrong one) it does not exist; bad input is a 400', async () => {
   const { app, svc } = await setup();
   try {

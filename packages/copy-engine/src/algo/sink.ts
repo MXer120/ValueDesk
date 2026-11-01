@@ -167,7 +167,8 @@ export class KeyAlgoSink implements AlgoSink {
   async place(a: AlgoRecord, market: MarketInfo, orders: ChildRequest[]): Promise<ChildResult[]> {
     if (!orders.length) return [];
     try {
-      const builder = await this.builder(a).catch(() => null);
+      // A failed lookup refuses the batch (the catch below) - never an order without our builder.
+      const builder = await this.builder(a);
       return readBatch(await this.signAndSend(childrenAction(a.accountId, market, orders, builder)), orders);
     } catch (e) {
       const unknown = e instanceof OutcomeUnknownError;
@@ -178,7 +179,8 @@ export class KeyAlgoSink implements AlgoSink {
   async placeStops(a: AlgoRecord, market: MarketInfo, stops: StopRequest[]): Promise<ChildResult[]> {
     if (!stops.length) return [];
     try {
-      const builder = await this.builder(a).catch(() => null);
+      // A failed lookup refuses the batch (the catch below) - never an order without our builder.
+      const builder = await this.builder(a);
       return readStops(await this.signAndSend(stopsAction(a.accountId, market, stops, builder)), stops);
     } catch (e) {
       const unknown = e instanceof OutcomeUnknownError;

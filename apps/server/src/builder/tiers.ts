@@ -93,3 +93,28 @@ export function decide(cfg: TiersConfig, address: string, facts: WalletFacts, no
     flags,
   };
 }
+
+/**
+ * The copy fee ladder (packages/copy-engine/src/policy.ts COPY_FEE_LADDER, tenths of a bp by
+ * the follower's verified 14-day volume): what the copy and algo engines - the hosted executor,
+ * a self-hosted one, the browser copier - name on their orders, in place of the site's fee.
+ * Kept equal to the engine's by test/builderTiers.test.ts.
+ */
+export const COPY_LADDER: ReadonlyArray<{ fromUsd: number; fee: number }> = [
+  { fromUsd: 0, fee: 25 },
+  { fromUsd: 100_000, fee: 20 },
+  { fromUsd: 500_000, fee: 15 },
+  { fromUsd: 2_000_000, fee: 12 },
+  { fromUsd: 10_000_000, fee: 10 },
+];
+export const COPY_LADDER_DAYS = 14;
+
+/** The engines' client order ids: algo children (`va-`), copies (`vdc-`), copy stops (`vds-`). */
+export const ENGINE_ORDER_ID = /^(va|vdc|vds)-/;
+
+/** The ladder's fee for `volumeUsd` of 14-day volume. */
+export function copyLadderFee(volumeUsd: number): number {
+  let fee = COPY_LADDER[0]!.fee;
+  for (const s of COPY_LADDER) if (volumeUsd >= s.fromUsd) fee = s.fee;
+  return fee;
+}

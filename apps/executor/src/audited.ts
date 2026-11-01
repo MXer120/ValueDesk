@@ -66,11 +66,13 @@ export function auditedOrderSink(inner: OrderSink, db: ExecutorDb, owner: string
 }
 
 /** An algo's sink (KeyAlgoSink), every call written down. */
-export function auditedAlgoSink(inner: AlgoSink, db: ExecutorDb): AlgoSink {
+export function auditedAlgoSink(inner: AlgoSink, db: ExecutorDb, builderOf?: (a: AlgoRecord) => Promise<BuilderParams | null>): AlgoSink {
+  // The builder the sink names (the same lookup, cached by the service): written on every send, as a copy's is.
+  const builderNow = async (a: AlgoRecord) => (builderOf ? builderRow(await builderOf(a).catch(() => null)) : undefined);
   return {
     paper: inner.paper,
     async place(a: AlgoRecord, market: MarketInfo, orders: ChildRequest[]) {
-      db.audit('order', a.owner, a.id, { via: 'algo', kind: a.spec.kind, step: 'send', accountId: a.accountId, symbol: market.name, orders });
+      db.audit('order', a.owner, a.id, { via: 'algo', kind: a.spec.kind, step: 'send', accountId: a.accountId, symbol: market.name, builder: await builderNow(a), orders });
       try {
         const out = await inner.place(a, market, orders);
         db.audit('order', a.owner, a.id, { via: 'algo', step: 'answer', symbol: market.name, results: out.map(resultRow) });
@@ -81,7 +83,7 @@ export function auditedAlgoSink(inner: AlgoSink, db: ExecutorDb): AlgoSink {
       }
     },
     async placeStops(a: AlgoRecord, market: MarketInfo, stops: StopRequest[]) {
-      db.audit('stop', a.owner, a.id, { via: 'algo', step: 'send', accountId: a.accountId, symbol: market.name, stops });
+      db.audit('stop', a.owner, a.id, { via: 'algo', step: 'send', accountId: a.accountId, symbol: market.name, builder: await builderNow(a), stops });
       try {
         const out = await inner.placeStops(a, market, stops);
         db.audit('stop', a.owner, a.id, { via: 'algo', step: 'answer', symbol: market.name, results: out.map(resultRow) });
