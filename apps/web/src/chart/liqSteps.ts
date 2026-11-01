@@ -11,8 +11,8 @@
  *
  * Where the step comes from: a whole number of the live engine's 0.02% buckets is the stream,
  * summed; anything finer (or between) is the API's fine route, exact from the books for the
- * window on screen (server liqRead.ts liqHeatmapFine), at most FINE_MAX_BUCKETS of them - zoomed
- * out past that, the step is coarsened for the view (fineWindow) and the widget says so.
+ * window on screen (server liqRead.ts liqHeatmapFine), at most FINE_MAX_BUCKETS of them (only those
+ * with levels come): the step picked holds however far the view is zoomed out.
  */
 import { niceStep } from '@sign/valuedesk/liquidations/math.js';
 import { FINE_MAX_BUCKETS, HIST_STEP } from '@sign/valuedesk/liquidations/levels.js';

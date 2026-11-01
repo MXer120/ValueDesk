@@ -86,10 +86,11 @@ test('the fine route asks: a step and a window, never more than FINE_MAX_BUCKETS
   const { fineAskOf } = await import('../src/indexer/liqRead.js');
   assert.equal(fineAskOf({}), null, 'no step: the stream-width heatmap as before');
   assert.equal(fineAskOf({ step: '' }), null);
-  assert.deepEqual(fineAskOf({ step: '1', from: '76000', to: '80000' }), { step: 1, from: 76_000, to: 80_000 }, '4,000 buckets: the cap itself');
-  assert.match(String(fineAskOf({ step: '1', from: '76000', to: '80001' })), /at most 4000/, 'one past the cap');
-  assert.equal(FINE_MAX_BUCKETS, 4_000);
-  assert.match(String(fineAskOf({ step: '0.1', from: '0', to: '1000' })), /at most/, 'a fine step over a wide window');
+  assert.deepEqual(fineAskOf({ step: '1', from: '15000', to: '240000' }), { step: 1, from: 15_000, to: 240_000 }, 'BTC at $1 zoomed all the way out: the step picked holds');
+  assert.deepEqual(fineAskOf({ step: '1', from: '0', to: '1000000' }), { step: 1, from: 0, to: 1_000_000 }, 'the cap itself');
+  assert.match(String(fineAskOf({ step: '1', from: '0', to: '1000001' })), /at most 1000000/, 'one past the cap');
+  assert.equal(FINE_MAX_BUCKETS, 1_000_000);
+  assert.match(String(fineAskOf({ step: '0.0001', from: '0', to: '1000' })), /at most/, 'a fine step over a wide window');
   assert.ok(typeof fineAskOf({ step: '0.0001', from: '0.07', to: '0.08' }) === 'object', 'a cheap coin at its tick: 100 buckets');
   for (const bad of [{ step: '0', from: '1', to: '2' }, { step: '-1', from: '1', to: '2' }, { step: 'x', from: '1', to: '2' }, { step: '1', from: '5', to: '5' }, { step: '1', from: '-1', to: '5' }, { step: '1' }]) {
     assert.equal(typeof fineAskOf(bad), 'string', JSON.stringify(bad));

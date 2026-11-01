@@ -89,8 +89,8 @@ interface CoinAgg {
 
 /**
  * A coin's fine layer: the same positions at FINE_SHARE of the price (BTC near $78K: $1 - the
- * snapshot step over a hundred, so its $10 and $100 are whole numbers of it) over FINE_REACH of
- * the price either side, laid out again once the price moved FINE_RECENTER from its middle. The
+ * snapshot step over a hundred, so its $10 and $100 are whole numbers of it) over the buckets'
+ * range (NOW_LO-NOW_HI of the price: a step picked holds zoomed out), laid out again once the price moved FINE_RECENTER from its middle. The
  * heatmap's $10 and $1 (owner 2026-11-01: "make it as accurate / updating as the normal heatmap")
  * stream from it as the normal buckets do: the same entries, the same second.
  */
@@ -105,8 +105,7 @@ interface FineAgg {
   whole: boolean;
   sent: Map<Venue, Map<number, Cell>>;
 }
-/** The fine layer's reach either side of its middle, and how far the price may move from it before it is laid out again. */
-export const FINE_REACH = 0.25;
+/** How far the price may move from the fine layer's middle before it is laid out again (its range and step follow the price). */
 const FINE_RECENTER = 0.1;
 /** The fine layer's step from the price: the history's snapshot step (HIST_STEP) over a hundred. */
 export const fineStepOf = (p: number): number => +(niceStep(p * HIST_STEP) / 100).toPrecision(12);
@@ -374,7 +373,7 @@ export class LiqLive {
 
   private fineAt(p: number): FineAgg {
     const st = fineStepOf(p);
-    return { p0: p, st, lo: p * (1 - FINE_REACH), hi: p * (1 + FINE_REACH), ep: ++this.epoch, v: new Map(), dirty: new Map(), whole: true, sent: new Map() };
+    return { p0: p, st, lo: p * NOW_LO, hi: p * NOW_HI, ep: ++this.epoch, v: new Map(), dirty: new Map(), whole: true, sent: new Map() };
   }
 
   /** An entry into (1) or out of (-1) the fine layer: out of the cell it went into, if into this layer at all. */

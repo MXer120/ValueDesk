@@ -46,7 +46,7 @@ export function mergeDelta(h: LiqHeatmap, d: { at: number; p: number; b: Row[]; 
   return { ...h, at: d.at, price: d.p, buckets: [...by.values()].sort((a, b) => a[0] - b[0]), coverage };
 }
 
-/** The fine layer's step and reach for the coin (server live.ts FineAgg: BTC $1 over +-25% of the price). */
+/** The fine layer's step and reach for the coin (server live.ts FineAgg: BTC $1 over the buckets' range, 0.2-3x the price). */
 export interface FineMeta { st: number; lo: number; hi: number }
 
 /** A fine window of the stream: the layer summed `k` cells at a time over [from, to), as the server sent it and its deltas moved it. */

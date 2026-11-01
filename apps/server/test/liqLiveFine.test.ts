@@ -3,15 +3,16 @@
  *
  * The live engine's fine layer (owner 2026-11-01: $10 and $1 "as accurate / updating as the normal
  * heatmap"): the same entries as the buckets, at the snapshot step over a hundred (BTC $1) over
- * FINE_REACH of the price, laid out again as the price moves, streamed in the same flush - and the
+ * the buckets' range (NOW_LO-NOW_HI of the price), laid out again as the price moves, streamed in the same flush - and the
  * API's feed state keeps it whole from those frames. Checked against a brute-force bucketing of the
  * engine's own positions.
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Venue } from '../src/valuedesk/types.js';
-import { FINE_REACH, LiqLive, fineStepOf, type LiveAccount, type LiveDelta } from '../src/valuedesk/liquidations/live.js';
+import { LiqLive, fineStepOf, type LiveAccount, type LiveDelta } from '../src/valuedesk/liquidations/live.js';
 import { flatTiers } from '../src/valuedesk/liquidations/math.js';
+import { NOW_HI, NOW_LO } from '../src/valuedesk/liquidations/levels.js';
 import { LiqFeedState } from '../src/indexer/liqFeed.js';
 
 function rng(seed: number): () => number {
@@ -92,7 +93,7 @@ test('the fine layer: the engine\'s own positions at a hundredth of the snapshot
   assert.ok(d.f?.whole, 'a new coin: its fine layer whole');
   assert.equal(d.f!.st, fineStepOf(px.v));
   assert.equal(d.f!.st, 1, 'BTC near $78K: $1');
-  assert.ok(Math.abs(d.f!.lo - px.v * (1 - FINE_REACH)) < 1e-6 && Math.abs(d.f!.hi - px.v * (1 + FINE_REACH)) < 1e-6);
+  assert.ok(Math.abs(d.f!.lo - px.v * NOW_LO) < 1e-6 && Math.abs(d.f!.hi - px.v * NOW_HI) < 1e-6, 'over the buckets range: a step picked holds zoomed out');
   const held = new Map<Venue, Map<number, number[]>>();
   apply(held, d.f!);
   same(held, brute(live, d.f!.st, d.f!.lo, d.f!.hi), 'first');
@@ -123,7 +124,7 @@ test('the price moving a tenth lays the fine layer out again around it, whole, w
   const d2 = live.flush().find((x) => x.coin === 'BTC')!;
   assert.ok(d2.f?.whole, 'laid out again, sent whole');
   assert.notEqual(d2.f!.ep, d.f!.ep);
-  assert.ok(Math.abs(d2.f!.lo - px.v * (1 - FINE_REACH)) < 1e-6);
+  assert.ok(Math.abs(d2.f!.lo - px.v * NOW_LO) < 1e-6);
   const held = new Map<Venue, Map<number, number[]>>();
   apply(held, d2.f!);
   same(held, brute(live, d2.f!.st, d2.f!.lo, d2.f!.hi), 'new layout');

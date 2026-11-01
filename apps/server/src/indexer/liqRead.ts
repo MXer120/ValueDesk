@@ -395,7 +395,7 @@ export async function liqHeatmapOf(coin: string, venues: readonly Venue[], walle
  * 0.02% of the price - BTC $20 - so a finer step cannot come out of its rows. The cohort load
  * keeps the books with every position (a minute old at most), and gather prices them exactly;
  * a step finer than the engine's is bucketed from those, for the price window on screen only
- * (FINE_MAX_BUCKETS at most: BTC at $1 is $4,000 of it). One pass over the coin's positions,
+ * (FINE_MAX_BUCKETS at most; only those with levels are sent). One pass over the coin's positions,
  * on levels kept per load (gatherNow), and edge-cached like the heatmap (perf.ts).
  */
 export interface FineAsk {

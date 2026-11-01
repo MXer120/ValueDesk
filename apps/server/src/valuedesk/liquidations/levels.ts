@@ -200,11 +200,13 @@ export interface LiqSnap {
  */
 export const NOW_STEP = 0.0002;
 /**
- * The fine route (liqRead.ts liqHeatmapFine): buckets in one answer's window at most. A step
- * finer than NOW_STEP is bucketed from the books for the price window on screen only; BTC at
- * $1 is a window of $4,000, and the web coarsens its step when the screen holds more.
+ * The fine route and stream (liqRead.ts liqHeatmapFine, routes/liqWs.ts): buckets in one
+ * window at most. The step picked holds however far the view is zoomed out (owner 2026-11-01:
+ * "the selected granularity ... sometimes still switching to $100"): an answer costs one pass
+ * over the coin's positions and carries only buckets with levels, whatever the window's width;
+ * this only bounds a window asked - BTC at $1 from 0 to $1M.
  */
-export const FINE_MAX_BUCKETS = 4_000;
+export const FINE_MAX_BUCKETS = 1_000_000;
 /** Levels between these shares of the price are bucketed; the rest is counted as outside. */
 export const NOW_LO = NOW_LO_SHARE;
 export const NOW_HI = NOW_HI_SHARE;
@@ -345,8 +347,8 @@ export function snapOfNow(row: LiqNow, share = HIST_STEP): LiqSnap {
  * Finer than a snapshot's step, near the price (owner 2026-11-01: "historical view supports $10 &
  * $1 resolution"): with each snapshot, the levels at a tenth and a hundredth of its step (BTC
  * near $78K: $10 and $1), each over `half` of its buckets either side of the price - BTC $10 to
- * +-12.5%, $1 to +-2.5%. A screen holds FINE_MAX_BUCKETS of a step at most, so a window wider
- * than a layer's would be drawn coarser anyway.
+ * +-12.5%, $1 to +-2.5%. Past a layer's reach a snapshot is drawn at its own step (the levels
+ * there were not kept finer).
  *
  * Exact: the live engine's level of every position as its account was last priced (live.ts),
  * not its 0.02% bucket. The change log (liq_log) cannot stand in: it writes a level again only

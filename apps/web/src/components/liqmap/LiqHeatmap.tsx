@@ -303,8 +303,8 @@ export function LiqHeatmap({ symbol, engine, instance, address = null }: { symbo
   // The bar width in server buckets: from the price and Fine / Medium / Coarse until the window is
   // known (groupFor), else the step when it is a whole number of them - told to the stream a quarter
   // second after it settles, drawn at once from what is held meanwhile. A finer step streams from the
-  // fine layer for the window on screen (fineWindow: coarser while that holds more than
-  // FINE_MAX_BUCKETS of it); with wallets picked, or beyond the layer's reach, the fine route is read.
+  // fine layer for the window on screen, at the step picked however far out (fineWindow); with
+  // wallets picked, or beyond the layer's reach, the fine route is read.
   const fineSubOf = (w: { step: number; from: number; to: number }): FineSub => {
     const fk = fm && !wallets.length && live.connected ? streamGroup(w.step, fm.st) : null;
     if (!fk || fk > 1000) return null;
@@ -621,7 +621,7 @@ function LiveView({ h: base, fine, onWindow, unit, want, streamK, colorBy, lev, 
   // Exact steps for the window (the fine route) when asked; the window, the curves and the axis stay the stream's.
   const h = useMemo(() => fine ?? regroup(base, k), [fine, base, k]);
   useEffect(() => { if (w > 0) onWindow(lo, hi, W); }, [lo, hi, w, W, onWindow]);
-  const shown = h.buckets.filter((b) => b[0] + h.step > lo && b[0] < hi);
+  const shown = useMemo(() => h.buckets.filter((b) => b[0] + h.step > lo && b[0] < hi), [h, lo, hi]);
   const { fit: fitBar, top: topBar } = barScale(shown, unit, colorBy);
   const fitCum = Math.max(1e-12, ...[...cum.long, ...cum.short].filter(([px]) => px >= lo && px <= hi).map(([, v]) => v));
   // The left axis scales from 2% of the fit out to the largest bar (to see a giant level whole).
@@ -643,6 +643,38 @@ function LiveView({ h: base, fine, onWindow, unit, want, streamK, colorBy, lev, 
   };
   const longPath = path(cum.long, 'lo');
   const shortPath = path(cum.short, 'hi');
+  // The bars, one path per colour (a step picked holds zoomed out - BTC $1 over the whole range is
+  // ~13k of them, too many SVG rects to redraw each second); the picked one drawn again on top.
+  const { bars, pickedBar } = useMemo(() => {
+    const d = new Map<string, string>();
+    let pickedBar: Array<[string, [number, number, number, number]]> | null = null;
+    const r1 = (v: number) => Math.round(v * 10) / 10;
+    for (const b of shown) {
+      const [l, s] = valOf(b, unit);
+      const rs: Array<[string, [number, number, number, number]]> = [];
+      const bx = x(b[0]);
+      if (colorBy === 'lev') {
+        // Both sides stacked by band from the axis up: low, mid, high, unknown; as tall as their total.
+        const v = bandsOf(b, unit);
+        const sum = v[0] + v[1] + v[2] + v[3] || l + s;
+        const full = M.t + H - yBar(l + s);
+        let y0 = M.t + H;
+        LEV_KEYS.forEach((k, i) => {
+          const hh = (v[i]! / sum) * full;
+          if (!(hh > 0)) return;
+          y0 -= hh;
+          rs.push([`lqm-bar-lev is-${k}`, [bx, y0, bw, hh]]);
+        });
+      } else {
+        if (l > 0) rs.push(['lqm-bar-long', [bx, yBar(l), bw, M.t + H - yBar(l)]]);
+        if (s > 0) rs.push(['lqm-bar-short', [bx, yBar(s), bw, M.t + H - yBar(s)]]);
+      }
+      if (barOf(b, unit, colorBy) > maxBar) rs.push(['lqm-bar-over', [bx, M.t, bw, 2]]);
+      for (const [cls, [rx, ry, rw, rh]] of rs) d.set(cls, `${d.get(cls) ?? ''}M${r1(rx)} ${r1(ry)}h${r1(rw)}v${r1(rh)}h${r1(-rw)}z`);
+      if (pick && Math.abs(pick.from - b[0]) < h.step / 2) pickedBar = rs;
+    }
+    return { bars: [...d], pickedBar };
+  }, [shown, unit, colorBy, maxBar, lo, hi, W, H, bw, pick, h.step]); // eslint-disable-line react-hooks/exhaustive-deps
   /** Zoom by `f` around a point `frac` of the way across the window (functional: fast wheel ticks each count). */
   const zoom = (f: number, frac = 0.5) => setView((v) => {
     const [a, b] = v ?? [lo, hi];
@@ -711,36 +743,12 @@ function LiveView({ h: base, fine, onWindow, unit, want, streamK, colorBy, lev, 
           <g clipPath="url(#lqm-clip-live)">
             {longPath && <path d={`${longPath} V${yCum(0)} Z`} className="lqm-area is-long" />}
             {shortPath && <path d={`${shortPath} V${yCum(0)} Z`} className="lqm-area is-short" />}
-            {shown.map((b) => {
-              const [l, s] = valOf(b, unit);
-              const on = pick && Math.abs(pick.from - b[0]) < h.step / 2;
-              const over = barOf(b, unit, colorBy) > maxBar;
-              if (colorBy === 'lev') {
-                // Both sides stacked by band from the axis up: low, mid, high, unknown; as tall as their total.
-                const v = bandsOf(b, unit);
-                const sum = v[0] + v[1] + v[2] + v[3] || l + s;
-                const full = M.t + H - yBar(l + s);
-                let y0 = M.t + H;
-                return (
-                  <g key={b[0]} className={on ? 'is-picked' : ''}>
-                    {LEV_KEYS.map((k, i) => {
-                      const hh = (v[i]! / sum) * full;
-                      if (!(hh > 0)) return null;
-                      y0 -= hh;
-                      return <rect key={k} x={x(b[0])} y={y0} width={bw} height={hh} className={`lqm-bar-lev is-${k}`} />;
-                    })}
-                    {over && <rect x={x(b[0])} y={M.t} width={bw} height={2} className="lqm-bar-over" />}
-                  </g>
-                );
-              }
-              return (
-                <g key={b[0]} className={on ? 'is-picked' : ''}>
-                  {l > 0 && <rect x={x(b[0])} y={yBar(l)} width={bw} height={M.t + H - yBar(l)} className="lqm-bar-long" />}
-                  {s > 0 && <rect x={x(b[0])} y={yBar(s)} width={bw} height={M.t + H - yBar(s)} className="lqm-bar-short" />}
-                  {over && <rect x={x(b[0])} y={M.t} width={bw} height={2} className="lqm-bar-over" />}
-                </g>
-              );
-            })}
+            {bars.map(([cls, d]) => <path key={cls} d={d} className={cls} />)}
+            {pickedBar && (
+              <g className="is-picked">
+                {pickedBar.map(([cls, r]) => <rect key={cls} x={r[0]} y={r[1]} width={r[2]} height={r[3]} className={cls} />)}
+              </g>
+            )}
             {longPath && <path d={longPath} className="lqm-cum is-long" />}
             {shortPath && <path d={shortPath} className="lqm-cum is-short" />}
             <line x1={x(p)} x2={x(p)} y1={M.t} y2={M.t + H} className="lqm-now" />

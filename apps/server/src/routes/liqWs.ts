@@ -38,7 +38,7 @@ import { clientKey } from '../hosted.js';
 import { liqFeed, type CoinChange } from '../indexer/liqFeed.js';
 import { heatOf, liqHeatmap, liveSrc } from '../indexer/liqRead.js';
 import { marketsNow } from '../valuedesk/liquidations/rules.js';
-import { addRow, trimRow, type LiqRow } from '../valuedesk/liquidations/levels.js';
+import { FINE_MAX_BUCKETS, addRow, trimRow, type LiqRow } from '../valuedesk/liquidations/levels.js';
 
 export const LIQ_WS_PATH = '/ws/liq';
 const MAX_CONNECTIONS = Number(process.env.VALUESCAN_LIQ_WS_MAX) || 5_000;
@@ -63,8 +63,8 @@ interface Group {
   fineSent: Map<number, LiqRow>;
 }
 
-/** A fine window holds at most this many streamed cells (the web's FINE_MAX_BUCKETS). */
-const FINE_MAX = 4_000;
+/** A fine window holds at most this many streamed cells (it sends only those with levels). */
+const FINE_MAX = FINE_MAX_BUCKETS;
 
 /** Widths a viewer may ask for, in server buckets (the web's groupFor uses the same). */
 const MULTIPLES = new Set([1, 2, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000]);

@@ -55,20 +55,23 @@ test('a whole number of the engine\'s buckets is the stream, summed; anything el
   assert.equal(streamAsk(7), 1);
 });
 
-test('the fine window: the screen and half of it each side, on a shared grid, never past the cap', () => {
-  // BTC zoomed in to $2,000 around the price at $1: 4,000 buckets would not hold the margin, so $2.
+test('the fine window: the screen and half of it each side, on a shared grid, the step picked kept', () => {
   const a = fineWindow(76_500, 78_500, 1);
+  assert.equal(a.step, 1);
   assert.ok(a.from <= 76_500 - 1_000 && a.to >= 78_500 + 1_000, 'the margin is read');
-  assert.ok((a.to - a.from) / a.step <= 4_000, 'within the cap');
   // Zoomed in to $500: $1 holds.
   const b = fineWindow(77_300, 77_800, 1);
   assert.equal(b.step, 1);
   assert.ok((b.to - b.from) / b.step <= 4_000);
-  // Zoomed out over 0.5x-1.5x: coarser for the view, a round width.
+  // Zoomed out over 0.5x-1.5x (owner 2026-11-01: "the selected granularity ... sometimes still
+  // switching to $100"): $1 and $10 hold.
   const c = fineWindow(38_000, 116_000, 1);
-  assert.ok(c.step >= 50, 'coarsened');
-  assert.equal(c.step, niceUp(c.step), 'a round width');
-  assert.ok((c.to - c.from) / c.step <= 4_000);
+  assert.equal(c.step, 1);
+  assert.equal(fineWindow(38_000, 116_000, 10).step, 10);
+  // Past the cap only (a window of a million buckets), a round width.
+  const e = fineWindow(0, 5_000_000, 1);
+  assert.ok(e.step > 1 && e.step === niceUp(e.step));
+  assert.ok((e.to - e.from) / e.step <= 1_000_000);
   // Two viewers a few dollars apart ask the same window (the edge shares the answer).
   assert.deepEqual(fineWindow(77_301, 77_799, 1), fineWindow(77_303, 77_802, 1));
   // A cheap coin at its tick.
