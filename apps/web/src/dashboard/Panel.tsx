@@ -330,6 +330,10 @@ export function MarketOnly({
     };
 
     apply();
+    // Filter off: the pass above showed every row an earlier filter hid, and the rows React adds
+    // carry no style of ours - nothing to re-apply on each change (it walked every table's rows
+    // on every account-table update until 2026-11-01).
+    if (!active) return;
 
     // React re-renders these tables on every account poll, which replaces the
     // rows we just styled. Re-apply when the subtree changes.

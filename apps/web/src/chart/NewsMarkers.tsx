@@ -20,7 +20,8 @@
  * knowledge folder where the folders are there.
  *
  * A DOM layer, not canvas: logos are images, and the hover is the browser's.
- * Positions follow the chart frame by frame, re-rendering this layer alone.
+ * Positions follow the chart in the frame it draws them (candleDraws.ts),
+ * re-rendering this layer alone.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -28,6 +29,7 @@ import type { Chart as KChart } from 'klinecharts';
 import { CoinIcon } from '../components/CoinIcon';
 import { MENU_ICONS } from '../dashboard/tabExtras';
 import { NEWS_ICONS } from './chartIcons';
+import { followChart } from './candleDraws';
 import {
   FED_LIVE_URL,
   NEWS_KIND_LABEL,
@@ -163,16 +165,15 @@ export function NewsMarkers({ chart, marks, left, top, barMs, coin, mode, leavin
     return () => window.removeEventListener(RELEASE_EVENT, landed);
   }, []);
 
-  // Where each marker is, every frame; a render only when one moved.
+  // Where each marker is, after every chart draw; a render only when one moved.
   useEffect(() => {
     if (!chart || marks.length === 0) {
       setPlaced([]);
       setFomc([]);
       return;
     }
-    let raf = 0;
     let last = '';
-    const tick = () => {
+    const read = () => {
       const size = chart.getSize(PANE);
       const width = size?.width ?? 0;
       const height = size?.height ?? 0;
@@ -223,10 +224,8 @@ export function NewsMarkers({ chart, marks, left, top, barMs, coin, mode, leavin
         setFomc(windows);
         setPane({ width, height, bar });
       }
-      raf = requestAnimationFrame(tick);
     };
-    tick();
-    return () => cancelAnimationFrame(raf);
+    return followChart(chart, PANE, read);
   }, [chart, marks, windowsShown]);
 
   // A pinned card closes on a press elsewhere or Escape.

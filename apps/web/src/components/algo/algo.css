@@ -525,6 +525,9 @@ select.algo-sf__pick option { background: #1c1b1a; }
 .algo-st__live i { width: 7px; height: 7px; border-radius: 50%; background: var(--pos); animation: algo-st-live 1.6s ease-in-out infinite; }
 @keyframes algo-st-live { 50% { opacity: 0.35; } }
 @media (prefers-reduced-motion: reduce) { .algo-st__live i { animation: none; } }
+/* Nobody at the page (attention.ts): the running marks stay lit, without the pulse that kept every frame drawn. */
+:root[data-still] .algo-st__live i,
+:root[data-still] .algo-status.is-running::before { animation: none; }
 
 /* A conditional's conditions: each a soft card; the market and the choices as the ticket's dropdowns. */
 .algo-cond {

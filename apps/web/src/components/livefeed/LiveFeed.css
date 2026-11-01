@@ -121,6 +121,8 @@
 .lf__err { position: absolute; left: 10px; right: 10px; top: 52px; z-index: 4; margin: 0; padding: 6px 10px; border-radius: 8px; background: rgba(20, 20, 22, 0.9); color: var(--neg); font-size: var(--fs-xs); }
 .lf:fullscreen { border-radius: 0; }
 @media (prefers-reduced-motion: reduce) { .lf__live i { animation: none; } }
+/* Nobody at the page (attention.ts): lit, not blinking. */
+:root[data-still] .lf__live i { animation: none; }
 
 /* The panel around the feed shows nothing of its own at the edges: no ring and no
    grey sliver while it is resized. */

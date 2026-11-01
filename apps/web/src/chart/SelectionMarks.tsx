@@ -2,11 +2,12 @@
  * The drawings picked by a marked area (Ctrl / ⌘ + drag, Chart.tsx), shown as
  * small squares on every anchor - klinecharts itself can show only one
  * selected drawing. The squares follow the chart through pans, zooms and
- * scale drags frame by frame, re-rendering this layer alone (never the chart)
- * and only when a square actually moved.
+ * scale drags in the frame the chart draws them (candleDraws.ts), re-rendering
+ * this layer alone (never the chart) and only when a square actually moved.
  */
 import { useEffect, useState } from 'react';
 import type { Chart as KChart } from 'klinecharts';
+import { followChart } from './candleDraws';
 
 const PANE = 'candle_pane';
 
@@ -17,9 +18,8 @@ export function SelectionMarks({ chart, ids, left, top }: { chart: KChart | null
       setPts([]);
       return;
     }
-    let raf = 0;
     let last = '';
-    const tick = () => {
+    const read = () => {
       const pane = chart.getSize(PANE);
       const out: Array<{ x: number; y: number }> = [];
       for (const id of ids) {
@@ -40,10 +40,8 @@ export function SelectionMarks({ chart, ids, left, top }: { chart: KChart | null
         last = key;
         setPts(out);
       }
-      raf = requestAnimationFrame(tick);
     };
-    tick();
-    return () => cancelAnimationFrame(raf);
+    return followChart(chart, PANE, read);
   }, [chart, ids]);
 
   if (pts.length === 0) return null;

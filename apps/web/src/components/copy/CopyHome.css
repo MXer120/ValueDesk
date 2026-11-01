@@ -86,6 +86,7 @@
 }
 @keyframes cpy-live { to { box-shadow: 0 0 0 6px transparent; } }
 @media (prefers-reduced-motion: reduce) { .cpy-copybtn__live { animation: none; } }
+:root[data-still] .cpy-copybtn__live { animation: none; }
 
 .cpy-venue {
   display: inline-flex; align-items: center; gap: 4px;
@@ -591,6 +592,10 @@
   92%  { --cpy-glare: 560deg; }
   100% { --cpy-glare: 685deg; }
 }
+/* Scrolled away, the glare waits (offscreen.ts): a paint a frame per card, seen or not. Nobody
+   at the page (attention.ts), it rests as under reduced motion. */
+.cpy-glow[data-off] .cpy-glow__glare { animation-play-state: paused; }
+:root[data-still] .cpy-glow__glare { animation: none; }
 .cpy-card--low .cpy-glow { display: none; }
 .cpy-card--mid .cpy-glow__glare { animation-duration: 8s; }
 @media (prefers-reduced-motion: reduce) {

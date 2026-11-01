@@ -28,6 +28,7 @@
  */
 import { useEffect, useRef } from 'react';
 import toneUrl from './whale-tone.png?inline';
+import { isStill, onStill } from '../../attention';
 
 /** The tone map's size, and its row on the surface; the box adds a little room either side. */
 const TW = 478;
@@ -147,6 +148,8 @@ export function DotWhale() {
     let raf = 0;
     let last = 0;
     let gone = false;
+    /** Some dot is still off its place (the pointer pushed it). */
+    let pushed = false;
 
     const fit = () => {
       const r = el.getBoundingClientRect();
@@ -185,6 +188,7 @@ export function DotWhale() {
       octx.fillStyle = color;
       const bob = still ? 0 : (1 - Math.cos(t / 4200)) * 0.8;
       const reach = 70 * scale;
+      pushed = false;
       for (const d of dots) {
         const vx = ox + d.x * scale - pointer.x;
         const vy = oy + (d.y + bob) * scale - pointer.y;
@@ -198,6 +202,7 @@ export function DotWhale() {
           d.dx *= 0.9;
           d.dy *= 0.9;
         }
+        if (!pushed && (Math.abs(d.dx) > 0.02 || Math.abs(d.dy) > 0.02)) pushed = true;
         const tw = still ? 1 : 0.88 + 0.12 * Math.sin((t / 1300) * d.sp + d.ph);
         if (d.a * tw <= 0.01) continue;
         octx.globalAlpha = d.a * tw;
@@ -252,13 +257,34 @@ export function DotWhale() {
       ctx.drawImage(mid, 0, 0);
       ctx.drawImage(low, 0, 0);
     };
+    // Drawn only while some of it is on screen and someone is at the page (attention.ts): it drew
+    // 18,000 dots and two blurs 30 times a second, scrolled away or not, used or not (2026-11-01).
+    // Resting, it keeps its last frame. About 30 frames a second while the pointer is over it or
+    // dots are still easing back; 10 otherwise, on a timer (an empty animation frame is work too) -
+    // the dip moves it under 2 px in 13 s and a twinkle changes a dot's alpha by under 0.02 in a
+    // tenth of a second, so the slower frames show the same motion for a third of the work.
+    let shown = true;
+    let resting = isStill();
+    let timer = 0;
     const loop = (t: number) => {
-      if (t - last > 32) { draw(t); last = t; }
-      raf = requestAnimationFrame(loop);
+      raf = 0;
+      if (!shown || resting || gone) return;
+      const gap = pointer.x > -1e3 || pushed ? 32 : 100;
+      if (t - last > gap - 4) { draw(t); last = t; }
+      if (gap > 50) {
+        timer = window.setTimeout(() => { timer = 0; wake(); }, Math.max(0, gap - (performance.now() - last)));
+      } else raf = requestAnimationFrame(loop);
     };
+    const wake = () => { if (shown && !resting && !still && !raf && !timer && !gone) raf = requestAnimationFrame(loop); };
+    const io = typeof IntersectionObserver === 'function'
+      ? new IntersectionObserver(([e]) => { shown = !!e?.isIntersecting; wake(); })
+      : null;
+    io?.observe(el);
+    const offStill = onStill((s) => { resting = s; wake(); });
 
     fit();
-    const ro = new ResizeObserver(() => { fit(); if (still) draw(0); });
+    // A resize clears the canvas: drawn again at once when no loop will (still, resting, away).
+    const ro = new ResizeObserver(() => { fit(); if (still || !raf) draw(last); });
     ro.observe(el);
     const move = (e: PointerEvent) => {
       const r = canvas.getBoundingClientRect();
@@ -274,13 +300,16 @@ export function DotWhale() {
       tone = t;
       dots = stipple(t, 18000);
       fit();
-      if (still) draw(0);
+      if (still || !raf) draw(last);
     }).catch(() => { /* no art, the hero still reads */ });
-    if (!still) raf = requestAnimationFrame(loop);
+    wake();
     return () => {
       gone = true;
       cancelAnimationFrame(raf);
+      window.clearTimeout(timer);
       ro.disconnect();
+      io?.disconnect();
+      offStill();
       el.removeEventListener('pointermove', move);
       el.removeEventListener('pointerleave', leave);
     };

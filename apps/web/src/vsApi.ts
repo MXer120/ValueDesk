@@ -33,11 +33,12 @@ import type {
 import { VenueError, venues } from './exchange/venues';
 import { serverGetJson } from './serverFetch';
 import type { CalendarEvent, CalendarSource } from '@sign/valuedesk/calendar.js';
+import type { CardPeek } from '@sign/valuedesk/hyperliquid/trader.js';
 import type { LiqAt, LiqHeatmap, LiqHistory, LiqHistoryFine, LiqWallets, WalletLiq } from '@sign/indexer/liqRead.js';
 import type { LiqTile, LiqTileIndex, TileAsk } from '@sign/indexer/liqTiles.js';
 import type { CohortDetailResponse, CohortFilter, CohortFocusResponse, CohortId, CohortMapResponse, CohortRange, CohortWalletsResponse, CohortsResponse, WalletSort } from '@sign/valuedesk/cohorts/model.js';
 
-export type { CalendarEvent, CalendarSource };
+export type { CalendarEvent, CalendarSource, CardPeek };
 export type {
   VsBalance,
   VsFunding,
@@ -150,6 +151,9 @@ export const vsApi = {
   // --- one trader on one venue: straight from the venue, in this browser -----
   trader: (venue: Venue, address: string, signal?: AbortSignal): Promise<TraderProfile | null> =>
     direct(venues.trader(venue, address), signal),
+  /** A trader card's curves and last trade (exchange/venues.ts peek). */
+  traderPeek: (venue: Venue, address: string, signal?: AbortSignal): Promise<CardPeek | null> =>
+    direct(venues.peek(venue, address), signal),
 
   fills: (venue: Venue, address: string, o: { from?: number; to?: number; limit?: number } = {}, signal?: AbortSignal): Promise<VsFill[]> =>
     direct(venues.fills(venue, address, o), signal),

@@ -27,6 +27,7 @@ import { SiteGate } from './legal/LegalGate';
 import { AnalyticsPrompt } from './legal/AnalyticsPrompt';
 import { loadViewerGeo } from './legal/geo';
 import { startAnalytics } from './analytics/usage';
+import { startAttention } from './attention';
 import './styles.css';
 import { useNumStyle } from './numStyle';
 
@@ -43,6 +44,7 @@ captureBoot();
 void loadViewerGeo();
 // ValueDesk's own usage analytics (analytics/usage.ts): nothing at all - no storage, no request - until the visitor allows it.
 startAnalytics();
+startAttention();
 // window.__vsTest for the UI specs (testBridge.ts): the dev server only - a production build drops this branch and the module.
 if (import.meta.env.DEV) void import('./testBridge').then((m) => m.installTestBridge());
 

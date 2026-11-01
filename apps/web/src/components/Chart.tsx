@@ -617,6 +617,31 @@ function GuardedChart(props: ChartProps) {
 }
 export { GuardedChart as Chart };
 
+/**
+ * Wall clock for the chart's footer strip, in the chart's zone.
+ *
+ * It used to be UTC while the axis above it was drawn in the browser's local
+ * time, so the footer and the last candle disagreed by the zone offset. Both
+ * now read `tz`, the footer names the zone ("UTC" or "UTC+2", as SoDEX's chart
+ * does), and a click on it switches.
+ *
+ * Its own component: the tick a second re-renders these few characters, not the
+ * whole chart (it did until 2026-11-01, once a second on every open chart). A
+ * tick that lands during a view move still waits for the move to end.
+ */
+function ChartClock({ tz, moving, afterMove }: { tz: TimeZoneMode; moving: { current: boolean }; afterMove: { current: Array<() => void> } }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const tick = () => setNow(Date.now());
+    const id = window.setInterval(() => {
+      if (moving.current) afterMove.current.push(tick);
+      else tick();
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [moving, afterMove]);
+  return <>{clockText(now, tz)} {tz === 'utc' ? 'UTC' : `(${utcOffsetLabel(now)})`}</>;
+}
+
 function Chart({
   engine, symbol, sym, onChartReady, bare = false,
   address = null, unlocked = false, refreshToken = 0, onChanged, onPrice, lastPrice,
@@ -992,13 +1017,6 @@ function Chart({
     }
     legendWait.current = { bar };
   }, []);
-  /** Wall clock for the chart's footer strip, in the chart's zone.
-   *
-   *  It used to be UTC while the axis above it was drawn in the browser's
-   *  local time, so the footer and the last candle disagreed by the zone
-   *  offset. Both now read `tz`, the footer names the zone ("UTC" or
-   *  "UTC+2", as SoDEX's chart does), and a click on it switches. */
-  const [now, setNow] = useState(() => Date.now());
   const [tzMenu, setTzMenu] = useState(false);
   /** Whether THIS panel is the fullscreen element. Read from the document
    *  rather than tracked optimistically: the user can leave fullscreen with
@@ -1163,18 +1181,6 @@ function Chart({
   };
 
   useEffect(() => () => window.clearTimeout(settleTimer.current), []);
-
-  // One tick a second for the footer clock. Cheap, and it only ever rewrites a
-  // 12-character text node - but it re-renders this component, so a tick that
-  // lands during a view move waits for the move to end.
-  useEffect(() => {
-    const tick = () => setNow(Date.now());
-    const id = window.setInterval(() => {
-      if (moving.current) afterMove.current.push(tick);
-      else tick();
-    }, 1000);
-    return () => window.clearInterval(id);
-  }, []);
 
   // A new time zone re-labels the axis and the crosshair at once: the resize
   // re-lays the chart, which rebuilds the time ticks now rather than on the
@@ -4785,7 +4791,7 @@ function Chart({
               aria-expanded={tzMenu}
               onClick={() => setTzMenu((o) => !o)}
             >
-              {clockText(now, tz)} {tz === 'utc' ? 'UTC' : `(${utcOffsetLabel(now)})`}
+              <ChartClock tz={tz} moving={moving} afterMove={afterMove} />
             </button>
             {tzMenu && (
               <div className="menu-popup kc-tz-menu" role="menu">
@@ -4803,7 +4809,7 @@ function Chart({
                         setTzMenu(false);
                       }}
                     >
-                      {z === 'utc' ? 'UTC' : `Local (${utcOffsetLabel(now)})`}
+                      {z === 'utc' ? 'UTC' : `Local (${utcOffsetLabel(Date.now())})`}
                     </button>
                   ))}
                 </div>

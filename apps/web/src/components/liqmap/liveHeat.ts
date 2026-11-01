@@ -73,6 +73,9 @@ export function mergeFine(f: LiveFine, d: { at: number; p: number; b: Row[] }): 
   return { ...f, at: d.at, p: d.p, buckets: [...by.values()].sort((a, b) => a[0] - b[0]) };
 }
 
+/** A tab hidden this long closes the socket until it is shown again. */
+export const HIDDEN_CLOSE_MS = 60_000;
+
 /** What to ask of the fine layer: cells per drawn one and the price window (null: nothing). */
 export type FineSub = { k: number; from: number; to: number } | null;
 
@@ -94,13 +97,18 @@ export function useLiveHeat(coin: string, venues: readonly Venue[], on: boolean,
   const subMsg = () => JSON.stringify({ op: 'sub', coin: want.current.coin, venues: want.current.venues, k: want.current.k, fine: want.current.fineSub });
 
   // One socket for the widget's life; it resubscribes when the coin, the venues, the width or the fine window change.
+  // A tab hidden for HIDDEN_CLOSE_MS closes it (a delta a second nobody sees, for the tab and the
+  // server); shown again it reopens at once, and the snapshot the subscription answers redraws all.
   useEffect(() => {
     const url = on ? liqWsUrl() : null;
     if (!url) return;
     let closed = false;
+    let away = false;
     let backoff = 1_000;
     let timer: ReturnType<typeof setTimeout> | null = null;
+    let hideTimer: ReturnType<typeof setTimeout> | null = null;
     const open = () => {
+      if (away) return;
       const s = new WebSocket(url);
       ws.current = s;
       s.onopen = () => {
@@ -132,16 +140,38 @@ export function useLiveHeat(coin: string, venues: readonly Venue[], on: boolean,
       s.onclose = () => {
         if (ws.current === s) ws.current = null;
         setConnected(false);
-        if (closed) return;
+        if (closed || away) return;
         timer = setTimeout(open, backoff);
         backoff = Math.min(30_000, backoff * 2);
       };
       s.onerror = () => s.close();
     };
+    const seen = () => {
+      if (document.visibilityState === 'hidden') {
+        hideTimer ??= setTimeout(() => {
+          hideTimer = null;
+          away = true;
+          if (timer) clearTimeout(timer);
+          timer = null;
+          ws.current?.close();
+        }, HIDDEN_CLOSE_MS);
+        return;
+      }
+      if (hideTimer) clearTimeout(hideTimer);
+      hideTimer = null;
+      if (!away) return;
+      away = false;
+      backoff = 1_000;
+      if (!ws.current) open();
+    };
+    document.addEventListener('visibilitychange', seen);
     open();
+    seen(); // opened in a tab already hidden
     return () => {
       closed = true;
+      document.removeEventListener('visibilitychange', seen);
       if (timer) clearTimeout(timer);
+      if (hideTimer) clearTimeout(hideTimer);
       ws.current?.close();
       ws.current = null;
       setConnected(false);

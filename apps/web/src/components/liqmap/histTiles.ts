@@ -29,6 +29,7 @@ import type { LiqTile, LiqTileIndex } from '@sign/indexer/liqTiles.js';
 import type { Chart as KChart } from 'klinecharts';
 import { barMsOf, heatScale, type HeatPoint } from '../../chart/liqHeatIndicator';
 import { CANDLE_PANE_ID } from '../../chart/theme';
+import { followChart } from '../../chart/candleDraws';
 import type { LevFilter } from '../../chart/liqLev';
 import { usePolled } from '../explore/cohorts/parts';
 import { vsApi, type Venue } from '../../vsApi';
@@ -184,10 +185,10 @@ export function useHistTiles(coin: string | null, venues: readonly Venue[], view
 }
 
 /**
- * The window a chart shows on its candle pane - the visible bars' times and the price axis - read a
- * few times a second while `on` (a wheel, a drag, a scale switch or a new bar move it, and none of
- * them tells). For the trade chart's heatmap layer (chart/liqIndicators.tsx); the heatmap widget's
- * chart reports its own (LiqHeatmap.tsx ChartPanel).
+ * The window a chart shows on its candle pane - the visible bars' times and the price axis - read
+ * after each redraw of the pane while `on` (a wheel, a drag, a scale switch or a new bar move it,
+ * and each redraws it: chart/candleDraws.ts). For the trade chart's heatmap layer
+ * (chart/liqIndicators.tsx); the heatmap widget's chart reports its own (LiqHeatmap.tsx ChartPanel).
  */
 export function useChartWindow(chart: KChart | null, on: boolean): TileWindow | null {
   const [w, setW] = useState<TileWindow | null>(null);
@@ -206,9 +207,7 @@ export function useChartWindow(chart: KChart | null, on: boolean): TileWindow | 
       const t1 = list[Math.max(0, Math.min(list.length - 1, Math.ceil(r.realTo) - 1))]!.timestamp + barMsOf(list);
       setW((x) => (x && x.t0 === t0 && x.t1 === t1 && x.lo === lo && x.hi === hi ? x : { t0, t1, lo: Math.max(0, lo), hi }));
     };
-    read();
-    const t = window.setInterval(read, 400);
-    return () => window.clearInterval(t);
+    return followChart(chart, CANDLE_PANE_ID, read);
   }, [chart, on]);
   return w;
 }

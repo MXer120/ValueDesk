@@ -19,7 +19,7 @@ import { shownLabel } from '@sign/valuedesk/labels.js';
 import { buildSodexProfile, fillLimit, sodexFills, type SodexTraderIo } from '@sign/valuedesk/sodex/traderCore.js';
 import { gatewayReads } from '@sign/valuedesk/sodex/gatewayCore.js';
 import { coolingDown } from '@sign/valuedesk/sodex/util.js';
-import { hlFills, hlTrader, type LbRowSource } from '@sign/valuedesk/hyperliquid/trader.js';
+import { hlFills, hlPeek, hlTrader, type CardPeek, type LbRowSource } from '@sign/valuedesk/hyperliquid/trader.js';
 import { hlInfo } from '@sign/valuedesk/hyperliquid/client.js';
 import { hlPriceSeries, type PriceRange, type PriceSeries } from '@sign/valuedesk/hyperliquid/price.js';
 import { ACCOUNT_DETAIL, arcusProvider, lighterProvider, nameSpotFills, tradexyzProvider } from '@sign/valuedesk/extra/providers.js';
@@ -173,6 +173,19 @@ export const venues = {
       const profile = await answers.run(`trader:${venue}:${address}`, PROFILE_TTL, () => traderOf(venue, address));
       // A copy (the provider caches the profile object); no names anywhere (valuedesk/labels.ts).
       return profile ? { ...profile, summary: { ...profile.summary, label: shownLabel(profile.summary.address, profile.summary.label) } } : profile;
+    });
+  },
+
+  /**
+   * What a trader card shows - the curves and the last trade. Hyperliquid's without the profile's
+   * 2,000-fill sample (hlPeek: 754 KB for a busy trader, for one number); the other venues give
+   * their profile, which carries the same.
+   */
+  peek(venue: Venue, addressIn: string): Promise<CardPeek | null> {
+    if (venue !== 'hyperliquid') return venues.trader(venue, addressIn);
+    return guarded(async () => {
+      const address = addressOf(addressIn);
+      return answers.run(`peek:${venue}:${address}`, PROFILE_TTL, () => hlPeek(address, hlInfo));
     });
   },
 

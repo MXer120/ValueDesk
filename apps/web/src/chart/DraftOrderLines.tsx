@@ -3,12 +3,14 @@
  * a thin dashed line, muted in the side's colour, slowly fading in and out so
  * it never reads as a placed order (those are klinecharts overlays, solid and
  * labelled with a side, chart/orderOverlays.ts). An HTML layer over the canvas,
- * as SelectionMarks: the lines follow pans, zooms and scale drags frame by
- * frame, re-rendering this layer alone and only when a line moved.
+ * as SelectionMarks: the lines follow pans, zooms and scale drags in the frame
+ * the chart draws them (candleDraws.ts), re-rendering this layer alone and only
+ * when a line moved.
  */
 import { useEffect, useState } from 'react';
 import type { Chart as KChart } from 'klinecharts';
 import { useDraftOrders } from '../draftOrders';
+import { followChart } from './candleDraws';
 
 const PANE = 'candle_pane';
 
@@ -22,9 +24,8 @@ export function DraftOrderLines({ chart, engine, symbol, left, top }: { chart: K
       setRows([]);
       return;
     }
-    let raf = 0;
     let last = '';
-    const tick = () => {
+    const read = () => {
       const pane = chart.getSize(PANE);
       const px = chart.convertToPixel(mine.lines.map((l) => ({ value: l.price })), { paneId: PANE }) as Array<{ y?: number }>;
       const out: Array<{ y: number; label: string; kind: string }> = [];
@@ -41,10 +42,8 @@ export function DraftOrderLines({ chart, engine, symbol, left, top }: { chart: K
         setRows(out);
         setWidth(w);
       }
-      raf = requestAnimationFrame(tick);
     };
-    tick();
-    return () => cancelAnimationFrame(raf);
+    return followChart(chart, PANE, read);
   }, [chart, mine]);
 
   if (!mine || !rows.length || !width) return null;

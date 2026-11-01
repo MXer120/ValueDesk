@@ -194,6 +194,8 @@
 .lqm-dot.is-on { background: var(--pos); animation: lqm-pulse 1.6s ease-in-out infinite; }
 @keyframes lqm-pulse { 50% { opacity: 0.35; } }
 @media (prefers-reduced-motion: reduce) { .lqm-dot.is-on { animation: none; } }
+/* Nobody at the page (attention.ts): the dot stays lit, without the pulse that kept every frame drawn. */
+:root[data-still] .lqm-dot.is-on { animation: none; }
 
 /* The historical view: cells coloured by size (viridis), the market's candles over them. */
 .lqm-hist { background: #0b0b10; }

@@ -8,13 +8,14 @@
  * once the card scrolls into view - four at a time, so a long grid does not
  * spend the venue's rate budget in one burst.
  */
-import { useEffect, useId, useState, type CSSProperties, type MouseEvent } from 'react';
+import { useEffect, useId, useRef, useState, type CSSProperties, type MouseEvent } from 'react';
 import { CoinIcon } from '../CoinIcon';
 import { VENUE_BRAND } from '../venueBrand';
 import { DASH, fmtUsd, shortAddr } from '../../format';
-import { VENUE_LABEL, vsApi, type BoardWindow, type TraderProfile, type TraderRow, type Window } from '../../vsApi';
+import { VENUE_LABEL, vsApi, type BoardWindow, type CardPeek, type TraderRow, type Window } from '../../vsApi';
 import { explainScore, scoreBand, type CopyScore } from './copyScore';
 import { fmtSignedPct, fmtSignedUsd } from './setup';
+import { markOffscreen } from '../../offscreen';
 
 /* ------------------------------------------------------------ the peek ----- */
 
@@ -27,7 +28,7 @@ const PEEK_CONCURRENCY = 4;
 let running = 0;
 let holds = 0;
 const queue: Array<() => void> = [];
-const peeks = new Map<string, Promise<TraderProfile | null>>();
+const peeks = new Map<string, Promise<CardPeek | null>>();
 
 /**
  * Hold the cards' reads while something more important needs the venue's rate
@@ -53,14 +54,14 @@ function nextInQueue(): void {
   }
 }
 
-/** The trader's profile, at most PEEK_CONCURRENCY at once; one request per trader per page view. */
-function peekProfile(venue: TraderRow['venue'], address: string): Promise<TraderProfile | null> {
+/** The trader's curves and last trade, at most PEEK_CONCURRENCY at once; one request per trader per page view. */
+function peekProfile(venue: TraderRow['venue'], address: string): Promise<CardPeek | null> {
   const key = `${venue}:${address}`;
   const hit = peeks.get(key);
   if (hit) return hit;
-  const p = new Promise<TraderProfile | null>((resolve) => {
+  const p = new Promise<CardPeek | null>((resolve) => {
     queue.push(() => {
-      vsApi.trader(venue, address).then(resolve, () => resolve(null)).finally(() => {
+      vsApi.traderPeek(venue, address).then(resolve, () => resolve(null)).finally(() => {
         running -= 1;
         nextInQueue();
       });
@@ -75,7 +76,7 @@ function peekProfile(venue: TraderRow['venue'], address: string): Promise<Trader
 
 const PROFILE_WINDOW: Record<BoardWindow, Window> = { '1d': '1d', '7d': '7d', '30d': '30d', '90d': 'all', ytd: 'all', all: 'all' };
 
-function peekOf(p: TraderProfile, w: BoardWindow): TraderPeek {
+function peekOf(p: CardPeek, w: BoardWindow): TraderPeek {
   const series = p.equity[PROFILE_WINDOW[w]] ?? p.equity['30d'] ?? [];
   const pnl = series.flatMap((pt) => (pt.pnl === null ? [] : [pt.pnl]));
   const spark = pnl.length > 1 ? pnl : p.summary.spark && p.summary.spark.length > 1 ? p.summary.spark : null;
@@ -313,6 +314,9 @@ export function TraderCard({ row, score, window: w, unit, kind = 'copy', onOpen,
   const bigVal = unit === 'usd' ? pnl : score.roi;
   const cls = bigVal === null ? 'is-dim' : bigVal >= 0 ? 'pos' : 'neg';
   const copy = (e: MouseEvent) => { e.stopPropagation(); onCopy(row); };
+  // The glare stops while the card is scrolled away (offscreen.ts, CopyHome.css).
+  const glow = useRef<HTMLSpanElement>(null);
+  useEffect(() => (glow.current ? markOffscreen(glow.current) : undefined), []);
   return (
     <article
       ref={ref}
@@ -323,7 +327,7 @@ export function TraderCard({ row, score, window: w, unit, kind = 'copy', onOpen,
       aria-label={`Trader ${shortAddr(row.address)} on ${VENUE_LABEL[row.venue]}`}
     >
       {/* The order ticket's side glow (OrderEntry.css .oe-fx): a wash, a rim and a slow glare, rising from the score. */}
-      <span className="cpy-glow" aria-hidden="true">
+      <span className="cpy-glow" ref={glow} aria-hidden="true">
         <span className="cpy-glow__rim"><span className="cpy-glow__glare" /></span>
       </span>
       <header className="cpy-card__head">

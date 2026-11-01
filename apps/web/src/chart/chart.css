@@ -2053,3 +2053,6 @@ html.kc-drag * {
 @media (prefers-reduced-motion: reduce) {
   .kc-draft__line { animation: none; opacity: 0.4; }
 }
+/* Nobody at the page (attention.ts): the line rests as under reduced motion, still dashed and
+   muted - the pulse recomposited the chart 60 times a second. */
+:root[data-still] .kc-draft__line { animation: none; opacity: 0.4; }

@@ -210,6 +210,9 @@
 @media (prefers-reduced-motion: reduce) {
   .oe-fx__glare { animation: none; }
 }
+/* Nobody at the page (attention.ts): the glare rests as under reduced motion - it repainted the
+   ticket's rim 60 times a second for as long as the tab was open. */
+:root[data-still] .oe-fx__glare { animation: none; }
 .panel.oe > :not(.oe-fx) { position: relative; z-index: 1; }
 
 /* 14px at weight 400 - state is carried by colour, never by weight, so the
