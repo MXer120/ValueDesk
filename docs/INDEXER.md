@@ -258,3 +258,20 @@ needs free disk of about the file's size. On a deployed instance stop both servi
 first (`deploy/release/remote.sh run 'systemctl stop valuescan-api valuescan-indexer'`),
 run it as the `valuescan` user from `/opt/valuescan/current/apps/server`, then start the
 indexer, then the API.
+
+## Trade flow ("Who traded", `apps/server/src/flow/`)
+
+Every print of every streamed venue (Hyperliquid, trade.xyz, SoDEX perps and spot, Lighter,
+Arcus; both parties and the taker side) is kept in its own file, `valuescan-flow.db` next to
+the index (`VALUESCAN_FLOW_DB` to move it, `VALUESCAN_FLOW=0` to stop recording). Raw prints
+per market in 5-minute chunks, per-wallet sums per hour and per UTC day, so any candle of any
+interval reads a handful of rows (`/api/vs/flow`, `/api/vs/flow/wallet`). Measured 2026-11-01:
+12.9-15.3 bytes a print on disk; at Hyperliquid's archive average (about 600k prints an hour)
+roughly 0.2 GB a day for Hyperliquid alone, plus the other venues. Nothing is pruned
+(retention.ts). The file is not in the index backup.
+
+History before the first start: `src/flow/backfillHl.ts` replays Hyperliquid's node archive
+(`node_fills_by_block`, from 2025-07-27, requester pays) for Hyperliquid and trade.xyz; run it
+on server 1 only, never over hours the recorder already holds. SoDEX publishes no market-wide
+trade history; Lighter's public `/api/v1/trades` pages back from now, 100 a page, and cannot
+seek to a time.

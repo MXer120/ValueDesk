@@ -119,6 +119,9 @@ const EDGE_MAX_TTL_BY_PATH = new Map([
   ['/api/vs/liquidations/history', 300],
   // The heatmap's history in tiles: a final tile never changes (apps/server/src/indexer/liqTiles.ts).
   ['/api/vs/liquidations/tiles', 86400],
+  // Who traded a window: one that has passed never changes (apps/server/src/flow/read.ts).
+  ['/api/vs/flow', 86400],
+  ['/api/vs/flow/wallet', 86400],
 ]);
 /** The function's own path: never forwarded (it is only ever reached through the /api rewrite). */
 const SELF = '/api/__vs_proxy';

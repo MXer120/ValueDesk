@@ -116,6 +116,9 @@ export const HOSTED_ROUTES: readonly HostedRoute[] = [
   // ...and live: one WebSocket per viewer, straight from the browser to the instance (routes/liqWs.ts).
   { method: 'GET', url: '/ws/liq', cls: 'read' },
   { method: 'GET', url: '/api/vs/screener', cls: 'read' },
+  // Who traded a candle (flow/read.ts): the venues' public prints, both parties, kept by the indexer.
+  { method: 'GET', url: '/api/vs/flow', cls: 'read' },
+  { method: 'GET', url: '/api/vs/flow/wallet', cls: 'read' },
   // Aggregated server-side from the venues' trade streams - no one user's traffic.
   { method: 'GET', url: '/api/vs/whales', cls: 'read' },
   { method: 'GET', url: '/api/vs/positioning', cls: 'read' },

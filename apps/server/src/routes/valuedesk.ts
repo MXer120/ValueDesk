@@ -54,6 +54,8 @@ import { isCohortId, isSector, type CohortFilter, type CohortRange, type WalletS
 import { fineAskOf, isLiqRange, levFilterOf, liqAt, liqHeatmap, liqHeatmapFine, liqHeatmapOf, liqHistory, liqHistoryFine, liqWallets, walletLiqs } from '../indexer/liqRead.js';
 import { TILE_FINAL_CACHE, TILE_INDEX_CACHE, TILE_WALLET_CACHE, liqTile, liqTileIndex, liqTileIndexOf, liqTileOf, tileAskOf } from '../indexer/liqTiles.js';
 import { watchAddresses } from '../indexer/host.js';
+import { MAX_WINDOW_MS, flowWalletFills, flowWindow, type MarketKind } from '../flow/read.js';
+import type { FlowRole, FlowSide, FlowSort } from '../flow/codec.js';
 import { BOARD_WINDOWS, type BoardWindow } from '../valuedesk/types.js';
 import { buildExplore, keepExploreWarm } from '../valuedesk/explore.js';
 import { buildScreener, keepScreenerWarm } from '../valuedesk/screener.js';
@@ -102,6 +104,21 @@ function walletsOf(q: Q): string[] {
 }
 
 const bad = (msg: string) => Object.assign(new Error(msg), { statusCode: 400 });
+
+/** Cache-Control for the trade flow: a window that has passed never changes; one still forming moves every flush (15 s). */
+const FLOW_FINAL_CACHE = 'public, max-age=86400, stale-while-revalidate=86400';
+const FLOW_LIVE_CACHE = 'public, max-age=10, stale-while-revalidate=10';
+
+/** coin=, venues=, kind=, from=, to= (ms) of a trade flow read. */
+function flowWindowOf(q: Q): { coin: string; venues: Venue[]; kind: MarketKind; from: number; to: number } {
+  const coin = (q.coin ?? '').trim().toUpperCase();
+  if (!/^[A-Z0-9]{1,20}$/.test(coin)) throw bad('coin= is required');
+  const from = Math.floor(Number(q.from));
+  const to = Math.floor(Number(q.to));
+  if (!(from > 0) || !(to > from)) throw bad('from= and to= must be a time range in ms');
+  if (to - from > MAX_WINDOW_MS) throw bad('the window is longer than 400 days');
+  return { coin, venues: cohortVenues(q), kind: q.kind === 'spot' ? 'spot' : 'perp', from, to: Math.min(to, Date.now() + 60_000) };
+}
 
 function venueOf(q: Q, allowAll: true): Venue | 'all';
 function venueOf(q: Q, allowAll: false): Venue;
@@ -603,6 +620,47 @@ export async function valuedeskRoutes(app: FastifyInstance) {
       const side = q.side === 'long' || q.side === 'short' ? q.side : 'both';
       const body = liqAt(coin, cohortVenues(q), t, from, to, side, walletsOf(q), 100, levFilterOf(q.lev));
       if (!body) return fail(reply, new NotAvailable('The index is not running yet'));
+      return { ok: true, ...body };
+    } catch (e) {
+      return fail(reply, e);
+    }
+  });
+
+  /**
+   * Who traded `coin` in [`from`, `to`) (ms): every wallet's volume, buys and sells, average prices,
+   * fills, lean and taker share, ranked (flow/read.ts). `venues=` as the cohorts, `kind=perp|spot`,
+   * `role=all|taker|maker`, `side=all|buy|sell`, `sort=volume|fills|net|buy|sell`, `limit=` (<= 500),
+   * `q=` an address or account id to look for. A window that has passed is kept a day.
+   */
+  app.get('/api/vs/flow', async (req, reply) => {
+    try {
+      const q = req.query as Q;
+      const ask = flowWindowOf(q);
+      const role: FlowRole = q.role === 'taker' || q.role === 'maker' ? q.role : 'all';
+      const side: FlowSide = q.side === 'buy' || q.side === 'sell' ? q.side : 'all';
+      const sort: FlowSort = q.sort === 'fills' || q.sort === 'net' || q.sort === 'buy' || q.sort === 'sell' ? q.sort : 'volume';
+      const limit = Math.max(1, Math.min(500, Math.floor(Number(q.limit) || 100)));
+      const search = (q.q ?? '').trim().slice(0, 64);
+      const body = await flowWindow({ ...ask, role, side, sort, limit, ...(search.length >= 3 ? { q: search } : {}) });
+      if (!body) return fail(reply, new NotAvailable('The trade flow is not recorded yet'));
+      reply.header('Cache-Control', body.final ? FLOW_FINAL_CACHE : FLOW_LIVE_CACHE);
+      return { ok: true, ...body };
+    } catch (e) {
+      return fail(reply, e);
+    }
+  });
+
+  /** One wallet's fills of `coin` in [`from`, `to`): time, price, size, side, taker or maker, counterparty (`w=` address or account id, `venue=` one venue's account). */
+  app.get('/api/vs/flow/wallet', async (req, reply) => {
+    try {
+      const q = req.query as Q;
+      const ask = flowWindowOf(q);
+      const w = (q.w ?? '').trim();
+      if (!/^(0x[0-9a-fA-F]{40}|\d{1,12})$/.test(w)) throw bad('w= must be an address or an account id');
+      const venue = (VENUES as readonly string[]).includes(q.venue ?? '') ? (q.venue as Venue) : undefined;
+      const body = await flowWalletFills({ ...ask, wallet: w, ...(venue ? { venue } : {}) });
+      if (!body) return fail(reply, new NotAvailable('The trade flow is not recorded yet'));
+      reply.header('Cache-Control', body.final ? FLOW_FINAL_CACHE : FLOW_LIVE_CACHE);
       return { ok: true, ...body };
     } catch (e) {
       return fail(reply, e);

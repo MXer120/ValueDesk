@@ -36,6 +36,8 @@ import type { CalendarEvent, CalendarSource } from '@sign/valuedesk/calendar.js'
 import type { CardPeek } from '@sign/valuedesk/hyperliquid/trader.js';
 import type { LiqAt, LiqHeatmap, LiqHistory, LiqHistoryFine, LiqWallets, WalletLiq } from '@sign/indexer/liqRead.js';
 import type { LiqTile, LiqTileIndex, TileAsk } from '@sign/indexer/liqTiles.js';
+import type { FlowWindow, WalletFillsBody } from '@sign/flow/read.js';
+import type { FlowRole, FlowSide, FlowSort } from '@sign/flow/codec.js';
 import type { CohortDetailResponse, CohortFilter, CohortFocusResponse, CohortId, CohortMapResponse, CohortRange, CohortWalletsResponse, CohortsResponse, WalletSort } from '@sign/valuedesk/cohorts/model.js';
 
 export type { CalendarEvent, CalendarSource, CardPeek };
@@ -228,6 +230,13 @@ export const vsApi = {
   /** The positions of some wallets (up to 10) on every coin, with their liquidation prices. */
   liquidationPositions: (wallets: readonly string[], venues: readonly Venue[], signal?: AbortSignal) =>
     unwrap<{ wallets: string[]; asOf?: number; positions: WalletLiq[] }>(`/api/vs/liquidations/positions${qs({ wallets: wallets.join(','), venues: venues.join(',') })}`, signal),
+
+  /** Who traded `coin` in [from, to) (ms) on these venues: every wallet's volume, sides, prices and fills (server flow/read.ts). */
+  flow: (ask: { coin: string; venues: readonly Venue[]; kind?: 'perp' | 'spot'; from: number; to: number; role: FlowRole; side: FlowSide; sort: FlowSort; limit?: number; q?: string }, signal?: AbortSignal) =>
+    unwrap<FlowWindow>(`/api/vs/flow${qs({ coin: ask.coin, venues: ask.venues.join(','), kind: ask.kind, from: ask.from, to: ask.to, role: ask.role, side: ask.side, sort: ask.sort, limit: ask.limit, q: ask.q })}`, signal),
+  /** One wallet's fills of `coin` in [from, to) (`w`: its address or account id; `venue`: that venue's account only). */
+  flowWallet: (ask: { coin: string; venues: readonly Venue[]; kind?: 'perp' | 'spot'; from: number; to: number; w: string; venue?: Venue }, signal?: AbortSignal) =>
+    unwrap<WalletFillsBody>(`/api/vs/flow/wallet${qs({ coin: ask.coin, venues: ask.venues.join(','), kind: ask.kind, from: ask.from, to: ask.to, w: ask.w, venue: ask.venue })}`, signal),
 
   /** The wallets left out of the cohorts and the liquidation heatmap, with why and what they hold. */
   excluded: (signal?: AbortSignal) => unwrap<{ wallets: ExcludedWallet[] }>('/api/vs/excluded', signal),

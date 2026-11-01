@@ -43,6 +43,9 @@ import type { BoardRow, Coverage, HistoryKind, IndexStore, TraderStatsRow, Trade
 import { winRateOf } from '../valuedesk/winRate.js';
 import { HlStream, SodexStream, type Print } from './streams.js';
 import { mayPrune } from '../retention.js';
+import { FlowRecorder } from '../flow/recorder.js';
+import { FlowStore } from '../flow/store.js';
+import { dirname, join } from 'node:path';
 import {
   BOARD_SIZE,
   dayOf,
@@ -332,6 +335,8 @@ export class Indexer {
   readonly cohorts: CohortTracker;
   /** SoDEX account id -> address, for stream prints (they carry ids). */
   private sodexAddrOf = new Map<number, string>();
+  /** Every print kept for the per-candle breakdown (flow/recorder.ts); off with VALUESCAN_FLOW=0. */
+  flow: FlowRecorder | null = null;
   /**
    * Event-loop health: the worst delay a 500 ms tick saw in the last minute.
    * A long synchronous stretch here makes every upstream request look like a
@@ -413,6 +418,15 @@ export class Indexer {
     for (const x of this.ext.values()) {
       x.start({ store: this.store, now: this.now, streamSince: (v) => this.streamSince(v), onPrint: (p) => this.onPrint(p), hlLane: this.hl });
     }
+    if (INDEXER_ENV.streams() && process.env.VALUESCAN_FLOW !== '0' && !this.flow) {
+      try {
+        const path = process.env.VALUESCAN_FLOW_DB?.trim() || join(dirname(this.store.path), 'valuescan-flow.db');
+        this.flow = new FlowRecorder(new FlowStore(path), (venue, acct) =>
+          venue === 'sodex' ? this.sodexAddrOf.get(Number(acct)) ?? null : this.ext.get(venue)?.addressOf?.(acct) ?? null);
+      } catch (e) {
+        this.lastError = `flow: ${String(e)}`;
+      }
+    }
     if (INDEXER_ENV.streams()) {
       this.hlStream = new HlStream((p) => this.onPrint(p));
       this.sodexStream = new SodexStream((p) => this.onPrint(p));
@@ -425,6 +439,7 @@ export class Indexer {
       this.timers.push(t);
     };
     every(FLUSH_MS, () => this.flush(), 'flush');
+    if (this.flow) every(1_000, () => this.flow?.tick(), 'flow');
     // Traders' day aggregates build in the background, ~40 ms at a time.
     // (Both are synchronous: an error is noted, never thrown out of the timer - that would end the worker.)
     let aggTick = Date.now();
@@ -482,6 +497,11 @@ export class Indexer {
     for (const x of this.ext.values()) x.stop();
     this.cohorts.stop();
     this.flush();
+    if (this.flow) {
+      this.flow.stop();
+      try { this.flow.store.close(); } catch { /* closed */ }
+      this.flow = null;
+    }
   }
 
   /** Addresses on screen (profiles, searches) that should be indexed too. */
@@ -567,6 +587,7 @@ export class Indexer {
       streams: Object.fromEntries(VENUES.map((v) => [v, this.streamSince(v)])),
       sockets: Object.fromEntries(VENUES.map((v) => [v, this.socketOf(v)])),
       gaps: this.gaps,
+      flow: this.flow?.status() ?? null,
       aggregates: this.store.aggBacklog,
       retention: this.store.retention(this.now()),
       lanes: { hl: lane(this.hl), sgw: lane(this.sgw), strades: lane(this.strades), sdata: lane(this.sdata) },
@@ -594,6 +615,7 @@ export class Indexer {
     if (p.venue === 'hyperliquid' && p.symbol.startsWith('xyz:')) this.onPrint({ ...p, venue: 'tradexyz' });
     // Cohorts: the print moves both parties' books (SoDEX prints carry account ids).
     mark(`print:${p.venue}`);
+    this.flow?.add(p);
     const ext = this.ext.get(p.venue);
     const addressOf = (acct: string): string | null =>
       p.venue === 'sodex' ? this.sodexAddrOf.get(Number(acct)) ?? null : ext?.addressOf ? ext.addressOf(acct) : acct;

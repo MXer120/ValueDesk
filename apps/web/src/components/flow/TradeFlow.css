@@ -1,0 +1,239 @@
+/* Who traded (TradeFlow.tsx): a chart view, the app's tokens only. Kind and state are pills, dots
+   and icons - never a coloured edge down one side of a row (owner's rule). */
+
+.tfl {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Expanded: the same view over the page. */
+.tfl-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4vh 4vw;
+  background: color-mix(in srgb, var(--bg) 70%, transparent);
+  backdrop-filter: blur(2px);
+}
+.tfl--big {
+  width: min(1280px, 100%);
+  height: 100%;
+  border: 1px solid var(--panel-line);
+  border-radius: var(--radius-page);
+  background: var(--bg-panel);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+.tfl-parked { align-items: center; justify-content: center; }
+
+/* --- the bar: what, when, where ------------------------------------------------------------- */
+.tfl-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2) var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--panel-line);
+}
+.tfl-title { display: flex; align-items: center; gap: var(--sp-2); margin-right: auto; min-width: 0; }
+.tfl-title > div { display: flex; flex-direction: column; min-width: 0; }
+.tfl-title b { font-size: var(--fs-head); font-weight: 600; color: var(--text); }
+.tfl-title .tfl-dim { font-size: var(--fs-xs); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tfl-nav { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.tfl-nav .lbp-seg > button { padding: 0 8px; }
+
+.tfl-icobtn, .tfl-latest {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 30px;
+  min-width: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--panel-line);
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--bg) 55%, transparent);
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  text-decoration: none;
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
+}
+.tfl-nav .tfl-icobtn { padding: 0; }
+.tfl-icobtn:hover:not(:disabled), .tfl-latest:hover { color: var(--text); border-color: var(--line); }
+.tfl-icobtn:disabled { opacity: 0.4; cursor: default; }
+.tfl-latest.is-on { color: var(--text); border-color: color-mix(in srgb, var(--text) 70%, transparent); background: color-mix(in srgb, var(--text) 7%, transparent); }
+
+.tfl-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--sp-3) var(--sp-4) var(--sp-4);
+}
+.tfl-body > * { flex: none; }
+.tfl-dim { color: var(--dim); }
+.tfl .pos { color: var(--pos); }
+.tfl .neg { color: var(--neg); }
+
+/* --- summary ---------------------------------------------------------------------------------- */
+.tfl-sum {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--panel-line);
+  border-radius: var(--radius-tile);
+  background: var(--tint);
+}
+.tfl-sum__head { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--sp-4); flex-wrap: wrap; }
+.tfl-sum__head > div:first-child { display: flex; flex-direction: column; gap: 2px; }
+.tfl-sum__big { font-size: 28px; font-weight: 600; letter-spacing: -0.01em; color: var(--text); line-height: 1.1; }
+.tfl-sum__stats { display: flex; gap: var(--sp-5); flex-wrap: wrap; }
+.tfl-sum__stats--wide { justify-content: space-between; }
+.tfl-stat { display: flex; flex-direction: column; gap: 2px; min-width: 56px; }
+.tfl-stat__l { font-size: var(--fs-label); text-transform: uppercase; letter-spacing: 0.06em; color: var(--dim); }
+.tfl-stat__v { font-size: var(--fs-base); font-weight: 600; color: var(--text); }
+
+.tfl-split { display: flex; flex-direction: column; gap: 6px; }
+.tfl-split__bar { display: flex; gap: 2px; height: 6px; border-radius: var(--radius-full); overflow: hidden; }
+.tfl-split__bar > i, .tfl-bias > i { display: block; height: 100%; min-width: 2px; transition: width var(--dur-fast) var(--ease-out); }
+.tfl-split__bar > .is-buy, .tfl-bias > .is-buy { background: var(--pos); }
+.tfl-split__bar > .is-sell, .tfl-bias > .is-sell { background: var(--neg); }
+.tfl-split__bar.is-empty > i { background: var(--line-soft); }
+.tfl-split__legend { display: flex; justify-content: space-between; gap: var(--sp-2); font-size: var(--fs-xs); color: var(--muted); }
+.tfl-split__legend b { font-weight: 600; }
+
+/* --- filters ---------------------------------------------------------------------------------- */
+.tfl-filters { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); }
+.tfl-search { width: 220px; height: 30px; border-radius: var(--radius-full); }
+.tfl-count { margin-left: auto; font-size: var(--fs-xs); }
+
+/* --- the wallets table ------------------------------------------------------------------------ */
+.tfl-table { display: flex; flex-direction: column; border: 1px solid var(--panel-line); border-radius: var(--radius-tile); overflow: hidden; }
+.tfl-table.is-stale { opacity: 0.6; }
+.tfl-tr {
+  display: grid;
+  grid-template-columns: minmax(170px, 1fr) minmax(90px, 170px) 84px minmax(96px, 150px) 64px 104px 96px 56px;
+  align-items: center;
+  gap: var(--sp-3);
+  min-height: 40px;
+  padding: 0 var(--sp-3);
+  border: 0;
+  border-top: 1px solid var(--panel-line);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-data);
+  text-align: left;
+  width: 100%;
+}
+button.tfl-tr { cursor: pointer; transition: background var(--dur-fast) var(--ease-out); }
+button.tfl-tr:hover, button.tfl-tr:focus-visible { background: var(--bg-hover); outline: none; }
+.tfl-th { min-height: 32px; border-top: 0; background: var(--bg-panel); color: var(--dim); font-size: var(--fs-label); text-transform: uppercase; letter-spacing: 0.06em; }
+.tfl-th button { padding: 0; border: 0; background: none; color: inherit; font: inherit; letter-spacing: inherit; text-transform: inherit; cursor: pointer; }
+.tfl-th button:hover, .tfl-th button.is-on { color: var(--text); }
+.tfl .c-num { text-align: right; justify-self: end; }
+.tfl-th .c-num { justify-self: end; }
+.c-who { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
+.c-px { display: flex; flex-direction: column; line-height: 1.25; }
+
+.tfl-who { display: inline-flex; align-items: center; gap: var(--sp-2); min-width: 0; }
+.tfl-who .identicon { border-radius: 4px; flex: none; }
+.tfl-who__a { font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--fs-xs); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.tfl-lean { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; flex: none; border-radius: var(--radius-full); background: var(--tint); color: var(--muted); }
+.tfl-lean.is-long { color: var(--pos); background: var(--bid-bg); }
+.tfl-lean.is-short { color: var(--neg); background: var(--ask-bg); }
+.tfl-lean.is-flat { color: var(--dim); }
+
+.c-share { display: flex; align-items: center; gap: var(--sp-2); }
+.tfl-share { flex: 1; height: 4px; border-radius: var(--radius-full); background: var(--line-soft); overflow: hidden; }
+.tfl-share > i { display: block; height: 100%; border-radius: inherit; background: var(--muted); }
+.c-share .tfl-dim { width: 38px; text-align: right; font-size: var(--fs-xs); }
+
+.c-bias { display: flex; flex-direction: column; gap: 3px; }
+.tfl-bias { display: flex; gap: 1px; height: 4px; border-radius: var(--radius-full); overflow: hidden; }
+.tfl-bias__n { font-size: var(--fs-xs); color: var(--dim); }
+
+.tfl-empty { padding: var(--sp-5) var(--sp-4); border-top: 1px solid var(--panel-line); color: var(--muted); text-align: center; font-size: var(--fs-xs); }
+.tfl-skel { pointer-events: none; }
+.tfl-skel > i { grid-column: 1 / -1; height: 10px; border-radius: var(--radius-full); background: linear-gradient(90deg, var(--tint), var(--line-soft), var(--tint)); background-size: 200% 100%; animation: tfl-shimmer 1.4s linear infinite; }
+@keyframes tfl-shimmer { to { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) { .tfl-skel > i { animation: none; } }
+
+.tfl-more { align-self: center; height: 30px; padding: 0 var(--sp-4); border: 1px solid var(--panel-line); border-radius: var(--radius-full); background: transparent; color: var(--muted); font: inherit; font-size: var(--fs-xs); cursor: pointer; }
+.tfl-more:hover { color: var(--text); border-color: var(--line); }
+
+.tfl-cov { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-3); font-size: var(--fs-xs); }
+.tfl-cov__venues { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+.tfl-cov__m { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 8px; border-radius: var(--radius-full); background: var(--tint); color: var(--muted); }
+
+.tfl-pill { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: var(--radius-full); font-size: var(--fs-xs); font-weight: 600; }
+.tfl-pill.is-buy { color: var(--pos); background: var(--bid-bg); }
+.tfl-pill.is-sell { color: var(--neg); background: var(--ask-bg); }
+.tfl-note { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; font-size: var(--fs-xs); color: var(--muted); }
+.tfl-pill.is-warn { color: var(--warn); background: color-mix(in srgb, var(--warn) 14%, transparent); }
+
+/* --- one wallet ------------------------------------------------------------------------------- */
+.tfl-wallet { overflow: hidden; }
+.tfl-wallet__head { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; }
+.tfl-wallet__head > .identicon { border-radius: 8px; }
+.tfl-wallet__id { display: flex; flex-direction: column; gap: 2px; margin-right: auto; min-width: 0; }
+.tfl-wallet__id b { font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--fs-head); }
+.tfl-wallet__id .tfl-dim { display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-xs); }
+.tfl-wallet__acts { display: flex; gap: var(--sp-2); }
+
+.tfl-body > .tfl-fills { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 240px; border: 1px solid var(--panel-line); border-radius: var(--radius-tile); overflow: hidden; }
+.tfl-fr {
+  display: grid;
+  grid-template-columns: 128px 1fr 1fr 88px minmax(120px, 1fr) 108px;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: 0 var(--sp-3);
+  font-size: var(--fs-data);
+}
+.tfl-fills__scroll { position: relative; flex: 1; min-height: 0; overflow: auto; }
+.tfl-fills__sizer { position: relative; }
+.tfl-fills__sizer > .tfl-fr { position: absolute; left: 0; right: 0; border-top: 1px solid var(--panel-line); }
+.tfl-fills__sizer > .tfl-fr:hover { background: var(--bg-hover); }
+.tfl-fr.tfl-th { min-height: 32px; }
+.c-side { display: flex; align-items: center; gap: var(--sp-2); }
+.tfl-role { font-size: var(--fs-xs); }
+.c-cp { display: flex; align-items: center; gap: 6px; min-width: 0; font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--fs-xs); }
+.c-cp .identicon { border-radius: 3px; flex: none; }
+
+/* --- narrow: the chart column, a phone -------------------------------------------------------- */
+@media (max-width: 900px) {
+  .tfl-tr { grid-template-columns: minmax(150px, 1.6fr) 84px minmax(80px, 1fr) 96px 80px; }
+  .tfl-tr > .c-share, .tfl-tr > .c-fills, .tfl-tr > .c-tk { display: none; }
+  .tfl-fr { grid-template-columns: 112px 1fr 1fr 96px; }
+  .tfl-fr > .c-val, .tfl-fr > .c-cp { display: none; }
+}
+@media (max-width: 560px) {
+  .tfl-overlay { padding: 0; }
+  .tfl--big { border-radius: 0; border: 0; }
+  .tfl-bar { padding: var(--sp-2) var(--sp-3); }
+  .tfl-body { padding: var(--sp-2) var(--sp-3) var(--sp-3); }
+  .tfl-nav { width: 100%; }
+  .tfl-nav .lbp-seg { flex: 1; overflow-x: auto; scrollbar-width: none; }
+  .tfl-sum__big { font-size: 22px; }
+  .tfl-sum__stats { gap: var(--sp-3); width: 100%; justify-content: space-between; }
+  .tfl-search { width: 100%; order: 3; }
+  .tfl-tr { grid-template-columns: minmax(0, 1fr) 68px 80px; gap: var(--sp-2); }
+  .tfl-tr > .c-bias { display: none; }
+  .tfl-tr > .c-net { display: none; }
+  .tfl-fr { grid-template-columns: 92px 1fr 1fr 92px; gap: var(--sp-2); }
+  .tfl-role { display: none; }
+  .tfl-wallet__acts { width: 100%; }
+}

@@ -99,6 +99,9 @@ export const CACHE_POLICIES: Readonly<Record<string, CachePolicy>> = {
   '/api/vs/liquidations/tiles': { cacheControl: 'public, max-age=60, stale-while-revalidate=120', own: true },
   // One cell at a past time: the log does not change behind it (the newest step may still fill in).
   '/api/vs/liquidations/at': { cacheControl: 'public, max-age=300, stale-while-revalidate=300' },
+  // Who traded a window (flow/read.ts): the route says whether the window has passed (kept a day) or still forms.
+  '/api/vs/flow': { cacheControl: 'public, max-age=10, stale-while-revalidate=10', own: true },
+  '/api/vs/flow/wallet': { cacheControl: 'public, max-age=10, stale-while-revalidate=10', own: true },
   '/api/vs/whales': LIVE,
   '/api/vs/positioning': LIVE,
   // The process already holds the page for five minutes. The edge may keep a minute of it.

@@ -37,7 +37,7 @@
  * The library is imported dynamically so it lands in its own chunk and never
  * blocks first paint.
  */
-import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore, type MouseEvent as ReactMouseEvent } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore, type MouseEvent as ReactMouseEvent } from 'react';
 import { useLatched, usePresence } from './motion';
 import { createPortal } from 'react-dom';
 import type {
@@ -232,6 +232,9 @@ import { logger, recentLogs } from '../log';
 import { plotViolation, readPlot, type Violation } from '../chart/invariant';
 import { pollEvery } from '../exchange/visibility';
 
+/** Who traded a candle (flow/TradeFlow.tsx): its own chunk, loaded when the view is first opened. */
+const TradeFlowView = lazy(() => import('./flow/TradeFlow').then((m) => ({ default: m.TradeFlowView })));
+
 /** error = the user sees something broken; warn = degraded or recovering;
  *  info = lifecycle; debug = high-volume detail (`?debug=chart`). */
 const log = logger('chart');
@@ -292,6 +295,8 @@ const VIEWS = [
   { id: 'chart', label: 'Chart' },
   { id: 'depth', label: 'Depth' },
   { id: 'market', label: 'Market info' },
+  // Every wallet that traded a candle (owner 2026-11-01): right-click a candle, or step candles there.
+  { id: 'flow', label: 'Who traded' },
 ] as const;
 type ViewId = (typeof VIEWS)[number]['id'];
 
@@ -1033,8 +1038,11 @@ function Chart({
   /** Right-click menu: chart-relative pixels, the tick-snapped price there, and
    *  which way to open so the popup stays inside a small panel. */
   const [menu, setMenu] = useState<
-    { x: number; y: number; price: string; flipX: boolean; flipY: boolean } | null
+    // `price` null: a read-only session (nothing to place); `t`: the candle under the pointer.
+    { x: number; y: number; price: string | null; t: number | null; flipX: boolean; flipY: boolean } | null
   >(null);
+  /** The candle "Who traded" opens on (a time inside it; null: the latest). */
+  const [flowAt, setFlowAt] = useState<number | null>(null);
   /** Live readout while a line is under the cursor. */
   const [drag, setDrag] = useState<PendingMove | null>(null);
   /** Dropped, snapped, and awaiting an explicit confirm. Nothing sent yet. */
@@ -3529,9 +3537,9 @@ function Chart({
       }
       const c = chart.current;
       const el = holder.current;
-      // A read-only session is offered nothing: every item in this menu is a
-      // step towards signing an order.
-      if (!ready || !c || !el || !canPlace || drawing || maskedRef.current) return;
+      // A read-only session is offered only "Who traded this candle": every
+      // other item in this menu is a step towards signing an order.
+      if (!ready || !c || !el || drawing || maskedRef.current || (bare && !canPlace)) return;
 
       const rect = el.getBoundingClientRect();
       const y = e.clientY - rect.top;
@@ -3541,11 +3549,12 @@ function Chart({
       const pane = c.getSize(CANDLE_PANE_ID);
       if (!pane || y < pane.top || y > pane.top + pane.height) return;
 
-      const pt = c.convertFromPixel([{ y }], { paneId: CANDLE_PANE_ID, absolute: true }) as Array<
+      const pt = c.convertFromPixel([{ x: e.clientX - rect.left, y }], { paneId: CANDLE_PANE_ID, absolute: true }) as Array<
         Partial<Point>
       >;
-      const price = snapToTick(pt[0]?.value ?? Number.NaN, sym?.tickSize);
-      if (price === null) return;
+      const price = canPlace ? snapToTick(pt[0]?.value ?? Number.NaN, sym?.tickSize) : null;
+      const t = !bare && typeof pt[0]?.timestamp === 'number' && Number.isFinite(pt[0].timestamp) ? pt[0].timestamp : null;
+      if (price === null && t === null) return;
 
       e.preventDefault();
       /*
@@ -3566,11 +3575,12 @@ function Chart({
         x: e.clientX,
         y: e.clientY,
         price,
+        t,
         flipX: e.clientX + MENU_W > vw - 8,
         flipY: up,
       });
     },
-    [ready, canPlace, drawing, sym?.tickSize],
+    [ready, canPlace, drawing, sym?.tickSize, bare],
   );
 
   // Dismiss the placement menu on any outside click or on Escape.
@@ -4754,15 +4764,27 @@ function Chart({
             // the menu would close on the way to its own buttons.
             onMouseDown={(e) => e.stopPropagation()}
           >
-            <div className="kc-menu-label">At {fmtPrice(menu.price, sym?.tickSize)}</div>
-            <div className="kc-menu-list">
-              <button onClick={() => prefill('buy', menu.price)}>Limit buy here</button>
-              <button onClick={() => prefill('sell', menu.price)}>Limit sell here</button>
-              <button onClick={() => prefill('stop', menu.price)}>Stop here</button>
-            </div>
-            <p className="muted small" style={{ margin: 'var(--sp-2) 0 0' }}>
-              Prefills the order price only. Nothing is submitted from here.
-            </p>
+            {menu.t !== null && (
+              <div className="kc-menu-list">
+                <button onClick={() => { setFlowAt(menu.t); setView('flow'); setMenu(null); }}>Who traded this candle</button>
+              </div>
+            )}
+            {menu.price !== null && (() => {
+              const price = menu.price;
+              return (
+                <>
+                  <div className="kc-menu-label">At {fmtPrice(price, sym?.tickSize)}</div>
+                  <div className="kc-menu-list">
+                    <button onClick={() => prefill('buy', price)}>Limit buy here</button>
+                    <button onClick={() => prefill('sell', price)}>Limit sell here</button>
+                    <button onClick={() => prefill('stop', price)}>Stop here</button>
+                  </div>
+                  <p className="muted small" style={{ margin: 'var(--sp-2) 0 0' }}>
+                    Prefills the order price only. Nothing is submitted from here.
+                  </p>
+                </>
+              );
+            })()}
           </div>,
           document.body,
         )}
@@ -4949,6 +4971,11 @@ function Chart({
           stays mounted and parked so its price range survives the switch. */}
       {view === 'depth' && <DepthView engine={engine} symbol={symbol} sym={sym} />}
       {view === 'market' && <MarketInfoView engine={engine} symbol={symbol} sym={sym} />}
+      {view === 'flow' && (
+        <Suspense fallback={<div className="mkinfo mkinfo-empty">Loading…</div>}>
+          <TradeFlowView symbol={symbol} spot={engine === 'spot'} interval={interval} at={flowAt} />
+        </Suspense>
+      )}
       </div>
 
       {ctxMenu && <TabMenu at={ctxMenu.at} items={ctxMenu.items} onClose={closeCtxMenu} />}
