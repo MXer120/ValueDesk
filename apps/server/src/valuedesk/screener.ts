@@ -181,8 +181,13 @@ export function wireRow(r: ScreenerRow): ScreenerRow {
   return row;
 }
 
-/** keepScreenerWarm reads the pools for this long after the last request. */
-export const SCREENER_WARM_MS = 30 * 60_000;
+/**
+ * keepScreenerWarm reads the pools for this long after the last request: the command palette's
+ * trader search waited 20.5 s for a cold pool on www (2026-11-01, a quiet evening). A read is
+ * nearly free - Hyperliquid's slices are its in-memory board, SoDEX's are Explore's (one shared
+ * 60 s provider cache) and a page or two more.
+ */
+export const SCREENER_WARM_MS = 2 * 3_600_000;
 let screenerAskedAt = 0;
 
 /**
