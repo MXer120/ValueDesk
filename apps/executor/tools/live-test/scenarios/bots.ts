@@ -73,7 +73,7 @@ export function fillNumbers(fills: FillInfo[], mark: number) {
 const usd = (x: number) => `$${x.toFixed(x !== 0 && Math.abs(x) < 1 ? 4 : 2)}`;
 
 /** The bot's own fills on SoDEX (paged), its numbers, written to the run's record. */
-async function report(t: T, v: AlgoView, what: string, extra: Record<string, unknown> = {}): Promise<ReturnType<typeof fillNumbers> | null> {
+async function report(t: T, v: AlgoView, what: string, extra: Record<string, unknown> = {}, symbol = t.main.name): Promise<ReturnType<typeof fillNumbers> | null> {
   t.note(`${what} ended ${v.algo.status}: ${v.algo.statusReason ?? '-'} (rejects ${v.algo.rejects})`);
   if (v.algo.rejects > 0) {
     const errs = (await t.exec.events(v.algo.id, 300).catch(() => [])).filter((e) => e.kind === 'error').map((e) => e.text.replace(/^SoDEX (refused|rejected) [^:]*: ?/, ''));
@@ -90,12 +90,12 @@ async function report(t: T, v: AlgoView, what: string, extra: Record<string, unk
   let mine: FillInfo[] = [];
   await t
     .waitFor(`${t.where}'s trades catch up with the bot's book`, async () => {
-      mine = (await t.env.reads.allFills(t.env.followerAddress, t.main.name, t.startedAt)).filter((f) => f.clOrdID?.startsWith(p));
+      mine = (await t.env.reads.allFills(t.env.followerAddress, symbol, t.startedAt)).filter((f) => f.clOrdID?.startsWith(p));
       const vol = mine.reduce((x, f) => x + f.qty * f.price, 0);
       return Math.abs(vol - (v.bot?.volume ?? 0)) <= Math.max(1, (v.bot?.volume ?? 0) * 0.01) ? true : null;
     }, { timeoutMs: 90_000, everyMs: 10_000 })
     .catch(() => undefined);
-  const q = await t.quote();
+  const q = await t.quote(symbol);
   const mark = (q.bid + q.ask) / 2;
   const n = fillNumbers(mine, mark);
   t.check(Math.abs(n.volume - (v.bot?.volume ?? 0)) <= Math.max(1, n.volume * 0.02), `the executor's book (${usd(v.bot?.volume ?? 0)}) agrees with ${t.where}'s fills (${usd(n.volume)})`);
@@ -106,6 +106,8 @@ async function report(t: T, v: AlgoView, what: string, extra: Record<string, unk
     symbol: v.algo.spec.symbol,
     minutes: Math.round(((v.algo.endedAt ?? Date.now()) - (v.algo.startedAt ?? v.algo.createdAt)) / 6_000) / 10,
     ...n,
+    // Per $1M: SoDEX's fee and ours, what the spread and the price did (gross: spread earned less adverse selection), net.
+    perMillion: n.volume > 0 ? { fees: ((n.venueFees + n.builderFees) / n.volume) * 1e6, gross: (n.gross / n.volume) * 1e6, net: (-n.net / n.volume) * 1e6 } : null,
     status: v.algo.status,
     reason: v.algo.statusReason,
     rejects: v.algo.rejects,
@@ -133,11 +135,43 @@ async function runThenStop(t: T, v0: AlgoView, until: (v: AlgoView) => boolean, 
   return t.waitEnded(v0.algo.id, 4 * MIN);
 }
 
-async function nothingResting(t: T, id: string): Promise<void> {
-  await t.waitFor(`nothing of ${id} rests on ${t.where}`, async () => ((await t.algoOrders(id)).length === 0 ? true : null), { timeoutMs: 30_000 });
+async function nothingResting(t: T, id: string, symbol = t.main.name): Promise<void> {
+  await t.waitFor(`nothing of ${id} rests on ${t.where}`, async () => ((await t.algoOrders(id, symbol)).length === 0 ? true : null), { timeoutMs: 30_000 });
 }
 
+/** The markets bot.makers runs on at once (LIVE_BOT_SYMBOLS, comma-separated); the runner flattens them at the end too. */
+export const BOT_SYMBOLS = (process.env.LIVE_BOT_SYMBOLS ?? 'ETH-USD,ZEC-USD,SOL-USD').split(',').map((s) => s.trim().toUpperCase()).filter(Boolean);
+
 export const BOT_SCENARIOS: Scenario[] = [
+  bot('bot.makers', 'mm', 'Volume makers on several markets at once (LIVE_BOT_SYMBOLS), side by side over the same minutes', 'each market\'s quotes rest (maker fills, the 0.5 bp bot fee), each book agrees with SoDEX, each stop closes and leaves nothing resting; per market: fills, volume, maker share, fees, gross and net per $1M', {
+    timeoutMs: RUN_MS + 12 * MIN,
+    // What each can hold is its inventory cap (LIVE_BOT_MM maxInventoryUsd, else 3 orders): all of them at once at the peak.
+    cost: (U) => {
+      const cap = typeof MM_TUNING.maxInventoryUsd === 'number' ? MM_TUNING.maxInventoryUsd : 3 * U;
+      return { takerUsd: cap * BOT_SYMBOLS.length, makerUsd: 60 * U * BOT_SYMBOLS.length, peakUsd: cap * BOT_SYMBOLS.length };
+    },
+    async run(t) {
+      const started: AlgoView[] = [];
+      for (const symbol of BOT_SYMBOLS) {
+        started.push(await t.start({ kind: 'mm', symbol, orderUsd: t.U, maxInventoryUsd: 3 * t.U, skewTicks: 3, chaseTicks: 1, minRepriceMs: 1_000, maxLossUsd: 2, volumeTargetUsd: 10_000 * t.U, onStop: 'close', ...MM_TUNING }));
+      }
+      // All run the same minutes; then each stops (closing what it holds) and is reported on its own market.
+      for (const end = Date.now() + RUN_MS; Date.now() < end; ) {
+        await new Promise((r) => setTimeout(r, Math.min(30_000, Math.max(0, end - Date.now()))));
+        if ((await Promise.all(started.map((x) => t.view(x.algo.id)))).every(ended)) break;
+      }
+      for (const v0 of started) if (!ended(await t.view(v0.algo.id))) await t.exec.algoAct('cancel', v0.algo.id);
+      for (const v0 of started) {
+        const v = await t.waitEnded(v0.algo.id, 4 * MIN);
+        const symbol = v.algo.spec.symbol;
+        await nothingResting(t, v.algo.id, symbol);
+        t.check(v.algo.children.filter((c) => !c.tag.startsWith('close')).every((c) => c.tif === 'gtx'), `${symbol}: every quote went out post-only (GTX)`);
+        const n = await report(t, v, `volume maker ${symbol}`, { tuning: MM_TUNING }, symbol);
+        if (n) t.check(n.makerShare >= 0.8 || n.volume < 4 * t.U, `${symbol}: the volume is maker volume (${Math.round(n.makerShare * 100)}%)`);
+      }
+    },
+  }),
+
   bot('bot.maker', 'mm', 'Volume maker: quotes both sides post-only, then stops and closes', 'every quote rests (maker fills only, the 0.5 bp bot fee on each), the book agrees with SoDEX, a stop closes what it holds and leaves nothing resting; the run\'s volume, fees, net PnL and cost per $1M', {
     timeoutMs: RUN_MS + 8 * MIN,
     cost: (U) => ({ takerUsd: 3 * U, makerUsd: 60 * U, peakUsd: 3 * U }),

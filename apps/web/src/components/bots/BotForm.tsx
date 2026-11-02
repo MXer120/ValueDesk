@@ -14,10 +14,12 @@ import { DlgFoot, DlgRow, DlgSection, DlgSeg, DlgSwitch } from '../dialogParts';
 import { MarketSelect } from '../algo/MarketSelect';
 import { marketOf } from '../algo/draft';
 import { useHistory } from '../algo/liveData';
+import { useTickers } from '../../hooks';
 import { BotIcon } from './BotIcon';
 import {
   PRESETS,
   PRESET_NAMES,
+  cheapestMakerMarkets,
   PRESET_VALUES,
   STRATEGIES,
   STRATEGY_INFO,
@@ -151,6 +153,13 @@ export function BotForm({ open, onClose, strategy: initial, editing, liveAllowed
   const range = d.strategy === 'grid' ? gridRange(d, mark) : null;
   const cost = costPerMillion(d, market, mark, botFeeTenths);
   const preset = presetOf(d);
+  // Where a volume maker costs least now (one shared tickers poll): the markets whose spread pays for the fees.
+  const tickers = useTickers('perps', { enabled: open && d.strategy === 'maker' && !editing, pollMs: 30_000 });
+  const cheapest = useMemo(
+    () => cheapestMakerMarkets(tickers.data?.tickers ?? [], (n) => { const t = Number(byName.get(n)?.tickSize); return t > 0 ? t : null; }, { botFeeTenths, limit: 4 }),
+    [tickers.data, byName, botFeeTenths],
+  );
+  const spreadNow = (tickers.data?.tickers ?? []).find((t) => t.symbol === d.symbol);
   const set = (p: Partial<BotDraft>) => setD((x) => ({ ...x, ...p }));
 
   // The spec the wallet will sign, checked as the executor checks it: the parser, then SoDEX's sizes at the mark.
@@ -212,6 +221,21 @@ export function BotForm({ open, onClose, strategy: initial, editing, liveAllowed
           <DlgRow title="Market" line={locked ? 'A running bot keeps its market.' : info.best}>
             {locked ? <span className="bots-fixed">{d.symbol}</span> : <MarketSelect value={d.symbol} onChange={(v) => set({ symbol: v, low: null, high: null })} compact />}
           </DlgRow>
+          {!locked && d.strategy === 'maker' && cheapest.length > 0 && (
+            <DlgRow title="Lowest cost now" line="Markets whose spread pays for the fees: quoting one tick inside it earns most of the spread on every round trip. Per $1M, before price moves." stack>
+              <DlgSeg
+                label="Lowest cost now"
+                value={d.symbol}
+                options={cheapest.map((c) => ({
+                  value: c.symbol,
+                  label: <span className="bots-cheap"><b>{c.symbol.replace(/-USD$/, '')}</b><small>{c.costPerMillion < 0 ? `earns ${fmtUsd(-c.costPerMillion, 0)}` : fmtUsd(c.costPerMillion, 0)}</small></span>,
+                  title: `${c.symbol}: spread ${c.spreadBps.toFixed(1)} bp, 24 h volume ${fmtUsd(c.volumeUsd, 0)}`,
+                }))}
+                onChange={(v) => set({ symbol: v, low: null, high: null })}
+              />
+              {spreadNow && <span className="oe-hint">Spread on {d.symbol} now: {(((Number(spreadNow.askPx) - Number(spreadNow.bidPx)) / ((Number(spreadNow.askPx) + Number(spreadNow.bidPx)) / 2)) * 10_000).toFixed(1)} bp.</span>}
+            </DlgRow>
+          )}
           {!locked && (
             <DlgRow title="Preset" line={preset ? 'Change any setting below to make it your own.' : 'Your own settings.'}>
               <DlgSeg<PresetId | 'custom'>
@@ -235,6 +259,12 @@ export function BotForm({ open, onClose, strategy: initial, editing, liveAllowed
               </DlgRow>
               <DlgRow title="Distance from the mid" line="Each quote rests at least this far from the mid. At 1.7 bp every round trip pays its own fees: fewer fills, lower cost. 0: at the best price." stack>
                 <NumField label="At least" value={d.edgeBps} onChange={(v) => set({ edgeBps: v ?? 0 })} unit="bp" />
+              </DlgRow>
+              <DlgRow title="Keep queue place" line="Quotes the price moved away from stay resting, up to this many ticks back, while a new one joins the best price: when the price comes back they are near the front of the queue. 1: one quote, moved with the price." stack>
+                <NumField label="Levels" value={d.ladder} onChange={(v) => set({ ladder: Math.max(1, Math.min(5, Math.round(v ?? 1))) })} />
+              </DlgRow>
+              <DlgRow title="Fast-move guard" line="While the price moved this many ticks in 2 seconds, the side it runs into waits (when it would add to what the bot holds). 0: off." stack>
+                <NumField label="After" value={d.moveGuard} onChange={(v) => set({ moveGuard: Math.max(0, Math.round(v ?? 0)) })} unit="ticks" />
               </DlgRow>
               <DlgRow title="Thin-queue guard" line="The side that would add waits while the queue at its best price is under this share of both best prices: a thin queue is about to be traded through, and that fill is the price running against it. 0: off." stack>
                 <NumField label="Under" value={Math.round(d.queueGuard * 100)} onChange={(v) => set({ queueGuard: Math.max(0, Math.min(50, v ?? 0)) / 100 })} unit="%" />

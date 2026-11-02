@@ -6,7 +6,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { checkAlgoSpec, parseAlgoSpec, type MarketInfo } from '@copy-engine';
-import { PRESETS, PRESET_VALUES, STRATEGIES, costPerMillion, draftFor, draftOfSpec, gridRange, patchOf, presetOf, specOf, strategyOf } from './presets';
+import { PRESETS, PRESET_VALUES, STRATEGIES, cheapestMakerMarkets, costPerMillion, draftFor, draftOfSpec, gridRange, patchOf, presetOf, specOf, strategyOf } from './presets';
 
 const BTC = { tickSize: '1', makerFee: 0.00012 } as Pick<MarketInfo, 'tickSize' | 'makerFee'>;
 const MARK = 78_000;
@@ -72,4 +72,18 @@ test('presets differ: each strategy\'s three are not the same', () => {
     const all = PRESETS.map((p) => JSON.stringify(PRESET_VALUES[s][p]));
     assert.equal(new Set(all).size, PRESETS.length, s);
   }
+});
+
+test('cheapest maker markets: a wide spread earns most of itself a round trip; thin or crazy markets left out', () => {
+  const tick = (s: string) => ({ 'MCD-USD': 0.01, 'BTC-USD': 1, 'THIN-USD': 0.01, 'WILD-USD': 0.01 } as Record<string, number>)[s] ?? null;
+  const r = cheapestMakerMarkets([
+    { symbol: 'BTC-USD', bidPx: '78000', askPx: '78001', quoteVolume: '100000000' },
+    { symbol: 'MCD-USD', bidPx: '263.00', askPx: '263.36', quoteVolume: '5000000' },
+    { symbol: 'THIN-USD', bidPx: '10.00', askPx: '10.05', quoteVolume: '2000' },
+    { symbol: 'WILD-USD', bidPx: '10.00', askPx: '10.20', quoteVolume: '9000000' },
+  ], tick);
+  assert.deepEqual(r.map((x) => x.symbol), ['MCD-USD', 'BTC-USD']);
+  // MCD: 36 ticks of 0.38 bp = 13.7 bp; inside both sides it keeps 34 ticks, 12.9 bp a round trip: $170 - $646 = it earns.
+  assert.ok(r[0]!.costPerMillion < -400 && r[0]!.costPerMillion > -520, String(r[0]!.costPerMillion));
+  assert.ok(Math.abs(r[1]!.costPerMillion - 163.6) < 0.2, String(r[1]!.costPerMillion));
 });

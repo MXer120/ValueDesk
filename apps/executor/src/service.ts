@@ -150,7 +150,7 @@ function algoPatch(raw: unknown): AlgoUpdatePatch {
     out.label = r.label as string | null;
   }
   // A bot's sizes, distances and limits: each of its type here, its range judged by the spec parser (AlgoRuntime.update).
-  for (const k of ['orderUsd', 'maxInventoryUsd', 'offsetTicks', 'chaseTicks', 'minRepriceMs', 'skewTicks', 'edgeBps', 'queueGuard'] as const) {
+  for (const k of ['orderUsd', 'maxInventoryUsd', 'offsetTicks', 'chaseTicks', 'minRepriceMs', 'skewTicks', 'edgeBps', 'queueGuard', 'levels', 'moveGuard'] as const) {
     if (r[k] === undefined) continue;
     if (!(typeof r[k] === 'number' && Number.isFinite(r[k]))) throw new ApiError(400, 'patch', `${k} must be a number.`);
     out[k] = r[k] as number;

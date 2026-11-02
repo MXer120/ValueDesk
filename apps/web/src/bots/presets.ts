@@ -59,6 +59,8 @@ export interface BotDraft {
   label: string;
   paper: boolean;
   /* maker */
+  /** Ticks from the best price: 0 joins it, -1 steps one tick inside where the spread has room (front of the queue). */
+  offsetTicks: number;
   orderUsd: number;
   maxInventoryUsd: number;
   skewTicks: number;
@@ -68,6 +70,10 @@ export interface BotDraft {
   edgeBps: number;
   /** The queue guard, a fraction (0: off): the adding side waits while its own queue is thinner than this share. */
   queueGuard: number;
+  /** Quotes a side keeps resting as the touch moves away (1: one, re-priced): the spec's `levels`. */
+  ladder: number;
+  /** Ticks the mid may move in 2 s before the side it runs into waits (0: off). */
+  moveGuard: number;
   /* grid */
   rangePct: number;
   low: number | null;
@@ -100,6 +106,7 @@ export function draftFor(strategy: Strategy, preset: PresetId = 'balanced', symb
     symbol,
     label: '',
     paper: true,
+    offsetTicks: -1,
     orderUsd: 50,
     maxInventoryUsd: 200,
     skewTicks: 4,
@@ -107,6 +114,8 @@ export function draftFor(strategy: Strategy, preset: PresetId = 'balanced', symb
     minRepriceMs: 3_000,
     edgeBps: 0,
     queueGuard: 0,
+    ladder: 1,
+    moveGuard: 0,
     rangePct: 0.02,
     low: null,
     high: null,
@@ -142,7 +151,7 @@ export function specOf(d: BotDraft, mark: number | null): Record<string, unknown
   const base = { symbol: d.symbol, paper: d.paper, label: d.label.trim() || null };
   const limits = { volumeTargetUsd: d.volumeTargetUsd, maxLossUsd: d.maxLossUsd, onStop: d.onStop };
   if (d.strategy === 'maker') {
-    return { ...base, ...limits, kind: 'mm', orderUsd: d.orderUsd, maxInventoryUsd: d.maxInventoryUsd, skewTicks: d.skewTicks, chaseTicks: d.chaseTicks, minRepriceMs: d.minRepriceMs, ...(d.edgeBps > 0 ? { edgeBps: d.edgeBps } : {}), ...(d.queueGuard > 0 ? { queueGuard: d.queueGuard } : {}) };
+    return { ...base, ...limits, kind: 'mm', offsetTicks: d.offsetTicks, orderUsd: d.orderUsd, maxInventoryUsd: d.maxInventoryUsd, skewTicks: d.skewTicks, chaseTicks: d.chaseTicks, minRepriceMs: d.minRepriceMs, ...(d.edgeBps > 0 ? { edgeBps: d.edgeBps } : {}), ...(d.queueGuard > 0 ? { queueGuard: d.queueGuard } : {}), ...(d.ladder > 1 ? { levels: d.ladder } : {}), ...(d.moveGuard > 0 ? { moveGuard: d.moveGuard } : {}) };
   }
   const r = gridRange(d, mark);
   return { ...base, ...limits, kind: 'grid', low: r?.low ?? null, high: r?.high ?? null, levels: d.levels, orderUsd: d.orderUsd, spacing: 'geometric', outOfRange: d.outOfRange };
@@ -151,7 +160,7 @@ export function specOf(d: BotDraft, mark: number | null): Record<string, unknown
 /** The draft a running bot's spec reads back as (the Edit form). */
 export function draftOfSpec(s: AlgoSpec): BotDraft {
   if (s.kind === 'mm') {
-    return { ...draftFor('maker', 'balanced', s.symbol), label: s.label ?? '', paper: s.paper, orderUsd: s.orderUsd, maxInventoryUsd: s.maxInventoryUsd, skewTicks: s.skewTicks, chaseTicks: s.chaseTicks, minRepriceMs: s.minRepriceMs, edgeBps: s.edgeBps ?? 0, queueGuard: s.queueGuard ?? 0, volumeTargetUsd: s.volumeTargetUsd, maxLossUsd: s.maxLossUsd, onStop: s.onStop };
+    return { ...draftFor('maker', 'balanced', s.symbol), label: s.label ?? '', paper: s.paper, offsetTicks: s.offsetTicks, orderUsd: s.orderUsd, maxInventoryUsd: s.maxInventoryUsd, skewTicks: s.skewTicks, chaseTicks: s.chaseTicks, minRepriceMs: s.minRepriceMs, edgeBps: s.edgeBps ?? 0, queueGuard: s.queueGuard ?? 0, ladder: s.levels ?? 1, moveGuard: s.moveGuard ?? 0, volumeTargetUsd: s.volumeTargetUsd, maxLossUsd: s.maxLossUsd, onStop: s.onStop };
   }
   if (s.kind === 'grid') {
     return { ...draftFor('grid', 'balanced', s.symbol), label: s.label ?? '', paper: s.paper, low: s.low, high: s.high, levels: s.levels, orderUsd: s.orderUsd, volumeTargetUsd: s.volumeTargetUsd, maxLossUsd: s.maxLossUsd, onStop: s.onStop, outOfRange: s.outOfRange };
@@ -162,10 +171,10 @@ export function draftOfSpec(s: AlgoSpec): BotDraft {
 /** What an Edit may send (runtime BOT_UPDATABLE): only the fields that changed. */
 export function patchOf(before: BotDraft, after: BotDraft): Record<string, unknown> {
   const keys: Array<keyof BotDraft> =
-    after.strategy === 'maker' ? ['orderUsd', 'maxInventoryUsd', 'skewTicks', 'chaseTicks', 'minRepriceMs', 'edgeBps', 'queueGuard', 'volumeTargetUsd', 'maxLossUsd', 'onStop']
+    after.strategy === 'maker' ? ['offsetTicks', 'orderUsd', 'maxInventoryUsd', 'skewTicks', 'chaseTicks', 'minRepriceMs', 'edgeBps', 'queueGuard', 'ladder', 'moveGuard', 'volumeTargetUsd', 'maxLossUsd', 'onStop']
     : ['orderUsd', 'volumeTargetUsd', 'maxLossUsd', 'onStop', 'outOfRange'];
   const out: Record<string, unknown> = {};
-  for (const k of keys) if (before[k] !== after[k]) out[k] = after[k];
+  for (const k of keys) if (before[k] !== after[k]) out[k === 'ladder' ? 'levels' : k] = after[k];
   if (before.label.trim() !== after.label.trim()) out.label = after.label.trim() || null;
   return out;
 }
@@ -213,4 +222,46 @@ export function costPerMillion(d: BotDraft, m: Pick<MarketInfo, 'makerFee' | 'ti
     edge = (Number(m.tickSize) / mark / 2) * 1_000_000;
   }
   return { trade, builder, fees, edge, net: fees - (edge ?? 0) };
+}
+
+/* --------------------------------------------------------- where it costs least ----- */
+
+export interface MarketCost {
+  symbol: string;
+  spreadBps: number;
+  /** What a round trip of quotes one tick inside the spread earns, bp (one tick where the spread is one tick). */
+  captureBps: number;
+  /** Fees less half the capture, per $1M, before price moves (USD). Negative: it earns. */
+  costPerMillion: number;
+  /** SoDEX's 24 h volume (USD): takers to fill against. */
+  volumeUsd: number;
+}
+
+/**
+ * The markets a volume maker costs least on now, cheapest first: where the spread is wide, a quote one tick
+ * inside each side earns most of it on every round trip (spread less two ticks); where it is one tick, that tick.
+ * Only markets with enough takers (24 h volume) and a sane spread (at most 60 bp) count. Before price moves:
+ * the live runs (docs/BOTS.md) put those at $40-90 per $1M on a one-tick market.
+ */
+export function cheapestMakerMarkets(
+  tickers: ReadonlyArray<{ symbol: string; bidPx: string; askPx: string; quoteVolume: string }>,
+  tickOf: (symbol: string) => number | null,
+  o: { minVolumeUsd?: number; makerFee?: number; botFeeTenths?: number; limit?: number } = {},
+): MarketCost[] {
+  const fees = ((o.makerFee ?? DEFAULT_MAKER_FEE) + (o.botFeeTenths ?? DEFAULT_BOT_FEE_TENTHS) / 100_000) * 1_000_000;
+  const out: MarketCost[] = [];
+  for (const t of tickers) {
+    const bid = Number(t.bidPx);
+    const ask = Number(t.askPx);
+    const tick = tickOf(t.symbol);
+    const vol = Number(t.quoteVolume);
+    if (!(bid > 0 && ask > bid) || !tick || !(vol >= (o.minVolumeUsd ?? 100_000))) continue;
+    const mid = (bid + ask) / 2;
+    const ticks = Math.round((ask - bid) / tick);
+    const spreadBps = ((ask - bid) / mid) * 10_000;
+    if (spreadBps > 60) continue;
+    const captureBps = ((ticks >= 3 ? ticks - 2 : 1) * tick / mid) * 10_000;
+    out.push({ symbol: t.symbol, spreadBps, captureBps, costPerMillion: fees - (captureBps / 2) * 100, volumeUsd: vol });
+  }
+  return out.sort((a, b) => a.costPerMillion - b.costPerMillion).slice(0, o.limit ?? 6);
 }

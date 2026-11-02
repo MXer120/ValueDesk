@@ -489,6 +489,18 @@ export interface MmSpec extends AlgoBase, BotLimits {
    * against it (adverse selection). The side that unwinds is always quoted.
    */
   queueGuard?: number;
+  /**
+   * The ladder (1-5; absent or 1: one quote a side, re-priced as the touch moves). Above 1, a quote the touch moved
+   * away from stays where it is - keeping its place in the queue - up to this many ticks back, and a new one joins
+   * the touch: when the price comes back the old one is near the front, and a fill there is the bounce, not the
+   * sweep that reaches the back of a queue. The inventory cap still holds what all of them could fill.
+   */
+  levels?: number;
+  /**
+   * The move guard, ticks (0 or absent: off): while the mid moved at least this far over the last 2 seconds, the
+   * side it moves toward is not quoted where it would add (a rising price lifts the asks) - pulled where it rests.
+   */
+  moveGuard?: number;
 }
 
 /**

@@ -84,8 +84,10 @@ class FakeMarket implements AlgoMarket {
   price(): number | null {
     return this.mk;
   }
+  /** The mid 2 s ago, for the move guard (null: no history). */
+  ago: number | null = null;
   priceAgo(): number | null {
-    return null;
+    return this.ago;
   }
   oiAgo(): number | null {
     return 1000;
@@ -340,7 +342,8 @@ test('volume maker: re-prices only past the distance and the pause; partial fill
   await settle();
   r.market.set(60_005, 60_007);
   await step(r, a.id, 1_000);
-  assert.equal(r.ex.cancelled.length, 0, 'not before the re-price pause');
+  assert.ok(!r.ex.cancelled.includes(bid.clOrdID), 'the bid, behind the touch: not before the re-price pause');
+  assert.ok(r.ex.cancelled.includes(r.ex.placed.find((o) => o.side === 'sell')!.clOrdID), 'the ask, ahead of the new price: pulled at once');
   await step(r, a.id, 2_500);
   assert.ok(r.ex.cancelled.includes(bid.clOrdID), 'moved 5 ticks away: re-priced');
   await step(r, a.id, 500);
@@ -599,6 +602,70 @@ test('volume maker queue guard: a thin queue pulls the resting bid; it comes bac
   assert.equal(r.ex.side('buy').length, 0, 'not back before the re-price pause');
   await step(r, a.id, 3_000);
   assert.equal(r.ex.side('buy').length, 1, 'back once the queue is thick again and the pause is over');
+});
+
+test('volume maker in a wide spread: one tick inside each side, never closer to fair than the edge - fair is the safer of mid and mark', () => {
+  const s = { orderUsd: 60, maxInventoryUsd: 180, offsetTicks: -1, skewTicks: 4, edgeBps: 3 };
+  const q = { bid: 60_000, ask: 60_084, at: 0 }; // 14 bp
+  // The mark agrees with the book: one tick inside on both sides - a round trip earns about 13.7 bp.
+  assert.deepEqual(mmQuotes(s, q, MKT, 0, 60_042).map((x) => x.price), [60_001, 60_083]);
+  // The oracle says the price is lower than the book (the book lags): the bid stays 3 bp under the mark, behind the book.
+  assert.deepEqual(mmQuotes(s, q, MKT, 0, 59_990).map((x) => x.price), [59_972, 60_083]);
+  // ...and higher: the ask stays 3 bp over it.
+  assert.deepEqual(mmQuotes(s, q, MKT, 0, 60_090).map((x) => x.price), [60_001, 60_109]);
+});
+
+test('volume maker ladder: a quote the touch moved away from keeps its place up to the levels; a new one joins the touch; the cap holds them all', async () => {
+  const r = await rig();
+  const a = await add(r, { ...MM, levels: 3, orderUsd: 20, maxInventoryUsd: 200 });
+  await step(r, a.id);
+  const first = r.ex.side('buy')[0]!;
+  r.market.set(60_001, 60_003);
+  await step(r, a.id, 4_000);
+  assert.ok(!r.ex.cancelled.includes(first.clOrdID), 'one tick behind the touch: kept (its place in the queue)');
+  assert.deepEqual(r.ex.side('buy').map((x) => Number(x.price)).sort(), [60_000, 60_001], 'a new bid at the touch');
+  r.market.set(60_003, 60_005);
+  await step(r, a.id, 4_000);
+  assert.ok(r.ex.cancelled.includes(first.clOrdID), 'three ticks back with three levels: pulled');
+  await step(r, a.id, 500);
+  assert.ok(r.ex.side('buy').some((x) => Number(x.price) === 60_003), 'and the touch has one');
+  assert.ok(r.ex.side('buy').length <= 3);
+  // Near the cap: the bids that could all fill never take it past the cap.
+  const b = await rig();
+  const x = await add(b, { ...MM, symbol: 'BTC-USD', levels: 5, orderUsd: 60, maxInventoryUsd: 130 });
+  await step(b, x.id);
+  for (const [bid, ask] of [[60_001, 60_003], [60_002, 60_004], [60_003, 60_005]] as const) {
+    b.market.set(bid, ask);
+    await step(b, x.id, 4_000);
+  }
+  assert.ok(b.ex.side('buy').length <= 2, `$130 cap, $60 orders: at most two bids (${b.ex.side('buy').length})`);
+});
+
+test('volume maker ladder one tick back: new quotes rest behind the touch; when the touch comes to one it stays (its queue place)', async () => {
+  const r = await rig();
+  const a = await add(r, { ...MM, levels: 3, offsetTicks: 1, orderUsd: 20, maxInventoryUsd: 200 });
+  await step(r, a.id);
+  const bid = r.ex.side('buy')[0]!;
+  assert.equal(Number(bid.price), 59_999, 'one tick behind the best bid');
+  // The best bid drops to it: it is the touch now, near the front of that queue - kept.
+  r.market.set(59_999, 60_001);
+  await step(r, a.id, 4_000);
+  assert.ok(!r.ex.cancelled.includes(bid.clOrdID), 'the touch came to it: kept');
+  assert.ok(r.ex.side('buy').some((x) => Number(x.price) === 59_998), 'and a new one rests a tick behind');
+});
+
+test('volume maker move guard: a mid that jumped up 2 ticks in 2 s pulls the ask that would add; the bid stays', async () => {
+  const r = await rig();
+  const a = await add(r, { ...MM, moveGuard: 2 });
+  await step(r, a.id);
+  const ask = r.ex.side('sell')[0]!;
+  r.market.ago = r.market.mk;
+  r.market.set(60_002, 60_004);
+  await step(r, a.id, 800);
+  assert.ok(r.ex.cancelled.includes(ask.clOrdID), 'the price runs up into the ask: pulled');
+  r.market.ago = r.market.mk;
+  await step(r, a.id, 4_000);
+  assert.equal(r.ex.side('sell').length, 1, 'quiet again: the ask is back');
 });
 
 test('grid: a level SoDEX refuses waits (3 s, doubling) instead of being sent every step into the refusal limit', async () => {

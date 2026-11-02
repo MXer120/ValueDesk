@@ -44,6 +44,7 @@
  * Ctrl+C once: the running scenario is abandoned, the cleanup runs, the state
  * is saved, the runner exits. Twice: it exits at once; the next start flattens.
  */
+import { BOT_SYMBOLS } from './scenarios/bots.ts';
 import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -297,7 +298,9 @@ async function main(): Promise<number> {
   const book = new MarketBook();
   book.load(all);
   const kMarket = leaderVenue === 'hyperliquid' ? book.sodexMarketFor('hyperliquid', K_COIN) : null;
-  const testMarkets = [...new Set([main.name, second.name, volatile.name, liquid.name, ...(kMarket ? [kMarket.name] : [])])];
+  // bot.makers' markets are flattened at the end like the rest (only when it is in the run: no extra reads otherwise).
+  const botMarkets = args.only?.some((x) => /bot/.test(x)) ? BOT_SYMBOLS.filter((x) => all.some((m) => m.name === x)) : [];
+  const testMarkets = [...new Set([main.name, second.name, volatile.name, liquid.name, ...(kMarket ? [kMarket.name] : []), ...botMarkets])];
 
   const list = CATALOGUE.filter((s) => (args.slow || !s.slow) && (s.always || selected(args.only, s)));
   // What the target cannot do (a hard restart of ValueDesk's executor), and what another leader venue is for, are skipped: not costed.

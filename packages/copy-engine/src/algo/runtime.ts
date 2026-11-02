@@ -243,7 +243,7 @@ const EXITS_MAX_REFUSALS = 5;
 const UPDATABLE: ReadonlySet<string> = new Set(['limitPrice', 'upper', 'lower', 'maxSpreadBps', 'label', 'quantity']);
 /** ...and on a running bot (its market, range and levels are what it is: a different one is a new bot). */
 const BOT_UPDATABLE: Readonly<Record<'mm' | 'grid', ReadonlySet<string>>> = {
-  mm: new Set(['label', 'maxSpreadBps', 'upper', 'lower', 'orderUsd', 'maxInventoryUsd', 'offsetTicks', 'chaseTicks', 'minRepriceMs', 'skewTicks', 'edgeBps', 'queueGuard', 'volumeTargetUsd', 'maxLossUsd', 'endAt', 'onStop']),
+  mm: new Set(['label', 'maxSpreadBps', 'upper', 'lower', 'orderUsd', 'maxInventoryUsd', 'offsetTicks', 'chaseTicks', 'minRepriceMs', 'skewTicks', 'edgeBps', 'queueGuard', 'levels', 'moveGuard', 'volumeTargetUsd', 'maxLossUsd', 'endAt', 'onStop']),
   grid: new Set(['label', 'maxSpreadBps', 'upper', 'lower', 'orderUsd', 'volumeTargetUsd', 'maxLossUsd', 'endAt', 'onStop', 'outOfRange']),
 };
 /** A bot closing what it holds rests at the touch this long before it takes... */
@@ -1584,13 +1584,23 @@ export class AlgoRuntime {
       await this.pullResting(a);
       return this.hold(a, `Held: the spread (${spreadBps(q).toFixed(1)} bp) is wider than your ${s.maxSpreadBps} bp.`);
     }
-    const want = mmQuotes(s, q, m, bookInventory(a.book!), mk);
-    // What it would quote without the queue guard: a side missing only because of the guard is pulled no sooner
-    // than half a second after it went out, and quoted again no sooner than minRepriceMs after (no cancel storm on a
-    // queue that flickers around the line).
-    const unguarded = (s.queueGuard ?? 0) > 0 ? mmQuotes({ ...s, queueGuard: 0 }, q, m, bookInventory(a.book!), mk) : want;
-    const guardedAt = { ...((a.k.mguard as Record<string, number> | undefined) ?? {}) };
+    const inv = bookInventory(a.book!);
     const tick = Number(m.tickSize);
+    // The move guard: the mid's move over the last 2 s, in ticks; the side it moves toward waits where it would add.
+    const ago = (s.moveGuard ?? 0) > 0 ? this.market.priceAgo(s.symbol, 'mid', 2_000) : null;
+    const moved = ago ? (mid(q) - ago) / tick : 0;
+    const movesInto = (side: Side) => (s.moveGuard ?? 0) > 0 && (side === 'sell' ? moved >= s.moveGuard! : moved <= -s.moveGuard!) && (side === 'buy' ? inv >= 0 : inv <= 0);
+    const want = mmQuotes(s, q, m, inv, mk).filter((x) => !movesInto(x.side));
+    // A ladder's front line: where a quote may stand at most (the touch, the skew and the edge as they are now, with no
+    // step back). A ladder quote the touch came to is kept up to it - near the front of that queue is where its fills
+    // are the bounce (a level that holds), not the sweep - and only one past it is pulled.
+    const front = (s.levels ?? 1) > 1 ? mmQuotes({ ...s, offsetTicks: Math.min(0, s.offsetTicks), queueGuard: 0 }, q, m, inv, mk) : want;
+    // What it would quote without the guards: a side missing only because of a guard is pulled no sooner than half
+    // a second after it went out, and quoted again no sooner than minRepriceMs after (no cancel storm on a queue or a
+    // price that flickers around the line).
+    const unguarded = (s.queueGuard ?? 0) > 0 || (s.moveGuard ?? 0) > 0 ? mmQuotes({ ...s, queueGuard: 0 }, q, m, inv, mk) : want;
+    const guardedAt = { ...((a.k.mguard as Record<string, number> | undefined) ?? {}) };
+    const levels = Math.max(1, s.levels ?? 1);
     const live = this.live(a);
     const send: Array<{ side: Side; price: number; quantity: number; tif: ChildTif; tag: string }> = [];
     const pull: ChildOrder[] = [];
@@ -1608,21 +1618,46 @@ export class AlgoRuntime {
         continue;
       }
       if (!standing.length && !mine.length && (guardedAt[side] ?? 0) + s.minRepriceMs > now) continue;
-      if (standing.length) {
-        const c = standing[0]!;
-        pull.push(...standing.slice(1));
-        if (c.state !== 'open' || c.tif === 'ioc') continue;
+      // How many quotes this side may have resting: one, or up to the ladder - never more than the cap could take
+      // (the adding side) or than it holds (the unwinding side) if all of them filled.
+      const adds = side === 'buy' ? inv >= 0 : inv <= 0;
+      const room = adds ? Math.floor((s.maxInventoryUsd - Math.abs(inv) * mk) / s.orderUsd + 1e-9) : Math.ceil((Math.abs(inv) * mk) / s.orderUsd - 1e-9);
+      const allowed = Math.max(1, Math.min(levels, room));
+      const kept: ChildOrder[] = [];
+      for (const c of [...standing].sort((x, y) => (side === 'buy' ? y.price - x.price : x.price - y.price))) {
+        if (c.state !== 'open' || c.tif === 'ioc') {
+          kept.push(c);
+          continue;
+        }
         const off = Math.abs(c.price - w.price) / tick;
-        // In front of where it should be (the skew wants it further back), or behind a touch that moved away.
-        const ahead = side === 'buy' ? c.price > w.price : c.price < w.price;
-        if (now - c.placedAt >= s.minRepriceMs && off >= s.chaseTicks - 1e-9 && (ahead || !this.atOwnTouch(side, c.price, q))) pull.push(c);
-        continue;
+        // In front of where it should be (the price came to it, the skew or the mark wants it further back): the one
+        // a fill would hurt - pulled after a quarter second, not the re-price pause. A ladder's limit is its front line.
+        const lim = levels > 1 ? front.find((x) => x.side === side)?.price ?? w.price : w.price;
+        const ahead = side === 'buy' ? c.price > lim + 1e-12 : c.price < lim - 1e-12;
+        if (ahead) {
+          if ((levels > 1 || off >= s.chaseTicks - 1e-9) && now - c.placedAt >= 250) pull.push(c);
+          else kept.push(c);
+          continue;
+        }
+        // Behind: one quote a side re-prices after the pause; a ladder keeps it while it is within its levels.
+        const old = now - c.placedAt >= s.minRepriceMs;
+        const back = (side === 'buy' ? w.price - c.price : c.price - w.price) / tick;
+        const tooFar = levels > 1 ? back > levels - 1 + 1e-9 : off >= s.chaseTicks - 1e-9 && !this.atOwnTouch(side, c.price, q);
+        if (old && tooFar) pull.push(c);
+        else kept.push(c);
       }
-      // One quote per side: none while the last one's cancel is not confirmed (it may still fill).
-      if (mine.length) continue;
+      // More than it may have: the farthest go.
+      while (kept.length > allowed) pull.push(kept.pop()!);
+      // A cancel not confirmed yet - sent before or now - still counts (it may still fill); and one quote at the price wanted is enough.
+      const cancelling = mine.length - kept.length;
+      if (kept.length + cancelling >= allowed || kept.some((c) => Math.abs(c.price - w.price) < tick / 2)) continue;
       // A side SoDEX refused waits (3 s, doubling to a minute) instead of going out again every step.
       if (Number((a.k.mretry as Record<string, number> | undefined)?.[side] ?? 0) > now) continue;
-      send.push({ side, price: w.price, quantity: w.quantity, tif: 'gtx', tag: side === 'buy' ? 'bid' : 'ask' });
+      // The unwinding side's new quote: what is left to unwind after the ones already resting.
+      const restingQty = kept.reduce((x, c) => x + Math.max(0, c.quantity - c.filled), 0);
+      const qty = adds ? w.quantity : Math.min(w.quantity, Math.max(minChildQty(m, w.price), floorStep(Math.abs(inv) - restingQty, m)));
+      if (!adds && restingQty >= Math.abs(inv) - 1e-12) continue;
+      send.push({ side, price: w.price, quantity: qty, tif: 'gtx', tag: side === 'buy' ? 'bid' : 'ask' });
     }
     a.k.mguard = guardedAt;
     if (pull.length) await this.cancelChildren(a, m, pull);

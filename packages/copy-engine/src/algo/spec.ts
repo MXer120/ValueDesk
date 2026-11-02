@@ -58,7 +58,7 @@ export const ALGO_LIMITS = {
   trailing: { trailPct: { min: 0.001, max: 0.5 }, chaseMs: { min: 1_000, max: 10 * MIN } },
   basket: { legs: { min: 2, max: 10 }, legUsd: { min: 10, max: 10_000_000 } },
   sweep: { slippageBps: { min: 1, max: 1_000 }, roundMs: { min: 500, max: MIN }, timeoutMs: { min: 5_000, max: DAY } },
-  mm: { orderUsd: { min: 10, max: 100_000 }, maxInventoryUsd: { min: 10, max: 1_000_000 }, offsetTicks: { min: -1, max: 1_000 }, chaseTicks: { min: 1, max: 1_000 }, minRepriceMs: { min: 1_000, max: MIN }, skewTicks: { min: 0, max: 1_000 }, edgeBps: { min: 0, max: 100 }, queueGuard: { min: 0, max: 0.5 } },
+  mm: { orderUsd: { min: 10, max: 100_000 }, maxInventoryUsd: { min: 10, max: 1_000_000 }, offsetTicks: { min: -1, max: 1_000 }, chaseTicks: { min: 1, max: 1_000 }, minRepriceMs: { min: 1_000, max: MIN }, skewTicks: { min: 0, max: 1_000 }, edgeBps: { min: 0, max: 100 }, queueGuard: { min: 0, max: 0.5 }, levels: { min: 1, max: 5 }, moveGuard: { min: 0, max: 100 } },
   grid: { levels: { min: 3, max: 60 }, orderUsd: { min: 10, max: 100_000 } },
   bot: { volumeTargetUsd: { min: 100, max: 1e10 }, maxLossUsd: { min: 1, max: 1e8 } },
   exitPct: { min: 0.001, max: 10 },
@@ -651,6 +651,9 @@ export function checkAlgoSpec(input: unknown, depth = 0): AlgoSpecCheck {
       // Only when above 0, so a spec without it keeps its canonical text.
       if (o.edgeBps !== undefined && o.edgeBps !== null && Number(o.edgeBps) !== 0) (spec as MmSpec).edgeBps = num(o, 'edgeBps', 'Distance from the mid', L.edgeBps, e);
       if (o.queueGuard !== undefined && o.queueGuard !== null && Number(o.queueGuard) !== 0) (spec as MmSpec).queueGuard = num(o, 'queueGuard', 'Queue guard', L.queueGuard, e);
+      // Only when they change something (above 1 level, above 0 ticks): a spec without them keeps its canonical text.
+      if (o.levels !== undefined && o.levels !== null && Number(o.levels) !== 1) (spec as MmSpec).levels = int(o, 'levels', 'Ladder', L.levels, e);
+      if (o.moveGuard !== undefined && o.moveGuard !== null && Number(o.moveGuard) !== 0) (spec as MmSpec).moveGuard = num(o, 'moveGuard', 'Move guard', L.moveGuard, e);
       break;
     }
     case 'grid': {

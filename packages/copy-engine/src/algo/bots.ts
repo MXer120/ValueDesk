@@ -129,7 +129,7 @@ export interface MmQuote {
 /**
  * The quotes a volume maker wants now, given what it holds (`inventory`, base units, signed) at the mark.
  *   - each side rests `offsetTicks` from its best price (-1 one tick inside where the spread has room), and at least
- *     `edgeBps` from the mid;
+ *     `edgeBps` from both the mid and the mark (in a wide spread: one tick inside, never closer to fair than that);
  *   - the side that adds to what it holds steps back by skewTicks x |held| / cap (rounded), so the side
  *     that unwinds is the one at the touch;
  *   - a side that would take it past the cap is not quoted; the side that unwinds is sized up to what it
@@ -155,10 +155,13 @@ export function mmQuotes(s: Pick<MmSpec, 'orderUsd' | 'maxInventoryUsd' | 'offse
     const off = Math.max(0, s.offsetTicks) + skew;
     let price = side === 'buy' ? q.bid - off * tick + inside * tick : q.ask + off * tick - inside * tick;
     // At least edgeBps from the mid (edge: a round trip earns twice it); the skew still steps back from there.
+    // Measured from the safer of the mid and the mark (the oracle-led fair price): a book that lags the market
+    // cannot put a quote on the wrong side of where the price really is.
     const edge = s.edgeBps ?? 0;
     if (edge > 0) {
       const midP = (q.bid + q.ask) / 2;
-      price = side === 'buy' ? Math.min(price, midP * (1 - edge / 10_000) - skew * tick) : Math.max(price, midP * (1 + edge / 10_000) + skew * tick);
+      const fair = mark > 0 ? mark : midP;
+      price = side === 'buy' ? Math.min(price, Math.min(midP, fair) * (1 - edge / 10_000) - skew * tick) : Math.max(price, Math.max(midP, fair) * (1 + edge / 10_000) + skew * tick);
     }
     // Never at or through the other side: post-only would be refused.
     price = side === 'buy' ? Math.min(price, q.ask - tick) : Math.max(price, q.bid + tick);

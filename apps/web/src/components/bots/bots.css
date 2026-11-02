@@ -179,7 +179,11 @@ button.bots-strat:active { transform: scale(0.995); }
 .modal.fx.bots-form { max-width: 560px; max-height: calc(100vh - 32px); }
 .bots-form .modal-body { overflow-y: auto; overscroll-behavior: contain; gap: 0; }
 .bots-form .modal-foot { display: block; padding: var(--sp-3) var(--sp-4) var(--sp-4); border-top: 1px solid var(--panel-line); background: transparent; }
-.bots-dlg .dlg-ctl > .oe-inputrow, .bots-dlg .dlg-ctl > .bots-pair { flex: 1 1 100%; }
+.bots-dlg .dlg-ctl > .oe-inputrow, .bots-dlg .dlg-ctl > .bots-cheap { display: inline-flex; flex-direction: column; align-items: center; line-height: 14px; }
+.bots-cheap b { font-weight: 500; }
+.bots-cheap small { color: var(--muted); font-family: var(--font-num); font-size: var(--fs-micro, 11px); }
+.dlg-seg .is-on .bots-cheap small { color: inherit; }
+.bots-pair { flex: 1 1 100%; }
 .bots-dlg .algo-ferr { flex: 1 1 100%; margin: 0; }
 
 .bots-sub { margin: 0 0 4px; color: var(--muted); font-size: var(--fs-xs); }
