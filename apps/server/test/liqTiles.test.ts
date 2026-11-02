@@ -180,9 +180,12 @@ test('after a restart the index reads the metas file, not the snapshots, and ans
     assert.equal(texts.length, 1, 'one parse: the metas file, no snapshot');
     assert.deepEqual(b.points, a.points);
     assert.deepEqual(b.scale, a.scale);
-    // A snapshot written again after the file is parsed again (its length moved).
+    // An older snapshot written again is listed again at the next full listing (RELIST_MS: the
+    // newest is listed on every ask) and parsed again then (its length moved).
     s.putLiqHist(t0, [['DOGE', JSON.stringify(snapOf(0.25, 0.0005, 1))]]);
-    const c = (await T.liqTileIndex('DOGE', [...venues], Date.now() + 40_000))!;
+    const held = (await T.liqTileIndex('DOGE', [...venues], Date.now() + 40_000))!;
+    assert.equal(held.points[0]!.p, a.points[0]!.p, 'within RELIST_MS: the listing held');
+    const c = (await T.liqTileIndex('DOGE', [...venues], Date.now() + T.RELIST_MS + 40_000))!;
     assert.equal(c.points[0]!.p, 0.25);
     s.close();
   } finally {
@@ -234,4 +237,29 @@ test('some wallets: their index and tiles are cut from one rebuilt history and g
   assert.deepEqual(held.scale, idx.scale, 'the same answer within the minute');
   T.resetWalletTiles();
   s.close();
+});
+
+test('an index ask lists only from the newest snapshot held on, and still sees one added since', async () => {
+  const { IndexStore } = await import('../src/indexer/store.js');
+  const T = await import('../src/indexer/liqTiles.js');
+  T.resetLiqTiles();
+  const s = new IndexStore(process.env.VALUESCAN_INDEX_DB!);
+  const t0 = Math.floor((Date.now() - 10 * H) / Q) * Q;
+  for (let i = 0; i < 6; i++) s.putLiqHist(t0 + i * H, [['WIF', JSON.stringify(snapOf(2 + i * 0.01, 0.005, 300 + i))]]);
+  const meta = IndexStore.prototype.liqHistMeta;
+  const froms: number[] = [];
+  IndexStore.prototype.liqHistMeta = function (this: InstanceType<typeof IndexStore>, coin: string, from: number, to: number) { if (coin === 'WIF') froms.push(from); return meta.call(this, coin, from, to); };
+  try {
+    const a = (await T.liqTileIndex('WIF', ['hyperliquid']))!;
+    assert.equal(a.points.length, 6);
+    s.putLiqHist(t0 + 6 * H, [['WIF', JSON.stringify(snapOf(2.1, 0.005, 400))]]);
+    const b = (await T.liqTileIndex('WIF', ['hyperliquid'], Date.now() + 20_000))!;
+    assert.equal(b.points.length, 7, 'the new snapshot is in');
+    assert.equal(froms.length, 2);
+    assert.equal(froms[1], t0 + 5 * H, 'the second ask lists from the newest held on');
+  } finally {
+    IndexStore.prototype.liqHistMeta = meta;
+    s.close();
+    T.resetLiqTiles();
+  }
 });

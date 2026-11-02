@@ -234,6 +234,40 @@ function listed(s: IndexStore, coin: string, from: number, to: number): Array<{ 
   }
 }
 
+/**
+ * A coin's listed snapshots over the index's reach (RANGE_MS and a widest slot before it, which
+ * a tile may start in), kept between asks: an ask lists only from the newest held on (the
+ * snapshot being written and any after it: a row or two), and the whole reach again every
+ * RELIST_MS (snapshots thinned past 3 days drop out then; a tile skips one gone meanwhile).
+ * Listed in full on every ask, it was 3% of the API's thread in the 2026-11-01 profile, in one
+ * synchronous statement per ask.
+ */
+export const RELIST_MS = 10 * 60_000;
+const lists = new Map<string, { at: number; from: number; rows: Array<{ t: number; n: number }> }>();
+
+function listing(s: IndexStore, coin: string, now: number): Array<{ t: number; n: number }> {
+  const from = now - RANGE_MS - tileMs(T_LEVELS - 1);
+  const held = lists.get(coin);
+  const last = held?.rows.at(-1);
+  if (held && last && now - held.at < RELIST_MS && from >= held.from) {
+    const tail = listed(s, coin, last.t, Number.MAX_SAFE_INTEGER);
+    const keep = held.rows.filter((x) => x.t >= from && x.t < last.t);
+    held.rows = keep.concat(tail);
+    return held.rows;
+  }
+  const rows = listed(s, coin, from, Number.MAX_SAFE_INTEGER);
+  lists.set(coin, { at: now, from, rows });
+  return rows;
+}
+
+/** The coins with snapshots, kept a minute: the statement scans the whole table (its key is coin, t). */
+const COINS_MS = 60_000;
+let coinsHeld: { at: number; coins: string[] } | null = null;
+function coinsOf(s: IndexStore, now: number): string[] {
+  if (!coinsHeld || now - coinsHeld.at >= COINS_MS || now < coinsHeld.at) coinsHeld = { at: now, coins: s.liqHistCoins() };
+  return coinsHeld.coins;
+}
+
 /** A snapshot's meta and rows: held, else read and parsed (null: gone, or not JSON). */
 function snapOf(s: IndexStore, coin: string, venues: readonly Venue[], vk: string, at: { t: number; n: number }, wantRows: boolean): { meta: Meta; rows: SnapRow[] | null } | null {
   let byT = metas.get(vk);
@@ -400,8 +434,8 @@ export function liqTileIndex(coin: string, venues: readonly Venue[], now = Date.
     let list: Array<{ t: number; n: number }> = [];
     let coins: string[] = [];
     try {
-      list = listed(s, coin, now - RANGE_MS, Number.MAX_SAFE_INTEGER);
-      coins = s.liqHistCoins();
+      list = listing(s, coin, now).filter((x) => x.t >= now - RANGE_MS);
+      coins = coinsOf(s, now);
     } catch { /* the table arrives with the indexer's first start */ }
     const snaps = (await walk(s, coin, venues, list, false)).map((x) => x.meta);
     trimMetas(vk, new Set(list.map((x) => x.t)));
@@ -446,7 +480,7 @@ export function liqTile(coin: string, venues: readonly Venue[], ask: TileAsk): P
     readMetas();
     const end = ask.tt + tileMs(ask.tl);
     let after: Array<{ t: number; n: number }> = [];
-    try { after = listed(s, coin, ask.tt, Number.MAX_SAFE_INTEGER); } catch { /* no table yet */ }
+    try { after = listing(s, coin, Date.now()).filter((x) => x.t >= ask.tt); } catch { /* no table yet */ }
     const newest = after.at(-1)?.t ?? null;
     const upTo = Math.min(end - 1, ask.v ?? Number.MAX_SAFE_INTEGER);
     const list = after.filter((x) => x.t <= upTo);
@@ -468,6 +502,8 @@ export function resetLiqTiles(): void {
   rowsHeld = 0;
   inflight.clear();
   lengthFn = 'octet_length';
+  lists.clear();
+  coinsHeld = null;
   metasFile = undefined;
   metasRead = false;
   if (saveTimer) clearTimeout(saveTimer);
