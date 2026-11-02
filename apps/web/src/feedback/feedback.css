@@ -4,7 +4,7 @@
    It is the one control there with a soft fill: the bar's words are chrome and
    read as such, this one is an invitation and has to be found without looking
    for it - but it stays a 20px pill in the bar's 12px type, never louder than
-   the price or the order buttons above it. Below 560px only its glyph is left,
+   the price or the order buttons above it. Below 760px only its glyph is left,
    with the bar's 34px touch target. */
 .fb-entry {
   display: inline-flex;
@@ -39,11 +39,9 @@
 .fb-entry:hover .fb-entry__glyph { color: var(--text); }
 .sfoot-right .fb-entry { margin-right: var(--sp-3, 12px); }
 
+/* Glyph only from 760px down: with the word, the bar's right group squeezed the account chip away. */
 @media (max-width: 760px) {
-  .fb-entry { height: 34px; padding: 0 12px; }
-}
-@media (max-width: 560px) {
-  .fb-entry { width: 34px; padding: 0; justify-content: center; }
+  .fb-entry { height: 34px; width: 34px; padding: 0; justify-content: center; }
   .fb-entry__word { display: none; }
 }
 

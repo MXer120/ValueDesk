@@ -482,6 +482,26 @@
 .dash-tabs__bar.has-end { overflow: visible; }
 .dash-tabs__bar::-webkit-scrollbar { display: none; }
 .dash-tabs__bar:active { cursor: grabbing; }
+/* A tab strip with more tabs than room (`.dash-tabs__list` beside the panel's controls: "Order
+   History" cut in half at 768px) fades out at the side that has more, the way the nav and the
+   market stats do - and only while there is more: the fade is driven by the strip's own scroll, so
+   one that fits has none, and one scrolled to its end loses it. Only the strip: the phone bar has
+   its own fade (responsive.css), and a second mask on the bar hid all of its tabs. */
+@property --tabs-fade-r { syntax: '<length>'; inherits: false; initial-value: 0px; }
+@property --tabs-fade-l { syntax: '<length>'; inherits: false; initial-value: 0px; }
+@keyframes dash-tabs-fade {
+  0% { --tabs-fade-l: 0px; --tabs-fade-r: 28px; }
+  8%, 92% { --tabs-fade-l: 28px; --tabs-fade-r: 28px; }
+  100% { --tabs-fade-l: 28px; --tabs-fade-r: 0px; }
+}
+@supports (animation-timeline: scroll()) {
+  .dash-tabs__list {
+    animation: dash-tabs-fade linear both;
+    animation-timeline: scroll(self inline);
+    -webkit-mask-image: linear-gradient(to right, transparent, #000 var(--tabs-fade-l), #000 calc(100% - var(--tabs-fade-r)), transparent);
+    mask-image: linear-gradient(to right, transparent, #000 var(--tabs-fade-l), #000 calc(100% - var(--tabs-fade-r)), transparent);
+  }
+}
 
 /* 14px/400. Hierarchy between the selected tab and the rest is carried by
    COLOUR plus a short amber stub, never by weight - the two states are the same

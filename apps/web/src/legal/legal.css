@@ -92,6 +92,15 @@
 @media (max-width: 760px) {
   .legal { padding: var(--sp-2) 0 var(--sp-5); }
   .legal-body { padding: var(--sp-3) var(--sp-3) var(--sp-4); }
+  /* A phone's footer links the Impressum only, so this switch is the way to the other six pages.
+     In one row it ran past the card (375px: "Copy terms" broken over two lines and cut); as a grid
+     of equal cells every page stays one tap away. */
+  .legal-head .lbp-seg {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(76px, 1fr));
+    width: 100%;
+  }
+  .legal-head .lbp-seg > button { justify-content: center; min-width: 0; padding: 0 6px; white-space: nowrap; }
 }
 
 @media (prefers-reduced-motion: reduce) {

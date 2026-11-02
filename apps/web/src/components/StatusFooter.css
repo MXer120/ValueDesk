@@ -546,18 +546,33 @@
    The connection WORD goes at 560px; the dot still carries the state, and it
    is the same convention the navbar already uses at 900px. Identity and the
    three actions survive at every width. */
-@media (max-width: 560px) {
-  .sfoot-connword { display: none; }
-  /* A phone keeps the Impressum link only - the legal words together would
-     squeeze the account chip to an ellipsis at 375px. Privacy, Terms and Copy
-     terms are one tap further, in the legal pages' own switch. (Two classes:
-     the touch block at the end of this file gives `.sfoot-link` a display of
-     its own.) */
+/* The right group is `flex: none`, so whatever it cannot fit squeezes the
+   account chip: with all seven legal words, Status and "Send feedback" it is
+   ~640px wide, and from 993px down the chip collapsed to an 18px red sliver
+   with Licences pushed past the window's edge (measured at 600 and 768px,
+   2026-11-03). So the words go in steps, the ones the legal pages' own switch
+   reaches one tap away first. (Two classes: the touch block at the end of this
+   file gives `.sfoot-link` a display of its own.) */
+@media (max-width: 993px) {
   .sfoot-legal .sfoot-link--privacy,
   .sfoot-legal .sfoot-link--terms,
   .sfoot-legal .sfoot-link--copy-terms { display: none; }
+}
+@media (max-width: 760px) {
   .sfoot-right .sfoot-link--status { display: none; }
 }
+@media (max-width: 560px) {
+  .sfoot-connword { display: none; }
+}
+/* A phone keeps the Impressum only, the one link the law wants on every page. */
+@media (max-width: 480px) {
+  .sfoot-legal .sfoot-link--cookies,
+  .sfoot-legal .sfoot-link--risk,
+  .sfoot-legal .sfoot-link--licenses { display: none; }
+  .sfoot-group { gap: var(--sp-2); }
+}
+/* The chip states which key the next order signs under: it may ellipsis, never vanish. */
+.sfoot-acct { min-width: 84px; }
 
 /* --- geometry --------------------------------------------------------------
    The bar's box - its height, its type step and the size of its four controls -

@@ -994,6 +994,16 @@ button.acct-link:where(:not(.active)) { background: none; }
   line-height: 1;
 }
 button.acctf-view:where(:not(.active)) { background: transparent; border-color: var(--panel-line); }
+/* A phone: the controls took 212 of 357px and left the tabs 101px - "Positions" and a fade. View
+   keeps its glyph (its word stays the button's name for a screen reader) and the gaps tighten. */
+@media (max-width: 560px) {
+  .acctf { gap: 6px; }
+  .acctf-view { padding: 0 7px; }
+  .acctf-view > span:not(.acctf-count) {
+    position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+    overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+  }
+}
 button.acctf-view:hover:not(:disabled),
 button.acctf-view.is-open,
 button.acctf-view.is-active { color: var(--text); border-color: var(--line); }

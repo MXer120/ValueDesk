@@ -65,6 +65,9 @@
    contract as PanelScroll's 'hidden'. A scrollbar here would let the chart
    grow instead of fit. */
 .mcarousel__page--fit { overflow: hidden; }
+/* ...and fills it: the chart panel is `flex: 0 1 auto` on its own, so on a phone it stopped at
+   its content (560 of a 657px page) and left a ~100px blank band under the time axis. */
+.mcarousel__page--fit > .panel { flex: 1 1 auto; }
 
 .mcarousel__dots {
   flex: none;

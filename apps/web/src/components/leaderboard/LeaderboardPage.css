@@ -264,6 +264,15 @@ button.lbp-card.is-1:hover {
 .lbp-spark.is-up { color: var(--pos); }
 .lbp-spark.is-down { color: var(--neg); }
 .lbp-spark.is-empty { min-height: 64px; }
+/* A podium card a third of a tablet wide (761-1100px): "+$102.755.530,31" at 24px ran past the
+   card's edge beside its sparkline. Below 340px of card the figures take the full width and the
+   sparkline goes under them; the PnL scales with the card, never under 18px. */
+.lbp-card { container-type: inline-size; }
+@container (max-width: 340px) {
+  .lbp-card__body { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .lbp-card__pnl, .lbp-card.is-1 .lbp-card__pnl { font-size: clamp(18px, 8.5cqi, 24px); line-height: 1.25; }
+  .lbp-spark, .lbp-card.is-1 .lbp-spark { height: 44px; }
+}
 
 .lbp-ava {
   width: 24px;
@@ -428,9 +437,12 @@ button.lbp-name:hover { color: var(--text); text-decoration: underline; text-und
   .lbp-card.is-1, .lbp-card.is-2, .lbp-card.is-3 { order: 0; }
   button.lbp-card.is-1, .lbp-card.is-1 { min-height: 150px; }
   .lbp-search { margin-left: 0; flex: 1 1 200px; min-width: 0; width: auto; }
-  .lbp .lb-scroll, .lbp-sheet { overflow-x: auto; }
-  .lbp .lb-table.lbp-table { min-width: 860px; }
 }
+/* The nine columns need 860px. Under that they scroll sideways at EVERY width, not only on a
+   phone: between 761 and ~1000px (a tablet, a narrow window with the rail) the fixed layout
+   squeezed them until Volume ran into Win rate and the headers "Rank"/"Trader" touched. */
+.lbp .lb-scroll, .lbp-sheet { overflow-x: auto; }
+.lbp .lb-table.lbp-table { min-width: 860px; }
 
 /* Venues: a narrow column of overlapping marks on the right. */
 .lbp .lbp-table th.lbp-th-venues, .lbp .lbp-table td.lbp-td-venues { text-align: right; }
