@@ -144,8 +144,7 @@ const tidyRow = (y: LiqRow) => trimRow(y.map((v, k) => (k === 3 || k === 4 || k 
 function fineSnapshot(g: Group): string | null {
   const c = liqFeed().coins.get(g.coin);
   const f = c?.f;
-  // A layer not kept yet (live.ts want) sends nothing: the viewer keeps what it draws until it is.
-  if (!c || !f || !f.on || !g.fine) return null;
+  if (!c || !f || !g.fine) return null;
   const rows = fineRows(g, null);
   g.fineSent = new Map(rows);
   const buckets = [...rows.values()].sort((a, b) => a[0] - b[0]).map(tidyRow);
@@ -156,7 +155,7 @@ function fineSnapshot(g: Group): string | null {
 function fineDeltaFor(g: Group, changed: Map<Venue, Set<number>>): string | null {
   const c = liqFeed().coins.get(g.coin);
   const f = c?.f;
-  if (!c || !f || !f.on || !g.fine) return null;
+  if (!c || !f || !g.fine) return null;
   const idx = new Set<number>();
   for (const v of g.venues) {
     for (const i of changed.get(v) ?? []) {
@@ -280,14 +279,6 @@ function leave(ws: WebSocket): void {
   const g = groups.get(key);
   g?.conns.delete(ws);
   if (g && !g.conns.size) groups.delete(key);
-  wantFine();
-}
-
-/** The coins viewers stream at a fine step, told to the indexer (it keeps only their fine layers, live.ts want). */
-function wantFine(): void {
-  const coins = new Set<string>();
-  for (const g of groups.values()) if (g.fine && g.conns.size) coins.add(g.coin);
-  liqFeed().want([...coins]);
 }
 
 function join(ws: WebSocket, coin: string, venues: Venue[], k: number, fine: Group['fine']): void {
@@ -304,7 +295,6 @@ function join(ws: WebSocket, coin: string, venues: Venue[], k: number, fine: Gro
   if (!g) { g = { coin, venues, k, conns: new Set(), snapAt: 0, sent: new Map(), fine, fineSent: new Map() }; groups.set(key, g); }
   g.conns.add(ws);
   subOf.set(ws, key);
-  wantFine();
   // A new group gets its snapshot now; a newcomer to a running one gets one for itself.
   if (fresh && !sameHeat) { void pushSnap(g); return; }
   if (fresh) g.snapAt = Date.now();

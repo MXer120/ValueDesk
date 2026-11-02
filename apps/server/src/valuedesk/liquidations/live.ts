@@ -93,15 +93,8 @@ interface CoinAgg {
  * range (NOW_LO-NOW_HI of the price: a step picked holds zoomed out), laid out again once the price moved FINE_RECENTER from its middle. The
  * heatmap's $10 and $1 (owner 2026-11-01: "make it as accurate / updating as the normal heatmap")
  * stream from it as the normal buckets do: the same entries, the same second.
- *
- * Kept (`on`) only for the coins a viewer streams at a fine step (want: the API says which, at once
- * and every few seconds) and FINE_GRACE_MS after the last left (owner 2026-11-02: the layer for
- * every coin was ~10% of the indexer's thread on production). Off, the layer keeps its step and
- * range - the viewers still learn them - and holds nothing. Turned on it is laid out from the
- * coin's entries at once (refine).
  */
 interface FineAgg {
-  on: boolean;
   p0: number;
   st: number;
   lo: number;
@@ -114,8 +107,6 @@ interface FineAgg {
 }
 /** How far the price may move from the fine layer's middle before it is laid out again (its range and step follow the price). */
 const FINE_RECENTER = 0.1;
-/** A coin's fine layer is kept this long after it was last wanted. */
-export const FINE_GRACE_MS = 2 * 60_000;
 /** The fine layer's step from the price: the history's snapshot step (HIST_STEP) over a hundred. */
 export const fineStepOf = (p: number): number => +(niceStep(p * HIST_STEP) / 100).toPrecision(12);
 
@@ -130,7 +121,7 @@ export interface LiveDelta {
   whole: boolean;
   v: Partial<Record<Venue, { b: LiqRow[]; c?: Cov; o?: [number, number, number, number] }>>;
   /** The fine layer's changed cells (whole: all of them, a new layout of it): its step, range [lo, hi), epoch. */
-  f?: { st: number; lo: number; hi: number; ep: number; whole: boolean; on: boolean; v: Partial<Record<Venue, LiqRow[]>> };
+  f?: { st: number; lo: number; hi: number; ep: number; whole: boolean; v: Partial<Record<Venue, LiqRow[]>> };
 }
 
 /** The coverage tuple (VenueAgg.c). */
@@ -172,13 +163,7 @@ export class LiqLive {
      * positions' notional at their levels. Called once per pricing of the account.
      */
     crossed?: (venue: Venue, address: string, usd: number) => void;
-    /** The clock for the fine layer's grace (tests set it). */
-    now?: () => number;
   }) {}
-
-  private now(): number {
-    return this.o.now ? this.o.now() : Date.now();
-  }
 
   /** The account changed (a print, a read): re-priced at the next flush. */
   touch(venue: Venue, address: string): void {
@@ -257,9 +242,7 @@ export class LiqLive {
       const p = this.o.priceOfCoin(coin) ?? c.p0;
       // The fine layer laid out again around the price once it moved FINE_RECENTER from its middle
       // (sent whole below) - checked for a quiet coin too: the price moves without its accounts.
-      if (p > 0 && Math.abs(p / c.f.p0 - 1) > FINE_RECENTER) this.refine(coin, c, p, c.f.on);
-      // No viewer for FINE_GRACE_MS: the layer is let go (sent whole, empty).
-      if (c.f.on && !this.isWanted(coin)) c.f = this.fineAt(c.f.p0, false);
+      if (p > 0 && Math.abs(p / c.f.p0 - 1) > FINE_RECENTER) this.refine(coin, c, p);
       if (!c.whole && !c.dirtyB.size && !c.dirtyC.size && !c.f.whole && !c.f.dirty.size) continue;
       const d: LiveDelta = { coin, p, st: c.st, ep: c.ep, whole: c.whole, v: {} };
       const venues = c.whole ? [...c.v.keys()] : [...new Set([...c.dirtyB.keys(), ...c.dirtyC])];
@@ -375,40 +358,12 @@ export class LiqLive {
     f.whole = false;
     f.dirty.clear();
     if (!whole && !Object.keys(v).length) return null;
-    return { st: f.st, lo: f.lo, hi: f.hi, ep: f.ep, whole, on: f.on, v };
+    return { st: f.st, lo: f.lo, hi: f.hi, ep: f.ep, whole, v };
   }
 
-  /** When each coin's fine layer was last wanted (want). */
-  private wantedAt = new Map<string, number>();
-  private isWanted(coin: string): boolean {
-    const at = this.wantedAt.get(coin);
-    return at !== undefined && this.now() - at < FINE_GRACE_MS;
-  }
-
-  /**
-   * The coins viewers stream at a fine step now (the API's whole list): each kept on, and one off
-   * until now laid out at once. True when a layer was turned on (flush to send it without waiting).
-   */
-  want(coins: Iterable<string>): boolean {
-    const now = this.now();
-    let on = false;
-    for (const coin of coins) {
-      this.wantedAt.set(coin, now);
-      const c = this.coins.get(coin);
-      if (c && !c.f.on) { this.refine(coin, c, c.f.p0, true); on = true; }
-    }
-    return on;
-  }
-
-  /** The coins whose fine layer is kept (tests, status). */
-  fineOn(): string[] {
-    return [...this.coins].filter(([, c]) => c.f.on).map(([coin]) => coin);
-  }
-
-  /** A new fine layer around `p`: every entry of the coin in this layout added into it again, when on (sent whole). */
-  private refine(coin: string, c: CoinAgg, p: number, on: boolean): void {
-    c.f = this.fineAt(p, on);
-    if (!on) return;
+  /** A new fine layer around `p`: every entry of the coin in this layout added into it again (sent whole). */
+  private refine(coin: string, c: CoinAgg, p: number): void {
+    c.f = this.fineAt(p);
     for (const key of this.holders.get(coin) ?? []) {
       const i = key.indexOf('|');
       const venue = key.slice(0, i) as Venue;
@@ -416,16 +371,16 @@ export class LiqLive {
     }
   }
 
-  private fineAt(p: number, on: boolean): FineAgg {
+  private fineAt(p: number): FineAgg {
     const st = fineStepOf(p);
-    return { on, p0: p, st, lo: p * NOW_LO, hi: p * NOW_HI, ep: ++this.epoch, v: new Map(), dirty: new Map(), whole: true, sent: new Map() };
+    return { p0: p, st, lo: p * NOW_LO, hi: p * NOW_HI, ep: ++this.epoch, v: new Map(), dirty: new Map(), whole: true, sent: new Map() };
   }
 
   /** An entry into (1) or out of (-1) the fine layer: out of the cell it went into, if into this layer at all. */
   private applyFine(f: FineAgg, venue: Venue, e: Entry, sign: 1 | -1): void {
     let i: number;
     if (sign > 0) {
-      if (!f.on || e.at < 0 || !(e.liq >= f.lo && e.liq < f.hi)) { e.fi = undefined; return; }
+      if (e.at < 0 || !(e.liq >= f.lo && e.liq < f.hi)) { e.fi = undefined; return; }
       i = Math.floor(e.liq / f.st);
       e.fi = i;
       e.fep = f.ep;
@@ -452,7 +407,7 @@ export class LiqLive {
     if (c) return c;
     const p = this.o.priceOfCoin(coin);
     if (!p || !(p > 0)) return null;
-    c = { p0: p, st: niceStep(p * NOW_STEP), lo: p * NOW_LO, hi: p * NOW_HI, ep: ++this.epoch, v: new Map(), dirtyB: new Map(), dirtyC: new Set(), whole: true, sent: new Map(), f: this.fineAt(p, this.isWanted(coin)) };
+    c = { p0: p, st: niceStep(p * NOW_STEP), lo: p * NOW_LO, hi: p * NOW_HI, ep: ++this.epoch, v: new Map(), dirtyB: new Map(), dirtyC: new Set(), whole: true, sent: new Map(), f: this.fineAt(p) };
     this.coins.set(coin, c);
     return c;
   }
@@ -461,6 +416,49 @@ export class LiqLive {
   private relayout(coin: string): void {
     this.coins.delete(coin);
     for (const a of this.holders.get(coin) ?? []) this.dirty.add(a);
+  }
+
+  /**
+   * `o` (priced last time) becomes `e` in place when nothing but its size, USD and level within
+   * its bucket and fine cell moved: the differences added - the same sums as taking `o` out and
+   * putting `e` in - and nothing marked changed when nothing did. False when it moved elsewhere
+   * (the caller takes it out and puts it in).
+   */
+  private move(venue: Venue, o: Entry, e: Entry): boolean {
+    if (o.ep !== e.ep || o.at !== e.at || o.band !== e.band || o.at < 0) return false;
+    const c = this.coins.get(e.coin);
+    if (!c || c.ep !== e.ep) return false;
+    const f = c.f;
+    const inF = e.liq >= f.lo && e.liq < f.hi;
+    const fi = inF ? Math.floor(e.liq / f.st) : undefined;
+    const oIn = o.fi !== undefined && o.fep === f.ep;
+    if (inF !== oIn || (inF && fi !== o.fi)) return false;
+    const da = e.a - o.a;
+    const du = e.usd - o.usd;
+    o.a = e.a;
+    o.usd = e.usd;
+    o.liq = e.liq;
+    if (da === 0 && du === 0) return true;
+    const L = e.long;
+    const x = c.v.get(venue)!;
+    x.c[L ? 0 : 1] += da;
+    x.c[L ? 2 : 3] += da;
+    c.dirtyC.add(venue);
+    const b = x.b.get(e.at)!;
+    b[L ? 0 : 1]! += du;
+    if (e.band >= 0) b[rowBand(L, e.band as 0 | 1 | 2) - 1]! += du;
+    let s = c.dirtyB.get(venue);
+    if (!s) { s = new Set(); c.dirtyB.set(venue, s); }
+    s.add(e.at);
+    if (inF) {
+      const y = f.v.get(venue)!.get(fi!)!;
+      y[L ? 0 : 1]! += du;
+      if (e.band >= 0) y[rowBand(L, e.band as 0 | 1 | 2) - 1]! += du;
+      let t = f.dirty.get(venue);
+      if (!t) { t = new Set(); f.dirty.set(venue, t); }
+      t.add(fi!);
+    }
+    return true;
   }
 
   private apply(venue: Venue, e: Entry, sign: 1 | -1): void {
@@ -497,13 +495,15 @@ export class LiqLive {
     const i = key.indexOf('|');
     const venue = key.slice(0, i) as Venue;
     const address = key.slice(i + 1);
-    for (const e of this.added.get(key) ?? []) this.apply(venue, e, -1);
+    // The entries priced last time, taken out below: each left where it was is moved in place (move).
+    const old = this.added.get(key) ?? [];
     this.added.delete(key);
     for (const s of this.multiOf.get(key) ?? []) this.multi.get(s)?.delete(key);
     this.multiOf.delete(key);
     const acct = this.o.account(venue, address);
     const ps = acct?.positions.filter((p) => p.szi) ?? [];
     if (!acct || !ps.length) {
+      for (const e of old) this.apply(venue, e, -1);
       for (const set of this.holders.values()) set.delete(key);
       return;
     }
@@ -534,9 +534,21 @@ export class LiqLive {
       const a = Math.abs(p.szi);
       const at = l === null || !(l > 0) ? (none[j] ? -3 : -2) : l < c.lo || l >= c.hi ? -1 : Math.floor(l / c.st);
       const e: Entry = { coin: coinName, ep: c.ep, long: p.szi > 0, a, at, usd: l ? a * l : 0, band: levBand(lev?.[j]) ?? -1, liq: at >= 0 ? l! : 0 };
-      this.apply(venue, e, 1);
       entries.push(e);
     });
+    // Each new entry against the old one of its coin and side: where it stayed in its bucket and
+    // fine cell only its size and USD move (most reprices: a cross account's level drifts with the
+    // price, ~10% of the indexer's thread taken out and put back - owner 2026-11-02, every coin's
+    // fine layer kept); else the old is taken out and the new put in.
+    const left = old.slice();
+    entries.forEach((e, j) => {
+      const k = left.findIndex((o) => o.coin === e.coin && o.long === e.long);
+      const o = k >= 0 ? left[k] : undefined;
+      if (o && this.move(venue, o, e)) { left.splice(k, 1); entries[j] = o; return; }
+      entries[j] = e;
+    });
+    for (const o of left) this.apply(venue, o, -1);
+    for (const e of entries) if (!left.includes(e) && !old.includes(e)) this.apply(venue, e, 1);
     this.added.set(key, entries);
     // Re-priced when another of its cross positions' prices moves.
     const cross = acct.priced ? ps.filter((p) => p.iso === undefined && p.fix == null) : [];
