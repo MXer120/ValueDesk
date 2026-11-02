@@ -18,8 +18,9 @@
   align-items: center;
   justify-content: center;
   padding: 4vh 4vw;
+  /* Dims only, like the dialog scrim (appearance.css): a blur here would make it the backdrop root,
+     and the platform picker's glass inside would blur nothing. */
   background: color-mix(in srgb, var(--bg) 70%, transparent);
-  backdrop-filter: blur(2px);
 }
 .tfl--big {
   width: min(1280px, 100%);
@@ -236,4 +237,29 @@ button.tfl-tr:hover, button.tfl-tr:focus-visible { background: var(--bg-hover); 
   .tfl-fr { grid-template-columns: 92px 1fr 1fr 92px; gap: var(--sp-2); }
   .tfl-role { display: none; }
   .tfl-wallet__acts { width: 100%; }
+}
+
+/* --- the candle row: pick the candle ---------------------------------------------------------- */
+.tfl-strip { display: flex; flex-direction: column; gap: 6px; padding: var(--sp-2) var(--sp-4) var(--sp-3); border-bottom: 1px solid var(--panel-line); }
+.tfl-strip__info { display: flex; align-items: center; flex-wrap: wrap; gap: 6px var(--sp-2); min-height: 22px; font-size: var(--fs-xs); color: var(--muted); }
+.tfl-strip__info b { color: var(--text); font-weight: 600; }
+.tfl-strip__ohlc { display: inline-flex; gap: var(--sp-2); flex-wrap: wrap; }
+.tfl-strip__ohlc i { font-style: normal; color: var(--dim); margin-right: 3px; }
+.tfl-strip__hint { margin-left: auto; }
+.tfl-pill.is-pick { color: var(--text); background: color-mix(in srgb, var(--text) 9%, transparent); }
+.tfl-pill.is-hover { color: var(--muted); background: var(--tint); }
+.tfl-pill.is-live { color: var(--pos); background: var(--bid-bg); }
+.tfl-strip__svg { display: block; width: 100%; height: 64px; cursor: pointer; }
+.tfl-strip__wait { fill: var(--line-soft); }
+.tfl-strip__col { fill: transparent; }
+.tfl-strip__c.is-hover .tfl-strip__col { fill: var(--tint); }
+.tfl-strip__c.is-on .tfl-strip__col { fill: color-mix(in srgb, var(--text) 10%, transparent); }
+.tfl-strip__c line { stroke-width: 1px; }
+.tfl-strip__c .is-up { fill: var(--pos); stroke: var(--pos); }
+.tfl-strip__c .is-down { fill: var(--neg); stroke: var(--neg); }
+.tfl-strip__c:not(.is-on):not(.is-hover) .is-up, .tfl-strip__c:not(.is-on):not(.is-hover) .is-down { opacity: 0.55; }
+@media (max-width: 560px) {
+  .tfl-strip { padding: var(--sp-2) var(--sp-3); }
+  .tfl-strip__svg { height: 52px; }
+  .tfl-strip__hint { display: none; }
 }

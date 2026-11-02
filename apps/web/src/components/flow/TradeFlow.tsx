@@ -29,6 +29,7 @@ import { PlatformSelect } from '../PlatformSelect';
 import { copyText } from '../accountTables/IdCell';
 import { coinOfSymbol } from '../../chart/liqMap';
 import { FLOW_INTERVALS, candleAt, stepCandle, windowText, type CandleWindow } from './flowWindow';
+import { CandleStrip } from './CandleStrip';
 import '../leaderboard/LeaderboardPage.css';
 import './TradeFlow.css';
 
@@ -38,6 +39,8 @@ const PAGE = 100;
 const MAX_ROWS = 500;
 const FILL_ROW_H = 30;
 
+/** "1H", "4H"; minutes and the long units as the chart spells them ("1m", "1D", "1M"). */
+const ivLabel = (i: string) => (i.endsWith('h') ? i.toUpperCase() : i);
 const pct = (v: number, dp = 0) => `${fmtNum(v * 100, { minimumFractionDigits: dp, maximumFractionDigits: dp })}%`;
 const fmtSz = (v: number) => fmtNum(v, { maximumSignificantDigits: 6 });
 const signed = (v: number, f: (x: number) => string) => (v > 0 ? `+${f(v)}` : v < 0 ? `${MINUS}${f(-v)}` : f(0));
@@ -207,18 +210,18 @@ export function TradeFlowView({ symbol, spot, interval: chartInterval, at }: Tra
           <CoinIcon coin={coin} size={20} />
           <div>
             <b>Who traded {coin}</b>
-            <span className="tfl-dim">{windowText(win)}{live ? ' · live' : ''}</span>
+            <span className="tfl-dim">{ivLabel(interval)} candle · {windowText(win)}{live ? ' · forming' : ''}</span>
           </div>
         </div>
         <div className="tfl-nav">
           <button type="button" className="tfl-icobtn" aria-label="Previous candle" title="Previous candle" onClick={() => setWin((w) => stepCandle(interval, w, -1))}>
             <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M10 3.5 5.5 8l4.5 4.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
           </button>
-          <Seg value={interval} label="Candle" options={FLOW_INTERVALS.map((i) => [i, i.endsWith('h') ? i.toUpperCase() : i] as const)} onChange={pickInterval} />
+          <Seg value={interval} label="Timeframe" options={FLOW_INTERVALS.map((i) => [i, ivLabel(i)] as const)} onChange={pickInterval} />
           <button type="button" className="tfl-icobtn" aria-label="Next candle" title="Next candle" disabled={live} onClick={() => setWin((w) => stepCandle(interval, w, 1))}>
             <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
           </button>
-          <button type="button" className={`tfl-latest${win.from === latest.from ? ' is-on' : ''}`} onClick={() => setWin(latest)}>Latest</button>
+          <button type="button" className={`tfl-latest${win.from === latest.from ? ' is-on' : ''}`} onClick={() => setWin(latest)} title="The candle still forming">Live candle</button>
         </div>
         <PlatformSelect options={spot ? ['sodex'] : FLOW_VENUES} value={venues} onChange={setVenues} align="end" />
         <button type="button" className="tfl-icobtn tfl-expand" onClick={() => setBig((b) => !b)} aria-label={big ? 'Back into the chart' : 'Expand'} title={big ? 'Back into the chart (Esc)' : 'Expand'}>
@@ -227,6 +230,7 @@ export function TradeFlowView({ symbol, spot, interval: chartInterval, at }: Tra
           </svg>
         </button>
       </div>
+      <CandleStrip engine={spot ? 'spot' : 'perps'} symbol={symbol} interval={interval} picked={win} onPick={setWin} />
 
       {open ? (
         <WalletView coin={coin} kind={kind} venues={venues} win={win} row={open} live={live} onBack={() => setOpen(null)} />
@@ -355,7 +359,7 @@ function Partial({ d }: { d: FlowWindow | null }) {
       {late && <span>Recording began {hm(d.since)} UTC: trades before that are not in these figures.</span>}
       {gapMs > 0 && (
         <span className="tfl-pill is-warn" title={d.gaps.map(([a, b]) => `${new Date(a).toUTCString()} – ${new Date(b).toUTCString()}`).join('\n')}>
-          {fmtNum(gapMs / 60_000, { maximumFractionDigits: 0 })} min not recorded
+          {gapMs < 60_000 ? 'Under 1' : fmtNum(gapMs / 60_000, { maximumFractionDigits: 0 })} min not recorded
         </span>
       )}
     </div>

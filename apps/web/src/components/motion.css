@@ -47,7 +47,10 @@
   to { opacity: 0; transform: translateY(6px) scale(0.985); }
 }
 /* A switched view (account tabs, Position History cards <-> list) fades in. */
-.mo-switch { animation: mo-fade-in 200ms var(--ease-out) both; }
+/* `backwards`, not `both`: a fade held after it ends keeps an opacity effect on the view, which
+   makes it the backdrop root - every pop-up inside (the platform picker in a chart card) then
+   blurs nothing of what lies under it (appearance.css says the same of the dialog scrim). */
+.mo-switch { animation: mo-fade-in 200ms var(--ease-out) backwards; }
 
 @media (prefers-reduced-motion: reduce) {
   /* Exits still play, in 1ms: `animation: none` would never fire animationend,
