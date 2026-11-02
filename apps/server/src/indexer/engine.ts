@@ -589,6 +589,7 @@ export class Indexer {
       gaps: this.gaps,
       flow: this.flow?.status() ?? null,
       aggregates: this.store.aggBacklog,
+      heldPartials: this.store.heldPartials,
       retention: this.store.retention(this.now()),
       lanes: { hl: lane(this.hl), sgw: lane(this.sgw), strades: lane(this.strades), sdata: lane(this.sdata) },
       venues: Object.fromEntries([...this.ext].map(([v, x]) => [v, x.status()])),

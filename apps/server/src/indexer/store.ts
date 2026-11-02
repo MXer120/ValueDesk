@@ -62,7 +62,7 @@
  * `src/indexer/compact.ts` is run once with the indexer stopped.
  */
 import { DatabaseSync, type StatementSync } from 'node:sqlite';
-import { mkdirSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { deviceKeyPath } from '../deviceKey.js';
 import { VENUES, type BoardWindow, type Venue } from '../valuedesk/types.js';
@@ -647,6 +647,12 @@ type HeldRows = { ver: number; from: number; n: number; t: Float64Array; v: Floa
 /** Rows held for partial days, in all and per day (~45 bytes a row, off the JS heap but for the names). */
 const HELD_ROWS_MAX = 6_000_000;
 const HELD_DAY_MAX = 1_000_000;
+/**
+ * The held rows written beside the index when the writer stops and read back when the next one
+ * starts. Tied to the scan's own SQL: a release that reads the fills differently starts cold.
+ */
+const HELD_FILE = 'held-partial-days.bin';
+const HELD_FORMAT = 'held-1|SELECT t, symbol, side, px * sz AS v, closed_pnl, fee, src FROM fills ORDER BY t';
 /** Rows per scan step: a few ms of work. */
 const SCAN_CHUNK = 1_000;
 /** A dirty day larger than this is summed in the background instead of at once. */
@@ -891,10 +897,104 @@ export class IndexStore {
         this.totalsSaved = JSON.stringify(this.totals);
       }
     } catch { /* a file from before the retention: nothing in flight */ }
+    if (!this.readOnly && path !== ':memory:') this.loadHeld();
   }
 
   close(): void {
+    if (!this.readOnly && this.path !== ':memory:') this.saveHeld();
     this.db.close();
+  }
+
+  // --- held rows across a restart ------------------------------------------------------
+  //
+  // A first board build after a start summed every candidate's first day from the fills:
+  // 46-63 min at midday on 2026-11-02 against 5.5 min just before midnight, so every
+  // indexer release was an hour of stale boards. The writer is the only one that writes
+  // the fills, and it hands what it held to the next one: written as it closes, read and
+  // removed as the next starts. Any writer that opens the file in between takes the file
+  // (and a stop that never reaches close() writes none), so what is read is what was held.
+
+  private heldPath(): string {
+    return join(dirname(this.path), HELD_FILE);
+  }
+
+  /** Bytes of one held day's arrays, in the order they are written. */
+  private static heldArrays(h: HeldRows): Uint8Array[] {
+    return [h.t, h.v, h.pnl, h.fee, h.side, h.src, h.sym].map((a) => new Uint8Array(a.buffer, a.byteOffset, a.byteLength));
+  }
+
+  private saveHeld(): void {
+    const file = this.heldPath();
+    const tmp = `${file}.tmp`;
+    try {
+      // Only days still as they were read: the stop's last flush may have written to one since.
+      const keep = [...this.held].filter(([dk, h]) => h.ver === (this.dayVersion.get(dk) ?? 0));
+      if (keep.length === 0) return;
+      const days = keep.map(([dk, h]) => ({ dk, from: h.from, n: h.n, syms: h.syms }));
+      const head = Buffer.from(JSON.stringify({ format: HELD_FORMAT, days }), 'utf8');
+      const len = Buffer.alloc(4);
+      len.writeUInt32LE(head.length);
+      const fd = openSync(tmp, 'w');
+      try {
+        writeSync(fd, len);
+        writeSync(fd, head);
+        for (const [, h] of keep) for (const a of IndexStore.heldArrays(h)) writeSync(fd, a);
+      } finally {
+        closeSync(fd);
+      }
+      renameSync(tmp, file);
+    } catch (e) {
+      console.warn(`[index] held rows not written: ${String(e)}`);
+      try { rmSync(tmp, { force: true }); } catch { /* none */ }
+    }
+  }
+
+  private loadHeld(): void {
+    const file = this.heldPath();
+    if (!existsSync(file)) return;
+    try {
+      const buf = readFileSync(file);
+      const hl = buf.readUInt32LE(0);
+      const head = JSON.parse(buf.subarray(4, 4 + hl).toString('utf8')) as { format: string; days: Array<{ dk: string; from: number; n: number; syms: string[] }> };
+      if (head.format !== HELD_FORMAT) return;
+      let off = 4 + hl;
+      const take = <T extends Float64Array | Int8Array | Uint16Array>(make: (n: number) => T, n: number): T => {
+        const a = make(n);
+        const bytes = a.byteLength;
+        if (off + bytes > buf.length) throw new Error('short file');
+        new Uint8Array(a.buffer).set(buf.subarray(off, off + bytes));
+        off += bytes;
+        return a;
+      };
+      const held: Array<[string, HeldRows]> = [];
+      let rows = 0;
+      for (const d of head.days) {
+        const f64 = (n: number) => new Float64Array(n);
+        const i8 = (n: number) => new Int8Array(n);
+        const h: HeldRows = {
+          ver: 0, from: d.from, n: d.n, syms: d.syms,
+          t: take(f64, d.n), v: take(f64, d.n), pnl: take(f64, d.n), fee: take(f64, d.n),
+          side: take(i8, d.n), src: take(i8, d.n), sym: take((n) => new Uint16Array(n), d.n),
+        };
+        held.push([d.dk, h]);
+        rows += d.n;
+      }
+      if (off !== buf.length) throw new Error('long file');
+      // Day versions start at 0 in this process; the first row written for a day moves it on.
+      for (const [dk, h] of held) this.held.set(dk, h);
+      this.heldRows = rows;
+      console.log(`[index] held rows read: ${held.length} days, ${rows} rows`);
+    } catch (e) {
+      this.dropHeld();
+      console.warn(`[index] held rows not read: ${String(e)}`);
+    } finally {
+      try { rmSync(file, { force: true }); } catch { /* gone */ }
+    }
+  }
+
+  /** The partial days held in memory (partialDayAsync), for the status. */
+  get heldPartials(): { days: number; rows: number } {
+    return { days: this.held.size, rows: this.heldRows };
   }
 
   /**

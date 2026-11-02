@@ -191,3 +191,64 @@ test('a later start in a finished day is summed from the rows held from the firs
   a.close();
   b.close();
 });
+
+test('the held rows go to the next writer through a file beside the index: its first read of a later start sums from them, with the same figures', async () => {
+  const { mkdtempSync, existsSync, writeFileSync, rmSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const { tmpdir } = await import('node:os');
+  const dir = mkdtempSync(join(tmpdir(), 'vs-held-'));
+  const path = join(dir, 'index.db');
+  const file = join(dir, 'held-partial-days.bin');
+  type Held = { held: Map<string, { from: number; n: number }>; heldPartials: { days: number; rows: number } };
+  const yesterday = Math.floor(Date.now() / DAY) * DAY - DAY;
+  const rows: FillRow[] = [];
+  for (let i = 0; i < 1_500; i++) {
+    rows.push(fill({
+      id: `k${i}`, t: yesterday + 120_000 + Math.floor(i / 2) * 100_000, oid: `ko${i}`, symbol: i % 3 ? 'SOL' : 'xyz:TSLA', side: i % 5 < 2 ? -1 : 1,
+      px: 20 + (i % 17) * 0.11, sz: 1 + (i % 7) * 0.5, closedPnl: i % 3 === 0 ? 0 : i % 3 === 1 ? (i % 8) - 3.5 : null, fee: i % 4 ? 0.02 : null, src: i % 9 ? 1 : 0,
+    }));
+  }
+  const pause = async () => {};
+  const read = async (s: IndexStore, from: number) => ({
+    stats: await s.windowStatsAsync('hyperliquid', '0xa', from, pause),
+    realized: await s.realizedAsync('hyperliquid', '0xa', from, pause),
+  });
+  const first = yesterday + 30 * 60_000;
+  const later = yesterday + 9 * 3_600_000 + 45 * 60_000;
+  const a = new IndexStore(path, { aggRefreshMs: 0 });
+  a.putFills(rows);
+  a.windowStats('hyperliquid', '0xa', 0);
+  while (a.buildAggregates(1_000) > 0) { /* build */ }
+  await read(a, first);
+  const want = await read(a, later);
+  a.close();
+  assert.ok(existsSync(file), 'written as the writer closes');
+  const b = new IndexStore(path, { aggRefreshMs: 0 });
+  assert.ok(!existsSync(file), 'taken by the next writer');
+  assert.deepEqual((b as unknown as Held).heldPartials, { days: 1, rows: rows.filter((r) => r.t >= first).length });
+  assert.deepEqual(await read(b, later), want, 'the same figures');
+  assert.equal([...(b as unknown as Held).held.values()][0]!.from, first, 'summed from the rows handed over');
+  // A late fill on that day: read again.
+  b.putFills([fill({ id: 'late', t: yesterday + 10 * 3_600_000, oid: 'lo', closedPnl: 1.25 })]);
+  b.flushAggregates(1_000);
+  const fresh = new IndexStore(':memory:', { aggRefreshMs: 0 });
+  fresh.putFills([...rows, fill({ id: 'late', t: yesterday + 10 * 3_600_000, oid: 'lo', closedPnl: 1.25 })]);
+  fresh.windowStats('hyperliquid', '0xa', 0);
+  while (fresh.buildAggregates(1_000) > 0) { /* build */ }
+  assert.deepEqual(await read(b, later), await read(fresh, later), 'after a late fill');
+  b.close();
+  fresh.close();
+  // A file from another format, or cut short: not read, and removed.
+  const c = new IndexStore(path, { aggRefreshMs: 0 });
+  assert.equal((c as unknown as Held).heldPartials.days, 1, 'b handed its rows on as well');
+  // A row written to a held day after it was read (a stop's last flush): that day is not handed on.
+  c.putFills([fill({ id: 'flush', t: yesterday + 11 * 3_600_000, oid: 'fo' })]);
+  c.close();
+  assert.ok(!existsSync(file), 'nothing still as it was read: no file');
+  writeFileSync(file, Buffer.from([5, 0, 0, 0, 0x7b]));
+  const d = new IndexStore(path, { aggRefreshMs: 0 });
+  assert.deepEqual((d as unknown as Held).heldPartials, { days: 0, rows: 0 });
+  assert.ok(!existsSync(file));
+  d.close();
+  rmSync(dir, { recursive: true, force: true });
+});
