@@ -902,7 +902,11 @@ function ChartPanel({ engine, symbol, points, scale, refSt, mark = null, side, c
     if (strip && x - pane.left >= pane.width - stripW(pane.width) - 6) {
       const lo = Math.floor(price / strip.step + 1e-9) * strip.step;
       const k = strip.rows.findIndex((row) => Math.abs(row[0] - lo) < strip.step / 2);
-      return { ...at, kind: 'now', lo, step: strip.step, p: strip.price, l: k >= 0 ? strip.rows[k]![1] : 0, s: k >= 0 ? strip.rows[k]![2] : 0, bands: (k >= 0 ? strip.bands?.[k] : null) ?? ZERO, col: null, ring: null };
+      const bands = (k >= 0 ? strip.bands?.[k] : null) ?? ZERO;
+      // The bar's colour: by leverage, its largest band's (it is stacked by band); by side, the side's (null).
+      const top = bands.indexOf(Math.max(...bands));
+      const col = colorBy === 'lev' && bands[top]! > 0 ? LEV_COLOR[LEV_KEYS[top]!] : null;
+      return { ...at, kind: 'now', lo, step: strip.step, p: strip.price, l: k >= 0 ? strip.rows[k]![1] : 0, s: k >= 0 ? strip.rows[k]![2] : 0, bands, col, ring: null };
     }
     if (!points.length) return null;
     const list = kc.getDataList();

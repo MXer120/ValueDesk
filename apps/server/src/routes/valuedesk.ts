@@ -557,8 +557,14 @@ export async function valuedeskRoutes(app: FastifyInstance) {
       if (typeof fine === 'string') throw bad(fine);
       if (fine) {
         const t0 = Number(q.t0);
-        const t1 = Number(q.t1);
-        if (!(t0 > 0) || !(t1 >= t0)) throw bad('t0= and t1= must be a time range in ms with step=');
+        // A tile still filling (`v=`: the index's newest snapshot the view draws from) ends there: a
+        // snapshot written since is not in the view's list yet, and would be the bar's one in its
+        // place - that column at its own step until the index caught up - and the answer kept for
+        // the URL would change under it.
+        const v = q.v === undefined || q.v === '' ? Number.NaN : Number(q.v);
+        if (!(t0 > 0) || !(Number(q.t1) >= t0)) throw bad('t0= and t1= must be a time range in ms with step=');
+        // Before the tile (none listed in it yet): an empty answer, not a range error.
+        const t1 = Number.isFinite(v) ? Math.max(t0 - 1, Math.min(Number(q.t1), v)) : Number(q.t1);
         // Some wallets: their positions from the change log at each snapshot the index lists, as at
         // the snapshots' own step (liqRead.ts walletHistoryFine); kept as the wallet tiles are.
         if (ws.length) {
