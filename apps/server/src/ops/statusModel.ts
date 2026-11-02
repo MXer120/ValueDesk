@@ -350,11 +350,19 @@ export const ANNOUNCE_AHEAD_MS = 24 * 3_600_000;
  * showed it in progress turns its notification green from it.
  */
 export const DONE_LISTED_MS = 2 * 3_600_000;
+/**
+ * A maintenance completed `ok` only after it had run out on the clock (by hand, or folded in by
+ * the next release - statusNotices.ts foldOlder) stays listed this long: a browser that showed it
+ * amber and was not open in the DONE_LISTED_MS after the late ok still turns it green (#66,
+ * 2026-11-02: completed at 15:51, the owner's app still showed "Data API and Indexer partly down" at 20:15).
+ */
+export const LATE_OK_LISTED_MS = 7 * 86_400_000;
 
 /**
  * What the app shows: open incidents (the worst first), maintenance in progress, then
  * maintenance starting within ANNOUNCE_AHEAD_MS - at most `max` of these - and after
- * them the maintenance completed within DONE_LISTED_MS (at most 3), the latest first.
+ * them the maintenance completed within DONE_LISTED_MS (at most 3), the latest first, and those
+ * completed ok after their clock end within LATE_OK_LISTED_MS (at most 3).
  * The banner reads only the open and upcoming ones (an older app too).
  */
 export function healthNotices(notices: readonly Notice[], now: number, max = 3): HealthNotice[] {
@@ -376,7 +384,12 @@ export function healthNotices(notices: readonly Notice[], now: number, max = 3):
     .filter((n) => n.kind === 'maintenance' && n.startsAt <= now && noticePhase(n, now) === 'completed' && doneAt(n) >= now - DONE_LISTED_MS)
     .sort((a, b) => doneAt(b) - doneAt(a))
     .slice(0, 3);
-  return [...open, ...done].map((n) => ({
+  const late = notices
+    .filter((n) => !done.includes(n) && n.kind === 'maintenance' && n.outcome === 'ok' && n.closedAt !== null && n.closedAt <= now
+      && n.closedAt > (clockEnd(n) ?? Infinity) && n.closedAt >= now - LATE_OK_LISTED_MS)
+    .sort((a, b) => b.closedAt! - a.closedAt!)
+    .slice(0, 3);
+  return [...open, ...done, ...late].map((n) => ({
     id: n.id, kind: n.kind, title: n.title, impact: n.impact, phase: noticePhase(n, now), startsAt: n.startsAt, endsAt: n.endsAt,
     components: n.components,
     ...(n.kind === 'maintenance' ? { closedAt: n.closedAt } : {}),

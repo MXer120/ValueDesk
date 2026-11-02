@@ -195,6 +195,11 @@ test('a release completed ok folds in an older release left open on the same par
   assert.match(folded.updates.at(-1)!.text, /checked by Update v0\.2\.136/);
   const [h] = healthNotices([folded], later + H + 11 * MIN);
   assert.equal(h!.outcome, 'ok', '/api/health lists it completed ok again, so the app turns the amber card green');
+  // A browser not open in the two hours after: still listed (a late ok), for a week.
+  assert.equal(healthNotices([folded], later + H + 10 * MIN + 5 * H)[0]?.id, stuck.id);
+  assert.equal(healthNotices([folded], later + H + 10 * MIN + 8 * 24 * H).length, 0);
+  const onTime = s.notices.get(both.id)!;
+  assert.equal(healthNotices([onTime], later + H + 10 * MIN + 3 * H).length, 0, 'one completed in its window: two hours, as before');
   assert.equal(s.notices.get(executorOnly.id)!.closedAt, null, 'a part this release did not check: left as it was');
   assert.equal(s.notices.get(byHand.id)!.outcome, 'rolled_back', 'completed by hand: never rewritten');
   // A rollback folds in nothing.
