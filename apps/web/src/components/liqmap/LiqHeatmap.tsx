@@ -41,7 +41,7 @@ import { WalletView, type Res, type Side, type StepsView, type Unit, type ViewCh
 import { Chart } from '../Chart';
 import type { Chart as KChart } from 'klinecharts';
 import { CANDLE_PANE_ID } from '../../chart/theme';
-import { HEAT_FLOOR, LIQ_HEAT, barMsOf, boxed, cellAt, cellOf, heatScale, liqHeatTemplate, profileWidth, refStep, snapRowsOf, snapshotFor, stepNorm, stripWidth, type HeatData, type HeatPoint } from '../../chart/liqHeatIndicator';
+import { HEAT_FLOOR, LIQ_HEAT, barMsOf, boxed, cellAt, cellOf, cellsOf, heatColor, heatScale, levHeatColor, liqHeatTemplate, profileWidth, refStep, snapRowsOf, snapshotFor, stepNorm, stripWidth, type HeatData, type HeatPoint } from '../../chart/liqHeatIndicator';
 import { autoStep, fineWindow, histSteps, stepAt, stepLabel, stepLadder, streamAsk, streamGroup, streamSteps, tickOf, type StepLevel } from '../../chart/liqSteps';
 import { coinOfSymbol, groupFor, mapData, type LiqMapData } from '../../chart/liqMap';
 import {
@@ -337,12 +337,12 @@ export function LiqHeatmap({ symbol, engine, instance, address = null }: { symbo
   // Historical at a step finer than its snapshots keep (BTC $10, $1): their fine layers in tiles over
   // the window on screen, every column at the step (histFine.ts), merged into the snapshots they
   // belong to (liqHeatIndicator.ts cellsOf); its newest column is the stream's, fine layer and all.
-  // Every wallet only: the layers keep no addresses.
+  // Some wallets: their levels from the change log at the step, as at $100 (server walletHistoryFine).
   const finer = histOn && step !== null && histAt !== null && step < histAt.st * (1 - 1e-9);
   let fineView: FineView | null = null;
-  if (finer && !wallets.length && win && times && win[2] >= MIN_PX) {
-    fineView = { step: step!, every: times[2], off: times[3], pool: poolOf(step!, (win[1] - win[0]) / win[2]), side, lev };
-    sub = fineSubOf(fineWindow(win[0], win[1], step!));
+  if (finer && win && times && win[2] >= MIN_PX) {
+    fineView = { step: step!, every: times[2], off: times[3], pool: poolOf(step!, (win[1] - win[0]) / win[2]), side, lev, wallets };
+    if (!wallets.length) sub = fineSubOf(fineWindow(win[0], win[1], step!));
   }
   // The stream at the snapshots' width in Historical (its newest column), whole buckets of it.
   if (histOn && histAt && rawStep > 0) want = streamGroup(histAt.st, rawStep) ?? want;
@@ -460,6 +460,7 @@ export function LiqHeatmap({ symbol, engine, instance, address = null }: { symbo
             points={histOn ? points : EMPTY_POINTS}
             scale={histOn ? heatSc : 1}
             refSt={histOn ? refSt : null}
+            mark={histOn && hf.step !== null && hf.since !== null ? { t: hf.since, label: `${stepLabel(hf.step)} from ${whenFmt(hf.since)}` } : null}
             side={side}
             colorBy={colorBy}
             lev={lev}
@@ -807,8 +808,10 @@ function LiveView({ h: base, fine, waiting, onWindow, unit, want, streamK, color
  * which snapshots' fine layers). A click on a cell opens who sat in it then (AtDetails); on the
  * strip or the profile, the wallets now (Details).
  */
-function ChartPanel({ engine, symbol, points, scale, refSt, side, colorBy, lev, strip, profile, fmt, note, onWindow, onTimes, onPick }: {
-  engine: Engine; symbol: string;
+function ChartPanel({ engine, symbol, points, scale, refSt, mark = null, side, colorBy, lev, strip, profile, fmt, note, onWindow, onTimes, onPick }: {
+  engine: Engine;
+  /** Where the step drawn begins (liqHeatIndicator.ts HeatData mark). */
+  mark?: HeatData['mark']; symbol: string;
   /** The snapshots drawn (none in the chart view), the notional a cell is full at, and the width that is of (null: the newest snapshot's). */
   points: HeatPoint[]; scale: number; refSt: number | null;
   side: Side; colorBy: ColorBy; lev: LevFilter;
@@ -832,7 +835,7 @@ function ChartPanel({ engine, symbol, points, scale, refSt, side, colorBy, lev, 
   // The axis fits the candles (fit off): fitted to every bar's levels as well, the candles lay flat in a
   // tenth of the pane (owner 2026-10-31). The snapshots hold the levels 0.2x-3x the price, so zooming the
   // price axis out shows all of them - none is cut off.
-  const data = useMemo<HeatData>(() => ({ points, side, lev, colorBy, scale, fit: false, strip, ref: refSt, profile }), [points, side, levKey, colorBy, scale, strip, refSt, profile]); // eslint-disable-line react-hooks/exhaustive-deps
+  const data = useMemo<HeatData>(() => ({ points, side, lev, colorBy, scale, fit: false, strip, ref: refSt, profile, mark }), [points, side, levKey, colorBy, scale, strip, refSt, profile, mark?.t, mark?.label]); // eslint-disable-line react-hooks/exhaustive-deps
   const dataRef = useRef({ data, rev });
   dataRef.current = { data, rev };
   // The layer on each chart instance the chart makes (it makes a new one on a rebuild).
@@ -899,21 +902,57 @@ function ChartPanel({ engine, symbol, points, scale, refSt, side, colorBy, lev, 
     if (strip && x - pane.left >= pane.width - stripW(pane.width) - 6) {
       const lo = Math.floor(price / strip.step + 1e-9) * strip.step;
       const k = strip.rows.findIndex((row) => Math.abs(row[0] - lo) < strip.step / 2);
-      return { ...at, kind: 'now', lo, step: strip.step, p: strip.price, l: k >= 0 ? strip.rows[k]![1] : 0, s: k >= 0 ? strip.rows[k]![2] : 0, bands: (k >= 0 ? strip.bands?.[k] : null) ?? ZERO };
+      return { ...at, kind: 'now', lo, step: strip.step, p: strip.price, l: k >= 0 ? strip.rows[k]![1] : 0, s: k >= 0 ? strip.rows[k]![2] : 0, bands: (k >= 0 ? strip.bands?.[k] : null) ?? ZERO, col: null, ring: null };
     }
     if (!points.length) return null;
     const list = kc.getDataList();
     const bar = pt?.dataIndex !== undefined ? list[pt.dataIndex] : undefined;
     if (!bar) return null;
-    const i = snapshotFor(points.map((q) => q.t), bar.timestamp, barMsOf(list));
+    const times = points.map((q) => q.t);
+    const barMs = barMsOf(list);
+    const i = snapshotFor(times, bar.timestamp, barMs);
     const snap = i >= 0 ? points[i]! : null;
     if (!snap) return null;
-    const cell = cellAt(snap, price);
+    // The cell drawn there, as the layer draws it (liqHeatIndicator.ts): its pixel rows, and under a
+    // pixel tall the strongest of its row (pixelCells) - the tile the swatch and the ring are of.
+    const ref = refSt ?? refStep(points);
+    const kOf = (st: number) => (ref && st > 0 ? ref / st : 1) / (scale || 1);
+    const yOf = (v: number) => Math.round((kc.convertToPixel([{ value: v }], { paneId: CANDLE_PANE_ID }) as Array<{ y?: number }>)[0]?.y ?? Number.NaN);
+    let cell = cellAt(snap, price);
+    if (cell) {
+      const top = yOf(cell.hi);
+      if (yOf(cell.lo) - top <= 1) {
+        let best = -1;
+        for (const c of cellsOf(snap)) {
+          const ct = yOf(c.hi);
+          if (ct !== top || yOf(c.lo) - ct > 1) continue;
+          const v = cellOf(c.r, side, lev).v * kOf(c.st);
+          if (v > best) { best = v; cell = c; }
+        }
+      }
+    }
     const st = cell ? cell.st : snap.st;
     const lo = cell ? cell.lo : Math.floor(price / st) * st;
     const l = cell && side !== 'short' ? cellOf(cell.r, 'long', lev).v : 0;
     const s = cell && side !== 'long' ? cellOf(cell.r, 'short', lev).v : 0;
-    return { ...at, kind: 'then', lo, step: st, p: snap.p, t: snap.t, l, s, bands: cell ? cellOf(cell.r, side, lev).bands : ZERO };
+    const shown = cell ? cellOf(cell.r, side, lev) : null;
+    const col = shown ? (colorBy === 'lev' ? levHeatColor(shown.v * kOf(st), shown.bands) : heatColor(shown.v * kOf(st))) : null;
+    // Its column: the bars drawing this snapshot, edge to edge at the midpoints between candle centres.
+    let a = pt!.dataIndex!;
+    let b = a;
+    while (a > 0 && snapshotFor(times, list[a - 1]!.timestamp, barMs) === i) a--;
+    while (b < list.length - 1 && snapshotFor(times, list[b + 1]!.timestamp, barMs) === i) b++;
+    const cx = (k: number) => (kc.convertToPixel([{ timestamp: list[k]!.timestamp }], { paneId: CANDLE_PANE_ID }) as Array<{ x?: number }>)[0]?.x ?? Number.NaN;
+    const space = kc.getBarSpace();
+    const half = Math.max(1, space.bar + space.gapBar) / 2;
+    const x0 = Math.round(a > 0 ? (cx(a - 1) + cx(a)) / 2 : cx(a) - half);
+    const x1 = Math.round(b < list.length - 1 ? (cx(b) + cx(b + 1)) / 2 : cx(b) + half);
+    const top = cell ? yOf(cell.hi) : Number.NaN;
+    const off = { x: rect.left - box.left + pane.left, y: rect.top - box.top + pane.top };
+    const ring = cell && col && Number.isFinite(top) && Number.isFinite(x0) && Number.isFinite(x1)
+      ? { x: off.x + Math.max(0, x0), y: off.y + top, w: Math.max(1, Math.min(pane.width, x1) - Math.max(0, x0)), h: Math.max(1, yOf(cell.lo) - top) }
+      : null;
+    return { ...at, kind: 'then', lo, step: st, p: snap.p, t: snap.t, l, s, bands: shown ? shown.bands : ZERO, col, ring };
   };
   // A click (not a drag) on a cell: that bar's snapshot and the cell of it under the pointer - the
   // positions in it, as they stood then, open beside the chart (AtDetails); on the strip, the wallets now.
@@ -926,6 +965,9 @@ function ChartPanel({ engine, symbol, points, scale, refSt, side, colorBy, lev, 
   };
   const [tip, setTip] = useState<Spot | null>(null);
   const frame = useRef(0);
+  const press = useRef(0);
+  const held = useRef(false);
+  useEffect(() => () => window.clearTimeout(press.current), []);
   const hover = (e: ReactPointerEvent<HTMLDivElement>) => {
     if (e.buttons) { setTip(null); return; }
     const { clientX, clientY } = e;
@@ -940,14 +982,30 @@ function ChartPanel({ engine, symbol, points, scale, refSt, side, colorBy, lev, 
     <div
       ref={wrap}
       className="lqm-hist2"
-      onPointerDownCapture={(e) => { down.current = e.button === 0 ? { x: e.clientX, y: e.clientY } : null; }}
+      onPointerDownCapture={(e) => {
+        down.current = e.button === 0 ? { x: e.clientX, y: e.clientY } : null;
+        // A long press on touch is the hover: the card and the ring, and its release opens nothing.
+        window.clearTimeout(press.current);
+        held.current = false;
+        if (e.pointerType !== 'touch') return;
+        const { clientX, clientY } = e;
+        press.current = window.setTimeout(() => { held.current = true; setTip(spotAt(clientX, clientY)); }, LONG_PRESS_MS);
+      }}
       onPointerUpCapture={(e) => {
+        window.clearTimeout(press.current);
         const d = down.current;
         down.current = null;
+        if (held.current) { held.current = false; return; }
         if (d && Math.hypot(e.clientX - d.x, e.clientY - d.y) < 4) pickAt(e.clientX, e.clientY);
       }}
-      onPointerMove={hover}
-      onPointerLeave={() => { cancelAnimationFrame(frame.current); setTip(null); }}
+      onPointerMove={(e) => {
+        const d = down.current;
+        if (d && Math.hypot(e.clientX - d.x, e.clientY - d.y) >= 8) window.clearTimeout(press.current);
+        if (e.pointerType === 'touch') return;
+        hover(e);
+      }}
+      onPointerCancel={() => window.clearTimeout(press.current)}
+      onPointerLeave={(e) => { if (e.pointerType === 'touch') return; cancelAnimationFrame(frame.current); setTip(null); }}
     >
       <Chart engine={engine} symbol={symbol} bare onChartReady={setKc} />
       {(!profile || note) && (
@@ -962,22 +1020,32 @@ function ChartPanel({ engine, symbol, points, scale, refSt, side, colorBy, lev, 
           {note && <span className="lqm-hist2-note">{note}</span>}
         </div>
       )}
+      {tip?.ring && <div className="lqm-ring" aria-hidden="true" style={{ left: tip.ring.x, top: tip.ring.y, width: tip.ring.w, height: tip.ring.h }} />}
       {tip && (tip.l > 0 || tip.s > 0 || tip.kind === 'now') && (
-        <div className="lqm-tip" style={{ left: Math.max(0, Math.min((box?.width ?? 400) - 220, tip.x + (tip.kind === 'now' ? -232 : 14))), top: Math.max(0, Math.min((box?.height ?? 300) - 150, tip.y - 20)) }}>
-          <b>{fmtPx(tip.lo)} – {fmtPx(tip.lo + tip.step)}</b>
-          <span>{tip.kind === 'now' ? `Now · ${pct((tip.lo + tip.step / 2) / tip.p - 1)} from current` : `${whenFmt(tip.t)} · ${pct((tip.lo + tip.step / 2) / tip.p - 1)} from the price then`}</span>
-          {tip.l > 0 && <span className="is-long">Longs {fmtTip(tip.l)}</span>}
-          {tip.s > 0 && <span className="is-short">Shorts {fmtTip(tip.s)}</span>}
+        // Slim (owner 2026-11-02): the time, the price, the liquidations by side - each with the tile's
+        // own colour - and the leverage only while the colours are by leverage.
+        <div className="lqm-tip" style={{ left: Math.max(0, Math.min((box?.width ?? 400) - 170, tip.x + (tip.kind === 'now' ? -176 : 14))), top: Math.max(0, Math.min((box?.height ?? 300) - 90, tip.y - 14)) }}>
+          <span className="lqm-tip-t">{tip.kind === 'now' ? 'Now' : whenFmt(tip.t)}</span>
+          <span className="lqm-tip-row"><span>Price</span><b>{fmtPx(tip.lo)}</b></span>
+          {tip.l > 0 && <span className="lqm-tip-row"><span><i className={tip.col ? 'lqm-tip-sw' : 'lqm-tip-sw is-long'} style={tip.col ? { background: tip.col } : undefined} />Longs</span><b className="is-long">{fmtTip(tip.l)}</b></span>}
+          {tip.s > 0 && <span className="lqm-tip-row"><span><i className={tip.col ? 'lqm-tip-sw' : 'lqm-tip-sw is-short'} style={tip.col ? { background: tip.col } : undefined} />Shorts</span><b className="is-short">{fmtTip(tip.s)}</b></span>}
           {!(tip.l > 0 || tip.s > 0) && <span>No liquidations here</span>}
-          <BandLines v={tip.bands} fmt={fmtTip} over={over(tip)} lev={lev} what="cell" />
-          <span className="lqm-tip-sub">{tip.kind === 'now' ? 'Click for the wallets now' : 'Click for the positions then'}</span>
+          {colorBy === 'lev' && <BandLines v={tip.bands} fmt={fmtTip} over={over(tip)} lev={lev} what="cell" />}
         </div>
       )}
     </div>
   );
 }
+/** How long a touch is held for the hover card (the chart's own menu waits as long). */
+const LONG_PRESS_MS = 500;
 /** A place on the chart: a past cell (`then`) or a bar of the levels now (`now`), as shown. */
-type Spot = { x: number; y: number; price: number; lo: number; step: number; p: number; l: number; s: number; bands: Bands } & ({ kind: 'now' } | { kind: 'then'; t: number });
+type Spot = {
+  x: number; y: number; price: number; lo: number; step: number; p: number; l: number; s: number; bands: Bands;
+  /** The tile's colour as drawn (null: not drawn, or a bar of the strip). */
+  col: string | null;
+  /** The tile's box in the panel, for its white ring. */
+  ring: { x: number; y: number; w: number; h: number } | null;
+} & ({ kind: 'now' } | { kind: 'then'; t: number });
 let calcRev = 0;
 const EMPTY_POINTS: HeatPoint[] = [];
 

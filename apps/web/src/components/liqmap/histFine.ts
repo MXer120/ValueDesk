@@ -37,6 +37,8 @@ export interface FineView {
   pool: number;
   side: 'long' | 'short' | 'both';
   lev: LevFilter;
+  /** Some wallets only (their levels from the change log, as at $100); none: every wallet. */
+  wallets: readonly string[];
 }
 
 /** A snapshot's fine part as drawn (HeatPoint f). */
@@ -57,7 +59,7 @@ export function poolOf(step: number, perPx: number): number {
 
 /** The key of a view's tiles (everything but the tile itself). */
 export const viewKey = (coin: string, vkey: string, v: FineView): string =>
-  `${coin}|${vkey}|${v.step}|${v.every}|${v.off}|${v.pool}|${v.side}|${[...v.lev].sort().join(',')}`;
+  `${coin}|${vkey}|${v.step}|${v.every}|${v.off}|${v.pool}|${v.side}|${[...v.lev].sort().join(',')}|${v.wallets.join(',')}`;
 export const fineTileId = (vk: string, k: TileKey): string => `${vk}#${tileId('', '', k)}`;
 
 /** One snapshot's parts from several price bands: the contiguous run of them that is longest. */
@@ -172,7 +174,7 @@ export function useHistFine(coin: string, venues: readonly Venue[], grid: TileGr
       // Inclusive times (store.liqHistFineBands): the slot's last millisecond, not the next slot's first snapshot.
       return [vsApi.liquidationHistoryFine(coin, venuesRef.current, {
         step: v.step, from: k.lo, to: k.hi, t0: k.t0, t1: k.t1 - 1,
-        every: v.every, off: v.off, pool: v.pool || undefined, side: v.side, lev: v.lev, v: k.v,
+        every: v.every, off: v.off, pool: v.pool || undefined, side: v.side, lev: v.lev, v: k.v, wallets: v.wallets,
       }).then(
         (tile) => { e.tile = tile; e.loading = false; e.rows = tile.points.reduce((n, q) => n + q.b.length, 0); rowsHeld += e.rows; },
         () => { e.failedAt = Date.now(); e.loading = false; },

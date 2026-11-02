@@ -46,7 +46,7 @@ function answer(k: TileKey, step: number): LiqHistoryFine {
   const points = times.filter((t) => t >= k.t0 && t <= t1 && t >= SINCE).map((t) => ({ t, st: step, lo: k.lo, hi: k.hi, b: rows(step, k.lo, k.hi, t / Q) as never }));
   return { coin: 'BTC', venues: ['sodex'], step, from: k.lo, to: k.hi, points, since: SINCE, cut: null };
 }
-const view = (step: number): FineView => ({ step, every: 0, off: 0, pool: 0, side: 'both', lev: LEV_BANDS });
+const view = (step: number): FineView => ({ step, every: 0, off: 0, pool: 0, side: 'both', lev: LEV_BANDS, wallets: [] });
 const W = { t0: NEWEST - 20 * H, t1: NEWEST + Q, lo: P * 0.97, hi: P * 1.03 };
 const ks = tilesFor(grid, W);
 

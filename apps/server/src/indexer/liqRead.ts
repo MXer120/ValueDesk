@@ -775,6 +775,60 @@ export function liqHistory(coin: string, venues: readonly Venue[], range: LiqRan
   return { coin, venues: [...venues], points, coins };
 }
 
+/**
+ * Some wallets' levels at a fine step (the historical view's wallet filter at $10 and $1, owner
+ * 2026-11-02: "The fine steps need to be EXACTLY like $100 just finer steps. No feature missing"):
+ * rebuilt from the change log at each snapshot `snaps` lists, as liqHistory rebuilds them at the
+ * snapshot's own step - the same positions, so a $100 cell is the sum of its $1 ones - over
+ * [ask.from, ask.to), cut to what the view draws (FineDraw). Every snapshot asked is answered,
+ * empty or not (none before the log began, as at $100).
+ */
+export function walletHistoryFine(coin: string, venues: readonly Venue[], wallets: readonly string[], snaps: ReadonlyArray<{ t: number; p: number }>, ask: FineAsk, draw: FineDraw | null = null): LiqHistoryFine | null {
+  const s = reader();
+  if (!s) return null;
+  const step = ask.step;
+  const eps = 1e-9;
+  const lo = +(Math.ceil(ask.from / step - eps) * step).toPrecision(12);
+  const hi = +(Math.floor(ask.to / step + eps) * step).toPrecision(12);
+  const points: LiqHistFinePoint[] = [];
+  if (!snaps.length || !(hi > lo)) return { coin, venues: [...venues], ...ask, points, since: null, cut: null };
+  // One per bar (FineDraw every): the newest of each, the one the chart draws.
+  const barOf = (t: number) => (draw && draw.every > 0 ? Math.floor((t - draw.off) / draw.every) : t);
+  const drawn = new Set<number>();
+  for (let k = 0; k < snaps.length; k++) if (k === snaps.length - 1 || barOf(snaps[k + 1]!.t) !== barOf(snaps[k]!.t)) drawn.add(snaps[k]!.t);
+  const vs = new Set(venues.map((v) => VENUES.indexOf(v)));
+  try {
+    const ids = [...s.liqAddrIds(wallets).values()];
+    const log = ids.length ? s.liqLog(ids, coin, snaps[0]!.t) : [];
+    const state = new Map<string, { side: number; liq: number; usd: number; band: LevBand | null }>();
+    let k = 0;
+    for (const snap of snaps) {
+      while (k < log.length && log[k]!.t <= snap.t) {
+        const e = log[k++]!;
+        const key = `${e.aid}|${e.venue}`;
+        if (e.usd > 0) state.set(key, { side: e.side, liq: e.liq, usd: e.usd, band: levBand(logLev(e)) });
+        else state.delete(key);
+      }
+      if (!drawn.has(snap.t)) continue;
+      const sum = new Map<number, SnapRow>();
+      for (const [key, x] of state) {
+        if (!vs.has(Number(key.slice(key.indexOf('|') + 1)))) continue;
+        // A level the price had crossed is past, as at the snapshot's own step.
+        if (x.side > 0 ? x.liq >= snap.p : x.liq <= snap.p) continue;
+        if (x.liq < lo || x.liq >= hi) continue;
+        const i = Math.floor(x.liq / step);
+        const b = sum.get(i) ?? [i, 0, 0, 0, 0, 0, 0, 0, 0];
+        if (x.side > 0) b[1] += x.usd; else b[2] += x.usd;
+        if (x.band !== null) b[snapBand(x.side > 0, x.band)]! += x.usd;
+        sum.set(i, b);
+      }
+      const rows = [...sum.values()].sort((a, b) => a[0] - b[0]).map((b) => trimRow(b, 3));
+      points.push({ t: snap.t, st: step, lo, hi, b: draw && draw.pool > 0 ? poolRows(rows, step, draw) : rows });
+    }
+  } catch { /* the tables arrive with the indexer's first start */ }
+  return { coin, venues: [...venues], ...ask, points, since: null, cut: null };
+}
+
 /** One snapshot's levels at the fine step asked, over [lo, hi): the part of its price range the fine layers hold. */
 export interface LiqHistFinePoint { t: number; st: number; lo: number; hi: number; b: SnapRow[] }
 

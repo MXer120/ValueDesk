@@ -59,6 +59,11 @@ export interface HeatData {
   ref?: number | null;
   /** The strip as the chart view's profile: wider, unlabelled, with the cumulative curves (liqProfile.ts). */
   profile?: boolean;
+  /**
+   * Where the step drawn begins (the history's fine levels were kept from then; before, its own
+   * step): a dashed line down the pane at `t` and `label` beside it.
+   */
+  mark?: { t: number; label: string } | null;
 }
 
 /** A snapshot older than this before a bar's end does not stand for it. */
@@ -370,6 +375,24 @@ export const liqHeatTemplate: IndicatorTemplate<{ lo?: number; hi?: number }, un
           }
         }
         i = j;
+      }
+      if (data.mark && data.mark.t > list[Math.floor(from)]!.timestamp && data.mark.t < list[Math.max(0, Math.ceil(to) - 1)]!.timestamp + barMs) {
+        const x = Math.round(xAxis.convertTimestampToPixel(data.mark.t)) + 0.5;
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
+        ctx.setLineDash([3, 3]);
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, bounding.height);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.font = '10px system-ui, sans-serif';
+        ctx.textBaseline = 'top';
+        const w = ctx.measureText(data.mark.label).width;
+        ctx.fillStyle = 'rgba(11, 11, 16, 0.75)';
+        ctx.fillRect(x + 4, 6, w + 10, 16);
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+        ctx.fillText(data.mark.label, x + 9, 9);
       }
       ctx.restore();
     }

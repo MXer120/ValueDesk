@@ -113,18 +113,30 @@
   pointer-events: none;
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  min-width: 180px;
-  padding: 8px 10px;
-  border-radius: 8px;
+  gap: 1px;
+  padding: 5px 8px;
+  border-radius: 6px;
   background: var(--bg-elevated);
   box-shadow: var(--shadow-pop);
+  font-size: 11px;
+  line-height: 16px;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 .lqm-tip span { color: var(--muted); }
+.lqm-tip .lqm-tip-t { color: var(--text); font-weight: 500; }
+.lqm-tip-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.lqm-tip-row > span { display: inline-flex; align-items: center; gap: 5px; }
+.lqm-tip-row b { color: var(--text); font-weight: 500; }
 .lqm-tip .is-long { color: var(--neg); }
 .lqm-tip .is-short { color: var(--pos); }
+/* The tile's own colour; a bar of the strip: its side's. */
+.lqm-tip-sw { display: inline-block; width: 7px; height: 7px; border-radius: 1px; flex: none; }
+.lqm-tip-sw.is-long { background: var(--neg); }
+.lqm-tip-sw.is-short { background: var(--pos); }
 .lqm-tip-sub { font-size: 11px; color: var(--dim) !important; }
+/* The tile under the pointer: a white ring on its own box, at any step or zoom. */
+.lqm-ring { position: absolute; z-index: 2; pointer-events: none; outline: 1px solid #fff; outline-offset: 0; }
 
 .lqm-det {
   position: absolute;

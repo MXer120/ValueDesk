@@ -3539,7 +3539,8 @@ function Chart({
   };
   const onPanePointerDown = (e: ReactPointerEvent) => {
     endPress();
-    if (e.pointerType !== 'touch') return;
+    // A bare chart's long press is its host's (the heatmap's hover card); its right-click stays the menu.
+    if (e.pointerType !== 'touch' || bare) return;
     const { clientX: x, clientY: y } = e;
     press.current = {
       x,
