@@ -19,12 +19,15 @@ import { clientKey } from '../hosted.js';
 import { builderService, type BuilderService } from '../builder/service.js';
 import { ADDRESS_RE, NONCE_RE } from '../builder/terms.js';
 import { SANCTIONED_WALLET_REASON, isSanctionedAddress } from '../builder/sanctions.js';
+import { AdminStore } from '../admin/store.js';
 
 export interface BuilderRouteOptions {
   /** A service to answer from instead of the running server's (tests). */
   service?: BuilderService;
   /** The token /api/vs/builder/volume asks for (tests); default VALUESCAN_INTERNAL_TOKEN. */
   internalToken?: string;
+  /** The beta list to answer /api/vs/builder/beta from (tests); default the admin suite's (admin/store.ts beta_wallets). */
+  betaWallets?: () => string[];
 }
 
 /** The internal token, compared in constant time; an empty one (unset) matches nothing. */
@@ -89,5 +92,28 @@ export async function builderRoutes(app: FastifyInstance, opts: BuilderRouteOpti
     service.hint(q.address.toLowerCase(), 'executor');
     if (usd === null) return reply.code(503).send({ ok: false, code: 'unavailable', error: 'the builder ledger is not open' });
     return { ok: true, usd, days };
+  });
+
+  /**
+   * GET /api/vs/builder/beta?address=0x..., header X-Internal-Token
+   *
+   * Whether a wallet is on the beta list (the admin suite's Beta page): the hosted executor on the other
+   * server lets a wallet run REAL bots only from beta.valuedesk.so and only while it is listed (owner,
+   * 2026-11-02: "Beta only"). Internal, as the volume above: without the token it is a 404.
+   */
+  let admin: AdminStore | null = null;
+  const betaWallets = opts.betaWallets ?? (() => (admin ??= new AdminStore()).betaWallets().map((w) => w.address.toLowerCase()));
+  app.get('/api/vs/builder/beta', async (req, reply) => {
+    reply.header('Cache-Control', 'no-store, no-transform');
+    const want = opts.internalToken ?? process.env.VALUESCAN_INTERNAL_TOKEN?.trim() ?? '';
+    if (!tokenOk(want, req.headers['x-internal-token'])) return reply.code(404).send({ error: 'not found', source: 'server' });
+    const q = (req.query ?? {}) as Record<string, unknown>;
+    if (typeof q.address !== 'string' || !ADDRESS_RE.test(q.address)) return reply.code(400).send({ ok: false, error: 'a valid 0x wallet address is required' });
+    try {
+      return { ok: true, listed: betaWallets().includes(q.address.toLowerCase()) };
+    } catch (e) {
+      req.log.error({ err: e instanceof Error ? e.message : String(e) }, 'beta list: not readable');
+      return reply.code(503).send({ ok: false, code: 'unavailable', error: 'the beta list is not readable' });
+    }
   });
 }

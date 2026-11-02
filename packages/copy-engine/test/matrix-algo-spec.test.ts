@@ -10,7 +10,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { ALGO_KINDS, ALGO_LIMITS, ORACLE_VENUES, SLIP_FROM, algoClosesOnly, algoQuantity, algoSymbols, canonicalJSON, checkAlgoSpec, opensPosition, parseAlgoSpec, type AlgoKind, type AlgoSpec } from '../src/index.ts';
+import { ALGO_KINDS, BOT_KINDS, ALGO_LIMITS, ORACLE_VENUES, SLIP_FROM, algoClosesOnly, algoQuantity, algoSymbols, canonicalJSON, checkAlgoSpec, opensPosition, parseAlgoSpec, type AlgoKind, type AlgoSpec } from '../src/index.ts';
 
 const MIN = 60_000;
 const HOUR = 60 * MIN;
@@ -32,6 +32,8 @@ const BASE: Record<AlgoKind, Record<string, unknown>> = {
   basket: { kind: 'basket', symbol: 'BTC-USD', side: 'buy', legs: [{ symbol: 'BTC-USD', side: 'buy', usd: 100 }, { symbol: 'ETH-USD', side: 'sell', usd: 100 }], style: 'swarm', clips: 4, inFlight: 2, waveMs: 1_000, slippageBps: 20 },
   bracket: { kind: 'bracket', symbol: 'BTC-USD', side: 'buy', quantity: '0.01', entry: 'market', exits: { tpPct: 0.02 } },
   sweep: { kind: 'sweep', symbol: 'BTC-USD', side: 'buy', quantity: '0.01', slippageBps: 10 },
+  mm: { kind: 'mm', symbol: 'BTC-USD', orderUsd: 20, maxInventoryUsd: 100 },
+  grid: { kind: 'grid', symbol: 'BTC-USD', low: 55_000, high: 65_000, levels: 10, orderUsd: 20 },
 };
 
 const accepted = (x: Record<string, unknown>, what: string): AlgoSpec => {
@@ -316,13 +318,14 @@ test('choices: every action of a conditional (market, limit, close, an algo of e
   const close = accepted({ ...then({ type: 'close', share: 0.5, slippageBps: 30 }), side: 'sell' }, 'close');
   assert.ok(algoClosesOnly(close), 'a conditional close only closes');
   assert.equal(opensPosition(close), false);
-  for (const k of ALGO_KINDS.filter((x) => x !== 'conditional')) {
+  for (const k of ALGO_KINDS.filter((x) => x !== 'conditional' && !BOT_KINDS.includes(x))) {
     const inner = { ...BASE[k] };
     const s = accepted(then({ type: 'algo', algo: inner }), `starts a ${k}`) as Extract<AlgoSpec, { kind: 'conditional' }>;
     assert.equal(s.then.type === 'algo' && s.then.algo.kind, k);
     assert.equal(opensPosition(s), false, 'the algo it starts opens (and carries the exits), not the conditional');
   }
   refused(then({ type: 'algo', algo: BASE.conditional }), 'then', 'a conditional that starts a conditional', /cannot start another conditional/);
+  for (const k of BOT_KINDS) refused(then({ type: 'algo', algo: BASE[k] }), 'then', `a conditional that starts a ${k} bot`, /cannot start a bot/);
   refused(then({ type: 'algo', algo: { ...BASE.twap, slices: 0 } }), 'then.algo.slices', 'the inner algo is checked as its own');
   refused(then({ type: 'nap' }), 'then', 'an unknown action', /Choose what happens/);
   refused(then({ type: 'market', quantity: '-1', slippageBps: 30 }), 'then.quantity', 'a negative size');
@@ -367,13 +370,14 @@ test('base: a SoDEX market (upper-cased, trimmed), a label of at most 40, reduce
   refused({ ...BASE.pov, endAt: 'later' }, 'endAt', 'endAt not a time', /must be a time/);
   refused({ ...BASE.conditional, expiresAt: 3 }, 'expiresAt', 'expiresAt not a time', /must be a time/);
   refused({ ...BASE.twap, upper: 70_000 }, 'upper', 'a bound that is only a number', /price and what to do/);
-  refused({ ...BASE.twap, kind: 'grid' }, 'kind', 'an unknown kind', /Unknown order type/);
+  refused({ ...BASE.twap, kind: 'lattice' }, 'kind', 'an unknown kind', /Unknown order type/);
   assert.deepEqual(checkAlgoSpec('twap').errors, { kind: 'Choose an order type.' });
   assert.equal(accepted({ ...BASE.twap, marginMode: null, leverage: '' }, 'no margin mode, no leverage').leverage, null);
 });
 
 test('base: every kind takes the shared rules a ticket may send, and drops what it does not know', () => {
-  for (const k of ALGO_KINDS) {
+  // A bot buys and sells: no limit price, nothing to rush (bots below).
+  for (const k of ALGO_KINDS.filter((x) => !BOT_KINDS.includes(x))) {
     const s = accepted({ ...BASE[k], limitPrice: 100_000, triggerPrice: 59_000, startAt: T0, maxSpreadBps: 10, leverage: 3, marginMode: 'isolated', label: 'x', surprise: 1, upper: k === 'scale' ? null : { price: 90_000, then: 'stop' }, lower: { price: 1_000, then: 'rush' } }, `${k} with every shared rule`);
     assert.equal(s.kind, k);
     assert.equal('surprise' in s, false, 'an unknown key is dropped');
@@ -381,6 +385,17 @@ test('base: every kind takes the shared rules a ticket may send, and drops what 
     assert.equal(s.marginMode, 'isolated');
     // The canonical text is the same every time (what a wallet signs).
     assert.equal(canonicalJSON(parseAlgoSpec(s)), canonicalJSON(s));
+  }
+});
+
+test('base: a bot takes the bounds (hold or stop), the spread guard and leverage; never a limit price or a rush', () => {
+  for (const k of BOT_KINDS) {
+    const s = accepted({ ...BASE[k], startAt: T0, maxSpreadBps: 10, leverage: 3, label: 'x', surprise: 1, upper: { price: 90_000, then: 'stop' }, lower: { price: 1_000, then: 'hold' } }, `${k} with the shared rules`);
+    assert.equal(s.bot, true);
+    assert.equal('surprise' in s, false);
+    assert.equal(canonicalJSON(parseAlgoSpec(s)), canonicalJSON(s));
+    refused({ ...BASE[k], limitPrice: 60_000 }, 'limitPrice', `${k} with a limit price`, /no limit price/);
+    refused({ ...BASE[k], lower: { price: 1_000, then: 'rush' } }, 'lower', `${k} with a rush`, /nothing to rush/);
   }
 });
 
@@ -518,9 +533,10 @@ test('conflicts: what CAN go together', () => {
 });
 
 test('every kind: its menu entry exists, its base spec opens (or closes) as expected', () => {
-  const opens: Record<AlgoKind, boolean> = { twap: true, vwap: true, pov: true, iceberg: true, chase: true, scale: true, dca: true, swarm: true, conditional: true, trailing: false, basket: false, bracket: true, sweep: true };
+  const opens: Record<AlgoKind, boolean> = { twap: true, vwap: true, pov: true, iceberg: true, chase: true, scale: true, dca: true, swarm: true, conditional: true, trailing: false, basket: false, bracket: true, sweep: true, mm: true, grid: true };
   for (const k of ALGO_KINDS) assert.equal(opensPosition(accepted(BASE[k], k)), opens[k], k);
-  for (const k of ALGO_KINDS.filter((x) => x !== 'bracket')) assert.equal(opensPosition(accepted({ ...BASE[k], reduceOnly: true, exits: null }, `${k} reduce-only`)), false, `${k} reduce-only opens nothing`);
+  // A bot buys and sells: it is never reduce-only (refused, its own test).
+  for (const k of ALGO_KINDS.filter((x) => x !== 'bracket' && !BOT_KINDS.includes(x))) assert.equal(opensPosition(accepted({ ...BASE[k], reduceOnly: true, exits: null }, `${k} reduce-only`)), false, `${k} reduce-only opens nothing`);
   // A bracket needs its exits and a reduce-only order may have none: there is no reduce-only bracket (the ticket's switch shows the error).
   refused({ ...BASE.bracket, reduceOnly: true }, 'exits', 'a reduce-only bracket with exits', /reduce-only order opens nothing/);
   refused({ ...BASE.bracket, reduceOnly: true, exits: null }, 'exits', 'a reduce-only bracket without', /needs a take-profit/);

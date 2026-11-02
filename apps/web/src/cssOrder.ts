@@ -61,6 +61,7 @@ import './components/dev/DevPanel.css';
 import './components/explore/Explore.css';
 import './components/excluded/excluded.css';
 import './components/leaderboard/LeaderboardPage.css';
+import './components/bots/bots.css';
 import './components/explore/cohorts/Cohorts.css';
 import './components/explore/markets/Markets.css';
 import './components/copy/Copy.css';

@@ -73,6 +73,8 @@ const PortfolioDashboard = lazyPage('portfolio', () => import('./dashboard/Portf
 const ScanDashboard = lazyPage('scan', () => import('./dashboard/ScanDashboard').then((m) => m.ScanDashboard));
 /* The knowledge folders' own page: docs, sheets, boards, saved posts, files (knowledge/). Off unless
    the Dev panel turned it on for the owner's wallet (folders/access.ts): then not even fetched. */
+/* Bots (components/bots/): automated strategies on the ValueDesk executor. */
+const BotsPage = lazyPage('bots', () => import('./components/bots/BotsPage').then((m) => m.BotsPage));
 const KnowledgePage = lazyPage('knowledge', () => import('./knowledge/KnowledgePage').then((m) => m.KnowledgePage));
 /* The folders' sign-in and save sheet (folders/FoldersHost.tsx): fetched only once Knowledge is on. */
 const FoldersHost = lazyChunk(() => import('./folders/FoldersHost').then((m) => ({ default: m.FoldersHost })));
@@ -96,6 +98,7 @@ const PAGES: Record<Tab, LazyPage<any>> = {
   portfolio: PortfolioDashboard,
   scan: ScanDashboard,
   knowledge: KnowledgePage,
+  bots: BotsPage,
 };
 
 /** The page the first render shows, and the one an old URL is then moved to (router.ts). */
@@ -585,7 +588,7 @@ function AppShell() {
             it pushed the account card - the only thing you can act on before
             scanning - below the fold. */}
         {/* Explore and Copy are about traders, not one market: no strip there either. Knowledge is the user's own writing. */}
-        {tab !== 'trade' && tab !== 'portfolio' && tab !== 'scan' && tab !== 'leaderboard' && tab !== 'explore' && tab !== 'copy' && tab !== 'knowledge' && (
+        {tab !== 'trade' && tab !== 'portfolio' && tab !== 'scan' && tab !== 'leaderboard' && tab !== 'explore' && tab !== 'copy' && tab !== 'knowledge' && tab !== 'bots' && (
           <div className="marketbar">
             <Guarded name="Ticker">
               <TickerBar
@@ -632,6 +635,10 @@ function AppShell() {
           <Guarded name="Leaderboard">
             <LeaderboardPage address={address} onScan={openScanOverview} onOpenCopy={openCopy} />
           </Guarded>
+        )}
+
+        {shown === 'bots' && (
+          <Guarded name="Bots"><BotsPage address={address} provider={provider} /></Guarded>
         )}
 
         {shown === 'knowledge' && knowledge && (

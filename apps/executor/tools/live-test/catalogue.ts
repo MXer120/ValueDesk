@@ -13,6 +13,7 @@ import type { Scenario } from './scenario.ts';
 import { SETUP_SCENARIOS } from './scenarios/setup.ts';
 import { ALGO_SCENARIOS } from './scenarios/algos.ts';
 import { ALGO_MATRIX_SCENARIOS } from './scenarios/algo-matrix.ts';
+import { BOT_SCENARIOS } from './scenarios/bots.ts';
 import { COPY_SCENARIOS } from './scenarios/copy.ts';
 import { COPY_MATRIX_SCENARIOS } from './scenarios/copy-matrix.ts';
 import { LIQ_SCENARIOS } from './scenarios/liquidation.ts';
@@ -23,6 +24,7 @@ export const CATALOGUE: readonly Scenario[] = [
   ...SETUP_SCENARIOS,
   ...ALGO_SCENARIOS,
   ...ALGO_MATRIX_SCENARIOS,
+  ...BOT_SCENARIOS,
   ...UI_TICKET_SCENARIOS,
   ...UI_ALGO_SCENARIOS,
   ...COPY_SCENARIOS,

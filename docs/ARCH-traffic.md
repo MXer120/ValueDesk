@@ -353,6 +353,9 @@ Against this inventory, HOSTED_ROUTES should be:
   copy fee step). Internal: without the `X-Internal-Token` (`VALUESCAN_INTERNAL_TOKEN`)
   it is a 404 even past the gate, since the site's proxy adds the origin secret to every
   request.
+- **Add**: `GET /api/vs/builder/beta?address=` (cls `read`): whether a wallet is on the beta
+  list, for the hosted executor's live-bot gate (real bots: beta.valuedesk.so and the list only).
+  Internal, as the volume above: without the `X-Internal-Token` it is a 404.
 - **Add**: the knowledge folders (`routes/folders.ts`), one wallet's own research:
   `POST /api/folders/session` (cls `auth`: a signed `FoldersSignIn`, free typed data,
   for a 7-day token), `GET /api/folders`, `/api/folders/item`, `/api/folders/file/url`

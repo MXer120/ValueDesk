@@ -88,6 +88,7 @@ other typed data) is refused with 4100 and recorded:
 | `site-terms` | `CopyRequest` `accept-site-terms` (ValueDesk's terms) |
 | `copy-terms` | `CopyRequest` `accept-terms` (the copy terms) |
 | `copy-sign-in` | `CopyRequest` `session` (signing in to an executor) |
+| `algo` | `CopyRequest` `algo-start` / `algo-action` (a practice algo or bot on the executor: start, pause, edit, stop) |
 | `copy-key` | `CopyRequest` `create-key` (an executor makes the copy key it then registers: `copy/live.ts approveKey`) |
 
 `wallet.log` / `wallet.since(mark)` say what was asked and how it was answered; a kind in `wallet.reject` is

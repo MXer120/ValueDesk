@@ -13,7 +13,7 @@
  */
 import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { ALGO_KINDS, regionPolicy, type AlgoKind, type AlgoRecord } from '../src/index.ts';
+import { ALGO_KINDS, BOT_KINDS, regionPolicy, type AlgoKind, type AlgoRecord } from '../src/index.ts';
 import { ETH } from './helpers.ts';
 import { add, clock, crashAndRestart, drive, near, rig, settle, sum, T0, type Rig } from './matrix-rig.ts';
 
@@ -965,6 +965,9 @@ const WORKING: Record<AlgoKind, Record<string, unknown>> = {
   bracket: { kind: 'bracket', quantity: '0.002', entry: 'limit', price: 59_900, exits: { tpPct: 0.02, slPct: 0.02 } },
   // Under a limit far below the book: nothing fills while it works.
   sweep: { kind: 'sweep', quantity: '0.004', slippageBps: 10, roundMs: 500, reference: 'mark', limitPrice: 59_000 },
+  // Bots: they quote until stopped; 'keep' so a cancel ends one at once, as every other kind's does.
+  mm: { kind: 'mm', orderUsd: 30, maxInventoryUsd: 120, onStop: 'keep' },
+  grid: { kind: 'grid', low: 59_000, high: 61_000, levels: 6, orderUsd: 30, onStop: 'keep' },
 };
 
 const family = (r: Rig, id: string) => [id, ...r.rt.list().filter((x) => x.parentId === id).map((x) => x.id)];
@@ -1000,6 +1003,8 @@ for (const kind of ALGO_KINDS) {
   });
 
   test(`lifecycle ${kind}: the label, limit price, bounds and spread guard can be changed while it runs; what it is cannot`, async () => {
+    // A bot has no limit price and its own fields to change (algo-bots.test.ts).
+    if (BOT_KINDS.includes(kind)) return;
     const r = await rig();
     r.ex.positions.set('BTC-USD', 0.01);
     const a = await add(r, WORKING[kind]);

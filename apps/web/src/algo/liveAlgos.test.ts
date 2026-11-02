@@ -41,3 +41,12 @@ test('no build for a deployment sets it: build-web.sh exports it empty and refus
     assert.doesNotMatch(readFileSync(join(REPO, f), 'utf8'), /^\s*VITE_LIVE_ALGOS_WALLETS\s*=/m, `${f} does not set it`);
   }
 });
+
+test('real bots: the beta channel (its door lets in only listed wallets) or the live-algo wallets; never without a wallet', async () => {
+  const { liveBotsFor } = await import('./liveAlgos');
+  const w = '0x04fb000000000000000000000000000000000277';
+  assert.equal(liveBotsFor(w, true, new Set()), true, 'beta');
+  assert.equal(liveBotsFor(w, false, new Set()), false, 'main site: practice only');
+  assert.equal(liveBotsFor(w, false, new Set([w])), true, 'the live-algo test wallet');
+  assert.equal(liveBotsFor(null, true, new Set()), false);
+});

@@ -186,6 +186,8 @@ export const HOSTED_ROUTES: readonly HostedRoute[] = [
   // One wallet's counted builder volume, for the copy executor on the other server (routes/builder.ts).
   // Internal: without its own token it is a 404 even past the gate.
   { method: 'GET', url: '/api/vs/builder/volume', cls: 'read' },
+  // Whether a wallet is on the beta list, for the executor's live-bot gate (routes/builder.ts). Internal, as above.
+  { method: 'GET', url: '/api/vs/builder/beta', cls: 'read' },
   // Deep links by SoDEX account id: the index's leaderboard map, on-chain as a fallback.
   { method: 'GET', url: '/api/feed/account', cls: 'upstream' },
   // Global, not per-user (until the web reads alpha-biz directly).

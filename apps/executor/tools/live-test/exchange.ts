@@ -300,6 +300,40 @@ export class SodexReads {
       .filter((f) => f.time >= since - 1_000);
   }
 
+  /**
+   * Every fill of the market since `since`, past SoDEX's 100 a page: paged by time (endTime back from the newest,
+   * or startTime on from the oldest - whichever way the page is sorted). A bot fills more than 100 times in a run.
+   */
+  async allFills(address: string, symbol: string, since: number, maxPages = 30): Promise<FillInfo[]> {
+    const seen = new Map<string, FillInfo>();
+    let from = since;
+    let until: number | null = null;
+    for (let i = 0; i < maxPages; i++) {
+      const q: string = `/api/v1/perps/accounts/${address.toLowerCase()}/trades?symbol=${encodeURIComponent(symbol)}&startTime=${from}${until !== null ? `&endTime=${until}` : ''}&limit=100`;
+      const rows: Array<Record<string, unknown>> = unwrapList<Record<string, unknown>>(await this.historyGet(q), 'trades').filter((r) => !r.symbol || r.symbol === symbol);
+      for (const r of rows) {
+        const f: FillInfo = {
+          clOrdID: typeof r.clOrdID === 'string' && r.clOrdID ? r.clOrdID : null,
+          orderId: String(r.orderID ?? ''),
+          side: String(r.side).toUpperCase() === 'SELL' ? 'sell' : 'buy',
+          price: n(r.price),
+          qty: n(r.quantity),
+          fee: n(r.fee),
+          builderFee: n(r.builderFee),
+          maker: r.isMaker === true,
+          time: n(r.time),
+        };
+        seen.set(`${String(r.tradeID ?? '')}|${f.orderId}|${f.time}|${f.qty}`, f);
+      }
+      if (rows.length < 100) break;
+      const times: number[] = rows.map((r: Record<string, unknown>) => n(r.time));
+      const desc = times[0]! >= times[times.length - 1]!;
+      if (desc) until = Math.min(...times) - 1;
+      else from = Math.max(...times) + 1;
+    }
+    return [...seen.values()].filter((f) => f.time >= since - 1_000).sort((a, b) => a.time - b.time);
+  }
+
   async apiKeys(address: string) {
     return this.client.apiKeys(address, 'perps');
   }

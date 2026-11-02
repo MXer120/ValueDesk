@@ -9,7 +9,7 @@
  * wallet shows it) and 'algo-action' (pause / resume / cancel / cancel all,
  * and a size change where the executor offers 'algo-update').
  */
-import { requirePaperAlgo } from './liveAlgos';
+import { liveBotsFor, requirePaperAlgo } from './liveAlgos';
 import type { AlgoEvent, AlgoUpdatePatch, AlgoView } from '@copy-engine';
 import { ExecutorClient, ExecutorError, hostedExecutor, selfBase, signCopy } from '../copy/executor';
 import { requireTermsOrThrow } from '../legal/acceptance';
@@ -80,7 +80,9 @@ async function call<T>(client: ExecutorClient, method: 'GET' | 'POST', path: str
 
 /** Start an algo on an executor: one wallet signature over the spec. */
 export async function startOn(mode: ExecutorMode, spec: unknown, seed: number): Promise<AlgoView> {
-  requirePaperAlgo(spec, getLiveCopy().owner);
+  // A bot's own rule (beta only); every other algo's: practice unless real algos are on for the wallet.
+  const bot = typeof spec === 'object' && spec !== null && (spec as { bot?: unknown }).bot === true;
+  if (!bot || !liveBotsFor(getLiveCopy().owner)) requirePaperAlgo(spec, getLiveCopy().owner);
   const { owner, provider } = needWallet();
   const client = clientFor(mode);
   const info = getLiveCopy()[mode].info;
@@ -91,7 +93,7 @@ export async function startOn(mode: ExecutorMode, spec: unknown, seed: number): 
 }
 
 /** Pause, resume or cancel one algo on an executor (or cancel all there): one wallet signature. */
-export async function actOn(mode: ExecutorMode, op: 'pause' | 'resume' | 'cancel' | 'cancel-all', id?: string): Promise<AlgoView[]> {
+export async function actOn(mode: ExecutorMode, op: 'pause' | 'resume' | 'cancel' | 'cancel-all' | 'archive', id?: string): Promise<AlgoView[]> {
   const { owner, provider } = needWallet();
   const client = clientFor(mode);
   const info = getLiveCopy()[mode].info;

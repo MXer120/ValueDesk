@@ -1,0 +1,307 @@
+/* Bots page (BotsPage.tsx), in the leaderboard page's frame (.panel.lbp: the bar, the segmented controls,
+   the table sheet) with the portfolio's soft tiles for the totals, the funds sheets' buttons and the Settings
+   shell for one bot (BotSheet: .stg.algo-sheet). Kind and state are pills and dots - never a coloured edge. */
+
+.panel.lbp.bots { max-width: 1240px; margin: 0 auto; width: 100%; }
+
+/* --- the head ----------------------------------------------------------------- */
+
+.bots-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 8px 0 16px;
+}
+.bots-head__text h1 { margin: 0 0 4px; font-size: var(--fs-xl); line-height: 28px; font-weight: 500; color: var(--text); }
+.bots-head__text p { margin: 0; max-width: 720px; color: var(--muted); font-size: var(--fs-xs); line-height: 18px; }
+.fx-cta.bots-new { width: auto; height: 34px; padding: 0 16px; border-radius: 8px; font-size: var(--fs-xs); flex: none; }
+
+/* --- the totals: the account card's soft tiles --------------------------------- */
+
+.bots-totals {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.bots-total {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid var(--panel-line);
+  border-radius: 12px;
+  background: linear-gradient(180deg, var(--sheen), transparent 60%), color-mix(in srgb, var(--text) 4%, var(--bg-panel));
+}
+.bots-total__k { color: var(--muted); font-size: var(--fs-micro, 11px); line-height: 14px; }
+.bots-total__v { font-family: var(--font-num); font-variant-numeric: tabular-nums; font-size: 18px; line-height: 22px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bots-total__v small { color: var(--muted); font-size: var(--fs-xs); }
+.bots-total__v.pos, .bots-kpi__v.pos, .bots td.pos { color: var(--pos); }
+.bots-total__v.neg, .bots-kpi__v.neg, .bots td.neg { color: var(--neg); }
+
+.bots-bar__gap { flex: 1; }
+
+/* --- buttons in rows and windows: the account tables' action chip ----------- */
+
+.bots .acct-act, .bots-sheet .acct-act {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 var(--sp-2);
+  border: 1px solid var(--panel-line);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-family: inherit;
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  line-height: 22px;
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
+}
+.bots .acct-act:hover:not(:disabled), .bots-sheet .acct-act:hover:not(:disabled) { color: var(--text); border-color: var(--line); }
+.bots .acct-act--danger:hover:not(:disabled), .bots-sheet .acct-act--danger:hover:not(:disabled) { color: var(--neg); border-color: color-mix(in srgb, var(--neg) 50%, var(--panel-line)); }
+.bots .acct-act:disabled, .bots-sheet .acct-act:disabled { color: var(--disabled); border-color: color-mix(in srgb, var(--panel-line) 60%, transparent); cursor: default; }
+.bots-ctl { display: inline-flex; gap: 6px; justify-content: flex-end; }
+
+/* --- the list ----------------------------------------------------------------- */
+
+.bots .lb-table.bots-table th:nth-child(1) { width: 24%; }
+.bots .lb-table.bots-table th:nth-child(2) { width: 11%; }
+.bots .lb-table.bots-table th:nth-child(3) { width: 9%; }
+.bots .lb-table.bots-table th:nth-child(4) { width: 11%; }
+.bots .lb-table.bots-table th:nth-child(5) { width: 10%; }
+.bots .lb-table.bots-table th:nth-child(6) { width: 10%; }
+.bots .lb-table.bots-table th:nth-child(7) { width: 9%; }
+.bots .lb-table.bots-table th:nth-child(8) { width: 16%; }
+.bots .bots-table th.right, .bots .bots-table td.right { text-align: right; }
+.bots .bots-table td { height: 52px; font-family: var(--font-num); font-variant-numeric: tabular-nums; }
+.bots-row { cursor: pointer; transition: background-color var(--dur-fast) var(--ease-out); }
+.bots-row:hover, .bots-row:focus-visible { background: color-mix(in srgb, var(--text) 4%, transparent); outline: none; }
+
+.bots-who { display: inline-flex; align-items: center; gap: 10px; min-width: 0; max-width: 100%; font-family: var(--font-text, inherit); }
+.bots-who__t { display: flex; flex-direction: column; min-width: 0; }
+.bots-who__t b { font-weight: 500; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bots-who__t small { color: var(--muted); font-size: var(--fs-micro, 11px); line-height: 14px; }
+.bots-mkt { display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-text, inherit); }
+
+/* The strategy's mark: a soft tile, one hue per strategy. */
+.bot-ic {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  color: var(--bot-hue);
+  background: color-mix(in srgb, var(--bot-hue) 13%, transparent);
+  border: 1px solid color-mix(in srgb, var(--bot-hue) 22%, transparent);
+}
+.bot-ic.is-maker { --bot-hue: #7aa7ff; }
+.bot-ic.is-grid { --bot-hue: #c79bff; }
+.bot-ic.is-dca { --bot-hue: #5fd0b5; }
+
+/* State: a pill with a dot (running pulses, as the algo status does). */
+.bots-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-family: var(--font-text, inherit);
+  font-size: var(--fs-micro, 11px);
+  color: var(--st);
+  background: color-mix(in srgb, var(--st) 12%, transparent);
+}
+.bots-state::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.bots-state.is-running { --st: var(--pos); }
+.bots-state.is-running::before { animation: algo-pulse 1.6s ease-in-out infinite; }
+.bots-state.is-waiting, .bots-state.is-closing { --st: var(--warn); }
+.bots-state.is-paused, .bots-state.is-ended { --st: var(--muted); }
+.bots-state.is-failed { --st: var(--neg); }
+@media (prefers-reduced-motion: reduce) { .bots-state.is-running::before { animation: none; } }
+:root[data-still] .bots-state.is-running::before { animation: none; }
+
+.bots-side { display: inline-flex; align-items: center; gap: 5px; }
+.bots-side::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.bots-side.is-buy { color: var(--pos); }
+.bots-side.is-sell { color: var(--neg); }
+
+/* --- empty, onboarding, loading ----------------------------------------------- */
+
+.bots-empty { display: flex; flex-direction: column; gap: 14px; margin-top: 4px; }
+.bots-empty__head { display: flex; flex-direction: column; gap: 4px; }
+.bots-empty__head b { font-weight: 500; color: var(--text); }
+.bots-empty__head span { color: var(--muted); font-size: var(--fs-xs); }
+
+.bots-onboard {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 18px 20px;
+  border: 1px solid var(--panel-line);
+  border-radius: 12px;
+  background: linear-gradient(180deg, var(--sheen), transparent 60%), color-mix(in srgb, var(--text) 4%, var(--bg-panel));
+}
+.bots-onboard__text { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.bots-onboard__text b { font-weight: 500; color: var(--text); }
+.bots-onboard__text > span { color: var(--muted); font-size: var(--fs-xs); max-width: 640px; }
+.bots-onboard .fx-cta { width: auto; height: 36px; padding: 0 18px; border-radius: 8px; flex: none; }
+
+.bots-skel { display: flex; flex-direction: column; gap: 8px; }
+.bots-bone { height: 52px; border-radius: 10px; background: linear-gradient(90deg, color-mix(in srgb, var(--text) 4%, transparent), color-mix(in srgb, var(--text) 8%, transparent), color-mix(in srgb, var(--text) 4%, transparent)); background-size: 200% 100%; animation: bots-shimmer 1.4s ease-in-out infinite; }
+@keyframes bots-shimmer { to { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) { .bots-bone { animation: none; } }
+
+/* --- strategy cards ------------------------------------------------------------ */
+
+.bots-strats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.bots-strats.is-compact { grid-template-columns: 1fr; margin: 4px 0 14px; }
+button.bots-strat {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  width: 100%;
+  height: auto;
+  margin: 0;
+  padding: 16px;
+  text-align: left;
+  color: var(--text);
+  font: inherit;
+  border: 1px solid var(--panel-line);
+  border-radius: 12px;
+  background: linear-gradient(180deg, var(--sheen), transparent 60%), color-mix(in srgb, var(--text) 4%, var(--bg-panel));
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out), transform 200ms var(--ease-spring, ease);
+}
+button.bots-strat:hover { border-color: var(--line); background: linear-gradient(180deg, var(--sheen), transparent 60%), color-mix(in srgb, var(--text) 7%, var(--bg-panel)); }
+button.bots-strat:active { transform: scale(0.995); }
+.bots-strat__top { display: flex; align-items: center; gap: 10px; }
+.bots-strat__top b { font-weight: 500; font-size: var(--fs-base); }
+.bots-tag { margin-left: auto; padding: 1px 7px; border-radius: 999px; font-size: var(--fs-micro, 11px); color: var(--text); background: color-mix(in srgb, var(--text) 9%, transparent); }
+.bots-strat__line { color: var(--muted); font-size: var(--fs-xs); line-height: 18px; }
+.bots-strat__how { margin: 0; padding: 0 0 0 16px; color: var(--muted); font-size: var(--fs-xs); line-height: 18px; display: flex; flex-direction: column; gap: 4px; }
+.bots-strat__foot { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin-top: auto; padding-top: 10px; border-top: 1px solid var(--panel-line); font-size: var(--fs-xs); }
+.bots-strat__k { color: var(--muted); }
+.bots-strat__v { font-family: var(--font-num); text-align: right; }
+.bots-strat__best { text-align: right; color: var(--text); }
+.bots-strats.is-compact button.bots-strat { padding: 12px 14px; gap: 6px; }
+
+/* --- the form: the copy dialog's frame (CopyHome.css .cpy-modal): capped, the body scrolls, the foot stays ---- */
+
+.modal.fx.bots-form { max-width: 560px; max-height: calc(100vh - 32px); }
+.bots-form .modal-body { overflow-y: auto; overscroll-behavior: contain; gap: 0; }
+.bots-form .modal-foot { display: block; padding: var(--sp-3) var(--sp-4) var(--sp-4); border-top: 1px solid var(--panel-line); background: transparent; }
+.bots-dlg .dlg-ctl > .oe-inputrow, .bots-dlg .dlg-ctl > .bots-pair { flex: 1 1 100%; }
+.bots-dlg .algo-ferr { flex: 1 1 100%; margin: 0; }
+
+.bots-sub { margin: 0 0 4px; color: var(--muted); font-size: var(--fs-xs); }
+.bots-formhead { display: flex; align-items: center; gap: 12px; margin: 0 0 14px; }
+.bots-formhead > span { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.bots-formhead b { font-weight: 500; }
+.bots-formhead small { color: var(--muted); font-size: var(--fs-xs); }
+button.bots-link { border: 0; background: none; padding: 0; color: var(--text); font: inherit; font-size: var(--fs-xs); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.bots-fixed { font-family: var(--font-num); color: var(--text); }
+.bots-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.bots-form .oe-inputrow.is-off { opacity: 0.55; }
+.bots-form .bots-name { text-align: left; }
+.bots-cost {
+  margin: 14px 0 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--panel-line);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg) 55%, transparent);
+  font-size: var(--fs-xs);
+}
+.bots-cost__row { display: flex; justify-content: space-between; gap: 12px; padding: 3px 0; color: var(--muted); }
+.bots-cost__row > span:last-child { font-family: var(--font-num); color: var(--text); text-align: right; }
+.bots-cost__row small { color: var(--muted); font-family: var(--font-text, inherit); }
+.bots-cost__row.is-pos > span:last-child { color: var(--pos); }
+.bots-cost__row.is-total { margin-top: 4px; padding-top: 8px; border-top: 1px solid var(--panel-line); color: var(--text); }
+.bots-cost__row.is-total > span:last-child.pos { color: var(--pos); }
+.bots-summary { margin: 0 0 10px; color: var(--text); font-size: var(--fs-xs); line-height: 18px; }
+.bots-foot-note { color: var(--muted); font-size: var(--fs-xs); }
+
+/* --- one bot (BotSheet) ------------------------------------------------------ */
+
+.bots-navsub { color: var(--muted); font-size: var(--fs-xs); margin: 2px 0 0; }
+.bots-navfoot { margin-top: auto; color: var(--dim); font-size: var(--fs-micro, 11px); }
+.bots-kpis { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; margin: 12px 0; }
+.bots-kpi { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border: 1px solid var(--panel-line); border-radius: 10px; background: color-mix(in srgb, var(--text) 3%, transparent); min-width: 0; }
+.bots-kpi__k { color: var(--muted); font-size: var(--fs-micro, 11px); }
+.bots-kpi__v { font-family: var(--font-num); font-variant-numeric: tabular-nums; font-size: var(--fs-base); color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bots-chart { margin: 0 0 12px; padding: 10px; border: 1px solid var(--panel-line); border-radius: 10px; }
+.bots-chart__wait { display: grid; place-items: center; min-height: 120px; margin: 0; text-align: center; }
+.bots-chart figcaption { display: flex; align-items: center; gap: 6px; margin-top: 6px; color: var(--muted); font-size: var(--fs-micro, 11px); }
+.bots-key { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-left: 10px; }
+.bots-key:first-child { margin-left: 0; }
+.bots-key.is-vol { background: #5b6b80; }
+.bots-key.is-pnl { height: 2px; background: #f7f7f7; }
+.bots-split { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.bots-box { padding: 12px 14px; border: 1px solid var(--panel-line); border-radius: 10px; min-width: 0; }
+.bots-box h4 { margin: 0 0 8px; font-size: var(--fs-xs); font-weight: 500; color: var(--text); }
+.bots-ledger { display: grid; grid-template-columns: 1fr auto; gap: 6px 12px; margin: 0; font-size: var(--fs-xs); }
+.bots-ledger dt { color: var(--muted); }
+.bots-ledger dd { margin: 0; text-align: right; font-family: var(--font-num); color: var(--text); }
+.bots-ledger .is-total { padding-top: 6px; border-top: 1px solid var(--panel-line); color: var(--text); }
+.bots-ledger dd.pos { color: var(--pos); }
+.bots-ledger dd.neg { color: var(--neg); }
+.bots-fine { margin: 8px 0 0; color: var(--dim); font-size: var(--fs-micro, 11px); line-height: 15px; }
+.bots-mini { width: 100%; border-collapse: collapse; font-family: var(--font-num); font-size: var(--fs-xs); }
+.bots-mini th { color: var(--muted); font-weight: 400; text-align: right; padding: 0 0 6px; }
+.bots-mini th:first-child, .bots-mini td:first-child { text-align: left; }
+.bots-mini td { text-align: right; padding: 4px 0; }
+.bots-trades td:nth-child(2) { text-align: left; }
+.bots-log { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; font-size: var(--fs-xs); }
+.bots-log li { display: grid; grid-template-columns: 64px 64px 1fr; gap: 10px; padding: 7px 0; border-top: 1px solid rgba(255, 255, 255, 0.045); align-items: baseline; }
+.bots-log li:first-child { border-top: 0; }
+.bots-log time { color: var(--muted); font-family: var(--font-num); }
+.bots-logk { justify-self: start; padding: 0 7px; border-radius: 999px; font-size: var(--fs-micro, 11px); line-height: 18px; color: var(--muted); background: color-mix(in srgb, var(--text) 6%, transparent); }
+.bots-logk.is-fill { color: var(--pos); background: color-mix(in srgb, var(--pos) 12%, transparent); }
+.bots-logk.is-error { color: var(--neg); background: color-mix(in srgb, var(--neg) 12%, transparent); }
+.bots-logk.is-status { color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent); }
+.bots-logt { color: var(--text); min-width: 0; overflow-wrap: anywhere; }
+
+/* --- phone ------------------------------------------------------------------- */
+
+@media (max-width: 900px) {
+  .bots-totals { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .bots-totals .bots-total:first-child { grid-column: 1 / -1; }
+  .bots-strats { grid-template-columns: 1fr; }
+  .bots-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .bots-split { grid-template-columns: 1fr; }
+}
+@media (max-width: 760px) {
+  .panel.lbp.bots { padding: 8px 12px 28px; }
+  .bots-head { flex-direction: column; align-items: stretch; }
+  .fx-cta.bots-new { width: 100%; height: 40px; }
+  .bots-onboard { flex-direction: column; align-items: stretch; }
+  .bots-onboard .fx-cta { width: 100%; }
+  /* The list as cards on a phone: the bot and its state, then volume and net PnL. Its controls are in its
+     window (a tap opens it). The leaderboard's sideways scroll is not used here. */
+  .bots .lbp-sheet { overflow: hidden; }
+  .bots .lb-table.bots-table { min-width: 0; table-layout: auto; }
+  .bots .bots-table thead { display: none; }
+  .bots .bots-table tbody { display: block; }
+  .bots .bots-table tr.bots-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: 'who state' 'vol pnl';
+    gap: 10px 12px;
+    padding: 12px 14px;
+  }
+  .bots .bots-table tr.bots-row + tr.bots-row { border-top: 1px solid var(--panel-line); }
+  .bots .lbp-table td { display: block; height: auto; padding: 0; }
+  .bots .lbp-table td:first-child, .bots .lbp-table td:last-child { padding: 0; }
+  .bots .bots-table td:nth-child(1) { grid-area: who; min-width: 0; }
+  .bots .bots-table td:nth-child(3) { grid-area: state; justify-self: end; align-self: center; }
+  .bots .bots-table td:nth-child(4) { grid-area: vol; text-align: left; }
+  .bots .bots-table td:nth-child(5) { grid-area: pnl; }
+  .bots .bots-table td:nth-child(2), .bots .bots-table td:nth-child(6), .bots .bots-table td:nth-child(7), .bots .bots-table td:nth-child(8) { display: none; }
+  .bots .bots-table td[data-k]::before { content: attr(data-k); margin-right: 6px; color: var(--muted); font-family: var(--font-text, inherit); font-size: var(--fs-micro, 11px); }
+  .bots-who .algo-practice { display: none; }
+}

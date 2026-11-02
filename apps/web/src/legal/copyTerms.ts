@@ -130,6 +130,16 @@ export const COPY_TERMS: LegalDoc = {
             'A practice run works against the live market but sends nothing to SoDEX and costs no fee. Real algo orders are available only where ValueDesk has switched them on for the executor you use.',
           ],
         },
+        { p: '**Bots.** A bot (the volume maker, the grid and the DCA bot on the Bots page) is an automated trading strategy you choose, configure and start yourself on the ValueDesk executor. It is an algo order that runs until you stop it or it reaches a limit you set, and everything above about algo orders applies to it.' },
+        {
+          ul: [
+            'A bot keeps orders resting on SoDEX\'s order book in your account around the clock - buys and sells - and builds and unwinds positions as they fill, without asking you before each order. It aims at trading volume at a low cost, not at a profit: it can lose money, through price moves against what it holds, through fees, and through a market that moves faster than it can follow.',
+            'Its limits - an inventory cap, a loss limit, a volume target, an end time - are checked by the executor as it runs. They are not stop orders on SoDEX: in a fast market, during an outage or while the emergency brake is on, a bot can lose more than its loss limit before it stops.',
+            'When a bot stops it pulls its resting orders and, if you chose so, closes what it holds: resting at the best price first, then at the market within a price limit. A stop by the kill switch (stop all) pulls the orders and closes nothing.',
+            '**No wash trading.** A bot must not be used to trade with yourself or with accounts you control, or to create the appearance of trading activity. You may run one bot per market per account. ValueDesk\'s executor never lets one user\'s bot fill against another user\'s bot: its orders rest (post-only) and its closing orders are priced so they do not reach another bot\'s order.',
+            'Real bots are available only where ValueDesk has switched them on for you (for now: the beta channel at beta.valuedesk.so, for wallets on its list). Practice bots run against the live market and send nothing.',
+          ],
+        },
       ],
     },
     {
@@ -185,6 +195,7 @@ export const COPY_TERMS: LegalDoc = {
             'SoDEX\'s own trading fees and funding apply on top. Fees already charged are not refunded. Paper copies carry no fee.',
             'Because the fee is charged on every copied order, ValueDesk earns more when the leader you copy trades more often and when your copies are larger. ValueDesk\'s leaderboards and statistics do not rank traders by what copying them would earn ValueDesk.',
             'The same fee, at the same rate, applies to every order an algo order sends on the hosted or a self-hosted executor: its slices, levels and other orders, and its take-profit and stop-loss orders.',
+            'A bot\'s orders carry 0.005% (0.5 bp) of their value instead, whatever your volume, and nothing else: a bot order never carries the copy fee or the fee for orders you place by hand as well. Your approval of a higher ceiling covers it.',
             'The fee applies in every mode. In browser mode your copies pay the rate for the volume ValueDesk\'s fee ledger last reported for your wallet; a self-hosted executor cannot read that ledger and therefore charges the rate for volumes under $100,000. The builder a self-hosted executor attaches is one of its settings.',
           ],
         },
@@ -215,6 +226,7 @@ export const COPY_TERMS: LegalDoc = {
             '**Fees.** The builder fee is charged on every copied order, including reductions, closes and stop orders, on top of SoDEX\'s fees and funding. A leader who trades often causes many copied orders, and the fees can outweigh small gains.',
             '**Counter-trading.** A counter-trade takes the side opposite the leader on every position. It gains when the leader\'s positions lose and loses when they gain, by roughly as much, plus fees and funding on both legs of every change. A leader with a good record is therefore a risk to a counter-trade, not a safeguard, and a losing past record does not mean the leader will keep losing. A position that is a hedge for the leader (see "The leader" above) is an unhedged position for you. Your loss is not limited by the leader\'s: a leader can win many times in a row, and your caps and stops apply as for any copy.',
             '**Algo orders.** An algo order carries out exactly the settings you gave it, mistakes included, around the clock and without asking you before each order. Its resting orders can fill in a sudden move; a schedule can buy or sell into a falling or rising market; a conditional or trailing stop can fire on a brief spike. Its plan and fee estimate are estimates at the moment you start it, not a promise of prices or fills.',
+            '**Bots.** A bot trades continuously and can lose money even when it trades as designed: what it holds moves with the market, its fees add up over its volume, and the cost per $1M shown in the app is a figure from past fills, not a promise. Its loss limit is checked while it runs and can be overrun in a fast market.',
             '**Paper copies** and practice runs are simulations. Real copies and orders can fill differently, later or not at all, and they carry fees.',
             '**Legal and tax risk.** Copy trading and perpetual futures may be restricted or forbidden where you live. The law on copy trading is changing, and the service may have to be limited or ended at short notice (section 14). Gains may be taxable.',
           ],

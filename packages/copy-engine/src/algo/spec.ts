@@ -15,6 +15,9 @@ import {
   type AlgoBase,
   type AlgoKind,
   type AlgoSpec,
+  type BotLimits,
+  type MmSpec,
+  BOT_KINDS,
   type ScaleSpec,
   type SweepSpec,
   type BoundAction,
@@ -55,6 +58,9 @@ export const ALGO_LIMITS = {
   trailing: { trailPct: { min: 0.001, max: 0.5 }, chaseMs: { min: 1_000, max: 10 * MIN } },
   basket: { legs: { min: 2, max: 10 }, legUsd: { min: 10, max: 10_000_000 } },
   sweep: { slippageBps: { min: 1, max: 1_000 }, roundMs: { min: 500, max: MIN }, timeoutMs: { min: 5_000, max: DAY } },
+  mm: { orderUsd: { min: 10, max: 100_000 }, maxInventoryUsd: { min: 10, max: 1_000_000 }, offsetTicks: { min: -1, max: 1_000 }, chaseTicks: { min: 1, max: 1_000 }, minRepriceMs: { min: 1_000, max: MIN }, skewTicks: { min: 0, max: 1_000 }, edgeBps: { min: 0, max: 100 } },
+  grid: { levels: { min: 3, max: 60 }, orderUsd: { min: 10, max: 100_000 } },
+  bot: { volumeTargetUsd: { min: 100, max: 1e10 }, maxLossUsd: { min: 1, max: 1e8 } },
   exitPct: { min: 0.001, max: 10 },
   exec: { slippageBps: { min: 1, max: 500 }, offsetTicks: { min: -5, max: 10_000 }, chaseTicks: { min: 1, max: 10_000 }, makerShare: { min: 0.1, max: 0.95 } },
   jitter: { min: 0, max: 0.5 },
@@ -229,8 +235,26 @@ function base(o: Obj, kind: AlgoKind, e: Errors): AlgoBase {
   };
   b.exits = exits(o, b.side, e);
   if (b.exits && b.reduceOnly) e.exits = 'A reduce-only order opens nothing to protect: no exits on it.';
+  // Only when true, so a spec from before bots keeps its canonical text (what was signed).
+  if (BOT_KINDS.includes(kind) || (kind === 'dca' && o.bot === true)) b.bot = true;
+  else if (o.bot === true) e.bot = 'Only a volume maker, a grid or a DCA runs as a bot.';
+  if (b.bot && b.exits) e.exits = 'A bot places no take-profit or stop-loss: set a loss limit instead.';
+  // A volume maker and a grid buy and sell: one limit price would stop one side only. Their range is the bounds (hold or stop).
+  if (BOT_KINDS.includes(kind) && b.limitPrice !== null) e.limitPrice = 'A bot buys and sells: it has no limit price. Use the bounds to hold or stop it.';
+  if (BOT_KINDS.includes(kind) && (b.upper?.then === 'rush' || b.lower?.then === 'rush')) e[b.upper?.then === 'rush' ? 'upper' : 'lower'] = 'A bot has nothing to rush: hold or stop it at a bound.';
   if (b.upper && b.lower && b.upper.price <= b.lower.price) e.upper = 'The upper bound must be above the lower bound.';
   return b;
+}
+
+/** A bot's limits: volume target, loss limit, end time, what happens to what it holds when it stops. */
+function botLimits(o: Obj, e: Errors): BotLimits {
+  const L = ALGO_LIMITS.bot;
+  return {
+    volumeTargetUsd: opt(o, 'volumeTargetUsd', 'Volume target', L.volumeTargetUsd, e),
+    maxLossUsd: opt(o, 'maxLossUsd', 'Loss limit', L.maxLossUsd, e),
+    endAt: time(o, 'endAt', 'End time', e),
+    onStop: oneOf(o, 'onStop', 'When it stops', ['close', 'keep'] as const, 'close', e),
+  };
 }
 
 /* -------------------------------------------------------------- conditions ----- */
@@ -299,6 +323,7 @@ function action(v: unknown, e: Errors, depth: number): ConditionalAction {
     const inner = checkAlgoSpec(o.algo, depth + 1);
     for (const [k, m] of Object.entries(inner.errors)) e[`then.algo.${k}`] = m;
     if (inner.spec?.kind === 'conditional') e.then = 'A conditional cannot start another conditional.';
+    if (inner.spec && BOT_KINDS.includes(inner.spec.kind)) e.then = 'A conditional cannot start a bot: start it from the Bots page.';
     return { type: 'algo', algo: (inner.spec ?? { kind: 'twap' }) as Exclude<AlgoSpec, { kind: 'conditional' }> };
   }
   e.then = 'Choose what happens when the conditions hold.';
@@ -604,6 +629,48 @@ export function checkAlgoSpec(input: unknown, depth = 0): AlgoSpecCheck {
       }
       break;
     }
+    case 'mm': {
+      const L = ALGO_LIMITS.mm;
+      const orderUsd = num(o, 'orderUsd', 'Order size', L.orderUsd, e);
+      const maxInventoryUsd = num(o, 'maxInventoryUsd', 'Inventory cap', L.maxInventoryUsd, e);
+      if (Number.isFinite(orderUsd) && Number.isFinite(maxInventoryUsd) && maxInventoryUsd < orderUsd) e.maxInventoryUsd = 'The inventory cap must hold at least one order.';
+      if (b.reduceOnly) e.reduceOnly = 'A volume maker quotes both sides: it cannot be reduce-only.';
+      spec = {
+        ...b,
+        ...botLimits(o, e),
+        kind,
+        side: 'buy',
+        orderUsd,
+        maxInventoryUsd,
+        offsetTicks: o.offsetTicks === undefined ? 0 : int(o, 'offsetTicks', 'Distance from the best price', L.offsetTicks, e),
+        chaseTicks: o.chaseTicks === undefined ? 2 : int(o, 'chaseTicks', 'Re-price distance', L.chaseTicks, e),
+        minRepriceMs: o.minRepriceMs === undefined ? 3_000 : int(o, 'minRepriceMs', 'Re-price pause', L.minRepriceMs, e),
+        skewTicks: o.skewTicks === undefined ? 3 : int(o, 'skewTicks', 'Inventory skew', L.skewTicks, e),
+      };
+      // Only when above 0, so a spec without it keeps its canonical text.
+      if (o.edgeBps !== undefined && o.edgeBps !== null && Number(o.edgeBps) !== 0) (spec as MmSpec).edgeBps = num(o, 'edgeBps', 'Distance from the mid', L.edgeBps, e);
+      break;
+    }
+    case 'grid': {
+      const L = ALGO_LIMITS.grid;
+      const low = price(o, 'low', 'Lowest price', e);
+      const high = price(o, 'high', 'Highest price', e);
+      if (Number.isFinite(low) && Number.isFinite(high) && high <= low) e.high = 'The highest price must be above the lowest.';
+      if (b.reduceOnly) e.reduceOnly = 'A grid buys and sells: it cannot be reduce-only.';
+      spec = {
+        ...b,
+        ...botLimits(o, e),
+        kind,
+        side: 'buy',
+        low,
+        high,
+        levels: int(o, 'levels', 'Levels', L.levels, e),
+        orderUsd: num(o, 'orderUsd', 'Order size', L.orderUsd, e),
+        spacing: oneOf(o, 'spacing', 'Spacing', ['linear', 'geometric'] as const, 'geometric', e),
+        outOfRange: oneOf(o, 'outOfRange', 'Out of the range', ['wait', 'stop'] as const, 'wait', e),
+      };
+      break;
+    }
     case 'bracket': {
       const entry = oneOf(o, 'entry', 'Entry', ['market', 'limit'] as const, 'market', e);
       if (!b.exits) e.exits = 'A bracket needs a take-profit, a stop-loss, or both.';
@@ -651,6 +718,8 @@ export function algoQuantity(s: AlgoSpec): number | null {
   switch (s.kind) {
     case 'dca':
     case 'basket':
+    case 'mm':
+    case 'grid':
       return null;
     case 'twap':
       return s.closeShare !== null ? null : Number(s.quantity);
@@ -692,4 +761,9 @@ export const ALGO_NAMES: Readonly<Record<AlgoKind, string>> = {
   basket: 'Basket',
   bracket: 'Bracket',
   sweep: 'Fill fast',
+  mm: 'Volume maker',
+  grid: 'Grid',
 };
+
+/** Started from the Bots page: keeps a bot book and carries the bot builder fee (policy.ts BOT_FEE). */
+export const isBotSpec = (s: AlgoSpec): boolean => s.bot === true;

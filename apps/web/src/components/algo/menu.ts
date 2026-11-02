@@ -5,7 +5,8 @@
  */
 import type { AlgoKind } from '@copy-engine';
 
-export type UiKind = AlgoKind | 'chasetwap';
+/** Every kind but the bots' (volume maker, grid): those start from the Bots page, never the ticket. */
+export type UiKind = Exclude<AlgoKind, 'mm' | 'grid'> | 'chasetwap';
 
 export interface AlgoMenuItem {
   id: UiKind;

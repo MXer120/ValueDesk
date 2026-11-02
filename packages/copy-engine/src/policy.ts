@@ -33,8 +33,10 @@
  * '.3': the United Kingdom and Canada excluded, sanctioned wallets screened by the executor, the domain www.valuedesk.so.
  * 2026-10-28: security incidents and the emergency brake, a hacked executor, rate limits, software errors named,
  * the follower's duties to report errors and limit what is at stake, the liability clause rewritten (BGB §§ 307-309).
+ * 2026-11-02: bots (the Bots page) - what they do, that they can lose, no wash trading, no fills between different
+ * users' bots, and their 0.5 bp fee in place of the normal one (owner, 2026-11-02).
  */
-export const COPY_TERMS_VERSION = '2026-10-28';
+export const COPY_TERMS_VERSION = '2026-11-02';
 
 /** US and its territories (US persons). */
 export const US_REGIONS: readonly string[] = ['US', 'PR', 'VI', 'GU', 'AS', 'MP', 'UM'];
@@ -203,6 +205,14 @@ export function copyFeeFor(volumeUsd: number | null | undefined, ladder: readonl
   for (const step of ladder) if (volumeUsd >= step.fromUsd) fee = step.fee;
   return fee;
 }
+
+/**
+ * THE BOT FEE (owner, 2026-11-02: "Builder fee needs to be low - probably 0.5bps"): every order of a bot
+ * (the Bots page: volume maker, grid, DCA bot) carries 5 tenths of a bp, whatever the volume - not the copy
+ * ladder. SoDEX charges each order the fee it names, up to the follower's approved ceiling, so the copy
+ * approval (COPY_FEE_MAX) covers it and a follower approves nothing new.
+ */
+export const BOT_FEE = 5;
 
 /** Tenths of a bp -> '0.025%'. */
 export const feePercent = (tenthsBps: number): string => `${(tenthsBps / 1000).toFixed(tenthsBps % 10 === 0 ? 2 : 3)}%`;

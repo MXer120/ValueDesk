@@ -62,6 +62,8 @@ import { checkSizes, coins, maxWords, minWords, money } from './sizes.ts';
 import type { AlgoSink, ChildRequest, ChildResult, StopRequest } from './sink.ts';
 import { ALGO_NAMES, algoClosesOnly, algoQuantity, algoSymbols, opensPosition, parseAlgoSpec } from './spec.ts';
 import type { AlgoStore } from './store.ts';
+import type { AlgoUpdatePatch } from '../api.ts';
+import { bookFill, bookGross, bookInventory, bookNet, bookVolume, costPerMillion, emptyBook, gridAfterFill, gridPrices, gridQty, gridStart, mmQuotes, sampleBook, type GridSide } from './bots.ts';
 import {
   FINAL_STATUSES,
   SLIP_FROM_NAMES,
@@ -71,6 +73,7 @@ import {
   type AlgoSpec,
   type AlgoStatus,
   type AlgoView,
+  type BotView,
   type ChildOrder,
   type ChildTif,
   type Condition,
@@ -238,6 +241,31 @@ const EXITS_MAX_REFUSALS = 5;
 
 /** What update() may change on a running algo. */
 const UPDATABLE: ReadonlySet<string> = new Set(['limitPrice', 'upper', 'lower', 'maxSpreadBps', 'label', 'quantity']);
+/** ...and on a running bot (its market, range and levels are what it is: a different one is a new bot). */
+const BOT_UPDATABLE: Readonly<Record<'mm' | 'grid', ReadonlySet<string>>> = {
+  mm: new Set(['label', 'maxSpreadBps', 'upper', 'lower', 'orderUsd', 'maxInventoryUsd', 'offsetTicks', 'chaseTicks', 'minRepriceMs', 'skewTicks', 'edgeBps', 'volumeTargetUsd', 'maxLossUsd', 'endAt', 'onStop']),
+  grid: new Set(['label', 'maxSpreadBps', 'upper', 'lower', 'orderUsd', 'volumeTargetUsd', 'maxLossUsd', 'endAt', 'onStop', 'outOfRange']),
+};
+/** A bot closing what it holds rests at the touch this long before it takes... */
+const BOT_CLOSE_REST_MS = 60_000;
+/** ...and then takes with at most this slippage. */
+const BOT_CLOSE_SLIP_BPS = 30;
+/** A grid level SoDEX refused (a post-only that would take) is tried again no sooner than this. */
+const GRID_RETRY_MS = 3_000;
+
+/** A grid child's level (0-based, from its tag 'grid 3/10'), or -1. */
+const gridLevelOf = (c: Pick<ChildOrder, 'tag'>): number => {
+  const x = /^grid (\d+)\//.exec(c.tag);
+  return x ? Number(x[1]) - 1 : -1;
+};
+
+/** A bot that is stopping: how it ends once what it holds is closed. */
+interface BotClosing {
+  status: AlgoStatus;
+  reason: string;
+  at: number;
+  rejects?: number;
+}
 
 const dec = (n: number): string => canonicalDecimal(numberToPlainString(Number(n.toPrecision(12))));
 
@@ -667,11 +695,30 @@ export class AlgoRuntime {
       return a;
     }
     for (const c of this.linkedOf(a)) if (!FINAL_STATUSES.has(c.status)) await this.cancel(c.id, o);
-    await this.end(a, 'cancelled', 'Cancelled by you.');
+    // A bot set to close what it holds stops by closing it first (the next steps); a second stop, or the kill switch, ends it at once.
+    if (!o.pullAll && !a.k.closing && (await this.stopBot(a, 'cancelled', 'Stopped by you.'))) return a;
+    await this.end(a, 'cancelled', a.k.closing ? 'Stopped by you; what it still holds is left as it is.' : a.spec.bot ? 'Stopped by you.' : 'Cancelled by you.');
     if (o.pullAll) {
       for (const c of this.linkedOf(a)) if (this.hasLeftovers(c)) await this.pullLeftovers(c);
       await this.pullLeftovers(a);
     }
+    return a;
+  }
+
+  /**
+   * Take an ended algo off the wallet's list (the Bots page's Delete). Nothing is deleted: the record and its
+   * log stay in the store (no data loss), `k.archived` only hides it from list().
+   */
+  async archive(id: string): Promise<AlgoRecord> {
+    const a = this.need(id);
+    if (!FINAL_STATUSES.has(a.status)) throw new Error('Stop it first: only an ended bot or algo can be removed from the list.');
+    if (this.hasLeftovers(a)) throw new Error('It still has orders or exits on SoDEX: cancel those first.');
+    if (a.k.archived) return a;
+    a.k.archived = true;
+    a.updatedAt = Date.now();
+    await this.save(a);
+    await this.event(a, 'info', 'Removed from your list by you (kept on record).');
+    this.host.onChange?.(a.id);
     return a;
   }
 
@@ -734,12 +781,19 @@ export class AlgoRuntime {
    * guard and label any time; its size only upward of what has filled (and,
    * for a schedule, from the next slice on).
    */
-  async update(id: string, patch: Partial<Pick<AlgoSpec, 'limitPrice' | 'upper' | 'lower' | 'maxSpreadBps' | 'label'>> & { quantity?: string }): Promise<AlgoRecord> {
+  async update(id: string, patch: AlgoUpdatePatch & Partial<Pick<AlgoSpec, 'upper' | 'lower'>>): Promise<AlgoRecord> {
     const a = this.need(id);
     if (FINAL_STATUSES.has(a.status)) throw new Error('This algo has ended.');
     // Only these: what the algo is (its kind, market, side, practice or live, reduce-only...) was signed and checked when it started.
-    const other = Object.keys(patch).filter((k) => !UPDATABLE.has(k) && (patch as Record<string, unknown>)[k] !== undefined);
-    if (other.length) throw new Error(`Only the limit price, bounds, spread guard, label and size of a running algo can be changed (not ${other.join(', ')}).`);
+    const allowed = a.spec.kind === 'mm' || a.spec.kind === 'grid' ? BOT_UPDATABLE[a.spec.kind] : UPDATABLE;
+    const other = Object.keys(patch).filter((k) => !allowed.has(k) && (patch as Record<string, unknown>)[k] !== undefined);
+    if (other.length) {
+      throw new Error(a.spec.kind === 'grid'
+        ? `A grid's market, range and levels are what it is: start a new bot for others (not ${other.join(', ')}).`
+        : a.spec.kind === 'mm'
+          ? `A volume maker's market is what it is: start a new bot for another (not ${other.join(', ')}).`
+          : `Only the limit price, bounds, spread guard, label and size of a running algo can be changed (not ${other.join(', ')}).`);
+    }
     const next = { ...a.spec, ...patch } as Record<string, unknown>;
     const before = this.targetOf(a);
     if (patch.quantity !== undefined) {
@@ -753,6 +807,12 @@ export class AlgoRuntime {
     }
     const spec = parseAlgoSpec(next);
     a.spec = spec;
+    // A bot's new sizes and distances apply at once: what rests is pulled, and placed again as they say.
+    if ((spec.kind === 'mm' || spec.kind === 'grid') && ['orderUsd', 'offsetTicks', 'skewTicks', 'maxInventoryUsd', 'edgeBps'].some((k) => k in patch)) {
+      const m = this.markets.get(spec.symbol);
+      const resting = this.live(a).filter((c) => c.tif !== 'ioc' && !c.cancelling);
+      if (m && resting.length) await this.cancelChildren(a, m, resting);
+    }
     const after = this.targetOf(a);
     if (patch.quantity !== undefined && before !== null && after !== null && a.startedAt !== null && (spec.kind === 'twap' || spec.kind === 'vwap')) {
       // A schedule spreads the change over what is still to come (from the next slice on): nothing extra is due at once.
@@ -823,6 +883,7 @@ export class AlgoRuntime {
     const marketVwap = a.marketQty > 0 ? a.marketValue / a.marketQty : null;
     let progress = target ? Math.min(1, a.filled / target) : 0;
     if (s.kind === 'dca') progress = Math.min(1, (Number(a.k.done ?? 0) + Number(a.k.skipped ?? 0)) / s.orders);
+    if ((s.kind === 'mm' || s.kind === 'grid') && a.book) progress = s.volumeTargetUsd ? Math.min(1, bookVolume(a.book) / s.volumeTargetUsd) : 0;
     // A basket's progress is its legs' filled value against what each leg is to trade.
     const legs = this.legsOf(a);
     if (s.kind === 'basket') {
@@ -852,6 +913,7 @@ export class AlgoRuntime {
     else if ((s.kind === 'chase' || s.kind === 'sweep') && a.startedAt !== null && s.timeoutMs) endsAt = a.startedAt + s.timeoutMs;
     else if (s.kind === 'swarm') nextAt = (a.k.waveAt as number | undefined) ?? null;
     else if (s.kind === 'conditional') endsAt = s.expiresAt;
+    else if (s.kind === 'mm' || s.kind === 'grid') endsAt = s.endAt;
     if (s.startAt && a.status === 'scheduled') nextAt = s.startAt;
     const live = a.children.filter((c) => LIVE.has(c.state));
     const working = live.length
@@ -876,6 +938,31 @@ export class AlgoRuntime {
         ? (a.exitOrders ?? []).filter((x) => LIVE.has(x.state) || x.filled > 0).map((x) => ({ kind: x.exit ?? 'sl', price: x.price, quantity: x.quantity, filled: x.filled, live: LIVE.has(x.state) }))
         : null,
       legs: s.kind === 'basket' ? legs.map((c) => ({ id: c.id, symbol: c.spec.symbol, side: c.spec.side, status: c.status, filledValue: c.filledValue, avgPrice: c.filled > 0 ? c.filledValue / c.filled : null })) : null,
+      bot: s.bot ? this.botView(a) : null,
+    };
+  }
+
+  /** A bot's figures at the mark now (the mid, else its average fill, while no mark is known). */
+  private botView(a: AlgoRecord): BotView {
+    const b = a.book ?? emptyBook();
+    const q = this.market.quote(a.spec.symbol);
+    const mark = this.market.mark(a.spec.symbol)?.mark ?? (q ? mid(q) : a.filled > 0 ? a.filledValue / a.filled : null);
+    const px = mark ?? 0;
+    const volume = bookVolume(b);
+    return {
+      volume,
+      inventory: bookInventory(b),
+      inventoryUsd: bookInventory(b) * px,
+      grossPnl: bookGross(b, px),
+      netPnl: bookNet(b, px),
+      tradeFees: b.tradeFees,
+      builderFees: b.builderFees,
+      makerShare: volume > 0 ? b.makerValue / volume : 0,
+      costPerMillion: costPerMillion(b, px),
+      fills: b.fills,
+      mark,
+      orders: this.live(a).filter((c) => c.tif !== 'ioc' && !c.cancelling).map((c) => ({ side: c.side, price: c.price, quantity: c.quantity - c.filled, tag: c.tag })),
+      closing: !!a.k.closing,
     };
   }
 
@@ -1006,6 +1093,12 @@ export class AlgoRuntime {
     }
     // Back to running only after a step that raised no hold of its own (no flapping, no log line per tick).
     this.heldNow.delete(a.id);
+    if (s.bot && a.book && sampleBook(a.book, mk, now)) this.dirty.add(a.id);
+    if (a.k.closing) {
+      await this.stepBotClose(a, m, q, mk, now);
+      if (!this.heldNow.has(a.id) && !FINAL_STATUSES.has(a.status)) await this.run(a);
+      return;
+    }
     await this.stepKind(a, m, q, mk, now);
     if (!this.heldNow.has(a.id) && !FINAL_STATUSES.has(a.status)) await this.run(a);
     if (!FINAL_STATUSES.has(a.status)) await this.syncExits(a, m, false);
@@ -1039,6 +1132,10 @@ export class AlgoRuntime {
         return this.stepBracket(a, m, q, mk);
       case 'sweep':
         return this.stepSweep(a, m, now);
+      case 'mm':
+        return this.stepMm(a, m, q, mk, now);
+      case 'grid':
+        return this.stepGrid(a, m, q, mk, now);
     }
   }
 
@@ -1221,12 +1318,17 @@ export class AlgoRuntime {
       if (!profile) await this.event(a, 'info', 'No volume history could be read: the schedule is even (a TWAP).');
     } else if (s.kind === 'chase') {
       a.k.startRef = q ? (s.side === 'buy' ? q.bid : q.ask) : null;
+    } else if (s.kind === 'grid') {
+      const prices = gridPrices(s, m.tickSize);
+      a.k.gp = prices;
+      a.k.gs = gridStart(prices, a.arrival ?? (s.low + s.high) / 2);
     } else if (s.kind === 'swarm') {
       a.k.clips = swarmClips(s, m, a.seed);
       a.k.next = 0;
       a.k.retriesLeft = s.retries;
       a.k.waveAt = now;
     }
+    if (s.bot) a.book ??= emptyBook();
     if (FINAL_STATUSES.has(a.status)) return false;
     if (a.status === 'paused') {
       // Paused while it was starting: it is set up, and resumes as running.
@@ -1368,6 +1470,215 @@ export class AlgoRuntime {
    * above the best bid): SoDEX's book then shows the order itself, and pricing
    * off that touch would chase its own price.
    */
+  /* ------------------------------------------------------------- the bots ----- */
+
+  /**
+   * A bot reached one of its limits, or was stopped: with `onStop: 'close'` and something held, it pulls its
+   * quotes and closes that first (stepBotClose). Returns whether it is now closing (false: end it here).
+   */
+  private async stopBot(a: AlgoRecord, status: AlgoStatus, reason: string): Promise<boolean> {
+    const s = a.spec;
+    if (!(s.kind === 'mm' || s.kind === 'grid') || s.onStop !== 'close' || !a.book) return false;
+    const m = this.markets.get(s.symbol);
+    const held = Math.abs(bookInventory(a.book));
+    const px = this.market.mark(s.symbol)?.mark ?? null;
+    if (!m || held < Number(m.stepSize) || (px !== null && held < minChildQty(m, px) - 1e-12)) return false;
+    const closing: BotClosing = { status, reason, at: Date.now() };
+    a.k.closing = closing;
+    await this.pullResting(a);
+    await this.save(a);
+    await this.event(a, 'info', `${reason} Closing what it holds: ${dec(held)} ${m.base}.`);
+    this.host.onChange?.(a.id);
+    return true;
+  }
+
+  /** A bot's limits, checked every step: true when it stopped (or began closing). */
+  private async botLimitsHit(a: AlgoRecord, mk: number, now: number): Promise<boolean> {
+    const s = a.spec as Extract<AlgoSpec, { kind: 'mm' | 'grid' }>;
+    const b = (a.book ??= emptyBook());
+    let hit: { status: AlgoStatus; reason: string } | null = null;
+    if (s.volumeTargetUsd !== null && bookVolume(b) >= s.volumeTargetUsd) hit = { status: 'done', reason: `Reached its volume target of ${money(s.volumeTargetUsd)}.` };
+    else if (s.maxLossUsd !== null && bookNet(b, mk) <= -s.maxLossUsd) hit = { status: 'expired', reason: `Stopped at its loss limit: net PnL ${money(bookNet(b, mk))} (limit -${money(s.maxLossUsd)}).` };
+    else if (s.endAt !== null && now >= s.endAt) hit = { status: 'expired', reason: 'Its end time came.' };
+    if (!hit) return false;
+    sampleBook(b, mk, now, true);
+    if (!(await this.stopBot(a, hit.status, hit.reason))) await this.end(a, hit.status, hit.reason);
+    return true;
+  }
+
+  /**
+   * Closing what a stopping bot holds (its own fills, never more: reduce-only): post-only at the touch,
+   * re-priced as it moves, for BOT_CLOSE_REST_MS; then a taker within BOT_CLOSE_SLIP_BPS. It ends with the
+   * status it was stopping for once what is left is under SoDEX's minimum, or once SoDEX refused the close
+   * three times (the position is not there any more: closed outside the bot).
+   */
+  private async stepBotClose(a: AlgoRecord, m: MarketInfo, q: Quote, mk: number, now: number): Promise<void> {
+    const closing = a.k.closing as BotClosing;
+    const b = (a.book ??= emptyBook());
+    const inv = bookInventory(b);
+    const live = this.live(a);
+    const stray = live.filter((c) => !c.tag.startsWith('close') && !c.cancelling);
+    if (stray.length) await this.cancelChildren(a, m, stray);
+    const qty = floorStep(Math.abs(inv), m);
+    const rejects = closing.rejects ?? 0;
+    if (!live.length && (qty < minChildQty(m, mk) - 1e-12 || rejects >= 3)) {
+      const left = qty >= Number(m.stepSize) ? ` ${dec(qty)} ${m.base} is left${rejects >= 3 ? ' (SoDEX shows nothing more to close)' : ' (under SoDEX\'s minimum order)'}.` : '';
+      delete a.k.closing;
+      sampleBook(b, mk, now, true);
+      return this.end(a, closing.status, `${closing.reason}${left}`);
+    }
+    if (live.length && !live.some((c) => c.tag.startsWith('close'))) return;
+    const side: Side = inv > 0 ? 'sell' : 'buy';
+    const taking = now - closing.at >= BOT_CLOSE_REST_MS;
+    const mine = live.find((c) => c.tag.startsWith('close'));
+    if (mine) {
+      if (mine.state !== 'open' || mine.cancelling || mine.tif === 'ioc') return;
+      const want = makerPrice(side, q, 0, null, m, null);
+      if (taking || (Math.abs(mine.price - want) / Number(m.tickSize) >= 1 && !this.atOwnTouch(side, mine.price, q) && now - mine.placedAt >= 2_000)) await this.cancelChildren(a, m, [mine]);
+      return;
+    }
+    let price = taking ? takerPrice(side, q, BOT_CLOSE_SLIP_BPS, m, mk, null) : makerPrice(side, q, 0, null, m, null);
+    if (price === null) return;
+    let take = taking;
+    if (take) {
+      // Never into another user's bot (terms 2026-11-02): the taker stops one tick short of their resting orders; when
+      // that leaves nothing to take at the touch, it rests at the touch instead and tries again.
+      const wall = this.otherBotWall(a, m.name, side);
+      if (wall !== null) {
+        const tick = Number(m.tickSize);
+        price = side === 'sell' ? Math.max(price, wall + tick) : Math.min(price, wall - tick);
+        if (side === 'sell' ? price > q.bid : price < q.ask) {
+          take = false;
+          price = makerPrice(side, q, 0, null, m, null);
+        }
+      }
+    }
+    const before = a.rejects;
+    await this.send(a, m, [{ side, price, quantity: qty, tif: take ? 'ioc' : 'gtx', tag: take ? 'close (take)' : 'close', reduceOnly: true }]);
+    if (a.rejects > before && a.k.closing) (a.k.closing as BotClosing).rejects = rejects + 1;
+  }
+
+  /**
+   * The nearest price another user's bot rests at, on the side a taker `side` of this bot would fill against (the
+   * highest bid for a sell, the lowest ask for a buy), live bots against live, practice against practice; null: none.
+   */
+  otherBotWall(a: AlgoRecord, symbol: string, side: Side): number | null {
+    let wall: number | null = null;
+    for (const x of this.algos.values()) {
+      if (x.owner === a.owner || !x.spec.bot || x.spec.symbol !== symbol || x.spec.paper !== a.spec.paper || FINAL_STATUSES.has(x.status)) continue;
+      for (const c of x.children) {
+        if (!LIVE.has(c.state) || c.tif === 'ioc' || c.side === side) continue;
+        if (wall === null || (side === 'sell' ? c.price > wall : c.price < wall)) wall = c.price;
+      }
+    }
+    return wall;
+  }
+
+  /** Volume maker: one post-only bid and one post-only ask where mmQuotes puts them (bots.ts). */
+  private async stepMm(a: AlgoRecord, m: MarketInfo, q: Quote, mk: number, now: number): Promise<void> {
+    const s = a.spec as Extract<AlgoSpec, { kind: 'mm' }>;
+    if (await this.botLimitsHit(a, mk, now)) return;
+    if (s.maxSpreadBps !== null && spreadBps(q) > s.maxSpreadBps) {
+      await this.pullResting(a);
+      return this.hold(a, `Held: the spread (${spreadBps(q).toFixed(1)} bp) is wider than your ${s.maxSpreadBps} bp.`);
+    }
+    const want = mmQuotes(s, q, m, bookInventory(a.book!), mk);
+    const tick = Number(m.tickSize);
+    const live = this.live(a);
+    const send: Array<{ side: Side; price: number; quantity: number; tif: ChildTif; tag: string }> = [];
+    const pull: ChildOrder[] = [];
+    for (const side of ['buy', 'sell'] as const) {
+      const w = want.find((x) => x.side === side);
+      const mine = live.filter((c) => c.side === side);
+      const standing = mine.filter((c) => !c.cancelling);
+      if (!w) {
+        pull.push(...standing);
+        continue;
+      }
+      if (standing.length) {
+        const c = standing[0]!;
+        pull.push(...standing.slice(1));
+        if (c.state !== 'open' || c.tif === 'ioc') continue;
+        const off = Math.abs(c.price - w.price) / tick;
+        // In front of where it should be (the skew wants it further back), or behind a touch that moved away.
+        const ahead = side === 'buy' ? c.price > w.price : c.price < w.price;
+        if (now - c.placedAt >= s.minRepriceMs && off >= s.chaseTicks - 1e-9 && (ahead || !this.atOwnTouch(side, c.price, q))) pull.push(c);
+        continue;
+      }
+      // One quote per side: none while the last one's cancel is not confirmed (it may still fill).
+      if (mine.length) continue;
+      // A side SoDEX refused waits (3 s, doubling to a minute) instead of going out again every step.
+      if (Number((a.k.mretry as Record<string, number> | undefined)?.[side] ?? 0) > now) continue;
+      send.push({ side, price: w.price, quantity: w.quantity, tif: 'gtx', tag: side === 'buy' ? 'bid' : 'ask' });
+    }
+    if (pull.length) await this.cancelChildren(a, m, pull);
+    if (!send.length || this.stopped(a)) return;
+    const sent = await this.send(a, m, send);
+    const back = { ...((a.k.mback as Record<string, number> | undefined) ?? {}) };
+    const at = { ...((a.k.mretry as Record<string, number> | undefined) ?? {}) };
+    for (const c of sent) {
+      if (c.state === 'done' && c.filled <= 1e-12) {
+        back[c.side] = Math.min(60_000, (back[c.side] ?? GRID_RETRY_MS / 2) * 2);
+        at[c.side] = Date.now() + back[c.side]!;
+      } else delete back[c.side];
+    }
+    a.k.mback = back;
+    a.k.mretry = at;
+  }
+
+  /** Grid: every level with a side rests there post-only; a fill moves the gap (onChildDone, bots.ts gridAfterFill). */
+  private async stepGrid(a: AlgoRecord, m: MarketInfo, q: Quote, mk: number, now: number): Promise<void> {
+    const s = a.spec as Extract<AlgoSpec, { kind: 'grid' }>;
+    if (await this.botLimitsHit(a, mk, now)) return;
+    const prices = a.k.gp as number[];
+    const sides = a.k.gs as GridSide[];
+    if ((mk < s.low || mk > s.high) && s.outOfRange === 'stop') {
+      const why = `The price (${mk}) left the range ${s.low}-${s.high}.`;
+      if (!(await this.stopBot(a, 'expired', why))) await this.end(a, 'expired', why);
+      return;
+    }
+    if (s.maxSpreadBps !== null && spreadBps(q) > s.maxSpreadBps) return this.hold(a, `Held: the spread (${spreadBps(q).toFixed(1)} bp) is wider than your ${s.maxSpreadBps} bp.`);
+    const n = prices.length;
+    const byLevel = new Map<number, ChildOrder[]>();
+    for (const c of this.live(a)) {
+      const i = gridLevelOf(c);
+      if (i >= 0) byLevel.set(i, [...(byLevel.get(i) ?? []), c]);
+    }
+    const retry = (a.k.gretry as Record<string, number> | undefined) ?? {};
+    const pull: ChildOrder[] = [];
+    const send: Array<{ side: Side; price: number; quantity: number; tif: ChildTif; tag: string }> = [];
+    for (let i = 0; i < n; i++) {
+      const want = sides[i] ?? null;
+      const here = byLevel.get(i) ?? [];
+      // A level whose side changed (a fill moved the gap onto it) loses what rests there on the old side.
+      pull.push(...here.filter((c) => !c.cancelling && c.side !== want));
+      if (!want || here.length) continue;
+      if ((retry[i] ?? 0) > now) continue;
+      const p = prices[i]!;
+      // Post-only: a level the price is at or through waits until it would rest (SoDEX would refuse it).
+      if (want === 'buy' ? p >= q.ask : p <= q.bid) continue;
+      send.push({ side: want, price: p, quantity: gridQty(s.orderUsd, p, m), tif: 'gtx', tag: `grid ${i + 1}/${n}` });
+    }
+    if (pull.length) await this.cancelChildren(a, m, pull);
+    // One signed batch a step, at most 50 orders (the rest the next step).
+    if (!send.length || this.stopped(a)) return;
+    const sent = await this.send(a, m, send.slice(0, 50));
+    // A level SoDEX refused in its answer waits before it goes out again - 3 s, doubling to a minute while it keeps
+    // being refused - so one level it will not take never runs the whole grid into its refusal limit.
+    const back = { ...((a.k.gback as Record<string, number> | undefined) ?? {}) };
+    const at = { ...((a.k.gretry as Record<string, number> | undefined) ?? {}) };
+    for (const c of sent) {
+      const i = gridLevelOf(c);
+      if (i < 0) continue;
+      if (c.state === 'done' && c.filled <= 1e-12) {
+        back[i] = Math.min(60_000, (back[i] ?? GRID_RETRY_MS / 2) * 2);
+        at[i] = Date.now() + back[i]!;
+      } else delete back[i];
+    }
+    a.k.gback = back;
+    a.k.gretry = at;
+  }
+
   private atOwnTouch(side: Side, price: number, q: Quote): boolean {
     return side === 'buy' ? price >= q.bid : price <= q.ask;
   }
@@ -2588,6 +2899,8 @@ export class AlgoRuntime {
         void this.event(a, 'error', `SoDEX rejected ${c.tag}${u.reason ? `: ${u.reason}` : ''}.`, c);
         const lim = limitRefusal(u.reason, a.spec.symbol);
         if (lim) void this.onLimit(a, lim);
+        // A grid level refused (a post-only the price reached meanwhile) goes out again after a moment, not on the next step.
+        if (a.spec.kind === 'grid' && gridLevelOf(c) >= 0) a.k.gretry = { ...((a.k.gretry as Record<string, number> | undefined) ?? {}), [gridLevelOf(c)]: Date.now() + GRID_RETRY_MS };
       }
       this.onChildDone(a, c);
     } else if (c.state === 'sending' || c.state === 'unknown') c.state = 'open';
@@ -2629,6 +2942,10 @@ export class AlgoRuntime {
     const m = this.markets.get(a.spec.symbol);
     const rate = (isMaker ? (m?.makerFee ?? (m?.takerFee ?? 0.0004) / 2) : (m?.takerFee ?? 0.0004)) + (this.host.builderRate?.(a) ?? 0);
     a.fees += dv * rate;
+    if (a.spec.bot) {
+      a.book ??= emptyBook();
+      bookFill(a.book, c.side, dq, dv, isMaker, isMaker ? (m?.makerFee ?? (m?.takerFee ?? 0.0004) / 2) : (m?.takerFee ?? 0.0004), this.host.builderRate?.(a) ?? 0);
+    }
     if (a.k.consecRejects) a.k.consecRejects = 0;
     void this.event(a, 'fill', `Filled ${dec(dq)} @ ${(dv / dq).toPrecision(8).replace(/\.?0+$/, '')}${isMaker ? ' (maker)' : ''}.`, { ...c, quantity: dq, price: dv / dq });
   }
@@ -3016,6 +3333,15 @@ export class AlgoRuntime {
 
   private onChildDone(a: AlgoRecord, c: ChildOrder): void {
     if (a.spec.kind === 'dca') return this.dcaChildDone(a, c);
+    if (a.spec.kind === 'grid') {
+      const i = gridLevelOf(c);
+      const sides = a.k.gs as GridSide[] | undefined;
+      if (i < 0 || !sides) return;
+      // Filled whole: the level becomes the gap and the next one over takes the other side. Cut short (a pause, a re-size,
+      // a refusal: onOrderUpdate holds it back a moment) the level keeps its side and goes out again.
+      if (c.filled >= c.quantity - 1e-12 && sides[i] === c.side) a.k.gs = gridAfterFill(sides, i, c.side);
+      return;
+    }
     if (a.spec.kind !== 'iceberg') return;
     if (a.k.reprice === c.clOrdID) {
       // A clip cancelled to be re-priced shows again with what it had left once SoDEX confirmed the cancel (a fill may have landed meanwhile).

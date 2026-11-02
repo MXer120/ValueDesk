@@ -433,7 +433,7 @@ test('targets: --target takes self, hosted or browser; self can do all but close
 test('targets: a scenario that restarts the executor declares it, and is skipped (with why) exactly where the target cannot', () => {
   const restarts = CATALOGUE.filter((s) => s.run.toString().includes('t.restart('));
   const fees = CATALOGUE.filter((s) => s.section === 'fee').map((s) => s.id);
-  assert.deepEqual(restarts.map((s) => s.id).sort(), ['copy.restart', 'copym.restart-close', 'iceberg.restart', 'scale.restart', 'twap.restart', ...fees].sort(), 'the fee scenarios restart it so it forgets the volume it holds');
+  assert.deepEqual(restarts.map((s) => s.id).sort(), ['bot.restart', 'copy.restart', 'copym.restart-close', 'iceberg.restart', 'scale.restart', 'twap.restart', ...fees].sort(), 'the fee scenarios restart it so it forgets the volume it holds');
   for (const s of CATALOGUE) assert.equal(s.needs?.includes('restart') ?? false, restarts.includes(s), `${s.id} declares needs: ['restart'] exactly when it restarts`);
   const tabs = CATALOGUE.filter((s) => s.run.toString().includes('t.closeTab('));
   assert.deepEqual(tabs.map((s) => s.id).sort(), ['copym.tab-close', 'twap.tab-close']);

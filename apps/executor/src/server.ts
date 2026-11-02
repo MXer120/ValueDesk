@@ -192,6 +192,8 @@ export function createExecutorServer(svc: ExecutorService, cfg: ExecutorConfig, 
   const contextOf = (req: IncomingMessage): RequestContext => ({
     viewerCountry: cfg.trustEdge ? normaliseCountry(String(req.headers['x-viewer-country'] ?? '')) : null,
     pairingCode: typeof req.headers['x-pairing-code'] === 'string' ? req.headers['x-pairing-code'] : null,
+    // Set only by the site's own proxy (deploy/vercel/api-proxy.cjs, the beta project): a browser cannot send it past the edge.
+    channel: cfg.trustEdge && req.headers['x-vs-channel'] === 'beta' ? 'beta' : 'main',
   });
 
   const cors = (req: IncomingMessage, res: ServerResponse): void => {

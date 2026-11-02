@@ -19,6 +19,7 @@
  *   site-terms    CopyRequest 'accept-site-terms' (ValueDesk's terms)
  *   copy-terms    CopyRequest 'accept-terms'    (the copy terms)
  *   copy-sign-in  CopyRequest 'session'         (signing in to an executor)
+ *   algo          CopyRequest 'algo-start' / 'algo-action' (a practice algo or bot on an executor: start, pause, edit, stop)
  *   copy-key      CopyRequest 'create-key'      (an executor makes the copy key it
  *                                                then asks SoDEX to register: copy/live.ts approveKey)
  * Every transaction, every personal_sign and any other typed data is refused
@@ -30,8 +31,8 @@ import type { BrowserContext, Page } from 'playwright-core';
 import { generatePrivateKey } from 'viem/accounts';
 import { createKeyProvider, type KeyProvider, type ProviderEvent, type TypedDataSeen } from '../live/provider';
 
-export type Signable = 'trading-key' | 'builder' | 'site-terms' | 'copy-terms' | 'copy-sign-in' | 'copy-key';
-export const SIGNABLE: readonly Signable[] = ['trading-key', 'builder', 'site-terms', 'copy-terms', 'copy-sign-in', 'copy-key'];
+export type Signable = 'trading-key' | 'builder' | 'site-terms' | 'copy-terms' | 'copy-sign-in' | 'copy-key' | 'algo';
+export const SIGNABLE: readonly Signable[] = ['trading-key', 'builder', 'site-terms', 'copy-terms', 'copy-sign-in', 'copy-key', 'algo'];
 
 /** Which of the allowed signatures this typed data is, or null. */
 export function signableOf(td: Pick<TypedDataSeen, 'primaryType' | 'message'>): Signable | null {
@@ -43,6 +44,7 @@ export function signableOf(td: Pick<TypedDataSeen, 'primaryType' | 'message'>): 
     if (action === 'accept-terms') return 'copy-terms';
     if (action === 'session') return 'copy-sign-in';
     if (action === 'create-key') return 'copy-key';
+    if (action === 'algo-start' || action === 'algo-action') return 'algo';
   }
   return null;
 }

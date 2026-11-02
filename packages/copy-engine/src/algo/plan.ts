@@ -4,6 +4,7 @@
  * of it. The order ticket draws this; the runtime derives its schedule from
  * the same functions with the same seed.
  */
+import { gridPrices, gridStart } from './bots.ts';
 import type { MarketInfo } from '../types.ts';
 import {
   allocateSteps,
@@ -300,6 +301,27 @@ export function planAlgo(s: AlgoSpec, m: MarketInfo, ctx: AlgoPlanContext): Algo
         const crossing = ladder.filter((l) => (s.side === 'buy' ? l.price >= px : l.price <= px)).length;
         if (crossing) out.warnings.push(s.postOnly ? `${crossing} level${crossing === 1 ? '' : 's'} at or through the market would be refused as post-only.` : `${crossing} level${crossing === 1 ? '' : 's'} at or through the market fill at once.`);
       }
+      break;
+    }
+    case 'mm': {
+      // Open-ended: one bid and one ask at a time, each `orderUsd`.
+      if (px) for (const side of ['buy', 'sell'] as const) out.children.push({ at: start, qty: s.orderUsd / px, price: null, tag: side === 'buy' ? 'bid' : 'ask' });
+      out.endsAt = s.endAt;
+      out.notional = s.volumeTargetUsd;
+      summarise();
+      break;
+    }
+    case 'grid': {
+      const prices = gridPrices(s, m.tickSize);
+      const sides = px ? gridStart(prices, px) : prices.map(() => null);
+      prices.forEach((p, i) => {
+        if (sides[i]) out.children.push({ at: start, qty: s.orderUsd / p, price: p, tag: `grid ${i + 1}/${prices.length}` });
+      });
+      if (prices.length < s.levels) out.warnings.push(`Only ${prices.length} distinct levels fit between these prices on SoDEX's tick.`);
+      if (px && (px < s.low || px > s.high)) out.warnings.push('The price is outside the range: every order rests on one side until it comes back.');
+      out.endsAt = s.endAt;
+      out.notional = s.volumeTargetUsd;
+      summarise();
       break;
     }
     case 'dca': {

@@ -67,6 +67,13 @@ export interface ExecutorConfig {
   /** The API's builder volume route and its internal token (the ledger on another server). */
   builderUrl: string | null;
   builderToken: string | null;
+  /**
+   * EXECUTOR_BETA_URL: the API server's /api/vs/builder/beta (whether a wallet is on the beta list), asked with
+   * the builder token. Unset: derived from EXECUTOR_BUILDER_URL (its /volume as /beta); neither: no wallet is.
+   * Real bots run only from beta.valuedesk.so for listed wallets (owner, 2026-11-02: "Beta only"), plus the
+   * wallets real algos are on for (EXECUTOR_LIVE_ALGOS_WALLETS: the test follower).
+   */
+  betaUrl: string | null;
   localAddress: string | null;
   logLevel: 'debug' | 'info' | 'warn' | 'error';
   /** The executor id requests are signed for; null = the default (hosted: by network; self: its own, kept in its data). */
@@ -114,6 +121,18 @@ function builderUrl(raw: string | undefined): string | null {
     throw new Error('EXECUTOR_BUILDER_URL must be a URL (the API server\'s /api/vs/builder/volume)');
   }
   if (u.protocol !== 'https:' && u.hostname !== '127.0.0.1' && u.hostname !== 'localhost') throw new Error('EXECUTOR_BUILDER_URL must be https (or a loopback address)');
+  return u.toString();
+}
+
+/** EXECUTOR_BETA_URL, else the builder URL's /volume as /beta (same server, same token). */
+export function betaUrlFrom(raw: string | undefined, builderRaw: string | undefined): string | null {
+  if (raw?.trim()) return builderUrl(raw);
+  const b = builderUrl(builderRaw);
+  if (!b) return null;
+  const u = new URL(b);
+  if (!/\/volume$/.test(u.pathname)) return null;
+  u.pathname = u.pathname.replace(/\/volume$/, '/beta');
+  u.search = '';
   return u.toString();
 }
 
@@ -177,6 +196,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ExecutorConfig
     builderDb: env.EXECUTOR_BUILDER_DB?.trim() || null,
     builderUrl: builderUrl(env.EXECUTOR_BUILDER_URL),
     builderToken: env.EXECUTOR_BUILDER_TOKEN?.trim() || null,
+    betaUrl: betaUrlFrom(env.EXECUTOR_BETA_URL, env.EXECUTOR_BUILDER_URL),
     localAddress: env.EXECUTOR_LOCAL_ADDRESS?.trim() || null,
     logLevel: level === 'debug' || level === 'warn' || level === 'error' ? level : 'info',
     executorId,

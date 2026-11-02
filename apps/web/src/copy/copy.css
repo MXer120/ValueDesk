@@ -9,6 +9,10 @@
    ======================================================================== */
 
 .modal.fx.cs-sheet { max-width: 600px; }
+/* On its own (Bots, algos) the sheet scrolls inside the window: on a phone its steps run past the screen (the copy
+   dialog's own body already scrolls, CopyHome.css .cpy-modal). */
+.modal.fx.cs-sheet { max-height: calc(100dvh - 32px); }
+.cs-sheet .modal-body { overflow-y: auto; overscroll-behavior: contain; }
 .cs-sub { margin: 0; color: var(--muted); font-size: var(--fs-sm, var(--fs-xs)); text-align: center; line-height: 1.45; }
 .cs-sheet .cp-seg { align-self: stretch; }
 .cs-sheet .cp-seg > button { flex: 1 1 0; justify-content: center; }

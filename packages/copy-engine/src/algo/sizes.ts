@@ -24,6 +24,7 @@
  *   closes    a position over SoDEX's largest order (a trailing stop or a
  *             conditional close of the whole position) closes in several orders.
  */
+import { gridPrices } from './bots.ts';
 import type { MarketInfo } from '../types.ts';
 import { allocateSteps, floorStep, ladderPrices, maxOrderQty, minChildQty, snapNearest, type VolumeProfile } from './math.ts';
 import { scaleLadder, sliceBounds, swarmClips, twapSchedule, vwapSchedule } from './plan.ts';
@@ -236,6 +237,21 @@ export function checkSizes(s: AlgoSpec, m: MarketInfo, ctx: SizeContext): SizeCh
       if (total < minChildQty(m, px) - 1e-12) out.errors.push(`The whole order is about ${money(total * px)}, under ${minUsdWords}. Raise the size to at least ${moneyUp(minChildQty(m, px) * px)}.`);
       else out.errors.push(...scheduleCheck({ unit: 'slice', count: s.slices, counts: { min: ALGO_LIMITS.vwap.slices.min, max: Math.min(ALGO_LIMITS.vwap.slices.max, most) }, sizes, total, m }));
       scheduleNotes(s, out);
+      break;
+    }
+    case 'mm': {
+      if (!px) break;
+      out.errors.push(...oneOrder(floorStep(s.orderUsd / px, m), px, m, 'Each quote'));
+      break;
+    }
+    case 'grid': {
+      const prices = gridPrices(s, m.tickSize);
+      if (prices.length < 3) {
+        out.errors.push("The range is too narrow for 3 levels on SoDEX's tick: widen it.");
+        break;
+      }
+      const low = prices[0]!;
+      out.errors.push(...oneOrder(floorStep(s.orderUsd / low, m), low, m, "Each level's order"));
       break;
     }
     case 'swarm': {

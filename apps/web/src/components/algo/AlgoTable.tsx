@@ -48,7 +48,9 @@ function useExecutorAlgos(address: string | null): { hosted: AlgoView[]; self: A
     let gone = false;
     const load = async () => {
       const [hosted, self] = await Promise.all([listOn('hosted').catch(() => []), listOn('self').catch(() => [])]);
-      if (!gone) setRows({ hosted, self });
+      // Bots have their own page (components/bots/): not in the Algos tab.
+      const notBot = (v: AlgoView) => v.algo.spec.bot !== true;
+      if (!gone) setRows({ hosted: hosted.filter(notBot), self: self.filter(notBot) });
     };
     void load();
     const t = window.setInterval(() => void load(), 5_000);
@@ -64,6 +66,8 @@ function useExecutorAlgos(address: string | null): { hosted: AlgoView[]; self: A
 export function uiKindOf(s: AlgoSpec): UiKind {
   if (s.kind === 'scale' && s.label === 'DCA') return 'dca';
   if (s.kind === 'twap' && s.label === 'Chase TWAP') return 'chasetwap';
+  // Bots never reach the Algos tab (filtered where it reads them); a scale is the nearest picture if one did.
+  if (s.kind === 'mm' || s.kind === 'grid') return 'scale';
   return s.kind;
 }
 

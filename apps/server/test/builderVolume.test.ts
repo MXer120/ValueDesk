@@ -104,3 +104,26 @@ test('builder volume: an unset token answers nobody', async () => {
 test('builder volume: the hosted gate lists the route', () => {
   assert.ok(HOSTED_ROUTES.some((r) => r.method === 'GET' && r.url === '/api/vs/builder/volume'));
 });
+
+test('builder beta: the token holder learns whether a wallet is on the beta list; nobody else learns anything', async () => {
+  const dir = join(DIR, `beta-${Math.random().toString(36).slice(2)}`);
+  mkdirSync(dir, { recursive: true });
+  const clock = new Clock();
+  writeFileSync(join(dir, 'builder-tiers.json'), JSON.stringify(testTiers(BUILDER)));
+  writeNewKeyFile(join(dir, 'builder-terms.key'));
+  const svc = new BuilderService({ tiersPath: join(dir, 'builder-tiers.json'), keyPath: join(dir, 'builder-terms.key'), dbPath: join(dir, 'builder.db'), chainId: CHAIN, io: new FakeSodex(clock), log: new MemoryLog(), now: clock.now });
+  const app = Fastify();
+  await app.register(builderRoutes, { service: svc, internalToken: TOKEN, betaWallets: () => [WALLET] });
+  await app.ready();
+  try {
+    const ask = (address: string, token?: string) => app.inject({ method: 'GET', url: `/api/vs/builder/beta?address=${address}`, headers: token ? { 'x-internal-token': token } : {} });
+    assert.deepEqual((await ask(WALLET.toUpperCase().replace('0X', '0x'), TOKEN)).json(), { ok: true, listed: true });
+    assert.deepEqual((await ask('0x00000000000000000000000000000000000000b1', TOKEN)).json(), { ok: true, listed: false });
+    assert.equal((await ask(WALLET)).statusCode, 404, 'no token: a path that does not exist');
+    assert.equal((await ask(WALLET, 'wrong')).statusCode, 404);
+    assert.equal((await ask('nope', TOKEN)).statusCode, 400);
+    assert.ok(HOSTED_ROUTES.some((r) => r.url === '/api/vs/builder/beta'), 'past the hosted gate');
+  } finally {
+    await app.close();
+  }
+});

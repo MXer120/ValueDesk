@@ -276,7 +276,8 @@ export interface AlgoStartPayload {
 }
 
 export interface AlgoActionPayload {
-  op: 'pause' | 'resume' | 'cancel' | 'cancel-all' | 'update';
+  /** 'archive' (feature 'bots'): an ended algo leaves the wallet's list; its record and log stay kept. */
+  op: 'pause' | 'resume' | 'cancel' | 'cancel-all' | 'update' | 'archive';
   /** Every op but 'cancel-all'. */
   id?: string;
   /**
@@ -293,10 +294,26 @@ export interface AlgoUpdatePatch {
   limitPrice?: number | null;
   maxSpreadBps?: number | null;
   label?: string | null;
+  /** A bot (feature 'bots'): its sizes, distances and limits - never its market, range or levels. */
+  orderUsd?: number;
+  maxInventoryUsd?: number;
+  offsetTicks?: number;
+  chaseTicks?: number;
+  minRepriceMs?: number;
+  skewTicks?: number;
+  edgeBps?: number;
+  volumeTargetUsd?: number | null;
+  maxLossUsd?: number | null;
+  endAt?: number | null;
+  onStop?: 'close' | 'keep';
+  outOfRange?: 'wait' | 'stop';
 }
 
 /** The fields of an AlgoUpdatePatch, for checking a signed one. */
-export const ALGO_UPDATE_FIELDS: ReadonlyArray<keyof AlgoUpdatePatch> = ['quantity', 'limitPrice', 'maxSpreadBps', 'label'];
+export const ALGO_UPDATE_FIELDS: ReadonlyArray<keyof AlgoUpdatePatch> = [
+  'quantity', 'limitPrice', 'maxSpreadBps', 'label',
+  'orderUsd', 'maxInventoryUsd', 'offsetTicks', 'chaseTicks', 'minRepriceMs', 'skewTicks', 'edgeBps', 'volumeTargetUsd', 'maxLossUsd', 'endAt', 'onStop', 'outOfRange',
+];
 
 /* -------------------------------------------------------------- responses ----- */
 
@@ -321,6 +338,8 @@ export interface ExecutorInfo {
   keyName: string;
   /** It also runs algo orders (TWAP, VWAP, ...) with the same key; absent on an older executor. */
   algos?: { maxPerOwner: number };
+  /** It runs bots (feature 'bots'): the builder fee on their orders, tenths of a bp. Absent on an older executor. */
+  bots?: { fee: number };
   /**
    * A SoDEX API key the follower made themselves can be brought here: its private key
    * encrypted to `publicKey` (ECDH P-256, HKDF-SHA256 with `info` - '<owner>' replaced by
@@ -341,10 +360,11 @@ export interface ExecutorInfo {
 }
 
 /**
+ * 'bots': it runs the bot kinds (volume maker, grid) and bot DCAs at the bot fee (policy.ts BOT_FEE).
  * 'counter': the rules may carry direction 'counter' (planner.ts).
  * 'site-terms': it records 'accept-site-terms' (POST /site-terms); the site sends no record to one without it.
  */
-export const EXECUTOR_FEATURES = ['counter', 'site-terms', 'key-import', 'algo-update'] as const;
+export const EXECUTOR_FEATURES = ['counter', 'site-terms', 'key-import', 'algo-update', 'bots'] as const;
 
 export interface SessionGrant {
   token: string;

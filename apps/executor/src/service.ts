@@ -37,6 +37,7 @@ import {
   SodexClient,
   canonicalSettings,
   copyFeeFor,
+  BOT_FEE,
   normaliseCountry,
   parseAlgoSpec,
   parseSettings,
@@ -148,6 +149,25 @@ function algoPatch(raw: unknown): AlgoUpdatePatch {
     if (r.label !== null && (typeof r.label !== 'string' || r.label.length > 60)) throw new ApiError(400, 'patch', 'The label must be text of at most 60 characters, or null.');
     out.label = r.label as string | null;
   }
+  // A bot's sizes, distances and limits: each of its type here, its range judged by the spec parser (AlgoRuntime.update).
+  for (const k of ['orderUsd', 'maxInventoryUsd', 'offsetTicks', 'chaseTicks', 'minRepriceMs', 'skewTicks', 'edgeBps'] as const) {
+    if (r[k] === undefined) continue;
+    if (!(typeof r[k] === 'number' && Number.isFinite(r[k]))) throw new ApiError(400, 'patch', `${k} must be a number.`);
+    out[k] = r[k] as number;
+  }
+  for (const k of ['volumeTargetUsd', 'maxLossUsd', 'endAt'] as const) {
+    if (r[k] === undefined) continue;
+    if (r[k] !== null && !(typeof r[k] === 'number' && Number.isFinite(r[k]) && (r[k] as number) > 0)) throw new ApiError(400, 'patch', `${k} must be a positive number or null.`);
+    out[k] = r[k] as number | null;
+  }
+  if (r.onStop !== undefined) {
+    if (r.onStop !== 'close' && r.onStop !== 'keep') throw new ApiError(400, 'patch', 'onStop must be close or keep.');
+    out.onStop = r.onStop;
+  }
+  if (r.outOfRange !== undefined) {
+    if (r.outOfRange !== 'wait' && r.outOfRange !== 'stop') throw new ApiError(400, 'patch', 'outOfRange must be wait or stop.');
+    out.outOfRange = r.outOfRange;
+  }
   return out;
 }
 
@@ -166,6 +186,8 @@ export interface RequestContext {
   viewerCountry: string | null;
   /** The pairing code a self-hosted executor printed, when the web app sends one. */
   pairingCode?: string | null;
+  /** The site channel the request came through (hosted, behind the edge): 'beta' from beta.valuedesk.so. */
+  channel?: 'main' | 'beta';
 }
 
 export interface ServiceDeps {
@@ -294,7 +316,7 @@ export class ExecutorService {
       factory: deps.factory,
       log: deps.log,
       sinkFor: (a) => this.algoSink(a),
-      builderRate: (a) => (cfg.builderId > 0 ? copyFeeFor(this.volumeOf(a.owner)) / 100_000 : 0),
+      builderRate: (a) => (cfg.builderId > 0 ? (a.spec?.bot === true ? BOT_FEE : copyFeeFor(this.volumeOf(a.owner))) / 100_000 : 0),
       problem: async (a) => this.guard.holdOf({ kind: 'algo', id: a.id, owner: a.owner }) ?? this.algoProblem(a),
       brake: () => this.brakeText('algos'),
       // The copy region rules, from the country declared with the terms and the one the request came from.
@@ -368,6 +390,7 @@ export class ExecutorService {
       keyName: this.keyName,
       keyImport: { alg: KEY_IMPORT_ALG, publicKey: this.secrets.importPublicKey(), info: importInfo(this.executorId, '<owner>') },
       algos: { maxPerOwner: this.cfg.maxAlgosPerOwner },
+      bots: { fee: BOT_FEE },
       features: [...EXECUTOR_FEATURES],
       brake: this.brakeView(),
     };
@@ -902,11 +925,49 @@ export class ExecutorService {
 
   /* ------------------------------------------------------------ algos ----- */
 
-  /** The sink of an algo: the key this wallet registered for this executor, the copy fee ladder as the builder. */
+  /** Whether real bots may start for this wallet through this request: the live-algo wallets, or the beta channel and the beta list. */
+  private async liveBotFor(owner: string, ctx: RequestContext): Promise<boolean> {
+    if (liveAlgosFor(this.cfg, owner)) return true;
+    return ctx.channel === 'beta' && (await this.betaListed(owner));
+  }
+
+  /** The beta list, asked of the API server (EXECUTOR_BETA_URL) and kept a minute; unreadable: not listed (fails closed). */
+  private betaCache = new Map<string, { at: number; listed: boolean }>();
+  private async betaListed(owner: string): Promise<boolean> {
+    const o = owner.toLowerCase();
+    const hit = this.betaCache.get(o);
+    if (hit && Date.now() - hit.at < 60_000) return hit.listed;
+    if (!this.cfg.betaUrl) return false;
+    let listed = false;
+    try {
+      const u = new URL(this.cfg.betaUrl);
+      u.searchParams.set('address', o);
+      const headers: Record<string, string> = { Accept: 'application/json' };
+      if (this.cfg.builderToken) headers['X-Internal-Token'] = this.cfg.builderToken;
+      if (this.cfg.originSecrets[0]) headers['X-Origin-Verify'] = this.cfg.originSecrets[0];
+      const res = await this.deps.fetch(u.toString(), { headers, signal: AbortSignal.timeout(5_000) });
+      const body = JSON.parse(await res.text()) as { ok?: boolean; listed?: unknown };
+      if (!res.ok || !body.ok) throw new Error(`HTTP ${res.status}`);
+      listed = body.listed === true;
+    } catch (e) {
+      this.deps.log.warn('bots: the beta list could not be read', { owner: o, error: String(e) });
+      // A read that failed keeps the last answer for a while (no flapping hold on a blip), else not listed.
+      if (hit && Date.now() - hit.at < 10 * 60_000) return hit.listed;
+    }
+    this.betaCache.set(o, { at: Date.now(), listed });
+    return listed;
+  }
+
+  /** The builder fee on an algo's orders, tenths of a bp: a bot's is BOT_FEE, every other algo's the copy ladder's. */
+  private async algoFee(a: AlgoRecord): Promise<number> {
+    return a.spec?.bot === true ? BOT_FEE : copyFeeFor(await this.freshVolume(a.owner));
+  }
+
+  /** The sink of an algo: the key this wallet registered for this executor, its fee (algoFee) as the builder. */
   private algoSink(a: AlgoRecord): AlgoSink | null {
     if (!this.db.key(a.owner, 'active')) return null;
     const builderOf = async (x: AlgoRecord): Promise<BuilderParams | null> =>
-      this.cfg.builderId > 0 ? { id: this.cfg.builderId, fee: copyFeeFor(await this.freshVolume(x.owner)) } : null;
+      this.cfg.builderId > 0 ? { id: this.cfg.builderId, fee: await this.algoFee(x) } : null;
     const sink = auditedAlgoSink(
       new KeyAlgoSink(this.sodex, () => this.signer(a.owner), this.nonces, SODEX_CHAIN_ID[this.cfg.network], builderOf),
       this.db,
@@ -924,8 +985,10 @@ export class ExecutorService {
   private async algoProblem(a: AlgoRecord): Promise<string | null> {
     const key = await this.keyProblem(a.owner);
     if (key) return key;
+    // A real bot runs while its wallet may run one: taken off the beta list, it is held (its quotes pulled) until it is back.
+    if (a.spec?.bot === true && !a.spec.paper && !liveAlgosFor(this.cfg, a.owner) && !(await this.betaListed(a.owner))) return 'Held: real bots are for beta testers only, and this wallet is not on the beta list.';
     if (this.cfg.builderId > 0) {
-      const fee = copyFeeFor(await this.freshVolume(a.owner));
+      const fee = await this.algoFee(a);
       const approved = await this.sodex.builderApproval(a.owner, this.cfg.builderId);
       if (approved === null || approved < fee) return `Your SoDEX account does not approve the ValueDesk fee (${fee / 10} bp) these orders carry. Approve it in copy setup.`;
     }
@@ -980,9 +1043,18 @@ export class ExecutorService {
     if (live.length + adds > this.cfg.maxAlgosPerOwner) {
       throw new ApiError(429, 'limit', adds > 1 ? `At most ${this.cfg.maxAlgosPerOwner} algo orders run at once here, and this basket runs ${adds} (itself and one per market). ${live.length ? 'Cancel one first, or use fewer markets.' : 'Use fewer markets.'}` : `At most ${this.cfg.maxAlgosPerOwner} algo orders run at once here. Cancel one first.`);
     }
+    // One live bot per wallet and market: two would quote against each other's orders and share one position.
+    if ((spec.kind === 'mm' || spec.kind === 'grid') && !spec.paper) {
+      const other = live.find((x) => (x.spec.kind === 'mm' || x.spec.kind === 'grid') && !x.spec.paper && x.spec.symbol === spec.symbol);
+      if (other) throw new ApiError(409, 'bot-market', `A bot of yours already trades ${spec.symbol}${other.spec.label ? ` ("${other.spec.label}")` : ''}. Stop it first, or choose another market.`);
+    }
+    // Real BOTS: the wallets real algos are on for (the test follower), else beta.valuedesk.so for a wallet on the beta list.
+    if (spec.bot && !spec.paper && !(await this.liveBotFor(owner, ctx))) {
+      throw new ApiError(403, 'paper-only', 'Real bots run on beta.valuedesk.so for beta testers only for now. Turn on Practice to run one against the live market.');
+    }
     // Real orders are off unless this executor is set to take them from every wallet (EXECUTOR_LIVE_ALGOS=1)
     // or from this one (EXECUTOR_LIVE_ALGOS_WALLETS) - for the algo itself and for one a conditional would start.
-    if (!liveAlgosFor(this.cfg, owner) && specsOf(spec, payload.spec).some((x) => !x.paper)) throw new ApiError(403, 'paper-only', 'Real algo orders are off for now. Turn on Practice run to try one against the live market.');
+    if (!spec.bot && !liveAlgosFor(this.cfg, owner) && specsOf(spec, payload.spec).some((x) => !x.paper)) throw new ApiError(403, 'paper-only', 'Real algo orders are off for now. Turn on Practice run to try one against the live market.');
     let accountId = 0;
     if (!spec.paper) {
       this.needNoBrake('algos');
@@ -1025,12 +1097,13 @@ export class ExecutorService {
         this.needTerms(owner, ctx);
         touched = [await this.algos.resume(a.id).catch(fail)];
       } else if (op === 'cancel') touched = [await this.algos.cancel(a.id).catch(fail)];
+      else if (op === 'archive') touched = [await this.algos.archive(a.id).catch(fail)];
       else if (op === 'update') {
         // A bigger size is more trading: the terms in force are needed, as for a resume.
         if (!a.spec.paper) this.needNoBrake('algos');
         this.needTerms(owner, ctx);
         touched = [await this.algos.update(a.id, algoPatch(payload.patch)).catch(fail)];
-      } else throw new ApiError(400, 'op', 'op must be pause, resume, cancel, cancel-all or update.');
+      } else throw new ApiError(400, 'op', 'op must be pause, resume, cancel, cancel-all, update or archive.');
     }
     return { algos: touched.map((a) => this.algos.view(a.id)).filter((v): v is AlgoView => v !== null) };
   }
@@ -1043,6 +1116,8 @@ export class ExecutorService {
   algoList(owner: string): AlgoView[] {
     return this.algos
       .list(owner)
+      // Removed from the list by the wallet (archive): kept on record, not shown.
+      .filter((a) => !a.k.archived)
       .map((a) => this.algos.view(a.id))
       .filter((v): v is AlgoView => v !== null);
   }

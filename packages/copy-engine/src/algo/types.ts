@@ -39,9 +39,12 @@
 import type { ConsentRecord, CopyMode } from '../types.ts';
 import type { OracleVenue } from '../oracle.ts';
 
-export type AlgoKind = 'twap' | 'vwap' | 'pov' | 'iceberg' | 'chase' | 'scale' | 'dca' | 'swarm' | 'conditional' | 'trailing' | 'basket' | 'bracket' | 'sweep';
+export type AlgoKind = 'twap' | 'vwap' | 'pov' | 'iceberg' | 'chase' | 'scale' | 'dca' | 'swarm' | 'conditional' | 'trailing' | 'basket' | 'bracket' | 'sweep' | 'mm' | 'grid';
 
-export const ALGO_KINDS: readonly AlgoKind[] = ['twap', 'vwap', 'pov', 'iceberg', 'chase', 'scale', 'dca', 'swarm', 'conditional', 'trailing', 'basket', 'bracket', 'sweep'];
+export const ALGO_KINDS: readonly AlgoKind[] = ['twap', 'vwap', 'pov', 'iceberg', 'chase', 'scale', 'dca', 'swarm', 'conditional', 'trailing', 'basket', 'bracket', 'sweep', 'mm', 'grid'];
+
+/** The kinds that only ever run as bots (the Bots page): open-ended, two-sided, resting only. */
+export const BOT_KINDS: readonly AlgoKind[] = ['mm', 'grid'];
 
 export type Side = 'buy' | 'sell';
 
@@ -137,6 +140,12 @@ export interface AlgoBase {
   label: string | null;
   /** Take-profit / stop-loss after what it fills (opening algos only). null = none. */
   exits: Exits | null;
+  /**
+   * Started from the Bots page (bots.ts): it keeps a bot book (volume, fees, PnL over time) and carries the
+   * bot builder fee instead of the copy ladder. Always true for the bot kinds (mm, grid); a DCA may be a bot.
+   * Absent: false (every spec from before 2026-11-02).
+   */
+  bot?: boolean;
 }
 
 export interface TwapSpec extends AlgoBase {
@@ -427,7 +436,77 @@ export interface SweepSpec extends AlgoBase {
   timeoutMs: number | null;
 }
 
+/**
+ * What a bot does when it stops - the trader's stop, its volume target, its loss limit, its end time:
+ *   close  pull its quotes, then close what it holds (post-only at the touch first, a capped taker after a minute);
+ *   keep   pull its quotes and leave the position as it is.
+ * The kill switch (cancel-all) never trades: it pulls and leaves.
+ */
+export type BotStop = 'close' | 'keep';
+
+/** Limits every bot kind has. */
+export interface BotLimits {
+  /** Stop once it traded this much (USD, both sides). null = until stopped. */
+  volumeTargetUsd: number | null;
+  /** Stop once its net PnL (at the mark, after all fees) is this far below 0, USD. null = no loss limit. */
+  maxLossUsd: number | null;
+  /** Stop at this time. null = until stopped. */
+  endAt: number | null;
+  onStop: BotStop;
+}
+
+/**
+ * Volume maker: one post-only bid and one post-only ask at the touch, re-priced as it moves, so every fill is
+ * a maker fill (SoDEX's maker fee, never the spread). It holds what it filled within an inventory cap either
+ * way; while it holds, the side that would add more steps back from the touch (skew), so the side that unwinds
+ * fills first. At the cap it quotes only the unwinding side. Delta-neutral by construction: it never aims for
+ * a position, only for turnover.
+ */
+export interface MmSpec extends AlgoBase, BotLimits {
+  kind: 'mm';
+  /** Each quote, USD. */
+  orderUsd: number;
+  /** The most it holds either way, USD at the mark. */
+  maxInventoryUsd: number;
+  /** Ticks behind the best price (0 = join it; -1 = one tick inside where the spread has room). */
+  offsetTicks: number;
+  /** Re-price once the best price is this many ticks away from the quote. */
+  chaseTicks: number;
+  /** At least this long between two re-prices of one side. */
+  minRepriceMs: number;
+  /** At a full inventory, the side that adds steps back this many ticks (in proportion below it). */
+  skewTicks: number;
+  /**
+   * Each quote rests at least this far from the mid, bp (0 = at the touch). A round trip then earns at least twice
+   * it: at 1.7 bp (1.2 bp maker + 0.5 bp bot fee) every round trip pays its own fees. Fewer fills, lower cost.
+   * Absent (a spec from before it): 0.
+   */
+  edgeBps?: number;
+}
+
+/**
+ * Grid: post-only orders on levels between two prices - buys below the price, sells above. When a buy fills,
+ * a sell goes up one level above it; when a sell fills, a buy one level below. Every round trip earns one
+ * level's step, less two maker fees. Out of the range everything rests on one side and it waits (or stops).
+ */
+export interface GridSpec extends AlgoBase, BotLimits {
+  kind: 'grid';
+  /** The lowest and the highest level. */
+  low: number;
+  high: number;
+  /** Levels (3..60), both ends included. */
+  levels: number;
+  /** Each level's order, USD. */
+  orderUsd: number;
+  /** Even steps in price, or in percent. */
+  spacing: 'linear' | 'geometric';
+  /** The mark out of the range: keep the orders and wait, or stop. */
+  outOfRange: 'wait' | 'stop';
+}
+
 export type AlgoSpec =
+  | MmSpec
+  | GridSpec
   | SweepSpec
   | TwapSpec
   | VwapSpec
@@ -542,6 +621,28 @@ export interface AlgoRecord {
   observedCountry?: string | null;
   /** Kind-specific working state (schedules, peaks, holds, counters). */
   k: Record<string, unknown>;
+  /** A bot's book (spec.bot): what it bought and sold, its fees and its PnL over time. */
+  book?: BotBook;
+}
+
+/**
+ * A bot's own trading, from its own fills only (a position the trader holds outside it is not in here).
+ * Net PnL at a price P = sellValue - buyValue + (buyQty - sellQty) x P - tradeFees - builderFees.
+ */
+export interface BotBook {
+  buyQty: number;
+  buyValue: number;
+  sellQty: number;
+  sellValue: number;
+  /** USD that rested (maker) and that took (taker). */
+  makerValue: number;
+  takerValue: number;
+  /** SoDEX's trading fee and the ValueDesk builder fee, USD (estimated at the market's rates and the bot fee). */
+  tradeFees: number;
+  builderFees: number;
+  fills: number;
+  /** [time, volume so far, net PnL at the mark then, fees so far] - one point every few minutes, thinned as it grows. */
+  series: Array<[number, number, number, number]>;
 }
 
 export type AlgoEventKind = 'status' | 'order' | 'fill' | 'cancel' | 'skip' | 'error' | 'info';
@@ -588,4 +689,30 @@ export interface AlgoView {
   exits: Array<{ kind: 'tp' | 'sl'; price: number; quantity: number; filled: number; live: boolean }> | null;
   /** A basket's legs. */
   legs: Array<{ id: string; symbol: string; side: Side; status: AlgoStatus; filledValue: number; avgPrice: number | null }> | null;
+  /** A bot's figures, at the mark now (spec.bot). */
+  bot?: BotView | null;
+}
+
+export interface BotView {
+  /** USD traded, both sides. */
+  volume: number;
+  /** What it holds from its own fills (base units, signed) and its value at the mark. */
+  inventory: number;
+  inventoryUsd: number;
+  /** Before fees: what its trading made or lost at the mark. */
+  grossPnl: number;
+  /** After every fee. */
+  netPnl: number;
+  tradeFees: number;
+  builderFees: number;
+  /** Share of the volume that rested (0..1). */
+  makerShare: number;
+  /** What a million dollars of volume cost it: fees less what its trading made (USD per 1M; negative = it earned). */
+  costPerMillion: number | null;
+  fills: number;
+  mark: number | null;
+  /** Its quotes or levels on SoDEX now. */
+  orders: Array<{ side: Side; price: number; quantity: number; tag: string }>;
+  /** Stopping: closing what it holds. */
+  closing: boolean;
 }
