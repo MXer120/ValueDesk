@@ -74,7 +74,12 @@ test('never green without the server\'s ok: a rollback and an unconfirmed end ar
   assert.equal(rb[0]!.end, 'rolled_back');
   assert.equal(rb[0]!.note, 'The update was rolled back; everything runs as before.');
   // A release's maintenance completed by the clock (ship.sh never confirmed it): amber.
-  assert.equal(M.maintStep(s, health(live({ phase: 'completed', closedAt: null })), T0 + 70 * MIN)[0]!.end, 'unconfirmed');
+  const amber = M.maintStep(s, health(live({ phase: 'completed', closedAt: null })), T0 + 70 * MIN);
+  assert.equal(amber[0]!.end, 'unconfirmed');
+  // Completed ok later (by hand, or folded in by the next release): green after all (#66, 2026-11-02).
+  const late = M.maintStep(amber, health(live({ phase: 'completed', closedAt: T0 + 14 * H, outcome: 'ok', note: 'Done: the boards are current again.' })), T0 + 14 * H);
+  assert.equal(late[0]!.end, 'ok');
+  assert.equal(late[0]!.doneAt, T0 + 14 * H);
   // Closed without an outcome (a server older than outcomes): not ok either.
   assert.equal(M.maintStep(s, health(live({ phase: 'completed', closedAt: T0 + MIN })), T0 + 2 * MIN)[0]!.end, 'unconfirmed');
   // A plain maintenance whose window ran out: not shown any more - and not green.

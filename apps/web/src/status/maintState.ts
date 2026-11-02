@@ -122,6 +122,9 @@ export function maintStep(prev: MaintState, health: unknown, now: number): Maint
     if (n.phase === 'in_progress') put({ ...facts, seenAt: had?.seenAt ?? now, doneAt: null, end: null, dismissed: had?.dismissed ?? false });
     // Completed - only where it was shown in progress: green on the server's `ok` alone (endOf).
     else if (had && had.end === null) put({ ...had, ...facts, doneAt: n.closedAt ?? now, end: endOf(n, had.holdOpen) });
+    // Amber because it ran out without the word, completed `ok` later (by hand, or folded in by
+    // the next release that checked its parts): green after all.
+    else if (had && (had.end === 'unconfirmed' || had.end === 'ended') && endOf(n, had.holdOpen) === 'ok') put({ ...had, ...facts, doneAt: n.closedAt ?? now, end: 'ok' });
   }
   // Shown in progress and gone from a complete answer (completed longer ago than it is listed, or
   // taken off): how it ended is not known here, so the card just goes - never green.

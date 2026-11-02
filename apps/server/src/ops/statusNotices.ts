@@ -276,10 +276,34 @@ export class NoticeStore {
     if (!n) throw new NoticeError(`there is no notice #${id}`);
     const fallback = n.kind === 'incident' ? 'This incident has been resolved.' : outcome === 'rolled_back' ? 'The update was rolled back; everything runs as before.' : 'The maintenance is complete.';
     if (n.kind === 'incident' && outcome !== undefined) throw new NoticeError('an incident is resolved; only a maintenance has an outcome');
-    return this.update(id, {
+    const done = this.update(id, {
       stage: closingStage(n.kind), text: cleanText(text ?? '', NOTICE_LIMITS.text) || fallback,
       ...(n.kind === 'maintenance' ? { outcome: outcome ?? 'ok' } : {}),
     }, now);
+    if (done.outcome === 'ok' && done.holdOpen) this.foldOlder(done, now);
+    return done;
+  }
+
+  /**
+   * A release completed `ok` checked its parts healthy, so an older release's notice that
+   * was never completed (ship.sh left it open, or it ran out on the clock - the app then
+   * keeps an amber "partly down" card) is completed too when every part it left affected
+   * is one this release restarted and checked. #66 (v0.2.133, 2026-11-02) stayed so for
+   * 14 h while v0.2.134 and v0.2.136 restarted the same parts and closed only their own.
+   */
+  private foldOlder(by: Notice, now: number): void {
+    const affected = (m: Notice): ServiceId[] => (m.parts ? m.parts.filter((p) => p.impact !== 'none').map((p) => p.id) : m.components);
+    const checked = new Set(affected(by));
+    for (const o of this.all()) {
+      if (o.id >= by.id || o.kind !== 'maintenance' || !o.holdOpen || o.closedAt !== null) continue;
+      const parts = affected(o);
+      if (!parts.length || !parts.every((p) => checked.has(p))) continue;
+      try {
+        this.update(o.id, { stage: 'completed', text: `Done: everything is back to normal (checked by ${by.title}).`, outcome: 'ok' }, now);
+      } catch {
+        /* one that cannot take another update stays as it is */
+      }
+    }
   }
 
   /** Take a notice off the page entirely (posted by mistake). */

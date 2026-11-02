@@ -172,6 +172,39 @@ test('completed how: ok (the app turns green) or rolled back (never green); by t
   s.close();
 });
 
+test('a release completed ok folds in an older release left open on the same parts (#66, 2026-11-02); others stay', () => {
+  const s = new StatusStore(dbPath());
+  const ship = (tag: string, parts: Parameters<typeof shipNotice>[1], at: number) => s.notices.create(shipNotice(tag, parts, at)!, at);
+  const stuck = ship('v0.2.133', ['api', 'indexer'], T0);
+  s.notices.update(stuck.id, { stage: 'in_progress', text: 'The indexer restarted; its first rebuild is taking longer than usual.' }, T0 + 30 * MIN);
+  const executorOnly = ship('v0.2.132', ['executor'], T0 - H);
+  const byHand = ship('v0.2.131', ['api'], T0 - 2 * H);
+  s.notices.resolve(byHand.id, undefined, T0 - 2 * H + 5 * MIN, 'rolled_back');
+  const later = T0 + 9 * H;
+  assert.equal(noticePhase(s.notices.get(stuck.id)!, later), 'completed', 'ran out on the clock: no outcome (the app shows it amber)');
+  // A newer release of the api alone does not cover the indexer.
+  const apiOnly = ship('v0.2.138', ['api'], later);
+  s.notices.resolve(apiOnly.id, 'Done.', later + 2 * MIN);
+  assert.equal(s.notices.get(stuck.id)!.closedAt, null);
+  // One that restarted and checked both does.
+  const both = ship('v0.2.136', ['indexer', 'api', 'web'], later + H);
+  s.notices.resolve(both.id, 'Done: everything runs normally again.', later + H + 10 * MIN);
+  const folded = s.notices.get(stuck.id)!;
+  assert.equal(folded.outcome, 'ok');
+  assert.equal(folded.closedAt, later + H + 10 * MIN);
+  assert.match(folded.updates.at(-1)!.text, /checked by Update v0\.2\.136/);
+  const [h] = healthNotices([folded], later + H + 11 * MIN);
+  assert.equal(h!.outcome, 'ok', '/api/health lists it completed ok again, so the app turns the amber card green');
+  assert.equal(s.notices.get(executorOnly.id)!.closedAt, null, 'a part this release did not check: left as it was');
+  assert.equal(s.notices.get(byHand.id)!.outcome, 'rolled_back', 'completed by hand: never rewritten');
+  // A rollback folds in nothing.
+  const stuck2 = ship('v0.2.141', ['api'], later + 2 * H);
+  const rolled = ship('v0.2.142', ['api'], later + 3 * H);
+  s.notices.resolve(rolled.id, undefined, later + 3 * H + MIN, 'rolled_back');
+  assert.equal(s.notices.get(stuck2.id)!.closedAt, null);
+  s.close();
+});
+
 test('what is still affected: update --parts sets parts impact now (the plan\'s words go with a changed impact); the note says why', () => {
   const s = new StatusStore(dbPath());
   const n = s.notices.create(shipNotice('v0.2.74', ['executor', 'indexer'], T0)!, T0);
