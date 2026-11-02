@@ -11147,7 +11147,7 @@ var ALGO_LIMITS = {
   trailing: { trailPct: { min: 1e-3, max: 0.5 }, chaseMs: { min: 1e3, max: 10 * MIN } },
   basket: { legs: { min: 2, max: 10 }, legUsd: { min: 10, max: 1e7 } },
   sweep: { slippageBps: { min: 1, max: 1e3 }, roundMs: { min: 500, max: MIN }, timeoutMs: { min: 5e3, max: DAY } },
-  mm: { orderUsd: { min: 10, max: 1e5 }, maxInventoryUsd: { min: 10, max: 1e6 }, offsetTicks: { min: -1, max: 1e3 }, chaseTicks: { min: 1, max: 1e3 }, minRepriceMs: { min: 1e3, max: MIN }, skewTicks: { min: 0, max: 1e3 }, edgeBps: { min: 0, max: 100 } },
+  mm: { orderUsd: { min: 10, max: 1e5 }, maxInventoryUsd: { min: 10, max: 1e6 }, offsetTicks: { min: -1, max: 1e3 }, chaseTicks: { min: 1, max: 1e3 }, minRepriceMs: { min: 1e3, max: MIN }, skewTicks: { min: 0, max: 1e3 }, edgeBps: { min: 0, max: 100 }, queueGuard: { min: 0, max: 0.5 } },
   grid: { levels: { min: 3, max: 60 }, orderUsd: { min: 10, max: 1e5 } },
   bot: { volumeTargetUsd: { min: 100, max: 1e10 }, maxLossUsd: { min: 1, max: 1e8 } },
   exitPct: { min: 1e-3, max: 10 },
@@ -11300,8 +11300,8 @@ function base(o, kind, e) {
   };
   b.exits = exits(o, b.side, e);
   if (b.exits && b.reduceOnly) e.exits = "A reduce-only order opens nothing to protect: no exits on it.";
-  if (BOT_KINDS.includes(kind) || kind === "dca" && o.bot === true) b.bot = true;
-  else if (o.bot === true) e.bot = "Only a volume maker, a grid or a DCA runs as a bot.";
+  if (BOT_KINDS.includes(kind)) b.bot = true;
+  else if (o.bot === true) e.bot = kind === "dca" ? "A DCA runs as an algo order, not a bot: start it from the order ticket." : "Only a volume maker or a grid runs as a bot.";
   if (b.bot && b.exits) e.exits = "A bot places no take-profit or stop-loss: set a loss limit instead.";
   if (BOT_KINDS.includes(kind) && b.limitPrice !== null) e.limitPrice = "A bot buys and sells: it has no limit price. Use the bounds to hold or stop it.";
   if (BOT_KINDS.includes(kind) && (b.upper?.then === "rush" || b.lower?.then === "rush")) e[b.upper?.then === "rush" ? "upper" : "lower"] = "A bot has nothing to rush: hold or stop it at a bound.";
@@ -11689,6 +11689,7 @@ function checkAlgoSpec(input, depth = 0) {
         skewTicks: o.skewTicks === void 0 ? 3 : int(o, "skewTicks", "Inventory skew", L.skewTicks, e)
       };
       if (o.edgeBps !== void 0 && o.edgeBps !== null && Number(o.edgeBps) !== 0) spec.edgeBps = num3(o, "edgeBps", "Distance from the mid", L.edgeBps, e);
+      if (o.queueGuard !== void 0 && o.queueGuard !== null && Number(o.queueGuard) !== 0) spec.queueGuard = num3(o, "queueGuard", "Queue guard", L.queueGuard, e);
       break;
     }
     case "grid": {
@@ -13760,6 +13761,7 @@ var ALGO_UPDATE_FIELDS = [
   "minRepriceMs",
   "skewTicks",
   "edgeBps",
+  "queueGuard",
   "volumeTargetUsd",
   "maxLossUsd",
   "endAt",
@@ -13842,6 +13844,8 @@ function mmQuotes(s, q, m, inventory, mark) {
   for (const side of ["buy", "sell"]) {
     const adds = side === "buy" ? inventory >= 0 : inventory <= 0;
     if (adds && Math.abs(invUsd) + s.orderUsd > s.maxInventoryUsd + 1e-9) continue;
+    const share = queueShare(q, side);
+    if (adds && (s.queueGuard ?? 0) > 0 && share !== null && share < s.queueGuard) continue;
     const skew = adds ? Math.round(Math.abs(ratio) * s.skewTicks) : 0;
     const inside = s.offsetTicks < 0 && room >= 2 ? 1 : 0;
     const off = Math.max(0, s.offsetTicks) + skew;
@@ -13860,6 +13864,12 @@ function mmQuotes(s, q, m, inventory, mark) {
     out.push({ side, price: price2, quantity: qty2 });
   }
   return out;
+}
+function queueShare(q, side) {
+  const own = side === "buy" ? q.bidSz : q.askSz;
+  const other = side === "buy" ? q.askSz : q.bidSz;
+  if (own === void 0 || other === void 0 || !(own + other > 0)) return null;
+  return own / (own + other);
 }
 
 // ../../packages/copy-engine/src/algo/sizes.ts
@@ -14474,7 +14484,11 @@ var AlgoFeed = class {
         const s = typeof r.s === "string" ? r.s.toUpperCase() : null;
         const bid = toNum(r.b);
         const ask = toNum(r.a);
-        if (s && bid !== null && ask !== null && bid > 0 && ask > 0 && ask >= bid) this.quotes.set(s, { bid, ask, at: now });
+        const bidSz = toNum(r.B);
+        const askSz = toNum(r.A);
+        if (s && bid !== null && ask !== null && bid > 0 && ask > 0 && ask >= bid) {
+          this.quotes.set(s, { bid, ask, at: now, ...bidSz !== null && bidSz >= 0 ? { bidSz } : {}, ...askSz !== null && askSz >= 0 ? { askSz } : {} });
+        }
       }
       return;
     }
@@ -14771,12 +14785,13 @@ var EXITS_RETRY_MS = 3e4;
 var EXITS_MAX_REFUSALS = 5;
 var UPDATABLE = /* @__PURE__ */ new Set(["limitPrice", "upper", "lower", "maxSpreadBps", "label", "quantity"]);
 var BOT_UPDATABLE = {
-  mm: /* @__PURE__ */ new Set(["label", "maxSpreadBps", "upper", "lower", "orderUsd", "maxInventoryUsd", "offsetTicks", "chaseTicks", "minRepriceMs", "skewTicks", "edgeBps", "volumeTargetUsd", "maxLossUsd", "endAt", "onStop"]),
+  mm: /* @__PURE__ */ new Set(["label", "maxSpreadBps", "upper", "lower", "orderUsd", "maxInventoryUsd", "offsetTicks", "chaseTicks", "minRepriceMs", "skewTicks", "edgeBps", "queueGuard", "volumeTargetUsd", "maxLossUsd", "endAt", "onStop"]),
   grid: /* @__PURE__ */ new Set(["label", "maxSpreadBps", "upper", "lower", "orderUsd", "volumeTargetUsd", "maxLossUsd", "endAt", "onStop", "outOfRange"])
 };
 var BOT_CLOSE_REST_MS = 6e4;
 var BOT_CLOSE_SLIP_BPS = 30;
 var GRID_RETRY_MS = 3e3;
+var MM_RETRY_MS = 500;
 var gridLevelOf = (c) => {
   const x = /^grid (\d+)\//.exec(c.tag);
   return x ? Number(x[1]) - 1 : -1;
@@ -15940,6 +15955,8 @@ var AlgoRuntime = class {
       return this.hold(a, `Held: the spread (${spreadBps(q).toFixed(1)} bp) is wider than your ${s.maxSpreadBps} bp.`);
     }
     const want = mmQuotes(s, q, m, bookInventory(a.book), mk2);
+    const unguarded = (s.queueGuard ?? 0) > 0 ? mmQuotes({ ...s, queueGuard: 0 }, q, m, bookInventory(a.book), mk2) : want;
+    const guardedAt = { ...a.k.mguard ?? {} };
     const tick = Number(m.tickSize);
     const live = this.live(a);
     const send = [];
@@ -15949,9 +15966,15 @@ var AlgoRuntime = class {
       const mine = live.filter((c) => c.side === side);
       const standing = mine.filter((c) => !c.cancelling);
       if (!w) {
-        pull.push(...standing);
+        const guarded = unguarded.some((x) => x.side === side);
+        if (guarded) {
+          const ripe = standing.filter((c) => now - c.placedAt >= 500);
+          if (ripe.length) guardedAt[side] = now;
+          pull.push(...ripe);
+        } else pull.push(...standing);
         continue;
       }
+      if (!standing.length && !mine.length && (guardedAt[side] ?? 0) + s.minRepriceMs > now) continue;
       if (standing.length) {
         const c = standing[0];
         pull.push(...standing.slice(1));
@@ -15965,6 +15988,7 @@ var AlgoRuntime = class {
       if (Number(a.k.mretry?.[side] ?? 0) > now) continue;
       send.push({ side, price: w.price, quantity: w.quantity, tif: "gtx", tag: side === "buy" ? "bid" : "ask" });
     }
+    a.k.mguard = guardedAt;
     if (pull.length) await this.cancelChildren(a, m, pull);
     if (!send.length || this.stopped(a)) return;
     const sent = await this.send(a, m, send);
@@ -15972,7 +15996,7 @@ var AlgoRuntime = class {
     const at = { ...a.k.mretry ?? {} };
     for (const c of sent) {
       if (c.state === "done" && c.filled <= 1e-12) {
-        back[c.side] = Math.min(6e4, (back[c.side] ?? GRID_RETRY_MS / 2) * 2);
+        back[c.side] = Math.min(6e4, (back[c.side] ?? MM_RETRY_MS / 2) * 2);
         at[c.side] = Date.now() + back[c.side];
       } else delete back[c.side];
     }
@@ -18658,7 +18682,7 @@ function algoPatch(raw) {
     if (r.label !== null && (typeof r.label !== "string" || r.label.length > 60)) throw new ApiError(400, "patch", "The label must be text of at most 60 characters, or null.");
     out.label = r.label;
   }
-  for (const k of ["orderUsd", "maxInventoryUsd", "offsetTicks", "chaseTicks", "minRepriceMs", "skewTicks", "edgeBps"]) {
+  for (const k of ["orderUsd", "maxInventoryUsd", "offsetTicks", "chaseTicks", "minRepriceMs", "skewTicks", "edgeBps", "queueGuard"]) {
     if (r[k] === void 0) continue;
     if (!(typeof r[k] === "number" && Number.isFinite(r[k]))) throw new ApiError(400, "patch", `${k} must be a number.`);
     out[k] = r[k];
