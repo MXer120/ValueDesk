@@ -31,7 +31,7 @@ import { BrandMark } from './BrandMark';
 /** beta.valuedesk.so (VITE_CHANNEL=beta): the Beta tag beside the brand, as the admin suite shows Dev. */
 const BETA = import.meta.env.VITE_CHANNEL === 'beta';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { TABS, TAB_LABELS, pathForTab, type Tab } from '../router';
+import { SOON_TABS, TABS, TAB_LABELS, pathForTab, type Tab } from '../router';
 import { preloadWalletModal, warmWalletModal } from '../walletconnect';
 import { Notices } from './Notices';
 import { NavMore, type NavAlert } from './NavMore';
@@ -190,7 +190,13 @@ export function NavBar({
           </>
         )}
         <nav className="navlinks">
-          {TABS.filter((t) => t !== 'knowledge' || knowledge).map((t) => (
+          {TABS.filter((t) => t !== 'knowledge' || knowledge).map((t) => SOON_TABS.has(t) ? (
+            /* Coming soon (router.ts SOON_TABS): the name and a pill, no link - there is no page to open. */
+            <span key={t} className="navlink navlink--soon" aria-disabled="true" title={`${TAB_LABELS[t]}: coming soon`}>
+              {TAB_LABELS[t]}
+              <span className="dv-devtag dv-devtag--soon">Coming soon</span>
+            </span>
+          ) : (
             /*
              * A REAL ANCHOR with a real href, not a button.
              *

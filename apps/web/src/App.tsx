@@ -4,7 +4,7 @@ import { PrivacyProvider } from './privacy';
 import { NavBar, scanHref } from './components/NavBar';
 import { SideBar } from './components/SideBar';
 import './components/shell.css';
-import { DEFAULT_TAB, OPEN_TAB_EVENT, TABS, isExcludedPath, isStatusPath, landingTab, legalForPath, pathForTab, tabForPath, useRoute, type LegalPage, type Tab } from './router';
+import { DEFAULT_TAB, OPEN_TAB_EVENT, SOON_TABS, TABS, isExcludedPath, isStatusPath, landingTab, legalForPath, pathForTab, tabForPath, useRoute, type LegalPage, type Tab } from './router';
 import { api, type Engine } from './api';
 import { useAsync, useConnState, useMediaQuery, useSession, useStored, useSymbols } from './hooks';
 import { hub } from './ws';
@@ -75,10 +75,11 @@ const ScanDashboard = lazyPage('scan', () => import('./dashboard/ScanDashboard')
 /* The knowledge folders' own page: docs, sheets, boards, saved posts, files (knowledge/). Off unless
    the Dev panel turned it on for the owner's wallet (folders/access.ts): then not even fetched. */
 /* Bots (components/bots/): automated strategies on the ValueDesk executor. */
-// Bots: the page on the beta channel only (owner, 2026-11-02); on the main site the tab opens "coming soon".
+// Bots: the page on the beta channel only (owner, 2026-11-02); on the main site the nav shows "coming soon" and
+// there is no page (router.ts SOON_TABS): nothing of it is built in.
 const BotsPage = BETA_CHANNEL
   ? lazyPage('bots', () => import('./components/bots/BotsPage').then((m) => m.BotsPage))
-  : lazyPage('bots', () => import('./components/bots/BotsSoon').then((m) => m.BotsSoon));
+  : lazyPage('bots', () => Promise.resolve(() => null));
 const KnowledgePage = lazyPage('knowledge', () => import('./knowledge/KnowledgePage').then((m) => m.KnowledgePage));
 /* The folders' sign-in and save sheet (folders/FoldersHost.tsx): fetched only once Knowledge is on. */
 const FoldersHost = lazyChunk(() => import('./folders/FoldersHost').then((m) => ({ default: m.FoldersHost })));
@@ -245,7 +246,7 @@ function AppShell() {
   useEffect(() => {
     const on = (e: Event) => {
       const t = (e as CustomEvent<Tab>).detail;
-      if ((TABS as readonly string[]).includes(t) && (t !== 'knowledge' || knowledge)) setTab(t);
+      if ((TABS as readonly string[]).includes(t) && !SOON_TABS.has(t) && (t !== 'knowledge' || knowledge)) setTab(t);
     };
     window.addEventListener(OPEN_TAB_EVENT, on);
     return () => window.removeEventListener(OPEN_TAB_EVENT, on);
@@ -783,7 +784,7 @@ function AppShell() {
 function usePagePrefetch(): void {
   useEffect(() => {
     const all = () => {
-      for (const t of TABS) if (t !== 'knowledge' || knowledgeOnAtBoot()) PAGES[t].preload().catch(() => {});
+      for (const t of TABS) if (!SOON_TABS.has(t) && (t !== 'knowledge' || knowledgeOnAtBoot())) PAGES[t].preload().catch(() => {});
     };
     const idle = typeof window.requestIdleCallback === 'function';
     const handle = idle ? window.requestIdleCallback(all, { timeout: 1000 }) : window.setTimeout(all, 300);
@@ -839,7 +840,7 @@ function useKeyboardShortcuts({
       const typing = el && (el.tagName === 'INPUT' || el.tagName === 'SELECT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
       if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
 
-      const tabs: readonly Tab[] = TABS.filter((t) => t !== 'knowledge' || knowledgeOnAtBoot());
+      const tabs: readonly Tab[] = TABS.filter((t) => !SOON_TABS.has(t) && (t !== 'knowledge' || knowledgeOnAtBoot()));
       const idx = Number.parseInt(e.key, 10);
       if (idx >= 1 && idx <= tabs.length) {
         setTab(tabs[idx - 1]!);

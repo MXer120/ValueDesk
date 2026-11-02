@@ -65,6 +65,15 @@ export const TAB_LABELS: Record<Tab, string> = {
 export const pathForTab = (tab: Tab): string => `/${tab}`;
 
 /**
+ * Tabs the nav shows as "coming soon" and that are no page: no link, no route, no number key, no code fetched.
+ * Bots, on the main site (owner, 2026-11-02: "make the bots in navbar coming soon already, no page for it"); the
+ * beta channel (VITE_CHANNEL=beta, beta.valuedesk.so) has the page. /bots here lands where any unknown path does.
+ */
+const CHANNEL = (import.meta as { env?: { VITE_CHANNEL?: string } }).env?.VITE_CHANNEL;
+export const soonTabs = (channel: string | undefined = CHANNEL): ReadonlySet<Tab> => new Set<Tab>(channel === 'beta' ? [] : ['bots']);
+export const SOON_TABS = soonTabs();
+
+/**
  * Change page from outside the shell's own props (the rail's quick drop, the
  * save sheet's "Open in Knowledge"): App.tsx listens and navigates as its own
  * links do, once the page's code is in.
@@ -151,9 +160,9 @@ export function landingTab(pathname: string): Tab {
  * rather than a default so the caller can tell "unknown path" from "the trade
  * page", which is what makes the redirect below possible.
  */
-export function tabForPath(pathname: string): Tab | null {
+export function tabForPath(pathname: string, soon: ReadonlySet<Tab> = SOON_TABS): Tab | null {
   const seg = pathname.replace(/\/+$/, '').split('/').filter(Boolean)[0]?.toLowerCase();
-  return (TABS as readonly string[]).includes(seg ?? '') ? (seg as Tab) : null;
+  return (TABS as readonly string[]).includes(seg ?? '') && !soon.has(seg as Tab) ? (seg as Tab) : null;
 }
 
 /**

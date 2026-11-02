@@ -288,16 +288,3 @@ button.bots-link { border: 0; background: none; padding: 0; color: var(--text); 
   .bots .bots-table td:nth-child(2), .bots .bots-table td:nth-child(6), .bots .bots-table td:nth-child(7), .bots .bots-table td:nth-child(8) { display: none; }
   .bots .bots-table td[data-k]::before { content: attr(data-k); margin-right: 6px; color: var(--muted); font-family: var(--font-text, inherit); font-size: var(--fs-micro, 11px); }
 }
-
-/* --- main site: coming soon (BotsSoon.tsx) ------------------------------------- */
-
-.bots-soon { max-width: 720px; width: 100%; margin: 0 auto; }
-.bots-soonpill { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 999px; font-size: var(--fs-micro, 11px); color: var(--text); background: color-mix(in srgb, var(--text) 9%, transparent); }
-.bots-soon__lead { display: flex; flex-direction: column; gap: 4px; margin-bottom: var(--sp-3); }
-.bots-soon__lead b { font-weight: 400; font-size: var(--fs-base); color: var(--text); }
-.bots-soon__lead span { color: var(--muted); font-size: var(--fs-xs); line-height: 18px; }
-.bots-soon__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-1); }
-.bots-soon__list li { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--panel-line); border-radius: var(--radius-sm); background: linear-gradient(160deg, rgb(255 255 255 / 4%) 0%, rgb(255 255 255 / 0%) 55%), var(--bg-elevated); }
-.bots-soon__list li > span { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.bots-soon__list b { font-weight: 400; color: var(--text); }
-.bots-soon__list small { color: var(--muted); font-size: var(--fs-xs); }

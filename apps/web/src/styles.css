@@ -1227,6 +1227,14 @@ button.danger:hover:not(:disabled) { background: var(--neg); border-color: var(-
 .tabbar button:hover:not(.active),
 .navlinks button:hover:not(.active) { color: var(--text); background: none; }
 
+/* A page that is coming soon (NavBar.tsx, router.ts SOON_TABS): the link's name and grey, no pointer, a grey pill. */
+.navlinks .navlink--soon {
+  display: flex; align-items: center; gap: 6px; height: 100%; padding: 0 var(--sp-1);
+  color: var(--muted); font-size: var(--fs-base); line-height: var(--lh-base); white-space: nowrap; cursor: default;
+}
+.navlinks .navlink--soon .dv-devtag { margin-left: 0; }
+.navlinks .dv-devtag--soon { background: color-mix(in srgb, var(--text) 9%, transparent); color: var(--muted); }
+
 /* "More" (NavMore.tsx): the last of the pages, in their look, pulled to their spacing (it
    sits outside .navlinks, whose margin and the bar's gap would set it apart); its menu the
    app's glass dropdown (.menu-popup) with its rows. */

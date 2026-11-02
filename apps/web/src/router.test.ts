@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { LEGAL_LABELS, LEGAL_PAGES, TABS, legalForPath, pathForLegal, tabForPath } from './router';
+import { LEGAL_LABELS, LEGAL_PAGES, TABS, legalForPath, pathForLegal, soonTabs, tabForPath } from './router';
 
 test('the legal pages are routes of their own, outside the nav', () => {
   assert.deepEqual([...LEGAL_PAGES], ['impressum', 'privacy', 'cookies', 'terms', 'risk', 'copy-terms', 'licenses']);
@@ -23,4 +23,12 @@ test('legalForPath: tolerant like tabForPath, null for anything else', () => {
   assert.equal(legalForPath('/trade'), null);
   assert.equal(legalForPath('/'), null);
   assert.equal(legalForPath('/legal'), null);
+});
+
+test('Bots on the main site: in the nav as coming soon, no route; the beta channel has the page', () => {
+  assert.ok(soonTabs(undefined).has('bots'));
+  assert.equal(soonTabs('beta').size, 0);
+  assert.equal(tabForPath('/bots', soonTabs(undefined)), null, '/bots lands where an unknown path does');
+  assert.equal(tabForPath('/Bots/', soonTabs('beta')), 'bots');
+  assert.equal(tabForPath('/copy', soonTabs(undefined)), 'copy');
 });

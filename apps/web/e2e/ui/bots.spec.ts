@@ -52,18 +52,24 @@ async function setUp(page: Page, wallet: TestWallet): Promise<void> {
   await sheet.waitFor({ state: 'hidden' });
 }
 
-const comingSoon = async (page: Page) => (await page.locator('.bots-soon').count()) > 0;
+// The main build: Bots is a "coming soon" name in the nav and no page (router.ts SOON_TABS); /bots lands on Trade.
+const comingSoon = async (page: Page) => {
+  await page.locator('.navlinks').first().waitFor();
+  return (await page.locator('.navlink--soon').count()) > 0;
+};
 
 h.test('before a wallet: the two strategies (no DCA bot), what each costs, and Connect', async ({ page }) => {
-  await page.getByRole('heading', { name: 'Bots', exact: true }).waitFor();
   if (await comingSoon(page)) {
-    // The main build: the tab, "coming soon", the two strategies - and nothing to start or set up.
-    assert.ok(await page.getByText('Coming soon', { exact: true }).isVisible());
-    for (const name of ['Volume maker', 'Grid']) assert.ok(await page.getByText(name, { exact: true }).isVisible(), name);
-    assert.equal(await page.getByRole('button', { name: /New bot|Set up/ }).count(), 0, 'nothing to start on the main site');
+    // The main build: "Bots" and a "Coming soon" pill in the nav, no link, and /bots went to the default page.
+    const soon = page.locator('.navlink--soon');
+    assert.ok(await soon.getByText('Coming soon', { exact: true }).isVisible());
+    assert.equal(await page.locator('.navlinks a[href="/bots"]').count(), 0, 'no link to a page that is not there');
+    await page.waitForURL((u) => u.pathname !== '/bots');
+    assert.equal(await page.getByRole('heading', { name: 'Bots', exact: true }).count(), 0, 'no Bots page on the main site');
     await shot(page, 'soon');
     return;
   }
+  await page.getByRole('heading', { name: 'Bots', exact: true }).waitFor();
   for (const name of ['Volume maker', 'Grid']) assert.ok(await page.getByRole('button', { name: new RegExp(name) }).first().isVisible(), name);
   assert.equal(await page.getByText('DCA bot').count(), 0, 'a DCA is an algo order, not a bot');
   assert.ok(await page.getByText('$170').first().isVisible(), 'fees per $1M: 1.2 bp maker + 0.5 bp');
@@ -72,7 +78,6 @@ h.test('before a wallet: the two strategies (no DCA bot), what each costs, and C
 }, { path: '/bots' });
 
 h.test('a practice volume maker: set up, preset, start, its window, pause, edit, stop, delete - one signature each', async ({ page, wallet }) => {
-  await page.getByRole('heading', { name: 'Bots', exact: true }).waitFor();
   if (await comingSoon(page)) return; // the main build: the page is on the beta only
   await connectWallet(page);
   await page.getByRole('heading', { name: 'Bots', exact: true }).waitFor();
