@@ -354,6 +354,18 @@ test('store: a drop where no stream row can lie reads nothing; stream rows put l
   s.close();
 });
 
+test('store: a drop that removes nothing keeps the partial-day sums (they were all cleared on every page synced)', async () => {
+  const s = new IndexStore(':memory:');
+  s.putFills([fill({ id: 'r1', t: B + 100, oid: '5', src: 1 }), fill({ id: 's1', t: B + 500, src: 0 })]);
+  const memo = (s as unknown as { partialMemo: Map<string, unknown> }).partialMemo;
+  memo.set('kept', undefined);
+  await s.dropStreamRowsAsync('hyperliquid', '0xa', 0, B + 200, async () => {});
+  assert.ok(memo.has('kept'), 'nothing dropped: kept');
+  await s.dropStreamRowsAsync('hyperliquid', '0xa', 0, B + 1_000, async () => {});
+  assert.ok(!memo.has('kept'), 'rows dropped: cleared');
+  s.close();
+});
+
 test('a board window\'s stats start holds for a quarter of an hour (engine.ts statsFrom)', () => {
   const q = 15 * 60_000;
   const now = Date.UTC(2026, 9, 31, 12, 7, 31);

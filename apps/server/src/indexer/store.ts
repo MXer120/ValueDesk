@@ -2090,7 +2090,6 @@ export class IndexStore {
    * maker's month of stream rows is 100k+ rows: one DELETE held the loop.
    */
   async dropStreamRowsAsync(venue: Venue, address: string, fromT: number, toT: number, pause: () => Promise<void>): Promise<void> {
-    this.partialMemo.clear();
     const slice = this.q(
       `DELETE FROM fills WHERE (venue, address, id) IN (
          SELECT venue, address, id FROM fills WHERE venue = ? AND address = ? AND src = 0 AND t >= ? AND t <= ? LIMIT 2000)`,
@@ -2106,7 +2105,14 @@ export class IndexStore {
         if (n < 2000) break;
         await pause();
       }
-      if (gone > 0) this.markRange(v, address, fromT, toT, first);
+      // The partial-day sums are keyed on their day's version, which markRange moves. Until
+      // 2026-11-02 every drop - every Hyperliquid fill page synced - cleared all of them, rows gone
+      // or not, and the boards summed every trader's first day again from the fills: partialDayAsync
+      // was 44% of the indexer's thread in that night's production profile.
+      if (gone > 0) {
+        this.markRange(v, address, fromT, toT, first);
+        this.partialMemo.clear();
+      }
       this.streamDropped(v, address, fromT, toT, puts);
     }
     this.bump(venue, address);
