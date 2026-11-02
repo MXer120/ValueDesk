@@ -1,46 +1,46 @@
-/* Bots page (BotsPage.tsx), in the leaderboard page's frame (.panel.lbp: the bar, the segmented controls,
-   the table sheet) with the portfolio's soft tiles for the totals, the funds sheets' buttons and the Settings
-   shell for one bot (BotSheet: .stg.algo-sheet). Kind and state are pills and dots - never a coloured edge. */
+/* Bots page (BotsPage.tsx), built from the design system's cards (portfolio/parts.tsx, Portfolio.css): the
+   panel fill, a hairline, the 4px radius, the 40px head strip, wells for the rail's rows, the three-column stat
+   strip under the chart - on the page frame Portfolio and Scan use (full width, cards 4px apart). The table is
+   the leaderboard's, the buttons the funds sheets', one bot's window the Settings shell (BotSheet:
+   .stg.algo-sheet). Kind and state are pills and dots - never a coloured edge. */
 
-.panel.lbp.bots { max-width: 1240px; margin: 0 auto; width: 100%; }
-
-/* --- the head ----------------------------------------------------------------- */
-
-.bots-head {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 16px;
-  margin: 8px 0 16px;
-}
-.bots-head__text h1 { margin: 0 0 4px; font-size: var(--fs-xl); line-height: 28px; font-weight: 500; color: var(--text); }
-.bots-head__text p { margin: 0; max-width: 720px; color: var(--muted); font-size: var(--fs-xs); line-height: 18px; }
-.fx-cta.bots-new { width: auto; height: 34px; padding: 0 16px; border-radius: 8px; font-size: var(--fs-xs); flex: none; }
-
-/* --- the totals: the account card's soft tiles --------------------------------- */
-
-.bots-totals {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 8px;
-  margin-bottom: 12px;
-}
-.bots-total {
+.pf.bots {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 12px 14px;
-  border: 1px solid var(--panel-line);
-  border-radius: 12px;
-  background: linear-gradient(180deg, var(--sheen), transparent 60%), color-mix(in srgb, var(--text) 4%, var(--bg-panel));
+  gap: var(--sp-1);
+  width: 100%;
+  min-height: 100%;
+  padding: var(--sp-1);
+  box-sizing: border-box;
 }
-.bots-total__k { color: var(--muted); font-size: var(--fs-micro, 11px); line-height: 14px; }
-.bots-total__v { font-family: var(--font-num); font-variant-numeric: tabular-nums; font-size: 18px; line-height: 22px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.bots-total__v small { color: var(--muted); font-size: var(--fs-xs); }
-.bots-total__v.pos, .bots-kpi__v.pos, .bots td.pos { color: var(--pos); }
-.bots-total__v.neg, .bots-kpi__v.neg, .bots td.neg { color: var(--neg); }
 
-.bots-bar__gap { flex: 1; }
+/* Row 1: the rail card (the portfolio's 320px) and the chart. */
+.bots-top {
+  display: grid;
+  grid-template-columns: var(--pf-rail) minmax(0, 1fr);
+  gap: var(--sp-1);
+  align-items: stretch;
+}
+.bots-rail .pf-card__body { gap: var(--sp-2); }
+.bots-rail .pf-btn--wide + .pf-btn--wide { margin-top: calc(-1 * var(--sp-1)); }
+.pf .pf-btn.bots-stopall:hover:not(:disabled) { color: var(--neg); border-color: color-mix(in srgb, var(--neg) 50%, var(--pf-line)); }
+.bots-rail .cs-progress { margin: 0; }
+
+.bots-chartcard .pf-card__body { min-height: 360px; }
+.bots-chartwell { margin-top: var(--sp-2); }
+.bots-chartcard .pf-chart--empty { min-height: 220px; margin-top: var(--sp-2); }
+.bots-chartkey { display: flex; align-items: center; gap: 6px; margin: 6px 0 0; color: var(--muted); font-size: var(--fs-micro, 11px); }
+.pf .pf-readout__sub .pos { color: var(--pos); }
+.pf .pf-readout__sub .neg { color: var(--neg); }
+
+/* Row 2: the list. The table runs to the card's edges, as the account tables do. */
+.bots-listcard { flex: 1 0 auto; }
+.bots-tablewrap { margin: calc(-1 * var(--sp-3)) calc(-1 * var(--sp-4)) calc(-1 * var(--sp-4)); overflow-x: auto; }
+.bots-pick { display: flex; flex-direction: column; gap: var(--sp-3); }
+.bots-pick > .pf-note { margin: 0; }
+
+.bots-pos, .bots td.pos { color: var(--pos); }
+.bots td.neg { color: var(--neg); }
 
 /* --- buttons in rows and windows: the account tables' action chip ----------- */
 
@@ -67,6 +67,8 @@
 
 /* --- the list ----------------------------------------------------------------- */
 
+.bots .lb-table.bots-table { width: 100%; }
+.bots .bots-table th { white-space: nowrap; }
 .bots .lb-table.bots-table th:nth-child(1) { width: 24%; }
 .bots .lb-table.bots-table th:nth-child(2) { width: 11%; }
 .bots .lb-table.bots-table th:nth-child(3) { width: 9%; }
@@ -77,6 +79,8 @@
 .bots .lb-table.bots-table th:nth-child(8) { width: 16%; }
 .bots .bots-table th.right, .bots .bots-table td.right { text-align: right; }
 .bots .bots-table td { height: 52px; font-family: var(--font-num); font-variant-numeric: tabular-nums; }
+.bots .bots-table th:first-child, .bots .bots-table td:first-child { padding-left: var(--sp-4); }
+.bots .bots-table th:last-child, .bots .bots-table td:last-child { padding-right: var(--sp-3); }
 .bots-row { cursor: pointer; transition: background-color var(--dur-fast) var(--ease-out); }
 .bots-row:hover, .bots-row:focus-visible { background: color-mix(in srgb, var(--text) 4%, transparent); outline: none; }
 
@@ -100,7 +104,6 @@
 }
 .bot-ic.is-maker { --bot-hue: #7aa7ff; }
 .bot-ic.is-grid { --bot-hue: #c79bff; }
-.bot-ic.is-dca { --bot-hue: #5fd0b5; }
 
 /* State: a pill with a dot (running pulses, as the algo status does). */
 .bots-state {
@@ -129,27 +132,7 @@
 .bots-side.is-buy { color: var(--pos); }
 .bots-side.is-sell { color: var(--neg); }
 
-/* --- empty, onboarding, loading ----------------------------------------------- */
-
-.bots-empty { display: flex; flex-direction: column; gap: 14px; margin-top: 4px; }
-.bots-empty__head { display: flex; flex-direction: column; gap: 4px; }
-.bots-empty__head b { font-weight: 500; color: var(--text); }
-.bots-empty__head span { color: var(--muted); font-size: var(--fs-xs); }
-
-.bots-onboard {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20px;
-  padding: 18px 20px;
-  border: 1px solid var(--panel-line);
-  border-radius: 12px;
-  background: linear-gradient(180deg, var(--sheen), transparent 60%), color-mix(in srgb, var(--text) 4%, var(--bg-panel));
-}
-.bots-onboard__text { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-.bots-onboard__text b { font-weight: 500; color: var(--text); }
-.bots-onboard__text > span { color: var(--muted); font-size: var(--fs-xs); max-width: 640px; }
-.bots-onboard .fx-cta { width: auto; height: 36px; padding: 0 18px; border-radius: 8px; flex: none; }
+/* --- loading ------------------------------------------------------------------ */
 
 .bots-skel { display: flex; flex-direction: column; gap: 8px; }
 .bots-bone { height: 52px; border-radius: 10px; background: linear-gradient(90deg, color-mix(in srgb, var(--text) 4%, transparent), color-mix(in srgb, var(--text) 8%, transparent), color-mix(in srgb, var(--text) 4%, transparent)); background-size: 200% 100%; animation: bots-shimmer 1.4s ease-in-out infinite; }
@@ -158,7 +141,7 @@
 
 /* --- strategy cards ------------------------------------------------------------ */
 
-.bots-strats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.bots-strats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-1); }
 .bots-strats.is-compact { grid-template-columns: 1fr; margin: 4px 0 14px; }
 button.bots-strat {
   display: flex;
@@ -173,15 +156,15 @@ button.bots-strat {
   color: var(--text);
   font: inherit;
   border: 1px solid var(--panel-line);
-  border-radius: 12px;
-  background: linear-gradient(180deg, var(--sheen), transparent 60%), color-mix(in srgb, var(--text) 4%, var(--bg-panel));
+  border-radius: var(--radius-sm);
+  background: linear-gradient(160deg, rgb(255 255 255 / 4%) 0%, rgb(255 255 255 / 0%) 55%), var(--bg-elevated);
   cursor: pointer;
   transition: border-color var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out), transform 200ms var(--ease-spring, ease);
 }
-button.bots-strat:hover { border-color: var(--line); background: linear-gradient(180deg, var(--sheen), transparent 60%), color-mix(in srgb, var(--text) 7%, var(--bg-panel)); }
+button.bots-strat:hover { border-color: var(--line); }
 button.bots-strat:active { transform: scale(0.995); }
 .bots-strat__top { display: flex; align-items: center; gap: 10px; }
-.bots-strat__top b { font-weight: 500; font-size: var(--fs-base); }
+.bots-strat__top b { font-weight: 400; font-size: var(--fs-base); }
 .bots-tag { margin-left: auto; padding: 1px 7px; border-radius: 999px; font-size: var(--fs-micro, 11px); color: var(--text); background: color-mix(in srgb, var(--text) 9%, transparent); }
 .bots-strat__line { color: var(--muted); font-size: var(--fs-xs); line-height: 18px; }
 .bots-strat__how { margin: 0; padding: 0 0 0 16px; color: var(--muted); font-size: var(--fs-xs); line-height: 18px; display: flex; flex-direction: column; gap: 4px; }
@@ -268,22 +251,19 @@ button.bots-link { border: 0; background: none; padding: 0; color: var(--text); 
 
 /* --- phone ------------------------------------------------------------------- */
 
+@media (max-width: 1240px) {
+  .bots-top { grid-template-columns: minmax(0, 1fr); }
+}
 @media (max-width: 900px) {
-  .bots-totals { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .bots-totals .bots-total:first-child { grid-column: 1 / -1; }
   .bots-strats { grid-template-columns: 1fr; }
   .bots-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .bots-split { grid-template-columns: 1fr; }
 }
 @media (max-width: 760px) {
-  .panel.lbp.bots { padding: 8px 12px 28px; }
-  .bots-head { flex-direction: column; align-items: stretch; }
-  .fx-cta.bots-new { width: 100%; height: 40px; }
-  .bots-onboard { flex-direction: column; align-items: stretch; }
-  .bots-onboard .fx-cta { width: 100%; }
+  .bots-chartcard .pf-card__body { min-height: 0; }
   /* The list as cards on a phone: the bot and its state, then volume and net PnL. Its controls are in its
      window (a tap opens it). The leaderboard's sideways scroll is not used here. */
-  .bots .lbp-sheet { overflow: hidden; }
+  .bots-tablewrap { overflow: hidden; }
   .bots .lb-table.bots-table { min-width: 0; table-layout: auto; }
   .bots .bots-table thead { display: none; }
   .bots .bots-table tbody { display: block; }
@@ -292,16 +272,15 @@ button.bots-link { border: 0; background: none; padding: 0; color: var(--text); 
     grid-template-columns: minmax(0, 1fr) auto;
     grid-template-areas: 'who state' 'vol pnl';
     gap: 10px 12px;
-    padding: 12px 14px;
+    padding: 12px var(--sp-4);
   }
   .bots .bots-table tr.bots-row + tr.bots-row { border-top: 1px solid var(--panel-line); }
-  .bots .lbp-table td { display: block; height: auto; padding: 0; }
-  .bots .lbp-table td:first-child, .bots .lbp-table td:last-child { padding: 0; }
+  .bots .bots-table td { display: block; height: auto; padding: 0; }
+  .bots .bots-table td:first-child, .bots .bots-table td:last-child { padding: 0; }
   .bots .bots-table td:nth-child(1) { grid-area: who; min-width: 0; }
   .bots .bots-table td:nth-child(3) { grid-area: state; justify-self: end; align-self: center; }
   .bots .bots-table td:nth-child(4) { grid-area: vol; text-align: left; }
   .bots .bots-table td:nth-child(5) { grid-area: pnl; }
   .bots .bots-table td:nth-child(2), .bots .bots-table td:nth-child(6), .bots .bots-table td:nth-child(7), .bots .bots-table td:nth-child(8) { display: none; }
   .bots .bots-table td[data-k]::before { content: attr(data-k); margin-right: 6px; color: var(--muted); font-family: var(--font-text, inherit); font-size: var(--fs-micro, 11px); }
-  .bots-who .algo-practice { display: none; }
 }

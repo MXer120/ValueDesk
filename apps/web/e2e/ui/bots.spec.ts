@@ -19,31 +19,39 @@ const h = uiSuite(import.meta.filename);
 const OUT = join(dirname(fileURLToPath(import.meta.url)), '.out');
 const shot = (page: Page, name: string) => page.screenshot({ path: join(OUT, `bots-${name}${PHONE ? '@phone' : ''}.png`), fullPage: true });
 
-/** Bots > Set up: the copy setup sheet, ValueDesk executor - sign in, then the copy terms. */
+/**
+ * Bots > Set up: the bot setup sheet (no executor to pick, no sign-in step of its own) - the terms, worded for
+ * bots, whose "Sign and accept" signs in to the executor as well; nothing of the copy setup shows.
+ */
 async function setUp(page: Page, wallet: TestWallet): Promise<void> {
   await page.getByRole('button', { name: 'Set up', exact: true }).first().click();
-  const sheet = page.getByRole('dialog', { name: 'Copy setup' });
+  const sheet = page.getByRole('dialog', { name: 'Bot setup' });
   await sheet.waitFor({ state: 'visible' });
+  await page.waitForTimeout(400);
+  await shot(page, 'setup-sheet');
+  for (const copyWords of [/Sign in to the ValueDesk executor/, /copy trading terms/, /One signature shows it/, /Pick where the copier runs/]) {
+    assert.equal(await sheet.getByText(copyWords).count(), 0, `no copy setup wording: ${copyWords}`);
+  }
   const step = (t: string) => sheet.getByRole('listitem').filter({ hasText: t });
-  await step('Sign in to the ValueDesk executor').getByRole('button', { name: 'Sign in', exact: true }).click();
-  await until(page, async () => !(await step('Sign in to the ValueDesk executor').getByRole('button', { name: 'Sign in' }).isVisible()), 'signed in', 20_000);
   const mark = wallet.mark();
-  await step('Accept the copy trading terms').getByRole('button', { name: 'Review', exact: true }).click();
-  for (const s of [/^I am at least 18/, /^I am not a US person/, /^I chose the trader/, /^I have read the copy trading terms/]) await sheet.getByRole('checkbox', { name: s }).check();
+  await step('Accept the terms').getByRole('button', { name: 'Review', exact: true }).click();
+  for (const s of [/^I am at least 18/, /^I am not a US person/, /^I chose every bot/, /^I have read the terms and risk disclosure/]) await sheet.getByRole('checkbox', { name: s }).check();
   await sheet.getByRole('button', { name: 'Sign and accept', exact: true }).click();
   const site = page.getByRole('dialog', { name: 'Sign the terms to continue' });
   await site.waitFor({ state: 'visible' });
   await site.getByRole('checkbox', { name: /^I confirm that/ }).check();
   await site.getByRole('button', { name: 'Only necessary', exact: true }).click();
-  await toast(page, 'Copy trading terms accepted.').waitFor({ state: 'visible', timeout: 30_000 });
-  assert.deepEqual(wallet.since(mark).filter((r) => r.outcome === 'signed').map((r) => r.kind), ['site-terms', 'copy-terms']);
+  await toast(page, 'Terms accepted.').waitFor({ state: 'visible', timeout: 30_000 });
+  await sheet.getByText('Ready to run bots').waitFor({ state: 'visible', timeout: 20_000 });
+  assert.deepEqual(wallet.since(mark).filter((r) => r.outcome === 'signed').map((r) => r.kind), ['site-terms', 'copy-terms', 'copy-sign-in']);
   await sheet.locator('.cs-actions').getByRole('button', { name: 'Close', exact: true }).click();
   await sheet.waitFor({ state: 'hidden' });
 }
 
-h.test('before a wallet: the three strategies, what each costs, and Connect', async ({ page }) => {
-  await page.getByRole('heading', { name: 'Bots', level: 1 }).waitFor();
-  for (const name of ['Volume maker', 'Grid', 'DCA bot']) assert.ok(await page.getByRole('button', { name: new RegExp(name) }).first().isVisible(), name);
+h.test('before a wallet: the two strategies (no DCA bot), what each costs, and Connect', async ({ page }) => {
+  await page.getByRole('heading', { name: 'Bots', exact: true }).waitFor();
+  for (const name of ['Volume maker', 'Grid']) assert.ok(await page.getByRole('button', { name: new RegExp(name) }).first().isVisible(), name);
+  assert.equal(await page.getByText('DCA bot').count(), 0, 'a DCA is an algo order, not a bot');
   assert.ok(await page.getByText('$170').first().isVisible(), 'fees per $1M: 1.2 bp maker + 0.5 bp');
   assert.ok(await page.getByRole('button', { name: 'Connect wallet' }).first().isVisible());
   await shot(page, 'no-wallet');
@@ -51,12 +59,12 @@ h.test('before a wallet: the three strategies, what each costs, and Connect', as
 
 h.test('a practice volume maker: set up, preset, start, its window, pause, edit, stop, delete - one signature each', async ({ page, wallet }) => {
   await connectWallet(page);
-  await page.getByRole('heading', { name: 'Bots', level: 1 }).waitFor();
+  await page.getByRole('heading', { name: 'Bots', exact: true }).waitFor();
   await shot(page, 'setup-needed');
   await setUp(page, wallet);
 
   // Empty: the strategies; pick the volume maker.
-  await page.getByText('Start your first bot').waitFor({ state: 'visible', timeout: 20_000 });
+  await page.getByText('Pick a strategy. Each starts as a practice run').waitFor({ state: 'visible', timeout: 20_000 });
   await shot(page, 'empty');
   await page.getByRole('button', { name: /Volume maker/ }).first().click();
   const form = page.getByRole('dialog', { name: 'New volume maker' });
@@ -64,7 +72,8 @@ h.test('a practice volume maker: set up, preset, start, its window, pause, edit,
   assert.ok(await form.getByRole('button', { name: 'Balanced', exact: true }).getAttribute('aria-pressed').then((x) => x === 'true'), 'Balanced by default');
   await form.getByRole('button', { name: 'Steady', exact: true }).click();
   assert.ok(await form.getByRole('switch', { name: 'Practice' }).isDisabled(), 'live bots are off for this wallet: practice only');
-  await until(page, async () => /\$170/.test((await form.locator('.bots-cost').textContent()) ?? ''), 'the cost per $1M');
+  // SoDEX's 1.2 bp ($120) and the 0.5 bp bot fee ($50) per $1M, less one tick a round trip at the touch.
+  await until(page, async () => { const t = (await form.locator('.bots-cost').textContent()) ?? ''; return /\$120/.test(t) && /\$50/.test(t) && /Spread earned/.test(t); }, 'the cost per $1M');
   await shot(page, 'form');
   let mark = wallet.mark();
   await form.getByRole('button', { name: 'Start practice bot', exact: true }).click();

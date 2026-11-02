@@ -83,7 +83,7 @@ test('bots: the executor advertises them and their fee; their orders carry 0.5 b
   assert.equal(BOT_FEE, 5);
   const fee = (spec: Record<string, unknown>) => (svc as unknown as { algoFee(a: Pick<AlgoRecord, 'owner' | 'spec'>): Promise<number> }).algoFee({ owner: '0x' + '1'.repeat(40), spec: spec as never });
   assert.equal(await fee({ kind: 'mm', bot: true }), 5);
-  assert.equal(await fee({ kind: 'dca', bot: true }), 5);
+  assert.equal(await fee({ kind: 'dca', bot: true }), 5, 'a bot DCA stored before they left the Bots page keeps the bot fee');
   assert.equal(await fee({ kind: 'dca' }), COPY_FEE_LADDER[0]!.fee, 'a plain DCA stays on the copy ladder');
   assert.equal(await fee({ kind: 'twap' }), COPY_FEE_LADDER[0]!.fee);
   await cleanup();

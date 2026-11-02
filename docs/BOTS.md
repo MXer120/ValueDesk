@@ -14,7 +14,9 @@ close what it holds.
 |---|---|---|---|
 | **Volume maker** | `mm` | One post-only bid and one ask at the touch, re-priced as the touch moves (after N ticks, at most every M s). Holds at most an inventory cap either way; while it holds, the adding side steps back (skew), so the unwinding side fills first. Delta-neutral by construction. | fees $170 (SoDEX maker 1.2 bp $120 + bot fee 0.5 bp $50), minus the spread it earns, plus adverse selection on what it holds |
 | **Grid** | `grid` | Post-only orders on 3-60 levels in a range: buys below the price, sells above, one level empty (the gap). A filled buy puts a sell one level up; a filled sell a buy one level down. | fees $170, minus half a step per $1M (a ±2% / 16-level grid: about $1,330 earned per $1M before price moves) |
-| **DCA bot** | `dca` + `bot: true` | A fixed amount every interval, resting only (maker exec). | fees $170 |
+
+A DCA is not a bot (owner, 2026-11-02): it is an algo order on the ticket. The engine refuses `bot: true` on a DCA;
+one stored before that keeps its spec and the bot fee.
 
 Not offered: anything that takes. A taker bot pays SoDEX 4.0 bp + the bot fee + half the spread: $450+ per $1M.
 Delta-neutral across two markets or two accounts is not offered either: SoDEX perps are one-way netted per account,
@@ -22,6 +24,31 @@ so a hedge needs a second account, and a bot trading against its owner's other a
 
 SoDEX tiers (docs/research/10-pooled-fee-account.md): maker 1.2 / 1.0 / 0.6 / 0.2 / 0 bp from $5M / $25M / $100M /
 $500M 14-day volume. A user who reaches tier 1 through bots pays $150 per $1M; tier 3, $70.
+
+### What the market adds
+
+At the touch a volume maker's round trip earns one tick where the spread is one tick, so the tick's share of the
+price comes back: per $1M, tick / 2. SoDEX, 2026-11-02 (tick, spread at the time): BTC 0.13 bp ($6), ETH 0.44 bp
+($22), SOL 1.07 bp ($53), SUI 1.13 bp, DOGE 1.33 bp. The form shows this line for the market picked ("Spread
+earned"). It is before price moves: SOL's live run (below) lost more to a falling price than its tick gave back.
+
+### The queue guard (`queueGuard`, off by default)
+
+SoDEX's bookTicker carries the size at the best bid and ask (`B`, `A`; the feed keeps them on the quote). With a
+guard of e.g. 30%, the side that would ADD to what the bot holds is not quoted - and is pulled where it rests, no
+sooner than 0.5 s after it went out - while the queue at its own best price is under 30% of both best prices: a
+thin queue is about to be traded through, and that fill is the move against it. It comes back no sooner than the
+re-price pause after. The side that unwinds is always quoted. A replay of 15 minutes of SoDEX's book (BTC, ETH,
+SOL, XRP, HYPE) with a queue model put it at 3-5% less cost; live on BTC it was inside the baseline's range.
+
+## The setup
+
+The Bots page has its own setup sheet (components/bots/BotSetupSheet.tsx): the copy setup's steps
+(CopySetupSteps with `bots`), worded for bots - no executor to pick, no sign-in step of its own (the terms step's
+"Sign and accept" signs in to the executor as well; a returning wallet whose terms stand gets "Continue"), the
+risks of a bot, the 0.5 bp fee, "the trading key". Practice: connect, terms. Real: plus the fee and the key.
+The signed terms text is unchanged (it still names the DCA bot among the bots): changing it would make every
+wallet sign again.
 
 ## The fee
 
@@ -83,6 +110,9 @@ fill; every fill a maker fill. Cost per $1M = -net PnL / volume, closed flat at 
 | 3 | Volume maker at the touch, cap one quote, re-price 1 tick / 1 s, skew 6 | 8.1 min | 68 | $723.08 | $0.087 + $0.036 | -$0.164 | $227 |
 | 3 | Grid +/-0.16%, 9 levels (4 bp steps) | 3.5 min | 6 | $69.22 | $0.012 | -$0.047 | $680 (failed: refusals, fixed) |
 | 4 | Grid +/-0.16%, 9 levels (4 bp steps), with the back-off | 12 min | 8 | $88.63 | $0.015 | -$0.0044 | **$50** |
+| 5 | Volume maker **SOL**, $12 quotes, cap $60, re-price 1 tick / 1 s | 12 min | 62 | $758.51 | $0.091 + $0.038 | -$0.186 | $246 (27 post-only refusals; SOL fell 93.27 → 93.13) |
+| 6 | Volume maker BTC, same, **queue guard 30%** | 12 min | 66 | $758.43 | $0.091 + $0.038 | -$0.162 | $214 |
+| 7 | Volume maker **ETH**, same, queue guard 30% | 12 min | 64 | $755.09 | $0.091 + $0.038 | -$0.196 | $260 (35 post-only refusals) |
 
 What the runs say:
 - **Fees are the floor: $170 per $1M** at SoDEX tier 0 (1.2 bp maker + 0.5 bp bot fee). The volume maker at the touch
@@ -93,5 +123,8 @@ What the runs say:
   price swings across its levels; in a one-way move it holds what it sold or bought on the way (run 3).
 - Run 3's grid exposed a bug: a level SoDEX refused in its answer went out again every 0.5 s until the bot hit its
   25-refusal limit. Fixed: a refused level (and a refused maker quote) waits 3 s, doubling to a minute.
+- Runs 5-7 (2026-11-02, about $60 of inventory): BTC stays the cheapest market ($214), ETH $260, SOL $246 - their
+  larger tick gave back less than price moves took. The queue guard changed nothing measurable on BTC. A refused
+  maker quote (post-only: the touch moved under it) now waits 0.5 s, doubling, instead of 3 s.
 - Break-even needs a lower fee floor, not tuning: SoDEX tier 1 ($5M/14 d) takes the maker to 1.0 bp ($150 per $1M),
   tier 2 ($25M) 0.6 bp ($110), and the maker rebate (-0.1 to -0.3 bp above 0.5-3% of SoDEX's maker volume) more.

@@ -15,19 +15,20 @@
  * their behalf, nothing is pre-ticked.
  */
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { COPY_FEE_LADDER, COPY_FEE_MAX, EEA_MAX_LEVERAGE, feePercent, regionPolicy } from '@copy-engine';
+import { BOT_FEE, COPY_FEE_LADDER, COPY_FEE_MAX, EEA_MAX_LEVERAGE, feePercent, regionPolicy } from '@copy-engine';
 import { Modal } from '../components/Modal';
 import { openConnectDialog } from '../components/account/connect';
 import { notify } from '../toast';
 import { tradingConfig } from '../trading/config';
 import { WalletError } from '../wallet';
-import { COPY_RISK_SUMMARY, COPY_STATEMENTS, HOSTED_KEY_NOTICE } from '../legal/copyTerms';
+import { BOT_HOSTED_KEY_NOTICE, BOT_RISK_SUMMARY, BOT_STATEMENT_LABEL, COPY_RISK_SUMMARY, COPY_STATEMENTS, HOSTED_KEY_NOTICE } from '../legal/copyTerms';
 import { countryName } from './countries';
 import { LOCATION_UNKNOWN, useViewerGeo } from '../legal/geo';
 import { DEFAULT_SELF_URL } from './executor';
 import {
   acceptTerms,
   approveFee,
+  getLiveCopy,
   approveKey,
   importKey,
   connectSelf,
@@ -121,23 +122,27 @@ export function copyReady(live: LiveCopy, mode: CopyModeId, paper?: boolean): bo
   return paper ? true : r.fee && r.key;
 }
 
-/** The steps a copy in `mode` needs, in order, and which are done (a paper copy needs no fee and no key). */
-export function setupSteps(live: LiveCopy, mode: CopyModeId, paper?: boolean): Array<{ id: string; done: boolean }> {
+/**
+ * The steps a copy in `mode` needs, in order, and which are done (a paper copy needs no fee and no key). For
+ * bots (the Bots page, always the hosted executor) the sign-in is no step of its own: the terms step signs in
+ * as well, so it is done once both are.
+ */
+export function setupSteps(live: LiveCopy, mode: CopyModeId, paper?: boolean, bots?: boolean): Array<{ id: string; done: boolean }> {
   const r = readiness(live, mode);
   const out = [{ id: 'wallet', done: !!live.owner && live.canSign }];
   if (mode === 'self') out.push({ id: 'copier', done: r.connected });
-  if (mode === 'hosted') out.push({ id: 'signin', done: r.connected });
-  out.push({ id: 'terms', done: r.terms });
+  if (mode === 'hosted' && !bots) out.push({ id: 'signin', done: r.connected });
+  out.push({ id: 'terms', done: bots ? r.terms && r.connected : r.terms });
   if (!paper) out.push({ id: 'fee', done: r.fee }, { id: 'key', done: r.key });
   return out;
 }
 
 /**
  * The steps of one mode, each with its own action: connect, sign in or pair,
- * terms, copy fee, copy key. Used by the setup sheet and by the copy modal's
- * second step.
+ * terms, copy fee, copy key. Used by the setup sheet, by the copy modal's
+ * second step and, worded for bots (`bots`), by the Bots page's setup.
  */
-export function CopySetupSteps({ mode, live, paper }: { mode: CopyModeId; live: LiveCopy; paper?: boolean }) {
+export function CopySetupSteps({ mode, live, paper, bots }: { mode: CopyModeId; live: LiveCopy; paper?: boolean; bots?: boolean }) {
   const [error, setError] = useState<string | null>(null);
   const [working, setWorking] = useState<string | null>(null);
   const [termsOpen, setTermsOpen] = useState(false);
@@ -178,13 +183,16 @@ export function CopySetupSteps({ mode, live, paper }: { mode: CopyModeId; live: 
 
   // The steps of this mode, in order; the first one not done is lit.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const steps = useMemo(() => setupSteps(live, mode, paper), [owner, live.canSign, mode, r.connected, r.terms, r.fee, r.key, paper]);
+  const steps = useMemo(() => setupSteps(live, mode, paper, bots), [owner, live.canSign, mode, r.connected, r.terms, r.fee, r.key, paper, bots]);
   const current = steps.find((s) => !s.done)?.id ?? null;
   const n =(id: string) => steps.findIndex((s) => s.id === id) + 1;
 
   const ladder = COPY_FEE_LADDER.map((s) => `${localize(feePercent(s.fee))}${s.fromUsd ? ` from $${(s.fromUsd / 1e6 >= 1 ? `${fmtPlain(s.fromUsd / 1e6)}M` : `${fmtPlain(s.fromUsd / 1e3)}k`)}` : ''}`).join(', ');
   const keyDays = mode === 'browser' ? [1, 3, 7] : [7, 30, 90, 180];
   const keyHolder = mode === 'browser' ? 'only this browser' : mode === 'hosted' ? 'the ValueDesk executor in Tokyo' : 'your copier';
+  const what = bots ? 'bots' : 'copies';
+  // Bots: the terms step signs in to the executor as well (no step of its own).
+  const termsDone = bots ? r.terms && r.connected : r.terms;
 
   return (
     <>
@@ -198,13 +206,13 @@ export function CopySetupSteps({ mode, live, paper }: { mode: CopyModeId; live: 
           owner && !live.canSign
             ? `${owner.slice(0, 6)}…${owner.slice(-4)} is connected read-only. Every step here is a signature: reconnect it with your wallet.`
             : owner
-              ? `${owner.slice(0, 6)}…${owner.slice(-4)} - its SoDEX account is the one copies trade in.`
-              : 'The wallet whose SoDEX account the copies trade in.'
+              ? `${owner.slice(0, 6)}…${owner.slice(-4)} - its SoDEX account is the one your ${what} trade in.`
+              : `The wallet whose SoDEX account your ${what} trade in.`
         }
         action={(!owner || !live.canSign) && <ActBtn label={owner ? 'Reconnect' : 'Connect'} primary onClick={() => void openConnectDialog()} />}
       />
 
-      {mode === 'hosted' && (
+      {mode === 'hosted' && !bots && (
         <Step
           n={n('signin')}
           done={r.connected}
@@ -272,25 +280,33 @@ export function CopySetupSteps({ mode, live, paper }: { mode: CopyModeId; live: 
 
       <Step
         n={n('terms')}
-        done={r.terms}
+        done={termsDone}
         current={current === 'terms'}
-        title="Accept the copy trading terms"
+        title={bots ? 'Accept the terms' : 'Accept the copy trading terms'}
         desc={
           live.terms
-            ? `Accepted ${new Date(live.terms.acceptedAt).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' })} · from ${countryName(live.terms.country)}.`
-            : 'The risks, the fee, and what you confirm. One signature.'
+            ? `Accepted ${new Date(live.terms.acceptedAt).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' })} · from ${countryName(live.terms.country)}.${bots && !r.connected ? ' One more signature opens your bots.' : ''}`
+            : bots
+              ? 'The risks, the fee, and what you confirm. Two signatures: the terms, then one that opens your bots.'
+              : 'The risks, the fee, and what you confirm. One signature.'
         }
-        action={!r.terms && !termsOpen && <ActBtn label="Review" primary={current === 'terms'} disabled={!owner} onClick={() => setTermsOpen(true)} />}
+        action={
+          !r.terms
+            ? !termsOpen && <ActBtn label="Review" primary={current === 'terms'} disabled={!owner} onClick={() => setTermsOpen(true)} />
+            : bots && !r.connected && (
+              <ActBtn label="Continue" primary={current === 'terms'} disabled={!owner || !live.hosted.info} busy={working === 'signin'} onClick={() => void run('signin', () => signIn('hosted'))} />
+            )
+        }
       >
         {!r.terms && termsOpen && (
           <div className="cs-form">
             <ul className="cs-risks">
-              {COPY_RISK_SUMMARY.map((t) => (
+              {(bots ? BOT_RISK_SUMMARY : COPY_RISK_SUMMARY).map((t) => (
                 <li key={t}>{t}</li>
               ))}
             </ul>
             <p className="fx-note">
-              Read the full <a className="fx-link" href="/copy-terms" target="_blank" rel="noopener">copy trading terms and risk disclosure</a>.
+              Read the full <a className="fx-link" href="/copy-terms" target="_blank" rel="noopener">{bots ? 'terms and risk disclosure' : 'copy trading terms and risk disclosure'}</a>{bots ? ' (bots: section 3).' : '.'}
             </p>
             <p className="fx-note">
               Your location: <b>{country ? `${countryName(country)}, from your connection` : 'unknown'}</b>
@@ -306,7 +322,7 @@ export function CopySetupSteps({ mode, live, paper }: { mode: CopyModeId; live: 
               {COPY_STATEMENTS.map((s) => (
                 <label key={s.id} className="oe-check cs-check">
                   <input type="checkbox" checked={!!ticks[s.id]} onChange={(e) => setTicks({ ...ticks, [s.id]: e.target.checked })} />
-                  <span>{s.label}</span>
+                  <span>{bots ? BOT_STATEMENT_LABEL[s.id] ?? s.label : s.label}</span>
                 </label>
               ))}
             </div>
@@ -315,7 +331,10 @@ export function CopySetupSteps({ mode, live, paper }: { mode: CopyModeId; live: 
               primary
               disabled={!country || !allTicked || !regionPolicy(country, live.viewerCountry).allowed}
               busy={working === 'terms'}
-              onClick={() => void run('terms', () => acceptTerms(country), 'Copy trading terms accepted.')}
+              onClick={() => void run('terms', async () => {
+                await acceptTerms(country);
+                if (bots && !getLiveCopy().hosted.signedIn) await signIn('hosted');
+              }, bots ? 'Terms accepted.' : 'Copy trading terms accepted.')}
             />
           </div>
         )}
@@ -327,15 +346,17 @@ export function CopySetupSteps({ mode, live, paper }: { mode: CopyModeId; live: 
           n={n('fee')}
           done={r.fee}
           current={current === 'fee'}
-          title="Approve the copy fee"
+          title={bots ? 'Approve the fee' : 'Approve the copy fee'}
           desc={
             !tradingConfig().builder
-              ? 'This build of ValueDesk charges no copy fee: nothing to approve.'
+              ? `This build of ValueDesk charges no ${bots ? '' : 'copy '}fee: nothing to approve.`
               : r.fee
               ? `Approved on SoDEX up to ${localize(feePercent(Math.max(live.fee.perps ?? COPY_FEE_MAX, COPY_FEE_MAX)))}.`
-              : `Copied orders pay ${ladder} of their value (by your 14-day volume). SoDEX charges it; you approve up to ${localize(feePercent(COPY_FEE_MAX))} and can revoke it.`
+              : bots
+                ? `Bot orders pay ${localize(feePercent(BOT_FEE))} (${BOT_FEE / 10} bp) of their value, instead of any other ValueDesk fee. SoDEX charges it; you approve up to ${localize(feePercent(COPY_FEE_MAX))} and can revoke it.`
+                : `Copied orders pay ${ladder} of their value (by your 14-day volume). SoDEX charges it; you approve up to ${localize(feePercent(COPY_FEE_MAX))} and can revoke it.`
           }
-          action={!r.fee && <ActBtn label="Approve" primary={current === 'fee'} disabled={!owner} busy={working === 'fee'} onClick={() => void run('fee', approveFee, 'Copy fee approved on SoDEX.')} />}
+          action={!r.fee && <ActBtn label="Approve" primary={current === 'fee'} disabled={!owner} busy={working === 'fee'} onClick={() => void run('fee', approveFee, bots ? 'Fee approved on SoDEX.' : 'Copy fee approved on SoDEX.')} />}
         />
       )}
 
@@ -344,13 +365,13 @@ export function CopySetupSteps({ mode, live, paper }: { mode: CopyModeId; live: 
           n={n('key')}
           done={r.key}
           current={current === 'key'}
-          title="Approve the copy key"
+          title={bots ? 'Approve the trading key' : 'Approve the copy key'}
           desc={
             r.key
               ? mode === 'browser'
                 ? `Registered until ${new Date(live.browser.key!.expiresAt).toLocaleString('en-US', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}.`
                 : `Registered${side?.me?.key?.expiresAt ? ` until ${new Date(side.me.key.expiresAt).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' })}` : ''}.`
-              : `A SoDEX key for perps only, held by ${keyHolder}. It trades your copies; per SoDEX it can also move funds between your own SoDEX accounts and your wallet, never to anyone else.`
+              : `A SoDEX key for perps only, held by ${keyHolder}. It trades your ${what}; per SoDEX it can also move funds between your own SoDEX accounts and your wallet, never to anyone else.`
           }
           action={
             r.key ? (
@@ -363,14 +384,14 @@ export function CopySetupSteps({ mode, live, paper }: { mode: CopyModeId; live: 
                 primary={current === 'key'}
                 disabled={!owner || (mode !== 'browser' && !r.connected) || !r.terms}
                 busy={working === 'key'}
-                onClick={() => void run('key', () => approveKey(mode, days), 'Copy key registered on your SoDEX account.')}
+                onClick={() => void run('key', () => approveKey(mode, days), bots ? 'Trading key registered on your SoDEX account.' : 'Copy key registered on your SoDEX account.')}
               />
             )
           }
         >
           {!r.key && (
             <div className="cs-form">
-              {mode === 'hosted' && current === 'key' && <p className="fx-note fx-note--warn">{HOSTED_KEY_NOTICE}</p>}
+              {mode === 'hosted' && current === 'key' && <p className="fx-note fx-note--warn">{bots ? BOT_HOSTED_KEY_NOTICE : HOSTED_KEY_NOTICE}</p>}
               <div className="cs-days" role="group" aria-label="Key lifetime">
                 <span className="fx-note">Valid for</span>
                 {keyDays.map((d) => (
@@ -421,12 +442,12 @@ export function CopySetupSteps({ mode, live, paper }: { mode: CopyModeId; live: 
 }
 
 /** "2 of 4 done", over a bar: how far this mode's steps are. */
-export function SetupProgress({ live, mode, paper }: { live: LiveCopy; mode: CopyModeId; paper?: boolean }) {
-  const steps = setupSteps(live, mode, paper);
+export function SetupProgress({ live, mode, paper, bots }: { live: LiveCopy; mode: CopyModeId; paper?: boolean; bots?: boolean }) {
+  const steps = setupSteps(live, mode, paper, bots);
   const done = steps.filter((x) => x.done).length;
   return (
     <div className="cs-progress" aria-label={`${done} of ${steps.length} steps done`}>
-      <span className="cs-progress__t">{done === steps.length ? 'Ready to copy' : `${done} of ${steps.length} steps done`}</span>
+      <span className="cs-progress__t">{done === steps.length ? (bots ? 'Ready to run bots' : 'Ready to copy') : `${done} of ${steps.length} steps done`}</span>
       <span className="cs-progress__bar"><i style={{ width: `${(done / steps.length) * 100}%` }} /></span>
     </div>
   );

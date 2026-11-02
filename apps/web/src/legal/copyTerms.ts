@@ -376,3 +376,26 @@ export const HOSTED_KEY_NOTICE: string =
   + 'SoDEX has no key that can trade but cannot move funds: according to SoDEX, this key can also move funds between your own SoDEX spot account, perps account and your own wallet, though not to anyone else. '
   + 'Like any server, it can be attacked: someone who took control of it could use the key until it expires or you revoke it, so choose a short lifetime and keep in your perps account only what you are prepared to have traded. '
   + 'You can stop your copies in the app at any time. To cut the executor off completely, revoke the key on SoDEX with your wallet; once SoDEX has processed that, no order can be placed with it.';
+
+/**
+ * The Bots page's setup (CopySetupSteps with `bots`): the same terms and the same four signed statements, worded
+ * for a bot. The terms cover bots and copies alike, so a statement ticked here still covers both.
+ */
+export const BOT_RISK_SUMMARY: string[] = [
+  'A bot can lose money even when it trades as designed: what it holds moves with the market, and its fees add up over its volume.',
+  'Its loss limit and inventory cap are checked by ValueDesk\'s server while it runs. They are not stop orders on SoDEX: in a fast market or an outage a bot can lose more than its loss limit.',
+  'The cost per $1M shown in the app is a figure from past fills, not a promise.',
+  'ValueDesk\'s server places your bots\' orders around the clock according to their settings, without asking you before each order. Outages, delays and software errors can cause missed, late or wrong orders.',
+  'Anyone who obtains your trading key can trade your SoDEX account and move funds between your own SoDEX accounts and wallet until the key expires or you revoke it on SoDEX.',
+  'A bot must not be used to trade with yourself or with accounts you control (no wash trading).',
+];
+
+export const BOT_STATEMENT_LABEL: Partial<Record<CopyStatementId, string>> = {
+  ownDecision: 'I chose every bot, trader and setting myself. Nobody, including ValueDesk, recommended them to me.',
+  risksUnderstood: 'I have read the terms and risk disclosure, and I understand that I can lose money with bots and copies, and with leverage more than I put in.',
+};
+
+/** Shown before the hosted executor creates the key a bot trades with. */
+export const BOT_HOSTED_KEY_NOTICE: string = HOSTED_KEY_NOTICE
+  .replace('to place your copies around the clock, according to your copy rules and', 'to place your bots\' orders around the clock, according to their settings and')
+  .replace('You can stop your copies in the app', 'You can stop your bots in the app');

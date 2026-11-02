@@ -25,6 +25,7 @@ import {
   gridStart,
   gridAfterFill,
   mmQuotes,
+  queueShare,
   BOT_FEE,
   type AlgoMarket,
   type AlgoRecord,
@@ -67,8 +68,8 @@ class FakeMarket implements AlgoMarket {
   start(): void {}
   stop(): void {}
   watch(): void {}
-  set(bid: number, ask: number): void {
-    this.q = { bid, ask, at: Date.now() };
+  set(bid: number, ask: number, sizes?: { bidSz: number; askSz: number }): void {
+    this.q = { bid, ask, at: Date.now(), ...(sizes ?? {}) };
     this.mk = (bid + ask) / 2;
   }
   quote(): Quote | null {
@@ -244,9 +245,8 @@ test('spec: refusals name the field', () => {
   assert.ok(checkAlgoSpec({ kind: 'mm', symbol: 'BTC-USD', orderUsd: 50, maxInventoryUsd: 200, minRepriceMs: 200 }).errors.minRepriceMs, 'no re-price storm: at least a second');
 });
 
-test('spec: a DCA may be a bot; a spec from before bots keeps its signed text', () => {
-  const dca = parseAlgoSpec({ kind: 'dca', symbol: 'BTC-USD', side: 'buy', perOrderUsd: 20, orders: 10, intervalMs: 3_600_000, bot: true, exec: { style: 'maker' } });
-  assert.equal(dca.bot, true);
+test('spec: only the volume maker and the grid are bots (a DCA is an algo order); a spec from before bots keeps its signed text', () => {
+  assert.ok(checkAlgoSpec({ kind: 'dca', symbol: 'BTC-USD', side: 'buy', perOrderUsd: 20, orders: 10, intervalMs: 3_600_000, bot: true, exec: { style: 'maker' } }).errors.bot);
   const twap = parseAlgoSpec({ kind: 'twap', symbol: 'BTC-USD', side: 'buy', quantity: '1', durationMs: 600_000, slices: 10 });
   assert.ok(!canonicalJSON(twap).includes('"bot"'));
 });
@@ -446,7 +446,7 @@ test('volume maker: the brake and a key problem hold it - nothing new is sent', 
   assert.equal(r.ex.placed.length, 2, 'goes on by itself once it clears');
 });
 
-test('volume maker: refusals (a 429) back off per side, 3 s doubling to a minute; it goes on when SoDEX takes orders again', async () => {
+test('volume maker: refusals (a 429) back off per side, half a second doubling to a minute; it goes on when SoDEX takes orders again', async () => {
   const r = await rig();
   const a = await add(r, MM);
   r.ex.refuse = 'HTTP 429 Too Many Requests';
@@ -560,6 +560,45 @@ test('volume maker edge: quotes at least edgeBps from the mid - a round trip ear
   assert.equal(mmQuotes({ ...s, edgeBps: 0 }, q, MKT, 0, 60_001)[0]!.price, 60_000, 'no edge: the touch');
   const parsed = parseAlgoSpec({ kind: 'mm', symbol: 'BTC-USD', orderUsd: 50, maxInventoryUsd: 200 });
   assert.ok(!('edgeBps' in parsed), 'no edge: not in the signed text');
+});
+
+test('volume maker queue guard: the adding side waits while its own queue is thin; the unwinding side never does', () => {
+  const s = { orderUsd: 60, maxInventoryUsd: 180, offsetTicks: 0, skewTicks: 4, queueGuard: 0.3 };
+  const q = (bidSz: number, askSz: number) => ({ bid: 60_000, ask: 60_002, at: 0, bidSz, askSz });
+  assert.equal(queueShare(q(1, 3), 'buy'), 0.25);
+  assert.equal(queueShare({ bid: 1, ask: 2, at: 0 }, 'buy'), null, 'no sizes: no guard');
+  // Flat: both sides add. A bid queue of 20% is thin: no bid; the ask (80%) stays.
+  assert.deepEqual(mmQuotes(s, q(0.2, 0.8), MKT, 0, 60_001).map((x) => x.side), ['sell']);
+  assert.deepEqual(mmQuotes(s, q(0.5, 0.5), MKT, 0, 60_001).map((x) => x.side), ['buy', 'sell']);
+  // A thin ask queue: flat, the ask adds and waits; long, the ask unwinds - quoted however thin its queue.
+  assert.deepEqual(mmQuotes(s, q(0.9, 0.1), MKT, 0, 60_001).map((x) => x.side), ['buy']);
+  assert.deepEqual(mmQuotes(s, q(0.9, 0.1), MKT, 0.001, 60_001).map((x) => x.side), ['buy', 'sell']);
+  // Off (0 or absent), and a feed without sizes: both sides.
+  assert.equal(mmQuotes({ ...s, queueGuard: 0 }, q(0.05, 0.95), MKT, 0, 60_001).length, 2);
+  assert.equal(mmQuotes(s, { bid: 60_000, ask: 60_002, at: 0 }, MKT, 0, 60_001).length, 2);
+  assert.equal(parseAlgoSpec({ ...MM, symbol: 'BTC-USD', queueGuard: 0.3 }).kind, 'mm');
+  assert.ok(checkAlgoSpec({ ...MM, symbol: 'BTC-USD', queueGuard: 0.8 }).errors.queueGuard, 'at most half');
+  assert.ok(!canonicalJSON(parseAlgoSpec({ ...MM, symbol: 'BTC-USD' })).includes('queueGuard'), 'off: not in the signed text');
+});
+
+test('volume maker queue guard: a thin queue pulls the resting bid; it comes back after the pause, not every flicker', async () => {
+  const r = await rig();
+  r.market.set(60_000, 60_002, { bidSz: 1, askSz: 1 });
+  const a = await add(r, { ...MM, queueGuard: 0.3 });
+  await step(r, a.id);
+  const bid = r.ex.side('buy')[0]!;
+  assert.ok(bid && r.ex.side('sell').length === 1, 'both quotes rest');
+  r.market.set(60_000, 60_002, { bidSz: 0.1, askSz: 1 });
+  await step(r, a.id, 200);
+  assert.ok(!r.ex.cancelled.includes(bid.clOrdID), 'not within half a second of going out');
+  await step(r, a.id, 600);
+  assert.ok(r.ex.cancelled.includes(bid.clOrdID), 'the bid queue thinned to 9%: pulled');
+  assert.equal(r.ex.side('sell').length, 1, 'the ask stays');
+  r.market.set(60_000, 60_002, { bidSz: 1, askSz: 1 });
+  await step(r, a.id, 1_000);
+  assert.equal(r.ex.side('buy').length, 0, 'not back before the re-price pause');
+  await step(r, a.id, 3_000);
+  assert.equal(r.ex.side('buy').length, 1, 'back once the queue is thick again and the pause is over');
 });
 
 test('grid: a level SoDEX refuses waits (3 s, doubling) instead of being sent every step into the refusal limit', async () => {

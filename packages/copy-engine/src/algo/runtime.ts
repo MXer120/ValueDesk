@@ -243,7 +243,7 @@ const EXITS_MAX_REFUSALS = 5;
 const UPDATABLE: ReadonlySet<string> = new Set(['limitPrice', 'upper', 'lower', 'maxSpreadBps', 'label', 'quantity']);
 /** ...and on a running bot (its market, range and levels are what it is: a different one is a new bot). */
 const BOT_UPDATABLE: Readonly<Record<'mm' | 'grid', ReadonlySet<string>>> = {
-  mm: new Set(['label', 'maxSpreadBps', 'upper', 'lower', 'orderUsd', 'maxInventoryUsd', 'offsetTicks', 'chaseTicks', 'minRepriceMs', 'skewTicks', 'edgeBps', 'volumeTargetUsd', 'maxLossUsd', 'endAt', 'onStop']),
+  mm: new Set(['label', 'maxSpreadBps', 'upper', 'lower', 'orderUsd', 'maxInventoryUsd', 'offsetTicks', 'chaseTicks', 'minRepriceMs', 'skewTicks', 'edgeBps', 'queueGuard', 'volumeTargetUsd', 'maxLossUsd', 'endAt', 'onStop']),
   grid: new Set(['label', 'maxSpreadBps', 'upper', 'lower', 'orderUsd', 'volumeTargetUsd', 'maxLossUsd', 'endAt', 'onStop', 'outOfRange']),
 };
 /** A bot closing what it holds rests at the touch this long before it takes... */
@@ -252,6 +252,8 @@ const BOT_CLOSE_REST_MS = 60_000;
 const BOT_CLOSE_SLIP_BPS = 30;
 /** A grid level SoDEX refused (a post-only that would take) is tried again no sooner than this. */
 const GRID_RETRY_MS = 3_000;
+/** A volume maker side SoDEX refused waits this long first (doubling to a minute while it keeps being refused). */
+const MM_RETRY_MS = 500;
 
 /** A grid child's level (0-based, from its tag 'grid 3/10'), or -1. */
 const gridLevelOf = (c: Pick<ChildOrder, 'tag'>): number => {
@@ -1583,6 +1585,11 @@ export class AlgoRuntime {
       return this.hold(a, `Held: the spread (${spreadBps(q).toFixed(1)} bp) is wider than your ${s.maxSpreadBps} bp.`);
     }
     const want = mmQuotes(s, q, m, bookInventory(a.book!), mk);
+    // What it would quote without the queue guard: a side missing only because of the guard is pulled no sooner
+    // than half a second after it went out, and quoted again no sooner than minRepriceMs after (no cancel storm on a
+    // queue that flickers around the line).
+    const unguarded = (s.queueGuard ?? 0) > 0 ? mmQuotes({ ...s, queueGuard: 0 }, q, m, bookInventory(a.book!), mk) : want;
+    const guardedAt = { ...((a.k.mguard as Record<string, number> | undefined) ?? {}) };
     const tick = Number(m.tickSize);
     const live = this.live(a);
     const send: Array<{ side: Side; price: number; quantity: number; tif: ChildTif; tag: string }> = [];
@@ -1592,9 +1599,15 @@ export class AlgoRuntime {
       const mine = live.filter((c) => c.side === side);
       const standing = mine.filter((c) => !c.cancelling);
       if (!w) {
-        pull.push(...standing);
+        const guarded = unguarded.some((x) => x.side === side);
+        if (guarded) {
+          const ripe = standing.filter((c) => now - c.placedAt >= 500);
+          if (ripe.length) guardedAt[side] = now;
+          pull.push(...ripe);
+        } else pull.push(...standing);
         continue;
       }
+      if (!standing.length && !mine.length && (guardedAt[side] ?? 0) + s.minRepriceMs > now) continue;
       if (standing.length) {
         const c = standing[0]!;
         pull.push(...standing.slice(1));
@@ -1611,6 +1624,7 @@ export class AlgoRuntime {
       if (Number((a.k.mretry as Record<string, number> | undefined)?.[side] ?? 0) > now) continue;
       send.push({ side, price: w.price, quantity: w.quantity, tif: 'gtx', tag: side === 'buy' ? 'bid' : 'ask' });
     }
+    a.k.mguard = guardedAt;
     if (pull.length) await this.cancelChildren(a, m, pull);
     if (!send.length || this.stopped(a)) return;
     const sent = await this.send(a, m, send);
@@ -1618,7 +1632,9 @@ export class AlgoRuntime {
     const at = { ...((a.k.mretry as Record<string, number> | undefined) ?? {}) };
     for (const c of sent) {
       if (c.state === 'done' && c.filled <= 1e-12) {
-        back[c.side] = Math.min(60_000, (back[c.side] ?? GRID_RETRY_MS / 2) * 2);
+        // Half a second first: most refusals are post-only ones (the touch moved under the quote), and the next step
+        // prices from the fresh book; a refusal that repeats (a 429) still doubles to a minute.
+        back[c.side] = Math.min(60_000, (back[c.side] ?? MM_RETRY_MS / 2) * 2);
         at[c.side] = Date.now() + back[c.side]!;
       } else delete back[c.side];
     }

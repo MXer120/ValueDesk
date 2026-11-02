@@ -482,6 +482,13 @@ export interface MmSpec extends AlgoBase, BotLimits {
    * Absent (a spec from before it): 0.
    */
   edgeBps?: number;
+  /**
+   * The queue guard, a fraction (0-0.5; absent or 0: off). The side that would add to what it holds is not quoted -
+   * and is pulled where it rests - while the size resting at its own best price is less than this share of both
+   * best prices together: a thin queue is about to be traded through, and the fill it gives is the price running
+   * against it (adverse selection). The side that unwinds is always quoted.
+   */
+  queueGuard?: number;
 }
 
 /**

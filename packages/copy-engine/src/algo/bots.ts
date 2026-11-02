@@ -134,9 +134,10 @@ export interface MmQuote {
  *     that unwinds is the one at the touch;
  *   - a side that would take it past the cap is not quoted; the side that unwinds is sized up to what it
  *     holds when that is less than one order, so it can always reach flat;
- *   - a quote under SoDEX's minimum is raised to it.
+ *   - a quote under SoDEX's minimum is raised to it;
+ *   - with a queue guard, the side that adds is not quoted while its own best price's queue is thin (queueShare).
  */
-export function mmQuotes(s: Pick<MmSpec, 'orderUsd' | 'maxInventoryUsd' | 'offsetTicks' | 'skewTicks' | 'edgeBps'>, q: Quote, m: MarketInfo, inventory: number, mark: number): MmQuote[] {
+export function mmQuotes(s: Pick<MmSpec, 'orderUsd' | 'maxInventoryUsd' | 'offsetTicks' | 'skewTicks' | 'edgeBps' | 'queueGuard'>, q: Quote, m: MarketInfo, inventory: number, mark: number): MmQuote[] {
   const tick = Number(m.tickSize);
   const invUsd = inventory * mark;
   const ratio = Math.max(-1, Math.min(1, invUsd / s.maxInventoryUsd));
@@ -146,6 +147,9 @@ export function mmQuotes(s: Pick<MmSpec, 'orderUsd' | 'maxInventoryUsd' | 'offse
     const adds = side === 'buy' ? inventory >= 0 : inventory <= 0;
     // The cap: an order on the adding side may not take what it holds past it.
     if (adds && Math.abs(invUsd) + s.orderUsd > s.maxInventoryUsd + 1e-9) continue;
+    // The queue guard: a thin queue on its own side is about to be traded through - the fill would be the move against it.
+    const share = queueShare(q, side);
+    if (adds && (s.queueGuard ?? 0) > 0 && share !== null && share < s.queueGuard!) continue;
     const skew = adds ? Math.round(Math.abs(ratio) * s.skewTicks) : 0;
     const inside = s.offsetTicks < 0 && room >= 2 ? 1 : 0;
     const off = Math.max(0, s.offsetTicks) + skew;
@@ -167,6 +171,14 @@ export function mmQuotes(s: Pick<MmSpec, 'orderUsd' | 'maxInventoryUsd' | 'offse
     out.push({ side, price, quantity: qty });
   }
   return out;
+}
+
+/** What rests at `side`'s best price, as a share of both best prices (null: the feed gives no sizes). */
+export function queueShare(q: Quote, side: Side): number | null {
+  const own = side === 'buy' ? q.bidSz : q.askSz;
+  const other = side === 'buy' ? q.askSz : q.bidSz;
+  if (own === undefined || other === undefined || !(own + other > 0)) return null;
+  return own / (own + other);
 }
 
 /* ------------------------------------------------------------------ cost ----- */

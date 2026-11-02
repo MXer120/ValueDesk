@@ -25,11 +25,6 @@ test('every strategy and preset makes a spec the engine accepts, as a bot, in pr
   }
 });
 
-test('a DCA bot rests only (maker), never takes', () => {
-  const s = parseAlgoSpec(specOf(draftFor('dca', 'active'), MARK));
-  assert.ok(s.kind === 'dca' && s.exec.style === 'maker');
-});
-
 test('a grid takes its range from the price, or its own prices; no price, no grid', () => {
   const d = draftFor('grid', 'balanced');
   assert.deepEqual(gridRange(d, 100), { low: 98, high: 102 });
@@ -47,24 +42,29 @@ test('a running bot reads back as its draft; an edit sends only what changed', (
   // A grid's range and levels are what it is: never in a patch.
   const g = draftOfSpec(parseAlgoSpec(specOf(draftFor('grid'), MARK)));
   assert.deepEqual(Object.keys(patchOf(g, { ...g, levels: 30, low: 1, orderUsd: 40 })), ['orderUsd']);
-  // A DCA bot's schedule is what it is: only its name.
-  const c = draftOfSpec(parseAlgoSpec(specOf(draftFor('dca'), MARK)));
-  assert.deepEqual(patchOf(c, { ...c, perOrderUsd: 99, label: 'x' }), { label: 'x' });
 });
 
-test('cost per $1M: 1.2 bp maker + 0.5 bp bot fee = $170; a grid earns half a step per $1M', () => {
+test('cost per $1M: 1.2 bp maker + 0.5 bp bot fee = $170; the maker gets one tick a round trip back, a grid half a step per $1M', () => {
   const m = costPerMillion(draftFor('maker'), BTC, MARK);
   assert.equal(Math.round(m.trade), 120);
   assert.equal(Math.round(m.builder), 50);
   assert.equal(Math.round(m.fees), 170);
-  assert.equal(m.edge, null);
+  // At the touch the spread gives one tick a round trip: BTC's $1 at $78,000 is 0.13 bp, $6.41 per $1M.
+  assert.ok(Math.abs(m.edge! - 6.41) < 0.01, String(m.edge));
+  assert.equal(costPerMillion({ ...draftFor('maker'), edgeBps: 2 }, BTC, MARK).edge, null, 'away from the touch: not counted');
+  assert.equal(costPerMillion(draftFor('maker'), BTC, null).edge, null, 'no price: not counted');
   const g = costPerMillion(draftFor('grid', 'balanced'), BTC, MARK);
   assert.ok(g.edge !== null && g.edge > 0);
   // ±2% over 16 levels: steps of about 0.27%, half of it per $1M = about $1,330, net about -$1,160 (it earns).
   assert.ok(g.edge! > 1_200 && g.edge! < 1_450, String(g.edge));
   assert.ok(Math.abs(g.net - (170 - g.edge!)) < 1e-6);
   // Unknown market: SoDEX's tier-0 maker fee.
-  assert.equal(Math.round(costPerMillion(draftFor('dca'), null, null).fees), 170);
+  assert.equal(Math.round(costPerMillion(draftFor('maker'), null, null).fees), 170);
+});
+
+test('the Bots page runs the volume maker and the grid only; a DCA is an algo order', () => {
+  assert.deepEqual([...STRATEGIES], ['maker', 'grid']);
+  assert.ok(checkAlgoSpec({ kind: 'dca', symbol: 'BTC-USD', side: 'buy', perOrderUsd: 20, orders: 3, intervalMs: 3_600_000, bot: true, exec: { style: 'maker' } }).errors.bot);
 });
 
 test('presets differ: each strategy\'s three are not the same', () => {

@@ -58,7 +58,7 @@ export const ALGO_LIMITS = {
   trailing: { trailPct: { min: 0.001, max: 0.5 }, chaseMs: { min: 1_000, max: 10 * MIN } },
   basket: { legs: { min: 2, max: 10 }, legUsd: { min: 10, max: 10_000_000 } },
   sweep: { slippageBps: { min: 1, max: 1_000 }, roundMs: { min: 500, max: MIN }, timeoutMs: { min: 5_000, max: DAY } },
-  mm: { orderUsd: { min: 10, max: 100_000 }, maxInventoryUsd: { min: 10, max: 1_000_000 }, offsetTicks: { min: -1, max: 1_000 }, chaseTicks: { min: 1, max: 1_000 }, minRepriceMs: { min: 1_000, max: MIN }, skewTicks: { min: 0, max: 1_000 }, edgeBps: { min: 0, max: 100 } },
+  mm: { orderUsd: { min: 10, max: 100_000 }, maxInventoryUsd: { min: 10, max: 1_000_000 }, offsetTicks: { min: -1, max: 1_000 }, chaseTicks: { min: 1, max: 1_000 }, minRepriceMs: { min: 1_000, max: MIN }, skewTicks: { min: 0, max: 1_000 }, edgeBps: { min: 0, max: 100 }, queueGuard: { min: 0, max: 0.5 } },
   grid: { levels: { min: 3, max: 60 }, orderUsd: { min: 10, max: 100_000 } },
   bot: { volumeTargetUsd: { min: 100, max: 1e10 }, maxLossUsd: { min: 1, max: 1e8 } },
   exitPct: { min: 0.001, max: 10 },
@@ -236,8 +236,9 @@ function base(o: Obj, kind: AlgoKind, e: Errors): AlgoBase {
   b.exits = exits(o, b.side, e);
   if (b.exits && b.reduceOnly) e.exits = 'A reduce-only order opens nothing to protect: no exits on it.';
   // Only when true, so a spec from before bots keeps its canonical text (what was signed).
-  if (BOT_KINDS.includes(kind) || (kind === 'dca' && o.bot === true)) b.bot = true;
-  else if (o.bot === true) e.bot = 'Only a volume maker, a grid or a DCA runs as a bot.';
+  // (A bot DCA, started before 2026-11-02 when the owner took it off the Bots page, keeps its stored spec; none starts now.)
+  if (BOT_KINDS.includes(kind)) b.bot = true;
+  else if (o.bot === true) e.bot = kind === 'dca' ? 'A DCA runs as an algo order, not a bot: start it from the order ticket.' : 'Only a volume maker or a grid runs as a bot.';
   if (b.bot && b.exits) e.exits = 'A bot places no take-profit or stop-loss: set a loss limit instead.';
   // A volume maker and a grid buy and sell: one limit price would stop one side only. Their range is the bounds (hold or stop).
   if (BOT_KINDS.includes(kind) && b.limitPrice !== null) e.limitPrice = 'A bot buys and sells: it has no limit price. Use the bounds to hold or stop it.';
@@ -649,6 +650,7 @@ export function checkAlgoSpec(input: unknown, depth = 0): AlgoSpecCheck {
       };
       // Only when above 0, so a spec without it keeps its canonical text.
       if (o.edgeBps !== undefined && o.edgeBps !== null && Number(o.edgeBps) !== 0) (spec as MmSpec).edgeBps = num(o, 'edgeBps', 'Distance from the mid', L.edgeBps, e);
+      if (o.queueGuard !== undefined && o.queueGuard !== null && Number(o.queueGuard) !== 0) (spec as MmSpec).queueGuard = num(o, 'queueGuard', 'Queue guard', L.queueGuard, e);
       break;
     }
     case 'grid': {

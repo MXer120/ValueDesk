@@ -34,14 +34,6 @@ import {
 } from '../../bots/presets';
 import { parseAlgoSpec } from '@copy-engine';
 
-const HOUR = 3_600_000;
-const EVERY: Array<{ value: number; label: string }> = [
-  { value: HOUR, label: '1h' },
-  { value: 4 * HOUR, label: '4h' },
-  { value: 12 * HOUR, label: '12h' },
-  { value: 24 * HOUR, label: '1d' },
-];
-
 /** One number, drawn like the ticket's Price and Amount boxes (AlgoTicket's Field): name left, value right, unit. */
 function NumField({ label, value, onChange, unit, placeholder, disabled, err, optional }: {
   label: string; value: number | null; onChange: (v: number | null) => void; unit?: string; placeholder?: string; disabled?: boolean; err?: string | null;
@@ -120,8 +112,7 @@ export function describe(d: BotDraft, range: { low: number; high: number } | nul
   const m = d.symbol;
   const stop = [d.maxLossUsd !== null ? `stops at a loss of ${fmtUsd(d.maxLossUsd, 0)}` : null, d.volumeTargetUsd !== null ? `stops after ${fmtUsd(d.volumeTargetUsd, 0)} traded` : null].filter(Boolean).join(' or ');
   if (d.strategy === 'maker') return `Quotes ${fmtUsd(d.orderUsd, 0)} on each side of ${m} at the best price, holds at most ${fmtUsd(d.maxInventoryUsd, 0)} either way${stop ? ` and ${stop}` : ''}.`;
-  if (d.strategy === 'grid') return `Rests ${fmtUsd(d.orderUsd, 0)} orders on ${d.levels} levels of ${m} between ${range ? `${fmtUsd(range.low)} and ${fmtUsd(range.high)}` : 'two prices'}${stop ? ` and ${stop}` : ''}.`;
-  return `${d.side === 'buy' ? 'Buys' : 'Sells'} ${fmtUsd(d.perOrderUsd, 0)} of ${m} every ${EVERY.find((e) => e.value === d.intervalMs)?.label ?? `${Math.round(d.intervalMs / HOUR)}h`}, ${d.orders} times, resting only (${fmtUsd(d.perOrderUsd * d.orders, 0)} in all).`;
+  return `Rests ${fmtUsd(d.orderUsd, 0)} orders on ${d.levels} levels of ${m} between ${range ? `${fmtUsd(range.low)} and ${fmtUsd(range.high)}` : 'two prices'}${stop ? ` and ${stop}` : ''}.`;
 }
 
 export function BotForm({ open, onClose, strategy: initial, editing, liveAllowed, botFeeTenths, onStart, onSave, setupWhy, onSetup }: {
@@ -138,7 +129,7 @@ export function BotForm({ open, onClose, strategy: initial, editing, liveAllowed
   onSave: (patch: Record<string, unknown>) => Promise<void>;
   /** The step of the executor setup still missing, in words, for practice or live. */
   setupWhy: (paper: boolean) => string | null;
-  onSetup: () => void;
+  onSetup: (paper: boolean) => void;
 }) {
   const before = useMemo(() => (editing ? draftOfSpec(editing.algo.spec) : null), [editing]);
   const [strategy, setStrategy] = useState<Strategy | null>(initial);
@@ -245,6 +236,9 @@ export function BotForm({ open, onClose, strategy: initial, editing, liveAllowed
               <DlgRow title="Distance from the mid" line="Each quote rests at least this far from the mid. At 1.7 bp every round trip pays its own fees: fewer fills, lower cost. 0: at the best price." stack>
                 <NumField label="At least" value={d.edgeBps} onChange={(v) => set({ edgeBps: v ?? 0 })} unit="bp" />
               </DlgRow>
+              <DlgRow title="Thin-queue guard" line="The side that would add waits while the queue at its best price is under this share of both best prices: a thin queue is about to be traded through, and that fill is the price running against it. 0: off." stack>
+                <NumField label="Under" value={Math.round(d.queueGuard * 100)} onChange={(v) => set({ queueGuard: Math.max(0, Math.min(50, v ?? 0)) / 100 })} unit="%" />
+              </DlgRow>
               <DlgRow title="Unwind first" line="While it holds, the side that would add more steps back this many ticks at the cap." stack>
                 <NumField label="Skew" value={d.skewTicks} onChange={(v) => v !== null && set({ skewTicks: Math.round(v) })} unit="ticks" />
               </DlgRow>
@@ -275,26 +269,9 @@ export function BotForm({ open, onClose, strategy: initial, editing, liveAllowed
               </DlgRow>
             </>
           )}
-          {d.strategy === 'dca' && (
-            <>
-              <DlgRow title="Side" line={locked ? 'A running DCA keeps its schedule; only its name changes.' : 'Build a long (buy) or a short (sell).'}>
-                <DlgSeg label="Side" value={d.side} disabled={locked} options={[{ value: 'buy', label: 'Buy' }, { value: 'sell', label: 'Sell' }]} onChange={(v) => set({ side: v })} />
-              </DlgRow>
-              <DlgRow title="Every" line="How often it places an order.">
-                <DlgSeg label="Every" value={d.intervalMs} disabled={locked} options={EVERY} onChange={(v) => set({ intervalMs: v })} />
-              </DlgRow>
-              <DlgRow title="Amount" line="Each order, and how many." stack>
-                <div className="bots-pair">
-                  <NumField label="Each" value={d.perOrderUsd} disabled={locked} onChange={(v) => v !== null && set({ perOrderUsd: v })} unit="USD" />
-                  <NumField label="Orders" value={d.orders} disabled={locked} onChange={(v) => v !== null && set({ orders: Math.round(v) })} />
-                </div>
-              </DlgRow>
-            </>
-          )}
         </DlgSection>
 
-        {d.strategy !== 'dca' && (
-          <DlgSection label="Limits">
+        <DlgSection label="Limits">
             <DlgRow title="Loss limit" line="Stops once its net PnL, after every fee, is this far below zero." stack>
               <NumField label="Stop at" value={d.maxLossUsd} optional onChange={(v) => set({ maxLossUsd: v })} unit="USD" />
             </DlgRow>
@@ -305,7 +282,6 @@ export function BotForm({ open, onClose, strategy: initial, editing, liveAllowed
               <DlgSeg label="When it stops" value={d.onStop} options={[{ value: 'close', label: 'Close' }, { value: 'keep', label: 'Keep' }]} onChange={(v) => set({ onStop: v })} />
             </DlgRow>
           </DlgSection>
-        )}
 
         <DlgSection label="Run">
           <DlgRow title="Name" line="Optional." stack>
@@ -327,7 +303,7 @@ export function BotForm({ open, onClose, strategy: initial, editing, liveAllowed
           <div className="bots-cost__row"><span>SoDEX maker fee</span><span>{fmtUsd(cost.trade, 0)}</span></div>
           <div className="bots-cost__row"><span>ValueDesk fee ({(botFeeTenths / 10).toFixed(1)} bp)</span><span>{fmtUsd(cost.builder, 0)}</span></div>
           <div className="bots-cost__row"><span>Spread</span><span>{fmtUsd(0, 0)} <small>never paid: every order rests</small></span></div>
-          {cost.edge !== null && <div className="bots-cost__row is-pos"><span>Grid steps earn</span><span>−{fmtUsd(cost.edge, 0)}</span></div>}
+          {cost.edge !== null && <div className="bots-cost__row is-pos"><span>{d.strategy === 'grid' ? 'Grid steps earn' : `Spread earned (one tick, ${market && mark ? ((Number(market.tickSize) / mark) * 10_000).toFixed(2) : '-'} bp, a round trip)`}</span><span>−{fmtUsd(cost.edge, 0)}</span></div>}
           <div className="bots-cost__row is-total"><span>Per $1M traded{cost.edge !== null ? ', before price moves' : ', before price moves and spread earned'}</span><span className={cost.net < 0 ? 'pos' : ''}>{cost.net < 0 ? `earns ${fmtUsd(-cost.net, 0)}` : fmtUsd(cost.net, 0)}</span></div>
         </div>
 
@@ -335,7 +311,7 @@ export function BotForm({ open, onClose, strategy: initial, editing, liveAllowed
         {check.errors.map((e) => <p key={e} className="fx-note fx-note--err" role="alert">{e}</p>)}
         {why && (
           <p className="fx-note">
-            {why} <button type="button" className="bots-link" onClick={onSetup}>Set up</button>
+            {why} <button type="button" className="bots-link" onClick={() => onSetup(paper)}>Set up</button>
           </p>
         )}
         {error && <p className="fx-note fx-note--err" role="alert">{error}</p>}

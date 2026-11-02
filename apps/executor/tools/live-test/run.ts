@@ -248,7 +248,12 @@ async function main(): Promise<number> {
     const m = all.find((x) => x.name === s);
     if (m) cands.push({ m, book: await reads.quote(s) });
   }
-  const pick = pickMarket(cands);
+  // LIVE_MAIN=SOL-USD: the main market named for this run (the bots' cost per $1M differs by market), else the cheapest candidate.
+  const forced = process.env.LIVE_MAIN?.trim().toUpperCase() || '';
+  const forcedM = forced ? all.find((x) => x.name === forced) : undefined;
+  if (forced && !forcedM) throw new Error(`LIVE_MAIN=${forced}: SoDEX lists no such perps market.`);
+  if (forcedM && !cands.some((c) => c.m.name === forcedM.name)) cands.unshift({ m: forcedM, book: await reads.quote(forcedM.name) });
+  const pick = forcedM ? { ...pickMarket(cands.filter((c) => c.m.name === forcedM.name)), m: forcedM } : pickMarket(cands);
   const main = pick.m;
   const second = cands.find((c) => c.m.name !== main.name)?.m ?? main;
   const U = Math.ceil(main.minNotional * 1.2);

@@ -1,5 +1,5 @@
 /**
- * Bots on a real exchange (the Bots page's volume maker, grid and DCA bot: algo kinds 'mm', 'grid', 'dca' with
+ * Bots on a real exchange (the Bots page's volume maker and grid: algo kinds 'mm' and 'grid' with
  * bot: true) at the smallest size SoDEX takes, and the numbers the owner asked for (2026-11-02): volume, the fees
  * SoDEX charged, the builder fee, net PnL and the cost per $1M - from SoDEX's own fills, not the executor's book.
  *
@@ -173,19 +173,6 @@ export const BOT_SCENARIOS: Scenario[] = [
       await nothingResting(t, v.algo.id);
       t.check(v.algo.children.filter((c) => c.tag.startsWith('grid')).every((c) => c.tif === 'gtx'), 'every level went out post-only (GTX)');
       await report(t, v, 'grid', { range: [(v.algo.spec as { low: number }).low, (v.algo.spec as { high: number }).high], tuning: GRID_TUNING });
-    },
-  }),
-
-  bot('bot.dca', 'dca', 'DCA bot: resting buys on a schedule at the bot fee', 'each installment rests (never takes), carries the 0.5 bp bot fee - not the copy ladder - and the run\'s numbers', {
-    timeoutMs: 8 * MIN,
-    slow: false,
-    cost: (U) => ({ takerUsd: 2 * U, makerUsd: 2 * U, peakUsd: 2 * U }),
-    async run(t) {
-      const v0 = await t.start({ kind: 'dca', bot: true, side: 'buy', perOrderUsd: t.U, orders: 2, intervalMs: MIN, exec: { style: 'maker', offsetTicks: 0, chaseTicks: 1 } });
-      t.check(v0.algo.spec.bot === true, 'it runs as a bot');
-      const v = await t.waitEnded(v0.algo.id, 6 * MIN, true);
-      t.check(v.algo.children.every((c) => c.tif === 'gtx'), 'every installment rested (GTX): a maker DCA never takes');
-      await report(t, v, 'DCA bot');
     },
   }),
 

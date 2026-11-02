@@ -241,7 +241,11 @@ export class AlgoFeed implements AlgoMarket {
         const s = typeof r.s === 'string' ? r.s.toUpperCase() : null;
         const bid = toNum(r.b);
         const ask = toNum(r.a);
-        if (s && bid !== null && ask !== null && bid > 0 && ask > 0 && ask >= bid) this.quotes.set(s, { bid, ask, at: now });
+        const bidSz = toNum(r.B);
+        const askSz = toNum(r.A);
+        if (s && bid !== null && ask !== null && bid > 0 && ask > 0 && ask >= bid) {
+          this.quotes.set(s, { bid, ask, at: now, ...(bidSz !== null && bidSz >= 0 ? { bidSz } : {}), ...(askSz !== null && askSz >= 0 ? { askSz } : {}) });
+        }
       }
       return;
     }

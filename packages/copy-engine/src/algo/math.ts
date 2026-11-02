@@ -256,6 +256,9 @@ export interface Quote {
   bid: number;
   ask: number;
   at: number;
+  /** What rests at the best bid and ask, base units (SoDEX's bookTicker B / A); absent where the feed gives none. */
+  bidSz?: number;
+  askSz?: number;
 }
 
 export const mid = (q: Quote): number => (q.bid + q.ask) / 2;
