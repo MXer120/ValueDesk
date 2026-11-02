@@ -128,3 +128,30 @@ What the runs say:
   maker quote (post-only: the touch moved under it) now waits 0.5 s, doubling, instead of 3 s.
 - Break-even needs a lower fee floor, not tuning: SoDEX tier 1 ($5M/14 d) takes the maker to 1.0 bp ($150 per $1M),
   tier 2 ($25M) 0.6 bp ($110), and the maker rebate (-0.1 to -0.3 bp above 0.5-3% of SoDEX's maker volume) more.
+
+## Getting the maker's cost down (2026-11-02, owner: "get cost for mm down", ETH / ZEC / SOL)
+
+Every run: the test wallet, $12 quotes, $24 cap, 15 min, ETH and SOL side by side, then ZEC (scenario `bot.makers`).
+Net, gross (spread earned less adverse selection) and fees per $1M from SoDEX's own fills; fees are $170 in every run.
+
+| Version | Executor | ETH net (gross) | SOL net (gross) | ZEC net (gross) |
+|---|---|---|---|---|
+| v1: one quote at the touch | laptop (DE) | $229 (−59) | $272 (−102) | $136 (+34) |
+| v2: ladder 2 + move guard 2 + one tick inside | laptop | $241 (−71) | $483 (−313) | $240 (−70) |
+| v3: one tick back + ladder 3 (kept when the touch comes) | laptop | $239 (−69) | $261 (−91) | $326 (−156) |
+| h1: v1 | **Tokyo (hosted)** | **$195 (−25)** | **$202 (−32)** | $290 (−120) |
+| h2: v1 + ladder 2 | Tokyo | $290 (−120) | $317 (−147) | $219 (−49) |
+
+Also: MCD one tick inside its 14 bp spread, 3 bp from the mark: 0 fills in 12 min (24 taker trades on the whole market).
+
+What the recordings say (15 + 20 min of SoDEX's book and trades, `bookTicker` + `trade`): a fill while its level holds
+(the front of the queue) earns +0.05 to +0.97 bp on ETH and SOL against the mid 5-30 s later; a fill that clears the
+level (the back of the queue: the sweep) loses 0.2 to 1.8 bp. The bot's fills look like the second kind: it joins the
+back of queues the fastest makers lead. Latency is a real part of it: SoDEX answers this laptop in 310-340 ms, and the
+same settings cost $34-70 less per $1M from the Tokyo executor. Keeping queue place with a ladder did not pay: the
+kept quotes are the ones a sweep reaches.
+
+Where that leaves $100 per $1M: the fees alone are $170. Below that needs a positive gross, which only the front of the
+queue or a spread of several ticks gives (ZEC's 6-tick spread was +$34 once, −$49 to −$156 the other runs). The levers
+left are the fee floor (the bot fee: 0.5 bp = $50 per $1M; SoDEX's tiers 1.0 / 0.6 bp maker from $5M / $25M 14-day
+volume; the maker rebate), and longer runs to tell 15-minute regimes from real differences.
