@@ -105,6 +105,8 @@ export interface AdminRouteOptions {
   builderAccount?: () => Promise<BuilderAccount | null>;
   /** Our own wallets: always listed, marked internal (VALUESCAN_ADMIN_INTERNAL_WALLETS). */
   internal?: readonly string[];
+  /** Every wallet the copy executor knows (tests); default a GET of its /internal/users, kept a minute. */
+  executorUsers?: () => Promise<ExecutorUser[] | null>;
   /** Copy the ledger's counted orders every FEE_SYNC_MS (off in tests). */
   syncTimer?: boolean;
   now?: () => number;
@@ -158,6 +160,55 @@ export async function liveBuilderAccount(builderId: number, wallet = BUILDER_WAL
     value = null;
   }
   accountCache = { at: now, value };
+  return value;
+}
+
+/**
+ * One wallet as the copy executor (server 2) knows it: who signed the site's terms or the copy
+ * terms, follows a trader, runs an algo or holds a key there. The ledger and the analytics
+ * here never see most of them - a terms signer who never traded, a hosted follower.
+ */
+export interface ExecutorUser {
+  owner: string;
+  firstAt: number | null;
+  lastSignedAt: number | null;
+  siteTermsAt: number | null;
+  copyTermsAt: number | null;
+  country: string | null;
+  viewerCountry: string | null;
+  copies: number;
+  activeCopies: number;
+  algos: number;
+  liveAlgos: number;
+  keys: number;
+  lastActivityAt: number | null;
+}
+
+let executorCache: { at: number; value: ExecutorUser[] | null } | null = null;
+/**
+ * GET the executor's user list, straight to its server (VALUESCAN_ADMIN_EXECUTOR_URL, default
+ * server 2's origin name): its Caddy asks for the origin secret, the route for the internal token
+ * (= the executor's EXECUTOR_BUILDER_TOKEN). A minute's cache; null when it cannot be read.
+ */
+export async function liveExecutorUsers(env: Readonly<Record<string, string | undefined>> = process.env, now = Date.now()): Promise<ExecutorUser[] | null> {
+  if (executorCache && now - executorCache.at < 60_000) return executorCache.value;
+  const base = (env.VALUESCAN_ADMIN_EXECUTOR_URL?.trim() || 'https://13-140-77-201.sslip.io').replace(/\/+$/, '');
+  const token = env.VALUESCAN_INTERNAL_TOKEN?.trim() ?? '';
+  const secret = env.VALUESCAN_ORIGIN_SECRET?.split(',')[0]?.trim() ?? '';
+  let value: ExecutorUser[] | null = null;
+  if (token) {
+    try {
+      const r = await fetch(`${base}/api/copy/v1/internal/users`, {
+        signal: AbortSignal.timeout(8_000),
+        headers: { accept: 'application/json', 'X-Internal-Token': token, ...(secret ? { 'X-Origin-Verify': secret } : {}) },
+      });
+      const j = (await r.json()) as { users?: unknown };
+      if (r.ok && Array.isArray(j.users)) value = (j.users as ExecutorUser[]).filter((u) => typeof u?.owner === 'string' && /^0x[0-9a-f]{40}$/.test(u.owner));
+    } catch {
+      value = null;
+    }
+  }
+  executorCache = { at: now, value };
   return value;
 }
 
@@ -398,16 +449,20 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOptions 
     const builder = l ? builderUsers(l.ledger, store(), l.cfg, now()) : [];
     const activity = opts.analytics ? opts.analytics().walletActivity() : new Map();
     const chats = new Map(feedback().adminThreads().filter((t) => t.wallet).map((t) => [t.wallet!, t.id]));
-    const all = new Set<string>([...builder.map((u) => u.address), ...activity.keys(), ...chats.keys(), ...internal]);
+    const fromExecutor = await (opts.executorUsers ?? (() => liveExecutorUsers()))().catch(() => null);
+    const executor = new Map((fromExecutor ?? []).map((u) => [u.owner, u]));
+    const all = new Set<string>([...builder.map((u) => u.address), ...activity.keys(), ...chats.keys(), ...executor.keys(), ...internal]);
     const byAddress = new Map(builder.map((u) => [u.address, u]));
     const users = [...all].map((address) => ({
       address,
       builder: byAddress.get(address) ?? null,
       activity: activity.get(address) ?? null,
+      executor: executor.get(address) ?? null,
       ticket: chats.get(address) ?? null,
       internal: internal.has(address),
     }));
-    return { ok: true, users, builderId: l?.cfg.builderId ?? null };
+    // executorRead false: server 2 could not be read, so its followers and signers are missing from the list.
+    return { ok: true, users, builderId: l?.cfg.builderId ?? null, executorRead: fromExecutor !== null };
   });
 
   app.post('/api/admin/analytics', { bodyLimit: 1024 }, async (req) => {

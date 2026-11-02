@@ -129,6 +129,23 @@ export interface KeyRow {
   checkedAt: number | null;
 }
 
+/** One wallet as the admin suite lists it (usersSummary): times in ms, countries two letters. */
+export interface UserSummary {
+  owner: string;
+  firstAt: number | null;
+  lastSignedAt: number | null;
+  siteTermsAt: number | null;
+  copyTermsAt: number | null;
+  country: string | null;
+  viewerCountry: string | null;
+  copies: number;
+  activeCopies: number;
+  algos: number;
+  liveAlgos: number;
+  keys: number;
+  lastActivityAt: number | null;
+}
+
 export interface ConsentRow {
   owner: string;
   action: string;
@@ -486,6 +503,42 @@ export class ExecutorDb implements CopyStore, AlgoStore {
     return (this.db.prepare(`SELECT * FROM notices WHERE owner = ? AND at < ?${gradeSql} ORDER BY at DESC LIMIT ?`).all(owner, q.before ?? Number.MAX_SAFE_INTEGER, ...grades, limit) as Row[]).map((r) => ({
       id: String(r.id), owner: String(r.owner), source: String(r.source) as EngineNotice['source'], ref: String(r.ref), kind: String(r.kind) as EngineNotice['kind'],
       grade: String(r.grade) as EngineNotice['grade'], title: String(r.title), body: String(r.body), at: Number(r.at), paper: Number(r.paper) === 1,
+    }));
+  }
+
+  /**
+   * Every wallet this executor knows, one row each, for the owner's admin suite (server.ts
+   * GET /internal/users, behind the internal token): when it first and last signed something,
+   * its ValueDesk terms (site) and copy terms, the countries it declared and the edge saw, how
+   * many copies and algos it has, whether a key is registered. Never a key, a signature or a payload.
+   */
+  usersSummary(): UserSummary[] {
+    const rows = this.q(`
+      WITH owners AS (
+        SELECT owner FROM consents UNION SELECT owner FROM subs UNION SELECT owner FROM algos UNION SELECT owner FROM keys UNION SELECT owner FROM terms
+      )
+      SELECT o.owner AS owner,
+        (SELECT MIN(at) FROM consents c WHERE c.owner = o.owner) AS first_at,
+        (SELECT MAX(at) FROM consents c WHERE c.owner = o.owner) AS last_signed_at,
+        (SELECT MAX(at) FROM consents c WHERE c.owner = o.owner AND c.action = 'accept-site-terms') AS site_terms_at,
+        (SELECT MAX(at) FROM consents c WHERE c.owner = o.owner AND c.action = 'accept-terms') AS copy_terms_at,
+        (SELECT json_extract(payload, '$.country') FROM consents c WHERE c.owner = o.owner AND c.action IN ('accept-site-terms', 'accept-terms') ORDER BY seq DESC LIMIT 1) AS country,
+        (SELECT viewer_country FROM consents c WHERE c.owner = o.owner AND viewer_country IS NOT NULL ORDER BY seq DESC LIMIT 1) AS viewer_country,
+        (SELECT COUNT(*) FROM subs s WHERE s.owner = o.owner) AS copies,
+        (SELECT COUNT(*) FROM subs s WHERE s.owner = o.owner AND json_extract(s.json, '$.status') = 'active') AS active_copies,
+        (SELECT COUNT(*) FROM algos a WHERE a.owner = o.owner) AS algos,
+        (SELECT COUNT(*) FROM algos a WHERE a.owner = o.owner AND json_extract(a.json, '$.status') NOT IN ('done', 'cancelled', 'expired', 'failed')) AS live_algos,
+        (SELECT COUNT(*) FROM keys k WHERE k.owner = o.owner AND k.registered = 1) AS keys,
+        (SELECT MAX(at) FROM activity x WHERE x.owner = o.owner) AS last_activity_at
+      FROM owners o`).all() as Row[];
+    const n = (v: unknown): number | null => (v === null || v === undefined ? null : Number(v));
+    const s = (v: unknown): string | null => (typeof v === 'string' && /^[A-Za-z]{2}$/.test(v) ? v.toUpperCase() : null);
+    return rows.map((r) => ({
+      owner: String(r.owner).toLowerCase(),
+      firstAt: n(r.first_at), lastSignedAt: n(r.last_signed_at), siteTermsAt: n(r.site_terms_at), copyTermsAt: n(r.copy_terms_at),
+      country: s(r.country), viewerCountry: s(r.viewer_country),
+      copies: Number(r.copies), activeCopies: Number(r.active_copies), algos: Number(r.algos), liveAlgos: Number(r.live_algos),
+      keys: Number(r.keys), lastActivityAt: n(r.last_activity_at),
     }));
   }
 

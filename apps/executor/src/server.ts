@@ -279,6 +279,13 @@ export function createExecutorServer(svc: ExecutorService, cfg: ExecutorConfig, 
 
       if (req.method === 'GET' && route === '/info') return send(res, 200, svc.info(ctx));
       if (req.method === 'GET' && route === '/health') return send(res, 200, svc.health());
+      // The admin suite's user list (server 1 asks, with its internal token): every wallet this executor
+      // knows. No token configured, or the wrong one: the route does not exist.
+      if (req.method === 'GET' && route === '/internal/users') {
+        const token = String(req.headers['x-internal-token'] ?? '');
+        if (!cfg.builderToken || !safeEqual(cfg.builderToken, token)) throw new ApiError(404, 'path', 'not found');
+        return send(res, 200, { users: svc.db.usersSummary() });
+      }
       if (req.method === 'GET' && route === '/me') return send(res, 200, svc.me(svc.authenticate(bearer(req)), ctx));
       if (req.method === 'GET' && route === '/consents') return send(res, 200, { consents: svc.consents(svc.authenticate(bearer(req))) });
       if (req.method === 'GET' && route === '/algos') return send(res, 200, { algos: svc.algoList(svc.authenticate(bearer(req))) });

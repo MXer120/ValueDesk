@@ -76,6 +76,7 @@ async function suite(o: Partial<AdminRouteOptions> & { password?: string | null;
     store, feedback, passwordPath, admins: [admin.address], origins: [DEV], hosted: o.gate ?? false, limiter: new KeyedLimiter(),
     tell: async (t: string) => (told.push(t), told.length),
     builderAccount: async () => null,
+    executorUsers: async () => [],
     internal: [],
     ...o,
   });
@@ -310,9 +311,15 @@ test('builder numbers: counted volume, fees = notional x rate / 100 000, kept be
   ledger.close();
   const cfg = validateTiers(testTiers(234812)).config!;
   const ours = '0x' + 'c'.repeat(40);
+  // A copy follower known only to the executor (server 2): signed the terms, never traded with a hint.
+  const follower = {
+    owner: '0x' + 'e'.repeat(40), firstAt: now - 5_000, lastSignedAt: now - 4_000, siteTermsAt: now - 5_000, copyTermsAt: now - 4_000, country: 'DE', viewerCountry: 'DE',
+    copies: 1, activeCopies: 1, algos: 0, liveAlgos: 0, keys: 1, lastActivityAt: now - 1_000,
+  };
   const s = await suite({
     ledger: () => openLedger(ledgerPath), tiers: () => cfg, now: () => now, internal: [ours],
     builderAccount: async () => ({ wallet: ours, perps: 105.0717, spot: 100, funded: 200, at: now }),
+    executorUsers: async () => [follower],
   });
   const auth = await s.login();
   const b = (await s.post('/api/admin/builder', { days: 7 }, auth)).json().builder;
@@ -324,9 +331,12 @@ test('builder numbers: counted volume, fees = notional x rate / 100 000, kept be
   assert.equal(b.days.length, 7);
   // The builder account itself: every fee SoDEX credited, also on trades the ledger never saw.
   assert.deepEqual((await s.post('/api/admin/builder', { days: 7 }, auth)).json().account, { wallet: ours, perps: 105.0717, spot: 100, funded: 200, at: now });
-  const all = (await s.post('/api/admin/users', {}, auth)).json().users as Array<{ address: string; internal: boolean; builder: { fees: unknown; volume30d: number; signedFee: { perps: number } } | null }>;
-  assert.deepEqual(all.find((u) => u.address === ours), { address: ours, builder: null, activity: null, ticket: null, internal: true }, 'our own wallet is listed, marked internal');
-  const users = all.filter((u) => !u.internal);
+  const listed = (await s.post('/api/admin/users', {}, auth)).json();
+  assert.equal(listed.executorRead, true);
+  const all = listed.users as Array<{ address: string; internal: boolean; builder: { fees: unknown; volume30d: number; signedFee: { perps: number } } | null }>;
+  assert.deepEqual(all.find((u) => u.address === ours), { address: ours, builder: null, activity: null, executor: null, ticket: null, internal: true }, 'our own wallet is listed, marked internal');
+  assert.deepEqual(all.find((u) => u.address === follower.owner), { address: follower.owner, builder: null, activity: null, executor: follower, ticket: null, internal: false }, "the executor's wallets are listed");
+  const users = all.filter((u) => !u.internal && u.builder);
   assert.equal(users.length, 1);
   assert.deepEqual(users[0]!.builder!.fees, { perps: 1_500_000, spot: 0 });
   assert.equal(users[0]!.builder!.volume30d, 10_000_000_000);

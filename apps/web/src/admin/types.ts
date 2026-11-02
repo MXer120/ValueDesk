@@ -72,10 +72,28 @@ export interface WalletActivity {
   features: Array<{ key: string; n: number }>;
 }
 
+/** What the copy executor (server 2) knows of a wallet: terms signed, copies, algos, keys; times in ms. */
+export interface ExecutorUser {
+  owner: string;
+  firstAt: number | null;
+  lastSignedAt: number | null;
+  siteTermsAt: number | null;
+  copyTermsAt: number | null;
+  country: string | null;
+  viewerCountry: string | null;
+  copies: number;
+  activeCopies: number;
+  algos: number;
+  liveAlgos: number;
+  keys: number;
+  lastActivityAt: number | null;
+}
+
 export interface UserRow {
   address: string;
   builder: BuilderUser | null;
   activity: WalletActivity | null;
+  executor?: ExecutorUser | null;
   ticket: number | null;
   /** One of our own wallets (the builder's, the owner's test wallet). */
   internal?: boolean;

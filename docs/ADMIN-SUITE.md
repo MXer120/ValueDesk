@@ -41,7 +41,7 @@ user, product analytics, the status of everything. Built 2026-10-31; first versi
 |---|---|
 | Overview | the ones below, today |
 | Tickets | `feedback.db` (ops/feedbackThreads.ts): every chat, messages with page info, screenshots; status (open / waiting / closed) in `admin.db`; answer = an owner message in the chat (signed) |
-| Users | union of the builder ledger's wallets, wallets seen in analytics, wallets with a chat: volume (lifetime, 30 d, tier window), fees paid, orders, tier and fee, signed fee, flags, last trade, visits, time, last seen, countries, top features; CSV |
+| Users | union of the builder ledger's wallets, the copy executor's wallets (server 2, `GET /api/copy/v1/internal/users` with X-Internal-Token = VALUESCAN_INTERNAL_TOKEN and the origin secret, kept a minute; VALUESCAN_ADMIN_EXECUTOR_URL, default `https://13-140-77-201.sslip.io`: joined, site / copy terms, declared country, copies and algos active / all, keys), wallets seen in analytics, wallets with a chat, our own wallets marked Internal: volume (lifetime, 30 d, tier window), fees paid, orders, tier and fee, signed fee, flags, last trade, visits, time, last seen, countries, top features; CSV |
 | Volume & fees | `builder.db` (read-only): counted volume per day; fees = counted notional x the order's fee / 100 000, from `admin.db` `fee_orders` (a copy of every counted order, synced every 5 min - the ledger keeps only 2,000 orders a wallet) |
 | Analytics | `analytics.db` (ops/analytics.ts), consenting visitors only |
 | Status | status page store, the indexer's whole status row, executor health (www.valuedesk.so/api/copy/v1/health), brake file, release dirs, server 1 load / memory / disk, client error reports |
