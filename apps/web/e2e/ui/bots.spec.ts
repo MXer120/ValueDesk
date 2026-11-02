@@ -6,6 +6,10 @@
  * Against the dev web the ValueDesk executor is the local one (127.0.0.1:8799): every bot here is a practice
  * run against SoDEX's live book, and nothing reaches SoDEX. Screenshots of each state land in
  * e2e/ui/.out/bots-*.png (with @phone on a phone) for the design review.
+ *
+ * The page is built into the beta channel only (owner, 2026-11-02): run this against the beta dev web
+ * (`--web http://localhost:5181`, VITE_CHANNEL=beta). Against the main build the tab is "coming soon", and that is
+ * what the first test checks there; the second has nothing to do.
  */
 import assert from 'node:assert/strict';
 import { join, dirname } from 'node:path';
@@ -48,8 +52,18 @@ async function setUp(page: Page, wallet: TestWallet): Promise<void> {
   await sheet.waitFor({ state: 'hidden' });
 }
 
+const comingSoon = async (page: Page) => (await page.locator('.bots-soon').count()) > 0;
+
 h.test('before a wallet: the two strategies (no DCA bot), what each costs, and Connect', async ({ page }) => {
   await page.getByRole('heading', { name: 'Bots', exact: true }).waitFor();
+  if (await comingSoon(page)) {
+    // The main build: the tab, "coming soon", the two strategies - and nothing to start or set up.
+    assert.ok(await page.getByText('Coming soon', { exact: true }).isVisible());
+    for (const name of ['Volume maker', 'Grid']) assert.ok(await page.getByText(name, { exact: true }).isVisible(), name);
+    assert.equal(await page.getByRole('button', { name: /New bot|Set up/ }).count(), 0, 'nothing to start on the main site');
+    await shot(page, 'soon');
+    return;
+  }
   for (const name of ['Volume maker', 'Grid']) assert.ok(await page.getByRole('button', { name: new RegExp(name) }).first().isVisible(), name);
   assert.equal(await page.getByText('DCA bot').count(), 0, 'a DCA is an algo order, not a bot');
   assert.ok(await page.getByText('$170').first().isVisible(), 'fees per $1M: 1.2 bp maker + 0.5 bp');
@@ -58,6 +72,8 @@ h.test('before a wallet: the two strategies (no DCA bot), what each costs, and C
 }, { path: '/bots' });
 
 h.test('a practice volume maker: set up, preset, start, its window, pause, edit, stop, delete - one signature each', async ({ page, wallet }) => {
+  await page.getByRole('heading', { name: 'Bots', exact: true }).waitFor();
+  if (await comingSoon(page)) return; // the main build: the page is on the beta only
   await connectWallet(page);
   await page.getByRole('heading', { name: 'Bots', exact: true }).waitFor();
   await shot(page, 'setup-needed');

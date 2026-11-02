@@ -9,6 +9,7 @@ import { api, type Engine } from './api';
 import { useAsync, useConnState, useMediaQuery, useSession, useStored, useSymbols } from './hooks';
 import { hub } from './ws';
 import { Guarded } from './components/ErrorBoundary';
+import { BETA_CHANNEL } from './algo/liveAlgos';
 import { StatusFooter } from './components/StatusFooter';
 import { CommandPalette, loadPalette, openPalette, paletteReady } from './components/palette/lazyPalette';
 import type { TradeContext } from './dashboard';
@@ -74,7 +75,10 @@ const ScanDashboard = lazyPage('scan', () => import('./dashboard/ScanDashboard')
 /* The knowledge folders' own page: docs, sheets, boards, saved posts, files (knowledge/). Off unless
    the Dev panel turned it on for the owner's wallet (folders/access.ts): then not even fetched. */
 /* Bots (components/bots/): automated strategies on the ValueDesk executor. */
-const BotsPage = lazyPage('bots', () => import('./components/bots/BotsPage').then((m) => m.BotsPage));
+// Bots: the page on the beta channel only (owner, 2026-11-02); on the main site the tab opens "coming soon".
+const BotsPage = BETA_CHANNEL
+  ? lazyPage('bots', () => import('./components/bots/BotsPage').then((m) => m.BotsPage))
+  : lazyPage('bots', () => import('./components/bots/BotsSoon').then((m) => m.BotsSoon));
 const KnowledgePage = lazyPage('knowledge', () => import('./knowledge/KnowledgePage').then((m) => m.KnowledgePage));
 /* The folders' sign-in and save sheet (folders/FoldersHost.tsx): fetched only once Knowledge is on. */
 const FoldersHost = lazyChunk(() => import('./folders/FoldersHost').then((m) => ({ default: m.FoldersHost })));
