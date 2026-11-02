@@ -593,7 +593,9 @@ if [ "$MOVE_MAIN" = 1 ]; then
     note "waiting for Vercel's Production deployment of ${HEAD_SHA:0:7}"
     state=""
     for _ in $(seq 1 60); do
-      id="$(gh_api "$REPO/deployments?sha=$HEAD_SHA&environment=Production" | json 'v && v[0] ? v[0].id : ""')"
+      # The main project's: "Production", or "Production – valuedesk" since a second Vercel project
+      # (valuedesk-beta, docs/BETA.md) builds the same repository - never the beta project's.
+      id="$(gh_api "$REPO/deployments?sha=$HEAD_SHA" | json '(Array.isArray(v) ? v : []).filter((d) => /^Production( – valuedesk)?$/.test(d.environment)).map((d) => d.id)[0] ?? ""')"
       if [ -n "$id" ]; then
         state="$(gh_api "$REPO/deployments/$id/statuses" | json 'v && v[0] ? v[0].state : ""')"
         case "$state" in success|failure|error) break ;; esac
