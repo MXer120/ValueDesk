@@ -177,6 +177,96 @@ test('load after load, the load kept current equals a load read in full', async 
   assert.ok(sampled.includes(2) && sampled.includes(4), `Lighter counted as its old sample once wallets with no book joined (loads ${sampled})`);
   assert.ok(!sampled.includes(5) && !sampled.includes(7), 'and every wallet as itself once they were read');
   assert.equal(_cohortLoad.kind.incremental, 8, 'every later load from what changed');
+  assert.ok(_cohortLoad.net.moved > 0, 'members came and went: lists patched with addresses moved');
+  assert.equal(_cohortLoad.net.outOfStep, 0, 'no list was out of step with the maps');
+});
+
+/** One minute with no address coming or going: rows rewritten in place (excluded books too), marks moved. */
+function updates(): void {
+  for (const v of VENUES) {
+    const lighter = v === 'lighter';
+    const members = [...writer.cohortMembers(v).keys()];
+    const some = [...new Set(Array.from({ length: Math.ceil(members.length * 0.03) }, () => pick(members)))];
+    writer.putCohortMembers(v, some.map((a) => member(a, lighter)), Date.now());
+    const booked = [...new Set(Array.from({ length: Math.ceil(members.length * 0.03) }, () => pick(members)))].filter((a) => writer.cohortBook(v, a));
+    writer.putCohortBooks(booked.map((a) => book(v, a, lighter)));
+  }
+  const [ev, ea] = pick(EXCLUDED);
+  writer.putCohortBooks([{ ...book(ev, ea), positions: [{ symbol: ev === 'sodex' ? 'BTC-USD' : 'BTC', szi: -900 + r() * 10, entry: 60_000 }] }]);
+  for (const k of marks.keys()) if (r() < 0.3) marks.set(k, marks.get(k)! * (0.98 + r() * 0.04));
+  writer.putCohortMarks([...marks], Date.now());
+}
+
+/** Rebuild from behind; how it laid out the venues and netted the sets. */
+async function rebuildCounted(): Promise<{ lay: typeof _cohortLoad.lay; net: typeof _cohortLoad.net }> {
+  const lay = { ..._cohortLoad.lay };
+  const net = { ..._cohortLoad.net };
+  _cohortLoad.age(LOAD_TTL_MS);
+  await _cohortLoad.rebuild();
+  const d = <T extends Record<string, number>>(now: T, was: T): T =>
+    Object.fromEntries(Object.entries(now).map(([k, n]) => [k, n - was[k]!])) as T;
+  return { lay: d(_cohortLoad.lay, lay), net: d(_cohortLoad.net, net) };
+}
+
+test('a load where only rows changed: each set\'s last list copied and patched in place, each venue\'s map kept or patched', async () => {
+  _cohortLoad.reset();
+  await warmCohorts(ALL);
+  answers();
+  sameAsFull('the first load');
+  for (let i = 0; i < 4; i++) {
+    updates();
+    const { lay, net } = await rebuildCounted();
+    assert.deepEqual(net, { copied: SCOPES.length, moved: 0, full: 0, outOfStep: 0 }, `load ${i + 2}: every set from its last list, nothing moved`);
+    assert.equal(lay.full, 0, `load ${i + 2}: no venue laid out again`);
+    assert.equal(lay.kept + lay.patched, VENUES.length);
+    sameAsFull(`load ${i + 2} (rows only)`);
+  }
+  // A minute where nothing at all was written: the maps are the very last ones.
+  const { lay, net } = await rebuildCounted();
+  assert.deepEqual(lay, { kept: VENUES.length, patched: 0, full: 0 });
+  assert.equal(net.copied, SCOPES.length);
+  sameAsFull('a load with nothing written');
+});
+
+test('a load where addresses came or went: they move in the list, everything else is patched in place', async () => {
+  _cohortLoad.reset();
+  await warmCohorts(ALL);
+  answers();
+  // A wallet with a book only (no member) on Hyperliquid, and a new SoDEX member (SoDEX is the
+  // first venue: every index after it moves).
+  updates();
+  const bookOnly = addr('hyperliquid', 70_001);
+  writer.putCohortBooks([book('hyperliquid', bookOnly)]);
+  writer.putCohortMembers('sodex', [member(addr('sodex', 70_002))], Date.now());
+  let c = await rebuildCounted();
+  assert.equal(c.lay.full, 2, 'SoDEX and Hyperliquid laid out again');
+  assert.deepEqual(c.net, { copied: 2, moved: 4, full: 0, outOfStep: 0 }, 'Lighter and Arcus alone copied; the four sets with SoDEX or Hyperliquid moved');
+  sameAsFull('a book with no member, and a new member on the first venue');
+  // The book-only wallet becomes a member (it moves ahead of every book-only wallet); a Hyperliquid
+  // member with no book there leaves, and its trade.xyz row puts it in trade.xyz's part of the list.
+  updates();
+  const xyzMembers = writer.cohortMembers('tradexyz');
+  const leaves = [...writer.cohortMembers('hyperliquid').keys()].find((a) => !writer.cohortBook('hyperliquid', a) && xyzMembers.has(a))!;
+  assert.ok(leaves, 'a Hyperliquid member with no book there, and a trade.xyz member');
+  writer.putCohortMembers('hyperliquid', [member(bookOnly)], Date.now());
+  writer.dropCohortMembers('hyperliquid', [leaves]);
+  // Lighter and Arcus: one in, one out each.
+  writer.putCohortMembers('lighter', [member(addr('lighter', 70_003), true)], Date.now());
+  writer.dropCohortMembers('lighter', [[...writer.cohortMembers('lighter').keys()][3]!]);
+  writer.putCohortMembers('arcus', [member(addr('arcus', 70_004))], Date.now());
+  writer.dropCohortMembers('arcus', [[...writer.cohortMembers('arcus').keys()][5]!]);
+  c = await rebuildCounted();
+  assert.deepEqual(c.net, { copied: 0, moved: SCOPES.length, full: 0, outOfStep: 0 });
+  sameAsFull('a wallet becoming a member, members leaving');
+  const all = _cohortLoad.dump([ALL])!.scopes[0]!.map((w) => w.address);
+  const hl = cohortBooksNow()!.per.get('hyperliquid')!;
+  assert.ok(!hl.has(leaves) && all.indexOf(leaves) > all.findLastIndex((a) => hl.has(a)), 'the wallet that left Hyperliquid is listed with trade.xyz now');
+  assert.ok(all.indexOf(bookOnly) < all.findIndex((a) => hl.has(a) && !writer.cohortMembers('hyperliquid').has(a)), 'and the new member ahead of every wallet with a book only');
+  // Only rows again: back to copying.
+  updates();
+  c = await rebuildCounted();
+  assert.deepEqual(c.net, { copied: SCOPES.length, moved: 0, full: 0, outOfStep: 0 });
+  sameAsFull('rows only, after addresses moved');
 });
 
 test('a load whose removals were pruned in the meantime reads everything again, and still equals a full one', async () => {
