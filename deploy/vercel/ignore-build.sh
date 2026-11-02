@@ -8,6 +8,9 @@
 # CPU minutes (owner 2026-11-02: "$18 for build cpu minutes"). ship.sh and CI test those commits.
 # Each project serves one branch: valuedesk-beta (its deployment URLs start "valuedesk-beta-") only
 # `beta`, valuedesk only `main` - the beta project started a build of every main push and cancelled it.
+# vercel.json git.deploymentEnabled keeps every other branch from starting a deployment at all
+# (2026-11-02: 33 of 52 deployments in a day were copy-trading or cross-project pushes cancelled here,
+# each on a build machine for its clone and this step); this step still splits main and beta.
 ref="${VERCEL_GIT_COMMIT_REF:-}"
 case "${VERCEL_URL:-}" in
   valuedesk-beta-*) want=beta ;;

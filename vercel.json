@@ -3,5 +3,13 @@
   "framework": null,
   "installCommand": "ONNXRUNTIME_NODE_INSTALL=skip npm ci --no-audit --no-fund",
   "buildCommand": "bash deploy/vercel/build.sh",
-  "ignoreCommand": "bash deploy/vercel/ignore-build.sh"
+  "ignoreCommand": "bash deploy/vercel/ignore-build.sh",
+  "git": {
+    "deploymentEnabled": {
+      "*": false,
+      "**": false,
+      "main": true,
+      "beta": true
+    }
+  }
 }
