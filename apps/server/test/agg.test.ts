@@ -141,3 +141,53 @@ test('a window\'s first partial day is kept while that day\'s rows stand: a fill
   assert.deepEqual(await s.windowStatsAsync('hyperliquid', '0xa', from, pause), scan(s, 'hyperliquid', '0xa', from), 'after a late fill on that day');
   s.close();
 });
+
+test('a later start in a finished day is summed from the rows held from the first read: the same figures as reading the fills again', async () => {
+  const mk = () => new IndexStore(':memory:', { aggRefreshMs: 0 });
+  const a = mk();
+  const b = mk();
+  type Held = { held: Map<string, { from: number; n: number }>; dropHeld: () => void };
+  const yesterday = Math.floor(Date.now() / DAY) * DAY - DAY;
+  const rows: FillRow[] = [];
+  // 2,600 fills (three chunks): blocks of several fills at one time, two markets, both sides,
+  // opening (0), closing and unknown PnL, fees and none, REST and stream rows.
+  for (let i = 0; i < 2_600; i++) {
+    const t = yesterday + 60_000 + Math.floor(i / 3) * 90_000;
+    rows.push(fill({
+      id: `h${i}`, t, oid: `ho${Math.floor(i / 2)}`, symbol: i % 5 ? 'BTC' : 'ETH', side: i % 7 < 4 ? 1 : -1,
+      px: 100 + (i % 13) * 0.37, sz: 0.1 + (i % 11) * 0.013,
+      closedPnl: i % 4 === 0 ? 0 : i % 4 === 1 ? ((i % 9) - 4) * 1.17 : i % 4 === 2 ? null : 0.31,
+      fee: i % 6 ? 0.0123 * (i % 6) : null, src: i % 10 ? 1 : 0,
+    }));
+  }
+  for (const s of [a, b]) {
+    s.putFills(rows);
+    s.windowStats('hyperliquid', '0xa', 0);
+    while (s.buildAggregates(1_000) > 0) { /* build */ }
+  }
+  const pause = async () => {};
+  const read = async (s: IndexStore, from: number) => ({
+    stats: await s.windowStatsAsync('hyperliquid', '0xa', from, pause),
+    orders: await s.orderCountAsync('hyperliquid', '0xa', from, pause),
+    realized: await s.realizedAsync('hyperliquid', '0xa', from, pause),
+  });
+  const first = yesterday + 15 * 60_000;
+  const starts = [first, first + 1, yesterday + 3_600_000, yesterday + 3_600_000 + 90_000, yesterday + 12 * 3_600_000 + 7, yesterday + 20 * 3_600_000];
+  for (const from of starts) {
+    (b as unknown as Held).dropHeld();
+    const got = await read(a, from);
+    assert.deepEqual(got, await read(b, from), `from ${from}`);
+  }
+  const held = (a as unknown as Held).held;
+  assert.equal(held.size, 1);
+  assert.equal([...held.values()][0]!.from, first, 'every later start was summed from the rows read first');
+  // A late fill on that day: its rows are read again, and the figures follow.
+  const late = [fill({ id: 'late', t: yesterday + 13 * 3_600_000, oid: 'lo', closedPnl: 2.5, side: -1 })];
+  for (const s of [a, b]) { s.putFills(late); s.flushAggregates(1_000); }
+  const from = yesterday + 12 * 3_600_000 + 15 * 60_000;
+  (b as unknown as Held).dropHeld();
+  assert.deepEqual(await read(a, from), await read(b, from), 'after a late fill');
+  assert.equal([...held.values()][0]!.from, from, 'read again from the new start');
+  a.close();
+  b.close();
+});

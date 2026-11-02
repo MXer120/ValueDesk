@@ -638,7 +638,15 @@ type ScanRow = { t: number; symbol: string; side: number; v: number; closed_pnl:
  * goes on, `day` = the day it is in. `touched` = days that got rows while a
  * build was in flight: summed again once it has landed.
  */
-type ScanJob = { venue: Venue; address: string; from: number; to: number; cursor: number; day: number; days: Map<number, DayAcc>; touched: Set<number>; seen: number; noKeep?: boolean };
+type ScanJob = { venue: Venue; address: string; from: number; to: number; cursor: number; day: number; days: Map<number, DayAcc>; touched: Set<number>; seen: number; noKeep?: boolean; keep?: ScanRow[] };
+/**
+ * A finished day's fills from some time on, as the scan ate them (partialDayAsync): a later start
+ * in that day is summed from these, not read again. `sym` indexes `syms`; null PnL and fee are NaN.
+ */
+type HeldRows = { ver: number; from: number; n: number; t: Float64Array; v: Float64Array; pnl: Float64Array; fee: Float64Array; side: Int8Array; src: Int8Array; sym: Uint16Array; syms: string[] };
+/** Rows held for partial days, in all and per day (~45 bytes a row, off the JS heap but for the names). */
+const HELD_ROWS_MAX = 6_000_000;
+const HELD_DAY_MAX = 1_000_000;
 /** Rows per scan step: a few ms of work. */
 const SCAN_CHUNK = 1_000;
 /** A dirty day larger than this is summed in the background instead of at once. */
@@ -1424,7 +1432,7 @@ export class IndexStore {
     const d = Math.floor(t / DAY);
     const dk = `${venue}|${address}|${d}`;
     this.dayVersion.set(dk, (this.dayVersion.get(dk) ?? 0) + 1);
-    if (this.dayVersion.size > 500_000) { this.dayVersion.clear(); this.partialMemo.clear(); }
+    if (this.dayVersion.size > 500_000) { this.dayVersion.clear(); this.partialMemo.clear(); this.dropHeld(); }
     // A row at or before the last one a kept sum ate: going on from there would miss it.
     const live = this.liveDays.get(`${venue}|${address}|${d}`);
     if (live && t <= live.seen) this.liveDays.delete(`${venue}|${address}|${d}`);
@@ -1497,7 +1505,9 @@ export class IndexStore {
   }
 
   private eat(job: ScanJob, rows: ReadonlyArray<ScanRow>): void {
+    const keep = job.keep;
     for (const r of rows) {
+      keep?.push(r);
       if (r.t > job.seen) job.seen = r.t;
       const day = Math.floor(r.t / DAY);
       // Rows come in time order: a new day means the one before is complete.
@@ -1825,14 +1835,105 @@ export class IndexStore {
     // 20% of the indexer's thread after the day sums were fixed (profiled 2026-10-31). The boards ask from
     // a start that holds for a quarter of an hour (engine.ts statsFrom), so this is read once per quarter.
     const d0 = Math.floor(fromT / DAY);
-    const key = `${venue}|${address}|${fromT}|${this.dayVersion.get(`${venue}|${address}|${d0}`) ?? 0}`;
+    const dk = `${venue}|${address}|${d0}`;
+    const ver = this.dayVersion.get(dk) ?? 0;
+    const key = `${venue}|${address}|${fromT}|${ver}`;
     if (this.partialMemo.has(key)) return this.partialMemo.get(key);
-    const job = this.newJob(venue, address, fromT, (d0 + 1) * DAY);
-    while (!this.step(job)) await pause();
+    const end = (d0 + 1) * DAY;
+    const job = this.newJob(venue, address, fromT, end);
+    // The start moves on every quarter (and the 1d window's first day is yesterday's last
+    // hours, 13 h of fills at noon): every quarter summed every candidate's first day again
+    // from SQLite, 15% of the indexer's thread at 11:10 UTC on 2026-11-02 and why a build
+    // took 46 min at midday against 5.5 min just before midnight. A finished day's rows,
+    // once read, serve every later start in it while that day stands (same rows, same order).
+    const held = this.held.get(dk);
+    if (held && held.ver === ver && held.from <= fromT) {
+      this.held.delete(dk);
+      this.held.set(dk, held);
+      await this.eatHeld(job, held, pause);
+    } else {
+      if (held) this.letGo(dk);
+      const gen = this.heldGen;
+      if (end <= Date.now()) job.keep = [];
+      while (!this.step(job)) {
+        if (job.keep && job.keep.length > HELD_DAY_MAX) job.keep = undefined;
+        await pause();
+      }
+      // A row of the day written while it was read: what was read is not that day any more.
+      // So is one with rows taken away meanwhile (dropHeld).
+      if (job.keep && job.keep.length <= HELD_DAY_MAX && (this.dayVersion.get(dk) ?? 0) === ver && this.heldGen === gen) this.hold(dk, ver, fromT, job.keep);
+      job.keep = undefined;
+    }
     const out = this.finish(job).get(d0);
     if (this.partialMemo.size >= 50_000) this.partialMemo.clear();
     this.partialMemo.set(key, out);
     return out;
+  }
+  private held = new Map<string, HeldRows>();
+  private heldRows = 0;
+  private heldGen = 0;
+
+  private hold(dk: string, ver: number, from: number, rows: ScanRow[]): void {
+    const n = rows.length;
+    const h: HeldRows = {
+      ver, from, n, t: new Float64Array(n), v: new Float64Array(n), pnl: new Float64Array(n), fee: new Float64Array(n),
+      side: new Int8Array(n), src: new Int8Array(n), sym: new Uint16Array(n), syms: [],
+    };
+    const ix = new Map<string, number>();
+    for (let i = 0; i < n; i++) {
+      const r = rows[i]!;
+      // Anything the arrays could not give back as it was read is not held.
+      if (!Number.isInteger(r.side) || r.side < -128 || r.side > 127 || (r.src !== 0 && r.src !== 1)) return;
+      let k = ix.get(r.symbol);
+      if (k === undefined) {
+        if (h.syms.length >= 65_535) return;
+        ix.set(r.symbol, (k = h.syms.length));
+        h.syms.push(r.symbol);
+      }
+      h.t[i] = r.t; h.v[i] = r.v; h.pnl[i] = r.closed_pnl ?? Number.NaN; h.fee[i] = r.fee ?? Number.NaN;
+      h.side[i] = r.side; h.src[i] = r.src; h.sym[i] = k;
+    }
+    this.held.set(dk, h);
+    this.heldRows += n;
+    for (const old of this.held.keys()) {
+      if (this.heldRows <= HELD_ROWS_MAX) break;
+      this.letGo(old);
+    }
+  }
+
+  private letGo(dk: string): void {
+    const h = this.held.get(dk);
+    if (!h) return;
+    this.held.delete(dk);
+    this.heldRows -= h.n;
+  }
+
+  private dropHeld(): void {
+    this.held.clear();
+    this.heldRows = 0;
+    this.heldGen++;
+  }
+
+  /** A job fed from held rows from its start on, SCAN_CHUNK at a time, as scanStep would feed it. */
+  private async eatHeld(job: ScanJob, h: HeldRows, pause: () => Promise<void>): Promise<void> {
+    let lo = 0;
+    let hi = h.n;
+    while (lo < hi) {
+      const m = (lo + hi) >> 1;
+      if (h.t[m]! < job.from) lo = m + 1;
+      else hi = m;
+    }
+    for (let i = lo; i < h.n; ) {
+      const rows: ScanRow[] = [];
+      for (const stop = Math.min(h.n, i + SCAN_CHUNK); i < stop; i++) {
+        const pnl = h.pnl[i]!;
+        const fee = h.fee[i]!;
+        rows.push({ t: h.t[i]!, symbol: h.syms[h.sym[i]!]!, side: h.side[i]!, v: h.v[i]!, closed_pnl: Number.isNaN(pnl) ? null : pnl, fee: Number.isNaN(fee) ? null : fee, src: h.src[i]! });
+      }
+      this.eat(job, rows);
+      if (i < h.n) await pause();
+    }
+    job.cursor = job.to;
   }
   private partialMemo = new Map<string, DayAgg | undefined>();
   /** `venue|address|day` -> bumped whenever a row of that day changes (markDay): the partial sums' key. */
@@ -2064,6 +2165,7 @@ export class IndexStore {
       if (gone > 0) {
         this.markRange(v, address, fromT, toT, first);
         this.partialMemo.clear();
+        // Held rows are not cleared: markRange has moved the version of every day that lost rows.
       }
     }
     this.bump(venue, address);
@@ -2310,6 +2412,7 @@ export class IndexStore {
     const t0 = Date.now();
     // Raw rows go: no partial day summed from them stands (partialDayAsync keys on row changes, not deletions).
     this.partialMemo.clear();
+    this.dropHeld();
     const frozen = `EXISTS (SELECT 1 FROM fill_day d WHERE d.venue = r.venue AND d.address = r.address AND d.day = CAST(r.t / ${DAY} AS INTEGER) AND d.frozen = 1)`;
     const n = Number(this.q(
       `DELETE FROM fills WHERE (venue, address, id) IN (
@@ -2336,6 +2439,7 @@ export class IndexStore {
   /** Delete up to `limit` of a drop job's raw rows. True when none is left. */
   private dropSlice(j: DropJob, limit: number): boolean {
     this.partialMemo.clear();
+    this.dropHeld();
     const n = Number(this.q(
       `DELETE FROM fills WHERE (venue, address, id) IN (SELECT venue, address, id FROM fills WHERE venue = ? AND address = ? AND t < ? LIMIT ?)`,
     ).run(j.venue, j.address, j.before, limit).changes);
