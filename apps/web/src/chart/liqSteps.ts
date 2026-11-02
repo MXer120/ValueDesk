@@ -119,6 +119,21 @@ export function streamSteps(base: number, fine: number | null): number[] {
 }
 
 /**
+ * The widths the history holds exactly, finest first: its snapshots' step `st` and, below it, the
+ * multiples (FINE_K) of its fine layers - a tenth of `st` and the coin's tick (server levels.ts
+ * fineHistSteps) - that are whole cells of them: BTC $1, $2, $5, $10, $20, $50, $100. What
+ * Historical's Auto picks from (it only had $100, $10 and $1: a window of $6.5 a pixel drew $100).
+ */
+export function histSteps(st: number, tick: number): number[] {
+  const out = [tidy(st)];
+  for (const layer of [st / 10, tick]) {
+    if (!(layer > 0)) continue;
+    for (const k of FINE_K) { const s = tidy(layer * k); if (s < st * (1 - EPS)) out.push(s); }
+  }
+  return [...new Set(out)].sort((a, b) => a - b);
+}
+
+/**
  * Auto's step (owner 2026-11-01: "auto is bad as its just the 100 steps no matter what"): the finest
  * of `steps` at least `target` wide (the price a cell should span on screen), else the coarsest.
  */

@@ -94,7 +94,8 @@ export const CACHE_POLICIES: Readonly<Record<string, CachePolicy>> = {
   // A wallet's positions, every coin (the wallet filter).
   '/api/vs/liquidations/positions': BOARD,
   // Snapshots are written every 15 minutes.
-  '/api/vs/liquidations/history': { cacheControl: 'public, max-age=300, stale-while-revalidate=300' },
+  // Its fine tiles (`every=` / `pool=`) pick their own: a final one a day (routes/valuedesk.ts).
+  '/api/vs/liquidations/history': { cacheControl: 'public, max-age=300, stale-while-revalidate=300', own: true },
   // The same in tiles (indexer/liqTiles.ts): the route says which answer is final.
   '/api/vs/liquidations/tiles': { cacheControl: 'public, max-age=60, stale-while-revalidate=120', own: true },
   // One cell at a past time: the log does not change behind it (the newest step may still fill in).

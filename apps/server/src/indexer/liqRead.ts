@@ -791,6 +791,75 @@ export interface LiqHistoryFine extends FineAsk {
 
 /** Rows one fine history answer carries at most (~25 bytes each): newer snapshots first, the rest left to their own step. */
 export const FINE_HIST_MAX_ROWS = 80_000;
+/**
+ * A tile's rows at most (FineDraw: the view's tiles, one snapshot a bar and pooled to its pixels,
+ * hold a few thousand; this only stops an ask nobody draws).
+ */
+export const FINE_TILE_MAX_ROWS = 400_000;
+
+/**
+ * How the historical view's fine tiles are cut to what it draws (web liqmap/histFine.ts), so every
+ * column on screen has its step without reading cells no pixel shows:
+ *   every, off  one snapshot per bar of `every` ms, the bars starting at `off` modulo it: the
+ *               newest in each, the one the chart draws for that bar (web liqHeatIndicator.ts
+ *               snapshotFor). 0: every snapshot.
+ *   pool        the cells in groups of this price width (a whole number of steps, at most a pixel
+ *               of the view), the strongest of each kept as it is - by the side and leverage
+ *               bands the view counts (web cellOf): the view draws the strongest cell of a pixel,
+ *               so what it draws is what every cell would draw. 0: every cell.
+ */
+export interface FineDraw {
+  every: number;
+  off: number;
+  pool: number;
+  side: 'long' | 'short' | 'both';
+  lev: ReadonlySet<LevBand> | null;
+}
+
+/** `every=` `off=` `pool=` `side=` `lev=` (FineDraw): null when none is asked, a message when wrong. */
+export function fineDrawOf(q: { every?: unknown; off?: unknown; pool?: unknown; side?: unknown; lev?: unknown }, step: number): FineDraw | null | string {
+  if ((q.every === undefined || q.every === '') && (q.pool === undefined || q.pool === '')) return null;
+  const every = q.every === undefined || q.every === '' ? 0 : Number(q.every);
+  const off = q.off === undefined || q.off === '' ? 0 : Number(q.off);
+  const pool = q.pool === undefined || q.pool === '' ? 0 : Number(q.pool);
+  if (!(every >= 0) || !Number.isFinite(every)) return 'every= must be a bar length in ms';
+  if (!Number.isFinite(off)) return 'off= must be a time in ms';
+  if (!(pool >= 0) || !Number.isFinite(pool)) return 'pool= must be a price width';
+  const k = pool / step;
+  if (pool > 0 && (k < 1 || Math.abs(k - Math.round(k)) > 1e-6 * k)) return 'pool= must be a whole number of step=';
+  const side = q.side === 'long' || q.side === 'short' ? q.side : 'both';
+  return { every, off: every > 0 ? ((off % every) + every) % every : 0, pool, side, lev: levFilterOf(q.lev) };
+}
+
+/** A row's notional as the view counts it under a side and leverage filter (web liqHeatIndicator.ts cellOf). */
+export function shownValue(r: SnapRow, side: FineDraw['side'], lev: ReadonlySet<LevBand> | null): number {
+  const all = !lev || LEV_BANDS.every((b) => lev.has(b));
+  let v = 0;
+  for (const long of [true, false]) {
+    if (side === (long ? 'short' : 'long')) continue;
+    const total = r[long ? 1 : 2] ?? 0;
+    if (!(total > 0)) continue;
+    if (all) { v += total; continue; }
+    for (const b of LEV_BANDS) if (lev!.has(b)) v += r[snapBand(long, b)] ?? 0;
+  }
+  return v;
+}
+
+/** Rows (ascending, at `step`) pooled into groups of `pool`: the strongest of each, as it is. */
+export function poolRows(rows: readonly SnapRow[], step: number, d: Pick<FineDraw, 'pool' | 'side' | 'lev'>): SnapRow[] {
+  const k = Math.round(d.pool / step);
+  if (!(k > 1)) return [...rows];
+  const out: SnapRow[] = [];
+  let g = Number.NaN;
+  let best = -1;
+  for (const r of rows) {
+    const gi = Math.floor(r[0] / k);
+    const v = shownValue(r, d.side, d.lev);
+    if (gi !== g) { g = gi; best = v; out.push(r); }
+    else if (v > best) { best = v; out[out.length - 1] = r; }
+  }
+  return out;
+}
 
 /**
  * A snapshot's fine rows at `ask.step` over the window asked, from the layer that serves it: the
@@ -828,20 +897,29 @@ export function fineRowsOf(f: FineSnap, venues: readonly Venue[], ask: FineAsk):
  * liq_hist_fine (near the price). Newest first up to FINE_HIST_MAX_ROWS rows; the view draws the
  * rest at their own step. Every wallet only: the layers keep no addresses.
  */
-export function liqHistoryFine(coin: string, venues: readonly Venue[], t0: number, t1: number, ask: FineAsk): LiqHistoryFine | null {
+export function liqHistoryFine(coin: string, venues: readonly Venue[], t0: number, t1: number, ask: FineAsk, draw: FineDraw | null = null): LiqHistoryFine | null {
   const s = reader();
   if (!s) return null;
   const points: LiqHistFinePoint[] = [];
   let since: number | null = null;
   let cut: number | null = null;
   let n = 0;
+  const max = draw ? FINE_TILE_MAX_ROWS : FINE_HIST_MAX_ROWS;
+  /** The bar of a snapshot (FineDraw every): the newest of each is the one drawn, met first. */
+  let lastBar = Number.NaN;
+  const barOf = (t: number) => (draw && draw.every > 0 ? Math.floor((t - draw.off) / draw.every) : t);
   /** Adds one snapshot's rows, newest first; false once the rows would pass the cap. */
   const add = (t: number, f: FineSnap): boolean => {
+    const bar = barOf(t);
+    if (bar === lastBar) return true;
+    // The bar's newest only, fine or not: an older one in it is not the one drawn.
+    lastBar = bar;
     const x = fineRowsOf(f, venues, ask);
     if (!x) return true;
-    if (n + x.b.length > FINE_HIST_MAX_ROWS) { cut = points.at(-1)?.t ?? t; return false; }
-    n += x.b.length;
-    points.push({ t, st: ask.step, lo: x.lo, hi: x.hi, b: x.b });
+    const b = draw && draw.pool > 0 ? poolRows(x.b, ask.step, draw) : x.b;
+    if (n + b.length > max) { cut = points.at(-1)?.t ?? t; return false; }
+    n += b.length;
+    points.push({ t, st: ask.step, lo: x.lo, hi: x.hi, b });
     return true;
   };
   const parse = (data: Uint8Array): FineSnap | null => { try { return JSON.parse(inflateRawSync(data).toString('utf8')) as FineSnap; } catch { return null; } };

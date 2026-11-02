@@ -51,7 +51,7 @@ import { ACCOUNT_DETAIL, arcusProvider, lighterProvider, nameSpotFills, tradexyz
 import { applyCachedCurves, attachPodiumCurves } from '../valuedesk/curves.js';
 import { attachStats, boardPage, cohortDetail, cohortFocus, cohortMap, cohortWallets, cohortsReady, cohortsRead, excludedNow, indexerStatus, netPage } from '../indexer/read.js';
 import { isCohortId, isSector, type CohortFilter, type CohortRange, type WalletSort } from '../valuedesk/cohorts/model.js';
-import { fineAskOf, isLiqRange, levFilterOf, liqAt, liqHeatmap, liqHeatmapFine, liqHeatmapOf, liqHistory, liqHistoryFine, liqWallets, walletLiqs } from '../indexer/liqRead.js';
+import { fineAskOf, fineDrawOf, isLiqRange, levFilterOf, liqAt, liqHeatmap, liqHeatmapFine, liqHeatmapOf, liqHistory, liqHistoryFine, liqWallets, walletLiqs } from '../indexer/liqRead.js';
 import { TILE_FINAL_CACHE, TILE_INDEX_CACHE, TILE_WALLET_CACHE, liqTile, liqTileIndex, liqTileIndexOf, liqTileOf, tileAskOf } from '../indexer/liqTiles.js';
 import { watchAddresses } from '../indexer/host.js';
 import { MAX_WINDOW_MS, flowWalletFills, flowWindow, type MarketKind } from '../flow/read.js';
@@ -560,8 +560,13 @@ export async function valuedeskRoutes(app: FastifyInstance) {
         const t0 = Number(q.t0);
         const t1 = Number(q.t1);
         if (!(t0 > 0) || !(t1 >= t0)) throw bad('t0= and t1= must be a time range in ms with step=');
-        const body = liqHistoryFine(coin, cohortVenues(q), t0, t1, fine);
+        // A tile of the historical view (`every=` / `pool=`, liqRead.ts FineDraw): one ending before
+        // the slot still filling (no `v=`) never changes, and is kept a day as the snapshots' tiles are.
+        const draw = fineDrawOf(q, fine.step);
+        if (typeof draw === 'string') throw bad(draw);
+        const body = liqHistoryFine(coin, cohortVenues(q), t0, t1, fine, draw);
         if (!body) return fail(reply, new NotAvailable('The index is not running yet'));
+        if (draw) reply.header('Cache-Control', q.v === undefined && t1 < Date.now() - 30 * 60_000 ? TILE_FINAL_CACHE : TILE_INDEX_CACHE);
         return { ok: true, ...body };
       }
       const body = liqHistory(coin, cohortVenues(q), isLiqRange(q.range) ? q.range : '1d', ws);

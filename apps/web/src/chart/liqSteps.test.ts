@@ -6,7 +6,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { autoStep, fineWindow, niceUp, stepAt, stepLabel, stepLadder, streamAsk, streamGroup, streamSteps, tickOf } from './liqSteps';
+import { autoStep, fineWindow, histSteps, niceUp, stepAt, stepLabel, stepLadder, streamAsk, streamGroup, streamSteps, tickOf } from './liqSteps';
 
 test('each coin its own ladder: the default 0.125% of the price, a tenth, a hundredth, the SoDEX tick last', () => {
   assert.deepEqual(stepLadder(77_545, 1), [100, 10, 1], 'BTC: $100 (history kept $200), down to the $1 tick');
@@ -111,4 +111,12 @@ test('Auto follows the zoom: the finest width the live data holds at about the c
   assert.equal(autoStep((259 / 199) * 3, [100, 10, 1]), 10);
   assert.equal(autoStep((50 / 199) * 3, [100, 10, 1]), 1);
   assert.equal(autoStep((20_000 / 199) * 3, [100, 10, 1]), 100);
+});
+
+test('Historical Auto: the steps the history holds exactly, not only the decades', () => {
+  assert.deepEqual(histSteps(100, 1), [1, 2, 5, 10, 20, 50, 100], 'BTC');
+  // A window of $6.5 a pixel, three pixels a cell: $20, where the decades alone gave $100.
+  assert.equal(autoStep(6.5 * 3, histSteps(100, 1)), 20);
+  assert.equal(autoStep(6.5 * 3, [100, 10, 1]), 100);
+  assert.deepEqual(histSteps(2.5, 0.1), [0.1, 0.2, 0.25, 0.5, 1, 1.25, 2, 2.5], 'ETH: whole cells of $0.25 and the $0.1 tick');
 });

@@ -34,7 +34,7 @@ import { followChart } from '../../chart/candleDraws';
 import type { LevFilter } from '../../chart/liqLev';
 import { usePolled } from '../explore/cohorts/parts';
 import { vsApi, type Venue } from '../../vsApi';
-import { MARGIN, assemble, scaleKeyOf, tileId, tilesFor, type Memo, type TileKey, type TileWindow } from './tileGrid';
+import { MARGIN, assemble, scaleKeyOf, tileId, tilesFor, type Memo, type TileGrid, type TileKey, type TileWindow } from './tileGrid';
 
 export type { TileWindow } from './tileGrid';
 
@@ -115,6 +115,8 @@ export interface HistTiles {
   scale: (side: 'both' | 'long' | 'short', lev: LevFilter) => number;
   /** The index (or the one-piece history) has been read. */
   ready: boolean;
+  /** The tile grid the index gives (null: none, or the one-piece history): the fine tiles' too (histFine.ts). */
+  grid: TileGrid | null;
   error: string | null;
 }
 
@@ -184,6 +186,7 @@ export function useHistTiles(coin: string | null, venues: readonly Venue[], view
     points,
     scale,
     ready: !!(hist || idx),
+    grid: hist ? null : idx,
     error: whole ? (hist ? null : hr.error) : idx ? null : ir.error,
   };
 }

@@ -203,6 +203,30 @@ export function cellsOf(q: HeatPoint): HeatCell[] {
 }
 const cellCache = new WeakMap<HeatPoint, HeatCell[]>();
 
+/**
+ * A column's cells as painted: pixel rows `top` to `bot` (from `y`, price to a whole pixel) and the
+ * value against the scale (per `ref`'s width: a $1 cell is read as a hundredth of a $100 one).
+ * Cells under a pixel tall share their row: the strongest is painted there (a cell of a pixel or
+ * more as it is) - the pixel shows its strongest level, as the fine tiles pooled to it keep.
+ */
+export function pixelCells(cells: readonly HeatCell[], side: HeatData['side'], lev: LevFilter, ref: number | null, scale: number, y: (price: number) => number): Array<{ top: number; bot: number; v: number; bands: Bands }> {
+  const out: Array<{ top: number; bot: number; v: number; bands: Bands }> = [];
+  let row: { top: number; bot: number; v: number; bands: Bands } | null = null;
+  for (const { lo, hi, r, st } of cells) {
+    const { v, bands } = cellOf(r, side, lev);
+    if (!(v > 0)) continue;
+    const k = (ref && st > 0 ? ref / st : 1) / (scale || 1);
+    const top = y(hi);
+    const bot = y(lo);
+    // A pixel or less: it shares its row (rounded, a cell a pixel tall may straddle two rows' worth).
+    if (bot - top > 1) { out.push({ top, bot, v: v * k, bands }); continue; }
+    if (row && row.top === top) { if (v * k > row.v) { row.v = v * k; row.bands = bands; } continue; }
+    row = { top, bot: top + 1, v: v * k, bands };
+    out.push(row);
+  }
+  return out;
+}
+
 /** The cell of a snapshot holding `price` (null: none there). */
 export function cellAt(q: HeatPoint, price: number): HeatCell | null {
   const cells = cellsOf(q);
@@ -335,18 +359,14 @@ export const liqHeatTemplate: IndicatorTemplate<{ lo?: number; hi?: number }, un
           const q = data.points[at]!;
           const x0 = edge(i);
           const x1 = edge(j);
-          for (const { lo, hi, r, st } of cellsOf(q)) {
-            const { v, bands } = cellOf(r, side, lev);
-            if (!(v > 0)) continue;
-            // Per the newest snapshot's width: a $1 cell is read as a hundredth of a $100 one.
-            const k = (ref && st > 0 ? ref / st : 1) / scale;
-            const col = byLev ? levHeatColor(v * k, bands) : heatColor(v * k);
+          // A cell thinner than a pixel shares its row with others: the strongest of them is drawn
+          // (pixelCells), so the fine tiles pooled to the pixel draw what every cell would.
+          for (const c of pixelCells(cellsOf(q), side, lev, ref, scale, (p) => Math.round(yAxis.convertToPixel(p)))) {
+            if (c.bot < 0 || c.top > bounding.height) continue;
+            const col = byLev ? levHeatColor(c.v, c.bands) : heatColor(c.v);
             if (!col) continue;
-            const top = Math.round(yAxis.convertToPixel(hi));
-            const bot = Math.round(yAxis.convertToPixel(lo));
-            if (bot < 0 || top > bounding.height) continue;
             ctx.fillStyle = col;
-            ctx.fillRect(x0, top, Math.max(1, x1 - x0), Math.max(1, bot - top));
+            ctx.fillRect(x0, c.top, Math.max(1, x1 - x0), Math.max(1, c.bot - c.top));
           }
         }
         i = j;
