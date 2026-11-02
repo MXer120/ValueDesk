@@ -5,7 +5,7 @@
  * hover one to read its window and prices, click it to break that candle down. The picked candle is
  * a lit column; the one still forming says so.
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { Engine } from '../../api';
 import { fetchKlineRows } from '../../chart/klines';
 import { normalizeBars } from '../../chart/tv/datafeedCore';
@@ -17,12 +17,14 @@ const N = 60;
 
 interface Bar { time: number; open: number; high: number; low: number; close: number }
 
-export function CandleStrip({ engine, symbol, interval, picked, onPick }: {
+export function CandleStrip({ engine, symbol, interval, picked, onPick, nav }: {
   engine: Engine;
   symbol: string;
   interval: string;
   picked: CandleWindow;
   onPick: (w: CandleWindow) => void;
+  /** The step buttons (previous, next, live), at the row's end. */
+  nav?: ReactNode;
 }) {
   const [bars, setBars] = useState<Bar[] | null>(null);
   const [hover, setHover] = useState<number | null>(null);
@@ -60,10 +62,12 @@ export function CandleStrip({ engine, symbol, interval, picked, onPick }: {
 
   return (
     <div className="tfl-strip">
-      <div className="tfl-strip__info" aria-live="polite">
-        <span className={`tfl-pill ${hover !== null ? 'is-hover' : 'is-pick'}`}>{hover !== null ? 'Hover' : 'Candle'}</span>
-        <b>{windowText(shownWin)}</b>
-        {shownWin.to > now && <span className="tfl-pill is-live">Forming</span>}
+      <div className="tfl-strip__info">
+        <span className="tfl-strip__when" aria-live="polite">
+          <span className={`tfl-pill ${hover !== null ? 'is-hover' : 'is-pick'}`}>{hover !== null ? 'Hover' : 'Candle'}</span>
+          <b>{windowText(shownWin)}</b>
+          {shownWin.to > now && <span className="tfl-pill is-live">Forming</span>}
+        </span>
         {shown && (
           <span className="tfl-strip__ohlc">
             <span><i>O</i>{fmtPx(shown.open)}</span>
@@ -73,14 +77,14 @@ export function CandleStrip({ engine, symbol, interval, picked, onPick }: {
             {change !== null && <span className={change >= 0 ? 'pos' : 'neg'}>{change >= 0 ? '+' : '−'}{Math.abs(change * 100).toFixed(2)}%</span>}
           </span>
         )}
-        {hover !== null && <span className="tfl-dim tfl-strip__hint">Click to break it down</span>}
+        {nav && <span className="tfl-strip__nav">{nav}</span>}
       </div>
       <svg
         className="tfl-strip__svg"
         viewBox={`0 0 ${W} ${H}`}
         preserveAspectRatio="none"
         role="listbox"
-        aria-label="Candles: pick one"
+        aria-label="Candles: click one to break it down"
         onMouseLeave={() => setHover(null)}
       >
         {!bars && <rect className="tfl-strip__wait" x="0" y={H / 2 - 1} width={W} height="2" />}

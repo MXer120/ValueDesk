@@ -1,15 +1,26 @@
-/* Who traded (TradeFlow.tsx): a chart view, the app's tokens only. Kind and state are pills, dots
-   and icons - never a coloured edge down one side of a row (owner's rule). */
+/* Who traded (TradeFlow.tsx, CandleStrip.tsx): a chart view, the app's tokens only. Kind and state
+   are pills, dots and icons - never a coloured edge down one side of a row (owner's rule).
+
+   SIZES (owner 2026-11-02: "not furnished ... on some screen sizes"). The view lives in a chart card,
+   a terminal panel of any width or the expanded overlay, so it answers to ITS OWN width (container
+   queries on `.tfl`), not the window's. Below the one-row toolbar everything scrolls together - the
+   candle row, the summary, the filters, the table (its header sticks) - so a short card still shows
+   wallets after a flick instead of three fixed bands and no table. */
 
 .tfl {
+  container: tfl / inline-size;
   display: flex;
   flex-direction: column;
   flex: 1;
   min-height: 0;
+  min-width: 0;
   font-variant-numeric: tabular-nums;
 }
+.tfl .pos { color: var(--pos); }
+.tfl .neg { color: var(--neg); }
+.tfl-dim { color: var(--dim); }
 
-/* Expanded: the same view over the page. */
+/* --- expanded: the same view over the page ------------------------------------------------------ */
 .tfl-overlay {
   position: fixed;
   inset: 0;
@@ -17,13 +28,13 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 4vh 4vw;
+  padding: clamp(0px, 3vh, 40px) clamp(0px, 3vw, 48px);
   /* Dims only, like the dialog scrim (appearance.css): a blur here would make it the backdrop root,
      and the platform picker's glass inside would blur nothing. */
   background: color-mix(in srgb, var(--bg) 70%, transparent);
 }
 .tfl--big {
-  width: min(1280px, 100%);
+  width: min(1440px, 100%);
   height: 100%;
   border: 1px solid var(--panel-line);
   border-radius: var(--radius-page);
@@ -32,24 +43,31 @@
   overflow: hidden;
 }
 .tfl-parked { align-items: center; justify-content: center; }
+@media (max-width: 600px) {
+  .tfl-overlay { padding: 0; }
+  .tfl--big { border-radius: 0; border: 0; }
+}
 
-/* --- the bar: what, when, where ------------------------------------------------------------- */
+/* --- the toolbar: what, which candles, where ---------------------------------------------------- */
 .tfl-bar {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-areas: 'title tf end';
   align-items: center;
-  flex-wrap: wrap;
   gap: var(--sp-2) var(--sp-3);
-  padding: var(--sp-3) var(--sp-4);
+  padding: var(--sp-2) var(--sp-3);
   border-bottom: 1px solid var(--panel-line);
 }
-.tfl-title { display: flex; align-items: center; gap: var(--sp-2); margin-right: auto; min-width: 0; }
-.tfl-title > div { display: flex; flex-direction: column; min-width: 0; }
-.tfl-title b { font-size: var(--fs-head); font-weight: 600; color: var(--text); }
-.tfl-title .tfl-dim { font-size: var(--fs-xs); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.tfl-nav { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.tfl-nav .lbp-seg > button { padding: 0 8px; }
+.tfl-title { grid-area: title; display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
+.tfl-title b { font-size: var(--fs-head); font-weight: 600; color: var(--text); white-space: nowrap; }
+.tfl-title__coin { color: var(--muted); font-weight: 500; }
+.tfl-tf { grid-area: tf; min-width: 0; display: flex; }
+.tfl-tf .lbp-seg { max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+.tfl-tf .lbp-seg::-webkit-scrollbar { display: none; }
+.tfl-tf .lbp-seg > button { padding: 0 9px; flex: none; }
+.tfl-bar__end { grid-area: end; display: flex; align-items: center; gap: var(--sp-2); justify-self: end; }
 
-.tfl-icobtn, .tfl-latest {
+.tfl-icobtn, .tfl-latest, .tfl-cta, .tfl-more {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -65,70 +83,143 @@
   font-size: var(--fs-xs);
   font-weight: 500;
   text-decoration: none;
+  white-space: nowrap;
   cursor: pointer;
-  transition: color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
+  transition: color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out);
 }
-.tfl-nav .tfl-icobtn { padding: 0; }
-.tfl-icobtn:hover:not(:disabled), .tfl-latest:hover { color: var(--text); border-color: var(--line); }
-.tfl-icobtn:disabled { opacity: 0.4; cursor: default; }
+.tfl-icobtn:has(> svg:only-child) { padding: 0; width: 30px; }
+.tfl-icobtn:hover:not(:disabled), .tfl-latest:hover, .tfl-cta:hover, .tfl-more:hover { color: var(--text); border-color: var(--line); }
+.tfl-icobtn:focus-visible, .tfl-latest:focus-visible, .tfl-cta:focus-visible, .tfl-more:focus-visible { outline: 2px solid var(--focus, var(--accent)); outline-offset: 1px; }
+.tfl-icobtn:disabled { opacity: 0.35; cursor: default; }
 .tfl-latest.is-on { color: var(--text); border-color: color-mix(in srgb, var(--text) 70%, transparent); background: color-mix(in srgb, var(--text) 7%, transparent); }
+.tfl-cta { color: var(--text); border-color: var(--line); }
 
-.tfl-body {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-3);
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-  padding: var(--sp-3) var(--sp-4) var(--sp-4);
+/* Narrow: the title and its controls on one row, the timeframes under them, full width. */
+@container tfl (max-width: 760px) {
+  .tfl-bar { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: 'title end' 'tf tf'; }
 }
-.tfl-body > * { flex: none; }
-.tfl-dim { color: var(--dim); }
-.tfl .pos { color: var(--pos); }
-.tfl .neg { color: var(--neg); }
+@container tfl (max-width: 440px) {
+  /* Every timeframe fits: equal shares of the row, no scrolling (eight at 320 px are 34 px each). */
+  .tfl-tf .lbp-seg { width: 100%; overflow: visible; }
+  .tfl-tf .lbp-seg > button { flex: 1 1 0; min-width: 0; padding: 0 2px; }
+}
+@container tfl (max-width: 380px) {
+  .tfl-title__coin { display: none; }
+  .tfl-bar .psel__v { max-width: 92px; overflow: hidden; text-overflow: ellipsis; }
+}
 
-/* --- summary ---------------------------------------------------------------------------------- */
+/* --- everything under the toolbar scrolls together ---------------------------------------------- */
+.tfl-scroll { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; }
+.tfl-body { display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-3); }
+.tfl-body > * { flex: none; }
+
+/* --- the candle row: pick the candle ------------------------------------------------------------ */
+.tfl-strip { display: flex; flex-direction: column; gap: 6px; padding: var(--sp-2) var(--sp-3) 6px; border-bottom: 1px solid var(--panel-line); }
+.tfl-strip__info { display: flex; align-items: center; flex-wrap: wrap; gap: 6px var(--sp-3); min-height: 30px; font-size: var(--fs-xs); color: var(--muted); }
+.tfl-strip__when { display: inline-flex; align-items: center; gap: var(--sp-2); min-width: 0; }
+.tfl-strip__when b { color: var(--text); font-weight: 600; white-space: nowrap; }
+.tfl-strip__ohlc { display: inline-flex; gap: 2px var(--sp-2); flex-wrap: wrap; }
+.tfl-strip__ohlc i { font-style: normal; color: var(--dim); margin-right: 3px; }
+.tfl-strip__nav { display: inline-flex; gap: 6px; margin-left: auto; }
+.tfl-strip__svg { display: block; width: 100%; height: 44px; cursor: pointer; touch-action: pan-y; }
+.tfl-strip__wait { fill: var(--line-soft); }
+.tfl-strip__col { fill: transparent; }
+.tfl-strip__c.is-hover .tfl-strip__col { fill: var(--tint); }
+.tfl-strip__c.is-on .tfl-strip__col { fill: color-mix(in srgb, var(--text) 12%, transparent); }
+.tfl-strip__c line { stroke-width: 1px; }
+.tfl-strip__c .is-up { fill: var(--pos); stroke: var(--pos); }
+.tfl-strip__c .is-down { fill: var(--neg); stroke: var(--neg); }
+.tfl-strip__c:not(.is-on):not(.is-hover) .is-up, .tfl-strip__c:not(.is-on):not(.is-hover) .is-down { opacity: 0.55; }
+@container tfl (max-width: 520px) {
+  /* The window and the step buttons first; the prices under them. */
+  .tfl-strip__ohlc { order: 3; width: 100%; }
+}
+@container tfl (max-width: 420px) {
+  /* The date says it is the candle; the pill comes back for a hovered one. */
+  .tfl-strip__when .tfl-pill.is-pick { display: none; }
+  .tfl-strip__info { column-gap: var(--sp-2); }
+}
+
+/* --- summary ------------------------------------------------------------------------------------- */
 .tfl-sum {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-3);
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-areas: 'lead stats' 'split split';
+  align-items: end;
+  gap: var(--sp-3) var(--sp-5);
   padding: var(--sp-3) var(--sp-4);
   border: 1px solid var(--panel-line);
   border-radius: var(--radius-tile);
   background: var(--tint);
 }
-.tfl-sum__head { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--sp-4); flex-wrap: wrap; }
-.tfl-sum__head > div:first-child { display: flex; flex-direction: column; gap: 2px; }
-.tfl-sum__big { font-size: 28px; font-weight: 600; letter-spacing: -0.01em; color: var(--text); line-height: 1.1; }
-.tfl-sum__stats { display: flex; gap: var(--sp-5); flex-wrap: wrap; }
-.tfl-sum__stats--wide { justify-content: space-between; }
-.tfl-stat { display: flex; flex-direction: column; gap: 2px; min-width: 56px; }
-.tfl-stat__l { font-size: var(--fs-label); text-transform: uppercase; letter-spacing: 0.06em; color: var(--dim); }
-.tfl-stat__v { font-size: var(--fs-base); font-weight: 600; color: var(--text); }
+.tfl-sum__lead { grid-area: lead; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.tfl-sum__big { font-size: 24px; font-weight: 600; letter-spacing: -0.01em; color: var(--text); line-height: 1.15; min-height: 28px; display: flex; align-items: center; }
+.tfl-sum__stats { grid-area: stats; display: flex; justify-content: flex-end; gap: var(--sp-5); }
+.tfl-sum__stats--wide { grid-area: auto; justify-content: space-between; flex-wrap: wrap; gap: var(--sp-3) var(--sp-5); }
+.tfl-sum > .tfl-split { grid-area: split; }
+.tfl-stat { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.tfl-stat__l { font-size: var(--fs-label); text-transform: uppercase; letter-spacing: 0.06em; color: var(--dim); white-space: nowrap; }
+.tfl-stat__v { font-size: var(--fs-base); font-weight: 600; color: var(--text); white-space: nowrap; min-height: 18px; display: flex; align-items: center; }
+.tfl-skelv { display: block; width: 64px; height: 12px; border-radius: var(--radius-full); background: linear-gradient(90deg, var(--tint), var(--line-soft), var(--tint)); background-size: 200% 100%; animation: tfl-shimmer 1.4s linear infinite; }
+.tfl-sum__big .tfl-skelv { width: 120px; height: 20px; }
 
-.tfl-split { display: flex; flex-direction: column; gap: 6px; }
+.tfl-split { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .tfl-split__bar { display: flex; gap: 2px; height: 6px; border-radius: var(--radius-full); overflow: hidden; }
 .tfl-split__bar > i, .tfl-bias > i { display: block; height: 100%; min-width: 2px; transition: width var(--dur-fast) var(--ease-out); }
 .tfl-split__bar > .is-buy, .tfl-bias > .is-buy { background: var(--pos); }
 .tfl-split__bar > .is-sell, .tfl-bias > .is-sell { background: var(--neg); }
 .tfl-split__bar.is-empty > i { background: var(--line-soft); }
-.tfl-split__legend { display: flex; justify-content: space-between; gap: var(--sp-2); font-size: var(--fs-xs); color: var(--muted); }
+.tfl-split__legend { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 2px var(--sp-2); font-size: var(--fs-xs); color: var(--muted); }
 .tfl-split__legend b { font-weight: 600; }
 
-/* --- filters ---------------------------------------------------------------------------------- */
-.tfl-filters { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); }
-.tfl-search { width: 220px; height: 30px; border-radius: var(--radius-full); }
-.tfl-count { margin-left: auto; font-size: var(--fs-xs); }
+@container tfl (max-width: 620px) {
+  .tfl-sum { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'lead' 'stats' 'split'; padding: var(--sp-3); gap: var(--sp-3); }
+  .tfl-sum__stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--sp-2); justify-content: stretch; }
+  .tfl-sum__stats--wide { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .tfl-sum__big { font-size: 22px; }
+}
+@container tfl (max-width: 330px) {
+  .tfl-sum__stats { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: var(--sp-3); }
+  .tfl-sum__stats--wide { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 
-/* --- the wallets table ------------------------------------------------------------------------ */
-.tfl-table { display: flex; flex-direction: column; border: 1px solid var(--panel-line); border-radius: var(--radius-tile); overflow: hidden; }
+/* --- notes, pills ---------------------------------------------------------------------------------- */
+.tfl-note { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; font-size: var(--fs-xs); color: var(--muted); line-height: 1.45; }
+.tfl-pill { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: var(--radius-full); font-size: var(--fs-xs); font-weight: 600; white-space: nowrap; flex: none; }
+.tfl-pill.is-buy { color: var(--pos); background: var(--bid-bg); }
+.tfl-pill.is-sell { color: var(--neg); background: var(--ask-bg); }
+.tfl-pill.is-warn { color: var(--warn); background: color-mix(in srgb, var(--warn) 14%, transparent); }
+.tfl-pill.is-pick { color: var(--text); background: color-mix(in srgb, var(--text) 9%, transparent); }
+.tfl-pill.is-hover { color: var(--muted); background: var(--tint); }
+.tfl-pill.is-live { color: var(--pos); background: var(--bid-bg); }
+
+/* --- filters ---------------------------------------------------------------------------------------- */
+.tfl-filters { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); }
+.tfl-search { width: auto; flex: 1 1 200px; max-width: 280px; height: 30px; margin-left: auto; border-radius: var(--radius-full); }
+.tfl-count { margin-left: auto; font-size: var(--fs-xs); white-space: nowrap; }
+@container tfl (max-width: 620px) {
+  /* The two switches on one row, the search and CSV on the next. */
+  .tfl-search { order: 3; flex: 1 1 calc(100% - 96px); max-width: none; margin-left: 0; }
+  .tfl-filters > .tfl-icobtn { order: 4; }
+}
+
+/* --- the wallets table ------------------------------------------------------------------------------ */
+.tfl-table {
+  --cols: minmax(180px, 1fr) minmax(100px, 200px) 96px minmax(104px, 200px) 64px 120px 108px 60px;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--panel-line);
+  border-radius: var(--radius-tile);
+  /* clip, not hidden: hidden would make this the scroller and unstick the header. */
+  overflow: clip;
+}
 .tfl-table.is-stale { opacity: 0.6; }
 .tfl-tr {
   display: grid;
-  grid-template-columns: minmax(170px, 1fr) minmax(90px, 170px) 84px minmax(96px, 150px) 64px 104px 96px 56px;
+  grid-template-columns: var(--cols);
   align-items: center;
   gap: var(--sp-3);
-  min-height: 40px;
+  min-height: 42px;
   padding: 0 var(--sp-3);
   border: 0;
   border-top: 1px solid var(--panel-line);
@@ -138,20 +229,22 @@
   font-size: var(--fs-data);
   text-align: left;
   width: 100%;
+  min-width: 0;
 }
+.tfl-tr > * { min-width: 0; }
 button.tfl-tr { cursor: pointer; transition: background var(--dur-fast) var(--ease-out); }
 button.tfl-tr:hover, button.tfl-tr:focus-visible { background: var(--bg-hover); outline: none; }
-.tfl-th { min-height: 32px; border-top: 0; background: var(--bg-panel); color: var(--dim); font-size: var(--fs-label); text-transform: uppercase; letter-spacing: 0.06em; }
+.tfl-th { position: sticky; top: 0; z-index: 2; min-height: 32px; border-top: 0; background: var(--bg-panel); color: var(--dim); font-size: var(--fs-label); text-transform: uppercase; letter-spacing: 0.06em; }
 .tfl-th button { padding: 0; border: 0; background: none; color: inherit; font: inherit; letter-spacing: inherit; text-transform: inherit; cursor: pointer; }
 .tfl-th button:hover, .tfl-th button.is-on { color: var(--text); }
-.tfl .c-num { text-align: right; justify-self: end; }
-.tfl-th .c-num { justify-self: end; }
-.c-who { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
-.c-px { display: flex; flex-direction: column; line-height: 1.25; }
+.tfl .c-num { text-align: right; justify-self: end; white-space: nowrap; }
+.c-who { display: flex; align-items: center; gap: var(--sp-2); }
+.c-px { display: flex; flex-direction: column; align-items: flex-end; line-height: 1.25; }
 
 .tfl-who { display: inline-flex; align-items: center; gap: var(--sp-2); min-width: 0; }
 .tfl-who .identicon { border-radius: 4px; flex: none; }
-.tfl-who__a { font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--fs-xs); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tfl-who .venue-logo, .tfl-who > svg:last-child { flex: none; }
+.tfl-who__a { font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--fs-xs); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 
 .tfl-lean { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; flex: none; border-radius: var(--radius-full); background: var(--tint); color: var(--muted); }
 .tfl-lean.is-long { color: var(--pos); background: var(--bid-bg); }
@@ -161,105 +254,122 @@ button.tfl-tr:hover, button.tfl-tr:focus-visible { background: var(--bg-hover); 
 .c-share { display: flex; align-items: center; gap: var(--sp-2); }
 .tfl-share { flex: 1; height: 4px; border-radius: var(--radius-full); background: var(--line-soft); overflow: hidden; }
 .tfl-share > i { display: block; height: 100%; border-radius: inherit; background: var(--muted); }
-.c-share .tfl-dim { width: 38px; text-align: right; font-size: var(--fs-xs); }
+.c-share .tfl-dim { width: 38px; text-align: right; font-size: var(--fs-xs); flex: none; }
 
 .c-bias { display: flex; flex-direction: column; gap: 3px; }
 .tfl-bias { display: flex; gap: 1px; height: 4px; border-radius: var(--radius-full); overflow: hidden; }
 .tfl-bias__n { font-size: var(--fs-xs); color: var(--dim); }
 
-.tfl-empty { padding: var(--sp-5) var(--sp-4); border-top: 1px solid var(--panel-line); color: var(--muted); text-align: center; font-size: var(--fs-xs); }
-.tfl-skel { pointer-events: none; }
-.tfl-skel > i { grid-column: 1 / -1; height: 10px; border-radius: var(--radius-full); background: linear-gradient(90deg, var(--tint), var(--line-soft), var(--tint)); background-size: 200% 100%; animation: tfl-shimmer 1.4s linear infinite; }
+.tfl-tr--empty { border-top: 1px solid var(--panel-line); padding: var(--sp-2) var(--sp-3) var(--sp-4); }
+.tfl-tr--empty .empty-state { padding-block: var(--sp-4) 0; }
+.tfl-skel { pointer-events: none; grid-template-columns: 1fr; }
+.tfl-skel > i { height: 10px; border-radius: var(--radius-full); background: linear-gradient(90deg, var(--tint), var(--line-soft), var(--tint)); background-size: 200% 100%; animation: tfl-shimmer 1.4s linear infinite; }
+.tfl-skel:nth-child(odd) > i { width: 82%; }
 @keyframes tfl-shimmer { to { background-position: -200% 0; } }
-@media (prefers-reduced-motion: reduce) { .tfl-skel > i { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .tfl-skel > i, .tfl-skelv { animation: none; } }
 
-.tfl-more { align-self: center; height: 30px; padding: 0 var(--sp-4); border: 1px solid var(--panel-line); border-radius: var(--radius-full); background: transparent; color: var(--muted); font: inherit; font-size: var(--fs-xs); cursor: pointer; }
-.tfl-more:hover { color: var(--text); border-color: var(--line); }
+.tfl-more { align-self: center; padding: 0 var(--sp-4); }
 
+/* Columns give way as the view narrows - share, then fills and taker, then bias and net - each step
+   before the row's minimum (columns + gaps + padding) passes the width. */
+@container tfl (max-width: 1040px) {
+  .tfl-table { --cols: minmax(170px, 1fr) 88px minmax(96px, 200px) 60px 112px 100px 52px; }
+  .tfl-tr > .c-share { display: none; }
+}
+@container tfl (max-width: 860px) {
+  .tfl-table { --cols: minmax(160px, 1.5fr) 84px minmax(90px, 1fr) 108px 96px; }
+  .tfl-tr > .c-fills, .tfl-tr > .c-tk { display: none; }
+}
+@container tfl (max-width: 640px) {
+  .tfl-table { --cols: minmax(0, 1fr) 70px 84px; }
+  .tfl-tr { gap: var(--sp-2); padding: 0 var(--sp-2); }
+  .tfl-tr > .c-bias, .tfl-tr > .c-net { display: none; }
+}
+@container tfl (max-width: 360px) {
+  .tfl-table { --cols: minmax(0, 1fr) 60px 70px; }
+  .tfl-lean { width: 18px; height: 18px; }
+  .tfl-who { gap: 6px; }
+}
+
+/* --- coverage ------------------------------------------------------------------------------------- */
 .tfl-cov { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-3); font-size: var(--fs-xs); }
 .tfl-cov__venues { display: inline-flex; flex-wrap: wrap; gap: 6px; }
-.tfl-cov__m { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 8px; border-radius: var(--radius-full); background: var(--tint); color: var(--muted); }
+.tfl-cov__m { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 9px; border-radius: var(--radius-full); background: var(--tint); color: var(--muted); white-space: nowrap; }
+.tfl-cov__m.is-off { color: var(--dim); background: transparent; border: 1px dashed var(--panel-line); }
+.tfl-cov__m.is-off .venue-logo, .tfl-cov__m.is-off > svg { opacity: 0.5; }
+.tfl-cov__note { flex: 1 1 260px; line-height: 1.45; }
 
-.tfl-pill { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: var(--radius-full); font-size: var(--fs-xs); font-weight: 600; }
-.tfl-pill.is-buy { color: var(--pos); background: var(--bid-bg); }
-.tfl-pill.is-sell { color: var(--neg); background: var(--ask-bg); }
-.tfl-note { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; font-size: var(--fs-xs); color: var(--muted); }
-.tfl-pill.is-warn { color: var(--warn); background: color-mix(in srgb, var(--warn) 14%, transparent); }
-
-/* --- one wallet ------------------------------------------------------------------------------- */
-.tfl-wallet { overflow: hidden; }
+/* --- one wallet ------------------------------------------------------------------------------------ */
 .tfl-wallet__head { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; }
-.tfl-wallet__head > .identicon { border-radius: 8px; }
+.tfl-wallet__head > .identicon { border-radius: 8px; flex: none; }
 .tfl-wallet__id { display: flex; flex-direction: column; gap: 2px; margin-right: auto; min-width: 0; }
-.tfl-wallet__id b { font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--fs-head); }
-.tfl-wallet__id .tfl-dim { display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-xs); }
+.tfl-wallet__id b { font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--fs-head); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tfl-wallet__id .tfl-dim { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; font-size: var(--fs-xs); }
 .tfl-wallet__acts { display: flex; gap: var(--sp-2); }
+.tfl-wallet .tfl-sum { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'stats' 'split'; }
+@container tfl (max-width: 520px) {
+  .tfl-wallet__acts { width: 100%; }
+  .tfl-wallet__acts > * { flex: 1; }
+}
 
-.tfl-body > .tfl-fills { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 240px; border: 1px solid var(--panel-line); border-radius: var(--radius-tile); overflow: hidden; }
+.tfl-fills { display: flex; flex-direction: column; height: clamp(280px, 62vh, 640px); border: 1px solid var(--panel-line); border-radius: var(--radius-tile); overflow: hidden; }
 .tfl-fr {
+  --fcols: 128px minmax(0, 1fr) minmax(0, 1fr) 92px minmax(130px, 1.2fr) 112px;
   display: grid;
-  grid-template-columns: 128px 1fr 1fr 88px minmax(120px, 1fr) 108px;
+  grid-template-columns: var(--fcols);
   align-items: center;
   gap: var(--sp-3);
   padding: 0 var(--sp-3);
   font-size: var(--fs-data);
 }
+.tfl-fr > * { min-width: 0; }
 .tfl-fills__scroll { position: relative; flex: 1; min-height: 0; overflow: auto; }
 .tfl-fills__sizer { position: relative; }
 .tfl-fills__sizer > .tfl-fr { position: absolute; left: 0; right: 0; border-top: 1px solid var(--panel-line); }
 .tfl-fills__sizer > .tfl-fr:hover { background: var(--bg-hover); }
-.tfl-fr.tfl-th { min-height: 32px; }
+.tfl-fr.tfl-th { min-height: 32px; flex: none; }
+.tfl-fr.tfl-skel { min-height: 30px; grid-template-columns: 1fr; border-top: 1px solid var(--panel-line); }
+.tfl-fills .empty-state { padding-block: var(--sp-5); }
 .c-side { display: flex; align-items: center; gap: var(--sp-2); }
 .tfl-role { font-size: var(--fs-xs); }
-.c-cp { display: flex; align-items: center; gap: 6px; min-width: 0; font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--fs-xs); }
+.c-cp { display: flex; align-items: center; gap: 6px; font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--fs-xs); white-space: nowrap; overflow: hidden; }
 .c-cp .identicon { border-radius: 3px; flex: none; }
-
-/* --- narrow: the chart column, a phone -------------------------------------------------------- */
-@media (max-width: 900px) {
-  .tfl-tr { grid-template-columns: minmax(150px, 1.6fr) 84px minmax(80px, 1fr) 96px 80px; }
-  .tfl-tr > .c-share, .tfl-tr > .c-fills, .tfl-tr > .c-tk { display: none; }
-  .tfl-fr { grid-template-columns: 112px 1fr 1fr 96px; }
-  .tfl-fr > .c-val, .tfl-fr > .c-cp { display: none; }
+@container tfl (max-width: 720px) {
+  .tfl-fr { --fcols: 112px minmax(0, 1fr) minmax(0, 1fr) 84px 100px; }
+  .tfl-fr > .c-cp { display: none; }
 }
-@media (max-width: 560px) {
-  .tfl-overlay { padding: 0; }
-  .tfl--big { border-radius: 0; border: 0; }
-  .tfl-bar { padding: var(--sp-2) var(--sp-3); }
-  .tfl-body { padding: var(--sp-2) var(--sp-3) var(--sp-3); }
-  .tfl-nav { width: 100%; }
-  .tfl-nav .lbp-seg { flex: 1; overflow-x: auto; scrollbar-width: none; }
-  .tfl-sum__big { font-size: 22px; }
-  .tfl-sum__stats { gap: var(--sp-3); width: 100%; justify-content: space-between; }
-  .tfl-search { width: 100%; order: 3; }
-  .tfl-tr { grid-template-columns: minmax(0, 1fr) 68px 80px; gap: var(--sp-2); }
-  .tfl-tr > .c-bias { display: none; }
-  .tfl-tr > .c-net { display: none; }
-  .tfl-fr { grid-template-columns: 92px 1fr 1fr 92px; gap: var(--sp-2); }
-  .tfl-role { display: none; }
-  .tfl-wallet__acts { width: 100%; }
+@container tfl (max-width: 520px) {
+  .tfl-fr { --fcols: 64px minmax(0, 1fr) minmax(0, 1fr) 96px; gap: var(--sp-2); padding: 0 var(--sp-2); }
+  .tfl-fr > .c-val, .tfl-role { display: none; }
 }
 
-/* --- the candle row: pick the candle ---------------------------------------------------------- */
-.tfl-strip { display: flex; flex-direction: column; gap: 6px; padding: var(--sp-2) var(--sp-4) var(--sp-3); border-bottom: 1px solid var(--panel-line); }
-.tfl-strip__info { display: flex; align-items: center; flex-wrap: wrap; gap: 6px var(--sp-2); min-height: 22px; font-size: var(--fs-xs); color: var(--muted); }
-.tfl-strip__info b { color: var(--text); font-weight: 600; }
-.tfl-strip__ohlc { display: inline-flex; gap: var(--sp-2); flex-wrap: wrap; }
-.tfl-strip__ohlc i { font-style: normal; color: var(--dim); margin-right: 3px; }
-.tfl-strip__hint { margin-left: auto; }
-.tfl-pill.is-pick { color: var(--text); background: color-mix(in srgb, var(--text) 9%, transparent); }
-.tfl-pill.is-hover { color: var(--muted); background: var(--tint); }
-.tfl-pill.is-live { color: var(--pos); background: var(--bid-bg); }
-.tfl-strip__svg { display: block; width: 100%; height: 64px; cursor: pointer; }
-.tfl-strip__wait { fill: var(--line-soft); }
-.tfl-strip__col { fill: transparent; }
-.tfl-strip__c.is-hover .tfl-strip__col { fill: var(--tint); }
-.tfl-strip__c.is-on .tfl-strip__col { fill: color-mix(in srgb, var(--text) 10%, transparent); }
-.tfl-strip__c line { stroke-width: 1px; }
-.tfl-strip__c .is-up { fill: var(--pos); stroke: var(--pos); }
-.tfl-strip__c .is-down { fill: var(--neg); stroke: var(--neg); }
-.tfl-strip__c:not(.is-on):not(.is-hover) .is-up, .tfl-strip__c:not(.is-on):not(.is-hover) .is-down { opacity: 0.55; }
-@media (max-width: 560px) {
-  .tfl-strip { padding: var(--sp-2) var(--sp-3); }
+/* --- touch: every control at least 40 px, rows 48 px ---------------------------------------------- */
+@media (pointer: coarse) {
+  .tfl-icobtn, .tfl-latest, .tfl-cta, .tfl-more { height: 40px; min-width: 40px; }
+  .tfl-icobtn:has(> svg:only-child) { width: 40px; }
+  .tfl .lbp-seg > button { height: 34px; }
+  .tfl-search { height: 40px; }
+  .tfl .psel__btn { min-height: 40px; }
+  .tfl-tr { min-height: 48px; }
+  .tfl-th { min-height: 34px; }
   .tfl-strip__svg { height: 52px; }
-  .tfl-strip__hint { display: none; }
+}
+
+/* --- a short panel (the trade page's chart card): thin candle row and summary -------------------- */
+.tfl.is-short .tfl-strip { padding-block: 6px 4px; }
+.tfl.is-short .tfl-strip__svg { height: 28px; }
+.tfl.is-short .tfl-body { gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); }
+.tfl.is-short .tfl-sum { grid-template-columns: auto minmax(0, 1fr); grid-template-areas: 'lead stats' 'split split'; align-items: center; gap: 6px var(--sp-4); padding: var(--sp-2) var(--sp-3); }
+.tfl.is-short .tfl-sum__lead { flex-direction: row; align-items: baseline; gap: var(--sp-2); }
+.tfl.is-short .tfl-sum__big { font-size: var(--fs-head); min-height: 0; }
+.tfl.is-short .tfl-sum__stats { display: flex; gap: var(--sp-4); justify-content: flex-end; flex-wrap: wrap; }
+.tfl.is-short .tfl-stat { flex-direction: row; align-items: baseline; gap: 5px; }
+.tfl.is-short .tfl-stat__v { font-size: var(--fs-xs); min-height: 0; }
+.tfl.is-short .tfl-split__bar { height: 4px; }
+.tfl.is-short .tfl-split__legend { font-size: var(--fs-label); }
+@container tfl (max-width: 620px) {
+  /* Short AND narrow (a small terminal panel): the figures in one row of four under the total. */
+  .tfl.is-short .tfl-sum { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'lead' 'stats' 'split'; }
+  .tfl.is-short .tfl-sum__stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px var(--sp-2); }
+  .tfl.is-short .tfl-stat { flex-direction: column; align-items: flex-start; gap: 1px; }
 }
