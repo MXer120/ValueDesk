@@ -4000,6 +4000,16 @@ function builderUrl(raw) {
   if (u.protocol !== "https:" && u.hostname !== "127.0.0.1" && u.hostname !== "localhost") throw new Error("EXECUTOR_BUILDER_URL must be https (or a loopback address)");
   return u.toString();
 }
+function betaUrlFrom(raw, builderRaw) {
+  if (raw?.trim()) return builderUrl(raw);
+  const b = builderUrl(builderRaw);
+  if (!b) return null;
+  const u = new URL(b);
+  if (!/\/volume$/.test(u.pathname)) return null;
+  u.pathname = u.pathname.replace(/\/volume$/, "/beta");
+  u.search = "";
+  return u.toString();
+}
 function liveAlgoWalletsFrom(raw) {
   const s = raw?.trim() ?? "";
   if (!s) return [];
@@ -4051,6 +4061,7 @@ function loadConfig(env = process.env) {
     builderDb: env.EXECUTOR_BUILDER_DB?.trim() || null,
     builderUrl: builderUrl(env.EXECUTOR_BUILDER_URL),
     builderToken: env.EXECUTOR_BUILDER_TOKEN?.trim() || null,
+    betaUrl: betaUrlFrom(env.EXECUTOR_BETA_URL, env.EXECUTOR_BUILDER_URL),
     localAddress: env.EXECUTOR_LOCAL_ADDRESS?.trim() || null,
     logLevel: level === "debug" || level === "warn" || level === "error" ? level : "info",
     executorId,
@@ -4501,6 +4512,49 @@ var ExecutorDb = class {
       body: String(r.body),
       at: Number(r.at),
       paper: Number(r.paper) === 1
+    }));
+  }
+  /**
+   * Every wallet this executor knows, one row each, for the owner's admin suite (server.ts
+   * GET /internal/users, behind the internal token): when it first and last signed something,
+   * its ValueDesk terms (site) and copy terms, the countries it declared and the edge saw, how
+   * many copies and algos it has, whether a key is registered. Never a key, a signature or a payload.
+   */
+  usersSummary() {
+    const rows2 = this.q(`
+      WITH owners AS (
+        SELECT owner FROM consents UNION SELECT owner FROM subs UNION SELECT owner FROM algos UNION SELECT owner FROM keys UNION SELECT owner FROM terms
+      )
+      SELECT o.owner AS owner,
+        (SELECT MIN(at) FROM consents c WHERE c.owner = o.owner) AS first_at,
+        (SELECT MAX(at) FROM consents c WHERE c.owner = o.owner) AS last_signed_at,
+        (SELECT MAX(at) FROM consents c WHERE c.owner = o.owner AND c.action = 'accept-site-terms') AS site_terms_at,
+        (SELECT MAX(at) FROM consents c WHERE c.owner = o.owner AND c.action = 'accept-terms') AS copy_terms_at,
+        (SELECT json_extract(payload, '$.country') FROM consents c WHERE c.owner = o.owner AND c.action IN ('accept-site-terms', 'accept-terms') ORDER BY seq DESC LIMIT 1) AS country,
+        (SELECT viewer_country FROM consents c WHERE c.owner = o.owner AND viewer_country IS NOT NULL ORDER BY seq DESC LIMIT 1) AS viewer_country,
+        (SELECT COUNT(*) FROM subs s WHERE s.owner = o.owner) AS copies,
+        (SELECT COUNT(*) FROM subs s WHERE s.owner = o.owner AND json_extract(s.json, '$.status') = 'active') AS active_copies,
+        (SELECT COUNT(*) FROM algos a WHERE a.owner = o.owner) AS algos,
+        (SELECT COUNT(*) FROM algos a WHERE a.owner = o.owner AND json_extract(a.json, '$.status') NOT IN ('done', 'cancelled', 'expired', 'failed')) AS live_algos,
+        (SELECT COUNT(*) FROM keys k WHERE k.owner = o.owner AND k.registered = 1) AS keys,
+        (SELECT MAX(at) FROM activity x WHERE x.owner = o.owner) AS last_activity_at
+      FROM owners o`).all();
+    const n = (v) => v === null || v === void 0 ? null : Number(v);
+    const s = (v) => typeof v === "string" && /^[A-Za-z]{2}$/.test(v) ? v.toUpperCase() : null;
+    return rows2.map((r) => ({
+      owner: String(r.owner).toLowerCase(),
+      firstAt: n(r.first_at),
+      lastSignedAt: n(r.last_signed_at),
+      siteTermsAt: n(r.site_terms_at),
+      copyTermsAt: n(r.copy_terms_at),
+      country: s(r.country),
+      viewerCountry: s(r.viewer_country),
+      copies: Number(r.copies),
+      activeCopies: Number(r.active_copies),
+      algos: Number(r.algos),
+      liveAlgos: Number(r.live_algos),
+      keys: Number(r.keys),
+      lastActivityAt: n(r.last_activity_at)
     }));
   }
   consents(owner, limit = 200) {
@@ -8138,7 +8192,7 @@ async function confirmRead(first, read, view, o = {}) {
 var sizeView = (n) => n === null || n === void 0 ? "unread" : String(Number((n || 0).toPrecision(12)));
 
 // ../../packages/copy-engine/src/policy.ts
-var COPY_TERMS_VERSION = "2026-10-28";
+var COPY_TERMS_VERSION = "2026-11-02";
 var US_REGIONS = ["US", "PR", "VI", "GU", "AS", "MP", "UM"];
 var UK_CA_REGIONS = ["GB", "CA"];
 var CLOSE_ONLY_REGIONS = [...US_REGIONS, ...UK_CA_REGIONS];
@@ -8253,6 +8307,7 @@ function copyFeeFor(volumeUsd, ladder = COPY_FEE_LADDER) {
   for (const step of ladder) if (volumeUsd >= step.fromUsd) fee = step.fee;
   return fee;
 }
+var BOT_FEE = 5;
 
 // ../../packages/copy-engine/src/sanctionsList.ts
 var SANCTIONED_ADDRESSES = [
@@ -11054,7 +11109,8 @@ var OracleFeed = class {
 };
 
 // ../../packages/copy-engine/src/algo/types.ts
-var ALGO_KINDS = ["twap", "vwap", "pov", "iceberg", "chase", "scale", "dca", "swarm", "conditional", "trailing", "basket", "bracket", "sweep"];
+var ALGO_KINDS = ["twap", "vwap", "pov", "iceberg", "chase", "scale", "dca", "swarm", "conditional", "trailing", "basket", "bracket", "sweep", "mm", "grid"];
+var BOT_KINDS = ["mm", "grid"];
 var SLIP_FROM = ["touch", "mid", "mark", "index", "oracleMid", "oracleFair"];
 var SLIP_FROM_NAMES = {
   touch: "Best price",
@@ -11091,6 +11147,9 @@ var ALGO_LIMITS = {
   trailing: { trailPct: { min: 1e-3, max: 0.5 }, chaseMs: { min: 1e3, max: 10 * MIN } },
   basket: { legs: { min: 2, max: 10 }, legUsd: { min: 10, max: 1e7 } },
   sweep: { slippageBps: { min: 1, max: 1e3 }, roundMs: { min: 500, max: MIN }, timeoutMs: { min: 5e3, max: DAY } },
+  mm: { orderUsd: { min: 10, max: 1e5 }, maxInventoryUsd: { min: 10, max: 1e6 }, offsetTicks: { min: -1, max: 1e3 }, chaseTicks: { min: 1, max: 1e3 }, minRepriceMs: { min: 1e3, max: MIN }, skewTicks: { min: 0, max: 1e3 }, edgeBps: { min: 0, max: 100 } },
+  grid: { levels: { min: 3, max: 60 }, orderUsd: { min: 10, max: 1e5 } },
+  bot: { volumeTargetUsd: { min: 100, max: 1e10 }, maxLossUsd: { min: 1, max: 1e8 } },
   exitPct: { min: 1e-3, max: 10 },
   exec: { slippageBps: { min: 1, max: 500 }, offsetTicks: { min: -5, max: 1e4 }, chaseTicks: { min: 1, max: 1e4 }, makerShare: { min: 0.1, max: 0.95 } },
   jitter: { min: 0, max: 0.5 },
@@ -11241,8 +11300,22 @@ function base(o, kind, e) {
   };
   b.exits = exits(o, b.side, e);
   if (b.exits && b.reduceOnly) e.exits = "A reduce-only order opens nothing to protect: no exits on it.";
+  if (BOT_KINDS.includes(kind) || kind === "dca" && o.bot === true) b.bot = true;
+  else if (o.bot === true) e.bot = "Only a volume maker, a grid or a DCA runs as a bot.";
+  if (b.bot && b.exits) e.exits = "A bot places no take-profit or stop-loss: set a loss limit instead.";
+  if (BOT_KINDS.includes(kind) && b.limitPrice !== null) e.limitPrice = "A bot buys and sells: it has no limit price. Use the bounds to hold or stop it.";
+  if (BOT_KINDS.includes(kind) && (b.upper?.then === "rush" || b.lower?.then === "rush")) e[b.upper?.then === "rush" ? "upper" : "lower"] = "A bot has nothing to rush: hold or stop it at a bound.";
   if (b.upper && b.lower && b.upper.price <= b.lower.price) e.upper = "The upper bound must be above the lower bound.";
   return b;
+}
+function botLimits(o, e) {
+  const L = ALGO_LIMITS.bot;
+  return {
+    volumeTargetUsd: opt(o, "volumeTargetUsd", "Volume target", L.volumeTargetUsd, e),
+    maxLossUsd: opt(o, "maxLossUsd", "Loss limit", L.maxLossUsd, e),
+    endAt: time(o, "endAt", "End time", e),
+    onStop: oneOf(o, "onStop", "When it stops", ["close", "keep"], "close", e)
+  };
 }
 var SOURCES = ["mark", "last", "mid", "index"];
 function condition(v, e, path) {
@@ -11306,6 +11379,7 @@ function action(v, e, depth) {
     const inner = checkAlgoSpec(o.algo, depth + 1);
     for (const [k, m] of Object.entries(inner.errors)) e[`then.algo.${k}`] = m;
     if (inner.spec?.kind === "conditional") e.then = "A conditional cannot start another conditional.";
+    if (inner.spec && BOT_KINDS.includes(inner.spec.kind)) e.then = "A conditional cannot start a bot: start it from the Bots page.";
     return { type: "algo", algo: inner.spec ?? { kind: "twap" } };
   }
   e.then = "Choose what happens when the conditions hold.";
@@ -11596,6 +11670,47 @@ function checkAlgoSpec(input, depth = 0) {
       }
       break;
     }
+    case "mm": {
+      const L = ALGO_LIMITS.mm;
+      const orderUsd = num3(o, "orderUsd", "Order size", L.orderUsd, e);
+      const maxInventoryUsd = num3(o, "maxInventoryUsd", "Inventory cap", L.maxInventoryUsd, e);
+      if (Number.isFinite(orderUsd) && Number.isFinite(maxInventoryUsd) && maxInventoryUsd < orderUsd) e.maxInventoryUsd = "The inventory cap must hold at least one order.";
+      if (b.reduceOnly) e.reduceOnly = "A volume maker quotes both sides: it cannot be reduce-only.";
+      spec = {
+        ...b,
+        ...botLimits(o, e),
+        kind,
+        side: "buy",
+        orderUsd,
+        maxInventoryUsd,
+        offsetTicks: o.offsetTicks === void 0 ? 0 : int(o, "offsetTicks", "Distance from the best price", L.offsetTicks, e),
+        chaseTicks: o.chaseTicks === void 0 ? 2 : int(o, "chaseTicks", "Re-price distance", L.chaseTicks, e),
+        minRepriceMs: o.minRepriceMs === void 0 ? 3e3 : int(o, "minRepriceMs", "Re-price pause", L.minRepriceMs, e),
+        skewTicks: o.skewTicks === void 0 ? 3 : int(o, "skewTicks", "Inventory skew", L.skewTicks, e)
+      };
+      if (o.edgeBps !== void 0 && o.edgeBps !== null && Number(o.edgeBps) !== 0) spec.edgeBps = num3(o, "edgeBps", "Distance from the mid", L.edgeBps, e);
+      break;
+    }
+    case "grid": {
+      const L = ALGO_LIMITS.grid;
+      const low = price(o, "low", "Lowest price", e);
+      const high = price(o, "high", "Highest price", e);
+      if (Number.isFinite(low) && Number.isFinite(high) && high <= low) e.high = "The highest price must be above the lowest.";
+      if (b.reduceOnly) e.reduceOnly = "A grid buys and sells: it cannot be reduce-only.";
+      spec = {
+        ...b,
+        ...botLimits(o, e),
+        kind,
+        side: "buy",
+        low,
+        high,
+        levels: int(o, "levels", "Levels", L.levels, e),
+        orderUsd: num3(o, "orderUsd", "Order size", L.orderUsd, e),
+        spacing: oneOf(o, "spacing", "Spacing", ["linear", "geometric"], "geometric", e),
+        outOfRange: oneOf(o, "outOfRange", "Out of the range", ["wait", "stop"], "wait", e)
+      };
+      break;
+    }
     case "bracket": {
       const entry = oneOf(o, "entry", "Entry", ["market", "limit"], "market", e);
       if (!b.exits) e.exits = "A bracket needs a take-profit, a stop-loss, or both.";
@@ -11627,6 +11742,8 @@ function algoQuantity(s) {
   switch (s.kind) {
     case "dca":
     case "basket":
+    case "mm":
+    case "grid":
       return null;
     case "twap":
       return s.closeShare !== null ? null : Number(s.quantity);
@@ -11664,7 +11781,9 @@ var ALGO_NAMES = {
   trailing: "Trailing stop",
   basket: "Basket",
   bracket: "Bracket",
-  sweep: "Fill fast"
+  sweep: "Fill fast",
+  mm: "Volume maker",
+  grid: "Grid"
 };
 
 // ../../packages/copy-engine/src/notices.ts
@@ -13629,8 +13748,119 @@ function verifyCopyRequest(r, o) {
   if (signer !== owner) return { ok: false, error: "the signature is not from this wallet" };
   return { ok: true, digest, payload };
 }
-var ALGO_UPDATE_FIELDS = ["quantity", "limitPrice", "maxSpreadBps", "label"];
-var EXECUTOR_FEATURES = ["counter", "site-terms", "key-import", "algo-update"];
+var ALGO_UPDATE_FIELDS = [
+  "quantity",
+  "limitPrice",
+  "maxSpreadBps",
+  "label",
+  "orderUsd",
+  "maxInventoryUsd",
+  "offsetTicks",
+  "chaseTicks",
+  "minRepriceMs",
+  "skewTicks",
+  "edgeBps",
+  "volumeTargetUsd",
+  "maxLossUsd",
+  "endAt",
+  "onStop",
+  "outOfRange"
+];
+var EXECUTOR_FEATURES = ["counter", "site-terms", "key-import", "algo-update", "bots"];
+
+// ../../packages/copy-engine/src/algo/bots.ts
+var BOT_SAMPLE_MS = 5 * 6e4;
+var BOT_SERIES_MAX = 1500;
+var emptyBook = () => ({ buyQty: 0, buyValue: 0, sellQty: 0, sellValue: 0, makerValue: 0, takerValue: 0, tradeFees: 0, builderFees: 0, fills: 0, series: [] });
+function bookFill(b, side, qty2, value, maker, tradeRate, builderRate) {
+  if (!(qty2 > 0) || !(value > 0)) return;
+  if (side === "buy") {
+    b.buyQty += qty2;
+    b.buyValue += value;
+  } else {
+    b.sellQty += qty2;
+    b.sellValue += value;
+  }
+  if (maker) b.makerValue += value;
+  else b.takerValue += value;
+  b.tradeFees += value * tradeRate;
+  b.builderFees += value * builderRate;
+  b.fills++;
+}
+var bookVolume = (b) => b.buyValue + b.sellValue;
+var bookInventory = (b) => b.buyQty - b.sellQty;
+var bookGross = (b, mark) => b.sellValue - b.buyValue + bookInventory(b) * mark;
+var bookNet = (b, mark) => bookGross(b, mark) - b.tradeFees - b.builderFees;
+function costPerMillion(b, mark) {
+  const v = bookVolume(b);
+  return v >= 1 ? -bookNet(b, mark) / v * 1e6 : null;
+}
+function sampleBook(b, mark, now, force = false) {
+  const last = b.series[b.series.length - 1];
+  if (!force && last && now - last[0] < BOT_SAMPLE_MS) return false;
+  b.series.push([now, round2(bookVolume(b)), round4(bookNet(b, mark)), round4(b.tradeFees + b.builderFees)]);
+  if (b.series.length > BOT_SERIES_MAX) {
+    const half = Math.floor(b.series.length / 2);
+    b.series = [...b.series.slice(0, half).filter((_, i) => i % 2 === 0), ...b.series.slice(half)];
+  }
+  return true;
+}
+var round2 = (x) => Math.round(x * 100) / 100;
+var round4 = (x) => Math.round(x * 1e4) / 1e4;
+function gridPrices(s, tickSize) {
+  const n = s.levels;
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const t = n === 1 ? 0 : i / (n - 1);
+    const p = s.spacing === "geometric" ? s.low * Math.pow(s.high / s.low, t) : s.low + (s.high - s.low) * t;
+    const snapped = i === 0 ? snapUp(p, tickSize) : snapDown(p, tickSize);
+    if (!out.length || snapped > out[out.length - 1] + 1e-12) out.push(snapped);
+  }
+  return out;
+}
+function gridStart(prices, ref) {
+  let gap = 0;
+  for (let i = 1; i < prices.length; i++) if (Math.abs(prices[i] - ref) < Math.abs(prices[gap] - ref)) gap = i;
+  return prices.map((_, i) => i < gap ? "buy" : i > gap ? "sell" : null);
+}
+function gridAfterFill(sides, i, filled) {
+  const out = [...sides];
+  out[i] = null;
+  const j = filled === "buy" ? i + 1 : i - 1;
+  if (j >= 0 && j < out.length) out[j] = filled === "buy" ? "sell" : "buy";
+  return out;
+}
+function gridQty(orderUsd, price2, m) {
+  return Math.max(floorStep(orderUsd / price2, m), minChildQty(m, price2));
+}
+function mmQuotes(s, q, m, inventory, mark) {
+  const tick = Number(m.tickSize);
+  const invUsd = inventory * mark;
+  const ratio = Math.max(-1, Math.min(1, invUsd / s.maxInventoryUsd));
+  const out = [];
+  const room = Math.round((q.ask - q.bid) / tick);
+  for (const side of ["buy", "sell"]) {
+    const adds = side === "buy" ? inventory >= 0 : inventory <= 0;
+    if (adds && Math.abs(invUsd) + s.orderUsd > s.maxInventoryUsd + 1e-9) continue;
+    const skew = adds ? Math.round(Math.abs(ratio) * s.skewTicks) : 0;
+    const inside = s.offsetTicks < 0 && room >= 2 ? 1 : 0;
+    const off = Math.max(0, s.offsetTicks) + skew;
+    let price2 = side === "buy" ? q.bid - off * tick + inside * tick : q.ask + off * tick - inside * tick;
+    const edge = s.edgeBps ?? 0;
+    if (edge > 0) {
+      const midP = (q.bid + q.ask) / 2;
+      price2 = side === "buy" ? Math.min(price2, midP * (1 - edge / 1e4) - skew * tick) : Math.max(price2, midP * (1 + edge / 1e4) + skew * tick);
+    }
+    price2 = side === "buy" ? Math.min(price2, q.ask - tick) : Math.max(price2, q.bid + tick);
+    price2 = side === "buy" ? snapDown(price2, m.tickSize) : snapUp(price2, m.tickSize);
+    if (!(price2 > 0)) continue;
+    let qty2 = floorStep(s.orderUsd / price2, m);
+    if (!adds && Math.abs(inventory) > 0 && Math.abs(inventory) < qty2) qty2 = floorStep(Math.abs(inventory), m);
+    qty2 = Math.max(qty2, minChildQty(m, price2));
+    out.push({ side, price: price2, quantity: qty2 });
+  }
+  return out;
+}
 
 // ../../packages/copy-engine/src/algo/sizes.ts
 function money(n) {
@@ -13772,6 +14002,21 @@ function checkSizes(s, m, ctx) {
       if (total < minChildQty(m, px2) - 1e-12) out.errors.push(`The whole order is about ${money(total * px2)}, under ${minUsdWords}. Raise the size to at least ${moneyUp(minChildQty(m, px2) * px2)}.`);
       else out.errors.push(...scheduleCheck({ unit: "slice", count: s.slices, counts: { min: ALGO_LIMITS.vwap.slices.min, max: Math.min(ALGO_LIMITS.vwap.slices.max, most) }, sizes, total, m }));
       scheduleNotes(s, out);
+      break;
+    }
+    case "mm": {
+      if (!px2) break;
+      out.errors.push(...oneOrder(floorStep(s.orderUsd / px2, m), px2, m, "Each quote"));
+      break;
+    }
+    case "grid": {
+      const prices = gridPrices(s, m.tickSize);
+      if (prices.length < 3) {
+        out.errors.push("The range is too narrow for 3 levels on SoDEX's tick: widen it.");
+        break;
+      }
+      const low = prices[0];
+      out.errors.push(...oneOrder(floorStep(s.orderUsd / low, m), low, m, "Each level's order"));
       break;
     }
     case "swarm": {
@@ -14525,6 +14770,17 @@ var ORACLE_FIRST_WAIT_MS = 3e3;
 var EXITS_RETRY_MS = 3e4;
 var EXITS_MAX_REFUSALS = 5;
 var UPDATABLE = /* @__PURE__ */ new Set(["limitPrice", "upper", "lower", "maxSpreadBps", "label", "quantity"]);
+var BOT_UPDATABLE = {
+  mm: /* @__PURE__ */ new Set(["label", "maxSpreadBps", "upper", "lower", "orderUsd", "maxInventoryUsd", "offsetTicks", "chaseTicks", "minRepriceMs", "skewTicks", "edgeBps", "volumeTargetUsd", "maxLossUsd", "endAt", "onStop"]),
+  grid: /* @__PURE__ */ new Set(["label", "maxSpreadBps", "upper", "lower", "orderUsd", "volumeTargetUsd", "maxLossUsd", "endAt", "onStop", "outOfRange"])
+};
+var BOT_CLOSE_REST_MS = 6e4;
+var BOT_CLOSE_SLIP_BPS = 30;
+var GRID_RETRY_MS = 3e3;
+var gridLevelOf = (c) => {
+  const x = /^grid (\d+)\//.exec(c.tag);
+  return x ? Number(x[1]) - 1 : -1;
+};
 var dec3 = (n) => canonicalDecimal(numberToPlainString(Number(n.toPrecision(12))));
 function onTick(p, side, tickSize) {
   const k = p / Number(tickSize);
@@ -14902,11 +15158,28 @@ var AlgoRuntime = class {
       return a;
     }
     for (const c of this.linkedOf(a)) if (!FINAL_STATUSES.has(c.status)) await this.cancel(c.id, o);
-    await this.end(a, "cancelled", "Cancelled by you.");
+    if (!o.pullAll && !a.k.closing && await this.stopBot(a, "cancelled", "Stopped by you.")) return a;
+    await this.end(a, "cancelled", a.k.closing ? "Stopped by you; what it still holds is left as it is." : a.spec.bot ? "Stopped by you." : "Cancelled by you.");
     if (o.pullAll) {
       for (const c of this.linkedOf(a)) if (this.hasLeftovers(c)) await this.pullLeftovers(c);
       await this.pullLeftovers(a);
     }
+    return a;
+  }
+  /**
+   * Take an ended algo off the wallet's list (the Bots page's Delete). Nothing is deleted: the record and its
+   * log stay in the store (no data loss), `k.archived` only hides it from list().
+   */
+  async archive(id) {
+    const a = this.need(id);
+    if (!FINAL_STATUSES.has(a.status)) throw new Error("Stop it first: only an ended bot or algo can be removed from the list.");
+    if (this.hasLeftovers(a)) throw new Error("It still has orders or exits on SoDEX: cancel those first.");
+    if (a.k.archived) return a;
+    a.k.archived = true;
+    a.updatedAt = Date.now();
+    await this.save(a);
+    await this.event(a, "info", "Removed from your list by you (kept on record).");
+    this.host.onChange?.(a.id);
     return a;
   }
   /** Whether an ended algo still has something on SoDEX (or the paper book): live exits, or a child it left resting. */
@@ -14965,8 +15238,11 @@ var AlgoRuntime = class {
   async update(id, patch) {
     const a = this.need(id);
     if (FINAL_STATUSES.has(a.status)) throw new Error("This algo has ended.");
-    const other = Object.keys(patch).filter((k) => !UPDATABLE.has(k) && patch[k] !== void 0);
-    if (other.length) throw new Error(`Only the limit price, bounds, spread guard, label and size of a running algo can be changed (not ${other.join(", ")}).`);
+    const allowed = a.spec.kind === "mm" || a.spec.kind === "grid" ? BOT_UPDATABLE[a.spec.kind] : UPDATABLE;
+    const other = Object.keys(patch).filter((k) => !allowed.has(k) && patch[k] !== void 0);
+    if (other.length) {
+      throw new Error(a.spec.kind === "grid" ? `A grid's market, range and levels are what it is: start a new bot for others (not ${other.join(", ")}).` : a.spec.kind === "mm" ? `A volume maker's market is what it is: start a new bot for another (not ${other.join(", ")}).` : `Only the limit price, bounds, spread guard, label and size of a running algo can be changed (not ${other.join(", ")}).`);
+    }
     const next = { ...a.spec, ...patch };
     const before = this.targetOf(a);
     if (patch.quantity !== void 0) {
@@ -14979,6 +15255,11 @@ var AlgoRuntime = class {
     }
     const spec = parseAlgoSpec(next);
     a.spec = spec;
+    if ((spec.kind === "mm" || spec.kind === "grid") && ["orderUsd", "offsetTicks", "skewTicks", "maxInventoryUsd", "edgeBps"].some((k) => k in patch)) {
+      const m = this.markets.get(spec.symbol);
+      const resting = this.live(a).filter((c) => c.tif !== "ioc" && !c.cancelling);
+      if (m && resting.length) await this.cancelChildren(a, m, resting);
+    }
     const after = this.targetOf(a);
     if (patch.quantity !== void 0 && before !== null && after !== null && a.startedAt !== null && (spec.kind === "twap" || spec.kind === "vwap")) {
       const steps = a.k.resize ?? [];
@@ -15040,6 +15321,7 @@ var AlgoRuntime = class {
     const marketVwap = a.marketQty > 0 ? a.marketValue / a.marketQty : null;
     let progress = target ? Math.min(1, a.filled / target) : 0;
     if (s.kind === "dca") progress = Math.min(1, (Number(a.k.done ?? 0) + Number(a.k.skipped ?? 0)) / s.orders);
+    if ((s.kind === "mm" || s.kind === "grid") && a.book) progress = s.volumeTargetUsd ? Math.min(1, bookVolume(a.book) / s.volumeTargetUsd) : 0;
     const legs = this.legsOf(a);
     if (s.kind === "basket") {
       const want = s.legs.reduce((x, l) => x + l.usd, 0);
@@ -15068,6 +15350,7 @@ var AlgoRuntime = class {
     else if ((s.kind === "chase" || s.kind === "sweep") && a.startedAt !== null && s.timeoutMs) endsAt = a.startedAt + s.timeoutMs;
     else if (s.kind === "swarm") nextAt = a.k.waveAt ?? null;
     else if (s.kind === "conditional") endsAt = s.expiresAt;
+    else if (s.kind === "mm" || s.kind === "grid") endsAt = s.endAt;
     if (s.startAt && a.status === "scheduled") nextAt = s.startAt;
     const live = a.children.filter((c) => LIVE.has(c.state));
     const working = live.length ? live.length === 1 ? `${live[0].tif === "ioc" ? "Taking" : "Resting"} ${live[0].quantity - live[0].filled} at ${live[0].price}` : `${live.length} orders working` : null;
@@ -15085,7 +15368,31 @@ var AlgoRuntime = class {
       triggerPrice: s.kind === "trailing" ? a.k.stop ?? null : null,
       conditions: s.kind === "conditional" ? s.conditions.map((c, i) => ({ text: this.describeCondition(c), ok: Boolean(a.k.ok?.[i]) })) : null,
       exits: (a.exitOrders ?? []).length ? (a.exitOrders ?? []).filter((x) => LIVE.has(x.state) || x.filled > 0).map((x) => ({ kind: x.exit ?? "sl", price: x.price, quantity: x.quantity, filled: x.filled, live: LIVE.has(x.state) })) : null,
-      legs: s.kind === "basket" ? legs.map((c) => ({ id: c.id, symbol: c.spec.symbol, side: c.spec.side, status: c.status, filledValue: c.filledValue, avgPrice: c.filled > 0 ? c.filledValue / c.filled : null })) : null
+      legs: s.kind === "basket" ? legs.map((c) => ({ id: c.id, symbol: c.spec.symbol, side: c.spec.side, status: c.status, filledValue: c.filledValue, avgPrice: c.filled > 0 ? c.filledValue / c.filled : null })) : null,
+      bot: s.bot ? this.botView(a) : null
+    };
+  }
+  /** A bot's figures at the mark now (the mid, else its average fill, while no mark is known). */
+  botView(a) {
+    const b = a.book ?? emptyBook();
+    const q = this.market.quote(a.spec.symbol);
+    const mark = this.market.mark(a.spec.symbol)?.mark ?? (q ? mid(q) : a.filled > 0 ? a.filledValue / a.filled : null);
+    const px2 = mark ?? 0;
+    const volume = bookVolume(b);
+    return {
+      volume,
+      inventory: bookInventory(b),
+      inventoryUsd: bookInventory(b) * px2,
+      grossPnl: bookGross(b, px2),
+      netPnl: bookNet(b, px2),
+      tradeFees: b.tradeFees,
+      builderFees: b.builderFees,
+      makerShare: volume > 0 ? b.makerValue / volume : 0,
+      costPerMillion: costPerMillion(b, px2),
+      fills: b.fills,
+      mark,
+      orders: this.live(a).filter((c) => c.tif !== "ioc" && !c.cancelling).map((c) => ({ side: c.side, price: c.price, quantity: c.quantity - c.filled, tag: c.tag })),
+      closing: !!a.k.closing
     };
   }
   /** The base quantity the algo is to fill, as far as it is known. */
@@ -15199,6 +15506,12 @@ var AlgoRuntime = class {
       }
     }
     this.heldNow.delete(a.id);
+    if (s.bot && a.book && sampleBook(a.book, mk2, now)) this.dirty.add(a.id);
+    if (a.k.closing) {
+      await this.stepBotClose(a, m, q, mk2, now);
+      if (!this.heldNow.has(a.id) && !FINAL_STATUSES.has(a.status)) await this.run(a);
+      return;
+    }
     await this.stepKind(a, m, q, mk2, now);
     if (!this.heldNow.has(a.id) && !FINAL_STATUSES.has(a.status)) await this.run(a);
     if (!FINAL_STATUSES.has(a.status)) await this.syncExits(a, m, false);
@@ -15231,6 +15544,10 @@ var AlgoRuntime = class {
         return this.stepBracket(a, m, q, mk2);
       case "sweep":
         return this.stepSweep(a, m, now);
+      case "mm":
+        return this.stepMm(a, m, q, mk2, now);
+      case "grid":
+        return this.stepGrid(a, m, q, mk2, now);
     }
   }
   /** What a taker leg's slippage is measured from: null for the touch, a price, or undefined when that price is not fresh. */
@@ -15392,12 +15709,17 @@ var AlgoRuntime = class {
       if (!profile) await this.event(a, "info", "No volume history could be read: the schedule is even (a TWAP).");
     } else if (s.kind === "chase") {
       a.k.startRef = q ? s.side === "buy" ? q.bid : q.ask : null;
+    } else if (s.kind === "grid") {
+      const prices = gridPrices(s, m.tickSize);
+      a.k.gp = prices;
+      a.k.gs = gridStart(prices, a.arrival ?? (s.low + s.high) / 2);
     } else if (s.kind === "swarm") {
       a.k.clips = swarmClips(s, m, a.seed);
       a.k.next = 0;
       a.k.retriesLeft = s.retries;
       a.k.waveAt = now;
     }
+    if (s.bot) a.book ??= emptyBook();
     if (FINAL_STATUSES.has(a.status)) return false;
     if (a.status === "paused") {
       a.k.pausedFrom = "running";
@@ -15512,6 +15834,198 @@ var AlgoRuntime = class {
    * above the best bid): SoDEX's book then shows the order itself, and pricing
    * off that touch would chase its own price.
    */
+  /* ------------------------------------------------------------- the bots ----- */
+  /**
+   * A bot reached one of its limits, or was stopped: with `onStop: 'close'` and something held, it pulls its
+   * quotes and closes that first (stepBotClose). Returns whether it is now closing (false: end it here).
+   */
+  async stopBot(a, status, reason) {
+    const s = a.spec;
+    if (!(s.kind === "mm" || s.kind === "grid") || s.onStop !== "close" || !a.book) return false;
+    const m = this.markets.get(s.symbol);
+    const held2 = Math.abs(bookInventory(a.book));
+    const px2 = this.market.mark(s.symbol)?.mark ?? null;
+    if (!m || held2 < Number(m.stepSize) || px2 !== null && held2 < minChildQty(m, px2) - 1e-12) return false;
+    const closing = { status, reason, at: Date.now() };
+    a.k.closing = closing;
+    await this.pullResting(a);
+    await this.save(a);
+    await this.event(a, "info", `${reason} Closing what it holds: ${dec3(held2)} ${m.base}.`);
+    this.host.onChange?.(a.id);
+    return true;
+  }
+  /** A bot's limits, checked every step: true when it stopped (or began closing). */
+  async botLimitsHit(a, mk2, now) {
+    const s = a.spec;
+    const b = a.book ??= emptyBook();
+    let hit = null;
+    if (s.volumeTargetUsd !== null && bookVolume(b) >= s.volumeTargetUsd) hit = { status: "done", reason: `Reached its volume target of ${money(s.volumeTargetUsd)}.` };
+    else if (s.maxLossUsd !== null && bookNet(b, mk2) <= -s.maxLossUsd) hit = { status: "expired", reason: `Stopped at its loss limit: net PnL ${money(bookNet(b, mk2))} (limit -${money(s.maxLossUsd)}).` };
+    else if (s.endAt !== null && now >= s.endAt) hit = { status: "expired", reason: "Its end time came." };
+    if (!hit) return false;
+    sampleBook(b, mk2, now, true);
+    if (!await this.stopBot(a, hit.status, hit.reason)) await this.end(a, hit.status, hit.reason);
+    return true;
+  }
+  /**
+   * Closing what a stopping bot holds (its own fills, never more: reduce-only): post-only at the touch,
+   * re-priced as it moves, for BOT_CLOSE_REST_MS; then a taker within BOT_CLOSE_SLIP_BPS. It ends with the
+   * status it was stopping for once what is left is under SoDEX's minimum, or once SoDEX refused the close
+   * three times (the position is not there any more: closed outside the bot).
+   */
+  async stepBotClose(a, m, q, mk2, now) {
+    const closing = a.k.closing;
+    const b = a.book ??= emptyBook();
+    const inv = bookInventory(b);
+    const live = this.live(a);
+    const stray = live.filter((c) => !c.tag.startsWith("close") && !c.cancelling);
+    if (stray.length) await this.cancelChildren(a, m, stray);
+    const qty2 = floorStep(Math.abs(inv), m);
+    const rejects = closing.rejects ?? 0;
+    if (!live.length && (qty2 < minChildQty(m, mk2) - 1e-12 || rejects >= 3)) {
+      const left = qty2 >= Number(m.stepSize) ? ` ${dec3(qty2)} ${m.base} is left${rejects >= 3 ? " (SoDEX shows nothing more to close)" : " (under SoDEX's minimum order)"}.` : "";
+      delete a.k.closing;
+      sampleBook(b, mk2, now, true);
+      return this.end(a, closing.status, `${closing.reason}${left}`);
+    }
+    if (live.length && !live.some((c) => c.tag.startsWith("close"))) return;
+    const side = inv > 0 ? "sell" : "buy";
+    const taking = now - closing.at >= BOT_CLOSE_REST_MS;
+    const mine = live.find((c) => c.tag.startsWith("close"));
+    if (mine) {
+      if (mine.state !== "open" || mine.cancelling || mine.tif === "ioc") return;
+      const want = makerPrice(side, q, 0, null, m, null);
+      if (taking || Math.abs(mine.price - want) / Number(m.tickSize) >= 1 && !this.atOwnTouch(side, mine.price, q) && now - mine.placedAt >= 2e3) await this.cancelChildren(a, m, [mine]);
+      return;
+    }
+    let price2 = taking ? takerPrice(side, q, BOT_CLOSE_SLIP_BPS, m, mk2, null) : makerPrice(side, q, 0, null, m, null);
+    if (price2 === null) return;
+    let take = taking;
+    if (take) {
+      const wall = this.otherBotWall(a, m.name, side);
+      if (wall !== null) {
+        const tick = Number(m.tickSize);
+        price2 = side === "sell" ? Math.max(price2, wall + tick) : Math.min(price2, wall - tick);
+        if (side === "sell" ? price2 > q.bid : price2 < q.ask) {
+          take = false;
+          price2 = makerPrice(side, q, 0, null, m, null);
+        }
+      }
+    }
+    const before = a.rejects;
+    await this.send(a, m, [{ side, price: price2, quantity: qty2, tif: take ? "ioc" : "gtx", tag: take ? "close (take)" : "close", reduceOnly: true }]);
+    if (a.rejects > before && a.k.closing) a.k.closing.rejects = rejects + 1;
+  }
+  /**
+   * The nearest price another user's bot rests at, on the side a taker `side` of this bot would fill against (the
+   * highest bid for a sell, the lowest ask for a buy), live bots against live, practice against practice; null: none.
+   */
+  otherBotWall(a, symbol2, side) {
+    let wall = null;
+    for (const x of this.algos.values()) {
+      if (x.owner === a.owner || !x.spec.bot || x.spec.symbol !== symbol2 || x.spec.paper !== a.spec.paper || FINAL_STATUSES.has(x.status)) continue;
+      for (const c of x.children) {
+        if (!LIVE.has(c.state) || c.tif === "ioc" || c.side === side) continue;
+        if (wall === null || (side === "sell" ? c.price > wall : c.price < wall)) wall = c.price;
+      }
+    }
+    return wall;
+  }
+  /** Volume maker: one post-only bid and one post-only ask where mmQuotes puts them (bots.ts). */
+  async stepMm(a, m, q, mk2, now) {
+    const s = a.spec;
+    if (await this.botLimitsHit(a, mk2, now)) return;
+    if (s.maxSpreadBps !== null && spreadBps(q) > s.maxSpreadBps) {
+      await this.pullResting(a);
+      return this.hold(a, `Held: the spread (${spreadBps(q).toFixed(1)} bp) is wider than your ${s.maxSpreadBps} bp.`);
+    }
+    const want = mmQuotes(s, q, m, bookInventory(a.book), mk2);
+    const tick = Number(m.tickSize);
+    const live = this.live(a);
+    const send = [];
+    const pull = [];
+    for (const side of ["buy", "sell"]) {
+      const w = want.find((x) => x.side === side);
+      const mine = live.filter((c) => c.side === side);
+      const standing = mine.filter((c) => !c.cancelling);
+      if (!w) {
+        pull.push(...standing);
+        continue;
+      }
+      if (standing.length) {
+        const c = standing[0];
+        pull.push(...standing.slice(1));
+        if (c.state !== "open" || c.tif === "ioc") continue;
+        const off = Math.abs(c.price - w.price) / tick;
+        const ahead = side === "buy" ? c.price > w.price : c.price < w.price;
+        if (now - c.placedAt >= s.minRepriceMs && off >= s.chaseTicks - 1e-9 && (ahead || !this.atOwnTouch(side, c.price, q))) pull.push(c);
+        continue;
+      }
+      if (mine.length) continue;
+      if (Number(a.k.mretry?.[side] ?? 0) > now) continue;
+      send.push({ side, price: w.price, quantity: w.quantity, tif: "gtx", tag: side === "buy" ? "bid" : "ask" });
+    }
+    if (pull.length) await this.cancelChildren(a, m, pull);
+    if (!send.length || this.stopped(a)) return;
+    const sent = await this.send(a, m, send);
+    const back = { ...a.k.mback ?? {} };
+    const at = { ...a.k.mretry ?? {} };
+    for (const c of sent) {
+      if (c.state === "done" && c.filled <= 1e-12) {
+        back[c.side] = Math.min(6e4, (back[c.side] ?? GRID_RETRY_MS / 2) * 2);
+        at[c.side] = Date.now() + back[c.side];
+      } else delete back[c.side];
+    }
+    a.k.mback = back;
+    a.k.mretry = at;
+  }
+  /** Grid: every level with a side rests there post-only; a fill moves the gap (onChildDone, bots.ts gridAfterFill). */
+  async stepGrid(a, m, q, mk2, now) {
+    const s = a.spec;
+    if (await this.botLimitsHit(a, mk2, now)) return;
+    const prices = a.k.gp;
+    const sides = a.k.gs;
+    if ((mk2 < s.low || mk2 > s.high) && s.outOfRange === "stop") {
+      const why = `The price (${mk2}) left the range ${s.low}-${s.high}.`;
+      if (!await this.stopBot(a, "expired", why)) await this.end(a, "expired", why);
+      return;
+    }
+    if (s.maxSpreadBps !== null && spreadBps(q) > s.maxSpreadBps) return this.hold(a, `Held: the spread (${spreadBps(q).toFixed(1)} bp) is wider than your ${s.maxSpreadBps} bp.`);
+    const n = prices.length;
+    const byLevel = /* @__PURE__ */ new Map();
+    for (const c of this.live(a)) {
+      const i = gridLevelOf(c);
+      if (i >= 0) byLevel.set(i, [...byLevel.get(i) ?? [], c]);
+    }
+    const retry = a.k.gretry ?? {};
+    const pull = [];
+    const send = [];
+    for (let i = 0; i < n; i++) {
+      const want = sides[i] ?? null;
+      const here = byLevel.get(i) ?? [];
+      pull.push(...here.filter((c) => !c.cancelling && c.side !== want));
+      if (!want || here.length) continue;
+      if ((retry[i] ?? 0) > now) continue;
+      const p = prices[i];
+      if (want === "buy" ? p >= q.ask : p <= q.bid) continue;
+      send.push({ side: want, price: p, quantity: gridQty(s.orderUsd, p, m), tif: "gtx", tag: `grid ${i + 1}/${n}` });
+    }
+    if (pull.length) await this.cancelChildren(a, m, pull);
+    if (!send.length || this.stopped(a)) return;
+    const sent = await this.send(a, m, send.slice(0, 50));
+    const back = { ...a.k.gback ?? {} };
+    const at = { ...a.k.gretry ?? {} };
+    for (const c of sent) {
+      const i = gridLevelOf(c);
+      if (i < 0) continue;
+      if (c.state === "done" && c.filled <= 1e-12) {
+        back[i] = Math.min(6e4, (back[i] ?? GRID_RETRY_MS / 2) * 2);
+        at[i] = Date.now() + back[i];
+      } else delete back[i];
+    }
+    a.k.gback = back;
+    a.k.gretry = at;
+  }
   atOwnTouch(side, price2, q) {
     return side === "buy" ? price2 >= q.bid : price2 <= q.ask;
   }
@@ -16622,6 +17136,7 @@ var AlgoRuntime = class {
         void this.event(a, "error", `SoDEX rejected ${c.tag}${u.reason ? `: ${u.reason}` : ""}.`, c);
         const lim = limitRefusal(u.reason, a.spec.symbol);
         if (lim) void this.onLimit(a, lim);
+        if (a.spec.kind === "grid" && gridLevelOf(c) >= 0) a.k.gretry = { ...a.k.gretry ?? {}, [gridLevelOf(c)]: Date.now() + GRID_RETRY_MS };
       }
       this.onChildDone(a, c);
     } else if (c.state === "sending" || c.state === "unknown") c.state = "open";
@@ -16658,6 +17173,10 @@ var AlgoRuntime = class {
     const m = this.markets.get(a.spec.symbol);
     const rate = (isMaker ? m?.makerFee ?? (m?.takerFee ?? 4e-4) / 2 : m?.takerFee ?? 4e-4) + (this.host.builderRate?.(a) ?? 0);
     a.fees += dv * rate;
+    if (a.spec.bot) {
+      a.book ??= emptyBook();
+      bookFill(a.book, c.side, dq, dv, isMaker, isMaker ? m?.makerFee ?? (m?.takerFee ?? 4e-4) / 2 : m?.takerFee ?? 4e-4, this.host.builderRate?.(a) ?? 0);
+    }
     if (a.k.consecRejects) a.k.consecRejects = 0;
     void this.event(a, "fill", `Filled ${dec3(dq)} @ ${(dv / dq).toPrecision(8).replace(/\.?0+$/, "")}${isMaker ? " (maker)" : ""}.`, { ...c, quantity: dq, price: dv / dq });
   }
@@ -17007,6 +17526,13 @@ var AlgoRuntime = class {
   }
   onChildDone(a, c) {
     if (a.spec.kind === "dca") return this.dcaChildDone(a, c);
+    if (a.spec.kind === "grid") {
+      const i = gridLevelOf(c);
+      const sides = a.k.gs;
+      if (i < 0 || !sides) return;
+      if (c.filled >= c.quantity - 1e-12 && sides[i] === c.side) a.k.gs = gridAfterFill(sides, i, c.side);
+      return;
+    }
     if (a.spec.kind !== "iceberg") return;
     if (a.k.reprice === c.clOrdID) {
       delete a.k.reprice;
@@ -18132,6 +18658,24 @@ function algoPatch(raw) {
     if (r.label !== null && (typeof r.label !== "string" || r.label.length > 60)) throw new ApiError(400, "patch", "The label must be text of at most 60 characters, or null.");
     out.label = r.label;
   }
+  for (const k of ["orderUsd", "maxInventoryUsd", "offsetTicks", "chaseTicks", "minRepriceMs", "skewTicks", "edgeBps"]) {
+    if (r[k] === void 0) continue;
+    if (!(typeof r[k] === "number" && Number.isFinite(r[k]))) throw new ApiError(400, "patch", `${k} must be a number.`);
+    out[k] = r[k];
+  }
+  for (const k of ["volumeTargetUsd", "maxLossUsd", "endAt"]) {
+    if (r[k] === void 0) continue;
+    if (r[k] !== null && !(typeof r[k] === "number" && Number.isFinite(r[k]) && r[k] > 0)) throw new ApiError(400, "patch", `${k} must be a positive number or null.`);
+    out[k] = r[k];
+  }
+  if (r.onStop !== void 0) {
+    if (r.onStop !== "close" && r.onStop !== "keep") throw new ApiError(400, "patch", "onStop must be close or keep.");
+    out.onStop = r.onStop;
+  }
+  if (r.outOfRange !== void 0) {
+    if (r.outOfRange !== "wait" && r.outOfRange !== "stop") throw new ApiError(400, "patch", "outOfRange must be wait or stop.");
+    out.outOfRange = r.outOfRange;
+  }
   return out;
 }
 var ApiError = class extends Error {
@@ -18204,7 +18748,7 @@ var ExecutorService = class {
       factory: deps.factory,
       log: deps.log,
       sinkFor: (a) => this.algoSink(a),
-      builderRate: (a) => cfg.builderId > 0 ? copyFeeFor(this.volumeOf(a.owner)) / 1e5 : 0,
+      builderRate: (a) => cfg.builderId > 0 ? (a.spec?.bot === true ? BOT_FEE : copyFeeFor(this.volumeOf(a.owner))) / 1e5 : 0,
       problem: async (a) => this.guard.holdOf({ kind: "algo", id: a.id, owner: a.owner }) ?? this.algoProblem(a),
       brake: () => this.brakeText("algos"),
       // The copy region rules, from the country declared with the terms and the one the request came from.
@@ -18300,6 +18844,7 @@ var ExecutorService = class {
       keyName: this.keyName,
       keyImport: { alg: KEY_IMPORT_ALG, publicKey: this.secrets.importPublicKey(), info: importInfo(this.executorId, "<owner>") },
       algos: { maxPerOwner: this.cfg.maxAlgosPerOwner },
+      bots: { fee: BOT_FEE },
       features: [...EXECUTOR_FEATURES],
       brake: this.brakeView()
     };
@@ -18781,10 +19326,44 @@ var ExecutorService = class {
     return this.db.activity({ subId, limit: q.limit ?? 200, before: q.before });
   }
   /* ------------------------------------------------------------ algos ----- */
-  /** The sink of an algo: the key this wallet registered for this executor, the copy fee ladder as the builder. */
+  /** Whether real bots may start for this wallet through this request: the live-algo wallets, or the beta channel and the beta list. */
+  async liveBotFor(owner, ctx) {
+    if (liveAlgosFor(this.cfg, owner)) return true;
+    return ctx.channel === "beta" && await this.betaListed(owner);
+  }
+  /** The beta list, asked of the API server (EXECUTOR_BETA_URL) and kept a minute; unreadable: not listed (fails closed). */
+  betaCache = /* @__PURE__ */ new Map();
+  async betaListed(owner) {
+    const o = owner.toLowerCase();
+    const hit = this.betaCache.get(o);
+    if (hit && Date.now() - hit.at < 6e4) return hit.listed;
+    if (!this.cfg.betaUrl) return false;
+    let listed = false;
+    try {
+      const u = new URL(this.cfg.betaUrl);
+      u.searchParams.set("address", o);
+      const headers = { Accept: "application/json" };
+      if (this.cfg.builderToken) headers["X-Internal-Token"] = this.cfg.builderToken;
+      if (this.cfg.originSecrets[0]) headers["X-Origin-Verify"] = this.cfg.originSecrets[0];
+      const res = await this.deps.fetch(u.toString(), { headers, signal: AbortSignal.timeout(5e3) });
+      const body = JSON.parse(await res.text());
+      if (!res.ok || !body.ok) throw new Error(`HTTP ${res.status}`);
+      listed = body.listed === true;
+    } catch (e) {
+      this.deps.log.warn("bots: the beta list could not be read", { owner: o, error: String(e) });
+      if (hit && Date.now() - hit.at < 10 * 6e4) return hit.listed;
+    }
+    this.betaCache.set(o, { at: Date.now(), listed });
+    return listed;
+  }
+  /** The builder fee on an algo's orders, tenths of a bp: a bot's is BOT_FEE, every other algo's the copy ladder's. */
+  async algoFee(a) {
+    return a.spec?.bot === true ? BOT_FEE : copyFeeFor(await this.freshVolume(a.owner));
+  }
+  /** The sink of an algo: the key this wallet registered for this executor, its fee (algoFee) as the builder. */
   algoSink(a) {
     if (!this.db.key(a.owner, "active")) return null;
-    const builderOf = async (x) => this.cfg.builderId > 0 ? { id: this.cfg.builderId, fee: copyFeeFor(await this.freshVolume(x.owner)) } : null;
+    const builderOf = async (x) => this.cfg.builderId > 0 ? { id: this.cfg.builderId, fee: await this.algoFee(x) } : null;
     const sink = auditedAlgoSink(
       new KeyAlgoSink(this.sodex, () => this.signer(a.owner), this.nonces, SODEX_CHAIN_ID[this.cfg.network], builderOf),
       this.db,
@@ -18801,8 +19380,9 @@ var ExecutorService = class {
   async algoProblem(a) {
     const key2 = await this.keyProblem(a.owner);
     if (key2) return key2;
+    if (a.spec?.bot === true && !a.spec.paper && !liveAlgosFor(this.cfg, a.owner) && !await this.betaListed(a.owner)) return "Held: real bots are for beta testers only, and this wallet is not on the beta list.";
     if (this.cfg.builderId > 0) {
-      const fee = copyFeeFor(await this.freshVolume(a.owner));
+      const fee = await this.algoFee(a);
       const approved = await this.sodex.builderApproval(a.owner, this.cfg.builderId);
       if (approved === null || approved < fee) return `Your SoDEX account does not approve the ValueDesk fee (${fee / 10} bp) these orders carry. Approve it in copy setup.`;
     }
@@ -18852,7 +19432,14 @@ var ExecutorService = class {
     if (live.length + adds > this.cfg.maxAlgosPerOwner) {
       throw new ApiError(429, "limit", adds > 1 ? `At most ${this.cfg.maxAlgosPerOwner} algo orders run at once here, and this basket runs ${adds} (itself and one per market). ${live.length ? "Cancel one first, or use fewer markets." : "Use fewer markets."}` : `At most ${this.cfg.maxAlgosPerOwner} algo orders run at once here. Cancel one first.`);
     }
-    if (!liveAlgosFor(this.cfg, owner) && specsOf(spec, payload.spec).some((x) => !x.paper)) throw new ApiError(403, "paper-only", "Real algo orders are off for now. Turn on Practice run to try one against the live market.");
+    if ((spec.kind === "mm" || spec.kind === "grid") && !spec.paper) {
+      const other = live.find((x) => (x.spec.kind === "mm" || x.spec.kind === "grid") && !x.spec.paper && x.spec.symbol === spec.symbol);
+      if (other) throw new ApiError(409, "bot-market", `A bot of yours already trades ${spec.symbol}${other.spec.label ? ` ("${other.spec.label}")` : ""}. Stop it first, or choose another market.`);
+    }
+    if (spec.bot && !spec.paper && !await this.liveBotFor(owner, ctx)) {
+      throw new ApiError(403, "paper-only", "Real bots run on beta.valuedesk.so for beta testers only for now. Turn on Practice to run one against the live market.");
+    }
+    if (!spec.bot && !liveAlgosFor(this.cfg, owner) && specsOf(spec, payload.spec).some((x) => !x.paper)) throw new ApiError(403, "paper-only", "Real algo orders are off for now. Turn on Practice run to try one against the live market.");
     let accountId = 0;
     if (!spec.paper) {
       this.needNoBrake("algos");
@@ -18893,11 +19480,12 @@ var ExecutorService = class {
         this.needTerms(owner, ctx);
         touched = [await this.algos.resume(a.id).catch(fail)];
       } else if (op === "cancel") touched = [await this.algos.cancel(a.id).catch(fail)];
+      else if (op === "archive") touched = [await this.algos.archive(a.id).catch(fail)];
       else if (op === "update") {
         if (!a.spec.paper) this.needNoBrake("algos");
         this.needTerms(owner, ctx);
         touched = [await this.algos.update(a.id, algoPatch(payload.patch)).catch(fail)];
-      } else throw new ApiError(400, "op", "op must be pause, resume, cancel, cancel-all or update.");
+      } else throw new ApiError(400, "op", "op must be pause, resume, cancel, cancel-all, update or archive.");
     }
     return { algos: touched.map((a) => this.algos.view(a.id)).filter((v) => v !== null) };
   }
@@ -18906,7 +19494,7 @@ var ExecutorService = class {
     return this.db.notices(owner, q);
   }
   algoList(owner) {
-    return this.algos.list(owner).map((a) => this.algos.view(a.id)).filter((v) => v !== null);
+    return this.algos.list(owner).filter((a) => !a.k.archived).map((a) => this.algos.view(a.id)).filter((v) => v !== null);
   }
   async algoEvents(owner, id, q) {
     const a = this.algos.get(id);
@@ -19128,7 +19716,9 @@ function createExecutorServer(svc, cfg, log) {
   };
   const contextOf = (req) => ({
     viewerCountry: cfg.trustEdge ? normaliseCountry(String(req.headers["x-viewer-country"] ?? "")) : null,
-    pairingCode: typeof req.headers["x-pairing-code"] === "string" ? req.headers["x-pairing-code"] : null
+    pairingCode: typeof req.headers["x-pairing-code"] === "string" ? req.headers["x-pairing-code"] : null,
+    // Set only by the site's own proxy (deploy/vercel/api-proxy.cjs, the beta project): a browser cannot send it past the edge.
+    channel: cfg.trustEdge && req.headers["x-vs-channel"] === "beta" ? "beta" : "main"
   });
   const cors = (req, res) => {
     const origin = req.headers.origin;
@@ -19203,6 +19793,11 @@ function createExecutorServer(svc, cfg, log) {
       const route = path.slice(PREFIX.length);
       if (req.method === "GET" && route === "/info") return send(res, 200, svc.info(ctx));
       if (req.method === "GET" && route === "/health") return send(res, 200, svc.health());
+      if (req.method === "GET" && route === "/internal/users") {
+        const token = String(req.headers["x-internal-token"] ?? "");
+        if (!cfg.builderToken || !safeEqual(cfg.builderToken, token)) throw new ApiError(404, "path", "not found");
+        return send(res, 200, { users: svc.db.usersSummary() });
+      }
       if (req.method === "GET" && route === "/me") return send(res, 200, svc.me(svc.authenticate(bearer(req)), ctx));
       if (req.method === "GET" && route === "/consents") return send(res, 200, { consents: svc.consents(svc.authenticate(bearer(req))) });
       if (req.method === "GET" && route === "/algos") return send(res, 200, { algos: svc.algoList(svc.authenticate(bearer(req))) });
