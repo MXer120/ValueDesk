@@ -883,7 +883,7 @@ test('gates: a hosted server never also runs the loopback gate, beta or not (dev
 
 test("gates: on a hosted server the admin suite's origin passes an admin POST and the site's does not", async () => {
   const app = Fastify();
-  const cfg = { enabled: true, trustProxy: false, originSecrets: [], limits: DEFAULT_LIMITS };
+  const cfg = { enabled: true, trustProxy: false as const, originSecrets: [] as string[], limits: DEFAULT_LIMITS };
   installHostedGate(app, { cfg, site: ['https://valuedesk.so'], admin: ['https://dev.valuedesk.so'] });
   app.post('/api/admin/session', async () => ({ ok: true }));
   await app.ready();
