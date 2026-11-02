@@ -324,6 +324,36 @@ test('store: stream rows inside a REST-held range are dropped (HL ids differ bet
   s.close();
 });
 
+test('store: a drop where no stream row can lie reads nothing; stream rows put later are still dropped', async () => {
+  const s = new IndexStore(':memory:');
+  s.putFills([fill({ id: 'r1', t: B + 100, oid: '5', src: 1 }), fill({ id: 's1', t: B + 500, src: 0 })]);
+  // Count the DELETEs run on fills (the span is looked up once, then kept).
+  type Q = (sql: string) => { run: (...a: unknown[]) => { changes: number | bigint } };
+  const store = s as unknown as { q: Q };
+  const q = store.q.bind(s);
+  let deletes = 0;
+  store.q = (sql) => {
+    const st = q(sql);
+    if (!/^\s*DELETE FROM fills/.test(sql)) return st;
+    return { run: (...a: unknown[]) => { deletes++; return st.run(...a); } };
+  };
+  s.dropStreamRows('hyperliquid', '0xa', 0, B + 200);
+  await s.dropStreamRowsAsync('hyperliquid', '0xa', 0, B + 200, async () => {});
+  assert.equal(deletes, 0, 'below the stream rows: no DELETE');
+  assert.equal(s.fillExtent('hyperliquid', '0xa').count, 2);
+  // Over them: dropped; then the span is empty and a later drop reads nothing.
+  await s.dropStreamRowsAsync('hyperliquid', '0xa', 0, B + 1_000, async () => {});
+  assert.equal(s.fillExtent('hyperliquid', '0xa').count, 1);
+  const before = deletes;
+  s.dropStreamRows('hyperliquid', '0xa', 0, B + 1_000);
+  assert.equal(deletes, before, 'none left: no DELETE');
+  // A stream row put afterwards widens the span again and goes with the next drop over it.
+  s.putFills([fill({ id: 's2', t: B + 700, src: 0 })]);
+  s.dropStreamRows('hyperliquid', '0xa', B + 600, B + 800);
+  assert.equal(s.fillExtent('hyperliquid', '0xa').count, 1);
+  s.close();
+});
+
 test('a board window\'s stats start holds for a quarter of an hour (engine.ts statsFrom)', () => {
   const q = 15 * 60_000;
   const now = Date.UTC(2026, 9, 31, 12, 7, 31);
