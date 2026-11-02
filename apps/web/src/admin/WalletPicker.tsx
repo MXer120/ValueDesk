@@ -35,7 +35,7 @@ export function WalletPicker({ onConnected, wantAddress }: { onConnected: (c: Co
       ))}
       <button type="button" className="dv-wallet" disabled={!!busy} onClick={() => void pick('wc', connectWalletConnect)}>
         <span className="dv-wallet__dot" />
-        <span>{busy === 'wc' ? 'Waiting for WalletConnect…' : 'WalletConnect (phone wallet)'}</span>
+        <span>{busy === 'wc' ? 'Scan the QR with your phone wallet…' : 'WalletConnect: scan a QR with your phone'}</span>
       </button>
       {!wallets.length && <p className="dv-dim">No browser wallet found on this page. Install or unlock one, or use WalletConnect.</p>}
       {error && <p className="dv-error" role="alert">{error}</p>}

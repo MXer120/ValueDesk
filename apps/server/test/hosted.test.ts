@@ -24,6 +24,7 @@ import {
   ORIGIN_SECRET_HEADER,
   clientKey,
   fastifyTrustProxy,
+  gatesFor,
   hostedConfigFromEnv,
   hostedRoute,
   indexerHealth,
@@ -866,4 +867,28 @@ test('gate: a change to knowledge folders needs the site Origin and is counted a
   assert.equal((await post({ origin: SITE })).statusCode, 429, 'the write budget is per client');
   assert.equal((await app.inject({ method: 'GET', url: '/api/folders' })).statusCode, 200, 'reading is not a write');
   assert.equal((await app.inject({ method: 'DELETE', url: '/api/folders' })).statusCode, 404);
+});
+
+test('gates: a hosted server never also runs the loopback gate, beta or not (dev.valuedesk.so "origin not allowed", 2026-11-02)', () => {
+  assert.deepEqual(gatesFor({ hosted: true, beta: false }), { hosted: true, beta: false, loopback: false });
+  assert.deepEqual(gatesFor({ hosted: true, beta: true }), { hosted: true, beta: true, loopback: false });
+  assert.deepEqual(gatesFor({ hosted: false, beta: false }), { hosted: false, beta: false, loopback: true });
+  assert.deepEqual(gatesFor({ hosted: false, beta: true }), { hosted: false, beta: true, loopback: false });
+  // index.ts installs each gate only on its own flag: no if/else chain a new gate can split (d7f9ac9 did).
+  const src = readFileSync(join(SRC, 'index.ts'), 'utf8');
+  assert.match(src, /if \(GATES\.hosted\) installHostedGate\(/);
+  assert.match(src, /if \(GATES\.loopback\) app\.addHook\('onRequest'/);
+  assert.doesNotMatch(src, /\n\s*else app\.addHook\('onRequest'/, 'the loopback gate hangs off an else');
+});
+
+test("gates: on a hosted server the admin suite's origin passes an admin POST and the site's does not", async () => {
+  const app = Fastify();
+  const cfg = { enabled: true, trustProxy: false, originSecrets: [], limits: DEFAULT_LIMITS };
+  installHostedGate(app, { cfg, site: ['https://valuedesk.so'], admin: ['https://dev.valuedesk.so'] });
+  app.post('/api/admin/session', async () => ({ ok: true }));
+  await app.ready();
+  const post = (origin: string) => app.inject({ method: 'POST', url: '/api/admin/session', payload: '{}', headers: { 'content-type': 'application/json', origin } });
+  assert.equal((await post('https://dev.valuedesk.so')).statusCode, 200);
+  assert.equal((await post('https://valuedesk.so')).statusCode, 403);
+  await app.close();
 });

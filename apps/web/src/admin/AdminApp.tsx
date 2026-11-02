@@ -14,7 +14,7 @@
  */
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { call, loadSession, onSession, saveSession, type AdminSession } from './api';
-import { signAction, signIn, type Connected } from './wallet';
+import { releaseWallet, signAction, signIn, type Connected } from './wallet';
 import { WalletContext, WalletPicker } from './WalletPicker';
 import { isUserRejection } from '../wallet';
 import { BrandMark } from '../components/BrandMark';
@@ -184,7 +184,7 @@ function SessionMenu({ session, connected, ensure }: { session: AdminSession; co
   );
 }
 
-function SignIn({ connected, onConnected }: { connected: Connected | null; onConnected: (c: Connected) => void }) {
+function SignIn({ connected, onConnected }: { connected: Connected | null; onConnected: (c: Connected | null) => void }) {
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -222,7 +222,25 @@ function SignIn({ connected, onConnected }: { connected: Connected | null; onCon
             <ol className="dv-steps">
               <li className={connected ? 'is-done' : undefined}>
                 <div className="dv-steps__title"><span className="dv-steps__n">{connected ? '✓' : '1'}</span>Connect the builder wallet</div>
-                {connected ? <div className="dv-mono dv-dim">{connected.name} · {short(connected.address)}</div> : <WalletPicker onConnected={onConnected} />}
+                {connected ? (
+                  <div className="dv-connected">
+                    <span className="dv-mono dv-dim">{connected.name} · {short(connected.address)}</span>
+                    <button
+                      type="button"
+                      className="dv-btn"
+                      disabled={busy}
+                      onClick={() => {
+                        setError(null);
+                        void releaseWallet(connected);
+                        onConnected(null);
+                      }}
+                    >
+                      Change wallet
+                    </button>
+                  </div>
+                ) : (
+                  <WalletPicker onConnected={onConnected} />
+                )}
               </li>
               <li>
                 <div className="dv-steps__title"><span className="dv-steps__n">2</span>Password, then sign</div>

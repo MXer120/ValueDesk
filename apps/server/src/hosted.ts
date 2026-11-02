@@ -598,6 +598,17 @@ export interface GateOptions {
 }
 
 /**
+ * Which request gates a server installs. Hosted: the hosted gate (origin secret, allow-list, the
+ * site's - or the admin suite's - Origin); otherwise the loopback gate (local origins, local token).
+ * Never both: the loopback gate knows only the site's origins, so on a hosted server it refused
+ * every admin route ("origin not allowed" on dev.valuedesk.so, 2026-11-02). The beta lock comes
+ * on top of either; a local beta server runs without the loopback gate, as it always has.
+ */
+export function gatesFor(o: { hosted: boolean; beta: boolean }): { hosted: boolean; beta: boolean; loopback: boolean } {
+  return { hosted: o.hosted, beta: o.beta, loopback: !o.hosted && !o.beta };
+}
+
+/**
  * Install the hosted gate: origin secret, allow-list, input shape, site
  * origin for state-changing routes, then the per-client limits. CORS preflights
  * pass through to @fastify/cors, which answers them for the site origins only.

@@ -185,6 +185,8 @@ html, body { background: var(--bg); }
 .dv-tag:first-child { margin-left: 0; }
 .dv-tag.is-on { background: color-mix(in srgb, var(--pos) 16%, transparent); color: var(--pos); }
 
+.dv-connected { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
+
 /* The crash card (Crash.tsx). */
 .dv-crash__msg { margin: 0; color: var(--text); font-family: var(--font-num); font-size: 13px; overflow-wrap: anywhere; }
 

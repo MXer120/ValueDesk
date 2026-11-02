@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { bytesToHex, generateTradingKey, hashTypedData, hexToBytes, signTypedDataWithKey, type TypedData } from '@sodex-core';
 import { ADMIN_SIGN_IN_STATEMENT, adminSignInTypedData } from '@sign/admin/signIn';
 import { adminSignInDigest, checkAdminAction, checkAdminSignIn } from '@sign/admin/auth';
-import { signAction, signIn, type Connected } from './wallet';
+import { connectWalletConnect, releaseWallet, signAction, signIn, type Connected, type WalletConnectModule } from './wallet';
 import { bp, duration, usd, usdShort } from './format';
 import { niceCeil } from './BarChart';
 
@@ -82,4 +82,62 @@ test('figures: dollars from micro-USD, fees in basis points, durations', () => {
   assert.equal(duration(3 * 3_600_000 + 60_000), '3h 01m');
   assert.equal(niceCeil(7), 10);
   assert.equal(niceCeil(2.2e6), 2.5e6);
+});
+
+/** A fake ../walletconnect.ts: a session AppKit may have restored, and a pairing that lands when the QR is scanned. */
+function fakeWalletConnect(restored: string | null, scan = true) {
+  const log: string[] = [];
+  const provider = { request: async () => null };
+  let snap = restored ? { status: 'connected', provider, address: restored, walletName: 'Old' } : { status: 'idle', provider: null, address: null, walletName: '' };
+  const subs = new Set<() => void>();
+  const modal = new Set<(s: { open: boolean }) => void>();
+  const mod: WalletConnectModule = {
+    initWallet: async () => (log.push('init'), { subscribeState: (cb: (s: { open: boolean }) => void) => (modal.add(cb), () => modal.delete(cb)) }),
+    getWalletSnapshot: () => snap as ReturnType<WalletConnectModule['getWalletSnapshot']>,
+    subscribeWallet: (cb) => (subs.add(cb), () => subs.delete(cb)),
+    disconnectWallet: async () => {
+      log.push('disconnect');
+      snap = { status: 'disconnected', provider: null, address: null, walletName: '' };
+      for (const cb of subs) cb();
+    },
+    connectVia: async (choice) => {
+      log.push(`open ${choice}`);
+      if (scan === false) {
+        // The owner closes the QR instead.
+        setTimeout(() => { for (const cb of modal) cb({ open: true }); for (const cb of modal) cb({ open: false }); }, 5);
+        return;
+      }
+      // The phone scans the QR a moment later.
+      setTimeout(() => {
+        snap = { status: 'connected', provider, address: '0x' + 'AB'.repeat(20), walletName: 'SafePal' };
+        for (const cb of subs) cb();
+      }, 5);
+    },
+  };
+  return { mod, log };
+}
+
+test('WalletConnect: a restored session is ended and the QR opens - never taken silently (owner 2026-11-02: "didnt pop up a qr")', async () => {
+  const { mod, log } = fakeWalletConnect('0x' + 'cd'.repeat(20));
+  const c = await connectWalletConnect(async () => mod);
+  assert.deepEqual(log, ['init', 'disconnect', 'open walletconnect']);
+  assert.equal(c.address, '0x' + 'ab'.repeat(20), 'the newly paired wallet, not the restored one');
+  assert.equal(c.via, 'walletconnect');
+});
+
+test('WalletConnect: with nothing restored the QR opens straight away; "Change wallet" ends only a WalletConnect pairing', async () => {
+  const { mod, log } = fakeWalletConnect(null);
+  const c = await connectWalletConnect(async () => mod);
+  assert.deepEqual(log, ['init', 'open walletconnect']);
+  await releaseWallet({ ...c, via: 'extension' }, async () => mod);
+  assert.equal(log.includes('disconnect'), false, 'a browser wallet has no pairing to end');
+  await releaseWallet(c, async () => mod);
+  assert.equal(log.at(-1), 'disconnect');
+});
+
+test('WalletConnect: closing the QR without a wallet gives the button back (an error), not a 5-minute wait', async () => {
+  const { mod } = fakeWalletConnect(null, false);
+  const t0 = Date.now();
+  await assert.rejects(connectWalletConnect(async () => mod), /closed before a wallet connected/);
+  assert.ok(Date.now() - t0 < 5_000);
 });

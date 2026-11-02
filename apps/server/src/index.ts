@@ -15,7 +15,7 @@ import websocket from '@fastify/websocket';
 
 import { HOST, PORT, NET, NETWORK, BOOTSTRAP, ALLOW_ENV_KEY, ALLOW_MAINNET_WRITES, KEYSTORE_PATH, ENV_FILE, ENV_FILE_LOADED, enginePath, SERVER_SIGNING, ALLOWED_ORIGINS, HOSTED, HOSTED_CONFIG, SITE_ORIGINS } from './config.js';
 import { siteBrakeReader } from './ops/brake.js';
-import { HOSTED_RESPONSE_HEADERS, HOSTED_ROUTES, ON_INSTANCE_ROUTES, fastifyTrustProxy, installHostedGate, installServerSigningGate } from './hosted.js';
+import { HOSTED_RESPONSE_HEADERS, HOSTED_ROUTES, ON_INSTANCE_ROUTES, fastifyTrustProxy, gatesFor, installHostedGate, installServerSigningGate } from './hosted.js';
 import { sodex, SodexApiError, NotUnlockedError } from './sodex/rest.js';
 import { upstreams } from './sodex/ws.js';
 import { addClient, removeClient, startHub, hubStats } from './hub.js';
@@ -346,10 +346,11 @@ app.addHook('onSend', async (_req, reply, payload) => {
  * the route allow-list (plus the health route a caller on the instance may
  * read), the site Origin for a state-changing route, per-client limits.
  */
-if (HOSTED) installHostedGate(app, { cfg: HOSTED_CONFIG, site: SITE_ORIGINS, admin: ADMIN_ORIGINS });
+const GATES = gatesFor({ hosted: HOSTED, beta: betaLock !== null });
+if (GATES.hosted) installHostedGate(app, { cfg: HOSTED_CONFIG, site: SITE_ORIGINS, admin: ADMIN_ORIGINS });
 // The beta channel's lock, after the gate above (beta/gate.ts).
-if (betaLock) installBetaGate(app, betaLock);
-else app.addHook('onRequest', async (req, reply) => {
+if (GATES.beta && betaLock) installBetaGate(app, betaLock);
+if (GATES.loopback) app.addHook('onRequest', async (req, reply) => {
   if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return;
   if (!isAllowedOrigin(req.headers.origin, ALLOWED_ORIGINS)) {
     return reply.code(403).send({ error: 'origin not allowed', source: 'server' });
