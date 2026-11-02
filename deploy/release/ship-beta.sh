@@ -174,13 +174,12 @@ say "branch beta -> $TAG"
 BETA_SHA="$(git -c user.name="$(git log -1 --format=%an "$HEAD_SHA")" -c user.email="$(git log -1 --format=%ae "$HEAD_SHA")" commit-tree "$HEAD_SHA^{tree}" -p "$HEAD_SHA" -m "beta: $TAG (deploy/release/ship-beta.sh)")"
 "${G[@]}" push -q --force origin "$BETA_SHA:refs/heads/beta"
 note "waiting for Vercel's deployment of ${BETA_SHA:0:7} (= $TAG) on branch beta"
+# The beta project (valuedesk-beta) leaves no GitHub deployment for its preview builds (2026-11-02, 729e38c),
+# only the commit status "Vercel – valuedesk-beta".
 state=""
 for _ in $(seq 1 60); do
-  id="$(gh_api "$REPO/deployments?sha=$BETA_SHA" | json 'v ? (v.find((d) => d.environment !== "Production") || {}).id || "" : ""')"
-  if [ -n "$id" ]; then
-    state="$(gh_api "$REPO/deployments/$id/statuses" | json 'v && v[0] ? v[0].state : ""')"
-    case "$state" in success|failure|error) break ;; esac
-  fi
+  state="$(gh_api "$REPO/commits/$BETA_SHA/status" | json 'v && v.statuses ? ((v.statuses.find((s) => /valuedesk-beta/.test(s.context)) || {}).state || "") : ""')"
+  case "$state" in success|failure|error) break ;; esac
   sleep 15
 done
 [ "$state" = success ] || die "the beta site's deployment is '${state:-not there}' after 15 minutes (Vercel dashboard)"
