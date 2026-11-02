@@ -906,6 +906,10 @@
 .tabmenu__item:disabled,
 .tabmenu__item:disabled .tabmenu__ic { color: var(--dim); cursor: default; }
 .tabmenu__sep { height: 1px; margin: 4px 6px; background: rgba(255, 255, 255, 0.08); }
+/* A group's heading (the chart's "Price source", "Scale"): the menus' label, sentence case. */
+.tabmenu__head { padding: 2px 10px 3px 8px; color: var(--muted); font-size: var(--fs-micro); line-height: var(--lh-micro); }
+/* A setting that is on: its check in the text's colour, not the muted icons'. */
+.tabmenu__item.is-on .tabmenu__ic { color: var(--text); }
 
 /* The widget sidebar for tabs (tabExtras.tsx TabSidebar): a glass sheet down the
    right edge, floating 8px clear of the navbar, the window's edge and its bottom,

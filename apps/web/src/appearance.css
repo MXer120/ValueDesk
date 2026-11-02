@@ -26,12 +26,29 @@ html[data-glass] .dash-panel[data-panel="livefeed"]:has(.lf.is-docked),
 html[data-glass] .dash-panel[data-panel="livefeed"]:has(.lf.is-empty) {
   /* Inside a panel its own fill is clear, so tab bars and tables do not stack a second tint. */
   --bg-panel: transparent;
+  background: transparent;
+  border-color: rgba(255, 255, 255, 0.07);
+}
+/* The glass is a layer under the content, not the panel itself: a blurred element is the
+   backdrop root of everything in it, so a menu opened inside the panel (the chart's
+   Indicators) blurred nothing of the chart under it. On a layer, the menu sees the page.
+   No `isolation` (or z-index) on the panel to hold the layer: Chromium makes an isolated
+   panel a backdrop root too, and the grid sets the items' own z-index. The layer sits
+   under the panel's content either way (its stacking context, or the page's). */
+html[data-glass] .dash-panel:not([data-panel="markets"]):not([data-panel="livefeed"])::before,
+html[data-glass] .dash-panel[data-panel="livefeed"]:has(.lf.is-docked)::before,
+html[data-glass] .dash-panel[data-panel="livefeed"]:has(.lf.is-empty)::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  z-index: -1;
+  border-radius: inherit;
+  pointer-events: none;
   background:
     radial-gradient(90% 60% at 20% 0%, color-mix(in srgb, var(--stg-glow) var(--stg-glow-a), transparent), transparent 70%),
     color-mix(in srgb, var(--stg-tint) var(--pn-a), transparent);
   -webkit-backdrop-filter: blur(var(--pn-blur)) saturate(var(--stg-sat));
   backdrop-filter: blur(var(--pn-blur)) saturate(var(--stg-sat));
-  border-color: rgba(255, 255, 255, 0.07);
 }
 
 /* --- every pop-up in the Settings window's language -------------------------

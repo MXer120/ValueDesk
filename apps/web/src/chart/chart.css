@@ -222,64 +222,6 @@
  * left and leaves the icon where the row's right padding put it. */
 .kc-toolbar .kc-fs { margin-left: 9px; }
 
-/* Segmented pair, price source. A RECESSED TRACK: 28px tall, filled with the
-   page base so it sits *into* the panel rather than on it, holding a 24px
-   active chip in --bg-control. Without the track the members do not read as
-   one control - which is what a bare chip with a border was doing before. */
-/* --radius-md (6px) on BOTH the track and the chip, measured, and deliberately
-   not the usual "outer radius minus the inset". The reference's corner-inset
-   profile loses 4-5px of width over its top four rows on the container and the
-   same on the pill; ours lost 1px over 1 row, which is what made a pair of
-   rounded lozenges read as two square boxes. The chip is only inset 2px, so
-   matching its radius to the track rather than dropping it to 4 is what keeps
-   the two curves concentric at this size. */
-.kc-seg {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  height: 28px;
-  padding: 2px;
-  border-radius: var(--radius-md);
-  background: var(--bg);
-}
-/* 12px, one step below the rest of the strip, and 7px of padding rather than 8.
- *
- * Measured, the reference's pair is 98px wide for these two labels and ours was
- * 112 — the same two words in a visibly bigger box. Both halves of that: its
- * segment labels carry 9px of ink where every other label in its toolbar
- * carries 10, and its segments hold ~8px of padding where ours held ~10 (6px of
- * which is the padding below, the rest the button's own). This is the one
- * control in the strip the reference quiets rather than sizes with its
- * neighbours, which is right — it names the price SOURCE, a thing you set once,
- * not a view you switch between. */
-.kc-toolbar .kc-seg button {
-  height: 24px;
-  padding: 0 7px;
-  border-radius: var(--radius-md);
-  font-size: var(--fs-xs);
-  line-height: var(--lh-xs);
-}
-.kc-toolbar .kc-seg button.on,
-.kc-toolbar .kc-seg button.on:hover {
-  background: var(--bg-control);
-  color: var(--text);
-}
-/* A source this timeframe cannot serve stays clickable. The click shakes the
-   button — a fast refusal — and a notification says to move to 5m or higher.
-   Disabled would swallow that click, which is how the refusal used to vanish. */
-@keyframes kc-deny {
-  0%, 100% { transform: translateX(0); }
-  20% { transform: translateX(-5px); }
-  40% { transform: translateX(4px); }
-  60% { transform: translateX(-3px); }
-  80% { transform: translateX(2px); }
-}
-.kc-toolbar .kc-seg button.is-deny { animation: kc-deny 180ms linear; }
-@media (prefers-reduced-motion: reduce) {
-  .kc-toolbar .kc-seg button.is-deny { animation: none; }
-}
-.kc-toolbar .kc-seg button:disabled { color: var(--disabled); background: transparent; }
-
 /* View tabs, right-hand group: 14px/400, colour is the whole state model. A
    view we do not offer is --dim and inert rather than hidden, so the set of
    views stays stable as more of them land - which is also exactly what the
@@ -488,24 +430,6 @@
   color: var(--muted);
 }
 
-.kc-scale { display: flex; align-items: center; gap: var(--sp-3); }
-
-.kc-scale button {
-  border: 0;
-  padding: 0;
-  background: transparent;
-  color: var(--muted);
-  font-size: var(--fs-base);
-  font-weight: 400;
-  line-height: var(--lh-base);
-  cursor: pointer;
-  transition: color var(--dur-fast) var(--ease-out);
-}
-.kc-scale button:hover:not(:disabled) { color: var(--text); }
-.kc-scale button.on,
-.kc-scale button.on:hover { color: var(--accent); }
-.kc-scale button:disabled { color: var(--dim); cursor: default; }
-.kc-scale button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 
 /* --- legend --------------------------------------------------------------- */
 

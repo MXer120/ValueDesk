@@ -37,7 +37,7 @@
  * The library is imported dynamically so it lands in its own chunk and never
  * blocks first paint.
  */
-import { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore, type MouseEvent as ReactMouseEvent } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import { useLatched, usePresence } from './motion';
 import { createPortal } from 'react-dom';
 import type {
@@ -543,9 +543,8 @@ interface Series {
  *  not leave a pending line on screen indefinitely. */
 const SETTLE_TIMEOUT_MS = 15_000;
 
-/** Approximate placement-menu box, used only to decide which way it opens. */
-const MENU_W = 220;
-const MENU_H = 170;
+/** How long a touch is held to open the chart's menu - the news button's long press too. */
+const LONG_PRESS_MS = 500;
 
 export interface ChartProps {
   engine: Engine;
@@ -951,50 +950,6 @@ function Chart({
   /** Which generation already started its glide, so a later reload does not start it again. */
   const handoffUsed = useRef(0);
   const motionOk = () => !prefersReducedMotion() && !document.documentElement.classList.contains('is-potato');
-  const scaleRef = useRef<HTMLDivElement>(null);
-
-  /*
-   * THE 'L' BUTTON IS BEHIND THE PANEL'S RESIZE GRIP.
-   *
-   * `.kc-scale` reads `% A L` right-aligned in the panel's bottom-right
-   * corner - and react-grid-layout pins its south-east resize handle to
-   * exactly that corner. 'L', being rightmost, sits mostly UNDER it: a real
-   * click there hits the grip (topmost element at that point), which is not
-   * an ancestor of the button, so the click never reaches its onClick. This
-   * is the same class of bug as the symbol header's right-click dead zone
-   * (Market.tsx) and the same fix: move the listener to the window, in the
-   * CAPTURE phase, and decide by GEOMETRY - which button's rect contains the
-   * point - rather than by DOM ancestry, which is the question a native click
-   * dispatch cannot answer here.
-   *
-   * This only intercepts a plain click; it never touches pointerdown, so the
-   * grip keeps every event it needs to actually resize the panel. A click
-   * with no movement was never a resize gesture anyway.
-   */
-  useEffect(() => {
-    const onClick = (e: globalThis.MouseEvent) => {
-      // Real pointer clicks only. `btn.click()` below dispatches its own
-      // synthetic click to reach the button's onClick - without this guard
-      // that synthetic event would re-enter this same capture listener.
-      if (!e.isTrusted) return;
-      const group = scaleRef.current;
-      if (!group) return;
-      const gr = group.getBoundingClientRect();
-      if (e.clientX < gr.left || e.clientX >= gr.right || e.clientY < gr.top || e.clientY >= gr.bottom) return;
-      for (const btn of group.querySelectorAll<HTMLButtonElement>('button')) {
-        if (btn.disabled) continue;
-        const r = btn.getBoundingClientRect();
-        if (e.clientX >= r.left && e.clientX < r.right && e.clientY >= r.top && e.clientY < r.bottom) {
-          e.preventDefault();
-          e.stopPropagation();
-          btn.click();
-          return;
-        }
-      }
-    };
-    window.addEventListener('click', onClick, true);
-    return () => window.removeEventListener('click', onClick, true);
-  }, []);
   const [candleStyle, setCandleStyle] = useState<CandleType>('candle_solid');
   /** Read by getBars, which is built once and must not close over state. */
   const candleStyleRef = useRef(candleStyle);
@@ -1035,12 +990,6 @@ function Chart({
 
   // --- order-line interaction state -----------------------------------------
   const layer = useRef<OrderLineLayer | null>(null);
-  /** Right-click menu: chart-relative pixels, the tick-snapped price there, and
-   *  which way to open so the popup stays inside a small panel. */
-  const [menu, setMenu] = useState<
-    // `price` null: a read-only session (nothing to place); `t`: the candle under the pointer.
-    { x: number; y: number; price: string | null; t: number | null; flipX: boolean; flipY: boolean } | null
-  >(null);
   /** The candle "Who traded" opens on (a time inside it; null: the latest). */
   const [flowAt, setFlowAt] = useState<number | null>(null);
   /** Live readout while a line is under the cursor. */
@@ -1991,7 +1940,7 @@ function Chart({
   // confirm box for BTC survive onto an ETH chart.
   useEffect(() => {
     window.clearTimeout(settleTimer.current);
-    setMenu(null);
+    setCtxMenu(null);
     setDrag(null);
     setPending(null);
     setAwaiting(null);
@@ -3515,88 +3464,123 @@ function Chart({
     return () => document.removeEventListener('keydown', onKey);
   }, [drawing, cancelDrawing, finishPath]);
 
-  // --- right-click to place --------------------------------------------------
+  // --- right-click: the chart's menu ------------------------------------------
 
   /**
-   * Open the placement menu at the price under the pointer.
+   * The chart's menu at a viewport point: "Who traded this candle" and the
+   * order prefills at the price under the pointer, then the chart's settings
+   * (the price source, the scale), which have no switches on the chart itself
+   * (owner 2026-11-02). A long press opens it on touch.
    *
    * klinecharts already calls preventDefault on the canvas's contextmenu event
    * but does not stop it propagating, so this DOM handler still sees it — and it
    * sees it for clicks on an order line too, where the overlay's own
    * onRightClick has meanwhile stopped the library deleting that line.
    */
-  const onContextMenu = useCallback(
-    (e: ReactMouseEvent) => {
-      // The right-click landed on a drawing: its menu opens, not this one.
-      const pend = pendingDrawingMenu.current;
-      if (pend && performance.now() - pend.t < 700) {
-        pendingDrawingMenu.current = null;
-        e.preventDefault();
-        drawingMenuRef.current(pend.id, { x: e.clientX, y: e.clientY });
-        return;
-      }
-      const c = chart.current;
-      const el = holder.current;
+  const openChartMenu = (x: number, y: number): boolean => {
+    const c = chart.current;
+    const el = holder.current;
+    if (!ready || !c || !el || drawing) return false;
+    const items: ChartMenuItem[] = [];
+
+    // Only the candle pane's own y-axis carries a price. A right-click down in
+    // a volume or MACD pane would convert against THAT pane's scale and name a
+    // number that is not a price at all. Nothing to place while the plot is masked.
+    const rect = el.getBoundingClientRect();
+    const py = y - rect.top;
+    const pane = c.getSize(CANDLE_PANE_ID);
+    if (!maskedRef.current && pane && py >= pane.top && py <= pane.top + pane.height) {
+      const pt = c.convertFromPixel([{ x: x - rect.left, y: py }], { paneId: CANDLE_PANE_ID, absolute: true }) as Array<Partial<Point>>;
       // A read-only session is offered only "Who traded this candle": every
-      // other item in this menu is a step towards signing an order.
-      if (!ready || !c || !el || drawing || maskedRef.current || (bare && !canPlace)) return;
-
-      const rect = el.getBoundingClientRect();
-      const y = e.clientY - rect.top;
-      // Only the candle pane's own y-axis carries a price. A right-click down in
-      // a volume or MACD pane would convert against THAT pane's scale and name a
-      // number that is not a price at all.
-      const pane = c.getSize(CANDLE_PANE_ID);
-      if (!pane || y < pane.top || y > pane.top + pane.height) return;
-
-      const pt = c.convertFromPixel([{ x: e.clientX - rect.left, y }], { paneId: CANDLE_PANE_ID, absolute: true }) as Array<
-        Partial<Point>
-      >;
+      // other prefill is a step towards signing an order.
       const price = canPlace ? snapToTick(pt[0]?.value ?? Number.NaN, sym?.tickSize) : null;
       const t = !bare && typeof pt[0]?.timestamp === 'number' && Number.isFinite(pt[0].timestamp) ? pt[0].timestamp : null;
-      if (price === null && t === null) return;
+      if (t !== null) items.push({ label: 'Who traded this candle', icon: MENU_ICONS.traders, onClick: () => { setFlowAt(t); setView('flow'); } });
+      if (price !== null) {
+        const note = 'Prefills the order price only. Nothing is submitted from here.';
+        items.push(
+          { head: `At ${fmtPrice(price, sym?.tickSize)}`, label: 'Limit buy here', icon: MENU_ICONS.limitBuy, title: note, onClick: () => prefill('buy', price) },
+          { label: 'Limit sell here', icon: MENU_ICONS.limitSell, title: note, onClick: () => prefill('sell', price) },
+          { label: 'Stop here', icon: MENU_ICONS.stop, title: note, onClick: () => prefill('stop', price) },
+        );
+      }
+    }
 
+    // A bare chart (the heatmap's history) is always the traded price: no source to pick.
+    if (!bare) {
+      for (const s of ['latest', 'mark', 'index'] as const) {
+        const off = s !== 'latest' && !sourceOk;
+        items.push({
+          head: s === 'latest' ? 'Price source' : undefined,
+          label: SOURCE_LABEL[s],
+          checked: src === s,
+          radio: true,
+          title: off ? markIndexNotice(engine, interval) : SOURCE_HINT[s],
+          // A source this timeframe cannot serve stays pickable, and says why it is not shown.
+          onClick: () => (off ? notify('info', markIndexNotice(engine, interval)) : setPriceSource(s)),
+        });
+      }
+    }
+    items.push(
+      { head: 'Scale', label: 'Auto fit', checked: scale.auto, title: 'Fits the price axis to the candles on screen', onClick: toggleAuto },
+      { label: 'Percentage', checked: scale.mode === 'percentage', onClick: () => dispatchScale({ type: 'percent' }) },
+      { label: 'Logarithmic', checked: scale.mode === 'logarithm', onClick: () => dispatchScale({ type: 'log' }) },
+    );
+    setCtxMenu({ at: { x, y }, items });
+    return true;
+  };
+
+  /** A long press (touch) that opened the menu, so the native contextmenu that may follow does not reopen it. */
+  const press = useRef<{ x: number; y: number; timer: number } | null>(null);
+  const pressedAt = useRef(0);
+  const endPress = () => {
+    if (press.current) window.clearTimeout(press.current.timer);
+    press.current = null;
+  };
+  const onPanePointerDown = (e: ReactPointerEvent) => {
+    endPress();
+    if (e.pointerType !== 'touch') return;
+    const { clientX: x, clientY: y } = e;
+    press.current = {
+      x,
+      y,
+      timer: window.setTimeout(() => {
+        press.current = null;
+        if (!openChartMenu(x, y)) return;
+        pressedAt.current = performance.now();
+        // The finger lifting off is a click under it, in the menu that just opened: not a pick.
+        const swallow = (ev: MouseEvent) => {
+          ev.preventDefault();
+          ev.stopPropagation();
+        };
+        window.addEventListener('click', swallow, { capture: true, once: true });
+        window.setTimeout(() => window.removeEventListener('click', swallow, { capture: true }), 800);
+      }, LONG_PRESS_MS),
+    };
+  };
+  const onPanePointerMove = (e: ReactPointerEvent) => {
+    const p = press.current;
+    // A pan or a crosshair drag, not a press.
+    if (p && Math.hypot(e.clientX - p.x, e.clientY - p.y) > 8) endPress();
+  };
+
+  const onContextMenu = (e: ReactMouseEvent) => {
+    endPress();
+    // The right-click landed on a drawing: its menu opens, not this one.
+    const pend = pendingDrawingMenu.current;
+    if (pend && performance.now() - pend.t < 700) {
+      pendingDrawingMenu.current = null;
       e.preventDefault();
-      /*
-       * WHERE THE MENU OPENS - viewport coordinates, portalled, so it may hang
-       * outside the chart over other panels. Below the last price it opens
-       * below-right of the pointer, above it above-right: the menu grows away
-       * from the price, never across it. Only when the screen has no room that
-       * way does it flip (left / the other side).
-       */
-      const last = Number(lastBar.current?.close ?? lastPriceRef.current ?? Number.NaN);
-      const abovePrice = Number.isFinite(last) ? Number(price) >= last : false;
-      const vw = window.innerWidth;
-      const vh = window.innerHeight;
-      let up = abovePrice;
-      if (up && e.clientY - MENU_H < 8) up = false;
-      else if (!up && e.clientY + MENU_H > vh - 8) up = true;
-      setMenu({
-        x: e.clientX,
-        y: e.clientY,
-        price,
-        t,
-        flipX: e.clientX + MENU_W > vw - 8,
-        flipY: up,
-      });
-    },
-    [ready, canPlace, drawing, sym?.tickSize, bare],
-  );
-
-  // Dismiss the placement menu on any outside click or on Escape.
-  useEffect(() => {
-    if (!menu) return;
-    const close = () => setMenu(null);
-    const onKey = (ev: KeyboardEvent) => {
-      if (ev.key === 'Escape') setMenu(null);
-    };
-    document.addEventListener('mousedown', close);
-    document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('mousedown', close);
-      document.removeEventListener('keydown', onKey);
-    };
-  }, [menu]);
+      drawingMenuRef.current(pend.id, { x: e.clientX, y: e.clientY });
+      return;
+    }
+    // A long press already opened it (Android sends its own contextmenu after one).
+    if (performance.now() - pressedAt.current < 1000) {
+      e.preventDefault();
+      return;
+    }
+    if (openChartMenu(e.clientX, e.clientY)) e.preventDefault();
+  };
 
   /**
    * Hand a price to the order ticket. This is the whole of what a menu pick
@@ -3607,7 +3591,6 @@ function Chart({
   const prefill = useCallback(
     (kind: 'buy' | 'sell' | 'stop', price: string) => {
       onPrice?.(price);
-      setMenu(null);
       setTicket({ kind, price });
     },
     [onPrice],
@@ -4323,47 +4306,6 @@ function Chart({
           )}
           </div>
 
-          {/* Price source.
-           *
-           * The candles are the venue's traded prices — the mark series — and
-           * that is stated rather than left implicit, because on a perps screen
-           * "which price is this?" decides whether a line you draw is where
-           * your liquidation is measured from.
-           *
-           * Oracle is rendered and DISABLED rather than omitted or faked. The
-           * gateway serves one kline series; there is no oracle candle history
-           * to switch to, and a segment that silently redrew the same data
-           * under a different name would be a lie about the source. Shown-and-
-           * explained beats both a dead toggle and a missing half-control. */}
-          {!bare && <div className="kc-seg" role="group" aria-label="Price source">
-            {(['latest', 'mark', 'index'] as const).map((s) => {
-              const off = s !== 'latest' && !sourceOk;
-              return (
-                <button
-                  key={s}
-                  className={src === s ? 'on' : undefined}
-                  aria-pressed={src === s}
-                  onClick={(e) => {
-                    if (!off) {
-                      setPriceSource(s);
-                      return;
-                    }
-                    // A fast nudge, then the class comes off so the next click
-                    // can play it again. Disabled would swallow the click.
-                    const el = e.currentTarget;
-                    el.classList.remove('is-deny');
-                    void el.offsetWidth;
-                    el.classList.add('is-deny');
-                    notify('info', markIndexNotice(engine, interval));
-                  }}
-                  onAnimationEnd={(e) => e.currentTarget.classList.remove('is-deny')}
-                  title={off ? markIndexNotice(engine, interval) : SOURCE_HINT[s]}
-                >
-                  {SOURCE_LABEL[s]}
-                </button>
-              );
-            })}
-          </div>}
         </div>
 
         {/* Transient strip. It lives in the flexible middle so that a hint
@@ -4421,7 +4363,7 @@ function Chart({
                 newsPress.current = window.setTimeout(() => {
                   newsHeld.current = true;
                   setNewsMenu(true);
-                }, 500);
+                }, LONG_PRESS_MS);
               }}
               onPointerUp={() => window.clearTimeout(newsPress.current)}
               onPointerLeave={() => window.clearTimeout(newsPress.current)}
@@ -4506,10 +4448,17 @@ function Chart({
         <div
           className="kc-pane"
           onContextMenu={onContextMenu}
+          onPointerDown={onPanePointerDown}
+          onPointerMove={onPanePointerMove}
+          onPointerCancel={endPress}
+          onPointerLeave={endPress}
           // The chart itself resets on the double click's second release (the
           // pointer effect above); this covers the rest of the pane.
           onDoubleClick={resetView}
-          onPointerUp={syncPaneHeights}
+          onPointerUp={() => {
+            endPress();
+            syncPaneHeights();
+          }}
           onMouseLeave={() => {
             // klinecharts only emits onCrosshairChange while the pointer is over a
             // pane, so "left the chart" has to come from the DOM. Scoped to the
@@ -4743,63 +4692,12 @@ function Chart({
           </div>
         )}
 
-        {menu && createPortal(
-          <div
-            className="menu-popup kc-ctxmenu"
-            style={{
-              position: 'fixed',
-              // 'auto' is load-bearing. `.menu-popup` sets `top: calc(100% + 4px)`
-              // and `left: 0`. Leaving either unset lets that rule through, and
-              // on a fixed box `top: 100%` parks the menu below the viewport —
-              // which is why a right-click above the price did nothing.
-              left: menu.flipX ? 'auto' : menu.x + 6,
-              right: menu.flipX ? window.innerWidth - menu.x + 6 : 'auto',
-              top: menu.flipY ? 'auto' : menu.y + 6,
-              bottom: menu.flipY ? window.innerHeight - menu.y + 6 : 'auto',
-              zIndex: 1600,
-              minWidth: `${MENU_W}px`,
-              transformOrigin: `${menu.flipX ? 'right' : 'left'} ${menu.flipY ? 'bottom' : 'top'}`,
-            }}
-            // The dismiss-on-outside-click listener is on document; without this
-            // the menu would close on the way to its own buttons.
-            onMouseDown={(e) => e.stopPropagation()}
-          >
-            {menu.t !== null && (
-              <div className="kc-menu-list">
-                <button onClick={() => { setFlowAt(menu.t); setView('flow'); setMenu(null); }}>Who traded this candle</button>
-              </div>
-            )}
-            {menu.price !== null && (() => {
-              const price = menu.price;
-              return (
-                <>
-                  <div className="kc-menu-label">At {fmtPrice(price, sym?.tickSize)}</div>
-                  <div className="kc-menu-list">
-                    <button onClick={() => prefill('buy', price)}>Limit buy here</button>
-                    <button onClick={() => prefill('sell', price)}>Limit sell here</button>
-                    <button onClick={() => prefill('stop', price)}>Stop here</button>
-                  </div>
-                  <p className="muted small" style={{ margin: 'var(--sp-2) 0 0' }}>
-                    Prefills the order price only. Nothing is submitted from here.
-                  </p>
-                </>
-              );
-            })()}
-          </div>,
-          document.body,
-        )}
         </div>
 
-        {/* Footer strip, under the time axis.
-         *
-         * The price scale used to be a filled chip up in the toolbar, which put
-         * the one raised control on the page into a strip that otherwise has
-         * none. Down here it is three plain toggles, `% A L`, each in the accent
-         * while it is on — the reference's own arrangement, and it also gives
-         * the panel the ~30px of footer that made our chart card a step shorter
-         * than every other card in the column. The clock earns its place beside
-         * them: it is the only thing on the panel that says which zone the axis
-         * above is drawn in. */}
+        {/* Footer strip, under the time axis: the feed's state and the clock,
+         * the only thing on the panel that says which zone the axis above is
+         * drawn in. The scale (`% A L`) and the price source are no switches on
+         * the chart any more: they are in its right-click menu (owner 2026-11-02). */}
         <div className="kc-status">
           {!masked && <FeedBadge health={health.health} why={health.why} />}
           {/* mousedown stays inside: the outside-click close would otherwise
@@ -4837,44 +4735,6 @@ function Chart({
                 </div>
               </div>
             )}
-          </div>
-          <div className="kc-scale" role="group" aria-label="Price scale" ref={scaleRef}>
-            <button
-              title="Percentage scale"
-              aria-label="Percentage scale"
-              className={scale.mode === 'percentage' ? 'on' : ''}
-              aria-pressed={scale.mode === 'percentage'}
-              disabled={!ready}
-              onClick={() => {
-                log.debug(scale.mode === 'percentage' ? 'percentage scale off' : 'percentage scale on');
-                dispatchScale({ type: 'percent' });
-              }}
-            >
-              %
-            </button>
-            <button
-              title="Auto (fits data to screen)"
-              aria-label="Auto (fits data to screen)"
-              className={scale.auto ? 'on' : ''}
-              aria-pressed={scale.auto}
-              disabled={!ready}
-              onClick={toggleAuto}
-            >
-              A
-            </button>
-            <button
-              title="Logarithmic scale"
-              aria-label="Logarithmic scale"
-              className={scale.mode === 'logarithm' ? 'on' : ''}
-              aria-pressed={scale.mode === 'logarithm'}
-              disabled={!ready}
-              onClick={() => {
-                log.debug(scale.mode === 'logarithm' ? 'logarithmic scale off' : 'logarithmic scale on');
-                dispatchScale({ type: 'log' });
-              }}
-            >
-              L
-            </button>
           </div>
         </div>
         </div>

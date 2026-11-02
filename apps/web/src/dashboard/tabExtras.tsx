@@ -69,6 +69,14 @@ export interface TabMenuItem {
   danger?: boolean;
   /** A line above it: a group of its own. */
   sep?: boolean;
+  /** A group of its own under this heading (the chart's "Price source", "Scale"). */
+  head?: string;
+  /** A setting: a check in the icon's place while it is on. */
+  checked?: boolean;
+  /** One of a set (the heading's group): read as a radio, not a toggle. */
+  radio?: boolean;
+  /** Its tooltip. */
+  title?: string;
 }
 
 const menuIcon = (d: ReactNode) => (
@@ -109,6 +117,12 @@ export const MENU_ICONS = {
   // The layout menu's and the header's: arrange the panels, back to the default, alerts.
   edit: menuIcon(<><rect x="2.5" y="2.5" width="5" height="5" rx="1.2" /><rect x="2.5" y="9.5" width="5" height="4" rx="1.2" /><path d="M9.5 13.5h1.2l3-3-1.2-1.2-3 3zM12.5 8.3 13.7 9.5" /><rect x="9.5" y="2.5" width="4" height="4" rx="1.2" /></>),
   reset: menuIcon(<><path d="M3 8a5 5 0 1 0 1.5-3.6" /><path d="M3 2.8v2.6h2.6" /></>),
+  // The chart's own menu: a setting that is on, and the order prefills and the candle's traders.
+  check: menuIcon(<path d="m3.5 8.4 2.9 2.9 6.1-6.4" />),
+  limitBuy: menuIcon(<><path d="M2.5 5.5h11" /><path d="M8 13.5V8.2M5.8 10.4 8 8.2l2.2 2.2" /></>),
+  limitSell: menuIcon(<><path d="M2.5 10.5h11" /><path d="M8 2.5v5.3M5.8 5.6 8 7.8l2.2-2.2" /></>),
+  stop: menuIcon(<><path d="M5.6 2.5h4.8l3.1 3.1v4.8l-3.1 3.1H5.6l-3.1-3.1V5.6z" /><path d="M5.5 8h5" /></>),
+  traders: menuIcon(<><circle cx="6" cy="5.5" r="2" /><path d="M2.5 13c0-2 1.6-3.5 3.5-3.5S9.5 11 9.5 13" /><circle cx="11.3" cy="6" r="1.6" /><path d="M11 9.6c1.5 0 2.5 1.3 2.5 3" /></>),
   bell: menuIcon(<><path d="M4.2 11V7.5a3.8 3.8 0 0 1 7.6 0V11l1.2 1.5H3L4.2 11Z" /><path d="M6.6 13.5a1.5 1.5 0 0 0 2.8 0" /></>),
 } as const;
 
@@ -139,15 +153,18 @@ export function TabMenu({ at, items, onClose }: { at: { x: number; y: number }; 
     <div ref={ref} className="menu-popup tabmenu" role="menu" style={{ left: place.x, top: place.y }} onContextMenu={(e) => e.preventDefault()}>
       {items.map((it, i) => (
         <Fragment key={`${i}:${it.label}`}>
-          {((it.danger && i > 0 && !items[i - 1]!.danger) || (it.sep && i > 0)) && <span className="tabmenu__sep" role="separator" />}
+          {((it.danger && i > 0 && !items[i - 1]!.danger) || ((it.sep || it.head) && i > 0)) && <span className="tabmenu__sep" role="separator" />}
+          {it.head && <span className="tabmenu__head">{it.head}</span>}
           <button
             type="button"
-            role="menuitem"
-            className={`tabmenu__item${it.danger ? ' is-danger' : ''}`}
+            role={it.checked === undefined ? 'menuitem' : it.radio ? 'menuitemradio' : 'menuitemcheckbox'}
+            aria-checked={it.checked}
+            className={`tabmenu__item${it.danger ? ' is-danger' : ''}${it.checked ? ' is-on' : ''}`}
             disabled={it.disabled}
+            title={it.title}
             onClick={() => { onClose(); it.onClick(); }}
           >
-            <span className="tabmenu__ic">{it.icon}</span>
+            <span className="tabmenu__ic">{it.checked === undefined ? it.icon : it.checked ? MENU_ICONS.check : null}</span>
             <span>{it.label}</span>
           </button>
         </Fragment>
