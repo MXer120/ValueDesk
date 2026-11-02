@@ -1210,7 +1210,6 @@ export class IndexStore {
       // In the same transaction: a day that is now behind its fills is written down with them.
       for (const f of changed) this.markDay(f.venue, f.address, f.t);
     });
-    for (const f of changed) if (f.src === 0) this.noteStreamRow(f.venue, f.address, f.t);
   }
 
   putCloses(input: readonly CloseRow[]): void {
@@ -1838,17 +1837,6 @@ export class IndexStore {
   private partialMemo = new Map<string, DayAgg | undefined>();
   /** `venue|address|day` -> bumped whenever a row of that day changes (markDay): the partial sums' key. */
   private dayVersion = new Map<string, number>();
-  /**
-   * Per `venue|address`, the times the public-stream rows (src 0) may span: absent = not looked
-   * up yet, null = none. Every REST page synced dropped the stream's copies of its range, and the
-   * DELETE walked every fill of the address in that range (the index is venue, address, t; src
-   * is in the row) to find, nearly always, none: 20% of the indexer's thread in the 2026-11-02
-   * production profile. Kept wide: a stream row put widens it, a drop narrows it only when no
-   * stream row was put while it ran.
-   */
-  private streamSpan = new Map<string, { lo: number; hi: number } | null>();
-  /** Stream rows put per `venue|address` (a drop that saw this move keeps the span as it was). */
-  private streamPuts = new Map<string, number>();
 
   /** windowStats without long stalls (the writer's board builds). Same figures. */
   async windowStatsAsync(venue: Venue, address: string, fromT: number, pause: () => Promise<void>): Promise<WindowStats> {
@@ -2042,47 +2030,13 @@ export class IndexStore {
    */
   dropStreamRows(venue: Venue, address: string, fromT: number, toT: number): void {
     for (const v of venue === 'hyperliquid' ? [venue, 'tradexyz' as Venue] : [venue]) {
-      if (!this.streamIn(v, address, fromT, toT)) continue;
-      const puts = this.streamPuts.get(`${v}|${address}`) ?? 0;
       // Days before the trader's oldest row hold nothing to sum again (a range from 0 used to mark 20,000 of them).
       const first = this.oldestRaw(v, address);
       const n = Number(this.q('DELETE FROM fills WHERE venue = ? AND address = ? AND src = 0 AND t >= ? AND t <= ?').run(v, address, fromT, toT).changes);
+      // Only days that lost rows are summed again (nearly always none: the REST read already replaced them).
       if (n > 0) this.markRange(v, address, fromT, toT, first);
-      this.streamDropped(v, address, fromT, toT, puts);
     }
     this.bump(venue, address);
-  }
-
-  /** Whether stream rows may lie in [fromT, toT] (looked up once per address, then kept: streamSpan). */
-  private streamIn(venue: Venue, address: string, fromT: number, toT: number): boolean {
-    const k = `${venue}|${address}`;
-    let span = this.streamSpan.get(k);
-    if (span === undefined) {
-      const r = this.q('SELECT MIN(t) AS lo, MAX(t) AS hi FROM fills WHERE venue = ? AND address = ? AND src = 0').get(venue, address) as { lo: number | null; hi: number | null } | undefined;
-      span = r && r.lo !== null && r.hi !== null ? { lo: Number(r.lo), hi: Number(r.hi) } : null;
-      if (this.streamSpan.size > 500_000) { this.streamSpan.clear(); this.streamPuts.clear(); }
-      this.streamSpan.set(k, span);
-    }
-    return span !== null && span.lo <= toT && span.hi >= fromT;
-  }
-
-  private noteStreamRow(venue: Venue, address: string, t: number): void {
-    const k = `${venue}|${address}`;
-    this.streamPuts.set(k, (this.streamPuts.get(k) ?? 0) + 1);
-    const span = this.streamSpan.get(k);
-    if (span === undefined) return; // looked up when first needed
-    this.streamSpan.set(k, span === null ? { lo: t, hi: t } : { lo: Math.min(span.lo, t), hi: Math.max(span.hi, t) });
-  }
-
-  /** [fromT, toT] holds no stream row now: the span loses what it covered, unless one was put meanwhile. */
-  private streamDropped(venue: Venue, address: string, fromT: number, toT: number, putsBefore: number): void {
-    const k = `${venue}|${address}`;
-    if ((this.streamPuts.get(k) ?? 0) !== putsBefore) return;
-    const span = this.streamSpan.get(k);
-    if (!span) return;
-    if (fromT <= span.lo && toT >= span.hi) this.streamSpan.set(k, null);
-    else if (fromT <= span.lo && toT >= span.lo) this.streamSpan.set(k, { lo: toT + 1, hi: span.hi });
-    else if (toT >= span.hi && fromT <= span.hi) this.streamSpan.set(k, { lo: span.lo, hi: fromT - 1 });
   }
 
   /**
@@ -2095,8 +2049,6 @@ export class IndexStore {
          SELECT venue, address, id FROM fills WHERE venue = ? AND address = ? AND src = 0 AND t >= ? AND t <= ? LIMIT 2000)`,
     );
     for (const v of venue === 'hyperliquid' ? [venue, 'tradexyz' as Venue] : [venue]) {
-      if (!this.streamIn(v, address, fromT, toT)) continue;
-      const puts = this.streamPuts.get(`${v}|${address}`) ?? 0;
       const first = this.oldestRaw(v, address);
       let gone = 0;
       for (;;) {
@@ -2113,7 +2065,6 @@ export class IndexStore {
         this.markRange(v, address, fromT, toT, first);
         this.partialMemo.clear();
       }
-      this.streamDropped(v, address, fromT, toT, puts);
     }
     this.bump(venue, address);
   }
@@ -2623,8 +2574,6 @@ export class IndexStore {
       }
       // The day rows those times made (1 January 1970 and the like).
       this.q('DELETE FROM fill_day WHERE venue = ? AND address = ? AND day < ? AND COALESCE(frozen, 0) = 0').run(venue, address, Math.floor(MIN_ROW_T / DAY));
-      // Rows moved in time: where the stream's lie is looked up again.
-      this.streamSpan.delete(`${venue}|${address}`);
     });
     for (const t of moved) this.markDay(venue, address, t);
     this.bump(venue, address);
