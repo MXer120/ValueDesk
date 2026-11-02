@@ -357,7 +357,12 @@ export function LiqHeatmap({ symbol, engine, instance, address = null }: { symbo
   const subKey = sub ? `${sub.k}|${sub.from}|${sub.to}` : '-';
   useEffect(() => setFineSub(sub), [subKey]); // eslint-disable-line react-hooks/exhaustive-deps
   // The fine window streamed, when it is of the step asked (a window panned past stays drawn until the next arrives).
-  const lf = sub && live.fine && live.fine.k === sub.k ? live.fine : null;
+  // The fine window streamed: the one asked, else the last one held for the coin while the new one
+  // comes (a step or window changed: its own step drawn meanwhile, never the stream's coarser one).
+  const lf = sub && live.fine ? live.fine : null;
+  // A coin streamed at a fine step for the first time: its layer is laid out on the indexer when
+  // asked (live.ts want), the first frame within a second - the bars wait for it.
+  const fineWaiting = !!sub && !lf;
   const fineKey = fineAsk ? `${coin}|${vkey}|${wkey}|${fineAsk.step}|${fineAsk.from}|${fineAsk.to}` : null;
   const fineR = usePolled<HeatApi>(fineKey, (s) => vsApi.liquidations(coin, chosen, 'fine', s, wallets, fineAsk ?? undefined), FINE_POLL_MS);
   const fd = fineAsk && fineR.data && fineR.data.coin === coin && fineR.data.venues.join(',') === vkey && Math.abs(fineR.data.step / fineAsk.step - 1) < 1e-9 ? fineR.data : null;
@@ -368,7 +373,7 @@ export function LiqHeatmap({ symbol, engine, instance, address = null }: { symbo
   // The chart view's profile: the bars at the step drawn, the curves from the fine answer when it holds the price.
   const chartH = prefs.view === 'chart' && h?.price && h.buckets.length ? h : null;
   const group = Math.max(1, Math.round(want / streamK));
-  const profile = useMemo(() => (chartH ? profileOf(fineOn && fine ? fine : regroup(chartH, group), cumSrc(chartH, fineOn ? fine : null), unit, colorBy) : null), [chartH, fineOn, fine, group, unit, colorBy]);
+  const profile = useMemo(() => (chartH && !fineWaiting ? profileOf(fineOn && fine ? fine : regroup(chartH, group), cumSrc(chartH, fineOn ? fine : null), unit, colorBy) : null), [chartH, fineWaiting, fineOn, fine, group, unit, colorBy]);
 
   const histFineKey = histAsk ? `${coin}|${vkey}|${histAsk.step}|${histAsk.from}|${histAsk.to}|${histAsk.t0}|${histAsk.t1}` : null;
   const hf = usePolled<LiqHistoryFine>(histFineKey, (s) => vsApi.liquidationHistoryFine(coin, chosen, histAsk!, s), 5 * 60_000);
@@ -390,11 +395,11 @@ export function LiqHeatmap({ symbol, engine, instance, address = null }: { symbo
   // The newest column: the stream now at the snapshots' step, and its fine window at the step drawn
   // (a second apart, as the live view). Every wallet only, as the stream.
   const livePt = useMemo((): HeatPoint | null => {
-    if (!histOn || wallets.length || !apiData?.price || !histAt || !newest || !(apiData.at > newest.t)) return null;
+    if (!histOn || wallets.length || fineWaiting || !apiData?.price || !histAt || !newest || !(apiData.at > newest.t)) return null;
     const p = apiData.price;
     const f = lf ? { st: lf.st, lo: lf.from, hi: lf.to, b: snapRowsOf(lf.buckets, lf.st, lf.st, p) } : null;
     return { t: apiData.at, p, st: histAt.st, b: snapRowsOf(apiData.buckets, apiData.step, histAt.st, p), f };
-  }, [histOn, wkey, apiData, histAt?.st, newest?.t, lf]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [histOn, wkey, fineWaiting, apiData, histAt?.st, newest?.t, lf]); // eslint-disable-line react-hooks/exhaustive-deps
   const points = useMemo(() => (livePt ? [...snapPts, livePt] : snapPts), [snapPts, livePt]);
   // The colours per the step drawn (the snapshots', not the live column's: the scale holds still): a
   // $1 cell is full at what $1 cells hold, a $100 cell around it reads as a hundred of them.
@@ -479,7 +484,7 @@ export function LiqHeatmap({ symbol, engine, instance, address = null }: { symbo
         ) : nowEmpty ? (
           <p className="lqm-empty">{nowEmpty}</p>
         ) : (
-          <LiveView h={h!} fine={fineOn ? fine : null} onWindow={onWindow} unit={unit} want={want} streamK={streamK} colorBy={colorBy} lev={lev} onPick={setPick} pick={pick} />
+          <LiveView h={h!} fine={fineOn ? fine : null} waiting={fineWaiting && barStep !== null ? `Reading the ${stepLabel(barStep)} levels…` : null} onWindow={onWindow} unit={unit} want={want} streamK={streamK} colorBy={colorBy} lev={lev} onPick={setPick} pick={pick} />
         )}
         {/* The wallets now: a bar of the live and chart views, or of the historical view's strip. */}
         {pick && pick.at === undefined && h && <Details coin={coin} venues={chosen} pick={pick} price={h.price} wallets={wallets} lev={lev} onClose={() => setPick(null)} />}
@@ -590,7 +595,7 @@ const M = { l: 56, r: 60, t: 10, b: 24 };
 const MIN_SPAN = 0.0005;
 
 /** Wheel zooms the price, drag pans; wheel on a side axis scales it; a double-click resets the axes. */
-function LiveView({ h: base, fine, onWindow, unit, want, streamK, colorBy, lev, onPick, pick }: { h: Heat; fine: Heat | null; onWindow: (lo: number, hi: number, px: number) => void; unit: Unit; want: number; streamK: number; colorBy: ColorBy; lev: LevFilter; onPick: (p: Pick) => void; pick: Pick | null }) {
+function LiveView({ h: base, fine, waiting, onWindow, unit, want, streamK, colorBy, lev, onPick, pick }: { h: Heat; fine: Heat | null; waiting: string | null; onWindow: (lo: number, hi: number, px: number) => void; unit: Unit; want: number; streamK: number; colorBy: ColorBy; lev: LevFilter; onPick: (p: Pick) => void; pick: Pick | null }) {
   const [el, setEl] = useState<HTMLDivElement | null>(null);
   const [ref, { w, h: ht }] = useSize<HTMLDivElement>();
   const bind = useCallback((x: HTMLDivElement | null) => { ref(x); setEl(x); }, [ref]);
@@ -655,7 +660,7 @@ function LiveView({ h: base, fine, onWindow, unit, want, streamK, colorBy, lev, 
     const d = new Map<string, string>();
     let pickedBar: Array<[string, [number, number, number, number]]> | null = null;
     const r1 = (v: number) => Math.round(v * 10) / 10;
-    for (const b of shown) {
+    for (const b of waiting ? [] : shown) {
       const [l, s] = valOf(b, unit);
       const rs: Array<[string, [number, number, number, number]]> = [];
       const bx = x(b[0]);
@@ -680,7 +685,7 @@ function LiveView({ h: base, fine, onWindow, unit, want, streamK, colorBy, lev, 
       if (pick && Math.abs(pick.from - b[0]) < h.step / 2) pickedBar = rs;
     }
     return { bars: [...d], pickedBar };
-  }, [shown, unit, colorBy, maxBar, lo, hi, W, H, bw, pick, h.step]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [shown, waiting, unit, colorBy, maxBar, lo, hi, W, H, bw, pick, h.step]); // eslint-disable-line react-hooks/exhaustive-deps
   /** Zoom by `f` around a point `frac` of the way across the window (functional: fast wheel ticks each count). */
   const zoom = (f: number, frac = 0.5) => setView((v) => {
     const [a, b] = v ?? [lo, hi];
@@ -733,7 +738,9 @@ function LiveView({ h: base, fine, onWindow, unit, want, streamK, colorBy, lev, 
       onPointerUp={drag.onPointerUp}
       onPointerLeave={() => setHover(null)}
       onDoubleClick={reset}
+      aria-busy={waiting ? true : undefined}
     >
+      {waiting && <p className="lqm-empty lqm-waiting">{waiting}</p>}
       {w > 0 && win && (
         <svg width={w} height={ht} role="img" aria-label={`Liquidation levels of ${h.coin}`}>
           <defs><clipPath id="lqm-clip-live"><rect x={M.l} y={0} width={W} height={ht} /></clipPath></defs>

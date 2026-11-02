@@ -697,7 +697,10 @@ export class CohortTracker {
     for (const sym of b.pos.keys()) if (this.sodexCoins.has(liqCoin(sym))) return true;
     return false;
   }
-  private feed = new LiqFeedServer(() => this.live.resendAll());
+  // A coin wanted at a fine step and not kept until now: laid out and sent at once, not at the next beat.
+  private feed = new LiqFeedServer(() => this.live.resendAll(), undefined, (coins) => {
+    if (this.live.want(coins)) this.feed.send(this.live.flush(), { at: this.d.now(), ready: this.liveReady });
+  });
   /** Every book priced into the engine once since the start. */
   private liveReady = false;
   /** The engine's `processed` count at which the books touched at the start are all in (liveTick). */
@@ -1064,7 +1067,7 @@ export class CohortTracker {
       recordMs: this.recordMs,
       liqMs: this.liqMs,
       printsSkipped: this.printsSkipped,
-      liq: { crossedQueued: this.crossedQueued, oi: this.oiLast, boost: this.liqBoost, due: Object.fromEntries(this.liqDue), live: { ready: this.liveReady, pending: this.live.pending, ms: this.liveMs, readers: this.feed.readers, error: this.feed.lastError }, nowAt: this.lastNowAt || null, since: this.startedAt },
+      liq: { crossedQueued: this.crossedQueued, oi: this.oiLast, boost: this.liqBoost, due: Object.fromEntries(this.liqDue), live: { ready: this.liveReady, pending: this.live.pending, ms: this.liveMs, readers: this.feed.readers, error: this.feed.lastError, fine: this.live.fineOn() }, nowAt: this.lastNowAt || null, since: this.startedAt },
       hlc: { queued: this.hlc.size, done: this.hlc.done, failed: this.hlc.failed, lastError: this.hlc.lastError },
       pnl: { perpSince: this.perpSince, due: this.pnlDue, flows: this.pnlFlow.size, imported: this.pnlImported },
       levels: { open: this.levelState?.size ?? null, lastRows: this.levelRows },

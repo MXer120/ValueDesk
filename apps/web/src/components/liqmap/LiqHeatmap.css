@@ -189,6 +189,8 @@
 /* Zoom and pan (LiveView). */
 .lqm-plot { touch-action: none; user-select: none; }
 .lqm-plot.is-drag { cursor: grabbing; }
+/* A fine step's first frame on its way (live.ts want): the axes stay, the bars wait. */
+.lqm-waiting { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; margin: 0; pointer-events: none; }
 
 /* Streaming: the Live dot pulses. */
 .lqm-dot.is-on { background: var(--pos); animation: lqm-pulse 1.6s ease-in-out infinite; }

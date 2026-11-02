@@ -10,6 +10,8 @@
  *
  *   indexer -> API   {t:"d", ...LiveDelta}     a coin's changed buckets (whole: all of them)
  *                    {t:"tick", at, ready}     after every flush; ready = every book priced into it once
+ *   API -> indexer   {t:"want", coins}         the coins viewers stream at a fine step (live.ts want):
+ *                                              on every change and every WANT_EVERY_MS
  *
  * The API keeps every coin whole in memory from these (LiqFeedState) and streams
  * them on to the browsers (routes/valuedesk.ts /ws/liq). A new connection gets
@@ -25,6 +27,8 @@ export const LIQ_FEED_PORT = Number(process.env.VALUESCAN_LIQ_FEED_PORT) || 8796
 const HOST = '127.0.0.1';
 /** A reader that falls this far behind is dropped (it reconnects and gets every coin whole). */
 const MAX_BUFFERED = 32 * 1024 * 1024;
+/** The API repeats its wanted coins this often (the indexer keeps a layer FINE_GRACE_MS past the last). */
+export const WANT_EVERY_MS = 10_000;
 
 // --- indexer side --------------------------------------------------------------------------
 
@@ -33,8 +37,11 @@ export class LiqFeedServer {
   private clients = new Set<net.Socket>();
   lastError: string | null = null;
 
-  /** `onReader`: a reader connected - the engine should send every coin whole next. */
-  constructor(private readonly onReader: () => void, private readonly port = LIQ_FEED_PORT) {}
+  /**
+   * `onReader`: a reader connected - the engine should send every coin whole next. `onWant`: a
+   * reader's coins wanted at a fine step (live.ts want).
+   */
+  constructor(private readonly onReader: () => void, private readonly port = LIQ_FEED_PORT, private readonly onWant: (coins: string[]) => void = () => {}) {}
 
   start(): void {
     if (this.server) return;
@@ -43,7 +50,20 @@ export class LiqFeedServer {
       this.clients.add(sock);
       sock.on('close', () => this.clients.delete(sock));
       sock.on('error', () => sock.destroy());
-      sock.on('data', () => { /* readers send nothing */ });
+      let buf = '';
+      sock.setEncoding('utf8');
+      sock.on('data', (chunk: string) => {
+        buf += chunk;
+        if (buf.length > 1_000_000) { sock.destroy(); return; }
+        let i: number;
+        while ((i = buf.indexOf('\n')) >= 0) {
+          const line = buf.slice(0, i);
+          buf = buf.slice(i + 1);
+          let m: { t?: string; coins?: unknown };
+          try { m = JSON.parse(line); } catch { continue; }
+          if (m.t === 'want' && Array.isArray(m.coins)) this.onWant(m.coins.filter((c): c is string => typeof c === 'string').slice(0, 500));
+        }
+      });
       this.onReader();
     });
     srv.on('error', (e) => {
@@ -95,7 +115,7 @@ export interface LiveCoin {
   at: number;
   v: Map<Venue, LiveVenue>;
   /** The fine layer (live.ts FineAgg): its step, range [lo, hi), epoch, and per venue its cells (rows without their index). */
-  f?: { st: number; lo: number; hi: number; ep: number; v: Map<Venue, Map<number, number[]>> };
+  f?: { st: number; lo: number; hi: number; ep: number; on: boolean; v: Map<Venue, Map<number, number[]>> };
 }
 
 /** A coin changed: the venues and bucket indices that did; `whole`: laid out anew (the browsers get it whole). */
@@ -122,6 +142,9 @@ export class LiqFeedState extends EventEmitter {
   private timer: NodeJS.Timeout | null = null;
   private stopped = false;
   private backoff = 1_000;
+  /** The coins wanted at a fine step (want): sent on a change, on connecting, and every WANT_EVERY_MS. */
+  private wanted: string[] = [];
+  private wantTimer: NodeJS.Timeout | null = null;
 
   constructor(private readonly port = LIQ_FEED_PORT) {
     super();
@@ -131,10 +154,28 @@ export class LiqFeedState extends EventEmitter {
   start(): void {
     this.stopped = false;
     if (!this.sock && !this.timer) this.connect();
+    if (!this.wantTimer) {
+      this.wantTimer = setInterval(() => this.sendWant(), WANT_EVERY_MS);
+      this.wantTimer.unref?.();
+    }
+  }
+
+  /** The coins viewers stream at a fine step now: told to the indexer at once when they change. */
+  want(coins: readonly string[]): void {
+    const next = [...new Set(coins)].sort();
+    const changed = next.join(',') !== this.wanted.join(',');
+    this.wanted = next;
+    if (changed) this.sendWant();
+  }
+
+  private sendWant(): void {
+    if (this.connected && this.wanted.length) this.sock?.write(`${JSON.stringify({ t: 'want', coins: this.wanted })}\n`);
   }
 
   stop(): void {
     this.stopped = true;
+    if (this.wantTimer) clearInterval(this.wantTimer);
+    this.wantTimer = null;
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
     this.sock?.destroy();
@@ -156,6 +197,7 @@ export class LiqFeedState extends EventEmitter {
       this.backoff = 1_000;
       this.coins.clear();
       this.ready = false;
+      this.sendWant();
     });
     sock.on('data', (chunk: string) => this.data(chunk));
     const retry = () => {
@@ -240,7 +282,8 @@ export class LiqFeedState extends EventEmitter {
   /** The fine layer's part of a frame: a new layout of it replaces what is held. */
   private applyFine(c: LiveCoin, f: NonNullable<LiveDelta['f']>): NonNullable<CoinChange['fine']> {
     const whole = f.whole || !c.f || c.f.ep !== f.ep;
-    if (whole) c.f = { st: f.st, lo: f.lo, hi: f.hi, ep: f.ep, v: new Map() };
+    // An older indexer sends no `on`: its layer is always kept.
+    if (whole) c.f = { st: f.st, lo: f.lo, hi: f.hi, ep: f.ep, on: f.on !== false, v: new Map() };
     const held = c.f!;
     const venues = new Map<Venue, number[]>();
     for (const [venue, rows] of Object.entries(f.v) as Array<[Venue, LiqRow[]]>) {

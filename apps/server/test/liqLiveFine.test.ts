@@ -10,10 +10,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Venue } from '../src/valuedesk/types.js';
-import { LiqLive, fineStepOf, type LiveAccount, type LiveDelta } from '../src/valuedesk/liquidations/live.js';
+import { FINE_GRACE_MS, LiqLive, fineStepOf, type LiveAccount, type LiveDelta } from '../src/valuedesk/liquidations/live.js';
 import { flatTiers } from '../src/valuedesk/liquidations/math.js';
 import { NOW_HI, NOW_LO } from '../src/valuedesk/liquidations/levels.js';
-import { LiqFeedState } from '../src/indexer/liqFeed.js';
+import { LiqFeedServer, LiqFeedState } from '../src/indexer/liqFeed.js';
 
 function rng(seed: number): () => number {
   let x = seed >>> 0;
@@ -38,8 +38,9 @@ function books(n: number, px: number, seed = 5): Map<string, LiveAccount> {
   return m;
 }
 
-function engine(b: Map<string, LiveAccount>, px: { v: number }) {
-  const live = new LiqLive({ account: (v, a) => b.get(`${v}|${a}`), priceOf: () => px.v, tiersOf: () => T, priceOfCoin: () => px.v });
+function engine(b: Map<string, LiveAccount>, px: { v: number }, o: { want?: boolean; clock?: { t: number } } = {}) {
+  const live = new LiqLive({ account: (v, a) => b.get(`${v}|${a}`), priceOf: () => px.v, tiersOf: () => T, priceOfCoin: () => px.v, ...(o.clock ? { now: () => o.clock!.t } : {}) });
+  if (o.want !== false) live.want(['BTC']);
   for (const k of b.keys()) { const [v, a] = k.split('|') as [Venue, string]; live.touch(v, a); }
   live.work(Number.MAX_SAFE_INTEGER);
   return live;
@@ -159,4 +160,71 @@ test('the API keeps the fine layer whole from the frames; a new layout of it rep
   assert.equal(f.ep, 3);
   assert.equal(f.v.get('hyperliquid'), undefined);
   assert.equal(changes.at(-1)!.fine!.whole, true);
+});
+
+test('the fine layer is kept only while wanted: off it holds nothing, wanted it is laid out at once, let go after the grace', () => {
+  const px = { v: 78_000 };
+  const clock = { t: 1_000_000 };
+  const b = books(2_000, px.v, 13);
+  const live = engine(b, px, { want: false, clock });
+  // Nobody streams BTC at a fine step: the layer's step and range go out, no cells.
+  const d = live.flush().find((x) => x.coin === 'BTC')!;
+  assert.equal(d.f?.on, false);
+  assert.equal(d.f!.st, 1);
+  assert.deepEqual(d.f!.v, {}, 'no cells while off');
+  assert.deepEqual(live.fineOn(), []);
+  // A reprice while off adds nothing.
+  const k0 = [...b.keys()][0]!;
+  { const [v, a] = k0.split('|') as [Venue, string]; b.set(k0, { ...b.get(k0)!, cash: (b.get(k0)!.cash ?? 0) * 0.9 }); live.touch(v, a); live.work(); }
+  assert.ok(!live.flush().find((x) => x.coin === 'BTC')?.f, 'nothing of the fine layer moves while off');
+  // Wanted: laid out from the engine's entries at once, the same as a layer kept all along.
+  assert.equal(live.want(['BTC']), true, 'turned on');
+  assert.equal(live.want(['BTC']), false, 'already on');
+  const on = live.flush().find((x) => x.coin === 'BTC')!;
+  assert.ok(on.f?.on && on.f.whole);
+  const held = new Map<Venue, Map<number, number[]>>();
+  apply(held, on.f!);
+  same(held, brute(live, on.f!.st, on.f!.lo, on.f!.hi), 'laid out on want');
+  const kept = engine(b, px);
+  const k = kept.flush().find((x) => x.coin === 'BTC')!;
+  const heldK = new Map<Venue, Map<number, number[]>>();
+  apply(heldK, k.f!);
+  same(held, brute(kept, k.f!.st, k.f!.lo, k.f!.hi), 'the same as a layer kept from the start');
+  // Kept while wanted again within the grace; let go (whole, empty, off) once it passed.
+  clock.t += FINE_GRACE_MS - 1_000;
+  live.want(['BTC']);
+  clock.t += FINE_GRACE_MS - 1_000;
+  assert.ok(!live.flush().find((x) => x.coin === 'BTC')?.f, 'still kept: wanted within the grace');
+  clock.t += 2_000;
+  const off = live.flush().find((x) => x.coin === 'BTC')!;
+  assert.ok(off.f && off.f.whole && !off.f.on && !Object.keys(off.f.v).length, 'let go: sent whole and empty');
+  assert.deepEqual(live.fineOn(), []);
+  // The API's copy empties with it, and its viewers are told it is off.
+  const s = new LiqFeedState(0);
+  const frame = (f: NonNullable<LiveDelta['f']>) => s.data(`${JSON.stringify({ t: 'd', coin: 'BTC', p: px.v, st: 20, ep: 1, whole: false, v: {}, f })}
+`);
+  frame(on.f!);
+  assert.ok(s.coins.get('BTC')!.f!.on && s.coins.get('BTC')!.f!.v.size > 0);
+  frame(off.f!);
+  assert.ok(!s.coins.get('BTC')!.f!.on && s.coins.get('BTC')!.f!.v.size === 0);
+});
+
+test('the API tells the indexer its wanted coins over the feed: at once on a change, again on connecting', async () => {
+  const got: string[][] = [];
+  const port = 30_000 + Math.floor(Math.random() * 20_000);
+  const server = new LiqFeedServer(() => {}, port, (coins) => got.push(coins));
+  server.start();
+  const client = new LiqFeedState(port);
+  client.want(['ETH', 'BTC']);
+  client.start();
+  const until = async (f: () => boolean) => { for (let i = 0; i < 100 && !f(); i++) await new Promise((r) => setTimeout(r, 20)); };
+  await until(() => got.length > 0);
+  assert.deepEqual(got[0], ['BTC', 'ETH'], 'sent on connecting, sorted');
+  client.want(['BTC', 'ETH']);
+  client.want(['BTC']);
+  await until(() => got.length > 1);
+  assert.deepEqual(got.at(-1), ['BTC'], 'a change goes at once; the same list again does not');
+  assert.equal(got.length, 2);
+  client.stop();
+  server.stop();
 });

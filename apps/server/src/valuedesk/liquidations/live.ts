@@ -93,8 +93,15 @@ interface CoinAgg {
  * range (NOW_LO-NOW_HI of the price: a step picked holds zoomed out), laid out again once the price moved FINE_RECENTER from its middle. The
  * heatmap's $10 and $1 (owner 2026-11-01: "make it as accurate / updating as the normal heatmap")
  * stream from it as the normal buckets do: the same entries, the same second.
+ *
+ * Kept (`on`) only for the coins a viewer streams at a fine step (want: the API says which, at once
+ * and every few seconds) and FINE_GRACE_MS after the last left (owner 2026-11-02: the layer for
+ * every coin was ~10% of the indexer's thread on production). Off, the layer keeps its step and
+ * range - the viewers still learn them - and holds nothing. Turned on it is laid out from the
+ * coin's entries at once (refine).
  */
 interface FineAgg {
+  on: boolean;
   p0: number;
   st: number;
   lo: number;
@@ -107,6 +114,8 @@ interface FineAgg {
 }
 /** How far the price may move from the fine layer's middle before it is laid out again (its range and step follow the price). */
 const FINE_RECENTER = 0.1;
+/** A coin's fine layer is kept this long after it was last wanted. */
+export const FINE_GRACE_MS = 2 * 60_000;
 /** The fine layer's step from the price: the history's snapshot step (HIST_STEP) over a hundred. */
 export const fineStepOf = (p: number): number => +(niceStep(p * HIST_STEP) / 100).toPrecision(12);
 
@@ -121,7 +130,7 @@ export interface LiveDelta {
   whole: boolean;
   v: Partial<Record<Venue, { b: LiqRow[]; c?: Cov; o?: [number, number, number, number] }>>;
   /** The fine layer's changed cells (whole: all of them, a new layout of it): its step, range [lo, hi), epoch. */
-  f?: { st: number; lo: number; hi: number; ep: number; whole: boolean; v: Partial<Record<Venue, LiqRow[]>> };
+  f?: { st: number; lo: number; hi: number; ep: number; whole: boolean; on: boolean; v: Partial<Record<Venue, LiqRow[]>> };
 }
 
 /** The coverage tuple (VenueAgg.c). */
@@ -163,7 +172,13 @@ export class LiqLive {
      * positions' notional at their levels. Called once per pricing of the account.
      */
     crossed?: (venue: Venue, address: string, usd: number) => void;
+    /** The clock for the fine layer's grace (tests set it). */
+    now?: () => number;
   }) {}
+
+  private now(): number {
+    return this.o.now ? this.o.now() : Date.now();
+  }
 
   /** The account changed (a print, a read): re-priced at the next flush. */
   touch(venue: Venue, address: string): void {
@@ -242,7 +257,9 @@ export class LiqLive {
       const p = this.o.priceOfCoin(coin) ?? c.p0;
       // The fine layer laid out again around the price once it moved FINE_RECENTER from its middle
       // (sent whole below) - checked for a quiet coin too: the price moves without its accounts.
-      if (p > 0 && Math.abs(p / c.f.p0 - 1) > FINE_RECENTER) this.refine(coin, c, p);
+      if (p > 0 && Math.abs(p / c.f.p0 - 1) > FINE_RECENTER) this.refine(coin, c, p, c.f.on);
+      // No viewer for FINE_GRACE_MS: the layer is let go (sent whole, empty).
+      if (c.f.on && !this.isWanted(coin)) c.f = this.fineAt(c.f.p0, false);
       if (!c.whole && !c.dirtyB.size && !c.dirtyC.size && !c.f.whole && !c.f.dirty.size) continue;
       const d: LiveDelta = { coin, p, st: c.st, ep: c.ep, whole: c.whole, v: {} };
       const venues = c.whole ? [...c.v.keys()] : [...new Set([...c.dirtyB.keys(), ...c.dirtyC])];
@@ -358,12 +375,40 @@ export class LiqLive {
     f.whole = false;
     f.dirty.clear();
     if (!whole && !Object.keys(v).length) return null;
-    return { st: f.st, lo: f.lo, hi: f.hi, ep: f.ep, whole, v };
+    return { st: f.st, lo: f.lo, hi: f.hi, ep: f.ep, whole, on: f.on, v };
   }
 
-  /** A new fine layer around `p`: every entry of the coin in this layout added into it again (sent whole). */
-  private refine(coin: string, c: CoinAgg, p: number): void {
-    c.f = this.fineAt(p);
+  /** When each coin's fine layer was last wanted (want). */
+  private wantedAt = new Map<string, number>();
+  private isWanted(coin: string): boolean {
+    const at = this.wantedAt.get(coin);
+    return at !== undefined && this.now() - at < FINE_GRACE_MS;
+  }
+
+  /**
+   * The coins viewers stream at a fine step now (the API's whole list): each kept on, and one off
+   * until now laid out at once. True when a layer was turned on (flush to send it without waiting).
+   */
+  want(coins: Iterable<string>): boolean {
+    const now = this.now();
+    let on = false;
+    for (const coin of coins) {
+      this.wantedAt.set(coin, now);
+      const c = this.coins.get(coin);
+      if (c && !c.f.on) { this.refine(coin, c, c.f.p0, true); on = true; }
+    }
+    return on;
+  }
+
+  /** The coins whose fine layer is kept (tests, status). */
+  fineOn(): string[] {
+    return [...this.coins].filter(([, c]) => c.f.on).map(([coin]) => coin);
+  }
+
+  /** A new fine layer around `p`: every entry of the coin in this layout added into it again, when on (sent whole). */
+  private refine(coin: string, c: CoinAgg, p: number, on: boolean): void {
+    c.f = this.fineAt(p, on);
+    if (!on) return;
     for (const key of this.holders.get(coin) ?? []) {
       const i = key.indexOf('|');
       const venue = key.slice(0, i) as Venue;
@@ -371,16 +416,16 @@ export class LiqLive {
     }
   }
 
-  private fineAt(p: number): FineAgg {
+  private fineAt(p: number, on: boolean): FineAgg {
     const st = fineStepOf(p);
-    return { p0: p, st, lo: p * NOW_LO, hi: p * NOW_HI, ep: ++this.epoch, v: new Map(), dirty: new Map(), whole: true, sent: new Map() };
+    return { on, p0: p, st, lo: p * NOW_LO, hi: p * NOW_HI, ep: ++this.epoch, v: new Map(), dirty: new Map(), whole: true, sent: new Map() };
   }
 
   /** An entry into (1) or out of (-1) the fine layer: out of the cell it went into, if into this layer at all. */
   private applyFine(f: FineAgg, venue: Venue, e: Entry, sign: 1 | -1): void {
     let i: number;
     if (sign > 0) {
-      if (e.at < 0 || !(e.liq >= f.lo && e.liq < f.hi)) { e.fi = undefined; return; }
+      if (!f.on || e.at < 0 || !(e.liq >= f.lo && e.liq < f.hi)) { e.fi = undefined; return; }
       i = Math.floor(e.liq / f.st);
       e.fi = i;
       e.fep = f.ep;
@@ -407,7 +452,7 @@ export class LiqLive {
     if (c) return c;
     const p = this.o.priceOfCoin(coin);
     if (!p || !(p > 0)) return null;
-    c = { p0: p, st: niceStep(p * NOW_STEP), lo: p * NOW_LO, hi: p * NOW_HI, ep: ++this.epoch, v: new Map(), dirtyB: new Map(), dirtyC: new Set(), whole: true, sent: new Map(), f: this.fineAt(p) };
+    c = { p0: p, st: niceStep(p * NOW_STEP), lo: p * NOW_LO, hi: p * NOW_HI, ep: ++this.epoch, v: new Map(), dirtyB: new Map(), dirtyC: new Set(), whole: true, sent: new Map(), f: this.fineAt(p, this.isWanted(coin)) };
     this.coins.set(coin, c);
     return c;
   }
