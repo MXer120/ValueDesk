@@ -71,6 +71,7 @@ import { reownReportsAllowed } from './legal/reownConsent';
 import { startLater } from './startLater';
 import { EVM_CHAINS } from './trading/onboard';
 import {
+  addOrSwitchChain,
   discoverWallets,
   getDiscoveredWallets,
   normaliseChainId,
@@ -1255,6 +1256,31 @@ async function connectExtension(k: AppKit, w: FeaturedWallet, c: KitConnector): 
   } finally {
     off?.();
     k.resetConnectingWallet();
+  }
+  void toValueChain();
+}
+
+/**
+ * Right after the user's own connect: ask the extension to move to ValueChain (adding it on first
+ * use). The connect itself never asks (defineAdapter: a first-time MetaMask would fail it), so a
+ * wallet last used elsewhere - RISE, a testnet - otherwise stayed there. Declined or failed, the
+ * wallet stays connected where it is; deposits and the key revocation still switch before they sign.
+ * Never on a reload: that path does not come through here.
+ */
+async function toValueChain(): Promise<void> {
+  const provider = snap.provider;
+  if (!provider) return;
+  try {
+    const c = await loadChain();
+    await addOrSwitchChain(provider, {
+      chainId: '0x' + c.chainId.toString(16),
+      chainName: c.name,
+      rpcUrls: [c.rpcUrl],
+      blockExplorerUrls: c.explorerUrl ? [c.explorerUrl] : [],
+      nativeCurrency: c.nativeCurrency,
+    });
+  } catch {
+    /* refused or not possible: keep the connection as it is */
   }
 }
 
