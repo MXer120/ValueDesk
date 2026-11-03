@@ -135,9 +135,11 @@ export interface MmQuote {
  *   - a side that would take it past the cap is not quoted; the side that unwinds is sized up to what it
  *     holds when that is less than one order, so it can always reach flat;
  *   - a quote under SoDEX's minimum is raised to it;
- *   - with a queue guard, the side that adds is not quoted while its own best price's queue is thin (queueShare).
+ *   - with a queue guard, the side that adds is not quoted while its own best price's queue is thin (queueShare);
+ *   - with `fair` (the Binance-led maker, spec.ref): the side that adds rests refBps from it (0: at the touch as above)
+ *     and is not quoted within pullBps of it; the side that unwinds at a quarter of refBps, never through it.
  */
-export function mmQuotes(s: Pick<MmSpec, 'orderUsd' | 'maxInventoryUsd' | 'offsetTicks' | 'skewTicks' | 'edgeBps' | 'queueGuard'>, q: Quote, m: MarketInfo, inventory: number, mark: number): MmQuote[] {
+export function mmQuotes(s: Pick<MmSpec, 'orderUsd' | 'maxInventoryUsd' | 'offsetTicks' | 'skewTicks' | 'edgeBps' | 'queueGuard' | 'refBps' | 'pullBps'>, q: Quote, m: MarketInfo, inventory: number, mark: number, fair: number | null = null): MmQuote[] {
   const tick = Number(m.tickSize);
   const invUsd = inventory * mark;
   const ratio = Math.max(-1, Math.min(1, invUsd / s.maxInventoryUsd));
@@ -160,8 +162,18 @@ export function mmQuotes(s: Pick<MmSpec, 'orderUsd' | 'maxInventoryUsd' | 'offse
     const edge = s.edgeBps ?? 0;
     if (edge > 0) {
       const midP = (q.bid + q.ask) / 2;
-      const fair = mark > 0 ? mark : midP;
-      price = side === 'buy' ? Math.min(price, Math.min(midP, fair) * (1 - edge / 10_000) - skew * tick) : Math.max(price, Math.max(midP, fair) * (1 + edge / 10_000) + skew * tick);
+      const markP = mark > 0 ? mark : midP;
+      price = side === 'buy' ? Math.min(price, Math.min(midP, markP) * (1 - edge / 10_000) - skew * tick) : Math.max(price, Math.max(midP, markP) * (1 + edge / 10_000) + skew * tick);
+    }
+    if (fair !== null && fair > 0) {
+      const at = refLine(side, fair, adds ? s.refBps ?? 0 : (s.refBps ?? 0) / 4);
+      // refBps above 0: there, wherever the touch is (inside a wide spread, or behind a touch too close to fair).
+      if ((s.refBps ?? 0) > 0) price = side === 'buy' ? at - skew * tick : at + skew * tick;
+      // Never past the fair price's line: the side that adds not within pullBps of it (at the touch: not quoted
+      // while the touch is that close), the side that unwinds not through it.
+      const line = adds ? refLine(side, fair, s.pullBps ?? 0) : fair;
+      if (adds && (s.refBps ?? 0) <= 0 && (side === 'buy' ? price > line + 1e-12 : price < line - 1e-12)) continue;
+      price = side === 'buy' ? Math.min(price, line) : Math.max(price, line);
     }
     // Never at or through the other side: post-only would be refused.
     price = side === 'buy' ? Math.min(price, q.ask - tick) : Math.max(price, q.bid + tick);
@@ -174,6 +186,18 @@ export function mmQuotes(s: Pick<MmSpec, 'orderUsd' | 'maxInventoryUsd' | 'offse
     out.push({ side, price, quantity: qty });
   }
   return out;
+}
+
+/** `bps` from the fair price on `side`'s side of it: below it for a bid, above for an ask. */
+export const refLine = (side: Side, fair: number, bps: number): number => (side === 'buy' ? fair * (1 - bps / 10_000) : fair * (1 + bps / 10_000));
+
+/**
+ * Whether a resting quote is past where the fair price allows it (the Binance-led maker's fast pull): a bid above
+ * fair - pullBps (the side that adds) or above fair (the side that unwinds), an ask the same way up.
+ */
+export function pastFair(side: Side, price: number, fair: number, adds: boolean, pullBps: number): boolean {
+  const line = refLine(side, fair, adds ? pullBps : 0);
+  return side === 'buy' ? price > line + 1e-12 : price < line - 1e-12;
 }
 
 /** What rests at `side`'s best price, as a share of both best prices (null: the feed gives no sizes). */

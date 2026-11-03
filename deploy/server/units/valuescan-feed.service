@@ -1,0 +1,50 @@
+# Installed to /etc/systemd/system by deploy/server/bootstrap.sh. Runs where the executor runs (server 2).
+#
+# The box's ONE holder of the Binance sockets (apps/executor/src/feed/main.ts): every SoDEX perp's Binance USD-M
+# best bid / ask into a ring in memory, /run/valuescan-feed/binance-l1, which the executor (the Binance-led maker)
+# and any other process on the box read instead of opening sockets of their own. A process of its own so an executor
+# release or crash never takes the feed down (and the other way round: a reader whose feed is silent for 0.5 s opens
+# its own socket until it is back). Holds no key, places nothing, reads public market data only. Restarted only when
+# its own code changes (deploy/release/parts.mjs, part `feed`).
+
+[Unit]
+Description=Valuescan shared Binance feed (best bid / ask ring for the executor)
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/opt/valuescan/current/apps/executor/src/feed/main.ts
+# Only where the executor runs (server 2): the same switch as its hold.conf on server 1.
+ConditionPathExists=/etc/valuescan/executor-here
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=valuescan
+Group=valuescan
+WorkingDirectory=/opt/valuescan/current/apps/executor
+# The ring lives here (tmpfs), readable by every user on the box (the executor runs as valuescan-executor).
+RuntimeDirectory=valuescan-feed
+RuntimeDirectoryMode=0755
+# Kept over a restart: readers keep the old file's latest quotes (and see it go silent) until the new one is renamed in.
+RuntimeDirectoryPreserve=yes
+Environment=FEED_PATH=/run/valuescan-feed/binance-l1
+ExecStart=/opt/node/current/bin/node --max-old-space-size=192 --disable-warning=ExperimentalWarning --import tsx src/feed/main.ts
+Restart=always
+RestartSec=2
+KillSignal=SIGTERM
+TimeoutStopSec=10
+MemoryMax=300M
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

@@ -84,6 +84,9 @@ import { Brake, type BrakeState } from './brake.ts';
 import { KEY_IMPORT_ALG, importInfo, type ImportEnvelope, type Secrets } from './secrets.ts';
 import { ErrorGuard, guardedAlgoSink, guardedOrderSink, type GuardTarget } from './guard.ts';
 import { shortWallet, type Alerts } from './alerts.ts';
+import { plainSockets } from './feed/binance.ts';
+import { BinanceReference } from './feed/reference.ts';
+import { DEFAULT_FEED_PATH } from './feed/ring.ts';
 
 /** The pairing code's letters: no 0/O, 1/I/L, so it reads back from a terminal without doubt. */
 const PAIR_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
@@ -150,7 +153,7 @@ function algoPatch(raw: unknown): AlgoUpdatePatch {
     out.label = r.label as string | null;
   }
   // A bot's sizes, distances and limits: each of its type here, its range judged by the spec parser (AlgoRuntime.update).
-  for (const k of ['orderUsd', 'maxInventoryUsd', 'offsetTicks', 'chaseTicks', 'minRepriceMs', 'skewTicks', 'edgeBps', 'queueGuard', 'levels', 'moveGuard'] as const) {
+  for (const k of ['orderUsd', 'maxInventoryUsd', 'offsetTicks', 'chaseTicks', 'minRepriceMs', 'skewTicks', 'edgeBps', 'queueGuard', 'levels', 'moveGuard', 'refBps', 'pullBps'] as const) {
     if (r[k] === undefined) continue;
     if (!(typeof r[k] === 'number' && Number.isFinite(r[k]))) throw new ApiError(400, 'patch', `${k} must be a number.`);
     out[k] = r[k] as number;
@@ -241,6 +244,8 @@ export class ExecutorService {
    * same builder (the copy fee ladder), the same terms and region rules.
    */
   readonly algos: AlgoRuntime;
+  /** The Binance-led maker's reference (feed/reference.ts); null on a self-hosted executor. */
+  readonly reference: BinanceReference | null;
   readonly sodex: SodexClient;
   private readonly hyperliquid: HyperliquidClient;
   private readonly nonces = createMemoryNonceManager();
@@ -309,6 +314,8 @@ export class ExecutorService {
       confirmGapMs: deps.readGapMs,
     });
     const oracleFeed = new OracleFeed({ fetch: deps.fetch });
+    // The Binance-led maker's reference: the box's shared Binance feed (valuescan-feed), own sockets while it is down. Hosted only.
+    this.reference = cfg.kind === 'hosted' ? new BinanceReference({ path: process.env.EXECUTOR_FEED_PATH || DEFAULT_FEED_PATH, factory: plainSockets, log: deps.log }) : null;
     this.algos = new AlgoRuntime({
       store: db,
       sodex: this.sodex,
@@ -324,6 +331,7 @@ export class ExecutorService {
       // A sweep's reference price: the shared oracle (oracle.ts) - Binance futures and spot, Bitget,
       // Hyperliquid, OKX and Bybit, each read at most once a second per coin for every algo here.
       oracle: (coin) => oracleFeed.quotes(coin),
+      ...(this.reference ? { reference: this.reference } : {}),
       // An algo failed, stopped, held or finished: kept for the follower to read after signing in.
       onNotice: (n) => db.addNotice(n),
       confirmGapMs: deps.readGapMs,
@@ -354,6 +362,7 @@ export class ExecutorService {
     this.signerSweep = null;
     for (const owner of [...this.signers.keys()]) this.forgetSigner(owner, true);
     await this.algos.stop();
+    this.reference?.stop();
     await this.runtime.stop();
     this.builderDb?.close();
   }

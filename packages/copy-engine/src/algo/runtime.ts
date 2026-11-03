@@ -63,7 +63,8 @@ import type { AlgoSink, ChildRequest, ChildResult, StopRequest } from './sink.ts
 import { ALGO_NAMES, algoClosesOnly, algoQuantity, algoSymbols, opensPosition, parseAlgoSpec } from './spec.ts';
 import type { AlgoStore } from './store.ts';
 import type { AlgoUpdatePatch } from '../api.ts';
-import { bookFill, bookGross, bookInventory, bookNet, bookVolume, costPerMillion, emptyBook, gridAfterFill, gridPrices, gridQty, gridStart, mmQuotes, sampleBook, type GridSide } from './bots.ts';
+import { bookFill, bookGross, bookInventory, bookNet, bookVolume, costPerMillion, emptyBook, gridAfterFill, gridPrices, gridQty, gridStart, mmQuotes, pastFair, sampleBook, type GridSide } from './bots.ts';
+import { FairBasis, REF_MAX_AGE_MS, type ReferenceSource } from './reference.ts';
 import {
   FINAL_STATUSES,
   SLIP_FROM_NAMES,
@@ -202,6 +203,11 @@ export interface AlgoHost {
    * while that is fresh.
    */
   oracle?(coin: string, venues?: readonly OracleVenue[]): Promise<VenueQuote[]>;
+  /**
+   * The Binance-led maker's reference (MmSpec.ref; reference.ts): on an executor the box's shared Binance feed.
+   * Absent: such a maker holds.
+   */
+  reference?: ReferenceSource;
   log: Logger;
   onChange?(id: string): void;
   /** An algo failed, ended, finished, or was stopped or held without the follower asking (notices.ts): the bell, the inbox. */
@@ -243,7 +249,7 @@ const EXITS_MAX_REFUSALS = 5;
 const UPDATABLE: ReadonlySet<string> = new Set(['limitPrice', 'upper', 'lower', 'maxSpreadBps', 'label', 'quantity']);
 /** ...and on a running bot (its market, range and levels are what it is: a different one is a new bot). */
 const BOT_UPDATABLE: Readonly<Record<'mm' | 'grid', ReadonlySet<string>>> = {
-  mm: new Set(['label', 'maxSpreadBps', 'upper', 'lower', 'orderUsd', 'maxInventoryUsd', 'offsetTicks', 'chaseTicks', 'minRepriceMs', 'skewTicks', 'edgeBps', 'queueGuard', 'levels', 'moveGuard', 'volumeTargetUsd', 'maxLossUsd', 'endAt', 'onStop']),
+  mm: new Set(['label', 'maxSpreadBps', 'upper', 'lower', 'orderUsd', 'maxInventoryUsd', 'offsetTicks', 'chaseTicks', 'minRepriceMs', 'skewTicks', 'edgeBps', 'queueGuard', 'levels', 'moveGuard', 'refBps', 'pullBps', 'volumeTargetUsd', 'maxLossUsd', 'endAt', 'onStop']),
   grid: new Set(['label', 'maxSpreadBps', 'upper', 'lower', 'orderUsd', 'volumeTargetUsd', 'maxLossUsd', 'endAt', 'onStop', 'outOfRange']),
 };
 /** A bot closing what it holds rests at the touch this long before it takes... */
@@ -333,6 +339,8 @@ export class AlgoRuntime {
   private running = false;
   /** The sweep oracle's last quotes per coin, and the read in flight. */
   private oracleQuotes = new Map<string, { quotes: VenueQuote[]; at: number; busy: boolean; first: number }>();
+  /** The Binance-led makers' basis per market (reference.ts). */
+  private fairs = new Map<string, FairBasis>();
 
   constructor(private readonly host: AlgoHost) {
     if (host.market) this.market = host.market;
@@ -384,6 +392,7 @@ export class AlgoRuntime {
       }
     }
     this.market.start();
+    this.host.reference?.onQuote((market) => this.onReference(market));
     this.syncWatch();
     if (this.host.autoTick !== false) {
       this.timers.push(
@@ -431,6 +440,48 @@ export class AlgoRuntime {
     }
     const owners = [...weight.entries()].sort((x, y) => y[1] - x[1] || (x[0] < y[0] ? -1 : 1)).map(([o]) => o);
     this.market.watch([...symbols], owners);
+    if (this.host.reference) {
+      const refs = new Set<string>();
+      for (const a of this.algos.values()) if (!FINAL_STATUSES.has(a.status) && a.spec.kind === 'mm' && a.spec.ref) refs.add(a.spec.symbol);
+      this.host.reference.watch([...refs]);
+    }
+  }
+
+  /**
+   * The fair price of a Binance-led maker's market now (reference.ts): the reference's mid times the basis, the basis
+   * fed with this pair of mids. null: no reference here, none for this market, or older than REF_MAX_AGE_MS.
+   */
+  private fairFor(symbol: string, q: Quote, now: number): number | null {
+    const r = this.host.reference?.quote(symbol);
+    if (!r || now - r.at > REF_MAX_AGE_MS || !(r.bid > 0) || !(r.ask > 0)) return null;
+    let b = this.fairs.get(symbol);
+    if (!b) this.fairs.set(symbol, (b = new FairBasis()));
+    const refMid = (r.bid + r.ask) / 2;
+    b.update(mid(q), refMid, now);
+    return b.fair(refMid);
+  }
+
+  /**
+   * A reference tick (the fast pull): every running Binance-led maker on that market cancels at once a quote the fair
+   * price came past its line (bots.ts pastFair) - before the next step, and before SoDEX's takers who watch Binance
+   * reach it. Only cancels: new quotes go out with the steps.
+   */
+  private onReference(market: string): void {
+    if (!this.running) return;
+    const q = this.market.quote(market);
+    const m = this.markets.get(market);
+    if (!q || !m) return;
+    const now = Date.now();
+    let fair: number | null | undefined;
+    for (const a of this.algos.values()) {
+      const s = a.spec;
+      if (s.kind !== 'mm' || !s.ref || s.symbol !== market || a.status !== 'running') continue;
+      if (fair === undefined) fair = this.fairFor(market, q, now);
+      if (fair === null) return;
+      const inv = bookInventory(a.book!);
+      const stale = this.live(a).filter((c) => c.state === 'open' && !c.cancelling && c.tif !== 'ioc' && pastFair(c.side, c.price, fair!, c.side === 'buy' ? inv >= 0 : inv <= 0, s.pullBps ?? 0));
+      if (stale.length) void this.cancelChildren(a, m, stale).catch((e) => this.host.log.warn('algo: fast pull failed', { algo: a.id, error: String(e) }));
+    }
   }
 
   /**
@@ -1586,19 +1637,25 @@ export class AlgoRuntime {
     }
     const inv = bookInventory(a.book!);
     const tick = Number(m.tickSize);
+    // The Binance-led maker: no fair price (no feed here, or it went quiet), no quotes.
+    const fair = s.ref ? this.fairFor(s.symbol, q, now) : null;
+    if (s.ref && fair === null) {
+      await this.pullResting(a);
+      return this.hold(a, this.host.reference ? 'Held: waiting for the Binance price (it quotes only with a fresh one).' : 'Held: the Binance-led maker runs on the ValueDesk executor only.');
+    }
     // The move guard: the mid's move over the last 2 s, in ticks; the side it moves toward waits where it would add.
     const ago = (s.moveGuard ?? 0) > 0 ? this.market.priceAgo(s.symbol, 'mid', 2_000) : null;
     const moved = ago ? (mid(q) - ago) / tick : 0;
     const movesInto = (side: Side) => (s.moveGuard ?? 0) > 0 && (side === 'sell' ? moved >= s.moveGuard! : moved <= -s.moveGuard!) && (side === 'buy' ? inv >= 0 : inv <= 0);
-    const want = mmQuotes(s, q, m, inv, mk).filter((x) => !movesInto(x.side));
+    const want = mmQuotes(s, q, m, inv, mk, fair).filter((x) => !movesInto(x.side));
     // A ladder's front line: where a quote may stand at most (the touch, the skew and the edge as they are now, with no
     // step back). A ladder quote the touch came to is kept up to it - near the front of that queue is where its fills
     // are the bounce (a level that holds), not the sweep - and only one past it is pulled.
-    const front = (s.levels ?? 1) > 1 ? mmQuotes({ ...s, offsetTicks: Math.min(0, s.offsetTicks), queueGuard: 0 }, q, m, inv, mk) : want;
+    const front = (s.levels ?? 1) > 1 ? mmQuotes({ ...s, offsetTicks: Math.min(0, s.offsetTicks), queueGuard: 0 }, q, m, inv, mk, fair) : want;
     // What it would quote without the guards: a side missing only because of a guard is pulled no sooner than half
     // a second after it went out, and quoted again no sooner than minRepriceMs after (no cancel storm on a queue or a
     // price that flickers around the line).
-    const unguarded = (s.queueGuard ?? 0) > 0 || (s.moveGuard ?? 0) > 0 ? mmQuotes({ ...s, queueGuard: 0 }, q, m, inv, mk) : want;
+    const unguarded = (s.queueGuard ?? 0) > 0 || (s.moveGuard ?? 0) > 0 ? mmQuotes({ ...s, queueGuard: 0 }, q, m, inv, mk, fair) : want;
     const guardedAt = { ...((a.k.mguard as Record<string, number> | undefined) ?? {}) };
     const levels = Math.max(1, s.levels ?? 1);
     const live = this.live(a);

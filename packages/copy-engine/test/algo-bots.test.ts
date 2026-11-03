@@ -26,7 +26,11 @@ import {
   gridAfterFill,
   mmQuotes,
   queueShare,
+  pastFair,
+  FairBasis,
   BOT_FEE,
+  type ReferenceSource,
+  type RefQuote,
   type AlgoMarket,
   type AlgoRecord,
   type AlgoSink,
@@ -169,7 +173,28 @@ class Exchange implements AlgoSink {
   }
 }
 
+/** The Binance reference (the executor's shared feed): `tick` is a Binance quote arriving. */
+class FakeRef implements ReferenceSource {
+  q: RefQuote | null = null;
+  watched: string[] = [];
+  private cbs: Array<(m: string) => void> = [];
+  watch(markets: readonly string[]): void {
+    this.watched = [...markets];
+  }
+  quote(): RefQuote | null {
+    return this.q;
+  }
+  onQuote(cb: (m: string) => void): void {
+    this.cbs.push(cb);
+  }
+  tick(bid: number, ask: number): void {
+    this.q = { bid, ask, at: Date.now() };
+    for (const cb of this.cbs) cb('BTC-USD');
+  }
+}
+
 interface Rig {
+  ref?: FakeRef;
   rt: AlgoRuntime;
   market: FakeMarket;
   ex: Exchange;
@@ -195,6 +220,7 @@ function runtimeFor(r: Rig): AlgoRuntime {
     log: silentLogger,
     autoTick: false,
     builderRate: (a) => (a.spec.bot ? BOT_FEE / 100_000 : 0.00025),
+    ...(r.ref ? { reference: r.ref } : {}),
     brake: () => r.brake,
     problem: async () => r.problem,
     lookup: async (_a, _s, history) =>
@@ -202,9 +228,9 @@ function runtimeFor(r: Rig): AlgoRuntime {
   });
 }
 
-async function rig(): Promise<Rig> {
+async function rig(ref?: FakeRef): Promise<Rig> {
   const market = new FakeMarket();
-  const r: Rig = { rt: null as unknown as AlgoRuntime, market, ex: new Exchange(market), store: new MemoryAlgoStore(), brake: null, problem: null };
+  const r: Rig = { rt: null as unknown as AlgoRuntime, market, ex: new Exchange(market), store: new MemoryAlgoStore(), brake: null, problem: null, ...(ref ? { ref } : {}) };
   r.rt = runtimeFor(r);
   await r.rt.start();
   market.set(60_000, 60_002);
@@ -679,4 +705,77 @@ test('grid: a level SoDEX refuses waits (3 s, doubling) instead of being sent ev
   r.ex.refuse = null;
   for (let i = 0; i < 140; i++) await step(r, a.id, 500);
   assert.equal(r.ex.resting.size, 4, 'every level back on the book once SoDEX takes them');
+});
+
+/* ------------------------------------------------------- the Binance-led maker ----- */
+
+test('Binance-led maker spec: ref is binance only; its distances only with it, in range', () => {
+  const ok = parseAlgoSpec({ kind: 'mm', symbol: 'BTC-USD', orderUsd: 60, maxInventoryUsd: 180, ref: 'binance', refBps: 2, pullBps: 0.5 });
+  assert.ok(ok.kind === 'mm' && ok.ref === 'binance' && ok.refBps === 2 && ok.pullBps === 0.5);
+  assert.match(JSON.stringify(checkAlgoSpec({ kind: 'mm', symbol: 'BTC-USD', orderUsd: 60, maxInventoryUsd: 180, ref: 'okx' }).errors), /binance/);
+  assert.ok(!checkAlgoSpec({ kind: 'mm', symbol: 'BTC-USD', orderUsd: 60, maxInventoryUsd: 180, ref: 'binance', refBps: 80 }).spec, 'refBps above 50');
+  const none = parseAlgoSpec({ kind: 'mm', symbol: 'BTC-USD', orderUsd: 60, maxInventoryUsd: 180, refBps: 2 });
+  assert.ok(none.kind === 'mm' && none.refBps === undefined, 'refBps without ref is dropped: a plain maker keeps its signed text');
+});
+
+test('Binance-led maker quotes: at the touch only while it is pullBps from fair; at refBps from fair inside a wide spread', () => {
+  const q: Quote = { bid: 60_000, ask: 60_010, at: 0 };
+  const s = { orderUsd: 60, maxInventoryUsd: 180, offsetTicks: 0, skewTicks: 0, refBps: 0, pullBps: 0.5 };
+  // Fair at the mid: both touches are 0.83 bp away - quoted at the touch.
+  assert.deepEqual(mmQuotes(s, q, MKT, 0, 60_005, 60_005).map((x) => x.price), [60_000, 60_010]);
+  // Binance fell: fair 60,001 is 0.17 bp above the bid - the bid (it adds) is not quoted; the ask stays.
+  assert.deepEqual(mmQuotes(s, q, MKT, 0, 60_005, 60_001).map((x) => `${x.side} ${x.price}`), ['sell 60010']);
+  // refBps 1: 6.0005 from fair 60,005, rounded away from it -> bid 59,998 (behind the touch), ask 60,012.
+  const r1 = mmQuotes({ ...s, refBps: 1 }, q, MKT, 0, 60_005, 60_005);
+  assert.deepEqual(r1.map((x) => x.price), [59_998, 60_012]);
+  // In a wide spread it rests inside it, refBps from fair.
+  const wide: Quote = { bid: 59_900, ask: 60_100, at: 0 };
+  assert.deepEqual(mmQuotes({ ...s, refBps: 2 }, wide, MKT, 0, 60_000, 60_000).map((x) => x.price), [59_988, 60_012]);
+  // Holding (long): the side that unwinds (ask) rests at a quarter of refBps, the bid steps back nothing (skew 0) at refBps.
+  const held = mmQuotes({ ...s, refBps: 4 }, wide, MKT, 0.001, 60_000, 60_000);
+  assert.deepEqual(held.map((x) => `${x.side} ${x.price}`), ['buy 59976', 'sell 60006']);
+  // pastFair: a bid above fair - pull (adding) or above fair (unwinding).
+  assert.ok(pastFair('buy', 60_000, 60_002, true, 0.5));
+  assert.ok(!pastFair('buy', 59_990, 60_002, true, 0.5));
+  assert.ok(!pastFair('buy', 60_000, 60_002, false, 0.5));
+  assert.ok(pastFair('sell', 59_998, 59_999, false, 0), 'an ask below fair');
+  assert.ok(!pastFair('sell', 60_000, 59_999, false, 0));
+});
+
+test('fair basis: the first pair sets it; later pairs move it with a 30 s half-life', () => {
+  const b = new FairBasis();
+  assert.equal(b.fair(100), null);
+  b.update(101, 100, 0);
+  assert.equal(b.fair(100), 101);
+  b.update(102, 100, 30_000);
+  assert.ok(Math.abs(b.fair(100)! - 101.5) < 1e-9, 'half way after one half-life');
+});
+
+test('Binance-led maker: holds without a reference; quotes off it; a Binance tick pulls the quote it came past at once', async () => {
+  const none = await rig();
+  const a0 = await add(none, { ...MM, ref: 'binance' });
+  const v0 = await step(none, a0.id);
+  assert.equal(none.ex.placed.length, 0);
+  assert.match(v0.statusReason ?? '', /executor only/);
+
+  const ref = new FakeRef();
+  const r = await rig(ref);
+  const a = await add(r, { ...MM, ref: 'binance', pullBps: 0.1 });
+  ref.tick(60_000.5, 60_001.5);
+  await step(r, a.id);
+  assert.deepEqual(ref.watched, ['BTC-USD']);
+  assert.equal(r.ex.placed.length, 2, 'fair at the mid: both sides at the touch');
+  const bid = r.ex.side('buy')[0]!;
+  // Binance drops 2 bp: the bid at 60,000 is now above fair - cancelled on the tick, no step in between.
+  ref.tick(59_988.5, 59_989.5);
+  await settle();
+  assert.ok(r.ex.cancelled.includes(bid.clOrdID), 'pulled by the tick');
+  assert.ok(!r.ex.cancelled.includes(r.ex.side('sell')[0]?.clOrdID ?? 'x'), 'the ask is safer than before: it stays');
+  // The next step does not put the bid back while fair is under it.
+  await step(r, a.id, 500);
+  assert.equal(r.ex.side('buy').length, 0);
+  // A reference gone quiet for over 2 s: everything is pulled, and it holds.
+  const v = await step(r, a.id, 2_500);
+  assert.equal(r.ex.side('sell').length, 0);
+  assert.match(v.statusReason ?? '', /Binance price/);
 });

@@ -501,6 +501,21 @@ export interface MmSpec extends AlgoBase, BotLimits {
    * side it moves toward is not quoted where it would add (a rising price lifts the asks) - pulled where it rests.
    */
   moveGuard?: number;
+  /**
+   * Quote off Binance (the Binance-led maker; absent: off SoDEX's own book). The fair price is Binance USD-M's mid
+   * times the basis - SoDEX's mid over Binance's, averaged over half a minute - read from the box's shared feed
+   * (apps/executor/src/feed). Binance moves first: a quote the fair price came too close to is pulled the moment the
+   * tick arrives, not at the next step. Hosted only (the browser has no feed): elsewhere it holds.
+   */
+  ref?: 'binance';
+  /**
+   * With `ref`: where the side that adds rests, bp from the fair price (0: SoDEX's best price, as without ref).
+   * Above 0 it rests at fair -/+ this - inside the spread where it has room, behind the touch where the fair price
+   * says the touch is too close - and the side that unwinds at a quarter of it.
+   */
+  refBps?: number;
+  /** With `ref`: a quote of the adding side within this many bp of the fair price (or through it) is pulled (default 0). */
+  pullBps?: number;
 }
 
 /**
