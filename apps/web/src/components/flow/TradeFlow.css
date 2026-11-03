@@ -108,9 +108,12 @@
   border-bottom: 1px solid var(--panel-line);
 }
 .tfl-candle__when { flex: 1 1 auto; order: -1; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-.tfl-candle__top { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.tfl-candle__top { display: flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; }
 .tfl-candle__when b { color: var(--text); font-size: var(--fs-sm); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tfl-candle__tip { color: var(--dim); font-size: var(--fs-xs); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.tfl-candle__one { padding: 0; border: 0; background: none; color: var(--muted); font: inherit; font-size: var(--fs-xs); text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 2px; white-space: nowrap; cursor: pointer; }
+.tfl-candle__one:hover { color: var(--text); }
+.tfl-candle__one:focus-visible { outline: 2px solid var(--focus, var(--accent)); outline-offset: 2px; border-radius: 3px; }
 @container tfl (max-width: 420px) {
   .tfl-candle { gap: 4px; padding-left: var(--sp-2); }
   .tfl-candle__when b { font-size: var(--fs-xs); }
@@ -300,6 +303,5 @@ button.tfl-tr:hover, button.tfl-tr:focus-visible { background: var(--bg-hover); 
 /* --- a short panel (the trade page's chart card): thin bars and summary ---------------------------- */
 .tfl.is-short .tfl-bar { min-height: 40px; padding-block: 4px; }
 .tfl.is-short .tfl-candle { padding-block: 4px; }
-.tfl.is-short .tfl-candle__when { flex-direction: row; align-items: center; gap: var(--sp-2); }
 .tfl.is-short .tfl-candle__tip { display: none; }
 .tfl.is-short .tfl-body { gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); }

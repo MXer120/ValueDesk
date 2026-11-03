@@ -310,40 +310,51 @@ const execTemplate: OverlayTemplate = {
 };
 
 /**
- * The picked candle outlined in white, wick top to wick bottom (owner 2026-11-03: "a white outline on
- * the candle not the whole area"). The bar is read from the chart on every draw, so a forming candle's
- * outline grows with it and a zoom or a rescale keeps it fitted; clicks go through it.
+ * The picked candle - or the picked range of candles - outlined in white, from the highest wick to the
+ * lowest (owner 2026-11-03: "a white outline on the candle not the whole area"). Two points: the first
+ * candle's open time and the last one's (the same for one candle). The bars are read from the chart on
+ * every draw, so a forming candle's outline grows with it and a zoom or rescale keeps it fitted; clicks
+ * go through it.
  */
 const flowPickTemplate: OverlayTemplate = {
   name: FLOW_PICK_OVERLAY,
-  totalStep: 2,
+  totalStep: 3,
   lock: true,
   needDefaultPointFigure: false,
   needDefaultXAxisFigure: false,
   needDefaultYAxisFigure: false,
   createPointFigures: ({ chart, overlay, coordinates, yAxis }) => {
-    const p = coordinates[0];
-    const t = overlay.points[0]?.timestamp;
-    if (!p || !yAxis || typeof t !== 'number') return [];
+    const p0 = coordinates[0];
+    const p1 = coordinates[1] ?? p0;
+    const t0 = overlay.points[0]?.timestamp;
+    const t1 = overlay.points[1]?.timestamp ?? t0;
+    if (!p0 || !p1 || !yAxis || typeof t0 !== 'number' || typeof t1 !== 'number') return [];
     const bars = chart.getDataList();
+    // The first bar at or after t0, then every bar up to t1 (at most a few thousand are ever on screen).
     let lo = 0;
-    let hi = bars.length - 1;
-    let bar: (typeof bars)[number] | null = null;
-    while (lo <= hi) {
+    let hi = bars.length;
+    while (lo < hi) {
       const mid = (lo + hi) >> 1;
-      const b = bars[mid]!;
-      if (b.timestamp === t) { bar = b; break; }
-      if (b.timestamp < t) lo = mid + 1;
-      else hi = mid - 1;
+      if (bars[mid]!.timestamp < t0) lo = mid + 1;
+      else hi = mid;
     }
-    if (!bar) return [];
-    const w = Math.max(5, chart.getBarSpace().gapBar + 4);
-    const top = yAxis.convertToPixel(bar.high) - 3;
-    const bottom = yAxis.convertToPixel(bar.low) + 3;
+    let high = -Infinity;
+    let low = Infinity;
+    for (let k = lo; k < bars.length && bars[k]!.timestamp <= t1 && k - lo < 20_000; k++) {
+      high = Math.max(high, bars[k]!.high);
+      low = Math.min(low, bars[k]!.low);
+    }
+    if (!(high >= low)) return [];
+    const space = chart.getBarSpace();
+    const half = Math.max(2.5, space.gapBar / 2 + 2);
+    const left = Math.min(p0.x, p1.x) - half;
+    const right = Math.max(p0.x, p1.x) + half;
+    const top = yAxis.convertToPixel(high) - 3;
+    const bottom = yAxis.convertToPixel(low) + 3;
     return [{
       type: 'rect',
       ignoreEvent: true,
-      attrs: { x: Math.round(p.x - w / 2) + 0.5, y: Math.round(top) + 0.5, width: Math.round(w), height: Math.max(6, Math.round(bottom - top)) },
+      attrs: { x: Math.round(left) + 0.5, y: Math.round(top) + 0.5, width: Math.max(5, Math.round(right - left)), height: Math.max(6, Math.round(bottom - top)) },
       styles: { style: 'stroke', color: T.text, borderColor: T.text, borderSize: 1.5, borderRadius: 2 },
     }];
   },

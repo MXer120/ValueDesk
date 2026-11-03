@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { candleAt, stepCandle, windowText } from './flowWindow';
+import { candleAt, candleCount, flowSpan, stepCandle, windowText } from './flowWindow';
 
 const T = Date.UTC(2026, 9, 29, 8, 17, 42, 5); // Thu 29 Oct 2026 08:17:42.005 UTC
 
@@ -21,4 +21,14 @@ test('stepping walks whole candles, months included', () => {
   assert.deepEqual(stepCandle('1h', candleAt('1h', T), -9), { from: Date.UTC(2026, 9, 28, 23), to: Date.UTC(2026, 9, 29, 0) });
   assert.match(windowText(candleAt('1h', T)), /^Oct 29, 08:00 – 09:00 UTC$/);
   assert.match(windowText(candleAt('1D', T)), /^Oct 29, 00:00 – Oct 30, 00:00 UTC$/);
+});
+
+test('a range is every candle from the picked one to the other, either way round', () => {
+  const later = Date.UTC(2026, 9, 29, 8, 40, 3);
+  const fwd = flowSpan('5m', T, later);
+  assert.deepEqual(fwd, { from: Date.UTC(2026, 9, 29, 8, 15), to: Date.UTC(2026, 9, 29, 8, 45) });
+  assert.deepEqual(flowSpan('5m', later, T), fwd);
+  assert.equal(candleCount('5m', fwd), 6);
+  assert.deepEqual(flowSpan('5m', T, null), candleAt('5m', T));
+  assert.equal(candleCount('1M', { from: Date.UTC(2026, 0, 1), to: Date.UTC(2026, 3, 1) }), 3);
 });

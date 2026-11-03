@@ -29,7 +29,7 @@ import { Identicon } from '../Identicon';
 import { PlatformSelect } from '../PlatformSelect';
 import { copyText } from '../accountTables/IdCell';
 import { coinOfSymbol } from '../../chart/liqMap';
-import { candleAt, flowCandle, stepCandle, windowText, type CandleWindow } from './flowWindow';
+import { candleAt, candleCount, flowSpan, stepCandle, windowText, type CandleWindow } from './flowWindow';
 import { EmptyState } from '../EmptyState';
 import { ViewPop } from '../ViewPop';
 import { Section, Seg as ViewSeg } from '../accountTables/FilterBar';
@@ -158,20 +158,33 @@ export interface TradeFlowProps {
   /** The chart's interval, and a time inside the candle picked on it (null: the last closed candle). */
   interval: string;
   at: number | null;
-  /** Step to another candle (a time inside it): the chart lights it too. */
-  onAt: (t: number) => void;
+  /** The other end of a range of candles (a time inside its last or first candle), null for one candle. */
+  end: number | null;
+  /** Pick other candles (a time inside the first, and the other end or null): the chart outlines them too. */
+  onPick: (at: number, end: number | null) => void;
   onClose: () => void;
 }
+
+/** How a range is made, said where the pointer is: a touch screen has no modifier keys. */
+const RANGE_TIP = typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches
+  ? 'Long-press another candle for a range'
+  : `Shift-drag or ${typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl'}-click for a range`;
 
 const ChevL = () => <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M10 3.5 5.5 8l4.5 4.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>;
 const ChevR = () => <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>;
 
 const CSV_HEAD = ['venue', 'wallet', 'lean', 'share', 'volume_usd', 'bought_usd', 'sold_usd', 'bought', 'sold', 'net', 'fills_buy', 'fills_sell', 'avg_buy', 'avg_sell', 'taker_share'];
 
-export function TradeFlowView({ symbol, spot, interval, at, onAt, onClose }: TradeFlowProps) {
+export function TradeFlowView({ symbol, spot, interval, at, end, onPick, onClose }: TradeFlowProps) {
   const coin = coinOfSymbol(symbol);
   // The chart's candle: picked there, or stepped here; the chart's interval changing re-cuts it.
-  const win = useMemo(() => flowCandle(interval, at), [interval, at]);
+  const win = useMemo(() => flowSpan(interval, at, end), [interval, at, end]);
+  const count = useMemo(() => candleCount(interval, win), [interval, win]);
+  /** Prev / next move the whole range by its own length. */
+  const step = (dir: -1 | 1) => {
+    const first = stepCandle(interval, candleAt(interval, win.from), dir * count);
+    onPick(first.from, count > 1 ? stepCandle(interval, candleAt(interval, win.to - 1), dir * count).from : null);
+  };
   const offered: Venue[] = spot ? ['sodex'] : [...FLOW_VENUES];
   const [venues, setVenues] = useState<Venue[]>(offered);
   const [role, setRole] = useState<FlowRole>('all');
@@ -246,16 +259,19 @@ export function TradeFlowView({ symbol, spot, interval, at, onAt, onClose }: Tra
 
       {/* The candle: the chart's interval and the one picked there, stepped here. */}
       <div className="tfl-candle">
-        <button type="button" className="tfl-icobtn" aria-label="Previous candle" title="Previous candle" onClick={() => onAt(stepCandle(interval, win, -1).from)}><ChevL /></button>
+        <button type="button" className="tfl-icobtn" aria-label={count > 1 ? 'Previous range' : 'Previous candle'} title={count > 1 ? `The ${count} candles before` : 'Previous candle'} onClick={() => step(-1)}><ChevL /></button>
         <div className="tfl-candle__when" aria-live="polite">
           <span className="tfl-candle__top">
-            <span className="tfl-pill is-pick" title="The chart's timeframe">{ivLabel(interval)}</span>
-            {live ? <span className="tfl-pill is-live">Forming</span> : <span className="tfl-candle__tip">Click a candle on the chart</span>}
+            <span className="tfl-pill is-pick" title={count > 1 ? `${fmtCount(count)} candles of the chart's timeframe` : "The chart's timeframe"}>{count > 1 ? `${fmtCount(count)} × ${ivLabel(interval)}` : ivLabel(interval)}</span>
+            {live && <span className="tfl-pill is-live">Forming</span>}
+            {count > 1
+              ? <button type="button" className="tfl-candle__one" onClick={() => onPick(win.from, null)} title="Back to the first candle alone">One candle</button>
+              : !live && <span className="tfl-candle__tip">{RANGE_TIP}</span>}
           </span>
           <b>{windowText(win)}</b>
         </div>
-        <button type="button" className="tfl-icobtn" aria-label="Next candle" title="Next candle" disabled={live} onClick={() => onAt(stepCandle(interval, win, 1).from)}><ChevR /></button>
-        <button type="button" className={`tfl-latest${win.from === latest.from ? ' is-on' : ''}`} onClick={() => onAt(latest.from)} title="The candle still forming">Live</button>
+        <button type="button" className="tfl-icobtn" aria-label={count > 1 ? 'Next range' : 'Next candle'} title={count > 1 ? `The ${count} candles after` : 'Next candle'} disabled={live} onClick={() => step(1)}><ChevR /></button>
+        <button type="button" className={`tfl-latest${win.from === latest.from ? ' is-on' : ''}`} onClick={() => onPick(latest.from, null)} title="The candle still forming">Live</button>
       </div>
 
       <div className={`tfl-scroll${open ? ' is-wallet' : ''}`}>

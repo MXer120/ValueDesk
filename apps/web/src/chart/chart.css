@@ -1437,6 +1437,7 @@ html.kc-drag * {
 }
 .kc-flow-grip:hover::after, body.kc-flow-resizing .kc-flow-grip::after { opacity: 1; }
 body.kc-flow-resizing { cursor: col-resize; user-select: none; }
+body.kc-flow-picking, body.kc-flow-picking * { cursor: ew-resize !important; user-select: none; }
 body.kc-flow-resizing:has(.kc-flow-wrap.is-under) { cursor: row-resize; }
 /* Under the plot: the card's width, a share of its height (dragged by the top edge's handle). */
 .kc-flow-wrap.is-under {

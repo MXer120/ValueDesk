@@ -134,7 +134,7 @@ import { NewsMarkers } from '../chart/NewsMarkers';
 import { NewsSettings } from '../chart/NewsSettings';
 import { ChartSidebar } from '../chart/ChartSidebar';
 import { CHART_ICONS } from '../chart/chartIcons';
-import { flowCandle } from './flow/flowWindow';
+import { candleAt, flowSpan } from './flow/flowWindow';
 import {
   buildSnapshot,
   frozenFills,
@@ -1000,6 +1000,17 @@ function Chart({
    */
   const [flowOpen, setFlowOpen] = useState(false);
   const [flowAt, setFlowAt] = useState<number | null>(null);
+  /**
+   * A range of candles (owner 2026-11-03: "possible by pressing cmd + mouse or dragging the mouse for
+   * multiple candles"): a time inside the other end candle, null for one candle. Cmd/Ctrl-click a candle
+   * extends to it, Shift-drag across the plot picks a range (a plain drag still pans), and on touch the
+   * long-press menu offers "to here".
+   */
+  const [flowEnd, setFlowEnd] = useState<number | null>(null);
+  const pickFlow = useCallback((at: number, end: number | null) => {
+    setFlowAt(at);
+    setFlowEnd(end);
+  }, []);
   const [flowSize, setFlowSize] = useStored<{ w: number; h: number }>('chart.flowSize', { w: 460, h: 0.45 });
   const flowWrap = useRef<HTMLDivElement | null>(null);
   /** A plain click on the plot while the panel is open picks its candle (not a pan, not a drag). */
@@ -3507,7 +3518,12 @@ function Chart({
       // other prefill is a step towards signing an order.
       const price = canPlace ? snapToTick(pt[0]?.value ?? Number.NaN, sym?.tickSize) : null;
       const t = !bare && typeof pt[0]?.timestamp === 'number' && Number.isFinite(pt[0].timestamp) ? pt[0].timestamp : null;
-      if (t !== null) items.push({ label: 'Who traded this candle', icon: MENU_ICONS.traders, onClick: () => { setFlowAt(t); setFlowOpen(true); } });
+      if (t !== null) items.push({ label: 'Who traded this candle', icon: MENU_ICONS.traders, onClick: () => { pickFlow(t, null); setFlowOpen(true); } });
+      // The touch way to a range (and the right-click one): from the picked candle to this one.
+      if (t !== null && flowOpen && candleAt(interval, t).from !== flowSpan(interval, flowAt, null).from) {
+        const anchor = flowSpan(interval, flowAt, null).from;
+        items.push({ label: 'Who traded from the picked candle to here', icon: MENU_ICONS.traders, onClick: () => pickFlow(anchor, t) });
+      }
       if (price !== null) {
         const note = 'Prefills the order price only. Nothing is submitted from here.';
         items.push(
@@ -3641,24 +3657,59 @@ function Chart({
         onDoubleClick={() => setFlowSize({ w: 460, h: 0.45 })}
       />
       <Suspense fallback={<div className="kc-flow-wait" aria-busy="true" />}>
-        <TradeFlowView symbol={symbol} spot={engine === 'spot'} interval={interval} at={flowAt} onAt={setFlowAt} onClose={() => setFlowOpen(false)} />
+        <TradeFlowView symbol={symbol} spot={engine === 'spot'} interval={interval} at={flowAt} end={flowEnd} onPick={pickFlow} onClose={() => setFlowOpen(false)} />
       </Suspense>
     </div>
   );
-  /** The candle under a click, for Who traded: a press that did not move and was not held. */
+  /** The candle time under a viewport x (null off the series or in the future). */
+  const flowTimeAt = (clientX: number): number | null => {
+    const c = chart.current;
+    const el = holder.current;
+    const pane = c?.getSize(CANDLE_PANE_ID);
+    if (!c || !el || !pane) return null;
+    const rect = el.getBoundingClientRect();
+    const pt = c.convertFromPixel([{ x: clientX - rect.left, y: pane.top + 1 }], { paneId: CANDLE_PANE_ID, absolute: true }) as Array<Partial<Point>>;
+    const t = pt[0]?.timestamp;
+    return typeof t === 'number' && Number.isFinite(t) ? Math.min(t, Date.now()) : null;
+  };
+  /** The candle under a click, for Who traded: a press that did not move and was not held. Cmd/Ctrl extends the pick. */
   const pickFlowCandle = (e: ReactPointerEvent) => {
     const d = flowDown.current;
     flowDown.current = null;
-    const c = chart.current;
-    const el = holder.current;
-    if (!flowOpen || !d || !c || !el || drawing || maskedRef.current) return;
+    if (!flowOpen || !d || drawing || maskedRef.current) return;
     if (Math.hypot(e.clientX - d.x, e.clientY - d.y) > 4 || performance.now() - d.t > 450) return;
-    const pane = c.getSize(CANDLE_PANE_ID);
-    if (!pane) return;
-    const rect = el.getBoundingClientRect();
-    const pt = c.convertFromPixel([{ x: e.clientX - rect.left, y: pane.top + 1 }], { paneId: CANDLE_PANE_ID, absolute: true }) as Array<Partial<Point>>;
-    const t = pt[0]?.timestamp;
-    if (typeof t === 'number' && Number.isFinite(t) && t <= Date.now()) setFlowAt(t);
+    const t = flowTimeAt(e.clientX);
+    if (t === null) return;
+    if (e.metaKey || e.ctrlKey) pickFlow(flowSpan(interval, flowAt, null).from, t);
+    else pickFlow(t, null);
+  };
+  /**
+   * Shift-drag across the plot: a range of candles, outlined while it is dragged. Taken in the capture
+   * phase, before the chart's own pan sees the press, so a plain drag keeps panning.
+   */
+  const onFlowDragStart = (e: ReactPointerEvent) => {
+    if (!flowOpen || !e.shiftKey || e.button !== 0 || e.pointerType === 'touch' || drawing || maskedRef.current) return;
+    const t0 = flowTimeAt(e.clientX);
+    if (t0 === null) return;
+    e.preventDefault();
+    e.stopPropagation();
+    flowDown.current = null;
+    let t1 = t0;
+    const move = (ev: PointerEvent) => {
+      const t = flowTimeAt(ev.clientX);
+      if (t === null || candleAt(interval, t).from === candleAt(interval, t1).from) return;
+      t1 = t;
+      showFlowPick(flowSpan(interval, t0, t1));
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move, true);
+      window.removeEventListener('pointerup', up, true);
+      document.body.classList.remove('kc-flow-picking');
+      pickFlow(t0, candleAt(interval, t1).from === candleAt(interval, t0).from ? null : t1);
+    };
+    document.body.classList.add('kc-flow-picking');
+    window.addEventListener('pointermove', move, true);
+    window.addEventListener('pointerup', up, true);
   };
   const onPanePointerMove = (e: ReactPointerEvent) => {
     const p = press.current;
@@ -3873,14 +3924,20 @@ function Chart({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, chartGen, fills, show.executions, symbol, interval, masked, wantKey, snapView]);
 
-  // The candle Who traded is breaking down, lit on the plot while the panel is open.
-  useEffect(() => {
+  // The candles Who traded is breaking down, outlined on the plot while the panel is open.
+  const showFlowPick = (w: { from: number; to: number } | null) => {
     const c = chart.current;
-    if (!ready || !c) return;
+    if (!c) return;
     c.removeOverlay({ name: FLOW_PICK_OVERLAY });
-    if (!flowOpen || bare || masked) return;
-    c.createOverlay({ name: FLOW_PICK_OVERLAY, points: [{ timestamp: flowCandle(interval, flowAt).from, value: 0 }], lock: true, zLevel: -1 });
-  }, [ready, chartGen, flowOpen, flowAt, interval, bare, masked]);
+    if (!w) return;
+    const last = candleAt(interval, w.to - 1).from;
+    c.createOverlay({ name: FLOW_PICK_OVERLAY, points: [{ timestamp: w.from, value: 0 }, { timestamp: last, value: 0 }], lock: true, zLevel: -1 });
+  };
+  useEffect(() => {
+    if (!ready || !chart.current) return;
+    showFlowPick(flowOpen && !bare && !masked ? flowSpan(interval, flowAt, flowEnd) : null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, chartGen, flowOpen, flowAt, flowEnd, interval, bare, masked]);
 
   // News: this coin's stories, or the macro ones, as far back as the server
   // keeps them (history: up to SoSoValue's 7 days, hot ones ranked) - one read
@@ -4570,6 +4627,7 @@ function Chart({
         <div
           className="kc-pane"
           onContextMenu={onContextMenu}
+          onPointerDownCapture={onFlowDragStart}
           onPointerDown={onPanePointerDown}
           onPointerMove={onPanePointerMove}
           onPointerCancel={endPress}

@@ -43,6 +43,27 @@ export function flowCandle(interval: string, at: number | null): CandleWindow {
   return at !== null ? candleAt(interval, at) : stepCandle(interval, candleAt(interval, Date.now()), -1);
 }
 
+/**
+ * The candles Who traded shows (owner 2026-11-03: "possible by pressing cmd + mouse or dragging the
+ * mouse for multiple candles"): the one holding `at`, or every candle from it to the one holding `end`
+ * (either order).
+ */
+export function flowSpan(interval: string, at: number | null, end: number | null): CandleWindow {
+  const a = flowCandle(interval, at);
+  if (end === null) return a;
+  const b = candleAt(interval, end);
+  return { from: Math.min(a.from, b.from), to: Math.max(a.to, b.to) };
+}
+
+/** How many candles of `interval` a window holds (months and weeks counted, the rest divided). */
+export function candleCount(interval: string, w: CandleWindow): number {
+  const one = candleAt(interval, w.from);
+  if (!/[WM]$/.test(interval)) return Math.max(1, Math.round((w.to - w.from) / (one.to - one.from)));
+  let n = 0;
+  for (let c = one; c.from < w.to && n < 10_000; c = candleAt(interval, c.to)) n++;
+  return Math.max(1, n);
+}
+
 /** The candle `steps` away from the one starting at `from` (negative: earlier). */
 export function stepCandle(interval: string, w: CandleWindow, steps: number): CandleWindow {
   let c = w;
