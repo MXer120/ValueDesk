@@ -59,6 +59,11 @@ export interface CopySettings {
   ratio: number;
   /** fixedNotional: USD per copied open. */
   fixedNotionalUsd: number;
+  /**
+   * A multiple of what the sizing mode gives, before every cap (max position, max
+   * leverage, the region's): 1 mirrors it, 2 copies twice the size. Absent = 1.
+   */
+  multiplier: number;
   /** Cap on gross copied exposure / copy equity, and the leverage set on each copied SoDEX position. */
   maxLeverage: number;
   /** Cap per copied position, USD notional. */

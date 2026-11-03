@@ -378,6 +378,20 @@ export function supportsCounter(s: LiveCopy, mode: CopyModeId): boolean {
   return !!s[mode].info?.features?.includes('counter');
 }
 
+/**
+ * Whether a mode can size by a multiple of the trader (settings.multiplier other than 1). An
+ * executor from before it ('multiplier' not in its features) ignores the field and would copy
+ * at 1x, and its signature check would not match the rules signed here.
+ */
+export function supportsMultiplier(s: LiveCopy, mode: CopyModeId): boolean {
+  if (mode === 'browser') return true;
+  return !!s[mode].info?.features?.includes('multiplier');
+}
+
+const multiplierRefusal = (mode: CopyModeId): string => (mode === 'self'
+  ? 'Your copier is older than the size multiplier: download the current copier and start it again, or copy at 1x.'
+  : 'This executor does not size by a multiplier yet: copy at 1x, or run it in this browser.');
+
 export async function startCopy(mode: CopyModeId, settings: CopySettings): Promise<void> {
   const { owner, provider: p } = needWallet();
   // ValueDesk's own terms first (the popup, as a gate): copy trading adds to them.
@@ -389,6 +403,7 @@ export async function startCopy(mode: CopyModeId, settings: CopySettings): Promi
       ? 'Your copier is older than counter-trading: download the current copier and start it again.'
       : 'This executor does not run counter-trades yet.');
   }
+  if ((settings.multiplier ?? 1) !== 1 && !supportsMultiplier(state, mode)) throw new Error(multiplierRefusal(mode));
   if (mode === 'browser') {
     await browserCopier.start({ owner, settings, country: t.country, termsVersion: COPY_TERMS_VERSION });
     syncBrowser();
@@ -435,6 +450,7 @@ export async function commandCopy(mode: CopyModeId, id: string, cmd: CopyCommand
 
 export async function updateCopy(mode: CopyModeId, id: string, settings: CopySettings): Promise<void> {
   if (state.owner) await requireTermsOrThrow({ owner: state.owner, reason: 'change this copy' });
+  if ((settings.multiplier ?? 1) !== 1 && !supportsMultiplier(state, mode)) throw new Error(multiplierRefusal(mode));
   if (mode === 'browser') {
     await browserCopier.update(id, settings);
     syncBrowser();

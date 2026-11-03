@@ -18,6 +18,7 @@ export const DEFAULT_SETTINGS: Omit<CopySettings, 'leader'> = {
   allocationUsd: 1000,
   ratio: 0.1,
   fixedNotionalUsd: 100,
+  multiplier: 1,
   maxLeverage: 5,
   maxPositionUsd: 2500,
   stopLossPct: 0.5,
@@ -36,6 +37,7 @@ export const LIMITS = {
   allocationUsd: { min: 10, max: 10_000_000 },
   ratio: { min: 0.0001, max: 10 },
   fixedNotionalUsd: { min: 10, max: 1_000_000 },
+  multiplier: { min: 0.1, max: 10 },
   maxLeverage: { min: 1, max: 50 },
   maxPositionUsd: { min: 10, max: 10_000_000 },
   stopLossPct: { min: 0.01, max: 1 },
@@ -105,6 +107,8 @@ export function checkSettings(input: unknown): SettingsCheck {
   const allocationUsd = numberIn(pick('allocationUsd'), LIMITS.allocationUsd, 'Allocation', errors, 'allocationUsd');
   const ratio = numberIn(pick('ratio'), LIMITS.ratio, 'Ratio', errors, 'ratio');
   const fixedNotionalUsd = numberIn(pick('fixedNotionalUsd'), LIMITS.fixedNotionalUsd, 'Amount per trade', errors, 'fixedNotionalUsd');
+  // Absent (rules from before the multiplier existed) or null is 1x.
+  const multiplier = numberIn((s.multiplier ?? null) === null ? DEFAULT_SETTINGS.multiplier : s.multiplier, LIMITS.multiplier, 'Multiplier', errors, 'multiplier');
   const maxLeverage = numberIn(pick('maxLeverage'), LIMITS.maxLeverage, 'Max leverage', errors, 'maxLeverage');
   const maxPositionUsd = numberIn(pick('maxPositionUsd'), LIMITS.maxPositionUsd, 'Max position', errors, 'maxPositionUsd');
   const stopLossPct = optionalIn(pick('stopLossPct'), LIMITS.stopLossPct, 'Stop loss', errors, 'stopLossPct');
@@ -133,6 +137,7 @@ export function checkSettings(input: unknown): SettingsCheck {
       allocationUsd,
       ratio,
       fixedNotionalUsd,
+      multiplier,
       maxLeverage: Math.floor(maxLeverage),
       maxPositionUsd,
       stopLossPct,
@@ -169,8 +174,9 @@ export class SettingsError extends Error {
 
 /**
  * Numbers as the shortest exact JSON form; key order fixed. `direction` is
- * written only for a counter-trade (at the end): the canonical form of every
- * copy rule set signed before counter-trading existed stays byte for byte the same.
+ * written only for a counter-trade and `multiplier` only when it is not 1 (both
+ * at the end): the canonical form of every copy rule set signed before either
+ * existed stays byte for byte the same.
  */
 const KEYS: ReadonlyArray<keyof CopySettings> = [
   'leader',
@@ -201,6 +207,7 @@ export function canonicalSettings(s: CopySettings): Record<string, unknown> {
     else out[k] = s[k];
   }
   if (s.direction === 'counter') out.direction = 'counter';
+  if ((s.multiplier ?? 1) !== 1) out.multiplier = s.multiplier;
   return out;
 }
 
@@ -210,7 +217,9 @@ export function describeSettings(s: CopySettings): string {
   const pct = (f: number) => `${Math.round(f * 1000) / 10}%`;
   const sizing =
     s.sizingMode === 'proportional' ? `Proportional on ${usd(s.allocationUsd)}` : s.sizingMode === 'fixedRatio' ? `${pct(s.ratio)} of the leader's size` : `${usd(s.fixedNotionalUsd)} per trade`;
-  const parts = [s.direction === 'counter' ? `Counter-trade: ${sizing.charAt(0).toLowerCase()}${sizing.slice(1)}` : sizing, `max ${s.maxLeverage}x`, `max ${usd(s.maxPositionUsd)} per position`];
+  const parts = [s.direction === 'counter' ? `Counter-trade: ${sizing.charAt(0).toLowerCase()}${sizing.slice(1)}` : sizing];
+  if ((s.multiplier ?? 1) !== 1) parts.push(`${s.multiplier}x the trader's size`);
+  parts.push(`max ${s.maxLeverage}x`, `max ${usd(s.maxPositionUsd)} per position`);
   if (s.stopLossPct !== null) parts.push(`stop loss ${pct(s.stopLossPct)}`);
   if (s.takeProfitPct !== null) parts.push(`take profit ${pct(s.takeProfitPct)}`);
   if (s.drawdownStopPct !== null) parts.push(`drawdown stop ${pct(s.drawdownStopPct)}`);

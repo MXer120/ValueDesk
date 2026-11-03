@@ -111,7 +111,14 @@ export interface SetupState {
   slippageBps: string;
   allow: string;
   deny: string;
-  copyExisting: boolean;
+  /**
+   * Only the trader's positions opened after the start are copied; off, the ones they already
+   * hold are joined at the start too. A new field (owner, 2026-11-03: off by default), so a
+   * setup stored when "new only" was the default starts off as well.
+   */
+  onlyNew: boolean;
+  /** A multiple of the sizing mode's size, before the caps: "1" mirrors the trader. */
+  multiplier: string;
   /** Margin mode of copied positions. */
   marginMode: 'isolated' | 'cross';
   /** Ask before each copied order (the browser copier only). */
@@ -122,7 +129,8 @@ export interface SetupState {
 
 /**
  * Defaults, from research 03 section 11 where it gives one: equity-proportional
- * sizing, leverage capped at 5x, new positions only. Slippage is a cap; the
+ * sizing at 1x, leverage capped at 5x; the trader's open positions are joined too
+ * (owner, 2026-11-03: "only new" is a switch, off by default). Slippage is a cap; the
  * backtest charges all of it on every order, so a tight default keeps that
  * worst case from swamping the result.
  */
@@ -140,7 +148,8 @@ export const DEFAULT_SETUP: SetupState = {
   slippageBps: '10',
   allow: '',
   deny: '',
-  copyExisting: false,
+  onlyNew: false,
+  multiplier: '1',
   marginMode: 'isolated',
   confirmEach: false,
   paper: false,
@@ -160,6 +169,9 @@ export function normaliseSetup(s: Partial<SetupState> | null | undefined): Setup
   if (out.direction !== 'copy' && out.direction !== 'counter') out.direction = DEFAULT_SETUP.direction;
   out.confirmEach = out.confirmEach === true;
   out.paper = out.paper === true;
+  out.onlyNew = out.onlyNew === true;
+  if (typeof out.multiplier !== 'string') out.multiplier = DEFAULT_SETUP.multiplier;
+  delete (out as Partial<{ copyExisting: unknown }>).copyExisting;
   return out;
 }
 
@@ -177,6 +189,7 @@ export function toCopySettings(p: ParsedSetup, s: SetupState, leader: { venue: L
     allocationUsd: c.allocationUsd,
     ratio: c.ratio,
     fixedNotionalUsd: p.fixedNotionalUsd,
+    multiplier: c.multiplier ?? 1,
     maxLeverage: Math.max(1, Math.floor(c.maxLeverage)),
     maxPositionUsd: c.maxPositionUsd,
     stopLossPct: c.stopLossPct,
@@ -193,6 +206,11 @@ export function toCopySettings(p: ParsedSetup, s: SetupState, leader: { venue: L
 }
 
 /** Copy rules the engine keeps as fractions, which the copy window takes in percent. */
+/** Multiplier presets, and the engine's range (packages/copy-engine settings.ts LIMITS.multiplier). */
+export const MULTIPLIER_PRESETS = [0.5, 1, 2, 3] as const;
+export const MULTIPLIER_MIN = 0.1;
+export const MULTIPLIER_MAX = 10;
+
 const PCT_FIELDS = new Set(['ratio', 'stopLossPct', 'takeProfitPct', 'drawdownStopPct']);
 const USD_FIELDS = new Set(['allocationUsd', 'fixedNotionalUsd', 'maxPositionUsd']);
 const RANGE = /^(.+) must be between (-?\d+(?:\.\d+)?) and (-?\d+(?:\.\d+)?)\.$/;
@@ -255,6 +273,11 @@ export function parseSetup(s: SetupState): ParsedSetup {
   const ratioPct = s.mode === 'fixedRatio' ? need('ratioPct', s.ratioPct, { min: 0, max: 1000, label: 'Ratio' }) : num(s.ratioPct);
   const notional = s.mode === 'fixedNotional' ? need('notional', s.notional, { min: 0, label: 'Amount per trade' }) : num(s.notional);
   const maxLeverage = need('maxLeverage', s.maxLeverage, { min: 0, max: 50, label: 'Max leverage' });
+  let multiplier = need('multiplier', s.multiplier, { min: 0, max: MULTIPLIER_MAX, label: 'Multiplier' });
+  if (multiplier !== null && multiplier < MULTIPLIER_MIN) {
+    errors.multiplier = `Multiplier must be at least ${localize(String(MULTIPLIER_MIN))}x.`;
+    multiplier = null;
+  }
   const maxPosition = need('maxPosition', s.maxPosition, { min: 0, label: 'Max position' });
   const stopLoss = need('stopLoss', s.stopLoss, { min: 0, max: 100, optional: true, label: 'Stop loss' });
   const takeProfit = need('takeProfit', s.takeProfit, { min: 0, max: 10_000, optional: true, label: 'Take profit' });
@@ -281,7 +304,8 @@ export function parseSetup(s: SetupState): ParsedSetup {
       drawdownStopPct: drawdown === null ? null : drawdown / 100,
       assetAllow: allow,
       assetDeny: deny,
-      copyExisting: s.copyExisting,
+      copyExisting: !s.onlyNew,
+      multiplier: multiplier ?? 1,
       slippageBps: slip !== null && slip >= 0 && slip <= 500 ? slip : Number(DEFAULT_SETUP.slippageBps),
       direction: s.direction,
     },
@@ -346,6 +370,9 @@ export function workedExample(
     mine = parsed.fixedNotionalUsd;
     basis = '';
   }
+  const k = config.multiplier ?? 1;
+  mine *= k;
+  if (k !== 1) basis += `, ${localize(String(k))}x`;
 
   let caveat: string | null = null;
   const capLev = config.maxLeverage * config.allocationUsd;
@@ -379,5 +406,37 @@ export function readTarget(search: string, fallback: Venue): { address: string |
   return {
     address: isAddress(a) ? a.trim().toLowerCase() : null,
     venue: v === 'sodex' || v === 'hyperliquid' ? v : fallback,
+  };
+}
+
+/* ------------------------------------------------------ expected PnL ----- */
+
+export interface PreviewSide {
+  /** Fraction of the start equity. */
+  roi: number;
+  /** USD. */
+  pnl: number;
+  /** Positive fraction from the peak. */
+  maxDrawdown: number;
+}
+
+/**
+ * The copy dialog's expected-result figures, from the replay: yours, and the trader's
+ * scaled to your allocation (the replay's leader curve starts at your equity), so the
+ * two compare on one axis. Every number is the replay's; nothing is projected.
+ */
+export function previewFigures(r: {
+  roi: number; pnl: number; maxDrawdown: number; startEquity: number;
+  leaderRoi: number; leaderMaxDrawdown: number; leaderCurve: ReadonlyArray<{ accountValue: number | null }>;
+}): { you: PreviewSide; them: PreviewSide } {
+  const fin = (v: number) => (Number.isFinite(v) ? v : 0);
+  const last = r.leaderCurve.length ? r.leaderCurve[r.leaderCurve.length - 1]!.accountValue : null;
+  return {
+    you: { roi: fin(r.roi), pnl: fin(r.pnl), maxDrawdown: Math.max(0, fin(r.maxDrawdown)) },
+    them: {
+      roi: fin(r.leaderRoi),
+      pnl: last === null ? fin(r.leaderRoi * r.startEquity) : fin(last - r.startEquity),
+      maxDrawdown: Math.max(0, fin(r.leaderMaxDrawdown)),
+    },
   };
 }

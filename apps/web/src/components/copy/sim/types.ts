@@ -89,6 +89,8 @@ export interface CopyConfig {
    * direction, packages/copy-engine planner.ts). Absent = 'copy'.
    */
   direction?: 'copy' | 'counter';
+  /** A multiple of the sizing mode's size before the caps (the live planner's settings.multiplier). Absent = 1. */
+  multiplier?: number;
 }
 
 /** One entry of the per-trade log (copied or skipped). */

@@ -559,6 +559,7 @@ export function runCopySimulation(fills: Fill[], config: CopyConfig, opts: SimOp
   // A counter-trade decides on the leader's position mirrored; the leader's own books stay real.
   const mirror = config.direction === 'counter' ? -1 : 1;
   const ratio = fin(config.ratio) && config.ratio > 0 ? config.ratio : 0;
+  const mult = fin(config.multiplier) && config.multiplier > 0 ? config.multiplier : 1;
   const maxLev = fin(config.maxLeverage) && config.maxLeverage > 0 ? config.maxLeverage : 0;
   const maxPosUsd = fin(config.maxPositionUsd) && config.maxPositionUsd > 0 ? config.maxPositionUsd : 0;
   const slPct = fin(config.stopLossPct) && config.stopLossPct > 0 ? config.stopLossPct : null;
@@ -882,14 +883,14 @@ export function runCopySimulation(fills: Fill[], config: CopyConfig, opts: SimOp
 
   /** Size of a fresh follower position mirroring leader position `L` (signed base units). */
   const openTarget = (m: Mkt, L: number, t: number): number | SkipReason => {
-    if (mode === 'fixedNotional') return (sgn(L) * fixedUsd) / m.mark;
-    if (mode === 'fixedRatio') return ratio * L;
+    if (mode === 'fixedNotional') return (mult * sgn(L) * fixedUsd) / m.mark;
+    if (mode === 'fixedRatio') return mult * ratio * L;
     // proportional (default for unknown modes)
     const eL = leaderEq.at(t);
     if (eL === null || !(eL > 0)) return 'no-leader-equity';
     const eF = equity();
     if (!(eF > 0)) return 'no-equity';
-    return (L * eF) / eL;
+    return (mult * L * eF) / eL;
   };
 
   /** Grow the follower towards |D| (same side as D; follower is flat or on D's side). */

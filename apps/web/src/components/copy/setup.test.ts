@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import type { TraderProfile, VsPosition } from '../../vsApi';
 import {
   DEFAULT_SETUP, COPY_BUILDER_TENTHS_BPS, TAKER_RATE, copyErrorInWords, fmtRate, fmtSignedPct, fmtSize, largestPosition,
-  normaliseSetup, parseCoins, parseSetup, readTarget, toCopySettings, windowStart, workedExample, type SetupState,
+  normaliseSetup, parseCoins, parseSetup, previewFigures, readTarget, toCopySettings, windowStart, workedExample, type SetupState,
 } from './setup';
 import { setNumStyle } from '../../numStyle';
 import { checkSettings } from '@copy-engine';
@@ -174,4 +174,46 @@ test('the engine rule limits in the copy window units: percent, dollars, bps', (
   assert.equal(copyErrorInWords('allocationUsd', 'Allocation must be between 10 and 10000000.'), 'Allocation must be between $10 and $10.000.000.');
   assert.equal(copyErrorInWords('slippageBps', 'Slippage cap must be between 1 and 500.'), 'Slippage cap must be between 1 and 500 bps.');
   assert.equal(copyErrorInWords('assetDeny', 'BTC is on both lists.'), 'BTC is on both lists.');
+});
+
+test('only new positions: off by default (existing positions joined), on sends copyExisting false; an older stored setup starts off', () => {
+  assert.equal(DEFAULT_SETUP.onlyNew, false);
+  const a = { venue: 'sodex' as const, address: '0x' + '1'.repeat(40) };
+  assert.equal(toCopySettings(parseSetup(setup()), setup(), a).copyExisting, true);
+  const on = setup({ onlyNew: true });
+  assert.equal(toCopySettings(parseSetup(on), on, a).copyExisting, false);
+  // Stored when "new only" was the default (copyExisting false, no onlyNew): off now.
+  const old = normaliseSetup({ copyExisting: false } as Partial<SetupState>);
+  assert.equal(old.onlyNew, false);
+  assert.equal('copyExisting' in old, false);
+});
+
+test('multiplier: 1x by default, parsed and checked, carried into the rules and the worked example', () => {
+  setNumStyle('comma-dot');
+  const a = { venue: 'sodex' as const, address: '0x' + '1'.repeat(40) };
+  assert.equal(DEFAULT_SETUP.multiplier, '1');
+  assert.equal(parseSetup(setup()).config.multiplier, 1);
+  const two = setup({ multiplier: '2' });
+  assert.equal(toCopySettings(parseSetup(two), two, a).multiplier, 2);
+  assert.equal(checkSettings(toCopySettings(parseSetup(two), two, a)).settings!.multiplier, 2);
+  assert.match(parseSetup(setup({ multiplier: '0.05' })).errors.multiplier!, /at least/);
+  assert.match(parseSetup(setup({ multiplier: '11' })).errors.multiplier!, /at most 10/);
+  assert.match(parseSetup(setup({ multiplier: '' })).errors.multiplier!, /required/);
+  assert.equal(normaliseSetup({ multiplier: 3 as never }).multiplier, '1');
+  // $200 at 1x (proportional, see above) -> $400 at 2x, under the $2,500 cap.
+  const ex = workedExample(parseSetup(two), profile([pos()]), coin);
+  assert.match(ex!.text, /on \$1,000,000 equity, 2x\. You: long 0\.004 BTC \(\$400\.00\)\.$/);
+  // 10x -> $2,000: a $1,500 max position binds.
+  const big = workedExample(parseSetup(setup({ multiplier: '10', maxPosition: '1500' })), profile([pos()]), coin);
+  assert.match(big!.caveat!, /max position/);
+});
+
+test("expected PnL figures: yours and the trader's scaled to your start, from the replay only", () => {
+  const f = previewFigures({
+    roi: 0.05, pnl: 50, maxDrawdown: 0.02, startEquity: 1_000,
+    leaderRoi: 0.08, leaderMaxDrawdown: 0.04, leaderCurve: [{ accountValue: 1_000 }, { accountValue: 1_080 }],
+  });
+  assert.deepEqual(f, { you: { roi: 0.05, pnl: 50, maxDrawdown: 0.02 }, them: { roi: 0.08, pnl: 80, maxDrawdown: 0.04 } });
+  const empty = previewFigures({ roi: NaN, pnl: NaN, maxDrawdown: -1, startEquity: 1_000, leaderRoi: -0.1, leaderMaxDrawdown: 0.2, leaderCurve: [] });
+  assert.deepEqual(empty, { you: { roi: 0, pnl: 0, maxDrawdown: 0 }, them: { roi: -0.1, pnl: -100, maxDrawdown: 0.2 } });
 });

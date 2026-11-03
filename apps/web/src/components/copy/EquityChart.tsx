@@ -10,9 +10,13 @@
  * thing the page is ABOUT - your copy - is the accent, the comparison is muted.
  * Neither line is green or red: equity rising is not a profit on its own, and
  * the start line is what gains and losses are read against.
+ *
+ * `pnl` draws the same two series as PnL from the start (the copy dialog's
+ * expected-result chart): the start line becomes $0, labels and tooltip sign.
  */
 import { useEffect, useRef, useState } from 'react';
 import { fmtUsd } from '../../format';
+import { fmtSignedUsd } from './setup';
 import type { EquityPoint } from '../../vsApi';
 import { fmtCompactUsd } from '../portfolio/parts';
 
@@ -38,7 +42,7 @@ function nearest(ts: number[], t: number): number {
   return lo;
 }
 
-export function EquityChart({ you, leader, base }: { you: EquityPoint[]; leader: EquityPoint[]; base: number }) {
+export function EquityChart({ you, leader, base: start, pnl = false }: { you: EquityPoint[]; leader: EquityPoint[]; base: number; pnl?: boolean }) {
   const boxRef = useRef<HTMLDivElement>(null);
   const [box, setBox] = useState({ w: 0, h: 0 });
   const [hover, setHover] = useState<number | null>(null);
@@ -56,8 +60,12 @@ export function EquityChart({ you, leader, base }: { you: EquityPoint[]; leader:
 
   const n = Math.min(you.length, leader.length);
   const ts = you.slice(0, n).map((p) => p.t);
-  const ys = you.slice(0, n).map((p) => p.accountValue ?? base);
-  const ls = leader.slice(0, n).map((p) => p.accountValue ?? base);
+  // PnL: every value less the start, so the start line is $0.
+  const base = pnl ? 0 : start;
+  const off = pnl ? start : 0;
+  const ys = you.slice(0, n).map((p) => (p.accountValue ?? start) - off);
+  const ls = leader.slice(0, n).map((p) => (p.accountValue ?? start) - off);
+  const money = (v: number) => (pnl ? fmtSignedUsd(v, 2) : fmtUsd(v, 2));
 
   const W = box.w || 600;
   const H = box.h || 220;
@@ -133,7 +141,9 @@ export function EquityChart({ you, leader, base }: { you: EquityPoint[]; leader:
         width={W}
         height={H}
         role="img"
-        aria-label={`Backtest equity: your copy ends at ${fmtUsd(ys[last]!, 2)}, the leader scaled to the same start ends at ${fmtUsd(ls[last]!, 2)}.`}
+        aria-label={pnl
+          ? `Replayed PnL: yours ends at ${money(ys[last]!)}, the trader scaled to your start ends at ${money(ls[last]!)}.`
+          : `Backtest equity: your copy ends at ${fmtUsd(ys[last]!, 2)}, the leader scaled to the same start ends at ${fmtUsd(ls[last]!, 2)}.`}
         onMouseMove={onMove}
         onMouseLeave={() => setHover(null)}
       >
@@ -175,11 +185,11 @@ export function EquityChart({ you, leader, base }: { you: EquityPoint[]; leader:
           <span className="pf-chart__tipday">{fmtTip(ts[h]!)}</span>
           <span className="copy-chart__tiprow">
             <i className="copy-swatch copy-swatch--you" aria-hidden="true" />
-            <span className="pf-chart__tipval">{fmtUsd(ys[h]!, 2)}</span>
+            <span className="pf-chart__tipval">{money(ys[h]!)}</span>
           </span>
           <span className="copy-chart__tiprow">
             <i className="copy-swatch copy-swatch--leader" aria-hidden="true" />
-            <span className="pf-chart__tipval">{fmtUsd(ls[h]!, 2)}</span>
+            <span className="pf-chart__tipval">{money(ls[h]!)}</span>
           </span>
         </div>
       )}

@@ -7,16 +7,18 @@
  *                    much the copy trades with, and the signatures that mode
  *                    still needs (copy/CopySetupSheet.tsx CopySetupSteps)
  *
- * Two columns: what you are copying on the left, what you decide on the right.
- * A rule's explanation is its info mark's title, so the form reads as a form;
- * the one line that matters while you size (the worked example) stays in view.
+ * Two columns: what you are copying and what it would have made you on the left
+ * (the trader's PnL against yours, replayed from their real fills under these
+ * rules), what you decide on the right. The steps slide into each other; with
+ * reduced motion they swap. Step 2 shows only what the mode still needs: the
+ * terms, sign-in, key or fee approval done before are a line of pills.
  *
  * Every number is the setup form's (setup.ts) and the backtest's (useCopy.ts);
  * nothing here starts anything until "Start copying", and that needs every step
  * of the mode done by the follower's own signatures.
  */
 import { decimalInput } from '../numberInput';
-import { useEffect, useId, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { COPY_FEE_MAX, EEA_MAX_LEVERAGE, feePercent, regionPolicy } from '@copy-engine';
 import { Modal } from '../Modal';
 import { DlgRow, DlgSection, DlgSwitch } from '../dialogParts';
@@ -25,18 +27,20 @@ import { DASH, fmt, fmtUsd, shortAddr } from '../../format';
 import { notify } from '../../toast';
 import { WalletError } from '../../wallet';
 import { VENUE_LABEL, vsApi, type TraderRow } from '../../vsApi';
-import { CopySetupSteps, SetupProgress, copyReady } from '../../copy/CopySetupSheet';
+import { CopySetupSteps, STEP_DONE_LABEL, SetupProgress, copyReady, setupSteps } from '../../copy/CopySetupSheet';
 import { ModeCards } from '../../copy/ModeCards';
-import { startCopy, supportsCounter } from '../../copy/live';
+import { startCopy, supportsCounter, supportsMultiplier } from '../../copy/live';
 import { EquityChart } from './EquityChart';
 import { Avatar, CopyGlyph, CounterGlyph, WinRate, holdPeeks } from './TraderCard';
 import { coinOf } from './sim';
 import {
-  SIZING_MODES, TAKER_RATE, fmtRate, fmtSignedPct, fmtSignedUsd, workedExample, type SetupField, type SetupState,
+  MULTIPLIER_PRESETS, SIZING_MODES, TAKER_RATE, fmtRate, fmtSignedPct, fmtSignedUsd, previewFigures, workedExample, type SetupField, type SetupState,
 } from './setup';
 import { FILL_LIMIT, type CopyContext } from './useCopy';
 import { NotCopyableNote, useNotCopyable } from './useNotCopyable';
 import { fmtFixed, localize, toInputText } from '../../numStyle';
+// The order ticket's slider (its striped rail, fill and thumb) for max leverage.
+import '../OrderEntry.css';
 
 const isRejection = (e: unknown): boolean => e instanceof WalletError && /reject|denied|cancel/i.test(e.message);
 
@@ -53,11 +57,14 @@ export interface CopyModalProps {
 }
 
 export function CopyModal({ c, open, row, onClose, onStarted }: CopyModalProps) {
-  const [step, setStep] = useState<1 | 2>(1);
+  const [step, setStepState] = useState<1 | 2>(1);
+  // Which way the next step slides in: forward from the right, back from the left.
+  const dir = useRef<'fwd' | 'back'>('fwd');
+  const setStep = (n: 1 | 2) => { dir.current = n > step ? 'fwd' : 'back'; setStepState(n); };
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
-    if (open) { setStep(1); setError(null); }
+    if (open) { dir.current = 'fwd'; setStepState(1); setError(null); }
   }, [open, c.leader]);
   // The replay's fill walk goes first: the grid's card reads wait while the dialog is open.
   useEffect(() => (open ? holdPeeks() : undefined), [open]);
@@ -66,7 +73,9 @@ export function CopyModal({ c, open, row, onClose, onStarted }: CopyModalProps) 
   const counter = c.setup.direction === 'counter';
   // A counter-trade needs a copier that knows the direction (copy/live.ts supportsCounter).
   const counterBlocked = counter && !supportsCounter(c.live, c.runOn);
-  const ready = copyReady(c.live, c.runOn, c.setup.paper) && !counterBlocked;
+  // A multiple other than 1x needs a copier that sizes by it (copy/live.ts supportsMultiplier).
+  const multBlocked = (c.copySettings?.multiplier ?? 1) !== 1 && !supportsMultiplier(c.live, c.runOn);
+  const ready = copyReady(c.live, c.runOn, c.setup.paper) && !counterBlocked && !multBlocked;
   const errs = [...Object.values(c.parsed.errors), ...(Object.keys(c.parsed.errors).length ? [] : c.copyErrors)] as string[];
 
   const title = (
@@ -110,7 +119,8 @@ export function CopyModal({ c, open, row, onClose, onStarted }: CopyModalProps) 
           ? (errs.length ? <span className="cpy-mfoot__err">{errs[0]}</span> : 'Next: where the copier runs and what it trades with.')
           // A rule that is wrong (the amount to trade with is on this step) says so here: Start is off for it, and "Ready" would not be true.
           : errs.length ? <span className="cpy-mfoot__err">{errs[0]}</span>
-          : ready ? (c.setup.paper ? 'Ready: a paper copy sends nothing to SoDEX.' : 'Ready to start.') : counterBlocked ? 'This copier cannot counter-trade.' : 'Finish the steps on the right first.'}
+          : ready ? (c.setup.paper ? 'Ready: a paper copy sends nothing to SoDEX.' : 'Ready to start.') : counterBlocked ? 'This copier cannot counter-trade.'
+          : multBlocked ? 'This copier copies at 1x only.' : 'Finish the steps on the right first.'}
       </span>
       <span className="cpy-mfoot__acts">
         {step === 1 ? (
@@ -137,7 +147,10 @@ export function CopyModal({ c, open, row, onClose, onStarted }: CopyModalProps) 
 
   return (
     <Modal open={open} title={title} onClose={onClose} size="lg" className="fx cpy-modal" footer={footer} onBack={step === 2 ? () => setStep(1) : undefined}>
-      {step === 1 ? <RulesStep c={c} row={row} errs={errs} /> : <RunStep c={c} />}
+      <div key={step} className={`cpy-stepview cpy-stepview--${dir.current}`}>
+        {/* Said only once the executor has answered: before that, its features are not known. */}
+        {step === 1 ? <RulesStep c={c} row={row} errs={errs} /> : <RunStep c={c} multBlocked={multBlocked && c.runOn !== 'browser' && !!c.live[c.runOn].info} />}
+      </div>
       {error && <p className="fx-note fx-note--err" role="alert">{error}</p>}
     </Modal>
   );
@@ -202,7 +215,7 @@ function RulesStep({ c, row, errs }: { c: CopyContext; row: TraderRow | null; er
           </p>
         )}
 
-        <Replay c={c} />
+        <Preview c={c} />
       </aside>
 
       <div className="cpy-mmain dlg">
@@ -223,11 +236,26 @@ function RulesStep({ c, row, errs }: { c: CopyContext; row: TraderRow | null; er
             {c.setup.mode === 'fixedRatio' && <Num id={`${uid}-ratio`} value={c.setup.ratioPct} onChange={set('ratioPct')} unit="%" error={e.ratioPct} label="Percent of their size" />}
             {c.setup.mode === 'fixedNotional' && <Num id={`${uid}-notional`} value={c.setup.notional} onChange={set('notional')} unit="USDC" error={e.notional} label="Per trade" />}
           </Rule>
+          <Rule title="Multiplier" hint="Copies a multiple of the trader's positions. 1× mirrors them. Your caps below still apply." wide>
+            <span className="cpy-mult">
+              <span className="dlg-seg" role="group" aria-label="Multiplier presets">
+                {MULTIPLIER_PRESETS.map((m) => {
+                  const on = Number(c.setup.multiplier.replace(',', '.')) === m;
+                  return (
+                    <button key={m} type="button" aria-pressed={on} className={on ? 'is-on' : undefined} onClick={() => c.patchSetup({ multiplier: String(m) })}>
+                      {localize(String(m))}×
+                    </button>
+                  );
+                })}
+              </span>
+              <Num id={`${uid}-mult`} value={c.setup.multiplier} onChange={set('multiplier')} unit="×" error={e.multiplier} label="Multiplier" />
+            </span>
+          </Rule>
         </Group>
 
         <Group title="Limits">
-          <Rule title="Max leverage" hint={eea ? `Caps every copied position. In the EU and EEA copies are capped at ${EEA_MAX_LEVERAGE}x.` : 'Caps every copied position, even when the trader uses more.'}>
-            <Num id={`${uid}-lev`} value={c.setup.maxLeverage} onChange={set('maxLeverage')} unit="x" error={e.maxLeverage} label="Max leverage" />
+          <Rule title="Max leverage" hint={eea ? `Caps every copied position. In the EU and EEA copies are capped at ${EEA_MAX_LEVERAGE}x.` : 'Caps every copied position, even when the trader uses more.'} wide>
+            <LevSlider value={c.setup.maxLeverage} max={eea ? EEA_MAX_LEVERAGE : LEV_MAX} onChange={set('maxLeverage')} error={e.maxLeverage} />
           </Rule>
           <Rule title="Max position" hint="The largest a single copied position may get, in dollars.">
             <Num id={`${uid}-maxpos`} value={c.setup.maxPosition} onChange={set('maxPosition')} unit="USDC" error={e.maxPosition} label="Max position" />
@@ -238,8 +266,13 @@ function RulesStep({ c, row, errs }: { c: CopyContext; row: TraderRow | null; er
         </Group>
 
         <Group title="Behaviour">
-          <Rule title="Only new positions" hint="Skips positions the trader already holds when the copy starts.">
-            <Switch checked={!c.setup.copyExisting} onChange={(v) => c.patchSetup({ copyExisting: !v })} label="Only copy newly opened positions" on="Only new" off="Also existing" />
+          <Rule
+            title="Only new positions"
+            hint={c.setup.onlyNew
+              ? 'Copies only positions the trader opens after you start. What they hold now is left alone until they close it.'
+              : 'Off: the positions the trader holds now are joined at the start too, at the current price.'}
+          >
+            <Switch checked={c.setup.onlyNew} onChange={(v) => c.patchSetup({ onlyNew: v })} label="Only copy newly opened positions" on="Only new" off="Off" />
           </Rule>
           <Rule title="Paper copy" hint="Follows the trader live and keeps the books, but sends nothing to SoDEX. No fee, no key.">
             <Switch checked={c.setup.paper} onChange={(v) => c.patchSetup({ paper: v })} label="Paper copy" on="Paper" off="Live" />
@@ -282,13 +315,19 @@ function RulesStep({ c, row, errs }: { c: CopyContext; row: TraderRow | null; er
   );
 }
 
-/** The backtest, small: your copy against the trader, scaled to your allocation. */
-function Replay({ c }: { c: CopyContext }) {
+/**
+ * The expected result: the trader's PnL against yours, replayed from their real fills
+ * under these rules (sizing, multiplier, leverage cap, region cap, fees, slippage cap;
+ * for a counter-trade, the other side). The trader's line is scaled to your allocation,
+ * so the two read on one axis. Nothing is estimated: without fills there are no lines.
+ */
+function Preview({ c }: { c: CopyContext }) {
   const r = c.sim.result;
+  const counter = c.setup.direction === 'counter';
   const windows = [{ v: '7d', label: '7D' }, { v: '30d', label: '30D' }] as const;
   const head = (
     <div className="cpy-replay__head">
-      <span className="cpy-replay__k">{c.setup.direction === 'counter' ? 'Your counter-trade, replayed' : 'Your copy, replayed'}</span>
+      <span className="cpy-replay__k">{counter ? 'Expected PnL, counter-trading' : 'Expected PnL, copying'}</span>
       <span className="cpy-seg cpy-seg--sm" role="group" aria-label="Replay window">
         {windows.map((w) => (
           <button key={w.v} type="button" aria-pressed={c.window === w.v} className={c.window === w.v ? 'is-on' : undefined} onClick={() => c.setWindow(w.v)}>{w.label}</button>
@@ -299,40 +338,95 @@ function Replay({ c }: { c: CopyContext }) {
   let body: ReactNode;
   if (c.fills.loading) body = <p className="cpy-replay__note">Reading their latest fills from {VENUE_LABEL[c.venue]} (up to {fmt(FILL_LIMIT, 0)}; a busy trader takes a moment)…</p>;
   else if (c.sim.busy && !r) body = <p className="cpy-replay__note">Replaying {fmt(c.fills.data?.length ?? 0, 0)} fills under your rules…</p>;
-  else if (c.fills.error) body = c.fills.code === 'not_available' ? <p className="cpy-replay__note">{VENUE_LABEL[c.venue]} fills are not available here, so there is nothing to replay.</p> : <LoadFailed what="Fills" onRetry={c.fills.reload} />;
-  else if (Object.keys(c.parsed.errors).length) body = <p className="cpy-replay__note">Fix the rules to run the replay.</p>;
-  else if (!r || r.copiedFills + r.skippedFills === 0) body = <p className="cpy-replay__note">No trades in this window to replay.</p>;
+  else if (c.fills.error) body = c.fills.code === 'not_available' ? <p className="cpy-replay__note">{VENUE_LABEL[c.venue]} fills are not available here, so there is no history to replay.</p> : <LoadFailed what="Fills" onRetry={c.fills.reload} />;
+  else if (Object.keys(c.parsed.errors).length) body = <p className="cpy-replay__note">Fix the rules to see the expected result.</p>;
+  else if (!r || r.copiedFills + r.skippedFills === 0) body = <p className="cpy-replay__note">No trades in this window, so there is no history to replay.</p>;
   else {
+    const f = previewFigures(r);
+    const tone = (v: number) => (v > 0 ? 'pos' : v < 0 ? 'neg' : '');
     body = (
       <>
-        <div className="cpy-replay__fig">
-          <span className={`cpy-replay__roi ${r.roi >= 0 ? 'pos' : 'neg'}`}>{fmtSignedPct(r.roi)}</span>
-          <span className="cpy-replay__sub">
-            {fmtSignedUsd(r.pnl)} on {fmtUsd(r.startEquity, 0)} · trader {fmtSignedPct(r.leaderRoi)} · {fmt(r.copiedFills, 0)} of {fmt(r.copiedFills + r.skippedFills, 0)} fills copied
-          </span>
+        <dl className={`cpy-pv${c.sim.busy ? ' is-busy' : ''}`}>
+          <div>
+            <dt>Return</dt>
+            <dd className={tone(f.you.roi)}>{fmtSignedPct(f.you.roi)}</dd>
+            <span className="cpy-pv__them">Trader {fmtSignedPct(f.them.roi)}</span>
+          </div>
+          <div>
+            <dt>PnL</dt>
+            <dd className={tone(f.you.pnl)}>{fmtSignedUsd(f.you.pnl)}</dd>
+            <span className="cpy-pv__them">Trader {fmtSignedUsd(f.them.pnl)}</span>
+          </div>
+          <div>
+            <dt>Max drawdown</dt>
+            <dd>{fmtSignedPct(-f.you.maxDrawdown)}</dd>
+            <span className="cpy-pv__them">Trader {fmtSignedPct(-f.them.maxDrawdown)}</span>
+          </div>
+        </dl>
+        <div className={`pf copy cpy-replay__chart${c.sim.busy ? ' is-busy' : ''}`}>
+          <EquityChart you={r.equityCurve} leader={r.leaderCurve} base={r.startEquity} pnl />
         </div>
-        <div className="pf copy cpy-replay__chart">
-          <EquityChart you={r.equityCurve} leader={r.leaderCurve} base={r.startEquity} />
+        <div className="cpy-replay__legend">
+          <span><i className="copy-swatch copy-swatch--you" aria-hidden="true" />{counter ? 'You, counter-trading' : 'You'}</span>
+          <span><i className="copy-swatch copy-swatch--leader" aria-hidden="true" />Trader, scaled to your {fmtUsd(r.startEquity, 0)}</span>
         </div>
-        <div className="cpy-replay__legend" aria-hidden="true">
-          <span><i className="copy-swatch copy-swatch--you" />You</span>
-          <span><i className="copy-swatch copy-swatch--leader" />Trader, scaled to you</span>
-        </div>
+        <p className="cpy-replay__sub">
+          {fmt(r.copiedFills, 0)} of {fmt(r.copiedFills + r.skippedFills, 0)} fills copied · fees {fmtUsd(r.feesUsd, 2)}
+          {r.stoppedBy ? ' · a stop rule of yours ended the run early' : ''}
+          {c.sim.truncated ? ` · their last ${fmt(FILL_LIMIT, 0)} fills reach back to ${new Date(r.from).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} only` : ''}
+        </p>
       </>
     );
   }
   return (
-    <section className="cpy-replay">
+    <section className="cpy-replay" aria-live="polite">
       {head}
       {body}
-      <p className="cpy-replay__fine">A replay of past fills at their price plus your full slippage cap, with fees. Not a forecast.</p>
+      <p className="cpy-replay__fine">A replay of their real fills at their price plus your full slippage cap, with fees. Not a forecast.</p>
     </section>
+  );
+}
+
+/** Max leverage on the order ticket's slider (OrderEntry.css .oe-slider), with its value and a few stops. */
+const LEV_MAX = 50;
+const LEV_STOPS = [1, 2, 3, 5, 10, 20] as const;
+
+function LevSlider({ value, max, onChange, error }: { value: string; max: number; onChange: (v: string) => void; error?: string }) {
+  const n = Number(value);
+  const cur = Number.isFinite(n) && n >= 1 ? Math.min(max, Math.round(n)) : 1;
+  const p = max > 1 ? (cur - 1) / (max - 1) : 1;
+  return (
+    <span className={`cpy-lev${error ? ' is-bad' : ''}`}>
+      <span className="oe-slider cpy-lev__slider">
+        <span className="oe-slider__rail" style={{ ['--oe-p' as string]: p } as CSSProperties}>
+          <span className="oe-slider__fill" />
+          <input
+            className="oe-slider__input"
+            type="range"
+            min={1}
+            max={max}
+            step={1}
+            value={cur}
+            aria-label="Max leverage"
+            aria-valuetext={`${cur}x`}
+            onChange={(e) => onChange(e.currentTarget.value)}
+          />
+        </span>
+      </span>
+      <span className="cpy-lev__v">{cur}x</span>
+      <span className="cpy-lev__stops">
+        {LEV_STOPS.filter((x) => x <= max).map((x) => (
+          <button key={x} type="button" className={`cpy-chip${cur === x ? ' is-on' : ''}`} aria-pressed={cur === x} onClick={() => onChange(String(x))}>{x}x</button>
+        ))}
+      </span>
+      {error && <small className="cpy-ferr" role="alert">{error}</small>}
+    </span>
   );
 }
 
 /* ============================================================ step 2 ====== */
 
-function RunStep({ c }: { c: CopyContext }) {
+function RunStep({ c, multBlocked }: { c: CopyContext; multBlocked: boolean }) {
   const uid = useId().replace(/:/g, '');
   const wallet = c.wallet;
   /* The wallet's SoDEX account value: a number, 'none' (no SoDEX account yet), 'error', or null while it loads. */
@@ -365,6 +459,13 @@ function RunStep({ c }: { c: CopyContext }) {
               : c.live.hosted.info
                 ? 'The ValueDesk executor does not run counter-trades yet. Run it in this browser instead.'
                 : 'Checking the ValueDesk executor…'}
+          </p>
+        )}
+        {multBlocked && (
+          <p className="fx-note fx-note--err">
+            {c.runOn === 'self'
+              ? 'Your copier is older than the size multiplier: download the current copier, start it again, or set the multiplier to 1×.'
+              : 'The ValueDesk executor does not size by a multiplier yet. Set it to 1×, or run the copy in this browser.'}
           </p>
         )}
         <dl className="cpy-fees">
@@ -409,9 +510,7 @@ function RunStep({ c }: { c: CopyContext }) {
           <p className="fx-note">The copy sizes its positions against this amount. It stays in your SoDEX account: nothing is moved.</p>
         </div>
 
-        <h3 className="cpy-h">{c.setup.paper ? 'Paper copy: what it needs' : 'What it needs'}</h3>
-        <SetupProgress live={c.live} mode={c.runOn} paper={c.setup.paper} />
-        <CopySetupSteps mode={c.runOn} live={c.live} paper={c.setup.paper} />
+        <Needs c={c} />
 
         <p className="fx-note">
           You choose the trader and every rule; ValueDesk never holds your funds. Not investment advice: past results do not predict future
@@ -419,6 +518,41 @@ function RunStep({ c }: { c: CopyContext }) {
         </p>
       </div>
     </div>
+  );
+}
+
+/**
+ * What the mode still needs, and only that (owner, 2026-11-03: "if the users already did
+ * that once dont show it"): the steps done before (terms, sign-in, key, fee approval) are
+ * a line of pills; with everything done, the pills and "Ready" are all there is.
+ */
+function Needs({ c }: { c: CopyContext }) {
+  const steps = setupSteps(c.live, c.runOn, c.setup.paper);
+  const done = steps.filter((x) => x.done);
+  const left = steps.length - done.length;
+  return (
+    <section className="cpy-needs" aria-label="What this copy needs">
+      <h3 className="cpy-h">
+        {left === 0 ? 'Ready' : c.setup.paper ? 'Paper copy: still needed' : 'Still needed'}
+        {left > 0 && <span className="cpy-needs__n">{left} of {steps.length}</span>}
+      </h3>
+      {done.length > 0 && (
+        <ul className="cpy-needs__done" aria-label="Done before">
+          {done.map((x) => (
+            <li key={x.id} className="cpy-pill cpy-pill--ok">
+              <svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true"><path d="M2.5 6.4 4.9 8.7 9.6 3.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
+              {STEP_DONE_LABEL[x.id] ?? x.id}
+            </li>
+          ))}
+        </ul>
+      )}
+      {left > 0 && (
+        <>
+          <SetupProgress live={c.live} mode={c.runOn} paper={c.setup.paper} />
+          <CopySetupSteps mode={c.runOn} live={c.live} paper={c.setup.paper} hideDone />
+        </>
+      )}
+    </section>
   );
 }
 

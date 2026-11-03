@@ -147,7 +147,8 @@ function sizingOf(v: CopyView): string {
   const size = s.sizingMode === 'proportional' ? 'Proportional'
     : s.sizingMode === 'fixedRatio' ? `${fmt(s.ratio * 100, 2)}% of leader`
     : `${fmtUsd(s.fixedNotionalUsd, 0)} / trade`;
-  return s.direction === 'counter' ? `Counter · ${size}` : size;
+  const sized = (s.multiplier ?? 1) !== 1 ? `${size} · ${fmt(s.multiplier, 2)}×` : size;
+  return s.direction === 'counter' ? `Counter · ${sized}` : sized;
 }
 
 function MyCopies({ src: c, rows, onActivity }: { src: CopiesSource; rows: CopyRow[]; onActivity: (id: string) => void }) {

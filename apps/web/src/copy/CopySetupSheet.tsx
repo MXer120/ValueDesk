@@ -14,7 +14,7 @@
  * Every action is one of the follower's own signatures; nothing is signed on
  * their behalf, nothing is pre-ticked.
  */
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { BOT_FEE, COPY_FEE_LADDER, COPY_FEE_MAX, EEA_MAX_LEVERAGE, feePercent, regionPolicy } from '@copy-engine';
 import { Modal } from '../components/Modal';
 import { openConnectDialog } from '../components/account/connect';
@@ -64,6 +64,9 @@ const Tick = () => (
   </svg>
 );
 
+/** A step already done is left out (the copy dialog: only what is missing shows, owner 2026-11-03). */
+const HideDone = createContext(false);
+
 function Step({ done, current, title, desc, action, children, n }: {
   done: boolean;
   current: boolean;
@@ -73,6 +76,7 @@ function Step({ done, current, title, desc, action, children, n }: {
   children?: ReactNode;
   n: number;
 }) {
+  if (useContext(HideDone) && done) return null;
   return (
     <li className={`cs-step${done ? ' is-done' : ''}${current ? ' is-current' : ''}`}>
       <span className="cs-step__dot" aria-hidden="true">{done ? <Tick /> : n}</span>
@@ -142,7 +146,7 @@ export function setupSteps(live: LiveCopy, mode: CopyModeId, paper?: boolean, bo
  * terms, copy fee, copy key. Used by the setup sheet, by the copy modal's
  * second step and, worded for bots (`bots`), by the Bots page's setup.
  */
-export function CopySetupSteps({ mode, live, paper, bots }: { mode: CopyModeId; live: LiveCopy; paper?: boolean; bots?: boolean }) {
+export function CopySetupSteps({ mode, live, paper, bots, hideDone = false }: { mode: CopyModeId; live: LiveCopy; paper?: boolean; bots?: boolean; hideDone?: boolean }) {
   const [error, setError] = useState<string | null>(null);
   const [working, setWorking] = useState<string | null>(null);
   const [termsOpen, setTermsOpen] = useState(false);
@@ -185,7 +189,9 @@ export function CopySetupSteps({ mode, live, paper, bots }: { mode: CopyModeId; 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const steps = useMemo(() => setupSteps(live, mode, paper, bots), [owner, live.canSign, mode, r.connected, r.terms, r.fee, r.key, paper, bots]);
   const current = steps.find((s) => !s.done)?.id ?? null;
-  const n =(id: string) => steps.findIndex((s) => s.id === id) + 1;
+  // Numbered among the steps shown: with the done ones left out, what is missing reads 1, 2, ...
+  const shown = hideDone ? steps.filter((s) => !s.done) : steps;
+  const n = (id: string) => shown.findIndex((s) => s.id === id) + 1;
 
   const ladder = COPY_FEE_LADDER.map((s) => `${localize(feePercent(s.fee))}${s.fromUsd ? ` from $${(s.fromUsd / 1e6 >= 1 ? `${fmtPlain(s.fromUsd / 1e6)}M` : `${fmtPlain(s.fromUsd / 1e3)}k`)}` : ''}`).join(', ');
   const keyDays = mode === 'browser' ? [1, 3, 7] : [7, 30, 90, 180];
@@ -195,7 +201,7 @@ export function CopySetupSteps({ mode, live, paper, bots }: { mode: CopyModeId; 
   const termsDone = bots ? r.terms && r.connected : r.terms;
 
   return (
-    <>
+    <HideDone.Provider value={hideDone}>
     <ol className="cs-steps">
       <Step
         n={n('wallet')}
@@ -437,9 +443,19 @@ export function CopySetupSteps({ mode, live, paper, bots }: { mode: CopyModeId; 
     </ol>
     {error && <p className="fx-note fx-note--err" role="alert">{error}</p>}
     {live.busy === 'wallet' && <p className="fx-wait"><span className="fx-spin" aria-hidden="true" />Waiting for your wallet…</p>}
-    </>
+    </HideDone.Provider>
   );
 }
+
+/** What each step is called once it is done, for the copy dialog's "already done" pills. */
+export const STEP_DONE_LABEL: Record<string, string> = {
+  wallet: 'Wallet connected',
+  signin: 'Signed in',
+  copier: 'Copier paired',
+  terms: 'Terms accepted',
+  fee: 'Copy fee approved',
+  key: 'Copy key active',
+};
 
 /** "2 of 4 done", over a bar: how far this mode's steps are. */
 export function SetupProgress({ live, mode, paper, bots }: { live: LiveCopy; mode: CopyModeId; paper?: boolean; bots?: boolean }) {

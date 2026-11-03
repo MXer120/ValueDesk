@@ -16,7 +16,7 @@ import {
 } from '../../vsApi';
 import type { Eip1193Provider } from '../../wallet';
 import { simulate, toSimFills, type Reconstruction, type SimResult } from './sim';
-import { checkSettings, type CopySettings } from '@copy-engine';
+import { checkSettings, regionPolicy, type CopySettings } from '@copy-engine';
 import { readiness, startCopy as startLiveCopy, useLiveCopy, type CopyModeId, type LiveCopy } from '../../copy/live';
 import {
   DEFAULT_SETUP, COPY_BUILDER_TENTHS_BPS, copyErrorInWords, normaliseSetup, parseSetup, readTarget, toCopySettings, windowStart,
@@ -276,7 +276,10 @@ export function useCopyContext({ address, provider, onScan }: CopyPageProps): Co
     const p = profile.data;
     const timer = window.setTimeout(() => {
       try {
-        const out = simulate(prepared.fills, parsed.config, {
+        // The region's leverage cap binds the replay as it binds the live copy (EEA 2x).
+        const regionMax = regionPolicy(live.terms?.country ?? null, live.viewerCountry).maxLeverage;
+        const config = regionMax === null ? parsed.config : { ...parsed.config, maxLeverage: Math.min(parsed.config.maxLeverage, regionMax) };
+        const out = simulate(prepared.fills, config, {
           leader: leader ? { venue, address: leader } : undefined,
           startAt: start,
           leaderEquity: p?.summary.accountValue ?? undefined,
@@ -306,7 +309,7 @@ export function useCopyContext({ address, provider, onScan }: CopyPageProps): Co
       }
     }, 250);
     return () => window.clearTimeout(timer);
-  }, [prepared, parsed, leader, venue, win, startAt, profile.data, fills.data]);
+  }, [prepared, parsed, leader, venue, win, startAt, profile.data, fills.data, live.terms?.country, live.viewerCountry]);
 
   const copyCheck = useMemo(() => {
     if (!leader || (venue !== 'sodex' && venue !== 'hyperliquid')) return { settings: null as CopySettings | null, errors: leader ? ['Copies follow SoDEX and Hyperliquid traders only.'] : [] };

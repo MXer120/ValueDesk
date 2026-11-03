@@ -777,3 +777,69 @@
 .cpy-mmain.dlg .cpy-adv > .cpy-rows > .dlg-row:first-child { border-top-color: transparent; padding-top: 4px; }
 .cpy-mmain.dlg .cpy-adv > .cpy-reset { margin: 0 14px 14px; }
 @media (max-width: 520px) { .cpy-mmain.dlg .cpy-dfield { width: 100%; } }
+
+/* --- copy dialog, 2026-11-03: expected PnL, multiplier, leverage slider, what is still needed --- */
+
+/* The steps slide into each other: forward from the right, back from the left. */
+.cpy-stepview { animation: cpy-step-in 260ms cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+.cpy-stepview--back { animation-name: cpy-step-back; }
+@keyframes cpy-step-in { from { opacity: 0; transform: translateX(14px); } }
+@keyframes cpy-step-back { from { opacity: 0; transform: translateX(-14px); } }
+@media (prefers-reduced-motion: reduce) { .cpy-stepview { animation: none; } }
+
+/* Expected PnL: yours over the trader's, three tiles in the trader stats' language. */
+.cpy-pv { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin: 2px 0 0; transition: opacity 160ms; }
+.cpy-pv > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 8px 10px; border-radius: var(--radius-tile); background: var(--bg-panel); box-shadow: var(--depth-1); }
+.cpy-pv dt { color: var(--muted); font-size: var(--fs-micro); }
+.cpy-pv dd { margin: 0; font-family: var(--font-num); font-size: var(--fs-base); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cpy-pv__them { color: var(--muted); font-family: var(--font-num); font-size: var(--fs-micro); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cpy-pv.is-busy, .cpy-replay__chart.is-busy { opacity: 0.55; }
+.cpy-replay__chart { transition: opacity 160ms; }
+.cpy-replay__chart .copy-chart__line { transition: d 280ms cubic-bezier(0.2, 0.7, 0.2, 1); }
+.cpy-replay__sub { margin: 0; }
+@media (prefers-reduced-motion: reduce) {
+  .cpy-pv, .cpy-replay__chart, .cpy-replay__chart .copy-chart__line { transition: none; }
+}
+
+/* Multiplier: the presets, then any value. */
+.cpy-mult { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.cpy-mmain.dlg .cpy-mult .cpy-dfield { width: 110px; }
+
+/* Max leverage on the order ticket's slider (OrderEntry.css), in the dialog's light tone. */
+.cpy-lev { --oe-tint: var(--accent); display: grid; grid-template-columns: minmax(0, 1fr) 44px; align-items: center; gap: 4px 10px; width: 100%; }
+.cpy-lev .oe-slider.cpy-lev__slider { display: block; }
+.cpy-lev .oe-slider__rail { display: block; margin: 0 8px; }
+.cpy-lev .oe-slider__rail::before, .cpy-lev .oe-slider__fill { display: block; }
+.cpy-lev__v { font-family: var(--font-num); font-size: var(--fs-sm); font-weight: 600; text-align: right; }
+.cpy-lev__stops { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 4px; }
+.cpy-lev__stops .cpy-chip { height: 24px; padding: 0 10px; font-family: var(--font-num); }
+.cpy-lev .cpy-ferr { grid-column: 1 / -1; }
+.cpy-chip.is-on { background: var(--text); color: var(--bg); box-shadow: none; }
+
+/* What the copy still needs: the steps done before as pills, then only the missing ones. */
+.cpy-needs { display: flex; flex-direction: column; gap: 10px; }
+.cpy-needs .cpy-h { display: flex; align-items: center; gap: 8px; }
+.cpy-needs__n { padding: 1px 7px; border-radius: var(--radius-full); background: var(--fx-well); color: var(--text); font-family: var(--font-num); letter-spacing: 0; text-transform: none; }
+.cpy-needs__done { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; animation: cpy-fade 200ms ease-out both; }
+.cpy-pill { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 10px; border-radius: var(--radius-full); font-size: var(--fs-micro); font-weight: 500; }
+.cpy-pill--ok { background: color-mix(in srgb, var(--pos) 12%, transparent); color: color-mix(in srgb, var(--pos) 60%, var(--text)); }
+.cpy-needs .cs-step { animation: cpy-fade 200ms ease-out both; }
+@keyframes cpy-fade { from { opacity: 0; transform: translateY(4px); } }
+@media (prefers-reduced-motion: reduce) { .cpy-needs__done, .cpy-needs .cs-step { animation: none; } }
+
+@media (max-width: 520px) {
+  .cpy-pv { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; }
+  .cpy-pv > div { padding: 7px 8px; }
+  .cpy-pv dd { font-size: var(--fs-sm); }
+  .cpy-mmain.dlg .cpy-mult .cpy-dfield { width: 100%; }
+}
+/* The chart's own box: Copy.css sizes the page's copy chart at 230px, with more weight than the replay's. */
+.cpy-replay__chart.pf.copy { height: 172px; }
+.cpy-replay .pf.copy .pf-chart.copy-chart { height: 172px; min-height: 0; }
+/* Phone: the footer's line over full-width buttons, not squeezed beside them. */
+@media (max-width: 520px) {
+  .cpy-mfoot { flex-wrap: wrap; gap: 8px; }
+  .cpy-mfoot__note { flex: 1 1 100%; }
+  .cpy-mfoot__acts { flex: 1 1 100%; }
+  .cpy-mfoot__acts .fx-cta { flex: 1 1 0; min-width: 0; }
+}

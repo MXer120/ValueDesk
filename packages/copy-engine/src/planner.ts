@@ -26,6 +26,8 @@
  *   fixedRatio        L x price x ratio
  *   fixedNotional     sign(L) x fixedNotionalUsd
  *
+ * each times settings.multiplier (1 mirrors), before the caps.
+ *
  * A counter-trade (settings.direction 'counter') runs the same table on the
  * leader's position mirrored, -L: their long opens your short, their close
  * closes it, their flip flips you the other way.
@@ -158,7 +160,7 @@ const DETACH_SKIP: Record<DetachReason, SkipReason> = {
 
 /** Target notional (signed, USD) for leader position `lSize` at leader price `lPrice`. */
 export function targetNotional(
-  s: Pick<CopySettings, 'sizingMode' | 'ratio' | 'fixedNotionalUsd'>,
+  s: Pick<CopySettings, 'sizingMode' | 'ratio' | 'fixedNotionalUsd'> & { multiplier?: number },
   lSize: number,
   lPrice: number,
   equity: number,
@@ -166,12 +168,14 @@ export function targetNotional(
 ): number | null {
   if (isFlat(lSize)) return 0;
   const lNotional = lSize * lPrice;
+  // The multiple of the mode's size (1x mirrors it); the caps apply after it (planLeaderEvent grow).
+  const k = Number.isFinite(s.multiplier) && s.multiplier! > 0 ? s.multiplier! : 1;
   if (s.sizingMode === 'proportional') {
     if (leaderEquity === null || !(leaderEquity > 0)) return null;
-    return (lNotional * equity) / leaderEquity;
+    return (k * lNotional * equity) / leaderEquity;
   }
-  if (s.sizingMode === 'fixedRatio') return lNotional * s.ratio;
-  return sign(lSize) * s.fixedNotionalUsd;
+  if (s.sizingMode === 'fixedRatio') return k * lNotional * s.ratio;
+  return k * sign(lSize) * s.fixedNotionalUsd;
 }
 
 /** +1 to take the trader's side, -1 to take the other side (a counter-trade). */
