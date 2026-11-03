@@ -42,9 +42,9 @@ var __toESM = (mod2, isNodeMode, target) => (target = mod2 != null ? __create(__
   mod2
 ));
 
-// node_modules/ws/lib/constants.js
+// ../../node_modules/ws/lib/constants.js
 var require_constants = __commonJS({
-  "node_modules/ws/lib/constants.js"(exports, module) {
+  "../../node_modules/ws/lib/constants.js"(exports, module) {
     "use strict";
     var BINARY_TYPES = ["nodebuffer", "arraybuffer", "fragments"];
     var hasBlob = typeof Blob !== "undefined";
@@ -65,9 +65,9 @@ var require_constants = __commonJS({
   }
 });
 
-// node_modules/node-gyp-build/node-gyp-build.js
+// ../../node_modules/node-gyp-build/node-gyp-build.js
 var require_node_gyp_build = __commonJS({
-  "node_modules/node-gyp-build/node-gyp-build.js"(exports, module) {
+  "../../node_modules/node-gyp-build/node-gyp-build.js"(exports, module) {
     var fs = __require("fs");
     var path = __require("path");
     var os = __require("os");
@@ -234,9 +234,9 @@ var require_node_gyp_build = __commonJS({
   }
 });
 
-// node_modules/node-gyp-build/index.js
+// ../../node_modules/node-gyp-build/index.js
 var require_node_gyp_build2 = __commonJS({
-  "node_modules/node-gyp-build/index.js"(exports, module) {
+  "../../node_modules/node-gyp-build/index.js"(exports, module) {
     var runtimeRequire = typeof __webpack_require__ === "function" ? __non_webpack_require__ : __require;
     if (typeof runtimeRequire.addon === "function") {
       module.exports = runtimeRequire.addon.bind(runtimeRequire);
@@ -246,9 +246,9 @@ var require_node_gyp_build2 = __commonJS({
   }
 });
 
-// node_modules/bufferutil/fallback.js
+// ../../node_modules/bufferutil/fallback.js
 var require_fallback = __commonJS({
-  "node_modules/bufferutil/fallback.js"(exports, module) {
+  "../../node_modules/bufferutil/fallback.js"(exports, module) {
     "use strict";
     var mask = (source, mask2, output, offset, length) => {
       for (var i = 0; i < length; i++) {
@@ -265,9 +265,9 @@ var require_fallback = __commonJS({
   }
 });
 
-// node_modules/bufferutil/index.js
+// ../../node_modules/bufferutil/index.js
 var require_bufferutil = __commonJS({
-  "node_modules/bufferutil/index.js"(exports, module) {
+  "../../node_modules/bufferutil/index.js"(exports, module) {
     "use strict";
     try {
       module.exports = require_node_gyp_build2()(__dirname);
@@ -277,9 +277,9 @@ var require_bufferutil = __commonJS({
   }
 });
 
-// node_modules/ws/lib/buffer-util.js
+// ../../node_modules/ws/lib/buffer-util.js
 var require_buffer_util = __commonJS({
-  "node_modules/ws/lib/buffer-util.js"(exports, module) {
+  "../../node_modules/ws/lib/buffer-util.js"(exports, module) {
     "use strict";
     var { EMPTY_BUFFER } = require_constants();
     var FastBuffer = Buffer[Symbol.species];
@@ -352,9 +352,9 @@ var require_buffer_util = __commonJS({
   }
 });
 
-// node_modules/ws/lib/limiter.js
+// ../../node_modules/ws/lib/limiter.js
 var require_limiter = __commonJS({
-  "node_modules/ws/lib/limiter.js"(exports, module) {
+  "../../node_modules/ws/lib/limiter.js"(exports, module) {
     "use strict";
     var kDone = /* @__PURE__ */ Symbol("kDone");
     var kRun = /* @__PURE__ */ Symbol("kRun");
@@ -402,9 +402,9 @@ var require_limiter = __commonJS({
   }
 });
 
-// node_modules/ws/lib/permessage-deflate.js
+// ../../node_modules/ws/lib/permessage-deflate.js
 var require_permessage_deflate = __commonJS({
-  "node_modules/ws/lib/permessage-deflate.js"(exports, module) {
+  "../../node_modules/ws/lib/permessage-deflate.js"(exports, module) {
     "use strict";
     var zlib = __require("zlib");
     var bufferUtil = require_buffer_util();
@@ -785,9 +785,9 @@ var require_permessage_deflate = __commonJS({
   }
 });
 
-// node_modules/utf-8-validate/fallback.js
+// ../../node_modules/utf-8-validate/fallback.js
 var require_fallback2 = __commonJS({
-  "node_modules/utf-8-validate/fallback.js"(exports, module) {
+  "../../node_modules/utf-8-validate/fallback.js"(exports, module) {
     "use strict";
     function isValidUTF8(buf) {
       const len = buf.length;
@@ -822,9 +822,9 @@ var require_fallback2 = __commonJS({
   }
 });
 
-// node_modules/utf-8-validate/index.js
+// ../../node_modules/utf-8-validate/index.js
 var require_utf_8_validate = __commonJS({
-  "node_modules/utf-8-validate/index.js"(exports, module) {
+  "../../node_modules/utf-8-validate/index.js"(exports, module) {
     "use strict";
     try {
       module.exports = require_node_gyp_build2()(__dirname);
@@ -834,9 +834,9 @@ var require_utf_8_validate = __commonJS({
   }
 });
 
-// node_modules/ws/lib/validation.js
+// ../../node_modules/ws/lib/validation.js
 var require_validation = __commonJS({
-  "node_modules/ws/lib/validation.js"(exports, module) {
+  "../../node_modules/ws/lib/validation.js"(exports, module) {
     "use strict";
     var { isUtf8 } = __require("buffer");
     var { hasBlob } = require_constants();
@@ -1035,9 +1035,9 @@ var require_validation = __commonJS({
   }
 });
 
-// node_modules/ws/lib/receiver.js
+// ../../node_modules/ws/lib/receiver.js
 var require_receiver = __commonJS({
-  "node_modules/ws/lib/receiver.js"(exports, module) {
+  "../../node_modules/ws/lib/receiver.js"(exports, module) {
     "use strict";
     var { Writable } = __require("stream");
     var PerMessageDeflate2 = require_permessage_deflate();
@@ -1658,9 +1658,9 @@ var require_receiver = __commonJS({
   }
 });
 
-// node_modules/ws/lib/sender.js
+// ../../node_modules/ws/lib/sender.js
 var require_sender = __commonJS({
-  "node_modules/ws/lib/sender.js"(exports, module) {
+  "../../node_modules/ws/lib/sender.js"(exports, module) {
     "use strict";
     var { Duplex } = __require("stream");
     var { randomFillSync } = __require("crypto");
@@ -2151,9 +2151,9 @@ var require_sender = __commonJS({
   }
 });
 
-// node_modules/ws/lib/event-target.js
+// ../../node_modules/ws/lib/event-target.js
 var require_event_target = __commonJS({
-  "node_modules/ws/lib/event-target.js"(exports, module) {
+  "../../node_modules/ws/lib/event-target.js"(exports, module) {
     "use strict";
     var { kForOnEventAttribute, kListener } = require_constants();
     var kCode = /* @__PURE__ */ Symbol("kCode");
@@ -2380,9 +2380,9 @@ var require_event_target = __commonJS({
   }
 });
 
-// node_modules/ws/lib/extension.js
+// ../../node_modules/ws/lib/extension.js
 var require_extension = __commonJS({
-  "node_modules/ws/lib/extension.js"(exports, module) {
+  "../../node_modules/ws/lib/extension.js"(exports, module) {
     "use strict";
     var { tokenChars } = require_validation();
     function push(dest, name, elem) {
@@ -2533,9 +2533,9 @@ var require_extension = __commonJS({
   }
 });
 
-// node_modules/ws/lib/websocket.js
+// ../../node_modules/ws/lib/websocket.js
 var require_websocket = __commonJS({
-  "node_modules/ws/lib/websocket.js"(exports, module) {
+  "../../node_modules/ws/lib/websocket.js"(exports, module) {
     "use strict";
     var EventEmitter = __require("events");
     var https = __require("https");
@@ -3429,9 +3429,9 @@ var require_websocket = __commonJS({
   }
 });
 
-// node_modules/ws/lib/stream.js
+// ../../node_modules/ws/lib/stream.js
 var require_stream = __commonJS({
-  "node_modules/ws/lib/stream.js"(exports, module) {
+  "../../node_modules/ws/lib/stream.js"(exports, module) {
     "use strict";
     var WebSocket2 = require_websocket();
     var { Duplex } = __require("stream");
@@ -3527,9 +3527,9 @@ var require_stream = __commonJS({
   }
 });
 
-// node_modules/ws/lib/subprotocol.js
+// ../../node_modules/ws/lib/subprotocol.js
 var require_subprotocol = __commonJS({
-  "node_modules/ws/lib/subprotocol.js"(exports, module) {
+  "../../node_modules/ws/lib/subprotocol.js"(exports, module) {
     "use strict";
     var { tokenChars } = require_validation();
     function parse(header) {
@@ -3572,9 +3572,9 @@ var require_subprotocol = __commonJS({
   }
 });
 
-// node_modules/ws/lib/websocket-server.js
+// ../../node_modules/ws/lib/websocket-server.js
 var require_websocket_server = __commonJS({
-  "node_modules/ws/lib/websocket-server.js"(exports, module) {
+  "../../node_modules/ws/lib/websocket-server.js"(exports, module) {
     "use strict";
     var EventEmitter = __require("events");
     var http = __require("http");
@@ -3973,10 +3973,10 @@ var require_websocket_server = __commonJS({
   }
 });
 
-// apps/executor/src/main.ts
+// src/main.ts
 import { join as join3 } from "node:path";
 
-// apps/executor/src/config.ts
+// src/config.ts
 import { existsSync } from "node:fs";
 import { homedir, platform } from "node:os";
 import { join, resolve } from "node:path";
@@ -4074,11 +4074,11 @@ function loadConfig(env = process.env) {
   };
 }
 
-// apps/executor/src/net.ts
+// src/net.ts
 import { Agent, request as httpsRequest } from "node:https";
 import { isIPv6 } from "node:net";
 
-// node_modules/ws/wrapper.mjs
+// ../../node_modules/ws/wrapper.mjs
 var import_stream = __toESM(require_stream(), 1);
 var import_extension = __toESM(require_extension(), 1);
 var import_permessage_deflate = __toESM(require_permessage_deflate(), 1);
@@ -4089,7 +4089,7 @@ var import_websocket = __toESM(require_websocket(), 1);
 var import_websocket_server = __toESM(require_websocket_server(), 1);
 var wrapper_default = import_websocket.default;
 
-// apps/executor/src/net.ts
+// src/net.ts
 function egress(localAddress) {
   if (!localAddress) {
     return {
@@ -4145,7 +4145,7 @@ function egress(localAddress) {
   return { fetch: bound2, factory, localAddress };
 }
 
-// apps/executor/src/db.ts
+// src/db.ts
 import { createHash } from "node:crypto";
 import { chmodSync, existsSync as existsSync2, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
@@ -4585,12 +4585,12 @@ function keyOf(r) {
   };
 }
 
-// apps/executor/src/secrets.ts
+// src/secrets.ts
 import { createCipheriv, createDecipheriv, createHmac, createPrivateKey, createPublicKey, diffieHellman, generateKeyPairSync, hkdfSync, randomBytes as randomBytes2, timingSafeEqual } from "node:crypto";
 import { chmodSync as chmodSync2, existsSync as existsSync3, mkdirSync as mkdirSync2, readFileSync as readFileSync2, writeFileSync as writeFileSync2 } from "node:fs";
 import { join as join2 } from "node:path";
 
-// packages/sodex-core/src/network.ts
+// ../../packages/sodex-core/src/network.ts
 var ENGINES = ["spot", "perps"];
 var SODEX_CHAIN_ID = {
   mainnet: 286623,
@@ -4609,7 +4609,7 @@ var enginePath = (engine) => `/api/v1/${engine}`;
 var DomainName = { spot: "spot", perps: "futures", universal: "universal" };
 var engineDomainName = (engine) => engine === "spot" ? DomainName.spot : DomainName.perps;
 
-// node_modules/@noble/hashes/esm/_u64.js
+// ../../node_modules/@noble/hashes/esm/_u64.js
 var U32_MASK64 = /* @__PURE__ */ BigInt(2 ** 32 - 1);
 var _32n = /* @__PURE__ */ BigInt(32);
 function fromBig(n, le = false) {
@@ -4632,7 +4632,7 @@ var rotlSL = (h, l, s) => l << s | h >>> 32 - s;
 var rotlBH = (h, l, s) => l << s - 32 | h >>> 64 - s;
 var rotlBL = (h, l, s) => h << s - 32 | l >>> 64 - s;
 
-// node_modules/@noble/hashes/esm/utils.js
+// ../../node_modules/@noble/hashes/esm/utils.js
 function isBytes(a) {
   return a instanceof Uint8Array || ArrayBuffer.isView(a) && a.constructor.name === "Uint8Array";
 }
@@ -4700,7 +4700,7 @@ function createHasher(hashCons) {
   return hashC;
 }
 
-// node_modules/@noble/hashes/esm/sha3.js
+// ../../node_modules/@noble/hashes/esm/sha3.js
 var _0n = BigInt(0);
 var _1n = BigInt(1);
 var _2n = BigInt(2);
@@ -4881,7 +4881,7 @@ var Keccak = class _Keccak extends Hash {
 var gen = (suffix, blockLen, outputLen) => createHasher(() => new Keccak(blockLen, suffix, outputLen));
 var keccak_256 = /* @__PURE__ */ (() => gen(1, 136, 256 / 8))();
 
-// node_modules/@noble/curves/node_modules/@noble/hashes/esm/_assert.js
+// ../../node_modules/@noble/curves/node_modules/@noble/hashes/esm/_assert.js
 function anumber2(n) {
   if (!Number.isSafeInteger(n) || n < 0)
     throw new Error("positive integer expected, got " + n);
@@ -4915,11 +4915,11 @@ function aoutput2(out, instance) {
   }
 }
 
-// node_modules/@noble/curves/node_modules/@noble/hashes/esm/cryptoNode.js
+// ../../node_modules/@noble/curves/node_modules/@noble/hashes/esm/cryptoNode.js
 import * as nc from "node:crypto";
 var crypto = nc && typeof nc === "object" && "webcrypto" in nc ? nc.webcrypto : nc && typeof nc === "object" && "randomBytes" in nc ? nc : void 0;
 
-// node_modules/@noble/curves/node_modules/@noble/hashes/esm/utils.js
+// ../../node_modules/@noble/curves/node_modules/@noble/hashes/esm/utils.js
 var createView = (arr) => new DataView(arr.buffer, arr.byteOffset, arr.byteLength);
 var rotr = (word2, shift) => word2 << 32 - shift | word2 >>> shift;
 function utf8ToBytes2(str2) {
@@ -4972,7 +4972,7 @@ function randomBytes(bytesLength = 32) {
   throw new Error("crypto.getRandomValues must be defined");
 }
 
-// node_modules/@noble/curves/node_modules/@noble/hashes/esm/_md.js
+// ../../node_modules/@noble/curves/node_modules/@noble/hashes/esm/_md.js
 function setBigUint64(view, byteOffset, value, isLE2) {
   if (typeof view.setBigUint64 === "function")
     return view.setBigUint64(byteOffset, value, isLE2);
@@ -5074,7 +5074,7 @@ var HashMD = class extends Hash2 {
   }
 };
 
-// node_modules/@noble/curves/node_modules/@noble/hashes/esm/sha256.js
+// ../../node_modules/@noble/curves/node_modules/@noble/hashes/esm/sha256.js
 var SHA256_K = /* @__PURE__ */ new Uint32Array([
   1116352408,
   1899447441,
@@ -5224,7 +5224,7 @@ var SHA256 = class extends HashMD {
 };
 var sha256 = /* @__PURE__ */ wrapConstructor(() => new SHA256());
 
-// node_modules/@noble/curves/node_modules/@noble/hashes/esm/hmac.js
+// ../../node_modules/@noble/curves/node_modules/@noble/hashes/esm/hmac.js
 var HMAC = class extends Hash2 {
   constructor(hash, _key) {
     super();
@@ -5289,7 +5289,7 @@ var HMAC = class extends Hash2 {
 var hmac = (hash, key2, message) => new HMAC(hash, key2).update(message).digest();
 hmac.create = (hash, key2) => new HMAC(hash, key2);
 
-// node_modules/@noble/curves/esm/abstract/utils.js
+// ../../node_modules/@noble/curves/esm/abstract/utils.js
 var utils_exports = {};
 __export(utils_exports, {
   aInRange: () => aInRange,
@@ -5557,7 +5557,7 @@ function memoized(fn) {
   };
 }
 
-// node_modules/@noble/curves/esm/abstract/modular.js
+// ../../node_modules/@noble/curves/esm/abstract/modular.js
 var _0n3 = BigInt(0);
 var _1n3 = BigInt(1);
 var _2n3 = /* @__PURE__ */ BigInt(2);
@@ -5833,7 +5833,7 @@ function mapHashToField(key2, fieldOrder, isLE2 = false) {
   return isLE2 ? numberToBytesLE(reduced, fieldLen) : numberToBytesBE(reduced, fieldLen);
 }
 
-// node_modules/@noble/curves/esm/abstract/curve.js
+// ../../node_modules/@noble/curves/esm/abstract/curve.js
 var _0n4 = BigInt(0);
 var _1n4 = BigInt(1);
 function constTimeNegate(condition2, item) {
@@ -6060,7 +6060,7 @@ function validateBasic(curve) {
   });
 }
 
-// node_modules/@noble/curves/esm/abstract/weierstrass.js
+// ../../node_modules/@noble/curves/esm/abstract/weierstrass.js
 function validateSigVerOpts(opts) {
   if (opts.lowS !== void 0)
     abool("lowS", opts.lowS);
@@ -6929,7 +6929,7 @@ function weierstrass(curveDef) {
   };
 }
 
-// node_modules/@noble/curves/esm/_shortw_utils.js
+// ../../node_modules/@noble/curves/esm/_shortw_utils.js
 function getHash(hash) {
   return {
     hash,
@@ -6942,7 +6942,7 @@ function createCurve(curveDef, defHash) {
   return { ...create(defHash), create };
 }
 
-// node_modules/@noble/curves/esm/secp256k1.js
+// ../../node_modules/@noble/curves/esm/secp256k1.js
 var secp256k1P = BigInt("0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f");
 var secp256k1N = BigInt("0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141");
 var _1n6 = BigInt(1);
@@ -7016,7 +7016,7 @@ var secp256k1 = createCurve({
 var _0n6 = BigInt(0);
 var Point = secp256k1.ProjectivePoint;
 
-// packages/sodex-core/src/eip712.ts
+// ../../packages/sodex-core/src/eip712.ts
 var SignatureType = {
   /** Exchange actions (orders, cancels, transfers, revokeAPIKey) - engine-specific domain. */
   EIP712: 1,
@@ -7267,7 +7267,7 @@ function recoverAddress(digest, rsv) {
 }
 var privateKeyToAddress = (privateKey) => bytesToHex2(keccak_256(secp256k1.getPublicKey(privateKey, false).slice(1)).slice(12));
 
-// packages/sodex-core/src/decimal.ts
+// ../../packages/sodex-core/src/decimal.ts
 var DECIMAL_RE = /^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$/;
 var DecimalError = class extends Error {
 };
@@ -7356,7 +7356,7 @@ function unscaleFromInt(n, scale) {
   return canonicalDecimal((neg ? "-" : "") + out);
 }
 
-// packages/sodex-core/src/actions.ts
+// ../../packages/sodex-core/src/actions.ts
 var OrderSide = { BUY: 1, SELL: 2 };
 var OrderType = { LIMIT: 1, MARKET: 2 };
 var TimeInForce = { GTC: 1, FOK: 2, IOC: 3, GTX: 4 };
@@ -7547,7 +7547,7 @@ var perpsActions = {
   cancelTwapOrder: (accountID, symbolID, orderID) => act("perps", "cancelTwapOrder", cancelTwapOrder(accountID, symbolID, orderID))
 };
 
-// packages/sodex-core/src/keys.ts
+// ../../packages/sodex-core/src/keys.ts
 function defaultRandom(length) {
   const c = globalThis.crypto;
   if (!c?.getRandomValues) throw new Error("no CSPRNG available (globalThis.crypto.getRandomValues)");
@@ -7574,7 +7574,7 @@ var MAX_TRADING_KEY_TTL_MS = 7 * DAY_MS;
 var MIN_TRADING_KEY_TTL_MS = 5 * 6e4;
 var isKeyExpired = (expiresAt, now = Date.now()) => !!expiresAt && expiresAt <= now;
 
-// packages/sodex-core/src/nonce.ts
+// ../../packages/sodex-core/src/nonce.ts
 var NONCE_WINDOW = { pastMs: 2 * DAY_MS, futureMs: DAY_MS };
 var DEFAULT_NONCE_WINDOW_MARGIN_MS = 6e4;
 var NonceWindowError = class extends RangeError {
@@ -7786,7 +7786,7 @@ var Manager = class {
 };
 var createMemoryNonceManager = (opts = {}) => new Manager({ ...opts, storage: null, channel: null, locks: null }, false);
 
-// packages/sodex-core/src/request.ts
+// ../../packages/sodex-core/src/request.ts
 var HEADER = {
   key: "X-API-Key",
   sign: "X-API-Sign",
@@ -7853,7 +7853,7 @@ async function signAndBuildWithNonceManager(action2, key2, opts) {
   return signAndBuild(action2, ref, { ...opts, nonce });
 }
 
-// packages/sodex-core/src/builders.ts
+// ../../packages/sodex-core/src/builders.ts
 var asRate = (v) => {
   const n = typeof v === "number" ? v : typeof v === "string" && /^\d+$/.test(v.trim()) ? Number(v) : NaN;
   return Number.isSafeInteger(n) && n > 0 ? n : null;
@@ -7876,7 +7876,7 @@ function approvedBuilderRates(data, builderID) {
   return out;
 }
 
-// packages/sodex-core/src/envelope.ts
+// ../../packages/sodex-core/src/envelope.ts
 var SodexApiError = class extends Error {
   constructor(code, message, httpStatus, path, body) {
     super(message);
@@ -7979,7 +7979,7 @@ function reportedRateLimit(get) {
   return { limit, remaining: rem !== null && rem <= limit ? rem : null };
 }
 
-// apps/executor/src/secrets.ts
+// src/secrets.ts
 function secretFile(dir, name) {
   mkdirSync2(dir, { recursive: true, mode: 448 });
   const path = join2(dir, name);
@@ -8127,12 +8127,12 @@ function openWith(kek, network, owner, address, sealed) {
   return pk;
 }
 
-// apps/executor/src/server.ts
+// src/server.ts
 import { createServer } from "node:http";
 import { timingSafeEqual as timingSafeEqual3 } from "node:crypto";
 import { isIP } from "node:net";
 
-// packages/copy-engine/src/io.ts
+// ../../packages/copy-engine/src/io.ts
 var WS_OPEN = 1;
 var host = globalThis;
 function unref(h) {
@@ -8167,7 +8167,7 @@ function randomId(prefix = "") {
   return prefix + s.slice(0, 16);
 }
 
-// packages/copy-engine/src/confirm.ts
+// ../../packages/copy-engine/src/confirm.ts
 var CONFIRM_READS = 2;
 var CONFIRM_GAP_MS = 2e3;
 async function confirmRead(first, read, view, o = {}) {
@@ -8191,7 +8191,7 @@ async function confirmRead(first, read, view, o = {}) {
 }
 var sizeView = (n) => n === null || n === void 0 ? "unread" : String(Number((n || 0).toPrecision(12)));
 
-// packages/copy-engine/src/policy.ts
+// ../../packages/copy-engine/src/policy.ts
 var COPY_TERMS_VERSION = "2026-11-02";
 var US_REGIONS = ["US", "PR", "VI", "GU", "AS", "MP", "UM"];
 var UK_CA_REGIONS = ["GB", "CA"];
@@ -8309,7 +8309,7 @@ function copyFeeFor(volumeUsd, ladder = COPY_FEE_LADDER) {
 }
 var BOT_FEE = 5;
 
-// packages/copy-engine/src/sanctionsList.ts
+// ../../packages/copy-engine/src/sanctionsList.ts
 var SANCTIONED_ADDRESSES = [
   "0x002471b8a185f9980708d0eaec5b289714f56f8d",
   "0x0330070fd38ec3bb94f58fa55d40368271e9e54a",
@@ -8407,7 +8407,7 @@ var SANCTIONED_ADDRESSES = [
   "0xfec8a60023265364d066a1212fde3930f6ae8da7"
 ];
 
-// packages/copy-engine/src/sanctions.ts
+// ../../packages/copy-engine/src/sanctions.ts
 function screenPolicy(policy, ...addresses) {
   const hit = sanctionedOf(addresses);
   if (hit === null) return policy;
@@ -8427,7 +8427,7 @@ function sanctionedOf(addresses) {
 var SANCTIONED_WALLET_REASON = "This wallet address is on a sanctions list, so ValueDesk cannot be used with it. If you believe this is a mistake, contact us at the address in the Impressum.";
 var SANCTIONED_LEADER_REASON = "This trader's wallet address is on a sanctions list, so it cannot be copied through ValueDesk.";
 
-// packages/copy-engine/src/settings.ts
+// ../../packages/copy-engine/src/settings.ts
 var ADDRESS2 = /^0x[0-9a-f]{40}$/;
 var COIN = /^[A-Z0-9]{1,20}$/;
 var DEFAULT_SETTINGS = {
@@ -8570,7 +8570,7 @@ var SettingsError = class extends Error {
   name = "SettingsError";
 };
 
-// packages/copy-engine/src/markets.ts
+// ../../packages/copy-engine/src/markets.ts
 var num = (v, fallback = NaN) => {
   const n = typeof v === "string" ? Number(v) : typeof v === "number" ? v : NaN;
   return Number.isFinite(n) ? n : fallback;
@@ -8758,7 +8758,7 @@ var snapPrice = (p, m) => {
   return s === "0" ? m.tickSize : s;
 };
 
-// packages/copy-engine/src/planner.ts
+// ../../packages/copy-engine/src/planner.ts
 var FLAT_EPS = 1e-9;
 var isFlat = (x) => !Number.isFinite(x) || Math.abs(x) < FLAT_EPS;
 var sign = (x) => isFlat(x) ? 0 : x > 0 ? 1 : -1;
@@ -9134,7 +9134,7 @@ function applyFill(state, symbol2, side, qty2, price2, fee, at) {
   else state.owned[symbol2] = { size: next, entry: price2, openedAt: at };
 }
 
-// packages/copy-engine/src/sodex.ts
+// ../../packages/copy-engine/src/sodex.ts
 var OutcomeUnknownError = class extends Error {
   name = "OutcomeUnknownError";
   outcomeUnknown = true;
@@ -9919,7 +9919,7 @@ function hlSpotCollateral(st, px2) {
   return sum;
 }
 
-// packages/copy-engine/src/socket.ts
+// ../../packages/copy-engine/src/socket.ts
 var LiveSocket = class {
   constructor(o) {
     this.o = o;
@@ -10046,7 +10046,7 @@ var LiveSocket = class {
   }
 };
 
-// packages/copy-engine/src/feeds.ts
+// ../../packages/copy-engine/src/feeds.ts
 var COALESCE_MS = 150;
 var key = (l) => `${l.venue}:${l.address.toLowerCase()}`;
 var LeaderBook = class {
@@ -10490,7 +10490,7 @@ var HyperliquidFeed = class {
   }
 };
 
-// packages/copy-engine/src/orders.ts
+// ../../packages/copy-engine/src/orders.ts
 function intentsAction(accountId, market, intents, builder) {
   return perpsActions.newOrder(
     accountId,
@@ -10612,7 +10612,7 @@ var PaperSink = class {
   }
 };
 
-// packages/copy-engine/src/algo/math.ts
+// ../../packages/copy-engine/src/algo/math.ts
 var DAY_MS2 = 864e5;
 function makeRng(seed) {
   let a = seed >>> 0;
@@ -10837,7 +10837,7 @@ function trail(s, side, price2, o) {
   return { state: { armed, extreme }, stop, fired };
 }
 
-// packages/copy-engine/src/oracle.ts
+// ../../packages/copy-engine/src/oracle.ts
 var ORACLE_VENUES = [
   "binanceFutures",
   "binanceSpot",
@@ -11113,7 +11113,7 @@ var OracleFeed = class {
   }
 };
 
-// packages/copy-engine/src/algo/types.ts
+// ../../packages/copy-engine/src/algo/types.ts
 var ALGO_KINDS = ["twap", "vwap", "pov", "iceberg", "chase", "scale", "dca", "swarm", "conditional", "trailing", "basket", "bracket", "sweep", "mm", "grid"];
 var BOT_KINDS = ["mm", "grid"];
 var SLIP_FROM = ["touch", "mid", "mark", "index", "oracleMid", "oracleFair"];
@@ -11127,7 +11127,7 @@ var SLIP_FROM_NAMES = {
 };
 var FINAL_STATUSES = /* @__PURE__ */ new Set(["done", "cancelled", "expired", "failed"]);
 
-// packages/copy-engine/src/algo/spec.ts
+// ../../packages/copy-engine/src/algo/spec.ts
 var AlgoSpecError = class extends Error {
   constructor(message, errors) {
     super(message);
@@ -11152,7 +11152,7 @@ var ALGO_LIMITS = {
   trailing: { trailPct: { min: 1e-3, max: 0.5 }, chaseMs: { min: 1e3, max: 10 * MIN } },
   basket: { legs: { min: 2, max: 10 }, legUsd: { min: 10, max: 1e7 } },
   sweep: { slippageBps: { min: 1, max: 1e3 }, roundMs: { min: 500, max: MIN }, timeoutMs: { min: 5e3, max: DAY } },
-  mm: { orderUsd: { min: 10, max: 1e5 }, maxInventoryUsd: { min: 10, max: 1e6 }, offsetTicks: { min: -1, max: 1e3 }, chaseTicks: { min: 1, max: 1e3 }, minRepriceMs: { min: 1e3, max: MIN }, skewTicks: { min: 0, max: 1e3 }, edgeBps: { min: 0, max: 100 }, queueGuard: { min: 0, max: 0.5 }, levels: { min: 1, max: 5 }, moveGuard: { min: 0, max: 100 } },
+  mm: { orderUsd: { min: 10, max: 1e5 }, maxInventoryUsd: { min: 10, max: 1e6 }, offsetTicks: { min: -1, max: 1e3 }, chaseTicks: { min: 1, max: 1e3 }, minRepriceMs: { min: 1e3, max: MIN }, skewTicks: { min: 0, max: 1e3 }, edgeBps: { min: 0, max: 100 }, queueGuard: { min: 0, max: 0.5 }, levels: { min: 1, max: 5 }, moveGuard: { min: 0, max: 100 }, refBps: { min: 0, max: 50 }, pullBps: { min: 0, max: 20 } },
   grid: { levels: { min: 3, max: 60 }, orderUsd: { min: 10, max: 1e5 } },
   bot: { volumeTargetUsd: { min: 100, max: 1e10 }, maxLossUsd: { min: 1, max: 1e8 } },
   exitPct: { min: 1e-3, max: 10 },
@@ -11697,6 +11697,14 @@ function checkAlgoSpec(input, depth = 0) {
       if (o.queueGuard !== void 0 && o.queueGuard !== null && Number(o.queueGuard) !== 0) spec.queueGuard = num3(o, "queueGuard", "Queue guard", L.queueGuard, e);
       if (o.levels !== void 0 && o.levels !== null && Number(o.levels) !== 1) spec.levels = int(o, "levels", "Ladder", L.levels, e);
       if (o.moveGuard !== void 0 && o.moveGuard !== null && Number(o.moveGuard) !== 0) spec.moveGuard = num3(o, "moveGuard", "Move guard", L.moveGuard, e);
+      if (o.ref !== void 0 && o.ref !== null) {
+        if (o.ref !== "binance") e.ref = "The reference must be binance.";
+        else {
+          spec.ref = "binance";
+          if (o.refBps !== void 0 && o.refBps !== null && Number(o.refBps) !== 0) spec.refBps = num3(o, "refBps", "Distance from the Binance price", L.refBps, e);
+          if (o.pullBps !== void 0 && o.pullBps !== null && Number(o.pullBps) !== 0) spec.pullBps = num3(o, "pullBps", "Pull distance", L.pullBps, e);
+        }
+      }
       break;
     }
     case "grid": {
@@ -11794,7 +11802,7 @@ var ALGO_NAMES = {
   grid: "Grid"
 };
 
-// packages/copy-engine/src/notices.ts
+// ../../packages/copy-engine/src/notices.ts
 var leaderShort = (s) => `${s.settings.leader.address.slice(0, 6)}\u2026${s.settings.leader.address.slice(-4)}`;
 var mk = (n) => ({ ...n, id: `${n.source}:${n.ref}:${n.kind}:${n.at}` });
 function algoName(a) {
@@ -11913,7 +11921,7 @@ function copyDelistedNotice(s, symbol2, size, at = Date.now()) {
 }
 var delistedDetail = (symbol2, size) => `${symbol2} is no longer listed on SoDEX. The copy still holds a ${size > 0 ? "long" : "short"} position of ${px(Math.abs(size))} there, and ValueDesk will not trade it any more: the copy does not close, reduce or add to it. What to do with it is yours to decide on SoDEX.`;
 
-// packages/copy-engine/src/runtime.ts
+// ../../packages/copy-engine/src/runtime.ts
 var RECONCILE_MS = 6e4;
 var FOLLOWER_REFRESH_MS = 3e4;
 var GUARD_MS = 2e3;
@@ -13669,7 +13677,7 @@ var CopyRuntime = class {
   }
 };
 
-// packages/copy-engine/src/api.ts
+// ../../packages/copy-engine/src/api.ts
 var COPY_DOMAIN = { name: "ValueDesk Copy", version: "1" };
 var COPY_TERMS_EXECUTOR = "valuedesk-copy-terms";
 var SITE_TERMS_EXECUTOR = "valuedesk-site-terms";
@@ -13771,6 +13779,8 @@ var ALGO_UPDATE_FIELDS = [
   "queueGuard",
   "levels",
   "moveGuard",
+  "refBps",
+  "pullBps",
   "volumeTargetUsd",
   "maxLossUsd",
   "endAt",
@@ -13779,7 +13789,7 @@ var ALGO_UPDATE_FIELDS = [
 ];
 var EXECUTOR_FEATURES = ["counter", "site-terms", "key-import", "algo-update", "bots", "multiplier"];
 
-// packages/copy-engine/src/algo/bots.ts
+// ../../packages/copy-engine/src/algo/bots.ts
 var BOT_SAMPLE_MS = 5 * 6e4;
 var BOT_SERIES_MAX = 1500;
 var emptyBook = () => ({ buyQty: 0, buyValue: 0, sellQty: 0, sellValue: 0, makerValue: 0, takerValue: 0, tradeFees: 0, builderFees: 0, fills: 0, series: [] });
@@ -13844,7 +13854,7 @@ function gridAfterFill(sides, i, filled) {
 function gridQty(orderUsd, price2, m) {
   return Math.max(floorStep(orderUsd / price2, m), minChildQty(m, price2));
 }
-function mmQuotes(s, q, m, inventory, mark) {
+function mmQuotes(s, q, m, inventory, mark, fair = null) {
   const tick = Number(m.tickSize);
   const invUsd = inventory * mark;
   const ratio = Math.max(-1, Math.min(1, invUsd / s.maxInventoryUsd));
@@ -13862,8 +13872,15 @@ function mmQuotes(s, q, m, inventory, mark) {
     const edge = s.edgeBps ?? 0;
     if (edge > 0) {
       const midP = (q.bid + q.ask) / 2;
-      const fair = mark > 0 ? mark : midP;
-      price2 = side === "buy" ? Math.min(price2, Math.min(midP, fair) * (1 - edge / 1e4) - skew * tick) : Math.max(price2, Math.max(midP, fair) * (1 + edge / 1e4) + skew * tick);
+      const markP = mark > 0 ? mark : midP;
+      price2 = side === "buy" ? Math.min(price2, Math.min(midP, markP) * (1 - edge / 1e4) - skew * tick) : Math.max(price2, Math.max(midP, markP) * (1 + edge / 1e4) + skew * tick);
+    }
+    if (fair !== null && fair > 0) {
+      const at = refLine(side, fair, adds ? s.refBps ?? 0 : (s.refBps ?? 0) / 4);
+      if ((s.refBps ?? 0) > 0) price2 = side === "buy" ? at - skew * tick : at + skew * tick;
+      const line = adds ? refLine(side, fair, s.pullBps ?? 0) : fair;
+      if (adds && (s.refBps ?? 0) <= 0 && (side === "buy" ? price2 > line + 1e-12 : price2 < line - 1e-12)) continue;
+      price2 = side === "buy" ? Math.min(price2, line) : Math.max(price2, line);
     }
     price2 = side === "buy" ? Math.min(price2, q.ask - tick) : Math.max(price2, q.bid + tick);
     price2 = side === "buy" ? snapDown(price2, m.tickSize) : snapUp(price2, m.tickSize);
@@ -13875,6 +13892,11 @@ function mmQuotes(s, q, m, inventory, mark) {
   }
   return out;
 }
+var refLine = (side, fair, bps) => side === "buy" ? fair * (1 - bps / 1e4) : fair * (1 + bps / 1e4);
+function pastFair(side, price2, fair, adds, pullBps) {
+  const line = refLine(side, fair, adds ? pullBps : 0);
+  return side === "buy" ? price2 > line + 1e-12 : price2 < line - 1e-12;
+}
 function queueShare(q, side) {
   const own = side === "buy" ? q.bidSz : q.askSz;
   const other = side === "buy" ? q.askSz : q.bidSz;
@@ -13882,7 +13904,7 @@ function queueShare(q, side) {
   return own / (own + other);
 }
 
-// packages/copy-engine/src/algo/sizes.ts
+// ../../packages/copy-engine/src/algo/sizes.ts
 function money(n) {
   const a = Math.abs(n);
   const sign2 = n < 0 ? "-" : "";
@@ -14199,7 +14221,7 @@ function closeNote(pos, share, m, px2, out) {
   if (take > maxQ + 1e-12) out.notes.push(`Closing about ${money(take * px2)} is over ${maxWords(m, px2)}: it closes in ${Math.ceil(take / maxQ - 1e-9)} orders, one after the other.`);
 }
 
-// packages/copy-engine/src/algo/limits.ts
+// ../../packages/copy-engine/src/algo/limits.ts
 var OI_NEAR_SHARE = 0.8;
 function positionCapUsd(m, leverage) {
   const tiers = m.marginTiers;
@@ -14276,7 +14298,7 @@ function oiRoomWords(m, head2, price2) {
   return `Open interest on ${m.name} is at ${used}% of SoDEX's cap: about ${money(head2.room * price2)} (${coins2(head2.room)} ${m.base}) can still be added market-wide.`;
 }
 
-// packages/copy-engine/src/algo/sweep.ts
+// ../../packages/copy-engine/src/algo/sweep.ts
 var SWEEP_MAX_AGE_MS = 5e3;
 function sweepRefFor(s, quotes, sodex, now, maxAgeMs = SWEEP_MAX_AGE_MS) {
   const kind = s.reference ?? "oracleMid";
@@ -14319,7 +14341,7 @@ function sweepStep(s) {
   return { type: "send", price: price2, qty: qty2 };
 }
 
-// packages/copy-engine/src/algo/plan.ts
+// ../../packages/copy-engine/src/algo/plan.ts
 function exitLevels(side, x, avg) {
   const sign2 = side === "buy" ? 1 : -1;
   return {
@@ -14380,7 +14402,7 @@ function bandRefused(side, children, m, ref) {
   return children.filter((c) => c.price !== null && (side === "buy" ? c.price > ref * (1 + m.buyLimitUpRatio) + 1e-9 : c.price < ref * (1 - m.sellLimitDownRatio) - 1e-9)).length;
 }
 
-// packages/copy-engine/src/algo/feed.ts
+// ../../packages/copy-engine/src/algo/feed.ts
 var QUOTE_MAX_AGE_MS = 15e3;
 var HISTORY_MS = 60 * 6e4;
 var toNum = (v) => {
@@ -14642,7 +14664,7 @@ var AlgoFeed = class {
   }
 };
 
-// packages/copy-engine/src/algo/sink.ts
+// ../../packages/copy-engine/src/algo/sink.ts
 var TIF = { ioc: TimeInForce.IOC, gtx: TimeInForce.GTX, gtc: TimeInForce.GTC };
 function stopsAction(accountId, market, stops, builder) {
   return perpsActions.newOrder(
@@ -14754,7 +14776,34 @@ var KeyAlgoSink = class {
   }
 };
 
-// packages/copy-engine/src/algo/runtime.ts
+// ../../packages/copy-engine/src/algo/reference.ts
+var BASIS_HALF_LIFE_MS = 3e4;
+var REF_MAX_AGE_MS = 2e3;
+var FairBasis = class {
+  basis = null;
+  at = 0;
+  /** A pair of mids seen at `now`. */
+  update(sodexMid, refMid, now) {
+    if (!(sodexMid > 0) || !(refMid > 0)) return;
+    const r = sodexMid / refMid;
+    if (this.basis === null || !(now > this.at)) {
+      if (this.basis === null) this.basis = r;
+      this.at = Math.max(this.at, now);
+      return;
+    }
+    this.basis += (1 - Math.pow(0.5, (now - this.at) / BASIS_HALF_LIFE_MS)) * (r - this.basis);
+    this.at = now;
+  }
+  get ready() {
+    return this.basis !== null;
+  }
+  /** The fair price for a reference mid (null before the first pair). */
+  fair(refMid) {
+    return this.basis === null ? null : refMid * this.basis;
+  }
+};
+
+// ../../packages/copy-engine/src/algo/runtime.ts
 var ALGO_TICK_MS = 500;
 var FLUSH_MS = 2e3;
 var MARKETS_REFRESH_MS2 = 10 * 6e4;
@@ -14795,7 +14844,7 @@ var EXITS_RETRY_MS = 3e4;
 var EXITS_MAX_REFUSALS = 5;
 var UPDATABLE = /* @__PURE__ */ new Set(["limitPrice", "upper", "lower", "maxSpreadBps", "label", "quantity"]);
 var BOT_UPDATABLE = {
-  mm: /* @__PURE__ */ new Set(["label", "maxSpreadBps", "upper", "lower", "orderUsd", "maxInventoryUsd", "offsetTicks", "chaseTicks", "minRepriceMs", "skewTicks", "edgeBps", "queueGuard", "levels", "moveGuard", "volumeTargetUsd", "maxLossUsd", "endAt", "onStop"]),
+  mm: /* @__PURE__ */ new Set(["label", "maxSpreadBps", "upper", "lower", "orderUsd", "maxInventoryUsd", "offsetTicks", "chaseTicks", "minRepriceMs", "skewTicks", "edgeBps", "queueGuard", "levels", "moveGuard", "refBps", "pullBps", "volumeTargetUsd", "maxLossUsd", "endAt", "onStop"]),
   grid: /* @__PURE__ */ new Set(["label", "maxSpreadBps", "upper", "lower", "orderUsd", "volumeTargetUsd", "maxLossUsd", "endAt", "onStop", "outOfRange"])
 };
 var BOT_CLOSE_REST_MS = 6e4;
@@ -14873,6 +14922,8 @@ var AlgoRuntime = class {
   running = false;
   /** The sweep oracle's last quotes per coin, and the read in flight. */
   oracleQuotes = /* @__PURE__ */ new Map();
+  /** The Binance-led makers' basis per market (reference.ts). */
+  fairs = /* @__PURE__ */ new Map();
   /* ------------------------------------------------------------ lifecycle ----- */
   async start() {
     if (this.running) return;
@@ -14903,6 +14954,7 @@ var AlgoRuntime = class {
       }
     }
     this.market.start();
+    this.host.reference?.onQuote((market) => this.onReference(market));
     this.syncWatch();
     if (this.host.autoTick !== false) {
       this.timers.push(
@@ -14943,6 +14995,46 @@ var AlgoRuntime = class {
     }
     const owners = [...weight.entries()].sort((x, y) => y[1] - x[1] || (x[0] < y[0] ? -1 : 1)).map(([o]) => o);
     this.market.watch([...symbols], owners);
+    if (this.host.reference) {
+      const refs = /* @__PURE__ */ new Set();
+      for (const a of this.algos.values()) if (!FINAL_STATUSES.has(a.status) && a.spec.kind === "mm" && a.spec.ref) refs.add(a.spec.symbol);
+      this.host.reference.watch([...refs]);
+    }
+  }
+  /**
+   * The fair price of a Binance-led maker's market now (reference.ts): the reference's mid times the basis, the basis
+   * fed with this pair of mids. null: no reference here, none for this market, or older than REF_MAX_AGE_MS.
+   */
+  fairFor(symbol2, q, now) {
+    const r = this.host.reference?.quote(symbol2);
+    if (!r || now - r.at > REF_MAX_AGE_MS || !(r.bid > 0) || !(r.ask > 0)) return null;
+    let b = this.fairs.get(symbol2);
+    if (!b) this.fairs.set(symbol2, b = new FairBasis());
+    const refMid = (r.bid + r.ask) / 2;
+    b.update(mid(q), refMid, now);
+    return b.fair(refMid);
+  }
+  /**
+   * A reference tick (the fast pull): every running Binance-led maker on that market cancels at once a quote the fair
+   * price came past its line (bots.ts pastFair) - before the next step, and before SoDEX's takers who watch Binance
+   * reach it. Only cancels: new quotes go out with the steps.
+   */
+  onReference(market) {
+    if (!this.running) return;
+    const q = this.market.quote(market);
+    const m = this.markets.get(market);
+    if (!q || !m) return;
+    const now = Date.now();
+    let fair;
+    for (const a of this.algos.values()) {
+      const s = a.spec;
+      if (s.kind !== "mm" || !s.ref || s.symbol !== market || a.status !== "running") continue;
+      if (fair === void 0) fair = this.fairFor(market, q, now);
+      if (fair === null) return;
+      const inv = bookInventory(a.book);
+      const stale = this.live(a).filter((c) => c.state === "open" && !c.cancelling && c.tif !== "ioc" && pastFair(c.side, c.price, fair, c.side === "buy" ? inv >= 0 : inv <= 0, s.pullBps ?? 0));
+      if (stale.length) void this.cancelChildren(a, m, stale).catch((e) => this.host.log.warn("algo: fast pull failed", { algo: a.id, error: String(e) }));
+    }
   }
   /**
    * Orders of wallets the socket does not follow (SoDEX lets one IP follow 10;
@@ -15966,12 +16058,17 @@ var AlgoRuntime = class {
     }
     const inv = bookInventory(a.book);
     const tick = Number(m.tickSize);
+    const fair = s.ref ? this.fairFor(s.symbol, q, now) : null;
+    if (s.ref && fair === null) {
+      await this.pullResting(a);
+      return this.hold(a, this.host.reference ? "Held: waiting for the Binance price (it quotes only with a fresh one)." : "Held: the Binance-led maker runs on the ValueDesk executor only.");
+    }
     const ago = (s.moveGuard ?? 0) > 0 ? this.market.priceAgo(s.symbol, "mid", 2e3) : null;
     const moved = ago ? (mid(q) - ago) / tick : 0;
     const movesInto = (side) => (s.moveGuard ?? 0) > 0 && (side === "sell" ? moved >= s.moveGuard : moved <= -s.moveGuard) && (side === "buy" ? inv >= 0 : inv <= 0);
-    const want = mmQuotes(s, q, m, inv, mk2).filter((x) => !movesInto(x.side));
-    const front = (s.levels ?? 1) > 1 ? mmQuotes({ ...s, offsetTicks: Math.min(0, s.offsetTicks), queueGuard: 0 }, q, m, inv, mk2) : want;
-    const unguarded = (s.queueGuard ?? 0) > 0 || (s.moveGuard ?? 0) > 0 ? mmQuotes({ ...s, queueGuard: 0 }, q, m, inv, mk2) : want;
+    const want = mmQuotes(s, q, m, inv, mk2, fair).filter((x) => !movesInto(x.side));
+    const front = (s.levels ?? 1) > 1 ? mmQuotes({ ...s, offsetTicks: Math.min(0, s.offsetTicks), queueGuard: 0 }, q, m, inv, mk2, fair) : want;
+    const unguarded = (s.queueGuard ?? 0) > 0 || (s.moveGuard ?? 0) > 0 ? mmQuotes({ ...s, queueGuard: 0 }, q, m, inv, mk2, fair) : want;
     const guardedAt = { ...a.k.mguard ?? {} };
     const levels = Math.max(1, s.levels ?? 1);
     const live = this.live(a);
@@ -18065,14 +18162,14 @@ var AlgoRuntime = class {
   }
 };
 
-// packages/copy-engine/src/index.ts
+// ../../packages/copy-engine/src/index.ts
 var COPY_ENGINE_VERSION = "1.1.0";
 
-// apps/executor/src/service.ts
+// src/service.ts
 import { randomInt, timingSafeEqual as timingSafeEqual2 } from "node:crypto";
-import { existsSync as existsSync4 } from "node:fs";
+import { existsSync as existsSync5 } from "node:fs";
 
-// apps/executor/src/audited.ts
+// src/audited.ts
 var said = (e) => e instanceof Error ? e.message : String(e);
 var intentRow = (i) => ({ clOrdID: i.clOrdID, side: i.side, quantity: i.quantity, limitPrice: i.limitPrice, reduceOnly: i.reduceOnly, leg: i.leg, notionalUsd: i.notionalUsd, clampedBy: i.clampedBy });
 var resultRow = (r) => ({ clOrdID: r.clOrdID, ok: r.ok, orderId: r.orderId, error: r.error, outcomeUnknown: r.outcomeUnknown });
@@ -18169,7 +18266,7 @@ function auditedAlgoSink(inner, db, builderOf) {
   };
 }
 
-// apps/executor/src/brake.ts
+// src/brake.ts
 import { readFileSync as readFileSync3, statSync as statSync2 } from "node:fs";
 var READ_EVERY_MS = 1e3;
 var DEFAULT_REASON = "ValueDesk has paused trading on this executor for now.";
@@ -18247,7 +18344,7 @@ var Brake = class {
   }
 };
 
-// apps/executor/src/guard.ts
+// src/guard.ts
 function classifyRejection(error) {
   const e = String(error ?? "");
   if (/^Not sent:/i.test(e)) return /order rate/i.test(e) ? "account-rate" : "local";
@@ -18440,7 +18537,7 @@ function guardedAlgoSink(inner, guard, budget, retryBudgetMs = LOCAL_RETRY_BUDGE
   };
 }
 
-// apps/executor/src/alerts.ts
+// src/alerts.ts
 import { readFileSync as readFileSync4 } from "node:fs";
 var DEDUPE_MS = 10 * 6e4;
 var PER_HOUR = 30;
@@ -18673,7 +18770,417 @@ function maintenanceFor(file, part, now = Date.now()) {
   }
 }
 
-// apps/executor/src/service.ts
+// src/feed/ring.ts
+import { closeSync, fstatSync, ftruncateSync, openSync, readSync, renameSync, statSync as statSync3, writeSync } from "node:fs";
+var DEFAULT_FEED_PATH = "/run/valuescan-feed/binance-l1";
+var MAGIC = "ARCFEED1";
+var VERSION = 1;
+var TICK_BYTES = 64;
+var HEADER_BYTES = 4096;
+var NAME_BYTES = 16;
+var SYMBOL_BYTES = 48;
+var H_HEAD = 88;
+var monoNs = () => process.hrtime.bigint();
+var getName = (b, at, max) => {
+  const end = b.indexOf(0, at);
+  return b.toString("latin1", at, end < 0 || end > at + max ? at + max : end);
+};
+var RingReader = class {
+  constructor(path) {
+    this.path = path;
+    this.fd = openSync(path, "r");
+    this.ino = fstatSync(this.fd).ino;
+    this.load();
+  }
+  path;
+  fd;
+  ino;
+  l;
+  feeds = [];
+  symbols = [];
+  bySymbol = /* @__PURE__ */ new Map();
+  generation = 0n;
+  /** The next tick to read. */
+  next = 0n;
+  /** Ticks the producer lapped before they were read. */
+  lost = 0n;
+  h = Buffer.alloc(16);
+  buf = Buffer.alloc(0);
+  load() {
+    const head2 = Buffer.alloc(HEADER_BYTES);
+    readSync(this.fd, head2, 0, HEADER_BYTES, 0);
+    if (head2.toString("latin1", 0, 8) !== MAGIC || head2.readUInt32LE(8) !== VERSION || head2.readUInt32LE(12) !== TICK_BYTES) throw new Error(`${this.path}: not an ${MAGIC} v${VERSION} ring`);
+    const capacity = Number(head2.readBigUInt64LE(16));
+    const feeds = head2.readUInt32LE(24);
+    const symbols = head2.readUInt32LE(28);
+    this.l = {
+      capacity,
+      feeds,
+      symbols,
+      names: Number(head2.readBigUInt64LE(32)),
+      table: Number(head2.readBigUInt64LE(40)),
+      latest: Number(head2.readBigUInt64LE(48)),
+      ring: Number(head2.readBigUInt64LE(56)),
+      length: Number(head2.readBigUInt64LE(64))
+    };
+    this.generation = head2.readBigUInt64LE(80);
+    const t = Buffer.alloc(this.l.latest - this.l.names);
+    readSync(this.fd, t, 0, t.length, this.l.names);
+    this.feeds.length = 0;
+    this.symbols.length = 0;
+    this.bySymbol.clear();
+    for (let i = 0; i < feeds; i++) this.feeds.push(getName(t, i * NAME_BYTES, NAME_BYTES));
+    for (let i = 0; i < symbols; i++) {
+      const at = this.l.table - this.l.names + i * SYMBOL_BYTES;
+      const s = { market: getName(t, at, 24), venue: getName(t, at + 24, 24) };
+      this.symbols.push(s);
+      this.bySymbol.set(s.market, i);
+    }
+    this.next = this.readHead().head;
+    this.buf = Buffer.alloc(Math.min(this.l.capacity, 4096) * TICK_BYTES);
+  }
+  readHead() {
+    readSync(this.fd, this.h, 0, 16, H_HEAD);
+    return { head: this.h.readBigUInt64LE(0), beat: this.h.readBigUInt64LE(8) };
+  }
+  /** The producer's heartbeat is younger than `maxMs`. */
+  alive(maxMs = 2e3) {
+    return monoNs() - this.readHead().beat < BigInt(maxMs) * 1000000n;
+  }
+  /** The path now names another file (the producer restarted): open that one. true when it did. */
+  reopenIfReplaced() {
+    let ino;
+    try {
+      ino = statSync3(this.path).ino;
+    } catch {
+      return false;
+    }
+    if (ino === this.ino) return false;
+    const fd = openSync(this.path, "r");
+    closeSync(this.fd);
+    this.fd = fd;
+    this.ino = ino;
+    this.load();
+    return true;
+  }
+  /** The newest tick of one feed and symbol (null: none yet, or being written twice over while read). */
+  latest(feed, symbol2) {
+    if (feed >= this.l.feeds || symbol2 >= this.l.symbols) return null;
+    const at = this.l.latest + (feed * this.l.symbols + symbol2) * TICK_BYTES;
+    const b = Buffer.alloc(TICK_BYTES);
+    const s = Buffer.alloc(8);
+    for (let i = 0; i < 3; i++) {
+      readSync(this.fd, b, 0, TICK_BYTES, at);
+      readSync(this.fd, s, 0, 8, at);
+      const seq = b.readBigUInt64LE(0);
+      if (seq !== 0n && seq === s.readBigUInt64LE(0)) return decode(b, 0, seq - 1n);
+    }
+    return null;
+  }
+  /** Every tick published since the last call, oldest first (at most `max`; the rest the next call). */
+  drain(max = 4096) {
+    const { head: head2 } = this.readHead();
+    if (head2 <= this.next) return [];
+    const cap = BigInt(this.l.capacity);
+    if (head2 - this.next > cap) {
+      this.lost += head2 - this.next - cap;
+      this.next = head2 - cap;
+    }
+    const want = Number(head2 - this.next < BigInt(max) ? head2 - this.next : BigInt(max));
+    if (this.buf.length < want * TICK_BYTES) this.buf = Buffer.alloc(want * TICK_BYTES);
+    const slot = Number(this.next & cap - 1n);
+    const first = Math.min(want, this.l.capacity - slot);
+    readSync(this.fd, this.buf, 0, first * TICK_BYTES, this.l.ring + slot * TICK_BYTES);
+    if (want > first) readSync(this.fd, this.buf, first * TICK_BYTES, (want - first) * TICK_BYTES, this.l.ring);
+    const after = this.readHead().head;
+    const out = [];
+    for (let i = 0; i < want; i++) {
+      const n = this.next + BigInt(i);
+      if (after - n > cap - 1n) {
+        this.lost++;
+        continue;
+      }
+      const seq = this.buf.readBigUInt64LE(i * TICK_BYTES);
+      if (seq !== n + 1n) {
+        this.lost++;
+        continue;
+      }
+      out.push(decode(this.buf, i * TICK_BYTES, n));
+    }
+    this.next += BigInt(want);
+    return out;
+  }
+  close() {
+    closeSync(this.fd);
+  }
+};
+function decode(b, at, n) {
+  const ids = b.readBigUInt64LE(at + 56);
+  return {
+    n,
+    rxNs: b.readBigUInt64LE(at + 8),
+    bid: b.readDoubleLE(at + 16),
+    ask: b.readDoubleLE(at + 24),
+    bidSz: b.readDoubleLE(at + 32),
+    askSz: b.readDoubleLE(at + 40),
+    eventMs: Number(b.readBigInt64LE(at + 48)),
+    feed: Number(ids & 0xffffn),
+    symbol: Number(ids >> 16n & 0xffffn),
+    update: Number(ids >> 32n)
+  };
+}
+
+// src/feed/binance.ts
+var BINANCE_FUTURES_WS = "wss://fstream.binance.com";
+var plainSockets = (url) => new wrapper_default(url, { perMessageDeflate: false });
+var SYMBOLS_PER_SOCKET = 8;
+var BinanceBooks = class {
+  constructor(o) {
+    this.o = o;
+    this.won = new Array(o.copies ?? 2).fill(0);
+  }
+  o;
+  sockets = [];
+  /** The newest update id per symbol: a copy's later arrival of the same update is dropped. */
+  seen = /* @__PURE__ */ new Map();
+  /** Ticks per copy that won the race, and duplicates dropped (for the feed's stats). */
+  won;
+  dropped = 0;
+  start() {
+    const groups = [];
+    const per = this.o.perSocket ?? SYMBOLS_PER_SOCKET;
+    for (let i = 0; i < this.o.symbols.length; i += per) groups.push(this.o.symbols.slice(i, i + per));
+    for (let copy = 0; copy < (this.o.copies ?? 2); copy++) {
+      for (const g2 of groups) {
+        const streams = g2.map((s) => `${s.toLowerCase()}@bookTicker`).join("/");
+        const socket = new LiveSocket({
+          url: `${this.o.origin ?? BINANCE_FUTURES_WS}/stream?streams=${streams}`,
+          factory: this.o.factory,
+          // Binance pings the client itself; a cheap request keeps our side of the silence check honest.
+          ping: '{"method":"LIST_SUBSCRIPTIONS","id":1}',
+          pingMs: 6e4,
+          staleMs: 15e3,
+          subscribe: () => {
+          },
+          onMessage: (m) => this.message(m, copy),
+          log: this.o.log,
+          name: `binance books ${copy}`
+        });
+        this.sockets.push(socket);
+        socket.start();
+      }
+    }
+  }
+  stop() {
+    for (const s of this.sockets) s.stop();
+    this.sockets = [];
+  }
+  /** At least one socket is up. */
+  get up() {
+    return this.sockets.some((s) => s.up);
+  }
+  message(m, copy) {
+    const d = m?.data;
+    if (!d || typeof d.s !== "string") return;
+    const rxNs = monoNs();
+    const u = Number(d.u);
+    const prev = this.seen.get(d.s);
+    if (prev !== void 0 && u <= prev) {
+      this.dropped++;
+      return;
+    }
+    this.seen.set(d.s, u);
+    const bid = Number(d.b);
+    const ask = Number(d.a);
+    if (!(bid > 0) || !(ask > 0)) return;
+    this.won[copy] = (this.won[copy] ?? 0) + 1;
+    this.o.onTick({ symbol: d.s, bid, ask, bidSz: Number(d.B) || 0, askSz: Number(d.A) || 0, eventMs: Number(d.E) || 0, update: u, rxNs, copy });
+  }
+};
+
+// src/feed/reference.ts
+import { existsSync as existsSync4 } from "node:fs";
+var POLL_MS = 2;
+var FALLBACK_AFTER_MS = 500;
+var RETURN_AFTER_MS = 3e3;
+var binanceSymbolOf = (market) => {
+  const m = /^([A-Z0-9]+)-USD$/.exec(market);
+  return m ? `${m[1]}USDT` : null;
+};
+var BinanceReference = class {
+  constructor(o) {
+    this.o = o;
+  }
+  o;
+  reader = null;
+  watched = /* @__PURE__ */ new Set();
+  quotes = /* @__PURE__ */ new Map();
+  listeners = [];
+  own = null;
+  ownFor = "";
+  /** The own sockets serve every watched market (the ring is down), not only the ones it lacks. */
+  ownAll = false;
+  /** Since when the ring has been alive again (for the return), or null while it is not. */
+  aliveSince = null;
+  poller = null;
+  checker = null;
+  /** For the status line: ticks from the ring and from the own sockets. */
+  stats = { ring: 0, own: 0, lost: 0 };
+  watch(markets) {
+    const next = new Set(markets);
+    if (next.size === this.watched.size && [...next].every((m) => this.watched.has(m))) return;
+    this.watched = next;
+    if (next.size && this.o.autoPoll !== false) this.startTimers();
+    this.check();
+  }
+  quote(market) {
+    return this.quotes.get(market) ?? null;
+  }
+  onQuote(cb) {
+    this.listeners.push(cb);
+  }
+  stop() {
+    if (this.poller) clearInterval(this.poller);
+    if (this.checker) clearInterval(this.checker);
+    this.poller = this.checker = null;
+    this.own?.stop();
+    this.own = null;
+    this.reader?.close();
+    this.reader = null;
+  }
+  /** Whether the ring serves the watched markets now (false: the own sockets do, or nothing yet). */
+  get onRing() {
+    return this.reader !== null && !this.ownAll;
+  }
+  startTimers() {
+    if (this.poller) return;
+    this.poller = setInterval(() => this.poll(), POLL_MS);
+    this.checker = setInterval(() => this.check(), 250);
+    this.poller.unref?.();
+    this.checker.unref?.();
+  }
+  /** Every tick the ring has for a watched market, into the quotes (and the listeners). */
+  poll() {
+    const r = this.reader;
+    if (!r || !this.watched.size) return;
+    let ticks;
+    try {
+      ticks = r.drain();
+    } catch (e) {
+      this.o.log.warn("reference: ring read failed", { error: String(e) });
+      return;
+    }
+    if (!ticks.length || this.ownAll) {
+      this.stats.lost = Number(r.lost);
+      return;
+    }
+    const nowMs = Date.now();
+    const nowNs = monoNs();
+    for (const t of ticks) {
+      const market = r.symbols[t.symbol]?.market;
+      if (!market || t.feed !== 0 || !this.watched.has(market)) continue;
+      const at = nowMs - Number((nowNs - t.rxNs) / 1000000n);
+      this.set(market, { bid: t.bid, ask: t.ask, at });
+      this.stats.ring++;
+    }
+  }
+  /** The ring's state, every 250 ms: open it, follow a restart, fall back and return. */
+  check() {
+    if (!this.watched.size) {
+      if (this.own) this.closeOwn();
+      return;
+    }
+    if (!this.reader && existsSync4(this.o.path)) {
+      try {
+        this.reader = new RingReader(this.o.path);
+        this.seed();
+        this.o.log.info("reference: on the shared feed", { path: this.o.path, symbols: this.reader.symbols.length });
+      } catch (e) {
+        this.o.log.warn("reference: shared feed unreadable", { path: this.o.path, error: String(e) });
+        this.reader = null;
+      }
+    } else if (this.reader) {
+      try {
+        if (this.reader.reopenIfReplaced()) {
+          this.seed();
+          this.o.log.info("reference: the shared feed restarted", { symbols: this.reader.symbols.length });
+        }
+      } catch (e) {
+        this.o.log.warn("reference: shared feed reopen failed", { error: String(e) });
+      }
+    }
+    const alive2 = this.reader?.alive(FALLBACK_AFTER_MS) ?? false;
+    const missing = [...this.watched].filter((m) => !this.reader?.bySymbol.has(m));
+    const now = Date.now();
+    if (alive2) this.aliveSince ??= now;
+    else this.aliveSince = null;
+    if (!alive2 || missing.length) {
+      this.openOwn(alive2 ? missing : [...this.watched], !alive2);
+    } else if (this.own && this.aliveSince !== null && now - this.aliveSince >= RETURN_AFTER_MS) {
+      this.closeOwn();
+      this.seed();
+      this.o.log.info("reference: back on the shared feed");
+    }
+  }
+  /** Every watched market's latest quote from the ring's latest table (on open: no wait for a tick). */
+  seed() {
+    const r = this.reader;
+    if (!r) return;
+    const nowMs = Date.now();
+    const nowNs = monoNs();
+    for (const market of this.watched) {
+      const i = r.bySymbol.get(market);
+      if (i === void 0) continue;
+      const t = r.latest(0, i);
+      if (t) this.set(market, { bid: t.bid, ask: t.ask, at: nowMs - Number((nowNs - t.rxNs) / 1000000n) });
+    }
+  }
+  openOwn(markets, all) {
+    const key2 = [...markets].sort().join(",");
+    this.ownAll = all;
+    if (this.own && this.ownFor === key2) return;
+    this.own?.stop();
+    const bySymbol = /* @__PURE__ */ new Map();
+    for (const m of markets) {
+      const s = binanceSymbolOf(m);
+      if (s) bySymbol.set(s, m);
+    }
+    if (!bySymbol.size) {
+      this.own = null;
+      this.ownFor = "";
+      return;
+    }
+    this.o.log.warn("reference: own Binance sockets", { markets: key2, ring: this.reader ? "silent or lacking these" : "missing" });
+    this.ownFor = key2;
+    this.own = new BinanceBooks({
+      factory: this.o.factory,
+      symbols: [...bySymbol.keys()],
+      copies: 1,
+      log: this.o.log,
+      onTick: (t) => {
+        const market = bySymbol.get(t.symbol);
+        if (!market) return;
+        this.set(market, { bid: t.bid, ask: t.ask, at: Date.now() });
+        this.stats.own++;
+      }
+    });
+    this.own.start();
+  }
+  closeOwn() {
+    this.own?.stop();
+    this.own = null;
+    this.ownFor = "";
+    this.ownAll = false;
+  }
+  set(market, q) {
+    const prev = this.quotes.get(market);
+    if (prev && prev.at > q.at) return;
+    this.quotes.set(market, q);
+    for (const cb of this.listeners) cb(market);
+  }
+};
+
+// src/service.ts
 var PAIR_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 var PAIR_MAX_TRIES = 10;
 var PAIR_LOCK_MS = 15 * 6e4;
@@ -18717,7 +19224,7 @@ function algoPatch(raw) {
     if (r.label !== null && (typeof r.label !== "string" || r.label.length > 60)) throw new ApiError(400, "patch", "The label must be text of at most 60 characters, or null.");
     out.label = r.label;
   }
-  for (const k of ["orderUsd", "maxInventoryUsd", "offsetTicks", "chaseTicks", "minRepriceMs", "skewTicks", "edgeBps", "queueGuard", "levels", "moveGuard"]) {
+  for (const k of ["orderUsd", "maxInventoryUsd", "offsetTicks", "chaseTicks", "minRepriceMs", "skewTicks", "edgeBps", "queueGuard", "levels", "moveGuard", "refBps", "pullBps"]) {
     if (r[k] === void 0) continue;
     if (!(typeof r[k] === "number" && Number.isFinite(r[k]))) throw new ApiError(400, "patch", `${k} must be a number.`);
     out[k] = r[k];
@@ -18800,6 +19307,7 @@ var ExecutorService = class {
       confirmGapMs: deps.readGapMs
     });
     const oracleFeed = new OracleFeed({ fetch: deps.fetch });
+    this.reference = cfg.kind === "hosted" ? new BinanceReference({ path: process.env.EXECUTOR_FEED_PATH || DEFAULT_FEED_PATH, factory: plainSockets, log: deps.log }) : null;
     this.algos = new AlgoRuntime({
       store: db,
       sodex: this.sodex,
@@ -18815,6 +19323,7 @@ var ExecutorService = class {
       // A sweep's reference price: the shared oracle (oracle.ts) - Binance futures and spot, Bitget,
       // Hyperliquid, OKX and Bybit, each read at most once a second per coin for every algo here.
       oracle: (coin) => oracleFeed.quotes(coin),
+      ...this.reference ? { reference: this.reference } : {},
       // An algo failed, stopped, held or finished: kept for the follower to read after signing in.
       onNotice: (n) => db.addNotice(n),
       confirmGapMs: deps.readGapMs
@@ -18833,6 +19342,8 @@ var ExecutorService = class {
    * same builder (the copy fee ladder), the same terms and region rules.
    */
   algos;
+  /** The Binance-led maker's reference (feed/reference.ts); null on a self-hosted executor. */
+  reference;
   sodex;
   hyperliquid;
   nonces = createMemoryNonceManager();
@@ -18871,6 +19382,7 @@ var ExecutorService = class {
     this.signerSweep = null;
     for (const owner of [...this.signers.keys()]) this.forgetSigner(owner, true);
     await this.algos.stop();
+    this.reference?.stop();
     await this.runtime.stop();
     this.builderDb?.close();
   }
@@ -19631,7 +20143,7 @@ var ExecutorService = class {
     let usd = null;
     try {
       if (!this.builderDb) {
-        if (!existsSync4(this.cfg.builderDb)) return null;
+        if (!existsSync5(this.cfg.builderDb)) return null;
         this.builderDb = new (sqlite()).DatabaseSync(this.cfg.builderDb, { readOnly: true });
         this.builderDb.exec("PRAGMA busy_timeout = 2000");
       }
@@ -19655,7 +20167,7 @@ var ExecutorService = class {
   }
 };
 
-// apps/executor/src/server.ts
+// src/server.ts
 var BODY_LIMIT = 64 * 1024;
 var PREFIX = "/api/copy/v1";
 function rateKey(ip) {
@@ -19906,7 +20418,7 @@ function createExecutorServer(svc, cfg, log) {
   });
 }
 
-// apps/executor/src/main.ts
+// src/main.ts
 var LEVELS = { debug: 10, info: 20, warn: 30, error: 40 };
 function logger(level) {
   const at = LEVELS[level];
