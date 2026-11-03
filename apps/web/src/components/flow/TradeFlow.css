@@ -1,11 +1,11 @@
-/* Who traded (TradeFlow.tsx, CandleStrip.tsx): a chart view, the app's tokens only. Kind and state
+/* Who traded (TradeFlow.tsx): a panel beside the chart (Chart.tsx .kc-flow-wrap), the app's tokens only. Kind and state
    are pills, dots and icons - never a coloured edge down one side of a row (owner's rule).
 
-   SIZES (owner 2026-11-02: "not furnished ... on some screen sizes"). The view lives in a chart card,
-   a terminal panel of any width or the expanded overlay, so it answers to ITS OWN width (container
-   queries on `.tfl`), not the window's. Below the one-row toolbar everything scrolls together - the
-   candle row, the summary, the filters, the table (its header sticks) - so a short card still shows
-   wallets after a flick instead of three fixed bands and no table. */
+   SIZES (owner 2026-11-02: "not furnished ... on some screen sizes"). The panel is as wide as it is
+   dragged (beside the plot), the card's width (under the plot, on a narrow card) or the expanded
+   overlay, so it answers to ITS OWN width (container queries on `.tfl`), not the window's. Below the
+   toolbar and the candle row everything scrolls together - the summary, the filters, the table (its
+   header sticks) - so a short card still shows wallets after a flick. */
 
 .tfl {
   container: tfl / inline-size;
@@ -48,24 +48,19 @@
   .tfl--big { border-radius: 0; border: 0; }
 }
 
-/* --- the toolbar: what, which candles, where ---------------------------------------------------- */
+/* --- the toolbar: what, where, close --------------------------------------------------------- */
 .tfl-bar {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  grid-template-areas: 'title tf end';
+  display: flex;
   align-items: center;
-  gap: var(--sp-2) var(--sp-3);
-  padding: var(--sp-2) var(--sp-3);
+  gap: var(--sp-2);
+  min-height: 46px;
+  padding: var(--sp-2) var(--sp-2) var(--sp-2) var(--sp-3);
   border-bottom: 1px solid var(--panel-line);
 }
-.tfl-title { grid-area: title; display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
+.tfl-title { flex: 1 1 auto; display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
 .tfl-title b { font-size: var(--fs-head); font-weight: 600; color: var(--text); white-space: nowrap; }
 .tfl-title__coin { color: var(--muted); font-weight: 500; }
-.tfl-tf { grid-area: tf; min-width: 0; display: flex; }
-.tfl-tf .lbp-seg { max-width: 100%; overflow-x: auto; scrollbar-width: none; }
-.tfl-tf .lbp-seg::-webkit-scrollbar { display: none; }
-.tfl-tf .lbp-seg > button { padding: 0 9px; flex: none; }
-.tfl-bar__end { grid-area: end; display: flex; align-items: center; gap: var(--sp-2); justify-self: end; }
+.tfl-bar__end { flex: none; display: flex; align-items: center; gap: 6px; }
 
 .tfl-icobtn, .tfl-latest, .tfl-cta, .tfl-more {
   display: inline-flex;
@@ -94,15 +89,6 @@
 .tfl-latest.is-on { color: var(--text); border-color: color-mix(in srgb, var(--text) 70%, transparent); background: color-mix(in srgb, var(--text) 7%, transparent); }
 .tfl-cta { color: var(--text); border-color: var(--line); }
 
-/* Narrow: the title and its controls on one row, the timeframes under them, full width. */
-@container tfl (max-width: 760px) {
-  .tfl-bar { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: 'title end' 'tf tf'; }
-}
-@container tfl (max-width: 440px) {
-  /* Every timeframe fits: equal shares of the row, no scrolling (eight at 320 px are 34 px each). */
-  .tfl-tf .lbp-seg { width: 100%; overflow: visible; }
-  .tfl-tf .lbp-seg > button { flex: 1 1 0; min-width: 0; padding: 0 2px; }
-}
 @container tfl (max-width: 380px) {
   .tfl-title__coin { display: none; }
   .tfl-bar .psel__v { max-width: 92px; overflow: hidden; text-overflow: ellipsis; }
@@ -113,31 +99,21 @@
 .tfl-body { display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-3); }
 .tfl-body > * { flex: none; }
 
-/* --- the candle row: pick the candle ------------------------------------------------------------ */
-.tfl-strip { display: flex; flex-direction: column; gap: 6px; padding: var(--sp-2) var(--sp-3) 6px; border-bottom: 1px solid var(--panel-line); }
-.tfl-strip__info { display: flex; align-items: center; flex-wrap: wrap; gap: 6px var(--sp-3); min-height: 30px; font-size: var(--fs-xs); color: var(--muted); }
-.tfl-strip__when { display: inline-flex; align-items: center; gap: var(--sp-2); min-width: 0; }
-.tfl-strip__when b { color: var(--text); font-weight: 600; white-space: nowrap; }
-.tfl-strip__ohlc { display: inline-flex; gap: 2px var(--sp-2); flex-wrap: wrap; }
-.tfl-strip__ohlc i { font-style: normal; color: var(--dim); margin-right: 3px; }
-.tfl-strip__nav { display: inline-flex; gap: 6px; margin-left: auto; }
-.tfl-strip__svg { display: block; width: 100%; height: 44px; cursor: pointer; touch-action: pan-y; }
-.tfl-strip__wait { fill: var(--line-soft); }
-.tfl-strip__col { fill: transparent; }
-.tfl-strip__c.is-hover .tfl-strip__col { fill: var(--tint); }
-.tfl-strip__c.is-on .tfl-strip__col { fill: color-mix(in srgb, var(--text) 12%, transparent); }
-.tfl-strip__c line { stroke-width: 1px; }
-.tfl-strip__c .is-up { fill: var(--pos); stroke: var(--pos); }
-.tfl-strip__c .is-down { fill: var(--neg); stroke: var(--neg); }
-.tfl-strip__c:not(.is-on):not(.is-hover) .is-up, .tfl-strip__c:not(.is-on):not(.is-hover) .is-down { opacity: 0.55; }
-@container tfl (max-width: 520px) {
-  /* The window and the step buttons first; the prices under them. */
-  .tfl-strip__ohlc { order: 3; width: 100%; }
+/* --- the candle: the chart's, stepped here ---------------------------------------------------- */
+.tfl-candle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: var(--sp-2) var(--sp-2) var(--sp-2) var(--sp-3);
+  border-bottom: 1px solid var(--panel-line);
 }
+.tfl-candle__when { flex: 1 1 auto; order: -1; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.tfl-candle__top { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.tfl-candle__when b { color: var(--text); font-size: var(--fs-sm); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tfl-candle__tip { color: var(--dim); font-size: var(--fs-xs); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 @container tfl (max-width: 420px) {
-  /* The date says it is the candle; the pill comes back for a hovered one. */
-  .tfl-strip__when .tfl-pill.is-pick { display: none; }
-  .tfl-strip__info { column-gap: var(--sp-2); }
+  .tfl-candle { gap: 4px; padding-left: var(--sp-2); }
+  .tfl-candle__when b { font-size: var(--fs-xs); }
 }
 
 /* --- summary ------------------------------------------------------------------------------------- */
@@ -352,12 +328,13 @@ button.tfl-tr:hover, button.tfl-tr:focus-visible { background: var(--bg-hover); 
   .tfl .psel__btn { min-height: 40px; }
   .tfl-tr { min-height: 48px; }
   .tfl-th { min-height: 34px; }
-  .tfl-strip__svg { height: 52px; }
 }
 
-/* --- a short panel (the trade page's chart card): thin candle row and summary -------------------- */
-.tfl.is-short .tfl-strip { padding-block: 6px 4px; }
-.tfl.is-short .tfl-strip__svg { height: 28px; }
+/* --- a short panel (the trade page's chart card): thin bars and summary ---------------------------- */
+.tfl.is-short .tfl-bar { min-height: 40px; padding-block: 4px; }
+.tfl.is-short .tfl-candle { padding-block: 4px; }
+.tfl.is-short .tfl-candle__when { flex-direction: row; align-items: center; gap: var(--sp-2); }
+.tfl.is-short .tfl-candle__tip { display: none; }
 .tfl.is-short .tfl-body { gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); }
 .tfl.is-short .tfl-sum { grid-template-columns: auto minmax(0, 1fr); grid-template-areas: 'lead stats' 'split split'; align-items: center; gap: 6px var(--sp-4); padding: var(--sp-2) var(--sp-3); }
 .tfl.is-short .tfl-sum__lead { flex-direction: row; align-items: baseline; gap: var(--sp-2); }

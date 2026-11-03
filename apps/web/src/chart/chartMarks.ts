@@ -30,8 +30,10 @@ import { intervalToMs } from './timeAxis';
 
 export const EXEC_OVERLAY = 'vs_exec';
 export const NEWS_OVERLAY = 'vs_news';
+/** The candle "Who traded" is breaking down (flow/TradeFlow.tsx): a lit column over it. */
+export const FLOW_PICK_OVERLAY = 'vs_flowpick';
 /** Overlays that are the chart's own, not the user's drawings. */
-export const SYSTEM_OVERLAYS: ReadonlySet<string> = new Set([ORDER_LINE_OVERLAY, EXEC_OVERLAY, NEWS_OVERLAY]);
+export const SYSTEM_OVERLAYS: ReadonlySet<string> = new Set([ORDER_LINE_OVERLAY, EXEC_OVERLAY, NEWS_OVERLAY, FLOW_PICK_OVERLAY]);
 
 const DAY = 86_400_000;
 
@@ -307,9 +309,31 @@ const execTemplate: OverlayTemplate = {
   },
 };
 
+/** The picked candle's column, the pane's full height and one bar wide; clicks go through it. */
+const flowPickTemplate: OverlayTemplate = {
+  name: FLOW_PICK_OVERLAY,
+  totalStep: 2,
+  lock: true,
+  needDefaultPointFigure: false,
+  needDefaultXAxisFigure: false,
+  needDefaultYAxisFigure: false,
+  createPointFigures: ({ chart, coordinates, bounding }) => {
+    const p = coordinates[0];
+    if (!p) return [];
+    const w = Math.max(3, chart.getBarSpace().bar + 2);
+    const x = Math.round(p.x - w / 2);
+    return [
+      { type: 'rect', ignoreEvent: true, attrs: { x, y: 0, width: w, height: bounding.height }, styles: { style: 'fill', color: 'rgba(255, 254, 239, 0.08)' } },
+      { type: 'line', ignoreEvent: true, attrs: { coordinates: [{ x: x + 0.5, y: 0 }, { x: x + 0.5, y: bounding.height }] }, styles: { color: 'rgba(255, 254, 239, 0.22)', size: 1, style: 'dashed', dashedValue: [3, 3] } },
+      { type: 'line', ignoreEvent: true, attrs: { coordinates: [{ x: x + w - 0.5, y: 0 }, { x: x + w - 0.5, y: bounding.height }] }, styles: { color: 'rgba(255, 254, 239, 0.22)', size: 1, style: 'dashed', dashedValue: [3, 3] } },
+    ];
+  },
+};
+
 /** Idempotent, like the other registrations. */
 export function registerMarkOverlays(kc: typeof import('klinecharts')): void {
   kc.registerOverlay(execTemplate);
+  kc.registerOverlay(flowPickTemplate);
 }
 
 // --- what the chart shows besides the candles -----------------------------------------

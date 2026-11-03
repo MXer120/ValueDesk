@@ -25,6 +25,8 @@ export const CHART_ICONS = {
   news: glyph(<><path d="M3.5 3h7.5v9.5a1 1 0 0 0 1 1H4a1.5 1.5 0 0 1-1.5-1.5V3.5" /><path d="M11 6h2.5v6.5a1 1 0 0 1-2 0M5.2 5.6h3.6M5.2 8h3.6M5.2 10.4h2.4" /></>),
   /** The object list: a window with its right column. */
   sidebar: glyph(<><rect x="2" y="2.8" width="12" height="10.4" rx="1.6" /><path d="M10 2.8v10.4M11.6 5.4h1M11.6 7.4h1" /></>),
+  /** Who traded: the wallets behind a candle. */
+  traders: glyph(<><circle cx="6" cy="5.5" r="2" /><path d="M2.5 13c0-2 1.6-3.5 3.5-3.5S9.5 11 9.5 13" /><circle cx="11.3" cy="6" r="1.6" /><path d="M11 9.6c1.5 0 2.5 1.3 2.5 3" /></>),
   /** Save to a research folder. */
   folder: glyph(<><path d="M2.5 4.5a1 1 0 0 1 1-1h2.8l1.4 1.5h4.8a1 1 0 0 1 1 1v6.5a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1Z" /><path d="M8 7.3v3.6M6.3 9.2 8 10.9l1.7-1.7" /></>),
   /** A row's drag handle. */

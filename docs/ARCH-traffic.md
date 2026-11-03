@@ -66,7 +66,7 @@ Class: **(a)** per-user exchange/chain traffic - now browser-direct;
 | Call (web) | Path | Class | Why it stays |
 |---|---|---|---|
 | Leaderboards, Explore, cohorts (+ detail, map, focus, wallets, the excluded wallets), liquidation heatmap (+ wallets, history, a wallet's positions; live over `/ws/liq`, browser to instance), screener | `/api/vs/leaderboard`, `/explore`, `/cohorts*`, `/excluded`, `/liquidations*`, `/ws/liq`, `/screener` | (b) | the index is the server's job |
-| Who traded a candle (chart view: every wallet's volume, sides, prices, fills; one wallet's fills) | `/api/vs/flow`, `/api/vs/flow/wallet` | (b) | the venues' public prints, both parties, recorded by the indexer (apps/server/src/flow/) |
+| Who traded a candle (a panel beside the chart: every wallet's volume, sides, prices, fills; one wallet's fills) | `/api/vs/flow`, `/api/vs/flow/wallet` | (b) | the venues' public prints, both parties, recorded by the indexer (apps/server/src/flow/) |
 | Whales tape, positioning | `/api/vs/whales`, `/api/vs/positioning` | (b) | aggregated server-side from venue trade streams; not one user's traffic |
 | Deep link by SoDEX account id (App.tsx) | `/api/feed/account` | (b) | resolved from the index's leaderboard map, on-chain only as a fallback |
 | Server status and network | `/api/health` | (c) | about ValueDesk itself |

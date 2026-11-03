@@ -2,8 +2,9 @@
  * WHO TRADED (owner 2026-11-01: "Make it possible to get the following trade info & more for each
  * candle & every timeframe across all supported platforms ... Use our own design & optimize UX").
  *
- * A chart view. One candle of any interval - picked on the chart (right-click "Who traded this
- * candle") or stepped here - broken down by wallet over the chosen platforms:
+ * A panel beside the chart, so the chart stays in view (owner 2026-11-03). One candle of the chart's
+ * interval - picked on the chart (click it while the panel is open, or right-click "Who traded this
+ * candle"; it is lit there) or stepped here - broken down by wallet over the chosen platforms:
  *   - the summary: traded, the takers' buy/sell split, wallets, the top three's share, fills, VWAP;
  *   - a ranked table: lean (net bought, net sold, round trip), share, volume, buy/sell bias,
  *     fills, average buy and sell price, net size, taker share;
@@ -28,8 +29,7 @@ import { Identicon } from '../Identicon';
 import { PlatformSelect } from '../PlatformSelect';
 import { copyText } from '../accountTables/IdCell';
 import { coinOfSymbol } from '../../chart/liqMap';
-import { FLOW_INTERVALS, candleAt, stepCandle, windowText, type CandleWindow } from './flowWindow';
-import { CandleStrip } from './CandleStrip';
+import { candleAt, flowCandle, stepCandle, windowText, type CandleWindow } from './flowWindow';
 import { EmptyState } from '../EmptyState';
 import '../leaderboard/LeaderboardPage.css';
 import './TradeFlow.css';
@@ -39,7 +39,7 @@ export const FLOW_VENUES: readonly Venue[] = ['sodex', 'hyperliquid', 'tradexyz'
 const PAGE = 100;
 const MAX_ROWS = 500;
 const FILL_ROW_H = 30;
-/** Below this height the view is a short panel (thin candle row and summary). */
+/** Below this height the view is a short panel (thin summary). */
 const SHORT_PX = 440;
 
 /** "1H", "4H"; minutes and the long units as the chart spells them ("1m", "1D", "1M"). */
@@ -155,11 +155,9 @@ export interface TradeFlowProps {
   /** The chart's interval, and a time inside the candle picked on it (null: the last closed candle). */
   interval: string;
   at: number | null;
-}
-
-/** The candle a view opens on: the one picked on the chart, else the last closed one (a forming candle is often still empty). */
-function openingCandle(iv: string, at: number | null): CandleWindow {
-  return at !== null ? candleAt(iv, at) : stepCandle(iv, candleAt(iv, Date.now()), -1);
+  /** Step to another candle (a time inside it): the chart lights it too. */
+  onAt: (t: number) => void;
+  onClose: () => void;
 }
 
 const ChevL = () => <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M10 3.5 5.5 8l4.5 4.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>;
@@ -167,17 +165,10 @@ const ChevR = () => <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden=
 
 const CSV_HEAD = ['venue', 'wallet', 'lean', 'share', 'volume_usd', 'bought_usd', 'sold_usd', 'bought', 'sold', 'net', 'fills_buy', 'fills_sell', 'avg_buy', 'avg_sell', 'taker_share'];
 
-export function TradeFlowView({ symbol, spot, interval: chartInterval, at }: TradeFlowProps) {
+export function TradeFlowView({ symbol, spot, interval, at, onAt, onClose }: TradeFlowProps) {
   const coin = coinOfSymbol(symbol);
-  const startInterval = (FLOW_INTERVALS as readonly string[]).includes(chartInterval) ? chartInterval : '1h';
-  const [interval, setIv] = useState(startInterval);
-  const [win, setWin] = useState<CandleWindow>(() => openingCandle(startInterval, at));
-  // A candle picked on the chart (or the chart's interval changing) moves the window.
-  useEffect(() => {
-    const iv = (FLOW_INTERVALS as readonly string[]).includes(chartInterval) ? chartInterval : '1h';
-    setIv(iv);
-    setWin(openingCandle(iv, at));
-  }, [chartInterval, at]);
+  // The chart's candle: picked there, or stepped here; the chart's interval changing re-cuts it.
+  const win = useMemo(() => flowCandle(interval, at), [interval, at]);
   const offered: Venue[] = spot ? ['sodex'] : [...FLOW_VENUES];
   const [venues, setVenues] = useState<Venue[]>(offered);
   const [role, setRole] = useState<FlowRole>('all');
@@ -189,7 +180,7 @@ export function TradeFlowView({ symbol, spot, interval: chartInterval, at }: Tra
   const [open, setOpen] = useState<FlowWindowRow | null>(null);
   /** Shown large, over the page (a chart card is often too short for a table). */
   const [big, setBig] = useState(false);
-  // A short panel (the trade page's chart card is ~300 px): the candle row and the summary go thin.
+  // A short panel (the trade page's chart card is ~300 px): the summary goes thin.
   const rootRef = useRef<HTMLDivElement>(null);
   const [short, setShort] = useState(false);
   useEffect(() => {
@@ -211,11 +202,6 @@ export function TradeFlowView({ symbol, spot, interval: chartInterval, at }: Tra
   const now = Date.now();
   const latest = candleAt(interval, now);
   const live = win.to > now;
-  const pickInterval = (iv: string) => {
-    setIv(iv);
-    // Keep the moment in view: the new candle holds the old one's start (the forming one stays forming).
-    setWin(candleAt(iv, live ? now : win.from));
-  };
 
   const kind = spot ? 'spot' as const : 'perp' as const;
   const key = `${coin}|${kind}|${venues.join(',')}|${win.from}|${win.to}|${role}|${side}|${sort}|${limit}|${query}`;
@@ -239,34 +225,34 @@ export function TradeFlowView({ symbol, spot, interval: chartInterval, at }: Tra
           <CoinIcon coin={coin} size={18} />
           <b>Who traded <span className="tfl-title__coin">{coin}</span></b>
         </div>
-        <div className="tfl-tf">
-          <Seg value={interval} label="Timeframe" options={FLOW_INTERVALS.map((i) => [i, ivLabel(i)] as const)} onChange={pickInterval} />
-        </div>
         <div className="tfl-bar__end">
           <PlatformSelect options={offered} value={venues} onChange={setVenues} align="end" />
-          <button type="button" className="tfl-icobtn tfl-expand" onClick={() => setBig((b) => !b)} aria-label={big ? 'Back into the chart' : 'Expand'} title={big ? 'Back into the chart (Esc)' : 'Expand'}>
+          <button type="button" className="tfl-icobtn tfl-expand" onClick={() => setBig((b) => !b)} aria-label={big ? 'Back beside the chart' : 'Expand'} title={big ? 'Back beside the chart (Esc)' : 'Expand'}>
             <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               {big ? <path d="M6.5 2.5v4h-4M9.5 13.5v-4h4M6.5 6.5 2 2M9.5 9.5 14 14" /> : <path d="M2.5 6.5v-4h4M13.5 9.5v4h-4M2.5 2.5 7 7M13.5 13.5 9 9" />}
             </svg>
           </button>
+          <button type="button" className="tfl-icobtn" onClick={() => { setBig(false); onClose(); }} aria-label="Close Who traded" title="Close">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" /></svg>
+          </button>
         </div>
       </div>
 
+      {/* The candle: the chart's interval and the one picked there, stepped here. */}
+      <div className="tfl-candle">
+        <button type="button" className="tfl-icobtn" aria-label="Previous candle" title="Previous candle" onClick={() => onAt(stepCandle(interval, win, -1).from)}><ChevL /></button>
+        <div className="tfl-candle__when" aria-live="polite">
+          <span className="tfl-candle__top">
+            <span className="tfl-pill is-pick" title="The chart's timeframe">{ivLabel(interval)}</span>
+            {live ? <span className="tfl-pill is-live">Forming</span> : <span className="tfl-candle__tip">Click a candle on the chart</span>}
+          </span>
+          <b>{windowText(win)}</b>
+        </div>
+        <button type="button" className="tfl-icobtn" aria-label="Next candle" title="Next candle" disabled={live} onClick={() => onAt(stepCandle(interval, win, 1).from)}><ChevR /></button>
+        <button type="button" className={`tfl-latest${win.from === latest.from ? ' is-on' : ''}`} onClick={() => onAt(latest.from)} title="The candle still forming">Live</button>
+      </div>
+
       <div className={`tfl-scroll${open ? ' is-wallet' : ''}`}>
-        <CandleStrip
-          engine={spot ? 'spot' : 'perps'}
-          symbol={symbol}
-          interval={interval}
-          picked={win}
-          onPick={setWin}
-          nav={(
-            <>
-              <button type="button" className="tfl-icobtn" aria-label="Previous candle" title="Previous candle" onClick={() => setWin((w) => stepCandle(interval, w, -1))}><ChevL /></button>
-              <button type="button" className="tfl-icobtn" aria-label="Next candle" title="Next candle" disabled={live} onClick={() => setWin((w) => stepCandle(interval, w, 1))}><ChevR /></button>
-              <button type="button" className={`tfl-latest${win.from === latest.from ? ' is-on' : ''}`} onClick={() => setWin(latest)} title="The candle still forming">Live</button>
-            </>
-          )}
-        />
         {open ? (
           <WalletView coin={coin} kind={kind} venues={venues} win={win} row={open} live={live} onBack={() => setOpen(null)} />
         ) : (
@@ -298,7 +284,7 @@ export function TradeFlowView({ symbol, spot, interval: chartInterval, at }: Tra
   if (!big) return view;
   return (
     <>
-      <div className="tfl tfl-parked"><button type="button" className="tfl-more" onClick={() => setBig(false)}>Show here</button></div>
+      <div className="tfl tfl-parked"><button type="button" className="tfl-more" onClick={() => setBig(false)}>Show beside the chart</button></div>
       {createPortal(<div className="tfl-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) setBig(false); }}>{view}</div>, document.body)}
     </>
   );

@@ -9,9 +9,6 @@ const DAY = 24 * HOUR;
 /** The epoch was a Thursday: Monday-based weeks start 4 days later. */
 const WEEK_OFFSET = 4 * DAY;
 
-/** The candle intervals the panel offers (the chart's own; 1M is a calendar month). */
-export const FLOW_INTERVALS = ['1m', '5m', '15m', '1h', '4h', '1D', '1W', '1M'] as const;
-
 export interface CandleWindow {
   from: number;
   to: number;
@@ -39,6 +36,11 @@ export function candleAt(interval: string, t: number): CandleWindow {
   const span = p.n * (p.u === 'm' ? MIN : p.u === 'h' ? HOUR : DAY);
   const from = Math.floor(t / span) * span;
   return { from, to: from + span };
+}
+
+/** The candle Who traded shows: the one holding `at`, else the last closed one (a forming candle is often still empty). */
+export function flowCandle(interval: string, at: number | null): CandleWindow {
+  return at !== null ? candleAt(interval, at) : stepCandle(interval, candleAt(interval, Date.now()), -1);
 }
 
 /** The candle `steps` away from the one starting at `from` (negative: earlier). */

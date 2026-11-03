@@ -37,7 +37,7 @@
  * The library is imported dynamically so it lands in its own chunk and never
  * blocks first paint.
  */
-import { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import { useLatched, usePresence } from './motion';
 import { createPortal } from 'react-dom';
 import type {
@@ -116,6 +116,7 @@ import { DraftOrderLines } from '../chart/DraftOrderLines';
 import { DrawingSettings, type DrawingDraft } from '../chart/DrawingSettings';
 import {
   EXEC_OVERLAY,
+  FLOW_PICK_OVERLAY,
   SHOW_KEY,
   SYSTEM_OVERLAYS,
   fillMarks,
@@ -133,6 +134,7 @@ import { NewsMarkers } from '../chart/NewsMarkers';
 import { NewsSettings } from '../chart/NewsSettings';
 import { ChartSidebar } from '../chart/ChartSidebar';
 import { CHART_ICONS } from '../chart/chartIcons';
+import { flowCandle } from './flow/flowWindow';
 import {
   buildSnapshot,
   frozenFills,
@@ -232,7 +234,7 @@ import { logger, recentLogs } from '../log';
 import { plotViolation, readPlot, type Violation } from '../chart/invariant';
 import { pollEvery } from '../exchange/visibility';
 
-/** Who traded a candle (flow/TradeFlow.tsx): its own chunk, loaded when the view is first opened. */
+/** Who traded a candle (flow/TradeFlow.tsx): its own chunk, loaded when the panel is first opened. */
 const TradeFlowView = lazy(() => import('./flow/TradeFlow').then((m) => ({ default: m.TradeFlowView })));
 
 /** error = the user sees something broken; warn = degraded or recovering;
@@ -284,6 +286,8 @@ const PANE_ORDER_BASE = 10;
  *  "more vertical than sideways" half of the rule still keeps a horizontal
  *  pan's wobble from switching A off. */
 const V_PAN_PX = 1;
+/** Below this card width Who traded sits under the plot, not beside it. */
+const FLOW_UNDER_PX = 640;
 
 /**
  * The toolbar's views. Chart is the klinecharts canvas this file has always
@@ -295,8 +299,6 @@ const VIEWS = [
   { id: 'chart', label: 'Chart' },
   { id: 'depth', label: 'Depth' },
   { id: 'market', label: 'Market info' },
-  // Every wallet that traded a candle (owner 2026-11-01): right-click a candle, or step candles there.
-  { id: 'flow', label: 'Who traded' },
 ] as const;
 type ViewId = (typeof VIEWS)[number]['id'];
 
@@ -990,8 +992,18 @@ function Chart({
 
   // --- order-line interaction state -----------------------------------------
   const layer = useRef<OrderLineLayer | null>(null);
-  /** The candle "Who traded" opens on (a time inside it; null: the latest). */
+  /**
+   * Who traded, a panel beside the plot so the chart stays in view (owner 2026-11-03: "I want the who
+   * traded to be a sidebar so chart stays visible"). Its candle is the chart's: right-click one, or
+   * click one while the panel is open; the timeframe is the chart's interval. flowAt is a time inside
+   * that candle (null: the last closed one).
+   */
+  const [flowOpen, setFlowOpen] = useState(false);
   const [flowAt, setFlowAt] = useState<number | null>(null);
+  const [flowSize, setFlowSize] = useStored<{ w: number; h: number }>('chart.flowSize', { w: 460, h: 0.45 });
+  const flowWrap = useRef<HTMLDivElement | null>(null);
+  /** A plain click on the plot while the panel is open picks its candle (not a pan, not a drag). */
+  const flowDown = useRef<{ x: number; y: number; t: number } | null>(null);
   /** Live readout while a line is under the cursor. */
   const [drag, setDrag] = useState<PendingMove | null>(null);
   /** Dropped, snapped, and awaiting an explicit confirm. Nothing sent yet. */
@@ -3495,7 +3507,7 @@ function Chart({
       // other prefill is a step towards signing an order.
       const price = canPlace ? snapToTick(pt[0]?.value ?? Number.NaN, sym?.tickSize) : null;
       const t = !bare && typeof pt[0]?.timestamp === 'number' && Number.isFinite(pt[0].timestamp) ? pt[0].timestamp : null;
-      if (t !== null) items.push({ label: 'Who traded this candle', icon: MENU_ICONS.traders, onClick: () => { setFlowAt(t); setView('flow'); } });
+      if (t !== null) items.push({ label: 'Who traded this candle', icon: MENU_ICONS.traders, onClick: () => { setFlowAt(t); setFlowOpen(true); } });
       if (price !== null) {
         const note = 'Prefills the order price only. Nothing is submitted from here.';
         items.push(
@@ -3539,6 +3551,7 @@ function Chart({
   };
   const onPanePointerDown = (e: ReactPointerEvent) => {
     endPress();
+    flowDown.current = e.button === 0 ? { x: e.clientX, y: e.clientY, t: performance.now() } : null;
     // A bare chart's long press is its host's (the heatmap's hover card); its right-click stays the menu.
     if (e.pointerType !== 'touch' || bare) return;
     const { clientX: x, clientY: y } = e;
@@ -3558,6 +3571,94 @@ function Chart({
         window.setTimeout(() => window.removeEventListener('click', swallow, { capture: true }), 800);
       }, LONG_PRESS_MS),
     };
+  };
+  /**
+   * Drag the panel's edge: its width beside the plot, its height where it sits under the plot (a
+   * narrow card, chart.css). Written to the element while dragging, so the chart does not re-render
+   * per move; stored on release. Double-click the edge for the default.
+   */
+  const onFlowResize = (e: ReactPointerEvent) => {
+    const el = flowWrap.current;
+    const host = el?.parentElement;
+    if (!el || !host || e.button !== 0) return;
+    e.preventDefault();
+    const under = el.classList.contains('is-under');
+    const box = host.getBoundingClientRect();
+    const start = { x: e.clientX, y: e.clientY, w: el.offsetWidth, h: el.offsetHeight };
+    let next = { ...flowSize };
+    const move = (ev: PointerEvent) => {
+      if (under) {
+        const h = Math.min(0.85, Math.max(0.3, (start.h + start.y - ev.clientY) / box.height));
+        next = { ...next, h };
+        el.style.setProperty('--flow-h', `${h * 100}%`);
+      } else {
+        const w = Math.round(Math.min(Math.max(340, box.width - 320), Math.max(340, start.w + start.x - ev.clientX)));
+        next = { ...next, w };
+        el.style.setProperty('--flow-w', `${w}px`);
+      }
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      document.body.classList.remove('kc-flow-resizing');
+      setFlowSize(next);
+    };
+    document.body.classList.add('kc-flow-resizing');
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  };
+  /** Beside the plot, or under it where the card is too narrow for both. */
+  const [flowUnder, setFlowUnder] = useState(false);
+  const [flowEl, setFlowEl] = useState<HTMLDivElement | null>(null);
+  const flowRef = useCallback((el: HTMLDivElement | null) => {
+    flowWrap.current = el;
+    setFlowEl(el);
+  }, []);
+  useEffect(() => {
+    // The dock is in the body (under) or in the stage inside it (beside): the body either way.
+    const body = flowEl?.closest('.kc-body');
+    if (!body) return;
+    const fit = () => setFlowUnder(body.clientWidth < FLOW_UNDER_PX);
+    // Measured now too: the observer's first call waits for a frame, and a frame of the wrong place shows.
+    fit();
+    const ro = new ResizeObserver(fit);
+    ro.observe(body);
+    return () => ro.disconnect();
+  }, [flowEl]);
+  const flowDock = (under: boolean) => (
+    <div
+      ref={flowRef}
+      className={`kc-flow-wrap${under ? ' is-under' : ''}`}
+      style={{ '--flow-w': `${flowSize.w}px`, '--flow-h': `${flowSize.h * 100}%` } as CSSProperties}
+    >
+      <div
+        className="kc-flow-grip"
+        role="separator"
+        aria-orientation={under ? 'horizontal' : 'vertical'}
+        aria-label="Resize Who traded"
+        title="Drag to resize (double-click: default size)"
+        onPointerDown={onFlowResize}
+        onDoubleClick={() => setFlowSize({ w: 460, h: 0.45 })}
+      />
+      <Suspense fallback={<div className="kc-flow-wait" aria-busy="true" />}>
+        <TradeFlowView symbol={symbol} spot={engine === 'spot'} interval={interval} at={flowAt} onAt={setFlowAt} onClose={() => setFlowOpen(false)} />
+      </Suspense>
+    </div>
+  );
+  /** The candle under a click, for Who traded: a press that did not move and was not held. */
+  const pickFlowCandle = (e: ReactPointerEvent) => {
+    const d = flowDown.current;
+    flowDown.current = null;
+    const c = chart.current;
+    const el = holder.current;
+    if (!flowOpen || !d || !c || !el || drawing || maskedRef.current) return;
+    if (Math.hypot(e.clientX - d.x, e.clientY - d.y) > 4 || performance.now() - d.t > 450) return;
+    const pane = c.getSize(CANDLE_PANE_ID);
+    if (!pane) return;
+    const rect = el.getBoundingClientRect();
+    const pt = c.convertFromPixel([{ x: e.clientX - rect.left, y: pane.top + 1 }], { paneId: CANDLE_PANE_ID, absolute: true }) as Array<Partial<Point>>;
+    const t = pt[0]?.timestamp;
+    if (typeof t === 'number' && Number.isFinite(t) && t <= Date.now()) setFlowAt(t);
   };
   const onPanePointerMove = (e: ReactPointerEvent) => {
     const p = press.current;
@@ -3771,6 +3872,15 @@ function Chart({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, chartGen, fills, show.executions, symbol, interval, masked, wantKey, snapView]);
+
+  // The candle Who traded is breaking down, lit on the plot while the panel is open.
+  useEffect(() => {
+    const c = chart.current;
+    if (!ready || !c) return;
+    c.removeOverlay({ name: FLOW_PICK_OVERLAY });
+    if (!flowOpen || bare || masked) return;
+    c.createOverlay({ name: FLOW_PICK_OVERLAY, points: [{ timestamp: flowCandle(interval, flowAt).from, value: 0 }], lock: true, zLevel: -1 });
+  }, [ready, chartGen, flowOpen, flowAt, interval, bare, masked]);
 
   // News: this coin's stories, or the macro ones, as far back as the server
   // keeps them (history: up to SoSoValue's 7 days, hot ones ranked) - one read
@@ -4380,6 +4490,17 @@ function Chart({
           <button
             style={bare ? { display: 'none' } : undefined}
             type="button"
+            className={`kc-ico kc-tb-ico${flowOpen ? ' on' : ''}`}
+            title={flowOpen ? 'Hide Who traded' : 'Who traded: every wallet in a candle (click a candle to pick it)'}
+            aria-label="Who traded"
+            aria-pressed={flowOpen}
+            onClick={() => setFlowOpen(!flowOpen)}
+          >
+            {CHART_ICONS.traders}
+          </button>
+          <button
+            style={bare ? { display: 'none' } : undefined}
+            type="button"
             className={`kc-ico kc-tb-ico${sidebar ? ' on' : ''}`}
             title={sidebar ? 'Hide the object list' : 'Object list: drawings, indicators, what the chart shows'}
             aria-label="Object list"
@@ -4456,9 +4577,10 @@ function Chart({
           // The chart itself resets on the double click's second release (the
           // pointer effect above); this covers the rest of the pane.
           onDoubleClick={resetView}
-          onPointerUp={() => {
+          onPointerUp={(e) => {
             endPress();
             syncPaneHeights();
+            pickFlowCandle(e);
           }}
           onMouseLeave={() => {
             // klinecharts only emits onCrosshairChange while the pointer is over a
@@ -4826,17 +4948,15 @@ function Chart({
             </div>
           );
         })()}
+        {flowOpen && !bare && !flowUnder && flowDock(false)}
       </div>
 
+      {/* A narrow card keeps Who traded under the plot instead of beside it. */}
+      {flowOpen && !bare && flowUnder && view === 'chart' && flowDock(true)}
       {/* Depth and Market info mount only while selected. The chart above
           stays mounted and parked so its price range survives the switch. */}
       {view === 'depth' && <DepthView engine={engine} symbol={symbol} sym={sym} />}
       {view === 'market' && <MarketInfoView engine={engine} symbol={symbol} sym={sym} />}
-      {view === 'flow' && (
-        <Suspense fallback={<div className="mkinfo mkinfo-empty">Loading…</div>}>
-          <TradeFlowView symbol={symbol} spot={engine === 'spot'} interval={interval} at={flowAt} />
-        </Suspense>
-      )}
       </div>
 
       {ctxMenu && <TabMenu at={ctxMenu.at} items={ctxMenu.items} onClose={closeCtxMenu} />}
