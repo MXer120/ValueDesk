@@ -5,7 +5,8 @@
 //
 // The parts: web (Vercel), api and indexer (server 1), status (the status page's prober on
 // server 1, valuescan-status.service: only when its own code changes, never with every API
-// release), executor (server 2), bin (the operations scripts in /opt/valuescan/bin on both
+// release), executor (server 2), feed (the shared market-data feed beside it on server 2,
+// valuescan-feed.service: only when its own code changes, never with every executor release), bin (the operations scripts in /opt/valuescan/bin on both
 // servers) and infra (units, Caddy, env templates, bootstrap: these need
 // bootstrap-instance.sh, never a plain release).
 //
@@ -45,6 +46,8 @@ export const ENTRIES = {
   web: ['apps/web/src/main.tsx'],
   // The status prober's own process (2026-11-01): what statusMain.ts reaches, ops/status.ts and the indexer status read.
   status: ['apps/server/src/statusMain.ts'],
+  // The shared market-data feed on server 2 (2026-11-03): what feed/main.ts reaches (its ring, the Binance sockets, sodex-core).
+  feed: ['apps/executor/src/feed/main.ts'],
 };
 
 // Edges production never takes. The API starts the indexer on a worker thread only when it
@@ -116,7 +119,7 @@ const IGNORED = [
   /^apps\/executor\/tools\//, /^deploy\/(release|ci|aws|\.out)\//,
 ];
 const DEPS = /^(package-lock\.json|package\.json|apps\/[^/]+\/package\.json|packages\/[^/]+\/package\.json)$/;
-const SERVICES = ['web', 'api', 'indexer', 'executor', 'status'];
+const SERVICES = ['web', 'api', 'indexer', 'executor', 'status', 'feed'];
 
 // --- dependencies (the header: DEPENDENCIES) ---------------------------------------------------
 
@@ -127,7 +130,7 @@ export const DEP_FIELDS = ['dependencies', 'optionalDependencies', 'peerDependen
 /** The package.json files whose devDependencies the web builds with. */
 const DEV_FOR_WEB = new Set(['package.json', 'apps/web/package.json']);
 /** The tools a part's processes run through (apps/server and apps/executor start with --import tsx). */
-const TOOLS = { api: [['apps/server', 'tsx']], indexer: [['apps/server', 'tsx']], executor: [['apps/executor', 'tsx']], web: [], status: [['apps/server', 'tsx']] };
+const TOOLS = { api: [['apps/server', 'tsx']], indexer: [['apps/server', 'tsx']], executor: [['apps/executor', 'tsx']], web: [], status: [['apps/server', 'tsx']], feed: [['apps/executor', 'tsx']] };
 
 const BUILTIN = new Set(builtinModules);
 /** A specifier's npm package ('@scope/name/x' -> '@scope/name', 'name/x' -> 'name'); null for a builtin. */
@@ -222,7 +225,7 @@ export function dependencyParts(file, from, to, ctx) {
  * of each changed dependency file; one it does not name is every service's.
  */
 export function classify(changed, graphs, deps = {}) {
-  const parts = { web: [], api: [], indexer: [], executor: [], status: [], bin: [], infra: [] };
+  const parts = { web: [], api: [], indexer: [], executor: [], status: [], feed: [], bin: [], infra: [] };
   const ignored = [];
   const add = (p, f) => parts[p].push(f);
   for (const f of changed) {
@@ -241,6 +244,8 @@ export function classify(changed, graphs, deps = {}) {
     for (const p of ['api', 'indexer', 'executor', 'web']) if (graphs[p]?.has(f)) { add(p, f); placed = true; }
     // The status prober shares the API's files; it restarts for those it reaches, never for a placement by folder.
     if (graphs.status?.has(f)) { add('status', f); placed = true; }
+    // The shared feed likewise shares the executor's files (sodex-core, the engine's socket): only those it reaches.
+    if (graphs.feed?.has(f)) { add('feed', f); placed = true; }
     if (placed) continue;
     // Not reached from any entry: by its folder, every service that could run it.
     if (/^apps\/web\//.test(f)) add('web', f);

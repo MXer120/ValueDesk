@@ -6,7 +6,8 @@
 #   sudo /opt/valuescan/bin/release.sh <tag> --api-only   install <tag>, restart the API only
 #   sudo /opt/valuescan/bin/release.sh <tag> --executor-only   install <tag>, restart the copy executor only
 #   sudo /opt/valuescan/bin/release.sh <tag> --units=indexer,api   install <tag>, restart exactly these (deploy/release/ship.sh;
-#                                                                  also `status`: the status prober, valuescan-status.service)
+#                                                                  also `status`: the status prober, valuescan-status.service,
+#                                                                  and `feed`: the shared market-data feed, valuescan-feed.service)
 #   sudo /opt/valuescan/bin/release.sh <tag> --install-only   install and check <tag>, switch nothing (ship.sh's executor preflight)
 #   sudo /opt/valuescan/bin/release.sh --rollback [--all|--api-only|--executor-only|--units=..]   back to the release before
 #   sudo /opt/valuescan/bin/release.sh --status           what is installed and running
@@ -295,6 +296,23 @@ restart_status() {
   log "the status prober runs release $(current_tag)"
 }
 
+# The shared market-data feed on the executor's box (valuescan-feed.service, apps/executor/src/feed/main.ts,
+# 2026-11-03): its own unit, so an executor release or crash never takes it down; readers open their own
+# sockets while it is silent. Like the status prober: restarted only when named (ship.sh names it when its
+# own code changed: deploy/release/parts.mjs, part `feed`) or by --all. A server without the unit has nothing to restart.
+feed_unit() { "$SYSTEMCTL" cat valuescan-feed.service >/dev/null 2>&1; }
+restart_feed() {
+  if ! feed_unit; then log "the shared feed (valuescan-feed.service) is not installed here: nothing to restart"; return 0; fi
+  if [ ! -e "$CURRENT/apps/executor/src/feed/main.ts" ]; then
+    log "this release has no shared feed (apps/executor/src/feed/main.ts): the running one keeps release $(release_of valuescan-feed.service)"
+    return 0
+  fi
+  log "restarting the shared feed"
+  "$SYSTEMCTL" restart valuescan-feed.service
+  wait_active valuescan-feed.service 30 || die "the shared feed did not become active - journalctl -u valuescan-feed -n 80"
+  log "the shared feed runs release $(current_tag)"
+}
+
 # The beta API: its own link and unit (see THE BETA API above).
 beta_unit() { "$SYSTEMCTL" cat valuescan-api-beta.service >/dev/null 2>&1; }
 release_beta() {
@@ -344,12 +362,13 @@ restart_units() {   # auto | all | api | executor | units (the list in $UNITS)
       case ",$UNITS," in *,api,*) restart_api ;; esac
       case ",$UNITS," in *,status,*) restart_status ;; esac
       case ",$UNITS," in *,executor,*) restart_executor ;; esac
+      case ",$UNITS," in *,feed,*) restart_feed ;; esac
       local u
       for u in indexer api executor; do
         case ",$UNITS," in *,"$u",*) ;; *) if here "$u"; then log "$u not named: it keeps running release $(release_of "valuescan-$u.service")"; fi ;; esac
       done
       ;;
-    all) restart_indexer_and_api 0; restart_status; restart_executor ;;
+    all) restart_indexer_and_api 0; restart_status; restart_executor; restart_feed ;;
     api)
       restart_indexer_and_api 1
       if "$SYSTEMCTL" is-active --quiet valuescan-executor.service; then
@@ -378,14 +397,14 @@ prune() {
   local cur prev n=0 d
   cur="$(current_tag)"; prev="$(previous_tag)"
   # Newest first; keep the current, the previous and whatever a unit still runs from.
-  local running_api running_idx running_exec running_status running_beta beta
+  local running_api running_idx running_exec running_status running_feed running_beta beta
   running_api="$(unit_release valuescan-api.service)"; running_idx="$(unit_release valuescan-indexer.service)"
   running_exec="$(unit_release valuescan-executor.service)"; running_status="$(unit_release valuescan-status.service)"
-  running_beta="$(unit_release valuescan-api-beta.service)"; beta="$(beta_tag)"
+  running_feed="$(unit_release valuescan-feed.service)"; running_beta="$(unit_release valuescan-api-beta.service)"; beta="$(beta_tag)"
   while IFS= read -r d; do
     [ -n "$d" ] || continue
     n=$((n + 1))
-    if [ "$n" -le "$KEEP" ] || [ "$d" = "$cur" ] || [ "$d" = "$prev" ] || [ "$d" = "$running_api" ] || [ "$d" = "$running_idx" ] || [ "$d" = "$running_exec" ] || [ "$d" = "$running_status" ] || [ "$d" = "$running_beta" ] || [ "$d" = "$beta" ]; then continue; fi
+    if [ "$n" -le "$KEEP" ] || [ "$d" = "$cur" ] || [ "$d" = "$prev" ] || [ "$d" = "$running_api" ] || [ "$d" = "$running_idx" ] || [ "$d" = "$running_exec" ] || [ "$d" = "$running_status" ] || [ "$d" = "$running_feed" ] || [ "$d" = "$running_beta" ] || [ "$d" = "$beta" ]; then continue; fi
     log "removing old release $d"
     rm -rf "${RELEASES:?}/$d"
   done < <(find "$RELEASES" -mindepth 1 -maxdepth 1 -type d ! -name '.*' -printf '%T@ %f\n' 2>/dev/null | sort -rn | awk '{print $2}')
@@ -402,6 +421,10 @@ status() {
   echo "executor:  $("$SYSTEMCTL" is-active valuescan-executor.service 2>/dev/null || true), release ${exe:-unknown}"
   local sta; sta="$(unit_release valuescan-status.service)"
   echo "status:    $("$SYSTEMCTL" is-active valuescan-status.service 2>/dev/null || true), release ${sta:-unknown}"
+  if feed_unit; then
+    local fee; fee="$(unit_release valuescan-feed.service)"
+    echo "feed:      $("$SYSTEMCTL" is-active valuescan-feed.service 2>/dev/null || true), release ${fee:-unknown}"
+  fi
   if beta_unit; then
     local bet; bet="$(unit_release valuescan-api-beta.service)"
     echo "beta:      $("$SYSTEMCTL" is-active valuescan-api-beta.service 2>/dev/null || true), release ${bet:-unknown} (beta-current $(beta_tag))"
@@ -424,8 +447,8 @@ for arg in "$@"; do
     --executor-only) [ "$MODE" = auto ] || die "$ONE_MODE"; MODE=executor ;;
     --units=*)
       [ "$MODE" = auto ] || die "$ONE_MODE"; MODE=units; UNITS="${arg#--units=}"
-      for u in ${UNITS//,/ }; do case "$u" in indexer|api|executor|status) ;; *) die "--units: $u is not one of indexer, api, executor, status" ;; esac; done
-      [ -n "${UNITS//,/}" ] || die "--units: name at least one of indexer, api, executor, status"
+      for u in ${UNITS//,/ }; do case "$u" in indexer|api|executor|status|feed) ;; *) die "--units: $u is not one of indexer, api, executor, status, feed" ;; esac; done
+      [ -n "${UNITS//,/}" ] || die "--units: name at least one of indexer, api, executor, status, feed"
       ;;
     --from=*) FROM="${arg#--from=}" ;;
     --install-only) INSTALL_ONLY=1 ;;

@@ -90,6 +90,20 @@ test('the status prober: its own part, by its graph only - never by the folder, 
   assert.deepEqual(at('apps/server/src/orphan.ts').status, [], 'reached by nothing: by its folder the API and the indexer, not the prober');
 });
 
+test('the shared feed: its own part, by its graph only - never with every executor change (2026-11-03)', () => {
+  const graphs = {
+    api: new Set(), indexer: new Set(), web: new Set(), status: new Set(),
+    executor: new Set(['apps/executor/src/main.ts', 'apps/executor/src/service.ts', 'packages/sodex-core/src/index.ts']),
+    feed: new Set(['apps/executor/src/feed/main.ts', 'apps/executor/src/feed/ring.ts', 'packages/sodex-core/src/index.ts']),
+  };
+  const at = (...f) => classify(f, graphs).parts;
+  assert.deepEqual([at('apps/executor/src/feed/ring.ts').feed, at('apps/executor/src/feed/ring.ts').executor], [['apps/executor/src/feed/ring.ts'], []], 'its own file: the feed alone');
+  assert.deepEqual(at('apps/executor/src/service.ts').feed, [], 'an executor file: the executor alone');
+  const shared = at('packages/sodex-core/src/index.ts');
+  assert.deepEqual([shared.executor, shared.feed], [['packages/sodex-core/src/index.ts'], ['packages/sodex-core/src/index.ts']], 'a file both reach: both');
+  assert.deepEqual(at('packages/copy-engine/src/orphan.ts').feed, [], 'reached by nothing: by its folder the executor, not the feed');
+});
+
 const GIT = spawnSync('git', ['--version']).status === 0 ? false : 'needs git';
 
 test('from two commits of a repository: an indexer-only change is the indexer only', { skip: GIT }, () => {
@@ -167,12 +181,12 @@ const lockParts = (to) => dependencyParts('package-lock.json', J(LOCK()), J(to),
 test('the lockfile: only the parts that resolve a changed entry - a web devDependency is the web alone', () => {
   assert.deepEqual(lockParts(LOCK({ 'node_modules/playwright-core': { version: '1.64.1', dev: true } })), ['web'], 'playwright-core: never the indexer or the executor');
   assert.deepEqual(lockParts(LOCK({ 'node_modules/avvio': { version: '9.0.1' } })), ['api'], 'a server dependency, through fastify: the part that imports it');
-  assert.deepEqual(lockParts(LOCK({ 'node_modules/tsx': { version: '4.20.0' } })), ['api', 'indexer', 'executor', 'status'], 'tsx: every process that runs through it');
+  assert.deepEqual(lockParts(LOCK({ 'node_modules/tsx': { version: '4.20.0' } })), ['api', 'indexer', 'executor', 'status', 'feed'], 'tsx: every process that runs through it');
   assert.deepEqual(lockParts(LOCK({ 'apps/server/node_modules/@noble/hashes': { version: '2.0.1' } })), ['api', 'indexer'], "the server's own nested copy, not the executor's hoisted one");
   assert.deepEqual(lockParts(LOCK({ 'node_modules/@noble/hashes': { version: '1.6.2' } })), ['executor']);
   assert.deepEqual(lockParts(LOCK({ 'node_modules/vite': { version: '6.0.1' } })), ['web'], 'the web builds with its devDependencies');
   assert.deepEqual(lockParts(LOCK({ 'node_modules/left-pad': { version: '1.3.0' } })), [], 'a package nothing runs on');
-  assert.deepEqual(dependencyParts('package-lock.json', '{not json', J(LOCK()), CTX), ['web', 'api', 'indexer', 'executor', 'status'], 'unreadable: every service');
+  assert.deepEqual(dependencyParts('package-lock.json', '{not json', J(LOCK()), CTX), ['web', 'api', 'indexer', 'executor', 'status', 'feed'], 'unreadable: every service');
   // The closure itself: a root, its dependencies, a link followed to a workspace's own entry.
   assert.deepEqual([...lockClosure(LOCK(), [['apps/server/src', 'fastify']])].sort(), ['node_modules/avvio', 'node_modules/fastify']);
   assert.deepEqual([...lockClosure(LOCK(), [['apps/web/src', '@valuescan/server']])].sort(), ['apps/server', 'apps/server/node_modules/@noble/hashes', 'node_modules/@valuescan/server', 'node_modules/avvio', 'node_modules/fastify'].sort());
@@ -182,7 +196,7 @@ test("a package.json: scripts change nothing; module fields its folder's parts; 
   const root = { name: 'valuescan', workspaces: ['apps/server', 'apps/web'], scripts: { dev: 'x' }, devDependencies: { concurrently: '^9.1.0' } };
   const at = (f, a, b, ctx = CTX) => dependencyParts(f, J(a), J(b), ctx);
   assert.deepEqual(at('package.json', root, { ...root, scripts: { dev: 'x', 'live-tests': 'node all.ts' } }), [], 'a scripts-only change restarts nothing');
-  assert.deepEqual(at('package.json', root, { ...root, overrides: { axios: '^1.20.0' } }), ['web', 'api', 'indexer', 'executor', 'status']);
+  assert.deepEqual(at('package.json', root, { ...root, overrides: { axios: '^1.20.0' } }), ['web', 'api', 'indexer', 'executor', 'status', 'feed']);
   const server = { name: '@valuescan/server', type: 'module', dependencies: { fastify: '^5.0.0' }, devDependencies: { tsx: '^4.19.0' } };
   assert.deepEqual(at('apps/server/package.json', server, { ...server, type: 'commonjs' }), ['web', 'api', 'indexer'], 'every part that runs files of apps/server (the web through @sign)');
   assert.deepEqual(at('apps/server/package.json', server, { ...server, dependencies: { fastify: '^5.1.0' } }), [], "what is installed is the lockfile's to say");
@@ -190,7 +204,7 @@ test("a package.json: scripts change nothing; module fields its folder's parts; 
   const web = { name: '@valuescan/web', devDependencies: { vite: '^6.0.0' } };
   assert.deepEqual(at('apps/web/package.json', web, { ...web, devDependencies: { vite: '^6.0.0', 'playwright-core': '1.64.1' } }, { ...CTX, lockChanged: false }), ['web'], "devDependencies: the web's only");
   assert.deepEqual(at('apps/server/package.json', server, { ...server, devDependencies: { tsx: '^4.20.0' } }, { ...CTX, lockChanged: false }), [], "another workspace's devDependencies: the lockfile decides");
-  assert.deepEqual(dependencyParts('apps/web/package.json', null, J(web), CTX), ['web', 'api', 'indexer', 'executor', 'status'], 'added or removed: every service');
+  assert.deepEqual(dependencyParts('apps/web/package.json', null, J(web), CTX), ['web', 'api', 'indexer', 'executor', 'status', 'feed'], 'added or removed: every service');
   // classify keeps a dependency file no part needs among what ships nothing; one it was not told about is every service's.
   const c = classify(['package.json', 'package-lock.json'], CTX.graphs, { 'package.json': [], 'package-lock.json': ['web'] });
   assert.deepEqual([c.parts.web, c.parts.api, c.ignored], [['package-lock.json'], [], ['package.json']]);

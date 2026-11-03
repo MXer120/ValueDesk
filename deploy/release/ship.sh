@@ -2,7 +2,7 @@
 # deploy/release/ship.sh - THE PIPELINE: ship what changed to where it runs, from this laptop.
 #
 #   bash deploy/release/ship.sh                  what changed since what is live: the plan, one question, then ship
-#   bash deploy/release/ship.sh web api          only these parts: web, api, indexer, executor, status (or all)
+#   bash deploy/release/ship.sh web api          only these parts: web, api, indexer, executor, status, feed (or all)
 #   bash deploy/release/ship.sh --dry-run        the plan only - nothing is tagged, pushed or released
 #   bash deploy/release/ship.sh --yes            no question (the owner's go is already given)
 #   bash deploy/release/ship.sh --tag=v0.2.60    this tag instead of the next one (or the one HEAD already has)
@@ -97,15 +97,15 @@ remote() { local host="$1"; shift; "${SSH[@]}" "$host" "$@"; }
 PARTS=() DRY=0 YES=0 TAG="" NOTICE=1 EXEC_OK=0
 for a in "$@"; do
   case "$a" in
-    web|api|indexer|executor|status) PARTS+=("$a") ;;
-    all) PARTS+=(web api indexer executor status) ;;
+    web|api|indexer|executor|status|feed) PARTS+=("$a") ;;
+    all) PARTS+=(web api indexer executor status feed) ;;
     --dry-run) DRY=1 ;;
     --yes) YES=1 ;;
     --executor-ok) EXEC_OK=1 ;;
     --tag=*) TAG="${a#--tag=}" ;;
     --no-notice) NOTICE=0 ;;
     -h|--help) sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-    *) die "unknown argument $a (parts: web api indexer executor status all)" ;;
+    *) die "unknown argument $a (parts: web api indexer executor status feed all)" ;;
   esac
 done
 
@@ -139,6 +139,8 @@ unit_tag() { printf '%s\n' "$1" | sed -n "s/^$2: *[a-z-]*, release //p" | head -
 LIVE_INDEXER="$(unit_tag "$st1" indexer)"; LIVE_API="$(unit_tag "$st1" api)"; LIVE_EXECUTOR="$(unit_tag "$st2" executor)"
 # The status prober (valuescan-status.service on server 1); empty while server 1's release.sh does not report it yet.
 LIVE_STATUS="$(unit_tag "$st1" status)"
+# The shared market-data feed (valuescan-feed.service on server 2, 2026-11-03); empty while server 2 does not report it.
+LIVE_FEED="$(unit_tag "$st2" feed)"
 note "server 1: indexer ${LIVE_INDEXER:-?}, API ${LIVE_API:-?}   server 2: executor ${LIVE_EXECUTOR:-?}   web: main $(git rev-parse --short origin/main)"
 
 # A part changed when parts.mjs finds files of it between what runs and HEAD (an unknown or gone release: changed).
@@ -149,11 +151,12 @@ changed_since() {   # part, live ref
 declare -A WHY
 want() { local p; for p in "${PARTS[@]}"; do [ "$p" = "$1" ] && return 0; done; return 1; }
 if [ ${#PARTS[@]} -eq 0 ]; then
-  for p in web api indexer executor status; do
-    case "$p" in web) from="origin/main" ;; api) from="$LIVE_API" ;; indexer) from="$LIVE_INDEXER" ;; executor) from="$LIVE_EXECUTOR" ;; status) from="$LIVE_STATUS" ;; esac
+  for p in web api indexer executor status feed; do
+    case "$p" in web) from="origin/main" ;; api) from="$LIVE_API" ;; indexer) from="$LIVE_INDEXER" ;; executor) from="$LIVE_EXECUTOR" ;; status) from="$LIVE_STATUS" ;; feed) from="$LIVE_FEED" ;; esac
     # The status prober is compared only once server 1 reports it (release.sh --status, from this release on): before
     # that it would count as changed on every ship. It runs in the meantime; name `status` to restart it.
-    if [ "$p" = status ] && [ -z "$from" ]; then continue; fi
+    # The shared feed likewise, once server 2 reports it (a server 2 without the unit installed reports none).
+    if { [ "$p" = status ] || [ "$p" = feed ]; } && [ -z "$from" ]; then continue; fi
     n="$(changed_since "$p" "$from")"
     if [ "$n" != 0 ]; then PARTS+=("$p"); WHY[$p]="${n} file(s) since ${from}"; fi
   done
@@ -176,8 +179,11 @@ want executor && U2+=(executor)
 # The status prober restarts on server 1 with the units there, but is not one of them for the maintenance
 # window and the notice: nobody notices its restart (it misses one round at most).
 STA=0; want status && STA=1
+# The shared feed on server 2 likewise: its own restart, after the executor's, outside the window and the notice
+# (its readers open their own sockets while it is away).
+FEED=0; want feed && FEED=1
 WEB=0; want web && WEB=1
-if [ ${#U1[@]} -eq 0 ] && [ ${#U2[@]} -eq 0 ] && [ "$STA" = 0 ] && [ "$WEB" = 0 ] && [ "$BIN" = 0 ]; then
+if [ ${#U1[@]} -eq 0 ] && [ ${#U2[@]} -eq 0 ] && [ "$STA" = 0 ] && [ "$FEED" = 0 ] && [ "$WEB" = 0 ] && [ "$BIN" = 0 ]; then
   note "nothing to ship: every part already runs HEAD's code"; exit 0
 fi
 # Moving main deploys the web as it is at HEAD - so main moves only when the web is shipped, or has not changed.
@@ -201,12 +207,13 @@ cost() {
     executor) echo "seconds, requests held by Caddy; copies and algos wait" ;;
     indexer) echo "boards ~2 min staler" ;;
     status) echo "a second; the status page misses one round at most" ;;
+    feed) echo "seconds; its readers use their own sockets meanwhile" ;;
   esac
 }
 say "plan: $TAG ($(git rev-parse --short HEAD)$([ "$NEW_TAG" = 1 ] && echo ", new tag"))"
-for p in indexer api status executor web; do
+for p in indexer api status executor feed web; do
   want "$p" || continue
-  where=""; case "$p" in indexer|api|status) where="server 1" ;; executor) where="server 2" ;; web) where="Vercel" ;; esac
+  where=""; case "$p" in indexer|api|status) where="server 1" ;; executor|feed) where="server 2" ;; web) where="Vercel" ;; esac
   printf '  %-9s %-9s %-30s %s\n' "$p" "$where" "${WHY[$p]:-}" "$(cost "$p")" >&2
 done
 [ "$BIN" = 0 ] || note "  bin       both      /opt/valuescan/bin from the tarball where it differs"
@@ -428,7 +435,7 @@ release_on() {   # host, units (comma list)
   die "$units on $host: not shipped"
 }
 
-if [ ${#U1[@]} -gt 0 ] || [ ${#U2[@]} -gt 0 ] || [ "$STA" = 1 ] || [ "$BIN" = 1 ]; then need_tarball; fi
+if [ ${#U1[@]} -gt 0 ] || [ ${#U2[@]} -gt 0 ] || [ "$STA" = 1 ] || [ "$FEED" = 1 ] || [ "$BIN" = 1 ]; then need_tarball; fi
 
 # Both servers' tarball and scripts first (one upload after the other: the laptop's cap): maint.sh and brake.sh
 # are the tag's before anything restarts.
@@ -438,11 +445,11 @@ if [ ${#U1[@]} -gt 0 ] || [ "$STA" = 1 ] || [ "$BIN" = 1 ]; then
   sync_bin "$S1" >&2
   [ ${#U1[@]} -gt 0 ] || [ "$STA" = 1 ] || remote "$S1" "sudo rm -f $INBOX/$(basename "$TARBALL") $INBOX/$(basename "$TARBALL").sha256"
 fi
-if [ ${#U2[@]} -gt 0 ] || [ "$BIN" = 1 ]; then
+if [ ${#U2[@]} -gt 0 ] || [ "$FEED" = 1 ] || [ "$BIN" = 1 ]; then
   say "server 2 ($S2): upload, scripts"
   upload "$S2"
   sync_bin "$S2" >&2
-  [ ${#U2[@]} -gt 0 ] || remote "$S2" "sudo rm -f $INBOX/$(basename "$TARBALL") $INBOX/$(basename "$TARBALL").sha256"
+  [ ${#U2[@]} -gt 0 ] || [ "$FEED" = 1 ] || remote "$S2" "sudo rm -f $INBOX/$(basename "$TARBALL") $INBOX/$(basename "$TARBALL").sha256"
 fi
 [ "$BIN" = 0 ] || done_note "scripts updated on both servers"
 
@@ -568,6 +575,18 @@ ship_executor() {
 if [ ${#U2[@]} -gt 0 ]; then
   say "server 2 ($S2): executor"
   ship_executor
+fi
+# The shared feed: after the executor (its release then is installed and current there: no tarball needed),
+# or on its own (installed from the tarball, current switched, nothing else restarted).
+if [ "$FEED" = 1 ]; then
+  say "server 2 ($S2): shared feed"
+  if [ ${#U2[@]} -gt 0 ]; then
+    if remote "$S2" "sudo /opt/valuescan/bin/release.sh $TAG --units=feed" >&2; then done_note "shared feed restarted"
+    else note "!! the shared feed did not come back on $TAG (journalctl -u valuescan-feed); its readers use their own sockets"; done_note "shared feed NOT back - check it"; WARNED=1; fi
+  else
+    release_on "$S2" feed
+    done_note "shared feed restarted"
+  fi
 fi
 
 # The restarts are over: what fails from here on is a failure.

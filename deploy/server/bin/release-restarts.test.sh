@@ -28,6 +28,7 @@ restart_indexer() { RESTARTED+="indexer "; }
 restart_api() { RESTARTED+="api "; }
 restart_executor() { RESTARTED+="executor "; }
 restart_status() { RESTARTED+="status "; }
+restart_feed() { RESTARTED+="feed "; }
 eval "$(sed -n '/^here() {/p' "$SRC")"
 eval "$(sed -n '/^restart_units() {/,/^}/p' "$SRC")"
 
@@ -90,7 +91,11 @@ VS_UNITS=indexer,api UNITS=indexer check "--units=indexer on server 1" "indexer"
 UNITS=status check "--units=status" "status" units
 UNITS=api check "--units=api leaves the status prober" "api" units
 UNITS=indexer,api,status check "--units=indexer,api,status" "indexer api status" units
-check "--all" "indexer api status executor" all
+# The shared feed on server 2 likewise: only when named or --all - never with every executor release.
+UNITS=feed check "--units=feed" "feed" units
+UNITS=executor check "--units=executor leaves the shared feed" "executor" units
+UNITS=executor,feed check "--units=executor,feed" "executor feed" units
+check "--all" "indexer api status executor feed" all
 CURRENT="$RELEASES/v1"
 RUNS=([valuescan-indexer.service]=v1 [valuescan-api.service]=v1 [valuescan-executor.service]=v1)
 UNITS=api check "--units=api with nothing changed" "api" units
