@@ -280,9 +280,10 @@ export interface FlowSummary {
   takerSell: number;
   /** Prints whose taker the venue did not name (counted in neither). */
   untaken: number;
-  /** Wallets under the role and side filter, and the top three's share of their volume. */
+  /** Wallets under the role and side filter, and the top three's / ten's share of their volume. */
   wallets: number;
   top3: number;
+  top10: number;
   /** Size-weighted average price of the window, and the volume-weighted buy / sell averages of takers. */
   vwap: number | null;
 }
@@ -342,15 +343,17 @@ export function tableOf(
     : (r) => r.vol;
   rows.sort((a, b) => key(b) - key(a) || b.vol - a.vol || a.pid - b.pid);
   const wallets = opts.keep ? rows.length : countPositive(sums, opts);
-  // Top three of the whole field (not of a search).
+  // Top three and ten of the whole field (not of a search).
   let top3 = 0;
+  let top10 = 0;
   if (all > 0) {
-    const best = opts.keep ? topVols(sums, opts, 3) : rows.slice().sort((a, b) => b.vol - a.vol).slice(0, 3).map((r) => r.vol);
-    top3 = best.reduce((s, v) => s + v, 0) / all;
+    const best = opts.keep ? topVols(sums, opts, 10) : rows.slice().sort((a, b) => b.vol - a.vol).slice(0, 10).map((r) => r.vol);
+    top3 = best.slice(0, 3).reduce((s, v) => s + v, 0) / all;
+    top10 = best.reduce((s, v) => s + v, 0) / all;
   }
   for (const r of rows) r.share = all > 0 ? r.vol / all : 0;
   return {
-    summary: { total, prints, takerBuy, takerSell, untaken, wallets, top3, vwap },
+    summary: { total, prints, takerBuy, takerSell, untaken, wallets, top3, top10, vwap },
     rows: rows.slice(0, Math.max(0, opts.limit)),
   };
 }

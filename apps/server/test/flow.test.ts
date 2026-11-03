@@ -81,6 +81,7 @@ test('sums pack and unpack exactly; the table counts each print once and splits 
   const tk = tableOf(sums, { role: 'taker', side: 'all', sort: 'volume', limit: 10 });
   assert.deepEqual(tk.rows.map((r) => [r.pid, r.vol]), [[3, 420], [1, 310]]);
   assert.equal(tk.summary.top3, 1);
+  assert.equal(tk.summary.top10, 1);
   assert.equal(leanOf({ buySz: 10, sellSz: 9.5 }), 'round');
   assert.equal(leanOf({ buySz: 0, sellSz: 0 }), 'flat');
 });

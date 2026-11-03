@@ -309,7 +309,11 @@ const execTemplate: OverlayTemplate = {
   },
 };
 
-/** The picked candle's column, the pane's full height and one bar wide; clicks go through it. */
+/**
+ * The picked candle outlined in white, wick top to wick bottom (owner 2026-11-03: "a white outline on
+ * the candle not the whole area"). The bar is read from the chart on every draw, so a forming candle's
+ * outline grows with it and a zoom or a rescale keeps it fitted; clicks go through it.
+ */
 const flowPickTemplate: OverlayTemplate = {
   name: FLOW_PICK_OVERLAY,
   totalStep: 2,
@@ -317,16 +321,31 @@ const flowPickTemplate: OverlayTemplate = {
   needDefaultPointFigure: false,
   needDefaultXAxisFigure: false,
   needDefaultYAxisFigure: false,
-  createPointFigures: ({ chart, coordinates, bounding }) => {
+  createPointFigures: ({ chart, overlay, coordinates, yAxis }) => {
     const p = coordinates[0];
-    if (!p) return [];
-    const w = Math.max(3, chart.getBarSpace().bar + 2);
-    const x = Math.round(p.x - w / 2);
-    return [
-      { type: 'rect', ignoreEvent: true, attrs: { x, y: 0, width: w, height: bounding.height }, styles: { style: 'fill', color: 'rgba(255, 254, 239, 0.08)' } },
-      { type: 'line', ignoreEvent: true, attrs: { coordinates: [{ x: x + 0.5, y: 0 }, { x: x + 0.5, y: bounding.height }] }, styles: { color: 'rgba(255, 254, 239, 0.22)', size: 1, style: 'dashed', dashedValue: [3, 3] } },
-      { type: 'line', ignoreEvent: true, attrs: { coordinates: [{ x: x + w - 0.5, y: 0 }, { x: x + w - 0.5, y: bounding.height }] }, styles: { color: 'rgba(255, 254, 239, 0.22)', size: 1, style: 'dashed', dashedValue: [3, 3] } },
-    ];
+    const t = overlay.points[0]?.timestamp;
+    if (!p || !yAxis || typeof t !== 'number') return [];
+    const bars = chart.getDataList();
+    let lo = 0;
+    let hi = bars.length - 1;
+    let bar: (typeof bars)[number] | null = null;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      const b = bars[mid]!;
+      if (b.timestamp === t) { bar = b; break; }
+      if (b.timestamp < t) lo = mid + 1;
+      else hi = mid - 1;
+    }
+    if (!bar) return [];
+    const w = Math.max(5, chart.getBarSpace().gapBar + 4);
+    const top = yAxis.convertToPixel(bar.high) - 3;
+    const bottom = yAxis.convertToPixel(bar.low) + 3;
+    return [{
+      type: 'rect',
+      ignoreEvent: true,
+      attrs: { x: Math.round(p.x - w / 2) + 0.5, y: Math.round(top) + 0.5, width: Math.round(w), height: Math.max(6, Math.round(bottom - top)) },
+      styles: { style: 'stroke', color: T.text, borderColor: T.text, borderSize: 1.5, borderRadius: 2 },
+    }];
   },
 };
 

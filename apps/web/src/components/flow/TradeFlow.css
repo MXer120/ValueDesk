@@ -95,7 +95,7 @@
 }
 
 /* --- everything under the toolbar scrolls together ---------------------------------------------- */
-.tfl-scroll { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; }
+.tfl-scroll { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; }
 .tfl-body { display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-3); }
 .tfl-body > * { flex: none; }
 
@@ -116,47 +116,42 @@
   .tfl-candle__when b { font-size: var(--fs-xs); }
 }
 
-/* --- summary ------------------------------------------------------------------------------------- */
+/* --- summary: slim (owner 2026-11-03: "per candle breakdown is too big") ---------------------------- */
 .tfl-sum {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  grid-template-areas: 'lead stats' 'split split';
-  align-items: end;
-  gap: var(--sp-3) var(--sp-5);
-  padding: var(--sp-3) var(--sp-4);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: var(--sp-2) var(--sp-3);
   border: 1px solid var(--panel-line);
   border-radius: var(--radius-tile);
   background: var(--tint);
 }
-.tfl-sum__lead { grid-area: lead; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.tfl-sum__big { font-size: 24px; font-weight: 600; letter-spacing: -0.01em; color: var(--text); line-height: 1.15; min-height: 28px; display: flex; align-items: center; }
-.tfl-sum__stats { grid-area: stats; display: flex; justify-content: flex-end; gap: var(--sp-5); }
-.tfl-sum__stats--wide { grid-area: auto; justify-content: space-between; flex-wrap: wrap; gap: var(--sp-3) var(--sp-5); }
-.tfl-sum > .tfl-split { grid-area: split; }
-.tfl-stat { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.tfl-sum__row { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 4px var(--sp-4); min-width: 0; }
+.tfl-sum__lead { display: flex; align-items: baseline; gap: var(--sp-2); min-width: 0; }
+.tfl-sum__big { font-size: var(--fs-head); font-weight: 600; color: var(--text); line-height: 1.2; display: inline-flex; align-items: center; }
+.tfl-sum__stats { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 2px var(--sp-3); min-width: 0; }
+.tfl-sum__stats--wide { justify-content: space-between; }
+.tfl-stat { display: inline-flex; align-items: baseline; gap: 5px; min-width: 0; }
 .tfl-stat__l { font-size: var(--fs-label); text-transform: uppercase; letter-spacing: 0.06em; color: var(--dim); white-space: nowrap; }
-.tfl-stat__v { font-size: var(--fs-base); font-weight: 600; color: var(--text); white-space: nowrap; min-height: 18px; display: flex; align-items: center; }
-.tfl-skelv { display: block; width: 64px; height: 12px; border-radius: var(--radius-full); background: linear-gradient(90deg, var(--tint), var(--line-soft), var(--tint)); background-size: 200% 100%; animation: tfl-shimmer 1.4s linear infinite; }
-.tfl-sum__big .tfl-skelv { width: 120px; height: 20px; }
+.tfl-stat__v { font-size: var(--fs-xs); font-weight: 600; color: var(--text); white-space: nowrap; display: inline-flex; align-items: center; }
+.tfl-skelv { display: inline-block; width: 40px; height: 9px; border-radius: var(--radius-full); background: linear-gradient(90deg, var(--tint), var(--line-soft), var(--tint)); background-size: 200% 100%; animation: tfl-shimmer 1.4s linear infinite; }
+.tfl-sum__big .tfl-skelv { width: 72px; height: 13px; }
 
-.tfl-split { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-.tfl-split__bar { display: flex; gap: 2px; height: 6px; border-radius: var(--radius-full); overflow: hidden; }
+.tfl-split { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.tfl-split__bar { display: flex; gap: 2px; height: 4px; border-radius: var(--radius-full); overflow: hidden; }
 .tfl-split__bar > i, .tfl-bias > i { display: block; height: 100%; min-width: 2px; transition: width var(--dur-fast) var(--ease-out); }
 .tfl-split__bar > .is-buy, .tfl-bias > .is-buy { background: var(--pos); }
 .tfl-split__bar > .is-sell, .tfl-bias > .is-sell { background: var(--neg); }
 .tfl-split__bar.is-empty > i { background: var(--line-soft); }
-.tfl-split__legend { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 2px var(--sp-2); font-size: var(--fs-xs); color: var(--muted); }
+.tfl-split__legend { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 2px var(--sp-2); font-size: var(--fs-label); color: var(--muted); }
 .tfl-split__legend b { font-weight: 600; }
-
-@container tfl (max-width: 620px) {
-  .tfl-sum { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'lead' 'stats' 'split'; padding: var(--sp-3); gap: var(--sp-3); }
-  .tfl-sum__stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--sp-2); justify-content: stretch; }
-  .tfl-sum__stats--wide { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .tfl-sum__big { font-size: 22px; }
-}
-@container tfl (max-width: 330px) {
-  .tfl-sum__stats { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: var(--sp-3); }
-  .tfl-sum__stats--wide { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@container tfl (max-width: 400px) {
+  /* The total on its own line, the four figures spread under it; the table gets the width. */
+  .tfl-sum__stats { width: 100%; justify-content: space-between; }
+  .tfl-body { padding-inline: var(--sp-2); }
+  /* The lean is in the bias beside it: the address gets the room. */
+  .tfl .tfl-tr .tfl-lean { display: none; }
+  .tfl .tfl-who { gap: 5px; }
 }
 
 /* --- notes, pills ---------------------------------------------------------------------------------- */
@@ -171,17 +166,11 @@
 
 /* --- filters ---------------------------------------------------------------------------------------- */
 .tfl-filters { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); }
-.tfl-search { width: auto; flex: 1 1 200px; max-width: 280px; height: 30px; margin-left: auto; border-radius: var(--radius-full); }
+.tfl-search { width: auto; flex: 1 1 160px; min-width: 0; height: 30px; border-radius: var(--radius-full); }
+.tfl .tfl-view { flex: none; height: 30px; border-radius: var(--radius-full); }
 .tfl-count { margin-left: auto; font-size: var(--fs-xs); white-space: nowrap; }
-@container tfl (max-width: 620px) {
-  /* The two switches on one row, the search and CSV on the next. */
-  .tfl-search { order: 3; flex: 1 1 calc(100% - 96px); max-width: none; margin-left: 0; }
-  .tfl-filters > .tfl-icobtn { order: 4; }
-}
-
 /* --- the wallets table ------------------------------------------------------------------------------ */
 .tfl-table {
-  --cols: minmax(180px, 1fr) minmax(100px, 200px) 96px minmax(104px, 200px) 64px 120px 108px 60px;
   display: flex;
   flex-direction: column;
   border: 1px solid var(--panel-line);
@@ -189,14 +178,13 @@
   /* clip, not hidden: hidden would make this the scroller and unstick the header. */
   overflow: clip;
 }
-.tfl-table.is-stale { opacity: 0.6; }
 .tfl-tr {
   display: grid;
   grid-template-columns: var(--cols);
   align-items: center;
-  gap: var(--sp-3);
-  min-height: 42px;
-  padding: 0 var(--sp-3);
+  gap: 6px;
+  min-height: 40px;
+  padding: 0 8px;
   border: 0;
   border-top: 1px solid var(--panel-line);
   background: transparent;
@@ -227,10 +215,11 @@ button.tfl-tr:hover, button.tfl-tr:focus-visible { background: var(--bg-hover); 
 .tfl-lean.is-short { color: var(--neg); background: var(--ask-bg); }
 .tfl-lean.is-flat { color: var(--dim); }
 
-.c-share { display: flex; align-items: center; gap: var(--sp-2); }
-.tfl-share { flex: 1; height: 4px; border-radius: var(--radius-full); background: var(--line-soft); overflow: hidden; }
+/* Share and bias alike: the figure, a thin bar under it. */
+.c-share { display: flex; flex-direction: column; gap: 3px; }
+.tfl-share { height: 4px; border-radius: var(--radius-full); background: var(--line-soft); overflow: hidden; }
+.tfl-share__n { font-size: var(--fs-xs); color: var(--muted); }
 .tfl-share > i { display: block; height: 100%; border-radius: inherit; background: var(--muted); }
-.c-share .tfl-dim { width: 38px; text-align: right; font-size: var(--fs-xs); flex: none; }
 
 .c-bias { display: flex; flex-direction: column; gap: 3px; }
 .tfl-bias { display: flex; gap: 1px; height: 4px; border-radius: var(--radius-full); overflow: hidden; }
@@ -245,27 +234,6 @@ button.tfl-tr:hover, button.tfl-tr:focus-visible { background: var(--bg-hover); 
 @media (prefers-reduced-motion: reduce) { .tfl-skel > i, .tfl-skelv { animation: none; } }
 
 .tfl-more { align-self: center; padding: 0 var(--sp-4); }
-
-/* Columns give way as the view narrows - share, then fills and taker, then bias and net - each step
-   before the row's minimum (columns + gaps + padding) passes the width. */
-@container tfl (max-width: 1040px) {
-  .tfl-table { --cols: minmax(170px, 1fr) 88px minmax(96px, 200px) 60px 112px 100px 52px; }
-  .tfl-tr > .c-share { display: none; }
-}
-@container tfl (max-width: 860px) {
-  .tfl-table { --cols: minmax(160px, 1.5fr) 84px minmax(90px, 1fr) 108px 96px; }
-  .tfl-tr > .c-fills, .tfl-tr > .c-tk { display: none; }
-}
-@container tfl (max-width: 640px) {
-  .tfl-table { --cols: minmax(0, 1fr) 70px 84px; }
-  .tfl-tr { gap: var(--sp-2); padding: 0 var(--sp-2); }
-  .tfl-tr > .c-bias, .tfl-tr > .c-net { display: none; }
-}
-@container tfl (max-width: 360px) {
-  .tfl-table { --cols: minmax(0, 1fr) 60px 70px; }
-  .tfl-lean { width: 18px; height: 18px; }
-  .tfl-who { gap: 6px; }
-}
 
 /* --- coverage ------------------------------------------------------------------------------------- */
 .tfl-cov { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-3); font-size: var(--fs-xs); }
@@ -282,7 +250,6 @@ button.tfl-tr:hover, button.tfl-tr:focus-visible { background: var(--bg-hover); 
 .tfl-wallet__id b { font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--fs-head); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tfl-wallet__id .tfl-dim { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; font-size: var(--fs-xs); }
 .tfl-wallet__acts { display: flex; gap: var(--sp-2); }
-.tfl-wallet .tfl-sum { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'stats' 'split'; }
 @container tfl (max-width: 520px) {
   .tfl-wallet__acts { width: 100%; }
   .tfl-wallet__acts > * { flex: 1; }
@@ -324,7 +291,7 @@ button.tfl-tr:hover, button.tfl-tr:focus-visible { background: var(--bg-hover); 
   .tfl-icobtn, .tfl-latest, .tfl-cta, .tfl-more { height: 40px; min-width: 40px; }
   .tfl-icobtn:has(> svg:only-child) { width: 40px; }
   .tfl .lbp-seg > button { height: 34px; }
-  .tfl-search { height: 40px; }
+  .tfl-search, .tfl .tfl-view { height: 40px; }
   .tfl .psel__btn { min-height: 40px; }
   .tfl-tr { min-height: 48px; }
   .tfl-th { min-height: 34px; }
@@ -336,17 +303,3 @@ button.tfl-tr:hover, button.tfl-tr:focus-visible { background: var(--bg-hover); 
 .tfl.is-short .tfl-candle__when { flex-direction: row; align-items: center; gap: var(--sp-2); }
 .tfl.is-short .tfl-candle__tip { display: none; }
 .tfl.is-short .tfl-body { gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); }
-.tfl.is-short .tfl-sum { grid-template-columns: auto minmax(0, 1fr); grid-template-areas: 'lead stats' 'split split'; align-items: center; gap: 6px var(--sp-4); padding: var(--sp-2) var(--sp-3); }
-.tfl.is-short .tfl-sum__lead { flex-direction: row; align-items: baseline; gap: var(--sp-2); }
-.tfl.is-short .tfl-sum__big { font-size: var(--fs-head); min-height: 0; }
-.tfl.is-short .tfl-sum__stats { display: flex; gap: var(--sp-4); justify-content: flex-end; flex-wrap: wrap; }
-.tfl.is-short .tfl-stat { flex-direction: row; align-items: baseline; gap: 5px; }
-.tfl.is-short .tfl-stat__v { font-size: var(--fs-xs); min-height: 0; }
-.tfl.is-short .tfl-split__bar { height: 4px; }
-.tfl.is-short .tfl-split__legend { font-size: var(--fs-label); }
-@container tfl (max-width: 620px) {
-  /* Short AND narrow (a small terminal panel): the figures in one row of four under the total. */
-  .tfl.is-short .tfl-sum { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'lead' 'stats' 'split'; }
-  .tfl.is-short .tfl-sum__stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px var(--sp-2); }
-  .tfl.is-short .tfl-stat { flex-direction: column; align-items: flex-start; gap: 1px; }
-}

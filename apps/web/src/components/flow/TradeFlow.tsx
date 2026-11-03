@@ -31,6 +31,9 @@ import { copyText } from '../accountTables/IdCell';
 import { coinOfSymbol } from '../../chart/liqMap';
 import { candleAt, flowCandle, stepCandle, windowText, type CandleWindow } from './flowWindow';
 import { EmptyState } from '../EmptyState';
+import { ViewPop } from '../ViewPop';
+import { Section, Seg as ViewSeg } from '../accountTables/FilterBar';
+import { useStored } from '../../hooks';
 import '../leaderboard/LeaderboardPage.css';
 import './TradeFlow.css';
 
@@ -47,7 +50,7 @@ const ivLabel = (i: string) => (i.endsWith('h') ? i.toUpperCase() : i);
 const pct = (v: number, dp = 0) => `${fmtNum(v * 100, { minimumFractionDigits: dp, maximumFractionDigits: dp })}%`;
 const fmtSz = (v: number) => fmtNum(v, { maximumSignificantDigits: 6 });
 const signed = (v: number, f: (x: number) => string) => (v > 0 ? `+${f(v)}` : v < 0 ? `${MINUS}${f(-v)}` : f(0));
-const short = (a: string) => (a.length > 14 ? `${a.slice(0, 6)}…${a.slice(-4)}` : a);
+const short = (a: string) => (a.length > 14 ? `${a.slice(0, 5)}…${a.slice(-4)}` : a);
 const whoOf = (w: { address: string | null; key: string }) => w.address ?? w.key;
 const clock = (t: number) => {
   const d = new Date(t);
@@ -211,7 +214,10 @@ export function TradeFlowView({ symbol, spot, interval, at, onAt, onClose }: Tra
   );
   // A candle still forming is read again every 15 s (the recorder's flush); a closed one once.
   const r = usePolled<FlowWindow>(key, fetcher, live ? 15_000 : 0);
-  const d = r.data;
+  // The previous candle's answer while this one loads is not this candle's: skeletons, not "No trades".
+  const d = r.stale ? null : r.data;
+  const [cols, setCols] = useStored<string[]>('flow.cols', DEFAULT_COLS);
+  const shownCols = COLS.filter((c) => !c.opt || cols.includes(c.key));
   const before = !!d && d.since !== null && d.to <= d.since;
   const csv = () => d && saveCsv(`who-traded-${coin}-${new Date(win.from).toISOString().slice(0, 16).replace(':', '')}.csv`, [
     CSV_HEAD,
@@ -260,16 +266,15 @@ export function TradeFlowView({ symbol, spot, interval, at, onAt, onClose }: Tra
             <Summary d={d && !before && d.markets.length ? d : null} role={role} loading={r.loading && !d} />
             <Partial d={d} />
             <div className="tfl-filters">
-              <Seg value={role} label="Who" options={[['all', 'All'], ['taker', 'Takers'], ['maker', 'Makers']]} onChange={setRole} />
-              <Seg value={side} label="Side" options={[['all', 'All'], ['buy', 'Buys'], ['sell', 'Sells']]} onChange={setSide} />
               <label className="lbp-search tfl-search">
                 <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><circle cx="7" cy="7" r="4.5" /><path d="m10.5 10.5 3 3" strokeLinecap="round" /></svg>
                 <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Find a wallet or account id" aria-label="Find a wallet" spellCheck={false} />
               </label>
+              <TableView cols={cols} onCols={setCols} role={role} onRole={setRole} side={side} onSide={setSide} sort={sort} onSort={setSort} />
               <CsvButton disabled={!d?.rows.length} onClick={csv} />
             </div>
             <Table
-              d={d} coin={coin} sort={sort} onSort={setSort} loading={r.loading} stale={r.stale} error={r.error} onOpen={setOpen}
+              d={d} coin={coin} cols={shownCols} sort={sort} onSort={setSort} loading={r.loading} error={r.error} onOpen={setOpen}
               empty={<TableEmpty d={d} coin={coin} live={live} query={query} venues={venues} offered={offered} onAll={() => setVenues(offered)} onRetry={r.retry} error={r.error} />}
             />
             {d && d.rows.length >= limit && limit < MAX_ROWS && (
@@ -295,31 +300,98 @@ function Summary({ d, role, loading }: { d: FlowWindow | null; role: FlowRole; l
   const v = (x: ReactNode) => (loading ? <i className="tfl-skelv" aria-hidden="true" /> : x);
   return (
     <section className="tfl-sum" aria-label="Candle summary" aria-busy={loading}>
-      <div className="tfl-sum__lead">
-        <span className="tfl-stat__l">Traded</span>
-        <span className="tfl-sum__big" title={fmtUsdExact(s?.total)}>{v(s ? fmtUsdShort(s.total) : DASH)}</span>
-      </div>
-      <div className="tfl-sum__stats">
-        <Stat label={role === 'all' ? 'Wallets' : role === 'taker' ? 'Takers' : 'Makers'} value={v(s ? fmtCount(s.wallets) : DASH)} />
-        <Stat label="Top 3" value={v(s && s.wallets ? pct(s.top3) : DASH)} title="The three largest wallets' share of the volume shown" />
-        <Stat label="Fills" value={v(s ? fmtCount(s.prints) : DASH)} title="Prints (one per match; each has a buyer and a seller)" />
-        <Stat label="VWAP" value={v(s?.vwap ? fmtPx(s.vwap) : DASH)} />
+      <div className="tfl-sum__row">
+        <div className="tfl-sum__lead">
+          <span className="tfl-stat__l">Traded</span>
+          <span className="tfl-sum__big" title={fmtUsdExact(s?.total)}>{v(s ? fmtUsdShort(s.total) : DASH)}</span>
+        </div>
+        <div className="tfl-sum__stats">
+          <Stat label={role === 'all' ? 'Wallets' : role === 'taker' ? 'Takers' : 'Makers'} value={v(s ? fmtCount(s.wallets) : DASH)} />
+          <Stat label="Top 10" value={v(s && s.wallets && s.top10 !== undefined ? pct(s.top10) : DASH)} title="The ten largest wallets' share of the volume shown" />
+          <Stat label="Fills" value={v(s ? fmtCount(s.prints) : DASH)} title="Prints (one per match; each has a buyer and a seller)" />
+          <Stat label="VWAP" value={v(s?.vwap ? fmtPx(s.vwap) : DASH)} />
+        </div>
       </div>
       <SplitBar buy={s?.takerBuy ?? 0} sell={s?.takerSell ?? 0} buyLabel="Taker buys" sellLabel="Taker sells" />
     </section>
   );
 }
 
-const COLS: Array<{ key: string; label: string; sort?: FlowSort; cls: string; title?: string }> = [
-  { key: 'who', label: 'Wallet', cls: 'c-who' },
-  { key: 'share', label: 'Share', cls: 'c-share' },
-  { key: 'vol', label: 'Volume', sort: 'volume', cls: 'c-num c-vol' },
-  { key: 'bias', label: 'Bias', cls: 'c-bias', title: 'Bought against sold (USD)' },
-  { key: 'fills', label: 'Fills', sort: 'fills', cls: 'c-num c-fills' },
-  { key: 'px', label: 'Avg buy / sell', cls: 'c-num c-px' },
-  { key: 'net', label: 'Net', sort: 'net', cls: 'c-num c-net', title: 'Bought minus sold, in the coin' },
-  { key: 'tk', label: 'Taker', cls: 'c-num c-tk', title: 'Share of its volume it took liquidity for' },
+interface Col { key: string; label: string; sort?: FlowSort; cls: string; title?: string; opt: boolean; w: string; min: number }
+/** The table's columns: the wallet always, the rest on or off under View (a row's grid is built from the ones on). */
+const COLS: Col[] = [
+  { key: 'who', label: 'Wallet', cls: 'c-who', opt: false, w: 'minmax(108px, 1.5fr)', min: 108 },
+  { key: 'share', label: 'Share', cls: 'c-share', opt: true, w: 'minmax(46px, 0.6fr)', min: 46 },
+  { key: 'vol', label: 'Volume', sort: 'volume', cls: 'c-num c-vol', opt: true, w: '62px', min: 62 },
+  { key: 'bias', label: 'Bias', cls: 'c-bias', title: 'Bought against sold (USD)', opt: true, w: 'minmax(46px, 0.6fr)', min: 46 },
+  { key: 'fills', label: 'Fills', sort: 'fills', cls: 'c-num c-fills', opt: true, w: '38px', min: 38 },
+  { key: 'px', label: 'Avg buy / sell', cls: 'c-num c-px', opt: true, w: '92px', min: 92 },
+  { key: 'net', label: 'Net', sort: 'net', cls: 'c-num c-net', title: 'Bought minus sold, in the coin', opt: true, w: '80px', min: 80 },
+  { key: 'tk', label: 'Taker', cls: 'c-num c-tk', title: 'Share of its volume it took liquidity for', opt: true, w: '46px', min: 46 },
 ];
+const DEFAULT_COLS = ['share', 'vol', 'bias', 'fills'];
+const ROW_GAP = 6;
+const ROW_PAD = 8;
+
+const SlidersGlyph = () => (
+  <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M2 4.5h12M2 11.5h12" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" opacity="0.55" /><circle cx="10.5" cy="4.5" r="1.8" fill="var(--bg-panel)" stroke="currentColor" strokeWidth="1.3" /><circle cx="5.5" cy="11.5" r="1.8" fill="var(--bg-panel)" stroke="currentColor" strokeWidth="1.3" /></svg>
+);
+
+/** The table's View: which columns show, whose fills (takers, makers) and which side, the order. */
+function TableView({ cols, onCols, role, onRole, side, onSide, sort, onSort }: {
+  cols: string[]; onCols: (c: string[]) => void;
+  role: FlowRole; onRole: (r: FlowRole) => void;
+  side: FlowSide; onSide: (s: FlowSide) => void;
+  sort: FlowSort; onSort: (s: FlowSort) => void;
+}) {
+  const btn = useRef<HTMLButtonElement>(null);
+  const [open, setOpen] = useState(false);
+  const colsChanged = cols.length !== DEFAULT_COLS.length || DEFAULT_COLS.some((c) => !cols.includes(c));
+  const count = (colsChanged ? 1 : 0) + (role !== 'all' ? 1 : 0) + (side !== 'all' ? 1 : 0) + (sort !== 'volume' ? 1 : 0);
+  const toggle = (k: string) => onCols(cols.includes(k) ? cols.filter((c) => c !== k) : COLS.filter((c) => c.key === k || cols.includes(c.key)).map((c) => c.key));
+  const optional = COLS.filter((c) => c.opt);
+  return (
+    <>
+      <button
+        ref={btn}
+        type="button"
+        className={`acctf-view tfl-view${open ? ' is-open' : ''}${count > 0 ? ' is-active' : ''}`}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+      >
+        <SlidersGlyph />
+        <span>View</span>
+        {count > 0 && <span className="acctf-count">{count}</span>}
+      </button>
+      <ViewPop
+        open={open}
+        anchor={btn}
+        onClose={() => setOpen(false)}
+        onReset={() => { onCols(DEFAULT_COLS); onRole('all'); onSide('all'); onSort('volume'); }}
+        resetDisabled={count === 0}
+      >
+        <Section label="Side">
+          <ViewSeg<FlowSide> value={side} onChange={onSide} options={[['all', 'All'], ['buy', 'Buys'], ['sell', 'Sells']]} tones={{ buy: 'pos', sell: 'neg' }} />
+        </Section>
+        <Section label="Who">
+          <ViewSeg<FlowRole> value={role} onChange={onRole} options={[['all', 'All'], ['taker', 'Takers'], ['maker', 'Makers']]} />
+        </Section>
+        <Section label="Sort">
+          <ViewSeg<FlowSort> value={sort} onChange={onSort} options={[['volume', 'Volume'], ['fills', 'Fills'], ['net', 'Net']]} />
+        </Section>
+        <Section label="Columns">
+          <div className="acctf-seg" role="group" aria-label="Columns" style={{ gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' }}>
+            {optional.map((c) => {
+              const on = cols.includes(c.key);
+              return <button key={c.key} type="button" aria-pressed={on} className={on ? 'is-on' : ''} onClick={() => toggle(c.key)}>{c.key === 'px' ? 'Avg price' : c.label}</button>;
+            })}
+          </div>
+        </Section>
+      </ViewPop>
+    </>
+  );
+}
 
 /** What the table says when it has no rows: an error, before the recording, not listed, a search, a quiet candle. */
 function TableEmpty({ d, coin, live, query, venues, offered, onAll, onRetry, error }: {
@@ -349,16 +421,22 @@ function TableEmpty({ d, coin, live, query, venues, offered, onAll, onRetry, err
   return <EmptyState compact icon="chart" title="No trades in this candle" line={`Nobody traded ${coin} on ${names(venues)} in this window.`} />;
 }
 
-function Table({ d, coin, sort, onSort, loading, stale, error, onOpen, empty }: {
-  d: FlowWindow | null; coin: string; sort: FlowSort; onSort: (s: FlowSort) => void; loading: boolean; stale: boolean; error: string | null; onOpen: (r: FlowWindowRow) => void; empty: ReactNode;
+function Table({ d, coin, cols, sort, onSort, loading, error, onOpen, empty }: {
+  d: FlowWindow | null; coin: string; cols: Col[]; sort: FlowSort; onSort: (s: FlowSort) => void; loading: boolean; error: string | null; onOpen: (r: FlowWindowRow) => void; empty: ReactNode;
 }) {
-  const max = d?.rows[0]?.share ?? 0;
+  const max = d?.rows.reduce((m, x) => Math.max(m, x.share), 0) ?? 0;
   const rows = d?.rows ?? [];
   const waiting = !d && !error && loading;
+  const on = new Set(cols.map((c) => c.key));
+  // Wider than the panel (many columns on a narrow one): the table scrolls sideways, the wallet stays readable.
+  const grid = {
+    '--cols': cols.map((c) => c.w).join(' '),
+    minWidth: cols.reduce((s, c) => s + c.min, 0) + ROW_GAP * (cols.length - 1) + ROW_PAD * 2,
+  } as CSSProperties;
   return (
-    <div className={`tfl-table${stale ? ' is-stale' : ''}`} role="table" aria-label="Wallets in this candle" aria-busy={loading}>
+    <div className="tfl-table" style={grid} role="table" aria-label="Wallets in this candle" aria-busy={loading}>
       <div className="tfl-tr tfl-th" role="row">
-        {COLS.map((c) => (
+        {cols.map((c) => (
           <span key={c.key} role="columnheader" className={c.cls} title={c.title} aria-sort={c.sort === sort ? 'descending' : undefined}>
             {c.sort ? <button type="button" className={c.sort === sort ? 'is-on' : ''} onClick={() => onSort(c.sort!)}>{c.label}{c.sort === sort ? ' ↓' : ''}</button> : c.label}
           </span>
@@ -371,22 +449,22 @@ function Table({ d, coin, sort, onSort, loading, stale, error, onOpen, empty }: 
         return (
           <button type="button" key={`${x.venue}|${x.key}`} className="tfl-tr" role="row" onClick={() => onOpen(x)} aria-label={`${x.address ?? x.key} on ${VENUE_LABEL[x.venue]}: ${fmtUsdShort(x.vol)}. Show its fills`}>
             <span className="c-who" role="cell"><LeanIcon lean={x.lean} /><Wallet w={x} /></span>
-            <span className="c-share" role="cell">
+            {on.has('share') && <span className="c-share" role="cell">
+              <span className="tfl-share__n">{pct(x.share, x.share < 0.1 ? 1 : 0)}</span>
               <span className="tfl-share"><i style={{ width: `${max > 0 ? (x.share / max) * 100 : 0}%` }} /></span>
-              <span className="tfl-dim">{pct(x.share, x.share < 0.1 ? 1 : 0)}</span>
-            </span>
-            <span className="c-num c-vol" role="cell" title={fmtUsdExact(x.vol)}>{fmtUsdShort(x.vol)}</span>
-            <span className="c-bias" role="cell" title={`Bought ${fmtUsdExact(x.buyNtl)} · sold ${fmtUsdExact(x.sellNtl)}`}>
+            </span>}
+            {on.has('vol') && <span className="c-num c-vol" role="cell" title={fmtUsdExact(x.vol)}>{fmtUsdShort(x.vol)}</span>}
+            {on.has('bias') && <span className="c-bias" role="cell" title={`Bought ${fmtUsdExact(x.buyNtl)} · sold ${fmtUsdExact(x.sellNtl)}`}>
               <span className="tfl-bias"><i className="is-buy" style={{ width: `${bias * 100}%` }} /><i className="is-sell" style={{ width: `${(1 - bias) * 100}%` }} /></span>
               <span className="tfl-bias__n"><span className="pos">{Math.round(bias * 100)}</span>/<span className="neg">{100 - Math.round(bias * 100)}</span></span>
-            </span>
-            <span className="c-num c-fills" role="cell" title={`${fmtCount(x.buyN)} buys · ${fmtCount(x.sellN)} sells`}>{fmtCount(x.buyN + x.sellN)}</span>
-            <span className="c-num c-px" role="cell">
+            </span>}
+            {on.has('fills') && <span className="c-num c-fills" role="cell" title={`${fmtCount(x.buyN)} buys · ${fmtCount(x.sellN)} sells`}>{fmtCount(x.buyN + x.sellN)}</span>}
+            {on.has('px') && <span className="c-num c-px" role="cell">
               {x.buyPx !== null ? <span className="pos">{fmtPx(x.buyPx)}</span> : <span className="tfl-dim">{DASH}</span>}
               {x.sellPx !== null ? <span className="neg">{fmtPx(x.sellPx)}</span> : <span className="tfl-dim">{DASH}</span>}
-            </span>
-            <span className={`c-num c-net ${x.net > 0 ? 'pos' : x.net < 0 ? 'neg' : 'tfl-dim'}`} role="cell" title={`${signed(x.net, fmtSz)} ${coin}`}>{signed(x.net, fmtSz)}</span>
-            <span className="c-num c-tk tfl-dim" role="cell">{x.takerShare !== null ? pct(x.takerShare) : DASH}</span>
+            </span>}
+            {on.has('net') && <span className={`c-num c-net ${x.net > 0 ? 'pos' : x.net < 0 ? 'neg' : 'tfl-dim'}`} role="cell" title={`${signed(x.net, fmtSz)} ${coin}`}>{signed(x.net, fmtSz)}</span>}
+            {on.has('tk') && <span className="c-num c-tk tfl-dim" role="cell">{x.takerShare !== null ? pct(x.takerShare) : DASH}</span>}
           </button>
         );
       })}
@@ -444,7 +522,7 @@ function WalletView({ coin, kind, venues, win, row, live, onBack }: {
   const key = `w|${coin}|${kind}|${row.venue}|${w}|${win.from}|${win.to}`;
   const fetcher = useCallback((s: AbortSignal) => vsApi.flowWallet({ coin, kind, venues, from: win.from, to: win.to, w, venue: row.venue }, s), [key]); // eslint-disable-line react-hooks/exhaustive-deps
   const r = usePolled<WalletFillsBody>(key, fetcher, live ? 15_000 : 0);
-  const d = r.data;
+  const d = r.stale ? null : r.data;
   const [side, setSide] = useState<'all' | 'buy' | 'sell'>('all');
   const [role, setRole] = useState<'all' | 'taker' | 'maker'>('all');
   // Indexes of the fills shown, newest first.
