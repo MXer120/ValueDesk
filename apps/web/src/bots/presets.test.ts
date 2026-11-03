@@ -62,8 +62,8 @@ test('cost per $1M: 1.2 bp maker + 0.5 bp bot fee = $170; the maker gets one tic
   assert.equal(Math.round(costPerMillion(draftFor('maker'), null, null).fees), 170);
 });
 
-test('the Bots page runs the volume maker and the grid only; a DCA is an algo order', () => {
-  assert.deepEqual([...STRATEGIES], ['maker', 'grid']);
+test('the Bots page runs the two makers and the grid; a DCA is an algo order', () => {
+  assert.deepEqual([...STRATEGIES], ['maker', 'lead', 'grid']);
   assert.ok(checkAlgoSpec({ kind: 'dca', symbol: 'BTC-USD', side: 'buy', perOrderUsd: 20, orders: 3, intervalMs: 3_600_000, bot: true, exec: { style: 'maker' } }).errors.bot);
 });
 
@@ -86,4 +86,21 @@ test('cheapest maker markets: a wide spread earns most of itself a round trip; t
   // MCD: 36 ticks of 0.38 bp = 13.7 bp; inside both sides it keeps 34 ticks, 12.9 bp a round trip: $170 - $646 = it earns.
   assert.ok(r[0]!.costPerMillion < -400 && r[0]!.costPerMillion > -520, String(r[0]!.costPerMillion));
   assert.ok(Math.abs(r[1]!.costPerMillion - 163.6) < 0.2, String(r[1]!.costPerMillion));
+});
+
+test('Binance-led maker: a volume maker with ref binance; its distances only above 0; reads back as itself', () => {
+  const d = { ...draftFor('lead', 'balanced', 'ETH-USD'), paper: true };
+  const spec = specOf(d, 2280);
+  assert.equal(spec.kind, 'mm');
+  assert.equal(spec.ref, 'binance');
+  assert.equal(spec.pullBps, 0.5);
+  assert.equal(spec.refBps, undefined, 'refBps 0 is left out');
+  const parsed = parseAlgoSpec(spec);
+  assert.equal(strategyOf(parsed), 'lead');
+  const back = draftOfSpec(parsed);
+  assert.equal(back.strategy, 'lead');
+  assert.equal(back.pullBps, 0.5);
+  assert.deepEqual(patchOf(back, { ...back, pullBps: 1, refBps: 2 }), { pullBps: 1, refBps: 2 });
+  // A plain maker stays a plain maker.
+  assert.equal(strategyOf(parseAlgoSpec(specOf(draftFor('maker'), 60_000))), 'maker');
 });

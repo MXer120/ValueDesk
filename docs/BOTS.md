@@ -155,3 +155,62 @@ Where that leaves $100 per $1M: the fees alone are $170. Below that needs a posi
 queue or a spread of several ticks gives (ZEC's 6-tick spread was +$34 once, −$49 to −$156 the other runs). The levers
 left are the fee floor (the bot fee: 0.5 bp = $50 per $1M; SoDEX's tiers 1.0 / 0.6 bp maker from $5M / $25M 14-day
 volume; the maker rebate), and longer runs to tell 15-minute regimes from real differences.
+
+## The Binance-led maker (2026-11-03, owner: "another Market Maker which quotes off of binance")
+
+A volume maker (`kind: 'mm'`) with `ref: 'binance'`. The page shows it as its own strategy, **Binance-led maker**
+(`presets.ts` strategy `lead`).
+
+- **Fair price:** Binance USD-M's mid times the basis, the basis being SoDEX's mid / Binance's mid with a 30 s
+  half-life (`copy-engine algo/reference.ts`).
+- **Where it rests:**
+  - `refBps` 0: the side that adds rests at SoDEX's best price, but only while that price is at least `pullBps`
+    from fair.
+  - `refBps` above 0: it rests `refBps` from fair: inside a wide spread, or behind a touch that is too close to fair.
+  - The side that unwinds rests at a quarter of `refBps`, never through fair.
+- **The fast pull:** every Binance tick checks the bot's resting quotes (`bots.ts pastFair`). A quote that fair came
+  past is cancelled at once, without waiting for the next 500 ms step.
+- **No fresh reference** (older than 2 s): it pulls everything and holds. Self-hosted executors have no reference,
+  so it holds there too.
+
+### The shared feed (`apps/executor/src/feed`)
+
+The executor box (server 2) runs one process that holds the Binance sockets: **valuescan-feed**
+(`deploy/server/units/valuescan-feed.service`).
+
+**What it writes.** Every SoDEX perp Binance lists (54 on 2026-11-03), into a ring in tmpfs at
+`/run/valuescan-feed/binance-l1`.
+
+**The layout.** Byte for byte the trading box's `ARCFEED1` (apex-tokyo `arcus-peregrine/FEED_SHM.md`):
+- a header, the feed and symbol tables, a latest table, and a 65,536-tick ring;
+- a seqlock per 64-byte tick;
+- a 100 ms heartbeat;
+- a producer restart writes a new file and renames it into place.
+
+**The sockets.**
+- Two raced copies of every socket; the first arrival of an update id wins.
+- 8 symbols per socket.
+- Only price changes are written; a size-only update is no news for a reference price.
+
+**The reader** (`feed/reference.ts`, in the executor):
+- polls the ring every 2 ms and seeds from the latest table when it opens;
+- opens its own Binance sockets while the ring is missing or silent for 0.5 s;
+- goes back to the ring after it has beaten for 3 s.
+
+`tools/feed-tap.ts` prints what the ring holds: ticks per symbol, Binance event -> feed delay, and the reader's
+delay.
+
+**Measured on server 2 (2026-11-03):**
+
+| | Behind Binance's event time |
+|---|---|
+| Node's built-in WebSocket, which negotiates permessage-deflate (ETH alone) | p50 246 ms, p99 1,009 ms |
+| `ws` without deflate (ETH alone) | p50 7 ms, p99 107 ms |
+| `ws` with 54 symbols on one socket, busy symbols | p50 80-100 ms |
+| `ws` with 8 symbols per socket | p50 5-30 ms |
+| Price changes only, at busy times | p50 20-35 ms, p90 150-250 ms |
+
+So every Binance socket here is `ws` with `perMessageDeflate: false`. On those numbers:
+- The path itself is the limit: the same probe without the ring shows the same figures. The ring adds about 2 ms.
+- apex-tokyo (AWS Tokyo) gets Binance at 1.6 ms p50. SoDEX's latency arbitrageurs (e.g. 0x773b, who fills about
+  86 ms after a Binance move) run there and see a move well before server 2 does.

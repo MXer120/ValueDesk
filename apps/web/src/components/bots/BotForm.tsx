@@ -27,6 +27,7 @@ import {
   draftFor,
   draftOfSpec,
   gridRange,
+  isMaker,
   patchOf,
   presetOf,
   specOf,
@@ -114,6 +115,10 @@ export function describe(d: BotDraft, range: { low: number; high: number } | nul
   const m = d.symbol;
   const stop = [d.maxLossUsd !== null ? `stops at a loss of ${fmtUsd(d.maxLossUsd, 0)}` : null, d.volumeTargetUsd !== null ? `stops after ${fmtUsd(d.volumeTargetUsd, 0)} traded` : null].filter(Boolean).join(' or ');
   if (d.strategy === 'maker') return `Quotes ${fmtUsd(d.orderUsd, 0)} on each side of ${m} at the best price, holds at most ${fmtUsd(d.maxInventoryUsd, 0)} either way${stop ? ` and ${stop}` : ''}.`;
+  if (d.strategy === 'lead') {
+    const where = d.refBps > 0 ? `${d.refBps} bp from Binance's price` : `at the best price while it is at least ${d.pullBps} bp from Binance's`;
+    return `Quotes ${fmtUsd(d.orderUsd, 0)} on each side of ${m} ${where}, holds at most ${fmtUsd(d.maxInventoryUsd, 0)} either way${stop ? ` and ${stop}` : ''}.`;
+  }
   return `Rests ${fmtUsd(d.orderUsd, 0)} orders on ${d.levels} levels of ${m} between ${range ? `${fmtUsd(range.low)} and ${fmtUsd(range.high)}` : 'two prices'}${stop ? ` and ${stop}` : ''}.`;
 }
 
@@ -154,7 +159,7 @@ export function BotForm({ open, onClose, strategy: initial, editing, liveAllowed
   const cost = costPerMillion(d, market, mark, botFeeTenths);
   const preset = presetOf(d);
   // Where a volume maker costs least now (one shared tickers poll): the markets whose spread pays for the fees.
-  const tickers = useTickers('perps', { enabled: open && d.strategy === 'maker' && !editing, pollMs: 30_000 });
+  const tickers = useTickers('perps', { enabled: open && isMaker(d.strategy) && !editing, pollMs: 30_000 });
   const cheapest = useMemo(
     () => cheapestMakerMarkets(tickers.data?.tickers ?? [], (n) => { const t = Number(byName.get(n)?.tickSize); return t > 0 ? t : null; }, { botFeeTenths, limit: 4 }),
     [tickers.data, byName, botFeeTenths],
@@ -221,7 +226,7 @@ export function BotForm({ open, onClose, strategy: initial, editing, liveAllowed
           <DlgRow title="Market" line={locked ? 'A running bot keeps its market.' : info.best}>
             {locked ? <span className="bots-fixed">{d.symbol}</span> : <MarketSelect value={d.symbol} onChange={(v) => set({ symbol: v, low: null, high: null })} compact />}
           </DlgRow>
-          {!locked && d.strategy === 'maker' && cheapest.length > 0 && (
+          {!locked && isMaker(d.strategy) && cheapest.length > 0 && (
             <DlgRow title="Lowest cost now" line="Markets whose spread pays for the fees: quoting one tick inside it earns most of the spread on every round trip. Per $1M, before price moves." stack>
               <DlgSeg
                 label="Lowest cost now"
@@ -249,6 +254,31 @@ export function BotForm({ open, onClose, strategy: initial, editing, liveAllowed
         </DlgSection>
 
         <DlgSection label="How it trades">
+          {d.strategy === 'lead' && (
+            <>
+              <DlgRow title="Order size" line="Each buy and each sell it keeps resting." stack>
+                <NumField label="Each side" value={d.orderUsd} onChange={(v) => v !== null && set({ orderUsd: v })} unit="USD" />
+              </DlgRow>
+              <DlgRow title="Inventory cap" line="The most it holds either way. At the cap it only unwinds." stack>
+                <NumField label="Up to" value={d.maxInventoryUsd} onChange={(v) => v !== null && set({ maxInventoryUsd: v })} unit="USD" />
+              </DlgRow>
+              <DlgRow title="Pull distance" line="A quote that would add to what it holds is pulled, and not placed, while Binance's price is within this many bp of it: the move that is about to reach it on SoDEX. Higher: fewer fills, fewer bad ones." stack>
+                <NumField label="Within" value={d.pullBps} onChange={(v) => set({ pullBps: Math.max(0, Math.min(20, v ?? 0)) })} unit="bp" />
+              </DlgRow>
+              <DlgRow title="Distance from Binance" line="0: rests at SoDEX's best price while that is far enough from Binance's. Above 0: rests this far from Binance's price instead, inside a wide spread or behind the best price. What it holds unwinds at a quarter of it." stack>
+                <NumField label="At" value={d.refBps} onChange={(v) => set({ refBps: Math.max(0, Math.min(50, v ?? 0)) })} unit="bp" />
+              </DlgRow>
+              <DlgRow title="Unwind first" line="While it holds, the side that would add more steps back this many ticks at the cap." stack>
+                <NumField label="Skew" value={d.skewTicks} onChange={(v) => v !== null && set({ skewTicks: Math.round(v) })} unit="ticks" />
+              </DlgRow>
+              <DlgRow title="Follow the price" line="Moves a quote once the best price is this far away, at most every few seconds. Binance moves pull at once, whatever this says." stack>
+                <div className="bots-pair">
+                  <NumField label="After" value={d.chaseTicks} onChange={(v) => v !== null && set({ chaseTicks: Math.max(1, Math.round(v)) })} unit="ticks" />
+                  <NumField label="Every" value={d.minRepriceMs / 1000} onChange={(v) => v !== null && set({ minRepriceMs: Math.round(v * 1000) })} unit="s" />
+                </div>
+              </DlgRow>
+            </>
+          )}
           {d.strategy === 'maker' && (
             <>
               <DlgRow title="Order size" line="Each buy and each sell it keeps resting." stack>
@@ -333,7 +363,7 @@ export function BotForm({ open, onClose, strategy: initial, editing, liveAllowed
           <div className="bots-cost__row"><span>SoDEX maker fee</span><span>{fmtUsd(cost.trade, 0)}</span></div>
           <div className="bots-cost__row"><span>ValueDesk fee ({(botFeeTenths / 10).toFixed(1)} bp)</span><span>{fmtUsd(cost.builder, 0)}</span></div>
           <div className="bots-cost__row"><span>Spread</span><span>{fmtUsd(0, 0)} <small>never paid: every order rests</small></span></div>
-          {cost.edge !== null && <div className="bots-cost__row is-pos"><span>{d.strategy === 'grid' ? 'Grid steps earn' : `Spread earned (one tick, ${market && mark ? ((Number(market.tickSize) / mark) * 10_000).toFixed(2) : '-'} bp, a round trip)`}</span><span>−{fmtUsd(cost.edge, 0)}</span></div>}
+          {cost.edge !== null && <div className="bots-cost__row is-pos"><span>{d.strategy === 'grid' ? 'Grid steps earn' : d.strategy === 'lead' && d.refBps > 0 ? `Distance earned (${d.refBps} bp a side, a round trip)` : `Spread earned (one tick, ${market && mark ? ((Number(market.tickSize) / mark) * 10_000).toFixed(2) : '-'} bp, a round trip)`}</span><span>−{fmtUsd(cost.edge, 0)}</span></div>}
           <div className="bots-cost__row is-total"><span>Per $1M traded{cost.edge !== null ? ', before price moves' : ', before price moves and spread earned'}</span><span className={cost.net < 0 ? 'pos' : ''}>{cost.net < 0 ? `earns ${fmtUsd(-cost.net, 0)}` : fmtUsd(cost.net, 0)}</span></div>
         </div>
 

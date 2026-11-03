@@ -1,6 +1,7 @@
 /**
  * Each strategy's mark, drawn like the algo icons (AlgoIcon.tsx): a 20-unit glyph on a soft tile.
  *   maker  two quotes either side of a price line;
+ *   lead   the same quotes, led by a second price line a step ahead;
  *   grid   levels with a price zig-zagging through them.
  */
 import type { ReactNode } from 'react';
@@ -9,6 +10,15 @@ import type { Strategy } from '../../bots/presets';
 const GLYPHS: Record<Strategy, ReactNode> = {
   maker: (
     <>
+      <path d="M3 10h14" />
+      <path d="M6 6.5h4M10 13.5h4" />
+      <circle cx="6" cy="6.5" r="1.2" />
+      <circle cx="14" cy="13.5" r="1.2" />
+    </>
+  ),
+  lead: (
+    <>
+      <path d="M3 11.5h8l2-3h4" strokeOpacity="0.45" />
       <path d="M3 10h14" />
       <path d="M6 6.5h4M10 13.5h4" />
       <circle cx="6" cy="6.5" r="1.2" />

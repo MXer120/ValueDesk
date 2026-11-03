@@ -173,3 +173,22 @@ h.test('a practice volume maker: set up, preset, start, its window, pause, edit,
   await page.getByRole('dialog', { name: /^Delete / }).getByRole('button', { name: 'Delete', exact: true }).click();
   await row.waitFor({ state: 'hidden', timeout: 20_000 });
 }, { path: '/bots', timeout: 240_000 });
+
+h.test('the Binance-led maker: the third strategy, its form with the two Binance distances and what it costs', async ({ page }) => {
+  if (await comingSoon(page)) return; // the main build: the page is on the beta only
+  await connectWallet(page);
+  await page.getByRole('heading', { name: 'Bots', exact: true }).waitFor();
+  for (const name of ['Volume maker', 'Binance-led maker', 'Grid']) assert.ok(await page.getByRole('button', { name: new RegExp(name) }).first().isVisible(), name);
+  await shot(page, 'strategies');
+  await page.getByRole('button', { name: /Binance-led maker/ }).first().click();
+  const form = page.getByRole('dialog', { name: 'New binance-led maker' });
+  await form.waitFor({ state: 'visible' });
+  for (const row of ['Pull distance', 'Distance from Binance', 'Inventory cap', 'Loss limit']) assert.ok(await form.getByText(row, { exact: true }).first().isVisible(), row);
+  assert.equal(await form.getByText('Distance from the mid', { exact: true }).count(), 0, 'its distance is from Binance, not the mid');
+  assert.match((await form.locator('.bots-summary').textContent()) ?? '', /0\.5 bp from Binance/);
+  await until(page, async () => /\$120/.test((await form.locator('.bots-cost').textContent()) ?? ''), 'the cost per $1M');
+  await page.waitForTimeout(600);
+  await shot(page, 'lead-form');
+  await form.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await form.waitFor({ state: 'hidden' });
+});

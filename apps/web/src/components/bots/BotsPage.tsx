@@ -228,7 +228,7 @@ export function BotsPage({ address, provider }: { address: string | null; provid
   if (!ready || (!bots.length && !loading)) {
     list = (
       <div className="bots-pick">
-        <p className="pf-note">{ready ? 'Pick a strategy. Each starts as a practice run against the real book, with presets you can change.' : 'Two strategies, each built for volume at the lowest cost. Every order rests on the book.'}</p>
+        <p className="pf-note">{ready ? 'Pick a strategy. Each starts as a practice run against the real book, with presets you can change.' : 'Three strategies, each built for volume at the lowest cost. Every order rests on the book.'}</p>
         <StrategyCards onPick={pick} />
       </div>
     );

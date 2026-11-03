@@ -6,6 +6,9 @@
  *   maker  Volume maker (algo kind 'mm'): a post-only bid and ask at the touch, an inventory cap, a skew that
  *          unwinds what it holds first. Every fill is a maker fill: SoDEX's 1.2 bp + ValueDesk's 0.5 bp,
  *          $170 per $1M, and it earns what the spread gives. Delta-neutral by construction.
+ *   lead   Binance-led maker (kind 'mm' with ref 'binance', 2026-11-03): the volume maker priced off Binance USD-M's
+ *          mid (times the SoDEX/Binance basis). Binance moves first: a quote the Binance price came too close to is
+ *          pulled the moment the tick reaches the executor, not at its next step. Hosted only.
  *   grid   Grid (kind 'grid'): post-only levels in a range; every round trip earns one step.
  * A bot that takes (pays 4.0 bp + the spread) would cost $450+ per $1M: none is offered.
  *
@@ -14,8 +17,10 @@
 import type { AlgoSpec, MarketInfo } from '@copy-engine';
 import { gridPrices, gridStepPct } from '@copy-engine';
 
-export type Strategy = 'maker' | 'grid';
-export const STRATEGIES: readonly Strategy[] = ['maker', 'grid'];
+export type Strategy = 'maker' | 'lead' | 'grid';
+export const STRATEGIES: readonly Strategy[] = ['maker', 'lead', 'grid'];
+/** The volume makers (kind 'mm'): the same sizes, cap and guards; `lead` adds its Binance distances. */
+export const isMaker = (s: Strategy): boolean => s !== 'grid';
 
 export type PresetId = 'steady' | 'balanced' | 'active';
 export const PRESETS: readonly PresetId[] = ['steady', 'balanced', 'active'];
@@ -37,6 +42,18 @@ export const STRATEGY_INFO: Record<Strategy, { name: string; kind: AlgoSpec['kin
     ],
     risk: 'If the price runs one way it ends up holding up to the cap and the move counts against it. The loss limit stops it.',
     best: 'BTC: the cheapest in our live runs (about $210 per $1M).',
+  },
+  lead: {
+    name: 'Binance-led maker',
+    kind: 'mm',
+    line: 'The volume maker, priced off Binance. Pulls a quote the moment Binance moves through it.',
+    how: [
+      'Reads Binance futures, where prices move first, and SoDEX\'s gap to it: that is the fair price.',
+      'Rests at the best price only while it is safely on its side of the fair price, or a set distance from it.',
+      'A Binance move that reaches a quote cancels it at once, before the next step.',
+    ],
+    risk: 'Like the volume maker: up to the cap either way, the move counts against it, the loss limit stops it. It holds while Binance\'s price is not fresh.',
+    best: 'Liquid coins Binance lists: BTC, ETH, SOL.',
   },
   grid: {
     name: 'Grid',
@@ -74,6 +91,11 @@ export interface BotDraft {
   ladder: number;
   /** Ticks the mid may move in 2 s before the side it runs into waits (0: off). */
   moveGuard: number;
+  /* Binance-led maker */
+  /** Where the adding side rests, bp from the Binance fair price (0: SoDEX's best price while it is far enough). */
+  refBps: number;
+  /** The adding side is not quoted, and is pulled, within this many bp of the fair price. */
+  pullBps: number;
   /* grid */
   rangePct: number;
   low: number | null;
@@ -92,6 +114,11 @@ export const PRESET_VALUES: Record<Strategy, Record<PresetId, Partial<BotDraft>>
     steady: { orderUsd: 20, maxInventoryUsd: 60, skewTicks: 4, chaseTicks: 2, minRepriceMs: 5_000, maxLossUsd: 3 },
     balanced: { orderUsd: 50, maxInventoryUsd: 200, skewTicks: 4, chaseTicks: 2, minRepriceMs: 3_000, maxLossUsd: 10 },
     active: { orderUsd: 150, maxInventoryUsd: 600, skewTicks: 6, chaseTicks: 1, minRepriceMs: 2_000, maxLossUsd: 30 },
+  },
+  lead: {
+    steady: { orderUsd: 20, maxInventoryUsd: 60, skewTicks: 4, chaseTicks: 2, minRepriceMs: 5_000, maxLossUsd: 3, refBps: 0, pullBps: 1 },
+    balanced: { orderUsd: 50, maxInventoryUsd: 200, skewTicks: 4, chaseTicks: 2, minRepriceMs: 3_000, maxLossUsd: 10, refBps: 0, pullBps: 0.5 },
+    active: { orderUsd: 150, maxInventoryUsd: 600, skewTicks: 6, chaseTicks: 1, minRepriceMs: 2_000, maxLossUsd: 30, refBps: 0, pullBps: 0.25 },
   },
   grid: {
     steady: { rangePct: 0.03, levels: 10, orderUsd: 15, maxLossUsd: 5 },
@@ -116,6 +143,8 @@ export function draftFor(strategy: Strategy, preset: PresetId = 'balanced', symb
     queueGuard: 0,
     ladder: 1,
     moveGuard: 0,
+    refBps: 0,
+    pullBps: 0,
     rangePct: 0.02,
     low: null,
     high: null,
@@ -150,8 +179,9 @@ const roundSig = (x: number): number => Number(x.toPrecision(6));
 export function specOf(d: BotDraft, mark: number | null): Record<string, unknown> {
   const base = { symbol: d.symbol, paper: d.paper, label: d.label.trim() || null };
   const limits = { volumeTargetUsd: d.volumeTargetUsd, maxLossUsd: d.maxLossUsd, onStop: d.onStop };
-  if (d.strategy === 'maker') {
-    return { ...base, ...limits, kind: 'mm', offsetTicks: d.offsetTicks, orderUsd: d.orderUsd, maxInventoryUsd: d.maxInventoryUsd, skewTicks: d.skewTicks, chaseTicks: d.chaseTicks, minRepriceMs: d.minRepriceMs, ...(d.edgeBps > 0 ? { edgeBps: d.edgeBps } : {}), ...(d.queueGuard > 0 ? { queueGuard: d.queueGuard } : {}), ...(d.ladder > 1 ? { levels: d.ladder } : {}), ...(d.moveGuard > 0 ? { moveGuard: d.moveGuard } : {}) };
+  if (isMaker(d.strategy)) {
+    const lead = d.strategy === 'lead' ? { ref: 'binance', ...(d.refBps > 0 ? { refBps: d.refBps } : {}), ...(d.pullBps > 0 ? { pullBps: d.pullBps } : {}) } : {};
+    return { ...base, ...limits, ...lead, kind: 'mm', offsetTicks: d.offsetTicks, orderUsd: d.orderUsd, maxInventoryUsd: d.maxInventoryUsd, skewTicks: d.skewTicks, chaseTicks: d.chaseTicks, minRepriceMs: d.minRepriceMs, ...(d.edgeBps > 0 ? { edgeBps: d.edgeBps } : {}), ...(d.queueGuard > 0 ? { queueGuard: d.queueGuard } : {}), ...(d.ladder > 1 ? { levels: d.ladder } : {}), ...(d.moveGuard > 0 ? { moveGuard: d.moveGuard } : {}) };
   }
   const r = gridRange(d, mark);
   return { ...base, ...limits, kind: 'grid', low: r?.low ?? null, high: r?.high ?? null, levels: d.levels, orderUsd: d.orderUsd, spacing: 'geometric', outOfRange: d.outOfRange };
@@ -160,7 +190,7 @@ export function specOf(d: BotDraft, mark: number | null): Record<string, unknown
 /** The draft a running bot's spec reads back as (the Edit form). */
 export function draftOfSpec(s: AlgoSpec): BotDraft {
   if (s.kind === 'mm') {
-    return { ...draftFor('maker', 'balanced', s.symbol), label: s.label ?? '', paper: s.paper, offsetTicks: s.offsetTicks, orderUsd: s.orderUsd, maxInventoryUsd: s.maxInventoryUsd, skewTicks: s.skewTicks, chaseTicks: s.chaseTicks, minRepriceMs: s.minRepriceMs, edgeBps: s.edgeBps ?? 0, queueGuard: s.queueGuard ?? 0, ladder: s.levels ?? 1, moveGuard: s.moveGuard ?? 0, volumeTargetUsd: s.volumeTargetUsd, maxLossUsd: s.maxLossUsd, onStop: s.onStop };
+    return { ...draftFor(s.ref ? 'lead' : 'maker', 'balanced', s.symbol), refBps: s.refBps ?? 0, pullBps: s.pullBps ?? 0, label: s.label ?? '', paper: s.paper, offsetTicks: s.offsetTicks, orderUsd: s.orderUsd, maxInventoryUsd: s.maxInventoryUsd, skewTicks: s.skewTicks, chaseTicks: s.chaseTicks, minRepriceMs: s.minRepriceMs, edgeBps: s.edgeBps ?? 0, queueGuard: s.queueGuard ?? 0, ladder: s.levels ?? 1, moveGuard: s.moveGuard ?? 0, volumeTargetUsd: s.volumeTargetUsd, maxLossUsd: s.maxLossUsd, onStop: s.onStop };
   }
   if (s.kind === 'grid') {
     return { ...draftFor('grid', 'balanced', s.symbol), label: s.label ?? '', paper: s.paper, low: s.low, high: s.high, levels: s.levels, orderUsd: s.orderUsd, volumeTargetUsd: s.volumeTargetUsd, maxLossUsd: s.maxLossUsd, onStop: s.onStop, outOfRange: s.outOfRange };
@@ -172,6 +202,7 @@ export function draftOfSpec(s: AlgoSpec): BotDraft {
 export function patchOf(before: BotDraft, after: BotDraft): Record<string, unknown> {
   const keys: Array<keyof BotDraft> =
     after.strategy === 'maker' ? ['offsetTicks', 'orderUsd', 'maxInventoryUsd', 'skewTicks', 'chaseTicks', 'minRepriceMs', 'edgeBps', 'queueGuard', 'ladder', 'moveGuard', 'volumeTargetUsd', 'maxLossUsd', 'onStop']
+    : after.strategy === 'lead' ? ['orderUsd', 'maxInventoryUsd', 'skewTicks', 'chaseTicks', 'minRepriceMs', 'refBps', 'pullBps', 'volumeTargetUsd', 'maxLossUsd', 'onStop']
     : ['orderUsd', 'volumeTargetUsd', 'maxLossUsd', 'onStop', 'outOfRange'];
   const out: Record<string, unknown> = {};
   for (const k of keys) if (before[k] !== after[k]) out[k === 'ladder' ? 'levels' : k] = after[k];
@@ -182,7 +213,7 @@ export function patchOf(before: BotDraft, after: BotDraft): Record<string, unkno
 /** The strategy a running algo is (null: not one of the page's bots - a bot DCA from before 2026-11-02 included). */
 export function strategyOf(s: AlgoSpec): Strategy | null {
   if (!s.bot) return null;
-  return s.kind === 'mm' ? 'maker' : s.kind === 'grid' ? 'grid' : null;
+  return s.kind === 'mm' ? (s.ref ? 'lead' : 'maker') : s.kind === 'grid' ? 'grid' : null;
 }
 
 /* ------------------------------------------------------------------- cost ----- */
@@ -218,6 +249,9 @@ export function costPerMillion(d: BotDraft, m: Pick<MarketInfo, 'makerFee' | 'ti
       const prices = gridPrices({ low: r.low, high: r.high, levels: d.levels, spacing: 'geometric' }, m.tickSize);
       edge = (gridStepPct(prices) / 2) * 1_000_000;
     }
+  } else if (d.strategy === 'lead' && d.refBps > 0) {
+    // refBps from fair on each side: a round trip (two fills) earns twice it on one order, refBps per $1 of volume.
+    edge = (d.refBps / 10_000) * 1_000_000;
   } else if (m && mark && mark > 0 && d.edgeBps === 0) {
     edge = (Number(m.tickSize) / mark / 2) * 1_000_000;
   }
