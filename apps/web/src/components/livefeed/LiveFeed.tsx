@@ -7,8 +7,7 @@
  * player: YouTube's and Twitch's terms forbid overlays, frames or anything else in
  * front of any part of their players, hiding their logo, title or links, and
  * changing a player beyond its documented options (YouTube API Services Required
- * Minimum Functionality; Twitch Developer Services Agreement - docs/legal/
- * TECH-AUDIT.md). So the widget's controls - LIVE with a slow red dot, the source,
+ * Minimum Functionality; Twitch Developer Services Agreement). So the widget's controls - LIVE with a slow red dot, the source,
  * mute, fullscreen, clear - sit in a header ABOVE the player, the player shows its
  * own controls, and it is never shown smaller than its platform allows
  * (MIN_PLAYER): a panel too small says so instead. The picture is 16:9 where the

@@ -56,9 +56,7 @@ a copy holding a delisted market is neither closed nor told (`edge-copy.test.ts`
 ### Lower fees through a pooled contract account - owner, 2026-10-29
 HyperLink-style: users' trades go through one SoDEX identity owned by our contract, so all users share one fee
 tier (combined 14-day volume) and one SOSO staking discount. The goal is fees below sodex.com for everyone, with no
-custody and as little risk as possible. Normal trades, algos and copies all run through our UI. Design and
-comparison: `docs/research/10-pooled-fee-account.md`; build plan for today's SoDEX:
-`docs/research/11-pooled-account-build-plan.md`.
+custody and as little risk as possible. Normal trades, algos and copies all run through our UI.
 - **Target: member sub-accounts** on SoDEX's coming sub-accounts. Our immutable contract is the parent; each user
   gets their own sub-account with their own keys, margin and withdrawals. SoDEX liquidates each one alone, and the
   contract holds nothing. Waits for SoDEX's answers (`docs/SODEX-REQUESTS.md` §6, ten questions).

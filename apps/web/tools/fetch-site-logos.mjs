@@ -10,7 +10,7 @@
  *   node apps/web/tools/fetch-site-logos.mjs --news     the news outlets' and venues' icons only
  *   ... --only=ADI,USDE,sec.gov                         just these coin keys / news sites; the rest is kept
  *
- * Why (licence review 2026-10-28, docs/legal/THIRD-PARTY-REVIEW.md row 23-26):
+ * Why (licence review 2026-10-28):
  * TradingView's symbol logos (no commercial use without an agreement),
  * CoinGecko's and DefiLlama's images and the DuckDuckGo / Google favicon
  * services are no longer used. Instead:

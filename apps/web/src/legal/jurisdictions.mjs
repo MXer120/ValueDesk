@@ -31,7 +31,7 @@
  *               address does not reliably tell the province
  *               (packages/copy-engine/src/policy.ts CLOSE_ONLY_REGIONS - the same
  *               list; jurisdictions.test.ts checks). Further changes are the
- *               owner's decision: docs/legal/OWNER-DECISIONS.md.
+ *               owner's decision.
  *
  * Changing a list changes the Terms of use (they name every entry): raise
  * SITE_TERMS_VERSION (legal/acceptance.ts) with it, so every wallet accepts the
@@ -46,7 +46,7 @@
  * Myanmar: FATF's call for action. SYRIA is kept although the US (July 2025, the
  * Caesar Act repealed in December 2025) and the EU (May 2025) lifted most of
  * their Syria sanctions: dropping it is the owner's decision, like every change
- * here (docs/legal/OWNER-DECISIONS.md).
+ * here.
  */
 export const SANCTIONED_COUNTRIES = Object.freeze([
   Object.freeze({ code: 'CU', name: 'Cuba' }),
@@ -63,7 +63,7 @@ export const SANCTIONED_COUNTRIES = Object.freeze([
  * programmes; EU Regulations 692/2014 and 2022/263). ISO 3166-2:UA codes.
  * Zaporizhzhia (23) and Kherson (65) are under EU sanctions only in the areas
  * not controlled by the Ukrainian government, which an IP address cannot tell
- * apart: they are not blocked (docs/legal/OWNER-DECISIONS.md).
+ * apart: they are not blocked.
  */
 export const SANCTIONED_REGIONS = Object.freeze([
   Object.freeze({ country: 'UA', region: '43', name: 'Crimea' }),

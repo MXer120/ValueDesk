@@ -49,7 +49,7 @@ users needs each user's order history, which is limited to about four requests a
 
 **Why we ask.** SoDEX's fee tier is per user and needs more than $5 M of 14-day volume for the first step. Most of
 our users trade far less, so every one of them pays tier 0 (4.0 bp taker) plus our builder fee. Together they
-trade through one builder. See [research/10-pooled-fee-account.md](research/10-pooled-fee-account.md).
+trade through one builder.
 
 **What we ask for.** Orders that carry builder 234812 are charged at the tier of the builder's combined 14-day
 volume over those orders (or at a fixed rate agreed for the builder), while each user keeps trading in their own

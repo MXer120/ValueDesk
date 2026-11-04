@@ -7,7 +7,7 @@
  *
  * The engine replays a leader's fills chronologically, reconstructs the
  * leader's signed position per market, and simulates a follower under a
- * CopyConfig, following docs/research/03-copy-trading-design-space.md section C:
+ * CopyConfig:
  *   - opens / increases move the follower TOWARDS a target (C.3), so an
  *     increase that was too small to trade is picked up by the next one (the
  *     "residual" of C.2);

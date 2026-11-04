@@ -4,7 +4,7 @@
  * logo tools (fetch-logos.mjs, fetch-venue-logos.mjs, fetch-addrbook-logos.mjs,
  * fetch-site-logos.mjs); build time only, the app serves the files itself.
  *
- * Why this source (licence review 2026-10-28, docs/legal/THIRD-PARTY-REVIEW.md):
+ * Why this source (licence review 2026-10-28):
  * TradingView's symbol logos, CoinGecko's and DefiLlama's images and the
  * DuckDuckGo / Google favicon services all come with terms that do not cover a
  * commercial site. A company's, fund issuer's or project's own published icon,

@@ -6,7 +6,6 @@ executor should run the same event handler on each detected leader fill. A
 result from this engine is then a faithful preview of live behaviour, minus the
 effects listed under [Assumptions](#assumptions-and-known-gaps).
 
-The design follows `docs/research/03-copy-trading-design-space.md`, section C.
 Nothing here signs, sends or deploys anything. The engine and its tests were
 ported from the rejected web draft (`archive/web-draft/src/pages/copy/sim`); the
 algorithm is unchanged, the draft's UI and styles were not reused.

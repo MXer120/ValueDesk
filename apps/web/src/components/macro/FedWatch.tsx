@@ -32,7 +32,7 @@ function meetingLabel(day: string): string {
 }
 
 /**
- * OFF (licence review 2026-10-28, docs/legal/THIRD-PARTY-REVIEW.md rows 2-3):
+ * OFF (licence review 2026-10-28):
  * neither Kalshi's Developer Agreement nor Polymarket's Terms of Use allow
  * showing their prices on a commercial site without written permission. The
  * server answers `not_available` unless FOMC_ODDS=on; this switch also hides

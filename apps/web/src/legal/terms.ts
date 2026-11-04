@@ -8,8 +8,7 @@
  * arbitration clause and no class-action waiver for consumers: neither would
  * hold against an EU consumer (§ 1031 Abs. 5 ZPO; the Representative Actions
  * Directive), and an invalid clause is an unfair term in itself. Whether
- * disputes with merchants go to arbitration is the owner's decision (section 22,
- * docs/legal/OWNER-DECISIONS.md).
+ * disputes with merchants go to arbitration is the owner's decision (section 22).
  *
  * ACCEPTED, NOT JUST SHOWN. Every visitor accepts these terms with the risk
  * disclosure (risk.ts) on the first visit, and every wallet signs them before it

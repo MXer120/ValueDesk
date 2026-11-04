@@ -29,8 +29,7 @@
  * The meetings are read at most every 60 s, a history every 10 minutes. The
  * parsers are pure and covered by test/fedwatch.test.ts on saved responses.
  *
- * OFF BY DEFAULT (licence review 2026-10-28, docs/legal/THIRD-PARTY-REVIEW.md
- * rows 2-3): Kalshi's Developer Agreement s. 3.1 bars sharing its API data with
+ * OFF BY DEFAULT (licence review 2026-10-28): Kalshi's Developer Agreement s. 3.1 bars sharing its API data with
  * third parties without written authorisation, and Polymarket's Terms of Use
  * (11 Aug 2026) give only a personal licence, bar distributing its Features and
  * bar "financial technology companies" from its Data without a written

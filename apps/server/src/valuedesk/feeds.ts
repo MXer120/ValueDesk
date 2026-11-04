@@ -12,7 +12,7 @@
  *
  * Watcher.Guru was dropped (2026-10-28): its terms (s. 3.1) license its services for
  * "personal, non-commercial use" only and say nothing about syndication. Any other
- * outlet needs its written OK before it is added here (docs/legal/THIRD-PARTY-REVIEW.md).
+ * outlet needs its written OK before it is added here.
  *
  * The Kobeissi Letter is not read: it publishes only on X (its site embeds the
  * X timeline and has no feed of its own), and X's timelines need its paid API.

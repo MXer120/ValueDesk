@@ -12,7 +12,7 @@
  *
  * The build fails on a licence outside ALLOWED (copyleft, source-available,
  * "see licence in", none at all): adding such a package needs a decision first
- * (docs/legal/TECH-AUDIT.md). Nothing about this machine is written - no paths,
+ * Nothing about this machine is written - no paths,
  * only package names, versions and licence texts.
  */
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
@@ -29,7 +29,7 @@ export const ALLOWED = new Set([
  * notice "Portions © 2025 Reown, Inc." on the site (the footer's licences link
  * and this file), a copy of the licence (this file), and a paid licence once more
  * than 500 wallets connect in 30 days or 2.5 million RPC calls a month - an owner
- * decision (docs/legal/TECH-AUDIT.md).
+ * decision.
  */
 export const CLEARED = [
   { test: /^@(reown|walletconnect)\//, licence: 'SEE LICENSE IN LICENSE.md', as: 'Reown / WalletConnect Community License' },
@@ -132,7 +132,7 @@ export function thirdPartyLicences({ fileName = 'third-party-licenses.txt' } = {
       if (refused.length) {
         this.error(
           `licence not cleared for shipping: ${refused.map((p) => `${p.name}@${p.version} (${p.licence ?? 'none'})`).join(', ')}. ` +
-            'Decide first (docs/legal/TECH-AUDIT.md), then add the SPDX id to ALLOWED in apps/web/tools/licenses.mjs.',
+            'Decide first, then add the SPDX id to ALLOWED in apps/web/tools/licenses.mjs.',
         );
       }
       this.emitFile({ type: 'asset', fileName, source: renderLicences(pkgs) });

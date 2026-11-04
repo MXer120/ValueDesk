@@ -63,6 +63,10 @@ local-api.token
 builder-tiers.json
 builder-terms.key*
 
+# working notes and run reports: private, never committed
+reports/
+research_notes/
+
 # Vercel: the link of `vercel link` and the Build Output of deploy/vercel/build.sh
 .vercel/
 apps/web/public/models/

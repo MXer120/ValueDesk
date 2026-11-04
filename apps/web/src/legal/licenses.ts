@@ -12,8 +12,7 @@
  *   - where data, news and streams come from, the notices BLS and BEA ask for,
  *     and the trademark notice with where the icons come from.
  *
- * The audits behind it: docs/legal/TECH-AUDIT.md, docs/legal/THIRD-PARTY-REVIEW.md
- * (2026-10-28). Not hashed into the terms' fingerprint: changing it asks nobody
+ * Not hashed into the terms' fingerprint: changing it asks nobody
  * to accept anything again.
  */
 import type { LegalDoc } from './model';

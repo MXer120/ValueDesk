@@ -2,7 +2,7 @@
  * A YouTube channel's live stream right now, for the Live Feed widget - asked of
  * the YouTube Data API v3 with this server's key (YOUTUBE_API_KEY), never read off
  * youtube.com's pages: YouTube's terms forbid automated access to the site and the
- * Developer Policies forbid scraping (docs/legal/TECH-AUDIT.md section 2).
+ * Developer Policies forbid scraping.
  *
  * YouTube's `embed/live_stream?channel=` stopped resolving, so the video is found
  * here, as cheaply as the API allows (10,000 units a day by default):

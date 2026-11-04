@@ -234,7 +234,7 @@ await app.register(statsRoutes);
 await app.register(scanRoutes);
 // SoPoints login (routes/pointsAuth.ts) is NOT registered: it relays SoDEX's private
 // sign-in API under a forged `Origin: https://sodex.com` to get past the allowlist SoDEX
-// chose, which SoDEX's terms forbid (s. 5.6; docs/legal/TECH-AUDIT.md). The Points page is
+// chose, which SoDEX's terms forbid (s. 5.6). The Points page is
 // not mounted either. Bring it back only with SoDEX's written OK or an official API - and
 // without the forged headers.
 void pointsAuthRoutes;
