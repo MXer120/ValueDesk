@@ -52,7 +52,9 @@ wallet sign again.
 
 ## The fee
 
-Bots carry **5 tenths of a bp (0.5 bp)** on every order (`BOT_FEE`, packages/copy-engine/src/policy.ts), whatever
+Bots carry **1 tenth of a bp (0.1 bp)** on every order since 2026-11-04 (0.5 bp before; `BOT_FEE`,
+packages/copy-engine/src/policy.ts), so the fee floor is 1.3 bp, $130 per $1M. The terms of 2026-11-02 still name
+0.5 bp: a bot is charged less than they say until their next version. Whatever
 the volume - not the copy ladder (2.5 → 1 bp), which other hosted algos keep. SoDEX charges each order the fee it
 names, up to the account's approved ceiling, so the copy approval (25) already covers it: a user approves nothing
 new. Where the fee is chosen: `ExecutorService.algoFee` (apps/executor/src/service.ts), used by the algo sink's

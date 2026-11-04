@@ -36,7 +36,7 @@ import { BotSetupSheet, botReady } from './BotSetupSheet';
 import { botName, botState, fmtPnl, STATE_WORD, type BotState } from './botWords';
 import { useBots } from '../../bots/useBots';
 import { fleetSeries, fleetTotals } from '../../bots/fleet';
-import { DEFAULT_BOT_FEE_TENTHS, STRATEGY_INFO, costPerMillion, draftFor, strategyOf, type Strategy } from '../../bots/presets';
+import { DEFAULT_BOT_FEE_TENTHS, STRATEGY_INFO, botFeeWords, costPerMillion, draftFor, strategyOf, type Strategy } from '../../bots/presets';
 import './bots.css';
 
 type Show = 'all' | 'running' | 'ended';
@@ -97,7 +97,7 @@ function FleetChart({ bots, children }: { bots: AlgoView[]; children?: ReactNode
       <div className="pf-statstrip">
         <Stat label="Fills" value={t.fills ? t.fills.toLocaleString('en-US') : DASH} privacy="funds" />
         <Stat label="Resting (maker)" value={t.volume >= 1 ? `${Math.round((t.makerValue / t.volume) * 100)}%` : DASH} hint="Share of the volume that filled resting on the book: the maker fee, never the spread." />
-        <Stat label="Fee floor per $1M" value={fmtUsd(floor.fees, 0)} hint={`SoDEX's maker fee (${fmtUsd(floor.trade, 0)}) plus ValueDesk's 0.5 bp (${fmtUsd(floor.builder, 0)}) on every $1M a bot trades.`} />
+        <Stat label="Fee floor per $1M" value={fmtUsd(floor.fees, 0)} hint={`SoDEX's maker fee (${fmtUsd(floor.trade, 0)}) plus ValueDesk's ${botFeeWords()} (${fmtUsd(floor.builder, 0)}) on every $1M a bot trades.`} />
       </div>
     </Card>
   );
@@ -198,7 +198,7 @@ export function BotsPage({ address, provider }: { address: string | null; provid
   } else if (!ready) {
     rail = (
       <>
-        <p className="pf-note">Accept the terms to start a practice bot. Real orders add the 0.5 bp fee and a trading key.</p>
+        <p className="pf-note">Accept the terms to start a practice bot. Real orders add the ${botFeeWords(fee)} fee and a trading key.</p>
         <SetupProgress live={live} mode="hosted" paper bots />
         <button type="button" className="pf-btn pf-btn--primary pf-btn--wide" onClick={() => setSetup({ paper: true })}>Set up</button>
       </>
@@ -214,7 +214,7 @@ export function BotsPage({ address, provider }: { address: string | null; provid
         </div>
         <div className="pf-well">
           <Row label="SoDEX fees" value={fmtUsd(t.tradeFees, 2)} />
-          <Row label="ValueDesk fee (0.5 bp)" value={fmtUsd(t.builderFees, 2)} />
+          <Row label={`ValueDesk fee (${botFeeWords(fee)})`} value={fmtUsd(t.builderFees, 2)} />
           <Row label="Holding" value={fmtUsd(t.holdingUsd, 2)} hint="What the bots hold from their own fills, at the price now." />
         </div>
         <button type="button" className="pf-btn pf-btn--primary pf-btn--wide" onClick={() => newBot()}>New bot</button>

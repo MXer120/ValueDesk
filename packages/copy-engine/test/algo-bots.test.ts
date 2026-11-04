@@ -350,7 +350,7 @@ test('volume maker: two post-only quotes at the touch; fills go into the book at
   assert.ok(v.bot);
   assert.equal(v.bot!.fills, 1);
   assert.ok(Math.abs(v.bot!.volume - Number(bid.quantity) * 60_000) < 1e-6);
-  assert.ok(Math.abs(v.bot!.builderFees - v.bot!.volume * 0.00005) < 1e-9, 'the bot fee, 0.5 bp');
+  assert.ok(Math.abs(v.bot!.builderFees - v.bot!.volume * 0.00001) < 1e-9, 'the bot fee, 0.1 bp');
   assert.ok(Math.abs(v.bot!.tradeFees - v.bot!.volume * 0.00012) < 1e-9, 'SoDEX\'s maker fee');
   assert.equal(v.bot!.makerShare, 1);
   // The filled side goes back out next step; the other one stays where it was.

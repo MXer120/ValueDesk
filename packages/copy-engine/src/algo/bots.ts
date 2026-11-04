@@ -3,7 +3,7 @@
  * book (volume, fees, PnL) and its series. The runtime and the page's preview call the same functions.
  *
  * WHAT A BOT COSTS. Every child is post-only (GTX), so every fill pays SoDEX's maker fee (1.2 bp at tier 0)
- * plus the bot builder fee (policy.ts BOT_FEE, 0.5 bp): 1.7 bp, $170 per $1M traded. A volume maker earns
+ * plus the bot builder fee (policy.ts BOT_FEE, 0.1 bp): 1.3 bp, $130 per $1M traded. A volume maker earns
  * back what the spread gives it and loses what the price takes from what it holds (adverse selection); a
  * grid earns one level's step per round trip. The only taker orders a bot ever sends are the reduce-only
  * close when it stops with `onStop: 'close'` and a minute of resting did not close it.

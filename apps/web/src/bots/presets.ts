@@ -4,8 +4,8 @@
  * Two strategies, picked for the most volume at the least net cost (owner, 2026-11-02; a DCA is an algo order,
  * not a bot - the owner took it off this page the same day):
  *   maker  Volume maker (algo kind 'mm'): a post-only bid and ask at the touch, an inventory cap, a skew that
- *          unwinds what it holds first. Every fill is a maker fill: SoDEX's 1.2 bp + ValueDesk's 0.5 bp,
- *          $170 per $1M, and it earns what the spread gives. Delta-neutral by construction.
+ *          unwinds what it holds first. Every fill is a maker fill: SoDEX's 1.2 bp + ValueDesk's 0.1 bp,
+ *          $130 per $1M, and it earns what the spread gives. Delta-neutral by construction.
  *   lead   Binance-led maker (kind 'mm' with ref 'binance', 2026-11-03): the volume maker priced off Binance USD-M's
  *          mid (times the SoDEX/Binance basis). Binance moves first: a quote the Binance price came too close to is
  *          pulled the moment the tick reaches the executor, not at its next step. Hosted only.
@@ -28,7 +28,9 @@ export const PRESET_NAMES: Record<PresetId, string> = { steady: 'Steady', balanc
 
 /** SoDEX's maker fee at tier 0 when the market does not say (fees.ts FEE_TIERS), and ours for bots (policy.ts BOT_FEE). */
 export const DEFAULT_MAKER_FEE = 0.00012;
-export const DEFAULT_BOT_FEE_TENTHS = 5;
+export const DEFAULT_BOT_FEE_TENTHS = 1;
+/** The bot fee in words: 1 tenth -> '0.1 bp'. */
+export const botFeeWords = (tenths: number = DEFAULT_BOT_FEE_TENTHS): string => `${(tenths / 10).toFixed(1)} bp`;
 
 export const STRATEGY_INFO: Record<Strategy, { name: string; kind: AlgoSpec['kind']; line: string; how: string[]; risk: string; best: string }> = {
   maker: {

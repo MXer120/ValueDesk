@@ -4,10 +4,11 @@
  * sign-in is part of the terms step rather than a step of its own:
  *
  *   practice   connect, terms
- *   real       connect, terms, fee (0.5 bp), trading key
+ *   real       connect, terms, fee (0.1 bp), trading key
  */
 import { readiness, type LiveCopy } from '../../copy/live';
 import { CopySetupSteps, SetupProgress, copyReady } from '../../copy/CopySetupSheet';
+import { botFeeWords } from '../../bots/presets';
 import { Modal } from '../Modal';
 import '../funds/funds.css';
 import '../../copy/copy.css';
@@ -20,7 +21,7 @@ export function botReady(live: LiveCopy, paper: boolean): { ready: boolean; why:
   if (!r.terms || !r.connected) return { ready: false, why: 'Accept the terms in the bot setup.' };
   if (!copyReady(live, 'hosted', true)) return { ready: false, why: 'Bots are not available where you are.' };
   if (copyReady(live, 'hosted', paper)) return { ready: true, why: null };
-  if (!r.fee) return { ready: false, why: 'Approve the 0.5 bp fee in the bot setup for real orders.' };
+  if (!r.fee) return { ready: false, why: `Approve the ${botFeeWords()} fee in the bot setup for real orders.` };
   return { ready: false, why: 'Approve the trading key in the bot setup for real orders.' };
 }
 

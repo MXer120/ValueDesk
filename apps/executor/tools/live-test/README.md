@@ -269,7 +269,7 @@ says what it confirms on the exchange (`title` and `confirms` in `scenarios/*.ts
 
 `scenarios/bots.ts` (`--only 'bot.*' --slow`): the Bots page's strategies at SoDEX's minimum size - `bot.maker` (volume
 maker), `bot.grid`, `bot.kill` (the kill switch never trades) and `bot.restart` (a hard kill mid-run). Each
-checks the 0.5 bp bot fee on every fill and that the executor's book agrees with SoDEX's trades, and appends its numbers
+checks the 0.1 bp bot fee on every fill and that the executor's book agrees with SoDEX's trades, and appends its numbers
 (volume, SoDEX fees, builder fee, net PnL, cost per $1M, from SoDEX's own fills) to `.state/bot-numbers.jsonl`.
 
 | Variable | |

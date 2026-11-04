@@ -34,7 +34,7 @@
  * 2026-10-28: security incidents and the emergency brake, a hacked executor, rate limits, software errors named,
  * the follower's duties to report errors and limit what is at stake, the liability clause rewritten (BGB §§ 307-309).
  * 2026-11-02: bots (the Bots page) - what they do, that they can lose, no wash trading, no fills between different
- * users' bots, and their 0.5 bp fee in place of the normal one (owner, 2026-11-02).
+ * users' bots, and their 0.5 bp fee in place of the normal one (owner, 2026-11-02; charged 0.1 bp since 2026-11-04, BOT_FEE).
  */
 export const COPY_TERMS_VERSION = '2026-11-02';
 
@@ -207,12 +207,14 @@ export function copyFeeFor(volumeUsd: number | null | undefined, ladder: readonl
 }
 
 /**
- * THE BOT FEE (owner, 2026-11-02: "Builder fee needs to be low - probably 0.5bps"): every order of a bot
- * (the Bots page: volume maker, grid, DCA bot) carries 5 tenths of a bp, whatever the volume - not the copy
- * ladder. SoDEX charges each order the fee it names, up to the follower's approved ceiling, so the copy
- * approval (COPY_FEE_MAX) covers it and a follower approves nothing new.
+ * THE BOT FEE: every order of a bot (the Bots page: the volume maker, the Binance-led maker, the grid) carries
+ * 1 tenth of a bp (0.1 bp), whatever the volume - not the copy ladder. Owner 2026-11-02: "Builder fee needs to be
+ * low - probably 0.5bps"; lowered to 0.1 bp on 2026-11-04 ("change builder fee to 0.1bps") to beat a rival's all-in cost
+ * (SoDEX's 1.2 bp maker fee + 0.1 bp = a 1.3 bp floor). SoDEX charges each order the fee it names, up to the
+ * follower's approved ceiling, so the copy approval (COPY_FEE_MAX) covers it and a follower approves nothing new.
+ * The terms of 2026-11-02 name 0.5 bp: a bot is charged less than they say, until their next version.
  */
-export const BOT_FEE = 5;
+export const BOT_FEE = 1;
 
 /** Tenths of a bp -> '0.025%'. */
 export const feePercent = (tenthsBps: number): string => `${(tenthsBps / 1000).toFixed(tenthsBps % 10 === 0 ? 2 : 3)}%`;

@@ -478,7 +478,7 @@ export interface MmSpec extends AlgoBase, BotLimits {
   skewTicks: number;
   /**
    * Each quote rests at least this far from the mid, bp (0 = at the touch). A round trip then earns at least twice
-   * it: at 1.7 bp (1.2 bp maker + 0.5 bp bot fee) every round trip pays its own fees. Fewer fills, lower cost.
+   * it: at 1.3 bp (1.2 bp maker + 0.1 bp bot fee) every round trip pays its own fees. Fewer fills, lower cost.
    * Absent (a spec from before it): 0.
    */
   edgeBps?: number;

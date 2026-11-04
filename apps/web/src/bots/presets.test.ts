@@ -1,7 +1,7 @@
 /**
  * The Bots page's strategies and presets (presets.ts): every preset makes a spec the engine accepts, a running
  * bot reads back as the draft it was made from, an edit sends only what changed, and the cost per $1M is
- * SoDEX's maker fee plus the 0.5 bp bot fee.
+ * SoDEX's maker fee plus the 0.1 bp bot fee.
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -44,11 +44,11 @@ test('a running bot reads back as its draft; an edit sends only what changed', (
   assert.deepEqual(Object.keys(patchOf(g, { ...g, levels: 30, low: 1, orderUsd: 40 })), ['orderUsd']);
 });
 
-test('cost per $1M: 1.2 bp maker + 0.5 bp bot fee = $170; the maker gets one tick a round trip back, a grid half a step per $1M', () => {
+test('cost per $1M: 1.2 bp maker + 0.1 bp bot fee = $130; the maker gets one tick a round trip back, a grid half a step per $1M', () => {
   const m = costPerMillion(draftFor('maker'), BTC, MARK);
   assert.equal(Math.round(m.trade), 120);
-  assert.equal(Math.round(m.builder), 50);
-  assert.equal(Math.round(m.fees), 170);
+  assert.equal(Math.round(m.builder), 10);
+  assert.equal(Math.round(m.fees), 130);
   // At the touch the spread gives one tick a round trip: BTC's $1 at $78,000 is 0.13 bp, $6.41 per $1M.
   assert.ok(Math.abs(m.edge! - 6.41) < 0.01, String(m.edge));
   assert.equal(costPerMillion({ ...draftFor('maker'), edgeBps: 2 }, BTC, MARK).edge, null, 'away from the touch: not counted');
@@ -57,9 +57,9 @@ test('cost per $1M: 1.2 bp maker + 0.5 bp bot fee = $170; the maker gets one tic
   assert.ok(g.edge !== null && g.edge > 0);
   // ±2% over 16 levels: steps of about 0.27%, half of it per $1M = about $1,330, net about -$1,160 (it earns).
   assert.ok(g.edge! > 1_200 && g.edge! < 1_450, String(g.edge));
-  assert.ok(Math.abs(g.net - (170 - g.edge!)) < 1e-6);
+  assert.ok(Math.abs(g.net - (130 - g.edge!)) < 1e-6);
   // Unknown market: SoDEX's tier-0 maker fee.
-  assert.equal(Math.round(costPerMillion(draftFor('maker'), null, null).fees), 170);
+  assert.equal(Math.round(costPerMillion(draftFor('maker'), null, null).fees), 130);
 });
 
 test('the Bots page runs the two makers and the grid; a DCA is an algo order', () => {
@@ -83,9 +83,9 @@ test('cheapest maker markets: a wide spread earns most of itself a round trip; t
     { symbol: 'WILD-USD', bidPx: '10.00', askPx: '10.20', quoteVolume: '9000000' },
   ], tick);
   assert.deepEqual(r.map((x) => x.symbol), ['MCD-USD', 'BTC-USD']);
-  // MCD: 36 ticks of 0.38 bp = 13.7 bp; inside both sides it keeps 34 ticks, 12.9 bp a round trip: $170 - $646 = it earns.
-  assert.ok(r[0]!.costPerMillion < -400 && r[0]!.costPerMillion > -520, String(r[0]!.costPerMillion));
-  assert.ok(Math.abs(r[1]!.costPerMillion - 163.6) < 0.2, String(r[1]!.costPerMillion));
+  // MCD: 36 ticks of 0.38 bp = 13.7 bp; inside both sides it keeps 34 ticks, 12.9 bp a round trip: $130 - $646 = it earns.
+  assert.ok(r[0]!.costPerMillion < -440 && r[0]!.costPerMillion > -560, String(r[0]!.costPerMillion));
+  assert.ok(Math.abs(r[1]!.costPerMillion - 123.6) < 0.2, String(r[1]!.costPerMillion));
 });
 
 test('Binance-led maker: a volume maker with ref binance; its distances only above 0; reads back as itself', () => {

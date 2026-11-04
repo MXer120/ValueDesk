@@ -3,7 +3,7 @@
  * bot: true) at the smallest size SoDEX takes, and the numbers the owner asked for (2026-11-02): volume, the fees
  * SoDEX charged, the builder fee, net PnL and the cost per $1M - from SoDEX's own fills, not the executor's book.
  *
- * What only SoDEX can show: every quote rests (post-only, maker fills), every order carries the BOT fee (0.5 bp,
+ * What only SoDEX can show: every quote rests (post-only, maker fills), every order carries the BOT fee (0.1 bp,
  * not the copy ladder), the executor's book agrees with SoDEX's fills, a stop closes what the bot holds and leaves
  * nothing resting, the kill switch pulls everything without trading, and a hard restart neither doubles a quote nor
  * forgets one.
@@ -21,7 +21,7 @@ import type { Scenario } from '../scenario.ts';
 
 const SOURCE = 'apps/executor/tools/live-test/scenarios/bots.ts';
 const MIN = 60_000;
-const BOT_FEE = 5;
+const BOT_FEE = 1;
 const RUN_MS = Math.max(2, Number(process.env.LIVE_BOT_MINUTES ?? 10) || 10) * MIN;
 const NUMBERS = join(dirname(fileURLToPath(import.meta.url)), '..', '.state', 'bot-numbers.jsonl');
 /** Tuning for an iteration, without a code change: JSON merged over the scenario's own settings (and recorded with its numbers). */
@@ -143,7 +143,7 @@ async function nothingResting(t: T, id: string, symbol = t.main.name): Promise<v
 export const BOT_SYMBOLS = (process.env.LIVE_BOT_SYMBOLS ?? 'ETH-USD,ZEC-USD,SOL-USD').split(',').map((s) => s.trim().toUpperCase()).filter(Boolean);
 
 export const BOT_SCENARIOS: Scenario[] = [
-  bot('bot.makers', 'mm', 'Volume makers on several markets at once (LIVE_BOT_SYMBOLS), side by side over the same minutes', 'each market\'s quotes rest (maker fills, the 0.5 bp bot fee), each book agrees with SoDEX, each stop closes and leaves nothing resting; per market: fills, volume, maker share, fees, gross and net per $1M', {
+  bot('bot.makers', 'mm', 'Volume makers on several markets at once (LIVE_BOT_SYMBOLS), side by side over the same minutes', 'each market\'s quotes rest (maker fills, the 0.1 bp bot fee), each book agrees with SoDEX, each stop closes and leaves nothing resting; per market: fills, volume, maker share, fees, gross and net per $1M', {
     timeoutMs: RUN_MS + 12 * MIN,
     // What each can hold is its inventory cap (LIVE_BOT_MM maxInventoryUsd, else 3 orders): all of them at once at the peak.
     cost: (U) => {
@@ -172,7 +172,7 @@ export const BOT_SCENARIOS: Scenario[] = [
     },
   }),
 
-  bot('bot.maker', 'mm', 'Volume maker: quotes both sides post-only, then stops and closes', 'every quote rests (maker fills only, the 0.5 bp bot fee on each), the book agrees with SoDEX, a stop closes what it holds and leaves nothing resting; the run\'s volume, fees, net PnL and cost per $1M', {
+  bot('bot.maker', 'mm', 'Volume maker: quotes both sides post-only, then stops and closes', 'every quote rests (maker fills only, the 0.1 bp bot fee on each), the book agrees with SoDEX, a stop closes what it holds and leaves nothing resting; the run\'s volume, fees, net PnL and cost per $1M', {
     timeoutMs: RUN_MS + 8 * MIN,
     cost: (U) => ({ takerUsd: 3 * U, makerUsd: 60 * U, peakUsd: 3 * U }),
     async run(t) {
@@ -192,7 +192,7 @@ export const BOT_SCENARIOS: Scenario[] = [
     },
   }),
 
-  bot('bot.grid', 'grid', 'Grid: post-only levels around the price, a fill moves the gap', 'every level rests post-only, a filled buy puts a sell one level up (and back), the 0.5 bp bot fee on each fill; the run\'s volume, fees, net PnL and cost per $1M', {
+  bot('bot.grid', 'grid', 'Grid: post-only levels around the price, a fill moves the gap', 'every level rests post-only, a filled buy puts a sell one level up (and back), the 0.1 bp bot fee on each fill; the run\'s volume, fees, net PnL and cost per $1M', {
     timeoutMs: RUN_MS + 8 * MIN,
     cost: (U) => ({ takerUsd: 3 * U, makerUsd: 30 * U, peakUsd: 4 * U }),
     async run(t) {

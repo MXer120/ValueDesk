@@ -287,7 +287,7 @@ export function BotForm({ open, onClose, strategy: initial, editing, liveAllowed
               <DlgRow title="Inventory cap" line="The most it holds either way. At the cap it only unwinds." stack>
                 <NumField label="Up to" value={d.maxInventoryUsd} onChange={(v) => v !== null && set({ maxInventoryUsd: v })} unit="USD" />
               </DlgRow>
-              <DlgRow title="Distance from the mid" line="Each quote rests at least this far from the mid. At 1.7 bp every round trip pays its own fees: fewer fills, lower cost. 0: at the best price." stack>
+              <DlgRow title="Distance from the mid" line="Each quote rests at least this far from the mid. At 1.3 bp every round trip pays its own fees: fewer fills, lower cost. 0: at the best price." stack>
                 <NumField label="At least" value={d.edgeBps} onChange={(v) => set({ edgeBps: v ?? 0 })} unit="bp" />
               </DlgRow>
               <DlgRow title="Keep queue place" line="Quotes the price moved away from stay resting, up to this many ticks back, while a new one joins the best price: when the price comes back they are near the front of the queue. 1: one quote, moved with the price." stack>

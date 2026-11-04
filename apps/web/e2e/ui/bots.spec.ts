@@ -72,7 +72,7 @@ h.test('before a wallet: the two strategies (no DCA bot), what each costs, and C
   await page.getByRole('heading', { name: 'Bots', exact: true }).waitFor();
   for (const name of ['Volume maker', 'Grid']) assert.ok(await page.getByRole('button', { name: new RegExp(name) }).first().isVisible(), name);
   assert.equal(await page.getByText('DCA bot').count(), 0, 'a DCA is an algo order, not a bot');
-  assert.ok(await page.getByText('$170').first().isVisible(), 'fees per $1M: 1.2 bp maker + 0.5 bp');
+  assert.ok(await page.getByText('$130').first().isVisible(), 'fees per $1M: 1.2 bp maker + 0.1 bp');
   assert.ok(await page.getByRole('button', { name: 'Connect wallet' }).first().isVisible());
   await shot(page, 'no-wallet');
 }, { path: '/bots' });
@@ -93,8 +93,8 @@ h.test('a practice volume maker: set up, preset, start, its window, pause, edit,
   assert.ok(await form.getByRole('button', { name: 'Balanced', exact: true }).getAttribute('aria-pressed').then((x) => x === 'true'), 'Balanced by default');
   await form.getByRole('button', { name: 'Steady', exact: true }).click();
   assert.ok(await form.getByRole('switch', { name: 'Practice' }).isDisabled(), 'live bots are off for this wallet: practice only');
-  // SoDEX's 1.2 bp ($120) and the 0.5 bp bot fee ($50) per $1M, less one tick a round trip at the touch.
-  await until(page, async () => { const t = (await form.locator('.bots-cost').textContent()) ?? ''; return /\$120/.test(t) && /\$50/.test(t) && /Spread earned/.test(t); }, 'the cost per $1M');
+  // SoDEX's 1.2 bp ($120) and the 0.1 bp bot fee ($10) per $1M, less one tick a round trip at the touch.
+  await until(page, async () => { const t = (await form.locator('.bots-cost').textContent()) ?? ''; return /\$120/.test(t) && /\$10/.test(t) && /Spread earned/.test(t); }, 'the cost per $1M');
   await shot(page, 'form');
   let mark = wallet.mark();
   await form.getByRole('button', { name: 'Start practice bot', exact: true }).click();
