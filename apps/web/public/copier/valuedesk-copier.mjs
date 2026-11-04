@@ -8307,7 +8307,7 @@ function copyFeeFor(volumeUsd, ladder = COPY_FEE_LADDER) {
   for (const step of ladder) if (volumeUsd >= step.fromUsd) fee = step.fee;
   return fee;
 }
-var BOT_FEE = 5;
+var BOT_FEE = 1;
 
 // ../../packages/copy-engine/src/sanctionsList.ts
 var SANCTIONED_ADDRESSES = [
