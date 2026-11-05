@@ -154,7 +154,7 @@ writeFileSync(join(DIR, 'index.html'), `<!doctype html>
         if (it.kind === 'video') {
           fig.className = 'video';
           const v = document.createElement('video');
-          v.src = it.href; v.controls = true; v.preload = 'metadata';
+          v.src = it.href + '#t=2.5'; v.controls = true; v.preload = 'metadata'; // a real frame, not the fade from black
           fig.append(v);
         } else {
           const img = document.createElement('img');

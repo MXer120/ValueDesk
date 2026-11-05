@@ -278,3 +278,12 @@ html[data-theme='light'] .dash-mktfilter input:checked {
 
 /* A locked copy step, a faded row: readable on white too. */
 html[data-theme='light'] .cs-step:not(.is-current):not(.is-done) { opacity: 0.82; }
+
+/* Controls over a video stay dark glass with white type, on either theme. */
+html[data-theme='light'] .lf:not(.is-docked) .lf__pick,
+html[data-theme='light'] .lf:not(.is-docked) .lf__btn,
+html[data-theme='light'] .lf:not(.is-docked) .lf__custom,
+html[data-theme='light'] .lf:not(.is-docked) .lf__err,
+html[data-theme='light'] .fl__over { --text: #f7f7f7; --muted: #bcbcbc; --dim: #a0a0a0; --ink: 255 255 255; color: #f7f7f7; }
+html[data-theme='light'] .nw { --nw-hot: #a84a08; }
+html[data-theme='light'] .nwc__short { color: #6b4300; }
