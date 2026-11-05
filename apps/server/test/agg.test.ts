@@ -257,3 +257,22 @@ test('the held rows go to the next writer through a file beside the index: its f
   d.close();
   rmSync(dir, { recursive: true, force: true });
 });
+
+test('the writer checkpoints less often and caches more: the data stays whole across a reopen', async () => {
+  const { mkdtempSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const dir = mkdtempSync(join(tmpdir(), 'vs-ckpt-'));
+  const file = join(dir, 'index.db');
+  type Raw = { db: { prepare(q: string): { get(): Record<string, number> } } };
+  const s = new IndexStore(file, { aggRefreshMs: 0 });
+  assert.equal((s as unknown as Raw).db.prepare('PRAGMA wal_autocheckpoint').get().wal_autocheckpoint, 16_000);
+  const rows: FillRow[] = [];
+  for (let i = 0; i < 2_000; i++) rows.push(fill({ id: 'c' + i, t: Date.now() - 3_600_000 - i, oid: 'o' + i, symbol: 'BTC', side: 1, px: 100, sz: 1, closedPnl: null, fee: null, src: 1 }));
+  s.putFills(rows);
+  s.close();
+  const again = new IndexStore(file, { aggRefreshMs: 0 });
+  assert.equal((again as unknown as Raw).db.prepare('SELECT COUNT(*) AS n FROM fills').get().n, 2_000);
+  again.close();
+  try { rmSync(dir, { recursive: true, force: true }); } catch { /* Windows handle */ }
+});
