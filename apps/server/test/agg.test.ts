@@ -276,3 +276,28 @@ test('the writer checkpoints less often and caches more: the data stays whole ac
   again.close();
   try { rmSync(dir, { recursive: true, force: true }); } catch { /* Windows handle */ }
 });
+
+test('a scan cut short by its time budget sums exactly what a whole one does, rows of one timestamp together', () => {
+  const build = (budget: number) => {
+    const s = new IndexStore(':memory:', { aggRefreshMs: 0 });
+    (s as unknown as { scanBudgetMs: number }).scanBudgetMs = budget;
+    const rows: FillRow[] = [];
+    for (let d = 0; d < 2; d++) {
+      for (let i = 0; i < 40; i++) {
+        const t = T0 + d * DAY + i * 60_000;
+        // Up to five fills of one timestamp, closes among them.
+        for (let k = 0; k <= i % 5; k++) rows.push(fill({ id: `f${d}-${i}-${k}`, t, oid: `o${d}-${i}`, closedPnl: k === 1 ? (i % 2 ? 4 : -2) : null, symbol: i % 3 ? 'ETH' : 'BTC' }));
+      }
+    }
+    s.putFills(rows);
+    s.windowStats('hyperliquid', '0xa', 0);
+    while (s.buildAggregates(1_000) > 0) { /* build */ }
+    assert.equal(s.aggregatesReady('hyperliquid', '0xa'), true);
+    return { s, stats: [0, T0 + DAY / 2, T0 + DAY].map((from) => s.windowStats('hyperliquid', '0xa', from)) };
+  };
+  const whole = build(Number.POSITIVE_INFINITY);
+  // 0: every step stops after two rows, the hardest case.
+  const short = build(0);
+  assert.deepEqual(short.stats, whole.stats);
+  assert.deepEqual(short.stats[0], scan(short.s, 'hyperliquid', '0xa', 0));
+});

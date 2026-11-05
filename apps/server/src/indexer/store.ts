@@ -850,6 +850,8 @@ export class IndexStore {
   private slice = 100;
   /** Rows per background scan step, tuned likewise (step). Starts small: the first pages may be cold. */
   private chunk = 125;
+  /** How long one background scan step may read. */
+  private scanBudgetMs = 30;
   private autoVacuum = 0;
   private totals: RetentionStatus['totals'] = { days: 0, fills: 0, closes: 0, dropped: 0, badTime: 0, late: 0, repaired: 0, unrepairable: 0, reclaimedPages: 0 };
   private totalsSaved = '';
@@ -1689,18 +1691,30 @@ export class IndexStore {
    * Scan up to `maxRows` more rows of a job. Returns true when the job has
    * reached its end. Rows of one timestamp are never split across chunks.
    */
-  private scanStep(job: ScanJob, maxRows: number): boolean {
+  private scanStep(job: ScanJob, maxRows: number, budgetMs = Number.POSITIVE_INFINITY): boolean {
     if (job.cursor >= job.to) return true;
-    const rows = this.q(
+    // Row by row, not `all`: rows off the page cache cost a disk read each (~11 ms here), and a chunk of 1,000 of
+    // them held the thread 11.7 s in one call (profile 2026-11-05 18:58). Past the budget it stops as a full chunk
+    // does: what it read up to its last timestamp counts, and the next step starts at that timestamp.
+    const t0 = Date.now();
+    const rows: ScanRow[] = [];
+    let cutShort = false;
+    for (const r of this.q(
       `SELECT t, symbol, side, px * sz AS v, closed_pnl, fee, src FROM fills
        WHERE venue = ? AND address = ? AND t >= ? AND t < ? ORDER BY t LIMIT ?`,
-    ).all(job.venue, job.address, job.cursor, job.to, maxRows + 1) as ScanRow[];
-    if (rows.length <= maxRows) {
+    ).iterate(job.venue, job.address, job.cursor, job.to, maxRows + 1)) {
+      rows.push(r as unknown as ScanRow);
+      if (rows.length >= 2 && Date.now() - t0 >= budgetMs) {
+        cutShort = rows.length <= maxRows;
+        break;
+      }
+    }
+    if (rows.length <= maxRows && !cutShort) {
       this.eat(job, rows);
       job.cursor = job.to;
       return true;
     }
-    const cut = rows[maxRows]!.t;
+    const cut = rows[rows.length - 1]!.t;
     if (rows[0]!.t === cut) {
       // One timestamp with more rows than a chunk: take all of it at once.
       this.eat(job, this.q(
@@ -1725,7 +1739,7 @@ export class IndexStore {
    */
   private step(job: ScanJob): boolean {
     const t0 = Date.now();
-    const done = this.scanStep(job, this.chunk);
+    const done = this.scanStep(job, this.chunk, this.scanBudgetMs);
     const ms = Date.now() - t0;
     if (ms > 20) this.chunk = Math.max(25, this.chunk >> 1);
     else if (ms < 5) this.chunk = Math.min(SCAN_CHUNK, this.chunk << 1);
