@@ -229,6 +229,12 @@ function AppShell() {
     setSymbol(sym);
     setTab('trade');
   }, [setEngine, setSymbol, setTab]);
+  /** A market on a given engine: the portfolio's Wealth funds are spot markets. */
+  const openMarket = useCallback((sym: string, onEngine: 'spot' | 'perps') => {
+    setEngine(onEngine);
+    setSymbol(sym);
+    setTab('trade');
+  }, [setEngine, setSymbol, setTab]);
   /** A trade print carries only the numeric account id, never an address - the
    *  same on-chain resolver the standalone Scan page itself uses
    *  (server/src/sodex/chain.ts's resolveAccountOnChain, exposed here as
@@ -577,7 +583,7 @@ function AppShell() {
             components/Portfolio.tsx. It takes exactly the `ctx` bag the account
             panels already use, so this page adds no state to App.tsx. */}
         {shown === 'portfolio' && (
-          <Guarded name="Portfolio"><PortfolioDashboard {...ctx} /></Guarded>
+          <Guarded name="Portfolio"><PortfolioDashboard {...ctx} provider={provider} onOpenMarket={openMarket} onOpenTab={setTab} /></Guarded>
         )}
 
         {shown === 'scan' && (
