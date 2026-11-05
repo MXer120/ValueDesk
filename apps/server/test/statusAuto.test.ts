@@ -59,11 +59,11 @@ test('degraded ten minutes opens a minor incident; going down makes it major', (
   m = play(s, 'indexer', ['degraded'], m);
   const [n] = s.notices.all();
   assert.equal(n!.impact, 'minor');
-  assert.equal(n!.title, 'Indexer degraded - a data stream is down');
+  assert.equal(n!.title, 'Indexer degraded - figures may be behind');
   play(s, 'indexer', rep(AUTO.downMin, 'down'), m);
   const up = s.notices.get(n!.id)!;
   assert.equal(up.impact, 'major');
-  assert.equal(up.title, 'Indexer stopped - data is not current');
+  assert.equal(up.title, 'Indexer not publishing - data is not current');
   assert.equal(s.notices.all().length, 1, 'the same incident, not a second');
   s.close();
 });
