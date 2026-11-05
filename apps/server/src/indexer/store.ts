@@ -644,9 +644,16 @@ type ScanJob = { venue: Venue; address: string; from: number; to: number; cursor
  * in that day is summed from these, not read again. `sym` indexes `syms`; null PnL and fee are NaN.
  */
 type HeldRows = { ver: number; from: number; n: number; t: Float64Array; v: Float64Array; pnl: Float64Array; fee: Float64Array; side: Int8Array; src: Int8Array; sym: Uint16Array; syms: string[] };
-/** Rows held for partial days, in all and per day (~45 bytes a row, off the JS heap but for the names). */
-const HELD_ROWS_MAX = 6_000_000;
-const HELD_DAY_MAX = 1_000_000;
+/**
+ * Rows held for partial days, in all and per day (~45 bytes a row, off the JS heap but for the names).
+ *
+ * The total must exceed what one board pass reads. A pass reads its candidates in the same order every
+ * time and the oldest go first, so just below that size nearly nothing is found when it is wanted and
+ * every read goes back to the fills: 6,000,000 stood full on 2026-11-05, 45% of the thread was these
+ * scans, and builds went from 1-3 min to 96 min. Whether it holds: heldPartials in the status (evicted).
+ */
+const HELD_ROWS_MAX = 30_000_000;
+const HELD_DAY_MAX = 5_000_000;
 /**
  * The held rows written beside the index when the writer stops and read back when the next one
  * starts. Tied to the scan's own SQL: a release that reads the fills differently starts cold.
@@ -1005,8 +1012,8 @@ export class IndexStore {
   }
 
   /** The partial days held in memory (partialDayAsync), for the status. */
-  get heldPartials(): { days: number; rows: number } {
-    return { days: this.held.size, rows: this.heldRows };
+  get heldPartials(): { days: number; rows: number; hits: number; scans: number; evicted: number } {
+    return { days: this.held.size, rows: this.heldRows, hits: this.heldHits, scans: this.heldScans, evicted: this.heldEvicted };
   }
 
   /**
@@ -1962,8 +1969,10 @@ export class IndexStore {
     if (held && held.ver === ver && held.from <= fromT) {
       this.held.delete(dk);
       this.held.set(dk, held);
+      this.heldHits++;
       await this.eatHeld(job, held, pause);
     } else {
+      this.heldScans++;
       if (held) this.letGo(dk);
       const gen = this.heldGen;
       if (end <= Date.now()) job.keep = [];
@@ -1984,6 +1993,10 @@ export class IndexStore {
   private held = new Map<string, HeldRows>();
   private heldRows = 0;
   private heldGen = 0;
+  /** Since this start: first days found held, read from the fills, and pushed out for room. */
+  private heldHits = 0;
+  private heldScans = 0;
+  private heldEvicted = 0;
 
   private hold(dk: string, ver: number, from: number, rows: ScanRow[]): void {
     const n = rows.length;
@@ -2010,6 +2023,7 @@ export class IndexStore {
     for (const old of this.held.keys()) {
       if (this.heldRows <= HELD_ROWS_MAX) break;
       this.letGo(old);
+      this.heldEvicted++;
     }
   }
 

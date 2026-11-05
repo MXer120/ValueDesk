@@ -180,6 +180,9 @@ test('a later start in a finished day is summed from the rows held from the firs
   }
   const held = (a as unknown as Held).held;
   assert.equal(held.size, 1);
+  assert.equal(a.heldPartials.scans, 1, 'read from the fills once');
+  assert.ok(a.heldPartials.hits >= 1, 'then from what is held');
+  assert.equal(a.heldPartials.evicted, 0);
   assert.equal([...held.values()][0]!.from, first, 'every later start was summed from the rows read first');
   // A late fill on that day: its rows are read again, and the figures follow.
   const late = [fill({ id: 'late', t: yesterday + 13 * 3_600_000, oid: 'lo', closedPnl: 2.5, side: -1 })];
@@ -225,7 +228,8 @@ test('the held rows go to the next writer through a file beside the index: its f
   assert.ok(existsSync(file), 'written as the writer closes');
   const b = new IndexStore(path, { aggRefreshMs: 0 });
   assert.ok(!existsSync(file), 'taken by the next writer');
-  assert.deepEqual((b as unknown as Held).heldPartials, { days: 1, rows: rows.filter((r) => r.t >= first).length });
+  const given = (b as unknown as Held).heldPartials;
+  assert.deepEqual({ days: given.days, rows: given.rows }, { days: 1, rows: rows.filter((r) => r.t >= first).length });
   assert.deepEqual(await read(b, later), want, 'the same figures');
   assert.equal([...(b as unknown as Held).held.values()][0]!.from, first, 'summed from the rows handed over');
   // A late fill on that day: read again.
@@ -247,7 +251,8 @@ test('the held rows go to the next writer through a file beside the index: its f
   assert.ok(!existsSync(file), 'nothing still as it was read: no file');
   writeFileSync(file, Buffer.from([5, 0, 0, 0, 0x7b]));
   const d = new IndexStore(path, { aggRefreshMs: 0 });
-  assert.deepEqual((d as unknown as Held).heldPartials, { days: 0, rows: 0 });
+  const none = (d as unknown as Held).heldPartials;
+  assert.deepEqual({ days: none.days, rows: none.rows }, { days: 0, rows: 0 });
   assert.ok(!existsSync(file));
   d.close();
   rmSync(dir, { recursive: true, force: true });

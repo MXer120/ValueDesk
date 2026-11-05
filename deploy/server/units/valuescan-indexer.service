@@ -33,7 +33,9 @@ Restart=always
 RestartSec=30
 # SIGTERM: the indexer flushes, publishes its status and closes the database.
 KillSignal=SIGTERM
-TimeoutStopSec=45
+# Room to write the held rows on the way out (store.ts saveHeld, up to about 1 GB): killed before that,
+# the next start reads every first day from the fills again.
+TimeoutStopSec=120
 LimitNOFILE=65536
 # No core file: writing one of a 1.5 GB heap held the restart back 5 minutes,
 # and systemd-coredump discarded it as too large anyway.
