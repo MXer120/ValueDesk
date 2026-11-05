@@ -391,6 +391,9 @@ Against this inventory, HOSTED_ROUTES should be:
   and `Content-Type` and `Authorization` under `/api/vs/feedback` (body up to 2,113,536 bytes on
   `/upload`, 16 KB elsewhere) and POST + `Content-Type` on `/api/vs/client-errors` (8 KB), never
   cached; an image answer is up to 2 MiB (docs/GO-LIVE.md).
+- **Add**: `GET /api/vs/profile?address=`, `GET /api/vs/username/check?name=` (cls `read`) and `POST /api/vs/username`
+  (cls `write`, 4 KB, its own limit of 12 a minute per client): a wallet's username, signed by the wallet and never
+  changed (routes/profiles.ts, `profiles.db`).
 - **Add**: `POST /api/vs/a` (cls `write`, 16 KB, `application/json` or `text/plain`): the app's own
   analytics, sent only after the visitor allowed analytics (ops/analyticsModel.ts says what one batch
   holds; routes/analytics.ts). The Vercel function lets POST + `Content-Type` through on this path and adds

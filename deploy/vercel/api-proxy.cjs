@@ -136,7 +136,7 @@ const isFoldersPath = (path) => { const p = String(path ?? ''); return p === '/a
  * wallet's inbox (apps/server/src/routes/reports.ts, ops/inbox.ts): POST passes, the thread token or
  * wallet session passes, nothing is cached.
  */
-const isReportsPath = (path) => { const p = String(path ?? ''); return p === '/api/vs/feedback' || p.startsWith('/api/vs/feedback/') || p.startsWith('/api/vs/inbox/') || p === '/api/vs/client-errors' || p === ANALYTICS_PATH; };
+const isReportsPath = (path) => { const p = String(path ?? ''); return p === '/api/vs/feedback' || p.startsWith('/api/vs/feedback/') || p.startsWith('/api/vs/inbox/') || p === '/api/vs/client-errors' || p === '/api/vs/username' || p === ANALYTICS_PATH; };
 /** The app's own analytics (apps/server/src/routes/analytics.ts): a POST, the viewer's country and region added. */
 const ANALYTICS_PATH = '/api/vs/a';
 /**

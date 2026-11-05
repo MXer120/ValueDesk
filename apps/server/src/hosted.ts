@@ -179,6 +179,10 @@ export const HOSTED_ROUTES: readonly HostedRoute[] = [
   { method: 'POST', url: '/api/vs/client-errors', cls: 'write' },
   // The app's own analytics, sent only after the visitor allowed it (routes/analytics.ts, ops/analyticsModel.ts).
   { method: 'POST', url: '/api/vs/a', cls: 'write' },
+  // A wallet's username (routes/profiles.ts): the two reads, and the signed claim (tighter limit in the route).
+  { method: 'GET', url: '/api/vs/profile', cls: 'read' },
+  { method: 'GET', url: '/api/vs/username/check', cls: 'read' },
+  { method: 'POST', url: '/api/vs/username', cls: 'write' },
   // The builder fee a wallet owes, signed (routes/builder.ts, docs/BUILDER-TIERS.md §3). Asking is a
   // read of this server's own ledger and one signature. A hint is what later costs SoDEX reads from
   // this server's address, so a request that carries one counts as `upstream` too.

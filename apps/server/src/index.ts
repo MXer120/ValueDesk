@@ -42,6 +42,7 @@ import { reportRoutes } from './routes/reports.js';
 import { statusRoutes } from './routes/status.js';
 import { adminRoutes } from './routes/admin.js';
 import { analyticsRoutes, analyticsStore } from './routes/analytics.js';
+import { profileRoutes } from './routes/profiles.js';
 import { adminOriginsFrom } from './admin/auth.js';
 import { fetchExecutorHealth } from './admin/statusView.js';
 import { openLedger } from './admin/builderStats.js';
@@ -255,6 +256,11 @@ await app.register(statusRoutes);
 // The app's own analytics, after consent (routes/analytics.ts), and the owner's admin suite on
 // dev.valuedesk.so (routes/admin.ts) - off (404) until an admin password is set on this server.
 await app.register(analyticsRoutes, { trustGeo: HOSTED });
+// A wallet's username, signed by the wallet and never changed (routes/profiles.ts).
+await app.register(profileRoutes, {
+  // An order counted through ValueDesk's builder: a returning user, whatever browser they are on.
+  known: (address: string) => !!(adminLedger ??= openLedger(builderDbPath()))?.prepare('SELECT 1 FROM orders WHERE address = ? LIMIT 1').get(address),
+});
 let adminLedger: ReturnType<typeof openLedger> = null;
 let adminStatusDb: StatusStore | null = null;
 let adminErrorsDb: ClientErrorStore | null = null;
