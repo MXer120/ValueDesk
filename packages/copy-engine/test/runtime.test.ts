@@ -383,6 +383,56 @@ test('brake: what the leader opens meanwhile stays out after an operator\'s brak
   }
 });
 
+test('brake: after a long one an add or a flip\'s new side is not made late; the flip\'s close is', async () => {
+  for (const flip of [false, true]) {
+    const w: World = { leaderPositions: [], followerPositions: [], builderRate: 25, mark: 80_000 };
+    const sent: Intent[][] = [];
+    const { rt } = runtime(w, () => brakeSink(sent));
+    let brake: string | null = null;
+    (rt as unknown as BrakeHost).host.brake = () => brake;
+    await rt.start();
+    const s = await rt.add(sub({}, { id: `bl${flip}` }));
+    await until(() => sodexWs()?.readyState === 1);
+    await wait(150);
+    sodexWs().push(print(flip ? 90 : 80, 'BUY', '1', '80000', LEADER_ID, 1002));
+    await until(() => sent.length === 1);
+    brake = 'Investigating.';
+    if (flip) sodexWs().push(print(91, 'SELL', '3', '80000', 1002, LEADER_ID));
+    else sodexWs().push(print(81, 'BUY', '1', '80000', LEADER_ID, 1002));
+    await wait(300);
+    assert.equal(sent.length, 1, 'held');
+    brake = null;
+    const st = (rt as unknown as { states: Map<string, { leaderPos: Record<string, number>; detached: Record<string, string> }> }).states.get(s.id)!;
+    if (flip) {
+      await until(() => sent.length === 2, 5_000);
+      assert.ok(sent[1]!.every((i) => i.reduceOnly), JSON.stringify(sent[1]));
+      await until(() => st.leaderPos['BTC-USD'] === -2);
+      assert.equal(st.detached['BTC-USD'], 'pre-existing', 'the new side stays out');
+    } else {
+      await until(() => st.leaderPos['BTC-USD'] === 2, 5_000);
+      await wait(200);
+      assert.equal(sent.length, 1, 'no late add');
+    }
+    await rt.stop();
+  }
+});
+
+test('an open from flat is written down as flat, so a death before it lands plans it again', async () => {
+  const w: World = { leaderPositions: [], followerPositions: [], builderRate: 25, mark: 80_000 };
+  const { rt, store } = runtime(w, () => brakeSink([]));
+  const saved: Array<{ followerBefore: number | null } | undefined> = [];
+  const real = store.saveState.bind(store);
+  store.saveState = async (st: never) => { saved.push((st as { sending?: { followerBefore: number | null } }).sending); return real(st); };
+  await rt.start();
+  await rt.add(sub({}, { id: 'j0' }));
+  await until(() => sodexWs()?.readyState === 1);
+  await wait(300);
+  sodexWs().push(print(95, 'BUY', '1', '80000', LEADER_ID, 1002));
+  await until(() => saved.some((x) => x));
+  assert.equal(saved.find((x) => x)!.followerBefore, 0);
+  await rt.stop();
+});
+
 test('an order on its way when the process died: planned again only when the follower did not move its way', async () => {
   const w: World = { leaderPositions: [], followerPositions: [], builderRate: 25, mark: 80_000 };
   const { rt } = runtime(w, () => brakeSink([]));

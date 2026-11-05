@@ -145,9 +145,10 @@ export interface RuntimeHost {
    * no order at all (it is asked before every batch, so it bites at once). Stops
    * already resting on SoDEX stay, and so does everything the follower does by
    * hand (stop, close, pause). What the leader does meanwhile is held, not lost: once
-   * released, a position the leader reduced or closed is followed, as after a restart.
-   * What it opened meanwhile stays out (a late entry at another price), except after a
-   * short brake of a release (shortBrakeSince): a copy should not miss a trade to one.
+   * released, a position the leader reduced or closed is followed. What it opened or
+   * added meanwhile, and the new side of a flip, stay out (a late entry at another
+   * price), except after a short brake of a release (shortBrakeSince): a copy should
+   * not miss a trade to one.
    */
   brake?(sub: Subscription): string | null;
   /** When the brake on this copy began, when it is a release's (they last about a minute); otherwise null. */
@@ -1683,7 +1684,7 @@ export class CopyRuntime {
    * as a missed print is while running - except a position opened meanwhile, which is
    * pre-existing (joined only with "copy existing"), as when a copy starts.
    */
-  private catchUp(subId: string, o: { open?: Set<string> | 'all' } = {}): void {
+  private catchUp(subId: string, o: { open?: Set<string> | 'all'; reduceOnly?: boolean } = {}): void {
     const s = this.subs.get(subId);
     if (!s || s.status === 'stopped') return;
     // Started under the brake (a release's restart): nothing is decided before the lift, or what the leader
@@ -1711,6 +1712,25 @@ export class CopyRuntime {
         continue;
       }
       const price = this.priceFor(l.venue, sym) ?? 0;
+      // After a long brake only what takes risk off: an add or the new side of a flip made now would be a late
+      // entry at another price. The books move on, and the follower's position stays as it is.
+      if (o.reduceOnly) {
+        const flipped = before !== 0 && after !== 0 && Math.sign(before) !== Math.sign(after);
+        if (!flipped && Math.abs(after) > Math.abs(before)) {
+          st.leaderPos[sym] = after;
+          this.dirty.add(s.id);
+          continue;
+        }
+        if (flipped) {
+          this.dispatch(s, { leader: l, symbol: sym, before, after: 0, price, time: now, id: `restart:${sym}:${now}`, source: 'reconcile' });
+          this.enqueue(s.owner, async () => {
+            st.leaderPos[sym] = after;
+            st.detached[sym] = 'pre-existing';
+            this.dirty.add(s.id);
+          });
+          continue;
+        }
+      }
       this.dispatch(s, { leader: l, symbol: sym, before, after, price, time: now, id: `restart:${sym}:${now}`, source: 'reconcile' });
     }
   }
@@ -1748,7 +1768,7 @@ export class CopyRuntime {
       if (!s) continue;
       const short = since !== undefined && now - since <= SHORT_BRAKE_MS;
       this.host.log.info('copy: brake off; going through what the leader did', { sub: id, opens: short });
-      this.enqueue(s.owner, async () => this.catchUp(id, short ? { open: 'all' } : {}));
+      this.enqueue(s.owner, async () => this.catchUp(id, short ? { open: 'all' } : { reduceOnly: true }));
     }
   }
 
@@ -1761,7 +1781,9 @@ export class CopyRuntime {
     const signed = intents.filter((i) => !i.reduceOnly).reduce((sum, i) => sum + (i.side === 'buy' ? 1 : -1) * Number(i.quantity), 0);
     if (!signed) return;
     const st = this.stateOf(s);
-    st.sending = { leaderSymbol, leaderBefore, symbol: market.name, followerBefore: this.followers.get(s.owner)?.positions[market.name]?.size ?? null, signed, at: Date.now() };
+    // A snapshot without the market is flat, the main case; no snapshot at all is not knowing.
+    const f = this.followers.get(s.owner);
+    st.sending = { leaderSymbol, leaderBefore, symbol: market.name, followerBefore: f ? f.positions[market.name]?.size ?? 0 : null, signed, at: Date.now() };
     await this.host.store.saveState(st);
   }
 

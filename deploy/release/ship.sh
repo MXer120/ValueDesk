@@ -540,6 +540,8 @@ ship_executor() {
   #    as taken stays (c): the database as it stood before this release, beside the live one, never deleted.
   local keep="/var/lib/valuescan/executor/pre-release/executor-before-$TAG-$(date -u +%Y%m%dT%H%M%SZ).db"
   pre="$(remote "$S2" "sudo -u valuescan-executor bash -c 'cd /opt/valuescan/releases/$TAG/apps/executor && /opt/node/current/bin/node --disable-warning=ExperimentalWarning --import tsx tools/preflight.ts /var/lib/valuescan/executor/executor.db --keep=$keep'" || true)"
+  # A whole copy of the executor's database: for its own user only (they were left readable by all).
+  remote "$S2" "sudo bash -c 'chmod 600 /var/lib/valuescan/executor/pre-release/*.db 2>/dev/null || true'" >&2
   h="$(exec_health)"
   note "preflight: $pre"
   [ "$(printf '%s' "$pre" | json 'v && v.ok ? 1 : 0')" = 1 ] || die "executor: the new code does not read today's data - nothing switched"
