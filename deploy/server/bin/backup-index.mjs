@@ -4,17 +4,22 @@
 //   node --disable-warning=ExperimentalWarning backup-index.mjs <source.db> <copy.db>
 //   node --disable-warning=ExperimentalWarning backup-index.mjs --check <file.db>
 //
-// HOW. Where the filesystem can share blocks (XFS with reflink, as on the servers): a read
-// transaction is opened on the source, so the WAL cannot restart, then the file and then its WAL
-// are cloned, in that order, and the transaction ends: under two seconds on any size. Every page a
-// checkpoint put in the cloned file came from a frame still in the cloned WAL, so opening the copy
-// replays to one committed instant. Everywhere else: `VACUUM INTO`, one read transaction.
+// HOW. Where `dd` is there (the servers): a read transaction is opened on the source, so the WAL
+// cannot restart, then the file and then its WAL are copied byte for byte, in that order, at
+// BACKUP_COPY_MB_S (150 MB/s: 45 GB in 5 minutes), past the page cache, and the transaction ends.
+// Every page a checkpoint writes to the file meanwhile comes from a frame still in the WAL, which is
+// copied after it, so opening the copy replays to one committed instant, torn pages included.
+// Everywhere else: `VACUUM INTO`, one read transaction.
 // The copy is then opened and checked (`PRAGMA quick_check`) before this exits 0.
 //
-// WHY THE CLONE (2026-11-05). VACUUM INTO on the 45 GB index held its read transaction for up to
+// WHY THE COPY (2026-11-05). VACUUM INTO on the 45 GB index held its read transaction for up to
 // 170 minutes. Nothing in the WAL could be copied back meanwhile, it grew to about 25 GB, and the
 // indexer stalled for up to 834 s at a time: 11 of its 12 worst stalls fell inside a backup, and
-// the backup timed out twice. The clone holds nothing of the source's once it is taken.
+// the backup timed out twice.
+//
+// NOT A REFLINK CLONE. Tried the same day: instant, but while it lasted (the check and the upload,
+// over 36 min) every page the indexer overwrote went to a new place: the live file went from 61
+// extents to 1,172,730 and took 24 GB more, for good.
 //
 // WHY NOT `sqlite3 .backup` or a file copy. The backup API restarts every time
 // another connection writes, and the indexer writes every few seconds, so it may
@@ -22,8 +27,8 @@
 //
 // With VACUUM INTO, while it runs the WAL cannot be checkpointed past the copy's snapshot, so
 // the -wal file grows by what the indexer writes in those minutes; it shrinks again
-// afterwards. It needs as much free space as the database. A clone needs space only as the
-// source changes, while the clone lasts.
+// afterwards. Either way it needs as much free space as the database, and the copy holds the
+// WAL back for its 5 minutes only.
 //
 // Runs on the instance (backup.sh) and on a developer machine alike (to seed a new
 // instance from a local index: see docs/deploy/DEPLOY.md). Node 22.13+, no dependencies.
@@ -93,17 +98,40 @@ const clean = () => {
   }
 };
 
-/** The clone; false when this filesystem cannot, and nothing is left behind. */
-function cloneInto() {
-  if (process.env.BACKUP_NO_CLONE) return false;
+const SLICE_BLOCKS = 16; // of 4 MiB: 64 MiB, then a pause to hold the rate
+const BLOCK = 4 * 1024 * 1024;
+
+/** `from` to `to` byte for byte, paced. Past the page cache where the filesystem can, so what the indexer has in memory stays. */
+function pacedCopy(from, to, mbPerS) {
+  const size = statSync(from).size;
+  let flags = ['iflag=direct', 'oflag=direct'];
+  for (let block = 0; block * BLOCK < size; block += SLICE_BLOCKS) {
+    const t0 = Date.now();
+    const args = [`if=${from}`, `of=${to}`, `bs=${BLOCK}`, `skip=${block}`, `seek=${block}`, `count=${SLICE_BLOCKS}`, 'conv=notrunc'];
+    try {
+      execFileSync('dd', [...args, ...flags], { stdio: 'ignore' });
+    } catch (e) {
+      if (!flags.length) throw e;
+      flags = []; // a filesystem without direct I/O, or a length it will not write directly
+      execFileSync('dd', args, { stdio: 'ignore' });
+    }
+    const wait = (SLICE_BLOCKS * BLOCK) / (mbPerS * 1e6) * 1000 - (Date.now() - t0);
+    if (wait > 0) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, wait);
+  }
+}
+
+/** The byte copy; false where it cannot be made, and nothing is left behind. */
+function copyInto() {
+  if (process.env.BACKUP_NO_COPY) return false;
+  const rate = Number(process.env.BACKUP_COPY_MB_S) || 150;
   const db = new DatabaseSync(source, { readOnly: true });
   try {
     db.exec('PRAGMA busy_timeout = 30000');
     db.exec('BEGIN');
     db.prepare('SELECT count(*) FROM sqlite_master').get(); // the read transaction starts here
-    const clone = (from, to) => execFileSync('cp', ['--reflink=always', from, to], { stdio: 'ignore' });
-    clone(source, dest);
-    if (existsSync(`${source}-wal`)) clone(`${source}-wal`, `${dest}-wal`);
+    pacedCopy(source, dest, rate);
+    // A plain copy: it is at most a few GB, the tail still being written is cut by its checksums.
+    if (existsSync(`${source}-wal`)) execFileSync('cp', ['--reflink=never', `${source}-wal`, `${dest}-wal`], { stdio: 'ignore' });
     db.exec('COMMIT');
   } catch {
     clean();
@@ -123,8 +151,8 @@ function cloneInto() {
 }
 
 const started = Date.now();
-let method = 'clone';
-if (!cloneInto()) {
+let method = 'copy';
+if (!copyInto()) {
   method = 'vacuum';
   const db = new DatabaseSync(source, { readOnly: true });
   try {
