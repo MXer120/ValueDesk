@@ -86,6 +86,10 @@ export const HL_COINS_RETRY_MS = 30_000;
 export const HL_MAX_COINS = 990;
 /** How long a sent order may still be matched to fills on the stream. */
 const PENDING_MS = 30_000;
+/** How often a copy with moves held by the brake looks whether it is off. */
+const BRAKE_CHECK_MS = 2_000;
+/** A release's brake up to this long: what the leader opened meanwhile is still copied. The longest of 34 ships held it 59 s. */
+const SHORT_BRAKE_MS = 5 * 60_000;
 /** How long the copier remembers its own opens and reductions, for a fill the stream did not show (refreshFollower). */
 const RECENT_ORDERS_MS = 10 * 60_000;
 /** SoDEX's fills behind a change in the follower's account are read from this long before the last read that did not show it. */
@@ -138,10 +142,14 @@ export interface RuntimeHost {
    * The operator's emergency brake: while it returns a reason, a live copy sends
    * no order at all (it is asked before every batch, so it bites at once). Stops
    * already resting on SoDEX stay, and so does everything the follower does by
-   * hand (stop, close, pause). Released, the copy goes on from the next trade of
-   * its leader; what the leader did meanwhile is not copied after the fact.
+   * hand (stop, close, pause). What the leader does meanwhile is held, not lost: once
+   * released, a position the leader reduced or closed is followed, as after a restart.
+   * What it opened meanwhile stays out (a late entry at another price), except after a
+   * short brake of a release (shortBrakeSince): a copy should not miss a trade to one.
    */
   brake?(sub: Subscription): string | null;
+  /** When the brake on this copy began, when it is a release's (they last about a minute); otherwise null. */
+  shortBrakeSince?(sub: Subscription): number | null;
   /**
    * Approval mode 'confirm': ask the follower; resolve true to place the orders, false when the
    * follower declined, 'timeout' when nobody answered in time (logged as such, not as declined).
@@ -291,6 +299,12 @@ export class CopyRuntime {
   private hlCoinsRetry = HL_COINS_RETRY_MS;
   /** Copies whose leader could not be read when they started (or were restored): caught up once it is seeded. */
   private awaitingSeed = new Set<string>();
+  /** Copies with leader moves held by the brake: subId -> when first held. Gone through by resumeHeld. */
+  private held = new Map<string, number>();
+  /** subId|symbol told once per brake that its leader moved and it waits. */
+  private heldTold = new Set<string>();
+  /** Whether the brake is on what it did, while it was on: asked when it began, as it is gone at the lift. */
+  private heldShort = new Map<string, number>();
   private running = false;
   private feedUp = { sodex: false, hyperliquid: false };
   private dirty = new Set<string>();
@@ -332,7 +346,10 @@ export class CopyRuntime {
     for (const s of [...this.subs.values()]) await this.applyLocalRules(s.id);
     // A notice is never a reason not to start (as on every market reload below).
     await this.noteDelisted().catch((e) => this.host.log.warn('copy: delisting check failed', { error: String(e) }));
-    for (const id of restored) this.catchUp(id);
+    // Orders that were on their way when the last process died: landed or not, before anything is planned on them.
+    const replay = new Map<string, Set<string>>();
+    for (const id of restored) replay.set(id, await this.settleSending(id));
+    for (const id of restored) this.catchUp(id, { open: replay.get(id) });
     for (const s of this.subs.values()) if (this.live(s)) void this.checkReady(s);
     this.timers.push(
       timers.every(RECONCILE_MS, () => void this.reconcileAll()),
@@ -343,6 +360,7 @@ export class CopyRuntime {
       }),
       timers.every(MARKETS_REFRESH_MS, () => void this.loadMarkets().then(() => this.sodexFeed?.refreshSymbols())),
       timers.every(5_000, () => void this.flush()),
+      timers.every(BRAKE_CHECK_MS, () => this.resumeHeld()),
     );
     void this.reconcileAll();
     void this.refreshAllFollowers();
@@ -595,6 +613,13 @@ export class CopyRuntime {
       await this.applyLocalRules(s.id);
       s = this.need(subId);
     }
+    // Braked: the state stays where it was, so the lift sees this move (resumeHeld). It used to move on with the
+    // leader here, the order dropped: a leader's close during a release left the follower holding the position.
+    const braked = this.brakedNow(s);
+    if (braked) {
+      await this.noteHeld(s, e.symbol, market?.name ?? e.symbol, braked);
+      return;
+    }
     const st = this.stateOf(s);
     // The copy's own stop closed this market moments ago (its fill on the stream, or SoDEX refusing a close there):
     // a change of a position the leader held waits for the leader to be flat there, whatever the books show yet.
@@ -651,7 +676,12 @@ export class CopyRuntime {
       }
       if (st.declined?.[market!.name]) delete st.declined[market!.name];
     }
+    await this.journal(s, market!, plan.intents, e.symbol, e.before ?? 0);
     await this.execute(s, market!, plan.intents, markOf(market!.name) ?? e.price, leader, plannedAt);
+    if (st.sending) {
+      delete st.sending;
+      this.dirty.add(s.id);
+    }
     if (plan.skip && !QUIET_SKIPS.has(plan.skip)) await this.activity(s, { kind: 'skip', reason: plan.skip, symbol: market!.name, leader, detail });
   }
 
@@ -1643,9 +1673,15 @@ export class CopyRuntime {
    * as a missed print is while running - except a position opened meanwhile, which is
    * pre-existing (joined only with "copy existing"), as when a copy starts.
    */
-  private catchUp(subId: string): void {
+  private catchUp(subId: string, o: { open?: Set<string> | 'all' } = {}): void {
     const s = this.subs.get(subId);
     if (!s || s.status === 'stopped') return;
+    // Started under the brake (a release's restart): nothing is decided before the lift, or what the leader
+    // opened meanwhile would be marked pre-existing here.
+    if (this.brakedNow(s)) {
+      this.markHeld(s);
+      return;
+    }
     const l = s.settings.leader;
     if (!this.leaders.seeded(l)) {
       this.awaitingSeed.add(subId);
@@ -1658,7 +1694,7 @@ export class CopyRuntime {
       const before = st.leaderPos[sym] ?? 0;
       const after = current[sym] ?? 0;
       if (Math.abs(before - after) <= 1e-9 * Math.max(1, Math.abs(before), Math.abs(after))) continue;
-      if (before === 0 && !s.settings.copyExisting) {
+      if (before === 0 && !s.settings.copyExisting && o.open !== 'all' && !o.open?.has(sym)) {
         st.leaderPos[sym] = after;
         st.detached[sym] = 'pre-existing';
         this.dirty.add(s.id);
@@ -1667,6 +1703,85 @@ export class CopyRuntime {
       const price = this.priceFor(l.venue, sym) ?? 0;
       this.dispatch(s, { leader: l, symbol: sym, before, after, price, time: now, id: `restart:${sym}:${now}`, source: 'reconcile' });
     }
+  }
+
+  private brakedNow(s: Subscription): string | null {
+    if (!this.live(s)) return null;
+    return this.host.brake?.(s) ?? null;
+  }
+
+  private markHeld(s: Subscription): void {
+    if (this.held.has(s.id)) return;
+    this.held.set(s.id, Date.now());
+    const since = this.host.shortBrakeSince?.(s) ?? null;
+    if (since !== null) this.heldShort.set(s.id, since);
+  }
+
+  private async noteHeld(s: Subscription, leaderSymbol: string, symbol: string, why: string): Promise<void> {
+    this.markHeld(s);
+    const k = `${s.id}|${leaderSymbol}`;
+    if (this.heldTold.has(k)) return;
+    this.heldTold.add(k);
+    await this.activity(s, { kind: 'error', reason: 'brake', symbol, detail: `Waiting: ${why} What the leader closes meanwhile is followed once this is over.` });
+  }
+
+  /** The brake is off for these copies: the leader's moves it held are planned now, as after a restart. */
+  private resumeHeld(): void {
+    const now = Date.now();
+    for (const [id] of [...this.held]) {
+      const s = this.subs.get(id);
+      if (s && this.brakedNow(s)) continue;
+      this.held.delete(id);
+      const since = this.heldShort.get(id);
+      this.heldShort.delete(id);
+      for (const k of [...this.heldTold]) if (k.startsWith(`${id}|`)) this.heldTold.delete(k);
+      if (!s) continue;
+      const short = since !== undefined && now - since <= SHORT_BRAKE_MS;
+      this.host.log.info('copy: brake off; going through what the leader did', { sub: id, opens: short });
+      this.enqueue(s.owner, async () => this.catchUp(id, short ? { open: 'all' } : {}));
+    }
+  }
+
+  /**
+   * Written before an order that opens or adds. A process killed between sending it and the next save would
+   * otherwise plan the same move again at its start: a position twice the size. See settleSending.
+   */
+  private async journal(s: Subscription, market: MarketInfo, intents: Intent[], leaderSymbol: string, leaderBefore: number): Promise<void> {
+    if (!this.live(s)) return;
+    const signed = intents.filter((i) => !i.reduceOnly).reduce((sum, i) => sum + (i.side === 'buy' ? 1 : -1) * Number(i.quantity), 0);
+    if (!signed) return;
+    const st = this.stateOf(s);
+    st.sending = { leaderSymbol, leaderBefore, symbol: market.name, followerBefore: this.followers.get(s.owner)?.positions[market.name]?.size ?? null, signed, at: Date.now() };
+    await this.host.store.saveState(st);
+  }
+
+  /**
+   * At a start: an order the last process wrote down and never came back from. The follower's position moved its
+   * way: it landed. It did not: the leader's move is planned again. Unreadable, or nothing known to compare with:
+   * taken as landed, as a missed entry costs less than a position twice the size, and said so in the log.
+   * Returns the leader symbols to be planned again even from flat.
+   */
+  private async settleSending(subId: string): Promise<Set<string>> {
+    const again = new Set<string>();
+    const s = this.subs.get(subId);
+    const st = this.states.get(subId);
+    const j = st?.sending;
+    if (!s || !st || !j) return again;
+    delete st.sending;
+    this.dirty.add(subId);
+    let now: number | null = null;
+    try {
+      await this.refreshFollower(s.owner);
+      const f = this.followers.get(s.owner);
+      if (f) now = f.positions[j.symbol]?.size ?? 0;
+    } catch { /* below */ }
+    const landed = now === null || j.followerBefore === null || (now - j.followerBefore) * Math.sign(j.signed) > 1e-12;
+    this.host.log.warn('copy: an order was on its way when the last process stopped', { sub: subId, symbol: j.symbol, landed, known: now !== null && j.followerBefore !== null });
+    if (landed) return again;
+    if (j.leaderBefore === 0) delete st.leaderPos[j.leaderSymbol];
+    else st.leaderPos[j.leaderSymbol] = j.leaderBefore;
+    again.add(j.leaderSymbol);
+    return again;
   }
 
   /** SoDEX symbol -> signed size of this copy's orders sent but not booked yet. */

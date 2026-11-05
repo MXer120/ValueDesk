@@ -310,6 +310,10 @@ export class ExecutorService {
       // A copy halted, held, stopped or closed outside the copier: kept for the follower to read after signing in.
       onNotice: (n) => db.addNotice(n),
       brake: () => this.brakeText('copies'),
+      shortBrakeSince: () => {
+        const b = this.brake.current();
+        return b?.copies && b.cause === 'maintenance' ? b.since : null;
+      },
       // Reads that confirm a change outside the copier (copy-engine confirm.ts), as far apart as the key reads.
       confirmGapMs: deps.readGapMs,
     });

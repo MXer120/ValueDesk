@@ -317,3 +317,94 @@ test('brake: a live copy sends nothing while the operator brake is on, logs why,
   await until(() => sent.length > 0);
   await rt.stop();
 });
+
+const brakeSink = (sent: Intent[][]): OrderSink => ({
+  paper: false,
+  async place(_a, _m, intents): Promise<SendResult[]> {
+    sent.push(intents);
+    return intents.map((i) => ({ clOrdID: i.clOrdID, ok: true, orderId: '1', error: null, outcomeUnknown: false }));
+  },
+  async setLeverage() {},
+  async placeStop(_a, _m, st) {
+    return { clOrdID: st.clOrdID, ok: true, orderId: null, error: null, outcomeUnknown: false };
+  },
+  async cancel() {},
+});
+type BrakeHost = { host: { brake?: () => string | null; shortBrakeSince?: () => number | null } };
+
+test('brake: what the leader closes while it is on is followed once it is off, not left open', async () => {
+  const w: World = { leaderPositions: [], followerPositions: [], builderRate: 25, mark: 80_000 };
+  const sent: Intent[][] = [];
+  const { rt } = runtime(w, () => brakeSink(sent));
+  let brake: string | null = null;
+  (rt as unknown as BrakeHost).host.brake = () => brake;
+  await rt.start();
+  const s = await rt.add(sub({}, { id: 'bc' }));
+  await until(() => sodexWs()?.readyState === 1);
+  await wait(150);
+  sodexWs().push(print(50, 'BUY', '1', '80000', LEADER_ID, 1002));
+  await until(() => sent.length === 1);
+  brake = 'Updating.';
+  sodexWs().push(print(51, 'SELL', '1', '80000', 1002, LEADER_ID));
+  await wait(400);
+  assert.equal(sent.length, 1, 'held');
+  assert.equal((rt as unknown as { states: Map<string, { leaderPos: Record<string, number> }> }).states.get(s.id)!.leaderPos['BTC-USD'], 1, 'the state stays where it was');
+  brake = null;
+  await until(() => sent.length === 2, 5_000);
+  assert.ok(sent[1]!.every((i) => i.reduceOnly), JSON.stringify(sent[1]));
+  await rt.stop();
+});
+
+test('brake: what the leader opens meanwhile stays out after an operator\'s brake, and is copied after a short one of a release', async () => {
+  for (const release of [false, true]) {
+    const w: World = { leaderPositions: [], followerPositions: [], builderRate: 25, mark: 80_000 };
+    const sent: Intent[][] = [];
+    const { rt } = runtime(w, () => brakeSink(sent));
+    let brake: string | null = null;
+    (rt as unknown as BrakeHost).host.brake = () => brake;
+    (rt as unknown as BrakeHost).host.shortBrakeSince = () => (release && brake ? Date.now() : null);
+    await rt.start();
+    await rt.add(sub({}, { id: `bo${release}` }));
+    await until(() => sodexWs()?.readyState === 1);
+    await wait(150);
+    brake = 'Updating.';
+    sodexWs().push(print(release ? 61 : 60, 'BUY', '1', '80000', LEADER_ID, 1002));
+    await wait(300);
+    assert.equal(sent.length, 0);
+    brake = null;
+    if (release) {
+      await until(() => sent.length === 1, 5_000);
+      assert.ok(sent[0]!.some((i) => !i.reduceOnly));
+    } else {
+      await wait(2_600);
+      assert.equal(sent.length, 0, 'a late entry at another price is not made');
+    }
+    await rt.stop();
+  }
+});
+
+test('an order on its way when the process died: planned again only when the follower did not move its way', async () => {
+  const w: World = { leaderPositions: [], followerPositions: [], builderRate: 25, mark: 80_000 };
+  const { rt } = runtime(w, () => brakeSink([]));
+  await rt.start();
+  const s = await rt.add(sub({}, { id: 'j1' }));
+  type Priv = { states: Map<string, { sending?: unknown; leaderPos: Record<string, number> }>; settleSending(id: string): Promise<Set<string>> };
+  const p = rt as unknown as Priv;
+  const st = p.states.get(s.id)!;
+  const journal = (followerBefore: number | null, leaderBefore = 0) => {
+    st.leaderPos['BTC-USD'] = 1;
+    st.sending = { leaderSymbol: 'BTC-USD', leaderBefore, symbol: 'BTC-USD', followerBefore, signed: 1, at: Date.now() };
+  };
+  // The fake follower holds nothing: size 0.
+  journal(0);
+  assert.deepEqual([...(await p.settleSending(s.id))], ['BTC-USD'], 'it did not land');
+  assert.equal(st.leaderPos['BTC-USD'], undefined, 'planned again from before');
+  assert.equal(st.sending, undefined);
+  journal(-1);
+  assert.equal((await p.settleSending(s.id)).size, 0, 'the follower moved its way: it landed');
+  assert.equal(st.leaderPos['BTC-USD'], 1);
+  journal(null);
+  assert.equal((await p.settleSending(s.id)).size, 0, 'nothing to compare with: never twice');
+  assert.equal((await p.settleSending(s.id)).size, 0, 'nothing written down: nothing to do');
+  await rt.stop();
+});

@@ -169,6 +169,11 @@ export interface SubState {
    * market, or automatic approval, clears it. Absent in states saved before 2026-10-30.
    */
   declined?: Record<string, number>;
+  /**
+   * An order that opens or adds, written down before it is sent and removed after (runtime settleSending).
+   * Absent nearly always, and in states saved before 2026-11-05.
+   */
+  sending?: { leaderSymbol: string; leaderBefore: number; symbol: string; followerBefore: number | null; signed: number; at: number };
   /** Protective SoDEX stop orders the copier placed: SoDEX symbol -> their client ids and the size they cover. */
   stops: Record<string, { sl: string | null; tp: string | null; size: number; at: number }>;
   /** Realised PnL of copied positions, USD (gross, fees apart). */
