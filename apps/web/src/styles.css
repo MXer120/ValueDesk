@@ -40,6 +40,15 @@
      field, with a ring of light at a few percent for the edge (--depth-*, and
      "DEPTH, EVERYWHERE" at the end of this sheet). It was 7 levels while every
      panel carried a hairline border. */
+  /* What hairlines and tints are made of, as channels: rgb(var(--ink) / 0.08). White here; the light
+     theme (theme-light.css) turns it to black, and every sheet's hairlines turn with it. */
+  --ink: 255 255 255;
+  --ink-solid: #fff;
+  --scheme: dark;
+  /* What a green or red tinted button mixes over. */
+  --mix-pos-base: #0b0d0c;
+  --mix-neg-base: #0d0b0b;
+
   --bg: #0e0e0e;         /* page base, darkest */
   --bg-panel: #1a1a1b;   /* panel / navbar / tab-bar fill */
   --bg-elevated: #272727;
@@ -54,14 +63,14 @@
      Shared, because the portfolio cards and the trade panels draw the same one -
      it lived in Portfolio.css as --pf-line while only that page had an outline. */
   --panel-line: rgba(78, 78, 78, 0.4);
-  --line-soft: rgba(255, 255, 255, 0.10);
-  --line-strong: rgba(255, 255, 255, 0.20);
+  --line-soft: rgb(var(--ink) / 0.10);
+  --line-strong: rgb(var(--ink) / 0.20);
   /* Gradient hairline used by every bordered button. A flat border cannot
      reproduce it - the reference fades the stroke from light at the top to
      near-nothing at the bottom, which is what stops a row of outlined buttons
      reading as a wireframe. */
   --button-border: linear-gradient(180deg, #bcbcbc40 0%, #4e4e4e40 100%);
-  --tint: rgba(255, 255, 255, 0.035);
+  --tint: rgb(var(--ink) / 0.035);
 
   --text: #f7f7f7;       /* values, active */
   --muted: #bcbcbc;      /* labels, inactive */
@@ -118,9 +127,9 @@
      box-shadow. 1 rests (pills, controls), 2 is a card, 3 floats (an open
      list, a lifted card). */
   /* Tight drop shadows: a wide soft one read as a halo around every card. */
-  --depth-1: 0 0 0 1px rgba(255, 255, 255, 0.035), 0 1px 3px rgba(0, 0, 0, 0.3);
-  --depth-2: 0 0 0 1px rgba(255, 255, 255, 0.045), 0 2px 6px rgba(0, 0, 0, 0.36);
-  --depth-3: 0 0 0 1px rgba(255, 255, 255, 0.06), 0 8px 22px rgba(0, 0, 0, 0.5);
+  --depth-1: 0 0 0 1px rgb(var(--ink) / 0.035), 0 1px 3px rgba(0, 0, 0, 0.3);
+  --depth-2: 0 0 0 1px rgb(var(--ink) / 0.045), 0 2px 6px rgba(0, 0, 0, 0.36);
+  --depth-3: 0 0 0 1px rgb(var(--ink) / 0.06), 0 8px 22px rgba(0, 0, 0, 0.5);
   /* The dashboard's radii (26 / 20 / 14 there), a step tighter for a terminal:
      a trading panel sits in a 4px gutter, a page card has room around it. */
   --radius-card: 12px;   /* a trading panel */
@@ -132,7 +141,7 @@
   /* Overlays. These have to be alpha rather than a flat colour because they
      composite over whatever is already painted: an order-book row that draws
      its own depth-bar gradient, or a chart behind the modal scrim. */
-  --tint-strong: rgba(255, 255, 255, 0.06);
+  --tint-strong: rgb(var(--ink) / 0.06);
   --scrim: rgba(8, 9, 11, 0.35);
   --scrim-solid: rgba(8, 9, 11, 0.72);
   /* Warm top sheen on the buy/sell buttons - a highlight, not a hue. */
@@ -755,7 +764,7 @@ footer {
   from { opacity: 0; transform: translateY(-4px) scale(0.985); }
   to { opacity: 1; transform: none; }
 }
-.menu-group + .menu-group { margin-top: 6px; padding-top: 6px; border-top: 1px solid rgba(255, 255, 255, 0.08); }
+.menu-group + .menu-group { margin-top: 6px; padding-top: 6px; border-top: 1px solid rgb(var(--ink) / 0.08); }
 /* A menu's section heading: small capitals, quieter than the rows under it. */
 .menu-group-label {
   margin-bottom: 4px; padding: 4px 8px 2px;
@@ -782,12 +791,12 @@ footer {
 .menu-row__ic { display: grid; place-items: center; flex: none; width: 16px; height: 16px; color: var(--muted); transition: color 120ms; }
 .menu-row__label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .menu-row__hint {
-  flex: none; padding: 1px 5px; border: 0; border-radius: 4px; background: rgba(255, 255, 255, 0.06); box-shadow: none;
+  flex: none; padding: 1px 5px; border: 0; border-radius: 4px; background: rgb(var(--ink) / 0.06); box-shadow: none;
   color: var(--dim); font-size: var(--fs-micro); font-weight: 400; font-family: var(--font-num); line-height: 14px;
 }
 /* (0,2,0) and (0,3,0): the keyboard's place is the row's fill, not the app's focus ring. */
 .menu-row:hover:not(:disabled),
-.menu-popup .menu-row:focus-visible { background: rgba(255, 255, 255, 0.07); border-color: transparent; color: var(--text); outline: none; box-shadow: none; }
+.menu-popup .menu-row:focus-visible { background: rgb(var(--ink) / 0.07); border-color: transparent; color: var(--text); outline: none; box-shadow: none; }
 .menu-row:hover:not(:disabled) .menu-row__ic,
 .menu-popup .menu-row:focus-visible .menu-row__ic { color: var(--text); }
 .menu-row.is-danger,
@@ -796,14 +805,14 @@ footer {
 .menu-row:disabled,
 .menu-row:disabled .menu-row__ic { color: var(--dim); cursor: default; }
 .menu-row.is-off { color: var(--muted); }
-.menu-sep { display: block; height: 1px; margin: 4px 6px; background: rgba(255, 255, 255, 0.08); }
+.menu-sep { display: block; height: 1px; margin: 4px 6px; background: rgb(var(--ink) / 0.08); }
 /* A checklist row's box: empty, or filled with a tick (PlatformSelect.css .psel__box). */
 .menu-box {
   display: grid; place-items: center; flex: none; width: 16px; height: 16px;
-  border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 5px; color: var(--text); transition: background 120ms, border-color 120ms;
+  border: 1px solid rgb(var(--ink) / 0.2); border-radius: 5px; color: var(--text); transition: background 120ms, border-color 120ms;
 }
-.menu-row:hover .menu-box { border-color: rgba(255, 255, 255, 0.36); }
-.menu-row[aria-checked="true"] .menu-box { border-color: transparent; background: rgba(255, 255, 255, 0.16); }
+.menu-row:hover .menu-box { border-color: rgb(var(--ink) / 0.36); }
+.menu-row[aria-checked="true"] .menu-box { border-color: transparent; background: rgb(var(--ink) / 0.16); }
 .menu-tick { display: grid; place-items: center; flex: none; width: 16px; color: var(--text); }
 /* Settings menus (the book's units, the tape's, the portfolio chart's): segmented chips. */
 .menu-popup .menu-grid { gap: 4px; padding: 0 2px; }
@@ -812,8 +821,8 @@ footer {
   color: var(--muted); font-size: var(--fs-xs); font-weight: 500; line-height: 28px; text-align: center; white-space: nowrap;
   transition: background 120ms, color 120ms;
 }
-.menu-popup .menu-grid button:hover:not(.active) { background: rgba(255, 255, 255, 0.06); color: var(--text); }
-.menu-popup .menu-grid button.active { background: rgba(255, 255, 255, 0.12); color: var(--text); box-shadow: none; }
+.menu-popup .menu-grid button:hover:not(.active) { background: rgb(var(--ink) / 0.06); color: var(--text); }
+.menu-popup .menu-grid button.active { background: rgb(var(--ink) / 0.12); color: var(--text); box-shadow: none; }
 .indicators-menu { min-width: 220px; }
 
 /* --- tabs (order book/trades, positions/orders/history) ------------------- */
@@ -1330,7 +1339,7 @@ select:hover {
 input:hover, select:hover { border-color: var(--line-strong); }
 /* The dropdown *popup* is native browser chrome CSS mostly can't reach; this
    is the one lever that actually themes it (color-scheme + option colours). */
-select { color-scheme: dark; }
+select { color-scheme: var(--scheme); }
 option { background: var(--bg-elevated); color: var(--text); }
 
 /* THE OPEN LIST OF EVERY NATIVE SELECT, where the browser lets CSS reach it

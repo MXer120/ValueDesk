@@ -6,13 +6,13 @@
 .ks {
   --ks-bg: var(--bg);
   --ks-head: var(--bg-panel);
-  --ks-line: rgba(255, 255, 255, 0.065);
-  --ks-head-line: rgba(255, 255, 255, 0.085);
-  --ks-freeze: rgba(255, 255, 255, 0.2);
-  --ks-sel: rgba(255, 255, 255, 0.075);
-  --ks-sel-line: rgba(255, 255, 255, 0.42);
+  --ks-line: rgb(var(--ink) / 0.065);
+  --ks-head-line: rgb(var(--ink) / 0.085);
+  --ks-freeze: rgb(var(--ink) / 0.2);
+  --ks-sel: rgb(var(--ink) / 0.075);
+  --ks-sel-line: rgb(var(--ink) / 0.42);
   --ks-active: #f2f2f2;
-  --ks-hover: rgba(255, 255, 255, 0.07);
+  --ks-hover: rgb(var(--ink) / 0.07);
   --ks-pop: var(--bg-elevated);
   display: flex; flex-direction: column; height: 100%; min-height: 0; min-width: 0;
   color: var(--text); font-size: var(--fs-xs);
@@ -31,7 +31,7 @@
   transition: background 120ms, color 120ms;
 }
 .ks-tool:hover:not(:disabled) { background: var(--ks-hover); color: var(--text); }
-.ks-tool.is-on { background: rgba(255, 255, 255, 0.12); color: var(--text); }
+.ks-tool.is-on { background: rgb(var(--ink) / 0.12); color: var(--text); }
 .ks-tool:disabled { opacity: 0.32; cursor: default; }
 .ks-tool:focus-visible, .ks-select:focus-visible { outline: 1px solid var(--focus); outline-offset: 1px; }
 .ks-tool--text { width: auto; padding: 0 6px; font-family: var(--font-num); font-size: 11.5px; letter-spacing: 0.01em; }
@@ -41,12 +41,12 @@
 .ks-fill { flex: 1 0 8px; }
 .ks-select {
   flex: none; height: 28px; padding: 0 22px 0 9px; margin: 0 2px;
-  border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 7px; background-color: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgb(var(--ink) / 0.08); border-radius: 7px; background-color: rgb(var(--ink) / 0.04);
   color: var(--text); font: inherit; font-size: var(--fs-xs); cursor: pointer; appearance: none; -webkit-appearance: none;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='m2.5 4 2.5 2.5L7.5 4' fill='none' stroke='%23bcbcbc' stroke-width='1.3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
   background-repeat: no-repeat; background-position: right 6px center; background-size: 10px;
 }
-.ks-select:hover { border-color: rgba(255, 255, 255, 0.16); }
+.ks-select:hover { border-color: rgb(var(--ink) / 0.16); }
 .ks-select option { background: var(--bg-elevated); color: var(--text); }
 
 .ks-swatch { position: relative; display: inline-flex; flex: none; }
@@ -58,11 +58,11 @@
 }
 .ks-swatch__c, .ks-swatch__none {
   width: 22px; height: 22px; min-height: 0; padding: 0; border: 0; border-radius: 6px; cursor: pointer;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12); transition: transform 100ms;
+  box-shadow: inset 0 0 0 1px rgb(var(--ink) / 0.12); transition: transform 100ms;
 }
 .ks-swatch__c:hover, .ks-swatch__none:hover { transform: scale(1.1); }
 .ks-swatch__c.is-on { box-shadow: 0 0 0 2px var(--ks-pop), 0 0 0 3.5px var(--text); }
-.ks-swatch__none { background: linear-gradient(135deg, transparent 45%, var(--neg) 45% 55%, transparent 55%), rgba(255, 255, 255, 0.04); }
+.ks-swatch__none { background: linear-gradient(135deg, transparent 45%, var(--neg) 45% 55%, transparent 55%), rgb(var(--ink) / 0.04); }
 
 /* --- formula bar -------------------------------------------------------------------- */
 .ks-fx { position: relative; z-index: 6; display: flex; align-items: stretch; flex: none; min-height: 31px; border-bottom: 1px solid var(--panel-line); }
@@ -70,8 +70,8 @@
   flex: none; width: 96px; min-height: 0; padding: 0 10px; border: 0; border-right: 1px solid var(--panel-line); border-radius: 0;
   background: transparent; color: var(--text); font-family: var(--font-num); font-size: 12px; outline: none;
 }
-.ks-name:hover { background: rgba(255, 255, 255, 0.025); }
-.ks-name:focus { background: rgba(255, 255, 255, 0.05); box-shadow: inset 0 -1px 0 var(--ks-active); }
+.ks-name:hover { background: rgb(var(--ink) / 0.025); }
+.ks-name:focus { background: rgb(var(--ink) / 0.05); box-shadow: inset 0 -1px 0 var(--ks-active); }
 .ks-fx__label {
   display: grid; place-items: center; flex: none; width: 32px; border-right: 1px solid var(--panel-line);
   color: var(--dim); font: italic 13px/1 Georgia, 'Times New Roman', serif;
@@ -90,10 +90,10 @@
   width: 100%; height: 100%; min-height: 0; resize: none; outline: none; background: transparent;
   color: transparent; caret-color: var(--text); -webkit-text-fill-color: transparent;
 }
-.ks-ff__input::selection { background: rgba(255, 255, 255, 0.22); color: transparent; }
+.ks-ff__input::selection { background: rgb(var(--ink) / 0.22); color: transparent; }
 .ks-ff--bar { height: calc(var(--lines, 1) * 18px + 12px); }
 .ks-ff--bar .ks-ff__mirror, .ks-ff--bar .ks-ff__input { width: 100%; height: 100%; padding: 6px 10px; }
-.ks-ff--bar .ks-ff__input:focus { box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.35); }
+.ks-ff--bar .ks-ff__input:focus { box-shadow: inset 0 -1px 0 rgb(var(--ink) / 0.35); }
 .ks-ff--cell { min-width: 100%; min-height: 100%; }
 .ks-ff--cell .ks-ff__mirror, .ks-ff--cell .ks-ff__input { padding: 3px 6px; line-height: 19px; }
 .ks-ff--cell .ks-ff__mirror { max-width: 100%; }
@@ -112,7 +112,7 @@
 }
 .ks-assist__item b { color: var(--text); font-weight: 600; }
 .ks-assist__item span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.ks-assist__item.is-on, .ks-assist__item:hover { background: rgba(255, 255, 255, 0.08); }
+.ks-assist__item.is-on, .ks-assist__item:hover { background: rgb(var(--ink) / 0.08); }
 .ks-assist__tip { margin: 3px 8px 2px; color: var(--dim); font-size: var(--fs-micro); }
 .ks-assist--sig { min-width: 0; padding: 6px 10px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ks-assist--sig b { color: var(--muted); font-weight: 600; }
@@ -127,11 +127,11 @@
 .ks-scroll {
   position: absolute; inset: 0; overflow: auto; overscroll-behavior: contain;
   font-size: 12.5px; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
-  scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+  scrollbar-width: thin; scrollbar-color: rgb(var(--ink) / 0.18) transparent;
 }
 .ks-scroll::-webkit-scrollbar { width: 10px; height: 10px; }
-.ks-scroll::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: 6px; background: rgba(255, 255, 255, 0.16) padding-box; }
-.ks-scroll::-webkit-scrollbar-thumb:hover { background-color: rgba(255, 255, 255, 0.28); }
+.ks-scroll::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: 6px; background: rgb(var(--ink) / 0.16) padding-box; }
+.ks-scroll::-webkit-scrollbar-thumb:hover { background-color: rgb(var(--ink) / 0.28); }
 .ks-scroll::-webkit-scrollbar-corner { background: transparent; }
 .ks-canvas { position: relative; min-height: 100%; }
 
@@ -162,8 +162,8 @@
 .ks-rh { left: 0; width: 46px; box-shadow: inset -1px 0 0 var(--ks-head-line), inset 0 -1px 0 var(--ks-head-line); }
 .ks-ch:hover, .ks-rh:hover { color: var(--muted); }
 .ks-ch.is-sel, .ks-rh.is-sel { background: #242425; color: var(--text); }
-.ks-ch.is-sel { box-shadow: inset -1px 0 0 var(--ks-head-line), inset 0 -2px 0 rgba(255, 255, 255, 0.55); }
-.ks-rh.is-sel { box-shadow: inset 0 -1px 0 var(--ks-head-line), inset -2px 0 0 rgba(255, 255, 255, 0.55); }
+.ks-ch.is-sel { box-shadow: inset -1px 0 0 var(--ks-head-line), inset 0 -2px 0 rgb(var(--ink) / 0.55); }
+.ks-rh.is-sel { box-shadow: inset 0 -1px 0 var(--ks-head-line), inset -2px 0 0 rgb(var(--ink) / 0.55); }
 .ks-ch.is-all, .ks-rh.is-all { background: #333334; }
 .ks-ch__size, .ks-rh__size { position: absolute; z-index: 2; }
 .ks-ch__size { top: 0; right: -4px; width: 8px; height: 100%; cursor: col-resize; }
@@ -203,14 +203,14 @@
 .ks-ref.l { border-left-width: 2px; }
 .ks-ref.r { border-right-width: 2px; }
 .ks-active { z-index: 3; box-shadow: 0 0 0 1px var(--ks-active), inset 0 0 0 1px var(--ks-active); }
-.ks-grid:not(:focus-within) .ks-active { --ks-active: rgba(255, 255, 255, 0.5); }
+.ks-grid:not(:focus-within) .ks-active { --ks-active: rgb(var(--ink) / 0.5); }
 .ks-fillh {
   position: absolute; z-index: 4; width: 8px; height: 8px; box-sizing: border-box;
   border: 1.5px solid var(--ks-bg); border-radius: 2px; background: var(--ks-active); cursor: crosshair;
 }
 .ks-fillh::before { content: ''; position: absolute; inset: -6px; }
 .ks-clip {
-  z-index: 3; --ant: rgba(255, 255, 255, 0.8);
+  z-index: 3; --ant: rgb(var(--ink) / 0.8);
   background-image:
     linear-gradient(90deg, var(--ant) 50%, transparent 50%), linear-gradient(90deg, var(--ant) 50%, transparent 50%),
     linear-gradient(0deg, var(--ant) 50%, transparent 50%), linear-gradient(0deg, var(--ant) 50%, transparent 50%);
@@ -233,10 +233,10 @@
 .ks-more__in { position: sticky; left: 0; display: flex; align-items: center; gap: 12px; height: 100%; padding-left: 56px; width: max-content; }
 .ks-more__btn {
   height: 28px; min-height: 0; padding: 0 14px; border: 0; border-radius: 8px;
-  background: rgba(255, 255, 255, 0.06); color: var(--muted); font: inherit; font-size: var(--fs-xs); cursor: pointer;
+  background: rgb(var(--ink) / 0.06); color: var(--muted); font: inherit; font-size: var(--fs-xs); cursor: pointer;
   transition: background 120ms, color 120ms;
 }
-.ks-more__btn:hover { background: rgba(255, 255, 255, 0.1); color: var(--text); }
+.ks-more__btn:hover { background: rgb(var(--ink) / 0.1); color: var(--text); }
 .ks-more__hint { color: var(--dim); font-size: var(--fs-micro); font-family: var(--font-num); }
 
 /* --- tabs and status ---------------------------------------------------------------- */
@@ -251,15 +251,15 @@
   border: 0; border-radius: 7px; background: transparent; color: var(--muted); font: inherit; font-size: var(--fs-xs);
   white-space: nowrap; cursor: pointer; transition: background 120ms, color 120ms;
 }
-.ks-tab:hover { background: rgba(255, 255, 255, 0.06); color: var(--text); }
-.ks-tab.is-on { background: rgba(255, 255, 255, 0.1); color: var(--text); font-weight: 500; }
+.ks-tab:hover { background: rgb(var(--ink) / 0.06); color: var(--text); }
+.ks-tab.is-on { background: rgb(var(--ink) / 0.1); color: var(--text); font-weight: 500; }
 .ks-tab:focus-visible, .ks-tabadd:focus-visible { outline: 1px solid var(--focus); outline-offset: 1px; }
-.ks-tab--edit { width: auto; max-width: 260px; padding: 0 8px; background: rgba(255, 255, 255, 0.07); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.3); color: var(--text); outline: none; cursor: text; }
+.ks-tab--edit { width: auto; max-width: 260px; padding: 0 8px; background: rgb(var(--ink) / 0.07); box-shadow: inset 0 0 0 1px rgb(var(--ink) / 0.3); color: var(--text); outline: none; cursor: text; }
 .ks-tabadd {
   display: grid; place-items: center; flex: none; width: 26px; height: 26px; min-height: 0; padding: 0;
   border: 0; border-radius: 7px; background: transparent; color: var(--muted); cursor: pointer;
 }
-.ks-tabadd:hover:not(:disabled) { background: rgba(255, 255, 255, 0.07); color: var(--text); }
+.ks-tabadd:hover:not(:disabled) { background: rgb(var(--ink) / 0.07); color: var(--text); }
 .ks-tabadd:disabled { opacity: 0.3; cursor: default; }
 .ks-stat {
   flex: none; max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: pre;

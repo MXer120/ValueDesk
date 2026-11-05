@@ -28,6 +28,7 @@
  * section ink slides; a new section or list fades in (FadeView). All of it
  * honours prefers-reduced-motion.
  */
+import { WATCHLIST_EVENT } from '../../onboarding/model';
 import {
   Fragment,
   memo,
@@ -499,6 +500,12 @@ function PaletteDialog(
     readList<string>(LS_RECENT_SEARCHES).filter((s) => typeof s === 'string' && !!s.trim()),
   );
   const watched = useMemo(() => new Set(watchlist.map(traderKey)), [watchlist]);
+  /* Track in the first-signup flow writes the same list. */
+  useEffect(() => {
+    const on = () => setWatchlist(readTraderRefs(readList<unknown>(LS_WATCHLIST)));
+    window.addEventListener(WATCHLIST_EVENT, on);
+    return () => window.removeEventListener(WATCHLIST_EVENT, on);
+  }, []);
   // Written back once, sanitised: a name an older build stored must not stay in this browser.
   useEffect(() => {
     writeList(LS_WATCHLIST, watchlist);

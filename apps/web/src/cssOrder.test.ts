@@ -15,6 +15,7 @@ const IMPORT_RE = /^\s*import\s+['"]([^'"]+\.css)['"]\s*;?/gm;
 /** Stylesheets that are NOT meant to be in the list, and why. */
 const EXEMPT = new Set([
   'styles.css', // main.tsx imports it last, after App
+  'theme-light.css', // main.tsx, right after styles.css: its selectors outrank :root, whatever the order
   'chart/tv/tv.css', // the optional TradingView chart loads its own sheets on demand
   'chart/tv/tv-theme.css',
   'legal/legal.css', // loads with the legal pages; only `.legal*` selectors (see below)

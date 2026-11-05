@@ -82,8 +82,8 @@ h.test('an unread error marks the bell, and opening it reads it', async ({ page 
 }, { storage: { 'vs.notices.v1': NOTICES } });
 
 h.test('toasts never lie over the bar: docked in its lane, or (a phone) under it - its links and wallet button take taps', async ({ page }) => {
-  await connectWallet(page);
-  // Connecting starts the indexing card, which stays for minutes: the toast that sat over a phone's header.
+  await connectWallet(page, { settle: false });
+  // Connecting shows a toast (and, the first time, the indexing card): what sat over a phone's header.
   const card = page.locator('.toasts .toast').first();
   await card.waitFor({ state: 'visible', timeout: 30_000 });
   const docked = await page.locator('.toasts').first().evaluate((el) => el.classList.contains('is-docked'));
@@ -100,7 +100,7 @@ h.test('toasts never lie over the bar: docked in its lane, or (a phone) under it
   const c = (await card.boundingBox())!;
   const top = await page.evaluate(([x, y]) => !!document.elementFromPoint(x!, y!)?.closest('.toasts'), [c.x + c.width / 2, c.y + c.height / 2]);
   assert.equal(top, false, 'the toast is not the topmost thing under the open dialog');
-}, { storage: { 'vs.notices.v1': NOTICES } });
+}, { storage: { 'vs.notices.v1': NOTICES, 'vs.setup.done': '1' } }); // a used browser: the first-signup flow would take the screen
 
 h.test('View > Grade: all, warnings + errors, errors', async ({ page }) => {
   const b = bell(page);

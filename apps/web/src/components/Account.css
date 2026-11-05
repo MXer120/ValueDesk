@@ -1201,7 +1201,7 @@ button.acctf-view.is-active { color: var(--text); border-color: var(--line); }
   color: var(--text);
   font-family: var(--font-num);
   font-size: var(--fs-xs);
-  color-scheme: dark;
+  color-scheme: var(--scheme);
 }
 .acctf-pop .acctf-dates input:hover { border-color: var(--line); }
 .acctf-pop .acctf-dates input:focus { border-color: var(--muted); outline: none; }

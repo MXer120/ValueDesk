@@ -1750,11 +1750,11 @@
   min-height: 38px;
   border-radius: 14px;
   background: #1c1c1e;
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.05);
+  box-shadow: 0 0 0 1px rgb(var(--ink) / 0.05);
   transition: background 140ms, box-shadow 140ms;
 }
 .mkt-favchip:hover { background: #212123; }
-.mkt-favchip.is-active { background: #262628; box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1), 0 2px 6px rgba(0, 0, 0, 0.32); }
+.mkt-favchip.is-active { background: #262628; box-shadow: 0 0 0 1px rgb(var(--ink) / 0.1), 0 2px 6px rgba(0, 0, 0, 0.32); }
 .mkt-favchip__open {
   display: flex;
   align-items: center;
@@ -1796,7 +1796,7 @@
   color: #7a7a80;
   cursor: pointer;
 }
-.mkt-favchip__x:hover { color: var(--text); background: rgba(255, 255, 255, 0.06); }
+.mkt-favchip__x:hover { color: var(--text); background: rgb(var(--ink) / 0.06); }
 .mkt-favchip__pin:hover { color: #f0c24b; }
 .mkt-favs__add {
   flex: none;
@@ -1806,13 +1806,13 @@
   height: 36px;
   min-height: 0;
   padding: 0;
-  border: 1px dashed rgba(255, 255, 255, 0.14);
+  border: 1px dashed rgb(var(--ink) / 0.14);
   border-radius: 11px;
   background: transparent;
   color: #8e8e93;
   cursor: pointer;
 }
-.mkt-favs__add:hover { color: var(--text); border-color: rgba(255, 255, 255, 0.28); }
+.mkt-favs__add:hover { color: var(--text); border-color: rgb(var(--ink) / 0.28); }
 
 .mkt-header.mkt-header--info { gap: 14px; padding: 0 18px 0 10px; }
 /* The coin on its own - no box (the owner's call); a press opens the market search. */
@@ -1843,7 +1843,7 @@
   letter-spacing: -0.02em;
   font-variant-numeric: tabular-nums;
 }
-.mkt-info__div { flex: none; width: 1px; height: 28px; background: rgba(255, 255, 255, 0.1); }
+.mkt-info__div { flex: none; width: 1px; height: 28px; background: rgb(var(--ink) / 0.1); }
 .mkt-header--info .mkt-stats { gap: 24px; margin-left: 2px; }
 .mkt-header--info .mkt-stat { gap: 2px; padding-top: 0; }
 .mkt-header--info .mkt-stat-l { color: #8e8e93; font-size: 11px; line-height: 14px; }
@@ -1881,9 +1881,9 @@
   border: 1px solid transparent; border-radius: 7px; background: transparent; color: var(--muted);
   font: inherit; font-size: var(--fs-xs); font-weight: 500; white-space: nowrap; cursor: pointer;
 }
-.chart-tab:hover { color: var(--text); background: rgba(255, 255, 255, 0.04); }
-.chart-tab.is-on { color: var(--text); background: rgba(255, 255, 255, 0.07); border-color: rgba(255, 255, 255, 0.08); }
-.chart-card__body.is-widget { overflow: hidden; border-top: 1px solid rgba(255, 255, 255, 0.05); }
+.chart-tab:hover { color: var(--text); background: rgb(var(--ink) / 0.04); }
+.chart-tab.is-on { color: var(--text); background: rgb(var(--ink) / 0.07); border-color: rgb(var(--ink) / 0.08); }
+.chart-card__body.is-widget { overflow: hidden; border-top: 1px solid rgb(var(--ink) / 0.05); }
 /* With tabs at the row's end the stats give way: they scroll under a fade instead of
    running into the tabs. */
 .mkt-header--info:has(> .mkt-aside) .mkt-stats {

@@ -8,6 +8,7 @@
  */
 import { useSyncExternalStore } from 'react';
 import './appearance.css';
+import { isLight, onTheme } from './theme';
 
 export interface Appearance {
   /** The window's tint (the warm brown) and how much of it covers the page, %. */
@@ -56,6 +57,30 @@ export const APPEARANCE_DEFAULT: Appearance = {
   pageGlow2Alpha: 15,
 };
 
+/**
+ * The same glass on the light theme: a white tint, a soft edge, a lift towards white. The sliders in
+ * Settings tune the dark look, the owner's; on light these values hold.
+ */
+const LIGHT_GLASS: Appearance = {
+  tint: '#fbfbfa',
+  tintAlpha: 82,
+  shade: 6,
+  shadeAlpha: 30,
+  blur: 20,
+  saturate: 1.1,
+  glow: '#ffffff',
+  glowAlpha: 40,
+  lift: 40,
+  innerGlow: 30,
+  trade: true,
+  panelAlpha: 100,
+  panelBlur: 0,
+  pageGlow: '#ffffff',
+  pageGlowAlpha: 30,
+  pageGlow2: '#c9d6e6',
+  pageGlow2Alpha: 22,
+};
+
 const KEY = 'vs.appearance';
 const listeners = new Set<() => void>();
 
@@ -75,8 +100,9 @@ function load(): Appearance {
 
 let current: Appearance = typeof window === 'undefined' ? APPEARANCE_DEFAULT : load();
 
-function apply(a: Appearance): void {
+function apply(shown: Appearance): void {
   if (typeof document === 'undefined') return;
+  const a = isLight() ? { ...LIGHT_GLASS, trade: shown.trade } : shown;
   const s = document.documentElement.style;
   s.setProperty('--stg-tint', a.tint);
   s.setProperty('--stg-tint-a', `${a.tintAlpha}%`);
@@ -97,6 +123,7 @@ function apply(a: Appearance): void {
   document.documentElement.toggleAttribute('data-glass', a.trade);
 }
 apply(current);
+onTheme(() => apply(current));
 
 export function setAppearance(patch: Partial<Appearance> | null): void {
   current = patch === null ? APPEARANCE_DEFAULT : { ...current, ...patch };

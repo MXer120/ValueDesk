@@ -22,11 +22,11 @@
   padding: 0 14px;
   border: 0;
   border-radius: 8px;
-  background: color-mix(in srgb, var(--pos) 34%, #0b0d0c);
-  color: color-mix(in srgb, var(--pos) 18%, #fff);
+  background: color-mix(in srgb, var(--pos) 34%, var(--mix-pos-base));
+  color: color-mix(in srgb, var(--pos) 18%, var(--ink-solid));
   font: inherit;
   font-size: var(--fs-xs);
   font-weight: 600;
   cursor: pointer;
 }
-.empty-state__cta:hover { background: color-mix(in srgb, var(--pos) 46%, #0b0d0c); }
+.empty-state__cta:hover { background: color-mix(in srgb, var(--pos) 46%, var(--mix-pos-base)); }

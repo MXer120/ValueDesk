@@ -267,7 +267,7 @@ export async function hideDevPanel(page: Page): Promise<void> {
  * Connect > "MetaMask Installed": the extension route (walletconnect.ts connectVia),
  * answered by the test wallet. Then "Explore while we set up" on the setup sheet.
  */
-export async function connectWallet(page: Page): Promise<void> {
+export async function connectWallet(page: Page, o: { settle?: boolean } = {}): Promise<void> {
   // The Tools rail on a wide screen; on a phone (no rail) the header's own button, which then names the address.
   const rail = page.getByRole('complementary', { name: 'Tools' });
   const wide = await rail.getByRole('button', { name: 'Connect wallet' }).isVisible().catch(() => false);
@@ -279,7 +279,21 @@ export async function connectWallet(page: Page): Promise<void> {
   await dialog.getByRole('button', { name: 'MetaMask Installed' }).click();
   const connected = wide ? rail.getByRole('button', { name: /^Wallet / }) : header.getByRole('button', { name: /0x[0-9a-f]{2,}/i });
   await connected.first().waitFor({ state: 'visible', timeout: 30_000 });
+  if (o.settle === false) return; // a spec about what shows the moment a wallet connects
+  await dismissOnboarding(page);
   await dismissSetup(page);
+}
+
+/** The first-signup flow a brand-new wallet gets (src/onboarding/): Skip. A no-op when it is not up. onboarding.spec.ts walks it. */
+export async function dismissOnboarding(page: Page, waitMs = 5_000): Promise<void> {
+  const flow = page.getByRole('dialog', { name: 'Getting started' });
+  try {
+    await flow.waitFor({ state: 'visible', timeout: waitMs });
+  } catch {
+    return;
+  }
+  await flow.getByRole('button', { name: 'Skip' }).click();
+  await flow.waitFor({ state: 'hidden' });
 }
 
 /** The "Setting up your account" sheet a first connect opens: "Explore while we set up". A no-op when it is not up. */

@@ -18,6 +18,7 @@
  * them. And it may lay the levels now over the pane's right edge (`strip`), on the
  * same axis, so a level now lines up with its band in the history.
  */
+import { isLight } from '../theme';
 import type { IndicatorTemplate, KLineData } from 'klinecharts';
 import { LEV_BANDS, addBands, isAllLev, levRgb, levelWindow, robustMax, shownBands, sideBands, type Bands, type ColorBy, type LevFilter } from './liqLev';
 import { drawProfile, type LiqMapData } from './liqProfile';
@@ -70,17 +71,20 @@ export interface HeatData {
 const STALE_MS = 2 * 60 * 60_000;
 
 const RAMP: ReadonlyArray<[number, number, number]> = [[68, 1, 84], [59, 82, 139], [33, 145, 140], [94, 201, 98], [253, 231, 37]];
+/** On white the scale runs the other way: strong levels are the dark end, as strong ones are the bright end on dark. */
+const RAMP_LIGHT: ReadonlyArray<[number, number, number]> = [[235, 215, 40], [94, 201, 98], [33, 145, 140], [59, 82, 139], [68, 1, 84]];
 export const HEAT_FLOOR = 0.03;
 
 /** A cell's colour by its share of the scale (null: below the floor, not drawn). Past the scale: the top colour. */
 export function heatColor(x: number): string | null {
   if (!(x > HEAT_FLOOR)) return null;
   const t = Math.min(1, x);
-  const f = t * (RAMP.length - 1);
-  const i = Math.min(RAMP.length - 2, Math.floor(f));
+  const ramp = isLight() ? RAMP_LIGHT : RAMP;
+  const f = t * (ramp.length - 1);
+  const i = Math.min(ramp.length - 2, Math.floor(f));
   const k = f - i;
-  const [r1, g1, b1] = RAMP[i]!;
-  const [r2, g2, b2] = RAMP[i + 1]!;
+  const [r1, g1, b1] = ramp[i]!;
+  const [r2, g2, b2] = ramp[i + 1]!;
   const a = 0.3 + 0.55 * Math.min(1, t * 1.6);
   return `rgba(${Math.round(r1 + (r2 - r1) * k)},${Math.round(g1 + (g2 - g1) * k)},${Math.round(b1 + (b2 - b1) * k)},${a.toFixed(3)})`;
 }
@@ -378,7 +382,8 @@ export const liqHeatTemplate: IndicatorTemplate<{ lo?: number; hi?: number }, un
       }
       if (data.mark && data.mark.t > list[Math.floor(from)]!.timestamp && data.mark.t < list[Math.max(0, Math.ceil(to) - 1)]!.timestamp + barMs) {
         const x = Math.round(xAxis.convertTimestampToPixel(data.mark.t)) + 0.5;
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
+        const light = isLight();
+        ctx.strokeStyle = light ? 'rgba(0, 0, 0, 0.35)' : 'rgba(255, 255, 255, 0.35)';
         ctx.setLineDash([3, 3]);
         ctx.lineWidth = 1;
         ctx.beginPath();
@@ -389,9 +394,9 @@ export const liqHeatTemplate: IndicatorTemplate<{ lo?: number; hi?: number }, un
         ctx.font = '10px system-ui, sans-serif';
         ctx.textBaseline = 'top';
         const w = ctx.measureText(data.mark.label).width;
-        ctx.fillStyle = 'rgba(11, 11, 16, 0.75)';
+        ctx.fillStyle = light ? 'rgba(255, 255, 255, 0.85)' : 'rgba(11, 11, 16, 0.75)';
         ctx.fillRect(x + 4, 6, w + 10, 16);
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+        ctx.fillStyle = light ? 'rgba(0, 0, 0, 0.75)' : 'rgba(255, 255, 255, 0.7)';
         ctx.fillText(data.mark.label, x + 9, 9);
       }
       ctx.restore();

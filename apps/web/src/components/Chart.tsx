@@ -70,6 +70,7 @@ import {
   registerChartAxes,
   T,
   X_AXIS_NAME,
+  followTheme,
 } from '../chart/theme';
 import {
   clockText,
@@ -1205,6 +1206,7 @@ function Chart({
     let disposed = false;
     let ro: ResizeObserver | undefined;
     let unNumStyle: (() => void) | undefined;
+    let unTheme: (() => void) | undefined;
     let initRetryTimer = 0;
 
     /**
@@ -1718,6 +1720,8 @@ function Chart({
       // One synchronous resize here re-reads the real box before first paint.
       c.resize();
       unNumStyle = followNumStyle(c);
+      // Dark or light (theme.ts): the shared styles again, then the axis badge is tinted afresh.
+      unTheme = followTheme(c, () => { badgeCss.current = null; c.setStyles({ candle: { type: candleStyleRef.current } }); });
 
       // A pan or an axis drag follows the pointer anywhere until it is
       // released, not just while it is over the pane it began on.
@@ -1833,6 +1837,7 @@ function Chart({
       badgeCss.current = null;
       ro?.disconnect();
       unNumStyle?.();
+      unTheme?.();
       const c = chart.current;
       if (c) {
         c.unsubscribeAction('onCrosshairChange');

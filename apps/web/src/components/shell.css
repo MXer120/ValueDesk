@@ -41,7 +41,7 @@
 .side__brand:focus-visible { outline: 1px solid var(--focus); outline-offset: 2px; }
 .side__groups { display: flex; flex-direction: column; align-items: center; gap: 12px; padding-top: 6px; }
 .side__group { display: flex; flex-direction: column; align-items: center; gap: 6px; }
-.side__sep { display: block; width: 36px; height: 1px; background: rgba(255, 255, 255, 0.08); }
+.side__sep { display: block; width: 36px; height: 1px; background: rgb(var(--ink) / 0.08); }
 
 .side__btn,
 .side .navicon {
@@ -58,7 +58,7 @@
   transition: background 140ms, color 140ms, box-shadow 140ms;
 }
 .side__btn:hover,
-.side .navicon:hover:not(:disabled) { background: rgba(255, 255, 255, 0.05); color: var(--text); }
+.side .navicon:hover:not(:disabled) { background: rgb(var(--ink) / 0.05); color: var(--text); }
 .side__btn:focus-visible,
 .side .navicon:focus-visible { outline: 1px solid var(--focus); outline-offset: 2px; }
 .side .navicon svg { width: 20px; height: 20px; }
@@ -69,7 +69,7 @@
   border-radius: 14px;
   background: #242426;
   color: var(--text);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07), 0 0 0 1px rgba(255, 255, 255, 0.06), 0 2px 6px rgba(0, 0, 0, 0.4);
+  box-shadow: inset 0 1px 0 rgb(var(--ink) / 0.07), 0 0 0 1px rgb(var(--ink) / 0.06), 0 2px 6px rgba(0, 0, 0, 0.4);
 }
 .side__btn.is-raised:hover { background: #2a2a2d; }
 .side .navnotes__dot,
@@ -156,7 +156,7 @@
   padding: 3px;
   border-radius: 12px;
   background: #18181a;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+  box-shadow: inset 0 0 0 1px rgb(var(--ink) / 0.05);
 }
 .nav-seg > button {
   height: 32px;
@@ -179,9 +179,9 @@
 .nav-seg > button.is-on {
   background: #2b2b2e;
   color: var(--text);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07), 0 2px 6px rgba(0, 0, 0, 0.4);
+  box-shadow: inset 0 1px 0 rgb(var(--ink) / 0.07), 0 2px 6px rgba(0, 0, 0, 0.4);
 }
-.nav-div { flex: none; width: 1px; height: 24px; background: rgba(255, 255, 255, 0.12); }
+.nav-div { flex: none; width: 1px; height: 24px; background: rgb(var(--ink) / 0.12); }
 
 /* The status bar spans its own column, not the window (StatusFooter.css widens it to 100vw). */
 .shell--rail .sfoot { margin-inline: calc(-1 * var(--sp-1)); }
@@ -198,14 +198,14 @@
   justify-content: center;
   gap: 3px;
   border-radius: 14px;
-  background: color-mix(in srgb, var(--pos) 30%, #0b0d0c);
-  color: color-mix(in srgb, var(--pos) 18%, #fff);
+  background: color-mix(in srgb, var(--pos) 30%, var(--mix-pos-base));
+  color: color-mix(in srgb, var(--pos) 18%, var(--ink-solid));
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--pos) 45%, transparent), 0 2px 8px color-mix(in srgb, var(--pos) 22%, transparent);
 }
-.side__btn.side__connect:hover { background: color-mix(in srgb, var(--pos) 42%, #0b0d0c); color: #fff; }
+.side__btn.side__connect:hover { background: color-mix(in srgb, var(--pos) 42%, var(--mix-pos-base)); color: #fff; }
 .side__btn.side__connect:disabled { opacity: 0.7; cursor: progress; }
 .side__connect-t { font-size: 10px; font-weight: 600; line-height: 1; letter-spacing: 0.01em; }
-.side__btn.side__addr { width: 44px; height: 44px; border-radius: 12px; background: #1c1c1e; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06); }
+.side__btn.side__addr { width: 44px; height: 44px; border-radius: 12px; background: #1c1c1e; box-shadow: inset 0 0 0 1px rgb(var(--ink) / 0.06); }
 .side__btn.side__addr:hover,
 .side__btn.side__addr[aria-expanded="true"] { background: #262628; }
 /* The address menu opens beside the rail, its foot level with the button. */
@@ -222,7 +222,7 @@
 
 /* Terminals (SideBar.tsx): the one on screen is the raised square; on another page
    it keeps a quiet ring, so the rail still says which one Trade opens on. */
-.side__btn.is-current { color: var(--text); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12); }
+.side__btn.is-current { color: var(--text); box-shadow: inset 0 0 0 1px rgb(var(--ink) / 0.12); }
 .side__add {
   display: grid;
   place-items: center;
@@ -230,13 +230,13 @@
   height: 22px;
   min-height: 0;
   padding: 0;
-  border: 1px dashed rgba(255, 255, 255, 0.14);
+  border: 1px dashed rgb(var(--ink) / 0.14);
   border-radius: 7px;
   background: transparent;
   color: #7a7a80;
   cursor: pointer;
 }
-.side__add:hover { color: var(--text); border-color: rgba(255, 255, 255, 0.3); }
+.side__add:hover { color: var(--text); border-color: rgb(var(--ink) / 0.3); }
 
 /* --- the notifications' lane in the navbar (NavBar.tsx #vs-notify-slot, toast.tsx) ----
    The bar's empty right side holds the toasts and the indexing card as compact pills,

@@ -68,6 +68,7 @@ import type { EthersAdapter } from '@reown/appkit-adapter-ethers';
 import { PACKAGE_VERSION as APPKIT_VERSION } from '@reown/appkit/constants';
 import { api } from './api';
 import { reownReportsAllowed } from './legal/reownConsent';
+import { isLight } from './theme';
 import { startLater } from './startLater';
 import { EVM_CHAINS } from './trading/onboard';
 import {
@@ -619,7 +620,7 @@ async function createKit(): Promise<AppKit> {
       // ambiguity a phishing dapp benefits from.
       icons: [window.location.origin + '/favicon.svg'],
     },
-    themeMode: 'dark',
+    themeMode: isLight() ? 'light' : 'dark',
     themeVariables: themeVariables(),
 
     /*

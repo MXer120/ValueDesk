@@ -72,7 +72,7 @@
   gap: 6px;
   height: 30px;
   padding: 0 10px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  border: 1px solid rgb(var(--ink) / 0.14);
   border-radius: 8px;
   background: rgba(20, 20, 22, 0.78);
   -webkit-backdrop-filter: blur(8px);
@@ -84,8 +84,8 @@
   cursor: pointer;
 }
 .lf.is-docked .lf__pick,
-.lf.is-docked .lf__btn { background: rgba(255, 255, 255, 0.04); border-color: rgba(255, 255, 255, 0.08); -webkit-backdrop-filter: none; backdrop-filter: none; }
-.lf__pick:hover { border-color: rgba(255, 255, 255, 0.26); }
+.lf.is-docked .lf__btn { background: rgb(var(--ink) / 0.04); border-color: rgb(var(--ink) / 0.08); -webkit-backdrop-filter: none; backdrop-filter: none; }
+.lf__pick:hover { border-color: rgb(var(--ink) / 0.26); }
 .lf__btn {
   display: grid;
   place-items: center;
@@ -93,7 +93,7 @@
   height: 30px;
   min-height: 0;
   padding: 0;
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  border: 1px solid rgb(var(--ink) / 0.14);
   border-radius: 8px;
   background: rgba(20, 20, 22, 0.78);
   -webkit-backdrop-filter: blur(8px);
@@ -101,23 +101,23 @@
   color: var(--text);
   cursor: pointer;
 }
-.lf__btn:hover { border-color: rgba(255, 255, 255, 0.3); }
+.lf__btn:hover { border-color: rgb(var(--ink) / 0.3); }
 .lf__btn[aria-pressed="true"] { color: var(--pos); }
-.lf__btn--go { width: auto; padding: 0 12px; font: inherit; font-size: var(--fs-xs); font-weight: 600; background: color-mix(in srgb, var(--pos) 34%, #0b0d0c); border-color: transparent; }
+.lf__btn--go { width: auto; padding: 0 12px; font: inherit; font-size: var(--fs-xs); font-weight: 600; background: color-mix(in srgb, var(--pos) 34%, var(--mix-pos-base)); border-color: transparent; }
 .lf__custom { display: flex; gap: 6px; flex: 1 1 260px; max-width: 420px; min-width: 0; }
 .lf__custom input {
   flex: 1 1 auto;
   min-width: 0;
   height: 30px;
   padding: 0 10px;
-  border: 1px solid rgba(255, 255, 255, 0.16);
+  border: 1px solid rgb(var(--ink) / 0.16);
   border-radius: 8px;
   background: rgba(20, 20, 22, 0.85);
   color: var(--text);
   font: inherit;
   font-size: var(--fs-xs);
 }
-.lf__custom input:focus { outline: none; border-color: rgba(255, 255, 255, 0.34); }
+.lf__custom input:focus { outline: none; border-color: rgb(var(--ink) / 0.34); }
 .lf__err { position: absolute; left: 10px; right: 10px; top: 52px; z-index: 4; margin: 0; padding: 6px 10px; border-radius: 8px; background: rgba(20, 20, 22, 0.9); color: var(--neg); font-size: var(--fs-xs); }
 .lf:fullscreen { border-radius: 0; }
 @media (prefers-reduced-motion: reduce) { .lf__live i { animation: none; } }

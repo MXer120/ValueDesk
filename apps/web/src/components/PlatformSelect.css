@@ -8,9 +8,9 @@
   height: 28px;
   min-height: 0;
   padding: 0 9px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid rgb(var(--ink) / 0.08);
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.04);
+  background: rgb(var(--ink) / 0.04);
   color: var(--text);
   font: inherit;
   font-size: var(--fs-xs);
@@ -20,7 +20,7 @@
   transition: background 140ms, border-color 140ms;
 }
 .psel__btn:hover,
-.psel__btn[aria-expanded="true"] { background: rgba(255, 255, 255, 0.075); border-color: rgba(255, 255, 255, 0.16); }
+.psel__btn[aria-expanded="true"] { background: rgb(var(--ink) / 0.075); border-color: rgb(var(--ink) / 0.16); }
 .psel__btn:focus-visible { outline: 1px solid var(--focus); outline-offset: 1px; }
 .psel__globe { flex: none; color: var(--muted); }
 .psel__logos { display: inline-flex; }
@@ -41,14 +41,14 @@
   background: var(--glass-pop-bg, #1f1f21);
   -webkit-backdrop-filter: var(--glass-pop-blur, none);
   backdrop-filter: var(--glass-pop-blur, none);
-  box-shadow: var(--depth-2), 0 0 0 1px rgba(255, 255, 255, 0.06);
+  box-shadow: var(--depth-2), 0 0 0 1px rgb(var(--ink) / 0.06);
 }
 .psel__pop--start { left: 0; }
 .psel__pop--end { right: 0; }
-.psel__sep { height: 1px; margin: 4px 6px; background: rgba(255, 255, 255, 0.07); }
+.psel__sep { height: 1px; margin: 4px 6px; background: rgb(var(--ink) / 0.07); }
 .psel__item { display: flex; align-items: center; gap: 2px; border-radius: 8px; }
 .psel__item:hover,
-.psel__row--all:hover { background: rgba(255, 255, 255, 0.05); }
+.psel__row--all:hover { background: rgb(var(--ink) / 0.05); }
 .psel__row {
   flex: 1 1 auto;
   display: flex;
@@ -83,11 +83,11 @@
   min-height: 0;
   margin-right: 8px;
   padding: 0;
-  border: 1px solid rgba(255, 255, 255, 0.18);
+  border: 1px solid rgb(var(--ink) / 0.18);
   border-radius: 5px;
   background: transparent;
   cursor: pointer;
 }
-.psel__box.is-on { border-color: transparent; background: rgba(255, 255, 255, 0.14); }
+.psel__box.is-on { border-color: transparent; background: rgb(var(--ink) / 0.14); }
 .psel__box:disabled { cursor: default; opacity: 0.5; }
-.psel__box:hover:not(:disabled) { border-color: rgba(255, 255, 255, 0.36); }
+.psel__box:hover:not(:disabled) { border-color: rgb(var(--ink) / 0.36); }

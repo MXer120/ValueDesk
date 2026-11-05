@@ -7,12 +7,18 @@
  * a hand-over invisible.
  */
 import { chartStyles } from './theme';
+import { onTheme } from '../theme';
 
 /** The grid exactly as klinecharts' GridView strokes it (theme.ts `grid`). */
 export const GRID = {
   h: { ...{ size: 1, color: '#272621', style: 'solid', dashedValue: [2, 2] }, ...chartStyles.grid?.horizontal },
   v: { ...{ size: 1, color: '#272621', style: 'solid', dashedValue: [2, 2] }, ...chartStyles.grid?.vertical },
 };
+
+onTheme(() => {
+  GRID.h = { ...GRID.h, ...chartStyles.grid?.horizontal };
+  GRID.v = { ...GRID.v, ...chartStyles.grid?.vertical };
+});
 
 export function drawGrid(ctx: CanvasRenderingContext2D, lines: { xs: readonly number[]; ys: readonly number[] }, width: number, height: number): void {
   const stroke = (s: typeof GRID.h, vertical: boolean, coords: readonly number[]) => {

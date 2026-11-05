@@ -17,7 +17,7 @@
  * One reveal at a time: a second late page cuts the first one short.
  */
 import type { Chart as KChart, Coordinate, KLineData } from 'klinecharts';
-import { CANDLE_PANE_ID } from './theme';
+import { CANDLE_PANE_ID, T } from './theme';
 import { gridLines, parseColor, type RGBA } from './morph';
 import { drawGrid } from './gridStroke';
 import { drawPriceLine, readPriceLine } from './priceLine';
@@ -49,7 +49,7 @@ function background(el: HTMLElement | null): string {
     const c = parseColor(bg);
     if (c && c[3] > 0.99) return bg;
   }
-  return '#1a1a1b';
+  return T.panel;
 }
 
 interface Cover {

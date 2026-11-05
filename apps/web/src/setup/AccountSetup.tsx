@@ -71,9 +71,13 @@ function indexPaused(): boolean {
   catch { return false; }
 }
 
-export function AccountSetup({ address }: { address: string | null }) {
+export function AccountSetup({ address, hold = false }: {
+  address: string | null;
+  /** The first-signup flow may take this wallet (onboarding/OnboardingHost.tsx): wait for its answer. */
+  hold?: boolean;
+}) {
   const connected = !!address && address.trim().length > 0;
-  const [open, setOpen] = useState(() => connected && !readDone());
+  const [open, setOpen] = useState(() => connected && !hold && !readDone());
   const [step, setStep] = useState<Step>(0);
   const [progress, setProgress] = useState<IndexProgress>(IDLE_PROGRESS);
   const [potatoOn, setPotatoOn] = useState(() => (potatoChosenByUser() ? readPotatoOn() : false));
@@ -133,8 +137,8 @@ export function AccountSetup({ address }: { address: string | null }) {
   }, [connected]);
 
   useEffect(() => {
-    if (connected && !readDone()) setOpen(true);
-  }, [connected]);
+    if (connected && !hold && !readDone()) setOpen(true);
+  }, [connected, hold]);
 
   useEffect(() => {
     if (!open || !address || indexPaused()) return;

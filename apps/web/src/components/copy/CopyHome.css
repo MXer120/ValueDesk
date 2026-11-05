@@ -95,7 +95,7 @@
   color: color-mix(in srgb, var(--venue, var(--muted)) 80%, var(--text));
   font-size: var(--fs-micro); font-weight: 600; letter-spacing: var(--ls-micro); white-space: nowrap;
 }
-.cpy-avatar { flex: none; display: inline-block; border-radius: 50%; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12); }
+.cpy-avatar { flex: none; display: inline-block; border-radius: 50%; box-shadow: inset 0 0 0 1px rgb(var(--ink) / 0.12); }
 .cpy-coins { display: inline-flex; align-items: center; }
 .cpy-coins > * + * { margin-left: -4px; }
 .cpy-coins > :not(.cpy-coins__more) { border-radius: 50%; box-shadow: 0 0 0 1.5px var(--bg-panel); }
@@ -198,12 +198,12 @@
 .cpy {
   --cpy-ctl-h: 28px;
   --cpy-ctl-r: 6px;
-  --cpy-ctl-bg: rgba(255, 255, 255, 0.04);
-  --cpy-ctl-bg-on: rgba(255, 255, 255, 0.075);
-  --cpy-ctl-edge: rgba(255, 255, 255, 0.08);
-  --cpy-ctl-edge-on: rgba(255, 255, 255, 0.16);
+  --cpy-ctl-bg: rgb(var(--ink) / 0.04);
+  --cpy-ctl-bg-on: rgb(var(--ink) / 0.075);
+  --cpy-ctl-edge: rgb(var(--ink) / 0.08);
+  --cpy-ctl-edge-on: rgb(var(--ink) / 0.16);
 }
-.cpy-toolbar { display: flex; flex-direction: column; gap: 8px; padding: 10px 0 6px; border-top: 1px solid rgba(255, 255, 255, 0.05); }
+.cpy-toolbar { display: flex; flex-direction: column; gap: 8px; padding: 10px 0 6px; border-top: 1px solid rgb(var(--ink) / 0.05); }
 .cpy-toolbar__row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
 .cpy-toolbar__end,
 .cpy-toolbar__filters { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
@@ -257,7 +257,7 @@
   transition: background 140ms, color 140ms;
 }
 .cpy-toggle > button:hover { color: var(--text); }
-.cpy-toggle > button.is-on { background: rgba(255, 255, 255, 0.1); color: var(--text); }
+.cpy-toggle > button.is-on { background: rgb(var(--ink) / 0.1); color: var(--text); }
 
 .cpy-search { position: relative; display: flex; align-items: center; gap: 6px; flex: 0 1 260px; min-width: 180px; }
 .cpy-search > .cpy-pick__ic { position: absolute; left: 9px; pointer-events: none; }
@@ -310,7 +310,7 @@
 .cpy-card__lbl { color: var(--muted); font-size: var(--fs-micro); margin-bottom: var(--sp-2); }
 .cpy-card__eq { font-family: var(--font-num); font-size: var(--fs-base); font-weight: 600; }
 .cpy-card__spark { height: 72px; }
-.cpy-card__foot { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); padding: 10px var(--sp-3) 12px; border-top: 1px solid color-mix(in srgb, var(--cpy-tint) 16%, rgba(255, 255, 255, 0.05)); }
+.cpy-card__foot { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); padding: 10px var(--sp-3) 12px; border-top: 1px solid color-mix(in srgb, var(--cpy-tint) 16%, rgb(var(--ink) / 0.05)); }
 
 .cpy-spark { display: block; width: 100%; overflow: visible; }
 .cpy-spark--empty { border-bottom: 1px dashed var(--line-soft); }
@@ -341,8 +341,8 @@
 /* --- the list --------------------------------------------------------------- */
 .cpy-list { overflow-x: auto; border: 0; border-radius: var(--cpy-r); background: var(--cpy-card); box-shadow: var(--depth-2); }
 .cpy-list table { width: 100%; border-collapse: collapse; font-size: var(--fs-xs); }
-.cpy-list th { padding: 12px var(--sp-3) 8px; color: var(--muted); font-weight: 500; text-align: left; white-space: nowrap; border-bottom: 1px solid rgba(255, 255, 255, 0.05); }
-.cpy-list td { padding: 9px var(--sp-3); border-bottom: 1px solid rgba(255, 255, 255, 0.04); font-family: var(--font-num); white-space: nowrap; }
+.cpy-list th { padding: 12px var(--sp-3) 8px; color: var(--muted); font-weight: 500; text-align: left; white-space: nowrap; border-bottom: 1px solid rgb(var(--ink) / 0.05); }
+.cpy-list td { padding: 9px var(--sp-3); border-bottom: 1px solid rgb(var(--ink) / 0.04); font-family: var(--font-num); white-space: nowrap; }
 .cpy-list tr:last-child td { border-bottom: 0; }
 .cpy-list tbody tr { cursor: pointer; }
 .cpy-list tbody tr:hover { background: var(--tint); }
@@ -606,19 +606,19 @@
 
 /* --- the two sides' buttons: the ticket's buy and sell faces -------------------- */
 .cpy-copybtn--copy:not(.is-copying) {
-  background: color-mix(in srgb, var(--pos) 30%, #0b0d0c);
-  color: color-mix(in srgb, var(--pos) 22%, #fff);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  background: color-mix(in srgb, var(--pos) 30%, var(--mix-pos-base));
+  color: color-mix(in srgb, var(--pos) 22%, var(--ink-solid));
+  box-shadow: inset 0 0 0 1px rgb(var(--ink) / 0.08);
 }
 .cpy-copybtn--counter:not(.is-copying) {
-  background: color-mix(in srgb, var(--neg) 30%, #0d0b0b);
-  color: color-mix(in srgb, var(--neg) 22%, #fff);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  background: color-mix(in srgb, var(--neg) 30%, var(--mix-neg-base));
+  color: color-mix(in srgb, var(--neg) 22%, var(--ink-solid));
+  box-shadow: inset 0 0 0 1px rgb(var(--ink) / 0.08);
 }
-.cpy-copybtn--copy:not(.is-copying):hover { background: color-mix(in srgb, var(--pos) 42%, #0b0d0c); }
-.cpy-copybtn--counter:not(.is-copying):hover { background: color-mix(in srgb, var(--neg) 42%, #0d0b0b); }
+.cpy-copybtn--copy:not(.is-copying):hover { background: color-mix(in srgb, var(--pos) 42%, var(--mix-pos-base)); }
+.cpy-copybtn--counter:not(.is-copying):hover { background: color-mix(in srgb, var(--neg) 42%, var(--mix-neg-base)); }
 /* A trader on a platform a copy cannot follow: the same place and width, a neutral face. */
-.cpy-copybtn--view { background: var(--cpy-surface-2); color: var(--text); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08); }
+.cpy-copybtn--view { background: var(--cpy-surface-2); color: var(--text); box-shadow: inset 0 0 0 1px rgb(var(--ink) / 0.08); }
 .cpy-copybtn--view:hover { background: var(--bg-hover); filter: none; }
 .cpy-copybtn--copy:active,
 .cpy-copybtn--counter:active { filter: brightness(0.96); transform: none; }
@@ -677,7 +677,7 @@
   display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: 50%;
   background: var(--tint-strong); color: var(--muted); font-family: var(--font-num); font-size: 10px; font-style: normal; font-weight: 600;
 }
-.cpy-msteps__s.is-on { color: var(--text); background: rgba(255, 255, 255, 0.06); border-color: rgba(255, 255, 255, 0.08); }
+.cpy-msteps__s.is-on { color: var(--text); background: rgb(var(--ink) / 0.06); border-color: rgb(var(--ink) / 0.08); }
 .cpy-msteps__s.is-on i { background: var(--text); color: var(--bg); }
 .cpy-msteps__s.is-done { color: var(--muted); }
 .cpy-msteps__s.is-done i { background: color-mix(in srgb, var(--pos) 25%, transparent); color: var(--pos); }
@@ -703,10 +703,10 @@
 .cpy-mmain .cpy-alloc__k { margin: 0 0 2px; color: var(--muted); font-size: var(--fs-micro); font-weight: 600; letter-spacing: var(--ls-caps); text-transform: uppercase; }
 
 /* The direction: the two buttons' faces, one chosen. */
-.cpy-dir { padding: 3px; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; background: var(--fx-well); }
+.cpy-dir { padding: 3px; border: 1px solid rgb(var(--ink) / 0.08); border-radius: 8px; background: var(--fx-well); }
 .cpy-dir__opt { display: inline-flex; align-items: center; justify-content: center; gap: 7px; height: 32px; border-radius: 6px; }
-.cpy-dir__opt--copy.is-on { background: color-mix(in srgb, var(--pos) 30%, #0b0d0c); color: color-mix(in srgb, var(--pos) 22%, #fff); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08); }
-.cpy-dir__opt--counter.is-on { background: color-mix(in srgb, var(--neg) 30%, #0d0b0b); color: color-mix(in srgb, var(--neg) 22%, #fff); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08); }
+.cpy-dir__opt--copy.is-on { background: color-mix(in srgb, var(--pos) 30%, var(--mix-pos-base)); color: color-mix(in srgb, var(--pos) 22%, var(--ink-solid)); box-shadow: inset 0 0 0 1px rgb(var(--ink) / 0.08); }
+.cpy-dir__opt--counter.is-on { background: color-mix(in srgb, var(--neg) 30%, var(--mix-neg-base)); color: color-mix(in srgb, var(--neg) 22%, var(--ink-solid)); box-shadow: inset 0 0 0 1px rgb(var(--ink) / 0.08); }
 
 /* A rule: its name and an info mark, its control; the row is a compact tile. */
 .cpy-rule { padding: 9px 12px; border-radius: 10px; }
@@ -720,10 +720,10 @@
 .cpy-mfoot__note { color: var(--muted); font-size: var(--fs-xs); }
 .cpy-mfoot__err { color: var(--neg); }
 .cpy-mfoot__acts .fx-cta { height: 36px; border-radius: 8px; }
-.cpy-mstart--copy:not(:disabled) { background: color-mix(in srgb, var(--pos) 34%, #0b0d0c); color: color-mix(in srgb, var(--pos) 18%, #fff); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1); }
-.cpy-mstart--counter:not(:disabled) { background: color-mix(in srgb, var(--neg) 34%, #0d0b0b); color: color-mix(in srgb, var(--neg) 18%, #fff); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1); }
-.cpy-mstart--copy:not(:disabled):hover { background: color-mix(in srgb, var(--pos) 46%, #0b0d0c); }
-.cpy-mstart--counter:not(:disabled):hover { background: color-mix(in srgb, var(--neg) 46%, #0d0b0b); }
+.cpy-mstart--copy:not(:disabled) { background: color-mix(in srgb, var(--pos) 34%, var(--mix-pos-base)); color: color-mix(in srgb, var(--pos) 18%, var(--ink-solid)); box-shadow: inset 0 0 0 1px rgb(var(--ink) / 0.1); }
+.cpy-mstart--counter:not(:disabled) { background: color-mix(in srgb, var(--neg) 34%, var(--mix-neg-base)); color: color-mix(in srgb, var(--neg) 18%, var(--ink-solid)); box-shadow: inset 0 0 0 1px rgb(var(--ink) / 0.1); }
+.cpy-mstart--copy:not(:disabled):hover { background: color-mix(in srgb, var(--pos) 46%, var(--mix-pos-base)); }
+.cpy-mstart--counter:not(:disabled):hover { background: color-mix(in srgb, var(--neg) 46%, var(--mix-neg-base)); }
 @media (max-width: 860px) {
   .cpy-mgrid { grid-template-columns: minmax(0, 1fr); }
   .cpy-mside { position: static; }
@@ -751,7 +751,7 @@
 .cpy-whale {
   /* Its shape is the whale's above the surface (set by DotWhale), so the whale fills it at any width. */
   position: relative; z-index: 0; align-self: end; max-height: 344px; color: #e9e9ea;
-  background: radial-gradient(55% 50% at 52% 42%, rgba(255, 255, 255, 0.06), transparent 70%);
+  background: radial-gradient(55% 50% at 52% 42%, rgb(var(--ink) / 0.06), transparent 70%);
 }
 /* Out of flow (its last size never holds the box open), taller than the box by the body
    under water, and faded at its sides. */

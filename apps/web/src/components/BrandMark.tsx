@@ -23,7 +23,7 @@ export function BrandMark({ size = 20 }: { size?: number }) {
           width={W}
           height={H}
           rx={1.5}
-          fill={ROWS[i] === 2 ? '#00b481' : '#f4f4f4'}
+          fill={ROWS[i] === 2 ? '#00b481' : 'var(--brand-ink, #f4f4f4)'}
         />
       ))}
     </svg>

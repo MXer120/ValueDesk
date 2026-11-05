@@ -20,7 +20,7 @@
   display: grid; place-items: center; width: 24px; height: 24px; min-height: 0; padding: 0; border: 0; border-radius: 6px;
   background: none; color: var(--muted); cursor: pointer;
 }
-.st-refresh:hover:not(:disabled) { background: rgba(255, 255, 255, 0.08); color: var(--text); }
+.st-refresh:hover:not(:disabled) { background: rgb(var(--ink) / 0.08); color: var(--text); }
 .st-refresh:disabled { opacity: 0.4; cursor: default; }
 
 /* The headline: the state's icon, what it is, which services, when checked. The
@@ -47,7 +47,7 @@
 
 /* The services. */
 .st-list { margin: 0; padding: var(--sp-1) var(--sp-4) 0; list-style: none; border-top: 1px solid var(--panel-line); }
-.st-svc { padding: 16px 0; border-top: 1px solid rgba(255, 255, 255, 0.07); }
+.st-svc { padding: 16px 0; border-top: 1px solid rgb(var(--ink) / 0.07); }
 .st-svc:first-child { border-top-color: transparent; }
 .st-svc__head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; }
 .st-svc__name { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
@@ -68,7 +68,7 @@
 .st-bar.is-degraded { background: var(--warn); }
 .st-bar.is-partial { background: color-mix(in srgb, var(--warn) 55%, var(--neg)); }
 .st-bar.is-down { background: var(--neg); }
-.st-bar.is-nodata { background: rgba(255, 255, 255, 0.1); }
+.st-bar.is-nodata { background: rgb(var(--ink) / 0.1); }
 .st-bar.is-maintenance { background: var(--st-maint); }
 .st-bars .st-bar:hover,
 .st-bars .st-bar.is-active { opacity: 0.7; }
@@ -147,7 +147,7 @@
 .st-timeline { display: flex; flex-direction: column; margin: 0 0 0 21px; padding: 0; list-style: none; font-size: 13px; line-height: 1.5; }
 .st-timeline li {
   position: relative; display: grid; grid-template-columns: 1fr auto; gap: 0 12px;
-  padding: 0 0 12px 15px; border-left: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 0 0 12px 15px; border-left: 1px solid rgb(var(--ink) / 0.1);
 }
 .st-timeline li:last-child { padding-bottom: 0; border-left-color: transparent; }
 .st-timeline li::before {
@@ -161,14 +161,14 @@
 
 /* Past: one slim row each, opened in place. */
 .st-rows { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; list-style: none; }
-.st-row { border-radius: var(--radius-md); background: rgba(255, 255, 255, 0.025); }
-.st-row.is-open { background: rgba(255, 255, 255, 0.045); box-shadow: var(--depth-1); }
+.st-row { border-radius: var(--radius-md); background: rgb(var(--ink) / 0.025); }
+.st-row.is-open { background: rgb(var(--ink) / 0.045); box-shadow: var(--depth-1); }
 .st-row__bar {
   display: grid; grid-template-columns: 8px minmax(0, 1fr) auto auto auto 12px; align-items: center; gap: 12px;
   width: 100%; min-height: 34px; padding: 0 12px; border: 0; border-radius: inherit; background: none;
   color: var(--muted); font: inherit; font-size: 12px; text-align: left; cursor: pointer;
 }
-.st-row__bar:hover { background: rgba(255, 255, 255, 0.04); }
+.st-row__bar:hover { background: rgb(var(--ink) / 0.04); }
 .st-row__bar:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 .st-row__title { overflow: hidden; color: var(--text); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
 .st-row__kind { color: var(--dim); }

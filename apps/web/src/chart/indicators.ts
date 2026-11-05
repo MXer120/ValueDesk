@@ -13,6 +13,7 @@
  */
 import type { DeepPartial, IndicatorStyle, SmoothLineStyle } from 'klinecharts';
 import { T } from './theme';
+import { isLight, onTheme } from '../theme';
 
 export interface IndicatorLineSpec {
   color?: string;
@@ -50,10 +51,15 @@ export const DEFAULT_INDICATORS: IndicatorSpec[] = [{ name: 'VOL', calcParams: [
 
 /** Line colours the library falls back to - the theme's warm ramp. */
 export const LINE_COLORS = [T.line1, T.line2, T.line3, T.line4, T.line5];
+onTheme(() => { LINE_COLORS.splice(0, LINE_COLORS.length, T.line1, T.line2, T.line3, T.line4, T.line5); });
 
 /** Bar colours, the candle colours at 60% (theme.ts POS_FILL / NEG_FILL). */
-export const BAR_UP = 'rgba(0, 180, 129, 0.6)';
-export const BAR_DOWN = 'rgba(239, 74, 60, 0.6)';
+export let BAR_UP = isLight() ? 'rgba(0, 133, 95, 0.55)' : 'rgba(0, 180, 129, 0.6)';
+export let BAR_DOWN = isLight() ? 'rgba(212, 55, 43, 0.55)' : 'rgba(239, 74, 60, 0.6)';
+onTheme(() => {
+  BAR_UP = isLight() ? 'rgba(0, 133, 95, 0.55)' : 'rgba(0, 180, 129, 0.6)';
+  BAR_DOWN = isLight() ? 'rgba(212, 55, 43, 0.55)' : 'rgba(239, 74, 60, 0.6)';
+});
 
 /** Colours offered in the settings dialog, before the free picker. */
 export const SWATCHES = [

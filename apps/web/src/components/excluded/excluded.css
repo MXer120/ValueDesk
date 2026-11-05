@@ -41,7 +41,7 @@
 .ex-stat {
   display: flex; flex-direction: column; gap: 4px; min-width: 0;
   padding: 12px 14px; border-radius: var(--radius-tile); box-shadow: var(--depth-1);
-  background: rgba(255, 255, 255, 0.02);
+  background: rgb(var(--ink) / 0.02);
 }
 .ex-stat__label { color: var(--dim); font-size: 11px; font-weight: 500; letter-spacing: 0.02em; text-transform: uppercase; }
 .ex-stat__value { display: flex; align-items: center; min-height: 26px; color: var(--text); font-family: var(--font-num); font-size: 20px; font-weight: 600; line-height: 1.2; }
@@ -53,7 +53,7 @@
 
 .ex-chip {
   display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px 2px 6px;
-  border-radius: var(--radius-full); background: rgba(255, 255, 255, 0.07);
+  border-radius: var(--radius-full); background: rgb(var(--ink) / 0.07);
   color: var(--muted); font-family: var(--font-ui, inherit); font-size: 11px; font-weight: 500; line-height: 18px; white-space: nowrap;
 }
 .ex-chip svg { fill: none; stroke: currentColor; stroke-width: 1.3; stroke-linecap: round; stroke-linejoin: round; }
@@ -67,10 +67,10 @@
 .ex-rows { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 14px var(--sp-4) var(--sp-4); list-style: none; }
 .ex-row {
   border-radius: var(--radius-tile); box-shadow: var(--depth-1);
-  background: rgba(255, 255, 255, 0.015);
+  background: rgb(var(--ink) / 0.015);
   transition: background .12s;
 }
-.ex-row:hover, .ex-row.is-open { background: rgba(255, 255, 255, 0.04); }
+.ex-row:hover, .ex-row.is-open { background: rgb(var(--ink) / 0.04); }
 .ex-row__bar {
   display: grid; grid-template-columns: auto minmax(0, 1fr) 118px 230px 14px; align-items: center; gap: 14px;
   width: 100%; min-height: 0; padding: 10px 14px 10px 12px; border: 0; border-radius: inherit;
@@ -119,7 +119,7 @@
 .ex-coins { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
 .ex-view .ex-coins li {
   display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px 2px 4px;
-  border-radius: var(--radius-full); background: rgba(255, 255, 255, 0.05); color: var(--muted); font-size: 11px;
+  border-radius: var(--radius-full); background: rgb(var(--ink) / 0.05); color: var(--muted); font-size: 11px;
 }
 .ex-coins li b { font-family: var(--font-num); font-weight: 550; }
 .ex-coins li.is-long b { color: var(--pos); }

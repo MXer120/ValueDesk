@@ -274,9 +274,9 @@
 .kc-rail-btn.active,
 .kc-rail-btn.active:hover {
   color: #fff;
-  background: rgba(255, 255, 255, 0.16);
+  background: rgb(var(--ink) / 0.16);
   border-color: transparent;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16);
+  box-shadow: inset 0 0 0 1px rgb(var(--ink) / 0.16);
 }
 
 .kc-rail-btn:disabled {
@@ -434,7 +434,7 @@
 .kc-rail-popup button:hover .kc-rail-popup-ico { color: var(--text); }
 .kc-rail-popup button:focus-visible { outline: 2px solid var(--focus); outline-offset: -1px; }
 .kc-rail-popup button.active,
-.kc-rail-popup button.active:hover { color: #fff; background-color: rgba(255, 255, 255, 0.12); box-shadow: none; }
+.kc-rail-popup button.active:hover { color: #fff; background-color: rgb(var(--ink) / 0.12); box-shadow: none; }
 .kc-rail-popup button.active .kc-rail-popup-ico { color: #fff; }
 
 /* --- narrow panels --------------------------------------------------------- */

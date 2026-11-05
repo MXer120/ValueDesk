@@ -23,6 +23,7 @@ import type { Eip1193Provider } from './wallet';
 import { AccountController } from './components/account/AccountController';
 import { UnlockDialog } from './components/account/UnlockDialog';
 import { AccountSetup } from './setup/AccountSetup';
+import { OnboardingHost, useOnboardingGate } from './onboarding/OnboardingHost';
 import { IndexPrompt } from './components/IndexPrompt';
 import { DevPanel, devPanelShown } from './components/dev/DevPanel';
 import { goToWallet } from './components/account/actions';
@@ -314,6 +315,8 @@ function AppShell() {
    *   - `wallet:disconnect` from the navbar's address menu.
    */
   useWalletBridge({ address, setAddress, setProvider });
+  /* First signup (onboarding/): a new wallet's username, the features, dark or light. */
+  const onboarding = useOnboardingGate(address);
 
   const [refreshToken, setRefreshToken] = useState(0);
   // Surfaced from the tab content up to the tab label, e.g. "Positions (2)".
@@ -687,7 +690,8 @@ function AppShell() {
           <UnlockDialog />
         </Guarded>
         <Guarded name="Account setup">
-          <AccountSetup address={address} />
+          <AccountSetup address={address} hold={onboarding.holdSetup} />
+          <OnboardingHost gate={onboarding} address={address} provider={provider} onFinish={() => { setTab('trade'); }} />
         </Guarded>
         <Guarded name="Dev panel">
           {devPanelShown(address) && <DevPanel address={address} engine={engine} />}

@@ -1,0 +1,186 @@
+/* The light theme: the design tokens of styles.css restated, under data-theme on <html> (theme.ts).
+   Same monotone language as dark: no brand hue, hierarchy by level, hues only where they mean
+   something (money, attention). `--ink` is what every hairline and tint in the sheets is made of
+   (rgb(var(--ink) / a)), so they turn with the page.
+
+   Contrast on the white panel, measured: text 18.9:1, muted 7.0:1, dim 4.5:1, pos 4.6:1, neg 4.6:1,
+   warn 4.6:1. Green and red are a step darker than dark's, which sit under 3:1 on white. */
+html[data-theme='light'] {
+  --ink: 0 0 0;
+  --ink-solid: #000;
+  --brand-ink: #141414;
+  --scheme: light;
+  --mix-pos-base: #ffffff;
+  --mix-neg-base: #ffffff;
+
+  --bg: #efefed;
+  --bg-panel: #ffffff;
+  --bg-elevated: #f3f3f1;
+  --bg-hover: #e8e8e6;
+  --bg-control: #dedede;
+
+  --line: #c9c9c7;
+  --panel-line: rgba(0, 0, 0, 0.09);
+  --line-soft: rgba(0, 0, 0, 0.09);
+  --line-strong: rgba(0, 0, 0, 0.2);
+  --button-border: linear-gradient(180deg, #00000024 0%, #00000014 100%);
+  --tint: rgba(0, 0, 0, 0.035);
+
+  --text: #141414;
+  --muted: #565656;
+  --dim: #757575;
+  --disabled: #b0b0b0;
+  --pos: #00855f;
+  --neg: #d4372b;
+  --pos-deep: #0f6e74;
+  --neg-deep: #a01e50;
+  --warn: #a86400;
+  --pos-dim: rgba(0, 133, 95, 0.55);
+  --neg-dim: rgba(212, 55, 43, 0.55);
+  --bid-bg: rgba(0, 133, 95, 0.13);
+  --ask-bg: rgba(212, 55, 43, 0.12);
+
+  --accent: #1f1f1f;
+  --accent-hover: #000000;
+  --accent-active: #333333;
+  --accent-text: #ffffff;
+  --accent-secondary: #d6d6d4;
+  --focus: #000000;
+
+  --shadow-pop: 0 8px 24px rgba(0, 0, 0, 0.13);
+  --shadow-modal: 0 16px 48px rgba(0, 0, 0, 0.18);
+  --depth-1: 0 0 0 1px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.05);
+  --depth-2: 0 0 0 1px rgba(0, 0, 0, 0.07), 0 2px 6px rgba(0, 0, 0, 0.06);
+  --depth-3: 0 0 0 1px rgba(0, 0, 0, 0.08), 0 8px 22px rgba(0, 0, 0, 0.13);
+  --shadow-text: 0 0 2px rgba(255, 255, 255, 0.9);
+
+  --tint-strong: rgba(0, 0, 0, 0.06);
+  --scrim: rgba(30, 30, 32, 0.22);
+  --scrim-solid: rgba(240, 240, 238, 0.82);
+  --sheen: rgba(255, 255, 255, 0.16);
+}
+
+/* The dialog scrim only dims (appearance.css): lighter over a light page. */
+html[data-theme='light'] .modal-scrim,
+html[data-theme='light'] .cdlg-scrim { background: rgba(30, 30, 32, 0.22); }
+
+/* The floating surfaces' shadow is a lighter one, and their edge a hairline of ink. */
+html[data-theme='light'] .menu-popup,
+html[data-theme='light'] .modal,
+html[data-theme='light'] .cp,
+html[data-theme='light'] .cdlg,
+html[data-theme='light'] .oe-pop,
+html[data-theme='light'] .acctf-pop,
+html[data-theme='light'] .acct-hc,
+html[data-theme='light'] .kc-rail-popup,
+html[data-theme='light'] .sfoot-pop,
+html[data-theme='light'] .navnotes__panel,
+html[data-theme='light'] .psel__pop,
+html[data-theme='light'] .navaddr__menu,
+html[data-theme='light'] .privacy__menu,
+html[data-theme='light'] .symbolsearch,
+html[data-theme='light'] .toast {
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.16), 0 1px 0 rgba(255, 255, 255, 0.5) inset;
+}
+
+/* --- what the sheets fix as literal dark colours -----------------------------------------------
+   Kept here, by selector, so dark stays byte for byte what it was. */
+
+/* The rail and the bar. */
+html[data-theme='light'] .side__btn,
+html[data-theme='light'] .side .navicon,
+html[data-theme='light'] .navbar--rail .navlinks a,
+html[data-theme='light'] .navbar--rail .navlinks .navlink--soon,
+html[data-theme='light'] .navbar--rail .navmore__btn,
+html[data-theme='light'] .nav-seg > button { color: var(--muted); }
+html[data-theme='light'] .navbar--rail .navlinks a.active,
+html[data-theme='light'] .navbar--rail .navlinks a[aria-current='page'] { color: var(--text); }
+html[data-theme='light'] .side__btn:hover,
+html[data-theme='light'] .side .navicon:hover:not(:disabled),
+html[data-theme='light'] .nav-seg > button:hover { color: var(--text); }
+html[data-theme='light'] .side__btn.is-raised { background: #fff; color: var(--text); box-shadow: var(--depth-2); }
+html[data-theme='light'] .side__btn.is-raised:hover { background: #f8f8f6; }
+html[data-theme='light'] .nav-seg { background: #e4e4e2; box-shadow: none; }
+html[data-theme='light'] .nav-seg > button.is-on { background: #fff; color: var(--text); box-shadow: var(--depth-1); }
+html[data-theme='light'] .side__btn.side__addr { background: #fff; box-shadow: var(--depth-1); }
+html[data-theme='light'] .side__btn.side__addr[aria-expanded='true'] { background: #f3f3f1; }
+html[data-theme='light'] .toasts.is-docked .toast { background: color-mix(in srgb, var(--tone, var(--text)) 9%, rgba(255, 255, 255, 0.94)); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12); }
+html[data-theme='light'] .side__money { background: color-mix(in srgb, var(--tone) 10%, rgba(255, 255, 255, 0.96)); box-shadow: 0 10px 28px rgba(0, 0, 0, 0.14); }
+
+/* The market tabs and header. */
+html[data-theme='light'] .mkt-favchip { background: #fff; box-shadow: var(--depth-1); }
+html[data-theme='light'] .mkt-favchip:hover { background: #f8f8f6; }
+html[data-theme='light'] .mkt-favchip.is-active { background: #fff; box-shadow: 0 0 0 1.5px rgba(0, 0, 0, 0.22), 0 2px 6px rgba(0, 0, 0, 0.08); }
+html[data-theme='light'] .mkt-favchip__icon,
+html[data-theme='light'] .mkt-favchip__coin { background: #f0f0ee; }
+html[data-theme='light'] .mkt-favchip__t small,
+html[data-theme='light'] .mkt-favchip__x,
+html[data-theme='light'] .mkt-header--info .mkt-stat-l { color: var(--dim); }
+
+/* The order book's depth ramp: the same two hues, at the pale end. */
+html[data-theme='light'] {
+  --mkt-bid-lo: #d7efe6;
+  --mkt-bid-hi: #79c9ad;
+  --mkt-ask-lo: #f9dfdc;
+  --mkt-ask-hi: #ec9a92;
+}
+html[data-theme='light'] .mkt-book,
+html[data-theme='light'] .mkt-book-panel {
+  --mkt-bid-lo: #d7efe6;
+  --mkt-bid-hi: #79c9ad;
+  --mkt-ask-lo: #f9dfdc;
+  --mkt-ask-hi: #ec9a92;
+}
+
+/* The order ticket. */
+html[data-theme='light'] .oe-levbtn,
+html[data-theme='light'] .oe-marginbtn { background-color: var(--bg-control); }
+html[data-theme='light'] .oe-slider .oe-pctbox { background: #e6e6e4; }
+html[data-theme='light'] .oe .oe-switch input { background: #cfcfcd; }
+html[data-theme='light'] .oe .oe-switch input:checked { background: var(--oe-tint, var(--pos)); }
+
+/* Chart chrome. */
+html[data-theme='light'] .panel.kc-panel { --kc-ink: #2a2a2a; }
+html[data-theme='light'] .kc-toolbar .kc-tb-ico.on:hover,
+html[data-theme='light'] .kc-rail-popup button.active:hover,
+html[data-theme='light'] .kc-rail-popup button.active .kc-rail-popup-ico { color: #000; }
+html[data-theme='light'] .kc-newsmark--macro { color: #3b4cc0; }
+
+/* A go button's hover: the darker end, as dark's is the lighter end. */
+html[data-theme='light'] .dlg-btn.is-go:hover:not(:disabled),
+html[data-theme='light'] .stg__btn.is-go:hover:not(:disabled),
+html[data-theme='light'] .oe-confirm:hover:not(:disabled) { background: #000; }
+html[data-theme='light'] .fx-cta:hover:not(:disabled) { filter: brightness(1.5); }
+
+/* Settings' inner pane lifts towards white already; no warm corner. */
+html[data-theme='light'] .stg__links > a:hover .stg__linkrow b { color: #000; }
+html[data-theme='light'] .stg__slider input { accent-color: #141414; }
+html[data-theme='light'] select option,
+html[data-theme='light'] .dlg .dlg-select option,
+html[data-theme='light'] .stg__select option,
+html[data-theme='light'] select.algo-sf__pick option { background: #fff; }
+
+/* Copy page. */
+html[data-theme='light'] .cpy { --cpy-surface-2: #f0f0ee; }
+
+/* The liquidation heatmap's own black field goes white with the rest. */
+html[data-theme='light'] .lqm-hist { background: #fff; }
+html[data-theme='light'] .lqm-hist2-note { background: rgba(255, 255, 255, 0.82); color: var(--text); }
+html[data-theme='light'] .lqm-ring { outline-color: #000; }
+html[data-theme='light'] .lqm-ln.is-long { background: #d4372b; }
+html[data-theme='light'] .lqm-ln.is-short { background: #00855f; }
+html[data-theme='light'] .lqm-cum.is-long { stroke: #d4372b; }
+html[data-theme='light'] .lqm-cum.is-short { stroke: #00855f; }
+
+/* Soft pills. */
+html[data-theme='light'] .mk-star.is-on,
+html[data-theme='light'] .mkt-favchip__pin:hover { color: #b98900; }
+
+/* The ticket's leverage and margin buttons, the market tabs' coin well, the hero whale, the treemap. */
+html[data-theme='light'] .panel.oe .oe-mode__btn { background-color: var(--bg-control); color: var(--text); }
+html[data-theme='light'] .mkt-favchip__ic { background: #f0f0ee; }
+html[data-theme='light'] .cpy-whale { color: #2c2c2e; }
+html[data-theme='light'] .mk-heat__tile { color: var(--text); }
+
+/* The heatmap's scale, over the chart. */
+html[data-theme='light'] .lqm-hist-scale { background: rgba(255, 255, 255, 0.85); }

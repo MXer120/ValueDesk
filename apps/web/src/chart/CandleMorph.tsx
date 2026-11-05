@@ -57,6 +57,7 @@
  */
 import { useEffect, useLayoutEffect, useRef, type RefObject } from 'react';
 import type { Chart as KChart, Coordinate, KLineData, Point } from 'klinecharts';
+import { onTheme } from '../theme';
 import { CANDLE_PANE_ID, DEFAULT_BAR_SPACE, DEFAULT_OFFSET_RIGHT, NUM_FAMILY, chartStyles } from './theme';
 import {
   candleGeom,
@@ -140,12 +141,16 @@ const TICK_PAD = 11;
 
 const X_AXIS_SIZE = typeof chartStyles.xAxis?.size === 'number' ? chartStyles.xAxis.size : 32;
 
-const BAR = chartStyles.candle?.bar ?? {};
-const PALETTE: Palette = {
-  up: { body: BAR.upColor ?? '#00b481', border: BAR.upBorderColor ?? '#00b481', wick: BAR.upWickColor ?? '#00b481' },
-  down: { body: BAR.downColor ?? '#ef4a3c', border: BAR.downBorderColor ?? '#ef4a3c', wick: BAR.downWickColor ?? '#ef4a3c' },
-  flat: { body: BAR.noChangeColor ?? '#c6b6ba', border: BAR.noChangeBorderColor ?? '#c6b6ba', wick: BAR.noChangeWickColor ?? '#c6b6ba' },
+const paletteNow = (): Palette => {
+  const BAR = chartStyles.candle?.bar ?? {};
+  return {
+    up: { body: BAR.upColor ?? '#00b481', border: BAR.upBorderColor ?? '#00b481', wick: BAR.upWickColor ?? '#00b481' },
+    down: { body: BAR.downColor ?? '#ef4a3c', border: BAR.downBorderColor ?? '#ef4a3c', wick: BAR.downWickColor ?? '#ef4a3c' },
+    flat: { body: BAR.noChangeColor ?? '#c6b6ba', border: BAR.noChangeBorderColor ?? '#c6b6ba', wick: BAR.noChangeWickColor ?? '#c6b6ba' },
+  };
 };
+const PALETTE: Palette = paletteNow();
+onTheme(() => { Object.assign(PALETTE, paletteNow()); });
 
 interface Rect {
   left: number;

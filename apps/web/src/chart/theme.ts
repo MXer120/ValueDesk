@@ -23,9 +23,10 @@ import type {
 } from 'klinecharts';
 import { compactNumber } from './volumeAxis';
 import { getNumSeps, localize } from '../numStyle';
+import { isLight, onTheme } from '../theme';
 
 /** Values copied from :root in web/src/styles.css. */
-export const T = {
+const DARK = {
   bg: '#141310', // --bg, the chart surface
   panel: '#1b1a14', // --bg-panel
   elevated: '#2a2620', // --bg-elevated
@@ -74,7 +75,38 @@ export const T = {
   canvasText: '#dbdbdb',
   canvasMuted: '#b8b8b8',
   canvasDim: '#797979',
-} as const;
+};
+
+type Palette = Record<keyof typeof DARK, string>;
+
+/** The light theme's, from theme-light.css; the ramp below is the same idea on white. */
+const LIGHT: Palette = {
+  bg: '#ffffff', // --bg-panel: the chart surface is a white card there
+  panel: '#ffffff',
+  elevated: '#f3f3f1',
+  control: '#dedede',
+  text: '#141414',
+  muted: '#565656',
+  dim: '#757575',
+  pos: '#00855f',
+  neg: '#d4372b',
+  accent: '#a86400',
+  grid: '#ececea',
+  line1: '#b06a00',
+  line2: '#565656',
+  line3: '#b8562a',
+  line4: '#141414',
+  line5: '#8a8a8a',
+  canvasText: '#2a2a2a',
+  canvasMuted: '#5c5c5c',
+  canvasDim: '#8c8c8c',
+};
+
+/**
+ * The colours in force. One object, changed in place when the theme changes: everything reads
+ * `T.x` when it paints, and what was built from it at load (chartStyles below) is rebuilt too.
+ */
+export const T: Palette = { ...(isLight() ? LIGHT : DARK) };
 
 /** Matches the body font stack in styles.css. Canvas parses the CSS shorthand. */
 export const FAMILY =
@@ -134,8 +166,9 @@ export const AXIS_FONT_WEIGHT = 400;
 const AXIS_LABEL_MARGIN_END = 7;
 
 /** Volume/histogram fills: the candle colours at ~60% so bars never shout. */
-const POS_FILL = 'rgba(0, 180, 129, 0.6)';
-const NEG_FILL = 'rgba(239, 74, 60, 0.6)';
+/** A #rrggbb at an alpha. */
+const alpha = (hex: string, a: number): string =>
+  `rgba(${parseInt(hex.slice(1, 3), 16)}, ${parseInt(hex.slice(3, 5), 16)}, ${parseInt(hex.slice(5, 7), 16)}, ${a})`;
 
 export const CANDLE_PANE_ID = 'candle_pane';
 
@@ -170,10 +203,11 @@ export const DEFAULT_BAR_SPACE = 6;
  */
 export const DEFAULT_OFFSET_RIGHT = 80;
 
-/** Text badge sitting on a --pos/--neg background: near-black, not white. */
-const ON_ACCENT = T.bg;
-
-export const chartStyles: DeepPartial<Styles> = {
+/** Everything klinecharts paints, from the colours in force. */
+const buildStyles = (): DeepPartial<Styles> => {
+  /** Text badge sitting on a --pos/--neg background: near-black, not white. */
+  const ON_ACCENT = T.bg;
+  return {
   // Off by default (the owner's call): the candles on the plain panel, no lines behind them.
   grid: {
     show: false,
@@ -241,7 +275,7 @@ export const chartStyles: DeepPartial<Styles> = {
            does not. Horizontal padding stays 4 — the badge's width was never
            the complaint. */
         text: {
-          color: T.text,
+          color: isLight() ? '#ffffff' : T.text,
           family: NUM_FAMILY,
           size: AXIS_FONT_SIZE,
           weight: 500,
@@ -275,8 +309,8 @@ export const chartStyles: DeepPartial<Styles> = {
   },
   indicator: {
     // Flat counts as up here too (volume bars follow their candle).
-    ohlc: { upColor: POS_FILL, downColor: NEG_FILL, noChangeColor: POS_FILL },
-    bars: [{ style: 'fill', upColor: POS_FILL, downColor: NEG_FILL, noChangeColor: POS_FILL }],
+    ohlc: { upColor: alpha(T.pos, 0.6), downColor: alpha(T.neg, 0.6), noChangeColor: alpha(T.pos, 0.6) },
+    bars: [{ style: 'fill', upColor: alpha(T.pos, 0.6), downColor: alpha(T.neg, 0.6), noChangeColor: alpha(T.pos, 0.6) }],
     lines: [
       { color: T.line1 },
       { color: T.line2 },
@@ -284,7 +318,7 @@ export const chartStyles: DeepPartial<Styles> = {
       { color: T.line4 },
       { color: T.line5 },
     ],
-    circles: [{ style: 'fill', upColor: POS_FILL, downColor: NEG_FILL, noChangeColor: POS_FILL }],
+    circles: [{ style: 'fill', upColor: alpha(T.pos, 0.6), downColor: alpha(T.neg, 0.6), noChangeColor: alpha(T.pos, 0.6) }],
     /* OFF on the canvas. The newest value of each study in its own pane is
        tagged on that pane's scale by the DOM legend layer instead
        (chart/IndicatorLegend.tsx): the library paints every tag with one text
@@ -344,7 +378,7 @@ export const chartStyles: DeepPartial<Styles> = {
       marginEnd: AXIS_LABEL_MARGIN_END,
     },
   },
-  separator: { size: 1, color: T.grid, fill: true, activeBackgroundColor: 'rgba(255, 181, 71, 0.14)' },
+  separator: { size: 1, color: T.grid, fill: true, activeBackgroundColor: alpha(T.accent, 0.14) },
   crosshair: {
     horizontal: {
       line: { color: T.dim },
@@ -375,21 +409,47 @@ export const chartStyles: DeepPartial<Styles> = {
        otherwise appear on this canvas the moment a drawing is hovered. */
     point: {
       color: T.accent,
-      borderColor: 'rgba(255, 181, 71, 0.35)',
+      borderColor: alpha(T.accent, 0.35),
       activeColor: T.accent,
-      activeBorderColor: 'rgba(255, 181, 71, 0.35)',
+      activeBorderColor: alpha(T.accent, 0.35),
     },
     line: { color: T.accent },
-    rect: { color: 'rgba(255, 181, 71, 0.14)', borderColor: T.accent },
+    rect: { color: alpha(T.accent, 0.14), borderColor: T.accent },
     polygon: { color: T.accent, borderColor: T.accent },
-    circle: { color: 'rgba(255, 181, 71, 0.14)', borderColor: T.accent },
+    circle: { color: alpha(T.accent, 0.14), borderColor: T.accent },
     arc: { color: T.accent },
     /* NUM_FAMILY: everything an overlay prints is a price — the tag on a price
        line, the levels down a retracement — so it belongs to the numeral half
        of the type split like the axis it is read against. */
     text: { color: ON_ACCENT, family: NUM_FAMILY, size: 12, weight: 400, backgroundColor: T.accent, borderColor: T.accent },
   },
+  };
 };
+
+/** The one styles object every chart starts from; changed in place when the theme changes. */
+export const chartStyles: DeepPartial<Styles> = buildStyles();
+
+function assignDeep(to: Record<string, unknown>, from: Record<string, unknown>): void {
+  for (const [k, v] of Object.entries(from)) {
+    const have = to[k];
+    if (v && typeof v === 'object' && !Array.isArray(v) && have && typeof have === 'object') assignDeep(have as Record<string, unknown>, v as Record<string, unknown>);
+    else to[k] = v;
+  }
+}
+
+/* First in line: the listeners below (a chart's setStyles) find the new colours in place. */
+onTheme(() => {
+  Object.assign(T, isLight() ? LIGHT : DARK);
+  assignDeep(chartStyles as Record<string, unknown>, buildStyles() as Record<string, unknown>);
+});
+
+/** Repaint a live chart when the theme changes: the shared styles, then whatever it lays on top. Returns the way to stop. */
+export function followTheme(chart: { setStyles: (s: DeepPartial<Styles>) => void }, extra?: () => void): () => void {
+  return onTheme(() => {
+    chart.setStyles(chartStyles);
+    extra?.();
+  });
+}
 
 /**
  * Name of our x-axis behaviour. Registered globally by name, applied per chart

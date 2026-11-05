@@ -8,6 +8,7 @@
  * public site never does - its switches (trading on and off, keys, the
  * indexer) are tools, not part of the product.
  */
+import { openOnboarding } from '../../onboarding/OnboardingHost';
 import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { createPortal } from 'react-dom';
 import type { Engine } from '../../api';
@@ -243,6 +244,7 @@ export function DevPanel({ address, engine }: { address: string | null; engine: 
           <div className="devp__body">
             <p className="devp__sec">Sheets</p>
             <button type="button" className="devp__btn" onClick={() => openSetup(0)}>Account setup</button>
+            <button type="button" className="devp__btn" title="The first-signup flow, from its first step. Nothing is stored for a username this wallet already has." onClick={() => { if (address) openOnboarding('signup'); else openConnectDialog(); }}>First signup</button>
             <div className="devp__row">
               {(['History', 'Layout', 'Device', 'Ready'] as const).map((label, i) => (
                 <button key={label} type="button" className="devp__mini" onClick={() => openSetup(i as 0 | 1 | 2 | 3)}>{label}</button>

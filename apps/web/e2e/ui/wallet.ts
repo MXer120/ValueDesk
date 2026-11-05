@@ -31,13 +31,14 @@ import type { BrowserContext, Page } from 'playwright-core';
 import { generatePrivateKey } from 'viem/accounts';
 import { createKeyProvider, type KeyProvider, type ProviderEvent, type TypedDataSeen } from '../live/provider';
 
-export type Signable = 'trading-key' | 'builder' | 'site-terms' | 'copy-terms' | 'copy-sign-in' | 'copy-key' | 'algo';
-export const SIGNABLE: readonly Signable[] = ['trading-key', 'builder', 'site-terms', 'copy-terms', 'copy-sign-in', 'copy-key', 'algo'];
+export type Signable = 'trading-key' | 'builder' | 'site-terms' | 'copy-terms' | 'copy-sign-in' | 'copy-key' | 'algo' | 'username';
+export const SIGNABLE: readonly Signable[] = ['trading-key', 'builder', 'site-terms', 'copy-terms', 'copy-sign-in', 'copy-key', 'algo', 'username'];
 
 /** Which of the allowed signatures this typed data is, or null. */
 export function signableOf(td: Pick<TypedDataSeen, 'primaryType' | 'message'>): Signable | null {
   if (td.primaryType === 'UserSignedAddAPIKeyAction') return 'trading-key';
   if (td.primaryType === 'ApproveBuilderFeeAction') return 'builder';
+  if (td.primaryType === 'UsernameClaim') return 'username';
   if (td.primaryType === 'CopyRequest') {
     const action = (td.message as { action?: unknown }).action;
     if (action === 'accept-site-terms') return 'site-terms';

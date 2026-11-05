@@ -29,6 +29,8 @@ import { loadViewerGeo } from './legal/geo';
 import { startAnalytics } from './analytics/usage';
 import { startAttention } from './attention';
 import './styles.css';
+import './theme-light.css';
+import './theme';
 import { useNumStyle } from './numStyle';
 
 // beta.valuedesk.so (VITE_CHANNEL=beta, deploy/vercel/beta.settings): the beta list's door before the app

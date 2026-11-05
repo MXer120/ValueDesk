@@ -10,11 +10,11 @@
 .mk {
   --mk-ctl-h: 28px;
   --mk-ctl-r: 6px;
-  --mk-ctl-bg: rgba(255, 255, 255, 0.04);
-  --mk-ctl-bg-on: rgba(255, 255, 255, 0.075);
-  --mk-ctl-edge: rgba(255, 255, 255, 0.08);
-  --mk-ctl-edge-on: rgba(255, 255, 255, 0.16);
-  --mk-tile: rgba(255, 255, 255, 0.03);
+  --mk-ctl-bg: rgb(var(--ink) / 0.04);
+  --mk-ctl-bg-on: rgb(var(--ink) / 0.075);
+  --mk-ctl-edge: rgb(var(--ink) / 0.08);
+  --mk-ctl-edge-on: rgb(var(--ink) / 0.16);
+  --mk-tile: rgb(var(--ink) / 0.03);
   max-width: 1720px;
   width: 100%;
   margin: 0 auto;
@@ -79,9 +79,9 @@
   font: inherit; font-size: var(--fs-xs); font-weight: 600; white-space: nowrap; cursor: pointer;
   box-shadow: inset 0 0 0 1px var(--mk-ctl-edge); transition: background 140ms;
 }
-.mk-btn:hover { background: rgba(255, 255, 255, 0.11); }
-.mk-btn--trade { background: color-mix(in srgb, var(--pos) 34%, #0b0d0c); color: color-mix(in srgb, var(--pos) 18%, #fff); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1); }
-.mk-btn--trade:hover { background: color-mix(in srgb, var(--pos) 46%, #0b0d0c); }
+.mk-btn:hover { background: rgb(var(--ink) / 0.11); }
+.mk-btn--trade { background: color-mix(in srgb, var(--pos) 34%, var(--mix-pos-base)); color: color-mix(in srgb, var(--pos) 18%, var(--ink-solid)); box-shadow: inset 0 0 0 1px rgb(var(--ink) / 0.1); }
+.mk-btn--trade:hover { background: color-mix(in srgb, var(--pos) 46%, var(--mix-pos-base)); }
 .mk-btn--sm { height: 24px; padding: 0 10px; border-radius: 6px; font-weight: 500; }
 
 .mk-feat__tiles { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; margin: 0; }
@@ -105,7 +105,7 @@
   font: inherit; font-size: var(--fs-xs); font-weight: 500; cursor: pointer; white-space: nowrap;
 }
 .mk-seg > button:hover { color: var(--text); }
-.mk-seg > button.is-on { background: rgba(255, 255, 255, 0.1); color: var(--text); }
+.mk-seg > button.is-on { background: rgb(var(--ink) / 0.1); color: var(--text); }
 
 .mk-star { display: inline-grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--dim); cursor: pointer; }
 .mk-star:hover { color: var(--text); background: var(--mk-ctl-bg); }
@@ -169,13 +169,13 @@
   transition: filter 140ms, box-shadow 140ms;
 }
 .mk-heat__tile:hover { filter: brightness(1.18); z-index: 1; }
-.mk-heat__tile.is-on { box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.85); }
+.mk-heat__tile.is-on { box-shadow: inset 0 0 0 2px rgb(var(--ink) / 0.85); }
 .mk-heat__name { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; font-size: var(--fs-micro); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mk-heat__chg { font-family: var(--font-num); font-size: var(--fs-micro); font-weight: 500; opacity: 0.9; font-variant-numeric: tabular-nums; }
 .mk-heat__tile.is-t2 .mk-heat__name { font-size: var(--fs-xs); }
 .mk-heat__tile.is-t3 .mk-heat__name { font-size: var(--fs-base); }
 .mk-heat__tile.is-t3 .mk-heat__chg { font-size: var(--fs-base); font-weight: 600; }
-.mk-heat__sub { color: rgba(255, 255, 255, 0.7); font-family: var(--font-num); font-size: var(--fs-micro); }
+.mk-heat__sub { color: rgb(var(--ink) / 0.7); font-family: var(--font-num); font-size: var(--fs-micro); }
 
 /* Sectors. */
 .mk-sectors { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; }
@@ -236,11 +236,11 @@
 .mk-table th.num > button { flex-direction: row-reverse; width: 100%; justify-content: flex-start; }
 .mk-table th.num { text-align: right; }
 .mk-sort { font-size: 10px; }
-.mk-table td { height: 44px; padding: 0 10px; border-bottom: 1px solid rgba(255, 255, 255, 0.045); white-space: nowrap; }
+.mk-table td { height: 44px; padding: 0 10px; border-bottom: 1px solid rgb(var(--ink) / 0.045); white-space: nowrap; }
 .mk-table td.num { text-align: right; font-family: var(--font-num); font-variant-numeric: tabular-nums; }
 .mk-table tbody tr { cursor: pointer; transition: background 120ms; }
-.mk-table tbody tr:hover { background: rgba(255, 255, 255, 0.03); }
-.mk-table tbody tr.is-on { background: rgba(255, 255, 255, 0.05); }
+.mk-table tbody tr:hover { background: rgb(var(--ink) / 0.03); }
+.mk-table tbody tr.is-on { background: rgb(var(--ink) / 0.05); }
 .mk-table__star { width: 34px; padding-right: 0 !important; }
 .mk-table__act { width: 72px; text-align: right; }
 .mk-mkt { display: inline-flex; align-items: center; gap: 10px; }

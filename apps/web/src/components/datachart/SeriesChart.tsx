@@ -64,6 +64,7 @@ import {
   createDenseYTicks,
   formatBigNumber,
   registerChartAxes,
+  followTheme,
 } from '../../chart/theme';
 import {
   INITIAL_SCALE,
@@ -859,6 +860,7 @@ export function SeriesChart({ series, height = 220, daily = true, span = null, m
     let c: KChart | null = null;
     let ro: ResizeObserver | null = null;
     let unNumStyle: (() => void) | null = null;
+    let unTheme: (() => void) | null = null;
     const pending = frames.current;
     DRAWS.set(ids.right, () => model.current?.right ?? []);
     DRAWS.set(ids.left, () => model.current?.left ?? []);
@@ -892,6 +894,7 @@ export function SeriesChart({ series, height = 220, daily = true, span = null, m
         // The labels are the callers' formats, which read the number format at
         // call time: a change only needs the axis rebuilt and repainted.
         unNumStyle = followNumStyle(ch, () => '');
+        unTheme = followTheme(ch, () => { ch.setStyles(SERIES_STYLES); });
         const measure = (text: string) => lib.utils.calcTextWidth(text, AXIS_FONT_SIZE, AXIS_FONT_WEIGHT, NUM_FAMILY);
         ch.overrideXAxis({
           name: X_AXIS_NAME,
@@ -968,6 +971,7 @@ export function SeriesChart({ series, height = 220, daily = true, span = null, m
       disposed = true;
       ro?.disconnect();
       unNumStyle?.();
+      unTheme?.();
       tween.current?.cancel();
       hold.current?.clear();
       hold.current = null;

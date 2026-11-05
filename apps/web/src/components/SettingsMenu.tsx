@@ -39,6 +39,7 @@ import { NEWS_SOURCES, OUTLETS, logoUrl, useNewsSources, useOutletsOff } from '.
 import { SETTINGS_EVENT, type SettingsSection } from '../settingsBus';
 import { requestDisconnect } from './account/actions';
 import { APPEARANCE_DEFAULT, setAppearance, useAppearance, type Appearance } from '../appearance';
+import { setTheme, useTheme, type Theme } from '../theme';
 import { HelpSection } from '../feedback/HelpSection';
 import { NUM_STYLES, NUM_STYLE_LIST, fmtFixed, fmtNum, setNumStyle, useNumStyle } from '../numStyle';
 import './SettingsMenu.css';
@@ -49,7 +50,7 @@ const Icon = ({ children, size = 18 }: { children: ReactNode; size?: number }) =
 
 type Section = SettingsSection;
 const SECTIONS: Array<{ id: Section; label: string; hint: string; icon: ReactNode }> = [
-  { id: 'appearance', label: 'Appearance', hint: 'Number format, glass look', icon: <><circle cx="10" cy="10" r="6.5" /><path d="M10 3.5a6.5 6.5 0 0 0 0 13Z" fill="currentColor" stroke="none" /></> },
+  { id: 'appearance', label: 'Appearance', hint: 'Dark or light, number format, glass look', icon: <><circle cx="10" cy="10" r="6.5" /><path d="M10 3.5a6.5 6.5 0 0 0 0 13Z" fill="currentColor" stroke="none" /></> },
   { id: 'privacy', label: 'Privacy', hint: 'Hide your figures', icon: <path d="M2.5 10s2.8-5 7.5-5 7.5 5 7.5 5-2.8 5-7.5 5-7.5-5-7.5-5ZM10 12.2a2.2 2.2 0 1 0 0-4.4 2.2 2.2 0 0 0 0 4.4Z" /> },
   { id: 'layout', label: 'Layout', hint: 'Panels on the trade page', icon: <><rect x="3" y="3.5" width="14" height="13" rx="2" /><path d="M9 3.5v13M9 9.5h8" /></> },
   { id: 'security', label: 'Security', hint: 'Trading key, lock', icon: <><rect x="4.5" y="9" width="11" height="8" rx="2" /><path d="M7 9V6.5a3 3 0 0 1 6 0V9" /></> },
@@ -513,14 +514,39 @@ function Colour({ title, line, k }: { title: string; line?: string; k: keyof App
   );
 }
 
+function ThemeChoice() {
+  const theme = useTheme();
+  return (
+    <>
+      <div className="stg__label"><span>Theme</span></div>
+      <div className="stg__choices">
+        {THEMES.map((t) => (
+          <button key={t.id} type="button" className={`stg__choice${theme === t.id ? ' is-on' : ''}`} aria-pressed={theme === t.id} onClick={() => setTheme(t.id)}>
+            <b>{t.label}</b>
+            <small>{t.hint}</small>
+          </button>
+        ))}
+      </div>
+    </>
+  );
+}
+
+const THEMES: ReadonlyArray<{ id: Theme; label: string; hint: string }> = [
+  { id: 'dark', label: 'Dark', hint: 'The default' },
+  { id: 'light', label: 'Light', hint: 'White panels on a soft grey page' },
+];
+
 function AppearanceSection() {
   const a = useAppearance();
+  const theme = useTheme();
   const [copied, setCopied] = useState(false);
   const changed = JSON.stringify(a) !== JSON.stringify(APPEARANCE_DEFAULT);
   return (
     <>
-      <Head title="Appearance" line="How numbers are written, and the glass look of this window and of the trading page if you switch it on there. Changes show at once and stay in this browser." />
+      <Head title="Appearance" line="Dark or light, how numbers are written, and the glass look of this window and of the trading page if you switch it on there. Changes show at once and stay in this browser." />
+      <ThemeChoice />
       <NumberFormatChoice />
+      {theme === 'light' && <p className="stg__note">The glass settings below tune the dark theme; the light theme has its own.</p>}
       <div className="stg__label"><span>This window</span></div>
       <div className="stg__card stg__card--tight">
         <Colour title="Tint" line="The colour over the blurred page" k="tint" />
