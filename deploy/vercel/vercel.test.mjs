@@ -618,7 +618,7 @@ test('writes, a missing secret, the function\'s own path and a stopped instance 
   } finally {
     await origin.close();
   }
-  // A stopped instance: nothing listens. 502 at once (connection refused), and the log
+  // A stopped instance: nothing listens. 502 once the attempts are spent (connection refused), and the log
   // line names neither the secret nor the query.
   const gone = await listen(() => {});
   const port = gone.port;
@@ -627,13 +627,41 @@ test('writes, a missing secret, the function\'s own path and a stopped instance 
     const t0 = Date.now();
     const r = await request(p, '/api/vs/leaderboard?q=0xwallet');
     assert.equal(r.status, 502);
-    assert.ok(Date.now() - t0 < 11_000);
+    assert.ok(Date.now() - t0 < 13_000);
     assert.equal(r.headers['cache-control'], 'no-store');
     const log = errors.join('\n');
     assert.match(log, /\/api\/vs\/leaderboard/);
     assert.doesNotMatch(log, /0xwallet/);
     assert.ok(!log.includes(SECRET));
   });
+});
+
+test('a read answered 502 while the API restarts is asked once more; a write never', async () => {
+  let hits = 0;
+  const posted = [];
+  const origin = await listen((req, res) => {
+    if (req.method === 'POST') { posted.push(req.url); req.resume(); res.writeHead(502); res.end(); return; }
+    hits++;
+    if (hits === 1) { res.writeHead(502); res.end(); return; }
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end('{"ok":true}');
+  });
+  try {
+    await withProxy({ VALUESCAN_ORIGIN_URL: `http://127.0.0.1:${origin.port}`, VALUESCAN_ORIGIN_SECRET: SECRET }, async (p) => {
+      const r = await request(p, '/api/vs/leaderboard');
+      assert.equal(r.status, 200);
+      assert.equal(hits, 2);
+      hits = 1;
+      const again = await request(p, '/api/vs/leaderboard');
+      assert.equal(again.status, 200, 'the origin answers: one ask');
+      assert.equal(hits, 2);
+      const w = await request(p, '/api/copy/v1/x', { method: 'POST', body: '{}' }).catch(() => null);
+      if (w) assert.equal(w.status, 502);
+      assert.equal(posted.length, 1, 'a write reaches the origin once');
+    });
+  } finally {
+    await origin.close();
+  }
 });
 
 test('the origin setting must be https (http only to loopback) and an origin only', () => {

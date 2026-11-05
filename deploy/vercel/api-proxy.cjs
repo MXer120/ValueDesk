@@ -53,9 +53,12 @@
 //     follower. They go out with Cache-Control: no-store (the origin's
 //     own value), and any CDN cache header from the origin is dropped.
 //   - An origin that does not answer (a stopped instance) is a 502 within about 10 s
-//     (two connection attempts of 5 s, like CloudFront), never a hang; the web then
-//     says the index is unavailable. No answer in 30 s: 504. Only a connection that
-//     never stood is retried, so a POST reaches the origin at most once.
+//     (connection attempts of 5 s, and refused ones again every 1.5 s, so a restart of
+//     Caddy passes unseen), never a hang; the web then says the index is unavailable.
+//     No answer in 30 s: 504. Only a connection that never stood is retried, so a POST
+//     reaches the origin at most once - and a GET or HEAD that Caddy answered 502
+//     because the API was restarting past its hold (13 of 79 restarts outlasted the 15 s),
+//     once, as reading twice changes nothing and the function has the time.
 //   - Never logs the secret, a query string, a body or a header; an error line names
 //     the path and the reason only.
 //   - GET /api/edge/geo is answered HERE, never by the origin (so also in a preview, and
@@ -98,7 +101,11 @@ const DROPPED_RESPONSE_HEADERS = new Set(['connection', 'keep-alive', 'proxy-aut
 /** Headers that could make a CDN keep an answer: never on /api/copy/*. */
 const CDN_CACHE_HEADERS = new Set(['cdn-cache-control', 'vercel-cdn-cache-control', 'surrogate-control']);
 const CONNECT_TIMEOUT_MS = 5000;
-const CONNECT_ATTEMPTS = 2;
+/** Connection attempts go on for this long. */
+const CONNECT_BUDGET_MS = 10000;
+const RETRY_WAIT_MS = 1500;
+/** A read that came back 502 this early is asked once more: a second hold of 15 s still ends inside the function's 35 s. */
+const READ_RETRY_BEFORE_MS = 18000;
 const READ_TIMEOUT_MS = 30000;
 const EDGE_MAX_TTL_S = 60;
 /**
@@ -400,13 +407,24 @@ async function handler(req, res) {
   if (body !== undefined) headers['content-length'] = String(body.length);
 
   let upstream;
-  for (let attempt = 1; ; attempt++) {
+  const askedAt = Date.now();
+  let readAgain = method === 'GET' || method === 'HEAD';
+  for (;;) {
     try {
       upstream = (await ask(origin.url, method, url, headers, body)).res;
+      if (upstream.statusCode === 502 && readAgain && Date.now() - askedAt < READ_RETRY_BEFORE_MS) {
+        readAgain = false;
+        upstream.resume();
+        await new Promise((r) => setTimeout(r, RETRY_WAIT_MS));
+        continue;
+      }
       break;
     } catch (e) {
       // Only a connection that never stood is retried: a request may have reached the origin otherwise.
-      if (!e.connected && attempt < CONNECT_ATTEMPTS) continue;
+      if (!e.connected && Date.now() - askedAt < CONNECT_BUDGET_MS) {
+        await new Promise((r) => setTimeout(r, RETRY_WAIT_MS));
+        continue;
+      }
       const code = e.code ?? 'error';
       console.error(`api-proxy: ${method} ${path} failed: ${code}`);
       const timeout = code === 'READ_TIMEOUT';

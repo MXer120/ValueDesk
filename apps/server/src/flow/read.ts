@@ -249,9 +249,12 @@ export async function flowWindow(ask: FlowAsk, now = Date.now()): Promise<FlowWi
   const keep = ask.q ? matcher(s, ask.q) : undefined;
   const { summary, rows } = tableOf(sums, { role: ask.role, side: ask.side, sort: ask.sort, limit: ask.limit, ...(keep ? { keep } : {}) });
   const who = s.partiesById(rows.map((r) => r.pid));
-  const final = settled(ask.to + READY_MS, now);
   const cover = coverOf(s, ask.venues);
   const since = cover.since;
+  const gaps = gapsOf(cover.runs, Math.max(ask.from, since ?? ask.from), Math.min(ask.to, now));
+  // Past by the clock is not final when the recorder was away in it: an answer with a hole stayed cached a day,
+  // at the edge too, also once a backfill had filled it.
+  const final = settled(ask.to + READY_MS, now) && !gaps.length;
   const body: FlowWindow = {
     coin: ask.coin.toUpperCase(),
     from: ask.from,
@@ -263,7 +266,7 @@ export async function flowWindow(ask: FlowAsk, now = Date.now()): Promise<FlowWi
       return { ...r, venue: p?.venue ?? 'hyperliquid', address: p?.address ?? null, key: p?.key ?? String(pid) };
     }),
     markets: markets.map((m) => ({ venue: m.venue, symbol: m.symbol, since: m.firstT })),
-    gaps: gapsOf(cover.runs, Math.max(ask.from, since ?? ask.from), Math.min(ask.to, now)),
+    gaps,
     since,
   };
   answers.set(key, { at: now, final, body });
