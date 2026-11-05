@@ -10,9 +10,9 @@ import '../Portfolio.css';
 import './sodex.css';
 
 /** `.pf` is the scope the Card/Group/Row rules match against; it carries no geometry of its own. */
-export function ProgrammePage({ children, label }: { children: ReactNode; label: string }) {
+export function ProgrammePage({ children, label, className }: { children: ReactNode; label: string; className?: string }) {
   return (
-    <main className="pf sdx" aria-label={label}>
+    <main className={`pf sdx ${className ?? ''}`} aria-label={label}>
       <div className="sdx-col">{children}</div>
     </main>
   );
