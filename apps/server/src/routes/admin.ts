@@ -22,8 +22,8 @@
  *   POST /api/admin/beta/add         {address, label, action}: put a wallet on it, or rename it (signed)
  *   POST /api/admin/beta/remove      {address, action}: take a wallet off it (signed); out within seconds
  *   POST /api/admin/board            the kanban board's cards
- *   POST /api/admin/board/add        {title, detail, area, action}: a planned feature (signed)
- *   POST /api/admin/board/move       {id, status, action}: another column, "reviewed" included (signed)
+ *   POST /api/admin/board/add        {title, detail, area}: a planned feature (the session is enough, owner 2026-11-05)
+ *   POST /api/admin/board/move       {id, status}: another column, "reviewed" included (the session is enough)
  *
  * THE LOCK IS HERE, NOT IN THE PAGE. In this plugin's own hook (after the hosted gate), before any handler:
  *   1. no password set on this server (admin/auth.ts): every route is a 404, as a
@@ -535,7 +535,6 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOptions 
     const area = typeof b.area === 'string' ? b.area.trim() : '';
     if (!title || title.length > BOARD_TITLE_MAX) return reply.code(400).send({ ok: false, error: `the title must be 1 to ${BOARD_TITLE_MAX} characters` });
     if (detail.length > BOARD_DETAIL_MAX) return reply.code(400).send({ ok: false, error: `the detail must be at most ${BOARD_DETAIL_MAX} characters` });
-    if (!signed(req, reply, 'board.add', title, { title, detail, area })) return reply;
     const s = session(req);
     const card = store().addBoardCard({ title, detail, area }, { owner: s.wallet }, now());
     store().audit({ kind: 'board.add', ok: true, wallet: s.wallet, client: clientKey(req.ip), country: countryOf(req), detail: { id: card.id, title } }, now());
@@ -548,7 +547,6 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOptions 
     const status = b.status as BoardStatus;
     if (!Number.isSafeInteger(id) || id <= 0 || !BOARD_STATUSES.includes(status)) return reply.code(400).send({ ok: false, error: 'id and status are required' });
     if (!store().boardCard(id)) return reply.code(404).send({ ok: false, error: 'no such card' });
-    if (!signed(req, reply, 'board.move', `card ${id}`, { id, status })) return reply;
     const s = session(req);
     const card = store().moveBoardCard(id, status, { owner: s.wallet }, {}, now());
     store().audit({ kind: 'board.move', ok: true, wallet: s.wallet, client: clientKey(req.ip), country: countryOf(req), detail: { id, status } }, now());

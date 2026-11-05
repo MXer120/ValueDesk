@@ -1,14 +1,12 @@
 /**
  * The kanban board: every feature planned, being worked on, done, and reviewed. Claude's sessions
- * keep it current (apps/server/tools/board.ts); the owner adds plans and moves cards here, each with
- * a signature from the builder wallet. Only the owner, or a session quoting the owner's confirmation,
- * can mark a card reviewed: the store enforces that, whichever way the change comes in.
+ * keep it current (apps/server/tools/board.ts); the owner adds plans and moves cards here, signed in,
+ * with no signature per card (owner 2026-11-05: "I dont want to sign to add stuff"). Only the owner, or
+ * a session quoting the owner's confirmation, can mark a card reviewed: the store enforces that,
+ * whichever way the change comes in.
  */
 import { useMemo, useState } from 'react';
 import { call } from '../api';
-import { signAction } from '../wallet';
-import { useWallet } from '../WalletPicker';
-import { isUserRejection } from '../../wallet';
 import { ago, int, when } from '../format';
 import { Empty, Figure, Figures, Note, Page, Search, Section, useAdmin } from '../ui';
 
@@ -47,7 +45,6 @@ export function boardMoves(status: Status): Array<{ to: Status; label: string }>
 
 export function Board() {
   const board = useAdmin<{ cards: Card[] }>('board', {}, 30_000);
-  const { ensure } = useWallet();
   const [title, setTitle] = useState('');
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState<number | null>(null);
@@ -67,23 +64,17 @@ export function Board() {
       await run();
       board.reload();
     } catch (e) {
-      setError(isUserRejection(e) ? 'You declined the signature in the wallet - nothing was changed.' : e instanceof Error ? e.message : String(e));
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(null);
     }
   };
   const add = () => write('add', async () => {
-    const c = await ensure();
-    const payload = { title: title.replace(/\s+/g, ' ').trim(), detail: '', area: '' };
-    const action = await signAction(c, 'board.add', payload.title, payload, `Plan: ${payload.title}`);
-    await call('board/add', { ...payload, action });
+    await call('board/add', { title: title.replace(/\s+/g, ' ').trim(), detail: '', area: '' });
     setTitle('');
   });
-  const move = (card: Card, to: Status, label: string) => write(`${card.id}`, async () => {
-    const c = await ensure();
-    const payload = { id: card.id, status: to };
-    const action = await signAction(c, 'board.move', `card ${card.id}`, payload, `${label}: ${card.title}`);
-    await call('board/move', { ...payload, action });
+  const move = (card: Card, to: Status) => write(`${card.id}`, async () => {
+    await call('board/move', { id: card.id, status: to });
   });
 
   return (
@@ -106,7 +97,7 @@ export function Board() {
             <input type="text" value={title} maxLength={140} onChange={(e) => setTitle(e.target.value)} placeholder="Plan a feature…" aria-label="New feature" autoComplete="off" />
           </label>
           <button type="submit" className="dv-btn dv-btn--primary" disabled={!title.trim() || !!busy}>
-            {busy === 'add' ? 'Waiting for the signature…' : 'Sign and add'}
+            {busy === 'add' ? 'Adding…' : 'Add'}
           </button>
           <Search value={query} onChange={setQuery} placeholder="Search cards" />
         </form>
@@ -136,8 +127,8 @@ export function Board() {
                           {c.reviewedAt !== null && <p className="dv-quiet" title={when(c.reviewedAt)}>Reviewed {ago(c.reviewedAt)}{c.reviewedBy ? ` by ${c.reviewedBy.startsWith('owner') ? 'you' : c.reviewedBy}` : ''}</p>}
                           <div className="dv-row">
                             {boardMoves(c.status).map((m) => (
-                              <button key={m.to} type="button" className={`dv-btn${m.to === 'reviewed' ? ' dv-btn--primary' : ''}`} disabled={!!busy} onClick={() => void move(c, m.to, m.label)}>
-                                {busy === `${c.id}` ? 'Signing…' : m.label}
+                              <button key={m.to} type="button" className={`dv-btn${m.to === 'reviewed' ? ' dv-btn--primary' : ''}`} disabled={!!busy} onClick={() => void move(c, m.to)}>
+                                {busy === `${c.id}` ? 'Moving…' : m.label}
                               </button>
                             ))}
                           </div>

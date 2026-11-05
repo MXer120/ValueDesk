@@ -449,17 +449,19 @@ test('beta list: a signed add and remove, for exactly that wallet, audited; the 
 
 // --- the kanban board ------------------------------------------------------------------------------
 
-test('board: the owner adds and moves with a signature; a session marks reviewed only quoting the owner', async () => {
+test('board: the owner adds and moves when signed in, no signature per card; a session marks reviewed only quoting the owner', async () => {
   const s = await suite();
   const auth = await s.login();
   assert.deepEqual((await s.post('/api/admin/board', {}, auth)).json().cards, []);
-  // Unsigned, or signed for another card: refused.
-  assert.equal((await s.post('/api/admin/board/add', { title: 'Plan', detail: '', area: '' }, auth)).statusCode, 403);
-  const add = await s.post('/api/admin/board/add', { title: '  Plan   it ', detail: '', area: '', action: action(s.admin, 'board.add', 'Plan it', { title: 'Plan it', detail: '', area: '' }) }, auth);
+  // Not signed in: refused, whatever the body says.
+  assert.equal((await s.post('/api/admin/board/add', { title: 'Plan', detail: '', area: '' })).statusCode, 401);
+  assert.deepEqual(s.store.boardCards(), []);
+  const add = await s.post('/api/admin/board/add', { title: '  Plan   it ', detail: '', area: '' }, auth);
   assert.equal(add.statusCode, 200);
   const id = add.json().card.id as number;
   assert.equal(add.json().card.status, 'planned');
-  assert.equal((await s.post('/api/admin/board/move', { id, status: 'done', action: action(s.admin, 'board.move', 'card 999', { id, status: 'done' }) }, auth)).statusCode, 403);
+  assert.equal((await s.post('/api/admin/board/move', { id, status: 'done' })).statusCode, 401);
+  assert.equal(s.store.boardCard(id)!.status, 'planned');
 
   // A session moves it along, but cannot review it, or undo a review, without the owner's words.
   s.store.moveBoardCard(id, 'working', { session: 'web' }, { ref: 'abc123' });
@@ -472,14 +474,14 @@ test('board: the owner adds and moves with a signature; a session marks reviewed
   assert.match(s.store.boardLog(id).at(-1)!.what, /owner said: yes, that one is good/);
   assert.throws(() => s.store.moveBoardCard(id, 'done', { session: 'web' }), /only the owner/);
 
-  // The owner reopens and reviews with a signature.
-  const reopen = await s.post('/api/admin/board/move', { id, status: 'done', action: action(s.admin, 'board.move', `card ${id}`, { id, status: 'done' }) }, auth);
+  // The owner, signed in, reopens and reviews.
+  const reopen = await s.post('/api/admin/board/move', { id, status: 'done' }, auth);
   assert.equal(reopen.json().card.reviewedAt, null);
-  const mine = await s.post('/api/admin/board/move', { id, status: 'reviewed', action: action(s.admin, 'board.move', `card ${id}`, { id, status: 'reviewed' }) }, auth);
+  const mine = await s.post('/api/admin/board/move', { id, status: 'reviewed' }, auth);
   assert.equal(mine.json().card.status, 'reviewed');
   assert.equal(mine.json().card.reviewedBy, `owner ${s.admin.address.toLowerCase()}`);
   assert.equal(mine.json().card.ref, 'abc123', 'a move keeps what the card knows');
   assert.throws(() => s.store.addBoardCard({ title: 'x', status: 'reviewed' }, { session: 'web' }), /cannot start as reviewed/);
   const kinds = s.store.auditRows({ limit: 20 }).filter((r) => r.kind.startsWith('board.')).map((r) => `${r.kind}:${r.ok}`);
-  assert.ok(kinds.includes('board.add:true') && kinds.includes('board.move:true') && kinds.includes('board.add:false'));
+  assert.ok(kinds.includes('board.add:true') && kinds.includes('board.move:true'));
 });
