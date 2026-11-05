@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { bandOf, bracketsOf, capOf, coinName, collateralOf, intervalOf, matches, ordered, pctOf, placeSearch, readPlace, shortPrice, topLeverage, type LimitSymbol } from './model';
+import { bandOf, bracketsOf, capOf, coinName, collateralOf, intervalOf, matches, ordered, pctOf, placeSearch, ratioPair, readPlace, shortPrice, type LimitSymbol } from './model';
 
 test('a percentage moves the point in the string, so no float can bend a figure', () => {
   assert.equal(pctOf('0.0125'), '1.25%');
@@ -27,6 +27,12 @@ test('a band with one ratio reads as one', () => {
   assert.equal(bandOf('0.05', '0.05'), '±5%');
   assert.equal(bandOf('1', '0.5'), '+100% / −50%');
   assert.equal(bandOf(undefined, '0.5'), null);
+});
+
+test('the limit order pair keeps both ratios', () => {
+  assert.equal(ratioPair('0.05', '0.05'), '5% / 5%');
+  assert.equal(ratioPair('1', '0.5'), '100% / 50%');
+  assert.equal(ratioPair('0.05', undefined), null);
 });
 
 test('tiers run from the tier below, in order, whatever order the feed sends', () => {
@@ -70,11 +76,6 @@ test('order and search', () => {
   assert.ok(matches(sym({ displayName: 'BTC/USDC', name: 'vBTC_vUSDC', baseCoin: 'vBTC' }), 'btc/'));
   assert.ok(!matches(sym({}), 'eth'));
   assert.ok(matches(sym({}), '  '));
-});
-
-test('highest leverage names its markets; no leverage, no claim', () => {
-  assert.deepEqual(topLeverage([sym({ id: 2, maxLeverage: 40, baseCoin: 'ETH' }), sym({ id: 1, maxLeverage: 40 }), sym({ id: 3, maxLeverage: 10 })]), { leverage: 40, coins: ['BTC', 'ETH'] });
-  assert.equal(topLeverage([sym({})]), null);
 });
 
 test('oracle prices are cut for reading, never rounded up', () => {
