@@ -20170,6 +20170,9 @@ var ExecutorService = class {
 // src/server.ts
 var BODY_LIMIT = 64 * 1024;
 var PREFIX = "/api/copy/v1";
+function withoutSeries(views) {
+  return views.map((v) => v.algo.book ? { ...v, algo: { ...v.algo, book: { ...v.algo.book, series: [] } } } : v);
+}
 function rateKey(ip) {
   let a = ip.trim().toLowerCase();
   if (a.startsWith("::ffff:") && isIP(a.slice(7)) === 4) a = a.slice(7);
@@ -20371,7 +20374,11 @@ function createExecutorServer(svc, cfg, log) {
       }
       if (req.method === "GET" && route === "/me") return send(res, 200, svc.me(svc.authenticate(bearer(req)), ctx));
       if (req.method === "GET" && route === "/consents") return send(res, 200, { consents: svc.consents(svc.authenticate(bearer(req))) });
-      if (req.method === "GET" && route === "/algos") return send(res, 200, { algos: svc.algoList(svc.authenticate(bearer(req))) });
+      if (req.method === "GET" && route === "/algos") {
+        const algos = svc.algoList(svc.authenticate(bearer(req)));
+        if (url.searchParams.get("series") === "0") return send(res, 200, { algos: withoutSeries(algos), noSeries: true });
+        return send(res, 200, { algos });
+      }
       if (req.method === "GET" && route === "/notices") {
         const owner = svc.authenticate(bearer(req));
         const grades = (url.searchParams.get("grades") ?? "").split(",").filter(Boolean);
