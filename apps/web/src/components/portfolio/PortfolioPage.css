@@ -49,7 +49,8 @@
 .pf.pfx .dash-tabs__body { overflow: visible; min-height: 0; -webkit-mask-image: none; mask-image: none; }
 .pf.pfx .pfx-band .dash-tabs__body { overflow: auto; }
 
-.pfx-stack { display: flex; flex-direction: column; gap: var(--sp-5); min-width: 0; }
+/* Full column wherever it is mounted: /wealth puts this directly in a centring `.pf.pfx`. */
+.pfx-stack { display: flex; flex-direction: column; gap: var(--sp-5); width: 100%; max-width: var(--pfx-col); min-width: 0; }
 
 /* --- the money buttons: pills -------------------------------------------------------------- */
 .pfx-money { display: flex; align-items: center; gap: var(--sp-2); }
