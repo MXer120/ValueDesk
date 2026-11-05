@@ -146,7 +146,8 @@
 .navbar--rail .navmore { margin-left: -10px; }
 .navbar--rail .navmore__btn { padding: 0 11px; color: #8e8e93; font-size: 15px; letter-spacing: -0.005em; transition: color 140ms; }
 .navbar--rail .navmore__btn:hover,
-.navbar--rail .navmore__btn.is-open { color: var(--text); }
+.navbar--rail .navmore__btn.is-open,
+.navbar--rail .navmore__btn.is-here { color: var(--text); }
 
 /* Futures / Spot: a pill in a well, the chosen one lifted. */
 .nav-seg {

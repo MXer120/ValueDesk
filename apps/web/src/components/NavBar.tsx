@@ -33,7 +33,7 @@ import { BrandMark } from './BrandMark';
 /** beta.valuedesk.so (VITE_CHANNEL=beta): the Beta tag beside the brand, as the admin suite shows Dev. */
 const BETA = import.meta.env.VITE_CHANNEL === 'beta';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { SOON_TABS, TABS, TAB_LABELS, pathForTab, type Tab } from '../router';
+import { NAV_TABS, SOON_TABS, TAB_LABELS, pathForTab, type SodexView, type Tab } from '../router';
 import { preloadWalletModal, warmWalletModal } from '../walletconnect';
 import { Notices } from './Notices';
 import { NavMore, type NavAlert } from './NavMore';
@@ -94,10 +94,20 @@ export interface NavBarProps {
   onOpenStatus?: () => void;
   /** The excluded wallets page (More > Excluded wallets). */
   onOpenExcluded?: () => void;
+  /** The trading limits page (More > Trading limits). */
+  onOpenLimits?: () => void;
+  /** Which of More's own pages is on screen. */
+  statusOn?: boolean;
+  excludedOn?: boolean;
+  limitsOn?: boolean;
+  /** Open one of SoDEX's products. Without it More has no SoDEX group (router.ts SODEX_VIEWS). */
+  onOpenSodex?: (view: SodexView) => void;
+  /** Which of them is on screen. */
+  sodexOn?: SodexView | null;
 }
 
 export function NavBar({
-  tab, onNavigate, address, hasLayout, dashLocked, onOpenSearch, rail = false, engine, onEngine, alert = null, onOpenStatus, onOpenExcluded,
+  tab, onNavigate, address, hasLayout, dashLocked, onOpenSearch, rail = false, engine, onEngine, alert = null, onOpenStatus, onOpenExcluded, onOpenLimits, statusOn = false, excludedOn = false, limitsOn = false, onOpenSodex, sodexOn = null,
 }: NavBarProps) {
   /*
    * Have the wallet modal's chunk in memory BEFORE the click.
@@ -189,7 +199,7 @@ export function NavBar({
           </>
         )}
         <nav className="navlinks">
-          {TABS.map((t) => SOON_TABS.has(t) ? (
+          {NAV_TABS.map((t) => SOON_TABS.has(t) ? (
             /* Coming soon (router.ts SOON_TABS): the name and a pill, no link - there is no page to open. */
             <span key={t} className="navlink navlink--soon" aria-disabled="true" title={`${TAB_LABELS[t]}: coming soon`}>
               {TAB_LABELS[t]}
@@ -221,8 +231,8 @@ export function NavBar({
             </a>
           ))}
         </nav>
-        {/* More: the status page, Help & FAQ, Send feedback (owner, 2026-10-28). Outside the nav: its menu's rows are not nav links. */}
-        <NavMore alert={alert} onOpenStatus={onOpenStatus} onOpenExcluded={onOpenExcluded} />
+        {/* More: Leaderboard, Trading limits, Status, Help & FAQ, Send feedback, Community, News (owner, 2026-11-05). Outside the nav: its menu's rows are not nav links. */}
+        <NavMore alert={alert} tab={tab} limits={limitsOn} status={statusOn} excluded={excludedOn} onNavigate={onNavigate} onOpenStatus={onOpenStatus} onOpenExcluded={onOpenExcluded} onOpenLimits={onOpenLimits} onOpenSodex={onOpenSodex} sodexOn={sodexOn} />
         {/* Without the rail (a phone, a narrow window) the same switch sits in the bar's first row, beside
             the wordmark: spot markets were otherwise reachable only through the market search there. */}
         {!rail && marketType}

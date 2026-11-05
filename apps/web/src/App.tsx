@@ -4,7 +4,7 @@ import { PrivacyProvider } from './privacy';
 import { NavBar, scanHref } from './components/NavBar';
 import { SideBar } from './components/SideBar';
 import './components/shell.css';
-import { DEFAULT_TAB, SOON_TABS, TABS, isExcludedPath, isStatusPath, landingTab, legalForPath, tabForPath, useRoute, type LegalPage, type Tab } from './router';
+import { DEFAULT_TAB, SOON_TABS, TABS, isExcludedPath, isLimitsPath, isStatusPath, landingTab, legalForPath, tabForPath, useRoute, type LegalPage, type Tab } from './router';
 import { api, type Engine } from './api';
 import { useAsync, useConnState, useMediaQuery, useSession, useStored, useSymbols } from './hooks';
 import { hub } from './ws';
@@ -87,6 +87,8 @@ const LegalDoc = lazyPage('legal', () => import('./legal/LegalView').then((m) =>
 const StatusDoc = lazyPage('status', () => import('./status/StatusPage').then((m) => m.StatusPage));
 /* The excluded wallets (More > Excluded wallets), the same way. */
 const ExcludedDoc = lazyPage('excluded', () => import('./components/excluded/ExcludedPage').then((m) => m.ExcludedPage));
+/* Trading limits & conditions (More > Trading limits), the same way. */
+const LimitsDoc = lazyPage('limits', () => import('./components/limits/LimitsPage').then((m) => m.LimitsPage));
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const PAGES: Record<Tab, LazyPage<any>> = {
@@ -108,7 +110,7 @@ const bootTabs = (): Tab[] => {
 /** The code the first render needs: a legal page's, the status page's, or the landing tab's (above). */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const bootPages = (): LazyPage<any>[] =>
-  legalForPath(window.location.pathname) ? [LegalDoc] : isStatusPath(window.location.pathname) ? [StatusDoc] : isExcludedPath(window.location.pathname) ? [ExcludedDoc] : bootTabs().map((t) => PAGES[t]);
+  legalForPath(window.location.pathname) ? [LegalDoc] : isStatusPath(window.location.pathname) ? [StatusDoc] : isExcludedPath(window.location.pathname) ? [ExcludedDoc] : isLimitsPath(window.location.pathname) ? [LimitsDoc] : bootTabs().map((t) => PAGES[t]);
 /* The landing page's first index reads leave now, when this browser has started
    on this URL before: the page asks for them in an effect, after its code has
    arrived and rendered, and takes the answers that are already there (serverFetch.ts). */
@@ -150,7 +152,7 @@ function AppShell() {
   const [address, setAddress] = useStored<string | null>('ot.address', null);
   /* The page comes from the URL. `setTab` keeps its name because ~15 call
    * sites below pass it around as a callback; it pushes history now. */
-  const [tab, navigate, legal, navigateLegal, status, navigateStatus, excluded, navigateExcluded] = useRoute();
+  const [tab, navigate, legal, navigateLegal, status, navigateStatus, excluded, navigateExcluded, limits, navigateLimits] = useRoute();
   /* Change page only once its code is in; the latest request wins. After the
      idle prefetch every page is in, and this is a plain synchronous navigate. */
   const navSeq = useRef(0);
@@ -199,6 +201,15 @@ function AppShell() {
     if (ExcludedDoc.ready) go();
     else ExcludedDoc.preload().then(go, go);
   }, [navigateExcluded]);
+  /* The trading limits page the same way. */
+  const openLimits = useCallback(() => {
+    const seq = ++navSeq.current;
+    const go = () => {
+      if (seq === navSeq.current) navigateLimits();
+    };
+    if (LimitsDoc.ready) go();
+    else LimitsDoc.preload().then(go, go);
+  }, [navigateLimits]);
   /* A legal link anywhere in the app (legal/LegalGate.tsx LegalLink) opens its page in place. */
   useEffect(() => {
     const on = (e: Event) => {
@@ -209,7 +220,7 @@ function AppShell() {
     return () => window.removeEventListener(OPEN_LEGAL_EVENT, on);
   }, [openLegal]);
   /* The tab whose page is on screen - none while a legal page or the status page is. */
-  const shown: Tab | null = legal || status || excluded ? null : tab;
+  const shown: Tab | null = legal || status || excluded || limits ? null : tab;
   usePagePrefetch();
   const openScanAddress = useCallback((addr: string, venue?: Venue) => {
     window.location.href = venue
@@ -515,6 +526,10 @@ function AppShell() {
         alert={navAlertOf(health, healthDown)}
         onOpenStatus={openStatus}
         onOpenExcluded={openExcluded}
+        onOpenLimits={openLimits}
+        statusOn={status && !legal}
+        excludedOn={excluded && !legal && !status}
+        limitsOn={limits && !legal && !status && !excluded}
       />
 
       {/* The venue-status line is the ONLY full-width strip allowed under the
@@ -615,6 +630,9 @@ function AppShell() {
 
         {excluded && !legal && !status && (
           <Guarded name="Excluded wallets"><ExcludedDoc /></Guarded>
+        )}
+        {limits && !legal && !status && !excluded && (
+          <Guarded name="Trading limits"><LimitsDoc /></Guarded>
         )}
 
         </div>
@@ -742,6 +760,7 @@ function usePagePrefetch(): void {
       if (t && !PAGES[t].ready) PAGES[t].preload().catch(() => {});
       if (!t && legalForPath(el.pathname) && !LegalDoc.ready) LegalDoc.preload().catch(() => {});
       if (!t && isStatusPath(el.pathname) && !StatusDoc.ready) StatusDoc.preload().catch(() => {});
+      if (!t && isLimitsPath(el.pathname) && !LimitsDoc.ready) LimitsDoc.preload().catch(() => {});
     };
     document.addEventListener('pointerover', onIntent, { passive: true });
     document.addEventListener('focusin', onIntent);
