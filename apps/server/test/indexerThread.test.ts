@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { DatabaseSync } from 'node:sqlite';
 import { Checkpointer } from '../src/indexer/checkpointer.js';
-import { SlicedWork } from '../src/indexer/slicedWork.js';
+import { SlicedWork, readInSlices } from '../src/indexer/slicedWork.js';
 import { IndexStore, type FillRow } from '../src/indexer/store.js';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -130,4 +130,30 @@ test('checkpoint thread: a hung thread is ended', async () => {
     db.close();
     rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 });
   }
+});
+
+test('read in slices: all of it within the call when it fits, and the loop let in when it does not', async () => {
+  const run = (budgetMs: number) => {
+    let left = 3;
+    let done = 0;
+    let clock = 0;
+    readInSlices({ budgetMs, now: () => clock, page: () => { clock += 10; return left-- > 0 ? 1 : 0; }, done: () => done++, onError: (e) => assert.fail(String(e)) });
+    return { get done() { return done; } };
+  };
+  assert.equal(run(1_000).done, 1, 'within the call');
+  const slow = run(5);
+  assert.equal(slow.done, 0, 'after one page the loop goes first');
+  await until('all read', () => slow.done === 1);
+});
+
+test('read in slices: a stop ends it, and done never runs', async () => {
+  let stopped = false;
+  let pages = 0;
+  let done = 0;
+  let clock = 0;
+  readInSlices({ budgetMs: 1, now: () => clock, stopped: () => stopped, page: () => { clock += 5; return ++pages; }, done: () => done++, onError: (e) => assert.fail(String(e)) });
+  stopped = true;
+  await sleep(10);
+  assert.equal(pages, 1);
+  assert.equal(done, 0);
 });

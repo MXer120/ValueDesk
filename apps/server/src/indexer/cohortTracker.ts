@@ -58,6 +58,7 @@ import {
   Aggregator, COHORTS, MARGIN_SIBLING, TAIL_EQUITY, coinOf, netWallet, perpEquity, sampleRule, sampledVenue, scopeKey, sectorTotals,
   type CohortRange, type Position, type WalletVenue,
 } from '../valuedesk/cohorts/model.js';
+import { readInSlices } from './slicedWork.js';
 import { Lane } from './lanes.js';
 import { WeightBudget } from '../valuedesk/hyperliquid/info.js';
 import { mark } from './busy.js';
@@ -132,6 +133,11 @@ const LIQ_BOOST_NOTIONAL = 10_000;
 const LIQ_BOOST_LEND = 200;
 const LIQ_BOOST_PNL_SHARE = 0.1;
 /** The live engine's beat, and how many changed accounts one beat prices at most (a start primes ~90k books in ~20 beats). */
+/** The books read at a start: a page, and the thread is let go once this much is used. */
+const BOOKS_LOAD_PAGE = 2_000;
+const BOOKS_LOAD_SLICE_MS = 40;
+/** Kept while they load: minutes of every venue's prints. Past it the re-read after a gap covers what is missed. */
+const EARLY_PRINTS_MAX = 1_000_000;
 const LIVE_TICK_MS = 1_000;
 const LIVE_SLICE = 5_000;
 /** ...and at most this long a beat (live.ts work): what is left waits for the next beat. */
@@ -780,6 +786,9 @@ export class CohortTracker {
   private planMs = 0;
   private recordMs = 0;
   lastError: string | null = null;
+  private booksLoading = false;
+  private stopped = false;
+  private earlyPrints: Array<[Print, (acct: string) => string | null]> = [];
 
   constructor(private readonly d: CohortDeps) {
     setRulesPacers({ lighter: d.lighter.pacer, arcus: d.arcus.pacer });
@@ -791,15 +800,9 @@ export class CohortTracker {
     const now = this.d.now();
     this.startedAt = now;
     for (const v of VENUES) {
-      const m = new Map<string, Book>();
-      for (const [a, b] of s.cohortBooks(v)) {
-        m.set(a, {
-          equity: b.equity, at: b.at, collateral: b.collateral, spotAt: b.spotAt, cash: b.cash,
-          pos: new Map(b.positions.map(({ symbol, ...p }) => [symbol, p])),
-        });
-      }
-      this.books.set(v, m);
+      this.books.set(v, new Map<string, Book>());
       // Whatever traded while the indexer was down is unknown: large books are re-read.
+      // Read here, before the load: the engine's flush moves stream_up on while the books come in.
       if (STREAMED.has(v)) {
         this.gapAt.set(v, now);
         // How long the stream was down across this restart (the engine keeps `stream_up`).
@@ -808,6 +811,47 @@ export class CohortTracker {
         this.gapFloor.set(v, gapRereadFloor(lastUp > 0 ? now - lastUp : Number.POSITIVE_INFINITY));
       }
     }
+    // The books a page at a time: ~300k read in one go held the thread 107 s at each start (2026-11-05 16:03:51 to
+    // 16:05:38), while the streams' sockets waited to open. The gap in the prints was 136 s, over the 120 s a stream
+    // may be away and still count as continuous, and most of it was this.
+    this.booksLoading = true;
+    let v = 0;
+    let after = '';
+    readInSlices({
+      budgetMs: BOOKS_LOAD_SLICE_MS,
+      stopped: () => this.stopped,
+      page: () => {
+        for (; v < VENUES.length; v++, after = '') {
+          const venue = VENUES[v]!;
+          const rows = s.cohortBooksPage(venue, after, BOOKS_LOAD_PAGE);
+          if (!rows.length) continue;
+          const m = this.books.get(venue)!;
+          for (const [a, b] of rows) {
+            m.set(a, {
+              equity: b.equity, at: b.at, collateral: b.collateral, spotAt: b.spotAt, cash: b.cash,
+              pos: new Map(b.positions.map(({ symbol, ...p }) => [symbol, p])),
+            });
+          }
+          after = rows[rows.length - 1]![0];
+          return rows.length;
+        }
+        return 0;
+      },
+      done: () => {
+        this.booksLoading = false;
+        this.startRest(now);
+      },
+      onError: (e) => {
+        // Not started on half the books: the process restarts and reads them again.
+        console.error('[indexer] cohort books could not be read:', e);
+        process.exitCode = 1;
+        throw e;
+      },
+    });
+  }
+
+  private startRest(now: number): void {
+    const s = this.d.store;
     for (const [k, px] of s.cohortMarks()) { this.marks.set(k, px); this.noteCoinPx(k, px); }
     // Prints the saved books already hold: a stream's snapshot of recent prints after this start
     // must not apply them again (printApplies).
@@ -859,11 +903,30 @@ export class CohortTracker {
     const first = setTimeout(() => void this.plan().catch((e) => (this.lastError = String(e))), 15_000);
     first.unref?.();
     this.timers.push(first);
+    // What the streams brought while the books came in, in the order it came.
+    const early = this.earlyPrints;
+    this.earlyPrints = [];
+    let i = 0;
+    readInSlices({
+      budgetMs: BOOKS_LOAD_SLICE_MS,
+      stopped: () => this.stopped,
+      page: () => {
+        const end = Math.min(i + 2_000, early.length);
+        const n = end - i;
+        for (; i < end; i++) this.onPrint(early[i]![0], early[i]![1]);
+        return n;
+      },
+      done: () => {},
+      onError: (e) => { this.lastError = `early prints: ${String(e)}`; },
+    });
   }
 
   stop(): void {
+    this.stopped = true;
     for (const t of this.timers) clearInterval(t);
     this.timers = [];
+    // Stopped while the books came in: nothing was changed, and half of them must not be written back.
+    if (this.booksLoading) return;
     this.hlc.stop();
     this.hlh.stop();
     this.lend(0);
@@ -913,6 +976,10 @@ export class CohortTracker {
 
   /** Every print: a price, and each party's book moved (or queued for its first read). */
   onPrint(p: Print, addressOf: (acct: string) => string | null): void {
+    if (this.booksLoading) {
+      if (this.earlyPrints.length < EARLY_PRINTS_MAX) this.earlyPrints.push([p, addressOf]);
+      return;
+    }
     if (p.venue === 'hyperliquid' && (p.symbol.startsWith('@') || p.symbol.includes('/'))) { this.onSpotPrint(p); return; }
     if (!bookable(p.venue, p.symbol)) return;
     const mk = `${p.venue}|${p.symbol}`;

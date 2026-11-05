@@ -66,3 +66,36 @@ export class SlicedWork {
     this.reset();
   }
 }
+
+/**
+ * Pages read one after another with the event loop let in once the budget is used up. Everything runs within the
+ * call when it fits (a small index, a test). `done` runs once, after the last page, unless `stopped` says otherwise.
+ */
+export function readInSlices(o: {
+  /** The next page; empty: the end. */
+  page: () => number;
+  budgetMs: number;
+  done: () => void;
+  onError: (e: unknown) => void;
+  stopped?: () => boolean;
+  now?: () => number;
+}): void {
+  const now = o.now ?? Date.now;
+  const run = (): void => {
+    const until = now() + o.budgetMs;
+    try {
+      for (;;) {
+        if (o.stopped?.()) return;
+        if (o.page() === 0) break;
+        if (now() >= until) {
+          setImmediate(run);
+          return;
+        }
+      }
+      o.done();
+    } catch (e) {
+      o.onError(e);
+    }
+  };
+  run();
+}
