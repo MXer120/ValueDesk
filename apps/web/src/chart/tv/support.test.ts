@@ -216,7 +216,7 @@ test('a stored interval is used only while it is still served', () => {
 // --- read-only order lines ----------------------------------------------------
 
 const line = (over: Partial<OrderLine>): OrderLine => ({
-  key: 'o1', kind: 'limit', side: 'buy', price: '100', quantity: '1', label: 'Buy 1 @ 100',
+  key: 'o1', kind: 'limit', side: 'buy', price: '100', quantity: '1', label: 'Buy 1 @ 100', tag: 'Buy limit', amount: '1',
   symbol: 'BTC-USD', draggable: false, ...over,
 });
 const colors = { pos: 'G', neg: 'R', text: 'W', muted: 'M' };
@@ -233,9 +233,9 @@ test('order lines take side colours; a position line follows profit', () => {
     '110',
   );
   assert.deepEqual(shapes.map((s) => [s.key, s.color, s.dashed]), [
-    ['o1', 'G', false],
+    ['o1', 'G', true],
     ['o2', 'R', true],
-    ['p', 'G', true],
+    ['p', 'G', false],
   ]);
   const losing = lineShapes(
     [line({ key: 'p', kind: 'position', side: null, label: 'LONG 1 @ 100', price: '100', quantity: '1' })],

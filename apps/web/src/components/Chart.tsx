@@ -4554,7 +4554,7 @@ function Chart({
         <div ref={holder} className={`chartholder kc-canvas${masked && !keepFrame ? ' kc-masked' : ''}${marking ? ' is-marking' : ''}`} />
         <div ref={marqueeEl} className="kc-marquee" aria-hidden />
         <SelectionMarks chart={ready ? chart.current : null} ids={multi} left={holder.current?.offsetLeft ?? 0} top={holder.current?.offsetTop ?? 0} />
-        {!bare && <DraftOrderLines chart={ready ? chart.current : null} engine={engine} symbol={symbol} left={holder.current?.offsetLeft ?? 0} top={holder.current?.offsetTop ?? 0} />}
+        {!bare && <DraftOrderLines chart={ready ? chart.current : null} engine={engine} symbol={symbol} left={holder.current?.offsetLeft ?? 0} top={holder.current?.offsetTop ?? 0} tickSize={sym?.tickSize} />}
         {!bare && <LiqIndicatorFeed chart={ready ? chart.current : null} engine={engine} symbol={symbol} names={indicators.map((i) => i.name)} ids={indicators.map((i) => i.id).join(',')} />}
         {!bare && newsLayer.value && (
           <NewsMarkers

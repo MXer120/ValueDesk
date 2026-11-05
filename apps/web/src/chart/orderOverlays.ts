@@ -32,8 +32,10 @@
  */
 import type { Chart as KChart, OverlayEvent, OverlayTemplate, Point } from 'klinecharts';
 import type { Symbol as MarketSymbol } from '../api';
-import { fmtPrice, fmtQty, num, pick } from '../format';
-import { CANDLE_PANE_ID, T } from './theme';
+import { fmtPrice, fmtQty, fmtQuote, num, pick } from '../format';
+import { isLight } from '../theme';
+import { followChart } from './candleDraws';
+import { CANDLE_PANE_ID, FAMILY, NUM_FAMILY, T } from './theme';
 
 /** Registered overlay name. Prefixed so Chart.tsx can keep it out of the user
  *  facing drawing-tool list - an order line is not a drawing tool, and one drawn
@@ -129,8 +131,12 @@ export interface OrderLine {
    *  re-sent from these strings, never from a reformatted float. */
   price: string;
   quantity: string | null;
-  /** Text on the in-chart badge: side / size / price. */
+  /** The whole line in words: side / size / price. */
   label: string;
+  /** The word on the chart's label: "Sell limit", "Sell stop", "TP", "SL", "Long". */
+  tag: string;
+  /** The size on the chart's label, formatted; null when the payload has none. */
+  amount: string | null;
   symbol: string;
   orderID?: number;
   /**
@@ -189,6 +195,18 @@ const usable = (v: unknown): string | null => {
   return Number.parseFloat(s) > 0 ? s : null;
 };
 
+/**
+ * The word for a trigger: an exit closes a position, so it says TP or SL and its side adds
+ * nothing; a stop that opens one is "Buy stop". Same stopType spellings as Account.tsx.
+ */
+function triggerTag(raw: unknown, side: 'buy' | 'sell' | null): string {
+  const s = String(pick(raw as object, 'stopType', 'st') ?? '').toUpperCase();
+  const closes = pick(raw as object, 'reduceOnly', 'R') === true || String(pick(raw as object, 'reduceOnly', 'R')) === 'true';
+  if (s === 'TAKE_PROFIT' || s === '2' || s === 'TP') return 'TP';
+  if (closes && (s === 'STOP_LOSS' || s === '1' || s === 'SL')) return 'SL';
+  return side ? `${side === 'buy' ? 'Buy' : 'Sell'} stop` : 'Stop';
+}
+
 export interface DeriveOptions {
   symbol: string;
   sym?: MarketSymbol;
@@ -224,6 +242,7 @@ export function orderLines(orders: any[], o: DeriveOptions): OrderLine[] {
     const base = {
       side,
       quantity: qty,
+      amount: qty === null ? null : fmtQty(qty, o.sym?.stepSize),
       symbol: o.symbol,
       orderID,
     };
@@ -245,6 +264,7 @@ export function orderLines(orders: any[], o: DeriveOptions): OrderLine[] {
         // Carry the trigger leg so moving the limit price cannot strip the stop.
         ...(trigger ? { stopPrice: trigger } : {}),
         label: labelFor(side ? side.toUpperCase() : 'ORDER', qty, limit, o.sym),
+        tag: side ? `${side === 'buy' ? 'Buy' : 'Sell'} limit` : 'Limit',
         draggable: lock === null,
         ...(lock === null ? {} : { lockedReason: lock }),
       });
@@ -257,6 +277,7 @@ export function orderLines(orders: any[], o: DeriveOptions): OrderLine[] {
         price: trigger,
         ...(limit ? { restPrice: limit } : {}),
         label: labelFor(`STOP ${side ? side.toUpperCase() : ''}`.trim(), qty, trigger, o.sym),
+        tag: triggerTag(raw, side),
         draggable: lock === null,
         ...(lock === null ? {} : { lockedReason: lock }),
       });
@@ -286,6 +307,8 @@ export function positionLines(positions: any[], o: DeriveOptions): OrderLine[] {
       quantity: String(Math.abs(size)),
       symbol: o.symbol,
       label: labelFor(dir ? dir.toUpperCase() : 'POSITION', String(Math.abs(size)), entry, o.sym),
+      tag: dir === 'long' ? 'Long' : dir === 'short' ? 'Short' : 'Position',
+      amount: fmtQty(String(Math.abs(size)), o.sym?.stepSize),
       draggable: false,
       lockedReason: 'This is your average entry price, not an order. It moves when you trade.',
     });
@@ -311,12 +334,69 @@ const labelFor = (
 export type LineState = 'live' | 'dragging' | 'confirm' | 'sending';
 
 interface LineVisual {
-  text: string;
+  /** The label's first part, on the panel colour in the line's colour. */
+  tag: string;
+  /** A position's unrealised PnL, right after the tag. */
+  pnl: string | null;
+  /** The label's filled part: the size, or where a moved price is going. */
+  amount: string | null;
   /** Short form for the y-axis gutter: price only, no room for more. */
   axisText: string;
   color: string;
   dashed: boolean;
   emphasis: boolean;
+  /** How far left of its place the label sits, so that lines at one height stay readable. */
+  shift: number;
+}
+
+/** The label: one line of text in a box, centred on the line. */
+const LABEL_HEIGHT = 18;
+const LABEL_PAD = 6;
+const LABEL_SIZE = 12;
+const LABEL_WEIGHT = 500;
+/** Lines closer than this share a height: their labels sit side by side. */
+const LABEL_ROW = LABEL_HEIGHT + 1;
+const LABEL_GAP = 4;
+/** Where a label sits across the plot, as in TradingView: right of the middle, clear of the newest candles and of the left-hand preview labels. */
+const LABEL_ANCHOR = 0.68;
+const LABEL_EDGE = 8;
+
+type Measure = (text: string, size: number, weight: number, family: string) => number;
+/** klinecharts' own measure once registered; an estimate before that, and in tests. */
+let measure: Measure = (text, size) => text.length * size * 0.56;
+
+const textWidth = (text: string, family: string): number => Math.ceil(measure(text, LABEL_SIZE, LABEL_WEIGHT, family));
+
+/** The widths of a label's parts. */
+function labelWidths(v: Pick<LineVisual, 'tag' | 'pnl' | 'amount'>): { head: number; amount: number; total: number } {
+  const head = LABEL_PAD * 2 + textWidth(v.tag, FAMILY) + (v.pnl ? LABEL_PAD + textWidth(v.pnl, NUM_FAMILY) : 0);
+  const amount = v.amount ? LABEL_PAD * 2 + textWidth(v.amount, NUM_FAMILY) : 0;
+  return { head, amount, total: head + amount };
+}
+
+/** Text on the line's colour. The app's last-price badge: white on the light theme's darker green and red. */
+const onLineColor = (color: string): string => {
+  if (color === T.text || color === T.muted) return T.bg;
+  if (isLight()) return '#ffffff';
+  // Dark's amber is bright: light text on it could not be read.
+  return color === T.accent ? T.bg : T.text;
+};
+
+/**
+ * How far each label moves left so none covers another: lines are taken top to bottom, and one
+ * within LABEL_ROW of the last starts where the last one's label ends. Keys with no height are out.
+ */
+export function labelShifts(rows: ReadonlyArray<{ key: string; y: number; width: number }>): Map<string, number> {
+  const out = new Map<string, number>();
+  let prevY = Number.NaN;
+  let shift = 0;
+  for (const r of [...rows].sort((a, b) => a.y - b.y || (a.key < b.key ? -1 : 1))) {
+    shift = r.y - prevY < LABEL_ROW ? shift : 0;
+    out.set(r.key, shift);
+    shift += r.width + LABEL_GAP;
+    prevY = r.y;
+  }
+  return out;
 }
 
 /**
@@ -326,8 +406,8 @@ interface LineVisual {
  *
  * Green/red mean SIDE on an order line, exactly as they do everywhere else in
  * the terminal. The position entry does not borrow that: a long painted green
- * would read as another resting buy. Its direction is the word on the badge
- * (LONG / SHORT). The line itself answers the other question — is that entry
+ * would read as another resting buy. Its direction is the word on the label
+ * (Long / Short). The line itself answers the other question — is that entry
  * ahead — so it is green in profit, red in loss, and plain when the result
  * cannot be read. Compared with the last traded price, which is the price the
  * candles are showing against the line.
@@ -384,34 +464,38 @@ function visualOf(
   price: string,
   sym?: MarketSymbol,
   last: number | null = null,
+  shift = 0,
 ): LineVisual {
   const priceText = fmtPrice(price, sym?.tickSize);
-  const suffix =
-    state === 'dragging' ? ' · release to review'
-    : state === 'confirm' ? ' · not sent'
-    : state === 'sending' ? ' · sending…'
-    : '';
-  const text =
-    state === 'live'
-      ? line.label
-      : `${line.label.replace(/@.*$/, '').trim()} → ${priceText}${suffix}`;
+  const pnl = state === 'live' ? unrealisedPnl(line, last) : null;
+  const moved =
+    state === 'dragging' ? `→ ${priceText} · release to review`
+    : state === 'confirm' ? `→ ${priceText} · not sent`
+    : state === 'sending' ? `→ ${priceText} · sending…`
+    : null;
   return {
-    text,
+    tag: line.tag,
+    // fmtQuote writes the minus itself; a gain gets an explicit plus.
+    pnl: pnl === null ? null : `${pnl > 0 ? '+' : ''}${fmtQuote(pnl, sym?.quoteCoin ?? null)}`,
+    amount: moved ?? line.amount,
     axisText: priceText,
     color: colorOf(line, state, last),
-    // Dashed = "not a resting limit price": a trigger that has not fired, an
-    // entry that is not an order, or a price still being moved.
-    dashed: state !== 'live' || line.kind !== 'limit',
+    // Solid = what you hold; dashed = an order that has not filled, as on TradingView.
+    dashed: state !== 'live' || line.kind !== 'position',
     emphasis: state !== 'live',
+    shift,
   };
 }
 
 const FALLBACK: LineVisual = {
-  text: '',
+  tag: '',
+  pnl: null,
+  amount: null,
   axisText: '',
   color: T.muted,
   dashed: true,
   emphasis: false,
+  shift: 0,
 };
 
 /**
@@ -439,6 +523,13 @@ const template: OverlayTemplate<LineVisual> = {
     const c = coordinates[0];
     if (!c) return [];
     const v = overlay.extendData ?? FALLBACK;
+    const w = labelWidths(v);
+    const x = Math.max(LABEL_EDGE, Math.min(Math.round(bounding.width * LABEL_ANCHOR), bounding.width - w.total - LABEL_EDGE) - v.shift);
+    const top = Math.round(c.y) - LABEL_HEIGHT / 2;
+    const mid = top + LABEL_HEIGHT / 2;
+    const words = { backgroundColor: 'transparent', borderColor: 'transparent', borderSize: 0, paddingLeft: 0, paddingRight: 0, paddingTop: 0, paddingBottom: 0, size: LABEL_SIZE, weight: LABEL_WEIGHT };
+    // Every part of the label is ignoreEvent: it is a label, not a handle, and
+    // would otherwise swallow the drag whenever the user grabbed the line by it.
     return [
       {
         type: 'line',
@@ -447,23 +538,45 @@ const template: OverlayTemplate<LineVisual> = {
           color: v.color,
           size: v.emphasis ? 2 : 1,
           style: v.dashed ? 'dashed' : 'solid',
-          dashedValue: [5, 4],
+          dashedValue: [4, 3],
         },
       },
       {
-        type: 'text',
-        // The badge is a label, not a handle. Left un-ignored it would swallow
-        // the drag whenever the user grabbed the line by its text.
+        type: 'rect',
         ignoreEvent: true,
-        attrs: { x: 4, y: c.y - 2, text: v.text, align: 'left', baseline: 'bottom' },
-        styles: {
-          color: T.bg,
-          backgroundColor: v.color,
-          borderColor: v.color,
-          paddingTop: 2,
-          paddingBottom: 2,
-        },
+        attrs: { x, y: top, width: w.total, height: LABEL_HEIGHT },
+        styles: { style: 'stroke_fill', color: T.panel, borderColor: v.color, borderSize: 1, borderRadius: 2 },
       },
+      ...(v.amount
+        ? [{
+            type: 'rect',
+            ignoreEvent: true,
+            attrs: { x: x + w.head, y: top, width: w.amount, height: LABEL_HEIGHT },
+            styles: { style: 'stroke_fill', color: v.color, borderColor: v.color, borderSize: 1, borderRadius: [0, 2, 2, 0] },
+          }]
+        : []),
+      {
+        type: 'text',
+        ignoreEvent: true,
+        attrs: { x: x + LABEL_PAD, y: mid, text: v.tag, align: 'left', baseline: 'middle' },
+        styles: { ...words, color: v.color, family: FAMILY },
+      },
+      ...(v.pnl
+        ? [{
+            type: 'text',
+            ignoreEvent: true,
+            attrs: { x: x + LABEL_PAD * 2 + textWidth(v.tag, FAMILY), y: mid, text: v.pnl, align: 'left', baseline: 'middle' },
+            styles: { ...words, color: v.color, family: NUM_FAMILY },
+          }]
+        : []),
+      ...(v.amount
+        ? [{
+            type: 'text',
+            ignoreEvent: true,
+            attrs: { x: x + w.head + LABEL_PAD, y: mid, text: v.amount, align: 'left', baseline: 'middle' },
+            styles: { ...words, color: onLineColor(v.color), family: NUM_FAMILY },
+          }]
+        : []),
     ];
   },
   // Price tag in the y-axis gutter, on the same side the axis labels are on.
@@ -483,11 +596,15 @@ const template: OverlayTemplate<LineVisual> = {
         baseline: 'middle',
       },
       styles: {
-        color: T.bg,
+        color: onLineColor(v.color),
         backgroundColor: v.color,
         borderColor: v.color,
-        paddingTop: 2,
-        paddingBottom: 2,
+        borderRadius: 0,
+        weight: LABEL_WEIGHT,
+        paddingLeft: 4,
+        paddingRight: 4,
+        paddingTop: 3,
+        paddingBottom: 3,
       },
     };
   },
@@ -496,6 +613,7 @@ const template: OverlayTemplate<LineVisual> = {
 /** Idempotent: klinecharts' overlay registry is module-global and keyed by name,
  *  so a second call simply replaces the template. */
 export function registerOrderLineOverlay(kc: typeof import('klinecharts')): void {
+  measure = (text, size, weight, family) => kc.utils.calcTextWidth(text, size, weight, family);
   kc.registerOverlay<LineVisual>(template);
 }
 
@@ -523,7 +641,10 @@ export interface OrderLineHandlers {
 
 /** Only price and label decide whether a line has to be redrawn. Anything else
  *  changing on an order (fill progress, a status code) does not move the line. */
-const signature = (l: OrderLine): string => `${l.price}|${l.label}|${l.draggable}`;
+const signature = (l: OrderLine): string => `${l.price}|${l.label}|${l.tag}|${l.draggable}`;
+
+/** A position's PnL on its label is rewritten this often at most: a price tick is many a second, a label is read. */
+const PNL_REDRAW_MS = 250;
 
 /**
  * Reconciles OrderLine records against klinecharts overlays.
@@ -545,8 +666,13 @@ export class OrderLineLayer {
   private sym: MarketSymbol | undefined;
   /** Last traded price, so a position line can be recoloured without a redraw. */
   private mark: number | null = null;
-  /** Colour last painted on a position line. Same colour skips the override. */
+  /** Colour and PnL last painted on a position line. The same text skips the override. */
   private tone = new Map<string, string>();
+  private tonedAt = 0;
+  /** How far each label is moved left, and the state and price of a line off the venue's. */
+  private shifts = new Map<string, number>();
+  private moved = new Map<string, { price: string; state: LineState }>();
+  private stopFollow: (() => void) | null = null;
 
   constructor(
     private readonly chart: KChart,
@@ -566,17 +692,63 @@ export class OrderLineLayer {
   notePrice(px: number | null): void {
     const next = px !== null && px > 0 ? px : null;
     this.mark = next;
+    const now = Date.now();
+    if (now - this.tonedAt < PNL_REDRAW_MS) return;
+    this.tonedAt = now;
     for (const [key, line] of this.lines) {
       if (line.kind !== 'position' || this.held === key) continue;
       const id = this.ids.get(key);
       if (!id) continue;
-      const color = positionInk(line, next);
-      if (this.tone.get(key) === color) continue;
-      this.tone.set(key, color);
-      this.chart.overrideOverlay({
-        id,
-        extendData: visualOf(line, 'live', line.price, this.sym, next),
-      });
+      const visual = visualOf(line, 'live', line.price, this.sym, next, this.shifts.get(key));
+      const said = `${visual.color}|${visual.pnl}`;
+      if (this.tone.get(key) === said) continue;
+      this.tone.set(key, said);
+      this.chart.overrideOverlay({ id, extendData: visual });
+    }
+  }
+
+  /** The visual a line has now: where the user moved it, or the venue's. */
+  private visualNow(line: OrderLine): LineVisual {
+    const m = this.moved.get(line.key);
+    return m
+      ? visualOf(line, m.state, m.price, this.sym, null, this.shifts.get(line.key))
+      : visualOf(line, 'live', line.price, this.sym, this.mark, this.shifts.get(line.key));
+  }
+
+  /** Lines at about one height: their labels go side by side. Runs only while two or more lines are drawn. */
+  private layout(): void {
+    const keys = [...this.ids.keys()];
+    const lines = keys.map((k) => this.lines.get(k)).filter((l): l is OrderLine => !!l);
+    if (lines.length !== keys.length) return;
+    const points = lines.map((l) => ({ value: Number.parseFloat(this.moved.get(l.key)?.price ?? l.price) }));
+    const px = this.chart.convertToPixel(points, { paneId: CANDLE_PANE_ID }) as Array<{ y?: number }>;
+    const rows: Array<{ key: string; y: number; width: number }> = [];
+    lines.forEach((l, i) => {
+      const y = px[i]?.y;
+      if (typeof y === 'number' && Number.isFinite(y)) rows.push({ key: l.key, y, width: labelWidths(this.visualNow(l)).total });
+    });
+    const next = labelShifts(rows);
+    for (const l of lines) {
+      const shift = next.get(l.key) ?? 0;
+      if ((this.shifts.get(l.key) ?? 0) === shift) continue;
+      this.shifts.set(l.key, shift);
+      const id = this.ids.get(l.key);
+      if (id) this.chart.overrideOverlay({ id, extendData: this.visualNow(l) });
+    }
+  }
+
+  private follow(): void {
+    if (this.ids.size >= 2) {
+      this.stopFollow ??= followChart(this.chart, CANDLE_PANE_ID, () => this.layout());
+    } else if (this.stopFollow) {
+      this.stopFollow();
+      this.stopFollow = null;
+      for (const key of this.ids.keys()) {
+        const line = this.lines.get(key);
+        const id = this.ids.get(key);
+        if (!this.shifts.delete(key) || !line || !id) continue;
+        this.chart.overrideOverlay({ id, extendData: this.visualNow(line) });
+      }
     }
   }
 
@@ -618,6 +790,7 @@ export class OrderLineLayer {
         if (gone) this.on.onGone(gone);
       }
     }
+    this.follow();
   }
 
   /** Move a line to a price WITHOUT touching the venue, and mark it as a state
@@ -628,10 +801,11 @@ export class OrderLineLayer {
     if (!id || !line) return;
     const value = Number.parseFloat(price);
     if (!Number.isFinite(value)) return;
+    this.moved.set(key, { price, state });
     this.chart.overrideOverlay({
       id,
       points: [{ value }],
-      extendData: visualOf(line, state, price, this.sym),
+      extendData: this.visualNow(line),
       // A line awaiting an answer must not be draggable again; a second drag
       // would queue a modify on top of one already in flight.
       lock: state !== 'dragging',
@@ -655,6 +829,7 @@ export class OrderLineLayer {
   release(key: string): void {
     if (this.held === key) this.held = null;
     if (this.expecting?.key === key) this.expecting = null;
+    this.moved.delete(key);
     const line = this.lines.get(key);
     const id = this.ids.get(key);
     if (!line || !id) return;
@@ -663,16 +838,18 @@ export class OrderLineLayer {
     this.chart.overrideOverlay({
       id,
       points: [{ value }],
-      extendData: visualOf(line, 'live', line.price, this.sym, this.mark),
+      extendData: this.visualNow(line),
       lock: !line.draggable,
     });
     this.sigs.set(key, signature(line));
-    this.tone.set(key, positionInk(line, this.mark));
+    this.tone.delete(key);
   }
 
   /** Our overlays only. Used by "clear all drawings", which must not take the
    *  order lines with it. */
   removeAll(): void {
+    this.stopFollow?.();
+    this.stopFollow = null;
     for (const key of [...this.ids.keys()]) this.remove(key);
     this.lines.clear();
     this.held = null;
@@ -684,8 +861,7 @@ export class OrderLineLayer {
     // A line we cannot price is not drawn at all. There is no safe placeholder
     // position for "an order exists somewhere".
     if (!Number.isFinite(value)) return;
-    const visual = visualOf(line, 'live', line.price, this.sym, this.mark);
-    if (line.kind === 'position') this.tone.set(line.key, visual.color);
+    const visual = this.visualNow(line);
     const id = this.chart.createOverlay({
       name: ORDER_LINE_OVERLAY,
       paneId: CANDLE_PANE_ID,
@@ -733,6 +909,8 @@ export class OrderLineLayer {
     this.ids.delete(key);
     this.sigs.delete(key);
     this.tone.delete(key);
+    this.shifts.delete(key);
+    this.moved.delete(key);
   }
 
   /** The dragged price, straight off the overlay the library just mutated. */

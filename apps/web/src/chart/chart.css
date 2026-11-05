@@ -1929,8 +1929,9 @@ body.kc-flow-resizing:has(.kc-flow-wrap.is-under) { cursor: row-resize; }
 .kc-newspop__fig i { color: var(--muted); font-family: var(--font-num); font-size: 10px; font-style: normal; }
 .kc-newspop__figs.is-out .kc-newspop__fig { background: color-mix(in srgb, var(--pos) 9%, transparent); }
 
-/* The ticket's unplaced order (DraftOrderLines.tsx): thin, dashed, muted, and
-   slowly fading in and out, so it never reads as a placed order line. */
+/* The ticket's unplaced order (DraftOrderLines.tsx): a placed order's label and price tag
+   (orderOverlays.ts: 18px, 12px text), hollow and on a line that slowly fades in and out, so it
+   never reads as a placed order. The fade is the line's alone: the words stay readable. */
 .kc-draft {
   position: absolute;
   z-index: 4;
@@ -1945,32 +1946,57 @@ body.kc-flow-resizing:has(.kc-flow-wrap.is-under) { cursor: row-resize; }
   left: 0;
   right: 0;
   height: 0;
+}
+.kc-draft__line.is-tp { --draft-ink: color-mix(in srgb, var(--pos) 55%, var(--muted, #888)); }
+.kc-draft__line.is-sl { --draft-ink: color-mix(in srgb, var(--neg) 55%, var(--muted, #888)); }
+.kc-draft__line::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
   border-top: 1px dashed var(--draft-ink);
   opacity: 0.5;
   animation: kc-draft-pulse 1.6s ease-in-out infinite;
 }
-.kc-draft__line.is-trigger { border-top-style: dotted; }
-.kc-draft__line.is-tp { border-top-color: color-mix(in srgb, var(--pos) 45%, var(--muted, #888)); }
-.kc-draft__line.is-sl { border-top-color: color-mix(in srgb, var(--neg) 45%, var(--muted, #888)); }
-.kc-draft__tag {
+.kc-draft__line.is-trigger::before { border-top-style: dotted; }
+.kc-draft__tag,
+.kc-draft__price {
   position: absolute;
-  left: 8px;
-  bottom: 1px;
-  padding: 0 5px;
-  border-radius: 3px;
-  font-size: 10px;
-  line-height: 15px;
+  top: -9px;
+  box-sizing: border-box;
+  height: 18px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 16px;
   white-space: nowrap;
   color: var(--draft-ink);
-  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  background: var(--bg);
+  border: 1px dashed var(--draft-ink);
+}
+.kc-draft__tag {
+  left: 8px;
+  display: flex;
+  border-radius: 2px;
+}
+.kc-draft__tag > span { padding: 0 5px; }
+.kc-draft__amount {
+  font-family: var(--font-num);
+  border-left: 1px dashed var(--draft-ink);
+}
+.kc-draft__price {
+  /* The pane this layer is as wide as includes the price axis: the tag ends on its right edge. */
+  right: 0;
+  padding: 0 3px;
+  font-family: var(--font-num);
 }
 @keyframes kc-draft-pulse {
   0%, 100% { opacity: 0.22; }
   50% { opacity: 0.6; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .kc-draft__line { animation: none; opacity: 0.4; }
+  .kc-draft__line::before { animation: none; opacity: 0.4; }
 }
 /* Nobody at the page (attention.ts): the line rests as under reduced motion, still dashed and
    muted - the pulse recomposited the chart 60 times a second. */
-:root[data-still] .kc-draft__line { animation: none; opacity: 0.4; }
+:root[data-still] .kc-draft__line::before { animation: none; opacity: 0.4; }

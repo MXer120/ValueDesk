@@ -54,14 +54,14 @@ export function lineShapes(
     if (!Number.isFinite(price) || price <= 0) continue;
     const color =
       l.kind === 'position' ? positionInk(l, last, c) : l.side === 'buy' ? c.pos : l.side === 'sell' ? c.neg : c.muted;
-    // Dashed = not a resting limit price (a trigger, or the entry), exactly
-    // as orderOverlays draws it.
+    // Solid = what you hold; dashed = an order that has not filled, exactly as
+    // orderOverlays draws it.
     out.push({
       key: l.key,
       price,
       text: l.label,
       color,
-      dashed: l.kind !== 'limit',
+      dashed: l.kind !== 'position',
       // orderLines() already folded the session's gates (perps, unlocked) into
       // `draggable`; a position entry is never an order.
       draggable: l.kind !== 'position' && l.draggable && l.orderID !== undefined,

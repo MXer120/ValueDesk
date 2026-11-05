@@ -30,6 +30,8 @@ const line = (over: Partial<OrderLine>): OrderLine => ({
   price: '100',
   quantity: '2',
   label: 'BUY 2 @ 100',
+  tag: 'Buy limit',
+  amount: '2',
   symbol: 'BTC-USD',
   orderID: 7,
   draggable: true,
