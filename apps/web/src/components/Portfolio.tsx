@@ -1316,8 +1316,8 @@ export function fmtCompactSigned(v: number): string {
  * must not drift apart. Selection is amber text on a filled control - the
  * label never changes weight, so the group cannot re-flow under the cursor.
  */
-export function PeriodSeg({ period, onPeriod, label, periods = PERIODS }: {
-  period: Period; onPeriod: (p: Period) => void; label: string; periods?: readonly Period[];
+export function PeriodSeg({ period, onPeriod, label, periods = PERIODS, format = (p) => p }: {
+  period: Period; onPeriod: (p: Period) => void; label: string; periods?: readonly Period[]; format?: (p: Period) => string;
 }) {
   return (
     <div className="pf-seg" role="tablist" aria-label={label}>
@@ -1330,7 +1330,7 @@ export function PeriodSeg({ period, onPeriod, label, periods = PERIODS }: {
           className={`pf-ctl ${p === period ? 'is-on' : ''}`}
           onClick={() => onPeriod(p)}
         >
-          {p}
+          {format(p)}
         </button>
       ))}
     </div>

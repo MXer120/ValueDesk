@@ -58,9 +58,11 @@ function WealthValueCard({ w, value, slp }: { w: WealthState; value: number | nu
   };
   return (
     <Card className="pfx-value">
-      <span className="pfx-value__k">Wealth value</span>
-      <span className="pfx-value__v">{maskEquity(value === null ? DASH : fmtUsd(value))}</span>
-      <span className="pfx-value__sub">24h change <b className={p?.totalPnl24h ? signClass(num(p.totalPnl24h)) : undefined}>{p?.totalPnl24h ? maskPnl(signedUsd(num(p.totalPnl24h))) : DASH}</b></span>
+      <div className="pfx-value__top">
+        <span className="pfx-value__k">Wealth value</span>
+        <span className="pfx-value__v">{maskEquity(value === null ? DASH : fmtUsd(value))}</span>
+        <span className="pfx-value__sub">24h change <b className={p?.totalPnl24h ? signClass(num(p.totalPnl24h)) : undefined}>{p?.totalPnl24h ? maskPnl(signedUsd(num(p.totalPnl24h))) : DASH}</b></span>
+      </div>
       <div className="pfx-kv">
         {row('Total PnL', p?.totalPnl)}
         {row('Realized', p?.totalRealizedPnl)}
@@ -69,7 +71,7 @@ function WealthValueCard({ w, value, slp }: { w: WealthState; value: number | nu
         {row('In progress', p?.inFlightValue, false)}
         {slp !== null && <div className="pfx-kv__row" title="MAG7.ssi or sMAG7.ssi deposited into the liquidity vault. SoDEX reports no position for it, so it is SoDEX's account-value series minus what the series is known to hold."><span>SLP vault, inferred</span><b>{maskPnl(fmtUsd(slp))}</b></div>}
       </div>
-      {p?.complete === false && <p className="pf-note">SoDEX could not price every fund, so the figures leave those out.</p>}
+      {p?.complete === false && <p className="pf-note pfx-sum__note">SoDEX could not price every fund, so the figures leave those out.</p>}
     </Card>
   );
 }
@@ -94,7 +96,7 @@ function WealthChart({ address }: { address: string | null }) {
   }, [history.data, view]);
   return (
     <Card
-      className="pf-card--chart"
+      className="pf-card--chart pfx-chart"
       title={(
         <div className="pf-seg" role="tablist" aria-label="Chart">
           <button type="button" role="tab" aria-selected={view === 'value'} className={`pf-ctl ${view === 'value' ? 'is-on' : ''}`} onClick={() => setView('value')}>Wealth value</button>
@@ -396,7 +398,7 @@ function History({ address, refreshToken, w, onOpenMarket, provider, onDone }: {
         ),
     },
   ];
-  return <Card className="pf-card--band pfx-band"><div className="dash pf-band"><PanelTabs tabs={tabs} /></div></Card>;
+  return <div className="dash pfx-plain"><PanelTabs tabs={tabs.map((t) => ({ ...t, content: <Card className="pf-card--band pfx-band">{t.content}</Card> }))} /></div>;
 }
 
 export function WealthTab({ w, value, slp, address, provider, refreshToken, onOpenMarket, onDone }: {
@@ -412,7 +414,7 @@ export function WealthTab({ w, value, slp, address, provider, refreshToken, onOp
 }) {
   return (
     <div className="pfx-stack">
-      <div className="bots-top pfx-top">
+      <div className="pfx-top">
         <WealthValueCard w={w} value={value} slp={slp} />
         <WealthChart address={address} />
       </div>

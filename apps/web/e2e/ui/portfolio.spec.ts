@@ -179,11 +179,11 @@ h.test('Total Value counts each dollar once, and copies and bots have no bucket'
   assert.ok(Math.abs(wealth - 1826) < 0.02, `wealth ${wealth}`);
   assert.ok(spot < 200, `the vQQQ share left Spot (${spot})`);
   assert.equal(await p.locator('.pfx-bucket').count(), 4);
-  await until(p, async () => /Trades\s*2/.test(await p.locator('.pfx-sum').innerText()), 'the summary to add up the fills', 15_000);
+  await until(p, async () => /trades\s*2/.test(await p.locator('.pfx-sum').innerText()), 'the summary to add up the fills', 15_000);
   const sum = (await p.locator('.pfx-sum').innerText()).replace(/\s+/g, ' ');
   assert.match(sum, /Buys 1 Sells 1/);
-  assert.match(sum, /Volume \$300,00/);
-  assert.match(sum, /Fees paid \$0,12/);
+  assert.match(sum, /vol\. of trades \$300,00/);
+  assert.match(sum, /commission \$0,12/);
   await shot(p, 'trade-tab');
   for (const name of ['Spot', 'Wealth', 'Copy trading', 'Bots']) {
     await p.locator('.pfx-sections').getByRole('tab', { name, exact: true }).click();

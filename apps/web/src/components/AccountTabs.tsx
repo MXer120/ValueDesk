@@ -289,6 +289,12 @@ export function AccountTabs({
     },
   ];
 
+  // The portfolio's sections open on what the account holds.
+  if (scope) {
+    const at = tabs.findIndex((t) => t.key === 'balances');
+    if (at > 0) tabs.unshift(tabs.splice(at, 1)[0]!);
+  }
+
   const actions = (active: string): ReactNode => {
     if (active.startsWith('x:')) return null;
     // The Algos tab has no filters; its View pop-up holds the IDs switch alone.
