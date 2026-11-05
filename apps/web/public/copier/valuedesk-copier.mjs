@@ -9410,7 +9410,7 @@ var SendQueue = class {
     const weight = 1 + Math.floor(orders / 40);
     const now = Date.now();
     if (cls === "open") {
-      const why = this.items.length ? "closes and stops go first" : this.budget.cooldownLeft(now) > 0 ? `it is cooling down (${Math.ceil(this.budget.cooldownLeft(now) / 1e3)} s left); closes and stops go first` : this.budget.used(now) + weight > this.budget.perMinute * this.budget.openShare ? "the per-IP budget is nearly spent; closes and stops go first" : null;
+      const why = this.items.some((it) => it.accountId === accountId) ? "closes and stops go first" : this.budget.cooldownLeft(now) > 0 ? `it is cooling down (${Math.ceil(this.budget.cooldownLeft(now) / 1e3)} s left); closes and stops go first` : this.budget.used(now) + weight > this.budget.perMinute * this.budget.openShare ? "the per-IP budget is nearly spent; closes and stops go first" : null;
       if (why) return Promise.reject(new LocalRefusal(`SoDEX's rate limit is reached; ${why}`, path));
       if (this.rate.waitMs(accountId, orders, this.rate.share, now) > 0) {
         return Promise.reject(new LocalRefusal(`account ${accountId} is at SoDEX's order rate; closes and stops go first`, path, "account-rate"));
@@ -18269,6 +18269,7 @@ function auditedAlgoSink(inner, db, builderOf) {
 // src/brake.ts
 import { readFileSync as readFileSync3, statSync as statSync2 } from "node:fs";
 var READ_EVERY_MS = 1e3;
+var MAINTENANCE_BRAKE_MAX_MS = 15 * 6e4;
 var DEFAULT_REASON = "ValueDesk has paused trading on this executor for now.";
 function parseBrake(text) {
   let raw;
@@ -18306,6 +18307,11 @@ var Brake = class {
   /** The brake now (null: off). Cheap: re-reads at most once a second. */
   current(now = Date.now()) {
     if (now - this.checkedAt >= READ_EVERY_MS) this.read(now, false);
+    const b = this.state;
+    if (b?.cause === "maintenance" && b.since !== null && now - b.since > MAINTENANCE_BRAKE_MAX_MS) {
+      this.state = null;
+      this.onChange?.(null, b);
+    }
     return this.state;
   }
   /** Why a live copy may not trade now, or null. */
