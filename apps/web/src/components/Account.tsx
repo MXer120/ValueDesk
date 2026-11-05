@@ -54,6 +54,7 @@ import { signedMarginAmount } from '../trading/orderParams';
 import { useConfirm } from './Modal';
 import { TpSlSheet, type TpSlConfirm } from './TpSlSheet';
 import { planExit, type ExitExisting } from './tpsl';
+import { onPositionAction } from '../positionActions';
 import './Account.css';
 import { CoinIcon, CoinLabel } from './CoinIcon';
 import { HistoryTable, ReadFailed } from './AccountHistory';
@@ -692,6 +693,34 @@ function PositionsInner({
       setBusy(false);
     }
   }
+
+  // The chart's buttons on a position line ask for the same review and the same dialog as this table.
+  useEffect(() => onPositionAction((symbol, action) => {
+    const p = positions.find((x) => symbolOf(x) === symbol);
+    if (!p || readOnly || busy || !unlocked) return false;
+    if (action === 'close') {
+      void close(p);
+      return true;
+    }
+    const dir = positionDirection(p);
+    if (!dir) return false;
+    const sym = byName.get(symbol);
+    const exits = exitsFor(ordersFeed.data?.orders ?? [], symbol, pick(p, 'id'));
+    const raw = String(pick(p, 'size', 'positionAmt', 'pa', 'q') ?? '');
+    setPosEdit({
+      kind: 'tpsl',
+      symbol,
+      dir,
+      coin: coinLabel(sym?.baseCoin) || sym?.baseCoin || '',
+      fullQty: raw.startsWith('-') ? raw.slice(1) : raw,
+      entry: num(pick(p, 'avgEntryPrice')),
+      mark: markOf(symbol),
+      tick: sym?.tickSize,
+      tp: exitSnap(exits.tp),
+      sl: exitSnap(exits.sl),
+    });
+    return true;
+  }));
 
   if (engine !== 'perps') return null;
 

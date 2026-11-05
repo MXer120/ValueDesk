@@ -4,7 +4,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { NEWS_KINDS, SYSTEM_OVERLAYS, barOpen, calendarStories, clusterNews, fillMarks, markFace, newsCoin, newsKind, newsMarks, sanitizeShow, type NewsStory } from './chartMarks';
+import { NEWS_KINDS, SYSTEM_OVERLAYS, barOpen, calendarStories, clusterNews, fillMarks, MAX_FILL_MARKS, markFace, newsCoin, newsKind, newsMarks, sanitizeShow, type NewsStory } from './chartMarks';
 
 const MIN = 60_000;
 const DAY = 86_400_000;
@@ -183,4 +183,11 @@ test('heat is measured, not guessed: the hot list\'s place, a post\'s reach; hot
   assert.equal(isFocused(s('1', 1), { id: '902', title: 'STORY 1!' }), true, 'the hot list\'s copy of the story');
   assert.equal(isFocused(s('1', 1), { id: '2', title: '' }), false, 'a release is matched by its id alone');
   assert.equal(isFocused(s('1', 1), null), false);
+});
+
+test('only the newest fills get a mark: a bot must not bury the candles', () => {
+  const rows = Array.from({ length: MAX_FILL_MARKS + 25 }, (_, i) => ({ symbol: 'BTC-USD', side: 'BUY', price: '100', quantity: '1', time: (i + 1) * 60_000 }));
+  const marks = fillMarks(rows, 'BTC-USD', '1m');
+  assert.equal(marks.length, MAX_FILL_MARKS);
+  assert.equal(marks.at(-1)!.timestamp, (MAX_FILL_MARKS + 25) * 60_000, 'the newest stays');
 });

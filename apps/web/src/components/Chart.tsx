@@ -113,6 +113,7 @@ import { DrawingStyleBar } from '../chart/DrawingStyleBar';
 import { boxOf, marqueeHits, type Pt } from '../chart/marquee';
 import { SelectionMarks } from '../chart/SelectionMarks';
 import { DraftOrderLines } from '../chart/DraftOrderLines';
+import { askPositionAction } from '../positionActions';
 import { DrawingSettings, type DrawingDraft } from '../chart/DrawingSettings';
 import {
   EXEC_OVERLAY,
@@ -1001,6 +1002,8 @@ function Chart({
   const [drag, setDrag] = useState<PendingMove | null>(null);
   /** Dropped, snapped, and awaiting an explicit confirm. Nothing sent yet. */
   const [pending, setPending] = useState<PendingMove | null>(null);
+  /** An order whose X was clicked: nothing is sent until the bar over the chart is confirmed. */
+  const [cancelAsk, setCancelAsk] = useState<OrderLine | null>(null);
   /** Submitted, waiting for the venue to report it back. */
   const [awaiting, setAwaiting] = useState<PendingMove | null>(null);
   const [sending, setSending] = useState(false);
@@ -1139,6 +1142,15 @@ function Chart({
     },
     onLineClick: (line) => {
       if (!line.draggable && line.lockedReason) showLine('info', line.lockedReason);
+    },
+    onLineButton: (line, button) => {
+      if (line.kind !== 'position' && button === 'cancel') {
+        setCancelAsk(line);
+        return;
+      }
+      // A position's close and exits: the Positions table's own review and dialog.
+      const action = button === 'cancel' ? 'close' : 'tpsl';
+      if (!askPositionAction(line.symbol, action)) showLine('info', 'Open the Positions tab below the chart to do this.');
     },
   };
 
@@ -1761,6 +1773,7 @@ function Chart({
         onGone: (l) => lineHandlers.current?.onGone(l),
         onSettled: (l) => lineHandlers.current?.onSettled(l),
         onLineClick: (l) => lineHandlers.current?.onLineClick(l),
+        onLineButton: (l, b) => lineHandlers.current?.onLineButton(l, b),
       });
       // Menus are built from what this build ACTUALLY registers, not a
       // hardcoded list — a name that is not in here can never be created. Our
@@ -3715,7 +3728,24 @@ function Chart({
     setPending(null);
   }, [pending, abandon]);
 
-  /** The only path in this file that sends anything. */
+  /** The X on an order line, once confirmed. */
+  const confirmCancel = useCallback(async () => {
+    const line = cancelAsk;
+    if (!line || line.orderID === undefined) return;
+    setSending(true);
+    try {
+      await api.cancelOrder(engine, { symbol: line.symbol, orderID: line.orderID });
+      showLine('ok', 'Order cancelled.');
+      setCancelAsk(null);
+    } catch (e) {
+      showLine('err', e instanceof Error ? e.message : String(e));
+    } finally {
+      setSending(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cancelAsk, engine]);
+
+  /** The path that changes an order. */
   const confirmPending = useCallback(async () => {
     const p = pending;
     const l = layer.current;
@@ -4700,8 +4730,18 @@ function Chart({
           it. Persistent errors stay in flow above — a broken account feed is not
           transient and should keep its space.
         */}
-        {(active || ticket || lineMsg) && (
+        {(active || ticket || lineMsg || cancelAsk) && (
           <div ref={notices} className="kc-notices">
+            {cancelAsk && (
+              <div className="kc-movebar">
+                <span className="kc-movebar-title">Cancel this order?</span>
+                <span>{cancelAsk.label}</span>
+                <button className="btn-primary kc-confirm" onClick={() => void confirmCancel()} disabled={sending}>
+                  {sending ? 'Sending…' : 'Confirm — cancel live order'}
+                </button>
+                <button onClick={() => setCancelAsk(null)} disabled={sending}>Keep it</button>
+              </div>
+            )}
             {active && (
               <div className="kc-movebar">
                 <span className="kc-movebar-title">

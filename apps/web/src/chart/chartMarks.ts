@@ -1,10 +1,10 @@
 /**
  * Marks the chart puts on the candles by itself - never drawings:
  *
- *   Executions  the account's own fills on this market, TradingView's arrows:
- *               a buy points up at its price from below, a sell down from
- *               above; fills of one side in one bar are one arrow (their
- *               size-weighted price, their total size, how many).
+ *   Executions  the account's recent fills on this market, B or S in a circle:
+ *               a buy below its price, a sell above; fills of one side in
+ *               one bar are one mark (their size-weighted price, their total
+ *               size, how many, in its tip).
  *   News        SoSoValue stories (server /api/vs/news) on the bar they came
  *               out in - this coin's, or the macro ones (category 5) - as
  *               markers along the foot of the price pane (NewsMarkers.tsx,
@@ -15,7 +15,7 @@
  *               the FOMC, CPI, jobs, GDP, PCE...) on the bar they are due,
  *               the coming ones in the space right of the last bar.
  *
- * The arrows are an overlay the user cannot select, move, style or save:
+ * The marks are an overlay the user cannot select, move, style or save:
  * Chart.tsx keeps the chart's own overlays out of everything that handles
  * drawings (SYSTEM_OVERLAYS), so "remove all", "hide all", the object list and
  * the snapshot never see them.
@@ -25,6 +25,7 @@
 import type { OverlayTemplate } from 'klinecharts';
 import type { CalendarEvent, CalendarSource } from '../vsApi';
 import { ORDER_LINE_OVERLAY } from './orderOverlays';
+import { isLight } from '../theme';
 import { FAMILY, T } from './theme';
 import { intervalToMs } from './timeAxis';
 
@@ -81,7 +82,10 @@ const sideOf = (v: unknown): 'buy' | 'sell' | null => {
   return s === 'BUY' || s === 1 ? 'buy' : s === 'SELL' || s === 2 ? 'sell' : null;
 };
 
-/** The gateway's trade rows (account trades) of one market as one arrow per bar and side. */
+/** How many bar-and-side marks a chart shows, the newest. */
+export const MAX_FILL_MARKS = 40;
+
+/** The gateway's trade rows (account trades) of one market as one mark per bar and side. */
 export function fillMarks(rows: readonly unknown[], symbol: string, interval: string, lookup?: (ts: number) => number | null): FillMark[] {
   const by = new Map<string, { m: FillMark; notional: number }>();
   for (const r of rows) {
@@ -105,7 +109,8 @@ export function fillMarks(rows: readonly unknown[], symbol: string, interval: st
       by.set(key, { m: { key, timestamp, side, price, qty, count: 1, last: time }, notional: price * qty });
     }
   }
-  return [...by.values()].map((g) => g.m).sort((a, b) => a.timestamp - b.timestamp || a.side.localeCompare(b.side));
+  // Only the recent ones (owner 2026-11-05: "Limited ofcourse only recent not ALL"): a bot's thousands would bury the candles.
+  return [...by.values()].map((g) => g.m).sort((a, b) => a.timestamp - b.timestamp || a.side.localeCompare(b.side)).slice(-MAX_FILL_MARKS);
 }
 
 // --- news ---------------------------------------------------------------------------
@@ -269,10 +274,9 @@ export function newsCoin(base: string | null | undefined): string {
 
 // --- overlays ----------------------------------------------------------------------
 
-const ARROW_W = 9;
-const ARROW_H = 7;
-/** Gap between the fill's price and the arrow's tip. */
-const ARROW_GAP = 2;
+/** A fill: B or S in a circle, a buy below its price and a sell above. */
+const MARK_R = 9;
+const MARK_GAP = 2;
 
 /** One fill arrow; its FillMark rides in extendData. */
 const execTemplate: OverlayTemplate = {
@@ -286,25 +290,17 @@ const execTemplate: OverlayTemplate = {
     const p = coordinates[0];
     const m = overlay.extendData as FillMark | undefined;
     if (!p || !m) return [];
-    const up = m.side === 'buy';
-    const color = up ? T.pos : T.neg;
-    const tip = up ? p.y + ARROW_GAP : p.y - ARROW_GAP;
-    const base = up ? tip + ARROW_H : tip - ARROW_H;
-    const figures: ReturnType<NonNullable<OverlayTemplate['createPointFigures']>> = [
+    const buy = m.side === 'buy';
+    const y = buy ? p.y + MARK_R + MARK_GAP : p.y - MARK_R - MARK_GAP;
+    const figures = [
+      { type: 'circle', attrs: { x: p.x, y, r: MARK_R }, styles: { style: 'fill', color: buy ? T.pos : T.neg } },
       {
-        type: 'polygon',
-        attrs: { coordinates: [{ x: p.x, y: tip }, { x: p.x - ARROW_W / 2, y: base }, { x: p.x + ARROW_W / 2, y: base }] },
-        styles: { style: 'fill', color },
-      },
-    ];
-    if (m.count > 1) {
-      (figures as unknown[]).push({
         type: 'text',
         ignoreEvent: true,
-        attrs: { x: p.x, y: up ? base + 2 : base - 2, text: String(m.count), align: 'center', baseline: up ? 'top' : 'bottom' },
-        styles: { color, size: 10, family: FAMILY, weight: 600, backgroundColor: 'transparent', borderSize: 0, paddingLeft: 0, paddingRight: 0, paddingTop: 0, paddingBottom: 0 },
-      });
-    }
+        attrs: { x: p.x, y, text: buy ? 'B' : 'S', align: 'center', baseline: 'middle' },
+        styles: { color: isLight() ? '#ffffff' : T.bg, size: 11, family: FAMILY, weight: 600, backgroundColor: 'transparent', borderColor: 'transparent', borderSize: 0, paddingLeft: 0, paddingRight: 0, paddingTop: 0, paddingBottom: 0 },
+      },
+    ] as ReturnType<NonNullable<OverlayTemplate['createPointFigures']>>;
     return figures;
   },
 };

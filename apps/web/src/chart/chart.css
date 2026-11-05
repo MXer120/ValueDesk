@@ -1929,9 +1929,9 @@ body.kc-flow-resizing:has(.kc-flow-wrap.is-under) { cursor: row-resize; }
 .kc-newspop__fig i { color: var(--muted); font-family: var(--font-num); font-size: 10px; font-style: normal; }
 .kc-newspop__figs.is-out .kc-newspop__fig { background: color-mix(in srgb, var(--pos) 9%, transparent); }
 
-/* The ticket's unplaced order (DraftOrderLines.tsx): a placed order's line, label and price tag
-   (orderOverlays.ts: 18px, 12px, radius 2, padding 6; the tag square, padding 4), darker and
-   pulsing. Nothing else tells them apart. The pulse is opacity, so the compositor's alone. */
+/* The ticket's unplaced order (DraftOrderLines.tsx): a placed order's dotted line, boxes and price tag
+   (orderOverlays.ts: 18px, 12px, radius 2, padding 6, gap 2), darker and pulsing. Nothing else tells
+   them apart. The pulse is opacity, so the compositor's alone. */
 .kc-draft {
   position: absolute;
   z-index: 4;
@@ -1949,43 +1949,43 @@ body.kc-flow-resizing:has(.kc-flow-wrap.is-under) { cursor: row-resize; }
   left: 0;
   right: 0;
   height: 0;
-  border-top: 1px dashed var(--draft-ink);
+  border-top: 1px dotted var(--draft-ink);
 }
-.kc-draft__tag,
-.kc-draft__price {
+.kc-draft__tag {
   position: absolute;
+  display: flex;
+  gap: 2px;
+  white-space: nowrap;
+}
+.kc-draft__word,
+.kc-draft__amount,
+.kc-draft__price {
   box-sizing: border-box;
   height: 18px;
+  padding: 0 5px;
   font-size: 12px;
   font-weight: 500;
   line-height: 16px;
-  white-space: nowrap;
+  border-radius: 2px;
   border: 1px solid var(--draft-ink);
 }
-.kc-draft__tag {
-  display: flex;
-  overflow: hidden;
-  border-radius: 2px;
-  color: var(--draft-ink);
-  background: var(--bg-panel);
-}
 .kc-draft__word,
-.kc-draft__amount {
-  box-sizing: border-box;
-  flex: none;
-  padding: 0 5px;
+.kc-draft__price {
+  color: var(--kc-draft-on, var(--bg));
+  background: var(--draft-ink);
 }
 .kc-draft__amount {
   font-family: var(--font-num);
-  color: var(--kc-draft-on, var(--text));
-  background: var(--draft-ink);
+  color: var(--text);
+  background: var(--bg);
+  border-color: var(--muted);
 }
 .kc-draft__price {
+  position: absolute;
   right: 0;
   padding: 0 3px;
   font-family: var(--font-num);
-  color: var(--kc-draft-on, var(--text));
-  background: var(--draft-ink);
+  white-space: nowrap;
 }
 @keyframes kc-draft-pulse {
   0%, 100% { opacity: 0.65; }

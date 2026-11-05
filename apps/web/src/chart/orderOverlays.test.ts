@@ -31,41 +31,35 @@ test('each line says what it is in one word, and its size apart from it', () => 
   const o = { symbol: 'S', canModify: true };
   const stop = (extra: object) => orderLines([{ symbol: 'S', orderID: 1, side: 'SELL', stopPrice: '90', quantity: '2', ...extra }], o)[0];
   const limit = orderLines([{ symbol: 'S', orderID: 2, side: 'SELL', price: '100', quantity: '2', type: 'LIMIT' }], o)[0];
-  assert.equal(limit?.tag, 'Sell limit');
+  assert.equal(limit?.tag, 'Limit');
   assert.equal(limit?.amount, fmtQty('2'));
   assert.equal(stop({ stopType: 'TAKE_PROFIT', reduceOnly: true })?.tag, 'TP');
   assert.equal(stop({ stopType: 'STOP_LOSS', reduceOnly: true })?.tag, 'SL');
   assert.equal(stop({ stopType: 2, reduceOnly: true })?.tag, 'TP', "the stream's enum");
-  assert.equal(stop({ stopType: 'STOP_LOSS' })?.tag, 'Sell stop', 'a stop that does not close a position is no stop-loss');
+  assert.equal(stop({ stopType: 'STOP_LOSS' })?.tag, 'Stop', 'a stop that does not close a position is no stop-loss');
   assert.equal(orderLines([{ symbol: 'S', orderID: 3, price: '100', quantity: '2' }], o)[0]?.tag, 'Limit', 'a side that cannot be read is not guessed');
   const long = positionLines([{ symbol: 'S', positionSide: 2, size: '0.5', avgEntryPrice: '100' }], o)[0];
   const short = positionLines([{ symbol: 'S', size: '-0.5', avgEntryPrice: '100' }], o)[0];
   assert.deepEqual([long?.tag, long?.amount, short?.tag, short?.amount], ['Long', fmtQty('0.5'), 'Short', fmtQty('0.5')]);
 });
 
-test('every label is in one column at one size; only ones that would overlap move, and as little as they can', () => {
-  const row = (key: string, y: number, head = 80, amount = 60) => ({ key, y, head, amount });
-  const at = layoutLabels([row('far', 300, 50, 40), row('b', 110, 100, 70), row('a', 100), row('c', 125)], 1000);
-  assert.equal(at.x, 680, 'one left edge for all of them');
-  assert.equal(at.head, 104, 'the widest word, in steps so a ticking PnL does not resize them');
-  assert.equal(at.amount, 72);
-  assert.equal(at.dy.get('far'), 0, 'a line with room keeps its label on it');
-  const place = (k: string) => [100, 110, 125].at(['a', 'b', 'c'].indexOf(k))! + at.dy.get(k)!;
+test('only labels that would overlap move, as little as they can; a line with room keeps its label', () => {
+  const dy = layoutLabels([{ key: 'far', y: 300 }, { key: 'b', y: 110 }, { key: 'a', y: 100 }, { key: 'c', y: 125 }]);
+  assert.equal(dy.get('far'), 0);
+  const place = (k: string) => [100, 110, 125].at(['a', 'b', 'c'].indexOf(k))! + dy.get(k)!;
   assert.ok(place('b') - place('a') >= 19 && place('c') - place('b') >= 19, 'none on another');
-  assert.equal(Math.abs(at.dy.get('a')! + at.dy.get('b')! + at.dy.get('c')!) <= 1, true, 'around where the lines are, not all downwards');
-
-  const narrow = layoutLabels([row('a', 10, 100, 100)], 240);
-  assert.equal(narrow.x, 24, 'a phone: the column ends clear of the axis');
-  assert.deepEqual(layoutLabels([], 500).dy.size, 0);
+  assert.ok(Math.abs(dy.get('a')! + dy.get('b')! + dy.get('c')!) <= 1, 'around where the lines are, not all downwards');
+  assert.equal(layoutLabels([]).size, 0);
 });
 
 test('a preview says what the placed order will say, in its colour', () => {
-  assert.deepEqual(draftLabelParts('Limit · 0.5 BTC', 'limit', 'sell'), { tag: 'Sell limit', amount: '0.5 BTC' });
-  assert.deepEqual(draftLabelParts('Trigger · 0.5 BTC', 'trigger', 'buy'), { tag: 'Buy stop', amount: '0.5 BTC' });
-  assert.deepEqual(draftLabelParts('DCA 3/5 · 0.01 BTC', 'limit', 'buy'), { tag: 'DCA 3/5', amount: '0.01 BTC' }, "an algo's own name stays");
-  assert.deepEqual(draftLabelParts('TP', 'tp', 'buy'), { tag: 'TP', amount: null });
-  assert.equal(draftInkSide('tp', 'buy'), 'sell', 'it closes a long, as the placed TP does');
-  assert.equal(draftInkSide('limit', 'buy'), 'buy');
+  assert.deepEqual(draftLabelParts('Limit · 0.5 BTC'), { tag: 'Limit', amount: '0.5 BTC' });
+  assert.deepEqual(draftLabelParts('Trigger · 0.5 BTC'), { tag: 'Stop', amount: '0.5 BTC' });
+  assert.deepEqual(draftLabelParts('DCA 3/5 · 0.01 BTC'), { tag: 'DCA 3/5', amount: '0.01 BTC' });
+  assert.deepEqual(draftLabelParts('TP'), { tag: 'TP', amount: null });
+  assert.equal(draftInkSide('tp', 'sell'), 'buy', 'a TP is green');
+  assert.equal(draftInkSide('sl', 'buy'), 'sell', 'an SL is red');
+  assert.equal(draftInkSide('limit', 'sell'), 'sell');
 });
 
 test('orders of another market are not drawn', () => {
