@@ -408,3 +408,27 @@ test('an order on its way when the process died: planned again only when the fol
   assert.equal((await p.settleSending(s.id)).size, 0, 'nothing written down: nothing to do');
   await rt.stop();
 });
+
+test('no market list at the start: nothing reads "not on SoDEX", and once it is in the leader\'s move is copied', async () => {
+  const w: World = { leaderPositions: [], followerPositions: [], builderRate: 25, mark: 80_000 };
+  const sent: Intent[][] = [];
+  const { rt } = runtime(w, () => brakeSink(sent));
+  type Priv = { host: { sodex: { markets(): Promise<unknown[]> } }; loadMarkets(): Promise<void>; states: Map<string, { leaderPos: Record<string, number>; skips: number }> };
+  const p = rt as unknown as Priv;
+  const real = p.host.sodex.markets.bind(p.host.sodex);
+  p.host.sodex.markets = async () => { throw new Error('502'); };
+  await rt.start();
+  const s = await rt.add(sub({ copyExisting: true }, { id: 'ml' }));
+  await until(() => sodexWs()?.readyState === 1);
+  await wait(150);
+  sodexWs().push(print(70, 'BUY', '1', '80000', LEADER_ID, 1002));
+  await wait(300);
+  assert.equal(sent.length, 0);
+  assert.deepEqual(p.states.get(s.id)!.leaderPos, {}, 'the state did not move past it');
+  assert.equal(p.states.get(s.id)!.skips, 0);
+  p.host.sodex.markets = real;
+  await p.loadMarkets();
+  await until(() => sent.length === 1, 3_000);
+  assert.ok(sent[0]!.some((i) => !i.reduceOnly));
+  await rt.stop();
+});

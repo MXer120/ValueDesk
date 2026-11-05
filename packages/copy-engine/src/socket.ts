@@ -13,6 +13,11 @@ export interface LiveSocketOptions {
   ping: string;
   pingMs?: number;
   staleMs?: number;
+  /**
+   * For a stream that always has something to say (every market's marks): no data for this long means it is dead,
+   * even though it answers pings. Unset: a pong counts as life, for streams that may rightly be quiet.
+   */
+  dataStaleMs?: number;
   /** `fresh`: a new socket (every subscription is gone); otherwise the set changed on a live one. */
   subscribe: (send: (msg: unknown) => void, fresh: boolean) => void;
   onMessage: (msg: unknown) => void;
@@ -26,6 +31,7 @@ export class LiveSocket {
   private running = false;
   private attempt = 0;
   private lastMessageAt = 0;
+  private lastDataAt = 0;
   private lastPingAt = 0;
   private tick: unknown = null;
   private retry: unknown = null;
@@ -75,6 +81,7 @@ export class LiveSocket {
     }
     this.ws = ws;
     this.lastMessageAt = Date.now();
+    this.lastDataAt = Date.now();
     ws.onopen = () => {
       this.attempt = 0;
       this.upSince = Date.now();
@@ -86,6 +93,7 @@ export class LiveSocket {
       this.lastMessageAt = Date.now();
       const raw = typeof ev.data === 'string' ? ev.data : String(ev.data);
       if (!raw || raw === 'pong') return;
+      this.lastDataAt = Date.now();
       let msg: unknown;
       try {
         msg = JSON.parse(raw);
@@ -140,8 +148,9 @@ export class LiveSocket {
   private check(): void {
     if (!this.running) return;
     const now = Date.now();
-    if (this.ws && now - this.lastMessageAt > (this.o.staleMs ?? 90_000)) {
-      this.o.log?.warn(`${this.o.name ?? 'socket'}: silent, replacing`, { silentMs: now - this.lastMessageAt });
+    const noData = this.o.dataStaleMs !== undefined && now - this.lastDataAt > this.o.dataStaleMs;
+    if (this.ws && (noData || now - this.lastMessageAt > (this.o.staleMs ?? 90_000))) {
+      this.o.log?.warn(`${this.o.name ?? 'socket'}: silent, replacing`, { silentMs: now - this.lastMessageAt, noDataMs: now - this.lastDataAt });
       this.drop();
       this.schedule();
       return;

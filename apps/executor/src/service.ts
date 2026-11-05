@@ -1226,6 +1226,9 @@ export class ExecutorService {
       usd = r && typeof r.m === 'number' ? r.m / 1e6 : 0;
     } catch (e) {
       this.deps.log.warn('copy fee: the builder ledger could not be read', { error: String(e) });
+      // Opened anew at the next read: a handle on a file since replaced would fail, or read the old one, for ever.
+      try { this.builderDb?.close(); } catch { /* closed */ }
+      this.builderDb = null;
     }
     this.rememberVolume(owner, usd);
     return usd;

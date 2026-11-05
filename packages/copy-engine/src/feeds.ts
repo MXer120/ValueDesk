@@ -300,6 +300,8 @@ export class SodexFeed {
       factory: o.factory,
       ping: '{"op":"ping"}',
       name: 'sodex-perps',
+      // allMarkPrice comes every few seconds: a socket that only answers pings had gone deaf with its status "up".
+      dataStaleMs: 90_000,
       log: o.log,
       subscribe: (send, fresh) => this.subscribeAll(send, fresh),
       onMessage: (m) => this.handle(m),

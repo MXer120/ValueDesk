@@ -86,6 +86,8 @@ export const HL_COINS_RETRY_MS = 30_000;
 export const HL_MAX_COINS = 990;
 /** How long a sent order may still be matched to fills on the stream. */
 const PENDING_MS = 30_000;
+/** The market list failed: asked again this soon. */
+const MARKETS_RETRY_MS = 15_000;
 /** How often a copy with moves held by the brake looks whether it is off. */
 const BRAKE_CHECK_MS = 2_000;
 /** A release's brake up to this long: what the leader opened meanwhile is still copied. The longest of 34 ships held it 59 s. */
@@ -299,6 +301,9 @@ export class CopyRuntime {
   private hlCoinsRetry = HL_COINS_RETRY_MS;
   /** Copies whose leader could not be read when they started (or were restored): caught up once it is seeded. */
   private awaitingSeed = new Set<string>();
+  private marketsRetry: ReturnType<typeof timers.after> | null = null;
+  /** start() has gone through its own catch-up. */
+  private started = false;
   /** Copies with leader moves held by the brake: subId -> when first held. Gone through by resumeHeld. */
   private held = new Map<string, number>();
   /** subId|symbol told once per brake that its leader moved and it waits. */
@@ -350,6 +355,7 @@ export class CopyRuntime {
     const replay = new Map<string, Set<string>>();
     for (const id of restored) replay.set(id, await this.settleSending(id));
     for (const id of restored) this.catchUp(id, { open: replay.get(id) });
+    this.started = true;
     for (const s of this.subs.values()) if (this.live(s)) void this.checkReady(s);
     this.timers.push(
       timers.every(RECONCILE_MS, () => void this.reconcileAll()),
@@ -373,6 +379,7 @@ export class CopyRuntime {
     for (const t of this.refreshTimers.values()) timers.cancel(t);
     for (const t of this.stopTimers.values()) timers.cancel(t);
     timers.cancel(this.hlCoinsTimer);
+    timers.cancel(this.marketsRetry);
     this.sodexFeed?.stop();
     this.hlFeed?.stop();
     await Promise.allSettled([...this.queues.values()]);
@@ -613,6 +620,9 @@ export class CopyRuntime {
       await this.applyLocalRules(s.id);
       s = this.need(subId);
     }
+    // No market list yet (SoDEX failed it at the start): every coin would read "not on SoDEX" and the state would
+    // move past the trade. Left as it is: once the list is in, the difference is planned (loadMarkets).
+    if (!this.markets.size) return;
     // Braked: the state stays where it was, so the lift sees this move (resumeHeld). It used to move on with the
     // leader here, the order dropped: a leader's close during a release left the follower holding the position.
     const braked = this.brakedNow(s);
@@ -2180,12 +2190,21 @@ export class CopyRuntime {
   }
 
   private async loadMarkets(): Promise<void> {
+    const had = this.markets.size;
     try {
       const list = await this.host.sodex.markets();
       if (list.length) this.markets.load(list);
       for (const p of await this.host.sodex.markPrices()) this.markets.setMark(p.symbol, p.price);
     } catch (e) {
       this.host.log.warn('copy: market list failed', { error: String(e) });
+    }
+    if (!this.markets.size && this.running) {
+      // Ten minutes (MARKETS_REFRESH_MS) is too long to copy nothing: again soon.
+      timers.cancel(this.marketsRetry);
+      this.marketsRetry = timers.after(MARKETS_RETRY_MS, () => void this.loadMarkets().then(() => this.sodexFeed?.refreshSymbols()));
+    } else if (!had && this.markets.size && this.started) {
+      // Late: what waited for the list.
+      for (const s of this.list()) this.enqueue(s.owner, async () => this.catchUp(s.id));
     }
     // A copied position on a market that left the list: the follower hears of it once.
     await this.noteDelisted().catch((e) => this.host.log.warn('copy: delisting check failed', { error: String(e) }));
