@@ -4,18 +4,26 @@
 //   node --disable-warning=ExperimentalWarning backup-index.mjs <source.db> <copy.db>
 //   node --disable-warning=ExperimentalWarning backup-index.mjs --check <file.db>
 //
-// HOW. The source is opened READ-ONLY and copied with `VACUUM INTO`: one read
-// transaction, so the copy is the database exactly as it was at one instant,
-// whatever the indexer writes meanwhile (WAL: readers never block the writer).
+// HOW. Where the filesystem can share blocks (XFS with reflink, as on the servers): a read
+// transaction is opened on the source, so the WAL cannot restart, then the file and then its WAL
+// are cloned, in that order, and the transaction ends: under two seconds on any size. Every page a
+// checkpoint put in the cloned file came from a frame still in the cloned WAL, so opening the copy
+// replays to one committed instant. Everywhere else: `VACUUM INTO`, one read transaction.
 // The copy is then opened and checked (`PRAGMA quick_check`) before this exits 0.
+//
+// WHY THE CLONE (2026-11-05). VACUUM INTO on the 45 GB index held its read transaction for up to
+// 170 minutes. Nothing in the WAL could be copied back meanwhile, it grew to about 25 GB, and the
+// indexer stalled for up to 834 s at a time: 11 of its 12 worst stalls fell inside a backup, and
+// the backup timed out twice. The clone holds nothing of the source's once it is taken.
 //
 // WHY NOT `sqlite3 .backup` or a file copy. The backup API restarts every time
 // another connection writes, and the indexer writes every few seconds, so it may
 // never finish. A plain copy of the .db file without its -wal is not a database.
 //
-// While it runs the WAL cannot be checkpointed past the copy's snapshot, so the
-// -wal file grows by what the indexer writes in those minutes; it shrinks again
-// afterwards. The copy needs as much free space as the database.
+// With VACUUM INTO, while it runs the WAL cannot be checkpointed past the copy's snapshot, so
+// the -wal file grows by what the indexer writes in those minutes; it shrinks again
+// afterwards. It needs as much free space as the database. A clone needs space only as the
+// source changes, while the clone lasts.
 //
 // Runs on the instance (backup.sh) and on a developer machine alike (to seed a new
 // instance from a local index: see docs/deploy/DEPLOY.md). Node 22.13+, no dependencies.
@@ -24,6 +32,7 @@
 // with it the same way. The index-only facts in the report (schema, boards,
 // coverage) are null for a database without those tables.
 import { DatabaseSync } from 'node:sqlite';
+import { execFileSync } from 'node:child_process';
 import { existsSync, statSync, unlinkSync } from 'node:fs';
 import { resolve } from 'node:path';
 
@@ -78,17 +87,56 @@ if (!existsSync(source)) fail(`${source} does not exist`);
 if (source === dest) fail('the copy cannot be the source');
 if (existsSync(dest)) fail(`${dest} already exists - a backup never overwrites`);
 
+const clean = () => {
+  for (const f of [dest, `${dest}-wal`, `${dest}-shm`]) {
+    try { if (existsSync(f)) unlinkSync(f); } catch { /* reported by what follows */ }
+  }
+};
+
+/** The clone; false when this filesystem cannot, and nothing is left behind. */
+function cloneInto() {
+  if (process.env.BACKUP_NO_CLONE) return false;
+  const db = new DatabaseSync(source, { readOnly: true });
+  try {
+    db.exec('PRAGMA busy_timeout = 30000');
+    db.exec('BEGIN');
+    db.prepare('SELECT count(*) FROM sqlite_master').get(); // the read transaction starts here
+    const clone = (from, to) => execFileSync('cp', ['--reflink=always', from, to], { stdio: 'ignore' });
+    clone(source, dest);
+    if (existsSync(`${source}-wal`)) clone(`${source}-wal`, `${dest}-wal`);
+    db.exec('COMMIT');
+  } catch {
+    clean();
+    return false;
+  } finally {
+    db.close();
+  }
+  // The WAL goes into the copy, so that it is one file and whatever reads it next reads only it.
+  const copy = new DatabaseSync(dest);
+  try {
+    copy.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+    copy.exec('PRAGMA journal_mode = DELETE');
+  } finally {
+    copy.close();
+  }
+  return true;
+}
+
 const started = Date.now();
-const db = new DatabaseSync(source, { readOnly: true });
-try {
-  // Wait for a checkpoint or a writer's commit rather than fail on a busy file.
-  db.exec('PRAGMA busy_timeout = 30000');
-  db.exec(`VACUUM INTO '${dest.replace(/'/g, "''")}'`);
-} catch (e) {
-  try { if (existsSync(dest)) unlinkSync(dest); } catch { /* reported below */ }
-  fail(`copy failed: ${e?.message ?? e}`);
-} finally {
-  db.close();
+let method = 'clone';
+if (!cloneInto()) {
+  method = 'vacuum';
+  const db = new DatabaseSync(source, { readOnly: true });
+  try {
+    // Wait for a checkpoint or a writer's commit rather than fail on a busy file.
+    db.exec('PRAGMA busy_timeout = 30000');
+    db.exec(`VACUUM INTO '${dest.replace(/'/g, "''")}'`);
+  } catch (e) {
+    clean();
+    fail(`copy failed: ${e?.message ?? e}`);
+  } finally {
+    db.close();
+  }
 }
 
 const result = inspect(dest);
@@ -99,6 +147,7 @@ if (!result.ok) {
 console.log(JSON.stringify({
   source,
   copy: dest,
+  method,
   sourceBytes: statSync(source).size,
   seconds: Math.round((Date.now() - started) / 100) / 10,
   ...result,
