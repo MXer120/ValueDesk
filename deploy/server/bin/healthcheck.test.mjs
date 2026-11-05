@@ -163,10 +163,10 @@ test('an indexer that stopped publishing, a stale board, an old backup and a wro
   const cases = [
     [{}, { health: indexerHealth({ statusAgeMs: 10 * 60_000 }) }, 'indexer', /status is \d+ s old/],
     [{}, { health: null }, 'indexer', /has not published a status/],
-    [{}, { health: indexerHealth({ buildAgeMs: 30 * 60_000 }) }, 'indexer', /last build \d+ s ago/],
+    [{}, { health: indexerHealth({ buildAgeMs: 90 * 60_000 }) }, 'indexer', /last build \d+ s ago/],
     [{}, { health: indexerHealth({ liqAgeMs: 16 * 3_600_000, liqReady: false }) }, 'indexer', /heatmap levels \d+ s old, engine not ready/],
     [{}, { health: indexerHealth({ liqAgeMs: null, liqSinceMs: 20 * 60_000 }) }, 'indexer', /heatmap levels not written since the start \d+ s ago/],
-    [{}, { boardAgeMs: 30 * 60_000 }, 'index', /the board is \d+ s old/],
+    [{}, { boardAgeMs: 90 * 60_000 }, 'index', /the board is \d+ s old/],
     [{}, { secrets: [OTHER_SECRET] }, 'index', /refused the origin secret/],
     [{ backupAgeH: 50 }, {}, 'backup', /last-backup: the last one is 50 h old/],
   ];
@@ -386,7 +386,7 @@ test('Telegram: an alert that could not be delivered is tried again on the next 
 test('Telegram: a check that newly fails while already alerted is news (after two passes), and a reminder comes after HEALTH_REALERT_H', async () => {
   const f = fixture();
   const bad = await api({ notHosted: true });
-  const worse = await api({ notHosted: true, boardAgeMs: 30 * 60_000 });
+  const worse = await api({ notHosted: true, boardAgeMs: 90 * 60_000 });
   const tg = await telegram();
   try {
     await run(env(f, bad, tg.env));

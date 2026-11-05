@@ -137,7 +137,7 @@ test('brake mid-run: a maintenance brake holds running live algos and copies exa
   let t = Date.now();
   try {
     assert.equal(algoBrake(), null);
-    writeFileSync(file, JSON.stringify({ copies: true, algos: true, reason: 'Updating the copy executor.', since: 1, cause: 'maintenance' }));
+    writeFileSync(file, JSON.stringify({ copies: true, algos: true, reason: 'Updating the copy executor.', since: Date.now(), cause: 'maintenance' }));
     svc.brake.current((t += 2_000));
     assert.match(algoBrake() ?? '', /paused all algo orders on this executor: Updating the copy executor\./);
     assert.match(copyBrake() ?? '', /paused all copy trading on this executor: Updating the copy executor\./);
