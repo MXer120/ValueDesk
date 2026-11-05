@@ -16,8 +16,8 @@
  *                                      address on the executor's own box - not this one).
  *                                      Asked again, or on VALUESCAN_STATUS_EXECUTOR_DIRECT_URL,
  *                                      before a bad answer counts: probeExecutor
- *   indexer   its own status, read in this process (hosted.ts indexerHealth): fresh
- *             and every stream up, else `degraded` (a stream down) or `down` (stale)
+ *   indexer   its own status, read in this process (hosted.ts indexerHealth): fresh, every
+ *             stream up and boards under an hour old, else `degraded` or `down` (stale)
  *
  * Each answer is one minute's sample in `status.db` (the server's data directory;
  * SQLite, WAL) and adds one minute to that UTC day's tally. Both are kept (about
@@ -63,6 +63,8 @@ const SAMPLE_KEEP_MS = 2 * 86_400_000;
 const STALE_MS = 5 * 60_000;
 /** The indexer publishes its status every 30 s (hosted.ts IndexerHealth.at). */
 const INDEXER_STALE_MS = 180_000;
+/** Boards last built longer ago than this: the indexer runs, but its figures are behind. */
+const INDEXER_BOARDS_OLD_MS = 60 * 60_000;
 export const DEFAULT_SITE = 'https://www.valuedesk.so';
 
 const STATE_CODE: Record<Exclude<ServiceState, 'unknown'>, number> = { down: 0, degraded: 1, up: 2 };
@@ -480,7 +482,10 @@ function indexerState(status: () => unknown, now: () => number): 'up' | 'degrade
   }
   const fresh = h?.at !== null && h?.at !== undefined && now() - h.at <= INDEXER_STALE_MS;
   const streams = Object.values(h?.streams ?? {});
-  return !fresh ? 'down' : streams.length && streams.every(Boolean) ? 'up' : 'degraded';
+  if (!fresh) return 'down';
+  // Boards hours old under a green page: 11.3 h on 2026-11-04 with most of that day counted as up.
+  const boardsOld = typeof h?.lastBuildAt === 'number' && h.lastBuildAt > 0 && now() - h.lastBuildAt > INDEXER_BOARDS_OLD_MS;
+  return streams.length && streams.every(Boolean) && !boardsOld ? 'up' : 'degraded';
 }
 
 async function probeIndexer(status: () => unknown, now: () => number, recheckMs: number): Promise<'up' | 'degraded' | 'down'> {

@@ -81,6 +81,13 @@ test('probes: no answer is asked once more before it counts; a bad answer is not
   assert.equal(down.find((s) => s.service === 'executor')!.state, 'down', 'twice no answer: down');
 });
 
+test('probes: boards over an hour old are degraded, even with every stream up; a start with no build yet is not', async () => {
+  const stateOf = async (lastBuildAt: number) => (await probeAll({ targets: TARGETS, fetch: fakeFetch(ALL_UP), now: () => T0, indexerRecheckMs: 0, indexerStatus: () => ({ at: T0 - 20_000, sockets: { sodex: true }, lastBuildAt }) })).find((s) => s.service === 'indexer')!.state;
+  assert.equal(await stateOf(T0 - 10 * MIN), 'up');
+  assert.equal(await stateOf(T0 - 61 * MIN), 'degraded');
+  assert.equal(await stateOf(0), 'up');
+});
+
 test('probes: an indexer stream back by the next status is up; down in both is degraded; a stale status is down at once', async () => {
   const healthy = { sodex: true, hyperliquid: true };
   const sequence = (...streams: Array<Record<string, boolean>>) => {

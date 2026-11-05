@@ -65,7 +65,7 @@ const TITLE: Record<ServiceId, Record<Bad, string>> = {
   website: { down: 'Website not loading', degraded: 'Website partly failing' },
   api: { down: 'Data API not answering', degraded: 'Data API degraded' },
   executor: { down: 'Copy & algo executor not answering', degraded: 'Copy & algo executor degraded' },
-  indexer: { down: 'Indexer stopped - data is not current', degraded: 'Indexer degraded - a data stream is down' },
+  indexer: { down: 'Indexer not publishing - data is not current', degraded: 'Indexer degraded - figures may be behind' },
 };
 
 function openText(svc: ServiceId, bad: Bad, from: number): string {
@@ -73,7 +73,7 @@ function openText(svc: ServiceId, bad: Bad, from: number): string {
   if (svc === 'indexer') {
     return bad === 'down'
       ? `The indexer has not published fresh data since ${since}: cohorts, the liquidation heatmap, leaderboards and wallet pages may be out of date. Detected by our automatic checks; we are looking into it.`
-      : `One of the indexer's data streams has been down since ${since}: some figures may update late. Detected by our automatic checks; we are looking into it.`;
+      : `Since ${since} one of the indexer's data streams has been down, or its leaderboards have not been rebuilt for over an hour: some figures may be behind. Detected by our automatic checks; we are looking into it.`;
   }
   if (svc === 'executor' && bad === 'degraded') {
     return `Since ${since} the copy & algo executor has either answered that its database or its SoDEX feed is not right, or has been hard to reach from the site: copies and algo orders may be late, and the app may wait for its answers. Detected by our automatic checks; we are looking into it.`;
