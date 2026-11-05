@@ -11,7 +11,8 @@ export class SlicedWork {
   private waiting = false;
 
   constructor(private readonly o: {
-    budgetMs: number;
+    /** How long a turn may run. A function of the steps waiting: work that falls behind must get more of the thread. */
+    budgetMs: number | ((backlog: number) => number);
     onError: (e: unknown) => void;
     /** After the loop was let in: what runs now is this work again. */
     onResume?: () => void;
@@ -50,7 +51,8 @@ export class SlicedWork {
 
   private run(): void {
     const now = this.o.now ?? Date.now;
-    const until = now() + this.o.budgetMs;
+    const b = this.o.budgetMs;
+    const until = now() + (typeof b === 'function' ? b(this.backlog) : b);
     while (this.next < this.queue.length) {
       this.step();
       if (this.next < this.queue.length && now() >= until) {

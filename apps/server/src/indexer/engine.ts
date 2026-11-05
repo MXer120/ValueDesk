@@ -149,8 +149,8 @@ export function statsFrom(window: BoardWindow, now: number): number {
 /** Stream-discovered SoDEX wallets are re-queued for lookups this often per window. */
 const LOOKUP_SCAN_MS = 10 * 60_000;
 const FLUSH_MS = 5_000;
-/** A flush keeps the thread this long at a time. */
-const FLUSH_BUDGET_MS = 40;
+/** A flush keeps the thread this long at a time: 40 ms when it is keeping up, up to 500 ms when it is not. */
+export const flushBudget = (backlog: number): number => Math.min(500, 40 + backlog);
 /** Rows per transaction in a flush: at ~2 ms a row, 150 fills are a third of a second of the thread. */
 const FLUSH_FILLS = 150;
 const FLUSH_ACTIVITY = 300;
@@ -321,7 +321,9 @@ export class Indexer {
   private pendingFills: import('./store.js').FillRow[] = [];
   /** What a flush writes, with the loop let in between slices. */
   private writes = new SlicedWork({
-    budgetMs: FLUSH_BUDGET_MS,
+    // v0.2.165 ran a flat 40 ms a turn: on a busy thread each turn took long enough that writes fell behind for
+    // good (781 steps queued, then 1,041 three minutes later). The more waits, the longer it may run.
+    budgetMs: flushBudget,
     onError: (e) => { this.lastError = `flush: ${String(e)}`; },
     onResume: () => mark('flush'),
   });
@@ -400,6 +402,13 @@ export class Indexer {
 
   start(): void {
     this.stopped = false;
+    // What keeps the thread before the sockets can open is named in the journal: a restart's gap is mostly this.
+    let lapAt = Date.now();
+    const lap = (name: string) => {
+      const t = Date.now();
+      if (t - lapAt >= 1_000) console.log(`[indexer] start: ${name} ${t - lapAt} ms`);
+      lapAt = t;
+    };
     for (const [id, a] of this.store.accountIds('sodex')) {
       seedAddress(id, a);
       this.sodexIdOf.set(a, id);
@@ -422,7 +431,9 @@ export class Indexer {
     const sodexHeld = new Set(this.store.indexedAddresses('sodex'));
     for (const [id, a] of this.store.accountIds('sodex')) if (sodexHeld.has(a)) this.trackedSodex.set(id, a);
     // Day aggregates built under the older close definition are re-summed in the background.
+    lap('accounts and tracked wallets');
     this.store.migrateCloses();
+    lap('closes migration');
     // "Not ranked" answers survive restarts: those wallets are not asked again for UNRANKED_TTL.
     this.unranked = this.store.unrankedSince('sodex', this.now() - UNRANKED_TTL);
     this.hl.start();
@@ -432,6 +443,7 @@ export class Indexer {
     for (const x of this.ext.values()) {
       x.start({ store: this.store, now: this.now, streamSince: (v) => this.streamSince(v), onPrint: (p) => this.onPrint(p), hlLane: this.hl });
     }
+    lap('lanes and venues');
     if (INDEXER_ENV.streams() && process.env.VALUESCAN_FLOW !== '0' && !this.flow) {
       try {
         const path = process.env.VALUESCAN_FLOW_DB?.trim() || join(dirname(this.store.path), 'valuescan-flow.db');
@@ -441,6 +453,7 @@ export class Indexer {
         this.lastError = `flow: ${String(e)}`;
       }
     }
+    lap('who traded recorder');
     if (INDEXER_ENV.streams()) {
       this.hlStream = new HlStream((p) => this.onPrint(p));
       this.sodexStream = new SodexStream((p) => this.onPrint(p));
@@ -507,7 +520,9 @@ export class Indexer {
       if (late >= this.lag.window) { this.lag.window = late; this.lag.maxAt = now; }
       this.lag.max = Math.max(this.lag.max, late);
     });
+    lap('streams and timers');
     if (process.env.VALUESCAN_INDEX_COHORTS !== '0') this.cohorts.start();
+    lap('cohorts');
     setTimeout(() => void this.rebuild().catch((e) => (this.lastError = String(e))), 3_000).unref?.();
   }
 

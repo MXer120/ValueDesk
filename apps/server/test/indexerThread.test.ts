@@ -7,6 +7,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { Checkpointer } from '../src/indexer/checkpointer.js';
 import { SlicedWork, readInSlices } from '../src/indexer/slicedWork.js';
 import { IndexStore, type FillRow } from '../src/indexer/store.js';
+import { flushBudget } from '../src/indexer/engine.js';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const until = async (what: string, ok: () => boolean, ms = 8_000) => {
@@ -156,4 +157,31 @@ test('read in slices: a stop ends it, and done never runs', async () => {
   await sleep(10);
   assert.equal(pages, 1);
   assert.equal(done, 0);
+});
+
+test('a flush that falls behind gets more of the thread, and catches up where a flat slice never would', async () => {
+  assert.equal(flushBudget(0), 40);
+  assert.equal(flushBudget(1_000), 500);
+  // A turn of the loop costs 400 ms of other work; a step 100 ms; 2.5 steps arrive per second. A model of the thread, not a measurement.
+  const simulate = (budget: (b: number) => number) => {
+    let backlog = 500;
+    for (let t = 0; t < 600; ) {
+      const run = Math.min(backlog, Math.max(1, Math.ceil(budget(backlog) / 100)));
+      const spent = run * 100 + 400;
+      backlog = backlog - run + (spent / 1000) * 2.5;
+      t += spent / 1000;
+    }
+    return backlog;
+  };
+  assert.ok(simulate(() => 40) > 500, 'flat: behind for good');
+  assert.ok(simulate(flushBudget) < 100, 'scaled: catches up');
+});
+
+test('sliced work: the budget is asked of the backlog at each turn', async () => {
+  const asked: number[] = [];
+  let clock = 0;
+  const w = new SlicedWork({ budgetMs: (b) => { asked.push(b); return 1; }, now: () => clock, onError: (e) => assert.fail(String(e)) });
+  w.add([1, 2, 3].map(() => () => { clock += 5; }));
+  await until('done', () => w.backlog === 0);
+  assert.deepEqual(asked, [3, 2, 1]);
 });

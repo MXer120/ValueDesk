@@ -37,8 +37,12 @@ export function claimHlShare(client: Pick<HlInfoClient, 'resize'> = hlInfo, get:
 
 export function runIndexer(path = defaultDbPath()): Running {
   claimHlShare();
+  const t0 = Date.now();
   const store = new IndexStore(path);
+  const t1 = Date.now();
   const indexer = new Indexer(store);
+  const t2 = Date.now();
+  console.log(`[indexer] start: store ${t1 - t0} ms, engine ${t2 - t1} ms`);
   indexer.start();
   const publish = () => {
     try {
