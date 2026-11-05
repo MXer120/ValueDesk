@@ -102,6 +102,21 @@ html, body { background: var(--bg); }
 .dv-beta__address { flex: 1 1 320px; min-width: 0; }
 .dv-beta__label { flex: 0 1 220px; min-width: 0; }
 
+/* The kanban board (pages/Board.tsx): four columns on the card's own surface, cards as depth tiles. On a phone they stack. */
+.dv-board { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; padding: 4px var(--sp-4) var(--sp-4); align-items: start; }
+.dv-board__col { min-width: 0; }
+.dv-board__head { display: flex; align-items: baseline; justify-content: space-between; margin: 0 0 8px; font-size: 13px; font-weight: 500; color: var(--muted); }
+.dv-board__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.dv-board__card { padding: 10px 12px; border-radius: var(--radius-tile); box-shadow: inset 0 0 0 1px var(--panel-line, rgba(255, 255, 255, 0.06)); }
+.dv-board__title { all: unset; display: block; cursor: pointer; font-size: 13px; line-height: 1.35; color: var(--text); overflow-wrap: anywhere; }
+.dv-board__title:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.dv-board__meta { display: flex; flex-wrap: wrap; gap: 4px 8px; margin: 6px 0 0; font-size: 11px; color: var(--dim); }
+.dv-board__more { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; font-size: 12px; }
+.dv-board__more p { margin: 0; }
+.dv-board__detail { white-space: pre-wrap; color: var(--muted); overflow-wrap: anywhere; }
+@media (max-width: 1000px) { .dv-board { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 600px) { .dv-board { grid-template-columns: minmax(0, 1fr); } }
+
 /* Charts (BarChart.tsx): two side by side; magnitude in --muted, hairline axes. */
 .dv-charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 12px 28px; }
 .dv-chart { margin: 0; }

@@ -21,6 +21,9 @@
  *   POST /api/admin/beta             the wallets that may use beta.valuedesk.so (beta/gate.ts reads the list)
  *   POST /api/admin/beta/add         {address, label, action}: put a wallet on it, or rename it (signed)
  *   POST /api/admin/beta/remove      {address, action}: take a wallet off it (signed); out within seconds
+ *   POST /api/admin/board            the kanban board's cards
+ *   POST /api/admin/board/add        {title, detail, area, action}: a planned feature (signed)
+ *   POST /api/admin/board/move       {id, status, action}: another column, "reviewed" included (signed)
  *
  * THE LOCK IS HERE, NOT IN THE PAGE. In this plugin's own hook (after the hosted gate), before any handler:
  *   1. no password set on this server (admin/auth.ts): every route is a 404, as a
@@ -52,7 +55,7 @@ import {
   ADMIN_SESSION_TTL_MS, BUILDER_WALLET, adminBearer, adminOriginsFrom, adminPasswordPath, adminWalletsFrom, checkAdminAction, checkAdminSignIn,
   newSessionToken, passwordIsSet, readPasswordHash, verifyPassword,
 } from '../admin/auth.js';
-import { AdminStore, TICKET_STATUSES, type TicketStatus } from '../admin/store.js';
+import { AdminStore, BOARD_DETAIL_MAX, BOARD_STATUSES, BOARD_TITLE_MAX, TICKET_STATUSES, type BoardStatus, type TicketStatus } from '../admin/store.js';
 import { builderOverview, builderUsers, syncFeeOrders } from '../admin/builderStats.js';
 import { statusOfEverything, type StatusSources } from '../admin/statusView.js';
 import type { AdminActionName } from '../admin/signIn.js';
@@ -520,6 +523,36 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOptions 
     const removed = store().removeBetaWallet(address);
     store().audit({ kind: 'beta.remove', ok: true, wallet: s.wallet, client: clientKey(req.ip), country: countryOf(req), detail: { address, removed } }, now());
     return { ok: true, removed, wallets: store().betaWallets() };
+  });
+
+  // --- the kanban board (sessions write through tools/board.ts) ---------------------------------
+  app.post('/api/admin/board', { bodyLimit: 1024 }, async () => ({ ok: true, cards: store().boardCards() }));
+
+  app.post('/api/admin/board/add', { bodyLimit: 16 * 1024 }, async (req, reply) => {
+    const b = bodyOf(req);
+    const title = typeof b.title === 'string' ? b.title.replace(/\s+/g, ' ').trim() : '';
+    const detail = typeof b.detail === 'string' ? b.detail.trim() : '';
+    const area = typeof b.area === 'string' ? b.area.trim() : '';
+    if (!title || title.length > BOARD_TITLE_MAX) return reply.code(400).send({ ok: false, error: `the title must be 1 to ${BOARD_TITLE_MAX} characters` });
+    if (detail.length > BOARD_DETAIL_MAX) return reply.code(400).send({ ok: false, error: `the detail must be at most ${BOARD_DETAIL_MAX} characters` });
+    if (!signed(req, reply, 'board.add', title, { title, detail, area })) return reply;
+    const s = session(req);
+    const card = store().addBoardCard({ title, detail, area }, { owner: s.wallet }, now());
+    store().audit({ kind: 'board.add', ok: true, wallet: s.wallet, client: clientKey(req.ip), country: countryOf(req), detail: { id: card.id, title } }, now());
+    return { ok: true, card, cards: store().boardCards() };
+  });
+
+  app.post('/api/admin/board/move', { bodyLimit: 1024 }, async (req, reply) => {
+    const b = bodyOf(req);
+    const id = Number(b.id);
+    const status = b.status as BoardStatus;
+    if (!Number.isSafeInteger(id) || id <= 0 || !BOARD_STATUSES.includes(status)) return reply.code(400).send({ ok: false, error: 'id and status are required' });
+    if (!store().boardCard(id)) return reply.code(404).send({ ok: false, error: 'no such card' });
+    if (!signed(req, reply, 'board.move', `card ${id}`, { id, status })) return reply;
+    const s = session(req);
+    const card = store().moveBoardCard(id, status, { owner: s.wallet }, {}, now());
+    store().audit({ kind: 'board.move', ok: true, wallet: s.wallet, client: clientKey(req.ip), country: countryOf(req), detail: { id, status } }, now());
+    return { ok: true, card, cards: store().boardCards() };
   });
 
   app.post('/api/admin/audit', { bodyLimit: 1024 }, async (req) => {

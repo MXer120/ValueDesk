@@ -75,7 +75,62 @@ CREATE TABLE IF NOT EXISTS beta_wallets (
   added_at INTEGER NOT NULL,
   added_by TEXT NOT NULL
 ) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS board_cards (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  title TEXT NOT NULL,
+  detail TEXT NOT NULL DEFAULT '',
+  area TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL,
+  session TEXT NOT NULL DEFAULT '',
+  ref TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  reviewed_at INTEGER,
+  reviewed_by TEXT
+);
+CREATE TABLE IF NOT EXISTS board_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  card INTEGER NOT NULL,
+  at INTEGER NOT NULL,
+  who TEXT NOT NULL,
+  what TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS board_log_card ON board_log (card, id);
 `;
+
+/** The kanban board's columns, in order (pages/Board.tsx in the admin suite, tools/board.ts). */
+export const BOARD_STATUSES = ['planned', 'working', 'done', 'reviewed'] as const;
+export type BoardStatus = (typeof BOARD_STATUSES)[number];
+export const BOARD_TITLE_MAX = 140;
+export const BOARD_DETAIL_MAX = 4000;
+export const BOARD_FIELD_MAX = 80;
+
+export interface BoardCard {
+  id: number;
+  title: string;
+  detail: string;
+  area: string;
+  status: BoardStatus;
+  /** Which session works on it. */
+  session: string;
+  /** Its commit, version or PR. */
+  ref: string;
+  createdAt: number;
+  updatedAt: number;
+  reviewedAt: number | null;
+  reviewedBy: string | null;
+}
+
+/**
+ * Who changes a card. The owner signs on the page. A session names itself, and to move a card
+ * into or out of "reviewed" it must quote the owner's own confirmation (owner 2026-11-05: "only I
+ * or you after confirmation can mark them as reviewed"). Enforced here, for every way in.
+ */
+export type BoardActor = { owner: string } | { session: string; ownerSaid?: string };
+
+export class BoardError extends Error {}
+
+const boardWho = (a: BoardActor): string => ('owner' in a ? `owner ${a.owner.toLowerCase()}` : `session ${a.session}`);
 
 export const TICKET_STATUSES = ['open', 'waiting', 'closed'] as const;
 export type TicketStatus = (typeof TICKET_STATUSES)[number];
@@ -326,6 +381,80 @@ export class AdminStore {
 
   removeBetaWallet(address: string): boolean {
     return Number(this.db.prepare('DELETE FROM beta_wallets WHERE address = ?').run(address.toLowerCase()).changes) > 0;
+  }
+
+  // --- the kanban board --------------------------------------------------------------------------
+
+  boardCards(): BoardCard[] {
+    const rows = this.db.prepare('SELECT * FROM board_cards ORDER BY updated_at DESC, id DESC').all() as Array<Record<string, string | number | null>>;
+    return rows.map((r) => this.boardRow(r));
+  }
+
+  boardCard(id: number): BoardCard | null {
+    const r = this.db.prepare('SELECT * FROM board_cards WHERE id = ?').get(id) as Record<string, string | number | null> | undefined;
+    return r ? this.boardRow(r) : null;
+  }
+
+  private boardRow(r: Record<string, string | number | null>): BoardCard {
+    return {
+      id: Number(r.id), title: String(r.title), detail: String(r.detail), area: String(r.area), status: r.status as BoardStatus,
+      session: String(r.session), ref: String(r.ref), createdAt: Number(r.created_at), updatedAt: Number(r.updated_at),
+      reviewedAt: r.reviewed_at === null ? null : Number(r.reviewed_at), reviewedBy: r.reviewed_by === null ? null : String(r.reviewed_by),
+    };
+  }
+
+  boardLog(id: number): Array<{ at: number; who: string; what: string }> {
+    const rows = this.db.prepare('SELECT at, who, what FROM board_log WHERE card = ? ORDER BY id').all(id) as Array<{ at: number; who: string; what: string }>;
+    return rows.map((r) => ({ at: Number(r.at), who: r.who, what: r.what }));
+  }
+
+  addBoardCard(c: { title: string; detail?: string; area?: string; status?: BoardStatus; session?: string; ref?: string }, actor: BoardActor, now = Date.now()): BoardCard {
+    const title = c.title.replace(/\s+/g, ' ').trim();
+    const status = c.status ?? 'planned';
+    if (!title || title.length > BOARD_TITLE_MAX) throw new BoardError(`the title must be 1 to ${BOARD_TITLE_MAX} characters`);
+    if ((c.detail ?? '').length > BOARD_DETAIL_MAX) throw new BoardError(`the detail must be at most ${BOARD_DETAIL_MAX} characters`);
+    if (status === 'reviewed') throw new BoardError('a new card cannot start as reviewed');
+    const r = this.db.prepare('INSERT INTO board_cards (title, detail, area, status, session, ref, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(title, (c.detail ?? '').trim(), (c.area ?? '').trim().slice(0, BOARD_FIELD_MAX), status, (c.session ?? '').trim().slice(0, BOARD_FIELD_MAX), (c.ref ?? '').trim().slice(0, BOARD_FIELD_MAX), now, now);
+    const id = Number(r.lastInsertRowid);
+    this.db.prepare('INSERT INTO board_log (card, at, who, what) VALUES (?, ?, ?, ?)').run(id, now, boardWho(actor), `added as ${status}`);
+    return this.boardCard(id)!;
+  }
+
+  /** Move a card. Into or out of "reviewed": the owner, or a session quoting the owner. Throws BoardError when refused. */
+  moveBoardCard(id: number, to: BoardStatus, actor: BoardActor, o: { session?: string; ref?: string; note?: string } = {}, now = Date.now()): BoardCard {
+    const card = this.boardCard(id);
+    if (!card) throw new BoardError(`no card ${id}`);
+    if (!BOARD_STATUSES.includes(to)) throw new BoardError(`no column ${String(to)}`);
+    const said = 'session' in actor ? (actor.ownerSaid ?? '').trim() : '';
+    if ((to === 'reviewed' || card.status === 'reviewed') && to !== card.status && 'session' in actor && !said) {
+      throw new BoardError('only the owner marks a card reviewed: quote their confirmation with --owner-said');
+    }
+    const reviewed = to === 'reviewed' && card.status !== 'reviewed';
+    const stays = to === 'reviewed' && card.status === 'reviewed';
+    this.db.prepare('UPDATE board_cards SET status = ?, session = ?, ref = ?, updated_at = ?, reviewed_at = ?, reviewed_by = ? WHERE id = ?').run(
+      to, (o.session ?? card.session).trim().slice(0, BOARD_FIELD_MAX), (o.ref ?? card.ref).trim().slice(0, BOARD_FIELD_MAX), now,
+      reviewed ? now : stays ? card.reviewedAt : null,
+      reviewed ? boardWho(actor) : stays ? card.reviewedBy : null,
+      id,
+    );
+    const what = `${card.status} -> ${to}${said ? `; owner said: ${said.slice(0, 500)}` : ''}${o.note ? `; ${o.note.slice(0, 500)}` : ''}`;
+    this.db.prepare('INSERT INTO board_log (card, at, who, what) VALUES (?, ?, ?, ?)').run(id, now, boardWho(actor), what);
+    return this.boardCard(id)!;
+  }
+
+  /** Change a card's words; its column only moves through moveBoardCard. */
+  editBoardCard(id: number, c: { title?: string; detail?: string; area?: string; session?: string; ref?: string }, actor: BoardActor, now = Date.now()): BoardCard {
+    const card = this.boardCard(id);
+    if (!card) throw new BoardError(`no card ${id}`);
+    const title = (c.title ?? card.title).replace(/\s+/g, ' ').trim();
+    if (!title || title.length > BOARD_TITLE_MAX) throw new BoardError(`the title must be 1 to ${BOARD_TITLE_MAX} characters`);
+    if ((c.detail ?? '').length > BOARD_DETAIL_MAX) throw new BoardError(`the detail must be at most ${BOARD_DETAIL_MAX} characters`);
+    this.db.prepare('UPDATE board_cards SET title = ?, detail = ?, area = ?, session = ?, ref = ?, updated_at = ? WHERE id = ?').run(
+      title, (c.detail ?? card.detail).trim(), (c.area ?? card.area).trim().slice(0, BOARD_FIELD_MAX), (c.session ?? card.session).trim().slice(0, BOARD_FIELD_MAX), (c.ref ?? card.ref).trim().slice(0, BOARD_FIELD_MAX), now, id,
+    );
+    this.db.prepare('INSERT INTO board_log (card, at, who, what) VALUES (?, ?, ?, ?)').run(id, now, boardWho(actor), 'edited');
+    return this.boardCard(id)!;
   }
 
   getMeta(key: string): string | null {

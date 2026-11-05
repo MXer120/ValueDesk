@@ -27,9 +27,11 @@ import { Analytics } from './pages/Analytics';
 import { Status } from './pages/Status';
 import { Audit } from './pages/Audit';
 import { Beta } from './pages/Beta';
+import { Board } from './pages/Board';
 
 const PAGES: Array<{ id: string; label: string; render: (arg: string) => ReactNode }> = [
   { id: 'overview', label: 'Overview', render: () => <Overview /> },
+  { id: 'board', label: 'Board', render: () => <Board /> },
   { id: 'tickets', label: 'Tickets', render: (arg) => <Tickets selected={arg ? Number(arg) : null} /> },
   { id: 'users', label: 'Users', render: () => <Users /> },
   { id: 'revenue', label: 'Volume & fees', render: () => <Revenue /> },

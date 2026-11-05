@@ -23,7 +23,7 @@ export const ADMIN_SIGNATURE_TTL_MS = 5 * 60_000;
 export const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
 
 /** The writes there are, each checked against the route it is sent to. */
-export const ADMIN_ACTIONS = ['ticket.reply', 'ticket.status', 'sessions.revoke', 'beta.add', 'beta.remove'] as const;
+export const ADMIN_ACTIONS = ['ticket.reply', 'ticket.status', 'sessions.revoke', 'beta.add', 'beta.remove', 'board.add', 'board.move'] as const;
 export type AdminActionName = (typeof ADMIN_ACTIONS)[number];
 
 export interface AdminSignIn {
