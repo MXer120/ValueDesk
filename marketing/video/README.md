@@ -17,8 +17,9 @@ npx remotion render src/index.ts heatmap-clip out/heatmap-clip.mp4 --browser-exe
 npx remotion still src/index.ts heatmap-card out/heatmap-card.png --browser-executable "C:/Program Files/Google/Chrome/Application/chrome.exe"
 ```
 
-Finished films and pictures go to `~/ValueDesk-media` on this PC, never into the repo: copy them there and run
-`node marketing/video/capture/gallery.mjs`, which writes the folder's `index.html` (open it by double-click).
+Finished films and pictures go to `desk/` at the top of this checkout, ignored by git: `desk/marketing/videos`,
+`desk/marketing/graphics`, screenshots under `desk/product`. `node marketing/video/capture/gallery.mjs` writes
+`desk/index.html` (open it by double-click), with filters for marketing or product, kind, theme and device.
 
 `npx remotion studio src/index.ts` opens the timeline for tuning. `public/footage`, `public/stills` and `out` are
 gitignored: re-capture them. A new feature clip is a new shot in `capture/record.mjs` and a new `<FeatureClip>` entry in
