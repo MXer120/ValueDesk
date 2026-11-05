@@ -14945,6 +14945,8 @@ var ALGO_TICK_MS = 500;
 var FLUSH_MS = 2e3;
 var MARKETS_REFRESH_MS2 = 10 * 6e4;
 var STOP_DRAIN_MS = 8e3;
+var STOP_PULL_MS = 4e3;
+var HELD_PULL_MS = 5e3;
 var STALE_IOC_MS = 8e3;
 var SENDING_MAX_MS = 2e4;
 var HISTORY_EVERY_MS = 2e4;
@@ -15038,6 +15040,8 @@ var AlgoRuntime = class {
   socketWasUp = false;
   /** Algos that raised a hold in the step now running (steps of one algo never overlap). */
   heldNow = /* @__PURE__ */ new Set();
+  /** When a held bot last tried to pull its quotes (pullHeldQuotes). */
+  heldPullAt = /* @__PURE__ */ new Map();
   eventSeq = 0;
   /** Each owner's positions and account, read at most every few seconds (conditions, closes, the leverage ceiling); `from`: when that read left. */
   positionsOf = /* @__PURE__ */ new Map();
@@ -15106,6 +15110,8 @@ var AlgoRuntime = class {
     for (const t of this.timers) timers.cancel(t);
     this.timers = [];
     for (let i = 0; this.busy.size && i < STOP_DRAIN_MS / 25; i++) await new Promise((r) => timers.after(25, () => r(void 0)));
+    const pulls = [...this.algos.values()].filter((a) => this.quotesNeedManaging(a) && a.mode === "hosted").map((a) => this.pullResting(a).catch((e) => this.host.log.warn("algo: pull on stop failed", { algo: a.id, error: String(e) })));
+    if (pulls.length) await Promise.race([Promise.all(pulls), new Promise((r) => timers.after(STOP_PULL_MS, () => r(void 0)))]);
     this.market.stop();
     await this.flush();
   }
@@ -15707,6 +15713,7 @@ var AlgoRuntime = class {
     if (!s.paper) {
       const brake = this.host.brake?.(a) ?? null;
       if (brake) {
+        await this.pullHeldQuotes(a, now);
         await this.hold(a, `Held: ${brake}`);
         if (!this.stopped(a)) await this.syncExits(a, m, false);
         return;
@@ -15714,16 +15721,19 @@ var AlgoRuntime = class {
       const problem = await this.problemOf(a, now);
       if (this.stopped(a)) return;
       if (problem) {
+        await this.pullHeldQuotes(a, now);
         await this.hold(a, problem);
         return;
       }
       const policy = this.host.policyFor?.(a) ?? null;
       if (policy && !policy.allowed && !(policy.closeOnly && algoClosesOnly(s))) {
+        await this.pullHeldQuotes(a, now);
         await this.hold(a, `Held: ${policy.reason ?? "not available in your region."}`);
         return;
       }
     }
     if (typeof a.k.limitUntil === "number" && now < a.k.limitUntil) {
+      await this.pullHeldQuotes(a, now);
       await this.hold(a, String(a.k.limitReason ?? "Held: a SoDEX limit is reached."));
       return;
     }
@@ -15733,6 +15743,7 @@ var AlgoRuntime = class {
     }
     const q = this.market.quote(s.symbol);
     if (!q) {
+      await this.pullHeldQuotes(a, now);
       await this.hold(a, "Waiting for a price from SoDEX.");
       return;
     }
@@ -17370,6 +17381,16 @@ var AlgoRuntime = class {
       for (const c of open) c.cancelling = false;
       await this.event(a, "error", `Cancel failed: ${e instanceof Error ? e.message : String(e)}`);
     }
+  }
+  /** A live bot with quotes of its own on the book. Not while it closes what it holds: that order only protects, as a stop does (brake.ts). */
+  quotesNeedManaging(a) {
+    return (a.spec.kind === "mm" || a.spec.kind === "grid") && !a.spec.paper && !FINAL_STATUSES.has(a.status) && !a.k.closing;
+  }
+  /** A held step returns before it re-prices, so a held bot's quotes would go stale on the book: they come off, and it quotes again when the hold ends. */
+  async pullHeldQuotes(a, now) {
+    if (!this.quotesNeedManaging(a) || now - (this.heldPullAt.get(a.id) ?? -Infinity) < HELD_PULL_MS) return;
+    this.heldPullAt.set(a.id, now);
+    await this.pullResting(a);
   }
   /** Cancel every resting child (pause, hold, end). */
   async pullResting(a, keep = []) {
@@ -19527,10 +19548,10 @@ var ExecutorService = class {
   async stop() {
     if (this.signerSweep) clearInterval(this.signerSweep);
     this.signerSweep = null;
-    for (const owner of [...this.signers.keys()]) this.forgetSigner(owner, true);
     await this.algos.stop();
     this.reference?.stop();
     await this.runtime.stop();
+    for (const owner of [...this.signers.keys()]) this.forgetSigner(owner, true);
     this.builderDb?.close();
   }
   selfId() {
