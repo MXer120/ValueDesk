@@ -40,6 +40,7 @@ export interface BrakeState {
 export type BrakeCause = 'maintenance' | 'operator';
 
 const READ_EVERY_MS = 1_000;
+export const MAINTENANCE_BRAKE_MAX_MS = 15 * 60_000;
 const DEFAULT_REASON = 'ValueDesk has paused trading on this executor for now.';
 
 /** Parse the file's text: null when both switches are off. A garbled file is a full brake. */
@@ -82,6 +83,13 @@ export class Brake {
   /** The brake now (null: off). Cheap: re-reads at most once a second. */
   current(now = Date.now()): BrakeState | null {
     if (now - this.checkedAt >= READ_EVERY_MS) this.read(now, false);
+    // A release's brake that outlived any release: the machine that set it is gone (the longest of 34
+    // ships held it 59 s). Everything stayed held, with health green. An operator's brake never lapses.
+    const b = this.state;
+    if (b?.cause === 'maintenance' && b.since !== null && now - b.since > MAINTENANCE_BRAKE_MAX_MS) {
+      this.state = null;
+      this.onChange?.(null, b);
+    }
     return this.state;
   }
 

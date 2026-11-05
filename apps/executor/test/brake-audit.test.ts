@@ -187,3 +187,24 @@ test('the audit keeps where a request came from as its network only', () => {
   assert.equal(ipPrefix('::ffff:198.51.100.9'), '198.51.100.0/24');
   assert.equal(ipPrefix('2001:db8:85a3:8d3:1319:8a2e:370:7348'), '2001:db8:85a3::/48');
 });
+
+test('a release\'s brake lapses when it outlives any release; an operator\'s never does', async () => {
+  const { mkdtempSync, writeFileSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { Brake, MAINTENANCE_BRAKE_MAX_MS } = await import('../src/brake.ts');
+  const dir = mkdtempSync(join(tmpdir(), 'vs-brake-'));
+  const file = join(dir, 'brake.json');
+  const t = 1_800_000_000_000;
+  writeFileSync(file, JSON.stringify({ copies: true, algos: true, reason: 'Updating', since: t, cause: 'maintenance' }));
+  const seen: Array<boolean> = [];
+  const b = new Brake(file, (now) => seen.push(now !== null));
+  assert.ok(b.current(t + 60_000), 'held during a release');
+  assert.equal(b.current(t + MAINTENANCE_BRAKE_MAX_MS + 1), null, 'the machine that set it is gone');
+  assert.equal(b.current(t + MAINTENANCE_BRAKE_MAX_MS + 5_000), null, 'and it stays off while the file is the same');
+  assert.deepEqual(seen.at(-1), false, 'told, so the service logs it');
+  writeFileSync(file, JSON.stringify({ copies: true, algos: true, reason: 'Stop', since: t }));
+  const op = new Brake(file);
+  assert.ok(op.current(t + 30 * 24 * 3_600_000), 'an operator\'s stands until lifted');
+  rmSync(dir, { recursive: true, force: true });
+});

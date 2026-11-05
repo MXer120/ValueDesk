@@ -652,6 +652,21 @@ function queueHarness(perMinute = 1200, freeInMs = 0) {
   return { budget, rate, q: new SendQueue(budget, rate) };
 }
 
+test('queue: another wallet\'s queued close does not refuse an opening while the budget has room; its own does', async () => {
+  const { q, budget } = queueHarness(1200);
+  let release: () => void = () => {};
+  const held = new Promise<string>((r) => { release = () => r('done'); });
+  // Account 1's first close is in flight, so its second waits in the queue.
+  const first = q.submit('protect', 1, 1, () => held);
+  const second = q.submit('protect', 1, 1, async () => 'second');
+  assert.equal(q.stats().waiting, 1);
+  assert.ok(budget.used(Date.now()) < 100, 'the budget has plenty of room');
+  assert.equal(await q.submit('open', 2, 1, async () => 'other wallet'), 'other wallet', 'sent');
+  await assert.rejects(q.submit('open', 1, 1, async () => 'same wallet'), /closes and stops go first/);
+  release();
+  await Promise.all([first, second]);
+});
+
 test('queue: cancels, then stops and closes, then leverage leave first; one account keeps its own order', async () => {
   const { q } = queueHarness(10, 300);
   const order: string[] = [];
@@ -668,7 +683,7 @@ test('queue: cancels, then stops and closes, then leverage leave first; one acco
   ];
   assert.equal(q.stats().waiting, 5, 'the minute is full: they wait, none is refused');
   // An opening order while closes wait: refused at once, never queued.
-  await assert.rejects(q.submit('open', 4, 1, job('D open')), (e: unknown) => e instanceof LocalRefusal && /Not sent: SoDEX's rate limit is reached; closes and stops go first/.test(e.message));
+  await assert.rejects(q.submit('open', 4, 1, job('D open')), (e: unknown) => e instanceof LocalRefusal && /Not sent: SoDEX's rate limit is reached; the per-IP budget is nearly spent; closes and stops go first/.test(e.message));
   await Promise.all(all);
   assert.deepEqual(order, ['C cancel', 'B close', 'A1 leverage', 'A2 stop', 'A3 close']);
   assert.ok(!order.includes('D open'));

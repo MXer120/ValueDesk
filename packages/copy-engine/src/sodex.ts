@@ -434,7 +434,10 @@ export class SendQueue {
     const weight = 1 + Math.floor(orders / 40);
     const now = Date.now();
     if (cls === 'open') {
-      const why = this.items.length
+      // Its own account's closes first. Another wallet's queued cancel is no reason to refuse this one
+      // while the budget has room: 54 refusals at 39-63 writes a minute against a limit of 6,000
+      // (2026-11-03/04), and a copy never retries, because its leader's position has already moved on.
+      const why = this.items.some((it) => it.accountId === accountId)
         ? 'closes and stops go first'
         : this.budget.cooldownLeft(now) > 0
           ? `it is cooling down (${Math.ceil(this.budget.cooldownLeft(now) / 1000)} s left); closes and stops go first`
