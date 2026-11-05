@@ -1,0 +1,250 @@
+/* SoDEX's programmes (SoPoints, Blind Boxes, Wealth): the status page's frame with the Portfolio's
+   cards inside. Tokens and --ink only, so both themes follow. A kind or state is a pill or a dot, never
+   a coloured edge. The tier colours sit on the tier's dot and the box art alone. */
+.sdx { display: flex; justify-content: center; padding: var(--sp-3) var(--sp-3) var(--sp-6); min-width: 0; }
+.sdx-col { display: flex; flex-direction: column; gap: var(--sp-2); width: 100%; max-width: 1180px; min-width: 0; }
+
+.sdx .pf-card { border-radius: var(--radius-tile); border-color: transparent; box-shadow: var(--depth-2); }
+.sdx .pf-card__body { padding: var(--sp-3) var(--sp-4) var(--sp-4); min-width: 0; }
+.sdx .pf-card__head { min-height: var(--pf-head-h); height: auto; flex-wrap: wrap; }
+.sdx .pf-note { color: var(--muted); }
+
+/* The hero: SoDEX's mark, the title, what it is. */
+.sdx-hero {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 4px 14px;
+  padding: 18px var(--sp-4);
+  border-radius: var(--radius-page);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--muted) 9%, transparent), transparent 120%), var(--bg-panel);
+  box-shadow: var(--depth-2);
+}
+.sdx-hero__mark { display: grid; place-items: center; }
+.sdx-hero__text { min-width: 0; }
+.sdx-hero__titleline { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.sdx-hero__title { margin: 0; color: var(--text); font-size: 20px; font-weight: 600; line-height: 1.3; letter-spacing: -0.01em; }
+.sdx-hero__line { margin: 3px 0 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
+.sdx-hero__aside { display: flex; align-items: center; gap: 8px; }
+
+/* Figures. */
+.sdx-tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--sp-2); }
+.sdx-tile {
+  display: flex; flex-direction: column; gap: 4px; min-width: 0;
+  padding: 12px 14px; border-radius: var(--radius-tile); box-shadow: var(--depth-2);
+  background: var(--bg-panel);
+}
+.sdx-tile__label { color: var(--dim); font-size: 11px; font-weight: 500; letter-spacing: 0.02em; text-transform: uppercase; }
+.sdx-tile__value { color: var(--text); font-family: var(--font-num); font-size: 20px; font-weight: 600; line-height: 1.25; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sdx-tile__sub { overflow: hidden; color: var(--dim); font-size: 11px; line-height: 1.4; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Pills. */
+.sdx-pill {
+  display: inline-flex; align-items: center; gap: 5px; padding: 1px 8px; border-radius: var(--radius-full);
+  background: rgb(var(--ink) / 0.07); color: var(--muted);
+  font-size: 11px; font-weight: 500; line-height: 18px; white-space: nowrap;
+}
+.sdx-pill > i { flex: none; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.sdx-pill.is-live { background: color-mix(in srgb, var(--pos) 14%, transparent); color: var(--pos); }
+.sdx-pill.is-warn { background: color-mix(in srgb, var(--warn) 15%, transparent); color: var(--warn); }
+.sdx-pill.is-neg { background: color-mix(in srgb, var(--neg) 14%, transparent); color: var(--neg); }
+.sdx-pill.is-info { background: color-mix(in srgb, #5b8def 16%, transparent); color: var(--text); }
+
+/* Columns. */
+.sdx-duo { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-2); align-items: stretch; }
+.sdx-duo--wealth { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); }
+.sdx-trio { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-2); align-items: stretch; }
+.sdx-trio--mine { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.sdx-span { grid-column: 1 / -1; min-width: 0; }
+
+/* The switch inside a card head. */
+.sdx-seg.lbp { display: inline-flex; min-width: 0; max-width: 100%; }
+.sdx-seg .lbp-seg { margin: 0; }
+
+/* Locked. */
+.sdx-locked {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px 16px;
+  padding: 18px var(--sp-4); border-radius: var(--radius-tile);
+  background: rgb(var(--ink) / 0.03); box-shadow: var(--depth-1);
+}
+.sdx-locked__icon { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 50%; background: rgb(var(--ink) / 0.07); color: var(--muted); }
+.sdx-locked__text { min-width: 0; }
+.sdx-locked__title { margin: 0; color: var(--text); font-size: 15px; font-weight: 600; }
+.sdx-locked__line { margin: 2px 0 8px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.sdx-locked__items { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.sdx-locked__items li { padding: 1px 8px; border-radius: var(--radius-full); background: rgb(var(--ink) / 0.07); color: var(--muted); font-size: 11px; line-height: 18px; }
+.pf .sdx-locked__go, .sdx-locked__go { text-decoration: none; }
+.pf a.pf-btn { text-decoration: none; }
+
+/* SoPoints: boosted markets. */
+.sdx-markets { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; margin: 0 0 8px; padding: 0; list-style: none; }
+.sdx-market {
+  display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: var(--radius-md);
+  background: var(--pf-well); box-shadow: var(--depth-1); color: var(--text); font-size: 12px; text-decoration: none;
+}
+.sdx-market:hover { background: rgb(var(--ink) / 0.06); }
+.sdx-market__sym { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sdx-market__x { color: var(--pos); font-family: var(--font-num); font-weight: 600; }
+
+/* SoPoints: the squad boost's ladder. */
+.sdx-ladder { display: grid; grid-template-columns: repeat(auto-fit, minmax(72px, 1fr)); gap: 6px; margin: 0 0 var(--sp-3); padding: 0; list-style: none; }
+.sdx-ladder__step { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border-radius: var(--radius-md); background: var(--pf-well); box-shadow: var(--depth-1); }
+.sdx-ladder__step b { color: var(--text); font-family: var(--font-num); font-size: 15px; font-weight: 600; }
+.sdx-ladder__step span { color: var(--dim); font-family: var(--font-num); font-size: 11px; }
+
+/* SoPoints: how to earn. */
+.sdx-section { display: flex; flex-direction: column; gap: var(--sp-2); }
+.sdx-section__title { margin: var(--sp-1) 0 0 2px; color: var(--text); font-size: 14px; font-weight: 500; }
+.sdx-earn { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-2); }
+.sdx-earn__tile { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 14px var(--sp-4); border-radius: var(--radius-tile); background: var(--bg-panel); box-shadow: var(--depth-2); }
+.sdx-earn__tile h3 { margin: 0; color: var(--text); font-size: 13px; font-weight: 550; }
+.sdx-earn__tile p { flex: 1 1 auto; margin: 0 0 4px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+
+/* Blind Boxes: tiers. */
+.sdx-box { flex: none; display: block; filter: drop-shadow(0 4px 8px rgb(0 0 0 / 0.22)); }
+.sdx-tiers { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--sp-2); }
+.sdx-tier { display: flex; flex-direction: column; gap: 10px; padding: 14px; border-radius: var(--radius-tile); background: var(--bg-panel); box-shadow: var(--depth-2); min-width: 0; }
+.sdx-tier header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 8px; }
+.sdx-tier__name { display: inline-flex; align-items: center; gap: 6px; color: var(--text); font-size: 13px; font-weight: 550; }
+.sdx-tier__name i { width: 8px; height: 8px; border-radius: 50%; background: var(--tier); }
+.sdx-tier.is-Common { --tier: #b8ae94; }
+.sdx-tier.is-Uncommon { --tier: #4aa57d; }
+.sdx-tier.is-Rare { --tier: #4c86da; }
+.sdx-tier.is-SuperRare { --tier: #9866d6; }
+.sdx-tier > .sdx-box { align-self: center; }
+.sdx-tier__band { display: flex; flex-direction: column; gap: 1px; }
+.sdx-tier__band span { color: var(--dim); font-size: 11px; }
+.sdx-tier__band b { color: var(--text); font-family: var(--font-num); font-size: 15px; font-weight: 600; }
+
+.sdx-steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--sp-2); }
+.sdx-step { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.sdx-step b { color: var(--text); font-family: var(--font-num); font-size: 18px; font-weight: 600; }
+.sdx-step span { color: var(--muted); font-size: 12px; }
+
+.sdx-merge { display: flex; flex-direction: column; gap: 8px; margin: 0 0 8px; padding: 0; list-style: none; }
+.sdx-merge li { display: grid; grid-template-columns: minmax(0, 1fr) 14px minmax(0, 1fr); align-items: center; gap: 6px; color: var(--dim); }
+.sdx-merge__from, .sdx-merge__to { display: inline-flex; align-items: center; gap: 5px; min-width: 0; color: var(--muted); font-size: 12px; white-space: nowrap; }
+.sdx-merge b { color: var(--text); font-family: var(--font-num); font-weight: 600; }
+.sdx-invite { display: flex; flex-direction: column; margin: 0 0 8px; padding: 0; list-style: none; }
+.sdx-invite li { display: flex; justify-content: space-between; gap: 10px; padding: 6px 0; color: var(--muted); font-size: 12px; }
+.sdx-invite li + li { border-top: 1px solid rgb(var(--ink) / 0.07); }
+.sdx-invite b { color: var(--text); font-weight: 500; text-align: right; }
+
+/* Rows: the opens, history, a wallet's funds. */
+.sdx-feed { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
+.sdx-feed__row { display: flex; align-items: center; gap: 10px; padding: 8px 0; min-width: 0; }
+.sdx-feed__row + .sdx-feed__row { border-top: 1px solid rgb(var(--ink) / 0.07); }
+.sdx-feed__who { display: flex; flex: 1 1 auto; flex-direction: column; gap: 1px; min-width: 0; }
+.sdx-feed__who b { color: var(--text); font-family: var(--font-num); font-size: 12px; font-weight: 500; }
+.sdx-feed__who small, .sdx-feed__prize small { color: var(--dim); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sdx-feed__prize { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; min-width: 0; text-align: right; }
+.sdx-feed__prize b { color: var(--text); font-family: var(--font-num); font-size: 13px; font-weight: 600; }
+.sdx-feed__ago { flex: none; width: 56px; color: var(--dim); font-size: 11px; text-align: right; white-space: nowrap; }
+
+/* The vault. */
+.sdx-vaulthead { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-3); margin-bottom: var(--sp-2); }
+.sdx-boxcount { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; margin-bottom: var(--sp-2); }
+.sdx-boxcount b { color: var(--text); font-family: var(--font-num); font-size: 26px; font-weight: 600; line-height: 1.15; }
+.sdx-boxcount span { color: var(--muted); font-size: 12px; }
+.sdx-boxlevels { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; margin-bottom: var(--sp-2); }
+.sdx-boxlevel { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 8px 10px; border-radius: var(--radius-md); background: var(--pf-well); box-shadow: var(--depth-1); color: var(--muted); font-size: 12px; }
+.sdx-boxlevel span { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sdx-boxlevel b { color: var(--text); font-family: var(--font-num); font-size: 15px; font-weight: 600; }
+.sdx-shelf { padding: 10px 0; border-top: 1px solid rgb(var(--ink) / 0.07); }
+.sdx-shelf header { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin-bottom: 8px; color: var(--text); font-size: 13px; }
+.sdx-shelf header b { font-weight: 550; }
+.sdx-shelf__count { color: var(--dim); font-family: var(--font-num); font-size: 12px; }
+.sdx-tokens { display: flex; flex-wrap: wrap; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.sdx-token {
+  display: inline-block; min-height: 0; padding: 3px 8px; border: 1px solid var(--panel-line); border-radius: var(--radius-full);
+  background: none; color: var(--muted); font-family: var(--font-num); font-size: 11px; line-height: 16px; cursor: pointer;
+}
+.sdx-token:hover:not(:disabled) { color: var(--text); border-color: var(--line); }
+
+@media (prefers-reduced-motion: reduce) { .sdx-skel__row { animation: none; } }
+
+/* Wealth. */
+.sdx-banner { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 14px; border-radius: var(--radius-tile); background: var(--bg-panel); box-shadow: var(--depth-2); color: var(--muted); font-size: 12px; }
+.sdx-featured { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; height: 100%; }
+.sdx-featured .pf-btn { margin-top: auto; }
+.sdx-featured__rate { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
+.sdx-featured__rate b { font-family: var(--font-num); font-size: 30px; font-weight: 600; line-height: 1.1; }
+.sdx-featured__rate span:not(.sdx-pill) { color: var(--muted); font-size: 12px; }
+.sdx-featured__more { display: flex; flex-wrap: wrap; gap: 8px 22px; margin: 0; }
+.sdx-featured__more dt { color: var(--dim); font-size: 11px; }
+.sdx-featured__more dd { margin: 1px 0 0; color: var(--text); font-family: var(--font-num); font-size: 13px; font-weight: 550; }
+.sdx-portfolio__top { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 10px 24px; margin-bottom: var(--sp-2); }
+.sdx-portfolio__top > div:first-child { display: flex; flex-direction: column; gap: 2px; }
+.sdx-portfolio__value { color: var(--text); font-family: var(--font-num); font-size: 26px; font-weight: 600; line-height: 1.15; }
+.sdx-chartblock { margin-top: var(--sp-3); }
+.sdx-chartblock__head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 6px; }
+
+.sdx-groups { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-2); }
+.sdx-funds { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
+.sdx-funds li + li { border-top: 1px solid rgb(var(--ink) / 0.07); }
+.sdx-fund { display: flex; align-items: center; gap: 10px; margin: 0 -8px; padding: 9px 8px; border-radius: var(--radius-md); color: inherit; text-decoration: none; min-width: 0; }
+.sdx-fund:hover { background: rgb(var(--ink) / 0.05); }
+.sdx-fund__who { display: flex; flex: 1 1 auto; flex-direction: column; gap: 1px; min-width: 0; }
+.sdx-fund__who b { overflow: hidden; color: var(--text); font-size: 13px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.sdx-fund__who small { color: var(--dim); font-size: 11px; }
+.sdx-fund__ret { flex: none; font-family: var(--font-num); font-size: 13px; font-weight: 600; }
+.sdx-fund__stack { display: flex; flex: none; flex-direction: column; align-items: flex-end; gap: 1px; font-family: var(--font-num); }
+.sdx-fund__stack b { color: var(--text); font-size: 13px; font-weight: 600; }
+.sdx-fund__stack small { font-size: 11px; }
+
+.sdx-tablewrap { min-width: 0; overflow-x: auto; }
+.sdx-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.sdx-table th { padding: 6px 8px; border-bottom: 1px solid var(--panel-line); color: var(--dim); font-size: 11px; font-weight: 500; text-align: left; white-space: nowrap; }
+.sdx-table th.num, .sdx-table td.num { text-align: right; font-family: var(--font-num); white-space: nowrap; }
+.sdx-table td { padding: 8px; border-bottom: 1px solid rgb(var(--ink) / 0.06); color: var(--text); }
+.sdx-table tbody tr { cursor: pointer; }
+.sdx-table tbody tr:hover td { background: rgb(var(--ink) / 0.04); }
+.sdx-table td.pf-dim { color: var(--dim); }
+.sdx-table td.pf-pos-text { color: var(--pos); }
+.sdx-table td.pf-neg-text { color: var(--neg); }
+.sdx-table__who { display: inline-flex; align-items: center; gap: 8px; color: inherit; text-decoration: none; min-width: 0; }
+.sdx-table__who span { display: flex; flex-direction: column; min-width: 0; }
+.sdx-table__who b { color: var(--text); font-weight: 500; white-space: nowrap; }
+.sdx-table__who small { color: var(--dim); font-size: 11px; }
+.sdx-table__basis { display: block; color: var(--dim); font-family: var(--font-ui, inherit); font-size: 10px; font-weight: 400; }
+
+.sdx-back { display: inline-flex; align-items: center; gap: 4px; align-self: flex-start; padding: 4px 6px; border-radius: var(--radius-md); color: var(--muted); font-size: 12px; text-decoration: none; }
+.sdx-back:hover { color: var(--text); background: rgb(var(--ink) / 0.05); }
+.sdx-coming { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; }
+.pf .sdx-btn-off { opacity: 0.45; cursor: not-allowed; }
+
+/* States. */
+.sdx-failed { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: var(--sp-3) var(--sp-4); border-radius: var(--radius-tile); background: var(--bg-panel); box-shadow: var(--depth-1); color: var(--muted); font-size: 12px; }
+.pf-card .sdx-failed { padding: 0; background: none; box-shadow: none; }
+.sdx-failed b { color: var(--text); font-size: 13px; font-weight: 550; }
+.sdx-skel { display: flex; flex-direction: column; gap: 6px; }
+.sdx-skel__row { border-radius: var(--radius-tile); background: rgb(var(--ink) / 0.05); animation: sdx-pulse 1.2s ease-in-out infinite; }
+@keyframes sdx-pulse { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
+
+/* Narrower. */
+@media (max-width: 1000px) {
+  .sdx-trio, .sdx-groups, .sdx-earn { grid-template-columns: minmax(0, 1fr); }
+  .sdx-duo, .sdx-duo--wealth, .sdx-trio--mine { grid-template-columns: minmax(0, 1fr); }
+  .sdx-tiers { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 767px) {
+  .sdx { padding: var(--sp-2) 8px var(--sp-6); }
+  .sdx-hero { grid-template-columns: auto minmax(0, 1fr); padding: 14px; }
+  .sdx-hero__aside { grid-column: 1 / -1; justify-content: flex-start; }
+  .sdx-coming { justify-content: flex-start; }
+  .sdx-tiles, .sdx-steps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .sdx-tile__value { font-size: 16px; }
+  .sdx .pf-card__body { padding: var(--sp-2) var(--sp-3) var(--sp-3); }
+  .sdx-locked { grid-template-columns: auto minmax(0, 1fr); padding: 14px; }
+  .sdx-locked__go { grid-column: 1 / -1; justify-self: start; }
+  .sdx-vaulthead { grid-template-columns: minmax(0, 1fr); }
+  .sdx-boxlevels { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .sdx-opt { display: none; }
+  .sdx-feed__ago { display: none; }
+  .sdx-table th, .sdx-table td { padding-inline: 4px; }
+}
+
+/* Signed figures read in colour here, as on SoDEX's pages; tile values outrank their own --text. */
+.sdx .pf-pos-text, .sdx-tile__value.pf-pos-text { color: var(--pos); }
+.sdx .pf-neg-text, .sdx-tile__value.pf-neg-text { color: var(--neg); }
+
+/* SoDEX's mark is white: on the light theme it sits on a dark chip, wherever it stands in for a logo. */
+html[data-theme='light'] .sdx-hero__mark { padding: 5px; border-radius: 10px; background: #141414; }
+html[data-theme='light'] .sdx .coin-ic[src*='sodex' i] { background: #141414; }

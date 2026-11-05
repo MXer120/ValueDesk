@@ -6,17 +6,17 @@
  * on top. Every figure below is either something SoDEX published or something we
  * derived from two things SoDEX published, and the page labels which is which.
  *
- * WHAT IS PUBLIC AND WHAT IS NOT. The weekly pool, the schedule, a wallet's
- * rank/volume/PnL, the venue's traded volume and a wallet's referral code are all
- * readable with no credentials. A wallet's OWN points balance and tier are not:
- * `biz/sopoints/summary` and `biz/sopoints/week/list` answer 401 without a Privy
- * bearer token from a SoDEX login, which we deliberately do not ask people for.
- * So this page can tell you how hard points are to earn and roughly what your
- * trading is worth in them - it cannot tell you your balance.
+ * WHAT IS PUBLIC AND WHAT IS NOT. The week, the pool, the squad boost config, the
+ * boosted markets, a wallet's rank/volume/PnL, the venue's traded volume and a
+ * wallet's referral code are all readable with no credentials. A wallet's OWN
+ * balance, weeks and squad are not: `biz/sopoints/v2/summary` and `.../week/list`
+ * answer 401 without a SoDEX token, and that sign-in is off (SODEX_SIGNIN_LIVE).
  *
  * Browser-direct, like performance.ts: these are public reads, and routing them
  * through our own backend would add a hop and a rate limit for nothing.
  */
+
+import { SODEX_SIGNIN_LIVE } from './sodexProgrammes';
 
 const BIZ = 'https://alpha-biz.sodex.dev';
 const DATA = 'https://mainnet-data.sodex.dev';
@@ -63,32 +63,64 @@ export const tierFor = (points: number): Tier =>
  * `as const` alone made it the type `1000000`, so passing it anywhere that takes
  * a plain pool size - `difficultyByWeek`, `seasonStats` - was a type error the
  * moment the venue's own `weekPoolPoints` was threaded through instead. The
- * value is a default, not a constant of the universe.
+ * value is a default, not a constant of the universe. The page always shows the
+ * pool the API reports (1,000,000 while SoDEX's page text says 900,000).
+ *
+ * The weekdays and season come from SoDEX's page text. Its clock times (14:00 UTC+1)
+ * are not repeated here: they are an hour off the API's own timestamps, and the page
+ * prints those instead.
  */
 export const RULES: {
+  season: string;
+  seasonWeeks: number;
   weeklyPool: number;
   snapshot: string;
   distribution: string;
   minimumUnit: number;
   referralBonusPct: number;
+  inviteeBoostPct: number;
 } = {
+  season: 'Layer1 Season',
+  seasonWeeks: 20,
   weeklyPool: 1_000_000,
-  snapshot: 'Every Saturday at 00:00 UTC',
-  distribution: 'Every Tuesday at 12:00 UTC',
+  snapshot: 'Every Tuesday, covering the prior week',
+  distribution: 'Every Friday',
   minimumUnit: 1,
   referralBonusPct: 25,
+  inviteeBoostPct: 5,
 } as const;
 
+/** `GET biz/sopoints/v2/week/info`. Times are unix seconds. */
 export interface WeekInfo {
-  weekNumber: number;
+  weekNo: number;
   weekName: string;
+  weekStatus: string;
   weekPoolPoints: number;
   nextWeekStartTime: number;
   distributionTime: number;
 }
 
-export const fetchWeek = (address: string): Promise<WeekInfo> =>
-  get<WeekInfo>(`${BIZ}/biz/sopoints/week/info?wallet_address=${address}`);
+export const fetchWeek = (): Promise<WeekInfo> => get<WeekInfo>(`${BIZ}/biz/sopoints/v2/week/info`);
+
+/** `GET biz/sopoints/v2/team/boost/config`. `threshold` is a decimal string of USD volume ("Energy"). */
+export interface BoostConfig {
+  windowRounds: number;
+  maxTotalBonusPct: number;
+  earlyBirdRounds: number;
+  earlyBirdBonusPct: number;
+  tiers: Array<{ threshold: string; bonusPct: number }>;
+}
+
+export const fetchBoostConfig = (): Promise<BoostConfig> => get<BoostConfig>(`${BIZ}/biz/sopoints/v2/team/boost/config`);
+
+/** `GET mainnet-data /api/v1/points/volume-weights`: this round's boosted markets. */
+export interface VolumeWeights {
+  activity_id: number;
+  round: { round_id: number; start_ts_ms: number; end_ts_ms: number };
+  weights: Array<{ market_type: string; symbol_id: number; symbol: string; coefficient: string }>;
+}
+
+export const fetchVolumeWeights = (): Promise<VolumeWeights> => get<VolumeWeights>(`${DATA}/api/v1/points/volume-weights`);
 
 export interface Standing {
   accountId: number;
@@ -375,8 +407,10 @@ export function shareFrom(d: Difficulty, yourVolume: number, yourPnl: number): Y
  *      address would be sent for whichever is connected now, and the answer
  *      would be the OTHER wallet's points, silently and wrongly.
  *
- *  It is sent to exactly one origin - alpha-biz.sodex.dev - and to nothing of
- *  ours: our backend forwards the sign-in, then drops out of the path entirely.
+ *  It is sent to SoDEX's hosts and to nothing of ours. None of this runs while
+ *  SODEX_SIGNIN_LIVE is false: `authed` below refuses first. The v2 paths answer
+ *  401 today, so their row shapes have not been seen; the readers below keep the
+ *  defensive field lists they had for v1, and a rename comes out as a dash.
  * ======================================================================== */
 
 const TOKEN_KEY = 'ot.sopoints.token';
@@ -443,6 +477,7 @@ export class NeedsPointsToken extends Error {
 }
 
 async function authed<T>(url: string, address: string): Promise<T> {
+  if (!SODEX_SIGNIN_LIVE) throw new NeedsPointsToken();
   const token = getPointsToken(address);
   if (!token) throw new NeedsPointsToken();
   const r = await fetch(url, {
@@ -526,7 +561,7 @@ const numOrNull = (v: unknown): number | null => {
 
 export async function fetchMyPoints(address: string): Promise<PointsSummary> {
   const d = await authed<Record<string, unknown>>(
-    `${BIZ}/biz/sopoints/summary?wallet_address=${address}`,
+    `${BIZ}/biz/sopoints/v2/summary?wallet_address=${address}`,
     address,
   );
   return {
@@ -626,7 +661,7 @@ export function weekPointsOf(w: PointsWeek, mode: ReferralMode): number | null {
 
 export async function fetchMyWeeks(address: string): Promise<PointsWeek[]> {
   const d = await authed<Record<string, unknown>>(
-    `${BIZ}/biz/sopoints/week/list?wallet_address=${address}&page=1&page_size=52`,
+    `${BIZ}/biz/sopoints/v2/week/list?wallet_address=${address}&page=1&page_size=52`,
     address,
   );
   const rows = (Array.isArray(d) ? d : (d.list ?? d.items ?? d.records ?? d.data ?? [])) as

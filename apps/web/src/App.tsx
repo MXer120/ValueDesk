@@ -4,7 +4,7 @@ import { PrivacyProvider } from './privacy';
 import { NavBar, scanHref } from './components/NavBar';
 import { SideBar } from './components/SideBar';
 import './components/shell.css';
-import { DEFAULT_TAB, SOON_TABS, TABS, isExcludedPath, isLimitsPath, isStatusPath, landingTab, legalForPath, tabForPath, useRoute, type LegalPage, type Tab } from './router';
+import { DEFAULT_TAB, SOON_TABS, TABS, isExcludedPath, isLimitsPath, isStatusPath, landingTab, legalForPath, sodexViewForPath, tabForPath, useRoute, type LegalPage, type SodexView, type Tab } from './router';
 import { api, type Engine } from './api';
 import { useAsync, useConnState, useMediaQuery, useSession, useStored, useSymbols } from './hooks';
 import { hub } from './ws';
@@ -89,6 +89,12 @@ const StatusDoc = lazyPage('status', () => import('./status/StatusPage').then((m
 const ExcludedDoc = lazyPage('excluded', () => import('./components/excluded/ExcludedPage').then((m) => m.ExcludedPage));
 /* Trading limits & conditions (More > Trading limits), the same way. */
 const LimitsDoc = lazyPage('limits', () => import('./components/limits/LimitsPage').then((m) => m.LimitsPage));
+/* SoDEX's own products (More > SoDEX), the same way. */
+const SODEX_DOCS: Record<SodexView, LazyPage<{ address: string | null; provider: Eip1193Provider | null }>> = {
+  points: lazyPage('sopoints', () => import('./components/sodex/SoPointsPage').then((m) => m.SoPointsPage)),
+  'blind-boxes': lazyPage('blindboxes', () => import('./components/sodex/BlindBoxPage').then((m) => m.BlindBoxPage)),
+  wealth: lazyPage('wealth', () => import('./components/sodex/WealthPage').then((m) => m.WealthPage)),
+};
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const PAGES: Record<Tab, LazyPage<any>> = {
@@ -110,7 +116,7 @@ const bootTabs = (): Tab[] => {
 /** The code the first render needs: a legal page's, the status page's, or the landing tab's (above). */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const bootPages = (): LazyPage<any>[] =>
-  legalForPath(window.location.pathname) ? [LegalDoc] : isStatusPath(window.location.pathname) ? [StatusDoc] : isExcludedPath(window.location.pathname) ? [ExcludedDoc] : isLimitsPath(window.location.pathname) ? [LimitsDoc] : bootTabs().map((t) => PAGES[t]);
+  legalForPath(window.location.pathname) ? [LegalDoc] : isStatusPath(window.location.pathname) ? [StatusDoc] : isExcludedPath(window.location.pathname) ? [ExcludedDoc] : isLimitsPath(window.location.pathname) ? [LimitsDoc] : sodexViewForPath(window.location.pathname) ? [SODEX_DOCS[sodexViewForPath(window.location.pathname) as SodexView]] : bootTabs().map((t) => PAGES[t]);
 /* The landing page's first index reads leave now, when this browser has started
    on this URL before: the page asks for them in an effect, after its code has
    arrived and rendered, and takes the answers that are already there (serverFetch.ts). */
@@ -152,7 +158,7 @@ function AppShell() {
   const [address, setAddress] = useStored<string | null>('ot.address', null);
   /* The page comes from the URL. `setTab` keeps its name because ~15 call
    * sites below pass it around as a callback; it pushes history now. */
-  const [tab, navigate, legal, navigateLegal, status, navigateStatus, excluded, navigateExcluded, limits, navigateLimits] = useRoute();
+  const [tab, navigate, legal, navigateLegal, status, navigateStatus, excluded, navigateExcluded, limits, navigateLimits, sodex, navigateSodex] = useRoute();
   /* Change page only once its code is in; the latest request wins. After the
      idle prefetch every page is in, and this is a plain synchronous navigate. */
   const navSeq = useRef(0);
@@ -210,6 +216,15 @@ function AppShell() {
     if (LimitsDoc.ready) go();
     else LimitsDoc.preload().then(go, go);
   }, [navigateLimits]);
+  /* SoDEX's products the same way. */
+  const openSodex = useCallback((view: SodexView) => {
+    const seq = ++navSeq.current;
+    const go = () => {
+      if (seq === navSeq.current) navigateSodex(view);
+    };
+    if (SODEX_DOCS[view].ready) go();
+    else SODEX_DOCS[view].preload().then(go, go);
+  }, [navigateSodex]);
   /* A legal link anywhere in the app (legal/LegalGate.tsx LegalLink) opens its page in place. */
   useEffect(() => {
     const on = (e: Event) => {
@@ -220,7 +235,8 @@ function AppShell() {
     return () => window.removeEventListener(OPEN_LEGAL_EVENT, on);
   }, [openLegal]);
   /* The tab whose page is on screen - none while a legal page or the status page is. */
-  const shown: Tab | null = legal || status || excluded || limits ? null : tab;
+  const shown: Tab | null = legal || status || excluded || limits || sodex ? null : tab;
+  const SodexDoc = sodex ? SODEX_DOCS[sodex] : null;
   usePagePrefetch();
   const openScanAddress = useCallback((addr: string, venue?: Venue) => {
     window.location.href = venue
@@ -530,6 +546,8 @@ function AppShell() {
         statusOn={status && !legal}
         excludedOn={excluded && !legal && !status}
         limitsOn={limits && !legal && !status && !excluded}
+        onOpenSodex={openSodex}
+        sodexOn={!legal && !status && !excluded && !limits ? sodex : null}
       />
 
       {/* The venue-status line is the ONLY full-width strip allowed under the
@@ -634,6 +652,9 @@ function AppShell() {
         {limits && !legal && !status && !excluded && (
           <Guarded name="Trading limits"><LimitsDoc /></Guarded>
         )}
+        {SodexDoc && !legal && !status && !excluded && !limits && (
+          <Guarded name="SoDEX"><SodexDoc address={address} provider={provider} /></Guarded>
+        )}
 
         </div>
 
@@ -723,6 +744,7 @@ function AppShell() {
 
       {/* Search / Cmd+K: Home, Traders, Screener, Assets - components/palette/. */}
       <CommandPalette
+        onOpenSodex={openSodex}
         onSelectSymbol={(e, s) => { setEngine(e); setSymbol(s); setTab('trade'); }}
         favorites={favorites}
         onToggleFavorite={toggleFavorite}
@@ -750,6 +772,7 @@ function usePagePrefetch(): void {
   useEffect(() => {
     const all = () => {
       for (const t of TABS) if (!SOON_TABS.has(t)) PAGES[t].preload().catch(() => {});
+      for (const doc of Object.values(SODEX_DOCS)) doc.preload().catch(() => {});
     };
     const idle = typeof window.requestIdleCallback === 'function';
     const handle = idle ? window.requestIdleCallback(all, { timeout: 1000 }) : window.setTimeout(all, 300);
@@ -761,6 +784,8 @@ function usePagePrefetch(): void {
       if (!t && legalForPath(el.pathname) && !LegalDoc.ready) LegalDoc.preload().catch(() => {});
       if (!t && isStatusPath(el.pathname) && !StatusDoc.ready) StatusDoc.preload().catch(() => {});
       if (!t && isLimitsPath(el.pathname) && !LimitsDoc.ready) LimitsDoc.preload().catch(() => {});
+      const view = t ? null : sodexViewForPath(el.pathname);
+      if (view && !SODEX_DOCS[view].ready) SODEX_DOCS[view].preload().catch(() => {});
     };
     document.addEventListener('pointerover', onIntent, { passive: true });
     document.addEventListener('focusin', onIntent);

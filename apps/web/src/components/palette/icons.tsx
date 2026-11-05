@@ -129,6 +129,18 @@ export const IconCandles = ({ size }: P = {}) => (
   </Svg>
 );
 /** Explore: a compass. */
+export const IconPoints = ({ size }: P = {}) => (
+  <Svg size={size}><path d="m12 3.5 2.6 5.4 5.9.8-4.3 4.1 1.1 5.9-5.300-2.900-5.300 2.900 1.100-5.900-4.300-4.100 5.900-.8z" /></Svg>
+);
+
+export const IconBox = ({ size }: P = {}) => (
+  <Svg size={size}><path d="M12 3 20 7.500v9L12 21l-8-4.500v-9z" /><path d="M4 7.500 12 12l8-4.500M12 12v9" /></Svg>
+);
+
+export const IconFunds = ({ size }: P = {}) => (
+  <Svg size={size}><path d="M3.500 20h17M6 20v-7M10.500 20V8M15 20v-5M19 20V4" /></Svg>
+);
+
 export const IconCompass = ({ size }: P = {}) => (
   <Svg size={size}>
     <circle cx="12" cy="12" r="8.5" />

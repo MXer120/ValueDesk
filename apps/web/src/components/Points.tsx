@@ -12,18 +12,19 @@
  * nothing - this reads their endpoints and does arithmetic they do not publish,
  * and every derived figure carries the `derived` tag the rest of the app uses.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useStored } from '../hooks';
 import {
-  NeedsPointsToken, RULES, TIERS, difficultyFrom, fetchMyPoints, fetchMyWeeks,
-  fetchRankedCount, fetchReferral, fetchStanding, fetchVenueVolume, fetchWeek,
+  NeedsPointsToken, RULES, TIERS, difficultyFrom, fetchBoostConfig, fetchMyPoints, fetchMyWeeks,
+  fetchRankedCount, fetchReferral, fetchStanding, fetchVenueVolume, fetchVolumeWeights, fetchWeek,
   clearPointsToken, getPointsToken, setPointsToken, shareFrom, tierFor, weekVolumeOf,
   difficultyByWeek, fetchVenueDaily, seasonStats, venueByWeek, MIN_COVERAGE,
-  type DailyPoint, type Difficulty, type DifficultyWeek, type PointsSummary, type PointsWeek,
+  type BoostConfig, type DailyPoint, type Difficulty, type DifficultyWeek, type PointsSummary, type PointsWeek,
   type Referral,
-  type ReferralMode, type SeasonStats, type Standing, type VenueWeek, type WeekInfo,
+  type ReferralMode, type SeasonStats, type Standing, type VenueWeek, type VolumeWeights, type WeekInfo,
   type Window, type YourShare,
 } from '../points';
+import { SODEX_SIGNIN_LIVE } from '../sodexProgrammes';
 import { Card, Group, Meter, Row, PeriodSeg, fmtCompactUsd } from './Portfolio';
 import { DASH, fmt, fmtUsd } from '../format';
 import { useMask } from '../privacy';
@@ -34,6 +35,7 @@ import './Points.css';
 import { notifyError } from '../toast';
 import { NoWallet } from './EmptyState';
 import { fmtFixed, fmtPlain } from '../numStyle';
+import { pollEvery } from '../exchange/visibility';
 /* The window the pool competes over. Weekly pool, so 7D is the honest default. */
 const POOL_DAYS = 7;
 
@@ -44,6 +46,12 @@ export interface PointsContext {
   window: Window;
   setWindow: (w: Window) => void;
   week: WeekInfo | null;
+  /** The squad boost's rules, as SoDEX publishes them. */
+  boost: BoostConfig | null;
+  /** This round's boosted markets. */
+  weights: VolumeWeights | null;
+  /** The public reads have all settled once; nothing to wait for any more. */
+  publicSettled: boolean;
   standing: Standing | null;
   ranked: number | null;
   venue: { total: number; days: number } | null;
@@ -89,6 +97,9 @@ export function usePointsContext(
      rather than a fourth kind of period control being invented. */
   const [window, setWindow] = useState<Window>('7D');
   const [week, setWeek] = useState<WeekInfo | null>(null);
+  const [boost, setBoost] = useState<BoostConfig | null>(null);
+  const [weights, setWeights] = useState<VolumeWeights | null>(null);
+  const [publicSettled, setPublicSettled] = useState(false);
   const [standing, setStanding] = useState<Standing | null>(null);
   /* Separate from `standing`, which follows the 24H/7D/30D control. Season
      points can only be divided by a season-long PnL. */
@@ -120,7 +131,7 @@ export function usePointsContext(
    * changing their mind in the wallet - so it clears the state and says nothing.
    */
   const signIn = useCallback(async () => {
-    if (!address || !provider) return;
+    if (!SODEX_SIGNIN_LIVE || !address || !provider) return;
     setSigningIn(true);
     setSignInError(null);
     try {
@@ -143,6 +154,20 @@ export function usePointsContext(
     setWeeks(null);
     setNeedsToken(true);
     setTick((n) => n + 1);
+  }, []);
+
+  /* The week, the squad boost and the boosted markets. Public, and independent of the wallet and of the
+     standing window below; the week turns over while the page is open, so they are read again every minute. */
+  useEffect(() => {
+    let off = false;
+    const read = () => Promise.allSettled([
+      fetchWeek().then((w) => { if (!off) setWeek(w); }),
+      fetchBoostConfig().then((b) => { if (!off) setBoost(b); }),
+      fetchVolumeWeights().then((v) => { if (!off) setWeights(v); }),
+    ]).then(() => { if (!off) setPublicSettled(true); });
+    void read();
+    const stop = pollEvery(60_000, () => { void read(); });
+    return () => { off = true; stop(); };
   }, []);
 
   useEffect(() => {
@@ -168,7 +193,6 @@ export function usePointsContext(
 
     if (address) {
       jobs.push(
-        fetchWeek(address).then((w) => { if (!off) setWeek(w); }).catch(() => {}),
         fetchStanding(address, window).then((s) => { if (!off) setStanding(s); }).catch(() => {}),
         fetchStanding(address, 'ALL_TIME')
           .then((s) => { if (!off) setSeasonPnl(s?.pnlUsd ?? null); }).catch(() => {}),
@@ -218,7 +242,7 @@ export function usePointsContext(
   const share = diff && standing ? shareFrom(diff, standing.volumeUsd, standing.pnlUsd) : null;
 
   return {
-    address, provider, window, setWindow, week, standing, ranked, venue, referral, mine,
+    address, provider, window, setWindow, week, boost, weights, publicSettled, standing, ranked, venue, referral, mine,
     weeks, venueWeeks, difficulty, stats,
     basis, setBasis, refMode, setRefMode, band, setBand, showTvl, setShowTvl,
     needsToken, tokenPresent, signIn, signOut, signingIn, signInError,
@@ -945,7 +969,7 @@ function TiersPanel({ c }: { c: PointsContext }) {
   return (
     <Card
       title="Tiers"
-      action={<span className="pf-unit">{real != null ? 'your balance' : 'estimate'}</span>}
+      action={points != null ? <span className="pf-unit">{real != null ? 'your balance' : 'estimate'}</span> : undefined}
     >
       <Group title="SoDEX's thresholds">
         {TIERS.map((t) => (
@@ -1105,15 +1129,39 @@ function WeeksPanel({ c }: { c: PointsContext }) {
   );
 }
 
+/** A public fact on a Row's line. Unlike `Row` it is never masked: hiding a wallet's figures does not hide SoDEX's rules. */
+export function Fact({ label, value, hint, cls }: { label: ReactNode; value: ReactNode; hint?: string; cls?: string }) {
+  return (
+    <div className="pf-row" title={hint}>
+      <span className="pf-row__label">{label}</span>
+      <span className={`pf-row__value ${cls ?? ''}`}>{value}</span>
+    </div>
+  );
+}
+
 function ProgrammePanel({ c }: { c: PointsContext }) {
   return (
     <Card title="Programme">
       <Group title="Schedule">
-        <Row label="Snapshot" value={RULES.snapshot} tag="venue" />
-        <Row label="Distribution" value={RULES.distribution} tag="venue" />
-        <Row label="Minimum award" value={`${RULES.minimumUnit} point`} tag="venue" />
-        <Row label="Referral bonus" value={`${RULES.referralBonusPct}% of an invitee's`} tag="venue" />
+        <Fact label="Season" value={`${RULES.season} · ${RULES.seasonWeeks} weeks`} />
+        <Fact label="Snapshot" value="Every Tuesday" hint={RULES.snapshot} />
+        <Fact label="Distribution" value={RULES.distribution} />
+        <Fact label="Minimum award" value={`${RULES.minimumUnit} point`} />
       </Group>
+      <Group title="Invites">
+        <Fact label="Your rebate" value={`${RULES.referralBonusPct}% of an invitee's points`} />
+        <Fact label="Their boost" value={`+${RULES.inviteeBoostPct}%`} />
+      </Group>
+      {c.diff && (
+        <Group title="The field">
+          <Fact label={`Venue volume, ${c.venue?.days ?? POOL_DAYS}D`} value={fmtCompactUsd(c.diff.venueVolume)} />
+          <Fact
+            label="Volume per point"
+            value={fmtUsd(c.diff.dollarsPerPoint, 2)}
+            hint="This week's pool divided into the venue's volume: a measure of how hard points are to earn, not SoDEX's formula, which also weighs open interest, holdings and more."
+          />
+        </Group>
+      )}
       <Group title="Your invite code">
         <Row
           label="Code"

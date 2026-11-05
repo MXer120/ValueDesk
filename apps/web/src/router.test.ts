@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { LEGAL_LABELS, LEGAL_PAGES, TABS, legalForPath, pathForLegal, soonTabs, tabForPath } from './router';
+import { LEGAL_LABELS, LEGAL_PAGES, SODEX_VIEWS, TABS, landingTab, legalForPath, pathForLegal, pathForSodexView, sodexViewForPath, soonTabs, tabForPath } from './router';
 
 test('the legal pages are routes of their own, outside the nav', () => {
   assert.deepEqual([...LEGAL_PAGES], ['impressum', 'privacy', 'cookies', 'terms', 'risk', 'copy-terms', 'licenses']);
@@ -31,4 +31,16 @@ test('Bots on the main site: in the nav as coming soon, no route; the beta chann
   assert.equal(tabForPath('/bots', soonTabs(undefined)), null, '/bots lands where an unknown path does');
   assert.equal(tabForPath('/Bots/', soonTabs('beta')), 'bots');
   assert.equal(tabForPath('/copy', soonTabs(undefined)), 'copy');
+});
+
+test('the SoDEX views are routes of their own, outside the tabs; a fund is still Wealth', () => {
+  for (const v of SODEX_VIEWS) {
+    assert.equal(sodexViewForPath(pathForSodexView(v)), v);
+    assert.equal(tabForPath(pathForSodexView(v)), null);
+  }
+  assert.equal(sodexViewForPath('/Points/'), 'points');
+  assert.equal(sodexViewForPath('/wealth/vQQQ'), 'wealth');
+  assert.equal(sodexViewForPath('/blind-boxes'), 'blind-boxes');
+  assert.equal(sodexViewForPath('/trade'), null);
+  assert.equal(landingTab('/verify'), 'trade', 'removed pages still move');
 });
