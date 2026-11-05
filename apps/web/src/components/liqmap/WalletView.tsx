@@ -26,6 +26,7 @@ import { shortAddr } from '../../format';
 import { fmtPx, fmtUsdShort } from '../explore/model';
 import { fmtFixed } from '../../numStyle';
 import { LEV_BANDS, LEV_COLOR, LEV_LABEL, isAllLev, type ColorBy, type LevBand } from '../../chart/liqLev';
+import { HEAT_PALETTES, HEAT_PALETTE_KEYS, heatGradient, type HeatPalette } from '../../chart/liqHeatIndicator';
 
 export const MAX_WALLETS = 10;
 export type Side = 'both' | 'long' | 'short';
@@ -34,7 +35,7 @@ export type Unit = 'usd' | 'coin';
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 
 /** What the View changes (one write, so a reset is never half a reset). */
-export interface ViewChange { wallets?: string[]; side?: Side; res?: Res; unit?: Unit; colorBy?: ColorBy; lev?: LevBand[]; strip?: boolean; step?: string }
+export interface ViewChange { wallets?: string[]; side?: Side; res?: Res; unit?: Unit; colorBy?: ColorBy; lev?: LevBand[]; strip?: boolean; palette?: HeatPalette; step?: string }
 
 /** The resolution's choices for the coin on screen: 'auto' and the ladder's places ('0' the default), named in its price units. */
 export interface StepsView {
@@ -60,8 +61,8 @@ export function WalletView({ wallets, side, venues, self, bars, steps, colors, o
   bars: { res: Res; unit: Unit; coin: string; width: string | null } | null;
   /** The resolution (null: no price yet). */
   steps: StepsView | null;
-  /** Colour by side or leverage, the bands shown, and the historical view's strip of the levels now (null elsewhere). */
-  colors: { colorBy: ColorBy; lev: LevBand[]; strip: boolean | null };
+  /** Colour by side or leverage, the bands shown, and the historical view's strip of the levels now and colours by side (null elsewhere). */
+  colors: { colorBy: ColorBy; lev: LevBand[]; strip: boolean | null; palette: HeatPalette | null };
   onChange: (c: ViewChange) => void;
   onReset: () => void;
 }) {
@@ -69,7 +70,7 @@ export function WalletView({ wallets, side, venues, self, bars, steps, colors, o
   const [open, setOpen] = useState(false);
   const auto = !steps || steps.value === 'auto';
   const count = wallets.length + (side === 'both' ? 0 : 1) + (bars && auto && bars.res !== 'fine' ? 1 : 0) + (steps && steps.value !== steps.initial ? 1 : 0) + (bars && bars.unit !== 'usd' ? 1 : 0)
-    + (colors.colorBy !== 'side' ? 1 : 0) + (isAllLev(colors.lev) ? 0 : 1) + (colors.strip ? 1 : 0);
+    + (colors.colorBy !== 'side' ? 1 : 0) + (isAllLev(colors.lev) ? 0 : 1) + (colors.strip ? 1 : 0) + (colors.palette && colors.palette !== 'viridis' ? 1 : 0);
   // A band on or off; the last one on stays (none at all would be an empty map).
   const toggleLev = (b: LevBand) => {
     const on = colors.lev.includes(b);
@@ -119,6 +120,17 @@ export function WalletView({ wallets, side, venues, self, bars, steps, colors, o
         <Section label="Side">
           <Seg<Side> value={side} onChange={(s) => onChange({ side: s })} options={[['both', 'Both'], ['long', 'Longs'], ['short', 'Shorts']]} tones={{ long: 'neg', short: 'pos' }} />
         </Section>
+        {colors.palette !== null && (
+          <Section label="Colors">
+            {/* A square picks by side: the leverage colours are the bands' own. */}
+            <div className="lqm-view-pal" role="radiogroup" aria-label="Heatmap colors">
+              {HEAT_PALETTE_KEYS.map((k) => {
+                const on = colors.colorBy === 'side' && colors.palette === k;
+                return <button key={k} type="button" role="radio" aria-checked={on} aria-label={HEAT_PALETTES[k].label} className={`lqm-view-sw${on ? ' is-on' : ''}`} style={{ background: heatGradient(k, '135deg') }} onClick={() => onChange({ palette: k, colorBy: 'side' })} />;
+              })}
+            </div>
+          </Section>
+        )}
         <Section label="Color by">
           <Seg<ColorBy> value={colors.colorBy} onChange={(colorBy) => onChange({ colorBy })} options={[['side', 'Side'], ['lev', 'Leverage']]} />
         </Section>

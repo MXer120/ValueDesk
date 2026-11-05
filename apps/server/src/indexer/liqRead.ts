@@ -649,9 +649,13 @@ export function liqAt(coin: string, venues: readonly Venue[], t: number, from: n
   if (!s) return null;
   let snap: { t: number; p: number } | null = null;
   try {
-    for (const r of s.liqHist(coin, t - 3 * 3_600_000)) {
-      if (r.t > t) break;
-      try { snap = { t: r.t, p: (JSON.parse(r.data) as LiqSnap).p }; } catch { /* a bad row: the one before stands */ }
+    // The newest in force then (a bad row: the one before it), reading only it: every row from three
+    // hours before `t` up to now was read to find it - over a second for an older cell of BTC.
+    let upTo = t;
+    while (!snap) {
+      const r = s.liqHistLast(coin, t - 3 * 3_600_000, upTo);
+      if (!r) break;
+      try { snap = { t: r.t, p: (JSON.parse(r.data) as LiqSnap).p }; } catch { upTo = r.t - 1; }
     }
   } catch { /* the tables arrive with the indexer's first start */ }
   const price = snap?.p ?? null;
@@ -698,7 +702,7 @@ const RANGE_MS = { '1d': 86_400_000, '2d': 2 * 86_400_000, '7d': 7 * 86_400_000,
 export type LiqRange = keyof typeof RANGE_MS;
 export const isLiqRange = (r: unknown): r is LiqRange => typeof r === 'string' && r in RANGE_MS;
 
-export function liqHistory(coin: string, venues: readonly Venue[], range: LiqRange, wallets: readonly string[] = []): LiqHistory | null {
+export function liqHistory(coin: string, venues: readonly Venue[], range: LiqRange, wallets: readonly string[] = [], known: { points: ReadonlyArray<{ t: number; p: number; st: number }>; coins: string[] } | null = null): LiqHistory | null {
   const s = reader();
   if (!s) return null;
   const points: LiqHistory['points'] = [];
@@ -714,7 +718,11 @@ export function liqHistory(coin: string, venues: readonly Venue[], range: LiqRan
       const log = ids.length ? s.liqLog(ids, coin, from) : [];
       const state = new Map<string, { side: number; liq: number; usd: number; band: LevBand | null }>();
       let k = 0;
-      for (const r of s.liqHist(coin, from)) {
+      // Each step's time, price and width: `known` (the tile index holds them), else its snapshot read.
+      const steps = known ? known.points.filter((q) => q.t >= from) : s.liqHist(coin, from).flatMap((r) => {
+        try { const q = JSON.parse(r.data) as LiqSnap; return [{ t: r.t, p: q.p, st: q.st }]; } catch { return []; }
+      });
+      for (const r of steps) {
         while (k < log.length && log[k]!.t <= r.t) {
           const e = log[k++]!;
           const key = `${e.aid}|${e.venue}`;
@@ -722,8 +730,7 @@ export function liqHistory(coin: string, venues: readonly Venue[], range: LiqRan
           else state.delete(key);
         }
         if (!state.size) continue;
-        let snap: LiqSnap;
-        try { snap = JSON.parse(r.data) as LiqSnap; } catch { continue; }
+        const snap = r;
         const sum = new Map<number, SnapRow>();
         for (const [key, x] of state) {
           if (!vs.has(Number(key.slice(key.indexOf('|') + 1)))) continue;
@@ -737,7 +744,7 @@ export function liqHistory(coin: string, venues: readonly Venue[], range: LiqRan
         }
         if (sum.size) points.push({ t: r.t, p: snap.p, st: snap.st, b: [...sum.values()].sort((x, y) => x[0] - y[0]).map((b) => trimRow(b, 3)) });
       }
-      coins = s.liqHistCoins();
+      coins = known ? known.coins : s.liqHistCoins();
     } catch { /* the tables arrive with the indexer's first start */ }
     return { coin, venues: [...venues], points, coins };
   }

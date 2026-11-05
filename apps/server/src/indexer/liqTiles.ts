@@ -36,9 +36,9 @@
 import { readFileSync } from 'node:fs';
 import { rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { setImmediate as nextTurn } from 'node:timers/promises';
+import { setImmediate as nextTurn, setTimeout as pause } from 'node:timers/promises';
 import { dataDir } from '../builder/paths.js';
-import type { Venue } from '../valuedesk/types.js';
+import { VENUES, type Venue } from '../valuedesk/types.js';
 import { LEV_BANDS, type LevBand } from '../valuedesk/liquidations/math.js';
 import { snapBand, trimRow, type LiqSnap, type SnapRow } from '../valuedesk/liquidations/levels.js';
 import { liqHistory, type LiqHistory } from './liqRead.js';
@@ -150,7 +150,11 @@ function cellV(r: SnapRow, side: ScaleSide, set: readonly LevBand[] | null): num
 
 /** web liqLev.ts robustMax at the heat scale's settings (q 0.95, ratio 3, keep 2). */
 export function robustMax95(values: number[]): number {
-  const v = values.filter((x) => x > 0 && Number.isFinite(x)).sort((a, b) => a - b);
+  return robustOfSorted(values.filter((x) => x > 0 && Number.isFinite(x)).sort((a, b) => a - b));
+}
+
+/** robustMax95 of values above 0, ascending. */
+function robustOfSorted(v: ArrayLike<number>): number {
   const n = v.length;
   if (!n) return 0;
   if (n < 5) return v[n - 1]!;
@@ -162,9 +166,21 @@ export function robustMax95(values: number[]): number {
 /** A snapshot's own robust scale per filter, at its own step (COMBOS order). */
 export function snapScales(rows: readonly SnapRow[]): Float64Array {
   const out = new Float64Array(COMBOS.length);
-  COMBOS.forEach((c, k) => { out[k] = robustMax95(rows.map((r) => cellV(r, c.side, c.set))); });
+  // One buffer, sorted as numbers: an array mapped, filtered and sorted with a comparator for each of
+  // the 21 filters was most of a coin's first read (production 2026-11-05: XRP's first index 8.2 s).
+  if (scaleBuf.length < rows.length) scaleBuf = new Float64Array(rows.length * 2);
+  for (let k = 0; k < COMBOS.length; k++) {
+    const { side, set } = COMBOS[k]!;
+    let m = 0;
+    for (const r of rows) {
+      const x = cellV(r, side, set);
+      if (x > 0 && Number.isFinite(x)) scaleBuf[m++] = x;
+    }
+    out[k] = robustOfSorted(scaleBuf.subarray(0, m).sort());
+  }
   return out;
 }
+let scaleBuf = new Float64Array(4096);
 
 /**
  * web heatScale per filter: each snapshot's robust scale read per the newest snapshot's step
@@ -193,6 +209,8 @@ interface Meta { t: number; n: number; p: number; st: number; sc: Float64Array }
 export const MAX_ROWS = 1_500_000;
 /** Work this long between two turns of the loop given back. */
 const YIELD_MS = 8;
+/** The background read (warmLiqMetas): this long of rest after each YIELD_MS of work, a quarter of the thread at most. */
+const WARM_REST_MS = 24;
 /** Snapshot metas kept per coin and venue set (30 days at 15 minutes is 2,880). */
 const MAX_METAS = 4_000;
 
@@ -282,10 +300,15 @@ function snapOf(s: IndexStore, coin: string, venues: readonly Venue[], vk: strin
   let snap: LiqSnap;
   try { snap = JSON.parse(data) as LiqSnap; } catch { return null; }
   const rows = snapRows(snap, venues);
+  // Its meta known and unchanged, only its rows were wanted: its scales are not worked out again.
+  if (meta && meta.n === at.n) {
+    keepRows(`${vk}|${at.t}`, rows);
+    return { meta, rows };
+  }
   const m: Meta = { t: at.t, n: at.n, p: snap.p, st: snap.st, sc: snapScales(rows) };
   if (!byT) { byT = new Map(); metas.set(vk, byT); }
   byT.set(at.t, m);
-  keepRows(`${vk}|${at.t}`, rows);
+  if (wantRows) keepRows(`${vk}|${at.t}`, rows);
   metasChanged();
   return { meta: m, rows };
 }
@@ -293,9 +316,11 @@ function snapOf(s: IndexStore, coin: string, venues: readonly Venue[], vk: strin
 // --- the metas across restarts -------------------------------------------------------------
 
 /** Bump when snapRows, snapScales or COMBOS change: a file of another version is not read. */
-const METAS_V = 1;
-/** Written this long after a change (a snapshot every 15 minutes; the first index adds hundreds at once). */
-const SAVE_MS = 30_000;
+const METAS_V = 2;
+/** Written this long after a change (a snapshot every 15 minutes; the first read of every coin adds ~100k). */
+const SAVE_MS = 120_000;
+/** A meta in the file: t, n, p, st, then its scales. */
+const META_W = 4 + COMBOS.length;
 
 let metasFile: string | null | undefined;
 /**
@@ -309,7 +334,7 @@ function metasPath(): string | null {
     const named = process.env.VALUESCAN_LIQ_METAS_FILE?.trim();
     if (named) metasFile = named === 'off' ? null : named;
     else if (process.env.NODE_TEST_CONTEXT) metasFile = null;
-    else { try { metasFile = join(dataDir(), 'liq-tile-metas.json'); } catch { metasFile = null; } }
+    else { try { metasFile = join(dataDir(), 'liq-tile-metas.bin'); } catch { metasFile = null; } }
   }
   return metasFile;
 }
@@ -321,17 +346,25 @@ function readMetas(): void {
   metasRead = true;
   const file = metasPath();
   if (!file) return;
-  let saved: { v?: number; keys?: Record<string, number[][]> };
-  try { saved = JSON.parse(readFileSync(file, 'utf8')) as typeof saved; } catch { return; }
-  if (saved.v !== METAS_V || !saved.keys) return;
-  for (const [vk, list] of Object.entries(saved.keys)) {
-    if (!Array.isArray(list)) continue;
+  // [header length (u32), the header (JSON: version, width, each key's count), padding to 8, the
+  // numbers]: every coin's 30 days are ~2.4M numbers, as JSON a parse that holds the API at each start.
+  let nums: Float64Array;
+  let saved: { v?: number; w?: number; keys?: Array<[string, number]> };
+  try {
+    const buf = readFileSync(file);
+    const len = buf.readUInt32LE(0);
+    saved = JSON.parse(buf.toString('utf8', 4, 4 + len)) as typeof saved;
+    const at = Math.ceil((4 + len) / 8) * 8;
+    nums = new Float64Array(buf.buffer.slice(buf.byteOffset + at, buf.byteOffset + buf.length));
+  } catch { return; }
+  if (saved.v !== METAS_V || saved.w !== META_W || !Array.isArray(saved.keys)) return;
+  let o = 0;
+  for (const [vk, count] of saved.keys) {
     let byT = metas.get(vk);
     if (!byT) { byT = new Map(); metas.set(vk, byT); }
-    for (const r of list) {
-      if (!Array.isArray(r) || r.length !== 4 + COMBOS.length || !r.every(Number.isFinite)) continue;
-      const [t, n, p, st] = r as [number, number, number, number];
-      if (!byT.has(t)) byT.set(t, { t, n, p, st, sc: Float64Array.from(r.slice(4)) });
+    for (let i = 0; i < count && o + META_W <= nums.length; i++, o += META_W) {
+      const t = nums[o]!;
+      if (!byT.has(t)) byT.set(t, { t, n: nums[o + 1]!, p: nums[o + 2]!, st: nums[o + 3]!, sc: nums.subarray(o + 4, o + META_W) });
     }
   }
 }
@@ -347,16 +380,31 @@ function metasChanged(): void {
 export async function saveLiqMetas(): Promise<void> {
   const file = metasPath();
   if (!file) return;
-  const keys: Record<string, number[][]> = {};
-  for (const [vk, byT] of metas) keys[vk] = [...byT.values()].sort((a, b) => a.t - b.t).map((m) => [m.t, m.n, m.p, m.st, ...m.sc]);
+  const keys: Array<[string, number]> = [];
+  let total = 0;
+  for (const [vk, byT] of metas) { keys.push([vk, byT.size]); total += byT.size; }
+  const nums = new Float64Array(total * META_W);
+  let o = 0;
+  for (const byT of metas.values()) {
+    for (const m of byT.values()) {
+      nums[o] = m.t; nums[o + 1] = m.n; nums[o + 2] = m.p; nums[o + 3] = m.st;
+      nums.set(m.sc, o + 4);
+      o += META_W;
+    }
+  }
+  const head = Buffer.from(JSON.stringify({ v: METAS_V, w: META_W, keys }), 'utf8');
+  const at = Math.ceil((4 + head.length) / 8) * 8;
+  const pre = Buffer.alloc(at);
+  pre.writeUInt32LE(head.length, 0);
+  head.copy(pre, 4);
   try {
-    await writeFile(`${file}.tmp`, JSON.stringify({ v: METAS_V, keys }));
+    await writeFile(`${file}.tmp`, Buffer.concat([pre, Buffer.from(nums.buffer)]));
     await rename(`${file}.tmp`, file);
   } catch { /* a read-only directory: the metas are rebuilt after a restart, as before */ }
 }
 
 /** Each listed snapshot, read where needed, the loop given back every YIELD_MS of work. */
-async function walk(s: IndexStore, coin: string, venues: readonly Venue[], list: ReadonlyArray<{ t: number; n: number }>, wantRows: boolean): Promise<Array<{ meta: Meta; rows: SnapRow[] | null }>> {
+async function walk(s: IndexStore, coin: string, venues: readonly Venue[], list: ReadonlyArray<{ t: number; n: number }>, wantRows: boolean, restMs = 0): Promise<Array<{ meta: Meta; rows: SnapRow[] | null }>> {
   const vk = venueKey(coin, venues);
   const out: Array<{ meta: Meta; rows: SnapRow[] | null }> = [];
   let since = performance.now();
@@ -364,7 +412,8 @@ async function walk(s: IndexStore, coin: string, venues: readonly Venue[], list:
     const x = snapOf(s, coin, venues, vk, at, wantRows);
     if (x) out.push(x);
     if (performance.now() - since > YIELD_MS) {
-      await nextTurn();
+      if (restMs > 0) await pause(restMs, undefined, { ref: false });
+      else await nextTurn();
       since = performance.now();
     }
   }
@@ -451,6 +500,47 @@ export function liqTileIndex(coin: string, venues: readonly Venue[], now = Date.
   });
 }
 
+/**
+ * Every coin's snapshots read ahead over every venue (what the view asks unless a venue is switched
+ * off), so no visitor waits for a coin's first read (owner 2026-11-05: "it takes a long time
+ * snapshots are read/shown"; production: SOL's first index 13.8 s, XRP's 8.2 s, BNB's 9.1 s - only
+ * coins already viewed were held). At most a quarter of the thread; the first round reads ~100
+ * coins' 30 days, kept on disk across releases, each later one only the snapshots written since.
+ * Returns how many coins it went over.
+ */
+export async function warmLiqMetas(now = Date.now(), restMs = WARM_REST_MS): Promise<number> {
+  const s = reader();
+  if (!s) return 0;
+  readMetas();
+  let coins: string[] = [];
+  try { coins = coinsOf(s, now); } catch { return 0; }
+  const venues = [...VENUES];
+  for (const coin of coins) {
+    let list: Array<{ t: number; n: number }>;
+    try { list = listing(s, coin, now).filter((x) => x.t >= now - RANGE_MS); } catch { continue; }
+    if (!list.length) continue;
+    await walk(s, coin, venues, list, false, restMs);
+    trimMetas(venueKey(coin, venues), new Set(list.map((x) => x.t)));
+    if (restMs > 0) await pause(restMs, undefined, { ref: false });
+  }
+  return coins.length;
+}
+
+/** warmLiqMetas soon after the start and every WARM_EVERY_MS (a snapshot every 15 minutes); returns the stop. VALUESCAN_LIQ_WARM=off: none. */
+export const WARM_EVERY_MS = 15 * 60_000;
+export function keepLiqMetasWarm(): () => void {
+  if (process.env.VALUESCAN_LIQ_WARM === 'off') return () => {};
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let stopped = false;
+  const next = (ms: number) => {
+    if (stopped) return;
+    timer = setTimeout(() => { void warmLiqMetas().catch(() => 0).finally(() => next(WARM_EVERY_MS)); }, ms);
+    timer.unref?.();
+  };
+  next(30_000);
+  return () => { stopped = true; if (timer) clearTimeout(timer); };
+}
+
 /** `tl= tt= pl= band= bw= [v=]` checked: a TileAsk, or what is wrong. */
 export function tileAskOf(q: Record<string, string | undefined>, now = Date.now()): TileAsk | string {
   const num = (k: string) => (q[k] === undefined || q[k] === '' ? NaN : Number(q[k]));
@@ -528,7 +618,9 @@ function walletHistory(coin: string, venues: readonly Venue[], wallets: readonly
   const hit = walletHists.get(key);
   if (hit && now - hit.at < WALLET_HIST_MS) return hit.h;
   if (walletHists.size >= WALLET_HIST_MAX) for (const [k, v] of walletHists) if (now - v.at >= WALLET_HIST_MS || walletHists.size >= WALLET_HIST_MAX) walletHists.delete(k);
-  const h = Promise.resolve().then(() => liqHistory(coin, venues, '30d', wallets));
+  // The snapshots' times, prices and steps from the index, held: read from the snapshots themselves
+  // this was 30 days of JSON in one blocking statement, again each minute (production 2026-11-05: 3.6-4.6 s).
+  const h = liqTileIndex(coin, venues, now).then((idx) => (idx ? liqHistory(coin, venues, '30d', wallets, { points: idx.points, coins: idx.coins }) : null));
   walletHists.set(key, { at: now, h });
   h.catch(() => walletHists.delete(key));
   return h;

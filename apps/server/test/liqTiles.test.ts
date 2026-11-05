@@ -263,3 +263,48 @@ test('an index ask lists only from the newest snapshot held on, and still sees o
     T.resetLiqTiles();
   }
 });
+
+test('the background read: every coin held over every venue, a first index parses no snapshot and answers as one read fresh', async () => {
+  const { IndexStore } = await import('../src/indexer/store.js');
+  const T = await import('../src/indexer/liqTiles.js');
+  const { VENUES } = await import('../src/valuedesk/types.js');
+  T.resetLiqTiles();
+  const s = new IndexStore(process.env.VALUESCAN_INDEX_DB!);
+  const t0 = Math.floor(Date.now() / Q) * Q + Q - 7 * H; // the newest snapshots: the coins of the newest are the ones listed
+  for (let i = 0; i < 8; i++) s.putLiqHist(t0 + i * H, [['WARMA', JSON.stringify(snapOf(50 + i, 0.1, 1200 + i))], ['WARMB', JSON.stringify(snapOf(3 + i * 0.01, 0.005, 1300 + i))]]);
+  const fresh = (await T.liqTileIndex('WARMA', [...VENUES]))!;
+  T.resetLiqTiles();
+  assert.ok((await T.warmLiqMetas(Date.now(), 0)) >= 2, 'it went over the coins');
+  const parse = JSON.parse;
+  let parsed = 0;
+  JSON.parse = ((text: string, rev?: Parameters<typeof JSON.parse>[1]) => { parsed++; return parse(text, rev); }) as typeof JSON.parse;
+  let a;
+  let b;
+  try {
+    a = (await T.liqTileIndex('WARMA', [...VENUES], Date.now() + 20_000))!;
+    b = (await T.liqTileIndex('WARMB', [...VENUES], Date.now() + 20_000))!;
+  } finally {
+    JSON.parse = parse;
+  }
+  assert.equal(parsed, 0, 'no snapshot parsed for either coin');
+  assert.deepEqual(a.points, fresh.points);
+  assert.deepEqual(a.scale, fresh.scale);
+  assert.equal(b.points.length, 8);
+  s.close();
+  T.resetLiqTiles();
+});
+
+test('the scales: the buffer and numeric sort give what the filter, map and comparator gave', async () => {
+  const T = await import('../src/indexer/liqTiles.js');
+  const r = rng(77);
+  const rows = Array.from({ length: 900 }, (_, i) => {
+    const l = r() < 0.5 ? Math.round(r() ** 4 * 3e6) : 0;
+    const sh = l ? 0 : Math.round(r() ** 4 * 3e6);
+    return [i, l, sh, Math.round(l * r()), Math.round(l * 0.2), 0, Math.round(sh * r()), 0, Math.round(sh * 0.1)] as [number, number, number, ...number[]];
+  });
+  const sc = T.snapScales(rows as never);
+  // The first three filters' order is fixed (`both`: every band, low, mid).
+  assert.equal(sc[0], T.robustMax95(rows.map((x) => x[1] + x[2])));
+  assert.equal(sc[1], T.robustMax95(rows.map((x) => (x[1] > 0 ? x[3] ?? 0 : 0) + (x[2] > 0 ? x[6] ?? 0 : 0))));
+  assert.equal(T.snapScales([] as never)[0], 0);
+});

@@ -107,6 +107,23 @@
 .lqm-now-text { fill: var(--text); font-size: 10px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .lqm-hover { fill: rgb(var(--ink) / 0.06); pointer-events: none; }
 
+/* View's colour presets (WalletView.tsx): four squares, each its own scale; the one in use ringed. */
+.lqm-view-pal { display: flex; gap: 8px; }
+.lqm-view-sw {
+  width: 30px;
+  height: 30px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  cursor: pointer;
+  outline: 1px solid var(--line);
+  outline-offset: 0;
+}
+.lqm-view-sw:hover { outline-color: var(--muted); }
+.lqm-view-sw.is-on { outline: 2px solid var(--text); outline-offset: 2px; }
+.lqm-view-sw:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
 .lqm-tip {
   position: absolute;
   z-index: 3;
@@ -233,7 +250,6 @@
   width: 90px;
   height: 6px;
   border-radius: 3px;
-  background: linear-gradient(90deg, rgba(68, 1, 84, 0.4), rgb(59, 82, 139), rgb(33, 145, 140), rgb(94, 201, 98), rgb(253, 231, 37));
 }
 
 /* The historical view: the app's own chart (Chart.tsx, bare) filling the body, the heatmap drawn

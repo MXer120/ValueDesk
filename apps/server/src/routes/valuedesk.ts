@@ -52,7 +52,7 @@ import { applyCachedCurves, attachPodiumCurves } from '../valuedesk/curves.js';
 import { attachStats, boardPage, cohortDetail, cohortFocus, cohortMap, cohortWallets, cohortsReady, cohortsRead, excludedNow, indexerStatus, netPage } from '../indexer/read.js';
 import { isCohortId, isSector, type CohortFilter, type CohortRange, type WalletSort } from '../valuedesk/cohorts/model.js';
 import { fineAskOf, fineDrawOf, isLiqRange, levFilterOf, liqAt, liqHeatmap, liqHeatmapFine, liqHeatmapOf, liqHistory, liqHistoryFine, liqWallets, walletHistoryFine, walletLiqs } from '../indexer/liqRead.js';
-import { TILE_FINAL_CACHE, TILE_INDEX_CACHE, TILE_WALLET_CACHE, liqTile, liqTileIndex, liqTileIndexOf, liqTileOf, tileAskOf } from '../indexer/liqTiles.js';
+import { TILE_FINAL_CACHE, TILE_INDEX_CACHE, TILE_WALLET_CACHE, keepLiqMetasWarm, liqTile, liqTileIndex, liqTileIndexOf, liqTileOf, tileAskOf } from '../indexer/liqTiles.js';
 import { watchAddresses } from '../indexer/host.js';
 import { MAX_WINDOW_MS, flowWalletFills, flowWindow, type MarketKind } from '../flow/read.js';
 import type { FlowRole, FlowSide, FlowSort } from '../flow/codec.js';
@@ -166,7 +166,7 @@ function sortValue(r: TraderRow, sort: LeaderboardSort, window: Window): number 
 /** Explore and the screener's pools built before their first visitor and kept built while visited (index.ts, after the start). */
 export function keepValuedeskWarm(): () => void {
   const core = CORE_VENUES.map((v) => PROVIDERS[v]);
-  const stops = [keepExploreWarm(core), keepScreenerWarm(core)];
+  const stops = [keepExploreWarm(core), keepScreenerWarm(core), keepLiqMetasWarm()];
   return () => { for (const stop of stops) stop(); };
 }
 

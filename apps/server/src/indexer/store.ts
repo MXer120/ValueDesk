@@ -3253,6 +3253,11 @@ export class IndexStore {
   }
 
   /** One coin's snapshots from `fromT`, oldest first (data as written). */
+  /** A coin's newest snapshot in [fromT, toT] (undefined: none). */
+  liqHistLast(coin: string, fromT: number, toT: number): { t: number; data: string } | undefined {
+    return this.q('SELECT t, data FROM liq_hist WHERE coin = ? AND t >= ? AND t <= ? ORDER BY t DESC LIMIT 1').get(coin, fromT, toT) as { t: number; data: string } | undefined;
+  }
+
   liqHist(coin: string, fromT: number): Array<{ t: number; data: string }> {
     return this.q('SELECT t, data FROM liq_hist WHERE coin = ? AND t >= ? ORDER BY t').all(coin, fromT) as Array<{ t: number; data: string }>;
   }

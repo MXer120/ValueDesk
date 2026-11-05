@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { boxed, cellAt, cellRange, cellsOf, snapRowsOf, heatColor, heatScale, refStep, snapshotFor, stepNorm, unboxed, type HeatData, type HeatPoint } from './liqHeatIndicator';
+import { HEAT_PALETTES, HEAT_PALETTE_KEYS, boxed, cellAt, cellRange, cellsOf, heatGradient, isHeatPalette, snapRowsOf, heatColor, heatScale, refStep, snapshotFor, stepNorm, unboxed, type HeatData, type HeatPoint } from './liqHeatIndicator';
 
 const H = 3_600_000;
 const Q = 15 * 60_000;
@@ -100,4 +100,20 @@ test('the live column: stream rows at the snapshot step, the levels the price cr
     [10, 0, 60, 0, 0, 0, 60, 0, 0],
     [11, 0, 25, 0, 0, 0, 0, 0, 0],
   ]);
+});
+
+test('the four palettes: the default is the colours as before; only the colour moves, never which cells are drawn', () => {
+  assert.equal(HEAT_PALETTE_KEYS.length, 4);
+  assert.equal(heatColor(0.5), heatColor(0.5, 'viridis'));
+  assert.equal(heatColor(1), 'rgba(253,231,37,0.850)');
+  for (const k of HEAT_PALETTE_KEYS) {
+    assert.equal(HEAT_PALETTES[k].dark.length, 5);
+    assert.equal(HEAT_PALETTES[k].light.length, 5);
+    assert.equal(heatColor(0.01, k), null, 'below the floor: not drawn');
+    for (const x of [0.04, 0.3, 0.7, 1, 3]) assert.equal(heatColor(x, k)!.split(',').at(-1), heatColor(x)!.split(',').at(-1), 'the same strength');
+  }
+  assert.notEqual(heatColor(0.5, 'fire'), heatColor(0.5, 'ocean'));
+  assert.match(heatGradient('ocean'), /^linear-gradient\(90deg, rgb\(/);
+  assert.equal(isHeatPalette('fire'), true);
+  assert.equal(isHeatPalette('nope'), false);
 });

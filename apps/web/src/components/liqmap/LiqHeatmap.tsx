@@ -41,7 +41,7 @@ import { WalletView, type Res, type Side, type StepsView, type Unit, type ViewCh
 import { Chart } from '../Chart';
 import type { Chart as KChart } from 'klinecharts';
 import { CANDLE_PANE_ID } from '../../chart/theme';
-import { HEAT_FLOOR, LIQ_HEAT, barMsOf, boxed, cellAt, cellOf, cellsOf, heatColor, heatScale, levHeatColor, liqHeatTemplate, profileWidth, refStep, snapRowsOf, snapshotFor, stepNorm, stripWidth, type HeatData, type HeatPoint } from '../../chart/liqHeatIndicator';
+import { HEAT_FLOOR, LIQ_HEAT, barMsOf, boxed, cellAt, cellOf, cellsOf, heatColor, heatGradient, heatScale, isHeatPalette, levHeatColor, liqHeatTemplate, profileWidth, refStep, snapRowsOf, snapshotFor, stepNorm, stripWidth, type HeatData, type HeatPalette, type HeatPoint } from '../../chart/liqHeatIndicator';
 import { autoStep, fineWindow, histSteps, stepAt, stepLabel, stepLadder, streamAsk, streamGroup, streamSteps, tickOf, type StepLevel } from '../../chart/liqSteps';
 import { coinOfSymbol, groupFor, mapData, type LiqMapData } from '../../chart/liqMap';
 import {
@@ -69,10 +69,12 @@ interface Prefs {
   lev: LevBand[];
   /** The historical view: the levels now laid over its right edge. */
   strip: boolean;
+  /** The historical view: the colours by side (View's four squares). */
+  palette: HeatPalette;
   /** The resolution per coin (liqSteps.ts): Auto or a place on the coin's ladder; a coin not here has the default. */
   steps: Record<string, StepLevel>;
 }
-const DEFAULTS: Prefs = { view: 'live', res: 'fine', unit: 'usd', venues: [...SCAN_VENUES], wallets: [], side: 'both', colorBy: 'side', lev: [...LEV_BANDS], strip: false, steps: {} };
+const DEFAULTS: Prefs = { view: 'live', res: 'fine', unit: 'usd', venues: [...SCAN_VENUES], wallets: [], side: 'both', colorBy: 'side', lev: [...LEV_BANDS], strip: false, palette: 'viridis', steps: {} };
 /** Exact steps from the fine route (some wallets, or past the stream's fine layer) are read this often: as the wallet filter's levels. */
 const FINE_POLL_MS = 10_000;
 /** Auto's cell height (or width, in Live): about this many pixels, by Fine / Medium / Coarse. */
@@ -232,6 +234,7 @@ export function LiqHeatmap({ symbol, engine, instance, address = null }: { symbo
   const wallets = (Array.isArray(prefs.wallets) ? prefs.wallets : []).filter((w): w is string => typeof w === 'string' && /^0x[0-9a-f]{40}$/.test(w)).slice(0, 10);
   const side: Side = prefs.side === 'long' || prefs.side === 'short' ? prefs.side : 'both';
   const colorBy: ColorBy = prefs.colorBy === 'lev' ? 'lev' : 'side';
+  const palette: HeatPalette = isHeatPalette(prefs.palette) ? prefs.palette : 'viridis';
   const lev = levFilterOf(prefs.lev);
   const levKey = lev.join(',');
   const wkey = wallets.join(',');
@@ -436,9 +439,9 @@ export function LiqHeatmap({ symbol, engine, instance, address = null }: { symbo
           self={address}
           bars={prefs.view !== 'history' ? { res, unit, coin, width: barWidth !== null ? stepLabel(barWidth) : null } : null}
           steps={steps}
-          colors={{ colorBy, lev, strip: prefs.view === 'history' ? strip : null }}
+          colors={{ colorBy, lev, strip: prefs.view === 'history' ? strip : null, palette: prefs.view === 'history' ? palette : null }}
           onChange={change}
-          onReset={() => set({ wallets: [], side: 'both', res: 'fine', unit: 'usd', colorBy: 'side', lev: [...LEV_BANDS], strip: false, steps: {} })}
+          onReset={() => set({ wallets: [], side: 'both', res: 'fine', unit: 'usd', colorBy: 'side', lev: [...LEV_BANDS], strip: false, palette: 'viridis', steps: {} })}
         />
       </div>
       {(prefs.view !== 'history' || colorBy === 'lev') && (
@@ -460,6 +463,7 @@ export function LiqHeatmap({ symbol, engine, instance, address = null }: { symbo
             points={histOn ? points : EMPTY_POINTS}
             scale={histOn ? heatSc : 1}
             refSt={histOn ? refSt : null}
+            palette={palette}
             mark={histOn && hf.step !== null && hf.since !== null ? { t: hf.since, label: `${stepLabel(hf.step)} from ${whenFmt(hf.since)}` } : null}
             side={side}
             colorBy={colorBy}
@@ -808,10 +812,12 @@ function LiveView({ h: base, fine, waiting, onWindow, unit, want, streamK, color
  * which snapshots' fine layers). A click on a cell opens who sat in it then (AtDetails); on the
  * strip or the profile, the wallets now (Details).
  */
-function ChartPanel({ engine, symbol, points, scale, refSt, mark = null, side, colorBy, lev, strip, profile, fmt, note, onWindow, onTimes, onPick }: {
+function ChartPanel({ engine, symbol, points, scale, refSt, palette, mark = null, side, colorBy, lev, strip, profile, fmt, note, onWindow, onTimes, onPick }: {
   engine: Engine;
   /** Where the step drawn begins (liqHeatIndicator.ts HeatData mark). */
-  mark?: HeatData['mark']; symbol: string;
+  mark?: HeatData['mark'];
+  /** The colours by side. */
+  palette: HeatPalette; symbol: string;
   /** The snapshots drawn (none in the chart view), the notional a cell is full at, and the width that is of (null: the newest snapshot's). */
   points: HeatPoint[]; scale: number; refSt: number | null;
   side: Side; colorBy: ColorBy; lev: LevFilter;
@@ -835,7 +841,7 @@ function ChartPanel({ engine, symbol, points, scale, refSt, mark = null, side, c
   // The axis fits the candles (fit off): fitted to every bar's levels as well, the candles lay flat in a
   // tenth of the pane (owner 2026-10-31). The snapshots hold the levels 0.2x-3x the price, so zooming the
   // price axis out shows all of them - none is cut off.
-  const data = useMemo<HeatData>(() => ({ points, side, lev, colorBy, scale, fit: false, strip, ref: refSt, profile, mark }), [points, side, levKey, colorBy, scale, strip, refSt, profile, mark?.t, mark?.label]); // eslint-disable-line react-hooks/exhaustive-deps
+  const data = useMemo<HeatData>(() => ({ points, side, lev, colorBy, palette, scale, fit: false, strip, ref: refSt, profile, mark }), [points, side, levKey, colorBy, palette, scale, strip, refSt, profile, mark?.t, mark?.label]); // eslint-disable-line react-hooks/exhaustive-deps
   const dataRef = useRef({ data, rev });
   dataRef.current = { data, rev };
   // The layer on each chart instance the chart makes (it makes a new one on a rebuild).
@@ -940,7 +946,7 @@ function ChartPanel({ engine, symbol, points, scale, refSt, mark = null, side, c
     const l = cell && side !== 'short' ? cellOf(cell.r, 'long', lev).v : 0;
     const s = cell && side !== 'long' ? cellOf(cell.r, 'short', lev).v : 0;
     const shown = cell ? cellOf(cell.r, side, lev) : null;
-    const col = shown ? (colorBy === 'lev' ? levHeatColor(shown.v * kOf(st), shown.bands) : heatColor(shown.v * kOf(st))) : null;
+    const col = shown ? (colorBy === 'lev' ? levHeatColor(shown.v * kOf(st), shown.bands) : heatColor(shown.v * kOf(st), palette)) : null;
     // Its column: the bars drawing this snapshot, edge to edge at the midpoints between candle centres.
     let a = pt!.dataIndex!;
     let b = a;
@@ -1017,7 +1023,7 @@ function ChartPanel({ engine, symbol, points, scale, refSt, mark = null, side, c
           {!profile && (
             <span className="lqm-hist-scale" title={colorBy === 'lev' ? 'Liquidation notional per cell (USD at the liquidation price): the stronger, the more; the colour is its mix of leverage' : 'Liquidation notional per cell (USD at the liquidation price): low to high'}>
               <span>{fmtUsdShort(scale * HEAT_FLOOR)}</span>
-              <i aria-hidden="true" className={colorBy === 'lev' ? 'is-lev' : ''} />
+              <i aria-hidden="true" className={colorBy === 'lev' ? 'is-lev' : ''} style={colorBy === 'lev' ? undefined : { background: heatGradient(palette) }} />
               <span>{fmtUsdShort(scale)}+</span>
             </span>
           )}

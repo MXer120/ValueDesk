@@ -102,3 +102,38 @@ test('one cell at a past time: who sat there by the row then, with size, entry, 
   assert.equal(liqAt('ETH', ['hyperliquid'], t0 + 7 * Q, 2_440, 2_460, 'both')!.count, 0, 'closed');
   assert.equal(liqAt('ETH', ['hyperliquid'], t0 + 2 * Q, 2_500, 2_510, 'both', [D])!.count, 0, 'wallet filter');
 });
+
+test('the wallet history from the steps the index holds equals the one read from the snapshots, reading none; a cell at a past time reads one', async () => {
+  const { IndexStore } = await import('../src/indexer/store.js');
+  const { liqAt, liqHistory } = await import('../src/indexer/liqRead.js');
+  const s = new IndexStore(process.env.VALUESCAN_INDEX_DB!);
+  const W1 = `0x${'e'.repeat(40)}`;
+  const t0 = Math.floor((Date.now() - 5 * 60 * 60_000) / Q) * Q;
+  const points = Array.from({ length: 12 }, (_, i) => ({ t: t0 + i * Q, p: 500 + i, st: 2 }));
+  for (const q of points) s.putLiqHist(q.t, [['LOGC', JSON.stringify({ p: q.p, st: q.st, v: {} })]]);
+  const ids = s.putLiqLog(t0, [W1], [{ aid: W1, coin: 'LOGC', venue: HL, side: 1, liq: 440, usd: 9_000 }], []);
+  s.putLiqLog(t0 + 3 * Q, [], [{ aid: ids.get(W1)!, coin: 'LOGC', venue: HL, side: 1, liq: 430, usd: 8_000 }], []);
+  const read = liqHistory('LOGC', ['hyperliquid'], '1d', [W1])!;
+  const parse = JSON.parse;
+  let parsed = 0;
+  JSON.parse = ((text: string, rev?: Parameters<typeof JSON.parse>[1]) => { parsed++; return parse(text, rev); }) as typeof JSON.parse;
+  let known;
+  let at;
+  try {
+    known = liqHistory('LOGC', ['hyperliquid'], '1d', [W1], { points, coins: read.coins })!;
+    assert.equal(parsed, 0, 'no snapshot read');
+    at = liqAt('LOGC', ['hyperliquid'], t0 + 5 * Q + 1, 400, 500, 'both')!;
+  } finally {
+    JSON.parse = parse;
+  }
+  assert.deepEqual(known.points, read.points);
+  assert.equal(parsed, 1, 'one snapshot read for the cell, though newer ones exist');
+  assert.equal(at.snapT, t0 + 5 * Q);
+  assert.equal(at.price, 505);
+  assert.equal(at.count, 1);
+  // A bad row: the one before it stands.
+  s.putLiqHist(t0 + 5 * Q, [['LOGC', 'not json']]);
+  const bad = liqAt('LOGC', ['hyperliquid'], t0 + 5 * Q + 1, 400, 500, 'both')!;
+  assert.equal(bad.snapT, t0 + 4 * Q);
+  s.close();
+});

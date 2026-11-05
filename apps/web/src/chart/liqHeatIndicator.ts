@@ -48,8 +48,10 @@ export interface HeatData {
   scale: number;
   /** Only longs, only shorts, or both. */
   side?: 'long' | 'short' | 'both';
-  /** By side (viridis, by notional) or by leverage (the cell's mix of bands); default side. */
+  /** By side (a palette, by notional) or by leverage (the cell's mix of bands); default side. */
   colorBy?: ColorBy;
+  /** The colours by side (default purple to yellow). */
+  palette?: HeatPalette;
   /** The leverage bands shown (default all). */
   lev?: LevFilter;
   /** The price axis takes in each bar's levels, not the candles alone (the historical view). */
@@ -70,16 +72,33 @@ export interface HeatData {
 /** A snapshot older than this before a bar's end does not stand for it. */
 const STALE_MS = 2 * 60 * 60_000;
 
-const RAMP: ReadonlyArray<[number, number, number]> = [[68, 1, 84], [59, 82, 139], [33, 145, 140], [94, 201, 98], [253, 231, 37]];
-/** On white the scale runs the other way: strong levels are the dark end, as strong ones are the bright end on dark. */
-const RAMP_LIGHT: ReadonlyArray<[number, number, number]> = [[235, 215, 40], [94, 201, 98], [33, 145, 140], [59, 82, 139], [68, 1, 84]];
+type Ramp = ReadonlyArray<readonly [number, number, number]>;
+/**
+ * The historical heatmap's colours (owner 2026-11-05: "switch color of histroical ... 4 presets"), weak
+ * to strong. On white a scale runs the other way: strong levels are the dark end, as strong ones
+ * are the bright end on dark. Only the colours differ: which cells are drawn is the floor's, on the same values.
+ */
+export const HEAT_PALETTES = {
+  viridis: { label: 'Purple to yellow', dark: [[68, 1, 84], [59, 82, 139], [33, 145, 140], [94, 201, 98], [253, 231, 37]], light: [[235, 215, 40], [94, 201, 98], [33, 145, 140], [59, 82, 139], [68, 1, 84]] },
+  fire: { label: 'Red to yellow', dark: [[88, 16, 52], [150, 28, 54], [214, 62, 42], [246, 130, 30], [254, 220, 80]], light: [[250, 200, 70], [245, 140, 40], [220, 75, 45], [160, 30, 50], [90, 15, 45]] },
+  ocean: { label: 'Blue to cyan', dark: [[28, 58, 140], [28, 96, 185], [30, 146, 220], [70, 202, 232], [190, 240, 250]], light: [[110, 205, 230], [50, 165, 220], [30, 115, 195], [25, 70, 150], [15, 35, 95]] },
+  emerald: { label: 'Green to lime', dark: [[12, 62, 58], [14, 104, 84], [24, 150, 96], [90, 200, 100], [200, 240, 120]], light: [[170, 225, 110], [90, 195, 100], [30, 150, 95], [12, 105, 80], [8, 65, 55]] },
+} as const satisfies Record<string, { label: string; dark: Ramp; light: Ramp }>;
+export type HeatPalette = keyof typeof HEAT_PALETTES;
+export const HEAT_PALETTE_KEYS = Object.keys(HEAT_PALETTES) as HeatPalette[];
+export const isHeatPalette = (x: unknown): x is HeatPalette => typeof x === 'string' && x in HEAT_PALETTES;
+
+const rampOf = (palette: HeatPalette): Ramp => (isLight() ? HEAT_PALETTES[palette].light : HEAT_PALETTES[palette].dark);
+/** A palette as a CSS gradient, weak to strong, for this theme: its swatch and the colour key. */
+export const heatGradient = (palette: HeatPalette, angle = '90deg'): string =>
+  `linear-gradient(${angle}, ${rampOf(palette).map(([r, g, b]) => `rgb(${r}, ${g}, ${b})`).join(', ')})`;
 export const HEAT_FLOOR = 0.03;
 
 /** A cell's colour by its share of the scale (null: below the floor, not drawn). Past the scale: the top colour. */
-export function heatColor(x: number): string | null {
+export function heatColor(x: number, palette: HeatPalette = 'viridis'): string | null {
   if (!(x > HEAT_FLOOR)) return null;
   const t = Math.min(1, x);
-  const ramp = isLight() ? RAMP_LIGHT : RAMP;
+  const ramp = rampOf(palette);
   const f = t * (ramp.length - 1);
   const i = Math.min(ramp.length - 2, Math.floor(f));
   const k = f - i;
@@ -372,7 +391,7 @@ export const liqHeatTemplate: IndicatorTemplate<{ lo?: number; hi?: number }, un
           // (pixelCells), so the fine tiles pooled to the pixel draw what every cell would.
           for (const c of pixelCells(cellsOf(q), side, lev, ref, scale, (p) => Math.round(yAxis.convertToPixel(p)))) {
             if (c.bot < 0 || c.top > bounding.height) continue;
-            const col = byLev ? levHeatColor(c.v, c.bands) : heatColor(c.v);
+            const col = byLev ? levHeatColor(c.v, c.bands) : heatColor(c.v, data.palette);
             if (!col) continue;
             ctx.fillStyle = col;
             ctx.fillRect(x0, c.top, Math.max(1, x1 - x0), Math.max(1, c.bot - c.top));
