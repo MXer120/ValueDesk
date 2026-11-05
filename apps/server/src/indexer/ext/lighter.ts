@@ -57,7 +57,14 @@ export class LighterVenue implements ExtVenue {
 
   start(ctx: ExtContext): void {
     this.ctx = ctx;
-    for (const [idx, address] of ctx.store.extIndex('lighter')) this.note(address, [idx], false);
+    // Grouped here, not through note(): it copies the wallet's list per call, and one wallet holds 29,658 sub-accounts
+    // of 70,244. That was 68 s of the thread at every start (2026-11-05 18:34:38 to 18:35:46), sockets waiting.
+    for (const [idx, address] of ctx.store.extIndex('lighter')) {
+      this.walletOf.set(idx, address);
+      const list = this.indicesOf.get(address);
+      if (list) list.push(idx);
+      else this.indicesOf.set(address, [idx]);
+    }
     if (process.env.VALUESCAN_INDEX_STREAMS !== '0') {
       this.stream = new LighterStream(ctx.onPrint, () => lighterActiveMarkets(this.pacer), LIGHTER_WS);
       void this.stream.start().catch(() => {
@@ -110,8 +117,9 @@ export class LighterVenue implements ExtVenue {
       mine.add(idx);
       fresh.push({ idx, address });
     }
+    if (!fresh.length) return;
     this.indicesOf.set(address, [...mine]);
-    if (persist && fresh.length) this.ctx.store.putExtIndex('lighter', fresh);
+    if (persist) this.ctx.store.putExtIndex('lighter', fresh);
   }
 
   addressOf(acct: string): string | null {

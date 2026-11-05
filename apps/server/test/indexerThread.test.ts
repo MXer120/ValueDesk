@@ -185,3 +185,26 @@ test('sliced work: the budget is asked of the backlog at each turn', async () =>
   await until('done', () => w.backlog === 0);
   assert.deepEqual(asked, [3, 2, 1]);
 });
+
+test('Lighter at the start: a wallet with tens of thousands of sub-accounts takes no time, and every index is found', async () => {
+  const { LighterVenue } = await import('../src/indexer/ext/lighter.js');
+  const was = process.env.VALUESCAN_INDEX_STREAMS;
+  process.env.VALUESCAN_INDEX_STREAMS = '0';
+  const rows = new Map<string, string>();
+  for (let i = 0; i < 60_000; i++) rows.set(String(i), i < 50_000 ? '0xbig' : `0x${i % 7}`);
+  const v = new LighterVenue();
+  const ctx = { store: { extIndex: () => rows, getMeta: () => null }, now: Date.now, streamSince: () => null, onPrint: () => {} } as never;
+  try {
+    const t0 = Date.now();
+    v.start(ctx);
+    assert.ok(Date.now() - t0 < 2_000, `${Date.now() - t0} ms`);
+    assert.equal(v.accountsOf('0xbig')!.length, 50_000);
+    assert.equal(v.addressOf('49999'), '0xbig');
+    assert.equal(v.addressOf('59999'), `0x${59999 % 7}`);
+    assert.equal(v.accountsOf('0xnobody'), null);
+  } finally {
+    v.stop();
+    if (was === undefined) delete process.env.VALUESCAN_INDEX_STREAMS;
+    else process.env.VALUESCAN_INDEX_STREAMS = was;
+  }
+});
