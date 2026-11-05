@@ -15,6 +15,7 @@ import { EXCLUDED_PATH, LIMITS_PATH, SODEX_LABELS, SODEX_VIEWS, STATUS_PATH, pat
 import { FeedbackIcon, FEEDBACK_LABEL, openFeedback } from '../feedback/FeedbackButton';
 import { FEEDBACK_URL } from '../feedback/feedback';
 import { openSettings } from '../settingsBus';
+import { usePresence } from './motion';
 import { useHoverMenu } from './useHoverMenu';
 
 /** What the status page has open right now, for the dot: worst first. */
@@ -86,6 +87,7 @@ export function NavMore({ alert = null, tab = null, limits = false, status = fal
   const root = useRef<HTMLDivElement>(null);
   const menu = useRef<HTMLDivElement>(null);
   const { open, mode, close: shut, press, hoverProps } = useHoverMenu(root);
+  const pres = usePresence(open);
   const close = (then?: () => void) => () => {
     shut();
     then?.();
@@ -95,7 +97,7 @@ export function NavMore({ alert = null, tab = null, limits = false, status = fal
   /* The button sits mid-bar, so the menu steps left by what would run off the window. On a phone CSS places it. */
   useLayoutEffect(() => {
     const el = menu.current;
-    if (!open || !el) return;
+    if (!pres.mounted || !el) return;
     const place = () => {
       el.style.removeProperty('left');
       if (getComputedStyle(el).position === 'fixed') return;
@@ -105,26 +107,12 @@ export function NavMore({ alert = null, tab = null, limits = false, status = fal
     place();
     window.addEventListener('resize', place);
     return () => window.removeEventListener('resize', place);
-  }, [open]);
+  }, [pres.mounted]);
 
+  /* A press or the keyboard moves into the menu; a mouse passing over does not take the focus. */
   useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (root.current && !root.current.contains(e.target as Node)) shut();
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') shut();
-    };
-    document.addEventListener('mousedown', onDown);
-    document.addEventListener('keydown', onKey);
-    /* A press or the keyboard moves into the menu; a mouse passing over does not take the focus. */
     if (mode === 'pinned') root.current?.querySelector<HTMLElement>('.menu-row')?.focus();
-    return () => {
-      document.removeEventListener('mousedown', onDown);
-      document.removeEventListener('keydown', onKey);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  }, [mode]);
 
   return (
     <div className="navmore" ref={root} {...hoverProps}>
@@ -140,8 +128,14 @@ export function NavMore({ alert = null, tab = null, limits = false, status = fal
         {alert && <span className={`navmore__dot is-${alert}`} aria-hidden="true" />}
         <svg className="navmore__chev" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="m4 6 4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
       </button>
-      {open && (
-        <div ref={menu} className="menu-popup navmore__menu" role="menu" aria-label="More">
+      {pres.mounted && (
+        <div
+          ref={menu}
+          className={`menu-popup navmore__menu navpop${pres.closing ? ' is-closing' : ''}`}
+          role="menu"
+          aria-label="More"
+          onAnimationEnd={(e) => { if (pres.closing && e.animationName === 'mo-pop-out') pres.done(); }}
+        >
           <div className="navmore__col">
           <div className="navmore__group" role="group" aria-label="Data">
             <div className="menu-group-label" aria-hidden="true">Data</div>

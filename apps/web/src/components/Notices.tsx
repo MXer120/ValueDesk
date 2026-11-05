@@ -23,6 +23,7 @@ import { useStored } from '../hooks';
 import { ViewPop } from './ViewPop';
 import { Section, Seg } from './accountTables/FilterBar';
 import { useWalletSnapshot } from './account/useWallet';
+import { usePresence } from './motion';
 import { useHoverMenu } from './useHoverMenu';
 
 function setupDone(): boolean {
@@ -55,6 +56,7 @@ export function Notices({ address }: { address: string | null }) {
   /* Kept open while its View pop-up, drawn outside it, is up. */
   const viewUp = useRef(false);
   const { open, mode, close, press, hoverProps } = useHoverMenu(root, () => viewUp.current);
+  const pres = usePresence(open);
   const [progress, setProgress] = useState<IndexProgress>(IDLE_PROGRESS);
   const [view, setView] = useStored<BellView>('vs.notices.view.v1', DEFAULT_VIEW);
   const [viewOpen, setViewOpen] = useState(false);
@@ -114,11 +116,16 @@ export function Notices({ address }: { address: string | null }) {
         <BellIcon />
         {dot > 0 && <span className="navnotes__dot" aria-hidden="true" />}
       </button>
-      {open && (
+      {pres.mounted && (
         <>
           {/* Only when pressed open: a full-window scrim under a mouse would count as still hovering. */}
-          {mode === 'pinned' && <button type="button" className="navnotes__scrim" aria-label="Close notifications" onClick={close} />}
-          <div className="navnotes__panel" role="dialog" aria-label="Notifications">
+          {mode === 'pinned' && open && <button type="button" className="navnotes__scrim" aria-label="Close notifications" onClick={close} />}
+          <div
+            className={`navnotes__panel navpop${pres.closing ? ' is-closing' : ''}`}
+            role="dialog"
+            aria-label="Notifications"
+            onAnimationEnd={(e) => { if (pres.closing && e.animationName === 'mo-pop-out') pres.done(); }}
+          >
             <div className="navnotes__head">
               <span>Notifications</span>
               <button ref={viewBtn} type="button" className={`navnotes__view${filtered ? ' is-on' : ''}`} aria-expanded={viewOpen} onClick={() => setViewOpen((v) => !v)}>

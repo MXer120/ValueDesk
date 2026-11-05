@@ -59,7 +59,7 @@ export function createHoverMenu(o: { mode: () => HoverMenuMode; setMode: (m: Hov
   };
 }
 
-export function useHoverMenu(root: RefObject<HTMLElement | null>, hold?: () => boolean) {
+export function useHoverMenu(root: RefObject<HTMLElement | null>, hold?: () => boolean, portalled?: RefObject<HTMLElement | null>) {
   const [mode, setMode] = useState<HoverMenuMode>('closed');
   const now = useRef(mode);
   const holdRef = useRef(hold);
@@ -74,11 +74,12 @@ export function useHoverMenu(root: RefObject<HTMLElement | null>, hold?: () => b
 
   useEffect(() => () => m.cancel(), [m]);
 
-  /* Opened by the mouse there is no scrim or press to end it: a press elsewhere, or Escape, does. */
+  /* However it opened: a press elsewhere, or Escape, ends it. */
   useEffect(() => {
-    if (mode !== 'hover') return;
+    if (mode === 'closed') return;
     const onDown = (e: PointerEvent) => {
-      if (!root.current?.contains(e.target as Node) && !holdRef.current?.()) m.close();
+      const t = e.target as Node;
+      if (!root.current?.contains(t) && !portalled?.current?.contains(t) && !holdRef.current?.()) m.close();
     };
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') m.close(); };
     document.addEventListener('pointerdown', onDown);
@@ -87,7 +88,7 @@ export function useHoverMenu(root: RefObject<HTMLElement | null>, hold?: () => b
       document.removeEventListener('pointerdown', onDown);
       document.removeEventListener('keydown', onKey);
     };
-  }, [mode, m, root]);
+  }, [mode, m, root, portalled]);
 
   const close = useCallback(() => m.close(), [m]);
   /** Open from elsewhere, as a press would. */

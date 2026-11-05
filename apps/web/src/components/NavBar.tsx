@@ -37,6 +37,7 @@ import { NAV_TABS, SOON_TABS, TAB_LABELS, pathForTab, type SodexView, type Tab }
 import { preloadWalletModal, warmWalletModal } from '../walletconnect';
 import { Notices } from './Notices';
 import { NavMore, type NavAlert } from './NavMore';
+import { NavTrade } from './NavTrade';
 import { useHoverMenu } from './useHoverMenu';
 import { SettingsMenu } from './SettingsMenu';
 import { useAddressMask, useMask } from '../privacy';
@@ -173,8 +174,10 @@ export function NavBar({
   }, []);
 
   /* Futures or Spot, on the trade page: the rail's bar shows it before the links, a bar without the rail in its first row. */
-  const marketType = tab === 'trade' && engine && onEngine ? (
-    <div className={`nav-seg${rail ? '' : ' nav-seg--bar'}`} role="radiogroup" aria-label="Market type">
+  const onTrade = tab === 'trade';
+  /* Always there: it opens and closes in place when the page changes, instead of popping in and shoving the links along (owner 2026-11-06). */
+  const marketType = engine && onEngine ? (
+    <div className="nav-seg" role="radiogroup" aria-label="Market type">
       {(['perps', 'spot'] as const).map((e) => (
         <button key={e} type="button" role="radio" aria-checked={engine === e} className={engine === e ? 'is-on' : ''} onClick={() => onEngine(e)}>
           {e === 'perps' ? 'Futures' : 'Spot'}
@@ -197,13 +200,17 @@ export function NavBar({
         )}
         {rail && BETA && <span className="dv-devtag dv-devtag--beta">Beta</span>}
         {rail && marketType && (
-          <>
-            {marketType}
-            <span className="nav-div" aria-hidden="true" />
-          </>
+          <div className={`nav-seg-slot${onTrade ? ' is-on' : ''}`} aria-hidden={!onTrade}>
+            <div className="nav-seg-slot__in">
+              {marketType}
+              <span className="nav-div" aria-hidden="true" />
+            </div>
+          </div>
         )}
         <nav className="navlinks">
-          {NAV_TABS.map((t) => SOON_TABS.has(t) ? (
+          {NAV_TABS.map((t) => t === 'trade' ? (
+            <NavTrade key={t} tab={tab} engine={engine} onEngine={onEngine} onNavigate={onNavigate} onOpenSodex={onOpenSodex} sodexOn={sodexOn} label={TAB_LABELS[t]} />
+          ) : SOON_TABS.has(t) ? (
             /* Coming soon (router.ts SOON_TABS): the name and a pill, no link - there is no page to open. */
             <span key={t} className="navlink navlink--soon" aria-disabled="true" title={`${TAB_LABELS[t]}: coming soon`}>
               {TAB_LABELS[t]}
@@ -239,7 +246,11 @@ export function NavBar({
         <NavMore alert={alert} tab={tab} limits={limitsOn} status={statusOn} excluded={excludedOn} onNavigate={onNavigate} onOpenStatus={onOpenStatus} onOpenExcluded={onOpenExcluded} onOpenLimits={onOpenLimits} onOpenSodex={onOpenSodex} sodexOn={sodexOn} />
         {/* Without the rail (a phone, a narrow window) the same switch sits in the bar's first row, beside
             the wordmark: spot markets were otherwise reachable only through the market search there. */}
-        {!rail && marketType}
+        {!rail && marketType && (
+          <div className={`nav-seg-slot nav-seg-slot--bar${onTrade ? ' is-on' : ''}`} aria-hidden={!onTrade}>
+            <div className="nav-seg-slot__in">{marketType}</div>
+          </div>
+        )}
 
         <div className={`navstatus${rail ? ' navstatus--rail' : ''}`}>
           {/*
@@ -429,7 +440,7 @@ export function AddressMenu({ address, onClose, closing = false, onExited, onPor
 
   return (
     <div
-      className={`navaddr__menu menu-popup acct-menu${closing ? ' is-closing' : ''}`}
+      className={`navaddr__menu menu-popup acct-menu navpop${closing ? ' is-closing' : ''}`}
       role="menu"
       ref={wrap}
       onAnimationEnd={(e) => { if (closing && e.animationName === 'mo-pop-out') onExited?.(); }}

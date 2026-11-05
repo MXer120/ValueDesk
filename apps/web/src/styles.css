@@ -1244,6 +1244,44 @@ button.danger:hover:not(:disabled) { background: var(--neg); border-color: var(-
 .navlinks .navlink--soon .dv-devtag { margin-left: 0; }
 .navlinks .dv-devtag--soon { background: color-mix(in srgb, var(--text) 9%, transparent); color: var(--muted); }
 
+/* The bar's pop-ups (More, Trade, the bell, the wallet menu): a slow settle in, a quick fade out (motion.css mo-pop-out). */
+.navpop { animation: navpop-in 200ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+.navpop.is-closing { animation: mo-pop-out 150ms var(--ease-out) forwards; pointer-events: none; }
+@keyframes navpop-in {
+  from { opacity: 0; transform: translateY(-6px) scale(0.985); }
+  to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) { .navpop { animation: none; } .navpop.is-closing { animation-duration: 1ms; } }
+
+/* "Trade" (NavTrade.tsx): the word a link, the chevron beside it; the pop-up two labelled columns of icon, title, line. */
+.navtrade { display: flex; flex: none; align-items: center; height: 100%; }
+.navlinks .navtrade > a { padding-right: 3px; }
+.navbar--rail .navlinks .navtrade > a { padding-right: 3px; }
+.navlinks button.navtrade__chev { display: inline-flex; align-items: center; height: 100%; min-height: 0; padding: 0 6px 0 2px; border: 0; background: none; box-shadow: none; color: var(--muted); cursor: pointer; }
+.navlinks button.navtrade__chev:hover, .navlinks .navtrade:hover button.navtrade__chev { color: var(--text); background: none; }
+.navlinks button.navtrade__chev:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.navtrade__chev svg { opacity: 0.7; transition: transform var(--dur-fast) var(--ease-out); }
+.navtrade__chev.is-open svg { transform: rotate(180deg); }
+.menu-popup.navtrade__menu { position: fixed; top: calc(var(--navbar-live, 56px) + 2px); left: 8px; z-index: 72; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 var(--sp-3); width: 620px; padding: 12px; }
+.navtrade__col { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.navtrade__menu .menu-group-label { margin-bottom: 4px; padding: 4px 10px 2px; text-transform: none; letter-spacing: 0; font-size: var(--fs-xs); font-weight: 400; }
+.navtrade__row.menu-row { align-items: center; gap: 12px; height: auto; min-height: 54px; padding: 8px 10px; white-space: normal; text-decoration: none; }
+.navtrade__row .menu-row__ic { width: 20px; height: 20px; }
+.navtrade__row.is-current { background: rgb(var(--ink) / 0.05); }
+.navtrade__row.is-current .menu-row__ic { color: var(--text); }
+.navtrade__row.is-soon { cursor: default; }
+.navtrade__row.is-soon:hover:not(:disabled) { background: transparent; }
+.navtrade__row.is-soon:hover .menu-row__ic { color: var(--muted); }
+.navtrade__row.is-soon b { color: var(--muted); }
+.navtrade__text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.navtrade__text b { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; color: var(--text); font-size: var(--fs-sm, 13px); font-weight: 500; line-height: 1.35; }
+.navtrade__text b .dv-devtag { margin-left: 0; background: color-mix(in srgb, var(--text) 9%, transparent); color: var(--muted); }
+.navtrade__text small { color: var(--dim); font-size: var(--fs-micro); font-weight: 400; line-height: 1.35; }
+@media (max-width: 760px) {
+  /* Across the window under the bar, one column: the lines under the titles need the room. */
+  .menu-popup.navtrade__menu { left: 8px; right: 8px; width: auto; grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 8px; }
+}
+
 /* "More" (NavMore.tsx): the last of the pages, in their look, pulled to their spacing (it
    sits outside .navlinks, whose margin and the bar's gap would set it apart); its menu the
    app's glass dropdown (.menu-popup) with its rows. */
@@ -2393,6 +2431,8 @@ kbd { border: 1px solid var(--line); border-bottom-width: 2px; padding: 0 3px; f
   }
   .navlinks::-webkit-scrollbar { display: none; }
   .navlinks button { scroll-snap-align: start; }
+  /* The word before it is what the strip lines up on: snapping to the chevron hid "Trade". */
+  .navlinks button.navtrade__chev { scroll-snap-align: none; }
   .navstatus { margin-left: auto; }
 }
 
