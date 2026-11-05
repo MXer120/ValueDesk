@@ -62,7 +62,7 @@ const RANGES: readonly Period[] = ['24H', '7D', '14D', '30D', 'ALL'];
 
 // --- the numbers ------------------------------------------------------------------------
 
-function useSummary(c: PortfolioContext, w: WealthState): { summary: PortfolioSummary; evmRows: Array<{ chain: string; chainLabel: string; symbol: string; usd: number }>; evmLoading: boolean } {
+export function useSummary(c: PortfolioContext, w: WealthState): { summary: PortfolioSummary; evmRows: Array<{ chain: string; chainLabel: string; symbol: string; usd: number }>; evmLoading: boolean } {
   const totals = useAccountTotals(c.address);
   const px = useAsync(() => coinPrices(), [], { pollMs: 60_000 });
   // The same shared feed the address menu and the Balances table read: no extra request.

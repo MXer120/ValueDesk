@@ -35,6 +35,7 @@ import { linkedMarket, notListed } from './trading/listed';
 import { FillToasts } from './components/FillToasts';
 import { FeedbackHost } from './feedback/FeedbackHost';
 import { lazyPage, type LazyPage, lazyChunk } from './lazyPage';
+import type { SodexPageProps } from './components/sodex/WealthPage';
 import { primeFirstReads } from './serverFetch';
 import type { Venue } from './vsApi';
 import { OPEN_LEGAL_EVENT, RegionBanner, TermsGate } from './legal/LegalGate';
@@ -90,7 +91,7 @@ const ExcludedDoc = lazyPage('excluded', () => import('./components/excluded/Exc
 /* Trading limits & conditions (More > Trading limits), the same way. */
 const LimitsDoc = lazyPage('limits', () => import('./components/limits/LimitsPage').then((m) => m.LimitsPage));
 /* SoDEX's own products (More > SoDEX), the same way. */
-const SODEX_DOCS: Record<SodexView, LazyPage<{ address: string | null; provider: Eip1193Provider | null }>> = {
+const SODEX_DOCS: Record<SodexView, LazyPage<SodexPageProps>> = {
   points: lazyPage('sopoints', () => import('./components/sodex/SoPointsPage').then((m) => m.SoPointsPage)),
   'blind-boxes': lazyPage('blindboxes', () => import('./components/sodex/BlindBoxPage').then((m) => m.BlindBoxPage)),
   wealth: lazyPage('wealth', () => import('./components/sodex/WealthPage').then((m) => m.WealthPage)),
@@ -659,7 +660,7 @@ function AppShell() {
           <Guarded name="Trading limits"><LimitsDoc /></Guarded>
         )}
         {SodexDoc && !legal && !status && !excluded && !limits && (
-          <Guarded name="SoDEX"><SodexDoc address={address} provider={provider} /></Guarded>
+          <Guarded name="SoDEX"><SodexDoc {...ctx} provider={provider} onOpenMarket={openMarket} /></Guarded>
         )}
 
         </div>

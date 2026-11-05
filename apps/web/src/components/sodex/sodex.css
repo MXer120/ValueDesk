@@ -4,9 +4,9 @@
 .sdx { display: flex; justify-content: center; padding: var(--sp-3) var(--sp-3) var(--sp-6); min-width: 0; }
 .sdx-col { display: flex; flex-direction: column; gap: var(--sp-2); width: 100%; max-width: 1180px; min-width: 0; }
 
-.sdx .pf-card { border-radius: var(--radius-tile); border-color: transparent; box-shadow: var(--depth-2); }
-.sdx .pf-card__body { padding: var(--sp-3) var(--sp-4) var(--sp-4); min-width: 0; }
-.sdx .pf-card__head { min-height: var(--pf-head-h); height: auto; flex-wrap: wrap; }
+.sdx .pf-card:not(.sdx-wealthtab .pf-card) { border-radius: var(--radius-tile); border-color: transparent; box-shadow: var(--depth-2); }
+.sdx .pf-card:not(.sdx-wealthtab .pf-card) > .pf-card__body { padding: var(--sp-3) var(--sp-4) var(--sp-4); min-width: 0; }
+.sdx .pf-card:not(.sdx-wealthtab .pf-card) > .pf-card__head { min-height: var(--pf-head-h); height: auto; flex-wrap: wrap; }
 .sdx .pf-note { color: var(--muted); }
 
 /* The hero: SoDEX's mark, the title, what it is. */
@@ -49,7 +49,6 @@
 
 /* Columns. */
 .sdx-duo { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-2); align-items: stretch; }
-.sdx-duo--wealth { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); }
 .sdx-trio { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-2); align-items: stretch; }
 .sdx-trio--mine { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .sdx-span { grid-column: 1 / -1; min-width: 0; }
@@ -160,55 +159,11 @@
 
 @media (prefers-reduced-motion: reduce) { .sdx-skel__row { animation: none; } }
 
-/* Wealth. */
+/* Wealth: the Portfolio's tab, unchanged, in this page's column. */
+.pf.bots.pfx.sdx-wealthtab { min-height: 0; padding: 0; }
+
+/* Wealth's maintenance notice. */
 .sdx-banner { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 14px; border-radius: var(--radius-tile); background: var(--bg-panel); box-shadow: var(--depth-2); color: var(--muted); font-size: 12px; }
-.sdx-featured { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; height: 100%; }
-.sdx-featured .pf-btn { margin-top: auto; }
-.sdx-featured__rate { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
-.sdx-featured__rate b { font-family: var(--font-num); font-size: 30px; font-weight: 600; line-height: 1.1; }
-.sdx-featured__rate span:not(.sdx-pill) { color: var(--muted); font-size: 12px; }
-.sdx-featured__more { display: flex; flex-wrap: wrap; gap: 8px 22px; margin: 0; }
-.sdx-featured__more dt { color: var(--dim); font-size: 11px; }
-.sdx-featured__more dd { margin: 1px 0 0; color: var(--text); font-family: var(--font-num); font-size: 13px; font-weight: 550; }
-.sdx-portfolio__top { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 10px 24px; margin-bottom: var(--sp-2); }
-.sdx-portfolio__top > div:first-child { display: flex; flex-direction: column; gap: 2px; }
-.sdx-portfolio__value { color: var(--text); font-family: var(--font-num); font-size: 26px; font-weight: 600; line-height: 1.15; }
-.sdx-chartblock { margin-top: var(--sp-3); }
-.sdx-chartblock__head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 6px; }
-
-.sdx-groups { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-2); }
-.sdx-funds { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
-.sdx-funds li + li { border-top: 1px solid rgb(var(--ink) / 0.07); }
-.sdx-fund { display: flex; align-items: center; gap: 10px; margin: 0 -8px; padding: 9px 8px; border-radius: var(--radius-md); color: inherit; text-decoration: none; min-width: 0; }
-.sdx-fund:hover { background: rgb(var(--ink) / 0.05); }
-.sdx-fund__who { display: flex; flex: 1 1 auto; flex-direction: column; gap: 1px; min-width: 0; }
-.sdx-fund__who b { overflow: hidden; color: var(--text); font-size: 13px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
-.sdx-fund__who small { color: var(--dim); font-size: 11px; }
-.sdx-fund__ret { flex: none; font-family: var(--font-num); font-size: 13px; font-weight: 600; }
-.sdx-fund__stack { display: flex; flex: none; flex-direction: column; align-items: flex-end; gap: 1px; font-family: var(--font-num); }
-.sdx-fund__stack b { color: var(--text); font-size: 13px; font-weight: 600; }
-.sdx-fund__stack small { font-size: 11px; }
-
-.sdx-tablewrap { min-width: 0; overflow-x: auto; }
-.sdx-table { width: 100%; border-collapse: collapse; font-size: 12px; }
-.sdx-table th { padding: 6px 8px; border-bottom: 1px solid var(--panel-line); color: var(--dim); font-size: 11px; font-weight: 500; text-align: left; white-space: nowrap; }
-.sdx-table th.num, .sdx-table td.num { text-align: right; font-family: var(--font-num); white-space: nowrap; }
-.sdx-table td { padding: 8px; border-bottom: 1px solid rgb(var(--ink) / 0.06); color: var(--text); }
-.sdx-table tbody tr { cursor: pointer; }
-.sdx-table tbody tr:hover td { background: rgb(var(--ink) / 0.04); }
-.sdx-table td.pf-dim { color: var(--dim); }
-.sdx-table td.pf-pos-text { color: var(--pos); }
-.sdx-table td.pf-neg-text { color: var(--neg); }
-.sdx-table__who { display: inline-flex; align-items: center; gap: 8px; color: inherit; text-decoration: none; min-width: 0; }
-.sdx-table__who span { display: flex; flex-direction: column; min-width: 0; }
-.sdx-table__who b { color: var(--text); font-weight: 500; white-space: nowrap; }
-.sdx-table__who small { color: var(--dim); font-size: 11px; }
-.sdx-table__basis { display: block; color: var(--dim); font-family: var(--font-ui, inherit); font-size: 10px; font-weight: 400; }
-
-.sdx-back { display: inline-flex; align-items: center; gap: 4px; align-self: flex-start; padding: 4px 6px; border-radius: var(--radius-md); color: var(--muted); font-size: 12px; text-decoration: none; }
-.sdx-back:hover { color: var(--text); background: rgb(var(--ink) / 0.05); }
-.sdx-coming { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; }
-.pf .sdx-btn-off { opacity: 0.45; cursor: not-allowed; }
 
 /* States. */
 .sdx-failed { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: var(--sp-3) var(--sp-4); border-radius: var(--radius-tile); background: var(--bg-panel); box-shadow: var(--depth-1); color: var(--muted); font-size: 12px; }
@@ -220,30 +175,23 @@
 
 /* Narrower. */
 @media (max-width: 1000px) {
-  .sdx-trio, .sdx-groups, .sdx-earn { grid-template-columns: minmax(0, 1fr); }
-  .sdx-duo, .sdx-duo--wealth, .sdx-trio--mine { grid-template-columns: minmax(0, 1fr); }
+  .sdx-trio, .sdx-earn { grid-template-columns: minmax(0, 1fr); }
+  .sdx-duo, .sdx-trio--mine { grid-template-columns: minmax(0, 1fr); }
   .sdx-tiers { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 767px) {
   .sdx { padding: var(--sp-2) 8px var(--sp-6); }
   .sdx-hero { grid-template-columns: auto minmax(0, 1fr); padding: 14px; }
   .sdx-hero__aside { grid-column: 1 / -1; justify-content: flex-start; }
-  .sdx-coming { justify-content: flex-start; }
   .sdx-tiles, .sdx-steps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .sdx-tile__value { font-size: 16px; }
-  .sdx .pf-card__body { padding: var(--sp-2) var(--sp-3) var(--sp-3); }
+  .sdx .pf-card:not(.sdx-wealthtab .pf-card) > .pf-card__body { padding: var(--sp-2) var(--sp-3) var(--sp-3); }
   .sdx-locked { grid-template-columns: auto minmax(0, 1fr); padding: 14px; }
   .sdx-locked__go { grid-column: 1 / -1; justify-self: start; }
   .sdx-vaulthead { grid-template-columns: minmax(0, 1fr); }
   .sdx-boxlevels { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .sdx-opt { display: none; }
   .sdx-feed__ago { display: none; }
-  .sdx-table th, .sdx-table td { padding-inline: 4px; }
 }
-
-/* Signed figures read in colour here, as on SoDEX's pages; tile values outrank their own --text. */
-.sdx .pf-pos-text, .sdx-tile__value.pf-pos-text { color: var(--pos); }
-.sdx .pf-neg-text, .sdx-tile__value.pf-neg-text { color: var(--neg); }
 
 /* SoDEX's mark is white: on the light theme it sits on a dark chip, wherever it stands in for a logo. */
 html[data-theme='light'] .sdx-hero__mark { padding: 5px; border-radius: 10px; background: #141414; }
