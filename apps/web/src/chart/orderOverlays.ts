@@ -360,16 +360,16 @@ interface LineVisual {
 }
 
 /** The label: boxes in a row at the left of the plot, centred on the line. */
-const LABEL_HEIGHT = 18;
-const LABEL_PAD = 6;
+const LABEL_HEIGHT = 20;
+const LABEL_PAD = 7;
 const LABEL_SIZE = 12;
-const LABEL_WEIGHT = 500;
+const LABEL_WEIGHT = 600;
 const LABEL_GAP = 2;
 /** Labels are at least this far apart up and down. */
 const LABEL_ROW = LABEL_HEIGHT + 1;
 /** Every label starts here (owner 2026-11-05: "on the left of the chart always"). */
 export const LABEL_X = 8;
-const CROSS_WIDTH = 20;
+const CROSS_WIDTH = 22;
 /** Where a label's words start after the cancel button: the preview has none, and lines up with the rest. */
 export const LABEL_WORDS_X = LABEL_X + CROSS_WIDTH + LABEL_GAP;
 
@@ -574,14 +574,14 @@ const template: OverlayTemplate<string> = {
     for (const seg of v.segs) {
       const width = segWidth(seg);
       const fill = seg.look === 'solid' ? seg.color : T.bg;
-      const border = seg.look === 'value' ? T.muted : seg.color;
+      const border = seg.look === 'value' ? T.text : seg.color;
       parts.push({
         type: 'rect',
         // A button answers a click (the layer's onClick); the rest is a label, not a handle, and
         // would otherwise swallow the drag whenever the user grabbed the line by it.
         ...(seg.button ? { key: seg.button } : { ignoreEvent: true }),
         attrs: { x, y: top, width, height: LABEL_HEIGHT },
-        styles: { style: 'stroke_fill', color: fill, borderColor: border, borderSize: 1, borderRadius: 2 },
+        styles: { style: 'stroke_fill', color: fill, borderColor: border, borderSize: 1, borderRadius: 3 },
       });
       if (seg.look === 'cross') {
         const cx = x + width / 2;
@@ -637,12 +637,12 @@ const template: OverlayTemplate<string> = {
         color: onLineColor(v.color),
         backgroundColor: v.color,
         borderColor: v.color,
-        borderRadius: 2,
+        borderRadius: 3,
         weight: LABEL_WEIGHT,
         paddingLeft: 4,
         paddingRight: 4,
-        paddingTop: 3,
-        paddingBottom: 3,
+        paddingTop: 4,
+        paddingBottom: 4,
       },
     };
   },

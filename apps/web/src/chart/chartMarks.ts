@@ -1,8 +1,8 @@
 /**
  * Marks the chart puts on the candles by itself - never drawings:
  *
- *   Executions  the account's recent fills on this market, B or S in a circle:
- *               a buy below its price, a sell above; fills of one side in
+ *   Executions  the account's recent fills on this market, B or S in a circle
+ *               above the candle; fills of one side in
  *               one bar are one mark (their size-weighted price, their total
  *               size, how many, in its tip).
  *   News        SoSoValue stories (server /api/vs/news) on the bar they came
@@ -74,6 +74,8 @@ export interface FillMark {
   count: number;
   /** The newest fill's time. */
   last: number;
+  /** Which circle it is above its candle: a bar with a buy and a sell shows both, one over the other. */
+  stack: number;
 }
 
 const num = (v: unknown): number => (typeof v === 'number' ? v : typeof v === 'string' ? Number(v) : Number.NaN);
@@ -106,11 +108,12 @@ export function fillMarks(rows: readonly unknown[], symbol: string, interval: st
       g.m.price = g.notional / g.m.qty;
       g.m.last = Math.max(g.m.last, time);
     } else {
-      by.set(key, { m: { key, timestamp, side, price, qty, count: 1, last: time }, notional: price * qty });
+      by.set(key, { m: { key, timestamp, side, price, qty, count: 1, last: time, stack: 0 }, notional: price * qty });
     }
   }
   // Only the recent ones (owner 2026-11-05: "Limited ofcourse only recent not ALL"): a bot's thousands would bury the candles.
-  return [...by.values()].map((g) => g.m).sort((a, b) => a.timestamp - b.timestamp || a.side.localeCompare(b.side)).slice(-MAX_FILL_MARKS);
+  return [...by.values()].map((g) => g.m).sort((a, b) => a.timestamp - b.timestamp || a.side.localeCompare(b.side)).slice(-MAX_FILL_MARKS)
+    .map((m, i, all) => (i > 0 && all[i - 1]!.timestamp === m.timestamp ? { ...m, stack: 1 } : m));
 }
 
 // --- news ---------------------------------------------------------------------------
@@ -274,9 +277,9 @@ export function newsCoin(base: string | null | undefined): string {
 
 // --- overlays ----------------------------------------------------------------------
 
-/** A fill: B or S in a circle, a buy below its price and a sell above. */
+/** A fill: B or S in a circle above its candle (owner 2026-11-05: "above the candles not on them"). */
 const MARK_R = 9;
-const MARK_GAP = 2;
+const MARK_GAP = 4;
 
 /** One fill arrow; its FillMark rides in extendData. */
 const execTemplate: OverlayTemplate = {
@@ -286,12 +289,23 @@ const execTemplate: OverlayTemplate = {
   needDefaultPointFigure: false,
   needDefaultXAxisFigure: false,
   needDefaultYAxisFigure: false,
-  createPointFigures: ({ coordinates, overlay }) => {
+  createPointFigures: ({ chart, coordinates, overlay, yAxis }) => {
     const p = coordinates[0];
     const m = overlay.extendData as FillMark | undefined;
     if (!p || !m) return [];
+    // Above the candle's wick, read on every draw so a forming candle's new high carries it up.
+    const bars = chart.getDataList();
+    let lo = 0;
+    let hi = bars.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (bars[mid]!.timestamp < m.timestamp) lo = mid + 1;
+      else hi = mid;
+    }
+    const bar = bars[lo];
+    const high = bar && bar.timestamp === m.timestamp && yAxis ? yAxis.convertToPixel(bar.high) : p.y;
     const buy = m.side === 'buy';
-    const y = buy ? p.y + MARK_R + MARK_GAP : p.y - MARK_R - MARK_GAP;
+    const y = high - MARK_GAP - MARK_R - m.stack * (MARK_R * 2 + MARK_GAP);
     const figures = [
       { type: 'circle', attrs: { x: p.x, y, r: MARK_R }, styles: { style: 'fill', color: buy ? T.pos : T.neg } },
       {

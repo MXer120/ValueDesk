@@ -83,11 +83,11 @@ export function DraftOrderLines({ chart, engine, symbol, left, top, tickSize }: 
       {view.rows.map((r) => (
         <div key={r.key} className={`kc-draft__row is-${r.ink}`}>
           <div className="kc-draft__line" style={{ top: r.y }} />
-          <span className="kc-draft__tag" style={{ left: LABEL_WORDS_X, top: r.labelY - 9 }}>
+          <span className="kc-draft__tag" style={{ left: LABEL_WORDS_X, top: r.labelY - 10 }}>
             <span className="kc-draft__word">{r.tag}</span>
             {r.amount && <span className="kc-draft__amount">{r.amount}</span>}
           </span>
-          <span className="kc-draft__price" style={{ top: r.labelY - 9 }}>{fmtPrice(String(r.price), tickSize)}</span>
+          <span className="kc-draft__price" style={{ top: r.labelY - 10 }}>{fmtPrice(String(r.price), tickSize)}</span>
         </div>
       ))}
     </div>
