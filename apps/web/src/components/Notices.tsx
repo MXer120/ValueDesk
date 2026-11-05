@@ -23,6 +23,7 @@ import { useStored } from '../hooks';
 import { ViewPop } from './ViewPop';
 import { Section, Seg } from './accountTables/FilterBar';
 import { useWalletSnapshot } from './account/useWallet';
+import { useHoverMenu } from './useHoverMenu';
 
 function setupDone(): boolean {
   try { return localStorage.getItem('vs.setup.done') != null; }
@@ -50,10 +51,14 @@ export function Notices({ address }: { address: string | null }) {
   const list = useSyncExternalStore(subscribeNotices, notices, notices);
   const dot = useSyncExternalStore(subscribeNotices, unreadImportant, unreadImportant);
   const wallet = useWalletSnapshot();
-  const [open, setOpen] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+  /* Kept open while its View pop-up, drawn outside it, is up. */
+  const viewUp = useRef(false);
+  const { open, mode, close, press, hoverProps } = useHoverMenu(root, () => viewUp.current);
   const [progress, setProgress] = useState<IndexProgress>(IDLE_PROGRESS);
   const [view, setView] = useStored<BellView>('vs.notices.view.v1', DEFAULT_VIEW);
   const [viewOpen, setViewOpen] = useState(false);
+  viewUp.current = viewOpen;
   const viewBtn = useRef<HTMLButtonElement>(null);
   const [signing, setSigning] = useState<string | null>(null);
   const owner = address?.toLowerCase() ?? null;
@@ -78,12 +83,8 @@ export function Notices({ address }: { address: string | null }) {
   }, [owner, session?.token]);
   useEffect(() => { if (open && owner) void syncNotices(owner); }, [open, owner]);
 
-  const toggle = () => {
-    setOpen((v) => {
-      if (!v) markNoticesRead();
-      return !v;
-    });
-  };
+  /* Opened is read, however it opened. */
+  useEffect(() => { if (open) markNoticesRead(); }, [open]);
 
   const signIn = async () => {
     if (!owner || !wallet.provider) return;
@@ -101,21 +102,22 @@ export function Notices({ address }: { address: string | null }) {
   const filtered = view.grade !== 'all' || view.source !== 'all';
 
   return (
-    <div className="navnotes">
+    <div className="navnotes" ref={root} {...hoverProps}>
       <button
         type="button"
         className="navicon"
         aria-label={dot > 0 ? `Notifications, ${dot} unread` : 'Notifications'}
         aria-expanded={open}
         title="Notifications"
-        onClick={toggle}
+        onClick={press}
       >
         <BellIcon />
         {dot > 0 && <span className="navnotes__dot" aria-hidden="true" />}
       </button>
       {open && (
         <>
-          <button type="button" className="navnotes__scrim" aria-label="Close notifications" onClick={() => setOpen(false)} />
+          {/* Only when pressed open: a full-window scrim under a mouse would count as still hovering. */}
+          {mode === 'pinned' && <button type="button" className="navnotes__scrim" aria-label="Close notifications" onClick={close} />}
           <div className="navnotes__panel" role="dialog" aria-label="Notifications">
             <div className="navnotes__head">
               <span>Notifications</span>
@@ -140,7 +142,7 @@ export function Notices({ address }: { address: string | null }) {
                     <span className={`navnotes__mark is-${n.kind} is-${gradeOf(n)}`} aria-hidden="true">{markOf(n)}</span>
                     {n.kind === 'reply' && n.ref ? (
                       /* A reply to the visitor's feedback: the row opens that chat (feedback/FeedbackHost.tsx). */
-                      <button type="button" className="navnotes__copy navnotes__open" onClick={() => { setOpen(false); openFeedback({ thread: n.ref }); }}>
+                      <button type="button" className="navnotes__copy navnotes__open" onClick={() => { close(); openFeedback({ thread: n.ref }); }}>
                         <span className="navnotes__k">{n.title}</span>
                         <span className="navnotes__b">{n.body}</span>
                       </button>

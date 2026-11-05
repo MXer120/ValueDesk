@@ -361,7 +361,7 @@ const PUBLIC: Scene[] = [
   ['excluded', async (p) => go(p, '/excluded', 3500)],
   ['limits', async (p) => go(p, '/limits', 3500)],
   ['limits rules', async (p) => { await tap(p, 'Trading rules', 500); }],
-  ['limits collateral', async (p) => { await tap(p, 'Collateral', 500); }],
+  ['limits collateral', async (p) => { await tap(p, 'Multi-asset margin', 500); }],
   ['terms page', async (p) => go(p, '/terms', 2500)],
   ['impressum page', async (p) => go(p, '/impressum', 2000)],
   ['terms popup', async (p) => { await p.evaluate(() => { localStorage.removeItem('vd.site.terms.look'); localStorage.removeItem('vd.site.terms.v1'); }); await go(p, '/trade', 4000); }],

@@ -37,6 +37,7 @@ import { NAV_TABS, SOON_TABS, TAB_LABELS, pathForTab, type SodexView, type Tab }
 import { preloadWalletModal, warmWalletModal } from '../walletconnect';
 import { Notices } from './Notices';
 import { NavMore, type NavAlert } from './NavMore';
+import { useHoverMenu } from './useHoverMenu';
 import { SettingsMenu } from './SettingsMenu';
 import { useAddressMask, useMask } from '../privacy';
 import { fmtUsd } from '../format';
@@ -124,7 +125,9 @@ export function NavBar({
      is exactly how a masked address would have leaked in one place while being
      hidden in another. */
   const maskAddr = useAddressMask();
-  const [addrMenu, setAddrMenu] = useState(false);
+  const addrRoot = useRef<HTMLDivElement>(null);
+  const addrHover = useHoverMenu(addrRoot);
+  const addrMenu = addrHover.open;
   const addrPres = usePresence(addrMenu);
   const pending = useAccountPending();
   /* The address book's logo for whichever wallet is connected, left of the address. */
@@ -140,15 +143,16 @@ export function NavBar({
    * With no address there is no menu to open, so it connects instead.
    */
   const hasAddress = !!address;
+  const openAddrMenu = addrHover.openPinned;
   useEffect(() => {
     if (rail) return;
     const onMenu = () => {
-      if (hasAddress) setAddrMenu(true);
+      if (hasAddress) openAddrMenu();
       else openConnectDialog();
     };
     window.addEventListener(WALLET_EVENTS.menu, onMenu);
     return () => window.removeEventListener(WALLET_EVENTS.menu, onMenu);
-  }, [hasAddress, rail]);
+  }, [hasAddress, rail, openAddrMenu]);
 
   /*
    * The bar's real height as `--navbar-live` on the root. The page scrolls behind
@@ -272,19 +276,19 @@ export function NavBar({
             options, drop it.
           */}
           {rail ? null : address ? (
-            <div className="navaddr">
+            <div className="navaddr" ref={addrRoot} {...addrHover.hoverProps}>
               <button
                 className="navbtn navaddr__btn"
                 aria-haspopup="menu"
                 aria-expanded={addrMenu}
-                onClick={() => setAddrMenu((v) => !v)}
+                onClick={addrHover.press}
                 onPointerEnter={() => prefetchAccountTotals(address)}
               >
                 <ConnectedWalletLogo size={18} className="navaddr__wicon" />
                 {maskAddr(address)}
               </button>
               {addrPres.mounted && (
-                <AddressMenu address={address} onClose={() => setAddrMenu(false)} closing={addrPres.closing} onExited={addrPres.done} onPortfolio={() => onNavigate('portfolio')} />
+                <AddressMenu address={address} onClose={addrHover.close} closing={addrPres.closing} onExited={addrPres.done} onPortfolio={() => onNavigate('portfolio')} />
               )}
             </div>
           ) : (

@@ -1,7 +1,7 @@
 /**
  * "More" at the end of the navbar's pages (owner, 2026-10-28; two columns owner 2026-11-05):
- * what is not a trading page, as Products and Resources, each a list of icon + label rows, and
- * SoDEX's own products as a third group once App passes `onOpenSodex`.
+ * what is not a trading page, as Data and Resources, each a list of icon + label rows, with SoDEX's
+ * own products under Data once App passes `onOpenSodex`. Opens on hover too (useHoverMenu.ts).
  * While something is open on the status page (an incident, maintenance in progress, or the
  * data service not answering) the button carries a dot, and the Status row says what.
  *
@@ -10,11 +10,12 @@
  * with a small arrow. The menu is the app's glass dropdown (.menu-popup) with its rows; Escape
  * or a click outside closes it. On a phone it spans the window under the bar.
  */
-import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { EXCLUDED_PATH, LIMITS_PATH, SODEX_LABELS, SODEX_VIEWS, STATUS_PATH, pathForSodexView, pathForTab, type SodexView, type Tab } from '../router';
 import { FeedbackIcon, FEEDBACK_LABEL, openFeedback } from '../feedback/FeedbackButton';
 import { FEEDBACK_URL } from '../feedback/feedback';
 import { openSettings } from '../settingsBus';
+import { useHoverMenu } from './useHoverMenu';
 
 /** What the status page has open right now, for the dot: worst first. */
 export type NavAlert = 'down' | 'incident' | 'maintenance' | null;
@@ -82,11 +83,11 @@ export function NavMore({ alert = null, tab = null, limits = false, status = fal
   onOpenSodex?: (view: SodexView) => void;
   sodexOn?: SodexView | null;
 }) {
-  const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const menu = useRef<HTMLDivElement>(null);
+  const { open, mode, close: shut, press, hoverProps } = useHoverMenu(root);
   const close = (then?: () => void) => () => {
-    setOpen(false);
+    shut();
     then?.();
   };
   const here = tab === 'leaderboard' || limits || status || excluded || sodexOn !== null;
@@ -109,38 +110,41 @@ export function NavMore({ alert = null, tab = null, limits = false, status = fal
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
-      if (root.current && !root.current.contains(e.target as Node)) setOpen(false);
+      if (root.current && !root.current.contains(e.target as Node)) shut();
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false);
+      if (e.key === 'Escape') shut();
     };
     document.addEventListener('mousedown', onDown);
     document.addEventListener('keydown', onKey);
-    root.current?.querySelector<HTMLElement>('.menu-row')?.focus();
+    /* A press or the keyboard moves into the menu; a mouse passing over does not take the focus. */
+    if (mode === 'pinned') root.current?.querySelector<HTMLElement>('.menu-row')?.focus();
     return () => {
       document.removeEventListener('mousedown', onDown);
       document.removeEventListener('keydown', onKey);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   return (
-    <div className="navmore" ref={root}>
+    <div className="navmore" ref={root} {...hoverProps}>
       <button
         type="button"
         className={`navmore__btn${open ? ' is-open' : ''}${here ? ' is-here' : ''}`}
         aria-haspopup="menu"
         aria-expanded={open}
         title={alert ? `More - status: ${ALERT_HINT[alert].toLowerCase()}` : 'More'}
-        onClick={() => setOpen((v) => !v)}
+        onClick={press}
       >
         More
         {alert && <span className={`navmore__dot is-${alert}`} aria-hidden="true" />}
         <svg className="navmore__chev" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="m4 6 4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
       </button>
       {open && (
-        <div ref={menu} className={`menu-popup navmore__menu${onOpenSodex ? ' has-sodex' : ''}`} role="menu" aria-label="More">
-          <div className="navmore__col is-products" role="group" aria-label="Products">
-            <div className="menu-group-label" aria-hidden="true">Products</div>
+        <div ref={menu} className="menu-popup navmore__menu" role="menu" aria-label="More">
+          <div className="navmore__col">
+          <div className="navmore__group" role="group" aria-label="Data">
+            <div className="menu-group-label" aria-hidden="true">Data</div>
             <PageRow
               href={pathForTab('leaderboard')}
               label="Leaderboard"
@@ -164,14 +168,15 @@ export function NavMore({ alert = null, tab = null, limits = false, status = fal
             />
           </div>
           {onOpenSodex && (
-            <div className="navmore__col is-sodex" role="group" aria-label="SoDEX">
+            <div className="navmore__group is-sodex" role="group" aria-label="SoDEX">
               <div className="menu-group-label" aria-hidden="true">SoDEX</div>
               {SODEX_VIEWS.map((v) => (
                 <PageRow key={v} href={pathForSodexView(v)} label={SODEX_LABELS[v]} current={sodexOn === v} onOpen={close(() => onOpenSodex(v))} icon={SODEX_ICONS[v]} />
               ))}
             </div>
           )}
-          <div className="navmore__col is-resources" role="group" aria-label="Resources">
+          </div>
+          <div className="navmore__col navmore__group" role="group" aria-label="Resources">
             <div className="menu-group-label" aria-hidden="true">Resources</div>
             <PageRow
               href={STATUS_PATH}

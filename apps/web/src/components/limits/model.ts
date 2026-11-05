@@ -85,6 +85,13 @@ export function bandOf(up: string | null | undefined, down: string | null | unde
   return u === d ? `±${u}` : `+${u} / −${d}`;
 }
 
+/** Limit order cap and floor as the reference sets them: '5% / 5%'. */
+export function ratioPair(up: string | null | undefined, down: string | null | undefined): string | null {
+  const u = pctOf(up);
+  const d = pctOf(down);
+  return u === null || d === null ? null : `${u} / ${d}`;
+}
+
 export interface Bracket {
   tier: number;
   from: string;
@@ -143,13 +150,6 @@ export function matches(s: Pick<LimitSymbol, 'name' | 'displayName' | 'baseCoin'
   const q = query.trim().toLowerCase();
   if (!q) return true;
   return `${s.name} ${s.displayName} ${coinName(s.baseCoin)}`.toLowerCase().includes(q);
-}
-
-/** The highest leverage any listed market allows, and which ones. */
-export function topLeverage(rows: readonly LimitSymbol[]): { leverage: number; coins: string[] } | null {
-  const top = Math.max(0, ...rows.map((s) => s.maxLeverage ?? 0));
-  if (!(top > 0)) return null;
-  return { leverage: top, coins: ordered(rows).filter((s) => s.maxLeverage === top).map((s) => coinName(s.baseCoin)) };
 }
 
 /** Funding interval in words, from SoDEX's seconds: 3600 -> '1 h'. */
