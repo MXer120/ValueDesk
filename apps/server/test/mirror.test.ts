@@ -4,7 +4,7 @@
  * A wrong address or a wrong asset/chain pair here means unrecoverable funds,
  * so these tests pin the decoding and the verification gate rather than any
  * cosmetic behaviour. The fixtures are real: the ABI blob is what ValueChain
- * actually returned, and the expected deposit address is one confirmed against
+ * actually returned, and the first deposit address is one confirmed against
  * both the REST service and the on-chain registry.
  */
 import { test } from 'node:test';
@@ -17,11 +17,15 @@ import {
   MIRROR_REGISTRY,
   MIRROR_SELECTORS,
 } from '../src/sodex/mirrorRegistry.js';
+import { depositWalletLists } from '../src/sodex/depositWallets.js';
+import { sameDepositAddress } from '../src/sodex/depositAddressCore.js';
 
-// A wallet with no SoDEX account, and the address the mirror issues it on
-// Ethereum — verified identical from the REST service and the registry.
+// A wallet with no SoDEX account, and the first address the mirror issued it on
+// Ethereum. Which address is CURRENT is this wallet's live state and not ours to
+// pin: SoDEX gave it a second one on 2026-11-04, and the custody contract appends,
+// so the first stays listed (depositAddressCore.ts).
 const ACCOUNT = '0x727d78415c4c5d5209dbbd74661321971485ab9a';
-const EXPECTED_ETH_DEPOSIT = '0x5Cc60dB393c3d48B8128BC82183dA57fD9fC7B01';
+const FIRST_ETH_DEPOSIT = '0x5Cc60dB393c3d48B8128BC82183dA57fD9fC7B01';
 
 test('registry address and selectors are pinned', () => {
   // Identified by brute force: the only verified contract on ValueChain whose
@@ -31,12 +35,14 @@ test('registry address and selectors are pinned', () => {
   assert.equal(MIRROR_SELECTORS.listRemoteNativeTokens, '0x3c79e67d');
 });
 
-test('getDepositWallet reproduces the issued address exactly', async () => {
-  // This is THE safety property: the UI only ever shows an address that the
-  // chain itself confirms. Case-insensitive compare, byte-identical otherwise.
+test('getDepositWallet returns the newest address the registry lists for the wallet', async () => {
+  // Two contract reads must decode to the same address, and the first address ever
+  // issued must still be listed: a wrong selector or a bad decode fails here.
   const onChain = await getDepositWallet(ACCOUNT, 'ETH');
   assert.ok(onChain, 'registry returned no deposit wallet');
-  assert.equal(onChain!.toLowerCase(), EXPECTED_ETH_DEPOSIT.toLowerCase());
+  const listed = ((await depositWalletLists(ACCOUNT, 'USDC')).get('ETH') ?? []).map((a) => a.toLowerCase());
+  assert.equal(listed[0], FIRST_ETH_DEPOSIT.toLowerCase());
+  assert.equal(listed.at(-1), onChain!.toLowerCase());
 });
 
 test('an unknown chain yields no address rather than a wrong one', async () => {
@@ -107,17 +113,26 @@ test('deposit options are verified against the chain before being offered', asyn
     for (const route of asset.routes) {
       assert.equal(route.verified, true, `${asset.symbol}/${route.chain} was offered unverified`);
       assert.ok(route.address, `${asset.symbol}/${route.chain} has no address`);
+      // THE safety property: an offered address is the one the chain says is current.
+      const onChain = await getDepositWallet(ACCOUNT, route.chain.toUpperCase());
+      assert.ok(onChain, `${asset.symbol}/${route.chain}: the chain has no address`);
+      assert.ok(sameDepositAddress(route.address, onChain!), `${asset.symbol}/${route.chain} offers ${route.address}, the chain says ${onChain}`);
     }
   }
 
-  // USDC is the asset a new user actually onboards with.
-  const usdc = body.assets.find((a: any) => a.symbol === 'USDC');
-  assert.ok(usdc, 'USDC is not offered');
-  assert.ok(usdc.routes.length >= 3, 'USDC should be available on several chains');
+  // USDC is the asset a new user actually onboards with. How many of its chains are
+  // offered depends on this wallet's addresses; every one must be offered or rejected
+  // with a reason, never dropped silently.
+  const usdcRoutes: any[] = body.assets.find((a: any) => a.symbol === 'USDC')?.routes ?? [];
+  const usdcRejected = body.rejected.filter((r: any) => r.reason.startsWith('USDC: '));
+  assert.ok(usdcRoutes.length + usdcRejected.length >= 3, 'USDC should be whitelisted on several chains');
+  for (const r of usdcRejected) {
+    assert.ok(!usdcRoutes.some((o) => o.chain === r.chain), `USDC/${r.chain} was both rejected and offered`);
+  }
 
   // A per-chain native minimum must never be attached to a non-native asset:
   // "min 1" against USDC would read as 1 USDC when the real figure is 1 ETH.
-  for (const r of usdc.routes) {
+  for (const r of usdcRoutes) {
     assert.equal(r.minDeposit, null, `USDC/${r.chain} carries a native-token minimum`);
   }
   const eth = body.assets.find((a: any) => a.symbol === 'ETH');
