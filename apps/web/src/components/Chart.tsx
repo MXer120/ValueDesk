@@ -3641,12 +3641,13 @@ function Chart({
     return typeof t === 'number' && Number.isFinite(t) ? Math.min(t, Date.now()) : null;
   };
   /**
-   * Shift + press on the plot, while the panel is open: a click picks that candle, a drag a range of
-   * them, outlined as it goes. Taken in the capture phase, before the chart's own pan sees the press;
-   * without Shift the chart gets every press as usual.
+   * Shift + press on the plot: a click picks that candle, a drag a range of them, outlined as it goes,
+   * and the panel opens if it is closed (owner 2026-11-05: "shift click or drag still doesnt work, only
+   * if already in the who traded tab"). Taken in the capture phase, before the chart's own pan sees the
+   * press; without Shift the chart gets every press as usual.
    */
   const onFlowDragStart = (e: ReactPointerEvent) => {
-    if (!flowOpen || !e.shiftKey || e.button !== 0 || e.pointerType === 'touch' || drawing || maskedRef.current) return;
+    if (bare || !e.shiftKey || e.button !== 0 || e.pointerType === 'touch' || drawing || maskedRef.current) return;
     const t0 = flowTimeAt(e.clientX);
     if (t0 === null) return;
     e.preventDefault();
@@ -3663,6 +3664,7 @@ function Chart({
       window.removeEventListener('pointerup', up, true);
       document.body.classList.remove('kc-flow-picking');
       pickFlow(t0, candleAt(interval, t1).from === candleAt(interval, t0).from ? null : t1);
+      setFlowOpen(true);
     };
     document.body.classList.add('kc-flow-picking');
     window.addEventListener('pointermove', move, true);
@@ -3895,6 +3897,31 @@ function Chart({
     showFlowPick(flowOpen && !bare && !masked ? flowSpan(interval, flowAt, flowEnd) : null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, chartGen, flowOpen, flowAt, flowEnd, interval, bare, masked]);
+  // Opening the panel narrows the plot from the left, which can push the candles just picked off it:
+  // bring them back, centred. The candles stay where they are if they are still on screen.
+  useEffect(() => {
+    if (!flowOpen || flowAt === null) return;
+    const id = window.setTimeout(() => {
+      const c = chart.current;
+      const size = c?.getSize(CANDLE_PANE_ID);
+      if (!c || !size) return;
+      c.resize();
+      const w = flowSpan(interval, flowAt, flowEnd);
+      const px = c.convertToPixel(
+        [{ timestamp: w.from }, { timestamp: candleAt(interval, w.to - 1).from }],
+        { paneId: CANDLE_PANE_ID },
+      ) as Array<Partial<Point> & { x?: number }>;
+      const a = px[0]?.x;
+      const b = px[1]?.x;
+      const width = c.getSize(CANDLE_PANE_ID)?.width;
+      if (typeof a !== 'number' || typeof b !== 'number' || !width) return;
+      const MARGIN = 24;
+      if (a >= MARGIN && b <= width - MARGIN) return;
+      c.scrollByDistance(width / 2 - (a + b) / 2, 200);
+    }, 60);
+    return () => window.clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [flowOpen]);
 
   // News: this coin's stories, or the macro ones, as far back as the server
   // keeps them (history: up to SoSoValue's 7 days, hot ones ranked) - one read
