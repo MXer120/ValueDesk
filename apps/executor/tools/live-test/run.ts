@@ -81,6 +81,7 @@ interface Args {
   force: boolean;
   slow: boolean;
   adopt: boolean;
+  stop?: boolean;
   keepData: boolean;
   only: string[] | null;
   envFile: string;
@@ -104,6 +105,7 @@ const HELP = `live-test: algo orders and copy trading with real money on SoDEX m
   --force         run even what passed on this code
   --slow          include the slow scenarios (vwap.full, copy.tp-fires)
   --adopt         at start, flatten positions/orders on the test markets this runner never recorded sending
+  --stop          at start, the kill switch for everything this wallet runs on the target, before the cleanup
   --env <file>    the env file with the keys (default: .env.live in this folder)
   --keep-data     keep the executor's data folder at the end (it holds the executor's sealed key)
 
@@ -120,6 +122,7 @@ function parseArgs(argv: string[]): Args {
     else if (x === '--force') a.force = true;
     else if (x === '--slow') a.slow = true;
     else if (x === '--adopt') a.adopt = true;
+    else if (x === '--stop') a.stop = true;
     else if (x === '--keep-data') a.keepData = true;
     else if (x === '--only') a.only = (argv[++i] ?? '').split(',').map((s) => s.trim()).filter(Boolean);
     else if (x === '--env') a.envFile = resolve(argv[++i] ?? '');
@@ -354,6 +357,11 @@ async function main(): Promise<number> {
   started = target;
 
   // The region rule is the stricter of the declared country and the one the target sees the requests come from (ValueDesk's: its edge's).
+  // --stop: a bot left running by a runner that was killed keeps quoting into the cleanup; the kill switch goes first.
+  if (args.stop) {
+    await target.stopEverything();
+    await new Promise((r) => setTimeout(r, 3_000));
+  }
   const observed = await target.observedCountry();
   const policy = regionPolicy(country || null, observed);
   if (!policy.allowed && !args.dry) throw new Error(`LIVE_COUNTRY=${country || '(missing)'}${observed ? `, seen from ${observed}` : ''}: ${policy.reason ?? 'copying is not allowed there'}`);
