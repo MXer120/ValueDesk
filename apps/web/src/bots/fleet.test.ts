@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { AlgoView } from '@copy-engine';
-import { fleetSeries, fleetTotals } from './fleet';
+import { fleetSeries, fleetTotals, keepSeries } from './fleet';
 
 const M = 5 * 60_000;
 const T0 = 1_800_000_000_000 - (1_800_000_000_000 % M);
@@ -34,4 +34,17 @@ test('series: two bots on their own clocks sum on one grid; bars are volume per 
   assert.deepEqual(s.volume.map((x) => x[1]), [100, 250]);
   assert.deepEqual(s.pnl.map((x) => Math.round(x[1] * 100) / 100), [-0.1, -0.15]);
   assert.deepEqual(fleetSeries([], T0), { volume: [], pnl: [] });
+});
+
+test('a read without the series keeps each bot its own, and the fresh figures; a bot with none here asks for them all', () => {
+  const had = { algo: { id: 'a', status: 'running', book: { fills: 1, series: [[T0, 10, 1, 0]] } } } as unknown as AlgoView;
+  const now = { algo: { id: 'a', status: 'running', book: { fills: 9, series: [] } }, bot: { volume: 99 } } as unknown as AlgoView;
+  const [v] = keepSeries([now], [had])!;
+  assert.deepEqual(v!.algo.book!.series, [[T0, 10, 1, 0]]);
+  assert.equal(v!.algo.book!.fills, 9);
+  assert.equal(v!.bot!.volume, 99);
+  const fresh = { algo: { id: 'b', status: 'running', book: { fills: 0, series: [] } } } as unknown as AlgoView;
+  assert.equal(keepSeries([now, fresh], [had]), null);
+  const noBook = { algo: { id: 'c', status: 'running' } } as unknown as AlgoView;
+  assert.deepEqual(keepSeries([noBook], []), [noBook]);
 });

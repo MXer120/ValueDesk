@@ -10,7 +10,7 @@ import { COPY_TERMS_VERSION, buildCopyRequest, copyRequestDigest, limitNoticeOf,
 import { liveAlgoWalletsFrom, loadConfig, type ExecutorConfig } from '../src/config.ts';
 import { ExecutorDb } from '../src/db.ts';
 import { Secrets } from '../src/secrets.ts';
-import { createExecutorServer } from '../src/server.ts';
+import { createExecutorServer, withoutSeries } from '../src/server.ts';
 import { ApiError, ExecutorService } from '../src/service.ts';
 
 class Wallet {
@@ -142,6 +142,9 @@ test('HTTP: POST /algos with a signed request, GET /algos and its events with th
   const view = (await started.json()) as { algo: { id: string } };
   const list = (await (await fetch(`${base}/algos`, { headers: { Authorization: `Bearer ${token}` } })).json()) as { algos: Array<{ algo: { id: string } }> };
   assert.deepEqual(list.algos.map((v) => v.algo.id), [view.algo.id]);
+  const thin = (await (await fetch(`${base}/algos?series=0`, { headers: { Authorization: `Bearer ${token}` } })).json()) as { algos: Array<{ algo: { id: string } }>; noSeries?: boolean };
+  assert.deepEqual(thin.algos.map((v) => v.algo.id), [view.algo.id]);
+  assert.equal(thin.noSeries, true);
   const ev = await fetch(`${base}/algos/${view.algo.id}/events`, { headers: { Authorization: `Bearer ${token}` } });
   assert.equal(ev.status, 200);
   assert.equal((await fetch(`${base}/algos`)).status, 401);
@@ -361,4 +364,13 @@ test('algos: EXECUTOR_LIVE_ALGOS_WALLETS lets real algo orders start for the wal
   assert.deepEqual(liveAlgoWalletsFrom(undefined), []);
   assert.deepEqual(liveAlgoWalletsFrom(` ${listed.address}, ,${other.address.toUpperCase().replace('0X', '0x')}`), [listed.address, other.address]);
   assert.throws(() => loadConfig({ EXECUTOR_LIVE_ALGOS_WALLETS: `${listed.address},0x123`, EXECUTOR_DATA_DIR: tmpdir() }), /not a wallet address/);
+});
+
+test('GET /algos?series=0: a bot keeps its figures and loses only the series; the list itself is not touched', () => {
+  const bot = { algo: { id: 'b', book: { fills: 3, series: [[1, 2, 3, 4]] } } };
+  const twap = { algo: { id: 't' } };
+  const [a, b] = withoutSeries<{ algo: { id: string; book?: { fills?: number; series: unknown[] } } }>([bot, twap]);
+  assert.deepEqual(a!.algo.book, { fills: 3, series: [] });
+  assert.equal(b, twap);
+  assert.equal(bot.algo.book.series.length, 1);
 });

@@ -17,7 +17,7 @@
  *   POST /api/copy/v1/copies/action              {request: update|pause|resume|stop|stop-all}
  *   GET  /api/copy/v1/copies/:id/activity        Bearer, ?limit=&before=
  *   GET  /api/copy/v1/consents                   Bearer                      -> the wallet's signed instructions
- *   GET  /api/copy/v1/algos                      Bearer                      -> the wallet's algo orders
+ *   GET  /api/copy/v1/algos                      Bearer, ?series=0           -> the wallet's algo orders (series=0: without the bots' book series, noSeries: true)
  *   GET  /api/copy/v1/algos/:id/events           Bearer, ?limit=&before=
  *   GET  /api/copy/v1/notices                    Bearer, ?limit=&before=&grades=warn,error -> what the wallet should hear of
  *   POST /api/copy/v1/algos                      {request: algo-start}
@@ -38,6 +38,11 @@ import { ApiError, type ExecutorService, type RequestContext } from './service.t
 
 const BODY_LIMIT = 64 * 1024;
 const PREFIX = '/api/copy/v1';
+
+/** The list as GET /algos?series=0 answers it: the same, each bot's book without its series. */
+export function withoutSeries<T extends { algo: { book?: { series: unknown[] } } }>(views: readonly T[]): T[] {
+  return views.map((v) => (v.algo.book ? { ...v, algo: { ...v.algo, book: { ...v.algo.book, series: [] } } } : v));
+}
 
 /**
  * The rate-limit key of a client address: IPv4 as is (an IPv4-mapped IPv6 address
@@ -290,7 +295,12 @@ export function createExecutorServer(svc: ExecutorService, cfg: ExecutorConfig, 
       }
       if (req.method === 'GET' && route === '/me') return send(res, 200, svc.me(svc.authenticate(bearer(req)), ctx));
       if (req.method === 'GET' && route === '/consents') return send(res, 200, { consents: svc.consents(svc.authenticate(bearer(req))) });
-      if (req.method === 'GET' && route === '/algos') return send(res, 200, { algos: svc.algoList(svc.authenticate(bearer(req))) });
+      if (req.method === 'GET' && route === '/algos') {
+        const algos = svc.algoList(svc.authenticate(bearer(req)));
+        // The Bots page reads every 5 s, and a bot's series is up to 1,500 points: 6 MB a read at 100 bots.
+        if (url.searchParams.get('series') === '0') return send(res, 200, { algos: withoutSeries(algos), noSeries: true });
+        return send(res, 200, { algos });
+      }
       if (req.method === 'GET' && route === '/notices') {
         const owner = svc.authenticate(bearer(req));
         const grades = (url.searchParams.get('grades') ?? '').split(',').filter(Boolean);

@@ -128,6 +128,19 @@ export async function listOn(mode: ExecutorMode): Promise<AlgoView[]> {
   return (await call<{ algos: AlgoView[] }>(client, 'GET', '/algos', { token })).algos;
 }
 
+/**
+ * The list, `series: false` without the bots' book series where the executor can leave them out
+ * (`noSeries`; an older one sends them anyway, and says nothing).
+ */
+export async function listBotsOn(mode: ExecutorMode, series: boolean): Promise<{ algos: AlgoView[]; noSeries: boolean }> {
+  const owner = getLiveCopy().owner;
+  const client = clientFor(mode);
+  const token = owner && client ? client.token(owner) : null;
+  if (!client || !token || !getLiveCopy()[mode].info?.algos) return { algos: [], noSeries: false };
+  const r = await call<{ algos: AlgoView[]; noSeries?: boolean }>(client, 'GET', series ? '/algos' : '/algos?series=0', { token });
+  return { algos: r.algos, noSeries: r.noSeries === true };
+}
+
 export async function eventsOn(mode: ExecutorMode, id: string, limit = 200): Promise<AlgoEvent[]> {
   const owner = getLiveCopy().owner;
   const client = clientFor(mode);

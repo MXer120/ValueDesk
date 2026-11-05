@@ -7,11 +7,17 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { FINAL_STATUSES, type AlgoEvent, type AlgoUpdatePatch, type AlgoView } from '@copy-engine';
-import { actOn, eventsOn, listOn, startOn, updateOn } from '../algo/executorAlgos';
+import { actOn, eventsOn, listBotsOn, startOn, updateOn } from '../algo/executorAlgos';
 import { pollEvery } from '../exchange/visibility';
 import { newSeed } from '@copy-engine';
+import { keepSeries } from './fleet';
 
 export const BOTS_POLL_MS = 5_000;
+/**
+ * The figures every read, each bot's series (up to 1,500 points, 6 MB a read at 100 bots) once a minute: the
+ * series samples every 5 minutes, and its newest point is drawn from the figures anyway (fleet.ts, BotSheet.tsx).
+ */
+export const BOTS_SERIES_MS = 60_000;
 
 export interface BotsState {
   bots: AlgoView[];
@@ -35,24 +41,44 @@ export function useBots(owner: string | null, signedIn: boolean): BotsState {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const alive = useRef(true);
+  /** The list on screen, and when a read last brought the series. */
+  const shown = useRef<AlgoView[]>([]);
+  const seriesAt = useRef(0);
+  const show = useCallback((list: AlgoView[]) => {
+    shown.current = list;
+    setBots(list);
+  }, []);
 
   const refresh = useCallback(async () => {
     if (!owner || !signedIn) {
-      setBots([]);
+      seriesAt.current = 0;
+      show([]);
       setLoading(false);
       return;
     }
     try {
-      const list = await listOn('hosted');
+      const askedAt = Date.now();
+      const whole = askedAt - seriesAt.current >= BOTS_SERIES_MS;
+      const read = await listBotsOn('hosted', whole);
       if (!alive.current) return;
-      setBots(sortBots(list.filter((v) => v.algo.spec.bot === true)));
+      const list = read.algos.filter((v) => v.algo.spec.bot === true);
+      if (!read.noSeries) seriesAt.current = askedAt;
+      const next = read.noSeries ? keepSeries(list, shown.current) : list;
+      if (next) show(sortBots(next));
+      // A bot this page has no series for: read them all now rather than show it without.
+      else {
+        seriesAt.current = 0;
+        void refreshRef.current();
+      }
       setError(null);
     } catch (e) {
       if (alive.current) setError(e instanceof Error ? e.message : String(e));
     } finally {
       if (alive.current) setLoading(false);
     }
-  }, [owner, signedIn]);
+  }, [owner, signedIn, show]);
+  const refreshRef = useRef(refresh);
+  refreshRef.current = refresh;
 
   useEffect(() => {
     alive.current = true;
@@ -67,12 +93,10 @@ export function useBots(owner: string | null, signedIn: boolean): BotsState {
 
   /** The executor's answer for these bots, in place. */
   const merge = useCallback((views: AlgoView[]) => {
-    setBots((cur) => {
-      const byId = new Map(cur.map((v) => [v.algo.id, v]));
-      for (const v of views) byId.set(v.algo.id, v);
-      return sortBots([...byId.values()].filter((v) => !v.algo.k.archived));
-    });
-  }, []);
+    const byId = new Map(shown.current.map((v) => [v.algo.id, v]));
+    for (const v of views) byId.set(v.algo.id, v);
+    show(sortBots([...byId.values()].filter((v) => !v.algo.k.archived)));
+  }, [show]);
 
   const start = useCallback(async (spec: Record<string, unknown>) => {
     const v = await startOn('hosted', spec, newSeed());

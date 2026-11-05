@@ -7,6 +7,26 @@
  */
 import { BOT_SAMPLE_MS, FINAL_STATUSES, type AlgoView } from '@copy-engine';
 
+/**
+ * A read without the series, with each bot's series from the last read that had one. null when a bot has none
+ * here yet (just started elsewhere): then the next read asks for them all.
+ */
+export function keepSeries(views: readonly AlgoView[], before: readonly AlgoView[]): AlgoView[] | null {
+  const kept = new Map(before.map((v) => [v.algo.id, v.algo.book?.series]));
+  const out: AlgoView[] = [];
+  for (const v of views) {
+    const book = v.algo.book;
+    if (!book) {
+      out.push(v);
+      continue;
+    }
+    const series = kept.get(v.algo.id);
+    if (!series) return null;
+    out.push({ ...v, algo: { ...v.algo, book: { ...book, series } } });
+  }
+  return out;
+}
+
 export interface FleetTotals {
   bots: number;
   running: number;
