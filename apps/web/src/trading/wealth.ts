@@ -360,11 +360,23 @@ export const approveData = (spender: string, amount: bigint): string =>
 export const allowanceData = (owner: string, spender: string): string =>
   `${SELECTOR.allowance}${addrWord(owner)}${addrWord(spender)}`;
 
-/** builderFeeData and referral are bytes32(0): no fee here and no referral code, as agreed for now. */
+/**
+ * The Wealth referral: ValueDesk's own SoDEX code (owner 2026-11-05). A text code is its UTF-8
+ * bytes, right-padded to 32 (Wealth docs, Referrals). SoDEX checks nothing here and publishes no
+ * payout terms; a code it does not know attributes nothing.
+ */
+export const WEALTH_REFERRAL_CODE = 'VALUEDESK';
+export function referralWord(code: string): string {
+  const bytes = new TextEncoder().encode(code);
+  if (bytes.length > 32) throw new RangeError('referral code longer than 32 bytes');
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('').padEnd(64, '0');
+}
+
+/** No builder fee (bytes32(0)); the referral is ValueDesk's. RFQ calls take no referral. */
 export const requestDepositData = (assets: bigint, receiver: string): string =>
-  `${SELECTOR.requestDeposit}${uintWord(assets)}${addrWord(receiver)}${ZERO32}${ZERO32}`;
+  `${SELECTOR.requestDeposit}${uintWord(assets)}${addrWord(receiver)}${ZERO32}${referralWord(WEALTH_REFERRAL_CODE)}`;
 export const requestRedeemData = (shares: bigint, receiver: string): string =>
-  `${SELECTOR.requestRedeem}${uintWord(shares)}${addrWord(receiver)}${ZERO32}${ZERO32}`;
+  `${SELECTOR.requestRedeem}${uintWord(shares)}${addrWord(receiver)}${ZERO32}${referralWord(WEALTH_REFERRAL_CODE)}`;
 
 /** buy / sell(address vault, uint256 pay, uint256 receive, uint256 deadline, bytes signature). */
 export function rfqData(side: 'buy' | 'sell', vault: string, pay: bigint, receive: bigint, deadline: bigint, signature: string): string {

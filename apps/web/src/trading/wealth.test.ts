@@ -6,7 +6,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { keccak_256 } from '@noble/hashes/sha3';
 import {
-  SELECTOR, allowanceData, approveData, fundAction, fundLabel, joinHoldings, requestDepositData, requestProblem, requestRedeemData, rfqData,
+  SELECTOR, allowanceData, approveData, fundAction, fundLabel, joinHoldings, referralWord, requestDepositData, requestProblem, requestRedeemData, rfqData,
   type TradingStatus, type VaultFacts,
 } from './wealth';
 
@@ -31,17 +31,26 @@ test('each selector is the keccak of the documented signature', () => {
 const word = (hex: string) => hex.padStart(64, '0');
 const addr = (a: string) => word(a.slice(2));
 
-test('a deposit request: assets, receiver, no builder fee, no referral', () => {
+const VALUEDESK = '56414c55454445534b'.padEnd(64, '0');
+
+test('the referral word is the code as UTF-8, right-padded, as the docs encode it', () => {
+  assert.equal(referralWord('VALUEDESK'), VALUEDESK);
+  assert.equal(referralWord(''), '0'.repeat(64));
+  assert.equal(referralWord('ABC'), '4142430000000000000000000000000000000000000000000000000000000000', 'the docs own example');
+  assert.throws(() => referralWord('x'.repeat(33)), /32 bytes/);
+});
+
+test('a deposit request: assets, receiver, no builder fee, ValueDesk referral', () => {
   assert.equal(
     requestDepositData(1_000_000n, OWNER),
-    `${SELECTOR.requestDeposit}${word('f4240')}${addr(OWNER)}${'0'.repeat(64)}${'0'.repeat(64)}`,
+    `${SELECTOR.requestDeposit}${word('f4240')}${addr(OWNER)}${'0'.repeat(64)}${VALUEDESK}`,
   );
 });
 
-test('a redemption request: shares, receiver, no builder fee, no referral', () => {
+test('a redemption request: shares, receiver, no builder fee, ValueDesk referral', () => {
   assert.equal(
     requestRedeemData(5n * 10n ** 17n, OWNER),
-    `${SELECTOR.requestRedeem}${word('6f05b59d3b20000')}${addr(OWNER)}${'0'.repeat(64)}${'0'.repeat(64)}`,
+    `${SELECTOR.requestRedeem}${word('6f05b59d3b20000')}${addr(OWNER)}${'0'.repeat(64)}${VALUEDESK}`,
   );
 });
 
