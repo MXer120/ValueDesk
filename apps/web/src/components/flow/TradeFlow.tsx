@@ -5,7 +5,7 @@
  * A panel beside the chart, so the chart stays in view (owner 2026-11-03), built like the chart's other
  * panels: flush, one hairline between its parts (owner 2026-11-05: "doesnt match our other stuff"). One
  * candle of the chart's interval - picked on the chart (Shift-click it, or right-click "Who traded this
- * candle"; it is outlined there) or stepped here - broken down by wallet over the chosen platforms:
+ * candle"; it is outlined there) - broken down by wallet over the chosen platforms:
  *   - the summary: traded, the takers' buy/sell split, wallets, the top three's share, fills, VWAP;
  *   - a ranked table: share, volume, buy/sell bias, fills, and under View lean (net bought, net
  *     sold, round trip), average buy and sell price, net size, taker share;
@@ -16,7 +16,6 @@
  * No wallet names: the owner's rule (server valuedesk/labels.ts) - an identicon and the address.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import { createPortal } from 'react-dom';
 import type { FlowWindow, FlowWindowRow, WalletFillsBody } from '@sign/flow/read.js';
 import type { FlowRole, FlowSide, FlowSort } from '@sign/flow/codec.js';
 import { vsApi, VENUE_LABEL, type Venue } from '../../vsApi';
@@ -29,7 +28,7 @@ import { Identicon } from '../Identicon';
 import { PlatformSelect } from '../PlatformSelect';
 import { copyText } from '../accountTables/IdCell';
 import { coinOfSymbol } from '../../chart/liqMap';
-import { candleAt, candleCount, flowSpan, stepCandle, windowText, type CandleWindow } from './flowWindow';
+import { candleCount, flowSpan, windowText, type CandleWindow } from './flowWindow';
 import { EmptyState } from '../EmptyState';
 import { ViewPop } from '../ViewPop';
 import { Section, Seg as ViewSeg } from '../accountTables/FilterBar';
@@ -45,8 +44,6 @@ const FILL_ROW_H = 30;
 /** Below this height the view is a short panel (thin summary). */
 const SHORT_PX = 440;
 
-/** "1H", "4H"; minutes and the long units as the chart spells them ("1m", "1D", "1M"). */
-const ivLabel = (i: string) => (i.endsWith('h') ? i.toUpperCase() : i);
 const pct = (v: number, dp = 0) => `${fmtNum(v * 100, { minimumFractionDigits: dp, maximumFractionDigits: dp })}%`;
 const fmtSz = (v: number) => fmtNum(v, { maximumSignificantDigits: 6 });
 const signed = (v: number, f: (x: number) => string) => (v > 0 ? `+${f(v)}` : v < 0 ? `${MINUS}${f(-v)}` : f(0));
@@ -57,20 +54,6 @@ const clock = (t: number) => {
   const p = (n: number, l = 2) => String(n).padStart(l, '0');
   return `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}.${p(d.getUTCMilliseconds(), 3)}`;
 };
-
-/** A CSV file from rows of cells, saved by the browser. */
-function saveCsv(name: string, rows: Array<Array<string | number>>): void {
-  const cell = (v: string | number) => {
-    const s = String(v);
-    return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-  };
-  const blob = new Blob(['﻿', rows.map((r) => r.map(cell).join(',')).join('\r\n')], { type: 'text/csv;charset=utf-8' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = name;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(a.href), 1_000);
-}
 
 // --- small parts --------------------------------------------------------------------------------
 
@@ -126,16 +109,6 @@ function Seg<T extends string>({ value, options, onChange, label }: { value: T; 
   );
 }
 
-function CsvButton({ onClick, disabled }: { onClick: () => void; disabled?: boolean }) {
-  return (
-    <button type="button" className="tfl-icobtn" onClick={onClick} disabled={disabled} title="Download as CSV" aria-label="Download as CSV">
-      <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        <path d="M8 2.5v7.5M4.8 7 8 10.2 11.2 7M3 12.5h10" />
-      </svg>
-    </button>
-  );
-}
-
 function Wallet({ w, size = 16 }: { w: { venue: Venue; address: string | null; key: string }; size?: number }) {
   const id = whoOf(w);
   return (
@@ -164,26 +137,11 @@ export interface TradeFlowProps {
   onClose: () => void;
 }
 
-/** How to pick candles, said where the pointer is: a touch screen has no Shift. */
-const PICK_TIP = typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches
-  ? 'Long-press a candle to change'
-  : 'Shift-click a candle, Shift-drag for a range';
-
-const ChevL = () => <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M10 3.5 5.5 8l4.5 4.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>;
-const ChevR = () => <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>;
-
-const CSV_HEAD = ['venue', 'wallet', 'lean', 'share', 'volume_usd', 'bought_usd', 'sold_usd', 'bought', 'sold', 'net', 'fills_buy', 'fills_sell', 'avg_buy', 'avg_sell', 'taker_share'];
-
 export function TradeFlowView({ symbol, spot, interval, at, end, onPick, onClose }: TradeFlowProps) {
   const coin = coinOfSymbol(symbol);
-  // The chart's candle: picked there, or stepped here; the chart's interval changing re-cuts it.
+  // The chart's candle, picked there; the chart's interval changing re-cuts it.
   const win = useMemo(() => flowSpan(interval, at, end), [interval, at, end]);
   const count = useMemo(() => candleCount(interval, win), [interval, win]);
-  /** Prev / next move the whole range by its own length. */
-  const step = (dir: -1 | 1) => {
-    const first = stepCandle(interval, candleAt(interval, win.from), dir * count);
-    onPick(first.from, count > 1 ? stepCandle(interval, candleAt(interval, win.to - 1), dir * count).from : null);
-  };
   const offered: Venue[] = spot ? ['sodex'] : [...FLOW_VENUES];
   const [venues, setVenues] = useState<Venue[]>(offered);
   const [role, setRole] = useState<FlowRole>('all');
@@ -193,8 +151,6 @@ export function TradeFlowView({ symbol, spot, interval, at, end, onPick, onClose
   const [q, setQ] = useState('');
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState<FlowWindowRow | null>(null);
-  /** Shown large, over the page (a chart card is often too short for a table). */
-  const [big, setBig] = useState(false);
   // A short panel (the trade page's chart card is ~300 px): the summary goes thin.
   const rootRef = useRef<HTMLDivElement>(null);
   const [short, setShort] = useState(false);
@@ -204,18 +160,11 @@ export function TradeFlowView({ symbol, spot, interval, at, end, onPick, onClose
     const ro = new ResizeObserver(() => setShort(el.clientHeight > 0 && el.clientHeight < SHORT_PX));
     ro.observe(el);
     return () => ro.disconnect();
-  }, [big]);
-  useEffect(() => {
-    if (!big) return;
-    const key = (e: KeyboardEvent) => { if (e.key === 'Escape') setBig(false); };
-    window.addEventListener('keydown', key);
-    return () => window.removeEventListener('keydown', key);
-  }, [big]);
+  }, []);
   useEffect(() => { const t = setTimeout(() => setQuery(q.trim()), 250); return () => clearTimeout(t); }, [q]);
   useEffect(() => { setOpen(null); setLimit(PAGE); }, [coin, win.from, win.to, venues.join(',')]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const now = Date.now();
-  const latest = candleAt(interval, now);
   const live = win.to > now;
 
   const kind = spot ? 'spot' as const : 'perp' as const;
@@ -231,42 +180,21 @@ export function TradeFlowView({ symbol, spot, interval, at, end, onPick, onClose
   const [cols, setCols] = useStored<string[]>('flow.cols', DEFAULT_COLS);
   const shownCols = COLS.filter((c) => !c.opt || cols.includes(c.key));
   const before = !!d && d.since !== null && d.to <= d.since;
-  const csv = () => d && saveCsv(`who-traded-${coin}-${new Date(win.from).toISOString().slice(0, 16).replace(':', '')}.csv`, [
-    CSV_HEAD,
-    ...d.rows.map((x) => [x.venue, whoOf(x), x.lean, x.share, x.vol, x.buyNtl, x.sellNtl, x.buySz, x.sellSz, x.net, x.buyN, x.sellN, x.buyPx ?? '', x.sellPx ?? '', x.takerShare ?? '']),
-  ]);
-
-  const view = (
-    <div ref={rootRef} className={`tfl${big ? ' tfl--big' : ''}${short ? ' is-short' : ''}`} role={big ? 'dialog' : undefined} aria-label={big ? `Who traded ${coin}` : undefined}>
+  return (
+    <div ref={rootRef} className={`tfl${short ? ' is-short' : ''}`}>
       <div className="tfl-bar">
-        <div className="tfl-title">
-          <b>Who traded</b>
-          <span className="tfl-title__coin">{coin}</span>
-        </div>
-        <button type="button" className="tfl-ghost" onClick={() => setBig((b) => !b)} aria-label={big ? 'Back beside the chart' : 'Expand'} title={big ? 'Back beside the chart (Esc)' : 'Expand'}>
-          <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            {big ? <path d="M6.5 2.5v4h-4M9.5 13.5v-4h4M6.5 6.5 2 2M9.5 9.5 14 14" /> : <path d="M2.5 6.5v-4h4M13.5 9.5v4h-4M2.5 2.5 7 7M13.5 13.5 9 9" />}
-          </svg>
-        </button>
-        <button type="button" className="tfl-ghost" onClick={() => { setBig(false); onClose(); }} aria-label="Close Who traded" title="Close">
+        <b className="tfl-title">Who traded</b>
+        <button type="button" className="tfl-ghost" onClick={onClose} aria-label="Close Who traded" title="Close">
           <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" /></svg>
         </button>
       </div>
 
-      {/* The candle: the chart's interval and the one picked there, stepped here. */}
-      <div className="tfl-candle">
-        <div className="tfl-candle__when" aria-live="polite">
-          <b>{windowText(win)}</b>
-          <span className="tfl-candle__sub">
-            <span title={count > 1 ? `${fmtCount(count)} candles of the chart's timeframe` : "The chart's timeframe"}>{count > 1 ? `${fmtCount(count)} × ${ivLabel(interval)}` : ivLabel(interval)}</span>
-            {live && <span className="tfl-forming">Forming</span>}
-            {count > 1 && <button type="button" className="tfl-candle__one" onClick={() => onPick(win.from, null)} title="Back to the first candle alone">One candle</button>}
-            <span className="tfl-candle__tip" title={PICK_TIP}>{PICK_TIP}</span>
-          </span>
-        </div>
-        <button type="button" className="tfl-ghost" aria-label={count > 1 ? 'Previous range' : 'Previous candle'} title={count > 1 ? `The ${count} candles before` : 'Previous candle'} onClick={() => step(-1)}><ChevL /></button>
-        <button type="button" className="tfl-ghost" aria-label={count > 1 ? 'Next range' : 'Next candle'} title={count > 1 ? `The ${count} candles after` : 'Next candle'} disabled={live} onClick={() => step(1)}><ChevR /></button>
-        <button type="button" className={`tfl-latest${win.from === latest.from ? ' is-on' : ''}`} onClick={() => onPick(latest.from, null)} title="The candle still forming">Live</button>
+      {/* The candles picked on the chart. */}
+      <div className="tfl-candle" aria-live="polite">
+        <b>{windowText(win)}</b>
+        {count > 1 && <span>{fmtCount(count)} candles</span>}
+        {live && <span className="tfl-forming">Forming</span>}
+        {count > 1 && <button type="button" className="tfl-candle__one" onClick={() => onPick(win.from, null)} title="Back to the first candle alone">One candle</button>}
       </div>
 
       <div className={`tfl-scroll${open ? ' is-wallet' : ''}`}>
@@ -283,7 +211,6 @@ export function TradeFlowView({ symbol, spot, interval, at, end, onPick, onClose
               </label>
               <PlatformSelect options={offered} value={venues} onChange={setVenues} align="end" />
               <TableView cols={cols} onCols={setCols} role={role} onRole={setRole} side={side} onSide={setSide} sort={sort} onSort={setSort} />
-              <CsvButton disabled={!d?.rows.length} onClick={csv} />
             </div>
             <Table
               d={d} coin={coin} cols={shownCols} sort={sort} onSort={setSort} loading={r.loading} error={r.error} onOpen={setOpen}
@@ -297,13 +224,6 @@ export function TradeFlowView({ symbol, spot, interval, at, end, onPick, onClose
         )}
       </div>
     </div>
-  );
-  if (!big) return view;
-  return (
-    <>
-      <div className="tfl tfl-parked"><button type="button" className="tfl-more" onClick={() => setBig(false)}>Show beside the chart</button></div>
-      {createPortal(<div className="tfl-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) setBig(false); }}>{view}</div>, document.body)}
-    </>
   );
 }
 
@@ -570,10 +490,6 @@ function WalletView({ coin, kind, venues, win, row, live, onBack }: {
         <Seg value={side} label="Side" options={[['all', 'All'], ['buy', 'Buys'], ['sell', 'Sells']]} onChange={setSide} />
         <Seg value={role} label="Role" options={[['all', 'All'], ['taker', 'Taker'], ['maker', 'Maker']]} onChange={setRole} />
         <span className="tfl-dim tfl-count">{d ? `${fmtCount(shown.length)} fills${d.capped ? ' (first 200,000)' : ''}` : ''}</span>
-        <CsvButton disabled={!d?.fills.t.length} onClick={() => d && saveCsv(`fills-${coin}-${w.slice(0, 10)}.csv`, [
-          ['time_utc', 'venue', 'side', 'role', 'price', 'size', 'value_usd', 'counterparty'],
-          ...d.fills.t.map((t, i) => [new Date(t).toISOString(), d.venues[d.fills.venue[i]!]!, d.fills.side[i] === 1 ? 'buy' : 'sell', ['taker', 'maker', ''][d.fills.role[i]!]!, d.fills.px[i]!, d.fills.sz[i]!, d.fills.px[i]! * d.fills.sz[i]!, whoOf(d.others[d.fills.other[i]!]!)]),
-        ])} />
       </div>
       <div className="tfl-fills" role="table" aria-label="Fills">
         <div className="tfl-fr tfl-th" role="row">

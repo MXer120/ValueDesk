@@ -4435,7 +4435,7 @@ function Chart({
             style={bare ? { display: 'none' } : undefined}
             type="button"
             className={`kc-ico kc-tb-ico${flowOpen ? ' on' : ''}`}
-            title={flowOpen ? 'Hide Who traded' : 'Who traded: every wallet in a candle'}
+            title={flowOpen ? 'Hide Who traded' : 'Who traded: every wallet in a candle (Shift-click or right-click a candle, Shift-drag for a range)'}
             aria-label="Who traded"
             aria-pressed={flowOpen}
             onClick={() => (flowOpen ? closeFlow() : setFlowOpen(true))}
