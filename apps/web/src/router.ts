@@ -133,6 +133,15 @@ export function isExcludedPath(pathname: string): boolean {
 /** Trading limits & conditions (components/limits/LimitsPage.tsx): SoDEX's live market rules, linked from More. */
 export const LIMITS_PATH = '/limits';
 
+/**
+ * SoDEX's own products, a group under More. The pages and their routes are not here yet: the group
+ * shows only once NavBar is given `onOpenSodex`, so the menu never links to a page that is not there.
+ */
+export const SODEX_VIEWS = ['points', 'blind-boxes', 'wealth'] as const;
+export type SodexView = (typeof SODEX_VIEWS)[number];
+export const SODEX_LABELS: Record<SodexView, string> = { points: 'SoPoints', 'blind-boxes': 'Blind Boxes', wealth: 'Wealth' };
+export const pathForSodexView = (view: SodexView): string => `/${view}`;
+
 /** Whether a pathname is the trading limits page. */
 export function isLimitsPath(pathname: string): boolean {
   return pathname.replace(/\/+$/, '').split('/').filter(Boolean)[0]?.toLowerCase() === 'limits';

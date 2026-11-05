@@ -1,6 +1,7 @@
 /**
  * "More" at the end of the navbar's pages (owner, 2026-10-28; two columns owner 2026-11-05):
- * what is not a trading page, as Products and Resources, each a list of icon + label rows.
+ * what is not a trading page, as Products and Resources, each a list of icon + label rows, and
+ * SoDEX's own products as a third group once App passes `onOpenSodex`.
  * While something is open on the status page (an incident, maintenance in progress, or the
  * data service not answering) the button carries a dot, and the Status row says what.
  *
@@ -9,8 +10,8 @@
  * with a small arrow. The menu is the app's glass dropdown (.menu-popup) with its rows; Escape
  * or a click outside closes it. On a phone it spans the window under the bar.
  */
-import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
-import { EXCLUDED_PATH, LIMITS_PATH, STATUS_PATH, pathForTab, type Tab } from '../router';
+import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
+import { EXCLUDED_PATH, LIMITS_PATH, SODEX_LABELS, SODEX_VIEWS, STATUS_PATH, pathForSodexView, pathForTab, type SodexView, type Tab } from '../router';
 import { FeedbackIcon, FEEDBACK_LABEL, openFeedback } from '../feedback/FeedbackButton';
 import { FEEDBACK_URL } from '../feedback/feedback';
 import { openSettings } from '../settingsBus';
@@ -31,6 +32,12 @@ const NEWS_URL = 'https://x.com/ValueDeskdotso';
 const Icon = ({ children }: { children: ReactNode }) => (
   <svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{children}</svg>
 );
+
+const SODEX_ICONS: Record<SodexView, ReactNode> = {
+  points: <Icon><path d="M10 2.8 12.2 7.300l5 .7-3.600 3.500.9 4.900L10 14.100l-4.500 2.300.9-4.900L2.800 8l5-.7L10 2.800Z" /></Icon>,
+  'blind-boxes': <Icon><path d="M3 6.500 10 3l7 3.500v7L10 17l-7-3.500v-7Z" /><path d="M3 6.500 10 10l7-3.500M10 10v7" /></Icon>,
+  wealth: <Icon><path d="M2.500 17h15M4 14l4-4 3 2.500L16.500 6" /><path d="M12.500 6h4v4" /></Icon>,
+};
 
 /** A page of the app: a link with its href, opened in place by a plain click. */
 function PageRow({ href, icon, label, current, onOpen, children }: { href: string; icon: ReactNode; label: string; current?: boolean; onOpen?: () => void; children?: ReactNode }) {
@@ -59,7 +66,7 @@ function OutRow({ href, icon, label }: { href: string; icon: ReactNode; label: s
   );
 }
 
-export function NavMore({ alert = null, tab = null, limits = false, status = false, excluded = false, onNavigate, onOpenStatus, onOpenExcluded, onOpenLimits }: {
+export function NavMore({ alert = null, tab = null, limits = false, status = false, excluded = false, onNavigate, onOpenStatus, onOpenExcluded, onOpenLimits, onOpenSodex, sodexOn = null }: {
   alert?: NavAlert;
   /** The tab on screen, for the Leaderboard row and the button. */
   tab?: Tab | null;
@@ -71,14 +78,33 @@ export function NavMore({ alert = null, tab = null, limits = false, status = fal
   onOpenStatus?: () => void;
   onOpenExcluded?: () => void;
   onOpenLimits?: () => void;
+  /** Open one of SoDEX's products; without it there is no SoDEX group. */
+  onOpenSodex?: (view: SodexView) => void;
+  sodexOn?: SodexView | null;
 }) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
+  const menu = useRef<HTMLDivElement>(null);
   const close = (then?: () => void) => () => {
     setOpen(false);
     then?.();
   };
-  const here = tab === 'leaderboard' || limits || status || excluded;
+  const here = tab === 'leaderboard' || limits || status || excluded || sodexOn !== null;
+
+  /* The button sits mid-bar, so the menu steps left by what would run off the window. On a phone CSS places it. */
+  useLayoutEffect(() => {
+    const el = menu.current;
+    if (!open || !el) return;
+    const place = () => {
+      el.style.removeProperty('left');
+      if (getComputedStyle(el).position === 'fixed') return;
+      const over = el.getBoundingClientRect().right - (window.innerWidth - 8);
+      if (over > 0) el.style.left = `${-over}px`;
+    };
+    place();
+    window.addEventListener('resize', place);
+    return () => window.removeEventListener('resize', place);
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -112,8 +138,8 @@ export function NavMore({ alert = null, tab = null, limits = false, status = fal
         <svg className="navmore__chev" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="m4 6 4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
       </button>
       {open && (
-        <div className="menu-popup navmore__menu" role="menu" aria-label="More">
-          <div className="navmore__col" role="group" aria-label="Products">
+        <div ref={menu} className={`menu-popup navmore__menu${onOpenSodex ? ' has-sodex' : ''}`} role="menu" aria-label="More">
+          <div className="navmore__col is-products" role="group" aria-label="Products">
             <div className="menu-group-label" aria-hidden="true">Products</div>
             <PageRow
               href={pathForTab('leaderboard')}
@@ -137,7 +163,15 @@ export function NavMore({ alert = null, tab = null, limits = false, status = fal
               icon={<Icon><circle cx="10" cy="10" r="7" /><path d="M5 15 15 5" /></Icon>}
             />
           </div>
-          <div className="navmore__col" role="group" aria-label="Resources">
+          {onOpenSodex && (
+            <div className="navmore__col is-sodex" role="group" aria-label="SoDEX">
+              <div className="menu-group-label" aria-hidden="true">SoDEX</div>
+              {SODEX_VIEWS.map((v) => (
+                <PageRow key={v} href={pathForSodexView(v)} label={SODEX_LABELS[v]} current={sodexOn === v} onOpen={close(() => onOpenSodex(v))} icon={SODEX_ICONS[v]} />
+              ))}
+            </div>
+          )}
+          <div className="navmore__col is-resources" role="group" aria-label="Resources">
             <div className="menu-group-label" aria-hidden="true">Resources</div>
             <PageRow
               href={STATUS_PATH}

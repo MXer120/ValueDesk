@@ -1265,6 +1265,7 @@ button.danger:hover:not(:disabled) { background: var(--neg); border-color: var(-
 .navmore__btn.is-here { color: var(--text); }
 /* Two labelled columns of icon + label rows (owner 2026-11-05). */
 .navmore__menu { top: calc(100% + 6px); left: 0; z-index: 72; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 var(--sp-2); width: 468px; padding: 10px; }
+.navmore__menu.has-sodex { grid-template-columns: repeat(3, minmax(0, 1fr)); width: 660px; }
 .navmore__col { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .navmore__menu .menu-group-label { margin-bottom: 4px; padding: 4px 10px 2px; text-transform: none; letter-spacing: 0; font-size: var(--fs-xs); font-weight: 400; }
 .navmore__menu a.menu-row { text-decoration: none; }
@@ -1278,6 +1279,11 @@ button.danger:hover:not(:disabled) { background: var(--neg); border-color: var(-
   /* Under the bar, across the window: the button sits mid-row there, a 468px menu would run off it. */
   .navmore__menu { position: fixed; top: calc(var(--navbar-live, 56px) + 4px); left: 8px; right: 8px; width: auto; padding: 8px; gap: 0 2px; }
   .navmore__row.menu-row { height: 42px; gap: 9px; padding: 0 8px; }
+  /* Three groups on a phone: SoDEX under Products, Resources (the longest) beside both. */
+  .navmore__menu.has-sodex { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-areas: 'products resources' 'sodex resources'; width: auto; }
+  .navmore__menu.has-sodex .is-products { grid-area: products; }
+  .navmore__menu.has-sodex .is-sodex { grid-area: sodex; margin-top: 8px; }
+  .navmore__menu.has-sodex .is-resources { grid-area: resources; }
 }
 .navmore__hint.is-down { color: var(--neg); }
 .navmore__hint.is-maintenance { color: var(--muted); }
