@@ -72,8 +72,11 @@ import { closeRuns, type CloseFill } from '../valuedesk/winRate.js';
 import { mayPrune } from '../retention.js';
 
 export const SCHEMA_VERSION = 1;
-/** The writer connection's page cache at most, in KiB (PRAGMA cache_size). */
-export const WRITER_CACHE_KB = 1024 * 1024;
+/**
+ * The writer connection's page cache at most, in KiB (PRAGMA cache_size). Its own memory: nothing else on the machine can
+ * push it out, as a backup's reads did to the OS's cache (a 413 s stall, 2026-11-05). Taken as used; the server has 46 GB.
+ */
+export const WRITER_CACHE_KB = 6 * 1024 * 1024;
 
 export function defaultDbPath(): string {
   return process.env.VALUESCAN_INDEX_DB?.trim() || join(dirname(deviceKeyPath()), 'valuescan-index.db');
