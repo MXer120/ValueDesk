@@ -149,8 +149,18 @@ export function statsFrom(window: BoardWindow, now: number): number {
 /** Stream-discovered SoDEX wallets are re-queued for lookups this often per window. */
 const LOOKUP_SCAN_MS = 10 * 60_000;
 const FLUSH_MS = 5_000;
-/** A flush keeps the thread this long at a time: 40 ms when it is keeping up, up to 500 ms when it is not. */
-export const flushBudget = (backlog: number): number => Math.min(500, 40 + backlog);
+/**
+ * A flush keeps the thread this long at a time: 40 ms when it is keeping up, up to 2 s when far behind. At 500 ms
+ * the queue still grew, by about 100 steps a minute at 5,600 (2026-11-05): rows waiting are data users do not have.
+ */
+export const flushBudget = (backlog: number): number => Math.min(2_000, 40 + backlog);
+
+/**
+ * In the fills' key order: rows of one wallet then go to the same pages in one transaction, instead of each
+ * touching and rewriting its own. The same rows, and the sort is stable: copies of one id keep their order.
+ */
+export const inKeyOrder = <T extends { venue: string; address: string; id: string }>(rows: T[]): T[] =>
+  rows.sort((a, b) => (a.venue < b.venue ? -1 : a.venue > b.venue ? 1 : a.address < b.address ? -1 : a.address > b.address ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 /** Rows per transaction in a flush: at ~2 ms a row, 150 fills are a third of a second of the thread. */
 const FLUSH_FILLS = 150;
 const FLUSH_ACTIVITY = 300;
@@ -702,7 +712,7 @@ export class Indexer {
       rows.push({ venue: venue as Venue, acct: acct!, hour: Number(hour), trades: v.trades, volume: v.volume });
     }
     this.act.clear();
-    const fills = this.pendingFills;
+    const fills = inKeyOrder(this.pendingFills);
     this.pendingFills = [];
     const at = this.now();
     // A write that failed: this flush's coverage does not move, as the rows it speaks for are not held.

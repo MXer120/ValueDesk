@@ -7,7 +7,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { Checkpointer } from '../src/indexer/checkpointer.js';
 import { SlicedWork, readInSlices } from '../src/indexer/slicedWork.js';
 import { IndexStore, type FillRow } from '../src/indexer/store.js';
-import { flushBudget } from '../src/indexer/engine.js';
+import { flushBudget, inKeyOrder } from '../src/indexer/engine.js';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const until = async (what: string, ok: () => boolean, ms = 8_000) => {
@@ -161,7 +161,8 @@ test('read in slices: a stop ends it, and done never runs', async () => {
 
 test('a flush that falls behind gets more of the thread, and catches up where a flat slice never would', async () => {
   assert.equal(flushBudget(0), 40);
-  assert.equal(flushBudget(1_000), 500);
+  assert.equal(flushBudget(1_000), 1_040);
+  assert.equal(flushBudget(10_000), 2_000);
   // A turn of the loop costs 400 ms of other work; a step 100 ms; 2.5 steps arrive per second. A model of the thread, not a measurement.
   const simulate = (budget: (b: number) => number) => {
     let backlog = 500;
@@ -207,4 +208,10 @@ test('Lighter at the start: a wallet with tens of thousands of sub-accounts take
     if (was === undefined) delete process.env.VALUESCAN_INDEX_STREAMS;
     else process.env.VALUESCAN_INDEX_STREAMS = was;
   }
+});
+
+test('fills written in key order hold the same rows, and copies of one id keep their order', () => {
+  const row = (address: string, id: string, src: number) => ({ venue: 'hyperliquid', address, id, src });
+  const sorted = inKeyOrder([row('0xb', '2', 0), row('0xa', '9', 0), row('0xb', '1', 1), row('0xb', '2', 1)]);
+  assert.deepEqual(sorted.map((r) => `${r.address}|${r.id}|${r.src}`), ['0xa|9|0', '0xb|1|1', '0xb|2|0', '0xb|2|1']);
 });
