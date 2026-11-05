@@ -31,7 +31,7 @@
 #   5. the operations scripts (deploy/server/bin) from the tarball into /opt/valuescan/bin where they differ -
 #      a release used to leave them to be installed by hand;
 #   6. the maintenance notice (THE NOTICE below), then server 1: release.sh --units=<indexer,api - those that
-#      changed>, waiting for the indexer to build its boards again; server 2: release.sh --units=executor. A
+#      changed>, waiting for the indexer to publish again; server 2: release.sh --units=executor. A
 #      unit that does not come back healthy is rolled back to the release before at once, and ship.sh stops;
 #   7. main moves to the tag (fast-forward) - Vercel builds and publishes the web - and, when the web changed,
 #      it waits for GitHub to show that Production deployment as successful and the site answering.
@@ -52,7 +52,7 @@
 # affected, and the expected end from the measurements below - an estimate, and the app says so. The app shows
 # it blue while it runs (past the estimate: "taking longer than expected") and turns it green ONLY when ship.sh
 # completes it `ok`: the restarts are over AND every restarted part passed the final checks (the API answers,
-# the executor is healthy with its SoDEX feed up and the brake as it was, the indexer built its boards). A
+# the executor is healthy with its SoDEX feed up and the brake as it was, the indexer publishing). A
 # rollback completes it `rolled_back` - amber in the app, never green - and so does a ship that stopped before
 # it was finished with nothing broken. When something is left not working (a failed rollback, the executor
 # held, no board build, a final check failing), it gets an update naming the parts still affected and stays
@@ -64,7 +64,7 @@
 #   api       no failed request: the API is away ~6 s and Caddy holds each request meanwhile (lb_try_duration
 #             15 s); the heatmap's WebSocket reconnects
 #   executor  no failed request: back in seconds, Caddy holds its requests up to 20 s; copies and algos wait
-#   indexer   the site keeps serving the last boards, ~2 min staler (start ~35 s, first build ~70 s); the
+#   indexer   the site keeps serving the last boards, which catch up over the next rebuild; the
 #             streams' gap is read again (Lighter's re-subscribe 3.5-8 min); after midnight UTC the first
 #             build took 5-8 min. The notice's expected end counts these (shipNotice.ts SHIP_EFFECTS).
 #
@@ -205,7 +205,7 @@ cost() {
     web) echo "none (Vercel switches at once)" ;;
     api) echo "~6 s, requests held by Caddy - none fail" ;;
     executor) echo "seconds, requests held by Caddy; copies and algos wait" ;;
-    indexer) echo "boards ~2 min staler" ;;
+    indexer) echo "boards catch up over the next rebuild" ;;
     status) echo "a second; the status page misses one round at most" ;;
     feed) echo "seconds; its readers use their own sockets meanwhile" ;;
   esac
@@ -475,31 +475,24 @@ if [ ${#U1[@]} -gt 0 ] || [ "$STA" = 1 ]; then
   if [ "$STA" = 1 ]; then done_note "status prober restarted"; fi
   if want api; then done_note "api back"; fi
   if want indexer; then
-    note "waiting for the indexer's first build on $TAG"
-    # Up to 30 minutes for the first build, then up to 10 more for every stream to be whole.
-    built="" whole="" since=0
-    for i in $(seq 1 90); do
+    # Back when it publishes fresh status again. Not its first board build: the boards keep showing
+    # meanwhile, and that build took 40 to 110 min at midday on 2026-11-05. Waiting for it held the
+    # website behind it and turned a healthy release into "not back to normal". A build that stays
+    # old is the status page's to say (boards over an hour old count as degraded).
+    note "waiting for the indexer to publish again on $TAG"
+    built="" whole=""
+    for i in $(seq 1 18); do
       read -r at ms conf markets down < <(indexer_state || echo "0 0 -1 -1 ?")
-      if [ -z "$built" ] && [ "${at:-0}" -gt "$t0" ]; then built="$at"; since="$i"; note "boards built again $(( (at - t0) / 1000 )) s after the restart (that build: $(( ms / 1000 )) s)"; fi
+      if [ -z "$built" ] && [ "${at:-0}" -gt "$t0" ]; then built="$at"; note "indexer publishing $(( (at - t0) / 1000 )) s after the restart"; fi
       if [ -n "$built" ] && [ "$down" = "-" ]; then whole=1; break; fi
-      if [ -n "$built" ] && [ $((i - since)) -ge 30 ]; then break; fi
-      sleep 20
+      sleep 10
     done
-    if [ -n "$whole" ]; then notice_note "Leaderboards and cohorts are current again."
-    elif [ -n "$built" ]; then
-      names="$(printf '%s' "$down" | sed 's/sodex/SoDEX/; s/hyperliquid/Hyperliquid/; s/tradexyz/trade.xyz/; s/arcus/Arcus/; s/,/, /g')"
-      if [ "${markets:--1}" -gt 0 ]; then names="${names/lighter/Lighter ($conf of $markets markets)}"; else names="${names/lighter/Lighter}"; fi
-      NOTICE_STILL="Still reconnecting: $names - their newest trades may show a few minutes late."
-      notice_note "Leaderboards and cohorts are current again. $NOTICE_STILL"
-    else
-      NOTICE_OK=0
-      notice_affected indexer:partial "The indexer restarted; its first rebuild is taking longer than usual. Leaderboards and cohorts may be behind until it is done."
-    fi
     if [ -n "$built" ]; then
-      done_note "indexer: boards built again $(( (built - t0) / 1000 )) s after the restart$([ -n "$whole" ] && echo ", every stream up" || echo ", still reconnecting: $down")"
+      done_note "indexer: publishing again $(( (built - t0) / 1000 )) s after the restart$([ -n "$whole" ] && echo ", every stream up" || echo ", streams still reconnecting: $down")"
+      notice_note "Leaderboards and cohorts keep showing; their figures catch up over the next rebuild."
     else
-      note "!! no board build within 30 minutes of the restart - check the indexer (deploy/release/remote.sh logs indexer)"
-      done_note "indexer: NO board build within 30 minutes of the restart - check it (deploy/release/remote.sh logs indexer)"
+      note "!! the indexer has not published in 3 minutes after the restart - check it (deploy/release/remote.sh logs indexer)"
+      done_note "indexer: NOT publishing 3 minutes after the restart - check it (deploy/release/remote.sh logs indexer)"
       WARNED=1
     fi
   fi
