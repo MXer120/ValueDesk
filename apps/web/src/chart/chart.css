@@ -1929,74 +1929,70 @@ body.kc-flow-resizing:has(.kc-flow-wrap.is-under) { cursor: row-resize; }
 .kc-newspop__fig i { color: var(--muted); font-family: var(--font-num); font-size: 10px; font-style: normal; }
 .kc-newspop__figs.is-out .kc-newspop__fig { background: color-mix(in srgb, var(--pos) 9%, transparent); }
 
-/* The ticket's unplaced order (DraftOrderLines.tsx): a placed order's label and price tag
-   (orderOverlays.ts: 18px, 12px text), hollow and on a line that slowly fades in and out, so it
-   never reads as a placed order. The fade is the line's alone: the words stay readable. */
+/* The ticket's unplaced order (DraftOrderLines.tsx): a placed order's line, label and price tag
+   (orderOverlays.ts: 18px, 12px, radius 2, padding 6; the tag square, padding 4), darker and
+   pulsing. Nothing else tells them apart. The pulse is opacity, so the compositor's alone. */
 .kc-draft {
   position: absolute;
   z-index: 4;
   height: 1px;
   overflow: visible;
   pointer-events: none;
-  --draft-ink: color-mix(in srgb, var(--pos) 55%, var(--muted, #888));
 }
-.kc-draft.is-sell { --draft-ink: color-mix(in srgb, var(--neg) 55%, var(--muted, #888)); }
+.kc-draft__row {
+  --draft-ink: color-mix(in srgb, var(--pos) 72%, #000);
+  animation: kc-draft-pulse 1.6s ease-in-out infinite;
+}
+.kc-draft__row.is-sell { --draft-ink: color-mix(in srgb, var(--neg) 72%, #000); }
 .kc-draft__line {
   position: absolute;
   left: 0;
   right: 0;
   height: 0;
-}
-.kc-draft__line.is-tp { --draft-ink: color-mix(in srgb, var(--pos) 55%, var(--muted, #888)); }
-.kc-draft__line.is-sl { --draft-ink: color-mix(in srgb, var(--neg) 55%, var(--muted, #888)); }
-.kc-draft__line::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 0;
   border-top: 1px dashed var(--draft-ink);
-  opacity: 0.5;
-  animation: kc-draft-pulse 1.6s ease-in-out infinite;
 }
-.kc-draft__line.is-trigger::before { border-top-style: dotted; }
 .kc-draft__tag,
 .kc-draft__price {
   position: absolute;
-  top: -9px;
   box-sizing: border-box;
   height: 18px;
   font-size: 12px;
   font-weight: 500;
   line-height: 16px;
   white-space: nowrap;
-  color: var(--draft-ink);
-  background: var(--bg);
-  border: 1px dashed var(--draft-ink);
+  border: 1px solid var(--draft-ink);
 }
 .kc-draft__tag {
-  left: 8px;
   display: flex;
+  overflow: hidden;
   border-radius: 2px;
+  color: var(--draft-ink);
+  background: var(--bg-panel);
 }
-.kc-draft__tag > span { padding: 0 5px; }
+.kc-draft__word,
+.kc-draft__amount {
+  box-sizing: border-box;
+  flex: none;
+  padding: 0 5px;
+}
 .kc-draft__amount {
   font-family: var(--font-num);
-  border-left: 1px dashed var(--draft-ink);
+  color: var(--kc-draft-on, var(--text));
+  background: var(--draft-ink);
 }
 .kc-draft__price {
-  /* The pane this layer is as wide as includes the price axis: the tag ends on its right edge. */
   right: 0;
   padding: 0 3px;
   font-family: var(--font-num);
+  color: var(--kc-draft-on, var(--text));
+  background: var(--draft-ink);
 }
 @keyframes kc-draft-pulse {
-  0%, 100% { opacity: 0.22; }
-  50% { opacity: 0.6; }
+  0%, 100% { opacity: 0.65; }
+  50% { opacity: 1; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .kc-draft__line::before { animation: none; opacity: 0.4; }
+  .kc-draft__row { animation: none; opacity: 0.75; }
 }
-/* Nobody at the page (attention.ts): the line rests as under reduced motion, still dashed and
-   muted - the pulse recomposited the chart 60 times a second. */
-:root[data-still] .kc-draft__line::before { animation: none; opacity: 0.4; }
+/* Nobody at the page (attention.ts): it rests as under reduced motion - the pulse recomposited the chart 60 times a second. */
+:root[data-still] .kc-draft__row { animation: none; opacity: 0.75; }

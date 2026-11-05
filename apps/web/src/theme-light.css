@@ -222,7 +222,6 @@ html[data-theme='light'] .lbp-card.is-3, html[data-theme='light'] .lbp-place.is-
 
 /* Faded text that stayed readable on dark and did not on white. */
 html[data-theme='light'] span.acct-sub { opacity: 1; }
-html[data-theme='light'] .kc-draft__tag { opacity: 0.85; }
 html[data-theme='light'] .fx-srct__t small { color: var(--text); }
 html[data-theme='light'] .oe-pop__opt small,
 html[data-theme='light'] .oe-pop__opt span { color: var(--muted); }
@@ -256,8 +255,7 @@ html[data-theme='light'] .acct-levbox.acct-levbox--long,
 html[data-theme='light'] .cpy-msteps__s.is-done i { color: var(--pos-ink); }
 html[data-theme='light'] .dlg-btn.is-danger { color: var(--neg-ink); }
 html[data-theme='light'] .ex-arb tr.is-link:hover td { background: rgba(0, 0, 0, 0.018); }
-html[data-theme='light'] .kc-draft { --draft-ink: color-mix(in srgb, var(--pos) 80%, #000); }
-html[data-theme='light'] .kc-draft.is-sell { --draft-ink: color-mix(in srgb, var(--neg) 80%, #000); }
+html[data-theme='light'] .kc-draft { --kc-draft-on: #ffffff; }
 html[data-theme='light'] .pf .acct-levbox--short { color: var(--neg-ink); }
 
 /* Drawn inside the sheets' data: URLs, so no variable reaches them: carets dark, ticks white. */

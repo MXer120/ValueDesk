@@ -6,8 +6,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { fmtQty } from '../format';
-import { draftLabelParts } from './DraftOrderLines';
-import { labelShifts, orderLines, positionLines } from './orderOverlays';
+import { draftInkSide, draftLabelParts } from './DraftOrderLines';
+import { layoutLabels, orderLines, positionLines } from './orderOverlays';
 
 const spotLimit = { symbol: 'vBTC_vUSDC', orderID: 77, side: 'BUY', price: '60000', quantity: '0.001', type: 'LIMIT', timeInForce: 'GTC' };
 
@@ -43,24 +43,29 @@ test('each line says what it is in one word, and its size apart from it', () => 
   assert.deepEqual([long?.tag, long?.amount, short?.tag, short?.amount], ['Long', fmtQty('0.5'), 'Short', fmtQty('0.5')]);
 });
 
-test('labels at one height go side by side; lines apart keep their place', () => {
-  const shifts = labelShifts([
-    { key: 'far', y: 300, width: 90 },
-    { key: 'b', y: 110, width: 100 },
-    { key: 'a', y: 100, width: 80 },
-    { key: 'c', y: 125, width: 60 },
-  ]);
-  assert.equal(shifts.get('a'), 0, 'the top one keeps its place');
-  assert.equal(shifts.get('b'), 84, 'left of the first: its width and the gap');
-  assert.equal(shifts.get('c'), 188, 'near the last of the row, so the row goes on');
-  assert.equal(shifts.get('far'), 0);
-  assert.deepEqual([...labelShifts([]).entries()], []);
+test('every label is in one column at one size; only ones that would overlap move, and as little as they can', () => {
+  const row = (key: string, y: number, head = 80, amount = 60) => ({ key, y, head, amount });
+  const at = layoutLabels([row('far', 300, 50, 40), row('b', 110, 100, 70), row('a', 100), row('c', 125)], 1000);
+  assert.equal(at.x, 680, 'one left edge for all of them');
+  assert.equal(at.head, 104, 'the widest word, in steps so a ticking PnL does not resize them');
+  assert.equal(at.amount, 72);
+  assert.equal(at.dy.get('far'), 0, 'a line with room keeps its label on it');
+  const place = (k: string) => [100, 110, 125].at(['a', 'b', 'c'].indexOf(k))! + at.dy.get(k)!;
+  assert.ok(place('b') - place('a') >= 19 && place('c') - place('b') >= 19, 'none on another');
+  assert.equal(Math.abs(at.dy.get('a')! + at.dy.get('b')! + at.dy.get('c')!) <= 1, true, 'around where the lines are, not all downwards');
+
+  const narrow = layoutLabels([row('a', 10, 100, 100)], 240);
+  assert.equal(narrow.x, 24, 'a phone: the column ends clear of the axis');
+  assert.deepEqual(layoutLabels([], 500).dy.size, 0);
 });
 
-test('the preview label splits as a placed order does', () => {
-  assert.deepEqual(draftLabelParts('Limit · 0.5 BTC'), { tag: 'Limit', amount: '0.5 BTC' });
-  assert.deepEqual(draftLabelParts('DCA 3/5 · 0.01 BTC'), { tag: 'DCA 3/5', amount: '0.01 BTC' });
-  assert.deepEqual(draftLabelParts('TP'), { tag: 'TP', amount: null });
+test('a preview says what the placed order will say, in its colour', () => {
+  assert.deepEqual(draftLabelParts('Limit · 0.5 BTC', 'limit', 'sell'), { tag: 'Sell limit', amount: '0.5 BTC' });
+  assert.deepEqual(draftLabelParts('Trigger · 0.5 BTC', 'trigger', 'buy'), { tag: 'Buy stop', amount: '0.5 BTC' });
+  assert.deepEqual(draftLabelParts('DCA 3/5 · 0.01 BTC', 'limit', 'buy'), { tag: 'DCA 3/5', amount: '0.01 BTC' }, "an algo's own name stays");
+  assert.deepEqual(draftLabelParts('TP', 'tp', 'buy'), { tag: 'TP', amount: null });
+  assert.equal(draftInkSide('tp', 'buy'), 'sell', 'it closes a long, as the placed TP does');
+  assert.equal(draftInkSide('limit', 'buy'), 'buy');
 });
 
 test('orders of another market are not drawn', () => {

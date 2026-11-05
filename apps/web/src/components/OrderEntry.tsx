@@ -1480,8 +1480,8 @@ export function OrderEntry({
     if (type === 'limit' && limitPx) draftLines.push({ price: limitPx, label: `Limit${draftQty}`, kind: 'limit' });
     if (type === 'stop' && num(stopPrice) > 0) draftLines.push({ price: num(stopPrice), label: `Trigger${draftQty}`, kind: 'trigger' });
     if (type === 'stop' && stopExec === 'limit' && num(price) > 0) draftLines.push({ price: num(price), label: `Limit${draftQty}`, kind: 'limit' });
-    if (engine === 'perps' && useTp) draftLines.push({ price: num(tpPrice), label: 'TP', kind: 'tp' });
-    if (engine === 'perps' && useSl) draftLines.push({ price: num(slPrice), label: 'SL', kind: 'sl' });
+    if (engine === 'perps' && useTp) draftLines.push({ price: num(tpPrice), label: `TP${draftQty}`, kind: 'tp' });
+    if (engine === 'perps' && useSl) draftLines.push({ price: num(slPrice), label: `SL${draftQty}`, kind: 'sl' });
   }
   const draftKey = `${engine}|${symbol}|${side}|${draftLines.map((l) => `${l.kind}:${l.price}:${l.label}`).join(',')}`;
   const placedDraft = useRef<string | null>(null);
