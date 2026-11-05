@@ -1704,7 +1704,8 @@ export class IndexStore {
        WHERE venue = ? AND address = ? AND t >= ? AND t < ? ORDER BY t LIMIT ?`,
     ).iterate(job.venue, job.address, job.cursor, job.to, maxRows + 1)) {
       rows.push(r as unknown as ScanRow);
-      if (rows.length >= 2 && Date.now() - t0 >= budgetMs) {
+      // Not inside one timestamp: stopping there would send it to the query for all of a timestamp below, for nothing.
+      if (rows.length >= 2 && rows[0]!.t !== rows[rows.length - 1]!.t && Date.now() - t0 >= budgetMs) {
         cutShort = rows.length <= maxRows;
         break;
       }
@@ -1718,7 +1719,9 @@ export class IndexStore {
     if (rows[0]!.t === cut) {
       // One timestamp with more rows than a chunk: take all of it at once.
       this.eat(job, this.q(
-        'SELECT t, symbol, side, px * sz AS v, closed_pnl, fee, src FROM fills WHERE venue = ? AND address = ? AND t = ?',
+        // By the time index, by name: left to itself (no sqlite_stat1) SQLite reads this through the primary key,
+        // every fill the trader ever had. That was the indexer's longest stalls, 57 s for one call (2026-11-05).
+        'SELECT t, symbol, side, px * sz AS v, closed_pnl, fee, src FROM fills INDEXED BY fills_t WHERE venue = ? AND address = ? AND t = ?',
       ).all(job.venue, job.address, cut) as ScanRow[]);
       job.cursor = cut + 1;
     } else {

@@ -5,6 +5,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { IndexStore, type FillRow } from '../src/indexer/store.js';
 
 const DAY = 86_400_000;
@@ -300,4 +301,14 @@ test('a scan cut short by its time budget sums exactly what a whole one does, ro
   const short = build(0);
   assert.deepEqual(short.stats, whole.stats);
   assert.deepEqual(short.stats[0], scan(short.s, 'hyperliquid', '0xa', 0));
+});
+
+test('every query for one timestamp of a trader goes through the time index, never all of the trader\'s fills', () => {
+  const s = new IndexStore(':memory:', { aggRefreshMs: 0 });
+  const db = (s as unknown as { db: { prepare(q: string): { all(...a: unknown[]): Array<{ detail: string }> } } }).db;
+  const plan = (q: string) => db.prepare(`EXPLAIN QUERY PLAN ${q}`).all('hyperliquid', '0xa', 1).map((r) => r.detail).join(' | ');
+  const q = 'SELECT t, symbol, side, px * sz AS v, closed_pnl, fee, src FROM fills INDEXED BY fills_t WHERE venue = ? AND address = ? AND t = ?';
+  assert.match(plan(q), /USING INDEX fills_t \(venue=\? AND address=\? AND t=\?\)/);
+  const src = readFileSync(new URL('../src/indexer/store.ts', import.meta.url), 'utf8');
+  assert.ok(src.includes(q), 'the store uses this query');
 });
