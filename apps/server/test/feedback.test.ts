@@ -22,7 +22,7 @@ import { FeedbackStore, bearer, tokenHash } from '../src/ops/feedbackThreads.js'
 import { FeedbackSessions, checkFeedbackSignIn, feedbackSignInDigest } from '../src/ops/feedbackAuth.js';
 import { FEEDBACK_SIGN_IN_STATEMENT, type FeedbackSignIn } from '../src/ops/feedbackSignIn.js';
 import { searchAreas } from '../src/ops/feedbackAreas.js';
-import { SIGN_IN_STATEMENT } from '../src/folders/types.js';
+import { ADMIN_SIGN_IN_STATEMENT } from '../src/admin/signIn.js';
 import { bytesToHex, privateKeyToAddress } from '../src/signing/eip712.js';
 import { parseFeedback } from '../src/ops/feedback.js';
 import { findSecret } from '../src/ops/secrets.js';
@@ -389,7 +389,7 @@ function signIn(w: { key: Uint8Array; address: string }, o: Partial<FeedbackSign
   return { ...base, signature: bytesToHex(rsv) };
 }
 
-test("sign-in: the wallet's own signature, once; a folders signature, another signer or a replay is refused", async () => {
+test("sign-in: the wallet's own signature, once; another sign-in's statement, another signer or a replay is refused", async () => {
   const { app } = await appFor();
   const w = newWallet();
   const s = signIn(w);
@@ -400,7 +400,7 @@ test("sign-in: the wallet's own signature, once; a folders signature, another si
   assert.equal(j.attached, 'none');
   assert.equal(r.headers['cache-control'], 'no-store');
   assert.equal((await post(app, '/api/vs/feedback/session', { signIn: s })).statusCode, 409, 'a replay');
-  assert.equal((await post(app, '/api/vs/feedback/session', { signIn: signIn(w, { statement: SIGN_IN_STATEMENT }) })).statusCode, 401, "the folders' statement");
+  assert.equal((await post(app, '/api/vs/feedback/session', { signIn: signIn(w, { statement: ADMIN_SIGN_IN_STATEMENT }) })).statusCode, 401, "the admin suite's statement");
   const forged = { ...signIn(newWallet()), owner: w.address };
   assert.equal((await post(app, '/api/vs/feedback/session', { signIn: forged })).statusCode, 401, 'signed by another key');
   assert.equal(checkFeedbackSignIn(signIn(w, {}, Date.now() - 20 * 60_000)).ok, false, 'expired');

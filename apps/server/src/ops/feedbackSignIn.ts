@@ -1,9 +1,8 @@
 /**
  * The wallet sign-in of the feedback chat (ops/feedbackAuth.ts checks it): what
  * the browser asks the wallet to sign. Free EIP-712 typed data with a fixed
- * statement - never a transaction - the same shape as the knowledge folders'
- * sign-in (folders/types.ts) under its own domain and type, so a signature for
- * one is never accepted by the other.
+ * statement - never a transaction - under its own domain and type, so a
+ * signature for another of the site's sign-ins is never accepted here.
  *
  * Pure and shared through the web's @sign alias (apps/web/src/feedback/session.ts).
  */

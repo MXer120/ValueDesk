@@ -6,8 +6,8 @@
 # what the beta site's Vercel function marks X-VS-Channel: beta, and /ws/liq-beta. With
 # VALUESCAN_CHANNEL=beta it answers nothing but to the token of a wallet on the admin suite's beta
 # list (apps/server/src/beta/gate.ts), and it runs none of the main API's background jobs (the
-# release watcher, the status prober, the Telegram poller, the fee-order copier, the folders'
-# upkeep, the builder verifier): it reads the same index and state as the main API, and the main
+# release watcher, the status prober, the Telegram poller, the fee-order copier,
+# the builder verifier): it reads the same index and state as the main API, and the main
 # API keeps them. The indexer and the copy executor have no beta.
 #
 [Unit]

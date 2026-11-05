@@ -1228,6 +1228,6 @@ export function drawingStyles(color: string, size: number, dashedLine: boolean):
     rect: { color: withAlpha(color, 0.14), borderColor: color },
     circle: { color: withAlpha(color, 0.14), borderColor: color },
     arc: { color },
-    text: { color: lum > 0.55 ? T.bg : T.text, backgroundColor: color, borderColor: color },
+    text: { color: lum > 0.55 ? '#0e0e0e' : '#f7f7f7', backgroundColor: color, borderColor: color },
   };
 }

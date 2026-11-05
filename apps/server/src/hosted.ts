@@ -16,11 +16,9 @@
  *     are forced off (config.ts), the custodial route plugins are not even
  *     registered (index.ts), and their paths still answer 410.
  *   - NO LOCAL TOKEN. It keeps other processes on one machine out; a public
- *     read API has no such boundary. The index is GET only. The one thing a
- *     visitor changes is their own knowledge folders (routes/folders.ts): POST
- *     routes that need the site's own Origin, exactly, and the wallet's token.
- *     The other POSTs are what a visitor sends the owner - feedback and client
- *     error reports (routes/reports.ts): the same Origin rule, limits of their own.
+ *     read API has no such boundary. The index is GET only. The POSTs are what a
+ *     visitor sends the owner - feedback and client error reports (routes/reports.ts):
+ *     they need the site's own Origin, exactly, and have limits of their own.
  *   - PER-CLIENT RATE LIMITS keyed by the address Fastify derives through
  *     `trustProxy`, which believes X-Forwarded-For ONLY from the configured
  *     proxy hops (VALUESCAN_TRUST_PROXY). IPv6 clients are grouped by /64.
@@ -50,14 +48,13 @@ import { isSiteOrigin, normaliseOrigin } from './origin.js';
  *            an account id), so it is limited much tighter - it is how one
  *            client could otherwise spend this server's exchange budgets and get
  *            its egress address rate-limited for everyone, indexer included.
- * `auth`     a sign-in: rare for a human - the knowledge folders' wallet
+ * `auth`     a sign-in: rare for a human - the feedback chat's wallet
  *            sign-in (one signature per browser), and the SoPoints relay if it
  *            is ever listed again, whose every call is a request to a third
  *            party from this server's address - capped per client and overall.
- * `write`    a change to a wallet's own knowledge folders: counted per client
- *            here, per wallet in the route (routes/folders.ts), and only ever
- *            with the site's Origin. Also a visitor's feedback and client error
- *            reports (routes/reports.ts), which the route limits far tighter still.
+ * `write`    a visitor's feedback and client error reports (routes/reports.ts):
+ *            counted per client here, only ever with the site's Origin, and the
+ *            route limits them far tighter still.
  * `admin`    the owner's admin suite (routes/admin.ts, dev.valuedesk.so): every route a
  *            POST that needs the SUITE's Origin exactly (GateOptions.admin), never the
  *            site's; counted as `read` here, and the route adds its own sign-in limits,
@@ -171,7 +168,7 @@ export const HOSTED_ROUTES: readonly HostedRoute[] = [
   { method: 'POST', url: '/api/vs/feedback/poll', cls: 'write' },
   { method: 'POST', url: '/api/vs/feedback/unread', cls: 'write' },
   { method: 'GET', url: '/api/vs/feedback/image', cls: 'read' },
-  // A wallet's signature for its feedback chat (ops/feedbackAuth.ts), like the folders' sign-in.
+  // A wallet's signature for its feedback chat (ops/feedbackAuth.ts).
   { method: 'POST', url: '/api/vs/feedback/session', cls: 'auth' },
   // A signed-in wallet's inbox: its browser-run algos' and copies' notices (ops/inbox.ts, routes/reports.ts).
   { method: 'POST', url: '/api/vs/inbox/add', cls: 'write' },
@@ -179,10 +176,11 @@ export const HOSTED_ROUTES: readonly HostedRoute[] = [
   { method: 'POST', url: '/api/vs/client-errors', cls: 'write' },
   // The app's own analytics, sent only after the visitor allowed it (routes/analytics.ts, ops/analyticsModel.ts).
   { method: 'POST', url: '/api/vs/a', cls: 'write' },
-  // A wallet's username (routes/profiles.ts): the two reads, and the signed claim (tighter limit in the route).
+  // A wallet's username (routes/profiles.ts): the two reads, the first name, a signed change (tighter limit in the route).
   { method: 'GET', url: '/api/vs/profile', cls: 'read' },
   { method: 'GET', url: '/api/vs/username/check', cls: 'read' },
   { method: 'POST', url: '/api/vs/username', cls: 'write' },
+  { method: 'POST', url: '/api/vs/username/change', cls: 'write' },
   // The builder fee a wallet owes, signed (routes/builder.ts, docs/BUILDER-TIERS.md §3). Asking is a
   // read of this server's own ledger and one signature. A hint is what later costs SoDEX reads from
   // this server's address, so a request that carries one counts as `upstream` too.
@@ -198,27 +196,6 @@ export const HOSTED_ROUTES: readonly HostedRoute[] = [
   { method: 'GET', url: '/api/external/maintenance/status', cls: 'read' },
   { method: 'GET', url: '/api/external/announcements', cls: 'read' },
   { method: 'GET', url: '/api/external/announcements/:id', cls: 'upstream' },
-  // Knowledge folders (routes/folders.ts): one wallet's own research, behind its token. The
-  // sign-in is the only route without one; every POST needs the site's Origin as well.
-  { method: 'POST', url: '/api/folders/session', cls: 'auth' },
-  { method: 'GET', url: '/api/folders', cls: 'read' },
-  { method: 'GET', url: '/api/folders/item', cls: 'read' },
-  { method: 'GET', url: '/api/folders/file', cls: 'read' },
-  { method: 'GET', url: '/api/folders/file/url', cls: 'read' },
-  // A post on X read for saving: this server asks X's embed endpoint (folders/tweets.ts) - upstream.
-  { method: 'GET', url: '/api/folders/tweet', cls: 'upstream' },
-  { method: 'POST', url: '/api/folders/folder/create', cls: 'write' },
-  { method: 'POST', url: '/api/folders/folder/rename', cls: 'write' },
-  { method: 'POST', url: '/api/folders/folder/delete', cls: 'write' },
-  { method: 'POST', url: '/api/folders/folder/order', cls: 'write' },
-  { method: 'POST', url: '/api/folders/item/create', cls: 'write' },
-  { method: 'POST', url: '/api/folders/item/update', cls: 'write' },
-  { method: 'POST', url: '/api/folders/item/move', cls: 'write' },
-  { method: 'POST', url: '/api/folders/item/delete', cls: 'write' },
-  { method: 'POST', url: '/api/folders/upload/start', cls: 'write' },
-  { method: 'POST', url: '/api/folders/upload/put', cls: 'write' },
-  { method: 'POST', url: '/api/folders/upload/finish', cls: 'write' },
-  { method: 'POST', url: '/api/folders/erase', cls: 'write' },
   // The owner's admin suite (routes/admin.ts), served on dev.valuedesk.so: a 404 while no admin
   // password is set on this server; otherwise the builder wallet's signature + the password for a
   // 24 h session, and a fresh signature for each write.
@@ -273,11 +250,11 @@ export interface HostedLimits {
   read: Limit;
   /** Per client, requests that can cost upstream calls. */
   upstream: Limit;
-  /** Per client, `auth` routes (the folders' sign-in). */
+  /** Per client, `auth` routes (a wallet's sign-in). */
   auth: Limit;
   /** All clients together, `auth` routes. */
   authGlobal: Limit;
-  /** Per client, `write` routes (changes to knowledge folders). */
+  /** Per client, `write` routes (what a visitor sends). */
   write: Limit;
 }
 
@@ -566,8 +543,8 @@ export function limitsFor(
   if (route.cls === 'auth') {
     return [
       { key: `auth|${who}`, limit: limits.auth },
-      // Each sign-in its own global budget: a flood of bad signatures on the feedback
-      // sign-in cannot lock the owner out of the folders one (security pass 2026-10-27).
+      // Each sign-in its own global budget: a flood of bad signatures on one sign-in
+      // cannot lock the owner out of another (security pass 2026-10-27).
       { key: `auth|*|${route.url}`, limit: limits.authGlobal },
     ];
   }

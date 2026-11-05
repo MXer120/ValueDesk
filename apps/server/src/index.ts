@@ -37,7 +37,6 @@ import { builderRoutes } from './routes/builder.js';
 import { betaRoutes } from './routes/beta.js';
 import { BetaList, BetaTokens, channelFrom, installBetaGate } from './beta/gate.js';
 import { AdminStore } from './admin/store.js';
-import { foldersRoutes } from './routes/folders.js';
 import { reportRoutes } from './routes/reports.js';
 import { statusRoutes } from './routes/status.js';
 import { adminRoutes } from './routes/admin.js';
@@ -244,9 +243,6 @@ void pointsAuthRoutes;
 await app.register(valuedeskRoutes);
 // Builder fee tiers: the signed terms of the fee a wallet owes - see routes/builder.ts.
 await app.register(builderRoutes);
-// Knowledge folders: each wallet's own research (notes, tables, chart snapshots, news,
-// files), behind a signed sign-in - see routes/folders.ts.
-await app.register(foldersRoutes, { upkeep: CHANNEL === 'main' });
 // The beta channel's sign-in (routes/beta.ts): the beta API only.
 if (betaLock) await app.register(betaRoutes, betaLock);
 // What visitors send the owner - the feedback form and client error reports (routes/reports.ts) -

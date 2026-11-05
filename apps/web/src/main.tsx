@@ -31,6 +31,7 @@ import { startAttention } from './attention';
 import './styles.css';
 import './theme-light.css';
 import './theme';
+import './appearance';
 import { useNumStyle } from './numStyle';
 
 // beta.valuedesk.so (VITE_CHANNEL=beta, deploy/vercel/beta.settings): the beta list's door before the app

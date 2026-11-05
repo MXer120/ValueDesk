@@ -1,7 +1,7 @@
 /**
  * What beta.valuedesk.so asks a tester's wallet to sign (beta/gate.ts checks it): free EIP-712
  * typed data with fixed wording - never a transaction - under a domain of its own, so a signature
- * for the admin suite, the feedback chat or the knowledge folders is never one for this.
+ * for the admin suite or the feedback chat is never one for this.
  *
  *   BetaSignIn  proves the wallet is the tester's; the beta API then hands out a 7-day token, but
  *               only to a wallet on the beta list (the admin suite's Beta page, admin/store.ts).

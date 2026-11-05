@@ -5,20 +5,19 @@
  * (ops/feedbackSignIn.ts - free typed data, never a transaction), and this
  * server hands back a session token for FEEDBACK_SESSION_TTL_MS.
  *
- * THE SIGN-IN is checked as the knowledge folders' is (folders/auth.ts): the
- * fixed statement, the owner, the time window, and that the owner's key signed
- * exactly those fields. Its nonce is accepted once (feedbackThreads.ts nonces).
+ * THE SIGN-IN is checked here: the fixed statement, the owner, the time window,
+ * and that the owner's key signed exactly those fields. Its nonce is accepted
+ * once (feedbackThreads.ts nonces).
  *
- * THE TOKEN is the folders' token (folders/auth.ts SessionTokens,
- * `<owner>.<expiresAt>.<epoch>.<HMAC>`) under a key of its own:
- * `feedback-auth/session.key` beside feedback.db (0600; never logged). A folders
- * token is no feedback token and the other way round - the keys differ. Losing
- * the key only means people sign once more.
+ * THE TOKEN is `<owner>.<expiresAt>.<epoch>.<HMAC-SHA256>` under a key of its
+ * own: `feedback-auth/session.key` beside feedback.db (0600; never logged).
+ * Losing the key only means people sign once more.
  */
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { keccak_256 } from '@noble/hashes/sha3';
 import { concat, domainSeparator, hexToBytes, recoverAddress, utf8, word } from '../signing/eip712.js';
-import { SessionTokens } from '../folders/auth.js';
 import {
   FEEDBACK_SIGN_IN_DOMAIN, FEEDBACK_SIGN_IN_STATEMENTS, FEEDBACK_SIGN_IN_TTL_MS, FEEDBACK_SIGN_IN_TYPE, ZERO_ADDRESS, type FeedbackSignIn,
 } from './feedbackSignIn.js';
@@ -75,6 +74,52 @@ export function checkFeedbackSignIn(raw: unknown, now = Date.now()): FeedbackSig
   }
   if (signer !== owner) return { ok: false, error: 'the signature is not from this wallet' };
   return { ok: true, owner, nonce: q.nonce, expiresAt };
+}
+
+function secretFile(dir: string, name: string): Buffer {
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const path = join(dir, name);
+  if (!existsSync(path)) writeFileSync(path, randomBytes(32), { mode: 0o600, flag: 'wx' });
+  try {
+    chmodSync(path, 0o600);
+  } catch {
+    /* not on every file system (Windows) */
+  }
+  const b = readFileSync(path);
+  if (b.length !== 32) throw new Error(`${path} must hold exactly 32 bytes`);
+  return b;
+}
+
+class SessionTokens {
+  private readonly key: Buffer;
+
+  constructor(dir: string) {
+    this.key = secretFile(dir, 'session.key');
+  }
+
+  issue(owner: string, epoch: number, now: number, ttlMs: number): { token: string; expiresAt: number } {
+    const expiresAt = now + ttlMs;
+    const body = `${owner.toLowerCase()}.${expiresAt}.${epoch}`;
+    return { token: `${body}.${this.mac(body)}`, expiresAt };
+  }
+
+  /** The wallet and epoch a token was issued for, or null (forged, expired, malformed). */
+  read(token: string | null | undefined, now = Date.now()): { owner: string; epoch: number } | null {
+    if (!token) return null;
+    const m = /^(0x[0-9a-f]{40})\.(\d{13})\.(\d{1,9})\.([A-Za-z0-9_-]{43})$/.exec(token.trim());
+    if (!m) return null;
+    const body = `${m[1]}.${m[2]}.${m[3]}`;
+    const want = Buffer.from(this.mac(body));
+    const got = Buffer.from(m[4]!);
+    if (want.length !== got.length || !timingSafeEqual(want, got)) return null;
+    if (Number(m[2]) <= now) return null;
+    return { owner: m[1]!, epoch: Number(m[3]) };
+  }
+
+  /** The label is kept from where this token began: another one would end every session handed out. */
+  private mac(body: string): string {
+    return createHmac('sha256', this.key).update(`vd-folders:v1:${body}`).digest('base64url');
+  }
 }
 
 /** The session tokens, under their own key in `dir` (default: feedback-auth/ beside feedback.db). */

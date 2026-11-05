@@ -36,10 +36,11 @@ test('text meets 4.5:1 on the light panel, and the steps stay in order', () => {
   assert.ok(contrast(token('muted'), panel) > contrast(token('dim'), panel));
 });
 
-test('text stays readable on the light page itself', () => {
-  const page = token('bg');
-  for (const t of ['text', 'muted']) assert.ok(contrast(token(t), page) >= 4.5, `--${t} on the page`);
-  assert.ok(contrast(token('dim'), page) >= 3.8, '--dim on the page');
+test('and on the light page itself, and on a row hovered there', () => {
+  for (const t of ['text', 'muted', 'dim', 'pos', 'neg', 'warn']) {
+    assert.ok(contrast(token(t), token('bg')) >= 4.5, `--${t} on the page`);
+    assert.ok(contrast(token(t), '#e4e4e2') >= 4.5, `--${t} on a hovered row`);
+  }
 });
 
 test('the sheets make hairlines of the ink, never of literal white', () => {

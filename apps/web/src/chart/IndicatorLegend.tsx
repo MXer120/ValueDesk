@@ -134,7 +134,8 @@ function inkOn(bg: string): string {
     b = Number(rgb[3]);
   } else return 'var(--text)';
   const lum = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
-  return lum > 0.55 ? 'var(--bg)' : 'var(--text)';
+  // Literal, not the theme's: a badge's fill is its own colour on either theme.
+  return lum > 0.55 ? '#0e0e0e' : '#f7f7f7';
 }
 
 interface Tag {

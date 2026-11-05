@@ -42,19 +42,6 @@
  *     browser copier keeps its data in IndexedDB (packages/copy-engine/src/
  *     store.ts). Hosting: Vercel (site and /api, Frankfurt fra1) and Contabo (data server in France, executor in Tokyo; was AWS
  *     ap-northeast-1 until 2026-10-25).
- *   - knowledge folders, as of 2026-10-24 (section 12): apps/server/src/folders and
- *     routes/folders.ts - per wallet: folder names, items (docs, sheets, boards,
- *     posts from X with their text as X's embed gave it and the user's note and
- *     tags, chart snapshots with the position and fills only when chosen, saved
- *     stories, uploaded files and their names, images attached to a doc or a
- *     board), times, the sign-in nonces until they expire
- *     and when the wallet last signed in; a 7-day token in localStorage
- *     (vd.folders.session:<wallet>); erase removes everything and ends every token;
- *     a wallet unseen for FOLDERS_RETENTION_DAYS (365) is deleted; the database is
- *     copied nightly, the last 7 kept (store.ts backup), files are not copied;
- *     files are kept on the data volume and travel through the site's /api in 4 MB
- *     pieces both ways (blobs.ts DiskBlobs) - no other host; an upload reserved and
- *     never finished is swept with its bytes within two hours (store.ts sweep).
  * If any of that changes, this text changes with it.
  */
 import type { LegalDoc } from './model';
@@ -65,7 +52,7 @@ export const PRIVACY: LegalDoc = {
   lang: 'en',
   updated: '[[OWNER: date, e.g. 1 November 2026]]',
   intro: [
-    { p: 'This policy explains which personal data ValueDesk processes, why, and what your rights are. In short: ValueDesk has no user accounts, sets no cookies and uses no advertising and no third-party analytics; it measures how its site is used only if you allow it, on its own server (section 13), and the one third-party usage report (Reown\'s, when you connect a wallet) is sent only with your consent. It never holds your funds or your wallet\'s keys; only if you use hosted copy trading does its server keep a SoDEX API key for you (section 11). If you use knowledge folders (the Knowledge page), what you keep in them is stored on ValueDesk\'s server for your wallet (section 12). Most of what you see is loaded by your own browser directly from the exchanges and blockchains, not through ValueDesk.' },
+    { p: 'This policy explains which personal data ValueDesk processes, why, and what your rights are. In short: ValueDesk has no user accounts, sets no cookies and uses no advertising and no third-party analytics; it measures how its site is used only if you allow it, on its own server (section 12), and the one third-party usage report (Reown\'s, when you connect a wallet) is sent only with your consent. It never holds your funds or your wallet\'s keys; only if you use hosted copy trading does its server keep a SoDEX API key for you (section 11). Most of what you see is loaded by your own browser directly from the exchanges and blockchains, not through ValueDesk.' },
   ],
   sections: [
     {
@@ -111,7 +98,8 @@ export const PRIVACY: LegalDoc = {
         { p: 'Leaderboards, cohorts, the screener, Explore, the News widget and parts of the search come from ValueDesk\'s own server. Some of these requests carry what you entered or opened: a wallet address or search text you typed into the search, the address whose rank Scan shows on Hyperliquid, a SoDEX account number from a link, or the coins and words you filter the News by. They are used only to answer the request; the query part is not written to the server log (section 2).' },
         { p: 'News comes from SoSoValue (SoSoValue\'s news API): ValueDesk\'s server asks SoSoValue for the stories you filter by - the type, the coins and any search words - in its own name. SoSoValue does not receive your IP address. For the Live Feed\'s channels, ValueDesk\'s server asks the YouTube Data API which video the channel has on air; that lookup carries nothing about you. ValueDesk uses YouTube API Services; when you watch YouTube content, the [Google Privacy Policy](https://policies.google.com/privacy) applies to it as well.' },
         { p: 'Legal basis: Art. 6(1)(f) GDPR - answering the request you made.' },
-        { p: 'Error reports and feedback. When part of the app crashes in your browser, the app sends ValueDesk\'s server a short error report: the type of error, its message with every wallet address, key, signature, long number, web address detail and longer quoted text taken out, where in ValueDesk\'s code it happened, the page\'s path without its variable parts (for example /scan/:address), the app\'s version and your browser\'s name and main version. It contains nothing you typed and no wallet address, and it is not linked to you: your IP address is used only to limit the number of reports per visitor and is not stored with it. A browser sends a few dozen at most per session. The reports are counted per kind of error and kept for [[OWNER: how long error reports are kept, e.g. 12 months]]; the ValueDesk team is told of a new kind of error by Telegram (Telegram Messenger Inc.), with the same scrubbed content. If you use "Send feedback", the server keeps what you write, the screenshots you attach (images only, re-drawn in your browser first, so their metadata such as a location is not sent), the wallet address connected in your browser with every message (so the team knows whose account it is about), the areas of the app you chose, and - unless you switch it off - technical page and browser information (the page, the app\'s version, browser and system type, window size, language, time zone, the app\'s connection state, whether a wallet is connected, the copy modes in use, recent error fingerprints, and the part of the page you right-clicked); the form shows all of it before you send. It is forwarded to the ValueDesk team by Telegram, and the team\'s replies come back the same way into your conversation. It is one ongoing conversation per wallet that you can continue at any time. Sending needs no signature; reading the conversation and the team\'s replies does: your wallet signs once (a free signature, not a transaction), and for 30 days that browser can open the conversation - on any device, only with that wallet. Without the signature, nothing in the conversation is shown: the browser you sent from, or signed in with, only learns whether a new reply is waiting (a dot on "Send feedback"), with no count and no content. For this and for sending, your browser keeps a random key, of which the server stores only a fingerprint, with the conversation it belongs to and when that browser last read it; the key opens nothing. If you send without a wallet connected, you can read a reply only after connecting a wallet and signing in, when what you sent joins your wallet\'s conversation. Feedback and screenshots are kept until you ask us to delete them (section 15); the Discord button leads to ValueDesk\'s Discord server, where Discord\'s privacy policy applies. [[OWNER: confirm Telegram as a recipient, and its safeguards for transfers outside the EU]] Legal basis: Art. 6(1)(f) GDPR - our legitimate interest in finding and fixing errors and in answering your feedback.' },
+        { p: 'Your username. If you set one (the first-signup screens, or Settings), ValueDesk\'s server keeps it with your wallet address and when it was set; a change also keeps the signature your wallet made for it and the old name. Anyone can ask the server which username a wallet has. It stays until you ask for it to be removed. Legal basis: Art. 6(1)(b) GDPR - providing the function you asked for.' },
+        { p: 'Error reports and feedback. When part of the app crashes in your browser, the app sends ValueDesk\'s server a short error report: the type of error, its message with every wallet address, key, signature, long number, web address detail and longer quoted text taken out, where in ValueDesk\'s code it happened, the page\'s path without its variable parts (for example /scan/:address), the app\'s version and your browser\'s name and main version. It contains nothing you typed and no wallet address, and it is not linked to you: your IP address is used only to limit the number of reports per visitor and is not stored with it. A browser sends a few dozen at most per session. The reports are counted per kind of error and kept for [[OWNER: how long error reports are kept, e.g. 12 months]]; the ValueDesk team is told of a new kind of error by Telegram (Telegram Messenger Inc.), with the same scrubbed content. If you use "Send feedback", the server keeps what you write, the screenshots you attach (images only, re-drawn in your browser first, so their metadata such as a location is not sent), the wallet address connected in your browser with every message (so the team knows whose account it is about), the areas of the app you chose, and - unless you switch it off - technical page and browser information (the page, the app\'s version, browser and system type, window size, language, time zone, the app\'s connection state, whether a wallet is connected, the copy modes in use, recent error fingerprints, and the part of the page you right-clicked); the form shows all of it before you send. It is forwarded to the ValueDesk team by Telegram, and the team\'s replies come back the same way into your conversation. It is one ongoing conversation per wallet that you can continue at any time. Sending needs no signature; reading the conversation and the team\'s replies does: your wallet signs once (a free signature, not a transaction), and for 30 days that browser can open the conversation - on any device, only with that wallet. Without the signature, nothing in the conversation is shown: the browser you sent from, or signed in with, only learns whether a new reply is waiting (a dot on "Send feedback"), with no count and no content. For this and for sending, your browser keeps a random key, of which the server stores only a fingerprint, with the conversation it belongs to and when that browser last read it; the key opens nothing. If you send without a wallet connected, you can read a reply only after connecting a wallet and signing in, when what you sent joins your wallet\'s conversation. Feedback and screenshots are kept until you ask us to delete them (section 14); the Discord button leads to ValueDesk\'s Discord server, where Discord\'s privacy policy applies. [[OWNER: confirm Telegram as a recipient, and its safeguards for transfers outside the EU]] Legal basis: Art. 6(1)(f) GDPR - our legitimate interest in finding and fixing errors and in answering your feedback.' },
       ],
     },
     {
@@ -143,7 +131,7 @@ export const PRIVACY: LegalDoc = {
             'the addresses of the trading keys the app registered for the wallet.',
           ],
         },
-        { p: 'Purpose: working out the fee you owe and the discount you have earned, and enforcing the fee you agreed to. Legal basis: Art. 6(1)(b) GDPR (the fee terms you accepted by approving the fee) and Art. 6(1)(f) GDPR (preventing the fee from being circumvented). This data is kept [[OWNER: retention period for the fee ledger, e.g. for as long as the volume tiers apply, at most N years]]. We delete a wallet\'s entries on request (section 15).' },
+        { p: 'Purpose: working out the fee you owe and the discount you have earned, and enforcing the fee you agreed to. Legal basis: Art. 6(1)(b) GDPR (the fee terms you accepted by approving the fee) and Art. 6(1)(f) GDPR (preventing the fee from being circumvented). This data is kept [[OWNER: retention period for the fee ledger, e.g. for as long as the volume tiers apply, at most N years]]. We delete a wallet\'s entries on request (section 14).' },
       ],
     },
     {
@@ -152,7 +140,7 @@ export const PRIVACY: LegalDoc = {
         { p: 'ValueDesk runs in your browser, and your browser connects to the following services directly - ValueDesk does not see this traffic. Each service receives your IP address and the technical information of the request, and whatever the request is about: market data, the wallet addresses you connect or look at, and - when you trade - the orders and transfers you sign. They are operated by third parties under their own terms and privacy policies.' },
         {
           ul: [
-            '**SoDEX** (mainnet-gw.sodex.dev, mainnet-data.sodex.dev, alpha-biz.sodex.dev, and the testnet hosts testnet-gw.sodex.dev and testnet-data.sodex.dev): market data, your account, orders, deposits, transfers and withdrawals - and, when you copy trades in browser mode, the leader\'s trades and your copied orders.',
+            '**SoDEX** (mainnet-gw.sodex.dev, mainnet-data.sodex.dev, alpha-biz.sodex.dev, and the testnet hosts testnet-gw.sodex.dev and testnet-data.sodex.dev): market data, your account, whether your wallet has a SoDEX referrer, orders, deposits, transfers and withdrawals - and, when you copy trades in browser mode, the leader\'s trades and your copied orders.',
             '**Hyperliquid** (api.hyperliquid.xyz, also for trade.xyz), **Lighter** (mainnet.zklighter.elliot.ai) and **Arcus** (api.arcus.xyz): trader data for Scan and the search, and the trades of a Hyperliquid leader you copy in browser mode.',
             '**ValueChain** (rpc.valuechain.xyz and the explorer main-scan.valuechain.xyz) and public RPC endpoints of Arbitrum (arb1.arbitrum.io), Base (mainnet.base.org), Ethereum (ethereum-rpc.publicnode.com), BNB Chain (bsc-dataseed.bnbchain.org) and Polygon (polygon-bor-rpc.publicnode.com, and polygon.drpc.org or 1rpc.io when it does not answer): read-only - the balances of your connected wallet and the status of your deposits and withdrawals.',
             '**Reown / WalletConnect** (relay.walletconnect.org, api.web3modal.org, verify.walletconnect.org): only once you connect a wallet, or a connection from an earlier visit is restored - to pair your wallet, list wallets and show your wallet that this site is genuine. A browser extension wallet connects inside your browser. **Usage reports** (pulse.walletconnect.org): only if you allow them - "Accept all" in the terms window, or the switch on the [Cookies](/cookies) page (section 4) - Reown\'s software reports that it has started and that a wallet has connected, with the wallet\'s address and network, the address of the page you are on, your IP address and technical details of your browser, and sends error reports with the page address. Reown, Inc. (USA) processes them as its own controller under its [privacy policy](https://reown.com/privacy-policy), with transfers to the US on standard contractual clauses. Legal basis: your consent (Art. 6(1)(a) GDPR, § 25(1) TDDDG), withdrawable at any time; without it the reports are blocked in your browser and connecting works the same.',
@@ -166,7 +154,7 @@ export const PRIVACY: LegalDoc = {
     {
       title: '9. Storage in your browser',
       blocks: [
-        { p: 'ValueDesk uses no cookies. It keeps the following in your browser\'s own storage (local storage, session storage and IndexedDB) so that the functions you use keep working between visits. It stays on your device and is never sent to ValueDesk, except the folders\' sign-in token, which goes with your requests to your folders:' },
+        { p: 'ValueDesk uses no cookies. It keeps the following in your browser\'s own storage (local storage, session storage and IndexedDB) so that the functions you use keep working between visits. It stays on your device and is not sent to ValueDesk, except the sign-in tokens for the copy executor and the feedback chat:' },
         {
           ul: [
             'settings and layouts: the selected market, dashboards, chart layouts and drawings, filters, the privacy mode, the Live Feed channel, the video platforms and Reown usage reports you allowed, and notices you have seen;',
@@ -174,7 +162,6 @@ export const PRIVACY: LegalDoc = {
             'lists you keep: your watchlist, recent searches and recently viewed traders, names you gave addresses, and a log of your own transfers;',
             'copies of public data for speed: the trading history of up to six wallets you looked at, statistics built from it, and the paths of recent requests;',
             'the connected wallet\'s address and, if you use WalletConnect, its session;',
-            'your sign-in to your knowledge folders: a token for your wallet, valid for seven days, which your browser sends with each request to your folders (section 12) - the folders themselves are on ValueDesk\'s server;',
             'the trading key - see the [Terms](/terms): encrypted with a key that your browser generates and that cannot be read out of it, and valid for at most seven days. You can choose not to keep it at all; signing out removes it;',
             'copy trading in browser mode: your copy rules, the copy key (encrypted, valid for at most seven days), the state of each copy and its activity log (section 11);',
             'for the current tab only: a deposit or withdrawal in progress, and diagnostic settings.',
@@ -187,7 +174,7 @@ export const PRIVACY: LegalDoc = {
       title: '10. Public trading data of wallets',
       blocks: [
         { p: 'ValueDesk\'s index is built from what SoDEX, Hyperliquid (including trade.xyz), Lighter and Arcus publish about trading on them: wallet addresses with their positions, trades, volumes and profit and loss, and statistics we derive from that (rankings, win rates, cohorts). A wallet address can relate to a person. Where a venue publishes a display name for a wallet, ValueDesk does not show it or make it searchable.' },
-        { p: 'Purpose: market analysis - showing how traders and groups of traders behave. Legal basis: Art. 6(1)(f) GDPR. The data comes from the venues\' public interfaces and is kept [[OWNER: retention period for the index]]; backups are deleted after 14 days. If you object to the processing of a wallet that belongs to you (section 15), [[OWNER: what happens, e.g. the wallet is removed from the index and not added again]].' },
+        { p: 'Purpose: market analysis - showing how traders and groups of traders behave. Legal basis: Art. 6(1)(f) GDPR. The data comes from the venues\' public interfaces and is kept [[OWNER: retention period for the index]]; backups are deleted after 14 days. If you object to the processing of a wallet that belongs to you (section 14), [[OWNER: what happens, e.g. the wallet is removed from the index and not added again]].' },
       ],
     },
     {
@@ -228,33 +215,14 @@ export const PRIVACY: LegalDoc = {
       ],
     },
     {
-      title: '12. Knowledge folders',
-      blocks: [
-        { p: 'Knowledge folders (the Knowledge page) keep your research - up to three folders of docs, sheets, boards, posts from X you save, chart snapshots, news stories and files you upload - on ValueDesk\'s server, for your wallet. To open them in a browser, your wallet signs a short sign-in message (a free signature, never a transaction); the server then gives that browser a token valid for seven days (section 9). Only a browser signed in with your wallet can read or change your folders.' },
-        { p: 'ValueDesk\'s server keeps, for your wallet address:' },
-        {
-          ul: [
-            'the names of your folders and the items in them: what you write in your docs, sheets (the values and formulas you enter) and boards (what you place on them), the chart snapshots you export (the market, the timeframe, your drawings and studies, and - only if you choose to include them - your position and your fills at that time), the news stories you save, and the files you upload (PDFs, images, text files) with their names, including images you add to a doc or a board;',
-            'for each post from X you save: its link, and its text, author and date as X\'s public embed showed them when you saved it, with the note and tags you add;',
-            'when each folder and item was made and last changed, and how much space they take;',
-            'the sign-in you signed, until it expires (so that it cannot be used twice), and when your wallet last signed in.',
-          ],
-        },
-        { p: 'What you put into your folders is yours: ValueDesk does not look at it, analyse it, use it for anything else or share it, except where that is needed to keep the service running and secure or where the law requires it. Please do not upload other people\'s personal data unless you are allowed to. To protect the service against misuse, the server counts, in its memory only, how many changes and uploads each wallet and each IP address make and how many wallets sign in from one address, and refuses what goes beyond the limits.' },
-        { p: 'Posts from X: when you save a post by its link, ValueDesk\'s server - not your browser - asks X\'s public embed service (publish.x.com, operated by X Corp.) for the post\'s text, author and date. That request carries only the post\'s link and comes from the server\'s own address, so X does not learn your IP address or your wallet; the answer is kept in the server\'s memory for up to an hour, so that the same post saved twice is asked for once. Nothing from X is loaded into the page: a saved post is shown as plain text.' },
-        { p: 'Purposes and legal bases: keeping the folders you asked for (Art. 6(1)(b) GDPR); protecting the service against misuse (Art. 6(1)(f) GDPR). Your requests reach the server through Vercel\'s edge and the /api function in Frankfurt, which pass on your IP address for the limits; the server logs the path of each request, without its query and without the content (section 2). Recipients and transfers: Contabo GmbH (the data server of ValueDesk, in France) and Vercel Inc. (the edge and the /api function), as in section 2. process this data on our behalf; for Japan the European Commission has decided that it ensures an adequate level of protection.' },
-        { p: 'Retention: everything stays until you delete it. You can delete an item or a folder at any time, or everything at once with "Delete everything" in the folders\' menu, which also signs out every browser that was signed in to your folders. The server deletes what it holds at once; its nightly copy of the folders\' database (text, not files), kept to recover from faults, still holds deleted text for up to seven days. A file you started to upload but that never arrived in full is deleted within two hours; an image you removed from a doc or a board is deleted a day later (so that undoing the removal still finds it), and the images in a doc or a board are deleted with it. A wallet that has not signed in to its folders for 365 days is deleted with everything in it. [[OWNER: whether snapshots of the server\'s disk are taken (they would contain uploaded files), and how long they are kept]]' },
-      ],
-    },
-    {
-      title: '13. Usage analytics, with your consent',
+      title: '12. Usage analytics, with your consent',
       blocks: [
         { p: 'If you allow it - "Accept all" in the terms window, "Allow" when the site asks you once, or the switch on the [Cookies](/cookies) page (section 5 there, which lists every detail) - your browser sends ValueDesk\'s server how you use the site: the pages you open (their path, with wallet addresses and identifiers replaced) and how long each is visible; the features you use, by name, with a few words of detail and never amounts, prices or what you type; the domain and campaign tags of the link you came from and your first page; device type, screen size, browser and operating system family, language, time zone and colour theme; how fast pages load; the address of the wallet you connect; a random visitor number kept in your browser for 13 months and a random number for the current visit. ValueDesk\'s function at Vercel adds the country and region Vercel determined from your IP address (section 3); the IP address itself is not stored with any of it.' },
         { p: 'Purpose: understanding which features help users and where they get stuck, how visitors find ValueDesk, and seeing a wallet\'s use of the app beside the volume and builder fees counted for it (section 7). The data is kept on ValueDesk\'s server at Contabo (section 2) and seen only by ValueDesk\'s operator; it is not shared, sold or used for advertising. Retention: [[OWNER: how long analytics data is kept, e.g. 25 months - nothing is deleted automatically until this is set]]. Legal basis: your consent (Art. 6(1)(a) GDPR, § 25(1) TDDDG), which you can withdraw at any time with effect for the future on the Cookies page; your browser then sends nothing more and deletes the visitor number. Without consent nothing is measured.' },
       ],
     },
     {
-      title: '14. What ValueDesk does not do',
+      title: '13. What ValueDesk does not do',
       blocks: [
         {
           ul: [
@@ -268,14 +236,14 @@ export const PRIVACY: LegalDoc = {
       ],
     },
     {
-      title: '15. Your rights',
+      title: '14. Your rights',
       blocks: [
         { p: 'You have the right to access your data (Art. 15 GDPR), to rectification (Art. 16), to erasure (Art. 17), to restriction of processing (Art. 18), to data portability (Art. 20) and to object to processing based on our legitimate interests (Art. 21). Write to the address in section 1. Because ValueDesk knows wallets only by their address, we may ask you to show that a wallet is yours - for example by signing a short message with it - before we act on a request about it. Data that exists only in your browser (section 9) is in your hands alone.' },
         { p: 'You may also lodge a complaint with a data protection supervisory authority, in particular in the member state where you live or where the alleged infringement took place. The authority responsible for us is [[OWNER: the competent supervisory authority, e.g. the data protection authority of your federal state, with address]].' },
       ],
     },
     {
-      title: '16. Changes',
+      title: '15. Changes',
       blocks: [
         { p: 'We update this policy when the site or the law changes. The current version is always on this page.' },
       ],

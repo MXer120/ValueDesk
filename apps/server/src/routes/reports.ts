@@ -22,7 +22,7 @@
  * and nothing else: a browser token gets 401 `wallet`. So does poll, the bell's
  * reply count: without the signature nothing about a chat is told, not even that.
  *
- * Like the knowledge folders' (hosted.ts), the POSTs need the site's exact Origin
+ * The POSTs need the site's exact Origin (hosted.ts)
  * and are counted as `write` by the gate; on top of that each has much tighter
  * limits of its own here, per client and for everyone together - messages and
  * screenshots also per chat - and a small body (a screenshot's 2 MB the largest).

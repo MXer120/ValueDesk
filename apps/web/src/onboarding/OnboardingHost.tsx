@@ -3,29 +3,30 @@
  * and loads the flow's own chunk only when someone is about to see it.
  *
  * It waits its turn: never over the terms popup (the first visit's), never before the wallet can
- * sign. Any part of the app asks for it with openOnboarding (the address menu, the Dev panel).
+ * sign. The Dev panel can open it with openOnboarding.
  */
-import { Suspense, useCallback, useEffect, useState } from 'react';
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { browseAccepted, lookedAround, useAcceptanceRevision } from '../legal/acceptance';
 import { lazyChunk } from '../lazyPage';
 import { setIndexEnabled } from '../setup/indexer';
 import type { Eip1193Provider } from '../wallet';
-import { decide, markSetupDone, readProgress, setupDoneBefore, writeProgress, type Mode, type Step } from './model';
+import { decide, markSetupDone, readProgress, setupDoneBefore, writeProgress, type Step } from './model';
 import { loadProfile } from './profile';
+import { loadReferral } from './referral';
 
 const Onboarding = lazyChunk(() => import('./Onboarding').then((m) => ({ default: m.Onboarding })));
 
 const OPEN_EVENT = 'vd:onboarding';
 
-/** Open the flow from anywhere: `username` the username step alone, `tour` everything but it. */
-export function openOnboarding(mode: Mode): void {
-  window.dispatchEvent(new CustomEvent<Mode>(OPEN_EVENT, { detail: mode }));
+/** Open the flow from its first step (the Dev panel). */
+export function openOnboarding(): void {
+  window.dispatchEvent(new Event(OPEN_EVENT));
 }
 
 export interface OnboardingGate {
   /** Whether the account-setup sheets must wait: the answer is out, or the flow is open. */
   holdSetup: boolean;
-  open: { mode: Mode; step: Step | null } | null;
+  open: { step: Step | null; offerReferral: boolean } | null;
   close: () => void;
 }
 
@@ -33,6 +34,8 @@ export interface OnboardingGate {
 export function useOnboardingGate(address: string | null): OnboardingGate {
   const [answered, setAnswered] = useState<string | null>(null);
   const [open, setOpen] = useState<OnboardingGate['open']>(null);
+  const addressRef = useRef(address);
+  addressRef.current = address;
 
   useEffect(() => {
     if (!address) {
@@ -49,12 +52,14 @@ export function useOnboardingGate(address: string | null): OnboardingGate {
       return;
     }
     setAnswered(null);
-    loadProfile(wallet).then(
-      (a) => {
+    // SoDEX not answering only leaves the referral step out.
+    Promise.all([loadProfile(wallet), loadReferral(wallet)]).then(
+      ([a, referral]) => {
         if (dead) return;
-        const step = decide({ progress, setupDone: setupDoneBefore(), username: a.username, known: a.known });
+        const offerReferral = referral === 'none';
+        const step = decide({ progress, setupDone: setupDoneBefore(), username: a.username, known: a.known, offerReferral });
         setAnswered(wallet);
-        if (step) setOpen({ mode: 'signup', step });
+        if (step) setOpen({ step, offerReferral });
       },
       () => {
         /* The server did not answer: nobody is stopped at the door over it. Asked again next visit. */
@@ -65,9 +70,10 @@ export function useOnboardingGate(address: string | null): OnboardingGate {
   }, [address]);
 
   useEffect(() => {
-    const on = (e: Event) => {
-      const mode = (e as CustomEvent<Mode>).detail;
-      if (mode === 'username' || mode === 'tour' || mode === 'signup') setOpen({ mode, step: null });
+    const on = () => {
+      const wallet = addressRef.current;
+      if (!wallet) return;
+      void loadReferral(wallet).then((referral) => setOpen({ step: null, offerReferral: referral === 'none' }));
     };
     window.addEventListener(OPEN_EVENT, on);
     return () => window.removeEventListener(OPEN_EVENT, on);
@@ -88,21 +94,19 @@ export function OnboardingHost({ gate, address, provider, onFinish }: {
   const { open, close } = gate;
   const termsUp = !browseAccepted() && !lookedAround();
   if (!open || !address || termsUp) return null;
-  /* A signup waits for a wallet that can sign; the tour needs none. */
-  if (open.mode !== 'tour' && !provider) return null;
+  /* A wallet really connected, not one remembered from last visit. */
+  if (!provider) return null;
   const end = (finished: boolean) => {
-    if (open.mode === 'signup') {
-      markSetupDone();
-      // What the setup sheets started on a first connect: the wallet's history, read in the background.
-      setIndexEnabled(true, address);
-      writeProgress(address, { step: open.step ?? 'username', closed: true });
-    }
+    markSetupDone();
+    // What the setup sheets started on a first connect: the wallet's history, read in the background.
+    setIndexEnabled(true, address);
+    writeProgress(address, { step: open.step ?? 'username', closed: true });
     close();
     if (finished) onFinish();
   };
   return (
     <Suspense fallback={null}>
-      <Onboarding mode={open.mode} startAt={open.step} address={address} provider={provider} onEnd={end} />
+      <Onboarding startAt={open.step} offerReferral={open.offerReferral} address={address} onEnd={end} />
     </Suspense>
   );
 }

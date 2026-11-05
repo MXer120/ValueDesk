@@ -247,3 +247,34 @@ html[data-theme='light'] .onb-go:hover { filter: brightness(1.6); }
 /* The address menu's first line: the wallet's username. */
 .acct-menu__who { display: flex; align-items: center; gap: 8px; padding: 8px 10px; color: var(--text); font-size: var(--fs-xs); }
 .acct-menu__who b { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* The referral step: the code as one quiet tile. */
+.onb-code {
+  display: flex; align-items: center; justify-content: center; gap: 10px; height: 64px; margin-bottom: var(--sp-2);
+  border-radius: var(--radius-tile); background: var(--bg-panel); box-shadow: var(--depth-2);
+  font-family: var(--font-num); font-size: 22px; letter-spacing: 0.08em;
+}
+.onb-code b { font-weight: 500; }
+.onb-code i { display: none; }
+.onb-code.is-on i { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--pos); color: #fff; }
+.onb-code__go { display: grid; place-items: center; text-decoration: none; }
+.onb-later {
+  height: 40px; border: 0; border-radius: 10px; background: transparent; color: var(--muted); font: inherit; font-size: var(--fs-xs); cursor: pointer;
+  transition: background 140ms, color 140ms;
+}
+.onb-later:hover { background: rgb(var(--ink) / 0.06); color: var(--text); }
+
+/* Settings > Profile. */
+.stg-name { gap: var(--sp-3); padding-top: 12px; }
+.stg-name__who { display: flex; align-items: center; gap: 12px; }
+.stg-name__field { display: flex; gap: 10px; }
+.stg-name__field .onb-input { flex: 1 1 auto; min-width: 0; height: 40px; }
+.stg-name .onb-input:focus, .stg-name .onb-input:focus-visible { border-color: var(--muted); outline: none; }
+.stg-name .onb-input.is-bad { border-color: color-mix(in srgb, var(--neg) 60%, transparent); }
+.stg-name .onb-hint { margin: 0 0 0 2px; }
+.stg-name .stg__note { margin: 0; }
+.stg-name__link { display: inline-flex; align-items: center; text-decoration: none; }
+
+/* The Settings icon's green dot: something waits in Profile. */
+.settings__dot--go { background: var(--pos); box-shadow: 0 0 0 2px var(--bg); }
+.stg__choices.is-two { grid-template-columns: repeat(2, minmax(0, 1fr)); }

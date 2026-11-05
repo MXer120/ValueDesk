@@ -25,7 +25,6 @@
  * end. Below 761px there is no rail and the bar carries them again.
  */
 import { Identicon } from './Identicon';
-import { openOnboarding } from '../onboarding/OnboardingHost';
 import { useUsername } from '../onboarding/profile';
 import { fmtDecimalString } from '../numStyle';
 import type { Engine } from '../api';
@@ -57,7 +56,6 @@ import { prefetchAccountTotals, useAccountTotals } from './account/useAccountTot
 import { NO_ACCOUNT_TRANSFER, useAccountExists } from './account/useAccountExists';
 import { useWalletSnapshot } from './account/useWallet';
 import { RegionPill } from '../legal/LegalGate';
-import { FOLDER_ICON } from '../folders/icons';
 import { FEEDBACK_LABEL, FeedbackIcon, openFeedback } from '../feedback/FeedbackButton';
 import './account/account.css';
 
@@ -90,8 +88,6 @@ export interface NavBarProps {
   /** Futures or spot, for the switch on Trade. */
   engine?: Engine;
   onEngine?: (e: Engine) => void;
-  /** Knowledge is on (folders/access.ts): its link and, without the rail, its button. Off, neither exists. */
-  knowledge?: boolean;
   /** What the status page has open, for More's dot (status/SiteNoticeBanner.tsx navAlertOf). */
   alert?: NavAlert;
   /** Open the status page in place (App.tsx). */
@@ -101,7 +97,7 @@ export interface NavBarProps {
 }
 
 export function NavBar({
-  tab, onNavigate, address, hasLayout, dashLocked, onOpenSearch, rail = false, engine, onEngine, knowledge = false, alert = null, onOpenStatus, onOpenExcluded,
+  tab, onNavigate, address, hasLayout, dashLocked, onOpenSearch, rail = false, engine, onEngine, alert = null, onOpenStatus, onOpenExcluded,
 }: NavBarProps) {
   /*
    * Have the wallet modal's chunk in memory BEFORE the click.
@@ -193,7 +189,7 @@ export function NavBar({
           </>
         )}
         <nav className="navlinks">
-          {TABS.filter((t) => t !== 'knowledge' || knowledge).map((t) => SOON_TABS.has(t) ? (
+          {TABS.map((t) => SOON_TABS.has(t) ? (
             /* Coming soon (router.ts SOON_TABS): the name and a pill, no link - there is no page to open. */
             <span key={t} className="navlink navlink--soon" aria-disabled="true" title={`${TAB_LABELS[t]}: coming soon`}>
               {TAB_LABELS[t]}
@@ -245,13 +241,8 @@ export function NavBar({
           {/* ONE settings gear: hide mode, and the page layout (lock / edit). In the rail when it shows. */}
           {!rail && (
             <>
-              <SettingsMenu hasLayout={hasLayout} dashLocked={dashLocked} />
+              <SettingsMenu hasLayout={hasLayout} dashLocked={dashLocked} address={address} />
               <Notices address={address} />
-              {knowledge && (
-                <button type="button" className="navicon" title="Knowledge" aria-label="Knowledge" onClick={() => onNavigate('knowledge')}>
-                  <svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><FOLDER_ICON /></svg>
-                </button>
-              )}
               <button
                 type="button" className="navicon" title="Search markets (⌘K)"
                 aria-label="Search markets" onClick={onOpenSearch}
@@ -345,13 +336,6 @@ const SearchIcon = () => (
  * The actions run in AccountController (mounted once in App.tsx), so the menu
  * closes the moment a row is pressed without cancelling anything.
  */
-const UsernameIcon = () => (
-  <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true"><circle cx="10" cy="7" r="3.2" /><path d="M4 17c.8-3.2 3-4.8 6-4.8s5.2 1.6 6 4.8" /></svg>
-);
-const TourIcon = () => (
-  <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="10" cy="10" r="7" /><path d="m13 7-1.8 4.2L7 13l1.8-4.2Z" /></svg>
-);
-
 export function AddressMenu({ address, onClose, closing = false, onExited, onPortfolio }: {
   address: string;
   onClose: () => void;
@@ -540,11 +524,6 @@ export function AddressMenu({ address, onClose, closing = false, onExited, onPor
       <div className="acct-menu__section">
         {username ? (
           <div className="acct-menu__who" title="Your username. It can't be changed."><Identicon seed={address} size={18} /><b>{username}</b></div>
-        ) : username === null && live ? (
-          <button type="button" className="navaddr__item acct-menu__row" role="menuitem" onClick={run(() => openOnboarding('username'))}>
-            <span>Set your username</span>
-            <UsernameIcon />
-          </button>
         ) : null}
         <button type="button" className="navaddr__item acct-menu__row" role="menuitem" onClick={run(onPortfolio)}>
           <span>Portfolio</span>
@@ -557,10 +536,6 @@ export function AddressMenu({ address, onClose, closing = false, onExited, onPor
         <button type="button" className="navaddr__item acct-menu__row" role="menuitem" onClick={run(() => openFeedback())}>
           <span>{FEEDBACK_LABEL}</span>
           <FeedbackIcon />
-        </button>
-        <button type="button" className="navaddr__item acct-menu__row" role="menuitem" onClick={run(() => openOnboarding('tour'))}>
-          <span>Product tour</span>
-          <TourIcon />
         </button>
         <button type="button" className="navaddr__item acct-menu__row acct-menu__row--out" role="menuitem" onClick={run(requestSignOut)}>
           <span>Sign out</span>

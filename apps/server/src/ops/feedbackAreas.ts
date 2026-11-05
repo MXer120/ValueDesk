@@ -31,7 +31,6 @@ export const FEEDBACK_AREAS: readonly FeedbackArea[] = [
   { id: 'liqmap', label: 'Liquidation heatmap', words: 'liquidations heat map' },
   { id: 'leaderboard', label: 'Leaderboard', words: 'traders ranking whales scan' },
   { id: 'points', label: 'Points', words: 'rewards fees tier' },
-  { id: 'knowledge', label: 'Knowledge', words: 'folders docs notes boards' },
   { id: 'notifications', label: 'Notifications', words: 'bell alerts toasts' },
   { id: 'speed', label: 'Speed & performance', words: 'slow lag freeze loading crash' },
   { id: 'other', label: 'Other' },

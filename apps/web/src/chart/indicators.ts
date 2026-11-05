@@ -54,11 +54,11 @@ export const LINE_COLORS = [T.line1, T.line2, T.line3, T.line4, T.line5];
 onTheme(() => { LINE_COLORS.splice(0, LINE_COLORS.length, T.line1, T.line2, T.line3, T.line4, T.line5); });
 
 /** Bar colours, the candle colours at 60% (theme.ts POS_FILL / NEG_FILL). */
-export let BAR_UP = isLight() ? 'rgba(0, 133, 95, 0.55)' : 'rgba(0, 180, 129, 0.6)';
-export let BAR_DOWN = isLight() ? 'rgba(212, 55, 43, 0.55)' : 'rgba(239, 74, 60, 0.6)';
+export let BAR_UP = isLight() ? 'rgba(0, 112, 80, 0.55)' : 'rgba(0, 180, 129, 0.6)';
+export let BAR_DOWN = isLight() ? 'rgba(185, 42, 30, 0.55)' : 'rgba(239, 74, 60, 0.6)';
 onTheme(() => {
-  BAR_UP = isLight() ? 'rgba(0, 133, 95, 0.55)' : 'rgba(0, 180, 129, 0.6)';
-  BAR_DOWN = isLight() ? 'rgba(212, 55, 43, 0.55)' : 'rgba(239, 74, 60, 0.6)';
+  BAR_UP = isLight() ? 'rgba(0, 112, 80, 0.55)' : 'rgba(0, 180, 129, 0.6)';
+  BAR_DOWN = isLight() ? 'rgba(185, 42, 30, 0.55)' : 'rgba(239, 74, 60, 0.6)';
 });
 
 /** Colours offered in the settings dialog, before the free picker. */

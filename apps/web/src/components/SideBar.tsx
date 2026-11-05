@@ -3,8 +3,7 @@
  * reference: the mark at the top, level with the navbar; the trade page's
  * terminals (Trade, News, and any the user adds - dashboard/terminals.ts), the
  * one on screen raised, and a + for a new one; then the tools that are the same
- * on every page - the market search and Knowledge (the knowledge folders' page;
- * anything dragged onto its button is saved into a folder, folders/QuickDrop.tsx), the
+ * on every page - the market search, the
  * money (deposit, transfer, withdraw), the app's own (notifications, settings) -
  * and the wallet at the foot. The pages themselves are the navbar's links.
  * Below 761px there is no rail and the tools sit in the navbar again (NavBar.tsx
@@ -13,7 +12,7 @@
  * Every button carries its name as a tooltip and an accessible name; the
  * notifications and settings menus open to the right of the rail (shell.css).
  */
-import { Suspense, useEffect, useState, type MouseEvent, type ReactNode } from 'react';
+import { useEffect, useState, type MouseEvent, type ReactNode } from 'react';
 import { BrandMark } from './BrandMark';
 import { SettingsMenu } from './SettingsMenu';
 import { AddressMenu } from './NavBar';
@@ -30,13 +29,8 @@ import { activateTerminal, addTerminal, openLayouts, removeTerminal, restoreTerm
 import { historyLabel } from '../dashboard/storage';
 import { MENU_ICONS, TabMenu, menuAt, type TabMenuItem } from '../dashboard/tabExtras';
 import { useMoneyNotice } from './funds/moneyNotice';
-import { FOLDER_ICON } from '../folders/icons';
-import { lazyChunk } from '../lazyPage';
 
-/* Knowledge's button and its quick drop: fetched only once Knowledge is on (folders/access.ts). */
-const KnowledgeRailButton = lazyChunk(() => import('../folders/QuickDrop').then((m) => ({ default: m.KnowledgeRailButton })));
-
-export function SideBar({ address, hasLayout, dashLocked, onOpenSearch, tab, onNavigate, knowledge = false }: {
+export function SideBar({ address, hasLayout, dashLocked, onOpenSearch, tab, onNavigate }: {
   address: string | null;
   hasLayout: boolean;
   dashLocked: boolean;
@@ -44,8 +38,6 @@ export function SideBar({ address, hasLayout, dashLocked, onOpenSearch, tab, onN
   /** The page on screen: a terminal is raised only on Trade. */
   tab: Tab | null;
   onNavigate: (tab: Tab) => void;
-  /** Knowledge is on (folders/access.ts): its button and quick drop. Off, it is not there. */
-  knowledge?: boolean;
 }) {
   const terminals = useTerminals(TRADE_DASHBOARD);
   const onTrade = tab === 'trade';
@@ -119,13 +111,6 @@ export function SideBar({ address, hasLayout, dashLocked, onOpenSearch, tab, onN
             <circle cx="13" cy="12.6" r="4.6" />
             <path d="M11.6 11.4h2.2M11.6 13.8h2.2" />
           </SideButton>
-          {knowledge && (
-            <Suspense fallback={null}>
-              <KnowledgeRailButton current={tab === 'knowledge'} onOpen={() => onNavigate('knowledge')}>
-                <FOLDER_ICON />
-              </KnowledgeRailButton>
-            </Suspense>
-          )}
         </div>
         <span className="side__sep" aria-hidden="true" />
         <div className="side__group">
@@ -144,7 +129,7 @@ export function SideBar({ address, hasLayout, dashLocked, onOpenSearch, tab, onN
         <span className="side__sep" aria-hidden="true" />
         <div className="side__group">
           {/* The bell lives in the navbar with the other notifications (NavBar.tsx). */}
-          <SettingsMenu hasLayout={hasLayout} dashLocked={dashLocked} />
+          <SettingsMenu hasLayout={hasLayout} dashLocked={dashLocked} address={address} />
         </div>
       </nav>
       <SideWallet address={address} onPortfolio={() => onNavigate('portfolio')} />

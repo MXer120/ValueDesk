@@ -11,7 +11,7 @@
  *
  * Not history, and still cleared as it always was: work queues, caches, one-time sign-in
  * nonces, a current state whose changes are kept elsewhere (liq_cur: liq_log keeps them), and
- * what someone asked to delete (a folder, a notice, an error report, a wallet dropped).
+ * what someone asked to delete (a notice, an error report, a wallet dropped).
  */
 export const PRUNE_KINDS = [
   'fills', 'activity', 'trader-stats', 'cohort-history', 'liq-history', 'liq-log', 'status', 'builder', 'client-errors',

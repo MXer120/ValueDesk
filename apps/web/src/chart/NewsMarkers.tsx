@@ -16,8 +16,7 @@
  * a click elsewhere or Escape. While a marker is open - or a list points at one
  * of its stories (newsFocus.ts: the News widget, the calendar) - the bars its
  * stories came out in are lit. The card is a glass sheet like the app's
- * drawers; every story opens its article in a new tab, and can be saved to a
- * knowledge folder where the folders are there.
+ * drawers; every story opens its article in a new tab.
  *
  * A DOM layer, not canvas: logos are images, and the hover is the browser's.
  * Positions follow the chart in the frame it draws them (candleDraws.ts),
@@ -27,7 +26,6 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { Chart as KChart } from 'klinecharts';
 import { CoinIcon } from '../components/CoinIcon';
-import { MENU_ICONS } from '../dashboard/tabExtras';
 import { NEWS_ICONS } from './chartIcons';
 import { followChart } from './candleDraws';
 import {
@@ -82,9 +80,6 @@ export interface NewsMarkersProps {
   /** News is going off: the markers fade out. */
   leaving?: boolean;
   tz: TimeZoneMode;
-  /** Folders are there: each story offers "Save to folder". */
-  canSave: boolean;
-  onSave: (s: NewsStory) => void;
 }
 
 /** "17:20", or "Fri 23 Oct 17:20" for another day; on the chart's clock. */
@@ -132,7 +127,7 @@ function hotNote(s: NewsStory): string | null {
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
-export function NewsMarkers({ chart, marks, left, top, barMs, coin, mode, leaving = false, tz, canSave, onSave }: NewsMarkersProps) {
+export function NewsMarkers({ chart, marks, left, top, barMs, coin, mode, leaving = false, tz }: NewsMarkersProps) {
   /** The row: stories and releases, merged where they would overlap. */
   const [placed, setPlaced] = useState<PlacedNews[]>([]);
   /** FOMC decisions on screen: the statement and the press conference, x from-to in the pane. */
@@ -461,11 +456,6 @@ export function NewsMarkers({ chart, marks, left, top, barMs, coin, mode, leavin
                         </span>
                       )}
                     </a>
-                    {canSave && (
-                      <button type="button" className="kc-newspop__save" title="Save to folder" aria-label={`Save to folder: ${s.title}`} onClick={() => onSave(s)}>
-                        {MENU_ICONS.folder}
-                      </button>
-                    )}
                   </li>
                 );
               })}

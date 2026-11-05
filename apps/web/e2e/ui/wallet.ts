@@ -38,7 +38,7 @@ export const SIGNABLE: readonly Signable[] = ['trading-key', 'builder', 'site-te
 export function signableOf(td: Pick<TypedDataSeen, 'primaryType' | 'message'>): Signable | null {
   if (td.primaryType === 'UserSignedAddAPIKeyAction') return 'trading-key';
   if (td.primaryType === 'ApproveBuilderFeeAction') return 'builder';
-  if (td.primaryType === 'UsernameClaim') return 'username';
+  if (td.primaryType === 'UsernameChange') return 'username';
   if (td.primaryType === 'CopyRequest') {
     const action = (td.message as { action?: unknown }).action;
     if (action === 'accept-site-terms') return 'site-terms';

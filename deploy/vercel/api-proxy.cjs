@@ -10,21 +10,16 @@
 //
 // WHAT IT DOES, AND WHAT IT LEAVES TO THE ORIGIN
 //   - GET, HEAD and OPTIONS (CloudFront's AllowedMethods). POST as well, but only
-//     under /api/copy/ - the copy executor's signed requests (apps/executor) - and
-//     under /api/folders/ - a wallet's own knowledge folders (apps/server
-//     routes/folders.ts). Any other method or path is a 405 here and never reaches
-//     the origin.
+//     under /api/copy/ - the copy executor's signed requests (apps/executor). Any
+//     other method or path is a 405 here and never reaches the origin.
 //   - A path with a dot segment, an encoded slash, backslash, dot or NUL is a 404
 //     here: what this function judges is then the path the origin routes.
 //   - Forwards the path and query unchanged, and only the request headers the
 //     origin reads (Accept, Accept-Encoding, If-None-Match, If-Modified-Since,
-//     Origin). No cookie, no user agent. Under /api/copy/ and /api/folders also
-//     Content-Type and Authorization (a follower's or a wallet's token, Bearer) -
-//     nowhere else.
+//     Origin). No cookie, no user agent. Under /api/copy/ also
+//     Content-Type and Authorization (a follower's token, Bearer) - nowhere else.
 //   - A POST's body is read here first and sent on with its length (413 above the
-//     limit): 64 KB for the executor, 640 KB for a folder item, 4.25 MB for one piece
-//     of a file uploaded to a folder (files go in 4 MB pieces because Vercel itself
-//     takes 4.5 MB at most, each way). A body is never sent with any other method.
+//     limit): 64 KB for the executor. A body is never sent with any other method.
 //   - Adds X-Origin-Verify (VALUESCAN_ORIGIN_SECRET, a Vercel environment variable
 //     of the production environment only) and X-Forwarded-For: the viewer's address
 //     as Vercel reports it (x-real-ip; Vercel overwrites these headers, a client
@@ -54,8 +49,8 @@
 //     EDGE_MAX_TTL_BY_PATH), with the
 //     API's stale-while-revalidate (at most 60), through Vercel-CDN-Cache-Control,
 //     which Vercel never passes on. The browser keeps the API's own Cache-Control.
-//     /api/copy/* and /api/folders* are NEVER cached: their answers belong to one
-//     follower or one wallet. They go out with Cache-Control: no-store (the origin's
+//     /api/copy/* is NEVER cached: its answers belong to one
+//     follower. They go out with Cache-Control: no-store (the origin's
 //     own value), and any CDN cache header from the origin is dropped.
 //   - An origin that does not answer (a stopped instance) is a 502 within about 10 s
 //     (two connection attempts of 5 s, like CloudFront), never a hang; the web then
@@ -96,7 +91,7 @@ const BODY_LIMIT = 64 * 1024;
 const BODY_TIMEOUT_MS = 10000;
 const FORWARDED_REQUEST_HEADERS = ['accept', 'accept-encoding', 'if-none-match', 'if-modified-since', 'origin',
   'access-control-request-method', 'access-control-request-headers'];
-/** Only under /api/copy/ and /api/folders: the request's type and a follower's or a wallet's token. */
+/** Only on one wallet's or one follower's paths: the request's type and its token. */
 const COPY_REQUEST_HEADERS = ['content-type', 'authorization'];
 const DROPPED_RESPONSE_HEADERS = new Set(['connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization', 'te',
   'trailer', 'transfer-encoding', 'upgrade', 'set-cookie', 'server']);
@@ -129,14 +124,12 @@ const SELF = '/api/__vs_proxy';
 const GEO_PATH = '/api/edge/geo';
 
 const isCopyPath = (path) => String(path ?? '').startsWith(COPY_PREFIX);
-/** The knowledge folders' paths (apps/server/src/routes/folders.ts): /api/folders and below. */
-const isFoldersPath = (path) => { const p = String(path ?? ''); return p === '/api/folders' || p.startsWith('/api/folders/'); };
 /**
  * Feedback (a visitor's own conversation, its screenshots), client error reports and a signed-in
  * wallet's inbox (apps/server/src/routes/reports.ts, ops/inbox.ts): POST passes, the thread token or
  * wallet session passes, nothing is cached.
  */
-const isReportsPath = (path) => { const p = String(path ?? ''); return p === '/api/vs/feedback' || p.startsWith('/api/vs/feedback/') || p.startsWith('/api/vs/inbox/') || p === '/api/vs/client-errors' || p === '/api/vs/username' || p === ANALYTICS_PATH; };
+const isReportsPath = (path) => { const p = String(path ?? ''); return p === '/api/vs/feedback' || p.startsWith('/api/vs/feedback/') || p.startsWith('/api/vs/inbox/') || p === '/api/vs/client-errors' || p === '/api/vs/username' || p === '/api/vs/username/change' || p === ANALYTICS_PATH; };
 /** The app's own analytics (apps/server/src/routes/analytics.ts): a POST, the viewer's country and region added. */
 const ANALYTICS_PATH = '/api/vs/a';
 /**
@@ -177,19 +170,13 @@ const FEEDBACK_UPLOAD_LIMIT = 2 * 1024 * 1024 + 16 * 1024 + 1024;
 /** A feedback message, a thread read, an error report. */
 const REPORTS_BODY_LIMIT = 16 * 1024;
 /** One wallet's or one follower's: a token passes, a POST passes, nothing is cached. */
-const isPrivatePath = (path) => isCopyPath(path) || isFoldersPath(path) || isReportsPath(path) || isAdminPath(path);
-/** A folder item (a sheet or a board at most; apps/server routes/folders.ts CREATE_BODY_LIMIT). */
-const FOLDERS_BODY_LIMIT = 1792 * 1024;
-/** A file uploaded to a folder (apps/server folders/limits.ts FILE_BYTES_CEILING, and a little room). */
-const FOLDERS_UPLOAD_LIMIT = Math.floor(4.25 * 1024 * 1024) + 1024;
+const isPrivatePath = (path) => isCopyPath(path) || isReportsPath(path) || isAdminPath(path);
 /** How large a POST's body may be on this path. */
 function bodyLimitFor(path) {
-  if (path === '/api/folders/upload/put') return FOLDERS_UPLOAD_LIMIT;
   if (path === '/api/vs/feedback/upload') return FEEDBACK_UPLOAD_LIMIT;
   if (path === '/api/vs/inbox/add') return INBOX_ADD_LIMIT;
   if (isAdminPath(path) || isBetaPath(path)) return ADMIN_BODY_LIMIT;
   if (isReportsPath(path)) return REPORTS_BODY_LIMIT;
-  if (isFoldersPath(path)) return FOLDERS_BODY_LIMIT;
   return BODY_LIMIT;
 }
 
@@ -466,7 +453,6 @@ module.exports.originFrom = originFrom;
 module.exports.oddPath = oddPath;
 module.exports.BODY_LIMIT = BODY_LIMIT;
 module.exports.bodyLimitFor = bodyLimitFor;
-module.exports.isFoldersPath = isFoldersPath;
 module.exports.isReportsPath = isReportsPath;
 module.exports.isAdminPath = isAdminPath;
 module.exports.requestHost = requestHost;

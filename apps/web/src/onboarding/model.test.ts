@@ -4,9 +4,9 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { STEPS, decide, markSetupDone, readProgress, setupDoneBefore, stepsOf, writeProgress } from './model';
+import { STEPS, decide, markProfileSeen, markSetupDone, profileSeen, readProgress, setupDoneBefore, stepsOf, writeProgress } from './model';
 
-const fresh = { progress: null, setupDone: false, username: null, known: false };
+const fresh = { progress: null, setupDone: false, username: null, known: false, offerReferral: false };
 
 function memory(): Pick<Storage, 'getItem' | 'setItem'> {
   const m = new Map<string, string>();
@@ -37,13 +37,26 @@ test('stopped on the username, and the name was taken elsewhere: on to the next 
   assert.equal(decide({ ...fresh, progress: { step: 'username', closed: false }, username: 'Luke_1' }), 'traders');
 });
 
-test('the steps: all of them, in order, with dark or light last', () => {
-  assert.deepEqual([...STEPS], ['username', 'traders', 'copy', 'heatmap', 'flow', 'overview', 'theme']);
-  assert.deepEqual(stepsOf('username', false), ['username']);
-  assert.ok(!stepsOf('tour', false).includes('username'));
-  assert.ok(!stepsOf('signup', true).includes('username'));
-  assert.equal(stepsOf('signup', false)[0], 'username');
-  assert.equal(stepsOf('tour', true).at(-1), 'theme');
+test('the steps: username and referral only when they apply, dark or light last', () => {
+  assert.deepEqual([...STEPS], ['username', 'referral', 'traders', 'copy', 'heatmap', 'flow', 'overview', 'theme']);
+  assert.deepEqual(stepsOf(false, true).slice(0, 3), ['username', 'referral', 'traders']);
+  assert.deepEqual(stepsOf(false, false).slice(0, 2), ['username', 'traders']);
+  assert.deepEqual(stepsOf(true, false).slice(0, 1), ['traders']);
+  assert.equal(stepsOf(true, true)[0], 'referral');
+  assert.equal(stepsOf(false, false).at(-1), 'theme');
+});
+
+test('stopped on a referral step the wallet no longer needs: the next step that applies', () => {
+  assert.equal(decide({ ...fresh, progress: { step: 'referral', closed: false }, username: 'Luke_1' }), 'traders');
+  assert.equal(decide({ ...fresh, progress: { step: 'referral', closed: false }, username: 'Luke_1', offerReferral: true }), 'referral');
+});
+
+test('the green dot is done once Profile was opened, per wallet', () => {
+  const s = memory();
+  assert.equal(profileSeen('0xABC', s), false);
+  markProfileSeen('0xabc', s);
+  assert.equal(profileSeen('0xABC', s), true);
+  assert.equal(profileSeen('0xdef', s), false);
 });
 
 test('progress is per wallet, any case, and survives junk', () => {

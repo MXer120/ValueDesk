@@ -1,23 +1,25 @@
 /**
- * What a wallet signs to take a username, and the rules a username follows. Pure, and shared
- * with the web through its @sign alias (apps/web/src/onboarding/), so the page checks a name by
- * the same rules as the server and asks the wallet to sign exactly what the server recomputes.
+ * Usernames: the rules a name follows, and what a wallet signs to CHANGE one. Pure, and shared with
+ * the web through its @sign alias (apps/web/src/onboarding/), so the page checks a name by the same
+ * rules as the server and signs exactly what the server recomputes.
  *
- * Free EIP-712 typed data with fixed wording - never a transaction - under a domain of its own,
- * so a signature for the terms, the feedback chat or the folders is never one for this.
+ * Owner, 2026-11-05: taking the first name needs no signature; only changing it is signed by the
+ * wallet. So a wallet's first name is not proof of who took it, and the wallet's signature always
+ * wins over it: free EIP-712 typed data with fixed wording, never a transaction, under a domain of
+ * its own so a signature for the terms, the feedback chat or anything else is never one for this.
  */
 
-export const USERNAME_DOMAIN = { name: 'ValueDesk Username', version: '1' } as const;
-export const USERNAME_STATEMENT = 'Take this ValueDesk username for my wallet. It cannot be changed later. Free: a signature, never a transaction.';
-export const USERNAME_TYPE = 'UsernameClaim(address owner,string username,string statement,string nonce,uint64 issuedAt,uint64 expiresAt)';
-/** How long a signed claim may be used after it was made. */
-export const USERNAME_CLAIM_TTL_MS = 10 * 60_000;
+export const USERNAME_DOMAIN = { name: 'ValueDesk Username', version: '2' } as const;
+export const USERNAME_STATEMENT = 'Change my ValueDesk username. Free: a signature, never a transaction.';
+export const USERNAME_TYPE = 'UsernameChange(address owner,string username,string statement,string nonce,uint64 issuedAt,uint64 expiresAt)';
+/** How long a signed change may be used after it was made. */
+export const USERNAME_CHANGE_TTL_MS = 10 * 60_000;
 export const USERNAME_ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
 
 export const USERNAME_MIN = 3;
 export const USERNAME_MAX = 20;
 
-export interface UsernameClaim {
+export interface UsernameChange {
   owner: string;
   username: string;
   statement: string;
@@ -71,8 +73,8 @@ export function usernameProblemText(p: UsernameProblem): string {
   }
 }
 
-/** The typed data the wallet signs (eth_signTypedData_v4). */
-export function usernameTypedData(c: Omit<UsernameClaim, 'signature'>) {
+/** The typed data the wallet signs to change its name (eth_signTypedData_v4). */
+export function usernameTypedData(c: Omit<UsernameChange, 'signature'>) {
   return {
     domain: { name: USERNAME_DOMAIN.name, version: USERNAME_DOMAIN.version, chainId: c.chainId, verifyingContract: USERNAME_ZERO_ADDRESS },
     types: {
@@ -82,7 +84,7 @@ export function usernameTypedData(c: Omit<UsernameClaim, 'signature'>) {
         { name: 'chainId', type: 'uint256' },
         { name: 'verifyingContract', type: 'address' },
       ],
-      UsernameClaim: [
+      UsernameChange: [
         { name: 'owner', type: 'address' },
         { name: 'username', type: 'string' },
         { name: 'statement', type: 'string' },
@@ -91,7 +93,7 @@ export function usernameTypedData(c: Omit<UsernameClaim, 'signature'>) {
         { name: 'expiresAt', type: 'uint64' },
       ],
     },
-    primaryType: 'UsernameClaim' as const,
+    primaryType: 'UsernameChange' as const,
     message: { owner: c.owner.toLowerCase(), username: c.username, statement: c.statement, nonce: c.nonce, issuedAt: c.issuedAt, expiresAt: c.expiresAt },
   };
 }

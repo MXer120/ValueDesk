@@ -37,7 +37,7 @@
  * The library is imported dynamically so it lands in its own chunk and never
  * blocks first paint.
  */
-import { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import { useLatched, usePresence } from './motion';
 import { createPortal } from 'react-dom';
 import type {
@@ -68,7 +68,6 @@ import {
   createDenseYTicks,
   formatBigNumber,
   registerChartAxes,
-  T,
   X_AXIS_NAME,
   followTheme,
 } from '../chart/theme';
@@ -109,7 +108,7 @@ import {
   paintOf,
   registerDrawingOverlays,
 } from '../chart/drawingOverlays';
-import { drawingsKey, loadDrawings, parseDrawings, realZ, saveDrawings, setRealZ, toStored, type StoredDrawing } from '../chart/drawingStore';
+import { drawingsKey, loadDrawings, realZ, saveDrawings, setRealZ, toStored, type StoredDrawing } from '../chart/drawingStore';
 import { DrawingStyleBar } from '../chart/DrawingStyleBar';
 import { boxOf, marqueeHits, type Pt } from '../chart/marquee';
 import { SelectionMarks } from '../chart/SelectionMarks';
@@ -140,17 +139,10 @@ import {
   buildSnapshot,
   frozenFills,
   frozenPosition,
-  registerLiveChart,
   snapshotFileName,
-  snapshotFills,
-  snapshotPosition,
-  takePendingSnapshot,
-  thumbOf,
   type ChartSnapshot,
-  type LiveChart,
 } from '../chart/snapshot';
 import { ExportSheet } from '../chart/ExportSheet';
-import { foldersAvailable, onBridgeChange, saveToFolder } from '../folders/bridge';
 import { vsApi } from '../vsApi';
 import { account as sodexAccount } from '../exchange/sodexAccount';
 import { MENU_ICONS, TabMenu, type TabMenuItem } from '../dashboard/tabExtras';
@@ -827,23 +819,7 @@ function Chart({
     };
   }, [newsMenu]);
 
-  /** Re-mount the studies / re-load the drawings (a snapshot view opened or closed). */
-  const [indGen, setIndGen] = useState(0);
-  const [drawGen, setDrawGen] = useState(0);
-  /**
-   * A snapshot from a research folder on screen (chart/snapshot.ts): its
-   * drawings, studies, interval, price source and range, with the frozen
-   * position and fills it was saved with. The user's own drawings and studies
-   * are set aside, not touched - nothing is saved while it shows - until Keep
-   * (they become the user's) or Close (the user's come back).
-   */
-  const [snapView, setSnapView] = useState<ChartSnapshot | null>(null);
-  const snapViewRef = useRef<ChartSnapshot | null>(null);
-  /** The interval and price source to go back to when the snapshot closes. */
-  const beforeSnap = useRef<{ interval: string; priceSource: PriceSource } | null>(null);
-  const folders = useSyncExternalStore(onBridgeChange, foldersAvailable, () => false);
   const [exportOpen, setExportOpen] = useState(false);
-  const [exportBusy, setExportBusy] = useState(false);
   const tzRef = useRef(tz);
   tzRef.current = tz;
   /** Drawing modes on the rail. Magnet and stay-in-drawing persist; lock and
@@ -1204,7 +1180,7 @@ function Chart({
     const ro = new ResizeObserver(measure);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [drag, pending, awaiting, ticket, lineMsg, snapView]);
+  }, [drag, pending, awaiting, ticket, lineMsg]);
 
   // --- create the chart once -------------------------------------------------
   useEffect(() => {
@@ -1960,13 +1936,10 @@ function Chart({
       canModify,
       ...(modifyBlocked === null ? {} : { cannotModifyReason: modifyBlocked }),
     };
-    l.sync(
-      snapView ? positionLines(snapshotPosition(snapView), opts)
-      : [...(show.orders ? orderLines(rawOrders, opts) : []), ...(show.position ? positionLines(rawPositions, opts) : [])],
-    );
+    l.sync([...(show.orders ? orderLines(rawOrders, opts) : []), ...(show.position ? positionLines(rawPositions, opts) : [])]);
     const px = Number(lastBar.current?.close ?? lastPriceRef.current ?? Number.NaN);
     l.notePrice(Number.isFinite(px) ? px : null);
-  }, [ready, chartGen, address, engine, orders.data, positions.data, symbol, sym, canModify, modifyBlocked, show.orders, show.position, snapView]);
+  }, [ready, chartGen, address, engine, orders.data, positions.data, symbol, sym, canModify, modifyBlocked, show.orders, show.position]);
 
   // Switching market invalidates every price on screen, including any the user
   // was in the middle of dragging. Drop the interaction state rather than let a
@@ -2410,7 +2383,7 @@ function Chart({
       if (chart.current) fitPanes(chart.current, next);
       // The pane is stored as a group key - the pane id it has now - so studies
       // that share a pane come back sharing one (mountIndicator).
-      if (persist && !snapViewRef.current) {
+      if (persist) {
         setStoredSpecs(
           next.map((i) => ({ ...i.spec, visible: i.visible, pane: i.paneId === CANDLE_PANE_ID ? 'main' : i.paneId })),
         );
@@ -2527,7 +2500,7 @@ function Chart({
     // Idempotent: whatever this instance already carries is taken off first - but on a bare chart
     // a layer the caller drew on it (the liquidation heatmap: chart/liqHeatIndicator.ts) is the caller's.
     for (const i of c.getIndicators()) if (!(bare && i.name === LIQ_HEAT)) c.removeIndicator({ id: i.id, paneId: i.paneId });
-    const specs = bare ? [] : sanitizeSpecs(snapViewRef.current?.indicators ?? storedRef.current, new Set(lib.current?.getSupportedIndicators() ?? []));
+    const specs = bare ? [] : sanitizeSpecs(storedRef.current, new Set(lib.current?.getSupportedIndicators() ?? []));
     const out: ActiveIndicator[] = [];
     const paneOf = new Map<string, string>([['main', CANDLE_PANE_ID]]);
     let order = PANE_ORDER_BASE;
@@ -2543,7 +2516,7 @@ function Chart({
     }
     commitIndicators(out, false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, chartGen, indGen]);
+  }, [ready, chartGen]);
 
   /** Distinct indicator panes, top to bottom. */
   const paneList = (list: ActiveIndicator[]) => [...new Set(list.map((i) => i.paneId))].filter((p) => p !== CANDLE_PANE_ID);
@@ -2778,11 +2751,6 @@ function Chart({
   const [, bumpList] = useReducer((n: number) => n + 1, 0);
   /** Save the drawings on screen as this market's. Never the one being drawn. */
   const persistDrawings = useCallback(() => {
-    // A snapshot view is not the user's chart: Keep saves it, nothing before.
-    if (snapViewRef.current) {
-      bumpList();
-      return;
-    }
     const c = chart.current;
     const key = drawingsKeyRef.current;
     if (!c || !key || restoringDrawings.current) return;
@@ -2936,16 +2904,7 @@ function Chart({
     hiddenDrawings.current.clear();
     setMulti([]);
     const known = new Set(lib.current?.getSupportedOverlays() ?? []);
-    // Another market leaves the snapshot view (the mobile carousel keeps one
-    // chart across markets): that market's own drawings and the studies return.
-    const sv = snapViewRef.current;
-    if (sv && (sv.engine !== engine || sv.symbol !== symbol)) {
-      snapViewRef.current = null;
-      setSnapView(null);
-      beforeSnap.current = null;
-      setIndGen((g) => g + 1);
-    }
-    const stored = bare ? [] : snapViewRef.current ? parseDrawings(snapViewRef.current.drawings, known) : loadDrawings(key, known);
+    const stored = bare ? [] : loadDrawings(key, known);
     for (const d of stored) {
       const id = c.createOverlay({
         name: d.name,
@@ -2965,7 +2924,7 @@ function Chart({
     restoringDrawings.current = false;
     bumpList();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, chartGen, engine, symbol, drawGen]);
+  }, [ready, chartGen, engine, symbol]);
 
   const startRef = useRef<(name: string) => void>(() => undefined);
   const startDrawing = useCallback(
@@ -3904,7 +3863,7 @@ function Chart({
     if (!ready || !c) return;
     c.removeOverlay({ name: EXEC_OVERLAY });
     setMarkTip((t) => (t?.kind === 'exec' ? null : t));
-    const rows = snapView ? snapshotFills(snapView) : show.executions ? fills : [];
+    const rows = show.executions ? fills : [];
     if (masked || rows.length === 0) return;
     for (const m of fillMarks(rows, symbol, interval, barLookup)) {
       c.createOverlay({
@@ -3920,7 +3879,7 @@ function Chart({
       });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, chartGen, fills, show.executions, symbol, interval, masked, wantKey, snapView]);
+  }, [ready, chartGen, fills, show.executions, symbol, interval, masked, wantKey]);
 
   // The candles Who traded is breaking down, outlined on the plot while the panel is open.
   const showFlowPick = (w: { from: number; to: number } | null) => {
@@ -3977,29 +3936,10 @@ function Chart({
   );
   /** The markers stay a moment as news goes off, to fade out. */
   const newsLayer = useLatched(newsList.length ? newsList : null, 200);
-  /** A story into a knowledge folder, as the News widget saves one. */
-  const saveStory = async (n: NewsStory) => {
-    const saved = await saveToFolder({
-      kind: 'news',
-      title: n.title.length > 120 ? `${n.title.slice(0, 117)}…` : n.title,
-      data: { id: n.id, title: n.title, href: n.href, time: n.time, author: n.author ?? null, symbols: n.symbols ?? [], summary: n.summary ?? null, ...(n.post ? { post: true } : {}) },
-    });
-    if (saved) notify('ok', 'Story saved to the folder');
-  };
 
-  // --- snapshot: this chart for a research folder, and back (chart/snapshot.ts) -
-  /** A range to show once the snapshot's bars are on screen. */
-  const pendingView = useRef<{ key: string; from: number; to: number } | null>(null);
-  const captureImage = (): string | null => {
-    try {
-      return chart.current?.getConvertPictureUrl(true, 'png', T.bg) ?? null;
-    } catch {
-      return null;
-    }
-  };
-  /** The position and fills an export can freeze: the snapshot's own while one shows. */
-  const exportPositions = snapView ? snapshotPosition(snapView) : address && engine === 'perps' ? (positions.data?.positions ?? []) : [];
-  const exportFills = snapView ? snapshotFills(snapView) : fills;
+  // --- snapshot: this chart as a .json file (chart/snapshot.ts) -----------------
+  /** The position an export can freeze. */
+  const exportPositions = address && engine === 'perps' ? (positions.data?.positions ?? []) : [];
   const exportOf = (include: { position: boolean; executions: boolean }): ChartSnapshot | null => {
     const c = chart.current;
     if (!c) return null;
@@ -4020,102 +3960,24 @@ function Chart({
           .filter((d): d is StoredDrawing => d !== null),
         indicators: indicatorsRef.current.map((i) => ({ ...i.spec, visible: i.visible, pane: i.paneId === CANDLE_PANE_ID ? 'main' : i.paneId })),
         position: frozenPosition(exportPositions, symbol),
-        fills: exportFills,
+        fills,
         at: Date.now(),
       },
       include,
     );
   };
-  /** Save: into a folder through the folders' picker, or - without folders - as a file. */
-  const exportChart = async (include: { position: boolean; executions: boolean }) => {
+  /** Download it as a file. */
+  const exportChart = (include: { position: boolean; executions: boolean }) => {
     const snap = exportOf(include);
     if (!snap) return;
-    const title = `${sym?.displayName ?? symbol} · ${intervalLabel(interval)} · ${new Date(snap.at).toLocaleString(undefined, { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}`;
-    if (!folders) {
-      const url = URL.createObjectURL(new Blob([JSON.stringify(snap, null, 2)], { type: 'application/json' }));
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = snapshotFileName(snap);
-      a.click();
-      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-      setExportOpen(false);
-      return;
-    }
-    setExportBusy(true);
-    const thumb = await thumbOf(captureImage());
-    // The folders' picker takes it from here (it may ask the wallet to sign in).
+    const url = URL.createObjectURL(new Blob([JSON.stringify(snap, null, 2)], { type: 'application/json' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = snapshotFileName(snap);
+    a.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
     setExportOpen(false);
-    const saved = await saveToFolder({ kind: 'chart', title, data: snap, ...(thumb ? { thumb } : {}) });
-    setExportBusy(false);
-    if (saved) notify('ok', `Saved ${title} to the folder`);
   };
-
-  /** Show a snapshot of this market as the snapshot view. */
-  const openHere = (snap: ChartSnapshot) => {
-    if (!snapViewRef.current) beforeSnap.current = { interval, priceSource };
-    snapViewRef.current = snap;
-    setSnapView(snap);
-    setSelected(null);
-    setDrawingSettings(null);
-    const to = PERIOD_BY_INTERVAL[snap.interval] ? snap.interval : interval;
-    const source: PriceSource = snap.priceSource ?? 'latest';
-    if (to !== interval) setIntervalValue(to);
-    setPriceSource(source);
-    setIndGen((g) => g + 1);
-    setDrawGen((g) => g + 1);
-    const shownSource = source !== 'latest' && engine === 'perps' && !NO_MARK_INDEX.has(to) ? source : 'latest';
-    pendingView.current = snap.range ? { key: feedKey(engine, shownSource === 'latest' ? symbol : `${symbol}@${shownSource}`, to), ...snap.range } : null;
-  };
-  /** Keep: the snapshot's drawings and studies become the user's. Close: the user's come back. */
-  const closeSnapshot = (keep: boolean) => {
-    if (!snapViewRef.current) return;
-    snapViewRef.current = null;
-    setSnapView(null);
-    const before = beforeSnap.current;
-    beforeSnap.current = null;
-    if (keep) {
-      persistDrawings();
-      commitIndicators(indicatorsRef.current);
-      return;
-    }
-    if (before) {
-      if (before.interval !== interval) setIntervalValue(before.interval);
-      setPriceSource(before.priceSource);
-    }
-    pendingView.current = null;
-    setIndGen((g) => g + 1);
-    setDrawGen((g) => g + 1);
-  };
-  const snapRef = useRef({ open: openHere, engine, symbol });
-  snapRef.current = { open: openHere, engine, symbol };
-  const liveChart = useRef<LiveChart | null>(null);
-  if (!liveChart.current) {
-    liveChart.current = {
-      engine: () => snapRef.current.engine,
-      symbol: () => snapRef.current.symbol,
-      open: (snap) => snapRef.current.open(snap),
-    };
-  }
-  useEffect(() => registerLiveChart(liveChart.current!), []);
-  // A snapshot opened from a folder while this market's chart was not on screen.
-  useEffect(() => {
-    if (!ready) return;
-    const snap = takePendingSnapshot(engine, symbol);
-    if (snap) openHere(snap);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, engine, symbol]);
-  // The snapshot's range, once its bars are on screen.
-  useEffect(() => {
-    const c = chart.current;
-    const v = pendingView.current;
-    if (!c || !v || masked || v.key !== wantKey) return;
-    pendingView.current = null;
-    const list = c.getDataList();
-    const bars = Math.max(1, list.filter((b) => b.timestamp >= v.from && b.timestamp <= v.to).length);
-    const width = c.getSize(CANDLE_PANE_ID)?.width ?? 0;
-    if (width > 0) c.setBarSpace(Math.max(1, Math.min(50, width / (bars + DEFAULT_OFFSET_RIGHT / 4))));
-    c.scrollToTimestamp(v.to);
-  }, [masked, wantKey]);
 
   // A stays off across a new series or scale type (the owner's rule: only the
   // user switches A). klinecharts refits the rebuilt or reloaded axis; once
@@ -4678,8 +4540,6 @@ function Chart({
             coin={coin}
             mode={show.newsScope}
             tz={tz}
-            canSave={folders}
-            onSave={(n) => void saveStory(n)}
           />
         )}
         <FeedOverlay
@@ -4813,32 +4673,8 @@ function Chart({
           it. Persistent errors stay in flow above — a broken account feed is not
           transient and should keep its space.
         */}
-        {(active || ticket || lineMsg || snapView) && (
+        {(active || ticket || lineMsg) && (
           <div ref={notices} className="kc-notices">
-            {snapView && (
-              <div className="kc-snapbar" role="status">
-                <span className="kc-snapbar-title">Snapshot</span>
-                <span className="kc-snapbar-when">
-                  saved {new Date(snapView.at).toLocaleString(undefined, { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                  {snapView.include.position ? ' · with the position' : ''}
-                  {snapView.include.executions ? ' · with the fills' : ''}
-                </span>
-                <span className="kc-snapbar-note">Your own drawings and indicators are set aside.</span>
-                <span className="kc-snapbar-actions">
-                  <button
-                    type="button"
-                    className="kc-snapbar-keep"
-                    title={`Make these your drawings on ${sym?.displayName ?? symbol} and your indicators (replaces the ones set aside)`}
-                    onClick={() => closeSnapshot(true)}
-                  >
-                    Keep
-                  </button>
-                  <button type="button" onClick={() => closeSnapshot(false)} title="Back to your own chart">
-                    Close
-                  </button>
-                </span>
-              </div>
-            )}
             {active && (
               <div className="kc-movebar">
                 <span className="kc-movebar-title">
@@ -4996,7 +4832,6 @@ function Chart({
                 if (ind) setSettingsFor({ id, original: ind.spec });
               }}
               onIndicatorRemove={removeIndicator}
-              folders={folders}
               onSave={() => setExportOpen(true)}
               onClose={() => setSidebar(false)}
             />
@@ -5035,11 +4870,9 @@ function Chart({
             const p = frozenPosition(exportPositions, symbol);
             return p ? `${p.side === 'long' ? 'Long' : 'Short'} ${fmtQty(p.size, sym?.stepSize)} at ${fmtPrice(p.entry, sym?.tickSize)}` : null;
           })()}
-          fills={frozenFills(exportFills, symbol).length}
-          folders={folders}
-          busy={exportBusy}
-          onSave={(include) => void exportChart(include)}
-          onClose={() => !exportBusy && setExportOpen(false)}
+          fills={frozenFills(fills, symbol).length}
+          onSave={exportChart}
+          onClose={() => setExportOpen(false)}
         />
       )}
 

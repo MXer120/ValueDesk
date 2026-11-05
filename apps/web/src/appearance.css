@@ -95,24 +95,17 @@ html .symbolsearch,
 html .modal-aside__card,
 html .tabside,
 html .dash-edit-confirm,
-html .kq,
 html .copy-prompt,
 html .toast,
 html .kc-newspop,
 html .kc-mark-tip,
 html .kc-feed-card.boxed,
 html .kc-stylebar,
-html .kc-snapbar,
 html .devp__sheet,
 html .modal.fx,
 html .fx-list,
 html .fx-dock__panel,
-html .kc-stylebar-palette,
-html .kd-swatch__menu,
-html .kd-bubble,
-html .kd-slash,
-html .kn-picker__panel,
-html .ks-swatch__menu {
+html .kc-stylebar-palette {
   background-color: var(--glass-pop-bg);
   -webkit-backdrop-filter: var(--glass-pop-blur);
   backdrop-filter: var(--glass-pop-blur);
@@ -137,12 +130,7 @@ html .navaddr__menu,
 html .privacy__menu,
 html .dash-edit-confirm,
 html .kc-newspop,
-html .kc-mark-tip,
-html .kd-swatch__menu,
-html .kd-bubble,
-html .kd-slash,
-html .kn-picker__panel,
-html .ks-swatch__menu { border-radius: 14px; }
+html .kc-mark-tip { border-radius: 14px; }
 /* Deposit, withdraw and transfer (`fx-money`) keep their own shape and layout (the
    owner: "the rest is already perfect there") - only the edge and the fill above
    are theirs. Every other dialog, the ones on the funds sheets' `fx` look too,

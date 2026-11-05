@@ -18,32 +18,32 @@ import { DASH, fmtUsd, shortAddr } from '../format';
 import { useAsync } from '../hooks';
 import { setTheme, useTheme, type Theme } from '../theme';
 import { VENUE_LABEL, vsApi, type TraderRow, type Venue } from '../vsApi';
-import { WalletError, type Eip1193Provider } from '../wallet';
-import { USERNAME_MAX, usernameProblem, usernameProblemText } from '@sign/profiles/claim';
-import { WATCHLIST_EVENT, stepsOf, writeProgress, type Mode, type Step } from './model';
-import { ProfileError, checkName, claimUsername, useUsername } from './profile';
+import { USERNAME_MAX } from '@sign/profiles/claim';
+import { WATCHLIST_EVENT, stepsOf, writeProgress, type Step } from './model';
+import { NameHint, useNameCheck } from './ProfileAccount';
+import { ProfileError, setFirstUsername, useUsername } from './profile';
+import { REFERRAL_CODE, REFERRAL_URL, useReferral } from './referral';
 
 /* ------------------------------------------------------------------ the frame ----- */
 
-export function Onboarding({ mode, startAt, address, provider, onEnd }: {
-  mode: Mode;
+export function Onboarding({ startAt, offerReferral, address, onEnd }: {
   startAt: Step | null;
+  offerReferral: boolean;
   address: string;
-  provider: Eip1193Provider | null;
   onEnd: (finished: boolean) => void;
 }) {
   const username = useUsername(address);
   /* The list is fixed when the flow opens, so taking the name on the first step does not renumber the rest. */
-  const [steps] = useState<readonly Step[]>(() => stepsOf(mode, mode !== 'username' && !!username && startAt !== 'username'));
+  const [steps] = useState<readonly Step[]>(() => stepsOf(!!username && startAt !== 'username', offerReferral));
   const [index, setIndex] = useState(() => Math.max(0, startAt ? steps.indexOf(startAt) : 0));
   const step = steps[index]!;
   const root = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (mode === 'signup') writeProgress(address, { step, closed: false });
+    writeProgress(address, { step, closed: false });
     root.current?.scrollTo({ top: 0 });
     root.current?.querySelector<HTMLElement>('[data-onb-first]')?.focus({ preventScroll: true });
-  }, [address, mode, step]);
+  }, [address, step]);
 
   /* Nothing behind it scrolls while it is up, and the app's toasts wait (the wallet's "connected", the indexing card). */
   useEffect(() => {
@@ -80,12 +80,13 @@ export function Onboarding({ mode, startAt, address, provider, onEnd }: {
           </ol>
         )}
         <div className="onb__trail">
-          <button type="button" className="onb__skip" onClick={() => onEnd(false)}>{mode === 'signup' ? 'Skip' : 'Close'}</button>
+          <button type="button" className="onb__skip" onClick={() => onEnd(false)}>Skip</button>
         </div>
       </header>
       <main className="onb__main">
         <div key={step} className="onb__view">
-          {step === 'username' && <UsernameStep address={address} provider={provider} onDone={next} />}
+          {step === 'username' && <UsernameStep address={address} onDone={next} />}
+          {step === 'referral' && <ReferralStep address={address} onNext={next} />}
           {step === 'traders' && <TradersStep onNext={next} />}
           {(step === 'copy' || step === 'heatmap' || step === 'flow') && <FeatureStep feature={step} onNext={next} />}
           {step === 'overview' && <OverviewStep onNext={next} />}
@@ -111,55 +112,37 @@ function Head({ title, line }: { title: string; line: ReactNode }) {
 
 /* -------------------------------------------------------------- 1: the username ----- */
 
-type Check = { at: 'idle' | 'checking' | 'free' } | { at: 'no'; why: string };
-
-function UsernameStep({ address, provider, onDone }: { address: string; provider: Eip1193Provider | null; onDone: () => void }) {
+function UsernameStep({ address, onDone }: { address: string; onDone: () => void }) {
   const have = useUsername(address);
   const [name, setName] = useState('');
-  const [check, setCheck] = useState<Check>({ at: 'idle' });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const hint = useId();
+  const check = useNameCheck(name, address, null);
 
-  /* The rules at once, the server's "taken" a moment after the last key. */
-  useEffect(() => {
-    setError(null);
-    if (!name) { setCheck({ at: 'idle' }); return; }
-    const problem = usernameProblem(name);
-    if (problem) { setCheck({ at: 'no', why: usernameProblemText(problem) }); return; }
-    setCheck({ at: 'checking' });
-    const stop = new AbortController();
-    const t = setTimeout(() => {
-      checkName(name, stop.signal).then(
-        (r) => setCheck(r.available ? { at: 'free' } : { at: 'no', why: r.reason ?? 'This username is taken.' }),
-        (e) => { if (!stop.signal.aborted) setCheck({ at: 'no', why: e instanceof Error ? e.message : 'The check did not answer. Try again.' }); },
-      );
-    }, 260);
-    return () => { clearTimeout(t); stop.abort(); };
-  }, [name]);
+  useEffect(() => { setError(null); }, [name]);
 
-  const ready = check.at === 'free' && !busy && !!provider;
+  const ready = check.at === 'free' && !busy;
   const take = async () => {
-    if (!ready || !provider) return;
+    if (!ready) return;
     setBusy(true);
     setError(null);
     try {
-      await claimUsername(provider, address, name);
+      await setFirstUsername(address, name);
       onDone();
     } catch (e) {
       if (e instanceof ProfileError && e.code === 'has-name') { onDone(); return; }
-      if (e instanceof ProfileError && e.code === 'taken') setCheck({ at: 'no', why: 'This username was just taken.' });
-      else setError(e instanceof WalletError || e instanceof Error ? e.message : String(e));
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
   };
 
-  /* This wallet has one already (taken in another tab): nothing to ask. */
+  /* This wallet has one already (from another tab): nothing to ask. */
   if (have) {
     return (
       <div className="onb-narrow">
-        <Head title={`You are ${have}`} line="This wallet already has its username. It can't be changed." />
+        <Head title={`You are ${have}`} line="This wallet already has its username. You can change it in Settings." />
         <button type="button" className="fx-cta fx-cta--lg" onClick={onDone}>Continue</button>
       </div>
     );
@@ -167,7 +150,7 @@ function UsernameStep({ address, provider, onDone }: { address: string; provider
 
   return (
     <form className="onb-narrow" onSubmit={(e) => { e.preventDefault(); void take(); }}>
-      <Head title="Set your username" line="It stands for this wallet on ValueDesk. You can't change it later." />
+      <Head title="Set your username" line="It stands for this wallet on ValueDesk. You can change it later in Settings." />
       <input
         className={`fx-input onb-input${check.at === 'no' ? ' is-bad' : ''}`}
         value={name}
@@ -183,18 +166,35 @@ function UsernameStep({ address, provider, onDone }: { address: string; provider
         maxLength={USERNAME_MAX + 1}
         data-onb-first
       />
-      <p id={hint} className={`onb-hint is-${error ? 'no' : check.at}`} role="status">
-        <i aria-hidden="true" />
-        {error ?? (
-          check.at === 'no' ? check.why
-            : check.at === 'free' ? 'Available'
-            : check.at === 'checking' ? 'Checking…'
-            : `3 to ${USERNAME_MAX} letters, numbers or _`
-        )}
-      </p>
-      <button type="submit" className="fx-cta fx-cta--lg" disabled={!ready}>{busy ? 'Confirm in your wallet…' : 'Continue'}</button>
-      <p className="onb-foot">One free signature, never a transaction.</p>
+      <NameHint id={hint} check={check} error={error} idle={`3 to ${USERNAME_MAX} letters, numbers or _`} />
+      <button type="submit" className="fx-cta fx-cta--lg" disabled={!ready}>{busy ? 'Saving…' : 'Continue'}</button>
     </form>
+  );
+}
+
+/* --------------------------------------------------------- the SoDEX referral code ----- */
+
+function ReferralStep({ address, onNext }: { address: string; onNext: () => void }) {
+  const state = useReferral(address);
+  const [opened, setOpened] = useState(false);
+  const joined = state === 'bound' || state === 'pending';
+  return (
+    <div className="onb-narrow">
+      <Head title={joined ? 'Code applied' : 'Use our SoDEX code'} line={joined ? `Your wallet is on ${REFERRAL_CODE}.` : 'ValueDesk\'s referral code on SoDEX, for wallets without one.'} />
+      <div className={`onb-code${joined ? ' is-on' : ''}`}>
+        <i aria-hidden="true">{joined && <CheckIcon />}</i>
+        <b>{REFERRAL_CODE}</b>
+      </div>
+      {joined ? (
+        <button type="button" className="fx-cta fx-cta--lg" onClick={onNext} data-onb-first>Continue</button>
+      ) : (
+        <>
+          <a className="fx-cta fx-cta--lg onb-code__go" href={REFERRAL_URL} target="_blank" rel="noopener noreferrer" onClick={() => setOpened(true)} data-onb-first>{opened ? 'Open SoDEX again' : 'Apply on SoDEX'}</a>
+          <button type="button" className="onb-later" onClick={onNext}>{opened ? 'Continue' : 'Not now'}</button>
+          <p className="onb-foot">{opened ? 'Confirm with your wallet in the SoDEX tab. This page updates when you come back.' : 'SoDEX opens in a new tab and you confirm with your wallet. SoDEX rewards ValueDesk for wallets that use it. No funds move.'}</p>
+        </>
+      )}
+    </div>
   );
 }
 

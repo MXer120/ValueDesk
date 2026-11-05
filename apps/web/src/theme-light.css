@@ -3,13 +3,16 @@
    something (money, attention). `--ink` is what every hairline and tint in the sheets is made of
    (rgb(var(--ink) / a)), so they turn with the page.
 
-   Contrast on the white panel (theme.test.ts keeps it at 4.5:1 or better): text 18.4:1, muted 7.3:1, dim 4.6:1,
-   pos 4.7:1, neg 4.8:1, warn 4.7:1. Green and red are a step darker than dark's, which give 2.7:1 and 3.7:1 on white. */
+   Text holds 4.5:1 on the panel, on the page and on a hovered row (theme.test.ts). Green and red are
+   well darker than dark's, which give 2.7:1 and 3.7:1 on white. */
 html[data-theme='light'] {
   --ink: 0 0 0;
   --ink-solid: #000;
   --brand-ink: #141414;
   --scheme: light;
+  /* Green and red text on their own tinted pill. */
+  --pos-ink: #00553c;
+  --neg-ink: #8e1f16;
   --mix-pos-base: #ffffff;
   --mix-neg-base: #ffffff;
 
@@ -27,18 +30,18 @@ html[data-theme='light'] {
   --tint: rgba(0, 0, 0, 0.035);
 
   --text: #141414;
-  --muted: #565656;
-  --dim: #757575;
-  --disabled: #b0b0b0;
-  --pos: #00855f;
-  --neg: #d4372b;
+  --muted: #505050;
+  --dim: #626262;
+  --disabled: #6f6f6f;
+  --pos: #007050;
+  --neg: #b92a1e;
   --pos-deep: #0f6e74;
   --neg-deep: #a01e50;
-  --warn: #a86400;
-  --pos-dim: rgba(0, 133, 95, 0.55);
-  --neg-dim: rgba(212, 55, 43, 0.55);
-  --bid-bg: rgba(0, 133, 95, 0.13);
-  --ask-bg: rgba(212, 55, 43, 0.12);
+  --warn: #8a5600;
+  --pos-dim: rgba(0, 112, 80, 0.55);
+  --neg-dim: rgba(185, 42, 30, 0.55);
+  --bid-bg: rgba(0, 112, 80, 0.13);
+  --ask-bg: rgba(185, 42, 30, 0.12);
 
   --accent: #1f1f1f;
   --accent-hover: #000000;
@@ -167,10 +170,10 @@ html[data-theme='light'] .cpy { --cpy-surface-2: #f0f0ee; }
 html[data-theme='light'] .lqm-hist { background: #fff; }
 html[data-theme='light'] .lqm-hist2-note { background: rgba(255, 255, 255, 0.82); color: var(--text); }
 html[data-theme='light'] .lqm-ring { outline-color: #000; }
-html[data-theme='light'] .lqm-ln.is-long { background: #d4372b; }
-html[data-theme='light'] .lqm-ln.is-short { background: #00855f; }
-html[data-theme='light'] .lqm-cum.is-long { stroke: #d4372b; }
-html[data-theme='light'] .lqm-cum.is-short { stroke: #00855f; }
+html[data-theme='light'] .lqm-ln.is-long { background: #b92a1e; }
+html[data-theme='light'] .lqm-ln.is-short { background: #007050; }
+html[data-theme='light'] .lqm-cum.is-long { stroke: #b92a1e; }
+html[data-theme='light'] .lqm-cum.is-short { stroke: #007050; }
 
 /* Soft pills. */
 html[data-theme='light'] .mk-star.is-on,
@@ -184,3 +187,94 @@ html[data-theme='light'] .mk-heat__tile { color: var(--text); }
 
 /* The heatmap's scale, over the chart. */
 html[data-theme='light'] .lqm-hist-scale { background: rgba(255, 255, 255, 0.85); }
+
+/* Found by e2e/ui/themeAudit.ts. */
+html[data-theme='light'] .lbp-card.is-1, html[data-theme='light'] .lbp-place.is-1 { --metal: #7f6200; }
+html[data-theme='light'] .lbp-card.is-2, html[data-theme='light'] .lbp-place.is-2 { --metal: #5a5f69; }
+html[data-theme='light'] .lbp-card.is-3, html[data-theme='light'] .lbp-place.is-3 { --metal: #84521f; }
+html[data-theme='light'] .kc-rail-btn.active,
+html[data-theme='light'] .kc-rail-btn.active:hover { color: #000; }
+html[data-theme='light'] .kc-ind-tag { color: #fff; }
+html[data-theme='light'] .cpy-venue { color: color-mix(in srgb, var(--venue, var(--muted)) 30%, var(--text)); background: color-mix(in srgb, var(--venue, var(--muted)) 22%, transparent); }
+
+/* Settings: the same glass as dark, on a lighter scrim. */
+html[data-theme='light'] .modal-scrim:has(.modal.stg) { background: rgba(30, 30, 32, 0.14); }
+html[data-theme='light'] .modal.stg { box-shadow: 0 30px 80px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.6); }
+
+/* Pills: the hue's dark end on the hue's own tint. */
+html[data-theme='light'] .coh-bias.is-bull,
+html[data-theme='light'] .stg__pill.is-ok,
+html[data-theme='light'] .cdlg-tag,
+html[data-theme='light'] .fx-badge,
+html[data-theme='light'] .acct-levbox--long,
+html[data-theme='light'] .acct-pill--pos,
+html[data-theme='light'] .coh-d__n { color: var(--pos-ink); }
+html[data-theme='light'] .coh-bias.is-bear,
+html[data-theme='light'] .stg__btn.is-danger,
+html[data-theme='light'] .acct-levbox--short,
+html[data-theme='light'] .acct-pill--neg,
+html[data-theme='light'] .acct-act--danger,
+html[data-theme='light'] .cpy-cat--counter.is-on,
+html[data-theme='light'] .badge.danger { color: var(--neg-ink); }
+html[data-theme='light'] .lbp-card.is-1, html[data-theme='light'] .lbp-place.is-1 { --metal: #5e4900; }
+html[data-theme='light'] .lbp-card.is-2, html[data-theme='light'] .lbp-place.is-2 { --metal: #44484f; }
+html[data-theme='light'] .lbp-card.is-3, html[data-theme='light'] .lbp-place.is-3 { --metal: #6f4518; }
+
+/* Faded text that stayed readable on dark and did not on white. */
+html[data-theme='light'] span.acct-sub { opacity: 1; }
+html[data-theme='light'] .kc-draft__tag { opacity: 0.85; }
+html[data-theme='light'] .fx-srct__t small { color: var(--text); }
+html[data-theme='light'] .oe-pop__opt small,
+html[data-theme='light'] .oe-pop__opt span { color: var(--muted); }
+html[data-theme='light'] .coh-tree__ctl button:disabled { opacity: 0.8; }
+
+/* A row hovered is a hair lighter than dark's tint, so green and red hold on it. */
+html[data-theme='light'] .lbp .lbp-table tbody tr:hover td { background: rgba(0, 0, 0, 0.025); }
+
+/* Literal dark and white in the sheets, states no scene reaches included (the audit's third pass). */
+html[data-theme='light'] .kc-newsset input[role='switch'],
+html[data-theme='light'] .kc-side-switch input[role='switch'] { background-color: #cfcfcd; }
+html[data-theme='light'] .kc-multi-marks rect { stroke: #141414; }
+html[data-theme='light'] .kc-stylebar-count { color: var(--text); }
+html[data-theme='light'] .side__btn.side__connect:hover { color: var(--pos-ink); }
+html[data-theme='light'] .side__btn.side__addr:hover { background: #f3f3f1; }
+html[data-theme='light'] .navpill { background: #ecece9; border-color: var(--line-soft); }
+html[data-theme='light'] .lqm-hist-px { stroke: rgba(20, 20, 20, 0.85); }
+html[data-theme='light'] .modal-scrim,
+html[data-theme='light'] .cdlg-scrim { background: rgba(30, 30, 32, 0.14); }
+
+/* Glass on light: a lit white edge, as dark's is a lit grey one. */
+html[data-theme='light'] .menu-popup,
+html[data-theme='light'] .modal,
+html[data-theme='light'] .cp,
+html[data-theme='light'] .cdlg,
+html[data-theme='light'] .oe-pop,
+html[data-theme='light'] .navnotes__panel,
+html[data-theme='light'] .navaddr__menu { border-color: rgba(255, 255, 255, 0.65); outline: 1px solid rgba(0, 0, 0, 0.06); outline-offset: 0; }
+html[data-theme='light'] .dash-panel:not([data-panel='markets']):not([data-panel='livefeed']) { border-color: rgba(255, 255, 255, 0.6); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.04), 0 4px 18px rgba(40, 50, 70, 0.06); }
+html[data-theme='light'] .acct-levbox.acct-levbox--long,
+html[data-theme='light'] .cpy-msteps__s.is-done i { color: var(--pos-ink); }
+html[data-theme='light'] .dlg-btn.is-danger { color: var(--neg-ink); }
+html[data-theme='light'] .ex-arb tr.is-link:hover td { background: rgba(0, 0, 0, 0.018); }
+html[data-theme='light'] .kc-draft { --draft-ink: color-mix(in srgb, var(--pos) 80%, #000); }
+html[data-theme='light'] .kc-draft.is-sell { --draft-ink: color-mix(in srgb, var(--neg) 80%, #000); }
+html[data-theme='light'] .pf .acct-levbox--short { color: var(--neg-ink); }
+
+/* Drawn inside the sheets' data: URLs, so no variable reaches them: carets dark, ticks white. */
+html[data-theme='light'] .oe {
+  --oe-caret: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E%3Cpath d='M1 1.25 5 5 9 1.25' fill='none' stroke='%23505050' stroke-width='1' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  --oe-caret-on: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E%3Cpath d='M1 1.25 5 5 9 1.25' fill='none' stroke='%23141414' stroke-width='1' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+html[data-theme='light'] .dlg .dlg-select,
+html[data-theme='light'] .stg__select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 16 16'%3E%3Cpath d='m4 6 4 4 4-4' fill='none' stroke='%23505050' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+html[data-theme='light'] .oe-check input:checked {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 6.3 4.8 8.6 9.5 3.6' fill='none' stroke='%23ffffff' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+html[data-theme='light'] .dash-mktfilter input:checked {
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 6.2 4.8 8.5 9.5 3.8' fill='none' stroke='%23ffffff' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+
+/* A locked copy step, a faded row: readable on white too. */
+html[data-theme='light'] .cs-step:not(.is-current):not(.is-done) { opacity: 0.82; }

@@ -62,23 +62,23 @@ export const APPEARANCE_DEFAULT: Appearance = {
  * Settings tune the dark look, the owner's; on light these values hold.
  */
 const LIGHT_GLASS: Appearance = {
-  tint: '#fbfbfa',
-  tintAlpha: 82,
-  shade: 6,
-  shadeAlpha: 30,
-  blur: 20,
-  saturate: 1.1,
+  tint: '#ffffff',
+  tintAlpha: 66,
+  shade: 4,
+  shadeAlpha: 40,
+  blur: 26,
+  saturate: 1.7,
   glow: '#ffffff',
   glowAlpha: 40,
-  lift: 40,
+  lift: 34,
   innerGlow: 30,
   trade: true,
-  panelAlpha: 100,
-  panelBlur: 0,
-  pageGlow: '#ffffff',
-  pageGlowAlpha: 30,
-  pageGlow2: '#c9d6e6',
-  pageGlow2Alpha: 22,
+  panelAlpha: 58,
+  panelBlur: 30,
+  pageGlow: '#cfdcf0',
+  pageGlowAlpha: 60,
+  pageGlow2: '#d9cfe8',
+  pageGlow2Alpha: 55,
 };
 
 const KEY = 'vs.appearance';

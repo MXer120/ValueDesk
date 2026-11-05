@@ -1,9 +1,10 @@
 /**
- * A wallet's username from the server (apps/server/src/routes/profiles.ts), the claim the wallet
- * signs for one, and a small shared store so the flow and the address menu read the same answer.
+ * A wallet's username from the server (apps/server/src/routes/profiles.ts): the first needs no
+ * signature, a change is signed by the wallet. A small shared store so the flow, Settings and the
+ * address menu read the same answer.
  */
 import { useEffect, useSyncExternalStore } from 'react';
-import { USERNAME_CLAIM_TTL_MS, USERNAME_STATEMENT, usernameTypedData, type UsernameClaim } from '@sign/profiles/claim';
+import { USERNAME_CHANGE_TTL_MS, USERNAME_STATEMENT, usernameTypedData, type UsernameChange } from '@sign/profiles/claim';
 import { getChainId, signTypedData, type Eip1193Provider } from '../wallet';
 
 export interface ProfileAnswer {
@@ -37,9 +38,9 @@ export interface NameCheck {
   reason: string | null;
 }
 
-export async function checkName(name: string, signal?: AbortSignal): Promise<NameCheck> {
+export async function checkName(name: string, address: string | null, signal?: AbortSignal): Promise<NameCheck> {
   const { status, body } = await json<{ available?: boolean; reason?: string | null; error?: string }>(
-    `/api/vs/username/check?name=${encodeURIComponent(name)}`,
+    `/api/vs/username/check?name=${encodeURIComponent(name)}${address ? `&for=${address}` : ''}`,
     signal ? { signal } : undefined,
   );
   if (status !== 200) throw new ProfileError(body.error || `The check answered ${status}.`);
@@ -52,27 +53,40 @@ const nonce = (): string => {
   return Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
 };
 
-/** One free signature (never a transaction), then the server takes the name for this wallet for good. */
-export async function claimUsername(provider: Eip1193Provider, address: string, username: string): Promise<string> {
-  const chainId = await getChainId(provider).catch(() => 1);
-  const t = Date.now();
-  const owner = address.toLowerCase();
-  const fields: Omit<UsernameClaim, 'signature'> = {
-    owner, username, statement: USERNAME_STATEMENT, nonce: nonce(), issuedAt: String(t), expiresAt: String(t + USERNAME_CLAIM_TTL_MS - 30_000), chainId,
-  };
-  const signature = await signTypedData(provider, address, usernameTypedData(fields));
-  const { status, body } = await json<{ ok?: boolean; username?: string; code?: string; error?: string }>('/api/vs/username', {
+const post = (path: string, body: unknown) =>
+  json<{ ok?: boolean; username?: string; code?: string; error?: string }>(path, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ claim: { ...fields, signature } }),
+    body: JSON.stringify(body),
   });
+
+/** A wallet's first name: no signature. */
+export async function setFirstUsername(address: string, username: string): Promise<string> {
+  const { status, body } = await post('/api/vs/username', { address: address.toLowerCase(), username });
   if (status === 200 && body.username) {
     setKnownUsername(address, body.username);
     return body.username;
   }
-  // This wallet took a name in another tab or browser: that one stands.
+  // This wallet has a name already, from another tab or browser: that one stands.
   if (body.code === 'has-name' && body.username) setKnownUsername(address, body.username);
   throw new ProfileError(body.error || `The username was not saved (${status}).`, body.code);
+}
+
+/** Change the wallet's name: one free signature, never a transaction. */
+export async function changeUsername(provider: Eip1193Provider, address: string, username: string): Promise<string> {
+  const chainId = await getChainId(provider).catch(() => 1);
+  const t = Date.now();
+  const owner = address.toLowerCase();
+  const fields: Omit<UsernameChange, 'signature'> = {
+    owner, username, statement: USERNAME_STATEMENT, nonce: nonce(), issuedAt: String(t), expiresAt: String(t + USERNAME_CHANGE_TTL_MS - 30_000), chainId,
+  };
+  const signature = await signTypedData(provider, address, usernameTypedData(fields));
+  const { status, body } = await post('/api/vs/username/change', { change: { ...fields, signature } });
+  if (status === 200 && body.username) {
+    setKnownUsername(address, body.username);
+    return body.username;
+  }
+  throw new ProfileError(body.error || `The username was not changed (${status}).`, body.code);
 }
 
 /* ------------------------------------------------- the shared answer, per wallet ----- */

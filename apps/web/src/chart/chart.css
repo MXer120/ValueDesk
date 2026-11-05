@@ -1833,63 +1833,7 @@ body.kc-flow-resizing:has(.kc-flow-wrap.is-under) { cursor: row-resize; }
 .kc-calmark--high.is-open,
 .kc-calmark--high.is-near { border-color: var(--warn); color: var(--warn); }
 .kc-calmark:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
-.kc-newspop__save {
-  position: absolute;
-  top: 7px;
-  right: 6px;
-  display: grid;
-  place-items: center;
-  width: 26px;
-  height: 26px;
-  min-height: 0;
-  padding: 0;
-  border: 0;
-  border-radius: 7px;
-  background: transparent;
-  color: var(--dim);
-  opacity: 0;
-  cursor: pointer;
-  transition: opacity 120ms, color 120ms, background 120ms;
-}
-.kc-newspop__row:hover .kc-newspop__save,
-.kc-newspop__save:focus-visible { opacity: 1; }
-.kc-newspop__save:hover { color: var(--text); background: rgb(var(--ink) / 0.1); }
-@media (hover: none) { .kc-newspop__save { opacity: 0.7; } }
 .kc-newspop__foot { padding: 6px 8px 0; color: var(--dim); font-size: var(--fs-micro); }
-
-/* --- a snapshot from a folder on screen (Chart.tsx snapView) ---------------- */
-.kc-snapbar {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 4px var(--sp-2);
-  padding: 6px 6px 6px var(--sp-3);
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-md);
-  background: var(--glass-pop-bg, var(--bg-elevated));
-  -webkit-backdrop-filter: var(--glass-pop-blur);
-  backdrop-filter: var(--glass-pop-blur);
-  font-size: var(--fs-xs);
-}
-.kc-snapbar-title { font-weight: 600; color: var(--text); }
-.kc-snapbar-when { color: var(--muted); font-family: var(--font-num); }
-.kc-snapbar-note { flex: 1 1 auto; color: var(--dim); }
-.kc-snapbar-actions { display: inline-flex; gap: 4px; margin-left: auto; }
-.kc-snapbar-actions button {
-  height: 26px;
-  padding: 0 10px;
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  background: transparent;
-  color: var(--text);
-  font: inherit;
-  font-weight: 500;
-  box-shadow: none;
-  cursor: pointer;
-}
-.kc-snapbar-actions button:hover { border-color: var(--muted); }
-.kc-snapbar-actions .kc-snapbar-keep { border-color: transparent; background: var(--accent); color: var(--accent-text); }
-.kc-snapbar-actions .kc-snapbar-keep:hover { background: var(--accent-hover); }
 
 /* The export sheet's notes under each switch. */
 .modal.fx.kc-set .kc-export-what { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.55; }

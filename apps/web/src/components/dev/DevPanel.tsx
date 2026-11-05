@@ -30,7 +30,6 @@ import { openConnectDialog } from '../account/connect';
 import { FeeSchedule } from '../FeeSchedule';
 import { openPalette } from '../palette/lazyPalette';
 import { readPotatoOn, writePotato } from '../../setup/device';
-import { isKnowledgeOwner, setKnowledgeSwitch, useKnowledgeSwitch } from '../../folders/access';
 import { indexEnabled, resetIndex, setIndexEnabled, setIndexSpeed } from '../../setup/indexer';
 import { SPEED_ORDER, SPEEDS, readSpeed, type SpeedId } from '../../setup/stats';
 import './DevPanel.css';
@@ -104,9 +103,12 @@ function previewTerms(): BuilderTerms {
   };
 }
 
+/** The owner's wallet: the dock shows for it on the live site. */
+const OWNER_WALLET = '0x04fb8f9d0d8cd5495aa47e81ca9804cdf32a277d';
+
 /** Whether the dock is shown at all: dev builds, the owner's wallet, or a browser opted in by hand. */
 export function devPanelShown(address: string | null): boolean {
-  if (import.meta.env.DEV || isKnowledgeOwner(address)) return true;
+  if (import.meta.env.DEV || address?.toLowerCase() === OWNER_WALLET) return true;
   try {
     return localStorage.getItem('vs.dev') === '1';
   } catch {
@@ -127,7 +129,6 @@ export function DevPanel({ address, engine }: { address: string | null; engine: 
   const ref = useRef<HTMLElement>(null);
   const drag = useRef<{ dx: number; dy: number; x0: number; y0: number; moved: boolean } | null>(null);
   const builderConsent = useBuilderConsent();
-  const knowledgeSwitch = useKnowledgeSwitch();
 
   useEffect(() => {
     const onToggle = () => setOpen((v) => !v);
@@ -244,7 +245,7 @@ export function DevPanel({ address, engine }: { address: string | null; engine: 
           <div className="devp__body">
             <p className="devp__sec">Sheets</p>
             <button type="button" className="devp__btn" onClick={() => openSetup(0)}>Account setup</button>
-            <button type="button" className="devp__btn" title="The first-signup flow, from its first step. Nothing is stored for a username this wallet already has." onClick={() => { if (address) openOnboarding('signup'); else openConnectDialog(); }}>First signup</button>
+            <button type="button" className="devp__btn" title="The first-signup flow, from its first step." onClick={() => { if (address) openOnboarding(); else openConnectDialog(); }}>First signup</button>
             <div className="devp__row">
               {(['History', 'Layout', 'Device', 'Ready'] as const).map((label, i) => (
                 <button key={label} type="button" className="devp__mini" onClick={() => openSetup(i as 0 | 1 | 2 | 3)}>{label}</button>
@@ -270,15 +271,6 @@ export function DevPanel({ address, engine }: { address: string | null; engine: 
               <span className="devp__meta">{potato ? 'On' : 'Off'}</span>
             </button>
             <button type="button" className="devp__btn" title="Clears the finished flag and shows account setup again. The wallet, trading key, and trade index stay." onClick={forget}>Forget setup</button>
-            <button
-              type="button"
-              className="devp__btn"
-              title="Knowledge (folders, docs, sheets, boards, saved posts): off by default. On in this browser, for the owner's wallet only."
-              onClick={() => setKnowledgeSwitch(!knowledgeSwitch)}
-            >
-              Knowledge
-              <span className="devp__meta">{!knowledgeSwitch ? 'Off' : isKnowledgeOwner(address) ? 'On' : 'On · not this wallet'}</span>
-            </button>
             <div className="devp__row">
               <button type="button" className="devp__mini" onClick={() => notify('ok', 'Saved.')}>Ok</button>
               <button type="button" className="devp__mini" onClick={() => notify('info', 'Heads up.')}>Info</button>

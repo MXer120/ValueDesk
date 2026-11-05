@@ -166,5 +166,4 @@ html .modal.fx.vs-tpsl .modal-foot { padding: 14px 22px 18px; border-top: 1px so
 .dlg.vs-fee__dlg .dlg-row { padding: 10px 0; }
 .dlg.vs-fee__dlg .dlg-rowtext b { font-weight: 500; color: var(--muted); }
 .dlg .vs-fee__v { color: var(--text); font-family: var(--font-num); font-size: 14px; font-weight: 550; }
-.dlg .kt-add__sel { width: 100%; }
 .dlg .vs-setup__state { color: var(--text); font-size: 14px; font-weight: 550; }

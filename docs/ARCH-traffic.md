@@ -356,19 +356,6 @@ Against this inventory, HOSTED_ROUTES should be:
 - **Add**: `GET /api/vs/builder/beta?address=` (cls `read`): whether a wallet is on the beta
   list, for the hosted executor's live-bot gate (real bots: beta.valuedesk.so and the list only).
   Internal, as the volume above: without the `X-Internal-Token` it is a 404.
-- **Add**: the knowledge folders (`routes/folders.ts`), one wallet's own research:
-  `POST /api/folders/session` (cls `auth`: a signed `FoldersSignIn`, free typed data,
-  for a 7-day token), `GET /api/folders`, `/api/folders/item`, `/api/folders/file/url`
-  (where and how big a file is) and `/api/folders/file` (cls `read`, the wallet's token),
-  and the changes - `POST /api/folders/folder/{create,rename,delete,order}`,
-  `/api/folders/item/{create,update,move,delete}`, `/api/folders/upload/{start,put,finish}`,
-  `/api/folders/erase` (cls `write`: per client here, per wallet in the route, and the
-  site's Origin). A file's bytes go both ways in 4 MB pieces (`upload/put?part=`,
-  `file?part=`) because the Vercel function carries 4.5 MB at most; they are kept on the
-  instance's data volume. (An S3 mode exists in the code, FOLDERS_S3_BUCKET, unused: it
-  needs an IAM role and the bucket in the CSP.) The only POSTs of the index API; the
-  Vercel function lets POST, Content-Type and Authorization through under
-  `/api/folders` as under `/api/copy/`, and never caches either.
 - **Add**: `GET /api/vs/status` (cls `read`): the public status page's report - each
   service's last probe and its 90 days, built from `status.db` at most every 30 s and
   cacheable at the edge as long (`perf.ts`); no input (routes/status.ts, ops/status.ts).
@@ -383,7 +370,7 @@ Against this inventory, HOSTED_ROUTES should be:
   `POST /api/vs/feedback/poll` (the thread, and the owner's reply counts for up to 10 threads),
   `POST /api/vs/feedback/unread` (1 KB, a browser token: one bit, a new reply since it last saw
   its chat - the unread dot without a signature), all cls `write`; `POST /api/vs/feedback/session` (cls `auth`, 4 KB: a wallet's free signature
-  for its chat, ops/feedbackAuth.ts, like `/api/folders/session`);
+  for its chat, ops/feedbackAuth.ts);
   `GET /api/vs/feedback/image?id=` (cls `read`), and `POST /api/vs/client-errors`
   (cls `write`, 8 KB, `application/json` or `text/plain` for sendBeacon). The thread token is
   `Authorization: Bearer` (poll: in the body), never in a URL. POSTs need the site's exact Origin;
@@ -391,9 +378,9 @@ Against this inventory, HOSTED_ROUTES should be:
   and `Content-Type` and `Authorization` under `/api/vs/feedback` (body up to 2,113,536 bytes on
   `/upload`, 16 KB elsewhere) and POST + `Content-Type` on `/api/vs/client-errors` (8 KB), never
   cached; an image answer is up to 2 MiB (docs/GO-LIVE.md).
-- **Add**: `GET /api/vs/profile?address=`, `GET /api/vs/username/check?name=` (cls `read`) and `POST /api/vs/username`
-  (cls `write`, 4 KB, its own limit of 12 a minute per client): a wallet's username, signed by the wallet and never
-  changed (routes/profiles.ts, `profiles.db`).
+- **Add**: `GET /api/vs/profile?address=`, `GET /api/vs/username/check?name=` (cls `read`), `POST /api/vs/username` and
+  `POST /api/vs/username/change` (cls `write`, 1 and 4 KB, one limit of 12 a minute per client): a wallet's username.
+  The first needs no signature, a change is signed by the wallet (routes/profiles.ts, `profiles.db`).
 - **Add**: `POST /api/vs/a` (cls `write`, 16 KB, `application/json` or `text/plain`): the app's own
   analytics, sent only after the visitor allowed analytics (ops/analyticsModel.ts says what one batch
   holds; routes/analytics.ts). The Vercel function lets POST + `Content-Type` through on this path and adds

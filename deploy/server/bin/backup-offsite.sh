@@ -230,7 +230,7 @@ tar_set() {   # set, force  (api-state, folders, executor)
       # admin password's hash (admin-auth/): after a restore the owner sets it again.
       [ -f "$STATE_DIR/admin.db" ] && add_db "$STATE_DIR/admin.db"
       [ -f "$STATE_DIR/analytics.db" ] && add_db "$STATE_DIR/analytics.db"
-      # Who took which username, with the wallet's signature (apps/server/src/profiles/store.ts).
+      # Who has which username, and the signed changes (apps/server/src/profiles/store.ts).
       [ -f "$STATE_DIR/profiles.db" ] && add_db "$STATE_DIR/profiles.db"
       local f
       # status-history.json: the status page's finished days and incidents (apps/server/src/ops/status.ts writeHistory).

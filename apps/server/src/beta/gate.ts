@@ -11,7 +11,7 @@
  *     whatever token it still holds.
  *
  * THE TOKEN is `<owner>.<expiresAt>.<HMAC-SHA256>` under `beta-session.key` (32 bytes, 0600) in the
- * state directory - its own key, so a folders token is never a beta one.
+ * state directory - its own key, so a feedback token is never a beta one.
  *
  * On the main channel (no VALUESCAN_CHANNEL) none of this is installed.
  */

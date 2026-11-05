@@ -20,13 +20,8 @@
  * time - each switched on or off in Settings. Their stories have no type, so a
  * type filter shows SoSoValue's alone. The "Powered by SoSoValue" pill can be
  * dismissed for good (its x on hover; Settings brings it back).
- *
- * Each story can be saved to one of the wallet's knowledge folders (its
- * bookmark button, or a right-click): folders/bridge.ts saveToFolder - shown
- * only where the folders are mounted. Or dragged onto the rail's Knowledge
- * button, or a folder on the Knowledge page.
  */
-import { Fragment, useEffect, useMemo, useState, useSyncExternalStore, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
+import { Fragment, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useAsync, useStored } from '../../hooks';
 import { vsApi, type NewsItem } from '../../vsApi';
 import { CoinIcon } from '../CoinIcon';
@@ -38,9 +33,6 @@ import { PoweredBy } from './PoweredBy';
 import { FEED_IDS, SourceMark, sourceSite, useNewsSources, useOutletsOff } from './newsSources';
 import { moveSince, useCoinSeries, type PriceSource } from './moves';
 import { focusProps } from '../../chart/newsFocus';
-import { foldersAvailable, onBridgeChange, saveToFolder } from '../../folders/bridge';
-import { DRAG_NEWS } from '../../folders/drag';
-import { MENU_ICONS, TabMenu, menuAt, type TabMenuItem } from '../../dashboard/tabExtras';
 import { fmtFixed } from '../../numStyle';
 import './NewsFeed.css';
 
@@ -111,21 +103,9 @@ export function NewsFeed({ coin, instance, markets, onCoin, prices }: {
   const [q, setQ] = useState('');
   const [search, setSearch] = useState('');
   const [pages, setPages] = useState(1);
-  const canSave = useSyncExternalStore(onBridgeChange, foldersAvailable, foldersAvailable);
   const [isOn] = useNewsSources();
   const [outletsOff] = useOutletsOff();
   const offKey = [...outletsOff].sort().join(',');
-  const [menu, setMenu] = useState<{ at: { x: number; y: number }; items: TabMenuItem[] } | null>(null);
-  const storyMenu = (e: ReactMouseEvent, n: NewsItem) => {
-    if (!canSave) return;
-    setMenu({
-      at: menuAt(e),
-      items: [
-        { label: 'Open story', icon: MENU_ICONS.open, onClick: () => window.open(n.href, '_blank', 'noopener,noreferrer') },
-        { label: 'Save to folder', icon: MENU_ICONS.folder, onClick: () => void saveStory(n) },
-      ],
-    });
-  };
   const f: Feed = FEEDS.some((x) => x.id === feed) ? feed : 'latest';
   const here = coin ? coin.toUpperCase() : null;
   const list = markets?.length ? markets : MAJORS;
@@ -284,7 +264,7 @@ export function NewsFeed({ coin, instance, markets, onCoin, prices }: {
         ) : (
           <ol className="nw__items">
             {items.map((n) => (
-              <li key={n.id} className={`nw__row${ranked && n.rank ? ' has-rank' : ''}`} {...focusProps({ id: n.id, title: n.title })} onContextMenu={(e) => storyMenu(e, n)} onDragStart={(e) => e.dataTransfer.setData(DRAG_NEWS, JSON.stringify(storyData(n)))}>
+              <li key={n.id} className={`nw__row${ranked && n.rank ? ' has-rank' : ''}`} {...focusProps({ id: n.id, title: n.title })}>
                 {ranked && n.rank != null && <span className={`nw__rank${n.rank <= 3 ? ' is-top' : ''}`} aria-label={`Number ${n.rank}`}>{n.rank}</span>}
                 <div className="nw__body">
                   <a className="nw__item" href={n.href} target="_blank" rel="noopener noreferrer">
@@ -315,11 +295,6 @@ export function NewsFeed({ coin, instance, markets, onCoin, prices }: {
                       })}
                     </span>
                   )}
-                  {canSave && (
-                    <button type="button" className="nw__save" aria-label={`Save to folder: ${n.title}`} title="Save to folder" onClick={() => void saveStory(n)}>
-                      <SaveIcon />
-                    </button>
-                  )}
                 </div>
               </li>
             ))}
@@ -332,28 +307,9 @@ export function NewsFeed({ coin, instance, markets, onCoin, prices }: {
         )}
       </div>
       </>}
-      {menu && <TabMenu at={menu.at} items={menu.items} onClose={() => setMenu(null)} />}
     </section>
   );
 }
-
-/** A story as a folder keeps it. */
-const storyData = (n: NewsItem) => ({ id: n.id, title: n.title, href: n.href, time: n.time, author: n.author, symbols: n.symbols, summary: n.summary ?? null, ...(n.post ? { post: true } : {}) });
-
-/** A story into a folder, as the widget shows it. Dragged (its link), it carries the same to the rail's Knowledge button (folders/QuickDrop.tsx). */
-const saveStory = (n: NewsItem) =>
-  saveToFolder({
-    kind: 'news',
-    title: n.title.length > 120 ? `${n.title.slice(0, 117)}…` : n.title,
-    data: storyData(n),
-  });
-
-const SaveIcon = () => (
-  <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-    <path d="M2.5 4.5c0-.6.4-1 1-1h3l1.4 1.5h4.6c.6 0 1 .4 1 1v6c0 .6-.4 1-1 1h-9c-.6 0-1-.4-1-1z" />
-    <path d="M8 7.5v3.6M6.2 9.3h3.6" />
-  </svg>
-);
 
 const CalendarIcon = () => (
   <svg className="nw__flame" viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true">

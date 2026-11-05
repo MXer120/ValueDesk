@@ -4,7 +4,7 @@ import { PrivacyProvider } from './privacy';
 import { NavBar, scanHref } from './components/NavBar';
 import { SideBar } from './components/SideBar';
 import './components/shell.css';
-import { DEFAULT_TAB, OPEN_TAB_EVENT, SOON_TABS, TABS, isExcludedPath, isStatusPath, landingTab, legalForPath, pathForTab, tabForPath, useRoute, type LegalPage, type Tab } from './router';
+import { DEFAULT_TAB, SOON_TABS, TABS, isExcludedPath, isStatusPath, landingTab, legalForPath, tabForPath, useRoute, type LegalPage, type Tab } from './router';
 import { api, type Engine } from './api';
 import { useAsync, useConnState, useMediaQuery, useSession, useStored, useSymbols } from './hooks';
 import { hub } from './ws';
@@ -38,8 +38,6 @@ import { lazyPage, type LazyPage, lazyChunk } from './lazyPage';
 import { primeFirstReads } from './serverFetch';
 import type { Venue } from './vsApi';
 import { OPEN_LEGAL_EVENT, RegionBanner, TermsGate } from './legal/LegalGate';
-import { knowledgeOnAtBoot, useKnowledge } from './folders/access';
-import { registerChartOpener } from './folders/bridge';
 import { setLastPrice } from './lastPrice';
 import { priceSeeder } from './priceSeed';
 
@@ -73,17 +71,12 @@ const AlgoRunner = lazyChunk(() => import('./algo/AlgoRunner'));
 const LeaderboardPage = lazyPage('leaderboard', () => import('./components/leaderboard/LeaderboardPage').then((m) => m.LeaderboardPage));
 const PortfolioDashboard = lazyPage('portfolio', () => import('./dashboard/PortfolioDashboard').then((m) => m.PortfolioDashboard));
 const ScanDashboard = lazyPage('scan', () => import('./dashboard/ScanDashboard').then((m) => m.ScanDashboard));
-/* The knowledge folders' own page: docs, sheets, boards, saved posts, files (knowledge/). Off unless
-   the Dev panel turned it on for the owner's wallet (folders/access.ts): then not even fetched. */
 /* Bots (components/bots/): automated strategies on the ValueDesk executor. */
 // Bots: the page on the beta channel only (owner, 2026-11-02); on the main site the nav shows "coming soon" and
 // there is no page (router.ts SOON_TABS): nothing of it is built in.
 const BotsPage = BETA_CHANNEL
   ? lazyPage('bots', () => import('./components/bots/BotsPage').then((m) => m.BotsPage))
   : lazyPage('bots', () => Promise.resolve(() => null));
-const KnowledgePage = lazyPage('knowledge', () => import('./knowledge/KnowledgePage').then((m) => m.KnowledgePage));
-/* The folders' sign-in and save sheet (folders/FoldersHost.tsx): fetched only once Knowledge is on. */
-const FoldersHost = lazyChunk(() => import('./folders/FoldersHost').then((m) => ({ default: m.FoldersHost })));
 /* The market strip below is shown on no page today, so this never loads. */
 const TickerBar = lazyPage('ticker', () => import('./components/Market').then((m) => m.TickerBar));
 /* Impressum, privacy policy, terms (src/legal): one chunk for the three, loaded
@@ -103,16 +96,13 @@ const PAGES: Record<Tab, LazyPage<any>> = {
   leaderboard: LeaderboardPage,
   portfolio: PortfolioDashboard,
   scan: ScanDashboard,
-  knowledge: KnowledgePage,
   bots: BotsPage,
 };
 
 /** The page the first render shows, and the one an old URL is then moved to (router.ts). */
 const bootTabs = (): Tab[] => {
-  // /knowledge while Knowledge is off lands on the default page: its code is not even fetched.
-  const off = (t: Tab): Tab => (t === 'knowledge' && !knowledgeOnAtBoot() ? DEFAULT_TAB : t);
-  const first = off(tabForPath(window.location.pathname) ?? DEFAULT_TAB);
-  const settled = off(landingTab(window.location.pathname));
+  const first = tabForPath(window.location.pathname) ?? DEFAULT_TAB;
+  const settled = landingTab(window.location.pathname);
   return first === settled ? [first] : [first, settled];
 };
 /** The code the first render needs: a legal page's, the status page's, or the landing tab's (above). */
@@ -176,23 +166,6 @@ function AppShell() {
     };
     page.preload().then(go, go);
   }, [navigate]);
-  /* A chart saved to a research folder, opened again (folders/bridge.ts): on its
-     market, in the Trade page, where the chart shows it as a snapshot view
-     (chart/snapshot.ts - loaded on demand, so the chart code stays out of here). */
-  useEffect(
-    () =>
-      registerChartOpener((raw) => {
-        void import('./chart/snapshot').then(({ openSnapshot, parseChartSnapshot }) => {
-          const s = parseChartSnapshot(raw);
-          if (!s) return;
-          openSnapshot(s);
-          setEngine(s.engine);
-          setSymbol(s.symbol);
-          setTab('trade');
-        });
-      }),
-    [setEngine, setSymbol, setTab],
-  );
   /* The legal pages the same way: their chunk first, then the page. */
   const openLegal = useCallback((next: LegalPage) => {
     const seq = ++navSeq.current;
@@ -235,23 +208,6 @@ function AppShell() {
     window.addEventListener(OPEN_LEGAL_EVENT, on);
     return () => window.removeEventListener(OPEN_LEGAL_EVENT, on);
   }, [openLegal]);
-  /* Knowledge, only while the Dev panel's switch is on and the owner's wallet is connected (folders/access.ts). */
-  const knowledge = useKnowledge(address);
-  /* /knowledge while it is off: the default page instead, in place (no history entry to come back to). */
-  useEffect(() => {
-    if (tab !== 'knowledge' || knowledge || legal || status) return;
-    window.history.replaceState(null, '', pathForTab(DEFAULT_TAB));
-    window.dispatchEvent(new PopStateEvent('popstate'));
-  }, [tab, knowledge, legal, status]);
-  /* A page opened from outside the shell's props (router.ts openTab): the rail's quick drop, the save sheet. */
-  useEffect(() => {
-    const on = (e: Event) => {
-      const t = (e as CustomEvent<Tab>).detail;
-      if ((TABS as readonly string[]).includes(t) && !SOON_TABS.has(t) && (t !== 'knowledge' || knowledge)) setTab(t);
-    };
-    window.addEventListener(OPEN_TAB_EVENT, on);
-    return () => window.removeEventListener(OPEN_TAB_EVENT, on);
-  }, [setTab, knowledge]);
   /* The tab whose page is on screen - none while a legal page or the status page is. */
   const shown: Tab | null = legal || status || excluded ? null : tab;
   usePagePrefetch();
@@ -532,7 +488,7 @@ function AppShell() {
     </Guarded>
     <div className={`shell${rail ? ' shell--rail' : ''}`}>
       {rail && (
-        <SideBar address={address} hasLayout={hasLayout} dashLocked={dashLocked} onOpenSearch={() => openSearch()} tab={shown} onNavigate={setTab} knowledge={knowledge} />
+        <SideBar address={address} hasLayout={hasLayout} dashLocked={dashLocked} onOpenSearch={() => openSearch()} tab={shown} onNavigate={setTab} />
       )}
       {/* ONE bar of chrome at the top, 56px, and nothing underneath it.
        *
@@ -549,7 +505,6 @@ function AppShell() {
       <NavBar
         tab={shown}
         onNavigate={setTab}
-        knowledge={knowledge}
         address={address}
         hasLayout={hasLayout}
         dashLocked={dashLocked}
@@ -595,8 +550,8 @@ function AppShell() {
             is the loudest thing on screen answering a question nobody asked, and
             it pushed the account card - the only thing you can act on before
             scanning - below the fold. */}
-        {/* Explore and Copy are about traders, not one market: no strip there either. Knowledge is the user's own writing. */}
-        {tab !== 'trade' && tab !== 'portfolio' && tab !== 'scan' && tab !== 'leaderboard' && tab !== 'explore' && tab !== 'copy' && tab !== 'knowledge' && tab !== 'bots' && (
+        {/* Explore and Copy are about traders, not one market: no strip there either. */}
+        {tab !== 'trade' && tab !== 'portfolio' && tab !== 'scan' && tab !== 'leaderboard' && tab !== 'explore' && tab !== 'copy' && tab !== 'bots' && (
           <div className="marketbar">
             <Guarded name="Ticker">
               <TickerBar
@@ -649,9 +604,6 @@ function AppShell() {
           <Guarded name="Bots"><BotsPage address={address} provider={provider} /></Guarded>
         )}
 
-        {shown === 'knowledge' && knowledge && (
-          <Guarded name="Knowledge"><KnowledgePage address={address} /></Guarded>
-        )}
 
         {legal && (
           <Guarded name="Legal"><LegalDoc page={legal} onOpen={openLegal} /></Guarded>
@@ -714,15 +666,6 @@ function AppShell() {
         <Guarded name="Terms">
           <TermsGate hidden={!!legal || status} onOpen={openLegal} address={address} provider={provider} />
         </Guarded>
-        {/* The knowledge folders (folders/): the wallet's sign-in, and "Save to folder" from the chart and
-            News - which offer it only while this is mounted, so only while Knowledge is on. */}
-        {knowledge && (
-          <Guarded name="Folders">
-            <Suspense fallback={null}>
-              <FoldersHost address={address} provider={provider} />
-            </Suspense>
-          </Guarded>
-        )}
         {/* Live copy trading on every page: the browser copier runs whichever page is open. */}
         <Guarded name="Copy trading">
           <Suspense fallback={null}>
@@ -788,7 +731,7 @@ function AppShell() {
 function usePagePrefetch(): void {
   useEffect(() => {
     const all = () => {
-      for (const t of TABS) if (!SOON_TABS.has(t) && (t !== 'knowledge' || knowledgeOnAtBoot())) PAGES[t].preload().catch(() => {});
+      for (const t of TABS) if (!SOON_TABS.has(t)) PAGES[t].preload().catch(() => {});
     };
     const idle = typeof window.requestIdleCallback === 'function';
     const handle = idle ? window.requestIdleCallback(all, { timeout: 1000 }) : window.setTimeout(all, 300);
@@ -796,7 +739,7 @@ function usePagePrefetch(): void {
       const el = e.target instanceof Element ? e.target.closest('a[href]') : null;
       if (!(el instanceof HTMLAnchorElement) || el.origin !== window.location.origin) return;
       const t = tabForPath(el.pathname);
-      if (t && !PAGES[t].ready && (t !== 'knowledge' || knowledgeOnAtBoot())) PAGES[t].preload().catch(() => {});
+      if (t && !PAGES[t].ready) PAGES[t].preload().catch(() => {});
       if (!t && legalForPath(el.pathname) && !LegalDoc.ready) LegalDoc.preload().catch(() => {});
       if (!t && isStatusPath(el.pathname) && !StatusDoc.ready) StatusDoc.preload().catch(() => {});
     };
@@ -844,7 +787,7 @@ function useKeyboardShortcuts({
       const typing = el && (el.tagName === 'INPUT' || el.tagName === 'SELECT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
       if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
 
-      const tabs: readonly Tab[] = TABS.filter((t) => !SOON_TABS.has(t) && (t !== 'knowledge' || knowledgeOnAtBoot()));
+      const tabs: readonly Tab[] = TABS.filter((t) => !SOON_TABS.has(t));
       const idx = Number.parseInt(e.key, 10);
       if (idx >= 1 && idx <= tabs.length) {
         setTab(tabs[idx - 1]!);

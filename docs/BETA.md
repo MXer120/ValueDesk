@@ -32,7 +32,7 @@ then promoted to everyone.
    goes to the executor, `X-VS-Channel: beta` to 127.0.0.1:8798; `/ws/liq-beta` to 8798 as `/ws/liq`.
 4. `valuescan-api-beta.service` (port 8798, `/etc/valuescan/api-beta.env`) runs `/opt/valuescan/beta-current`
    with `VALUESCAN_CHANNEL=beta`: none of the main API's background jobs (release watcher, status prober,
-   Telegram poller, fee-order copier, folders upkeep, builder verifier) - it reads the same index and state.
+   Telegram poller, fee-order copier, builder verifier) - it reads the same index and state.
 
 ## Releasing
 

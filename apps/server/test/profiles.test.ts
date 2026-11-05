@@ -1,6 +1,6 @@
 /**
- * Usernames (profiles/, routes/profiles.ts): signed by the wallet, one per wallet, one wallet per
- * name in any spelling, and no way to change one - not through the route, not in the database.
+ * Usernames (profiles/, routes/profiles.ts): the first name needs no signature and only a wallet
+ * without one can take it; every change is signed by the wallet; one wallet per name in any spelling.
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -9,10 +9,9 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import Fastify from 'fastify';
 import { secp256k1 } from '@noble/curves/secp256k1';
-import { keccak_256 } from '@noble/hashes/sha3';
 
-import { usernameClaimDigest, checkUsernameClaim } from '../src/profiles/check.js';
-import { USERNAME_STATEMENT, usernameKey, usernameProblem, usernameTypedData, type UsernameClaim } from '../src/profiles/claim.js';
+import { checkUsernameChange, usernameChangeDigest } from '../src/profiles/check.js';
+import { USERNAME_STATEMENT, usernameKey, usernameProblem, usernameTypedData, type UsernameChange } from '../src/profiles/claim.js';
 import { ProfileStore } from '../src/profiles/store.js';
 import { USERNAME_LIMITS, profileRoutes } from '../src/routes/profiles.js';
 import { bytesToHex, privateKeyToAddress } from '../src/signing/eip712.js';
@@ -35,20 +34,22 @@ const rsv = (digest: Uint8Array, key: Uint8Array): string => {
   return bytesToHex(out);
 };
 
-function claim(w: W, username: string, o: Partial<UsernameClaim> = {}, signer: W = w): UsernameClaim {
+function change(w: W, username: string, o: Partial<UsernameChange> = {}, signer: W = w): UsernameChange {
   const base = { owner: w.address, username, statement: USERNAME_STATEMENT, nonce: randomBytes(16).toString('hex'), issuedAt: String(NOW), expiresAt: String(NOW + 5 * 60_000), chainId: 1, ...o };
-  return { ...base, signature: rsv(usernameClaimDigest(base), signer.key) };
+  return { ...base, signature: rsv(usernameChangeDigest(base), signer.key) };
 }
 
-async function api() {
+async function api(known?: (a: string) => boolean) {
   const store = new ProfileStore(':memory:');
   const app = Fastify();
-  await app.register(profileRoutes, { store, now: () => NOW, limiter: new KeyedLimiter(1000) });
+  let t = NOW;
+  await app.register(profileRoutes, { store, now: () => t, limiter: new KeyedLimiter(1000), ...(known ? { known } : {}) });
   await app.ready();
-  const post = (c: unknown) => app.inject({ method: 'POST', url: '/api/vs/username', payload: { claim: c } });
+  const first = (address: string, username: string) => app.inject({ method: 'POST', url: '/api/vs/username', payload: { address, username } });
+  const signed = (c: unknown) => app.inject({ method: 'POST', url: '/api/vs/username/change', payload: { change: c } });
   const profile = (a: string) => app.inject({ method: 'GET', url: `/api/vs/profile?address=${a}` });
-  const check = (n: string) => app.inject({ method: 'GET', url: `/api/vs/username/check?name=${encodeURIComponent(n)}` });
-  return { app, store, post, profile, check };
+  const check = (n: string, asker?: string) => app.inject({ method: 'GET', url: `/api/vs/username/check?name=${encodeURIComponent(n)}${asker ? `&for=${asker}` : ''}` });
+  return { app, store, first, signed, profile, check, tick: (ms: number) => { t += ms; } };
 }
 
 test('name rules: length, characters, addresses and reserved names', () => {
@@ -72,122 +73,183 @@ test('name rules: length, characters, addresses and reserved names', () => {
 
 test('typed data: the page signs exactly the fields the server hashes', () => {
   const w = newWallet();
-  const c = claim(w, 'Luke_1');
+  const c = change(w, 'Luke_1');
   const td = usernameTypedData(c);
-  assert.equal(td.primaryType, 'UsernameClaim');
+  assert.equal(td.primaryType, 'UsernameChange');
   assert.deepEqual(td.message, { owner: w.address, username: 'Luke_1', statement: USERNAME_STATEMENT, nonce: c.nonce, issuedAt: c.issuedAt, expiresAt: c.expiresAt });
-  // The EIP-712 type string of the typed data's field list is the one the digest starts from.
-  const type = `UsernameClaim(${td.types.UsernameClaim.map((f) => `${f.type} ${f.name}`).join(',')})`;
-  assert.equal(type, 'UsernameClaim(address owner,string username,string statement,string nonce,uint64 issuedAt,uint64 expiresAt)');
-  assert.equal(keccak_256(new TextEncoder().encode(type)).length, 32);
+  const type = `UsernameChange(${td.types.UsernameChange.map((f) => `${f.type} ${f.name}`).join(',')})`;
+  assert.equal(type, 'UsernameChange(address owner,string username,string statement,string nonce,uint64 issuedAt,uint64 expiresAt)');
 });
 
-test('claim check: wording, window, name, and only the wallet itself can sign', () => {
+test('change check: wording, window, name, and only the wallet itself can sign', () => {
   const w = newWallet();
   const other = newWallet();
-  assert.ok(checkUsernameClaim(claim(w, 'Luke_1'), NOW).ok);
+  assert.ok(checkUsernameChange(change(w, 'Luke_1'), NOW).ok);
   const cases: Array<[unknown, RegExp]> = [
     [null, /missing/],
-    [claim(w, 'Luke_1', { statement: 'something else' }), /not the username claim/],
-    [claim(w, 'Luke_1', {}, other), /not from this wallet/],
-    [claim(w, 'sodex_hq'), /reserved/],
-    [claim(w, 'Luke_1', { expiresAt: String(NOW - 1), issuedAt: String(NOW - 60_000) }), /expired/],
-    [claim(w, 'Luke_1', { expiresAt: String(NOW + 3_600_000) }), /longer than allowed/],
-    [claim(w, 'Luke_1', { issuedAt: String(NOW + 3_600_000), expiresAt: String(NOW + 3_660_000) }), /too far ahead/],
-    [{ ...claim(w, 'Luke_1'), username: 'Luke_2' }, /not from this wallet/],
+    [change(w, 'Luke_1', { statement: 'something else' }), /not the username change/],
+    [change(w, 'Luke_1', {}, other), /not from this wallet/],
+    [change(w, 'sodex_hq'), /reserved/],
+    [change(w, 'Luke_1', { expiresAt: String(NOW - 1), issuedAt: String(NOW - 60_000) }), /expired/],
+    [change(w, 'Luke_1', { expiresAt: String(NOW + 3_600_000) }), /longer than allowed/],
+    [change(w, 'Luke_1', { issuedAt: String(NOW + 3_600_000), expiresAt: String(NOW + 3_660_000) }), /too far ahead/],
+    [{ ...change(w, 'Luke_1'), username: 'Luke_2' }, /not from this wallet/],
   ];
   for (const [c, re] of cases) {
-    const r = checkUsernameClaim(c, NOW);
+    const r = checkUsernameChange(c, NOW);
     assert.equal(r.ok, false);
     assert.match((r as { error: string }).error, re);
   }
 });
 
-test('route: take a name; it is the wallet\'s; a repeat is the same answer', async () => {
+test('first name: no signature, and a repeat is the same answer', async () => {
   const a = await api();
   const w = newWallet();
   assert.equal((await a.profile(w.address)).json().username, null);
   assert.deepEqual((await a.check('Luke_1')).json(), { ok: true, available: true, reason: null });
-  const c = claim(w, 'Luke_1');
-  const r = await a.post(c);
+  const r = await a.first(w.address, 'Luke_1');
   assert.equal(r.statusCode, 200);
-  assert.deepEqual(r.json(), { ok: true, username: 'Luke_1', claimedAt: NOW });
+  assert.deepEqual(r.json(), { ok: true, username: 'Luke_1', updatedAt: NOW });
   assert.equal((await a.profile(w.address.toUpperCase().replace('0X', '0x'))).json().username, 'Luke_1');
-  assert.equal((await a.post(c)).statusCode, 200, 'the same claim twice (a retry after a lost answer)');
+  assert.equal((await a.first(w.address, 'luke_1')).statusCode, 200, 'a retry after a lost answer');
   assert.equal((await a.check('luke_1')).json().available, false);
+  assert.equal((await a.check('luke_1', w.address)).json().available, true, 'its own name, for the wallet that has it');
   await a.app.close();
 });
 
-test('route: a wallet keeps its first name; a name has one wallet, in any spelling', async () => {
+test('first name: bad input is refused and a name has one wallet in any spelling', async () => {
   const a = await api();
   const w = newWallet();
   const other = newWallet();
-  await a.post(claim(w, 'Luke_1'));
-  const second = await a.post(claim(w, 'Another_1'));
-  assert.equal(second.statusCode, 409);
-  assert.equal(second.json().code, 'has-name');
-  assert.equal(second.json().username, 'Luke_1');
-  const stolen = await a.post(claim(other, 'LUKE_1'));
+  assert.equal((await a.first('nope', 'Luke_1')).statusCode, 400);
+  assert.equal((await a.first(w.address, 'sodex_hq')).statusCode, 400);
+  await a.first(w.address, 'Luke_1');
+  const stolen = await a.first(other.address, 'LUKE_1');
   assert.equal(stolen.statusCode, 409);
   assert.equal(stolen.json().code, 'taken');
   assert.equal((await a.profile(other.address)).json().username, null);
+  await a.app.close();
+});
+
+test('without a signature a name cannot be replaced', async () => {
+  const a = await api();
+  const w = newWallet();
+  await a.first(w.address, 'Luke_1');
+  const r = await a.first(w.address, 'Another_1');
+  assert.equal(r.statusCode, 409);
+  assert.equal(r.json().code, 'has-name');
+  assert.equal(r.json().username, 'Luke_1');
   assert.equal((await a.profile(w.address)).json().username, 'Luke_1');
   await a.app.close();
 });
 
-test('route: a claim signed by another wallet and a bad address are refused', async () => {
+test('a signed change replaces the name and frees the old one', async () => {
+  const a = await api();
+  const w = newWallet();
+  await a.first(w.address, 'Luke_1');
+  a.tick(1000);
+  const r = await a.signed(change(w, 'Luke_2', { issuedAt: String(NOW + 500), expiresAt: String(NOW + 60_000) }));
+  assert.equal(r.statusCode, 200);
+  assert.equal(r.json().username, 'Luke_2');
+  assert.equal((await a.profile(w.address)).json().username, 'Luke_2');
+  assert.equal((await a.check('luke_1')).json().available, true);
+  await a.app.close();
+});
+
+test('a change only by the wallet itself, never to another wallet\'s name, never from an old signature', async () => {
   const a = await api();
   const w = newWallet();
   const other = newWallet();
-  assert.equal((await a.post(claim(w, 'Luke_1', {}, other))).statusCode, 400);
-  assert.equal((await a.profile('nope')).statusCode, 400);
-  assert.equal((await a.profile(w.address)).json().username, null);
+  await a.first(w.address, 'Luke_1');
+  await a.first(other.address, 'Other_1');
+  assert.equal((await a.signed(change(w, 'Luke_2', { issuedAt: String(NOW + 1), expiresAt: String(NOW + 60_000) }, other))).statusCode, 400);
+  const taken = await a.signed(change(w, 'OTHER_1', { issuedAt: String(NOW + 1), expiresAt: String(NOW + 60_000) }));
+  assert.equal(taken.statusCode, 409);
+  assert.equal(taken.json().code, 'taken');
+  assert.equal((await a.profile(w.address)).json().username, 'Luke_1');
+
+  // Luke_1 -> Luke_2 -> Luke_3, then the signature for Luke_2 again.
+  const toTwo = change(w, 'Luke_2', { issuedAt: String(NOW + 1), expiresAt: String(NOW + 60_000) });
+  a.tick(2000);
+  assert.equal((await a.signed(toTwo)).statusCode, 200);
+  a.tick(2000);
+  assert.equal((await a.signed(change(w, 'Luke_3', { issuedAt: String(NOW + 3000), expiresAt: String(NOW + 60_000) }))).statusCode, 200);
+  const replay = await a.signed(toTwo);
+  assert.equal(replay.statusCode, 409);
+  assert.equal(replay.json().code, 'stale');
+  assert.equal((await a.profile(w.address)).json().username, 'Luke_3');
   await a.app.close();
 });
 
-test('route: claims per client are limited', async () => {
+test('a wallet named by someone else takes it back with its signature', async () => {
   const a = await api();
-  const w = newWallet();
-  const c = claim(w, 'Luke_1');
-  let last = 0;
-  for (let i = 0; i <= USERNAME_LIMITS.claim.max; i++) last = (await a.post(c)).statusCode;
-  assert.equal(last, 429);
+  const victim = newWallet();
+  await a.first(victim.address, 'Squatted');
+  a.tick(1000);
+  assert.equal((await a.signed(change(victim, 'Mine_1', { issuedAt: String(NOW + 500), expiresAt: String(NOW + 60_000) }))).statusCode, 200);
+  assert.equal((await a.profile(victim.address)).json().username, 'Mine_1');
   await a.app.close();
 });
 
-test('route: known says a wallet has traded through ValueDesk, and a failing ledger never breaks the answer', async () => {
-  const store = new ProfileStore(':memory:');
+test('known says a wallet has traded through ValueDesk, and a failing ledger never breaks the answer', async () => {
   const traded = newWallet();
-  const app = Fastify();
   let broken = false;
-  await app.register(profileRoutes, { store, now: () => NOW, limiter: new KeyedLimiter(1000), known: (a: string) => { if (broken) throw new Error('no ledger'); return a === traded.address; } });
-  await app.ready();
-  const known = async (a: string) => (await app.inject({ method: 'GET', url: `/api/vs/profile?address=${a}` })).json().known;
+  const a = await api((x: string) => { if (broken) throw new Error('no ledger'); return x === traded.address; });
+  const known = async (x: string) => (await a.profile(x)).json().known;
   assert.equal(await known(traded.address), true);
   assert.equal(await known(newWallet().address), false);
   broken = true;
   assert.equal(await known(traded.address), false);
-  await app.close();
+  await a.app.close();
 });
 
-test('database: the row holds the signed claim, and no UPDATE gets through', () => {
+test('writes per client are limited', async () => {
+  const a = await api();
+  const w = newWallet();
+  let last = 0;
+  for (let i = 0; i <= USERNAME_LIMITS.write.max; i++) last = (await a.first(w.address, 'Luke_1')).statusCode;
+  assert.equal(last, 429);
+  assert.equal((await a.signed(change(w, 'Luke_2'))).statusCode, 429, 'one budget for both');
+  await a.app.close();
+});
+
+test('names taken on v0.2.158 carry over, and can be changed with a signature', () => {
+  const path = join(tempDir('vs-profiles-'), 'profiles.db');
+  const w = newWallet();
+  const db = new DatabaseSync(path);
+  db.exec(`CREATE TABLE usernames (address TEXT PRIMARY KEY, username TEXT NOT NULL, username_key TEXT NOT NULL UNIQUE, claimed_at INTEGER NOT NULL, statement TEXT NOT NULL, nonce TEXT NOT NULL, issued_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, chain_id INTEGER NOT NULL, signature TEXT NOT NULL) WITHOUT ROWID;
+    CREATE TRIGGER usernames_never_change BEFORE UPDATE ON usernames BEGIN SELECT RAISE(ABORT, 'a username does not change'); END;`);
+  db.prepare('INSERT INTO usernames VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(w.address, 'Early_1', 'early_1', NOW - 5000, 's', 'n', NOW - 5000, NOW, 1, '0xsig');
+  db.close();
+  const s = new ProfileStore(path);
+  assert.equal(s.byAddress(w.address)?.username, 'Early_1');
+  assert.equal(s.isTaken('early_1'), true);
+  assert.ok(s.change(change(w, 'Later_1', { issuedAt: String(NOW + 1), expiresAt: String(NOW + 60_000) }), NOW + 2).ok);
+  s.close();
+  const again = new ProfileStore(path);
+  assert.equal(again.byAddress(w.address)?.username, 'Later_1', 'a reopen does not bring the old name back');
+  again.close();
+});
+
+test('database: a signed change is kept whole, and the store survives a reopen', () => {
   const path = join(tempDir('vs-profiles-'), 'profiles.db');
   const s = new ProfileStore(path);
   const w = newWallet();
-  const c = claim(w, 'Luke_1');
-  assert.ok(s.claim(c, NOW).ok);
+  assert.ok(s.setFirst(w.address, 'Luke_1', NOW).ok);
+  const c = change(w, 'Luke_2', { issuedAt: String(NOW + 1), expiresAt: String(NOW + 60_000) });
+  assert.ok(s.change(c, NOW + 2).ok);
   s.close();
   const db = new DatabaseSync(path);
-  const row = db.prepare('SELECT * FROM usernames').get() as Record<string, unknown>;
+  const row = db.prepare('SELECT * FROM name_changes').get() as Record<string, unknown>;
   assert.equal(row.address, w.address);
-  assert.equal(row.username_key, 'luke_1');
+  assert.equal(row.old_username, 'Luke_1');
+  assert.equal(row.username, 'Luke_2');
   assert.equal(row.signature, c.signature);
   assert.equal(row.nonce, c.nonce);
-  assert.throws(() => db.prepare("UPDATE usernames SET username = 'Other_1', username_key = 'other_1'").run(), /does not change/);
   db.close();
-  // Survives a reopen, trigger included.
   const again = new ProfileStore(path);
-  assert.equal(again.byAddress(w.address)?.username, 'Luke_1');
-  assert.equal(again.isTaken('LUKE_1'), true);
+  assert.equal(again.byAddress(w.address)?.username, 'Luke_2');
+  assert.equal(again.isTaken('LUKE_2'), true);
+  assert.equal(again.isTaken('LUKE_2', w.address), false);
   again.close();
 });

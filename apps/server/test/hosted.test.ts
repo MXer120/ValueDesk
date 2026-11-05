@@ -242,11 +242,6 @@ test('the allow-list is exactly docs/ARCH-traffic.md section 5', () => {
       'GET /api/external/announcements/:id upstream',
       'GET /api/external/maintenance/status read',
       'GET /api/feed/account upstream',
-      'GET /api/folders read',
-      'GET /api/folders/file read',
-      'GET /api/folders/file/url read',
-      'GET /api/folders/item read',
-      'GET /api/folders/tweet upstream',
       'GET /api/health read',
       'GET /api/vs/builder/beta read',
       'GET /api/vs/builder/terms read',
@@ -309,19 +304,6 @@ test('the allow-list is exactly docs/ARCH-traffic.md section 5', () => {
       'POST /api/admin/tickets admin',
       'POST /api/admin/users admin',
       'POST /api/beta/session auth',
-      'POST /api/folders/erase write',
-      'POST /api/folders/folder/create write',
-      'POST /api/folders/folder/delete write',
-      'POST /api/folders/folder/order write',
-      'POST /api/folders/folder/rename write',
-      'POST /api/folders/item/create write',
-      'POST /api/folders/item/delete write',
-      'POST /api/folders/item/move write',
-      'POST /api/folders/item/update write',
-      'POST /api/folders/session auth',
-      'POST /api/folders/upload/finish write',
-      'POST /api/folders/upload/put write',
-      'POST /api/folders/upload/start write',
       'POST /api/vs/a write',
       'POST /api/vs/client-errors write',
       'POST /api/vs/feedback write',
@@ -333,6 +315,7 @@ test('the allow-list is exactly docs/ARCH-traffic.md section 5', () => {
       'POST /api/vs/inbox/add write',
       'POST /api/vs/inbox/list write',
       'POST /api/vs/username write',
+      'POST /api/vs/username/change write',
     ],
   );
   // Nothing is left marked provisional: the list is final.
@@ -349,18 +332,16 @@ test('the allow-list holds no custodial, per-user, diagnostic or websocket route
   ];
   for (const r of HOSTED_ROUTES) {
     for (const re of forbidden) assert.ok(!re.test(r.url), `${r.method} ${r.url} must not be public`);
-    // The index is read-only; the one thing a visitor changes is their own knowledge folders,
-    // the one thing a visitor sends is feedback and error reports to the owner (routes/reports.ts),
+    // The index is read-only; the one thing a visitor sends is feedback and error reports to the owner (routes/reports.ts),
     // and a signed-in wallet keeps its own algos' and copies' notices in its inbox (ops/inbox.ts).
     if (r.url === '/api/vs/feedback/image') assert.ok(r.method === 'GET' && r.cls === 'read', r.url);
     else if (r.url === '/api/vs/feedback/session') assert.ok(r.method === 'POST' && r.cls === 'auth', r.url);
-    else if (r.url.startsWith('/api/vs/feedback') || r.url.startsWith('/api/vs/inbox/') || r.url === '/api/vs/client-errors' || r.url === '/api/vs/a' || r.url === '/api/vs/username') assert.ok(r.method === 'POST' && r.cls === 'write', r.url);
+    else if (r.url.startsWith('/api/vs/feedback') || r.url.startsWith('/api/vs/inbox/') || r.url === '/api/vs/client-errors' || r.url === '/api/vs/a' || r.url === '/api/vs/username' || r.url === '/api/vs/username/change') assert.ok(r.method === 'POST' && r.cls === 'write', r.url);
     // The owner's admin suite (routes/admin.ts): POST only, its own class (the suite's Origin, its own limits).
     else if (r.url.startsWith('/api/admin/')) assert.ok(r.method === 'POST' && r.cls === 'admin', r.url);
     // The beta channel's sign-in (routes/beta.ts, beta API only): a wallet's free signature, cls auth.
     else if (r.url === '/api/beta/session') assert.ok(r.method === 'POST' && r.cls === 'auth', r.url);
-    else if (!r.url.startsWith('/api/folders/')) assert.equal(r.method, 'GET', `${r.method} ${r.url}: hosted mode is read-only`);
-    else if (r.method === 'POST') assert.ok(r.cls === 'write' || (r.cls === 'auth' && r.url === '/api/folders/session'), r.url);
+    else assert.equal(r.method, 'GET', `${r.method} ${r.url}: hosted mode is read-only`);
   }
   // HEAD follows GET; nothing else is implied.
   assert.ok(hostedRoute('HEAD', '/api/vs/leaderboard'));
@@ -861,16 +842,16 @@ test('index health: whatever the status holds, only a name, a number or a boolea
   assert.equal(Object.keys(capped.lanes).length, 16);
 });
 
-test('gate: a change to knowledge folders needs the site Origin and is counted as a write', async () => {
+test('gate: what a visitor sends needs the site Origin and is counted as a write', async () => {
   const app = await hostedApp({ limits: { write: { max: 2, windowMs: 60_000 } } });
-  const post = (headers: Record<string, string>) => app.inject({ method: 'POST', url: '/api/folders/item/create', headers, payload: {} });
+  const post = (headers: Record<string, string>) => app.inject({ method: 'POST', url: '/api/vs/feedback', headers, payload: {} });
   assert.equal((await post({})).statusCode, 403, 'no Origin');
   assert.equal((await post({ origin: 'https://evil.example' })).statusCode, 403);
   assert.equal((await post({ origin: SITE })).statusCode, 200);
   assert.equal((await post({ origin: SITE })).statusCode, 200);
   assert.equal((await post({ origin: SITE })).statusCode, 429, 'the write budget is per client');
-  assert.equal((await app.inject({ method: 'GET', url: '/api/folders' })).statusCode, 200, 'reading is not a write');
-  assert.equal((await app.inject({ method: 'DELETE', url: '/api/folders' })).statusCode, 404);
+  assert.equal((await app.inject({ method: 'GET', url: '/api/vs/leaderboard' })).statusCode, 200, 'reading is not a write');
+  assert.equal((await app.inject({ method: 'DELETE', url: '/api/vs/feedback' })).statusCode, 404);
 });
 
 test('gates: a hosted server never also runs the loopback gate, beta or not (dev.valuedesk.so "origin not allowed", 2026-11-02)', () => {

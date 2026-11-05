@@ -2,7 +2,7 @@
  * What the admin suite (dev.valuedesk.so) asks the builder wallet to sign
  * (admin/auth.ts checks it). Free EIP-712 typed data with fixed wording - never
  * a transaction - under a domain of its own, so a signature for the feedback
- * chat or the knowledge folders is never one for this, and the other way round.
+ * chat is never one for this, and the other way round.
  *
  *   AdminSignIn  opens a 24-hour session, together with the password.
  *   AdminAction  one write (a reply, a status change, signing out everywhere):
