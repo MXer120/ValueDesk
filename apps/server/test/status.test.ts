@@ -53,6 +53,7 @@ test('probes: up, degraded and down for each service', async () => {
     indexerStatus: indexer(T0 - 20_000, { sodex: true, hyperliquid: false }),
     now: () => T0,
     recheckMs: 0,
+    indexerRecheckMs: 0,
   });
   assert.deepEqual(mixed.map((s) => `${s.service}:${s.state}`), ['website:down', 'api:down', 'executor:degraded', 'indexer:degraded']);
 
@@ -78,6 +79,24 @@ test('probes: no answer is asked once more before it counts; a bad answer is not
   assert.equal(bad.filter((s) => s.url.endsWith('/api/health')).length, 1, 'a 502 is an answer: not asked again');
   const down = await probeAll({ targets: TARGETS, retryMs: 0, fetch: fakeFetch({}) });
   assert.equal(down.find((s) => s.service === 'executor')!.state, 'down', 'twice no answer: down');
+});
+
+test('probes: an indexer stream back by the next status is up; down in both is degraded; a stale status is down at once', async () => {
+  const healthy = { sodex: true, hyperliquid: true };
+  const sequence = (...streams: Array<Record<string, boolean>>) => {
+    let n = 0;
+    return () => {
+      n++;
+      return indexer(T0 - 20_000, streams[Math.min(n, streams.length) - 1]!)();
+    };
+  };
+  const stateOf = async (status: () => unknown) => (await probeAll({ targets: TARGETS, fetch: fakeFetch(ALL_UP), indexerStatus: status, now: () => T0, indexerRecheckMs: 0 })).find((s) => s.service === 'indexer')!.state;
+  assert.equal(await stateOf(sequence({ sodex: false, hyperliquid: true }, healthy)), 'up', 'a reconnect');
+  assert.equal(await stateOf(sequence({ sodex: false, hyperliquid: true }, { sodex: false, hyperliquid: true })), 'degraded', 'still down');
+  let reads = 0;
+  const stale = indexer(T0 - 10 * MIN);
+  assert.equal(await stateOf(() => { reads++; return stale(); }), 'down');
+  assert.equal(reads, 1, 'not asked again');
 });
 
 test('probes: a feed reconnecting is asked again; still not ok is degraded', async () => {

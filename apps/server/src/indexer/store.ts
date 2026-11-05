@@ -768,6 +768,18 @@ export interface RetentionStatus {
   lastBad: string | null;
 }
 
+/** Rows of the liquidation change log in one transaction (putLiqLogSliced): at about 1 ms a row on a busy disk, half a second. */
+export const LIQ_LOG_SLICE = 500;
+
+/**
+ * In key order (aid, coin, venue): each insert lands next to the last in the log's and the state's
+ * b-trees instead of on a page of its own (dev, 30k rows: 2.1 s -> 0.66 s, with the cache 0.36 s).
+ */
+function liqLogOrder<T extends { aid: number | string; coin: string; venue: number }>(rows: readonly T[]): T[] {
+  const aidOf = (x: T): number => (typeof x.aid === 'number' ? x.aid : Number.MAX_SAFE_INTEGER);
+  return [...rows].sort((a, b) => aidOf(a) - aidOf(b) || (a.coin < b.coin ? -1 : a.coin > b.coin ? 1 : 0) || a.venue - b.venue);
+}
+
 export class IndexStore {
   readonly db: DatabaseSync;
   private stmts = new Map<string, StatementSync>();
@@ -3394,15 +3406,8 @@ export class IndexStore {
     closed: ReadonlyArray<{ aid: number; coin: string; venue: number; mark?: number | null }>,
   ): Map<string, number> {
     const ids = new Map<string, number>();
-    // In key order (aid, coin, venue): each insert lands next to the last in the log's and the
-    // state's b-trees instead of on a page of its own (dev, 30k rows: 2.1 s -> 0.66 s, with the cache 0.36 s).
-    const key = (x: { aid: number | string; coin: string; venue: number }) => [typeof x.aid === 'number' ? x.aid : Number.MAX_SAFE_INTEGER, x.coin, x.venue] as const;
-    const byKey = <T extends { aid: number | string; coin: string; venue: number }>(rows: readonly T[]): T[] => [...rows].sort((a, b) => {
-      const [p, q] = [key(a), key(b)];
-      return p[0] - q[0] || (p[1] < q[1] ? -1 : p[1] > q[1] ? 1 : 0) || p[2] - q[2];
-    });
-    changed = byKey(changed);
-    closed = byKey(closed);
+    changed = liqLogOrder(changed);
+    closed = liqLogOrder(closed);
     this.tx(() => {
       const addr = this.q('INSERT INTO liq_addr (address) VALUES (?) ON CONFLICT (address) DO UPDATE SET address = excluded.address RETURNING id');
       for (const a of newAddrs) {
@@ -3425,6 +3430,33 @@ export class IndexStore {
         del.run(c.aid, c.coin, c.venue);
       }
     });
+    return ids;
+  }
+
+  /**
+   * putLiqLog in slices of LIQ_LOG_SLICE rows, with `pause` between them: about 36k rows a step
+   * (2026-11-05) in one transaction held the indexer's only thread while the disk wrote them, and a
+   * stall past 45 s called every stream's socket dead. Run again for the same step after a failure,
+   * it replaces what it wrote. Each slice is one transaction, so what a reader sees is whole rows.
+   */
+  async putLiqLogSliced(
+    t: number,
+    newAddrs: readonly string[],
+    changed: ReadonlyArray<{ aid: number | string; coin: string; venue: number; side: number; liq: number; usd: number } & LiqLogExtra>,
+    closed: ReadonlyArray<{ aid: number; coin: string; venue: number; mark?: number | null }>,
+    pause: () => Promise<void>,
+  ): Promise<Map<string, number>> {
+    const ids = this.putLiqLog(t, newAddrs, [], []);
+    const known = liqLogOrder(changed.map((c) => (typeof c.aid === 'number' ? c : { ...c, aid: ids.get(c.aid)! })));
+    for (let i = 0; i < known.length; i += LIQ_LOG_SLICE) {
+      this.putLiqLog(t, [], known.slice(i, i + LIQ_LOG_SLICE), []);
+      await pause();
+    }
+    const gone = liqLogOrder(closed);
+    for (let i = 0; i < gone.length; i += LIQ_LOG_SLICE) {
+      this.putLiqLog(t, [], [], gone.slice(i, i + LIQ_LOG_SLICE));
+      await pause();
+    }
     return ids;
   }
 

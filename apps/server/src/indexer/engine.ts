@@ -36,12 +36,13 @@ import { LighterVenue } from './ext/lighter.js';
 import { TradexyzVenue } from './ext/tradexyz.js';
 import type { ExtVenue } from './ext/types.js';
 import { CohortTracker } from './cohortTracker.js';
-import { mark, startedBefore } from './busy.js';
+import { PerformanceObserver, performance } from 'node:perf_hooks';
+import { STALL_LOG_MS, gcWithin, mark, noteGc, startedBefore } from './busy.js';
 import { hlCoinName } from '../valuedesk/extra/account.js';
 import { accountValue as fetchAccountValue, chartWindows, lookupPnl, syncCloses, syncLists, syncTrades } from './sodexSource.js';
 import type { BoardRow, Coverage, HistoryKind, IndexStore, TraderStatsRow, TraderWin } from './store.js';
 import { winRateOf } from '../valuedesk/winRate.js';
-import { HlStream, SodexStream, type Print } from './streams.js';
+import { HlStream, SodexStream, streamLog, type Print } from './streams.js';
 import { mayPrune } from '../retention.js';
 import { FlowRecorder } from '../flow/recorder.js';
 import { FlowStore } from '../flow/store.js';
@@ -345,6 +346,7 @@ export class Indexer {
   private lag = { max: 0, maxAt: 0, window: 0 };
   /** The last long stalls, each with what was running when it began. */
   private spikes: Array<{ late: number; at: number; by: string | null }> = [];
+  private gcWatch: PerformanceObserver | null = null;
   private gaps = Object.fromEntries(VENUES.map((v) => [v, [] as StreamGap[]])) as Record<Venue, StreamGap[]>;
   private advancedAt = 0;
   /** Board key -> the hour its ranks were last snapshotted. */
@@ -467,13 +469,26 @@ export class Indexer {
     prune.unref?.();
     this.timers.push(prune);
     every(REBUILD_MS, () => this.rebuild(), 'rebuild');
+    try {
+      this.gcWatch = new PerformanceObserver((list) => {
+        for (const e of list.getEntries()) noteGc(performance.timeOrigin + e.startTime, e.duration);
+      });
+      this.gcWatch.observe({ entryTypes: ['gc'] });
+    } catch { /* the stall lines then say 0 s of it */ }
     let tick = Date.now();
     every(500, () => {
       const now = Date.now();
       const late = Math.max(0, now - tick - 500);
       if (late >= 1_000) {
-        this.spikes.push({ late, at: now, by: startedBefore(tick + 500) });
+        const by = startedBefore(tick + 500);
+        this.spikes.push({ late, at: now, by });
         if (this.spikes.length > 8) this.spikes.shift();
+        if (late >= STALL_LOG_MS) {
+          // A second later: the observer's entries for the stall are delivered after it.
+          const from = now - late;
+          const said = setTimeout(() => streamLog(`thread stalled ${Math.round(late / 1000)} s, started by ${by ?? 'unknown'}, of it garbage collection ${Math.round(gcWithin(from, now) / 1000)} s`), 1_000);
+          said.unref?.();
+        }
       }
       tick = now;
       if (now - this.lag.maxAt > 60_000) this.lag.window = 0;
@@ -488,6 +503,7 @@ export class Indexer {
     this.stopped = true;
     for (const t of this.timers) clearInterval(t);
     this.timers = [];
+    this.gcWatch?.disconnect();
     this.hl.stop();
     this.sgw.stop();
     this.strades.stop();

@@ -65,6 +65,64 @@ test('a close is logged: its code, its reason, how long the socket was up', asyn
   }
 });
 
+test('a stall of this thread is not silence: what waits to be read keeps the socket; a socket really silent is still replaced', async () => {
+  const { wss, url } = await wsServer();
+  let opened = 0;
+  let talking = true;
+  wss.on('connection', (c) => {
+    opened++;
+    c.send('{"type":"connected"}');
+    const t = setInterval(() => { if (talking && c.readyState === c.OPEN) c.send('{"type":"tick"}'); }, 20);
+    c.on('close', () => clearInterval(t));
+  });
+  const lines: string[] = [];
+  const s = new LiveSocket(url, '{}', () => {}, () => {}, { name: 'hl', staleMs: 300, tickMs: 50, log: (l) => lines.push(l) });
+  try {
+    s.start();
+    await until(() => s.upSince !== null);
+    // The thread does nothing else for twice the stale limit. The frames sent meanwhile wait unread.
+    for (let n = 0; n < 2; n++) {
+      const end = Date.now() + 600;
+      while (Date.now() < end) { /* a stalled thread */ }
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    assert.equal(opened, 1, 'never replaced');
+    assert.deepEqual(lines, [], 'never closed');
+    assert.notEqual(s.upSince, null);
+
+    talking = false;
+    await until(() => lines.length > 0);
+    assert.match(lines[0]!, /^stream hl: closed 1006 after \d+ s up \(nothing came for \d+ s\); again in \d+ s$/);
+  } finally {
+    s.stop();
+    wss.close();
+  }
+});
+
+test('a venue that sends its close frame and never ends the connection is cut within about a second', async () => {
+  const { wss, url } = await wsServer();
+  wss.on('connection', (c) => {
+    c.send('{"type":"connected"}');
+    const raw = (c as unknown as { _socket: import('node:net').Socket })._socket;
+    setTimeout(() => {
+      raw.pause(); // it reads nothing more, so it never finishes the close
+      raw.write(Buffer.from([0x88, 0x02, 0x03, 0xe8])); // a close frame, code 1000
+    }, 30);
+  });
+  const lines: string[] = [];
+  const s = new LiveSocket(url, '{}', () => {}, () => {}, { name: 'sodex-perps', log: (l) => lines.push(l) });
+  try {
+    const t0 = Date.now();
+    s.start();
+    await until(() => lines.length > 0, 4000);
+    assert.ok(Date.now() - t0 < 3000, `cut after ${Date.now() - t0} ms, not left for the 5 s tick`);
+  } finally {
+    s.stop();
+    for (const c of wss.clients) c.terminate();
+    wss.close();
+  }
+});
+
 test('an HTTP 429 on connect: logged, and the next try waits out the cooldown (60 s)', async () => {
   const http = createServer((_req, res) => res.end());
   http.on('upgrade', (_req, socket) => socket.end('HTTP/1.1 429 Too Many Requests\r\nContent-Length: 0\r\n\r\n'));

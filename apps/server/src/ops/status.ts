@@ -463,15 +463,43 @@ async function timedRetry(fetchImpl: Fetch, url: string, headers: Record<string,
   return timed(fetchImpl, url, headers);
 }
 
+/**
+ * The indexer publishes its status every 30 s, so one socket reconnecting at that moment read as a
+ * stream down for the next 30 s (arcus and SoDEX reconnect about ten times an hour, in seconds).
+ * A stream that reads as down is read once more after the next publish: down in both is a degraded
+ * minute. A stale status is not asked again: the indexer has stopped publishing.
+ */
+export const INDEXER_RECHECK_MS = 35_000;
+
+function indexerState(status: () => unknown, now: () => number): 'up' | 'degraded' | 'down' {
+  let h = null;
+  try {
+    h = indexerHealth(status());
+  } catch {
+    /* no index file: down */
+  }
+  const fresh = h?.at !== null && h?.at !== undefined && now() - h.at <= INDEXER_STALE_MS;
+  const streams = Object.values(h?.streams ?? {});
+  return !fresh ? 'down' : streams.length && streams.every(Boolean) ? 'up' : 'degraded';
+}
+
+async function probeIndexer(status: () => unknown, now: () => number, recheckMs: number): Promise<'up' | 'degraded' | 'down'> {
+  const first = indexerState(status, now);
+  if (first !== 'degraded') return first;
+  if (recheckMs > 0) await new Promise((r) => setTimeout(r, recheckMs));
+  return indexerState(status, now);
+}
+
 /** Probe every service once. Never throws: a failed probe is a `down` sample. */
-export async function probeAll(o: { targets: ProbeTargets; fetch?: Fetch; indexerStatus?: () => unknown; now?: () => number; retryMs?: number; recheckMs?: number }): Promise<Sample[]> {
+export async function probeAll(o: { targets: ProbeTargets; fetch?: Fetch; indexerStatus?: () => unknown; now?: () => number; retryMs?: number; recheckMs?: number; indexerRecheckMs?: number }): Promise<Sample[]> {
   const f = o.fetch ?? fetch;
   const now = o.now ?? Date.now;
   const { site } = o.targets;
-  const [web, api, exec] = await Promise.all([
+  const [web, api, exec, indexer] = await Promise.all([
     timedRetry(f, `${site}/`, {}, o.retryMs),
     timedRetry(f, `${site}/api/health`, { Accept: 'application/json' }, o.retryMs),
     probeExecutor(f, o.targets, o.retryMs, o.recheckMs ?? EXECUTOR_RECHECK_MS),
+    o.indexerStatus ? probeIndexer(o.indexerStatus, now, o.indexerRecheckMs ?? INDEXER_RECHECK_MS) : null,
   ]);
   const out: Sample[] = [];
   out.push({
@@ -481,17 +509,7 @@ export async function probeAll(o: { targets: ProbeTargets; fetch?: Fetch; indexe
   });
   out.push({ service: 'api', state: api && api.res.status === 200 && jsonOk(api.body) === true ? 'up' : 'down', ms: api?.ms ?? null });
   out.push({ service: 'executor', state: exec.state, ms: exec.ms });
-  if (o.indexerStatus) {
-    let h = null;
-    try {
-      h = indexerHealth(o.indexerStatus());
-    } catch {
-      /* no index file: down */
-    }
-    const fresh = h?.at !== null && h?.at !== undefined && now() - h.at <= INDEXER_STALE_MS;
-    const streams = Object.values(h?.streams ?? {});
-    out.push({ service: 'indexer', state: !fresh ? 'down' : streams.length && streams.every(Boolean) ? 'up' : 'degraded', ms: null });
-  }
+  if (indexer) out.push({ service: 'indexer', state: indexer, ms: null });
   return out;
 }
 

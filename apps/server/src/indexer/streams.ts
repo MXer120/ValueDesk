@@ -23,7 +23,7 @@
  * trader's fills are complete from then on; the indexer only trusts that
  * window.
  */
-import WebSocket from 'ws';
+import WebSocket, { type ClientOptions } from 'ws';
 import { NET } from '../config.js';
 import type { Venue } from '../valuedesk/types.js';
 import { hlInfo } from '../valuedesk/hyperliquid/index.js';
@@ -63,6 +63,12 @@ const RECONNECT_CAP_MS = 30_000;
 const HANDSHAKE_MS = 15_000;
 /** A socket left closing this long is cut: otherwise its close event - and the reconnect - may never come. 3 s, not 10: "its close never finished" was SoDEX's commonest drop (57 of 115 since 10-29). */
 const CLOSING_MS = 3_000;
+/**
+ * ws cuts a socket itself this long after the venue's close frame if the venue then never ends the
+ * connection. It still was SoDEX's commonest drop (82 of 100, 2026-11-04 to 11-05), and waiting for
+ * tick() to find it made each one up to 8 s of a stream counted as down. tick() stays as the backstop.
+ */
+const CLOSE_HANDSHAKE_MS = 1_000;
 /** After an HTTP 429 on connect the next try waits at least this long (Lighter: a static 60 s cooldown). */
 const RATE_LIMITED_MS = 60_000;
 
@@ -100,6 +106,15 @@ export class LiveSocket {
   private ws: WebSocket | null = null;
   private attempt = 0;
   private lastMessageAt = 0;
+  /**
+   * How much of the time since the last message this thread itself was not running (tick() came
+   * late), so what the socket sent could not have been read. 2026-11-03 to 11-05: 33 times all six
+   * Hyperliquid, Arcus and Lighter sockets were called silent in the same second, after a stall of
+   * the indexer's own thread: the tick ran before the waiting frames did, and cutting the sockets
+   * threw those frames away and cost Lighter its ~90 s of subscribing again.
+   */
+  private stalledMs = 0;
+  private lastTickAt = 0;
   private timer?: NodeJS.Timeout;
   private reconnectTimer?: NodeJS.Timeout;
   private running = false;
@@ -121,6 +136,8 @@ export class LiveSocket {
       pingMs?: number;
       /** Silent this long: replaced (default STALE_MS). */
       staleMs?: number;
+      /** How often the socket is looked at (default TICK_MS). */
+      tickMs?: number;
       /** false: no permessage-deflate - frames are parsed as they come, never held for the zlib pool (LighterStream). */
       deflate?: boolean;
       /** For the log lines. */
@@ -138,7 +155,8 @@ export class LiveSocket {
     if (this.running) return;
     this.running = true;
     this.connect();
-    this.timer = setInterval(() => this.tick(), TICK_MS);
+    this.lastTickAt = Date.now();
+    this.timer = setInterval(() => this.tick(), this.opts.tickMs ?? TICK_MS);
     this.timer.unref?.();
   }
 
@@ -164,16 +182,20 @@ export class LiveSocket {
 
   private connect(): void {
     if (!this.running || this.ws) return;
-    const ws = new WebSocket(this.url, { perMessageDeflate: this.opts.deflate !== false, handshakeTimeout: HANDSHAKE_MS });
+    // closeTimeout: in ws, not yet in its published types.
+    const options: ClientOptions & { closeTimeout: number } = { perMessageDeflate: this.opts.deflate !== false, handshakeTimeout: HANDSHAKE_MS, closeTimeout: CLOSE_HANDSHAKE_MS };
+    const ws = new WebSocket(this.url, options);
     this.ws = ws;
     this.closingAt = 0;
     ws.on('open', () => {
       this.attempt = 0;
       this.openedAt = this.lastMessageAt = Date.now();
+      this.stalledMs = 0;
       void Promise.resolve(this.subscribe((m) => ws.send(JSON.stringify(m)))).catch(() => ws.terminate());
     });
     ws.on('message', (raw) => {
       this.lastMessageAt = Date.now();
+      this.stalledMs = 0;
       // Up from the moment the subscriptions were sent and data flows.
       if (this.upSince === null) this.upSince = this.openedAt;
       let msg: unknown;
@@ -209,6 +231,9 @@ export class LiveSocket {
   }
 
   private tick(): void {
+    const tickedAt = Date.now();
+    this.stalledMs += Math.max(0, tickedAt - this.lastTickAt - (this.opts.tickMs ?? TICK_MS));
+    this.lastTickAt = tickedAt;
     const ws = this.ws;
     if (!ws) return;
     if (ws.readyState === WebSocket.CLOSING) {
@@ -221,7 +246,7 @@ export class LiveSocket {
     }
     if (ws.readyState !== WebSocket.OPEN) return;
     const staleMs = this.opts.staleMs ?? STALE_MS;
-    if (Date.now() - this.lastMessageAt > staleMs) {
+    if (Date.now() - this.lastMessageAt - this.stalledMs > staleMs) {
       this.why = `nothing came for ${dur(Date.now() - this.lastMessageAt)}`;
       ws.terminate();
       return;

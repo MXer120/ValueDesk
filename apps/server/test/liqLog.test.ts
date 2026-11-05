@@ -48,6 +48,40 @@ test('a wallet history is rebuilt from the change log at each step the history k
   assert.equal(liqHistory('BTC', ['hyperliquid'], '1d', [`0x${'c'.repeat(40)}`])!.points.length, 0, 'a wallet never logged');
 });
 
+test('a step written in slices is row for row the step written at once, and the thread gets a turn between slices', async () => {
+  const { IndexStore, LIQ_LOG_SLICE } = await import('../src/indexer/store.js');
+  const whole = new IndexStore(join(dir, 'whole.db'));
+  const sliced = new IndexStore(join(dir, 'sliced.db'));
+  const wallets = Array.from({ length: LIQ_LOG_SLICE * 2 + 37 }, (_, i) => `0x${i.toString(16).padStart(40, '0')}`);
+  const oldWallet = `0x${'e'.repeat(40)}`;
+  const steps = [whole, sliced].map((s) => s.putLiqLog(1_000, [oldWallet], [{ aid: oldWallet, coin: 'BTC', venue: HL, side: 1, liq: 50_000, usd: 5 }], []));
+  assert.equal(steps[0]!.get(oldWallet), steps[1]!.get(oldWallet));
+  const known = steps[0]!.get(oldWallet)!;
+  const changed = [
+    ...wallets.map((aid, i) => ({ aid, coin: i % 2 ? 'BTC' : 'ETH', venue: HL, side: i % 3 ? 1 : -1, liq: 100 + i, usd: 10 + i, sz: i / 7, mark: 99.5 })),
+    { aid: known, coin: 'ETH', venue: HL, side: -1, liq: 3_000, usd: 8 },
+  ];
+  const closed = [{ aid: known, coin: 'BTC', venue: HL, mark: 51_000 }];
+
+  const t = 2_000;
+  const idsWhole = whole.putLiqLog(t, wallets, changed, closed);
+  let pauses = 0;
+  const idsSliced = await sliced.putLiqLogSliced(t, wallets, changed, closed, async () => { pauses++; });
+  assert.deepEqual([...idsSliced], [...idsWhole], 'the same ids');
+  assert.equal(pauses, 4, 'three slices of changes, one of closes');
+  const dump = (s: InstanceType<typeof IndexStore>) => ({
+    log: s.db.prepare('SELECT * FROM liq_log ORDER BY aid, coin, venue, t').all(),
+    cur: s.liqCur().sort((a, b) => a.aid - b.aid || a.coin.localeCompare(b.coin)),
+  });
+  assert.deepEqual(dump(sliced), dump(whole));
+
+  // Written again for the same step (a failure in the middle): nothing doubles.
+  const rows = dump(sliced).log.length;
+  await sliced.putLiqLogSliced(t, wallets, changed, closed, async () => {});
+  assert.equal(dump(sliced).log.length, rows);
+  assert.deepEqual(dump(sliced), dump(whole));
+});
+
 test('pruning keeps each position\'s state at the cut, drops what a later row replaced and old closes', async () => {
   const { IndexStore } = await import('../src/indexer/store.js');
   const s = new IndexStore(join(dir, 'prune.db'));

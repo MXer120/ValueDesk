@@ -2075,7 +2075,7 @@ export class CohortTracker {
    * (liq_cur, read once at the first step): a restart neither repeats every position nor misses
    * what closed while it was down. Pruned daily to LIQ_KEEP_MS (a row superseded before then).
    */
-  private logLevels(t: number, coins: ReadonlySet<string>, byCoin: ReturnType<LiqLive['positionsByCoin']>): void {
+  private async logLevels(t: number, coins: ReadonlySet<string>, byCoin: ReturnType<LiqLive['positionsByCoin']>): Promise<void> {
     const s = this.d.store;
     if (!this.levelState) {
       // Where the log begins, for the history's details (liqRead.ts liqAt: nothing before it is by position).
@@ -2119,7 +2119,9 @@ export class CohortTracker {
       closed.push({ aid: Number(aid), coin: coin!, venue: Number(venue), mark: this.coinPx.get(coin!)?.px ?? null });
     }
     if (!changed.length && !closed.length) return;
-    const ids = s.putLiqLog(t, [...fresh], changed, closed);
+    // Everything above is one instant of the books; only the writing is spread out. The state below
+    // moves when all of it is written, so a step that fails is written again from the same comparison.
+    const ids = await s.putLiqLogSliced(t, [...fresh], changed, closed, () => this.breathe());
     if (full) s.setMeta(LIQ_LOG_FULL_META, String(t));
     for (const [a, id] of ids) addr.set(a, id);
     for (const x of changed) {
@@ -2152,6 +2154,12 @@ export class CohortTracker {
     return { ...acct, sym, sz: p.szi, entry: p.entry, mark: this.marks.get(`${venue}|${sym}`) ?? null, iso: p.iso !== undefined, lev: p.lev ?? null };
   }
 
+  /** Let timers and sockets run between two slices of a liquidation step. */
+  private async breathe(): Promise<void> {
+    await new Promise<void>((r) => setImmediate(r));
+    mark('coh:liq');
+  }
+
   private async recordLiq(): Promise<void> {
     const now = this.d.now();
     if (this.liqRecording || !this.members.size || now - this.lastNowAt < LIQ_NOW_MS - 5_000) return;
@@ -2167,12 +2175,15 @@ export class CohortTracker {
       const t = Math.floor(now / LIQ_STEP_MS) * LIQ_STEP_MS;
       if (t > this.lastLiqT) {
         const keep = this.sodexCoins;
-        // Every position's exact level now, per coin: the fine layers and the change log.
+        // One instant of every position, copied here: the slices below all read this same moment.
+        const stepAt = Date.now();
         const byCoin = this.live.positionsByCoin(0, NO_WALLETS);
+        const positionsMs = Date.now() - stepAt;
         const hist: Array<[string, string]> = [];
         const fine: Array<[string, number, number, Uint8Array]> = [];
         const ticks = new Map<string, number>();
         for (const [sym, tick] of marketsNow('sodex')?.ticks ?? []) ticks.set(liqCoin(sym), tick);
+        let sliceAt = Date.now();
         for (const coin of keep) {
           const row = rows.get(coin);
           if (!row) continue;
@@ -2181,14 +2192,25 @@ export class CohortTracker {
           // Its fine layers over the whole range, down to the coin's tick, in price bands (levels.ts fineBands).
           const f = fineSnapOf(row.p, snap.st, byCoin.get(coin) ?? [], ticks.get(coin) ?? 0);
           if (f) for (const b of fineBands(f, fineBandWidth(row.p))) fine.push([coin, b.lo, b.hi, deflateRawSync(JSON.stringify(b.f))]);
+          if (Date.now() - sliceAt > SLICE_MS) {
+            await this.breathe();
+            sliceAt = Date.now();
+          }
         }
-        if (hist.length) s.putLiqHist(t, hist);
-        if (fine.length) s.putLiqHistFineBands(t, fine);
+        const layersAt = Date.now();
         // Every position's level at the same step, as a change log (the history's wallet filter).
-        this.logLevels(t, keep, byCoin);
+        // Before the snapshot: a snapshot at `t` says the step is there, and its log is by then whole.
+        await this.logLevels(t, keep, byCoin);
+        const loggedAt = Date.now();
+        if (fine.length) s.putLiqHistFineBands(t, fine);
+        await this.breathe();
+        if (hist.length) s.putLiqHist(t, hist);
         // Older snapshots - and the 15-minute ones thinned to hourly - go only with the owner's word.
         if (mayPrune('liq-history')) s.pruneLiqHist(now - LIQ_KEEP_MS, now - LIQ_THIN_MS, 60 * 60_000);
         this.lastLiqT = t;
+        const stepMs = Date.now() - stepAt;
+        // What the step took and in which part: a step's cost grows with the positions held.
+        if (stepMs >= 5_000) console.log(`[indexer] liq step ${Math.round(stepMs / 1000)} s: positions ${positionsMs} ms, layers ${layersAt - stepAt - positionsMs} ms, log ${loggedAt - layersAt} ms (${this.levelRows} rows), snapshots ${Date.now() - loggedAt} ms`);
       }
     } catch (e) {
       this.lastError = `liquidations: ${String(e)}`;
