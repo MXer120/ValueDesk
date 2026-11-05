@@ -11,6 +11,7 @@ import { dirname, join } from 'node:path';
 
 const running = runIndexer();
 console.log(`[indexer] writing ${running.store.path}`);
+running.store.startCheckpointer();
 profileOnSignal(join(dirname(running.store.path), 'profiles'), 'indexer');
 
 const stop = () => {

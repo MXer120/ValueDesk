@@ -142,6 +142,8 @@ export class LiqLive {
   /** Symbols per account in `multi`, to take it out again. */
   private multiOf = new Map<string, string[]>();
   private dirty = new Set<string>();
+  /** venue|symbol whose price moved: its accounts join `dirty` in `work`, within its budget, once however often it moved. */
+  private moved = new Set<string>();
   /** venue|symbol -> the price the accounts holding it were last re-priced at. */
   private pricedAt = new Map<string, number>();
   private epoch = 0;
@@ -178,11 +180,20 @@ export class LiqLive {
     const was = this.pricedAt.get(k);
     if (was !== undefined && Math.abs(px - was) <= MOVE * was) return;
     this.pricedAt.set(k, px);
-    for (const a of set) this.dirty.add(a);
+    this.moved.add(k);
   }
 
   get pending(): number {
     return this.dirty.size;
+  }
+
+  private takeMoved(until: number): void {
+    for (const k of this.moved) {
+      this.moved.delete(k);
+      const set = this.multi.get(k);
+      if (set) for (const a of set) this.dirty.add(a);
+      if (Date.now() >= until) return;
+    }
   }
 
   /**
@@ -202,13 +213,14 @@ export class LiqLive {
   work(max = 5_000, budgetMs = Number.POSITIVE_INFINITY): number {
     let n = 0;
     const until = Date.now() + budgetMs;
+    this.takeMoved(until);
     for (const key of this.dirty) {
       this.dirty.delete(key);
       this.reprice(key);
       this.done++;
       if (++n >= max || ((n & 63) === 0 && Date.now() >= until)) break;
     }
-    return this.dirty.size;
+    return this.dirty.size + this.moved.size;
   }
 
   /**
@@ -498,11 +510,11 @@ export class LiqLive {
     // The entries priced last time, taken out below: each left where it was is moved in place (move).
     const old = this.added.get(key) ?? [];
     this.added.delete(key);
-    for (const s of this.multiOf.get(key) ?? []) this.multi.get(s)?.delete(key);
-    this.multiOf.delete(key);
+    const wasMulti = this.multiOf.get(key);
     const acct = this.o.account(venue, address);
     const ps = acct?.positions.filter((p) => p.szi) ?? [];
     if (!acct || !ps.length) {
+      this.setMulti(key, wasMulti, []);
       for (const e of old) this.apply(venue, e, -1);
       for (const set of this.holders.values()) set.delete(key);
       return;
@@ -527,9 +539,12 @@ export class LiqLive {
       if (this.o.wanted && !this.o.wanted(coinName)) return;
       const c = this.coin(coinName);
       if (!c) return;
-      let h = this.holders.get(coinName);
-      if (!h) { h = new Set(); this.holders.set(coinName, h); }
-      h.add(key);
+      // Most reprices are of the same positions: no walk of a set of 100k+ for what it already holds.
+      if (!old.some((o) => o.coin === coinName)) {
+        let h = this.holders.get(coinName);
+        if (!h) { h = new Set(); this.holders.set(coinName, h); }
+        h.add(key);
+      }
       const l = liq[j] ?? null;
       const a = Math.abs(p.szi);
       const at = l === null || !(l > 0) ? (none[j] ? -3 : -2) : l < c.lo || l >= c.hi ? -1 : Math.floor(l / c.st);
@@ -552,15 +567,23 @@ export class LiqLive {
     this.added.set(key, entries);
     // Re-priced when another of its cross positions' prices moves.
     const cross = acct.priced ? ps.filter((p) => p.iso === undefined && p.fix == null) : [];
-    if (cross.length >= 2) {
-      const syms = cross.map((p) => `${venue}|${p.symbol}`);
-      for (const s of syms) {
-        let set = this.multi.get(s);
-        if (!set) { set = new Set(); this.multi.set(s, set); }
-        set.add(key);
-      }
-      this.multiOf.set(key, syms);
+    this.setMulti(key, wasMulti, cross.length >= 2 ? cross.map((p) => `${venue}|${p.symbol}`) : []);
+  }
+
+  /** The account's place in `multi`. The same symbols as before (nearly every reprice): nothing to do. */
+  private setMulti(key: string, was: string[] | undefined, syms: string[]): void {
+    if (was && was.length === syms.length && was.every((s, i) => s === syms[i])) return;
+    for (const s of was ?? []) this.multi.get(s)?.delete(key);
+    if (!syms.length) {
+      this.multiOf.delete(key);
+      return;
     }
+    for (const s of syms) {
+      let set = this.multi.get(s);
+      if (!set) { set = new Set(); this.multi.set(s, set); }
+      set.add(key);
+    }
+    this.multiOf.set(key, syms);
   }
 }
 

@@ -87,7 +87,7 @@ export async function hlSyncFills(store: IndexStore, address: string, fromT: num
       mark('hl:fills');
       const list = Array.isArray(page) ? page : [];
       const got = list.flatMap((f) => hlFillRow(address, f) ?? []);
-      store.putFills(got);
+      await store.putFillsSliced(got, yieldLoop);
       rows += list.length;
       for (const r of got) {
         if (firstT === null || r.t < firstT) firstT = r.t;
@@ -112,7 +112,7 @@ export async function hlSyncFills(store: IndexStore, address: string, fromT: num
     mark('hl:fills');
     const list = Array.isArray(page) ? page : [];
     const got = list.flatMap((f) => hlFillRow(address, f) ?? []);
-    store.putFills(got);
+    await store.putFillsSliced(got, yieldLoop);
     rows += list.length;
     const minT = got.reduce((m, r) => Math.min(m, r.t), o.now);
     await store.dropStreamRowsAsync('hyperliquid', address, minT, o.now, yieldLoop);

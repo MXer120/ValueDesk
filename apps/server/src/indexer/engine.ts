@@ -38,6 +38,7 @@ import type { ExtVenue } from './ext/types.js';
 import { CohortTracker } from './cohortTracker.js';
 import { PerformanceObserver, performance } from 'node:perf_hooks';
 import { STALL_LOG_MS, gcWithin, mark, noteGc, startedBefore } from './busy.js';
+import { SlicedWork } from './slicedWork.js';
 import { hlCoinName } from '../valuedesk/extra/account.js';
 import { accountValue as fetchAccountValue, chartWindows, lookupPnl, syncCloses, syncLists, syncTrades } from './sodexSource.js';
 import type { BoardRow, Coverage, HistoryKind, IndexStore, TraderStatsRow, TraderWin } from './store.js';
@@ -148,6 +149,11 @@ export function statsFrom(window: BoardWindow, now: number): number {
 /** Stream-discovered SoDEX wallets are re-queued for lookups this often per window. */
 const LOOKUP_SCAN_MS = 10 * 60_000;
 const FLUSH_MS = 5_000;
+/** A flush keeps the thread this long at a time. */
+const FLUSH_BUDGET_MS = 40;
+/** Rows per transaction in a flush: at ~2 ms a row, 150 fills are a third of a second of the thread. */
+const FLUSH_FILLS = 150;
+const FLUSH_ACTIVITY = 300;
 /** A held range this fresh answers for "now" even without the stream. */
 const STALE_MS = 10 * 60_000;
 /** Candidates waiting for a trade check per board before the walk stops. */
@@ -313,6 +319,12 @@ export class Indexer {
   private act = new Map<string, ActRec>();
   private lastOrder = new Map<string, string>();
   private pendingFills: import('./store.js').FillRow[] = [];
+  /** What a flush writes, with the loop let in between slices. */
+  private writes = new SlicedWork({
+    budgetMs: FLUSH_BUDGET_MS,
+    onError: (e) => { this.lastError = `flush: ${String(e)}`; },
+    onResume: () => mark('flush'),
+  });
   private streamState = Object.fromEntries(VENUES.map((v) => [v, { since: null, lastUp: 0 }])) as Record<Venue, StreamState>;
   private sodexIdOf = new Map<string, number>();
   private building = false;
@@ -606,6 +618,8 @@ export class Indexer {
       flow: this.flow?.status() ?? null,
       aggregates: this.store.aggBacklog,
       heldPartials: this.store.heldPartials,
+      checkpoint: this.store.checkpointStatus,
+      flushBacklog: this.writes.backlog,
       retention: this.store.retention(this.now()),
       lanes: { hl: lane(this.hl), sgw: lane(this.sgw), strades: lane(this.strades), sdata: lane(this.sdata) },
       venues: Object.fromEntries([...this.ext].map(([v, x]) => [v, x.status()])),
@@ -675,20 +689,38 @@ export class Indexer {
     this.act.clear();
     const fills = this.pendingFills;
     this.pendingFills = [];
-    try {
-      this.store.addActivity(rows);
-      this.store.putFills(fills);
-      // Days with new fills: re-summed a slice at a time, never holding the loop.
-      this.store.flushAggregates(40);
-      this.trackStreams(this.now());
-      this.advanceCoverage(this.now());
-      if (this.pendingStats.length) {
-        this.store.putTraderStats(this.pendingStats);
-        this.pendingStats = [];
+    const at = this.now();
+    // A write that failed: this flush's coverage does not move, as the rows it speaks for are not held.
+    let failed = false;
+    const write = (fn: () => void) => () => {
+      try {
+        fn();
+      } catch (e) {
+        failed = true;
+        throw e;
       }
-    } catch (e) {
-      this.lastError = `flush: ${String(e)}`;
-    }
+    };
+    const steps: Array<() => void> = [];
+    for (let i = 0; i < rows.length; i += FLUSH_ACTIVITY) steps.push(write(() => this.store.addActivity(rows.slice(i, i + FLUSH_ACTIVITY))));
+    for (let i = 0; i < fills.length; i += FLUSH_FILLS) steps.push(write(() => this.store.putFills(fills.slice(i, i + FLUSH_FILLS))));
+    // Days with new fills: re-summed a slice at a time, never holding the loop.
+    steps.push(write(() => { this.store.flushAggregates(40); }));
+    // After this flush's rows are written, and as of the time they were taken: what the coverage claims is stored.
+    steps.push(() => {
+      if (failed) return;
+      this.store.tx(() => {
+        this.trackStreams(at);
+        this.advanceCoverage(at);
+      });
+    });
+    steps.push(() => {
+      if (!this.pendingStats.length) return;
+      const stats = this.pendingStats;
+      this.pendingStats = [];
+      this.store.putTraderStats(stats);
+    });
+    this.writes.add(steps);
+    if (this.stopped) this.writes.drain();
   }
 
   // --- trade checks -------------------------------------------------------------------

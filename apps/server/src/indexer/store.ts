@@ -64,6 +64,7 @@
 import { DatabaseSync, type StatementSync } from 'node:sqlite';
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { Checkpointer, type CheckpointStatus } from './checkpointer.js';
 import { deviceKeyPath } from '../deviceKey.js';
 import { VENUES, type BoardWindow, type Venue } from '../valuedesk/types.js';
 import type { BoardFilter, Side } from './windows.js';
@@ -729,6 +730,8 @@ const RECLAIM_PAGES = 256;
 /** The WAL file is cut back to this after a checkpoint (it had grown to 359 MB and stayed there). */
 const WAL_LIMIT_BYTES = 128 * 1024 * 1024;
 const WAL_CHECKPOINT_PAGES = 16_000;
+/** Rows per transaction when a history page is written a slice at a time: 2,000 rows were seconds of the thread. */
+const FILL_SLICE = 200;
 
 /** A settled stretch of one trader's old days: summed, frozen, then deleted. */
 interface FreezeJob {
@@ -925,8 +928,24 @@ export class IndexStore {
   }
 
   close(): void {
+    this.checkpointer?.stop();
+    this.checkpointer = null;
     if (!this.readOnly && this.path !== ':memory:') this.saveHeld();
     this.db.close();
+  }
+
+  private checkpointer: Checkpointer | null = null;
+
+  /** The WAL's checkpoints go to a thread of their own (checkpointer.ts). The production writer only. */
+  startCheckpointer(o: { everyMs?: number } = {}): void {
+    if (this.readOnly || this.path === ':memory:' || this.checkpointer) return;
+    this.checkpointer = new Checkpointer(this.path, (on) => {
+      this.db.exec(`PRAGMA wal_autocheckpoint = ${on ? WAL_CHECKPOINT_PAGES : 0}`);
+    }, o);
+  }
+
+  get checkpointStatus(): CheckpointStatus | null {
+    return this.checkpointer?.state ?? null;
   }
 
   // --- held rows across a restart ------------------------------------------------------
@@ -1342,6 +1361,14 @@ export class IndexStore {
       // In the same transaction: a day that is now behind its fills is written down with them.
       for (const f of changed) this.markDay(f.venue, f.address, f.t);
     });
+  }
+
+  /** putFills a slice at a time, `pause()` between: one page of a busy trader's history is 2,000 rows, written from the caller's turn. */
+  async putFillsSliced(input: readonly FillRow[], pause: () => Promise<void>): Promise<void> {
+    for (let i = 0; i < input.length; i += FILL_SLICE) {
+      if (i) await pause();
+      this.putFills(input.slice(i, i + FILL_SLICE));
+    }
   }
 
   putCloses(input: readonly CloseRow[]): void {
