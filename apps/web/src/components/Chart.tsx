@@ -3931,11 +3931,12 @@ function Chart({
   // bring them back, centred. The candles stay where they are if they are still on screen.
   useEffect(() => {
     if (!flowOpen || flowAt === null) return;
-    const id = window.setTimeout(() => {
+    // The plot takes its new width a moment after resize(): measured before that, the old layout
+    // still shows the candles and nothing scrolls. No animation: it needs animation frames to run.
+    const fit = window.setTimeout(() => chart.current?.resize(), 60);
+    const reveal = window.setTimeout(() => {
       const c = chart.current;
-      const size = c?.getSize(CANDLE_PANE_ID);
-      if (!c || !size) return;
-      c.resize();
+      if (!c) return;
       const w = flowSpan(interval, flowAt, flowEnd);
       const px = c.convertToPixel(
         [{ timestamp: w.from }, { timestamp: candleAt(interval, w.to - 1).from }],
@@ -3947,9 +3948,12 @@ function Chart({
       if (typeof a !== 'number' || typeof b !== 'number' || !width) return;
       const MARGIN = 24;
       if (a >= MARGIN && b <= width - MARGIN) return;
-      c.scrollByDistance(width / 2 - (a + b) / 2, 200);
-    }, 60);
-    return () => window.clearTimeout(id);
+      c.scrollByDistance(width / 2 - (a + b) / 2);
+    }, 180);
+    return () => {
+      window.clearTimeout(fit);
+      window.clearTimeout(reveal);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [flowOpen]);
 
