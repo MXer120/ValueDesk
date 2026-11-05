@@ -59,6 +59,7 @@ export interface PortfolioPageLinks {
 }
 
 const RANGES: readonly Period[] = ['24H', '7D', '14D', '30D', 'ALL'];
+const RANGE_LABEL = (p: Period): string => (p === 'ALL' ? 'All time' : p === '24H' ? '24h' : p);
 
 // --- the numbers ------------------------------------------------------------------------
 
@@ -115,7 +116,7 @@ function MoneyButtons({ c, onSwap }: { c: PortfolioContext; onSwap: () => void }
       <button type="button" className="pf-btn" disabled={noAccount} onClick={() => requestWithdraw()}>Withdraw</button>
       <button type="button" className="pf-btn" disabled={noAccount} onClick={() => requestTransfer()}>Transfer</button>
       <button type="button" className="pf-btn pfx-swapbtn" onClick={onSwap} title="Swap USDT to USDC">
-        <span className="pfx-pair" aria-hidden="true"><CoinIcon coin="USDT" size={16} /><CoinIcon coin="USDC" size={16} /></span>
+        <span className="pfx-pair" aria-hidden="true"><CoinIcon coin="USDT" size={18} /><CoinIcon coin="USDC" size={18} /></span>
         Swap
       </button>
     </div>
@@ -124,13 +125,12 @@ function MoneyButtons({ c, onSwap }: { c: PortfolioContext; onSwap: () => void }
 
 // --- the left card ----------------------------------------------------------------------
 
-function Bucket({ icon, label, value, hint, onClick, open }: {
-  icon: ReactNode; label: string; value: ReactNode; hint?: string; onClick?: () => void; open?: boolean;
+function Bucket({ label, value, hint, onClick, open }: {
+  label: string; value: ReactNode; hint?: string; onClick?: () => void; open?: boolean;
 }) {
   return (
-    <button type="button" className={`pfa__part pfa__part--toggle pfx-bucket${open ? ' is-open' : ''}`} onClick={onClick} aria-expanded={open}>
-      <span className="pfa__part-ic">{icon}</span>
-      <span className="pfa__part-k">{label}{hint && <InfoDot title={hint} />}{open !== undefined && <Chevron />}</span>
+    <button type="button" className={`pfx-bucket${open ? ' is-open' : ''}`} onClick={onClick} aria-expanded={open}>
+      <span className="pfx-bucket__k">{label}{hint && <InfoDot title={hint} />}{open !== undefined && <Chevron />}</span>
       <span className="pfa__part-v">{value}</span>
     </button>
   );
@@ -151,13 +151,16 @@ function ValueCard({ c, s, today, vol, evmRows, evmLoading, onSection }: {
   const [evmOpen, setEvmOpen] = useState(false);
   const usd = (v: number | null) => maskFunds(v === null ? DASH : fmtUsd(v));
   const week = c.venue.points ? sliceCurve(c.venue.points, '7D', (p) => pnlAt('pnl-total', p)) : null;
+  const pledged = s.wealthInPerps > 0.01 ? ` ${fmtUsd(s.wealthInPerps)} of it is pledged as Perps margin and counted in Perps.` : '';
   return (
     <Card className="pfx-value">
-      <span className="pfx-value__k">Total Value</span>
-      <span className="pfx-value__v">{maskEquity(s.total === null ? DASH : fmtUsd(s.total))}</span>
-      <span className="pfx-value__sub">
-        Today&apos;s PnL <b className={today === null ? undefined : signClass(today)}>{maskPnl(today === null ? DASH : fmtSigned(today))}</b>
-      </span>
+      <div className="pfx-value__top">
+        <span className="pfx-value__k">Total Value</span>
+        <span className="pfx-value__v">{maskEquity(s.total === null ? DASH : fmtUsd(s.total))}</span>
+        <span className="pfx-value__sub">
+          Today&apos;s PnL <b className={today === null ? undefined : signClass(today)}>{maskPnl(today === null ? DASH : fmtSigned(today))}</b>
+        </span>
+      </div>
 
       <div className="pfx-kv">
         <div className="pfx-kv__row">
@@ -171,16 +174,15 @@ function ValueCard({ c, s, today, vol, evmRows, evmLoading, onSection }: {
       </div>
 
       <div className="pfx-buckets">
-        <Bucket icon={<CoinIcon coin="USDC" size={18} />} label="Perps" value={usd(s.perps)} onClick={() => onSection('perps')} />
-        <Bucket icon={<CoinIcon coin="USDC" size={18} />} label="Spot" value={usd(s.spot)} onClick={() => onSection('spot')} />
+        <Bucket label="Perps" value={usd(s.perps)} hint="Copies and bots trade from this account, so their money is already counted here." onClick={() => onSection('perps')} />
+        <Bucket label="Spot" value={usd(s.spot)} onClick={() => onSection('spot')} />
         <Bucket
-          icon={<SodexMark size={18} />}
           label="Wealth"
           value={usd(s.wealth)}
-          hint="SoDEX Wealth funds wherever the shares sit, so a fund in Spot or your wallet is counted here and not there. Shares pledged as Perps margin stay in Perps."
+          hint={`SoDEX Wealth funds wherever the shares sit, so a fund in Spot or your wallet is counted here and not there.${pledged}`}
           onClick={() => onSection('wealth')}
         />
-        <Bucket icon={<CoinIcon chain="VALUECHAIN" size={18} />} label="EVM" value={s.evm === null ? (evmLoading ? '…' : DASH) : usd(s.evm)} open={evmOpen} onClick={() => setEvmOpen((v) => !v)} />
+        <Bucket label="EVM" value={s.evm === null ? (evmLoading ? '…' : DASH) : usd(s.evm)} open={evmOpen} onClick={() => setEvmOpen((v) => !v)} />
         <Collapse open={evmOpen}>
           <ul className="pf-evm pfa__evm">
             {evmRows.length === 0 && <li className="pf-dim">{evmLoading ? 'Reading your wallet…' : 'Nothing on ValueChain or the other EVM chains.'}</li>}
@@ -194,10 +196,6 @@ function ValueCard({ c, s, today, vol, evmRows, evmLoading, onSection }: {
           </ul>
         </Collapse>
       </div>
-      <p className="pf-note pfx-value__note">
-        Copies and bots trade from Perps and Spot, so their money is already counted there.
-        {s.wealthInPerps > 0.01 && <> {maskFunds(fmtUsd(s.wealthInPerps))} of Wealth is pledged as Perps margin and counted in Perps.</>}
-      </p>
     </Card>
   );
 }
@@ -219,11 +217,14 @@ function ChartCard({ c, h24 }: { c: PortfolioContext; h24: ChartPoint[] | null }
     <Card
       className="pf-card--chart pfx-chart"
       title={<div className="pf-seg" role="tablist" aria-label="Chart">{seg('value', 'Total Value')}{seg('pnl', 'PnL')}{seg('calendar', 'PnL Calendar')}</div>}
-      action={view === 'calendar' ? undefined : <PeriodSeg period={range} onPeriod={setRange} label="Range" periods={RANGES} />}
+      action={view === 'calendar' ? undefined : <PeriodSeg period={range} onPeriod={setRange} label="Range" periods={RANGES} format={RANGE_LABEL} />}
     >
       {win && win.change !== null && (
         <div className="pfx-chart__head">
-          <span>{view === 'value' ? 'Change in value' : 'PnL'}, {range === 'ALL' ? 'all time' : range}</span>
+          <span>
+            {view === 'value' ? 'Change in value' : 'PnL'}, {range === 'ALL' ? 'all time' : RANGE_LABEL(range)}
+            {view === 'value' && <InfoDot title="The change from the start of the range, on SoDEX's own series: Spot, Perps and vaults, deposits and withdrawals included. Your EVM wallet is not in it." />}
+          </span>
           <b className={view === 'pnl' ? signClass(win.change) : undefined}>{mask(fmtSigned(win.change))}</b>
         </div>
       )}
@@ -234,15 +235,14 @@ function ChartCard({ c, h24 }: { c: PortfolioContext; h24: ChartPoint[] | null }
         : view === 'calendar' ? <CrossFadeCal points={c.venue.points ?? []} mode="pnl-total" />
         : win ? <EquityCurve win={win} tone={view === 'value' ? 'equity' : 'pnl'} />
         : empty(`Fewer than two points in ${range === 'ALL' ? 'this history' : range}.`)}
-      {view === 'value' && c.address && <p className="pf-note pfx-chart__note">The change from the start of the range, on SoDEX&apos;s own series: Spot, Perps and vaults, deposits and withdrawals included. Your EVM wallet is not in it.</p>}
     </Card>
   );
 }
 
 // --- the promo row ----------------------------------------------------------------------
 
-function Promo({ icon, title, cta, line, figure, figureLabel, soon, onClick }: {
-  icon: ReactNode; title: string; cta?: string; line: string; figure?: string | null; figureLabel?: string; soon?: boolean; onClick?: () => void;
+function Promo({ icon, title, cta, line, figure, soon, onClick }: {
+  icon: ReactNode; title: string; cta?: string; line: string; figure?: string | null; soon?: boolean; onClick?: () => void;
 }) {
   const body = (
     <>
@@ -250,11 +250,10 @@ function Promo({ icon, title, cta, line, figure, figureLabel, soon, onClick }: {
       <span className="pfx-promo__t">
         <span className="pfx-promo__h">
           {title}
-          {soon ? <span className="dv-devtag dv-devtag--soon">Coming soon</span> : cta && <span className="pfx-promo__cta">{cta}</span>}
+          {soon ? <span className="dv-devtag dv-devtag--soon">Coming soon</span> : cta && <span className="pfx-promo__cta">{cta} <span aria-hidden="true">&rarr;</span></span>}
         </span>
-        <span className="pfx-promo__l">{line}</span>
+        <span className="pfx-promo__l">{figure && <b>{figure} 7-day APY.</b>} {line}</span>
       </span>
-      {figure && <span className="pfx-promo__f"><b>{figure}</b><small>{figureLabel}</small></span>}
     </>
   );
   return onClick
@@ -272,32 +271,30 @@ function Promos({ w, onOpenTab, onWealth }: { w: WealthState; onOpenTab: (t: Tab
   return (
     <div className="pfx-promos">
       <Promo
-        icon={<IconCopyTrade size={22} />}
+        icon={<IconCopyTrade size={32} />}
         title="Copy trading"
         cta="Find traders"
         line="Mirror a trader's positions from your own account."
         onClick={() => onOpenTab('copy')}
       />
       <Promo
-        icon={<CoinIcon coin="USDC" size={26} />}
+        icon={<CoinIcon coin="USDC" size={40} />}
         title="USDC Earn"
         cta="See vault"
         line="Variable yield on USDC, through a Morpho vault."
         figure={apy(w.quotes.get('Morpho-Earn')?.apy7d)}
-        figureLabel="7-day APY"
         onClick={onWealth}
       />
       <Promo
-        icon={<CoinIcon coin="BOXX" size={26} />}
+        icon={<CoinIcon coin="BOXX" size={40} />}
         title="US Cash Yield"
         cta="See fund"
         line="Treasury-bill yield, on-chain, through BOXX."
         figure={apy(w.quotes.get('vBOXX')?.apy7d)}
-        figureLabel="7-day APY"
         onClick={onWealth}
       />
       <Promo
-        icon={<BotIcon strategy="grid" size={22} />}
+        icon={<BotIcon strategy="grid" size={40} />}
         title="Bots"
         soon={botsSoon}
         cta="Open bots"
@@ -326,12 +323,11 @@ function FeeStrip({ c }: { c: PortfolioContext }) {
   return (
     <Card className="pfx-fees">
       <div className="pfx-fees__tier">
-        <span className="pfx-fees__k">Fee tier</span>
-        <b>{mask(p ? String(p.feeTier) : DASH)}</b>
-        <button type="button" className="pfx-link" onClick={() => setOpen(true)}>View tiers</button>
+        <span><b>{mask(p ? String(p.feeTier) : DASH)}</b> <span className="pfx-fees__k">Fee tier</span></span>
+        <button type="button" className="pfx-link" onClick={() => setOpen(true)}>View tiers <span aria-hidden="true">&#8599;</span></button>
       </div>
-      <div className="pfx-fees__cell"><span className="bal-tag">Perps</span><span className="pfx-fees__k">Taker / Maker</span><b>{rates(p)}</b></div>
-      <div className="pfx-fees__cell"><span className="bal-tag">Spot</span><span className="pfx-fees__k">Taker / Maker</span><b>{rates(s)}</b></div>
+      <div className="pfx-fees__cell"><span className="bal-tag">Perps</span><span><span className="pfx-fees__k">Taker fee / Maker fee</span> <b>{rates(p)}</b></span></div>
+      <div className="pfx-fees__cell"><span className="bal-tag">Spot</span><span><span className="pfx-fees__k">Taker fee / Maker fee</span> <b>{rates(s)}</b></span></div>
       <Modal open={open} onClose={() => setOpen(false)} title="Fee tiers" size="lg" className="pfa-modal">
         <FeeTier address={c.address} engine="perps" />
       </Modal>
@@ -400,14 +396,11 @@ function SummaryPanel({ c }: { c: PortfolioContext }) {
   const volumeAll = whole?.volume.find((v) => v.coin === null || shareKey(v.coin ?? '') === 'USDC');
   const feeAll = whole?.fees.find((v) => v.coin === null || shareKey(v.coin ?? '') === 'USDC');
   const fundAll = walk?.funding.totals.find((v) => v.coin === null || shareKey(v.coin ?? '') === 'USDC');
-  const seg = (k: 'perps' | 'spot', label: string) => (
-    <button type="button" role="tab" aria-selected={engine === k} className={`pf-ctl ${engine === k ? 'is-on' : ''}`} onClick={() => setEngine(k)}>{label}</button>
-  );
-  return (
+  const card = (
     <Card
       className="pfx-sum"
-      title={<div className="pf-seg" role="tablist" aria-label="Summary of">{seg('perps', 'Perps summary')}{seg('spot', 'Spot summary')}</div>}
-      action={<PeriodSeg period={range} onPeriod={setRange} label="Summary range" periods={RANGES} />}
+      title="Summary"
+      action={<PeriodSeg period={range} onPeriod={setRange} label="Summary range" periods={RANGES} format={RANGE_LABEL} />}
     >
       {!c.address ? <NoWallet line="Connect a wallet to see your trading summary." compact />
         : error && !fills ? <p className="pf-note">Could not read your trades. {error}</p>
@@ -415,29 +408,29 @@ function SummaryPanel({ c }: { c: PortfolioContext }) {
           <>
             <div className="pfx-sum__grid">
               <SumCell
-                title="Trades"
+                title="Total no. of trades"
                 value={mask(count)}
                 rows={[['Buys', mask(a ? fmt(a.buys, 0) : DASH)], ['Sells', mask(a ? fmt(a.sells, 0) : DASH)]]}
               />
               <SumCell
-                title="Volume"
+                title="Total vol. of trades"
                 value={mask(whole ? fmtCompactUsd(num(volumeAll?.amount)) : a ? `${floor}${fmtCompactUsd(a.volume)}` : DASH)}
                 rows={[['Buys', mask(a ? fmtCompactUsd(a.buyVolume) : DASH)], ['Sells', mask(a ? fmtCompactUsd(a.sellVolume) : DASH)]]}
               />
               {engine === 'perps' ? (
                 <SumCell
-                  title="Funding"
+                  title="Total funding fee"
                   value={maskPnl(range === 'ALL' ? (fundAll ? signedUsd(num(fundAll.amount)) : DASH) : a?.funding != null ? signedUsd(a.funding) : DASH)}
                   tone={a?.funding != null && range !== 'ALL' ? signClass(a.funding) : undefined}
-                  rows={[['Latest', maskPnl(a?.latestFunding != null ? signedUsd(a.latestFunding) : DASH), a?.latestFunding != null ? signClass(a.latestFunding) : undefined]]}
+                  rows={[['Latest funding fee', maskPnl(a?.latestFunding != null ? signedUsd(a.latestFunding) : DASH), a?.latestFunding != null ? signClass(a.latestFunding) : undefined]]}
                 />
               ) : (
-                <SumCell title="Funding" value={DASH} rows={[['Spot has no funding', '']]} />
+                <SumCell title="Total funding fee" value={DASH} rows={[['Spot has no funding', '']]} />
               )}
               <SumCell
-                title="Fees paid"
+                title="Total commission"
                 value={mask(whole ? fmtUsd(num(feeAll?.amount)) : a ? `${floor}${fmtUsd(a.commission)}` : DASH)}
-                rows={[['Latest', mask(a?.latestCommission != null ? fmtUsd(a.latestCommission) : DASH)]]}
+                rows={[['Latest commission', mask(a?.latestCommission != null ? fmtUsd(a.latestCommission) : DASH)]]}
               />
             </div>
             {a && !a.complete && <p className="pf-note pfx-sum__note">More than {PAGE} rows in this range, so the figures marked ≥ are the most recent {PAGE}.</p>}
@@ -446,6 +439,15 @@ function SummaryPanel({ c }: { c: PortfolioContext }) {
           </>
         )}
     </Card>
+  );
+  return (
+    <div className="dash pfx-plain">
+      <PanelTabs
+        tabs={[{ key: 'perps', label: 'Perps Summary', content: card }, { key: 'spot', label: 'Spot Summary', content: card }]}
+        active={engine}
+        onChange={(k) => setEngine(k as 'perps' | 'spot')}
+      />
+    </div>
   );
 }
 
@@ -489,23 +491,24 @@ function Sections({ c, w, provider, section, setSection, onOpenMarket, onOpenTab
       />
     </div>
   );
+  const inCard = (body: ReactNode) => <Card className="pf-card--band pfx-band">{body}</Card>;
   const tabs: PanelTab[] = [
-    { key: 'perps', label: 'Perps', content: band('perps') },
-    { key: 'spot', label: 'Spot', content: band('spot') },
-    { key: 'wealth', label: 'Wealth', content: <WealthHoldings w={w} address={c.address} onOpenMarket={onOpenMarket} onOpenWealth={onWealth} provider={provider} onDone={c.onChanged} /> },
+    { key: 'perps', label: 'Perps', content: inCard(band('perps')) },
+    { key: 'spot', label: 'Spot', content: inCard(band('spot')) },
+    { key: 'wealth', label: 'Wealth', content: inCard(<WealthHoldings w={w} address={c.address} onOpenMarket={onOpenMarket} onOpenWealth={onWealth} provider={provider} onDone={c.onChanged} />) },
     {
       key: 'copy',
       label: 'Copy trading',
-      content: (
-        <Activity line="Copies trade from your Perps account. Their positions are in Perps above. A copy's allocation is a size limit, not money set aside, so none of this adds to Total Value.">
+      content: inCard(
+        <Activity line="Copies trade from your Perps account. Their positions are in Perps. A copy's allocation is a size limit, not money set aside, so none of this adds to Total Value.">
           <MyCopiesCard />
-        </Activity>
+        </Activity>,
       ),
     },
     {
       key: 'bots',
       label: 'Bots',
-      content: (
+      content: inCard(
         <Activity line="Bots trade from your own Perps and Spot accounts, so what they hold is counted there.">
           <EmptyState
             icon="chart"
@@ -514,16 +517,14 @@ function Sections({ c, w, provider, section, setSection, onOpenMarket, onOpenTab
             compact
             action={SOON_TABS.has('bots') ? undefined : <button type="button" className="empty-state__cta" onClick={() => onOpenTab('bots')}>Open bots</button>}
           />
-        </Activity>
+        </Activity>,
       ),
     },
   ];
   return (
-    <Card className="pf-card--band pfx-band pfx-sections">
-      <div className="dash pf-band">
-        <PanelTabs tabs={tabs} active={section} onChange={(k) => setSection(k as Section)} />
-      </div>
-    </Card>
+    <div className="dash pfx-plain pfx-sections">
+      <PanelTabs tabs={tabs} active={section} onChange={(k) => setSection(k as Section)} />
+    </div>
   );
 }
 
@@ -563,7 +564,7 @@ export function PortfolioPage({ c, provider, onOpenMarket, onOpenTab }: { c: Por
       label: 'Trade',
       content: (
         <div className="pfx-stack">
-          <div className="bots-top pfx-top">
+          <div className="pfx-top">
             <ValueCard c={c} s={summary} today={today} vol={vol} evmRows={evmRows} evmLoading={evmLoading} onSection={goSection} />
             <ChartCard c={c} h24={h24} />
           </div>
