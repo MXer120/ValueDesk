@@ -105,7 +105,8 @@ const TG_API = env('ALERT_TELEGRAM_API');
 const ORIGIN_DOMAIN = env('ORIGIN_DOMAIN');
 const SERVER_NAME = env('HEALTH_SERVER_NAME', ORIGIN_DOMAIN || hostname());
 const INDEXER_STALE_S = num('HEALTH_INDEXER_STALE_S', 180);
-const BOARD_STALE_S = num('HEALTH_BOARD_STALE_S', 900);
+// An hour, as on the status page: 15 min failed 92% of the passes on 2026-11-04, so a real failure was lost in the noise.
+const BOARD_STALE_S = num('HEALTH_BOARD_STALE_S', 3600);
 const LIQ_STALE_S = num('HEALTH_LIQ_STALE_S', 900);
 const DISK_PCT = num('HEALTH_DISK_PCT', 80);
 const BACKUP_MAX_AGE_H = num('HEALTH_BACKUP_MAX_AGE_H', 36);

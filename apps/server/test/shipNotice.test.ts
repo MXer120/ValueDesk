@@ -40,8 +40,8 @@ test('a release names every part: what it restarts by its measured cost, the res
 
   assert.equal(shipNotice('v0.2.71', ['web'], T0), null, 'a web-only ship has no downtime and posts nothing');
   assert.equal(shipNotice('v0.2.71', [], T0), null);
-  assert.equal(shipMinutes(['indexer', 'api', 'executor', 'web'], T0), 13);
-  assert.equal(shipMinutes(['indexer', 'api', 'executor'], Date.UTC(2026, 9, 29, 1, 27)), 15, 'the first build after midnight UTC is the long one');
+  assert.equal(shipMinutes(['indexer', 'api', 'executor', 'web'], T0), 8);
+  assert.equal(shipMinutes(['indexer', 'api', 'executor'], Date.UTC(2026, 9, 29, 1, 27)), 8, 'no longer waits for a first build, at any hour');
   assert.equal(shipMinutes(['api'], T0), 2);
   assert.deepEqual(shipPartsOf(' indexer,API,,api '), ['indexer', 'api']);
   assert.throws(() => shipPartsOf('db'), /unknown part "db"/);

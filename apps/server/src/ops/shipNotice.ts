@@ -21,7 +21,7 @@ export type ShipPart = keyof typeof SHIP_PARTS;
  *   api       away ~6 s, Caddy holds each request meanwhile; with the install about a minute
  *   executor  back in seconds; copies and algos held by the brake for about a minute; with the
  *             install, the preflight on a snapshot and the wait for a quiet send queue ~3 min
- *   indexer   up, the boards a few minutes staler (start ~35 s, first build ~70 s); ship.sh then
+ *   indexer   up, the boards staler until the next rebuild; ship.sh then
  *             waits for every stream, Lighter's 3.5-8 min - ~8 min; the first build after
  *             midnight UTC took 5-8 min (v0.2.60, 01:27 UTC) - ~10 min then
  */
@@ -29,10 +29,8 @@ export const SHIP_EFFECTS: Record<ServiceId, { impact: PartImpact; minutes: numb
   website: { impact: 'none', minutes: 0, text: 'No interruption: the new version loads with your next page.' },
   api: { impact: 'partial', minutes: 1, text: 'Pauses for a few seconds; requests wait and are then answered. Live charts reconnect by themselves.' },
   executor: { impact: 'partial', minutes: 3, text: 'Copies and algo orders pause for about a minute, then go on. Stops already on SoDEX stay.' },
-  indexer: { impact: 'partial', minutes: 8, text: 'Leaderboards, cohorts and the heatmap stay up; their figures may be a few minutes behind.' },
+  indexer: { impact: 'partial', minutes: 3, text: 'Leaderboards, cohorts and the heatmap stay up; their figures catch up over the next rebuild.' },
 };
-/** The indexer's after midnight UTC (its first build of the day is the long one). */
-const INDEXER_AFTER_MIDNIGHT_MIN = 10;
 /** Before the first restart: the notice goes up once the uploads are done. */
 const OVERHEAD_MIN = 1;
 
@@ -71,7 +69,7 @@ export function partChangesOf(list: string): PartChange[] {
 export function shipMinutes(parts: readonly ShipPart[], now: number): number {
   const services = new Set(parts.map((p) => SHIP_PARTS[p]));
   let min = 0;
-  for (const s of services) min += s === 'indexer' && new Date(now).getUTCHours() < 2 ? INDEXER_AFTER_MIDNIGHT_MIN : SHIP_EFFECTS[s].minutes;
+  for (const s of services) min += SHIP_EFFECTS[s].minutes;
   return min ? min + OVERHEAD_MIN : 0;
 }
 
