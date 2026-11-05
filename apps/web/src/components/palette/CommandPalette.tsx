@@ -50,6 +50,7 @@ import { usePrivacy } from '../../privacy';
 import { resolveTarget } from '../../dashboard/scanAliases';
 import { FadeView } from '../motion';
 import { CohortIcon } from '../explore/cohorts/CohortIcon';
+import { SODEX_LABELS, type SodexView } from '../../router';
 import {
   IconActivity,
   IconAssets,
@@ -67,6 +68,9 @@ import {
   IconPie,
   IconPodium,
   IconScan,
+  IconPoints,
+  IconBox,
+  IconFunds,
   IconScreener,
   IconSearch,
   IconShield,
@@ -184,6 +188,8 @@ export interface CommandPaletteProps {
   onOpenCopy: (address: string, venue: Venue) => void;
   /** Go to an app page. */
   onNavigate: (tab: Tab) => void;
+  /** Open one of SoDEX's products (router.ts SODEX_VIEWS). */
+  onOpenSodex?: (view: SodexView) => void;
 }
 
 /* ===========================================================================
@@ -288,7 +294,7 @@ const ASSET_SORTS: { id: AssetSort; label: string }[] = [
 ];
 
 /** Every page, with its own glyph. `path` opens a view inside Explore. `words` also match a search. */
-const PAGES: { id: string; tab: Tab; path?: string; label: string; hint: string; icon: ReactNode; words: string }[] = [
+const PAGES: { id: string; tab: Tab; path?: string; sodex?: SodexView; label: string; hint: string; icon: ReactNode; words: string }[] = [
   { id: 'trade', tab: 'trade', label: 'Trade', hint: 'The SoDEX trading terminal', icon: <IconCandles size={18} />, words: 'trade terminal chart order' },
   { id: 'explore', tab: 'explore', label: 'Explore', hint: 'Discover traders across venues', icon: <IconCompass size={18} />, words: 'explore discover overview' },
   { id: 'cohorts', tab: 'explore', path: COHORTS_PATH, label: 'Cohorts', hint: 'Wallets grouped by PnL and account size', icon: <CohortIcon id="apex" size={18} />, words: 'cohorts whales groups' },
@@ -297,6 +303,9 @@ const PAGES: { id: string; tab: Tab; path?: string; label: string; hint: string;
   { id: 'copy', tab: 'copy', label: 'Copy', hint: 'Set up and manage copy trading', icon: <IconCopyTrade size={18} />, words: 'copy trading follow' },
   { id: 'portfolio', tab: 'portfolio', label: 'Portfolio', hint: 'Your positions and history', icon: <IconPie size={18} />, words: 'portfolio positions history account' },
   { id: 'scan', tab: 'scan', label: 'Scan', hint: 'Look up any wallet', icon: <IconScan size={18} />, words: 'scan wallet address lookup' },
+  { id: 'points', tab: 'trade', sodex: 'points', label: SODEX_LABELS.points, hint: "SoDEX's weekly points, boosts and tiers", icon: <IconPoints size={18} />, words: 'sopoints points sodex tiers squad boost' },
+  { id: 'blind-boxes', tab: 'trade', sodex: 'blind-boxes', label: SODEX_LABELS['blind-boxes'], hint: "SoDEX's boxes: tiers, merging, live opens", icon: <IconBox size={18} />, words: 'blind box boxes treasure lottery draw sodex' },
+  { id: 'wealth', tab: 'trade', sodex: 'wealth', label: SODEX_LABELS.wealth, hint: "SoDEX's funds, returns and your holdings", icon: <IconFunds size={18} />, words: 'wealth funds vault earn etf yield sodex' },
 ];
 
 type HomeList = 'trending' | 'watchlist' | 'recent';
@@ -717,7 +726,15 @@ function PaletteDialog(
     if (wasExplore) window.dispatchEvent(new PopStateEvent('popstate'));
     p.onClose();
   };
-  const openPage = (pg: (typeof PAGES)[number]) => (pg.path ? openExplorePath(pg.path) : navigate(pg.tab));
+  const openPage = (pg: (typeof PAGES)[number]) => {
+    if (pg.sodex) {
+      p.onOpenSodex?.(pg.sodex);
+      p.onClose();
+      return;
+    }
+    if (pg.path) openExplorePath(pg.path);
+    else navigate(pg.tab);
+  };
 
   const setVenues = (next: Venue[]) => {
     writeList(LS_VENUES, next);

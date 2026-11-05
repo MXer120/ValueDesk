@@ -49,7 +49,7 @@ export const NAV_TABS: readonly (typeof TABS)[number][] = TABS.filter((t) => t !
  * Pages that were removed, and where their old links now land (Account's
  * positions, orders, balances and history live on the portfolio page).
  */
-const MOVED: Record<string, Tab> = { account: 'portfolio', money: 'portfolio', stats: 'trade', points: 'trade', verify: 'trade' };
+const MOVED: Record<string, Tab> = { account: 'portfolio', money: 'portfolio', stats: 'trade', verify: 'trade' };
 
 export type Tab = (typeof TABS)[number];
 
@@ -134,13 +134,20 @@ export function isExcludedPath(pathname: string): boolean {
 export const LIMITS_PATH = '/limits';
 
 /**
- * SoDEX's own products, a group under More. The pages and their routes are not here yet: the group
- * shows only once NavBar is given `onOpenSodex`, so the menu never links to a page that is not there.
+ * SoDEX's own products, a group under More (components/sodex/): shown like the status page, instead of
+ * the tab's page, with no number key. `/wealth/<fund>` is the Wealth page on one fund, so only the first
+ * path segment decides.
  */
 export const SODEX_VIEWS = ['points', 'blind-boxes', 'wealth'] as const;
 export type SodexView = (typeof SODEX_VIEWS)[number];
 export const SODEX_LABELS: Record<SodexView, string> = { points: 'SoPoints', 'blind-boxes': 'Blind Boxes', wealth: 'Wealth' };
 export const pathForSodexView = (view: SodexView): string => `/${view}`;
+
+/** The SoDEX view a pathname names, or null. Tolerant like `tabForPath`. */
+export function sodexViewForPath(pathname: string): SodexView | null {
+  const seg = pathname.replace(/\/+$/, '').split('/').filter(Boolean)[0]?.toLowerCase();
+  return (SODEX_VIEWS as readonly string[]).includes(seg ?? '') ? (seg as SodexView) : null;
+}
 
 /** Whether a pathname is the trading limits page. */
 export function isLimitsPath(pathname: string): boolean {
@@ -185,7 +192,7 @@ export function tabForPath(pathname: string, soon: ReadonlySet<Tab> = SOON_TABS)
  * with the default page: pushing would put a URL that renders nothing into the
  * history stack, and going "back" to it would be a dead end.
  */
-export function useRoute(): [Tab, (tab: Tab) => void, LegalPage | null, (page: LegalPage) => void, boolean, () => void, boolean, () => void, boolean, () => void] {
+export function useRoute(): [Tab, (tab: Tab) => void, LegalPage | null, (page: LegalPage) => void, boolean, () => void, boolean, () => void, boolean, () => void, SodexView | null, (view: SodexView) => void] {
   const [tab, setTab] = useState<Tab>(() => tabForPath(window.location.pathname) ?? DEFAULT_TAB);
   /* A legal page is shown INSTEAD of the tab's page; `tab` keeps the default
      there, so everything keyed on it (the nav, the shortcuts) is unchanged. */
@@ -196,6 +203,8 @@ export function useRoute(): [Tab, (tab: Tab) => void, LegalPage | null, (page: L
   const [excluded, setExcluded] = useState<boolean>(() => isExcludedPath(window.location.pathname));
   /* The trading limits page, the same way. */
   const [limits, setLimits] = useState<boolean>(() => isLimitsPath(window.location.pathname));
+  /* One of SoDEX's products, the same way. */
+  const [sodex, setSodex] = useState<SodexView | null>(() => sodexViewForPath(window.location.pathname));
 
   useEffect(() => {
     /*
@@ -208,7 +217,7 @@ export function useRoute(): [Tab, (tab: Tab) => void, LegalPage | null, (page: L
      */
     const normalise = () => {
       const path = window.location.pathname;
-      if (tabForPath(path) === null && legalForPath(path) === null && !isStatusPath(path) && !isExcludedPath(path) && !isLimitsPath(path)) {
+      if (tabForPath(path) === null && legalForPath(path) === null && !isStatusPath(path) && !isExcludedPath(path) && !isLimitsPath(path) && sodexViewForPath(path) === null) {
         const seg = path.replace(/\/+$/, '').split('/').filter(Boolean)[0]?.toLowerCase() ?? '';
         window.history.replaceState(null, '', pathForTab(MOVED[seg] ?? DEFAULT_TAB));
       }
@@ -217,6 +226,7 @@ export function useRoute(): [Tab, (tab: Tab) => void, LegalPage | null, (page: L
       setStatus(isStatusPath(window.location.pathname));
       setExcluded(isExcludedPath(window.location.pathname));
       setLimits(isLimitsPath(window.location.pathname));
+      setSodex(sodexViewForPath(window.location.pathname));
     };
     normalise();
     window.addEventListener('popstate', normalise);
@@ -234,6 +244,7 @@ export function useRoute(): [Tab, (tab: Tab) => void, LegalPage | null, (page: L
     setStatus(false);
     setExcluded(false);
     setLimits(false);
+    setSodex(null);
   }, []);
 
   const openLegal = useCallback((page: LegalPage) => {
@@ -244,6 +255,7 @@ export function useRoute(): [Tab, (tab: Tab) => void, LegalPage | null, (page: L
     setStatus(false);
     setExcluded(false);
     setLimits(false);
+    setSodex(null);
   }, []);
 
   const openStatus = useCallback(() => {
@@ -252,6 +264,7 @@ export function useRoute(): [Tab, (tab: Tab) => void, LegalPage | null, (page: L
     setStatus(true);
     setExcluded(false);
     setLimits(false);
+    setSodex(null);
   }, []);
 
   const openExcluded = useCallback(() => {
@@ -260,6 +273,7 @@ export function useRoute(): [Tab, (tab: Tab) => void, LegalPage | null, (page: L
     setStatus(false);
     setExcluded(true);
     setLimits(false);
+    setSodex(null);
   }, []);
 
   const openLimits = useCallback(() => {
@@ -268,7 +282,22 @@ export function useRoute(): [Tab, (tab: Tab) => void, LegalPage | null, (page: L
     setStatus(false);
     setExcluded(false);
     setLimits(true);
+    setSodex(null);
   }, []);
 
-  return [tab, navigate, legal, openLegal, status, openStatus, excluded, openExcluded, limits, openLimits];
+  const openSodex = useCallback((view: SodexView) => {
+    const path = pathForSodexView(view);
+    if (window.location.pathname !== path) {
+      window.history.pushState(null, '', path);
+      /* A page already on this view (Wealth on one fund) reads the URL again. */
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    }
+    setLegal(null);
+    setStatus(false);
+    setExcluded(false);
+    setLimits(false);
+    setSodex(view);
+  }, []);
+
+  return [tab, navigate, legal, openLegal, status, openStatus, excluded, openExcluded, limits, openLimits, sodex, openSodex];
 }

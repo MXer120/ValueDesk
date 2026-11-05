@@ -38,6 +38,7 @@ import { betaRoutes } from './routes/beta.js';
 import { BetaList, BetaTokens, channelFrom, installBetaGate } from './beta/gate.js';
 import { AdminStore } from './admin/store.js';
 import { reportRoutes } from './routes/reports.js';
+import { sodexLotteryRoutes } from './routes/sodexLottery.js';
 import { statusRoutes } from './routes/status.js';
 import { adminRoutes } from './routes/admin.js';
 import { analyticsRoutes, analyticsStore } from './routes/analytics.js';
@@ -234,9 +235,9 @@ await app.register(statsRoutes);
 await app.register(scanRoutes);
 // SoPoints login (routes/pointsAuth.ts) is NOT registered: it relays SoDEX's private
 // sign-in API under a forged `Origin: https://sodex.com` to get past the allowlist SoDEX
-// chose, which SoDEX's terms forbid (s. 5.6). The Points page is
-// not mounted either. Bring it back only with SoDEX's written OK or an official API - and
-// without the forged headers.
+// chose, which SoDEX's terms forbid (s. 5.6). The SoPoints page shows SoDEX's public reads only
+// and keeps the signed-in part behind SODEX_SIGNIN_LIVE (web/src/sodexProgrammes.ts). This relay
+// does not come back: with SoDEX's written OK the browser calls SoDEX directly, no forged headers.
 void pointsAuthRoutes;
 // ValueDesk: multi-venue traders (SoDEX + Hyperliquid) for Explore,
 // Leaderboard, Scan and Copy. Read-only - see routes/valuedesk.ts.
@@ -247,6 +248,8 @@ await app.register(builderRoutes);
 if (betaLock) await app.register(betaRoutes, betaLock);
 // What visitors send the owner - the feedback form and client error reports (routes/reports.ts) -
 // and the public status page's data (routes/status.ts).
+// SoDEX's Blind Box programme, its public rules and opens feed only (routes/sodexLottery.ts).
+await app.register(sodexLotteryRoutes);
 await app.register(reportRoutes);
 await app.register(statusRoutes);
 // The app's own analytics, after consent (routes/analytics.ts), and the owner's admin suite on

@@ -86,9 +86,9 @@ export interface HostedRoute {
  *     error text, a pid). A 404 for every caller, on the instance too - which is
  *     also how operations tell that hosted mode is in effect. Monitoring reads
  *     /api/vs/index/health instead: ON_INSTANCE_ROUTES below, not this list;
- *   - /api/points/* (the SoPoints relay: the page is not mounted; if it returns,
- *     list both routes as { method: 'POST', cls: 'auth' } - the gate then needs
- *     the exact site Origin and applies the `auth` caps);
+ *   - /api/points/* (the SoPoints relay, off: the page reads SoDEX's public data and a
+ *     SoDEX sign-in, once confirmed, leaves the browser directly. The `auth` class stays
+ *     for a state-changing route that may need it: exact site Origin, `auth` caps);
  *   - every custodial route, which answers 410 before this list is consulted.
  */
 export const HOSTED_ROUTES: readonly HostedRoute[] = [
@@ -100,6 +100,12 @@ export const HOSTED_ROUTES: readonly HostedRoute[] = [
   { method: 'GET', url: '/api/vs/cohorts/detail', cls: 'read' },
   { method: 'GET', url: '/api/vs/cohorts/map', cls: 'read' },
   { method: 'GET', url: '/api/vs/excluded', cls: 'read' },
+  // SoDEX's Blind Box rules and opens feed: two public reads its host will not serve a browser (no CORS). Cached, so a
+  // visitor costs no upstream call beyond the route's one a minute and one per 10 s (routes/sodexLottery.ts).
+  { method: 'GET', url: '/api/vs/sodex/lottery/meta', cls: 'read' },
+  { method: 'GET', url: '/api/vs/sodex/lottery/feed', cls: 'read' },
+  // Wealth's maintenance flag: same reason, same route file, read once every 30 s.
+  { method: 'GET', url: '/api/vs/sodex/wealth/maintenance', cls: 'read' },
   { method: 'GET', url: '/api/vs/cohorts/focus', cls: 'read' },
   { method: 'GET', url: '/api/vs/cohorts/wallets', cls: 'read' },
   // The liquidation heatmap (indexer/liqRead.ts): the cohort books, priced; the venues' market
