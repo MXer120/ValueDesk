@@ -194,6 +194,11 @@ h.test('Total Value counts each dollar once, and copies and bots have no bucket'
   await p.locator('.pfx-board').waitFor();
   await p.waitForTimeout(1500);
   await shot(p, 'wealth-tab');
+  // No column of the fund list or the holdings is cut off, on a phone above all.
+  for (const wrap of await p.locator('.pfx-tablewrap').all()) {
+    const { scroll, client } = await wrap.evaluate((e) => ({ scroll: e.scrollWidth, client: e.clientWidth }));
+    assert.ok(scroll <= client + 1, `table fits: ${scroll} <= ${client}`);
+  }
 }, { storage });
 
 h.test('Swap: the exact order SoDEX\'s own dialog sends, and its result', async ({ page: p, wallet, ctx, origin }) => {

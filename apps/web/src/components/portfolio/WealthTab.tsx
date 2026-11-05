@@ -212,7 +212,6 @@ function FundBoard({ w, address, provider, onOpenMarket, onDone }: {
           </tbody>
         </table>
       </div>
-      <p className="pf-note pfx-boardnote">Returns and yields are SoDEX&apos;s own figures. They are variable, not guaranteed, and past returns do not predict future ones.</p>
       <WealthSheet target={target} onClose={() => setTarget(null)} address={address} provider={provider} onDone={onDone} />
     </Card>
   );

@@ -147,7 +147,7 @@ function SheetBody({ target, address, provider, onDone, onClose }: {
       {error && <p className="fx-note fx-note--err" role="alert">{error}</p>}
       <p className="fx-note">
         {side === 'buy'
-          ? <>Paid from USDC in your wallet on ValueChain, with SOSO for gas. <button type="button" className="fx-link" onClick={() => requestTransfer({ to: 'evm', coin: 'USDC' })}>Move USDC to your wallet</button>. Returns are not guaranteed.</>
+          ? <>Paid from USDC in your wallet on ValueChain, with SOSO for gas. <button type="button" className="fx-link" onClick={() => requestTransfer({ to: 'evm', coin: 'USDC' })}>Move USDC to your wallet</button>.</>
           : 'Paid to your wallet on ValueChain. Part of a redemption can settle later.'}
       </p>
     </div>
