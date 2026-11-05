@@ -3,8 +3,8 @@
    something (money, attention). `--ink` is what every hairline and tint in the sheets is made of
    (rgb(var(--ink) / a)), so they turn with the page.
 
-   Contrast on the white panel, measured: text 18.9:1, muted 7.0:1, dim 4.5:1, pos 4.6:1, neg 4.6:1,
-   warn 4.6:1. Green and red are a step darker than dark's, which sit under 3:1 on white. */
+   Contrast on the white panel (theme.test.ts keeps it at 4.5:1 or better): text 18.4:1, muted 7.3:1, dim 4.6:1,
+   pos 4.7:1, neg 4.8:1, warn 4.7:1. Green and red are a step darker than dark's, which give 2.7:1 and 3.7:1 on white. */
 html[data-theme='light'] {
   --ink: 0 0 0;
   --ink-solid: #000;
