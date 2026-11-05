@@ -9929,6 +9929,7 @@ var LiveSocket = class {
   running = false;
   attempt = 0;
   lastMessageAt = 0;
+  lastDataAt = 0;
   lastPingAt = 0;
   tick = null;
   retry = null;
@@ -9970,6 +9971,7 @@ var LiveSocket = class {
     }
     this.ws = ws;
     this.lastMessageAt = Date.now();
+    this.lastDataAt = Date.now();
     ws.onopen = () => {
       this.attempt = 0;
       this.upSince = Date.now();
@@ -9981,6 +9983,7 @@ var LiveSocket = class {
       this.lastMessageAt = Date.now();
       const raw = typeof ev.data === "string" ? ev.data : String(ev.data);
       if (!raw || raw === "pong") return;
+      this.lastDataAt = Date.now();
       let msg;
       try {
         msg = JSON.parse(raw);
@@ -10030,8 +10033,9 @@ var LiveSocket = class {
   check() {
     if (!this.running) return;
     const now = Date.now();
-    if (this.ws && now - this.lastMessageAt > (this.o.staleMs ?? 9e4)) {
-      this.o.log?.warn(`${this.o.name ?? "socket"}: silent, replacing`, { silentMs: now - this.lastMessageAt });
+    const noData = this.o.dataStaleMs !== void 0 && now - this.lastDataAt > this.o.dataStaleMs;
+    if (this.ws && (noData || now - this.lastMessageAt > (this.o.staleMs ?? 9e4))) {
+      this.o.log?.warn(`${this.o.name ?? "socket"}: silent, replacing`, { silentMs: now - this.lastMessageAt, noDataMs: now - this.lastDataAt });
       this.drop();
       this.schedule();
       return;
@@ -10250,6 +10254,8 @@ var SodexFeed = class {
       factory: o.factory,
       ping: '{"op":"ping"}',
       name: "sodex-perps",
+      // allMarkPrice comes every few seconds: a socket that only answers pings had gone deaf with its status "up".
+      dataStaleMs: 9e4,
       log: o.log,
       subscribe: (send, fresh) => this.subscribeAll(send, fresh),
       onMessage: (m) => this.handle(m),
@@ -11931,6 +11937,9 @@ var HL_COINS_REFRESH_MS = 10 * 6e4;
 var HL_COINS_RETRY_MS = 3e4;
 var HL_MAX_COINS = 990;
 var PENDING_MS = 3e4;
+var MARKETS_RETRY_MS = 15e3;
+var BRAKE_CHECK_MS = 2e3;
+var SHORT_BRAKE_MS = 5 * 6e4;
 var RECENT_ORDERS_MS = 10 * 6e4;
 var FILLS_SLACK_MS = 6e4;
 var OUTSIDE_NO_FILL_MS = 15 * 6e4;
@@ -12017,6 +12026,15 @@ var CopyRuntime = class {
   hlCoinsRetry = HL_COINS_RETRY_MS;
   /** Copies whose leader could not be read when they started (or were restored): caught up once it is seeded. */
   awaitingSeed = /* @__PURE__ */ new Set();
+  marketsRetry = null;
+  /** start() has gone through its own catch-up. */
+  started = false;
+  /** Copies with leader moves held by the brake: subId -> when first held. Gone through by resumeHeld. */
+  held = /* @__PURE__ */ new Map();
+  /** subId|symbol told once per brake that its leader moved and it waits. */
+  heldTold = /* @__PURE__ */ new Set();
+  /** Whether the brake is on what it did, while it was on: asked when it began, as it is gone at the lift. */
+  heldShort = /* @__PURE__ */ new Map();
   running = false;
   feedUp = { sodex: false, hyperliquid: false };
   dirty = /* @__PURE__ */ new Set();
@@ -12052,7 +12070,10 @@ var CopyRuntime = class {
     await this.syncFeeds();
     for (const s of [...this.subs.values()]) await this.applyLocalRules(s.id);
     await this.noteDelisted().catch((e) => this.host.log.warn("copy: delisting check failed", { error: String(e) }));
-    for (const id of restored) this.catchUp(id);
+    const replay = /* @__PURE__ */ new Map();
+    for (const id of restored) replay.set(id, await this.settleSending(id));
+    for (const id of restored) this.catchUp(id, { open: replay.get(id) });
+    this.started = true;
     for (const s of this.subs.values()) if (this.live(s)) void this.checkReady(s);
     this.timers.push(
       timers.every(RECONCILE_MS, () => void this.reconcileAll()),
@@ -12062,7 +12083,8 @@ var CopyRuntime = class {
         for (const s of this.subs.values()) if (this.live(s)) void this.checkReady(s);
       }),
       timers.every(MARKETS_REFRESH_MS, () => void this.loadMarkets().then(() => this.sodexFeed?.refreshSymbols())),
-      timers.every(5e3, () => void this.flush())
+      timers.every(5e3, () => void this.flush()),
+      timers.every(BRAKE_CHECK_MS, () => this.resumeHeld())
     );
     void this.reconcileAll();
     void this.refreshAllFollowers();
@@ -12074,6 +12096,7 @@ var CopyRuntime = class {
     for (const t of this.refreshTimers.values()) timers.cancel(t);
     for (const t of this.stopTimers.values()) timers.cancel(t);
     timers.cancel(this.hlCoinsTimer);
+    timers.cancel(this.marketsRetry);
     this.sodexFeed?.stop();
     this.hlFeed?.stop();
     await Promise.allSettled([...this.queues.values()]);
@@ -12278,6 +12301,12 @@ var CopyRuntime = class {
       await this.applyLocalRules(s.id);
       s = this.need(subId);
     }
+    if (!this.markets.size) return;
+    const braked = this.brakedNow(s);
+    if (braked) {
+      await this.noteHeld(s, e.symbol, market?.name ?? e.symbol, braked);
+      return;
+    }
     const st = this.stateOf(s);
     const firedKey = market ? `${s.id}|${market.name}` : "";
     const fired = market ? this.stopFired.get(firedKey) : void 0;
@@ -12332,7 +12361,12 @@ var CopyRuntime = class {
       }
       if (st.declined?.[market.name]) delete st.declined[market.name];
     }
+    await this.journal(s, market, plan.intents, e.symbol, e.before ?? 0);
     await this.execute(s, market, plan.intents, markOf(market.name) ?? e.price, leader, plannedAt);
+    if (st.sending) {
+      delete st.sending;
+      this.dirty.add(s.id);
+    }
     if (plan.skip && !QUIET_SKIPS.has(plan.skip)) await this.activity(s, { kind: "skip", reason: plan.skip, symbol: market.name, leader, detail });
   }
   /**
@@ -13217,9 +13251,13 @@ var CopyRuntime = class {
    * as a missed print is while running - except a position opened meanwhile, which is
    * pre-existing (joined only with "copy existing"), as when a copy starts.
    */
-  catchUp(subId) {
+  catchUp(subId, o = {}) {
     const s = this.subs.get(subId);
     if (!s || s.status === "stopped") return;
+    if (this.brakedNow(s)) {
+      this.markHeld(s);
+      return;
+    }
     const l = s.settings.leader;
     if (!this.leaders.seeded(l)) {
       this.awaitingSeed.add(subId);
@@ -13232,15 +13270,107 @@ var CopyRuntime = class {
       const before = st.leaderPos[sym] ?? 0;
       const after = current[sym] ?? 0;
       if (Math.abs(before - after) <= 1e-9 * Math.max(1, Math.abs(before), Math.abs(after))) continue;
-      if (before === 0 && !s.settings.copyExisting) {
+      if (before === 0 && !s.settings.copyExisting && o.open !== "all" && !o.open?.has(sym)) {
         st.leaderPos[sym] = after;
         st.detached[sym] = "pre-existing";
         this.dirty.add(s.id);
         continue;
       }
       const price2 = this.priceFor(l.venue, sym) ?? 0;
+      if (o.reduceOnly) {
+        const flipped = before !== 0 && after !== 0 && Math.sign(before) !== Math.sign(after);
+        if (!flipped && Math.abs(after) > Math.abs(before)) {
+          st.leaderPos[sym] = after;
+          this.dirty.add(s.id);
+          continue;
+        }
+        if (flipped) {
+          this.dispatch(s, { leader: l, symbol: sym, before, after: 0, price: price2, time: now, id: `restart:${sym}:${now}`, source: "reconcile" });
+          this.enqueue(s.owner, async () => {
+            st.leaderPos[sym] = after;
+            st.detached[sym] = "pre-existing";
+            this.dirty.add(s.id);
+          });
+          continue;
+        }
+      }
       this.dispatch(s, { leader: l, symbol: sym, before, after, price: price2, time: now, id: `restart:${sym}:${now}`, source: "reconcile" });
     }
+  }
+  brakedNow(s) {
+    if (!this.live(s)) return null;
+    return this.host.brake?.(s) ?? null;
+  }
+  markHeld(s) {
+    if (this.held.has(s.id)) return;
+    this.held.set(s.id, Date.now());
+    const since = this.host.shortBrakeSince?.(s) ?? null;
+    if (since !== null) this.heldShort.set(s.id, since);
+  }
+  async noteHeld(s, leaderSymbol, symbol2, why) {
+    this.markHeld(s);
+    const k = `${s.id}|${leaderSymbol}`;
+    if (this.heldTold.has(k)) return;
+    this.heldTold.add(k);
+    await this.activity(s, { kind: "error", reason: "brake", symbol: symbol2, detail: `Waiting: ${why} What the leader closes meanwhile is followed once this is over.` });
+  }
+  /** The brake is off for these copies: the leader's moves it held are planned now, as after a restart. */
+  resumeHeld() {
+    const now = Date.now();
+    for (const [id] of [...this.held]) {
+      const s = this.subs.get(id);
+      if (s && this.brakedNow(s)) continue;
+      this.held.delete(id);
+      const since = this.heldShort.get(id);
+      this.heldShort.delete(id);
+      for (const k of [...this.heldTold]) if (k.startsWith(`${id}|`)) this.heldTold.delete(k);
+      if (!s) continue;
+      const short = since !== void 0 && now - since <= SHORT_BRAKE_MS;
+      this.host.log.info("copy: brake off; going through what the leader did", { sub: id, opens: short });
+      this.enqueue(s.owner, async () => this.catchUp(id, short ? { open: "all" } : { reduceOnly: true }));
+    }
+  }
+  /**
+   * Written before an order that opens or adds. A process killed between sending it and the next save would
+   * otherwise plan the same move again at its start: a position twice the size. See settleSending.
+   */
+  async journal(s, market, intents, leaderSymbol, leaderBefore) {
+    if (!this.live(s)) return;
+    const signed = intents.filter((i) => !i.reduceOnly).reduce((sum, i) => sum + (i.side === "buy" ? 1 : -1) * Number(i.quantity), 0);
+    if (!signed) return;
+    const st = this.stateOf(s);
+    const f = this.followers.get(s.owner);
+    st.sending = { leaderSymbol, leaderBefore, symbol: market.name, followerBefore: f ? f.positions[market.name]?.size ?? 0 : null, signed, at: Date.now() };
+    await this.host.store.saveState(st);
+  }
+  /**
+   * At a start: an order the last process wrote down and never came back from. The follower's position moved its
+   * way: it landed. It did not: the leader's move is planned again. Unreadable, or nothing known to compare with:
+   * taken as landed, as a missed entry costs less than a position twice the size, and said so in the log.
+   * Returns the leader symbols to be planned again even from flat.
+   */
+  async settleSending(subId) {
+    const again = /* @__PURE__ */ new Set();
+    const s = this.subs.get(subId);
+    const st = this.states.get(subId);
+    const j = st?.sending;
+    if (!s || !st || !j) return again;
+    delete st.sending;
+    this.dirty.add(subId);
+    let now = null;
+    try {
+      await this.refreshFollower(s.owner);
+      const f = this.followers.get(s.owner);
+      if (f) now = f.positions[j.symbol]?.size ?? 0;
+    } catch {
+    }
+    const landed = now === null || j.followerBefore === null || (now - j.followerBefore) * Math.sign(j.signed) > 1e-12;
+    this.host.log.warn("copy: an order was on its way when the last process stopped", { sub: subId, symbol: j.symbol, landed, known: now !== null && j.followerBefore !== null });
+    if (landed) return again;
+    if (j.leaderBefore === 0) delete st.leaderPos[j.leaderSymbol];
+    else st.leaderPos[j.leaderSymbol] = j.leaderBefore;
+    again.add(j.leaderSymbol);
+    return again;
   }
   /** SoDEX symbol -> signed size of this copy's orders sent but not booked yet. */
   inFlightOf(subId) {
@@ -13600,12 +13730,19 @@ var CopyRuntime = class {
     return m ? this.markets.mark(m.name, 10 * 6e4) : null;
   }
   async loadMarkets() {
+    const had = this.markets.size;
     try {
       const list = await this.host.sodex.markets();
       if (list.length) this.markets.load(list);
       for (const p of await this.host.sodex.markPrices()) this.markets.setMark(p.symbol, p.price);
     } catch (e) {
       this.host.log.warn("copy: market list failed", { error: String(e) });
+    }
+    if (!this.markets.size && this.running) {
+      timers.cancel(this.marketsRetry);
+      this.marketsRetry = timers.after(MARKETS_RETRY_MS, () => void this.loadMarkets().then(() => this.sodexFeed?.refreshSymbols()));
+    } else if (!had && this.markets.size && this.started) {
+      for (const s of this.list()) this.enqueue(s.owner, async () => this.catchUp(s.id));
     }
     await this.noteDelisted().catch((e) => this.host.log.warn("copy: delisting check failed", { error: String(e) }));
   }
@@ -19309,6 +19446,10 @@ var ExecutorService = class {
       // A copy halted, held, stopped or closed outside the copier: kept for the follower to read after signing in.
       onNotice: (n) => db.addNotice(n),
       brake: () => this.brakeText("copies"),
+      shortBrakeSince: () => {
+        const b = this.brake.current();
+        return b?.copies && b.cause === "maintenance" ? b.since : null;
+      },
       // Reads that confirm a change outside the copier (copy-engine confirm.ts), as far apart as the key reads.
       confirmGapMs: deps.readGapMs
     });
@@ -20158,6 +20299,11 @@ var ExecutorService = class {
       usd = r && typeof r.m === "number" ? r.m / 1e6 : 0;
     } catch (e) {
       this.deps.log.warn("copy fee: the builder ledger could not be read", { error: String(e) });
+      try {
+        this.builderDb?.close();
+      } catch {
+      }
+      this.builderDb = null;
     }
     this.rememberVolume(owner, usd);
     return usd;
