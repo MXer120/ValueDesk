@@ -13,7 +13,9 @@
  *                                      VALUESCAN_STATUS_EXECUTOR_URL names the executor's
  *                                      server itself (the health check's EXECUTOR_URL,
  *                                      deploy/server/bin/healthcheck.mjs, is the loopback
- *                                      address on the executor's own box - not this one)
+ *                                      address on the executor's own box - not this one).
+ *                                      Asked again, or on VALUESCAN_STATUS_EXECUTOR_DIRECT_URL,
+ *                                      before a bad answer counts: probeExecutor
  *   indexer   its own status, read in this process (hosted.ts indexerHealth): fresh
  *             and every stream up, else `degraded` (a stream down) or `down` (stale)
  *
@@ -350,6 +352,10 @@ export interface ProbeTargets {
   executor: string;
   /** Sent as X-Origin-Verify to the executor - only when VALUESCAN_STATUS_EXECUTOR_URL names it directly. */
   executorSecret: string | null;
+  /** The executor's own server, asked only when the visitor's way fails (VALUESCAN_STATUS_EXECUTOR_DIRECT_URL). */
+  executorDirect?: string | null;
+  /** Sent as X-Origin-Verify to executorDirect: its Caddy refuses a request without it. */
+  directSecret?: string | null;
 }
 
 const trimSlash = (s: string): string => s.replace(/\/+$/, '');
@@ -359,12 +365,19 @@ export function probeTargetsFromEnv(env: Readonly<Record<string, string | undefi
   const get = (k: string): string => env[k]?.trim() ?? '';
   const site = trimSlash(get('VALUESCAN_STATUS_SITE_URL') || DEFAULT_SITE);
   const direct = trimSlash(get('VALUESCAN_STATUS_EXECUTOR_URL'));
-  return {
+  const fallback = trimSlash(get('VALUESCAN_STATUS_EXECUTOR_DIRECT_URL'));
+  const secret = get('VALUESCAN_ORIGIN_SECRET').split(',')[0]?.trim() || null;
+  const targets: ProbeTargets = {
     site,
     executor: direct || site,
     // Caddy on the executor's server refuses a request without the origin secret; the site's edge adds it itself.
-    executorSecret: direct && direct !== site ? get('VALUESCAN_ORIGIN_SECRET').split(',')[0]?.trim() || null : null,
+    executorSecret: direct && direct !== site ? secret : null,
   };
+  if (fallback) {
+    targets.executorDirect = fallback;
+    targets.directSecret = secret;
+  }
+  return targets;
 }
 
 type Fetch = typeof fetch;
@@ -394,9 +407,54 @@ const jsonOk = (body: string): boolean | null => {
  * No answer at all is asked once more, PROBE_RETRY_MS later, before it counts: a single dropped
  * connection on the way to the executor in Tokyo made a "down" minute (three on 2026-11-01, the
  * executor fine and its own checks green) - an incident on the status page for nothing.
- * An answer, good or bad, is never asked again.
+ * An answer, good or bad, is not asked again here (the executor's own rules: probeExecutor).
  */
 export const PROBE_RETRY_MS = 2_000;
+
+/**
+ * The executor's `ok:false` is asked once more this much later: a SoDEX feed reconnecting takes
+ * seconds and was a whole degraded day bar (2026-11-05 07:41, one sample, every check of the
+ * executor's own box green). Still not ok after this: a degraded minute.
+ */
+export const EXECUTOR_RECHECK_MS = 15_000;
+
+/**
+ * One minute's sample of the copy & algo executor.
+ *
+ * The visitor's way crosses Vercel, server 1 and the France-Japan link, so it can fail while the
+ * executor runs: on 2026-11-04 three "down" minutes came with all 25 of the executor's own checks
+ * green and a 1 MiB backup between the servers taking 32 s instead of about 7. When that way gives
+ * no good answer, the executor's own server is asked over a new connection:
+ *   - it answers ok: `degraded`, not `down`. Copies and algos run; a visitor may have waited.
+ *   - it answers not ok: `degraded`, as the executor says.
+ *   - no answer there either: `down`.
+ */
+async function probeExecutor(
+  f: Fetch,
+  t: ProbeTargets,
+  retryMs: number | undefined,
+  recheckMs: number,
+): Promise<{ state: Exclude<ServiceState, 'unknown'>; ms: number | null }> {
+  const headers = { Accept: 'application/json', ...(t.executorSecret ? { 'X-Origin-Verify': t.executorSecret } : {}) };
+  const url = `${t.executor}/api/copy/v1/health`;
+  const okOf = (a: Awaited<ReturnType<typeof timed>>): boolean | null => (a && a.res.status === 200 ? jsonOk(a.body) : null);
+  const first = await timedRetry(f, url, headers, retryMs);
+  const said = okOf(first);
+  if (said === true) return { state: 'up', ms: first!.ms };
+  if (said === false) {
+    if (recheckMs > 0) await new Promise((r) => setTimeout(r, recheckMs));
+    const again = await timed(f, url, headers);
+    return { state: okOf(again) === true ? 'up' : 'degraded', ms: again?.ms ?? first!.ms };
+  }
+  if (t.executorDirect) {
+    const direct = await timed(f, `${t.executorDirect}/api/copy/v1/health`, {
+      Accept: 'application/json',
+      ...(t.directSecret ? { 'X-Origin-Verify': t.directSecret } : {}),
+    });
+    if (okOf(direct) !== null) return { state: 'degraded', ms: first?.ms ?? null };
+  }
+  return { state: 'down', ms: first?.ms ?? null };
+}
 
 async function timedRetry(fetchImpl: Fetch, url: string, headers: Record<string, string> = {}, retryMs = PROBE_RETRY_MS): Promise<{ res: Response; ms: number; body: string } | null> {
   const first = await timed(fetchImpl, url, headers);
@@ -406,14 +464,14 @@ async function timedRetry(fetchImpl: Fetch, url: string, headers: Record<string,
 }
 
 /** Probe every service once. Never throws: a failed probe is a `down` sample. */
-export async function probeAll(o: { targets: ProbeTargets; fetch?: Fetch; indexerStatus?: () => unknown; now?: () => number; retryMs?: number }): Promise<Sample[]> {
+export async function probeAll(o: { targets: ProbeTargets; fetch?: Fetch; indexerStatus?: () => unknown; now?: () => number; retryMs?: number; recheckMs?: number }): Promise<Sample[]> {
   const f = o.fetch ?? fetch;
   const now = o.now ?? Date.now;
-  const { site, executor, executorSecret } = o.targets;
+  const { site } = o.targets;
   const [web, api, exec] = await Promise.all([
     timedRetry(f, `${site}/`, {}, o.retryMs),
     timedRetry(f, `${site}/api/health`, { Accept: 'application/json' }, o.retryMs),
-    timedRetry(f, `${executor}/api/copy/v1/health`, { Accept: 'application/json', ...(executorSecret ? { 'X-Origin-Verify': executorSecret } : {}) }, o.retryMs),
+    probeExecutor(f, o.targets, o.retryMs, o.recheckMs ?? EXECUTOR_RECHECK_MS),
   ]);
   const out: Sample[] = [];
   out.push({
@@ -422,8 +480,7 @@ export async function probeAll(o: { targets: ProbeTargets; fetch?: Fetch; indexe
     ms: web?.ms ?? null,
   });
   out.push({ service: 'api', state: api && api.res.status === 200 && jsonOk(api.body) === true ? 'up' : 'down', ms: api?.ms ?? null });
-  const execOk = exec && exec.res.status === 200 ? jsonOk(exec.body) : null;
-  out.push({ service: 'executor', state: execOk === true ? 'up' : execOk === false ? 'degraded' : 'down', ms: exec?.ms ?? null });
+  out.push({ service: 'executor', state: exec.state, ms: exec.ms });
   if (o.indexerStatus) {
     let h = null;
     try {

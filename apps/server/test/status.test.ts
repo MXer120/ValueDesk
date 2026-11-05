@@ -52,6 +52,7 @@ test('probes: up, degraded and down for each service', async () => {
     }),
     indexerStatus: indexer(T0 - 20_000, { sodex: true, hyperliquid: false }),
     now: () => T0,
+    recheckMs: 0,
   });
   assert.deepEqual(mixed.map((s) => `${s.service}:${s.state}`), ['website:down', 'api:down', 'executor:degraded', 'indexer:degraded']);
 
@@ -77,6 +78,45 @@ test('probes: no answer is asked once more before it counts; a bad answer is not
   assert.equal(bad.filter((s) => s.url.endsWith('/api/health')).length, 1, 'a 502 is an answer: not asked again');
   const down = await probeAll({ targets: TARGETS, retryMs: 0, fetch: fakeFetch({}) });
   assert.equal(down.find((s) => s.service === 'executor')!.state, 'down', 'twice no answer: down');
+});
+
+test('probes: a feed reconnecting is asked again; still not ok is degraded', async () => {
+  const HEALTH = 'https://site.test/api/copy/v1/health';
+  let notOk = 1;
+  const reconnecting = (async (url: string, init: RequestInit) => {
+    if (url === HEALTH && notOk-- > 0) return new Response('{"ok":false,"feeds":{"sodex":false}}', { status: 200 });
+    return fakeFetch(ALL_UP)(url, init);
+  }) as unknown as typeof fetch;
+  const back = await probeAll({ targets: TARGETS, fetch: reconnecting, retryMs: 0, recheckMs: 0 });
+  assert.equal(back.find((s) => s.service === 'executor')!.state, 'up');
+  const seen: Array<{ url: string; headers: Record<string, string> }> = [];
+  const still = await probeAll({ targets: TARGETS, retryMs: 0, recheckMs: 0, fetch: fakeFetch({ ...ALL_UP, [HEALTH]: { status: 200, body: '{"ok":false}' } }, seen) });
+  assert.equal(still.find((s) => s.service === 'executor')!.state, 'degraded');
+  assert.equal(seen.filter((s) => s.url === HEALTH).length, 2, 'asked exactly twice');
+});
+
+test('probes: the visitor way failing with the executor answering is degraded, not down', async () => {
+  const DIRECT = 'https://executor.test/api/copy/v1/health';
+  const targets: ProbeTargets = { ...TARGETS, executorDirect: 'https://executor.test', directSecret: 'the-secret' };
+  const seen: Array<{ url: string; headers: Record<string, string> }> = [];
+  const run = (answers: Record<string, Answer>) => probeAll({ targets, retryMs: 0, recheckMs: 0, fetch: fakeFetch(answers, seen) }).then((r) => r.find((s) => s.service === 'executor')!.state);
+  const { 'https://site.test/api/copy/v1/health': _way, ...noWay } = ALL_UP;
+
+  assert.equal(await run({ ...noWay, [DIRECT]: { status: 200, body: '{"ok":true}' } }), 'degraded', 'no answer on the way, the executor fine');
+  assert.equal(seen.find((s) => s.url === DIRECT)?.headers['X-Origin-Verify'], 'the-secret');
+  assert.equal(seen.find((s) => s.url.startsWith('https://site.test'))?.headers['X-Origin-Verify'], undefined, 'the public site never gets it');
+  assert.equal(await run({ ...noWay, 'https://site.test/api/copy/v1/health': { status: 504, body: 'gateway timeout' }, [DIRECT]: { status: 200, body: '{"ok":true}' } }), 'degraded', 'a 504 on the way, the executor fine');
+  assert.equal(await run({ ...noWay, [DIRECT]: { status: 403, body: 'forbidden' } }), 'down', 'a refusal says nothing about its health');
+  assert.equal(await run(noWay), 'down', 'no answer anywhere');
+
+  seen.length = 0;
+  assert.equal(await run(ALL_UP), 'up');
+  assert.equal(seen.some((s) => s.url === DIRECT), false, 'a good answer asks nothing more');
+
+  assert.deepEqual(
+    probeTargetsFromEnv({ VALUESCAN_STATUS_EXECUTOR_DIRECT_URL: 'https://executor.test/', VALUESCAN_ORIGIN_SECRET: 'current-secret,next-secret' }),
+    { site: 'https://www.valuedesk.so', executor: 'https://www.valuedesk.so', executorSecret: null, executorDirect: 'https://executor.test', directSecret: 'current-secret' },
+  );
 });
 
 test('probes: the executor directly gets the origin secret, the public site never does', async () => {

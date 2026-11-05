@@ -76,7 +76,7 @@ function openText(svc: ServiceId, bad: Bad, from: number): string {
       : `One of the indexer's data streams has been down since ${since}: some figures may update late. Detected by our automatic checks; we are looking into it.`;
   }
   if (svc === 'executor' && bad === 'degraded') {
-    return `The copy & algo executor has answered since ${since} that its database or its SoDEX feed is not right: copies and algo orders may be late. Detected by our automatic checks; we are looking into it.`;
+    return `Since ${since} the copy & algo executor has either answered that its database or its SoDEX feed is not right, or has been hard to reach from the site: copies and algo orders may be late, and the app may wait for its answers. Detected by our automatic checks; we are looking into it.`;
   }
   return `Our automatic checks have found the ${NAME.get(svc)} ${bad === 'down' ? 'not answering' : 'degraded'} since ${since}. We are looking into it.`;
 }
