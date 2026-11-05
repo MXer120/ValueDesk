@@ -210,7 +210,6 @@ button.pfx-promo:hover .pfx-promo__cta { color: var(--text); }
 .pfx-tags { margin-left: 0; }
 .pfx-dim { color: var(--muted); }
 .pfx-board .pf-card__body { padding: 0; }
-.pfx-boardnote { margin: 0; padding: var(--sp-2) var(--sp-4); border-top: 1px solid var(--pf-line); }
 .pfx-status { display: inline-flex; align-items: center; gap: 6px; }
 .pfx-status i { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); }
 .pfx-status.pos i { background: var(--pos); }
@@ -263,6 +262,13 @@ html[data-theme='light'] .pfx-table .acct-mkt img { background: #17181a; border-
   .pfx .pfx-money .pf-btn { padding: 0 var(--sp-1); min-width: 0; }
   .pfx-promos { grid-template-columns: minmax(0, 1fr); }
   .pfx-hide-phone { display: none; }
+  /* Every remaining column fits, the action included: the fund's name wraps before anything clips. */
+  .pfx-table th, .pfx-table td { padding-left: 6px; padding-right: 6px; }
+  .pfx-table th:first-child, .pfx-table td:first-child { padding-left: var(--sp-2); white-space: normal; }
+  .pfx-table th:last-child, .pfx-table td:last-child { padding-right: var(--sp-2); }
+  .pfx-table .acct-mkt { gap: 6px; }
+  .pfx-table .acct-mkt__n { white-space: normal; line-height: var(--lh-xs); }
+  .pfx-table .acct-act { padding: 0 6px; white-space: nowrap; }
   .pfx-activity__line { flex-direction: column; gap: var(--sp-1); }
   .pfx-activity .pf-card { max-width: none; }
   .pf-card--chart .pf-card__head { height: auto; min-height: var(--pf-head-h); flex-wrap: wrap; padding: var(--sp-2); row-gap: var(--sp-1); }
