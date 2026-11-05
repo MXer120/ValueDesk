@@ -9,7 +9,9 @@ import { installViteStubs, staticMarkup } from '../macro/testEnv';
 import { SODEX_SIGNIN_LIVE, SODEX_SITE } from '../../sodexProgrammes';
 
 installViteStubs();
-const { LockedSection, fmtLeft, fmtTokens } = await import('./parts');
+const { LockedSection, fmtLeft, fmtTokens, fmtUsdTight } = await import('./parts');
+const { BoxArt, boxArtSrc } = await import('./BoxArt');
+const { setNumStyle } = await import('../../numStyle');
 const { WalletBoxesView } = await import('./BoxVault');
 const toMarkup = await staticMarkup();
 const render = async (el: ReactElement): Promise<string> => toMarkup(el);
@@ -60,4 +62,18 @@ test('fmtLeft and fmtTokens', () => {
   assert.equal(fmtLeft(0, 5), '00h 00m 00s');
   assert.match(fmtTokens('0.001386'), /0[.,]001386/);
   assert.match(fmtTokens('104.34'), /104[.,]34/);
+});
+
+test('fmtUsdTight: whole dollars drop the cents, and the number style of the app decides the marks', () => {
+  assert.doesNotMatch(fmtUsdTight('10000.00'), /[.,]00$/);
+  assert.match(fmtUsdTight('10.20'), /^\$10[.,]20$/);
+  assert.match(fmtUsdTight(8), /^\$8$/);
+  void setNumStyle;
+});
+
+test('box art: self-hosted, never from the hosts of SoDEX', async () => {
+  assert.equal(boxArtSrc('SuperRare'), '/sodex-art/box-superrare.webp');
+  const html = await render(<BoxArt level="Rare" size={40} />);
+  assert.match(html, /src="\/sodex-art\/box-rare\.webp"/);
+  assert.doesNotMatch(html, /sodex\.com|sosovalue/);
 });

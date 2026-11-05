@@ -5,7 +5,7 @@
  */
 import { useEffect, useState, type ReactNode } from 'react';
 import { SodexMark } from '../funds/ui';
-import { fmt } from '../../format';
+import { fmt, fmtUsd } from '../../format';
 import '../Portfolio.css';
 import './sodex.css';
 
@@ -18,10 +18,10 @@ export function ProgrammePage({ children, label, className }: { children: ReactN
   );
 }
 
-export function ProgrammeHero({ title, line, pills, aside }: { title: string; line: ReactNode; pills?: ReactNode; aside?: ReactNode }) {
+export function ProgrammeHero({ title, line, pills, aside, big }: { title: string; line: ReactNode; pills?: ReactNode; aside?: ReactNode; big?: boolean }) {
   return (
-    <header className="sdx-hero">
-      <span className="sdx-hero__mark"><SodexMark size={36} /></span>
+    <header className={`sdx-hero${big ? ' sdx-hero--big' : ''}`}>
+      <span className="sdx-hero__mark"><SodexMark size={big ? 44 : 36} /></span>
       <div className="sdx-hero__text">
         <div className="sdx-hero__titleline">
           <h1 className="sdx-hero__title">{title}</h1>
@@ -132,6 +132,15 @@ export const fmtWhen = (ms: number): string =>
 
 export const fmtDate = (ms: number): string =>
   new Date(ms).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+
+/**
+ * Money in the app's number style: no cents when the figure is whole dollars ($10.000, not $10.000,00), cents
+ * when it has them ($10,20).
+ */
+export function fmtUsdTight(v: string | number): string {
+  const n = Number(v);
+  return fmtUsd(v, Number.isFinite(n) && Number.isInteger(n) ? 0 : 2);
+}
 
 /** A reward's token amount: enough places that a small one (0.0014 vQQQ) is not printed as nothing. */
 export function fmtTokens(raw: string): string {
