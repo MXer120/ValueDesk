@@ -364,10 +364,11 @@ export class ExecutorService {
   async stop(): Promise<void> {
     if (this.signerSweep) clearInterval(this.signerSweep);
     this.signerSweep = null;
-    for (const owner of [...this.signers.keys()]) this.forgetSigner(owner, true);
     await this.algos.stop();
     this.reference?.stop();
     await this.runtime.stop();
+    // Last: a stop still signs (what a step had on its way, the bots' cancels), and a wiped key signs nothing valid.
+    for (const owner of [...this.signers.keys()]) this.forgetSigner(owner, true);
     this.builderDb?.close();
   }
 

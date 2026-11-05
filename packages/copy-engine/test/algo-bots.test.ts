@@ -475,6 +475,91 @@ test('volume maker: the brake and a key problem hold it - nothing new is sent', 
   assert.equal(r.ex.placed.length, 2, 'goes on by itself once it clears');
 });
 
+test('volume maker: every hold that stops it re-pricing takes its quotes off, and it quotes again when the hold ends', async () => {
+  const holds: Array<[string, (r: Rig, on: boolean) => void]> = [
+    ['brake', (r, on) => { r.brake = on ? 'operator brake' : null; }],
+    ['key problem', (r, on) => { r.problem = on ? 'Your copy key expired.' : null; }],
+  ];
+  for (const [name, set] of holds) {
+    const r = await rig();
+    const a = await add(r, { ...MM, onStop: 'keep' });
+    await step(r, a.id);
+    assert.equal(r.ex.resting.size, 2, name);
+    set(r, true);
+    await step(r, a.id, 61_000);
+    assert.equal(r.ex.resting.size, 0, `${name}: nothing rests while held`);
+    const placed = r.ex.placed.length;
+    await step(r, a.id, 500);
+    assert.equal(r.ex.placed.length, placed, `${name}: nothing new while held`);
+    set(r, false);
+    await step(r, a.id, 61_000);
+    await step(r, a.id, 500);
+    assert.equal(r.ex.resting.size, 2, `${name}: quotes again by itself`);
+  }
+});
+
+test('grid: the brake takes its levels off; they go back when it lifts', async () => {
+  const r = await rig();
+  const a = await add(r, { kind: 'grid', low: 59_000, high: 61_000, levels: 5, orderUsd: 60, onStop: 'keep' });
+  await step(r, a.id);
+  const levels = r.ex.resting.size;
+  assert.ok(levels > 0);
+  r.brake = 'operator brake';
+  await step(r, a.id, 500);
+  assert.equal(r.ex.resting.size, 0);
+  r.brake = null;
+  await step(r, a.id, 500);
+  await step(r, a.id, 500);
+  assert.equal(r.ex.resting.size, levels);
+});
+
+test('volume maker: the brake leaves the order closing what it holds', async () => {
+  const r = await rig();
+  const a = await add(r, MM);
+  await step(r, a.id);
+  r.ex.fill(r.ex.side('buy')[0]!.clOrdID);
+  await settle();
+  await r.rt.cancel(a.id);
+  await settle();
+  await step(r, a.id, 500);
+  const closing = [...r.ex.resting.keys()];
+  assert.equal(closing.length, 1, 'its close rests');
+  r.brake = 'operator brake';
+  await step(r, a.id, 500);
+  assert.deepEqual([...r.ex.resting.keys()], closing);
+});
+
+test('volume maker: a clean stop takes its quotes off and the next start quotes again; a kill under the brake pulls them on the first step', async () => {
+  const r = await rig();
+  const a = await add(r, { ...MM, onStop: 'keep' });
+  await step(r, a.id);
+  assert.equal(r.ex.resting.size, 2);
+  await r.rt.stop();
+  assert.equal(r.ex.resting.size, 0, 'SIGTERM: nothing rests unattended');
+  await crashAndRestart(r);
+  r.market.set(60_000, 60_002);
+  await step(r, a.id, 61_000);
+  await step(r, a.id, 500);
+  assert.equal(r.ex.resting.size, 2, 'quoting again after the start');
+
+  // SIGKILL: no stop ran, and the brake is on when it comes back (a release): the first step pulls them.
+  await crashAndRestart(r);
+  r.market.set(60_000, 60_002);
+  r.brake = 'release';
+  await step(r, a.id, 61_000);
+  assert.equal(r.ex.resting.size, 0, 'a restart under the brake takes over and pulls');
+});
+
+test('volume maker: a clean stop does not wait for ever on a cancel that hangs', async () => {
+  const r = await rig();
+  const a = await add(r, MM);
+  await step(r, a.id);
+  r.ex.cancel = () => new Promise(() => {});
+  const t0 = Date.now();
+  await r.rt.stop();
+  assert.ok(Date.now() - t0 < 6_000);
+});
+
 test('volume maker: refusals (a 429) back off per side, half a second doubling to a minute; it goes on when SoDEX takes orders again', async () => {
   const r = await rig();
   const a = await add(r, MM);

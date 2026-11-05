@@ -25,7 +25,7 @@ still failing after it" came right after a ship: start with that ship (`deploy/.
 
    That stops, within a second on the executor and within 30 s in every open browser tab: every order from
    the site, every copy order, every live algo (held, not cancelled). Stops already resting on SoDEX stay, so
-   positions keep their protection. Followers can still pause, stop, stop-and-close and cancel.
+   positions keep their protection. A bot's quotes come off, as they do on a clean stop (not a bot's order closing what it holds), and it quotes again when the brake lifts. Followers can still pause, stop, stop-and-close and cancel.
    Narrower: `brake.sh on copies,algos "..."` (the site keeps trading), `brake.sh on trading "..."`.
 
 2. **Check it took:**

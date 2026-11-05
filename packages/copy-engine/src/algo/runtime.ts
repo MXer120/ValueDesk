@@ -87,6 +87,10 @@ const FLUSH_MS = 2_000;
 const MARKETS_REFRESH_MS = 10 * 60_000;
 /** On stop, how long a step that is placing or cancelling an order is waited for. */
 const STOP_DRAIN_MS = 8_000;
+/** On stop, how long the cancels of the bots' quotes are waited for (the service manager stops waiting after 20 s). */
+const STOP_PULL_MS = 4_000;
+/** While a bot is held with quotes that would not cancel (a key SoDEX refuses), how often it tries again. */
+const HELD_PULL_MS = 5_000;
 /** An IOC with no final update after this is looked up on SoDEX. */
 const STALE_IOC_MS = 8_000;
 /** A request with no answer after this is `unknown`. */
@@ -318,6 +322,8 @@ export class AlgoRuntime {
   private socketWasUp = false;
   /** Algos that raised a hold in the step now running (steps of one algo never overlap). */
   private heldNow = new Set<string>();
+  /** When a held bot last tried to pull its quotes (pullHeldQuotes). */
+  private heldPullAt = new Map<string, number>();
   private eventSeq = 0;
   /** Each owner's positions and account, read at most every few seconds (conditions, closes, the leverage ceiling); `from`: when that read left. */
   private positionsOf = new Map<string, { at: number; from?: number; data: Record<string, { size: number; entry: number; leverage?: number }>; loading: boolean }>();
@@ -411,6 +417,9 @@ export class AlgoRuntime {
     // record what it did, so the next start resumes from the truth (bounded: the
     // service manager stops waiting after 20 s).
     for (let i = 0; this.busy.size && i < STOP_DRAIN_MS / 25; i++) await new Promise((r) => timers.after(25, () => r(undefined)));
+    // Nothing manages a bot's quotes until the next start, and the price may move: they come off, and the first step after it quotes again.
+    const pulls = [...this.algos.values()].filter((a) => this.quotesNeedManaging(a) && a.mode === 'hosted').map((a) => this.pullResting(a).catch((e) => this.host.log.warn('algo: pull on stop failed', { algo: a.id, error: String(e) })));
+    if (pulls.length) await Promise.race([Promise.all(pulls), new Promise((r) => timers.after(STOP_PULL_MS, () => r(undefined)))]);
     this.market.stop();
     await this.flush();
   }
@@ -1085,6 +1094,7 @@ export class AlgoRuntime {
     if (!s.paper) {
       const brake = this.host.brake?.(a) ?? null;
       if (brake) {
+        await this.pullHeldQuotes(a, now);
         await this.hold(a, `Held: ${brake}`);
         // Nothing new is sent, but what filled meanwhile (a child left resting) still gets its exits: they only protect (brake.ts).
         if (!this.stopped(a)) await this.syncExits(a, m, false);
@@ -1094,6 +1104,7 @@ export class AlgoRuntime {
       // A cancel or a pause may have landed while it was being checked.
       if (this.stopped(a)) return;
       if (problem) {
+        await this.pullHeldQuotes(a, now);
         await this.hold(a, problem);
         return;
       }
@@ -1101,12 +1112,14 @@ export class AlgoRuntime {
       // close-only place may close: an algo that only makes a position smaller runs there (owner, 2026-10-29).
       const policy = this.host.policyFor?.(a) ?? null;
       if (policy && !policy.allowed && !(policy.closeOnly && algoClosesOnly(s))) {
+        await this.pullHeldQuotes(a, now);
         await this.hold(a, `Held: ${policy.reason ?? 'not available in your region.'}`);
         return;
       }
     }
     // SoDEX refused it at one of its limits (onLimit): nothing goes out until the wait is over.
     if (typeof a.k.limitUntil === 'number' && now < a.k.limitUntil) {
+      await this.pullHeldQuotes(a, now);
       await this.hold(a, String(a.k.limitReason ?? 'Held: a SoDEX limit is reached.'));
       return;
     }
@@ -1116,6 +1129,7 @@ export class AlgoRuntime {
     }
     const q = this.market.quote(s.symbol);
     if (!q) {
+      await this.pullHeldQuotes(a, now);
       await this.hold(a, 'Waiting for a price from SoDEX.');
       return;
     }
@@ -2936,6 +2950,18 @@ export class AlgoRuntime {
       for (const c of open) c.cancelling = false;
       await this.event(a, 'error', `Cancel failed: ${e instanceof Error ? e.message : String(e)}`);
     }
+  }
+
+  /** A live bot with quotes of its own on the book. Not while it closes what it holds: that order only protects, as a stop does (brake.ts). */
+  private quotesNeedManaging(a: AlgoRecord): boolean {
+    return (a.spec.kind === 'mm' || a.spec.kind === 'grid') && !a.spec.paper && !FINAL_STATUSES.has(a.status) && !a.k.closing;
+  }
+
+  /** A held step returns before it re-prices, so a held bot's quotes would go stale on the book: they come off, and it quotes again when the hold ends. */
+  private async pullHeldQuotes(a: AlgoRecord, now: number): Promise<void> {
+    if (!this.quotesNeedManaging(a) || now - (this.heldPullAt.get(a.id) ?? -Infinity) < HELD_PULL_MS) return;
+    this.heldPullAt.set(a.id, now);
+    await this.pullResting(a);
   }
 
   /** Cancel every resting child (pause, hold, end). */
