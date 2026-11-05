@@ -392,16 +392,19 @@ export interface LabelRow {
  */
 export function layoutLabels(rows: readonly LabelRow[]): Map<string, number> {
   const sorted = [...rows].sort((a, b) => a.y - b.y || (a.key < b.key ? -1 : 1));
-  const runs: Array<{ items: LabelRow[]; top: number }> = [];
+  // `starts`: where each label of the run would have to start, added up. Kept rather than added up again at
+  // each join: with a bot's hundreds of orders at about one height that was most of a frame.
+  const runs: Array<{ items: LabelRow[]; top: number; starts: number }> = [];
   for (const r of sorted) {
-    let run = { items: [r], top: r.y };
+    let run = { items: [r], top: r.y, starts: r.y };
     for (;;) {
       const prev = runs[runs.length - 1];
       if (!prev || prev.top + prev.items.length * LABEL_ROW <= run.top) break;
       runs.pop();
-      const items = [...prev.items, ...run.items];
+      const starts = prev.starts + run.starts - prev.items.length * run.items.length * LABEL_ROW;
+      for (const item of run.items) prev.items.push(item);
       // The top that moves its labels least: the mean of where each would have to start.
-      run = { items, top: items.reduce((sum, item, i) => sum + item.y - i * LABEL_ROW, 0) / items.length };
+      run = { items: prev.items, top: starts / prev.items.length, starts };
     }
     runs.push(run);
   }
@@ -533,14 +536,28 @@ const FALLBACK: LineVisual = { segs: [], axisText: '', color: T.muted, emphasis:
  * A line's visual travels as text: overrideOverlay merges objects and arrays element by element,
  * so a label with fewer boxes than before kept the old ones behind the new.
  */
+/** Read twice per line per draw, the same text until the line changes. */
+const visualsRead = new Map<string, LineVisual>();
 const visualIn = (data: string | null | undefined): LineVisual => {
   if (!data) return FALLBACK;
+  const known = visualsRead.get(data);
+  if (known) return known;
   try {
-    return JSON.parse(data) as LineVisual;
+    const v = JSON.parse(data) as LineVisual;
+    if (visualsRead.size >= 4_000) visualsRead.clear();
+    visualsRead.set(data, v);
+    return v;
   } catch {
     return FALLBACK;
   }
 };
+
+/**
+ * How far each drawn line's label moved off its line, by overlay id. Read as a line is drawn, so a column
+ * that moved rewrites this and asks for one redraw: an override per line clones that overlay and looks it
+ * up among all of them, which with a bot's hundreds of lines cost more than drawing them.
+ */
+const drawnOffsets = new Map<string, number>();
 
 /**
  * The overlay template.
@@ -567,11 +584,16 @@ const template: OverlayTemplate<string> = {
     const c = coordinates[0];
     if (!c) return [];
     const v = visualIn(overlay.extendData);
-    const top = Math.round(c.y) + v.dy - LABEL_HEIGHT / 2;
+    const top = Math.round(c.y) + (drawnOffsets.get(overlay.id) ?? v.dy) - LABEL_HEIGHT / 2;
     const mid = top + LABEL_HEIGHT / 2;
+    // What lies outside the pane is clipped anyway, and working it out is not free: labels pushed apart
+    // by hundreds of orders run far past the pane's edges.
+    const lineShown = c.y >= -1 && c.y <= bounding.height + 1;
+    const labelShown = top + LABEL_HEIGHT >= 0 && top <= bounding.height;
+    if (!lineShown && !labelShown) return [];
     const parts: Array<Record<string, unknown>> = [];
     let x = LABEL_X;
-    for (const seg of v.segs) {
+    for (const seg of labelShown ? v.segs : []) {
       const width = segWidth(seg);
       const fill = seg.look === 'solid' ? seg.color : T.bg;
       const border = seg.look === 'value' ? T.text : seg.color;
@@ -609,11 +631,13 @@ const template: OverlayTemplate<string> = {
       x += width + LABEL_GAP;
     }
     return [
-      {
-        type: 'line',
-        attrs: { coordinates: [{ x: 0, y: c.y }, { x: bounding.width, y: c.y }] },
-        styles: { color: v.color, size: 1, style: 'dashed', dashedValue: v.emphasis ? [4, 3] : [1, 3] },
-      },
+      ...(lineShown
+        ? [{
+            type: 'line',
+            attrs: { coordinates: [{ x: 0, y: c.y }, { x: bounding.width, y: c.y }] },
+            styles: { color: v.color, size: 1, style: 'dashed', dashedValue: v.emphasis ? [4, 3] : [1, 3] },
+          }]
+        : []),
       ...parts,
     ] as unknown as ReturnType<NonNullable<OverlayTemplate<string>['createPointFigures']>>;
   },
@@ -623,12 +647,14 @@ const template: OverlayTemplate<string> = {
     if (!c) return [];
     const v = visualIn(overlay.extendData);
     const fromZero = yAxis?.isFromZero() ?? false;
+    const y = Math.round(c.y) + (drawnOffsets.get(overlay.id) ?? v.dy);
+    if (y < -LABEL_HEIGHT || y > bounding.height + LABEL_HEIGHT) return [];
     return {
       type: 'text',
       ignoreEvent: true,
       attrs: {
         x: fromZero ? 0 : bounding.width,
-        y: Math.round(c.y) + v.dy,
+        y,
         text: v.axisText,
         align: fromZero ? 'left' : 'right',
         baseline: 'middle',
@@ -716,7 +742,10 @@ export class OrderLineLayer {
   private tonedAt = 0;
   /** How far each label is off its line, and the state and price of a line off the venue's. */
   private offsets = new Map<string, number>();
-  private placed = '';
+  /** What the labels were last placed from, and where that put them (layout). */
+  private laid: { rows: LabelRow[]; out: Map<string, number> } | null = null;
+  /** What every label reads from the other lines: worked out once per sync, not once per line. */
+  private facts: Pick<LineContext, 'position' | 'hasTp' | 'hasSl'> | null = null;
   private moved = new Map<string, { price: string; state: LineState }>();
   /** The preview's labels (DraftOrderLines.tsx): they share the column and take room too. */
   private previewRows: LabelRow[] = [];
@@ -767,13 +796,15 @@ export class OrderLineLayer {
   }
 
   private context(line: OrderLine): LineContext {
-    const all = [...this.lines.values()];
-    return {
-      dy: this.offsets.get(line.key) ?? 0,
-      position: all.find((l) => l.kind === 'position') ?? null,
-      hasTp: all.some((l) => l.tag === 'TP'),
-      hasSl: all.some((l) => l.tag === 'SL'),
-    };
+    if (!this.facts) {
+      const all = [...this.lines.values()];
+      this.facts = {
+        position: all.find((l) => l.kind === 'position') ?? null,
+        hasTp: all.some((l) => l.tag === 'TP'),
+        hasSl: all.some((l) => l.tag === 'SL'),
+      };
+    }
+    return { dy: this.offsets.get(line.key) ?? 0, ...this.facts };
   }
 
   /**
@@ -790,17 +821,25 @@ export class OrderLineLayer {
       const y = px[i]?.y;
       if (typeof y === 'number' && Number.isFinite(y)) rows.push({ key: l.key, y });
     });
+    // Nothing moved since the last draw, as on most: a pan along time, a price tick that keeps the scale.
+    const was = this.laid;
+    if (was && was.rows.length === rows.length && rows.every((r, i) => r.key === was.rows[i]!.key && r.y === was.rows[i]!.y)) return was.out;
     const out = layoutLabels(rows);
-    const sig = [...out].join(';');
-    if (sig === this.placed) return out;
-    this.placed = sig;
+    this.laid = { rows, out };
+    let moved: OrderLine | null = null;
     for (const l of lines) {
       const dy = out.get(l.key) ?? 0;
       if ((this.offsets.get(l.key) ?? 0) === dy) continue;
       this.offsets.set(l.key, dy);
       const id = this.ids.get(l.key);
-      if (id) this.chart.overrideOverlay({ id, extendData: JSON.stringify(this.visualNow(l)) });
+      if (id) {
+        drawnOffsets.set(id, dy);
+        moved = l;
+      }
     }
+    // One override redraws the pane, and every line reads its offset as it is drawn.
+    const id = moved ? this.ids.get(moved.key) : undefined;
+    if (moved && id) this.chart.overrideOverlay({ id, extendData: JSON.stringify(this.visualNow(moved)) });
     return out;
   }
 
@@ -818,6 +857,8 @@ export class OrderLineLayer {
     const seen = new Set<string>();
     // All of them first: a TP's label reads the position beside it.
     for (const line of next) this.lines.set(line.key, line);
+    this.facts = null;
+    const fresh: OrderLine[] = [];
     for (const line of next) {
       seen.add(line.key);
       this.lines.set(line.key, line);
@@ -838,8 +879,9 @@ export class OrderLineLayer {
       const sig = signature(line);
       if (this.ids.has(line.key) && this.sigs.get(line.key) === sig) continue;
       this.remove(line.key);
-      this.create(line);
+      fresh.push(line);
     }
+    this.create(fresh);
 
     for (const key of [...this.ids.keys()]) {
       if (seen.has(key)) continue;
@@ -847,6 +889,7 @@ export class OrderLineLayer {
       const wasHeld = this.held === key;
       this.remove(key);
       this.lines.delete(key);
+      this.facts = null;
       if (wasHeld) {
         this.held = null;
         this.expecting = null;
@@ -915,23 +958,36 @@ export class OrderLineLayer {
     this.stopFollow = null;
     for (const key of [...this.ids.keys()]) this.remove(key);
     this.lines.clear();
+    this.facts = null;
     this.held = null;
     this.expecting = null;
   }
 
-  private create(line: OrderLine): void {
-    const value = Number.parseFloat(line.price);
+  /** All of a sync's new lines at once: the library sorts its overlays after each call, and a bot's refresh brings hundreds. */
+  private create(lines: readonly OrderLine[]): void {
     // A line we cannot price is not drawn at all. There is no safe placeholder
     // position for "an order exists somewhere".
-    if (!Number.isFinite(value)) return;
-    const visual = this.visualNow(line);
-    const id = this.chart.createOverlay({
+    const priced = lines.filter((l) => Number.isFinite(Number.parseFloat(l.price)));
+    if (!priced.length) return;
+    const ids = this.chart.createOverlay(priced.map((l) => this.overlayOf(l))) as Array<string | null>;
+    priced.forEach((line, i) => {
+      const id = ids[i];
+      if (typeof id === 'string') {
+        this.ids.set(line.key, id);
+        this.sigs.set(line.key, signature(line));
+      }
+    });
+    this.laid = null;
+  }
+
+  private overlayOf(line: OrderLine) {
+    return {
       name: ORDER_LINE_OVERLAY,
       paneId: CANDLE_PANE_ID,
       zLevel: Z_LEVEL,
       lock: !line.draggable,
-      points: [{ value }],
-      extendData: JSON.stringify(visual),
+      points: [{ value: Number.parseFloat(line.price) }],
+      extendData: JSON.stringify(this.visualNow(line)),
 
       // Without this the library deletes the overlay on right-click. See the
       // file header - on a stop-loss that is a one-click lie.
@@ -971,21 +1027,20 @@ export class OrderLineLayer {
         this.hold(line.key);
         this.on.onDrop(this.current(line), snapped);
       },
-    });
-    if (typeof id === 'string') {
-      this.ids.set(line.key, id);
-      this.sigs.set(line.key, signature(line));
-    }
+    };
   }
 
   private remove(key: string): void {
     const id = this.ids.get(key);
-    if (id) this.chart.removeOverlay({ id });
+    if (id) {
+      this.chart.removeOverlay({ id });
+      drawnOffsets.delete(id);
+    }
     this.ids.delete(key);
     this.sigs.delete(key);
     this.tone.delete(key);
     this.offsets.delete(key);
-    this.placed = '';
+    this.laid = null;
     this.moved.delete(key);
   }
 

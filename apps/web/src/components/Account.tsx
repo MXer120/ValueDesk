@@ -57,6 +57,7 @@ import { planExit, type ExitExisting } from './tpsl';
 import { onPositionAction } from '../positionActions';
 import './Account.css';
 import { CoinIcon, CoinLabel } from './CoinIcon';
+import { RowSpacer, useRowWindow } from './account/rowWindow';
 import { HistoryTable, ReadFailed } from './AccountHistory';
 import { Updating } from './LoadFailed';
 import { readShown } from './readState';
@@ -1055,6 +1056,8 @@ function OpenOrdersInner({
     }
   }
 
+  const capped = shownOrders.slice(0, orderCap);
+  const win = useRowWindow(capped.length);
   const spot = engine === 'spot';
   const anyStop = orders.some((o) => num(pick(o, 'stopPrice')) > 0);
   const head = showTitle || !!headAction;
@@ -1096,8 +1099,9 @@ function OpenOrdersInner({
               )}
             </tr>
           </thead>
-          <tbody>
-            {shownOrders.slice(0, orderCap).map((o, i) => {
+          <tbody ref={win.ref}>
+            <RowSpacer height={win.top} />
+            {capped.slice(win.from, win.to).map((o, i) => {
               const symbol = symbolOf(o) || EM;
               const sym = byName.get(symbol);
               const dir = directionOfSide(pick(o, 'side', 'S'));
@@ -1156,6 +1160,7 @@ function OpenOrdersInner({
                 </tr>
               );
             })}
+            <RowSpacer height={win.bottom} />
           </tbody>
         </table>
         )}

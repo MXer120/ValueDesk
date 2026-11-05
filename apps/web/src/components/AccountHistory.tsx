@@ -39,6 +39,7 @@ import { cachedAssetConfigs, canDepositCoin, canWithdrawCoin, chainLabel, transf
 import { coinPrices, priceOf } from '../trading/prices';
 import { refreshWallet, subscribeWallet, walletRead } from '../trading/walletBalances';
 import { CoinIcon, CoinLabel } from './CoinIcon';
+import { RowSpacer, useRowWindow } from './account/rowWindow';
 import { SodexMark } from './funds/ui';
 import { requestDeposit, requestTransfer, requestWithdraw } from './account/actions';
 import { SortTh, sortRows, useTableSort } from './accountTables/sort';
@@ -684,6 +685,7 @@ function OrdersTable({ rows, byName, engine, account }: { rows: any[]; byName: M
     if (key === 'placed') return num(pick(o, 'createdAt')) || null;
     return null;
   });
+  const win = useRowWindow(shown.length);
   return (
     <table className="acct-table acct-t">
       <thead>
@@ -700,8 +702,9 @@ function OrdersTable({ rows, byName, engine, account }: { rows: any[]; byName: M
           {showIds && <IdsTh />}
         </tr>
       </thead>
-      <tbody>
-        {shown.map((o) => {
+      <tbody ref={win.ref}>
+        <RowSpacer height={win.top} />
+        {shown.slice(win.from, win.to).map((o) => {
           const symbol = String(pick(o, 'symbol') ?? DASH);
           const sym = byName.get(symbol);
           const filled = num(pick(o, 'executedQty'));
@@ -751,6 +754,7 @@ function OrdersTable({ rows, byName, engine, account }: { rows: any[]; byName: M
             </tr>
           );
         })}
+        <RowSpacer height={win.bottom} />
       </tbody>
     </table>
   );
@@ -771,6 +775,7 @@ function TradesTable({ rows, byName, engine, account }: { rows: any[]; byName: M
     if (key === 'time') return num(pick(t, 'time')) || null;
     return null;
   });
+  const win = useRowWindow(shown.length);
   return (
     <table className="acct-table acct-t">
       <thead>
@@ -785,8 +790,9 @@ function TradesTable({ rows, byName, engine, account }: { rows: any[]; byName: M
           {showIds && <IdsTh />}
         </tr>
       </thead>
-      <tbody>
-        {shown.map((t) => {
+      <tbody ref={win.ref}>
+        <RowSpacer height={win.top} />
+        {shown.slice(win.from, win.to).map((t) => {
           const symbol = String(pick(t, 'symbol') ?? DASH);
           const sym = byName.get(symbol);
           const px = pick(t, 'price');
@@ -823,6 +829,7 @@ function TradesTable({ rows, byName, engine, account }: { rows: any[]; byName: M
             </tr>
           );
         })}
+        <RowSpacer height={win.bottom} />
       </tbody>
     </table>
   );
@@ -837,6 +844,7 @@ function FundingTable({ rows, byName, account }: { rows: any[]; byName: Map<stri
     if (key === 'time') return num(pick(f, 'timestamp')) || null;
     return null;
   });
+  const win = useRowWindow(shown.length);
   return (
     <table className="acct-table acct-t">
       <thead>
@@ -847,8 +855,9 @@ function FundingTable({ rows, byName, account }: { rows: any[]; byName: Map<stri
           {showIds && <IdsTh />}
         </tr>
       </thead>
-      <tbody>
-        {shown.map((f) => {
+      <tbody ref={win.ref}>
+        <RowSpacer height={win.top} />
+        {shown.slice(win.from, win.to).map((f) => {
           const symbol = String(pick(f, 'symbol') ?? DASH);
           // Settled per coin: shown in feeCoin. Positive = received.
           const fee = pick(f, 'fundingFee');
@@ -873,6 +882,7 @@ function FundingTable({ rows, byName, account }: { rows: any[]; byName: Map<stri
             </tr>
           );
         })}
+        <RowSpacer height={win.bottom} />
       </tbody>
     </table>
   );
@@ -1038,6 +1048,7 @@ function ClosedTable({ rows, byName, funding, account }: { rows: any[]; byName: 
     if (key === 'closed') return c.open ? null : num(c.closed);
     return null;
   });
+  const win = useRowWindow(shown.length);
   return (
     <table className="acct-table acct-t">
       <thead>
@@ -1056,8 +1067,9 @@ function ClosedTable({ rows, byName, funding, account }: { rows: any[]; byName: 
           {showIds && <IdsTh />}
         </tr>
       </thead>
-      <tbody>
-        {shown.map((p) => {
+      <tbody ref={win.ref}>
+        <RowSpacer height={win.top} />
+        {shown.slice(win.from, win.to).map((p) => {
           const c = closedOf(p, byName, funding);
           return (
             <tr key={HISTORY.positions.idOf(p)}>
@@ -1086,6 +1098,7 @@ function ClosedTable({ rows, byName, funding, account }: { rows: any[]; byName: 
             </tr>
           );
         })}
+        <RowSpacer height={win.bottom} />
       </tbody>
     </table>
   );
@@ -1304,6 +1317,7 @@ export function AccountLedger({
   useReportMeta(onMeta, oldest, null, l.hasMore);
   const auto = useAutoLoad(filter, caps.time, oldest, { busy: l.loading || l.loadingMore, failed: !!l.error || !!l.moreError, hasMore: l.hasMore }, l.more);
 
+  const win = useRowWindow(shown.length);
   if (!address) return <section className="panel acct"><Note>Connect a wallet to see deposits, withdrawals and transfers.</Note></section>;
   if (!available) return <section className="panel acct"><Note>Deposits, withdrawals and transfers are published for mainnet accounts only.</Note></section>;
 
@@ -1329,8 +1343,9 @@ export function AccountLedger({
                 <SortTh k="time" label="Time" numeric sort={sort} onSort={toggle} className="num" />
               </tr>
             </thead>
-            <tbody>
-              {shown.map((r) => {
+            <tbody ref={win.ref}>
+              <RowSpacer height={win.top} />
+              {shown.slice(win.from, win.to).map((r) => {
                 const inbound = INBOUND.has(r.kind);
                 const g = LEDGER_GLYPH[r.state];
                 return (
@@ -1366,6 +1381,7 @@ export function AccountLedger({
                   </tr>
                 );
               })}
+              <RowSpacer height={win.bottom} />
             </tbody>
           </table>
         )}

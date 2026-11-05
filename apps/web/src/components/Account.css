@@ -252,6 +252,9 @@
    brighten), so it keeps its tint. Every control below hovers on colour. */
 .acct-table tbody tr { transition: background-color var(--dur-fast) var(--ease-out); }
 .acct-table tbody tr:hover { background: var(--tint); }
+/* What stands in for the rows far from the view (account/rowWindow.tsx). */
+.acct-table tbody tr.acct-spacer:hover { background: none; }
+.acct-table.acct-t tbody tr.acct-spacer td { height: auto; padding: 0; box-shadow: none; }
 
 /* Colour carries meaning in these cells, so it is pinned locally rather than
    inherited from the global utilities. */
