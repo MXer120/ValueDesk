@@ -159,3 +159,17 @@ test('reference: the ring while it beats; its own Binance socket while the ring 
     rmSync(d, { recursive: true, force: true });
   }
 });
+
+test('ring: the same price is written again after half a second on a size change, so a still market does not look like a dead feed', () => {
+  const d = dir();
+  try {
+    const w = new RingWriter(join(d, 'ring'), ['binance_fut'], SYMS, 8);
+    assert.equal(w.publish(0, 1, 100, 101, 1, 1, 1, 1, 1_000_000_000n), true);
+    assert.equal(w.publish(0, 1, 100, 101, 2, 2, 2, 2, 1_400_000_000n), false, 'under half a second: not written');
+    assert.equal(w.publish(0, 1, 100, 101, 3, 3, 3, 3, 1_500_000_000n), true, 'half a second: written');
+    assert.equal(w.publish(0, 1, 100, 101, 4, 4, 4, 4, 1_600_000_000n), false, 'and the wait starts over');
+    assert.equal(w.publish(0, 1, 100, 102, 4, 4, 5, 5, 1_600_000_001n), true, 'a new price always goes in');
+  } finally {
+    rmSync(d, { recursive: true, force: true });
+  }
+});

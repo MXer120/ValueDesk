@@ -98,6 +98,9 @@ const getName = (b: Buffer, at: number, max: number): string => {
   return b.toString('latin1', at, end < 0 || end > at + max ? at + max : end);
 };
 
+/** The same price is written again this long after it was last written, on the next size change. */
+const FRESH_NS = 500_000_000n;
+
 /** The producer's side. */
 export class RingWriter {
   private readonly fd: number;
@@ -148,15 +151,23 @@ export class RingWriter {
     renameSync(tmp, path);
   }
 
+  /** When each pair was last written, its rxNs. */
+  private wroteAt = new Map<number, bigint>();
+
   /** Ticks published so far. */
   get published(): bigint {
     return this.head;
   }
 
-  /** One quote. false: bid and ask are what was written last for this pair (nothing written). */
+  /**
+   * One quote. false: bid and ask are what was written last for this pair, under FRESH_NS ago (nothing written). A size
+   * change at the same price still proves the stream alive, so one goes in that often: a reader's age check must not take
+   * a still market for a dead feed (the makers we want to be rest exactly then; on 2026-11-04 every still 2 s pulled them).
+   */
   publish(feed: number, symbol: number, bid: number, ask: number, bidSz: number, askSz: number, eventMs: number, update: number, rxNs: bigint = monoNs()): boolean {
     const k = (feed * this.l.symbols + symbol) * 2;
-    if (this.last[k] === bid && this.last[k + 1] === ask) return false;
+    if (this.last[k] === bid && this.last[k + 1] === ask && rxNs - (this.wroteAt.get(k) ?? 0n) < FRESH_NS) return false;
+    this.wroteAt.set(k, rxNs);
     this.last[k] = bid;
     this.last[k + 1] = ask;
     const n = this.head;
