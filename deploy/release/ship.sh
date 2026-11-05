@@ -342,7 +342,7 @@ echo "  bin: $n changed"
 EOF
 }
 
-# The indexer's state in the index (meta indexer_status): last build, its pid, Lighter's subscriptions, streams down.
+# The indexer's state in the index (meta indexer_status): when it last published, its last build, Lighter's subscriptions, streams down.
 indexer_state() {
   remote "$S1" 'sudo /opt/node/current/bin/node --disable-warning=ExperimentalWarning -' <<'EOF'
 const { DatabaseSync } = require('node:sqlite');
@@ -351,7 +351,7 @@ const r = d.prepare("select * from meta where key = 'indexer_status'").get();
 const s = r ? JSON.parse(Object.values(r)[1]) : {};
 const l = s.venues?.lighter?.subscribed;
 const down = Object.entries(s.streams ?? {}).filter(([, v]) => v == null).map(([k]) => k);
-console.log([s.lastBuildAt ?? 0, s.lastBuildMs ?? 0, l?.confirmed ?? -1, l?.markets ?? -1, down.join(',') || '-'].join(' '));
+console.log([s.at ?? 0, s.lastBuildMs ?? 0, l?.confirmed ?? -1, l?.markets ?? -1, down.join(',') || '-'].join(' '));
 EOF
 }
 
@@ -472,6 +472,9 @@ if [ ${#U1[@]} -gt 0 ] || [ "$STA" = 1 ]; then
   t0=0
   if want indexer; then t0="$(remote "$S1" 'date +%s%3N')"; fi
   release_on "$S1" "$(IFS=,; echo "${S1U[*]}")"
+  # What the old process published before it stopped does not count.
+  restarted=0
+  if want indexer; then restarted="$(remote "$S1" 'date +%s%3N')"; fi
   if [ "$STA" = 1 ]; then done_note "status prober restarted"; fi
   if want api; then done_note "api back"; fi
   if want indexer; then
@@ -481,9 +484,9 @@ if [ ${#U1[@]} -gt 0 ] || [ "$STA" = 1 ]; then
     # old is the status page's to say (boards over an hour old count as degraded).
     note "waiting for the indexer to publish again on $TAG"
     built="" whole=""
-    for i in $(seq 1 18); do
+    for i in $(seq 1 30); do
       read -r at ms conf markets down < <(indexer_state || echo "0 0 -1 -1 ?")
-      if [ -z "$built" ] && [ "${at:-0}" -gt "$t0" ]; then built="$at"; note "indexer publishing $(( (at - t0) / 1000 )) s after the restart"; fi
+      if [ -z "$built" ] && [ "${at:-0}" -gt "$restarted" ]; then built="$at"; note "indexer publishing $(( (at - t0) / 1000 )) s after the restart"; fi
       if [ -n "$built" ] && [ "$down" = "-" ]; then whole=1; break; fi
       sleep 10
     done
@@ -491,8 +494,8 @@ if [ ${#U1[@]} -gt 0 ] || [ "$STA" = 1 ]; then
       done_note "indexer: publishing again $(( (built - t0) / 1000 )) s after the restart$([ -n "$whole" ] && echo ", every stream up" || echo ", streams still reconnecting: $down")"
       notice_note "Leaderboards and cohorts keep showing; their figures catch up over the next rebuild."
     else
-      note "!! the indexer has not published in 3 minutes after the restart - check it (deploy/release/remote.sh logs indexer)"
-      done_note "indexer: NOT publishing 3 minutes after the restart - check it (deploy/release/remote.sh logs indexer)"
+      note "!! the indexer has not published in 5 minutes after the restart - check it (deploy/release/remote.sh logs indexer)"
+      done_note "indexer: NOT publishing 5 minutes after the restart - check it (deploy/release/remote.sh logs indexer)"
       WARNED=1
     fi
   fi
