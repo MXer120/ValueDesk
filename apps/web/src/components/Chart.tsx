@@ -996,26 +996,31 @@ function Chart({
   /**
    * Who traded, a panel beside the plot so the chart stays in view (owner 2026-11-03: "I want the who
    * traded to be a sidebar so chart stays visible"). Its candle is the chart's: right-click one, or
-   * click one while the panel is open; the timeframe is the chart's interval. flowAt is a time inside
+   * Shift-click one while the panel is open; the timeframe is the chart's interval. flowAt is a time inside
    * that candle (null: the last closed one).
    */
   const [flowOpen, setFlowOpen] = useState(false);
   const [flowAt, setFlowAt] = useState<number | null>(null);
   /**
-   * A range of candles (owner 2026-11-03: "possible by pressing cmd + mouse or dragging the mouse for
-   * multiple candles"): a time inside the other end candle, null for one candle. Cmd/Ctrl-click a candle
-   * extends to it, Shift-drag across the plot picks a range (a plain drag still pans), and on touch the
-   * long-press menu offers "to here".
+   * A range of candles (owner 2026-11-03: "dragging the mouse for multiple candles"): a time inside the
+   * other end candle, null for one candle. Shift-drag across the plot picks a range, and the right-click
+   * (on touch, long-press) menu offers "to here". A plain click never picks anything (owner 2026-11-05:
+   * "Via left click only change/select candle when pressing shift, otherwise only via right click"),
+   * and Ctrl / Cmd belongs to picking drawings.
    */
   const [flowEnd, setFlowEnd] = useState<number | null>(null);
   const pickFlow = useCallback((at: number, end: number | null) => {
     setFlowAt(at);
     setFlowEnd(end);
   }, []);
+  /** Closing lets go of the pick: the outline goes, and the panel opens fresh next time. */
+  const closeFlow = useCallback(() => {
+    setFlowOpen(false);
+    setFlowAt(null);
+    setFlowEnd(null);
+  }, []);
   const [flowSize, setFlowSize] = useStored<{ w: number; h: number }>('chart.flowSize', { w: 460, h: 0.45 });
   const flowWrap = useRef<HTMLDivElement | null>(null);
-  /** A plain click on the plot while the panel is open picks its candle (not a pan, not a drag). */
-  const flowDown = useRef<{ x: number; y: number; t: number } | null>(null);
   /** Live readout while a line is under the cursor. */
   const [drag, setDrag] = useState<PendingMove | null>(null);
   /** Dropped, snapped, and awaiting an explicit confirm. Nothing sent yet. */
@@ -3572,7 +3577,6 @@ function Chart({
   };
   const onPanePointerDown = (e: ReactPointerEvent) => {
     endPress();
-    flowDown.current = e.button === 0 ? { x: e.clientX, y: e.clientY, t: performance.now() } : null;
     // A bare chart's long press is its host's (the heatmap's hover card); its right-click stays the menu.
     if (e.pointerType !== 'touch' || bare) return;
     const { clientX: x, clientY: y } = e;
@@ -3662,7 +3666,7 @@ function Chart({
         onDoubleClick={() => setFlowSize({ w: 460, h: 0.45 })}
       />
       <Suspense fallback={<div className="kc-flow-wait" aria-busy="true" />}>
-        <TradeFlowView symbol={symbol} spot={engine === 'spot'} interval={interval} at={flowAt} end={flowEnd} onPick={pickFlow} onClose={() => setFlowOpen(false)} />
+        <TradeFlowView symbol={symbol} spot={engine === 'spot'} interval={interval} at={flowAt} end={flowEnd} onPick={pickFlow} onClose={closeFlow} />
       </Suspense>
     </div>
   );
@@ -3677,20 +3681,10 @@ function Chart({
     const t = pt[0]?.timestamp;
     return typeof t === 'number' && Number.isFinite(t) ? Math.min(t, Date.now()) : null;
   };
-  /** The candle under a click, for Who traded: a press that did not move and was not held. Cmd/Ctrl extends the pick. */
-  const pickFlowCandle = (e: ReactPointerEvent) => {
-    const d = flowDown.current;
-    flowDown.current = null;
-    if (!flowOpen || !d || drawing || maskedRef.current) return;
-    if (Math.hypot(e.clientX - d.x, e.clientY - d.y) > 4 || performance.now() - d.t > 450) return;
-    const t = flowTimeAt(e.clientX);
-    if (t === null) return;
-    if (e.metaKey || e.ctrlKey) pickFlow(flowSpan(interval, flowAt, null).from, t);
-    else pickFlow(t, null);
-  };
   /**
-   * Shift-drag across the plot: a range of candles, outlined while it is dragged. Taken in the capture
-   * phase, before the chart's own pan sees the press, so a plain drag keeps panning.
+   * Shift + press on the plot, while the panel is open: a click picks that candle, a drag a range of
+   * them, outlined as it goes. Taken in the capture phase, before the chart's own pan sees the press;
+   * without Shift the chart gets every press as usual.
    */
   const onFlowDragStart = (e: ReactPointerEvent) => {
     if (!flowOpen || !e.shiftKey || e.button !== 0 || e.pointerType === 'touch' || drawing || maskedRef.current) return;
@@ -3698,7 +3692,6 @@ function Chart({
     if (t0 === null) return;
     e.preventDefault();
     e.stopPropagation();
-    flowDown.current = null;
     let t1 = t0;
     const move = (ev: PointerEvent) => {
       const t = flowTimeAt(ev.clientX);
@@ -4553,10 +4546,10 @@ function Chart({
             style={bare ? { display: 'none' } : undefined}
             type="button"
             className={`kc-ico kc-tb-ico${flowOpen ? ' on' : ''}`}
-            title={flowOpen ? 'Hide Who traded' : 'Who traded: every wallet in a candle (click a candle to pick it)'}
+            title={flowOpen ? 'Hide Who traded' : 'Who traded: every wallet in a candle'}
             aria-label="Who traded"
             aria-pressed={flowOpen}
-            onClick={() => setFlowOpen(!flowOpen)}
+            onClick={() => (flowOpen ? closeFlow() : setFlowOpen(true))}
           >
             {CHART_ICONS.traders}
           </button>
@@ -4640,10 +4633,9 @@ function Chart({
           // The chart itself resets on the double click's second release (the
           // pointer effect above); this covers the rest of the pane.
           onDoubleClick={resetView}
-          onPointerUp={(e) => {
+          onPointerUp={() => {
             endPress();
             syncPaneHeights();
-            pickFlowCandle(e);
           }}
           onMouseLeave={() => {
             // klinecharts only emits onCrosshairChange while the pointer is over a

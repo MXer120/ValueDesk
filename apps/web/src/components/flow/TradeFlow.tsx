@@ -2,12 +2,13 @@
  * WHO TRADED (owner 2026-11-01: "Make it possible to get the following trade info & more for each
  * candle & every timeframe across all supported platforms ... Use our own design & optimize UX").
  *
- * A panel beside the chart, so the chart stays in view (owner 2026-11-03). One candle of the chart's
- * interval - picked on the chart (click it while the panel is open, or right-click "Who traded this
- * candle"; it is lit there) or stepped here - broken down by wallet over the chosen platforms:
+ * A panel beside the chart, so the chart stays in view (owner 2026-11-03), built like the chart's other
+ * panels: flush, one hairline between its parts (owner 2026-11-05: "doesnt match our other stuff"). One
+ * candle of the chart's interval - picked on the chart (Shift-click it, or right-click "Who traded this
+ * candle"; it is outlined there) or stepped here - broken down by wallet over the chosen platforms:
  *   - the summary: traded, the takers' buy/sell split, wallets, the top three's share, fills, VWAP;
- *   - a ranked table: lean (net bought, net sold, round trip), share, volume, buy/sell bias,
- *     fills, average buy and sell price, net size, taker share;
+ *   - a ranked table: share, volume, buy/sell bias, fills, and under View lean (net bought, net
+ *     sold, round trip), average buy and sell price, net size, taker share;
  *   - a wallet's fills in the candle (click a row): side, taker or maker, price, size, value,
  *     counterparty, time to the millisecond - a virtual list, so a hundred thousand rows scroll.
  * Data: the venues' public prints with both parties, kept by the indexer (server flow/). Nothing
@@ -23,7 +24,6 @@ import { usePolled } from '../explore/cohorts/parts';
 import { fmtCount, fmtPx, fmtUsdExact, fmtUsdShort } from '../explore/model';
 import { fmtNum } from '../../numStyle';
 import { DASH, MINUS } from '../../format';
-import { CoinIcon } from '../CoinIcon';
 import { VenueLogo } from '../VenueLogo';
 import { Identicon } from '../Identicon';
 import { PlatformSelect } from '../PlatformSelect';
@@ -132,12 +132,11 @@ function CsvButton({ onClick, disabled }: { onClick: () => void; disabled?: bool
       <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
         <path d="M8 2.5v7.5M4.8 7 8 10.2 11.2 7M3 12.5h10" />
       </svg>
-      <span>CSV</span>
     </button>
   );
 }
 
-function Wallet({ w, size = 18 }: { w: { venue: Venue; address: string | null; key: string }; size?: number }) {
+function Wallet({ w, size = 16 }: { w: { venue: Venue; address: string | null; key: string }; size?: number }) {
   const id = whoOf(w);
   return (
     <span className="tfl-who" title={`${VENUE_LABEL[w.venue]} · ${w.address ?? `account ${w.key}`}`}>
@@ -165,10 +164,10 @@ export interface TradeFlowProps {
   onClose: () => void;
 }
 
-/** How a range is made, said where the pointer is: a touch screen has no modifier keys. */
-const RANGE_TIP = typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches
-  ? 'Long-press another candle for a range'
-  : `Shift-drag or ${typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl'}-click for a range`;
+/** How to pick candles, said where the pointer is: a touch screen has no Shift. */
+const PICK_TIP = typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches
+  ? 'Long-press a candle to change'
+  : 'Shift-click a candle, Shift-drag for a range';
 
 const ChevL = () => <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M10 3.5 5.5 8l4.5 4.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>;
 const ChevR = () => <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>;
@@ -241,36 +240,32 @@ export function TradeFlowView({ symbol, spot, interval, at, end, onPick, onClose
     <div ref={rootRef} className={`tfl${big ? ' tfl--big' : ''}${short ? ' is-short' : ''}`} role={big ? 'dialog' : undefined} aria-label={big ? `Who traded ${coin}` : undefined}>
       <div className="tfl-bar">
         <div className="tfl-title">
-          <CoinIcon coin={coin} size={18} />
-          <b>Who traded <span className="tfl-title__coin">{coin}</span></b>
+          <b>Who traded</b>
+          <span className="tfl-title__coin">{coin}</span>
         </div>
-        <div className="tfl-bar__end">
-          <PlatformSelect options={offered} value={venues} onChange={setVenues} align="end" />
-          <button type="button" className="tfl-icobtn tfl-expand" onClick={() => setBig((b) => !b)} aria-label={big ? 'Back beside the chart' : 'Expand'} title={big ? 'Back beside the chart (Esc)' : 'Expand'}>
-            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              {big ? <path d="M6.5 2.5v4h-4M9.5 13.5v-4h4M6.5 6.5 2 2M9.5 9.5 14 14" /> : <path d="M2.5 6.5v-4h4M13.5 9.5v4h-4M2.5 2.5 7 7M13.5 13.5 9 9" />}
-            </svg>
-          </button>
-          <button type="button" className="tfl-icobtn" onClick={() => { setBig(false); onClose(); }} aria-label="Close Who traded" title="Close">
-            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" /></svg>
-          </button>
-        </div>
+        <button type="button" className="tfl-ghost" onClick={() => setBig((b) => !b)} aria-label={big ? 'Back beside the chart' : 'Expand'} title={big ? 'Back beside the chart (Esc)' : 'Expand'}>
+          <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            {big ? <path d="M6.5 2.5v4h-4M9.5 13.5v-4h4M6.5 6.5 2 2M9.5 9.5 14 14" /> : <path d="M2.5 6.5v-4h4M13.5 9.5v4h-4M2.5 2.5 7 7M13.5 13.5 9 9" />}
+          </svg>
+        </button>
+        <button type="button" className="tfl-ghost" onClick={() => { setBig(false); onClose(); }} aria-label="Close Who traded" title="Close">
+          <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" /></svg>
+        </button>
       </div>
 
       {/* The candle: the chart's interval and the one picked there, stepped here. */}
       <div className="tfl-candle">
-        <button type="button" className="tfl-icobtn" aria-label={count > 1 ? 'Previous range' : 'Previous candle'} title={count > 1 ? `The ${count} candles before` : 'Previous candle'} onClick={() => step(-1)}><ChevL /></button>
         <div className="tfl-candle__when" aria-live="polite">
-          <span className="tfl-candle__top">
-            <span className="tfl-pill is-pick" title={count > 1 ? `${fmtCount(count)} candles of the chart's timeframe` : "The chart's timeframe"}>{count > 1 ? `${fmtCount(count)} × ${ivLabel(interval)}` : ivLabel(interval)}</span>
-            {live && <span className="tfl-pill is-live">Forming</span>}
-            {count > 1
-              ? <button type="button" className="tfl-candle__one" onClick={() => onPick(win.from, null)} title="Back to the first candle alone">One candle</button>
-              : !live && <span className="tfl-candle__tip">{RANGE_TIP}</span>}
-          </span>
           <b>{windowText(win)}</b>
+          <span className="tfl-candle__sub">
+            <span title={count > 1 ? `${fmtCount(count)} candles of the chart's timeframe` : "The chart's timeframe"}>{count > 1 ? `${fmtCount(count)} × ${ivLabel(interval)}` : ivLabel(interval)}</span>
+            {live && <span className="tfl-forming">Forming</span>}
+            {count > 1 && <button type="button" className="tfl-candle__one" onClick={() => onPick(win.from, null)} title="Back to the first candle alone">One candle</button>}
+            <span className="tfl-candle__tip" title={PICK_TIP}>{PICK_TIP}</span>
+          </span>
         </div>
-        <button type="button" className="tfl-icobtn" aria-label={count > 1 ? 'Next range' : 'Next candle'} title={count > 1 ? `The ${count} candles after` : 'Next candle'} disabled={live} onClick={() => step(1)}><ChevR /></button>
+        <button type="button" className="tfl-ghost" aria-label={count > 1 ? 'Previous range' : 'Previous candle'} title={count > 1 ? `The ${count} candles before` : 'Previous candle'} onClick={() => step(-1)}><ChevL /></button>
+        <button type="button" className="tfl-ghost" aria-label={count > 1 ? 'Next range' : 'Next candle'} title={count > 1 ? `The ${count} candles after` : 'Next candle'} disabled={live} onClick={() => step(1)}><ChevR /></button>
         <button type="button" className={`tfl-latest${win.from === latest.from ? ' is-on' : ''}`} onClick={() => onPick(latest.from, null)} title="The candle still forming">Live</button>
       </div>
 
@@ -284,8 +279,9 @@ export function TradeFlowView({ symbol, spot, interval, at, end, onPick, onClose
             <div className="tfl-filters">
               <label className="lbp-search tfl-search">
                 <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><circle cx="7" cy="7" r="4.5" /><path d="m10.5 10.5 3 3" strokeLinecap="round" /></svg>
-                <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Find a wallet or account id" aria-label="Find a wallet" spellCheck={false} />
+                <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Find a wallet" title="A wallet address or account id" aria-label="Find a wallet" spellCheck={false} />
               </label>
+              <PlatformSelect options={offered} value={venues} onChange={setVenues} align="end" />
               <TableView cols={cols} onCols={setCols} role={role} onRole={setRole} side={side} onSide={setSide} sort={sort} onSort={setSort} />
               <CsvButton disabled={!d?.rows.length} onClick={csv} />
             </div>
@@ -316,17 +312,12 @@ function Summary({ d, role, loading }: { d: FlowWindow | null; role: FlowRole; l
   const v = (x: ReactNode) => (loading ? <i className="tfl-skelv" aria-hidden="true" /> : x);
   return (
     <section className="tfl-sum" aria-label="Candle summary" aria-busy={loading}>
-      <div className="tfl-sum__row">
-        <div className="tfl-sum__lead">
-          <span className="tfl-stat__l">Traded</span>
-          <span className="tfl-sum__big" title={fmtUsdExact(s?.total)}>{v(s ? fmtUsdShort(s.total) : DASH)}</span>
-        </div>
-        <div className="tfl-sum__stats">
-          <Stat label={role === 'all' ? 'Wallets' : role === 'taker' ? 'Takers' : 'Makers'} value={v(s ? fmtCount(s.wallets) : DASH)} />
-          <Stat label="Top 10" value={v(s && s.wallets && s.top10 !== undefined ? pct(s.top10) : DASH)} title="The ten largest wallets' share of the volume shown" />
-          <Stat label="Fills" value={v(s ? fmtCount(s.prints) : DASH)} title="Prints (one per match; each has a buyer and a seller)" />
-          <Stat label="VWAP" value={v(s?.vwap ? fmtPx(s.vwap) : DASH)} />
-        </div>
+      <div className="tfl-sum__stats">
+        <Stat label="Traded" value={v(s ? fmtUsdShort(s.total) : DASH)} title={s ? fmtUsdExact(s.total) : undefined} />
+        <Stat label={role === 'all' ? 'Wallets' : role === 'taker' ? 'Takers' : 'Makers'} value={v(s ? fmtCount(s.wallets) : DASH)} />
+        <Stat label="Top 10" value={v(s && s.wallets && s.top10 !== undefined ? pct(s.top10) : DASH)} title="The ten largest wallets' share of the volume shown" />
+        <Stat label="Fills" value={v(s ? fmtCount(s.prints) : DASH)} title="Prints (one per match; each has a buyer and a seller)" />
+        <Stat label="VWAP" value={v(s?.vwap ? fmtPx(s.vwap) : DASH)} />
       </div>
       <SplitBar buy={s?.takerBuy ?? 0} sell={s?.takerSell ?? 0} buyLabel="Taker buys" sellLabel="Taker sells" />
     </section>
@@ -337,17 +328,18 @@ interface Col { key: string; label: string; sort?: FlowSort; cls: string; title?
 /** The table's columns: the wallet always, the rest on or off under View (a row's grid is built from the ones on). */
 const COLS: Col[] = [
   { key: 'who', label: 'Wallet', cls: 'c-who', opt: false, w: 'minmax(108px, 1.5fr)', min: 108 },
-  { key: 'share', label: 'Share', cls: 'c-share', opt: true, w: 'minmax(46px, 0.6fr)', min: 46 },
+  { key: 'lean', label: 'Lean', cls: 'c-lean', title: 'Net buyer, net seller or round trip', opt: true, w: '30px', min: 30 },
+  { key: 'share', label: 'Share', cls: 'c-num c-share', opt: true, w: '40px', min: 40 },
   { key: 'vol', label: 'Volume', sort: 'volume', cls: 'c-num c-vol', opt: true, w: '62px', min: 62 },
-  { key: 'bias', label: 'Bias', cls: 'c-bias', title: 'Bought against sold (USD)', opt: true, w: 'minmax(46px, 0.6fr)', min: 46 },
-  { key: 'fills', label: 'Fills', sort: 'fills', cls: 'c-num c-fills', opt: true, w: '38px', min: 38 },
+  { key: 'bias', label: 'Bias', cls: 'c-bias', title: 'Bought against sold (USD)', opt: true, w: 'minmax(44px, 0.8fr)', min: 44 },
+  { key: 'fills', label: 'Fills', sort: 'fills', cls: 'c-num c-fills', opt: true, w: '40px', min: 40 },
   { key: 'px', label: 'Avg buy / sell', cls: 'c-num c-px', opt: true, w: '92px', min: 92 },
   { key: 'net', label: 'Net', sort: 'net', cls: 'c-num c-net', title: 'Bought minus sold, in the coin', opt: true, w: '80px', min: 80 },
   { key: 'tk', label: 'Taker', cls: 'c-num c-tk', title: 'Share of its volume it took liquidity for', opt: true, w: '46px', min: 46 },
 ];
 const DEFAULT_COLS = ['share', 'vol', 'bias', 'fills'];
-const ROW_GAP = 6;
-const ROW_PAD = 8;
+const ROW_GAP = 8;
+const ROW_PAD = 12;
 
 const SlidersGlyph = () => (
   <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M2 4.5h12M2 11.5h12" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" opacity="0.55" /><circle cx="10.5" cy="4.5" r="1.8" fill="var(--bg-panel)" stroke="currentColor" strokeWidth="1.3" /><circle cx="5.5" cy="11.5" r="1.8" fill="var(--bg-panel)" stroke="currentColor" strokeWidth="1.3" /></svg>
@@ -440,7 +432,6 @@ function TableEmpty({ d, coin, live, query, venues, offered, onAll, onRetry, err
 function Table({ d, coin, cols, sort, onSort, loading, error, onOpen, empty }: {
   d: FlowWindow | null; coin: string; cols: Col[]; sort: FlowSort; onSort: (s: FlowSort) => void; loading: boolean; error: string | null; onOpen: (r: FlowWindowRow) => void; empty: ReactNode;
 }) {
-  const max = d?.rows.reduce((m, x) => Math.max(m, x.share), 0) ?? 0;
   const rows = d?.rows ?? [];
   const waiting = !d && !error && loading;
   const on = new Set(cols.map((c) => c.key));
@@ -464,15 +455,12 @@ function Table({ d, coin, cols, sort, onSort, loading, error, onOpen, empty }: {
         const bias = x.buyNtl + x.sellNtl > 0 ? x.buyNtl / (x.buyNtl + x.sellNtl) : 0.5;
         return (
           <button type="button" key={`${x.venue}|${x.key}`} className="tfl-tr" role="row" onClick={() => onOpen(x)} aria-label={`${x.address ?? x.key} on ${VENUE_LABEL[x.venue]}: ${fmtUsdShort(x.vol)}. Show its fills`}>
-            <span className="c-who" role="cell"><LeanIcon lean={x.lean} /><Wallet w={x} /></span>
-            {on.has('share') && <span className="c-share" role="cell">
-              <span className="tfl-share__n">{pct(x.share, x.share < 0.1 ? 1 : 0)}</span>
-              <span className="tfl-share"><i style={{ width: `${max > 0 ? (x.share / max) * 100 : 0}%` }} /></span>
-            </span>}
+            <span className="c-who" role="cell"><Wallet w={x} /></span>
+            {on.has('lean') && <span className="c-lean" role="cell"><LeanIcon lean={x.lean} /></span>}
+            {on.has('share') && <span className="c-num c-share tfl-dim" role="cell">{pct(x.share, x.share < 0.1 ? 1 : 0)}</span>}
             {on.has('vol') && <span className="c-num c-vol" role="cell" title={fmtUsdExact(x.vol)}>{fmtUsdShort(x.vol)}</span>}
-            {on.has('bias') && <span className="c-bias" role="cell" title={`Bought ${fmtUsdExact(x.buyNtl)} · sold ${fmtUsdExact(x.sellNtl)}`}>
+            {on.has('bias') && <span className="c-bias" role="cell" title={`${Math.round(bias * 100)}% bought, ${100 - Math.round(bias * 100)}% sold: bought ${fmtUsdExact(x.buyNtl)} · sold ${fmtUsdExact(x.sellNtl)}`}>
               <span className="tfl-bias"><i className="is-buy" style={{ width: `${bias * 100}%` }} /><i className="is-sell" style={{ width: `${(1 - bias) * 100}%` }} /></span>
-              <span className="tfl-bias__n"><span className="pos">{Math.round(bias * 100)}</span>/<span className="neg">{100 - Math.round(bias * 100)}</span></span>
             </span>}
             {on.has('fills') && <span className="c-num c-fills" role="cell" title={`${fmtCount(x.buyN)} buys · ${fmtCount(x.sellN)} sells`}>{fmtCount(x.buyN + x.sellN)}</span>}
             {on.has('px') && <span className="c-num c-px" role="cell">
@@ -555,10 +543,10 @@ function WalletView({ coin, kind, venues, win, row, live, onBack }: {
   return (
     <div className="tfl-body tfl-wallet">
       <div className="tfl-wallet__head">
-        <button type="button" className="tfl-icobtn" onClick={onBack} aria-label="Back to all wallets" title="Back to all wallets">
+        <button type="button" className="tfl-ghost" onClick={onBack} aria-label="Back to all wallets" title="Back to all wallets">
           <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M10 3.5 5.5 8l4.5 4.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
         </button>
-        <Identicon seed={w} size={32} />
+        <Identicon seed={w} size={24} />
         <div className="tfl-wallet__id">
           <b>{row.address ? short(row.address) : `${VENUE_LABEL[row.venue]} account ${row.key}`}</b>
           <span className="tfl-dim"><VenueLogo venue={row.venue} size={12} /> {VENUE_LABEL[row.venue]} · {fmtCount(d ? d.fills.t.length : row.buyN + row.sellN)} fills · {fmtUsdShort(d ? d.fills.px.reduce((s, p, i) => s + p * d.fills.sz[i]!, 0) : row.buyNtl + row.sellNtl)}</span>
