@@ -1,0 +1,271 @@
+/* The portfolio page (PortfolioPage.tsx, WealthTab.tsx). Built from Portfolio.css's cards and
+   the account band; this file only places them and draws the few pieces only this page has:
+   the value card, the promo row, the fee strip, the summary grid. Tokens only, and works on
+   both themes (light is glass, so surfaces come from the card, not from literals here). */
+
+.pf.pfx { gap: 0; padding: var(--sp-1) var(--sp-1) var(--sp-5); }
+
+.pfx-title {
+  margin: var(--sp-3) var(--sp-3) var(--sp-2);
+  color: var(--text);
+  font-size: var(--fs-xl);
+  font-weight: 500;
+  line-height: var(--lh-xl);
+}
+
+/* --- the page's own tabs: the panel tab bar, at page scale ---------------------------- */
+.pfx-tabs { display: block; min-width: 0; }
+.pfx-tabs > .dash-tabs { flex: none; }
+.pfx-tabs > .dash-tabs > .dash-tabs__bar {
+  height: 49px;
+  padding: 0 var(--sp-3);
+  overflow: visible;
+  cursor: default;
+  background: none;
+}
+.pfx-tabs > .dash-tabs > .dash-tabs__bar:active { cursor: default; }
+.pfx-tabs > .dash-tabs > .dash-tabs__bar .dash-tab { font-size: var(--fs-base); }
+.pfx-tabs > .dash-tabs > .dash-tabs__body,
+.pfx-tabs > .dash-tabs > .dash-tabs__body > * { overflow: visible; }
+.pfx-tabs > .dash-tabs > .dash-tabs__body { padding-top: var(--sp-1); min-height: 0; }
+
+.pfx-stack { display: flex; flex-direction: column; gap: var(--sp-1); min-width: 0; }
+
+.pfx-money { display: flex; align-items: center; gap: var(--sp-1); }
+.pfx .pfx-money .pf-btn { height: 30px; white-space: nowrap; }
+.pfx-swapbtn { display: inline-flex; align-items: center; gap: 6px; }
+.pfx-pair { display: inline-flex; }
+.pfx-pair > * + * { margin-left: -5px; }
+
+/* --- the value card ---------------------------------------------------------------------- */
+.pfx-top { align-items: stretch; }
+.pfx-value .pf-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding: var(--sp-3) var(--sp-4);
+  flex: 1;
+}
+.pfx-value__k { color: var(--muted); font-size: var(--fs-xs); }
+.pfx-value__v {
+  color: var(--text);
+  font-family: var(--font-num);
+  font-size: var(--fs-xl);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  line-height: var(--lh-xl);
+}
+.pfx-value__sub { color: var(--muted); font-size: var(--fs-xs); }
+.pfx-value__sub b { margin-left: 4px; font-family: var(--font-num); font-weight: 500; font-variant-numeric: tabular-nums; color: var(--text); }
+.pfx-value__sub b.pos, .pfx-kv__row b.pos, .pfx-sum__row b.pos, .pfx-sum__head b.pos { color: var(--pos); }
+.pfx-value__sub b.neg, .pfx-kv__row b.neg, .pfx-sum__row b.neg, .pfx-sum__head b.neg { color: var(--neg); }
+
+.pfx-kv {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: var(--sp-2);
+  padding-top: var(--sp-2);
+  border-top: 1px solid var(--pf-line);
+}
+.pfx-kv__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  min-height: 22px;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
+.pfx-kv__row > span { display: inline-flex; align-items: center; gap: 4px; }
+.pfx-kv__row b { color: var(--text); font-family: var(--font-num); font-weight: 500; font-variant-numeric: tabular-nums; }
+
+.pfx-buckets {
+  display: flex;
+  flex-direction: column;
+  margin-top: var(--sp-2);
+  padding-top: var(--sp-2);
+  border-top: 1px solid var(--pf-line);
+}
+.pfx-bucket { width: 100%; border: 0; background: none; text-align: left; font: inherit; cursor: pointer; border-radius: var(--radius-sm); }
+.pfx-bucket:hover { background: rgb(var(--ink) / 0.05); }
+.pfx-bucket:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.pfx-bucket .pfa__part-k { display: inline-flex; align-items: center; gap: 4px; }
+.pfx-value__note { margin: auto 0 0; padding-top: var(--sp-2); }
+
+/* --- the chart card ---------------------------------------------------------------------- */
+.pfx-chart { min-height: 420px; }
+.pfx-chart .pf-card__body { padding: var(--sp-3) var(--sp-4); }
+.pfx-chart__note { margin: var(--sp-2) 0 0; }
+.pfx-chart__head { display: flex; align-items: baseline; gap: var(--sp-2); margin-bottom: var(--sp-2); color: var(--muted); font-size: var(--fs-xs); }
+.pfx-chart__head b { color: var(--text); font-family: var(--font-num); font-weight: 500; font-variant-numeric: tabular-nums; }
+.pfx-chart__head b.pos { color: var(--pos); }
+.pfx-chart__head b.neg { color: var(--neg); }
+.pf-card--chart .pf-card__head .pf-seg { max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+
+/* --- the promo row ----------------------------------------------------------------------- */
+.pfx-promos { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--sp-1); }
+.pfx-promo {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  min-width: 0;
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--pf-line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  transition: background-color var(--dur-fast) linear, border-color var(--dur-fast) linear;
+}
+button.pfx-promo { cursor: pointer; }
+button.pfx-promo:hover { background: var(--bg-hover); border-color: var(--line); }
+button.pfx-promo:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.pfx-promo.is-off .pfx-promo__l, .pfx-promo.is-off .pfx-promo__ic { opacity: 0.7; }
+.pfx-promo__ic {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: rgb(var(--ink) / 0.06);
+  color: var(--text);
+}
+.pfx-promo__t { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.pfx-promo__h { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px var(--sp-2); font-size: var(--fs-base); font-weight: 500; }
+.pfx-promo__cta { color: var(--muted); font-size: var(--fs-xs); font-weight: 400; }
+button.pfx-promo:hover .pfx-promo__cta { color: var(--text); }
+.pfx-promo__l { color: var(--muted); font-size: var(--fs-xs); line-height: var(--lh-xs); }
+.pfx-promo__f { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 1px; }
+.pfx-promo__f b { font-family: var(--font-num); font-size: var(--fs-xl); font-weight: 500; font-variant-numeric: tabular-nums; color: var(--pos); line-height: var(--lh-xl); }
+.pfx-promo__f small { color: var(--muted); font-size: var(--fs-micro); white-space: nowrap; }
+
+/* --- the fee strip ----------------------------------------------------------------------- */
+.pfx-fees .pf-card__body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--sp-2) var(--sp-5);
+  align-items: center;
+  padding: var(--sp-3) var(--sp-4);
+}
+.pfx-fees__tier, .pfx-fees__cell { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; font-size: var(--fs-xs); flex-wrap: wrap; }
+.pfx-fees__k { color: var(--muted); }
+.pfx-fees b { color: var(--text); font-family: var(--font-num); font-weight: 500; font-variant-numeric: tabular-nums; }
+.pfx-link { padding: 0; border: 0; background: none; color: var(--muted); font: inherit; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.pfx-link:hover { color: var(--text); }
+
+/* --- the summary ------------------------------------------------------------------------- */
+.pfx-sum .pf-card__body { padding: 0; }
+.pfx-sum__grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.pfx-sum__cell { display: flex; flex-direction: column; gap: 4px; padding: var(--sp-3) var(--sp-4); min-width: 0; }
+.pfx-sum__cell + .pfx-sum__cell { border-left: 1px solid var(--pf-line); }
+.pfx-sum__head, .pfx-sum__row { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-2); }
+.pfx-sum__head { color: var(--text); font-size: var(--fs-base); font-weight: 500; }
+.pfx-sum__row { color: var(--muted); font-size: var(--fs-xs); min-height: 20px; }
+.pfx-sum__head b, .pfx-sum__row b { font-family: var(--font-num); font-weight: 500; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pfx-sum__row b { color: var(--text); }
+.pfx-sum__note { margin: 0; padding: var(--sp-2) var(--sp-4); border-top: 1px solid var(--pf-line); }
+
+/* --- the sections ------------------------------------------------------------------------ */
+.pfx-band { min-height: 240px; }
+.pfx-sections { min-height: 380px; }
+.pfx-band > .pf-card__body { display: flex; flex-direction: column; }
+.pfx-band > .pf-card__body > .pf-band { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+/* The tabs after Wealth are views of activity, not places money is: a rule sets them apart. */
+.pfx-sections > .pf-card__body > .pf-band > .dash-tabs > .dash-tabs__bar .dash-tab:nth-of-type(4) {
+  position: relative;
+  margin-left: var(--sp-4);
+}
+.pfx-sections > .pf-card__body > .pf-band > .dash-tabs > .dash-tabs__bar .dash-tab:nth-of-type(4)::before {
+  content: '';
+  position: absolute;
+  left: calc(-1 * var(--sp-2) - 4px);
+  top: 12px;
+  bottom: 12px;
+  width: 1px;
+  background: var(--line);
+}
+#pfx-sections { scroll-margin-top: var(--sp-2); }
+.pfx-sections .dash-tabs__body > .dash.pf-band { height: 100%; display: flex; flex-direction: column; min-height: 340px; }
+
+.pfx-activity { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-3) var(--sp-4); }
+.pfx-activity__line { display: flex; align-items: baseline; gap: var(--sp-2); margin: 0; color: var(--muted); font-size: var(--fs-xs); line-height: var(--lh-xs); }
+.pfx-activity__line .bal-tag { flex: none; }
+.pfx-activity .pf-card { max-width: 480px; }
+
+/* --- Wealth tables ------------------------------------------------------------------------ */
+.pfx-tablewrap { overflow-x: auto; }
+.pfx-table { width: 100%; }
+.pfx-table th:first-child, .pfx-table td:first-child { padding-left: var(--sp-4); }
+.pfx-table th:last-child, .pfx-table td:last-child { padding-right: var(--sp-4); }
+.pfx-table td { white-space: nowrap; }
+.pfx-table .pos { color: var(--pos); }
+.pfx-table .neg { color: var(--neg); }
+.pfx-table a.acct-act { text-decoration: none; }
+.pfx-table .acct-actions { text-align: right; }
+.pfx-table .acct-actions > * + * { margin-left: var(--sp-1); }
+.pfx-tags { margin-left: 0; }
+.pfx-dim { color: var(--muted); }
+.pfx-board .pf-card__body { padding: 0; }
+.pfx-boardnote { margin: 0; padding: var(--sp-2) var(--sp-4); border-top: 1px solid var(--pf-line); }
+.pfx-status { display: inline-flex; align-items: center; gap: 6px; }
+.pfx-status i { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); }
+.pfx-status.pos i { background: var(--pos); }
+.pfx-status.neg i { background: var(--neg); }
+.pfx-status.pos, .pfx-status.neg { color: var(--text); }
+
+.pfx-bones { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-3) var(--sp-4); }
+.pfx-bone {
+  display: block;
+  height: 16px;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(90deg, rgb(var(--ink) / 0.04), rgb(var(--ink) / 0.09), rgb(var(--ink) / 0.04));
+  background-size: 200% 100%;
+  animation: pfx-shimmer 1.2s linear infinite;
+}
+@keyframes pfx-shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) { .pfx-bone { animation: none; } }
+
+/* --- the sheets -------------------------------------------------------------------------- */
+.pfx-swap__arrow { display: flex; justify-content: center; margin: calc(-1 * var(--sp-2)) 0; color: var(--muted); pointer-events: none; }
+.pfx-swap__arrow svg { transform: rotate(90deg); }
+.pfx-swap__out { flex: 1; color: var(--text); font-family: var(--font-num); font-variant-numeric: tabular-nums; }
+
+.pfx-unit { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+
+/* SoDEX's marks and some fund logos are white: on the light theme they sit on a dark disc. */
+html[data-theme='light'] .pfx-bucket .pfa__part-ic img,
+html[data-theme='light'] .pfx-promo__ic img,
+html[data-theme='light'] .pfx-table .acct-mkt img { background: #17181a; border-radius: 50%; }
+
+/* --- narrower ---------------------------------------------------------------------------- */
+@media (max-width: 1280px) {
+  .pfx-promos { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 900px) {
+  .pfx-top { grid-template-columns: minmax(0, 1fr); }
+  .pfx-chart { min-height: 340px; }
+  .pfx-sum__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .pfx-sum__cell:nth-child(3) { border-left: 0; }
+  .pfx-sum__cell:nth-child(n + 3) { border-top: 1px solid var(--pf-line); }
+  .pfx-fees .pf-card__body { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 640px) {
+  .pfx-title { margin: var(--sp-2) var(--sp-2) var(--sp-1); }
+  /* The buttons take a row of their own, under the tabs. */
+  .pfx-tabs > .dash-tabs > .dash-tabs__bar { flex-wrap: wrap; height: auto; padding: 0 var(--sp-2) var(--sp-2); row-gap: var(--sp-1); }
+  .pfx-tabs > .dash-tabs > .dash-tabs__bar .dash-tabs__list { height: 40px; flex: 1 0 100%; }
+  .pfx-tabs > .dash-tabs > .dash-tabs__bar .dash-tabs__actions { flex: 1 0 100%; margin: 0; padding: 0; }
+  .pfx-money { width: 100%; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .pfx .pfx-money .pf-btn { padding: 0 var(--sp-1); min-width: 0; }
+  .pfx-promos { grid-template-columns: minmax(0, 1fr); }
+  .pfx-hide-phone { display: none; }
+  .pfx-activity__line { flex-direction: column; gap: var(--sp-1); }
+  .pfx-activity .pf-card { max-width: none; }
+  .pf-card--chart .pf-card__head { height: auto; min-height: var(--pf-head-h); flex-wrap: wrap; padding: var(--sp-2); row-gap: var(--sp-1); }
+  .pfx-sum .pf-card__head { height: auto; min-height: var(--pf-head-h); flex-wrap: wrap; padding: var(--sp-2); row-gap: var(--sp-1); }
+  .pfx-board .pf-card__head { height: auto; min-height: var(--pf-head-h); flex-wrap: wrap; padding: var(--sp-2); row-gap: var(--sp-1); }
+}

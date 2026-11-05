@@ -867,9 +867,9 @@ function useVolume14d(address: string | null): {
 //  3. PERIOD MATHS - everything derived from the venue's daily PnL series.
 // =============================================================================
 
-export type Period = '7D' | '30D' | '90D' | 'ALL';
+export type Period = '24H' | '7D' | '14D' | '30D' | '90D' | 'ALL';
 const PERIODS: Period[] = ['7D', '30D', '90D', 'ALL'];
-const PERIOD_DAYS: Record<Period, number | null> = { '7D': 7, '30D': 30, '90D': 90, ALL: null };
+const PERIOD_DAYS: Record<Period, number | null> = { '24H': 1, '7D': 7, '14D': 14, '30D': 30, '90D': 90, ALL: null };
 
 /* ---------------------------------------------------------------------------
  * The venue's own equity / PnL series.
@@ -890,7 +890,7 @@ const PERIOD_DAYS: Record<Period, number | null> = { '7D': 7, '30D': 30, '90D': 
  * What a PnL chart plots. Equity is deliberately NOT here - it belongs to the
  * Account value card, which is the card about account value.
  */
-type SeriesMode = 'pnl-total' | 'pnl-perps' | 'pnl-spot';
+export type SeriesMode = 'pnl-total' | 'pnl-perps' | 'pnl-spot';
 
 /** Said in both menus, because it is the same limitation in both. */
 const AIRDROP_NOTE =
@@ -906,18 +906,20 @@ const SERIES: ReadonlyArray<readonly [SeriesMode, string, string]> = [
 
 /** Period -> the venue window that covers it. There is no ALL; 1Y is the max. */
 const VENUE_WINDOW_FOR: Record<Period, VenueWindow> = {
-  '7D': '7D', '30D': '30D', '90D': '90D', ALL: '1Y',
+  '24H': '24H', '7D': '7D', '14D': '30D', '30D': '30D', '90D': '90D', ALL: '1Y',
 };
 
-function pnlAt(m: SeriesMode, p: ChartPoint): number {
+export function pnlAt(m: SeriesMode, p: ChartPoint): number {
   if (m === 'pnl-perps') return p.perpsPnl;
   if (m === 'pnl-spot') return p.spotPnl;
   return p.pnl;
 }
 
-interface VenueSeries {
+export interface VenueSeries {
   /** The full 1Y spine, cumulative from account inception. */
   points: ChartPoint[] | null;
+  /** The network the series was read on (the 24-hour read needs the same one). */
+  network: string;
   error: string | null;
   progress: { done: number; total: number } | null;
   accountId: number | null;
@@ -976,7 +978,7 @@ function useVenueSeries(address: string | null): VenueSeries {
     return () => { off = true; };
   }, [accountId, network]);
 
-  return { points, error, progress, accountId };
+  return { points, network, error, progress, accountId };
 }
 
 /**
@@ -1235,7 +1237,7 @@ function fmtCoinAmount(amount: number, coin: string | null): ReactNode {
  * move - green up, red down, the strongest day of the month at full strength -
  * with the day's figure and the month's total above.
  */
-function CrossFadeCal({ points, mode }: { points: ChartPoint[]; mode: SeriesMode }) {
+export function CrossFadeCal({ points, mode }: { points: ChartPoint[]; mode: SeriesMode }) {
   const mask = useMask('pnl');
   const days = useMemo(() => {
     const out = new Map<string, number>();
@@ -1314,12 +1316,12 @@ export function fmtCompactSigned(v: number): string {
  * must not drift apart. Selection is amber text on a filled control - the
  * label never changes weight, so the group cannot re-flow under the cursor.
  */
-export function PeriodSeg({ period, onPeriod, label }: {
-  period: Period; onPeriod: (p: Period) => void; label: string;
+export function PeriodSeg({ period, onPeriod, label, periods = PERIODS }: {
+  period: Period; onPeriod: (p: Period) => void; label: string; periods?: readonly Period[];
 }) {
   return (
     <div className="pf-seg" role="tablist" aria-label={label}>
-      {PERIODS.map((p) => (
+      {periods.map((p) => (
         <button
           key={p}
           type="button"
@@ -2710,7 +2712,7 @@ function useFundHoldings(address: string | null): FundHolding[] | null {
 }
 
 /** The leaderboard's 7-day volume for this wallet (0 when it has not traded in the window). */
-function useVolume7d(address: string | null): number | null {
+export function useVolume7d(address: string | null): number | null {
   const [v, setV] = useState<number | null>(null);
   useEffect(() => {
     setV(null);
@@ -2888,7 +2890,7 @@ const CheckGlyph = () => (
   <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M3.5 8.4 6.6 11.4 12.6 4.8" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
 );
 
-function InfoDot({ title }: { title: string }) {
+export function InfoDot({ title }: { title: string }) {
   return (
     <span className="pfa__info" title={title} aria-label={title}>
       <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><circle cx="8" cy="8" r="6.2" fill="none" stroke="currentColor" strokeWidth="1.2" /><path d="M8 7.2v4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" /><circle cx="8" cy="5" r="0.8" fill="currentColor" /></svg>
