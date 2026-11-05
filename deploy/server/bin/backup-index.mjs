@@ -51,6 +51,9 @@ function inspect(file) {
   const db = new DatabaseSync(file, { readOnly: true });
   try {
     db.exec('PRAGMA busy_timeout = 30000');
+    // SQLite's 2 MB page cache read the 46 GB copy's pages over and over: over 70 GB read, past 90 min, in the first run
+    // of the byte copy (2026-11-05). This connection reads only the copy, so 4 GB costs nothing else.
+    db.exec('PRAGMA cache_size = -4000000');
     const rows = db.prepare('PRAGMA quick_check').all();
     const verdict = rows.map((r) => Object.values(r)[0]).join('; ');
     if (verdict !== 'ok') return { ok: false, verdict };
