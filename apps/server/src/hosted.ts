@@ -116,6 +116,7 @@ export const HOSTED_ROUTES: readonly HostedRoute[] = [
   // Who traded a candle (flow/read.ts): the venues' public prints, both parties, kept by the indexer.
   { method: 'GET', url: '/api/vs/flow', cls: 'read' },
   { method: 'GET', url: '/api/vs/flow/wallet', cls: 'read' },
+  { method: 'GET', url: '/api/vs/activity/coverage', cls: 'read' },
   // Aggregated server-side from the venues' trade streams - no one user's traffic.
   { method: 'GET', url: '/api/vs/whales', cls: 'read' },
   { method: 'GET', url: '/api/vs/positioning', cls: 'read' },

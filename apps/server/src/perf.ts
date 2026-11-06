@@ -103,6 +103,8 @@ export const CACHE_POLICIES: Readonly<Record<string, CachePolicy>> = {
   // Who traded a window (flow/read.ts): the route says whether the window has passed (kept a day) or still forms.
   '/api/vs/flow': { cacheControl: 'public, max-age=10, stale-while-revalidate=10', own: true },
   '/api/vs/flow/wallet': { cacheControl: 'public, max-age=10, stale-while-revalidate=10', own: true },
+  // Per day against SoDEX's own count (flow/ledger.ts): written every 15 minutes.
+  '/api/vs/activity/coverage': { cacheControl: 'public, max-age=60, stale-while-revalidate=60' },
   '/api/vs/whales': LIVE,
   '/api/vs/positioning': LIVE,
   // The process already holds the page for five minutes. The edge may keep a minute of it.

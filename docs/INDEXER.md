@@ -270,6 +270,15 @@ interval reads a handful of rows (`/api/vs/flow`, `/api/vs/flow/wallet`). Measur
 roughly 0.2 GB a day for Hyperliquid alone, plus the other venues. Nothing is pruned
 (retention.ts). The file is not in the index backup.
 
+**SoDEX's own count** (`src/flow/ledger.ts`, thread `ledgerWorker.ts`, file `valuescan-sodex-ledger.db` next to the flow,
+`VALUESCAN_LEDGER_DB` to move it, `VALUESCAN_SODEX_LEDGER=0` to stop it): per market and 5-minute slot, the prints held
+(`flow_chunk.n`) against the candle's `n`. A slot is whole only when they are equal, and a window is `final` only when all
+its slots are; short slots come back as `gaps` and `coverage` (held n of m), and nothing short is cached as final. One
+kline call every 10 s (360 an hour at most, 120 of SoDEX's 1,200 weight a minute): every market each 30 minutes, the rest
+walking back to where SoDEX's 5-minute candles end (2026-10-02). Other venues have no such check yet. `/api/vs/activity/coverage`
+gives SoDEX's activity per UTC day against the venue's volume and count; SoDEX's trade counts on the leaderboard read `n+`,
+with a note, over any window that holds a day that is short or not checked.
+
 History before the first start: `src/flow/backfillHl.ts` replays Hyperliquid's node archive
 (`node_fills_by_block`, from 2025-07-27, requester pays) for Hyperliquid and trade.xyz; run it
 on server 1 only, never over hours the recorder already holds. SoDEX publishes no market-wide

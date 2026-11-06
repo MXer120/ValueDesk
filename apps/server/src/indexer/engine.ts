@@ -45,6 +45,7 @@ import type { BoardRow, Coverage, HistoryKind, IndexStore, TraderStatsRow, Trade
 import { winRateOf } from '../valuedesk/winRate.js';
 import { HlStream, SodexStream, streamLog, type Print } from './streams.js';
 import { SodexCatchup } from './sodexCatchup.js';
+import { startLedgerThread, type LedgerThread } from '../flow/ledgerWorker.js';
 import { mayPrune } from '../retention.js';
 import { FlowRecorder } from '../flow/recorder.js';
 import { FlowStore } from '../flow/store.js';
@@ -364,6 +365,7 @@ export class Indexer {
   /** Every print kept for the per-candle breakdown (flow/recorder.ts); off with VALUESCAN_FLOW=0. */
   flow: FlowRecorder | null = null;
   private sodexCatchup: SodexCatchup | null = null;
+  private coverageLedger: LedgerThread | null = null;
   /**
    * Event-loop health: the worst delay a 500 ms tick saw in the last minute.
    * A long synchronous stretch here makes every upstream request look like a
@@ -477,6 +479,7 @@ export class Indexer {
         this.sodexCatchup = new SodexCatchup((rows) => stream.catchUp(rows, (prints) => flow.missing(prints)), streamLog);
         this.sodexCatchup.start();
       }
+      if (this.flow && process.env.VALUESCAN_SODEX_LEDGER !== '0') this.coverageLedger = startLedgerThread({ flow: this.flow.store.path, index: this.store.path }, streamLog);
     }
     const every = (ms: number, fn: () => void | Promise<void>, name = 'timer') => {
       const t = setInterval(() => { mark(name); void Promise.resolve(fn()).catch((e) => (this.lastError = String(e))); }, ms);
@@ -556,6 +559,7 @@ export class Indexer {
     this.hlStream?.stop();
     this.sodexStream?.stop();
     this.sodexCatchup?.stop();
+    this.coverageLedger?.stop();
     for (const x of this.ext.values()) x.stop();
     this.cohorts.stop();
     this.flush();
@@ -586,9 +590,11 @@ export class Indexer {
 
   /**
    * Since when the venue's stream has run without a gap longer than
-   * STREAM_GAP_MS (kept across restarts). Every trade of every account since
-   * then is in the activity tables, and every fill of a tracked trader in
-   * `fills`. Null while the stream is down.
+   * STREAM_GAP_MS (kept across restarts): since then the stream was connected.
+   * That is not every trade: a socket can stay up and lose prints, and only what
+   * SoDEX still serves gets added back (measured 2026-11-06, activity held 7-33 %
+   * of SoDEX's volume on days inside such a span; per day: flow/ledger.ts,
+   * /api/vs/activity/coverage). Null while the stream is down.
    */
   streamSince(venue: Venue): number | null {
     const st = this.streamState[venue];
@@ -651,6 +657,7 @@ export class Indexer {
       gaps: this.gaps,
       flow: this.flow?.status() ?? null,
       sodexCatchup: this.sodexCatchup?.status() ?? null,
+      coverageLedger: this.coverageLedger?.status() ?? null,
       aggregates: this.store.aggBacklog,
       heldPartials: this.store.heldPartials,
       checkpoint: this.store.checkpointStatus,
