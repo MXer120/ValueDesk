@@ -275,9 +275,15 @@ roughly 0.2 GB a day for Hyperliquid alone, plus the other venues. Nothing is pr
 (`flow_chunk.n`) against the candle's `n`. A slot is whole only when they are equal, and a window is `final` only when all
 its slots are; short slots come back as `gaps` and `coverage` (held n of m), and nothing short is cached as final. One
 kline call every 10 s (360 an hour at most, 120 of SoDEX's 1,200 weight a minute): every market each 30 minutes, the rest
-walking back to where SoDEX's 5-minute candles end (2026-10-02). Other venues have no such check yet. `/api/vs/activity/coverage`
-gives SoDEX's activity per UTC day against the venue's volume and count; SoDEX's trade counts on the leaderboard read `n+`,
+walking back to where SoDEX's 5-minute candles end (2026-10-02). `/api/vs/activity/coverage`
+gives SoDEX's activity per UTC day against the venue's volume and count, short as soon as any slot read so far is; SoDEX's trade counts on the leaderboard read `n+`,
 with a note, over any window that holds a day that is short or not checked.
+
+**The other venues' figures** (`src/flow/venueCheck.ts`, in the API process, for the market on screen): Hyperliquid and trade.xyz
+candle `n`, Arcus `tradeCount`, Lighter volume (no count). Same rule: nothing is `final` unless compared and equal, what cannot be
+compared is unchecked with a short cache. At most 6 Hyperliquid reads a minute per process (20 Arcus, 6 Lighter), so a crowd
+waits as "checking". A restart no longer takes a snapshot's prints twice (`FlowRecorder.repeatOfHeld`); slots written twice before
+that remain, and show as held above the count.
 
 History before the first start: `src/flow/backfillHl.ts` replays Hyperliquid's node archive
 (`node_fills_by_block`, from 2025-07-27, requester pays) for Hyperliquid and trade.xyz; run it

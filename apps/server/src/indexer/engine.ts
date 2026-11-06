@@ -174,10 +174,17 @@ export function statsFrom(window: BoardWindow, now: number): number {
 const LOOKUP_SCAN_MS = 10 * 60_000;
 const FLUSH_MS = 5_000;
 /**
- * A flush keeps the thread this long at a time: 40 ms when it is keeping up, up to 2 s when far behind. At 500 ms
- * the queue still grew, by about 100 steps a minute at 5,600 (2026-11-05): rows waiting are data users do not have.
+ * How long a flush keeps the thread at a time. 40 ms when it is keeping up, and as long as everything else held the thread
+ * since its last turn (so about half of it, whatever the turns cost), both up to FLUSH_TURN_MS. That is what a flat 40 ms
+ * lacked: other sliced work takes a fixed piece each turn, so a much shorter slice starves. Two seconds a turn, the cap until
+ * 2026-11-06, was the lag itself: every socket, timer and request waited 4-14 s a turn, and requests timed out on it.
+ * Only far behind (past FLUSH_FAR steps, about ten minutes of rows) does it climb back to 2 s: rows waiting are data users
+ * do not have (at 500 ms flat the queue grew at 5,600 steps on 2026-11-05, at twice today's cost a row).
  */
-export const flushBudget = (backlog: number): number => Math.min(2_000, 40 + backlog);
+export const FLUSH_TURN_MS = 400;
+const FLUSH_FAR = 2_000;
+export const flushBudget = (backlog: number, gapMs = 0): number =>
+  Math.min(2_000, Math.min(FLUSH_TURN_MS, Math.max(40 + backlog, gapMs)) + Math.max(0, backlog - FLUSH_FAR) / 2);
 
 /**
  * In the fills' key order: rows of one wallet then go to the same pages in one transaction, instead of each
@@ -185,7 +192,7 @@ export const flushBudget = (backlog: number): number => Math.min(2_000, 40 + bac
  */
 export const inKeyOrder = <T extends { venue: string; address: string; id: string }>(rows: T[]): T[] =>
   rows.sort((a, b) => (a.venue < b.venue ? -1 : a.venue > b.venue ? 1 : a.address < b.address ? -1 : a.address > b.address ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
-/** Rows per transaction in a flush: at ~2 ms a row, 150 fills are a third of a second of the thread. */
+/** Rows per transaction in a flush: at ~1 ms a row, 150 fills are a seventh of a second of the thread. */
 const FLUSH_FILLS = 150;
 const FLUSH_ACTIVITY = 300;
 /** A held range this fresh answers for "now" even without the stream. */
@@ -765,6 +772,7 @@ export class Indexer {
       heldPartials: this.store.heldPartials,
       checkpoint: this.store.checkpointStatus,
       flushBacklog: this.writes.backlog,
+      streamUnderRest: this.store.streamUnderRest,
       retention: this.store.retention(this.now()),
       sodexBreaks: this.sodexBreaks.length,
       lanes: { hl: lane(this.hl), sgw: lane(this.sgw), scheck: lane(this.scheck), strades: lane(this.strades), sdata: lane(this.sdata) },
@@ -788,6 +796,8 @@ export class Indexer {
   // --- streams ----------------------------------------------------------------------
 
   private onPrint(p: Print): void {
+    // A restart's snapshot of what the last run already took: not again, here or in activity and the cohorts.
+    if (this.flow?.repeatOfHeld(p)) return;
     // Hyperliquid's HIP-3 dex "xyz" is also ranked on its own as trade.xyz.
     if (p.venue === 'hyperliquid' && p.symbol.startsWith('xyz:')) this.onPrint({ ...p, venue: 'tradexyz' });
     // Cohorts: the print moves both parties' books (SoDEX prints carry account ids).
@@ -816,7 +826,9 @@ export class Indexer {
         p.venue === 'hyperliquid' ? (this.trackedHl.has(acct) ? acct : null)
         : p.venue === 'sodex' ? (this.trackedSodex.get(Number(acct)) ?? null)
         : extAddress && this.trackedExt.get(p.venue)?.has(extAddress) ? extAddress : null;
-      if (address) {
+      // An xyz print of a wallet Hyperliquid tracks too: store.putFills files that row under both venues from its Hyperliquid
+      // copy. A second copy here changed nothing, and was a quarter of the rows written (2026-11-06).
+      if (address && !(p.venue === 'tradexyz' && this.trackedHl.has(address))) {
         this.pendingFills.push({
           venue: p.venue, address, id: p.id, t: p.t, symbol: p.symbol, side, px: p.px, sz: p.sz,
           fee: null, closedPnl: null, oid: null, src: 0,

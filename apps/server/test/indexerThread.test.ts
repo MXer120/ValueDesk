@@ -161,7 +161,10 @@ test('read in slices: a stop ends it, and done never runs', async () => {
 
 test('a flush that falls behind gets more of the thread, and catches up where a flat slice never would', async () => {
   assert.equal(flushBudget(0), 40);
-  assert.equal(flushBudget(1_000), 1_040);
+  assert.equal(flushBudget(1_000), 400, 'behind: one bounded slice, not seconds of the thread');
+  assert.equal(flushBudget(5, 300), 300, 'as long as the rest of the thread took');
+  assert.equal(flushBudget(5, 9_000), 400, 'and no longer');
+  assert.equal(flushBudget(3_000), 900, 'far behind it climbs');
   assert.equal(flushBudget(10_000), 2_000);
   // A turn of the loop costs 400 ms of other work; a step 100 ms; 2.5 steps arrive per second. A model of the thread, not a measurement.
   const simulate = (budget: (b: number) => number) => {
@@ -185,6 +188,117 @@ test('sliced work: the budget is asked of the backlog at each turn', async () =>
   w.add([1, 2, 3].map(() => () => { clock += 5; }));
   await until('done', () => w.backlog === 0);
   assert.deepEqual(asked, [3, 2, 1]);
+});
+
+test('sliced work: a step that ran is let go at once, with a backlog still standing, and its order holds across the cut', async () => {
+  let clock = 0;
+  const ran: number[] = [];
+  const w = new SlicedWork({ budgetMs: 1, now: () => clock, onError: (e) => assert.fail(String(e)) });
+  const inside = w as unknown as { queue: Array<() => void> };
+  const steps = Array.from({ length: 3_000 }, (_, k) => () => { ran.push(k); clock += 5; });
+  w.add(steps.slice(0, 1_500));
+  let sawCut = false;
+  // More arrive while it runs: the queue never stands empty, as under a backlog that does not drain.
+  w.add(steps.slice(1_500));
+  while (w.backlog > 0) {
+    const held = new Set(inside.queue);
+    for (let k = 0; k < ran.length; k++) assert.ok(!held.has(steps[k]!), `step ${k} ran and is still held`);
+    if (inside.queue.length < 3_000) sawCut = true;
+    await new Promise((r) => setImmediate(r));
+  }
+  assert.ok(sawCut, 'the queue was cut down while work still waited');
+  assert.deepEqual(ran, Array.from({ length: 3_000 }, (_, i) => i));
+});
+
+test('sliced work: a turn is told how long the rest of the thread took since the last one', async () => {
+  const gaps: number[] = [];
+  let clock = 1_000;
+  const w = new SlicedWork({ budgetMs: (_b, gap) => { gaps.push(gap); return 1; }, now: () => clock, onResume: () => { clock += 70; }, onError: (e) => assert.fail(String(e)) });
+  w.add([1, 2].map(() => () => { clock += 5; }));
+  await until('done', () => w.backlog === 0);
+  assert.deepEqual(gaps, [0, 70], 'the first turn has nothing before it');
+});
+
+test('a stream row reaching the writer after a REST read answered for its time is not counted beside the REST row', async () => {
+  const B = Date.now() - 3_600_000;
+  const row = (id: string, t: number, src: 0 | 1): FillRow => ({ venue: 'hyperliquid', address: '0xa', id, t, symbol: 'BTC', side: 1, px: 100, sz: 1, fee: src ? 0.1 : null, closedPnl: src ? 0 : null, oid: src ? 'o' : null, src });
+  const s = new IndexStore(':memory:', { aggRefreshMs: 0 });
+  try {
+    s.putFills([row('s-written', B + 100, 0), row('rest', B + 100, 1)]);
+    await s.dropStreamRowsAsync('hyperliquid', '0xa', B, B + 1_000, async () => {});
+    s.putFills([row('s-queued', B + 500, 0), row('s-queued2', B + 1_000, 0)]);
+    assert.equal(s.streamUnderRest, 2);
+    s.putFills([row('s-after', B + 1_001, 0), row('rest-late', B + 600, 1)]);
+    const ids = (s.db.prepare("SELECT id FROM fills WHERE venue = 'hyperliquid' ORDER BY id").all() as Array<{ id: string }>).map((r) => r.id);
+    assert.deepEqual(ids, ['rest', 'rest-late', 's-after'], 'REST rows and later prints stay; nothing else');
+    s.dropStreamRows('hyperliquid', '0xa', B + 2_000, B + 3_000);
+    s.putFills([row('s-other', B + 1_500, 0), row('s-under-second', B + 2_500, 0)]);
+    assert.equal((s.db.prepare("SELECT COUNT(*) AS n FROM fills WHERE id = 's-other'").get() as { n: number }).n, 1, 'between two read ranges: kept');
+    assert.equal((s.db.prepare("SELECT COUNT(*) AS n FROM fills WHERE id = 's-under-second'").get() as { n: number }).n, 0);
+    // The xyz mirror's held range goes with it.
+    const xyz = { ...row('x', B + 200, 0), symbol: 'xyz:TSLA' };
+    s.putFills([xyz]);
+    assert.equal((s.db.prepare("SELECT COUNT(*) AS n FROM fills WHERE id = 'x'").get() as { n: number }).n, 0);
+  } finally {
+    s.close();
+  }
+});
+
+test('an xyz print of a wallet both venues track reaches putFills once, and is stored once under each', async () => {
+  const { Indexer } = await import('../src/indexer/engine.js');
+  const s = new IndexStore(':memory:');
+  try {
+    const now = Date.now();
+    const ix = new Indexer(s, () => now) as unknown as {
+      trackedHl: Set<string>; trackedExt: Map<string, Set<string>>; pendingFills: FillRow[];
+      onPrint(p: unknown): void; flush(): void; stopped: boolean; cohorts: { onPrint(): void };
+    };
+    ix.cohorts.onPrint = () => {};
+    ix.trackedHl = new Set(['0xboth', '0xhlonly']);
+    ix.trackedExt.set('tradexyz', new Set(['0xboth', '0xxyzonly']));
+    const print = { venue: 'hyperliquid', symbol: 'xyz:TSLA', id: 'p1', t: now - 1_000, px: 100, sz: 1, buyer: '0xboth', seller: '0xhlonly' };
+    ix.onPrint(print);
+    ix.onPrint({ ...print, id: 'p2', buyer: '0xxyzonly', seller: '0xnobody' });
+    assert.deepEqual(ix.pendingFills.map((f) => `${f.venue} ${f.address} ${f.id}`).sort(), [
+      'hyperliquid 0xboth p1', 'hyperliquid 0xhlonly p1', 'tradexyz 0xxyzonly p2',
+    ]);
+    ix.stopped = true;
+    ix.flush();
+    const rows = (s.db.prepare('SELECT venue, address, id FROM fills ORDER BY venue, address, id').all() as Array<{ venue: string; address: string; id: string }>).map((f) => `${f.venue} ${f.address} ${f.id}`);
+    assert.deepEqual(rows, ['hyperliquid 0xboth p1', 'hyperliquid 0xhlonly p1', 'tradexyz 0xboth p1', 'tradexyz 0xhlonly p1', 'tradexyz 0xxyzonly p2']);
+  } finally {
+    s.close();
+  }
+});
+
+test('checkpoint thread: under a writer that never pauses the WAL starts over and its file stops growing, and every row reads back', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'vs-ckpt-'));
+  const path = join(dir, 'i.db');
+  const store = new IndexStore(path);
+  try {
+    store.startCheckpointer({ everyMs: 20, restartFrames: 400, restartGapMs: 50 });
+    await until('thread up', () => store.checkpointStatus?.running === true);
+    let i = 0;
+    const sizes: number[] = [];
+    const end = Date.now() + 3_000;
+    let n = 0;
+    while (Date.now() < end) {
+      store.putFills(Array.from({ length: 150 }, () => fill(i++)));
+      n++;
+      if (n % 25 === 0) sizes.push(statSync(`${path}-wal`).size);
+      await new Promise((r) => setImmediate(r));
+    }
+    const st = store.checkpointStatus!;
+    assert.ok(st.fulls - st.fullsBusy > 0, `full checkpoints finished: ${JSON.stringify(st)}`);
+    assert.equal(st.errors, 0);
+    assert.ok(st.log < i, 'the WAL started over: it holds fewer frames than rows written');
+    assert.ok(sizes.length > 2, 'wrote long enough to see it');
+    assert.equal((store.db.prepare('SELECT COUNT(*) AS n FROM fills').get() as { n: number }).n, i);
+    assert.equal((store.db.prepare('PRAGMA busy_timeout').get() as { timeout: number }).timeout, 200_000, 'the writer waits, it never errors, on that lock');
+  } finally {
+    store.close();
+    rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 });
+  }
 });
 
 test('Lighter at the start: a wallet with tens of thousands of sub-accounts takes no time, and every index is found', async () => {

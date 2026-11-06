@@ -11,8 +11,8 @@
  * wallets (MAX_CACHED), and whole answers for windows that have passed are kept too (ANSWERS).
  *
  * FINAL means nothing can change and nothing is missing: the window has passed, the recorder was up, and for SoDEX the
- * held prints equal SoDEX's own count in every slot (ledger.ts). A slot that is short stays not final for as long as it is
- * short, so no answer holding one is kept a day. Other venues have no such count: their `final` says only the first two.
+ * held prints equal the venue's own figure in every slot (SoDEX: ledger.ts; the others, for what is on screen: venueCheck.ts). A
+ * slot that is short, or could not be compared, stays not final, so no answer holding one is kept a day.
  */
 import { setImmediate as nextTurn } from 'node:timers/promises';
 import type { Venue } from '../valuedesk/types.js';
@@ -25,6 +25,7 @@ import { CLOSE_MS, FLUSH_MS, READY_MS } from './recorder.js';
 import { defaultFlowPath, flowReader, type FlowMarket, type FlowStore } from './store.js';
 import { existsSync } from 'node:fs';
 import { coinOf } from '../valuedesk/cohorts/model.js';
+import { venueChecks, type CheckMarket } from './venueCheck.js';
 import { LedgerStore, activityDays, coverageOf, joinSpans, ledgerPathFor, provenSpans, subtractSpans, type ActivityDay, type VenueCoverage } from './ledger.js';
 
 /** The longest window one read sums (a 1M candle is 31 days). */
@@ -201,6 +202,8 @@ export interface FlowWindow {
   down: Array<[number, number]>;
   /** SoDEX's prints held against its own count; null when SoDEX is not among the venues asked. */
   coverage: VenueCoverage | null;
+  /** The same for each other venue asked that lists the coin. */
+  checks: VenueCoverage[];
   /** The recorder's first start (how far back any flow goes). */
   since: number | null;
 }
@@ -288,12 +291,32 @@ interface Judged {
   gaps: Array<[number, number]>;
   down: Array<[number, number]>;
   coverage: VenueCoverage | null;
+  checks: VenueCoverage[];
   final: boolean;
   since: number | null;
 }
 
-/** What can be said of a window: the recorder's runs, and for SoDEX what its count says. */
-function judge(s: FlowStore, ask: { coin: string; venues: readonly Venue[]; kind: MarketKind; from: number; to: number }, markets: readonly FlowMarket[], now: number): Judged {
+/** What a market holds per slot: prints from the chunk's own count, or the coin's volume, which means reading the chunks. */
+async function heldPerSlot(s: FlowStore, m: CheckMarket, unit: 'prints' | 'volume', a: number, b: number, slotMs: number, now: number): Promise<Map<number, number>> {
+  const out = new Map<number, number>();
+  const add = (t: number, v: number) => { const k = Math.floor(t / slotMs) * slotMs; out.set(k, (out.get(k) ?? 0) + v); };
+  if (unit === 'prints') {
+    for (const c of s.chunkCounts(m.id, a, b)) add(c.t, c.n);
+    return out;
+  }
+  const budget = { at: Date.now() };
+  for (const c of s.chunks(m.id, a, b)) {
+    const p = cachedChunk(m.id, c.t, c.n, c.data, now);
+    let sum = 0;
+    for (let i = 0; i < p.n; i++) sum += p.sz[i]!;
+    add(c.t, sum);
+    if (Date.now() - budget.at > YIELD_MS) { await nextTurn(); budget.at = Date.now(); }
+  }
+  return out;
+}
+
+/** What can be said of a window: the recorder's runs, and each venue's own figures. */
+async function judge(s: FlowStore, ask: { coin: string; venues: readonly Venue[]; kind: MarketKind; from: number; to: number }, markets: readonly FlowMarket[], now: number): Promise<Judged> {
   const cover = coverOf(s, ask.venues);
   const since = cover.since;
   const from = Math.max(ask.from, since ?? ask.from);
@@ -310,14 +333,32 @@ function judge(s: FlowStore, ask: { coin: string; venues: readonly Venue[]; kind
       const b = Math.min(h.to, ask.to);
       if (a < b) holes.push([a, b]);
     }
-    // SoDEX alone: a span its count proves whole was not lost, whatever the recorder did (the catch-up brought it back).
-    if (coverage && ask.venues.every((v) => v === 'sodex')) down = subtractSpans(down, provenSpans(coverage));
+  }
+  const others = markets.filter((m) => m.venue !== 'sodex');
+  const checks = from < ask.to ? await venueChecks(others, from, ask.to, now, (m, unit, a, b, slotMs) => heldPerSlot(s, m, unit, a, b, slotMs, now)) : [];
+  for (const c of checks) {
+    for (const h of c.holes) {
+      const a = Math.max(h.from, ask.from);
+      const b = Math.min(h.to, ask.to);
+      if (a < b) holes.push([a, b]);
+    }
+  }
+  // Every venue here compared: a span all their figures prove whole was not lost, whatever the recorder did.
+  const all = [...(coverage ? [coverage] : []), ...checks];
+  if (all.length) {
+    const compared = new Set(all.map((c) => c.venue));
+    if (ask.venues.every((v) => compared.has(v) || !markets.some((m) => m.venue === v))) {
+      let proven = provenSpans(all[0]!);
+      for (const c of all.slice(1)) proven = subtractSpans(proven, subtractSpans([[0, Number.MAX_SAFE_INTEGER]], provenSpans(c)));
+      down = subtractSpans(down, proven);
+    }
   }
   const gaps = joinSpans([...down, ...holes]);
-  // Not yet compared, or off anywhere (also past the holes listed): nothing is claimed, so nothing is final.
-  const open = !!coverage && (coverage.unchecked.length > 0 || coverage.holeSlots > 0);
+  // Not yet compared, or off anywhere (also past the holes listed): nothing is claimed, so nothing is final. Asked for venues
+  // and nothing compared (none lists the coin) stands as it did: there is nothing there to be missing.
+  const open = all.some((c) => c.unchecked.length > 0 || c.holeSlots > 0 || c.pending);
   const final = settled(ask.to + READY_MS, now) && !gaps.length && !open;
-  return { gaps, down, coverage, final, since };
+  return { gaps, down, coverage, checks, final, since };
 }
 
 /** Per UTC day: SoDEX's activity against its own count and volume (`from`, `to` in ms). */
@@ -326,7 +367,7 @@ export function activityCoverage(from: number, to: number, now = Date.now()): { 
   const today = Math.floor(now / DAY_MS);
   const toDay = Math.min(Math.floor(to / DAY_MS), today);
   const l = ledgerReader();
-  return { days: activityDays(l?.days(fromDay, toDay) ?? [], fromDay, toDay, today), checked: !!l };
+  return { days: activityDays(l?.days(fromDay, toDay) ?? [], fromDay, toDay, today, l?.markets() ?? []), checked: !!l };
 }
 
 export async function flowWindow(ask: FlowAsk, now = Date.now()): Promise<FlowWindow | null> {
@@ -344,7 +385,7 @@ export async function flowWindow(ask: FlowAsk, now = Date.now()): Promise<FlowWi
   const { summary, rows } = tableOf(sums, { role: ask.role, side: ask.side, sort: ask.sort, limit: ask.limit, ...(keep ? { keep } : {}) });
   const who = s.partiesById(rows.map((r) => r.pid));
   // Past by the clock is not final when anything is missing: an answer with a hole stayed cached a day, also once it was filled.
-  const { gaps, down, coverage, final, since } = judge(s, ask, markets, now);
+  const { gaps, down, coverage, checks, final, since } = await judge(s, ask, markets, now);
   const body: FlowWindow = {
     coin: ask.coin.toUpperCase(),
     from: ask.from,
@@ -359,6 +400,7 @@ export async function flowWindow(ask: FlowAsk, now = Date.now()): Promise<FlowWi
     gaps,
     down,
     coverage,
+    checks,
     since,
   };
   answers.set(key, { at: now, final, body });
@@ -404,6 +446,7 @@ export interface WalletFillsBody {
   gaps: Array<[number, number]>;
   down: Array<[number, number]>;
   coverage: VenueCoverage | null;
+  checks: VenueCoverage[];
   since: number | null;
 }
 
@@ -461,7 +504,7 @@ export async function flowWalletFills(ask: WalletAsk, now = Date.now()): Promise
     fills.other.push(o);
   }
   const who = s.partiesById(otherIds);
-  const { gaps, down, coverage, final, since } = judge(s, ask, markets, now);
+  const { gaps, down, coverage, checks, final, since } = await judge(s, ask, markets, now);
   const body: WalletFillsBody = {
     coin: ask.coin.toUpperCase(),
     from: ask.from,
@@ -475,6 +518,7 @@ export async function flowWalletFills(ask: WalletAsk, now = Date.now()): Promise
     gaps,
     down,
     coverage,
+    checks,
     since,
   };
   answers.set(key, { at: now, final, body }, 1);

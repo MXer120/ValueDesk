@@ -20,6 +20,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { useLatched } from '../motion';
 import type { FlowWindow, FlowWindowRow, WalletFillsBody } from '@sign/flow/read.js';
+import type { VenueCoverage } from '@sign/flow/ledger.js';
 import type { FlowRole, FlowSide, FlowSort } from '@sign/flow/codec.js';
 import { vsApi, VENUE_LABEL, type Venue } from '../../vsApi';
 import { usePolled } from '../explore/cohorts/parts';
@@ -47,6 +48,7 @@ const FILL_ROW_H = 30;
 /** Below this height the view is a short panel (thin summary). */
 const SHORT_PX = 440;
 const RECHECK_MS = 60_000;
+const READING_MS = 5_000;
 const RECHECK_WITHIN_MS = 12 * 3_600_000;
 
 const pct = (v: number, dp = 0) => `${fmtNum(v * 100, { minimumFractionDigits: dp, maximumFractionDigits: dp })}%`;
@@ -59,6 +61,9 @@ const clock = (t: number) => {
   const p = (n: number, l = 2) => String(n).padStart(l, '0');
   return `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}.${p(d.getUTCMilliseconds(), 3)}`;
 };
+
+/** What each venue's own figures say of a window, SoDEX first. (`checks` is new: an answer from an older server has none.) */
+const coveragesOf = (d: Pick<FlowWindow, 'coverage' | 'checks'>): VenueCoverage[] => [...(d.coverage ? [d.coverage] : []), ...(d.checks ?? [])];
 
 // --- small parts --------------------------------------------------------------------------------
 
@@ -184,11 +189,15 @@ export function TradeFlowView({ symbol, spot, interval, at, end, onPick, onClose
   // A candle still forming is read again every 15 s (the recorder's flush); a closed one once.
   // One already closed, once: SoDEX's count comes within 30 minutes and the catch-up can still fill it for hours, so a recent
   // one that is not final is read again now and then.
-  const [recheck, setRecheck] = useState(false);
-  const r = usePolled<FlowWindow>(key, fetcher, live ? 15_000 : recheck ? RECHECK_MS : 0);
+  const [recheck, setRecheck] = useState(0);
+  const r = usePolled<FlowWindow>(key, fetcher, live ? 15_000 : recheck);
   // The previous candle's answer while this one loads is not this candle's: skeletons, not "No trades".
   const d = r.stale ? null : r.data;
-  useEffect(() => { setRecheck(!!d && !d.final && d.to > Date.now() - RECHECK_WITHIN_MS); }, [d]);
+  useEffect(() => {
+    // A venue's figures being read just now come within seconds.
+    const reading = !!d && coveragesOf(d).some((c) => c.pending);
+    setRecheck(reading ? READING_MS : !!d && !d.final && d.to > Date.now() - RECHECK_WITHIN_MS ? RECHECK_MS : 0);
+  }, [d]);
   const [cols, setCols] = useStored<string[]>('flow.cols', DEFAULT_COLS);
   const shownCols = COLS.filter((c) => !c.opt || cols.includes(c.key));
   const before = !!d && d.since !== null && d.to <= d.since;
@@ -245,7 +254,7 @@ function Summary({ d, role, loading }: { d: FlowWindow | null; role: FlowRole; l
   const s = d?.summary;
   const v = (x: ReactNode) => (loading ? <i className="tfl-skelv" aria-hidden="true" /> : x);
   // Prints we do not hold: what is counted here is the least it can have been.
-  const floor = !!d?.coverage?.holeSlots || !!d?.down.length ? '+' : '';
+  const floor = (d && coveragesOf(d).some((c) => c.holeSlots > (c.overSlots ?? 0))) || !!d?.down.length ? '+' : '';
   // Nothing held at all says nothing, not "at least nothing".
   const blank = !!floor && s?.prints === 0;
   return (
@@ -354,9 +363,11 @@ function TableEmpty({ d, coin, live, query, venues, offered, onAll, onRetry, err
   if (d.since !== null && d.to <= d.since) {
     return <EmptyState compact icon="history" title="Before the recording began" line={`Recording began ${new Date(d.since).toUTCString().slice(5, 22)} UTC. Pick a later candle.`} />;
   }
-  // SoDEX counted trades here and we hold none of them: never "nobody traded", and never "not listed".
-  if (query.length < 3 && d.coverage && d.coverage.expected > 0 && d.coverage.held === 0) {
-    return <EmptyState compact icon="alert" title="We hold no trades for this candle" line={`SoDEX counted ${fmtNum(d.coverage.expected)} here, so this table is not who traded. Pick another candle.`} />;
+  // A venue counted trades here and we hold none of them: never "nobody traded", and never "not listed".
+  const counted = coveragesOf(d).filter((c) => c.expected > 0);
+  if (query.length < 3 && counted.length && counted.every((c) => c.held === 0)) {
+    const figures = counted.map((c) => (c.unit === 'volume' ? `${VENUE_LABEL[c.venue]} shows volume` : `${VENUE_LABEL[c.venue]} counted ${fmtNum(c.expected)}`)).join(', ');
+    return <EmptyState compact icon="alert" title="We hold no trades for this candle" line={`${figures} here, so this table is not who traded. Pick another candle.`} />;
   }
   if (!d.markets.length) {
     return (
@@ -434,38 +445,54 @@ function HoleStrip({ gaps, from, to }: { gaps: ReadonlyArray<readonly [number, n
   );
 }
 
+/** One venue's figures, in a line: prints against its count, or a share of its volume where it gives no count. */
+function heldPill(c: VenueCoverage, named: boolean): string {
+  const who = named ? `${VENUE_LABEL[c.venue]}: ` : '';
+  if (c.unit === 'volume') return `${who}held ${pct(c.expected > 0 ? c.held / c.expected : 0, 1)} of volume`;
+  return `${named ? `${VENUE_LABEL[c.venue]}: held` : 'Held'} ${fmtNum(c.held)} of ${fmtNum(c.expected)} trades`;
+}
+
 /**
  * A candle that is not whole, said above the table and not left to the footer: before the recording, the recorder down, and
- * SoDEX's own count against what is held. Prints we do not hold are a hole wherever they went, so the figures say so plainly.
+ * each venue's own figures against what is held. Prints we do not hold are a hole wherever they went, so the figures say so plainly.
  */
-function Partial({ d, win, wallet }: { d: Pick<FlowWindow, 'from' | 'to' | 'since' | 'gaps' | 'down' | 'coverage'> | null; win: CandleWindow; wallet?: boolean }) {
+function Partial({ d, win, wallet }: { d: Pick<FlowWindow, 'from' | 'to' | 'since' | 'gaps' | 'down' | 'coverage' | 'checks'> | null; win: CandleWindow; wallet?: boolean }) {
   if (!d || d.since === null || d.to <= d.since) return null;
   const late = d.since > d.from;
   const downMs = d.down.reduce((s, [a, b]) => s + (b - a), 0);
-  const c = d.coverage;
-  const holes = c?.holeSlots ?? 0;
-  const pending = c?.unchecked.length ?? 0;
-  if (!late && !downMs && !holes && !pending) return null;
+  const all = coveragesOf(d);
+  const off = all.filter((c) => c.holeSlots > 0);
+  const waiting = all.filter((c) => !c.holeSlots && c.unchecked.length > 0);
+  if (!late && !downMs && !off.length && !waiting.length) return null;
   const hm = (t: number) => new Date(t).toISOString().slice(11, 16);
   const spans = (list: ReadonlyArray<readonly [number, number]>) => list.map(([a, b]) => `${new Date(a).toUTCString()} – ${new Date(b).toUTCString()}`).join('\n');
-  // A candle under 5 minutes is judged by the 5-minute slots around it.
-  const around = !!c && (c.from < win.from || c.to > win.to);
-  const scope = around ? 'the 5 minutes around this candle' : 'this candle';
-  const heldLine = c ? `${fmtNum(c.held)} of ${fmtNum(c.expected)}` : '';
+  // A candle shorter than the slots it is judged by says so.
+  const scope = (c: VenueCoverage) => (c.from < win.from || c.to > win.to ? 'the slots around this candle' : 'this candle');
   const whose = wallet ? "This wallet's fills in them are missing too." : 'Volume, wallets, shares and VWAP are from what we hold.';
+  const named = all.length > 1;
+  const reading = waiting.some((c) => c.pending);
+  const recent = d.to > Date.now() - RECHECK_WITHIN_MS;
   return (
     <>
-      {holes > 0 && c && (
-        <div className="tfl-note" role="note">
-          <span className="tfl-pill is-warn" title={c.holes.map((h) => `${new Date(h.from).toUTCString()} – ${hm(h.to)}: ${fmtNum(h.held)} of ${fmtNum(h.venue)}`).join('\n')}>Held {heldLine} trades</span>
-          <span>SoDEX counted {fmtNum(c.expected)} trades in {scope} and we hold {fmtNum(c.held)}. {whose}</span>
-          {!around && <HoleStrip gaps={d.gaps} from={d.from} to={d.to} />}
+      {off.map((c) => (
+        <div key={c.venue} className="tfl-note" role="note">
+          <span className="tfl-pill is-warn" title={c.holes.map((h) => `${new Date(h.from).toUTCString()} – ${hm(h.to)}: ${fmtNum(h.held)} of ${fmtNum(h.venue)}`).join('\n')}>{heldPill(c, named)}</span>
+          <span>
+            {c.unit === 'volume'
+              ? `${VENUE_LABEL[c.venue]} gives volume, not a count: in ${scope(c)} we hold ${pct(c.expected > 0 ? c.held / c.expected : 0, 1)} of it.`
+              : `${VENUE_LABEL[c.venue]} counted ${fmtNum(c.expected)} trades in ${scope(c)} and we hold ${fmtNum(c.held)}.`}
+            {(c.overSlots ?? 0) > 0 ? ` In ${fmtNum(c.overSlots!)} of its ${c.overSlots === 1 ? 'slot' : 'slots'} we hold more than that: those trades were recorded twice.` : ''} {whose}
+          </span>
+          {scope(c) === 'this candle' && <HoleStrip gaps={c.holes.map((h) => [h.from, h.to] as const)} from={d.from} to={d.to} />}
         </div>
-      )}
-      {!holes && pending > 0 && (
+      ))}
+      {waiting.length > 0 && (
         <div className="tfl-note" role="note">
-          <span className="tfl-pill is-wait" title={spans(c!.unchecked)}>Not checked yet</span>
-          <span>SoDEX's trade count for {scope} has not come in, so we can't say yet whether this is all of it. {d.to > Date.now() - RECHECK_WITHIN_MS ? 'It usually takes under 30 minutes.' : 'Older candles are read back a little at a time.'}</span>
+          <span className="tfl-pill is-wait" title={waiting.map((c) => `${VENUE_LABEL[c.venue]}\n${spans(c.unchecked)}`).join('\n')}>{reading ? 'Checking' : 'Not checked yet'}</span>
+          <span>
+            {`${waiting.map((c) => VENUE_LABEL[c.venue]).join(', ')}: ${reading ? 'reading its own figures for this candle' : 'its own figures for this candle have not been compared'}, so we can't say yet whether this is all of it.`}
+            {reading ? '' : recent && waiting.some((c) => c.venue === 'sodex') ? ' It usually takes under 30 minutes.' : ' A long range or an old candle may stay this way.'}
+          </span>
         </div>
       )}
       {(late || downMs > 0) && (
@@ -500,10 +527,8 @@ function Coverage({ d, venues }: { d: FlowWindow | null; venues: Venue[] }) {
         ))}
       </span>
       <span className="tfl-dim tfl-cov__note">
-        {d.coverage && d.coverage.expected > 0 && !d.coverage.holeSlots && !d.coverage.unchecked.length
-          ? `SoDEX: all ${fmtNum(d.coverage.expected)} of its trades held, by its own count. `
-          : ''}
-        From the venues' public trade streams, both sides. Only SoDEX is checked against a count of its own. Wallets are shown by address.
+        {coveragesOf(d).filter((c) => c.expected > 0 && !c.holeSlots && !c.unchecked.length).map((c) => (c.unit === 'volume' ? `${VENUE_LABEL[c.venue]}: its volume all held. ` : `${VENUE_LABEL[c.venue]}: all ${fmtNum(c.expected)} of its trades held, by its own count. `)).join('')}
+        From the venues' public trade streams, both sides. Wallets are shown by address.
       </span>
     </footer>
   );
