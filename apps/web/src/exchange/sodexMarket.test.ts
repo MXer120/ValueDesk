@@ -26,7 +26,7 @@ globalThis.fetch = (async (input: string | URL) => {
   return new Response(JSON.stringify({ code: 404, message: 'not found' }), { status: 404 });
 }) as typeof fetch;
 
-const { market, MarketRequestError } = await import('./sodexMarket');
+const { freshTicker, market, MarketRequestError } = await import('./sodexMarket');
 
 test('market: a book read by name goes out together with the market list, not after it', async () => {
   calls.length = 0;
@@ -57,4 +57,23 @@ test('market: a name that is not safe in a URL path never reaches one', async ()
   calls.length = 0;
   await assert.rejects(market.orderbook('perps', '../accounts/0xabc/trades', 20));
   assert.ok(calls.every((c) => !c.path.includes('accounts')), calls.map((c) => c.path).join(', '));
+});
+
+const staleBase = { symbol: 'vADA_vUSDC', lastPx: '0.5', openPx: '0.4', highPx: '0.6', lowPx: '0.3', volume: '10', quoteVolume: '727', change: '0.1', changePct: 2.45, askPx: '0.51', bidPx: '0.49' };
+const staleNow = 1_800_000_000_000;
+
+test('a ticker window closed over 24 h ago is empty: no volume, no move; the price and the book stay', () => {
+  const out = freshTicker({ ...staleBase, closeTime: staleNow - 86_400_001 }, staleNow);
+  assert.equal(out.quoteVolume, '0');
+  assert.equal(out.volume, '0');
+  assert.equal(out.changePct, 0);
+  assert.equal(out.lowPx, '0.5');
+  assert.equal(out.lastPx, '0.5');
+  assert.equal(out.askPx, '0.51');
+});
+
+test('a live ticker window, and one with no close time, stay as they are', () => {
+  const live = { ...staleBase, closeTime: staleNow - 1_000 };
+  assert.equal(freshTicker(live, staleNow), live);
+  assert.equal(freshTicker(staleBase, staleNow), staleBase);
 });
