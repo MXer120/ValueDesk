@@ -218,8 +218,8 @@ function ChartCard({ c, h24 }: { c: PortfolioContext; h24: ChartPoint[] | null }
   return (
     <Card
       className="pf-card--chart pfx-chart"
-      title={<ViewSeg value={view} options={CHART_VIEWS} onChange={setView} label="Chart" />}
-      action={view === 'calendar' ? undefined : <RangePicker value={range} options={RANGES} onChange={setRange} />}
+      title={<RangePicker value={view} options={CHART_VIEWS} onChange={setView} label="Chart" align="start" />}
+      action={view === 'calendar' ? undefined : <ViewSeg value={range} options={RANGES} onChange={setRange} label="Timeframe" />}
     >
       {win && win.change !== null && (
         <div className="pfx-chart__head">
@@ -407,7 +407,7 @@ function SummaryPanel({ c }: { c: PortfolioContext }) {
     <Card
       className="pfx-sum"
       title="Summary"
-      action={<RangePicker value={range} options={RANGES} onChange={setRange} />}
+      action={<ViewSeg value={range} options={RANGES} onChange={setRange} label="Timeframe" />}
     >
       {!c.address ? <NoWallet line="Connect a wallet to see your trading summary." compact />
         : error && !fills ? <p className="pf-note">Could not read your trades. {error}</p>
