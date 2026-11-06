@@ -7,7 +7,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { Ticker } from '../../api';
 import { DASH, fmtCountdown, fmtPct, signClass } from '../../format';
-import { useSharedPoll, useStored, useSymbols, useTickers } from '../../hooks';
+import { useSharedPoll, useSodexOiExcluded, useStored, useSymbols, useTickers } from '../../hooks';
 import { vsApi, VENUE_LABEL } from '../../vsApi';
 import { CoinIcon } from '../CoinIcon';
 import { LoadFailed } from '../LoadFailed';
@@ -54,6 +54,8 @@ export function FundingScanner({
   // Shared with the markets board above it (and the trade page's tickers): one read each.
   const tickers = useTickers('perps', { pollMs: POLL_MS, enabled });
   const hl = useSharedPoll('vs:screener:assets', () => vsApi.assets(), { pollMs: POLL_MS, enabled });
+  // Only the full table shows open interest; the compact card has no such column.
+  const oiExcluded = useSodexOiExcluded(enabled && mode === 'full');
   const { symbols, error: symbolError } = useSymbols('perps');
   const now = useNow();
   const [sort, setSort] = useStored<ArbSort>('vs.funding.sort', 'apr');
@@ -65,13 +67,13 @@ export function FundingScanner({
   const pairs = useMemo(() => {
     const tickerRows: Ticker[] = tickers.data?.tickers ?? [];
     const legs = [
-      ...sodexLegs(symbols, tickerRows),
+      ...sodexLegs(symbols, tickerRows, oiExcluded),
       ...hlLegs(hl.data?.assets),
     ];
     const built = buildPairs(legs);
     if (mode === 'compact') return built.slice(0, COMPACT_ROWS);
     return sortPairs(filterPairs(built, { q, minVol: vol }), sortId);
-  }, [tickers.data, hl.data, symbols, mode, q, vol, sortId]);
+  }, [tickers.data, hl.data, symbols, oiExcluded, mode, q, vol, sortId]);
 
   const waiting = (!tickers.data && !tickers.error) || (!hl.data && !hl.error) || (symbols.length === 0 && !symbolError);
   const broken = (symbolError && symbols.length === 0) || (!tickers.data && tickers.error)

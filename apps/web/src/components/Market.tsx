@@ -23,7 +23,8 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { useLatched } from './motion';
 import { createPortal, flushSync } from 'react-dom';
 import { api, type Engine, type OrderBook, type Symbol, type Ticker } from '../api';
-import { useAsync, useChannel, useSharedStored, useStored, useTickers as useSharedTickers } from '../hooks';
+import { useAsync, useChannel, useSharedStored, useSodexOiExcluded, useStored, useTickers as useSharedTickers } from '../hooks';
+import { displayedOi } from '../sodexOi';
 import { hub } from '../ws';
 import { pollEvery } from '../exchange/visibility';
 import { shareBook } from '../exchange/bookShare';
@@ -623,6 +624,8 @@ export function TickerBar({
     if (row) setMark(row);
   });
 
+  const oiExcluded = useSodexOiExcluded(engine === 'perps' && headerStats.includes('oi'));
+
   const rest: Ticker | undefined = rows?.find((t) => t.symbol === symbol);
   // WebSocket keys are terse and REST keys are verbose, so every reading is
   // "live if the socket published it, otherwise the REST snapshot". `pick`
@@ -807,16 +810,16 @@ export function TickerBar({
          * positioned here".
          */
         const px = num(markPx ?? last);
-        const size = oi !== undefined && oi !== null && oi !== '' ? num(oi) : NaN;
+        const size = displayedOi(symbol, oi, oiExcluded) ?? NaN;
         const oiUsd = Number.isFinite(size) && px > 0 ? size * px : NaN;
         return (
           <Stat
             key={id}
             label={label}
-            /* The venue publishes CONTRACTS. This figure is contracts x mark
-               price - ours, not theirs - and the title says so rather than
-               letting a currency glyph imply a venue reading. */
-            hint="Base-unit open interest x mark price. The venue publishes contracts, not notional."
+            /* The venue publishes CONTRACTS, and counts SoDEX's own internal pair
+               in them. This figure is ours, not theirs, and the title says so
+               rather than letting a currency glyph imply a venue reading. */
+            hint="Contracts x mark price, leaving out SoDEX's internal pair, so it can differ from SoDEX's own page."
             value={Number.isFinite(oiUsd) ? `${quoteGlyph(sym)}${fmtCompact(oiUsd)}` : DASH}
           />
         );

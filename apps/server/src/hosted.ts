@@ -100,6 +100,7 @@ export const HOSTED_ROUTES: readonly HostedRoute[] = [
   { method: 'GET', url: '/api/vs/cohorts/detail', cls: 'read' },
   { method: 'GET', url: '/api/vs/cohorts/map', cls: 'read' },
   { method: 'GET', url: '/api/vs/excluded', cls: 'read' },
+  { method: 'GET', url: '/api/vs/sodex/oi-excluded', cls: 'read' },
   { method: 'GET', url: '/api/vs/cohorts/focus', cls: 'read' },
   { method: 'GET', url: '/api/vs/cohorts/wallets', cls: 'read' },
   // The liquidation heatmap (indexer/liqRead.ts): the cohort books, priced; the venues' market

@@ -15,7 +15,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } 
 import { SECTORS, type Sector } from '@sign/valuedesk/cohorts/model.js';
 import { api } from '../../../api';
 import { DASH } from '../../../format';
-import { useAsync, useSharedPoll, useStored, useSymbols, useTickers } from '../../../hooks';
+import { useAsync, useSharedPoll, useSodexOiExcluded, useStored, useSymbols, useTickers } from '../../../hooks';
 import { VENUE_LABEL, vsApi, type Venue } from '../../../vsApi';
 import { CoinIcon } from '../../CoinIcon';
 import { VenueLogo } from '../../VenueLogo';
@@ -67,10 +67,12 @@ export function Markets({ enabled, onOpenSymbol, onOpenScanner }: {
   const { symbols } = useSymbols('perps');
   const map = useAsync(() => vsApi.cohortMap(MAP_VENUES, null), [], { pollMs: 5 * 60_000, enabled });
 
+  const oiExcluded = useSodexOiExcluded(enabled);
+
   const held = useMemo<HeldAsset[]>(() => (map.data?.sectors ?? []).flatMap((s) => s.assets ?? []), [map.data]);
   const rows = useMemo(
-    () => buildMarkets(Array.isArray(hl.data?.assets) ? (hl.data.assets as HlAsset[]) : [], tickers.data?.tickers, symbols, held),
-    [hl.data, tickers.data, symbols, held],
+    () => buildMarkets(Array.isArray(hl.data?.assets) ? (hl.data.assets as HlAsset[]) : [], tickers.data?.tickers, symbols, held, oiExcluded),
+    [hl.data, tickers.data, symbols, held, oiExcluded],
   );
 
   const [featuredKey, setFeatured] = useStored<string>('vs.markets.featured', 'BTC');
@@ -544,7 +546,7 @@ function MarketTable({ anchor, rows, sector, onSector, active, watch, onWatch, o
                   <td className="num">{fmtPx(r.price)}</td>
                   <td className={`num ${tone(r.changePct)}`}>{pct(r.changePct)}</td>
                   <td className="num" title={fmtUsdExact(r.volume)}>{fmtUsdShort(r.volume)}</td>
-                  <td className="num" title={fmtUsdExact(r.oi)}>{r.oi > 0 ? fmtUsdShort(r.oi) : DASH}</td>
+                  <td className="num" title={fmtUsdExact(r.oi)}>{r.oi !== null && r.oi > 0 ? fmtUsdShort(r.oi) : DASH}</td>
                   <td className={`num ${tone(r.funding)}`} title={r.funding === null ? undefined : `${pct(fundingApr(r.funding), 1)} APR`}>{fundPct(r.funding)}</td>
                   {anyHeld && (
                     <td className="num">

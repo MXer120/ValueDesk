@@ -45,6 +45,7 @@ import {
   type Window,
 } from '../valuedesk/types.js';
 import { sodexProvider } from '../valuedesk/sodex/index.js';
+import { sodexOiExcluded } from '../valuedesk/sodex/oiExcluded.js';
 import { hlInfo, hlLeaderboardRow, hyperliquidProvider } from '../valuedesk/hyperliquid/index.js';
 import { hlPriceSeries } from '../valuedesk/hyperliquid/price.js';
 import { ACCOUNT_DETAIL, arcusProvider, lighterProvider, nameSpotFills, tradexyzProvider } from '../valuedesk/extra/providers.js';
@@ -781,6 +782,18 @@ export async function valuedeskRoutes(app: FastifyInstance) {
     try {
       await cohortsReady();
       return { ok: true, wallets: excludedNow() };
+    } catch (e) {
+      return fail(reply, e);
+    }
+  });
+
+  /**
+   * Per SoDEX market, the size of SoDEX's internal pair: what the pages take off SoDEX's open interest
+   * (valuedesk/sodex/oiExcluded.ts). A failed read answers {ok:false}, never zeros.
+   */
+  app.get('/api/vs/sodex/oi-excluded', async (_req, reply) => {
+    try {
+      return { ok: true, ...(await sodexOiExcluded()) };
     } catch (e) {
       return fail(reply, e);
     }

@@ -81,6 +81,8 @@ export const CACHE_POLICIES: Readonly<Record<string, CachePolicy>> = {
   '/api/vs/cohorts/detail': BOARD,
   '/api/vs/cohorts/map': BOARD,
   '/api/vs/excluded': BOARD,
+  // The process holds it 15 s (valuedesk/sodex/oiExcluded.ts). No older copy on top: the pages subtract it.
+  '/api/vs/sodex/oi-excluded': { cacheControl: 'public, max-age=10' },
   '/api/vs/cohorts/focus': BOARD,
   '/api/vs/cohorts/wallets': BOARD,
   '/api/vs/screener': BOARD,

@@ -6,7 +6,8 @@
  */
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import type { Engine, Symbol, Ticker } from '../api';
-import { useStored, useSymbolList, useTickers } from '../hooks';
+import { useSodexOiExcluded, useStored, useSymbolList, useTickers } from '../hooks';
+import { displayedOi, type SodexOiExcluded } from '../sodexOi';
 import { aliasFor, resolveTarget } from '../dashboard/ScanDashboard';
 import { fmtPct, fmtPrice, fmtUsd, num, signClass } from '../format';
 import { usePrivacy } from '../privacy';
@@ -74,15 +75,19 @@ const FEATURED_COUNT = 8;
  * lack one) so this column and its sort agree with each other and with the
  * header stat, rather than each guessing independently.
  */
-const oiUsd = (r: Row): number => num(r.ticker?.openInterest) * num(r.ticker?.markPrice ?? r.ticker?.lastPx);
+const oiUsd = (r: Row, excluded: SodexOiExcluded | null): number | null => {
+  /* A perp's figure leaves out SoDEX's internal pair (sodexOi.ts); null while that is unavailable. */
+  const coins = r.engine === 'perps' ? displayedOi(r.symbol.name, r.ticker?.openInterest ?? 0, excluded) : num(r.ticker?.openInterest);
+  return coins === null ? null : coins * num(r.ticker?.markPrice ?? r.ticker?.lastPx);
+};
 
-const SORT_VALUE: Record<SortKey, (r: Row) => number | string> = {
+const SORT_VALUE: Record<SortKey, (r: Row, excluded: SodexOiExcluded | null) => number | string> = {
   pair: (r) => r.symbol.displayName,
   last: (r) => num(r.ticker?.lastPx),
   change: (r) => r.ticker?.changePct ?? -Infinity,
   funding: (r) => num(r.ticker?.fundingRate),
   volume: (r) => num(r.ticker?.quoteVolume ?? r.ticker?.volume),
-  oi: (r) => oiUsd(r),
+  oi: (r, excluded) => oiUsd(r, excluded) ?? -Infinity,
 };
 
 /**
@@ -139,6 +144,7 @@ export function SymbolSearch({
   // The page's shared snapshots (hooks.ts useTickers), read every 15 s while open.
   const spotTickers = useTickers('spot', { enabled: open, pollMs: 15_000 });
   const perpsTickers = useTickers('perps', { enabled: open, pollMs: 15_000 });
+  const oiExcluded = useSodexOiExcluded(open);
 
   useEffect(() => {
     if (open) {
@@ -225,12 +231,13 @@ export function SymbolSearch({
     const dir = sortDir === 'asc' ? 1 : -1;
     const accessor = SORT_VALUE[sortKey];
     return [...list].sort((a, b) => {
-      const av = accessor(a);
-      const bv = accessor(b);
+      const av = accessor(a, oiExcluded);
+      const bv = accessor(b, oiExcluded);
       if (typeof av === 'string' || typeof bv === 'string') return String(av).localeCompare(String(bv)) * dir;
-      return (av - bv) * dir;
+      /* Two markets without a figure are level: -Infinity less -Infinity is no ordering. */
+      return av === bv ? 0 : (av - bv) * dir;
     });
-  }, [rows, category, query, favorites, sortKey, sortDir]);
+  }, [rows, category, query, favorites, sortKey, sortDir, oiExcluded]);
 
   // Top movers market-wide, independent of search/category - "featured" is
   // just the real 24h change stat, not a curated/fabricated field.
@@ -382,7 +389,7 @@ export function SymbolSearch({
               </div>
             </td>
             <td>{fmtUsd(r.ticker?.quoteVolume ?? r.ticker?.volume, 0)}</td>
-            <td>{r.ticker?.openInterest ? fmtUsd(oiUsd(r), 0) : '-'}</td>
+            <td>{r.ticker?.openInterest ? fmtUsd(oiUsd(r, oiExcluded) ?? undefined, 0) : '-'}</td>
           </tr>
           );
         })}
