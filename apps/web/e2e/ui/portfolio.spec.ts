@@ -185,6 +185,19 @@ h.test('Total Value counts each dollar once, and copies and bots have no bucket'
   assert.match(sum, /vol\. of trades \$300,00/);
   assert.match(sum, /commission \$0,12/);
   await shot(p, 'trade-tab');
+  // The timeframe is the app's dropdown: choosing changes the summary's window.
+  await p.locator('.pfx-sum .coh-pick__btn').click();
+  await p.locator('.pfx-sum').getByRole('option', { name: '30 days' }).waitFor();
+  await shot(p, 'timeframe', false);
+  await p.locator('.pfx-sum').getByRole('option', { name: '30 days' }).click();
+  await until(p, async () => (await p.locator('.pfx-sum .coh-pick__btn').innerText()).includes('30 days'), 'the 30-day summary', 5_000);
+  await p.getByRole('tab', { name: 'PnL Calendar' }).click();
+  await p.locator('.pfc-grid').waitFor();
+  await shot(p, 'calendar', false);
+  await p.getByRole('button', { name: 'View tiers' }).click();
+  await p.getByRole('dialog').first().waitFor();
+  await shot(p, 'fee-sheet', false);
+  await p.keyboard.press('Escape');
   for (const name of ['Spot', 'Wealth', 'Copy trading', 'Bots']) {
     await p.locator('.pfx-sections').getByRole('tab', { name, exact: true }).click();
     await p.waitForTimeout(700);
@@ -230,6 +243,7 @@ h.test('Swap: the exact order SoDEX\'s own dialog sends, and its result', async 
   assert.equal(Number(leg.price), 0.99, 'at the floor');
   assert.equal(Number(leg.quantity), 100);
   assert.match(leg.clOrdID, /^vd_swap_/);
+  assert.equal((sx.orders().at(-1)!.body as { builder?: unknown }).builder, undefined, 'no ValueDesk fee where SoDEX charges none');
   await shot(p, 'swap-sent', false);
 }, { storage });
 

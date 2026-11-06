@@ -1271,29 +1271,47 @@ export function CrossFadeCal({ points, mode }: { points: ChartPoint[]; mode: Ser
     return { y: d.getFullYear(), m: d.getMonth() };
   });
   const label = monthStart.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+  const traded = cells.filter((c): c is { day: number; v: number } => !!c && c.v !== null && Math.abs(c.v) >= 0.005);
+  const wins = traded.filter((c) => c.v > 0).length;
+  const best = traded.length ? Math.max(...traded.map((c) => c.v)) : null;
+  const worst = traded.length ? Math.min(...traded.map((c) => c.v)) : null;
+  const now = new Date();
+  const isThisMonth = now.getFullYear() === month.y && now.getMonth() === month.m;
+  const stat = (k: string, v: ReactNode, cls = '') => (
+    <div className="pfc-stat"><span>{k}</span><b className={cls}>{v}</b></div>
+  );
   return (
-    <div className="pf-cal">
-      <div className="pf-cal__head">
-        <button type="button" className="pf-cal__nav" onClick={() => step(-1)} disabled={!canBack} aria-label="Previous month">&#8249;</button>
-        <span className="pf-cal__month">{label}</span>
-        <button type="button" className="pf-cal__nav" onClick={() => step(1)} disabled={!canFwd} aria-label="Next month">&#8250;</button>
-        <span className={`pf-cal__total ${signClass(total)}`}>{mask(fmtSigned(total))}</span>
+    <div className="pfc">
+      <div className="pfc-head">
+        <div className="pfc-nav">
+          <button type="button" onClick={() => step(-1)} disabled={!canBack} aria-label="Previous month"><Chevron /></button>
+          <span>{label}</span>
+          <button type="button" onClick={() => step(1)} disabled={!canFwd} aria-label="Next month"><Chevron /></button>
+        </div>
+        <div className="pfc-stats">
+          {stat('Month', mask(fmtSigned(total)), signClass(total))}
+          {stat('Winning days', mask(traded.length ? `${wins} of ${traded.length}` : DASH))}
+          {stat('Best day', mask(best === null ? DASH : fmtSigned(best)), best === null ? '' : signClass(best))}
+          {stat('Worst day', mask(worst === null ? DASH : fmtSigned(worst)), worst === null ? '' : signClass(worst))}
+        </div>
       </div>
-      <div className="pf-cal__dow">{['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'].map((d) => <span key={d}>{d}</span>)}</div>
-      <div className="pf-cal__grid">
+      <div className="pfc-dow">{['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => <span key={d}>{d}</span>)}</div>
+      <div className="pfc-grid">
         {cells.map((c, i) => {
-          if (!c) return <span key={`e${i}`} className="pf-cal__cell is-empty" />;
-          const strength = c.v === null || peak === 0 ? 0 : Math.max(0.12, Math.abs(c.v) / peak);
-          const tone = c.v === null ? '' : c.v > 0 ? 'is-up' : c.v < 0 ? 'is-down' : '';
+          if (!c) return <span key={`e${i}`} className="pfc-day is-blank" />;
+          const moved = c.v !== null && Math.abs(c.v) >= 0.005;
+          const strength = !moved || peak === 0 ? 0 : Math.max(0.14, Math.abs(c.v!) / peak);
+          const tone = !moved ? '' : c.v! > 0 ? 'is-up' : 'is-down';
+          const today = isThisMonth && now.getDate() === c.day;
           return (
             <span
               key={c.day}
-              className={`pf-cal__cell ${tone}`}
+              className={`pfc-day ${tone}${today ? ' is-today' : ''}`}
               style={{ ['--s' as string]: strength.toFixed(3) }}
               title={c.v === null ? undefined : `${label.split(' ')[0]} ${c.day}: ${fmtSigned(c.v)}`}
             >
-              <span className="pf-cal__d">{c.day}</span>
-              {c.v !== null && Math.abs(c.v) >= 0.005 && <span className="pf-cal__v">{mask(fmtCompactSigned(c.v))}</span>}
+              <span className="pfc-day__n">{c.day}</span>
+              {moved && <span className="pfc-day__v">{mask(fmtCompactSigned(c.v!))}</span>}
             </span>
           );
         })}
@@ -1316,12 +1334,12 @@ export function fmtCompactSigned(v: number): string {
  * must not drift apart. Selection is amber text on a filled control - the
  * label never changes weight, so the group cannot re-flow under the cursor.
  */
-export function PeriodSeg({ period, onPeriod, label, periods = PERIODS, format = (p) => p }: {
-  period: Period; onPeriod: (p: Period) => void; label: string; periods?: readonly Period[]; format?: (p: Period) => string;
+export function PeriodSeg({ period, onPeriod, label }: {
+  period: Period; onPeriod: (p: Period) => void; label: string;
 }) {
   return (
     <div className="pf-seg" role="tablist" aria-label={label}>
-      {periods.map((p) => (
+      {PERIODS.map((p) => (
         <button
           key={p}
           type="button"
@@ -1330,7 +1348,7 @@ export function PeriodSeg({ period, onPeriod, label, periods = PERIODS, format =
           className={`pf-ctl ${p === period ? 'is-on' : ''}`}
           onClick={() => onPeriod(p)}
         >
-          {format(p)}
+          {p}
         </button>
       ))}
     </div>

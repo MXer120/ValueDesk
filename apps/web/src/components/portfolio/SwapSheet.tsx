@@ -4,24 +4,22 @@
  * the way until it says Swap.
  */
 import { useMemo, useState } from 'react';
-import { builderRateToFraction } from '@sodex-core';
 import { Modal } from '../Modal';
 import { CoinIcon } from '../CoinIcon';
 import { NoWallet } from '../EmptyState';
 import { useAccountResource } from '../../accountFeeds';
 import { api } from '../../api';
-import { fmt, num, pick } from '../../format';
+import { DASH, fmt, num, pick } from '../../format';
 import { useAsync } from '../../hooks';
 import { placeOrder } from '../../trading/actions';
-import { feeNow } from '../../trading/terms';
 import { OutcomeUnknownError } from '../../trading/gateway';
 import {
   SWAP_BUTTON_TEXT, SWAP_FLOOR_PRICE, SWAP_FROM_COIN, SWAP_SYMBOL, runSwap, swapAmount, swapButton, swapQuote,
   type BookLevel, type SwapResult,
 } from '../../trading/swap';
-import { requestEnableTrading, requestTransfer } from '../account/actions';
+import { requestEnableTrading } from '../account/actions';
 import { decimalInput } from '../numberInput';
-import { Arrow, Spinner } from '../funds/ui';
+import { Spinner } from '../funds/ui';
 import '../funds/funds.css';
 
 const levels = (raw: unknown): BookLevel[] =>
@@ -59,12 +57,11 @@ function SwapBody({ address, unlocked, onChanged, onClose }: { address: string; 
     return row ? Math.max(0, num(pick(row, 't', 'total')) - num(pick(row, 'l', 'locked'))) : 0;
   }, [spot.data]);
 
-  const fee = builderRateToFraction(feeNow('spot', address));
   const bids = useMemo(() => {
     const raw = book.data as unknown as { book?: { bids?: unknown } | null } | null;
     return raw?.book ? levels(raw.book.bids) : null;
   }, [book.data]);
-  const quote = useMemo(() => (bids && amount ? swapQuote(bids, amount, fee) : null), [bids, amount, fee]);
+  const quote = useMemo(() => (bids && amount ? swapQuote(bids, amount) : null), [bids, amount]);
   const button = swapButton({ amount, balance, quote });
 
   const submit = async () => {
@@ -104,31 +101,36 @@ function SwapBody({ address, unlocked, onChanged, onClose }: { address: string; 
   }
 
   return (
-    <div className="fx-stack">
-      <div className="fx-box">
-        <div className="fx-box__head">
-          <span>You pay</span>
-          <span className="fx-max">Spot balance: {balance === null ? <Spinner /> : `${fmt(balance, 2)} USDT`}</span>
+    <div className="fx-stack pfx-swap">
+      <div className="pfx-swap__pair">
+        <div className="pfx-swap__box">
+          <div className="pfx-swap__row">
+            <span className="pfx-swap__k">From</span>
+            <span className="pfx-swap__k">
+              Spot {balance === null ? <Spinner /> : <b>{fmt(balance, 2)}</b>}
+              <button type="button" className="pfx-swap__max" disabled={!balance} onClick={() => setAmount(swapAmount(balance ?? 0))}>Max</button>
+            </span>
+          </div>
+          <div className="pfx-swap__row">
+            <input className="pfx-swap__in" value={amount} onChange={(e) => setAmount(decimalInput(e.target.value, { prev: amount }))} inputMode="decimal" placeholder="0" aria-label="USDT to swap" />
+            <span className="pfx-swap__coin"><CoinIcon coin="USDT" size={22} /> USDT</span>
+          </div>
         </div>
-        <div className="fx-amount">
-          <input value={amount} onChange={(e) => setAmount(decimalInput(e.target.value, { prev: amount }))} inputMode="decimal" placeholder="0.00" aria-label="USDT to swap" />
-          <span className="fx-amount__unit pfx-unit"><CoinIcon coin="USDT" size={16} /> USDT</span>
-          <button type="button" className="fx-chip" disabled={!balance} onClick={() => setAmount(swapAmount(balance ?? 0))}>Max</button>
-        </div>
-      </div>
-      <div className="pfx-swap__arrow" aria-hidden="true"><Arrow /></div>
-      <div className="fx-box">
-        <div className="fx-box__head"><span>You receive, about</span></div>
-        <div className="fx-amount">
-          <output className="pfx-swap__out">{quote ? fmt(quote.receive, 2) : '0.00'}</output>
-          <span className="fx-amount__unit pfx-unit"><CoinIcon coin="USDC" size={16} /> USDC</span>
+        <span className="pfx-swap__arrow" aria-hidden="true">
+          <svg viewBox="0 0 16 16" width="16" height="16"><path d="M8 3v10M4 9l4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
+        </span>
+        <div className="pfx-swap__box">
+          <div className="pfx-swap__row"><span className="pfx-swap__k">To</span></div>
+          <div className="pfx-swap__row">
+            <output className={`pfx-swap__in${quote ? '' : ' is-empty'}`}>{quote ? fmt(quote.receive, 2) : '0'}</output>
+            <span className="pfx-swap__coin"><CoinIcon coin="USDC" size={22} /> USDC</span>
+          </div>
         </div>
       </div>
       <div className="fx-kv">
-        <div><span>Average price</span><b>{quote && quote.filled > 0 ? fmt(quote.avgPrice, 5) : '-'} USDC</b></div>
-        <div><span>Lowest price it can fill at</span><b>{fmt(Number(SWAP_FLOOR_PRICE), 2)} USDC</b></div>
-        <div><span>SoDEX fee</span><b>{fmt(0, 2)}%</b></div>
-        <div><span>ValueDesk fee</span><b>{fmt(fee * 100, 3)}%{quote ? ` (${fmt(quote.fee, 2)} USDC)` : ''}</b></div>
+        <div><span>Rate</span><b>1 USDT = {quote && quote.filled > 0 ? fmt(quote.avgPrice, 5) : DASH} USDC</b></div>
+        <div><span>Lowest fill</span><b>{fmt(Number(SWAP_FLOOR_PRICE), 2)} USDC</b></div>
+        <div><span>Fee</span><b>None</b></div>
       </div>
       {!unlocked ? (
         <button type="button" className="fx-cta" onClick={() => requestEnableTrading()}>Enable trading to swap</button>
@@ -139,10 +141,6 @@ function SwapBody({ address, unlocked, onChanged, onClose }: { address: string; 
       )}
       {error && <p className="fx-note fx-note--err" role="alert">{error}</p>}
       {book.error && !book.data && <p className="fx-note fx-note--err">Could not read the USDT/USDC book. Try again in a moment.</p>}
-      <p className="fx-note">
-        A market order on SoDEX&apos;s USDT/USDC book, the same one sodex.com uses. It fills what it can at once, so part of a large amount may stay USDT.
-        {' '}USDT elsewhere? <button type="button" className="fx-link" onClick={() => requestTransfer({ to: 'spot', coin: 'USDT' })}>Move it to Spot</button>.
-      </p>
     </div>
   );
 }

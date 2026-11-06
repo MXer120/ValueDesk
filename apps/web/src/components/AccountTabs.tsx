@@ -98,15 +98,8 @@ function useBandFilters(): [Record<BandTab, TableFilter>, (tab: BandTab, f: Tabl
 export function AccountTabs({
   engine, address, unlocked, readOnly = false, byName, refreshToken, onChanged,
   market, positionCount, orderCount, onPositionCount, onOrderCount, accountScope = false, symbolsFor,
-  extraTabs, tabsAfter, onTabMenu, select, scope, balanceTags,
+  extraTabs, tabsAfter, onTabMenu, select,
 }: AccountTabsProps & {
-  /**
-   * The portfolio's Perps or Spot section: one engine, its own balances only, and on Spot no
-   * Positions tab (spot holds balances, not positions).
-   */
-  scope?: 'perps' | 'spot';
-  /** Coins whose Balances row carries a tag, and the word for it (share coins: "Wealth"). */
-  balanceTags?: { coins: ReadonlySet<string>; label: string };
   /** Tabs a trader added with the + (dashboard/tradeTabs.tsx), after the band's own. */
   extraTabs?: PanelTab[];
   /** The + itself. */
@@ -220,11 +213,11 @@ export function AccountTabs({
   const labelCount = (hostTracks: number | undefined, live: number | undefined) => (hostTracks === undefined ? undefined : live);
 
   const tabs: PanelTab[] = [
-    ...(scope === 'spot' ? [] : [{
+    {
       key: 'positions',
       label: `Positions${tally(labelCount(positionCount, livePositions))}`,
       content: <Positions {...(accountScope ? perps : acct)} {...band('positions')} showTitle={false} />,
-    }]),
+    },
     {
       key: 'orders',
       label: `Open Orders${tally(labelCount(orderCount, liveOrders))}`,
@@ -249,7 +242,7 @@ export function AccountTabs({
       label: 'Balances',
       // Per COIN, not per market: no filter bites on it. The portfolio lists
       // every place the account holds funds; the trade page, its engine.
-      content: <Private k="funds"><AllBalances address={address} refreshToken={refreshToken} readOnly={readOnly} only={scope} tags={balanceTags} /></Private>,
+      content: <Private k="funds"><AllBalances address={address} refreshToken={refreshToken} readOnly={readOnly} /></Private>,
     },
     {
       key: 'order-history',
@@ -288,12 +281,6 @@ export function AccountTabs({
       ),
     },
   ];
-
-  // The portfolio's sections open on what the account holds.
-  if (scope) {
-    const at = tabs.findIndex((t) => t.key === 'balances');
-    if (at > 0) tabs.unshift(tabs.splice(at, 1)[0]!);
-  }
 
   const actions = (active: string): ReactNode => {
     if (active.startsWith('x:')) return null;

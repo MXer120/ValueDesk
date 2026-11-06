@@ -30,12 +30,6 @@ test('more than the book holds above the floor is flagged', () => {
   assert.equal(swapQuote([{ price: 1, quantity: 4 }], 5).exceedsDepth, true);
 });
 
-test('the builder fee comes off what is received, and is shown', () => {
-  const q = swapQuote([{ price: 1, quantity: 100 }], 100, 0.0002);
-  assert.ok(Math.abs(q.fee - 0.02) < 1e-9);
-  assert.equal(q.receive, 99.98);
-});
-
 test('the button says what stands in the way, in order', () => {
   const ok = swapQuote([{ price: 1, quantity: 1e6 }], 10);
   assert.equal(swapButton({ amount: '', balance: 10, quote: ok }), 'enter');

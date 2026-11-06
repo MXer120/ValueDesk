@@ -19,8 +19,7 @@ import { AccountTabs } from '../AccountTabs';
 import { ReadFailed } from '../AccountHistory';
 import { CoinIcon } from '../CoinIcon';
 import { EmptyState, NoWallet } from '../EmptyState';
-import { FeeTier } from '../FeeTier';
-import { Modal } from '../Modal';
+import { FeeSchedule } from '../FeeSchedule';
 import { Collapse } from '../motion';
 import { requestDeposit, requestTransfer, requestWithdraw } from '../account/actions';
 import { useAccountTotals } from '../account/useAccountTotals';
@@ -30,11 +29,12 @@ import { IconCopyTrade } from '../palette/icons';
 import { MyCopiesCard } from '../scan/MyCopies';
 import { BotIcon } from '../bots/BotIcon';
 import {
-  CrossFadeCal, InfoDot, PeriodSeg, fmtSigned, pnlAt, sliceCurve, useVolume7d,
+  CrossFadeCal, InfoDot, fmtSigned, pnlAt, sliceCurve, useVolume7d,
   type Period, type PortfolioContext,
 } from '../Portfolio';
 import { Card, EquityCurve, fmtCompactUsd, type CurveWindow } from './parts';
 import { claimedCoins, shareKey, summarize, summarizeActivity, type ActivitySummary, type FillRow, type FundingRow, type PortfolioSummary } from './summary';
+import { RangePicker } from './RangePicker';
 import { SwapSheet } from './SwapSheet';
 import { useWealth, type WealthState } from './useWealth';
 import { WealthHoldings, WealthTab } from './WealthTab';
@@ -58,8 +58,7 @@ export interface PortfolioPageLinks {
   onOpenTab: (tab: Tab) => void;
 }
 
-const RANGES: readonly Period[] = ['24H', '7D', '14D', '30D', 'ALL'];
-const RANGE_LABEL = (p: Period): string => (p === 'ALL' ? 'All time' : p === '24H' ? '24h' : p);
+const RANGES: ReadonlyArray<readonly [Period, string]> = [['24H', '24 hours'], ['7D', '7 days'], ['14D', '14 days'], ['30D', '30 days'], ['ALL', 'All time']];
 
 // --- the numbers ------------------------------------------------------------------------
 
@@ -125,12 +124,13 @@ function MoneyButtons({ c, onSwap }: { c: PortfolioContext; onSwap: () => void }
 
 // --- the left card ----------------------------------------------------------------------
 
-function Bucket({ label, value, hint, onClick, open }: {
-  label: string; value: ReactNode; hint?: string; onClick?: () => void; open?: boolean;
+function Bucket({ icon, label, value, hint, onClick, open }: {
+  icon: ReactNode; label: string; value: ReactNode; hint?: string; onClick?: () => void; open?: boolean;
 }) {
   return (
-    <button type="button" className={`pfx-bucket${open ? ' is-open' : ''}`} onClick={onClick} aria-expanded={open}>
-      <span className="pfx-bucket__k">{label}{hint && <InfoDot title={hint} />}{open !== undefined && <Chevron />}</span>
+    <button type="button" className={`pfa__part pfa__part--toggle pfx-bucket${open ? ' is-open' : ''}`} onClick={onClick} aria-expanded={open}>
+      <span className="pfa__part-ic">{icon}</span>
+      <span className="pfa__part-k">{label}{hint && <InfoDot title={hint} />}{open !== undefined && <Chevron />}</span>
       <span className="pfa__part-v">{value}</span>
     </button>
   );
@@ -174,15 +174,16 @@ function ValueCard({ c, s, today, vol, evmRows, evmLoading, onSection }: {
       </div>
 
       <div className="pfx-buckets">
-        <Bucket label="Perps" value={usd(s.perps)} hint="Copies and bots trade from this account, so their money is already counted here." onClick={() => onSection('perps')} />
-        <Bucket label="Spot" value={usd(s.spot)} onClick={() => onSection('spot')} />
+        <Bucket icon={<CoinIcon coin="USDC" size={18} />} label="Perps" value={usd(s.perps)} hint="Copies and bots trade from this account, so their money is already counted here." onClick={() => onSection('perps')} />
+        <Bucket icon={<CoinIcon coin="USDC" size={18} />} label="Spot" value={usd(s.spot)} onClick={() => onSection('spot')} />
         <Bucket
+          icon={<SodexMark size={18} />}
           label="Wealth"
           value={usd(s.wealth)}
           hint={`SoDEX Wealth funds wherever the shares sit, so a fund in Spot or your wallet is counted here and not there.${pledged}`}
           onClick={() => onSection('wealth')}
         />
-        <Bucket label="EVM" value={s.evm === null ? (evmLoading ? '…' : DASH) : usd(s.evm)} open={evmOpen} onClick={() => setEvmOpen((v) => !v)} />
+        <Bucket icon={<CoinIcon chain="VALUECHAIN" size={18} />} label="EVM" value={s.evm === null ? (evmLoading ? '…' : DASH) : usd(s.evm)} open={evmOpen} onClick={() => setEvmOpen((v) => !v)} />
         <Collapse open={evmOpen}>
           <ul className="pf-evm pfa__evm">
             {evmRows.length === 0 && <li className="pf-dim">{evmLoading ? 'Reading your wallet…' : 'Nothing on ValueChain or the other EVM chains.'}</li>}
@@ -217,12 +218,12 @@ function ChartCard({ c, h24 }: { c: PortfolioContext; h24: ChartPoint[] | null }
     <Card
       className="pf-card--chart pfx-chart"
       title={<div className="pf-seg" role="tablist" aria-label="Chart">{seg('value', 'Total Value')}{seg('pnl', 'PnL')}{seg('calendar', 'PnL Calendar')}</div>}
-      action={view === 'calendar' ? undefined : <PeriodSeg period={range} onPeriod={setRange} label="Range" periods={RANGES} format={RANGE_LABEL} />}
+      action={view === 'calendar' ? undefined : <RangePicker value={range} options={RANGES} onChange={setRange} />}
     >
       {win && win.change !== null && (
         <div className="pfx-chart__head">
           <span>
-            {view === 'value' ? 'Change in value' : 'PnL'}, {range === 'ALL' ? 'all time' : RANGE_LABEL(range)}
+            {view === 'value' ? 'Change in value' : 'PnL'}, {range === 'ALL' ? 'all time' : range}
             {view === 'value' && <InfoDot title="The change from the start of the range, on SoDEX's own series: Spot, Perps and vaults, deposits and withdrawals included. Your EVM wallet is not in it." />}
           </span>
           <b className={view === 'pnl' ? signClass(win.change) : undefined}>{mask(fmtSigned(win.change))}</b>
@@ -241,24 +242,27 @@ function ChartCard({ c, h24 }: { c: PortfolioContext; h24: ChartPoint[] | null }
 
 // --- the promo row ----------------------------------------------------------------------
 
-function Promo({ icon, title, cta, line, figure, soon, onClick }: {
-  icon: ReactNode; title: string; cta?: string; line: string; figure?: string | null; soon?: boolean; onClick?: () => void;
+function Promo({ tint, icon, title, cta, line, figure, soon, onClick }: {
+  tint: 'copy' | 'earn' | 'cash' | 'bots'; icon: ReactNode; title: string; cta?: string; line: string; figure?: string | null; soon?: boolean; onClick?: () => void;
 }) {
   const body = (
     <>
-      <span className="pfx-promo__ic">{icon}</span>
-      <span className="pfx-promo__t">
-        <span className="pfx-promo__h">
-          {title}
-          {soon ? <span className="dv-devtag dv-devtag--soon">Coming soon</span> : cta && <span className="pfx-promo__cta">{cta} <span aria-hidden="true">&rarr;</span></span>}
-        </span>
-        <span className="pfx-promo__l">{figure && <b>{figure} 7-day APY.</b>} {line}</span>
+      <span className="pfx-promo__top">
+        <span className="pfx-promo__ic">{icon}</span>
+        {soon
+          ? <span className="dv-devtag dv-devtag--soon">Coming soon</span>
+          : figure
+            ? <span className="pfx-promo__f"><b>{figure}</b><small>7-day APY</small></span>
+            : null}
       </span>
+      <span className="pfx-promo__t">{title}</span>
+      <span className="pfx-promo__l">{line}</span>
+      {cta && !soon && <span className="pfx-promo__cta">{cta} <span aria-hidden="true">&rarr;</span></span>}
     </>
   );
   return onClick
-    ? <button type="button" className="pfx-promo" onClick={onClick}>{body}</button>
-    : <div className="pfx-promo is-off" aria-disabled="true">{body}</div>;
+    ? <button type="button" className={`pfx-promo is-${tint}`} onClick={onClick}>{body}</button>
+    : <div className={`pfx-promo is-${tint} is-off`} aria-disabled="true">{body}</div>;
 }
 
 const apy = (raw: string | undefined): string | null => {
@@ -271,14 +275,16 @@ function Promos({ w, onOpenTab, onWealth }: { w: WealthState; onOpenTab: (t: Tab
   return (
     <div className="pfx-promos">
       <Promo
-        icon={<IconCopyTrade size={32} />}
+        tint="copy"
+        icon={<IconCopyTrade size={24} />}
         title="Copy trading"
         cta="Find traders"
         line="Mirror a trader's positions from your own account."
         onClick={() => onOpenTab('copy')}
       />
       <Promo
-        icon={<CoinIcon coin="USDC" size={40} />}
+        tint="earn"
+        icon={<CoinIcon coin="USDC" size={28} />}
         title="USDC Earn"
         cta="See vault"
         line="Variable yield on USDC, through a Morpho vault."
@@ -286,7 +292,8 @@ function Promos({ w, onOpenTab, onWealth }: { w: WealthState; onOpenTab: (t: Tab
         onClick={onWealth}
       />
       <Promo
-        icon={<CoinIcon coin="BOXX" size={40} />}
+        tint="cash"
+        icon={<CoinIcon coin="BOXX" size={28} />}
         title="US Cash Yield"
         cta="See fund"
         line="Treasury-bill yield, on-chain, through BOXX."
@@ -294,7 +301,8 @@ function Promos({ w, onOpenTab, onWealth }: { w: WealthState; onOpenTab: (t: Tab
         onClick={onWealth}
       />
       <Promo
-        icon={<BotIcon strategy="grid" size={40} />}
+        tint="bots"
+        icon={<BotIcon strategy="grid" size={24} />}
         title="Bots"
         soon={botsSoon}
         cta="Open bots"
@@ -328,9 +336,7 @@ function FeeStrip({ c }: { c: PortfolioContext }) {
       </div>
       <div className="pfx-fees__cell"><span className="bal-tag">Perps</span><span><span className="pfx-fees__k">Taker fee / Maker fee</span> <b>{rates(p)}</b></span></div>
       <div className="pfx-fees__cell"><span className="bal-tag">Spot</span><span><span className="pfx-fees__k">Taker fee / Maker fee</span> <b>{rates(s)}</b></span></div>
-      <Modal open={open} onClose={() => setOpen(false)} title="Fee tiers" size="lg" className="pfa-modal">
-        <FeeTier address={c.address} engine="perps" />
-      </Modal>
+      <FeeSchedule open={open} onClose={() => setOpen(false)} engine="perps" address={c.address} />
     </Card>
   );
 }
@@ -400,7 +406,7 @@ function SummaryPanel({ c }: { c: PortfolioContext }) {
     <Card
       className="pfx-sum"
       title="Summary"
-      action={<PeriodSeg period={range} onPeriod={setRange} label="Summary range" periods={RANGES} format={RANGE_LABEL} />}
+      action={<RangePicker value={range} options={RANGES} onChange={setRange} />}
     >
       {!c.address ? <NoWallet line="Connect a wallet to see your trading summary." compact />
         : error && !fills ? <p className="pf-note">Could not read your trades. {error}</p>
@@ -474,12 +480,11 @@ function Sections({ c, w, provider, section, setSection, onOpenMarket, onOpenTab
   onOpenTab: (t: Tab) => void;
   onWealth: () => void;
 }) {
-  const claimed = useMemo(() => claimedCoins(w.rows), [w.rows]);
+  // The same element, with the same props, as the trade page's bottom band.
   const band = (engine: 'perps' | 'spot') => (
     <div className="dash pf-band" key={engine}>
       <AccountTabs
         engine={engine}
-        scope={engine}
         address={c.address}
         unlocked={c.unlocked}
         readOnly={c.readOnly}
@@ -487,7 +492,6 @@ function Sections({ c, w, provider, section, setSection, onOpenMarket, onOpenTab
         refreshToken={c.refreshToken}
         onChanged={c.onChanged}
         symbolsFor={(e) => (e === 'perps' ? c.perpsByName : c.spotByName)}
-        balanceTags={engine === 'spot' && claimed.size ? { coins: claimed, label: 'Counted in Wealth' } : undefined}
       />
     </div>
   );
