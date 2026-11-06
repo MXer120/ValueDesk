@@ -9,6 +9,10 @@
  * THE API THREAD (no stalls - the heatmap's tiles taught that): the loop is given back between
  * rows (YIELD_MS), decoded rows of slots that can no longer change are kept in an LRU bounded by
  * wallets (MAX_CACHED), and whole answers for windows that have passed are kept too (ANSWERS).
+ *
+ * FINAL means nothing can change and nothing is missing: the window has passed, the recorder was up, and for SoDEX the
+ * held prints equal SoDEX's own count in every slot (ledger.ts). A slot that is short stays not final for as long as it is
+ * short, so no answer holding one is kept a day. Other venues have no such count: their `final` says only the first two.
  */
 import { setImmediate as nextTurn } from 'node:timers/promises';
 import type { Venue } from '../valuedesk/types.js';
@@ -18,7 +22,10 @@ import {
   type FlowRole, type FlowRow, type FlowSide, type FlowSort, type FlowSummary, type PrintCols, type WalletFills, type WalletSums,
 } from './codec.js';
 import { CLOSE_MS, FLUSH_MS, READY_MS } from './recorder.js';
-import { flowReader, type FlowMarket, type FlowStore } from './store.js';
+import { defaultFlowPath, flowReader, type FlowMarket, type FlowStore } from './store.js';
+import { existsSync } from 'node:fs';
+import { coinOf } from '../valuedesk/cohorts/model.js';
+import { LedgerStore, activityDays, coverageOf, joinSpans, ledgerPathFor, provenSpans, subtractSpans, type ActivityDay, type VenueCoverage } from './ledger.js';
 
 /** The longest window one read sums (a 1M candle is 31 days). */
 export const MAX_WINDOW_MS = 400 * DAY_MS;
@@ -59,6 +66,7 @@ class Lru<V> {
   clear(): void { this.m.clear(); this.weight = 0; }
 }
 
+// By its print count too: a slot filled later (the SoDEX catch-up reaches back hours) is summed again, and the old sums must not stay.
 const sumsCache = new Lru<{ sums: WalletSums; prints: number }>(MAX_CACHED);
 const chunkCache = new Lru<PrintCols>(MAX_CACHED);
 const answers = new Lru<{ at: number; final: boolean; body: unknown }>(256);
@@ -74,13 +82,12 @@ export function clearFlowCaches(): void {
 const settled = (end: number, now: number): boolean => end + CLOSE_MS + FLUSH_MS + 5_000 <= now;
 
 function cachedSums(s: FlowStore, level: 'hour' | 'day', mid: number, t: number, now: number): { sums: WalletSums; prints: number } | null {
-  const k = `${level}|${mid}|${t}`;
+  const k = `${level}|${mid}|${t}|${s.sumPrints(level, mid, t)}`;
   const hit = sumsCache.get(k);
   if (hit) return hit;
   const blob = s.sums(level, mid, t);
   if (!blob) return null;
   const d = decodeSums(blob);
-  // A summed row is written after its slot passed; a late print may sum it again, rarely.
   if (settled(t + (level === 'hour' ? HOUR_MS : DAY_MS) + READY_MS, now)) sumsCache.set(k, d, Math.max(1, d.sums.size));
   return d;
 }
@@ -183,13 +190,17 @@ export interface FlowWindow {
   coin: string;
   from: number;
   to: number;
-  /** The window has passed and every slot in it is final (cached a day). */
+  /** The window has passed, the recorder was up throughout, and SoDEX's slots in it all match its count (cached a day). */
   final: boolean;
   summary: FlowSummary;
   rows: FlowWindowRow[];
   markets: FlowCoverage[];
-  /** When the recorder was down inside the window: [from, to) spans with no prints recorded. */
+  /** Every span inside the window known to be missing prints: `down`, and SoDEX's slots short of its count. */
   gaps: Array<[number, number]>;
+  /** The part of `gaps` that is the recorder being down, unless SoDEX's own count shows its prints came back. */
+  down: Array<[number, number]>;
+  /** SoDEX's prints held against its own count; null when SoDEX is not among the venues asked. */
+  coverage: VenueCoverage | null;
   /** The recorder's first start (how far back any flow goes). */
   since: number | null;
 }
@@ -201,7 +212,8 @@ export function gapsOf(runs: ReadonlyArray<[number, number]>, from: number, to: 
   let t = from;
   for (const [a, b] of [...runs].sort((x, y) => x[0] - y[0])) {
     if (b + slack <= t) continue;
-    if (a > t && a < to) out.push([t, a]);
+    // Also when the next run began after the window: a candle wholly inside an outage is a gap, not "no gaps".
+    if (a > t) out.push([t, Math.min(a, to)]);
     t = Math.max(t, b + slack);
     if (t >= to) break;
   }
@@ -235,6 +247,88 @@ export function marketsOf(s: FlowStore, coin: string, venues: readonly Venue[], 
   return s.marketsOfCoin(coin.toUpperCase()).filter((m) => want.has(m.venue) && kindOf(m.symbol) === kind);
 }
 
+// --- SoDEX's own count (ledger.ts) --------------------------------------------------------------------
+
+let ledger: LedgerStore | null = null;
+let ledgerTried = 0;
+/** The API side's read-only connection: null until the indexer's thread has made the file. */
+function ledgerReader(): LedgerStore | null {
+  if (ledger) return ledger;
+  if (Date.now() - ledgerTried < 10_000) return null;
+  ledgerTried = Date.now();
+  const path = ledgerPathFor(defaultFlowPath());
+  if (!existsSync(path)) return null;
+  let l: LedgerStore | null = null;
+  try {
+    l = new LedgerStore(path, { readOnly: true });
+    if (l.ready()) ledger = l;
+  } catch { /* the next try */ }
+  if (!ledger) {
+    try { l?.close(); } catch { /* never opened */ }
+  }
+  return ledger;
+}
+
+/** Tests: forget the reader. */
+export function closeLedgerReader(): void {
+  try { ledger?.close(); } catch { /* closed */ }
+  ledger = null;
+  ledgerTried = 0;
+}
+
+/** SoDEX's markets of a coin that the ledger or the flow knows: one the stream lost entirely is in the ledger only. */
+function sodexSymbols(l: LedgerStore | null, flowMarkets: readonly FlowMarket[], coin: string, kind: MarketKind): string[] {
+  const out = new Set(flowMarkets.filter((m) => m.venue === 'sodex').map((m) => m.symbol));
+  const want = coin.toUpperCase();
+  for (const m of l?.markets() ?? []) if (coinOf(m.symbol) === want && kindOf(m.symbol) === kind) out.add(m.symbol);
+  return [...out];
+}
+
+interface Judged {
+  gaps: Array<[number, number]>;
+  down: Array<[number, number]>;
+  coverage: VenueCoverage | null;
+  final: boolean;
+  since: number | null;
+}
+
+/** What can be said of a window: the recorder's runs, and for SoDEX what its count says. */
+function judge(s: FlowStore, ask: { coin: string; venues: readonly Venue[]; kind: MarketKind; from: number; to: number }, markets: readonly FlowMarket[], now: number): Judged {
+  const cover = coverOf(s, ask.venues);
+  const since = cover.since;
+  const from = Math.max(ask.from, since ?? ask.from);
+  const to = Math.min(ask.to, now);
+  let down = gapsOf(cover.runs, from, to);
+  let coverage: VenueCoverage | null = null;
+  const holes: Array<[number, number]> = [];
+  if (ask.venues.includes('sodex') && from < ask.to) {
+    const l = ledgerReader();
+    const symbols = sodexSymbols(l, markets, ask.coin, ask.kind);
+    if (symbols.length) coverage = coverageOf(symbols, from, ask.to, now, (symbol, a, b) => (l ? l.window(symbol, a, b) : { market: null, held: 0, expected: 0, off: [] }));
+    for (const h of coverage?.holes ?? []) {
+      const a = Math.max(h.from, ask.from);
+      const b = Math.min(h.to, ask.to);
+      if (a < b) holes.push([a, b]);
+    }
+    // SoDEX alone: a span its count proves whole was not lost, whatever the recorder did (the catch-up brought it back).
+    if (coverage && ask.venues.every((v) => v === 'sodex')) down = subtractSpans(down, provenSpans(coverage));
+  }
+  const gaps = joinSpans([...down, ...holes]);
+  // Not yet compared, or off anywhere (also past the holes listed): nothing is claimed, so nothing is final.
+  const open = !!coverage && (coverage.unchecked.length > 0 || coverage.holeSlots > 0);
+  const final = settled(ask.to + READY_MS, now) && !gaps.length && !open;
+  return { gaps, down, coverage, final, since };
+}
+
+/** Per UTC day: SoDEX's activity against its own count and volume (`from`, `to` in ms). */
+export function activityCoverage(from: number, to: number, now = Date.now()): { days: ActivityDay[]; checked: boolean } {
+  const fromDay = Math.floor(from / DAY_MS);
+  const today = Math.floor(now / DAY_MS);
+  const toDay = Math.min(Math.floor(to / DAY_MS), today);
+  const l = ledgerReader();
+  return { days: activityDays(l?.days(fromDay, toDay) ?? [], fromDay, toDay, today), checked: !!l };
+}
+
 export async function flowWindow(ask: FlowAsk, now = Date.now()): Promise<FlowWindow | null> {
   const s = flowReader();
   if (!s) return null;
@@ -249,12 +343,8 @@ export async function flowWindow(ask: FlowAsk, now = Date.now()): Promise<FlowWi
   const keep = ask.q ? matcher(s, ask.q) : undefined;
   const { summary, rows } = tableOf(sums, { role: ask.role, side: ask.side, sort: ask.sort, limit: ask.limit, ...(keep ? { keep } : {}) });
   const who = s.partiesById(rows.map((r) => r.pid));
-  const cover = coverOf(s, ask.venues);
-  const since = cover.since;
-  const gaps = gapsOf(cover.runs, Math.max(ask.from, since ?? ask.from), Math.min(ask.to, now));
-  // Past by the clock is not final when the recorder was away in it: an answer with a hole stayed cached a day,
-  // at the edge too, also once a backfill had filled it.
-  const final = settled(ask.to + READY_MS, now) && !gaps.length;
+  // Past by the clock is not final when anything is missing: an answer with a hole stayed cached a day, also once it was filled.
+  const { gaps, down, coverage, final, since } = judge(s, ask, markets, now);
   const body: FlowWindow = {
     coin: ask.coin.toUpperCase(),
     from: ask.from,
@@ -267,6 +357,8 @@ export async function flowWindow(ask: FlowAsk, now = Date.now()): Promise<FlowWi
     }),
     markets: markets.map((m) => ({ venue: m.venue, symbol: m.symbol, since: m.firstT })),
     gaps,
+    down,
+    coverage,
     since,
   };
   answers.set(key, { at: now, final, body });
@@ -308,6 +400,11 @@ export interface WalletFillsBody {
   others: Array<{ address: string | null; key: string }>;
   /** More fills than MAX_FILLS: the oldest MAX_FILLS were sent. */
   capped: boolean;
+  /** As FlowWindow: what is missing here is missing from this wallet's list too. */
+  gaps: Array<[number, number]>;
+  down: Array<[number, number]>;
+  coverage: VenueCoverage | null;
+  since: number | null;
 }
 
 export async function flowWalletFills(ask: WalletAsk, now = Date.now()): Promise<WalletFillsBody | null> {
@@ -364,7 +461,7 @@ export async function flowWalletFills(ask: WalletAsk, now = Date.now()): Promise
     fills.other.push(o);
   }
   const who = s.partiesById(otherIds);
-  const final = settled(ask.to + READY_MS, now);
+  const { gaps, down, coverage, final, since } = judge(s, ask, markets, now);
   const body: WalletFillsBody = {
     coin: ask.coin.toUpperCase(),
     from: ask.from,
@@ -375,6 +472,10 @@ export async function flowWalletFills(ask: WalletAsk, now = Date.now()): Promise
     venues,
     others: otherIds.map((id) => ({ address: who.get(id)?.address ?? null, key: who.get(id)?.key ?? String(id) })),
     capped: capped || idx.length > MAX_FILLS,
+    gaps,
+    down,
+    coverage,
+    since,
   };
   answers.set(key, { at: now, final, body }, 1);
   return body;

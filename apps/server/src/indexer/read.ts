@@ -23,9 +23,10 @@ import {
 import { tailCountRate, tailOf } from './cohortTracker.js';
 import { labelMatches, shownLabel } from '../valuedesk/labels.js';
 import { winRateOf } from '../valuedesk/winRate.js';
-import { sampledVenue, COHORT_RANGES, type CohortWalletRow as WalletRow } from '../valuedesk/cohorts/model.js';
+import { sampledVenue, COHORT_RANGES, type BooksOverOi, type CohortWalletRow as WalletRow } from '../valuedesk/cohorts/model.js';
 import { EXCLUDED_FROM, EXCLUDED_WALLETS, isExcluded, outOfCohorts, type ExcludedFrom, type ExcludedWallet } from '../valuedesk/internalWallets.js';
 import { liqCoin } from '../valuedesk/liquidations/levels.js';
+import { activityCoverage } from '../flow/read.js';
 
 export interface IndexState {
   /** Every board behind this page is final (no unchecked wallet outranks a pick). */
@@ -44,6 +45,56 @@ export interface BoardPage {
   updatedAt: number;
   source: string;
   index: IndexState;
+  /** Present when SoDEX's trade counts on this page are floors: why. */
+  sodexTrades?: SodexTradeNote;
+}
+
+/** The days of a window on which SoDEX's activity is not whole (flow/ledger.ts). Trade counts drawn from it are floors. */
+export interface SodexTradeNote {
+  days: number;
+  short: number;
+  unchecked: number;
+  /** The day with the smallest share of SoDEX's own volume. */
+  lowest: { t: number; share: number } | null;
+}
+
+const NOTE_MS = 60_000;
+const notes = new Map<BoardWindow, { at: number; note: SodexTradeNote | null }>();
+
+/** Null when every day of the window is proved whole. */
+function sodexTradeNote(window: BoardWindow, now: number): SodexTradeNote | null {
+  const hit = notes.get(window);
+  if (hit && now - hit.at < NOTE_MS) return hit.note;
+  let from = windowStart(window, now);
+  // Before the first activity row there is nothing to be short of.
+  const first = reader()?.firstActivity('sodex');
+  if (first !== null && first !== undefined) from = Math.max(from, first);
+  const { days } = activityCoverage(Math.max(from, now - 400 * 86_400_000), now, now);
+  const short = days.filter((d) => d.state === 'short');
+  const unchecked = days.filter((d) => d.state === 'unchecked').length;
+  let lowest: SodexTradeNote['lowest'] = null;
+  for (const d of short) if (d.share !== null && (!lowest || d.share < lowest.share)) lowest = { t: d.t, share: d.share };
+  const note = short.length || unchecked ? { days: days.length, short: short.length, unchecked, lowest } : null;
+  notes.set(window, { at: now, note });
+  return note;
+}
+
+/** Tests: forget what was worked out. */
+export function clearTradeNotes(): void {
+  notes.clear();
+}
+
+/**
+ * SoDEX's trade counts come from the activity tables (or the fills, which ride the same stream), so a count over a day that
+ * is short is a floor however long the socket stayed up: such rows read "n+", and the page says why.
+ */
+export function markSodexTrades(rows: TraderRow[], window: BoardWindow, now = Date.now()): SodexTradeNote | undefined {
+  const onSodex = rows.filter((r) => (r.venues ?? [r.venue]).includes('sodex'));
+  if (!onSodex.length) return undefined;
+  const note = sodexTradeNote(window, now);
+  if (!note) return undefined;
+  for (const r of onSodex) if (r.trades !== null && r.trades !== undefined) r.tradesCapped = true;
+  return note;
 }
 
 function toRow(r: BoardRow, window: BoardWindow, rank: number): TraderRow {
@@ -98,8 +149,11 @@ export function boardPage(
   const which = side === 'worst' ? 'Lowest' : 'Highest';
   const who = filter === 'active' ? 'traders with more than one trade' : 'traders';
   const what = venues.length === 1 && venues[0] === 'tradexyz' ? 'realised PnL (closed trades, net of fees)' : 'PnL';
+  const shownRows = rows.slice(o.offset, o.offset + o.limit).map((r, i) => toRow(r, window, o.offset + i + 1));
+  const sodexTrades = markSodexTrades(shownRows, window);
   return {
-    rows: rows.slice(o.offset, o.offset + o.limit).map((r, i) => toRow(r, window, o.offset + i + 1)),
+    ...(sodexTrades ? { sodexTrades } : {}),
+    rows: shownRows,
     total: rows.length,
     updatedAt: Math.max(...boards.map((b) => b.meta.sourceAt || b.meta.updatedAt)),
     source: `ValueDesk index. ${which} ${what} over ${WINDOW_WORD[window]} among ${who} in that window.`,
@@ -180,8 +234,11 @@ export function netPage(
   const metas = venues.map((v) => s.readBoard(v, window, side, filter)?.meta).filter((m) => !!m);
   const which = side === 'worst' ? 'Lowest' : 'Highest';
   const who = filter === 'active' ? ', among traders with more than one trade in that window' : '';
+  const shownRows = shown.slice(o.offset, o.offset + o.limit).map((r, i) => netToRow(r, window, o.offset + i + 1));
+  const sodexTrades = markSodexTrades(shownRows, window);
   return {
-    rows: shown.slice(o.offset, o.offset + o.limit).map((r, i) => netToRow(r, window, o.offset + i + 1)),
+    ...(sodexTrades ? { sodexTrades } : {}),
+    rows: shownRows,
     total: shown.length,
     updatedAt: Math.max(0, ...metas.map((m) => m.sourceAt || m.updatedAt)),
     source: `ValueDesk index. ${which} PnL over ${WINDOW_WORD[window]}, netted per address across ${venues.map((v) => VENUE_WORD[v]).join(' + ')}${who}.`,
@@ -1343,6 +1400,7 @@ export function cohortsRead(venues: readonly Venue[], f: CohortFilter): CohortsR
     asOf: load.at,
     coverage: Object.fromEntries(venues.map((v) => [v, load.coverage[v]])),
     coins,
+    overOi: booksOverOi(venues, f.coin),
     cohorts: stats.map(({ markets: _m, ...rest }) => ({
       ...rest,
       spark: thin((series.get(rest.id) ?? []).flatMap((p) => {
@@ -1442,6 +1500,7 @@ export function cohortFocus(venues: readonly Venue[], f: CohortFilter, range: Co
     at: load.booksAt,
     range,
     total,
+    overOi: booksOverOi(venues, f.coin),
     cohorts: stats.map((st) => ({
       id: st.id, wallets: st.wallets, long: st.long, short: st.short, upnl: st.upnl, inProfit: st.inProfit, inLoss: st.inLoss,
     })),
@@ -1496,6 +1555,30 @@ export function indexerStatusJudged(): unknown {
   const status = indexerStatus();
   if (!status || typeof status !== 'object') return status;
   return { ...(status as Record<string, unknown>), boardsAt: reader()?.newestBoardAt() ?? null };
+}
+
+/** The status row is parsed at most this often for booksOverOi: it is large, and read on every cohort answer. */
+const OVER_OI_CACHE_MS = 30_000;
+/** A check older than this says nothing about now (it runs every 5 minutes). */
+const OVER_OI_MAX_AGE_MS = 15 * 60_000;
+let overOiCache: { at: number; rows: BooksOverOi[] } | null = null;
+
+/** From the indexer's status row (cohortTracker.ts checkOi): its last open interest check, as rows. */
+export function overOiRows(status: unknown, now: number, maxAgeMs = OVER_OI_MAX_AGE_MS): BooksOverOi[] {
+  const oi = (status as { cohorts?: { liq?: { oi?: { at?: number; venues?: Record<string, { coins?: Array<{ coin: string; ratio: number }> }> } } } } | null)?.cohorts?.liq?.oi;
+  if (!oi?.at || now - oi.at > maxAgeMs) return [];
+  const at = oi.at;
+  return Object.entries(oi.venues ?? {}).flatMap(([venue, v]) => (v.coins ?? []).map((c) => ({ venue: venue as Venue, coin: c.coin, ratio: c.ratio, at })));
+}
+
+/**
+ * The coins whose books hold more than the venue says is open (over oiCheck.ts OI_EXCESS), in these venues: size that does
+ * not exist, until the reads correct it. An answer that shows the coin's figures carries them, so the page can say so.
+ */
+export function booksOverOi(venues: readonly Venue[], coin?: string | null): BooksOverOi[] {
+  const now = Date.now();
+  if (!overOiCache || now - overOiCache.at >= OVER_OI_CACHE_MS) overOiCache = { at: now, rows: overOiRows(indexerStatus(), now) };
+  return overOiCache.rows.filter((r) => venues.includes(r.venue) && (!coin || r.coin === coin));
 }
 
 /** The indexer's own status line (lanes, streams), for diagnostics. */

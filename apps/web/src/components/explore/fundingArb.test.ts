@@ -55,6 +55,14 @@ test('a two-sided book is the entry spread: sell the short bid, buy the long ask
   assert.equal(pair?.priceSpread, (102 - 100) / 100);
 });
 
+test('a SoDEX leg\'s open interest leaves out the internal pair, and has no figure while that is unavailable', () => {
+  const symbols = [{ name: 'BTC-USD', fundingInterval: 3600 }];
+  const tickers = [{ symbol: 'BTC-USD', fundingRate: '0.0001', markPrice: '100', openInterest: '10' }];
+  assert.equal(sodexLegs(symbols, tickers, { at: 1, sizes: { 'BTC-USD': 8 } })[0]?.oiUsd, 2 * 100);
+  assert.equal(sodexLegs(symbols, tickers, { at: 1, sizes: { 'BTC-USD': 80 } })[0]?.oiUsd, 0);
+  assert.equal(sodexLegs(symbols, tickers, null)[0]?.oiUsd, null);
+});
+
 test('one venue, or a missing rate, is not a pair; kPEPE and 1000PEPE are one coin; xyz is not', () => {
   const rows = buildPairs([
     ...sodexLegs(
@@ -70,6 +78,7 @@ test('one venue, or a missing rate, is not a pair; kPEPE and 1000PEPE are one co
         { symbol: 'TSLA-USD', fundingRate: '0.0001', markPrice: '200' },
         { symbol: 'HALT-USD', fundingRate: '0.01', markPrice: '1' },
       ],
+      { at: 1, sizes: {} },
     ),
     ...hlLegs([
       { symbol: 'BTC', funding: 0.0003, price: 101, volume24h: 9_000_000, openInterestUsd: 40_000_000 },

@@ -176,7 +176,11 @@ test('the recorder sums hours and days, and any window equals the prints summed 
       const k = `${row.venue}|${row.address ?? row.key}`;
       assert.ok(Math.abs(row.vol - (x.byWallet.get(k) ?? -1)) < 1e-6 * row.vol, `wallet ${k}`);
     }
-    assert.equal(w.final, to + READY_MS + CLOSE_MS + FLUSH_MS + 5_000 <= now, "final once passed");
+    // Asked with SoDEX and no ledger here: nothing has been compared with its count, so never final (flowLedger.test.ts).
+    assert.equal(w.final, false, 'SoDEX unchecked');
+    assert.equal(w.coverage?.holeSlots, 0);
+    const hl = await flowWindow({ coin: 'btc', venues: ['hyperliquid'], kind: 'perp', from, to, role: 'all', side: 'all', sort: 'volume', limit: 1 }, now);
+    assert.equal(hl!.final, to + READY_MS + CLOSE_MS + FLUSH_MS + 5_000 <= now, 'final once passed');
     assert.deepEqual(w.markets.map((m) => m.venue).sort(), ['hyperliquid', 'sodex']);
   }
   // Search, venue filter.
@@ -221,6 +225,9 @@ test('the recorder sums hours and days, and any window equals the prints summed 
 });
 
 test('recorder downtime inside a window is reported as gaps', () => {
+  // A window wholly inside an outage, or one ending inside it: the next run began after the window.
+  assert.deepEqual(gapsOf([[0, 1000], [9000, 12_000]], 3000, 5000, 0), [[3000, 5000]]);
+  assert.deepEqual(gapsOf([[0, 1000], [5000, 12_000]], 500, 5000, 0), [[1000, 5000]]);
   const runs: Array<[number, number]> = [[0, 1000_000], [1_600_000, 3_000_000]];
   assert.deepEqual(gapsOf(runs, 500_000, 2_000_000, 0), [[1_000_000, 1_600_000]]);
   assert.deepEqual(gapsOf(runs, 500_000, 4_000_000, 0), [[1_000_000, 1_600_000], [3_000_000, 4_000_000]]);

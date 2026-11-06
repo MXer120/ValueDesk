@@ -9,6 +9,7 @@ import { sectorOf, SECTORS, type Sector } from '@sign/valuedesk/cohorts/model.js
 import type { Venue } from '../../../vsApi';
 import { marketKey } from '../model';
 import { fmtFixed, fmtNum } from '../../../numStyle';
+import { displayedOi, type SodexOiExcluded } from '../../../sodexOi';
 
 /** One market across the venues that list it. */
 export interface MarketRow {
@@ -29,8 +30,11 @@ export interface MarketRow {
   changePct: number | null;
   /** 24h notional volume, summed over venues. */
   volume: number;
-  /** Open interest in dollars, summed over venues. */
-  oi: number;
+  /**
+   * Open interest in dollars, summed over venues; SoDEX's without its internal pair (sodexOi.ts).
+   * Null on a row SoDEX lists while that is unavailable: a part or an inflated sum would mislead.
+   */
+  oi: number | null;
   /** Hourly funding rate (the deepest venue's). */
   funding: number | null;
   maxLeverage: number | null;
@@ -97,7 +101,9 @@ export function buildMarkets(
   hl: readonly HlAsset[] | null | undefined,
   tickers: readonly SodexTickerLike[] | null | undefined,
   symbols: readonly SodexSymbolLike[] | null | undefined,
-  held?: readonly HeldAsset[] | null,
+  held: readonly HeldAsset[] | null | undefined,
+  /** What SoDEX's open interest leaves out; null while unavailable (hooks.ts useSodexOiExcluded). */
+  oiExcluded: SodexOiExcluded | null,
 ): MarketRow[] {
   const rows = new Map<string, MarketRow>();
   for (const a of hl ?? []) {
@@ -139,12 +145,13 @@ export function buildMarkets(
     const key = marketKey(t.symbol);
     const row = rows.get(key) ?? rows.get(`XYZ:${base.toUpperCase()}`);
     const vol = Math.max(0, num(t.quoteVolume) ?? 0);
-    const oi = Math.max(0, (num(t.openInterest) ?? 0) * px);
+    const coins = displayedOi(t.symbol, t.openInterest ?? 0, oiExcluded);
+    const oi = coins === null ? null : coins * px;
     if (row) {
       row.sodex = t.symbol;
       row.venues.push('sodex');
       row.volume += vol;
-      row.oi += oi;
+      row.oi = row.oi === null || oi === null ? null : row.oi + oi;
       continue;
     }
     const sector = sectorOf(base.toUpperCase());
@@ -204,7 +211,8 @@ export function heldLong(r: Pick<MarketRow, 'long' | 'short'>): number | null {
 export interface Pulse {
   markets: number;
   volume: number;
-  oi: number;
+  /** Null when any market's figure is unavailable: the total would be short. */
+  oi: number | null;
   up: number;
   down: number;
   /** Volume-weighted 24h change of every market with one, in percent. */
@@ -214,10 +222,11 @@ export interface Pulse {
 }
 
 export function pulseOf(rows: readonly MarketRow[]): Pulse {
-  let volume = 0, oi = 0, up = 0, down = 0, wc = 0, w = 0, wf = 0, wfw = 0;
+  let volume = 0, up = 0, down = 0, wc = 0, w = 0, wf = 0, wfw = 0;
+  let oi: number | null = 0;
   for (const r of rows) {
     volume += r.volume;
-    oi += r.oi;
+    oi = oi === null || r.oi === null ? null : oi + r.oi;
     if (r.changePct !== null) {
       if (r.changePct > 0) up++;
       else if (r.changePct < 0) down++;

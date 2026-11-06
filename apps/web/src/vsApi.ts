@@ -32,6 +32,7 @@ import type {
 } from '@sign/valuedesk/types.js';
 import { VenueError, venues } from './exchange/venues';
 import { serverGetJson } from './serverFetch';
+import type { SodexOiExcluded } from './sodexOi';
 import type { CalendarEvent, CalendarSource } from '@sign/valuedesk/calendar.js';
 import type { CardPeek } from '@sign/valuedesk/hyperliquid/trader.js';
 import type { LiqAt, LiqHeatmap, LiqHistory, LiqHistoryFine, LiqWallets, WalletLiq } from '@sign/indexer/liqRead.js';
@@ -240,6 +241,8 @@ export const vsApi = {
 
   /** The wallets left out of the cohorts and the liquidation heatmap, with why and what they hold. */
   excluded: (signal?: AbortSignal) => unwrap<{ wallets: ExcludedWallet[] }>('/api/vs/excluded', signal),
+  /** Per SoDEX market, the size of SoDEX's internal pair (sodexOi.ts). */
+  sodexOiExcluded: (signal?: AbortSignal) => unwrap<SodexOiExcluded>('/api/vs/sodex/oi-excluded', signal),
   /** Every cohort for a set of venues (netted over them), under a sector / coin filter. */
   cohorts: (venues: readonly Venue[], f: CohortFilter, signal?: AbortSignal) =>
     unwrap<CohortsResponse>(`/api/vs/cohorts${qs({ venues: venues.join(','), sector: f.sector ?? undefined, coin: f.coin ?? undefined })}`, signal),

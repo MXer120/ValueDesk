@@ -44,6 +44,8 @@ import {
   type LbMode,
   type LbSide,
   type LbView,
+  type SodexTradeNote,
+  sodexTradesNote,
 } from './lbState';
 import { winRateView } from '../../winRateView';
 import { CoinIcon } from '../CoinIcon';
@@ -272,6 +274,8 @@ type Page = LeaderboardResponse & {
   partial?: Venue[];
   /** `rankSince`: when the ranks `rankChange` compares against were taken (null = no snapshot yet). */
   index?: { complete: boolean; pending: number; updatedAt: number; rankSince?: number | null };
+  /** SoDEX's trade counts on this page are floors: on these days activity is short of SoDEX's own volume, or not checked yet. */
+  sodexTrades?: SodexTradeNote;
 };
 type Loaded = { ok: true; key: string; res: Page } | { ok: false; key: string; code?: string; message: string };
 
@@ -480,6 +484,8 @@ export function LeaderboardPage({ address, onScan, embedded = false }: Leaderboa
             : 'the ranking source is loading.'}
         </p>
       )}
+
+      {top?.sodexTrades && <p className="lbp-note">{sodexTradesNote(top.sodexTrades)}</p>}
 
       {partial && (
         <p className="lbp-note">

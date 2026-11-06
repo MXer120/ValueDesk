@@ -127,7 +127,8 @@ export function MarketHeat({ onOpenSymbol }: { onOpenSymbol: (symbol: string) =>
   const map = useAsync(() => vsApi.cohortMap(MAP_VENUES, null), [], { pollMs: 5 * 60_000 });
   const held = useMemo<HeldAsset[]>(() => (map.data?.sectors ?? []).flatMap((s) => s.assets ?? []), [map.data]);
   const rows = useMemo(
-    () => buildMarkets(Array.isArray(hl.data?.assets) ? (hl.data.assets as HlAsset[]) : [], tickers.data?.tickers, symbols, held).filter((r) => !r.tradfi),
+    // The heat tiles draw no open interest, so nothing is read for it.
+    () => buildMarkets(Array.isArray(hl.data?.assets) ? (hl.data.assets as HlAsset[]) : [], tickers.data?.tickers, symbols, held, null).filter((r) => !r.tradfi),
     [hl.data, tickers.data, symbols, held],
   );
   if (!rows.length) {

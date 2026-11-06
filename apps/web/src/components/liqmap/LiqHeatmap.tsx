@@ -1227,6 +1227,7 @@ function Details({ coin, venues, pick, price, wallets, lev, onClose }: { coin: s
 function Coverage({ h, coin }: { h: Heat; coin: string }) {
   const rows = (Object.entries(h.coverage) as Array<[Venue, NonNullable<Heat['coverage'][Venue]>]>).filter(([, c]) => c.oi !== null || c.positions > 0);
   if (!rows.length) return null;
+  const over = new Map((h.overOi ?? []).map((r) => [r.venue, r.ratio]));
   return (
     <div className="lqm-cov" aria-label="Coverage">
       {rows.map(([v, c]) => {
@@ -1238,6 +1239,7 @@ function Coverage({ h, coin }: { h: Heat; coin: string }) {
             <span>{t.share}</span>
             {t.priced && <span className="lqm-cov-dim">{t.priced}</span>}
             <span className="lqm-cov-dim">{t.accuracy}</span>
+            {over.get(v) !== undefined && <span>books {Math.round(over.get(v)! * 100)}% of open interest, being read again, not current</span>}
           </span>
         );
       })}

@@ -6,6 +6,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { TraderRow } from '../../vsApi';
 import {
+  sodexTradesNote,
   DEFAULT_VIEW,
   fmtRoi,
   lastPageOf,
@@ -144,4 +145,10 @@ test('metricOf: reads the sort key for the window, null when not reported', () =
   assert.equal(metricOf(row, 'roi', '7d'), 0.1);
   assert.equal(metricOf(row, 'volume', '7d'), null);
   assert.equal(metricOf(row, 'accountValue', 'all'), 1000);
+});
+
+test('the note on SoDEX trade counts says the days in figures', () => {
+  const short = sodexTradesNote({ days: 30, short: 6, unchecked: 2, lowest: { t: Date.UTC(2026, 9, 27), share: 0.07 } });
+  assert.match(short, /on 6 of 30 days here we hold less than SoDEX's own count, lowest 7% on 27 Oct; 2 more are not checked yet/);
+  assert.match(sodexTradesNote({ days: 1, short: 0, unchecked: 1, lowest: null }), /1 of 1 day here is not checked yet/);
 });

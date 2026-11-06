@@ -106,6 +106,7 @@ export const HOSTED_ROUTES: readonly HostedRoute[] = [
   { method: 'GET', url: '/api/vs/sodex/lottery/feed', cls: 'read' },
   // Wealth's maintenance flag: same reason, same route file, read once every 30 s.
   { method: 'GET', url: '/api/vs/sodex/wealth/maintenance', cls: 'read' },
+  { method: 'GET', url: '/api/vs/sodex/oi-excluded', cls: 'read' },
   { method: 'GET', url: '/api/vs/cohorts/focus', cls: 'read' },
   { method: 'GET', url: '/api/vs/cohorts/wallets', cls: 'read' },
   // The liquidation heatmap (indexer/liqRead.ts): the cohort books, priced; the venues' market
@@ -122,6 +123,7 @@ export const HOSTED_ROUTES: readonly HostedRoute[] = [
   // Who traded a candle (flow/read.ts): the venues' public prints, both parties, kept by the indexer.
   { method: 'GET', url: '/api/vs/flow', cls: 'read' },
   { method: 'GET', url: '/api/vs/flow/wallet', cls: 'read' },
+  { method: 'GET', url: '/api/vs/activity/coverage', cls: 'read' },
   // Aggregated server-side from the venues' trade streams - no one user's traffic.
   { method: 'GET', url: '/api/vs/whales', cls: 'read' },
   { method: 'GET', url: '/api/vs/positioning', cls: 'read' },

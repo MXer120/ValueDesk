@@ -45,16 +45,18 @@ import {
   type Window,
 } from '../valuedesk/types.js';
 import { sodexProvider } from '../valuedesk/sodex/index.js';
+import { sodexOiExcluded } from '../valuedesk/sodex/oiExcluded.js';
 import { hlInfo, hlLeaderboardRow, hyperliquidProvider } from '../valuedesk/hyperliquid/index.js';
 import { hlPriceSeries } from '../valuedesk/hyperliquid/price.js';
 import { ACCOUNT_DETAIL, arcusProvider, lighterProvider, nameSpotFills, tradexyzProvider } from '../valuedesk/extra/providers.js';
 import { applyCachedCurves, attachPodiumCurves } from '../valuedesk/curves.js';
-import { attachStats, boardPage, cohortDetail, cohortFocus, cohortMap, cohortWallets, cohortsReady, cohortsRead, excludedNow, indexerStatus, indexerStatusJudged, netPage } from '../indexer/read.js';
+import { attachStats, markSodexTrades, type SodexTradeNote, boardPage, cohortDetail, cohortFocus, cohortMap, cohortWallets, cohortsReady, cohortsRead, excludedNow, indexerStatus, indexerStatusJudged, netPage } from '../indexer/read.js';
+import { booksOverOi } from '../indexer/read.js';
 import { isCohortId, isSector, type CohortFilter, type CohortRange, type WalletSort } from '../valuedesk/cohorts/model.js';
 import { fineAskOf, fineDrawOf, isLiqRange, levFilterOf, liqAt, liqHeatmap, liqHeatmapFine, liqHeatmapOf, liqHistory, liqHistoryFine, liqWallets, walletHistoryFine, walletLiqs } from '../indexer/liqRead.js';
 import { TILE_FINAL_CACHE, TILE_INDEX_CACHE, TILE_WALLET_CACHE, keepLiqMetasWarm, liqTile, liqTileIndex, liqTileIndexOf, liqTileOf, tileAskOf } from '../indexer/liqTiles.js';
 import { watchAddresses } from '../indexer/host.js';
-import { MAX_WINDOW_MS, flowWalletFills, flowWindow, type MarketKind } from '../flow/read.js';
+import { MAX_WINDOW_MS, activityCoverage, flowWalletFills, flowWindow, type MarketKind } from '../flow/read.js';
 import type { FlowRole, FlowSide, FlowSort } from '../flow/codec.js';
 import { BOARD_WINDOWS, type BoardWindow } from '../valuedesk/types.js';
 import { buildExplore, keepExploreWarm } from '../valuedesk/explore.js';
@@ -230,11 +232,13 @@ export async function valuedeskRoutes(app: FastifyInstance) {
       const sortKey: LeaderboardSort = sort;
       const capped = limit;
       const curves = q.curves === '1';
+      let sodexTrades: SodexTradeNote | undefined;
       const paint = async (rows: TraderRow[]) => {
         scrubLabels(rows);
         applyCachedCurves(rows, w);
         if (curves) await attachPodiumCurves(rows, w);
         attachStats(rows, w);
+        sodexTrades = markSodexTrades(rows, w);
         watchAddresses('hyperliquid', rows.filter((r) => r.venue === 'hyperliquid').map((r) => r.address));
       };
 
@@ -242,7 +246,7 @@ export async function valuedeskRoutes(app: FastifyInstance) {
         const page = await PROVIDERS[venue].leaderboard({ window: w, sort: sortKey, limit: capped, offset, q: search, side });
         await paint(page.rows);
         const body: LeaderboardResponse = { venue, window: w, sort: sortKey, ...page };
-        return { ok: true, ...body };
+        return { ok: true, ...body, ...(sodexTrades ? { sodexTrades } : {}) };
       }
 
       // venue=all: take the top (offset+limit) of each venue, merge by the sort
@@ -269,7 +273,7 @@ export async function valuedeskRoutes(app: FastifyInstance) {
         source: ok.map((p) => p.source).join(' + '),
       };
       const failed = pages.flatMap((p, i) => (p.status === 'rejected' ? [CORE_VENUES[i]] : []));
-      return { ok: true, ...body, partial: failed.length ? failed : undefined };
+      return { ok: true, ...body, partial: failed.length ? failed : undefined, ...(sodexTrades ? { sodexTrades } : {}) };
     } catch (e) {
       return fail(reply, e);
     }
@@ -502,7 +506,7 @@ export async function valuedeskRoutes(app: FastifyInstance) {
       const body = fine ? await liqHeatmapFine(coin, cohortVenues(q), fine, { wallets: new Set(ws), side, lev: levFilterOf(q.lev) })
         : ws.length ? await liqHeatmapOf(coin, cohortVenues(q), ws) : await liqHeatmap(coin, cohortVenues(q));
       if (!body) return fail(reply, new NotAvailable('The index is not running yet'));
-      return { ok: true, ...body };
+      return { ok: true, ...body, overOi: booksOverOi(cohortVenues(q), coin) };
     } catch (e) {
       return fail(reply, e);
     }
@@ -689,6 +693,22 @@ export async function valuedeskRoutes(app: FastifyInstance) {
     }
   });
 
+  /**
+   * SoDEX's activity tables per UTC day against SoDEX's own volume and trade count (flow/ledger.ts), `from` and `to` in ms,
+   * at most 400 days: any surface with an activity-based figure asks here whether that figure is whole.
+   */
+  app.get('/api/vs/activity/coverage', async (req, reply) => {
+    try {
+      const q = req.query as Q;
+      const to = Number(q.to) || Date.now();
+      const from = Number(q.from) || to - 30 * 86_400_000;
+      if (!(from <= to) || to - from > MAX_WINDOW_MS) throw bad('from= and to= must span at most 400 days');
+      return { ok: true, venue: 'sodex' as const, ...activityCoverage(from, to) };
+    } catch (e) {
+      return fail(reply, e);
+    }
+  });
+
   /** One cohort: its lean over `range` (1d / 7d / 30d) and every market it holds. */
   app.get('/api/vs/cohorts/detail', async (req, reply) => {
     try {
@@ -762,6 +782,18 @@ export async function valuedeskRoutes(app: FastifyInstance) {
     try {
       await cohortsReady();
       return { ok: true, wallets: excludedNow() };
+    } catch (e) {
+      return fail(reply, e);
+    }
+  });
+
+  /**
+   * Per SoDEX market, the size of SoDEX's internal pair: what the pages take off SoDEX's open interest
+   * (valuedesk/sodex/oiExcluded.ts). A failed read answers {ok:false}, never zeros.
+   */
+  app.get('/api/vs/sodex/oi-excluded', async (_req, reply) => {
+    try {
+      return { ok: true, ...(await sodexOiExcluded()) };
     } catch (e) {
       return fail(reply, e);
     }

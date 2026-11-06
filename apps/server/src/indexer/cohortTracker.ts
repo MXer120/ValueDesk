@@ -69,7 +69,7 @@ import { dirname, join } from 'node:path';
 import { DAY_MS, dayOf } from './windows.js';
 import {
   PNL_READ_COST, READ_COST, arcusPositions, hlEquityHistory, hlFundingRows, hlHourlyPrices, hlPortfolioPnl, hlPositions,
-  lighterPositions, sodexPositions, type PositionRead,
+  lighterPositions, sodexPositionsOf, type BookRead, type PositionRead,
 } from './cohortSource.js';
 import {
   HOUR_MS, REBUILD_WINDOW_MS, REBUILT_VENUES, checkEdges, histOf, missingSpans, needsEquityHistory, peakNotional, priceAt,
@@ -88,6 +88,9 @@ import { deflateRawSync } from 'node:zlib';
 import { loadSeeds, type Seeds } from './archiveSeed.js';
 import { mayPrune } from '../retention.js';
 import { OI_EXCESS, oiCheck, oiOver, oiRereads, oiStatus } from './oiCheck.js';
+import { RestReader } from './sodexCatchup.js';
+import type { PerpsState } from '../valuedesk/sodex/mappers.js';
+import { chargeGatewayWeight } from '../valuedesk/sodex/gateway.js';
 import { excludedOf, isExcluded, outOfCohorts } from '../valuedesk/internalWallets.js';
 
 const envNum = (name: string, dflt: number, min: number, max: number): number => {
@@ -161,6 +164,10 @@ const CROSSED_MAX = 50_000;
 const PRINTS_THROUGH_META = 'cohort_prints_through';
 /** The open interest check (checkOi): how often, and how many holders of a coin over it are read per check. */
 const OI_CHECK_MS = 5 * 60_000;
+/** SoDEX's documented weight of a perps state read. */
+const STATE_WEIGHT = 5;
+/** Open interest older than this judges nothing (VenueMarkets.at: a failed read leaves the last good one). */
+const OI_FRESH_MS = 3 * 60_000;
 const OI_REREAD_BATCH: Record<Venue, number> = { hyperliquid: 200, tradexyz: 100, sodex: 50, arcus: 50, lighter: 60 };
 const OI_PRIO = 870;
 const OI_LOG_EVERY_MS = 60 * 60_000;
@@ -413,6 +420,8 @@ export interface Book {
   at: number;
   /** When its read was asked (this process only): a print before it is in the read already (printApplies). */
   reqAt?: number;
+  /** SoDEX: which prints its read holds, to the millisecond (printInRead; this process only). */
+  read?: BookRead;
   /** When a print last moved it (this process only): liqChangedDue. */
   filledAt?: number;
   /** Hyperliquid: a unified account's stablecoin collateral (model.ts perpEquity), when the read looked. */
@@ -465,6 +474,36 @@ export function tailBookDue(book: { at: number; pos: { size: number } } | undefi
 export const PRINT_SKEW_MS = 2_000;
 
 /**
+ * Whether a read already holds a print. SoDEX gives each position's last change (`ut`, BookRead): a print up to it is in the
+ * read, a later one is not. A market flat in the read has no `ut`: a print well before the ask is in it, one well after the
+ * answer is not, and between the two it cannot be told ('unknown'): the print is left out and the book is read again soon.
+ */
+export function printInRead(read: BookRead, symbol: string, t: number): boolean | 'unknown' {
+  if (t < read.sent - PRINT_SKEW_MS) return true;
+  const ut = read.ut.get(symbol);
+  if (ut !== undefined) return t <= ut;
+  return t > read.got + PRINT_SKEW_MS ? false : 'unknown';
+}
+
+/**
+ * How often a SoDEX holder's book is read whatever its coin's total looks like. The books follow every print, so a read only
+ * corrects what the prints could not: a restart's gap beyond the catch-up's reach, transfers, whatever else moves a position.
+ * Larger first; a wallet that traded since its read at most an hour.
+ */
+export function sodexBookTtl(notional: number, filledSinceRead: boolean): number {
+  if (notional >= 100_000) return 15 * 60_000;
+  if (notional >= 10_000) return 30 * 60_000;
+  if (notional >= 1_000 || filledSinceRead) return 60 * 60_000;
+  return SODEX_BOOK_MAX_MS;
+}
+/** The longest a SoDEX holder waits for a read, on schedule. */
+export const SODEX_BOOK_MAX_MS = 3 * 60 * 60_000;
+/** Above the routine reconciles (400s), below the open interest check (OI_PRIO) and the heatmap's refreshes (880). Largest first. */
+export function sodexBookPrio(notional: number): number {
+  return 500 + Math.min(360, Math.round(Math.log10(Math.max(1, notional)) * 40));
+}
+
+/**
  * Whether a print still moves a book: not when the book's read already holds it (the print is
  * older than the read was asked, by PRINT_SKEW_MS), and not when it is a print this indexer
  * applied before a restart (`replayBefore`: the newest print time the saved books hold) - each
@@ -481,8 +520,10 @@ export function printApplies(book: { reqAt?: number }, t: number, replayBefore: 
 }
 
 /** Which prints move which venue's books: spot never, and a HIP-3 market only its own dex's book. */
-function bookable(venue: Venue, symbol: string): boolean {
+export function bookable(venue: Venue, symbol: string): boolean {
   if (symbol.includes('/') || symbol.startsWith('@')) return false;
+  // SoDEX spot pairs (`vETH_vUSDC`) come down the same stream. Until 2026-11-06 they went into perps books as positions in the coin (62 in 14 books).
+  if (venue === 'sodex') return !symbol.includes('_');
   if (venue === 'hyperliquid') return !symbol.includes(':');
   if (venue === 'tradexyz') return symbol.startsWith('xyz:');
   return true;
@@ -510,6 +551,8 @@ export interface CohortDeps {
   arcus: { lane: Lane; pacer: Pacer };
   /** SoDEX's shared gateway gate (cooldowns, busy budget). */
   sodexGate: () => number;
+  /** A SoDEX book read on another thread (default: the tracker's own reader). */
+  sodexState?: (address: string) => Promise<PositionRead>;
   /** Lend this much of the Hyperliquid boards lane's weight a minute to the history rebuild (0 = give it back). */
   lendHl?: (weight: number) => void;
 }
@@ -646,7 +689,7 @@ export class CohortTracker {
   private replayBefore = new Map<Venue, number>();
   private printsSkipped = 0;
   /** The last open interest check (checkOi): per venue, the worst ratio and the coins over. */
-  private oiLast: { at: number; venues: ReturnType<typeof oiStatus>; queued: number } | null = null;
+  private oiLast: { at: number; venues: ReturnType<typeof oiStatus>; queued: number; staleOi: Venue[] } | null = null;
   /** venue|coin -> when its excess was last logged. */
   private oiLogged = new Map<string, number>();
   /** Books priced with a crossed level since the last beat (venue|address -> USD), read again first (liveTick). */
@@ -714,6 +757,15 @@ export class CohortTracker {
   private lent = 0;
   /** SoDEX perps state reads, requests / minute (weight 5 each). */
   readonly scoh: Lane;
+  /** The reader thread behind `scoh`'s reads: on this thread a read took 4-15 s while prints went on arriving. */
+  private stateReader: RestReader | null = null;
+  /**
+   * SoDEX books being read: every print of theirs since the read was asked. A read replaces the book, and a print that came
+   * in meanwhile went with the old one if SoDEX's answer predates it. Measured 2026-11-06 on two wallets read minutes
+   * before: the book was off by exactly the print 5 s and 7 s before the read ended, and 95 of 245 positions settled
+   * for 30 s on 44 books read in the 20 minutes before were off.
+   */
+  private flying = new Map<string, Array<{ p: Print; d: number }>>();
   private books = new Map<Venue, Map<string, Book>>();
   private marks = new Map<string, number>();
   private dirtyBooks = new Set<string>();
@@ -792,7 +844,7 @@ export class CohortTracker {
 
   constructor(private readonly d: CohortDeps) {
     setRulesPacers({ lighter: d.lighter.pacer, arcus: d.arcus.pacer });
-    this.scoh = new Lane({ name: 'scoh', perMin: envNum('VALUESCAN_INDEX_SODEX_COHORT', 20, 1, 60), gate: d.sodexGate, rateLimitPauseMs: 15 * 60_000 });
+    this.scoh = new Lane({ name: 'scoh', perMin: envNum('VALUESCAN_INDEX_SODEX_COHORT', 20, 1, 60), gate: d.sodexGate, rateLimitPauseMs: 15 * 60_000, creditTaskTime: true });
   }
 
   start(): void {
@@ -827,10 +879,12 @@ export class CohortTracker {
           if (!rows.length) continue;
           const m = this.books.get(venue)!;
           for (const [a, b] of rows) {
+            const held = b.positions.filter((p) => bookable(venue, p.symbol));
             m.set(a, {
               equity: b.equity, at: b.at, collateral: b.collateral, spotAt: b.spotAt, cash: b.cash,
-              pos: new Map(b.positions.map(({ symbol, ...p }) => [symbol, p])),
+              pos: new Map(held.map(({ symbol, ...p }) => [symbol, p])),
             });
+            if (held.length !== b.positions.length) this.dirtyBooks.add(`${venue}|${a}`);
           }
           after = rows[rows.length - 1]![0];
           return rows.length;
@@ -931,6 +985,7 @@ export class CohortTracker {
     this.hlh.stop();
     this.lend(0);
     this.scoh.stop();
+    this.stateReader?.stop();
     this.feed.stop();
     this.flush();
     this.saveFlows();
@@ -993,6 +1048,8 @@ export class CohortTracker {
     for (const [acct, d] of [[p.buyer, p.sz], [p.seller, -p.sz]] as const) {
       const address = addressOf(acct);
       if (!address) continue;
+      // Whatever the book holds now, a read under way decides afresh (settleFlying).
+      this.flying.get(`${p.venue}|${address}`)?.push({ p, d });
       const book = books.get(address);
       if (!book) {
         const k = `${p.venue}|${address}`;
@@ -1000,17 +1057,59 @@ export class CohortTracker {
         continue;
       }
       if (!printApplies(book, p.t, this.replayBefore.get(p.venue) ?? 0)) { this.printsSkipped++; continue; }
-      if (!book.pos.has(p.symbol) && OPENED_REREAD.has(p.venue)) book.opened = true;
-      const fee = this.fillFee(p, address, d > 0);
-      if (p.venue === 'hyperliquid') this.addFlow(address, realizedOf(book, p.symbol, d, p.px) - fee);
-      feeCash(book, p.symbol, fee);
-      applyFill(book, p.symbol, d, p.px);
-      book.filledAt = this.d.now();
-      this.live.touch(p.venue, address);
-      this.dirtyBooks.add(`${p.venue}|${address}`);
-      this.applied++;
+      if (book.read) {
+        const inRead = printInRead(book.read, p.symbol, p.t);
+        if (inRead !== false) {
+          this.printsSkipped++;
+          if (inRead === 'unknown') book.opened = true;
+          continue;
+        }
+      }
+      this.moveBook(p, address, book, d);
     }
     if (this.wanted.size > 100_000) this.wanted.clear();
+  }
+
+  private moveBook(p: Print, address: string, book: Book, d: number): void {
+    if (!book.pos.has(p.symbol) && OPENED_REREAD.has(p.venue)) book.opened = true;
+    const fee = this.fillFee(p, address, d > 0);
+    if (p.venue === 'hyperliquid') this.addFlow(address, realizedOf(book, p.symbol, d, p.px) - fee);
+    feeCash(book, p.symbol, fee);
+    applyFill(book, p.symbol, d, p.px);
+    book.filledAt = this.d.now();
+    this.live.touch(p.venue, address);
+    this.dirtyBooks.add(`${p.venue}|${address}`);
+    this.applied++;
+  }
+
+  /** The prints that came in during a read and are not in it go onto the new book, in the order they came. */
+  private settleFlying(key: string, venue: Venue, address: string, book: Book): void {
+    const list = this.flying.get(key) ?? [];
+    this.flying.delete(key);
+    const read = book.read;
+    if (!read) return;
+    for (const { p, d } of list) {
+      if (p.t <= (this.replayBefore.get(venue) ?? 0)) { this.printsSkipped++; continue; }
+      const inRead = printInRead(read, p.symbol, p.t);
+      if (inRead === false) this.moveBook(p, address, book, d);
+      else {
+        this.printsSkipped++;
+        if (inRead === 'unknown') book.opened = true;
+      }
+    }
+  }
+
+  /** A SoDEX book on the reader thread: no turn of this thread is in the read, and it knows what it holds to the millisecond. */
+  private async readSodexState(address: string): Promise<PositionRead> {
+    if (this.d.sodexState) return this.d.sodexState(address);
+    const reader = this.stateReader ?? (this.stateReader = new RestReader());
+    const { status, data, sentAt, gotAt } = await reader.get(`/api/v1/perps/accounts/${address}/state`);
+    chargeGatewayWeight(STATE_WEIGHT);
+    if (status !== 200) throw Object.assign(new Error(`SoDEX state: HTTP ${status}`), { status });
+    // No account answers `aid: 0`. An answer with no state at all says nothing, and must not empty the book.
+    if (data === null || typeof data !== 'object') throw new Error('SoDEX state: no state in the answer');
+    const now = this.d.now();
+    return sodexPositionsOf(data as PerpsState | null, { sent: sentAt ?? now, got: gotAt ?? now });
   }
 
   /**
@@ -1433,7 +1532,7 @@ export class CohortTracker {
         return hlPositions(address, undefined, (r) => needsSpot(total, r.equity, r.positions.length, { notional: readNotional(r), unified: prev?.collateral != null }));
       }
       case 'tradexyz': return hlPositions(address, 'xyz');
-      case 'sodex': return sodexPositions(address);
+      case 'sodex': return this.readSodexState(address);
       case 'lighter': return lighterPositions(address, this.d.lighter.pacer);
       case 'arcus': return arcusPositions(address, this.d.arcus.pacer);
     }
@@ -1834,6 +1933,9 @@ export class CohortTracker {
         else if (book.pos.size && liqKnown(book) && this.holdsSodexCoin(book) && liqChangedDue(book, notional(book), now)) push(885 + size);
         // A large book whose liquidation prices sit on the heatmap: read again sooner than its reconcile (liqRefreshTtl).
         else if (book.pos.size && liqKnown(book) && age >= liqRefreshTtl(notional(book)) && this.holdsSodexCoin(book)) push(880 + size);
+        // Every SoDEX holder on its own schedule, whatever its coin's total looks like. Up to the lane to fit: planned from
+        // the holders of 2026-11-06 (12 of $100K+, 27 of $10K+, 133 of $1K+, 990 under), 565 reads an hour, 1,225 if every small one trades.
+        else if (venue === 'sodex' && book.pos.size && age >= sodexBookTtl(notional(book), (book.filledAt ?? 0) > book.at)) push(sodexBookPrio(notional(book)));
         else if (age >= (follows ? reconcileTtl(eq, venue) : pollTtl(eq))) push(400 + size);
       };
       let t0 = Date.now();
@@ -1874,20 +1976,23 @@ export class CohortTracker {
    */
   private queueRead(venue: Venue, address: string, prio: number, total: number | null): void {
     const books = this.books.get(venue)!;
+    const flyKey = `${venue}|${address}`;
     this.laneOf(venue).add({
       key: `coh:${venue}:${address}`,
       prio,
       run: async () => {
         const reqAt = this.d.now();
-        const r = await this.readOne(venue, address, total);
+        if (venue === 'sodex') this.flying.set(flyKey, []);
+        const r = await this.readOne(venue, address, total).catch((e: unknown) => { this.flying.delete(flyKey); throw e; });
         if (venue === 'lighter' && r.indices?.length) this.d.lighter.learn?.(address, r.indices);
         const at = this.d.now();
         const book: Book = {
-          equity: r.equity, at, reqAt, collateral: r.collateral ?? null, spotAt: r.spotAt ?? null,
+          equity: r.equity, at, reqAt: r.read?.sent ?? reqAt, ...(r.read ? { read: r.read } : {}), collateral: r.collateral ?? null, spotAt: r.spotAt ?? null,
           pos: new Map(r.positions.map((p) => [p.symbol, { szi: p.szi, entry: p.entry }])),
         };
         await this.liquidationSide(venue, r, books.get(address), book);
         books.set(address, book);
+        if (venue === 'sodex') this.settleFlying(flyKey, venue, address, book);
         // The read holds every spot trade before it: what waited for the account's mode is in it.
         if (venue === 'hyperliquid') this.spotPending.delete(address);
         this.live.touch(venue, address);
@@ -2068,8 +2173,12 @@ export class CohortTracker {
     if (!this.liveReady) return;
     const totals = this.live.totals();
     const markets = new Map<Venue, Map<string, number>>();
+    const staleOi: Venue[] = [];
     for (const v of VENUES) {
       const m = await venueMarkets(v, { oi: true }).catch(() => null);
+      // A failed read answers with the last good one. Judged against that, books are "over" what the market held minutes ago:
+      // WIF 2,496 against 153 at 12:03 on 2026-11-06, when a real print of 2,414 at 11:57 had made it so and the books were right.
+      if (m && Date.now() - m.at > OI_FRESH_MS) { staleOi.push(v); markets.set(v, new Map()); continue; }
       const per = new Map<string, number>();
       for (const [symbol, x] of m?.oi ?? []) {
         const c = liqCoin(symbol);
@@ -2094,7 +2203,7 @@ export class CohortTracker {
         queued++;
       }
     }
-    this.oiLast = { at: now, venues: oiStatus(rows), queued };
+    this.oiLast = { at: now, venues: oiStatus(rows, 50), queued, staleOi };
   }
 
   /** The books the engine found crossed: read again first (crossedPrio), a recent read excepted (crossedDue). */

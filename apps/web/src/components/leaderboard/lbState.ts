@@ -12,7 +12,27 @@
  */
 import type { BoardWindow, LeaderboardSort, TraderRow, Venue, Window } from '../../vsApi';
 import { formatNumber } from '../../intlCache';
-import { localize } from '../../numStyle';
+import { fmtNum, localize } from '../../numStyle';
+
+/** The days of a window on which SoDEX's activity is short of its own count, or not checked yet (server flow/ledger.ts). */
+export interface SodexTradeNote {
+  days: number;
+  short: number;
+  unchecked: number;
+  lowest: { t: number; share: number } | null;
+}
+
+/** Why SoDEX's trade counts read "n+": the days behind them, in the figures the server measured. */
+export function sodexTradesNote(n: SodexTradeNote): string {
+  const of = `${fmtNum(n.days)} ${n.days === 1 ? 'day' : 'days'}`;
+  const parts: string[] = [];
+  if (n.short) {
+    const low = n.lowest ? `, lowest ${fmtNum(n.lowest.share * 100, { maximumFractionDigits: 0 })}% on ${new Date(n.lowest.t).toUTCString().slice(5, 11)}` : '';
+    parts.push(`on ${fmtNum(n.short)} of ${of} here we hold less than SoDEX's own count${low}`);
+  }
+  if (n.unchecked) parts.push(n.short ? `${fmtNum(n.unchecked)} more ${n.unchecked === 1 ? 'is' : 'are'} not checked yet` : `${fmtNum(n.unchecked)} of ${of} here ${n.unchecked === 1 ? 'is' : 'are'} not checked yet`);
+  return `SoDEX trade counts are floors, shown with a +: ${parts.join('; ')}. A wallet with more than one trade can be missing from that filter for the same reason.`;
+}
 
 /** Every venue the leaderboard can show, in display order. */
 export const LB_VENUES: readonly Venue[] = ['sodex', 'hyperliquid', 'tradexyz', 'lighter', 'arcus'];

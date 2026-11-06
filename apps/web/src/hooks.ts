@@ -5,6 +5,8 @@ import { getTradingState, sessionInfoOf, subscribeTrading } from './trading/sess
 import { pollEvery } from './exchange/visibility';
 import { revalidating } from './serverFetch';
 import { peekShared, refreshShared, subscribeShared, type SharedState } from './sharedPoll';
+import type { SodexOiExcluded } from './sodexOi';
+import { vsApi } from './vsApi';
 
 /**
  * A promise-backed value with loading/error state and manual refresh.
@@ -86,6 +88,15 @@ export function useSharedPoll<T>(
 /** The engine's /tickers snapshot, one shared poll per engine (see useSharedPoll). */
 export function useTickers(engine: Engine, opts: { enabled?: boolean; pollMs: number }) {
   return useSharedPoll(`md:tickers:${engine}`, () => api.tickers(engine), opts);
+}
+
+/**
+ * What SoDEX's displayed open interest leaves out (sodexOi.ts), one shared poll. Null while it has not
+ * loaded or the last read failed: an older answer stays out, and the figures show their dash.
+ */
+export function useSodexOiExcluded(enabled = true): SodexOiExcluded | null {
+  const { data, error } = useSharedPoll('vs:sodex:oi-excluded', () => vsApi.sodexOiExcluded(), { enabled, pollMs: 15_000 });
+  return error ? null : data;
 }
 
 /** Subscribe to a hub channel for the lifetime of the component. */

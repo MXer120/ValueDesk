@@ -12,6 +12,7 @@
  * Nothing here is a settled 24h, 7d or 30d funding total. Neither feed
  * publishes that for a market. The APR is the live spread, annualised.
  */
+import { displayedOi, type SodexOiExcluded } from '../../sodexOi';
 import { marketKey } from './model';
 
 const HOUR = 3600;
@@ -158,7 +159,8 @@ export function bestPair(legs: readonly FundLeg[]): FundPair | null {
   return best;
 }
 
-export function sodexLegs(symbols: readonly SodexSymbol[], tickers: readonly SodexTicker[]): FundLeg[] {
+/** `oiExcluded`: what SoDEX's open interest leaves out (sodexOi.ts); null while unavailable, and the leg has no figure. */
+export function sodexLegs(symbols: readonly SodexSymbol[], tickers: readonly SodexTicker[], oiExcluded: SodexOiExcluded | null): FundLeg[] {
   const byName = new Map(tickers.map((t) => [t.symbol, t]));
   const out: FundLeg[] = [];
   for (const s of symbols) {
@@ -169,7 +171,7 @@ export function sodexLegs(symbols: readonly SodexSymbol[], tickers: readonly Sod
     const rate = Number(t.fundingRate);
     if (!Number.isFinite(rate)) continue;
     const mark = pos(t.markPrice) ?? pos(t.lastPx);
-    const oi = pos(t.openInterest);
+    const oi = pos(t.openInterest) === null ? null : displayedOi(s.name, t.openInterest, oiExcluded);
     out.push({
       venue: 'sodex',
       symbol: s.name,
