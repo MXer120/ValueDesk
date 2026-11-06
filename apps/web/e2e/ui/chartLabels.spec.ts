@@ -39,7 +39,7 @@ async function btcLast(): Promise<number> {
 const round = (n: number) => String(Math.round(n));
 
 /** Limit, stop, take profit and stop loss around the price, beside the seeded one. */
-async function moreOrders(ctx: BrowserContext, px: number) {
+async function moreOrders(ctx: BrowserContext, px: number, exits: boolean) {
   const base = { symbol: 'BTC-USD', timeInForce: 'GTC', filledQuantity: '0', status: 'NEW', createdAt: Date.now() - 60_000 };
   const rows = [
     { ...base, orderID: 777_001, clOrdID: 'a', side: 'BUY', type: 'LIMIT', price: round(px * 0.9985), quantity: '0.002', origQty: '0.002', reduceOnly: false },
@@ -49,7 +49,7 @@ async function moreOrders(ctx: BrowserContext, px: number) {
   ];
   await ctx.route(/\/perps\/accounts\/[^/]+\/orders(\?|$)/, (route) => route.fulfill({
     status: 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' },
-    body: JSON.stringify({ code: 0, timestamp: Date.now(), data: rows }),
+    body: JSON.stringify({ code: 0, timestamp: Date.now(), data: exits ? rows : rows.slice(0, 2) }),
   }));
 }
 
@@ -70,20 +70,23 @@ const rowsWith = (page: Page, text: RegExp) =>
     return [...document.querySelectorAll('.kc-lbls .kc-lbl:not([hidden])')].findIndex((r) => re.test(r.textContent ?? ''));
   }, text.source);
 
-async function labels(page: Page) {
-  await until(page, async () => (await page.locator('.kc-lbls .kc-lbl:not([hidden])').count()) >= 4, 'the labels', 40_000);
+async function labels(page: Page, least: number) {
+  await until(page, async () => (await page.locator('.kc-lbls .kc-lbl:not([hidden])').count()) >= least, 'the labels', 40_000);
 }
 
 /** Past the first-use tour and the like, which sit over the chart. */
 const clear = (page: Page) => page.addStyleTag({ content: '[aria-label="Developer"], .toast { display: none !important; }' });
 
-async function setup(env: { page: Page; ctx: BrowserContext; wallet: Parameters<typeof enableTrading>[0]['wallet'] }): Promise<{ sx: FakeSodex; px: number }> {
+async function setup(env: { page: Page; ctx: BrowserContext; wallet: Parameters<typeof enableTrading>[0]['wallet'] }, exits = true): Promise<{ sx: FakeSodex; px: number }> {
   const px = await btcLast();
   const entry = round(px * 0.9992);
   const sx = await enableTrading(env, { position: { symbol: 'BTC-USD', size: '0.01', entry, leverage: 10 }, openOrder: { symbol: 'BTC-USD', side: 'BUY', price: round(px * 0.9985), quantity: '0.002' } });
-  await moreOrders(env.ctx, px);
+  await moreOrders(env.ctx, px, exits);
   await clear(env.page);
-  await labels(env.page);
+  await labels(env.page, exits && !PHONE ? 4 : 2);
+  // A phone's panels are a carousel, and it opens on the ticket.
+  await env.page.locator('.chartholder.kc-canvas').first().scrollIntoViewIfNeeded();
+  await env.page.waitForTimeout(400);
   return { sx, px };
 }
 
@@ -155,15 +158,9 @@ h.test('moving a line asks, with from and to; Put it back sends nothing', async 
 }, { storage, timeout: 180_000 });
 
 h.test('+ TP opens the sheet, and its Confirm asks once more', async (env) => {
-  const { sx, px } = await setup(env);
-  const { page, ctx } = env;
   // No exits here, so the position offers + TP and + SL.
-  await ctx.route(/\/perps\/accounts\/[^/]+\/orders(\?|$)/, (route) => route.fulfill({
-    status: 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' },
-    body: JSON.stringify({ code: 0, timestamp: Date.now(), data: [] }),
-  }));
-  await page.reload();
-  await clear(page);
+  const { sx, px } = await setup(env, false);
+  const { page } = env;
   await until(page, async () => (await rowsWith(page, /\+ TP/)) >= 0, 'a position with + TP', 30_000);
   await page.waitForTimeout(1000);
   await shot(page, 'labels-position-trade-page');
@@ -219,10 +216,20 @@ h.test('the rest: the ticket review, a preview line, cancel all, Settings, the b
   assert.equal(sx.since(mark).filter((w) => w.method !== 'GET').length, 0, 'nothing was sent');
 
   if (!PHONE) {
-    // A resting order's row in the book carries the dot.
-    const dots = await page.locator('.mkt-bookrow__mine').count();
-    console.log(`book dots with a mocked order near the price: ${dots}`);
-    await clip(page, 'book-dot', '.mkt-book, [data-panel="book"], [data-panel="orderbook"]').catch((e) => console.log(`book clip: ${e}`));
+    // A resting order on a row the book shows: the dot right of its price, whatever its size.
+    const rowPrice = await page.evaluate(() => {
+      const rows = [...document.querySelectorAll('.mkt-bookrow')];
+      return rows[rows.length - 3]?.textContent ?? '';
+    });
+    // Dot groups thousands, so the row's text runs 76.183 62.675 528.738: its first figure is the price.
+    const atRow = (rowPrice.match(/^\d{1,3}\.\d{3}/)?.[0] ?? '').replace('.', '');
+    await env.ctx.route(/\/perps\/accounts\/[^/]+\/orders(\?|$)/, (route) => route.fulfill({
+      status: 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' },
+      body: JSON.stringify({ code: 0, timestamp: Date.now(), data: [{ symbol: 'BTC-USD', orderID: 777_009, clOrdID: 'dot', side: 'BUY', type: 'LIMIT', timeInForce: 'GTC', price: atRow, quantity: '0.002', origQty: '0.002', filledQuantity: '0', status: 'NEW', reduceOnly: false, createdAt: Date.now() }] }),
+    }));
+    await until(page, async () => (await page.locator('.mkt-bookrow__mine').count()) > 0, `the dot at ${atRow}`, 30_000).catch((err) => console.log(`book dot: ${err}`));
+    console.log(`book dots: ${await page.locator('.mkt-bookrow__mine').count()} (row text "${rowPrice.slice(0, 30)}", order at ${atRow})`);
+    if (SHOTS) await page.locator('.mkt-bookrow').first().locator('xpath=ancestor::*[contains(@class,"dash-panel")][1]').screenshot({ path: join(SHOTS, `book-dot-${tag}.png`) }).catch((err) => console.log(`book clip: ${err}`));
 
     await page.getByRole('button', { name: /^Settings/ }).first().click();
     const settings = page.getByRole('dialog', { name: 'Settings' });
