@@ -101,6 +101,9 @@ export const hasFreshPrint = (list: unknown, timeOf: (t: never) => unknown, now 
 export class Dedup {
   private set = new Set<string>();
   constructor(private readonly cap = 200_000) {}
+  has(id: string): boolean {
+    return this.set.has(id);
+  }
   /** True the first time an id is seen. */
   add(id: string): boolean {
     if (this.set.has(id)) return false;
@@ -425,7 +428,7 @@ interface SodexWsTrade {
   S?: string;
 }
 
-async function sodexSymbols(engine: 'perps' | 'spot'): Promise<string[]> {
+export async function sodexSymbols(engine: 'perps' | 'spot'): Promise<string[]> {
   const res = await fetch(`${NET.restBase}/api/v1/${engine}/markets/symbols`, { signal: AbortSignal.timeout(15_000) });
   const j = (await res.json()) as { data?: unknown };
   const list = Array.isArray(j.data) ? j.data : ((j.data as { symbols?: unknown[] } | undefined)?.symbols ?? []);
@@ -434,6 +437,8 @@ async function sodexSymbols(engine: 'perps' | 'spot'): Promise<string[]> {
     return typeof n === 'string' && n ? [n] : [];
   });
 }
+
+export type { SodexWsTrade };
 
 export function sodexPrint(t: SodexWsTrade): Print | null {
   if (!t || typeof t.t !== 'number' || typeof t.s !== 'string' || typeof t.T !== 'number') return null;
@@ -511,6 +516,22 @@ export class SodexStream {
       const p = sodexPrint(t);
       if (p && this.dedup.add(p.id)) this.onPrint(p);
     }
+  }
+
+  /** Trades read over REST: the ones this run has not seen and `missing` says are not held go in as prints. How many did. */
+  catchUp(rows: readonly SodexWsTrade[], missing: (prints: readonly Print[]) => Print[]): Print[] {
+    const fresh: Print[] = [];
+    for (const r of rows) {
+      const p = sodexPrint(r);
+      if (p && !this.dedup.has(p.id)) fresh.push(p);
+    }
+    const added: Print[] = [];
+    for (const p of missing(fresh)) {
+      if (!this.dedup.add(p.id)) continue;
+      this.onPrint(p);
+      added.push(p);
+    }
+    return added;
   }
 }
 

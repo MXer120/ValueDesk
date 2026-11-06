@@ -44,6 +44,7 @@ import { accountValue as fetchAccountValue, chartWindows, lookupPnl, syncCloses,
 import type { BoardRow, Coverage, HistoryKind, IndexStore, TraderStatsRow, TraderWin } from './store.js';
 import { winRateOf } from '../valuedesk/winRate.js';
 import { HlStream, SodexStream, streamLog, type Print } from './streams.js';
+import { SodexCatchup } from './sodexCatchup.js';
 import { mayPrune } from '../retention.js';
 import { FlowRecorder } from '../flow/recorder.js';
 import { FlowStore } from '../flow/store.js';
@@ -362,6 +363,7 @@ export class Indexer {
   private sodexAddrOf = new Map<number, string>();
   /** Every print kept for the per-candle breakdown (flow/recorder.ts); off with VALUESCAN_FLOW=0. */
   flow: FlowRecorder | null = null;
+  private sodexCatchup: SodexCatchup | null = null;
   /**
    * Event-loop health: the worst delay a 500 ms tick saw in the last minute.
    * A long synchronous stretch here makes every upstream request look like a
@@ -469,6 +471,12 @@ export class Indexer {
       this.sodexStream = new SodexStream((p) => this.onPrint(p));
       this.hlStream.start();
       this.sodexStream.start();
+      if (this.flow && process.env.VALUESCAN_SODEX_CATCHUP !== '0') {
+        const stream = this.sodexStream;
+        const flow = this.flow;
+        this.sodexCatchup = new SodexCatchup((rows) => stream.catchUp(rows, (prints) => flow.missing(prints)), streamLog);
+        this.sodexCatchup.start();
+      }
     }
     const every = (ms: number, fn: () => void | Promise<void>, name = 'timer') => {
       const t = setInterval(() => { mark(name); void Promise.resolve(fn()).catch((e) => (this.lastError = String(e))); }, ms);
@@ -547,6 +555,7 @@ export class Indexer {
     this.sdata.stop();
     this.hlStream?.stop();
     this.sodexStream?.stop();
+    this.sodexCatchup?.stop();
     for (const x of this.ext.values()) x.stop();
     this.cohorts.stop();
     this.flush();
@@ -641,6 +650,7 @@ export class Indexer {
       sockets: Object.fromEntries(VENUES.map((v) => [v, this.socketOf(v)])),
       gaps: this.gaps,
       flow: this.flow?.status() ?? null,
+      sodexCatchup: this.sodexCatchup?.status() ?? null,
       aggregates: this.store.aggBacklog,
       heldPartials: this.store.heldPartials,
       checkpoint: this.store.checkpointStatus,
