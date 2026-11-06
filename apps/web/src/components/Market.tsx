@@ -1728,7 +1728,7 @@ export function Book({
   const askIncrement = groupOptions[Math.min(askGroupIdx, groupOptions.length - 1)] ?? tick;
   const bidIncrement = groupOptions[Math.min(bidGroupIdx, groupOptions.length - 1)] ?? tick;
   const own = useMemo(
-    () => ownBookLevels(Array.isArray(ownOrders.data) ? ownOrders.data : [], symbol, askIncrement, bidIncrement),
+    () => ownBookLevels(ownOrders.data?.orders ?? [], symbol, askIncrement, bidIncrement),
     [ownOrders.data, symbol, askIncrement, bidIncrement],
   );
   /** The unit-menu button's own label - one figure when both sides agree,

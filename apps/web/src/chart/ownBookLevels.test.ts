@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { readFileSync } from 'node:fs';
 import { ownBookLevels } from './orderOverlays';
+
+test('the book reads the orders inside the feed\'s answer, which is no bare list', () => {
+  const src = readFileSync(new URL('../components/Market.tsx', import.meta.url), 'utf8');
+  assert.match(src, /ownBookLevels\(ownOrders\.data\?\.orders \?\? \[\]/);
+});
 
 test('own orders mark their rows at the book\'s grouping, stops and other markets do not', () => {
   const orders = [
