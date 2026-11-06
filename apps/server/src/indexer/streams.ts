@@ -106,6 +106,8 @@ export class LiveSocket {
   private ws: WebSocket | null = null;
   private attempt = 0;
   private lastMessageAt = 0;
+  private lastDataAt = 0;
+  private dataStalledMs = 0;
   /**
    * How much of the time since the last message this thread itself was not running (tick() came
    * late), so what the socket sent could not have been read. 2026-11-03 to 11-05: 33 times all six
@@ -136,6 +138,14 @@ export class LiveSocket {
       pingMs?: number;
       /** Silent this long: replaced (default STALE_MS). */
       staleMs?: number;
+      /**
+       * No DATA this long, whatever else arrives: replaced. A socket can go on answering pings and subscribe
+       * acks after its venue stopped sending it data, so "something came" says nothing about the feed.
+       * Pair it with `isData`; leave it out for a feed that can really go quiet.
+       */
+      dataSilentMs?: number;
+      /** Whether a message is the feed itself, not a pong or an ack. */
+      isData?: (msg: unknown) => boolean;
       /** How often the socket is looked at (default TICK_MS). */
       tickMs?: number;
       /** false: no permessage-deflate - frames are parsed as they come, never held for the zlib pool (LighterStream). */
@@ -189,8 +199,9 @@ export class LiveSocket {
     this.closingAt = 0;
     ws.on('open', () => {
       this.attempt = 0;
-      this.openedAt = this.lastMessageAt = Date.now();
+      this.openedAt = this.lastMessageAt = this.lastDataAt = Date.now();
       this.stalledMs = 0;
+      this.dataStalledMs = 0;
       void Promise.resolve(this.subscribe((m) => ws.send(JSON.stringify(m)))).catch(() => ws.terminate());
     });
     ws.on('message', (raw) => {
@@ -203,6 +214,10 @@ export class LiveSocket {
         msg = JSON.parse(raw.toString());
       } catch {
         return;
+      }
+      if (this.opts.isData?.(msg)) {
+        this.lastDataAt = Date.now();
+        this.dataStalledMs = 0;
       }
       try {
         this.onMessage(msg);
@@ -232,7 +247,9 @@ export class LiveSocket {
 
   private tick(): void {
     const tickedAt = Date.now();
-    this.stalledMs += Math.max(0, tickedAt - this.lastTickAt - (this.opts.tickMs ?? TICK_MS));
+    const late = Math.max(0, tickedAt - this.lastTickAt - (this.opts.tickMs ?? TICK_MS));
+    this.stalledMs += late;
+    this.dataStalledMs += late;
     this.lastTickAt = tickedAt;
     const ws = this.ws;
     if (!ws) return;
@@ -248,6 +265,12 @@ export class LiveSocket {
     const staleMs = this.opts.staleMs ?? STALE_MS;
     if (Date.now() - this.lastMessageAt - this.stalledMs > staleMs) {
       this.why = `nothing came for ${dur(Date.now() - this.lastMessageAt)}`;
+      ws.terminate();
+      return;
+    }
+    const dataSilentMs = this.opts.dataSilentMs;
+    if (dataSilentMs !== undefined && Date.now() - this.lastDataAt - this.dataStalledMs > dataSilentMs) {
+      this.why = `no data for ${dur(Date.now() - this.lastDataAt)}, though it still answers`;
       ws.terminate();
       return;
     }
@@ -386,6 +409,20 @@ export function sodexPrint(t: SodexWsTrade): Print | null {
   return { venue: 'sodex', id: `${t.s}:${t.t}`, t: t.T, symbol: t.s, px, sz, buyer: String(t.bi), seller: String(t.si), ...(taker ? { taker } : {}) };
 }
 
+/**
+ * A SODEX SOCKET CAN GO ON ANSWERING PINGS AND DELIVER NO TRADES. Measured 2026-11-06: the perps socket delivered no
+ * trade from 03:00 to 08:10 UTC while it counted as up, so no gap was recorded and the hours came out short. Hours
+ * without such a silence match SoDEX's own candles (2026-11-06 01:00: 7,632 of 7,632 trades), so this silence is the
+ * loss. Why it stops is not known: a 12 s stall of this thread came just before that one, but a test client blocked
+ * for 30 s and 90 s got its trades back with the backlog. So on SoDEX only a trade proves the feed. The limits are
+ * above the quietest real market: over 1,000 minutes neither book had more than 1 empty minute in a row.
+ */
+const SODEX_DATA_SILENT_MS: Readonly<Record<'perps' | 'spot', number>> = { perps: 90_000, spot: 180_000 };
+const isSodexTrade = (msg: unknown): boolean => {
+  const m = msg as { channel?: unknown; data?: unknown } | null;
+  return m?.channel === 'trade' && Array.isArray(m.data) && m.data.length > 0;
+};
+
 export class SodexStream {
   private sockets: LiveSocket[];
   private dedup = new Dedup();
@@ -401,7 +438,7 @@ export class SodexStream {
             if (symbols.length) send({ op: 'subscribe', params: { channel: 'trade', symbols } });
           },
           (msg) => this.handle(msg),
-          { name: `sodex-${engine}`, log: streamLog },
+          { name: `sodex-${engine}`, log: streamLog, isData: isSodexTrade, dataSilentMs: SODEX_DATA_SILENT_MS[engine] },
         ),
     );
   }
