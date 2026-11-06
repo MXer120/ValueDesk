@@ -7,6 +7,7 @@ import {
   BIAS_LABEL, LEAN_LABEL, biasOf, isBullish, longShare, type Lean,
 } from '@sign/valuedesk/cohorts/model.js';
 import { VENUE_LABEL, type Venue } from '../../../vsApi';
+import type { BooksOverOi } from '@sign/valuedesk/cohorts/model.js';
 import { DASH } from '../../../format';
 import { VenueLogo } from '../../VenueLogo';
 import { fmtUsdShort } from '../model';
@@ -70,6 +71,17 @@ export const Arrow = ({ up }: { up: boolean }) => (
     <path d={up ? 'M2 8 8 2M3.5 2H8v4.5' : 'M2 2l6 6M8 3.5V8H3.5'} fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
   </svg>
 );
+
+/**
+ * Books that hold more than the venue says is open: size that does not exist until the reads correct it, so the figures
+ * under it are not to be taken as current (server read.ts booksOverOi). Nothing when all is well.
+ */
+export function OverOiNote({ rows }: { rows: ReadonlyArray<BooksOverOi> | undefined }) {
+  if (!rows?.length) return null;
+  const venues = [...new Set(rows.map((r) => r.venue))];
+  const text = venues.map((v) => `${VENUE_LABEL[v]}: ${rows.filter((r) => r.venue === v).map((r) => `${r.coin} ${Math.round(r.ratio * 100)}%`).join(', ')}`).join(' · ');
+  return <p className="lbp-note">Books above open interest, being read again and not current. {text}</p>;
+}
 
 export function BiasPill({ long, short }: { long: number; short: number }) {
   const bias = biasOf(longShare(long, short));

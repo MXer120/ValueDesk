@@ -25,7 +25,7 @@ import { CohortIcon } from './CohortIcon';
 import { COHORT_COLOR } from './cohortStyle';
 import { MarketMap } from './MarketMap';
 import { MultiLeanChart, shareAt } from './MultiLeanChart';
-import { BiasPill, LeanPill, Meter, Picker, pctText, usePolled } from './parts';
+import { BiasPill, LeanPill, Meter, OverOiNote, Picker, pctText, usePolled } from './parts';
 import { Treemap } from './Treemap';
 import { PriceChart, toCandles, type PriceKind } from './PriceChart';
 import { AllHidden, useCohortView } from './view';
@@ -198,6 +198,7 @@ export function FocusPage({
       {r.error && !d ? <LoadFailed what={name} onRetry={r.retry} /> : (
         <>
           {!showMeters && !showChart && !showPrice && !showTable && !showAssets && <AllHidden />}
+          <OverOiNote rows={d?.overOi} />
           {showMeters && <div className="coh-d__meters">
             <Meter
               title="Unrealised PnL"

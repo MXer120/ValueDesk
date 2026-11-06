@@ -735,6 +735,16 @@ export interface CohortsResponse {
   coverage: Partial<Record<Venue, VenueCoverage>>;
   /** Every coin held in this scope, largest first, for the asset picker. */
   coins: Array<{ coin: string; sector: Sector; gross: number }>;
+  /** Coins (the filter's, when it names one) whose books hold more than is open: not to be taken as current. */
+  overOi?: BooksOverOi[];
+}
+
+/** One coin on one venue over its open interest: `ratio` is the larger side over it, `at` when that was checked. */
+export interface BooksOverOi {
+  venue: Venue;
+  coin: string;
+  ratio: number;
+  at: number;
 }
 
 export type CohortRange = '1d' | '7d' | '30d';
@@ -806,6 +816,8 @@ export interface CohortFocusResponse {
   range: CohortRange;
   /** Every wallet holding a position in it, cohort or not. */
   total: { long: number; short: number; upnl: number; wallets: number; inProfit: number; inLoss: number };
+  /** The coin's books over its open interest: these figures are not to be taken as current. */
+  overOi?: BooksOverOi[];
   cohorts: FocusCohort[];
   /** Each cohort's [t, long, short] over the range (hourly). */
   series: Partial<Record<CohortId, CohortPoint[]>>;

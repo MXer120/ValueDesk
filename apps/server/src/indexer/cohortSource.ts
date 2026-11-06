@@ -25,6 +25,7 @@ import { portfolioWindow } from '../valuedesk/hyperliquid/mappers.js';
 import type { CohortPnlRow } from './store.js';
 import type { FundingRow } from './cohortRebuild.js';
 import { perpsState } from '../valuedesk/sodex/gateway.js';
+import type { PerpsState } from '../valuedesk/sodex/mappers.js';
 import { arcusAccount } from '../valuedesk/extra/arcus.js';
 import { LIGHTER_API } from '../valuedesk/extra/lighter.js';
 import { num, type Pacer } from '../valuedesk/extra/http.js';
@@ -63,7 +64,15 @@ export interface PositionRead {
    * margin mode, and the cross cash the account value implies (`cash0`).
    */
   liq?: { cash0: number | null; positions: ReadPos[]; split?: boolean };
+  /** SoDEX, read on the reader thread: what says which prints the read holds (cohortTracker.ts printInRead). */
+  read?: BookRead;
 }
+
+/**
+ * When a read was asked and answered, and each position's `ut`: its last change on SoDEX's clock, the same millisecond as
+ * the print that made it (measured 2026-11-06: 12:27:00.407 on both). A print up to `ut` is in the read, a later one is not.
+ */
+export interface BookRead { sent: number; got: number; ut: ReadonlyMap<string, number> }
 
 const EMPTY: PositionRead = { equity: null, positions: [], marks: [] };
 
@@ -301,8 +310,13 @@ export async function hlEquityHistory(address: string, pace?: HistPace): Promise
 }
 
 export async function sodexPositions(address: string): Promise<PositionRead> {
-  const st = await perpsState(address);
-  if (!st || !st.aid) return EMPTY;
+  return sodexPositionsOf(await perpsState(address));
+}
+
+/** One perps state as a read. `at`: when the reader thread asked and heard, for printInRead. */
+export function sodexPositionsOf(st: PerpsState | null | undefined, at?: { sent: number; got: number }): PositionRead {
+  if (!st || !st.aid) return at ? { ...EMPTY, read: { ...at, ut: new Map() } } : EMPTY;
+  const ut = new Map<string, number>();
   const positions: Position[] = [];
   const marks: Array<[string, number]> = [];
   const lp: ReadPos[] = [];
@@ -311,6 +325,7 @@ export async function sodexPositions(address: string): Promise<PositionRead> {
     if (!p?.s || !szi) continue;
     const entry = num(p.ep);
     positions.push({ symbol: p.s, szi, entry });
+    if (typeof p.ut === 'number' && p.ut > 0) ut.set(p.s, p.ut);
     const ur = num(p.ur);
     const mark = entry !== null && ur !== null ? entry + ur / szi : null;
     if (mark !== null) marks.push([p.s, mark]);
@@ -318,7 +333,7 @@ export async function sodexPositions(address: string): Promise<PositionRead> {
     lp.push({ symbol: p.s, szi, mark, vliq: num(p.lp) || null, isolated: p.m === 'ISOLATED', lev: p.l ?? null });
   }
   const equity = num(st.av);
-  return { equity, positions, marks, liq: { cash0: cashOf(equity, lp), positions: lp } };
+  return { equity, positions, marks, liq: { cash0: cashOf(equity, lp), positions: lp }, ...(at ? { read: { ...at, ut } } : {}) };
 }
 
 /** Every sub-account of an L1 address, positions included, in one request. */

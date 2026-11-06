@@ -40,7 +40,7 @@ import { PerformanceObserver, performance } from 'node:perf_hooks';
 import { STALL_LOG_MS, gcWithin, mark, noteGc, startedBefore } from './busy.js';
 import { SlicedWork } from './slicedWork.js';
 import { hlCoinName } from '../valuedesk/extra/account.js';
-import { accountValue as fetchAccountValue, chartWindows, lookupPnl, syncCloses, syncLists, syncTrades } from './sodexSource.js';
+import { accountValue as fetchAccountValue, chartWindows, lookupPnl, peekTrades, syncCloses, syncLists, syncTrades } from './sodexSource.js';
 import type { BoardRow, Coverage, HistoryKind, IndexStore, TraderStatsRow, TraderWin } from './store.js';
 import { winRateOf } from '../valuedesk/winRate.js';
 import { HlStream, SodexStream, streamLog, type Print } from './streams.js';
@@ -69,6 +69,12 @@ const envNum = (name: string, dflt: number, min: number, max: number): number =>
   const n = Number(process.env[name]);
   return Number.isFinite(n) && n > 0 ? Math.min(max, Math.max(min, n)) : dflt;
 };
+
+/** Where the SoDEX stream's unanswered breaks are kept (settleBreaks). */
+const STREAM_PENDING_META = 'stream_pending:sodex';
+/** One trade check read per wallet and window for this long, and not again sooner when it could not decide. */
+const CHECK_BUCKET_MS = 6 * 60 * 60_000;
+const CHECK_AGAIN_MS = 60 * 60_000;
 
 /**
  * SoDEX's history limit, MEASURED 2026-09-30 (docs/ARCH-traffic.md §2):
@@ -110,6 +116,11 @@ export const INDEXER_ENV = {
    * fill of a tracked trader from the moment it is tracked.
    */
   sodexTradesEnabled: () => Number(process.env.VALUESCAN_INDEX_SODEX_TRADES) > 0,
+  /**
+   * SoDEX account-trades reads per minute that answer a wallet's trade check. They spend the `/trades` counter above, so with
+   * the backfill on the two together stay at SODEX_HISTORY_PAIR_PER_MIN. Two such reads on 2026-11-06 answered 200.
+   */
+  sodexChecksPerMin: () => Math.max(0.2, Math.min(envNum('VALUESCAN_INDEX_SODEX_CHECKS', 1, 0.2, SODEX_HISTORY_PAIR_PER_MIN), SODEX_HISTORY_PAIR_PER_MIN - (INDEXER_ENV.sodexTradesEnabled() ? INDEXER_ENV.sodexTradesPerMin() : 0))),
   /** How far back `/trades` reaches for a SoDEX board member (days). The stream covers everything after. */
   sodexTradesBackDays: () => envNum('VALUESCAN_INDEX_SODEX_TRADES_DAYS', 30, 1, 400),
   /**
@@ -285,7 +296,7 @@ export function lookupDue(heldAt: number | null, unrankedAt: number | null, now:
 interface ActRec { trades: number; volume: number }
 interface StreamState { since: number | null; lastUp: number }
 /** A stream outage seen on (re)connect: [down from, up again], and whether it broke the activity span. */
-interface StreamGap { from: number; to: number; broke: boolean }
+interface StreamGap { from: number; to: number; broke: boolean; covered?: boolean }
 /** One board pick's figures from what the index holds. */
 interface PickStats {
   stats: import('./store.js').WindowStats;
@@ -300,6 +311,15 @@ interface PickStats {
 export class Indexer {
   readonly hl: Lane;
   readonly sgw: Lane;
+  /** One account-trades read for a wallet its closes and the stream cannot answer for (queueCheck). */
+  readonly scheck: Lane;
+  /** When each check was last asked (key -> ms): a wallet the read could not decide is not asked again at once. */
+  private checkAsked = new Map<string, number>();
+  /**
+   * SoDEX stream breaks the catch-up may yet answer for, oldest first; `since`: the span they cut short. Kept in the
+   * index (STREAM_PENDING_META), as a restart comes on top of a restart when several releases follow each other.
+   */
+  private sodexBreaks: Array<{ from: number; to: number; since: number }> = [];
   readonly strades: Lane;
   readonly sdata: Lane;
   private hlStream: HlStream | null = null;
@@ -389,7 +409,9 @@ export class Indexer {
     // the gateway's minute (the limit SoDEX reports: 6000 on 2026-10-31), and
     // pause 15 minutes after a 429.
     const sodexGate = () => Math.max(cooldownLeftMs(), sodex.cooldownLeft(), gatewayWeightSpent() > gatewayWeightLimit() / 3 ? 5_000 : 0);
-    this.sgw = new Lane({ name: 'sgw', perMin: INDEXER_ENV.sodexClosesPerMin(), gate: sodexGate, rateLimitPauseMs: 15 * 60_000 });
+    this.sgw = new Lane({ name: 'sgw', perMin: INDEXER_ENV.sodexClosesPerMin(), gate: sodexGate, rateLimitPauseMs: 15 * 60_000, creditTaskTime: true });
+    // Not while a break may yet be answered: the check will not need the read.
+    this.scheck = new Lane({ name: 'scheck', perMin: INDEXER_ENV.sodexChecksPerMin(), gate: () => Math.max(sodexGate(), this.sodexBreaks.length ? 5_000 : 0), rateLimitPauseMs: 30 * 60_000 });
     // The indexer's only SoDEX `/trades` reader (off unless VALUESCAN_INDEX_SODEX_TRADES
     // is set). Each task reads ONE page (syncTrades maxPages: 1) and the lane then
     // rests, so its rate is `perMin`, capped at SODEX_HISTORY_PAIR_PER_MIN: the
@@ -435,6 +457,10 @@ export class Indexer {
         if (Array.isArray(g)) this.gaps[venue] = g.slice(-10);
       } catch { /* none */ }
     }
+    try {
+      const b = JSON.parse(this.store.getMeta(STREAM_PENDING_META) ?? '[]');
+      if (Array.isArray(b)) this.sodexBreaks = b.filter((x) => x && x.from > 0 && x.to > 0 && x.since > 0);
+    } catch { /* none */ }
     // Every wallet with a held range is tracked BEFORE the streams open: a print
     // for it must land in its fills from the first second, or a range moved up
     // with the socket (advanceCoverage) would claim fills it never got.
@@ -450,6 +476,7 @@ export class Indexer {
     this.unranked = this.store.unrankedSince('sodex', this.now() - UNRANKED_TTL);
     this.hl.start();
     this.sgw.start();
+    this.scheck.start();
     this.strades.start();
     this.sdata.start();
     for (const x of this.ext.values()) {
@@ -474,7 +501,16 @@ export class Indexer {
       if (this.flow && process.env.VALUESCAN_SODEX_CATCHUP !== '0') {
         const stream = this.sodexStream;
         const flow = this.flow;
-        this.sodexCatchup = new SodexCatchup((rows) => stream.catchUp(rows, (prints) => flow.missing(prints)), streamLog);
+        this.sodexCatchup = new SodexCatchup((rows) => {
+          // `missing` answers "none" when it cannot read a chunk. For a read that must not count as covering a break.
+          const was = flow.lastError;
+          flow.lastError = null;
+          const added = stream.catchUp(rows, (prints) => flow.missing(prints));
+          const err = flow.lastError as string | null;
+          flow.lastError = err ?? was;
+          if (err?.startsWith('missing:')) throw new Error(err);
+          return added;
+        }, streamLog);
         this.sodexCatchup.start();
       }
     }
@@ -551,6 +587,7 @@ export class Indexer {
     this.gcWatch?.disconnect();
     this.hl.stop();
     this.sgw.stop();
+    this.scheck.stop();
     this.strades.stop();
     this.sdata.stop();
     this.hlStream?.stop();
@@ -633,11 +670,51 @@ export class Indexer {
         this.store.setMeta(`stream_gaps:${venue}`, JSON.stringify(this.gaps[venue]));
       }
       // This connection came up after an outage longer than the tolerance: a new span.
-      if (st.since === null || up - st.lastUp > STREAM_GAP_MS) st.since = up;
+      if (st.since === null || up - st.lastUp > STREAM_GAP_MS) {
+        if (venue === 'sodex' && this.sodexCatchup && st.since !== null && st.lastUp > 0) {
+          this.sodexBreaks.push({ from: st.lastUp, to: up, since: st.since });
+          this.store.setMeta(STREAM_PENDING_META, JSON.stringify(this.sodexBreaks));
+        }
+        st.since = up;
+      }
+      if (venue === 'sodex') this.settleBreaks(st);
       st.lastUp = now;
       this.store.setMeta(`stream_since:${venue}`, String(st.since));
       this.store.setMeta(`stream_up:${venue}`, String(st.lastUp));
     }
+  }
+
+  /**
+   * A break the catch-up has covered is no break: every print of it went in as if the stream had brought it, activity and
+   * fills included, so the span runs on from before it. Until then it counts as one. Newest first, as the older ones' spans
+   * end where the newer ones' begin; one that is lost ends the span there for good, and whatever came before it with it.
+   */
+  private settleBreaks(st: { since: number | null }): void {
+    const c = this.sodexCatchup;
+    if (!c || !this.sodexBreaks.length) return;
+    let changed = false;
+    while (this.sodexBreaks.length) {
+      const b = this.sodexBreaks[this.sodexBreaks.length - 1]!;
+      const state = st.since === b.to ? c.watch(b.from, b.to) : 'lost';
+      if (state === 'waiting') break;
+      c.forget(b.from, b.to);
+      this.sodexBreaks.pop();
+      changed = true;
+      if (state === 'lost') {
+        for (const o of this.sodexBreaks) c.forget(o.from, o.to);
+        this.sodexBreaks = [];
+        break;
+      }
+      st.since = b.since;
+      const g = this.gaps.sodex.find((x) => x.to === b.to);
+      if (g) {
+        g.broke = false;
+        g.covered = true;
+        this.store.setMeta('stream_gaps:sodex', JSON.stringify(this.gaps.sodex));
+      }
+      streamLog(`sodex stream: the ${Math.round((b.to - b.from) / 1000)} s break is covered by the catch-up, the span runs on from ${new Date(b.since).toISOString()}`);
+    }
+    if (changed) this.store.setMeta(STREAM_PENDING_META, JSON.stringify(this.sodexBreaks));
   }
 
   status() {
@@ -656,7 +733,8 @@ export class Indexer {
       checkpoint: this.store.checkpointStatus,
       flushBacklog: this.writes.backlog,
       retention: this.store.retention(this.now()),
-      lanes: { hl: lane(this.hl), sgw: lane(this.sgw), strades: lane(this.strades), sdata: lane(this.sdata) },
+      sodexBreaks: this.sodexBreaks.length,
+      lanes: { hl: lane(this.hl), sgw: lane(this.sgw), scheck: lane(this.scheck), strades: lane(this.strades), sdata: lane(this.sdata) },
       venues: Object.fromEntries([...this.ext].map(([v, x]) => [v, x.status()])),
       tracked: {
         hyperliquid: this.trackedHl.size,
@@ -914,14 +992,39 @@ export class Indexer {
       this.hl.add({ key: `q:${address}`, prio, run: () => hlQuickCheck(this.store, address, from, this.now()) });
       return;
     }
-    // SoDEX: closed positions first (not rate limited like /trades). A wallet
-    // they cannot prove stays pending until the stream covers the window.
+    // SoDEX: closed positions first (not rate limited like /trades), which prove trades but
+    // not their absence, and one account-trades read for what they leave open.
     const closes = this.store.coverage('sodex', address, 'closes');
-    if (closes && closes.fromT <= from && now - closes.restAt < RESYNC_MS) return;
-    this.sgw.add({
-      key: `q:${address}`,
+    if (!closes || closes.fromT > from || now - closes.restAt >= RESYNC_MS) {
+      this.sgw.add({
+        key: `q:${address}`,
+        prio,
+        run: async () => (await syncCloses(this.store, address, from, { maxPages: 1, now: this.now() })).pages,
+      });
+    }
+    this.queueTradeRead(address, from, prio, now);
+  }
+
+  /**
+   * A wallet's own trades over the window, newest first: two prove it passes, and a short page on both engines proves it
+   * does not (peekTrades covers the window then), so the check means what it always did. Perps first, as spot only
+   * answers what perps could not. Paced by the `/trades` counter's rule; what waits is the board's top first.
+   */
+  private queueTradeRead(address: string, from: number, prio: number, now: number): void {
+    // The window slides: one wallet and window is one read for a while.
+    const key = `c:${Math.floor(from / CHECK_BUCKET_MS)}:${address}`;
+    if (now - (this.checkAsked.get(key) ?? 0) < CHECK_AGAIN_MS) return;
+    if (this.checkAsked.size > 20_000) this.checkAsked.clear();
+    this.scheck.add({
+      key,
       prio,
-      run: async () => (await syncCloses(this.store, address, from, { maxPages: 1, now: this.now() })).pages,
+      run: async () => {
+        this.checkAsked.set(key, this.now());
+        await peekTrades(this.store, address, 'perps', from, this.now());
+        if (this.store.hasTrades('sodex', address, from, MIN_TRADES) >= MIN_TRADES) return 1;
+        await peekTrades(this.store, address, 'spot', from, this.now());
+        return 2;
+      },
     });
   }
 
@@ -1721,6 +1824,7 @@ export class Indexer {
     this.hl.retain((k) => k.startsWith('chart:') || k.startsWith('xyz:') || k.startsWith('xyzav:') || keep(k));
     for (const x of this.ext.values()) x.lane.retain((k) => !k.startsWith('q:') && !k.startsWith('h:') ? true : keep(k));
     this.sgw.retain(keep);
+    this.scheck.retain(keep);
     this.strades.retain(keep);
     // Forget histories no board has wanted for two weeks (checked once a day).
     if (dayOf(now) !== dayOf(now - REBUILD_MS)) {
