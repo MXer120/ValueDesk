@@ -10,7 +10,9 @@ import { join } from 'node:path';
 import { FlowStore } from '../src/flow/store.js';
 import { FlowRecorder } from '../src/flow/recorder.js';
 import { chunkPrints, decodeChunk, CHUNK_MS } from '../src/flow/codec.js';
-import { SodexCatchup, CATCHUP_LIMIT } from '../src/indexer/sodexCatchup.js';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { RestReader, SodexCatchup, CATCHUP_LIMIT } from '../src/indexer/sodexCatchup.js';
 import { SodexStream, sodexPrint, type Print, type SodexWsTrade } from '../src/indexer/streams.js';
 
 const dir = mkdtempSync(join(tmpdir(), 'vs-catchup-'));
@@ -146,4 +148,45 @@ test('a market is read at half its reach, what fell out of reach is counted, 429
   await c.tick();
   assert.equal(reads, r, 'waits out the limit');
   rec.stop();
+});
+
+test('the reader thread brings back rows, market lists and a 429', async () => {
+  const server = createServer((req, res) => {
+    if (req.url!.includes('/symbols')) { res.end(JSON.stringify({ data: [{ symbol: 'BTC-USD' }, { name: 'vX_vUSDC' }] })); return; }
+    if (req.url!.includes('LIMITED')) { res.statusCode = 429; res.end('{}'); return; }
+    res.end(JSON.stringify({ data: [row(7, T0)] }));
+  });
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+  const reader = new RestReader(`http://127.0.0.1:${(server.address() as AddressInfo).port}`);
+  try {
+    assert.deepEqual(await reader.symbols('perps'), ['BTC-USD', 'vX_vUSDC']);
+    assert.deepEqual(await reader.readTrades('perps', 'LIMITED'), { rows: [], limited: true });
+    const rows = await reader.readTrades('perps', 'BTC-USD');
+    assert.equal(rows.rows[0]!.t, 7);
+  } finally {
+    reader.stop();
+    server.closeAllConnections();
+    server.close();
+  }
+});
+
+test('a read that fails is tried again in 30 s, and the others go on', async () => {
+  const now = { t: T0 + 3_600_000 };
+  const asked: string[] = [];
+  const stream = new SodexStream(() => {});
+  const c = new SodexCatchup(
+    (r) => stream.catchUp(r, () => []),
+    () => {},
+    async (_e, s) => { asked.push(s); if (s === 'A-USD') throw new Error('timeout'); return { rows: [] }; },
+    async (e) => (e === 'perps' ? ['A-USD', 'B-USD'] : []),
+    () => now.t,
+  );
+  await c.tick();
+  now.t += 2_000;
+  await c.tick();
+  assert.deepEqual(asked, ['A-USD', 'B-USD']);
+  assert.equal(c.status().errors, 1);
+  now.t += 28_000;
+  await c.tick();
+  assert.deepEqual(asked, ['A-USD', 'B-USD', 'A-USD']);
 });
