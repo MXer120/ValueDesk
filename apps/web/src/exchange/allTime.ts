@@ -37,6 +37,7 @@ import { aggregateFunding, aggregateTradeRows, quoteCoinMap, type FundingStats, 
 import { allTimeStatsBody, headlineReader, type AllTimeStats } from '@sign/statsCore.js';
 import type { Engine } from '../api';
 import { logger } from '../log';
+import { vsApi } from '../vsApi';
 import { coverOf, fundingFigures, tradeFigures, type Cover, type FundingFigures, type TradeFigures } from './activityWindows';
 import { RateLimitedError, isRateLimitError } from './errors';
 import { IdbHistory, type HistoryPersistence } from './historyDb';
@@ -61,6 +62,10 @@ const LIFETIME_MATCH = 0.99;
 
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
 
+export interface SeededHistory { state: ScopeState | null; rows: NormalRow[] }
+
+const SEED_MS = 8_000;
+
 export interface AllTimeDeps {
   gateway: GatewayClient;
   /** One data-host GET (mainnet-data.sodex.dev), resolving with `data`. */
@@ -68,6 +73,8 @@ export interface AllTimeDeps {
   /** The engine's market list (for the quote coin each symbol is priced in). */
   symbols(e: Engine): Promise<ReadonlyArray<{ name?: string; quoteCoin?: string }>>;
   persistence: HistoryPersistence;
+  /** What the server has already read for a wallet's scope: the walk starts from it. Absent: the walk starts empty. */
+  seed?(kind: ScopeKind, address: string): Promise<SeededHistory | null>;
   /** Per-scope exclusivity across tabs; null = this tab alone. */
   locks: LockManagerLike | null;
   ledger: LedgerDeps;
@@ -243,6 +250,24 @@ export function createAllTime(d: AllTimeDeps): AllTime {
   // --- hydration and the wallet cap ---------------------------------------------
   const hydrated = new Map<string, Promise<void>>();
 
+  /**
+   * Start from what the server read, when this browser has less. Never in the way: a slow or failed answer leaves the
+   * browser's own walk, which then reads it all. Only newer rows are read after this.
+   */
+  async function takeSeed(kind: ScopeKind, address: string): Promise<void> {
+    if (!d.seed) return;
+    const scope = scopeKey(kind, address);
+    const mine = store.readState(scope);
+    if (mine.complete) return;
+    const timeout = new Promise<null>((resolve) => { setTimeout(() => resolve(null), SEED_MS); });
+    const got = await Promise.race([d.seed(kind, address).catch(() => null), timeout]);
+    if (!got?.state || !(got.state.complete || mine.updatedAt === 0)) return;
+    store.load(scope, got.state, got.rows);
+    await d.persistence.dropScope(scope);
+    await d.persistence.appendRows(scope, got.rows);
+    await d.persistence.putState(scope, got.state);
+  }
+
   function hydrate(address: string): Promise<void> {
     const key = address.toLowerCase();
     let p = hydrated.get(key);
@@ -252,6 +277,7 @@ export function createAllTime(d: AllTimeDeps): AllTime {
           SCOPE_KINDS.map(async (kind) => {
             const loaded = await d.persistence.readScope(scopeKey(kind, key));
             if (loaded) store.load(scopeKey(kind, key), loaded.state, loaded.rows);
+            await takeSeed(kind, key);
           }),
         );
         const evicted = await d.persistence.touchWallet(key);
@@ -358,7 +384,7 @@ export function createAllTime(d: AllTimeDeps): AllTime {
       const scope = scopeKey(kind, address);
       const state = store.readState(scope);
       const running = sync.progressOf(kind, address).status === 'running';
-      const cover = coverOf(state, running, since, store.cachedCount(scope));
+      const cover = coverOf(state, running, since, store.cachedCount(scope), now());
       if (cover.state !== 'final') return { figures: null, cover, running };
       const figures = figuresOf(kind, address, since, state.newest, make);
       if (figures.unreadable > 0) {
@@ -436,6 +462,16 @@ function appInstance(): AllTime {
       dataGet: (path) => dataGet(path),
       symbols: (e) => symbolList(e),
       persistence: new IdbHistory(),
+      seed: async (kind, address) => {
+        const got = await vsApi.walletHistory(address, kind);
+        return {
+          state: got.state,
+          rows: got.rows.map((p) => ({
+            id: p[0], time: p[1], symbol: p[2], side: p[3], price: p[4], qty: p[5], quote: p[6], fee: p[7], feeCoin: p[8],
+            isMaker: p[9] === null ? null : p[9] === 1, raw: '',
+          })),
+        };
+      },
       locks: ledger.locks,
       ledger,
     });

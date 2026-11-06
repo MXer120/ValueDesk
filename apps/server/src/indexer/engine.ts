@@ -21,9 +21,11 @@
  *
  * Nothing here signs, trades or moves funds; every request is a public read.
  */
+import { WalletBackfill, WalletHistoryDb } from './walletHistory.js';
+import { pageSource } from '../history.js';
 import { hlInfo, hlLeaderboard } from '../valuedesk/hyperliquid/index.js';
 import type { LbSnapshot } from '../valuedesk/hyperliquid/leaderboard.js';
-import { sodex } from '../sodex/rest.js';
+import { isRateLimited, sodex } from '../sodex/rest.js';
 import { gatewayWeightLimit, gatewayWeightSpent } from '../valuedesk/sodex/gateway.js';
 import { knownAddress, resolveIds, seedAddress } from '../valuedesk/sodex/resolver.js';
 import { cooldownLeftMs } from '../valuedesk/sodex/util.js';
@@ -122,6 +124,15 @@ export const INDEXER_ENV = {
    * the backfill on the two together stay at SODEX_HISTORY_PAIR_PER_MIN. Two such reads on 2026-11-06 answered 200.
    */
   sodexChecksPerMin: () => Math.max(0.2, Math.min(envNum('VALUESCAN_INDEX_SODEX_CHECKS', 1, 0.2, SODEX_HISTORY_PAIR_PER_MIN), SODEX_HISTORY_PAIR_PER_MIN - (INDEXER_ENV.sodexTradesEnabled() ? INDEXER_ENV.sodexTradesPerMin() : 0))),
+  /**
+   * The wallet backfill's `/trades` reads a minute (walletHistory.ts): off at 0, and never more than what the trade
+   * checks and the board reads leave of SODEX_HISTORY_PAIR_PER_MIN.
+   */
+  walletBackfillPerMin: () => {
+    const asked = Number(process.env.VALUESCAN_WALLET_BACKFILL);
+    if (!(asked > 0)) return 0;
+    return Math.max(0.1, Math.min(asked, SODEX_HISTORY_PAIR_PER_MIN - INDEXER_ENV.sodexChecksPerMin() - (INDEXER_ENV.sodexTradesEnabled() ? INDEXER_ENV.sodexTradesPerMin() : 0)));
+  },
   /** How far back `/trades` reaches for a SoDEX board member (days). The stream covers everything after. */
   sodexTradesBackDays: () => envNum('VALUESCAN_INDEX_SODEX_TRADES_DAYS', 30, 1, 400),
   /**
@@ -326,6 +337,7 @@ export class Indexer {
   private hlStream: HlStream | null = null;
   private sodexStream: SodexStream | null = null;
   private timers: NodeJS.Timeout[] = [];
+  private walletBackfill: WalletBackfill | null = null;
   private listSnap: Partial<Record<Window, number>> = {};
   private listCheckAt: Partial<Record<Window, number>> = {};
   private chartPoolAt = Object.fromEntries(VENUES.map((v) => [v, 0])) as Record<Venue, number>;
@@ -517,6 +529,19 @@ export class Indexer {
       }
       if (this.flow && process.env.VALUESCAN_SODEX_LEDGER !== '0') this.coverageLedger = startLedgerThread({ flow: this.flow.store.path, index: this.store.path }, streamLog);
     }
+    const backfillRate = INDEXER_ENV.walletBackfillPerMin();
+    if (backfillRate > 0) {
+      this.walletBackfill = new WalletBackfill({
+        db: new WalletHistoryDb(),
+        tradesPerMin: backfillRate,
+        pageSource,
+        accounts: () => this.store.backfillAccounts(),
+        gate: () => Math.max(cooldownLeftMs(), sodex.cooldownLeft(), gatewayWeightSpent() > gatewayWeightLimit() / 3 ? 5_000 : 0),
+        isRateLimited,
+        log: (line) => console.log(`[indexer] ${line}`),
+      });
+      this.walletBackfill.start();
+    }
     const every = (ms: number, fn: () => void | Promise<void>, name = 'timer') => {
       const t = setInterval(() => { mark(name); void Promise.resolve(fn()).catch((e) => (this.lastError = String(e))); }, ms);
       t.unref?.();
@@ -596,6 +621,7 @@ export class Indexer {
     this.hlStream?.stop();
     this.sodexStream?.stop();
     this.sodexCatchup?.stop();
+    void this.walletBackfill?.stop();
     this.coverageLedger?.stop();
     for (const x of this.ext.values()) x.stop();
     this.cohorts.stop();

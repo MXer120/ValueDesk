@@ -154,6 +154,12 @@ test('a catch-up that fails halfway leaves a hole, and no row above the hole is 
   assert.equal(coverOf(state, false, null, 1501).state, 'final');
 });
 
+test('rows too old to answer a rolling window are read first, not shown', () => {
+  const s = { ...EMPTY_STATE, oldest: 1000, newest: 5000, updatedAt: 6000, pages: 1, complete: true, syncedAt: 6000 };
+  assert.equal(coverOf(s, false, null, 10, 6000 + 59 * 60_000).state, 'final');
+  assert.equal(coverOf(s, true, null, 10, 6000 + 61 * 60_000).state, 'reading');
+});
+
 test('a walk that ends at SoDEX\'s row limit is not all of history, though what it reached still counts', async () => {
   // The venue keeps the newest 10,000 and answers empty below them; there are 15,000.
   const rows = Array.from({ length: 15_000 }, (_, i) => fill({ tradeID: i, time: 100_000 + i }));

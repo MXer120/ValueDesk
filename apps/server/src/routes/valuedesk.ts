@@ -31,6 +31,7 @@
  *   GET /api/vs/index/status   (the indexer's full diagnostics; never on a hosted server)
  *   GET /api/vs/index/health   (its health in numbers, for monitoring on the instance)
  */
+import { walletHistoryFor } from '../indexer/walletHistory.js';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import {
   CORE_VENUES,
@@ -174,6 +175,19 @@ export function keepValuedeskWarm(): () => void {
 
 export async function valuedeskRoutes(app: FastifyInstance) {
   oracleRoutes(app);
+  // A SoDEX wallet's own history as the server has read it (public data), for the browser to start from. Asks for the
+  // wallet if it is not read yet; no upstream read here.
+  app.get('/api/vs/wallet-history', async (req, reply) => {
+    const q = req.query as { address?: unknown; kind?: unknown };
+    const address = String(q.address ?? '').toLowerCase();
+    const kind = String(q.kind ?? '');
+    if (!/^0x[0-9a-f]{40}$/.test(address)) return reply.code(400).send({ ok: false, error: 'a 0x wallet address is required' });
+    if (kind !== 'trades-perps' && kind !== 'trades-spot' && kind !== 'funding') return reply.code(400).send({ ok: false, error: 'kind must be trades-perps, trades-spot or funding' });
+    const held = walletHistoryFor(address, kind);
+    if (!held) return reply.code(503).send({ ok: false, code: 'indexing', error: 'No wallet history here yet.' });
+    return { ok: true, ...held };
+  });
+
   app.get('/api/vs/leaderboard', async (req, reply) => {
     try {
       const q = req.query as Q;

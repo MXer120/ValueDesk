@@ -336,7 +336,7 @@ function cachedCount(scope: string): number {
   return Number(r?.n ?? 0);
 }
 
-function pageSource(kind: ScopeKind, address: string): (q: PageQuery) => Promise<NormalRow[]> {
+export function pageSource(kind: ScopeKind, address: string): (q: PageQuery) => Promise<NormalRow[]> {
   if (kind === 'trades-spot') return tradePage('spot', address);
   if (kind === 'trades-perps') return tradePage('perps', address);
   return fundingPage(address);

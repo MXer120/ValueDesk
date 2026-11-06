@@ -163,11 +163,15 @@ export function fundingFigures(rows: readonly NormalRow[], since: number | null,
  * The oldest row must be strictly older than the window's start: `endTime` is inclusive, so more rows of the oldest
  * row's own millisecond may still be a page away. A walk that ended at SoDEX's row limit proves only what it reached.
  */
-export function coverOf(state: ScopeState, running: boolean, since: number | null, rows: number): Cover {
+const MAX_AGE_MS = 60 * 60_000;
+
+export function coverOf(state: ScopeState, running: boolean, since: number | null, rows: number, now?: number): Cover {
   const asOf = state.syncedAt ?? (state.complete && !state.lastError && state.updatedAt > 0 ? state.updatedAt : null);
   const from = state.coveredFrom ?? state.oldest;
   const reached = (state.complete && !state.limited) || (since !== null && from !== null && from < since);
-  if (reached && asOf !== null) return { state: 'final', asOf };
+  // Rows days old leave a rolling window short: not a figure until the newest rows are read too.
+  const tooOld = now !== undefined && asOf !== null && now - asOf > MAX_AGE_MS;
+  if (reached && asOf !== null && !tooOld) return { state: 'final', asOf };
   if (state.complete && state.limited) {
     const day = from === null ? 'a recent date' : new Date(from).toISOString().slice(0, 10);
     return { state: 'incomplete', reason: `SoDEX keeps only a wallet's latest ${VENUE_ROW_LIMIT.toLocaleString('en-US')} rows, and nothing before ${day} can be read.` };

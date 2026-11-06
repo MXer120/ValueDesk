@@ -14,6 +14,7 @@
  * a venue fails, so `unwrap` turns that into a thrown VsError that the page's
  * useAsync error state can render per section.
  */
+import type { ScopeState } from '@sign/historySync.js';
 import type {
   BoardWindow,
   ExploreResponse,
@@ -140,6 +141,9 @@ function direct<T>(p: Promise<T>, signal?: AbortSignal): Promise<T> {
 }
 
 export const vsApi = {
+  /** What the server has read of a SoDEX wallet's own history, for the browser's walk to start from. */
+  walletHistory: (address: string, kind: 'trades-perps' | 'trades-spot' | 'funding', signal?: AbortSignal) =>
+    unwrap<{ state: ScopeState | null; rows: Array<[string, number, string | null, string | null, string | null, string | null, string | null, string | null, string | null, 0 | 1 | null]> }>(`/api/vs/wallet-history?address=${address}&kind=${kind}`, signal),
   leaderboard: (
     o: { venue?: Venue | 'all'; venues?: string; view?: 'net' | 'single'; window?: BoardWindow; sort?: LeaderboardSort; limit?: number; offset?: number; q?: string; side?: 'top' | 'worst'; curves?: 1; minTrades?: 2 },
     signal?: AbortSignal,

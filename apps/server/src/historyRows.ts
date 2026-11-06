@@ -235,6 +235,11 @@ export async function walkBackwards(
      * truncation rather than the ordinary completion it actually is.
      */
     floorTime?: number;
+    /**
+     * Take a page shorter than the limit as the end, without a second read to confirm it. For the server's walk over
+     * every wallet, where that second read is what makes the list take twice as long.
+     */
+    shortPageEnds?: boolean;
     limit?: number;
     maxPages?: number;
     /**
@@ -296,6 +301,11 @@ export async function walkBackwards(
 
     if (opts.floorTime !== undefined && minT <= opts.floorTime) {
       reachedFloor = true;
+      break;
+    }
+
+    if (opts.shortPageEnds && page.length < limit) {
+      complete = true;
       break;
     }
 

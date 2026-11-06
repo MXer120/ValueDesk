@@ -378,6 +378,7 @@ Against this inventory, HOSTED_ROUTES should be:
   and `Content-Type` and `Authorization` under `/api/vs/feedback` (body up to 2,113,536 bytes on
   `/upload`, 16 KB elsewhere) and POST + `Content-Type` on `/api/vs/client-errors` (8 KB), never
   cached; an image answer is up to 2 MiB (docs/GO-LIVE.md).
+- **Add**: `GET /api/vs/wallet-history?address=&kind=` (cls `read`): a SoDEX wallet's own history as the server read it, for the browser's walk to start from (indexer/walletHistory.ts); no upstream read.
 - **Add**: `GET /api/vs/profile?address=`, `GET /api/vs/username/check?name=` (cls `read`), `POST /api/vs/username` and
   `POST /api/vs/username/change` (cls `write`, 1 and 4 KB, one limit of 12 a minute per client): a wallet's username.
   The first needs no signature, a change is signed by the wallet (routes/profiles.ts, `profiles.db`).

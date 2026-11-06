@@ -935,6 +935,16 @@ export class IndexStore {
     if (!this.readOnly && path !== ':memory:') this.loadHeld();
   }
 
+  /** Every SoDEX wallet with what the index recorded of it: the wallet backfill's order. */
+  backfillAccounts(): Array<{ address: string; trades: number; lastDay: number | null }> {
+    const held = new Map<string, { t: number; d: number }>();
+    for (const r of this.db.prepare("SELECT acct, SUM(trades) AS t, MAX(day) AS d FROM activity_day WHERE venue = 'sodex' GROUP BY acct").all() as Array<{ acct: string; t: number; d: number }>) held.set(String(r.acct), { t: Number(r.t), d: Number(r.d) });
+    return (this.db.prepare("SELECT address, account_id FROM accounts WHERE venue = 'sodex' AND account_id IS NOT NULL").all() as Array<{ address: string; account_id: number }>).map((a) => {
+      const h = held.get(String(a.account_id));
+      return { address: a.address, trades: h?.t ?? 0, lastDay: h?.d ?? null };
+    });
+  }
+
   close(): void {
     this.checkpointer?.stop();
     this.checkpointer = null;

@@ -119,6 +119,8 @@ export interface HistorySyncOptions {
   exclusive?(scope: string, run: () => Promise<void>): Promise<void>;
   /** Called with the scope held, before the freshness re-check (the browser re-reads what another tab stored). */
   beforeSync?(scope: string): Promise<void>;
+  /** A short page ends the backward walk without a read to confirm it (historyRows.ts). */
+  shortPageEnds?: boolean;
 }
 
 export interface HistorySync {
@@ -315,6 +317,7 @@ export function createHistorySync(o: HistorySyncOptions): HistorySync {
           // Resume from the oldest row already held. `endTime` is inclusive, so the
           // boundary row comes back and is deduped rather than skipped.
           endTime: oldest ?? undefined,
+          shortPageEnds: o.shortPageEnds,
           onPage: onExtendPage,
         });
         pages += r.pages;
