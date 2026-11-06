@@ -179,11 +179,15 @@ h.test('Total Value counts each dollar once, and copies and bots have no bucket'
   assert.ok(Math.abs(wealth - 1826) < 0.02, `wealth ${wealth}`);
   assert.ok(spot < 200, `the vQQQ share left Spot (${spot})`);
   assert.equal(await p.locator('.pfx-bucket').count(), 4);
-  await until(p, async () => /trades\s*2/.test(await p.locator('.pfx-sum').innerText()), 'the summary to add up the fills', 15_000);
+  // No partial figure while the wallet's history is still being read.
+  await p.locator('.pfx-sum .pfx-sum__state').first().waitFor();
+  await shot(p, 'summary-reading');
+  await until(p, async () => { const text = await p.locator('.pfx-sum').innerText(); return /trades\s*2/.test(text) && !text.includes('Reading'); }, 'the summary to add up the fills and the funding', 150_000);
   const sum = (await p.locator('.pfx-sum').innerText()).replace(/\s+/g, ' ');
   assert.match(sum, /Buys 1 Sells 1/);
   assert.match(sum, /vol\. of trades \$300,00/);
   assert.match(sum, /commission \$0,12/);
+  assert.match(sum, /funding fee\s*\S*\$1,50 Received \$0,00 Paid \S*\$1,50/);
   await shot(p, 'trade-tab');
   // The timeframe is a switch whose blob travels to the chosen segment.
   await p.locator('.pfx-sum').getByRole('radio', { name: '30d' }).click();
