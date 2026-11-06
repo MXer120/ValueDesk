@@ -23,7 +23,7 @@ import {
 import { tailCountRate, tailOf } from './cohortTracker.js';
 import { labelMatches, shownLabel } from '../valuedesk/labels.js';
 import { winRateOf } from '../valuedesk/winRate.js';
-import { sampledVenue, COHORT_RANGES, type CohortWalletRow as WalletRow } from '../valuedesk/cohorts/model.js';
+import { sampledVenue, COHORT_RANGES, type BooksOverOi, type CohortWalletRow as WalletRow } from '../valuedesk/cohorts/model.js';
 import { EXCLUDED_FROM, EXCLUDED_WALLETS, isExcluded, outOfCohorts, type ExcludedFrom, type ExcludedWallet } from '../valuedesk/internalWallets.js';
 import { liqCoin } from '../valuedesk/liquidations/levels.js';
 import { activityCoverage } from '../flow/read.js';
@@ -1400,6 +1400,7 @@ export function cohortsRead(venues: readonly Venue[], f: CohortFilter): CohortsR
     asOf: load.at,
     coverage: Object.fromEntries(venues.map((v) => [v, load.coverage[v]])),
     coins,
+    overOi: booksOverOi(venues, f.coin),
     cohorts: stats.map(({ markets: _m, ...rest }) => ({
       ...rest,
       spark: thin((series.get(rest.id) ?? []).flatMap((p) => {
@@ -1499,6 +1500,7 @@ export function cohortFocus(venues: readonly Venue[], f: CohortFilter, range: Co
     at: load.booksAt,
     range,
     total,
+    overOi: booksOverOi(venues, f.coin),
     cohorts: stats.map((st) => ({
       id: st.id, wallets: st.wallets, long: st.long, short: st.short, upnl: st.upnl, inProfit: st.inProfit, inLoss: st.inLoss,
     })),
@@ -1553,6 +1555,30 @@ export function indexerStatusJudged(): unknown {
   const status = indexerStatus();
   if (!status || typeof status !== 'object') return status;
   return { ...(status as Record<string, unknown>), boardsAt: reader()?.newestBoardAt() ?? null };
+}
+
+/** The status row is parsed at most this often for booksOverOi: it is large, and read on every cohort answer. */
+const OVER_OI_CACHE_MS = 30_000;
+/** A check older than this says nothing about now (it runs every 5 minutes). */
+const OVER_OI_MAX_AGE_MS = 15 * 60_000;
+let overOiCache: { at: number; rows: BooksOverOi[] } | null = null;
+
+/** From the indexer's status row (cohortTracker.ts checkOi): its last open interest check, as rows. */
+export function overOiRows(status: unknown, now: number, maxAgeMs = OVER_OI_MAX_AGE_MS): BooksOverOi[] {
+  const oi = (status as { cohorts?: { liq?: { oi?: { at?: number; venues?: Record<string, { coins?: Array<{ coin: string; ratio: number }> }> } } } } | null)?.cohorts?.liq?.oi;
+  if (!oi?.at || now - oi.at > maxAgeMs) return [];
+  const at = oi.at;
+  return Object.entries(oi.venues ?? {}).flatMap(([venue, v]) => (v.coins ?? []).map((c) => ({ venue: venue as Venue, coin: c.coin, ratio: c.ratio, at })));
+}
+
+/**
+ * The coins whose books hold more than the venue says is open (over oiCheck.ts OI_EXCESS), in these venues: size that does
+ * not exist, until the reads correct it. An answer that shows the coin's figures carries them, so the page can say so.
+ */
+export function booksOverOi(venues: readonly Venue[], coin?: string | null): BooksOverOi[] {
+  const now = Date.now();
+  if (!overOiCache || now - overOiCache.at >= OVER_OI_CACHE_MS) overOiCache = { at: now, rows: overOiRows(indexerStatus(), now) };
+  return overOiCache.rows.filter((r) => venues.includes(r.venue) && (!coin || r.coin === coin));
 }
 
 /** The indexer's own status line (lanes, streams), for diagnostics. */

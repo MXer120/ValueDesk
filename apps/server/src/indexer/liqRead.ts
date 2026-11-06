@@ -63,9 +63,13 @@ export interface VenueCoverage {
   noRules?: boolean;
 }
 
+import type { BooksOverOi } from '../valuedesk/cohorts/model.js';
+
 export interface LiqHeatmap {
   coin: string;
   venues: Venue[];
+  /** The coin's books over its open interest (read.ts booksOverOi): the levels hold size that does not exist. */
+  overOi?: BooksOverOi[];
   /** When the indexer priced the books. */
   at: number;
   price: number | null;

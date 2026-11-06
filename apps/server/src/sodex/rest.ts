@@ -165,6 +165,11 @@ export class WeightBudget {
     return this.used.reduce((n, u) => n + u.w, 0);
   }
 
+  /** Weight spent elsewhere in this process (a read on another thread): it counts, and waits for nothing. */
+  charge(w: number, now = Date.now()): void {
+    this.used.push({ at: now, w });
+  }
+
   /**
    * Resolves once there is room for `w`. Bounded, not infinite: it used to
    * say "never rejects; just delays," which is what let one exhausted budget
@@ -705,6 +710,11 @@ export class SodexClient {
 
   weightSpent(): number {
     return this.budget.spent();
+  }
+
+  /** Weight spent on this gateway outside this client (a read on another thread). */
+  chargeWeight(w: number): void {
+    this.budget.charge(w);
   }
 
   /** The gateway's weight a minute for this IP, as it last reported it (1200 before its first answer). */

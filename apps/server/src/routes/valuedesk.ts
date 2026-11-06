@@ -50,6 +50,7 @@ import { hlPriceSeries } from '../valuedesk/hyperliquid/price.js';
 import { ACCOUNT_DETAIL, arcusProvider, lighterProvider, nameSpotFills, tradexyzProvider } from '../valuedesk/extra/providers.js';
 import { applyCachedCurves, attachPodiumCurves } from '../valuedesk/curves.js';
 import { attachStats, markSodexTrades, type SodexTradeNote, boardPage, cohortDetail, cohortFocus, cohortMap, cohortWallets, cohortsReady, cohortsRead, excludedNow, indexerStatus, indexerStatusJudged, netPage } from '../indexer/read.js';
+import { booksOverOi } from '../indexer/read.js';
 import { isCohortId, isSector, type CohortFilter, type CohortRange, type WalletSort } from '../valuedesk/cohorts/model.js';
 import { fineAskOf, fineDrawOf, isLiqRange, levFilterOf, liqAt, liqHeatmap, liqHeatmapFine, liqHeatmapOf, liqHistory, liqHistoryFine, liqWallets, walletHistoryFine, walletLiqs } from '../indexer/liqRead.js';
 import { TILE_FINAL_CACHE, TILE_INDEX_CACHE, TILE_WALLET_CACHE, keepLiqMetasWarm, liqTile, liqTileIndex, liqTileIndexOf, liqTileOf, tileAskOf } from '../indexer/liqTiles.js';
@@ -504,7 +505,7 @@ export async function valuedeskRoutes(app: FastifyInstance) {
       const body = fine ? await liqHeatmapFine(coin, cohortVenues(q), fine, { wallets: new Set(ws), side, lev: levFilterOf(q.lev) })
         : ws.length ? await liqHeatmapOf(coin, cohortVenues(q), ws) : await liqHeatmap(coin, cohortVenues(q));
       if (!body) return fail(reply, new NotAvailable('The index is not running yet'));
-      return { ok: true, ...body };
+      return { ok: true, ...body, overOi: booksOverOi(cohortVenues(q), coin) };
     } catch (e) {
       return fail(reply, e);
     }

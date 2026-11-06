@@ -45,5 +45,7 @@ export const tradesPage = reads.tradesPage;
 
 /** Weight this process has spent on the gateway in the last minute (shared with the UI). */
 export const gatewayWeightSpent = (): number => sodex.weightSpent();
+/** A gateway read made on another thread counts against the same budget. */
+export const chargeGatewayWeight = (w: number): void => sodex.chargeWeight(w);
 /** The gateway's weight a minute for this IP, as it last reported it: the thresholds above are shares of it. */
 export const gatewayWeightLimit = (): number => sodex.weightLimit();

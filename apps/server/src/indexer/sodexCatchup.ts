@@ -35,10 +35,12 @@ const READER_CODE = `
 const { parentPort } = require('node:worker_threads');
 parentPort.on('message', async ({ id, url }) => {
   try {
+    const sentAt = Date.now();
     const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
-    if (!res.ok) { parentPort.postMessage({ id, status: res.status }); return; }
+    const gotAt = Date.now();
+    if (!res.ok) { parentPort.postMessage({ id, status: res.status, sentAt, gotAt }); return; }
     const j = await res.json();
-    parentPort.postMessage({ id, status: res.status, data: j.data });
+    parentPort.postMessage({ id, status: res.status, data: j.data, sentAt, gotAt });
   } catch (e) {
     parentPort.postMessage({ id, error: String(e && e.message || e) });
   }
@@ -47,11 +49,14 @@ parentPort.on('message', async ({ id, url }) => {
 /** How long the indexer's thread waits for an answer: the worker's own 15 s, plus what this thread may lag. */
 const ANSWER_MS = 90_000;
 
+/** A read's answer: `sentAt` and `gotAt` are the reader thread's own clock, so this thread's lag is not in them. */
+export interface RestAnswer { status: number; data?: unknown; sentAt?: number; gotAt?: number }
+
 /** GET on the reader's thread; its JSON's `data` comes back here. */
 export class RestReader {
   private worker: Worker | null = null;
   private seq = 0;
-  private waiting = new Map<number, { ok: (v: { status: number; data?: unknown }) => void; no: (e: Error) => void; timer: NodeJS.Timeout }>();
+  private waiting = new Map<number, { ok: (v: RestAnswer) => void; no: (e: Error) => void; timer: NodeJS.Timeout }>();
 
   constructor(private readonly base = NET.restBase) {}
 
@@ -59,13 +64,13 @@ export class RestReader {
     if (this.worker) return this.worker;
     const w = new Worker(READER_CODE, { eval: true, execArgv: [] });
     w.unref();
-    w.on('message', (m: { id: number; status?: number; data?: unknown; error?: string }) => {
+    w.on('message', (m: { id: number; status?: number; data?: unknown; error?: string; sentAt?: number; gotAt?: number }) => {
       const r = this.waiting.get(m.id);
       if (!r) return;
       this.waiting.delete(m.id);
       clearTimeout(r.timer);
       if (m.error) r.no(new Error(m.error));
-      else r.ok({ status: m.status ?? 0, data: m.data });
+      else r.ok({ status: m.status ?? 0, data: m.data, sentAt: m.sentAt, gotAt: m.gotAt });
     });
     const gone = (why: string) => {
       if (this.worker === w) this.worker = null;
@@ -78,7 +83,7 @@ export class RestReader {
     return w;
   }
 
-  get(path: string): Promise<{ status: number; data?: unknown }> {
+  get(path: string): Promise<RestAnswer> {
     return new Promise((ok, no) => {
       const id = ++this.seq;
       const timer = setTimeout(() => { this.waiting.delete(id); no(new Error('no answer from the reader')); }, ANSWER_MS);
@@ -120,8 +125,15 @@ export class RestReader {
   };
 }
 
+/** A stream break the catch-up is asked to answer for: the prints of [from, to]. */
+interface Watch { from: number; to: number; deadline: number; left: Set<string> | null; failed: boolean }
+export type WatchState = 'covered' | 'lost' | 'waiting';
+/** How long a break waits for its answer: a full round of the markets takes about 5 minutes. */
+export const WATCH_MS = 15 * 60_000;
+
 export class SodexCatchup {
   private markets = new Map<string, Market>();
+  private watches = new Map<string, Watch>();
   private timer?: NodeJS.Timeout;
   private busy = false;
   private limitedUntil = 0;
@@ -156,6 +168,35 @@ export class SodexCatchup {
 
   status(): { markets: number; reads: number; added: number; beyondReach: number; errors: number; lastAddedAt: number; lastError: string | null } {
     return { markets: this.markets.size, ...this.stats };
+  }
+
+  /**
+   * Whether every print of [from, to] is held: every market read after `to` with a reach back to `from`. A market read after
+   * the break that cannot show back to `from` has lost that part: 'lost', and the break stands. The first ask starts the
+   * watch. `to` is when the stream was back, so what came after it is the stream's own.
+   */
+  watch(from: number, to: number): WatchState {
+    const key = `${from}|${to}`;
+    let w = this.watches.get(key);
+    if (!w) this.watches.set(key, (w = { from, to, deadline: this.now() + WATCH_MS, left: null, failed: false }));
+    if (!w.left && this.markets.size) w.left = new Set(this.markets.keys());
+    if (w.failed) return 'lost';
+    if (w.left && !w.left.size) return 'covered';
+    return this.now() > w.deadline ? 'lost' : 'waiting';
+  }
+
+  forget(from: number, to: number): void {
+    this.watches.delete(`${from}|${to}`);
+  }
+
+  private noteReach(key: string, readAt: number, oldest: number): void {
+    for (const w of this.watches.values()) {
+      if (!w.left && this.markets.size) w.left = new Set(this.markets.keys());
+      // Rows newer than STREAM_FIRST_MS are not added by this read, so a read this close to `to` proves nothing yet.
+      if (!w.left?.has(key) || readAt - STREAM_FIRST_MS < w.to) continue;
+      if (oldest <= w.from) w.left.delete(key);
+      else w.failed = true;
+    }
   }
 
   /** One step. Public for tests. */
@@ -199,7 +240,8 @@ export class SodexCatchup {
     this.stats.reads++;
     const sorted = rows.filter((r) => typeof r.t === 'number' && typeof r.T === 'number').sort((a, b) => a.t! - b.t!);
     m.nextAt = now + MIN_EVERY_MS;
-    if (!sorted.length) { m.nextAt = now + MAX_EVERY_MS; return; }
+    const key = `${m.engine}|${m.symbol}`;
+    if (!sorted.length) { this.noteReach(key, now, -Infinity); m.nextAt = now + MAX_EVERY_MS; return; }
     const oldest = sorted[0]!;
     const newest = sorted[sorted.length - 1]!;
     // Trade ids run without a hole per market, so what fell out of reach since the last read can be counted.
@@ -214,6 +256,8 @@ export class SodexCatchup {
       this.stats.lastAddedAt = now;
       this.log(`sodex catch-up: ${m.symbol}: added ${added.length} of ${sorted.length} (the oldest ${Math.round((now - added[0]!.t) / 60_000)} min old)`);
     }
+    // Fewer rows than the limit: SoDEX showed all it has. `add` throws if it could not tell what is held, so this is not reached then.
+    this.noteReach(key, now, sorted.length >= CATCHUP_LIMIT ? oldest.T! : -Infinity);
     const reach = sorted.length >= CATCHUP_LIMIT ? newest.T! - oldest.T! : Infinity;
     m.nextAt = now + Math.max(MIN_EVERY_MS, Math.min(MAX_EVERY_MS, reach / 2));
   }

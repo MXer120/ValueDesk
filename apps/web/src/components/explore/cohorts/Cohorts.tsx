@@ -35,7 +35,7 @@ import { CohortIcon } from './CohortIcon';
 import { LeanChart, bandsOf } from './LeanChart';
 import { Treemap } from './Treemap';
 import { SectorIcon } from './SectorIcon';
-import { BiasPill, LeanPill, Meter, POLL_MS, Picker, Split, VenueMarks, pctText, usePolled } from './parts';
+import { BiasPill, LeanPill, Meter, POLL_MS, Picker, Split, VenueMarks, pctText, usePolled, OverOiNote } from './parts';
 import { CrossFade, FadeView } from '../../motion';
 import { FocusPage, MarketMapPage } from './MarketSection';
 import { ExcludedButton } from '../../excluded/ExcludedPage';
@@ -193,7 +193,7 @@ function Overview({ data, onOpen }: { data: CohortsResponse | null; onOpen: (id:
     ...(v.show('overview', 'size') ? SIZE_COHORTS : []),
   ].filter((d) => v.cohortOn(d.id) && isEmpty(d)));
   const asOf = asOfText(data?.asOf);
-  return pnl || size ? <>{line && <p className="lbp-note">{line}</p>}{pnl}{size}{asOf && <p className="lbp-note coh-asof">{asOf}</p>}</> : <AllHidden />;
+  return pnl || size ? <>{line && <p className="lbp-note">{line}</p>}<OverOiNote rows={data?.overOi} />{pnl}{size}{asOf && <p className="lbp-note coh-asof">{asOf}</p>}</> : <AllHidden />;
 }
 
 /* --- one cohort ----------------------------------------------------------------------------- */

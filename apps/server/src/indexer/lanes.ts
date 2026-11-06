@@ -61,6 +61,12 @@ export interface LaneOptions {
   shares?: ReadonlyArray<{ prefix: string; share: number }>;
   /** Tasks in flight at once (default 1: one after another). */
   concurrency?: number;
+  /**
+   * The time a task took counts toward its rest (one after another only). A rest on top of the task made the rate a good
+   * deal lower than asked: at 6 a minute and 5-15 s a task on a busy thread, the SoDEX gateway lane did 2.4-3.9 (measured
+   * 2026-11-06). The spend stays at or below `perMin` on average.
+   */
+  creditTaskTime?: boolean;
   sleep?: (ms: number) => Promise<void>;
 }
 
@@ -301,6 +307,7 @@ export class Lane {
 
   private async run(key: string, run: () => Promise<number>): Promise<void> {
     let cost = 1;
+    const startedAt = Date.now();
     try {
       cost = Math.max(0, await run());
       this.done++;
@@ -319,7 +326,7 @@ export class Lane {
     }
     this.note(key, cost);
     this.spent += cost;
-    this.owed += cost;
+    this.owed += this.o.creditTaskTime ? Math.max(0, cost - ((Date.now() - startedAt) / 60_000) * this.rate) : cost;
     for (const wake of this.waiters.splice(0)) wake();
   }
 }
