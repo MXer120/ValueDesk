@@ -216,7 +216,7 @@ function RulesTab({ perps, spot, onTiers }: { perps: readonly LimitSymbol[]; spo
         </div>
       </div>
       {rows.length === 0 ? (
-        <div className="lim-panel ex-state"><b>No market matches</b><span>Nothing on SoDEX's {engine === 'perps' ? 'futures' : 'spot'} list goes by "{q.trim()}".</span></div>
+        <div className="lim-panel ex-state"><b>No market matches</b><span>{`Nothing on SoDEX's ${engine === 'perps' ? 'futures' : 'spot'} list goes by "${q.trim()}".`}</span></div>
       ) : (
         <div className="lim-panel">
           <div className="lim-scroll">

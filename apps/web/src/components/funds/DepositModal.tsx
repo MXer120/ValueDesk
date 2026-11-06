@@ -459,13 +459,13 @@ function TransferCrypto({ owner, mirror, onMirror, configs, firstDeposit }: {
             <div className="fx-warnbox" role="alert">
               <p className="fx-warnbox__t">I understand:</p>
               <ul>
-                <li>Only send <em>{sym}</em> on <em>{chainName}</em> Network.</li>
-                {min && <li><em>Each deposit</em> must be at least <em>{min} {sym}</em>.</li>}
-                {route?.contractWarning && <li>Send from a normal wallet - <em>not from a smart contract</em>.</li>}
+                <li><em>{`Only send ${sym} on ${chainName} Network.`}</em></li>
+                {min && <li><em>{`Each deposit must be at least ${min} ${sym}.`}</em></li>}
+                {route?.contractWarning && <li><em>Send from a normal wallet, not from a smart contract.</em></li>}
                 {route?.needsMemo && <li>No memo / tag is needed. If the sending exchange insists on one, enter any 9-digit number (e.g. 123456789).</li>}
-                {route && /^(XRP|XLM)$/.test(route.chain) && <li>Your <em>first {sym}</em> deposit pays a one-time 1 {sym} address activation fee.</li>}
+                {route && /^(XRP|XLM)$/.test(route.chain) && <li>{`Your first ${sym} deposit pays a one-time 1 ${sym} address activation fee.`}</li>}
               </ul>
-              <p>Otherwise, it will result in permanent <em>loss</em>.</p>
+              <p><em>Otherwise, your funds will be permanently lost.</em></p>
               <button type="button" className="fx-cta" onClick={() => setAcked((prev) => new Set(prev).add(key))}>
                 OK, show me the address
               </button>

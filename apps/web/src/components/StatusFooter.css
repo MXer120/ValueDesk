@@ -553,7 +553,10 @@
 @media (max-width: 560px) {
   .sfoot-connword { display: none; }
 }
+.sfoot-chipshort { display: none; }
 @media (max-width: 480px) {
+  .sfoot-chiplong { display: none; }
+  .sfoot-chipshort { display: inline; }
   /* The word the law asks for; the menu behind it has them all. */
   .sfoot-legal__more { display: none; }
   .sfoot-group { gap: var(--sp-2); }

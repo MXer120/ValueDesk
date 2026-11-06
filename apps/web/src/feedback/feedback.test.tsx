@@ -231,7 +231,7 @@ test('Send: the form only asks; the warning and the slide are a second window, a
   assert.match(form, /onSubmit=\{[^}]*askToSend\(\)/);
   assert.ok(!/onSubmit=[\s\S]{0,80}send\(\)/.test(form.replace('askToSend', '')), 'submit never sends by itself');
   const confirm = src.slice(src.indexOf('export function SendConfirm'));
-  assert.match(confirm, /<b>Never<\/b> send a <b>private key<\/b>, a <b>seed phrase<\/b>, <b>passwords<\/b> or <b>API keys<\/b>/);
+  assert.match(confirm, /<b>Never send a private key, a seed phrase, passwords or API keys\.<\/b>/);
   assert.match(confirm, /<SlideConfirm label=\{CONFIRM_LABEL\} tone="sell" onConfirm=\{onConfirm\}/);
   assert.match(src, /<SendConfirm open=\{open && confirming\}[\s\S]{0,80}onConfirm=\{\(\) => void send\(\)\}/);
   const { CONFIRM_LABEL } = await import('./FeedbackDialog');

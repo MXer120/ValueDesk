@@ -65,6 +65,11 @@ test('holes side by side are left to the English, not guessed at', () => {
   assert.equal(t('ab cd'), null);
 });
 
+test('an English plural ending from the code does not reach another language', () => {
+  const t = createMatcher({ '{0} order{1} filled': '{0} Order{1} ausgeführt' });
+  assert.equal(t('3 orders filled'), '3 Order ausgeführt');
+});
+
 test('prices and times are not words', () => {
   assert.ok(!hasWords('22:40:02'));
   assert.ok(!hasWords('$1,234.50'));
@@ -89,8 +94,10 @@ for (const code of catalogues) {
     assert.deepEqual(bad.slice(0, 20), [], `${bad.length} broken`);
   });
   test(`${code}: every number of the English is in the translation`, () => {
-    const nums = (s: string) => (s.replace(/\{\d+\}/g, '').replace(/~?\d{1,2}(:\d\d)? ?(am|pm)\b/gi, '').match(/\d+(?:[.,]\d+)*/g) ?? []).map((n) => n.replace(/[.,]/g, ''));
-    const bad = Object.entries(c).filter(([en, to]) => { const have = nums(to).concat((to.match(/\d+/g) ?? [])); return nums(en).some((n) => !have.includes(n)); }).map(([en, to]) => `${en} => ${to}`);
+    // Written the local way is the same number: 200,000 = 200 000; 2:30 pm = 14:30; $1M = 100 万; 24/7 = round the clock.
+    const nums = (t: string) => (t.replace(/\{\d+\}/g, '').replace(/~?\d{1,2}(:\d\d)? ?(am|pm)\b/gi, '').replace(/24\/7/g, '').replace(/\$?\d+(\.\d+)?[KMB]\b/g, '').match(/\d+(?:[.,]\d+)*/g) ?? []).map((n) => n.replace(/[.,]/g, ''));
+    const digits = (t: string) => t.replace(/\{\d+\}/g, '').replace(/(\d)[\s\u00a0\u202f.,'’](?=\d)/g, '$1');
+    const bad = Object.entries(c).filter(([en, to]) => { const have = digits(to); return nums(en).some((n) => !have.includes(n)); }).map(([en, to]) => `${en} => ${to}`);
     assert.deepEqual(bad.slice(0, 20), [], `${bad.length} changed`);
   });
   test(`${code}: names and tickers stay as they are`, () => {
