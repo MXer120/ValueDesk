@@ -92,6 +92,7 @@ import { RestReader } from './sodexCatchup.js';
 import type { PerpsState } from '../valuedesk/sodex/mappers.js';
 import { chargeGatewayWeight } from '../valuedesk/sodex/gateway.js';
 import { excludedOf, isExcluded, outOfCohorts } from '../valuedesk/internalWallets.js';
+import { sodexInternalNow } from '../valuedesk/sodex/oiExcluded.js';
 
 const envNum = (name: string, dflt: number, min: number, max: number): number => {
   const n = Number(process.env[name]);
@@ -2174,8 +2175,12 @@ export class CohortTracker {
     const totals = this.live.totals();
     const markets = new Map<Venue, Map<string, number>>();
     const staleOi: Venue[] = [];
+    // The books leave SoDEX's internal pair out, so the check must too: against the whole figure the 36 markets the pair holds
+    // could never read over (BTC: books 14 of 908 until 2026-11-06). Without the pair's size SoDEX is judged on nothing.
+    const sodexInternal = await sodexInternalNow();
     for (const v of VENUES) {
       const m = await venueMarkets(v, { oi: true }).catch(() => null);
+      if (v === 'sodex' && !sodexInternal) { staleOi.push(v); markets.set(v, new Map()); continue; }
       // A failed read answers with the last good one. Judged against that, books are "over" what the market held minutes ago:
       // WIF 2,496 against 153 at 12:03 on 2026-11-06, when a real print of 2,414 at 11:57 had made it so and the books were right.
       if (m && Date.now() - m.at > OI_FRESH_MS) { staleOi.push(v); markets.set(v, new Map()); continue; }
@@ -2184,6 +2189,7 @@ export class CohortTracker {
         const c = liqCoin(symbol);
         per.set(c, (per.get(c) ?? 0) + x.oi);
       }
+      if (v === 'sodex') for (const [c, size] of sodexInternal ?? []) per.set(c, Math.max(0, (per.get(c) ?? 0) - size));
       markets.set(v, per);
     }
     const rows = oiCheck(totals, (v, coin) => markets.get(v)?.get(coin) ?? null);

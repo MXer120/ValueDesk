@@ -27,6 +27,7 @@ import { inflateRawSync } from 'node:zlib';
 import { marketsNow, venueMarkets, type VenueMarkets } from '../valuedesk/liquidations/rules.js';
 import { shownLabel } from '../valuedesk/labels.js';
 import { cohortBooksNow, internalOiNow } from './read.js';
+import { sodexInternalNow } from '../valuedesk/sodex/oiExcluded.js';
 import { reader } from './reader.js';
 import type { LiqAtRow } from './store.js';
 import { liqFeed } from './liqFeed.js';
@@ -243,7 +244,7 @@ async function gather(coin: string, venues: readonly Venue[]): Promise<Gathered 
     const tiersFor = (s: string): Tiers | null => m?.tiers.get(s) ?? null;
     const wallets = idx?.get(venue) ?? [];
     const cov: VenueCoverage = {
-      oi: mk.length ? Math.max(0, mk.reduce((a, x) => a + x.oi, 0) - internalOiNow(venue, coin)) : null, oiUsd: null,
+      oi: mk.length ? Math.max(0, mk.reduce((a, x) => a + x.oi, 0) - internalOiOf(venue, coin)) : null, oiUsd: null,
       long: 0, short: 0, longKnown: 0, shortKnown: 0, longNone: 0, shortNone: 0, positions: 0, past: 0,
       price: null, accuracy: shownAccuracy(acc[venue]), computed: venue === 'arcus', ...(m ? {} : { noRules: true }),
     };
@@ -311,7 +312,7 @@ export function heatOf(
     const main = mk.slice().sort((p, q) => q.oi - p.oi)[0];
     const price = main?.px ?? null;
     // The venue's own accounts' share is not the traders' (internalWallets.ts): the books leave them out, so does the OI.
-    const oi = mk.length ? Math.max(0, mk.reduce((n, y) => n + y.oi, 0) - internalOiNow(venue, coin)) : null;
+    const oi = mk.length ? Math.max(0, mk.reduce((n, y) => n + y.oi, 0) - internalOiOf(venue, coin)) : null;
     coverage[venue] = {
       oi, oiUsd: oi !== null && price !== null ? oi * price : null,
       long: x?.c[0] ?? 0, short: x?.c[1] ?? 0, longKnown: x?.c[2] ?? 0, shortKnown: x?.c[3] ?? 0, longNone: x?.c[6] ?? 0, shortNone: x?.c[7] ?? 0, positions: x?.c[4] ?? 0, past: x?.c[5] ?? 0,
@@ -363,7 +364,19 @@ export function liveSrc(coin: string): Parameters<typeof heatOf>[2] | null {
  * (2026-10-28) whenever the API's shared Lighter / Arcus pacers or Hyperliquid budget were busy:
  * the edge gave up at 30 s and the map showed nothing.
  */
+/** SoDEX's internal pair as SoDEX says it holds now (oiExcluded.ts), when it answered in the last minute. */
+let sodexInternal: { at: number; byCoin: Map<string, number> } | null = null;
+const SODEX_INTERNAL_FRESH_MS = 60_000;
+function internalOiOf(venue: Venue, coin: string): number {
+  if (venue === 'sodex' && sodexInternal && Date.now() - sodexInternal.at < SODEX_INTERNAL_FRESH_MS) return sodexInternal.byCoin.get(coin) ?? 0;
+  return internalOiNow(venue, coin);
+}
+
 export async function marketsFor(venues: readonly Venue[]): Promise<Map<Venue, VenueMarkets | null>> {
+  if (venues.includes('sodex')) {
+    // At most one read in 15 s however many ask, and a page never waits for it: the next one has it.
+    void sodexInternalNow().then((byCoin) => { if (byCoin) sodexInternal = { at: Date.now(), byCoin }; });
+  }
   return new Map(await Promise.all(venues.map(async (v) => {
     const fresh = venueMarkets(v, { oi: true }).catch(() => null);
     const now = marketsNow(v);
