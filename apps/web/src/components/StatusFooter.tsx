@@ -39,6 +39,8 @@
  * with"), so its row routes to the wallet page to unlock instead.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { usePresence } from './motion';
+import { useHoverMenu } from './useHoverMenu';
 import type { SessionInfo } from '../api';
 import { Modal } from './Modal';
 import { useAddressMask } from '../privacy';
@@ -305,30 +307,10 @@ export function StatusFooter({
         >
           Status
         </a>
-        {/* The Impressum, privacy policy and terms: required to be reachable
-            from every page, and this bar is the one strip every page has.
-            Words in the bar's own muted type, left of the rule that opens the
-            icon cluster - present, never louder than the icons. Real links
-            (middle-click, copy link); a plain click changes page in place. */}
-        <nav className="sfoot-legal" aria-label="Legal">
-          {LEGAL_PAGES.map((p) => (
-            <a
-              key={p}
-              href={pathForLegal(p)}
-              lang={p === 'impressum' ? 'de' : undefined}
-              className={`sfoot-link sfoot-link--${p}`}
-              aria-current={legal === p ? 'page' : undefined}
-              onClick={(e) => {
-                if (!onOpenLegal || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
-                e.preventDefault();
-                setMenuOpen(false);
-                onOpenLegal(p);
-              }}
-            >
-              {LEGAL_LABELS[p]}
-            </a>
-          ))}
-        </nav>
+        {/* The Impressum, privacy policy and terms: required to be reachable from every page, and this
+            bar is the one strip every page has. One entry that names the Impressum, a menu of all the
+            documents (owner 2026-11-06: the row of seven words was too much). */}
+        <LegalMenu legal={legal} onOpenLegal={onOpenLegal ? (p) => { setMenuOpen(false); onOpenLegal(p); } : undefined} />
         <span className="sfoot-rule" aria-hidden="true" />
         <button
           type="button"
@@ -463,3 +445,42 @@ const StatsIcon = () => (
     />
   </svg>
 );
+
+/** The legal documents behind one entry: opens upward, on hover or a press, like the bar's other pop-ups (useHoverMenu.ts). */
+function LegalMenu({ legal, onOpenLegal }: { legal: LegalPage | null; onOpenLegal?: (page: LegalPage) => void }) {
+  const root = useRef<HTMLDivElement>(null);
+  const { open, close, press, hoverProps } = useHoverMenu(root);
+  const pres = usePresence(open);
+  return (
+    <div className="sfoot-legal" ref={root} {...hoverProps}>
+      <button type="button" className={`sfoot-link sfoot-legal__btn${legal ? ' is-here' : ''}`} aria-haspopup="menu" aria-expanded={open} onClick={press}>
+        <span lang="de">Impressum</span><span className="sfoot-legal__more"> &amp; legal</span>
+      </button>
+      {pres.mounted && (
+        <nav
+          className={`menu-popup sfoot-legal__menu navpop${pres.closing ? ' is-closing' : ''}`}
+          aria-label="Legal"
+          onAnimationEnd={(e) => { if (pres.closing && e.animationName === 'mo-pop-out') pres.done(); }}
+        >
+          {LEGAL_PAGES.map((p) => (
+            <a
+              key={p}
+              href={pathForLegal(p)}
+              lang={p === 'impressum' ? 'de' : undefined}
+              className={`menu-row${legal === p ? ' is-current' : ''}`}
+              aria-current={legal === p ? 'page' : undefined}
+              onClick={(e) => {
+                if (!onOpenLegal || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                e.preventDefault();
+                close();
+                onOpenLegal(p);
+              }}
+            >
+              <span className="menu-row__label">{LEGAL_LABELS[p]}</span>
+            </a>
+          ))}
+        </nav>
+      )}
+    </div>
+  );
+}

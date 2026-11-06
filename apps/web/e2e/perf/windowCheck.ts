@@ -8,7 +8,7 @@ import { createServer } from 'node:http';
 import { dirname, extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { launchEdge } from '../ui/browser';
-import { acceptWelcome, connectWallet, dismissOnboarding, dismissSetup, hideDevPanel, newUiContext } from '../ui/harness';
+import { acceptWelcome, connectWallet, dismissOnboarding, dismissSetup, newUiContext } from '../ui/harness';
 import { createTestWallet } from '../ui/wallet';
 
 const [dist, shots] = process.argv.slice(2);
@@ -36,7 +36,6 @@ await ctx.addInitScript({ content: `window.__VS_FAKE = ${JSON.stringify({ owner:
 await ctx.addInitScript({ content: readFileSync(join(here, 'fakeAccount.js'), 'utf8') });
 const page = await ctx.newPage();
 await page.goto(`${origin}/trade`, { waitUntil: 'domcontentloaded' });
-await hideDevPanel(page).catch(() => {});
 await acceptWelcome(page).catch(() => {});
 await connectWallet(page, { settle: true }).catch(() => {});
 await dismissOnboarding(page, 3000).catch(() => {});

@@ -22,7 +22,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { CDPSession, Page } from 'playwright-core';
 import { findDevWeb, launchEdge } from './browser';
-import { acceptWelcome, hideDevPanel, newUiContext } from './harness';
+import { acceptWelcome, newUiContext } from './harness';
 import { ticket } from './ticket';
 import { enableTrading, sideButton } from './trade';
 import { createTestWallet } from './wallet';
@@ -32,6 +32,9 @@ const THEME = arg('theme', 'light')!;
 const PHONE = arg('viewport', 'desktop') === 'phone';
 const ONLY = arg('only')?.split(',');
 const SHOTS = arg('shots');
+/** --lang de: note, page by page, every piece of English that language's catalogue lacks, to <out>.missing.json. The page stays English. */
+const LANG = arg('lang');
+const MISSING = new Map<string, string>();
 const OUT = arg('out', join(dirname(fileURLToPath(import.meta.url)), '.out', `theme-audit-${THEME}-${PHONE ? 'phone' : 'desktop'}.json`))!;
 const SRC = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'src');
 
@@ -135,7 +138,7 @@ const PAGE_LIB = `
     for (const n of el.childNodes) if (n.nodeType === 3) t += n.nodeValue;
     return t.trim();
   };
-  const SKIP = '.devp, .devp *, input[type=checkbox], input[type=radio], input[type=range], input[type=color], canvas, video, iframe, script, style, noscript, .sr-only, [aria-hidden="true"] .sr-only';
+  const SKIP = 'input[type=checkbox], input[type=radio], input[type=range], input[type=color], canvas, video, iframe, script, style, noscript, .sr-only, [aria-hidden="true"] .sr-only';
   const isDisabled = (el) => !!el.closest('[disabled], [aria-disabled="true"], .is-off, .is-disabled, .disabled, fieldset[disabled]');
   window.__audit = (root, scene, state) => {
     const base = page();
@@ -215,7 +218,6 @@ const INTERACTIVE = 'button,a[href],[role=button],[role=tab],[role=menuitem],[ro
 const KIND_FN = `function () {
   const r = this.getBoundingClientRect();
   if (r.width < 1 || r.height < 1 || r.bottom < 0 || r.top > innerHeight || r.left > innerWidth || r.right < 0) return '';
-  if (this.closest('.devp')) return '';
   return this.tagName + '|' + (typeof this.className === 'string' ? this.className : '') + '|' + (this.getAttribute('role') || '') + '|' + (this.getAttribute('aria-selected') || '') + (this.getAttribute('aria-checked') || '') + (this.disabled ? 'd' : '');
 }`;
 
@@ -262,6 +264,7 @@ async function audit(page: Page, scene: string): Promise<void> {
   findings.push(...resting);
   const { elements, states } = await forcedStates(scene);
   covered.push({ scene, ok: true, elements, states });
+  if (LANG) for (const m of await page.evaluate(() => [...((window as unknown as { __vsI18nMissing?: Set<string> }).__vsI18nMissing ?? [])])) if (!MISSING.has(m)) MISSING.set(m, scene);
   if (SHOTS) {
     mkdirSync(SHOTS, { recursive: true });
     await page.screenshot({ path: join(SHOTS, `${scene.replace(/[^a-z0-9]+/gi, '-')}.png`) });
@@ -269,7 +272,7 @@ async function audit(page: Page, scene: string): Promise<void> {
   console.log(`  ${scene}: ${resting.length} at rest, ${elements} interactive kinds, ${states} forced states`);
 }
 
-const STILL = '*, *::before, *::after { transition: none !important; animation: none !important; } .devp { opacity: 0.001 !important; pointer-events: none !important; }';
+const STILL = '*, *::before, *::after { transition: none !important; animation: none !important; }';
 async function ready(page: Page): Promise<void> {
   await page.addStyleTag({ content: STILL });
   await page.evaluate(PAGE_LIB);
@@ -434,12 +437,13 @@ async function runScenes(first: Page, scenes: Scene[], group: string): Promise<v
 async function main(): Promise<void> {
   const origin = process.env.VS_E2E_UI_WEB?.trim() || (await findDevWeb());
   const browser = await launchEdge({});
-  const storage = { 'vs.theme': THEME, 'vs.setup.done': '1' };
+  const storage: Record<string, string> = { 'vs.theme': THEME, 'vs.setup.done': '1', ...(LANG ? { 'vs.lang.audit': LANG } : {}) };
 
   // No wallet.
   {
     const wallet = createTestWallet();
     const ctx = await newUiContext(browser, wallet, { ...storage, 'vd.site.terms.look': JSON.stringify('2026-10-28') }, { phone: PHONE });
+    if (LANG) await ctx.addInitScript(() => { (window as unknown as { __vsI18nMissing: Set<string> }).__vsI18nMissing = new Set(); });
     const page = await ctx.newPage();
     await page.goto(`${origin}/trade`, { waitUntil: 'domcontentloaded' });
     await page.waitForTimeout(4000);
@@ -457,9 +461,9 @@ async function main(): Promise<void> {
   {
     const wallet = createTestWallet();
     const ctx = await newUiContext(browser, wallet, storage, { phone: PHONE });
+    if (LANG) await ctx.addInitScript(() => { (window as unknown as { __vsI18nMissing: Set<string> }).__vsI18nMissing = new Set(); });
     const page = await ctx.newPage();
     await page.goto(`${origin}/trade`, { waitUntil: 'domcontentloaded' });
-    await hideDevPanel(page); // at phone width it lies over the welcome gate's checkbox
     await acceptWelcome(page);
     try {
       await enableTrading({ page, ctx, wallet }, { position: { symbol: 'BTC-USD', size: '0.01', entry: '70000', leverage: 10 }, openOrder: { symbol: 'BTC-USD', side: 'BUY', price: '50000', quantity: '0.01' } });
@@ -483,6 +487,10 @@ async function main(): Promise<void> {
   const list = [...groups.values()].sort((a, b) => a.kind.localeCompare(b.kind) || a.ratio - b.ratio).map((g) => ({ ...g, scenes: [...g.scenes].slice(0, 4) }));
   mkdirSync(dirname(OUT), { recursive: true });
   writeFileSync(OUT, JSON.stringify({ covered, findings: list }, null, 1));
+  if (LANG) {
+    writeFileSync(`${OUT}.missing.json`, JSON.stringify(Object.fromEntries(MISSING), null, 1));
+    console.log(`${MISSING.size} pieces of English still on screen in ${LANG}: ${OUT}.missing.json`);
+  }
   const ok = covered.filter((c) => c.ok);
   console.log(`\n${ok.length} of ${covered.length} scenes reached; ${ok.reduce((a, c) => a + (c.elements ?? 0), 0)} interactive kinds, ${ok.reduce((a, c) => a + (c.states ?? 0), 0)} forced states`);
   console.log(`${list.filter((f) => f.kind === 'contrast').length} contrast, ${list.filter((f) => f.kind === 'icon').length} icon, ${list.filter((f) => f.kind === 'dark-fill').length} dark-fill distinct findings -> ${OUT}`);

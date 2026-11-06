@@ -58,7 +58,6 @@ import './components/funds/funds.css';
 import './components/FeeSchedule.css';
 import './setup/setup.css';
 import './onboarding/onboarding.css';
-import './components/dev/DevPanel.css';
 import './components/explore/Explore.css';
 import './components/excluded/excluded.css';
 import './components/sodex/sodex.css';

@@ -22,7 +22,7 @@
 import type { BrowserContext, Page } from 'playwright-core';
 import { TEST_BRIDGE_VERSION } from '../../src/testBridge';
 import { launchEdge } from './browser';
-import { acceptWelcome, connectWallet, hideDevPanel, newUiContext, until } from './harness';
+import { acceptWelcome, connectWallet, newUiContext, until } from './harness';
 import { ticket } from './ticket';
 import { runUiStep } from './uiSteps';
 import { createTestWallet, type WalletRecord } from './wallet';
@@ -139,7 +139,6 @@ export async function openBridgeSession(o: BridgeSessionOptions): Promise<Bridge
     await p.goto(`${o.origin}/trade`, { waitUntil: 'domcontentloaded' });
     if (first) {
       await acceptWelcome(p);
-      await hideDevPanel(p);
       await connectWallet(p);
     }
     await until(p, async () => (await p.evaluate(() => window.__vsTest?.version ?? 0)) > 0, 'the test bridge (window.__vsTest) on the page', 30_000);

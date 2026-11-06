@@ -28,11 +28,16 @@ import { AnalyticsPrompt } from './legal/AnalyticsPrompt';
 import { loadViewerGeo } from './legal/geo';
 import { startAnalytics } from './analytics/usage';
 import { startAttention } from './attention';
+import { bootLanguage } from './i18n/store';
 import './styles.css';
 import './theme-light.css';
 import './theme';
 import './appearance';
+
 import { useNumStyle } from './numStyle';
+
+/* Before React renders, so a chosen language is on the page as early as its catalogue allows. */
+bootLanguage();
 
 // beta.valuedesk.so (VITE_CHANNEL=beta, deploy/vercel/beta.settings): the beta list's door before the app
 // (beta/BetaGate.tsx). The site's own build folds this to null and never contains the door.

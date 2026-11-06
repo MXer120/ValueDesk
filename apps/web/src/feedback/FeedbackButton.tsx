@@ -12,6 +12,7 @@ import { useSyncExternalStore } from 'react';
 import type { ElementInfo } from './element';
 import { hasUnread, onUnread } from './threads';
 import './feedback.css';
+import { currentLanguage, languageName } from '../i18n/store';
 
 export const OPEN_FEEDBACK_EVENT = 'vs:open-feedback';
 
@@ -20,11 +21,20 @@ export interface OpenFeedback {
   element?: ElementInfo;
   /** Open this thread (a reply in the bell). */
   thread?: string;
+  /** Start the form on these areas (ids of ops/feedbackAreas.ts)... */
+  areas?: string[];
+  /** ...and with this text, for the sender to finish. */
+  draft?: string;
 }
 
 /** Open the feedback chat from anywhere. */
 export function openFeedback(o: OpenFeedback = {}): void {
   window.dispatchEvent(new CustomEvent<OpenFeedback>(OPEN_FEEDBACK_EVENT, { detail: o }));
+}
+
+/** The feedback form, set up to say a translation is wrong: the language is named, the area chosen. */
+export function reportTranslation(element?: ElementInfo): void {
+  openFeedback({ element, areas: ['translations'], draft: `Language: ${languageName(currentLanguage())}\nShown: \nShould say: ` });
 }
 
 export const FEEDBACK_LABEL = 'Send feedback';

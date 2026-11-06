@@ -484,13 +484,14 @@
    --text. No box and no underline: chrome, not content. */
 /* The status page's link: a word like the legal ones, between the feedback entry and them. */
 .sfoot-right .sfoot-link--status { flex: none; margin-right: var(--sp-3); }
-.sfoot-legal {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-3);
-  flex: none;
-  white-space: nowrap;
-}
+.sfoot-legal { position: relative; display: flex; align-items: center; flex: none; white-space: nowrap; }
+.sfoot-legal__btn { min-height: 0; padding: 0; border: 0; background: none; box-shadow: none; font: inherit; cursor: pointer; }
+.sfoot-legal__more { white-space: pre; }
+.sfoot-legal__btn:hover, .sfoot-legal__btn[aria-expanded='true'], .sfoot-legal__btn.is-here { color: var(--text); background: none; }
+/* Above the bar, the right edge on the word's; the pad closes the gap for a mouse on its way up. */
+.menu-popup.sfoot-legal__menu { top: auto; left: auto; right: 0; bottom: calc(100% + 6px); z-index: 72; display: flex; flex-direction: column; gap: 1px; min-width: 180px; transform-origin: bottom right; }
+.sfoot-legal__menu a.menu-row { text-decoration: none; }
+.sfoot-legal__menu .menu-row.is-current { background: rgb(var(--ink) / 0.05); }
 .sfoot-link {
   color: var(--muted);
   text-decoration: none;
@@ -546,29 +547,15 @@
    The connection WORD goes at 560px; the dot still carries the state, and it
    is the same convention the navbar already uses at 900px. Identity and the
    three actions survive at every width. */
-/* The right group is `flex: none`, so whatever it cannot fit squeezes the
-   account chip: with all seven legal words, Status and "Send feedback" it is
-   ~640px wide, and from 993px down the chip collapsed to an 18px red sliver
-   with Licences pushed past the window's edge (measured at 600 and 768px,
-   2026-11-03). So the words go in steps, the ones the legal pages' own switch
-   reaches one tap away first. (Two classes: the touch block at the end of this
-   file gives `.sfoot-link` a display of its own.) */
-@media (max-width: 993px) {
-  .sfoot-legal .sfoot-link--privacy,
-  .sfoot-legal .sfoot-link--terms,
-  .sfoot-legal .sfoot-link--copy-terms { display: none; }
-}
 @media (max-width: 760px) {
   .sfoot-right .sfoot-link--status { display: none; }
 }
 @media (max-width: 560px) {
   .sfoot-connword { display: none; }
 }
-/* A phone keeps the Impressum only, the one link the law wants on every page. */
 @media (max-width: 480px) {
-  .sfoot-legal .sfoot-link--cookies,
-  .sfoot-legal .sfoot-link--risk,
-  .sfoot-legal .sfoot-link--licenses { display: none; }
+  /* The word the law asks for; the menu behind it has them all. */
+  .sfoot-legal__more { display: none; }
   .sfoot-group { gap: var(--sp-2); }
 }
 /* The chip states which key the next order signs under: it may ellipsis, never vanish. */

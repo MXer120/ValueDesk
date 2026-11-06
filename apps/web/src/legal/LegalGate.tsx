@@ -222,7 +222,8 @@ function TermsForm({ signer, offerOptional, onOpen, onDone }: TermsFormProps) {
 
   return (
     <>
-      <label className={`lg-card lg-card--confirm${confirmed ? ' is-on' : ''}`}>
+      {/* What is agreed to stays in the language of the terms it refers to. */}
+      <label className={`lg-card lg-card--confirm${confirmed ? ' is-on' : ''}`} data-no-i18n="">
         <span className="lg-card__head">
           <input type="checkbox" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} />
           <span>I confirm that</span>

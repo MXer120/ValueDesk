@@ -38,6 +38,7 @@ import { preloadWalletModal, warmWalletModal } from '../walletconnect';
 import { Notices } from './Notices';
 import { NavMore, type NavAlert } from './NavMore';
 import { NavTrade } from './NavTrade';
+import { LanguageGlobe } from './LanguageMenu';
 import { useHoverMenu } from './useHoverMenu';
 import { SettingsMenu } from './SettingsMenu';
 import { useAddressMask, useMask } from '../privacy';
@@ -262,6 +263,7 @@ export function NavBar({
           {rail && <div id="vs-notify-slot" className="navnotify" />}
           {/* A restricted (close-only) place: the red pill, always, rail or not (legal/LegalGate.tsx). */}
           <RegionPill address={address} />
+          <LanguageGlobe />
           {rail && <Notices address={address} />}
           {/* ONE settings gear: hide mode, and the page layout (lock / edit). In the rail when it shows. */}
           {!rail && (
