@@ -168,8 +168,6 @@ export function uiSuite(file = process.argv[1] ?? 'spec') {
 
   async function goto(page: Page, at: string, path: string, o: Omit<OpenOptions, 'setup'>): Promise<void> {
     await page.goto(at + path, { waitUntil: 'domcontentloaded' });
-    // The dock first: at phone width it lies over the welcome gate's checkbox.
-    await hideDevPanel(page);
     if (o.welcome !== false) await acceptWelcome(page);
     if (o.connect) await connectWallet(page);
   }
@@ -250,17 +248,6 @@ export async function acceptWelcome(page: Page): Promise<void> {
   await dialog.getByRole('checkbox', { name: /^I confirm that/ }).check();
   await dialog.getByRole('button', { name: 'Only necessary' }).click();
   await dialog.waitFor({ state: 'hidden' });
-}
-
-/** The dev build's Developer dock (components/dev/DevPanel.tsx) folded to its chip: it floats over the page's left half. */
-export async function hideDevPanel(page: Page): Promise<void> {
-  const hide = page.getByRole('complementary', { name: 'Developer' }).getByRole('button', { name: 'Hide', exact: true });
-  try {
-    await hide.waitFor({ state: 'visible', timeout: 5_000 });
-    await hide.click();
-  } catch {
-    /* not shown */
-  }
 }
 
 /**

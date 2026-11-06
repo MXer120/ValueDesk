@@ -40,6 +40,9 @@ import { NEWS_SOURCES, OUTLETS, logoUrl, useNewsSources, useOutletsOff } from '.
 import { SETTINGS_EVENT, type SettingsSection } from '../settingsBus';
 import { requestDisconnect } from './account/actions';
 import { setTheme, useTheme, type Theme } from '../theme';
+import { useLanguage } from '../i18n/store';
+import { LanguageRow } from './LanguageMenu';
+import { reportTranslation } from '../feedback/FeedbackButton';
 import { ProfileAccount } from '../onboarding/ProfileAccount';
 import { markProfileSeen, profileSeen } from '../onboarding/model';
 import { useUsername } from '../onboarding/profile';
@@ -552,11 +555,28 @@ const THEMES: ReadonlyArray<{ id: Theme; label: string; hint: string }> = [
   { id: 'light', label: 'Light', hint: 'Frosted glass on a soft light page' },
 ];
 
+/** The language (LanguageMenu.tsx), and the way to say a translation is wrong. */
+function LanguageChoice() {
+  const lang = useLanguage();
+  return (
+    <>
+      <div className="stg__label"><span>Language</span></div>
+      <LanguageRow />
+      {lang !== 'en' && (
+        <p className="stg__note">
+          Something translated wrong? <button type="button" className="stg__inlink" onClick={() => reportTranslation()}>Report a translation issue</button>
+        </p>
+      )}
+    </>
+  );
+}
+
 function ProfileSection({ address }: { address: string | null }) {
   return (
     <>
-      <Head title="Profile" line="Your username, how the terminal looks and how numbers are written." />
+      <Head title="Profile" line="Your username, language, how the terminal looks and how numbers are written." />
       <ProfileAccount address={address} />
+      <LanguageChoice />
       <ThemeChoice />
       <NumberFormatChoice />
     </>

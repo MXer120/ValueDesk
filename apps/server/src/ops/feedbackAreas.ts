@@ -17,6 +17,7 @@ export interface FeedbackArea {
 }
 
 export const FEEDBACK_AREAS: readonly FeedbackArea[] = [
+  { id: 'translations', label: 'Translations', words: 'language wording translated german french spanish wrong text' },
   { id: 'layout', label: 'Layout & UI', words: 'design panels dashboard theme screen mobile' },
   { id: 'charts', label: 'Charts', words: 'candles indicators drawing tradingview' },
   { id: 'orderbook', label: 'Order book & trades', words: 'depth tape book prices' },

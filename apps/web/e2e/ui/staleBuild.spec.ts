@@ -11,7 +11,7 @@
 import assert from 'node:assert/strict';
 import type { Page, Route } from 'playwright-core';
 import { SIZE, algo, practiceInBrowser, slideStart } from './algo';
-import { acceptWelcome, dec, hideDevPanel, typeInto, uiSuite, until } from './harness';
+import { acceptWelcome, dec, typeInto, uiSuite, until } from './harness';
 import { toast } from './ticket';
 
 const h = uiSuite(import.meta.filename);
@@ -52,7 +52,6 @@ h.test('a missing part: one retry, one reload, then the note and its Reload butt
   assert.ok(gone.hits() >= 1, 'the part was asked for');
   await page.waitForLoadState('domcontentloaded');
   await acceptWelcome(page);
-  await hideDevPanel(page);
 
   // Still missing after the reload (within the minute): no reload loop - the note, in place of the algo ticket.
   await a.t.ready();

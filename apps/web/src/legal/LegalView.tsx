@@ -19,6 +19,7 @@ import { LEGAL_DOCS } from './docs';
 import { AnalyticsSwitch, EmbedSwitches, ReownSwitch } from './LegalGate';
 import { MARKER_INLINE, isDraft, type Block } from './model';
 import './legal.css';
+import { useLanguage } from '../i18n/store';
 
 export interface LegalViewProps {
   page: LegalPage;
@@ -27,6 +28,7 @@ export interface LegalViewProps {
 }
 
 export function LegalView({ page, onOpen }: LegalViewProps) {
+  const lang = useLanguage();
   const doc = LEGAL_DOCS[page];
   const draft = isDraft(doc);
   const root = useRef<HTMLElement>(null);
@@ -41,8 +43,9 @@ export function LegalView({ page, onOpen }: LegalViewProps) {
   return (
     <main className="legal" ref={root}>
       <article className="legal-card" lang={doc.lang}>
+        {doc.lang === 'en' && lang !== 'en' && <p className="legal-only-en" lang={lang}>This document is available in English only, and the English text is what counts.</p>}
         <header className="legal-head">
-          <h1 className="legal-title">{doc.title}</h1>
+          <h1 className="legal-title" data-no-i18n="">{doc.title}</h1>
           <nav className="lbp-seg" aria-label="Legal pages" lang="en">
             {LEGAL_PAGES.map((p) => (
               <button
@@ -57,7 +60,7 @@ export function LegalView({ page, onOpen }: LegalViewProps) {
             ))}
           </nav>
         </header>
-        <div className="legal-body">
+        <div className="legal-body" data-no-i18n="">
           {draft && <p className="legal-draft" role="note" lang="en">Draft – not yet legally reviewed</p>}
           {doc.intro && <Blocks blocks={doc.intro} onOpen={onOpen} />}
           {doc.sections.map((s, i) => (

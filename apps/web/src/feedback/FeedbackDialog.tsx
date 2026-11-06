@@ -116,6 +116,8 @@ export function FeedbackDialog({ open, request, onClose, onThread, address = nul
   useEffect(() => {
     if (!open) return;
     if (request?.element) setElement(request.element);
+    if (request?.areas) setAreas(request.areas);
+    if (request?.draft) setText(request.draft);
     setError(null);
     setNote(null);
     void gatherSources().then(setSources).catch(() => setSources(null));

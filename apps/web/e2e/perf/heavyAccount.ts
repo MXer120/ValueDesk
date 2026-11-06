@@ -13,7 +13,7 @@ import { createServer } from 'node:http';
 import { dirname, extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { launchEdge } from '../ui/browser';
-import { connectWallet, dismissOnboarding, dismissSetup, acceptWelcome, hideDevPanel, newUiContext } from '../ui/harness';
+import { connectWallet, dismissOnboarding, dismissSetup, acceptWelcome, newUiContext } from '../ui/harness';
 import { createTestWallet } from '../ui/wallet';
 import { COPY_TERMS_VERSION, canonicalJSON } from '../../../../packages/copy-engine/src/index.ts';
 import { COPY_TERMS } from '../../src/legal/copyTerms';
@@ -144,7 +144,6 @@ for (const scenario of SCENARIOS) {
   page.on('pageerror', (e) => errors.push(String(e?.message ?? e).slice(0, 300)));
   if (scenario === 'bots') fakeExec.bots = 1;
   await page.goto(`${site.origin}/${scenario === 'bots' ? 'bots' : 'trade'}`, { waitUntil: 'domcontentloaded' });
-  await hideDevPanel(page).catch(() => {});
   await acceptWelcome(page).catch(() => {});
   await connectWallet(page, { settle: true }).catch((e) => console.log('connect', String(e).slice(0, 200)));
   await dismissOnboarding(page, 3000).catch(() => {});

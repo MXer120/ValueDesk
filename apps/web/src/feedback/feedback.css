@@ -169,7 +169,6 @@
 /* The right-click entry (FeedbackMenu.tsx) and a reply's row in the bell. */
 .menu-popup.fb-menu { min-width: 220px; }
 .fb-menu .menu-row__ic .fb-entry__glyph { color: currentColor; }
-.fb-menu__hint { padding: 4px 10px 3px; color: var(--dim); font-size: 11px; }
 .navnotes__open { padding: 0; min-height: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .navnotes__open:hover .navnotes__k { text-decoration: underline; }
 

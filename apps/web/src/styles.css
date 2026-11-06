@@ -1253,6 +1253,13 @@ button.danger:hover:not(:disabled) { background: var(--neg); border-color: var(-
 }
 @media (prefers-reduced-motion: reduce) { .navpop { animation: none; } .navpop.is-closing { animation-duration: 1ms; } }
 
+/* The language menu (LanguageMenu.tsx): the globe is one more icon in the bar, with no chevron; a flag on each row. */
+.navlang__btn > svg:not(.navlang__globe) { display: none; }
+.langflag { flex: none; width: 20px; height: 15px; border-radius: 2px; object-fit: cover; box-shadow: 0 0 0 1px rgb(var(--ink) / 0.12); }
+.stg__inlink { min-height: 0; padding: 0; border: 0; background: none; box-shadow: none; color: inherit; font: inherit; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.stg__inlink:hover { color: var(--text); background: none; }
+.legal-only-en { margin: 0; padding: 10px var(--sp-4); border-bottom: 1px solid var(--panel-line); color: var(--muted); font-size: 12px; }
+
 /* "Trade" (NavTrade.tsx): the word a link, the chevron beside it; the pop-up two labelled columns of icon, title, line. */
 .navtrade { display: flex; flex: none; align-items: center; height: 100%; }
 .navlinks .navtrade > a { padding-right: 3px; }

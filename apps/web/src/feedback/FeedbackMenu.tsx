@@ -8,15 +8,16 @@
  *   - in a text field, a select or editable content (paste, spell check);
  *   - while text is selected (copy);
  *   - on a link (open in a new tab, copy the address);
- *   - with Shift held: Shift + right-click always gives the browser's menu, and
- *     the menu says so;
+ *   - with Shift held: Shift + right-click still gives the browser's menu (the
+ *     hint saying so was removed, owner 2026-11-06);
  *   - where something else already took the click (a chart's own menu, the
  *     dashboard's: `defaultPrevented`, or inside the dashboard's area).
  */
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { describeElement, type ElementInfo } from './element';
-import { FeedbackIcon, openFeedback } from './FeedbackButton';
+import { FeedbackIcon, openFeedback, reportTranslation } from './FeedbackButton';
+import { useLanguage } from '../i18n/store';
 
 /** Whether a right-click on `target` keeps the browser's own menu (see the header). */
 export function keepNativeMenu(e: { defaultPrevented: boolean; shiftKey: boolean; target: unknown }, selection: string): boolean {
@@ -30,6 +31,7 @@ export function keepNativeMenu(e: { defaultPrevented: boolean; shiftKey: boolean
 }
 
 export function FeedbackMenu() {
+  const lang = useLanguage();
   const [at, setAt] = useState<{ x: number; y: number; element: ElementInfo } | null>(null);
   const ref = useRef<HTMLDivElement>(null);
   const [place, setPlace] = useState<{ left: number; top: number } | null>(null);
@@ -95,7 +97,21 @@ export function FeedbackMenu() {
         <span className="menu-row__ic"><FeedbackIcon /></span>
         <span className="menu-row__label">Send feedback about this</span>
       </button>
-      <span className="fb-menu__hint">Shift + right-click: the browser&apos;s menu</span>
+      {lang !== 'en' && (
+        <button
+          type="button"
+          role="menuitem"
+          className="menu-row"
+          onClick={() => {
+            const element = at.element;
+            setAt(null);
+            reportTranslation(element);
+          }}
+        >
+          <span className="menu-row__ic"><FeedbackIcon /></span>
+          <span className="menu-row__label">Report a translation issue</span>
+        </button>
+      )}
     </div>,
     document.body,
   );
