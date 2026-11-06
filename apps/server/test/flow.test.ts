@@ -7,6 +7,7 @@
  * the recorder closes chunks, sums hours and days, and sums an hour again for a late print; a
  * wallet's fills are exactly its prints; recorder downtime shows as gaps.
  */
+import { setCandleRead } from '../src/flow/venueCheck.js';
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -33,6 +34,9 @@ function rng(seed: number): () => number {
 }
 
 const A = (i: number) => `0x${i.toString(16).padStart(40, '0')}`;
+
+// No venue's candles are read from a test (venueCheck.ts): flowVenues.test.ts gives its own.
+setCandleRead(async () => null);
 
 test('a chunk packs and unpacks every print exactly, in time order', () => {
   const r = rng(1);
@@ -179,8 +183,9 @@ test('the recorder sums hours and days, and any window equals the prints summed 
     // Asked with SoDEX and no ledger here: nothing has been compared with its count, so never final (flowLedger.test.ts).
     assert.equal(w.final, false, 'SoDEX unchecked');
     assert.equal(w.coverage?.holeSlots, 0);
+    // Hyperliquid too: its candles are not to be read here, so nothing is compared, however long ago.
     const hl = await flowWindow({ coin: 'btc', venues: ['hyperliquid'], kind: 'perp', from, to, role: 'all', side: 'all', sort: 'volume', limit: 1 }, now);
-    assert.equal(hl!.final, to + READY_MS + CLOSE_MS + FLUSH_MS + 5_000 <= now, 'final once passed');
+    assert.equal(hl!.final, false, 'no check, not final');
     assert.deepEqual(w.markets.map((m) => m.venue).sort(), ['hyperliquid', 'sodex']);
   }
   // Search, venue filter.

@@ -42,7 +42,8 @@ parentPort.on('message', async ({ id, url }) => {
     const j = await res.json();
     parentPort.postMessage({ id, status: res.status, data: j.data, sentAt, gotAt });
   } catch (e) {
-    parentPort.postMessage({ id, error: String(e && e.message || e) });
+    const why = e && e.cause && (e.cause.code || e.cause.message);
+    parentPort.postMessage({ id, error: String(e && e.message || e) + (why ? ': ' + why : '') });
   }
 });
 `;

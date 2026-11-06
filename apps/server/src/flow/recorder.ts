@@ -34,6 +34,7 @@ export const READY_MS = 60_000;
 export const BUDGET_MS = 40;
 /** How often the run log (meta `runs`: when the recorder was up) is moved forward. */
 const RUN_MS = 60_000;
+const REPEATS_MS = 10 * 60_000;
 
 /** Venues whose prints name account ids, not addresses (the address comes from the index). */
 const ID_VENUES: ReadonlySet<Venue> = new Set(['sodex', 'lighter']);
@@ -75,6 +76,8 @@ export class FlowRecorder {
   private hourQueue: number[] | null = null;
   private dayQueue: number[] | null = null;
   private lastRun = 0;
+  private repeats = new Map<string, Map<string, number>>();
+  private repeatsAt = 0;
   private runStart: number;
   private stats = { prints: 0, late: 0, lastFlushMs: 0 };
   lastError: string | null = null;
@@ -93,6 +96,7 @@ export class FlowRecorder {
     this.hourThrough = Number(store.getMeta('hour_through')) || Math.floor(t / HOUR_MS) * HOUR_MS;
     this.dayThrough = Number(store.getMeta('day_through')) || Math.floor(t / DAY_MS) * DAY_MS;
     this.runStart = t;
+    this.repeatsAt = t;
     if (!store.getMeta('since')) store.setMeta('since', String(t));
   }
 
@@ -172,6 +176,48 @@ export class FlowRecorder {
       return [];
     }
     return out;
+  }
+
+  /**
+   * A print older than this run, that the run before already holds: the first frame after subscribing is a snapshot of recent
+   * prints, and the streams' memory of ids died with the last process. Measured 2026-11-06: Hyperliquid slots held 2 to 6 times
+   * their count, one more each restart (DYDX 12:05 17 of 9, para:NET 09:35 24 of 4), in activity and cohorts as well. Exact
+   * and counted as in `missing`. Only prints older than the run come here, a chunk is read once, and the counts go after 10
+   * minutes, when the snapshots are in.
+   */
+  repeatOfHeld(p: Print): boolean {
+    if (p.t >= this.runStart) return false;
+    try {
+      const venue: Venue = p.venue === 'hyperliquid' && p.symbol.startsWith('xyz:') ? 'tradexyz' : p.venue;
+      const mid = this.markets.get(`${venue}|${p.symbol}`);
+      if (mid === undefined) return false;
+      if (this.now() - this.repeatsAt > REPEATS_MS) { this.repeats.clear(); this.repeatsAt = this.now(); }
+      const party = (acct: string): number => this.parties.get(`${venue}|${ID_VENUES.has(venue) ? acct : acct.toLowerCase()}`) ?? -1;
+      const ct = Math.floor(p.t / CHUNK_MS) * CHUNK_MS;
+      const k = `${mid}|${ct}`;
+      let counts = this.repeats.get(k);
+      if (!counts) {
+        counts = new Map();
+        const open = this.open.get(k);
+        let list: readonly FlowPrint[] = open?.prints ?? [];
+        if (!open) {
+          const blob = this.store.chunk(mid, ct);
+          if (blob) list = chunkPrints(decodeChunk(blob));
+        }
+        for (const f of list) {
+          const key = `${f.t}|${f.px}|${f.sz}|${f.buyer}|${f.seller}`;
+          counts.set(key, (counts.get(key) ?? 0) + 1);
+        }
+        this.repeats.set(k, counts);
+      }
+      const key = `${p.t}|${p.px}|${p.sz}|${party(p.buyer)}|${party(p.seller)}`;
+      const n = counts.get(key) ?? 0;
+      if (n > 0) counts.set(key, n - 1);
+      return n > 0;
+    } catch (e) {
+      this.lastError = `repeatOfHeld: ${String(e)}`;
+      return false;
+    }
   }
 
   private markLate(mid: number, ct: number): void {
