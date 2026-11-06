@@ -558,7 +558,7 @@ if (process.env.VALUESCAN_RELEASES !== '0') {
 // The status page's prober (ops/status.ts): every minute, the site, this API the way a visitor
 // reaches it, the copy executor and the indexer. On a hosted server unless VALUESCAN_STATUS_PROBE=0.
 if (proberEnabled(process.env, HOSTED)) {
-  const [{ startStatusProber }, { indexerStatus }] = await Promise.all([import('./ops/status.js'), import('./indexer/read.js')]);
+  const [{ startStatusProber }, { indexerStatusJudged: indexerStatus }] = await Promise.all([import('./ops/status.js'), import('./indexer/read.js')]);
   startStatusProber({ indexerStatus, log: app.log });
 }
 

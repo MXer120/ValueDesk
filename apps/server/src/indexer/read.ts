@@ -1488,6 +1488,16 @@ export function cohortWallets(
   return { total: rows.length, asOf: load.at, range, rows: page };
 }
 
+/**
+ * That status and when the newest board was written. A process with no build of its own yet says nothing of how old
+ * the boards are: 8.7 h of it on 2026-11-06 counted as up on the status page and passed the health check's indexer line.
+ */
+export function indexerStatusJudged(): unknown {
+  const status = indexerStatus();
+  if (!status || typeof status !== 'object') return status;
+  return { ...(status as Record<string, unknown>), boardsAt: reader()?.newestBoardAt() ?? null };
+}
+
 /** The indexer's own status line (lanes, streams), for diagnostics. */
 export function indexerStatus(): unknown {
   const s = reader();
