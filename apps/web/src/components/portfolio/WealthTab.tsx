@@ -16,6 +16,7 @@ import {
   fundAction, fundLabel, readPnlHistory, sodexFundUrl,
   type FundAction, type FundShelf, type JoinedHolding, type PnlRange, type WealthEntry, type WealthFund,
 } from '../../trading/wealth';
+import { RangePicker } from './RangePicker';
 import { useLedger, useTradingStatuses, type WealthState } from './useWealth';
 import { WealthSheet, type WealthSheetTarget } from './WealthSheet';
 import type { Eip1193Provider } from '../../wallet';
@@ -78,7 +79,7 @@ function WealthValueCard({ w, value, slp }: { w: WealthState; value: number | nu
 
 // --- the chart --------------------------------------------------------------------------
 
-const RANGES: readonly PnlRange[] = ['1W', '1M', '3M', '1Y', 'All'];
+const RANGES: ReadonlyArray<readonly [PnlRange, string]> = [['1W', '1 week'], ['1M', '1 month'], ['3M', '3 months'], ['1Y', '1 year'], ['All', 'All time']];
 
 function WealthChart({ address }: { address: string | null }) {
   const [range, setRange] = useState<PnlRange>('1M');
@@ -104,11 +105,7 @@ function WealthChart({ address }: { address: string | null }) {
         </div>
       )}
       action={(
-        <div className="pf-seg" role="tablist" aria-label="Range">
-          {RANGES.map((r) => (
-            <button key={r} type="button" role="tab" aria-selected={r === range} className={`pf-ctl ${r === range ? 'is-on' : ''}`} onClick={() => setRange(r)}>{r}</button>
-          ))}
-        </div>
+        <RangePicker value={range} options={RANGES} onChange={setRange} />
       )}
     >
       {win && win.change !== null && (

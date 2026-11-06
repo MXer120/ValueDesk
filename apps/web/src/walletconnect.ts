@@ -827,6 +827,28 @@ let connectRequested = false;
 let chainWatch: { provider: Eip1193Provider; off: () => void } | null = null;
 let teardownTimer: ReturnType<typeof setTimeout> | undefined;
 let syncSeq = 0;
+let pendingTimer: ReturnType<typeof setTimeout> | undefined;
+
+/**
+ * AppKit can stay in "reconnecting" for good (a wallet that never answers, a relay that does not
+ * come back). The app would say "Reconnecting wallet…" for ever with its button disabled. So
+ * "connecting" has a limit: after it the state is "disconnected", which offers Reconnect, and a
+ * connection that does arrive later still lands. A connect the user asked for gets longer: they
+ * may be reading the wallet's prompt.
+ */
+const RESTORE_LIMIT_MS = 12_000;
+const USER_CONNECT_LIMIT_MS = 180_000;
+function armPendingLimit(): void {
+  if (pendingTimer !== undefined) return;
+  pendingTimer = setTimeout(() => {
+    pendingTimer = undefined;
+    if (snap.status === 'connecting') setSnap({ ...EMPTY, status: 'disconnected' });
+  }, connectRequested ? USER_CONNECT_LIMIT_MS : RESTORE_LIMIT_MS);
+}
+function clearPendingLimit(): void {
+  clearTimeout(pendingTimer);
+  pendingTimer = undefined;
+}
 
 function watchKit(k: AppKit): void {
   const refresh = () => { void syncFromKit(k); };
@@ -872,12 +894,18 @@ async function syncFromKit(k: AppKit): Promise<void> {
     if (pending && wasConnected) return; // mid-switch: keep what we have until it settles
     chainWatch?.off();
     chainWatch = null;
-    setSnap({ ...EMPTY, status: pending ? 'connecting' : 'disconnected' });
+    if (pending) armPendingLimit();
+    else clearPendingLimit();
+    // Past the limit AppKit may still say "reconnecting": that does not bring the spinner back.
+    if (!(pending && snap.status === 'disconnected' && pendingTimer === undefined)) {
+      setSnap({ ...EMPTY, status: pending ? 'connecting' : 'disconnected' });
+    }
     if (wasConnected && !pending) scheduleTeardown();
     return;
   }
 
   clearTimeout(teardownTimer);
+  clearPendingLimit();
   let chainId = snap.provider === provider ? snap.chainId : null;
   if (chainId === null) {
     try {

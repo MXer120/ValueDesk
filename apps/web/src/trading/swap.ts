@@ -10,10 +10,10 @@
  *   2 decimals     both ways, rounded down (the market's step size is 0.01)
  *   one way        USDT to USDC. SoDEX's dialog has no way back.
  *
- * The market itself charges no fee (makerFee and takerFee are 0 in /spot/markets/symbols).
- * Like every order this app sends, it carries the builder fee the wallet owes, so the quote
- * takes that off and the sheet shows it: the fee guard refuses an order without it in a
- * build that requires it, and there is no exception for one market.
+ * NOBODY CHARGES A FEE HERE. Owner 2026-11-06: no ValueDesk fee where SoDEX charges none. Checked
+ * that day: makerFee and takerFee are 0 in /spot/markets/symbols, on this market alone of the 43;
+ * sodex.com's own quote multiplies the fee by 0; and 12 real taker fills of 6 wallets on the pair
+ * all read fee 0. So the order carries no builder (feeGuard.ts FEE_FREE_SPOT_SYMBOL_IDS).
  *
  * IOC can fill part of the amount. The rest stays USDT, and the result says how much.
  */
@@ -40,17 +40,16 @@ export interface BookLevel { price: number; quantity: number }
 
 export interface SwapQuote {
   filled: number;
-  /** USDC received, fee taken off. */
+  /** USDC received. */
   receive: number;
   avgPrice: number;
-  fee: number;
   /** USDT the book can take at or above the floor. */
   depth: number;
   exceedsDepth: boolean;
 }
 
-/** Walk the bids at or above the floor. `feeFraction` is the builder fee as a fraction of the value. */
-export function swapQuote(bids: readonly BookLevel[], amount: string | number, feeFraction = 0): SwapQuote {
+/** Walk the bids at or above the floor. */
+export function swapQuote(bids: readonly BookLevel[], amount: string | number): SwapQuote {
   const want = Number(swapAmount(amount));
   const usable = bids.filter((b) => b.price >= FLOOR && b.quantity > 0);
   const depth = usable.reduce((s, b) => s + b.quantity, 0);
@@ -64,12 +63,10 @@ export function swapQuote(bids: readonly BookLevel[], amount: string | number, f
     filled += take;
     left -= take;
   }
-  const fee = value * feeFraction;
   return {
     filled,
-    receive: Math.floor((value - fee) * 100 + 1e-9) / 100,
+    receive: Math.floor(value * 100 + 1e-9) / 100,
     avgPrice: filled > 0 ? value / filled : FLOOR,
-    fee,
     depth,
     exceedsDepth: want > depth,
   };

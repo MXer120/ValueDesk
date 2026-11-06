@@ -1538,15 +1538,7 @@ function richestVenue(parts: { spot?: BalanceLine; futures?: BalanceLine; evm?: 
   return best;
 }
 
-export function AllBalances({ address, refreshToken, readOnly = false, only, tags }: {
-  address: string | null;
-  refreshToken: number;
-  readOnly?: boolean;
-  /** One account's balances instead of every place (the portfolio's Perps and Spot sections). */
-  only?: 'perps' | 'spot';
-  /** Coins that carry a tag on their row, for a reason the page knows. Keys as summary.ts `shareKey`. */
-  tags?: { coins: ReadonlySet<string>; label: string };
-}) {
+export function AllBalances({ address, refreshToken, readOnly = false }: { address: string | null; refreshToken: number; readOnly?: boolean }) {
   // The same shared feeds (and keys, and interval) the Balances table and the
   // order ticket read - no extra request when they are mounted too.
   const spotKey = address ? `state:spot:${address}` : null;
@@ -1624,9 +1616,9 @@ export function AllBalances({ address, refreshToken, readOnly = false, only, tag
     row[venue] = line;
     byCoin.set(key, row);
   };
-  if (only !== 'perps') for (const l of spotLines) put('spot', l);
-  if (only !== 'spot') for (const l of perpsLines) put('futures', l);
-  if (!only) for (const l of evmLines) put('evm', l);
+  for (const l of spotLines) put('spot', l);
+  for (const l of perpsLines) put('futures', l);
+  for (const l of evmLines) put('evm', l);
 
   const pxOf = (coin: string, amount: number | null): number | null => {
     if (!px || amount === null) return null;
@@ -1707,7 +1699,6 @@ export function AllBalances({ address, refreshToken, readOnly = false, only, tag
                           )}
                           <span className="bal-tags">
                             {r.pieces.map((p) => <span key={p[0]} className="bal-tag">{p[1]}</span>)}
-                            {tags?.coins.has(r.coin.replace(/^v(?=[A-Za-z])/, '').toUpperCase()) && <span className="bal-tag">{tags.label}</span>}
                           </span>
                         </span>
                       </td>

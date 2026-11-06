@@ -1574,23 +1574,3 @@
 
 /* Daily PnL calendar (Portfolio.tsx CrossFadeCal): Monday-first month grid,
    each day tinted by its share of the month's biggest move. */
-.pf-cal { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 6px; padding: 4px 16px 8px; animation: mo-fade-in 220ms var(--ease-out) both; }
-.pf-cal__head { display: flex; align-items: center; gap: 6px; }
-.pf-cal__month { min-width: 128px; text-align: center; color: var(--text); font-size: var(--fs-xs); font-weight: 600; }
-.pf-cal__nav { width: 24px; height: 24px; padding: 0; border: 1px solid var(--panel-line); border-radius: 6px; background: none; color: var(--muted); font-size: 16px; line-height: 20px; cursor: pointer; }
-.pf-cal__nav:hover:not(:disabled) { color: var(--text); border-color: var(--line); }
-.pf-cal__nav:disabled { color: var(--disabled); cursor: default; }
-.pf-cal__total { margin-left: auto; font-family: var(--font-num); font-size: var(--fs-xs); font-weight: 600; }
-.pf-cal__dow, .pf-cal__grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 3px; }
-.pf-cal__dow span { color: var(--dim); font-size: var(--fs-micro); text-align: center; }
-.pf-cal__grid { flex: 1; grid-auto-rows: minmax(26px, 1fr); }
-.pf-cal__cell {
-  position: relative; display: flex; flex-direction: column; justify-content: space-between;
-  padding: 3px 5px; border-radius: 6px; min-width: 0; overflow: hidden;
-  background: color-mix(in srgb, var(--text) 4%, transparent);
-}
-.pf-cal__cell.is-empty { background: none; }
-.pf-cal__cell.is-up { background: color-mix(in srgb, var(--pos) calc(var(--s, 0) * 55%), color-mix(in srgb, var(--text) 4%, transparent)); }
-.pf-cal__cell.is-down { background: color-mix(in srgb, var(--neg) calc(var(--s, 0) * 55%), color-mix(in srgb, var(--text) 4%, transparent)); }
-.pf-cal__d { color: var(--dim); font-size: 10px; line-height: 12px; }
-.pf-cal__v { color: var(--text); font-family: var(--font-num); font-size: 11px; font-weight: 600; line-height: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
