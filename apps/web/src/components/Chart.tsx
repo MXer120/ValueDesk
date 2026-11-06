@@ -56,7 +56,7 @@ import type {
 import { api, type Engine, type Kline, type Symbol } from '../api';
 import { bumpAccountResource, useAccountResource } from '../accountFeeds';
 import { useAsync, useChannel, useStatus, useStored } from '../hooks';
-import { fmtPct, fmtPrice, fmtQty, fmtQuote, num, precisionOf, signClass } from '../format';
+import { coinLabel, fmtPct, fmtPrice, fmtQty, fmtQuote, num, precisionOf, signClass } from '../format';
 import {
   AXIS_FONT_SIZE,
   AXIS_FONT_WEIGHT,
@@ -114,6 +114,7 @@ import { boxOf, marqueeHits, type Pt } from '../chart/marquee';
 import { SelectionMarks } from '../chart/SelectionMarks';
 import { DraftOrderLines } from '../chart/DraftOrderLines';
 import { askPositionAction } from '../positionActions';
+import { askTrade, withdrawTradeAsk, type TradeAsk } from './TradeConfirm';
 import { DrawingSettings, type DrawingDraft } from '../chart/DrawingSettings';
 import {
   EXEC_OVERLAY,
@@ -1009,8 +1010,8 @@ function Chart({
   const [drag, setDrag] = useState<PendingMove | null>(null);
   /** Dropped, snapped, and awaiting an explicit confirm. Nothing sent yet. */
   const [pending, setPending] = useState<PendingMove | null>(null);
-  /** An order whose X was clicked: nothing is sent until the bar over the chart is confirmed. */
-  const [cancelAsk, setCancelAsk] = useState<OrderLine | null>(null);
+  /** The drop the confirm window is asking about. */
+  const moveAsked = useRef<PendingMove | null>(null);
   /** Submitted, waiting for the venue to report it back. */
   const [awaiting, setAwaiting] = useState<PendingMove | null>(null);
   const [sending, setSending] = useState(false);
@@ -1134,6 +1135,7 @@ function Chart({
         return;
       }
       setPending({ line, price });
+      void askMove({ line, price });
     },
     onGone: (line) => {
       abandon(line.key);
@@ -1152,7 +1154,7 @@ function Chart({
     },
     onLineButton: (line, button) => {
       if (line.kind !== 'position' && button === 'cancel') {
-        setCancelAsk(line);
+        void cancelLine(line);
         return;
       }
       // A position's close and exits: the Positions table's own review and dialog.
@@ -1721,7 +1723,7 @@ function Chart({
       c.resize();
       unNumStyle = followNumStyle(c);
       // Dark or light (theme.ts): the shared styles again, then the axis badge is tinted afresh.
-      unTheme = followTheme(c, () => { badgeCss.current = null; c.setStyles({ candle: { type: candleStyleRef.current } }); });
+      unTheme = followTheme(c, () => { badgeCss.current = null; c.setStyles({ candle: { type: candleStyleRef.current } }); layer.current?.retheme(); });
 
       // A pan or an axis drag follows the pointer anywhere until it is
       // released, not just while it is over the pane it began on.
@@ -3741,33 +3743,77 @@ function Chart({
 
   // --- drag to modify --------------------------------------------------------
 
-  const cancelPending = useCallback(() => {
-    if (pending) abandon(pending.line.key);
-    setPending(null);
-  }, [pending, abandon]);
-
-  /** The X on an order line, once confirmed. */
-  const confirmCancel = useCallback(async () => {
-    const line = cancelAsk;
-    if (!line || line.orderID === undefined) return;
+  /** The X on an order line: asks (TradeConfirm.tsx), then cancels. */
+  async function cancelLine(line: OrderLine): Promise<void> {
+    if (line.orderID === undefined) return;
+    const value = num(line.price) * num(line.quantity);
+    const ok = await askTrade({
+      kind: 'cancel',
+      title: 'Cancel this order?',
+      tone: 'danger',
+      confirmLabel: 'Cancel order',
+      cancelLabel: 'Keep order',
+      market: sym?.displayName ?? line.symbol,
+      coin: sym?.baseCoin,
+      side: sideWords(line, engine),
+      facts: [
+        { label: 'Type', value: line.tag },
+        ...(line.amount ? [{ label: 'Size', value: `${line.amount} ${coinLabel(sym?.baseCoin) || ''}`.trim() }] : []),
+        { label: line.kind === 'trigger' ? 'Trigger' : 'Price', value: fmtPrice(line.price, sym?.tickSize) },
+        ...(value > 0 ? [{ label: 'Order value', value: fmtQuote(value, sym?.quoteCoin) }] : []),
+      ],
+    });
+    if (!ok) return;
     setSending(true);
     try {
       await api.cancelOrder(engine, { symbol: line.symbol, orderID: line.orderID });
       showLine('ok', 'Order cancelled.');
-      setCancelAsk(null);
+      onChanged?.();
+      refreshOrders();
     } catch (e) {
       showLine('err', e instanceof Error ? e.message : String(e));
     } finally {
       setSending(false);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cancelAsk, engine]);
+  }
+
+  /** A line was dropped at a new price: asks, then sends or puts it back. */
+  async function askMove(p: PendingMove): Promise<void> {
+    const from = num(p.line.price);
+    const to = num(p.price);
+    const qty = num(p.line.quantity);
+    const last = num(lastPrice);
+    moveAsked.current = p;
+    const ok = await askTrade({
+      kind: 'move',
+      id: MOVE_ASK,
+      title: 'Move this order?',
+      tone: 'plain',
+      confirmLabel: 'Move order',
+      cancelLabel: 'Put it back',
+      market: sym?.displayName ?? p.line.symbol,
+      coin: sym?.baseCoin,
+      side: sideWords(p.line, engine),
+      facts: [
+        { label: 'Type', value: p.line.tag },
+        ...(p.line.amount ? [{ label: 'Size', value: `${p.line.amount} ${coinLabel(sym?.baseCoin) || ''}`.trim() }] : []),
+        { label: p.line.kind === 'trigger' ? 'Trigger' : 'Price', value: `${fmtPrice(p.line.price, sym?.tickSize)} → ${fmtPrice(p.price, sym?.tickSize)}` },
+        ...(from > 0 ? [{ label: 'Change', value: `${to >= from ? '+' : ''}${fmtPrice(to - from, sym?.tickSize)} (${fmtPct(((to - from) / from) * 100)})` }] : []),
+        ...(last > 0 ? [{ label: 'From last price', value: fmtPct(((to - last) / last) * 100) }] : []),
+        ...(qty > 0 ? [{ label: 'New order value', value: fmtQuote(to * qty, sym?.quoteCoin) }] : []),
+      ],
+    });
+    // A question taken back (its subject went) has been dealt with where that was found.
+    if (moveAsked.current !== p) return;
+    moveAsked.current = null;
+    if (ok) void sendMoveNow.current(p);
+    else abandon(p.line.key);
+  }
 
   /** The path that changes an order. */
-  const confirmPending = useCallback(async () => {
-    const p = pending;
+  const sendMove = async (p: PendingMove) => {
     const l = layer.current;
-    if (!p || !l || p.line.orderID === undefined) return;
+    if (!l || p.line.orderID === undefined) return;
 
     // Re-check the gate at the moment of sending, not just when the line was
     // drawn: the session can lock between a drop and a click.
@@ -3840,7 +3886,16 @@ function Chart({
     } finally {
       setSending(false);
     }
-  }, [pending, canModify, modifyBlocked, engine, sym?.tickSize, onChanged, refreshOrders, abandon, showLine, lineError]);
+  };
+  // Sent from the window's answer, so with the gates as they are then: the session can lock while it is open.
+  const sendMoveNow = useRef(sendMove);
+  sendMoveNow.current = sendMove;
+  // The question goes with its subject: the order filled or the market changed while the window was open.
+  useEffect(() => {
+    if (pending) return;
+    moveAsked.current = null;
+    withdrawTradeAsk(MOVE_ASK);
+  }, [pending]);
 
   const change = legendBar ? legendBar.close - legendBar.open : 0;
   /** Direction class for the whole OHLC row — one reading, one colour. */
@@ -4776,35 +4831,14 @@ function Chart({
           it. Persistent errors stay in flow above — a broken account feed is not
           transient and should keep its space.
         */}
-        {(active || ticket || lineMsg || cancelAsk) && (
+        {(active || ticket || lineMsg) && (
           <div ref={notices} className="kc-notices">
-            {cancelAsk && (
-              <div className="kc-movebar">
-                <span className="kc-movebar-title">Cancel this order?</span>
-                <span>{cancelAsk.label}</span>
-                <button className="btn-primary kc-confirm" onClick={() => void confirmCancel()} disabled={sending}>
-                  {sending ? 'Sending…' : 'Confirm — cancel live order'}
-                </button>
-                <button onClick={() => setCancelAsk(null)} disabled={sending}>Keep it</button>
-              </div>
-            )}
             {active && (
               <div className="kc-movebar">
                 <span className="kc-movebar-title">
-                  {pending ? 'Move this order?' : awaiting ? 'Submitted' : 'Moving'}
+                  {pending ? 'Not sent' : awaiting ? 'Submitted' : 'Moving'}
                 </span>
                 <MoveReadout line={active.line} to={active.price} sym={sym} lastPrice={lastPrice} />
-                {pending && (
-                  <>
-                    <button className="btn-primary kc-confirm" onClick={() => void confirmPending()} disabled={sending}>
-                      {sending ? 'Sending…' : 'Confirm — send live modify'}
-                    </button>
-                    <button onClick={cancelPending} disabled={sending}>
-                      Cancel
-                    </button>
-                    <span className="muted">Nothing has been sent yet.</span>
-                  </>
-                )}
                 {drag && <span className="muted">Release to review. Nothing is sent while you drag.</span>}
                 {awaiting && (
                   <span className="muted">
@@ -5038,6 +5072,16 @@ function Chart({
  * any cash figure attached to moving one would be a confident guess. A guess is
  * worse than a blank on this screen, so triggers get the blank.
  */
+/** Names the window asking about a dropped line. */
+const MOVE_ASK = 'chart-move';
+
+/** Which way a line's order goes, as its market says it; null when the side could not be read. */
+function sideWords(line: OrderLine, engine: Engine): TradeAsk['side'] {
+  if (line.side === null) return undefined;
+  const buy = line.side === 'buy';
+  return { word: engine === 'perps' ? (buy ? 'Long' : 'Short') : (buy ? 'Buy' : 'Sell'), tone: buy ? 'pos' : 'neg' };
+}
+
 function MoveReadout({
   line, to, sym, lastPrice,
 }: {

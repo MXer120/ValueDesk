@@ -17,7 +17,6 @@
  * and states why, because a confident-looking invented number on the screen
  * where you commit real money is worse than a blank.
  */
-import { useState } from 'react';
 import type { Engine, Symbol } from '../api';
 import { fmt, fmtPrice, fmtUsd, num, precisionOf, shortAddr, signClass } from '../format';
 import {
@@ -51,43 +50,12 @@ import './ReviewPosition.css';
  */
 export const ALWAYS_REVIEW_NOTIONAL_USD = 10_000;
 
-const SUPPRESS_KEY = 'opentrade.review.suppress';
-
 /**
- * localStorage access is wrapped because it throws outright - not returns null -
- * in a Safari private window and under "block all cookies". A thrown storage
- * read must never be the reason an order ticket stops working, and failing
- * closed (treat as "not suppressed") means the worst case is one extra
- * confirmation rather than one skipped confirmation.
+ * Whether this order's review shows even when reviews are turned off (trading/confirmPrefs.ts): real money, at or
+ * above the floor above.
  */
-export function isReviewSuppressed(): boolean {
-  try {
-    return localStorage.getItem(SUPPRESS_KEY) === '1';
-  } catch {
-    return false;
-  }
-}
-
-export function setReviewSuppressed(v: boolean): void {
-  try {
-    if (v) localStorage.setItem(SUPPRESS_KEY, '1');
-    else localStorage.removeItem(SUPPRESS_KEY);
-  } catch {
-    // A browser that refuses storage simply keeps showing the review.
-  }
-}
-
-/**
- * Whether the ticket must be reviewed before it is signed.
- *
- * Two independent reasons, and the second one cannot be turned off:
- *  1. the user has not suppressed the review; or
- *  2. this is real money and the order is at or above the floor above.
- */
-export function shouldReview(network: string | undefined, notional: number): boolean {
-  if (!isReviewSuppressed()) return true;
-  return network === 'mainnet' && notional >= ALWAYS_REVIEW_NOTIONAL_USD;
-}
+export const reviewFloored = (network: string | undefined, notional: number): boolean =>
+  network === 'mainnet' && notional >= ALWAYS_REVIEW_NOTIONAL_USD;
 
 export interface ReviewOrder {
   side: Side;
@@ -130,12 +98,6 @@ export interface ReviewOrder {
 
 interface Props {
   order: ReviewOrder;
-  /**
-   * Reports the "don't show again" checkbox. The caller persists it only after
-   * the order is actually confirmed, so cancelling out of the review does not
-   * quietly disable every future one.
-   */
-  onSuppressChange?: (v: boolean) => void;
 }
 
 /** Distance between two prices, rendered in quote terms and as a percentage of entry. */
@@ -150,8 +112,7 @@ function Distance({ from, to, sym }: { from: number; to: number; sym?: Symbol })
   );
 }
 
-export function ReviewPosition({ order, onSuppressChange }: Props) {
-  const [suppress, setSuppress] = useState(false);
+export function ReviewPosition({ order }: Props) {
   const {
     side, engine, symbol, sym, orderType, marketExec, entryPrice, quantity, notional,
     leverage, marginMode, triggerPrice, triggerKind, triggerOn, tpPrice, slPrice,
@@ -206,14 +167,9 @@ export function ReviewPosition({ order, onSuppressChange }: Props) {
         ? `market · fills at the book, ${priceKnown ? `last ${fmtPrice(entryPrice, tick)}` : 'price unknown'}`
         : `limit @ ${fmtPrice(entryPrice, tick)}`;
 
-  const toggle = (v: boolean) => {
-    setSuppress(v);
-    onSuppressChange?.(v);
-  };
-
-  // Above the floor the checkbox cannot do what it says for THIS order, so the
-  // review says so instead of accepting a tick that silently does nothing.
-  const flooredNow = network === 'mainnet' && notional >= ALWAYS_REVIEW_NOTIONAL_USD;
+  // Above the floor "Don't ask again" cannot do what it says for THIS order, so
+  // the review says so instead of accepting a tick that silently does nothing.
+  const flooredNow = reviewFloored(network, notional);
 
   return (
     <div className="review">
@@ -383,10 +339,6 @@ export function ReviewPosition({ order, onSuppressChange }: Props) {
         </p>
       )}
 
-      <label className="fx-check review-suppress">
-        <input type="checkbox" checked={suppress} onChange={(e) => toggle(e.target.checked)} />
-        Don&apos;t show this review again
-      </label>
       <p className="muted small review-note">
         {flooredNow
           ? `This order is at or above ${fmtUsd(ALWAYS_REVIEW_NOTIONAL_USD, 0)} on mainnet, so it will keep showing this review either way.`

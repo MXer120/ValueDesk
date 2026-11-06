@@ -59,8 +59,9 @@ import { useMask } from '../privacy';
 import { checkStopAgainstLiquidation, estimateLiquidationPrice } from '../risk';
 import { exitEntryFor } from './exitEntry';
 import { mergeBookSide } from './bookDepth';
-import { useConfirm } from './Modal';
-import { ReviewPosition, setReviewSuppressed, shouldReview, type ReviewOrder } from './ReviewPosition';
+import { confirmOn } from '../trading/confirmPrefs';
+import { ReviewPosition, reviewFloored, type ReviewOrder } from './ReviewPosition';
+import { askTrade } from './TradeConfirm';
 import { useLegalTradeGate, useTradeGate } from './account/useTradeGate';
 import { getTradingState, subscribeTrading } from '../trading/session';
 import { requestUnlock } from '../trading/keyLock';
@@ -751,7 +752,6 @@ export function OrderEntry({
   /** Leverage being edited in the popover, committed only on Confirm. */
   const [levDraft, setLevDraft] = useState(1);
   const { msg, show, fromError } = useStatus();
-  const { confirm, dialog } = useConfirm();
   /* The dashboard is a registry of panels and nothing stops a layout holding
      two tickets, so the label/input pairing cannot use literal ids. */
   const uid = useId();
@@ -774,14 +774,6 @@ export function OrderEntry({
   const algoPopRef = useRef<HTMLDivElement>(null);
   const algoRef = useRef<AlgoTicketHandle>(null);
   const [algoState, setAlgoState] = useState<AlgoTicketState>({ ready: false, label: 'Start', why: null, needsAmount: true, walletFree: false, sided: true, blocked: null });
-  /**
-   * The review's "don't show again" tick, held until the order is actually
-   * confirmed. Persisting it on change instead would mean opening the review,
-   * ticking the box and then cancelling silently disabled every future review -
-   * a preference change the user never agreed to.
-   */
-  const suppressPending = useRef(false);
-
   const closePop = useCallback(() => setPop(null), []);
   useDismiss(pop === 'margin', [marginRef], closePop);
   useDismiss(pop === 'leverage', [levRef, levPopRef], closePop);
@@ -1564,10 +1556,11 @@ export function OrderEntry({
       );
     }
 
-    // An order is never one click away. The review is suppressible for the
-    // routine case, but `shouldReview` keeps it unconditional for real money
-    // above a floor - see ALWAYS_REVIEW_NOTIONAL_USD in ReviewPosition.tsx.
-    if (shouldReview(network, liveNotional)) {
+    // The review can be turned off for the routine case, but it stays
+    // unconditional for real money above a floor - see
+    // ALWAYS_REVIEW_NOTIONAL_USD in ReviewPosition.tsx.
+    const floored = reviewFloored(network, liveNotional);
+    if (floored || confirmOn('order')) {
       const review: ReviewOrder = {
         side,
         engine,
@@ -1605,21 +1598,21 @@ export function OrderEntry({
           ? checkStopAgainstLiquidation(reviewStopLevel, { ...riskBase, side })
           : null;
 
-      suppressPending.current = false;
-      const ok = await confirm({
+      const ok = await askTrade({
+        kind: 'order',
+        force: floored,
         title: network === 'mainnet' ? 'Review order — real funds' : 'Review order',
         size: 'md',
-        danger: network === 'mainnet',
+        tone: side === 'buy' ? 'buy' : 'sell',
         confirmLabel: side === 'buy' ? 'Place buy / long' : 'Place sell / short',
         cancelLabel: 'Back to ticket',
         requireAck:
           reviewStop?.verdict === 'beyond-liquidation'
             ? 'I understand liquidation would happen before this stop loss.'
             : undefined,
-        body: <ReviewPosition order={review} onSuppressChange={(v) => { suppressPending.current = v; }} />,
+        body: <ReviewPosition order={review} />,
       });
       if (!ok) return;
-      if (suppressPending.current) setReviewSuppressed(true);
     }
 
     setBusy(true);
@@ -2658,7 +2651,6 @@ export function OrderEntry({
       </div>
 
       {msg && <p className={`status ${msg.kind}`}>{msg.text}</p>}
-      {dialog}
       <FeeSchedule
         open={feesOpen}
         onClose={() => setFeesOpen(false)}

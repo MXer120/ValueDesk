@@ -107,7 +107,7 @@ async function place(page: Page, last?: () => Promise<void>): Promise<{ review: 
     });
     w.__placedObs.observe(document.body, { childList: true, subtree: true });
   }).catch(() => {});
-  // "Don't show this review again" was ticked in this browser: the button sends it at once.
+  // "Don't ask again" was ticked in this browser: the button sends it at once.
   const reviewed = await page.evaluate(() => localStorage.getItem('opentrade.review.suppress') !== '1').catch(() => true);
   if (!reviewed) await last?.();
   await btn.click();
@@ -265,6 +265,7 @@ export const UI_STEPS = {
     const text = ((await row.textContent()) ?? '').replace(/\s+/g, ' ').trim();
     const said = await toast(page, /cancel/i).count();
     await row.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await page.getByRole('dialog', { name: 'Cancel this order?' }).getByRole('button', { name: 'Cancel order' }).click({ timeout: 10_000 });
     await until(page, async () => (await toast(page, /cancel/i).count()) > said || !(await row.isVisible().catch(() => false)), 'the cancel to be sent', 20_000);
     return { row: text };
   },
@@ -357,6 +358,7 @@ export const UI_STEPS = {
       throw new Error(`the TP/SL sheet will not confirm: ${((await sheet.textContent()) ?? '').replace(/\s+/g, ' ').slice(0, 300)}`);
     });
     await confirm.click();
+    await page.getByRole('dialog', { name: 'Confirm take profit and stop loss' }).getByRole('button', { name: 'Send exits' }).click({ timeout: 10_000 });
     await sheet.waitFor({ state: 'hidden', timeout: 30_000 }).catch(async () => {
       throw new Error(`the TP/SL sheet stayed open: ${((await sheet.textContent()) ?? '').replace(/\s+/g, ' ').slice(0, 300)}`);
     });

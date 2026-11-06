@@ -35,6 +35,7 @@ import type { Chart as KChart, OverlayEvent, OverlayTemplate, Point } from 'klin
 import type { Symbol as MarketSymbol } from '../api';
 import { fmtPrice, fmtQty, fmtQuote, num, pick } from '../format';
 import { followChart } from './candleDraws';
+import { OrderLabelDom, labelsInPane, type DomLabel } from './orderLabelDom';
 import { CANDLE_PANE_ID, FAMILY, NUM_FAMILY, T } from './theme';
 
 /** Registered overlay name. Prefixed so Chart.tsx can keep it out of the user
@@ -358,7 +359,7 @@ export type LineState = 'live' | 'dragging' | 'confirm' | 'sending';
 /** A button on a line's label. */
 export type LineButton = 'cancel' | 'tp' | 'sl';
 
-/** One box of a label: filled in the line's colour, a value on the plot's colour, or an outlined button. */
+/** One box of a label: filled in the line's colour, a value in a light outline, or an outlined button in its own colour. */
 interface LabelSeg {
   text: string;
   look: 'solid' | 'value' | 'outline' | 'cross';
@@ -395,7 +396,8 @@ type Measure = (text: string, size: number, weight: number, family: string) => n
 /** klinecharts' own measure once registered; an estimate before that, and in tests. */
 let measure: Measure = (text, size) => text.length * size * 0.56;
 
-const segWidth = (seg: LabelSeg): number =>
+/** One width for a box on screen (orderLabelDom.ts) and its button's hit area here. */
+const segWidth = (seg: Pick<LabelSeg, 'look' | 'text' | 'family'>): number =>
   seg.look === 'cross' ? CROSS_WIDTH : LABEL_PAD * 2 + Math.ceil(measure(seg.text, LABEL_SIZE, LABEL_WEIGHT, seg.family));
 
 /** One label to place: a line of an order or of the preview. */
@@ -430,19 +432,6 @@ export function layoutLabels(rows: readonly LabelRow[]): Map<string, number> {
   for (const run of runs) run.items.forEach((item, i) => dy.set(item.key, Math.round(run.top + i * LABEL_ROW - item.y)));
   return dy;
 }
-
-/** Text on the line's colour: dark on the bright colours of the dark theme, white on the light theme's deeper ones. */
-/** `a` over `b`, solid: a label hides what is behind it, so no line or candle shows through its tint. */
-const mix = (a: string, b: string, share: number): string => {
-  const rgb = (h: string) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
-  const [x, y] = [rgb(a), rgb(b)];
-  if (x.concat(y).some((n) => !Number.isFinite(n))) return a;
-  return `rgb(${x.map((n, i) => Math.round(n * share + y[i]! * (1 - share))).join(', ')})`;
-};
-/** The owner's version 1 (2026-11-06): a solid tint of the line's colour, a fine border, its colour as the text. */
-const labelFill = (color: string): string => mix(color, T.bg, 0.16);
-const labelBorder = (color: string): string => mix(color, T.bg, 0.6);
-const labelInk = (color: string): string => mix(color, T.text, 0.75);
 
 /**
  * Colours come from chart/theme.ts, the canvas-side mirror of the tokens in
@@ -531,7 +520,7 @@ function visualOf(
   });
   const segs: LabelSeg[] = [];
   const live = state === 'live';
-  if (live && line.actionable) segs.push(words('', 'cross', color, 'cancel'));
+  if (live && line.actionable) segs.push(words('', 'cross', T.neg, 'cancel'));
   if (!live) {
     // A moved line says so: the price it is going to is on the axis tag.
     segs.push(words(state === 'dragging' ? 'Moving' : state === 'confirm' ? 'Not sent' : 'Sending…', 'solid'));
@@ -593,9 +582,8 @@ const drawnOffsets = new Map<string, number>();
  * point moves by the same delta on a pressed-move, a one-point full-width line
  * still drags correctly (klinecharts' eventPressedOtherMove).
  *
- * Styles are merged as defaults <- overlay.styles <- figure.styles, and the
- * defaults here are the themed ones from chart/theme.ts, so font family and size
- * are inherited rather than restated.
+ * Its words and its price tag are not here: orderLabelDom.ts draws them over the
+ * canvas, from this overlay's extendData.
  */
 const template: OverlayTemplate<string> = {
   name: ORDER_LINE_OVERLAY,
@@ -616,90 +604,33 @@ const template: OverlayTemplate<string> = {
     const lineShown = c.y >= -1 && c.y <= bounding.height + 1;
     const labelShown = top + LABEL_HEIGHT >= 0 && top <= bounding.height;
     if (!lineShown && !labelShown) return [];
+    // The boxes are HTML, for the blur behind them (orderLabelDom.ts). Only a button's hit area is here, on the same
+    // pixels: the rest of a label is no handle, and must not swallow a drag that begins on the line.
     const parts: Array<Record<string, unknown>> = [];
     let x = LABEL_X;
     for (const seg of labelShown ? v.segs : []) {
       const width = segWidth(seg);
-      const fill = labelFill(seg.color);
-      const border = labelBorder(seg.color);
-      parts.push({
-        type: 'rect',
-        // A button answers a click (the layer's onClick); the rest is a label, not a handle, and
-        // would otherwise swallow the drag whenever the user grabbed the line by it.
-        ...(seg.button ? { key: seg.button } : { ignoreEvent: true }),
-        attrs: { x, y: top, width, height: LABEL_HEIGHT },
-        styles: { style: 'stroke_fill', color: fill, borderColor: border, borderSize: 1, borderRadius: 4 },
-      });
-      if (seg.look === 'cross') {
-        const cx = x + width / 2;
-        const r = 3.5;
-        for (const d of [1, -1]) {
-          parts.push({
-            type: 'line',
-            ignoreEvent: true,
-            attrs: { coordinates: [{ x: cx - r, y: mid - r * d }, { x: cx + r, y: mid + r * d }] },
-            styles: { color: labelInk(seg.color), size: 1, style: 'solid' },
-          });
-        }
-      } else {
+      if (seg.button) {
         parts.push({
-          type: 'text',
-          ignoreEvent: true,
-          attrs: { x: x + LABEL_PAD, y: mid, text: seg.text, align: 'left', baseline: 'middle' },
-          styles: {
-            backgroundColor: 'transparent', borderColor: 'transparent', borderSize: 0, paddingLeft: 0, paddingRight: 0, paddingTop: 0, paddingBottom: 0,
-            size: LABEL_SIZE, weight: LABEL_WEIGHT, family: seg.family,
-            color: labelInk(seg.color),
-          },
+          type: 'rect',
+          key: seg.button,
+          attrs: { x, y: top, width, height: LABEL_HEIGHT },
+          styles: { style: 'fill', color: 'transparent', borderSize: 0 },
         });
       }
       x += width + LABEL_GAP;
     }
-    // The line starts past a label sitting on it, so it cannot show between the label's boxes.
-    const onLine = parts.length > 0 && Math.abs(mid - c.y) < LABEL_HEIGHT / 2;
     return [
       ...(lineShown
         ? [{
             type: 'line',
-            attrs: { coordinates: [{ x: onLine ? x : 0, y: c.y }, { x: bounding.width, y: c.y }] },
+            // All the way across: it runs under the labels, which blur it there (or hide it, past the blur's cap).
+            attrs: { coordinates: [{ x: 0, y: c.y }, { x: bounding.width, y: c.y }] },
             styles: { color: v.color, size: 1, style: 'dashed', dashedValue: v.emphasis ? [4, 3] : [2, 3] },
           }]
         : []),
       ...parts,
     ] as unknown as ReturnType<NonNullable<OverlayTemplate<string>['createPointFigures']>>;
-  },
-  // Price tag in the y-axis gutter, on the same side the axis labels are on.
-  createYAxisFigures: ({ coordinates, bounding, overlay, yAxis }) => {
-    const c = coordinates[0];
-    if (!c) return [];
-    const v = visualIn(overlay.extendData);
-    const fromZero = yAxis?.isFromZero() ?? false;
-    const y = Math.round(c.y) + (drawnOffsets.get(overlay.id) ?? v.dy);
-    if (y < -LABEL_HEIGHT || y > bounding.height + LABEL_HEIGHT) return [];
-    return {
-      type: 'text',
-      ignoreEvent: true,
-      attrs: {
-        x: fromZero ? 0 : bounding.width,
-        y,
-        text: v.axisText,
-        align: fromZero ? 'left' : 'right',
-        baseline: 'middle',
-      },
-      styles: {
-        color: labelInk(v.color),
-        backgroundColor: labelFill(v.color),
-        borderColor: labelBorder(v.color),
-        borderSize: 1,
-        borderRadius: 4,
-        size: LABEL_SIZE,
-        weight: LABEL_WEIGHT,
-        paddingLeft: 5,
-        paddingRight: 5,
-        paddingTop: 3,
-        paddingBottom: 3,
-      },
-    };
   },
 };
 
@@ -781,6 +712,11 @@ export class OrderLineLayer {
   private stopFollow: (() => void) | null = null;
   /** The line under a drag that has really moved. */
   private dragging: string | null = null;
+  /** The labels on screen (orderLabelDom.ts), and each line's visual as last given to its overlay. */
+  private dom: OrderLabelDom | null = null;
+  private data = new Map<string, string>();
+  private labelsDirty = true;
+  private painted: { laid: unknown; size: string } | null = null;
 
   constructor(
     private readonly chart: KChart,
@@ -813,8 +749,57 @@ export class OrderLineLayer {
       const said = `${visual.color}|${visual.segs.map((x) => x.text).join('|')}`;
       if (this.tone.get(key) === said) continue;
       this.tone.set(key, said);
-      this.chart.overrideOverlay({ id, extendData: JSON.stringify(visual) });
+      this.chart.overrideOverlay({ id, extendData: this.remember(key, visual) });
     }
+  }
+
+  /** The text an overlay is given, and what the label on screen is written from. */
+  private remember(key: string, visual: LineVisual): string {
+    const data = JSON.stringify(visual);
+    if (this.data.get(key) !== data) {
+      this.data.set(key, data);
+      this.labelsDirty = true;
+    }
+    return data;
+  }
+
+  /** Dark or light: the colours are in each line's visual. */
+  retheme(): void {
+    for (const [key, id] of this.ids) {
+      const line = this.lines.get(key);
+      if (line) this.chart.overrideOverlay({ id, extendData: this.remember(key, this.visualNow(line)) });
+    }
+  }
+
+  /**
+   * The labels as HTML, after a draw: their rows are what layout() worked out. Nothing to do on most draws, when a
+   * pan along time moved no line and no figure changed.
+   */
+  private paintLabels(): void {
+    if (!this.dom) {
+      const host = this.chart.getDom?.();
+      if (!host || typeof document === 'undefined') return;
+      this.dom = new OrderLabelDom(host, segWidth);
+    }
+    const laid = this.laid;
+    const main = this.chart.getSize(CANDLE_PANE_ID, 'main');
+    if (!laid || !main) return;
+    const axis = this.chart.getSize(CANDLE_PANE_ID, 'yAxis');
+    const axisOnRight = !axis || axis.left >= main.left;
+    const size = `${main.left}|${main.top}|${main.height}|${axisOnRight}`;
+    if (!this.labelsDirty && this.painted?.laid === laid && this.painted.size === size) return;
+    this.labelsDirty = false;
+    this.painted = { laid, size };
+    const rows: Array<{ key: string; y: number }> = [];
+    for (const r of laid.rows) {
+      if (this.ids.has(r.key)) rows.push({ key: r.key, y: Math.round(r.y) + (laid.out.get(r.key) ?? 0) });
+    }
+    const labels: DomLabel[] = labelsInPane(rows, main.height).map((r) => {
+      const data = this.data.get(r.key) ?? '';
+      const v = visualIn(data);
+      return { key: r.key, y: r.y, first: this.lines.get(r.key)?.kind === 'position', data, boxes: v.segs, axisText: v.axisText, color: v.color };
+    });
+    this.dom.paint(labels, { left: main.left + LABEL_X, top: main.top, height: main.height }, axisOnRight);
   }
 
   /** The visual a line has now: where the user moved it, or the venue's. */
@@ -868,13 +853,16 @@ export class OrderLineLayer {
     }
     // One override redraws the pane, and every line reads its offset as it is drawn.
     const id = moved ? this.ids.get(moved.key) : undefined;
-    if (moved && id) this.chart.overrideOverlay({ id, extendData: JSON.stringify(this.visualNow(moved)) });
+    if (moved && id) this.chart.overrideOverlay({ id, extendData: this.remember(moved.key, this.visualNow(moved)) });
     return out;
   }
 
   private follow(): void {
     if (this.ids.size > 0) {
-      this.stopFollow ??= followChart(this.chart, CANDLE_PANE_ID, () => this.layout());
+      this.stopFollow ??= followChart(this.chart, CANDLE_PANE_ID, () => {
+        this.layout();
+        this.paintLabels();
+      });
     } else if (this.stopFollow) {
       this.stopFollow();
       this.stopFollow = null;
@@ -940,7 +928,7 @@ export class OrderLineLayer {
     this.chart.overrideOverlay({
       id,
       points: [{ value }],
-      extendData: JSON.stringify(this.visualNow(line)),
+      extendData: this.remember(key, this.visualNow(line)),
       // A line awaiting an answer must not be draggable again; a second drag
       // would queue a modify on top of one already in flight.
       lock: state !== 'dragging',
@@ -973,7 +961,7 @@ export class OrderLineLayer {
     this.chart.overrideOverlay({
       id,
       points: [{ value }],
-      extendData: JSON.stringify(this.visualNow(line)),
+      extendData: this.remember(key, this.visualNow(line)),
       lock: !line.draggable,
     });
     this.sigs.set(key, signature(line));
@@ -1016,7 +1004,7 @@ export class OrderLineLayer {
       zLevel: Z_LEVEL,
       lock: !line.draggable,
       points: [{ value: Number.parseFloat(line.price) }],
-      extendData: JSON.stringify(this.visualNow(line)),
+      extendData: this.remember(line.key, this.visualNow(line)),
 
       // Without this the library deletes the overlay on right-click. See the
       // file header - on a stop-loss that is a one-click lie.
@@ -1040,6 +1028,11 @@ export class OrderLineLayer {
           this.held = line.key;
           this.expecting = null;
           this.on.onDragStart(this.current(line));
+        }
+        // The library moves the line itself; the label on screen follows here, and says so.
+        if (price !== null) {
+          this.moved.set(line.key, { price, state: 'dragging' });
+          this.remember(line.key, this.visualNow(this.current(line)));
         }
         this.on.onDragMove(this.current(line), price);
       },
@@ -1067,6 +1060,9 @@ export class OrderLineLayer {
     }
     this.ids.delete(key);
     this.sigs.delete(key);
+    this.dom?.drop(key);
+    this.data.delete(key);
+    this.labelsDirty = true;
     this.tone.delete(key);
     this.offsets.delete(key);
     this.laid = null;

@@ -200,7 +200,7 @@ h.test('TP/SL on an entry: a bracket with two reduce-only exits of the same size
   await toast(page, /\+2 exit orders/).waitFor({ state: 'visible' });
 });
 
-h.test('Back to ticket sends nothing; "Don\'t show this review again" skips it next time (under $10,000)', async (env) => {
+h.test('Back to ticket sends nothing; "Don\'t ask again" skips it next time (under $10,000)', async (env) => {
   const sx = await enableTrading(env);
   const { page } = env;
   const { t, last } = await ready(page);
@@ -216,7 +216,7 @@ h.test('Back to ticket sends nothing; "Don\'t show this review again" skips it n
   // Tick "don't show again", then Place: only then is it remembered.
   await sideButton(page).click();
   await review.waitFor({ state: 'visible' });
-  await review.getByRole('checkbox', { name: "Don't show this review again" }).check();
+  await review.getByRole('checkbox', { name: "Don't ask again" }).check();
   assert.match((await review.textContent()) ?? '', /Mainnet orders of \$10[.,]000 or more always show it regardless\./);
   await review.getByRole('button', { name: 'Place buy / long' }).click();
   await until(page, () => sx.orders().length === 1, 'the first order');
