@@ -81,6 +81,22 @@ const dur = (ms: number): string => {
 };
 const MARKETS_REFRESH_MS = 6 * 60 * 60_000;
 
+/**
+ * A print this old proves nothing about the feed: it is a backlog or a snapshot arriving. Measured 2026-11-06: the SoDEX
+ * perps socket went on delivering a trickle of prints 20 minutes old, so it looked alive while most of the market's
+ * trades waited unread in the kernel.
+ */
+const FRESH_PRINT_MS = 60_000;
+/** Whether a frame's trades hold one that just happened. */
+export const hasFreshPrint = (list: unknown, timeOf: (t: never) => unknown, now = Date.now()): boolean => {
+  if (!Array.isArray(list)) return false;
+  for (const t of list as never[]) {
+    const at = timeOf(t);
+    if (typeof at === 'number' && now - at < FRESH_PRINT_MS) return true;
+  }
+  return false;
+};
+
 /** Remembers the last `cap` ids. */
 export class Dedup {
   private set = new Set<string>();
@@ -146,10 +162,10 @@ export class LiveSocket {
       dataSilentMs?: number;
       /** Whether a message is the feed itself, not a pong or an ack. */
       isData?: (msg: unknown) => boolean;
+      /** false while the feed cannot be expected yet (a socket still subscribing): its clock waits. */
+      dataExpected?: () => boolean;
       /** How often the socket is looked at (default TICK_MS). */
       tickMs?: number;
-      /** false: no permessage-deflate - frames are parsed as they come, never held for the zlib pool (LighterStream). */
-      deflate?: boolean;
       /** For the log lines. */
       name?: string;
       log?: (line: string) => void;
@@ -192,8 +208,12 @@ export class LiveSocket {
 
   private connect(): void {
     if (!this.running || this.ws) return;
+    // No compression on any feed. An inflated frame takes a turn of the event loop through the zlib pool, so on this
+    // thread, busy with builds, a socket reads about one frame per turn, whatever is waiting. Measured 2026-11-06 on a
+    // thread busy 150 ms a turn, one SoDEX socket: with compression 43 s behind after 90 s and 333 of 876 trades read;
+    // without, 0.26 s behind and all 876. A venue sending many small frames loses the most: SoDEX sends one per trade.
     // closeTimeout: in ws, not yet in its published types.
-    const options: ClientOptions & { closeTimeout: number } = { perMessageDeflate: this.opts.deflate !== false, handshakeTimeout: HANDSHAKE_MS, closeTimeout: CLOSE_HANDSHAKE_MS };
+    const options: ClientOptions & { closeTimeout: number } = { perMessageDeflate: false, handshakeTimeout: HANDSHAKE_MS, closeTimeout: CLOSE_HANDSHAKE_MS };
     const ws = new WebSocket(this.url, options);
     this.ws = ws;
     this.closingAt = 0;
@@ -202,23 +222,29 @@ export class LiveSocket {
       this.openedAt = this.lastMessageAt = this.lastDataAt = Date.now();
       this.stalledMs = 0;
       this.dataStalledMs = 0;
-      void Promise.resolve(this.subscribe((m) => ws.send(JSON.stringify(m)))).catch(() => ws.terminate());
+      void Promise.resolve(this.subscribe((m) => ws.send(JSON.stringify(m)))).catch((e: unknown) => {
+        this.why = `subscribing failed: ${String((e as Error)?.message ?? e).slice(0, 120)}`;
+        ws.terminate();
+      });
     });
     ws.on('message', (raw) => {
       this.lastMessageAt = Date.now();
       this.stalledMs = 0;
-      // Up from the moment the subscriptions were sent and data flows.
-      if (this.upSince === null) this.upSince = this.openedAt;
       let msg: unknown;
       try {
         msg = JSON.parse(raw.toString());
       } catch {
+        if (this.upSince === null && !this.opts.isData) this.upSince = this.openedAt;
         return;
       }
-      if (this.opts.isData?.(msg)) {
+      const isData = this.opts.isData?.(msg) ?? false;
+      if (isData) {
         this.lastDataAt = Date.now();
         this.dataStalledMs = 0;
       }
+      // Up from the moment the subscriptions were sent and data flows. Where the feed can be told from the rest, only
+      // the feed counts: a socket that answers but delivers nothing was counted as up, and its hours as complete.
+      if (this.upSince === null && (isData || !this.opts.isData)) this.upSince = this.openedAt;
       try {
         this.onMessage(msg);
       } catch { /* one bad print never takes the socket down */ }
@@ -269,7 +295,10 @@ export class LiveSocket {
       return;
     }
     const dataSilentMs = this.opts.dataSilentMs;
-    if (dataSilentMs !== undefined && Date.now() - this.lastDataAt - this.dataStalledMs > dataSilentMs) {
+    if (this.opts.dataExpected?.() === false) {
+      this.lastDataAt = Date.now();
+      this.dataStalledMs = 0;
+    } else if (dataSilentMs !== undefined && Date.now() - this.lastDataAt - this.dataStalledMs > dataSilentMs) {
       this.why = `no data for ${dur(Date.now() - this.lastDataAt)}, though it still answers`;
       ws.terminate();
       return;
@@ -300,6 +329,13 @@ async function hlMarkets(): Promise<string[]> {
   return [...new Set([...perps, ...pairs])].slice(0, 990);
 }
 
+/** The whole venue on one socket and always trading: over 60 s without a fresh print means the socket, not the market. */
+const HL_DATA_SILENT_MS = 60_000;
+const isHlFresh = (msg: unknown): boolean => {
+  const m = msg as { channel?: unknown; data?: unknown } | null;
+  return m?.channel === 'trades' && hasFreshPrint(m.data, (t: { time?: unknown }) => t?.time);
+};
+
 export class HlStream {
   private socket: LiveSocket;
   private markets: string[] = [];
@@ -320,7 +356,7 @@ export class HlStream {
         }
       },
       (msg) => this.handle(msg),
-      { name: 'hyperliquid', log: streamLog },
+      { name: 'hyperliquid', log: streamLog, isData: isHlFresh, dataSilentMs: HL_DATA_SILENT_MS },
     );
   }
 
@@ -418,14 +454,16 @@ export function sodexPrint(t: SodexWsTrade): Print | null {
  * above the quietest real market: over 1,000 minutes neither book had more than 1 empty minute in a row.
  */
 const SODEX_DATA_SILENT_MS: Readonly<Record<'perps' | 'spot', number>> = { perps: 90_000, spot: 180_000 };
-const isSodexTrade = (msg: unknown): boolean => {
+const isSodexFresh = (msg: unknown): boolean => {
   const m = msg as { channel?: unknown; data?: unknown } | null;
-  return m?.channel === 'trade' && Array.isArray(m.data) && m.data.length > 0;
+  return m?.channel === 'trade' && hasFreshPrint(m.data, (t: { T?: unknown }) => t?.T);
 };
 
 export class SodexStream {
   private sockets: LiveSocket[];
   private dedup = new Dedup();
+  /** The last good list: a failed REST call never takes a live feed down. */
+  private symbols: Partial<Record<'perps' | 'spot', string[]>> = {};
 
   constructor(private readonly onPrint: (p: Print) => void, wsBase = NET.wsBase) {
     this.sockets = (['perps', 'spot'] as const).map(
@@ -434,11 +472,16 @@ export class SodexStream {
           `${wsBase}/ws/${engine}`,
           JSON.stringify({ op: 'ping' }),
           async (send) => {
-            const symbols = await sodexSymbols(engine);
+            const read = await sodexSymbols(engine).catch((e: unknown) => {
+              if (!this.symbols[engine]?.length) throw e;
+              return [];
+            });
+            if (read.length) this.symbols[engine] = read;
+            const symbols = this.symbols[engine] ?? [];
             if (symbols.length) send({ op: 'subscribe', params: { channel: 'trade', symbols } });
           },
           (msg) => this.handle(msg),
-          { name: `sodex-${engine}`, log: streamLog, isData: isSodexTrade, dataSilentMs: SODEX_DATA_SILENT_MS[engine] },
+          { name: `sodex-${engine}`, log: streamLog, isData: isSodexFresh, dataSilentMs: SODEX_DATA_SILENT_MS[engine] },
         ),
     );
   }
@@ -510,19 +553,37 @@ export function arcusPrint(t: ArcusWsTrade): Print | null {
  * allows 100 subscriptions per connection and closes a socket after 24 h;
  * LiveSocket reconnects).
  */
+/** Arcus's thinnest hours are not measured over a weekend: this is above what 5 days showed, and a wrong cut costs 1 s. */
+const ARCUS_DATA_SILENT_MS = 120_000;
+const isArcusFresh = (msg: unknown): boolean => {
+  const m = msg as { type?: unknown; channel?: unknown; contents?: unknown } | null;
+  return m?.type === 'channel_data' && m.channel === 'trades'
+    && hasFreshPrint(m.contents, (t: { timestamp?: unknown }) => (typeof t?.timestamp === 'number' ? t.timestamp / 1000 : undefined));
+};
+
 export class ArcusStream {
   private socket: LiveSocket;
   private dedup = new Dedup();
+  /**
+   * The last good list. A failed market read used to end the socket with nothing logged, each time: 302 closes and
+   * 305 silent minutes from 2026-11-01 to 11-06 while the REST side was slow.
+   */
+  private lastMarkets: string[] = [];
 
   constructor(private readonly onPrint: (p: Print) => void, markets: () => Promise<string[]>, url: string) {
     this.socket = new LiveSocket(
       url,
       JSON.stringify({ type: 'ping' }),
       async (send) => {
-        for (const id of (await markets()).slice(0, 100)) send({ type: 'subscribe', channel: 'trades', id });
+        const read = await markets().catch((e: unknown) => {
+          if (!this.lastMarkets.length) throw e;
+          return [];
+        });
+        if (read.length) this.lastMarkets = read;
+        for (const id of this.lastMarkets.slice(0, 100)) send({ type: 'subscribe', channel: 'trades', id });
       },
       (msg) => this.handle(msg),
-      { name: 'arcus', log: streamLog },
+      { name: 'arcus', log: streamLog, isData: isArcusFresh, dataSilentMs: ARCUS_DATA_SILENT_MS },
     );
   }
 
@@ -609,7 +670,16 @@ export function lighterPrint(t: LighterWsTrade, symbolOf: (marketId: number) => 
 /** Lighter's messages that need no word in the log. */
 const LIGHTER_QUIET = new Set(['update/trade', 'subscribed/trade', 'connected', 'pong']);
 
+const isLighterFresh = (msg: unknown): boolean => {
+  const m = msg as { type?: unknown; trades?: unknown; liquidation_trades?: unknown } | null;
+  if (m?.type !== 'update/trade') return false;
+  const at = (t: { timestamp?: unknown }) => t?.timestamp;
+  return hasFreshPrint(m.trades, at) || hasFreshPrint(m.liquidation_trades, at);
+};
+
 export class LighterStream {
+  /** A full socket with no fresh print this long is deaf. */
+  private static readonly DATA_SILENT_MS = 180_000;
   private sockets: LiveSocket[] = [];
   private dedup = new Dedup();
   private groups: number[][] = [];
@@ -682,7 +752,12 @@ export class LighterStream {
         },
         (msg) => this.handle(i, msg),
         {
-          pingMs: LighterStream.PING_MS, staleMs: LighterStream.STALE_MS, deflate: false, name: `lighter#${i + 1}`, log: this.log,
+          pingMs: LighterStream.PING_MS, staleMs: LighterStream.STALE_MS, name: `lighter#${i + 1}`, log: this.log,
+          // A full socket trades all the time; the last one may hold a few thin markets and can be really quiet. A socket
+          // still subscribing is left alone: cutting it would only start its ~90 s again.
+          ...(group.length >= LighterStream.PER_SOCKET
+            ? { isData: isLighterFresh, dataSilentMs: LighterStream.DATA_SILENT_MS, dataExpected: () => this.readyAt[i] != null }
+            : {}),
           onClose: () => { this.sendFns[i] = null; this.readyAt[i] = null; },
         },
       ));

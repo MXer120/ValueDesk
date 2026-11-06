@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 import { createServer, type IncomingMessage } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { WebSocketServer } from 'ws';
-import { LighterStream, LiveSocket } from '../src/indexer/streams.js';
+import { hasFreshPrint, LighterStream, LiveSocket } from '../src/indexer/streams.js';
 
 async function until(cond: () => boolean, ms = 3000): Promise<void> {
   const end = Date.now() + ms;
@@ -29,20 +29,84 @@ async function wsServer() {
   return { wss, upgrades, url: `ws://127.0.0.1:${(wss.address() as AddressInfo).port}` };
 }
 
-test('deflate: false offers no compression (Lighter); the default still does', async () => {
+test('no socket offers compression: inflating reads about one frame per turn of a busy thread', async () => {
   const { wss, upgrades, url } = await wsServer();
-  const plain = new LiveSocket(url, '{}', () => {}, () => {}, { deflate: false });
-  const usual = new LiveSocket(url, '{}', () => {}, () => {});
+  const s = new LiveSocket(url, '{}', () => {}, () => {});
   try {
-    plain.start();
+    s.start();
     await until(() => upgrades.length === 1);
-    usual.start();
-    await until(() => upgrades.length === 2);
     assert.equal(upgrades[0]!.headers['sec-websocket-extensions'], undefined, 'no permessage-deflate offered');
-    assert.match(String(upgrades[1]!.headers['sec-websocket-extensions']), /permessage-deflate/);
   } finally {
-    plain.stop();
-    usual.stop();
+    s.stop();
+    wss.close();
+  }
+});
+
+test('where the feed can be told apart, only the feed makes a socket up', async () => {
+  const { wss, url } = await wsServer();
+  let feed = false;
+  wss.on('connection', (c) => {
+    const t = setInterval(() => c.send(feed ? '{"channel":"trade"}' : '{"op":"pong"}'), 10);
+    c.on('close', () => clearInterval(t));
+  });
+  let frames = 0;
+  const isData = (m: unknown) => (m as { channel?: string }).channel === 'trade';
+  const s = new LiveSocket(url, '{}', () => {}, () => { frames++; }, { isData });
+  try {
+    s.start();
+    await until(() => frames >= 3);
+    assert.equal(s.upSince, null, 'pongs alone: not up');
+    feed = true;
+    await until(() => s.upSince !== null);
+  } finally {
+    s.stop();
+    for (const c of wss.clients) c.terminate();
+    wss.close();
+  }
+});
+
+test('old prints do not count as the feed: a socket delivering only a backlog is replaced', async () => {
+  const { wss, url } = await wsServer();
+  let opened = 0;
+  wss.on('connection', (c) => {
+    opened++;
+    const t = setInterval(() => c.send(JSON.stringify({ channel: 'trade', data: [{ T: Date.now() - (opened === 1 ? 20 * 60_000 : 0), t: 1, s: 'BTC-USD', p: '1', q: '1', bi: 1, si: 2 }] })), 10);
+    c.on('close', () => clearInterval(t));
+  });
+  const fresh = (m: unknown) => hasFreshPrint((m as { data?: unknown }).data, (t: { T?: unknown }) => t?.T);
+  const s = new LiveSocket(url, '{}', () => {}, () => {}, { tickMs: 20, dataSilentMs: 150, isData: fresh });
+  try {
+    s.start();
+    await until(() => opened === 2);
+    await until(() => s.upSince !== null);
+  } finally {
+    s.stop();
+    for (const c of wss.clients) c.terminate();
+    wss.close();
+  }
+});
+
+test('a socket still subscribing is not cut for silence', async () => {
+  const { wss, url } = await wsServer();
+  let opened = 0;
+  wss.on('connection', (c) => {
+    opened++;
+    const t = setInterval(() => c.send('{"op":"pong"}'), 10);
+    c.on('close', () => clearInterval(t));
+  });
+  let ready = false;
+  const isData = (m: unknown) => (m as { channel?: string }).channel === 'trade';
+  const s = new LiveSocket(url, '{}', () => {}, () => {}, { tickMs: 20, dataSilentMs: 100, isData, dataExpected: () => ready });
+  try {
+    s.start();
+    await until(() => opened === 1);
+    await new Promise((r) => setTimeout(r, 300));
+    assert.equal(opened, 1, 'left alone');
+    ready = true;
+    await until(() => opened === 2);
+  } finally {
+    s.stop();
+    for (const c of wss.clients) c.terminate();
     wss.close();
   }
 });
