@@ -101,7 +101,7 @@ export function widgetBody(id: string, c: TradeContext, o: { instance?: string; 
     case 'chart':
       return body(
         <LiveChart engine={c.engine} symbol={c.symbol} sym={c.sym} address={c.address} unlocked={c.unlocked} refreshToken={c.refreshToken} onChanged={c.onChanged} onPrice={c.onPrice} />);
-    case 'book': return body(<Book engine={c.engine} symbol={c.symbol} sym={c.sym} onPick={c.onPrice} showTitle={false} />);
+    case 'book': return body(<Book engine={c.engine} symbol={c.symbol} sym={c.sym} onPick={c.onPrice} showTitle={false} address={c.address} />);
     case 'tape': return body(<Trades engine={c.engine} symbol={c.symbol} sym={c.sym} showTitle={false} onOpenScan={c.onOpenScan} />);
     case 'exec':
     case 'quick':

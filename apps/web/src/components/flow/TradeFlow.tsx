@@ -1,5 +1,5 @@
 /**
- * WHO TRADED (owner 2026-11-01: "Make it possible to get the following trade info & more for each
+ * TRADE FLOW, first called Who traded (owner 2026-11-01: "Make it possible to get the following trade info & more for each
  * candle & every timeframe across all supported platforms ... Use our own design & optimize UX").
  *
  * A panel beside the chart, so the chart stays in view (owner 2026-11-03), built like the chart's other
@@ -16,6 +16,7 @@
  * No wallet names: the owner's rule (server valuedesk/labels.ts) - an identicon and the address.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { useLatched } from '../motion';
 import type { FlowWindow, FlowWindowRow, WalletFillsBody } from '@sign/flow/read.js';
 import type { FlowRole, FlowSide, FlowSort } from '@sign/flow/codec.js';
 import { vsApi, VENUE_LABEL, type Venue } from '../../vsApi';
@@ -161,6 +162,9 @@ export function TradeFlowView({ symbol, spot, interval, at, end, onPick, onClose
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
+  // The wallet slides over the list and away again (owner 2026-11-06: "fully smooth"): the list stays
+  // mounted under it, with its scroll, and the wallet is still there while it leaves.
+  const wallet = useLatched(open, 220);
   useEffect(() => { const t = setTimeout(() => setQuery(q.trim()), 250); return () => clearTimeout(t); }, [q]);
   useEffect(() => { setOpen(null); setLimit(PAGE); }, [coin, win.from, win.to, venues.join(',')]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -183,8 +187,8 @@ export function TradeFlowView({ symbol, spot, interval, at, end, onPick, onClose
   return (
     <div ref={rootRef} className={`tfl${short ? ' is-short' : ''}`}>
       <div className="tfl-bar">
-        <b className="tfl-title">Who traded</b>
-        <button type="button" className="tfl-ghost" onClick={onClose} aria-label="Close Who traded" title="Close">
+        <b className="tfl-title">Trade flow</b>
+        <button type="button" className="tfl-ghost" onClick={onClose} aria-label="Close trade flow" title="Close">
           <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" /></svg>
         </button>
       </div>
@@ -194,13 +198,10 @@ export function TradeFlowView({ symbol, spot, interval, at, end, onPick, onClose
         <b>{windowText(win)}</b>
         {count > 1 && <span>{fmtCount(count)} candles</span>}
         {live && <span className="tfl-forming">Forming</span>}
-        {count > 1 && <button type="button" className="tfl-candle__one" onClick={() => onPick(win.from, null)} title="Back to the first candle alone">One candle</button>}
       </div>
 
-      <div className={`tfl-scroll${open ? ' is-wallet' : ''}`}>
-        {open ? (
-          <WalletView coin={coin} kind={kind} venues={venues} win={win} row={open} live={live} onBack={() => setOpen(null)} />
-        ) : (
+      <div className="tfl-views">
+      <div className="tfl-scroll" {...(open ? { inert: '' } : {})}>
           <div className="tfl-body">
             <Summary d={d && !before && d.markets.length ? d : null} role={role} loading={r.loading && !d} />
             <Partial d={d} />
@@ -221,7 +222,12 @@ export function TradeFlowView({ symbol, spot, interval, at, end, onPick, onClose
             )}
             <Coverage d={d} venues={venues} />
           </div>
-        )}
+      </div>
+      {wallet.value && (
+        <div className={`tfl-layer${wallet.closing ? ' is-closing' : ''}`}>
+          <WalletView coin={coin} kind={kind} venues={venues} win={win} row={wallet.value} live={live} onBack={() => setOpen(null)} />
+        </div>
+      )}
       </div>
     </div>
   );
@@ -237,9 +243,12 @@ function Summary({ d, role, loading }: { d: FlowWindow | null; role: FlowRole; l
         <Stat label={role === 'all' ? 'Wallets' : role === 'taker' ? 'Takers' : 'Makers'} value={v(s ? fmtCount(s.wallets) : DASH)} />
         <Stat label="Top 10" value={v(s && s.wallets && s.top10 !== undefined ? pct(s.top10) : DASH)} title="The ten largest wallets' share of the volume shown" />
         <Stat label="Fills" value={v(s ? fmtCount(s.prints) : DASH)} title="Prints (one per match; each has a buyer and a seller)" />
-        <Stat label="VWAP" value={v(s?.vwap ? fmtPx(s.vwap) : DASH)} />
       </div>
-      <SplitBar buy={s?.takerBuy ?? 0} sell={s?.takerSell ?? 0} buyLabel="Taker buys" sellLabel="Taker sells" />
+      {/* Every print has a buyer and a seller, so the split is by who took: under "All" that is the plain
+          buys and sells a chart shows. A maker buys what a taker sells, so makers read the same prints mirrored. */}
+      {role === 'maker'
+        ? <SplitBar buy={s?.takerSell ?? 0} sell={s?.takerBuy ?? 0} buyLabel="Maker buys" sellLabel="Maker sells" />
+        : <SplitBar buy={s?.takerBuy ?? 0} sell={s?.takerSell ?? 0} buyLabel={role === 'taker' ? 'Taker buys' : 'Buys'} sellLabel={role === 'taker' ? 'Taker sells' : 'Sells'} />}
     </section>
   );
 }
@@ -327,7 +336,7 @@ function TableEmpty({ d, coin, live, query, venues, offered, onAll, onRetry, err
 }) {
   const names = (vs: Venue[]) => (vs.length === offered.length ? 'any platform' : vs.map((v) => VENUE_LABEL[v]).join(', '));
   if (error && !d) {
-    return <EmptyState compact icon="alert" title="Couldn't load who traded" line={error} action={<button type="button" className="tfl-cta" onClick={onRetry}>Try again</button>} />;
+    return <EmptyState compact icon="alert" title="Couldn't load the trade flow" line={error} action={<button type="button" className="tfl-cta" onClick={onRetry}>Try again</button>} />;
   }
   if (!d) return null;
   if (d.since !== null && d.to <= d.since) {

@@ -1,13 +1,7 @@
 /**
- * Signing in to SoPoints with your wallet.
+ * Signing in to SoDEX with your wallet, behind SODEX_SIGNIN_LIVE (sodexProgrammes.ts: off today).
  *
- * WHAT THIS REPLACES. The points page used to ask you to paste a bearer token
- * copied out of a SoDEX tab, and then briefly asked for the email on your SoDEX
- * account. Both were wrong. SoDEX's own points page signs you in with the WALLET
- * you have connected - connect, press a button, approve one signature - and this
- * is that same flow, run from here.
- *
- * THE PROTOCOL, read out of their bundle (`Tie` in features-*.js):
+ * THE PROTOCOL, read out of SoDEX's bundle:
  *
  *     POST sodex.com/auth/v2/nonce   {address, type:'sign_in'}
  *       -> {data:{message, nonce, expiresIn:300}}
@@ -17,39 +11,17 @@
  *     POST sodex.com/auth/v2/verify  {address, message, signature, type:'sign_in'}
  *       -> {data:{accessToken}}
  *
- * The access token is a SoDEX identity JWT, good for about 15 days, and it is
- * the bearer `alpha-biz.sodex.dev/biz/sopoints/*` asks for. Nothing about it
- * involves an email address: on SoDEX the account IS the wallet.
+ * The access token is a SoDEX identity JWT, good for about 15 days, and it is the bearer
+ * `alpha-biz.sodex.dev/biz/sopoints/*` and `mainnet-lottery.sodex.dev` ask for.
  *
- * The message reads "Confirm wallet to reveal your SoDEX referral code. No
- * blockchain transaction or gas fee will occur." - their wording, not ours. It
- * is an off-chain signature: it moves nothing and approves no spending.
- *
- * WHY THE TWO CALLS GO THROUGH OUR BACKEND. `sodex.com/auth/v2/*` returns CORS
- * headers only for origins on their allowlist (their domains plus
- * `http://localhost:3000`); every other origin gets no `Access-Control-Allow-
- * Origin` at all, and the browser refuses the response. A server has no such
- * limit, so those two calls are forwarded by our own backend and sign-in works
- * on any port and any domain. See server/src/routes/pointsAuth.ts.
- *
- * NOTE WHAT IS *NOT* PROXIED. The signature is produced here, by your wallet,
- * and the points endpoints on alpha-biz are read straight from the browser -
- * that host reflects any origin. Our backend sees a nonce request and an
- * already-signed message, cannot produce a signature of its own, and stores
- * nothing.
+ * STRAIGHT FROM THE BROWSER, OR NOT AT ALL. `sodex.com/auth/v2/*` returns CORS headers only for origins
+ * on SoDEX's allowlist. These calls never go through a server of ours and never set an Origin: until
+ * SoDEX lists this site they cannot succeed, and while the switch is off they are not even sent.
  */
 import { signMessage, type Eip1193Provider } from './wallet';
+import { assertSigninLive } from './sodexProgrammes';
 
-const API = '/api/points/auth';
-
-/**
- * Every other client call in this app is bounded; these two were not.
- *
- * In practice they settle in well under a second - the whole nonce/sign/verify
- * round trip measures ~780ms - so anything approaching this is already a
- * failure, and an unbounded `fetch` is one more way for a button to sit on
- * "Waiting…" with nothing to say. Matches the timeout api.ts uses.
- */
+const API = 'https://sodex.com/auth/v2';
 const AUTH_TIMEOUT_MS = 20_000;
 
 export class PointsAuthError extends Error {}
@@ -61,19 +33,26 @@ interface SodexEnvelope<T> {
   data?: T;
 }
 
-async function post<T>(path: string, body: unknown): Promise<T> {
+/** Test seams: the network, the wallet and the switch. App code passes none of them. */
+export interface PointsAuthDeps {
+  fetchImpl?: typeof fetch;
+  sign?: (provider: Eip1193Provider, address: string, message: string) => Promise<string>;
+  live?: boolean;
+}
+
+async function post<T>(path: string, body: unknown, deps: PointsAuthDeps): Promise<T> {
+  assertSigninLive(deps.live);
+  const f = deps.fetchImpl ?? fetch;
   let res: Response;
   try {
-    res = await fetch(`${API}${path}`, {
+    res = await f(`${API}${path}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
+      credentials: 'omit',
       signal: AbortSignal.timeout(AUTH_TIMEOUT_MS),
     });
   } catch (e) {
-    /* A network refusal, a CSP block and a timeout all land here - none of them
-       reach a status code, and the timeout is the one worth naming, because it
-       means the request went out and nothing came back. */
     const err = e as Error;
     throw new PointsAuthError(
       err.name === 'TimeoutError' || err.name === 'AbortError'
@@ -90,15 +69,14 @@ async function post<T>(path: string, body: unknown): Promise<T> {
   }
 
   if (!res.ok) throw new PointsAuthError(j?.message || j?.msg || `SoDEX ${res.status}`);
-  /* Their envelope reports failure in the body with a 200 status, so the code
-     has to be checked separately from the HTTP status. */
+  /* Their envelope reports failure in the body with a 200 status. */
   if (j?.code !== 0) throw new PointsAuthError(j?.message || j?.msg || `SoDEX code ${j?.code}`);
   return j.data as T;
 }
 
 /** Step 1: the exact message SoDEX wants signed. Valid for five minutes. */
-export async function fetchSignInMessage(address: string): Promise<string> {
-  const d = await post<{ message?: string }>('/nonce', { address });
+export async function fetchSignInMessage(address: string, deps: PointsAuthDeps = {}): Promise<string> {
+  const d = await post<{ message?: string }>('/nonce', { address, type: 'sign_in' }, deps);
   if (!d?.message) throw new PointsAuthError('SoDEX returned no message to sign.');
   return d.message;
 }
@@ -108,8 +86,9 @@ export async function verifySignature(
   address: string,
   message: string,
   signature: string,
+  deps: PointsAuthDeps = {},
 ): Promise<string> {
-  const d = await post<{ accessToken?: string }>('/verify', { address, message, signature });
+  const d = await post<{ accessToken?: string }>('/verify', { address, message, signature, type: 'sign_in' }, deps);
   if (!d?.accessToken) throw new PointsAuthError('SoDEX accepted the signature but returned no token.');
   return d.accessToken;
 }
@@ -117,16 +96,16 @@ export async function verifySignature(
 /**
  * The whole thing: nonce, one wallet prompt, token.
  *
- * The address is passed explicitly rather than read back from the provider so
- * that the token can never end up filed under a different account than the one
- * that signed for it - the wallet may have more than one, and `eth_accounts`
- * reports whichever is selected at the moment it is asked.
+ * The address is passed explicitly so the token can never be filed under a different account than the
+ * one that signed for it: `eth_accounts` reports whichever is selected at the moment it is asked.
  */
 export async function signInToPoints(
   provider: Eip1193Provider,
   address: string,
+  deps: PointsAuthDeps = {},
 ): Promise<string> {
-  const message = await fetchSignInMessage(address);
-  const signature = await signMessage(provider, address, message);
-  return verifySignature(address, message, signature);
+  assertSigninLive(deps.live);
+  const message = await fetchSignInMessage(address, deps);
+  const signature = await (deps.sign ?? signMessage)(provider, address, message);
+  return verifySignature(address, message, signature, deps);
 }

@@ -40,7 +40,8 @@
  * a remembered approval - SoDEX itself rejects an order naming a builder the
  * account has not approved, so a forged "approved" only ever gets a refusal.
  *
- * There is no switch that turns the guard off.
+ * There is no switch that turns the guard off. ONE EXCEPTION IN KIND, by market: where SoDEX
+ * itself charges nothing (owner 2026-11-06, `FEE_FREE_SPOT_SYMBOL_IDS`), an order carries no builder.
  */
 import { BUILDER_FEE_CAP, type ActionType, type BuilderParams, type Engine, type SignableAction } from '@sodex-core';
 import { activeBuilder, orderBuilder } from './builder';
@@ -93,6 +94,22 @@ export const ACTION_CLASS: Readonly<Record<ActionType, ActionClass>> = {
   revokeAPIKey: 'other',
 };
 
+/**
+ * Spot markets SoDEX charges no fee on, by symbol id on mainnet: 27 is vUSDT_vUSDC, the market
+ * behind the swap (evidence: trading/swap.ts). Owner 2026-11-06: "dont charge one if sodex doesnt
+ * charge one for swaps". A fixed list on purpose: a market only leaves the builder fee by a change
+ * someone reads here, never because of a field in a response.
+ */
+export const FEE_FREE_SPOT_SYMBOL_IDS: ReadonlySet<number> = new Set([27]);
+
+export const isFeeFreeMarket = (engine: Engine, symbolId: number): boolean =>
+  engine === 'spot' && tradingConfig().network === 'mainnet' && FEE_FREE_SPOT_SYMBOL_IDS.has(symbolId);
+
+/** Every leg of this order is on a market SoDEX charges nothing on. */
+function allFeeFree(engine: Engine, orders: unknown[]): boolean {
+  return orders.length > 0 && orders.every((o) => isFeeFreeMarket(engine, Number((o as { symbolID?: unknown } | null)?.symbolID)));
+}
+
 const refuse = (message: string, detail: Record<string, unknown>): TradingError => {
   log.error('fee guard: an action was NOT signed', detail);
   return new TradingError(message, 'fee-guard');
@@ -133,6 +150,7 @@ function guardOrder(action: SignableAction, b: BuilderConfig, owner: string): vo
     return;
   }
   if (got === undefined || got === null) {
+    if (allFeeFree(engine, orders)) return;
     if (b.required) {
       throw refuse(
         `This ${engine} order was not sent: it does not carry the ValueDesk builder fee, and trading through ValueDesk requires it. Reload the page; if it happens again, enable trading again.`,

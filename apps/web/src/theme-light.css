@@ -97,7 +97,9 @@ html[data-theme='light'] .navbar--rail .navlinks .navlink--soon,
 html[data-theme='light'] .navbar--rail .navmore__btn,
 html[data-theme='light'] .nav-seg > button { color: var(--muted); }
 html[data-theme='light'] .navbar--rail .navlinks a.active,
-html[data-theme='light'] .navbar--rail .navlinks a[aria-current='page'] { color: var(--text); }
+html[data-theme='light'] .navbar--rail .navlinks a[aria-current='page'],
+html[data-theme='light'] .navbar--rail .navmore__btn.is-here,
+html[data-theme='light'] .navbar--rail .navmore__btn.is-open { color: var(--text); }
 html[data-theme='light'] .side__btn:hover,
 html[data-theme='light'] .side .navicon:hover:not(:disabled),
 html[data-theme='light'] .nav-seg > button:hover { color: var(--text); }

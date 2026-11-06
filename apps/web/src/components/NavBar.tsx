@@ -33,10 +33,12 @@ import { BrandMark } from './BrandMark';
 /** beta.valuedesk.so (VITE_CHANNEL=beta): the Beta tag beside the brand, as the admin suite shows Dev. */
 const BETA = import.meta.env.VITE_CHANNEL === 'beta';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { SOON_TABS, TABS, TAB_LABELS, pathForTab, type Tab } from '../router';
+import { NAV_TABS, SOON_TABS, TAB_LABELS, pathForTab, type SodexView, type Tab } from '../router';
 import { preloadWalletModal, warmWalletModal } from '../walletconnect';
 import { Notices } from './Notices';
 import { NavMore, type NavAlert } from './NavMore';
+import { NavTrade } from './NavTrade';
+import { useHoverMenu } from './useHoverMenu';
 import { SettingsMenu } from './SettingsMenu';
 import { useAddressMask, useMask } from '../privacy';
 import { fmtUsd } from '../format';
@@ -94,10 +96,20 @@ export interface NavBarProps {
   onOpenStatus?: () => void;
   /** The excluded wallets page (More > Excluded wallets). */
   onOpenExcluded?: () => void;
+  /** The trading limits page (More > Trading limits). */
+  onOpenLimits?: () => void;
+  /** Which of More's own pages is on screen. */
+  statusOn?: boolean;
+  excludedOn?: boolean;
+  limitsOn?: boolean;
+  /** Open one of SoDEX's products. Without it More has no SoDEX group (router.ts SODEX_VIEWS). */
+  onOpenSodex?: (view: SodexView) => void;
+  /** Which of them is on screen. */
+  sodexOn?: SodexView | null;
 }
 
 export function NavBar({
-  tab, onNavigate, address, hasLayout, dashLocked, onOpenSearch, rail = false, engine, onEngine, alert = null, onOpenStatus, onOpenExcluded,
+  tab, onNavigate, address, hasLayout, dashLocked, onOpenSearch, rail = false, engine, onEngine, alert = null, onOpenStatus, onOpenExcluded, onOpenLimits, statusOn = false, excludedOn = false, limitsOn = false, onOpenSodex, sodexOn = null,
 }: NavBarProps) {
   /*
    * Have the wallet modal's chunk in memory BEFORE the click.
@@ -114,7 +126,9 @@ export function NavBar({
      is exactly how a masked address would have leaked in one place while being
      hidden in another. */
   const maskAddr = useAddressMask();
-  const [addrMenu, setAddrMenu] = useState(false);
+  const addrRoot = useRef<HTMLDivElement>(null);
+  const addrHover = useHoverMenu(addrRoot);
+  const addrMenu = addrHover.open;
   const addrPres = usePresence(addrMenu);
   const pending = useAccountPending();
   /* The address book's logo for whichever wallet is connected, left of the address. */
@@ -130,15 +144,16 @@ export function NavBar({
    * With no address there is no menu to open, so it connects instead.
    */
   const hasAddress = !!address;
+  const openAddrMenu = addrHover.openPinned;
   useEffect(() => {
     if (rail) return;
     const onMenu = () => {
-      if (hasAddress) setAddrMenu(true);
+      if (hasAddress) openAddrMenu();
       else openConnectDialog();
     };
     window.addEventListener(WALLET_EVENTS.menu, onMenu);
     return () => window.removeEventListener(WALLET_EVENTS.menu, onMenu);
-  }, [hasAddress, rail]);
+  }, [hasAddress, rail, openAddrMenu]);
 
   /*
    * The bar's real height as `--navbar-live` on the root. The page scrolls behind
@@ -159,8 +174,10 @@ export function NavBar({
   }, []);
 
   /* Futures or Spot, on the trade page: the rail's bar shows it before the links, a bar without the rail in its first row. */
-  const marketType = tab === 'trade' && engine && onEngine ? (
-    <div className={`nav-seg${rail ? '' : ' nav-seg--bar'}`} role="radiogroup" aria-label="Market type">
+  const onTrade = tab === 'trade';
+  /* Always there: it opens and closes in place when the page changes, instead of popping in and shoving the links along (owner 2026-11-06). */
+  const marketType = engine && onEngine ? (
+    <div className="nav-seg" role="radiogroup" aria-label="Market type">
       {(['perps', 'spot'] as const).map((e) => (
         <button key={e} type="button" role="radio" aria-checked={engine === e} className={engine === e ? 'is-on' : ''} onClick={() => onEngine(e)}>
           {e === 'perps' ? 'Futures' : 'Spot'}
@@ -183,13 +200,17 @@ export function NavBar({
         )}
         {rail && BETA && <span className="dv-devtag dv-devtag--beta">Beta</span>}
         {rail && marketType && (
-          <>
-            {marketType}
-            <span className="nav-div" aria-hidden="true" />
-          </>
+          <div className={`nav-seg-slot${onTrade ? ' is-on' : ''}`} aria-hidden={!onTrade}>
+            <div className="nav-seg-slot__in">
+              {marketType}
+              <span className="nav-div" aria-hidden="true" />
+            </div>
+          </div>
         )}
         <nav className="navlinks">
-          {TABS.map((t) => SOON_TABS.has(t) ? (
+          {NAV_TABS.map((t) => t === 'trade' ? (
+            <NavTrade key={t} tab={tab} engine={engine} onEngine={onEngine} onNavigate={onNavigate} onOpenSodex={onOpenSodex} sodexOn={sodexOn} label={TAB_LABELS[t]} />
+          ) : SOON_TABS.has(t) ? (
             /* Coming soon (router.ts SOON_TABS): the name and a pill, no link - there is no page to open. */
             <span key={t} className="navlink navlink--soon" aria-disabled="true" title={`${TAB_LABELS[t]}: coming soon`}>
               {TAB_LABELS[t]}
@@ -221,11 +242,15 @@ export function NavBar({
             </a>
           ))}
         </nav>
-        {/* More: the status page, Help & FAQ, Send feedback (owner, 2026-10-28). Outside the nav: its menu's rows are not nav links. */}
-        <NavMore alert={alert} onOpenStatus={onOpenStatus} onOpenExcluded={onOpenExcluded} />
+        {/* More: Leaderboard, Trading limits, Status, Help & FAQ, Send feedback, Community, News (owner, 2026-11-05). Outside the nav: its menu's rows are not nav links. */}
+        <NavMore alert={alert} tab={tab} limits={limitsOn} status={statusOn} excluded={excludedOn} onNavigate={onNavigate} onOpenStatus={onOpenStatus} onOpenExcluded={onOpenExcluded} onOpenLimits={onOpenLimits} onOpenSodex={onOpenSodex} sodexOn={sodexOn} />
         {/* Without the rail (a phone, a narrow window) the same switch sits in the bar's first row, beside
             the wordmark: spot markets were otherwise reachable only through the market search there. */}
-        {!rail && marketType}
+        {!rail && marketType && (
+          <div className={`nav-seg-slot nav-seg-slot--bar${onTrade ? ' is-on' : ''}`} aria-hidden={!onTrade}>
+            <div className="nav-seg-slot__in">{marketType}</div>
+          </div>
+        )}
 
         <div className={`navstatus${rail ? ' navstatus--rail' : ''}`}>
           {/*
@@ -262,19 +287,19 @@ export function NavBar({
             options, drop it.
           */}
           {rail ? null : address ? (
-            <div className="navaddr">
+            <div className="navaddr" ref={addrRoot} {...addrHover.hoverProps}>
               <button
                 className="navbtn navaddr__btn"
                 aria-haspopup="menu"
                 aria-expanded={addrMenu}
-                onClick={() => setAddrMenu((v) => !v)}
+                onClick={addrHover.press}
                 onPointerEnter={() => prefetchAccountTotals(address)}
               >
                 <ConnectedWalletLogo size={18} className="navaddr__wicon" />
                 {maskAddr(address)}
               </button>
               {addrPres.mounted && (
-                <AddressMenu address={address} onClose={() => setAddrMenu(false)} closing={addrPres.closing} onExited={addrPres.done} onPortfolio={() => onNavigate('portfolio')} />
+                <AddressMenu address={address} onClose={addrHover.close} closing={addrPres.closing} onExited={addrPres.done} onPortfolio={() => onNavigate('portfolio')} />
               )}
             </div>
           ) : (
@@ -415,7 +440,7 @@ export function AddressMenu({ address, onClose, closing = false, onExited, onPor
 
   return (
     <div
-      className={`navaddr__menu menu-popup acct-menu${closing ? ' is-closing' : ''}`}
+      className={`navaddr__menu menu-popup acct-menu navpop${closing ? ' is-closing' : ''}`}
       role="menu"
       ref={wrap}
       onAnimationEnd={(e) => { if (closing && e.animationName === 'mo-pop-out') onExited?.(); }}

@@ -287,3 +287,30 @@ test('a refusal is logged with what was wrong, and nothing in the action is chan
   stops(bad, /not the fee this wallet owes/);
   assert.equal(JSON.stringify(bad), badBefore, 'a refused action is not "repaired" either');
 });
+
+// --- a market SoDEX charges nothing on ------------------------------------------------------
+
+const spotOn = (symbolIDs: number[], builder?: BuilderParams): SignableAction => spotActions.batchNewOrder(
+  AID,
+  symbolIDs.map((symbolID, i) => ({ symbolID, clOrdID: `c${i}`, side: OrderSide.SELL, type: OrderType.MARKET, timeInForce: TimeInForce.IOC, price: '0.99', quantity: '10' })),
+  builder,
+);
+
+test('the USDT/USDC market goes without the builder, even in a build that requires it', () => {
+  configure(REQUIRED);
+  assert.doesNotThrow(() => guardAction(spotOn([27]), OWNER));
+});
+
+test('every other market still needs it, and so does a batch with one other market in it', () => {
+  configure(REQUIRED);
+  assert.throws(() => guardAction(spotOn([28]), OWNER), /builder/);
+  assert.throws(() => guardAction(spotOn([27, 28]), OWNER), /builder/);
+});
+
+test('the exception is spot on mainnet only', () => {
+  setTradingConfig({ network: 'testnet', chainId: SODEX, gateway: 'https://gw.test', writesAllowed: true, disabled: false, builder: REQUIRED } as never);
+  assert.throws(() => guardAction(spotOn([27]), OWNER), /builder/);
+  configure(REQUIRED);
+  const perps = perpsActions.newOrder(AID, 27, [{ clOrdID: 'c', side: OrderSide.SELL, type: OrderType.MARKET, timeInForce: TimeInForce.IOC, price: '1', quantity: '1', reduceOnly: false, modifier: 1, positionSide: 1 } as never]);
+  assert.throws(() => guardAction(perps, OWNER), /builder/);
+});

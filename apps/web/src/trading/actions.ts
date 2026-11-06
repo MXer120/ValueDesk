@@ -41,7 +41,7 @@ import {
 import { api } from '../api';
 import { activeBuilder, orderBuilder, type BuilderApproval } from './builder';
 import { tradingConfig, writesOffMessage } from './config';
-import { guardAction, mustRecreate } from './feeGuard';
+import { guardAction, mustRecreate, isFeeFreeMarket } from './feeGuard';
 import { guardLegal, isOpening } from './legalGate';
 import { requireTerms } from '../legal/acceptance';
 import { readGateway, sendSigned } from './gateway';
@@ -214,7 +214,8 @@ function checkBatch(result: unknown, what: string, labels: readonly string[] = [
 export async function placeOrder(engine: Engine, t: OrderTicket) {
   const s = requireSigner(undefined, engine);
   const sym = await symbolFor(engine, t.symbol);
-  const builder = await builderForOrder(engine);
+  // No ValueDesk fee where SoDEX itself charges none (feeGuard.ts).
+  const builder = isFeeFreeMarket(engine, sym.id) ? undefined : await builderForOrder(engine);
   const built = placeOrderAction(engine, t, sym, s.meta.accountId, builder);
   const labels = ['the order', ...(t.takeProfit ? ['the take-profit'] : []), ...(t.stopLoss ? ['the stop-loss'] : [])];
   const result = await signAndSend(built.action, 'order');

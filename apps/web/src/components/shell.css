@@ -146,7 +146,8 @@
 .navbar--rail .navmore { margin-left: -10px; }
 .navbar--rail .navmore__btn { padding: 0 11px; color: #8e8e93; font-size: 15px; letter-spacing: -0.005em; transition: color 140ms; }
 .navbar--rail .navmore__btn:hover,
-.navbar--rail .navmore__btn.is-open { color: var(--text); }
+.navbar--rail .navmore__btn.is-open,
+.navbar--rail .navmore__btn.is-here { color: var(--text); }
 
 /* Futures / Spot: a pill in a well, the chosen one lifted. */
 .nav-seg {
@@ -174,8 +175,18 @@
 }
 .nav-seg > button:hover { color: var(--text); }
 /* In a bar without the rail (a phone): the first row, after the wordmark and More, at the row's end; compact. */
-.nav-seg--bar { margin-left: auto; padding: 2px; }
-.nav-seg--bar > button { height: 30px; padding: 0 12px; }
+/* Its slot opens and closes with the trade page. Only the width moves, by the grid track, so the links beside it glide; the -14px takes back the bar's gap while it is shut. */
+.nav-seg-slot {
+  display: grid; flex: none; grid-template-columns: 0fr; margin-right: -14px; opacity: 0; visibility: hidden;
+  transition: grid-template-columns 240ms var(--ease-out), opacity 160ms var(--ease-out), visibility 0s linear 240ms;
+}
+.nav-seg-slot.is-on { grid-template-columns: 1fr; opacity: 1; visibility: visible; transition-delay: 0s, 60ms, 0s; }
+.nav-seg-slot__in { display: flex; align-items: center; gap: 14px; min-width: 0; overflow: hidden; }
+.nav-seg-slot__in > .nav-div { margin-right: 14px; }
+.nav-seg-slot--bar { margin-left: auto; margin-right: 0; }
+.nav-seg-slot--bar .nav-seg { padding: 2px; }
+.nav-seg-slot--bar .nav-seg > button { height: 30px; padding: 0 12px; }
+@media (prefers-reduced-motion: reduce) { .nav-seg-slot, .nav-seg-slot.is-on { transition: none; } }
 .nav-seg > button.is-on {
   background: #2b2b2e;
   color: var(--text);

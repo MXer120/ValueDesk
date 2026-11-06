@@ -323,7 +323,7 @@ const FEATURES: Record<FeatureId, { title: string; line: string; alt: { main: st
     title: 'Know who traded every candle',
     line: 'Click a candle and read the wallets behind it: who bought, who sold, how much, on every timeframe.',
     alt: {
-      main: 'A price chart with the Who traded panel beside it',
+      main: 'A price chart with the trade flow panel beside it',
       back: 'Wallets on one candle, sorted by size',
       front: 'The top wallets of the picked candle',
     },
@@ -378,7 +378,7 @@ const MAJORS: ReadonlyArray<{ title: string; line: string; pill?: string; icon: 
   { title: 'Leaderboard', line: 'Top traders across SoDEX, Hyperliquid, trade.xyz, Lighter and Arcus.', icon: <path d="M4 17V9m6 8V4m6 13v-6" /> },
   { title: 'Explore', line: 'Markets, funding rates and what wallet cohorts are holding.', icon: <><circle cx="10" cy="10" r="7" /><path d="m13 7-1.8 4.2L7 13l1.8-4.2Z" /></> },
   { title: 'Liquidation heatmap', line: 'Where open positions get liquidated, live and back in time.', icon: <><rect x="3" y="3" width="14" height="14" rx="2" /><path d="M3 8h14M3 13h14M8 3v14M13 3v14" /></> },
-  { title: 'Who traded', line: 'The wallets behind any candle, on every timeframe.', icon: <><circle cx="8" cy="7" r="3" /><path d="M2.5 17c.6-3 2.8-4.5 5.5-4.5s4.9 1.5 5.5 4.5M13.5 4.2a3 3 0 0 1 0 5.6M15 12.8c1.4.6 2.2 2 2.5 4.2" /></> },
+  { title: 'Trade flow', line: 'The wallets behind any candle, on every timeframe.', icon: <><circle cx="8" cy="7" r="3" /><path d="M2.5 17c.6-3 2.8-4.5 5.5-4.5s4.9 1.5 5.5 4.5M13.5 4.2a3 3 0 0 1 0 5.6M15 12.8c1.4.6 2.2 2 2.5 4.2" /></> },
   { title: 'Scan', line: 'Look up any wallet across five venues: positions, fills and PnL.', icon: <><circle cx="9" cy="9" r="5.5" /><path d="m13.2 13.2 3.8 3.8" /></> },
   { title: 'Portfolio', line: 'Balances, open positions, PnL and your full history.', icon: <><path d="M3 7a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" /><path d="M13 11h4M3 8h14" /></> },
   { title: 'Terminals', line: 'Arrange panels into layouts of your own and switch between them.', icon: <><rect x="3" y="3" width="6" height="14" rx="1.5" /><rect x="11" y="3" width="6" height="6" rx="1.5" /><rect x="11" y="11" width="6" height="6" rx="1.5" /></> },

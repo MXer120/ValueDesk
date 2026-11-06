@@ -31,7 +31,7 @@ import { intervalToMs } from './timeAxis';
 
 export const EXEC_OVERLAY = 'vs_exec';
 export const NEWS_OVERLAY = 'vs_news';
-/** The candle "Who traded" is breaking down (flow/TradeFlow.tsx): a lit column over it. */
+/** The candles the trade flow panel is breaking down (flow/TradeFlow.tsx): traced in white, the rest dimmed. */
 export const FLOW_PICK_OVERLAY = 'vs_flowpick';
 /** Overlays that are the chart's own, not the user's drawings. */
 export const SYSTEM_OVERLAYS: ReadonlySet<string> = new Set([ORDER_LINE_OVERLAY, EXEC_OVERLAY, NEWS_OVERLAY, FLOW_PICK_OVERLAY]);
@@ -320,11 +320,12 @@ const execTemplate: OverlayTemplate = {
 };
 
 /**
- * The picked candle - or the picked range of candles - outlined in white, from the highest wick to the
- * lowest (owner 2026-11-03: "a white outline on the candle not the whole area"). Two points: the first
- * candle's open time and the last one's (the same for one candle). The bars are read from the chart on
- * every draw, so a forming candle's outline grows with it and a zoom or rescale keeps it fitted; clicks
- * go through it.
+ * The picked candles traced in white, each its own body and wicks (owner 2026-11-06: "the white outline
+ * to be the actual candles including their wicks, and for multi select the same instead of 1 rectangle.
+ * Also darken the other candles just a bit"). The rest of the pane lies under a thin wash of the chart's
+ * own background. Two points: the first candle's open time and the last one's (the same for one candle).
+ * The bars are read from the chart on every draw, so a forming candle's trace grows with it; only those
+ * on screen are drawn; clicks go through it.
  */
 const flowPickTemplate: OverlayTemplate = {
   name: FLOW_PICK_OVERLAY,
@@ -333,40 +334,55 @@ const flowPickTemplate: OverlayTemplate = {
   needDefaultPointFigure: false,
   needDefaultXAxisFigure: false,
   needDefaultYAxisFigure: false,
-  createPointFigures: ({ chart, overlay, coordinates, yAxis }) => {
-    const p0 = coordinates[0];
-    const p1 = coordinates[1] ?? p0;
+  createPointFigures: ({ chart, overlay, bounding, xAxis, yAxis }) => {
     const t0 = overlay.points[0]?.timestamp;
     const t1 = overlay.points[1]?.timestamp ?? t0;
-    if (!p0 || !p1 || !yAxis || typeof t0 !== 'number' || typeof t1 !== 'number') return [];
+    if (!xAxis || !yAxis || typeof t0 !== 'number' || typeof t1 !== 'number') return [];
     const bars = chart.getDataList();
-    // The first bar at or after t0, then every bar up to t1 (at most a few thousand are ever on screen).
-    let lo = 0;
+    // The first bar at or after t0, then the bars up to t1.
+    let first = 0;
     let hi = bars.length;
-    while (lo < hi) {
-      const mid = (lo + hi) >> 1;
-      if (bars[mid]!.timestamp < t0) lo = mid + 1;
+    while (first < hi) {
+      const mid = (first + hi) >> 1;
+      if (bars[mid]!.timestamp < t0) first = mid + 1;
       else hi = mid;
     }
-    let high = -Infinity;
-    let low = Infinity;
-    for (let k = lo; k < bars.length && bars[k]!.timestamp <= t1 && k - lo < 20_000; k++) {
-      high = Math.max(high, bars[k]!.high);
-      low = Math.min(low, bars[k]!.low);
+    let last = first - 1;
+    lo: for (let step = 1 << 20; step > 0; step >>= 1) {
+      if (last + step >= bars.length) continue lo;
+      if (bars[last + step]!.timestamp <= t1) last += step;
     }
-    if (!(high >= low)) return [];
+    if (last < first) return [];
     const space = chart.getBarSpace();
-    const half = Math.max(2.5, space.gapBar / 2 + 2);
-    const left = Math.min(p0.x, p1.x) - half;
-    const right = Math.max(p0.x, p1.x) + half;
-    const top = yAxis.convertToPixel(high) - 3;
-    const bottom = yAxis.convertToPixel(low) + 3;
-    return [{
-      type: 'rect',
-      ignoreEvent: true,
-      attrs: { x: Math.round(left) + 0.5, y: Math.round(top) + 0.5, width: Math.max(5, Math.round(right - left)), height: Math.max(6, Math.round(bottom - top)) },
-      styles: { style: 'stroke', color: T.text, borderColor: T.text, borderSize: 1.5, borderRadius: 2 },
-    }];
+    const left = Math.max(0, xAxis.convertToPixel(first) - space.halfBar);
+    const right = Math.min(bounding.width, xAxis.convertToPixel(last) + space.halfBar);
+    const wash = `${T.bg}59`;
+    const figures: Array<{ type: string; ignoreEvent: true; attrs: unknown; styles: Record<string, unknown> }> = [];
+    if (left > 0) figures.push({ type: 'rect', ignoreEvent: true, attrs: { x: 0, y: 0, width: left, height: bounding.height }, styles: { style: 'fill', color: wash } });
+    if (right < bounding.width) figures.push({ type: 'rect', ignoreEvent: true, attrs: { x: right, y: 0, width: bounding.width - right, height: bounding.height }, styles: { style: 'fill', color: wash } });
+    const range = chart.getVisibleRange();
+    const wicks: Array<{ coordinates: Array<{ x: number; y: number }> }> = [];
+    const bodies: Array<{ x: number; y: number; width: number; height: number }> = [];
+    const w = space.gapBar;
+    for (let k = Math.max(first, range.from - 1); k <= Math.min(last, range.to); k++) {
+      const b = bars[k]!;
+      const x = Math.round(xAxis.convertToPixel(k)) + 0.5;
+      const high = yAxis.convertToPixel(b.high);
+      const low = yAxis.convertToPixel(b.low);
+      const top = yAxis.convertToPixel(Math.max(b.open, b.close));
+      const bottom = yAxis.convertToPixel(Math.min(b.open, b.close));
+      // Too thin to have an inside (zoomed far out): the candle is its one line.
+      if (w < 3) {
+        wicks.push({ coordinates: [{ x, y: high }, { x, y: low }] });
+        continue;
+      }
+      if (top > high) wicks.push({ coordinates: [{ x, y: high }, { x, y: top }] });
+      if (low > bottom) wicks.push({ coordinates: [{ x, y: bottom }, { x, y: low }] });
+      bodies.push({ x: Math.round(x - w / 2) - 0.5, y: Math.round(top) - 0.5, width: Math.round(w) + 1, height: Math.max(1, Math.round(bottom - top)) + 1 });
+    }
+    if (bodies.length) figures.push({ type: 'rect', ignoreEvent: true, attrs: bodies, styles: { style: 'stroke', color: T.text, borderColor: T.text, borderSize: 1 } });
+    if (wicks.length) figures.push({ type: 'line', ignoreEvent: true, attrs: wicks, styles: { color: T.text, size: 1 } });
+    return figures as unknown as ReturnType<NonNullable<OverlayTemplate['createPointFigures']>>;
   },
 };
 

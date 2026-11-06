@@ -30,10 +30,10 @@
  *     the cursor. That is the only value a drag reads; it is snapped to the
  *     symbol's tick before it is shown, and shown before it is ever sent.
  */
+import { bucketOf } from '../components/bookDepth';
 import type { Chart as KChart, OverlayEvent, OverlayTemplate, Point } from 'klinecharts';
 import type { Symbol as MarketSymbol } from '../api';
 import { fmtPrice, fmtQty, fmtQuote, num, pick } from '../format';
-import { isLight } from '../theme';
 import { followChart } from './candleDraws';
 import { CANDLE_PANE_ID, FAMILY, NUM_FAMILY, T } from './theme';
 
@@ -224,6 +224,24 @@ export interface DeriveOptions {
 /** Open orders for the charted market, as lines. Orders for other markets are
  *  dropped - the chart shows one symbol, and a line at another symbol's price
  *  would be a number with no meaning on this axis. */
+/**
+ * The order book rows holding one of the wallet's resting orders, however small: `ask` and `bid` hold the row's
+ * price at the book's grouping. A stop waiting for its trigger is not in the book, so it marks nothing.
+ */
+export function ownBookLevels(orders: readonly any[] | null | undefined, symbol: string, askStep: number, bidStep: number): { ask: Set<number>; bid: Set<number> } {
+  const out = { ask: new Set<number>(), bid: new Set<number>() };
+  for (const raw of orders ?? []) {
+    if ((pick<string>(raw, 'symbol', 's') ?? '') !== symbol) continue;
+    if (usable(pick(raw, 'stopPrice', 'sp', 'triggerPrice'))) continue;
+    const price = Number(usable(pick(raw, 'price', 'p')));
+    const side = sideOf(pick(raw, 'side', 'S'));
+    if (!(price > 0) || side === null) continue;
+    if (side === 'sell') { if (askStep > 0) out.ask.add(bucketOf(price, askStep, 'ask')); }
+    else if (bidStep > 0) out.bid.add(bucketOf(price, bidStep, 'bid'));
+  }
+  return out;
+}
+
 export function orderLines(orders: any[], o: DeriveOptions): OrderLine[] {
   const out: OrderLine[] = [];
   for (const raw of orders ?? []) {
@@ -360,15 +378,15 @@ interface LineVisual {
 }
 
 /** The label: boxes in a row at the left of the plot, centred on the line. */
-const LABEL_HEIGHT = 20;
-const LABEL_PAD = 7;
-const LABEL_SIZE = 12;
-const LABEL_WEIGHT = 600;
+const LABEL_HEIGHT = 18;
+const LABEL_PAD = 5;
+const LABEL_SIZE = 11;
+const LABEL_WEIGHT = 500;
 const LABEL_GAP = 2;
 /** Labels are at least this far apart up and down. */
 const LABEL_ROW = LABEL_HEIGHT + 1;
 /** Every label starts here (owner 2026-11-05: "on the left of the chart always"). */
-export const LABEL_X = 8;
+export const LABEL_X = 6;
 const CROSS_WIDTH = 22;
 /** Where a label's words start after the cancel button: the preview has none, and lines up with the rest. */
 export const LABEL_WORDS_X = LABEL_X + CROSS_WIDTH + LABEL_GAP;
@@ -414,10 +432,17 @@ export function layoutLabels(rows: readonly LabelRow[]): Map<string, number> {
 }
 
 /** Text on the line's colour: dark on the bright colours of the dark theme, white on the light theme's deeper ones. */
-const onLineColor = (color: string): string => {
-  if (color === T.text || color === T.muted) return T.bg;
-  return isLight() ? '#ffffff' : T.bg;
+/** `a` over `b`, solid: a label hides what is behind it, so no line or candle shows through its tint. */
+const mix = (a: string, b: string, share: number): string => {
+  const rgb = (h: string) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+  const [x, y] = [rgb(a), rgb(b)];
+  if (x.concat(y).some((n) => !Number.isFinite(n))) return a;
+  return `rgb(${x.map((n, i) => Math.round(n * share + y[i]! * (1 - share))).join(', ')})`;
 };
+/** The owner's version 1 (2026-11-06): a solid tint of the line's colour, a fine border, its colour as the text. */
+const labelFill = (color: string): string => mix(color, T.bg, 0.16);
+const labelBorder = (color: string): string => mix(color, T.bg, 0.6);
+const labelInk = (color: string): string => mix(color, T.text, 0.75);
 
 /**
  * Colours come from chart/theme.ts, the canvas-side mirror of the tokens in
@@ -595,15 +620,15 @@ const template: OverlayTemplate<string> = {
     let x = LABEL_X;
     for (const seg of labelShown ? v.segs : []) {
       const width = segWidth(seg);
-      const fill = seg.look === 'solid' ? seg.color : T.bg;
-      const border = seg.look === 'value' ? T.text : seg.color;
+      const fill = labelFill(seg.color);
+      const border = labelBorder(seg.color);
       parts.push({
         type: 'rect',
         // A button answers a click (the layer's onClick); the rest is a label, not a handle, and
         // would otherwise swallow the drag whenever the user grabbed the line by it.
         ...(seg.button ? { key: seg.button } : { ignoreEvent: true }),
         attrs: { x, y: top, width, height: LABEL_HEIGHT },
-        styles: { style: 'stroke_fill', color: fill, borderColor: border, borderSize: 1, borderRadius: 3 },
+        styles: { style: 'stroke_fill', color: fill, borderColor: border, borderSize: 1, borderRadius: 4 },
       });
       if (seg.look === 'cross') {
         const cx = x + width / 2;
@@ -613,7 +638,7 @@ const template: OverlayTemplate<string> = {
             type: 'line',
             ignoreEvent: true,
             attrs: { coordinates: [{ x: cx - r, y: mid - r * d }, { x: cx + r, y: mid + r * d }] },
-            styles: { color: seg.color, size: 1, style: 'solid' },
+            styles: { color: labelInk(seg.color), size: 1, style: 'solid' },
           });
         }
       } else {
@@ -624,18 +649,20 @@ const template: OverlayTemplate<string> = {
           styles: {
             backgroundColor: 'transparent', borderColor: 'transparent', borderSize: 0, paddingLeft: 0, paddingRight: 0, paddingTop: 0, paddingBottom: 0,
             size: LABEL_SIZE, weight: LABEL_WEIGHT, family: seg.family,
-            color: seg.look === 'solid' ? onLineColor(seg.color) : seg.look === 'value' ? T.text : seg.color,
+            color: labelInk(seg.color),
           },
         });
       }
       x += width + LABEL_GAP;
     }
+    // The line starts past a label sitting on it, so it cannot show between the label's boxes.
+    const onLine = parts.length > 0 && Math.abs(mid - c.y) < LABEL_HEIGHT / 2;
     return [
       ...(lineShown
         ? [{
             type: 'line',
-            attrs: { coordinates: [{ x: 0, y: c.y }, { x: bounding.width, y: c.y }] },
-            styles: { color: v.color, size: 1, style: 'dashed', dashedValue: v.emphasis ? [4, 3] : [1, 3] },
+            attrs: { coordinates: [{ x: onLine ? x : 0, y: c.y }, { x: bounding.width, y: c.y }] },
+            styles: { color: v.color, size: 1, style: 'dashed', dashedValue: v.emphasis ? [4, 3] : [2, 3] },
           }]
         : []),
       ...parts,
@@ -660,15 +687,17 @@ const template: OverlayTemplate<string> = {
         baseline: 'middle',
       },
       styles: {
-        color: onLineColor(v.color),
-        backgroundColor: v.color,
-        borderColor: v.color,
-        borderRadius: 3,
+        color: labelInk(v.color),
+        backgroundColor: labelFill(v.color),
+        borderColor: labelBorder(v.color),
+        borderSize: 1,
+        borderRadius: 4,
+        size: LABEL_SIZE,
         weight: LABEL_WEIGHT,
-        paddingLeft: 4,
-        paddingRight: 4,
-        paddingTop: 4,
-        paddingBottom: 4,
+        paddingLeft: 5,
+        paddingRight: 5,
+        paddingTop: 3,
+        paddingBottom: 3,
       },
     };
   },

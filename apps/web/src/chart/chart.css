@@ -1403,23 +1403,26 @@ html.kc-drag * {
 @keyframes kc-side-slide-in { from { transform: translateX(100%); } }
 @keyframes kc-side-slide-out { to { transform: translateX(100%); } }
 
-/* --- Who traded (flow/TradeFlow.tsx): beside the plot, or under it on a narrow card ---------------- */
-/* The plot keeps at least 320 px beside it; the panel is as wide as it was dragged. `backwards`, not
-   `both`: an animation held at its end would make this the backdrop root, and the platform picker's
-   glass inside would blur nothing (motion.css .mo-switch). */
+/* --- Trade flow (flow/TradeFlow.tsx): beside the plot, or under it on a narrow card ---------------- */
+/* As the object list: the wrap opens and closes the space, the panel in it keeps its width and slides,
+   so nothing inside reflows. `backwards`, not `both`, on the way in: an animation held at its end would
+   make this the backdrop root, and the platform picker's glass inside would blur nothing
+   (motion.css .mo-switch). The grip stays outside the clip. */
 .kc-flow-wrap {
   position: relative;
   flex: none;
   display: flex;
-  width: min(var(--flow-w, 460px), calc(100% - 320px));
-  min-width: 340px;
+  width: var(--flow-w, 460px);
   min-height: 0;
   border-left: 1px solid var(--panel-line);
   background: var(--bg-panel);
-  animation: kc-flow-in 200ms var(--ease-out, ease) backwards;
+  animation: kc-flow-in 260ms var(--ease-out, ease) backwards;
 }
-@keyframes kc-flow-in { from { opacity: 0; transform: translateX(12px); } }
-.kc-flow-wrap > .tfl { flex: 1 1 auto; min-width: 0; }
+.kc-flow-wrap.is-closing { animation: kc-flow-out 220ms var(--ease-out, ease) both; pointer-events: none; }
+@keyframes kc-flow-in { from { width: 0; opacity: 0; } }
+@keyframes kc-flow-out { to { width: 0; opacity: 0; } }
+.kc-flow-clip { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; justify-content: flex-end; overflow: hidden; }
+.kc-flow-clip > .tfl { flex: none; width: var(--flow-w, 460px); }
 .kc-flow-wait { flex: 1 1 auto; }
 .kc-flow-grip { position: absolute; z-index: 3; top: 0; bottom: 0; left: -4px; width: 8px; cursor: col-resize; touch-action: none; }
 .kc-flow-grip::after {
@@ -1448,7 +1451,10 @@ body.kc-flow-resizing:has(.kc-flow-wrap.is-under) { cursor: row-resize; }
   border-top: 1px solid var(--panel-line);
   animation-name: kc-flow-up;
 }
-@keyframes kc-flow-up { from { opacity: 0; transform: translateY(12px); } }
+.kc-flow-wrap.is-under.is-closing { animation-name: kc-flow-down; }
+.kc-flow-wrap.is-under .kc-flow-clip > .tfl { flex: 1 1 auto; width: auto; }
+@keyframes kc-flow-up { from { flex-basis: 0; opacity: 0; } }
+@keyframes kc-flow-down { to { flex-basis: 0; opacity: 0; } }
 .kc-flow-wrap.is-under .kc-flow-grip { top: -6px; bottom: auto; left: 0; right: 0; width: auto; height: 14px; cursor: row-resize; }
 .kc-flow-wrap.is-under .kc-flow-grip::after { top: 5px; left: 50%; width: 36px; height: 3px; margin: 0 0 0 -18px; opacity: 1; }
 @media (prefers-reduced-motion: reduce) { .kc-flow-wrap { animation: none; } }
@@ -1961,29 +1967,23 @@ body.kc-flow-resizing:has(.kc-flow-wrap.is-under) { cursor: row-resize; }
 .kc-draft__amount,
 .kc-draft__price {
   box-sizing: border-box;
-  height: 20px;
-  padding: 0 6px;
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 18px;
-  border-radius: 3px;
-  border: 1px solid var(--draft-ink);
-}
-.kc-draft__word,
-.kc-draft__price {
-  color: var(--kc-draft-on, var(--bg));
-  background: var(--draft-ink);
+  height: 18px;
+  padding: 0 5px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 16px;
+  border-radius: 4px;
+  color: color-mix(in srgb, var(--draft-ink) 75%, var(--text));
+  background: color-mix(in srgb, var(--draft-ink) 16%, var(--bg));
+  border: 1px solid color-mix(in srgb, var(--draft-ink) 60%, var(--bg));
 }
 .kc-draft__amount {
   font-family: var(--font-num);
-  color: var(--text);
-  background: var(--bg);
-  border-color: var(--text);
 }
 .kc-draft__price {
   position: absolute;
   right: 0;
-  padding: 0 3px;
+  padding: 0 5px;
   font-family: var(--font-num);
   white-space: nowrap;
 }

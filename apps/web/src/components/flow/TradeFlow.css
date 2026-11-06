@@ -1,4 +1,4 @@
-/* Who traded (TradeFlow.tsx): a panel beside the chart (Chart.tsx .kc-flow-wrap), the app's tokens only. Kind and state
+/* Trade flow (TradeFlow.tsx): a panel beside the chart (Chart.tsx .kc-flow-wrap), the app's tokens only. Kind and state
    are pills, dots and icons - never a coloured edge down one side of a row (owner's rule).
 
    LOOK (owner 2026-11-05: "doesnt match our other stuff. It looks cluttered"): flush like the order
@@ -90,7 +90,14 @@
 .tfl-cta { color: var(--text); }
 
 /* --- everything under the head and the candle scrolls together ----------------------------------- */
-.tfl-scroll { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; }
+.tfl-views { position: relative; flex: 1; min-height: 0; display: flex; overflow: hidden; }
+.tfl-scroll { flex: 1; min-width: 0; min-height: 0; overflow: auto; overscroll-behavior: contain; }
+/* One wallet slides in over the list, which waits under it where it was. */
+.tfl-layer { position: absolute; inset: 0; overflow: auto; overscroll-behavior: contain; background: var(--bg-panel); animation: tfl-layer-in 220ms var(--ease-out, ease) backwards; }
+.tfl-layer.is-closing { animation: tfl-layer-out 200ms var(--ease-out, ease) both; pointer-events: none; }
+@keyframes tfl-layer-in { from { transform: translateX(100%); } }
+@keyframes tfl-layer-out { to { transform: translateX(100%); } }
+@media (prefers-reduced-motion: reduce) { .tfl-layer, .tfl-layer.is-closing { animation-duration: 1ms; } }
 .tfl-body { display: flex; flex-direction: column; }
 .tfl-body > * { flex: none; }
 
@@ -110,9 +117,6 @@
 }
 .tfl-candle b { color: var(--text); font-size: var(--fs-xs); font-weight: 600; }
 .tfl-forming { color: var(--pos); }
-.tfl-candle__one { min-height: 0; padding: 0; border: 0; background: none; box-shadow: none; color: var(--text); font: inherit; cursor: pointer; }
-.tfl-candle__one:hover { text-decoration: underline; text-underline-offset: 2px; }
-.tfl-candle__one:focus-visible { outline: 2px solid var(--focus, var(--accent)); outline-offset: 2px; border-radius: 3px; }
 
 /* --- summary: labels over values, as the market strip above the chart ----------------------------- */
 .tfl-sum {

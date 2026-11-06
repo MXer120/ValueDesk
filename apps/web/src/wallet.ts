@@ -150,16 +150,32 @@ function wrap(e: any): never {
  */
 export async function silentReconnect(
   provider: Eip1193Provider,
+  timeoutMs = SILENT_RECONNECT_MS,
 ): Promise<{ address: string; chainId: number } | null> {
-  try {
+  /*
+   * WITH A TIME LIMIT. An extension can simply not answer (asleep, two wallets fighting over
+   * window.ethereum). Without one, this never returned and the app said "Reconnecting wallet…"
+   * for good, its Reconnect button disabled.
+   */
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), timeoutMs); });
+  const ask = (async () => {
     const accounts: string[] = await provider.request({ method: 'eth_accounts' });
     const address = accounts?.[0];
     if (!address) return null;
     return { address, chainId: await getChainId(provider) };
+  })();
+  try {
+    return await Promise.race([ask, late]);
   } catch {
     return null;
+  } finally {
+    clearTimeout(timer);
   }
 }
+
+/** How long a wallet gets to answer the silent reconnect on load. */
+export const SILENT_RECONNECT_MS = 5_000;
 
 /**
  * The wallet's current chain id, normalised.

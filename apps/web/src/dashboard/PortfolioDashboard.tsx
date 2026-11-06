@@ -1,9 +1,10 @@
 /**
  * The portfolio page, as a dashboard.
  *
- * The second seam of the shape TradeDashboard.tsx describes: a registry, a
- * config, and no state or layout of its own. Everything the panels read comes
- * from `usePortfolioContext`, which is the page's former component body.
+ * The page has a fixed layout since 2026-11-05 (components/portfolio/PortfolioPage.tsx):
+ * the owner asked for Trade and Wealth tabs over a set order of sections, which a
+ * draggable grid cannot promise. Everything it reads comes from `usePortfolioContext`.
+ * The panels in PORTFOLIO_PANELS stay: the terminal's widgets and Scan still mount them.
  *
  * It lives in dashboard/ rather than components/ so the dependency runs one way -
  * this file imports from components/Portfolio, and nothing in components imports
@@ -22,40 +23,13 @@
  * is this app's own copy-trading summary (components/scan/MyCopies.tsx), and it
  * belongs on the portfolio of whoever does the copying.
  */
-import { Dashboard } from './Dashboard';
-import { PORTFOLIO_DASHBOARD } from './layout';
-import type { PanelDefinition } from './types';
 import {
-  PORTFOLIO_PANELS,
   usePortfolioContext,
-  type PortfolioContext,
   type PortfolioProps,
 } from '../components/Portfolio';
-import { MyCopiesCard } from '../components/scan/MyCopies';
+import { PortfolioPage, type PortfolioPageLinks } from '../components/portfolio/PortfolioPage';
 
-const PANELS: Array<PanelDefinition<PortfolioContext>> = [
-  ...PORTFOLIO_PANELS,
-  {
-    // Same id it had in the Hyperliquid section, so a placement someone already
-    // dragged it to is kept.
-    id: 'copies',
-    title: 'My copies',
-    pad: false,
-    minW: 8,
-    minH: 6,
-    render: () => <MyCopiesCard />,
-  },
-];
-
-export function PortfolioDashboard(props: PortfolioProps) {
+export function PortfolioDashboard({ provider, onOpenMarket, onOpenTab, ...props }: PortfolioProps & PortfolioPageLinks) {
   const context = usePortfolioContext(props);
-  return (
-    <Dashboard
-      config={PORTFOLIO_DASHBOARD}
-      panels={PANELS}
-      context={context}
-      /* The CSS scope every `.pf .pf-*` rule matches against - see Portfolio.css. */
-      className="pf"
-    />
-  );
+  return <PortfolioPage c={context} provider={provider} onOpenMarket={onOpenMarket} onOpenTab={onOpenTab} />;
 }

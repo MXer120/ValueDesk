@@ -359,7 +359,9 @@ async function main(): Promise<number> {
   // The region rule is the stricter of the declared country and the one the target sees the requests come from (ValueDesk's: its edge's).
   // --stop: a bot left running by a runner that was killed keeps quoting into the cleanup; the kill switch goes first.
   if (args.stop) {
-    await target.stopEverything();
+    await target.start();
+    const left = await target.algoAct('cancel-all');
+    log(`--stop: the kill switch answered, ${left.filter((x) => x.status === 'running' || x.status === 'waiting').length} still running`);
     await new Promise((r) => setTimeout(r, 3_000));
   }
   const observed = await target.observedCountry();

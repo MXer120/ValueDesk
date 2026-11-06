@@ -280,7 +280,10 @@ const PANE_ORDER_BASE = 10;
  *  "more vertical than sideways" half of the rule still keeps a horizontal
  *  pan's wobble from switching A off. */
 const V_PAN_PX = 1;
-/** Below this card width Who traded sits under the plot, not beside it. */
+/** The trade flow panel's narrowest, and what it always leaves the plot. */
+const FLOW_MIN_PX = 340;
+const FLOW_PLOT_MIN_PX = 320;
+/** Below this card width the trade flow panel sits under the plot, not beside it. */
 const FLOW_UNDER_PX = 640;
 
 /**
@@ -990,12 +993,16 @@ function Chart({
     setFlowAt(at);
     setFlowEnd(end);
   }, []);
-  /** Closing lets go of the pick: the outline goes, and the panel opens fresh next time. */
-  const closeFlow = useCallback(() => {
-    setFlowOpen(false);
+  const closeFlow = useCallback(() => setFlowOpen(false), []);
+  /** The panel slides open and shut (owner 2026-11-06: "needs to be fully smooth"), as the object list does. */
+  const flowPres = usePresence(flowOpen && !bare, 260);
+  // Closed lets go of the pick, once it has slid away: the panel opens fresh next time, and keeps its
+  // candle while it leaves.
+  useEffect(() => {
+    if (flowPres.mounted) return;
     setFlowAt(null);
     setFlowEnd(null);
-  }, []);
+  }, [flowPres.mounted]);
   const [flowSize, setFlowSize] = useStored<{ w: number; h: number }>('chart.flowSize', { w: 460, h: 0.45 });
   const flowWrap = useRef<HTMLDivElement | null>(null);
   /** Live readout while a line is under the cursor. */
@@ -3472,7 +3479,7 @@ function Chart({
   // --- right-click: the chart's menu ------------------------------------------
 
   /**
-   * The chart's menu at a viewport point: "Who traded this candle" and the
+   * The chart's menu at a viewport point: "Trade flow of this candle" and the
    * order prefills at the price under the pointer, then the chart's settings
    * (the price source, the scale), which have no switches on the chart itself
    * (owner 2026-11-02). A long press opens it on touch.
@@ -3496,15 +3503,15 @@ function Chart({
     const pane = c.getSize(CANDLE_PANE_ID);
     if (!maskedRef.current && pane && py >= pane.top && py <= pane.top + pane.height) {
       const pt = c.convertFromPixel([{ x: x - rect.left, y: py }], { paneId: CANDLE_PANE_ID, absolute: true }) as Array<Partial<Point>>;
-      // A read-only session is offered only "Who traded this candle": every
+      // A read-only session is offered only "Trade flow of this candle": every
       // other prefill is a step towards signing an order.
       const price = canPlace ? snapToTick(pt[0]?.value ?? Number.NaN, sym?.tickSize) : null;
       const t = !bare && typeof pt[0]?.timestamp === 'number' && Number.isFinite(pt[0].timestamp) ? pt[0].timestamp : null;
-      if (t !== null) items.push({ label: 'Who traded this candle', icon: MENU_ICONS.traders, onClick: () => { pickFlow(t, null); setFlowOpen(true); } });
+      if (t !== null) items.push({ label: 'Trade flow of this candle', icon: MENU_ICONS.traders, onClick: () => { pickFlow(t, null); setFlowOpen(true); } });
       // The touch way to a range (and the right-click one): from the picked candle to this one.
       if (t !== null && flowOpen && candleAt(interval, t).from !== flowSpan(interval, flowAt, null).from) {
         const anchor = flowSpan(interval, flowAt, null).from;
-        items.push({ label: 'Who traded from the picked candle to here', icon: MENU_ICONS.traders, onClick: () => pickFlow(anchor, t) });
+        items.push({ label: 'Trade flow from the picked candle to here', icon: MENU_ICONS.traders, onClick: () => pickFlow(anchor, t) });
       }
       if (price !== null) {
         const note = 'Prefills the order price only. Nothing is submitted from here.';
@@ -3589,7 +3596,7 @@ function Chart({
         next = { ...next, h };
         el.style.setProperty('--flow-h', `${h * 100}%`);
       } else {
-        const w = Math.round(Math.min(Math.max(340, box.width - 320), Math.max(340, start.w + start.x - ev.clientX)));
+        const w = Math.round(Math.min(Math.max(FLOW_MIN_PX, box.width - FLOW_PLOT_MIN_PX), Math.max(FLOW_MIN_PX, start.w + start.x - ev.clientX)));
         next = { ...next, w };
         el.style.setProperty('--flow-w', `${w}px`);
       }
@@ -3606,16 +3613,22 @@ function Chart({
   };
   /** Beside the plot, or under it where the card is too narrow for both. */
   const [flowUnder, setFlowUnder] = useState(false);
+  const [flowBodyW, setFlowBodyW] = useState(0);
+  /** The panel's width in pixels: the content keeps it while the wrap opens around it, so nothing reflows. */
+  const flowPx = Math.round(Math.min(flowSize.w, Math.max(FLOW_MIN_PX, flowBodyW - FLOW_PLOT_MIN_PX)));
   const [flowEl, setFlowEl] = useState<HTMLDivElement | null>(null);
   const flowRef = useCallback((el: HTMLDivElement | null) => {
     flowWrap.current = el;
     setFlowEl(el);
   }, []);
-  useEffect(() => {
+  useLayoutEffect(() => {
     // The dock is in the body (under) or in the stage inside it (beside): the body either way.
     const body = flowEl?.closest('.kc-body');
     if (!body) return;
-    const fit = () => setFlowUnder(body.clientWidth < FLOW_UNDER_PX);
+    const fit = () => {
+      setFlowUnder(body.clientWidth < FLOW_UNDER_PX);
+      setFlowBodyW(body.clientWidth);
+    };
     // Measured now too: the observer's first call waits for a frame, and a frame of the wrong place shows.
     fit();
     const ro = new ResizeObserver(fit);
@@ -3625,21 +3638,26 @@ function Chart({
   const flowDock = (under: boolean) => (
     <div
       ref={flowRef}
-      className={`kc-flow-wrap${under ? ' is-under' : ''}`}
-      style={{ '--flow-w': `${flowSize.w}px`, '--flow-h': `${flowSize.h * 100}%` } as CSSProperties}
+      className={`kc-flow-wrap${under ? ' is-under' : ''}${flowPres.closing ? ' is-closing' : ''}`}
+      style={{ '--flow-w': `${flowPx}px`, '--flow-h': `${flowSize.h * 100}%` } as CSSProperties}
+      onAnimationEnd={(e) => {
+        if (e.target === e.currentTarget && flowPres.closing) flowPres.done();
+      }}
     >
       <div
         className="kc-flow-grip"
         role="separator"
         aria-orientation={under ? 'horizontal' : 'vertical'}
-        aria-label="Resize Who traded"
+        aria-label="Resize trade flow"
         title="Drag to resize (double-click: default size)"
         onPointerDown={onFlowResize}
         onDoubleClick={() => setFlowSize({ w: 460, h: 0.45 })}
       />
-      <Suspense fallback={<div className="kc-flow-wait" aria-busy="true" />}>
-        <TradeFlowView symbol={symbol} spot={engine === 'spot'} interval={interval} at={flowAt} end={flowEnd} onPick={pickFlow} onClose={closeFlow} />
-      </Suspense>
+      <div className="kc-flow-clip">
+        <Suspense fallback={<div className="kc-flow-wait" aria-busy="true" />}>
+          <TradeFlowView symbol={symbol} spot={engine === 'spot'} interval={interval} at={flowAt} end={flowEnd} onPick={pickFlow} onClose={closeFlow} />
+        </Suspense>
+      </div>
     </div>
   );
   /** The candle time under a viewport x (null off the series or in the future). */
@@ -3927,16 +3945,15 @@ function Chart({
     showFlowPick(flowOpen && !bare && !masked ? flowSpan(interval, flowAt, flowEnd) : null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, chartGen, flowOpen, flowAt, flowEnd, interval, bare, masked]);
-  // Opening the panel narrows the plot from the left, which can push the candles just picked off it:
-  // bring them back, centred. The candles stay where they are if they are still on screen.
+  // Opening the panel narrows the plot from the left, which can push the candles just picked off it.
+  // Where they will land is known now, so the chart glides them into place as the panel slides in, and
+  // looks again once it has settled. The candles stay where they are if they will still be on screen.
   useEffect(() => {
     if (!flowOpen || flowAt === null) return;
-    // The plot takes its new width a moment after resize(): measured before that, the old layout
-    // still shows the candles and nothing scrolls. No animation: it needs animation frames to run.
-    const fit = window.setTimeout(() => chart.current?.resize(), 60);
-    const reveal = window.setTimeout(() => {
-      const c = chart.current;
-      if (!c) return;
+    const c = chart.current;
+    const size = c?.getSize(CANDLE_PANE_ID);
+    if (!c || !size) return;
+    const span = () => {
       const w = flowSpan(interval, flowAt, flowEnd);
       const px = c.convertToPixel(
         [{ timestamp: w.from }, { timestamp: candleAt(interval, w.to - 1).from }],
@@ -3944,15 +3961,40 @@ function Chart({
       ) as Array<Partial<Point> & { x?: number }>;
       const a = px[0]?.x;
       const b = px[1]?.x;
-      const width = c.getSize(CANDLE_PANE_ID)?.width;
-      if (typeof a !== 'number' || typeof b !== 'number' || !width) return;
-      const MARGIN = 24;
-      if (a >= MARGIN && b <= width - MARGIN) return;
-      c.scrollByDistance(width / 2 - (a + b) / 2);
-    }, 180);
+      return typeof a === 'number' && typeof b === 'number' ? { a, b } : null;
+    };
+    /** How far to scroll so the candles sit centred on a plot this wide, or 0 if they are on it. */
+    const off = (a: number, b: number, width: number) => (a >= 24 && b <= width - 24 ? 0 : width / 2 - (a + b) / 2);
+    const now = span();
+    const shrink = flowUnder ? 0 : flowPx;
+    const distance = now ? off(now.a - shrink, now.b - shrink, size.width - shrink) : 0;
+    let moved = 0;
+    let frame = 0;
+    const started = performance.now();
+    const MS = 260;
+    const glide = () => {
+      const p = Math.min(1, (performance.now() - started) / MS);
+      const to = distance * (1 - (1 - p) ** 3);
+      c.scrollByDistance(to - moved);
+      moved = to;
+      if (p < 1) frame = requestAnimationFrame(glide);
+    };
+    if (distance !== 0) frame = requestAnimationFrame(glide);
+    // Frames can be scarce (a background tab): this finishes the move, and corrects any miss.
+    const settle = window.setTimeout(() => {
+      cancelAnimationFrame(frame);
+      if (moved !== distance) c.scrollByDistance(distance - moved);
+      c.resize();
+      window.setTimeout(() => {
+        const s = span();
+        const width = c.getSize(CANDLE_PANE_ID)?.width;
+        const d = s && width ? off(s.a, s.b, width) : 0;
+        if (d !== 0) c.scrollByDistance(d);
+      }, 100);
+    }, MS + 40);
     return () => {
-      window.clearTimeout(fit);
-      window.clearTimeout(reveal);
+      cancelAnimationFrame(frame);
+      window.clearTimeout(settle);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [flowOpen]);
@@ -4469,8 +4511,8 @@ function Chart({
             style={bare ? { display: 'none' } : undefined}
             type="button"
             className={`kc-ico kc-tb-ico${flowOpen ? ' on' : ''}`}
-            title={flowOpen ? 'Hide Who traded' : 'Who traded: every wallet in a candle (Shift-click or right-click a candle, Shift-drag for a range)'}
-            aria-label="Who traded"
+            title={flowOpen ? 'Hide trade flow' : 'Trade flow: every wallet in a candle (Shift-click or right-click a candle, Shift-drag for a range)'}
+            aria-label="Trade flow"
             aria-pressed={flowOpen}
             onClick={() => (flowOpen ? closeFlow() : setFlowOpen(true))}
           >
@@ -4909,11 +4951,11 @@ function Chart({
             </div>
           );
         })()}
-        {flowOpen && !bare && !flowUnder && flowDock(false)}
+        {flowPres.mounted && !flowUnder && flowDock(false)}
       </div>
 
       {/* A narrow card keeps Who traded under the plot instead of beside it. */}
-      {flowOpen && !bare && flowUnder && view === 'chart' && flowDock(true)}
+      {flowPres.mounted && flowUnder && view === 'chart' && flowDock(true)}
       {/* Depth and Market info mount only while selected. The chart above
           stays mounted and parked so its price range survives the switch. */}
       {view === 'depth' && <DepthView engine={engine} symbol={symbol} sym={sym} />}
