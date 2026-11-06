@@ -730,8 +730,18 @@ const SWEEP_EVERY_MS = 6 * 60 * 60_000;
 const FREE_RESERVE_PAGES = 16_384;
 /** Pages handed back per reclaim step (1 MB). */
 const RECLAIM_PAGES = 256;
-/** The WAL file is cut back to this after a checkpoint (it had grown to 359 MB and stayed there). */
-const WAL_LIMIT_BYTES = 128 * 1024 * 1024;
+/**
+ * The WAL file is cut back to this when it starts over (it had grown to 359 MB and stayed there). Above what one round
+ * of the checkpoint thread leaves in it (checkpointer.ts RESTART_FRAMES): frames then overwrite the file in place, at 6 us
+ * a write on production's disk against 250 us for one that extends the file. With 128 MB here and the WAL at 1.6 GB, the
+ * writer's thread was up to 44% in the kernel (2026-11-06).
+ */
+const WAL_LIMIT_BYTES = 1024 * 1024 * 1024;
+/**
+ * How long the writer waits for the write lock. Until now no one else ever held it; the checkpoint thread now does, briefly,
+ * for a full checkpoint. Past Checkpointer's HUNG_MS, so a hung thread is ended first: an error here would lose a write.
+ */
+const WRITER_BUSY_MS = 200_000;
 const WAL_CHECKPOINT_PAGES = 16_000;
 /** Rows per transaction when a history page is written a slice at a time: 2,000 rows were seconds of the thread. */
 const FILL_SLICE = 200;
@@ -889,6 +899,7 @@ export class IndexStore {
     this.retainDays = opts.retainDays ?? retainDays();
     this.db.exec('PRAGMA busy_timeout = 5000');
     if (!opts.readOnly) {
+      this.db.exec(`PRAGMA busy_timeout = ${WRITER_BUSY_MS}`);
       // Only takes effect on a file with no table yet: pages freed later can then be
       // handed back in slices (reclaimStep). An older file keeps reusing them instead.
       this.db.exec('PRAGMA auto_vacuum = INCREMENTAL');
@@ -945,7 +956,7 @@ export class IndexStore {
   private checkpointer: Checkpointer | null = null;
 
   /** The WAL's checkpoints go to a thread of their own (checkpointer.ts). The production writer only. */
-  startCheckpointer(o: { everyMs?: number } = {}): void {
+  startCheckpointer(o: { everyMs?: number; restartFrames?: number; restartGapMs?: number } = {}): void {
     if (this.readOnly || this.path === ':memory:' || this.checkpointer) return;
     this.checkpointer = new Checkpointer(this.path, (on) => {
       this.db.exec(`PRAGMA wal_autocheckpoint = ${on ? WAL_CHECKPOINT_PAGES : 0}`);
@@ -1330,6 +1341,10 @@ export class IndexStore {
     const take = (f: FillRow): void => {
       // A time no venue can have produced (0, seconds, microseconds): never stored.
       if (!(f.t >= MIN_ROW_T && f.t <= maxT)) return this.noteBad(f.venue, f.address, f.id, f.t);
+      if (f.src === 0 && this.restAnswered(f.venue, f.address, f.t)) {
+        this.streamUnderRest++;
+        return;
+      }
       // The day is frozen: its rows were complete when they were summed, so this is a re-read of one of them.
       if (this.frozenDay(f.venue, f.address, Math.floor(f.t / DAY))) {
         this.totals.late++;
@@ -2305,6 +2320,36 @@ export class IndexStore {
     for (let d = Math.floor(Math.max(fromT, first) / DAY); d <= hi; d++) this.markDay(venue, address, d * DAY);
   }
 
+  /** venue|address -> the ranges a REST read has answered for and whose stream rows went (dropStreamRows), newest last. */
+  private restSpans = new Map<string, Array<[number, number]>>();
+  /** Stream rows refused since this start: they reached the writer after a read that already counted them. */
+  streamUnderRest = 0;
+
+  /**
+   * A stream row still on its way to the file when REST answered for its time would land after the drop that was meant for it,
+   * and count beside the REST row for good: the next read starts past it. So it goes as the drop would have taken it.
+   */
+  private restAnswered(venue: Venue, address: string, t: number): boolean {
+    if (!this.restSpans.size) return false;
+    const s = this.restSpans.get(`${venue}|${address}`);
+    return !!s && s.some(([a, b]) => t >= a && t <= b);
+  }
+
+  private noteRestSpan(venue: Venue, address: string, fromT: number, toT: number): void {
+    const k = `${venue}|${address}`;
+    const s = this.restSpans.get(k) ?? [];
+    const last = s[s.length - 1];
+    if (last && fromT <= last[1] && toT >= last[0]) {
+      last[0] = Math.min(last[0], fromT);
+      last[1] = Math.max(last[1], toT);
+    } else {
+      s.push([fromT, toT]);
+      if (s.length > 8) s.shift();
+    }
+    if (this.restSpans.size >= 50_000 && !this.restSpans.has(k)) this.restSpans.clear();
+    this.restSpans.set(k, s);
+  }
+
   /**
    * Remove public-stream rows in [fromT, toT] once REST fills cover that range.
    * Hyperliquid's REST fills are aggregated per order and time, so their ids
@@ -2312,6 +2357,7 @@ export class IndexStore {
    */
   dropStreamRows(venue: Venue, address: string, fromT: number, toT: number): void {
     for (const v of venue === 'hyperliquid' ? [venue, 'tradexyz' as Venue] : [venue]) {
+      this.noteRestSpan(v, address, fromT, toT);
       // Days before the trader's oldest row hold nothing to sum again (a range from 0 used to mark 20,000 of them).
       const first = this.oldestRaw(v, address);
       const n = Number(this.q('DELETE FROM fills WHERE venue = ? AND address = ? AND src = 0 AND t >= ? AND t <= ?').run(v, address, fromT, toT).changes);
@@ -2331,6 +2377,7 @@ export class IndexStore {
          SELECT venue, address, id FROM fills WHERE venue = ? AND address = ? AND src = 0 AND t >= ? AND t <= ? LIMIT 2000)`,
     );
     for (const v of venue === 'hyperliquid' ? [venue, 'tradexyz' as Venue] : [venue]) {
+      this.noteRestSpan(v, address, fromT, toT);
       const first = this.oldestRaw(v, address);
       let gone = 0;
       for (;;) {
