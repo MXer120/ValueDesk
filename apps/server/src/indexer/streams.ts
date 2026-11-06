@@ -428,7 +428,7 @@ interface SodexWsTrade {
   S?: string;
 }
 
-export async function sodexSymbols(engine: 'perps' | 'spot'): Promise<string[]> {
+async function sodexSymbols(engine: 'perps' | 'spot'): Promise<string[]> {
   const res = await fetch(`${NET.restBase}/api/v1/${engine}/markets/symbols`, { signal: AbortSignal.timeout(15_000) });
   const j = (await res.json()) as { data?: unknown };
   const list = Array.isArray(j.data) ? j.data : ((j.data as { symbols?: unknown[] } | undefined)?.symbols ?? []);
