@@ -13,6 +13,8 @@
  * shorter candle in it whole. SoDEX's 1m rows would need the chunks decoded per minute, which is more work than this file
  * should cost anyone.
  *
+ * The other venues are checked for the markets on screen instead: venueCheck.ts.
+ *
  * NO TOLERANCE: a slot is whole when held equals the count, exactly. The two count the same thing, so a difference of one is
  * one print we do not hold. Held above the count is off too (it would mean a print held twice) and is shown as what it is.
  *
@@ -32,6 +34,7 @@
 import { DatabaseSync, type StatementSync } from 'node:sqlite';
 import { dirname, join } from 'node:path';
 import { CHUNK_MS, DAY_MS } from './codec.js';
+import type { Venue } from '../valuedesk/types.js';
 
 export const SLOT_MS = CHUNK_MS;
 export const TICK_MS = 10_000;
@@ -44,6 +47,8 @@ export const RECENT_MS = 12 * 3_600_000;
 const RESCAN_MS = 35 * DAY_MS;
 const SYMBOLS_EVERY_MS = 3_600_000;
 const LIMITED_MS = 5 * 60_000;
+/** A read that failed (a timeout, a connection cut: about 1 in 500 on 2026-11-06) is tried again soon. */
+const RETRY_MS = 2 * 60_000;
 const DAYS_EVERY_MS = 15 * 60_000;
 /** Candle rows per call: SoDEX refuses more than this. */
 export const PAGE = 1_000;
@@ -178,10 +183,6 @@ export class LedgerStore {
       .run(symbol, s.t, s.venueN, s.held, s.venueUsd);
   }
 
-  hasSlots(symbol: string): boolean {
-    return !!this.q('SELECT 1 FROM ledger_slot WHERE symbol = ? LIMIT 1').get(symbol);
-  }
-
   slots(symbol: string, from: number, to: number): SlotRow[] {
     return (this.q('SELECT t, venue_n AS n, held, venue_usd AS u FROM ledger_slot WHERE symbol = ? AND t >= ? AND t < ?').all(symbol, from, to) as Array<{ t: number; n: number | null; held: number; u: number }>)
       .map((r) => ({ t: r.t, venueN: r.n, held: r.held, venueUsd: r.u }));
@@ -224,7 +225,11 @@ export interface CoverageHole {
 }
 
 export interface VenueCoverage {
-  venue: 'sodex';
+  venue: Venue;
+  /** What `held` and `expected` count: prints, or (a venue that gives no count) the coin's volume. */
+  unit?: 'prints' | 'volume';
+  /** Being read right now: asking again soon will say more. */
+  pending?: boolean;
   /** The whole slots compared: wider than a window under 5 minutes, or not on the 5-minute marks. */
   from: number;
   to: number;
@@ -235,6 +240,8 @@ export interface VenueCoverage {
   holes: CoverageHole[];
   /** Slots that are off, all of them. */
   holeSlots: number;
+  /** Of those, the ones holding more than the venue's figure: prints recorded twice. */
+  overSlots?: number;
   /** Closed slots with no count from SoDEX yet: nothing is claimed for them. */
   unchecked: Array<[number, number]>;
 }
@@ -285,6 +292,7 @@ export function coverageOf(symbols: readonly string[], from: number, to: number,
   const b = Math.min(slotUp(to), slotDown(now - SETTLE_MS));
   const off = new Map<number, { held: number; venue: number }>();
   const unchecked: Array<[number, number]> = [];
+  let overSlots = 0;
   let held = 0;
   let expected = 0;
   if (a < b) {
@@ -298,6 +306,7 @@ export function coverageOf(symbols: readonly string[], from: number, to: number,
       if (!m.backDone) addSpan(unchecked, a, Math.min(b, m.checkedFrom));
       for (const s of w.off) {
         if (s.venue === null) { addSpan(unchecked, s.t, s.t + SLOT_MS); continue; }
+        if (s.held > s.venue) overSlots++;
         const o = off.get(s.t) ?? { held: 0, venue: 0 };
         o.held += s.held;
         o.venue += s.venue;
@@ -312,7 +321,7 @@ export function coverageOf(symbols: readonly string[], from: number, to: number,
     if (last && last.to === t) { last.to = t + SLOT_MS; last.held += s.held; last.venue += s.venue; }
     else holes.push({ from: t, to: t + SLOT_MS, held: s.held, venue: s.venue });
   }
-  return { venue: 'sodex', from: a, to: Math.max(a, b), held, expected, holes: holes.slice(0, MAX_HOLES), holeSlots: off.size, unchecked: joinSpans(unchecked) };
+  return { venue: 'sodex', from: a, to: Math.max(a, b), held, expected, holes: holes.slice(0, MAX_HOLES), holeSlots: off.size, overSlots, unchecked: joinSpans(unchecked) };
 }
 
 /** A span the ledger has proved whole: compared, and neither a hole nor unchecked. */
@@ -324,15 +333,18 @@ export function provenSpans(c: VenueCoverage): Array<[number, number]> {
 export type DayState = 'complete' | 'short' | 'unchecked';
 
 /**
- * A day of activity: whole, short or not known. A day still forming is judged on prints alone, as the two volumes are read
- * at different moments and only the closed slots have a count.
+ * A day of activity: whole, short or not known. Short needs no whole day: any slot read so far that is short makes the day
+ * short at once, and so does activity under what only the markets read so far traded (all of activity against part of the
+ * venue, so it can only be understated). Whole does need the whole day: every market read, the prints equal, the volumes equal.
+ * A day still forming is judged on prints alone, as its volume comes at another moment than its candles.
  */
 export function dayState(d: DayRow | undefined, today: number): DayState {
-  if (!d || !d.known) return 'unchecked';
-  const printsOff = d.heldPrints !== null && d.heldPrints !== d.venuePrints;
-  if (d.day >= today) return printsOff ? 'short' : d.heldPrints === null ? 'unchecked' : 'complete';
-  if (d.activityUsd === null) return printsOff ? 'short' : 'unchecked';
-  if (printsOff) return 'short';
+  if (!d) return 'unchecked';
+  if (d.heldPrints !== null && d.heldPrints !== d.venuePrints) return 'short';
+  if (d.day < today && d.activityUsd !== null && d.venueUsd > 0 && d.activityUsd < d.venueUsd * (1 - DAY_SHARE_TOLERANCE)) return 'short';
+  if (!d.known) return 'unchecked';
+  if (d.day >= today) return d.heldPrints === null ? 'unchecked' : 'complete';
+  if (d.activityUsd === null) return 'unchecked';
   if (d.venueUsd <= 0) return d.activityUsd > 0 ? 'short' : 'complete';
   return Math.abs(d.activityUsd / d.venueUsd - 1) <= DAY_SHARE_TOLERANCE ? 'complete' : 'short';
 }
@@ -341,16 +353,27 @@ export interface ActivityDay {
   /** UTC midnight, ms. */
   t: number;
   state: DayState;
-  /** Activity's one-side volume over the venue's. Null when either is not known or the venue did nothing. */
+  /** Activity's one-side volume over the venue's. Null until every market's candles cover the day, or the venue did nothing. */
   share: number | null;
+  /** Prints held over the venue's count, in the slots read so far. Null before the flow began. */
+  printShare: number | null;
+  /** Of the markets, how many have been read over this day. */
+  marketsChecked: number;
+  markets: number;
   venueUsd: number | null;
   activityUsd: number | null;
   venuePrints: number | null;
   heldPrints: number | null;
 }
 
+/** A market's candles have been read over this day (a day still forming: into it). */
+function covers(m: LedgerMarket, day: number, today: number): boolean {
+  const start = day * DAY_MS;
+  return (m.backDone || m.checkedFrom <= start) && m.checkedTo >= (day >= today ? start : start + DAY_MS);
+}
+
 /** Per day for [fromDay, toDay]: a day the ledger holds nothing for is there too, as not checked. */
-export function activityDays(rows: readonly DayRow[], fromDay: number, toDay: number, today: number): ActivityDay[] {
+export function activityDays(rows: readonly DayRow[], fromDay: number, toDay: number, today: number, markets: readonly LedgerMarket[] = []): ActivityDay[] {
   const by = new Map(rows.map((r) => [r.day, r]));
   const out: ActivityDay[] = [];
   for (let day = fromDay; day <= toDay; day++) {
@@ -359,6 +382,9 @@ export function activityDays(rows: readonly DayRow[], fromDay: number, toDay: nu
       t: day * DAY_MS,
       state: dayState(r, today),
       share: r && r.known && r.activityUsd !== null && r.venueUsd > 0 ? r.activityUsd / r.venueUsd : null,
+      printShare: r && r.heldPrints !== null && r.venuePrints > 0 ? r.heldPrints / r.venuePrints : null,
+      marketsChecked: markets.filter((m) => covers(m, day, today)).length,
+      markets: markets.length,
       venueUsd: r?.venueUsd ?? null,
       activityUsd: r?.activityUsd ?? null,
       venuePrints: r?.venuePrints ?? null,
@@ -398,6 +424,8 @@ export interface LedgerStatus {
   errors: number;
   limited: number;
   lastError: string | null;
+  /** When lastError happened: it stays until the next error, so one old failure does not read as a live one. */
+  lastErrorAt: number;
   lastAt: number;
 }
 
@@ -415,7 +443,9 @@ export class CoverageLedger {
   private daysAt = -Infinity;
   private limitedUntil = 0;
   private busy = false;
-  private stats = { calls: 0, errors: 0, limited: 0, lastError: null as string | null, lastAt: 0 };
+  /** How far SoDEX's candles have got, by the newest closed row of any market. */
+  private candlesTo = -Infinity;
+  private stats = { calls: 0, errors: 0, limited: 0, lastError: null as string | null, lastErrorAt: 0, lastAt: 0 };
 
   constructor(private readonly d: LedgerDeps) {
     this.now = d.now ?? Date.now;
@@ -436,6 +466,7 @@ export class CoverageLedger {
     } catch (e) {
       this.stats.errors++;
       this.stats.lastError = String((e as Error)?.message ?? e).slice(0, 160);
+      this.stats.lastErrorAt = now;
     } finally {
       this.busy = false;
     }
@@ -461,8 +492,8 @@ export class CoverageLedger {
   /** Read a market's new closed slots and look again at its recent held counts. */
   private async visit(symbol: string, now: number): Promise<void> {
     const entry = this.markets.get(symbol)!;
-    // Whatever happens, this market waits its turn.
-    entry.nextAt = now + VISIT_EVERY_MS;
+    // Whatever happens, this market waits its turn; one whose read failed, a short one.
+    entry.nextAt = now + RETRY_MS;
     const { store } = this.d;
     const closedEnd = slotDown(now - SETTLE_MS);
     const st = store.market(symbol);
@@ -473,7 +504,7 @@ export class CoverageLedger {
       if (!got) return;
       rows = got;
       const oldest = rows.reduce((t, r) => Math.min(t, r.t), closedEnd);
-      next = { symbol, engine: entry.engine, checkedFrom: oldest, checkedTo: this.provedTo(symbol, rows, oldest, closedEnd), backDone: rows.length < PAGE };
+      next = { symbol, engine: entry.engine, checkedFrom: oldest, checkedTo: this.provedTo(rows, oldest, closedEnd), backDone: rows.length < PAGE };
     } else if (st.checkedTo < closedEnd) {
       // A long absence comes back a page a visit, oldest first, so the span never has a hole in it.
       const start = Math.max(st.checkedFrom, st.checkedTo - OVERLAP * SLOT_MS);
@@ -481,26 +512,27 @@ export class CoverageLedger {
       const got = await this.read(entry.engine, symbol, { limit: PAGE, startTime: start, endTime: end - SLOT_MS });
       if (!got) return;
       rows = got;
-      next = { ...st, checkedTo: this.provedTo(symbol, rows, st.checkedTo, end) };
+      next = { ...st, checkedTo: this.provedTo(rows, st.checkedTo, end) };
       // Still behind: its next page does not wait half an hour (unless SoDEX has nothing further yet).
       if (next.checkedTo === end && end < closedEnd) entry.nextAt = now;
     } else {
       next = st;
     }
+    if (entry.nextAt !== now) entry.nextAt = now + VISIT_EVERY_MS;
     const from = entry.rescanned ? now - RECENT_MS : now - RESCAN_MS;
     this.write(next, rows, Math.max(next.checkedFrom, slotDown(from)), next.checkedTo);
     entry.rescanned = true;
   }
 
   /**
-   * How far a read proves. An idle market's candles say n = 0, so a missing row is not a quiet slot: SoDEX's candles may just
-   * not have got there, and a slot called empty for that reason would read as whole. Only a market that has never had a
-   * candle (they stay empty for good) goes by the clock.
+   * How far a read proves. An idle market's candles may simply stop (vADA_vUSDC's last came on 11-03), so a missing row is a
+   * quiet slot, but only as far as SoDEX's candles have got for the others: a slot called empty because the candles are late
+   * would read as whole. Before any market has shown that, only what this one's rows reach.
    */
-  private provedTo(symbol: string, rows: readonly Kline[], from: number, end: number): number {
+  private provedTo(rows: readonly Kline[], from: number, end: number): number {
     const newest = rows.reduce((t, r) => (r.t < end ? Math.max(t, r.t + SLOT_MS) : t), -Infinity);
-    if (newest > -Infinity) return Math.max(from, newest);
-    return this.d.store.hasSlots(symbol) ? from : end;
+    this.candlesTo = Math.max(this.candlesTo, newest);
+    return Math.max(from, newest, Math.min(end, this.candlesTo));
   }
 
   /** One page further back, for the market that is least far back, so all reach the flow's start before any goes beyond it. */
@@ -588,8 +620,7 @@ export class CoverageLedger {
     let usd = 0;
     let known = true;
     for (const m of markets) {
-      if (!m.backDone && m.checkedFrom > start) known = false;
-      if (m.checkedTo < (day >= today ? start : end)) known = false;
+      if (!covers(m, day, today)) known = false;
       const s = this.d.store.daySums(m.symbol, start, end);
       prints += s.prints;
       held += s.held;

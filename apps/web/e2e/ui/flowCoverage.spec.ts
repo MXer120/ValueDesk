@@ -31,6 +31,18 @@ const summary = { total: 2_690_000, takerBuy: 1_480_000, takerSell: 1_210_000, w
 const base = { coin: 'BTC', from: FROM, to: TO, final: false, summary, rows, markets: [{ venue: 'sodex', symbol: 'BTC-USD', since: FROM - 3 * 86_400_000 }], down: [] as number[][], since: FROM - 3 * 86_400_000 };
 
 const STATES = {
+  // Hyperliquid BTC 14:30 as measured, trade.xyz above its count, Lighter by volume.
+  venues: {
+    ...base,
+    markets: [{ venue: 'hyperliquid', symbol: 'BTC', since: base.since }, { venue: 'lighter', symbol: 'BTC', since: base.since }, { venue: 'arcus', symbol: 'BTC-USD', since: base.since }],
+    gaps: [[FROM + 6 * SLOT, FROM + 7 * SLOT]],
+    coverage: null,
+    checks: [
+      { venue: 'hyperliquid', unit: 'prints', from: FROM, to: TO, held: 34_806, expected: 36_003, holeSlots: 1, overSlots: 0, unchecked: [], holes: [{ from: FROM + 6 * SLOT, to: FROM + 7 * SLOT, held: 4_061, venue: 5_258 }] },
+      { venue: 'lighter', unit: 'volume', from: FROM, to: TO, held: 244, expected: 250, holeSlots: 1, overSlots: 0, unchecked: [], holes: [{ from: FROM + 2 * SLOT, to: FROM + 3 * SLOT, held: 20, venue: 26 }] },
+      { venue: 'arcus', unit: 'prints', from: FROM, to: TO, held: 0, expected: 0, holeSlots: 0, overSlots: 0, unchecked: [[FROM, TO]], holes: [], pending: true },
+    ],
+  },
   // 11-06 12:10 as measured in shape: a run of short slots, some of them empty.
   holes: {
     ...base,
@@ -96,7 +108,7 @@ for (const phone of [false, true]) {
   test(`${size}: holes are said in figures and the summary reads as floors`, async () => {
     const { page, close } = await show('holes', phone);
     await page.getByText(/Held 811 of 2[.,]685 trades/).waitFor();
-    await page.getByText(/SoDEX counted 2[.,]685 trades in this candle and we hold 811\./).waitFor();
+    await page.getByText(/SoDEX counted 2[.,]685 trades in this candle and we hold 811\./).first().waitFor();
     assert.ok(await page.getByText('811+', { exact: true }).isVisible());
     assert.ok(await page.getByText('148+', { exact: true }).isVisible());
     assert.equal(await page.getByText(/Every print/).count(), 0);
@@ -110,6 +122,15 @@ for (const phone of [false, true]) {
     });
     assert.deepEqual(wider, [], 'no sideways scroll');
     await shot(page, 'holes');
+    await close();
+  });
+
+  test(`${size}: other venues show their own figures, and one being read says so`, async () => {
+    const { page, close } = await show('venues', phone);
+    await page.getByText(/Hyperliquid: held 34[.,]806 of 36[.,]003 trades/).waitFor();
+    await page.getByText(/Lighter: held 97[.,]6% of volume/).waitFor();
+    await page.getByText('Checking', { exact: true }).waitFor();
+    await shot(page, 'venues');
     await close();
   });
 

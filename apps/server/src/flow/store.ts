@@ -174,6 +174,11 @@ export class FlowStore {
     return this.q('SELECT t, n, data FROM flow_chunk WHERE mid = ? AND t >= ? AND t < ? ORDER BY t').all(mid, from, to) as unknown as Array<{ t: number; n: number; data: Uint8Array }>;
   }
 
+  /** Prints per chunk of a market with from <= t < to, without their blobs. */
+  chunkCounts(mid: number, from: number, to: number): Array<{ t: number; n: number }> {
+    return this.q('SELECT t, n FROM flow_chunk WHERE mid = ? AND t >= ? AND t < ?').all(mid, from, to) as unknown as Array<{ t: number; n: number }>;
+  }
+
   /** Which markets have chunks in [from, to). */
   marketsWithChunks(from: number, to: number): number[] {
     return (this.q('SELECT DISTINCT mid FROM flow_chunk WHERE t >= ? AND t < ?').all(from, to) as Array<{ mid: number }>).map((r) => r.mid);

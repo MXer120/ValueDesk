@@ -762,6 +762,8 @@ export class Indexer {
   // --- streams ----------------------------------------------------------------------
 
   private onPrint(p: Print): void {
+    // A restart's snapshot of what the last run already took: not again, here or in activity and the cohorts.
+    if (this.flow?.repeatOfHeld(p)) return;
     // Hyperliquid's HIP-3 dex "xyz" is also ranked on its own as trade.xyz.
     if (p.venue === 'hyperliquid' && p.symbol.startsWith('xyz:')) this.onPrint({ ...p, venue: 'tradexyz' });
     // Cohorts: the print moves both parties' books (SoDEX prints carry account ids).

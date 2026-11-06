@@ -11,7 +11,7 @@ import { join } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
 import { CHUNK_MS, DAY_MS } from '../src/flow/codec.js';
 import {
-  CoverageLedger, LedgerStore, PAGE, SETTLE_MS, SLOT_MS, VISIT_EVERY_MS,
+  CoverageLedger, LedgerStore, PAGE, SETTLE_MS, SLOT_MS, VISIT_EVERY_MS, slotDown,
   activityDays, coverageOf, dayState, joinSpans, ledgerPathFor, provenSpans, subtractSpans,
   type DayRow, type Kline, type MarketWindow,
 } from '../src/flow/ledger.js';
@@ -19,12 +19,15 @@ import { FlowStore, closeFlowReader } from '../src/flow/store.js';
 import { FlowRecorder, CLOSE_MS, FLUSH_MS, READY_MS } from '../src/flow/recorder.js';
 import { activityCoverage, clearFlowCaches, closeLedgerReader, flowWalletFills, flowWindow } from '../src/flow/read.js';
 import { startLedgerThread } from '../src/flow/ledgerWorker.js';
+import { setCandleRead } from '../src/flow/venueCheck.js';
 import { clearTradeNotes, markSodexTrades } from '../src/indexer/read.js';
 import type { TraderRow } from '../src/valuedesk/types.js';
 import { RestReader } from '../src/indexer/sodexCatchup.js';
 import type { Print } from '../src/indexer/streams.js';
 
 const DAY = 20_400 * DAY_MS;
+// No venue's candles are read from here: flowVenues.test.ts has its own.
+setCandleRead(async () => null);
 const tmp = () => mkdtempSync(join(tmpdir(), 'ledger-'));
 const row = (t: number, n: number, q = n * 10): Kline => ({ t, n, v: String(n), q: String(q) });
 
@@ -211,6 +214,51 @@ test('candles that have not got there yet prove nothing: the slots after the new
   rmSync(dir, { recursive: true, force: true });
 });
 
+test('a market whose candles stopped goes on with the others, so it does not hold every day back as unchecked', async () => {
+  const t0 = DAY + 3_600_000;
+  const now = t0 + SLOT_MS + SETTLE_MS;
+  const later = now + DAY_MS;
+  const btc = [row(t0, 10)];
+  const { store, clock, ledger, dir } = setup({ 'BTC-USD': btc, 'vADA_vUSDC': [row(t0, 1)] }, {}, now);
+  await ledger.tick();
+  await ledger.tick();
+  await ledger.tick();
+  clock.now = later;
+  for (let i = 1; i <= Math.floor(DAY_MS / SLOT_MS); i++) btc.push(row(t0 + i * SLOT_MS, 1));
+  await ledger.tick(); // the symbols
+  await ledger.tick();
+  await ledger.tick();
+  const end = slotDown(later - SETTLE_MS);
+  assert.equal(store.market('BTC-USD')!.checkedTo, end);
+  assert.equal(store.market('vADA_vUSDC')!.checkedTo, end);
+  store.close();
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('a restart does not take in again what the snapshot repeats, and takes what is really new', () => {
+  const dir = tmp();
+  const t0 = DAY + 3_600_000;
+  const clock = { now: t0 + 60_000 };
+  const flow = new FlowStore(join(dir, 'flow.db'));
+  const a = new FlowRecorder(flow, () => null, () => clock.now);
+  const print = (id: string, t: number, symbol = 'DYDX', sz = 1): Print => ({ venue: 'hyperliquid', id, t, symbol, px: 1, sz, buyer: '0xA', seller: '0xB', taker: 'buyer' });
+  a.add(print('1', t0 + 1));
+  a.add(print('2', t0 + 1)); // twins: the same in every field
+  a.add({ ...print('3', t0 + 2, 'xyz:TSLA'), venue: 'tradexyz' });
+  clock.now += FLUSH_MS + 1;
+  a.stop();
+  clock.now += 60_000;
+  const b = new FlowRecorder(flow, () => null, () => clock.now);
+  assert.equal(b.repeatOfHeld(print('1', t0 + 1)), true);
+  assert.equal(b.repeatOfHeld(print('2', t0 + 1)), true);
+  assert.equal(b.repeatOfHeld(print('9', t0 + 1)), false, 'a third of the same was not held');
+  assert.equal(b.repeatOfHeld(print('8', t0 + 5, 'DYDX', 2)), false, 'held by nobody: the gap it fills');
+  assert.equal(b.repeatOfHeld(print('3', t0 + 2, 'xyz:TSLA')), true, 'as Hyperliquid hands it in, held under trade.xyz');
+  assert.equal(b.repeatOfHeld(print('7', clock.now + 1)), false, 'newer than this run');
+  flow.close();
+  rmSync(dir, { recursive: true, force: true });
+});
+
 test('a 429 stops the calls for five minutes and moves nothing', async () => {
   const t0 = DAY + 3_600_000;
   const dir = tmp();
@@ -244,6 +292,11 @@ test('a day is complete only if its prints match and its volume is within the to
   assert.equal(dayState(undefined, today), 'unchecked');
   assert.equal(dayState(d({}), today), 'complete');
   assert.equal(dayState(d({ known: false }), today), 'unchecked');
+  // Short needs no whole day: a slot read so far, or activity under the part of the venue read so far.
+  assert.equal(dayState(d({ known: false, heldPrints: 17, venuePrints: 100 }), today), 'short');
+  assert.equal(dayState(d({ known: false, heldPrints: null, activityUsd: 500 }), today), 'short');
+  assert.equal(dayState(d({ known: false, heldPrints: null, activityUsd: 5_000 }), today), 'unchecked', 'all of activity against part of the venue says nothing');
+  assert.equal(dayState(d({ day: today, known: false, activityUsd: null, heldPrints: 50 }), today), 'short');
   assert.equal(dayState(d({ heldPrints: 99 }), today), 'short');
   assert.equal(dayState(d({ activityUsd: 130 }), today), 'short', '13 % of the venue, as on 11-04');
   assert.equal(dayState(d({ heldPrints: null, activityUsd: 70 }), today), 'short', 'before the flow began: volume alone');
@@ -296,6 +349,7 @@ test('a past window is final only when SoDEX\'s count agrees: short slots are ga
   const print = (t: number, id: number): Print => ({ venue: 'sodex', id: String(id), t, symbol: 'BTC-USD', px: 100, sz: 1, buyer: '1', seller: '2', taker: 'buyer' });
   rec.add(print(t0 + 1, 1));
   rec.add(print(t0 + SLOT_MS + 1, 2));
+  rec.add({ venue: 'hyperliquid', id: 'h', t: t0 + 1, symbol: 'BTC', px: 100, sz: 1, buyer: '0xa', seller: '0xb', taker: 'buyer' });
   clock.now = t0 + 2 * SLOT_MS + CLOSE_MS + FLUSH_MS + 1_000;
   rec.tick();
   rec.tick();
@@ -357,7 +411,7 @@ test('a past window is final only when SoDEX\'s count agrees: short slots are ga
   rmSync(dir, { recursive: true, force: true });
 });
 
-test('no ledger yet: SoDEX is said to be unchecked and not final; a venue with no count is unaffected', async () => {
+test('no ledger yet: SoDEX is said to be unchecked and not final; another venue goes by its own figures', async () => {
   const dir = tmp();
   const flowPath = join(dir, 'flow.db');
   process.env.VALUESCAN_FLOW_DB = flowPath;
@@ -380,9 +434,11 @@ test('no ledger yet: SoDEX is said to be unchecked and not final; a venue with n
   const sodex = await flowWindow({ ...ask, venues: ['sodex'] }, later);
   assert.equal(sodex!.final, false);
   assert.deepEqual(sodex!.coverage!.unchecked, [[t0, t0 + SLOT_MS]]);
+  setCandleRead(async () => ({ unit: 'prints', rows: [{ t: t0, v: 1, final: true }] }));
   const hl = await flowWindow({ ...ask, venues: ['hyperliquid'] }, later);
-  assert.equal(hl!.final, true);
+  assert.equal(hl!.final, true, 'compared and equal');
   assert.equal(hl!.coverage, null);
+  setCandleRead(async () => null);
   closeFlowReader();
   clearFlowCaches();
   flow.close();

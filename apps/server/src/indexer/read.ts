@@ -73,7 +73,10 @@ function sodexTradeNote(window: BoardWindow, now: number): SodexTradeNote | null
   const short = days.filter((d) => d.state === 'short');
   const unchecked = days.filter((d) => d.state === 'unchecked').length;
   let lowest: SodexTradeNote['lowest'] = null;
-  for (const d of short) if (d.share !== null && (!lowest || d.share < lowest.share)) lowest = { t: d.t, share: d.share };
+  for (const d of short) {
+    const share = d.share ?? d.printShare;
+    if (share !== null && (!lowest || share < lowest.share)) lowest = { t: d.t, share };
+  }
   const note = short.length || unchecked ? { days: days.length, short: short.length, unchecked, lowest } : null;
   notes.set(window, { at: now, note });
   return note;
