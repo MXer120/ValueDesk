@@ -15,15 +15,16 @@
 /* The page scrolls, not its outer tabs, and a card's edge does not fade. Only the band keeps its own. */
 .pfx-tabs { display: block; min-width: 0; }
 .pfx-tabs > .dash-tabs, .pfx-plain > .dash-tabs { flex: none; }
+/* No horizontal rules on this page: space and the cards carry the structure. The account band keeps its own. */
+.pf.pfx .pfx-tabs > .dash-tabs > .dash-tabs__bar,
+.pf.pfx .pfx-plain > .dash-tabs > .dash-tabs__bar { border-bottom: 0; }
+.pf.pfx .pf-card__head { border-bottom: 0; }
 .pf.pfx .dash-tabs__body:not(.pf-card--band .dash-tabs__body) { overflow: visible; min-height: 0; -webkit-mask-image: none; mask-image: none; }
 .pf.pfx .pfx-tabs > .dash-tabs > .dash-tabs__bar, .pf.pfx .pfx-plain > .dash-tabs > .dash-tabs__bar { overflow: visible; cursor: default; }
 .pf.pfx .pfx-tabs > .dash-tabs > .dash-tabs__bar:active, .pf.pfx .pfx-plain > .dash-tabs > .dash-tabs__bar:active { cursor: default; }
 
 /* Full column wherever it is mounted: /wealth puts this directly in a centring `.pf.pfx`. */
 .pfx-stack { display: flex; flex-direction: column; gap: var(--sp-3); width: 100%; max-width: var(--pfx-col); min-width: 0; padding-top: var(--sp-3); }
-
-/* A card's timeframe dropdown opens over the sections below it, not behind them. */
-.pfx-top, .pfx-plain:not(.pfx-sections) { position: relative; z-index: 3; }
 
 .pfx-money { display: flex; align-items: center; gap: var(--sp-1); }
 .pfx-swapbtn { display: inline-flex; align-items: center; gap: 6px; }
@@ -40,18 +41,22 @@
 .pfx-value__sub b { margin-left: 4px; font-family: var(--font-num); font-weight: 500; font-variant-numeric: tabular-nums; color: var(--text); }
 .pfx-value__sub b.pos, .pfx-kv__row b.pos, .pfx-sum__row b.pos, .pfx-sum__head b.pos { color: var(--pos); }
 .pfx-value__sub b.neg, .pfx-kv__row b.neg, .pfx-sum__row b.neg, .pfx-sum__head b.neg { color: var(--neg); }
-.pfx-kv { display: flex; flex-direction: column; gap: 2px; padding: var(--sp-2) var(--sp-4); border-top: 1px solid var(--pf-line); }
+.pfx-kv { display: flex; flex-direction: column; gap: 2px; padding: 0 var(--sp-4) var(--sp-3); }
 .pfx-kv__row { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); min-height: 24px; color: var(--muted); font-size: var(--fs-xs); }
 .pfx-kv__row > span { display: inline-flex; align-items: center; gap: 4px; }
 .pfx-kv__row b { color: var(--text); font-family: var(--font-num); font-weight: 500; font-variant-numeric: tabular-nums; }
-.pfx-buckets { display: flex; flex-direction: column; gap: 2px; flex: 1; padding: var(--sp-2) var(--sp-4) var(--sp-3); border-top: 1px solid var(--pf-line); }
+.pfx-buckets { display: flex; flex-direction: column; gap: 2px; flex: 1; padding: 0 var(--sp-4) var(--sp-3); }
 .pfx-bucket { width: 100%; border: 0; background: none; text-align: left; font: inherit; cursor: pointer; border-radius: var(--radius-sm); }
 .pfx-bucket:hover { background: rgb(var(--ink) / 0.05); }
 .pfx-bucket:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 .pfx-bucket .pfa__part-k { display: inline-flex; align-items: center; gap: 4px; }
 
+/* The chart sits straight on its card: no box inside the box, three quiet levels, a line with some weight. */
 .pfx-chart { min-height: 400px; }
-.pfx-chart .pf-card__body { padding: var(--sp-3) var(--sp-4) var(--sp-4); }
+.pfx-chart .pf-card__body { padding: 0 var(--sp-4) var(--sp-3); }
+.pf.pfx .pfx-chart .pf-chart { flex: 1 1 auto; min-height: 280px; height: auto; padding: 0; border: 0; border-radius: 0; background: none; box-shadow: none; }
+.pf.pfx .pfx-chart .pf-chart__grid { stroke: var(--panel-line); opacity: 0.7; stroke-dasharray: 2 4; }
+.pf.pfx .pfx-chart .pf-chart__line { stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
 .pfx-chart__head { display: flex; align-items: baseline; gap: var(--sp-2); margin-bottom: var(--sp-2); color: var(--muted); font-size: var(--fs-xs); }
 .pfx-chart__head > span { display: inline-flex; align-items: center; gap: 4px; }
 .pfx-chart__head b { color: var(--text); font-family: var(--font-num); font-weight: 500; font-variant-numeric: tabular-nums; }
@@ -145,7 +150,7 @@ button.pfx-promo:hover .pfx-promo__cta span { transform: translateX(3px); }
 .pfx-sum__row { color: var(--muted); font-size: var(--fs-xs); min-height: 20px; }
 .pfx-sum__head b, .pfx-sum__row b { font-family: var(--font-num); font-weight: 500; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .pfx-sum__row b { color: var(--text); }
-.pfx-sum__note { margin: 0; padding: var(--sp-2) var(--sp-4); border-top: 1px solid var(--pf-line); }
+.pfx-sum__note { margin: 0; padding: 0 var(--sp-4) var(--sp-3); }
 
 /* --- sections ------------------------------------------------------------------------------ */
 .pfx-band { min-height: 240px; }
@@ -192,6 +197,15 @@ button.pfx-promo:hover .pfx-promo__cta span { transform: translateX(3px); }
 @keyframes pfx-shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
 @media (prefers-reduced-motion: reduce) { .pfx-bone { animation: none; } }
 
+.pfx-range { flex: none; }
+.pfx-range__pop { min-width: 132px; }
+.pfx-range__pop .psel__row { display: flex; align-items: center; justify-content: space-between; width: 100%; }
+/* Over the sections below it, not behind them (they come later in the page). */
+.pfx-top, .pfx-plain:not(.pfx-sections) { position: relative; z-index: 3; }
+/* The account table draws its row rule as an inset shadow. */
+.pf.pfx .pfx-table.acct-table.acct-t th,
+.pf.pfx .pfx-table.acct-table.acct-t tbody td { box-shadow: none; }
+
 .pfx-unit { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
 
 /* SoDEX's marks and some fund logos are white: on the light theme they sit on a dark disc. */
@@ -227,7 +241,6 @@ html[data-theme='light'] .pfx-table .acct-mkt img { background: #17181a; border-
   .pfx-chart { min-height: 340px; }
   .pfx-sum__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .pfx-sum__cell:nth-child(3) { border-left: 0; }
-  .pfx-sum__cell:nth-child(n + 3) { border-top: 1px solid var(--pf-line); }
 }
 @media (max-width: 640px) {
   .pf.pfx { padding: var(--sp-2) var(--sp-2) var(--sp-5); }

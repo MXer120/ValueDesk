@@ -117,10 +117,10 @@ async function fakeHistory(ctx: BrowserContext) {
     const n = hourly ? 24 : 60;
     const chart = Array.from({ length: n }, (_, i) => ({
       ts_ms: Date.now() - (n - 1 - i) * step,
-      account_value_usd: 2000 + i * 13 + (i % 7) * 21,
-      pnl_usd: i * 2.5 - (i % 5) * 4,
+      account_value_usd: 2000 + i * 9 + Math.sin(i / 3) * 70 + Math.sin(i / 7) * 110,
+      pnl_usd: i * 2.5 + Math.sin(i / 2.5) * 22,
       spot_pnl_usd: 0,
-      perps_pnl_usd: i * 2.5 - (i % 5) * 4,
+      perps_pnl_usd: i * 2.5 + Math.sin(i / 2.5) * 22,
     }));
     return route.fulfill(ok({ chart, total_pnl_usd: 100, roi: 0.05 }));
   });
@@ -186,12 +186,16 @@ h.test('Total Value counts each dollar once, and copies and bots have no bucket'
   assert.match(sum, /commission \$0,12/);
   await shot(p, 'trade-tab');
   // The timeframe is the app's dropdown: choosing changes the summary's window.
-  await p.locator('.pfx-sum .coh-pick__btn').click();
-  await p.locator('.pfx-sum').getByRole('option', { name: '30 days' }).waitFor();
+  await p.locator('.pfx-sum .psel__btn').click();
+  await p.locator('.pfx-sum').getByRole('option', { name: '30d' }).waitFor();
+  await p.locator('.pfx-sum').evaluate((el) => el.scrollIntoView({ block: 'start' }));
   await shot(p, 'timeframe', false);
-  await p.locator('.pfx-sum').getByRole('option', { name: '30 days' }).click();
-  await until(p, async () => (await p.locator('.pfx-sum .coh-pick__btn').innerText()).includes('30 days'), 'the 30-day summary', 5_000);
-  await p.getByRole('tab', { name: 'PnL Calendar' }).click();
+  await p.locator('.pfx-sum').getByRole('option', { name: '30d' }).click();
+  await until(p, async () => (await p.locator('.pfx-sum .psel__btn').innerText()).includes('30d'), 'the 30-day summary', 5_000);
+  await p.getByRole('radio', { name: 'PnL', exact: true }).click();
+  await p.locator('.pfx-chart').evaluate((el) => el.scrollIntoView({ block: 'center' }));
+  await shot(p, 'pnl', false);
+  await p.getByRole('radio', { name: 'PnL Calendar' }).click();
   await p.locator('.pfc-grid').waitFor();
   await shot(p, 'calendar', false);
   await p.getByRole('button', { name: 'View tiers' }).click();
