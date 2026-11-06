@@ -5,6 +5,7 @@
  * VALUESCAN_INDEXER=0 so none of them starts a second writer. See
  * docs/INDEXER.md for the environment and budgets.
  */
+import './fetchThreadOn.js';
 import { runIndexer } from './worker.js';
 import { profileOnSignal } from './cpuProfile.js';
 import { dirname, join } from 'node:path';

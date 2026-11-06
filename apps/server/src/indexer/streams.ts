@@ -317,20 +317,32 @@ export class LiveSocket {
 interface HlSpotMeta { universe?: Array<{ name?: string }> }
 interface HlMeta { universe?: Array<{ name?: string; isDelisted?: boolean }> }
 
-/** Every live perp (default dex and every HIP-3 dex) and every spot pair. */
-async function hlMarkets(): Promise<string[]> {
-  const opts = { ttlMs: 60 * 60_000, background: true };
-  const dexes = await hlInfo.post<Array<{ name?: string } | null>>({ type: 'perpDexs' }, opts).catch(() => [null]);
+/**
+ * Every live perp (default dex and every HIP-3 dex) and every spot pair. A read that failed used to count as an empty list: a
+ * start with the main list unread subscribed to what was left and stayed so for 6 hours (MARKETS_REFRESH_MS), its prints unseen.
+ * Now the main list or the spot list unread throws, so the socket tries again and says why. A HIP-3 dex unread must not keep the
+ * whole venue down: `partial` says so, and the list is read again soon. `first`: no list yet, so it waits behind nothing.
+ */
+export async function hlMarkets(
+  first = false,
+  post: <T>(body: { type: string; dex?: string }, o: { ttlMs: number; background: boolean }) => Promise<T> = (b, o) => hlInfo.post(b as never, o),
+): Promise<{ markets: string[]; partial: boolean }> {
+  const opts = { ttlMs: 60 * 60_000, background: !first };
+  const dexes = await post<Array<{ name?: string } | null>>({ type: 'perpDexs' }, opts).catch(() => null);
   const names = ['', ...(Array.isArray(dexes) ? dexes : []).flatMap((d) => (d?.name ? [d.name] : []))];
   const metas = await Promise.all(
-    names.map((dex) => hlInfo.post<HlMeta>(dex ? { type: 'meta', dex } : { type: 'meta' }, opts).catch(() => null)),
+    names.map((dex) => post<HlMeta>(dex ? { type: 'meta', dex } : { type: 'meta' }, opts).catch(() => null)),
   );
+  const spot = await post<HlSpotMeta>({ type: 'spotMeta' }, opts).catch(() => null);
+  if (!metas[0] || !spot) throw new Error('Hyperliquid market list: a read failed');
   const perps = metas.flatMap((m) => (m?.universe ?? []).flatMap((u) => (u.name && !u.isDelisted ? [u.name] : [])));
-  const spot = await hlInfo.post<HlSpotMeta>({ type: 'spotMeta' }, opts).catch(() => null);
-  const pairs = (spot?.universe ?? []).flatMap((u) => (u.name ? [u.name] : []));
+  const pairs = (spot.universe ?? []).flatMap((u) => (u.name ? [u.name] : []));
   // HL allows 1,000 subscriptions per connection.
-  return [...new Set([...perps, ...pairs])].slice(0, 990);
+  return { markets: [...new Set([...perps, ...pairs])].slice(0, 990), partial: !dexes || metas.some((m) => !m) };
 }
+
+/** How soon a list with a dex unread is read again (what was read is cached, so only the missing reads go out). */
+const HL_PARTIAL_RETRY_MS = 60_000;
 
 /** The whole venue on one socket and always trading: over 60 s without a fresh print means the socket, not the market. */
 const HL_DATA_SILENT_MS = 60_000;
@@ -345,13 +357,18 @@ export class HlStream {
   private subscribed = new Set<string>();
   private dedup = new Dedup();
   private refreshTimer?: NodeJS.Timeout;
+  private retryTimer?: NodeJS.Timeout;
 
   constructor(private readonly onPrint: (p: Print) => void, url = HL_WS_URL) {
     this.socket = new LiveSocket(
       url,
       JSON.stringify({ method: 'ping' }),
       async (send) => {
-        if (!this.markets.length) this.markets = await hlMarkets();
+        if (!this.markets.length) {
+          const { markets, partial } = await hlMarkets(true);
+          this.markets = markets;
+          if (partial) this.refreshSoon();
+        }
         this.subscribed.clear();
         for (const coin of this.markets) {
           send({ method: 'subscribe', subscription: { type: 'trades', coin } });
@@ -369,20 +386,33 @@ export class HlStream {
 
   start(): void {
     this.socket.start();
-    this.refreshTimer = setInterval(() => {
-      void hlMarkets().then((m) => {
-        if (m.length && m.some((c) => !this.subscribed.has(c))) {
-          this.markets = m;
-          this.socket.resubscribe();
-        }
-      }).catch(() => {});
-    }, MARKETS_REFRESH_MS);
+    this.refreshTimer = setInterval(() => this.refresh(), MARKETS_REFRESH_MS);
     this.refreshTimer.unref?.();
+  }
+
+  private refresh(): void {
+    void hlMarkets().then(({ markets, partial }) => {
+      if (markets.length && markets.some((c) => !this.subscribed.has(c))) {
+        this.markets = markets;
+        this.socket.resubscribe();
+      }
+      if (partial) this.refreshSoon();
+    }).catch(() => this.refreshSoon());
+  }
+
+  private refreshSoon(): void {
+    if (this.retryTimer) return;
+    this.retryTimer = setTimeout(() => {
+      this.retryTimer = undefined;
+      this.refresh();
+    }, HL_PARTIAL_RETRY_MS);
+    this.retryTimer.unref?.();
   }
 
   stop(): void {
     this.socket.stop();
     if (this.refreshTimer) clearInterval(this.refreshTimer);
+    if (this.retryTimer) clearTimeout(this.retryTimer);
   }
 
   /** One raw message. Public for tests. */

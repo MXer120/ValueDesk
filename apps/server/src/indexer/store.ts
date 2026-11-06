@@ -744,7 +744,7 @@ const WAL_LIMIT_BYTES = 1024 * 1024 * 1024;
 const WRITER_BUSY_MS = 200_000;
 const WAL_CHECKPOINT_PAGES = 16_000;
 /** Rows per transaction when a history page is written a slice at a time: 2,000 rows were seconds of the thread. */
-const FILL_SLICE = 200;
+const FILL_SLICE = 50;
 
 /** A settled stretch of one trader's old days: summed, frozen, then deleted. */
 interface FreezeJob {
@@ -792,13 +792,24 @@ export interface RetentionStatus {
   lastBad: string | null;
 }
 
-/** Rows of the liquidation change log in one transaction (putLiqLogSliced): at about 1 ms a row on a busy disk, half a second. */
+/** Rows of the liquidation change log in one transaction at most (putLiqLogSliced). */
 export const LIQ_LOG_SLICE = 500;
+/**
+ * How long one transaction of a change log step may hold the thread, the step `elapsedMs` old. Rows, not time, set the slice
+ * until 2026-11-06, and a row is no fixed cost: profiled on production that day, 2.6 ms a row and up to 6 s for one slice, nearly
+ * all of it SQLite walking pages of its cache; the same write on a laptop's file takes 0.02 ms. The step gets more as it ages:
+ * at a flat 100 ms it could outlast its 15 minutes on a thread this busy, and a step that overruns loses the next.
+ */
+export const liqTurnMs = (elapsedMs: number): number => Math.min(600, 100 + (500 * Math.max(0, elapsedMs)) / 300_000);
 
 /**
  * In key order (aid, coin, venue): each insert lands next to the last in the log's and the state's
  * b-trees instead of on a page of its own (dev, 30k rows: 2.1 s -> 0.66 s, with the cache 0.36 s).
  */
+const LIQ_LOG_INSERT = `INSERT OR REPLACE INTO liq_log (aid, coin, venue, t, side, liq, usd, sym, sz, entry, mark, iso, lev, eq, cash, read_at)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+const finiteOrNull = (v: number | null | undefined): number | null => (v === undefined || v === null || !Number.isFinite(v) ? null : v);
+
 function liqLogOrder<T extends { aid: number | string; coin: string; venue: number }>(rows: readonly T[]): T[] {
   const aidOf = (x: T): number => (typeof x.aid === 'number' ? x.aid : Number.MAX_SAFE_INTEGER);
   return [...rows].sort((a, b) => aidOf(a) - aidOf(b) || (a.coin < b.coin ? -1 : a.coin > b.coin ? 1 : 0) || a.venue - b.venue);
@@ -3546,30 +3557,27 @@ export class IndexStore {
         const r = addr.get(a) as { id: number };
         ids.set(a, r.id);
       }
-      const log = this.q(`INSERT OR REPLACE INTO liq_log (aid, coin, venue, t, side, liq, usd, sym, sz, entry, mark, iso, lev, eq, cash, read_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
-      const cur = this.q('INSERT OR REPLACE INTO liq_cur (aid, coin, venue, side, liq, usd, t) VALUES (?, ?, ?, ?, ?, ?, ?)');
-      const n = (v: number | null | undefined) => (v === undefined || v === null || !Number.isFinite(v) ? null : v);
-      for (const c of changed) {
-        const aid = typeof c.aid === 'number' ? c.aid : ids.get(c.aid)!;
-        log.run(aid, c.coin, c.venue, t, c.side, c.liq, c.usd, c.sym ?? null, n(c.sz), n(c.entry), n(c.mark),
-          c.iso === undefined || c.iso === null ? null : c.iso ? 1 : 0, n(c.lev), n(c.eq), n(c.cash), n(c.readAt));
-        cur.run(aid, c.coin, c.venue, c.side, c.liq, c.usd, t);
-      }
-      const del = this.q('DELETE FROM liq_cur WHERE aid = ? AND coin = ? AND venue = ?');
-      for (const c of closed) {
-        log.run(c.aid, c.coin, c.venue, t, 0, 0, 0, null, 0, null, n(c.mark), null, null, null, null, null);
-        del.run(c.aid, c.coin, c.venue);
-      }
+      for (const c of changed) this.liqChangedRow(t, typeof c.aid === 'number' ? c.aid : ids.get(c.aid)!, c);
+      for (const c of closed) this.liqClosedRow(t, c);
     });
     return ids;
   }
 
+  private liqChangedRow(t: number, aid: number, c: { coin: string; venue: number; side: number; liq: number; usd: number } & LiqLogExtra): void {
+    this.q(LIQ_LOG_INSERT).run(aid, c.coin, c.venue, t, c.side, c.liq, c.usd, c.sym ?? null, finiteOrNull(c.sz), finiteOrNull(c.entry), finiteOrNull(c.mark),
+      c.iso === undefined || c.iso === null ? null : c.iso ? 1 : 0, finiteOrNull(c.lev), finiteOrNull(c.eq), finiteOrNull(c.cash), finiteOrNull(c.readAt));
+    this.q('INSERT OR REPLACE INTO liq_cur (aid, coin, venue, side, liq, usd, t) VALUES (?, ?, ?, ?, ?, ?, ?)').run(aid, c.coin, c.venue, c.side, c.liq, c.usd, t);
+  }
+
+  private liqClosedRow(t: number, c: { aid: number; coin: string; venue: number; mark?: number | null }): void {
+    this.q(LIQ_LOG_INSERT).run(c.aid, c.coin, c.venue, t, 0, 0, 0, null, 0, null, finiteOrNull(c.mark), null, null, null, null, null);
+    this.q('DELETE FROM liq_cur WHERE aid = ? AND coin = ? AND venue = ?').run(c.aid, c.coin, c.venue);
+  }
+
   /**
-   * putLiqLog in slices of LIQ_LOG_SLICE rows, with `pause` between them: about 36k rows a step
-   * (2026-11-05) in one transaction held the indexer's only thread while the disk wrote them, and a
-   * stall past 45 s called every stream's socket dead. Run again for the same step after a failure,
-   * it replaces what it wrote. Each slice is one transaction, so what a reader sees is whole rows.
+   * putLiqLog a transaction at a time with `pause` between them, each as long as liqTurnMs allows and LIQ_LOG_SLICE rows at most:
+   * about 36k rows a step (2026-11-05) in one transaction held the indexer's only thread, and a stall past 45 s called every
+   * stream's socket dead. Run again for the same step after a failure, it replaces what it wrote. A reader sees whole rows.
    */
   async putLiqLogSliced(
     t: number,
@@ -3577,18 +3585,26 @@ export class IndexStore {
     changed: ReadonlyArray<{ aid: number | string; coin: string; venue: number; side: number; liq: number; usd: number } & LiqLogExtra>,
     closed: ReadonlyArray<{ aid: number; coin: string; venue: number; mark?: number | null }>,
     pause: () => Promise<void>,
+    now: () => number = Date.now,
   ): Promise<Map<string, number>> {
     const ids = this.putLiqLog(t, newAddrs, [], []);
     const known = liqLogOrder(changed.map((c) => (typeof c.aid === 'number' ? c : { ...c, aid: ids.get(c.aid)! })));
-    for (let i = 0; i < known.length; i += LIQ_LOG_SLICE) {
-      this.putLiqLog(t, [], known.slice(i, i + LIQ_LOG_SLICE), []);
-      await pause();
-    }
     const gone = liqLogOrder(closed);
-    for (let i = 0; i < gone.length; i += LIQ_LOG_SLICE) {
-      this.putLiqLog(t, [], [], gone.slice(i, i + LIQ_LOG_SLICE));
-      await pause();
-    }
+    const started = now();
+    // One list at a time, every row in the order it would go in at once. The clock is asked every few rows: cheap, and a row is rarely long.
+    const inTurns = async <R>(rows: readonly R[], write: (row: R) => void): Promise<void> => {
+      for (let i = 0; i < rows.length; ) {
+        const until = now() + liqTurnMs(now() - started);
+        const end = Math.min(rows.length, i + LIQ_LOG_SLICE);
+        this.tx(() => {
+          do write(rows[i++]!);
+          while (i < end && ((i & 7) !== 0 || now() < until));
+        });
+        await pause();
+      }
+    };
+    await inTurns(known, (c) => this.liqChangedRow(t, c.aid as number, c));
+    await inTurns(gone, (c) => this.liqClosedRow(t, c));
     return ids;
   }
 
