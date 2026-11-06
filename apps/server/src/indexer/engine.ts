@@ -43,8 +43,9 @@ import { hlCoinName } from '../valuedesk/extra/account.js';
 import { accountValue as fetchAccountValue, chartWindows, lookupPnl, peekTrades, syncCloses, syncLists, syncTrades } from './sodexSource.js';
 import type { BoardRow, Coverage, HistoryKind, IndexStore, TraderStatsRow, TraderWin } from './store.js';
 import { winRateOf } from '../valuedesk/winRate.js';
-import { HlStream, SodexStream, streamLog, type Print } from './streams.js';
+import { HlStream, SodexStream, streamLog, type ArcusWsTrade, type Print } from './streams.js';
 import { SodexCatchup } from './sodexCatchup.js';
+import { ArcusCatchup } from './arcusCatchup.js';
 import { startLedgerThread, type LedgerThread } from '../flow/ledgerWorker.js';
 import { mayPrune } from '../retention.js';
 import { FlowRecorder } from '../flow/recorder.js';
@@ -73,6 +74,12 @@ const envNum = (name: string, dflt: number, min: number, max: number): number =>
 
 /** Where the SoDEX stream's unanswered breaks are kept (settleBreaks). */
 const STREAM_PENDING_META = 'stream_pending:sodex';
+/** How far each Arcus market has been read over REST (arcusCatchup.ts), in the who-traded database. */
+const ARCUS_CATCHUP_META = 'catchup:arcus';
+/** Arcus's REST time against its stream's: 2 to 16 ms measured, wide on purpose (FlowRecorder.missingNear). */
+const ARCUS_NEAR_MS = 2_000;
+/** Older than this, a print the catch-up found no longer moves books and marks. */
+const CATCHUP_BOOK_MS = 30 * 60_000;
 /** One trade check read per wallet and window for this long, and not again sooner when it could not decide. */
 const CHECK_BUCKET_MS = 6 * 60 * 60_000;
 const CHECK_AGAIN_MS = 60 * 60_000;
@@ -402,6 +409,7 @@ export class Indexer {
   /** Every print kept for the per-candle breakdown (flow/recorder.ts); off with VALUESCAN_FLOW=0. */
   flow: FlowRecorder | null = null;
   private sodexCatchup: SodexCatchup | null = null;
+  private arcusCatchup: ArcusCatchup | null = null;
   private coverageLedger: LedgerThread | null = null;
   /**
    * Event-loop health: the worst delay a 500 ms tick saw in the last minute.
@@ -520,17 +528,24 @@ export class Indexer {
       if (this.flow && process.env.VALUESCAN_SODEX_CATCHUP !== '0') {
         const stream = this.sodexStream;
         const flow = this.flow;
-        this.sodexCatchup = new SodexCatchup((rows) => {
-          // `missing` answers "none" when it cannot read a chunk. For a read that must not count as covering a break.
-          const was = flow.lastError;
-          flow.lastError = null;
-          const added = stream.catchUp(rows, (prints) => flow.missing(prints));
-          const err = flow.lastError as string | null;
-          flow.lastError = err ?? was;
-          if (err?.startsWith('missing:')) throw new Error(err);
-          return added;
-        }, streamLog);
+        this.sodexCatchup = new SodexCatchup((rows) => this.heldChecked(flow, () => stream.catchUp(rows, (prints) => flow.missing(prints))), streamLog);
         this.sodexCatchup.start();
+      }
+      if (this.flow && process.env.VALUESCAN_ARCUS_CATCHUP !== '0') {
+        const flow = this.flow;
+        const arcus = this.ext.get('arcus') as ArcusVenue;
+        // Who traded and activity take a print of any age. The books and marks only a recent one: an hour-old price is no mark,
+        // and a book read since already holds it.
+        const sink = (p: Print) => this.onPrint(p, this.now() - p.t > CATCHUP_BOOK_MS);
+        this.arcusCatchup = new ArcusCatchup(
+          (rows) => this.heldChecked(flow, () => arcus.catchUp(rows as ArcusWsTrade[], (prints) => flow.missingNear(prints, ARCUS_NEAR_MS), sink)),
+          streamLog,
+          {
+            load: () => { try { return JSON.parse(flow.store.getMeta(ARCUS_CATCHUP_META) ?? '{}') as Record<string, number>; } catch { return {}; } },
+            save: (through) => flow.store.setMeta(ARCUS_CATCHUP_META, JSON.stringify(through)),
+          },
+        );
+        this.arcusCatchup.start();
       }
       if (this.flow && process.env.VALUESCAN_SODEX_LEDGER !== '0') this.coverageLedger = startLedgerThread({ flow: this.flow.store.path, index: this.store.path }, streamLog);
     }
@@ -613,6 +628,7 @@ export class Indexer {
     this.hlStream?.stop();
     this.sodexStream?.stop();
     this.sodexCatchup?.stop();
+    this.arcusCatchup?.stop();
     this.coverageLedger?.stop();
     for (const x of this.ext.values()) x.stop();
     this.cohorts.stop();
@@ -751,6 +767,7 @@ export class Indexer {
       gaps: this.gaps,
       flow: this.flow?.status() ?? null,
       sodexCatchup: this.sodexCatchup?.status() ?? null,
+      arcusCatchup: this.arcusCatchup?.status() ?? null,
       coverageLedger: this.coverageLedger?.status() ?? null,
       aggregates: this.store.aggBacklog,
       heldPartials: this.store.heldPartials,
@@ -779,18 +796,29 @@ export class Indexer {
 
   // --- streams ----------------------------------------------------------------------
 
-  private onPrint(p: Print): void {
+  /** `missing` answers "none" when it cannot read a chunk. For a read that must not count as having looked. */
+  private heldChecked(flow: FlowRecorder, run: () => Print[]): Print[] {
+    const was = flow.lastError;
+    flow.lastError = null;
+    const added = run();
+    const err = flow.lastError as string | null;
+    flow.lastError = err ?? was;
+    if (err?.startsWith('missing:')) throw new Error(err);
+    return added;
+  }
+
+  private onPrint(p: Print, past = false): void {
     // A restart's snapshot of what the last run already took: not again, here or in activity and the cohorts.
     if (this.flow?.repeatOfHeld(p)) return;
     // Hyperliquid's HIP-3 dex "xyz" is also ranked on its own as trade.xyz.
-    if (p.venue === 'hyperliquid' && p.symbol.startsWith('xyz:')) this.onPrint({ ...p, venue: 'tradexyz' });
+    if (p.venue === 'hyperliquid' && p.symbol.startsWith('xyz:')) this.onPrint({ ...p, venue: 'tradexyz' }, past);
     // Cohorts: the print moves both parties' books (SoDEX prints carry account ids).
     mark(`print:${p.venue}`);
     this.flow?.add(p);
     const ext = this.ext.get(p.venue);
     const addressOf = (acct: string): string | null =>
       p.venue === 'sodex' ? this.sodexAddrOf.get(Number(acct)) ?? null : ext?.addressOf ? ext.addressOf(acct) : acct;
-    this.cohorts.onPrint(p, addressOf);
+    if (!past) this.cohorts.onPrint(p, addressOf);
     const hour = hourOf(p.t);
     const notional = p.px * p.sz;
     for (const [acct, side] of [[p.buyer, 1], [p.seller, -1]] as const) {

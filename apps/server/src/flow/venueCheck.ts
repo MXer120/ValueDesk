@@ -10,6 +10,8 @@
  *   Lighter                 /api/v1/candles `v`: volume only, no count. Whole slots read 1.00000-1.00005; the newest ones run
  *                           ahead or behind for a while (1.0064 at 12 minutes), so they wait SETTLE and a 0.05 % margin
  *
+ * Arcus's count is by its REST time, its stream's stamp 2 to 16 ms later, so a print can be held one slot on: lateAcrossEdge.
+ *
  * A slot with fewer or more than the venue's figure is a hole; one we could not compare is unchecked, and a window with either
  * is not final (read.ts), so nothing goes uncompared into a day's cache. Slots follow the window: 5 minutes up to 12 hours, then
  * hours, then days. Beyond 60 days, or Lighter past 12 hours (its slots need chunks decoded), a window is said to be unchecked.
@@ -34,6 +36,10 @@ const VOLUME_TOLERANCE = 0.0005;
 const SETTLE: Partial<Record<Venue, number>> = { lighter: 20 * MIN };
 const SETTLE_MS = 2 * MIN;
 const MAX_HOLES = 200;
+/** Most prints put back across one slot edge: a sweep's fills share one stamp. */
+const EDGE_MAX = 50;
+/** Whose stream stamps later than its count: compared with the slot either side in view. */
+const LATE_STAMPS: ReadonlySet<Venue> = new Set(['arcus']);
 /** What failed is not asked again this soon. */
 const FAILED_MS = 60_000;
 /** What was read while a slot of it could still move. */
@@ -147,11 +153,15 @@ export function compareSlots(o: {
   to: number;
   venueRows: ReadonlyArray<{ t: number; v: number; final: boolean }>;
   held: ReadonlyMap<number, number>;
+  /** The stream stamps a print later than the venue's count does: see lateAcrossEdge. */
+  lateStamps?: boolean;
+  edgeRows?: ReadonlyArray<{ t: number; v: number; final: boolean }>;
 }): VenueCoverage {
   const rows = new Map(o.venueRows.map((r) => [r.t, r]));
   const times = o.venueRows.map((r) => r.t);
   const first = times.length ? Math.min(...times) : Infinity;
   const last = times.length ? Math.max(...times) : -Infinity;
+  const heldOf = o.lateStamps ? lateAcrossEdge(o.held, new Map([...(o.edgeRows ?? []), ...o.venueRows].map((r) => [r.t, r])), o.slotMs) : o.held;
   const holes: CoverageHole[] = [];
   const unchecked: Array<[number, number]> = [];
   let held = 0;
@@ -159,7 +169,7 @@ export function compareSlots(o: {
   let holeSlots = 0;
   let overSlots = 0;
   for (let t = o.from; t < o.to; t += o.slotMs) {
-    const h = o.held.get(t) ?? 0;
+    const h = heldOf.get(t) ?? 0;
     const r = rows.get(t);
     if (t < first || t > last) {
       if (h > 0) unchecked.push([t, t + o.slotMs]);
@@ -178,6 +188,30 @@ export function compareSlots(o: {
     else holes.push({ from: t, to: t + o.slotMs, held: h, venue: v });
   }
   return { venue: o.venue, unit: o.unit, from: o.from, to: Math.max(o.from, o.to), held, expected, holes: holes.slice(0, MAX_HOLES), holeSlots, overSlots, unchecked: joinSpans(unchecked) };
+}
+
+/**
+ * Arcus's count goes by its REST time and the stream's print is stamped 2 to 16 ms later (indexer/arcusCatchup.ts), so a print
+ * just before a slot's end is held in the next slot: that slot one over and this one short, with nothing lost and nothing twice.
+ * Only that shape is put back, and only in that direction: short, with the very next slot over by as much.
+ */
+function lateAcrossEdge(held: ReadonlyMap<number, number>, rows: ReadonlyMap<number, { v: number; final: boolean }>, slotMs: number): Map<number, number> {
+  const out = new Map(held);
+  const times = [...rows.keys()].sort((a, b) => a - b);
+  const last = times[times.length - 1] ?? -Infinity;
+  for (const t of times) {
+    const r = rows.get(t)!;
+    // Between a venue's rows, one that is not there counted nothing.
+    const next = rows.get(t + slotMs) ?? (t + slotMs <= last ? { v: 0, final: true } : undefined);
+    if (!r.final || !next?.final) continue;
+    const short = r.v - (out.get(t) ?? 0);
+    const over = (out.get(t + slotMs) ?? 0) - next.v;
+    if (short <= 0 || over <= 0) continue;
+    const k = Math.min(short, over, EDGE_MAX);
+    out.set(t, (out.get(t) ?? 0) + k);
+    out.set(t + slotMs, out.get(t + slotMs)! - k);
+  }
+  return out;
 }
 
 /** Several markets of one venue (a coin on two of Hyperliquid's dexes) as one line. */
@@ -241,10 +275,18 @@ export async function venueChecks(
     let c: VenueCoverage;
     if (!tf || a >= b) c = empty({});
     else {
-      const got = await candlesOf(m.venue, m.symbol, tf, a, b, now, waitMs);
+      const late = LATE_STAMPS.has(m.venue);
+      const before = late ? a - slotMs : a;
+      const past = late ? Math.min(b + slotMs, settled) : b;
+      const got = await candlesOf(m.venue, m.symbol, tf, before, past, now, waitMs);
       if (got === 'pending') c = empty({ pending: true });
       else if (got === null) c = empty({});
-      else c = compareSlots({ venue: m.venue, unit: got.unit, slotMs, from: a, to: b, venueRows: got.rows, held: await heldOf(m, got.unit, a, b, slotMs) });
+      else {
+        // The window's first and last row are what compareSlots reads its reach from; the slot either side only answers for an edge.
+        const inWindow = got.rows.filter((r) => r.t >= a && r.t < b);
+        const edges = got.rows.filter((r) => r.t < a || r.t >= b);
+        c = compareSlots({ venue: m.venue, unit: got.unit, slotMs, from: a, to: b, venueRows: inWindow, edgeRows: edges, held: await heldOf(m, got.unit, before, past, slotMs), lateStamps: late });
+      }
     }
     byVenue.set(m.venue, [...(byVenue.get(m.venue) ?? []), c]);
   }));
