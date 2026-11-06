@@ -99,6 +99,65 @@ test('a stall of this thread is not silence: what waits to be read keeps the soc
   }
 });
 
+test('a socket that answers pings but sends no data any more is replaced, and the data keeps a live one up', async () => {
+  const { wss, url } = await wsServer();
+  let opened = 0;
+  let sending = true;
+  wss.on('connection', (c) => {
+    opened++;
+    // Answers everything it is sent (the pings), whatever happens to the feed: what SoDEX does.
+    c.on('message', () => c.send('{"op":"pong"}'));
+    const t = setInterval(() => { if (sending) c.send('{"channel":"trade","data":[{}]}'); }, 20);
+    c.on('close', () => clearInterval(t));
+  });
+  const lines: string[] = [];
+  const isData = (m: unknown) => (m as { channel?: string }).channel === 'trade';
+  const s = new LiveSocket(url, '{}', () => {}, () => {}, { name: 'sodex-perps', pingMs: 30, tickMs: 20, dataSilentMs: 200, isData, log: (l) => lines.push(l) });
+  try {
+    s.start();
+    await until(() => s.upSince !== null);
+    await new Promise((r) => setTimeout(r, 400));
+    assert.equal(opened, 1, 'data flowing: never replaced');
+    assert.deepEqual(lines, []);
+
+    sending = false;
+    await until(() => lines.length > 0);
+    assert.match(lines[0]!, /^stream sodex-perps: closed 1006 after \d+ s up \(no data for \d+ s, though it still answers\); again in \d+ s$/);
+    await until(() => opened === 2);
+  } finally {
+    s.stop();
+    for (const c of wss.clients) c.terminate();
+    wss.close();
+  }
+});
+
+test('a stall of this thread is not counted as the feed going silent', async () => {
+  const { wss, url } = await wsServer();
+  let opened = 0;
+  wss.on('connection', (c) => {
+    opened++;
+    c.on('message', () => c.send('{"op":"pong"}'));
+    const t = setInterval(() => c.send('{"channel":"trade","data":[{}]}'), 20);
+    c.on('close', () => clearInterval(t));
+  });
+  const isData = (m: unknown) => (m as { channel?: string }).channel === 'trade';
+  const s = new LiveSocket(url, '{}', () => {}, () => {}, { name: 'sodex-perps', tickMs: 50, dataSilentMs: 300, isData });
+  try {
+    s.start();
+    await until(() => s.upSince !== null);
+    for (let n = 0; n < 2; n++) {
+      const end = Date.now() + 600;
+      while (Date.now() < end) { /* a stalled thread */ }
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    assert.equal(opened, 1, 'never replaced');
+  } finally {
+    s.stop();
+    for (const c of wss.clients) c.terminate();
+    wss.close();
+  }
+});
+
 test('a venue that sends its close frame and never ends the connection is cut within about a second', async () => {
   const { wss, url } = await wsServer();
   wss.on('connection', (c) => {
