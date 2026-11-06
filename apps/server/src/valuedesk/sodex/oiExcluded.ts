@@ -12,6 +12,7 @@
 import { EXCLUDED_WALLETS } from '../internalWallets.js';
 import { gwGet } from './gateway.js';
 import { TtlCache } from './util.js';
+import { liqCoin } from '../liquidations/levels.js';
 
 export interface SodexOiExcluded {
   /** Symbol (`BTC-USD`) -> coins to take off SoDEX's open interest. A market the pair does not hold is absent. */
@@ -60,3 +61,21 @@ const cache = new TtlCache(1);
 /** The sizes, held 15 s (one read at a time, however many ask); a failed read is thrown and not kept. */
 export const sodexOiExcluded = (): Promise<SodexOiExcluded> =>
   cache.wrap('oi-excluded', TTL_MS, () => readOiExcluded((p) => gwGet<unknown>(p), sodexInternalAddresses()));
+
+/**
+ * The pair's size per coin as one side of a market, to take off a venue's open interest counted the same way (rules.ts halves
+ * SoDEX's two-sided figure). Our stored book of the pair is not good enough: the pair is about 98% of BTC's open interest, so
+ * a book 12 BTC behind (883 of 895, on a local view on 2026-11-06) nearly doubled what the others hold and showed the
+ * books at 54% of it. Null when SoDEX did not answer.
+ */
+export function internalByCoin(sizes: Readonly<Record<string, number>>): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const [symbol, size] of Object.entries(sizes)) {
+    const coin = liqCoin(symbol);
+    out.set(coin, (out.get(coin) ?? 0) + size / 2);
+  }
+  return out;
+}
+
+export const sodexInternalNow = (): Promise<Map<string, number> | null> =>
+  sodexOiExcluded().then((x) => internalByCoin(x.sizes)).catch(() => null);

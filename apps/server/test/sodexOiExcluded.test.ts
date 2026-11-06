@@ -9,7 +9,7 @@ import Fastify from 'fastify';
 import { perfPlugin } from '../src/perf.js';
 import { valuedeskRoutes } from '../src/routes/valuedesk.js';
 import { sodex } from '../src/sodex/rest.js';
-import { readOiExcluded, sodexInternalAddresses } from '../src/valuedesk/sodex/oiExcluded.js';
+import { internalByCoin, readOiExcluded, sodexInternalAddresses } from '../src/valuedesk/sodex/oiExcluded.js';
 
 const [A, B] = ['0xa', '0xb'];
 const pos = (symbol: string, size: string) => ({ symbol, size, positionSide: 'BOTH' });
@@ -86,4 +86,12 @@ test('route: a failure answers ok:false uncached, the next read succeeds and is 
 test('an account answering with no positions is an error, not zero', async () => {
   const get = async (path: string) => (path.includes('/a/') ? { positions: [{ symbol: 'BTC-USD', size: '-1' }] } : { positions: [] });
   await assert.rejects(readOiExcluded(get, ['a', 'b']), /empty position list for b/);
+});
+
+test('the pair per coin is one side of the market: the books against the rest read about 100%, not 54%', () => {
+  // Measured BTC, 2026-11-06: SoDEX's figure counts both sides, the legs are 895.34 each, the books held 13.9 a side of 13.95 others.
+  const byCoin = internalByCoin({ 'BTC-USD': 1790.68 });
+  const others = 1818.58 / 2 - byCoin.get('BTC')!;
+  assert.ok(Math.abs(others - 13.95) < 0.01, String(others));
+  assert.equal(internalByCoin({}).size, 0);
 });
