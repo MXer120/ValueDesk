@@ -230,7 +230,7 @@ test('the on-instance list is the indexer health and nothing else, and is not pu
   // The route hands out the projection, never the indexer's status itself.
   const src = readFileSync(join(SRC, 'routes', 'valuedesk.ts'), 'utf8');
   const handlers = [...src.matchAll(/app\.get\(\s*'\/api\/vs\/index\/health'\s*,([^\n]*)/g)].map((m) => m[1]!.trim());
-  assert.deepEqual(handlers, ['async () => ({ ok: true, status: indexerHealth(indexerStatus()) }));']);
+  assert.deepEqual(handlers, ['async () => ({ ok: true, status: indexerHealth(indexerStatusJudged()) }));']);
 });
 
 test('the allow-list is exactly docs/ARCH-traffic.md section 5', () => {

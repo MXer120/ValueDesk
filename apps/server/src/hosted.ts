@@ -759,7 +759,8 @@ export function indexerHealth(status: unknown): IndexerHealth | null {
     streams,
     loopLagMs: { lastMinute: amount(lag.lastMinute), sinceStart: amount(lag.sinceStart) },
     lanes,
-    lastBuildAt: stamp(status.lastBuildAt),
+    // Its own last build, or with none yet in this process, when the newest board was written.
+    lastBuildAt: stamp(status.lastBuildAt) || stamp(status.boardsAt),
     lastBuildMs: amount(status.lastBuildMs),
     errorSinceStart: Boolean(status.lastError),
     liq: liqHealth(status.cohorts),

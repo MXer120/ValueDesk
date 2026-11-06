@@ -88,6 +88,14 @@ test('probes: boards over an hour old are degraded, even with every stream up; a
   assert.equal(await stateOf(0), 'up');
 });
 
+test('probes: a process with no build yet is judged by when the boards were written, not called up for hours', async () => {
+  const stateOf = async (boardsAt: number) => (await probeAll({ targets: TARGETS, fetch: fakeFetch(ALL_UP), now: () => T0, indexerRecheckMs: 0, indexerStatus: () => ({
+    at: T0 - 5_000, streams: { sodex: 1, hyperliquid: 1 }, lastBuildAt: 0, boardsAt,
+  }) })).find((s) => s.service === 'indexer')!.state;
+  assert.equal(await stateOf(T0 - 10 * MIN), 'up');
+  assert.equal(await stateOf(T0 - 61 * MIN), 'degraded');
+});
+
 test('probes: an indexer stream back by the next status is up; down in both is degraded; a stale status is down at once', async () => {
   const healthy = { sodex: true, hyperliquid: true };
   const sequence = (...streams: Array<Record<string, boolean>>) => {

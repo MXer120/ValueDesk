@@ -3753,6 +3753,12 @@ export class IndexStore {
 
   // --- boards -------------------------------------------------------------------
 
+  /** When the newest board was written (null: none). What a reader can judge the boards by, whatever the writer's process did. */
+  newestBoardAt(): number | null {
+    const r = this.q('SELECT MAX(updated_at) AS t FROM board_meta').get() as { t: number | null } | undefined;
+    return typeof r?.t === 'number' ? r.t : null;
+  }
+
   writeBoard(meta: BoardMeta, rows: readonly BoardRow[]): void {
     this.tx(() => {
       this.q('DELETE FROM boards WHERE venue = ? AND win = ? AND side = ? AND filter = ?').run(meta.venue, meta.window, meta.side, meta.filter);

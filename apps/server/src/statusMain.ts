@@ -9,7 +9,7 @@
  * prober off with VALUESCAN_STATUS_PROBE=0 once this unit runs.
  */
 import { startStatusProber } from './ops/status.js';
-import { indexerStatus } from './indexer/read.js';
+import { indexerStatusJudged as indexerStatus } from './indexer/read.js';
 
 const log = {
   warn: (o: object, msg: string) => console.warn(JSON.stringify({ level: 'warn', msg, ...o })),

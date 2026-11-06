@@ -49,7 +49,7 @@ import { hlInfo, hlLeaderboardRow, hyperliquidProvider } from '../valuedesk/hype
 import { hlPriceSeries } from '../valuedesk/hyperliquid/price.js';
 import { ACCOUNT_DETAIL, arcusProvider, lighterProvider, nameSpotFills, tradexyzProvider } from '../valuedesk/extra/providers.js';
 import { applyCachedCurves, attachPodiumCurves } from '../valuedesk/curves.js';
-import { attachStats, boardPage, cohortDetail, cohortFocus, cohortMap, cohortWallets, cohortsReady, cohortsRead, excludedNow, indexerStatus, netPage } from '../indexer/read.js';
+import { attachStats, boardPage, cohortDetail, cohortFocus, cohortMap, cohortWallets, cohortsReady, cohortsRead, excludedNow, indexerStatus, indexerStatusJudged, netPage } from '../indexer/read.js';
 import { isCohortId, isSector, type CohortFilter, type CohortRange, type WalletSort } from '../valuedesk/cohorts/model.js';
 import { fineAskOf, fineDrawOf, isLiqRange, levFilterOf, liqAt, liqHeatmap, liqHeatmapFine, liqHeatmapOf, liqHistory, liqHistoryFine, liqWallets, walletHistoryFine, walletLiqs } from '../indexer/liqRead.js';
 import { TILE_FINAL_CACHE, TILE_INDEX_CACHE, TILE_WALLET_CACHE, keepLiqMetasWarm, liqTile, liqTileIndex, liqTileIndexOf, liqTileOf, tileAskOf } from '../indexer/liqTiles.js';
@@ -467,7 +467,7 @@ export async function valuedeskRoutes(app: FastifyInstance) {
    * A hosted server answers it to a caller on the instance only (hosted.ts
    * ON_INSTANCE_ROUTES); through the proxy it is a 404.
    */
-  app.get('/api/vs/index/health', async () => ({ ok: true, status: indexerHealth(indexerStatus()) }));
+  app.get('/api/vs/index/health', async () => ({ ok: true, status: indexerHealth(indexerStatusJudged()) }));
 
   /** Cohorts for `venues=a,b` (netted over them; all venues when none is named), `sector=` / `coin=` filters. */
   app.get('/api/vs/cohorts', async (req, reply) => {
