@@ -498,7 +498,7 @@ export function SendConfirm({ open, onCancel, onConfirm }: { open: boolean; onCa
     <Modal open={open} size="sm" title="Before you send" className="fx fb-confirm" onClose={onCancel}>
       <div className="dlg fb-confirm__body">
         <p className="fb-warn" role="alert">
-          <b>Never</b> send a <b>private key</b>, a <b>seed phrase</b>, <b>passwords</b> or <b>API keys</b> - nobody from ValueDesk will ever ask for one. Check your message and your screenshots.
+          <b>Never send a private key, a seed phrase, passwords or API keys.</b> Nobody from ValueDesk will ever ask for one. Check your message and your screenshots.
         </p>
         <SlideConfirm label={CONFIRM_LABEL} tone="sell" onConfirm={onConfirm} />
         <DlgFoot>

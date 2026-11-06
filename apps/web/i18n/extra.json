@@ -1,5 +1,4 @@
-[
-"Open Orders",
+["Open Orders",
 "Open Orders ({0})",
 "Algos",
 "& legal",
@@ -88,5 +87,6 @@
 "Not updating · last read {0}",
 ", funding every {0}",
 " with a cap of {0}",
-"SoDEX also lists an open interest cap of {0} {1}"
-]
+"SoDEX also lists an open interest cap of {0} {1}",
+"rejected",
+"canceled"]

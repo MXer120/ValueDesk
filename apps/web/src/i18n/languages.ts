@@ -17,7 +17,7 @@ export const LANGUAGES: readonly Language[] = [
   { code: 'de', name: 'Deutsch', english: 'German', flag: 'de' },
   { code: 'fr', name: 'Français', english: 'French', flag: 'fr' },
   { code: 'es', name: 'Español', english: 'Spanish', flag: 'es' },
-  { code: 'pt', name: 'Português', english: 'Portuguese', flag: 'pt' },
+  { code: 'pt', name: 'Português', english: 'Portuguese', flag: 'br' },
   { code: 'it', name: 'Italiano', english: 'Italian', flag: 'it' },
   { code: 'nl', name: 'Nederlands', english: 'Dutch', flag: 'nl' },
   { code: 'pl', name: 'Polski', english: 'Polish', flag: 'pl' },
@@ -33,5 +33,5 @@ export const LANGUAGES: readonly Language[] = [
   { code: 'th', name: 'ไทย', english: 'Thai', flag: 'th' },
 ];
 
-/** The languages with a finished catalogue. English needs none. */
-export const READY: ReadonlySet<string> = new Set(['en', 'de']);
+/** The languages with a finished catalogue, all of them since 2026-11-06. English needs none. */
+export const READY: ReadonlySet<string> = new Set(LANGUAGES.map((l) => l.code));

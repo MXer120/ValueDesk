@@ -15,6 +15,8 @@ export type Catalogue = Readonly<Record<string, string>>;
 const HOLE = /\{(\d+)\}/g;
 /** Longer than any label or sentence in the app: long text is someone's data, not ours. */
 const MAX_PATTERN_TEXT = 400;
+/* Endings and the verb that agrees with them ('order' + 's are', 'order' + ' is'). */
+const ENGLISH_ENDING = new Set(['s', 'es', 'y', 'ies', 's are', ' is', 'is', 'are']);
 
 interface Pattern {
   /** The literal text between the holes: one more piece than there are holes, the first and last may be empty. */
@@ -86,6 +88,8 @@ export function createMatcher(catalogue: Catalogue, cacheSize = 4000) {
         if (!values) continue;
         return p.to.replace(HOLE, (_, n: string) => {
           const v = values[p.holes.indexOf(n)] ?? '';
+          // The code's English plural ending ("order" + "s", "retr" + "ies") means nothing in another language.
+          if (ENGLISH_ENDING.has(v)) return '';
           return exact.get(v.trim()) ?? v;
         });
       }
