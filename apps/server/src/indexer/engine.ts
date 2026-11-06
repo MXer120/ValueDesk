@@ -181,8 +181,18 @@ export const flushBudget = (backlog: number, gapMs = 0): number =>
  */
 export const inKeyOrder = <T extends { venue: string; address: string; id: string }>(rows: T[]): T[] =>
   rows.sort((a, b) => (a.venue < b.venue ? -1 : a.venue > b.venue ? 1 : a.address < b.address ? -1 : a.address > b.address ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
-/** Rows per transaction in a flush: at ~1 ms a row, 150 fills are a seventh of a second of the thread. */
-const FLUSH_FILLS = 150;
+/**
+ * How long a board build holds the thread before it lets the loop in. At 40 ms and a turn of everything else taking hundreds of ms,
+ * a build got about a tenth of the thread: the first one after a restart took 41 minutes on 2026-11-06, and users read 1d PnL off
+ * boards that old. The build's own reads were 5-8% of a 30 s profile, so it is starved, not heavy.
+ */
+const BUILD_TURN_MS = 120;
+/**
+ * Rows per transaction in a flush. A step is the least the thread can be held for, and a fill is no fixed cost: 150 of them were up
+ * to 1.2 s on production (profile 2026-11-06). The rows are in key order across steps, and a laptop's file wrote 50 rows a
+ * transaction no slower than 500 a row (0.08 ms against 0.10 ms), so the shorter hold costs no throughput.
+ */
+const FLUSH_FILLS = 50;
 const FLUSH_ACTIVITY = 300;
 /** A held range this fresh answers for "now" even without the stream. */
 const STALE_MS = 10 * 60_000;
@@ -1425,14 +1435,14 @@ export class Indexer {
   private lastBreath = 0;
 
   /**
-   * Hand the event loop back if this build has held it for 40 ms. The build is
+   * Hand the event loop back if this build has held it for BUILD_TURN_MS. The build is
    * a long run of synchronous SQLite reads chained by `await`s of settled
    * promises - microtasks, which never let timers or sockets in. Without this a
    * cold build held the loop for ~110 s and every upstream request in that
    * time failed as a timeout (profiled 2026-09-29).
    */
   private async breathe(): Promise<void> {
-    if (Date.now() - this.lastBreath < 40) return;
+    if (Date.now() - this.lastBreath < BUILD_TURN_MS) return;
     await new Promise<void>((r) => setImmediate(r));
     this.lastBreath = Date.now();
     // What runs after this is the build again, not whatever marked last.

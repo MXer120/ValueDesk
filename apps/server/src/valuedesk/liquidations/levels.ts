@@ -26,9 +26,17 @@ const ALIAS: Readonly<Record<string, string>> = {
 
 /** The coin a market's liquidations count under (cohorts/model.ts coinOf, then the aliases). */
 export function liqCoin(symbol: string): string {
+  const hit = coinMemo.get(symbol);
+  if (hit !== undefined) return hit;
   const c = coinOf(symbol);
-  return ALIAS[c] ?? c;
+  const coin = ALIAS[c] ?? c;
+  // A venue lists hundreds of symbols, so this is never large; the bound is for a stream gone wrong.
+  if (coinMemo.size >= 20_000) coinMemo.clear();
+  coinMemo.set(symbol, coin);
+  return coin;
 }
+/** Asked for each position of each account priced: coinOf's split and slice were 6.5% of what the indexer allocated (2026-11-06). */
+const coinMemo = new Map<string, string>();
 import { LEV_BANDS, accountLevs, accountLiqs, levBand, niceStep, type LevBand, type LiqPos, type Tiers } from './math.js';
 
 /** One position with its liquidation price (null = none, or not known). */

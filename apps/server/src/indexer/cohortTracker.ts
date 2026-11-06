@@ -2398,34 +2398,29 @@ export class CohortTracker {
 
   // --- history ------------------------------------------------------------------------
 
-  /** The netted input for every scope, from the books in memory (yielding between slices). */
-  private async perVenue(): Promise<Map<Venue, Map<string, WalletVenue>>> {
-    const per = new Map<Venue, Map<string, WalletVenue>>();
-    let t0 = Date.now();
-    for (const venue of VENUES) {
-      const m = new Map<string, WalletVenue>();
+  /**
+   * What one venue's wallets are read from in a history step. A wallet's input is made when its turn comes and let go with it. All of
+   * them were made first (about 300k wallets' positions copied) and held through the netting, which took up to 14 minutes on a busy
+   * thread (recordMs 847 s, 2026-11-06): long enough to reach the old generation, and a step's collection held the thread 8 s of 12.
+   */
+  private recordSources(): Array<{ has: (a: string) => boolean; wallet: (a: string) => WalletVenue }> {
+    return VENUES.map((venue) => {
       const books = this.books.get(venue)!;
       const sib = MARGIN_SIBLING[venue];
       const sibBooks = sib ? this.books.get(sib) : undefined;
       const members = this.members.get(venue) ?? new Map<string, Member>();
-      const addresses = new Set([...members.keys(), ...books.keys()]);
       const rate = tailCountRate(venue, tailOf(members, (a) => books.has(a)));
-      for (const address of addresses) {
+      return {
         // The cohorts' history counts what the cohorts count (internalWallets.ts outOfCohorts).
-        if (outOfCohorts([venue], address)) continue;
-        const b = books.get(address);
-        m.set(address, sampledVenue(rate, address, members.get(address),
-          b ? { equity: b.equity, at: b.at, positions: [...b.pos].map(([symbol, p]) => ({ symbol, szi: p.szi, entry: p.entry })) } : undefined,
-          perpEquity(venue, b, sibBooks?.get(address))));
-        if (Date.now() - t0 > SLICE_MS) {
-          await new Promise<void>((r) => setImmediate(r));
-          mark('coh:record');
-          t0 = Date.now();
-        }
-      }
-      per.set(venue, m);
-    }
-    return per;
+        has: (a: string) => (members.has(a) || books.has(a)) && !outOfCohorts([venue], a),
+        wallet: (address: string) => {
+          const b = books.get(address);
+          return sampledVenue(rate, address, members.get(address),
+            b ? { equity: b.equity, at: b.at, positions: [...b.pos].map(([symbol, p]) => ({ symbol, szi: p.szi, entry: p.entry })) } : undefined,
+            perpEquity(venue, b, sibBooks?.get(address)));
+        },
+      };
+    });
   }
 
   private async record(): Promise<void> {
@@ -2436,7 +2431,7 @@ export class CohortTracker {
     this.recording = true;
     const t0 = Date.now();
     try {
-      const per = await this.perVenue();
+      const sources = this.recordSources();
       const priceOf = (v: Venue, sym: string) => this.marks.get(`${v}|${sym}`) ?? null;
       const series: Array<{ scope: string; cohort: string; t: number; long: number; short: number }> = [];
       const mix: Array<{ scope: string; cohort: string; t: number; data: string }> = [];
@@ -2450,16 +2445,20 @@ export class CohortTracker {
       const scopeMasks = scopes.map(maskOf);
       const aggs = scopes.map(() => new Aggregator());
       const addresses = new Set<string>();
-      for (const m of per.values()) for (const a of m.keys()) addresses.add(a);
+      for (const v of VENUES) {
+        for (const a of this.members.get(v)?.keys() ?? []) addresses.add(a);
+        for (const a of this.books.get(v)!.keys()) addresses.add(a);
+      }
       let t1 = Date.now();
       for (const address of addresses) {
         let held = 0;
         // Listed on a venue counts it in that venue's scopes (as a member), its figures only where it has them.
-        const wv: Array<WalletVenue | undefined> = VENUES.map((v, i) => {
-          const m = per.get(v)!;
-          if (m.has(address)) held |= 1 << i;
-          return m.get(address);
+        const wv: Array<WalletVenue | undefined> = sources.map((src, i) => {
+          if (!src.has(address)) return undefined;
+          held |= 1 << i;
+          return src.wallet(address);
         });
+        if (!held) continue;
         const netted = new Map<number, ReturnType<typeof netWallet>>();
         for (let i = 0; i < scopes.length; i++) {
           const u = held & scopeMasks[i]!;

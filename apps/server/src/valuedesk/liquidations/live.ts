@@ -262,7 +262,8 @@ export class LiqLive {
         const x = c.v.get(venue);
         if (!x) continue;
         let sent = c.sent.get(venue);
-        if (!sent || c.whole) { sent = { b: new Map(), c: '' }; c.sent.set(venue, sent); }
+        if (!sent) { sent = { b: new Map(), c: '' }; c.sent.set(venue, sent); }
+        if (c.whole) sent.c = '';
         const idx = c.whole ? [...x.b.keys()] : [...(c.dirtyB.get(venue) ?? [])];
         const b: LiqRow[] = [];
         for (const i of idx.sort((m, n) => m - n)) {
@@ -274,9 +275,10 @@ export class LiqLive {
           // under SEND_MOVE, the counts (tooltip only) catch up, and the minute's full refresh is exact.
           if (!c.whole && y && was && nearCell(y, was)) continue;
           if (!y && !was && !c.whole) continue;
-          if (y) { sent.b.set(i, y.slice()); b.push(rowOf(i, y)); }
+          if (y) { rememberCell(sent.b, i, y, was); b.push(rowOf(i, y)); }
           else { sent.b.delete(i); b.push([i, 0, 0, 0, 0]); }
         }
+        if (c.whole) dropGone(sent.b, x.b);
         const e: NonNullable<LiveDelta['v'][Venue]> = { b };
         const cov: Cov = [sig(x.c[0]), sig(x.c[1]), sig(x.c[2]), sig(x.c[3]), x.c[4], 0, sig(x.c[6]), sig(x.c[7])];
         const ck = cov.join(',');
@@ -354,7 +356,7 @@ export class LiqLive {
     for (const venue of venues) {
       const x = f.v.get(venue);
       let sent = f.sent.get(venue);
-      if (!sent || f.whole) { sent = new Map(); f.sent.set(venue, sent); }
+      if (!sent) { sent = new Map(); f.sent.set(venue, sent); }
       const idx = f.whole ? [...(x?.keys() ?? [])] : [...(f.dirty.get(venue) ?? [])];
       const b: LiqRow[] = [];
       for (const i of idx.sort((m, n) => m - n)) {
@@ -362,8 +364,9 @@ export class LiqLive {
         const was = sent.get(i);
         if (!f.whole && y && was && nearCell(y, was)) continue;
         if (!y && !was) continue;
-        if (y) { sent.set(i, y.slice()); b.push(rowOf(i, y)); } else { sent.delete(i); b.push([i, 0, 0, 0, 0]); }
+        if (y) { rememberCell(sent, i, y, was); b.push(rowOf(i, y)); } else { sent.delete(i); b.push([i, 0, 0, 0, 0]); }
       }
+      if (f.whole) dropGone(sent, x);
       if (b.length || f.whole) v[venue] = b;
     }
     const whole = f.whole;
@@ -585,6 +588,21 @@ export class LiqLive {
     }
     this.multiOf.set(key, syms);
   }
+}
+
+/**
+ * What was sent of a cell, kept by copying into the array it already has. Every coin goes out whole once a minute, and a new copy of
+ * every cell lived that minute, long enough to reach the old generation and to be what its long collections then had to clear.
+ */
+function rememberCell(sent: Map<number, number[]>, i: number, y: readonly number[], was: number[] | undefined): void {
+  if (!was || was.length !== y.length) { sent.set(i, y.slice()); return; }
+  for (let k = 0; k < y.length; k++) was[k] = y[k]!;
+}
+
+/** After a whole send: what was sent is only what is there now, as a new map would hold. */
+function dropGone(sent: Map<number, number[]>, now: ReadonlyMap<number, unknown> | undefined): void {
+  if (now?.size === sent.size) return;
+  for (const i of sent.keys()) if (!now?.has(i)) sent.delete(i);
 }
 
 const sig = (x: number) => +x.toPrecision(6);
