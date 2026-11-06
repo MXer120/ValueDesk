@@ -1989,13 +1989,15 @@ body.kc-flow-resizing:has(.kc-flow-wrap.is-under) { cursor: row-resize; }
   align-items: center;
   box-sizing: border-box;
   height: 18px;
-  padding: 0 4px;
+  /* The price ends where the axis's own prices end: 7px from the edge (theme.ts AXIS_LABEL_MARGIN_END), border included,
+     in their size, so a tag reads as one more line of the scale. */
+  padding: 0 6px 0 4px;
   border: 1px solid var(--c);
   border-radius: 4px;
   background: var(--bg);
   color: var(--c);
   font-family: var(--font-num);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
   line-height: 1;
   white-space: nowrap;

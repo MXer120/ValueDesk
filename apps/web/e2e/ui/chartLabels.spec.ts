@@ -105,6 +105,18 @@ h.test('labels: boxes on one line, blurred, and the buttons answer on the pixels
   assert.match(facts.blur, /blur/);
   assert.equal(facts.tags, facts.count, 'each label has its tag');
 
+  // A tag's price ends where the axis's own prices end: 7 px inside the canvas (theme.ts AXIS_LABEL_MARGIN_END), same size.
+  const tag = await page.evaluate(() => {
+    const el = document.querySelector<HTMLElement>('.kc-lbls .kc-lbl__axis:not([hidden])')!;
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    const canvases = [...document.querySelectorAll<HTMLCanvasElement>('.chartholder canvas')];
+    const edge = Math.max(...canvases.map((x) => x.getBoundingClientRect().right));
+    return { inset: edge - range.getBoundingClientRect().right, size: getComputedStyle(el).fontSize };
+  });
+  assert.ok(Math.abs(tag.inset - 7) <= 1, `tag text ends ${tag.inset} px from the canvas edge, the axis's 7 px`);
+  assert.equal(tag.size, '12px');
+
   // The X of the limit order, on the canvas under its box.
   const limit = await rowsWith(page, /Limit/);
   assert.ok(limit >= 0);
