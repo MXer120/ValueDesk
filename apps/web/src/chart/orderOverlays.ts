@@ -30,6 +30,7 @@
  *     the cursor. That is the only value a drag reads; it is snapped to the
  *     symbol's tick before it is shown, and shown before it is ever sent.
  */
+import { bucketOf } from '../components/bookDepth';
 import type { Chart as KChart, OverlayEvent, OverlayTemplate, Point } from 'klinecharts';
 import type { Symbol as MarketSymbol } from '../api';
 import { fmtPrice, fmtQty, fmtQuote, num, pick } from '../format';
@@ -224,6 +225,24 @@ export interface DeriveOptions {
 /** Open orders for the charted market, as lines. Orders for other markets are
  *  dropped - the chart shows one symbol, and a line at another symbol's price
  *  would be a number with no meaning on this axis. */
+/**
+ * The order book rows holding one of the wallet's resting orders, however small: `ask` and `bid` hold the row's
+ * price at the book's grouping. A stop waiting for its trigger is not in the book, so it marks nothing.
+ */
+export function ownBookLevels(orders: readonly any[] | null | undefined, symbol: string, askStep: number, bidStep: number): { ask: Set<number>; bid: Set<number> } {
+  const out = { ask: new Set<number>(), bid: new Set<number>() };
+  for (const raw of orders ?? []) {
+    if ((pick<string>(raw, 'symbol', 's') ?? '') !== symbol) continue;
+    if (usable(pick(raw, 'stopPrice', 'sp', 'triggerPrice'))) continue;
+    const price = Number(usable(pick(raw, 'price', 'p')));
+    const side = sideOf(pick(raw, 'side', 'S'));
+    if (!(price > 0) || side === null) continue;
+    if (side === 'sell') { if (askStep > 0) out.ask.add(bucketOf(price, askStep, 'ask')); }
+    else if (bidStep > 0) out.bid.add(bucketOf(price, bidStep, 'bid'));
+  }
+  return out;
+}
+
 export function orderLines(orders: any[], o: DeriveOptions): OrderLine[] {
   const out: OrderLine[] = [];
   for (const raw of orders ?? []) {
