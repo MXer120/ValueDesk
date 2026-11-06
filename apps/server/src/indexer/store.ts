@@ -2927,6 +2927,12 @@ export class IndexStore {
     return r.n;
   }
 
+  /** The first day of a venue's activity (ms), or null: the head of the primary key. */
+  firstActivity(venue: Venue): number | null {
+    const r = this.q('SELECT MIN(day) AS d FROM activity_day WHERE venue = ?').get(venue) as { d: number | null };
+    return r.d === null ? null : r.d * 86_400_000;
+  }
+
   /** Accounts with at least `minTrades` stream trades since the start, most volume first. */
   activeAccounts(
     venue: Venue,

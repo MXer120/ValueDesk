@@ -206,6 +206,12 @@ export class FlowStore {
     return r?.data ?? null;
   }
 
+  /** A sums row's print count, without its blob: 0 when there is no row. */
+  sumPrints(level: SumLevel, mid: number, t: number): number {
+    const r = this.q(`SELECT prints FROM ${this.sumTable(level)} WHERE mid = ? AND t = ?`).get(mid, t) as { prints: number } | undefined;
+    return r?.prints ?? 0;
+  }
+
   /** Bytes per table (dbstat is not built into node:sqlite everywhere: page counts by table instead). */
   sizes(): Record<string, { rows: number; bytes: number }> {
     const out: Record<string, { rows: number; bytes: number }> = {};

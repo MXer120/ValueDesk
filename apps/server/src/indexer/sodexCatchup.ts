@@ -100,6 +100,15 @@ export class RestReader {
     return { rows: Array.isArray(data) ? (data as Row[]) : [] };
   };
 
+  /** 5-minute candles, newest first as SoDEX sends them (flow/ledger.ts). */
+  klines = async (engine: Engine, symbol: string, q: { limit: number; startTime?: number; endTime?: number }): Promise<{ rows: Array<{ t: number; n?: unknown; v?: unknown; q?: unknown }>; limited?: boolean }> => {
+    const when = `${q.startTime !== undefined ? `&startTime=${q.startTime}` : ''}${q.endTime !== undefined ? `&endTime=${q.endTime}` : ''}`;
+    const { status, data } = await this.get(`/api/v1/${engine}/markets/${encodeURIComponent(symbol)}/klines?interval=5m&limit=${q.limit}${when}`);
+    if (status === 429) return { rows: [], limited: true };
+    if (status !== 200) throw new Error(`HTTP ${status}`);
+    return { rows: Array.isArray(data) ? (data as Array<{ t: number }>) : [] };
+  };
+
   symbols = async (engine: Engine): Promise<string[]> => {
     const { status, data } = await this.get(`/api/v1/${engine}/markets/symbols`);
     if (status !== 200) throw new Error(`HTTP ${status}`);

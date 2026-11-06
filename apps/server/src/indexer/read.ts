@@ -26,6 +26,7 @@ import { winRateOf } from '../valuedesk/winRate.js';
 import { sampledVenue, COHORT_RANGES, type CohortWalletRow as WalletRow } from '../valuedesk/cohorts/model.js';
 import { EXCLUDED_FROM, EXCLUDED_WALLETS, isExcluded, outOfCohorts, type ExcludedFrom, type ExcludedWallet } from '../valuedesk/internalWallets.js';
 import { liqCoin } from '../valuedesk/liquidations/levels.js';
+import { activityCoverage } from '../flow/read.js';
 
 export interface IndexState {
   /** Every board behind this page is final (no unchecked wallet outranks a pick). */
@@ -44,6 +45,56 @@ export interface BoardPage {
   updatedAt: number;
   source: string;
   index: IndexState;
+  /** Present when SoDEX's trade counts on this page are floors: why. */
+  sodexTrades?: SodexTradeNote;
+}
+
+/** The days of a window on which SoDEX's activity is not whole (flow/ledger.ts). Trade counts drawn from it are floors. */
+export interface SodexTradeNote {
+  days: number;
+  short: number;
+  unchecked: number;
+  /** The day with the smallest share of SoDEX's own volume. */
+  lowest: { t: number; share: number } | null;
+}
+
+const NOTE_MS = 60_000;
+const notes = new Map<BoardWindow, { at: number; note: SodexTradeNote | null }>();
+
+/** Null when every day of the window is proved whole. */
+function sodexTradeNote(window: BoardWindow, now: number): SodexTradeNote | null {
+  const hit = notes.get(window);
+  if (hit && now - hit.at < NOTE_MS) return hit.note;
+  let from = windowStart(window, now);
+  // Before the first activity row there is nothing to be short of.
+  const first = reader()?.firstActivity('sodex');
+  if (first !== null && first !== undefined) from = Math.max(from, first);
+  const { days } = activityCoverage(Math.max(from, now - 400 * 86_400_000), now, now);
+  const short = days.filter((d) => d.state === 'short');
+  const unchecked = days.filter((d) => d.state === 'unchecked').length;
+  let lowest: SodexTradeNote['lowest'] = null;
+  for (const d of short) if (d.share !== null && (!lowest || d.share < lowest.share)) lowest = { t: d.t, share: d.share };
+  const note = short.length || unchecked ? { days: days.length, short: short.length, unchecked, lowest } : null;
+  notes.set(window, { at: now, note });
+  return note;
+}
+
+/** Tests: forget what was worked out. */
+export function clearTradeNotes(): void {
+  notes.clear();
+}
+
+/**
+ * SoDEX's trade counts come from the activity tables (or the fills, which ride the same stream), so a count over a day that
+ * is short is a floor however long the socket stayed up: such rows read "n+", and the page says why.
+ */
+export function markSodexTrades(rows: TraderRow[], window: BoardWindow, now = Date.now()): SodexTradeNote | undefined {
+  const onSodex = rows.filter((r) => (r.venues ?? [r.venue]).includes('sodex'));
+  if (!onSodex.length) return undefined;
+  const note = sodexTradeNote(window, now);
+  if (!note) return undefined;
+  for (const r of onSodex) if (r.trades !== null && r.trades !== undefined) r.tradesCapped = true;
+  return note;
 }
 
 function toRow(r: BoardRow, window: BoardWindow, rank: number): TraderRow {
@@ -98,8 +149,11 @@ export function boardPage(
   const which = side === 'worst' ? 'Lowest' : 'Highest';
   const who = filter === 'active' ? 'traders with more than one trade' : 'traders';
   const what = venues.length === 1 && venues[0] === 'tradexyz' ? 'realised PnL (closed trades, net of fees)' : 'PnL';
+  const shownRows = rows.slice(o.offset, o.offset + o.limit).map((r, i) => toRow(r, window, o.offset + i + 1));
+  const sodexTrades = markSodexTrades(shownRows, window);
   return {
-    rows: rows.slice(o.offset, o.offset + o.limit).map((r, i) => toRow(r, window, o.offset + i + 1)),
+    ...(sodexTrades ? { sodexTrades } : {}),
+    rows: shownRows,
     total: rows.length,
     updatedAt: Math.max(...boards.map((b) => b.meta.sourceAt || b.meta.updatedAt)),
     source: `ValueDesk index. ${which} ${what} over ${WINDOW_WORD[window]} among ${who} in that window.`,
@@ -180,8 +234,11 @@ export function netPage(
   const metas = venues.map((v) => s.readBoard(v, window, side, filter)?.meta).filter((m) => !!m);
   const which = side === 'worst' ? 'Lowest' : 'Highest';
   const who = filter === 'active' ? ', among traders with more than one trade in that window' : '';
+  const shownRows = shown.slice(o.offset, o.offset + o.limit).map((r, i) => netToRow(r, window, o.offset + i + 1));
+  const sodexTrades = markSodexTrades(shownRows, window);
   return {
-    rows: shown.slice(o.offset, o.offset + o.limit).map((r, i) => netToRow(r, window, o.offset + i + 1)),
+    ...(sodexTrades ? { sodexTrades } : {}),
+    rows: shownRows,
     total: shown.length,
     updatedAt: Math.max(0, ...metas.map((m) => m.sourceAt || m.updatedAt)),
     source: `ValueDesk index. ${which} PnL over ${WINDOW_WORD[window]}, netted per address across ${venues.map((v) => VENUE_WORD[v]).join(' + ')}${who}.`,

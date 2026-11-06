@@ -12,7 +12,9 @@
  *   - a wallet's fills in the candle (click a row): side, taker or maker, price, size, value,
  *     counterparty, time to the millisecond - a virtual list, so a hundred thousand rows scroll.
  * Data: the venues' public prints with both parties, kept by the indexer (server flow/). Nothing
- * here is estimated; a window before the recording began says so instead of showing zeros.
+ * here is estimated; a window before the recording began says so instead of showing zeros, and one
+ * SoDEX counted more prints in than we hold says how many (server flow/ledger.ts) with its figures
+ * marked as floors.
  * No wallet names: the owner's rule (server valuedesk/labels.ts) - an identicon and the address.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
@@ -43,6 +45,8 @@ const MAX_ROWS = 500;
 const FILL_ROW_H = 30;
 /** Below this height the view is a short panel (thin summary). */
 const SHORT_PX = 440;
+const RECHECK_MS = 60_000;
+const RECHECK_WITHIN_MS = 12 * 3_600_000;
 
 const pct = (v: number, dp = 0) => `${fmtNum(v * 100, { minimumFractionDigits: dp, maximumFractionDigits: dp })}%`;
 const fmtSz = (v: number) => fmtNum(v, { maximumSignificantDigits: 6 });
@@ -174,9 +178,13 @@ export function TradeFlowView({ symbol, spot, interval, at, end, onPick, onClose
     [key], // eslint-disable-line react-hooks/exhaustive-deps
   );
   // A candle still forming is read again every 15 s (the recorder's flush); a closed one once.
-  const r = usePolled<FlowWindow>(key, fetcher, live ? 15_000 : 0);
+  // One already closed, once: SoDEX's count comes within 30 minutes and the catch-up can still fill it for hours, so a recent
+  // one that is not final is read again now and then.
+  const [recheck, setRecheck] = useState(false);
+  const r = usePolled<FlowWindow>(key, fetcher, live ? 15_000 : recheck ? RECHECK_MS : 0);
   // The previous candle's answer while this one loads is not this candle's: skeletons, not "No trades".
   const d = r.stale ? null : r.data;
+  useEffect(() => { setRecheck(!!d && !d.final && d.to > Date.now() - RECHECK_WITHIN_MS); }, [d]);
   const [cols, setCols] = useStored<string[]>('flow.cols', DEFAULT_COLS);
   const shownCols = COLS.filter((c) => !c.opt || cols.includes(c.key));
   const before = !!d && d.since !== null && d.to <= d.since;
@@ -203,7 +211,7 @@ export function TradeFlowView({ symbol, spot, interval, at, end, onPick, onClose
         ) : (
           <div className="tfl-body">
             <Summary d={d && !before && d.markets.length ? d : null} role={role} loading={r.loading && !d} />
-            <Partial d={d} />
+            <Partial d={d} win={win} />
             <div className="tfl-filters">
               <label className="lbp-search tfl-search">
                 <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><circle cx="7" cy="7" r="4.5" /><path d="m10.5 10.5 3 3" strokeLinecap="round" /></svg>
@@ -230,13 +238,17 @@ export function TradeFlowView({ symbol, spot, interval, at, end, onPick, onClose
 function Summary({ d, role, loading }: { d: FlowWindow | null; role: FlowRole; loading: boolean }) {
   const s = d?.summary;
   const v = (x: ReactNode) => (loading ? <i className="tfl-skelv" aria-hidden="true" /> : x);
+  // Prints we do not hold: what is counted here is the least it can have been.
+  const floor = !!d?.coverage?.holeSlots || !!d?.down.length ? '+' : '';
+  // Nothing held at all says nothing, not "at least nothing".
+  const blank = !!floor && s?.prints === 0;
   return (
     <section className="tfl-sum" aria-label="Candle summary" aria-busy={loading}>
       <div className="tfl-sum__stats">
-        <Stat label="Traded" value={v(s ? fmtUsdShort(s.total) : DASH)} title={s ? fmtUsdExact(s.total) : undefined} />
-        <Stat label={role === 'all' ? 'Wallets' : role === 'taker' ? 'Takers' : 'Makers'} value={v(s ? fmtCount(s.wallets) : DASH)} />
+        <Stat label="Traded" value={v(s && !blank ? `${fmtUsdShort(s.total)}${floor}` : DASH)} title={s ? `${fmtUsdExact(s.total)}${floor ? ' of what we hold' : ''}` : undefined} />
+        <Stat label={role === 'all' ? 'Wallets' : role === 'taker' ? 'Takers' : 'Makers'} value={v(s && !blank ? `${fmtCount(s.wallets)}${floor}` : DASH)} />
         <Stat label="Top 10" value={v(s && s.wallets && s.top10 !== undefined ? pct(s.top10) : DASH)} title="The ten largest wallets' share of the volume shown" />
-        <Stat label="Fills" value={v(s ? fmtCount(s.prints) : DASH)} title="Prints (one per match; each has a buyer and a seller)" />
+        <Stat label="Fills" value={v(s && !blank ? `${fmtCount(s.prints)}${floor}` : DASH)} title="Prints (one per match; each has a buyer and a seller)" />
         <Stat label="VWAP" value={v(s?.vwap ? fmtPx(s.vwap) : DASH)} />
       </div>
       <SplitBar buy={s?.takerBuy ?? 0} sell={s?.takerSell ?? 0} buyLabel="Taker buys" sellLabel="Taker sells" />
@@ -331,7 +343,11 @@ function TableEmpty({ d, coin, live, query, venues, offered, onAll, onRetry, err
   }
   if (!d) return null;
   if (d.since !== null && d.to <= d.since) {
-    return <EmptyState compact icon="history" title="Before the recording began" line={`Every trade is kept from ${new Date(d.since).toUTCString().slice(5, 22)} UTC. Pick a later candle.`} />;
+    return <EmptyState compact icon="history" title="Before the recording began" line={`Recording began ${new Date(d.since).toUTCString().slice(5, 22)} UTC. Pick a later candle.`} />;
+  }
+  // SoDEX counted trades here and we hold none of them: never "nobody traded", and never "not listed".
+  if (query.length < 3 && d.coverage && d.coverage.expected > 0 && d.coverage.held === 0) {
+    return <EmptyState compact icon="alert" title="We hold no trades for this candle" line={`SoDEX counted ${fmtNum(d.coverage.expected)} here, so this table is not who traded. Pick another candle.`} />;
   }
   if (!d.markets.length) {
     return (
@@ -396,20 +412,62 @@ function Table({ d, coin, cols, sort, onSort, loading, error, onOpen, empty }: {
   );
 }
 
-/** A candle the recording does not cover whole: said above the table, not left to the footer. */
-function Partial({ d }: { d: FlowWindow | null }) {
+/** Where in the window the holes are: a thin bar across its time, as the taker split above it, the missing spans marked. */
+function HoleStrip({ gaps, from, to }: { gaps: ReadonlyArray<readonly [number, number]>; from: number; to: number }) {
+  const span = to - from;
+  if (span <= 0) return null;
+  return (
+    <span className="tfl-holes" aria-hidden="true">
+      {gaps.map(([a, b]) => (
+        <i key={a} style={{ left: `${((Math.max(a, from) - from) / span) * 100}%`, width: `max(2px, ${((Math.min(b, to) - Math.max(a, from)) / span) * 100}%)` }} />
+      ))}
+    </span>
+  );
+}
+
+/**
+ * A candle that is not whole, said above the table and not left to the footer: before the recording, the recorder down, and
+ * SoDEX's own count against what is held. Prints we do not hold are a hole wherever they went, so the figures say so plainly.
+ */
+function Partial({ d, win, wallet }: { d: Pick<FlowWindow, 'from' | 'to' | 'since' | 'gaps' | 'down' | 'coverage'> | null; win: CandleWindow; wallet?: boolean }) {
   if (!d || d.since === null || d.to <= d.since) return null;
   const late = d.since > d.from;
-  const gapMs = d.gaps.reduce((s, [a, b]) => s + (b - a), 0);
-  if (!late && !gapMs) return null;
+  const downMs = d.down.reduce((s, [a, b]) => s + (b - a), 0);
+  const c = d.coverage;
+  const holes = c?.holeSlots ?? 0;
+  const pending = c?.unchecked.length ?? 0;
+  if (!late && !downMs && !holes && !pending) return null;
   const hm = (t: number) => new Date(t).toISOString().slice(11, 16);
+  const spans = (list: ReadonlyArray<readonly [number, number]>) => list.map(([a, b]) => `${new Date(a).toUTCString()} – ${new Date(b).toUTCString()}`).join('\n');
+  // A candle under 5 minutes is judged by the 5-minute slots around it.
+  const around = !!c && (c.from < win.from || c.to > win.to);
+  const scope = around ? 'the 5 minutes around this candle' : 'this candle';
+  const heldLine = c ? `${fmtNum(c.held)} of ${fmtNum(c.expected)}` : '';
+  const whose = wallet ? "This wallet's fills in them are missing too." : 'Volume, wallets, shares and VWAP are from what we hold.';
   return (
-    <div className="tfl-note" role="note">
-      <span className="tfl-pill is-warn">{late ? 'Partial candle' : `${gapMs < 60_000 ? 'Under 1' : fmtNum(gapMs / 60_000, { maximumFractionDigits: 0 })} min not recorded`}</span>
-      <span title={gapMs ? d.gaps.map(([a, b]) => `${new Date(a).toUTCString()} – ${new Date(b).toUTCString()}`).join('\n') : undefined}>
-        {late ? `Recording began ${hm(d.since)} UTC: earlier trades in this candle are not counted.` : 'The recorder was down for part of this candle: those trades are not counted.'}
-      </span>
-    </div>
+    <>
+      {holes > 0 && c && (
+        <div className="tfl-note" role="note">
+          <span className="tfl-pill is-warn" title={c.holes.map((h) => `${new Date(h.from).toUTCString()} – ${hm(h.to)}: ${fmtNum(h.held)} of ${fmtNum(h.venue)}`).join('\n')}>Held {heldLine} trades</span>
+          <span>SoDEX counted {fmtNum(c.expected)} trades in {scope} and we hold {fmtNum(c.held)}. {whose}</span>
+          {!around && <HoleStrip gaps={d.gaps} from={d.from} to={d.to} />}
+        </div>
+      )}
+      {!holes && pending > 0 && (
+        <div className="tfl-note" role="note">
+          <span className="tfl-pill is-wait" title={spans(c!.unchecked)}>Not checked yet</span>
+          <span>SoDEX's trade count for {scope} has not come in, so we can't say yet whether this is all of it. {d.to > Date.now() - RECHECK_WITHIN_MS ? 'It usually takes under 30 minutes.' : 'Older candles are read back a little at a time.'}</span>
+        </div>
+      )}
+      {(late || downMs > 0) && (
+        <div className="tfl-note" role="note">
+          <span className="tfl-pill is-warn">{late ? 'Partial candle' : `${downMs < 60_000 ? 'Under 1' : fmtNum(downMs / 60_000, { maximumFractionDigits: 0 })} min not recorded`}</span>
+          <span title={downMs ? spans(d.down) : undefined}>
+            {late ? `Recording began ${hm(d.since)} UTC: earlier trades in this candle are not counted.` : 'The recorder was down for part of this candle: those trades are not counted.'}
+          </span>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -432,7 +490,12 @@ function Coverage({ d, venues }: { d: FlowWindow | null; venues: Venue[] }) {
           </span>
         ))}
       </span>
-      <span className="tfl-dim tfl-cov__note">Every print of the venues' public trade streams, both sides. Wallets are shown by address.</span>
+      <span className="tfl-dim tfl-cov__note">
+        {d.coverage && d.coverage.expected > 0 && !d.coverage.holeSlots && !d.coverage.unchecked.length
+          ? `SoDEX: all ${fmtNum(d.coverage.expected)} of its trades held, by its own count. `
+          : ''}
+        From the venues' public trade streams, both sides. Only SoDEX is checked against a count of its own. Wallets are shown by address.
+      </span>
     </footer>
   );
 }
@@ -476,6 +539,7 @@ function WalletView({ coin, kind, venues, win, row, live, onBack }: {
           {row.address && <a className="tfl-icobtn" href={`/scan?address=${encodeURIComponent(row.address)}&venue=${row.venue}`}>Open profile</a>}
         </div>
       </div>
+      <Partial d={d} win={win} wallet />
       <section className="tfl-sum">
         <div className="tfl-sum__stats tfl-sum__stats--wide">
           <Stat label="Net" value={<span className={row.net > 0 ? 'pos' : row.net < 0 ? 'neg' : ''}>{signed(row.net, fmtSz)} {coin}</span>} />
