@@ -33,14 +33,16 @@ import { BrandMark } from './BrandMark';
 /** beta.valuedesk.so (VITE_CHANNEL=beta): the Beta tag beside the brand, as the admin suite shows Dev. */
 const BETA = import.meta.env.VITE_CHANNEL === 'beta';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { NAV_TABS, SOON_TABS, TAB_LABELS, pathForTab, type SodexView, type Tab } from '../router';
+import { NAV_TABS, SOON_TABS, TAB_LABELS, pathForTab, type LegalPage, type SodexView, type Tab } from '../router';
 import { preloadWalletModal, warmWalletModal } from '../walletconnect';
 import { Notices } from './Notices';
 import { NavMore, type NavAlert } from './NavMore';
 import { NavTrade } from './NavTrade';
 import { LanguageGlobe } from './LanguageMenu';
 import { useHoverMenu } from './useHoverMenu';
-import { SettingsMenu } from './SettingsMenu';
+import { SettingsMenu, useSettingsBadge } from './SettingsMenu';
+import { PrefsIcon } from './PrefsIcon';
+import { openSettings } from '../settingsBus';
 import { useAddressMask, useMask } from '../privacy';
 import { fmtUsd } from '../format';
 import {
@@ -88,6 +90,12 @@ export interface NavBarProps {
   onOpenSearch: () => void;
   /** The icon rail is showing (SideBar.tsx): the mark and the tool icons are there, not here. */
   rail?: boolean;
+  /** The connection in a word, and whether all of it is up (App.tsx). */
+  connLabel?: string;
+  connOk?: boolean;
+  /** The legal pages: open one in place, and is one on screen (More > Impressum & legal). */
+  onOpenLegal?: (page: LegalPage) => void;
+  legalOn?: boolean;
   /** Futures or spot, for the switch on Trade. */
   engine?: Engine;
   onEngine?: (e: Engine) => void;
@@ -110,7 +118,7 @@ export interface NavBarProps {
 }
 
 export function NavBar({
-  tab, onNavigate, address, hasLayout, dashLocked, onOpenSearch, rail = false, engine, onEngine, alert = null, onOpenStatus, onOpenExcluded, onOpenLimits, statusOn = false, excludedOn = false, limitsOn = false, onOpenSodex, sodexOn = null,
+  tab, onNavigate, address, hasLayout, dashLocked, onOpenSearch, rail = false, connLabel = '', connOk = true, onOpenLegal, legalOn = false, engine, onEngine, alert = null, onOpenStatus, onOpenExcluded, onOpenLimits, statusOn = false, excludedOn = false, limitsOn = false, onOpenSodex, sodexOn = null,
 }: NavBarProps) {
   /*
    * Have the wallet modal's chunk in memory BEFORE the click.
@@ -140,8 +148,7 @@ export function NavBar({
   }, [address]);
 
   /*
-   * `wallet:menu` opens this menu from elsewhere - the status footer's wallet
-   * button lands here once there is nothing left to set up (actions.ts:goToWallet).
+   * `wallet:menu` opens this menu from elsewhere (actions.ts:goToWallet).
    * With no address there is no menu to open, so it connects instead.
    */
   const hasAddress = !!address;
@@ -244,7 +251,7 @@ export function NavBar({
           ))}
         </nav>
         {/* More: Leaderboard, Trading limits, Status, Help & FAQ, Send feedback, Community, News (owner, 2026-11-05). Outside the nav: its menu's rows are not nav links. */}
-        <NavMore alert={alert} tab={tab} limits={limitsOn} status={statusOn} excluded={excludedOn} onNavigate={onNavigate} onOpenStatus={onOpenStatus} onOpenExcluded={onOpenExcluded} onOpenLimits={onOpenLimits} onOpenSodex={onOpenSodex} sodexOn={sodexOn} />
+        <NavMore alert={alert} tab={tab} limits={limitsOn} status={statusOn} excluded={excludedOn} onNavigate={onNavigate} onOpenStatus={onOpenStatus} onOpenExcluded={onOpenExcluded} onOpenLimits={onOpenLimits} onOpenSodex={onOpenSodex} sodexOn={sodexOn} onOpenLegal={onOpenLegal} legalOn={legalOn} settingsRow={rail && !address} />
         {/* Without the rail (a phone, a narrow window) the same switch sits in the bar's first row, beside
             the wordmark: spot markets were otherwise reachable only through the market search there. */}
         {!rail && marketType && (
@@ -263,9 +270,10 @@ export function NavBar({
           {rail && <div id="vs-notify-slot" className="navnotify" />}
           {/* A restricted (close-only) place: the red pill, always, rail or not (legal/LegalGate.tsx). */}
           <RegionPill address={address} />
+          <ConnectionPill ok={connOk} label={connLabel} />
           <LanguageGlobe />
           {rail && <Notices address={address} />}
-          {/* ONE settings gear: hide mode, and the page layout (lock / edit). In the rail when it shows. */}
+          {/* Settings: under Copy Address in the wallet menu; a phone keeps its gear, it has no rail and may have no wallet. */}
           {!rail && (
             <>
               <SettingsMenu hasLayout={hasLayout} dashLocked={dashLocked} address={address} />
@@ -335,6 +343,26 @@ export function NavBar({
  *
  * Each one drives a control that actually does something; there is no
  * decorative icon in this bar. */
+/**
+ * The connection, only while it is not live: prices and the book above are not current then, which
+ * must not need a look elsewhere. Waits 3 s, so a page load or a short reconnect does not flash it.
+ */
+function ConnectionPill({ ok, label }: { ok: boolean; label: string }) {
+  const [show, setShow] = useState(false);
+  useEffect(() => {
+    if (ok) { setShow(false); return; }
+    const t = window.setTimeout(() => setShow(true), 3000);
+    return () => window.clearTimeout(t);
+  }, [ok]);
+  if (ok || !show) return null;
+  return (
+    <span className="navconn" role="status" title={`Connection: ${label}`}>
+      <span className="navconn__dot" aria-hidden="true" />
+      Connecting
+    </span>
+  );
+}
+
 const SearchIcon = () => (
   <svg viewBox="0 0 20 20" width="20" height="20" aria-hidden="true">
     <circle cx="8.6" cy="8.6" r="6.4" fill="none" stroke="currentColor" strokeWidth="1.6" />
@@ -433,6 +461,7 @@ export function AddressMenu({ address, onClose, closing = false, onExited, onPor
      remembered from last visit with nothing attached to it. */
   const live = wallet.status === 'connected' && !!wallet.provider;
   const username = useUsername(address);
+  const badge = useSettingsBadge(address);
   const restoring = wallet.status === 'connecting';
   const usd = (v: number | null) => maskFunds(v === null ? '—' : fmtUsd(v));
   // Largest value first, then largest amount; four shown, the rest summed.
@@ -559,6 +588,19 @@ export function AddressMenu({ address, onClose, closing = false, onExited, onPor
         <button type="button" className="navaddr__item acct-menu__row" role="menuitem" onClick={copy}>
           <span>{copied ? 'Copied' : 'Copy Address'}</span>
           <CopyIcon />
+        </button>
+        <button
+          type="button"
+          className="navaddr__item acct-menu__row"
+          role="menuitem"
+          title={badge.profile ? 'Settings - your profile' : badge.anyHidden ? 'Settings - some of your data is hidden' : undefined}
+          onClick={run(() => openSettings('profile'))}
+        >
+          <span>Settings</span>
+          <span className="acct-menu__rowic">
+            <PrefsIcon size={16} />
+            {badge.profile ? <span className="settings__dot settings__dot--go" aria-hidden="true" /> : badge.anyHidden && <span className="settings__dot" aria-hidden="true" />}
+          </span>
         </button>
         <button type="button" className="navaddr__item acct-menu__row" role="menuitem" onClick={run(() => openFeedback())}>
           <span>{FEEDBACK_LABEL}</span>

@@ -34,32 +34,39 @@ const g = globalThis as unknown as { window?: unknown; localStorage?: Storage };
 g.localStorage = memoryStorage();
 g.window = Object.assign(new EventTarget(), { localStorage: g.localStorage });
 
-test('go-live: the workspace bar renders "Send feedback" and the status link', async () => {
-  const { StatusFooter } = await import('../components/StatusFooter');
-  const html = renderToMarkup(
-    createElement(StatusFooter, {
-      connLabel: 'live', connOk: true, session: null, address: null, health: null,
-      onGoToWallet: () => {}, onSessionChanged: () => {}, helpOpen: false, onHelpOpen: () => {},
-    }),
-  );
-  assert.match(html, /data-feedback-entry/, 'the feedback entry is gone from the workspace bar');
-  assert.match(html, />Send feedback</);
-  assert.match(html, /href="\/status"/, 'the status page link is gone from the workspace bar');
+test('go-live: More on every page offers Send feedback, the status page and the legal documents', () => {
+  const more = readFileSync(new URL('../components/NavMore.tsx', import.meta.url), 'utf8');
+  assert.match(more, /openFeedback\(\)/, 'More no longer opens the feedback chat');
+  assert.match(more, /FEEDBACK_LABEL/);
+  assert.match(more, /href=\{STATUS_PATH\}/, 'the status page link is gone from More');
+  assert.match(more, /pathForLegal\(LEGAL_HOME\)/, 'the Impressum is gone from More');
+  const bar = readFileSync(new URL('../components/NavBar.tsx', import.meta.url), 'utf8');
+  assert.match(bar, /<NavMore /, 'the navbar no longer renders More');
 });
 
-test('go-live: the shell renders the workspace bar and the feedback host on every page', () => {
+test('go-live: the shell renders the navbar and the feedback host on every page, and no status bar', () => {
   const app = readFileSync(new URL('../App.tsx', import.meta.url), 'utf8');
   const shell = app.slice(app.indexOf('function AppShell('));
-  for (const [tag, guard] of [['<StatusFooter', 'Status footer'], ['<FeedbackHost', 'Feedback']] as const) {
-    const at = shell.indexOf(tag);
-    assert.ok(at > 0, `App.tsx no longer renders ${tag}>`);
-    assert.match(shell.slice(Math.max(0, at - 200), at), new RegExp(`<Guarded name="${guard}">\\s*$`), `${tag}> must be rendered unconditionally`);
-  }
+  assert.ok(shell.indexOf('<NavBar') > 0, 'App.tsx no longer renders <NavBar>');
+  const at = shell.indexOf('<FeedbackHost');
+  assert.ok(at > 0, 'App.tsx no longer renders <FeedbackHost>');
+  assert.match(shell.slice(Math.max(0, at - 200), at), /<Guarded name="Feedback">\s*$/, '<FeedbackHost> must be rendered unconditionally');
+  assert.ok(!shell.includes('StatusFooter'), 'the status bar is gone (owner 2026-11-06)');
+});
+
+test('Settings sits right under Copy Address in the wallet menu, with a row in More when there is no wallet', () => {
+  const bar = readFileSync(new URL('../components/NavBar.tsx', import.meta.url), 'utf8');
+  const copy = bar.indexOf("'Copy Address'");
+  const settings = bar.indexOf('<span>Settings</span>');
+  const feedback = bar.indexOf('<span>{FEEDBACK_LABEL}</span>');
+  assert.ok(copy > 0 && copy < settings && settings < feedback);
+  assert.match(bar, /settingsRow=\{rail && !address\}/);
+  const side = readFileSync(new URL('../components/SideBar.tsx', import.meta.url), 'utf8');
+  assert.match(side, /trigger=\{false\}/, 'the sidebar shows no Settings button');
 });
 
 test('the entry opens the chat by event, from anywhere', async () => {
-  const { FeedbackButton, OPEN_FEEDBACK_EVENT, openFeedback } = await import('./FeedbackButton');
-  assert.match(renderToMarkup(createElement(FeedbackButton)), /<button [^>]*aria-haspopup="dialog"/);
+  const { OPEN_FEEDBACK_EVENT, openFeedback } = await import('./FeedbackButton');
   const seen: unknown[] = [];
   (g.window as EventTarget).addEventListener(OPEN_FEEDBACK_EVENT, (e) => seen.push((e as CustomEvent).detail));
   openFeedback({ thread: TOKEN });

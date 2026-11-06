@@ -262,6 +262,9 @@ w3m-modal[data-shared-backdrop] {
 }
 .navaddr__item.acct-menu__row svg { flex: none; color: var(--muted); }
 .navaddr__item.acct-menu__row:hover svg { color: var(--text); }
+/* A row's icon with a dot on it (Settings: your profile is waiting, or figures are hidden). */
+.acct-menu__rowic { position: relative; display: inline-flex; flex: none; }
+.acct-menu__rowic .settings__dot { top: -2px; right: -2px; }
 .navaddr__item.acct-menu__row--out,
 .navaddr__item.acct-menu__row--out svg,
 .navaddr__item.acct-menu__row--out:hover,

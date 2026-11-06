@@ -1,5 +1,5 @@
 /**
- * Settings: one gear (the rail, or the navbar without it) opens one window in the
+ * Settings: the wallet menu, More without a wallet, or the gear on a phone open one window in the
  * middle of the screen, its sections down the left (owner, 2026-10-25: "in the
  * middle, completely redesigned, sections").
  *
@@ -46,7 +46,7 @@ import { reportTranslation } from '../feedback/FeedbackButton';
 import { ProfileAccount } from '../onboarding/ProfileAccount';
 import { markProfileSeen, profileSeen } from '../onboarding/model';
 import { useUsername } from '../onboarding/profile';
-import { useReferral } from '../onboarding/referral';
+import { useReferral, useReferralKnown } from '../onboarding/referral';
 import { HelpSection } from '../feedback/HelpSection';
 import { NUM_STYLES, NUM_STYLE_LIST, fmtFixed, fmtNum, setNumStyle, useNumStyle } from '../numStyle';
 import { CONFIRM_KINDS, CONFIRM_LABELS, resetConfirms, setConfirmOn, useConfirmPrefs } from '../trading/confirmPrefs';
@@ -73,21 +73,35 @@ const SECTIONS: Array<{ id: Section; label: string; hint: string; icon: ReactNod
 
 const AUTO_LOCK: Array<[number, string]> = [[5, '5 min'], [15, '15 min'], [30, '30 min'], [60, '1 hour'], [240, '4 hours'], [0, 'Tab closes']];
 
-export function SettingsMenu({ hasLayout, dashLocked, address = null }: { hasLayout: boolean; dashLocked: boolean; address?: string | null }) {
+const PROFILE_SEEN_EVENT = 'vs:profile-seen';
+
+/** What Settings has to say while closed: Profile is waiting (green dot), or some figures are hidden. */
+export function useSettingsBadge(address: string | null): { profile: boolean; anyHidden: boolean } {
   const { anyHidden } = usePrivacy();
+  const username = useUsername(address);
+  const referral = useReferralKnown(address);
+  const [, seen] = useState(0);
+  useEffect(() => {
+    const onSeen = () => seen((n) => n + 1);
+    window.addEventListener(PROFILE_SEEN_EVENT, onSeen);
+    return () => window.removeEventListener(PROFILE_SEEN_EVENT, onSeen);
+  }, []);
+  /* A wallet with no username, or no referral yet, until it has opened Profile once. */
+  const wants = !!address && (username === null || referral === 'none' || referral === 'pending');
+  return { profile: wants && !profileSeen(address!), anyHidden };
+}
+
+/** With `trigger` off only the window is here: it opens by openSettings() (the wallet menu, More). */
+export function SettingsMenu({ hasLayout, dashLocked, address = null, trigger = true }: { hasLayout: boolean; dashLocked: boolean; address?: string | null; trigger?: boolean }) {
+  useReferral(address); // The one that reads it from SoDEX; the badges only look.
+  const { profile: dot, anyHidden } = useSettingsBadge(address);
   const [open, setOpen] = useState(false);
   const [section, setSection] = useState<Section>('profile');
-  const username = useUsername(address);
-  const referral = useReferral(address);
-  /* Green dot: a wallet with no username, or no referral yet, until it has opened Profile once. */
-  const [seenRev, setSeenRev] = useState(0);
-  const wants = !!address && (username === null || referral === 'none' || referral === 'pending');
-  const dot = wants && !profileSeen(address!);
   useEffect(() => {
     if (!open || section !== 'profile' || !address || profileSeen(address)) return;
     markProfileSeen(address);
-    setSeenRev((n) => n + 1);
-  }, [open, section, address, seenRev]);
+    window.dispatchEvent(new CustomEvent(PROFILE_SEEN_EVENT));
+  }, [open, section, address]);
   const gear = useRef<HTMLButtonElement>(null);
   const t = useSyncExternalStore(subscribeTrading, getTradingState, getTradingState);
   const current = SECTIONS.find((s) => s.id === section)!;
@@ -105,7 +119,7 @@ export function SettingsMenu({ hasLayout, dashLocked, address = null }: { hasLay
 
   return (
     <div className="privacy settings">
-      <button
+      {trigger && <button
         ref={gear}
         type="button"
         className="navicon settings__btn"
@@ -117,7 +131,7 @@ export function SettingsMenu({ hasLayout, dashLocked, address = null }: { hasLay
       >
         <PrefsIcon size={20} />
         {dot ? <span className="settings__dot settings__dot--go" aria-hidden="true" /> : anyHidden && <span className="settings__dot" aria-hidden="true" />}
-      </button>
+      </button>}
 
       <Modal open={open} title="Settings" onClose={() => setOpen(false)} size="lg" className="stg">
         <div className="stg__body">

@@ -243,7 +243,10 @@ h.test('the rest: the ticket review, a preview line, cancel all, Settings, the b
     console.log(`book dots: ${await page.locator('.mkt-bookrow__mine').count()} (row text "${rowPrice.slice(0, 30)}", order at ${atRow})`);
     if (SHOTS) await page.locator('.mkt-bookrow').first().locator('xpath=ancestor::*[contains(@class,"dash-panel")][1]').screenshot({ path: join(SHOTS, `book-dot-${tag}.png`) }).catch((err) => console.log(`book clip: ${err}`));
 
-    await page.getByRole('button', { name: /^Settings/ }).first().click();
+    if (await page.locator('.side__addr').first().isVisible()) {
+      await page.locator('.side__addr').first().click();
+      await page.getByRole('menuitem', { name: /^Settings/ }).click();
+    } else await page.locator('.settings__btn').first().click();
     const settings = page.getByRole('dialog', { name: 'Settings' });
     await settings.getByRole('button', { name: 'Trading', exact: true }).click();
     await page.waitForTimeout(300);

@@ -41,7 +41,13 @@ async function connect(page: Page): Promise<void> {
 
 const stored = (page: Page, key: string) => page.evaluate((k) => localStorage.getItem(k), key);
 const profileOf = (page: Page, a: string) => page.evaluate((x) => fetch(`/api/vs/profile?address=${x}`).then((r) => r.json()), a) as Promise<{ username: string | null }>;
-const settingsIcon = (page: Page) => page.getByRole('button', { name: /^Settings/ }).first();
+/* The wallet on the rail carries the green dot, Settings in its menu; a phone has no rail and keeps the gear. */
+const settingsIcon = (page: Page) => page.locator('.side__addr, .settings__btn').first();
+const openSettingsRow = async (page: Page) => {
+  const rail = await page.locator('.side__addr').first().isVisible();
+  await settingsIcon(page).click();
+  if (rail) await page.getByRole('menuitem', { name: /^Settings/ }).click();
+};
 
 /** The pictures on screen arrived. */
 async function picturesLoaded(page: Page): Promise<void> {
@@ -191,7 +197,7 @@ h.test('a skipper gets the green dot; Profile sets a name unsigned and changes i
   const dot = page.locator('.settings__dot--go:visible');
   await dot.first().waitFor({ timeout: 15_000 });
 
-  await settingsIcon(page).click();
+  await openSettingsRow(page);
   const stg = page.getByRole('dialog', { name: 'Settings' });
   await stg.getByRole('heading', { name: 'Profile' }).waitFor();
   assert.equal(await stg.getByRole('button', { name: 'Appearance' }).count(), 0, 'Appearance is gone');
@@ -235,7 +241,7 @@ h.test('a declined signature changes nothing and says so', async ({ page, wallet
   await flow.waitFor({ state: 'hidden' });
 
   wallet.reject.add('username');
-  await settingsIcon(page).click();
+  await openSettingsRow(page);
   const stg = page.getByRole('dialog', { name: 'Settings' });
   await stg.getByRole('heading', { name: 'Profile' }).waitFor();
   await stg.getByRole('textbox', { name: 'New username' }).fill(newName());

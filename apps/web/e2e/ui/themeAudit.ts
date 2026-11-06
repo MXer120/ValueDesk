@@ -293,7 +293,8 @@ const settingsSection = (name: string): Scene => [`settings ${name}`, async (p) 
   if (!(await p.getByRole('dialog', { name: 'Settings' }).isVisible())) {
     await esc(p);
     await p.waitForTimeout(300);
-    await role(p, 'button', /^Settings/);
+    if (await p.locator('.side__addr').first().isVisible()) await p.locator('.side__addr').first().click(); else await tap(p, 'More', 400);
+    await role(p, 'menuitem', /^Settings/);
   }
   await p.getByRole('dialog', { name: 'Settings' }).getByRole('button', { name, exact: true }).first().click({ force: true });
   await wait(p, 600);
@@ -336,7 +337,7 @@ const PUBLIC: Scene[] = [
   ['news calendar', async (p) => { await esc(p); await p.locator('.nw').getByText('Calendar').first().click({ force: true }); await wait(p, 2500); }],
   ['add widget', async (p) => { await role(p, 'button', /^New terminal/); }],
   ['feedback dialog', async (p) => { await esc(p); await tap(p, 'Send feedback', 800); }],
-  ['keyboard shortcuts', async (p) => { await esc(p); await role(p, 'button', /Keyboard shortcuts/); }],
+  ['keyboard shortcuts', async (p) => { await esc(p); await tap(p, 'More', 400); await role(p, 'menuitem', /Keyboard shortcuts/); }],
   settingsSection('Profile'), settingsSection('Privacy'), settingsSection('Layout'), settingsSection('Security'),
   settingsSection('News'), settingsSection('Players & cookies'), settingsSection('Legal'), settingsSection('Help & FAQ'),
   ['connect dialog', async (p) => { await esc(p); await wait(p, 300); await role(p, 'button', 'Connect wallet'); }],
