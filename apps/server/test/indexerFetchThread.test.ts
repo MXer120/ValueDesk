@@ -110,7 +110,7 @@ test('a large body arrives in pieces with the loop let in between, byte for byte
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
-    assert.ok(value.every((c) => c === 120));
+    assert.ok(value.every((c: number) => c === 120));
     bytes += value.length;
     pieces++;
   }
