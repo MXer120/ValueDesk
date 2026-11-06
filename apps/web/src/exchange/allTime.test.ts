@@ -6,9 +6,9 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import type { NormalRow } from '@sign/historyRows.js';
+import { normaliseTrade, type NormalRow } from '@sign/historyRows.js';
 import type { ScopeState } from '@sign/historySync.js';
-import { createAllTime, WALK_GAP_MS, WALK_PAUSE_MS, type AllTime } from './allTime';
+import { createAllTime, WALK_GAP_MS, WALK_PAUSE_MS, type AllTime, type AllTimeDeps } from './allTime';
 import type { HistoryPersistence } from './historyDb';
 import { GatewayClient, HISTORY_DRIP } from './sodexGateway';
 import type { KeyValueStore, LedgerDeps, LockManagerLike } from './ledger';
@@ -137,7 +137,7 @@ const page = (rows: Array<Record<string, unknown>>, q: URLSearchParams, timeKey:
   return rows.filter((r) => (r[timeKey] as number) <= end && (r[timeKey] as number) >= start).slice(0, Number(q.get('limit') ?? 100));
 };
 
-function tab(w: World): Tab {
+function tab(w: World, seed?: AllTimeDeps['seed']): Tab {
   const ledger: LedgerDeps = { store: w.store, locks: null, now: () => w.clock.t, sleep: w.vt.sleep };
   const calls: Tab['calls'] = [];
   const fetchImpl = (async (input: string | URL) => {
@@ -163,6 +163,7 @@ function tab(w: World): Tab {
     persistence: w.persistence,
     locks: w.locks,
     ledger,
+    seed,
   });
   return { at, client, calls };
 }
@@ -217,6 +218,45 @@ test('all-time: the server\'s answer, walked from the browser one page per gap o
   assert.equal(again.trades.perps.count, 5);
   assert.equal(again.sync.running, false);
   assert.equal(walkCalls(later).length, 0, 'a fresh, complete history is not walked again');
+});
+
+test('summary: a wallet the server already read has its figures at once, and only newer rows are read after', async () => {
+  const w = world(5);
+  const rows = (w.venue.perps as Array<Record<string, unknown>>).map((r) => normaliseTrade(r));
+  const newest = Math.max(...rows.map((r) => r.time));
+  const seeded = (age: number): AllTimeDeps['seed'] => async (kind) => ({
+    state: { oldest: 1, newest: kind === 'trades-perps' ? newest : null, complete: true, pages: 1, updatedAt: w.clock.t - age, lastError: null, syncedAt: w.clock.t - age },
+    rows: kind === 'trades-perps' ? rows : [],
+  });
+  const t = tab(w, seeded(0));
+  const a = await w.vt.until(t.at.activity(A, 'perps', 1));
+  assert.equal(a.tradesCover.state, 'final');
+  assert.equal(a.trades?.trades, 5);
+  assert.equal(walkCalls(t).length, 0, 'nothing to read: the server read it just now');
+  await w.vt.until(t.at.flush());
+  assert.equal(w.persistence.chunks.get(`trades-perps|${A.toLowerCase()}`)?.flat().length, 5, 'kept for the next visit');
+
+  const w2 = world(5);
+  const t2 = tab(w2, async (kind) => ({
+    state: { oldest: 1, newest: kind === 'trades-perps' ? newest : null, complete: true, pages: 1, updatedAt: w2.clock.t - 3 * 3_600_000, lastError: null, syncedAt: w2.clock.t - 3 * 3_600_000 },
+    rows: kind === 'trades-perps' ? rows : [],
+  }));
+  const stale = await w2.vt.until(t2.at.activity(A, 'perps', 1));
+  assert.equal(stale.trades, null, 'hours old: no figure until the newest rows are in');
+  await settle(w2, t2.at);
+  const fresh = await w2.vt.until(t2.at.activity(A, 'perps', 1));
+  assert.equal(fresh.trades?.trades, 5);
+  const perpsReads = walkCalls(t2).filter((c) => c.path.includes('/perps/') && c.path.includes('/trades'));
+  assert.ok(perpsReads.every((c) => c.path.includes('startTime=')), 'only what is newer');
+});
+
+test('summary: when the server has nothing, the browser walks by itself', async () => {
+  const w = world(5);
+  const t = tab(w, async () => { throw new Error('offline'); });
+  await w.vt.until(t.at.activity(A, 'perps', 1));
+  await settle(w, t.at);
+  const a = await w.vt.until(t.at.activity(A, 'perps', 1));
+  assert.equal(a.trades?.trades, 5);
 });
 
 test('all-time: a /trades walk page waits until the fill panels have drip slots left', async () => {

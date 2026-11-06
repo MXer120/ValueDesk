@@ -77,6 +77,7 @@ const LIVE: CachePolicy = { cacheControl: 'public, no-cache' };
 export const CACHE_POLICIES: Readonly<Record<string, CachePolicy>> = {
   '/api/vs/leaderboard': BOARD,
   '/api/vs/explore': BOARD,
+  '/api/vs/wallet-history': BOARD,
   '/api/vs/cohorts': BOARD,
   '/api/vs/cohorts/detail': BOARD,
   '/api/vs/cohorts/map': BOARD,

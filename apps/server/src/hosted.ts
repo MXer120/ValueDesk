@@ -156,6 +156,7 @@ export const HOSTED_ROUTES: readonly HostedRoute[] = [
   // The shared price oracle (routes/oracle.ts): every caller shares one read per venue and coin a second -
   // but the coin is the caller's choice, and each coin not read this second is up to 19 venue requests
   // from this server's address: upstream (a ticket's poll, every 2 s, is 30 a minute).
+  { method: 'GET', url: '/api/vs/wallet-history', cls: 'read' },
   { method: 'GET', url: '/api/vs/oracle', cls: 'upstream' },
   // The Live Feed's stream lookup: one cached read of a YouTube channel's /live
   // page per channel (valuedesk/youtube/live.ts); upstream, since a new channel is a fetch.
