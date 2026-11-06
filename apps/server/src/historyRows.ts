@@ -207,6 +207,8 @@ export interface WalkResult {
   newest: number | null;
   /** True only when a page came back genuinely empty - the real end of the range. */
   complete: boolean;
+  /** True when `complete` rests on a short page alone, with no second read to confirm it. */
+  endedShort: boolean;
   /** True when the walk stopped because it reached the caller's `floorTime`. */
   reachedFloor: boolean;
   /** Non-null when the walk stopped for any other reason. Never treat as complete. */
@@ -262,6 +264,7 @@ export async function walkBackwards(
   let complete = false;
   let reachedFloor = false;
   let truncated: string | null = null;
+  let endedShort = false;
 
   for (;;) {
     const page = await fetchPage({ limit, startTime: opts.startTime, endTime });
@@ -306,6 +309,7 @@ export async function walkBackwards(
 
     if (opts.shortPageEnds && page.length < limit) {
       complete = true;
+      endedShort = true;
       break;
     }
 
@@ -325,6 +329,12 @@ export async function walkBackwards(
      * with no history at all.
      */
     if (page.length < limit && fresh === 0) {
+      complete = true;
+      break;
+    }
+    // The same, on a walk resuming from a row it holds: this walk has not seen that row yet, but a short page with
+    // nothing below the bound it asked for says the same. It saves a read of SoDEX's two a minute on every resume.
+    if (page.length < limit && endTime !== undefined && minT >= endTime) {
       complete = true;
       break;
     }
@@ -352,5 +362,5 @@ export async function walkBackwards(
     endTime = minT;
   }
 
-  return { rows, pages, oldest, newest, complete, reachedFloor, truncated };
+  return { rows, pages, oldest, newest, complete, endedShort, reachedFloor, truncated };
 }

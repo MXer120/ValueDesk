@@ -54,6 +54,8 @@ export interface ScopeState {
   syncedAt?: number;
   /** Set when the walk ended at the venue's row limit: `complete` then means "as far back as the venue goes". */
   limited?: boolean;
+  /** `complete` rests on a short page alone: the next sync reads once more below `oldest` to confirm it. */
+  unconfirmed?: boolean;
   /** A catch-up could not reach what was held before, so nothing older than this is known to be contiguous. */
   coveredFrom?: number;
 }
@@ -119,7 +121,11 @@ export interface HistorySyncOptions {
   exclusive?(scope: string, run: () => Promise<void>): Promise<void>;
   /** Called with the scope held, before the freshness re-check (the browser re-reads what another tab stored). */
   beforeSync?(scope: string): Promise<void>;
-  /** A short page ends the backward walk without a read to confirm it (historyRows.ts). */
+  /**
+   * Trades only: a short page ends the backward walk at once, and the read that confirms it follows on the next sync
+   * (`unconfirmed`). Never funding: measured 2026-11-06, wallet 5786's funding answered 993 rows of 1,000 with older
+   * rows still below them, and funding has no read limit to save anyway. Trades held on every wallet walked so far.
+   */
   shortPageEnds?: boolean;
 }
 
@@ -154,7 +160,7 @@ export function createHistorySync(o: HistorySyncOptions): HistorySync {
   const isFresh = (s: ScopeState): boolean =>
     // A recorded error or truncation re-arms the sync even inside the freshness
     // window: an incomplete answer is exactly the thing worth retrying.
-    s.complete && !s.lastError && now() - s.updatedAt <= o.resyncAfterMs;
+    s.complete && !s.lastError && !s.unconfirmed && now() - s.updatedAt <= o.resyncAfterMs;
 
   function progressOf(kind: ScopeKind, address: string): SyncProgress {
     const scope = scopeKey(kind, address);
@@ -226,6 +232,7 @@ export function createHistorySync(o: HistorySyncOptions): HistorySync {
     let syncedAt = prior.syncedAt;
     let limited = prior.limited;
     let coveredFrom = prior.coveredFrom;
+    let unconfirmed = prior.unconfirmed;
     const startedAt = prog.startedAt!;
 
     /**
@@ -249,7 +256,7 @@ export function createHistorySync(o: HistorySyncOptions): HistorySync {
     const checkpoint = (lastError: string | null = null) => {
       prog.oldest = oldest;
       prog.newest = newest;
-      store.writeState(scope, { oldest, newest, complete, pages: prog.pages, updatedAt: now(), lastError, syncedAt, limited, coveredFrom });
+      store.writeState(scope, { oldest, newest, complete, pages: prog.pages, updatedAt: now(), lastError, syncedAt, limited, coveredFrom, unconfirmed });
     };
 
     /**
@@ -312,16 +319,18 @@ export function createHistorySync(o: HistorySyncOptions): HistorySync {
 
       if (newest !== null) await catchUp(newest);
 
-      if (!complete) {
+      if (!complete || unconfirmed) {
         const r = await walkBackwards(fetchPage, {
           // Resume from the oldest row already held. `endTime` is inclusive, so the
           // boundary row comes back and is deduped rather than skipped.
           endTime: oldest ?? undefined,
-          shortPageEnds: o.shortPageEnds,
+          // Figures first, proof after: the read that confirms the end runs on the next sync, and any row it finds counts.
+          shortPageEnds: o.shortPageEnds && kind !== 'funding' && !unconfirmed,
           onPage: onExtendPage,
         });
         pages += r.pages;
         complete = r.complete;
+        unconfirmed = r.endedShort;
         if (r.truncated) truncated = r.truncated;
         // A wallet with no history at all: the one empty page is the whole read.
         if (r.complete && prior.newest === null) syncedAt ??= startedAt;
@@ -352,6 +361,7 @@ export function createHistorySync(o: HistorySyncOptions): HistorySync {
       syncedAt,
       limited,
       coveredFrom,
+      unconfirmed,
     });
 
     prog.status = error ? 'error' : 'done';
