@@ -2,10 +2,12 @@
  * The page's two controls (owner 2026-11-06: the chart's view is the dropdown, the timeframe is the switch).
  *
  * RangePicker: the same dropdown as "All platforms" (PlatformSelect.css `.psel`). The chosen value is the whole
- * label; PlatformSelect itself is multi-select over venues, so only its look is shared.
+ * label; PlatformSelect itself is multi-select over venues, so only its look is shared. Its list opens on the page
+ * body: a card here is glass, and backdrop-filter inside a backdrop-filter has nothing behind it to blur.
  * ViewSeg: the leaderboard's well (`.lbp-seg`) with a translucent blob that sits on the chosen segment and slides.
  */
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 export function RangePicker<T extends string>({ value, options, onChange, label, align = 'end' }: {
   value: T;
@@ -16,13 +18,32 @@ export function RangePicker<T extends string>({ value, options, onChange, label,
 }) {
   const [open, setOpen] = useState(false);
   const box = useRef<HTMLDivElement>(null);
+  const pop = useRef<HTMLDivElement>(null);
+  const [place, setPlace] = useState<{ top: number; left?: number; right?: number } | null>(null);
+  useLayoutEffect(() => {
+    if (!open) { setPlace(null); return; }
+    const r = box.current!.getBoundingClientRect();
+    setPlace(align === 'start'
+      ? { top: r.bottom + 6, left: r.left }
+      : { top: r.bottom + 6, right: document.documentElement.clientWidth - r.right });
+  }, [open, align]);
   useEffect(() => {
     if (!open) return;
-    const down = (e: PointerEvent) => { if (!box.current?.contains(e.target as Node)) setOpen(false); };
+    const down = (e: PointerEvent) => {
+      if (!box.current?.contains(e.target as Node) && !pop.current?.contains(e.target as Node)) setOpen(false);
+    };
     const key = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    const away = () => setOpen(false);
     document.addEventListener('pointerdown', down);
     window.addEventListener('keydown', key);
-    return () => { document.removeEventListener('pointerdown', down); window.removeEventListener('keydown', key); };
+    window.addEventListener('scroll', away, true);
+    window.addEventListener('resize', away);
+    return () => {
+      document.removeEventListener('pointerdown', down);
+      window.removeEventListener('keydown', key);
+      window.removeEventListener('scroll', away, true);
+      window.removeEventListener('resize', away);
+    };
   }, [open]);
   const shown = options.find(([k]) => k === value)?.[1] ?? value;
   return (
@@ -38,8 +59,8 @@ export function RangePicker<T extends string>({ value, options, onChange, label,
         <span className="psel__v">{shown}</span>
         <svg className="psel__chev" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="m4 6 4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
       </button>
-      {open && (
-        <div className={`psel__pop psel__pop--${align} pfx-range__pop`} role="listbox" aria-label={label}>
+      {open && place && createPortal(
+        <div className="psel__pop pfx-range__pop" style={{ position: 'fixed', ...place }} role="listbox" aria-label={label} ref={pop}>
           {options.map(([k, text]) => (
             <button
               key={k}
@@ -55,7 +76,8 @@ export function RangePicker<T extends string>({ value, options, onChange, label,
               )}
             </button>
           ))}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );
