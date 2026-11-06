@@ -853,8 +853,11 @@ export class IndexStore {
   private slice = 100;
   /** Rows per background scan step, tuned likewise (step). Starts small: the first pages may be cold. */
   private chunk = 125;
-  /** How long one background scan step may read. */
-  private scanBudgetMs = 30;
+  /**
+   * How long one background scan step may read. 30 ms starved the build on rows off the disk: about 1M rows an hour against
+   * about 10M before it, and a first build not done after 8.8 h (2026-11-06). The chunk still bounds a step on rows in memory.
+   */
+  private scanBudgetMs = 200;
   private autoVacuum = 0;
   private totals: RetentionStatus['totals'] = { days: 0, fills: 0, closes: 0, dropped: 0, badTime: 0, late: 0, repaired: 0, unrepairable: 0, reclaimedPages: 0 };
   private totalsSaved = '';
