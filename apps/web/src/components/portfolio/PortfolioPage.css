@@ -157,6 +157,8 @@ button.pfx-promo:hover .pfx-promo__cta span { transform: translateX(3px); }
 .pfx-sum__row { color: var(--muted); font-size: var(--fs-xs); min-height: 20px; }
 .pfx-sum__head b, .pfx-sum__row b { font-family: var(--font-num); font-weight: 500; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .pfx-sum__row b { color: var(--text); }
+.pfx-sum__state { display: inline-block; color: var(--muted); font-size: var(--fs-base); font-weight: 400; }
+.pfx-sum__state.is-off { padding: 0 var(--sp-2); border-radius: 1000px; background: var(--tint); font-size: var(--fs-xs); }
 .pfx-sum__note { margin: 0; padding: 0 var(--sp-4) var(--sp-3); }
 
 /* --- sections ------------------------------------------------------------------------------ */

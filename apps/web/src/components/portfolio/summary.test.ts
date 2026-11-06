@@ -4,7 +4,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { claimedCoins, shareKey, summarize, summarizeActivity, type FillRow, type SummaryInput, type WealthRow } from './summary';
+import { claimedCoins, shareKey, summarize, type SummaryInput, type WealthRow } from './summary';
 
 const row = (o: Partial<WealthRow> & { coin: string }): WealthRow => ({
   fundId: o.coin, marketValue: 0, inFlight: 0, shares: 0, spotShares: 0, perpShares: 0, evmShares: 0, ...o,
@@ -152,38 +152,4 @@ test('share keys: the v prefix is lower-case only', () => {
   assert.equal(shareKey('QQQ'), 'QQQ');
   assert.equal(shareKey('vsoUSDC'), shareKey('soUSDC'));
   assert.notEqual(shareKey('VANA'), shareKey('ANA'));
-});
-
-const fill = (o: Partial<FillRow>): FillRow => ({ time: 1000, side: 'buy', notional: 100, fee: 0.1, feeCoin: 'vUSDC', ...o });
-
-test('activity: only rows inside the window, split by side', () => {
-  const a = summarizeActivity(
-    [fill({ time: 2000, side: 'buy', notional: 100 }), fill({ time: 2500, side: 'sell', notional: 50, fee: 0.2 }), fill({ time: 1, notional: 1e6 })],
-    [{ time: 2200, fee: -1.5, coin: 'vUSDC' }, { time: 5, fee: 99, coin: 'vUSDC' }],
-    1000,
-    500,
-  );
-  assert.equal(a.trades, 2);
-  assert.equal(a.buys, 1);
-  assert.equal(a.sells, 1);
-  assert.equal(a.volume, 150);
-  assert.equal(a.commission, 0.30000000000000004);
-  assert.equal(a.latestCommission, 0.2);
-  assert.equal(a.funding, -1.5);
-  assert.equal(a.latestFunding, -1.5);
-  assert.equal(a.complete, true);
-});
-
-test('activity: fees in another coin are counted apart, not added to USDC', () => {
-  const a = summarizeActivity([fill({ fee: 5, feeCoin: 'vBTC' }), fill({ fee: 1 })], null, 0, 500);
-  assert.equal(a.commission, 1);
-  assert.equal(a.otherFeeCoins, 1);
-  assert.equal(a.funding, null, 'Spot has no funding');
-});
-
-test('activity: a full page that never left the window is a floor', () => {
-  const page = Array.from({ length: 3 }, (_, i) => fill({ time: 2000 + i }));
-  assert.equal(summarizeActivity(page, null, 1000, 3).complete, false);
-  assert.equal(summarizeActivity(page, null, 2001, 3).complete, true, 'it reached past the window');
-  assert.equal(summarizeActivity(page.slice(0, 2), null, 1000, 3).complete, true, 'a short page is the whole history');
 });
