@@ -1967,29 +1967,23 @@ body.kc-flow-resizing:has(.kc-flow-wrap.is-under) { cursor: row-resize; }
 .kc-draft__amount,
 .kc-draft__price {
   box-sizing: border-box;
-  height: 20px;
-  padding: 0 6px;
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 18px;
-  border-radius: 3px;
-  border: 1px solid var(--draft-ink);
-}
-.kc-draft__word,
-.kc-draft__price {
-  color: var(--kc-draft-on, var(--bg));
-  background: var(--draft-ink);
+  height: 18px;
+  padding: 0 5px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 16px;
+  border-radius: 4px;
+  color: color-mix(in srgb, var(--draft-ink) 75%, var(--text));
+  background: color-mix(in srgb, var(--draft-ink) 16%, var(--bg));
+  border: 1px solid color-mix(in srgb, var(--draft-ink) 60%, var(--bg));
 }
 .kc-draft__amount {
   font-family: var(--font-num);
-  color: var(--text);
-  background: var(--bg);
-  border-color: var(--text);
 }
 .kc-draft__price {
   position: absolute;
   right: 0;
-  padding: 0 3px;
+  padding: 0 5px;
   font-family: var(--font-num);
   white-space: nowrap;
 }
