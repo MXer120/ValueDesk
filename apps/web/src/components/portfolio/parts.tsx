@@ -48,6 +48,10 @@ export function fmtCompactUsd(v: number | null | undefined): string {
   return `${sign}$${fmtNum(abs, { notation: 'compact', maximumFractionDigits: 2 })}`;
 }
 
+/** An axis figure: no cents, and thousands shortened from 10k up. */
+const wholeUsd = (v: number): string => (Math.abs(v) < 10_000 ? fmtUsd(v, 0) : fmtCompactUsd(v));
+const shortDay = (ms: number): string => new Date(ms).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+
 export const fmtDay = (ms: number | null | undefined): string =>
   ms ? new Date(ms).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: '2-digit' }) : DASH;
 
@@ -350,7 +354,7 @@ export function EquityCurve(props: Parameters<typeof EquityCurveInner>[0]) {
   return <Private k="charts"><EquityCurveInner {...props} /></Private>;
 }
 
-function EquityCurveInner({ win, unit = 'usd', tone = 'pnl', compactAxis = false }: {
+function EquityCurveInner({ win, unit = 'usd', tone = 'pnl', compactAxis = false, level = false, clean = false }: {
   win: CurveWindow;
   unit?: 'usd' | 'pct';
   /**
@@ -366,6 +370,13 @@ function EquityCurveInner({ win, unit = 'usd', tone = 'pnl', compactAxis = false
    * would be cut at the card edge. The hover readout stays exact either way.
    */
   compactAxis?: boolean;
+  /**
+   * The points are LEVELS (an account's value), not a change from zero: the axis fits the data and reads the
+   * real values, the area fills to the plot's foot, and no zero line is drawn, since zero is not on it.
+   */
+  level?: boolean;
+  /** Whole-dollar axis, dates without the year, evenly spaced date labels, a dot on the latest point. */
+  clean?: boolean;
 }) {
   const pts = win.points;
   const [hover, setHover] = useState<number | null>(null);
@@ -420,8 +431,13 @@ function EquityCurveInner({ win, unit = 'usd', tone = 'pnl', compactAxis = false
   const PLOT_H = Math.max(1, H - PAD_B);
 
   const ys = pts.map((q) => q.v);
-  let lo = Math.min(...ys, 0);
-  let hi = Math.max(...ys, 0);
+  let lo = level ? Math.min(...ys) : Math.min(...ys, 0);
+  let hi = level ? Math.max(...ys) : Math.max(...ys, 0);
+  if (level && hi > lo) {
+    const room = (hi - lo) * 0.12;
+    hi += room;
+    lo = lo >= 0 ? Math.max(0, lo - room) : lo - room;
+  }
   if (hi === lo) {
     const pad = Math.max(1, Math.abs(hi) * 0.1);
     hi += pad;
@@ -431,7 +447,7 @@ function EquityCurveInner({ win, unit = 'usd', tone = 'pnl', compactAxis = false
   const y = (v: number) => PAD_T + (PLOT_H - PAD_T) - ((v - lo) / span) * (PLOT_H - PAD_T);
   const x = (i: number) => (i / (pts.length - 1)) * PLOT_W;
 
-  const zeroY = y(0);
+  const zeroY = level ? PLOT_H : y(0);
   const runs = splitAtZero(pts, x, y);
   const last = ys[ys.length - 1]!;
 
@@ -445,7 +461,7 @@ function EquityCurveInner({ win, unit = 'usd', tone = 'pnl', compactAxis = false
    * 1/2/5 x 10^n step so the labels land on numbers a person would choose, then
    * always adds zero because zero is the line the sign is read against.
    */
-  const targetTicks = Math.max(3, Math.min(6, Math.floor((PLOT_H - PAD_T) / 26)));
+  const targetTicks = level || clean ? 3 : Math.max(3, Math.min(6, Math.floor((PLOT_H - PAD_T) / 26)));
   const rawStep = span / targetTicks;
   const mag = 10 ** Math.floor(Math.log10(Math.abs(rawStep) || 1));
   const norm = rawStep / mag;
@@ -454,13 +470,13 @@ function EquityCurveInner({ win, unit = 'usd', tone = 'pnl', compactAxis = false
   for (let t = Math.ceil(lo / niceStep) * niceStep; t <= hi + 1e-9; t += niceStep) {
     yTicks.push(Math.abs(t) < niceStep / 1e6 ? 0 : t);
   }
-  if (!yTicks.some((t) => t === 0)) yTicks.push(0);
+  if (!level && !yTicks.some((t) => t === 0)) yTicks.push(0);
   // Drop any tick that would collide with zero's label.
   const minGap = (PLOT_H - PAD_T) / 12;
   const shown = yTicks
     .sort((a, b) => b - a)
     .filter((t, i, arr) => t === 0 || i === 0 || Math.abs(y(t) - y(arr[i - 1]!)) >= minGap)
-    .filter((t) => t === 0 || Math.abs(y(t) - y(0)) >= minGap);
+    .filter((t) => level || t === 0 || Math.abs(y(t) - y(0)) >= minGap);
 
   /*
    * How many date labels FIT, checked in PIXELS.
@@ -493,6 +509,8 @@ function EquityCurveInner({ win, unit = 'usd', tone = 'pnl', compactAxis = false
     for (let c = Math.min(6, lastIdx + 1); c >= 3; c--) {
       const cand = Array.from({ length: c }, (_, k) => Math.round((k / (c - 1)) * lastIdx));
       if (new Set(cand).size !== c) continue;
+      // Few points cannot be spaced evenly unless the count divides: 7 points in 6 labels skips a day in the middle.
+      if (clean && lastIdx <= 12 && lastIdx % (c - 1) !== 0) continue;
       if (fits(cand)) { xTicks = cand; break; }
     }
   }
@@ -534,10 +552,10 @@ function EquityCurveInner({ win, unit = 'usd', tone = 'pnl', compactAxis = false
           <g key={t}>
             <line
               x1="0" y1={y(t)} x2={PLOT_W} y2={y(t)}
-              className={t === 0 ? 'pf-chart__zero' : 'pf-chart__grid'}
+              className={t === 0 && !level ? 'pf-chart__zero' : 'pf-chart__grid'}
             />
             <text x={PLOT_W + 5} y={y(t) + 3} className="pf-chart__ylabel">
-              {compactAxis && unit === 'usd' ? fmtCompactUsd(t) : fmtV(t)}
+              {clean && unit === 'usd' && niceStep >= 1 ? wholeUsd(t) : compactAxis && unit === 'usd' ? fmtCompactUsd(t) : fmtV(t)}
             </text>
           </g>
         ))}
@@ -569,9 +587,16 @@ function EquityCurveInner({ win, unit = 'usd', tone = 'pnl', compactAxis = false
             className="pf-chart__xlabel"
             textAnchor={i === 0 ? 'start' : i === pts.length - 1 ? 'end' : 'middle'}
           >
-            {fmtDay(pts[i]!.t)}
+            {clean ? shortDay(pts[i]!.t) : fmtDay(pts[i]!.t)}
           </text>
         ))}
+
+        {clean && !h && lastIdx > 0 && (
+          <circle
+            cx={x(lastIdx)} cy={y(last)} r="3"
+            className={`pf-chart__dot ${tone === 'equity' ? 'neutral' : last >= 0 ? 'pos' : 'neg'}`}
+          />
+        )}
 
         {h && (
           <g>
@@ -593,7 +618,7 @@ function EquityCurveInner({ win, unit = 'usd', tone = 'pnl', compactAxis = false
           }}
         >
           <span className="pf-chart__tipday">{fmtDay(h.t)}</span>
-          <span className={`pf-chart__tipval ${signClass(h.v)}`}>{fmtV(h.v)}</span>
+          <span className={`pf-chart__tipval ${level ? '' : signClass(h.v)}`}>{fmtV(h.v)}</span>
         </div>
       )}
     </div>

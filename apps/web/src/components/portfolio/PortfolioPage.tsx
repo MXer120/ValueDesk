@@ -34,7 +34,7 @@ import {
 } from '../Portfolio';
 import { Card, EquityCurve, fmtCompactUsd, type CurveWindow } from './parts';
 import { claimedCoins, shareKey, summarize, summarizeActivity, type ActivitySummary, type FillRow, type FundingRow, type PortfolioSummary } from './summary';
-import { RangePicker } from './RangePicker';
+import { RangePicker, ViewSeg } from './RangePicker';
 import { SwapSheet } from './SwapSheet';
 import { useWealth, type WealthState } from './useWealth';
 import { WealthHoldings, WealthTab } from './WealthTab';
@@ -58,7 +58,8 @@ export interface PortfolioPageLinks {
   onOpenTab: (tab: Tab) => void;
 }
 
-const RANGES: ReadonlyArray<readonly [Period, string]> = [['24H', '24 hours'], ['7D', '7 days'], ['14D', '14 days'], ['30D', '30 days'], ['ALL', 'All time']];
+const RANGES: ReadonlyArray<readonly [Period, string]> = [['24H', '24h'], ['7D', '7d'], ['14D', '14d'], ['30D', '30d'], ['ALL', 'All time']];
+const CHART_VIEWS: ReadonlyArray<readonly [ChartView, string]> = [['value', 'Total Value'], ['pnl', 'PnL'], ['calendar', 'PnL Calendar']];
 
 // --- the numbers ------------------------------------------------------------------------
 
@@ -104,6 +105,9 @@ function curveFor(c: PortfolioContext, h24: ChartPoint[] | null, range: Period, 
   const points = h24.map((p) => ({ t: p.ts, v: value(p) - baseline }));
   return { points, baseline, change: points[points.length - 1]!.v, maxDrawdown: null };
 }
+
+/** A curve is built as the change from its start; a balance chart reads the balance itself. */
+const atLevel = (w: CurveWindow): CurveWindow => ({ ...w, points: w.points.map((p) => ({ t: p.t, v: p.v + w.baseline })) });
 
 // --- the head ---------------------------------------------------------------------------
 
@@ -209,22 +213,19 @@ function ChartCard({ c, h24 }: { c: PortfolioContext; h24: ChartPoint[] | null }
   const [view, setView] = useStored<ChartView>('vs.pf.chart.view', 'value');
   const [range, setRange] = useStored<Period>('vs.pf.chart.range', '7D');
   const win = view === 'calendar' ? null : curveFor(c, h24, range, view === 'value' ? (p) => p.accountValue : (p) => pnlAt('pnl-total', p));
-  const seg = (k: ChartView, label: string) => (
-    <button type="button" role="tab" aria-selected={view === k} className={`pf-ctl ${view === k ? 'is-on' : ''}`} onClick={() => setView(k)}>{label}</button>
-  );
   const empty = (body: ReactNode) => <div className="pf-chart pf-chart--empty"><p>{body}</p></div>;
   const mask = useMask(view === 'value' ? 'funds' : 'pnl');
   return (
     <Card
       className="pf-card--chart pfx-chart"
-      title={<div className="pf-seg" role="tablist" aria-label="Chart">{seg('value', 'Total Value')}{seg('pnl', 'PnL')}{seg('calendar', 'PnL Calendar')}</div>}
+      title={<ViewSeg value={view} options={CHART_VIEWS} onChange={setView} label="Chart" />}
       action={view === 'calendar' ? undefined : <RangePicker value={range} options={RANGES} onChange={setRange} />}
     >
       {win && win.change !== null && (
         <div className="pfx-chart__head">
           <span>
-            {view === 'value' ? 'Change in value' : 'PnL'}, {range === 'ALL' ? 'all time' : range}
-            {view === 'value' && <InfoDot title="The change from the start of the range, on SoDEX's own series: Spot, Perps and vaults, deposits and withdrawals included. Your EVM wallet is not in it." />}
+            {view === 'value' ? 'Change in value' : 'PnL'}, {range === 'ALL' ? 'all time' : range.toLowerCase()}
+            {view === 'value' && <InfoDot title="SoDEX's own series: Spot, Perps and vaults, deposits and withdrawals included. Your EVM wallet is not in it." />}
           </span>
           <b className={view === 'pnl' ? signClass(win.change) : undefined}>{mask(fmtSigned(win.change))}</b>
         </div>
@@ -234,8 +235,8 @@ function ChartCard({ c, h24 }: { c: PortfolioContext; h24: ChartPoint[] | null }
         : c.venue.progress ? empty(<><span className="pf-spin" aria-hidden="true" />Reading</>)
         : !c.venue.accountId ? empty('No SoDEX account for this wallet yet.')
         : view === 'calendar' ? <CrossFadeCal points={c.venue.points ?? []} mode="pnl-total" />
-        : win ? <EquityCurve win={win} tone={view === 'value' ? 'equity' : 'pnl'} />
-        : empty(`Fewer than two points in ${range === 'ALL' ? 'this history' : range}.`)}
+        : win ? <EquityCurve win={view === 'value' ? atLevel(win) : win} tone={view === 'value' ? 'equity' : 'pnl'} level={view === 'value'} compactAxis clean />
+        : empty(`Fewer than two points in ${range === 'ALL' ? 'this history' : range.toLowerCase()}.`)}
     </Card>
   );
 }
