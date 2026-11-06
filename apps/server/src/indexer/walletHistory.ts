@@ -188,9 +188,8 @@ export class WalletBackfill {
       paced: (f) => f,
       resyncAfterMs: RESYNC_AFTER_MS,
       now: this.now,
-      // Each wallet costs a read per scope, not two: this is what makes the whole list possible at 2 reads a minute. A
-      // page shorter than the limit already means nothing older exists; the browser's all-time perps check against
-      // SoDEX's lifetime volume is what would catch one that lied.
+      // A wallet's trades cost a read per engine, not two: this is what makes the list possible at 2 reads a minute. The
+      // confirming read is left to the browser that connects: the state says `unconfirmed`, and it reads below `oldest`.
       shortPageEnds: true,
     });
   }

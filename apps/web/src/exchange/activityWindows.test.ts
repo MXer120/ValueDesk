@@ -208,6 +208,53 @@ test('more new rows between visits than SoDEX keeps leaves a gap, and nothing is
   assert.equal(coverOf(state, false, 55_000, 10_050).state, 'final');
 });
 
+test('a short page answers at once, and the next sync reads below it, so a row it missed still counts', async () => {
+  // A venue that cut the first answer short, and has older rows.
+  const rows = [fill({ tradeID: 1, time: 5000 }), fill({ tradeID: 2, time: 4000 }), fill({ tradeID: 3, time: 3000 })];
+  const inner = venue(() => rows);
+  let cut = true;
+  const source: PageFetcher = async (q) => {
+    const page = await inner(q);
+    if (cut) { cut = false; return page.slice(0, 2); }
+    return page;
+  };
+  const store = new MemoryHistoryStore();
+  let clock = 1_000_000;
+  const sync = createHistorySync({ store, pageSource: () => source, paced: (f) => f, resyncAfterMs: 0, now: () => clock++, shortPageEnds: true });
+  sync.ensureSync('trades-perps', ADDRESS);
+  await sync.settled('trades-perps', ADDRESS);
+  let state = store.readState(SCOPE);
+  assert.equal(state.complete, true);
+  assert.equal(state.unconfirmed, true);
+  assert.equal(store.cachedCount(SCOPE), 2);
+  sync.ensureSync('trades-perps', ADDRESS);
+  await sync.settled('trades-perps', ADDRESS);
+  state = store.readState(SCOPE);
+  assert.equal(store.cachedCount(SCOPE), 3, 'the confirming read found it');
+  assert.equal(state.complete, true);
+  assert.ok(!state.unconfirmed);
+  assert.equal(tradeFigures(store.loadRows(SCOPE), null, state.newest).trades, 3);
+});
+
+test('funding never ends on a short page: SoDEX answered 993 of 1,000 with older rows still below', async () => {
+  const rows = [pay({ timestamp: 5000 }), pay({ timestamp: 4000 }), pay({ timestamp: 3000 })];
+  const inner = venue(() => rows);
+  let cut = true;
+  const source: PageFetcher = async (q) => {
+    const page = await inner(q);
+    if (cut) { cut = false; return page.slice(0, 2); }
+    return page;
+  };
+  const store = new MemoryHistoryStore();
+  let clock = 1_000_000;
+  const sync = createHistorySync({ store, pageSource: () => source, paced: (f) => f, resyncAfterMs: 0, now: () => clock++, shortPageEnds: true });
+  sync.ensureSync('funding', ADDRESS);
+  await sync.settled('funding', ADDRESS);
+  const scope = scopeKey('funding', ADDRESS);
+  assert.equal(store.cachedCount(scope), 3, 'read on until a page added nothing');
+  assert.ok(!store.readState(scope).unconfirmed);
+});
+
 test('a walk that cannot pass a full page of one millisecond is incomplete, not final', async () => {
   const rows = Array.from({ length: 1001 }, (_, i) => fill({ tradeID: i, time: 1000 }));
   const { store, sync } = syncOver(venue(() => rows));

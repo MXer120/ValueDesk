@@ -62,7 +62,7 @@ test('a small wallet costs one read per scope, and its rows round-trip exactly',
     const rows = [fill(1, 1000), fill(2, 2000)];
     const { backfill, reads } = harness(db, (k) => (k === 'funding' ? [pay(1500)] : k === 'trades-perps' ? rows : []), []);
     await backfill.walk(A);
-    assert.equal(reads.length, 3, 'perps, spot, funding: no second page to confirm the end');
+    assert.deepEqual(reads.map((r) => r.kind), ['trades-spot', 'trades-perps', 'funding', 'funding'], 'trades once each; funding is confirmed');
     assert.ok(db.isDone(A));
     const held = db.loadRows(scopeKey('trades-perps', A));
     assert.deepEqual(held.map((r) => r.id).sort(), rows.map((r) => r.id).sort(), 'the same ids as the browser computes');

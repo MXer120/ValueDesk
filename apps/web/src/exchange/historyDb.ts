@@ -94,7 +94,7 @@ const result = <T>(r: IDBRequest<T>): Promise<T> =>
 
 function stateOf(r: StateRecord | undefined): ScopeState | null {
   if (!r) return null;
-  return { oldest: r.oldest, newest: r.newest, complete: r.complete, pages: r.pages, updatedAt: r.updatedAt, lastError: r.lastError, syncedAt: r.syncedAt, limited: r.limited, coveredFrom: r.coveredFrom };
+  return { oldest: r.oldest, newest: r.newest, complete: r.complete, pages: r.pages, updatedAt: r.updatedAt, lastError: r.lastError, syncedAt: r.syncedAt, limited: r.limited, coveredFrom: r.coveredFrom, unconfirmed: r.unconfirmed };
 }
 
 export class IdbHistory implements HistoryPersistence {

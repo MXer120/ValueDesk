@@ -240,6 +240,9 @@ export function createAllTime(d: AllTimeDeps): AllTime {
     paced: (f) => f,
     resyncAfterMs: RESYNC_AFTER_MS,
     now,
+    // A wallet with under a page of trades shows after one read: its summary does not wait a minute of SoDEX's limit on
+    // the read that only confirms it. That read follows at once, and anything it finds counts.
+    shortPageEnds: true,
     exclusive,
     beforeSync: async (scope) => {
       await refresh(scope);
