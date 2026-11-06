@@ -9,7 +9,7 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { Private, useMask, usePrivacy, type PrivacyKey } from '../../privacy';
 import { DASH, MINUS, fmtUsd, signClass } from '../../format';
-import { timeTicks } from './timeTicks';
+import { dotGrid, timeTicks } from './timeTicks';
 import '../Portfolio.css';
 import { fmtFixed, fmtNum } from '../../numStyle';
 
@@ -397,8 +397,9 @@ function EquityCurveInner({ win, unit = 'usd', tone = 'pnl', compactAxis = false
    */
   level?: boolean;
   /**
-   * The portfolio's chart (owner 2026-11-06): a smooth line on a dotted ground, read against the START of the window.
-   * Above the start is green, below it red, in the line, the fill and the dots alike; there are no grid lines. Also a
+   * The portfolio's chart (owner 2026-11-06): a smooth line on a gray dotted ground, read against the START of the
+   * window. Above the start is green, below it red, in the line and the fill; the fill colours the dots it covers,
+   * and no others. There are no grid lines. Also a
    * whole-dollar axis, dates without the year, evenly spaced date labels and a dot on the latest point. `tone` does
    * not apply here.
    */
@@ -439,7 +440,7 @@ function EquityCurveInner({ win, unit = 'usd', tone = 'pnl', compactAxis = false
    * scopes them per component instance.
    */
   const uid = useId().replace(/:/g, '');
-  const ID = { fillUp: `${uid}-fu`, fillDown: `${uid}-fd`, dotUp: `${uid}-du`, dotDown: `${uid}-dd`, clipUp: `${uid}-cu`, clipDown: `${uid}-cd`, washUp: `${uid}-wu`, washDown: `${uid}-wd`, fadeUp: `${uid}-au`, fadeDown: `${uid}-ad`, maskUp: `${uid}-mu`, maskDown: `${uid}-md` };
+  const ID = { fillUp: `${uid}-fu`, fillDown: `${uid}-fd`, dotUp: `${uid}-du`, dotDown: `${uid}-dd`, dotGround: `${uid}-dg`, clipUp: `${uid}-cu`, clipDown: `${uid}-cd`, washUp: `${uid}-wu`, washDown: `${uid}-wd`, fadeUp: `${uid}-au`, fadeDown: `${uid}-ad`, maskUp: `${uid}-mu`, maskDown: `${uid}-md` };
 
   if (pts.length < 2) return null;
 
@@ -485,6 +486,7 @@ function EquityCurveInner({ win, unit = 'usd', tone = 'pnl', compactAxis = false
   const baseY = y(baseV);
   const line = clean ? smoothPath(pts.map((p, i) => [x(i), y(p.v)])) : '';
   const sideOf = (v: number) => (v >= baseV ? 'pos' : 'neg');
+  const dots = dotGrid(PLOT_W, pts.length);
 
   const fmtV = (v: number) => (unit === 'pct' ? `${fmtFixed(v * 100, 1)}%` : fmtUsd(v));
 
@@ -587,8 +589,11 @@ function EquityCurveInner({ win, unit = 'usd', tone = 'pnl', compactAxis = false
           </linearGradient>
           {clean && (
             <>
-              <pattern id={ID.dotUp} width="14" height="14" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="0.8" className="pf-chart__dots pos" /></pattern>
-              <pattern id={ID.dotDown} width="14" height="14" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="0.8" className="pf-chart__dots neg" /></pattern>
+              {([[ID.dotGround, 'none'], [ID.dotUp, 'pos'], [ID.dotDown, 'neg']] as const).map(([id, tone]) => (
+                <pattern key={id} id={id} width={dots.x} height={dots.y} x={-dots.x / 2} y={baseY - dots.y / 2} patternUnits="userSpaceOnUse">
+                  <circle cx={dots.x / 2} cy={dots.y / 2} r="0.8" className={`pf-chart__dots ${tone}`} />
+                </pattern>
+              ))}
               {/* The fill is strongest at the line's furthest reach and fades towards the start level. */}
               <linearGradient id={ID.washUp} gradientUnits="userSpaceOnUse" x1="0" y1={y(Math.max(...ys))} x2="0" y2={baseY}>
                 <stop offset="0%" stopColor="var(--pos)" stopOpacity="0.26" />
@@ -599,12 +604,12 @@ function EquityCurveInner({ win, unit = 'usd', tone = 'pnl', compactAxis = false
                 <stop offset="100%" stopColor="var(--neg)" stopOpacity="0.02" />
               </linearGradient>
               <linearGradient id={ID.fadeUp} gradientUnits="userSpaceOnUse" x1="0" y1={y(Math.max(...ys))} x2="0" y2={baseY}>
-                <stop offset="0%" stopColor="#fff" stopOpacity="0.7" />
-                <stop offset="100%" stopColor="#fff" stopOpacity="0.25" />
+                <stop offset="0%" stopColor="#fff" stopOpacity="0.9" />
+                <stop offset="100%" stopColor="#fff" stopOpacity="0.2" />
               </linearGradient>
               <linearGradient id={ID.fadeDown} gradientUnits="userSpaceOnUse" x1="0" y1={y(Math.min(...ys))} x2="0" y2={baseY}>
-                <stop offset="0%" stopColor="#fff" stopOpacity="0.7" />
-                <stop offset="100%" stopColor="#fff" stopOpacity="0.25" />
+                <stop offset="0%" stopColor="#fff" stopOpacity="0.9" />
+                <stop offset="100%" stopColor="#fff" stopOpacity="0.2" />
               </linearGradient>
               <mask id={ID.maskUp} maskUnits="userSpaceOnUse" x="0" y="0" width={W} height={H}><rect x="0" y="0" width={W} height={H} fill={`url(#${ID.fadeUp})`} /></mask>
               <mask id={ID.maskDown} maskUnits="userSpaceOnUse" x="0" y="0" width={W} height={H}><rect x="0" y="0" width={W} height={H} fill={`url(#${ID.fadeDown})`} /></mask>
@@ -616,8 +621,7 @@ function EquityCurveInner({ win, unit = 'usd', tone = 'pnl', compactAxis = false
 
         {clean && (
           <>
-            <rect x="0" y="0" width={PLOT_W} height={Math.max(0, baseY)} fill={`url(#${ID.dotUp})`} className="pf-chart__ground" />
-            <rect x="0" y={baseY} width={PLOT_W} height={Math.max(0, PLOT_H - baseY)} fill={`url(#${ID.dotDown})`} className="pf-chart__ground" />
+            <rect x="-2" y="0" width={PLOT_W + 4} height={PLOT_H} fill={`url(#${ID.dotGround})`} className="pf-chart__ground" />
             <g mask={`url(#${ID.maskUp})`}><path d={`${line} L${PLOT_W},${baseY.toFixed(1)} L0,${baseY.toFixed(1)} Z`} fill={`url(#${ID.dotUp})`} clipPath={`url(#${ID.clipUp})`} /></g>
             <g mask={`url(#${ID.maskDown})`}><path d={`${line} L${PLOT_W},${baseY.toFixed(1)} L0,${baseY.toFixed(1)} Z`} fill={`url(#${ID.dotDown})`} clipPath={`url(#${ID.clipDown})`} /></g>
             <path d={`${line} L${PLOT_W},${baseY.toFixed(1)} L0,${baseY.toFixed(1)} Z`} fill={`url(#${ID.washUp})`} clipPath={`url(#${ID.clipUp})`} />

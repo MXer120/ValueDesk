@@ -201,6 +201,7 @@ h.test('Total Value counts each dollar once, and copies and bots have no bucket'
   const labels = () => p.locator('.pfx-chart .pf-chart__xlabel').allTextContents();
   await p.locator('.pfx-chart').getByRole('radio', { name: '24h' }).click();
   await until(p, async () => (await labels()).some((l) => /^\d\d:00$/.test(l)), 'hours on the 24h axis', 5_000);
+  await p.waitForTimeout(350);
   await shot(p, 'axis-24h', false);
   await p.locator('.pfx-chart').getByRole('radio', { name: '7d' }).click();
   await until(p, async () => (await labels()).length >= 3 && !(await labels()).some((l) => l.includes(':')), 'days on the 7d axis', 5_000);

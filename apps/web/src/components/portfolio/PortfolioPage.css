@@ -59,10 +59,11 @@
 /* Drawn to the measured box, out of the flow, so its rounded size cannot push the card by a fraction of a pixel. */
 .pf.pfx .pfx-chart .pf-chart__svg { position: absolute; top: 0; left: 0; }
 .pf.pfx .pfx-chart .pf-chart__line { stroke-width: 1.75; stroke-linejoin: round; stroke-linecap: round; }
-/* The dotted ground: faint on the whole plot, stronger between the line and the start level. */
+/* The dotted ground: gray on the whole plot; only the fill between the line and the start level colours its dots. */
 .pf-chart__dots.pos { fill: var(--pos); }
 .pf-chart__dots.neg { fill: var(--neg); }
-.pf-chart__ground { opacity: 0.22; }
+.pf-chart__dots.none { fill: var(--muted); }
+.pf-chart__ground { opacity: 0.35; }
 .pf-chart__tipval.pos { color: var(--pos); }
 .pf-chart__tipval.neg { color: var(--neg); }
 .pfx-chart__head { display: flex; flex-direction: column; gap: 2px; margin-bottom: var(--sp-2); color: var(--muted); font-size: var(--fs-xs); }

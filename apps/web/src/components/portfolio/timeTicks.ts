@@ -23,6 +23,22 @@ const STEPS: ReadonlyArray<{ ms: number; unit: 'hour' | 'day' | 'month'; n: numb
   { ms: 365 * DAY, unit: 'month', n: 12 },
 ];
 
+/** Below this the dots run into each other. */
+const MIN_DOT_GAP = 10;
+/** Rows stay this close however far apart the columns are, or a chart of few points has hardly any dots. */
+const MAX_DOT_ROW_GAP = 18;
+
+/**
+ * The dotted ground follows the data (owner 2026-11-06): a column on every datapoint and one between two datapoints.
+ * Where so many points would merge the dots, only every 2nd, 4th... point gets a column.
+ */
+export function dotGrid(plotWidth: number, points: number): { x: number; y: number } {
+  const between = plotWidth / Math.max(1, points - 1);
+  let x = between / 2;
+  while (x < MIN_DOT_GAP) x *= 2;
+  return { x, y: Math.max(MIN_DOT_GAP, Math.min(MAX_DOT_ROW_GAP, x)) };
+}
+
 export interface TimeTick { t: number; label: string }
 
 export function timeTicks(from: number, to: number, maxLabels: number): TimeTick[] {

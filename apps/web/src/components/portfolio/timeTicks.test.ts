@@ -1,12 +1,21 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { timeTicks } from './timeTicks';
+import { dotGrid, timeTicks } from './timeTicks';
 
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
 const FROM = new Date(2026, 9, 31, 11, 37).getTime();
 
 const gaps = (ts: number[]) => ts.slice(1).map((t, i) => t - ts[i]!);
+
+test('dots: a column on every datapoint and one between, thinned only where they would merge', () => {
+  assert.equal(dotGrid(600, 7).x, 50, '6 gaps of 100 px');
+  assert.equal(dotGrid(600, 25).x, 12.5, '24 gaps of 25 px');
+  assert.equal(dotGrid(600, 301).x, 16, 'every point would be 1 px apart: every 8th');
+  assert.equal(Number.isInteger(dotGrid(600, 301).x / (600 / 300 / 2)), true, 'still on the datapoints');
+  assert.equal(dotGrid(600, 7).y, 18);
+  assert.equal(dotGrid(600, 25).y, 12.5);
+});
 
 test('24 hours read in hours, at one step, with the date only at midnight', () => {
   const ticks = timeTicks(FROM, FROM + DAY, 8);
