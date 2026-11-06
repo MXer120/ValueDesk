@@ -179,6 +179,56 @@ export class FlowRecorder {
   }
 
   /**
+   * As `missing`, for a venue whose REST time is not its stream's (Arcus, 2 to 16 ms apart on every row, see
+   * indexer/arcusCatchup.ts): price, size and both parties exact, the time within `nearMs`, and one held print answers for one
+   * row, the nearest, so of two like trades with one held the other still counts as missing. The margin errs towards "held":
+   * a print left out can be fetched again, one added twice cannot be taken out.
+   */
+  missingNear(prints: readonly Print[], nearMs: number): Print[] {
+    const out: Print[] = [];
+    const held = new Map<string, number[]>();
+    const read = new Set<string>();
+    try {
+      for (const p of [...prints].sort((a, b) => a.t - b.t)) {
+        const mid = this.markets.get(`${p.venue}|${p.symbol}`);
+        if (mid === undefined) { out.push(p); continue; }
+        for (let ct = Math.floor((p.t - nearMs) / CHUNK_MS) * CHUNK_MS; ct <= p.t + nearMs; ct += CHUNK_MS) {
+          const k = `${mid}|${ct}`;
+          if (read.has(k)) continue;
+          read.add(k);
+          const open = this.open.get(k);
+          let list: readonly FlowPrint[] = open?.prints ?? [];
+          if (!open) {
+            const blob = this.store.chunk(mid, ct);
+            if (blob) list = chunkPrints(decodeChunk(blob));
+          }
+          for (const f of list) {
+            const key = `${mid}|${f.px}|${f.sz}|${f.buyer}|${f.seller}`;
+            const times = held.get(key);
+            if (times) times.push(f.t);
+            else held.set(key, [f.t]);
+          }
+        }
+        const party = (acct: string): number =>
+          this.parties.get(`${p.venue}|${ID_VENUES.has(p.venue) ? acct : acct.toLowerCase()}`) ?? -1;
+        const times = held.get(`${mid}|${p.px}|${p.sz}|${party(p.buyer)}|${party(p.seller)}`);
+        let best = -1;
+        let bestBy = nearMs;
+        for (let i = 0; times && i < times.length; i++) {
+          const by = Math.abs(times[i]! - p.t);
+          if (by <= bestBy) { best = i; bestBy = by; }
+        }
+        if (best >= 0) times!.splice(best, 1);
+        else out.push(p);
+      }
+    } catch (e) {
+      this.lastError = `missing: ${String(e)}`;
+      return [];
+    }
+    return out;
+  }
+
+  /**
    * A print older than this run, that the run before already holds: the first frame after subscribing is a snapshot of recent
    * prints, and the streams' memory of ids died with the last process. Measured 2026-11-06: Hyperliquid slots held 2 to 6 times
    * their count, one more each restart (DYDX 12:05 17 of 9, para:NET 09:35 24 of 4), in activity and cohorts as well. Exact

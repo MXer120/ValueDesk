@@ -107,8 +107,16 @@ for (const phone of [false, true]) {
 
   test(`${size}: holes are said in figures and the summary reads as floors`, async () => {
     const { page, close } = await show('holes', phone);
-    await page.getByText(/Held 811 of 2[.,]685 trades/).waitFor();
+    const line = page.getByText(/Held 811 of 2[.,]685 trades/);
+    await line.waitFor();
+    // One short line; the details wait for a hover or a tap.
+    assert.equal(await page.getByText(/SoDEX counted 2[.,]685 trades/).count(), 0);
+    if (phone) await line.tap(); else await line.hover();
     await page.getByText(/SoDEX counted 2[.,]685 trades in this candle and we hold 811\./).first().waitFor();
+    await page.locator('.acct-hc.is-on').waitFor();
+    await shot(page, 'holes-details');
+    await page.mouse.move(0, 0);
+    await page.getByText('Who traded').first().click();
     assert.ok(await page.getByText('811+', { exact: true }).isVisible());
     assert.ok(await page.getByText('148+', { exact: true }).isVisible());
     assert.equal(await page.getByText(/Every print/).count(), 0);
@@ -125,11 +133,13 @@ for (const phone of [false, true]) {
     await close();
   });
 
-  test(`${size}: other venues show their own figures, and one being read says so`, async () => {
+  test(`${size}: one line per venue short, and one still being read says nothing`, async () => {
     const { page, close } = await show('venues', phone);
     await page.getByText(/Hyperliquid: held 34[.,]806 of 36[.,]003 trades/).waitFor();
     await page.getByText(/Lighter: held 97[.,]6% of volume/).waitFor();
-    await page.getByText('Checking', { exact: true }).waitFor();
+    assert.equal(await page.locator('.tfl-note').count(), 2);
+    assert.equal(await page.getByText('Checking', { exact: true }).count(), 0);
+    assert.equal(await page.getByText(/Arcus:/).count(), 0);
     await shot(page, 'venues');
     await close();
   });
@@ -142,9 +152,11 @@ for (const phone of [false, true]) {
     await close();
   });
 
-  test(`${size}: a count not in yet is said, not read as whole`, async () => {
+  test(`${size}: a count not in yet says nothing, and is not read as whole`, async () => {
     const { page, close } = await show('checking', phone);
-    await page.getByText('Not checked yet').waitFor();
+    await page.getByText('Wallet', { exact: true }).first().waitFor();
+    assert.equal(await page.getByText('Not checked yet').count(), 0);
+    assert.equal(await page.locator('.tfl-note').count(), 0);
     assert.equal(await page.getByText(/all .* of its trades held/).count(), 0);
     await shot(page, 'not-checked');
     await close();

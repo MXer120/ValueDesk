@@ -550,24 +550,33 @@ export class SodexStream {
 
   /** Trades read over REST: the ones this run has not seen and `missing` says are not held go in as prints. How many did. */
   catchUp(rows: readonly SodexWsTrade[], missing: (prints: readonly Print[]) => Print[]): Print[] {
-    const fresh: Print[] = [];
-    for (const r of rows) {
-      const p = sodexPrint(r);
-      if (p && !this.dedup.has(p.id)) fresh.push(p);
-    }
-    const added: Print[] = [];
-    for (const p of missing(fresh)) {
-      if (!this.dedup.add(p.id)) continue;
-      this.onPrint(p);
-      added.push(p);
-    }
-    return added;
+    return catchUpRows(rows, sodexPrint, this.dedup, missing, this.onPrint);
   }
+}
+
+/**
+ * What the catch-up adds: never a row this run's stream brought or added, and of the rest what `missing` says is not held.
+ * `every`: `missing` sees the rows already seen too. Where it matches with a margin each must take its own held print, or a lost
+ * trade could take a neighbour's.
+ */
+function catchUpRows<R>(rows: readonly R[], print: (r: R) => Print | null, dedup: Dedup, missing: (prints: readonly Print[]) => Print[], sink: (p: Print) => void, every = false): Print[] {
+  const fresh: Print[] = [];
+  for (const r of rows) {
+    const p = print(r);
+    if (p && (every || !dedup.has(p.id))) fresh.push(p);
+  }
+  const added: Print[] = [];
+  for (const p of missing(fresh)) {
+    if (!dedup.add(p.id)) continue;
+    sink(p);
+    added.push(p);
+  }
+  return added;
 }
 
 // --- Arcus -----------------------------------------------------------------------------
 
-interface ArcusWsTrade {
+export interface ArcusWsTrade {
   marketDisplayName?: string;
   side?: string;
   price?: string;
@@ -657,6 +666,11 @@ export class ArcusStream {
       const p = arcusPrint(t);
       if (p && this.dedup.add(p.id)) this.onPrint(p);
     }
+  }
+
+  /** As SodexStream.catchUp; `sink` takes what goes in, as an old print goes less far than a live one (engine.ts). */
+  catchUp(rows: readonly ArcusWsTrade[], missing: (prints: readonly Print[]) => Print[], sink: (p: Print) => void = this.onPrint): Print[] {
+    return catchUpRows(rows, arcusPrint, this.dedup, missing, sink, true);
   }
 }
 
