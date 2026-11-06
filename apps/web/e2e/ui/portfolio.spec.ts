@@ -185,17 +185,27 @@ h.test('Total Value counts each dollar once, and copies and bots have no bucket'
   assert.match(sum, /vol\. of trades \$300,00/);
   assert.match(sum, /commission \$0,12/);
   await shot(p, 'trade-tab');
-  // The timeframe is the app's dropdown: choosing changes the summary's window.
-  await p.locator('.pfx-sum .psel__btn').click();
-  await p.locator('.pfx-sum').getByRole('option', { name: '30d' }).waitFor();
-  await p.locator('.pfx-sum').evaluate((el) => el.scrollIntoView({ block: 'start' }));
+  // The timeframe is a switch whose blob travels to the chosen segment.
+  await p.locator('.pfx-sum').getByRole('radio', { name: '30d' }).click();
+  await until(p, async () => p.locator('.pfx-sum .pfx-slide').evaluate((el) => {
+    const on = el.querySelector('.is-on')!.getBoundingClientRect();
+    const blob = el.querySelector('.pfx-slide__blob')!.getBoundingClientRect();
+    return Math.abs(on.left - blob.left) < 1 && Math.abs(on.width - blob.width) < 1;
+  }), 'the blob on 30d', 5_000);
+  // The chart's view is a dropdown.
+  await p.locator('.pfx-chart .psel__btn').click();
+  await p.locator('.pfx-chart').getByRole('option', { name: 'PnL', exact: true }).waitFor();
+  await p.waitForTimeout(350);
+  assert.ok(await p.locator('.pfx-chart').getByRole('option', { name: 'PnL', exact: true }).evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    return el.contains(document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2));
+  }), 'the view list is on top, not clipped');
   await shot(p, 'timeframe', false);
-  await p.locator('.pfx-sum').getByRole('option', { name: '30d' }).click();
-  await until(p, async () => (await p.locator('.pfx-sum .psel__btn').innerText()).includes('30d'), 'the 30-day summary', 5_000);
-  await p.getByRole('radio', { name: 'PnL', exact: true }).click();
+  await p.locator('.pfx-chart').getByRole('option', { name: 'PnL', exact: true }).click();
   await p.locator('.pfx-chart').evaluate((el) => el.scrollIntoView({ block: 'center' }));
   await shot(p, 'pnl', false);
-  await p.getByRole('radio', { name: 'PnL Calendar' }).click();
+  await p.locator('.pfx-chart .psel__btn').click();
+  await p.locator('.pfx-chart').getByRole('option', { name: 'PnL Calendar' }).click();
   await p.locator('.pfc-grid').waitFor();
   await shot(p, 'calendar', false);
   await p.getByRole('button', { name: 'View tiers' }).click();

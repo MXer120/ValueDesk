@@ -102,10 +102,10 @@ function WealthChart({ address }: { address: string | null }) {
     <Card
       className="pf-card--chart pfx-chart"
       title={(
-        <ViewSeg value={view} options={WEALTH_VIEWS} onChange={setView} label="Chart" />
+        <RangePicker value={view} options={WEALTH_VIEWS} onChange={setView} label="Chart" align="start" />
       )}
       action={(
-        <RangePicker value={range} options={RANGES} onChange={setRange} />
+        <ViewSeg value={range} options={RANGES} onChange={setRange} label="Timeframe" />
       )}
     >
       {win && win.change !== null && (

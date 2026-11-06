@@ -36,30 +36,36 @@
 .pfx-value .pf-card__body { display: flex; flex-direction: column; padding: 0; flex: 1; }
 .pfx-value__top { display: flex; flex-direction: column; gap: var(--sp-1); padding: var(--sp-4); }
 .pfx-value__k { color: var(--muted); font-size: var(--fs-xs); }
-.pfx-value__v { color: var(--text); font-family: var(--font-num); font-size: var(--fs-xl); font-weight: 500; font-variant-numeric: tabular-nums; line-height: var(--lh-xl); }
+.pfx-value__v { color: var(--text); font-family: var(--font-num); font-size: 30px; font-weight: 500; font-variant-numeric: tabular-nums; line-height: 36px; }
 .pfx-value__sub { color: var(--muted); font-size: var(--fs-xs); }
-.pfx-value__sub b { margin-left: 4px; font-family: var(--font-num); font-weight: 500; font-variant-numeric: tabular-nums; color: var(--text); }
+.pfx-value__sub b { margin-left: 4px; font-size: var(--fs-base); font-family: var(--font-num); font-weight: 500; font-variant-numeric: tabular-nums; color: var(--text); }
 .pfx-value__sub b.pos, .pfx-kv__row b.pos, .pfx-sum__row b.pos, .pfx-sum__head b.pos { color: var(--pos); }
 .pfx-value__sub b.neg, .pfx-kv__row b.neg, .pfx-sum__row b.neg, .pfx-sum__head b.neg { color: var(--neg); }
 .pfx-kv { display: flex; flex-direction: column; gap: 2px; padding: 0 var(--sp-4) var(--sp-3); }
 .pfx-kv__row { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); min-height: 24px; color: var(--muted); font-size: var(--fs-xs); }
 .pfx-kv__row > span { display: inline-flex; align-items: center; gap: 4px; }
-.pfx-kv__row b { color: var(--text); font-family: var(--font-num); font-weight: 500; font-variant-numeric: tabular-nums; }
+.pfx-kv__row b { font-size: var(--fs-base); color: var(--text); font-family: var(--font-num); font-weight: 500; font-variant-numeric: tabular-nums; }
 .pfx-buckets { display: flex; flex-direction: column; gap: 2px; flex: 1; padding: 0 var(--sp-4) var(--sp-3); }
 .pfx-bucket { width: 100%; border: 0; background: none; text-align: left; font: inherit; cursor: pointer; border-radius: var(--radius-sm); }
 .pfx-bucket:hover { background: rgb(var(--ink) / 0.05); }
 .pfx-bucket:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.pfx-bucket .pfa__part-v { font-size: var(--fs-base); }
 .pfx-bucket .pfa__part-k { display: inline-flex; align-items: center; gap: 4px; }
 
 /* The chart sits straight on its card: no box inside the box, three quiet levels, a line with some weight. */
 .pfx-chart { min-height: 400px; }
 .pfx-chart .pf-card__body { padding: 0 var(--sp-4) var(--sp-3); }
 .pf.pfx .pfx-chart .pf-chart { flex: 1 1 auto; min-height: 280px; height: auto; padding: 0; border: 0; border-radius: 0; background: none; box-shadow: none; }
-.pf.pfx .pfx-chart .pf-chart__grid { stroke: var(--panel-line); opacity: 0.7; stroke-dasharray: 2 4; }
-.pf.pfx .pfx-chart .pf-chart__line { stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
-.pfx-chart__head { display: flex; align-items: baseline; gap: var(--sp-2); margin-bottom: var(--sp-2); color: var(--muted); font-size: var(--fs-xs); }
+.pf.pfx .pfx-chart .pf-chart__line { stroke-width: 1.75; stroke-linejoin: round; stroke-linecap: round; }
+/* The dotted ground: faint on the whole plot, stronger between the line and the start level. */
+.pf-chart__dots.pos { fill: var(--pos); }
+.pf-chart__dots.neg { fill: var(--neg); }
+.pf-chart__ground { opacity: 0.2; }
+.pf-chart__tipval.pos { color: var(--pos); }
+.pf-chart__tipval.neg { color: var(--neg); }
+.pfx-chart__head { display: flex; flex-direction: column; gap: 2px; margin-bottom: var(--sp-2); color: var(--muted); font-size: var(--fs-xs); }
 .pfx-chart__head > span { display: inline-flex; align-items: center; gap: 4px; }
-.pfx-chart__head b { color: var(--text); font-family: var(--font-num); font-weight: 500; font-variant-numeric: tabular-nums; }
+.pfx-chart__head b { font-size: var(--fs-xl); line-height: var(--lh-xl); color: var(--text); font-family: var(--font-num); font-weight: 500; font-variant-numeric: tabular-nums; }
 .pfx-chart__head b.pos { color: var(--pos); }
 .pfx-chart__head b.neg { color: var(--neg); }
 
@@ -145,8 +151,9 @@ button.pfx-promo:hover .pfx-promo__cta span { transform: translateX(3px); }
 .pfx-sum__grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .pfx-sum__cell { display: flex; flex-direction: column; gap: 4px; padding: var(--sp-3) var(--sp-4); min-width: 0; }
 .pfx-sum__cell + .pfx-sum__cell { border-left: 1px solid var(--pf-line); }
-.pfx-sum__head, .pfx-sum__row { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-2); }
-.pfx-sum__head { color: var(--text); font-size: var(--fs-xs); font-weight: 500; }
+.pfx-sum__row { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-2); }
+.pfx-sum__head { display: flex; flex-direction: column; gap: 2px; margin-bottom: var(--sp-1); color: var(--muted); font-size: var(--fs-xs); }
+.pfx-sum__head b { color: var(--text); font-size: var(--fs-xl); line-height: var(--lh-xl); }
 .pfx-sum__row { color: var(--muted); font-size: var(--fs-xs); min-height: 20px; }
 .pfx-sum__head b, .pfx-sum__row b { font-family: var(--font-num); font-weight: 500; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .pfx-sum__row b { color: var(--text); }
@@ -197,6 +204,15 @@ button.pfx-promo:hover .pfx-promo__cta span { transform: translateX(3px); }
 @keyframes pfx-shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
 @media (prefers-reduced-motion: reduce) { .pfx-bone { animation: none; } }
 
+/* The switch: the leaderboard's well, and one translucent blob on the chosen segment, above its word. */
+.pf.pfx .pfx-slide { position: relative; }
+.pf.pfx .pfx-slide > button,
+.pf.pfx .pfx-slide > button.is-on { border-color: transparent; background: none; transition: color var(--dur-fast) var(--ease-out); }
+.pfx-slide__blob { position: absolute; top: 2px; bottom: 2px; left: 0; z-index: 1; border-radius: 6px; background: rgb(var(--ink) / 0.13); box-shadow: inset 0 0 0 1px rgb(var(--ink) / 0.16); pointer-events: none; }
+.pfx-slide__blob.is-ready { transition: transform 280ms cubic-bezier(0.3, 1.25, 0.5, 1), width 280ms cubic-bezier(0.3, 1.25, 0.5, 1); }
+@media (prefers-reduced-motion: reduce) { .pfx-slide__blob.is-ready { transition: none; } }
+/* A card's title clips its text; the chart's title is a dropdown, whose list must leave it. */
+.pf.pfx .pf-h:has(.psel) { overflow: visible; }
 .pfx-range { flex: none; }
 .pfx-range__pop { min-width: 132px; }
 .pfx-range__pop .psel__row { display: flex; align-items: center; justify-content: space-between; width: 100%; }
