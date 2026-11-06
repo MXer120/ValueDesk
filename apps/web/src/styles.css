@@ -1321,6 +1321,15 @@ button.danger:hover:not(:disabled) { background: var(--neg); border-color: var(-
 .navmore__row.is-current .menu-row__ic { color: var(--text); }
 .navmore__out { flex: none; color: var(--dim); }
 .navmore__hint { flex: none; color: var(--warn); font-size: var(--fs-micro); }
+/* No keyboard on a phone. */
+@media (max-width: 760px) { .navmore__row--keys { display: none; } }
+/* The connection, only while it is not live (NavBar.tsx ConnectionPill). */
+.navconn {
+  display: inline-flex; align-items: center; gap: 6px; flex: none; height: 26px; padding: 0 10px;
+  border-radius: var(--radius-full); background: color-mix(in srgb, var(--warn) 14%, transparent);
+  color: var(--warn); font-size: var(--fs-xs); line-height: 1; font-weight: 500; white-space: nowrap;
+}
+.navconn__dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 @media (max-width: 760px) {
   /* Under the bar, across the window: the button sits mid-row there, a 468px menu would run off it. */
   .navmore__menu { position: fixed; top: calc(var(--navbar-live, 56px) + 4px); left: 8px; right: 8px; width: auto; padding: 8px; gap: 0 2px; }
@@ -2304,33 +2313,10 @@ kbd { border: 1px solid var(--line); border-bottom-width: 2px; padding: 0 3px; f
 .dash .dash-mktfilter { color: var(--disabled); }
 .dash .dash-mktfilter:hover { color: var(--text); }
 
-/* ==========================================================================
-   STATUS BAR - the shell sets nothing about it
-   ==========================================================================
-   Markup and behaviour live in components/StatusFooter.tsx (connection, the
-   signing-account switcher, the three actions, and the REST-weight readout that
-   is fenced behind `import.meta.env.DEV` so it never reaches a production
-   build); its box lives in components/StatusFooter.css.
-
-   THE HEIGHT AND THE TYPE STEP ARE NOT SET HERE ANY MORE. This file used to
-   carry a `@media (min-width: 761px) { .shell .sfoot }` block stating a 24px
-   bar, an 18px chip, an 18px icon, a 10px separator and a 6px dot. Every one of
-   those declarations was overridden by the component sheet, which measures the
-   bar at 28px with 20px controls, so the block painted nothing and existed only
-   to contradict the file that wins - the exact shape of bug that gets "fixed"
-   twice in two places and stays broken.
-   The bar is a component and it owns its own box: components/StatusFooter.css,
-   bottom of the file. */
-
 /* --- responsive ----------------------------------------------------------- */
 
-/* THE STATUS BAR IS CHROME, SO IT SITS AT THE BOTTOM OF THE SCREEN.
- *
- * The shell is the viewport at every width. The navbar and the status bar are
- * flex siblings of the scrolling page, so they stay on screen without
- * `position: sticky` — a sticky footer paints ON TOP of whatever is at the
- * bottom of the viewport, which hid the order ticket's slippage row and the
- * chart's time axis on a phone. The page itself scrolls inside `.appcontent`.
+/* The shell is the viewport at every width. The navbar is a flex sibling of the
+ * scrolling page, so it stays on screen. The page itself scrolls inside `.appcontent`.
  * `100dvh` follows a phone browser's toolbar; `100vh` is the fallback. */
 .shell {
   display: flex;
@@ -3298,7 +3284,6 @@ button.coh-pick__btn,
 .mkt-spark-tip,
 .mkt-bookpop,
 .mkdepth-tip,
-.sfoot-pop,
 .navnotes__panel,
 .coh-pick__pop,
 .coh-lean__tip,

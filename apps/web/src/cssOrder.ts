@@ -28,7 +28,7 @@ import './components/PlatformSelect.css';
 import './components/EmptyState.css';
 import './components/livefeed/LiveFeed.css';
 import './components/news/NewsFeed.css';
-import './components/StatusFooter.css';
+import './components/ShortcutsDialog.css';
 import './feedback/feedback.css';
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';

@@ -76,13 +76,19 @@ export async function loadReferral(address: string): Promise<ReferralState> {
 }
 
 /** The wallet's state; `unknown` until SoDEX has answered. Read again whenever the tab comes back. */
-export function useReferral(address: string | null): ReferralState {
+/** What is known already, asking SoDEX nothing: for a badge beside the one useReferral that does. */
+export function useReferralKnown(address: string | null): ReferralState {
   const wallet = address?.toLowerCase() ?? '';
-  const s = useSyncExternalStore(
+  return useSyncExternalStore(
     (l) => { listeners.add(l); return () => { listeners.delete(l); }; },
     () => (wallet ? states.get(wallet) ?? 'unknown' : 'unknown'),
     () => 'unknown' as ReferralState,
   );
+}
+
+export function useReferral(address: string | null): ReferralState {
+  const wallet = address?.toLowerCase() ?? '';
+  const s = useReferralKnown(address);
   useEffect(() => {
     if (!wallet) return;
     void loadReferral(wallet);

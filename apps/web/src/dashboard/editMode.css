@@ -88,7 +88,7 @@
   z-index: 2;
   left: 50%;
   right: auto;
-  bottom: calc(var(--sfoot-h, 28px) + var(--sp-3));
+  bottom: var(--sp-3);
   top: auto;
   transform: translateX(-50%);
   opacity: 1;

@@ -73,7 +73,7 @@
 }
 .side__btn.is-raised:hover { background: #2a2a2d; }
 .side .navnotes__dot,
-.side .settings__dot { top: 10px; right: 10px; }
+.side__addr .settings__dot { top: 6px; right: 6px; z-index: 3; }
 
 /* The notifications and settings menus open beside the rail, under the navbar, and scroll
    rather than run off the bottom of a short window. */
@@ -194,8 +194,6 @@
 }
 .nav-div { flex: none; width: 1px; height: 24px; background: rgb(var(--ink) / 0.12); }
 
-/* The status bar spans its own column, not the window (StatusFooter.css widens it to 100vw). */
-.shell--rail .sfoot { margin-inline: calc(-1 * var(--sp-1)); }
 
 /* The wallet at the foot of the rail (SideBar.tsx SideWallet): Connect in the app's
    green, raised like the market search; once connected, the wallet's logo. */

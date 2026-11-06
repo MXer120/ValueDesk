@@ -4,17 +4,15 @@
  * terminals (Trade, News, and any the user adds - dashboard/terminals.ts), the
  * one on screen raised, and a + for a new one; then the tools that are the same
  * on every page - the market search, the
- * money (deposit, transfer, withdraw), the app's own (notifications, settings) -
- * and the wallet at the foot. The pages themselves are the navbar's links.
+ * money (deposit, transfer, withdraw) - and the wallet at the foot, whose menu holds Settings. The pages themselves are the navbar's links.
  * Below 761px there is no rail and the tools sit in the navbar again (NavBar.tsx
  * `rail`).
  *
- * Every button carries its name as a tooltip and an accessible name; the
- * notifications and settings menus open to the right of the rail (shell.css).
+ * Every button carries its name as a tooltip and an accessible name.
  */
 import { useEffect, useState, type MouseEvent, type ReactNode } from 'react';
 import { BrandMark } from './BrandMark';
-import { SettingsMenu } from './SettingsMenu';
+import { SettingsMenu, useSettingsBadge } from './SettingsMenu';
 import { AddressMenu } from './NavBar';
 import { ConnectedWalletLogo } from './funds/ui';
 import { usePresence } from './motion';
@@ -126,12 +124,8 @@ export function SideBar({ address, hasLayout, dashLocked, onOpenSearch, tab, onN
             <path d="M3.5 12.5v2.2c0 1 .8 1.8 1.8 1.8h9.4c1 0 1.8-.8 1.8-1.8v-2.2" />
           </SideButton>
         </div>
-        <span className="side__sep" aria-hidden="true" />
-        <div className="side__group">
-          {/* The bell lives in the navbar with the other notifications (NavBar.tsx). */}
-          <SettingsMenu hasLayout={hasLayout} dashLocked={dashLocked} address={address} />
-        </div>
       </nav>
+      <SettingsMenu hasLayout={hasLayout} dashLocked={dashLocked} address={address} trigger={false} />
       <SideWallet address={address} onPortfolio={() => onNavigate('portfolio')} />
     </aside>
   );
@@ -162,6 +156,7 @@ function SideWallet({ address, onPortfolio }: { address: string | null; onPortfo
   }, [hasAddress]);
 
   const money = useMoneyNotice();
+  const badge = useSettingsBadge(address);
   if (!address) {
     return (
       <div className="side__wallet">
@@ -209,6 +204,8 @@ function SideWallet({ address, onPortfolio }: { address: string | null; onPortfo
         onPointerEnter={() => prefetchAccountTotals(address)}
       >
         <ConnectedWalletLogo size={22} />
+        {/* Settings live in this menu now, so the wallet carries their "your profile is waiting". */}
+        {badge.profile && <span className="settings__dot settings__dot--go" aria-hidden="true" />}
       </button>
       {pres.mounted && <AddressMenu address={address} onClose={() => setOpen(false)} closing={pres.closing} onExited={pres.done} onPortfolio={onPortfolio} />}
     </div>

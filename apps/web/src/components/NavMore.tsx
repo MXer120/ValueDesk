@@ -9,14 +9,21 @@
  * a plain click opens it in place. Community and News leave the site, in a new tab, and say so
  * with a small arrow. The menu is the app's glass dropdown (.menu-popup) with its rows; Escape
  * or a click outside closes it. On a phone it spans the window under the bar.
+ *
+ * The Impressum and the other legal documents are reachable from here on every page (owner 2026-11-06:
+ * out of the status bar, which is gone). One row; the legal page lists all the documents beside it.
  */
 import { useEffect, useLayoutEffect, useRef, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
-import { EXCLUDED_PATH, LIMITS_PATH, SODEX_LABELS, SODEX_VIEWS, STATUS_PATH, pathForSodexView, pathForTab, type SodexView, type Tab } from '../router';
+import { EXCLUDED_PATH, LIMITS_PATH, SODEX_LABELS, SODEX_VIEWS, STATUS_PATH, pathForLegal, pathForSodexView, pathForTab, type LegalPage, type SodexView, type Tab } from '../router';
+import { openShortcuts } from './ShortcutsDialog';
 import { FeedbackIcon, FEEDBACK_LABEL, openFeedback } from '../feedback/FeedbackButton';
 import { FEEDBACK_URL } from '../feedback/feedback';
 import { openSettings } from '../settingsBus';
 import { usePresence } from './motion';
 import { useHoverMenu } from './useHoverMenu';
+
+/** More's legal row lands here; the legal page lists the other documents beside it. */
+const LEGAL_HOME: LegalPage = 'impressum';
 
 /** What the status page has open right now, for the dot: worst first. */
 export type NavAlert = 'down' | 'incident' | 'maintenance' | null;
@@ -42,7 +49,7 @@ const SODEX_ICONS: Record<SodexView, ReactNode> = {
 };
 
 /** A page of the app: a link with its href, opened in place by a plain click. */
-function PageRow({ href, icon, label, current, onOpen, children }: { href: string; icon: ReactNode; label: string; current?: boolean; onOpen?: () => void; children?: ReactNode }) {
+function PageRow({ href, icon, label, current, onOpen, children }: { href: string; icon: ReactNode; label: ReactNode; current?: boolean; onOpen?: () => void; children?: ReactNode }) {
   const go = (e: ReactMouseEvent) => {
     if (!onOpen || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
     e.preventDefault();
@@ -68,7 +75,7 @@ function OutRow({ href, icon, label }: { href: string; icon: ReactNode; label: s
   );
 }
 
-export function NavMore({ alert = null, tab = null, limits = false, status = false, excluded = false, onNavigate, onOpenStatus, onOpenExcluded, onOpenLimits, onOpenSodex, sodexOn = null }: {
+export function NavMore({ alert = null, tab = null, limits = false, status = false, excluded = false, onNavigate, onOpenStatus, onOpenExcluded, onOpenLimits, onOpenSodex, sodexOn = null, onOpenLegal, legalOn = false, settingsRow = false }: {
   alert?: NavAlert;
   /** The tab on screen, for the Leaderboard row and the button. */
   tab?: Tab | null;
@@ -83,6 +90,10 @@ export function NavMore({ alert = null, tab = null, limits = false, status = fal
   /** Open one of SoDEX's products; without it there is no SoDEX group. */
   onOpenSodex?: (view: SodexView) => void;
   sodexOn?: SodexView | null;
+  onOpenLegal?: (page: LegalPage) => void;
+  legalOn?: boolean;
+  /** No wallet menu to hold Settings: they sit here instead. */
+  settingsRow?: boolean;
 }) {
   const root = useRef<HTMLDivElement>(null);
   const menu = useRef<HTMLDivElement>(null);
@@ -92,7 +103,7 @@ export function NavMore({ alert = null, tab = null, limits = false, status = fal
     shut();
     then?.();
   };
-  const here = tab === 'leaderboard' || limits || status || excluded || sodexOn !== null;
+  const here = tab === 'leaderboard' || limits || status || excluded || legalOn || sodexOn !== null;
 
   /* The button sits mid-bar, so the menu steps left by what would run off the window. On a phone CSS places it. */
   useLayoutEffect(() => {
@@ -189,6 +200,16 @@ export function NavMore({ alert = null, tab = null, limits = false, status = fal
               <span className="menu-row__ic"><FeedbackIcon /></span>
               <span className="menu-row__label">{FEEDBACK_LABEL}</span>
             </button>
+            <button type="button" role="menuitem" className="menu-row navmore__row navmore__row--keys" onClick={close(openShortcuts)}>
+              <span className="menu-row__ic"><Icon><rect x="2.5" y="5" width="15" height="10" rx="2" /><path d="M5.500 8h.01M8.500 8h.01M11.500 8h.01M14.500 8h.01M6.500 12h7" /></Icon></span>
+              <span className="menu-row__label">Keyboard shortcuts</span>
+            </button>
+            {settingsRow && (
+              <button type="button" role="menuitem" className="menu-row navmore__row" onClick={close(() => openSettings('profile'))}>
+                <span className="menu-row__ic"><Icon><path d="M3 6h7M14 6h3M3 14h3M10 14h7" /><circle cx="12" cy="6" r="2" /><circle cx="8" cy="14" r="2" /></Icon></span>
+                <span className="menu-row__label">Settings</span>
+              </button>
+            )}
             <OutRow
               href={COMMUNITY_URL}
               label="Community"
@@ -198,6 +219,13 @@ export function NavMore({ alert = null, tab = null, limits = false, status = fal
               href={NEWS_URL}
               label="News & updates"
               icon={<Icon><path d="M3.500 3.500h3.200l9.800 13h-3.200l-9.800-13ZM16 3.500l-5 5.700M4 16.500l5.200-5.900" /></Icon>}
+            />
+            <PageRow
+              href={pathForLegal(LEGAL_HOME)}
+              label={<><span lang="de">Impressum</span><span> &amp; legal</span></>}
+              current={legalOn}
+              onOpen={onOpenLegal && close(() => onOpenLegal(LEGAL_HOME))}
+              icon={<Icon><path d="M6 3h6l3 3v11H6Z" /><path d="M12 3v3h3M8.500 10h4M8.500 13h4" /></Icon>}
             />
           </div>
         </div>

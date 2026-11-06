@@ -11,7 +11,7 @@ import { useAsync, useConnState, useMediaQuery, useSession, useStored, useSymbol
 import { hub } from './ws';
 import { Guarded } from './components/ErrorBoundary';
 import { BETA_CHANNEL } from './algo/liveAlgos';
-import { StatusFooter } from './components/StatusFooter';
+import { ShortcutsDialog, openShortcuts } from './components/ShortcutsDialog';
 import { CommandPalette, loadPalette, openPalette, paletteReady } from './components/palette/lazyPalette';
 import type { TradeContext } from './dashboard';
 import { MaintenanceBanner } from './components/MaintenanceBanner';
@@ -26,7 +26,6 @@ import { UnlockDialog } from './components/account/UnlockDialog';
 import { AccountSetup } from './setup/AccountSetup';
 import { OnboardingHost, useOnboardingGate } from './onboarding/OnboardingHost';
 import { IndexPrompt } from './components/IndexPrompt';
-import { goToWallet } from './components/account/actions';
 import { useWalletBridge } from './components/account/useWallet';
 import { configureFromHealth } from './trading/config';
 import { restoreTrading } from './trading/session';
@@ -314,7 +313,6 @@ function AppShell() {
   const [orderCount, setOrderCount] = useState(0);
   // Lives here, not in the footer, because two separate things open it: the
   // footer's help button and the global `?` shortcut.
-  const [helpOpen, setHelpOpen] = useState(false);
 
   /* Mirrors Dashboard.tsx's `locked` so the navbar icon can show it. Dashboard
    * broadcasts `dash:lock` on every change including its own mount; the
@@ -445,10 +443,9 @@ function AppShell() {
   // useCallback, not an inline arrow: the shortcut hook takes this as an effect
   // dependency, and a fresh identity every render would tear down and re-bind
   // the window keydown listener on every state change in the app.
-  const openHelp = useCallback(() => setHelpOpen(true), []);
   useKeyboardShortcuts({
     setTab, engine, symbol, unlocked: session?.unlocked ?? false, onChanged: bump,
-    onOpenSearch: openSearch, onHelp: openHelp,
+    onOpenSearch: openSearch, onHelp: openShortcuts,
   });
 
   const ctx = useMemo(
@@ -528,9 +525,8 @@ function AppShell() {
        *
        * Hierarchy here is carried by colour alone: the wordmark and the current
        * page are --text, every other link is --muted, and the active item gets
-       * no pill, no box and no underline. The connection state used to live up
-       * here as a dot and a word; it belongs to the status bar at the bottom of
-       * the screen and is not duplicated.
+       * no pill, no box and no underline. The connection shows only when it is
+       * not live (NavBar.tsx ConnectionPill).
        *
        * The "MAINNET - real funds" block is gone with it. A filled red badge in
        * the top-right was the loudest pixel on a 1920px trading screen, louder
@@ -544,6 +540,10 @@ function AppShell() {
         dashLocked={dashLocked}
         onOpenSearch={() => openSearch()}
         rail={rail}
+        connLabel={connLabel}
+        connOk={connState === 'open' && upstreamState === 'open'}
+        legalOn={!!legal}
+        onOpenLegal={openLegal}
         engine={engine}
         onEngine={switchEngine}
         alert={navAlertOf(health, healthDown)}
@@ -721,29 +721,7 @@ function AppShell() {
           </Suspense>
         </Guarded>
 
-        {/* The workspace bar: connection + which account we are signing as on
-            the left, the two things worth reaching for on the right. What used
-            to be here - a REST-weight readout and a printed shortcut list - was
-            developer scaffolding; the readout survives inside StatusFooter
-            behind import.meta.env.DEV, and the shortcut list became a real
-            dialog reachable from both the `?` key and a button. */}
-        <Guarded name="Status footer">
-          <StatusFooter
-            connLabel={connLabel}
-            connOk={connState === 'open' && upstreamState === 'open'}
-            session={session}
-            address={address}
-            health={health ?? null}
-            onGoToWallet={() => goToWallet({ address, hasProvider: !!provider, unlocked: session?.unlocked ?? false })}
-            onSessionChanged={refreshSession}
-            helpOpen={helpOpen}
-            onHelpOpen={setHelpOpen}
-            legal={legal}
-            onOpenLegal={openLegal}
-            status={status && !legal}
-            onOpenStatus={openStatus}
-          />
-        </Guarded>
+        <ShortcutsDialog />
       </div>
 
       {/* Search / Cmd+K: Home, Traders, Screener, Assets - components/palette/. */}

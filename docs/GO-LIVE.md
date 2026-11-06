@@ -12,11 +12,11 @@ Status: 2026-10-27. An item is ticked only when it holds on the production site.
 > we don't go live without this being done." (owner, 2026-10-27) - extended the same day:
 > a chat with replies in the bell, screenshots, right-click, Help & FAQ in Settings.
 
-- [x] Every page shows **Send feedback** in the workspace bar at the bottom
-      (`apps/web/src/feedback/FeedbackButton.tsx`, rendered by
-      `components/StatusFooter.tsx`). **Guarded by a test:**
-      `apps/web/src/feedback/feedback.test.tsx` fails if the bar stops rendering the
-      entry, or the shell stops rendering the bar or the feedback host.
+- [x] Every page offers **Send feedback** in the navbar's More menu
+      (`components/NavMore.tsx`) and in the wallet menu; the status bar that held it is gone
+      (owner, 2026-11-06). **Guarded by a test:**
+      `apps/web/src/feedback/feedback.test.tsx` fails if More stops offering it, or the shell
+      stops rendering the navbar or the feedback host.
 - [x] Also from Settings - Help & FAQ (`feedback/HelpSection.tsx`, with the FAQ) and from
       a right-click anywhere ("Send feedback about this", `feedback/FeedbackMenu.tsx`; the
       dashboard's own menu has it too), which attaches the clicked element.
