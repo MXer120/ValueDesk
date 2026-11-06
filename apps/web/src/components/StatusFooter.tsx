@@ -203,7 +203,13 @@ export function StatusFooter({
   /* The footer chip is on screen on every page, so it is the address most
      likely to end up in a screenshot. */
   const maskAddr = useAddressMask();
-  const chipLabel = activeAddr ? maskAddr(activeAddr) : 'Connect account';
+  /* A phone's bar has no room for the long form in every language (2026-11-06). */
+  const chipLabel = activeAddr ? maskAddr(activeAddr) : (
+    <>
+      <span className="sfoot-chiplong">Connect account</span>
+      <span className="sfoot-chipshort">Connect</span>
+    </>
+  );
   // The sub-label is the account's STATE, never a placeholder. With a key
   // stored but locked, "locked" is the true answer; with a wallet connected
   // and no key, "read-only" is.
