@@ -160,6 +160,11 @@ for (const scenario of SCENARIOS) {
     await page.evaluate((o) => (window as any).__vsLoad.set(o), l);
     fakeExec.bots = l.bots;
     await page.waitForTimeout(8_000);
+    // A wider timeframe (interval=1D) brings more of the order lines inside the pane: the labels' worst case.
+    const interval = arg('interval', '');
+    if (interval) await page.getByRole('button', { name: interval, exact: true }).first().click({ timeout: 5_000 }).catch((e) => console.log('interval', String(e).slice(0, 160)));
+    if (interval) await page.waitForTimeout(3_000);
+    console.log('labels', JSON.stringify(await page.evaluate(() => ({ shown: document.querySelectorAll('.kc-lbl:not([hidden])').length, blurred: document.querySelectorAll('.kc-lbl.is-blur:not([hidden])').length, tagsBlurred: document.querySelectorAll('.kc-lbl__axis.is-blur:not([hidden])').length }))));
     await page.evaluate(() => (window as any).__vsLoad.reset());
     fakeExec.bytes = 0;
     fakeExec.polls = 0;

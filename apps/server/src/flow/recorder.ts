@@ -110,10 +110,14 @@ export class FlowRecorder {
       let o = this.open.get(k);
       if (!o) {
         o = { mid, t: ct, prints: [], dirty: false, at: 0 };
-        // A slot already closed (or written by an earlier run): reopen it with what is on disk.
-        if (ct + CHUNK_MS + CLOSE_MS <= this.now()) {
+        // A slot already closed, or begun before this run: reopen it with what is on disk. A slot begun before a
+        // restart used to start empty here, and its next write replaced what the last run held.
+        const closed = ct + CHUNK_MS + CLOSE_MS <= this.now();
+        if (closed || ct < this.runStart) {
           const old = this.store.chunk(mid, ct);
           if (old) o.prints = chunkPrints(decodeChunk(old));
+        }
+        if (closed) {
           this.stats.late++;
           this.markLate(mid, ct);
         }
@@ -125,6 +129,49 @@ export class FlowRecorder {
     } catch (e) {
       this.lastError = `add: ${String(e)}`;
     }
+  }
+
+  /**
+   * Of these prints, the ones not held: exact on time, price, size and both parties, and counted, as one wallet can fill
+   * the same counterparty twice at one price in one millisecond. Chunks keep no trade id. If a chunk cannot be read,
+   * nothing counts as missing: a print left out can be fetched again, one added twice cannot be taken out.
+   */
+  missing(prints: readonly Print[]): Print[] {
+    const out: Print[] = [];
+    const held = new Map<string, Map<string, number>>();
+    try {
+      for (const p of prints) {
+        const mid = this.markets.get(`${p.venue}|${p.symbol}`);
+        if (mid === undefined) { out.push(p); continue; }
+        const party = (acct: string): number =>
+          this.parties.get(`${p.venue}|${ID_VENUES.has(p.venue) ? acct : acct.toLowerCase()}`) ?? -1;
+        const ct = Math.floor(p.t / CHUNK_MS) * CHUNK_MS;
+        const k = `${mid}|${ct}`;
+        let counts = held.get(k);
+        if (!counts) {
+          counts = new Map();
+          const open = this.open.get(k);
+          let list: readonly FlowPrint[] = open?.prints ?? [];
+          if (!open) {
+            const blob = this.store.chunk(mid, ct);
+            if (blob) list = chunkPrints(decodeChunk(blob));
+          }
+          for (const f of list) {
+            const key = `${f.t}|${f.px}|${f.sz}|${f.buyer}|${f.seller}`;
+            counts.set(key, (counts.get(key) ?? 0) + 1);
+          }
+          held.set(k, counts);
+        }
+        const key = `${p.t}|${p.px}|${p.sz}|${party(p.buyer)}|${party(p.seller)}`;
+        const n = counts.get(key) ?? 0;
+        if (n > 0) counts.set(key, n - 1);
+        else out.push(p);
+      }
+    } catch (e) {
+      this.lastError = `missing: ${String(e)}`;
+      return [];
+    }
+    return out;
   }
 
   private markLate(mid: number, ct: number): void {

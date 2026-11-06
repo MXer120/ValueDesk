@@ -6,6 +6,7 @@ import { SideBar } from './components/SideBar';
 import './components/shell.css';
 import { DEFAULT_TAB, SOON_TABS, TABS, isExcludedPath, isLimitsPath, isStatusPath, landingTab, legalForPath, sodexViewForPath, tabForPath, useRoute, type LegalPage, type SodexView, type Tab } from './router';
 import { api, type Engine } from './api';
+import { askTrade } from './components/TradeConfirm';
 import { useAsync, useConnState, useMediaQuery, useSession, useStored, useSymbols } from './hooks';
 import { hub } from './ws';
 import { Guarded } from './components/ErrorBoundary';
@@ -846,9 +847,18 @@ function useKeyboardShortcuts({
         return;
       }
       if (e.key === 'c' && unlocked) {
-        if (confirm('Cancel every open order?')) {
-          api.cancelAll(engine).then(onChanged).catch(() => {});
-        }
+        // One stray letter: this asks even when Cancel all's window was turned off.
+        void askTrade({
+          kind: 'cancelAll',
+          force: true,
+          title: `Cancel all ${engine} orders`,
+          tone: 'danger',
+          confirmLabel: 'Cancel every open order',
+          cancelLabel: 'Keep them',
+          note: `The C key cancels every order open on ${engine === 'perps' ? 'Futures' : 'Spot'}. Open positions are not closed by this.`,
+        }).then((ok) => {
+          if (ok) api.cancelAll(engine).then(onChanged).catch(() => {});
+        });
         return;
       }
       if (e.key === '?') {

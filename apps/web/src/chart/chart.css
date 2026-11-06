@@ -1935,9 +1935,90 @@ body.kc-flow-resizing:has(.kc-flow-wrap.is-under) { cursor: row-resize; }
 .kc-newspop__fig i { color: var(--muted); font-family: var(--font-num); font-size: 10px; font-style: normal; }
 .kc-newspop__figs.is-out .kc-newspop__fig { background: color-mix(in srgb, var(--pos) 9%, transparent); }
 
-/* The ticket's unplaced order (DraftOrderLines.tsx): a placed order's dotted line, boxes and price tag
-   (orderOverlays.ts: 20px, 12px, weight 600, radius 3, padding 7, gap 2), darker and pulsing. Nothing else tells
-   them apart. The pulse is opacity, so the compositor's alone. */
+/* An order line's words and price tag (orderLabelDom.ts): separate rounded boxes on one line, HTML so that the line
+   and the candles blur behind them. A row with no blur (past its cap, potato mode) is solid, so the line cannot show
+   in the gaps between its boxes either. Its width comes from orderOverlays.ts: border + padding = LABEL_PAD. */
+.kc-lbls {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 3;
+  width: 100%;
+  overflow: hidden;
+  pointer-events: none;
+}
+.kc-lbl {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: flex;
+  gap: 2px;
+  height: 18px;
+  border-radius: 4px;
+  background: var(--bg);
+  contain: layout style;
+  white-space: nowrap;
+}
+.kc-lbl[hidden], .kc-lbl__axis[hidden] { display: none; }
+.kc-lbl.is-blur { background: none; -webkit-backdrop-filter: blur(5px); backdrop-filter: blur(5px); }
+.kc-lbl__box {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  height: 18px;
+  padding: 0 4px;
+  border: 1px solid var(--c);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--c);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
+}
+.kc-lbl.is-blur .kc-lbl__box { background: color-mix(in srgb, var(--bg) 62%, transparent); }
+.kc-lbl .kc-lbl__box.is-solid { background: var(--c); color: var(--kc-on, #0e0d0c); }
+.kc-lbl .kc-lbl__box.is-value { border-color: rgb(var(--ink) / 0.62); color: var(--text); }
+.kc-lbl__box.is-cross { padding: 0; }
+.kc-lbl__axis {
+  position: absolute;
+  top: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+  height: 18px;
+  padding: 0 4px;
+  border: 1px solid var(--c);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--c);
+  font-family: var(--font-num);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  contain: layout style;
+}
+.kc-lbl__axis.is-blur {
+  background: color-mix(in srgb, var(--bg) 62%, transparent);
+  -webkit-backdrop-filter: blur(5px);
+  backdrop-filter: blur(5px);
+}
+.is-axis-left > .kc-lbl__axis { right: auto; left: 0; }
+html.is-potato .kc-lbl.is-blur { background: var(--bg); -webkit-backdrop-filter: none; backdrop-filter: none; }
+html.is-potato .kc-lbl.is-blur .kc-lbl__box:not(.is-solid),
+html.is-potato .kc-lbl__axis.is-blur { background: var(--bg); -webkit-backdrop-filter: none; backdrop-filter: none; }
+@media (prefers-reduced-transparency: reduce) {
+  .kc-lbl.is-blur { background: var(--bg); -webkit-backdrop-filter: none; backdrop-filter: none; }
+  .kc-lbl.is-blur .kc-lbl__box:not(.is-solid),
+  .kc-lbl__axis.is-blur { background: var(--bg); -webkit-backdrop-filter: none; backdrop-filter: none; }
+}
+
+/* The ticket's unplaced order (DraftOrderLines.tsx): a placed order's dotted line, boxes and price tag, darker and
+   pulsing. Nothing else tells them apart. The pulse is opacity, so the compositor's alone, and it is on the boxes,
+   not on what holds them: an ancestor with opacity would cut the blur off from the chart behind it. */
 .kc-draft {
   position: absolute;
   z-index: 4;
@@ -1947,7 +2028,7 @@ body.kc-flow-resizing:has(.kc-flow-wrap.is-under) { cursor: row-resize; }
 }
 .kc-draft__row {
   --draft-ink: color-mix(in srgb, var(--pos) 72%, #000);
-  animation: kc-draft-pulse 1.6s ease-in-out infinite;
+  --c: var(--draft-ink);
 }
 .kc-draft__row.is-sell { --draft-ink: color-mix(in srgb, var(--neg) 72%, #000); }
 .kc-draft__line {
@@ -1957,48 +2038,19 @@ body.kc-flow-resizing:has(.kc-flow-wrap.is-under) { cursor: row-resize; }
   height: 0;
   border-top: 1px dotted var(--draft-ink);
 }
-.kc-draft__tag {
-  position: absolute;
-  display: flex;
-  gap: 2px;
-  white-space: nowrap;
-}
-.kc-draft__word,
-.kc-draft__amount,
-.kc-draft__price {
-  box-sizing: border-box;
-  height: 20px;
-  padding: 0 6px;
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 18px;
-  border-radius: 3px;
-  border: 1px solid var(--draft-ink);
-}
-.kc-draft__word,
-.kc-draft__price {
-  color: var(--kc-draft-on, var(--bg));
-  background: var(--draft-ink);
-}
-.kc-draft__amount {
-  font-family: var(--font-num);
-  color: var(--text);
-  background: var(--bg);
-  border-color: var(--text);
-}
-.kc-draft__price {
-  position: absolute;
-  right: 0;
-  padding: 0 3px;
-  font-family: var(--font-num);
-  white-space: nowrap;
-}
+.kc-draft__line,
+.kc-draft .kc-lbl__box,
+.kc-draft .kc-lbl__axis { animation: kc-draft-pulse 1.6s ease-in-out infinite; }
 @keyframes kc-draft-pulse {
   0%, 100% { opacity: 0.65; }
   50% { opacity: 1; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .kc-draft__row { animation: none; opacity: 0.75; }
+  .kc-draft__line,
+  .kc-draft .kc-lbl__box,
+  .kc-draft .kc-lbl__axis { animation: none; opacity: 0.75; }
 }
 /* Nobody at the page (attention.ts): it rests as under reduced motion - the pulse recomposited the chart 60 times a second. */
-:root[data-still] .kc-draft__row { animation: none; opacity: 0.75; }
+:root[data-still] .kc-draft__line,
+:root[data-still] .kc-draft .kc-lbl__box,
+:root[data-still] .kc-draft .kc-lbl__axis { animation: none; opacity: 0.75; }

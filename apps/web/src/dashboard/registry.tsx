@@ -239,7 +239,7 @@ export const TRADE_PANELS: PanelDefinition<TradeContext>[] = [
               // and it grows instead of fitting.
               scroll: 'hidden',
               content: (
-                <Book engine={c.engine} symbol={c.symbol} sym={c.sym} onPick={c.onPrice} showTitle={false} />
+                <Book engine={c.engine} symbol={c.symbol} sym={c.sym} onPick={c.onPrice} showTitle={false} address={c.address} />
               ),
             },
             {

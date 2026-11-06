@@ -52,6 +52,7 @@ import { Private } from '../privacy';
 import { estimateLiquidationPrice } from '../risk';
 import { signedMarginAmount } from '../trading/orderParams';
 import { useConfirm } from './Modal';
+import { askTrade } from './TradeConfirm';
 import { TpSlSheet, type TpSlConfirm } from './TpSlSheet';
 import { planExit, type ExitExisting } from './tpsl';
 import { onPositionAction } from '../positionActions';
@@ -82,6 +83,8 @@ const dashed = (s: string): string => (s === '-' ? EM : s);
 const usd = (v: unknown): string => dashed(fmtUsd(v as string | number | undefined));
 const price = (v: unknown, tick?: string): string => dashed(tick ? fmtPrice(v as string | number | undefined, tick) : fmt(v as string | number | undefined));
 const qty = (v: unknown, step?: string): string => dashed(step ? fmtQty(v as string | number | undefined, step) : fmt(v as string | number | undefined));
+/** An order's side as the market says it: long and short on futures, buy and sell on spot. */
+const spotWord = (engine: Engine, buy: boolean): string => (engine === 'perps' ? (buy ? 'Long' : 'Short') : (buy ? 'Buy' : 'Sell'));
 const when = (v: unknown): string => dashed(fmtDateTime(num(v) || undefined));
 
 interface Ctx {
@@ -563,22 +566,31 @@ function PositionsInner({
     // The review states the side that will actually be submitted, not only the
     // direction being closed - those are opposites.
     const sym = byName.get(symbol);
-    const ok = await confirm({
+    const size = Math.abs(amt);
+    const entry = num(pick(p, 'avgEntryPrice'));
+    const mark = markOf(symbol) ?? 0;
+    const lev = num(pick(p, 'leverage'));
+    const value = mark > 0 ? size * mark : 0;
+    const pnl = mark > 0 && entry > 0 ? (mark - entry) * size * (dir === 'long' ? 1 : -1) : null;
+    const taker = num(sym?.takerFee);
+    const ok = await askTrade({
+      kind: 'close',
       title: 'Close position at market',
-      danger: true,
+      tone: 'danger',
       confirmLabel: 'Close at market',
       cancelLabel: 'Keep position',
-      body: (
-        <table className="kv">
-          <tbody>
-            <tr><th>Market</th><td>{sym?.displayName ?? symbol}</td></tr>
-            <tr><th>Position</th><td className={dir === 'long' ? 'pos' : 'neg'}>{dir}</td></tr>
-            <tr><th>Size</th><td>{qty(Math.abs(amt), sym?.stepSize)} {sym?.baseCoin ?? ''}</td></tr>
-            <tr><th>Entry</th><td>{price(pick(p, 'avgEntryPrice'), sym?.tickSize)}</td></tr>
-            <tr><th>Order sent</th><td>{dir === 'long' ? 'SELL' : 'BUY'} market, reduce-only</td></tr>
-          </tbody>
-        </table>
-      ),
+      market: sym?.displayName ?? symbol,
+      coin: sym?.baseCoin,
+      side: { word: lev > 0 ? `${dir === 'long' ? 'Long' : 'Short'} ${fmt(lev, 0)}x` : dir === 'long' ? 'Long' : 'Short', tone: dir === 'long' ? 'pos' : 'neg' },
+      facts: [
+        { label: 'Size', value: `${qty(size, sym?.stepSize)} ${coinLabel(sym?.baseCoin) || ''}`.trim() },
+        { label: 'Entry', value: price(pick(p, 'avgEntryPrice'), sym?.tickSize) },
+        ...(mark > 0 ? [{ label: 'Mark', value: price(mark, sym?.tickSize) }] : []),
+        ...(value > 0 ? [{ label: 'Est. value', value: fmtUsd(value) }] : []),
+        ...(pnl !== null ? [{ label: 'Est. PnL at mark', value: `${pnl > 0 ? '+' : ''}${fmtUsd(pnl)}`, tone: pnl > 0 ? 'pos' as const : pnl < 0 ? 'neg' as const : undefined }] : []),
+        ...(value > 0 && taker > 0 ? [{ label: 'Est. fee', value: fmtUsd(value * taker) }] : []),
+        { label: 'Order sent', value: `${dir === 'long' ? 'SELL' : 'BUY'} market, reduce-only` },
+      ],
     });
     if (!ok) return;
     setBusy(true);
@@ -603,6 +615,34 @@ function PositionsInner({
   async function saveExits(req: TpSlConfirm) {
     if (!posEdit || posEdit.kind !== 'tpsl') return;
     const edit = posEdit;
+    const sym = byName.get(edit.symbol);
+    const legsWord = { tp: 'Take profit', sl: 'Stop loss' } as const;
+    const facts = ([['tp', req.tp, edit.tp], ['sl', req.sl, edit.sl]] as const).flatMap(([kind, draft, existing]) => {
+      const plan = planExit(existing, draft);
+      if (plan.action === 'keep') return [];
+      if (plan.action === 'cancel') return [{ label: legsWord[kind], value: 'Removed' }];
+      const at = plan.action === 'modify' ? draft.price : plan.price;
+      return [{ label: legsWord[kind], value: `${price(at, sym?.tickSize)}${draft.limit ? ', limit' : ', at market'}`, tone: kind === 'tp' ? 'pos' as const : 'neg' as const }];
+    });
+    if (facts.length > 0) {
+      const ok = await askTrade({
+        kind: 'tpsl',
+        title: 'Confirm take profit and stop loss',
+        tone: 'plain',
+        confirmLabel: 'Send exits',
+        cancelLabel: 'Back',
+        market: sym?.displayName ?? edit.symbol,
+        coin: sym?.baseCoin,
+        side: { word: edit.dir === 'long' ? 'Long' : 'Short', tone: edit.dir === 'long' ? 'pos' : 'neg' },
+        facts: [
+          { label: 'Position', value: `${qty(edit.fullQty, sym?.stepSize)} ${edit.coin}`.trim() },
+          { label: 'Entry', value: price(edit.entry, sym?.tickSize) },
+          ...facts,
+          { label: 'Order sent', value: `${edit.dir === 'long' ? 'SELL' : 'BUY'}, reduce-only, on mark price` },
+        ],
+      });
+      if (!ok) return;
+    }
     setBusy(true);
     try {
       for (const [kind, draft, existing] of [
@@ -999,6 +1039,30 @@ function OpenOrdersInner({
   });
 
   async function cancel(o: any) {
+    const askSym = byName.get(symbolOf(o));
+    const askBuy = directionOfSide(pick(o, 'side', 'S')) === 'long';
+    const askPrice = num(pick(o, 'price', 'p'));
+    const askQty = num(pick(o, 'quantity', 'q', 'origQty'));
+    const askStop = num(pick(o, 'stopPrice'));
+    const askWord = spotWord(engine, askBuy);
+    const ok = await askTrade({
+      kind: 'cancel',
+      title: 'Cancel this order?',
+      tone: 'danger',
+      confirmLabel: 'Cancel order',
+      cancelLabel: 'Keep order',
+      market: askSym?.displayName ?? symbolOf(o),
+      coin: askSym?.baseCoin,
+      side: { word: askWord, tone: askBuy ? 'pos' : 'neg' },
+      facts: [
+        { label: 'Type', value: orderTypeText(o) },
+        { label: 'Size', value: `${qty(askQty, askSym?.stepSize)} ${coinLabel(askSym?.baseCoin) || ''}`.trim() },
+        ...(askPrice > 0 ? [{ label: 'Price', value: price(askPrice, askSym?.tickSize) }] : []),
+        ...(askStop > 0 ? [{ label: 'Trigger', value: price(askStop, askSym?.tickSize) }] : []),
+        ...(askPrice > 0 && askQty > 0 ? [{ label: 'Order value', value: fmtUsd(askPrice * askQty) }] : []),
+      ],
+    });
+    if (!ok) return;
     setBusy(true);
     try {
       await api.cancelOrder(engine, {
@@ -1025,20 +1089,18 @@ function OpenOrdersInner({
     // The dialog counts the rows ON SCREEN, but the request cancels everything
     // open on the engine - so when a filter hides rows, the difference is said.
     const hidden = all.length - orders.length;
-    const ok = await confirm({
+    const ok = await askTrade({
+      kind: 'cancelAll',
       title: `Cancel all ${engine} orders`,
-      danger: true,
+      tone: 'danger',
       confirmLabel: 'Cancel every open order',
       cancelLabel: 'Keep them',
-      body: (
-        <p>
-          Cancels every order the gateway currently lists as open on <strong>{engine}</strong>
-          {hidden > 0
-            ? ` — including ${hidden} this table is currently hiding (${orders.length} shown).`
-            : ` — ${orders.length} in this table right now.`}{' '}
-          Open positions are not closed by this; only resting orders are removed.
-        </p>
-      ),
+      facts: [
+        { label: 'Book', value: engine === 'perps' ? 'Futures' : 'Spot' },
+        { label: 'Open orders', value: String(all.length) },
+        ...(hidden > 0 ? [{ label: 'Hidden by a filter', value: String(hidden) }] : []),
+      ],
+      note: `Cancels every order the gateway lists as open${hidden > 0 ? `, including the ${hidden} this table hides` : ''}. Open positions are not closed by this; only resting orders are removed.`,
     });
     if (!ok) return;
     setBusy(true);
@@ -1199,6 +1261,25 @@ function ModifyOrder({
   const { msg, show, fromError } = useStatus();
 
   async function submit() {
+    const buy = directionOfSide(pick(order, 'side', 'S')) === 'long';
+    const wasPrice = pick(order, 'price', 'p');
+    const wasQty = pick(order, 'quantity', 'q', 'origQty');
+    const ok = await askTrade({
+      kind: 'move',
+      title: 'Change this order?',
+      tone: 'plain',
+      confirmLabel: 'Send change',
+      cancelLabel: 'Back',
+      market: sym?.displayName ?? symbol,
+      coin: sym?.baseCoin,
+      side: { word: spotWord(engine, buy), tone: buy ? 'pos' : 'neg' },
+      facts: [
+        { label: 'Price', value: `${price(wasPrice, sym?.tickSize)} → ${price(priceInput, sym?.tickSize)}` },
+        { label: 'Size', value: `${qty(wasQty, sym?.stepSize)} → ${qty(quantity, sym?.stepSize)} ${coinLabel(sym?.baseCoin) || ''}`.trim() },
+        ...(num(priceInput) > 0 && num(quantity) > 0 ? [{ label: 'New order value', value: fmtUsd(num(priceInput) * num(quantity)) }] : []),
+      ],
+    });
+    if (!ok) return;
     setBusy(true);
     try {
       // Modify for a take-profit / stop-loss, replace for a plain limit order - or, where that could

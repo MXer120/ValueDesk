@@ -9,6 +9,7 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { Private, useMask, usePrivacy, type PrivacyKey } from '../../privacy';
 import { DASH, MINUS, fmtUsd, signClass } from '../../format';
+import { timeTicks } from './timeTicks';
 import '../Portfolio.css';
 import { fmtFixed, fmtNum } from '../../numStyle';
 
@@ -47,6 +48,9 @@ export function fmtCompactUsd(v: number | null | undefined): string {
   const sign = v < 0 ? MINUS : '';
   return `${sign}$${fmtNum(abs, { notation: 'compact', maximumFractionDigits: 2 })}`;
 }
+
+/** An axis figure: no cents, and thousands shortened from 10k up. */
+const wholeUsd = (v: number): string => (Math.abs(v) < 10_000 ? fmtUsd(v, 0) : fmtCompactUsd(v));
 
 export const fmtDay = (ms: number | null | undefined): string =>
   ms ? new Date(ms).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: '2-digit' }) : DASH;
@@ -336,6 +340,27 @@ function splitAtZero(
 }
 
 /**
+ * A monotone cubic (Fritsch-Carlson): smooth, and it never swings past a data point, so the line shows no high or low
+ * that did not happen.
+ */
+function smoothPath(p: ReadonlyArray<readonly [number, number]>): string {
+  const n = p.length;
+  const dx = (i: number) => p[i + 1]![0] - p[i]![0];
+  const m = Array.from({ length: n - 1 }, (_, i) => (p[i + 1]![1] - p[i]![1]) / (dx(i) || 1));
+  const t = p.map((_, i) => {
+    if (i === 0) return m[0]!;
+    if (i === n - 1) return m[n - 2]!;
+    return m[i - 1]! * m[i]! <= 0 ? 0 : (2 * m[i - 1]! * m[i]!) / (m[i - 1]! + m[i]!);
+  });
+  let d = `M${p[0]![0].toFixed(1)},${p[0]![1].toFixed(1)}`;
+  for (let i = 0; i < n - 1; i++) {
+    const h = dx(i) / 3;
+    d += ` C${(p[i]![0] + h).toFixed(1)},${(p[i]![1] + h * t[i]!).toFixed(1)} ${(p[i + 1]![0] - h).toFixed(1)},${(p[i + 1]![1] - h * t[i + 1]!).toFixed(1)} ${p[i + 1]![0].toFixed(1)},${p[i + 1]![1].toFixed(1)}`;
+  }
+  return d;
+}
+
+/**
  * Every curve on the page, behind one incognito category.
  *
  * All three chart surfaces - the account-value card, the performance card and
@@ -350,7 +375,7 @@ export function EquityCurve(props: Parameters<typeof EquityCurveInner>[0]) {
   return <Private k="charts"><EquityCurveInner {...props} /></Private>;
 }
 
-function EquityCurveInner({ win, unit = 'usd', tone = 'pnl', compactAxis = false }: {
+function EquityCurveInner({ win, unit = 'usd', tone = 'pnl', compactAxis = false, level = false, clean = false }: {
   win: CurveWindow;
   unit?: 'usd' | 'pct';
   /**
@@ -366,6 +391,18 @@ function EquityCurveInner({ win, unit = 'usd', tone = 'pnl', compactAxis = false
    * would be cut at the card edge. The hover readout stays exact either way.
    */
   compactAxis?: boolean;
+  /**
+   * The points are LEVELS (an account's value), not a change from zero: the axis fits the data and reads the
+   * real values, the area fills to the plot's foot, and no zero line is drawn, since zero is not on it.
+   */
+  level?: boolean;
+  /**
+   * The portfolio's chart (owner 2026-11-06): a smooth line on a dotted ground, read against the START of the window.
+   * Above the start is green, below it red, in the line, the fill and the dots alike; there are no grid lines. Also a
+   * whole-dollar axis, dates without the year, evenly spaced date labels and a dot on the latest point. `tone` does
+   * not apply here.
+   */
+  clean?: boolean;
 }) {
   const pts = win.points;
   const [hover, setHover] = useState<number | null>(null);
@@ -402,7 +439,7 @@ function EquityCurveInner({ win, unit = 'usd', tone = 'pnl', compactAxis = false
    * scopes them per component instance.
    */
   const uid = useId().replace(/:/g, '');
-  const ID = { fillUp: `${uid}-fu`, fillDown: `${uid}-fd` };
+  const ID = { fillUp: `${uid}-fu`, fillDown: `${uid}-fd`, dotUp: `${uid}-du`, dotDown: `${uid}-dd`, clipUp: `${uid}-cu`, clipDown: `${uid}-cd`, washUp: `${uid}-wu`, washDown: `${uid}-wd`, fadeUp: `${uid}-au`, fadeDown: `${uid}-ad`, maskUp: `${uid}-mu`, maskDown: `${uid}-md` };
 
   if (pts.length < 2) return null;
 
@@ -420,8 +457,13 @@ function EquityCurveInner({ win, unit = 'usd', tone = 'pnl', compactAxis = false
   const PLOT_H = Math.max(1, H - PAD_B);
 
   const ys = pts.map((q) => q.v);
-  let lo = Math.min(...ys, 0);
-  let hi = Math.max(...ys, 0);
+  let lo = level ? Math.min(...ys) : Math.min(...ys, 0);
+  let hi = level ? Math.max(...ys) : Math.max(...ys, 0);
+  if (level && hi > lo) {
+    const room = (hi - lo) * 0.12;
+    hi += room;
+    lo = lo >= 0 ? Math.max(0, lo - room) : lo - room;
+  }
   if (hi === lo) {
     const pad = Math.max(1, Math.abs(hi) * 0.1);
     hi += pad;
@@ -429,11 +471,20 @@ function EquityCurveInner({ win, unit = 'usd', tone = 'pnl', compactAxis = false
   }
   const span = hi - lo;
   const y = (v: number) => PAD_T + (PLOT_H - PAD_T) - ((v - lo) / span) * (PLOT_H - PAD_T);
-  const x = (i: number) => (i / (pts.length - 1)) * PLOT_W;
+  const tFrom = pts[0]!.t;
+  const tTo = pts[pts.length - 1]!.t;
+  /* The portfolio chart places points by time: unevenly spaced points must not bend the axis. */
+  const byTime = clean && tTo > tFrom;
+  const x = (i: number) => (byTime ? ((pts[i]!.t - tFrom) / (tTo - tFrom)) * PLOT_W : (i / (pts.length - 1)) * PLOT_W);
 
-  const zeroY = y(0);
+  const zeroY = level ? PLOT_H : y(0);
   const runs = splitAtZero(pts, x, y);
   const last = ys[ys.length - 1]!;
+
+  const baseV = pts[0]!.v;
+  const baseY = y(baseV);
+  const line = clean ? smoothPath(pts.map((p, i) => [x(i), y(p.v)])) : '';
+  const sideOf = (v: number) => (v >= baseV ? 'pos' : 'neg');
 
   const fmtV = (v: number) => (unit === 'pct' ? `${fmtFixed(v * 100, 1)}%` : fmtUsd(v));
 
@@ -445,7 +496,7 @@ function EquityCurveInner({ win, unit = 'usd', tone = 'pnl', compactAxis = false
    * 1/2/5 x 10^n step so the labels land on numbers a person would choose, then
    * always adds zero because zero is the line the sign is read against.
    */
-  const targetTicks = Math.max(3, Math.min(6, Math.floor((PLOT_H - PAD_T) / 26)));
+  const targetTicks = level || clean ? 3 : Math.max(3, Math.min(6, Math.floor((PLOT_H - PAD_T) / 26)));
   const rawStep = span / targetTicks;
   const mag = 10 ** Math.floor(Math.log10(Math.abs(rawStep) || 1));
   const norm = rawStep / mag;
@@ -454,13 +505,13 @@ function EquityCurveInner({ win, unit = 'usd', tone = 'pnl', compactAxis = false
   for (let t = Math.ceil(lo / niceStep) * niceStep; t <= hi + 1e-9; t += niceStep) {
     yTicks.push(Math.abs(t) < niceStep / 1e6 ? 0 : t);
   }
-  if (!yTicks.some((t) => t === 0)) yTicks.push(0);
+  if (!level && !yTicks.some((t) => t === 0)) yTicks.push(0);
   // Drop any tick that would collide with zero's label.
   const minGap = (PLOT_H - PAD_T) / 12;
   const shown = yTicks
     .sort((a, b) => b - a)
     .filter((t, i, arr) => t === 0 || i === 0 || Math.abs(y(t) - y(arr[i - 1]!)) >= minGap)
-    .filter((t) => t === 0 || Math.abs(y(t) - y(0)) >= minGap);
+    .filter((t) => level || t === 0 || Math.abs(y(t) - y(0)) >= minGap);
 
   /*
    * How many date labels FIT, checked in PIXELS.
@@ -501,6 +552,12 @@ function EquityCurveInner({ win, unit = 'usd', tone = 'pnl', compactAxis = false
     const r = e.currentTarget.getBoundingClientRect();
     const px = e.clientX - r.left;
     if (px > PLOT_W) return setHover(null);
+    if (byTime) {
+      const at = tFrom + (px / PLOT_W) * (tTo - tFrom);
+      let best = 0;
+      for (let k = 1; k < pts.length; k++) if (Math.abs(pts[k]!.t - at) < Math.abs(pts[best]!.t - at)) best = k;
+      return setHover(best);
+    }
     const i = Math.round((px / PLOT_W) * (pts.length - 1));
     setHover(Math.min(pts.length - 1, Math.max(0, i)));
   };
@@ -528,30 +585,73 @@ function EquityCurveInner({ win, unit = 'usd', tone = 'pnl', compactAxis = false
             <stop offset="0%" stopColor="var(--neg)" stopOpacity="0" />
             <stop offset="100%" stopColor="var(--neg)" stopOpacity="0.22" />
           </linearGradient>
+          {clean && (
+            <>
+              <pattern id={ID.dotUp} width="14" height="14" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="0.8" className="pf-chart__dots pos" /></pattern>
+              <pattern id={ID.dotDown} width="14" height="14" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="0.8" className="pf-chart__dots neg" /></pattern>
+              {/* The fill is strongest at the line's furthest reach and fades towards the start level. */}
+              <linearGradient id={ID.washUp} gradientUnits="userSpaceOnUse" x1="0" y1={y(Math.max(...ys))} x2="0" y2={baseY}>
+                <stop offset="0%" stopColor="var(--pos)" stopOpacity="0.26" />
+                <stop offset="100%" stopColor="var(--pos)" stopOpacity="0.02" />
+              </linearGradient>
+              <linearGradient id={ID.washDown} gradientUnits="userSpaceOnUse" x1="0" y1={y(Math.min(...ys))} x2="0" y2={baseY}>
+                <stop offset="0%" stopColor="var(--neg)" stopOpacity="0.26" />
+                <stop offset="100%" stopColor="var(--neg)" stopOpacity="0.02" />
+              </linearGradient>
+              <linearGradient id={ID.fadeUp} gradientUnits="userSpaceOnUse" x1="0" y1={y(Math.max(...ys))} x2="0" y2={baseY}>
+                <stop offset="0%" stopColor="#fff" stopOpacity="0.7" />
+                <stop offset="100%" stopColor="#fff" stopOpacity="0.25" />
+              </linearGradient>
+              <linearGradient id={ID.fadeDown} gradientUnits="userSpaceOnUse" x1="0" y1={y(Math.min(...ys))} x2="0" y2={baseY}>
+                <stop offset="0%" stopColor="#fff" stopOpacity="0.7" />
+                <stop offset="100%" stopColor="#fff" stopOpacity="0.25" />
+              </linearGradient>
+              <mask id={ID.maskUp} maskUnits="userSpaceOnUse" x="0" y="0" width={W} height={H}><rect x="0" y="0" width={W} height={H} fill={`url(#${ID.fadeUp})`} /></mask>
+              <mask id={ID.maskDown} maskUnits="userSpaceOnUse" x="0" y="0" width={W} height={H}><rect x="0" y="0" width={W} height={H} fill={`url(#${ID.fadeDown})`} /></mask>
+              <clipPath id={ID.clipUp}><rect x="-4" y="-4" width={PLOT_W + 8} height={Math.max(0, baseY + 4)} /></clipPath>
+              <clipPath id={ID.clipDown}><rect x="-4" y={baseY} width={PLOT_W + 8} height={Math.max(0, PLOT_H - baseY + 4)} /></clipPath>
+            </>
+          )}
         </defs>
+
+        {clean && (
+          <>
+            <rect x="0" y="0" width={PLOT_W} height={Math.max(0, baseY)} fill={`url(#${ID.dotUp})`} className="pf-chart__ground" />
+            <rect x="0" y={baseY} width={PLOT_W} height={Math.max(0, PLOT_H - baseY)} fill={`url(#${ID.dotDown})`} className="pf-chart__ground" />
+            <g mask={`url(#${ID.maskUp})`}><path d={`${line} L${PLOT_W},${baseY.toFixed(1)} L0,${baseY.toFixed(1)} Z`} fill={`url(#${ID.dotUp})`} clipPath={`url(#${ID.clipUp})`} /></g>
+            <g mask={`url(#${ID.maskDown})`}><path d={`${line} L${PLOT_W},${baseY.toFixed(1)} L0,${baseY.toFixed(1)} Z`} fill={`url(#${ID.dotDown})`} clipPath={`url(#${ID.clipDown})`} /></g>
+            <path d={`${line} L${PLOT_W},${baseY.toFixed(1)} L0,${baseY.toFixed(1)} Z`} fill={`url(#${ID.washUp})`} clipPath={`url(#${ID.clipUp})`} />
+            <path d={`${line} L${PLOT_W},${baseY.toFixed(1)} L0,${baseY.toFixed(1)} Z`} fill={`url(#${ID.washDown})`} clipPath={`url(#${ID.clipDown})`} />
+            <line x1="0" y1={baseY} x2={PLOT_W} y2={baseY} className="pf-chart__zero" />
+            <path d={line} className="pf-chart__line pos" clipPath={`url(#${ID.clipUp})`} />
+            <path d={line} className="pf-chart__line neg" clipPath={`url(#${ID.clipDown})`} />
+          </>
+        )}
 
         {shown.map((t) => (
           <g key={t}>
-            <line
-              x1="0" y1={y(t)} x2={PLOT_W} y2={y(t)}
-              className={t === 0 ? 'pf-chart__zero' : 'pf-chart__grid'}
-            />
+            {!clean && (
+              <line
+                x1="0" y1={y(t)} x2={PLOT_W} y2={y(t)}
+                className={t === 0 && !level ? 'pf-chart__zero' : 'pf-chart__grid'}
+              />
+            )}
             <text x={PLOT_W + 5} y={y(t) + 3} className="pf-chart__ylabel">
-              {compactAxis && unit === 'usd' ? fmtCompactUsd(t) : fmtV(t)}
+              {clean && unit === 'usd' && niceStep >= 1 ? wholeUsd(t) : compactAxis && unit === 'usd' ? fmtCompactUsd(t) : fmtV(t)}
             </text>
           </g>
         ))}
 
         {/* Fills first, then the strokes on top, so a run's own line is never
             dimmed by the next run's translucent area. */}
-        {runs.map((r, i) => (
+        {!clean && runs.map((r, i) => (
           <path
             key={`f${i}`}
             d={`${r.d} L${r.x1.toFixed(1)},${zeroY.toFixed(1)} L${r.x0.toFixed(1)},${zeroY.toFixed(1)} Z`}
             fill={`url(#${r.up ? ID.fillUp : ID.fillDown})`}
           />
         ))}
-        {runs.map((r, i) => (
+        {!clean && runs.map((r, i) => (
           <path
             key={`l${i}`}
             d={r.d}
@@ -559,7 +659,15 @@ function EquityCurveInner({ win, unit = 'usd', tone = 'pnl', compactAxis = false
           />
         ))}
 
-        {xTicks.map((i) => (
+        {byTime && timeTicks(tFrom, tTo, Math.max(2, Math.floor(PLOT_W / 72))).map((tick) => {
+          const px = ((tick.t - tFrom) / (tTo - tFrom)) * PLOT_W;
+          return (
+            <text key={tick.t} x={px} y={PLOT_H + 11} className="pf-chart__xlabel" textAnchor={px < 24 ? 'start' : px > PLOT_W - 24 ? 'end' : 'middle'}>
+              {tick.label}
+            </text>
+          );
+        })}
+        {!byTime && xTicks.map((i) => (
           <text
             key={i}
             x={Math.min(PLOT_W, Math.max(0, x(i)))}
@@ -573,12 +681,19 @@ function EquityCurveInner({ win, unit = 'usd', tone = 'pnl', compactAxis = false
           </text>
         ))}
 
+        {clean && !h && lastIdx > 0 && (
+          <circle
+            cx={x(lastIdx)} cy={y(last)} r="3"
+            className={`pf-chart__dot ${sideOf(last)}`}
+          />
+        )}
+
         {h && (
           <g>
             <line x1={x(hover!)} y1={PAD_T} x2={x(hover!)} y2={PLOT_H} className="pf-chart__cursor" />
               <circle
               cx={x(hover!)} cy={y(h.v)} r="2.5"
-              className={`pf-chart__dot ${h.v >= 0 ? (tone === 'equity' ? 'neutral' : 'pos') : 'neg'}`}
+              className={`pf-chart__dot ${clean ? sideOf(h.v) : h.v >= 0 ? (tone === 'equity' ? 'neutral' : 'pos') : 'neg'}`}
             />
           </g>
         )}
@@ -592,8 +707,8 @@ function EquityCurveInner({ win, unit = 'usd', tone = 'pnl', compactAxis = false
             left: `${Math.min(PLOT_W - 40, Math.max(40, x(hover!)))}px`,
           }}
         >
-          <span className="pf-chart__tipday">{fmtDay(h.t)}</span>
-          <span className={`pf-chart__tipval ${signClass(h.v)}`}>{fmtV(h.v)}</span>
+          <span className="pf-chart__tipday">{clean && tTo - tFrom <= 2 * 86_400_000 ? `${fmtDay(h.t)}, ${new Date(h.t).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}` : fmtDay(h.t)}</span>
+          <span className={`pf-chart__tipval ${clean ? sideOf(h.v) : level ? '' : signClass(h.v)}`}>{fmtV(h.v)}</span>
         </div>
       )}
     </div>

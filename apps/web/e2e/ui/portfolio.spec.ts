@@ -117,10 +117,10 @@ async function fakeHistory(ctx: BrowserContext) {
     const n = hourly ? 24 : 60;
     const chart = Array.from({ length: n }, (_, i) => ({
       ts_ms: Date.now() - (n - 1 - i) * step,
-      account_value_usd: 2000 + i * 13 + (i % 7) * 21,
-      pnl_usd: i * 2.5 - (i % 5) * 4,
+      account_value_usd: 2000 + i * 9 + Math.sin(i / 3) * 70 + Math.sin(i / 7) * 110,
+      pnl_usd: i * 2.5 + Math.sin(i / 2.5) * 22,
       spot_pnl_usd: 0,
-      perps_pnl_usd: i * 2.5 - (i % 5) * 4,
+      perps_pnl_usd: i * 2.5 + Math.sin(i / 2.5) * 22,
     }));
     return route.fulfill(ok({ chart, total_pnl_usd: 100, roi: 0.05 }));
   });
@@ -179,20 +179,49 @@ h.test('Total Value counts each dollar once, and copies and bots have no bucket'
   assert.ok(Math.abs(wealth - 1826) < 0.02, `wealth ${wealth}`);
   assert.ok(spot < 200, `the vQQQ share left Spot (${spot})`);
   assert.equal(await p.locator('.pfx-bucket').count(), 4);
-  await until(p, async () => /trades\s*2/.test(await p.locator('.pfx-sum').innerText()), 'the summary to add up the fills', 15_000);
+  // No partial figure while the wallet's history is still being read.
+  await p.locator('.pfx-sum .pfx-sum__state').first().waitFor();
+  await shot(p, 'summary-reading');
+  await until(p, async () => { const text = await p.locator('.pfx-sum').innerText(); return /trades\s*2/.test(text) && !text.includes('Reading'); }, 'the summary to add up the fills and the funding', 150_000);
   const sum = (await p.locator('.pfx-sum').innerText()).replace(/\s+/g, ' ');
   assert.match(sum, /Buys 1 Sells 1/);
   assert.match(sum, /vol\. of trades \$300,00/);
   assert.match(sum, /commission \$0,12/);
+  assert.match(sum, /funding fee\s*\S*\$1,50 Received \$0,00 Paid \S*\$1,50/);
   await shot(p, 'trade-tab');
-  // The timeframe is the app's dropdown: choosing changes the summary's window.
-  await p.locator('.pfx-sum .coh-pick__btn').click();
-  await p.locator('.pfx-sum').getByRole('option', { name: '30 days' }).waitFor();
+  // The timeframe is a switch whose blob travels to the chosen segment.
+  await p.locator('.pfx-sum').getByRole('radio', { name: '30d' }).click();
+  await until(p, async () => p.locator('.pfx-sum .pfx-slide').evaluate((el) => {
+    const on = el.querySelector('.is-on')!.getBoundingClientRect();
+    const blob = el.querySelector('.pfx-slide__blob')!.getBoundingClientRect();
+    return Math.abs(on.left - blob.left) < 1 && Math.abs(on.width - blob.width) < 1;
+  }), 'the blob on 30d', 5_000);
+  // The chart's view is a dropdown.
+  // The axis: hours on 24h, several days at one step on 7d.
+  const labels = () => p.locator('.pfx-chart .pf-chart__xlabel').allTextContents();
+  await p.locator('.pfx-chart').getByRole('radio', { name: '24h' }).click();
+  await until(p, async () => (await labels()).some((l) => /^\d\d:00$/.test(l)), 'hours on the 24h axis', 5_000);
+  await shot(p, 'axis-24h', false);
+  await p.locator('.pfx-chart').getByRole('radio', { name: '7d' }).click();
+  await until(p, async () => (await labels()).length >= 3 && !(await labels()).some((l) => l.includes(':')), 'days on the 7d axis', 5_000);
+  await p.locator('.pfx-chart .psel__btn').click();
+  await p.getByRole('option', { name: 'PnL', exact: true }).waitFor();
+  await p.waitForTimeout(350);
+  assert.ok(await p.getByRole('option', { name: 'PnL', exact: true }).evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    return el.contains(document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2));
+  }), 'the view list is on top, not clipped');
   await shot(p, 'timeframe', false);
-  await p.locator('.pfx-sum').getByRole('option', { name: '30 days' }).click();
-  await until(p, async () => (await p.locator('.pfx-sum .coh-pick__btn').innerText()).includes('30 days'), 'the 30-day summary', 5_000);
-  await p.getByRole('tab', { name: 'PnL Calendar' }).click();
+  const heightOf = () => p.locator('.pfx-chart').evaluate((el) => el.getBoundingClientRect().height);
+  const valueHeight = await heightOf();
+  await p.getByRole('option', { name: 'PnL', exact: true }).click();
+  assert.equal(await heightOf(), valueHeight, 'the card keeps its height on PnL');
+  await p.locator('.pfx-chart').evaluate((el) => el.scrollIntoView({ block: 'center' }));
+  await shot(p, 'pnl', false);
+  await p.locator('.pfx-chart .psel__btn').click();
+  await p.getByRole('option', { name: 'PnL Calendar' }).click();
   await p.locator('.pfc-grid').waitFor();
+  assert.equal(await heightOf(), valueHeight, 'the card keeps its height on the calendar');
   await shot(p, 'calendar', false);
   await p.getByRole('button', { name: 'View tiers' }).click();
   await p.getByRole('dialog').first().waitFor();

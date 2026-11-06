@@ -23,6 +23,8 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { useLatched } from './motion';
 import { createPortal, flushSync } from 'react-dom';
 import { api, type Engine, type OrderBook, type Symbol, type Ticker } from '../api';
+import { useAccountResource } from '../accountFeeds';
+import { ownBookLevels } from '../chart/orderOverlays';
 import { useAsync, useChannel, useSharedStored, useStored, useTickers as useSharedTickers } from '../hooks';
 import { hub } from '../ws';
 import { pollEvery } from '../exchange/visibility';
@@ -1391,11 +1393,15 @@ export function takenShareByLevel(
 }
 
 export function Book({
-  engine, symbol, sym, onPick, showTitle = true,
+  engine, symbol, sym, onPick, showTitle = true, address = null,
 }: {
   engine: Engine; symbol: string; sym?: Symbol; onPick: (price: string) => void; showTitle?: boolean;
+  /** The connected wallet: its resting orders are marked on their rows. */
+  address?: string | null;
 }) {
   const book = useOrderBook(engine, symbol);
+  // The feed the chart and Open orders already share (accountFeeds.ts): no further request.
+  const ownOrders = useAccountResource(address ? `orders:${engine}:${address}` : null, () => api.openOrders(engine, address!), 10_000);
   /** One market: what the recordings and the charts' visibility belong to. */
   const marketKey = `${engine}:${symbol}`;
   const [view, setView] = useState<'both' | 'bids' | 'asks'>('both');
@@ -1721,6 +1727,10 @@ export function Book({
   // the rows agree.
   const askIncrement = groupOptions[Math.min(askGroupIdx, groupOptions.length - 1)] ?? tick;
   const bidIncrement = groupOptions[Math.min(bidGroupIdx, groupOptions.length - 1)] ?? tick;
+  const own = useMemo(
+    () => ownBookLevels(ownOrders.data?.orders ?? [], symbol, askIncrement, bidIncrement),
+    [ownOrders.data, symbol, askIncrement, bidIncrement],
+  );
   /** The unit-menu button's own label - one figure when both sides agree,
    *  bid/ask when a wheel-zoom has split them, since no single number would
    *  be true at that point. */
@@ -2612,6 +2622,7 @@ export function Book({
                     rank={rank}
                     max={maxCum}
                     side="ask"
+                    mine={own.ask.has(r.price)}
                     sym={sym}
                     unit={unit}
                     onPick={onPick}
@@ -2715,6 +2726,7 @@ export function Book({
                   rank={rank}
                   max={maxCum}
                   side="bid"
+                  mine={own.bid.has(r.price)}
                   sym={sym}
                   unit={unit}
                   onPick={onPick}
@@ -2834,6 +2846,7 @@ export function Book({
 
 function BookRow({
   level, rank, max, side, sym, unit, onPick, hovered = false, lit = false, takenShare = null, quiet = false, restAdd = null,
+  mine,
 }: {
   level: BookLevel; max: number; side: 'bid' | 'ask'; sym?: Symbol; unit: 'quote' | 'base'; onPick: (p: string) => void;
   /** Rows from the touch on this side, best = 0: the row's place, and its React key. */
@@ -2848,6 +2861,8 @@ function BookRow({
   quiet?: boolean;
   /** Size, in the bar's unit, a limit would add at this level. The bar grows by it; the new slice is dotted. */
   restAdd?: number | null;
+  /** The wallet has a resting order on this row. */
+  mine?: boolean;
 }) {
   const { price } = level;
   // Both columns are read in the SAME unit, and so is the depth bar behind
@@ -2925,6 +2940,7 @@ function BookRow({
       <td className="p">
         <span className="mkt-bookrow__rest" aria-hidden="true" />
         {fmtPrice(price, sym?.tickSize)}
+        {mine && <span className="mkt-bookrow__mine" role="img" aria-label="Your order at this price" />}
       </td>
       <td>{unit === 'quote' ? fmtNotional(size) : fmtQty(size, sym?.stepSize)}</td>
       <td>{unit === 'quote' ? fmtNotional(total) : fmtQty(total, sym?.stepSize)}</td>

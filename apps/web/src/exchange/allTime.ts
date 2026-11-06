@@ -37,6 +37,7 @@ import { aggregateFunding, aggregateTradeRows, quoteCoinMap, type FundingStats, 
 import { allTimeStatsBody, headlineReader, type AllTimeStats } from '@sign/statsCore.js';
 import type { Engine } from '../api';
 import { logger } from '../log';
+import { coverOf, fundingFigures, tradeFigures, type Cover, type FundingFigures, type TradeFigures } from './activityWindows';
 import { RateLimitedError, isRateLimitError } from './errors';
 import { IdbHistory, type HistoryPersistence } from './historyDb';
 import { SharedLedger, defaultLedgerDeps, type LedgerDeps, type LockManagerLike } from './ledger';
@@ -55,6 +56,8 @@ const RESYNC_AFTER_MS = 5 * 60_000;
 /** A tab waiting for another tab's walk re-reads what it stored at most this often. */
 const FOLLOW_EVERY_MS = 4_000;
 const PAUSE_KEY = 'vs:history:walk-paused-until';
+/** An all-time perps walk below this share of SoDEX's own lifetime volume is not the whole history. */
+const LIFETIME_MATCH = 0.99;
 
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
 
@@ -88,9 +91,22 @@ const qsOf = (q: PageQuery): string => {
   return p.toString();
 };
 
+/** One window of one engine. A figure is null unless its cover is final: there is no partial number to show. */
+export interface ActivityWindow {
+  trades: TradeFigures | null;
+  tradesCover: Cover;
+  /** Perps only. */
+  funding: FundingFigures | null;
+  fundingCover: Cover | null;
+  /** Some walk of this window is still running (poll again soon). */
+  running: boolean;
+}
+
 export interface AllTime {
   /** The Stats answer for one wallet; starts (or continues) its walks in the background. */
   stats(address: string, rebuild?: boolean): Promise<AllTimeStats>;
+  /** A wallet's trades and funding from `since` (null: all time); starts (or continues) its walks. */
+  activity(address: string, engine: Engine, since: number | null): Promise<ActivityWindow>;
   readonly sync: HistorySync;
   /** Resolves once every queued write has reached persistence (tests). */
   flush(): Promise<void>;
@@ -102,6 +118,9 @@ export function createAllTime(d: AllTimeDeps): AllTime {
   const walkGap = new SharedLedger('sodex-walk', 1, WALK_GAP_MS, d.ledger);
   let pending: Promise<void> = Promise.resolve();
   let pausedUntilMem = 0;
+  /** While a figure on screen waits for the walk it is a read for that view, not idle background work. */
+  let onScreenUntil = 0;
+  const onScreen = (): boolean => now() < onScreenUntil;
 
   // --- the shared walk pause (localStorage, so every tab honours it) -------------
   const pausedFor = (): number => {
@@ -137,7 +156,7 @@ export function createAllTime(d: AllTimeDeps): AllTime {
       }
       // A `/trades` page only when a background history read may go (historyQueue.ts):
       // the walk spends its turn when the page can actually be sent, not before.
-      const busy = gateway.budget.spent() > gateway.budget.limit / 2 || (drip !== null && !gateway.historyQueue.backgroundMayGo());
+      const busy = gateway.budget.spent() > gateway.budget.limit / 2 || (drip !== null && !onScreen() && !gateway.historyQueue.backgroundMayGo());
       if (!busy) {
         const wait = await walkGap.tryTake(1);
         if (wait === 0) return;
@@ -155,7 +174,7 @@ export function createAllTime(d: AllTimeDeps): AllTime {
       await walkTurn(path);
       try {
         // Not kept as a last-good copy: a long walk would otherwise hold every page it read.
-        const data = await gateway.get<unknown>(path, { ttlMs: 0, keepLastGood: false, priority: 'walk' });
+        const data = await gateway.get<unknown>(path, { ttlMs: 0, keepLastGood: false, priority: onScreen() ? 'bulk' : 'walk' });
         return unwrapList<Record<string, unknown>>(data, listKey).map((r) => ({ ...normalise(r), raw: '' }));
       } catch (e) {
         if (e instanceof RateLimitedError || isRateLimitError(e)) pauseWalks(WALK_PAUSE_MS);
@@ -303,12 +322,8 @@ export function createAllTime(d: AllTimeDeps): AllTime {
     now,
   });
 
-  async function stats(addressIn: string, rebuild = false): Promise<AllTimeStats> {
-    if (!addressIn || !ADDRESS_RE.test(addressIn)) throw new MarketRequestError('a valid 0x wallet address is required', 400);
-    const address = addressIn;
-    await hydrate(address);
-
-    // A scope another tab is walking: show what it has stored so far.
+  /** A scope another tab is walking: show what it has stored so far. */
+  async function follow(address: string): Promise<void> {
     for (const kind of SCOPE_KINDS) {
       const scope = scopeKey(kind, address);
       if (!waiting.has(scope)) continue;
@@ -316,6 +331,66 @@ export function createAllTime(d: AllTimeDeps): AllTime {
       followedAt.set(scope, now());
       await refresh(scope);
     }
+  }
+
+  // --- a window's figures, recomputed only when the rows or the window changed --------
+  const windowMemo = new Map<string, { key: string; value: unknown }>();
+  function figuresOf<T>(kind: ScopeKind, address: string, since: number | null, top: number | null, make: (rows: NormalRow[], since: number | null, top: number | null) => T): T {
+    const scope = scopeKey(kind, address);
+    const key = `${store.versionOf(scope)}|${top}`;
+    const slot = `${scope}|${since}`;
+    const hit = windowMemo.get(slot);
+    if (hit && hit.key === key) return hit.value as T;
+    const value = make(store.loadRows(scope), since, top);
+    if (windowMemo.size >= 24) windowMemo.clear();
+    windowMemo.set(slot, { key, value });
+    return value;
+  }
+
+  async function activity(addressIn: string, engine: Engine, since: number | null): Promise<ActivityWindow> {
+    if (!addressIn || !ADDRESS_RE.test(addressIn)) throw new MarketRequestError('a valid 0x wallet address is required', 400);
+    const address = addressIn;
+    onScreenUntil = now() + 15_000;
+    await hydrate(address);
+    await follow(address);
+    const part = <T extends { unreadable: number }>(kind: ScopeKind, make: (rows: NormalRow[], since: number | null, top: number | null) => T): { figures: T | null; cover: Cover; running: boolean } => {
+      sync.ensureSync(kind, address);
+      const scope = scopeKey(kind, address);
+      const state = store.readState(scope);
+      const running = sync.progressOf(kind, address).status === 'running';
+      const cover = coverOf(state, running, since, store.cachedCount(scope));
+      if (cover.state !== 'final') return { figures: null, cover, running };
+      const figures = figuresOf(kind, address, since, state.newest, make);
+      if (figures.unreadable > 0) {
+        return { figures: null, cover: { state: 'incomplete', reason: `SoDEX returned ${figures.unreadable} rows we could not read.` }, running };
+      }
+      return { figures, cover, running };
+    };
+    const trades = part(engine === 'spot' ? 'trades-spot' : 'trades-perps', tradeFigures);
+    // SoDEX states a wallet's lifetime perps volume: a walk that claims all of history must come near it.
+    if (engine === 'perps' && since === null && trades.figures) {
+      const head = await headline(address).catch(() => null);
+      const own = Number(head?.cumulativeQuoteVolume);
+      if (head?.available && Number.isFinite(own) && trades.figures.volume < own * LIFETIME_MATCH) {
+        trades.cover = { state: 'incomplete', reason: `SoDEX states a lifetime volume of $${Math.round(own).toLocaleString('en-US')}, more than the $${Math.round(trades.figures.volume).toLocaleString('en-US')} its trade list returned.` };
+        trades.figures = null;
+      }
+    }
+    const funding = engine === 'perps' ? part('funding', fundingFigures) : null;
+    return {
+      trades: trades.figures,
+      tradesCover: trades.cover,
+      funding: funding?.figures ?? null,
+      fundingCover: funding?.cover ?? null,
+      running: trades.running || (funding?.running ?? false),
+    };
+  }
+
+  async function stats(addressIn: string, rebuild = false): Promise<AllTimeStats> {
+    if (!addressIn || !ADDRESS_RE.test(addressIn)) throw new MarketRequestError('a valid 0x wallet address is required', 400);
+    const address = addressIn;
+    await hydrate(address);
+    await follow(address);
 
     for (const kind of SCOPE_KINDS) sync.ensureSync(kind, address, rebuild);
 
@@ -337,6 +412,7 @@ export function createAllTime(d: AllTimeDeps): AllTime {
 
   return {
     stats,
+    activity,
     sync,
     flush: async () => {
       for (;;) {
@@ -365,6 +441,11 @@ function appInstance(): AllTime {
     });
   }
   return instance;
+}
+
+/** One window of a wallet's own trades and funding (the Portfolio summary). */
+export function activityWindow(address: string, engine: Engine, since: number | null): Promise<ActivityWindow> {
+  return appInstance().activity(address, engine, since);
 }
 
 /** All-time statistics for one wallet (the Stats panel and Portfolio's lifetime figures). */

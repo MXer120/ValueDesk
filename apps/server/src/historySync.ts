@@ -24,6 +24,18 @@ export type ScopeKind = 'trades-spot' | 'trades-perps' | 'funding';
 
 export const SCOPE_KINDS: ScopeKind[] = ['trades-spot', 'trades-perps', 'funding'];
 
+/**
+ * SoDEX keeps about this many rows per wallet and scope, and below them answers with an empty page, the same answer
+ * as the true start of a history. Measured 2026-11-06 on a market maker: funding 10,000 rows exactly, then nothing;
+ * fills likewise, with new fills pushing old ones out of reach during the walk. Holding this many when the walk "ends"
+ * means it may have ended at the limit, not at the first row. A wallet with exactly that many rows reads as limited
+ * too, which is the safe side.
+ */
+export const VENUE_ROW_LIMIT = 10_000;
+const LIMITED_AT = VENUE_ROW_LIMIT - 10;
+/** Fewer rows than this when a walk ends: its few seconds cannot have pushed thousands out of reach. */
+const SLIDE_NEEDS_ROWS = 1_000;
+
 export const scopeKey = (kind: ScopeKind, address: string): string => `${kind}|${address.toLowerCase()}`;
 
 /** What a scope's walk has established so far (the persisted checkpoint). */
@@ -34,6 +46,16 @@ export interface ScopeState {
   pages: number;
   updatedAt: number;
   lastError: string | null;
+  /**
+   * When the newest rows were last read through without a gap: everything from `oldest` up to this moment is held.
+   * Unset until a first page arrived. A catch-up that failed leaves it alone, so `lastError` from an older page does
+   * not cast doubt on what is covered and the other way round.
+   */
+  syncedAt?: number;
+  /** Set when the walk ended at the venue's row limit: `complete` then means "as far back as the venue goes". */
+  limited?: boolean;
+  /** A catch-up could not reach what was held before, so nothing older than this is known to be contiguous. */
+  coveredFrom?: number;
 }
 
 export const EMPTY_STATE: ScopeState = {
@@ -199,6 +221,10 @@ export function createHistorySync(o: HistorySyncOptions): HistorySync {
     let pages = 0;
     let error: string | null = null;
     let truncated: string | null = null;
+    let syncedAt = prior.syncedAt;
+    let limited = prior.limited;
+    let coveredFrom = prior.coveredFrom;
+    const startedAt = prog.startedAt!;
 
     /**
      * Persist after EVERY page, not at the end of the phase.
@@ -221,7 +247,7 @@ export function createHistorySync(o: HistorySyncOptions): HistorySync {
     const checkpoint = (lastError: string | null = null) => {
       prog.oldest = oldest;
       prog.newest = newest;
-      store.writeState(scope, { oldest, newest, complete, pages: prog.pages, updatedAt: now(), lastError });
+      store.writeState(scope, { oldest, newest, complete, pages: prog.pages, updatedAt: now(), lastError, syncedAt, limited, coveredFrom });
     };
 
     /**
@@ -235,6 +261,8 @@ export function createHistorySync(o: HistorySyncOptions): HistorySync {
      */
     const onExtendPage = (p: { pages: number; rows: number; oldest: number | null; fresh: NormalRow[] }) => {
       savePage(p);
+      // A first walk starts at the top, so its first page is that read.
+      if (prior.newest === null) syncedAt ??= startedAt;
       for (const r of p.fresh) {
         if (!Number.isFinite(r.time)) continue;
         if (oldest === null || r.time < oldest) oldest = r.time;
@@ -244,7 +272,7 @@ export function createHistorySync(o: HistorySyncOptions): HistorySync {
     };
 
     try {
-      if (newest !== null) {
+      const catchUp = async (floor: number): Promise<void> => {
         /*
          * Phase 1 saves its rows per page but does NOT move `newest` until the
          * phase finishes.
@@ -259,13 +287,28 @@ export function createHistorySync(o: HistorySyncOptions): HistorySync {
          *
          * `startTime` keeps the pages small; `floorTime` is what ends the phase.
          */
-        const r = await walkBackwards(fetchPage, { startTime: newest, floorTime: newest, onPage: savePage });
+        const r = await walkBackwards(fetchPage, { startTime: floor, floorTime: floor, onPage: savePage });
         pages += r.pages;
         prog.fetched = 0; // phase 2 restarts the per-run row counter
-        if (r.newest !== null) newest = Math.max(newest, r.newest);
+        // A truncated catch-up stopped above where it should have ended: its rows have a hole under them too.
         if (r.truncated) truncated = r.truncated;
+        else if (r.reachedFloor) {
+          if (r.newest !== null) newest = Math.max(newest ?? r.newest, r.newest);
+          syncedAt = startedAt;
+        } else if (r.rows.length >= LIMITED_AT) {
+          // More new rows than the venue keeps: everything down to where this read ended holds, nothing across the gap.
+          if (r.newest !== null) newest = Math.max(newest ?? r.newest, r.newest);
+          if (r.oldest !== null) coveredFrom = r.oldest;
+          limited = true;
+          syncedAt = startedAt;
+        } else {
+          // It should have come back to the row it started from. Not a claim to build on: try again next time.
+          truncated = 'a catch-up did not reach the rows already held';
+        }
         checkpoint();
-      }
+      };
+
+      if (newest !== null) await catchUp(newest);
 
       if (!complete) {
         const r = await walkBackwards(fetchPage, {
@@ -277,6 +320,13 @@ export function createHistorySync(o: HistorySyncOptions): HistorySync {
         pages += r.pages;
         complete = r.complete;
         if (r.truncated) truncated = r.truncated;
+        // A wallet with no history at all: the one empty page is the whole read.
+        if (r.complete && prior.newest === null) syncedAt ??= startedAt;
+        if (r.complete) {
+          // New rows pushed old ones out of reach while a long walk ran. Count them too, then judge where it ended.
+          if (newest !== null && store.cachedCount(scope) >= SLIDE_NEEDS_ROWS) await catchUp(newest);
+          if (store.cachedCount(scope) >= LIMITED_AT) limited = true;
+        }
       }
     } catch (e) {
       // Every page fetched before the failure is already stored (see savePage),
@@ -296,6 +346,9 @@ export function createHistorySync(o: HistorySyncOptions): HistorySync {
       pages,
       updatedAt: now(),
       lastError: error ?? truncated,
+      syncedAt,
+      limited,
+      coveredFrom,
     });
 
     prog.status = error ? 'error' : 'done';

@@ -257,7 +257,8 @@ html[data-theme='light'] .acct-levbox.acct-levbox--long,
 html[data-theme='light'] .cpy-msteps__s.is-done i { color: var(--pos-ink); }
 html[data-theme='light'] .dlg-btn.is-danger { color: var(--neg-ink); }
 html[data-theme='light'] .ex-arb tr.is-link:hover td { background: rgba(0, 0, 0, 0.018); }
-html[data-theme='light'] .kc-draft { --kc-draft-on: #ffffff; }
+html[data-theme='light'] .kc-draft,
+html[data-theme='light'] .kc-lbls { --kc-on: #ffffff; }
 html[data-theme='light'] .pf .acct-levbox--short { color: var(--neg-ink); }
 
 /* Drawn inside the sheets' data: URLs, so no variable reaches them: carets dark, ticks white. */

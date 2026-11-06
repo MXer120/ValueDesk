@@ -86,6 +86,7 @@ import './components/fedlive/FedLive.css';
 import './components/account/UnlockDialog.css';
 import './components/SettingsMenu.css';
 import './components/dialog.css';
+import './components/TradeConfirm.css';
 // The admin suite's sign-in pieces (.dv-), which the beta site's gate shows (beta/BetaGate.tsx).
 import './admin/shell.css';
 import './appearance.css';

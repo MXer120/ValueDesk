@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 import { createServer, type IncomingMessage } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { WebSocketServer } from 'ws';
-import { LighterStream, LiveSocket } from '../src/indexer/streams.js';
+import { hasFreshPrint, LighterStream, LiveSocket } from '../src/indexer/streams.js';
 
 async function until(cond: () => boolean, ms = 3000): Promise<void> {
   const end = Date.now() + ms;
@@ -29,20 +29,84 @@ async function wsServer() {
   return { wss, upgrades, url: `ws://127.0.0.1:${(wss.address() as AddressInfo).port}` };
 }
 
-test('deflate: false offers no compression (Lighter); the default still does', async () => {
+test('no socket offers compression: inflating reads about one frame per turn of a busy thread', async () => {
   const { wss, upgrades, url } = await wsServer();
-  const plain = new LiveSocket(url, '{}', () => {}, () => {}, { deflate: false });
-  const usual = new LiveSocket(url, '{}', () => {}, () => {});
+  const s = new LiveSocket(url, '{}', () => {}, () => {});
   try {
-    plain.start();
+    s.start();
     await until(() => upgrades.length === 1);
-    usual.start();
-    await until(() => upgrades.length === 2);
     assert.equal(upgrades[0]!.headers['sec-websocket-extensions'], undefined, 'no permessage-deflate offered');
-    assert.match(String(upgrades[1]!.headers['sec-websocket-extensions']), /permessage-deflate/);
   } finally {
-    plain.stop();
-    usual.stop();
+    s.stop();
+    wss.close();
+  }
+});
+
+test('where the feed can be told apart, only the feed makes a socket up', async () => {
+  const { wss, url } = await wsServer();
+  let feed = false;
+  wss.on('connection', (c) => {
+    const t = setInterval(() => c.send(feed ? '{"channel":"trade"}' : '{"op":"pong"}'), 10);
+    c.on('close', () => clearInterval(t));
+  });
+  let frames = 0;
+  const isData = (m: unknown) => (m as { channel?: string }).channel === 'trade';
+  const s = new LiveSocket(url, '{}', () => {}, () => { frames++; }, { isData });
+  try {
+    s.start();
+    await until(() => frames >= 3);
+    assert.equal(s.upSince, null, 'pongs alone: not up');
+    feed = true;
+    await until(() => s.upSince !== null);
+  } finally {
+    s.stop();
+    for (const c of wss.clients) c.terminate();
+    wss.close();
+  }
+});
+
+test('old prints do not count as the feed: a socket delivering only a backlog is replaced', async () => {
+  const { wss, url } = await wsServer();
+  let opened = 0;
+  wss.on('connection', (c) => {
+    opened++;
+    const t = setInterval(() => c.send(JSON.stringify({ channel: 'trade', data: [{ T: Date.now() - (opened === 1 ? 20 * 60_000 : 0), t: 1, s: 'BTC-USD', p: '1', q: '1', bi: 1, si: 2 }] })), 10);
+    c.on('close', () => clearInterval(t));
+  });
+  const fresh = (m: unknown) => hasFreshPrint((m as { data?: unknown }).data, (t: { T?: unknown }) => t?.T);
+  const s = new LiveSocket(url, '{}', () => {}, () => {}, { tickMs: 20, dataSilentMs: 150, isData: fresh });
+  try {
+    s.start();
+    await until(() => opened === 2);
+    await until(() => s.upSince !== null);
+  } finally {
+    s.stop();
+    for (const c of wss.clients) c.terminate();
+    wss.close();
+  }
+});
+
+test('a socket still subscribing is not cut for silence', async () => {
+  const { wss, url } = await wsServer();
+  let opened = 0;
+  wss.on('connection', (c) => {
+    opened++;
+    const t = setInterval(() => c.send('{"op":"pong"}'), 10);
+    c.on('close', () => clearInterval(t));
+  });
+  let ready = false;
+  const isData = (m: unknown) => (m as { channel?: string }).channel === 'trade';
+  const s = new LiveSocket(url, '{}', () => {}, () => {}, { tickMs: 20, dataSilentMs: 100, isData, dataExpected: () => ready });
+  try {
+    s.start();
+    await until(() => opened === 1);
+    await new Promise((r) => setTimeout(r, 300));
+    assert.equal(opened, 1, 'left alone');
+    ready = true;
+    await until(() => opened === 2);
+  } finally {
+    s.stop();
+    for (const c of wss.clients) c.terminate();
     wss.close();
   }
 });
@@ -95,6 +159,65 @@ test('a stall of this thread is not silence: what waits to be read keeps the soc
     assert.match(lines[0]!, /^stream hl: closed 1006 after \d+ s up \(nothing came for \d+ s\); again in \d+ s$/);
   } finally {
     s.stop();
+    wss.close();
+  }
+});
+
+test('a socket that answers pings but sends no data any more is replaced, and the data keeps a live one up', async () => {
+  const { wss, url } = await wsServer();
+  let opened = 0;
+  let sending = true;
+  wss.on('connection', (c) => {
+    opened++;
+    // Answers everything it is sent (the pings), whatever happens to the feed: what SoDEX does.
+    c.on('message', () => c.send('{"op":"pong"}'));
+    const t = setInterval(() => { if (sending) c.send('{"channel":"trade","data":[{}]}'); }, 20);
+    c.on('close', () => clearInterval(t));
+  });
+  const lines: string[] = [];
+  const isData = (m: unknown) => (m as { channel?: string }).channel === 'trade';
+  const s = new LiveSocket(url, '{}', () => {}, () => {}, { name: 'sodex-perps', pingMs: 30, tickMs: 20, dataSilentMs: 200, isData, log: (l) => lines.push(l) });
+  try {
+    s.start();
+    await until(() => s.upSince !== null);
+    await new Promise((r) => setTimeout(r, 400));
+    assert.equal(opened, 1, 'data flowing: never replaced');
+    assert.deepEqual(lines, []);
+
+    sending = false;
+    await until(() => lines.length > 0);
+    assert.match(lines[0]!, /^stream sodex-perps: closed 1006 after \d+ s up \(no data for \d+ s, though it still answers\); again in \d+ s$/);
+    await until(() => opened === 2);
+  } finally {
+    s.stop();
+    for (const c of wss.clients) c.terminate();
+    wss.close();
+  }
+});
+
+test('a stall of this thread is not counted as the feed going silent', async () => {
+  const { wss, url } = await wsServer();
+  let opened = 0;
+  wss.on('connection', (c) => {
+    opened++;
+    c.on('message', () => c.send('{"op":"pong"}'));
+    const t = setInterval(() => c.send('{"channel":"trade","data":[{}]}'), 20);
+    c.on('close', () => clearInterval(t));
+  });
+  const isData = (m: unknown) => (m as { channel?: string }).channel === 'trade';
+  const s = new LiveSocket(url, '{}', () => {}, () => {}, { name: 'sodex-perps', tickMs: 50, dataSilentMs: 300, isData });
+  try {
+    s.start();
+    await until(() => s.upSince !== null);
+    for (let n = 0; n < 2; n++) {
+      const end = Date.now() + 600;
+      while (Date.now() < end) { /* a stalled thread */ }
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    assert.equal(opened, 1, 'never replaced');
+  } finally {
+    s.stop();
+    for (const c of wss.clients) c.terminate();
     wss.close();
   }
 });

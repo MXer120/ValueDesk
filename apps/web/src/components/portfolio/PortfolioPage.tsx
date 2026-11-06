@@ -33,13 +33,15 @@ import {
   type Period, type PortfolioContext,
 } from '../Portfolio';
 import { Card, EquityCurve, fmtCompactUsd, type CurveWindow } from './parts';
-import { claimedCoins, shareKey, summarize, summarizeActivity, type ActivitySummary, type FillRow, type FundingRow, type PortfolioSummary } from './summary';
-import { RangePicker } from './RangePicker';
+import { claimedCoins, shareKey, summarize, type PortfolioSummary } from './summary';
+import { RangePicker, ViewSeg } from './RangePicker';
 import { SwapSheet } from './SwapSheet';
 import { useWealth, type WealthState } from './useWealth';
 import { WealthHoldings, WealthTab } from './WealthTab';
 import { PanelTabs, type PanelTab } from '../../dashboard/Panel';
 import { api } from '../../api';
+import { activityWindow, type ActivityWindow } from '../../exchange/allTime';
+import type { Cover } from '../../exchange/activityWindows';
 import { useAccountResource } from '../../accountFeeds';
 import { fetchChart, type ChartPoint } from '../../performance';
 import { DASH, MINUS, fmt, fmtUsd, num, pick, signClass } from '../../format';
@@ -58,7 +60,8 @@ export interface PortfolioPageLinks {
   onOpenTab: (tab: Tab) => void;
 }
 
-const RANGES: ReadonlyArray<readonly [Period, string]> = [['24H', '24 hours'], ['7D', '7 days'], ['14D', '14 days'], ['30D', '30 days'], ['ALL', 'All time']];
+const RANGES: ReadonlyArray<readonly [Period, string]> = [['24H', '24h'], ['7D', '7d'], ['14D', '14d'], ['30D', '30d'], ['ALL', 'All time']];
+const CHART_VIEWS: ReadonlyArray<readonly [ChartView, string]> = [['value', 'Total Value'], ['pnl', 'PnL'], ['calendar', 'PnL Calendar']];
 
 // --- the numbers ------------------------------------------------------------------------
 
@@ -104,6 +107,9 @@ function curveFor(c: PortfolioContext, h24: ChartPoint[] | null, range: Period, 
   const points = h24.map((p) => ({ t: p.ts, v: value(p) - baseline }));
   return { points, baseline, change: points[points.length - 1]!.v, maxDrawdown: null };
 }
+
+/** A curve is built as the change from its start; a balance chart reads the balance itself. */
+const atLevel = (w: CurveWindow): CurveWindow => ({ ...w, points: w.points.map((p) => ({ t: p.t, v: p.v + w.baseline })) });
 
 // --- the head ---------------------------------------------------------------------------
 
@@ -209,22 +215,19 @@ function ChartCard({ c, h24 }: { c: PortfolioContext; h24: ChartPoint[] | null }
   const [view, setView] = useStored<ChartView>('vs.pf.chart.view', 'value');
   const [range, setRange] = useStored<Period>('vs.pf.chart.range', '7D');
   const win = view === 'calendar' ? null : curveFor(c, h24, range, view === 'value' ? (p) => p.accountValue : (p) => pnlAt('pnl-total', p));
-  const seg = (k: ChartView, label: string) => (
-    <button type="button" role="tab" aria-selected={view === k} className={`pf-ctl ${view === k ? 'is-on' : ''}`} onClick={() => setView(k)}>{label}</button>
-  );
   const empty = (body: ReactNode) => <div className="pf-chart pf-chart--empty"><p>{body}</p></div>;
   const mask = useMask(view === 'value' ? 'funds' : 'pnl');
   return (
     <Card
       className="pf-card--chart pfx-chart"
-      title={<div className="pf-seg" role="tablist" aria-label="Chart">{seg('value', 'Total Value')}{seg('pnl', 'PnL')}{seg('calendar', 'PnL Calendar')}</div>}
-      action={view === 'calendar' ? undefined : <RangePicker value={range} options={RANGES} onChange={setRange} />}
+      title={<RangePicker value={view} options={CHART_VIEWS} onChange={setView} label="Chart" align="start" />}
+      action={view === 'calendar' ? undefined : <ViewSeg value={range} options={RANGES} onChange={setRange} label="Timeframe" />}
     >
       {win && win.change !== null && (
         <div className="pfx-chart__head">
           <span>
-            {view === 'value' ? 'Change in value' : 'PnL'}, {range === 'ALL' ? 'all time' : range}
-            {view === 'value' && <InfoDot title="The change from the start of the range, on SoDEX's own series: Spot, Perps and vaults, deposits and withdrawals included. Your EVM wallet is not in it." />}
+            {view === 'value' ? 'Change in value' : 'PnL'}, {range === 'ALL' ? 'all time' : range.toLowerCase()}
+            {view === 'value' && <InfoDot title="SoDEX's own series: Spot, Perps and vaults, deposits and withdrawals included. Your EVM wallet is not in it." />}
           </span>
           <b className={view === 'pnl' ? signClass(win.change) : undefined}>{mask(fmtSigned(win.change))}</b>
         </div>
@@ -234,8 +237,8 @@ function ChartCard({ c, h24 }: { c: PortfolioContext; h24: ChartPoint[] | null }
         : c.venue.progress ? empty(<><span className="pf-spin" aria-hidden="true" />Reading</>)
         : !c.venue.accountId ? empty('No SoDEX account for this wallet yet.')
         : view === 'calendar' ? <CrossFadeCal points={c.venue.points ?? []} mode="pnl-total" />
-        : win ? <EquityCurve win={win} tone={view === 'value' ? 'equity' : 'pnl'} />
-        : empty(`Fewer than two points in ${range === 'ALL' ? 'this history' : range}.`)}
+        : win ? <EquityCurve win={view === 'value' ? atLevel(win) : win} tone={view === 'value' ? 'equity' : 'pnl'} level={view === 'value'} compactAxis clean />
+        : empty(`Fewer than two points in ${range === 'ALL' ? 'this history' : range.toLowerCase()}.`)}
     </Card>
   );
 }
@@ -343,39 +346,59 @@ function FeeStrip({ c }: { c: PortfolioContext }) {
 
 // --- the activity summary ---------------------------------------------------------------
 
-const PAGE = 500;
-
-function useActivity(engine: 'perps' | 'spot', address: string | null): { fills: FillRow[] | null; funding: FundingRow[] | null; error: string | null } {
-  const trades = useAsync(() => api.userTrades(engine, address!, PAGE), [engine, address], { enabled: !!address, pollMs: 120_000 });
-  const pays = useAsync(() => api.fundingHistory(address!, PAGE), [address], { enabled: !!address && engine === 'perps', pollMs: 300_000 });
-  const fills = useMemo((): FillRow[] | null => {
-    const rows = (trades.data as { trades?: unknown[] } | null)?.trades;
-    if (!rows) return null;
-    return rows.map((t) => {
-      const d = directionOfSide(pick(t, 'side', 'S'));
-      return {
-        time: num(pick(t, 'time', 'T', 'createdAt', 'updatedAt')),
-        side: d === 'long' ? 'buy' : d === 'short' ? 'sell' : null,
-        notional: num(pick(t, 'price', 'p')) * num(pick(t, 'quantity', 'q', 'origQty')),
-        fee: num(pick(t, 'fee')),
-        feeCoin: pick<string>(t, 'feeCoin') ?? null,
-      };
-    });
-  }, [trades.data]);
-  const funding = useMemo((): FundingRow[] | null => {
-    if (engine !== 'perps') return null;
-    const raw = pays.data as unknown;
-    const rows = (Array.isArray(raw) ? raw : (raw as { funding?: unknown[]; fundings?: unknown[]; history?: unknown[] } | null)?.funding ?? (raw as { fundings?: unknown[] } | null)?.fundings ?? (raw as { history?: unknown[] } | null)?.history) as unknown[] | undefined;
-    if (!rows) return pays.data ? [] : null;
-    return rows.map((f) => ({ time: num(pick(f, 'timestamp', 'time')), fee: num(pick(f, 'fundingFee')), coin: pick<string>(f, 'feeCoin') ?? null }));
-  }, [engine, pays.data]);
-  return { fills, funding, error: trades.error };
-}
 
 const signedUsd = (v: number): string => `${v > 0 ? '+' : v < 0 ? MINUS : ''}${fmtUsd(Math.abs(v))}`;
 const DAYS: Partial<Record<Period, number>> = { '24H': 1, '7D': 7, '14D': 14, '30D': 30 };
 
-function SumCell({ title, value, rows, tone }: { title: string; value: ReactNode; rows: Array<[string, ReactNode, string?]>; tone?: string }) {
+/** A window of the wallet's own SoDEX history, re-read while its walk runs and now and then afterwards. */
+function useActivityWindow(engine: 'perps' | 'spot', address: string | null, range: Period): { window: ActivityWindow | null; error: string | null } {
+  const [window, setWindow] = useState<ActivityWindow | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    setWindow(null);
+    setError(null);
+    if (!address) return;
+    let off = false;
+    let timer = 0;
+    const tick = async () => {
+      let next = 30_000;
+      try {
+        const days = DAYS[range];
+        const w = await activityWindow(address, engine, days === undefined ? null : Date.now() - days * 86_400_000);
+        if (off) return;
+        setWindow(w);
+        setError(null);
+        if (w.running) next = 2_000;
+      } catch (e) {
+        if (off) return;
+        setError((e as Error).message);
+      }
+      timer = globalThis.setTimeout(tick, next) as unknown as number;
+    };
+    void tick();
+    return () => { off = true; globalThis.clearTimeout(timer); };
+  }, [engine, address, range]);
+  return { window, error };
+}
+
+const shortDate = (ms: number): string => new Date(ms).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+
+/** What a figure says until it is final. */
+const NotFinal = ({ cover }: { cover: Cover | null }) => (
+  cover?.state === 'incomplete' ? <span className="pfx-sum__state is-off">Incomplete</span> : <span className="pfx-sum__state">Reading</span>
+);
+
+/** One line on what the walk is doing, or why a figure is missing. */
+function coverLine(what: string, cover: Cover | null): string | null {
+  if (cover?.state === 'reading') {
+    const back = cover.oldest === null ? '' : `, back to ${shortDate(cover.oldest)}`;
+    return cover.rows === 0 ? `Reading your ${what} from SoDEX.` : `Reading your ${what} from SoDEX: ${fmt(cover.rows, 0)} so far${back}.`;
+  }
+  if (cover?.state === 'incomplete') return `Your ${what} for this timeframe cannot be shown in full. ${cover.reason}`;
+  return null;
+}
+
+function SumCell({ title, value, rows, tone }: { title: ReactNode; value: ReactNode; rows: Array<[string, ReactNode, string?]>; tone?: string }) {
   return (
     <div className="pfx-sum__cell">
       <div className="pfx-sum__head"><span>{title}</span><b className={tone}>{value}</b></div>
@@ -387,61 +410,67 @@ function SumCell({ title, value, rows, tone }: { title: string; value: ReactNode
 function SummaryPanel({ c }: { c: PortfolioContext }) {
   const [engine, setEngine] = useStored<'perps' | 'spot'>('vs.pf.sum.engine', 'perps');
   const [range, setRange] = useStored<Period>('vs.pf.sum.range', '7D');
-  const { fills, funding, error } = useActivity(engine, c.address);
+  const { window: w, error } = useActivityWindow(engine, c.address, range);
   const mask = useMask('funds');
   const maskPnl = useMask('pnl');
-  const walk = c.all.data;
-  const a: ActivitySummary | null = useMemo(() => {
-    const days = DAYS[range];
-    if (days === undefined || !fills) return null;
-    return summarizeActivity(fills, engine === 'perps' ? (funding ?? []) : null, Date.now() - days * 86_400_000, PAGE);
-  }, [range, fills, funding, engine]);
-  const whole = range === 'ALL' ? walk?.trades[engine] ?? null : null;
-  const floor = a && !a.complete ? '≥ ' : '';
-  const count = whole ? fmt(whole.count, 0) : a ? `${floor}${fmt(a.trades, 0)}` : DASH;
-  const volumeAll = whole?.volume.find((v) => v.coin === null || shareKey(v.coin ?? '') === 'USDC');
-  const feeAll = whole?.fees.find((v) => v.coin === null || shareKey(v.coin ?? '') === 'USDC');
-  const fundAll = walk?.funding.totals.find((v) => v.coin === null || shareKey(v.coin ?? '') === 'USDC');
+  const t = w?.trades ?? null;
+  const f = w?.funding ?? null;
+  const tradesPending = <NotFinal cover={w?.tradesCover ?? null} />;
+  const fundingPending = <NotFinal cover={w?.fundingCover ?? null} />;
+  const lines = [
+    coverLine(`${engine} trades`, w?.tradesCover ?? null),
+    engine === 'perps' ? coverLine('funding', w?.fundingCover ?? null) : null,
+  ].filter((l): l is string => l !== null);
+  const reading = w?.tradesCover.state === 'reading';
+  const asOf = [w?.tradesCover, w?.fundingCover].reduce<number | null>((old, x) => (x?.state === 'final' && (old === null || x.asOf < old) ? x.asOf : old), null);
+  const late = asOf !== null && Date.now() - asOf > 15 * 60_000;
   const card = (
     <Card
       className="pfx-sum"
       title="Summary"
-      action={<RangePicker value={range} options={RANGES} onChange={setRange} />}
+      action={<ViewSeg value={range} options={RANGES} onChange={setRange} label="Timeframe" />}
     >
       {!c.address ? <NoWallet line="Connect a wallet to see your trading summary." compact />
-        : error && !fills ? <p className="pf-note">Could not read your trades. {error}</p>
+        : error && !w ? <p className="pf-note">Could not read your trades. {error}</p>
         : (
           <>
             <div className="pfx-sum__grid">
               <SumCell
                 title="Total no. of trades"
-                value={mask(count)}
-                rows={[['Buys', mask(a ? fmt(a.buys, 0) : DASH)], ['Sells', mask(a ? fmt(a.sells, 0) : DASH)]]}
+                value={t ? mask(fmt(t.trades, 0)) : tradesPending}
+                rows={[['Buys', t ? mask(fmt(t.buys, 0)) : DASH], ['Sells', t ? mask(fmt(t.sells, 0)) : DASH]]}
               />
               <SumCell
                 title="Total vol. of trades"
-                value={mask(whole ? fmtCompactUsd(num(volumeAll?.amount)) : a ? `${floor}${fmtCompactUsd(a.volume)}` : DASH)}
-                rows={[['Buys', mask(a ? fmtCompactUsd(a.buyVolume) : DASH)], ['Sells', mask(a ? fmtCompactUsd(a.sellVolume) : DASH)]]}
+                value={t ? mask(fmtUsd(t.volume)) : tradesPending}
+                rows={[['Buys', t ? mask(fmtUsd(t.buyVolume)) : DASH], ['Sells', t ? mask(fmtUsd(t.sellVolume)) : DASH]]}
               />
               {engine === 'perps' ? (
                 <SumCell
-                  title="Total funding fee"
-                  value={maskPnl(range === 'ALL' ? (fundAll ? signedUsd(num(fundAll.amount)) : DASH) : a?.funding != null ? signedUsd(a.funding) : DASH)}
-                  tone={a?.funding != null && range !== 'ALL' ? signClass(a.funding) : undefined}
-                  rows={[['Latest funding fee', maskPnl(a?.latestFunding != null ? signedUsd(a.latestFunding) : DASH), a?.latestFunding != null ? signClass(a.latestFunding) : undefined]]}
+                  title={<>Total funding fee <InfoDot title="As SoDEX books it: a minus is funding you paid, a plus is funding you received." /></>}
+                  value={f ? maskPnl(signedUsd(f.total)) : fundingPending}
+                  tone={f ? signClass(f.total) : undefined}
+                  rows={[
+                    ['Received', f ? maskPnl(signedUsd(f.received)) : DASH, f && f.received > 0 ? 'pos' : undefined],
+                    ['Paid', f ? maskPnl(signedUsd(f.paid)) : DASH, f && f.paid < 0 ? 'neg' : undefined],
+                    ['Latest funding fee', f && f.latest !== null ? maskPnl(signedUsd(f.latest)) : DASH, f && f.latest !== null ? signClass(f.latest) : undefined],
+                  ]}
                 />
               ) : (
                 <SumCell title="Total funding fee" value={DASH} rows={[['Spot has no funding', '']]} />
               )}
               <SumCell
-                title="Total commission"
-                value={mask(whole ? fmtUsd(num(feeAll?.amount)) : a ? `${floor}${fmtUsd(a.commission)}` : DASH)}
-                rows={[['Latest commission', mask(a?.latestCommission != null ? fmtUsd(a.latestCommission) : DASH)]]}
+                title={<>Total commission <InfoDot title="The trading fees you paid, in dollars. Where SoDEX charged a fee in the coin you bought, it is valued at that fill's price." /></>}
+                value={t ? mask(fmtUsd(t.commission)) : tradesPending}
+                rows={[
+                  ['Latest commission', t && t.latestCommission !== null ? mask(fmtUsd(t.latestCommission)) : DASH],
+                  ...(t?.otherFees ?? []).map((o): [string, ReactNode] => [`Also paid in ${o.coin ?? 'an unnamed coin'}`, mask(fmt(o.amount, 6))]),
+                ]}
               />
             </div>
-            {a && !a.complete && <p className="pf-note pfx-sum__note">More than {PAGE} rows in this range, so the figures marked ≥ are the most recent {PAGE}.</p>}
-            {range === 'ALL' && <p className="pf-note pfx-sum__note">All time comes from the account&apos;s full history walk, which has no split by side.{walk?.sync.running ? ' It is still reading.' : ''}</p>}
-            {a && a.otherFeeCoins > 0 && <p className="pf-note pfx-sum__note">{a.otherFeeCoins} fees were paid in another coin and are not in this figure.</p>}
+            {lines.map((l) => <p key={l} className="pf-note pfx-sum__note">{l}</p>)}
+            {reading && <p className="pf-note pfx-sum__note">SoDEX allows two pages of trades a minute, so a long history takes a while. It carries on from here next time.</p>}
+            {late && asOf !== null && <p className="pf-note pfx-sum__note">As of {new Date(asOf).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}. SoDEX has not let us read newer rows yet.</p>}
           </>
         )}
     </Card>

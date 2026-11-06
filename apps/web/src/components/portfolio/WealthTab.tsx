@@ -16,7 +16,7 @@ import {
   fundAction, fundLabel, readPnlHistory, sodexFundUrl,
   type FundAction, type FundShelf, type JoinedHolding, type PnlRange, type WealthEntry, type WealthFund,
 } from '../../trading/wealth';
-import { RangePicker } from './RangePicker';
+import { RangePicker, ViewSeg } from './RangePicker';
 import { useLedger, useTradingStatuses, type WealthState } from './useWealth';
 import { WealthSheet, type WealthSheetTarget } from './WealthSheet';
 import type { Eip1193Provider } from '../../wallet';
@@ -79,7 +79,9 @@ function WealthValueCard({ w, value, slp }: { w: WealthState; value: number | nu
 
 // --- the chart --------------------------------------------------------------------------
 
-const RANGES: ReadonlyArray<readonly [PnlRange, string]> = [['1W', '1 week'], ['1M', '1 month'], ['3M', '3 months'], ['1Y', '1 year'], ['All', 'All time']];
+const RANGES: ReadonlyArray<readonly [PnlRange, string]> = [['1W', '7d'], ['1M', '30d'], ['3M', '90d'], ['1Y', '1y'], ['All', 'All time']];
+const WEALTH_VIEWS: ReadonlyArray<readonly ['value' | 'pnl', string]> = [['value', 'Wealth value'], ['pnl', 'PnL']];
+const SHELF_VIEWS: ReadonlyArray<readonly [FundShelf | 'All', string]> = [['All', 'All'], ['Stable Earn', 'Stable Earn'], ['Curated ETF', 'Curated ETF'], ['Specialty', 'Specialty']];
 
 function WealthChart({ address }: { address: string | null }) {
   const [range, setRange] = useState<PnlRange>('1M');
@@ -92,32 +94,30 @@ function WealthChart({ address }: { address: string | null }) {
       .filter((p) => Number.isFinite(p.t));
     if (pts.length < 2) return null;
     const first = pts[0]!.v;
-    const rebased = pts.map((p) => ({ t: p.t, v: p.v - first }));
-    return { points: rebased, baseline: first, change: rebased[rebased.length - 1]!.v, maxDrawdown: null };
+    // The value chart reads the value itself; PnL is the change from the start of the range.
+    const shown = view === 'value' ? pts : pts.map((p) => ({ t: p.t, v: p.v - first }));
+    return { points: shown, baseline: first, change: pts[pts.length - 1]!.v - first, maxDrawdown: null };
   }, [history.data, view]);
   return (
     <Card
       className="pf-card--chart pfx-chart"
       title={(
-        <div className="pf-seg" role="tablist" aria-label="Chart">
-          <button type="button" role="tab" aria-selected={view === 'value'} className={`pf-ctl ${view === 'value' ? 'is-on' : ''}`} onClick={() => setView('value')}>Wealth value</button>
-          <button type="button" role="tab" aria-selected={view === 'pnl'} className={`pf-ctl ${view === 'pnl' ? 'is-on' : ''}`} onClick={() => setView('pnl')}>PnL</button>
-        </div>
+        <RangePicker value={view} options={WEALTH_VIEWS} onChange={setView} label="Chart" align="start" />
       )}
       action={(
-        <RangePicker value={range} options={RANGES} onChange={setRange} />
+        <ViewSeg value={range} options={RANGES} onChange={setRange} label="Timeframe" />
       )}
     >
       {win && win.change !== null && (
         <div className="pfx-chart__head">
-          <span>{view === 'value' ? 'Change in value' : 'Change in PnL'}, {range === 'All' ? 'all time' : range}</span>
+          <span>{view === 'value' ? 'Change in value' : 'Change in PnL'}, {(RANGES.find(([k]) => k === range)?.[1] ?? range).toLowerCase()}</span>
           <b className={view === 'pnl' ? signClass(win.change) : undefined}>{mask(signedUsd(win.change))}</b>
         </div>
       )}
       {!address ? <div className="pf-chart pf-chart--empty"><p>Connect a wallet to chart your Wealth.</p></div>
         : history.error && !history.data ? <div className="pf-chart pf-chart--empty"><ReadFailed what="Wealth history" error={history.error} onRetry={history.refresh} /></div>
         : history.loading && !history.data ? <div className="pf-chart pf-chart--empty"><p><span className="pf-spin" aria-hidden="true" />Reading</p></div>
-        : win ? <EquityCurve win={win} tone={view === 'value' ? 'equity' : 'pnl'} />
+        : win ? <EquityCurve win={win} tone={view === 'value' ? 'equity' : 'pnl'} level={view === 'value'} compactAxis clean />
         : <div className="pf-chart pf-chart--empty"><p>Nothing to chart yet in this range.</p></div>}
     </Card>
   );
@@ -125,7 +125,6 @@ function WealthChart({ address }: { address: string | null }) {
 
 // --- the shelves ------------------------------------------------------------------------
 
-const SHELVES: ReadonlyArray<FundShelf | 'All'> = ['All', 'Stable Earn', 'Curated ETF', 'Specialty'];
 
 /** The channel, in words the reader can use. */
 function channelWords(a: FundAction | null, fundType: WealthFund['fundType']): string {
@@ -155,11 +154,7 @@ function FundBoard({ w, address, provider, onOpenMarket, onDone }: {
       title="All funds"
       className="pfx-board"
       action={(
-        <div className="pf-seg" role="tablist" aria-label="Shelf">
-          {SHELVES.map((s) => (
-            <button key={s} type="button" role="tab" aria-selected={s === shelf} className={`pf-ctl ${s === shelf ? 'is-on' : ''}`} onClick={() => setShelf(s)}>{s}</button>
-          ))}
-        </div>
+        <ViewSeg value={shelf} options={SHELF_VIEWS} onChange={setShelf} label="Shelf" />
       )}
     >
       <div className="pfx-tablewrap">

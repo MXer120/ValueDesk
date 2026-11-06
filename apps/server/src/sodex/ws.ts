@@ -75,7 +75,7 @@ export class Upstream extends EventEmitter {
     if (this.closed || this.ws) return;
     this.setStatus(this.attempt === 0 ? 'connecting' : 'reconnecting');
 
-    const ws = new WebSocket(this.url());
+    const ws = new WebSocket(this.url(), { perMessageDeflate: false });
     this.ws = ws;
 
     ws.on('open', () => {

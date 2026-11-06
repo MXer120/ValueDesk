@@ -193,7 +193,7 @@ export class HlTradeFeed {
   private connect(): void {
     if (!this.running || this.ws) return;
     this.status = this.attempt === 0 ? 'connecting' : 'reconnecting';
-    const ws = new WebSocket(this.url);
+    const ws = new WebSocket(this.url, { perMessageDeflate: false });
     this.ws = ws;
     this.subscribed.clear();
     this.snapshotSeen.clear();
