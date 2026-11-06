@@ -5,6 +5,7 @@
  *
  *   Privacy     hide my data - what, and how it is hidden
  *   Layout      lock the trade page's panels, edit them
+ *   Trading     which trades ask first (components/TradeConfirm.tsx), each on or off
  *   Security    this browser's trading key: its state, a password or passkey lock
  *               on it (trading/keyLock.ts), auto-lock, a check before money moves
  *   News        the News widget's sources, each on or off, and its SoSoValue credit
@@ -45,6 +46,9 @@ import { useUsername } from '../onboarding/profile';
 import { useReferral } from '../onboarding/referral';
 import { HelpSection } from '../feedback/HelpSection';
 import { NUM_STYLES, NUM_STYLE_LIST, fmtFixed, fmtNum, setNumStyle, useNumStyle } from '../numStyle';
+import { CONFIRM_KINDS, CONFIRM_LABELS, resetConfirms, setConfirmOn, useConfirmPrefs } from '../trading/confirmPrefs';
+import { ALWAYS_REVIEW_NOTIONAL_USD } from './ReviewPosition';
+import { fmtUsd } from '../format';
 import './SettingsMenu.css';
 
 const Icon = ({ children, size = 18 }: { children: ReactNode; size?: number }) => (
@@ -56,6 +60,7 @@ const SECTIONS: Array<{ id: Section; label: string; hint: string; icon: ReactNod
   { id: 'profile', label: 'Profile', hint: 'Username, theme, number format', icon: <><circle cx="10" cy="7" r="3.2" /><path d="M4 17c.8-3.2 3-4.8 6-4.8s5.2 1.6 6 4.8" /></> },
   { id: 'privacy', label: 'Privacy', hint: 'Hide your figures', icon: <path d="M2.5 10s2.8-5 7.5-5 7.5 5 7.5 5-2.8 5-7.5 5-7.5-5-7.5-5ZM10 12.2a2.2 2.2 0 1 0 0-4.4 2.2 2.2 0 0 0 0 4.4Z" /> },
   { id: 'layout', label: 'Layout', hint: 'Panels on the trade page', icon: <><rect x="3" y="3.5" width="14" height="13" rx="2" /><path d="M9 3.5v13M9 9.5h8" /></> },
+  { id: 'trading', label: 'Trading', hint: 'What asks before it is sent', icon: <><path d="M3 16.5V3.5M3 16.5h14" /><path d="m6 12.5 3-3.5 2.5 2 4-5" /></> },
   { id: 'security', label: 'Security', hint: 'Trading key, lock', icon: <><rect x="4.5" y="9" width="11" height="8" rx="2" /><path d="M7 9V6.5a3 3 0 0 1 6 0V9" /></> },
   { id: 'news', label: 'News', hint: 'Sources', icon: <><rect x="3" y="4" width="14" height="12" rx="2" /><path d="M6 7.5h5M6 10h8M6 12.5h8" /></> },
   { id: 'players', label: 'Players & cookies', hint: 'Video consents', icon: <><rect x="2.5" y="4.5" width="15" height="11" rx="2" /><path d="m8.5 8 4 2-4 2Z" /></> },
@@ -136,6 +141,7 @@ export function SettingsMenu({ hasLayout, dashLocked, address = null }: { hasLay
             {section === 'profile' && <ProfileSection address={address} />}
             {section === 'privacy' && <PrivacySection />}
             {section === 'layout' && <LayoutSection hasLayout={hasLayout} dashLocked={dashLocked} gear={gear} close={() => setOpen(false)} />}
+            {section === 'trading' && <TradingSection />}
             {section === 'security' && <SecuritySection />}
             {section === 'news' && <NewsSection />}
             {section === 'players' && <PlayersSection />}
@@ -252,6 +258,29 @@ function LayoutSection({ hasLayout, dashLocked, gear, close }: { hasLayout: bool
           </button>
         </Row>
       </div>
+    </>
+  );
+}
+
+/** One switch per kind of trade (trading/confirmPrefs.ts), the same ones "Don't ask again" turns off. */
+function TradingSection() {
+  const prefs = useConfirmPrefs();
+  const anyOff = CONFIRM_KINDS.some((k) => !prefs[k]);
+  return (
+    <>
+      <Head title="Trading" line="A window with the figures, before anything is sent. Switched off, the trade goes on the first press." />
+      <div className="stg__label">
+        <span>Confirmations</span>
+        {anyOff && <button type="button" className="stg__link" onClick={resetConfirms}>Ask for all</button>}
+      </div>
+      <div className="stg__card">
+        {CONFIRM_KINDS.map((k) => (
+          <Row key={k} title={CONFIRM_LABELS[k].title} line={CONFIRM_LABELS[k].line} off={!prefs[k]}>
+            <Toggle checked={prefs[k]} onChange={(v) => setConfirmOn(k, v)} label={`Confirm: ${CONFIRM_LABELS[k].title}`} words={['Asks first', 'Sends']} />
+          </Row>
+        ))}
+      </div>
+      <p className="stg__note">Mainnet orders of {fmtUsd(ALWAYS_REVIEW_NOTIONAL_USD, 0)} or more always ask, and so does the C key that cancels every order.</p>
     </>
   );
 }

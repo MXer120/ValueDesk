@@ -58,6 +58,16 @@ h.test('Positions: the TP/SL sheet sends position exits (stops, reduce-only) on 
   await typeInto(sheet.getByRole('textbox', { name: 'Stop Loss price' }), '50000');
   await until(page, async () => await confirm.isEnabled(), 'Confirm');
   await confirm.click();
+  const ask = page.getByRole('dialog', { name: 'Confirm take profit and stop loss' });
+  await ask.waitFor({ state: 'visible' });
+  assert.match((await ask.textContent()) ?? '', /Take profit/);
+  // Esc closes this window, not the sheet under it.
+  await page.keyboard.press('Escape');
+  await ask.waitFor({ state: 'hidden' });
+  assert.ok(await sheet.isVisible(), 'the sheet stays');
+  assert.equal(sx.orders().length, 0);
+  await confirm.click();
+  await ask.getByRole('button', { name: 'Send exits' }).click();
   await until(page, () => sx.orders().length >= 1, 'the exits to be sent');
   const all = sx.orders().flatMap(legs);
   const tp = all.find((l) => l.stopType === 2);
@@ -85,6 +95,16 @@ h.test('Open orders: Cancel sends one cancel for that order; Cancel all asks fir
   await ask.waitFor({ state: 'hidden' });
   const mark = sx.mark();
   await row.getByRole('button', { name: 'Cancel', exact: true }).click();
+  // One order asks too; "Keep order" sends nothing, Enter answers yes.
+  const one = page.getByRole('dialog', { name: 'Cancel this order?' });
+  await one.getByRole('button', { name: 'Keep order' }).click();
+  await one.waitFor({ state: 'hidden' });
+  await page.waitForTimeout(300);
+  assert.equal(sx.since(mark).length, 0, 'Keep order sends nothing');
+  await row.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await one.waitFor({ state: 'visible' });
+  await page.waitForTimeout(350);
+  await page.keyboard.press('Enter');
   await until(page, () => sx.since(mark).some((w) => w.method === 'DELETE'), 'the cancel');
   const w = sx.since(mark).find((w) => w.method === 'DELETE')!;
   assert.equal(w.path, '/api/v1/perps/trade/orders');

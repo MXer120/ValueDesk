@@ -11,6 +11,7 @@ import { useDraftOrders, type DraftLineKind } from '../draftOrders';
 import { fmtPrice } from '../format';
 import { followChart } from './candleDraws';
 import { LABEL_WORDS_X, layoutLabels, orderLineLayerOf, type LabelRow } from './orderOverlays';
+import { NUM_FAMILY } from './theme';
 
 const PANE = 'candle_pane';
 
@@ -83,11 +84,11 @@ export function DraftOrderLines({ chart, engine, symbol, left, top, tickSize }: 
       {view.rows.map((r) => (
         <div key={r.key} className={`kc-draft__row is-${r.ink}`}>
           <div className="kc-draft__line" style={{ top: r.y }} />
-          <span className="kc-draft__tag" style={{ left: LABEL_WORDS_X, top: r.labelY - 9 }}>
-            <span className="kc-draft__word">{r.tag}</span>
-            {r.amount && <span className="kc-draft__amount">{r.amount}</span>}
+          <span className="kc-lbl is-blur" style={{ transform: `translate(${LABEL_WORDS_X}px, ${r.labelY - 9}px)` }}>
+            <span className="kc-lbl__box is-solid">{r.tag}</span>
+            {r.amount && <span className="kc-lbl__box is-value" style={{ fontFamily: NUM_FAMILY }}>{r.amount}</span>}
           </span>
-          <span className="kc-draft__price" style={{ top: r.labelY - 9 }}>{fmtPrice(String(r.price), tickSize)}</span>
+          <span className="kc-lbl__axis is-blur" style={{ transform: `translateY(${r.labelY - 9}px)` }}>{fmtPrice(String(r.price), tickSize)}</span>
         </div>
       ))}
     </div>

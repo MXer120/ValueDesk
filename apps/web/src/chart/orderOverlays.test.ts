@@ -7,6 +7,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { fmtQty } from '../format';
 import { draftInkSide, draftLabelParts } from './DraftOrderLines';
+import { AXIS_BLUR_CAP, BLUR_CAP, labelsInPane, pickBlurred } from './orderLabelDom';
 import { layoutLabels, orderLines, positionLines } from './orderOverlays';
 
 const spotLimit = { symbol: 'vBTC_vUSDC', orderID: 77, side: 'BUY', price: '60000', quantity: '0.001', type: 'LIMIT', timeInForce: 'GTC' };
@@ -64,4 +65,30 @@ test('a preview says what the placed order will say, in its colour', () => {
 
 test('orders of another market are not drawn', () => {
   assert.deepEqual(orderLines([spotLimit], { symbol: 'vETH_vUSDC', canModify: true }), []);
+});
+
+test('a label has a node only inside the pane, its whole box counting', () => {
+  const rows = [{ y: -10 }, { y: -9 }, { y: 0 }, { y: 400 }, { y: 409 }, { y: 410 }];
+  assert.deepEqual(labelsInPane(rows, 400).map((r) => r.y), [-9, 0, 400, 409]);
+});
+
+test('up to the cap every label blurs; past it positions first, then those nearest the price', () => {
+  const few = Array.from({ length: BLUR_CAP }, (_, i) => ({ key: `o${i}`, y: i * 20, first: false }));
+  assert.equal(pickBlurred(few, 300).size, BLUR_CAP);
+  const many = [...Array.from({ length: BLUR_CAP + 10 }, (_, i) => ({ key: `o${i}`, y: i * 20, first: false })), { key: 'pos', y: 790, first: true }];
+  const chosen = pickBlurred(many, 200);
+  assert.equal(chosen.size, BLUR_CAP);
+  assert.ok(chosen.has('pos'), 'the position, though far from the middle');
+  assert.ok(chosen.has('o10'), 'the row at the middle');
+  assert.ok(!chosen.has(`o${BLUR_CAP + 9}`), 'the row furthest away');
+  assert.ok(AXIS_BLUR_CAP < BLUR_CAP, 'tags give up their blur before labels do');
+});
+
+test('labels of hundreds of lines at one price stay apart and stay fast', () => {
+  const rows = Array.from({ length: 300 }, (_, i) => ({ key: `o${i}`, y: 200 + (i % 3) }));
+  const started = performance.now();
+  const dy = layoutLabels(rows);
+  assert.ok(performance.now() - started < 50, 'well inside a frame');
+  const placed = rows.map((r) => r.y + dy.get(r.key)!).sort((a, b) => a - b);
+  for (let i = 1; i < placed.length; i++) assert.ok(placed[i]! - placed[i - 1]! >= 18, `row ${i}`);
 });
