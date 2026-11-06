@@ -139,8 +139,9 @@ test('reference: the ring while it beats; its own Binance socket while the ring 
     assert.equal(ref.quote('ETH-USD')!.bid, 2281);
     assert.equal(ref.onRing, false, 'not before it has beaten for 3 s');
     const realNow = Date.now;
-    const t0 = realNow();
-    Date.now = () => t0 + 3_100;
+    // Moved on, not frozen: a tick's time is the clock less its age, so under a frozen clock a pause between publish and poll
+    // (a CI runner, 2026-11-06) makes the newer tick look older than the last and it is rightly refused.
+    Date.now = () => realNow() + 3_100;
     try {
       w.beat();
       ref.check();
