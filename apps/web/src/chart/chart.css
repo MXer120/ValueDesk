@@ -988,6 +988,9 @@ html.kc-drag * {
   pointer-events: auto;
   text-shadow: 0 0 3px var(--bg-panel), 0 0 2px var(--bg-panel);
 }
+/* An order label lies on this row: its buttons take the press (orderLabelDom.ts yieldLegend). */
+.kc-ind-row[data-under-label],
+.kc-ind-row[data-under-label] * { pointer-events: none; }
 .kc-ind-row:hover,
 .kc-ind-row.is-open { background: color-mix(in srgb, var(--bg-elevated) 82%, transparent); text-shadow: none; }
 .kc-ind-name {

@@ -67,7 +67,12 @@ async function pressBox(page: Page, row: number, box: number) {
 const rowsWith = (page: Page, text: RegExp) =>
   page.evaluate((src) => {
     const re = new RegExp(src);
-    return [...document.querySelectorAll('.kc-lbls .kc-lbl:not([hidden])')].findIndex((r) => re.test(r.textContent ?? ''));
+    // Whole inside the pane: the market moves under this test, and a label cut off at the pane's edge cannot be pressed.
+    const pane = document.querySelector('.kc-lbls')!.getBoundingClientRect();
+    return [...document.querySelectorAll('.kc-lbls .kc-lbl:not([hidden])')].findIndex((r) => {
+      const b = r.getBoundingClientRect();
+      return re.test(r.textContent ?? '') && b.top >= pane.top && b.bottom <= pane.bottom && !!r.querySelector('.is-cross');
+    });
   }, text.source);
 
 async function labels(page: Page, least: number) {
@@ -120,6 +125,13 @@ h.test('labels: boxes on one line, blurred, and the buttons answer on the pixels
   // The X of the limit order, on the canvas under its box.
   const limit = await rowsWith(page, /Limit/);
   assert.ok(limit >= 0);
+  // No legend row may take the press of a label's button, wherever the price has put that label.
+  const taken = await page.evaluate(() => [...document.querySelectorAll('.kc-lbls .kc-lbl:not([hidden]) > :first-child')].flatMap((el) => {
+    const b = el.getBoundingClientRect();
+    const top = document.elementFromPoint(b.x + b.width / 2, b.y + b.height / 2);
+    return top?.closest('.kc-ind-row') ? [top.textContent ?? ''] : [];
+  }));
+  assert.deepEqual(taken, [], 'a legend row lies over a label button');
   const mark = sx.mark();
   await pressBox(page, limit, 0);
   const ask = page.getByRole('dialog', { name: 'Cancel this order?' });
@@ -146,7 +158,12 @@ h.test('moving a line asks, with from and to; Put it back sends nothing', async 
   const { sx } = await setup(env);
   const { page } = env;
   const box = await page.evaluate(() => {
-    const row = [...document.querySelectorAll<HTMLElement>('.kc-lbls .kc-lbl:not([hidden])')].find((r) => /Limit/.test(r.textContent ?? ''));
+    // The limit with the most room: labels that crowd are pushed off their lines, and a press at the label misses the line.
+    const rows = [...document.querySelectorAll<HTMLElement>('.kc-lbls .kc-lbl:not([hidden])')];
+    const room = (r: HTMLElement) => Math.min(...rows.filter((o) => o !== r).map((o) => Math.abs(o.getBoundingClientRect().y - r.getBoundingClientRect().y)));
+    const pane = document.querySelector('.kc-lbls')!.getBoundingClientRect();
+    const whole = (r: HTMLElement) => r.getBoundingClientRect().top >= pane.top && r.getBoundingClientRect().bottom <= pane.bottom;
+    const row = rows.filter((r) => /Limit.*0,0|Limit.*0.0/.test(r.textContent ?? '') && r.querySelector('.is-cross') && whole(r)).sort((x, y) => room(y) - room(x))[0];
     const b = row?.getBoundingClientRect();
     const end = row?.lastElementChild?.getBoundingClientRect();
     return b && end ? { x: end.right + 80, y: b.y + b.height / 2 } : null;

@@ -35,6 +35,8 @@ export interface DomLabel {
 }
 
 const LABEL_HALF = 9;
+/** chart.css .kc-ind-row. */
+const LEGEND_ROW_HEIGHT = 20;
 
 /** Which rows show in a pane this tall, a row's whole box counting: no node for the hundreds that do not. */
 export function labelsInPane<T extends { y: number }>(rows: readonly T[], height: number): T[] {
@@ -87,9 +89,12 @@ export class OrderLabelDom {
   private pass = 0;
   private size = '';
   private left = 0;
+  /** Where each shown label sits, from the top of the pane's legend layer. */
+  private tops: number[] = [];
+  private paneTop = 0;
 
   constructor(
-    host: HTMLElement,
+    private readonly host: HTMLElement,
     private readonly widthOf: (box: LabelBox) => number,
   ) {
     this.root = document.createElement('div');
@@ -108,7 +113,10 @@ export class OrderLabelDom {
       this.root.classList.toggle('is-axis-left', !axisOnRight);
       for (const row of this.rows.values()) row.y = Number.NaN;
       this.left = pane.left;
+      // Read only when the pane changes: the indicator legend's rows are placed from the holder's parent.
+      this.paneTop = this.host.offsetTop + pane.top;
     }
+    this.tops = labels.map((l) => this.paneTop + l.y - LABEL_HALF);
     const blurred = pickBlurred(labels, pane.height / 2);
     const axisBlurs = labels.length <= AXIS_BLUR_CAP;
     this.pass++;
@@ -142,6 +150,21 @@ export class OrderLabelDom {
       row.shown = false;
       row.el.hidden = true;
       row.axis.hidden = true;
+    }
+  }
+
+  /**
+   * A label's buttons win over an indicator's legend row under them. The buttons are hit on the canvas, and the row is
+   * HTML above it, so a press on the X of a label over "Volume" opened Volume's settings (phone, 2026-11-06). A row with
+   * a label on it takes no pointer until the label moves off. Reads no layout: the rows carry their top inline.
+   */
+  yieldLegend(): void {
+    const rows = this.host.parentElement?.querySelectorAll<HTMLElement>('.kc-ind-row');
+    if (!rows) return;
+    for (const row of rows) {
+      const top = Number.parseFloat(row.style.top);
+      const under = this.tops.some((t) => t < top + LEGEND_ROW_HEIGHT && t + LABEL_HALF * 2 > top);
+      if (row.hasAttribute('data-under-label') !== under) row.toggleAttribute('data-under-label', under);
     }
   }
 

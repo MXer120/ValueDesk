@@ -787,7 +787,11 @@ export class OrderLineLayer {
     const axis = this.chart.getSize(CANDLE_PANE_ID, 'yAxis');
     const axisOnRight = !axis || axis.left >= main.left;
     const size = `${main.left}|${main.top}|${main.height}|${axisOnRight}`;
-    if (!this.labelsDirty && this.painted?.laid === laid && this.painted.size === size) return;
+    if (!this.labelsDirty && this.painted?.laid === laid && this.painted.size === size) {
+      // The legend re-renders on its own, also while the labels stand still.
+      this.dom.yieldLegend();
+      return;
+    }
     this.labelsDirty = false;
     this.painted = { laid, size };
     const rows: Array<{ key: string; y: number }> = [];
@@ -800,6 +804,7 @@ export class OrderLineLayer {
       return { key: r.key, y: r.y, first: this.lines.get(r.key)?.kind === 'position', data, boxes: v.segs, axisText: v.axisText, color: v.color };
     });
     this.dom.paint(labels, { left: main.left + LABEL_X, top: main.top, height: main.height }, axisOnRight);
+    this.dom.yieldLegend();
   }
 
   /** The visual a line has now: where the user moved it, or the venue's. */
