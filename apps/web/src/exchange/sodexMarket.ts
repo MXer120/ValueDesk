@@ -60,12 +60,25 @@ async function withMarket<T>(e: Engine, ref: string, load: (name: string) => Pro
   return { sym, data: await load(sym.name) };
 }
 
+/**
+ * SoDEX's 24h ticker stops at a market's last trade: it does not roll off. Measured 2026-11-06: 7 of 41 spot tickers
+ * closed over 24 h ago, vADA 605 h, and went on showing $727 of volume and a 2.45% move for a day with no trade.
+ * Past 24 h the window is empty: nothing traded and the price did not move.
+ */
+export function freshTicker<T extends Ticker & { closeTime?: number }>(t: T, now = Date.now()): T {
+  if (typeof t.closeTime !== 'number' || now - t.closeTime <= 86_400_000) return t;
+  return { ...t, volume: '0', quoteVolume: '0', change: '0', changePct: 0, openPx: t.lastPx, highPx: t.lastPx, lowPx: t.lastPx };
+}
+
 export const market = {
   symbols: async (e: Engine) => ({ engine: e, symbols: await symbolList(e) }),
 
   coins: async () => ({ coins: await gwGet<Array<{ id: number; name: string; precision: number }>>(`${ep('spot')}/markets/coins`) }),
 
-  tickers: async (e: Engine) => ({ engine: e, tickers: await gwGet<Ticker[]>(`${ep(e)}/markets/tickers`) }),
+  tickers: async (e: Engine) => {
+    const raw = await gwGet<Ticker[]>(`${ep(e)}/markets/tickers`);
+    return { engine: e, tickers: Array.isArray(raw) ? raw.map((t) => freshTicker(t)) : raw };
+  },
 
   bookTickers: async (e: Engine) => ({ engine: e, bookTickers: await gwGet<unknown>(`${ep(e)}/markets/bookTickers`) }),
 
