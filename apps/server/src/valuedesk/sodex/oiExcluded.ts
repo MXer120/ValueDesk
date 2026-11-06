@@ -30,6 +30,8 @@ export const sodexInternalAddresses = (): string[] =>
 function addPositions(sizes: Record<string, number>, address: string, body: unknown): void {
   const list = (body as { positions?: unknown } | null)?.positions;
   if (!Array.isArray(list)) throw new Error(`SoDEX sent no position list for ${address}`);
+  // An empty list is not believed: each account holds 36 markets, and one read as empty would show the other's leg as the others' open interest.
+  if (!list.length) throw new Error(`SoDEX sent an empty position list for ${address}`);
   for (const p of list as Array<{ symbol?: unknown; size?: unknown }>) {
     const size = typeof p?.size === 'string' && p.size.trim() !== '' ? Number(p.size) : Number.NaN;
     if (typeof p?.symbol !== 'string' || !p.symbol || !Number.isFinite(size)) {

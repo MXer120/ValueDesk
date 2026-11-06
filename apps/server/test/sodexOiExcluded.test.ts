@@ -31,9 +31,8 @@ test('each leg counts by its own absolute size, whether the two offset or not', 
   assert.deepEqual(r.sizes, { 'BTC-USD': 1790.68, 'SPCX-USD': 20.5, 'ONLY-USD': 3 });
 });
 
-test('an account holding nothing is a real answer; an account not answering is not', async () => {
-  const empty = await readOiExcluded(async () => ({ positions: [] }), [A!, B!]);
-  assert.deepEqual(empty.sizes, {});
+test('an account not answering, or answering with no positions, is an error', async () => {
+  await assert.rejects(readOiExcluded(async () => ({ positions: [] }), [A!, B!]), /empty position list/);
   for (const bad of [null, {}, [], { positions: null }, { positions: 'x' }, { positions: [{ symbol: 'BTC-USD' }] }, { positions: [{ symbol: 'BTC-USD', size: 'x' }] }, { positions: [{ size: '1' }] }]) {
     await assert.rejects(readOiExcluded(async (p) => (p.includes(A!) ? { positions: [pos('BTC-USD', '1')] } : bad), [A!, B!]), Error, JSON.stringify(bad));
   }
@@ -82,4 +81,9 @@ test('route: a failure answers ok:false uncached, the next read succeeds and is 
     sodex.get = realGet;
     await a.close();
   }
+});
+
+test('an account answering with no positions is an error, not zero', async () => {
+  const get = async (path: string) => (path.includes('/a/') ? { positions: [{ symbol: 'BTC-USD', size: '-1' }] } : { positions: [] });
+  await assert.rejects(readOiExcluded(get, ['a', 'b']), /empty position list for b/);
 });
