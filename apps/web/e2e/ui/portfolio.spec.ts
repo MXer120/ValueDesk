@@ -197,20 +197,31 @@ h.test('Total Value counts each dollar once, and copies and bots have no bucket'
     return Math.abs(on.left - blob.left) < 1 && Math.abs(on.width - blob.width) < 1;
   }), 'the blob on 30d', 5_000);
   // The chart's view is a dropdown.
+  // The axis: hours on 24h, several days at one step on 7d.
+  const labels = () => p.locator('.pfx-chart .pf-chart__xlabel').allTextContents();
+  await p.locator('.pfx-chart').getByRole('radio', { name: '24h' }).click();
+  await until(p, async () => (await labels()).some((l) => /^\d\d:00$/.test(l)), 'hours on the 24h axis', 5_000);
+  await shot(p, 'axis-24h', false);
+  await p.locator('.pfx-chart').getByRole('radio', { name: '7d' }).click();
+  await until(p, async () => (await labels()).length >= 3 && !(await labels()).some((l) => l.includes(':')), 'days on the 7d axis', 5_000);
   await p.locator('.pfx-chart .psel__btn').click();
-  await p.locator('.pfx-chart').getByRole('option', { name: 'PnL', exact: true }).waitFor();
+  await p.getByRole('option', { name: 'PnL', exact: true }).waitFor();
   await p.waitForTimeout(350);
-  assert.ok(await p.locator('.pfx-chart').getByRole('option', { name: 'PnL', exact: true }).evaluate((el) => {
+  assert.ok(await p.getByRole('option', { name: 'PnL', exact: true }).evaluate((el) => {
     const r = el.getBoundingClientRect();
     return el.contains(document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2));
   }), 'the view list is on top, not clipped');
   await shot(p, 'timeframe', false);
-  await p.locator('.pfx-chart').getByRole('option', { name: 'PnL', exact: true }).click();
+  const heightOf = () => p.locator('.pfx-chart').evaluate((el) => el.getBoundingClientRect().height);
+  const valueHeight = await heightOf();
+  await p.getByRole('option', { name: 'PnL', exact: true }).click();
+  assert.equal(await heightOf(), valueHeight, 'the card keeps its height on PnL');
   await p.locator('.pfx-chart').evaluate((el) => el.scrollIntoView({ block: 'center' }));
   await shot(p, 'pnl', false);
   await p.locator('.pfx-chart .psel__btn').click();
-  await p.locator('.pfx-chart').getByRole('option', { name: 'PnL Calendar' }).click();
+  await p.getByRole('option', { name: 'PnL Calendar' }).click();
   await p.locator('.pfc-grid').waitFor();
+  assert.equal(await heightOf(), valueHeight, 'the card keeps its height on the calendar');
   await shot(p, 'calendar', false);
   await p.getByRole('button', { name: 'View tiers' }).click();
   await p.getByRole('dialog').first().waitFor();

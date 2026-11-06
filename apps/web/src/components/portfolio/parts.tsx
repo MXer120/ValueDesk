@@ -9,6 +9,7 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { Private, useMask, usePrivacy, type PrivacyKey } from '../../privacy';
 import { DASH, MINUS, fmtUsd, signClass } from '../../format';
+import { timeTicks } from './timeTicks';
 import '../Portfolio.css';
 import { fmtFixed, fmtNum } from '../../numStyle';
 
@@ -50,7 +51,6 @@ export function fmtCompactUsd(v: number | null | undefined): string {
 
 /** An axis figure: no cents, and thousands shortened from 10k up. */
 const wholeUsd = (v: number): string => (Math.abs(v) < 10_000 ? fmtUsd(v, 0) : fmtCompactUsd(v));
-const shortDay = (ms: number): string => new Date(ms).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 
 export const fmtDay = (ms: number | null | undefined): string =>
   ms ? new Date(ms).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: '2-digit' }) : DASH;
@@ -471,7 +471,11 @@ function EquityCurveInner({ win, unit = 'usd', tone = 'pnl', compactAxis = false
   }
   const span = hi - lo;
   const y = (v: number) => PAD_T + (PLOT_H - PAD_T) - ((v - lo) / span) * (PLOT_H - PAD_T);
-  const x = (i: number) => (i / (pts.length - 1)) * PLOT_W;
+  const tFrom = pts[0]!.t;
+  const tTo = pts[pts.length - 1]!.t;
+  /* The portfolio chart places points by time: unevenly spaced points must not bend the axis. */
+  const byTime = clean && tTo > tFrom;
+  const x = (i: number) => (byTime ? ((pts[i]!.t - tFrom) / (tTo - tFrom)) * PLOT_W : (i / (pts.length - 1)) * PLOT_W);
 
   const zeroY = level ? PLOT_H : y(0);
   const runs = splitAtZero(pts, x, y);
@@ -540,8 +544,6 @@ function EquityCurveInner({ win, unit = 'usd', tone = 'pnl', compactAxis = false
     for (let c = Math.min(6, lastIdx + 1); c >= 3; c--) {
       const cand = Array.from({ length: c }, (_, k) => Math.round((k / (c - 1)) * lastIdx));
       if (new Set(cand).size !== c) continue;
-      // Few points cannot be spaced evenly unless the count divides: 7 points in 6 labels skips a day in the middle.
-      if (clean && lastIdx <= 12 && lastIdx % (c - 1) !== 0) continue;
       if (fits(cand)) { xTicks = cand; break; }
     }
   }
@@ -550,6 +552,12 @@ function EquityCurveInner({ win, unit = 'usd', tone = 'pnl', compactAxis = false
     const r = e.currentTarget.getBoundingClientRect();
     const px = e.clientX - r.left;
     if (px > PLOT_W) return setHover(null);
+    if (byTime) {
+      const at = tFrom + (px / PLOT_W) * (tTo - tFrom);
+      let best = 0;
+      for (let k = 1; k < pts.length; k++) if (Math.abs(pts[k]!.t - at) < Math.abs(pts[best]!.t - at)) best = k;
+      return setHover(best);
+    }
     const i = Math.round((px / PLOT_W) * (pts.length - 1));
     setHover(Math.min(pts.length - 1, Math.max(0, i)));
   };
@@ -579,8 +587,8 @@ function EquityCurveInner({ win, unit = 'usd', tone = 'pnl', compactAxis = false
           </linearGradient>
           {clean && (
             <>
-              <pattern id={ID.dotUp} width="8" height="8" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="0.9" className="pf-chart__dots pos" /></pattern>
-              <pattern id={ID.dotDown} width="8" height="8" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="0.9" className="pf-chart__dots neg" /></pattern>
+              <pattern id={ID.dotUp} width="14" height="14" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="0.8" className="pf-chart__dots pos" /></pattern>
+              <pattern id={ID.dotDown} width="14" height="14" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="0.8" className="pf-chart__dots neg" /></pattern>
               {/* The fill is strongest at the line's furthest reach and fades towards the start level. */}
               <linearGradient id={ID.washUp} gradientUnits="userSpaceOnUse" x1="0" y1={y(Math.max(...ys))} x2="0" y2={baseY}>
                 <stop offset="0%" stopColor="var(--pos)" stopOpacity="0.26" />
@@ -591,12 +599,12 @@ function EquityCurveInner({ win, unit = 'usd', tone = 'pnl', compactAxis = false
                 <stop offset="100%" stopColor="var(--neg)" stopOpacity="0.02" />
               </linearGradient>
               <linearGradient id={ID.fadeUp} gradientUnits="userSpaceOnUse" x1="0" y1={y(Math.max(...ys))} x2="0" y2={baseY}>
-                <stop offset="0%" stopColor="#fff" stopOpacity="0.9" />
-                <stop offset="100%" stopColor="#fff" stopOpacity="0.2" />
+                <stop offset="0%" stopColor="#fff" stopOpacity="0.7" />
+                <stop offset="100%" stopColor="#fff" stopOpacity="0.25" />
               </linearGradient>
               <linearGradient id={ID.fadeDown} gradientUnits="userSpaceOnUse" x1="0" y1={y(Math.min(...ys))} x2="0" y2={baseY}>
-                <stop offset="0%" stopColor="#fff" stopOpacity="0.9" />
-                <stop offset="100%" stopColor="#fff" stopOpacity="0.2" />
+                <stop offset="0%" stopColor="#fff" stopOpacity="0.7" />
+                <stop offset="100%" stopColor="#fff" stopOpacity="0.25" />
               </linearGradient>
               <mask id={ID.maskUp} maskUnits="userSpaceOnUse" x="0" y="0" width={W} height={H}><rect x="0" y="0" width={W} height={H} fill={`url(#${ID.fadeUp})`} /></mask>
               <mask id={ID.maskDown} maskUnits="userSpaceOnUse" x="0" y="0" width={W} height={H}><rect x="0" y="0" width={W} height={H} fill={`url(#${ID.fadeDown})`} /></mask>
@@ -651,7 +659,15 @@ function EquityCurveInner({ win, unit = 'usd', tone = 'pnl', compactAxis = false
           />
         ))}
 
-        {xTicks.map((i) => (
+        {byTime && timeTicks(tFrom, tTo, Math.max(2, Math.floor(PLOT_W / 72))).map((tick) => {
+          const px = ((tick.t - tFrom) / (tTo - tFrom)) * PLOT_W;
+          return (
+            <text key={tick.t} x={px} y={PLOT_H + 11} className="pf-chart__xlabel" textAnchor={px < 24 ? 'start' : px > PLOT_W - 24 ? 'end' : 'middle'}>
+              {tick.label}
+            </text>
+          );
+        })}
+        {!byTime && xTicks.map((i) => (
           <text
             key={i}
             x={Math.min(PLOT_W, Math.max(0, x(i)))}
@@ -661,7 +677,7 @@ function EquityCurveInner({ win, unit = 'usd', tone = 'pnl', compactAxis = false
             className="pf-chart__xlabel"
             textAnchor={i === 0 ? 'start' : i === pts.length - 1 ? 'end' : 'middle'}
           >
-            {clean ? shortDay(pts[i]!.t) : fmtDay(pts[i]!.t)}
+            {fmtDay(pts[i]!.t)}
           </text>
         ))}
 
@@ -691,7 +707,7 @@ function EquityCurveInner({ win, unit = 'usd', tone = 'pnl', compactAxis = false
             left: `${Math.min(PLOT_W - 40, Math.max(40, x(hover!)))}px`,
           }}
         >
-          <span className="pf-chart__tipday">{fmtDay(h.t)}</span>
+          <span className="pf-chart__tipday">{clean && tTo - tFrom <= 2 * 86_400_000 ? `${fmtDay(h.t)}, ${new Date(h.t).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}` : fmtDay(h.t)}</span>
           <span className={`pf-chart__tipval ${clean ? sideOf(h.v) : level ? '' : signClass(h.v)}`}>{fmtV(h.v)}</span>
         </div>
       )}
