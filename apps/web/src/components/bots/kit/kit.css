@@ -236,3 +236,16 @@ html[data-theme='light'] .tf-switch__thumb, .tf-switch.is-on .tf-switch__thumb {
 /* The app's global `label { flex-direction: column }` (styles.css) must not reach the kit's inline labels. */
 .tf label.tf-check { flex-direction: row; gap: 8px; line-height: normal; font-size: 13px; }
 .tf label.tf-num__l, .tf label.tf-field__l, .tf label.tf-choice__t { line-height: normal; gap: 0; }
+
+/* ------------------------------------------------------------------ slider ---- */
+.tf-slider { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.tf .tf-slider input { width: 100%; height: 28px; margin: 0; padding: 0; border: 0; border-radius: 0; box-shadow: none; outline: none; background: none; cursor: pointer; -webkit-appearance: none; appearance: none; }
+.tf-slider input::-webkit-slider-runnable-track { height: 6px; border-radius: 9999px; background: linear-gradient(90deg, var(--tf-fg) var(--tf-fill), rgb(var(--ink) / 0.1) var(--tf-fill)); }
+.tf-slider input::-moz-range-track { height: 6px; border-radius: 9999px; background: rgb(var(--ink) / 0.1); }
+.tf-slider input::-moz-range-progress { height: 6px; border-radius: 9999px; background: var(--tf-fg); }
+.tf-slider input::-webkit-slider-thumb { -webkit-appearance: none; width: 20px; height: 20px; margin-top: -7px; border-radius: 50%; background: linear-gradient(180deg, #ffffff, #e2e2e2); box-shadow: 0 2px 3px rgba(0, 0, 0, 0.25); transition: scale 150ms var(--tf-ease); }
+.tf-slider input::-moz-range-thumb { width: 20px; height: 20px; border: 0; border-radius: 50%; background: linear-gradient(180deg, #ffffff, #e2e2e2); box-shadow: 0 2px 3px rgba(0, 0, 0, 0.25); }
+.tf-slider input:active::-webkit-slider-thumb { scale: 1.1; }
+.tf-slider input:focus-visible { outline: none; }
+.tf-slider input:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px color-mix(in srgb, var(--tf-brand) 55%, transparent); }
+.tf-slider__ends { display: flex; justify-content: space-between; font-size: 11px; color: var(--tf-faint); font-variant-numeric: tabular-nums; }

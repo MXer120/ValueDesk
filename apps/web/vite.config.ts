@@ -290,6 +290,9 @@ export default defineConfig({
     // Proxy keeps the browser same-origin, so there is no CORS preflight on the
     // hot path and the WebSocket upgrade works without extra configuration.
     proxy: DEV_PROD ? {
+      // VS_DEV_EXECUTOR=local: production's data with a local executor (apps/executor on 8799), for tests that
+      // must not reach the production executor (the Bots e2e). Listed first: the first matching prefix wins.
+      ...(process.env.VS_DEV_EXECUTOR === 'local' ? { '/api/copy': { target: 'http://127.0.0.1:8799', changeOrigin: true } } : {}),
       '/api': {
         target: PROD_SITE,
         changeOrigin: true,

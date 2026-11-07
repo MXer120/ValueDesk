@@ -86,7 +86,7 @@ export function BotsExplore({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
 
   return (
     <>
-      <BotsHead view={view} title="Explore" sub="What a market maker costs on every SoDEX market, read from each market's own trades: no live run needed." />
+      <BotsHead view={view} title="Explore" sub="What a market maker costs on every market, from its own trades." />
 
       <Shell className="bots-kpis">
         <ShellHeader icon="compass" title="Every market, estimated" subtitle={r.data ? `Read ${new Date(r.data.at).toISOString().slice(11, 16)} UTC · refreshes every 5 minutes` : 'Reading the markets…'} />
@@ -102,7 +102,7 @@ export function BotsExplore({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
         <ShellHeader
           icon="list"
           title="Markets"
-          subtitle="Sorted by cost. Open a market for its hours and weekend figures."
+          subtitle="Open a market for its hours and weekends"
           aside={
             <>
               <Segmented value={win} label="Window" onChange={setWin} options={[{ value: '24h', label: '24h' }, { value: '7d', label: '7d' }]} />
@@ -200,9 +200,9 @@ export function BotsExplore({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
             </div>
           )}
         </Panel>
-        <p className="bots-method">
+        <details className="bots-methodbox"><summary>How it's estimated</summary><p className="bots-method">
           How it is estimated: every trade on SoDEX names both accounts. For each market we take the makers our size (any maker under a tenth of the market's maker volume that fills like a bot), measure what each of their fills kept 30 seconds later, and add the fees. The patient taker's fills cost makers little; the fast taker's cost about 1 bp each, so a market's cost follows who takes there. On BTC this read within about 0.15 bp of our live runs. "With gate": only the minutes the price moved less than 12 bp in the minute before. Fees: SoDEX's maker fee and ValueDesk's {(ctx.feeTenths / 10).toFixed(1)} bp.
-        </p>
+        </p></details>
       </Shell>
     </>
   );

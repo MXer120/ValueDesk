@@ -136,7 +136,9 @@ export function NavBar({
      is exactly how a masked address would have leaked in one place while being
      hidden in another. */
   const maskAddr = useAddressMask();
-  const botsOpen = useBetaAccess(address);
+  // Local builds of the Bots section (BOTS_ON) open it for any wallet, as BotsPage does.
+  const listedForBots = useBetaAccess(address);
+  const botsOpen = BOTS_ON || listedForBots;
   const addrRoot = useRef<HTMLDivElement>(null);
   const addrHover = useHoverMenu(addrRoot);
   const addrMenu = addrHover.open;

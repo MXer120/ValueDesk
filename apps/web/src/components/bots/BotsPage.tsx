@@ -38,7 +38,8 @@ import type { BotState } from './botWords';
 import { STATE_WORD } from './botWords';
 import { applyForBeta, useBetaAccessState } from '../../beta/access';
 import { openConnectDialog } from '../account/connect';
-import { Button, EmptyState, Panel, Shell } from './kit/kit';
+import { Button, EmptyState, Panel, Shell, Skeleton } from './kit/kit';
+import { hostedExecutor } from '../../copy/executor';
 import './bots.css';
 import './botsPages.css';
 
@@ -56,6 +57,9 @@ export interface BotsCtx {
   setup: (paper: boolean) => void;
   setupWhy: (paper: boolean) => string | null;
   start: (spec: Record<string, unknown>) => Promise<AlgoView>;
+  /** New settings by restart (feature 'bot-restart'): 'clean' closes first, 'takeover' hands what it holds to the new bot. */
+  restart: (v: AlgoView, spec: Record<string, unknown>, how: 'clean' | 'takeover') => Promise<AlgoView>;
+  canRestart: boolean;
   update: (id: string, patch: Record<string, unknown>) => Promise<void>;
   pause: (v: AlgoView) => Promise<void>;
   resume: (v: AlgoView) => Promise<void>;
@@ -82,6 +86,17 @@ export function BotsHead({ title, sub, actions, lead }: { view?: BotsView; title
 }
 
 const STATE_TONE: Record<BotState, Tone> = { running: 'positive', waiting: 'warning', paused: 'neutral', closing: 'warning', ended: 'neutral', failed: 'negative' };
+
+/** The page's shape while the wallet's state is read: no signed-out or setup view flashes first. */
+function BotsSettling() {
+  return (
+    <div className="bots-settling" aria-busy="true" aria-label="Loading your bots">
+      <div className="bots-head"><div className="bots-head__t"><Skeleton className="bots-skel is-title" /><Skeleton className="bots-skel is-line" /></div></div>
+      <Shell><div className="bots-kpigrid">{[0, 1, 2, 3, 4, 5].map((i) => <Skeleton key={i} className="bots-skel is-kpi" />)}</div></Shell>
+      <div className="bots-two"><Shell><Skeleton className="bots-skel is-chart" /></Shell><Shell><Skeleton className="bots-skel is-chart" /></Shell></div>
+    </div>
+  );
+}
 
 /** A bot's state as a pill: a live dot while it runs. */
 export function StatePill({ s, size = 'md' }: { s: BotState; size?: 'sm' | 'md' }) {
@@ -125,6 +140,14 @@ function BotsPageOpen({ address, provider }: { address: string | null; provider:
   const live = useLiveCopy(address, provider);
   const signedIn = readiness(live, 'hosted').connected;
   const { bots, loading, error, start, act, stopAll, update } = useBots(address, signedIn);
+  // Until the wallet's state is read (owner 2026-11-07: it showed the signed-out page, then the setup, then the
+  // bots): the live state follows the wallet, a stored session is checked with the executor, the first list loads.
+  const settling = !!address && (
+    live.owner !== address.toLowerCase()
+    || (!live.hosted.info && !live.hosted.infoError)
+    || (!signedIn && !!hostedExecutor.token(address) && !live.hosted.infoError)
+    || (signedIn && loading && !bots.length)
+  );
   const [setup, setSetup] = useState<{ paper: boolean } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const { confirm, dialog } = useConfirm();
@@ -161,6 +184,13 @@ function BotsPageOpen({ address, provider }: { address: string | null; provider:
       notify('ok', `${botName(v)} started${v.algo.spec.paper ? ' (practice)' : ''}.`);
       return v;
     },
+    restart: async (v, spec, how) => {
+      const n = await start(spec, { from: v.algo.id, how });
+      notify('ok', how === 'clean' ? 'Restarting: the old bot closes, then the new one starts.' : 'Restarted: the new bot took over.');
+      goBots({ page: 'bot', id: n.algo.id });
+      return n;
+    },
+    canRestart: !!live.hosted.info?.features?.includes('bot-restart'),
     update: async (id, patch) => {
       await update(id, patch);
       notify('ok', 'Changes saved. They apply at once.');
@@ -213,7 +243,7 @@ function BotsPageOpen({ address, provider }: { address: string | null; provider:
 
   return (
     <div className="tf bots-page" aria-busy={loading}>
-      <div className="bots-col">{page}</div>
+      <div className="bots-col">{settling && view.page !== 'explore' ? <BotsSettling /> : page}</div>
       <BotSetupSheet open={!!setup} onClose={() => setSetup(null)} live={live} paper={setup?.paper ?? true} />
       {dialog}
     </div>

@@ -32,6 +32,8 @@ export interface BotMarket {
   weekdayCostBps: number | null;
   weekendCostBps: number | null;
   hourly: Array<{ h: number; costBps: number | null; volumeUsdH: number }>;
+  /** 'binance': R10 quotes off Binance there; null: no Binance market, the plain maker runs; absent: not known. */
+  lead?: 'binance' | null;
 }
 
 export interface BotMarketsResponse {
@@ -96,9 +98,9 @@ const isLatency = (x: unknown): x is BotLatencyResponse => !!x && typeof x === '
 export const useBotMarkets = (window: '24h' | '7d' = '24h', enabled = true): Read<BotMarketsResponse> =>
   usePolled(enabled ? `/api/vs/bots/markets?window=${window}` : null, 5 * 60_000, isMarkets);
 
-/** This wallet's own bots' latency; nothing is read without its session (token null). */
-export const useBotLatency = (hours: number, token: string | null): Read<BotLatencyResponse> =>
-  usePolled(token ? `/api/copy/v1/bots/latency?hours=${hours}` : null, 60_000, isLatency, token);
+/** This wallet's own bots' latency, or one bot's (`bot`); nothing is read without its session (token null). */
+export const useBotLatency = (hours: number, token: string | null, bot?: string): Read<BotLatencyResponse> =>
+  usePolled(token ? `/api/copy/v1/bots/latency?hours=${hours}${bot ? `&bot=${encodeURIComponent(bot)}` : ''}` : null, 60_000, isLatency, token);
 
 /** A cost in bp, per $1M: 1.30 bp is $130. */
 export const bpToPerMillion = (bp: number): number => bp * 100;

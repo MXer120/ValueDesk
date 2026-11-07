@@ -17,7 +17,7 @@
  *
  * Colours come from the app's tokens (kit.css maps them), so dark and light both work.
  */
-import { useEffect, useId, useLayoutEffect, useRef, useState, type ComponentProps, type KeyboardEvent, type ReactNode } from 'react';
+import { forwardRef, useEffect, useId, useLayoutEffect, useRef, useState, type ComponentProps, type KeyboardEvent, type ReactNode } from 'react';
 import { toInputText } from '../../../numStyle';
 import { decimalInput } from '../../numberInput';
 import './kit.css';
@@ -56,6 +56,7 @@ const PATHS = {
   arrowRight: <path d="M8 4.5 13.5 10 8 15.5" />,
   star: <path d="m10 3.8 1.9 3.9 4.2.6-3 3 .7 4.2L10 13.5l-3.8 2 .7-4.2-3-3 4.2-.6z" />,
   wallet: <><rect x="3" y="5.5" width="14" height="10" rx="2.4" /><path d="M3 8.5h10.5M13 12h1.5" /></>,
+  expand: <path d="M4 8V4h4M12 4h4v4M16 12v4h-4M8 16H4v-4" />,
   grid: <><path d="M4 7h12M4 10h12M4 13h12" /><circle cx="7" cy="7" r="1" /><circle cx="12" cy="10" r="1" /><circle cx="9" cy="13" r="1" /></>,
 } as const;
 export type IconName = keyof typeof PATHS;
@@ -70,9 +71,9 @@ export function Icon({ name, size = 16, className }: { name: IconName; size?: nu
 
 /* --------------------------------------------------------------- surface ----- */
 
-export function Shell({ className, ...p }: ComponentProps<'section'>) {
-  return <section className={cx('tf-shell', className)} {...p} />;
-}
+export const Shell = forwardRef<HTMLElement, ComponentProps<'section'>>(function Shell({ className, ...p }, ref) {
+  return <section ref={ref} className={cx('tf-shell', className)} {...p} />;
+});
 export function Panel({ className, ...p }: ComponentProps<'div'>) {
   return <div className={cx('tf-panel', className)} {...p} />;
 }
@@ -366,8 +367,10 @@ export function TextInput({ className, ...p }: ComponentProps<'input'>) {
 }
 
 /** A number in a borderless pill: the label inside on the left, the unit on the right (the app's decimal input rules). */
-export function NumberField({ label, value, onChange, unit, placeholder, disabled, error, optional, className }: {
+export function NumberField({ label, value, onChange, unit, placeholder, disabled, error, optional, className, hideLabel }: {
   label: string; value: number | null; onChange: (v: number | null) => void; unit?: string; placeholder?: string; disabled?: boolean; error?: string | null; optional?: boolean; className?: string;
+  /** Named for screen readers only (a field beside its own slider). */
+  hideLabel?: boolean;
 }) {
   const id = useId();
   const [text, setText] = useState(value === null ? '' : String(value));
@@ -377,7 +380,8 @@ export function NumberField({ label, value, onChange, unit, placeholder, disable
   }, [value]);
   return (
     <div className={cx('tf-num', error && 'is-bad', disabled && 'is-off', className)}>
-      <label htmlFor={id} className="tf-num__l">{label}</label>
+      <label htmlFor={id} className={hideLabel ? 'tf-sr' : 'tf-num__l'}>{label}</label>
+      {hideLabel && unit === 'USD' && <span className="tf-num__l">$</span>}
       <input
         id={id}
         autoComplete="off"
@@ -393,7 +397,7 @@ export function NumberField({ label, value, onChange, unit, placeholder, disable
           else if (Number.isFinite(Number(t)) && t !== '') onChange(Number(t));
         }}
       />
-      {unit && <span className="tf-num__u">{unit}</span>}
+      {unit && !(hideLabel && unit === 'USD') && <span className="tf-num__u">{unit}</span>}
     </div>
   );
 }
@@ -496,6 +500,30 @@ export function SettingRow({ title, line, children, stack }: { title: ReactNode;
         {line && <p className="tf-setrow__line">{line}</p>}
       </div>
       <div className="tf-setrow__c">{children}</div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ slider ----- */
+
+/** A single slider (TUFFUI range-slider): the filled track to the thumb, min and max under it. */
+export function Slider({ value, min, max, step = 1, onChange, label, minLabel, maxLabel, className }: {
+  value: number; min: number; max: number; step?: number; onChange: (v: number) => void; label: string; minLabel?: string; maxLabel?: string; className?: string;
+}) {
+  const r = Math.min(1, Math.max(0, (value - min) / (max - min || 1)));
+  return (
+    <div className={cx('tf-slider', className)}>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={Math.min(max, Math.max(min, value))}
+        aria-label={label}
+        style={{ '--tf-fill': `${r * 100}%` } as React.CSSProperties}
+        onChange={(e) => onChange(Number(e.target.value))}
+      />
+      {(minLabel || maxLabel) && <div className="tf-slider__ends"><span>{minLabel}</span><span>{maxLabel}</span></div>}
     </div>
   );
 }

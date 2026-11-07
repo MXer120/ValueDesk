@@ -25,7 +25,7 @@ export interface BotsState {
   loading: boolean;
   error: string | null;
   refresh: () => Promise<void>;
-  start: (spec: Record<string, unknown>) => Promise<AlgoView>;
+  start: (spec: Record<string, unknown>, restart?: { from: string; how: 'clean' | 'takeover' }) => Promise<AlgoView>;
   act: (op: 'pause' | 'resume' | 'cancel' | 'archive', id: string) => Promise<void>;
   stopAll: () => Promise<void>;
   update: (id: string, patch: AlgoUpdatePatch) => Promise<void>;
@@ -98,11 +98,13 @@ export function useBots(owner: string | null, signedIn: boolean): BotsState {
     show(sortBots([...byId.values()].filter((v) => !v.algo.k.archived)));
   }, [show]);
 
-  const start = useCallback(async (spec: Record<string, unknown>) => {
-    const v = await startOn('hosted', spec, newSeed());
+  const start = useCallback(async (spec: Record<string, unknown>, restart?: { from: string; how: 'clean' | 'takeover' }) => {
+    const v = await startOn('hosted', spec, newSeed(), restart);
     merge([v]);
+    // A restart stopped the old bot too: read the list again for its new state.
+    if (restart) void refresh();
     return v;
-  }, [merge]);
+  }, [merge, refresh]);
   const act = useCallback(async (op: 'pause' | 'resume' | 'cancel' | 'archive', id: string) => merge(await actOn('hosted', op, id)), [merge]);
   const stopAll = useCallback(async () => merge(await actOn('hosted', 'cancel-all')), [merge]);
   const update = useCallback(async (id: string, patch: AlgoUpdatePatch) => merge(await updateOn('hosted', id, patch)), [merge]);

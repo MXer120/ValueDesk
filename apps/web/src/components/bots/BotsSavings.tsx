@@ -25,6 +25,9 @@ import { BotsHead, isLive, type BotsCtx } from './BotsPage';
 import { Button, EmptyState, IconTile, Panel, ProgressBar, Shell, ShellHeader, StatCard, StatusPill, type IconName, type Tone } from './kit/kit';
 
 const DAY = 86_400_000;
+
+/** The monthly figure as context, never the headline: "$1/mo" read as the whole saving (owner 2026-11-07). */
+const monthWords = (m: number | null): string => (m === null ? 'at your volume' : m < 1 ? 'under $1 a month at your pace' : `≈ ${fmtUsd(m, 0)} a month at your pace`);
 const month = (perDay: number) => perDay * 30;
 
 /** A bot's volume per day: what it traded over the time it has run (at least an hour). */
@@ -45,8 +48,8 @@ function Saving({ title, line, perMonth, perMillion, action, icon, tile, tone = 
           <p className="bots-saving__line">{line}</p>
         </div>
         <div className="bots-saving__n">
-          <b className={perMonth !== null && perMonth > 0 ? 'pos' : ''}>{perMonth === null ? DASH : `${fmtUsd(perMonth, 0)}/mo`}</b>
-          {perMillion !== null && <small>{fmtUsd(perMillion, 0)} per $1M</small>}
+          <b className={perMillion !== null && perMillion > 0 ? 'pos' : ''}>{perMillion === null ? DASH : `−${fmtUsd(perMillion, 0)}`}<span> per $1M</span></b>
+          <small>{monthWords(perMonth)}</small>
         </div>
         {action && <div className="bots-saving__act">{action}</div>}
       </Panel>
@@ -103,12 +106,13 @@ export function BotsSavings({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
     await ctx.update(v.algo.id, patchOf(before, { ...before, gate: true }));
   };
 
+  const totalPerM = (tierSavePerM ?? 0) + (stakeRows[0]?.perM ?? 0) + Math.max(0, ...moves.map((m) => m.perM), ...gates.map((g) => g.perM));
   const total = (tierSavePerM !== null && perDay * 14 >= (next?.minVolume ?? Infinity) ? month((tierSavePerM / 1_000_000) * perDay) : 0)
     + (stakeRows[0]?.perMonth ?? 0) + moves.reduce((x, m) => x + m.perMonth, 0) + gates.reduce((x, g) => x + g.perMonth, 0);
 
   return (
     <>
-      <BotsHead view={view} title="Savings" sub="What would make your bots' volume cheaper, in dollars at the pace they trade now." />
+      <BotsHead view={view} title="Savings" sub="Ways to make your bots' volume cheaper." />
       {!ctx.address ? (
         <Shell>
           <Panel>
@@ -124,7 +128,7 @@ export function BotsSavings({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
               <StatCard index={1} label="Fee tier" value={perps ? `Tier ${tier.tier}` : DASH} hint={`Maker ${(tier.perpsMaker * 10_000).toFixed(1)} bp here`} />
               <StatCard index={2} label="Staking" value={perps ? (stake.discount ? `${Math.round(stake.discount * 100)}% off` : 'None') : DASH} hint="Off every SoDEX fee" />
               <StatCard index={3} label="Bots trade" value={perDay > 0 ? `${fmtUsd(perDay, 0)}/day` : DASH} hint="Over the time they ran" />
-              <StatCard index={4} label="Could save" value={total > 0 ? `${fmtUsd(total, 0)}/mo` : DASH} valueTone={total > 0 ? 'positive' : undefined} hint="What applies, added up" />
+              <StatCard index={4} label="Could save per $1M" value={totalPerM > 0 ? fmtUsd(totalPerM, 0) : DASH} valueTone={totalPerM > 0 ? 'positive' : undefined} hint={total > 0 ? monthWords(total) : 'What applies, added up'} />
             </div>
           </Shell>
 
@@ -146,14 +150,14 @@ export function BotsSavings({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
                     tone="positive"
                     title={`Reach tier ${next.tier}`}
                     line={perDay > 0
-                      ? perDay * 14 >= next.minVolume ? `At ${fmtUsd(perDay, 0)} a day your bots alone reach it in under 14 days.` : `About ${fmtUsd(needPerDay!, 0)} a day over 14 days. Your bots trade ${fmtUsd(perDay, 0)}: ${fmtUsd(needPerDay! - perDay, 0)} a day more (your manual trading counts too).`
-                      : `About ${fmtUsd(needPerDay!, 0)} a day over 14 days.`}
+                      ? perDay * 14 >= next.minVolume ? 'Your bots reach it within 14 days.' : `${fmtUsd(needPerDay! - perDay, 0)} a day more volume needed.`
+                      : `${fmtUsd(needPerDay!, 0)} a day for 14 days.`}
                     perMillion={tierSavePerM}
                     perMonth={month((tierSavePerM / 1_000_000) * Math.max(perDay, needPerDay!))}
                     action={<Button variant="secondary" icon="plus" onClick={() => goBots({ page: 'new', market: best?.symbol ?? null, kind: null })}>Add a bot</Button>}
                   />
                 </ul>
-                <p className="bots-method">At tier {next.tier} every $1M costs {fmtUsd(tierSavePerM, 0)} less in maker fees; the monthly figure is at the volume the tier needs, or yours if higher. More volume costs its own fees, so the tier pays where that volume was going to trade anyway.</p>
+                
               </>
             ) : (
               <Panel><EmptyState compact icon="star" title={perps ? "You are at the top of SoDEX's volume tiers" : fees.loading ? 'Reading your fee tier from SoDEX…' : 'Your fee tier could not be read from SoDEX'} /></Panel>
@@ -170,14 +174,14 @@ export function BotsSavings({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
                     icon="coins"
                     tone="brand"
                     title={`Stake ${fmtSoso(r.t.soso)} SOSO: ${Math.round(r.t.discount * 100)}% off`}
-                    line={`${fmtSoso(r.soso)} SOSO more than you stake now. Takes ${Math.round(r.t.discount * 100)}% off every SoDEX fee, the bots' and yours.`}
+                    line={`${fmtSoso(r.soso)} SOSO more · off every SoDEX fee`}
                     perMillion={r.perM}
                     perMonth={perDay > 0 ? r.perMonth : null}
                   />
                 ))}
               </ul>
             ) : <Panel><EmptyState compact icon="star" title="You are at the top staking tier" /></Panel>}
-            <p className="bots-method">SOSO is staked on SoDEX itself, and its price can fall: weigh what the stake costs against what it saves.</p>
+            <p className="bots-method">SOSO's price can fall: weigh the stake against the saving.</p>
           </Shell>
 
           <Shell className="bots-listcard">
@@ -194,7 +198,7 @@ export function BotsSavings({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
                     icon="pulse"
                     tone="warning"
                     title={`Turn on the market gate: ${botName(g.v)}`}
-                    line={`On ${g.v.algo.spec.symbol} the minutes Binance moves fast cost makers our size more. Without them: fewer fills, cheaper ones.`}
+                    line="Skips the fast minutes: fewer, cheaper fills."
                     perMillion={g.perM}
                     perMonth={g.perMonth}
                     action={<Button variant="secondary" disabled={ctx.busy === g.v.algo.id} onClick={() => void turnOnGate(g.v)}>Turn on</Button>}
@@ -205,7 +209,7 @@ export function BotsSavings({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
                     key={`m-${m.v.algo.id}`}
                     tile={<CoinIcon coin={m.to.symbol} size={20} />}
                     title={`Run ${botName(m.v)} on ${m.to.base} instead of ${m.here.base}`}
-                    line={`Makers our size paid ${fmtUsd(bpToPerMillion(m.here.estCostBps), 0)} per $1M on ${m.here.base} and ${fmtUsd(bpToPerMillion(m.to.estCostBps), 0)} on ${m.to.base} over the last 7 days. A bot keeps its market: start one there and stop this one.`}
+                    line={`${fmtUsd(bpToPerMillion(m.here.estCostBps), 0)} vs ${fmtUsd(bpToPerMillion(m.to.estCostBps), 0)} per $1M over 7 days`}
                     perMillion={m.perM}
                     perMonth={m.perMonth}
                     action={<Button variant="secondary" icon="plus" onClick={() => goBots({ page: 'new', market: m.to.symbol, kind: null })}>Start on {m.to.base}</Button>}

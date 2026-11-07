@@ -63,6 +63,43 @@ export interface BotMarket {
   confidence: 'high' | 'medium' | 'low';
   weekdayCostBps: number | null; weekendCostBps: number | null;
   hourly: Array<{ h: number; costBps: number | null; volumeUsdH: number }>;
+  /**
+   * The price the Binance-led maker (R10) quotes off: 'binance' when Binance lists the coin's USDT perpetual, null
+   * when it does not (that market gets the plain maker, quoting off SoDEX's own book), absent when Binance's list
+   * could not be read.
+   */
+  lead?: 'binance' | null;
+}
+
+/** SoDEX market -> the Binance USD-M symbol the executor's feed reads (executor feed/reference.ts binanceSymbolOf). */
+export const binanceSymbolOf = (market: string): string | null => {
+  const m = /^([A-Z0-9]+)-USD$/.exec(market);
+  return m ? `${m[1]}USDT` : null;
+};
+
+const LEAD_TTL = 6 * 3_600_000;
+let leadSet: { at: number; symbols: Set<string> } | null = null;
+let leadRun: Promise<void> | null = null;
+
+/** Binance's USD-M symbols (one small public list, about 40 KB), read at most every 6 h; null until read once. */
+async function binanceSymbols(): Promise<Set<string> | null> {
+  if (!leadSet || Date.now() - leadSet.at > LEAD_TTL) {
+    leadRun ??= (async () => {
+      try {
+        const r = await fetch('https://fapi.binance.com/fapi/v1/ticker/price', { signal: AbortSignal.timeout(8_000) });
+        if (!r.ok) return;
+        const rows = (await r.json()) as Array<{ symbol?: unknown }>;
+        const symbols = new Set(rows.map((x) => String(x.symbol ?? '')).filter(Boolean));
+        if (symbols.size > 50) leadSet = { at: Date.now(), symbols };
+      } catch {
+        /* the last list stands; none yet: lead stays unknown */
+      } finally {
+        leadRun = null;
+      }
+    })();
+    if (!leadSet) await leadRun;
+  }
+  return leadSet?.symbols ?? null;
 }
 
 export interface BotMarketsResponse {
@@ -533,7 +570,9 @@ export async function botMarkets(window: BotWindow): Promise<BotMarketsResponse 
   let c = kept;
   if (!c) c = await refresh(s);
   else if (Date.now() - c.at > BOT_MARKETS_TTL) void refresh(s).catch(() => { /* the kept answer stands */ });
-  return { at: c.at, window, fee: c.fee, markets: c.rows[window] };
+  const lead = await binanceSymbols();
+  const markets = lead ? c.rows[window].map((m) => ({ ...m, lead: lead.has(binanceSymbolOf(m.symbol) ?? '') ? ('binance' as const) : null })) : c.rows[window];
+  return { at: c.at, window, fee: c.fee, markets };
 }
 
 /** Kept warm every 5 min while someone asked in the last 30 min (nothing runs on a server nobody asks). */

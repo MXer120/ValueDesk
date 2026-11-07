@@ -1,146 +1,151 @@
 /**
- * The market maker's and the grid's settings, shared by New bot (everything open) and a bot's own page (only what
- * the executor lets change while it runs: runtime BOT_UPDATABLE; the market, the Binance lead and a grid's range
- * stay what it started with). Built from the Bots kit: each group a panel of setting rows.
+ * A bot's settings, short: size and limits up front, the rest under Advanced. Shared by New bot (step Size) and a
+ * bot's own page (change settings, applied by a restart). Built from the Bots kit.
  */
 import { useState, type ReactNode } from 'react';
 import { fmtUsd } from '../../format';
-import { GATE_DEFAULT, PRESETS, PRESET_NAMES, PRESET_VALUES, presetOf, type BotDraft, type PresetId } from '../../bots/presets';
-import { Icon, NumberField, Panel, Segmented, SettingRow, Switch, TextInput } from './kit/kit';
+import { GATE_DEFAULT, type BotDraft } from '../../bots/presets';
+import { Field, Icon, NumberField, Segmented, Slider, Switch, TextInput } from './kit/kit';
 
-function Group({ title, icon, children, aside }: { title: string; icon: Parameters<typeof Icon>[0]['name']; children: ReactNode; aside?: ReactNode }) {
+const TARGETS = [null, 50_000, 250_000, 1_000_000] as const;
+const tgtKey = (v: number | null): string => (v === null ? 'none' : TARGETS.includes(v as never) ? String(v) : 'custom');
+
+function Row({ label, hint, children, wide }: { label: ReactNode; hint?: ReactNode; children: ReactNode; wide?: boolean }) {
   return (
-    <section className="bots-group">
-      <header className="bots-group__h"><Icon name={icon} size={14} /><h4>{title}</h4>{aside}</header>
-      <Panel className="bots-group__p">{children}</Panel>
-    </section>
+    <div className={`bots-f${wide ? ' is-wide' : ''}`}>
+      <div className="bots-f__l"><span>{label}</span></div>
+      <div className="bots-f__c">{children}</div>
+      {hint && <p className="bots-f__h">{hint}</p>}
+    </div>
   );
 }
 
-export function BotSettings({ d, set, running, range, mark, liveAllowed, extraRun }: {
+export function BotSettings({ d, set, range, mark, liveAllowed, noLead, hidePractice }: {
   d: BotDraft;
   set: (p: Partial<BotDraft>) => void;
-  /** A running bot: what cannot change is shown, not editable. */
-  running: boolean;
   range: { low: number; high: number } | null;
   mark: number | null;
   liveAllowed: boolean;
-  extraRun?: ReactNode;
+  /** This market has no Binance price: the market maker runs plain (no gate, no rest). */
+  noLead?: boolean;
+  hidePractice?: boolean;
+  /** Kept for callers from before the restart flow. */
+  running?: boolean;
 }) {
-  const preset = presetOf(d);
-  const mm = d.strategy !== 'grid';
   const [adv, setAdv] = useState(false);
+  const [customTgt, setCustomTgt] = useState(tgtKey(d.volumeTargetUsd) === 'custom');
+  const mm = d.strategy !== 'grid';
+  const market = d.strategy === 'market' && !noLead;
+  const holdX = d.orderUsd > 0 ? d.maxInventoryUsd / d.orderUsd : 3;
   return (
     <div className="bots-settings">
-      {!running && (
-        <Group title="Size" icon="layers">
-          <SettingRow title="Preset" line={preset ? 'A starting point: change any setting below to make it your own.' : 'Your own settings.'}>
-            <Segmented<PresetId | 'custom'>
-              label="Preset"
-              value={preset ?? 'custom'}
-              options={[...PRESETS.map((p) => ({ value: p as PresetId | 'custom', label: PRESET_NAMES[p] })), ...(preset ? [] : [{ value: 'custom' as const, label: 'Custom' }])]}
-              onChange={(p) => p !== 'custom' && set({ ...PRESET_VALUES[d.strategy][p], low: null, high: null })}
-            />
-          </SettingRow>
-        </Group>
-      )}
-
-      {mm && (
-        <Group title="How it trades" icon="pulse">
-          <SettingRow title="Order size" line="Each buy and each sell it keeps resting. Bigger orders fill more of each trade that reaches them." stack>
-            <NumberField label="Each side" value={d.orderUsd} onChange={(v) => v !== null && set({ orderUsd: v })} unit="USD" />
-          </SettingRow>
-          <SettingRow title="Inventory cap" line="The most it holds either way. At the cap it only quotes the side that unwinds." stack>
-            <NumberField label="Up to" value={d.maxInventoryUsd} onChange={(v) => v !== null && set({ maxInventoryUsd: v })} unit="USD" />
-          </SettingRow>
-          {d.strategy === 'market' && (
-            <SettingRow
-              title={<>Market gate {d.gate && <span className="bots-on">On</span>}</>}
-              line={`No new quote while Binance has moved more than ${d.gateBps} bp over the last ${d.gateWindowS} s: the minutes where fast traders pick small makers off. Fewer fills, cheaper ones.`}
-            >
-              <Switch checked={d.gate} onChange={(on) => set({ gate: on, ...(on && !d.gateBps ? GATE_DEFAULT : {}) })} label="Market gate" hideLabel />
-            </SettingRow>
-          )}
-          {d.strategy === 'market' && d.gate && (
-            <SettingRow title="Gate" line="How much Binance may move, and over how long, before it stops adding quotes. 12 bp over 60 s is what the backtest kept." stack>
+      <div className="bots-fgrid">
+        {d.strategy === 'grid' && (
+          <>
+            <Row label="Price range" hint={mark ? `Now ${fmtUsd(mark)}` : undefined} wide>
               <div className="bots-pair">
-                <NumberField label="Moves" value={d.gateBps} onChange={(v) => set({ gateBps: Math.max(1, Math.min(500, v ?? GATE_DEFAULT.gateBps)) })} unit="bp" />
-                <NumberField label="Over" value={d.gateWindowS} onChange={(v) => set({ gateWindowS: Math.max(1, Math.min(120, Math.round(v ?? GATE_DEFAULT.gateWindowS))) })} unit="s" />
+                <NumberField label="Low" value={range?.low ?? null} onChange={(v) => set({ low: v, high: d.high ?? range?.high ?? null })} unit="USD" />
+                <NumberField label="High" value={range?.high ?? null} onChange={(v) => set({ high: v, low: d.low ?? range?.low ?? null })} unit="USD" />
               </div>
-            </SettingRow>
-          )}
-        </Group>
-      )}
-
-      {d.strategy === 'grid' && (
-        <Group title="How it trades" icon="grid">
-          <SettingRow title="Range" line={running ? 'A running grid keeps its range.' : `±${(d.rangePct * 100).toFixed(1)}% around the price now${mark ? ` (${fmtUsd(mark)})` : ''}, or your own prices.`} stack>
-            <div className="bots-pair">
-              <NumberField label="Low" value={range?.low ?? null} disabled={running} onChange={(v) => set({ low: v, high: d.high ?? range?.high ?? null })} unit="USD" />
-              <NumberField label="High" value={range?.high ?? null} disabled={running} onChange={(v) => set({ high: v, low: d.low ?? range?.low ?? null })} unit="USD" />
-            </div>
-          </SettingRow>
-          <SettingRow title="Levels" line="More levels: smaller steps, more round trips." stack>
-            <NumberField label="Levels" value={d.levels} disabled={running} onChange={(v) => v !== null && set({ levels: Math.round(v) })} />
-          </SettingRow>
-          <SettingRow title="Order size" line="Each level's order." stack>
-            <NumberField label="Each level" value={d.orderUsd} onChange={(v) => v !== null && set({ orderUsd: v })} unit="USD" />
-          </SettingRow>
-          <SettingRow title="Out of the range" line="Keep its orders and wait for the price to come back, or stop.">
-            <Segmented label="Out of the range" value={d.outOfRange} options={[{ value: 'wait', label: 'Wait' }, { value: 'stop', label: 'Stop' }]} onChange={(v) => set({ outOfRange: v })} />
-          </SettingRow>
-        </Group>
-      )}
-
-      {d.strategy === 'market' && (
-        <section className={`bots-group bots-adv${adv ? ' is-open' : ''}`}>
-          <button type="button" className="bots-group__h bots-adv__t" aria-expanded={adv} onClick={() => setAdv(!adv)}>
-            <Icon name="gear" size={14} /><h4>Advanced</h4>
-            <span className="bots-adv__hint">Rest, quote place, skew, spread limit</span>
-            <Icon name="arrowRight" size={14} className="bots-adv__chev" />
-          </button>
-          <div className="bots-adv__body" hidden={!adv}>
-            <Panel className="bots-group__p">
-              <SettingRow title="Rest" line="The longest a quote rests before it is placed again. 10 s kept the most fills from the patient taker and the fewest from the fast one in our live tests." stack>
-                <NumberField label="Up to" value={d.restS} onChange={(v) => set({ restS: Math.max(0.5, Math.min(120, v ?? 10)) })} unit="s" />
-              </SettingRow>
-              <SettingRow title="Where it quotes" line="At the best price, or one tick inside it where the spread has room (first in the queue, and first to be picked off).">
-                <Segmented label="Where it quotes" value={d.offsetTicks < 0 ? 'inside' : 'touch'} options={[{ value: 'touch', label: 'Best price' }, { value: 'inside', label: 'One tick inside' }]} onChange={(v) => set({ offsetTicks: v === 'inside' ? -1 : 0 })} />
-              </SettingRow>
-              <SettingRow title="Unwind first" line="While it holds, the side that would add more steps back this many ticks at the cap. 0: both sides stay at the best price." stack>
-                <NumberField label="Skew" value={d.skewTicks} onChange={(v) => set({ skewTicks: Math.max(0, Math.round(v ?? 0)) })} unit="ticks" />
-              </SettingRow>
-              <SettingRow title="Spread limit" line="No quote while SoDEX's spread is wider than this: a book that thin is about to move. Empty: no limit." stack>
-                <NumberField label="Above" value={d.maxSpreadBps} optional onChange={(v) => set({ maxSpreadBps: v === null ? null : Math.max(1, v) })} unit="bp" />
-              </SettingRow>
-            </Panel>
-          </div>
-        </section>
-      )}
-
-      <Group title="Limits" icon="shield">
-        <SettingRow title="Loss limit" line="Stops once its net PnL, after every fee, is this far below zero. Empty: no limit." stack>
-          <NumberField label="Stop at" value={d.maxLossUsd} optional onChange={(v) => set({ maxLossUsd: v })} unit="USD" />
-        </SettingRow>
-        <SettingRow title="Volume target" line="Stops once it traded this much. Empty: runs until you stop it." stack>
-          <NumberField label="Stop after" value={d.volumeTargetUsd} optional onChange={(v) => set({ volumeTargetUsd: v })} unit="USD" />
-        </SettingRow>
-        <SettingRow title="When it stops" line="Close what it holds (resting first, a capped taker after a minute), or keep it.">
-          <Segmented label="When it stops" value={d.onStop} options={[{ value: 'close', label: 'Close' }, { value: 'keep', label: 'Keep' }]} onChange={(v) => set({ onStop: v })} />
-        </SettingRow>
-      </Group>
-
-      <Group title="Run" icon="play">
-        <SettingRow title="Name" line="Optional: how it shows in your list." stack>
-          <TextInput maxLength={40} placeholder="Market maker" value={d.label} onChange={(e) => set({ label: e.target.value })} aria-label="Name" />
-        </SettingRow>
-        {!running && (
-          <SettingRow title="Practice" line={liveAllowed ? 'Runs against the real book and sends nothing. Turn off to trade with real orders.' : 'Real orders open soon for your wallet. A practice bot runs against the real book and sends nothing.'}>
-            <Switch checked={!liveAllowed || d.paper} disabled={!liveAllowed} onChange={(on) => set({ paper: on })} label="Practice" hideLabel />
-          </SettingRow>
+            </Row>
+            <Row label="Levels">
+              <Segmented label="Levels" value={[5, 10, 20].includes(d.levels) ? String(d.levels) : 'x'} onChange={(v) => v !== 'x' && set({ levels: Number(v) })} options={[{ value: '5', label: '5' }, { value: '10', label: '10' }, { value: '20', label: '20' }, ...([5, 10, 20].includes(d.levels) ? [] : [{ value: 'x', label: String(d.levels) }])]} />
+            </Row>
+          </>
         )}
-        {extraRun}
-      </Group>
+        <Row label="Order size" hint={mark && mark > 0 ? `≈ ${(d.orderUsd / mark).toPrecision(3)} ${d.symbol.replace(/-USD$/, '')} per order` : undefined}>
+          <div className="bots-sizeline">
+            <Slider label="Order size slider" value={d.orderUsd} min={10} max={500} step={1} onChange={(v) => set({ orderUsd: v, ...(mm ? { maxInventoryUsd: Math.round(v * holdX) } : {}) })} minLabel="$10" maxLabel="$500" />
+            <NumberField label="Order size" hideLabel value={d.orderUsd} onChange={(v) => v !== null && set({ orderUsd: v, ...(mm ? { maxInventoryUsd: Math.round(v * holdX) } : {}) })} unit="USD" className="bots-sizeline__n" />
+          </div>
+        </Row>
+        <Row label="Stop if it loses">
+          <NumberField label="Loss" value={d.maxLossUsd} optional onChange={(v) => set({ maxLossUsd: v })} unit="USD" />
+        </Row>
+        <Row label="Stop after trading" hint={d.volumeTargetUsd === null ? 'Runs until you stop it or it hits the loss limit.' : undefined}>
+          <Segmented
+            label="Stop after trading"
+            value={customTgt ? 'custom' : tgtKey(d.volumeTargetUsd)}
+            onChange={(v) => { if (v === 'custom') setCustomTgt(true); else { setCustomTgt(false); set({ volumeTargetUsd: v === 'none' ? null : Number(v) }); } }}
+            options={[{ value: 'none', label: 'None' }, { value: '50000', label: '$50K' }, { value: '250000', label: '$250K' }, { value: '1000000', label: '$1M' }, { value: 'custom', label: 'Custom' }]}
+          />
+          {customTgt && <NumberField label="After" value={d.volumeTargetUsd} optional onChange={(v) => set({ volumeTargetUsd: v })} unit="USD" />}
+        </Row>
+      </div>
+
+      <section className={`bots-adv${adv ? ' is-open' : ''}`}>
+        <button type="button" className="bots-adv__t" aria-expanded={adv} onClick={() => setAdv(!adv)}>
+          <span>Advanced settings</span>
+          <Icon name="arrowRight" size={14} className="bots-adv__chev" />
+        </button>
+        {adv && (
+          <div className="bots-adv__body">
+            <div className="bots-fgrid">
+              {mm && (
+                <Row label="Max holding" hint={`${holdX.toFixed(1)}× the order size`}>
+                  <div className="bots-sizeline">
+                    <Slider label="Max holding slider" value={holdX} min={1} max={10} step={0.5} onChange={(x) => set({ maxInventoryUsd: Math.round(d.orderUsd * x) })} minLabel="1×" maxLabel="10×" />
+                    <NumberField label="Max holding" hideLabel value={d.maxInventoryUsd} onChange={(v) => v !== null && set({ maxInventoryUsd: v })} unit="USD" className="bots-sizeline__n" />
+                  </div>
+                </Row>
+              )}
+              {market && (
+                <Row label={<>Market gate {d.gate && <span className="bots-on">On</span>}</>} hint={`Pauses new quotes while Binance moves over ${d.gateBps} bp in ${d.gateWindowS} s.`}>
+                  <Switch checked={d.gate} onChange={(on) => set({ gate: on, ...(on && !d.gateBps ? GATE_DEFAULT : {}) })} label="Market gate" hideLabel />
+                  {d.gate && (
+                    <div className="bots-pair">
+                      <NumberField label="Moves" value={d.gateBps} onChange={(v) => set({ gateBps: Math.max(1, Math.min(500, v ?? GATE_DEFAULT.gateBps)) })} unit="bp" />
+                      <NumberField label="Over" value={d.gateWindowS} onChange={(v) => set({ gateWindowS: Math.max(1, Math.min(120, Math.round(v ?? GATE_DEFAULT.gateWindowS))) })} unit="s" />
+                    </div>
+                  )}
+                </Row>
+              )}
+              {market && (
+                <Row label="Longest rest">
+                  <Segmented label="Longest rest" value={[5, 10, 20].includes(d.restS) ? String(d.restS) : 'x'} onChange={(v) => v !== 'x' && set({ restS: Number(v) })} options={[{ value: '5', label: '5 s' }, { value: '10', label: '10 s' }, { value: '20', label: '20 s' }, ...([5, 10, 20].includes(d.restS) ? [] : [{ value: 'x', label: `${d.restS} s` }])]} />
+                </Row>
+              )}
+              {mm && (
+                <Row label="Quote at">
+                  <Segmented label="Quote at" value={d.offsetTicks < 0 ? 'inside' : 'touch'} options={[{ value: 'touch', label: 'Best price' }, { value: 'inside', label: '1 tick inside' }]} onChange={(v) => set({ offsetTicks: v === 'inside' ? -1 : 0 })} />
+                </Row>
+              )}
+              {market && (
+                <Row label="Pause if spread over">
+                  <Segmented label="Pause if spread over" value={d.maxSpreadBps === null ? 'off' : [5, 10, 20].includes(d.maxSpreadBps) ? String(d.maxSpreadBps) : 'x'} onChange={(v) => v !== 'x' && set({ maxSpreadBps: v === 'off' ? null : Number(v) })} options={[{ value: 'off', label: 'Off' }, { value: '5', label: '5 bp' }, { value: '10', label: '10 bp' }, { value: '20', label: '20 bp' }, ...(d.maxSpreadBps === null || [5, 10, 20].includes(d.maxSpreadBps) ? [] : [{ value: 'x', label: `${d.maxSpreadBps} bp` }])]} />
+                </Row>
+              )}
+              {d.strategy === 'grid' && (
+                <Row label="Out of range">
+                  <Segmented label="Out of the range" value={d.outOfRange} options={[{ value: 'wait', label: 'Wait' }, { value: 'stop', label: 'Stop' }]} onChange={(v) => set({ outOfRange: v })} />
+                </Row>
+              )}
+              <Row label="On stop">
+                <Segmented label="When it stops" value={d.onStop} options={[{ value: 'close', label: 'Close position' }, { value: 'keep', label: 'Keep it' }]} onChange={(v) => set({ onStop: v })} />
+              </Row>
+            </div>
+          </div>
+        )}
+      </section>
+
+      {!hidePractice && (
+        <div className="bots-practice">
+          <div>
+            <p className="bots-practice__t">Practice</p>
+            <p className="bots-practice__h">{liveAllowed ? 'Real book, no orders sent.' : 'Real orders open soon for your wallet.'}</p>
+          </div>
+          <Switch checked={!liveAllowed || d.paper} disabled={!liveAllowed} onChange={(on) => set({ paper: on })} label="Practice" hideLabel />
+        </div>
+      )}
     </div>
+  );
+}
+
+/** The bot's name (Review step, and a restart). */
+export function NameField({ d, set }: { d: BotDraft; set: (p: Partial<BotDraft>) => void }) {
+  return (
+    <Field label="Bot name" htmlFor="bot-name">
+      <TextInput id="bot-name" maxLength={40} placeholder={`${d.strategy === 'grid' ? 'Grid' : 'Market maker'} ${d.symbol.replace(/-USD$/, '')}`} value={d.label} onChange={(e) => set({ label: e.target.value })} aria-label="Name" />
+    </Field>
   );
 }

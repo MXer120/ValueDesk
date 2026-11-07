@@ -4,7 +4,7 @@
  * or a list (many): search, filter by state, sort by any column, 25 a page, pause / resume / stop for one bot or
  * every bot shown.
  */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { AlgoView } from '@copy-engine';
 import { DASH, fmtUsd } from '../../format';
 import { SetupProgress } from '../../copy/CopySetupSheet';
@@ -20,7 +20,7 @@ import { BotIcon } from './BotIcon';
 import { LatencyChart, mergeRegions, type ChartMark } from './LatencyChart';
 import { botName, botState, fmtPnl, statusWords } from './botWords';
 import { BotsHead, StatePill, isLive, type BotsCtx } from './BotsPage';
-import { Button, EmptyState, Icon, Panel, ProgressBar, SearchField, Segmented, Shell, ShellHeader, Skeleton, StatCard, StatusPill } from './kit/kit';
+import { Button, EmptyState, Icon, IconButton, Panel, ProgressBar, SearchField, Segmented, Shell, ShellHeader, Skeleton, StatCard, StatusPill } from './kit/kit';
 
 const PAGE = 25;
 export const fmtCost = (cpm: number | null | undefined): string => (cpm === null || cpm === undefined ? DASH : cpm < 0 ? `earns ${fmtUsd(-cpm, 0)}` : fmtUsd(cpm, 0));
@@ -36,11 +36,11 @@ type Layout = 'tiles' | 'list';
  * This wallet's own bots' latency to SoDEX (never another wallet's), laid out like the owner's reference: icon tile,
  * "Latency", scope · window, the legend and the window switch on the right, the chart in its panel.
  */
-export function LatencyCard({ marks = [], ctx }: { marks?: ChartMark[]; ctx: BotsCtx }) {
+export function LatencyCard({ marks = [], ctx, bot, practice }: { marks?: ChartMark[]; ctx: BotsCtx; bot?: string; practice?: boolean }) {
   const [hours, setHours] = useState<'6' | '24' | '48'>('24');
   const [region, setRegion] = useState<string>('all');
   const token = ctx.address && ctx.live.hosted.signedIn ? hostedExecutor.token(ctx.address) : null;
-  const lat = useBotLatency(48, token);
+  const lat = useBotLatency(48, token, bot);
   const regions = lat.data?.regions ?? [];
   const one = regions.find((r) => r.id === region) ?? null;
   const buckets = one ? one.buckets : mergeRegions(regions);
@@ -72,10 +72,12 @@ export function LatencyCard({ marks = [], ctx }: { marks?: ChartMark[]; ctx: Bot
         }
       />
       <Panel className="bots-lat__panel">
-        {!ctx.address
-          ? empty('Your bots only', "Connect your wallet: this chart shows how fast your own bots' orders reach SoDEX. Nobody else sees it.")
+        {practice
+          ? empty('Practice bot', 'It sends no orders, so there is nothing to time.')
+          : !ctx.address
+          ? empty('Your bots only', 'Connect your wallet to see how fast your orders reach SoDEX.')
           : !token
-            ? empty('Your bots only', "Finish the bot setup to see your bots' latency here. Only you see it.")
+            ? empty('Your bots only', 'Finish the bot setup to see it.')
             : lat.error && !lat.data
               ? empty('Not available right now', `The executor did not answer (${lat.error}).`)
               : !lat.data
@@ -88,27 +90,49 @@ export function LatencyCard({ marks = [], ctx }: { marks?: ChartMark[]; ctx: Bot
 
 /* --------------------------------------------------------------- fleet ----- */
 
-function FleetChart({ bots }: { bots: AlgoView[] }) {
+type Span = '1h' | '6h' | '24h' | '7d' | 'all';
+const SPAN_MS: Record<Span, number | null> = { '1h': 3_600_000, '6h': 6 * 3_600_000, '24h': 86_400_000, '7d': 7 * 86_400_000, all: null };
+
+/** Volume and net PnL of every bot together: timeframes, series on and off, and the whole card full screen. */
+export function FleetChart({ bots, title = 'Volume and net PnL', series: given }: { bots: AlgoView[]; title?: string; series?: { volume: Array<[number, number]>; pnl: Array<[number, number]> } }) {
+  const [span, setSpan] = useState<Span>('24h');
+  const [showVol, setShowVol] = useState(true);
+  const [showPnl, setShowPnl] = useState(true);
+  const [full, setFull] = useState(false);
+  const box = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const on = () => setFull(document.fullscreenElement === box.current);
+    document.addEventListener('fullscreenchange', on);
+    return () => document.removeEventListener('fullscreenchange', on);
+  }, []);
+  const toggleFull = () => {
+    if (document.fullscreenElement) void document.exitFullscreen();
+    else void box.current?.requestFullscreen?.();
+  };
+  const s = useMemo(() => given ?? fleetSeries(bots, Date.now()), [bots, given]);
+  const cut = SPAN_MS[span];
+  const from = cut ? Date.now() - cut : -Infinity;
   const series = useMemo<ChartSeries[]>(() => {
-    const s = fleetSeries(bots, Date.now());
-    return [
-      { key: 'vol', kind: 'bars', color: '#5b6b80', points: s.volume, format: (x) => fmtUsd(x, 0), title: 'Volume' },
-      { key: 'pnl', kind: 'line', color: '#f7f7f7', negColor: '#ef4a3c', points: s.pnl, scale: 'left', format: (x) => fmtUsd(x, 2), title: 'Net PnL' },
-    ];
-  }, [bots]);
-  const enough = series[0]!.points.length >= 3;
+    const out: ChartSeries[] = [];
+    if (showVol) out.push({ key: 'vol', kind: 'bars', color: '#5b6b80', points: s.volume.filter((p) => p[0] >= from), format: (x) => fmtUsd(x, 0), title: 'Volume' });
+    if (showPnl) out.push({ key: 'pnl', kind: 'line', color: '#f7f7f7', negColor: '#ef4a3c', points: s.pnl.filter((p) => p[0] >= from), scale: 'left', format: (x) => fmtUsd(x, 2), title: 'Net PnL' });
+    return out;
+  }, [s, from, showVol, showPnl]);
+  const enough = s.volume.filter((p) => p[0] >= from).length >= 3 && series.length > 0;
   return (
-    <Shell className="bots-chartcard">
-      <ShellHeader
-        icon="chart"
-        title="Volume and net PnL"
-        subtitle="Every bot together, a point every 5 minutes"
-        aside={<span className="bots-chartkey"><span><i className="is-vol" />Volume</span><span><i className="is-pnl" />Net PnL</span></span>}
-      />
+    <Shell className={`bots-chartcard${full ? ' is-full' : ''}`} ref={box as never}>
+      <ShellHeader icon="chart" title={title} subtitle={span === 'all' ? 'All time' : `Last ${span}`} aside={<IconButton icon={full ? 'x' : 'expand'} label={full ? 'Exit full screen' : 'Full screen'} variant="secondary" onClick={toggleFull} />} />
+      <div className="bots-charttools">
+            <span className="bots-toggles">
+              <button type="button" className={`bots-toggle${showVol ? ' is-on' : ''}`} aria-pressed={showVol} onClick={() => setShowVol(!showVol)}><i className="is-vol" />Volume</button>
+              <button type="button" className={`bots-toggle${showPnl ? ' is-on' : ''}`} aria-pressed={showPnl} onClick={() => setShowPnl(!showPnl)}><i className="is-pnl" />Net PnL</button>
+            </span>
+            <Segmented value={span} label="Timeframe" onChange={setSpan} options={[{ value: '1h', label: '1H' }, { value: '6h', label: '6H' }, { value: '24h', label: '24H' }, { value: '7d', label: '7D' }, { value: 'all', label: 'All' }]} />
+      </div>
       <Panel className="bots-chartpanel">
         {enough
-          ? <SeriesChart series={series} height={232} daily={false} />
-          : <EmptyState icon="chart" title={bots.length ? 'Charting soon' : 'No bot yet'} description={bots.length ? 'The chart starts after the first 15 minutes of trading.' : 'Start a bot to chart its volume and net PnL here.'} />}
+          ? <SeriesChart key={`${span}-${full}`} series={series} height={full ? Math.max(320, window.innerHeight - 150) : 232} daily={false} magnet />
+          : <EmptyState icon="chart" title={bots.length ? 'Not enough points yet' : 'No bot yet'} description={bots.length ? 'A point every 5 minutes. Try a longer timeframe.' : 'Start a bot to chart it here.'} />}
       </Panel>
     </Shell>
   );
@@ -132,7 +156,6 @@ function StrategyPick({ ctx }: { ctx: BotsCtx }) {
                 <p className="bots-strat__line">{info.line}</p>
               </div>
             </div>
-            <ul className="bots-strat__how">{info.how.map((h) => <li key={h}><Icon name="check" size={13} />{h}</li>)}</ul>
             <div className="bots-strat__foot">
               <span><small>Fees per $1M</small><b>{fmtUsd(cost.fees, 0)}</b></span>
               <span><small>Best for</small><b>{info.best}</b></span>
@@ -301,7 +324,7 @@ export function BotsOverview({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
       <BotsHead
         view={view}
         title="Bots"
-        sub="Market makers that run around the clock in your SoDEX account, from the ValueDesk executor."
+        sub="Market makers running 24/7 in your SoDEX account."
         actions={ready ? (
           <>
             {anyRunning && <Button variant="danger" icon="stop" disabled={ctx.busy === 'all'} onClick={() => void ctx.stopAll()}>Stop all</Button>}
@@ -331,7 +354,7 @@ export function BotsOverview({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
 
       {!ready || (!bots.length && !ctx.loading) ? (
         <Shell className="bots-listcard">
-          <ShellHeader icon="layers" title="Strategies" subtitle={ready ? 'Each starts as a practice run against the real book. You pick the market and the size.' : 'Every order rests on the book: you pay the maker fee, never the spread.'} />
+          <ShellHeader icon="layers" title="Strategies" subtitle="Maker fee only, never the spread" />
           <StrategyPick ctx={ctx} />
         </Shell>
       ) : (

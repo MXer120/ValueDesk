@@ -123,9 +123,17 @@ export function LatencyChart({ buckets, bucketMs, regionLabel, marks = [], hours
   const hb = hover !== null ? shown[hover] : null;
   const fmtHour = (t: number) => new Date(t).toISOString().slice(11, 16);
 
-  if (!shown.some((b) => b.n > 0)) {
-    return <div className="pf-chart pf-chart--empty bots-lat__well" ref={wrap}><p>None of your bots has sent an order to SoDEX in this window. The chart fills as they trade.</p></div>;
+  // Stretches without a write: a dashed line at 0 (owner: never a gap that reads as missing data).
+  const idle: Array<[number, number]> = [];
+  {
+    let from: number | null = null;
+    for (const b of shown) {
+      if (b.n === 0) { if (from === null) from = b.t; }
+      else if (from !== null) { idle.push([from, b.t]); from = null; }
+    }
+    if (from !== null) idle.push([from, end]);
   }
+  const none = !shown.some((b) => b.n > 0);
 
   return (
     <div className="bots-lat__chart" ref={wrap}>
@@ -170,6 +178,10 @@ export function LatencyChart({ buckets, bucketMs, regionLabel, marks = [], hours
             </g>
           );
         })}
+        {idle.map(([a0, a1]) => (
+          <line key={`idle-${a0}`} x1={Math.max(PAD.l, x(a0) - ((bucketMs / (end - start)) * (w - PAD.l - PAD.r)) / 2)} x2={Math.min(w - PAD.r, x(a1))} y1={y(0)} y2={y(0)} className="bots-lat__idle" />
+        ))}
+        {none && <text x={(PAD.l + w - PAD.r) / 2} y={(PAD.t + H - PAD.b) / 2} textAnchor="middle" className="bots-lat__none">No orders in this window</text>}
         <path d={line('p99')} className="bots-lat__p99" />
         <path d={line('p50')} className="bots-lat__p50" />
         <path d={line('p95')} className="bots-lat__p95glow" filter="url(#bots-lat-glow)" />

@@ -79,7 +79,7 @@ async function call<T>(client: ExecutorClient, method: 'GET' | 'POST', path: str
 }
 
 /** Start an algo on an executor: one wallet signature over the spec. */
-export async function startOn(mode: ExecutorMode, spec: unknown, seed: number): Promise<AlgoView> {
+export async function startOn(mode: ExecutorMode, spec: unknown, seed: number, restart?: { from: string; how: 'clean' | 'takeover' }): Promise<AlgoView> {
   // A bot's own rule (beta only); every other algo's: practice unless real algos are on for the wallet.
   const bot = typeof spec === 'object' && spec !== null && (spec as { bot?: unknown }).bot === true;
   if (!bot || !liveBotsFor(getLiveCopy().owner)) requirePaperAlgo(spec, getLiveCopy().owner);
@@ -88,7 +88,7 @@ export async function startOn(mode: ExecutorMode, spec: unknown, seed: number): 
   const info = getLiveCopy()[mode].info;
   if (!client || !info) throw new Error('That executor is not connected.');
   await requireTermsOrThrow({ owner, reason: 'start this algo order' });
-  const request = await signCopy(provider, owner, info.executorId, 'algo-start', { spec, seed });
+  const request = await signCopy(provider, owner, info.executorId, 'algo-start', restart ? { spec, seed, restart } : { spec, seed });
   return call<AlgoView>(client, 'POST', '/algos', { body: { request } });
 }
 
