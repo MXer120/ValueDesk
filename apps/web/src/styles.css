@@ -1321,8 +1321,6 @@ button.danger:hover:not(:disabled) { background: var(--neg); border-color: var(-
 .navmore__row.is-current .menu-row__ic { color: var(--text); }
 .navmore__out { flex: none; color: var(--dim); }
 .navmore__hint { flex: none; color: var(--warn); font-size: var(--fs-micro); }
-/* No keyboard on a phone. */
-@media (max-width: 760px) { .navmore__row--keys { display: none; } }
 /* The connection, only while it is not live (NavBar.tsx ConnectionPill). */
 .navconn {
   display: inline-flex; align-items: center; gap: 6px; flex: none; height: 26px; padding: 0 10px;
@@ -3309,3 +3307,7 @@ button.coh-pick__btn,
 /* The Trade menu's Bots row while it is in beta: a button that opens the Discord (NavTrade.tsx). */
 .navtrade__row.is-access { width: 100%; border: 0; background: none; font: inherit; text-align: left; cursor: pointer; }
 .navtrade__text b .dv-devtag--beta { margin-left: 0; background: color-mix(in srgb, #4c8dff 18%, transparent); color: #4c8dff; }
+
+/* SoDEX's products while they are in beta (NavMore.tsx): a button that opens the Discord, with the pill at its end. */
+.navmore__row.is-access { width: 100%; border: 0; background: none; font: inherit; text-align: left; cursor: pointer; }
+.navmore__access { margin-left: auto; flex: none; }
