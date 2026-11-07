@@ -29,7 +29,7 @@
  * only makes it answer 503 for longer.
  */
 import { isRateLimit } from '../valuedesk/sodex/util.js';
-import { mark } from './busy.js';
+import { within } from './busy.js';
 
 export interface LaneTask {
   key: string;
@@ -300,9 +300,8 @@ export class Lane {
       }
       const [key, task] = e;
       this.queue.delete(key);
-      mark(`lane:${this.o.name}:${key.split(':')[0]}`);
       this.active.set(key, Date.now());
-      const run = this.run(key, task.run);
+      const run = within(`lane:${this.o.name}:${key.split(':')[0]}`, () => this.run(key, task.run));
       if (slots === 1) await run;
     }
     this.running = false;

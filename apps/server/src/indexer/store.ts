@@ -957,11 +957,15 @@ export class IndexStore {
     if (!this.readOnly && path !== ':memory:') this.loadHeld();
   }
 
-  close(): void {
+  /** `lap`: called after each step with its name (the stop's timing line, worker.ts). */
+  close(lap: (step: string) => void = () => {}): void {
     this.checkpointer?.stop();
     this.checkpointer = null;
+    lap('checkpoint thread');
     if (!this.readOnly && this.path !== ':memory:') this.saveHeld();
+    lap('held rows');
     this.db.close();
+    lap('database close');
   }
 
   private checkpointer: Checkpointer | null = null;
@@ -3934,6 +3938,46 @@ export class IndexStore {
       },
       rows,
     };
+  }
+
+  // --- rows a stop did not write (engine.ts spillUnwritten / replaySpill) --------------------------
+  //
+  // A stop wrote its whole write backlog into the fills a slice at a time, and that was the stop's minutes. Now the rows go
+  // here in one transaction of appends (no page of the big tables is touched), and the next start writes them first, each
+  // part leaving this table in the transaction that writes it: written once, whatever stops or crashes in between. Made
+  // by the writer when first needed, not in SCHEMA: a reader's schemaReady must not wait for it.
+
+  private spillTable(): void {
+    this.db.exec('CREATE TABLE IF NOT EXISTS write_spill (id INTEGER PRIMARY KEY, kind TEXT NOT NULL, rows TEXT NOT NULL)');
+  }
+
+  /** Parts of rows, in the order they were to be written, in one transaction. */
+  spillWrites(parts: ReadonlyArray<{ kind: 'fills'; rows: readonly FillRow[] } | { kind: 'activity'; rows: ReadonlyArray<{ venue: Venue; acct: string; hour: number; trades: number; volume: number }> }>): void {
+    if (!parts.length) return;
+    this.spillTable();
+    const ins = this.q('INSERT INTO write_spill (kind, rows) VALUES (?, ?)');
+    this.tx(() => {
+      for (const p of parts) if (p.rows.length) ins.run(p.kind, JSON.stringify(p.rows));
+    });
+  }
+
+  /** The spilled parts, oldest first: each part's id and how many rows it holds. */
+  spilledWrites(): Array<{ id: number; rows: number }> {
+    this.spillTable();
+    return (this.q("SELECT id, json_array_length(rows) AS n FROM write_spill ORDER BY id").all() as Array<{ id: number; n: number }>).map((r) => ({ id: r.id, rows: r.n }));
+  }
+
+  /** Write one spilled part and remove it, in one transaction. A part already gone (written before) does nothing. */
+  replaySpill(id: number): void {
+    const r = this.q('SELECT kind, rows FROM write_spill WHERE id = ?').get(id) as { kind: string; rows: string } | undefined;
+    if (!r) return;
+    const rows = JSON.parse(r.rows) as unknown[];
+    this.tx(() => {
+      if (r.kind === 'fills') this.putFills(rows as FillRow[]);
+      else if (r.kind === 'activity') this.addActivity(rows as Array<{ venue: Venue; acct: string; hour: number; trades: number; volume: number }>);
+      else throw new Error(`write_spill ${id}: unknown kind ${r.kind}`);
+      this.q('DELETE FROM write_spill WHERE id = ?').run(id);
+    });
   }
 
   /** Board rows for an address across every board (a trader's standing). */
