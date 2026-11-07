@@ -59,6 +59,7 @@ import { TILE_FINAL_CACHE, TILE_INDEX_CACHE, TILE_WALLET_CACHE, keepLiqMetasWarm
 import { watchAddresses } from '../indexer/host.js';
 import { MAX_WINDOW_MS, activityCoverage, flowWalletFills, flowWindow, type MarketKind } from '../flow/read.js';
 import type { FlowRole, FlowSide, FlowSort } from '../flow/codec.js';
+import { botMarkets, keepBotMarketsWarm } from '../flow/botMarkets.js';
 import { BOARD_WINDOWS, type BoardWindow } from '../valuedesk/types.js';
 import { buildExplore, keepExploreWarm } from '../valuedesk/explore.js';
 import { buildScreener, keepScreenerWarm } from '../valuedesk/screener.js';
@@ -169,7 +170,7 @@ function sortValue(r: TraderRow, sort: LeaderboardSort, window: Window): number 
 /** Explore and the screener's pools built before their first visitor and kept built while visited (index.ts, after the start). */
 export function keepValuedeskWarm(): () => void {
   const core = CORE_VENUES.map((v) => PROVIDERS[v]);
-  const stops = [keepExploreWarm(core), keepScreenerWarm(core), keepLiqMetasWarm()];
+  const stops = [keepExploreWarm(core), keepScreenerWarm(core), keepLiqMetasWarm(), keepBotMarketsWarm()];
   return () => { for (const stop of stops) stop(); };
 }
 
@@ -684,6 +685,23 @@ export async function valuedeskRoutes(app: FastifyInstance) {
       const body = await flowWindow({ ...ask, role, side, sort, limit, ...(search.length >= 3 ? { q: search } : {}) });
       if (!body) return fail(reply, new NotAvailable('The trade flow is not recorded yet'));
       reply.header('Cache-Control', body.final ? FLOW_FINAL_CACHE : FLOW_LIVE_CACHE);
+      return { ok: true, ...body };
+    } catch (e) {
+      return fail(reply, e);
+    }
+  });
+
+  /**
+   * What a new small market-making bot pays per $1M all-in on every SoDEX perp, from public prints (flow/botMarkets.ts,
+   * docs/BOTS-UI.md): fees minus the 30 s markout of the market's small makers. `window=24h|7d`. Kept 5 min.
+   */
+  app.get('/api/vs/bots/markets', async (req, reply) => {
+    try {
+      const q = req.query as Q;
+      const window = q.window === '7d' ? '7d' : '24h';
+      const body = await botMarkets(window);
+      if (!body) return fail(reply, new NotAvailable('The trade flow is not recorded yet'));
+      reply.header('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
       return { ok: true, ...body };
     } catch (e) {
       return fail(reply, e);
