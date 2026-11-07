@@ -12,14 +12,13 @@ import { useEffect, useMemo, useState } from 'react';
 import { FINAL_STATUSES, type AlgoEvent, type AlgoView } from '@copy-engine';
 import { DASH, fmtDateTime, fmtTime, fmtUsd } from '../../format';
 import { CoinIcon } from '../CoinIcon';
-import { Modal } from '../Modal';
 import { SeriesChart } from '../datachart/SeriesChart';
 import { useBotEvents } from '../../bots/useBots';
 import { demoEvents } from '../../bots/demo';
 import { useBotMarkets } from '../../bots/data';
 import { goBots, type BotsView } from '../../bots/routes';
 import { STRATEGY_INFO, botFeeWords, draftOfSpec, gridRange, specChanges, specOf, strategyOf, type BotDraft } from '../../bots/presets';
-import { BotIcon } from './BotIcon';
+import { BotAvatar, BotIcon } from './BotIcon';
 import { botSeries } from './BotSheet';
 import { BotSettings, NameField } from './BotSettings';
 import { Estimate, effectiveDraft } from './BotNewPage';
@@ -28,7 +27,7 @@ import { botName, botState, fmtPnl, statusWords } from './botWords';
 import { BotsHead, StatePill, type BotsCtx } from './BotsPage';
 import { Button, EmptyState, Icon, IconButton, Inset, Panel, Shell, ShellHeader, Skeleton, StatCard, StatusPill, Tabs, type Tone } from './kit/kit';
 
-type Tab = 'orders' | 'trades' | 'activity';
+type Tab = 'overview' | 'settings' | 'orders' | 'trades' | 'activity';
 type How = 'clean' | 'takeover';
 
 function Controls({ v, ctx }: { v: AlgoView; ctx: BotsCtx }) {
@@ -48,88 +47,57 @@ function Controls({ v, ctx }: { v: AlgoView; ctx: BotsCtx }) {
   );
 }
 
-/** The settings as they run, read-only: one line each. */
-function SettingsView({ d }: { d: BotDraft }) {
-  const rows: Array<[string, string]> = [
-    ['Order size', d.strategy === 'grid' ? `${fmtUsd(d.orderUsd, 0)} × ${d.levels} levels` : `${fmtUsd(d.orderUsd, 0)} each side`],
-    ...(d.strategy !== 'grid' ? [['Max holding', fmtUsd(d.maxInventoryUsd, 0)] as [string, string]] : []),
-    ...(d.strategy === 'grid' ? [['Range', `${d.low ?? DASH} – ${d.high ?? DASH}`] as [string, string]] : []),
-    ...(d.strategy === 'market' ? [['Market gate', d.gate ? `On · ${d.gateBps} bp in ${d.gateWindowS} s` : 'Off'] as [string, string], ['Longest rest', `${d.restS} s`] as [string, string]] : []),
-    ...(d.strategy !== 'grid' ? [['Quote at', d.offsetTicks < 0 ? '1 tick inside' : 'Best price'] as [string, string]] : []),
-    ...(d.strategy === 'market' ? [['Pause if spread over', d.maxSpreadBps === null ? 'Off' : `${d.maxSpreadBps} bp`] as [string, string]] : []),
-    ...(d.strategy !== 'grid' ? [['Flow gate', d.flowOn ? `${d.flowAction === 'pause' ? 'Pause' : `${Math.round(d.flowShrink * 100)}% size`} under ${fmtUsd(d.flowMinUsd, 0)} / ${d.flowWindowMin} min` : 'Off'] as [string, string]] : []),
-    ['Quiet hours', d.quiet.length ? d.quiet.map((w) => `${w.from}–${w.to} ${w.zone === 'new_york' ? 'NY' : w.zone === 'london' ? 'LDN' : 'UTC'}`).join(', ') : 'Off'],
-    ...(d.ladder > 1 ? [['Levels per side', String(d.ladder)] as [string, string]] : []),
-    ['Stop if it loses', d.maxLossUsd === null ? 'No limit' : fmtUsd(d.maxLossUsd, 2)],
-    ['Stop after', d.volumeTargetUsd === null ? 'You stop it' : `${fmtUsd(d.volumeTargetUsd, 0)} traded`],
-    ['On stop', d.onStop === 'close' ? 'Close position' : 'Keep it'],
-    ['Orders', d.paper ? 'Practice' : 'Real'],
-  ];
-  return (
-    <dl className="bots-review__list">
-      {rows.map(([k, val]) => <div key={k}><dt>{k}</dt><dd>{val}</dd></div>)}
-    </dl>
-  );
-}
-
-/** Edit settings: the form, then how the new settings take over (owner: changing needs a restart; clean recommended). */
-function EditSettings({ v, ctx, open, onClose }: { v: AlgoView; ctx: BotsCtx; open: boolean; onClose: () => void }) {
+/**
+ * The bot's settings as a page (owner 2026-11-07: a real settings page, not a summary, and not a pop-up): the form
+ * with what runs now, and the two ways a change takes over, as two buttons. Clean restart is the recommended one.
+ */
+function SettingsTab({ v, ctx }: { v: AlgoView; ctx: BotsCtx }) {
   const before = useMemo(() => draftOfSpec(v.algo.spec), [v.algo.spec]);
   const [d, setD] = useState<BotDraft>(before);
-  const [how, setHow] = useState<How>('clean');
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<How | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const markets = useBotMarkets('24h', open);
+  const markets = useBotMarkets('24h');
   const est = markets.data?.markets.find((m) => m.symbol === v.algo.spec.symbol) ?? null;
-  // Reset when it opens only: the list refreshes every few seconds with a new spec object, which must not wipe the edits.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { if (open) { setD(before); setHow('clean'); setError(null); } }, [open]);
-  const n = specChanges(before, d).length;
+  const changes = specChanges(before, d);
+  const n = changes.length;
+  // A list refresh brings a new spec object every few seconds: only pick it up while nothing is being edited.
+  useEffect(() => { if (!n) setD(before); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [before]);
   const holds = Math.abs(v.bot?.inventory ?? 0) > 0;
-  const restart = async () => {
-    setBusy(true);
+  const ended = botState(v) === 'ended' || botState(v) === 'failed';
+  const restart = async (how: How) => {
+    setBusy(how);
     setError(null);
     try {
       await ctx.restart(v, specOf(effectiveDraft({ ...d, paper: v.algo.spec.paper }, est), null), how);
-      onClose();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   };
-  const opt = (h: How, icon: 'shield' | 'bolt', tone: Tone, title: string, line: string, pill?: string) => (
-    <button type="button" role="radio" aria-checked={how === h} className={`bots-kind bots-rmode${how === h ? ' is-on' : ''}`} onClick={() => setHow(h)}>
-      <span className={`tf-tile is-${tone}`}><Icon name={icon} size={18} /></span>
-      <span className="bots-kind__t">
-        <b>{title}{pill && <StatusPill size="sm" tone="positive">{pill}</StatusPill>}</b>
-        <small>{line}</small>
-      </span>
-      {how === h && <span className="bots-check" aria-hidden="true"><Icon name="check" size={12} /></span>}
-    </button>
-  );
-  const footer = (
-    <div className="tf bots-edit__foot">
-      <span className={n ? 'is-dirty' : ''}>{n ? `${n} change${n === 1 ? '' : 's'}` : 'No change yet'}</span>
-      <Button variant="quiet" onClick={onClose}>Cancel</Button>
-      <Button variant="primary" icon="play" loading={busy} disabled={!n} onClick={() => void restart()}>{how === 'clean' ? 'Clean restart' : 'Instant restart'}</Button>
-    </div>
-  );
   return (
-    <Modal open={open} onClose={onClose} title="Edit settings" size="lg" className="tf bots-edit" footer={footer}>
-      <div className="bots-edit__body">
-        <BotSettings d={d} set={(p) => setD((x) => ({ ...x, ...p }))} range={d.strategy === 'grid' ? gridRange(d, null) : null} mark={v.bot?.mark ?? null} liveAllowed={ctx.liveAllowed} hidePractice noLead={est?.lead === null} />
-        <NameField d={d} set={(p) => setD((x) => ({ ...x, ...p }))} />
-        <section className="bots-edit__restart">
-          <p className="bots-edit__k">New settings apply by a restart</p>
-          <div className="bots-edit__modes" role="radiogroup" aria-label="How to restart">
-            {opt('clean', 'shield', 'positive', 'Clean restart', holds ? 'Closes its position, then starts fresh.' : 'Stops, then starts fresh.', 'Recommended')}
-            {opt('takeover', 'bolt', 'warning', 'Instant restart', holds ? 'Starts now and keeps its position.' : 'Starts now, no pause.')}
-          </div>
-        </section>
-        {error && <p className="bots-err" role="alert">{error}</p>}
-      </div>
-    </Modal>
+    <div className="bots-settingspage">
+      <Shell>
+        <ShellHeader icon="gear" title="Settings" subtitle={ended ? 'As it ran. Start a new bot to change them.' : 'Change anything, then restart to apply.'} aside={n ? <Button variant="quiet" onClick={() => setD(before)}>Undo changes</Button> : undefined} />
+        <Panel className="bots-sizepanel">
+          <fieldset className="bots-fieldset" disabled={ended}>
+            <BotSettings d={d} set={(p) => setD((x) => ({ ...x, ...p }))} range={d.strategy === 'grid' ? gridRange(d, null) : null} mark={v.bot?.mark ?? null} liveAllowed={ctx.liveAllowed} hidePractice noLead={est?.lead === null} />
+            <NameField d={d} set={(p) => setD((x) => ({ ...x, ...p }))} />
+          </fieldset>
+        </Panel>
+      </Shell>
+      {error && <p className="bots-err" role="alert">{error}</p>}
+      {!ended && (
+        <div className={`bots-restartbar${n ? ' is-dirty' : ''}`}>
+          <span className="bots-restartbar__t">
+            <b>{n ? `${n} change${n === 1 ? '' : 's'}` : 'No change yet'}</b>
+            <small>{n ? 'A restart applies them.' : 'Edit any setting above.'}</small>
+          </span>
+          <Button variant="secondary" icon="bolt" disabled={!n || busy !== null} loading={busy === 'takeover'} onClick={() => void restart('takeover')} title={holds ? 'Starts now and keeps its position.' : 'Starts now.'}>Instant restart</Button>
+          <Button variant="go" icon="shield" disabled={!n || busy !== null} loading={busy === 'clean'} onClick={() => void restart('clean')} title={holds ? 'Closes its position, then starts fresh.' : 'Stops, then starts fresh.'}>Clean restart<span className="bots-rec">Recommended</span></Button>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -206,8 +174,7 @@ function Activity({ events, error }: { events: AlgoEvent[] | null; error: string
 
 export function BotDetail({ ctx, view, id }: { ctx: BotsCtx; view: BotsView; id: string }) {
   const v = ctx.bots.find((x) => x.algo.id === id) ?? null;
-  const [tab, setTab] = useState<Tab>('orders');
-  const [editing, setEditing] = useState(false);
+  const [tab, setTab] = useState<Tab>('overview');
   const realEv = useBotEvents(id, !!v && !ctx.demo && (tab === 'trades' || tab === 'activity'));
   const demoEv = useMemo(() => (ctx.demo && v ? demoEvents(v) : null), [ctx.demo, v]);
   const events = demoEv ?? realEv.events;
@@ -244,7 +211,7 @@ export function BotDetail({ ctx, view, id }: { ctx: BotsCtx; view: BotsView; id:
     <>
       <BotsHead
         view={view}
-        lead={<>{back}<span className="bots-head__coin"><CoinIcon coin={v.algo.spec.symbol} size={40} /></span></>}
+        lead={<>{back}<BotAvatar symbol={v.algo.spec.symbol} strategy={strategy} size={48} /></>}
         title={<span className="bots-dhead">{botName(v)}<StatePill s={botState(v)} />{v.algo.spec.paper && <StatusPill tone="brand" size="md">Practice</StatusPill>}</span>}
         sub={
           <span className="bots-chips">
@@ -255,7 +222,7 @@ export function BotDetail({ ctx, view, id }: { ctx: BotsCtx; view: BotsView; id:
             <span className="bots-chipx is-plain">{statusWords(v)}</span>
           </span>
         }
-        actions={<><Controls v={v} ctx={ctx} />{!ended && <Button variant="primary" icon="gear" onClick={() => setEditing(true)}>Edit settings</Button>}</>}
+        actions={<><Controls v={v} ctx={ctx} />{!ended && <Button variant="primary" icon="gear" onClick={() => setTab('settings')}>Edit settings</Button>}</>}
       />
 
       <Shell className="bots-kpis">
@@ -268,42 +235,43 @@ export function BotDetail({ ctx, view, id }: { ctx: BotsCtx; view: BotsView; id:
         </div>
       </Shell>
 
-      <div className="bots-dgrid">
-        <div className="bots-dgrid__main">
-          <FleetChart bots={[v]} title="Performance" />
-          <Shell className="bots-detailcard">
-            <div className="bots-tabsbar">
-              <Tabs<Tab>
-                label="Bot sections"
-                value={tab}
-                onChange={setTab}
-                tabs={[{ value: 'orders', label: 'Orders', count: b?.orders.length ?? 0 }, { value: 'trades', label: 'Trades' }, { value: 'activity', label: 'Activity' }]}
-              />
-            </div>
-            <Panel className="bots-tabpanel" role="tabpanel">
-              {tab === 'orders' && <Orders v={v} />}
-              {tab === 'trades' && <Trades events={events} />}
-              {tab === 'activity' && <Activity events={events} error={error} />}
-            </Panel>
-          </Shell>
-        </div>
-        <aside className="bots-dgrid__side">
-          <Shell className="bots-setcard">
-            <ShellHeader icon="gear" title="Settings" subtitle={ended ? 'As it ran' : 'Changes apply by a restart'} aside={!ended && <Button variant="secondary" onClick={() => setEditing(true)}>Edit</Button>} />
-            <Panel className="bots-setview"><SettingsView d={draftOfSpec(v.algo.spec)} /></Panel>
-          </Shell>
-          <LatencyCard ctx={ctx} bot={v.algo.id} practice={v.algo.spec.paper} compact marks={v.algo.startedAt ? [{ t: v.algo.startedAt, label: 'Started' }] : []} />
-          {v.algo.spec.kind === 'mm' && (
-            <Shell className="bots-sidecard">
-              <ShellHeader icon="compass" title="This market" subtitle="Estimate against this bot" aside={<Button variant="quiet" onClick={() => goBots({ page: 'savings' })}>Lower it</Button>} />
-              <Panel className="bots-sidepanel">
-                {markets.data ? <Estimate m={est} gate={gate} feeBps={feeBps} compact /> : markets.error ? <p className="bots-fine">Estimates unavailable.</p> : <div className="bots-skels"><Skeleton className="bots-skel is-big" /></div>}
-              </Panel>
-            </Shell>
-          )}
-        </aside>
+      <div className="bots-pagetabs">
+        <Tabs<Tab>
+          label="Bot sections"
+          value={tab}
+          onChange={setTab}
+          tabs={[{ value: 'overview', label: 'Overview' }, { value: 'settings', label: 'Settings' }, { value: 'orders', label: 'Orders', count: b?.orders.length ?? 0 }, { value: 'trades', label: 'Trades' }, { value: 'activity', label: 'Activity' }]}
+        />
       </div>
-      {!ended && <EditSettings v={v} ctx={ctx} open={editing} onClose={() => setEditing(false)} />}
+
+      {tab === 'overview' && (
+        <div className="bots-dgrid">
+          <div className="bots-dgrid__main">
+            <FleetChart bots={[v]} title="Performance" />
+          </div>
+          <aside className="bots-dgrid__side">
+            <LatencyCard ctx={ctx} bot={v.algo.id} practice={v.algo.spec.paper} compact marks={v.algo.startedAt ? [{ t: v.algo.startedAt, label: 'Started' }] : []} />
+            {v.algo.spec.kind === 'mm' && (
+              <Shell className="bots-sidecard is-plain">
+                <ShellHeader icon="compass" title="This market" subtitle="Estimate against this bot" aside={<Button variant="quiet" onClick={() => goBots({ page: 'savings' })}>Lower it</Button>} />
+                <Panel className="bots-sidepanel">
+                  {markets.data ? <Estimate m={est} gate={gate} feeBps={feeBps} compact /> : markets.error ? <p className="bots-fine">Estimates unavailable.</p> : <div className="bots-skels"><Skeleton className="bots-skel is-big" /></div>}
+                </Panel>
+              </Shell>
+            )}
+          </aside>
+        </div>
+      )}
+      {tab === 'settings' && <SettingsTab v={v} ctx={ctx} />}
+      {tab !== 'overview' && tab !== 'settings' && (
+        <Shell className="bots-detailcard">
+          <Panel className="bots-tabpanel" role="tabpanel">
+            {tab === 'orders' && <Orders v={v} />}
+            {tab === 'trades' && <Trades events={events} />}
+            {tab === 'activity' && <Activity events={events} error={error} />}
+          </Panel>
+        </Shell>
+      )}
     </>
   );
 }

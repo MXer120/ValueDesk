@@ -3,7 +3,7 @@
  *
  *   Size & risk   order size, max holding, loss limit, volume target, run time, on stop
  *   Quoting       how R10 quotes: rest, place, distance from Binance, pull distance, levels, re-price, chase, skew
- *   Safeguards    market gate (Binance moves), flow gate (the patient taker away), quiet hours (NY open...), spread
+ *   Safeguards    market gate (Binance moves), flow gate (uninformed flow away), quiet hours (NY open...), spread
  *
  * Shared by New bot (step Size) and a bot's Edit settings (applied by a restart). R10's values are marked and one
  * press away. Built from the Bots kit.
@@ -178,7 +178,7 @@ export function BotSettings({ d, set, range, mark, liveAllowed, noLead, hidePrac
       {sec === 'guard' && (
         <div className="bots-guards">
           {market && (
-            <Guard icon="pulse" title="Market gate" line={`No new quotes while Binance moves over ${d.gateBps} bp in ${d.gateWindowS}s.`} on={d.gate} set={(on) => set({ gate: on, ...(on && !d.gateBps ? GATE_DEFAULT : {}) })}>
+            <Guard icon="pulse" title="Market gate" line="Pause on fast moves" on={d.gate} set={(on) => set({ gate: on, ...(on && !d.gateBps ? GATE_DEFAULT : {}) })}>
               <div className="bots-pair">
                 <NumberField label="Moves" value={d.gateBps} onChange={(v) => set({ gateBps: Math.max(1, Math.min(500, v ?? GATE_DEFAULT.gateBps)) })} unit="bp" />
                 <NumberField label="Over" value={d.gateWindowS} onChange={(v) => set({ gateWindowS: Math.max(1, Math.min(120, Math.round(v ?? GATE_DEFAULT.gateWindowS))) })} unit="s" />
@@ -186,9 +186,9 @@ export function BotSettings({ d, set, range, mark, liveAllowed, noLead, hidePrac
             </Guard>
           )}
           {mm && (
-            <Guard icon="robot" title="Flow gate" line={`${d.flowAction === 'pause' ? 'Pauses' : `Quotes at ${Math.round(d.flowShrink * 100)}% size`} while the patient taker trades under ${fmtUsd(d.flowMinUsd, 0)} in ${d.flowWindowMin} min.`} on={d.flowOn} set={(on) => set({ flowOn: on, ...(on && !d.flowMinUsd ? FLOW_DEFAULT : {}) })}>
+            <Guard icon="robot" title="Flow gate" line="Pause when uninformed flow dries up" on={d.flowOn} set={(on) => set({ flowOn: on, ...(on && !d.flowMinUsd ? FLOW_DEFAULT : {}) })}>
               <div className="bots-fgrid is-2">
-                <Row label="Patient taker under">
+                <Row label="Uninformed flow under">
                   <Segmented label="Flow threshold" value={[100_000, 250_000, 500_000, 1_000_000].includes(d.flowMinUsd) ? String(d.flowMinUsd) : 'x'} onChange={(v) => v !== 'x' && set({ flowMinUsd: Number(v) })} options={[{ value: '100000', label: '$100K' }, { value: '250000', label: '$250K' }, { value: '500000', label: '$500K' }, { value: '1000000', label: '$1M' }, ...([100_000, 250_000, 500_000, 1_000_000].includes(d.flowMinUsd) ? [] : [{ value: 'x', label: fmtUsd(d.flowMinUsd, 0) }])]} />
                 </Row>
                 <Row label="In the last">
@@ -205,7 +205,7 @@ export function BotSettings({ d, set, range, mark, liveAllowed, noLead, hidePrac
               </div>
             </Guard>
           )}
-          <Guard icon="clock" title="Quiet hours" line={d.quiet.length ? `${d.quiet.length} window${d.quiet.length === 1 ? '' : 's'}: no quotes inside them.` : 'No quotes around volatile times, like the New York open.'} on={d.quiet.length > 0} set={(on) => set({ quiet: on ? [QUIET_PRESETS[0]!.w] : [] })}>
+          <Guard icon="clock" title="Quiet hours" line={d.quiet.length ? `${d.quiet.length} window${d.quiet.length === 1 ? '' : 's'}` : 'Pause around the New York open'} on={d.quiet.length > 0} set={(on) => set({ quiet: on ? [QUIET_PRESETS[0]!.w] : [] })}>
             <div className="bots-quiet">
               <div className="bots-quiet__presets">
                 {QUIET_PRESETS.map((p) => (
@@ -230,7 +230,7 @@ export function BotSettings({ d, set, range, mark, liveAllowed, noLead, hidePrac
             </div>
           </Guard>
           {market && (
-            <Guard icon="layers" title="Spread limit" line={d.maxSpreadBps === null ? 'Pauses while SoDEX\'s spread is unusually wide.' : `Pauses while the spread is over ${d.maxSpreadBps} bp.`} on={d.maxSpreadBps !== null} set={(on) => set({ maxSpreadBps: on ? 10 : null })}>
+            <Guard icon="layers" title="Spread limit" line="Pause on a wide spread" on={d.maxSpreadBps !== null} set={(on) => set({ maxSpreadBps: on ? 10 : null })}>
               <Segmented label="Pause if spread over" value={d.maxSpreadBps === null ? '10' : [5, 10, 20].includes(d.maxSpreadBps) ? String(d.maxSpreadBps) : 'x'} onChange={(v) => v !== 'x' && set({ maxSpreadBps: Number(v) })} options={[{ value: '5', label: '5 bp' }, { value: '10', label: '10 bp' }, { value: '20', label: '20 bp' }, ...(d.maxSpreadBps === null || [5, 10, 20].includes(d.maxSpreadBps) ? [] : [{ value: 'x', label: `${d.maxSpreadBps} bp` }])]} />
             </Guard>
           )}

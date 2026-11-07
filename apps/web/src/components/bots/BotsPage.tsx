@@ -325,6 +325,9 @@ function BotsPageOpen({ address, provider }: { address: string | null; provider:
     stop: base.demo
       ? async (v, how) => { if (how !== 'ask' && how !== undefined) return base.stop(v, how); if (await confirm({ title: `Stop ${botName(v)}?`, body: 'It pulls its orders and closes what it holds.', confirmLabel: 'Stop bot', danger: true })) await base.stop(v, 'close'); }
       : base.stop,
+    stopAll: base.demo
+      ? async () => { if (await confirm({ title: 'Stop every bot?', body: 'Every bot pulls its orders. What they hold stays as it is.', confirmLabel: 'Stop all', danger: true })) await base.stopAll(); }
+      : base.stopAll,
     remove: base.demo
       ? async (v) => { if (await confirm({ title: `Delete ${botName(v)}?`, body: 'It leaves your list.', confirmLabel: 'Delete', danger: true })) await base.remove(v); }
       : base.remove,

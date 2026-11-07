@@ -1,14 +1,15 @@
 /**
- * Bots > New bot, in four steps (owner 2026-11-07: "setting up a bot should be multi step", fewer sentences):
+ * Bots > New bot, in four steps, with a receipt beside them (owner 2026-11-07):
  *
  *   1 Bot      market maker (R10) or grid
- *   2 Market   the busiest markets as cards, every other one in a searchable list; each with what it costs there
- *   3 Size     order size, loss limit, volume target, Advanced, practice
- *   4 Review   what starts, the estimate, the name, Start (one wallet signature)
+ *   2 Market   one or several markets from a ranked table: price, activity per hour, what $1M does there, the
+ *              uninformed flow's share, the spread. Several markets start one bot each, with the same settings.
+ *   3 Settings Size & risk, Quoting, Safeguards (BotSettings)
+ *   4 Review   the name; the receipt holds the rest; Start (asks first; one signature per bot)
  *
- * The stepper on the left keeps the estimate for the chosen market in view.
+ * The receipt on the right lists what will run and what it is estimated to cost, line by line.
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { checkSizes, parseAlgoSpec, type MarketInfo } from '@copy-engine';
 import { DASH, fmtUsd } from '../../format';
 import { useSymbols } from '../../hooks';
@@ -19,7 +20,7 @@ import { CoinIcon } from '../CoinIcon';
 import { useBotMarkets, bpToPerMillion, type BotMarket } from '../../bots/data';
 import { goBots, type BotsView } from '../../bots/routes';
 import { STRATEGIES, STRATEGY_INFO, costPerMillion, draftFor, gridRange, specOf, type BotDraft, type Strategy } from '../../bots/presets';
-import { BotIcon } from './BotIcon';
+import { BotAvatar, StrategyTile } from './BotIcon';
 import { BotSettings, NameField } from './BotSettings';
 import { BotsHead, type BotsCtx } from './BotsPage';
 import { Button, Icon, Inset, Panel, ProgressBar, RollingNumber, SearchField, Segmented, SegmentedBar, Shell, ShellHeader, Skeleton, StatusPill } from './kit/kit';
@@ -27,8 +28,8 @@ import { Button, Icon, Inset, Panel, ProgressBar, RollingNumber, SearchField, Se
 /** A cost in bp as what $1M does: −$185 (it costs), +$359 (it earns). */
 export const fmtBpUsd = (bp: number | null | undefined): string => (bp === null || bp === undefined ? DASH : bp < 0 ? `+${fmtUsd(-bpToPerMillion(bp), 0)}` : bp > 0 ? `−${fmtUsd(bpToPerMillion(bp), 0)}` : fmtUsd(0, 0));
 export const bpCls = (bp: number | null | undefined): string => (bp === null || bp === undefined ? '' : bp < 0 ? 'pos' : bp > 0 ? 'neg' : '');
-const fmtVol = (usdH: number): string => fmtUsd(usdH * 24, 0);
 const CONF_TONE = { high: 'positive', medium: 'warning', low: 'neutral' } as const;
+/** Who takes small makers' quotes: uninformed flow (1002, cheap to fill), informed flow (23342, about 1 bp a fill). */
 export const TAKER_COLORS = { patient: 'var(--pos)', fast: 'var(--neg)', other: 'rgb(var(--ink) / 0.28)' };
 
 /** Who takes small makers' quotes on a market. */
@@ -40,14 +41,14 @@ export function Takers({ m }: { m: BotMarket }) {
         max={1}
         size="md"
         segments={[
-          { id: 'p', value: m.takers.t1002, label: 'Patient taker', color: TAKER_COLORS.patient },
-          { id: 'f', value: m.takers.t23342, label: 'Fast taker', color: TAKER_COLORS.fast },
+          { id: 'p', value: m.takers.t1002, label: 'Uninformed flow', color: TAKER_COLORS.patient },
+          { id: 'f', value: m.takers.t23342, label: 'Informed flow', color: TAKER_COLORS.fast },
           { id: 'o', value: m.takers.other, label: 'Others', color: TAKER_COLORS.other },
         ]}
       />
       <div className="bots-takers__key">
-        <span title="Fills from the patient taker cost makers little."><i style={{ background: TAKER_COLORS.patient }} />Patient <b>{Math.round(m.takers.t1002 * 100)}%</b></span>
-        <span title="Fills from the fast taker cost about 1 bp each."><i style={{ background: TAKER_COLORS.fast }} />Fast <b>{Math.round(m.takers.t23342 * 100)}%</b></span>
+        <span title="Uninformed flow: its fills cost makers little."><i style={{ background: TAKER_COLORS.patient }} />Uninformed <b>{Math.round(m.takers.t1002 * 100)}%</b></span>
+        <span title="Informed flow: its fills cost about 1 bp each."><i style={{ background: TAKER_COLORS.fast }} />Informed <b>{Math.round(m.takers.t23342 * 100)}%</b></span>
         <span><i style={{ background: TAKER_COLORS.other }} />Others <b>{Math.round(m.takers.other * 100)}%</b></span>
       </div>
     </div>
@@ -62,7 +63,7 @@ export function Estimate({ m, gate, feeBps, compact }: { m: BotMarket | null; ga
   return (
     <div className="bots-est">
       <div className="bots-est__big">
-        <span className="bots-est__k">Est. cost per $1M{gate ? ' · gate on' : ''}</span>
+        <span className="bots-est__k">Per $1M{gate ? ' · gate on' : ''}</span>
         <RollingNumber value={fmtBpUsd(est)} className={`bots-est__v ${bpCls(est)}`} />
         <span className="bots-est__sub">
           {fmtBpUsd(m.estCostLowBps)} to {fmtBpUsd(m.estCostHighBps)}
@@ -84,17 +85,18 @@ export function Estimate({ m, gate, feeBps, compact }: { m: BotMarket | null; ga
 const STEPS = [
   { title: 'Bot', hint: 'What it does' },
   { title: 'Market', hint: 'Where it trades' },
-  { title: 'Size', hint: 'How much' },
-  { title: 'Review', hint: 'Check and start' },
+  { title: 'Settings', hint: 'Size and safeguards' },
+  { title: 'Review', hint: 'Name and start' },
 ] as const;
 
 /** A market without a Binance price runs the plain maker: quotes off SoDEX's book, no gate, no rest. */
 export const noLeadOf = (m: BotMarket | null | undefined): boolean => m?.lead === null;
 export const effectiveDraft = (d: BotDraft, m: BotMarket | null | undefined): BotDraft => (d.strategy === 'market' && noLeadOf(m) ? { ...d, strategy: 'maker', gate: false } : d);
 
-type MSort = 'best' | 'volume' | 'patient' | 'room';
+type MSort = 'best' | 'activity' | 'uninformed' | 'spread';
 
-function MarketStep({ d, set, markets }: { d: BotDraft; set: (p: Partial<BotDraft>) => void; markets: BotMarket[] | null; feeBps: number }) {
+/** The markets, ranked; tick one or several. Activity is the market's own volume per hour (a bot's size does not change it). */
+function MarketStep({ picked, toggle, markets }: { picked: string[]; toggle: (s: string) => void; markets: BotMarket[] | null }) {
   const [q, setQ] = useState('');
   const [sort, setSort] = useState<MSort>('best');
   const [all, setAll] = useState(false);
@@ -102,101 +104,134 @@ function MarketStep({ d, set, markets }: { d: BotDraft; set: (p: Partial<BotDraf
   const needle = q.trim().toLowerCase();
   const list = useMemo(() => {
     const xs = (markets ?? []).filter((m) => (!needle || m.symbol.toLowerCase().includes(needle)) && (all || needle || m.confidence !== 'low'));
-    const by: Record<MSort, (m: BotMarket) => number> = { best: (m) => m.estCostBps, volume: (m) => -m.volumeUsdH, patient: (m) => -m.takers.t1002, room: (m) => -m.capacityUsdH };
+    const by: Record<MSort, (m: BotMarket) => number> = { best: (m) => m.estCostBps, activity: (m) => -m.volumeUsdH, uninformed: (m) => -m.takers.t1002, spread: (m) => m.spreadBps };
     return [...xs].sort((x, y) => by[sort](x) - by[sort](y));
   }, [markets, needle, sort, all]);
   const shown = all || needle ? list : list.slice(0, 10);
-  const best = useMemo(() => (markets ?? []).filter((m) => m.confidence === 'high' && m.capacityUsdH >= 1_000).sort((x, y) => x.estCostBps - y.estCostBps)[0]?.symbol ?? null, [markets]);
+  const best = useMemo(() => (markets ?? []).filter((m) => m.confidence === 'high').sort((x, y) => x.estCostBps - y.estCostBps)[0]?.symbol ?? null, [markets]);
   const extra = needle ? [...byName.keys()].filter((x) => x.toLowerCase().includes(needle) && !(markets ?? []).some((m) => m.symbol === x)).slice(0, 12) : [];
-  const pick = (symbol: string) => set({ symbol, low: null, high: null });
   if (!markets) return <div className="bots-skels">{[0, 1, 2, 3, 4].map((i) => <Skeleton key={i} className="bots-skel" />)}</div>;
-  const head = (k: MSort, label: string) => (
-    <th className="right"><button type="button" className={`bots-sort${sort === k ? ' is-on' : ''}`} onClick={() => setSort(k)}>{label}</button></th>
+  const head = (k: MSort, label: string, title?: string) => (
+    <th className="right" title={title}>
+      <button type="button" className={`bots-th${sort === k ? ' is-on' : ''}`} onClick={() => setSort(k)}>{label}{sort === k && <Icon name="down" size={10} />}</button>
+    </th>
   );
+  const row = (symbol: string, m: BotMarket | null) => {
+    const on = picked.includes(symbol);
+    return (
+      <tr key={symbol} role="checkbox" aria-checked={on} aria-label={symbol} tabIndex={0} className={`bots-row${on ? ' is-picked' : ''}`} onClick={() => toggle(symbol)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(symbol); } }}>
+        <td className="bots-mt__pick"><span className={`bots-tick${on ? ' is-on' : ''}`} aria-hidden="true">{on && <Icon name="check" size={11} />}</span></td>
+        <td>
+          <span className="bots-mt__name">
+            <CoinIcon coin={symbol} size={22} />
+            <span><b>{symbol.replace(/-USD$/, '')}</b><small>{symbol}</small></span>
+            {symbol === best && <StatusPill size="sm" tone="positive">best</StatusPill>}
+            {m?.lead === null && <StatusPill size="sm">no Binance</StatusPill>}
+            {!m && <StatusPill size="sm">little traded</StatusPill>}
+          </span>
+        </td>
+        <td className="right num dim">{m ? fmtUsd(m.price) : DASH}</td>
+        <td className="right num">{m ? fmtUsd(m.volumeUsdH, 0) : DASH}</td>
+        <td className={`right num bots-strong ${m ? bpCls(m.estCostBps) : ''}`}>{m ? fmtBpUsd(m.estCostBps) : DASH}</td>
+        <td className="right">{m ? <span className="bots-share"><ProgressBar value={m.takers.t1002} max={1} size="sm" color={TAKER_COLORS.patient} label="Uninformed flow share" /><b>{Math.round(m.takers.t1002 * 100)}%</b></span> : DASH}</td>
+        <td className="right num dim">{m ? `${m.spreadBps.toFixed(1)} bp` : DASH}</td>
+      </tr>
+    );
+  };
   return (
     <Panel className="bots-mstep">
       <div className="bots-toolbar">
         <SearchField value={q} onChange={setQ} placeholder="Search a market (SOL, DOGE, NVDA…)" label="Search a market" className="bots-toolbar__search" />
+        <span className="bots-toolbar__n">{picked.length} selected</span>
         <span className="bots-toolbar__sp" />
         <Segmented value={all ? 'all' : 'read'} label="Markets shown" onChange={(v) => setAll(v === 'all')} options={[{ value: 'read', label: 'Well read' }, { value: 'all', label: `All ${markets.length}` }]} />
       </div>
       <div className="bots-tablewrap">
-        <table className="bots-table bots-mtable" role="radiogroup" aria-label="Market">
+        <table className="bots-table bots-mt" aria-label="Markets">
+          <colgroup><col style={{ width: 36 }} /><col /><col style={{ width: 110 }} /><col style={{ width: 130 }} /><col style={{ width: 110 }} /><col style={{ width: 150 }} /><col style={{ width: 90 }} /></colgroup>
           <thead>
             <tr>
+              <th />
               <th>Market</th>
               <th className="right">Price</th>
-              {head('volume', 'Volume / day')}
-              {head('best', 'Per $1M')}
-              {head('patient', 'Patient taker')}
-              {head('room', 'Room / h')}
+              {head('activity', 'Activity / h', "The market's traded volume per hour, last day")}
+              {head('best', 'Per $1M', "What $1M of a small maker's volume did here, all-in")}
+              {head('uninformed', 'Uninformed', "Share of small makers' fills taken by uninformed flow")}
+              {head('spread', 'Spread')}
             </tr>
           </thead>
           <tbody>
-            {shown.map((m) => {
-              const on = d.symbol === m.symbol;
-              return (
-                <tr key={m.symbol} role="radio" aria-checked={on} aria-label={m.symbol} tabIndex={0} className={`bots-row${on ? ' is-open' : ''}`} onClick={() => pick(m.symbol)} onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && pick(m.symbol)}>
-                  <td>
-                    <span className="bots-mkt__name">
-                      <span className={`bots-radio${on ? ' is-on' : ''}`} aria-hidden="true" />
-                      <CoinIcon coin={m.symbol} size={20} />
-                      <b>{m.symbol}</b>
-                      {m.symbol === best && <StatusPill size="sm" tone="positive">best</StatusPill>}
-                      {m.lead === null && <StatusPill size="sm">no Binance</StatusPill>}
-                    </span>
-                  </td>
-                  <td className="right num dim">{fmtUsd(m.price)}</td>
-                  <td className="right num">{fmtUsd(m.volumeUsdH * 24, 0)}</td>
-                  <td className={`right num bots-strong ${bpCls(m.estCostBps)}`}>{fmtBpUsd(m.estCostBps)}</td>
-                  <td className="right"><span className="bots-share"><ProgressBar value={m.takers.t1002} max={1} size="sm" color={TAKER_COLORS.patient} label="Patient taker share" /><b>{Math.round(m.takers.t1002 * 100)}%</b></span></td>
-                  <td className="right num dim">{fmtUsd(m.capacityUsdH, 0)}</td>
-                </tr>
-              );
-            })}
-            {extra.map((x) => (
-              <tr key={x} role="radio" aria-checked={d.symbol === x} aria-label={x} tabIndex={0} className={`bots-row${d.symbol === x ? ' is-open' : ''}`} onClick={() => pick(x)}>
-                <td><span className="bots-mkt__name"><span className={`bots-radio${d.symbol === x ? ' is-on' : ''}`} aria-hidden="true" /><CoinIcon coin={x} size={20} /><b>{x}</b><StatusPill size="sm">little traded</StatusPill></span></td>
-                <td className="right dim" colSpan={5}>No estimate</td>
-              </tr>
-            ))}
+            {shown.map((m) => row(m.symbol, m))}
+            {extra.map((x) => row(x, null))}
           </tbody>
         </table>
       </div>
-      {!all && !needle && list.length > 10 && <button type="button" className="bots-more__t" onClick={() => setAll(true)}>{list.length - 10} more<Icon name="arrowRight" size={13} /></button>}
+      {!all && !needle && list.length > 10 && <button type="button" className="bots-more__t" onClick={() => setAll(true)}>Show {list.length - 10} more<Icon name="arrowRight" size={13} /></button>}
     </Panel>
   );
 }
 
-/** How a strategy quotes, drawn: the market maker's two quotes at the touch, the grid's ladder. */
-function StrategyArt({ s }: { s: Strategy }) {
-  if (s === 'grid') {
-    return (
-      <svg viewBox="0 0 120 64" className="bots-art" aria-hidden="true">
-        <path d="M4 40 C20 30, 32 46, 48 34 S78 22, 92 30 S112 40, 116 32" className="bots-art__px" />
-        {[10, 18, 26, 34, 42, 50, 58].map((y, i) => <line key={y} x1="10" x2="110" y1={y} y2={y} className={i < 3 ? 'bots-art__ask' : i > 3 ? 'bots-art__bid' : 'bots-art__mid'} />)}
-      </svg>
-    );
-  }
+/** The receipt: what will run, line by line, and what it is estimated to do per $1M. */
+function Receipt({ d, eff, picked, markets, feeBps, paper, floor, step, children }: {
+  d: BotDraft; eff: BotDraft; picked: string[]; markets: BotMarket[]; feeBps: number; paper: boolean; floor: ReturnType<typeof costPerMillion>; step: number; children: ReactNode;
+}) {
+  const known = picked.map((s) => markets.find((m) => m.symbol === s) ?? null).filter((m): m is BotMarket => !!m);
+  const gate = eff.strategy === 'market' && eff.gate;
+  const bp = (m: BotMarket) => (gate && m.gateCostBps !== null ? m.gateCostBps : m.estCostBps);
+  const avg = known.length ? known.reduce((x, m) => x + bp(m), 0) / known.length : null;
+  const guards = [eff.strategy === 'market' && eff.gate ? 'Gate' : null, d.flowOn ? 'Flow' : null, d.quiet.length ? 'Quiet hours' : null, d.maxSpreadBps !== null ? 'Spread' : null].filter(Boolean);
+  const need = (d.strategy === 'grid' ? d.orderUsd * d.levels : d.maxInventoryUsd + d.orderUsd * 2) * picked.length;
+  const name = d.label.trim() || `${STRATEGY_INFO[eff.strategy].name}${picked.length === 1 ? ` ${picked[0]!.replace(/-USD$/, '')}` : ''}`;
+  const grid = eff.strategy === 'grid';
   return (
-    <svg viewBox="0 0 120 64" className="bots-art" aria-hidden="true">
-      <path d="M4 34 C18 30, 30 38, 44 33 S70 28, 84 32 S108 36, 116 33" className="bots-art__px" />
-      <rect x="70" y="22" width="40" height="6" rx="2" className="bots-art__askq" />
-      <rect x="70" y="38" width="40" height="6" rx="2" className="bots-art__bidq" />
-      <path d="M8 14h20M8 14l4-3M8 14l4 3" className="bots-art__lead" />
-      <text x="32" y="17" className="bots-art__t">Binance</text>
-    </svg>
+    <div className="bots-receipt">
+      <div className="bots-receipt__head">
+        <BotAvatar symbol={picked[0] ?? d.symbol} strategy={eff.strategy} size={40} />
+        <span><b>{name}</b><small>{paper ? 'Practice · no orders sent' : 'Real orders'}</small></span>
+      </div>
+      <dl className="bots-receipt__lines">
+        <div><dt>Strategy</dt><dd>{STRATEGY_INFO[eff.strategy].name}{eff.strategy === 'market' ? ' · R10' : ''}</dd></div>
+        <div><dt>{picked.length === 1 ? 'Market' : `Markets · ${picked.length}`}</dt><dd className="bots-receipt__mkts">{picked.length ? picked.map((s) => <span key={s}><CoinIcon coin={s} size={14} />{s.replace(/-USD$/, '')}</span>) : DASH}</dd></div>
+        <div><dt>Order size</dt><dd>{fmtUsd(d.orderUsd, 0)}{grid ? ` × ${d.levels}` : ' a side'}</dd></div>
+        {!grid && <div><dt>Max holding</dt><dd>{fmtUsd(d.maxInventoryUsd, 0)}</dd></div>}
+        <div><dt>Loss limit</dt><dd>{d.maxLossUsd === null ? 'None' : fmtUsd(d.maxLossUsd, 0)}</dd></div>
+        <div><dt>Safeguards</dt><dd>{guards.length ? guards.join(' · ') : 'None'}</dd></div>
+      </dl>
+      <div className="bots-receipt__cut" aria-hidden="true" />
+      <dl className="bots-receipt__lines">
+        <div><dt>Fees per $1M</dt><dd className="neg">{fmtBpUsd(feeBps)}</dd></div>
+        {grid
+          ? <div><dt>Grid steps per $1M</dt><dd className="pos">{floor.edge !== null ? `+${fmtUsd(floor.edge, 0)}` : DASH}</dd></div>
+          : known.length === 1
+            ? <div><dt>Price moves</dt><dd className={bp(known[0]!) - feeBps > 0 ? 'neg' : 'pos'}>{bp(known[0]!) - feeBps > 0 ? '−' : '+'}{fmtUsd(Math.abs(bpToPerMillion(bp(known[0]!) - feeBps)), 0)}</dd></div>
+            : known.map((m) => <div key={m.symbol}><dt>{m.base}</dt><dd className={bpCls(bp(m))}>{fmtBpUsd(bp(m))}</dd></div>)}
+      </dl>
+      <div className="bots-receipt__total">
+        <span>Est. per $1M{picked.length > 1 ? ', average' : ''}</span>
+        <RollingNumber value={grid ? (floor.net < 0 ? `+${fmtUsd(-floor.net, 0)}` : `−${fmtUsd(floor.net, 0)}`) : fmtBpUsd(avg)} className={`bots-receipt__v ${grid ? (floor.net < 0 ? 'pos' : 'neg') : bpCls(avg)}`} />
+      </div>
+      {known.length === 1 && step < 3 && <Takers m={known[0]!} />}
+      <dl className="bots-receipt__lines is-foot">
+        <div><dt>Balance needed</dt><dd>about {fmtUsd(need, 0)}</dd></div>
+        <div><dt>Signatures</dt><dd>{Math.max(1, picked.length)}</dd></div>
+      </dl>
+      {children}
+    </div>
   );
 }
 
 export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView, { page: 'new' }> }) {
   const startKind: Strategy = view.kind === 'grid' ? 'grid' : 'market';
   const [d, setD] = useState<BotDraft>(() => draftFor(startKind, 'balanced', view.market ?? 'BTC-USD'));
+  const [picked, setPicked] = useState<string[]>(() => [view.market ?? 'BTC-USD']);
   const [step, setStep] = useState(view.market ? 1 : 0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  useEffect(() => { if (view.market) setD((x) => ({ ...x, symbol: view.market! })); }, [view.market]);
+  useEffect(() => { if (view.market) { setD((x) => ({ ...x, symbol: view.market! })); setPicked([view.market]); } }, [view.market]);
   const set = (p: Partial<BotDraft>) => setD((x) => ({ ...x, ...p }));
+  // The first picked market leads the form (its price, its minimum size); the others start with the same settings.
+  useEffect(() => { if (picked[0] && picked[0] !== d.symbol) setD((x) => ({ ...x, symbol: picked[0]!, low: null, high: null })); }, [picked, d.symbol]);
+  const toggle = (s: string) => setPicked((xs) => (xs.includes(s) ? (xs.length > 1 ? xs.filter((x) => x !== s) : xs) : d.strategy === 'grid' ? [s] : [...xs, s].slice(0, 8)));
   const { byName } = useSymbols('perps');
   const sym = byName.get(d.symbol);
   const market: MarketInfo | null = sym ? marketOf(sym) : null;
@@ -210,6 +245,10 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
   const feeBps = markets.data ? markets.data.fee.makerBps + ctx.feeTenths / 10 : 1.2 + ctx.feeTenths / 10;
   const floor = costPerMillion(eff, market, mark, ctx.feeTenths);
   const paper = !ctx.liveAllowed || d.paper;
+  const specFor = (s: string) => {
+    const m = markets.data?.markets.find((x) => x.symbol === s) ?? null;
+    return specOf({ ...effectiveDraft({ ...d, symbol: s }, m), paper }, s === d.symbol ? mark : null);
+  };
 
   const check = useMemo(() => {
     try {
@@ -221,23 +260,24 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
     }
   }, [eff, mark, market, paper]);
   const why = ctx.setupWhy(paper);
-  const can = !check.length && !why && ctx.ready && (d.strategy !== 'grid' || !!range);
-  const estBps = est ? (eff.strategy === 'market' && eff.gate && est.gateCostBps !== null ? est.gateCostBps : est.estCostBps) : null;
-  const need = d.strategy === 'grid' ? d.orderUsd * d.levels : d.maxInventoryUsd + d.orderUsd * 2;
+  const can = !check.length && !why && ctx.ready && (d.strategy !== 'grid' || !!range) && picked.length > 0;
 
   const { confirm, dialog } = useConfirm();
   const start = async () => {
+    const many = picked.length > 1;
     const ok = await confirm({
-      title: `Start ${d.label.trim() || `${STRATEGY_INFO[eff.strategy].name} ${d.symbol.replace(/-USD$/, '')}`}?`,
-      body: `${STRATEGY_INFO[eff.strategy].name} on ${d.symbol}, ${fmtUsd(d.orderUsd, 0)} orders${d.strategy === 'grid' ? '' : `, up to ${fmtUsd(d.maxInventoryUsd, 0)} held`}${d.maxLossUsd !== null ? `, stops at a ${fmtUsd(d.maxLossUsd, 0)} loss` : ''}. ${paper ? 'Practice: no orders are sent.' : 'Real orders in your SoDEX account.'}`,
-      confirmLabel: paper ? 'Start practice bot' : 'Start bot',
+      title: many ? `Start ${picked.length} bots?` : `Start ${d.label.trim() || `${STRATEGY_INFO[eff.strategy].name} ${d.symbol.replace(/-USD$/, '')}`}?`,
+      body: `${STRATEGY_INFO[eff.strategy].name} on ${picked.join(', ')}, ${fmtUsd(d.orderUsd, 0)} orders${d.strategy === 'grid' ? '' : `, up to ${fmtUsd(d.maxInventoryUsd, 0)} held each`}${d.maxLossUsd !== null ? `, stops at a ${fmtUsd(d.maxLossUsd, 0)} loss` : ''}. ${paper ? 'Practice: no orders are sent.' : 'Real orders in your SoDEX account.'}${many ? ` One signature per bot (${picked.length}).` : ''}`,
+      confirmLabel: paper ? (many ? `Start ${picked.length} practice bots` : 'Start practice bot') : (many ? `Start ${picked.length} bots` : 'Start bot'),
     });
     if (!ok) return;
     setBusy(true);
     setError(null);
     try {
-      const v = await ctx.start(specOf({ ...eff, paper }, mark));
-      goBots({ page: 'bot', id: v.algo.id });
+      let last: Awaited<ReturnType<BotsCtx['start']>> | null = null;
+      for (const s of picked) last = await ctx.start(specFor(s));
+      if (many || !last) goBots({ page: 'overview' });
+      else goBots({ page: 'bot', id: last.algo.id });
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -247,11 +287,12 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
 
   const next = () => setStep((s) => Math.min(3, s + 1));
   const back = () => setStep((s) => Math.max(0, s - 1));
+  const startLabel = busy ? 'Starting…' : paper ? (picked.length > 1 ? `Start ${picked.length} practice bots` : 'Start practice bot') : (picked.length > 1 ? `Start ${picked.length} bots` : 'Start bot');
 
   return (
     <>
       {dialog}
-      <BotsHead view={view} title="New bot" sub="Pick a bot, a market and a size, then start it." />
+      <BotsHead view={view} title="New bot" sub="Pick a bot, its markets and its settings." />
       <nav className="bots-wsteps" aria-label="Steps">
         <ol>
           {STEPS.map((st, i) => (
@@ -269,20 +310,18 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
         <div className="bots-wizard__main">
           {step === 0 && (
             <Shell>
-              <ShellHeader icon="layers" title="Strategy" subtitle="Every order rests on the book: maker fee only." />
+              <ShellHeader icon="layers" title="Strategy" subtitle="Maker fee only, never the spread." />
               <div className="bots-strows" role="radiogroup" aria-label="Strategy">
                 {STRATEGIES.map((st) => {
                   const c = costPerMillion(draftFor(st), null, null, ctx.feeTenths);
                   const on = d.strategy === st;
-                  const facts = st === 'market' ? ['Binance-led', 'Rests up to 10 s', 'At the touch', 'Gate, flow gate, quiet hours'] : ['Your price range', 'Buy low, sell high', 'Levels on both sides'];
                   return (
-                    <button key={st} type="button" role="radio" aria-checked={on} aria-label={STRATEGY_INFO[st].name} className={`bots-strow${on ? ' is-on' : ''}`} onClick={() => setD({ ...draftFor(st, 'balanced', d.symbol), label: d.label, paper: d.paper })}>
+                    <button key={st} type="button" role="radio" aria-checked={on} aria-label={STRATEGY_INFO[st].name} className={`bots-strow${on ? ' is-on' : ''}`} onClick={() => { setD({ ...draftFor(st, 'balanced', d.symbol), label: d.label, paper: d.paper }); if (st === 'grid') setPicked((xs) => xs.slice(0, 1)); }}>
                       <span className={`bots-radio${on ? ' is-on' : ''}`} aria-hidden="true" />
-                      <StrategyArt s={st} />
+                      <StrategyTile strategy={st} size={44} />
                       <span className="bots-strow__t">
-                        <b>{STRATEGY_INFO[st].name}{st === 'market' && <StatusPill size="sm" tone="positive">R10 · live tested</StatusPill>}</b>
+                        <b>{STRATEGY_INFO[st].name}{st === 'market' && <StatusPill size="sm" tone="positive">R10</StatusPill>}</b>
                         <small>{STRATEGY_INFO[st].line}</small>
-                        <span className="bots-strow__facts">{facts.map((f) => <span key={f}>{f}</span>)}</span>
                       </span>
                       <span className="bots-strow__n">
                         {st === 'market' && est
@@ -298,17 +337,15 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
 
           {step === 1 && (
             <Shell>
-              <ShellHeader icon="compass" title="Market" subtitle="Busy markets fill often and cheaply." aside={<Button variant="quiet" onClick={() => goBots({ page: 'explore' })}>Compare all<Icon name="arrowRight" size={13} /></Button>} />
-              <MarketStep d={d} set={set} markets={markets.data?.markets ?? (markets.error ? [] : null)} feeBps={feeBps} />
-              {noLead && d.strategy === 'market' && <p className="bots-note bots-note--pad"><Icon name="warning" size={13} /> No Binance price here: it quotes off SoDEX's book, without the gate.</p>}
+              <ShellHeader icon="compass" title="Markets" subtitle={d.strategy === 'grid' ? 'One market for a grid.' : 'Tick one or several: one bot each.'} aside={<Button variant="quiet" onClick={() => goBots({ page: 'explore' })}>Compare all<Icon name="arrowRight" size={13} /></Button>} />
+              <MarketStep picked={picked} toggle={toggle} markets={markets.data?.markets ?? (markets.error ? [] : null)} />
             </Shell>
           )}
 
           {step === 2 && (
             <Shell>
-              <ShellHeader icon="coins" title="Size" subtitle="Start small: $10–20 orders and a $1–3 loss limit." />
+              <ShellHeader icon="gear" title="Settings" subtitle={picked.length > 1 ? `The same for all ${picked.length} markets.` : 'Uses your SoDEX futures USDC.'} />
               <Panel className="bots-sizepanel">
-                <div className="bots-callout"><Icon name="wallet" size={14} /><span>Trades futures: it uses the USDC in your SoDEX <b>futures</b> account.</span></div>
                 <BotSettings d={d} set={set} range={range} mark={mark} liveAllowed={ctx.liveAllowed} noLead={noLead} />
               </Panel>
             </Shell>
@@ -316,54 +353,31 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
 
           {step === 3 && (
             <Shell>
-              <ShellHeader icon="check" title="Review and start" subtitle="One wallet signature. Stop or change it any time." />
+              <ShellHeader icon="check" title="Review" subtitle="Check the receipt, name it, start." />
               <Panel className="bots-review">
-                <dl className="bots-review__list">
-                  <div><dt>Bot</dt><dd><BotIcon strategy={eff.strategy} size={14} />{STRATEGY_INFO[eff.strategy].name}</dd></div>
-                  <div><dt>Market</dt><dd><CoinIcon coin={d.symbol} size={16} />{d.symbol}</dd></div>
-                  <div><dt>Order size</dt><dd>{fmtUsd(d.orderUsd, 0)}{d.strategy === 'grid' ? ` × ${d.levels} levels` : ' each side'}</dd></div>
-                  {d.strategy !== 'grid' && <div><dt>Max holding</dt><dd>{fmtUsd(d.maxInventoryUsd, 0)}</dd></div>}
-                  {eff.strategy === 'market' && <div><dt>Market gate</dt><dd>{eff.gate ? `On · ${d.gateBps} bp in ${d.gateWindowS} s` : 'Off'}</dd></div>}
-                  <div><dt>Est. cost per $1M</dt><dd>{est ? `${fmtBpUsd(est.estCostLowBps)}–${fmtBpUsd(est.estCostHighBps)}` : DASH}</dd></div>
-                  <div><dt>Stops if it loses</dt><dd>{d.maxLossUsd === null ? 'No limit' : fmtUsd(d.maxLossUsd, 2)}</dd></div>
-                  <div><dt>Stops after</dt><dd>{d.volumeTargetUsd === null ? 'You stop it' : `${fmtUsd(d.volumeTargetUsd, 0)} traded`}</dd></div>
-                  <div><dt>Balance needed</dt><dd>about {fmtUsd(need, 0)}</dd></div>
-                  <div><dt>Orders</dt><dd>{paper ? <StatusPill tone="brand" size="sm">Practice</StatusPill> : <StatusPill tone="warning" size="sm">Real</StatusPill>}</dd></div>
-                </dl>
                 <NameField d={d} set={set} />
+                {check.map((e) => <p key={e} className="bots-err" role="alert">{e}</p>)}
                 {why && ctx.address && <p className="bots-note">{why} <button type="button" className="bots-link" onClick={() => ctx.setup(paper)}>Set up</button></p>}
                 {!ctx.address && <p className="bots-note">Connect your wallet to start a bot.</p>}
+                {error && <p className="bots-err" role="alert">{error}</p>}
               </Panel>
+              {picked.length === 1 && est && (
+                <Panel className="bots-review__est"><Estimate m={est} gate={eff.strategy === 'market' && eff.gate} feeBps={feeBps} /></Panel>
+              )}
             </Shell>
           )}
         </div>
+
         <aside className="bots-newside">
           <Shell className="bots-sidecard">
-            <ShellHeader tile={<CoinIcon coin={d.symbol} size={20} />} title={d.symbol} subtitle={`${STRATEGY_INFO[eff.strategy].name}${noLead && d.strategy === 'market' ? ' · no Binance price' : ''}`} aside={paper ? <StatusPill tone="brand" size="sm">Practice</StatusPill> : <StatusPill tone="warning" size="sm">Real</StatusPill>} />
-            <Panel className="bots-sidepanel">
-              {eff.strategy === 'grid' ? (
-                <div className="bots-est">
-                  <div className="bots-est__big">
-                    <span className="bots-est__k">Per $1M, before price moves</span>
-                    <RollingNumber value={floor.net < 0 ? `+${fmtUsd(-floor.net, 0)}` : `−${fmtUsd(floor.net, 0)}`} className={`bots-est__v ${floor.net < 0 ? 'pos' : 'neg'}`} />
-                    <span className="bots-est__sub">fees {fmtUsd(floor.fees, 0)}{floor.edge !== null ? ` · steps earn ${fmtUsd(floor.edge, 0)}` : ''}</span>
-                  </div>
-                </div>
-              ) : markets.data ? <Estimate m={est} gate={eff.strategy === 'market' && eff.gate} feeBps={feeBps} /> : markets.error ? <p className="bots-fine">Estimates unavailable. Fees alone: {fmtUsd(floor.fees, 0)} per $1M.</p> : <div className="bots-skels"><Skeleton className="bots-skel is-big" /><Skeleton className="bots-skel" /></div>}
-              <div className="bots-sidepanel__facts">
-                <span><small>Order</small><b>{fmtUsd(d.orderUsd, 0)}</b></span>
-                <span><small>{d.strategy === 'grid' ? 'Levels' : 'Max holding'}</small><b>{d.strategy === 'grid' ? d.levels : fmtUsd(d.maxInventoryUsd, 0)}</b></span>
-                <span><small>Loss limit</small><b>{d.maxLossUsd === null ? 'None' : fmtUsd(d.maxLossUsd, 0)}</b></span>
-              </div>
-              {step === 3 && check.map((e) => <p key={e} className="bots-err" role="alert">{e}</p>)}
-              {step === 3 && error && <p className="bots-err" role="alert">{error}</p>}
+            <Receipt d={d} eff={eff} picked={picked} markets={markets.data?.markets ?? []} feeBps={feeBps} paper={paper} floor={floor} step={step}>
               <div className="bots-sidepanel__act">
                 {step > 0 && <Button variant="secondary" size="md" icon="arrowLeft" onClick={back}>Back</Button>}
                 {step < 3
                   ? <Button variant="primary" size="md" className="bots-stepper__next" onClick={next}>Next<Icon name="arrowRight" size={14} /></Button>
-                  : <Button variant="primary" size="md" className="bots-stepper__next" icon="play" loading={busy} disabled={!can} onClick={() => void start()}>{busy ? 'Starting…' : paper ? 'Start practice bot' : 'Start bot'}</Button>}
+                  : <Button variant="go" size="md" className="bots-stepper__next" icon="play" loading={busy} disabled={!can} onClick={() => void start()}>{startLabel}</Button>}
               </div>
-            </Panel>
+            </Receipt>
           </Shell>
         </aside>
       </div>

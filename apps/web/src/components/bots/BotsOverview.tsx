@@ -17,7 +17,7 @@ import { useBotLatency } from '../../bots/data';
 import { hostedExecutor } from '../../copy/executor';
 import { demoLatency } from '../../bots/demo';
 import { goBots, type BotsView } from '../../bots/routes';
-import { BotIcon } from './BotIcon';
+import { BotAvatar, BotIcon } from './BotIcon';
 import { LatencyChart, mergeRegions, type ChartMark } from './LatencyChart';
 import { botName, botState, fmtPnl, statusWords } from './botWords';
 import { BotsHead, StatePill, isLive, type BotsCtx } from './BotsPage';
@@ -257,7 +257,7 @@ function BotTile({ v, ctx }: { v: AlgoView; ctx: BotsCtx }) {
     <li>
       <div role="link" tabIndex={0} className={`bots-tile bots-row is-${state}`} onClick={open} onKeyDown={(e) => e.key === 'Enter' && open()} aria-label={`${botName(v)}, ${v.algo.spec.symbol}`}>
         <div className="bots-tile__top">
-          <CoinIcon coin={v.algo.spec.symbol} size={30} />
+          <BotAvatar symbol={v.algo.spec.symbol} strategy={st} size={38} />
           <div className="bots-tile__t">
             <p className="bots-tile__name">{botName(v)}</p>
             <p className="bots-tile__sub">{v.algo.spec.symbol.replace(/-USD$/, '')} · {STRATEGY_INFO[st].name}{gate ? ' · gate' : ''}</p>
@@ -463,7 +463,7 @@ export function BotsOverview({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
                             <tr key={v.algo.id} className="bots-row" tabIndex={0} onClick={open} onKeyDown={(e) => e.key === 'Enter' && open()}>
                               <td>
                                 <span className="bots-who">
-                                  <span className="bots-who__ic"><BotIcon strategy={st} size={14} /></span>
+                                  <BotAvatar symbol={v.algo.spec.symbol} strategy={st} size={30} />
                                   <span className="bots-who__t">
                                     <b>{botName(v)}</b>
                                     <small>{STRATEGY_INFO[st].name}{v.algo.spec.kind === 'mm' && (v.algo.spec.stillBps ?? 0) > 0 ? ' · gate' : ''} · {v.algo.spec.paper ? 'practice' : 'real orders'}</small>

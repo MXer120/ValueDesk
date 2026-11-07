@@ -5,6 +5,7 @@
  *   grid   levels with a price zig-zagging through them.
  */
 import type { ReactNode } from 'react';
+import { CoinIcon } from '../CoinIcon';
 import type { Strategy } from '../../bots/presets';
 
 const GLYPHS: Record<Strategy, ReactNode> = {
@@ -50,4 +51,29 @@ export function BotIcon({ strategy, size = 20, tile = true }: { strategy: Strate
     </svg>
   );
   return tile ? <span className={`bot-ic is-${strategy}`}>{svg}</span> : svg;
+}
+
+/**
+ * A bot's picture: its market's coin in a rounded square with a soft ring, and a small badge of its strategy at the
+ * corner (owner 2026-11-07: a real design for icons and profile pictures, no drawings).
+ */
+export function BotAvatar({ symbol, strategy, size = 40 }: { symbol: string; strategy: Strategy; size?: number }) {
+  const badge = Math.max(14, Math.round(size * 0.42));
+  return (
+    <span className="bot-av" style={{ width: size, height: size, borderRadius: Math.round(size * 0.3) }} aria-hidden="true">
+      <CoinIcon coin={symbol} size={Math.round(size * 0.62)} />
+      <span className={`bot-av__badge is-${strategy}`} style={{ width: badge, height: badge }}>
+        <BotIcon strategy={strategy} size={Math.round(badge * 0.7)} tile={false} />
+      </span>
+    </span>
+  );
+}
+
+/** A strategy's own tile (the picker): the glyph on the app's control surface. */
+export function StrategyTile({ strategy, size = 44 }: { strategy: Strategy; size?: number }) {
+  return (
+    <span className={`bot-st is-${strategy}`} style={{ width: size, height: size }} aria-hidden="true">
+      <BotIcon strategy={strategy} size={Math.round(size * 0.5)} tile={false} />
+    </span>
+  );
 }

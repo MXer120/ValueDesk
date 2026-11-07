@@ -48,12 +48,23 @@ function Saving({ title, line, perMonth, perMillion, action, icon, tile, tone = 
           <p className="bots-saving__line">{line}</p>
         </div>
         <div className="bots-saving__n">
-          <b className={perMillion !== null && perMillion > 0 ? 'pos' : ''}>{perMillion === null ? DASH : `−${fmtUsd(perMillion, 0)}`}<span> per $1M</span></b>
+          <b className={perMillion !== null && perMillion > 0 ? 'pos' : ''}>{perMillion === null ? DASH : `+${fmtUsd(perMillion, 0)}`}<span> per $1M</span></b>
           <small>{monthWords(perMonth)}</small>
         </div>
         {action && <div className="bots-saving__act">{action}</div>}
       </Panel>
     </li>
+  );
+}
+
+/** One bar of the waterfall: where it starts, how long, and its value. */
+function WfRow({ label, value, max, from, kind }: { label: string; value: number; max: number; from: number; kind: 'now' | 'save' | 'after' }) {
+  return (
+    <div className={`bots-wf__row is-${kind}`}>
+      <span className="bots-wf__l">{label}</span>
+      <span className="bots-wf__track"><i style={{ left: `${(from / max) * 100}%`, width: `${Math.max(0.8, (value / max) * 100)}%` }} /></span>
+      <b className="bots-wf__v">{kind === 'save' ? `+${fmtUsd(value, 0)}` : `−${fmtUsd(value, 0)}`}</b>
+    </div>
   );
 }
 
@@ -110,6 +121,17 @@ export function BotsSavings({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
   const total = (tierSavePerM !== null && perDay * 14 >= (next?.minVolume ?? Infinity) ? month((tierSavePerM / 1_000_000) * perDay) : 0)
     + (stakeRows[0]?.perMonth ?? 0) + moves.reduce((x, m) => x + m.perMonth, 0) + gates.reduce((x, g) => x + g.perMonth, 0);
 
+  // The waterfall: what $1M costs now (the bots' own figure, else the fees and Explore's average), and each lever.
+  const fleetCpm = (() => { const vol = all.reduce((x, v) => x + (v.bot?.volume ?? 0), 0); const net = all.reduce((x, v) => x + (v.bot?.netPnl ?? 0), 0); return vol >= 100 ? (-net / vol) * 1_000_000 : null; })();
+  const nowPerM = fleetCpm !== null && fleetCpm > 0 ? fleetCpm : null;
+  const levers = [
+    ...(tierSavePerM !== null && tierSavePerM > 0 ? [{ label: `Fee tier ${next?.tier ?? ''}`.trim(), perM: tierSavePerM }] : []),
+    ...(stakeRows[0] && stakeRows[0].perM > 0 ? [{ label: `Stake ${Math.round(stakeRows[0].t.discount * 100)}%`, perM: stakeRows[0].perM }] : []),
+    ...(moves.length ? [{ label: 'Cheaper market', perM: Math.max(...moves.map((m) => m.perM)) }] : []),
+    ...(gates.length ? [{ label: 'Market gate', perM: Math.max(...gates.map((g) => g.perM)) }] : []),
+  ];
+  const wfMax = Math.max(1, nowPerM ?? 0, levers.reduce((x, y) => x + y.perM, 0));
+
   return (
     <>
       <BotsHead view={view} title="Savings" sub="Ways to make your bots' volume cheaper." />
@@ -131,6 +153,24 @@ export function BotsSavings({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
               <StatCard index={4} label="Could save per $1M" value={totalPerM > 0 ? fmtUsd(totalPerM, 0) : DASH} valueTone={totalPerM > 0 ? 'positive' : undefined} hint={total > 0 ? monthWords(total) : 'What applies, added up'} />
             </div>
           </Shell>
+
+          <Shell className="bots-listcard">
+            <ShellHeader icon="piggy" title="Every saving, per $1M" subtitle={nowPerM !== null ? `From what $1M costs your bots now to where these levers take it` : 'What each lever takes off $1M of volume'} />
+            <Panel className="bots-wf">
+              {levers.length ? (
+                <>
+                  <div className="bots-wf__rows">
+                    {nowPerM !== null && <WfRow label="Now" value={nowPerM} max={wfMax} from={0} kind="now" />}
+                    {levers.map((l, i) => <WfRow key={l.label} label={l.label} value={l.perM} max={wfMax} from={nowPerM !== null ? Math.max(0, nowPerM - levers.slice(0, i).reduce((x, y) => x + y.perM, 0) - l.perM) : levers.slice(0, i).reduce((x, y) => x + y.perM, 0)} kind="save" />)}
+                    {nowPerM !== null && <WfRow label="After" value={Math.max(0, nowPerM - levers.reduce((x, y) => x + y.perM, 0))} max={wfMax} from={0} kind="after" />}
+                  </div>
+                  <p className="bots-wf__foot">Saves <b className="pos">{fmtUsd(levers.reduce((x, y) => x + y.perM, 0), 0)}</b> per $1M{total > 0 ? ` · ${monthWords(total)}` : ''}</p>
+                </>
+              ) : <EmptyState compact icon="check" title="Nothing left to save here" />}
+            </Panel>
+          </Shell>
+
+          <div className="bots-savegrid">
 
           <Shell className="bots-listcard">
             <ShellHeader icon="chart" title="Fee tier" subtitle="SoDEX's maker fee falls with your 14-day volume" aside={perps ? <StatusPill tone="neutral">Tier {tier.tier}</StatusPill> : undefined} />
@@ -183,6 +223,8 @@ export function BotsSavings({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
             ) : <Panel><EmptyState compact icon="star" title="You are at the top staking tier" /></Panel>}
             <p className="bots-method">SOSO's price can fall: weigh the stake against the saving.</p>
           </Shell>
+
+          </div>
 
           <Shell className="bots-listcard">
             <ShellHeader icon="robot" title="Your bots" subtitle="A cheaper market, or the market gate, per bot" />
