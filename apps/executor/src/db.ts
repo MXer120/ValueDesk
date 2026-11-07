@@ -35,6 +35,7 @@ export function sqlite(): typeof import('node:sqlite') {
   if (!m?.DatabaseSync) throw new Error(`The ValueDesk copier needs Node.js 22.13 or newer (this is ${process.version}). Get it from https://nodejs.org, then start it again.`);
   return m;
 }
+import type { LatencyRow, LatencyStore } from './latency.ts';
 import type { ActivityEntry, AlgoEvent, AlgoRecord, AlgoStore, CopyStore, EngineNotice, SubState, Subscription, TermsRecord } from '../../../packages/copy-engine/src/index.ts';
 
 const SCHEMA = `
@@ -94,6 +95,11 @@ CREATE TABLE IF NOT EXISTS audit (
 CREATE INDEX IF NOT EXISTS audit_owner ON audit (owner, at);
 CREATE INDEX IF NOT EXISTS audit_ref ON audit (ref);
 CREATE INDEX IF NOT EXISTS audit_at ON audit (at);
+-- Signed-write latency to SoDEX per region, 10-minute bucket and kind (latency.ts): a histogram "bin:count,...".
+-- Read back for 48 h on start (GET /api/copy/v1/bots/latency); nothing deletes a row for being old.
+CREATE TABLE IF NOT EXISTS write_latency (
+  region TEXT NOT NULL, t INTEGER NOT NULL, kind TEXT NOT NULL, n INTEGER NOT NULL, hist TEXT NOT NULL,
+  PRIMARY KEY (region, t, kind)) WITHOUT ROWID;
 `;
 
 /** One row of the audit log. */
@@ -222,7 +228,7 @@ function alive(pid: number): boolean {
   }
 }
 
-export class ExecutorDb implements CopyStore, AlgoStore {
+export class ExecutorDb implements CopyStore, AlgoStore, LatencyStore {
   readonly db: SqliteDb;
   private stmts = new Map<string, StatementSync>();
 
@@ -321,6 +327,31 @@ export class ExecutorDb implements CopyStore, AlgoStore {
     let s = this.stmts.get(sql);
     if (!s) this.stmts.set(sql, (s = this.db.prepare(sql)));
     return s;
+  }
+
+  /* ---------------------------------------------------- write latency ----- */
+
+  /** A bucket's histograms, replacing what was there (the open bucket is written again as it grows). */
+  saveLatency(rows: LatencyRow[]): void {
+    const s = this.q('INSERT INTO write_latency (region, t, kind, n, hist) VALUES (?, ?, ?, ?, ?) ON CONFLICT (region, t, kind) DO UPDATE SET n = excluded.n, hist = excluded.hist');
+    this.db.exec('BEGIN');
+    try {
+      for (const r of rows) s.run(r.region, r.t, r.kind, r.n, r.hist);
+      this.db.exec('COMMIT');
+    } catch (e) {
+      this.db.exec('ROLLBACK');
+      throw e;
+    }
+  }
+
+  loadLatency(since: number): LatencyRow[] {
+    return (this.q('SELECT region, t, kind, n, hist FROM write_latency WHERE t >= ? ORDER BY t').all(since) as Row[]).map((r) => ({
+      region: String(r.region),
+      t: Number(r.t),
+      kind: String(r.kind) as LatencyRow['kind'],
+      n: Number(r.n),
+      hist: String(r.hist),
+    }));
   }
 
   /* ----------------------------------------------------------- meta ----- */

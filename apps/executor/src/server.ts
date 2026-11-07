@@ -6,6 +6,7 @@
  *
  *   GET  /api/copy/v1/info                       what this executor is (public)
  *   GET  /api/copy/v1/health                     liveness (public)
+ *   GET  /api/copy/v1/bots/latency               signed-write latency to SoDEX per region, ?hours=1..48 (public, docs/BOTS-UI.md)
  *   POST /api/copy/v1/session                    {request: session}          -> a read token
  *   POST /api/copy/v1/terms                      {request: accept-terms}
  *   POST /api/copy/v1/site-terms                 {request: accept-site-terms}  (hosted: ValueDesk's own terms, recorded)
@@ -34,6 +35,7 @@ import { timingSafeEqual } from 'node:crypto';
 import { isIP } from 'node:net';
 import { copyRequestDigest, normaliseCountry, type Logger } from '../../../packages/copy-engine/src/index.ts';
 import type { ExecutorConfig } from './config.ts';
+import { clampHours } from './latency.ts';
 import { ApiError, type ExecutorService, type RequestContext } from './service.ts';
 
 const BODY_LIMIT = 64 * 1024;
@@ -286,6 +288,8 @@ export function createExecutorServer(svc: ExecutorService, cfg: ExecutorConfig, 
 
       if (req.method === 'GET' && route === '/info') return send(res, 200, svc.info(ctx));
       if (req.method === 'GET' && route === '/health') return send(res, 200, svc.health());
+      // Public like /info: no token, no signature; a read (240/min per client), no-store (the chart reads every few seconds).
+      if (req.method === 'GET' && route === '/bots/latency') return send(res, 200, svc.latency.view(clampHours(url.searchParams.get('hours'))));
       // The admin suite's user list (server 1 asks, with its internal token): every wallet this executor
       // knows. No token configured, or the wrong one: the route does not exist.
       if (req.method === 'GET' && route === '/internal/users') {

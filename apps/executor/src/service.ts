@@ -81,6 +81,7 @@ import { liveAlgosFor, type ExecutorConfig } from './config.ts';
 import { sqlite, type ExecutorDb, type KeyRow } from './db.ts';
 import { auditedAlgoSink, auditedOrderSink } from './audited.ts';
 import { Brake, type BrakeState } from './brake.ts';
+import { WriteLatency } from './latency.ts';
 import { KEY_IMPORT_ALG, importInfo, type ImportEnvelope, type Secrets } from './secrets.ts';
 import { ErrorGuard, guardedAlgoSink, guardedOrderSink, type GuardTarget } from './guard.ts';
 import { shortWallet, type Alerts } from './alerts.ts';
@@ -247,6 +248,8 @@ export class ExecutorService {
   /** The Binance-led maker's reference (feed/reference.ts); null on a self-hosted executor. */
   readonly reference: BinanceReference | null;
   readonly sodex: SodexClient;
+  /** Signed-write latency to SoDEX per 10 min (latency.ts), for GET /bots/latency. */
+  readonly latency: WriteLatency;
   private readonly hyperliquid: HyperliquidClient;
   private readonly nonces = createMemoryNonceManager();
   private readonly paper = new PaperSink();
@@ -292,7 +295,14 @@ export class ExecutorService {
       if (now) deps.log.warn('executor: the emergency brake is ON', { copies: now.copies, algos: now.algos, reason: now.reason });
       else if (before) deps.log.warn('executor: the emergency brake is off', {});
     });
-    this.sodex = new SodexClient({ network: cfg.network, fetch: deps.fetch, fastDoor: process.env.EXECUTOR_SODEX_DOOR === 'exchange' ? true : process.env.EXECUTOR_SODEX_DOOR === 'exchange-key' ? 'with-key' : false, raceCopies: Number(process.env.EXECUTOR_SODEX_RACE) || 1, lanesByMarket: process.env.EXECUTOR_SODEX_LANES === '1', ...(process.env.EXECUTOR_LOG_WRITES === '1' ? { onWrite: (w) => deps.log.info('write', w) } : {}) });
+    // Every signed write's time to answer, always on (GET /bots/latency): one region now, the array takes more.
+    this.latency = new WriteLatency([{ id: 'tokyo', label: 'Tokyo · SoDEX', where: cfg.location }], db, Date.now, (e) => deps.log.warn('executor: write latency not recorded', { error: String(e) }));
+    const logWrites = process.env.EXECUTOR_LOG_WRITES === '1';
+    // The official route (/trade/orders) unless EXECUTOR_SODEX_DOOR names the fast door: the default stays official.
+    this.sodex = new SodexClient({ network: cfg.network, fetch: deps.fetch, fastDoor: process.env.EXECUTOR_SODEX_DOOR === 'exchange' ? true : process.env.EXECUTOR_SODEX_DOOR === 'exchange-key' ? 'with-key' : false, raceCopies: Number(process.env.EXECUTOR_SODEX_RACE) || 1, lanesByMarket: process.env.EXECUTOR_SODEX_LANES === '1', onWrite: (w) => {
+      this.latency.record('tokyo', w);
+      if (logWrites) deps.log.info('write', w);
+    } });
     this.hyperliquid = new HyperliquidClient(deps.fetch);
     this.runtime = new CopyRuntime({
       store: db,
@@ -343,6 +353,7 @@ export class ExecutorService {
   }
 
   async start(): Promise<void> {
+    this.latency.start();
     this.signerSweep ??= setInterval(() => this.sweepSigners(), 30_000);
     this.signerSweep.unref?.();
     // The per-IP rate limit, to the operator: SoDEX's 429 / Cloudflare 1015 opens a cooldown for every wallet here.
@@ -370,6 +381,7 @@ export class ExecutorService {
     // Last: a stop still signs (what a step had on its way, the bots' cancels), and a wiped key signs nothing valid.
     for (const owner of [...this.signers.keys()]) this.forgetSigner(owner, true);
     this.builderDb?.close();
+    this.latency.stop();
   }
 
   private selfId(): string {
