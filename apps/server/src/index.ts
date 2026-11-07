@@ -64,6 +64,7 @@ import { ElevationError, revokeAllElevations } from './elevation.js';
 import { classify, take } from './rateLimit.js';
 import { perfPlugin } from './perf.js';
 import { installLocalHostGate } from './localHost.js';
+import { LoopWatch } from './loopWatch.js';
 
 
 // A CPU profile on demand (indexer/cpuProfile.ts): `sudo systemctl kill -s SIGUSR2 --kill-whom=main valuescan-api`. The API sat at 77-92% of a core
@@ -87,6 +88,16 @@ const app = Fastify({
   // Hosted: a slow client may not hold a connection open indefinitely.
   ...(HOSTED ? { requestTimeout: 30_000 } : {}),
 });
+
+// The event loop watched (loopWatch.ts): stalls of 1 s or more logged with what started them, a profile of a long one,
+// requests of 2 s or more logged by route pattern, the counts in /api/health. 2026-11-07: three minutes of "Data API
+// not answering" with no line saying why. Hosted, the profiles go where the SIGUSR2 ones go (VALUESCAN_STALL_PROFILE=0: none).
+const loopWatch = new LoopWatch((obj, msg) => app.log.warn(obj, msg), {
+  profileDir: process.env.VALUESCAN_STALL_PROFILE === '0' || (!HOSTED && process.env.VALUESCAN_STALL_PROFILE !== '1')
+    ? null
+    : process.env.VALUESCAN_PROFILE_DIR?.trim() || '/var/lib/valuescan/state/profiles',
+});
+loopWatch.install(app);
 
 // Local mode answers only to a loopback Host (DNS rebinding, audit S-12). First, so that
 // nothing - not even a CORS preflight - answers to a Host that is not ours. Hosted: no-op.
@@ -186,8 +197,10 @@ app.get('/api/health', async () => (HOSTED
   // Hosted: only what the web reads (trading/config.ts configureFromHealth).
   // No upstream URLs, budgets, hub or stream stats - the latter name every
   // wallet whose account stream is open.
-  ? { ok: true, network: NETWORK, chainId: NET.chainId, mainnetWritesAllowed: NETWORK === 'testnet' || ALLOW_MAINNET_WRITES, brake: siteBrake(), notices: siteNotices() }
+  // `loop`: the API's own thread (loopWatch.ts) - stalls counted, the longest, the last one's start label; no personal data.
+  ? { ok: true, network: NETWORK, chainId: NET.chainId, mainnetWritesAllowed: NETWORK === 'testnet' || ALLOW_MAINNET_WRITES, brake: siteBrake(), notices: siteNotices(), loop: loopWatch.health() }
   : {
+  loop: loopWatch.health(),
   ok: true,
   network: NETWORK,
   chainId: NET.chainId,
@@ -532,6 +545,7 @@ for (const sig of ['SIGINT', 'SIGTERM'] as const) {
 }
 
 await app.listen({ host: HOST, port: PORT });
+loopWatch.start();
 
 // Cohorts: the first load is built from behind a few seconds after the start
 // (indexer/read.ts warmCohorts), so a restart does not leave the first visitor -

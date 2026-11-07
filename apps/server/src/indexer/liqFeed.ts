@@ -15,6 +15,7 @@
  * them on to the browsers (routes/valuedesk.ts /ws/liq). A new connection gets
  * every coin whole first. Loopback only: nothing else can connect.
  */
+import { mark } from './busy.js';
 import net from 'node:net';
 import { EventEmitter } from 'node:events';
 import type { Venue } from '../valuedesk/types.js';
@@ -175,6 +176,7 @@ export class LiqFeedState extends EventEmitter {
 
   /** Frames as they arrive (exported for tests). */
   data(chunk: string): void {
+    mark('liq:feed');
     this.buf += chunk;
     let i: number;
     while ((i = this.buf.indexOf('\n')) >= 0) {

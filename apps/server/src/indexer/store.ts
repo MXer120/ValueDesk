@@ -3558,7 +3558,16 @@ export class IndexStore {
 
   /** The coins of the newest snapshot. */
   liqHistCoins(): string[] {
-    return (this.q('SELECT coin FROM liq_hist WHERE t = (SELECT MAX(t) FROM liq_hist)').all() as Array<{ coin: string }>).map((r) => r.coin);
+    // Walked coin by coin on the primary key (coin, t): two seeks per coin. `WHERE t = (SELECT MAX(t))` scanned the whole
+    // table twice - 0.57 s on server 1 with it cached (2026-11-07), on the API's thread, on every history answer.
+    const next = this.q('SELECT coin FROM liq_hist WHERE coin > ? ORDER BY coin LIMIT 1');
+    const last = this.q('SELECT MAX(t) AS t FROM liq_hist WHERE coin = ?');
+    const newest: Array<{ coin: string; t: number }> = [];
+    for (let r = next.get('') as { coin: string } | undefined; r; r = next.get(r.coin) as { coin: string } | undefined) {
+      newest.push({ coin: r.coin, t: Number((last.get(r.coin) as { t: number | null }).t ?? 0) });
+    }
+    const top = Math.max(0, ...newest.map((x) => x.t));
+    return newest.filter((x) => x.t === top).map((x) => x.coin);
   }
 
   liqHistLastT(): number {

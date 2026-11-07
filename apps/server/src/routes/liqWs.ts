@@ -31,6 +31,7 @@
  * cannot connect through Vercel's functions), with the viewer's own address for
  * the per-address limit; the API checks the site Origin itself.
  */
+import { mark } from '../indexer/busy.js';
 import type { FastifyInstance } from 'fastify';
 import type { WebSocket } from 'ws';
 import { VENUES, type Venue } from '../valuedesk/types.js';
@@ -232,6 +233,7 @@ function wire(): void {
     for (const v of ch.covered) p.c.add(v);
   });
   feed.on('tick', () => {
+    mark('liq:ws');
     const now = Date.now();
     for (const g of groups.values()) {
       if (!g.conns.size) continue;

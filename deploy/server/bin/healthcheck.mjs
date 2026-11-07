@@ -170,8 +170,21 @@ function getJson(path, headers = {}, base = API_URL) {
 await check('api', async () => {
   const { status, body } = await getJson('/api/health');
   if (status !== 200 || body?.ok !== true) return { ok: false, note: `/api/health answered ${status}` };
-  return { ok: true, note: `${body.network}, trading ${body.mainnetWritesAllowed ? 'allowed' : 'OFF'}` };
+  const loop = loopNote(body.loop);
+  return { ok: true, ...(loop.warn ? { warn: true } : {}), note: `${body.network}, trading ${body.mainnetWritesAllowed ? 'allowed' : 'OFF'}${loop.text}` };
 });
+
+/**
+ * The API's own thread (apps/server/src/loopWatch.ts): its stalls since the start, and a warning when one in the last
+ * minute reached 5 s - named by what started it, so an alert says which route or timer held the API (2026-11-07).
+ */
+function loopNote(loop) {
+  if (!loop || typeof loop !== 'object' || !loop.stalls) return { warn: false, text: '' };
+  const s = (ms) => `${(Number(ms) / 1000).toFixed(1)} s`;
+  const by = loop.last?.by ? ` (last by ${String(loop.last.by).slice(0, 80)})` : '';
+  const warn = Number(loop.lastMinuteMs) >= 5_000;
+  return { warn, text: `; thread stalled ${loop.stalls}x since start, longest ${s(loop.longestMs)}${warn ? `, ${s(loop.lastMinuteMs)} in the last minute` : ''}${by}` };
+}
 
 await check('lockdown', async () => {
   // In hosted mode only the allow-list answers; this diagnostics route is not on it.
