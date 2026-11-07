@@ -75,7 +75,7 @@ test('a past notice is one slim row: title, kind, start, duration - its timeline
   assert.match(shut, /id="notice-7"/);
   assert.match(shut, /aria-expanded="false"/);
   assert.match(shut, /Indexer &lt;slow&gt;/);
-  assert.match(shut, /Major incident/);
+  assert.match(shut, /Partial outage/);
   assert.match(shut, /27 Oct 11:00</);
   assert.match(shut, /55 min/);
   assert.ok(!shut.includes('st-timeline'), 'no timeline while shut');
@@ -128,7 +128,7 @@ test('a day bar tells its day: uptime, minutes, and that day\'s incidents and ma
   assert.equal(d.date, '27 Oct 2026');
   assert.equal(d.uptime, '95.38% up');
   assert.deepEqual(d.facts, ['30 min down', '20 min degraded', '1 h 10 min no data']);
-  assert.deepEqual(d.notices, [{ id: 7, label: 'Major incident', title: 'Copies are late', times: '27 Oct 11:00 – 11:55 UTC' }]);
+  assert.deepEqual(d.notices, [{ id: 7, label: 'Partial outage', title: 'Copies are late', times: '27 Oct 11:00 – 11:55 UTC' }]);
   const m = D.dayDetail(['2026-10-27', 0, 0, 0], 'api', [maint()], T0 + 90 * MIN);
   assert.equal(m.tone, 'maintenance');
   assert.equal(m.uptime, null);
@@ -138,7 +138,7 @@ test('a day bar tells its day: uptime, minutes, and that day\'s incidents and ma
   assert.match(html, /role="tooltip"/);
   assert.match(html, /class="st-tip is-end"/);
   assert.match(html, /<b>27 Oct 2026<\/b><span>95\.38% up · 30 min down · 20 min degraded · 1 h 10 min no data<\/span>/);
-  assert.match(html, /Major incident: Copies are late<small>27 Oct 11:00 – 11:55 UTC<\/small>/);
+  assert.match(html, /Partial outage: Copies are late<small>27 Oct 11:00 – 11:55 UTC<\/small>/);
   assert.match(render(createElement(DayTip, { d: m, index: 0, count: 90 })), /No data/);
 });
 
@@ -149,7 +149,7 @@ test('a notice card: title, impact, components, times and the timeline newest fi
   assert.ok(!html.includes('<script>'));
   assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt;/);
   assert.match(html, /id="notice-7"/);
-  assert.match(html, /Major incident/);
+  assert.match(html, /Partial outage/);
   assert.match(html, /Copy &amp; algo executor · since 27 Oct 11:00 UTC/);
   const two = render(createElement(NoticeCard, { n: incident(), now: T0 }));
   assert.ok(two.indexOf('Identified') < two.indexOf('Investigating'), 'newest first');

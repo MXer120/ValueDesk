@@ -186,8 +186,12 @@ export function splitNotices(notices: readonly Notice[], now: number): { current
 const SERVICE_NAME = new Map<string, string>(STATUS_SERVICES.map((s) => [s.id, s.name]));
 export const componentNames = (n: Notice): string => n.components.map((c) => SERVICE_NAME.get(c) ?? c).join(', ');
 
-/** "Major incident", "Maintenance". */
-export const noticeKindText = (n: Notice): string => (n.kind === 'incident' ? `${IMPACT_TEXT[n.impact ?? 'minor']} incident` : 'Maintenance');
+/** What an incident is called by its impact: never "major incident" (owner, 2026-11-07: "Its a partial outage so just say Partial Outage"). */
+export const incidentTitle = (impact: 'minor' | 'major' | 'critical' | null | undefined): string =>
+  impact === 'critical' ? 'Outage' : impact === 'major' ? 'Partial outage' : `${IMPACT_TEXT[impact ?? 'minor']} incident`;
+
+/** "Partial outage", "Maintenance". */
+export const noticeKindText = (n: Notice): string => (n.kind === 'incident' ? incidentTitle(n.impact) : 'Maintenance');
 
 /** When it was (or is): "27 Oct 14:02 – 15:10 UTC", "since 27 Oct 14:02 UTC", a maintenance's window. */
 export function noticeTimes(n: Notice, now: number): string {
