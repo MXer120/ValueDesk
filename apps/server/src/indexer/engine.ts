@@ -1883,8 +1883,9 @@ export class Indexer {
     this.sgw.retain(keep);
     this.scheck.retain(keep);
     this.strades.retain(keep);
-    // Forget histories no board has wanted for two weeks (checked once a day).
-    if (dayOf(now) !== dayOf(now - REBUILD_MS)) {
+    // Forget histories no board has wanted for two weeks (checked once a day): their fills and closes are deleted, so only with
+    // the owner's word (retention.ts). Ungated until 2026-11-07, it had deleted 3,636,070 rows (retention totals.dropped).
+    if (mayPrune('fills') && dayOf(now) !== dayOf(now - REBUILD_MS)) {
       for (const venue of VENUES) {
         for (const a of this.store.indexedAddresses(venue)) {
           const at = this.wanted.get(`${venue}|${a}`) ?? 0;
