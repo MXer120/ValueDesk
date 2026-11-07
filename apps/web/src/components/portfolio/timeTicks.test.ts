@@ -50,6 +50,13 @@ test('long ranges read in months, with the year once it changes', () => {
   assert.ok(ticks.some((t) => t.label === 'Jan 2026'));
 });
 
+test('never a single label: a 24-hour window holding one midnight and no noon steps down to more', () => {
+  const from = new Date(2026, 10, 6, 12, 20).getTime();
+  const ticks = timeTicks(from, from + 23 * HOUR, 3);
+  assert.ok(ticks.length >= 2, ticks.map((t) => t.label).join(','));
+  assert.ok(ticks.some((t) => /^\d\d:00$/.test(t.label)));
+});
+
 test('an empty or backwards range has no labels', () => {
   assert.deepEqual(timeTicks(FROM, FROM, 5), []);
   assert.deepEqual(timeTicks(FROM, FROM - 1, 5), []);
