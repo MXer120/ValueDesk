@@ -1326,7 +1326,7 @@ export class Indexer {
           key: `h:${address}`,
           prio: readPrio(prio, need),
           run: async () => {
-            const r = await hlSyncFills(this.store, address, this.now(), { maxPages: 1, now: this.now() });
+            const r = await hlSyncFills(this.store, address, this.now(), { maxPages: 1, now: this.now(), streamSince: this.socketOf('hyperliquid') });
             return r.pages * 20 + Math.ceil(r.rows / 20);
           },
         });
@@ -1341,7 +1341,7 @@ export class Indexer {
           run: async () => {
             const f = this.histFrom.get(key) ?? from;
             this.histFrom.delete(key);
-            const r = await hlSyncFills(this.store, address, f, { maxPages: 6, now: this.now() });
+            const r = await hlSyncFills(this.store, address, f, { maxPages: 6, now: this.now(), streamSince: this.socketOf('hyperliquid') });
             return r.pages * 20 + Math.ceil(r.rows / 20);
           },
         });
