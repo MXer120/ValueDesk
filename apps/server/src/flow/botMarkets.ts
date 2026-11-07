@@ -77,6 +77,13 @@ export const DEFAULT_MAKER_BPS = 1.2;
 /** Our bot's builder fee: executor BOT_FEE = 1 tenth of a bp. */
 export const BOT_BUILDER_BPS = 0.1;
 export const DOMINANT_SHARE = 0.1;
+/**
+ * A maker counts as one like our bot only if it fills often: at least this many fills a day in the window. A limit
+ * order a person left far from the price fills only when a sweep runs through it, which is the worst fill there is;
+ * a bot quoting at the touch fills all day. Without this the estimate read BTC 0.3-0.4 bp dearer than our own live
+ * runs measured (owner check 2026-11-07); with it the two agree (see the calibration in docs/BOTS-UI.md).
+ */
+export const BOTLIKE_FILLS_PER_DAY = 40;
 export const GATE_PATH_BPS = 12;
 export const GATE_MIN_FILLS = 300;
 export const SPLIT_MIN_FILLS = 300;
@@ -111,6 +118,8 @@ export interface AnalyzeOpts {
   /** flow_party ids of SoDEX accounts 1002 and 23342 (null: not seen). */
   id1002: number | null;
   id23342: number | null;
+  /** Calibration only (BOTS_MARKETS_WATCH): flow_party ids whose own cost is reported next to the estimate. */
+  watch?: number[];
 }
 
 /** Eligible maker fills of one market, column per field, time order. */
@@ -137,6 +146,8 @@ export interface WindowStats {
   gateCostBps: number | null;
   capacityUsdH: number;
   confidence: BotMarket['confidence'];
+  /** Calibration only: each watched maker's own fills and cost, on the same measure. */
+  watched?: Array<{ id: number; fills: number; costBps: number }>;
 }
 
 export interface MarketAnalysis {
@@ -301,6 +312,7 @@ export async function analyzeMarket(p: PrintCols, o: AnalyzeOpts, yieldNow: () =
   const stats = async (from: number, volume: number): Promise<{ st: WindowStats; small: (j: number) => boolean }> => {
     const hours = spanH(from);
     const byMaker = new Map<number, number>();
+    const fillsBy = new Map<number, number>();
     let lo = 0;
     while (lo < f.n && f.t[lo]! < from) lo++;
     let total = 0, allMk = 0;
@@ -312,10 +324,13 @@ export async function analyzeMarket(p: PrintCols, o: AnalyzeOpts, yieldNow: () =
       allMk += v * f.mk[j]!;
       takerVol[f.cls[j]!]! += v;
       byMaker.set(f.maker[j]!, (byMaker.get(f.maker[j]!) ?? 0) + v);
+      fillsBy.set(f.maker[j]!, (fillsBy.get(f.maker[j]!) ?? 0) + 1);
     }
     const dominant = new Set<number>();
     for (const [id, v] of byMaker) if (total > 0 && v / total >= DOMINANT_SHARE) dominant.add(id);
-    const small = (j: number): boolean => !dominant.has(f.maker[j]!);
+    const minFills = Math.max(5, Math.round(BOTLIKE_FILLS_PER_DAY * Math.min(7, hours / 24)));
+    const small = (j: number): boolean => !dominant.has(f.maker[j]!) && (fillsBy.get(f.maker[j]!) ?? 0) >= minFills;
+    const perMaker = new Map<number, { v: number; mk: number; n: number }>();
     const makers = new Set<number>();
     let sv = 0, smk = 0, sn = 0, gv = 0, gmk = 0, gn = 0;
     const cv = [0, 0, 0], cmk = [0, 0, 0];
@@ -327,6 +342,7 @@ export async function analyzeMarket(p: PrintCols, o: AnalyzeOpts, yieldNow: () =
       const v = f.ntl[j]!, mk = f.mk[j]!;
       makers.add(f.maker[j]!);
       sv += v; smk += v * mk; sn++;
+      if (o.watch?.includes(f.maker[j]!)) { const w = perMaker.get(f.maker[j]!) ?? { v: 0, mk: 0, n: 0 }; w.v += v; w.mk += v * mk; w.n++; perMaker.set(f.maker[j]!, w); }
       cv[f.cls[j]!]! += v; cmk[f.cls[j]!]! += v * mk;
       const h = Math.floor(f.t[j]! / HOUR_MS);
       hourV.set(h, (hourV.get(h) ?? 0) + v);
@@ -344,9 +360,13 @@ export async function analyzeMarket(p: PrintCols, o: AnalyzeOpts, yieldNow: () =
       volumeUsdH: r2(volume / hours),
       spreadBps: r2(spreadOf(from)),
       volBpsH: r2(volOf(from)),
-      takers: total > 0
-        ? { t1002: r2(takerVol[0]! / total), t23342: r2(takerVol[1]! / total), other: r2(takerVol[2]! / total) }
-        : { t1002: 0, t23342: 0, other: 0 },
+      // Who takes makers OUR size: their fills by taker (all makers' when there is none). 23342 is the dominant
+      // maker on BTC and ETH, so the share of all maker volume would hide that it is also the taker small makers meet.
+      takers: sv > 0
+        ? { t1002: r2(cv[0]! / sv), t23342: r2(cv[1]! / sv), other: r2(cv[2]! / sv) }
+        : total > 0
+          ? { t1002: r2(takerVol[0]! / total), t23342: r2(takerVol[1]! / total), other: r2(takerVol[2]! / total) }
+          : { t1002: 0, t23342: 0, other: 0 },
       smallMakers: {
         count: makers.size,
         volumeUsdH: r2(sv / hours),
@@ -362,6 +382,7 @@ export async function analyzeMarket(p: PrintCols, o: AnalyzeOpts, yieldNow: () =
       capacityUsdH: r2(sv / hours),
       confidence: sn >= 2000 ? 'high' : sn >= 300 ? 'medium' : 'low',
     };
+    if (o.watch?.length) st.watched = [...perMaker].map(([id, w]) => ({ id, fills: w.n, costBps: r2(fee - w.mk / w.v) }));
     return { st, small };
   };
 
@@ -442,7 +463,11 @@ interface Computed {
   rows: { '24h': BotMarket[]; '7d': BotMarket[] };
 }
 
+/** Calibration rows from the last compute (BOTS_MARKETS_WATCH only). */
+export const calibration: Array<{ symbol: string; w7: NonNullable<WindowStats['watched']>; w24: NonNullable<WindowStats['watched']>; est7: number; est24: number }> = [];
+
 async function compute(s: FlowStore, now: number): Promise<Computed> {
+  calibration.length = 0;
   let list: SodexSymbol[] = [];
   try { list = await sodexSymbols('perps'); } catch { /* fees default, ticks 0 */ }
   const fees = list.map(feeBpsOf).filter((x): x is number => x !== null);
@@ -453,6 +478,9 @@ async function compute(s: FlowStore, now: number): Promise<Computed> {
   const id = (key: string): number | null => s.partiesOf(key).find((p) => p.venue === 'sodex')?.id ?? null;
   const id1002 = id('1002');
   const id23342 = id('23342');
+  // Calibration (never in production): accounts whose own measured cost is set next to the estimate, e.g. our test
+  // wallet, whose real cost the live runs know. BOTS_MARKETS_WATCH=231928,1061
+  const watch = (process.env.BOTS_MARKETS_WATCH ?? '').split(',').map((x) => x.trim()).filter(Boolean).map(id).filter((x): x is number => x !== null);
   const from = now - W7 - GATE_S * 1000;
   const active = new Set(s.marketsWithChunks(Math.floor(from / CHUNK_MS) * CHUNK_MS, now + 1));
   const markets = s.markets().filter((m) => m.venue === 'sodex' && kindOf(m.symbol) === 'perp' && active.has(m.id));
@@ -471,8 +499,9 @@ async function compute(s: FlowStore, now: number): Promise<Computed> {
     parts.length = 0;
     const sym = findSymbol(list, m.symbol);
     const makerBps = feeBpsOf(sym) ?? common;
-    const a = await analyzeMarket(cols, { now, makerBps, builderBps: BOT_BUILDER_BPS, id1002, id23342 }, y);
+    const a = await analyzeMarket(cols, { now, makerBps, builderBps: BOT_BUILDER_BPS, id1002, id23342, watch }, y);
     if (!a) continue;
+    if (watch.length) calibration.push({ symbol: m.symbol, w7: a.w7.watched ?? [], w24: a.w24.watched ?? [], est7: a.w7.estCostBps, est24: a.w24.estCostBps });
     const base = sym?.baseCoin?.replace(/^v(?=[A-Z])/, '') || coinOf(m.symbol);
     const tick = Number(sym?.tickSize) || 0;
     const name = sym?.name ?? m.symbol;

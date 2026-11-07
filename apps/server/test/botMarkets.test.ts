@@ -77,9 +77,9 @@ test('maker side, dominant maker left out, markout sign, gate and cost', async (
   // The gate drops exactly the fills whose minute before held the jump (seconds J+1 .. J+60).
   const still = withMk.filter((f) => !(f.s >= J + 1 && f.s <= J + 60));
   close(w.gateCostBps, MAKER_BPS + BOT_BUILDER_BPS - vw(still));
-  // Who took: 1002 took the dominant maker's fills and the small makers' buys.
-  const takenBy1002 = N * 2 * 10 * 100.15 + (N / 2) * 1 * 100;
-  close(w.takers.t1002, takenBy1002 / (takenBy1002 + (N / 2) * 100.2), 0.01);
+  // Who took, among the small makers' fills (the dominant maker's are not ours to meet): 1002 took their buys.
+  const smallBy1002 = (N / 2) * 1 * 100 * 0.9995;
+  close(w.takers.t1002, vw(small.filter((f) => f.taker === P1002).map((f) => ({ ...f, mk: 1 }))) * smallBy1002 / (small.reduce((x, f) => x + f.px * f.sz, 0)), 0.02);
   assert.equal(w.takers.t23342, 0);
   assert.equal(w.confidence, 'medium');
   // Capacity is the small makers' volume per hour; spread from opposite prints is the 10 bp quote (the 30 bp jump is one gap in thousands).
@@ -107,4 +107,18 @@ test('weighted percentile', () => {
   assert.equal(weightedPercentile([5, 1, 3], [1, 1, 1], 0.1), 1);
   assert.equal(weightedPercentile([5, 1, 3], [1, 1, 1], 0.9), 5);
   assert.equal(weightedPercentile([5, 1, 3], [0, 10, 1], 0.9), 1);
+});
+
+test('a maker that fills rarely, a person leaving a limit order, is not one like our bot', async () => {
+  const { cols } = market();
+  // Maker 99 fills once in the whole window: under the bot-like floor, so it is not counted among the small makers.
+  const n = cols.n + 1;
+  const grow = (a: Float64Array | Uint32Array | Uint8Array, v: number) => { const b = new (a.constructor as Float64ArrayConstructor)(n); b.set(a as Float64Array); b[n - 1] = v; return b; };
+  const t = T0 + 5 * 1000 + 700;
+  const one: PrintCols = {
+    n, t: grow(cols.t, t) as Float64Array, px: grow(cols.px, 100.05) as Float64Array, sz: grow(cols.sz, 1) as Float64Array,
+    buyer: grow(cols.buyer, OTHER_TAKER) as unknown as Uint32Array, seller: grow(cols.seller, 99) as unknown as Uint32Array, taker: grow(cols.taker, TAKER_BUYER) as unknown as Uint8Array,
+  };
+  const a = await analyzeMarket(one, { now: T0 + N * 1000 + 200_000, makerBps: MAKER_BPS, builderBps: BOT_BUILDER_BPS, id1002: P1002, id23342: P23342 }, () => undefined);
+  assert.equal(a!.w24.smallMakers.count, 20);
 });
