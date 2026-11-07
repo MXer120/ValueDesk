@@ -140,6 +140,7 @@ export function NavTrade({ tab, botsOpen = true, engine, onEngine, onNavigate, o
               line="SoDEX's funds and vaults"
               current={sodexOn === 'wealth'}
               onOpen={onOpenSodex && go(() => onOpenSodex('wealth'))}
+              access={botsLocked ? go(applyForBeta) : undefined}
               icon={<Icon><path d="M2.5 17h15M4 14l4-4 3 2.500L16.5 6" /><path d="M12.5 6h4v4" /></Icon>}
             />
           </div>

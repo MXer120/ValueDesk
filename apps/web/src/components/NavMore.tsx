@@ -15,7 +15,7 @@
  */
 import { useEffect, useLayoutEffect, useRef, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { EXCLUDED_PATH, LIMITS_PATH, SODEX_LABELS, SODEX_VIEWS, STATUS_PATH, pathForLegal, pathForSodexView, pathForTab, type LegalPage, type SodexView, type Tab } from '../router';
-import { openShortcuts } from './ShortcutsDialog';
+import { applyForBeta } from '../beta/access';
 import { FeedbackIcon, FEEDBACK_LABEL, openFeedback } from '../feedback/FeedbackButton';
 import { FEEDBACK_URL } from '../feedback/feedback';
 import { openSettings } from '../settingsBus';
@@ -75,7 +75,7 @@ function OutRow({ href, icon, label }: { href: string; icon: ReactNode; label: s
   );
 }
 
-export function NavMore({ alert = null, tab = null, limits = false, status = false, excluded = false, onNavigate, onOpenStatus, onOpenExcluded, onOpenLimits, onOpenSodex, sodexOn = null, onOpenLegal, legalOn = false, settingsRow = false }: {
+export function NavMore({ alert = null, tab = null, limits = false, status = false, excluded = false, onNavigate, onOpenStatus, onOpenExcluded, onOpenLimits, onOpenSodex, sodexOn = null, onOpenLegal, legalOn = false, settingsRow = false, sodexOpen = true }: {
   alert?: NavAlert;
   /** The tab on screen, for the Leaderboard row and the button. */
   tab?: Tab | null;
@@ -94,6 +94,8 @@ export function NavMore({ alert = null, tab = null, limits = false, status = fal
   legalOn?: boolean;
   /** No wallet menu to hold Settings: they sit here instead. */
   settingsRow?: boolean;
+  /** SoDEX's products are open for this wallet (beta/access.ts); else their rows ask for access (owner 2026-11-07). */
+  sodexOpen?: boolean;
 }) {
   const root = useRef<HTMLDivElement>(null);
   const menu = useRef<HTMLDivElement>(null);
@@ -175,8 +177,14 @@ export function NavMore({ alert = null, tab = null, limits = false, status = fal
           {onOpenSodex && (
             <div className="navmore__group is-sodex" role="group" aria-label="SoDEX">
               <div className="menu-group-label" aria-hidden="true">SoDEX</div>
-              {SODEX_VIEWS.map((v) => (
+              {SODEX_VIEWS.map((v) => sodexOpen ? (
                 <PageRow key={v} href={pathForSodexView(v)} label={SODEX_LABELS[v]} current={sodexOn === v} onOpen={close(() => onOpenSodex(v))} icon={SODEX_ICONS[v]} />
+              ) : (
+                <button key={v} type="button" role="menuitem" className="menu-row navmore__row is-access" title="In beta: apply for access on our Discord" onClick={close(applyForBeta)}>
+                  <span className="menu-row__ic">{SODEX_ICONS[v]}</span>
+                  <span className="menu-row__label">{SODEX_LABELS[v]}</span>
+                  <span className="dv-devtag dv-devtag--beta navmore__access">Get access</span>
+                </button>
               ))}
             </div>
           )}
@@ -199,10 +207,6 @@ export function NavMore({ alert = null, tab = null, limits = false, status = fal
             <button type="button" role="menuitem" className="menu-row navmore__row" onClick={close(() => openFeedback())}>
               <span className="menu-row__ic"><FeedbackIcon /></span>
               <span className="menu-row__label">{FEEDBACK_LABEL}</span>
-            </button>
-            <button type="button" role="menuitem" className="menu-row navmore__row navmore__row--keys" onClick={close(openShortcuts)}>
-              <span className="menu-row__ic"><Icon><rect x="2.5" y="5" width="15" height="10" rx="2" /><path d="M5.500 8h.01M8.500 8h.01M11.500 8h.01M14.500 8h.01M6.500 12h7" /></Icon></span>
-              <span className="menu-row__label">Keyboard shortcuts</span>
             </button>
             {settingsRow && (
               <button type="button" role="menuitem" className="menu-row navmore__row" onClick={close(() => openSettings('profile'))}>
