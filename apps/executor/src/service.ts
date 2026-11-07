@@ -81,7 +81,7 @@ import { liveAlgosFor, type ExecutorConfig } from './config.ts';
 import { sqlite, type ExecutorDb, type KeyRow } from './db.ts';
 import { auditedAlgoSink, auditedOrderSink } from './audited.ts';
 import { Brake, type BrakeState } from './brake.ts';
-import { WriteLatency } from './latency.ts';
+import { WriteLatency, type BotLatencyResponse } from './latency.ts';
 import { KEY_IMPORT_ALG, importInfo, type ImportEnvelope, type Secrets } from './secrets.ts';
 import { ErrorGuard, guardedAlgoSink, guardedOrderSink, type GuardTarget } from './guard.ts';
 import { shortWallet, type Alerts } from './alerts.ts';
@@ -1137,6 +1137,15 @@ export class ExecutorService {
   /** What the wallet should hear of: its copies' and algos' notices, newest first (db.ts notices). */
   notices(owner: string, q: { limit?: number; before?: number; grades?: readonly string[] }): EngineNotice[] {
     return this.db.notices(owner, q);
+  }
+
+  /**
+   * GET /bots/latency: the signed-write latency of this wallet's own SoDEX accounts (those its bots trade in), never
+   * another wallet's or the executor's whole flow. A wallet whose bots only practise has no account here: empty.
+   */
+  botLatency(owner: string, hours: number): BotLatencyResponse {
+    const ids = [...new Set(this.algos.list(owner).map((a) => a.accountId).filter((x) => x > 0))];
+    return this.latency.view(hours, ids);
   }
 
   algoList(owner: string): AlgoView[] {

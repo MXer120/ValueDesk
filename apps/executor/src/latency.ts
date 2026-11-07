@@ -7,6 +7,10 @@
  * 100 ms and 0.5 % above (2 ms at 400 ms, 5 ms at 1 s). A closed bucket is written to the executor's database, the
  * open one on stop; 48 h are read back on start, so a restart does not wipe the chart. Rows are never deleted here.
  *
+ * Each write is kept twice: in its region and in its SoDEX account's own log (region id "tokyo:<accountId>"). A
+ * user reads only their account's (GET /bots/latency needs their session); the region-wide view is for operators
+ * and never leaves the executor through that route.
+ *
  * Recording never throws: it runs on the write path (SodexClient onWrite), after the answer.
  */
 
@@ -22,7 +26,12 @@ export interface WriteTiming {
   queueMs: number;
   wireMs: number;
   status: number;
+  /** The SoDEX account the write was for (0 when unknown). */
+  accountId?: number;
 }
+
+/** The store id of one account's log in a region. */
+export const accountLogId = (regionId: string, accountId: number): string => `${regionId}:${accountId}`;
 
 /** Place: POST .../trade/orders (and its batch, modify, replace). Cancel: DELETE .../trade/orders (and batch), schedule-cancel. Else null (leverage, margin). */
 export function classifyWrite(method: string, path: string): WriteKind | null {
@@ -158,6 +167,8 @@ class RegionLog {
 
 export class WriteLatency {
   private readonly logs = new Map<string, RegionLog>();
+  /** Per account, keyed by accountLogId: created on its first write (or read back from the store). */
+  private readonly accounts = new Map<string, RegionLog>();
   private timer: ReturnType<typeof setInterval> | null = null;
 
   constructor(
@@ -181,7 +192,7 @@ export class WriteLatency {
     try {
       const since = this.now() - LATENCY_KEEP_MS;
       for (const row of this.store.loadLatency(since)) {
-        const log = this.logs.get(row.region);
+        const log = this.logs.get(row.region) ?? this.accountLog(row.region);
         if (!log || !KINDS.includes(row.kind)) continue;
         let b = log.buckets.get(row.t);
         if (!b) log.buckets.set(row.t, (b = emptyBucket()));
@@ -192,6 +203,19 @@ export class WriteLatency {
     }
   }
 
+  /** An account's log for a store id "region:accountId" (created when its region exists), or null. */
+  private accountLog(id: string, create = true): RegionLog | null {
+    const have = this.accounts.get(id);
+    if (have || !create) return have ?? null;
+    const m = /^(.+):(\d+)$/.exec(id);
+    const region = m ? this.logs.get(m[1]!) : undefined;
+    if (!region || Number(m![2]) <= 0) return null;
+    const log = new RegionLog({ ...region.region, id });
+    log.open = region.open;
+    this.accounts.set(id, log);
+    return log;
+  }
+
   /** One answered write. Never throws. */
   record(regionId: string, w: WriteTiming): void {
     try {
@@ -200,16 +224,25 @@ export class WriteLatency {
       if (!kind || !log) return;
       const ms = Math.max(0, (Number(w.queueMs) || 0) + (Number(w.wireMs) || 0));
       const at = this.now();
-      this.roll(log, at);
-      let b = log.buckets.get(log.open);
-      if (!b) log.buckets.set(log.open, (b = emptyBucket()));
-      b[kind].add(ms);
-      log.recent.push({ at, ms });
-      while (log.recent.length && log.recent[0]!.at <= at - LATENCY_BUCKET_MS) log.recent.shift();
-      if (log.recent.length > RECENT_CAP) log.recent.splice(0, log.recent.length - RECENT_CAP);
+      this.add(log, kind, ms, at);
+      const aid = Number(w.accountId) || 0;
+      if (aid > 0) {
+        const own = this.accountLog(accountLogId(regionId, aid));
+        if (own) this.add(own, kind, ms, at);
+      }
     } catch (e) {
       this.onError(e);
     }
+  }
+
+  private add(log: RegionLog, kind: WriteKind, ms: number, at: number): void {
+    this.roll(log, at);
+    let b = log.buckets.get(log.open);
+    if (!b) log.buckets.set(log.open, (b = emptyBucket()));
+    b[kind].add(ms);
+    log.recent.push({ at, ms });
+    while (log.recent.length && log.recent[0]!.at <= at - LATENCY_BUCKET_MS) log.recent.shift();
+    if (log.recent.length > RECENT_CAP) log.recent.splice(0, log.recent.length - RECENT_CAP);
   }
 
   /** Move the open bucket to now: the ones that closed are written, the ones older than 48 h leave memory. */
@@ -248,6 +281,11 @@ export class WriteLatency {
     try {
       const at = this.now();
       for (const log of this.logs.values()) this.roll(log, at);
+      for (const [id, log] of this.accounts) {
+        this.roll(log, at);
+        // Nothing left in 48 h: the account's log leaves memory (its rows stay in the store).
+        if (!log.buckets.size && !log.recent.length) this.accounts.delete(id);
+      }
     } catch (e) {
       this.onError(e);
     }
@@ -259,15 +297,21 @@ export class WriteLatency {
     this.timer = null;
     this.tick();
     for (const log of this.logs.values()) this.save(log, [log.open]);
+    for (const log of this.accounts.values()) this.save(log, [log.open]);
   }
 
-  view(hours: number): BotLatencyResponse {
+  /**
+   * The chart's answer. With accountIds: only those accounts' writes, per region (a user's own bots); without: the
+   * whole region (operators, tests).
+   */
+  view(hours: number, accountIds?: readonly number[]): BotLatencyResponse {
     const at = this.now();
     const h = Math.max(1, Math.min(48, Math.round(hours) || 24));
     const open = Math.floor(at / LATENCY_BUCKET_MS) * LATENCY_BUCKET_MS;
     const slots = h * (3_600_000 / LATENCY_BUCKET_MS);
     const regions: BotLatencyResponse['regions'] = [];
-    for (const log of this.logs.values()) {
+    for (const base of this.logs.values()) {
+      const log = accountIds ? mergeLogs(base, accountIds.map((a) => this.accountLog(accountLogId(base.region.id, a), false)).filter((x): x is RegionLog => !!x)) : base;
       const buckets: BotLatencyResponse['regions'][number]['buckets'] = [];
       for (let i = slots - 1; i >= 0; i--) {
         const t = open - i * LATENCY_BUCKET_MS;
@@ -284,18 +328,36 @@ export class WriteLatency {
         hour.cancel.merge(b.cancel);
       }
       regions.push({
-        id: log.region.id,
-        label: log.region.label,
-        where: log.region.where,
+        id: base.region.id,
+        label: base.region.label,
+        where: base.region.where,
         buckets,
         now: { p50: recent.quantile(0.5), p95: recent.quantile(0.95), p99: recent.quantile(0.99), n: recent.n },
         kinds: { place: { p50: hour.place.quantile(0.5), n: hour.place.n }, cancel: { p50: hour.cancel.quantile(0.5), n: hour.cancel.n } },
       });
       // The raw samples older than 10 minutes are no longer needed.
-      const keepFrom = log.recent.findIndex((s) => s.at > at - LATENCY_BUCKET_MS);
-      if (keepFrom > 0) log.recent.splice(0, keepFrom);
-      else if (keepFrom < 0) log.recent.length = 0;
+      if (!accountIds) {
+        const keepFrom = log.recent.findIndex((s) => s.at > at - LATENCY_BUCKET_MS);
+        if (keepFrom > 0) log.recent.splice(0, keepFrom);
+        else if (keepFrom < 0) log.recent.length = 0;
+      }
     }
     return { at, bucketMs: LATENCY_BUCKET_MS, regions };
   }
+}
+
+/** One view over several accounts' logs in a region (a wallet with more than one account); the one log as it is. */
+function mergeLogs(base: RegionLog, logs: RegionLog[]): RegionLog {
+  if (logs.length === 1) return logs[0]!;
+  const out = new RegionLog(base.region);
+  out.open = base.open;
+  for (const l of logs) {
+    for (const [t, b] of l.buckets) {
+      let o = out.buckets.get(t);
+      if (!o) out.buckets.set(t, (o = emptyBucket()));
+      for (const k of KINDS) o[k].merge(b[k]);
+    }
+    out.recent.push(...l.recent);
+  }
+  return out;
 }

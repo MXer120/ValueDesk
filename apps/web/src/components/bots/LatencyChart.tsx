@@ -12,7 +12,7 @@ import type { LatencyBucket, LatencyRegion } from '../../bots/data';
 export interface ChartMark { t: number; label: string; tone?: 'warn' | 'muted' }
 
 const H = 232;
-const PAD = { l: 8, r: 52, t: 26, b: 26 };
+const PAD = { l: 8, r: 46, t: 30, b: 24 };
 
 /** All regions as one: per bucket the worst p50 / p95 / p99 of any region (what the slowest user sees). */
 export function mergeRegions(regions: LatencyRegion[]): LatencyBucket[] {
@@ -51,6 +51,22 @@ export function elevated(buckets: LatencyBucket[]): Array<{ from: number; to: nu
   return out;
 }
 
+/** A smooth line through the points (Catmull-Rom as cubic Beziers), like the reference card. */
+export function smoothPath(pts: Array<[number, number]>): string {
+  if (!pts.length) return '';
+  if (pts.length < 3) return pts.map(([x, y], i) => `${i ? 'L' : 'M'}${x.toFixed(1)} ${y.toFixed(1)}`).join('');
+  let d = `M${pts[0]![0].toFixed(1)} ${pts[0]![1].toFixed(1)}`;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p0 = pts[Math.max(0, i - 1)]!;
+    const p1 = pts[i]!;
+    const p2 = pts[i + 1]!;
+    const p3 = pts[Math.min(pts.length - 1, i + 2)]!;
+    const k = 1 / 6;
+    d += `C${(p1[0] + (p2[0] - p0[0]) * k).toFixed(1)} ${(p1[1] + (p2[1] - p0[1]) * k).toFixed(1)} ${(p2[0] - (p3[0] - p1[0]) * k).toFixed(1)} ${(p2[1] - (p3[1] - p1[1]) * k).toFixed(1)} ${p2[0].toFixed(1)} ${p2[1].toFixed(1)}`;
+  }
+  return d;
+}
+
 /** A round step for at most four intervals, and the top it reaches. */
 export function niceScale(v: number): { top: number; step: number } {
   const steps = [10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000, 2500, 5000];
@@ -85,16 +101,17 @@ export function LatencyChart({ buckets, bucketMs, regionLabel, marks = [], hours
   const { top, step } = niceScale(Math.max(50, p95max * 1.45));
   const x = (t: number) => PAD.l + ((t + bucketMs / 2 - start) / (end - start)) * (w - PAD.l - PAD.r);
   const y = (ms: number) => PAD.t + (1 - Math.min(ms, top) / top) * (H - PAD.t - PAD.b);
-  const line = (k: 'p50' | 'p95' | 'p99') => {
+  // One smooth run per stretch with data; a bucket without writes breaks the line.
+  const line = (k: 'p50' | 'p95' | 'p99', from = -Infinity, to = Infinity) => {
     let d = '';
-    let pen = false;
+    let run: Array<[number, number]> = [];
     for (const b of shown) {
       const v = b[k];
-      if (v === null || b.n === 0) { pen = false; continue; }
-      d += `${pen ? 'L' : 'M'}${x(b.t).toFixed(1)} ${y(v).toFixed(1)}`;
-      pen = true;
+      if (b.t < from || b.t > to) continue;
+      if (v === null || b.n === 0) { d += smoothPath(run); run = []; continue; }
+      run.push([x(b.t), y(v)]);
     }
-    return d;
+    return d + smoothPath(run);
   };
   const bands = useMemo(() => elevated(shown), [shown]);
   const ticks: number[] = [];
@@ -107,7 +124,7 @@ export function LatencyChart({ buckets, bucketMs, regionLabel, marks = [], hours
   const fmtHour = (t: number) => new Date(t).toISOString().slice(11, 16);
 
   if (!shown.some((b) => b.n > 0)) {
-    return <div className="bots-lat__empty" ref={wrap}><p>No order has gone to SoDEX in this window yet. The chart fills as bots trade.</p></div>;
+    return <div className="pf-chart pf-chart--empty bots-lat__well" ref={wrap}><p>None of your bots has sent an order to SoDEX in this window. The chart fills as they trade.</p></div>;
   }
 
   return (
@@ -136,20 +153,20 @@ export function LatencyChart({ buckets, bucketMs, regionLabel, marks = [], hours
           <filter id="bots-lat-glow" x="-10%" y="-40%" width="120%" height="180%">
             <feGaussianBlur stdDeviation="2.4" />
           </filter>
+          <filter id="bots-lat-hotglow" x="-20%" y="-60%" width="140%" height="220%">
+            <feGaussianBlur stdDeviation="3.2" />
+          </filter>
         </defs>
         {ticks.map((v) => (
-          <g key={v}>
-            <line x1={PAD.l} x2={w - PAD.r} y1={y(v)} y2={y(v)} className="bots-lat__grid" />
-            <text x={w - PAD.r + 8} y={y(v) + 3.5} className="bots-lat__ax">{v === top ? `${v} ms` : v}</text>
-          </g>
+          <text key={v} x={w - PAD.r + 14} y={y(v) + 3.5} className="bots-lat__ax">{v}</text>
         ))}
         {bands.map((b) => {
           const x0 = x(b.from) - (w / Math.max(shown.length, 1)) * 0.6;
           const x1 = x(b.to) + (w / Math.max(shown.length, 1)) * 0.6;
           return (
             <g key={b.from}>
-              <rect x={x0} y={PAD.t - 8} width={Math.max(8, x1 - x0)} height={H - PAD.t - PAD.b + 8} fill="url(#bots-lat-band)" />
-              <text x={(x0 + x1) / 2} y={PAD.t - 12} className="bots-lat__flag" textAnchor="middle">{regionLabel} · p95 elevated</text>
+              <rect x={x0} y={PAD.t - 6} width={Math.max(8, x1 - x0)} height={H - PAD.t - PAD.b + 6} fill="url(#bots-lat-band)" />
+              <text x={Math.min(Math.max((x0 + x1) / 2, 70), w - PAD.r - 70)} y={PAD.t - 12} className="bots-lat__flag" textAnchor="middle">{regionLabel} · p95 elevated</text>
             </g>
           );
         })}
@@ -158,17 +175,21 @@ export function LatencyChart({ buckets, bucketMs, regionLabel, marks = [], hours
         <path d={line('p95')} className="bots-lat__p95glow" filter="url(#bots-lat-glow)" />
         <path d={line('p95')} className="bots-lat__p95" />
         {bands.map((b) => {
-          const seg = shown.filter((s) => s.t >= b.from - bucketMs && s.t <= b.to + bucketMs && s.p95 !== null);
-          const d = seg.map((s, i) => `${i ? 'L' : 'M'}${x(s.t).toFixed(1)} ${y(s.p95!).toFixed(1)}`).join('');
-          return <path key={`hot-${b.from}`} d={d} className="bots-lat__hot" />;
+          const d = line('p95', b.from - bucketMs, b.to + bucketMs);
+          return (
+            <g key={`hot-${b.from}`}>
+              <path d={d} className="bots-lat__hotglow" filter="url(#bots-lat-hotglow)" />
+              <path d={d} className="bots-lat__hot" />
+            </g>
+          );
         })}
         {hourTicks.map((t) => (
-          <text key={t} x={x(t - bucketMs / 2)} y={H - 6} className="bots-lat__ax" textAnchor="middle">{fmtHour(t)}</text>
+          <text key={t} x={Math.max(PAD.l + 14, x(t - bucketMs / 2))} y={H - 4} className="bots-lat__ax" textAnchor="middle">{fmtHour(t)}</text>
         ))}
         {marks.filter((m) => m.t >= start && m.t <= end).map((m) => (
           <g key={`${m.t}-${m.label}`} className={`bots-lat__mark is-${m.tone ?? 'muted'}`}>
-            <line x1={x(m.t)} x2={x(m.t)} y1={H - PAD.b - 10} y2={H - PAD.b + 1} />
-            <circle cx={x(m.t)} cy={H - PAD.b - 12} r={2.6}><title>{m.label}</title></circle>
+            <line x1={x(m.t)} x2={x(m.t)} y1={H - PAD.b - 9} y2={H - PAD.b + 2} />
+            <circle cx={x(m.t)} cy={H - PAD.b - 10} r={3}><title>{m.label}</title></circle>
           </g>
         ))}
         {hb && (

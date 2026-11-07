@@ -293,18 +293,26 @@ export function CopySetupSteps({ mode, live, paper, bots, hideDone = false }: { 
           live.terms
             ? `Accepted ${new Date(live.terms.acceptedAt).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' })} · from ${countryName(live.terms.country)}.${bots && !r.connected ? ' One more signature opens your bots.' : ''}`
             : bots
-              ? 'The risks, the fee, and what you confirm. Two signatures: the terms, then one that opens your bots.'
+              ? r.connected
+                ? 'No acceptance on record for this wallet yet: the risks, the fee, and what you confirm. One signature.'
+                : 'One signature opens your bots. If this wallet accepted the terms before, in any browser, that is all.'
               : 'The risks, the fee, and what you confirm. One signature.'
         }
         action={
           !r.terms
-            ? !termsOpen && <ActBtn label="Review" primary={current === 'terms'} disabled={!owner} onClick={() => setTermsOpen(true)} />
+            ? bots && !r.connected
+              // Sign in first: the executor's record of an earlier acceptance then counts, and nobody signs the terms twice.
+              ? <ActBtn label="Continue" primary={current === 'terms'} disabled={!owner || !live.hosted.info} busy={working === 'signin'} onClick={() => void run('signin', async () => {
+                  await signIn('hosted');
+                  if (!getLiveCopy().terms) setTermsOpen(true);
+                })} />
+              : !termsOpen && <ActBtn label="Review" primary={current === 'terms'} disabled={!owner} onClick={() => setTermsOpen(true)} />
             : bots && !r.connected && (
               <ActBtn label="Continue" primary={current === 'terms'} disabled={!owner || !live.hosted.info} busy={working === 'signin'} onClick={() => void run('signin', () => signIn('hosted'))} />
             )
         }
       >
-        {!r.terms && termsOpen && (
+        {!r.terms && termsOpen && (!bots || r.connected) && (
           <div className="cs-form">
             <ul className="cs-risks">
               {(bots ? BOT_RISK_SUMMARY : COPY_RISK_SUMMARY).map((t) => (
@@ -318,7 +326,7 @@ export function CopySetupSteps({ mode, live, paper, bots, hideDone = false }: { 
               Your location: <b>{country ? `${countryName(country)}, from your connection` : 'unknown'}</b>
             </p>
             {!country && <p className="fx-note fx-note--err">{LOCATION_UNKNOWN}</p>}
-            {country && regionPolicy(country, live.viewerCountry).maxLeverage === EEA_MAX_LEVERAGE && (
+            {!bots && country && regionPolicy(country, live.viewerCountry).maxLeverage === EEA_MAX_LEVERAGE && (
               <p className="fx-note fx-note--warn">In the EU and EEA, copies are limited to {EEA_MAX_LEVERAGE}x leverage.</p>
             )}
             {country && !regionPolicy(country, live.viewerCountry).allowed && (

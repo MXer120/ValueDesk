@@ -30,7 +30,7 @@ import { pollEvery } from '../exchange/visibility';
 import { BROWSER_KEY_NAME, browserCopier, type BrowserKey, type CopierRole, type PendingConfirm } from './browserCopier';
 import { DEFAULT_SELF_URL, ExecutorClient, ExecutorError, hostedExecutor, selfBase, selfUrlProblem, signCopy } from './executor';
 import { MAX_BROWSER_KEY_DAYS, approveCopyFee, copyFeeApproval, copyKeyRegistered, registerCopyKey, revokeCopyKey } from './sodexSetup';
-import { acceptCopyTerms, localTerms, recordPendingTerms, sendTermsTo, type LocalTerms } from './terms';
+import { acceptCopyTerms, adoptRecordedTerms, localTerms, recordPendingTerms, sendTermsTo, type LocalTerms } from './terms';
 import { requireTermsOrThrow } from '../legal/acceptance';
 import { track } from '../analytics/usage';
 
@@ -197,6 +197,11 @@ async function loadMe(mode: 'hosted' | 'self', token: string): Promise<void> {
   try {
     const me = await client.me(token);
     set({ [mode]: { ...state[mode], me, signedIn: true } } as Partial<LiveCopy>);
+    // Accepted in another browser: ValueDesk's record of the current terms counts here too.
+    if (mode === 'hosted' && !state.terms && state.owner === me.owner.toLowerCase()) {
+      const t = adoptRecordedTerms(me.owner, me.terms);
+      if (t) set({ terms: t });
+    }
   } catch (e) {
     if (e instanceof ExecutorError && (e.status === 401 || e.status === 403)) set({ [mode]: { ...state[mode], me: null, signedIn: false } } as Partial<LiveCopy>);
     else log.warn(`copy: ${mode} executor read failed`, { error: String(e) });

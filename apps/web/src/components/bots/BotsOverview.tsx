@@ -15,6 +15,7 @@ import { SeriesChart, type ChartSeries } from '../datachart/SeriesChart';
 import { fleetSeries, fleetTotals } from '../../bots/fleet';
 import { STRATEGY_INFO, botFeeWords, costPerMillion, draftFor, strategyOf } from '../../bots/presets';
 import { useBotLatency } from '../../bots/data';
+import { hostedExecutor } from '../../copy/executor';
 import { goBots, type BotsView } from '../../bots/routes';
 import { BotIcon } from './BotIcon';
 import { StrategyCards } from './BotForm';
@@ -50,63 +51,59 @@ function Seg<T extends string>({ value, options, onChange, label }: { value: T; 
   );
 }
 
-/** The executor's write latency to SoDEX: p50 / p95 / p99 per 10 minutes over a day, per region or all of them. */
-export function LatencyCard({ marks = [] }: { marks?: ChartMark[] }) {
+/**
+ * This wallet's own bots' latency to SoDEX (never another wallet's): p95 / p50 / p99 per 10 minutes, laid out like
+ * the reference card - icon, title, "scope · window", the legend on the right, the chart, the bots' start and stop
+ * pins under it. The window is the small switch beside the legend; regions, when there are several, the scope's.
+ */
+export function LatencyCard({ marks = [], ctx }: { marks?: ChartMark[]; ctx: BotsCtx }) {
   const [hours, setHours] = useState(24);
   const [region, setRegion] = useState<string>('all');
-  const lat = useBotLatency(48);
+  const token = ctx.address && ctx.live.hosted.signedIn ? hostedExecutor.token(ctx.address) : null;
+  const lat = useBotLatency(48, token);
   const regions = lat.data?.regions ?? [];
   const one = regions.find((r) => r.id === region) ?? null;
   const buckets = one ? one.buckets : mergeRegions(regions);
-  const nowP = (k: 'p50' | 'p95') => {
-    const xs = (one ? [one] : regions).map((r) => r.now[k]).filter((x): x is number => x !== null);
-    return xs.length ? Math.max(...xs) : null;
-  };
-  const kind = (k: 'place' | 'cancel') => {
-    const xs = (one ? [one] : regions).map((r) => r.kinds[k].p50).filter((x): x is number => x !== null);
-    return xs.length ? Math.max(...xs) : null;
-  };
-  const where = one ? one.where : regions.length === 1 ? regions[0]!.where : `${regions.length} regions`;
+  const scope = one ? one.label.toLowerCase() : regions.length > 1 ? 'all regions' : (regions[0]?.label.split(' · ')[0] ?? 'tokyo').toLowerCase();
   const title = (
     <span className="bots-lat__title">
       <span className="bots-lat__ic" aria-hidden="true">
-        <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><path d="M3.5 13a6.5 6.5 0 1 1 13 0" /><path d="M10 13l3.2-3.6" /></svg>
+        <svg viewBox="0 0 20 20" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><path d="M3.5 13a6.5 6.5 0 1 1 13 0" /><path d="M10 13l3.2-3.6" /></svg>
       </span>
-      Latency
-      <small>{one ? one.label.toLowerCase() : 'all regions'} · {hours}h</small>
+      <span className="bots-lat__name">Latency</span>
+      {regions.length > 1 ? (
+        <button type="button" className="bots-lat__scope" onClick={() => { const ids = ['all', ...regions.map((r) => r.id)]; setRegion(ids[(ids.indexOf(region) + 1) % ids.length]!); }} aria-label={`Region: ${scope}. Show the next region`}>{scope}</button>
+      ) : (
+        <small>{scope}</small>
+      )}
+      <small>· {hours}h</small>
     </span>
   );
+  const empty = (line: string) => <div className="pf-chart pf-chart--empty bots-lat__well"><p>{line}</p></div>;
   return (
     <Card
       title={title}
       className="bots-latcard"
       action={
-        <span className="bots-lat__legend" aria-hidden="true">
-          <span><i className="is-p95" />p95</span>
-          <span><i className="is-p50" />p50</span>
-          <span><i className="is-p99" />p99</span>
+        <span className="bots-lat__head">
+          <span className="bots-lat__legend" aria-hidden="true">
+            <span><i className="is-p95" />p95</span>
+            <span><i className="is-p50" />p50</span>
+            <span><i className="is-p99" />p99</span>
+          </span>
+          <Seg value={String(hours)} label="Window" onChange={(v) => setHours(Number(v))} options={[{ id: '6', label: '6h' }, { id: '24', label: '24h' }, { id: '48', label: '48h' }]} />
         </span>
       }
     >
-      <div className="bots-lat__bar">
-        {regions.length > 1 && (
-          <Seg value={region} label="Region" onChange={setRegion} options={[{ id: 'all', label: 'All' }, ...regions.map((r) => ({ id: r.id, label: r.label }))]} />
-        )}
-        <Seg value={String(hours)} label="Window" onChange={(v) => setHours(Number(v))} options={[{ id: '6', label: '6h' }, { id: '24', label: '24h' }, { id: '48', label: '48h' }]} />
-      </div>
-      {lat.error && !lat.data ? (
-        <div className="bots-lat__empty"><p>Latency is not available from the executor yet ({lat.error}).</p></div>
-      ) : !lat.data ? (
-        <div className="bots-skel bots-skel--chart" aria-hidden="true"><span className="bots-bone" /></div>
-      ) : (
-        <LatencyChart buckets={buckets} bucketMs={lat.data.bucketMs} regionLabel={one ? one.id : regions.length === 1 ? regions[0]!.id : 'all regions'} marks={marks} hours={hours} />
-      )}
-      <div className="pf-statstrip">
-        <Stat label="p50 now" value={nowP('p50') !== null ? `${nowP('p50')} ms` : DASH} hint="Half of the writes in the last 10 minutes reached SoDEX's answer faster than this." />
-        <Stat label="p95 now" value={nowP('p95') !== null ? `${nowP('p95')} ms` : DASH} hint="19 of 20 writes in the last 10 minutes were faster." />
-        <Stat label="Place / cancel p50" value={kind('place') !== null || kind('cancel') !== null ? `${kind('place') ?? DASH} / ${kind('cancel') ?? DASH} ms` : DASH} hint="The last hour: an order, and a cancel, from the executor to SoDEX's answer." />
-        <Stat label="Runs on" value={where || DASH} hint="Where the executor that places your bots' orders runs. Its orders go through SoDEX's official route." />
-      </div>
+      {!ctx.address
+        ? empty("Connect your wallet: this chart shows how fast your own bots' orders reach SoDEX. Nobody else sees it.")
+        : !token
+          ? empty("Finish the bot setup to see your bots' latency here. Only you see it.")
+          : lat.error && !lat.data
+            ? empty(`Latency is not available from the executor right now (${lat.error}).`)
+            : !lat.data
+              ? <div className="bots-skel bots-skel--chart" aria-hidden="true"><span className="bots-bone" /></div>
+              : <LatencyChart buckets={buckets} bucketMs={lat.data.bucketMs} regionLabel={one ? one.id : regions.length === 1 ? regions[0]!.id : 'all regions'} marks={marks} hours={hours} />}
     </Card>
   );
 }
@@ -235,7 +232,7 @@ export function BotsOverview({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
       </Card>
 
       <div className="bots-two">
-        <LatencyCard marks={marks} />
+        <LatencyCard marks={marks} ctx={ctx} />
         <FleetChart bots={ctx.ready ? bots : []} />
       </div>
 

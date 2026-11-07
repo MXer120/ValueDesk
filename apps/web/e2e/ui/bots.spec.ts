@@ -40,7 +40,10 @@ async function setUp(page: Page, wallet: TestWallet): Promise<void> {
   }
   const step = (t: string) => sheet.getByRole('listitem').filter({ hasText: t });
   const mark = wallet.mark();
-  await step('Accept the terms').getByRole('button', { name: 'Review', exact: true }).click();
+  // Sign in first; with no acceptance on record for this wallet, the terms form opens.
+  await step('Accept the terms').getByRole('button', { name: 'Continue', exact: true }).click();
+  await sheet.getByRole('checkbox', { name: /^I am at least 18/ }).waitFor({ state: 'visible', timeout: 30_000 });
+  assert.equal(await sheet.getByText(/EU and EEA/).count(), 0, 'no copy leverage note in the bot setup');
   for (const s of [/^I am at least 18/, /^I am not a US person/, /^I chose every bot/, /^I have read the terms and risk disclosure/]) await sheet.getByRole('checkbox', { name: s }).check();
   await sheet.getByRole('button', { name: 'Sign and accept', exact: true }).click();
   const site = page.getByRole('dialog', { name: 'Sign the terms to continue' });
@@ -49,7 +52,7 @@ async function setUp(page: Page, wallet: TestWallet): Promise<void> {
   await site.getByRole('button', { name: 'Only necessary', exact: true }).click();
   await toast(page, 'Terms accepted.').waitFor({ state: 'visible', timeout: 30_000 });
   await sheet.getByText('Ready to run bots').waitFor({ state: 'visible', timeout: 20_000 });
-  assert.deepEqual(wallet.since(mark).filter((r) => r.outcome === 'signed').map((r) => r.kind), ['site-terms', 'copy-terms', 'copy-sign-in']);
+  assert.deepEqual(wallet.since(mark).filter((r) => r.outcome === 'signed').map((r) => r.kind), ['copy-sign-in', 'site-terms', 'copy-terms']);
   await sheet.locator('.cs-actions').getByRole('button', { name: 'Close', exact: true }).click();
   await sheet.waitFor({ state: 'hidden' });
 }
@@ -79,8 +82,10 @@ h.test('before a wallet: the sidebar Bots group, Overview, latency, Explore and 
   assert.equal(await page.getByText('Volume maker', { exact: true }).count(), 0, 'the volume maker is no longer offered');
   // The latency card: the chart or its empty state, never an error.
   await page.locator('.bots-latcard').waitFor();
-  await until(page, async () => (await page.locator('.bots-lat__chart svg, .bots-lat__empty').count()) > 0, 'latency drawn or empty', 20_000);
-  assert.equal(await page.locator('.bots-latcard').getByText(/not available from the executor/).count(), 0, 'the executor answers latency');
+  await until(page, async () => (await page.locator('.bots-lat__chart svg, .bots-lat__well').count()) > 0, 'latency drawn or empty', 20_000);
+  // Before a wallet: no figures at all, only the wallet's own once it is set up.
+  assert.ok(await page.locator('.bots-latcard').getByText(/your own bots' orders reach SoDEX/).isVisible(), 'own bots only');
+  assert.equal(await page.locator('.bots-lat__chart svg').count(), 0, 'nobody else\u2019s latency before a wallet');
   await shot(page, 'no-wallet');
   if (!PHONE) {
     // The rail's foot: Bots, New bot, Explore, Savings.
@@ -195,4 +200,20 @@ h.test('a practice market maker: set up, New bot with the gate, its page, settin
   await go(page, 'Savings', 'Savings');
   for (const t of ['Fee tier', 'Staking', 'Your bots']) await page.getByText(t, { exact: true }).first().waitFor();
   await shot(page, 'savings');
+
+  // A new browser for the same wallet (nothing kept here): one sign-in signature, the terms are not asked again.
+  await page.evaluate(() => {
+    for (const k of Object.keys(localStorage)) if (k.startsWith('vd.copy.terms:')) localStorage.removeItem(k);
+    sessionStorage.clear();
+  });
+  await page.reload();
+  await go(page, 'Overview', 'Bots');
+  await page.getByRole('button', { name: 'Set up', exact: true }).first().click();
+  const again = page.getByRole('dialog', { name: 'Bot setup' });
+  await again.waitFor({ state: 'visible' });
+  mark = wallet.mark();
+  await again.getByRole('listitem').filter({ hasText: 'Accept the terms' }).getByRole('button', { name: 'Continue', exact: true }).click();
+  await again.getByText('Ready to run bots').waitFor({ state: 'visible', timeout: 30_000 });
+  assert.deepEqual(signedKinds(wallet, mark), ['copy-sign-in'], 'returning wallet: sign in only, no second terms signature');
+  assert.equal(await again.getByRole('checkbox', { name: /^I am at least 18/ }).count(), 0, 'no terms form');
 }, { path: '/bots', timeout: 300_000 });

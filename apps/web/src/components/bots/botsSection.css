@@ -10,7 +10,6 @@
 .bots-head__t h1 { margin: 0; font-size: var(--fs-xl); font-weight: 500; line-height: 1.2; color: var(--text); display: flex; align-items: center; gap: var(--sp-2); }
 .bots-head__t p { margin: var(--sp-1) 0 0; color: var(--muted); font-size: var(--fs-xs); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .bots-head__act { display: flex; gap: var(--sp-2); flex-wrap: wrap; justify-content: flex-end; }
-.bots-subnav { align-self: flex-start; }
 .bots-dhead { display: inline-flex; align-items: center; gap: var(--sp-2); min-width: 0; }
 .bots-back { display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: var(--radius-md); border: 1px solid var(--line-soft); background: transparent; color: var(--muted); cursor: pointer; transition: color var(--dur-fast), border-color var(--dur-fast); }
 .bots-back:hover { color: var(--text); border-color: var(--line); }
@@ -24,24 +23,28 @@
 /* Latency and the fleet chart side by side. */
 .bots-two { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: var(--sp-1); }
 .bots-latcard .pf-card__body, .bots-two .bots-chartcard .pf-card__body { min-height: 340px; }
-.bots-lat__title { display: inline-flex; align-items: center; gap: var(--sp-2); }
-.bots-lat__title small { color: var(--muted); font-size: var(--fs-micro); font-weight: 400; }
-.bots-lat__ic { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: var(--radius-md); background: rgb(var(--ink) / 0.06); color: var(--muted); }
-.bots-lat__legend { display: inline-flex; gap: var(--sp-3); color: var(--muted); font-size: var(--fs-micro); }
+.bots-lat__title { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.bots-lat__name { font-weight: 600; margin: 0 var(--sp-2) 0 4px; }
+.bots-lat__title small, .bots-lat__scope { color: var(--muted); font-size: var(--fs-xs); font-weight: 400; white-space: nowrap; }
+.bots-lat__scope { background: none; border: 0; padding: 0; cursor: pointer; font: inherit; font-size: var(--fs-xs); color: var(--muted); }
+.bots-lat__scope:hover, .bots-lat__scope:focus-visible { color: var(--text); }
+.bots-lat__ic { display: inline-grid; place-items: center; width: 30px; height: 30px; border-radius: var(--radius-md); border: 1px solid var(--panel-line); background: rgb(var(--ink) / 0.03); color: var(--text); }
+.bots-lat__head { display: inline-flex; align-items: center; gap: var(--sp-4); }
+.bots-lat__legend { display: inline-flex; gap: var(--sp-3); color: var(--muted); font-size: var(--fs-xs); }
 .bots-lat__legend span { display: inline-flex; align-items: center; gap: 6px; }
-.bots-lat__legend i, .bots-lat__tip i { display: inline-block; width: 12px; height: 0; border-top: 2px solid var(--text); }
+.bots-lat__legend i, .bots-lat__tip i { display: inline-block; width: 10px; height: 0; border-top: 2px solid var(--text); border-radius: 2px; }
 .bots-lat__legend i.is-p50, .bots-lat__tip i.is-p50 { border-top: 1.5px solid var(--muted); }
 .bots-lat__legend i.is-p99, .bots-lat__tip i.is-p99 { border-top: 1.5px dashed var(--dim); }
-.bots-lat__bar { display: flex; justify-content: flex-end; gap: var(--sp-2); margin-bottom: var(--sp-1); }
 .bots-lat__chart { position: relative; width: 100%; margin-top: var(--sp-1); }
 .bots-lat__chart svg { display: block; overflow: visible; }
 .bots-lat__grid { stroke: var(--panel-line); stroke-width: 1; }
 .bots-lat__ax { fill: var(--muted); font-family: var(--font-num); font-size: var(--fs-micro); font-variant-numeric: tabular-nums; }
 .bots-lat__p50 { fill: none; stroke: var(--muted); stroke-width: 1.3; vector-effect: non-scaling-stroke; opacity: 0.8; }
 .bots-lat__p95 { fill: none; stroke: var(--text); stroke-width: 1.8; vector-effect: non-scaling-stroke; stroke-linejoin: round; }
-.bots-lat__p95glow { fill: none; stroke: var(--text); stroke-width: 5; opacity: 0.12; }
+.bots-lat__p95glow { fill: none; stroke: var(--text); stroke-width: 7; opacity: 0.22; }
 .bots-lat__p99 { fill: none; stroke: var(--dim); stroke-width: 1.2; stroke-dasharray: 2 3; vector-effect: non-scaling-stroke; }
-.bots-lat__hot { fill: none; stroke: var(--neg); stroke-width: 2; vector-effect: non-scaling-stroke; stroke-linejoin: round; }
+.bots-lat__hot { fill: none; stroke: var(--neg); stroke-width: 2.2; vector-effect: non-scaling-stroke; stroke-linejoin: round; }
+.bots-lat__hotglow { fill: none; stroke: var(--neg); stroke-width: 8; opacity: 0.35; }
 .bots-lat__flag { fill: var(--neg); font-size: var(--fs-micro); font-family: var(--font-text); }
 .bots-lat__mark line { stroke: var(--dim); stroke-width: 1; }
 .bots-lat__mark circle { fill: var(--muted); }
@@ -201,7 +204,6 @@
   .bots-head { padding: var(--sp-3) var(--sp-2) var(--sp-1); }
   .bots-head__row { flex-direction: column; gap: var(--sp-2); }
   .bots-head__act { justify-content: flex-start; }
-  .bots-subnav { overflow-x: auto; max-width: 100%; }
   .bots-kpicard .bots-kpistrip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .bots-kinds { grid-template-columns: minmax(0, 1fr); }
   .bots-search { min-width: 0; flex: 1; }
@@ -214,11 +216,7 @@
   .bots-tierbar__fill, .bots-adv > summary::before, .bots-kind, .bots-chip, .bots-back, .bots-sort svg { transition: none; }
 }
 
-.bots-latcard .pf-statstrip { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-@media (max-width: 760px) { .bots-latcard .pf-statstrip { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .bots-check input { width: auto; height: auto; margin: 0; flex: none; accent-color: var(--text); }
 .pf.bots .bots-check { flex-direction: row; align-items: center; white-space: nowrap; }
-.bots-latcard .pf-stat__value, .bots-latcard .pf-stat .pf-stat__v { overflow-wrap: anywhere; }
-.bots-latcard .pf-stat { min-width: 0; }
-.bots-latcard .pf-stat__value { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 760px) { .pf.bots .bots-pair { grid-template-columns: minmax(0, 1fr); } }
+.bots-lat__well { min-height: 232px; margin-top: var(--sp-1); }

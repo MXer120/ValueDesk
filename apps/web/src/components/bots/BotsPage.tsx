@@ -61,16 +61,8 @@ export interface BotsCtx {
   live: ReturnType<typeof useLiveCopy>;
 }
 
-const PAGES: Array<{ id: BotsView['page']; label: string }> = [
-  { id: 'overview', label: 'Overview' },
-  { id: 'new', label: 'New bot' },
-  { id: 'explore', label: 'Explore' },
-  { id: 'savings', label: 'Savings' },
-];
-
-/** The section's own tabs, under the page title (the sidebar has the same four at its foot). */
-export function BotsHead({ view, title, sub, actions }: { view: BotsView; title: ReactNode; sub?: ReactNode; actions?: ReactNode }) {
-  const on = view.page === 'bot' ? 'overview' : view.page;
+/** A page's title, its line and its actions. The section's pages are in the top bar (BotsNavSeg) and the rail's foot. */
+export function BotsHead({ title, sub, actions }: { view?: BotsView; title: ReactNode; sub?: ReactNode; actions?: ReactNode }) {
   return (
     <header className="bots-head">
       <div className="bots-head__row">
@@ -80,19 +72,6 @@ export function BotsHead({ view, title, sub, actions }: { view: BotsView; title:
         </div>
         {actions && <div className="bots-head__act">{actions}</div>}
       </div>
-      <nav className="pf-seg bots-subnav" aria-label="Bots pages">
-        {PAGES.map((p) => (
-          <button
-            key={p.id}
-            type="button"
-            className={`pf-ctl${on === p.id ? ' is-on' : ''}`}
-            aria-current={on === p.id ? 'page' : undefined}
-            onClick={() => goBots(p.id === 'new' ? { page: 'new', market: null, kind: null } : ({ page: p.id } as BotsView))}
-          >
-            {p.label}
-          </button>
-        ))}
-      </nav>
     </header>
   );
 }

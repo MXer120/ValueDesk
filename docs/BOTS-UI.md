@@ -3,7 +3,7 @@
 Owner, 2026-11-07: users' bots run on the ValueDesk executor on Contabo (server 2, the official SoDEX route; the AWS
 box and the fast door are test only). The market maker is R10 (rests up to 10 s at the touch, Binance-led), with the
 market gate (`stillBps` 12 over `stillMs` 60 000) as a switch, plus the other configs. Bots live at the bottom of the
-sidebar. Pages: Overview (any number of bots, latency chart p50/p95/p99 per region over 24 h), New bot, Bot detail
+sidebar. Pages, switched in the top bar (BotsNavSeg, the switch Trade uses for Futures / Spot): Overview (any number of bots, the latency of the wallet's own bots p50/p95/p99 per region over 24 h), New bot, Bot detail
 (full control), Explore (estimated cost on every market without running there), Savings (next fee tier, staking,
 cheaper markets). Everything behind `BOTS_ON` (web) so other work can ship without it.
 
@@ -51,9 +51,11 @@ interface BotMarket {
 }
 ```
 
-## GET /api/copy/v1/bots/latency (apps/executor, public, no wallet)
+## GET /api/copy/v1/bots/latency (apps/executor, Bearer session)
 
-Query: `hours=24` (1..48).
+Query: `hours=24` (1..48). Only the signed-in wallet's own figures: the writes of the SoDEX accounts its bots trade in
+(owner 2026-11-07: users see their own bots, never everyone's). No session: 401. A wallet whose bots only practise has
+no account there, so its buckets are empty. The executor keeps the region-wide log for operators; no route serves it.
 
 ```ts
 interface BotLatencyResponse {

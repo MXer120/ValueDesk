@@ -642,7 +642,7 @@ export interface SodexClientOptions {
   /** One send lane per account and market instead of per account: a cancel on one market does not wait for a write on another. Nonces need no order within SoDEX's window of 100. */
   lanesByMarket?: boolean;
   /** Each signed write's timing, for measuring the order path: time in the send queue, on the wire, the answer. */
-  onWrite?: (w: { method: string; path: string; queueMs: number; wireMs: number; status: number }) => void;
+  onWrite?: (w: { method: string; path: string; queueMs: number; wireMs: number; status: number; accountId: number }) => void;
   fetch: FetchLike;
   budget?: WeightBudget;
   /** Per-account order rate (default: SoDEX's 20/s, 600/min). */
@@ -768,7 +768,7 @@ export class SodexClient {
     }
     const shape = writeShape(req.method, req.gatewayPath, req.body);
     // Weight of a signed write: 1 + floor(N/40) for a batch of N (research 01); the queue books it.
-    return this.queue.submit(sendClass(req.method, req.gatewayPath, shape.priority), shape.accountId, shape.orders, ((enqueued) => () => this.transmit<T>(req, enqueued))(Date.now()), req.gatewayPath, this.lanesByMarket ? laneOf(shape.accountId, req.method, req.body) : shape.accountId);
+    return this.queue.submit(sendClass(req.method, req.gatewayPath, shape.priority), shape.accountId, shape.orders, ((enqueued) => () => this.transmit<T>(req, enqueued, shape.accountId))(Date.now()), req.gatewayPath, this.lanesByMarket ? laneOf(shape.accountId, req.method, req.body) : shape.accountId);
   }
 
   /** The request as it goes out: as built, or through the fast door (fastDoor) when it is a perps order or cancel. */
@@ -812,7 +812,7 @@ export class SodexClient {
   }
 
   /** One signed write on the wire (the queue decides when). */
-  private async transmit<T>(req: Pick<BuiltRequest, 'method' | 'gatewayPath' | 'headers' | 'body'>, enqueued = Date.now()): Promise<T> {
+  private async transmit<T>(req: Pick<BuiltRequest, 'method' | 'gatewayPath' | 'headers' | 'body'>, enqueued = Date.now(), accountId = 0): Promise<T> {
     const ctl = abortController();
     const timer = timers.after(this.writeTimeoutMs, () => ctl.abort());
     const sentAt = Date.now();
@@ -829,7 +829,7 @@ export class SodexClient {
       timers.cancel(timer);
     }
     const text = await res.text().catch(() => '');
-    this.onWrite?.({ method: req.method, path: req.gatewayPath, queueMs: sentAt - enqueued, wireMs: Date.now() - sentAt, status: res.status });
+    this.onWrite?.({ method: req.method, path: req.gatewayPath, queueMs: sentAt - enqueued, wireMs: Date.now() - sentAt, status: res.status, accountId });
     this.observe(res, text, req.gatewayPath, sentAt);
     // Cloudflare's 1015 page is HTML: refused at the edge, it never reached the exchange.
     if (isIpRateLimited(res.status, text)) throw new IpRateLimitedError(req.gatewayPath);

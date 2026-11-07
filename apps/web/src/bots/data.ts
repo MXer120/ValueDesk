@@ -3,10 +3,11 @@
  *
  *   useBotMarkets   GET /api/vs/bots/markets: what a new market maker pays on every market, estimated from the
  *                   market's own trades (who took, what small makers kept), refreshed every 5 minutes
- *   useBotLatency   GET /api/copy/v1/bots/latency: the executor's write latency to SoDEX, p50 / p95 / p99 per
- *                   10 minutes over a day, per region, refreshed every minute
+ *   useBotLatency   GET /api/copy/v1/bots/latency: how long this wallet's own bots' orders and cancels take to
+ *                   reach SoDEX's answer, p50 / p95 / p99 per 10 minutes, per region, refreshed every minute.
+ *                   It needs the wallet's executor session: nobody reads another wallet's figures.
  *
- * Both are public (no wallet). The last answer stays on screen while the next one is out.
+ * Markets are public (no wallet). The last answer stays on screen while the next one is out.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { pollEvery } from '../exchange/visibility';
@@ -53,7 +54,7 @@ export interface BotLatencyResponse { at: number; bucketMs: number; regions: Lat
 
 interface Read<T> { data: T | null; error: string | null; loading: boolean; refresh: () => void }
 
-function usePolled<T>(url: string | null, everyMs: number, check: (x: unknown) => x is T): Read<T> {
+function usePolled<T>(url: string | null, everyMs: number, check: (x: unknown) => x is T, token: string | null = null): Read<T> {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(!!url);
@@ -61,8 +62,8 @@ function usePolled<T>(url: string | null, everyMs: number, check: (x: unknown) =
   const read = useCallback(async () => {
     if (!url) return;
     try {
-      const r = await fetch(url, { headers: { Accept: 'application/json' } });
-      if (!r.ok) throw new Error(r.status === 404 ? 'not available yet' : `HTTP ${r.status}`);
+      const r = await fetch(url, { headers: token ? { Accept: 'application/json', Authorization: `Bearer ${token}` } : { Accept: 'application/json' } });
+      if (!r.ok) throw new Error(r.status === 404 ? 'not available yet' : r.status === 401 ? 'sign in again' : `HTTP ${r.status}`);
       const body: unknown = await r.json();
       if (!check(body)) throw new Error('an answer this page cannot read');
       if (alive.current) {
@@ -74,7 +75,7 @@ function usePolled<T>(url: string | null, everyMs: number, check: (x: unknown) =
     } finally {
       if (alive.current) setLoading(false);
     }
-  }, [url, check]);
+  }, [url, check, token]);
   useEffect(() => {
     alive.current = true;
     if (!url) return;
@@ -95,8 +96,9 @@ const isLatency = (x: unknown): x is BotLatencyResponse => !!x && typeof x === '
 export const useBotMarkets = (window: '24h' | '7d' = '24h', enabled = true): Read<BotMarketsResponse> =>
   usePolled(enabled ? `/api/vs/bots/markets?window=${window}` : null, 5 * 60_000, isMarkets);
 
-export const useBotLatency = (hours = 24, enabled = true): Read<BotLatencyResponse> =>
-  usePolled(enabled ? `/api/copy/v1/bots/latency?hours=${hours}` : null, 60_000, isLatency);
+/** This wallet's own bots' latency; nothing is read without its session (token null). */
+export const useBotLatency = (hours: number, token: string | null): Read<BotLatencyResponse> =>
+  usePolled(token ? `/api/copy/v1/bots/latency?hours=${hours}` : null, 60_000, isLatency, token);
 
 /** A cost in bp, per $1M: 1.30 bp is $130. */
 export const bpToPerMillion = (bp: number): number => bp * 100;
