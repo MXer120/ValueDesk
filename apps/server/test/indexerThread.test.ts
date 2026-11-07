@@ -280,9 +280,11 @@ test('checkpoint thread: under a writer that never pauses the WAL starts over an
     await until('thread up', () => store.checkpointStatus?.running === true);
     let i = 0;
     const sizes: number[] = [];
-    const end = Date.now() + 3_000;
+    // At least 3 s, then until a full checkpoint has finished (20 s at most): on a loaded CI box 3 s was not always enough
+    // for one to find the reader-free moment it needs (2026-11-07).
+    const start = Date.now();
     let n = 0;
-    while (Date.now() < end) {
+    while (Date.now() - start < 3_000 || (Date.now() - start < 20_000 && (store.checkpointStatus!.fulls - store.checkpointStatus!.fullsBusy) === 0)) {
       store.putFills(Array.from({ length: 150 }, () => fill(i++)));
       n++;
       if (n % 25 === 0) sizes.push(statSync(`${path}-wal`).size);
