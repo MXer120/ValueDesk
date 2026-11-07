@@ -291,3 +291,7 @@ button.bots-link { border: 0; background: none; padding: 0; color: var(--text); 
   .bots .bots-table td:nth-child(2), .bots .bots-table td:nth-child(6), .bots .bots-table td:nth-child(7), .bots .bots-table td:nth-child(8) { display: none; }
   .bots .bots-table td[data-k]::before { content: attr(data-k); margin-right: 6px; color: var(--muted); font-family: var(--font-text, inherit); font-size: var(--fs-micro, 11px); }
 }
+
+/* Bots are in beta: the page for a wallet that is not on the list (BotsPage.tsx). */
+.bots-locked { display: grid; place-items: center; min-height: 60vh; }
+.bots-locked__actions { display: inline-flex; gap: var(--sp-2); flex-wrap: wrap; justify-content: center; }

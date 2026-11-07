@@ -19,6 +19,8 @@ export function liveAlgoWalletsFrom(raw: unknown, dev: boolean): ReadonlySet<str
   return new Set(raw.split(',').map((s) => s.trim().toLowerCase()).filter((s) => /^0x[0-9a-f]{40}$/.test(s)));
 }
 
+import { hasBetaAccess } from '../beta/access';
+
 const env = (import.meta as { env?: { DEV?: boolean; VITE_LIVE_ALGOS_WALLETS?: string; VITE_CHANNEL?: string } }).env;
 
 /** This build's test wallets (empty but on a dev server with the variable set). */
@@ -31,12 +33,12 @@ export function liveAlgosFor(owner: string | null | undefined, wallets: Readonly
 }
 
 /**
- * REAL BOTS (the Bots page): on the beta channel only (beta.valuedesk.so, whose door lets in only wallets on the beta
- * list - owner, 2026-11-02: "Beta only"), and for the wallets real algos are on for. The executor decides again
- * (apps/executor/src/service.ts liveBotFor: the beta channel AND the beta list); this only says what the page offers.
+ * REAL BOTS (the Bots page): for wallets on the beta list, on beta.valuedesk.so or the main site (owner, 2026-11-06),
+ * and for the wallets real algos are on for. The executor decides again for the wallet that signs
+ * (apps/executor/src/service.ts liveBotFor); this only says what the page offers.
  */
 export const BETA_CHANNEL = env?.VITE_CHANNEL === 'beta';
-export function liveBotsFor(owner: string | null | undefined, beta: boolean = BETA_CHANNEL, wallets: ReadonlySet<string> = LIVE_ALGOS_WALLETS): boolean {
+export function liveBotsFor(owner: string | null | undefined, beta: boolean = BETA_CHANNEL || hasBetaAccess(owner), wallets: ReadonlySet<string> = LIVE_ALGOS_WALLETS): boolean {
   return !!owner && (beta || liveAlgosFor(owner, wallets));
 }
 

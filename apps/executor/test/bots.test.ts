@@ -140,7 +140,7 @@ test('bots: delete (archive) takes an ended bot off the list and keeps its recor
   await cleanup();
 });
 
-test('bots: real bots only from the beta channel for a listed wallet (or the live-algo wallets); unreadable list: refused', async () => {
+test('bots: real bots only for a listed wallet, on the beta site or the main one (or the live-algo wallets); unreadable list: refused', async () => {
   const { svc, cleanup } = make({ EXECUTOR_BUILDER_URL: 'http://127.0.0.1:9/api/vs/builder/volume', EXECUTOR_BUILDER_TOKEN: 't' });
   const w = new Wallet();
   const other = new Wallet();
@@ -149,11 +149,12 @@ test('bots: real bots only from the beta channel for a listed wallet (or the liv
   for (const x of [w, other]) svc.acceptTerms(x.sign(svc.executorId, 'accept-terms', TERMS), main);
   const live = { ...MM, paper: false };
   BETA = [w.address];
-  // Listed, from beta: past the gate - it stops at the key it has not registered yet.
+  // Listed, from beta or from the main site: past the gate - it stops at the key it has not registered yet.
   assert.equal(await code(svc.algoStart(w.sign(svc.executorId, 'algo-start', { spec: live, seed: 1 }), beta)), '412:key');
-  // The same wallet from the main site, or another wallet from beta: refused.
-  assert.equal(await code(svc.algoStart(w.sign(svc.executorId, 'algo-start', { spec: live, seed: 2 }), main)), '403:paper-only');
+  assert.equal(await code(svc.algoStart(w.sign(svc.executorId, 'algo-start', { spec: live, seed: 2 }), main)), '412:key');
+  // A wallet that is not listed: refused from either.
   assert.equal(await code(svc.algoStart(other.sign(svc.executorId, 'algo-start', { spec: live, seed: 3 }), beta)), '403:paper-only');
+  assert.equal(await code(svc.algoStart(other.sign(svc.executorId, 'algo-start', { spec: live, seed: 6 }), main)), '403:paper-only');
   // A live algo that is not a bot is not opened by the beta list.
   assert.equal(await code(svc.algoStart(w.sign(svc.executorId, 'algo-start', { spec: { kind: 'twap', symbol: 'BTC-USD', side: 'buy', quantity: '0.01', durationMs: 600_000, slices: 10 }, seed: 4 }), beta)), '403:paper-only');
   await cleanup();

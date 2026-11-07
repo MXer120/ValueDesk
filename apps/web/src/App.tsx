@@ -73,11 +73,9 @@ const LeaderboardPage = lazyPage('leaderboard', () => import('./components/leade
 const PortfolioDashboard = lazyPage('portfolio', () => import('./dashboard/PortfolioDashboard').then((m) => m.PortfolioDashboard));
 const ScanDashboard = lazyPage('scan', () => import('./dashboard/ScanDashboard').then((m) => m.ScanDashboard));
 /* Bots (components/bots/): automated strategies on the ValueDesk executor. */
-// Bots: the page on the beta channel only (owner, 2026-11-02); on the main site the nav shows "coming soon" and
-// there is no page (router.ts SOON_TABS): nothing of it is built in.
-const BotsPage = BETA_CHANNEL
-  ? lazyPage('bots', () => import('./components/bots/BotsPage').then((m) => m.BotsPage))
-  : lazyPage('bots', () => Promise.resolve(() => null));
+// Bots: for wallets on the beta list, on the beta site and the main one alike (owner, 2026-11-06); the page
+// shows everyone else how to get access (beta/access.ts). Real bots are the executor's to allow.
+const BotsPage = lazyPage('bots', () => import('./components/bots/BotsPage').then((m) => m.BotsPage));
 /* The market strip below is shown on no page today, so this never loads. */
 const TickerBar = lazyPage('ticker', () => import('./components/Market').then((m) => m.TickerBar));
 /* Impressum, privacy policy, terms (src/legal): one chunk for the three, loaded
@@ -627,7 +625,7 @@ function AppShell() {
 
         {shown === 'explore' && (
           <Guarded name="Explore">
-            <Explore address={address} onScan={openScanAddress} onOpenCopy={openCopy} onOpenSymbol={openSymbol} />
+            <Explore address={address} onScan={openScanAddress} onOpenCopy={openCopy} onOpenSymbol={openSymbol} onOpenCopyPage={() => setTab('copy')} />
           </Guarded>
         )}
 

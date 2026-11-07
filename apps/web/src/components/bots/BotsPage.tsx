@@ -37,6 +37,7 @@ import { botName, botState, fmtPnl, STATE_WORD, type BotState } from './botWords
 import { useBots } from '../../bots/useBots';
 import { fleetSeries, fleetTotals } from '../../bots/fleet';
 import { DEFAULT_BOT_FEE_TENTHS, STRATEGY_INFO, botFeeWords, costPerMillion, draftFor, strategyOf, type Strategy } from '../../bots/presets';
+import { applyForBeta, useBetaAccessState } from '../../beta/access';
 import './bots.css';
 
 type Show = 'all' | 'running' | 'ended';
@@ -103,7 +104,30 @@ function FleetChart({ bots, children }: { bots: AlgoView[]; children?: ReactNode
   );
 }
 
+/** Bots are in beta (owner, 2026-11-06): a wallet on the beta list gets the page, everyone else the way to apply. */
 export function BotsPage({ address, provider }: { address: string | null; provider: Eip1193Provider | null }) {
+  const access = useBetaAccessState(address);
+  if (access === 'open') return <BotsPageOpen address={address} provider={provider} />;
+  return (
+    <div className="pf bots-locked">
+      <EmptyState
+        icon="chart"
+        title="Bots are in beta"
+        line={access === 'checking'
+          ? 'Checking whether this wallet has beta access…'
+          : <>Market-making and grid strategies that run around the clock, for beta testers for now. Apply on our Discord{address ? '; once your wallet is added, this page opens for it.' : ', then connect the wallet that was added.'}</>}
+        action={access === 'checking' ? undefined : (
+          <span className="bots-locked__actions">
+            <button type="button" className="empty-state__cta" onClick={applyForBeta}>Get access</button>
+            {!address && <button type="button" className="empty-state__cta empty-state__cta--quiet" onClick={() => void openConnectDialog()}>Connect wallet</button>}
+          </span>
+        )}
+      />
+    </div>
+  );
+}
+
+function BotsPageOpen({ address, provider }: { address: string | null; provider: Eip1193Provider | null }) {
   const live = useLiveCopy(address, provider);
   const signedIn = readiness(live, 'hosted').connected;
   const { bots, loading, error, start, act, stopAll, update } = useBots(address, signedIn);

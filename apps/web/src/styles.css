@@ -3299,3 +3299,13 @@ button.coh-pick__btn,
 .stale-build { display: flex; align-items: center; gap: var(--sp-2); margin: 0; padding: 10px 12px; color: var(--muted); font-size: var(--fs-xs); }
 .stale-build__btn { height: 24px; padding: 0 10px; border: 1px solid var(--panel-line); border-radius: var(--radius-md); background: transparent; color: var(--text); font: inherit; cursor: pointer; }
 .stale-build__btn:hover { border-color: var(--line); }
+
+/* Bots are in beta (NavBar.tsx): the name and a "Get access" pill, which opens the Discord. */
+.navlinks .navlink--access { border: 0; background: none; font: inherit; cursor: pointer; }
+.navlinks .navlink--access:hover { color: var(--text); background: none; }
+.navlinks .navlink--access .dv-devtag { margin-left: 0; }
+/* The navbar's wordmark carries the Beta tag on every channel now (owner, 2026-11-06). */
+.brand .brand__beta { margin-left: 6px; }
+/* The Trade menu's Bots row while it is in beta: a button that opens the Discord (NavTrade.tsx). */
+.navtrade__row.is-access { width: 100%; border: 0; background: none; font: inherit; text-align: left; cursor: pointer; }
+.navtrade__text b .dv-devtag--beta { margin-left: 0; background: color-mix(in srgb, #4c8dff 18%, transparent); color: #4c8dff; }

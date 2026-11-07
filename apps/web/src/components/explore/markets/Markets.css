@@ -279,3 +279,10 @@
   .mk-search { flex-basis: 100%; }
   .mk-pulse__stats { gap: 8px 16px; }
 }
+
+/* Traders to copy (Markets.tsx): the Copy page's own cards, four across. */
+.mk-traders { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--sp-3); }
+@media (max-width: 1200px) { .mk-traders { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 560px) { .mk-traders { grid-template-columns: minmax(0, 1fr); } }
+.mk-more { height: auto; min-height: 0; padding: 0; border: 0; background: none; color: var(--muted); font: inherit; font-size: var(--fs-xs); cursor: pointer; white-space: nowrap; }
+.mk-more:hover { color: var(--text); background: none; }
