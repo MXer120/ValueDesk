@@ -9,6 +9,8 @@
  * server keeps the time - and is dropped here at the first 401.
  */
 
+import { forgetAll } from './cache';
+
 export interface AdminSession {
   token: string;
   wallet: string;
@@ -37,6 +39,10 @@ export const onSession = (cb: (s: AdminSession | null) => void): (() => void) =>
 };
 
 export function saveSession(s: AdminSession | null): void {
+  // Another wallet signed in: the kept copies of the pages go (cache.ts; their keys name the wallet anyway).
+  // A session that simply ran out keeps them, so the next sign-in draws at once; "Sign out" forgets them.
+  const before = loadSession();
+  if (s && before && before.wallet !== s.wallet) forgetAll();
   try {
     if (s) localStorage.setItem(KEY, JSON.stringify(s));
     else localStorage.removeItem(KEY);
@@ -52,9 +58,24 @@ export class AdminApiError extends Error {
   }
 }
 
+/** Each call's time and size, the last 100, for measuring (the session menu lists them; nothing leaves the page). */
+export interface CallTiming { path: string; ms: number; bytes: number; status: number; at: number }
+export const timings: CallTiming[] = [];
+function note(t: CallTiming): void {
+  timings.push(t);
+  if (timings.length > 100) timings.shift();
+}
+
+/** Sign out on purpose: the session and every kept copy of the pages. */
+export function signOutHere(): void {
+  forgetAll();
+  saveSession(null);
+}
+
 /** One call. `blob`: the answer's bytes (a screenshot). A 401 `session` signs this page out. */
 export async function call<T = Record<string, unknown>>(path: string, body: unknown = {}, o: { blob?: boolean; anonymous?: boolean } = {}): Promise<T> {
   const s = o.anonymous ? null : loadSession();
+  const started = performance.now();
   let r: Response;
   try {
     r = await fetch(`/api/admin/${path}`, {
@@ -70,11 +91,14 @@ export async function call<T = Record<string, unknown>>(path: string, body: unkn
   }
   if (r.ok && o.blob) return (await r.blob()) as T;
   let j: Record<string, unknown> = {};
+  let text = '';
   try {
-    j = (await r.json()) as Record<string, unknown>;
+    text = await r.text();
+    j = JSON.parse(text) as Record<string, unknown>;
   } catch {
     /* not JSON (a 404 from the edge, say) */
   }
+  note({ path, ms: Math.round(performance.now() - started), bytes: text.length, status: r.status, at: Date.now() });
   if (!r.ok) {
     const code = typeof j.code === 'string' ? j.code : undefined;
     if (r.status === 401 && code === 'session' && !o.anonymous) saveSession(null);

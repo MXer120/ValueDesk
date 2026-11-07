@@ -350,3 +350,35 @@ test('route: public, cached 30 s in the process and at the edge', async () => {
   await app.close();
   s.close();
 });
+
+// --- the admin suite reads the same judgement (admin/statusView.ts judge) -------------------------
+
+test('admin status: the dev page says what the public page says (maintenance, not the raw degraded probe), plus which check failed', async () => {
+  const { judge } = await import('../src/admin/statusView.js');
+  const { shownState } = await import('../src/ops/statusModel.js');
+  const s = store();
+  const t = Date.UTC(2026, 10, 7, 15, 20, 30);
+  s.record([
+    { service: 'website', state: 'up', ms: 80 },
+    { service: 'api', state: 'up', ms: 40 },
+    { service: 'executor', state: 'up', ms: 300 },
+    { service: 'indexer', state: 'degraded', ms: null, why: ['stopping'] },
+  ], t);
+  s.notices.create({ kind: 'maintenance', title: 'Update v0.2.190', components: ['api', 'indexer'], startsAt: t - 60_000, endsAt: t + 9 * 60_000 }, t - 60_000);
+  const report = s.report(t);
+  const j = judge(report, s.lastChecks(), t);
+  const indexer = j.services.find((x) => x.id === 'indexer')!;
+  assert.equal(indexer.probe, 'degraded');
+  assert.equal(indexer.shown, shownState('degraded', 'indexer', report.notices ?? [], t), 'the public page judges with the same function');
+  assert.equal(indexer.shown, 'maintenance');
+  assert.equal(j.overall, 'maintenance');
+  assert.deepEqual(indexer.why, [{ code: 'stopping', text: 'the indexer is restarting' }]);
+  assert.equal(indexer.notices[0]!.title, 'Update v0.2.190');
+  // The public report never carries the reasons.
+  assert.equal(JSON.stringify(report).includes('stopping'), false);
+  // A reason from an older round is not shown beside a newer sample.
+  s.record([{ service: 'indexer', state: 'up', ms: null }], t + 60_000);
+  const later = judge(s.report(t + 60_000), { at: t - 60_000, checks: [{ service: 'indexer', state: 'degraded', ms: null, why: ['lag'] }] }, t + 60_000);
+  assert.deepEqual(later.services.find((x) => x.id === 'indexer')!.why, []);
+  s.close();
+});

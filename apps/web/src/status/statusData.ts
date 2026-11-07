@@ -11,12 +11,14 @@
  */
 import {
   IMPACT_TEXT, STAGE_TEXT, STATUS_SERVICES, dayToneWith, fmtUtc, fmtWindow, minutesExpected, noticeLive, noticePhase,
-  noticeSpan, noticesOnDay, parseNotice,
-  type DayTone, type DayToneShown, type DayTuple, type HealthNotice, type Impact, type Notice, type NoticePhase, type ServiceId,
-  type ServiceState, type StatusReport,
+  noticeSpan, noticesOnDay, overallOf, overallShown, parseNotice, shownState,
+  type DayTone, type DayToneShown, type DayTuple, type HealthNotice, type Notice, type NoticePhase, type ServiceId,
+  type ServiceState, type StatusReport, type Overall, type OverallShown, type ShownState,
 } from '@sign/ops/statusModel.js';
 import { fmtFixed } from '../numStyle';
 
+export type { Overall, OverallShown, ShownState };
+export { overallOf, overallShown, shownState };
 export type { DayTone, DayToneShown, DayTuple, HealthNotice, Notice, NoticePhase, ServiceState, StatusReport };
 export { IMPACT_TEXT, STAGE_TEXT, fmtUtc, fmtWindow, noticeLive, noticePhase };
 
@@ -66,17 +68,6 @@ export async function loadStatus(f: typeof fetch = fetch, now = Date.now): Promi
   return { kind: 'unreachable', at: now(), executor: await checkExecutor(f, now) };
 }
 
-export type Overall = 'operational' | 'degraded' | 'outage' | 'unknown';
-
-/** The headline: every known service up, any degraded, or any down. */
-export function overallOf(states: readonly ServiceState[]): Overall {
-  const known = states.filter((s) => s !== 'unknown');
-  if (!known.length) return 'unknown';
-  if (known.includes('down')) return 'outage';
-  if (known.includes('degraded')) return 'degraded';
-  return 'operational';
-}
-
 export const OVERALL_TEXT: Record<Overall, string> = {
   operational: 'All systems operational',
   degraded: 'Some systems are degraded',
@@ -111,45 +102,10 @@ export function fmtUptime(pct: number | null): string {
 
 // --- incidents and maintenance on the page -------------------------------------------------
 
-/** What a service's pill says: the probe's verdict, made worse by an open incident, or maintenance. */
-export type ShownState = ServiceState | 'partial' | 'maintenance';
-
-const STATE_RANK: Record<ShownState, number> = { unknown: 0, up: 1, maintenance: 2, degraded: 3, partial: 4, down: 5 };
-const IMPACT_STATE: Record<Impact, ShownState> = { minor: 'degraded', major: 'partial', critical: 'down' };
-
-/**
- * A service's state with the owner's notices: an open incident on it is at least its
- * impact (minor degraded, major partial outage, critical down); maintenance in
- * progress shows as maintenance unless an incident is open on it too.
- */
-export function shownState(probe: ServiceState, service: ServiceId, notices: readonly Notice[], now: number): ShownState {
-  let state: ShownState = probe;
-  let incident = false;
-  let maintenance = false;
-  for (const n of notices) {
-    if (!n.components.includes(service) || !noticeLive(n, now)) continue;
-    if (n.kind === 'maintenance') maintenance = true;
-    else if (n.impact) {
-      incident = true;
-      const s = IMPACT_STATE[n.impact];
-      if (STATE_RANK[s] > STATE_RANK[state]) state = s;
-    }
-  }
-  return maintenance && !incident ? 'maintenance' : state;
-}
+// What a service's pill says (shownState, overallShown) lives in @sign/ops/statusModel.ts: the admin
+// suite's Status and Overview judge with the very same code, so the two pages never disagree.
 
 export const SHOWN_TEXT: Record<ShownState, string> = { ...STATE_TEXT, partial: 'Partial outage', maintenance: 'Maintenance' };
-
-export type OverallShown = Overall | 'partial' | 'maintenance';
-
-/** The headline over the shown states: a service down outranks one partly down, then degraded, then maintenance. */
-export function overallShown(states: readonly ShownState[]): OverallShown {
-  if (states.includes('down')) return 'outage';
-  if (states.includes('partial')) return 'partial';
-  if (states.includes('degraded')) return 'degraded';
-  if (states.includes('maintenance')) return 'maintenance';
-  return overallOf(states.filter((s): s is ServiceState => s !== 'maintenance' && s !== 'partial'));
-}
 
 export const OVERALL_SHOWN_TEXT: Record<OverallShown, string> = { ...OVERALL_TEXT, partial: 'Partial outage', maintenance: 'Maintenance in progress' };
 

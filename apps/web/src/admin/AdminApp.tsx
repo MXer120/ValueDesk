@@ -13,12 +13,14 @@
  * the wallet again.
  */
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { call, loadSession, onSession, saveSession, type AdminSession } from './api';
+import { call, loadSession, onSession, saveSession, signOutHere, timings, type AdminSession } from './api';
+import { setTheme, useTheme, type Theme } from '../theme';
+import { Seg } from './ui';
 import { releaseWallet, signAction, signIn, type Connected } from './wallet';
 import { WalletContext, WalletPicker } from './WalletPicker';
 import { isUserRejection } from '../wallet';
 import { BrandMark } from '../components/BrandMark';
-import { duration, short } from './format';
+import { bytes, duration, short } from './format';
 import { Overview } from './pages/Overview';
 import { Tickets } from './pages/Tickets';
 import { Users } from './pages/Users';
@@ -33,17 +35,22 @@ const PAGES: Array<{ id: string; label: string; render: (arg: string) => ReactNo
   { id: 'overview', label: 'Overview', render: () => <Overview /> },
   { id: 'board', label: 'Board', render: () => <Board /> },
   { id: 'tickets', label: 'Tickets', render: (arg) => <Tickets selected={arg ? Number(arg) : null} /> },
+  // The beta list: who gets real bots and every algo order (owner 2026-11-07: "whitelist address on dev.valuedesk.so").
+  { id: 'access', label: 'Access', render: () => <Beta /> },
   { id: 'users', label: 'Users', render: () => <Users /> },
   { id: 'revenue', label: 'Volume & fees', render: () => <Revenue /> },
   { id: 'analytics', label: 'Analytics', render: () => <Analytics /> },
   { id: 'status', label: 'Status', render: () => <Status /> },
-  { id: 'beta', label: 'Beta', render: () => <Beta /> },
   { id: 'audit', label: 'Audit', render: () => <Audit /> },
 ];
 
+/** Old links that still land: #/beta is Access now. */
+const ALIASES: Record<string, string> = { beta: 'access' };
+
 /** #/tickets/12 -> ['tickets', '12']. */
-function routeOf(hash: string): [string, string] {
-  const [page = 'overview', arg = ''] = hash.replace(/^#\/?/, '').split('/');
+export function routeOf(hash: string): [string, string] {
+  const [raw = 'overview', arg = ''] = hash.replace(/^#\/?/, '').split('/');
+  const page = ALIASES[raw] ?? raw;
   return [PAGES.some((p) => p.id === page) ? page : 'overview', arg];
 }
 
@@ -145,7 +152,10 @@ function SessionMenu({ session, connected, ensure }: { session: AdminSession; co
       removeEventListener('keydown', key);
     };
   }, [open]);
-  const signOut = () => void call('signout').catch(() => null).finally(() => saveSession(null));
+  const theme = useTheme();
+  const signOut = () => void call('signout').catch(() => null).finally(() => signOutHere());
+  // The slowest of this tab's last requests: what "it takes ages" was, measured.
+  const slow = open ? [...timings].sort((a, b) => b.ms - a.ms).slice(0, 4) : [];
   const everywhere = async () => {
     setBusy(true);
     setError(null);
@@ -153,7 +163,7 @@ function SessionMenu({ session, connected, ensure }: { session: AdminSession; co
       const c = await ensure();
       const action = await signAction(c, 'sessions.revoke', 'all sessions', {}, 'Sign every admin session out, this one too');
       await call('sessions/revoke', { action });
-      saveSession(null);
+      signOutHere();
     } catch (e) {
       setError(isUserRejection(e) ? 'You declined - nothing changed.' : e instanceof Error ? e.message : String(e));
     } finally {
@@ -172,6 +182,18 @@ function SessionMenu({ session, connected, ensure }: { session: AdminSession; co
           <div className="menu-group-label">Session</div>
           <p className="dv-menu-line">Ends in {duration(session.expiresAt - Date.now())}</p>
           <p className="dv-menu-line">{connected ? `Wallet for changes: ${connected.name}` : 'Wallet for changes: asked at the first change'}</p>
+          <div className="menu-group-label">Theme</div>
+          <div className="dv-menu-seg">
+            <Seg label="Theme" value={theme} onChange={(t: Theme) => setTheme(t)} options={[{ value: 'dark', label: 'Dark' }, { value: 'light', label: 'Light' }]} />
+          </div>
+          {slow.length > 0 && (
+            <>
+              <div className="menu-group-label">Slowest requests in this tab</div>
+              {slow.map((t, i) => (
+                <p key={i} className="dv-menu-line dv-menu-timing"><span className="dv-mono">{t.path}</span><span>{t.ms} ms · {bytes(t.bytes)}</span></p>
+              ))}
+            </>
+          )}
           <div className="menu-group">
             <button type="button" role="menuitem" className="menu-row" onClick={signOut}><span className="menu-row__label">Sign out</span></button>
             <button type="button" role="menuitem" className="menu-row" disabled={busy} onClick={() => void everywhere()}>

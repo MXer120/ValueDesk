@@ -418,3 +418,58 @@ const sameDay = (a: number, b: number): boolean => new Date(a).toISOString().sli
 export function fmtWindow(from: number, to: number): string {
   return `${fmtUtc(from).replace(/ UTC$/, '')} – ${sameDay(from, to) ? fmtUtc(to, { date: false }) : fmtUtc(to)}`;
 }
+
+// --- what a service's pill says: the public page and the admin suite alike ---------------------
+
+export type Overall = 'operational' | 'degraded' | 'outage' | 'unknown';
+
+/** The headline: every known service up, any degraded, or any down. */
+export function overallOf(states: readonly ServiceState[]): Overall {
+  const known = states.filter((s) => s !== 'unknown');
+  if (!known.length) return 'unknown';
+  if (known.includes('down')) return 'outage';
+  if (known.includes('degraded')) return 'degraded';
+  return 'operational';
+}
+
+/** What a service's pill says: the probe's verdict, made worse by an open incident, or maintenance. */
+export type ShownState = ServiceState | 'partial' | 'maintenance';
+
+const STATE_RANK: Record<ShownState, number> = { unknown: 0, up: 1, maintenance: 2, degraded: 3, partial: 4, down: 5 };
+const IMPACT_STATE: Record<Impact, ShownState> = { minor: 'degraded', major: 'partial', critical: 'down' };
+
+/**
+ * A service's state with the owner's notices: an open incident on it is at least its
+ * impact (minor degraded, major partial outage, critical down); maintenance in
+ * progress shows as maintenance unless an incident is open on it too.
+ *
+ * The public Status page and the admin suite (dev.valuedesk.so) both judge with this: the dev page
+ * once showed the raw probe ("Indexer: Degraded") during a release the public page called
+ * maintenance (owner 2026-11-07).
+ */
+export function shownState(probe: ServiceState, service: ServiceId, notices: readonly Notice[], now: number): ShownState {
+  let state: ShownState = probe;
+  let incident = false;
+  let maintenance = false;
+  for (const n of notices) {
+    if (!n.components.includes(service) || !noticeLive(n, now)) continue;
+    if (n.kind === 'maintenance') maintenance = true;
+    else if (n.impact) {
+      incident = true;
+      const s = IMPACT_STATE[n.impact];
+      if (STATE_RANK[s] > STATE_RANK[state]) state = s;
+    }
+  }
+  return maintenance && !incident ? 'maintenance' : state;
+}
+
+export type OverallShown = Overall | 'partial' | 'maintenance';
+
+/** The headline over the shown states: a service down outranks one partly down, then degraded, then maintenance. */
+export function overallShown(states: readonly ShownState[]): OverallShown {
+  if (states.includes('down')) return 'outage';
+  if (states.includes('partial')) return 'partial';
+  if (states.includes('degraded')) return 'degraded';
+  if (states.includes('maintenance')) return 'maintenance';
+  return overallOf(states.filter((s): s is ServiceState => s !== 'maintenance' && s !== 'partial'));
+}

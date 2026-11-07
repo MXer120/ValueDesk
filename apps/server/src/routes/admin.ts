@@ -14,7 +14,9 @@
  *   POST /api/admin/builder          {days?}: volume, fees, wallets, tiers (admin/builderStats.ts)
  *   POST /api/admin/users            every wallet ValueDesk knows: volume, fees, tier, activity
  *   POST /api/admin/analytics        {days?}: visitors, pages, time, places, sources, features
- *   POST /api/admin/status           the status of everything (admin/statusView.ts)
+ *   POST /api/admin/overview         the first page in one answer: status as the public page judges it, open
+ *                                    tickets, 14 days of volume and fees, the top 5 wallets, 7 days of visitors
+ *   POST /api/admin/status           the status of everything (admin/statusView.ts), with the public judgement
  *   POST /api/admin/audit            {before?, kind?}: the audit log, newest first
  *   POST /api/admin/page-error       {message, stack, where, route, build, browser}: an error the page hit,
  *                                    into the audit log (the page shows it too - apps/web/src/admin/Crash.tsx)
@@ -59,6 +61,8 @@ import { AdminStore, BOARD_DETAIL_MAX, BOARD_STATUSES, BOARD_TITLE_MAX, TICKET_S
 import { builderOverview, builderUsers, syncFeeOrders } from '../admin/builderStats.js';
 import { statusOfEverything, type StatusSources } from '../admin/statusView.js';
 import type { AdminActionName } from '../admin/signIn.js';
+import { swr, type Swr } from '../admin/swr.js';
+import { BETA_LIST_TTL_MS } from '../beta/gate.js';
 
 const MINUTE = 60_000;
 const DAY = 86_400_000;
@@ -86,6 +90,10 @@ export const REPLY_MAX = 4000;
 export const BETA_LABEL_MAX = 60;
 /** How often the builder ledger's counted orders are copied (admin/builderStats.ts syncFeeOrders). */
 export const FEE_SYNC_MS = 5 * MINUTE;
+/** A read copies the counted orders again only after this long (the page asks several routes at once). */
+export const SYNC_GAP_MS = 30_000;
+/** How long the executor keeps a wallet's beta answer (apps/executor/src/service.ts betaListed): a change counts for bots within it. */
+export const EXECUTOR_BETA_CACHE_MS = 60_000;
 
 export interface AdminRouteOptions {
   store?: AdminStore;
@@ -105,7 +113,7 @@ export interface AdminRouteOptions {
   limiter?: KeyedLimiter;
   limits?: AdminLimits;
   /** The builder account's balances on SoDEX (tests); default a GET of the gateway, kept a minute. */
-  builderAccount?: () => Promise<BuilderAccount | null>;
+  builderAccount?: (builderId: number) => Promise<BuilderAccount | null>;
   /** Our own wallets: always listed, marked internal (VALUESCAN_ADMIN_INTERNAL_WALLETS). */
   internal?: readonly string[];
   /** Every wallet the copy executor knows (tests); default a GET of its /internal/users, kept a minute. */
@@ -229,6 +237,16 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOptions 
   const store = (): AdminStore => (storeOpen ??= new AdminStore());
   let feedbackOpen = opts.feedback ?? null;
   const feedback = (): FeedbackStore => (feedbackOpen ??= new FeedbackStore());
+  // The slow outside reads, answered from the last value and refreshed behind it (admin/swr.ts). Tests
+  // that hand their own reads in get them called every time, as before.
+  const executorUsersSwr = swr(async () => liveExecutorUsers(), { freshMs: 60_000, maxStaleMs: 30 * MINUTE });
+  const executorUsers = opts.executorUsers ?? (async () => (await executorUsersSwr.get()).value);
+  const accountSwr = new Map<number, Swr<BuilderAccount | null>>();
+  const builderAccount = opts.builderAccount ?? (async (builderId: number) => {
+    let s = accountSwr.get(builderId);
+    if (!s) accountSwr.set(builderId, (s = swr(() => liveBuilderAccount(builderId), { freshMs: 60_000, maxStaleMs: 30 * MINUTE })));
+    return (await s.get()).value;
+  });
 
   const countryOf = (req: FastifyRequest): string | null => {
     if (!hosted) return null;
@@ -421,14 +439,20 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOptions 
 
   // --- numbers --------------------------------------------------------------------------------
 
+  // The counted orders are copied at most every SYNC_GAP_MS on a read (and every FEE_SYNC_MS by the timer):
+  // every page used to copy them again on each of its requests.
+  let syncedAt = -Infinity;
   const ledgerAndTiers = (): { ledger: DatabaseSync; cfg: TiersConfig } | null => {
     const cfg = opts.tiers?.() ?? null;
     const ledger = opts.ledger?.() ?? null;
     if (!cfg || !ledger) return null;
-    try {
-      syncFeeOrders(ledger, store(), cfg.builderId);
-    } catch (e) {
-      app.log.warn({ err: e instanceof Error ? e.message : String(e) }, 'admin: copying the counted orders failed');
+    if (now() - syncedAt >= SYNC_GAP_MS) {
+      try {
+        syncFeeOrders(ledger, store(), cfg.builderId);
+        syncedAt = now();
+      } catch (e) {
+        app.log.warn({ err: e instanceof Error ? e.message : String(e) }, 'admin: copying the counted orders failed');
+      }
     }
     return { ledger, cfg };
   };
@@ -443,7 +467,7 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOptions 
     const days = Math.max(7, Math.min(120, Number(bodyOf(req).days) || 30));
     const l = ledgerAndTiers();
     if (!l) return { ok: true, builder: null };
-    const account = await (opts.builderAccount ?? (() => liveBuilderAccount(l.cfg.builderId)))().catch(() => null);
+    const account = await builderAccount(l.cfg.builderId).catch(() => null);
     return { ok: true, builder: builderOverview(l.ledger, store(), l.cfg, now(), days), account, tiers: l.cfg.tiers, volumeDays: l.cfg.volumeDays };
   });
 
@@ -452,10 +476,12 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOptions 
     const builder = l ? builderUsers(l.ledger, store(), l.cfg, now()) : [];
     const activity = opts.analytics ? opts.analytics().walletActivity() : new Map();
     const chats = new Map(feedback().adminThreads().filter((t) => t.wallet).map((t) => [t.wallet!, t.id]));
-    const fromExecutor = await (opts.executorUsers ?? (() => liveExecutorUsers()))().catch(() => null);
+    const fromExecutor = await executorUsers().catch(() => null);
     const executor = new Map((fromExecutor ?? []).map((u) => [u.owner, u]));
     const all = new Set<string>([...builder.map((u) => u.address), ...activity.keys(), ...chats.keys(), ...executor.keys(), ...internal]);
     const byAddress = new Map(builder.map((u) => [u.address, u]));
+    const beta = new Set(store().betaWallets().map((w) => w.address));
+    for (const a of beta) all.add(a);
     const users = [...all].map((address) => ({
       address,
       builder: byAddress.get(address) ?? null,
@@ -463,6 +489,7 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOptions 
       executor: executor.get(address) ?? null,
       ticket: chats.get(address) ?? null,
       internal: internal.has(address),
+      beta: beta.has(address),
     }));
     // executorRead false: server 2 could not be read, so its followers and signers are missing from the list.
     return { ok: true, users, builderId: l?.cfg.builderId ?? null, executorRead: fromExecutor !== null };
@@ -474,7 +501,59 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOptions 
     const t = now();
     const to = (Math.floor(t / DAY) + 1) * DAY;
     const a = opts.analytics();
-    return { ok: true, analytics: a.summary(to - days * DAY, to, t), recent: a.recentVisits(50) };
+    return { ok: true, analytics: a.summary(to - days * DAY, to, t), recent: a.recentVisits(25) };
+  });
+
+  /**
+   * The first page in one small answer: only what it shows. It used to ask five routes (tickets, builder,
+   * analytics, status, users) for ~25 KB and waited on the slowest - the user list with its read of server 2
+   * - to draw the top five wallets. Status here is the public page's judgement (admin/statusView.ts judge).
+   */
+  app.post('/api/admin/overview', { bodyLimit: 1024 }, async () => {
+    const t = now();
+    const statuses = store().ticketStatuses();
+    const threads = feedback().adminThreads().map((x) => ({ ...x, status: statusOf(statuses, x) }));
+    const open = threads.filter((x) => x.status === 'open').sort((a, b) => b.lastAt - a.lastAt);
+    const l = ledgerAndTiers();
+    const [account, everything] = await Promise.all([
+      l ? builderAccount(l.cfg.builderId).catch(() => null) : Promise.resolve(null),
+      opts.status ? statusOfEverything(opts.status, t) : Promise.resolve(null),
+    ]);
+    let builder: Record<string, unknown> | null = null;
+    let top: Array<{ address: string; volume30d: number; fees: number }> = [];
+    if (l) {
+      const b = builderOverview(l.ledger, store(), l.cfg, t, 14);
+      builder = { builderId: b.builderId, volume: b.volume, fees: b.fees, wallets: b.wallets, days: b.days.map((d) => ({ day: d.day, volume: d.perps + d.spot, fees: d.feePerps + d.feeSpot })) };
+      top = builderUsers(l.ledger, store(), l.cfg, t)
+        .filter((u) => u.volume30d > 0)
+        .sort((x, y) => y.volume30d - x.volume30d)
+        .slice(0, 5)
+        .map((u) => ({ address: u.address, volume30d: u.volume30d, fees: u.fees.perps + u.fees.spot }));
+    }
+    let visitors: Record<string, unknown> | null = null;
+    if (opts.analytics) {
+      const to = (Math.floor(t / DAY) + 1) * DAY;
+      const s = opts.analytics().summary(to - 7 * DAY, to, t) as { totals?: Record<string, unknown> };
+      visitors = s.totals ?? null;
+    }
+    const exec = everything?.executor as { reachable?: boolean; ms?: number; readAt?: number; health?: Record<string, unknown> } | undefined;
+    return {
+      ok: true,
+      at: t,
+      status: everything ? {
+        judged: everything.judged,
+        executor: exec ? {
+          reachable: !!exec.reachable, ms: exec.ms ?? null, readAt: exec.readAt ?? null,
+          ok: !!exec.health?.ok, brake: exec.health?.brake ?? null, copies: exec.health?.copies ?? null, algos: exec.health?.algos ?? null,
+        } : null,
+      } : null,
+      tickets: { open: open.length, total: threads.length, latest: open.slice(0, 5).map((x) => ({ id: x.id, lastAt: x.lastAt, lastText: x.lastText.slice(0, 160), category: x.category })) },
+      builder,
+      account,
+      top,
+      visitors,
+      beta: store().betaWallets().length,
+    };
   });
 
   app.post('/api/admin/status', { bodyLimit: 1024 }, async () => {
@@ -499,7 +578,16 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOptions 
 
   // --- the beta list (beta.valuedesk.so) ------------------------------------------------------
 
-  app.post('/api/admin/beta', { bodyLimit: 1024 }, async () => ({ ok: true, wallets: store().betaWallets() }));
+  /**
+   * The list, and how fast a change counts where: the beta site's lock reads it every BETA_LIST_TTL_MS
+   * (beta/gate.ts), the main site's page asks per wallet (routes/builder.ts /api/vs/beta/listed, kept a
+   * minute in the tab), the executor asks per wallet and keeps the answer EXECUTOR_BETA_CACHE_MS.
+   */
+  app.post('/api/admin/beta', { bodyLimit: 1024 }, async () => ({
+    ok: true,
+    wallets: store().betaWallets(),
+    takesEffect: { betaSiteMs: BETA_LIST_TTL_MS, mainSiteMs: 60_000, executorMs: EXECUTOR_BETA_CACHE_MS },
+  }));
 
   app.post('/api/admin/beta/add', { bodyLimit: 4 * 1024 }, async (req, reply) => {
     const b = bodyOf(req);
