@@ -78,7 +78,7 @@ h.test('before a wallet: the sidebar Bots group, Overview, latency, Explore and 
   }
   await page.getByRole('heading', { name: 'Bots', exact: true }).waitFor();
   assert.ok(await page.getByRole('button', { name: 'Connect wallet' }).first().isVisible());
-  for (const name of ['Market maker', 'Grid']) assert.ok(await page.getByRole('button', { name: new RegExp(name) }).first().isVisible(), name);
+  for (const name of ['Market maker', 'Grid']) assert.ok(await page.locator('.bots-strat__name', { hasText: name }).first().isVisible(), name);
   assert.equal(await page.getByText('Volume maker', { exact: true }).count(), 0, 'the volume maker is no longer offered');
   // The latency card: the chart or its empty state, never an error.
   await page.locator('.bots-latcard').waitFor();
@@ -97,10 +97,10 @@ h.test('before a wallet: the sidebar Bots group, Overview, latency, Explore and 
   } else await go(page, 'Explore', 'Explore');
   await page.locator('.bots-xtable tbody tr').first().waitFor({ timeout: 20_000 });
   await shot(page, 'explore');
-  await page.getByRole('tab', { name: 'Any room', exact: true }).click();
+  await page.getByRole('radio', { name: 'Any room', exact: true }).click();
   const rows = await page.locator('.bots-xtable tbody tr.bots-row').count();
   assert.ok(rows >= 5, `markets listed: ${rows}`);
-  await page.getByRole('textbox', { name: 'Search markets' }).fill('ETH');
+  await page.getByRole('searchbox', { name: 'Search markets' }).fill('ETH');
   const eth = page.locator('.bots-xtable tbody tr.bots-row', { hasText: 'ETH' }).first();
   await eth.click();
   await page.getByText('Weekday and weekend').waitFor();
@@ -125,7 +125,7 @@ h.test('a practice market maker: set up, New bot with the gate, its page, settin
   // New bot: the market maker by default (R10), Steady, the market gate on.
   await go(page, 'New bot', 'New bot');
   assert.equal(await page.getByRole('radio', { name: /Market maker/ }).getAttribute('aria-checked'), 'true');
-  await page.getByRole('button', { name: 'Steady', exact: true }).click();
+  await page.getByRole('radio', { name: 'Steady', exact: true }).click();
   const gate = page.getByRole('switch', { name: 'Market gate' });
   await gate.click();
   await until(page, async () => (await gate.getAttribute('aria-checked')) === 'true', 'gate on');
@@ -145,7 +145,7 @@ h.test('a practice market maker: set up, New bot with the gate, its page, settin
   await shot(page, 'bot');
 
   // Settings: a new order size and the gate off, one signature.
-  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.getByRole('tab', { name: 'Settings', exact: true }).click();
   await page.getByRole('textbox', { name: 'Each side' }).fill('15');
   await page.getByRole('switch', { name: 'Market gate' }).click();
   await until(page, async () => /2 changes/.test((await page.locator('.bots-savebar').textContent()) ?? ''), 'two changes');
@@ -164,17 +164,17 @@ h.test('a practice market maker: set up, New bot with the gate, its page, settin
   await head.getByRole('button', { name: 'Resume', exact: true }).click();
   await head.getByRole('button', { name: 'Pause', exact: true }).waitFor({ state: 'visible', timeout: 20_000 });
   assert.deepEqual(signedKinds(wallet, mark), ['algo', 'algo']);
-  await page.getByRole('button', { name: 'Activity', exact: true }).click();
+  await page.getByRole('tab', { name: 'Activity', exact: true }).click();
   await page.locator('.bots-log li').first().waitFor({ state: 'visible', timeout: 20_000 });
   await shot(page, 'activity');
 
   // The overview lists it; search finds it and misses well.
   await go(page, 'Overview', 'Bots');
-  const row = page.locator('tr.bots-row').filter({ hasText: 'BTC-USD' }).first();
+  const row = page.locator('.bots-row').filter({ hasText: 'BTC' }).first();
   await row.waitFor({ state: 'visible' });
-  await page.getByRole('textbox', { name: 'Search bots' }).fill('zzz');
+  await page.getByRole('searchbox', { name: 'Search bots' }).fill('zzz');
   await page.getByText('No bot matches').waitFor();
-  await page.getByRole('textbox', { name: 'Search bots' }).fill('BTC');
+  await page.getByRole('searchbox', { name: 'Search bots' }).fill('BTC');
   await row.waitFor({ state: 'visible' });
   await shot(page, 'overview');
 

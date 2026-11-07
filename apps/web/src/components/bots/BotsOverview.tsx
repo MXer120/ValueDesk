@@ -1,63 +1,43 @@
 /**
- * Bots > Overview: the fleet, however large. Its figures; the executor's latency to SoDEX (LatencyChart); volume
- * and net PnL over time; and every bot in one list - search, filter by state, sort by any column, 25 a page, and
- * pause / resume / stop for one bot or every bot shown.
+ * Bots > Overview: the fleet, however large, in the Bots kit (kit/kit.tsx, TUFFUI's layers). Its figures as KPI
+ * cards; this wallet's own latency to SoDEX and volume / net PnL side by side; and every bot as tiles (a handful)
+ * or a list (many): search, filter by state, sort by any column, 25 a page, pause / resume / stop for one bot or
+ * every bot shown.
  */
-import { useMemo, useState, type ReactNode } from 'react';
+import { useMemo, useState } from 'react';
 import type { AlgoView } from '@copy-engine';
-import { DASH, fmtUsd, signClass } from '../../format';
+import { DASH, fmtUsd } from '../../format';
 import { SetupProgress } from '../../copy/CopySetupSheet';
 import { openConnectDialog } from '../account/connect';
-import { Card, Stat } from '../portfolio/parts';
 import { CoinIcon } from '../CoinIcon';
-import { EmptyState } from '../EmptyState';
 import { SeriesChart, type ChartSeries } from '../datachart/SeriesChart';
 import { fleetSeries, fleetTotals } from '../../bots/fleet';
-import { STRATEGY_INFO, botFeeWords, costPerMillion, draftFor, strategyOf } from '../../bots/presets';
+import { STRATEGIES, STRATEGY_INFO, botFeeWords, costPerMillion, draftFor, strategyOf, type Strategy } from '../../bots/presets';
 import { useBotLatency } from '../../bots/data';
 import { hostedExecutor } from '../../copy/executor';
 import { goBots, type BotsView } from '../../bots/routes';
 import { BotIcon } from './BotIcon';
-import { StrategyCards } from './BotForm';
 import { LatencyChart, mergeRegions, type ChartMark } from './LatencyChart';
-import { botName, botState, fmtPnl, STATE_WORD, type BotState } from './botWords';
-import { BotsHead, isLive, type BotsCtx } from './BotsPage';
+import { botName, botState, fmtPnl, statusWords } from './botWords';
+import { BotsHead, StatePill, isLive, type BotsCtx } from './BotsPage';
+import { Button, EmptyState, Icon, Panel, ProgressBar, SearchField, Segmented, Shell, ShellHeader, Skeleton, StatCard, StatusPill } from './kit/kit';
 
 const PAGE = 25;
 export const fmtCost = (cpm: number | null | undefined): string => (cpm === null || cpm === undefined ? DASH : cpm < 0 ? `earns ${fmtUsd(-cpm, 0)}` : fmtUsd(cpm, 0));
-
-export function StatePill({ s }: { s: BotState }) {
-  return <span className={`bots-state is-${s}`}>{STATE_WORD[s]}</span>;
-}
+export { StatePill };
 
 type Show = 'all' | 'running' | 'paused' | 'ended';
-const SHOWS: Array<{ id: Show; label: string }> = [
-  { id: 'all', label: 'All' },
-  { id: 'running', label: 'Running' },
-  { id: 'paused', label: 'Paused' },
-  { id: 'ended', label: 'Stopped' },
-];
 type SortKey = 'started' | 'name' | 'market' | 'volume' | 'pnl' | 'cost' | 'holding';
+type Layout = 'tiles' | 'list';
 
-function Seg<T extends string>({ value, options, onChange, label }: { value: T; options: Array<{ id: T; label: ReactNode }>; onChange: (v: T) => void; label: string }) {
-  return (
-    <div className="pf-seg" role="tablist" aria-label={label}>
-      {options.map((o) => (
-        <button key={o.id} type="button" role="tab" aria-selected={o.id === value} className={`pf-ctl ${o.id === value ? 'is-on' : ''}`} onClick={() => onChange(o.id)}>
-          {o.label}
-        </button>
-      ))}
-    </div>
-  );
-}
+/* ------------------------------------------------------------- latency ----- */
 
 /**
- * This wallet's own bots' latency to SoDEX (never another wallet's): p95 / p50 / p99 per 10 minutes, laid out like
- * the reference card - icon, title, "scope · window", the legend on the right, the chart, the bots' start and stop
- * pins under it. The window is the small switch beside the legend; regions, when there are several, the scope's.
+ * This wallet's own bots' latency to SoDEX (never another wallet's), laid out like the owner's reference: icon tile,
+ * "Latency", scope · window, the legend and the window switch on the right, the chart in its panel.
  */
 export function LatencyCard({ marks = [], ctx }: { marks?: ChartMark[]; ctx: BotsCtx }) {
-  const [hours, setHours] = useState(24);
+  const [hours, setHours] = useState<'6' | '24' | '48'>('24');
   const [region, setRegion] = useState<string>('all');
   const token = ctx.address && ctx.live.hosted.signedIn ? hostedExecutor.token(ctx.address) : null;
   const lat = useBotLatency(48, token);
@@ -65,50 +45,49 @@ export function LatencyCard({ marks = [], ctx }: { marks?: ChartMark[]; ctx: Bot
   const one = regions.find((r) => r.id === region) ?? null;
   const buckets = one ? one.buckets : mergeRegions(regions);
   const scope = one ? one.label.toLowerCase() : regions.length > 1 ? 'all regions' : (regions[0]?.label.split(' · ')[0] ?? 'tokyo').toLowerCase();
-  const title = (
-    <span className="bots-lat__title">
-      <span className="bots-lat__ic" aria-hidden="true">
-        <svg viewBox="0 0 20 20" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><path d="M3.5 13a6.5 6.5 0 1 1 13 0" /><path d="M10 13l3.2-3.6" /></svg>
-      </span>
-      <span className="bots-lat__name">Latency</span>
-      {regions.length > 1 ? (
-        <button type="button" className="bots-lat__scope" onClick={() => { const ids = ['all', ...regions.map((r) => r.id)]; setRegion(ids[(ids.indexOf(region) + 1) % ids.length]!); }} aria-label={`Region: ${scope}. Show the next region`}>{scope}</button>
-      ) : (
-        <small>{scope}</small>
-      )}
-      <small>· {hours}h</small>
-    </span>
-  );
-  const empty = (line: string) => <div className="pf-chart pf-chart--empty bots-lat__well"><p>{line}</p></div>;
+  const nowP95 = (one ? [one] : regions).map((r) => r.now.p95).filter((x): x is number => x !== null);
+  const empty = (title: string, line: string) => <div className="bots-lat__well"><EmptyState icon="gauge" title={title} description={line} /></div>;
   return (
-    <Card
-      title={title}
-      className="bots-latcard"
-      action={
-        <span className="bots-lat__head">
-          <span className="bots-lat__legend" aria-hidden="true">
-            <span><i className="is-p95" />p95</span>
-            <span><i className="is-p50" />p50</span>
-            <span><i className="is-p99" />p99</span>
-          </span>
-          <Seg value={String(hours)} label="Window" onChange={(v) => setHours(Number(v))} options={[{ id: '6', label: '6h' }, { id: '24', label: '24h' }, { id: '48', label: '48h' }]} />
-        </span>
-      }
-    >
-      {!ctx.address
-        ? empty("Connect your wallet: this chart shows how fast your own bots' orders reach SoDEX. Nobody else sees it.")
-        : !token
-          ? empty("Finish the bot setup to see your bots' latency here. Only you see it.")
-          : lat.error && !lat.data
-            ? empty(`Latency is not available from the executor right now (${lat.error}).`)
-            : !lat.data
-              ? <div className="bots-skel bots-skel--chart" aria-hidden="true"><span className="bots-bone" /></div>
-              : <LatencyChart buckets={buckets} bucketMs={lat.data.bucketMs} regionLabel={one ? one.id : regions.length === 1 ? regions[0]!.id : 'all regions'} marks={marks} hours={hours} />}
-    </Card>
+    <Shell className="bots-latcard">
+      <ShellHeader
+        icon="gauge"
+        title="Latency"
+        subtitle={
+          <>
+            {regions.length > 1
+              ? <button type="button" className="bots-lat__scope" onClick={() => { const ids = ['all', ...regions.map((r) => r.id)]; setRegion(ids[(ids.indexOf(region) + 1) % ids.length]!); }}>{scope}</button>
+              : scope}
+            {' · '}{hours}h{nowP95.length ? ` · p95 now ${Math.max(...nowP95)} ms` : ''}
+          </>
+        }
+        aside={
+          <>
+            <span className="bots-lat__legend" aria-hidden="true">
+              <span><i className="is-p95" />p95</span>
+              <span><i className="is-p50" />p50</span>
+              <span><i className="is-p99" />p99</span>
+            </span>
+            <Segmented value={hours} label="Window" onChange={setHours} options={[{ value: '6', label: '6h' }, { value: '24', label: '24h' }, { value: '48', label: '48h' }]} />
+          </>
+        }
+      />
+      <Panel className="bots-lat__panel">
+        {!ctx.address
+          ? empty('Your bots only', "Connect your wallet: this chart shows how fast your own bots' orders reach SoDEX. Nobody else sees it.")
+          : !token
+            ? empty('Your bots only', "Finish the bot setup to see your bots' latency here. Only you see it.")
+            : lat.error && !lat.data
+              ? empty('Not available right now', `The executor did not answer (${lat.error}).`)
+              : !lat.data
+                ? <Skeleton className="bots-lat__skel" />
+                : <LatencyChart buckets={buckets} bucketMs={lat.data.bucketMs} regionLabel={one ? one.id : regions.length === 1 ? regions[0]!.id : 'all regions'} marks={marks} hours={Number(hours)} />}
+      </Panel>
+    </Shell>
   );
 }
 
-/** Every bot together, over time: volume per step (bars) and net PnL (line). */
+/* --------------------------------------------------------------- fleet ----- */
+
 function FleetChart({ bots }: { bots: AlgoView[] }) {
   const series = useMemo<ChartSeries[]>(() => {
     const s = fleetSeries(bots, Date.now());
@@ -119,35 +98,125 @@ function FleetChart({ bots }: { bots: AlgoView[] }) {
   }, [bots]);
   const enough = series[0]!.points.length >= 3;
   return (
-    <Card title="Volume and net PnL" className="bots-chartcard">
-      {enough ? (
-        <div className="bots-chartwell">
-          <SeriesChart series={series} height={210} daily={false} />
-          <p className="bots-chartkey"><span className="bots-key is-vol" />Volume per interval<span className="bots-key is-pnl" />Net PnL</p>
-        </div>
-      ) : (
-        <div className="pf-chart pf-chart--empty"><p>{bots.length ? 'The chart starts after the first 15 minutes: a point every 5 minutes.' : 'Start a bot to chart its volume and net PnL here.'}</p></div>
-      )}
-    </Card>
+    <Shell className="bots-chartcard">
+      <ShellHeader
+        icon="chart"
+        title="Volume and net PnL"
+        subtitle="Every bot together, a point every 5 minutes"
+        aside={<span className="bots-chartkey"><span><i className="is-vol" />Volume</span><span><i className="is-pnl" />Net PnL</span></span>}
+      />
+      <Panel className="bots-chartpanel">
+        {enough
+          ? <SeriesChart series={series} height={232} daily={false} />
+          : <EmptyState icon="chart" title={bots.length ? 'Charting soon' : 'No bot yet'} description={bots.length ? 'The chart starts after the first 15 minutes of trading.' : 'Start a bot to chart its volume and net PnL here.'} />}
+      </Panel>
+    </Shell>
+  );
+}
+
+/* ----------------------------------------------------------- strategies ----- */
+
+function StrategyPick({ ctx }: { ctx: BotsCtx }) {
+  const pick = (s: Strategy) => { if (ctx.ready) goBots({ page: 'new', market: null, kind: s }); else if (ctx.address) ctx.setup(true); else void openConnectDialog(); };
+  return (
+    <div className="bots-strats">
+      {STRATEGIES.map((s) => {
+        const info = STRATEGY_INFO[s];
+        const cost = costPerMillion(draftFor(s), null, null, ctx.feeTenths);
+        return (
+          <Panel key={s} className="bots-strat">
+            <div className="bots-strat__top">
+              <span className="tf-tile is-neutral"><BotIcon strategy={s} size={18} /></span>
+              <div className="bots-strat__t">
+                <p className="bots-strat__name">{info.name}{s === 'market' && <StatusPill tone="positive" size="sm">Lowest cost</StatusPill>}</p>
+                <p className="bots-strat__line">{info.line}</p>
+              </div>
+            </div>
+            <ul className="bots-strat__how">{info.how.map((h) => <li key={h}><Icon name="check" size={13} />{h}</li>)}</ul>
+            <div className="bots-strat__foot">
+              <span><small>Fees per $1M</small><b>{fmtUsd(cost.fees, 0)}</b></span>
+              <span><small>Best for</small><b>{info.best}</b></span>
+              <Button variant={s === 'market' ? 'primary' : 'secondary'} icon="plus" onClick={() => pick(s)}>{ctx.ready ? 'Set up' : 'Choose'}</Button>
+            </div>
+          </Panel>
+        );
+      })}
+    </div>
   );
 }
 
 function Setup({ ctx }: { ctx: BotsCtx }) {
-  if (!ctx.address) {
-    return (
-      <Card title="Start here" className="bots-setupcard">
-        <p className="pf-note">Bots trade around the clock in your own SoDEX account, from the ValueDesk executor. Connect the wallet whose account they trade in.</p>
-        <button type="button" className="pf-btn pf-btn--primary" onClick={() => void openConnectDialog()}>Connect wallet</button>
-      </Card>
-    );
-  }
-  if (!ctx.supported) return <Card title="Start here" className="bots-setupcard"><p className="pf-note">The ValueDesk executor does not run bots yet. They arrive with its next update.</p></Card>;
+  const body = !ctx.address
+    ? { line: 'Bots trade around the clock in your own SoDEX account, from the ValueDesk executor. Connect the wallet whose account they trade in.', act: <Button variant="primary" icon="wallet" onClick={() => void openConnectDialog()}>Connect wallet</Button> }
+    : !ctx.supported
+      ? { line: 'The ValueDesk executor does not run bots yet. They arrive with its next update.', act: null }
+      : { line: `Accept the terms to start a practice bot: it runs against the real book and sends nothing. Real orders add the ${botFeeWords(ctx.feeTenths)} fee and a trading key.`, act: <Button variant="primary" onClick={() => ctx.setup(true)}>Set up</Button> };
   return (
-    <Card title="Start here" className="bots-setupcard">
-      <p className="pf-note">Accept the terms to start a practice bot: it runs against the real book and sends nothing. Real orders add the {botFeeWords(ctx.feeTenths)} fee and a trading key.</p>
-      <SetupProgress live={ctx.live} mode="hosted" paper bots />
-      <button type="button" className="pf-btn pf-btn--primary" onClick={() => ctx.setup(true)}>Set up</button>
-    </Card>
+    <Shell className="bots-setupcard">
+      <ShellHeader icon="bolt" title="Start here" subtitle={ctx.address ? 'Two short steps, one signature each' : 'No wallet connected'} />
+      <Panel className="bots-setup">
+        <p className="bots-setup__line">{body.line}</p>
+        {ctx.address && ctx.supported && <div className="bots-setup__steps"><SetupProgress live={ctx.live} mode="hosted" paper bots /></div>}
+        {body.act}
+      </Panel>
+    </Shell>
+  );
+}
+
+/* ---------------------------------------------------------------- bots ----- */
+
+function Controls({ v, ctx }: { v: AlgoView; ctx: BotsCtx }) {
+  const state = botState(v);
+  const ended = state === 'ended' || state === 'failed';
+  const busy = ctx.busy === v.algo.id;
+  const stop = (e: React.MouseEvent) => e.stopPropagation();
+  return (
+    <span className="bots-ctl" onClick={stop}>
+      {!ended && state !== 'closing' && (state === 'paused'
+        ? <Button variant="quiet" icon="play" disabled={busy} onClick={() => void ctx.resume(v)}>Resume</Button>
+        : <Button variant="quiet" icon="pause" disabled={busy} onClick={() => void ctx.pause(v)}>Pause</Button>)}
+      {!ended && <Button variant="danger" icon="stop" disabled={busy} onClick={() => void ctx.stop(v)}>{state === 'closing' ? 'Stop now' : 'Stop'}</Button>}
+      {ended && <Button variant="danger" icon="trash" disabled={busy} onClick={() => void ctx.remove(v)}>Delete</Button>}
+    </span>
+  );
+}
+
+function BotTile({ v, ctx }: { v: AlgoView; ctx: BotsCtx }) {
+  const st = strategyOf(v.algo.spec) ?? 'maker';
+  const b = v.bot;
+  const state = botState(v);
+  const cap = v.algo.spec.kind === 'mm' ? v.algo.spec.maxInventoryUsd : null;
+  const hold = Math.abs(b?.inventoryUsd ?? 0);
+  const open = () => goBots({ page: 'bot', id: v.algo.id });
+  return (
+    <li>
+      <div role="link" tabIndex={0} className={`bots-tile bots-row is-${state}`} onClick={open} onKeyDown={(e) => e.key === 'Enter' && open()} aria-label={`${botName(v)}, ${v.algo.spec.symbol}`}>
+        {state === 'running' && <span className="bots-tile__glow" aria-hidden="true" />}
+        <div className="bots-tile__top">
+          <span className="tf-tile bots-tile__coin"><CoinIcon coin={v.algo.spec.symbol} size={20} /></span>
+          <div className="bots-tile__t">
+            <p className="bots-tile__name">{botName(v)}</p>
+            <p className="bots-tile__sub"><BotIcon strategy={st} size={12} />{STRATEGY_INFO[st].name}{v.algo.spec.kind === 'mm' && (v.algo.spec.stillBps ?? 0) > 0 ? ' · gate' : ''}{v.algo.spec.paper ? ' · practice' : ''}</p>
+          </div>
+          <StatePill s={state} size="sm" />
+        </div>
+        <p className="bots-tile__status">{statusWords(v)}</p>
+        <dl className="bots-tile__nums">
+          <div><dt>Volume</dt><dd>{b ? fmtUsd(b.volume, 0) : DASH}</dd></div>
+          <div><dt>Net PnL</dt><dd className={b && b.netPnl > 0.004 ? 'pos' : b && b.netPnl < -0.004 ? 'neg' : ''}>{fmtPnl(b?.netPnl)}</dd></div>
+          <div><dt>Per $1M</dt><dd>{fmtCost(b?.costPerMillion)}</dd></div>
+        </dl>
+        {cap ? (
+          <div className="bots-tile__inv">
+            <ProgressBar value={hold} max={cap} size="sm" tone={hold / cap > 0.8 ? 'warning' : 'neutral'} kind="meter" label="Holding against its cap" valueText={`${fmtUsd(hold, 0)} of ${fmtUsd(cap, 0)}`} />
+            <span>Holding {fmtUsd(hold, 0)} of {fmtUsd(cap, 0)}</span>
+          </div>
+        ) : null}
+        <div className="bots-tile__foot">
+          <Controls v={v} ctx={ctx} />
+        </div>
+      </div>
+    </li>
   );
 }
 
@@ -157,8 +226,22 @@ export function BotsOverview({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
   const [q, setQ] = useState('');
   const [sort, setSort] = useState<{ k: SortKey; desc: boolean }>({ k: 'started', desc: true });
   const [page, setPage] = useState(0);
+  const [layout, setLayout] = useState<Layout | null>(null);
   const t = useMemo(() => fleetTotals(bots), [bots]);
+  const s = useMemo(() => fleetSeries(bots, Date.now()), [bots]);
   const floor = costPerMillion(draftFor('market'), null, null, ctx.feeTenths);
+  const lay: Layout = layout ?? (bots.length > 12 ? 'list' : 'tiles');
+
+  const counts = useMemo(() => {
+    const c = { all: bots.length, running: 0, paused: 0, ended: 0 };
+    for (const v of bots) {
+      const st = botState(v);
+      if (st === 'running' || st === 'waiting' || st === 'closing') c.running++;
+      else if (st === 'paused') c.paused++;
+      else c.ended++;
+    }
+    return c;
+  }, [bots]);
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -200,137 +283,151 @@ export function BotsOverview({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
 
   const head = (k: SortKey, label: string, right = false) => (
     <th className={right ? 'right' : undefined} aria-sort={sort.k === k ? (sort.desc ? 'descending' : 'ascending') : undefined}>
-      <button type="button" className={`bots-sort${sort.k === k ? ' is-on' : ''}`} onClick={() => setSort((s) => ({ k, desc: s.k === k ? !s.desc : k !== 'name' && k !== 'market' }))}>
+      <button type="button" className={`bots-sort${sort.k === k ? ' is-on' : ''}`} onClick={() => setSort((x) => ({ k, desc: x.k === k ? !x.desc : k !== 'name' && k !== 'market' }))}>
         {label}
         <svg viewBox="0 0 10 10" width="8" height="8" aria-hidden="true"><path d={sort.k === k && !sort.desc ? 'M2 6.5 5 3.5l3 3' : 'M2 3.5 5 6.5l3-3'} fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" /></svg>
       </button>
     </th>
   );
 
-  const actions = ctx.ready ? (
-    <>
-      {anyRunning && <button type="button" className="pf-btn bots-stopall" disabled={ctx.busy === 'all'} onClick={() => void ctx.stopAll()}>Stop all</button>}
-      <button type="button" className="pf-btn pf-btn--primary" onClick={() => goBots({ page: 'new', market: null, kind: null })}>New bot</button>
-    </>
-  ) : undefined;
+  const ready = ctx.ready;
+  const val = (x: string) => (ready ? x : DASH);
+  const trendVol = s.volume.map((p) => p[1]);
+  const trendPnl = s.pnl.map((p) => p[1]);
+  const pnlTone = t.netPnl > 0.004 ? 'positive' : t.netPnl < -0.004 ? 'negative' : undefined;
 
   return (
     <>
-      <BotsHead view={view} title="Bots" sub="Market makers that run around the clock in your SoDEX account, from the ValueDesk executor." actions={actions} />
+      <BotsHead
+        view={view}
+        title="Bots"
+        sub="Market makers that run around the clock in your SoDEX account, from the ValueDesk executor."
+        actions={ready ? (
+          <>
+            {anyRunning && <Button variant="danger" icon="stop" disabled={ctx.busy === 'all'} onClick={() => void ctx.stopAll()}>Stop all</Button>}
+            <Button variant="primary" icon="plus" onClick={() => goBots({ page: 'new', market: null, kind: null })}>New bot</Button>
+          </>
+        ) : undefined}
+      />
 
-      {!ctx.ready && <Setup ctx={ctx} />}
+      {!ready && <Setup ctx={ctx} />}
 
-      <Card className="bots-kpicard">
-        <div className="pf-statstrip bots-kpistrip">
-          <Stat label="Running" value={ctx.ready ? <>{t.running}<span className="pf-dim"> of {t.bots}</span></> : DASH} privacy="funds" />
-          <Stat label="Volume" value={ctx.ready ? fmtUsd(t.volume, 2) : DASH} privacy="funds" />
-          <Stat label="Net PnL" value={ctx.ready ? fmtPnl(t.netPnl) : DASH} cls={signClass(t.netPnl)} hint="After every fee, with what they hold valued at the price now." privacy="funds" />
-          <Stat label="Cost per $1M" value={ctx.ready ? fmtCost(t.costPerMillion) : DASH} cls={t.costPerMillion !== null && t.costPerMillion < 0 ? 'pos' : ''} hint="Net PnL per $1M traded, sign turned: what the volume cost after what it earned." />
-          <Stat label="Fees paid" value={ctx.ready ? fmtUsd(t.tradeFees + t.builderFees, 2) : DASH} hint={`SoDEX's maker fee and ValueDesk's ${botFeeWords(ctx.feeTenths)}: at least ${fmtUsd(floor.fees, 0)} per $1M.`} privacy="funds" />
-          <Stat label="Holding" value={ctx.ready ? fmtUsd(t.holdingUsd, 2) : DASH} hint="What the bots hold from their own fills, at the price now." privacy="funds" />
+      <Shell className="bots-kpis">
+        <ShellHeader icon="robot" title="Fleet" subtitle={ready ? `${t.running} of ${t.bots} running` : 'Your bots, together'} />
+        <div className="bots-kpigrid">
+          <StatCard index={0} label="Running" value={ready ? `${t.running}` : DASH} hint={ready ? `of ${t.bots} bots` : undefined} />
+          <StatCard index={1} label="Volume" value={val(fmtUsd(t.volume, 0))} trend={ready ? trendVol : undefined} />
+          <StatCard index={2} label="Net PnL" value={val(fmtPnl(t.netPnl))} valueTone={ready ? pnlTone : undefined} trend={ready ? trendPnl : undefined} trendTone={pnlTone ?? 'neutral'} hint="After every fee" />
+          <StatCard index={3} label="Cost per $1M" value={val(fmtCost(t.costPerMillion))} valueTone={ready && t.costPerMillion !== null && t.costPerMillion < 0 ? 'positive' : undefined} hint="What the volume cost, net" />
+          <StatCard index={4} label="Fees paid" value={val(fmtUsd(t.tradeFees + t.builderFees, 2))} hint={`At least ${fmtUsd(floor.fees, 0)} per $1M`} />
+          <StatCard index={5} label="Holding" value={val(fmtUsd(t.holdingUsd, 0))} hint="From their own fills" />
         </div>
-      </Card>
+      </Shell>
 
       <div className="bots-two">
         <LatencyCard marks={marks} ctx={ctx} />
-        <FleetChart bots={ctx.ready ? bots : []} />
+        <FleetChart bots={ready ? bots : []} />
       </div>
 
-      <Card
-        title={ctx.ready && bots.length ? `Your bots · ${bots.length}` : 'Strategies'}
-        className="bots-listcard"
-        action={ctx.ready && bots.length > 0 ? <Seg value={show} options={SHOWS} onChange={(v) => { setShow(v); setPage(0); }} label="Show" /> : undefined}
-      >
-        {ctx.error && ctx.ready && <p className="fx-note fx-note--err" role="alert">{ctx.error}</p>}
-        {!ctx.ready || (!bots.length && !ctx.loading) ? (
-          <div className="bots-pick">
-            <p className="pf-note">{ctx.ready ? 'Pick a strategy. Each starts as a practice run against the real book, and you choose the market and size.' : 'Every order rests on the book: you pay the maker fee, never the spread.'}</p>
-            <StrategyCards onPick={(s) => { if (ctx.ready) goBots({ page: 'new', market: null, kind: s }); else if (ctx.address) ctx.setup(true); else void openConnectDialog(); }} />
-          </div>
-        ) : ctx.loading && !bots.length ? (
-          <div className="bots-skel" aria-hidden="true">{[0, 1, 2].map((i) => <span key={i} className="bots-bone" />)}</div>
-        ) : (
-          <>
-            <div className="bots-toolbar">
-              <label className="bots-search">
-                <svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true"><circle cx="9" cy="9" r="5.5" /><path d="m13.2 13.2 3.3 3.3" /></svg>
-                <input value={q} onChange={(e) => { setQ(e.target.value); setPage(0); }} placeholder="Search name or market" aria-label="Search bots" />
-              </label>
-              <span className="bots-toolbar__n">{filtered.length.toLocaleString('en-US')} shown</span>
-              <span className="bots-toolbar__sp" />
-              <button type="button" className="acct-act" disabled={!canPause.length || ctx.busy === 'all'} onClick={() => void ctx.pauseAll(canPause)}>Pause {canPause.length > 1 ? `all ${canPause.length}` : ''}</button>
-              <button type="button" className="acct-act" disabled={!canResume.length || ctx.busy === 'all'} onClick={() => void ctx.resumeAll(canResume)}>Resume {canResume.length > 1 ? `all ${canResume.length}` : ''}</button>
-            </div>
-            {!filtered.length ? (
-              <EmptyState icon="chart" title={q ? 'No bot matches' : show === 'running' ? 'No bot running' : show === 'paused' ? 'No bot paused' : 'No stopped bot'} line={q ? 'Try another name or market.' : 'Start one with New bot.'} compact />
+      {!ready || (!bots.length && !ctx.loading) ? (
+        <Shell className="bots-listcard">
+          <ShellHeader icon="layers" title="Strategies" subtitle={ready ? 'Each starts as a practice run against the real book. You pick the market and the size.' : 'Every order rests on the book: you pay the maker fee, never the spread.'} />
+          <StrategyPick ctx={ctx} />
+        </Shell>
+      ) : (
+        <Shell className="bots-listcard">
+          <ShellHeader
+            icon="list"
+            title={<>Your bots <span className="bots-count">{bots.length}</span></>}
+            subtitle={`${counts.running} running · ${counts.paused} paused · ${counts.ended} stopped`}
+            aside={
+              <>
+                <Segmented value={show} label="Show" onChange={(v) => { setShow(v); setPage(0); }} options={[
+                  { value: 'all', label: 'All', count: counts.all },
+                  { value: 'running', label: 'Running', count: counts.running },
+                  { value: 'paused', label: 'Paused', count: counts.paused },
+                  { value: 'ended', label: 'Stopped', count: counts.ended },
+                ]} />
+                <Segmented value={lay} label="Layout" onChange={setLayout} options={[{ value: 'tiles', label: 'Tiles' }, { value: 'list', label: 'List' }]} />
+              </>
+            }
+          />
+          <Panel className="bots-listpanel">
+            {ctx.error && <p className="bots-err" role="alert">{ctx.error}</p>}
+            {ctx.loading && !bots.length ? (
+              <div className="bots-skels">{[0, 1, 2].map((i) => <Skeleton key={i} className="bots-skel" />)}</div>
             ) : (
-              <div className="bots-tablewrap">
-                <table className="datatable lb-table bots-table">
-                  <thead>
-                    <tr>
-                      {head('name', 'Bot')}
-                      {head('market', 'Market')}
-                      <th>State</th>
-                      {head('volume', 'Volume', true)}
-                      {head('pnl', 'Net PnL', true)}
-                      {head('cost', 'Cost per $1M', true)}
-                      {head('holding', 'Holding', true)}
-                      {head('started', 'Started', true)}
-                      <th className="right" aria-label="Controls" />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {rows.map((v) => {
-                      const st = strategyOf(v.algo.spec) ?? 'maker';
-                      const b = v.bot;
-                      const state = botState(v);
-                      const ended = state === 'ended' || state === 'failed';
-                      const busy = ctx.busy === v.algo.id;
-                      const open = () => goBots({ page: 'bot', id: v.algo.id });
-                      return (
-                        <tr key={v.algo.id} className="bots-row" tabIndex={0} onClick={open} onKeyDown={(e) => e.key === 'Enter' && open()}>
-                          <td>
-                            <span className="bots-who">
-                              <BotIcon strategy={st} size={16} />
-                              <span className="bots-who__t">
-                                <b>{botName(v)}</b>
-                                <small>{STRATEGY_INFO[st].name}{st === 'market' && v.algo.spec.kind === 'mm' && (v.algo.spec.stillBps ?? 0) > 0 ? ' · gate' : ''} · {v.algo.spec.paper ? 'practice' : 'real orders'}</small>
-                              </span>
-                            </span>
-                          </td>
-                          <td><span className="bots-mkt"><CoinIcon coin={v.algo.spec.symbol} size={16} />{v.algo.spec.symbol}</span></td>
-                          <td><StatePill s={state} /></td>
-                          <td className="right" data-k="Volume">{b ? fmtUsd(b.volume, 2) : DASH}</td>
-                          <td className={`right ${signClass(b?.netPnl)}`} data-k="Net PnL">{fmtPnl(b?.netPnl)}</td>
-                          <td className={`right ${b?.costPerMillion !== null && b?.costPerMillion !== undefined && b.costPerMillion < 0 ? 'pos' : ''}`} data-k="Cost per $1M">{fmtCost(b?.costPerMillion)}</td>
-                          <td className="right" data-k="Holding">{b ? fmtUsd(b.inventoryUsd, 2) : DASH}</td>
-                          <td className="right bots-dim" data-k="Started">{new Date(v.algo.startedAt ?? v.algo.createdAt).toISOString().slice(5, 16).replace('T', ' ')}</td>
-                          <td className="right">
-                            <span className="bots-ctl is-compact">
-                              {!ended && state !== 'closing' && (state === 'paused'
-                                ? <button type="button" className="acct-act" disabled={busy} onClick={(e) => { e.stopPropagation(); void ctx.resume(v); }}>Resume</button>
-                                : <button type="button" className="acct-act" disabled={busy} onClick={(e) => { e.stopPropagation(); void ctx.pause(v); }}>Pause</button>)}
-                              {!ended && <button type="button" className="acct-act acct-act--danger" disabled={busy} onClick={(e) => { e.stopPropagation(); void ctx.stop(v); }}>{state === 'closing' ? 'Stop now' : 'Stop'}</button>}
-                              {ended && <button type="button" className="acct-act acct-act--danger" disabled={busy} onClick={(e) => { e.stopPropagation(); void ctx.remove(v); }}>Delete</button>}
-                            </span>
-                          </td>
+              <>
+                <div className="bots-toolbar">
+                  <SearchField value={q} onChange={(x) => { setQ(x); setPage(0); }} placeholder="Search name or market" label="Search bots" className="bots-toolbar__search" />
+                  <span className="bots-toolbar__n">{filtered.length.toLocaleString('en-US')} shown</span>
+                  <span className="bots-toolbar__sp" />
+                  <Button variant="quiet" icon="pause" disabled={!canPause.length || ctx.busy === 'all'} onClick={() => void ctx.pauseAll(canPause)}>Pause{canPause.length > 1 ? ` all ${canPause.length}` : ''}</Button>
+                  <Button variant="quiet" icon="play" disabled={!canResume.length || ctx.busy === 'all'} onClick={() => void ctx.resumeAll(canResume)}>Resume{canResume.length > 1 ? ` all ${canResume.length}` : ''}</Button>
+                </div>
+                {!filtered.length ? (
+                  <EmptyState icon="search" title={q ? 'No bot matches' : show === 'running' ? 'No bot running' : show === 'paused' ? 'No bot paused' : 'No stopped bot'} description={q ? 'Try another name or market.' : 'Start one with New bot.'} />
+                ) : lay === 'tiles' ? (
+                  <ul className="bots-tiles">{rows.map((v) => <BotTile key={v.algo.id} v={v} ctx={ctx} />)}</ul>
+                ) : (
+                  <div className="bots-tablewrap">
+                    <table className="bots-table">
+                      <thead>
+                        <tr>
+                          {head('name', 'Bot')}
+                          {head('market', 'Market')}
+                          <th>State</th>
+                          {head('volume', 'Volume', true)}
+                          {head('pnl', 'Net PnL', true)}
+                          {head('cost', 'Per $1M', true)}
+                          {head('holding', 'Holding', true)}
+                          {head('started', 'Started', true)}
+                          <th className="right"><span className="tf-sr">Controls</span></th>
                         </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
+                      </thead>
+                      <tbody>
+                        {rows.map((v) => {
+                          const st = strategyOf(v.algo.spec) ?? 'maker';
+                          const b = v.bot;
+                          const open = () => goBots({ page: 'bot', id: v.algo.id });
+                          return (
+                            <tr key={v.algo.id} className="bots-row" tabIndex={0} onClick={open} onKeyDown={(e) => e.key === 'Enter' && open()}>
+                              <td>
+                                <span className="bots-who">
+                                  <span className="bots-who__ic"><BotIcon strategy={st} size={14} /></span>
+                                  <span className="bots-who__t">
+                                    <b>{botName(v)}</b>
+                                    <small>{STRATEGY_INFO[st].name}{v.algo.spec.kind === 'mm' && (v.algo.spec.stillBps ?? 0) > 0 ? ' · gate' : ''} · {v.algo.spec.paper ? 'practice' : 'real orders'}</small>
+                                  </span>
+                                </span>
+                              </td>
+                              <td><span className="bots-mkt"><CoinIcon coin={v.algo.spec.symbol} size={16} />{v.algo.spec.symbol}</span></td>
+                              <td><StatePill s={botState(v)} size="sm" /></td>
+                              <td className="right num" data-k="Volume">{b ? fmtUsd(b.volume, 2) : DASH}</td>
+                              <td className={`right num ${b && b.netPnl > 0.004 ? 'pos' : b && b.netPnl < -0.004 ? 'neg' : ''}`} data-k="Net PnL">{fmtPnl(b?.netPnl)}</td>
+                              <td className="right num" data-k="Per $1M">{fmtCost(b?.costPerMillion)}</td>
+                              <td className="right num" data-k="Holding">{b ? fmtUsd(b.inventoryUsd, 2) : DASH}</td>
+                              <td className="right num dim" data-k="Started">{new Date(v.algo.startedAt ?? v.algo.createdAt).toISOString().slice(5, 16).replace('T', ' ')}</td>
+                              <td className="right"><Controls v={v} ctx={ctx} /></td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+                {pages > 1 && (
+                  <nav className="bots-pager" aria-label="Pages">
+                    <Button variant="quiet" icon="arrowLeft" disabled={at === 0} onClick={() => setPage(at - 1)}>Previous</Button>
+                    <span>Page {at + 1} of {pages}</span>
+                    <Button variant="quiet" disabled={at >= pages - 1} onClick={() => setPage(at + 1)}>Next<Icon name="arrowRight" size={14} /></Button>
+                  </nav>
+                )}
+              </>
             )}
-            {pages > 1 && (
-              <nav className="bots-pager" aria-label="Pages">
-                <button type="button" className="acct-act" disabled={at === 0} onClick={() => setPage(at - 1)}>Previous</button>
-                <span>Page {at + 1} of {pages}</span>
-                <button type="button" className="acct-act" disabled={at >= pages - 1} onClick={() => setPage(at + 1)}>Next</button>
-              </nav>
-            )}
-          </>
-        )}
-      </Card>
+          </Panel>
+        </Shell>
+      )}
     </>
   );
 }

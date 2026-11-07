@@ -33,8 +33,11 @@ import { BotNewPage } from './BotNewPage';
 import { BotDetail } from './BotDetail';
 import { BotsExplore } from './BotsExplore';
 import { BotsSavings } from './BotsSavings';
+import { StatusPill, type Tone } from './kit/kit';
+import type { BotState } from './botWords';
+import { STATE_WORD } from './botWords';
 import './bots.css';
-import './botsSection.css';
+import './botsPages.css';
 
 export interface BotsCtx {
   address: string | null;
@@ -62,18 +65,24 @@ export interface BotsCtx {
 }
 
 /** A page's title, its line and its actions. The section's pages are in the top bar (BotsNavSeg) and the rail's foot. */
-export function BotsHead({ title, sub, actions }: { view?: BotsView; title: ReactNode; sub?: ReactNode; actions?: ReactNode }) {
+export function BotsHead({ title, sub, actions, lead }: { view?: BotsView; title: ReactNode; sub?: ReactNode; actions?: ReactNode; lead?: ReactNode }) {
   return (
     <header className="bots-head">
-      <div className="bots-head__row">
-        <div className="bots-head__t">
-          <h1>{title}</h1>
-          {sub && <p>{sub}</p>}
-        </div>
-        {actions && <div className="bots-head__act">{actions}</div>}
+      {lead && <div className="bots-head__lead">{lead}</div>}
+      <div className="bots-head__t">
+        <h1>{title}</h1>
+        {sub && <p>{sub}</p>}
       </div>
+      {actions && <div className="bots-head__act">{actions}</div>}
     </header>
   );
+}
+
+const STATE_TONE: Record<BotState, Tone> = { running: 'positive', waiting: 'warning', paused: 'neutral', closing: 'warning', ended: 'neutral', failed: 'negative' };
+
+/** A bot's state as a pill: a live dot while it runs. */
+export function StatePill({ s, size = 'md' }: { s: BotState; size?: 'sm' | 'md' }) {
+  return <StatusPill tone={STATE_TONE[s]} size={size} dot pulse={s === 'running'} className={`bots-state is-${s}`}>{STATE_WORD[s]}</StatusPill>;
 }
 
 export function BotsPage({ address, provider }: { address: string | null; provider: Eip1193Provider | null }) {
@@ -168,8 +177,8 @@ export function BotsPage({ address, provider }: { address: string | null; provid
   else page = <BotsOverview ctx={ctx} view={view} />;
 
   return (
-    <div className="pf bots" aria-busy={loading}>
-      {page}
+    <div className="tf bots-page" aria-busy={loading}>
+      <div className="bots-col">{page}</div>
       <BotSetupSheet open={!!setup} onClose={() => setSetup(null)} live={live} paper={setup?.paper ?? true} />
       {dialog}
     </div>

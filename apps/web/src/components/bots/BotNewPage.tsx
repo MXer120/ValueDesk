@@ -1,18 +1,16 @@
 /**
- * Bots > New bot: a page, not a window. Left, what it is (market maker or grid), where (with what Explore estimates
- * it costs there), its size, the market gate, the advanced settings and limits. Right, held in view: what it is
- * estimated to cost per $1M on that market, where the money goes, and Start. One wallet signature starts it.
+ * Bots > New bot: a page, not a window, in the Bots kit. Left: what it is (market maker or grid), where (with what
+ * Explore estimates it costs there and cheaper markets with room), and its settings. Right, held in view: what it is
+ * estimated to cost per $1M on that market, who takes there, where the money goes, and Start. One wallet signature.
  */
 import { useEffect, useMemo, useState } from 'react';
 import { checkSizes, parseAlgoSpec, type MarketInfo } from '@copy-engine';
 import { DASH, fmtUsd } from '../../format';
 import { useSymbols } from '../../hooks';
-import { DlgRow, DlgSection } from '../dialogParts';
 import { MarketSelect } from '../algo/MarketSelect';
 import { marketOf } from '../algo/draft';
 import { useHistory } from '../algo/liveData';
 import { CoinIcon } from '../CoinIcon';
-import { Card } from '../portfolio/parts';
 import { useBotMarkets, bpToPerMillion, type BotMarket } from '../../bots/data';
 import { goBots, type BotsView } from '../../bots/routes';
 import { STRATEGIES, STRATEGY_INFO, costPerMillion, draftFor, gridRange, specOf, type BotDraft, type Strategy } from '../../bots/presets';
@@ -20,38 +18,56 @@ import { BotIcon } from './BotIcon';
 import { BotSettings } from './BotSettings';
 import { describe } from './BotForm';
 import { BotsHead, type BotsCtx } from './BotsPage';
+import { Button, Icon, Inset, Panel, RollingNumber, SegmentedBar, Shell, ShellHeader, Skeleton, StatusPill } from './kit/kit';
 
 const fmtBpUsd = (bp: number | null | undefined): string => (bp === null || bp === undefined ? DASH : bp < 0 ? `earns ${fmtUsd(-bpToPerMillion(bp), 0)}` : fmtUsd(bpToPerMillion(bp), 0));
+const CONF_TONE = { high: 'positive', medium: 'warning', low: 'neutral' } as const;
+export const TAKER_COLORS = { patient: 'var(--pos)', fast: 'var(--neg)', other: 'rgb(var(--ink) / 0.28)' };
 
-/** What Explore estimates for this market: the number, its range, and how sure. */
+/** Who takes small makers' quotes on a market, as TUFFUI's stacked bar with its key. */
+export function Takers({ m }: { m: BotMarket }) {
+  return (
+    <div className="bots-takers">
+      <SegmentedBar
+        label="Who takes small makers' quotes here"
+        max={1}
+        size="md"
+        segments={[
+          { id: 'p', value: m.takers.t1002, label: 'Patient taker', color: TAKER_COLORS.patient },
+          { id: 'f', value: m.takers.t23342, label: 'Fast taker', color: TAKER_COLORS.fast },
+          { id: 'o', value: m.takers.other, label: 'Others', color: TAKER_COLORS.other },
+        ]}
+      />
+      <div className="bots-takers__key">
+        <span><i style={{ background: TAKER_COLORS.patient }} />Patient <b>{Math.round(m.takers.t1002 * 100)}%</b></span>
+        <span><i style={{ background: TAKER_COLORS.fast }} />Fast <b>{Math.round(m.takers.t23342 * 100)}%</b></span>
+        <span><i style={{ background: TAKER_COLORS.other }} />Others <b>{Math.round(m.takers.other * 100)}%</b></span>
+      </div>
+    </div>
+  );
+}
+
+/** What Explore estimates for this market: the number, its range, how sure, who takes, where the money goes. */
 export function Estimate({ m, gate, feeBps }: { m: BotMarket | null; gate: boolean; feeBps: number }) {
-  if (!m) return <p className="oe-hint">No estimate for this market yet: too few trades from small makers there to read one.</p>;
+  if (!m) return <p className="bots-fine">No estimate for this market yet: too few trades from small makers there to read one.</p>;
   const est = gate && m.gateCostBps !== null ? m.gateCostBps : m.estCostBps;
   const losses = est - feeBps;
   return (
     <div className="bots-est">
       <div className="bots-est__big">
-        <span className="bots-est__k">Estimated cost per $1M{gate ? ', with the gate' : ''}</span>
-        <span className={`bots-est__v${est < 0 ? ' pos' : ''}`}>{fmtBpUsd(est)}</span>
-        <span className="bots-est__sub">range {fmtBpUsd(m.estCostLowBps)} to {fmtBpUsd(m.estCostHighBps)} · <span className={`bots-conf is-${m.confidence}`}>{m.confidence} confidence</span></span>
-      </div>
-      <dl className="bots-ledger">
-        <dt>Fees (SoDEX + ValueDesk)</dt><dd>{fmtBpUsd(feeBps)}</dd>
-        <dt>{losses >= 0 ? 'Price moves against fills' : 'Spread kept after price moves'}</dt><dd className={losses > 0 ? 'neg' : 'pos'}>{losses >= 0 ? '+' : '−'}{fmtUsd(Math.abs(bpToPerMillion(losses)), 0)}</dd>
-        <dt className="is-total">All-in</dt><dd className="is-total">{fmtBpUsd(est)}</dd>
-      </dl>
-      <div className="bots-takers" aria-label="Who takes small makers' quotes here">
-        <span className="bots-takers__bar">
-          <i className="is-patient" style={{ width: `${m.takers.t1002 * 100}%` }} />
-          <i className="is-fast" style={{ width: `${m.takers.t23342 * 100}%` }} />
-          <i className="is-other" style={{ width: `${m.takers.other * 100}%` }} />
-        </span>
-        <span className="bots-takers__key">
-          <span><i className="is-patient" />Patient taker {Math.round(m.takers.t1002 * 100)}%</span>
-          <span><i className="is-fast" />Fast taker {Math.round(m.takers.t23342 * 100)}%</span>
-          <span><i className="is-other" />Others {Math.round(m.takers.other * 100)}%</span>
+        <span className="bots-est__k">Estimated cost per $1M{gate ? ', gate on' : ''}</span>
+        <RollingNumber value={fmtBpUsd(est)} className={`bots-est__v${est < 0 ? ' pos' : ''}`} />
+        <span className="bots-est__sub">
+          range {fmtBpUsd(m.estCostLowBps)} to {fmtBpUsd(m.estCostHighBps)}
+          <StatusPill size="sm" tone={CONF_TONE[m.confidence]} dot>{m.confidence} confidence</StatusPill>
         </span>
       </div>
+      <Takers m={m} />
+      <Inset className="bots-ledger">
+        <div><span>Fees (SoDEX + ValueDesk)</span><b>{fmtBpUsd(feeBps)}</b></div>
+        <div><span>{losses >= 0 ? 'Price moves against fills' : 'Spread kept after price moves'}</span><b className={losses > 0 ? 'neg' : 'pos'}>{losses >= 0 ? '+' : '−'}{fmtUsd(Math.abs(bpToPerMillion(losses)), 0)}</b></div>
+        <div className="is-total"><span>All-in</span><b>{fmtBpUsd(est)}</b></div>
+      </Inset>
       <p className="bots-fine">From the last day of this market's trades: what makers our size kept 30 s after each fill, plus the fees. Fills from the patient taker cost little; fills from the fast one cost about 1 bp each.</p>
     </div>
   );
@@ -101,14 +117,15 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
     }
   };
 
-  const cheaper = (markets.data?.markets ?? []).filter((m) => m.symbol !== d.symbol && m.confidence !== 'low' && m.capacityUsdH >= 1_000 && est && m.estCostBps < est.estCostBps - 0.05).slice(0, 3);
+  const cheaper = (markets.data?.markets ?? []).filter((m) => m.symbol !== d.symbol && m.confidence !== 'low' && m.capacityUsdH >= 1_000 && est && m.estCostBps < est.estCostBps - 0.05).slice(0, 4);
 
   return (
     <>
       <BotsHead view={view} title="New bot" sub="Choose what it does and where. It starts as soon as you sign, and you can change or stop it at any time." />
       <div className="bots-newgrid">
         <div className="bots-newform">
-          <Card title="Strategy">
+          <Shell>
+            <ShellHeader icon="layers" title="Strategy" subtitle="What it does on the book" />
             <div className="bots-kinds" role="radiogroup" aria-label="Strategy">
               {STRATEGIES.map((s) => (
                 <button
@@ -119,67 +136,71 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
                   className={`bots-kind${d.strategy === s ? ' is-on' : ''}`}
                   onClick={() => setD(draftFor(s, 'balanced', d.symbol))}
                 >
-                  <BotIcon strategy={s} size={20} />
+                  <span className="tf-tile"><BotIcon strategy={s} size={18} /></span>
                   <span className="bots-kind__t">
-                    <b>{STRATEGY_INFO[s].name}{s === 'market' && <span className="bots-tag">Lowest cost</span>}</b>
+                    <b>{STRATEGY_INFO[s].name}{s === 'market' && <StatusPill size="sm" tone="positive">Lowest cost</StatusPill>}</b>
                     <small>{STRATEGY_INFO[s].line}</small>
                   </span>
+                  <span className="bots-kind__radio" aria-hidden="true" />
                 </button>
               ))}
             </div>
-            <ul className="bots-how">{STRATEGY_INFO[d.strategy].how.map((h) => <li key={h}>{h}</li>)}</ul>
-          </Card>
+            <ul className="bots-how">{STRATEGY_INFO[d.strategy].how.map((h) => <li key={h}><Icon name="check" size={13} />{h}</li>)}</ul>
+          </Shell>
 
-          <Card title="Market" className="dlg">
-            <DlgSection label="Market">
-              <DlgRow title="Market" line="Any SoDEX perpetual. Explore compares what a market maker costs on each.">
-                <MarketSelect value={d.symbol} onChange={(v) => set({ symbol: v, low: null, high: null })} compact />
-              </DlgRow>
+          <Shell>
+            <ShellHeader icon="compass" title="Market" subtitle="Any SoDEX perpetual. Explore compares what a market maker costs on each." aside={<Button variant="quiet" onClick={() => goBots({ page: 'explore' })}>Every market<Icon name="arrowRight" size={13} /></Button>} />
+            <Panel className="bots-mktpanel">
+              <div className="bots-mktpick"><MarketSelect value={d.symbol} onChange={(v) => set({ symbol: v, low: null, high: null })} compact /></div>
               {cheaper.length > 0 && d.strategy === 'market' && (
-                <DlgRow title="Cheaper now" line="Markets where makers our size paid less over the last day." stack>
-                  <div className="bots-cheaprow">
+                <div className="bots-cheap">
+                  <p className="bots-cheap__k">Cheaper now, with room to trade</p>
+                  <div className="bots-cheap__row">
                     {cheaper.map((m) => (
                       <button key={m.symbol} type="button" className="bots-chip" onClick={() => set({ symbol: m.symbol })}>
-                        <CoinIcon coin={m.symbol} size={14} />
+                        <CoinIcon coin={m.symbol} size={16} />
                         <b>{m.base}</b>
                         <small>{fmtBpUsd(m.estCostBps)}</small>
                       </button>
                     ))}
-                    <button type="button" className="bots-link" onClick={() => goBots({ page: 'explore' })}>Every market</button>
                   </div>
-                </DlgRow>
+                </div>
               )}
-            </DlgSection>
-          </Card>
+            </Panel>
+          </Shell>
 
-          <Card title="Settings" className="dlg">
+          <Shell>
+            <ShellHeader icon="gear" title="Settings" subtitle="Change any of them later, from the bot's page" />
             <BotSettings d={d} set={set} running={false} range={range} mark={mark} liveAllowed={ctx.liveAllowed} />
-          </Card>
+          </Shell>
         </div>
 
         <aside className="bots-newside">
-          <Card title={<span className="bots-sidehead"><CoinIcon coin={d.symbol} size={16} />{d.symbol}</span>} className="bots-sidecard">
-            {d.strategy === 'market' ? (
-              markets.data ? <Estimate m={est} gate={d.gate} feeBps={feeBps} /> : markets.error ? <p className="oe-hint">Estimates are not available right now ({markets.error}). The fees alone are {fmtUsd(floor.fees, 0)} per $1M.</p> : <div className="bots-skel" aria-hidden="true"><span className="bots-bone" /><span className="bots-bone" /></div>
-            ) : (
-              <div className="bots-est">
-                <div className="bots-est__big">
-                  <span className="bots-est__k">Per $1M, before price moves</span>
-                  <span className={`bots-est__v${floor.net < 0 ? ' pos' : ''}`}>{floor.net < 0 ? `earns ${fmtUsd(-floor.net, 0)}` : fmtUsd(floor.net, 0)}</span>
-                  <span className="bots-est__sub">fees {fmtUsd(floor.fees, 0)}{floor.edge !== null ? `, grid steps earn ${fmtUsd(floor.edge, 0)}` : ''}</span>
+          <Shell className="bots-sidecard">
+            <ShellHeader tile={<CoinIcon coin={d.symbol} size={20} />} title={d.symbol} subtitle={STRATEGY_INFO[d.strategy].name} aside={paper ? <StatusPill tone="brand" size="sm">Practice</StatusPill> : <StatusPill tone="warning" size="sm">Real orders</StatusPill>} />
+            <Panel className="bots-sidepanel">
+              {d.strategy === 'market' ? (
+                markets.data ? <Estimate m={est} gate={d.gate} feeBps={feeBps} /> : markets.error ? <p className="bots-fine">Estimates are not available right now ({markets.error}). The fees alone are {fmtUsd(floor.fees, 0)} per $1M.</p> : <div className="bots-skels"><Skeleton className="bots-skel is-big" /><Skeleton className="bots-skel" /></div>
+              ) : (
+                <div className="bots-est">
+                  <div className="bots-est__big">
+                    <span className="bots-est__k">Per $1M, before price moves</span>
+                    <RollingNumber value={floor.net < 0 ? `earns ${fmtUsd(-floor.net, 0)}` : fmtUsd(floor.net, 0)} className={`bots-est__v${floor.net < 0 ? ' pos' : ''}`} />
+                    <span className="bots-est__sub">fees {fmtUsd(floor.fees, 0)}{floor.edge !== null ? `, grid steps earn ${fmtUsd(floor.edge, 0)}` : ''}</span>
+                  </div>
                 </div>
-              </div>
-            )}
-            <p className="bots-summary">{describe(d.strategy === 'market' ? { ...d, strategy: 'maker' } : d, range)}{d.strategy === 'market' && d.gate ? ` It adds no quote while Binance moved more than ${d.gateBps} bp in ${d.gateWindowS} s.` : ''}</p>
-            {check.map((e) => <p key={e} className="fx-note fx-note--err" role="alert">{e}</p>)}
-            {why && ctx.address && <p className="fx-note">{why} <button type="button" className="bots-link" onClick={() => ctx.setup(paper)}>Set up</button></p>}
-            {!ctx.address && <p className="fx-note">Connect your wallet to start a bot.</p>}
-            {error && <p className="fx-note fx-note--err" role="alert">{error}</p>}
-            <button type="button" className="pf-btn pf-btn--primary pf-btn--wide" disabled={!can || busy} onClick={() => void start()}>
-              {busy ? 'Starting…' : paper ? 'Start practice bot' : 'Start bot'}
-            </button>
-            <p className="bots-foot-note">{paper ? 'Practice: runs against the real book, sends nothing.' : 'Real orders in your SoDEX account.'} One wallet signature. Stop it any time.</p>
-          </Card>
+              )}
+              <Inset className="bots-summary">{describe(d.strategy === 'market' ? { ...d, strategy: 'maker' } : d, range)}{d.strategy === 'market' && d.gate ? ` It adds no quote while Binance moved more than ${d.gateBps} bp in ${d.gateWindowS} s.` : ''}</Inset>
+              {check.map((e) => <p key={e} className="bots-err" role="alert">{e}</p>)}
+              {why && ctx.address && <p className="bots-note">{why} <button type="button" className="bots-link" onClick={() => ctx.setup(paper)}>Set up</button></p>}
+              {!ctx.address && <p className="bots-note">Connect your wallet to start a bot.</p>}
+              {error && <p className="bots-err" role="alert">{error}</p>}
+              <Button variant="primary" size="md" className="bots-start" icon="play" loading={busy} disabled={!can} onClick={() => void start()}>
+                {busy ? 'Starting…' : paper ? 'Start practice bot' : 'Start bot'}
+              </Button>
+              <p className="bots-fine bots-center">{paper ? 'Practice: runs against the real book, sends nothing.' : 'Real orders in your SoDEX account.'} One wallet signature. Stop it any time.</p>
+            </Panel>
+          </Shell>
         </aside>
       </div>
     </>
