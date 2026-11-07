@@ -363,7 +363,7 @@ function Preview({ c }: { c: CopyContext }) {
           <EquityChart you={r.equityCurve} leader={r.leaderCurve} base={r.startEquity} pnl />
         </div>
         <div className="cpy-replay__legend">
-          <span><i className="copy-swatch copy-swatch--you" aria-hidden="true" />{counter ? 'You, counter-trading' : 'You'}</span>
+          <span><i className={`copy-swatch copy-swatch--you ${f.you.pnl >= 0 ? 'pos' : 'neg'}`} aria-hidden="true" />{counter ? 'You, counter-trading' : 'You'}</span>
           <span><i className="copy-swatch copy-swatch--leader" aria-hidden="true" />Trader, scaled to your {fmtUsd(r.startEquity, 0)}</span>
         </div>
         <p className="cpy-replay__sub">
