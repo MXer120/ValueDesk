@@ -61,7 +61,7 @@ import {
 import { readInSlices } from './slicedWork.js';
 import { Lane } from './lanes.js';
 import { WeightBudget } from '../valuedesk/hyperliquid/info.js';
-import { mark } from './busy.js';
+import { mark, within } from './busy.js';
 import type { Print } from './streams.js';
 import { defaultDbPath, type IndexStore } from './store.js';
 import { readFileSync, readdirSync, unlinkSync } from 'node:fs';
@@ -85,9 +85,9 @@ import { fineBandWidth, fineBands, fineSnapOf, liqCoin, snapOfNow } from '../val
 import { LiqLive } from '../valuedesk/liquidations/live.js';
 import { LiqFeedServer } from './liqFeed.js';
 import { deflateRawSync } from 'node:zlib';
-import { loadSeeds, type Seeds } from './archiveSeed.js';
+import { loadReadList, loadSeeds, readListDue, type Seeds } from './archiveSeed.js';
 import { mayPrune } from '../retention.js';
-import { OI_EXCESS, oiCheck, oiOver, oiRereads, oiStatus } from './oiCheck.js';
+import { OI_EXCESS, oiCheck, oiOver, oiRereads, oiStatus, overSides } from './oiCheck.js';
 import { RestReader } from './sodexCatchup.js';
 import type { PerpsState } from '../valuedesk/sodex/mappers.js';
 import { chargeGatewayWeight } from '../valuedesk/sodex/gateway.js';
@@ -124,6 +124,13 @@ export function fullPassDue(o: { lastAt: number | undefined; now: number; queued
 }
 /** An archive holder's notional from which its first read ranks with a trader's (USD). */
 const SEED_BONUS_MIN = 1_000;
+/**
+ * A wallet of the archive's read list (archiveSeed.ts loadReadList: it traded a perp in an older archive, and
+ * nothing says what it holds now) waits below every other read: the tail's (300+), the routine reconciles
+ * (400+) and the PnL reads (300+), so the boards' and the cohorts' own figures never wait for it. In the
+ * list's order (the most recent trader first). Once read, its book makes it a member like any other.
+ */
+export const READ_LIST_PRIO = 100;
 /** Coins kept per cohort in the hourly mix. */
 const MIX_COINS = 120;
 
@@ -170,7 +177,18 @@ const STATE_WEIGHT = 5;
 /** Open interest older than this judges nothing (VenueMarkets.at: a failed read leaves the last good one). */
 const OI_FRESH_MS = 3 * 60_000;
 const OI_REREAD_BATCH: Record<Venue, number> = { hyperliquid: 200, tradexyz: 100, sodex: 50, arcus: 50, lighter: 60 };
-const OI_PRIO = 870;
+/**
+ * Over-OI rereads queued per venue per check (OI_CHECK_MS), split over its coins that are over. Hyperliquid and
+ * trade.xyz share one lane of ~66 tasks a minute (measured 2026-11-07: 45,238 in ~11.4 h): 2 x 100 every 5 minutes
+ * is ~60% of it, run within ~3 minutes at OI_PRIO. Lighter's cohort share is ~13 reads a minute.
+ */
+export const OI_REREAD_TOTAL: Record<Venue, number> = { hyperliquid: 100, tradexyz: 100, sodex: 50, arcus: 50, lighter: 30 };
+/**
+ * A book behind an excess over open interest is known wrong: read before everything but the crossed books
+ * (crossedPrio, 1,700+). At 870 (until 2026-11-07) it waited behind the gap, staleness and never-read reads
+ * (900-1,900): trade.xyz ORCL stayed at 116% with 800 rereads queued.
+ */
+export const OI_PRIO = 1_650;
 const OI_LOG_EVERY_MS = 60 * 60_000;
 /** A trade.xyz market whose terms are not read yet: the usual xyz market's (scale 1, growth mode). */
 const XYZ_SCALE_UNKNOWN: MarketScale = { scale: 1, growth: true };
@@ -251,6 +269,25 @@ export function reconcileTtl(equity: number, venue?: Venue): number {
   if (equity >= 100_000) return funded ? 3 * DAY_MS : 24 * 60 * 60_000;
   if (venue === 'sodex') return 24 * 60 * 60_000;
   return 7 * DAY_MS;
+}
+
+/**
+ * An EMPTY Hyperliquid or trade.xyz book the stream follows: re-read after this long. It can only come to hold something by a print,
+ * and a print opens the book (and asks for a read within minutes, OPENED_REREAD); prints missed in an outage
+ * are covered by the outage re-reads (staleBefore, the gap floor). A deposit moves no position. Re-reading
+ * them weekly spent ~18k Hyperliquid reads a day on 127k books that were empty (2026-11-07: 32 of 32 sampled
+ * still empty on the venue, 96.7k of them already past the week, the lane behind on everything else).
+ */
+export const EMPTY_RECONCILE_MS = 30 * DAY_MS;
+
+/** A book's routine re-read age (the lowest priority): reconcileTtl when the stream follows it, pollTtl otherwise. */
+export function routineTtl(equity: number, venue: Venue, follows: boolean, positions: number): number {
+  if (!follows) return pollTtl(equity);
+  const ttl = reconcileTtl(equity, venue);
+  // Only where every print names the wallet itself: SoDEX's stream misses prints (reconcileTtl), a Lighter print
+  // names a sub-account (a new one is not known until a read), Arcus subscribes to its first 100 markets.
+  const named = venue === 'hyperliquid' || venue === 'tradexyz';
+  return positions > 0 || !named ? ttl : Math.max(ttl, EMPTY_RECONCILE_MS);
 }
 
 /** No venue here lends more than 50x: a book above this against its read equity was read before it was funded. */
@@ -831,6 +868,8 @@ export class CohortTracker {
   /** Holders the Hyperliquid fills archive found (archiveSeed.ts): read once each, the largest first. */
   private seeds: Seeds = new Map();
   private seedsAt: number | null = null;
+  /** Hyperliquid wallets to read once, without positions (archiveSeed.ts loadReadList), at READ_LIST_PRIO. */
+  private readList: string[] = [];
   /** How long Hyperliquid's stream was down across this start (its `stream_up`); Infinity = never up before. */
   private downAtStart = Number.POSITIVE_INFINITY;
   /** The hour's funding rates, taken in its last minutes and applied when it ends (fundingTick). */
@@ -932,11 +971,12 @@ export class CohortTracker {
       for (const [a, [flow, u0]] of Object.entries(saved)) if (Number.isFinite(flow) && Number.isFinite(u0)) this.pnlFlow.set(a, { flow, u0 });
     } catch { /* starts afresh: the PnL stands as read until the next read */ }
     void loadSeeds().then((r) => { this.seeds = r.seeds; this.seedsAt = r.at; }).catch((e) => (this.lastError = `archive seeds: ${String(e)}`));
+    void loadReadList().then((r) => { this.readList = r; }).catch((e) => (this.lastError = `archive read list: ${String(e)}`));
     this.hlc.start();
     this.hlh.start();
     this.scoh.start();
     const every = (ms: number, fn: () => Promise<void> | void, name: string) => {
-      const t = setInterval(() => { mark(name); void Promise.resolve(fn()).catch((e) => (this.lastError = String(e))); }, ms);
+      const t = setInterval(() => within(name, () => { void Promise.resolve(fn()).catch((e) => (this.lastError = String(e))); }), ms);
       t.unref?.();
       this.timers.push(t);
     };
@@ -1245,6 +1285,12 @@ export class CohortTracker {
         for (const k of m.keys()) if (!books?.has(k)) unread++;
         return [v, { wallets: m.size, unread }];
       })) },
+      readList: (() => {
+        const books = this.books.get('hyperliquid');
+        let unread = 0;
+        for (const a of this.readList) if (!books?.has(a)) unread++;
+        return { wallets: this.readList.length, unread };
+      })(),
       rebuild: this.rebuild
         ? {
           span: this.rebuild.span, phase: this.rebuild.phase, planned: this.rebuild.plan.size, read: this.rebuild.read.size,
@@ -1937,7 +1983,7 @@ export class CohortTracker {
         // Every SoDEX holder on its own schedule, whatever its coin's total looks like. Up to the lane to fit: planned from
         // the holders of 2026-11-06 (12 of $100K+, 27 of $10K+, 133 of $1K+, 990 under), 565 reads an hour, 1,225 if every small one trades.
         else if (venue === 'sodex' && book.pos.size && age >= sodexBookTtl(notional(book), (book.filledAt ?? 0) > book.at)) push(sodexBookPrio(notional(book)));
-        else if (age >= (follows ? reconcileTtl(eq, venue) : pollTtl(eq))) push(400 + size);
+        else if (age >= routineTtl(eq, venue, follows, book.pos.size)) push(400 + size);
       };
       let t0 = Date.now();
       for (const [address, m] of members) {
@@ -1961,6 +2007,17 @@ export class CohortTracker {
           await new Promise<void>((r) => setImmediate(r));
           mark('coh:plan');
           t0 = Date.now();
+        }
+      }
+      // The read list's wallets not read yet, below every other read (READ_LIST_PRIO).
+      if (venue === 'hyperliquid') {
+        for (const address of readListDue(this.readList, (a) => members.has(a) || books.has(a) || this.wanted.has(`${venue}|${a}`) || (this.seeds.get(venue)?.has(a) ?? false))) {
+          due.push([address, READ_LIST_PRIO]);
+          if (Date.now() - t0 > SLICE_MS) {
+            await new Promise<void>((r) => setImmediate(r));
+            mark('coh:plan');
+            t0 = Date.now();
+          }
         }
       }
       this.liqDue.set(venue, liqDue);
@@ -2195,7 +2252,10 @@ export class CohortTracker {
     const rows = oiCheck(totals, (v, coin) => markets.get(v)?.get(coin) ?? null);
     const now = this.d.now();
     let queued = 0;
-    for (const r of oiOver(rows)) {
+    const over = oiOver(rows);
+    const overOn = new Map<Venue, number>();
+    for (const r of over) overOn.set(r.venue, (overOn.get(r.venue) ?? 0) + 1);
+    for (const r of over) {
       const k = `${r.venue}|${r.coin}`;
       if (now - (this.oiLogged.get(k) ?? 0) >= OI_LOG_EVERY_MS) {
         this.oiLogged.set(k, now);
@@ -2203,7 +2263,8 @@ export class CohortTracker {
       }
       const books = this.books.get(r.venue);
       if (!books) continue;
-      for (const address of oiRereads(books, r.coin, liqCoin, now, OI_REREAD_BATCH[r.venue])) {
+      const limit = Math.min(OI_REREAD_BATCH[r.venue], Math.ceil(OI_REREAD_TOTAL[r.venue] / (overOn.get(r.venue) ?? 1)));
+      for (const address of oiRereads(books, r.coin, liqCoin, now, limit, { sides: overSides(r), gapAt: this.gapAt.get(r.venue) })) {
         const m = this.members.get(r.venue)?.get(address);
         this.queueRead(r.venue, address, OI_PRIO, r.venue === 'hyperliquid' && m?.ranked ? m.equity : null);
         queued++;

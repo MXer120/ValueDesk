@@ -17,6 +17,10 @@
  * these by hand while the probes still see the fault, it stays closed until the service has
  * been up AUTO.clearMin minutes again.
  *
+ * An indexer incident says what is behind (a sample's `why`, ops/indexerJudge.ts whyText) in plain
+ * words; something new behind while it is open is one update to it ("Now also: ..."). A sample that
+ * says the service is stopping on purpose counts as maintenance: nothing is opened from it.
+ *
  * The incidents are ordinary notices (ops/statusNotices.ts): the page, the feed, the app's
  * banner and the backup carry them as they carry the owner's, and the owner can change
  * them with the same tools. Which ones are automatic, and each service's run, are kept in
@@ -28,6 +32,7 @@
  */
 import type { NoticeStore } from './statusNotices.js';
 import { STATUS_SERVICES, fmtUtc, noticeSpan, type ServiceId, type ServiceState } from './statusModel.js';
+import { whyText } from './indexerJudge.js';
 
 export const AUTO = { downMin: 3, degradedMin: 10, clearMin: 5, gapMin: 5 } as const;
 
@@ -48,6 +53,9 @@ interface Track {
   upFrom: number | null;
   /** The owner closed ours while the fault was still seen: nothing new until it has been up a while. */
   quiet: boolean;
+  /** What the probes said is behind during this bad run (Sample.why codes), and what our incident has said. */
+  seen?: string[];
+  told?: string[];
 }
 
 interface AutoState {
@@ -68,12 +76,24 @@ const TITLE: Record<ServiceId, Record<Bad, string>> = {
   indexer: { down: 'Indexer not publishing - data is not current', degraded: 'Indexer degraded - figures may be behind' },
 };
 
-function openText(svc: ServiceId, bad: Bad, from: number): string {
+/** The codes' plain words, known ones only, joined; '' for none. */
+function whyWords(why: readonly string[]): string {
+  return why.map(whyText).filter((x): x is string => x !== null).join('; ');
+}
+
+const sentence = (s: string): string => s.charAt(0).toUpperCase() + s.slice(1);
+
+function openText(svc: ServiceId, bad: Bad, from: number, why: readonly string[] = []): string {
   const since = fmtUtc(from);
   if (svc === 'indexer') {
-    return bad === 'down'
-      ? `The indexer has not published fresh data since ${since}: cohorts, the liquidation heatmap, leaderboards and wallet pages may be out of date. Detected by our automatic checks; we are looking into it.`
-      : `Since ${since} one of the indexer's data streams has been down, or its leaderboards have not been rebuilt for over an hour: some figures may be behind. Detected by our automatic checks; we are looking into it.`;
+    if (bad === 'down') {
+      return `The indexer has not published fresh data since ${since}: cohorts, the liquidation heatmap, leaderboards and wallet pages may be out of date. Detected by our automatic checks; we are looking into it.`;
+    }
+    // What the probes saw behind (ops/indexerJudge.ts); a replayed record has only the states.
+    const words = whyWords(why);
+    return words
+      ? `Since ${since}: ${sentence(words)}. Detected by our automatic checks; we are looking into it.`
+      : `Since ${since} one of the indexer's data streams has been down, its leaderboards have not been rebuilt for over an hour, or its reads have stopped making progress: some figures may be behind. Detected by our automatic checks; we are looking into it.`;
   }
   if (svc === 'executor' && bad === 'degraded') {
     return `Since ${since} the copy & algo executor has either answered that its database or its SoDEX feed is not right, or has been hard to reach from the site: copies and algo orders may be late, and the app may wait for its answers. Detected by our automatic checks; we are looking into it.`;
@@ -135,12 +155,12 @@ export class AutoIncidents {
     });
   }
 
-  private open(svc: ServiceId, bad: Bad, fromMs: number, at: number): number | null {
+  private open(svc: ServiceId, bad: Bad, fromMs: number, at: number, why: readonly string[] = []): number | null {
     const from = Math.max(fromMs, at - BACK_MS);
     if (this.covered(svc, from, at)) return null;
     const n = this.notices.create({
       kind: 'incident', title: TITLE[svc][bad], components: [svc], impact: bad === 'down' ? 'major' : 'minor',
-      startsAt: from, text: openText(svc, bad, from), stage: 'investigating',
+      startsAt: from, text: openText(svc, bad, from, why), stage: 'investigating',
     }, at);
     this.s.ids.push(n.id);
     return n.id;
@@ -163,7 +183,7 @@ export class AutoIncidents {
    * One round's samples for `minute`, observed at `at`. Never throws: a notice that cannot
    * be written is skipped, and the next round tries again.
    */
-  observe(minute: number, samples: ReadonlyArray<{ service: ServiceId; state: Seen }>, at = minute * 60_000): void {
+  observe(minute: number, samples: ReadonlyArray<{ service: ServiceId; state: Seen; why?: readonly string[] }>, at = minute * 60_000): void {
     if (this.s.last !== null && minute <= this.s.last) return;
     try {
       if (this.s.last !== null && minute - this.s.last - 1 >= AUTO.gapMin) this.gap(this.s.last + 1, minute, at);
@@ -173,7 +193,7 @@ export class AutoIncidents {
     this.s.last = minute;
     for (const smp of samples) {
       try {
-        this.step(smp.service, smp.state, minute, at);
+        this.step(smp.service, smp.state, minute, at, smp.why ?? []);
       } catch {
         /* skipped: the next minute decides again */
       }
@@ -181,11 +201,21 @@ export class AutoIncidents {
     this.save();
   }
 
-  private step(svc: ServiceId, state: Seen, minute: number, at: number): void {
+  private step(svc: ServiceId, state: Seen, minute: number, at: number, why: readonly string[]): void {
     const t = (this.s.tracks[svc] ??= blankTrack());
+    // The service says it is stopping on purpose (the indexer's `stopping`, ops/status.ts): maintenance.
+    // Nothing is opened from it and a bad run does not carry across it; an incident already open stays.
+    if (why.includes('stopping')) {
+      t.badFrom = null;
+      t.downFrom = null;
+      t.upFrom = null;
+      t.seen = [];
+      return;
+    }
     if (state === 'up') {
       t.badFrom = null;
       t.downFrom = null;
+      t.seen = [];
       t.upFrom ??= minute;
       if (minute - t.upFrom + 1 < AUTO.clearMin) return;
       t.quiet = false;
@@ -202,6 +232,8 @@ export class AutoIncidents {
     }
     t.upFrom = null;
     t.badFrom ??= minute;
+    const seen = (t.seen ??= []);
+    for (const w of why) if (!seen.includes(w)) seen.push(w);
     if (state === 'down') t.downFrom ??= minute;
     else t.downFrom = null;
     const downLong = t.downFrom !== null && minute - t.downFrom + 1 >= AUTO.downMin;
@@ -219,14 +251,20 @@ export class AutoIncidents {
         this.notices.update(t.id, { impact: 'major', title: TITLE[svc].down, text: `Not answering at all since ${fmtUtc(t.downFrom! * 60_000)}.` }, at);
         t.worst = 'down';
       }
+      // Something else is behind as well: said once, as an update to the same incident.
+      const fresh = seen.filter((w) => !(t.told ?? []).includes(w));
+      const words = whyWords(fresh);
+      if (words && t.worst !== 'down') this.notices.update(t.id, { text: `Now also: ${words}.` }, at);
+      if (fresh.length) t.told = [...seen];
       return;
     }
     if (t.quiet || (!downLong && !badLong)) return;
     const bad: Bad = downLong ? 'down' : 'degraded';
-    const id = this.open(svc, bad, t.badFrom * 60_000, at);
+    const id = this.open(svc, bad, t.badFrom * 60_000, at, seen);
     if (id !== null) {
       t.id = id;
       t.worst = bad;
+      t.told = [...seen];
     }
   }
 }

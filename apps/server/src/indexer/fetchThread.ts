@@ -16,6 +16,7 @@
  * A request this cannot carry over (a Request object, a stream as the body, an option it does not know) goes the old way.
  */
 import { Worker } from 'node:worker_threads';
+import { currentLabel, resumed } from './busy.js';
 
 const CODE = `
 const { parentPort } = require('node:worker_threads');
@@ -133,9 +134,11 @@ export class FetchThread {
     const sent = { ...rest, ...(rest.headers ? { headers: [...new Headers(rest.headers)] } : {}) };
     return new Promise<Response>((ok, no) => {
       const id = ++this.seq;
+      // Whoever asked resumes when the answer is handed over: named again then (busy.ts), not after the last timer.
+      const label = currentLabel();
       const entry: Waiting = {
-        ok,
-        no,
+        ok: (v) => { resumed(label); ok(v); },
+        no: (e) => { resumed(label); no(e); },
         done: () => {
           signal?.removeEventListener('abort', onAbort);
           if (entry.timer) clearTimeout(entry.timer);

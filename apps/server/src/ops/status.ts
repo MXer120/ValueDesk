@@ -17,7 +17,8 @@
  *                                      Asked again, or on VALUESCAN_STATUS_EXECUTOR_DIRECT_URL,
  *                                      before a bad answer counts: probeExecutor
  *   indexer   its own status, read in this process (hosted.ts indexerHealth): fresh, every
- *             stream up and boards under an hour old, else `degraded` or `down` (stale)
+ *             stream up, boards under an hour old, and its lanes, reads and thread keeping up
+ *             over the last minutes (ops/indexerJudge.ts), else `degraded` or `down` (stale)
  *
  * Each answer is one minute's sample in `status.db` (the server's data directory;
  * SQLite, WAL) and adds one minute to that UTC day's tally. Both are kept (about
@@ -54,6 +55,7 @@ import { NoticeStore, healthNoticeReader } from './statusNotices.js';
 import { AutoIncidents, REPLAYED_KEY } from './statusAuto.js';
 import type { HealthNotice } from './statusModel.js';
 import { mayPrune } from '../retention.js';
+import { IndexerJudge } from './indexerJudge.js';
 
 export const PROBE_EVERY_MS = 60_000;
 export const PROBE_TIMEOUT_MS = 10_000;
@@ -65,6 +67,8 @@ const STALE_MS = 5 * 60_000;
 const INDEXER_STALE_MS = 180_000;
 /** Boards last built longer ago than this: the indexer runs, but its figures are behind. */
 const INDEXER_BOARDS_OLD_MS = 60 * 60_000;
+/** The longest an indexer that said it is stopping counts as maintenance (stops on 11-06 took up to 19.5 min). */
+const INDEXER_STOP_MAX_MS = 20 * 60_000;
 export const DEFAULT_SITE = 'https://www.valuedesk.so';
 
 const STATE_CODE: Record<Exclude<ServiceState, 'unknown'>, number> = { down: 0, degraded: 1, up: 2 };
@@ -74,6 +78,11 @@ export interface Sample {
   service: ServiceId;
   state: Exclude<ServiceState, 'unknown'>;
   ms: number | null;
+  /**
+   * What made it not up, as codes (indexer only: indexerJudge.ts whyText) - for the automatic
+   * incident's words. Not kept in the record.
+   */
+  why?: string[];
 }
 
 export const statusDbPath = (): string => process.env.VALUESCAN_STATUS_DB?.trim() || join(dataDir(), 'status.db');
@@ -473,30 +482,52 @@ async function timedRetry(fetchImpl: Fetch, url: string, headers: Record<string,
  */
 export const INDEXER_RECHECK_MS = 35_000;
 
-function indexerState(status: () => unknown, now: () => number): 'up' | 'degraded' | 'down' {
+type IndexerSeen = { state: 'up' | 'degraded' | 'down'; why: string[] };
+
+function indexerState(status: () => unknown, now: () => number, judge: IndexerJudge): IndexerSeen {
   let h = null;
+  let raw: unknown = null;
   try {
-    h = indexerHealth(status());
+    raw = status();
+    h = indexerHealth(raw);
   } catch {
     /* no index file: down */
   }
-  const fresh = h?.at !== null && h?.at !== undefined && now() - h.at <= INDEXER_STALE_MS;
-  const streams = Object.values(h?.streams ?? {});
-  if (!fresh) return 'down';
+  const age = h?.at ? now() - h.at : null;
+  // The indexer says it is stopping (a release, a restart): maintenance, not an incident (statusAuto.ts),
+  // for as long as a stop takes at most (11-06: 36 s to 19.5 min).
+  if (h && age !== null && age <= INDEXER_STOP_MAX_MS && (raw as { stopping?: unknown }).stopping === true) return { state: 'degraded', why: ['stopping'] };
+  if (!h || age === null || age > INDEXER_STALE_MS) {
+    // Not publishing, but the boards it wrote are under an hour old: what users see is still recent.
+    // The stops of 11-06 (36 s to 19.5 min) made most of that day's 39 down minutes.
+    const written = (raw as { boardsAt?: unknown } | null)?.boardsAt;
+    const boards = Math.max(h?.lastBuildAt ?? 0, typeof written === 'number' && Number.isFinite(written) ? written : 0);
+    return boards > 0 && now() - boards <= INDEXER_BOARDS_OLD_MS ? { state: 'degraded', why: ['paused'] } : { state: 'down', why: [] };
+  }
+  const why: string[] = [];
+  const streams = Object.entries(h.streams);
+  if (!streams.length) why.push('stream:');
+  for (const [venue, up] of streams) if (!up) why.push(`stream:${venue}`);
   // Boards hours old under a green page: 11.3 h on 2026-11-04 with most of that day counted as up.
-  const boardsOld = typeof h?.lastBuildAt === 'number' && h.lastBuildAt > 0 && now() - h.lastBuildAt > INDEXER_BOARDS_OLD_MS;
-  return streams.length && streams.every(Boolean) && !boardsOld ? 'up' : 'degraded';
+  if (typeof h.lastBuildAt === 'number' && h.lastBuildAt > 0 && now() - h.lastBuildAt > INDEXER_BOARDS_OLD_MS) why.push('boards');
+  // Lanes that have work and finish none, reads failing, the thread far behind (ops/indexerJudge.ts).
+  why.push(...judge.judge(h, now()));
+  return { state: why.length ? 'degraded' : 'up', why };
 }
 
-async function probeIndexer(status: () => unknown, now: () => number, recheckMs: number): Promise<'up' | 'degraded' | 'down'> {
-  const first = indexerState(status, now);
-  if (first !== 'degraded') return first;
+async function probeIndexer(status: () => unknown, now: () => number, recheckMs: number, judge: IndexerJudge): Promise<IndexerSeen> {
+  const first = indexerState(status, now, judge);
+  if (first.state !== 'degraded') return first;
   if (recheckMs > 0) await new Promise((r) => setTimeout(r, recheckMs));
-  return indexerState(status, now);
+  return indexerState(status, now, judge);
 }
 
 /** Probe every service once. Never throws: a failed probe is a `down` sample. */
-export async function probeAll(o: { targets: ProbeTargets; fetch?: Fetch; indexerStatus?: () => unknown; now?: () => number; retryMs?: number; recheckMs?: number; indexerRecheckMs?: number }): Promise<Sample[]> {
+export async function probeAll(o: {
+  targets: ProbeTargets; fetch?: Fetch; indexerStatus?: () => unknown; now?: () => number; retryMs?: number; recheckMs?: number; indexerRecheckMs?: number;
+  /** The indexer's readings across rounds (startStatusProber keeps one); none: this round alone. */
+  indexerJudge?: IndexerJudge;
+}): Promise<Sample[]> {
   const f = o.fetch ?? fetch;
   const now = o.now ?? Date.now;
   const { site } = o.targets;
@@ -504,7 +535,7 @@ export async function probeAll(o: { targets: ProbeTargets; fetch?: Fetch; indexe
     timedRetry(f, `${site}/`, {}, o.retryMs),
     timedRetry(f, `${site}/api/health`, { Accept: 'application/json' }, o.retryMs),
     probeExecutor(f, o.targets, o.retryMs, o.recheckMs ?? EXECUTOR_RECHECK_MS),
-    o.indexerStatus ? probeIndexer(o.indexerStatus, now, o.indexerRecheckMs ?? INDEXER_RECHECK_MS) : null,
+    o.indexerStatus ? probeIndexer(o.indexerStatus, now, o.indexerRecheckMs ?? INDEXER_RECHECK_MS, o.indexerJudge ?? new IndexerJudge()) : null,
   ]);
   const out: Sample[] = [];
   out.push({
@@ -514,7 +545,7 @@ export async function probeAll(o: { targets: ProbeTargets; fetch?: Fetch; indexe
   });
   out.push({ service: 'api', state: api && api.res.status === 200 && jsonOk(api.body) === true ? 'up' : 'down', ms: api?.ms ?? null });
   out.push({ service: 'executor', state: exec.state, ms: exec.ms });
-  if (indexer) out.push({ service: 'indexer', state: indexer, ms: null });
+  if (indexer) out.push({ service: 'indexer', state: indexer.state, ms: null, ...(indexer.why.length ? { why: indexer.why } : {}) });
   return out;
 }
 
@@ -558,6 +589,7 @@ export function startStatusProber(o: {
     o.log?.warn({ err: e instanceof Error ? e.message : String(e) }, 'status: the record could not be played through the automatic incidents');
   }
   let running = false;
+  const indexerJudge = new IndexerJudge();
   const tick = async (): Promise<void> => {
     // One round at a time: a slow round is never overlapped by the next.
     if (running) return;
@@ -567,7 +599,7 @@ export function startStatusProber(o: {
     // (three on 2026-10-31 with nothing down - owner 2026-11-01: the checker must not go blind).
     const started = Date.now();
     try {
-      const samples = await probeAll({ targets, fetch: o.fetch, indexerStatus: o.indexerStatus });
+      const samples = await probeAll({ targets, fetch: o.fetch, indexerStatus: o.indexerStatus, indexerJudge });
       const at = started;
       store.record(samples, at);
       store.auto.observe(Math.floor(at / 60_000), samples, Date.now());
