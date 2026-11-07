@@ -1486,6 +1486,13 @@ export class IndexStore {
     return rows as unknown as WalletFillRow[];
   }
 
+  /** The signed size each symbol's fills in (fromT, toT] add up to - a walk of fills_t over that span. Read-only (indexer/walletFills.ts positionsAt). */
+  fillsNetBySymbol(venue: Venue, address: string, fromT: number, toT: number): Array<{ symbol: string; net: number }> {
+    if (!(toT > fromT)) return [];
+    return this.q('SELECT symbol, SUM(CASE WHEN side > 0 THEN sz ELSE -sz END) AS net FROM fills INDEXED BY fills_t WHERE venue = ? AND address = ? AND t > ? AND t <= ? GROUP BY symbol')
+      .all(venue, address, fromT, toT) as Array<{ symbol: string; net: number }>;
+  }
+
   /** The time of the wallet's newest fills row of any source (null: none) - one step down fills_t. Read-only (indexer/walletFills.ts lastTrades). */
   newestRowT(venue: Venue, address: string): number | null {
     const r = this.q('SELECT MAX(t) AS t FROM fills INDEXED BY fills_t WHERE venue = ? AND address = ?').get(venue, address) as { t?: number | null } | undefined;

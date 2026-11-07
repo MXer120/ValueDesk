@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { VsFill } from '@sign/valuedesk/types.js';
-import { TAIL_SLACK_MS, fillsWithIndex, indexFillsPath, type FillsQuery, type IndexFillsAnswer } from './indexFills';
+import { TAIL_SLACK_MS, fillsWithIndex, indexFillsPath, indexPositions, type FillsQuery, type IndexFillsAnswer } from './indexFills';
 
 const NOW = 1_800_000_000_000;
 const A = '0x' + 'a'.repeat(40);
@@ -107,4 +107,18 @@ test('a venue the route does not answer (Arcus, Lighter, trade.xyz) is not asked
     assert.equal(t.paths.length, 0);
     assert.deepEqual(t.asked, [{ limit: 10 }]);
   }
+});
+
+test('the index\'s positions come with its fills: as sent when it reaches the end, moved on by the venue\'s tail otherwise', async () => {
+  const at = { ok: true, covered: true, fills: [f('h1', NOW - 200)], positions: [{ symbol: 'BTC', side: 'long' as const, size: 2 }, { symbol: 'ETH', side: 'short' as const, size: 1 }] };
+  const whole = await fillsWithIndex('hyperliquid', A, { limit: 10 }, io({ ...at, heldTo: NOW - 60_000 }).io);
+  assert.deepEqual(indexPositions(whole), at.positions);
+  // A tail after heldTo: a buy of 1 ETH closes the short, a sell of 3 BTC turns it short 1.
+  const heldTo = NOW - 3_600_000;
+  const sellBtc = { ...f('v1', NOW - 100), side: 'sell' as const, sz: 3 };
+  const tailed = await fillsWithIndex('hyperliquid', A, { limit: 10 }, io({ ...at, heldTo }, [sellBtc, f('v2', NOW - 50, 'ETH')]).io);
+  assert.deepEqual(indexPositions(tailed), [{ symbol: 'BTC', side: 'short', size: 1 }]);
+  // An answer without them, or the venue's own read: none - the replay waits for the profile.
+  assert.equal(indexPositions(await fillsWithIndex('hyperliquid', A, { limit: 10 }, io({ ok: true, covered: true, heldTo: NOW, fills: [] }).io)), null);
+  assert.equal(indexPositions(await fillsWithIndex('hyperliquid', A, { limit: 10 }, io({ ok: true, covered: false }).io)), null);
 });

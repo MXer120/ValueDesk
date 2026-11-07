@@ -17,6 +17,10 @@ import { explainScore, scoreBand, type CopyScore } from './copyScore';
 import { fmtSignedPct, fmtSignedUsd } from './setup';
 import { markOffscreen } from '../../offscreen';
 import { serverCards } from '../../exchange/copyCards';
+import { prefetchCopy } from './useCopy';
+
+/** How long a pointer rests on a card before its copy setup's reads start (a sweep over the grid starts none). */
+const HOVER_INTENT_MS = 150;
 import { cardShown, PROFILE_WINDOW } from '@sign/valuedesk/cardPeek.js';
 
 /* ------------------------------------------------------------ the peek ----- */
@@ -335,9 +339,19 @@ export function TraderCard({ row, score, window: w, unit, kind = 'copy', onOpen,
   // The glare stops while the card is scrolled away (offscreen.ts, CopyHome.css).
   const glow = useRef<HTMLSpanElement>(null);
   useEffect(() => (glow.current ? markOffscreen(glow.current) : undefined), []);
+  // The copy setup's reads started on a hover that stays (or focus, or a press): usually in before the click (useCopy.ts prefetchCopy).
+  const intent = useRef<number | null>(null);
+  const warm = () => { if (copyable) prefetchCopy(row.venue, row.address, row.accountValue); };
+  const hoverOn = () => { if (intent.current === null) intent.current = window.setTimeout(() => { intent.current = null; warm(); }, HOVER_INTENT_MS); };
+  const hoverOff = () => { if (intent.current !== null) { window.clearTimeout(intent.current); intent.current = null; } };
+  useEffect(() => hoverOff, []);
   return (
     <article
       ref={ref}
+      onPointerEnter={hoverOn}
+      onPointerLeave={hoverOff}
+      onPointerDown={warm}
+      onFocus={warm}
       className={`cpy-card cpy-card--${kind} cpy-card--${scoreBand(score.score)}`}
       tabIndex={0}
       onClick={() => onOpen(row)}

@@ -583,7 +583,8 @@ if (process.env.VALUESCAN_COPY_FILLS_WARM !== '0') {
   const [{ warmCopyFills }, { indexLeaders }] = await Promise.all([import('./indexer/walletFills.js'), import('./valuedesk/copyCards.js')]);
   // 30D first, then 7D, then All; both sides (the page shows traders to copy and to counter).
   const order = { '30d': 0, '7d': 1, all: 2 } as Record<string, number>;
-  warmCopyFills(() => indexLeaders().sort((a, b) => (order[a.window] ?? 9) - (order[b.window] ?? 9) || a.i - b.i), 5_000);
+  const { join } = await import('node:path');
+  warmCopyFills(() => indexLeaders().sort((a, b) => (order[a.window] ?? 9) - (order[b.window] ?? 9) || a.i - b.i), 5_000, join(dataDir(), 'copy-fills'));
 }
 
 // Official economic results at the release second (valuedesk/releases.ts): one

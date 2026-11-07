@@ -277,3 +277,55 @@ test('GET /api/vs/last-trades: each Hyperliquid wallet\'s newest fills row (a st
     .prepare('EXPLAIN QUERY PLAN SELECT MAX(t) AS t FROM fills INDEXED BY fills_t WHERE venue = ? AND address = ?').all('hyperliquid', HL).map((x) => x.detail);
   assert.ok(plan.some((d) => /COVERING INDEX fills_t/.test(d)), plan.join(' | '));
 });
+
+test('the positions at the answer\'s end: the book plus the fills since (or less those before it); none when a book lies outside the held span', async () => {
+  const P = '0x' + '6'.repeat(40);
+  // BTC long 2 at the book's read, then bought 1 and sold 0.5; ETH short 3 at the read, closed by a buy of 3; xyz:GOLD on its own book.
+  const bookAt = NOW - 3 * 3_600_000;
+  store.putCohortBooks([
+    { venue: 'hyperliquid', address: P, equity: 1000, positions: [{ symbol: 'BTC', szi: 2, entry: 100 }, { symbol: 'ETH', szi: -3, entry: 10 }], at: bookAt },
+    { venue: 'tradexyz', address: P, equity: 50, positions: [{ symbol: 'xyz:GOLD', szi: 4, entry: 2000 }], at: bookAt },
+  ]);
+  store.putFills([
+    fill('hyperliquid', P, 'p0', bookAt - 3_600_000, { symbol: 'BTC', side: 1, sz: 7 }), // before the read: in the book already
+    fill('hyperliquid', P, 'p1', bookAt + 60_000, { symbol: 'BTC', side: 1, sz: 1 }),
+    fill('hyperliquid', P, 'p2', bookAt + 120_000, { symbol: 'BTC', side: -1, sz: 0.5 }),
+    fill('hyperliquid', P, 'p3', bookAt + 180_000, { symbol: 'ETH', side: 1, sz: 3 }),
+    fill('hyperliquid', P, 'p4', bookAt + 240_000, { symbol: 'xyz:GOLD', side: -1, sz: 1 }),
+  ]);
+  store.addCoverage('hyperliquid', P, 'fills', { fromT: NOW - 5 * DAY, toT: NOW - 60_000 }, NOW);
+  const a = (await get(`venue=hyperliquid&address=${P}&from=${NOW - DAY}&limit=5000`)).body;
+  assert.deepEqual(a.positions, [{ symbol: 'BTC', side: 'long', size: 2.5 }, { symbol: 'xyz:GOLD', side: 'long', size: 3 }]);
+  const { positionsAt, heldSpan } = await import('../src/indexer/walletFills.js');
+  const span = heldSpan(store, 'hyperliquid', P)!;
+  // At a time before the book's read: the fills between come off it.
+  assert.deepEqual(positionsAt(store, 'hyperliquid', P, bookAt - 2 * 3_600_000, span), [{ symbol: 'BTC', side: 'short', size: 5 }, { symbol: 'ETH', side: 'short', size: 3 }, { symbol: 'xyz:GOLD', side: 'long', size: 4 }]);
+  // A book read after the held span ends: the fills between are not all held - nothing said.
+  assert.equal(positionsAt(store, 'hyperliquid', P, NOW - 60_000, { lo: span.lo, hi: bookAt - 1 }), null);
+});
+
+test('saved to disk and read back after a start: the same answer, then topped up from there', async () => {
+  const S = '0x' + '5'.repeat(40);
+  store.putFills([fill('hyperliquid', S, 'k1', NOW - 2 * DAY), fill('hyperliquid', S, 'k2', NOW - DAY)]);
+  store.addCoverage('hyperliquid', S, 'fills', { fromT: NOW - 10 * DAY, toT: NOW - 120_000 }, NOW);
+  const W = await import('../src/indexer/walletFills.js');
+  W.setWalletFillsDir(join(dir, 'copy-fills'));
+  try {
+    const q = `venue=hyperliquid&address=${S}&from=${NOW - 3 * DAY}&limit=5000`;
+    const a = (await get(q)).body;
+    assert.ok((await W.saveWalletFills()) >= 1);
+    W.clearWalletFills(); // a start: nothing in memory
+    // Read back without touching the index's rows: a row written now below the saved end is not in the answer.
+    store.putFills([fill('hyperliquid', S, 'k9', NOW - 1.5 * DAY)]);
+    const b = (await get(q)).body;
+    assert.deepEqual(b, a);
+    // The held span grows: topped up from the saved end.
+    store.putFills([fill('hyperliquid', S, 'k3', NOW - 60_000)]);
+    store.setCoverage('hyperliquid', S, 'fills', { ...store.coverage('hyperliquid', S, 'fills')!, toT: NOW });
+    const c = (await get(q)).body;
+    assert.deepEqual(c.fills.map((f: { id: string }) => f.id), ['k3', 'k2', 'k1']);
+  } finally {
+    W.setWalletFillsDir(null);
+    W.clearWalletFills();
+  }
+});

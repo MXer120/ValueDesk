@@ -23,11 +23,35 @@ export const TAIL_SLACK_MS = 90_000;
 const DEFAULT_LIMIT = 2_000;
 export const FROM_STEP_MS = 60_000;
 
+/** A position as the replay needs it to recover each fill's position-before. */
+export interface IndexPosition { symbol: string; side: 'long' | 'short'; size: number }
+
 export interface IndexFillsAnswer {
   ok?: boolean;
   covered?: boolean;
   heldTo?: number;
   fills?: VsFill[];
+  /** The trader's positions at heldTo (server walletFills.ts positionsAt): the book plus the fills since. */
+  positions?: IndexPosition[];
+}
+
+/**
+ * The positions at the end of an answer, when the index said them: at its heldTo, moved on by the tail the venue
+ * answered after it. The copy setup's replay runs on these at once instead of waiting for the venue's profile
+ * (about 1.5 s from a browser to Hyperliquid), and again on the profile's when it arrives.
+ */
+const positionsOf = new WeakMap<VsFill[], IndexPosition[]>();
+export function indexPositions(fills: VsFill[] | null | undefined): IndexPosition[] | null {
+  return (fills && positionsOf.get(fills)) ?? null;
+}
+
+function movedOn(at: readonly IndexPosition[], tail: readonly VsFill[]): IndexPosition[] {
+  const size = new Map<string, number>();
+  for (const p of at) size.set(p.symbol, (p.side === 'long' ? 1 : -1) * p.size);
+  for (const f of tail) size.set(f.symbol, (size.get(f.symbol) ?? 0) + (f.side === 'buy' ? 1 : -1) * f.sz);
+  const out: IndexPosition[] = [];
+  for (const [symbol, v] of size) if (Math.abs(v) > 1e-12) out.push({ symbol, side: v > 0 ? 'long' : 'short', size: Math.abs(v) });
+  return out;
 }
 
 export interface FillsQuery {
@@ -77,8 +101,14 @@ export async function fillsWithIndex(
   }
   const held = io.name ? await io.name(got.fills) : got.fills;
   const end = o.to ?? (io.now ?? Date.now)();
-  if (heldTo >= end - TAIL_SLACK_MS) return held;
+  const pos = Array.isArray(got.positions) ? got.positions : null;
+  if (heldTo >= end - TAIL_SLACK_MS) {
+    if (pos) positionsOf.set(held, pos);
+    return held;
+  }
   // The tail the index has not caught up with: from the venue, then the index's below it.
   const tail = (await io.direct({ ...o, from: Math.max(o.from ?? 0, heldTo + 1), limit })).filter((f) => f.time > heldTo);
-  return [...tail.sort(newestFirst), ...held.filter((f) => f.time <= heldTo)].slice(0, limit);
+  const out = [...tail.sort(newestFirst), ...held.filter((f) => f.time <= heldTo)].slice(0, limit);
+  if (pos) positionsOf.set(out, movedOn(pos, tail));
+  return out;
 }

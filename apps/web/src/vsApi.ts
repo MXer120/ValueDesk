@@ -141,6 +141,27 @@ async function indexFills(path: string, signal?: AbortSignal): Promise<IndexFill
   }
 }
 
+/*
+ * ONE READ PER TRADER FOR A MOMENT (2026-11-07, owner: "for all users charts arrive in milliseconds"). A trader card's
+ * hover starts the fills and profile reads its copy setup takes (useCopy.ts prefetchCopy), and opening it again within
+ * the minute reads nothing. Keyed by everything the read depends on; a failed read is not kept; a caller that goes
+ * away cancels only its own wait (direct's signal), not the read others share.
+ */
+const FILLS_SHARE_MS = 60_000;
+const TRADER_SHARE_MS = 30_000;
+const SHARE_MAX = 64;
+const shared = new Map<string, { at: number; p: Promise<unknown> }>();
+function sharedRead<T>(key: string, ttl: number, run: () => Promise<T>): Promise<T> {
+  const now = Date.now();
+  const hit = shared.get(key);
+  if (hit && now - hit.at < ttl) return hit.p as Promise<T>;
+  const p = run();
+  shared.set(key, { at: now, p });
+  if (shared.size > SHARE_MAX) for (const [k, v] of shared) if (now - v.at >= ttl || shared.size > SHARE_MAX) shared.delete(k);
+  p.catch(() => { if (shared.get(key)?.p === p) shared.delete(key); });
+  return p;
+}
+
 /** A venue read done in this browser, failing the way the route did (VsError with its code). */
 function direct<T>(p: Promise<T>, signal?: AbortSignal): Promise<T> {
   const mapped = p.catch((e: unknown) => {
@@ -175,20 +196,20 @@ export const vsApi = {
     unwrap<{ assets?: unknown }>('/api/vs/screener?view=assets', signal),
 
   // --- one trader on one venue: straight from the venue, in this browser -----
+  // Shared for a moment (sharedRead): a card's hover starts the read the copy setup then takes (prefetchCopy).
   trader: (venue: Venue, address: string, signal?: AbortSignal): Promise<TraderProfile | null> =>
-    direct(venues.trader(venue, address), signal),
+    direct(sharedRead(`trader|${venue}|${address.toLowerCase()}`, TRADER_SHARE_MS, () => venues.trader(venue, address)), signal),
   /** A trader card's curves and last trade (exchange/venues.ts peek). */
   traderPeek: (venue: Venue, address: string, window: Window = '30d', signal?: AbortSignal): Promise<CardPeek | null> =>
     direct(venues.peek(venue, address, window), signal),
 
   /** The newest fills, newest first: what the index holds (indexFills.ts), the rest from the venue in this browser. */
   fills: (venue: Venue, address: string, o: { from?: number; to?: number; limit?: number } = {}, signal?: AbortSignal): Promise<VsFill[]> =>
-    direct(fillsWithIndex(venue, address, o, {
-      index: (path) => indexFills(path, signal),
-      // A page that went away while the index answered starts no venue walk.
-      direct: (q) => (signal?.aborted ? Promise.reject(new DOMException('aborted', 'AbortError')) : venues.fills(venue, address, q)),
+    direct(sharedRead(`fills|${venue}|${address.toLowerCase()}|${o.from ?? ''}|${o.to ?? ''}|${o.limit ?? ''}`, FILLS_SHARE_MS, () => fillsWithIndex(venue, address, o, {
+      index: (path) => indexFills(path),
+      direct: (q) => venues.fills(venue, address, q),
       name: (fills) => venues.nameFills(venue, fills),
-    }), signal),
+    })), signal),
   openOrders: (venue: Venue, address: string, signal?: AbortSignal): Promise<VsOrder[]> =>
     direct(venues.openOrders(venue, address), signal),
   orderHistory: (venue: Venue, address: string, signal?: AbortSignal): Promise<VsOrder[]> =>

@@ -44,6 +44,8 @@
  * (THE KEPT ANSWERS below).
  */
 import { setImmediate as nextTurn } from 'node:timers/promises';
+import { mkdir, open, readFile, rename } from 'node:fs/promises';
+import { join } from 'node:path';
 import type { Venue, VsFill } from '../valuedesk/types.js';
 import { reader } from './reader.js';
 import type { HistoryKind, IndexStore, WalletFillRow } from './store.js';
@@ -58,7 +60,7 @@ const SLICE = 250;
 
 export type WalletFillsBody =
   | { ok: true; covered: false; reason: string }
-  | { ok: true; covered: true; heldTo: number; fills: VsFill[] };
+  | { ok: true; covered: true; heldTo: number; fills: VsFill[]; positions?: Array<{ symbol: string; side: 'long' | 'short'; size: number }> };
 
 export interface WalletFillsQuery {
   from?: number;
@@ -179,12 +181,15 @@ type Span = { lo: number; hi: number };
  * string of its fills (newest first) with each fill's time and end offset: any `from` inside it is a prefix of that
  * string, nothing parsed or serialized again. When the held span grows, only the rows after it are read and put in
  * front; every REBUILD_MS the answer is read whole again in the background (a REST read may have replaced stream rows).
+ * Saved to disk every SAVE_EVERY_MS (one file per answer, warmCopyFills' directory) and read back on first use after a
+ * start, then topped up: a release does not start every copy setup cold.
  * The answers held stay under KEEP_BYTES, least recently used out first; the copy leaders are kept warm (warmCopyFills).
  * The JSON is held as a Buffer, outside the JavaScript heap: ~1,200 leaders at up to ~0.9 MB each would otherwise be
  * hundreds of MB the collector walks and counts against the heap limit (its pauses held this thread 8-10 s on 2026-11-07).
  */
 const NEWEST_SPAN_MS = 31 * DAY_MS;
-export const REBUILD_MS = 10 * 60_000;
+/** Read whole again this often (a top-up keeps it current between): ~1,200 warm leaders, so not more. */
+export const REBUILD_MS = 60 * 60_000;
 const KEEP_BYTES = 700 * 1024 * 1024;
 
 interface Newest {
@@ -199,6 +204,54 @@ interface Newest {
   times: Float64Array;
   ends: Uint32Array;
   bytes: number;
+  /** The wallet's positions at `heldTo` as a JSON array (positionsAt), or null when the index cannot say them. */
+  positions: string | null;
+  positionsAt: number | null;
+}
+
+/*
+ * THE POSITIONS AT THE ANSWER'S END (2026-11-07): the replay recovers each fill's position-before from where the trader
+ * stands at the end of its fills, and waited for the venue's profile for that (about 1.5 s from a browser to
+ * Hyperliquid). The index has the wallet's book (cohort_book: its positions when it was read) and every fill since:
+ * the book plus the net of the fills between its time and `heldTo` is the position at `heldTo`, consistent with the
+ * fills given by construction. Only when every book's time lies inside the held span (the fills between are then all
+ * held); otherwise null and the browser waits for the venue as before. On Hyperliquid the xyz: dex has its own book
+ * (venue tradexyz). The browser runs the replay on these at once and again on the venue's when that arrives.
+ */
+const XYZ = 'xyz:';
+export function positionsAt(store: IndexStore, venue: Venue, address: string, at: number, span: Span): Array<{ symbol: string; side: 'long' | 'short'; size: number }> | null {
+  const books: Array<{ dex: 'main' | 'xyz'; book: ReturnType<IndexStore['cohortBook']> }> = venue === 'hyperliquid'
+    ? [{ dex: 'main', book: store.cohortBook('hyperliquid', address) }, { dex: 'xyz', book: store.cohortBook('tradexyz', address) }]
+    : venue === 'sodex' ? [{ dex: 'main', book: store.cohortBook('sodex', address) }] : [];
+  if (!books.length || !books[0]!.book) return null;
+  const size = new Map<string, number>();
+  for (const { dex, book } of books) {
+    if (!book) continue;
+    if (book.at < span.lo || book.at > span.hi) return null;
+    const mine = (sym: string) => (venue !== 'hyperliquid' ? true : dex === 'xyz' ? sym.startsWith(XYZ) : !sym.startsWith(XYZ));
+    for (const p of book.positions) {
+      const sym = dex === 'xyz' && !p.symbol.startsWith(XYZ) ? XYZ + p.symbol : p.symbol;
+      if (mine(sym)) size.set(sym, (size.get(sym) ?? 0) + p.szi);
+    }
+    const sign = at >= book.at ? 1 : -1;
+    for (const r of store.fillsNetBySymbol(venue, address, Math.min(book.at, at), Math.max(book.at, at))) {
+      if (mine(r.symbol)) size.set(r.symbol, (size.get(r.symbol) ?? 0) + sign * r.net);
+    }
+  }
+  const out: Array<{ symbol: string; side: 'long' | 'short'; size: number }> = [];
+  for (const [symbol, v] of size) {
+    const abs = Math.abs(v);
+    if (abs > 1e-9 * Math.max(1, abs)) out.push({ symbol, side: v > 0 ? 'long' : 'short', size: +abs.toPrecision(12) });
+  }
+  return out.sort((a, b) => (a.symbol < b.symbol ? -1 : a.symbol > b.symbol ? 1 : 0));
+}
+
+function withPositions(store: IndexStore, venue: Venue, address: string, n: Newest): Newest {
+  if (!n.covered || n.positionsAt === n.heldTo) return n;
+  let p: ReturnType<typeof positionsAt> = null;
+  try { p = positionsAt(store, venue, address, n.heldTo, n.span); } catch { p = null; }
+  const positions = p ? JSON.stringify(p) : null;
+  return { ...n, positions, positionsAt: n.heldTo, bytes: n.bytes - (n.positions?.length ?? 0) + (positions?.length ?? 0) };
 }
 
 const newest = new Map<string, Newest>();
@@ -237,7 +290,7 @@ async function buildNewest(store: IndexStore, venue: Venue, address: string, lim
   const heldTo = cut === null ? span.hi : cut - 1;
   const bad = heldTo < lower || (cut !== null && !rows.length);
   const p = pack(bad ? [] : rows);
-  return { at: now, span, lower, covered: !bad, reason: bad ? 'the index holds stream prints here that the venue\'s REST answer has not replaced' : '', heldTo, ...p, bytes: p.json.length + p.times.byteLength + p.ends.byteLength + 64 };
+  return { at: now, span, lower, covered: !bad, reason: bad ? 'the index holds stream prints here that the venue\'s REST answer has not replaced' : '', heldTo, ...p, bytes: p.json.length + p.times.byteLength + p.ends.byteLength + 64, positions: null, positionsAt: null };
 }
 
 /** A kept answer brought up to a held span that grew at its end: the new rows in front (a stream cut among them: read whole). */
@@ -262,19 +315,93 @@ async function topUp(store: IndexStore, venue: Venue, address: string, limit: nu
   return { ...n, span, heldTo: span.hi, json, times, ends, bytes: json.length + times.byteLength + ends.byteLength + 64 };
 }
 
+/* --- on disk ------------------------------------------------------------------------------- */
+
+const FILE_V = 1;
+export const SAVE_EVERY_MS = 60 * 60_000;
+let saveDir: string | null = null;
+const triedLoad = new Set<string>();
+const savedAt = new Map<string, number>();
+const fileOf = (key: string) => join(saveDir!, `${key.replace(/[^0-9a-zA-Z]+/g, '-')}.bin`);
+
+/** [u32 header length][header JSON][times f64][ends u32][fills JSON]. */
+async function saveOne(key: string, n: Newest): Promise<void> {
+  const { json, times, ends, ...rest } = n;
+  const header = Buffer.from(JSON.stringify({ v: FILE_V, key, n: times.length, ...rest }), 'utf8');
+  const len = Buffer.alloc(4);
+  len.writeUInt32LE(header.length, 0);
+  const tmp = `${fileOf(key)}.tmp`;
+  const fh = await open(tmp, 'w');
+  try {
+    await fh.write(Buffer.concat([len, header, Buffer.from(times.buffer, times.byteOffset, times.byteLength), Buffer.from(ends.buffer, ends.byteOffset, ends.byteLength), json]));
+  } finally {
+    await fh.close();
+  }
+  await rename(tmp, fileOf(key));
+}
+
+async function loadSaved(key: string): Promise<Newest | null> {
+  let b: Buffer;
+  try { b = await readFile(fileOf(key)); } catch { return null; }
+  if (b.length < 4) return null;
+  const hl = b.readUInt32LE(0);
+  const h = JSON.parse(b.subarray(4, 4 + hl).toString('utf8')) as Omit<Newest, 'json' | 'times' | 'ends'> & { v: number; key: string; n: number };
+  if (h.v !== FILE_V || h.key !== key) return null;
+  let at = 4 + hl;
+  // Copied out: a typed array needs its own aligned buffer.
+  const times = new Float64Array(h.n);
+  Buffer.from(times.buffer).set(b.subarray(at, at + h.n * 8));
+  at += h.n * 8;
+  const ends = new Uint32Array(h.n);
+  Buffer.from(ends.buffer).set(b.subarray(at, at + h.n * 4));
+  at += h.n * 4;
+  const json = Buffer.from(b.subarray(at));
+  if (h.n && ends[h.n - 1] !== json.length) return null;
+  const { v: _v, key: _k, n: _n, ...rest } = h;
+  return { ...rest, json, times, ends };
+}
+
+/** Where the answers are saved (warmCopyFills sets it; tests). */
+export function setWalletFillsDir(dir: string | null): void {
+  saveDir = dir;
+}
+
+/** Every kept answer that changed since it was last saved, one at a time. */
+export async function saveWalletFills(): Promise<number> {
+  if (!saveDir) return 0;
+  await mkdir(saveDir, { recursive: true });
+  let n = 0;
+  for (const [key, a] of [...newest]) {
+    if (savedAt.get(key) === a.heldTo) continue;
+    try {
+      await saveOne(key, a);
+      savedAt.set(key, a.heldTo);
+      n++;
+    } catch { /* the next save tries again */ }
+    await nextTurn();
+  }
+  return n;
+}
+
 /** The kept answer for (venue, address, limit), up to the held span now; built or topped up here, read whole again after REBUILD_MS. */
 async function newestOf(store: IndexStore, venue: Venue, address: string, limit: number, span: Span, now: number): Promise<Newest> {
   const key = `${venue}|${address}|${limit}`;
   const going = building.get(key);
   if (going) return going;
-  const cur = newest.get(key);
+  let cur = newest.get(key);
+  if (!cur && saveDir && !triedLoad.has(key)) {
+    triedLoad.add(key);
+    const saved = await loadSaved(key).catch(() => null);
+    if (saved && !newest.has(key)) cur = keep(key, saved);
+    else cur = newest.get(key);
+  }
   let job: Promise<Newest>;
   if (!cur || cur.span.lo !== span.lo || cur.span.hi > span.hi || cur.lower < Math.max(span.lo, now - NEWEST_SPAN_MS) - DAY_MS) {
     job = buildNewest(store, venue, address, limit, span, now);
   } else if (now - cur.at >= REBUILD_MS) {
     // Read whole again behind this answer; this one is topped up meanwhile.
     if (!building.has(`${key}|re`)) {
-      const re = buildNewest(store, venue, address, limit, span, now).then((n) => keep(key, n));
+      const re = buildNewest(store, venue, address, limit, span, now).then((n) => keep(key, withPositions(store, venue, address, n)));
       building.set(`${key}|re`, re);
       re.catch(() => {}).finally(() => building.delete(`${key}|re`));
     }
@@ -286,7 +413,7 @@ async function newestOf(store: IndexStore, venue: Venue, address: string, limit:
     newest.set(key, cur); // most recently used
     return cur;
   }
-  const kept = job.then((n) => keep(key, n));
+  const kept = job.then((n) => keep(key, withPositions(store, venue, address, n)));
   building.set(key, kept);
   try {
     return await kept;
@@ -309,7 +436,8 @@ function countFrom(times: Float64Array, from: number): number {
 
 const COMMA = Buffer.from(',');
 const TAIL = Buffer.from(']}');
-const coveredJson = (heldTo: number, fills: Buffer): Buffer => Buffer.concat([Buffer.from(`{"ok":true,"covered":true,"heldTo":${heldTo},"fills":[`), fills, TAIL]);
+const coveredJson = (heldTo: number, fills: Buffer, positions: string | null = null): Buffer =>
+  Buffer.concat([Buffer.from(`{"ok":true,"covered":true,"heldTo":${heldTo},${positions ? `"positions":${positions},` : ''}"fills":[`), fills, TAIL]);
 
 /** The route's answer as the JSON text it sends: from the kept answer when it can say it, else read as before. */
 export async function walletFillsJson(venue: Venue, address: string, q: WalletFillsQuery, now = Date.now(), store: IndexStore | null = reader()): Promise<string | Buffer> {
@@ -322,13 +450,13 @@ export async function walletFillsJson(venue: Venue, address: string, q: WalletFi
     const n = await newestOf(store, venue, address, q.limit, span, now);
     // The window starts before the held span: complete only when the newest `limit` fills all fall inside it.
     if (from < n.lower) {
-      if (n.covered && n.heldTo === span.hi && n.times.length === q.limit) return coveredJson(n.heldTo, n.json);
+      if (n.covered && n.heldTo === span.hi && n.times.length === q.limit) return coveredJson(n.heldTo, n.json, n.positions);
       if (from < span.lo && n.lower === span.lo) return JSON.stringify(n.covered ? notCovered('the index holds this wallet from a later time') : notCovered(n.reason));
     } else {
       // Cut at an old stream row, the window may start after it: read as before (exact), not refused.
       if (n.covered && from <= n.heldTo) {
         const k = countFrom(n.times, from);
-        return coveredJson(n.heldTo, k ? n.json.subarray(0, n.ends[k - 1]!) : Buffer.alloc(0));
+        return coveredJson(n.heldTo, k ? n.json.subarray(0, n.ends[k - 1]!) : Buffer.alloc(0), n.positions);
       }
     }
   }
@@ -351,8 +479,10 @@ export function walletFillsKept(): { wallets: number; bytes: number } {
  * the last pass), so a copy setup's first open reads nothing. One wallet at a time, the reads in slices as any answer's.
  */
 export const WARM_EVERY_MS = 2 * 60_000;
-export function warmCopyFills(leaders: () => Array<{ venue: Venue; address: string }>, limit: number): () => void {
+export function warmCopyFills(leaders: () => Array<{ venue: Venue; address: string }>, limit: number, dir: string | null = null): () => void {
+  saveDir = dir;
   let stopped = false;
+  let lastSave = Date.now();
   let timer: NodeJS.Timeout | null = null;
   const pass = async () => {
     const store = reader();
@@ -370,6 +500,10 @@ export function warmCopyFills(leaders: () => Array<{ venue: Venue; address: stri
         await nextTurn();
       }
     }
+    if (Date.now() - lastSave >= SAVE_EVERY_MS) {
+      lastSave = Date.now();
+      await saveWalletFills().catch(() => 0);
+    }
   };
   const next = (ms: number) => {
     if (stopped) return;
@@ -377,7 +511,7 @@ export function warmCopyFills(leaders: () => Array<{ venue: Venue; address: stri
     timer.unref?.();
   };
   next(20_000);
-  return () => { stopped = true; if (timer) clearTimeout(timer); };
+  return () => { stopped = true; if (timer) clearTimeout(timer); void saveWalletFills().catch(() => 0); };
 }
 
 /** Addresses one /api/vs/last-trades read takes (a page of copy cards is 24). */
@@ -411,6 +545,8 @@ export function lastTrades(venue: Venue, addresses: readonly string[], now = Dat
 /** Forget every kept answer (tests). */
 export function clearWalletFills(): void {
   newest.clear();
+  triedLoad.clear();
+  savedAt.clear();
   building.clear();
   keptBytes = 0;
   lastKept.clear();
