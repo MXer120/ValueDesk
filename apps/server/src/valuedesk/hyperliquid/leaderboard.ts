@@ -382,6 +382,17 @@ export class HlLeaderboardStore {
     return this.cur;
   }
 
+  /**
+   * A snapshot kept from before a restart (leaderboardFile.ts), used until HL is asked: only when none is loaded yet, and
+   * the next call checks HL at once (with its ETag, so the same file costs a 304).
+   */
+  seed(snap: LbSnapshot): boolean {
+    if (this.cur) return false;
+    this.cur = snap;
+    this.nextCheckAt = 0;
+    return true;
+  }
+
   /** The current snapshot if one is loaded, without any I/O. */
   peek(): LbSnapshot | null {
     return this.cur;

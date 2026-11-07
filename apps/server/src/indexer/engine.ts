@@ -37,7 +37,7 @@ import { TradexyzVenue } from './ext/tradexyz.js';
 import type { ExtVenue } from './ext/types.js';
 import { CohortTracker } from './cohortTracker.js';
 import { PerformanceObserver, performance } from 'node:perf_hooks';
-import { STALL_LOG_MS, gcWithin, mark, noteGc, startedBefore } from './busy.js';
+import { STALL_LOG_MS, gcWithin, mark, noteGc, startedBefore, within } from './busy.js';
 import { SlicedWork } from './slicedWork.js';
 import { hlCoinName } from '../valuedesk/extra/account.js';
 import { accountValue as fetchAccountValue, chartWindows, lookupPnl, peekTrades, syncCloses, syncLists, syncTrades } from './sodexSource.js';
@@ -51,6 +51,9 @@ import { mayPrune } from '../retention.js';
 import { FlowRecorder } from '../flow/recorder.js';
 import { FlowStore } from '../flow/store.js';
 import { dirname, join } from 'node:path';
+import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { StallProfiler } from './stallProfiler.js';
+import { loadLeaderboardFile, saveLeaderboardFile } from '../valuedesk/hyperliquid/leaderboardFile.js';
 import {
   BOARD_SIZE,
   dayOf,
@@ -323,6 +326,20 @@ interface StreamState { since: number | null; lastUp: number }
 /** A stream outage seen on (re)connect: [down from, up again], and whether it broke the activity span. */
 interface StreamGap { from: number; to: number; broke: boolean; covered?: boolean }
 /** One board pick's figures from what the index holds. */
+/** Rows of a flush not written yet; `spilled` tells the flush they went to the spill instead. */
+type UnwrittenPart =
+  | { kind: 'activity'; rows: Array<{ venue: Venue; acct: string; hour: number; trades: number; volume: number }>; spilled: () => void }
+  | { kind: 'fills'; rows: import('./store.js').FillRow[]; spilled: () => void };
+
+/**
+ * The per-trader answers a build reuses (cache), handed from a stop to the next start: the first build after a start
+ * computed every candidate again (pools 78.8 s of a 352 s build on 2026-11-06 against 2-18 s after). Only answers this
+ * young are kept, and one whose trader changed since it was computed is reused only as long as a changed one ever is.
+ */
+const WARM_FILE = 'warm-cache.json';
+const WARM_FORMAT = 'warm-1';
+const WARM_MAX_AGE_MS = MAX_REUSE_MS;
+
 interface PickStats {
   stats: import('./store.js').WindowStats;
   covered: boolean;
@@ -375,6 +392,14 @@ export class Indexer {
   private act = new Map<string, ActRec>();
   private lastOrder = new Map<string, string>();
   private pendingFills: import('./store.js').FillRow[] = [];
+  /** Rows handed to `writes` and not written yet, in the order they were queued. */
+  private unwritten = new Set<UnwrittenPart>();
+  /** A stop is moving the unwritten rows to the spill: the flush only queues. */
+  private spilling = false;
+  /** Rows the last stop spilled (its timing line). */
+  private spilledRows = 0;
+  /** Samples the thread all the time and keeps the last minute when it stalls (stallProfiler.ts). */
+  private stallProfiler: StallProfiler | null = null;
   /** What a flush writes, with the loop let in between slices. */
   private writes = new SlicedWork({
     // v0.2.165 ran a flat 40 ms a turn: on a busy thread each turn took long enough that writes fell behind for
@@ -501,6 +526,13 @@ export class Indexer {
     lap('closes migration');
     // "Not ranked" answers survive restarts: those wallets are not asked again for UNRANKED_TTL.
     this.unranked = this.store.unrankedSince('sodex', this.now() - UNRANKED_TTL);
+    // What the last stop handed over: its rows not yet written (first in the write queue), its build answers and its
+    // Hyperliquid leaderboard (the first build waited 84.5 s for a fresh download on 2026-11-06).
+    this.replaySpill();
+    const warm = this.loadWarm();
+    const lb = this.loadHlSnapshot();
+    if (warm || lb) console.log(`[indexer] start: ${warm} build answers kept from the last stop${lb ? `, its HL leaderboard (${Math.round(lb / 60_000)} min old)` : ''}`);
+    lap('last stop handover');
     this.hl.start();
     this.sgw.start();
     this.scheck.start();
@@ -550,7 +582,7 @@ export class Indexer {
       if (this.flow && process.env.VALUESCAN_SODEX_LEDGER !== '0') this.coverageLedger = startLedgerThread({ flow: this.flow.store.path, index: this.store.path }, streamLog);
     }
     const every = (ms: number, fn: () => void | Promise<void>, name = 'timer') => {
-      const t = setInterval(() => { mark(name); void Promise.resolve(fn()).catch((e) => (this.lastError = String(e))); }, ms);
+      const t = setInterval(() => within(name, () => { void Promise.resolve(fn()).catch((e) => (this.lastError = String(e))); }), ms);
       t.unref?.();
       this.timers.push(t);
     };
@@ -589,10 +621,15 @@ export class Indexer {
       });
       this.gcWatch.observe({ entryTypes: ['gc'] });
     } catch { /* the stall lines then say 0 s of it */ }
+    if (process.env.VALUESCAN_STALL_PROFILE !== '0' && this.store.path !== ':memory:') {
+      this.stallProfiler = new StallProfiler(join(dirname(this.store.path), 'profiles'), 'indexer-stall');
+      this.stallProfiler.start();
+    }
     let tick = Date.now();
     every(500, () => {
       const now = Date.now();
       const late = Math.max(0, now - tick - 500);
+      this.stallProfiler?.onLag(late, now);
       if (late >= 1_000) {
         const by = startedBefore(tick + 500);
         this.spikes.push({ late, at: now, by });
@@ -615,11 +652,16 @@ export class Indexer {
     setTimeout(() => void this.rebuild().catch((e) => (this.lastError = String(e))), 3_000).unref?.();
   }
 
-  stop(): void {
+  /**
+   * `lap`: called after each step with its name, for the stop's timing line (worker.ts). Six stops on 2026-11-06 took
+   * 36 s to 19.5 min with nothing in the journal to say which step held them.
+   */
+  stop(lap: (step: string) => void = () => {}): void {
     this.stopped = true;
     for (const t of this.timers) clearInterval(t);
     this.timers = [];
     this.gcWatch?.disconnect();
+    this.stallProfiler?.stop();
     this.hl.stop();
     this.sgw.stop();
     this.scheck.stop();
@@ -631,13 +673,30 @@ export class Indexer {
     this.arcusCatchup?.stop();
     this.coverageLedger?.stop();
     for (const x of this.ext.values()) x.stop();
+    lap('lanes and streams');
     this.cohorts.stop();
-    this.flush();
+    lap('cohorts');
+    // The rows still waiting go to the spill in one sequential write (store.spillWrites), not into the fills a slice at a
+    // time: written out here, a backlog of minutes of rows took minutes of the stop. The next start writes them first.
+    const backlog = this.writes.backlog;
+    this.spilling = true;
+    try {
+      this.flush();
+      this.spillUnwritten();
+      lap(`write backlog (${backlog} steps; spilled ${this.spilledRows} rows)`);
+      this.writes.drain();
+    } finally {
+      this.spilling = false;
+    }
+    lap('last writes');
+    this.saveWarm();
+    lap('warm cache');
     if (this.flow) {
       this.flow.stop();
       try { this.flow.store.close(); } catch { /* closed */ }
       this.flow = null;
     }
+    lap('who traded recorder');
   }
 
   /** Addresses on screen (profiles, searches) that should be indexed too. */
@@ -871,16 +930,31 @@ export class Indexer {
       }
     };
     const steps: Array<() => void> = [];
-    for (let i = 0; i < rows.length; i += FLUSH_ACTIVITY) steps.push(write(() => this.store.addActivity(rows.slice(i, i + FLUSH_ACTIVITY))));
-    for (let i = 0; i < fills.length; i += FLUSH_FILLS) steps.push(write(() => this.store.putFills(fills.slice(i, i + FLUSH_FILLS))));
-    // Days with new fills: re-summed a slice at a time, never holding the loop.
-    steps.push(write(() => { this.store.flushAggregates(40); }));
+    // Rows not written yet are kept as parts, so a stop can hand them to the spill instead (spillUnwritten).
+    let spilled = false;
+    const part = (p: UnwrittenPart) => {
+      this.unwritten.add(p);
+      return write(() => {
+        if (!this.unwritten.delete(p)) return;
+        if (p.kind === 'activity') this.store.addActivity(p.rows);
+        else this.store.putFills(p.rows);
+      });
+    };
+    const parts: UnwrittenPart[] = [];
+    for (let i = 0; i < rows.length; i += FLUSH_ACTIVITY) parts.push({ kind: 'activity', rows: rows.slice(i, i + FLUSH_ACTIVITY), spilled: () => { spilled = true; } });
+    for (let i = 0; i < fills.length; i += FLUSH_FILLS) parts.push({ kind: 'fills', rows: fills.slice(i, i + FLUSH_FILLS), spilled: () => { spilled = true; } });
+    for (const p of parts) steps.push(part(p));
+    // Days with new fills: re-summed a slice at a time, never holding the loop. Not on the way out: those days are kept
+    // on disk (fill_dirty) and the next start sums them.
+    steps.push(write(() => { if (!this.stopped) this.store.flushAggregates(40); }));
     // After this flush's rows are written, and as of the time they were taken: what the coverage claims is stored.
+    // Rows in the spill are not stored yet, so nothing moves the held ranges over them (at a stop the sockets are closed
+    // and advanceCoverage moved nothing anyway); the streams' own span is the sockets', and moves as before.
     steps.push(() => {
       if (failed) return;
       this.store.tx(() => {
         this.trackStreams(at);
-        this.advanceCoverage(at);
+        if (!spilled) this.advanceCoverage(at);
       });
     });
     steps.push(() => {
@@ -889,8 +963,56 @@ export class Indexer {
       this.pendingStats = [];
       this.store.putTraderStats(stats);
     });
+    if (this.spilling) return this.writes.enqueue(steps);
     this.writes.add(steps);
     if (this.stopped) this.writes.drain();
+  }
+
+  /**
+   * At a stop: every row not written yet goes to the spill in one transaction, and the steps that would have written them
+   * do nothing. Should the spill fail, they are written as before (the drain after it).
+   */
+  private spillUnwritten(): void {
+    const parts = [...this.unwritten];
+    if (!parts.length) return;
+    // The fills of every waiting flush in one key order, cut again into FLUSH_FILLS: the next start writes each wallet's
+    // rows of the whole backlog together (stable: copies of one id keep their order).
+    const fills = inKeyOrder(parts.flatMap((p) => (p.kind === 'fills' ? p.rows : [])));
+    const out: Parameters<IndexStore['spillWrites']>[0][number][] = parts.flatMap((p) => (p.kind === 'activity' ? [{ kind: 'activity' as const, rows: p.rows }] : []));
+    for (let i = 0; i < fills.length; i += FLUSH_FILLS) out.push({ kind: 'fills', rows: fills.slice(i, i + FLUSH_FILLS) });
+    try {
+      this.store.spillWrites(out);
+    } catch (e) {
+      this.lastError = `spill: ${String(e)}`;
+      console.warn(`[indexer] stop: spill failed, writing the rows instead: ${String(e)}`);
+      return;
+    }
+    for (const p of parts) {
+      this.unwritten.delete(p);
+      p.spilled();
+      this.spilledRows += p.rows.length;
+    }
+  }
+
+  /**
+   * At a start: rows a stop spilled are written first, a part a step, ahead of anything new. Each part leaves the spill in
+   * the transaction that writes it (store.replaySpill), so a stop or a crash midway leaves only the rest, and nothing is
+   * written twice. Not tracked as unwritten: a stop meanwhile leaves them where they are.
+   */
+  private replaySpill(): number {
+    let parts: ReturnType<IndexStore['spilledWrites']>;
+    try {
+      parts = this.store.spilledWrites();
+    } catch (e) {
+      this.lastError = `spill: ${String(e)}`;
+      return 0;
+    }
+    if (!parts.length) return 0;
+    let rows = 0;
+    for (const p of parts) rows += p.rows;
+    this.writes.add(parts.map((p) => () => { if (!this.stopped) this.store.replaySpill(p.id); }));
+    console.log(`[indexer] start: ${rows} rows spilled by the last stop, written first (${parts.length} parts)`);
+    return rows;
   }
 
   // --- trade checks -------------------------------------------------------------------
@@ -932,7 +1054,65 @@ export class Indexer {
 
   /** How long an answer for a trader whose data has not changed is reused: one build, within bounds. */
   private reuseMs(): number {
-    return Math.min(MAX_REUSE_MS, Math.max(CACHE_MS, Math.round(this.lastBuildMs * 1.5)));
+    return Math.min(MAX_REUSE_MS, Math.max(CACHE_MS, Math.round((this.lastBuildMs || this.warmBuildMs) * 1.5)));
+  }
+
+  /** The last process's build time, until this one has built (loadWarm). */
+  private warmBuildMs = 0;
+
+  private warmPath(): string | null {
+    return this.store.path === ':memory:' ? null : join(dirname(this.store.path), WARM_FILE);
+  }
+
+  /**
+   * At a stop: the answers young enough to reuse, each with whether its trader is unchanged since. A trader's version
+   * starts at 0 in the next process and moves with its first new row (the spill's too), so "unchanged" holds as long as
+   * it would have here.
+   */
+  private saveWarm(): void {
+    const file = this.warmPath();
+    if (!file) return;
+    const tmp = `${file}.tmp`;
+    try {
+      const now = this.now();
+      const entries: Array<[string, number, 0 | 1, unknown]> = [];
+      for (const [k, e] of this.cache) {
+        if (!(now - e.at < WARM_MAX_AGE_MS)) continue;
+        const [, venue, address] = k.split('|');
+        if (!venue || !address) continue;
+        entries.push([k, e.at, e.ver === this.store.version(venue as Venue, address) ? 1 : 0, e.value]);
+      }
+      writeFileSync(tmp, JSON.stringify({ format: WARM_FORMAT, savedAt: now, buildMs: this.lastBuildMs, entries }));
+      renameSync(tmp, file);
+    } catch (e) {
+      console.warn(`[indexer] warm cache not written: ${String(e)}`);
+      try { rmSync(tmp, { force: true }); } catch { /* none */ }
+    }
+  }
+
+  /** At a start: the last stop's answers (the file is taken, like the held rows: a second start finds none). */
+  private loadWarm(): number {
+    const file = this.warmPath();
+    if (!file || !existsSync(file)) return 0;
+    try {
+      const j = JSON.parse(readFileSync(file, 'utf8')) as { format?: string; buildMs?: number; entries?: Array<[string, number, 0 | 1, unknown]> };
+      if (j.format !== WARM_FORMAT || !Array.isArray(j.entries)) return 0;
+      const now = this.now();
+      let n = 0;
+      for (const [k, at, fresh, value] of j.entries) {
+        if (typeof k !== 'string' || !(now - at < WARM_MAX_AGE_MS) || at > now) continue;
+        // -1: never this process's version, so only the age rule can reuse it (a changed trader's answer, as before).
+        this.cache.set(k, { ver: fresh === 1 ? 0 : -1, at, value });
+        n++;
+      }
+      this.warmBuildMs = Number(j.buildMs) || 0;
+      return n;
+    } catch (e) {
+      console.warn(`[indexer] warm cache not read: ${String(e)}`);
+      return 0;
+    } finally {
+      try { rmSync(file, { force: true }); } catch { /* gone */ }
+    }
   }
 
   /** Fresh enough, or the trader's data is unchanged since and it is not older than one build. */
@@ -1184,12 +1364,43 @@ export class Indexer {
   // --- sources ------------------------------------------------------------------------
 
   private async hlSnapshot(): Promise<LbSnapshot | null> {
+    let snap: LbSnapshot | null;
     try {
-      return await hlLeaderboard.snapshot();
+      snap = await hlLeaderboard.snapshot();
     } catch (e) {
       this.lastError = `hl leaderboard: ${String(e)}`;
-      return hlLeaderboard.peek();
+      snap = hlLeaderboard.peek();
     }
+    this.saveHlSnapshot(snap);
+    return snap;
+  }
+
+  /** The snapshot the boards use, on disk once per new HL file, for the next start (leaderboardFile.ts). */
+  private lbSaved: LbSnapshot | null = null;
+
+  private lbPath(): string | null {
+    return this.store.path === ':memory:' ? null : join(dirname(this.store.path), 'hl-leaderboard.bin');
+  }
+
+  private saveHlSnapshot(snap: LbSnapshot | null): void {
+    const file = this.lbPath();
+    if (!file || !snap || snap === this.lbSaved) return;
+    this.lbSaved = snap;
+    try {
+      saveLeaderboardFile(file, snap);
+    } catch (e) {
+      this.lastError = `hl leaderboard file: ${String(e)}`;
+    }
+  }
+
+  /** At a start: the last process's snapshot when its numbers are under an hour old. Returns its age (0: none). */
+  private loadHlSnapshot(): number {
+    const file = this.lbPath();
+    if (!file || hlLeaderboard.peek()) return 0;
+    const snap = loadLeaderboardFile(file);
+    if (!snap || !hlLeaderboard.seed(snap)) return 0;
+    this.lbSaved = snap;
+    return Math.max(1, Date.now() - snap.updatedAt);
   }
 
   /** Keep the SoDEX published lists current (one data-lane task per window). */

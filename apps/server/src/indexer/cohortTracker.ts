@@ -61,7 +61,7 @@ import {
 import { readInSlices } from './slicedWork.js';
 import { Lane } from './lanes.js';
 import { WeightBudget } from '../valuedesk/hyperliquid/info.js';
-import { mark } from './busy.js';
+import { mark, within } from './busy.js';
 import type { Print } from './streams.js';
 import { defaultDbPath, type IndexStore } from './store.js';
 import { readFileSync, readdirSync, unlinkSync } from 'node:fs';
@@ -936,7 +936,7 @@ export class CohortTracker {
     this.hlh.start();
     this.scoh.start();
     const every = (ms: number, fn: () => Promise<void> | void, name: string) => {
-      const t = setInterval(() => { mark(name); void Promise.resolve(fn()).catch((e) => (this.lastError = String(e))); }, ms);
+      const t = setInterval(() => within(name, () => { void Promise.resolve(fn()).catch((e) => (this.lastError = String(e))); }), ms);
       t.unref?.();
       this.timers.push(t);
     };

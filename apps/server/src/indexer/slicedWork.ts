@@ -38,6 +38,11 @@ export class SlicedWork {
     if (!this.waiting) this.run();
   }
 
+  /** Queued behind the rest without running any of it now (a stop that hands the rows elsewhere first). */
+  enqueue(steps: ReadonlyArray<() => void>): void {
+    this.queue.push(...steps);
+  }
+
   /** Everything left, now, in this call (a stop). */
   drain(): void {
     while (this.next < this.queue.length) this.step();
