@@ -17,7 +17,7 @@ function memStore(init: Record<string, string> = {}) {
 test('ValueDesk is the default, and first in the choice', () => {
   assert.equal(DEFAULT_PLACE, 'hosted');
   assert.equal(PLACES[0]![0], 'hosted');
-  assert.deepEqual(PLACES.map(([v]) => v), ['hosted', 'browser', 'self']);
+  assert.deepEqual(PLACES.map(([v]) => v), ['hosted', 'browser'], 'no self-hosted (owner 2026-11-07)');
   assert.equal(readExecutor(memStore()), 'hosted');
   assert.equal(readExecutor(null), 'hosted');
 });
@@ -26,16 +26,16 @@ test('the choice is kept under its own key', () => {
   const store = memStore();
   writeExecutor('self', store);
   assert.equal(store.map.get(EXECUTOR_KEY), '"self"');
-  assert.equal(readExecutor(store), 'self');
+  assert.equal(readExecutor(store), 'hosted', 'self-hosted from before runs on ValueDesk');
   writeExecutor('browser', store);
   assert.equal(readExecutor(store), 'browser');
   assert.equal(store.map.has(DRAFT_KEY), false, 'the draft is not touched');
 });
 
-test('the old draft\'s place moves over once', () => {
+test('the old draft\'s place moves over once, as ValueDesk now that self-hosted is gone', () => {
   const store = memStore({ [DRAFT_KEY]: JSON.stringify({ ...DEFAULT, place: 'self' }) });
-  assert.equal(readExecutor(store), 'self');
-  assert.equal(store.map.get(EXECUTOR_KEY), '"self"');
+  assert.equal(readExecutor(store), 'hosted');
+  assert.equal(store.map.get(EXECUTOR_KEY), '"hosted"');
   // Once moved, the executor's own key decides, whatever the draft still says.
   writeExecutor('hosted', store);
   assert.equal(readExecutor(store), 'hosted');

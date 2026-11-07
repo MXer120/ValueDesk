@@ -20,7 +20,6 @@ export const DEFAULT_PLACE: Place = 'hosted';
 export const PLACES: ReadonlyArray<readonly [Place, string, string]> = [
   ['hosted', 'ValueDesk', 'On the ValueDesk executor, 24/7: keeps running with your browser closed'],
   ['browser', 'Browser', 'In this browser, signed with your trading key: keep a ValueDesk tab open'],
-  ['self', 'Self-hosted', 'On the copier you run yourself'],
 ];
 
 /** What the executor cards say where only this browser may run an algo (browserOnly). */
@@ -95,14 +94,16 @@ export function readExecutor(store: Store | null = local()): Place {
     const own = store.getItem(EXECUTOR_KEY);
     if (own !== null) {
       const v: unknown = JSON.parse(own);
-      return isPlace(v) ? v : DEFAULT_PLACE;
+      // Self-hosted is no longer offered (owner 2026-11-07): picked before, it is the executor now.
+      return isPlace(v) && v !== 'self' ? v : DEFAULT_PLACE;
     }
     // Once: the choice the old draft held - only Self-hosted, which someone picked.
     // Browser was the old default, saved into every draft unasked, so it is not
     // a choice to keep: those traders start on ValueDesk too (owner, 2026-10-26).
     const draft = store.getItem(DRAFT_KEY);
     const old: unknown = draft ? (JSON.parse(draft) as { place?: unknown }).place : undefined;
-    const v: Place = old === 'self' ? 'self' : DEFAULT_PLACE;
+    void old;
+    const v: Place = DEFAULT_PLACE;
     store.setItem(EXECUTOR_KEY, JSON.stringify(v));
     return v;
   } catch {
