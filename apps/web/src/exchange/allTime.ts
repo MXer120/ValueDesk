@@ -67,7 +67,7 @@ const HOLD_KEY = (address: string) => `vs:history:held:${address.toLowerCase()}`
 export type WalkSpeed = 'gentle' | 'normal' | 'fast';
 export const WALK_SPEEDS: ReadonlyArray<{ id: WalkSpeed; label: string; detail: string }> = [
   { id: 'gentle', label: 'Gentle', detail: 'Only when nothing else on the page is reading' },
-  { id: 'normal', label: 'Normal', detail: 'Ahead of the background, after the tables you open' },
+  { id: 'normal', label: 'Normal', detail: 'Any free read, after the tables you open' },
   { id: 'fast', label: 'Fast', detail: 'Every read it can get; tables you open wait their turn' },
 ];
 const GAP_BY_SPEED: Record<WalkSpeed, number> = { gentle: 12_000, normal: WALK_GAP_MS, fast: 2_000 };
@@ -234,7 +234,9 @@ export function createAllTime(d: AllTimeDeps): AllTime {
       }
       // A `/trades` page only when a background history read may go (historyQueue.ts):
       // the walk spends its turn when the page can actually be sent, not before.
-      const eager = s === 'fast' || (s === 'normal' && onScreen());
+      // Normal takes a free slot after the tables you open; only Gentle waits for a page where nothing has read for a
+      // minute. On the trade page that never comes (its tables read every minute), and the history walk never ran.
+      const eager = s !== 'gentle';
       const busy = gateway.budget.spent() > gateway.budget.limit / 2 || (drip !== null && !eager && !gateway.historyQueue.backgroundMayGo());
       if (!busy) {
         const wait = await walkGap.tryTake(1);
@@ -253,7 +255,7 @@ export function createAllTime(d: AllTimeDeps): AllTime {
       await walkTurn(path, address);
       try {
         // Not kept as a last-good copy: a long walk would otherwise hold every page it read.
-        const data = await gateway.get<unknown>(path, { ttlMs: 0, keepLastGood: false, priority: speed() === 'fast' ? 'visible' : speed() === 'normal' && onScreen() ? 'bulk' : 'walk' });
+        const data = await gateway.get<unknown>(path, { ttlMs: 0, keepLastGood: false, priority: speed() === 'fast' ? 'visible' : speed() === 'normal' ? 'bulk' : 'walk' });
         return unwrapList<Record<string, unknown>>(data, listKey).map((r) => ({ ...normalise(r), raw: '' }));
       } catch (e) {
         if (e instanceof RateLimitedError || isRateLimitError(e)) pauseWalks(WALK_PAUSE_MS);

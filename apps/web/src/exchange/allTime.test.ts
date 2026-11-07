@@ -264,8 +264,9 @@ test('summary: when the server has nothing, the browser walks by itself', async 
   assert.equal(a.trades?.trades, 5);
 });
 
-test('all-time: a /trades walk page waits until the fill panels have drip slots left', async () => {
+test('all-time: on Gentle, a /trades walk page waits until the fill panels have drip slots left', async () => {
   const w = world(3);
+  w.store.setItem('vs:history:speed', 'gentle');
   const t = tab(w);
   const t0 = w.clock.t;
   // An interactive history read just went out.
@@ -275,6 +276,18 @@ test('all-time: a /trades walk page waits until the fill panels have drip slots 
   const firstTrades = walkCalls(t).find((c) => c.path.includes('/trades?'))!;
   assert.ok(firstTrades.t >= t0 + HISTORY_DRIP.windowMs, 'no walk page while the panels have read history this minute');
   assert.ok(walkCalls(t)[0]!.path.includes('/fundings?'), 'funding (not dripped) went first');
+  assert.ok(t.client.historyDrip.spent() <= HISTORY_DRIP.max);
+});
+
+test('all-time: on Normal, the walk takes a free slot of the drip after a panel, not only an idle minute', async () => {
+  const w = world(3);
+  const t = tab(w);
+  const t0 = w.clock.t;
+  await t.client.historyDrip.charge(1);
+  await statsOf(w, t);
+  await settle(w, t.at);
+  const firstTrades = walkCalls(t).find((c) => c.path.includes('/trades?'))!;
+  assert.ok(firstTrades.t < t0 + HISTORY_DRIP.windowMs, 'the second slot of the minute went to the walk');
   assert.ok(t.client.historyDrip.spent() <= HISTORY_DRIP.max);
 });
 
