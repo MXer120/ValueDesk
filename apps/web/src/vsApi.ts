@@ -7,7 +7,10 @@
  * fills, open orders, history, funding, balances - and a coin's price are read
  * straight from that venue in this browser (exchange/venues.ts), with the
  * server's own provider code: each user's own IP and budget, and no address
- * anyone looks at passes through ValueDesk.
+ * anyone looks at passes through ValueDesk. One exception: a SoDEX or
+ * Hyperliquid trader's fills are asked of the index first (indexFills.ts: the
+ * address goes to ValueDesk's server, in the query), and only the part it does
+ * not hold comes from the venue.
  *
  * Types come from the server through the `@sign` alias, so both sides share one
  * definition. Every endpoint answers HTTP 200 with {ok:false, code, error} when
@@ -33,6 +36,7 @@ import type {
 } from '@sign/valuedesk/types.js';
 import { VenueError, venues } from './exchange/venues';
 import { serverGetJson } from './serverFetch';
+import { fillsWithIndex, type IndexFillsAnswer } from './indexFills';
 import type { SodexOiExcluded } from './sodexOi';
 import type { CalendarEvent, CalendarSource } from '@sign/valuedesk/calendar.js';
 import type { CardPeek } from '@sign/valuedesk/hyperliquid/trader.js';
@@ -122,6 +126,21 @@ async function unwrap<T>(path: string, signal?: AbortSignal): Promise<T> {
   return body as T;
 }
 
+/** The server answered 404 for the index's fills: an older server - the venue only, for the rest of this session. */
+let indexFillsMissing = false;
+
+/** The index's fills route (indexFills.ts), or null for any failure: the caller then reads the venue. */
+async function indexFills(path: string, signal?: AbortSignal): Promise<IndexFillsAnswer | null> {
+  if (indexFillsMissing) return null;
+  try {
+    const res = await serverGetJson<IndexFillsAnswer>(path, signal);
+    if (res.status === 404) indexFillsMissing = true;
+    return res.ok ? res.body : null;
+  } catch {
+    return null;
+  }
+}
+
 /** A venue read done in this browser, failing the way the route did (VsError with its code). */
 function direct<T>(p: Promise<T>, signal?: AbortSignal): Promise<T> {
   const mapped = p.catch((e: unknown) => {
@@ -159,11 +178,17 @@ export const vsApi = {
   trader: (venue: Venue, address: string, signal?: AbortSignal): Promise<TraderProfile | null> =>
     direct(venues.trader(venue, address), signal),
   /** A trader card's curves and last trade (exchange/venues.ts peek). */
-  traderPeek: (venue: Venue, address: string, signal?: AbortSignal): Promise<CardPeek | null> =>
-    direct(venues.peek(venue, address), signal),
+  traderPeek: (venue: Venue, address: string, window: Window = '30d', signal?: AbortSignal): Promise<CardPeek | null> =>
+    direct(venues.peek(venue, address, window), signal),
 
+  /** The newest fills, newest first: what the index holds (indexFills.ts), the rest from the venue in this browser. */
   fills: (venue: Venue, address: string, o: { from?: number; to?: number; limit?: number } = {}, signal?: AbortSignal): Promise<VsFill[]> =>
-    direct(venues.fills(venue, address, o), signal),
+    direct(fillsWithIndex(venue, address, o, {
+      index: (path) => indexFills(path, signal),
+      // A page that went away while the index answered starts no venue walk.
+      direct: (q) => (signal?.aborted ? Promise.reject(new DOMException('aborted', 'AbortError')) : venues.fills(venue, address, q)),
+      name: (fills) => venues.nameFills(venue, fills),
+    }), signal),
   openOrders: (venue: Venue, address: string, signal?: AbortSignal): Promise<VsOrder[]> =>
     direct(venues.openOrders(venue, address), signal),
   orderHistory: (venue: Venue, address: string, signal?: AbortSignal): Promise<VsOrder[]> =>

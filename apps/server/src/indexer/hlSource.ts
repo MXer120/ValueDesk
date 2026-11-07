@@ -12,7 +12,7 @@
  * that, the held range starts at the oldest reachable fill and is marked
  * capped, so its trade count reads as "at least".
  */
-import { mark } from './busy.js';
+import { mark, resumed } from './busy.js';
 import type { LbSnapshot } from '../valuedesk/hyperliquid/leaderboard.js';
 import { hlInfo } from '../valuedesk/hyperliquid/index.js';
 import { equitySeries, portfolioWindow } from '../valuedesk/hyperliquid/mappers.js';
@@ -25,7 +25,7 @@ import type { Side } from './windows.js';
 export const HL_FILL_PAGE = 2_000;
 
 /** Hand the event loop back (streams, timers) between slices of a long write. */
-const yieldLoop = (): Promise<void> => new Promise<void>((r) => setImmediate(r));
+const yieldLoop = (): Promise<void> => new Promise<void>((r) => setImmediate(() => { resumed(); r(); }));
 export const HL_REACHABLE_FILLS = 10_000;
 
 /** One REST fill as a row. */

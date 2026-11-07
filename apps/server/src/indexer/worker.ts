@@ -31,9 +31,13 @@ export interface Running {
  * VALUESCAN_HOSTED=1) and with them the small share of a process that only
  * serves the API (hyperliquid/info.ts).
  */
-export function claimHlShare(client: Pick<HlInfoClient, 'resize'> = hlInfo, get: (name: string) => string | undefined = envOf): void {
+export function claimHlShare(client: Pick<HlInfoClient, 'resize' | 'backgroundMaxWaitMs'> = hlInfo, get: (name: string) => string | undefined = envOf): void {
   client.resize(hlWeightPerMin(get, true));
+  client.backgroundMaxWaitMs = BACKGROUND_MAX_WAIT_MS;
 }
+
+/** The boards' reads wait this long for headroom at most, then queue with the cohort reads (info.ts backgroundMaxWaitMs). */
+export const BACKGROUND_MAX_WAIT_MS = 10_000;
 
 export function runIndexer(path = defaultDbPath()): Running {
   claimHlShare();
@@ -44,11 +48,16 @@ export function runIndexer(path = defaultDbPath()): Running {
   const t2 = Date.now();
   console.log(`[indexer] start: store ${t1 - t0} ms, engine ${t2 - t1} ms`);
   indexer.start();
+  /** When a stop began (0: running). Published from its first moment, so the status page can say maintenance, not down. */
+  let stoppingSince = 0;
   const publish = () => {
     try {
-      store.setMeta('indexer_status', JSON.stringify({ ...indexer.status(), at: Date.now(), pid: process.pid }));
+      const status = (() => { try { return indexer.status(); } catch { return {}; } })();
+      store.setMeta('indexer_status', statusRow(status, Date.now(), process.pid, stoppingSince));
     } catch { /* the next tick tries again */ }
   };
+  // At once, not 30 s on: the row the last stop left says `stopping` until this one replaces it.
+  publish();
   const statusTimer = setInterval(publish, 30_000);
   // Tell the host when this thread hits a SoDEX rate limit, so the API side backs off too.
   let reported = 0;
@@ -63,13 +72,46 @@ export function runIndexer(path = defaultDbPath()): Running {
     indexer,
     store,
     stop() {
+      if (stoppingSince) return;
+      stoppingSince = Date.now();
       clearInterval(statusTimer);
       clearInterval(coolTimer);
-      indexer.stop();
+      const lap = stopLaps(stoppingSince);
       publish();
-      store.close();
+      lap('status published (stopping)');
+      indexer.stop(lap);
+      // Still `stopping`: the process is about to end, and the next start replaces the row at once.
+      publish();
+      lap('status published');
+      store.close(lap);
+      lap.done();
     },
   };
+}
+
+/**
+ * The `indexer_status` meta row. `stopping` (with `stoppingSince`, ms) only while a stop runs and after it, until the next
+ * start writes its first row: the status page reads the field as maintenance.
+ */
+export function statusRow(status: object, at: number, pid: number, stoppingSince = 0): string {
+  return JSON.stringify({ ...status, at, pid, ...(stoppingSince ? { stopping: true, stoppingSince } : {}) });
+}
+
+/**
+ * The stop's steps timed, like the start's (`start: store 1632 ms, ...`): each one of a second or more in a line of its
+ * own as it ends (a stop killed midway still names the step it was in), and all of them in one line at the end.
+ */
+export function stopLaps(since: number, log: (line: string) => void = (l) => console.log(l), now: () => number = Date.now): ((step: string) => void) & { done(): void } {
+  const steps: Array<[string, number]> = [];
+  let at = since;
+  const lap = ((step: string) => {
+    const t = now();
+    steps.push([step, t - at]);
+    if (t - at >= 1_000) log(`[indexer] stop: ${step} ${t - at} ms`);
+    at = t;
+  }) as ((step: string) => void) & { done(): void };
+  lap.done = () => log(`[indexer] stopped in ${now() - since} ms: ${steps.map(([s, ms]) => `${s} ${ms} ms`).join(', ')}`);
+  return lap;
 }
 
 if (!isMainThread && parentPort) {

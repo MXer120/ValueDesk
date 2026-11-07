@@ -135,6 +135,7 @@ export const APP_COVERAGE: Readonly<Record<string, Readonly<Record<string, Cover
     builderNow: c(['builder-fee-default', 'builder-fee-lowered'], 'the runner\'s guard asks it what an order placed now carries'),
     mustRecreate: c(['spot-limit-change-price', 'builder-replace-keeps-builder', 'builder-modify-keeps-builder']),
     classifyAction: PURE(['builder-approval-enforced'], 'gate classification'),
+    isFeeFreeMarket: no('a fixed list of spot markets SoDEX charges nothing on (the USDT/USDC swap): no live scenario places a swap yet'),
   },
   onboard: {
     sendUsdcDeposit: c(['deposit-*'], 'deposit-external, extra-deposits and the USDC legs of the evm-tour'),

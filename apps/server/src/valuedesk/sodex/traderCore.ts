@@ -191,6 +191,42 @@ export async function buildSodexProfile(io: SodexTraderIo, address: string): Pro
   };
 }
 
+/** What a copy card shows of a SoDEX trader (web copy/TraderCard.tsx): one window's curve and the last activity. */
+export interface SodexCardPeek {
+  equity: TraderProfile['equity'];
+  summary: { lastActive: number | null };
+}
+
+/**
+ * A copy card's figures for ONE window, from 3 reads where the whole profile takes 13: the account
+ * state (its id and open positions), that window's portfolio chart and the closed positions. The
+ * curve is buildSodexProfile's own `equity[window]` - chartToEquity of the same chart - and the last
+ * activity its own rule (newest open position update, else the newest close). What a card does not
+ * show is not read: the other windows' charts, the four leaderboard ranks, marks and tickers.
+ *
+ * `undefined` when only the whole profile can say it the same way: a window chart with fewer than two
+ * PnL points, whose curve the profile takes from the 1Y chart (or leaves out when the account's
+ * analytics are suspect) - the caller then reads the profile.
+ */
+export async function sodexPeek(
+  io: Pick<SodexTraderIo, 'perpsState' | 'spotState' | 'portfolioChart' | 'closedPositions' | 'coolingDown'>,
+  address: string,
+  window: (typeof WINDOWS)[number],
+): Promise<SodexCardPeek | null | undefined> {
+  const ps = await io.perpsState(address);
+  const aid = Number(ps?.aid || 0) || Number((await io.spotState(address).catch(() => null))?.aid || 0);
+  if (!aid) return null; // no SoDEX account behind this wallet
+  const [chart, closed] = await Promise.all([
+    io.portfolioChart(aid, CHART_WINDOW[window]).catch(() => null),
+    io.coolingDown() ? Promise.resolve(null) : io.closedPositions(address).catch(() => null),
+  ]);
+  const pts = chartToEquity(chart);
+  if (pts.filter((p) => p.pnl !== null).length < 2) return undefined;
+  const lastOpen = Math.max(0, ...(ps?.P ?? []).map((p) => Number(p?.ut) || 0));
+  const lastActive = Math.max(lastOpen, closedStats(closed, CLOSED_LIMIT).lastClosedAt ?? 0) || null;
+  return { equity: { [window]: pts }, summary: { lastActive } };
+}
+
 /**
  * The newest `limit` fills per engine, walked backwards with history.ts's
  * pager. A page shorter than asked for ends that engine's walk locally; the
