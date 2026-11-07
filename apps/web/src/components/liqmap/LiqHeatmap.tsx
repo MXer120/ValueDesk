@@ -22,7 +22,7 @@
  *
  * View (owner 2026-10-31) colours every view by side or by leverage band and shows only
  * the bands picked (chart/liqLev.ts); the historical view can lay the levels now over its
- * right edge on the same price axis. Bars and cells scale to robustMax, so one giant level
+ * right edge on the same price axis. Bars scale to barFit (cells to robustMax), so one giant level
  * is drawn at full (a tick marks it, the tooltip has its figure) and the rest stay readable.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react';
@@ -45,7 +45,7 @@ import { HEAT_FLOOR, LIQ_HEAT, barMsOf, boxed, cellAt, cellOf, cellsOf, heatColo
 import { autoStep, fineWindow, histSteps, stepAt, stepLabel, stepLadder, streamAsk, streamGroup, streamSteps, tickOf, type StepLevel } from '../../chart/liqSteps';
 import { coinOfSymbol, groupFor, mapData, type LiqMapData } from '../../chart/liqMap';
 import {
-  LEV_BANDS, LEV_COLOR, LEV_LABEL, addBands, isAllLev, levBandOf, levFilterOf, levelWindow, robustMax, shownBands, shownTotal, sideBands,
+  LEV_BANDS, LEV_COLOR, LEV_LABEL, addBands, isAllLev, levBandOf, levFilterOf, barFit, levelWindow, shownBands, shownTotal, sideBands,
   type Bands, type ColorBy, type LevBand, type LevFilter, type LevKey,
 } from '../../chart/liqLev';
 import { shortAddr } from '../../format';
@@ -558,14 +558,15 @@ const sideOf = (b: Bucket | null, from: number, step: number, p: number): 'long'
   b && (b[1] > 0) !== (b[2] > 0) ? (b[1] > 0 ? 'long' : 'short') : from + step / 2 < p ? 'long' : 'short';
 
 /**
- * The bar scale: robustMax of the bars on screen (liqLev.ts), so a level far past every other
- * (SoDEX BTC's two ~$70M accounts beside levels under $0.3M) is drawn at full with a tick, and
- * the rest keep a length to read. `top`: the largest bar, how far a side axis may scale out.
+ * The bar scale: barFit of the bars on screen (liqLev.ts): the largest, unless a few stand alone far
+ * past every other (SoDEX BTC's two ~$70M accounts beside levels under $0.3M), which are drawn at full
+ * with a tick while the rest keep a length to read. `top`: the largest bar, how far a side axis may scale out.
  */
 function barScale(shown: readonly Bucket[], unit: Unit, colorBy: ColorBy): { fit: number; top: number } {
   const v = shown.map((b) => barOf(b, unit, colorBy));
-  const top = Math.max(1e-12, ...v);
-  return { fit: Math.max(1e-12, Math.min(top, robustMax(v))), top };
+  let top = 1e-12;
+  for (const x of v) if (x > top) top = x;
+  return { fit: Math.max(1e-12, Math.min(top, barFit(v))), top };
 }
 
 /** A tooltip's lines by leverage band (only the bands with some), and a note when the bar or cell runs past the scale. */

@@ -124,6 +124,32 @@ export function robustMax(values: Iterable<number>, o: { q?: number; ratio?: num
 }
 
 /**
+ * The bar scale of the live liquidation map: the largest bar on screen, unless at most `maxOut` bars stand alone above
+ * the rest (each at least `gap` times the next one down) - then those are drawn at full with a tick and the scale is the
+ * first bar under them. A quantile cannot do this: zoomed out at a fine step there are thousands of bars on screen (BTC
+ * $1 is ~13k), and robustMax's top 1% ran dozens of real levels into the top of the chart (owner 2026-11-07: "when
+ * chosing a resolution and zooming out some liquidations are maxed out y axis wise"). The lone outliers it was there
+ * for still are: SoDEX BTC's two ~$70M accounts beside levels under $0.3M.
+ */
+export function barFit(values: Iterable<number>, o: { maxOut?: number; gap?: number } = {}): number {
+  const maxOut = o.maxOut ?? 3;
+  const gap = o.gap ?? 4;
+  const top: number[] = [];
+  // Only the largest maxOut + 1 are needed: kept sorted, high first, without sorting thousands.
+  for (const x of values) {
+    if (!(x > 0) || !Number.isFinite(x)) continue;
+    if (top.length > maxOut && x <= top[top.length - 1]!) continue;
+    let i = top.length;
+    while (i > 0 && top[i - 1]! < x) i--;
+    top.splice(i, 0, x);
+    if (top.length > maxOut + 1) top.pop();
+  }
+  if (!top.length) return 0;
+  for (let i = 0; i < Math.min(maxOut, top.length - 1); i++) if (top[i]! >= gap * top[i + 1]!) return top[i + 1]!;
+  return top[0]!;
+}
+
+/**
  * The price window the levels fill (the live view's, and the historical view's price axis):
  * from the lowest to the highest level once the thinnest 0.5% of the notional each side is left
  * out (one far order does not stretch it), always 10% either side of the price, never past 0.4x
