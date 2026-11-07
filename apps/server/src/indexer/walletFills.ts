@@ -39,10 +39,9 @@
  * REST row could be given: not covered.
  *
  * Reads: the coverage rows and the frozen-day bound (primary-key lookups), and
- * one backwards walk of fills_t bounded by `limit`, in slices. A copy of each
- * answer is kept five minutes per (venue, address, from rounded to five
- * minutes, to, limit); when the held span grows at its end meanwhile, only the
- * new rows are read onto it.
+ * one backwards walk of fills_t bounded by `limit`, in slices, kept as one
+ * answer per (venue, address, limit) and topped up as the held span grows
+ * (THE KEPT ANSWERS below).
  */
 import { setImmediate as nextTurn } from 'node:timers/promises';
 import type { Venue, VsFill } from '../valuedesk/types.js';
@@ -53,7 +52,6 @@ const DAY_MS = 86_400_000;
 export const WALLET_FILLS_TTL_MS = 5 * 60_000;
 /** The most fills one answer carries (the Copy page asks 5,000); a larger ask is left to the venue. */
 export const WALLET_FILLS_MAX = 10_000;
-const FROM_STEP_MS = 5 * 60_000;
 const CACHE_MAX = 2_000;
 /** Rows per synchronous read (about 150 ms when none is in the page cache). */
 const SLICE = 250;
@@ -128,10 +126,21 @@ async function readRows(store: IndexStore, venue: Venue, address: string, lower:
   let cut: number | null = null;
   if (upper < lower) return { rows: out, cut };
   let at: { t: number; id: string } | null = null;
+  // THE NEWEST STREAM ROWS (2026-11-07): the stream's rows newer than every REST row are the only copies of those
+  // fills (no REST row beside them to double), and the held span reaches over them only while the stream ran without
+  // a break (the engine's advanceCoverage). They are given: without them every answer stopped at the wallet's last
+  // REST read and the browser walked the venue from there (median 19 h on the board wallets, 20-30 s per replay).
+  // They carry no fee (the replay prices the taker rate instead) and no closed PnL.
+  let restSeen = false;
   while (out.length < limit) {
     const n = SLICE;
     const got: WalletFillRow[] = at ? store.walletFillRows(venue, address, lower, at.t, n, at.id) : store.walletFillRows(venue, address, lower, upper, n);
     for (const r of got) {
+      if (Number(r.src) === 1) restSeen = true;
+      else if (!restSeen) {
+        if (cut === null && out.length < limit) out.push(r);
+        continue;
+      }
       if (Number(r.src) !== 1) {
         // Newest first: every row kept so far is at or after this one.
         cut = r.t;
@@ -162,60 +171,213 @@ async function answer(store: IndexStore, venue: Venue, address: string, q: Walle
 
 type Span = { lo: number; hi: number };
 
-interface Kept {
+/*
+ * THE KEPT ANSWERS (2026-11-07, owner: "focus on fixing loading times for copy trading charts and expected pnl charts
+ * first. sub second"). Kept per (venue, address, from rounded to five minutes), the copy setup's `from` (now - 30 days)
+ * moved on every five minutes, so nearly every open read 5,000 rows again: 1-7 s each on production, 31 s with eight
+ * at once. Now ONE answer per (venue, address, limit) over the last NEWEST_SPAN_MS of the held span, kept as one JSON
+ * string of its fills (newest first) with each fill's time and end offset: any `from` inside it is a prefix of that
+ * string, nothing parsed or serialized again. When the held span grows, only the rows after it are read and put in
+ * front; every REBUILD_MS the answer is read whole again in the background (a REST read may have replaced stream rows).
+ * The answers held stay under KEEP_BYTES, least recently used out first; the copy leaders are kept warm (warmCopyFills).
+ * The JSON is held as a Buffer, outside the JavaScript heap: ~1,200 leaders at up to ~0.9 MB each would otherwise be
+ * hundreds of MB the collector walks and counts against the heap limit (its pauses held this thread 8-10 s on 2026-11-07).
+ */
+const NEWEST_SPAN_MS = 31 * DAY_MS;
+export const REBUILD_MS = 10 * 60_000;
+const KEEP_BYTES = 700 * 1024 * 1024;
+
+interface Newest {
   at: number;
   span: Span;
-  body: Promise<WalletFillsBody>;
+  lower: number;
+  covered: boolean;
+  reason: string;
+  heldTo: number;
+  /** The fills' JSON objects, newest first, comma-joined (UTF-8). */
+  json: Buffer;
+  times: Float64Array;
+  ends: Uint32Array;
+  bytes: number;
 }
 
-const kept = new Map<string, Kept>();
+const newest = new Map<string, Newest>();
+const building = new Map<string, Promise<Newest>>();
+let keptBytes = 0;
+
+function pack(rows: readonly WalletFillRow[]): { json: Buffer; times: Float64Array; ends: Uint32Array } {
+  const parts = rows.map((r) => JSON.stringify(rowToFill(r)));
+  const times = new Float64Array(rows.length);
+  const ends = new Uint32Array(rows.length);
+  let at = 0;
+  for (let i = 0; i < parts.length; i++) {
+    at += (i ? 1 : 0) + Buffer.byteLength(parts[i]!, 'utf8');
+    times[i] = rows[i]!.t;
+    ends[i] = at;
+  }
+  return { json: Buffer.from(parts.join(','), 'utf8'), times, ends };
+}
+
+function keep(key: string, n: Newest): Newest {
+  const was = newest.get(key);
+  if (was) { keptBytes -= was.bytes; newest.delete(key); }
+  newest.set(key, n);
+  keptBytes += n.bytes;
+  for (const [k, v] of newest) {
+    if (keptBytes <= KEEP_BYTES || k === key) break;
+    newest.delete(k);
+    keptBytes -= v.bytes;
+  }
+  return n;
+}
+
+async function buildNewest(store: IndexStore, venue: Venue, address: string, limit: number, span: Span, now: number): Promise<Newest> {
+  const lower = Math.max(span.lo, now - NEWEST_SPAN_MS);
+  const { rows, cut } = await readRows(store, venue, address, lower, span.hi, limit);
+  const heldTo = cut === null ? span.hi : cut - 1;
+  const bad = heldTo < lower || (cut !== null && !rows.length);
+  const p = pack(bad ? [] : rows);
+  return { at: now, span, lower, covered: !bad, reason: bad ? 'the index holds stream prints here that the venue\'s REST answer has not replaced' : '', heldTo, ...p, bytes: p.json.length + p.times.byteLength + p.ends.byteLength + 64 };
+}
+
+/** A kept answer brought up to a held span that grew at its end: the new rows in front (a stream cut among them: read whole). */
+async function topUp(store: IndexStore, venue: Venue, address: string, limit: number, n: Newest, span: Span, now: number): Promise<Newest> {
+  if (!n.covered || n.heldTo < n.span.hi) return { ...n, span };
+  const { rows, cut } = await readRows(store, venue, address, n.span.hi + 1, span.hi, limit);
+  if (cut !== null) return buildNewest(store, venue, address, limit, span, now);
+  if (!rows.length) return { ...n, span, heldTo: span.hi };
+  const add = pack(rows);
+  const total = Math.min(limit, rows.length + n.times.length);
+  const times = new Float64Array(total);
+  const ends = new Uint32Array(total);
+  times.set(add.times.subarray(0, total));
+  ends.set(add.ends.subarray(0, total));
+  const keepOld = total - rows.length;
+  const shift = add.json.length + 1;
+  for (let i = 0; i < keepOld; i++) {
+    times[rows.length + i] = n.times[i]!;
+    ends[rows.length + i] = n.ends[i]! + shift;
+  }
+  const json = keepOld > 0 ? Buffer.concat([add.json, COMMA, n.json.subarray(0, n.ends[keepOld - 1]!)]) : Buffer.from(add.json.subarray(0, ends[total - 1]!));
+  return { ...n, span, heldTo: span.hi, json, times, ends, bytes: json.length + times.byteLength + ends.byteLength + 64 };
+}
+
+/** The kept answer for (venue, address, limit), up to the held span now; built or topped up here, read whole again after REBUILD_MS. */
+async function newestOf(store: IndexStore, venue: Venue, address: string, limit: number, span: Span, now: number): Promise<Newest> {
+  const key = `${venue}|${address}|${limit}`;
+  const going = building.get(key);
+  if (going) return going;
+  const cur = newest.get(key);
+  let job: Promise<Newest>;
+  if (!cur || cur.span.lo !== span.lo || cur.span.hi > span.hi || cur.lower < Math.max(span.lo, now - NEWEST_SPAN_MS) - DAY_MS) {
+    job = buildNewest(store, venue, address, limit, span, now);
+  } else if (now - cur.at >= REBUILD_MS) {
+    // Read whole again behind this answer; this one is topped up meanwhile.
+    if (!building.has(`${key}|re`)) {
+      const re = buildNewest(store, venue, address, limit, span, now).then((n) => keep(key, n));
+      building.set(`${key}|re`, re);
+      re.catch(() => {}).finally(() => building.delete(`${key}|re`));
+    }
+    job = cur.span.hi < span.hi ? topUp(store, venue, address, limit, cur, span, now) : Promise.resolve(cur);
+  } else if (cur.span.hi < span.hi) {
+    job = topUp(store, venue, address, limit, cur, span, now);
+  } else {
+    newest.delete(key);
+    newest.set(key, cur); // most recently used
+    return cur;
+  }
+  const kept = job.then((n) => keep(key, n));
+  building.set(key, kept);
+  try {
+    return await kept;
+  } finally {
+    building.delete(key);
+  }
+}
+
+/** The number of kept fills at or after `from` (times newest first). */
+function countFrom(times: Float64Array, from: number): number {
+  let lo = 0;
+  let hi = times.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (times[mid]! >= from) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
+const COMMA = Buffer.from(',');
+const TAIL = Buffer.from(']}');
+const coveredJson = (heldTo: number, fills: Buffer): Buffer => Buffer.concat([Buffer.from(`{"ok":true,"covered":true,"heldTo":${heldTo},"fills":[`), fills, TAIL]);
+
+/** The route's answer as the JSON text it sends: from the kept answer when it can say it, else read as before. */
+export async function walletFillsJson(venue: Venue, address: string, q: WalletFillsQuery, now = Date.now(), store: IndexStore | null = reader()): Promise<string | Buffer> {
+  if (q.limit > WALLET_FILLS_MAX) return JSON.stringify(notCovered('more fills than the index answers at once'));
+  if (!store) return JSON.stringify(notCovered('the index is not open yet'));
+  const span = heldSpan(store, venue, address);
+  if (!span) return JSON.stringify(notCovered('this wallet is not indexed'));
+  const from = q.from ?? 0;
+  if (q.to === undefined) {
+    const n = await newestOf(store, venue, address, q.limit, span, now);
+    // The window starts before the held span: complete only when the newest `limit` fills all fall inside it.
+    if (from < n.lower) {
+      if (n.covered && n.heldTo === span.hi && n.times.length === q.limit) return coveredJson(n.heldTo, n.json);
+      if (from < span.lo && n.lower === span.lo) return JSON.stringify(n.covered ? notCovered('the index holds this wallet from a later time') : notCovered(n.reason));
+    } else {
+      // Cut at an old stream row, the window may start after it: read as before (exact), not refused.
+      if (n.covered && from <= n.heldTo) {
+        const k = countFrom(n.times, from);
+        return coveredJson(n.heldTo, k ? n.json.subarray(0, n.ends[k - 1]!) : Buffer.alloc(0));
+      }
+    }
+  }
+  // A window the kept answer does not reach (an upper bound, or older than its span): read as before.
+  return JSON.stringify(await answer(store, venue, address, q, span));
+}
+
+/** The same answer as an object (tests, and callers that want one). */
+export async function walletFills(venue: Venue, address: string, q: WalletFillsQuery, now = Date.now(), store: IndexStore | null = reader()): Promise<WalletFillsBody> {
+  return JSON.parse(String(await walletFillsJson(venue, address, q, now, store))) as WalletFillsBody;
+}
+
+/** How much the kept answers hold (the health answer). */
+export function walletFillsKept(): { wallets: number; bytes: number } {
+  return { wallets: newest.size, bytes: keptBytes };
+}
 
 /**
- * A kept answer brought up to a held span that has grown at its end (the stream moves to_t up every 30 s):
- * only the rows in between are read. Anything else is read again.
+ * The copy leaders' answers kept warm: every WARM_EVERY_MS each is brought up to its held span (a top-up: the rows since
+ * the last pass), so a copy setup's first open reads nothing. One wallet at a time, the reads in slices as any answer's.
  */
-async function moveUp(store: IndexStore, venue: Venue, address: string, q: WalletFillsQuery, prev: Promise<WalletFillsBody>, was: Span, span: Span): Promise<WalletFillsBody> {
-  const body = await prev;
-  if (!body.covered) return answer(store, venue, address, q, span);
-  // Cut short at a stream row: what lies above it does not change the answer.
-  if (body.heldTo < was.hi) return body;
-  const to = q.to ?? Number.POSITIVE_INFINITY;
-  const lower = Math.max(q.from ?? 0, span.lo, Math.min(to, was.hi) + 1);
-  const { rows: fresh, cut } = await readRows(store, venue, address, lower, Math.min(to, span.hi), q.limit);
-  return { ok: true, covered: true, heldTo: cut === null ? span.hi : Math.max(was.hi, cut - 1), fills: [...fresh.map(rowToFill), ...body.fills].slice(0, q.limit) };
-}
-
-/** The route's answer: the index this process reads, through the five-minute copy (requests for the same one share its read). */
-export async function walletFills(venue: Venue, address: string, q: WalletFillsQuery, now = Date.now(), store: IndexStore | null = reader()): Promise<WalletFillsBody> {
-  if (q.limit > WALLET_FILLS_MAX) return notCovered('more fills than the index answers at once');
-  if (!store) return notCovered('the index is not open yet');
-  const span = heldSpan(store, venue, address);
-  if (!span) return notCovered('this wallet is not indexed');
-  // Read from the five-minute step at or before `from`, then cut at `from`: the newest `limit` of a
-  // longer window, cut, are still the newest of the shorter one.
-  const from5 = q.from === undefined ? undefined : Math.floor(q.from / FROM_STEP_MS) * FROM_STEP_MS;
-  const q5 = { ...q, from: from5 };
-  const key = `${venue}|${address}|${from5 ?? ''}|${q.to ?? ''}|${q.limit}`;
-  let k = kept.get(key);
-  if (!k || now - k.at >= WALLET_FILLS_TTL_MS || k.span.lo !== span.lo || k.span.hi > span.hi) {
-    k = { at: now, span, body: answer(store, venue, address, q5, span) };
-  } else if (k.span.hi < span.hi) {
-    k = { at: k.at, span, body: moveUp(store, venue, address, q5, k.body, k.span, span) };
-  }
-  if (kept.get(key) !== k) {
-    kept.delete(key);
-    if (kept.size >= CACHE_MAX) kept.delete(kept.keys().next().value!);
-    kept.set(key, k);
-    // A read that failed is not kept.
-    const mine = k;
-    mine.body.catch(() => { if (kept.get(key) === mine) kept.delete(key); });
-  }
-  const body = await k.body;
-  if (q.from === undefined || q.from === from5) return body;
-  // The shorter window can be complete when the rounded one was not (it starts inside the held span): decide on the real `from`.
-  if (!body.covered) return answer(store, venue, address, q, span);
-  const fromT = q.from;
-  return { ...body, fills: body.fills.filter((f) => f.time >= fromT) };
+export const WARM_EVERY_MS = 2 * 60_000;
+export function warmCopyFills(leaders: () => Array<{ venue: Venue; address: string }>, limit: number): () => void {
+  let stopped = false;
+  let timer: NodeJS.Timeout | null = null;
+  const pass = async () => {
+    const store = reader();
+    if (store) {
+      const seen = new Set<string>();
+      for (const l of leaders()) {
+        if (stopped) return;
+        const key = `${l.venue}|${l.address}`;
+        if (seen.has(key) || !FILL_KINDS[l.venue]) continue;
+        seen.add(key);
+        try {
+          const span = heldSpan(store, l.venue, l.address);
+          if (span) await newestOf(store, l.venue, l.address, limit, span, Date.now());
+        } catch { /* the next pass tries again */ }
+        await nextTurn();
+      }
+    }
+  };
+  const next = (ms: number) => {
+    if (stopped) return;
+    timer = setTimeout(() => { void pass().finally(() => next(WARM_EVERY_MS)); }, ms);
+    timer.unref?.();
+  };
+  next(20_000);
+  return () => { stopped = true; if (timer) clearTimeout(timer); };
 }
 
 /** Addresses one /api/vs/last-trades read takes (a page of copy cards is 24). */
@@ -248,6 +410,8 @@ export function lastTrades(venue: Venue, addresses: readonly string[], now = Dat
 
 /** Forget every kept answer (tests). */
 export function clearWalletFills(): void {
-  kept.clear();
+  newest.clear();
+  building.clear();
+  keptBytes = 0;
   lastKept.clear();
 }

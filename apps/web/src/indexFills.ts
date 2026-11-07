@@ -21,6 +21,7 @@ import type { Venue, VsFill } from '@sign/valuedesk/types.js';
 export const TAIL_SLACK_MS = 90_000;
 /** venues.fills's default. */
 const DEFAULT_LIMIT = 2_000;
+export const FROM_STEP_MS = 60_000;
 
 export interface IndexFillsAnswer {
   ok?: boolean;
@@ -38,7 +39,9 @@ export interface FillsQuery {
 export function indexFillsPath(venue: Venue, address: string, o: FillsQuery): string {
   // The address in the query: the server's log keeps the path only.
   const p = new URLSearchParams({ venue, address: address.toLowerCase() });
-  if (o.from !== undefined) p.set('from', String(Math.trunc(o.from)));
+  // `from` to the minute: the same request from every visitor in that minute, so the edge cache (max-age 60) answers it.
+  // Up to a minute of older fills comes with it, which the replay takes as warm-up before its window.
+  if (o.from !== undefined) p.set('from', String(Math.floor(o.from / FROM_STEP_MS) * FROM_STEP_MS));
   if (o.to !== undefined) p.set('to', String(Math.trunc(o.to)));
   p.set('limit', String(o.limit ?? DEFAULT_LIMIT));
   return `/api/vs/wallet/fills?${p.toString()}`;

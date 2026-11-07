@@ -576,6 +576,16 @@ if (HOSTED ? process.env.VALUESCAN_COPY_CARDS !== '0' : ['1', 'follow'].includes
   startCopyCards(process.env.VALUESCAN_COPY_CARDS_FILE?.trim() || join(dataDir(), 'copy-cards.json'));
 }
 
+// The copy leaders' fills kept ready for the copy setup's replay (indexer/walletFills.ts warmCopyFills; owner
+// 2026-11-07: "sub second"): read from the index once, then topped up with the rows since. No venue read.
+// Wherever this process reads an index, unless VALUESCAN_COPY_FILLS_WARM=0.
+if (process.env.VALUESCAN_COPY_FILLS_WARM !== '0') {
+  const [{ warmCopyFills }, { indexLeaders }] = await Promise.all([import('./indexer/walletFills.js'), import('./valuedesk/copyCards.js')]);
+  // 30D first, then 7D, then All; both sides (the page shows traders to copy and to counter).
+  const order = { '30d': 0, '7d': 1, all: 2 } as Record<string, number>;
+  warmCopyFills(() => indexLeaders().sort((a, b) => (order[a.window] ?? 9) - (order[b.window] ?? 9) || a.i - b.i), 5_000);
+}
+
 // Official economic results at the release second (valuedesk/releases.ts): one
 // watcher in this process, hosted or not; idle but for a minute's look at the
 // calendar outside the minutes around a release. VALUESCAN_RELEASES=0 turns it off.

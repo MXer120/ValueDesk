@@ -107,3 +107,27 @@ test('the card is the window\'s PnL points, the 30-day curve when the window has
   assert.deepEqual(cardShown({ equity: { '7d': [pt(1)] }, summary: { spark: [4, 5] } }, '7d'), { spark: [4, 5], lastActive: null });
   assert.deepEqual(cardShown({ equity: {}, summary: {} }, '90d'), { spark: null, lastActive: null });
 });
+
+test('the periodic save and the follower\'s reload run in slices and give back the same cards', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'cards-'));
+  try {
+    const file = join(dir, 'copy-cards.json');
+    const leaders: Leader[] = Array.from({ length: 300 }, (_, i) => ({ venue: 'arcus' as Venue, address: addr(i + 1), window: '7d' as CardWindow, side: 'top' as const, i }));
+    const a = harness(leaders, { file });
+    a.cards.replan();
+    a.cards.lanes.arcus.start();
+    for (let i = 0; i < 400 && a.cards.entries.size < 300; i++) await tick();
+    a.cards.lanes.arcus.stop();
+    assert.equal(a.cards.entries.size, 300);
+    await a.cards.saveSliced();
+    const b = harness([], { file, follower: true });
+    await b.cards.loadSliced();
+    assert.deepEqual([...b.cards.entries].sort(), [...a.cards.entries].sort());
+    // The one-go read at start reads the same file.
+    const c = harness([], { file, follower: true });
+    c.cards.load();
+    assert.equal(c.cards.entries.size, 300);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

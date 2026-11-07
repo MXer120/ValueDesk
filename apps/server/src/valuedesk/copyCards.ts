@@ -32,6 +32,8 @@
  * not start cold; a second API on the same server (the beta channel) only reads that file.
  */
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { mkdir, open, readFile, rename, type FileHandle } from 'node:fs/promises';
+import { setImmediate as nextTurn } from 'node:timers/promises';
 import { dirname } from 'node:path';
 import { Lane } from '../indexer/lanes.js';
 import { reader } from '../indexer/reader.js';
@@ -81,6 +83,10 @@ const ON_SCREEN_MS = 10 * MIN;
 const PLAN_MS = MIN;
 const SAVE_MS = 3 * MIN;
 const FOLLOW_MS = MIN;
+/** The file's format: a header line, then one [key, entry] per line (v1 was one JSON object, read no more). */
+const FILE_V = 2;
+/** Work between two turns of the loop given back, saving or reloading the file. */
+const SLICE_MS = 8;
 
 export interface Leader {
   venue: Venue;
@@ -148,7 +154,7 @@ export class CopyCards {
   start(): void {
     this.load();
     if (this.d.follower) {
-      const t = setInterval(() => this.load(), FOLLOW_MS);
+      const t = setInterval(() => { void this.loadSliced(); }, FOLLOW_MS);
       t.unref?.();
       this.timers.push(t);
       return;
@@ -156,7 +162,7 @@ export class CopyCards {
     for (const lane of Object.values(this.lanes)) lane.start();
     this.replan();
     const plan = setInterval(() => this.replan(), PLAN_MS);
-    const save = setInterval(() => this.save(), SAVE_MS);
+    const save = setInterval(() => { void this.saveSliced(); }, SAVE_MS);
     plan.unref?.();
     save.unref?.();
     this.timers.push(plan, save);
@@ -262,12 +268,25 @@ export class CopyCards {
     return { held: this.entries.size, leaders: this.plan.size, lanes };
   }
 
+  /*
+   * THE FILE: one card per line after a header line (FILE_V), so it is written and read a slice at a time. In one piece,
+   * ~1,600 wallets' cards are a ~45 MB JSON string: its stringify and write held the API's one thread every SAVE_MS, and
+   * the beta API's parse every FOLLOW_MS. The periodic save and the follower's reload run sliced (saveSliced, loadSliced);
+   * only the read at start and the save at stop, when nothing waits, run in one go.
+   */
+
+  /** The lines of the file. */
+  private *lines(): Generator<string> {
+    yield JSON.stringify({ v: FILE_V });
+    for (const kv of this.entries) yield JSON.stringify(kv);
+  }
+
   save(): void {
     if (!this.d.file || this.d.follower || !this.dirty) return;
     try {
       mkdirSync(dirname(this.d.file), { recursive: true });
       const tmp = `${this.d.file}.tmp`;
-      writeFileSync(tmp, JSON.stringify({ v: 1, entries: [...this.entries] }));
+      writeFileSync(tmp, [...this.lines()].join('\n'));
       renameSync(tmp, this.d.file);
       this.dirty = false;
     } catch {
@@ -275,19 +294,89 @@ export class CopyCards {
     }
   }
 
+  private saving = false;
+
+  /** The periodic save: lines built and written a slice at a time, the thread given back between slices. */
+  async saveSliced(): Promise<void> {
+    if (!this.d.file || this.d.follower || !this.dirty || this.saving) return;
+    this.saving = true;
+    // Entries changed while this writes are saved next time.
+    this.dirty = false;
+    const tmp = `${this.d.file}.tmp`;
+    let fh: FileHandle | null = null;
+    try {
+      await mkdir(dirname(this.d.file), { recursive: true });
+      fh = await open(tmp, 'w');
+      let chunk: string[] = [];
+      let since = performance.now();
+      let first = true;
+      for (const line of this.lines()) {
+        chunk.push(first ? line : `\n${line}`);
+        first = false;
+        if (performance.now() - since >= SLICE_MS) {
+          await fh.write(chunk.join(''));
+          chunk = [];
+          await nextTurn();
+          since = performance.now();
+        }
+      }
+      if (chunk.length) await fh.write(chunk.join(''));
+      await fh.close();
+      fh = null;
+      await rename(tmp, this.d.file);
+    } catch {
+      this.dirty = true; // the next save tries again
+    } finally {
+      await fh?.close().catch(() => {});
+      this.saving = false;
+    }
+  }
+
+  /** One line of the file into the entries (anything else is skipped). */
+  private take(line: string): void {
+    let kv: unknown;
+    try { kv = JSON.parse(line); } catch { return; }
+    if (!Array.isArray(kv) || kv.length !== 2) return;
+    const [k, e] = kv as [unknown, Entry];
+    if (typeof k !== 'string' || !e || typeof e.at !== 'number' || !e.cards || typeof e.cards !== 'object') return;
+    const cur = this.entries.get(k);
+    if (!cur || cur.at < e.at) this.entries.set(k, e);
+  }
+
+  private static header(line: string): boolean {
+    try { return (JSON.parse(line) as { v?: unknown }).v === FILE_V; } catch { return false; }
+  }
+
   load(): void {
     if (!this.d.file) return;
-    let body: { v?: number; entries?: Array<[string, Entry]> };
+    let text: string;
+    try { text = readFileSync(this.d.file, 'utf8'); } catch { return; }
+    const lines = text.split('\n');
+    if (!CopyCards.header(lines[0] ?? '')) return;
+    for (let i = 1; i < lines.length; i++) this.take(lines[i]!);
+  }
+
+  private loading = false;
+
+  /** The follower's reload: the file read without blocking, its lines parsed a slice at a time. */
+  async loadSliced(): Promise<void> {
+    if (!this.d.file || this.loading) return;
+    this.loading = true;
     try {
-      body = JSON.parse(readFileSync(this.d.file, 'utf8'));
-    } catch {
-      return;
-    }
-    if (body.v !== 1 || !Array.isArray(body.entries)) return;
-    for (const [k, e] of body.entries) {
-      if (typeof k !== 'string' || !e || typeof e.at !== 'number' || !e.cards || typeof e.cards !== 'object') continue;
-      const cur = this.entries.get(k);
-      if (!cur || cur.at < e.at) this.entries.set(k, e);
+      let text: string;
+      try { text = await readFile(this.d.file, 'utf8'); } catch { return; }
+      const lines = text.split('\n');
+      if (!CopyCards.header(lines[0] ?? '')) return;
+      let since = performance.now();
+      for (let i = 1; i < lines.length; i++) {
+        this.take(lines[i]!);
+        if (performance.now() - since >= SLICE_MS) {
+          await nextTurn();
+          since = performance.now();
+        }
+      }
+    } finally {
+      this.loading = false;
     }
   }
 }

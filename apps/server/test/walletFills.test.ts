@@ -213,15 +213,42 @@ test('REST rows only: the answer ends before the oldest stream print it meets, b
   // A limit below the REST rows there: still none past the print.
   const two = (await get(`venue=hyperliquid&address=${MIX}&from=${from}&limit=1`)).body;
   assert.deepEqual([two.heldTo, two.fills.map((f: { id: string }) => f.id)], [T - 1, ['r2']]);
-  // Stream prints and no REST row below them: declined.
+  // Only stream prints in the window, newer than any REST row: the stream's only copies, given to the held end (2026-11-07).
   const only = (await get(`venue=hyperliquid&address=${ONLY}&from=${from}&limit=5000`)).body;
-  assert.equal(only.covered, false);
+  assert.deepEqual([only.covered, only.heldTo, only.fills.map((f: { id: string }) => f.id)], [true, NOW - 60_000, ['s5', 's4']]);
   // Once REST has replaced the prints (dropStreamRows), the whole held span is answered.
   store.dropStreamRows('hyperliquid', MIX, NOW - 10 * DAY, NOW);
   const { clearWalletFills } = await import('../src/indexer/walletFills.js');
   clearWalletFills();
   const clean = (await get(`venue=hyperliquid&address=${MIX}&from=${from}&limit=5000`)).body;
   assert.deepEqual([clean.heldTo, clean.fills.map((f: { id: string }) => f.id)], [NOW - 60_000, ['r4', 'r3', 'r2', 'r1']]);
+});
+
+test('one kept answer per wallet: a later window start is cut from it, a grown held span reads only the new rows', async () => {
+  const W = '0x' + '7'.repeat(40);
+  store.putFills([fill('hyperliquid', W, 'a1', NOW - 20 * DAY), fill('hyperliquid', W, 'a2', NOW - 2 * DAY)]);
+  store.addCoverage('hyperliquid', W, 'fills', { fromT: NOW - 25 * DAY, toT: NOW - 60_000 }, NOW);
+  const { walletFillsKept } = await import('../src/indexer/walletFills.js');
+  const before = walletFillsKept().wallets;
+  const a = (await get(`venue=hyperliquid&address=${W}&from=${NOW - 24 * DAY}&limit=5000`)).body;
+  const b = (await get(`venue=hyperliquid&address=${W}&from=${NOW - 3 * DAY}&limit=5000`)).body;
+  assert.deepEqual(a.fills.map((f: { id: string }) => f.id), ['a2', 'a1']);
+  assert.deepEqual(b.fills.map((f: { id: string }) => f.id), ['a2']);
+  // Before the held span, with fewer fills than the limit: not covered, as before.
+  assert.equal((await get(`venue=hyperliquid&address=${W}&from=${NOW - 30 * DAY}&limit=5000`)).body.covered, false);
+  assert.equal(walletFillsKept().wallets, before + 1, 'both windows from one kept answer');
+  // The held span grows (the stream moves to_t up): the new rows are in front - the stream's print after the last REST
+  // row too, the only copy of that fill (2026-11-07) - nothing else read again.
+  store.putFills([fill('hyperliquid', W, 'a3', NOW - 40_000), fill('hyperliquid', W, 's1', NOW - 30_000, { fee: null, oid: null, src: 0 })]);
+  store.setCoverage('hyperliquid', W, 'fills', { ...store.coverage('hyperliquid', W, 'fills')!, toT: NOW });
+  const c = (await get(`venue=hyperliquid&address=${W}&from=${NOW - 3 * DAY}&limit=5000`)).body;
+  assert.deepEqual([c.heldTo, c.fills.map((f: { id: string }) => f.id)], [NOW, ['s1', 'a3', 'a2']]);
+  assert.equal(c.fills[0].fee, null, 'a stream print carries no fee; the replay prices the taker rate');
+  // Read whole, the same answer.
+  const { clearWalletFills } = await import('../src/indexer/walletFills.js');
+  clearWalletFills();
+  const d = (await get(`venue=hyperliquid&address=${W}&from=${NOW - 3 * DAY}&limit=5000`)).body;
+  assert.deepEqual(d, c);
 });
 
 test('the held span never starts before the raw rows the retention kept (a frozen day has only its sums)', async () => {

@@ -35,7 +35,7 @@ function io(answer: IndexFillsAnswer | null | Error, venueFills: VsFill[] = []) 
 }
 
 test('the path: venue and address in the query (the server log keeps the path only), the limit always', () => {
-  assert.equal(indexFillsPath('sodex', A.toUpperCase().replace('0X', '0x'), { from: 1.7, limit: 5000 }), `/api/vs/wallet/fills?venue=sodex&address=${A}&from=1&limit=5000`);
+  assert.equal(indexFillsPath('sodex', A.toUpperCase().replace('0X', '0x'), { from: 1_794_000_123_456.7, limit: 5000 }), `/api/vs/wallet/fills?venue=sodex&address=${A}&from=1794000120000&limit=5000`);
   assert.equal(indexFillsPath('hyperliquid', A, {}), `/api/vs/wallet/fills?venue=hyperliquid&address=${A}&limit=2000`);
 });
 

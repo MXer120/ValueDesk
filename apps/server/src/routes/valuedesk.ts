@@ -35,7 +35,7 @@
  *   GET /api/vs/index/health   (its health in numbers, for monitoring on the instance)
  */
 import { walletHistoryFor } from '../indexer/walletHistory.js';
-import { LAST_TRADES_MAX, lastTrades, walletFills } from '../indexer/walletFills.js';
+import { LAST_TRADES_MAX, lastTrades, walletFillsJson } from '../indexer/walletFills.js';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import {
   CORE_VENUES,
@@ -204,11 +204,13 @@ export async function valuedeskRoutes(app: FastifyInstance) {
       const q = req.query as Q;
       const from = numOf(q.from);
       const to = numOf(q.to);
-      return await walletFills(venueOf(q, false), addressOf(q), {
+      // Sent as the kept JSON text (indexer/walletFills.ts THE KEPT ANSWERS): 5,000 fills are not serialized again per ask.
+      const body = await walletFillsJson(venueOf(q, false), addressOf(q), {
         ...(from !== undefined ? { from: Math.trunc(from) } : {}),
         ...(to !== undefined ? { to: Math.trunc(to) } : {}),
         limit: intOf(q.limit, 2000, 1, 100_000),
       });
+      return reply.type('application/json; charset=utf-8').send(body);
     } catch (e) {
       return fail(reply, e);
     }
