@@ -307,6 +307,12 @@ export interface AlgoUpdatePatch {
   moveGuard?: number;
   refBps?: number;
   pullBps?: number;
+  placeBps?: number;
+  calmBps?: number;
+  calmMs?: number;
+  stillBps?: number;
+  stillMs?: number;
+  restMs?: number;
   volumeTargetUsd?: number | null;
   maxLossUsd?: number | null;
   endAt?: number | null;
@@ -317,7 +323,7 @@ export interface AlgoUpdatePatch {
 /** The fields of an AlgoUpdatePatch, for checking a signed one. */
 export const ALGO_UPDATE_FIELDS: ReadonlyArray<keyof AlgoUpdatePatch> = [
   'quantity', 'limitPrice', 'maxSpreadBps', 'label',
-  'orderUsd', 'maxInventoryUsd', 'offsetTicks', 'chaseTicks', 'minRepriceMs', 'skewTicks', 'edgeBps', 'queueGuard', 'levels', 'moveGuard', 'refBps', 'pullBps', 'volumeTargetUsd', 'maxLossUsd', 'endAt', 'onStop', 'outOfRange',
+  'orderUsd', 'maxInventoryUsd', 'offsetTicks', 'chaseTicks', 'minRepriceMs', 'skewTicks', 'edgeBps', 'queueGuard', 'levels', 'moveGuard', 'refBps', 'pullBps', 'placeBps', 'calmBps', 'calmMs', 'stillBps', 'stillMs', 'restMs', 'volumeTargetUsd', 'maxLossUsd', 'endAt', 'onStop', 'outOfRange',
 ];
 
 /* -------------------------------------------------------------- responses ----- */

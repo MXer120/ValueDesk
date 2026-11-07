@@ -131,6 +131,17 @@ const LATE_MS = 30_000;
 /** After a taker child that filled nothing, the next one waits this long. */
 const TAKER_RETRY_MS = 1_000;
 
+/** The list in a uniformly random order, in place (Fisher-Yates). Measured with the copy: about 2 us for 100 items on the bot box. */
+function shuffled<T>(list: T[]): T[] {
+  for (let i = list.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const x = list[i]!;
+    list[i] = list[j]!;
+    list[j] = x;
+  }
+  return list;
+}
+
 /** One DCA installment (k.inst): its number, its own size and due time, what its settled children filled (each counted once). */
 interface DcaInstallment {
   n: number;
@@ -253,7 +264,7 @@ const EXITS_MAX_REFUSALS = 5;
 const UPDATABLE: ReadonlySet<string> = new Set(['limitPrice', 'upper', 'lower', 'maxSpreadBps', 'label', 'quantity']);
 /** ...and on a running bot (its market, range and levels are what it is: a different one is a new bot). */
 const BOT_UPDATABLE: Readonly<Record<'mm' | 'grid', ReadonlySet<string>>> = {
-  mm: new Set(['label', 'maxSpreadBps', 'upper', 'lower', 'orderUsd', 'maxInventoryUsd', 'offsetTicks', 'chaseTicks', 'minRepriceMs', 'skewTicks', 'edgeBps', 'queueGuard', 'levels', 'moveGuard', 'refBps', 'pullBps', 'volumeTargetUsd', 'maxLossUsd', 'endAt', 'onStop']),
+  mm: new Set(['label', 'maxSpreadBps', 'upper', 'lower', 'orderUsd', 'maxInventoryUsd', 'offsetTicks', 'chaseTicks', 'minRepriceMs', 'skewTicks', 'edgeBps', 'queueGuard', 'levels', 'moveGuard', 'refBps', 'pullBps', 'placeBps', 'calmBps', 'calmMs', 'stillBps', 'stillMs', 'restMs', 'volumeTargetUsd', 'maxLossUsd', 'endAt', 'onStop']),
   grid: new Set(['label', 'maxSpreadBps', 'upper', 'lower', 'orderUsd', 'volumeTargetUsd', 'maxLossUsd', 'endAt', 'onStop', 'outOfRange']),
 };
 /** A bot closing what it holds rests at the touch this long before it takes... */
@@ -322,6 +333,8 @@ export class AlgoRuntime {
   private socketWasUp = false;
   /** Algos that raised a hold in the step now running (steps of one algo never overlap). */
   private heldNow = new Set<string>();
+  /** When an account a bot pauses after last took: market:account -> ms. */
+  private takerAt = new Map<string, number>();
   /** When a held bot last tried to pull its quotes (pullHeldQuotes). */
   private heldPullAt = new Map<string, number>();
   private eventSeq = 0;
@@ -347,6 +360,8 @@ export class AlgoRuntime {
   private oracleQuotes = new Map<string, { quotes: VenueQuote[]; at: number; busy: boolean; first: number }>();
   /** The Binance-led makers' basis per market (reference.ts). */
   private fairs = new Map<string, FairBasis>();
+  /** The reference's mids of the last seconds per market, oldest first, for calmBps. */
+  private refTrail = new Map<string, Array<[number, number]>>();
 
   constructor(private readonly host: AlgoHost) {
     if (host.market) this.market = host.market;
@@ -470,6 +485,32 @@ export class AlgoRuntime {
     return b.fair(refMid);
   }
 
+  /** How far the reference moved over the last `ms`, bp (+ up). 0 with too little history. */
+  private refMove(market: string, ms: number, now: number): number {
+    const trail = this.refTrail.get(market);
+    if (!trail || trail.length < 2) return 0;
+    const last = trail[trail.length - 1]!;
+    let from = last;
+    for (const x of trail) {
+      if (x[0] >= now - ms) {
+        from = x;
+        break;
+      }
+    }
+    return ((last[1] - from[1]) / from[1]) * 10_000;
+  }
+
+  /** The reference's path over the last `ms`, bp: every move, either way. null while the trail does not reach that far back. */
+  private refPath(market: string, ms: number, now: number): number | null {
+    const trail = this.refTrail.get(market);
+    if (!trail?.length || trail[0]![0] > now - ms) return null;
+    let path = 0;
+    for (let i = 1; i < trail.length; i++) {
+      if (trail[i]![0] >= now - ms) path += Math.abs(trail[i]![1] - trail[i - 1]![1]) / trail[i]![1];
+    }
+    return path * 10_000;
+  }
+
   /**
    * A reference tick (the fast pull): every running Binance-led maker on that market cancels at once a quote the fair
    * price came past its line (bots.ts pastFair) - before the next step, and before SoDEX's takers who watch Binance
@@ -477,20 +518,29 @@ export class AlgoRuntime {
    */
   private onReference(market: string): void {
     if (!this.running) return;
+    const rq = this.host.reference?.quote(market);
+    if (rq) {
+      let trail = this.refTrail.get(market);
+      if (!trail) this.refTrail.set(market, (trail = []));
+      trail.push([rq.at, (rq.bid + rq.ask) / 2]);
+      while (trail.length > 2 && trail[1]![0] < rq.at - 120_000) trail.shift();
+    }
     const q = this.market.quote(market);
     const m = this.markets.get(market);
     if (!q || !m) return;
     const now = Date.now();
     let fair: number | null | undefined;
+    const pulls: Array<[AlgoRecord, ChildOrder[]]> = [];
     for (const a of this.algos.values()) {
       const s = a.spec;
-      if (s.kind !== 'mm' || !s.ref || s.symbol !== market || a.status !== 'running') continue;
+      if (s.kind !== 'mm' || !s.ref || s.noFair || s.symbol !== market || a.status !== 'running') continue;
       if (fair === undefined) fair = this.fairFor(market, q, now);
       if (fair === null) return;
       const inv = bookInventory(a.book!);
       const stale = this.live(a).filter((c) => c.state === 'open' && !c.cancelling && c.tif !== 'ioc' && pastFair(c.side, c.price, fair!, c.side === 'buy' ? inv >= 0 : inv <= 0, s.pullBps ?? 0));
-      if (stale.length) void this.cancelChildren(a, m, stale).catch((e) => this.host.log.warn('algo: fast pull failed', { algo: a.id, error: String(e) }));
+      if (stale.length) pulls.push([a, stale]);
     }
+    for (const [a, stale] of shuffled(pulls)) void this.cancelChildren(a, m, stale).catch((e) => this.host.log.warn('algo: fast pull failed', { algo: a.id, error: String(e) }));
   }
 
   /**
@@ -1042,7 +1092,9 @@ export class AlgoRuntime {
   /** One step for every live algo (the timer calls this; tests call it directly). */
   tick(now = Date.now()): void {
     this.checkPaperExits();
-    for (const a of this.algos.values()) {
+    // A fresh order every step: bots at one price queue in the order their orders leave, so a fixed order would keep the
+    // earliest-added users at the front of the queue for good.
+    for (const a of shuffled([...this.algos.values()])) {
       // An ended algo is not stepped, but its exits still follow what it filled (a resize whose cancel came late, a refusal tried
       // again), and are held against its position: gone, closed outside it, they are cancelled instead (watchExits).
       if (FINAL_STATUSES.has(a.status)) {
@@ -1661,15 +1713,15 @@ export class AlgoRuntime {
     const ago = (s.moveGuard ?? 0) > 0 ? this.market.priceAgo(s.symbol, 'mid', 2_000) : null;
     const moved = ago ? (mid(q) - ago) / tick : 0;
     const movesInto = (side: Side) => (s.moveGuard ?? 0) > 0 && (side === 'sell' ? moved >= s.moveGuard! : moved <= -s.moveGuard!) && (side === 'buy' ? inv >= 0 : inv <= 0);
-    const want = mmQuotes(s, q, m, inv, mk, fair).filter((x) => !movesInto(x.side));
+    const want = mmQuotes(s, q, m, inv, mk, s.noFair ? null : fair).filter((x) => !movesInto(x.side));
     // A ladder's front line: where a quote may stand at most (the touch, the skew and the edge as they are now, with no
     // step back). A ladder quote the touch came to is kept up to it - near the front of that queue is where its fills
     // are the bounce (a level that holds), not the sweep - and only one past it is pulled.
-    const front = (s.levels ?? 1) > 1 ? mmQuotes({ ...s, offsetTicks: Math.min(0, s.offsetTicks), queueGuard: 0 }, q, m, inv, mk, fair) : want;
+    const front = (s.levels ?? 1) > 1 ? mmQuotes({ ...s, offsetTicks: Math.min(0, s.offsetTicks), queueGuard: 0 }, q, m, inv, mk, s.noFair ? null : fair) : want;
     // What it would quote without the guards: a side missing only because of a guard is pulled no sooner than half
     // a second after it went out, and quoted again no sooner than minRepriceMs after (no cancel storm on a queue or a
     // price that flickers around the line).
-    const unguarded = (s.queueGuard ?? 0) > 0 || (s.moveGuard ?? 0) > 0 ? mmQuotes({ ...s, queueGuard: 0 }, q, m, inv, mk, fair) : want;
+    const unguarded = (s.queueGuard ?? 0) > 0 || (s.moveGuard ?? 0) > 0 ? mmQuotes({ ...s, queueGuard: 0 }, q, m, inv, mk, s.noFair ? null : fair) : want;
     const guardedAt = { ...((a.k.mguard as Record<string, number> | undefined) ?? {}) };
     const levels = Math.max(1, s.levels ?? 1);
     const live = this.live(a);
@@ -1700,6 +1752,10 @@ export class AlgoRuntime {
           kept.push(c);
           continue;
         }
+        if ((s.restMs ?? 0) > 0 && now - c.placedAt >= s.restMs!) {
+          pull.push(c);
+          continue;
+        }
         const off = Math.abs(c.price - w.price) / tick;
         // In front of where it should be (the price came to it, the skew or the mark wants it further back): the one
         // a fill would hurt - pulled after a quarter second, not the re-price pause. A ladder's limit is its front line.
@@ -1728,6 +1784,20 @@ export class AlgoRuntime {
       const restingQty = kept.reduce((x, c) => x + Math.max(0, c.quantity - c.filled), 0);
       const qty = adds ? w.quantity : Math.min(w.quantity, Math.max(minChildQty(m, w.price), floorStep(Math.abs(inv) - restingQty, m)));
       if (!adds && restingQty >= Math.abs(inv) - 1e-12) continue;
+      // Pickier to send than to keep (the adding side): far enough from fair for the time an order takes to land, and not while the reference runs at it.
+      if (fair !== null && adds) {
+        const away = ((side === 'buy' ? fair - w.price : w.price - fair) / fair) * 10_000;
+        if (away < (s.placeBps ?? 0) - 1e-9) continue;
+        if ((s.calmBps ?? 0) > 0) {
+          const mv = this.refMove(s.symbol, s.calmMs ?? 500, now);
+          if (side === 'buy' ? mv <= -s.calmBps! : mv >= s.calmBps!) continue;
+        }
+        if (s.pauseAfter && now - (this.takerAt.get(`${s.symbol}:${s.pauseAfter}`) ?? -Infinity) < (s.pauseMs ?? 0)) continue;
+        if ((s.stillBps ?? 0) > 0) {
+          const path = this.refPath(s.symbol, s.stillMs ?? 60_000, now);
+          if (path === null || path >= s.stillBps!) continue;
+        }
+      }
       send.push({ side, price: w.price, quantity: qty, tif: 'gtx', tag: side === 'buy' ? 'bid' : 'ask' });
     }
     a.k.mguard = guardedAt;
@@ -3491,6 +3561,16 @@ export class AlgoRuntime {
   }
 
   private onPrint(p: Print): void {
+    const taker = p.taker === 'buy' ? p.buyer : p.seller;
+    for (const a of this.algos.values()) {
+      const s = a.spec;
+      if (s.kind !== 'mm' || s.pauseAfter !== taker || s.symbol !== p.symbol || a.status !== 'running' || !a.book) continue;
+      this.takerAt.set(`${s.symbol}:${taker}`, Date.now());
+      const m = this.markets.get(s.symbol);
+      const inv = bookInventory(a.book);
+      const adding = this.live(a).filter((c) => c.state === 'open' && !c.cancelling && c.tif !== 'ioc' && (c.side === 'buy' ? inv >= 0 : inv <= 0));
+      if (m && adding.length) void this.cancelChildren(a, m, adding).catch((e) => this.host.log.warn('algo: pause pull failed', { algo: a.id, error: String(e) }));
+    }
     for (const a of this.algos.values()) {
       if (a.status !== 'running' && a.status !== 'waiting') continue;
       if (a.spec.symbol !== p.symbol || a.startedAt === null || p.at < a.startedAt) continue;

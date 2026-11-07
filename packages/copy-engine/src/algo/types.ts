@@ -516,6 +516,31 @@ export interface MmSpec extends AlgoBase, BotLimits {
   refBps?: number;
   /** With `ref`: a quote of the adding side within this many bp of the fair price (or through it) is pulled (default 0). */
   pullBps?: number;
+  /**
+   * With `ref`: a NEW quote of the adding side goes out only this many bp from the fair price (0: pullBps decides).
+   * An order takes about 350 ms to reach SoDEX's book, so one sent right at the line is past it on arrival: on the
+   * live hours of 2026-11-04 over 90% of fills came with the fair price already past the quote, taken by the big maker.
+   * Pickier to send than to keep: what rests stays until pullBps.
+   */
+  placeBps?: number;
+  /** With `ref`: no new quote on the adding side while the reference moved this many bp at it over calmMs (0: off). */
+  calmBps?: number;
+  /** The window of calmBps, ms (default 500). */
+  calmMs?: number;
+  /**
+   * With `ref`: no new quote on the adding side unless the reference's path (every move, up or down) over stillMs is under
+   * this many bp (0: off). The makers that SoDEX's flow fills rather than its sniper rest only in a still market.
+   */
+  stillBps?: number;
+  /** The window of stillBps, ms (default 60,000). */
+  stillMs?: number;
+  /** With `ref`: after this account takes on the market, the adding side is pulled and not quoted for pauseMs. */
+  pauseAfter?: number;
+  /** With `ref`: the quotes rest at the touch, with no limit at the fair price and no pull on it; the reference only feeds stillBps. */
+  noFair?: boolean;
+  pauseMs?: number;
+  /** With `ref`: a resting quote is cancelled this long after it went out, wherever the price is (0: off). */
+  restMs?: number;
 }
 
 /**

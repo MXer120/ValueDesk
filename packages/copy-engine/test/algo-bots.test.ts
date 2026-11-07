@@ -62,6 +62,10 @@ const settle = async (n = 6) => {
   for (let i = 0; i < n; i++) await new Promise((r) => setImmediate(r));
 };
 
+const clockTick = (ms: number) => {
+  clock += ms;
+};
+
 const MKT: MarketInfo = { ...BTC, makerFee: 0.00012 };
 
 class FakeMarket implements AlgoMarket {
@@ -664,6 +668,29 @@ test('bots of different users never fill each other: a stopping bot\'s taker sto
   assert.equal(r.rt.otherBotWall(r.rt.get(b.id)!, 'BTC-USD', 'sell'), null, 'its own quotes are no wall for itself');
 });
 
+test('bots at one price take turns: no user keeps the front of the queue for being added first', async () => {
+  const firsts = new Map<number, number>();
+  const RUNS = 60;
+  for (let run = 0; run < RUNS; run++) {
+    const r = await rig();
+    const ids: string[] = [];
+    for (let u = 0; u < 5; u++) {
+      const b = await r.rt.add({ owner: `0x${String(u + 1).repeat(40)}`, accountId: 100 + u, mode: 'hosted', spec: { symbol: 'BTC-USD', ...MM }, seed: u + 1 });
+      ids.push(b.id);
+    }
+    r.rt.tick(clock);
+    await settle();
+    assert.equal(new Set(r.ex.placed.map((o) => ids.findIndex((id) => o.clOrdID.includes(id.slice(1, 13))))).size, 5, 'every bot still sends');
+    const first = ids.findIndex((id) => r.ex.placed[0]!.clOrdID.includes(id.slice(1, 13)));
+    firsts.set(first, (firsts.get(first) ?? 0) + 1);
+  }
+  // Uniform is 12 each of 60; each user below 2 or above 28 has a chance far under 1 in 1,000.
+  for (let u = 0; u < 5; u++) {
+    const n = firsts.get(u) ?? 0;
+    assert.ok(n >= 2 && n <= 28, `user ${u} was first ${n} times of ${RUNS}`);
+  }
+});
+
 test('volume maker edge: quotes at least edgeBps from the mid - a round trip earns twice it', () => {
   const q = { bid: 60_000, ask: 60_002, at: 0 };
   const s = { orderUsd: 60, maxInventoryUsd: 180, offsetTicks: 0, skewTicks: 4, edgeBps: 2 };
@@ -863,4 +890,66 @@ test('Binance-led maker: holds without a reference; quotes off it; a Binance tic
   const v = await step(r, a.id, 2_500);
   assert.equal(r.ex.side('sell').length, 0);
   assert.match(v.statusReason ?? '', /Binance price/);
+});
+
+test('Binance-led maker: pickier to send than to keep - placeBps and calmBps hold new quotes back; what rests stays until pullBps', async () => {
+  const ref = new FakeRef();
+  const r = await rig(ref);
+  // Fair at the mid (60,001): both touches 0.17 bp away. placeBps 0.5: neither goes out.
+  const a = await add(r, { ...MM, ref: 'binance', placeBps: 0.5 });
+  ref.tick(60_000.5, 60_001.5);
+  await step(r, a.id);
+  assert.equal(r.ex.placed.length, 0, 'too close to fair to send');
+  // A wide book: 60,000 / 60,020, fair 60,010: 1.67 bp each way, both go out.
+  r.market.set(60_000, 60_020);
+  ref.tick(60_009.5, 60_010.5);
+  await step(r, a.id, 500);
+  assert.equal(r.ex.placed.length, 2, 'far enough: both go out');
+  const b = await add(r, { ...MM, ref: 'binance', calmBps: 1, calmMs: 500 });
+  clockTick(100);
+  // Binance falls 3 bp within the window: the bid (it would add) waits, the ask goes out.
+  ref.tick(60_009.5, 60_010.5);
+  clockTick(100);
+  ref.tick(59_991.5, 59_992.5);
+  const before = r.ex.placed.length;
+  r.market.set(59_985, 60_020);
+  await step(r, b.id, 100);
+  const sent = r.ex.placed.slice(before);
+  assert.deepEqual(sent.map((o) => o.side), ['sell'], 'the side Binance runs at waits');
+});
+
+test('Binance-led maker: stillBps sends only in a still market, restMs cancels what has rested that long', async () => {
+  const ref = new FakeRef();
+  const r = await rig(ref);
+  const a = await add(r, { ...MM, ref: 'binance', chaseTicks: 40, stillBps: 5, stillMs: 1_000, restMs: 3_000 });
+  ref.tick(60_000.5, 60_001.5);
+  await step(r, a.id);
+  assert.equal(r.ex.placed.length, 0, 'the trail does not reach back a full window yet');
+  clockTick(1_100);
+  ref.tick(60_000.5, 60_001.5);
+  await step(r, a.id);
+  assert.equal(r.ex.placed.length, 2, 'still: both sides go out');
+  const first = r.ex.placed.map((o) => o.clOrdID);
+  for (let i = 0; i < 2; i++) {
+    clockTick(1_000);
+    ref.tick(60_000.5, 60_001.5);
+    await step(r, a.id);
+    assert.equal(r.ex.cancelled.length, 0, 'younger than restMs: it rests');
+  }
+  // Binance runs 3 bp up and back: nearly back at the same price, but the path is 6 bp.
+  clockTick(800);
+  ref.tick(60_018.5, 60_019.5);
+  clockTick(50);
+  ref.tick(60_000.5, 60_001.5);
+  clockTick(150);
+  ref.tick(60_000.5, 60_001.5);
+  const before = r.ex.placed.length;
+  await step(r, a.id);
+  assert.deepEqual(r.ex.cancelled.filter((c) => first.includes(c)).sort(), [...first].sort(), 'rested 3 s: both cancelled');
+  await step(r, a.id, 200);
+  assert.equal(r.ex.placed.length, before, 'the path is over stillBps: nothing new goes out');
+  clockTick(1_100);
+  ref.tick(60_000.5, 60_001.5);
+  await step(r, a.id);
+  assert.equal(r.ex.placed.length, before + 2, 'still again: both sides are back');
 });

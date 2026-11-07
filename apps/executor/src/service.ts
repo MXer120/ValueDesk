@@ -153,7 +153,7 @@ function algoPatch(raw: unknown): AlgoUpdatePatch {
     out.label = r.label as string | null;
   }
   // A bot's sizes, distances and limits: each of its type here, its range judged by the spec parser (AlgoRuntime.update).
-  for (const k of ['orderUsd', 'maxInventoryUsd', 'offsetTicks', 'chaseTicks', 'minRepriceMs', 'skewTicks', 'edgeBps', 'queueGuard', 'levels', 'moveGuard', 'refBps', 'pullBps'] as const) {
+  for (const k of ['orderUsd', 'maxInventoryUsd', 'offsetTicks', 'chaseTicks', 'minRepriceMs', 'skewTicks', 'edgeBps', 'queueGuard', 'levels', 'moveGuard', 'refBps', 'pullBps', 'placeBps', 'calmBps', 'calmMs', 'stillBps', 'stillMs', 'restMs'] as const) {
     if (r[k] === undefined) continue;
     if (!(typeof r[k] === 'number' && Number.isFinite(r[k]))) throw new ApiError(400, 'patch', `${k} must be a number.`);
     out[k] = r[k] as number;
@@ -292,7 +292,7 @@ export class ExecutorService {
       if (now) deps.log.warn('executor: the emergency brake is ON', { copies: now.copies, algos: now.algos, reason: now.reason });
       else if (before) deps.log.warn('executor: the emergency brake is off', {});
     });
-    this.sodex = new SodexClient({ network: cfg.network, fetch: deps.fetch });
+    this.sodex = new SodexClient({ network: cfg.network, fetch: deps.fetch, fastDoor: process.env.EXECUTOR_SODEX_DOOR === 'exchange' ? true : process.env.EXECUTOR_SODEX_DOOR === 'exchange-key' ? 'with-key' : false, raceCopies: Number(process.env.EXECUTOR_SODEX_RACE) || 1, lanesByMarket: process.env.EXECUTOR_SODEX_LANES === '1', ...(process.env.EXECUTOR_LOG_WRITES === '1' ? { onWrite: (w) => deps.log.info('write', w) } : {}) });
     this.hyperliquid = new HyperliquidClient(deps.fetch);
     this.runtime = new CopyRuntime({
       store: db,

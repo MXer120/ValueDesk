@@ -58,7 +58,7 @@ export const ALGO_LIMITS = {
   trailing: { trailPct: { min: 0.001, max: 0.5 }, chaseMs: { min: 1_000, max: 10 * MIN } },
   basket: { legs: { min: 2, max: 10 }, legUsd: { min: 10, max: 10_000_000 } },
   sweep: { slippageBps: { min: 1, max: 1_000 }, roundMs: { min: 500, max: MIN }, timeoutMs: { min: 5_000, max: DAY } },
-  mm: { orderUsd: { min: 10, max: 100_000 }, maxInventoryUsd: { min: 10, max: 1_000_000 }, offsetTicks: { min: -1, max: 1_000 }, chaseTicks: { min: 1, max: 1_000 }, minRepriceMs: { min: 1_000, max: MIN }, skewTicks: { min: 0, max: 1_000 }, edgeBps: { min: 0, max: 100 }, queueGuard: { min: 0, max: 0.5 }, levels: { min: 1, max: 5 }, moveGuard: { min: 0, max: 100 }, refBps: { min: 0, max: 50 }, pullBps: { min: 0, max: 20 } },
+  mm: { orderUsd: { min: 10, max: 100_000 }, maxInventoryUsd: { min: 10, max: 1_000_000 }, offsetTicks: { min: -1, max: 1_000 }, chaseTicks: { min: 1, max: 1_000 }, minRepriceMs: { min: 1_000, max: MIN }, skewTicks: { min: 0, max: 1_000 }, edgeBps: { min: 0, max: 100 }, queueGuard: { min: 0, max: 0.5 }, levels: { min: 1, max: 5 }, moveGuard: { min: 0, max: 100 }, refBps: { min: 0, max: 50 }, pullBps: { min: 0, max: 20 }, placeBps: { min: 0, max: 20 }, calmBps: { min: 0, max: 20 }, calmMs: { min: 50, max: 10_000 }, stillBps: { min: 0, max: 500 }, stillMs: { min: 1_000, max: 120_000 }, restMs: { min: 500, max: 120_000 } },
   grid: { levels: { min: 3, max: 60 }, orderUsd: { min: 10, max: 100_000 } },
   bot: { volumeTargetUsd: { min: 100, max: 1e10 }, maxLossUsd: { min: 1, max: 1e8 } },
   exitPct: { min: 0.001, max: 10 },
@@ -661,6 +661,21 @@ export function checkAlgoSpec(input: unknown, depth = 0): AlgoSpecCheck {
           (spec as MmSpec).ref = 'binance';
           if (o.refBps !== undefined && o.refBps !== null && Number(o.refBps) !== 0) (spec as MmSpec).refBps = num(o, 'refBps', 'Distance from the Binance price', L.refBps, e);
           if (o.pullBps !== undefined && o.pullBps !== null && Number(o.pullBps) !== 0) (spec as MmSpec).pullBps = num(o, 'pullBps', 'Pull distance', L.pullBps, e);
+          if (o.placeBps !== undefined && o.placeBps !== null && Number(o.placeBps) !== 0) (spec as MmSpec).placeBps = num(o, 'placeBps', 'Send distance', L.placeBps, e);
+          if (o.calmBps !== undefined && o.calmBps !== null && Number(o.calmBps) !== 0) {
+            (spec as MmSpec).calmBps = num(o, 'calmBps', 'Calm move', L.calmBps, e);
+            if (o.calmMs !== undefined && o.calmMs !== null) (spec as MmSpec).calmMs = int(o, 'calmMs', 'Calm window', L.calmMs, e);
+          }
+          if (o.stillBps !== undefined && o.stillBps !== null && Number(o.stillBps) !== 0) {
+            (spec as MmSpec).stillBps = num(o, 'stillBps', 'Still market', L.stillBps, e);
+            if (o.stillMs !== undefined && o.stillMs !== null) (spec as MmSpec).stillMs = int(o, 'stillMs', 'Still window', L.stillMs, e);
+          }
+          if (o.restMs !== undefined && o.restMs !== null && Number(o.restMs) !== 0) (spec as MmSpec).restMs = int(o, 'restMs', 'Longest rest', L.restMs, e);
+          if (o.noFair === true) (spec as MmSpec).noFair = true;
+          if (o.pauseAfter !== undefined && o.pauseAfter !== null && Number(o.pauseAfter) !== 0) {
+            (spec as MmSpec).pauseAfter = int(o, 'pauseAfter', 'Pause after account', { min: 1, max: 100_000_000 }, e);
+            (spec as MmSpec).pauseMs = int(o, 'pauseMs', 'Pause', L.restMs, e);
+          }
         }
       }
       break;

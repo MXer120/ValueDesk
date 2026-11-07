@@ -23,7 +23,7 @@ import {
   type BuiltRequest,
   type Network,
 } from '../../sodex-core/src/index.ts';
-import { abortController, sleep, timers, type FetchLike, type ResponseLike } from './io.ts';
+import { abortController, sleep, timers, type FetchLike, type RequestInitLike, type ResponseLike } from './io.ts';
 import { parseMarkets } from './markets.ts';
 import type { FollowerSnapshot, LeaderRead, MarginChoice, MarketInfo } from './types.ts';
 
@@ -363,6 +363,8 @@ const PROBE_MS = 2_000;
 const PUMP_MAX_WAIT_MS = 1_000;
 
 interface QueueItem {
+  /** Writes of one lane leave one at a time: the account, or the account and market (lanesByMarket). */
+  lane: number;
   seq: number;
   cls: SendClass;
   accountId: number;
@@ -430,7 +432,7 @@ export class SendQueue {
   }
 
   /** Send `run` (one signed write) under the queue's rules. */
-  submit<T>(cls: SendClass, accountId: number, orders: number, run: () => Promise<T>, path = ''): Promise<T> {
+  submit<T>(cls: SendClass, accountId: number, orders: number, run: () => Promise<T>, path = '', lane: number = accountId): Promise<T> {
     const weight = 1 + Math.floor(orders / 40);
     const now = Date.now();
     if (cls === 'open') {
@@ -455,7 +457,7 @@ export class SendQueue {
     }
     if (cls === 'leverage' && this.items.length >= QUEUE_CAP) return Promise.reject(new LocalRefusal(`the send queue is full (${this.items.length} waiting); closes and stops go first`, path));
     return new Promise<T>((resolve, reject) => {
-      this.items.push({ seq: ++this.seq, cls, accountId, orders, weight, at: now, run, resolve: resolve as (v: unknown) => void, reject });
+      this.items.push({ seq: ++this.seq, cls, accountId, lane, orders, weight, at: now, run, resolve: resolve as (v: unknown) => void, reject });
       this.pump();
     });
   }
@@ -463,9 +465,9 @@ export class SendQueue {
   /** The next item that may leave: per account only its oldest, and only when that account has nothing in flight; then class, then age. */
   private candidates(): QueueItem[] {
     const heads = new Map<number, QueueItem>();
-    for (const it of this.items) if (!heads.has(it.accountId)) heads.set(it.accountId, it);
+    for (const it of this.items) if (!heads.has(it.lane)) heads.set(it.lane, it);
     return [...heads.values()]
-      .filter((it) => !this.busy.has(it.accountId))
+      .filter((it) => !this.busy.has(it.lane))
       .sort((a, b) => SEND_CLASSES.indexOf(a.cls) - SEND_CLASSES.indexOf(b.cls) || a.seq - b.seq);
   }
 
@@ -522,7 +524,7 @@ export class SendQueue {
 
   private dispatch(it: QueueItem, now: number, probe: boolean): void {
     this.items.splice(this.items.indexOf(it), 1);
-    this.busy.add(it.accountId);
+    this.busy.add(it.lane);
     this.budget.charge(it.weight, now);
     this.rate.book(it.accountId, it.orders, now);
     this.sentN++;
@@ -540,7 +542,7 @@ export class SendQueue {
         },
       )
       .finally(() => {
-        this.busy.delete(it.accountId);
+        this.busy.delete(it.lane);
         if (probe) this.probing = false;
         this.pump();
       });
@@ -570,6 +572,22 @@ export const ALLOWED_WRITES: ReadonlyArray<{ method: string; path: string }> = [
 ];
 
 /** What a signed write is, read from its body: its account, how many orders, and whether it only protects. */
+/**
+ * lanesByMarket: an opening write keeps one lane per account and market; a cancel gets a lane of its own, so no pull
+ * ever waits for another write's answer (SoDEX keeps the 100 highest nonces, so order on the wire does not matter; the
+ * runtime sends a replacement only after its cancel is confirmed).
+ */
+let cancelLane = 1_000_000_000;
+const laneOf = (accountId: number, method: string, body: string | undefined): number => {
+  if (method === 'DELETE') return ++cancelLane;
+  try {
+    const p = JSON.parse(body ?? '{}') as { symbolID?: unknown };
+    return accountId * 10_000 + (Number(p.symbolID) || 0);
+  } catch {
+    return accountId;
+  }
+};
+
 export function writeShape(method: string, path: string, body: string | undefined): { accountId: number; orders: number; priority: WritePriority } {
   let p: { accountID?: unknown; orders?: unknown; cancels?: unknown } = {};
   try {
@@ -613,6 +631,18 @@ export interface SodexClientOptions {
   network: Network;
   /** REST origin; default SoDEX's gateway for the network. */
   gateway?: string;
+  /**
+   * Send perps orders and cancels through /api/v1/perps/exchange: the same signature, in the body instead of the
+   * X-API-* headers. Peregrine measured 32 ms there against 242 ms on /trade/orders (2026-09-15), with a quota of its
+   * own (60 a minute then). Off: the official route. An experiment until live runs say otherwise.
+   */
+  fastDoor?: boolean | 'with-key';
+  /** Send a perps order or cancel on this many connections at once; SoDEX refuses the later copies ("nonce already used"), the first answer counts. */
+  raceCopies?: number;
+  /** One send lane per account and market instead of per account: a cancel on one market does not wait for a write on another. Nonces need no order within SoDEX's window of 100. */
+  lanesByMarket?: boolean;
+  /** Each signed write's timing, for measuring the order path: time in the send queue, on the wire, the answer. */
+  onWrite?: (w: { method: string; path: string; queueMs: number; wireMs: number; status: number }) => void;
   fetch: FetchLike;
   budget?: WeightBudget;
   /** Per-account order rate (default: SoDEX's 20/s, 600/min). */
@@ -631,6 +661,10 @@ interface ApiKeyRow {
 export class SodexClient {
   readonly network: Network;
   readonly gateway: string;
+  private readonly fastDoor: boolean | 'with-key';
+  private readonly raceCopies: number;
+  private readonly lanesByMarket: boolean;
+  private readonly onWrite: SodexClientOptions['onWrite'];
   readonly budget: WeightBudget;
   readonly accountRate: AccountRate;
   /** Every signed write leaves through it (SendQueue). */
@@ -644,6 +678,10 @@ export class SodexClient {
   constructor(o: SodexClientOptions) {
     this.network = o.network;
     this.gateway = (o.gateway ?? GATEWAY_ORIGIN[o.network]).replace(/\/+$/, '');
+    this.fastDoor = o.fastDoor ?? false;
+    this.raceCopies = Math.max(1, Math.min(5, o.raceCopies ?? 1));
+    this.lanesByMarket = o.lanesByMarket === true;
+    this.onWrite = o.onWrite;
     this.fetch = o.fetch;
     this.budget = o.budget ?? new WeightBudget();
     this.accountRate = o.accountRate ?? new AccountRate();
@@ -730,17 +768,60 @@ export class SodexClient {
     }
     const shape = writeShape(req.method, req.gatewayPath, req.body);
     // Weight of a signed write: 1 + floor(N/40) for a batch of N (research 01); the queue books it.
-    return this.queue.submit(sendClass(req.method, req.gatewayPath, shape.priority), shape.accountId, shape.orders, () => this.transmit<T>(req), req.gatewayPath);
+    return this.queue.submit(sendClass(req.method, req.gatewayPath, shape.priority), shape.accountId, shape.orders, ((enqueued) => () => this.transmit<T>(req, enqueued))(Date.now()), req.gatewayPath, this.lanesByMarket ? laneOf(shape.accountId, req.method, req.body) : shape.accountId);
+  }
+
+  /** The request as it goes out: as built, or through the fast door (fastDoor) when it is a perps order or cancel. */
+  private wire(req: Pick<BuiltRequest, 'method' | 'gatewayPath' | 'headers' | 'body'>): [string, { method: string; headers: Record<string, string>; body: string }] {
+    const type = req.gatewayPath === '/api/v1/perps/trade/orders' ? (req.method === 'POST' ? 'newOrder' : 'cancelOrder') : null;
+    if (!this.fastDoor || !type) return [this.gateway + req.gatewayPath, { method: req.method, headers: req.headers, body: req.body }];
+    const body = `{"type":"${type}","params":${req.body},"nonce":${req.headers['X-API-Nonce']},"signature":"${req.headers['X-API-Sign']}","signatureChainID":${req.headers['X-API-Chain']}}`;
+    return [`${this.gateway}/api/v1/perps/exchange`, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json', ...(this.fastDoor === 'with-key' && req.headers['X-API-Key'] ? { 'X-API-Key': req.headers['X-API-Key'] } : {}) }, body }];
+  }
+
+  /** The same signed bytes on several connections: the first answer that is not "nonce already used" counts. */
+  private async race(url: string, init: RequestInitLike): Promise<ResponseLike> {
+    return new Promise<ResponseLike>((resolve, reject) => {
+      let open = this.raceCopies;
+      let settled = false;
+      let last: ResponseLike | null = null;
+      for (let i = 0; i < this.raceCopies; i++) {
+        void this.fetch(url, init)
+          .then(async (r) => {
+            const text = await r.text().catch(() => '');
+            const answer: ResponseLike = { status: r.status, ok: r.ok, text: async () => text, ...(r.headers ? { headers: r.headers } : {}) };
+            last = answer;
+            if (!settled && !/nonce already used/i.test(text)) {
+              settled = true;
+              resolve(answer);
+            }
+          })
+          .catch((e) => {
+            if (open === 1 && !last && !settled) reject(e);
+          })
+          .finally(() => {
+            open--;
+            if (open === 0 && !settled) {
+              settled = true;
+              if (last) resolve(last);
+              else reject(new Error('every copy failed'));
+            }
+          });
+      }
+    });
   }
 
   /** One signed write on the wire (the queue decides when). */
-  private async transmit<T>(req: Pick<BuiltRequest, 'method' | 'gatewayPath' | 'headers' | 'body'>): Promise<T> {
+  private async transmit<T>(req: Pick<BuiltRequest, 'method' | 'gatewayPath' | 'headers' | 'body'>, enqueued = Date.now()): Promise<T> {
     const ctl = abortController();
     const timer = timers.after(this.writeTimeoutMs, () => ctl.abort());
     const sentAt = Date.now();
     let res: ResponseLike;
     try {
-      res = await this.fetch(this.gateway + req.gatewayPath, { method: req.method, headers: req.headers, body: req.body, signal: ctl.signal });
+      const [url, init] = this.wire(req);
+      res = this.raceCopies > 1 && req.gatewayPath === '/api/v1/perps/trade/orders'
+        ? await this.race(url, { ...init, signal: ctl.signal })
+        : await this.fetch(url, { ...init, signal: ctl.signal });
     } catch (e) {
       this.unreached(e);
       throw new OutcomeUnknownError(`SoDEX did not answer (${String(e).slice(0, 120)}); the request may still have executed.`);
@@ -748,6 +829,7 @@ export class SodexClient {
       timers.cancel(timer);
     }
     const text = await res.text().catch(() => '');
+    this.onWrite?.({ method: req.method, path: req.gatewayPath, queueMs: sentAt - enqueued, wireMs: Date.now() - sentAt, status: res.status });
     this.observe(res, text, req.gatewayPath, sentAt);
     // Cloudflare's 1015 page is HTML: refused at the edge, it never reached the exchange.
     if (isIpRateLimited(res.status, text)) throw new IpRateLimitedError(req.gatewayPath);
