@@ -43,7 +43,7 @@
  * answer per (venue, address, limit) and topped up as the held span grows
  * (THE KEPT ANSWERS below).
  */
-import { setImmediate as nextTurn } from 'node:timers/promises';
+import { setImmediate as nextTurn, setTimeout as pause } from 'node:timers/promises';
 import { mkdir, open, readFile, rename } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Venue, VsFill } from '../valuedesk/types.js';
@@ -219,6 +219,8 @@ interface Newest {
  * (venue tradexyz). The browser runs the replay on these at once and again on the venue's when that arrives.
  */
 const XYZ = 'xyz:';
+/** How far a book may lie from the answer's end for its positions to be said (books are read about hourly). */
+export const POSITIONS_SPAN_MS = 4 * 3_600_000;
 export function positionsAt(store: IndexStore, venue: Venue, address: string, at: number, span: Span): Array<{ symbol: string; side: 'long' | 'short'; size: number }> | null {
   const books: Array<{ dex: 'main' | 'xyz'; book: ReturnType<IndexStore['cohortBook']> }> = venue === 'hyperliquid'
     ? [{ dex: 'main', book: store.cohortBook('hyperliquid', address) }, { dex: 'xyz', book: store.cohortBook('tradexyz', address) }]
@@ -228,6 +230,9 @@ export function positionsAt(store: IndexStore, venue: Venue, address: string, at
   for (const { dex, book } of books) {
     if (!book) continue;
     if (book.at < span.lo || book.at > span.hi) return null;
+    // The fills between are summed in one statement: a book days from the answer's end on a busy wallet was hundreds of
+    // thousands of rows, 5.4 s on the API thread (production 2026-11-07 22:43). Further than POSITIONS_SPAN_MS: none.
+    if (Math.abs(at - book.at) > POSITIONS_SPAN_MS) return null;
     const mine = (sym: string) => (venue !== 'hyperliquid' ? true : dex === 'xyz' ? sym.startsWith(XYZ) : !sym.startsWith(XYZ));
     for (const p of book.positions) {
       const sym = dex === 'xyz' && !p.symbol.startsWith(XYZ) ? XYZ + p.symbol : p.symbol;
@@ -479,6 +484,8 @@ export function walletFillsKept(): { wallets: number; bytes: number } {
  * the last pass), so a copy setup's first open reads nothing. One wallet at a time, the reads in slices as any answer's.
  */
 export const WARM_EVERY_MS = 2 * 60_000;
+/** The rest between two wallets of a warm pass. */
+const WARM_GAP_MS = 100;
 export function warmCopyFills(leaders: () => Array<{ venue: Venue; address: string }>, limit: number, dir: string | null = null): () => void {
   saveDir = dir;
   let stopped = false;
@@ -497,7 +504,9 @@ export function warmCopyFills(leaders: () => Array<{ venue: Venue; address: stri
           const span = heldSpan(store, l.venue, l.address);
           if (span) await newestOf(store, l.venue, l.address, limit, span, Date.now());
         } catch { /* the next pass tries again */ }
-        await nextTurn();
+        // A rest between wallets: after a start every one is read from cold pages, and back to back they kept the
+        // thread busy for seconds at a time (production 2026-11-07 22:43).
+        await pause(WARM_GAP_MS, undefined, { ref: false });
       }
     }
     if (Date.now() - lastSave >= SAVE_EVERY_MS) {
