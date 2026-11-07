@@ -26,6 +26,7 @@ import { UnlockDialog } from './components/account/UnlockDialog';
 import { AccountSetup } from './setup/AccountSetup';
 import { OnboardingHost, useOnboardingGate } from './onboarding/OnboardingHost';
 import { IndexPrompt } from './components/IndexPrompt';
+import { HistoryNote } from './components/HistoryNote';
 import { useWalletBridge } from './components/account/useWallet';
 import { configureFromHealth } from './trading/config';
 import { restoreTrading } from './trading/session';
@@ -693,6 +694,9 @@ function AppShell() {
         </Guarded>
         <Guarded name="Indexing">
           <IndexPrompt address={address} />
+        </Guarded>
+        <Guarded name="History">
+          <HistoryNote address={address} />
         </Guarded>
         {/* Maintenance as a notification: blue with its countdown while an update runs, green once done (status/MaintNote.tsx). */}
         <Guarded name="Maintenance notice">
