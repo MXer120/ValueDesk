@@ -2037,7 +2037,9 @@ export class IndexStore {
     const d0 = Math.floor(fromT / DAY);
     const dk = `${venue}|${address}|${d0}`;
     const ver = this.dayVersion.get(dk) ?? 0;
-    const key = `${venue}|${address}|${fromT}|${ver}`;
+    const wk = `${venue}|${address}`;
+    const gone = this.rowsGone.get(wk) ?? 0;
+    const key = `${wk}|${fromT}|${ver}|${gone}`;
     if (this.partialMemo.has(key)) return this.partialMemo.get(key);
     const end = (d0 + 1) * DAY;
     const job = this.newJob(venue, address, fromT, end);
@@ -2062,8 +2064,8 @@ export class IndexStore {
         await pause();
       }
       // A row of the day written while it was read: what was read is not that day any more.
-      // So is one with rows taken away meanwhile (dropHeld).
-      if (job.keep && job.keep.length <= HELD_DAY_MAX && (this.dayVersion.get(dk) ?? 0) === ver && this.heldGen === gen) this.hold(dk, ver, fromT, job.keep);
+      // So is one with rows taken away meanwhile (dropHeld, or this wallet's rows: dropHeldOf).
+      if (job.keep && job.keep.length <= HELD_DAY_MAX && (this.dayVersion.get(dk) ?? 0) === ver && this.heldGen === gen && (this.rowsGone.get(wk) ?? 0) === gone) this.hold(dk, ver, fromT, job.keep);
       job.keep = undefined;
     }
     const out = this.finish(job).get(d0);
@@ -2120,6 +2122,31 @@ export class IndexStore {
     this.heldRows = 0;
     this.heldGen++;
   }
+
+  /**
+   * One wallet's raw rows are being deleted (a forgotten wallet, a frozen stretch): its held days and
+   * partial sums are void, nobody else's. Until 2026-11-07 every delete slice dropped ALL held rows
+   * (dropHeld): the once-a-day forget at the first build after 00:00 UTC queued ~426k rows of
+   * forgotten wallets, deleted a slice a second for over an hour, and each slice threw away the
+   * 18M held rows of everyone else - the first build after midnight read every first day from the
+   * fills again, again and again (105 min against 2-3). `rowsGone` keys the wallet's partial sums
+   * (partialMemo) and stops a read in flight from being held.
+   */
+  private dropHeldOf(venue: Venue, address: string): void {
+    const k = `${venue}|${address}`;
+    this.rowsGone.set(k, (this.rowsGone.get(k) ?? 0) + 1);
+    if (this.rowsGone.size > 100_000) {
+      // Bounded like dayVersion: a forgotten key would read 0 again, so everything goes once.
+      this.rowsGone.clear();
+      this.partialMemo.clear();
+      this.dropHeld();
+      return;
+    }
+    const prefix = `${k}|`;
+    for (const dk of [...this.held.keys()]) if (dk.startsWith(prefix)) this.letGo(dk);
+  }
+  /** `venue|address` -> bumped whenever raw rows of that wallet are deleted (dropHeldOf). */
+  private rowsGone = new Map<string, number>();
 
   /** A job fed from held rows from its start on, SCAN_CHUNK at a time, as scanStep would feed it. */
   private async eatHeld(job: ScanJob, h: HeldRows, pause: () => Promise<void>): Promise<void> {
@@ -2649,9 +2676,6 @@ export class IndexStore {
     const b = p.hi * DAY;
     const limit = this.slice;
     const t0 = Date.now();
-    // Raw rows go: no partial day summed from them stands (partialDayAsync keys on row changes, not deletions).
-    this.partialMemo.clear();
-    this.dropHeld();
     const frozen = `EXISTS (SELECT 1 FROM fill_day d WHERE d.venue = r.venue AND d.address = r.address AND d.day = CAST(r.t / ${DAY} AS INTEGER) AND d.frozen = 1)`;
     const n = Number(this.q(
       `DELETE FROM fills WHERE (venue, address, id) IN (
@@ -2666,6 +2690,8 @@ export class IndexStore {
       ).run(p.venue, p.address, a, b, limit).changes);
       this.totals.closes += c;
     }
+    // Raw rows went: no partial day of THIS wallet summed from them stands (partialDayAsync keys on row changes, not deletions).
+    if (n + c > 0) this.dropHeldOf(p.venue, p.address);
     const more = n >= limit || c >= limit;
     this.tune(Date.now() - t0, more);
     if (more) return false;
@@ -2677,17 +2703,18 @@ export class IndexStore {
 
   /** Delete up to `limit` of a drop job's raw rows. True when none is left. */
   private dropSlice(j: DropJob, limit: number): boolean {
-    this.partialMemo.clear();
-    this.dropHeld();
     const n = Number(this.q(
       `DELETE FROM fills WHERE (venue, address, id) IN (SELECT venue, address, id FROM fills WHERE venue = ? AND address = ? AND t < ? LIMIT ?)`,
     ).run(j.venue, j.address, j.before, limit).changes);
     this.totals.dropped += n;
+    // Only this wallet's held days and partial sums go (dropHeldOf), not everyone's.
+    if (n > 0) this.dropHeldOf(j.venue, j.address);
     if (n >= limit) return false;
     const c = Number(this.q(
       `DELETE FROM closes WHERE (venue, address, id) IN (SELECT venue, address, id FROM closes WHERE venue = ? AND address = ? AND t < ? LIMIT ?)`,
     ).run(j.venue, j.address, j.before, limit).changes);
     this.totals.dropped += c;
+    if (c > 0) this.dropHeldOf(j.venue, j.address);
     return c < limit;
   }
 

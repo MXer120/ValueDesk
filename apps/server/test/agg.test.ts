@@ -196,6 +196,65 @@ test('a later start in a finished day is summed from the rows held from the firs
   b.close();
 });
 
+test('the day change\'s forget pass deletes only the forgotten wallets\' rows: everyone else\'s held days stay, with the same figures', async () => {
+  // Production 2026-11-07: the first build after 00:00 UTC forgets the wallets no board wanted for
+  // two weeks; their rows go a slice a second for over an hour, and every slice threw away all held
+  // days (18M rows), so the board builds read every first day from the fills again (105 min).
+  const s = new IndexStore(':memory:', { aggRefreshMs: 0 });
+  const fresh = new IndexStore(':memory:', { aggRefreshMs: 0 });
+  type Held = { held: Map<string, { from: number; n: number }>; dropping: Map<string, unknown> };
+  const yesterday = Math.floor(Date.now() / DAY) * DAY - DAY;
+  const day = (address: string, n: number, tag: string) => Array.from({ length: n }, (_, i) => fill({
+    address, id: `${tag}${i}`, t: yesterday + 60_000 + i * 15_000, oid: `${tag}o${i >> 1}`, side: i % 3 ? 1 : -1,
+    closedPnl: i % 4 === 0 ? ((i % 7) - 3) * 0.5 : null, symbol: i % 5 ? 'BTC' : 'ETH', fee: i % 6 ? 0.01 : null,
+  }));
+  const kept = [...day('0xa', 2_500, 'a'), ...day('0xc', 1_200, 'c')];
+  const gone = day('0xb', 5_000, 'b');
+  s.putFills([...kept, ...gone]);
+  fresh.putFills(kept);
+  for (const x of [s, fresh]) {
+    for (const a of ['0xa', '0xb', '0xc']) x.windowStats('hyperliquid', a, 0);
+    while (x.buildAggregates(1_000) > 0) { /* build */ }
+  }
+  const pause = async () => {};
+  const read = async (x: IndexStore, a: string, from: number) => ({
+    stats: await x.windowStatsAsync('hyperliquid', a, from, pause),
+    realized: await x.realizedAsync('hyperliquid', a, from, pause),
+  });
+  const first = yesterday + 15 * 60_000;
+  for (const a of ['0xa', '0xb', '0xc']) await read(s, a, first);
+  const held = (s as unknown as Held).held;
+  assert.equal(held.size, 3, 'before: three first days held');
+  const before = { ...s.heldPartials };
+
+  // A read of the forgotten wallet in flight while its rows go: not held afterwards.
+  let sliced = false;
+  const forgetMidRead = async () => {
+    if (sliced) return;
+    sliced = true;
+    s.forget('hyperliquid', '0xb');
+  };
+  // An earlier start than the held one: read from the fills.
+  await s.windowStatsAsync('hyperliquid', '0xb', yesterday + 1_000, forgetMidRead);
+  assert.ok(sliced, 'the forget came while the read was in flight');
+  assert.ok((s as unknown as Held).dropping.size === 1, 'the rest of 0xb goes slice by slice');
+  // The rest of the drop, a slice at a time, as the indexer's timer runs it.
+  for (let i = 0; i < 1_000 && (s as unknown as Held).dropping.size; i++) s.pruneStep(1_000, Date.now(), 1);
+  assert.equal((s as unknown as Held).dropping.size, 0, 'all of 0xb dropped');
+
+  assert.deepEqual([...held.keys()].sort(), [`hyperliquid|0xa|${Math.floor(yesterday / DAY)}`, `hyperliquid|0xc|${Math.floor(yesterday / DAY)}`],
+    'after: the kept wallets\' days are still held, the forgotten one\'s are not');
+  // Later starts of the kept wallets: summed from what is held, no read of the fills, same figures as a store that never had 0xb.
+  for (const from of [first + 15 * 60_000, yesterday + 6 * 3_600_000, yesterday + 9 * 3_600_000 + 7]) {
+    for (const a of ['0xa', '0xc']) assert.deepEqual(await read(s, a, from), await read(fresh, a, from), `${a} from ${from}`);
+  }
+  assert.equal(s.heldPartials.scans, before.scans + 1, 'no first day read from the fills again but the one read in flight');
+  assert.ok(s.heldPartials.hits > before.hits);
+  assert.equal(s.heldPartials.rows, kept.filter((r) => r.t >= first).length, 'the held row count follows');
+  s.close();
+  fresh.close();
+});
+
 test('the held rows go to the next writer through a file beside the index: its first read of a later start sums from them, with the same figures', async () => {
   const { mkdtempSync, existsSync, writeFileSync, rmSync } = await import('node:fs');
   const { join } = await import('node:path');
