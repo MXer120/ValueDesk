@@ -137,11 +137,11 @@ export type CardPeek = Pick<TraderProfile, 'equity'> & { summary: Pick<TraderPro
  * shortest window that holds any, followed forward past HL's 2,000 an answer; none in 30 days,
  * the sample hlTrader takes. Null: the address never did anything on HL.
  */
-export async function hlPeek(address: string, info: InfoLike, now = Date.now()): Promise<CardPeek | null> {
+export async function hlPeek(address: string, info: InfoLike, now = Date.now(), hint: number | null = null): Promise<CardPeek | null> {
   const user = address.toLowerCase();
   const [portfolioR, lastR] = await Promise.allSettled([
     info.post<HlPortfolio>({ type: 'portfolio', user }, { ttlMs: PORTFOLIO_TTL_MS }),
-    newestFill(user, info, now),
+    newestFill(user, info, now, hint),
   ]);
   if (portfolioR.status === 'rejected' && lastR.status === 'rejected') throw portfolioR.reason;
   const portfolio = settled(portfolioR);
@@ -152,11 +152,17 @@ export async function hlPeek(address: string, info: InfoLike, now = Date.now()):
   return { equity, summary: { lastActive, ...(spark.length ? { spark } : {}) } };
 }
 
-async function newestFill(user: string, info: InfoLike, now: number): Promise<number | null> {
+/**
+ * The newest fill's time. `hint`: a time the wallet is known to have a fill at (the ValueDesk index's
+ * newest, /api/vs/last-trades). The fills since a minute before it then hold the newest - one read
+ * where the windows below took up to eight - and an empty answer (a hint HL does not confirm) falls
+ * back to the windows: the hint chooses where to look, never what is shown.
+ */
+async function newestFill(user: string, info: InfoLike, now: number, hint: number | null = null): Promise<number | null> {
   const newest = (fills: readonly HlFillRaw[]) => fills.reduce<number | null>((m, f) => (typeof f.time === 'number' && (m === null || f.time > m) ? f.time : m), null);
-  for (const w of PEEK_WINDOWS_MS) {
-    // From a whole minute: the same body for a minute, so HL is asked once (the info cache).
-    let from = Math.floor((now - w) / 60_000) * 60_000;
+  // From `from` forward to now, at most PEEK_PAGES answers: the newest seen, and whether now was reached.
+  const forward = async (start: number): Promise<{ last: number | null; toNow: boolean }> => {
+    let from = start;
     let last: number | null = null;
     let toNow = false;
     for (let page = 0; page < PEEK_PAGES && !toNow; page++) {
@@ -168,11 +174,24 @@ async function newestFill(user: string, info: InfoLike, now: number): Promise<nu
       if (fills.length < HL_FILLS_PAGE || t === null) toNow = true;
       else from = t + 1;
     }
-    if (!toNow) break; // still more than PEEK_PAGES answers: the sample's newest is the newest
-    if (last !== null) return last;
+    return { last, toNow };
+  };
+  const sample = async (): Promise<number | null> => {
+    const got = await info.post<HlFillRaw[]>({ type: 'userFills', user, aggregateByTime: true }, { ttlMs: SAMPLE_TTL_MS, timeoutMs: 30_000 });
+    return newest(Array.isArray(got) ? got : []);
+  };
+  if (hint !== null && Number.isFinite(hint) && hint > 0 && hint <= now) {
+    // From the whole minute before the hint: the same body while the hint stands, so HL is asked once (the info cache).
+    const r = await forward(Math.floor((hint - 60_000) / 60_000) * 60_000);
+    if (r.last !== null) return r.toNow ? r.last : sample();
   }
-  const sample = await info.post<HlFillRaw[]>({ type: 'userFills', user, aggregateByTime: true }, { ttlMs: SAMPLE_TTL_MS, timeoutMs: 30_000 });
-  return newest(Array.isArray(sample) ? sample : []);
+  for (const w of PEEK_WINDOWS_MS) {
+    // From a whole minute: the same body for a minute, so HL is asked once (the info cache).
+    const r = await forward(Math.floor((now - w) / 60_000) * 60_000);
+    if (!r.toNow) break; // still more than PEEK_PAGES answers: the sample's newest is the newest
+    if (r.last !== null) return r.last;
+  }
+  return sample();
 }
 
 const stateBody = (user: string, dex: string) =>

@@ -729,6 +729,30 @@ test('hlPeek: the newest fill exactly as the profile has it, without the 2,000-f
   assert.equal(await hlPeek(A1, stubInfo((b) => (b.type === 'portfolio' ? EMPTY_PF : [])), now), null);
 });
 
+test('hlPeek with the index\'s hint: one read from the minute before it, the same newest fill; a hint HL does not confirm falls back', async () => {
+  const now = 1_790_000_000_000;
+  const H = 3_600_000;
+  const D = 24 * H;
+  const cases: Array<[string, number[], number, string[]]> = [
+    // The walk asked 8 windows and the sample for this one; the hint finds it in one.
+    ['dormant two months, hinted at its last fill', [now - 90 * D, now - 61 * D], now - 61 * D, ['userFillsByTime']],
+    ['quiet two days, hinted', [now - 20 * D, now - 2 * D - 5], now - 2 * D - 5, ['userFillsByTime']],
+    // The index is behind: the fills since its newest hold a newer one, which is what is shown.
+    ['the index behind by a day', [now - 3 * D, now - 2 * D, now - 3 * H], now - 2 * D, ['userFillsByTime']],
+    ['a bot past five pages from the hint: the sample', Array.from({ length: 11_000 }, (_, i) => now - 225_000 + i * 20), now - 225_000, [...Array<string>(5).fill('userFillsByTime'), 'userFills']],
+    // A hint with no fill after it on HL (a wrong row): the windows, as without one.
+    ['a hint HL does not confirm', [now - 20 * D, now - 2 * D - 5], now - 60_000, [...Array<string>(7).fill('userFillsByTime')]],
+  ];
+  for (const [what, times, hint, asks] of cases) {
+    const info = fillsInfo(times);
+    const peek = (await hlPeek(A2, info, now, hint))!;
+    assert.equal(peek.summary.lastActive, Math.max(...times), what);
+    assert.deepEqual(info.bodies.filter((b) => b.type !== 'portfolio').map((b) => b.type), asks, `${what}: what was asked`);
+    const first = info.bodies.find((b) => b.type === 'userFillsByTime') as { startTime?: number } | undefined;
+    if (hint <= Math.max(...times)) assert.equal(first?.startTime, Math.floor((hint - 60_000) / 60_000) * 60_000, `${what}: from the minute before the hint`);
+  }
+});
+
 test('hlFills: one page answers a recent query, newest first, limited', async () => {
   const recent = Array.from({ length: 5 }, (_, i) => fill({ tid: 100 + i, time: 1000 - i * 10 }));
   const info = stubInfo(() => recent);

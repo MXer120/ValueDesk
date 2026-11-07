@@ -1480,6 +1480,12 @@ export class IndexStore {
     return rows as unknown as WalletFillRow[];
   }
 
+  /** The time of the wallet's newest fills row of any source (null: none) - one step down fills_t. Read-only (indexer/walletFills.ts lastTrades). */
+  newestRowT(venue: Venue, address: string): number | null {
+    const r = this.q('SELECT MAX(t) AS t FROM fills INDEXED BY fills_t WHERE venue = ? AND address = ?').get(venue, address) as { t?: number | null } | undefined;
+    return r?.t ?? null;
+  }
+
   /** The day after the wallet's newest frozen day (0: none) - read from the file, not the writer's cache: raw rows exist from there on. */
   rawFromDay(venue: Venue, address: string): number {
     const r = this.q('SELECT MAX(day) AS d FROM fill_day WHERE venue = ? AND address = ? AND frozen = 1').get(venue, address) as { d: number | null } | undefined;

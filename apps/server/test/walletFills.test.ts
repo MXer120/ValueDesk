@@ -198,3 +198,16 @@ test('the held span never starts before the raw rows the retention kept (a froze
   assert.deepEqual(heldSpan(stub({ fromT: NOW - 5 * DAY, toT: NOW, exhausted: true, capped: true }, 0), 'hyperliquid', HL), { lo: NOW - 5 * DAY, hi: NOW });
   assert.deepEqual(heldSpan(stub({ fromT: NOW - 5 * DAY, toT: NOW, exhausted: true, capped: false }, 0), 'hyperliquid', HL), { lo: 0, hi: NOW });
 });
+
+test('GET /api/vs/last-trades: each Hyperliquid wallet\'s newest fills row (a stream print too), unknown ones left out', async () => {
+  const r = await app.inject({ method: 'GET', url: `/api/vs/last-trades?venue=hyperliquid&addresses=${HL},${BUSY.toUpperCase().replace('0X', '0x')},${UNKNOWN},nonsense` });
+  assert.equal(r.statusCode, 200);
+  assert.deepEqual(r.json(), { ok: true, at: { [HL]: NOW - 10_000, [BUSY]: NOW - 40 * 60_000 } });
+  // Hyperliquid only: the hint is for hlPeek.
+  assert.deepEqual((await app.inject({ method: 'GET', url: `/api/vs/last-trades?venue=sodex&addresses=${SODEX}` })).json(), { ok: true, at: {} });
+  assert.equal((await app.inject({ method: 'GET', url: '/api/vs/last-trades?venue=hyperliquid&addresses=' })).statusCode, 400);
+  // One step down fills_t, no scan of the wallet's rows.
+  const plan = (store as unknown as { db: { prepare(s: string): { all(...a: unknown[]): Array<{ detail: string }> } } }).db
+    .prepare('EXPLAIN QUERY PLAN SELECT MAX(t) AS t FROM fills INDEXED BY fills_t WHERE venue = ? AND address = ?').all('hyperliquid', HL).map((x) => x.detail);
+  assert.ok(plan.some((d) => /COVERING INDEX fills_t/.test(d)), plan.join(' | '));
+});

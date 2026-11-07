@@ -192,7 +192,36 @@ export async function walletFills(venue: Venue, address: string, q: WalletFillsQ
   return { ...body, fills: body.fills.filter((f) => f.time >= fromT) };
 }
 
+/** Addresses one /api/vs/last-trades read takes (a page of copy cards is 24). */
+export const LAST_TRADES_MAX = 50;
+const LAST_TTL_MS = 60_000;
+const lastKept = new Map<string, { at: number; t: number | null }>();
+
+/**
+ * When each wallet's newest fill in the index happened (GET /api/vs/last-trades), Hyperliquid only: a
+ * HINT for the copy cards, never shown as such. The card asks Hyperliquid for the fills since then and
+ * shows the newest of those (hyperliquid/trader.ts hlPeek) - one small read where it walked up to eight
+ * windows - so a stale or wrong hint costs the old walk, not a wrong figure. One step down fills_t per
+ * wallet, kept a minute.
+ */
+export function lastTrades(venue: Venue, addresses: readonly string[], now = Date.now(), store: IndexStore | null = reader()): Record<string, number> {
+  const out: Record<string, number> = {};
+  if (!store || venue !== 'hyperliquid') return out;
+  for (const a of addresses.slice(0, LAST_TRADES_MAX)) {
+    const key = `${venue}|${a}`;
+    let k = lastKept.get(key);
+    if (!k || now - k.at >= LAST_TTL_MS) {
+      k = { at: now, t: store.newestRowT(venue, a) };
+      if (lastKept.size >= CACHE_MAX) lastKept.delete(lastKept.keys().next().value!);
+      lastKept.set(key, k);
+    }
+    if (k.t !== null) out[a] = k.t;
+  }
+  return out;
+}
+
 /** Forget every kept answer (tests). */
 export function clearWalletFills(): void {
   kept.clear();
+  lastKept.clear();
 }

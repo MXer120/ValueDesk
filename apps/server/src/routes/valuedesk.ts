@@ -29,11 +29,12 @@
  *   GET /api/vs/screener?...   (query owned by valuedesk/screener.ts)
  *   GET /api/vs/lbrow?venue=hyperliquid&address   (one leaderboard row from the index)
  *   GET /api/vs/wallet/fills?venue&address&from&to&limit   (a tracked wallet's fills from the index, up to what it holds - indexer/walletFills.ts)
+ *   GET /api/vs/last-trades?venue=hyperliquid&addresses=a,b   (each wallet's newest indexed fill time: the copy cards' hint - indexer/walletFills.ts)
  *   GET /api/vs/index/status   (the indexer's full diagnostics; never on a hosted server)
  *   GET /api/vs/index/health   (its health in numbers, for monitoring on the instance)
  */
 import { walletHistoryFor } from '../indexer/walletHistory.js';
-import { walletFills } from '../indexer/walletFills.js';
+import { LAST_TRADES_MAX, lastTrades, walletFills } from '../indexer/walletFills.js';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import {
   CORE_VENUES,
@@ -203,6 +204,20 @@ export async function valuedeskRoutes(app: FastifyInstance) {
         ...(to !== undefined ? { to: Math.trunc(to) } : {}),
         limit: intOf(q.limit, 2000, 1, 100_000),
       });
+    } catch (e) {
+      return fail(reply, e);
+    }
+  });
+
+  // When each Hyperliquid wallet's newest indexed fill happened: the copy cards' hint for one small fill read
+  // (indexer/walletFills.ts lastTrades). `addresses=a,b,...`, up to 50; unknown wallets are left out.
+  app.get('/api/vs/last-trades', async (req, reply) => {
+    try {
+      const q = req.query as Q;
+      const venue = venueOf(q, false);
+      const list = (q.addresses ?? '').split(',').map((a) => a.trim().toLowerCase()).filter((a) => ADDRESS_RE.test(a));
+      if (!list.length) throw bad('addresses= is required');
+      return { ok: true, at: lastTrades(venue, [...new Set(list)].slice(0, LAST_TRADES_MAX)) };
     } catch (e) {
       return fail(reply, e);
     }

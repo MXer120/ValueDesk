@@ -178,8 +178,8 @@ export const vsApi = {
   trader: (venue: Venue, address: string, signal?: AbortSignal): Promise<TraderProfile | null> =>
     direct(venues.trader(venue, address), signal),
   /** A trader card's curves and last trade (exchange/venues.ts peek). */
-  traderPeek: (venue: Venue, address: string, signal?: AbortSignal): Promise<CardPeek | null> =>
-    direct(venues.peek(venue, address), signal),
+  traderPeek: (venue: Venue, address: string, window: Window = '30d', signal?: AbortSignal): Promise<CardPeek | null> =>
+    direct(venues.peek(venue, address, window), signal),
 
   /** The newest fills, newest first: what the index holds (indexFills.ts), the rest from the venue in this browser. */
   fills: (venue: Venue, address: string, o: { from?: number; to?: number; limit?: number } = {}, signal?: AbortSignal): Promise<VsFill[]> =>
