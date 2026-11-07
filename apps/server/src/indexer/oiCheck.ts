@@ -49,22 +49,45 @@ export function oiCheck(
 /** The rows over OI_EXCESS. */
 export const oiOver = (rows: readonly OiRow[]): OiRow[] => rows.filter((r) => r.ratio > OI_EXCESS);
 
+/** Which side of a coin's books is over its open interest (both when both are). */
+export function overSides(r: Pick<OiRow, 'long' | 'short' | 'oi'>): { long: boolean; short: boolean } {
+  const long = r.long > r.oi * OI_EXCESS;
+  const short = r.short > r.oi * OI_EXCESS;
+  // Over as a ratio but neither side past the line on its own cannot happen; read the larger side then.
+  return long || short ? { long, short } : { long: r.long >= r.short, short: r.short > r.long };
+}
+
 /**
- * The holders of `coin` (by `coinOf` over their symbols) to read again, oldest read first,
- * none read within OI_REREAD_MIN_AGE_MS, at most `limit`.
+ * The holders of `coin` (by `coinOf` over their symbols) to read again, none read within
+ * OI_REREAD_MIN_AGE_MS, at most `limit`. Size that is not there sits on the side that is over, in a
+ * book read before the venue's last gap in the prints (a restart, an outage: the close it missed);
+ * a book read since is the venue's own answer. So (2026-11-07, trade.xyz ORCL at 116%: the excess
+ * was one 6,817 short, closed on the venue 3.8 days before, the coin's third-largest short of 751
+ * holders - oldest first, a batch of 100 did not reach it):
+ *   - only holders on an over side (`sides`; both when not given);
+ *   - books read before `gapAt` first;
+ *   - then the largest position first: one phantom of size clears most of an excess;
+ *   - oldest read last of all.
  */
 export function oiRereads(
   books: Iterable<[string, { at: number; pos: ReadonlyMap<string, { szi: number }> }]>,
   coin: string, coinOf: (symbol: string) => string, now: number, limit: number,
+  o: { sides?: { long: boolean; short: boolean }; gapAt?: number } = {},
 ): string[] {
-  const due: Array<[string, number]> = [];
+  const sides = o.sides ?? { long: true, short: true };
+  const gapAt = o.gapAt ?? 0;
+  const due: Array<{ address: string; before: boolean; size: number; at: number }> = [];
   for (const [address, b] of books) {
     if (now - b.at < OI_REREAD_MIN_AGE_MS) continue;
+    let size = 0;
     for (const [symbol, p] of b.pos) {
-      if (p.szi && coinOf(symbol) === coin) { due.push([address, b.at]); break; }
+      if (!p.szi || coinOf(symbol) !== coin) continue;
+      if ((p.szi > 0 && sides.long) || (p.szi < 0 && sides.short)) size += Math.abs(p.szi);
     }
+    if (size > 0) due.push({ address, before: b.at < gapAt, size, at: b.at });
   }
-  return due.sort((a, b) => a[1] - b[1]).slice(0, limit).map(([a]) => a);
+  due.sort((a, b) => (a.before !== b.before ? (a.before ? -1 : 1) : b.size - a.size || a.at - b.at));
+  return due.slice(0, limit).map((d) => d.address);
 }
 
 /** The status's view: per venue, the worst ratio and the coins over, worst first (at most `max`). */
