@@ -27,6 +27,7 @@ import { sampledVenue, COHORT_RANGES, type BooksOverOi, type CohortWalletRow as 
 import { EXCLUDED_FROM, EXCLUDED_WALLETS, isExcluded, outOfCohorts, type ExcludedFrom, type ExcludedWallet } from '../valuedesk/internalWallets.js';
 import { liqCoin } from '../valuedesk/liquidations/levels.js';
 import { activityCoverage } from '../flow/read.js';
+import { mark } from './busy.js';
 
 export interface IndexState {
   /** Every board behind this page is final (no unchecked wallet outranks a pick). */
@@ -446,18 +447,27 @@ function runNow<T>(steps: Generator<void, T>): T {
   }
 }
 
-/** Run steps to the end, giving the thread back whenever SLICE_MS of work is done. */
-async function runBehind<T>(steps: Generator<void, T>): Promise<T> {
+/**
+ * Run steps to the end, giving the thread back whenever SLICE_MS of work is done. The steps yield often (every few hundred
+ * wallets): a yield costs next to nothing, and the time between two is what a request waits. Until 2026-11-07 some steps
+ * ran a whole venue or a whole list between yields - production profile 15:41: relaid 1.6 s, renet's list copy 0.5 s,
+ * replace 0.36 s, 1-2 s holds every minute with the health check waiting behind them.
+ */
+async function runBehind<T>(steps: Generator<void, T>, label = 'coh:rebuild'): Promise<T> {
   let since = performance.now();
   for (;;) {
     const r = steps.next();
     if (r.done) return r.value;
     if (performance.now() - since >= SLICE_MS) {
       await new Promise<void>((resolve) => setImmediate(resolve));
+      mark(label);
       since = performance.now();
     }
   }
 }
+
+/** Yield every this many items in the load's loops (runBehind decides whether to give the thread back). */
+const STEP = 256;
 
 // --- keeping the load current ------------------------------------------------------
 //
@@ -633,12 +643,12 @@ function* readAll(s: IndexStore): Generator<void, Map<Venue, VenueRows>> {
     let n = 0;
     for (const address of r.memberOrder) {
       setWallet(r, address, walletVenue(venue, r, sib, address));
-      if (++n % 2_000 === 0) yield;
+      if (++n % STEP === 0) yield;
     }
     for (const address of r.bookOrder) {
       if (r.members.has(address)) continue;
       setWallet(r, address, walletVenue(venue, r, sib, address));
-      if (++n % 2_000 === 0) yield;
+      if (++n % STEP === 0) yield;
     }
   }
   return venues;
@@ -660,28 +670,33 @@ function* readChanges(
   for (const venue of VENUES) {
     const r = st.venues.get(venue)!;
     type Ev = { rev: number; address: string; member?: CohortMemberRow; book?: CohortBookRow; tomb?: 'm' | 'b' };
-    const evs: Ev[] = [];
+    // Each kind comes in write order (the pages are read by rev): merged, not sorted - after the indexer's restart every
+    // row is new (546k on 2026-11-07 15:10-15:12) and one sort of them all held the thread.
+    const mEv: Ev[] = [];
+    const bEv: Ev[] = [];
     for (let after = st.rev; ;) {
       const page = s.cohortMembersSince(venue, after, upTo, LOAD_PAGE);
-      for (const x of page) evs.push({ rev: x.rev, address: x.row.address, member: x.row });
+      for (const x of page) mEv.push({ rev: x.rev, address: x.row.address, member: x.row });
       yield;
       if (page.length < LOAD_PAGE) break;
       after = page[page.length - 1]!.rev;
     }
     for (let after = st.rev; ;) {
       const page = s.cohortBooksSince(venue, after, upTo, LOAD_PAGE);
-      for (const x of page) evs.push({ rev: x.rev, address: x.address, book: x.row });
+      for (const x of page) bEv.push({ rev: x.rev, address: x.address, book: x.row });
       yield;
       if (page.length < LOAD_PAGE) break;
       after = page[page.length - 1]!.rev;
     }
-    for (const t of s.cohortTombsSince(venue, st.rev, upTo)) evs.push({ rev: t.rev, address: t.address, tomb: t.kind });
-    if (!evs.length) continue;
-    evs.sort((a, b) => a.rev - b.rev);
+    const tEv: Ev[] = s.cohortTombsSince(venue, st.rev, upTo).map((t) => ({ rev: t.rev, address: t.address, tomb: t.kind }));
+    if (!mEv.length && !bEv.length && !tEv.length) continue;
+    const evs = yield* mergeByRev([mEv, bEv, tEv]);
     // Each address as it was before (its presence and its share of the tail), then the writes.
     const was = new Map<string, { member: boolean; book: boolean }>();
     const books = new Set<string>();
+    let k = 0;
     for (const e of evs) {
+      if (++k % STEP === 0) yield;
       if (!was.has(e.address)) {
         was.set(e.address, { member: r.members.has(e.address), book: r.books.has(e.address) });
         const [n, read] = tailPart(r, e.address);
@@ -698,6 +713,7 @@ function* readChanges(
     const dropM = new Set<string>();
     const dropB = new Set<string>();
     for (const [address, w] of was) {
+      if (++k % STEP === 0) yield;
       const [n, read] = tailPart(r, address);
       r.tail.members += n;
       r.tail.read += read;
@@ -708,10 +724,12 @@ function* readChanges(
       if (b && !w.book) addB.push(address);
       if (!b && w.book) dropB.add(address);
     }
-    r.memberOrder = reorder(r.memberOrder, addM, dropM);
-    r.bookOrder = reorder(r.bookOrder, addB, dropB);
+    r.memberOrder = yield* reorder(r.memberOrder, addM, dropM);
+    r.bookOrder = yield* reorder(r.bookOrder, addB, dropB);
     if (addM.length || addB.length || dropM.size || dropB.size) reshaped.set(venue, new Set([...addM, ...addB, ...dropM, ...dropB]));
-    touched.set(venue, new Set(was.keys()));
+    const t = new Set<string>();
+    for (const a of was.keys()) { t.add(a); if (++k % STEP === 0) yield; }
+    touched.set(venue, t);
     touchedBooks.set(venue, books);
     yield;
   }
@@ -723,37 +741,60 @@ function* readChanges(
     const sibV = MARGIN_SIBLING[venue];
     const sib = sibV ? st.venues.get(sibV) : undefined;
     const rate = tailCountRate(venue, r.tail);
-    let dirty: Set<string>;
+    const dirty = new Set<string>();
+    let n = 0;
     if (rate !== r.rate) {
       r.rate = rate;
-      dirty = new Set([...r.wv.keys(), ...(touched.get(venue) ?? [])]);
+      for (const a of r.wv.keys()) { dirty.add(a); if (++n % STEP === 0) yield; }
+      for (const a of touched.get(venue) ?? []) { dirty.add(a); if (++n % STEP === 0) yield; }
     } else {
-      dirty = new Set(touched.get(venue) ?? []);
-      for (const a of (sibV && touchedBooks.get(sibV)) || []) dirty.add(a);
+      for (const a of touched.get(venue) ?? []) { dirty.add(a); if (++n % STEP === 0) yield; }
+      for (const a of (sibV && touchedBooks.get(sibV)) || []) { dirty.add(a); if (++n % STEP === 0) yield; }
     }
-    let n = 0;
+    n = 0;
     for (const address of dirty) {
       setWallet(r, address, walletVenue(venue, r, sib, address));
-      if (++n % 2_000 === 0) yield;
+      if (++n % STEP === 0) yield;
     }
     changed.set(venue, dirty);
   }
   return { changed, reshaped };
 }
 
-/** A sorted address list without `drop`, with `add` merged in (one pass; `add` is a few thousand at most). */
-function reorder(order: string[], add: string[], drop: ReadonlySet<string>): string[] {
+/** Lists each in rising rev, merged into one (unique revs: the writer numbers every row once). */
+function* mergeByRev<E extends { rev: number }>(lists: ReadonlyArray<readonly E[]>): Generator<void, E[]> {
+  const out: E[] = [];
+  const at = lists.map(() => 0);
+  for (;;) {
+    let best = -1;
+    for (let l = 0; l < lists.length; l++) if (at[l]! < lists[l]!.length && (best < 0 || lists[l]![at[l]!]!.rev < lists[best]![at[best]!]!.rev)) best = l;
+    if (best < 0) return out;
+    out.push(lists[best]![at[best]!++]!);
+    if (out.length % (STEP * 8) === 0) yield;
+  }
+}
+
+/** A sorted address list without `drop`, with `add` merged in (one pass, in steps; `add` is a few thousand most minutes). */
+function* reorder(order: string[], add: string[], drop: ReadonlySet<string>): Generator<void, string[]> {
   if (!add.length && !drop.size) return order;
-  const kept = drop.size ? order.filter((a) => !drop.has(a)) : order;
+  let kept = order;
+  if (drop.size) {
+    kept = [];
+    for (let i = 0; i < order.length; i++) {
+      if (!drop.has(order[i]!)) kept.push(order[i]!);
+      if (i % (STEP * 16) === 0) yield;
+    }
+  }
   if (!add.length) return kept;
   add.sort(byAddress);
-  const out: string[] = new Array(kept.length + add.length);
+  yield;
+  const out: string[] = [];
   let i = 0;
   let j = 0;
-  let k = 0;
-  while (i < kept.length && j < add.length) out[k++] = byAddress(kept[i]!, add[j]!) <= 0 ? kept[i++]! : add[j++]!;
-  while (i < kept.length) out[k++] = kept[i++]!;
-  while (j < add.length) out[k++] = add[j++]!;
+  while (i < kept.length || j < add.length) {
+    out.push(j >= add.length || (i < kept.length && byAddress(kept[i]!, add[j]!) <= 0) ? kept[i++]! : add[j++]!);
+    if (out.length % (STEP * 16) === 0) yield;
+  }
   return out;
 }
 
@@ -777,7 +818,7 @@ function* layOut(
   const excluded = new Map<string, ExcludedBook>();
   for (const venue of BUILD_ORDER) {
     const r = venues.get(venue)!;
-    const kept = changed && relaid(r, changed.get(venue));
+    const kept = changed ? yield* relaid(r, changed.get(venue)) : null;
     const laid = kept || (yield* layVenue(r));
     layKind[!kept ? 'full' : kept === r.laid ? 'kept' : 'patched']++;
     r.laid = laid;
@@ -816,26 +857,37 @@ function* layVenue(r: VenueRows): Generator<void, Laid> {
   };
   for (const address of r.memberOrder) {
     visit(address);
-    if (++n % 5_000 === 0) yield;
+    if (++n % STEP === 0) yield;
   }
   for (const address of r.bookOrder) {
     if (r.members.has(address)) continue;
     visit(address);
-    if (++n % 5_000 === 0) yield;
+    if (++n % STEP === 0) yield;
   }
   return { memberOrder: r.memberOrder, bookOrder: r.bookOrder, map, covered, booksAt, out };
 }
 
-/** The last map with `changed` set in place, while no address came or went (else null: lay it out again). */
-function relaid(r: VenueRows, changed: ReadonlySet<string> | undefined): Laid | null {
+/**
+ * The last map with `changed` set in place, while no address came or went (else null: lay it out again). In steps: the
+ * copy of Hyperliquid's 229k-entry map and the walk of the changed addresses held the API 1.4-1.6 s at a time on
+ * production (profile 2026-11-07 15:41).
+ */
+function* relaid(r: VenueRows, changed: ReadonlySet<string> | undefined): Generator<void, Laid | null> {
   const was = r.laid;
   if (!was || was.memberOrder !== r.memberOrder || was.bookOrder !== r.bookOrder) return null;
   if (!changed?.size) return was;
-  const map = new Map(was.map);
+  // Copied entry by entry (insertion order kept, as new Map(was.map) keeps it).
+  const map = new Map<string, WalletVenue>();
+  let n = 0;
+  for (const [k, v] of was.map) {
+    map.set(k, v);
+    if (++n % (STEP * 8) === 0) yield;
+  }
   let covered = was.covered;
   let booksAt = was.booksAt;
   let lower = false;
   for (const address of changed) {
+    if (++n % STEP === 0) yield;
     const w = r.wv.get(address);
     const old = map.get(address);
     if (!w !== !old) return null; // a WalletVenue where the map has none, or none where it has one: lay it out again
@@ -850,7 +902,10 @@ function relaid(r: VenueRows, changed: ReadonlySet<string> | undefined): Laid | 
   if (lower) {
     // The newest book went back or out of the count: the newest of the rest.
     booksAt = 0;
-    for (const w of map.values()) if (w.positions) booksAt = Math.max(booksAt, w.at);
+    for (const w of map.values()) {
+      if (w.positions) booksAt = Math.max(booksAt, w.at);
+      if (++n % (STEP * 8) === 0) yield;
+    }
   }
   return { ...was, map, covered, booksAt };
 }
@@ -882,13 +937,24 @@ function* netSteps(load: CohortLoad, venues: readonly Venue[]): Generator<void, 
     const all = yield* scopeWalletSteps(venues, load.per, mark);
     // Hedged desks hold books (the heatmap prices them) but no cohort counts them (internalWallets.ts).
     const out = new Set<string>();
-    wallets = all.filter((w) => !(outOfCohorts(venues, w.address) && out.add(w.address)));
+    const kept: NettedWallet[] = [];
+    for (let i = 0; i < all.length; i++) {
+      const w = all[i]!;
+      if (outOfCohorts(venues, w.address)) out.add(w.address);
+      else kept.push(w);
+      if (i % (STEP * 8) === 0) yield;
+    }
+    wallets = kept;
     // Kept for the next load to start from: only while these rows are the newest (a request on the
     // load in use while the next one is read nets from it in full, and keeps nothing).
     if (st && st.gen === load.gen && cohortState === st) {
       const at = new Map<string, number>();
-      for (let i = 0; i < wallets.length; i++) at.set(wallets[i]!.address, i);
-      st.nets.set(key, { gen: load.gen, list: wallets, at, out });
+      for (let i = 0; i < wallets.length; i++) {
+        at.set(wallets[i]!.address, i);
+        if (i % (STEP * 8) === 0) yield;
+      }
+      // Asked again: the rows may have moved on while this yielded.
+      if (st.gen === load.gen && cohortState === st) st.nets.set(key, { gen: load.gen, list: wallets, at, out });
     }
   }
   load.scopes.set(key, wallets);
@@ -927,22 +993,41 @@ function* renet(
     if (outOfCohorts(venues, address)) { out.add(address); return null; }
     return netWallet(address, mine, mark);
   };
+  let n = 0;
   const reshaped = new Set<string>();
-  for (const v of venues) for (const a of st.reshaped.get(v) ?? []) reshaped.add(a);
+  for (const v of venues) for (const a of st.reshaped.get(v) ?? []) { reshaped.add(a); if (++n % STEP === 0) yield; }
   const stale = new Set<string>();
-  for (const v of venues) for (const a of st.changed.get(v) ?? []) if (!reshaped.size || !reshaped.has(a)) stale.add(a);
+  for (const v of venues) {
+    for (const a of st.changed.get(v) ?? []) {
+      if (!reshaped.size || !reshaped.has(a)) stale.add(a);
+      if (++n % STEP === 0) yield;
+    }
+  }
   const inScope = new Set<Venue>(venues);
   for (const k of st.moved) {
     const i = k.indexOf('|');
     const v = k.slice(0, i) as Venue;
     if (!inScope.has(v)) continue;
-    for (const a of st.venues.get(v)?.holders.get(k.slice(i + 1)) ?? []) if (!reshaped.size || !reshaped.has(a)) stale.add(a);
+    for (const a of st.venues.get(v)?.holders.get(k.slice(i + 1)) ?? []) {
+      if (!reshaped.size || !reshaped.has(a)) stale.add(a);
+      if (++n % STEP === 0) yield;
+    }
   }
   yield;
-  const list = reshaped.size ? yield* replace(net, reshaped, st, venues, maps, netted) : net.list.slice();
+  let list: NettedWallet[] | null;
+  if (reshaped.size) list = yield* replace(net, reshaped, st, venues, maps, netted);
+  else {
+    // Copied in steps: one slice() of a 500k list was 0.5 s on production (2026-11-07 15:41).
+    list = [];
+    const from = net.list;
+    for (let i = 0; i < from.length; i++) {
+      list.push(from[i]!);
+      if (i % (STEP * 16) === 0) yield;
+    }
+  }
   if (!list) return null;
   netKind[reshaped.size ? 'moved' : 'copied']++;
-  let n = 0;
+  n = 0;
   for (const address of stale) {
     const i = at.get(address);
     const w = netted(address);
@@ -953,7 +1038,7 @@ function* renet(
     }
     if (!w) return null;
     list[i] = w;
-    if (++n % 5_000 === 0) yield;
+    if (++n % STEP === 0) yield;
   }
   net.list = list;
   return list;
@@ -978,7 +1063,9 @@ function* replace(
     p[0] !== q[0] ? p[0] < q[0] : p[1] !== q[1] ? p[1] < q[1] : a < b;
   const gone: number[] = [];
   const put: Array<{ address: string; place: [number, number]; w: NettedWallet; i: number }> = [];
+  let n = 0;
   for (const address of reshaped) {
+    if (++n % STEP === 0) yield;
     const i = at.get(address);
     if (i !== undefined) gone.push(i);
     const place = placeOf(address);
@@ -1007,7 +1094,10 @@ function* replace(
     }
     return lo;
   };
-  for (const x of put) x.i = indexOf(x.place, x.address);
+  for (const x of put) {
+    x.i = indexOf(x.place, x.address);
+    if (++n % STEP === 0) yield;
+  }
   if (bad) return null;
   yield;
   // Pushed, not written into a preallocated array: that one stays holey, and the sums iterate it slower.
@@ -1019,14 +1109,14 @@ function* replace(
     if (i === list.length) break;
     if (g < gone.length && gone[g] === i) { g++; continue; }
     next.push(list[i]!);
-    if (i % 20_000 === 0) yield;
+    if (i % (STEP * 16) === 0) yield;
   }
   if (next.length !== list.length - gone.length + put.length) return null;
   const first = Math.min(gone[0] ?? Infinity, put[0]?.i ?? Infinity);
-  for (const address of reshaped) at.delete(address);
+  for (const address of reshaped) { at.delete(address); if (++n % STEP === 0) yield; }
   for (let i = first; i < next.length; i++) {
     at.set(next[i]!.address, i);
-    if (i % 20_000 === 0) yield;
+    if (i % (STEP * 16) === 0) yield;
   }
   return next;
 }
@@ -1041,7 +1131,7 @@ function* sumSteps(load: CohortLoad, venues: readonly Venue[], f: CohortFilter):
   let n = 0;
   for (const w of wallets) {
     sum.add(w);
-    if (++n % 5_000 === 0) yield;
+    if (++n % STEP === 0) yield;
   }
   const stats: CohortSums = { cohorts: sum.result(), all: sum.total() };
   if (load.stats.size > 200) load.stats.clear();
@@ -1167,6 +1257,7 @@ async function rebuildBehind(s: IndexStore): Promise<void> {
   const started = Date.now();
   if (rebuilding) return;
   rebuilding = true;
+  mark('coh:rebuild');
   try {
     const p = runBehind(loadSteps(s, started, wantedNow(started)));
     inflight = p;
@@ -1604,6 +1695,9 @@ export function indexerStatus(): unknown {
  */
 export async function cohortsReady(waitMs = READY_WAIT_MS): Promise<void> {
   if (!cohortLoad) {
+    // None under way either (a read before the start's warm-up began): one from behind now, not one in place.
+    const s = reader();
+    if (!inflight && !rebuilding && s && Date.now() - rebuildFailedAt >= 10_000) { lastAsked = Date.now(); void rebuildBehind(s); }
     if (inflight) await inflight.catch(() => undefined);
     return;
   }
@@ -1625,4 +1719,32 @@ export async function cohortsReady(waitMs = READY_WAIT_MS): Promise<void> {
     new Promise<void>((r) => { timer = setTimeout(r, waitMs); timer.unref?.(); }),
   ]);
   if (timer) clearTimeout(timer);
+}
+
+const preparing = new Map<string, Promise<void>>();
+
+/**
+ * Before a cohort read: cohortsReady, then what the read will net and sum - done here from behind, in slices, so the
+ * synchronous read finds it made. A set of venues or a filter asked for the first time was netted and summed inside
+ * the read, in place: 0.7 s on a benchmark at production's size (Hyperliquid + Lighter with a coin filter), longer on
+ * server 1, every route waiting. `filters`: those the read sums (`[]`: the netted wallets only).
+ */
+export async function cohortsPrepare(venues: readonly Venue[], filters: readonly CohortFilter[], waitMs = READY_WAIT_MS): Promise<void> {
+  await cohortsReady(waitMs);
+  const load = cohortLoad;
+  if (!load) return;
+  for (const f of filters.length ? filters : [null]) {
+    if (f) note(venues, f); else note(venues);
+    const made = f ? load.stats.has(`${scopeKey(venues)}|${filterKey(f)}`) : load.scopes.has(scopeKey(venues));
+    if (made) continue;
+    const k = `${load.gen}|${scopeKey(venues)}|${f ? filterKey(f) : '-'}`;
+    let p = preparing.get(k);
+    if (!p) {
+      p = runBehind<unknown>(f ? sumSteps(load, venues, f) : netSteps(load, venues), 'coh:prepare')
+        .then(() => undefined, () => undefined)
+        .finally(() => preparing.delete(k));
+      preparing.set(k, p);
+    }
+    await p;
+  }
 }

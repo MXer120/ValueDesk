@@ -33,6 +33,7 @@
  * scales for as long as it is listed, and in a file across restarts (metasPath): the first index
  * after the 2026-11-01 release took 7.1 s, every snapshot of 30 days parsed again for its scales.
  */
+import { mark } from './busy.js';
 import { readFileSync } from 'node:fs';
 import { rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -41,7 +42,8 @@ import { dataDir } from '../builder/paths.js';
 import { VENUES, type Venue } from '../valuedesk/types.js';
 import { LEV_BANDS, type LevBand } from '../valuedesk/liquidations/math.js';
 import { snapBand, trimRow, type LiqSnap, type SnapRow } from '../valuedesk/liquidations/levels.js';
-import { liqHistory, type LiqHistory } from './liqRead.js';
+import type { LiqHistory } from './liqRead.js';
+import { liqJob } from './liqHistThread.js';
 import { reader } from './reader.js';
 import type { IndexStore } from './store.js';
 
@@ -414,6 +416,7 @@ async function walk(s: IndexStore, coin: string, venues: readonly Venue[], list:
     if (performance.now() - since > YIELD_MS) {
       if (restMs > 0) await pause(restMs, undefined, { ref: false });
       else await nextTurn();
+      mark(restMs > 0 ? 'liq:warm' : 'liq:tiles');
       since = performance.now();
     }
   }
@@ -620,7 +623,10 @@ function walletHistory(coin: string, venues: readonly Venue[], wallets: readonly
   if (walletHists.size >= WALLET_HIST_MAX) for (const [k, v] of walletHists) if (now - v.at >= WALLET_HIST_MS || walletHists.size >= WALLET_HIST_MAX) walletHists.delete(k);
   // The snapshots' times, prices and steps from the index, held: read from the snapshots themselves
   // this was 30 days of JSON in one blocking statement, again each minute (production 2026-11-05: 3.6-4.6 s).
-  const h = liqTileIndex(coin, venues, now).then((idx) => (idx ? liqHistory(coin, venues, '30d', wallets, { points: idx.points, coins: idx.coins }) : null));
+  // The change log read and summed on the liquidation history's thread (liqHistThread.ts), not this one.
+  const h = liqTileIndex(coin, venues, now).then(async (idx) => (idx
+    ? JSON.parse(await liqJob({ kind: 'history', coin, venues: [...venues], range: '30d', wallets: [...wallets], known: { points: idx.points, coins: idx.coins } })) as LiqHistory | null
+    : null));
   walletHists.set(key, { at: now, h });
   h.catch(() => walletHists.delete(key));
   return h;

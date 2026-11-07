@@ -370,10 +370,16 @@ export function netWallet(address: string, per: ReadonlyMap<Venue, WalletVenue>,
  * can let other work run in between. The wallets come out in the same order.
  */
 export function* scopeWalletSteps(
-  scope: readonly Venue[], per: ReadonlyMap<Venue, ReadonlyMap<string, WalletVenue>>, mark: MarkOf, every = 1_000,
+  scope: readonly Venue[], per: ReadonlyMap<Venue, ReadonlyMap<string, WalletVenue>>, mark: MarkOf, every = 256,
 ): Generator<void, NettedWallet[]> {
   const addresses = new Set<string>();
-  for (const v of scope) for (const a of per.get(v)?.keys() ?? []) addresses.add(a);
+  let n = 0;
+  for (const v of scope) {
+    for (const a of per.get(v)?.keys() ?? []) {
+      addresses.add(a);
+      if (++n % (every * 8) === 0) yield;
+    }
+  }
   yield;
   const out: NettedWallet[] = [];
   for (const address of addresses) {

@@ -16,7 +16,12 @@ import { join } from 'node:path';
 export const STALL_MS = 5_000;
 export const GAP_MS = 10 * 60_000;
 const SAMPLE_US = 10_000;
-const SEGMENT_MS = 60_000;
+/**
+ * 30 minutes, not one (2026-11-07): every cut starts the profiler again, and Profiler.start walks the heap on the thread
+ * it profiles - 0.3 s with a 0.5 GB heap on a dev machine, 3.6 s on the production API (2+ GB). Once a minute that was a
+ * stall of its own. A segment of 30 minutes at 10 ms is ~180k samples (a few MB); a dump still keeps only KEEP_MS.
+ */
+const SEGMENT_MS = 30 * 60_000;
 const KEEP_MS = 60_000;
 const MAX_FILES = 20;
 
@@ -155,7 +160,7 @@ export class StallProfiler {
       const file = join(this.dir, `${this.name}-${new Date(now).toISOString().replace(/[:.]/g, '-')}-${Math.round(lateMs / 1000)}s.cpuprofile`);
       writeFileSync(file, JSON.stringify(merged));
       this.lastFile = file;
-      (this.o.log ?? ((l: string) => console.log(l)))(`[indexer] thread stalled ${Math.round(lateMs / 1000)} s: the last minute of samples is in ${file}`);
+      (this.o.log ?? ((l: string) => console.log(l)))(`[${this.name.replace(/-stall$/, '')}] thread stalled ${Math.round(lateMs / 1000)} s: the last minute of samples is in ${file}`);
       this.prune();
     } catch (e) {
       this.lastError = String(e);
