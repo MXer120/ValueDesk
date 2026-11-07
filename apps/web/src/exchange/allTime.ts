@@ -57,6 +57,23 @@ const RESYNC_AFTER_MS = 5 * 60_000;
 /** A tab waiting for another tab's walk re-reads what it stored at most this often. */
 const FOLLOW_EVERY_MS = 4_000;
 const PAUSE_KEY = 'vs:history:walk-paused-until';
+const SPEED_KEY = 'vs:history:speed';
+const HOLD_KEY = (address: string) => `vs:history:held:${address.toLowerCase()}`;
+
+/**
+ * How hard the walk reads. SoDEX allows about two `/trades` pages a minute per IP whatever is chosen; the speed decides
+ * who gets them. Funding has no such limit, so its gap is what changes most.
+ */
+export type WalkSpeed = 'gentle' | 'normal' | 'fast';
+export const WALK_SPEEDS: ReadonlyArray<{ id: WalkSpeed; label: string; detail: string }> = [
+  { id: 'gentle', label: 'Gentle', detail: 'Only when nothing else on the page is reading' },
+  { id: 'normal', label: 'Normal', detail: 'Ahead of the background, after the tables you open' },
+  { id: 'fast', label: 'Fast', detail: 'Every read it can get; tables you open wait their turn' },
+];
+const GAP_BY_SPEED: Record<WalkSpeed, number> = { gentle: 12_000, normal: WALK_GAP_MS, fast: 2_000 };
+
+/** The paused message, also what a figure shows while its walk is held. */
+export const HELD_MESSAGE = 'Paused on this device.';
 /** An all-time perps walk below this share of SoDEX's own lifetime volume is not the whole history. */
 const LIFETIME_MATCH = 0.99;
 
@@ -109,7 +126,38 @@ export interface ActivityWindow {
   running: boolean;
 }
 
+/** One scope's walk, for the indexing notification. */
+export interface WalkScope {
+  kind: ScopeKind;
+  running: boolean;
+  rows: number;
+  /** Oldest row held. */
+  oldest: number | null;
+  /** Reached the start of what SoDEX keeps. */
+  complete: boolean;
+  /** Ended at SoDEX's row limit, not at the first row. */
+  limited: boolean;
+  error: string | null;
+}
+
+export interface WalkState {
+  scopes: WalkScope[];
+  held: boolean;
+  speed: WalkSpeed;
+  /** The account's first perps trade, as SoDEX states it; null when it does not say. */
+  firstTradeAt: number | null;
+}
+
 export interface AllTime {
+  /** Where each walk of a wallet stands. Reads nothing new. */
+  walkState(address: string): Promise<WalkState>;
+  /** Start every walk of a wallet, or carry them on. */
+  start(address: string): Promise<void>;
+  /** Hold a wallet's walks, or let them go on. Kept across visits. */
+  hold(address: string, held: boolean): void;
+  setSpeed(speed: WalkSpeed): void;
+  /** Hold, and remove what this device kept of the wallet. */
+  forget(address: string): Promise<void>;
   /** The Stats answer for one wallet; starts (or continues) its walks in the background. */
   stats(address: string, rebuild?: boolean): Promise<AllTimeStats>;
   /** A wallet's trades and funding from `since` (null: all time); starts (or continues) its walks. */
@@ -122,7 +170,27 @@ export interface AllTime {
 export function createAllTime(d: AllTimeDeps): AllTime {
   const { gateway } = d;
   const now = d.ledger.now;
-  const walkGap = new SharedLedger('sodex-walk', 1, WALK_GAP_MS, d.ledger);
+  const gaps = new Map<WalkSpeed, SharedLedger>();
+  const speed = (): WalkSpeed => {
+    try {
+      const v = d.ledger.store?.getItem(SPEED_KEY);
+      return v === 'gentle' || v === 'fast' ? v : 'normal';
+    } catch {
+      return 'normal';
+    }
+  };
+  const walkGapFor = (s: WalkSpeed): SharedLedger => {
+    let l = gaps.get(s);
+    if (!l) gaps.set(s, (l = new SharedLedger(`sodex-walk-${s}`, 1, GAP_BY_SPEED[s], d.ledger)));
+    return l;
+  };
+  const held = (address: string): boolean => {
+    try {
+      return d.ledger.store?.getItem(HOLD_KEY(address)) === '1';
+    } catch {
+      return false;
+    }
+  };
   let pending: Promise<void> = Promise.resolve();
   let pausedUntilMem = 0;
   /** While a figure on screen waits for the walk it is a read for that view, not idle background work. */
@@ -151,9 +219,12 @@ export function createAllTime(d: AllTimeDeps): AllTime {
   };
 
   /** Wait for this walk page's turn: pause, cooldown, budget, drip headroom, the gap. */
-  async function walkTurn(path: string): Promise<void> {
+  async function walkTurn(path: string, address: string): Promise<void> {
     const drip = gateway.dripFor(path);
     for (;;) {
+      if (held(address)) throw new Error(HELD_MESSAGE);
+      const s = speed();
+      const walkGap = walkGapFor(s);
       if (pausedFor() > 0) throw new Error('SoDEX rate-limited this connection - history walks are paused for a while.');
       const cool = gateway.cooldownLeft(path);
       if (cool > 0) {
@@ -163,7 +234,8 @@ export function createAllTime(d: AllTimeDeps): AllTime {
       }
       // A `/trades` page only when a background history read may go (historyQueue.ts):
       // the walk spends its turn when the page can actually be sent, not before.
-      const busy = gateway.budget.spent() > gateway.budget.limit / 2 || (drip !== null && !onScreen() && !gateway.historyQueue.backgroundMayGo());
+      const eager = s === 'fast' || (s === 'normal' && onScreen());
+      const busy = gateway.budget.spent() > gateway.budget.limit / 2 || (drip !== null && !eager && !gateway.historyQueue.backgroundMayGo());
       if (!busy) {
         const wait = await walkGap.tryTake(1);
         if (wait === 0) return;
@@ -175,13 +247,13 @@ export function createAllTime(d: AllTimeDeps): AllTime {
   }
 
   /** One walk page reader: newest first, each row normalised (its raw JSON dropped once hashed). */
-  function walkPages(pathOf: (q: PageQuery) => string, listKey: string, normalise: (r: Record<string, unknown>) => NormalRow): PageFetcher {
+  function walkPages(address: string, pathOf: (q: PageQuery) => string, listKey: string, normalise: (r: Record<string, unknown>) => NormalRow): PageFetcher {
     return async (q) => {
       const path = pathOf(q);
-      await walkTurn(path);
+      await walkTurn(path, address);
       try {
         // Not kept as a last-good copy: a long walk would otherwise hold every page it read.
-        const data = await gateway.get<unknown>(path, { ttlMs: 0, keepLastGood: false, priority: onScreen() ? 'bulk' : 'walk' });
+        const data = await gateway.get<unknown>(path, { ttlMs: 0, keepLastGood: false, priority: speed() === 'fast' ? 'visible' : speed() === 'normal' && onScreen() ? 'bulk' : 'walk' });
         return unwrapList<Record<string, unknown>>(data, listKey).map((r) => ({ ...normalise(r), raw: '' }));
       } catch (e) {
         if (e instanceof RateLimitedError || isRateLimitError(e)) pauseWalks(WALK_PAUSE_MS);
@@ -193,10 +265,10 @@ export function createAllTime(d: AllTimeDeps): AllTime {
   function pageSource(kind: ScopeKind, address: string): PageFetcher {
     if (kind === 'funding') {
       // `/fundings`, not the documented `/funding-history` - the latter 404s.
-      return walkPages((q) => `/api/v1/perps/accounts/${address}/fundings?${qsOf(q)}`, 'fundings', normaliseFunding);
+      return walkPages(address, (q) => `/api/v1/perps/accounts/${address}/fundings?${qsOf(q)}`, 'fundings', normaliseFunding);
     }
     const engine: Engine = kind === 'trades-spot' ? 'spot' : 'perps';
-    return walkPages((q) => `/api/v1/${engine}/accounts/${address}/trades?${qsOf(q)}`, 'trades', normaliseTrade);
+    return walkPages(address, (q) => `/api/v1/${engine}/accounts/${address}/trades?${qsOf(q)}`, 'trades', normaliseTrade);
   }
 
   // --- the working copy, mirrored to persistence ---------------------------------
@@ -243,6 +315,7 @@ export function createAllTime(d: AllTimeDeps): AllTime {
     // A wallet with under a page of trades shows after one read: its summary does not wait a minute of SoDEX's limit on
     // the read that only confirms it. That read follows at once, and anything it finds counts.
     shortPageEnds: true,
+    catchUpEveryMs: 2 * 60_000,
     exclusive,
     beforeSync: async (scope) => {
       await refresh(scope);
@@ -415,6 +488,60 @@ export function createAllTime(d: AllTimeDeps): AllTime {
     };
   }
 
+  function checked(addressIn: string): string {
+    if (!addressIn || !ADDRESS_RE.test(addressIn)) throw new MarketRequestError('a valid 0x wallet address is required', 400);
+    return addressIn;
+  }
+
+  async function walkState(addressIn: string): Promise<WalkState> {
+    const address = checked(addressIn);
+    await hydrate(address);
+    await follow(address);
+    const scopes = SCOPE_KINDS.map((kind): WalkScope => {
+      const p = sync.progressOf(kind, address);
+      const s = store.readState(scopeKey(kind, address));
+      return { kind, running: p.status === 'running', rows: store.cachedCount(scopeKey(kind, address)), oldest: s.oldest, complete: s.complete, limited: !!s.limited, error: s.lastError };
+    });
+    const head = await headline(address).catch(() => null);
+    return { scopes, held: held(address), speed: speed(), firstTradeAt: head?.firstTradeAt ?? null };
+  }
+
+  async function start(addressIn: string): Promise<void> {
+    const address = checked(addressIn);
+    await hydrate(address);
+    if (held(address)) return;
+    for (const kind of SCOPE_KINDS) sync.ensureSync(kind, address);
+  }
+
+  function hold(addressIn: string, on: boolean): void {
+    const address = checked(addressIn);
+    try {
+      if (on) d.ledger.store?.setItem(HOLD_KEY(address), '1');
+      else d.ledger.store?.removeItem(HOLD_KEY(address));
+    } catch {
+      /* this tab still reads it */
+    }
+    if (!on) {
+      // A walk that stopped for the hold has it as its error, so it is not fresh: start them again.
+      for (const kind of SCOPE_KINDS) sync.ensureSync(kind, address);
+    }
+  }
+
+  function setSpeed(s: WalkSpeed): void {
+    try {
+      d.ledger.store?.setItem(SPEED_KEY, s);
+    } catch {
+      /* this tab keeps the default */
+    }
+  }
+
+  async function forget(addressIn: string): Promise<void> {
+    const address = checked(addressIn).toLowerCase();
+    hold(address, true);
+    await hydrate(address);
+    await evict(address);
+  }
+
   async function stats(addressIn: string, rebuild = false): Promise<AllTimeStats> {
     if (!addressIn || !ADDRESS_RE.test(addressIn)) throw new MarketRequestError('a valid 0x wallet address is required', 400);
     const address = addressIn;
@@ -440,6 +567,11 @@ export function createAllTime(d: AllTimeDeps): AllTime {
   }
 
   return {
+    walkState,
+    start,
+    hold,
+    setSpeed,
+    forget,
     stats,
     activity,
     sync,
@@ -481,6 +613,15 @@ function appInstance(): AllTime {
   }
   return instance;
 }
+
+/** The indexing notification's handle on the walk (components/HistoryNote.tsx). */
+export const walks = {
+  state: (address: string) => appInstance().walkState(address),
+  start: (address: string) => appInstance().start(address),
+  hold: (address: string, on: boolean) => appInstance().hold(address, on),
+  setSpeed: (s: WalkSpeed) => appInstance().setSpeed(s),
+  forget: (address: string) => appInstance().forget(address),
+};
 
 /** One window of a wallet's own trades and funding (the Portfolio summary). */
 export function activityWindow(address: string, engine: Engine, since: number | null): Promise<ActivityWindow> {

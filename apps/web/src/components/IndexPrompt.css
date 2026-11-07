@@ -127,3 +127,21 @@
 @media (prefers-reduced-motion: reduce) {
   .ix-note__more, .ix-note__bar.is-wait::after, .ix-note__spin { animation: none; transition: none; }
 }
+
+/* The portfolio history's notification (HistoryNote.tsx): the same card, with its three parts above the controls. */
+.hn-panel { flex-direction: column; align-items: stretch; gap: 8px; }
+.hn-parts { display: flex; flex-direction: column; gap: 6px; }
+.hn-part { display: grid; grid-template-columns: 88px minmax(0, 1fr); align-items: center; gap: 2px 8px; font-size: var(--fs-xs); }
+.hn-part__k { color: var(--muted); }
+.hn-part__v { color: var(--text); font-family: var(--font-num); font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hn-part__bar { grid-column: 1 / -1; height: 3px; border-radius: 2px; background: rgb(var(--ink) / 0.08); overflow: hidden; }
+.hn-part__bar > span { display: block; height: 100%; border-radius: inherit; background: var(--text); opacity: 0.7; transition: width 400ms var(--ease-out); }
+.hn-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.hn-note { margin: 0; color: var(--muted); font-size: var(--fs-micro); line-height: 1.4; }
+
+/* Open, the card holds its controls over the page: solid, as the lane it sits in gives a backdrop blur nothing to blur. */
+html .toasts .toast.hn.is-open,
+html .toasts .toast.hn:hover,
+html .toasts .toast.hn:focus-within { background: var(--bg-elevated); }
+/* Docked in the navbar lane, the opened controls hang below the pill: they carry their own solid ground. */
+html .toasts.is-docked .toast.hn .ix-note__panel { margin-top: 6px; padding: 10px; border-radius: 12px; background: var(--bg-elevated); box-shadow: var(--depth-2), 0 0 0 1px rgb(var(--ink) / 0.08); }

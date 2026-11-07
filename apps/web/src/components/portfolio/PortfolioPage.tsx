@@ -40,7 +40,7 @@ import { useWealth, type WealthState } from './useWealth';
 import { WealthHoldings, WealthTab } from './WealthTab';
 import { PanelTabs, type PanelTab } from '../../dashboard/Panel';
 import { api } from '../../api';
-import { activityWindow, type ActivityWindow } from '../../exchange/allTime';
+import { HELD_MESSAGE, activityWindow, type ActivityWindow } from '../../exchange/allTime';
 import type { Cover } from '../../exchange/activityWindows';
 import { useAccountResource } from '../../accountFeeds';
 import { fetchChart, type ChartPoint } from '../../performance';
@@ -400,6 +400,7 @@ function coverLine(what: string, cover: Cover | null): string | null {
     const back = cover.oldest === null ? '' : `, back to ${shortDate(cover.oldest)}`;
     return cover.rows === 0 ? `Reading your ${what} from SoDEX.` : `Reading your ${what} from SoDEX: ${fmt(cover.rows, 0)} so far${back}.`;
   }
+  if (cover?.state === 'incomplete' && cover.reason === HELD_MESSAGE) return `Reading your ${what} is paused. Resume it from the History notification.`;
   if (cover?.state === 'incomplete') return `Your ${what} for this timeframe cannot be shown in full. ${cover.reason}`;
   return null;
 }

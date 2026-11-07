@@ -44,7 +44,18 @@ export interface TimeTick { t: number; label: string }
 export function timeTicks(from: number, to: number, maxLabels: number): TimeTick[] {
   if (!(to > from) || maxLabels < 1) return [];
   const span = to - from;
-  const step = STEPS.find((s) => span / s.ms <= maxLabels) ?? STEPS[STEPS.length - 1]!;
+  let at = STEPS.findIndex((s) => span / s.ms <= maxLabels);
+  if (at < 0) at = STEPS.length - 1;
+  // The largest step that fits can land a single round time in the range (24 hours from 12:20 holds one midnight and
+  // no noon): one label says nothing about the scale, so take a smaller step while it gives fewer than two.
+  for (;;) {
+    const ticks = ticksAt(from, to, STEPS[at]!);
+    if (ticks.length >= 2 || at === 0) return ticks;
+    at--;
+  }
+}
+
+function ticksAt(from: number, to: number, step: (typeof STEPS)[number]): TimeTick[] {
   const showYear = step.unit === 'month' && (new Date(from).getFullYear() !== new Date(to).getFullYear());
 
   // Start at a round time in local time, then walk through the calendar, so a daylight-saving day stays on the hour.
