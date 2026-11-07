@@ -30,6 +30,7 @@
  *   GET /api/vs/lbrow?venue=hyperliquid&address   (one leaderboard row from the index)
  *   GET /api/vs/wallet/fills?venue&address&from&to&limit   (a tracked wallet's fills from the index, up to what it holds - indexer/walletFills.ts)
  *   GET /api/vs/last-trades?venue=hyperliquid&addresses=a,b   (each wallet's newest indexed fill time: the copy cards' hint - indexer/walletFills.ts)
+ *   GET /api/vs/copy/cards?w=30d&keys=venue:0x...,...   (the Copy page's cards read ahead by the server, with their age - valuedesk/copyCards.ts)
  *   GET /api/vs/index/status   (the indexer's full diagnostics; never on a hosted server)
  *   GET /api/vs/index/health   (its health in numbers, for monitoring on the instance)
  */
@@ -54,6 +55,7 @@ import { hlInfo, hlLeaderboardRow, hyperliquidProvider } from '../valuedesk/hype
 import { hlPriceSeries } from '../valuedesk/hyperliquid/price.js';
 import { ACCOUNT_DETAIL, arcusProvider, lighterProvider, nameSpotFills, tradexyzProvider } from '../valuedesk/extra/providers.js';
 import { applyCachedCurves, attachPodiumCurves } from '../valuedesk/curves.js';
+import { CARDS_PER_REQUEST, CARD_VENUES, copyCards, isCardWindow } from '../valuedesk/copyCards.js';
 import { attachStats, markSodexTrades, type SodexTradeNote, boardPage, cohortDetail, cohortFocus, cohortMap, cohortWallets, cohortsPrepare, cohortsReady, cohortsRead, excludedNow, indexerStatus, indexerStatusJudged, netPage } from '../indexer/read.js';
 import { booksOverOi } from '../indexer/read.js';
 import { isCohortId, isSector, type CohortFilter, type CohortRange, type WalletSort } from '../valuedesk/cohorts/model.js';
@@ -221,6 +223,24 @@ export async function valuedeskRoutes(app: FastifyInstance) {
       const list = (q.addresses ?? '').split(',').map((a) => a.trim().toLowerCase()).filter((a) => ADDRESS_RE.test(a));
       if (!list.length) throw bad('addresses= is required');
       return { ok: true, at: lastTrades(venue, [...new Set(list)].slice(0, LAST_TRADES_MAX)) };
+    } catch (e) {
+      return fail(reply, e);
+    }
+  });
+
+  // The Copy page's cards for one window, read ahead by this process (valuedesk/copyCards.ts): `w=7d|30d|all`,
+  // `keys=venue:0x...,...` up to 50. A card not held is left out (the browser reads the venue); each held one says its age.
+  app.get('/api/vs/copy/cards', async (req, reply) => {
+    try {
+      const q = req.query as Q;
+      const w = q.w ?? '30d';
+      if (!isCardWindow(w)) throw bad('w must be 7d, 30d or all');
+      const wallets = [...new Set((q.keys ?? '').split(','))].flatMap((k) => {
+        const [v, a] = k.trim().toLowerCase().split(':');
+        return v && a && (CARD_VENUES as readonly string[]).includes(v) && ADDRESS_RE.test(a) ? [{ venue: v as Venue, address: a }] : [];
+      }).slice(0, CARDS_PER_REQUEST);
+      if (!wallets.length) throw bad('keys= is required');
+      return { ok: true, w, cards: copyCards()?.answer(w, wallets) ?? {} };
     } catch (e) {
       return fail(reply, e);
     }

@@ -94,6 +94,8 @@ export const CACHE_POLICIES: Readonly<Record<string, CachePolicy>> = {
   '/api/vs/wallet/fills': { cacheControl: 'public, max-age=60, stale-while-revalidate=240' },
   // The copy cards' hint (indexer/walletFills.ts lastTrades): kept a minute by the process.
   '/api/vs/last-trades': BOARD,
+  // The Copy page's cards (valuedesk/copyCards.ts): each says its own age, so a shared copy for seconds is fine.
+  '/api/vs/copy/cards': BOARD,
   '/api/vs/price': PRICE,
   // The liquidation heatmap moves every second (the live feed; the page streams it over /ws/liq):
   // the edge may share one answer per coin for five seconds.

@@ -169,6 +169,8 @@ export const HOSTED_ROUTES: readonly HostedRoute[] = [
   { method: 'GET', url: '/api/vs/wallet/fills', cls: 'read' },
   // The copy cards' hint: each Hyperliquid wallet's newest indexed fill time, one index step per wallet, kept a minute.
   { method: 'GET', url: '/api/vs/last-trades', cls: 'read' },
+  // The Copy page's cards read ahead by the server (valuedesk/copyCards.ts): held answers only, no upstream read per request.
+  { method: 'GET', url: '/api/vs/copy/cards', cls: 'read' },
   // The public status page (routes/status.ts, ops/status.ts): one report for everyone, rebuilt at most every 30 s.
   { method: 'GET', url: '/api/vs/status', cls: 'read' },
   { method: 'GET', url: '/api/vs/status/feed', cls: 'read' },

@@ -16,6 +16,8 @@ import { VENUE_LABEL, vsApi, type BoardWindow, type CardPeek, type TraderRow, ty
 import { explainScore, scoreBand, type CopyScore } from './copyScore';
 import { fmtSignedPct, fmtSignedUsd } from './setup';
 import { markOffscreen } from '../../offscreen';
+import { serverCards } from '../../exchange/copyCards';
+import { cardShown, PROFILE_WINDOW } from '@sign/valuedesk/cardPeek.js';
 
 /* ------------------------------------------------------------ the peek ----- */
 
@@ -74,23 +76,19 @@ function peekProfile(venue: TraderRow['venue'], address: string, window: Window)
   return p;
 }
 
-const PROFILE_WINDOW: Record<BoardWindow, Window> = { '1d': '1d', '7d': '7d', '30d': '30d', '90d': 'all', ytd: 'all', all: 'all' };
-
-function peekOf(p: CardPeek, w: BoardWindow): TraderPeek {
-  const series = p.equity[PROFILE_WINDOW[w]] ?? p.equity['30d'] ?? [];
-  const pnl = series.flatMap((pt) => (pt.pnl === null ? [] : [pt.pnl]));
-  const spark = pnl.length > 1 ? pnl : p.summary.spark && p.summary.spark.length > 1 ? p.summary.spark : null;
-  return { spark, lastActive: p.summary.lastActive ?? null };
-}
+/** The server's cards, read ahead for every leader of the page (exchange/copyCards.ts). */
+const serverCard = serverCards();
 
 /** The card's curve and last trade, read once the element has been on screen. */
-export function useTraderPeek(row: TraderRow, w: BoardWindow): { ref: (el: HTMLElement | null) => void; peek: TraderPeek | null; loading: boolean } {
+export function useTraderPeek(row: TraderRow, w: BoardWindow): { ref: (el: HTMLElement | null) => void; peek: TraderPeek | null; loading: boolean; age: number | null } {
   const [el, setEl] = useState<HTMLElement | null>(null);
   const [seen, setSeen] = useState(false);
   const [done, setDone] = useState(false);
   const [peek, setPeek] = useState<TraderPeek | null>(
     row.spark && row.spark.length > 1 ? { spark: row.spark, lastActive: row.lastActive ?? null } : null,
   );
+  /** How old the shown curve is, when it is the server's and older than its refresh interval (null: current). */
+  const [age, setAge] = useState<number | null>(null);
 
   useEffect(() => {
     if (!el || seen) return;
@@ -105,15 +103,35 @@ export function useTraderPeek(row: TraderRow, w: BoardWindow): { ref: (el: HTMLE
   useEffect(() => {
     if (!seen) return;
     let dead = false;
-    void peekProfile(row.venue, row.address, PROFILE_WINDOW[w]).then((p) => {
+    const venueRead = () => peekProfile(row.venue, row.address, PROFILE_WINDOW[w]).then((p) => {
       if (dead) return;
-      if (p) setPeek(peekOf(p, w));
+      if (p) {
+        setPeek(cardShown(p, w));
+        setAge(null);
+      }
       setDone(true);
+    });
+    // The server's card first: shown at once. Within its refresh interval it is the answer; older, it is
+    // shown with its age and the venue is read here as before, replacing it when it comes.
+    void serverCard(row.venue, row.address, w).then((c) => {
+      if (dead) return;
+      if (!c) return void venueRead();
+      if (!('none' in c)) setPeek({ spark: c.spark, lastActive: c.lastActive });
+      if (c.fresh) return void setDone(true);
+      if (!('none' in c)) setAge(c.age);
+      return void venueRead();
     });
     return () => { dead = true; };
   }, [seen, row.venue, row.address, w]);
 
-  return { ref: setEl, peek, loading: !done && !peek };
+  return { ref: setEl, peek, loading: !done && !peek, age };
+}
+
+/** A curve older than its refresh interval: "2h old", in the card's small muted type. */
+export function AgeHint({ age, className }: { age: number | null; className?: string }) {
+  if (age === null) return null;
+  const read = fmtAgo(Date.now() - age);
+  return <span className={`cpy-card__age ${className ?? ''}`} title={`Curve read ${read}; updating from the venue`}>{read.replace(' ago', ' old')}</span>;
 }
 
 /* ------------------------------------------------------------ the parts ---- */
@@ -308,7 +326,7 @@ export interface TraderCardProps {
 }
 
 export function TraderCard({ row, score, window: w, unit, kind = 'copy', onOpen, onCopy, copying, copyable = true }: TraderCardProps) {
-  const { ref, peek, loading } = useTraderPeek(row, w);
+  const { ref, peek, loading, age } = useTraderPeek(row, w);
   const pnl = row.pnl[w] ?? null;
   const big = unit === 'usd' ? fmtSignedUsd(pnl, 0) : fmtSignedPct(score.roi, 1);
   const bigVal = unit === 'usd' ? pnl : score.roi;
@@ -351,7 +369,10 @@ export function TraderCard({ row, score, window: w, unit, kind = 'copy', onOpen,
           <span className="cpy-card__eq">{row.accountValue == null ? DASH : fmtUsd(row.accountValue, 0)}</span>
           <span className="cpy-card__lbl">Equity</span>
         </div>
-        <Spark values={peek?.spark ?? null} loading={loading} className="cpy-card__spark" />
+        <div className="cpy-card__chart">
+          <Spark values={peek?.spark ?? null} loading={loading} className="cpy-card__spark" />
+          <AgeHint age={age} />
+        </div>
       </div>
 
       <footer className="cpy-card__foot">
