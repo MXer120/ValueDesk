@@ -69,3 +69,45 @@ export async function loadSeeds(dir = ARCHIVE_DIR): Promise<{ seeds: Seeds; at: 
   }
   return { seeds, at };
 }
+
+/**
+ * Hyperliquid wallets to read once, with no position named: every `hl-read-<name>.tsv.gz` in the archive,
+ * in name order, its first column the address (a header line is skipped). An older archive's traders
+ * (2025-03-22 .. 2025-07-27) the index held no book for: a position untouched since, which no stream and
+ * no later archive shows, is only found by reading the wallet - and the read is what counts, never a
+ * guess from the archive. In the files' order, each address once; none when there are no files.
+ */
+export async function loadReadList(dir = ARCHIVE_DIR): Promise<string[]> {
+  let files: string[] = [];
+  try { files = readdirSync(dir).filter((f) => /^hl-read-[\w.-]+\.tsv\.gz$/.test(f)).sort(); } catch { return []; }
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const name of files) {
+    const text = gunzipSync(readFileSync(`${dir}/${name}`)).toString('utf8');
+    let i = 0;
+    let t0 = Date.now();
+    while (i < text.length) {
+      const j = text.indexOf('\n', i);
+      const line = text.slice(i, j < 0 ? text.length : j);
+      i = j < 0 ? text.length : j + 1;
+      const a = readListLine(line);
+      if (a && !seen.has(a)) { seen.add(a); out.push(a); }
+      if (Date.now() - t0 > 20) {
+        await new Promise<void>((r) => setImmediate(r));
+        t0 = Date.now();
+      }
+    }
+  }
+  return out;
+}
+
+/** Pure: a read list line's address (lower case), or null (a header, a blank line, no address). */
+export function readListLine(line: string): string | null {
+  const a = line.split('\t', 1)[0]!.trim().toLowerCase();
+  return /^0x[0-9a-f]{40}$/.test(a) ? a : null;
+}
+
+/** Pure: the read list's wallets still to read, in its order - those `known` (a book, a member, queued, a seed) are left out. */
+export function* readListDue(list: readonly string[], known: (address: string) => boolean): Generator<string> {
+  for (const a of list) if (!known(a)) yield a;
+}
