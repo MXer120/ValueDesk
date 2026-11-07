@@ -75,6 +75,13 @@ export function IndexPrompt({ address }: { address: string | null }) {
   const [pct, setPct] = useState<number | null>(null);
   const [held, setHeld] = useState(false);
   const [slot, setSlot] = useState<HTMLElement | null>(null);
+  const [historyUp, setHistoryUp] = useState(false);
+  useEffect(() => {
+    const sync = () => setHistoryUp(document.body.dataset.vsHistory === 'on');
+    sync();
+    window.addEventListener('vs-history', sync);
+    return () => window.removeEventListener('vs-history', sync);
+  }, []);
 
   useEffect(() => {
     setSlot(document.getElementById('vs-toast-pin'));
@@ -96,7 +103,8 @@ export function IndexPrompt({ address }: { address: string | null }) {
     if (!address) { setOpen(false); return; }
     if (progress.done && (engaged || on)) { setOpen(false); return; }
     if (on || engaged) { setOpen(true); return; }
-    setOpen(due());
+    // Not over the portfolio's own history walk (HistoryNote): one indexing notification at a time.
+    setOpen(due() && document.body.dataset.vsHistory !== 'on');
   }, [address, progress.done, engaged, on]);
 
   useEffect(() => {
@@ -115,7 +123,8 @@ export function IndexPrompt({ address }: { address: string | null }) {
     setPct(raw === null ? null : Math.min(99, raw));
   }, [engaged, address, earliest, progress.pages, progress.done, progress.cursorMs]);
 
-  if (!open || !address || !slot) return null;
+  // One indexing notification at a time: while the portfolio history's is up (HistoryNote.tsx), it speaks for both.
+  if (!open || !address || !slot || historyUp) return null;
 
   const detail = progress.notice
     ? progress.notice

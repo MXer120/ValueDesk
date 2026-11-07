@@ -164,6 +164,11 @@ export const HOSTED_ROUTES: readonly HostedRoute[] = [
   // One Hyperliquid leaderboard row from the index (the Scan profile's rank):
   // a lookup in the file already in memory, never a per-address upstream call.
   { method: 'GET', url: '/api/vs/lbrow', cls: 'read' },
+  // A tracked wallet's fills as the index holds them (indexer/walletFills.ts): indexed reads, kept five minutes;
+  // the Copy page's charts read the venue only for what the index does not hold.
+  { method: 'GET', url: '/api/vs/wallet/fills', cls: 'read' },
+  // The copy cards' hint: each Hyperliquid wallet's newest indexed fill time, one index step per wallet, kept a minute.
+  { method: 'GET', url: '/api/vs/last-trades', cls: 'read' },
   // The public status page (routes/status.ts, ops/status.ts): one report for everyone, rebuilt at most every 30 s.
   { method: 'GET', url: '/api/vs/status', cls: 'read' },
   { method: 'GET', url: '/api/vs/status/feed', cls: 'read' },
@@ -199,6 +204,8 @@ export const HOSTED_ROUTES: readonly HostedRoute[] = [
   { method: 'GET', url: '/api/vs/builder/volume', cls: 'read' },
   // Whether a wallet is on the beta list, for the executor's live-bot gate (routes/builder.ts). Internal, as above.
   { method: 'GET', url: '/api/vs/builder/beta', cls: 'read' },
+  // Whether one wallet is on the beta list, for the page (routes/builder.ts): what it offers, never what runs.
+  { method: 'GET', url: '/api/vs/beta/listed', cls: 'read' },
   // Deep links by SoDEX account id: the index's leaderboard map, on-chain as a fallback.
   { method: 'GET', url: '/api/feed/account', cls: 'upstream' },
   // Global, not per-user (until the web reads alpha-biz directly).

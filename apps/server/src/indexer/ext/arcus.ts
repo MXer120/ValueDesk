@@ -29,7 +29,7 @@ import {
 } from '../../valuedesk/extra/arcus.js';
 import { Lane } from '../lanes.js';
 import { MIN_ROW_T, type FillRow } from '../store.js';
-import { ArcusStream } from '../streams.js';
+import { ArcusStream, type ArcusWsTrade, type Print } from '../streams.js';
 import { dayOf, DAY_MS } from '../windows.js';
 import type { ExtContext, ExtVenue } from './types.js';
 
@@ -105,6 +105,11 @@ export class ArcusVenue implements ExtVenue {
 
   socketSince(): number | null {
     return this.stream?.since ?? null;
+  }
+
+  /** Rows read over REST, through the stream's own memory of ids (indexer/arcusCatchup.ts). */
+  catchUp(rows: readonly ArcusWsTrade[], missing: (prints: readonly Print[]) => Print[], sink: (p: Print) => void): Print[] {
+    return this.stream?.catchUp(rows, missing, sink) ?? [];
   }
 
   maxAgeMs(): number {

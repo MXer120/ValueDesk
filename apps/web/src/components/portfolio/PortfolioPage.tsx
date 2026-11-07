@@ -40,7 +40,7 @@ import { useWealth, type WealthState } from './useWealth';
 import { WealthHoldings, WealthTab } from './WealthTab';
 import { PanelTabs, type PanelTab } from '../../dashboard/Panel';
 import { api } from '../../api';
-import { activityWindow, type ActivityWindow } from '../../exchange/allTime';
+import { HELD_MESSAGE, activityWindow, type ActivityWindow } from '../../exchange/allTime';
 import type { Cover } from '../../exchange/activityWindows';
 import { useAccountResource } from '../../accountFeeds';
 import { fetchChart, type ChartPoint } from '../../performance';
@@ -48,6 +48,7 @@ import { DASH, MINUS, fmt, fmtUsd, num, pick, signClass } from '../../format';
 import { fmtRate, type VenueFeeRate } from '../../fees';
 import { useAsync, useStored } from '../../hooks';
 import { SOON_TABS, type Tab } from '../../router';
+import { applyForBeta, useBetaAccess } from '../../beta/access';
 import { useMask } from '../../privacy';
 import { coinPrices, priceOf } from '../../trading/prices';
 import type { Eip1193Provider } from '../../wallet';
@@ -245,14 +246,18 @@ function ChartCard({ c, h24 }: { c: PortfolioContext; h24: ChartPoint[] | null }
 
 // --- the promo row ----------------------------------------------------------------------
 
-function Promo({ tint, icon, title, cta, line, figure, soon, onClick }: {
-  tint: 'copy' | 'earn' | 'cash' | 'bots'; icon: ReactNode; title: string; cta?: string; line: string; figure?: string | null; soon?: boolean; onClick?: () => void;
+function Promo({ tint, icon, title, cta, line, figure, soon, beta, onClick }: {
+  tint: 'copy' | 'earn' | 'cash' | 'bots'; icon: ReactNode; title: string; cta?: string; line: string; figure?: string | null; soon?: boolean;
+  /** In beta: a Beta pill, and the call to action applies for access. */
+  beta?: boolean; onClick?: () => void;
 }) {
   const body = (
     <>
       <span className="pfx-promo__top">
         <span className="pfx-promo__ic">{icon}</span>
-        {soon
+        {beta
+          ? <span className="dv-devtag dv-devtag--beta">Beta</span>
+          : soon
           ? <span className="dv-devtag dv-devtag--soon">Coming soon</span>
           : figure
             ? <span className="pfx-promo__f"><b>{figure}</b><small>7-day APY</small></span>
@@ -273,7 +278,7 @@ const apy = (raw: string | undefined): string | null => {
   return raw !== undefined && Number.isFinite(v) ? `${v.toFixed(2)}%` : null;
 };
 
-function Promos({ w, onOpenTab, onWealth }: { w: WealthState; onOpenTab: (t: Tab) => void; onWealth: () => void }) {
+function Promos({ w, onOpenTab, onWealth, botsOpen }: { w: WealthState; onOpenTab: (t: Tab) => void; onWealth: () => void; botsOpen: boolean }) {
   const botsSoon = SOON_TABS.has('bots');
   return (
     <div className="pfx-promos">
@@ -308,9 +313,10 @@ function Promos({ w, onOpenTab, onWealth }: { w: WealthState; onOpenTab: (t: Tab
         icon={<BotIcon strategy="grid" size={24} />}
         title="Bots"
         soon={botsSoon}
-        cta="Open bots"
+        beta={!botsOpen}
+        cta={botsOpen ? 'Open bots' : 'Get access'}
         line="Market-making and grid strategies that run around the clock."
-        onClick={botsSoon ? undefined : () => onOpenTab('bots')}
+        onClick={botsSoon ? undefined : botsOpen ? () => onOpenTab('bots') : applyForBeta}
       />
     </div>
   );
@@ -394,6 +400,7 @@ function coverLine(what: string, cover: Cover | null): string | null {
     const back = cover.oldest === null ? '' : `, back to ${shortDate(cover.oldest)}`;
     return cover.rows === 0 ? `Reading your ${what} from SoDEX.` : `Reading your ${what} from SoDEX: ${fmt(cover.rows, 0)} so far${back}.`;
   }
+  if (cover?.state === 'incomplete' && cover.reason === HELD_MESSAGE) return `Reading your ${what} is paused. Resume it from the History notification.`;
   if (cover?.state === 'incomplete') return `Your ${what} for this timeframe cannot be shown in full. ${cover.reason}`;
   return null;
 }
@@ -509,6 +516,7 @@ function Sections({ c, w, provider, section, setSection, onOpenMarket, onOpenTab
   onOpenTab: (t: Tab) => void;
   onWealth: () => void;
 }) {
+  const botsOpen = useBetaAccess(c.address);
   // The same element, with the same props, as the trade page's bottom band.
   const band = (engine: 'perps' | 'spot') => (
     <div className="dash pf-band" key={engine}>
@@ -545,10 +553,10 @@ function Sections({ c, w, provider, section, setSection, onOpenMarket, onOpenTab
         <Activity line="Bots trade from your own Perps and Spot accounts, so what they hold is counted there.">
           <EmptyState
             icon="chart"
-            title={SOON_TABS.has('bots') ? 'Bots are coming soon' : 'Your bots run from the Bots page'}
+            title={!botsOpen ? 'Bots are in beta' : 'Your bots run from the Bots page'}
             line="Their volume, cost and PnL will show here, without a balance of their own."
             compact
-            action={SOON_TABS.has('bots') ? undefined : <button type="button" className="empty-state__cta" onClick={() => onOpenTab('bots')}>Open bots</button>}
+            action={!botsOpen ? <button type="button" className="empty-state__cta" onClick={applyForBeta}>Get access</button> : <button type="button" className="empty-state__cta" onClick={() => onOpenTab('bots')}>Open bots</button>}
           />
         </Activity>,
       ),
@@ -565,6 +573,7 @@ function Sections({ c, w, provider, section, setSection, onOpenMarket, onOpenTab
 
 export function PortfolioPage({ c, provider, onOpenMarket, onOpenTab }: { c: PortfolioContext } & PortfolioPageLinks) {
   const w = useWealth(c.address, c.refreshToken);
+  const botsOpen = useBetaAccess(c.address);
   const { summary, evmRows, evmLoading } = useSummary(c, w);
   const vol = useVolume7d(c.address);
   const h24 = use24h(c);
@@ -601,7 +610,7 @@ export function PortfolioPage({ c, provider, onOpenMarket, onOpenTab }: { c: Por
             <ValueCard c={c} s={summary} today={today} vol={vol} evmRows={evmRows} evmLoading={evmLoading} onSection={goSection} />
             <ChartCard c={c} h24={h24} />
           </div>
-          <Promos w={w} onOpenTab={onOpenTab} onWealth={goWealth} />
+          <Promos w={w} onOpenTab={onOpenTab} onWealth={goWealth} botsOpen={botsOpen} />
           <FeeStrip c={c} />
           <SummaryPanel c={c} />
           <div id="pfx-sections">

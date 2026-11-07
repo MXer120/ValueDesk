@@ -11,6 +11,7 @@
 import { useEffect, useLayoutEffect, useRef, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import type { Engine } from '../api';
+import { applyForBeta } from '../beta/access';
 import { SOON_TABS, pathForSodexView, pathForTab, type SodexView, type Tab } from '../router';
 import { usePresence } from './motion';
 import { useHoverMenu } from './useHoverMenu';
@@ -19,16 +20,17 @@ const Icon = ({ children }: { children: ReactNode }) => (
   <svg viewBox="0 0 20 20" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{children}</svg>
 );
 
-function Row({ href, icon, title, line, current, soon, onOpen }: { href?: string; icon: ReactNode; title: string; line: string; current?: boolean; soon?: boolean; onOpen?: () => void }) {
+function Row({ href, icon, title, line, current, soon, access, onOpen }: { href?: string; icon: ReactNode; title: string; line: string; current?: boolean; soon?: boolean; access?: () => void; onOpen?: () => void }) {
   const inner = (
     <>
       <span className="menu-row__ic">{icon}</span>
       <span className="navtrade__text">
-        <b>{title}{soon && <span className="dv-devtag dv-devtag--soon">Coming soon</span>}</b>
+        <b>{title}{access ? <span className="dv-devtag dv-devtag--beta">Get access</span> : soon && <span className="dv-devtag dv-devtag--soon">Coming soon</span>}</b>
         <small>{line}</small>
       </span>
     </>
   );
+  if (access) return <button type="button" role="menuitem" className="menu-row navtrade__row is-access" title="In beta: apply for access on our Discord" onClick={access}>{inner}</button>;
   if (soon || !href) return <div role="menuitem" aria-disabled="true" className="menu-row navtrade__row is-soon">{inner}</div>;
   const go = (e: ReactMouseEvent) => {
     if (!onOpen || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
@@ -38,8 +40,10 @@ function Row({ href, icon, title, line, current, soon, onOpen }: { href?: string
   return <a role="menuitem" className={`menu-row navtrade__row${current ? ' is-current' : ''}`} href={href} aria-current={current ? 'page' : undefined} onClick={go}>{inner}</a>;
 }
 
-export function NavTrade({ tab, engine, onEngine, onNavigate, onOpenSodex, sodexOn = null, label }: {
+export function NavTrade({ tab, botsOpen = true, engine, onEngine, onNavigate, onOpenSodex, sodexOn = null, label }: {
   tab: Tab | null;
+  /** The Bots page is open for this wallet (beta/access.ts); else its row asks for access. */
+  botsOpen?: boolean;
   engine?: Engine;
   onEngine?: (e: Engine) => void;
   onNavigate: (tab: Tab) => void;
@@ -84,6 +88,7 @@ export function NavTrade({ tab, engine, onEngine, onNavigate, onOpenSodex, sodex
     onEngine?.(e);
   });
   const botsSoon = SOON_TABS.has('bots');
+  const botsLocked = !botsOpen;
 
   return (
     <div className="navtrade" ref={root} {...hoverProps}>
@@ -135,6 +140,7 @@ export function NavTrade({ tab, engine, onEngine, onNavigate, onOpenSodex, sodex
               line="SoDEX's funds and vaults"
               current={sodexOn === 'wealth'}
               onOpen={onOpenSodex && go(() => onOpenSodex('wealth'))}
+              access={botsLocked ? go(applyForBeta) : undefined}
               icon={<Icon><path d="M2.5 17h15M4 14l4-4 3 2.500L16.5 6" /><path d="M12.5 6h4v4" /></Icon>}
             />
           </div>
@@ -151,6 +157,7 @@ export function NavTrade({ tab, engine, onEngine, onNavigate, onOpenSodex, sodex
             <Row
               href={botsSoon ? undefined : pathForTab('bots')}
               soon={botsSoon}
+              access={botsLocked ? go(applyForBeta) : undefined}
               title="Bots"
               line="Automated volume and grid strategies"
               current={tab === 'bots'}

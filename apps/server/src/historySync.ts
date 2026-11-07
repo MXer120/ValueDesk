@@ -127,6 +127,11 @@ export interface HistorySyncOptions {
    * rows still below them, and funding has no read limit to save anyway. Trades held on every wallet walked so far.
    */
   shortPageEnds?: boolean;
+  /**
+   * A walk that starts again (a page refused, a tab back) reads what is newer first. Not again within this long of the
+   * last time it did: in the browser each such read is one of SoDEX's two a minute, taken from the history.
+   */
+  catchUpEveryMs?: number;
 }
 
 export interface HistorySync {
@@ -317,7 +322,8 @@ export function createHistorySync(o: HistorySyncOptions): HistorySync {
         checkpoint();
       };
 
-      if (newest !== null) await catchUp(newest);
+      const caughtUpLately = !!o.catchUpEveryMs && prior.syncedAt !== undefined && now() - prior.syncedAt < o.catchUpEveryMs;
+      if (newest !== null && !caughtUpLately) await catchUp(newest);
 
       if (!complete || unconfirmed) {
         const r = await walkBackwards(fetchPage, {

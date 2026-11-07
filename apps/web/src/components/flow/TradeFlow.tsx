@@ -13,8 +13,8 @@
  *     counterparty, time to the millisecond - a virtual list, so a hundred thousand rows scroll.
  * Data: the venues' public prints with both parties, kept by the indexer (server flow/). Nothing
  * here is estimated; a window before the recording began says so instead of showing zeros, and one
- * SoDEX counted more prints in than we hold says how many (server flow/ledger.ts) with its figures
- * marked as floors.
+ * a venue counted more prints in than we hold says how many in one line (server flow/ledger.ts,
+ * venueCheck.ts) with its figures marked as floors. A candle not compared yet says nothing.
  * No wallet names: the owner's rule (server valuedesk/labels.ts) - an identicon and the address.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
@@ -31,12 +31,14 @@ import { VenueLogo } from '../VenueLogo';
 import { Identicon } from '../Identicon';
 import { PlatformSelect } from '../PlatformSelect';
 import { copyText } from '../accountTables/IdCell';
+import { HoverCard } from '../accountTables/cells';
 import { coinOfSymbol } from '../../chart/liqMap';
 import { candleCount, flowSpan, windowText, type CandleWindow } from './flowWindow';
 import { EmptyState } from '../EmptyState';
 import { ViewPop } from '../ViewPop';
 import { Section, Seg as ViewSeg } from '../accountTables/FilterBar';
 import { useStored } from '../../hooks';
+import '../Account.css';
 import '../leaderboard/LeaderboardPage.css';
 import './TradeFlow.css';
 
@@ -50,6 +52,8 @@ const SHORT_PX = 440;
 const RECHECK_MS = 60_000;
 const READING_MS = 5_000;
 const RECHECK_WITHIN_MS = 12 * 3_600_000;
+/** A shortfall's card lists this many of its spans. */
+const HOLES_SHOWN = 6;
 
 const pct = (v: number, dp = 0) => `${fmtNum(v * 100, { minimumFractionDigits: dp, maximumFractionDigits: dp })}%`;
 const fmtSz = (v: number) => fmtNum(v, { maximumSignificantDigits: 6 });
@@ -187,8 +191,8 @@ export function TradeFlowView({ symbol, spot, interval, at, end, onPick, onClose
     [key], // eslint-disable-line react-hooks/exhaustive-deps
   );
   // A candle still forming is read again every 15 s (the recorder's flush); a closed one once.
-  // One already closed, once: SoDEX's count comes within 30 minutes and the catch-up can still fill it for hours, so a recent
-  // one that is not final is read again now and then.
+  // One already closed, once: a venue's count comes within 30 minutes and the catch-up can still fill it for hours, so a recent
+  // one that is not final is read again now and then, silently: only a known shortfall is said.
   const [recheck, setRecheck] = useState(0);
   const r = usePolled<FlowWindow>(key, fetcher, live ? 15_000 : recheck);
   // The previous candle's answer while this one loads is not this candle's: skeletons, not "No trades".
@@ -449,59 +453,84 @@ function HoleStrip({ gaps, from, to }: { gaps: ReadonlyArray<readonly [number, n
 function heldPill(c: VenueCoverage, named: boolean): string {
   const who = named ? `${VENUE_LABEL[c.venue]}: ` : '';
   if (c.unit === 'volume') return `${who}held ${pct(c.expected > 0 ? c.held / c.expected : 0, 1)} of volume`;
-  return `${named ? `${VENUE_LABEL[c.venue]}: held` : 'Held'} ${fmtNum(c.held)} of ${fmtNum(c.expected)} trades`;
+  // Whole sentences: a translation of a lone "Held" would be the paused copy's word (i18n catalogues).
+  return named
+    ? `${VENUE_LABEL[c.venue]}: held ${fmtNum(c.held)} of ${fmtNum(c.expected)} trades`
+    : `Held ${fmtNum(c.held)} of ${fmtNum(c.expected)} trades`;
+}
+
+/** One short line of a shortfall: a pill, its details on hover, focus or a tap (HoverCard), and where it is when that is known. */
+function NoteLine({ pill, card, strip }: { pill: ReactNode; card: ReactNode; strip?: ReactNode }) {
+  return (
+    <div className="tfl-note" role="note">
+      <HoverCard className="tfl-note__more" card={<div className="tfl-note__card">{card}</div>}>
+        <span className="tfl-pill is-warn">
+          {pill}
+          <svg viewBox="0 0 12 12" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" aria-hidden="true"><circle cx="6" cy="6" r="4.9" /><path d="M6 5.5v2.8M6 3.6v.1" /></svg>
+        </span>
+      </HoverCard>
+      {strip}
+    </div>
+  );
 }
 
 /**
- * A candle that is not whole, said above the table and not left to the footer: before the recording, the recorder down, and
- * each venue's own figures against what is held. Prints we do not hold are a hole wherever they went, so the figures say so plainly.
+ * A candle known not to be whole, above the table: before the recording, the recorder down, each venue's own figures against
+ * what is held, one short line each with the details on hover or a tap. Prints we do not hold are a hole wherever they went.
+ * A candle only waiting for its check says nothing (owner 2026-11-06): the API's `final` stays false and the panel keeps asking,
+ * but nothing is known to be wrong, so nothing is shown.
  */
-function Partial({ d, win, wallet }: { d: Pick<FlowWindow, 'from' | 'to' | 'since' | 'gaps' | 'down' | 'coverage' | 'checks'> | null; win: CandleWindow; wallet?: boolean }) {
+export function Partial({ d, win, wallet }: { d: Pick<FlowWindow, 'from' | 'to' | 'since' | 'gaps' | 'down' | 'coverage' | 'checks'> | null; win: CandleWindow; wallet?: boolean }) {
   if (!d || d.since === null || d.to <= d.since) return null;
   const late = d.since > d.from;
   const downMs = d.down.reduce((s, [a, b]) => s + (b - a), 0);
   const all = coveragesOf(d);
   const off = all.filter((c) => c.holeSlots > 0);
-  const waiting = all.filter((c) => !c.holeSlots && c.unchecked.length > 0);
-  if (!late && !downMs && !off.length && !waiting.length) return null;
+  if (!late && !downMs && !off.length) return null;
   const hm = (t: number) => new Date(t).toISOString().slice(11, 16);
-  const spans = (list: ReadonlyArray<readonly [number, number]>) => list.map(([a, b]) => `${new Date(a).toUTCString()} – ${new Date(b).toUTCString()}`).join('\n');
   // A candle shorter than the slots it is judged by says so.
   const scope = (c: VenueCoverage) => (c.from < win.from || c.to > win.to ? 'the slots around this candle' : 'this candle');
   const whose = wallet ? "This wallet's fills in them are missing too." : 'Volume, wallets, shares and VWAP are from what we hold.';
   const named = all.length > 1;
-  const reading = waiting.some((c) => c.pending);
-  const recent = d.to > Date.now() - RECHECK_WITHIN_MS;
   return (
     <>
       {off.map((c) => (
-        <div key={c.venue} className="tfl-note" role="note">
-          <span className="tfl-pill is-warn" title={c.holes.map((h) => `${new Date(h.from).toUTCString()} – ${hm(h.to)}: ${fmtNum(h.held)} of ${fmtNum(h.venue)}`).join('\n')}>{heldPill(c, named)}</span>
-          <span>
-            {c.unit === 'volume'
-              ? `${VENUE_LABEL[c.venue]} gives volume, not a count: in ${scope(c)} we hold ${pct(c.expected > 0 ? c.held / c.expected : 0, 1)} of it.`
-              : `${VENUE_LABEL[c.venue]} counted ${fmtNum(c.expected)} trades in ${scope(c)} and we hold ${fmtNum(c.held)}.`}
-            {(c.overSlots ?? 0) > 0 ? ` In ${fmtNum(c.overSlots!)} of its ${c.overSlots === 1 ? 'slot' : 'slots'} we hold more than that: those trades were recorded twice.` : ''} {whose}
-          </span>
-          {scope(c) === 'this candle' && <HoleStrip gaps={c.holes.map((h) => [h.from, h.to] as const)} from={d.from} to={d.to} />}
-        </div>
+        <NoteLine
+          key={c.venue}
+          pill={heldPill(c, named)}
+          card={(
+            <>
+              <p>
+                {c.unit === 'volume'
+                  ? `${VENUE_LABEL[c.venue]} gives volume, not a count: in ${scope(c)} we hold ${pct(c.expected > 0 ? c.held / c.expected : 0, 1)} of it.`
+                  : `${VENUE_LABEL[c.venue]} counted ${fmtNum(c.expected)} trades in ${scope(c)} and we hold ${fmtNum(c.held)}.`}
+                {(c.overSlots ?? 0) > 0 ? ` In ${fmtNum(c.overSlots!)} of its ${c.overSlots === 1 ? 'slot' : 'slots'} we hold more than that: those trades were recorded twice.` : ''} {whose}
+              </p>
+              {c.unit !== 'volume' && c.holes.length > 0 && (
+                <ul className="tfl-note__slots">
+                  {c.holes.slice(0, HOLES_SHOWN).map((h) => <li key={h.from}><span>{hm(h.from)} – {hm(h.to)} UTC</span><span>{fmtNum(h.held)} of {fmtNum(h.venue)}</span></li>)}
+                  {c.holes.length > HOLES_SHOWN && <li><span>{fmtNum(c.holes.length - HOLES_SHOWN)} more</span></li>}
+                </ul>
+              )}
+            </>
+          )}
+          strip={scope(c) === 'this candle' ? <HoleStrip gaps={c.holes.map((h) => [h.from, h.to] as const)} from={d.from} to={d.to} /> : undefined}
+        />
       ))}
-      {waiting.length > 0 && (
-        <div className="tfl-note" role="note">
-          <span className="tfl-pill is-wait" title={waiting.map((c) => `${VENUE_LABEL[c.venue]}\n${spans(c.unchecked)}`).join('\n')}>{reading ? 'Checking' : 'Not checked yet'}</span>
-          <span>
-            {`${waiting.map((c) => VENUE_LABEL[c.venue]).join(', ')}: ${reading ? 'reading its own figures for this candle' : 'its own figures for this candle have not been compared'}, so we can't say yet whether this is all of it.`}
-            {reading ? '' : recent && waiting.some((c) => c.venue === 'sodex') ? ' It usually takes under 30 minutes.' : ' A long range or an old candle may stay this way.'}
-          </span>
-        </div>
-      )}
       {(late || downMs > 0) && (
-        <div className="tfl-note" role="note">
-          <span className="tfl-pill is-warn">{late ? 'Partial candle' : `${downMs < 60_000 ? 'Under 1' : fmtNum(downMs / 60_000, { maximumFractionDigits: 0 })} min not recorded`}</span>
-          <span title={downMs ? spans(d.down) : undefined}>
-            {late ? `Recording began ${hm(d.since)} UTC: earlier trades in this candle are not counted.` : 'The recorder was down for part of this candle: those trades are not counted.'}
-          </span>
-        </div>
+        <NoteLine
+          pill={late ? 'Partial candle' : `${downMs < 60_000 ? 'Under 1' : fmtNum(downMs / 60_000, { maximumFractionDigits: 0 })} min not recorded`}
+          card={(
+            <>
+              <p>{late ? `Recording began ${hm(d.since)} UTC: earlier trades in this candle are not counted.` : 'The recorder was down for part of this candle: those trades are not counted.'}</p>
+              {downMs > 0 && (
+                <ul className="tfl-note__slots">
+                  {d.down.slice(0, HOLES_SHOWN).map(([a, b]) => <li key={a}><span>{hm(a)} – {hm(b)} UTC</span></li>)}
+                </ul>
+              )}
+            </>
+          )}
+        />
       )}
     </>
   );

@@ -258,6 +258,17 @@ export class HlInfoClient implements InfoLike {
   }
 
   /**
+   * How long a background request waits for headroom before it takes its place in line like any other (0: for as long
+   * as it takes). In the API a background sweep must never delay a profile someone opened, and waits. In the indexer every
+   * read is a lane that paces itself, and the waiting starved one of them: the cohort reads (not background) kept the
+   * bucket in debt, so the boards' Hyperliquid lane finished 0 reads in the first 9.5 minutes after the start of
+   * 2026-11-06 23:33 UTC and ~6 a minute after (hlBudget -265 in its status). The bucket still holds the total rate.
+   */
+  backgroundMaxWaitMs = 0;
+  /** The clock of the wait above (tests). */
+  clock: () => number = Date.now;
+
+  /**
    * Give this client another share of HL's limit, with a fresh bucket. For the
    * indexer process at its start (indexer/worker.ts), before it has sent anything.
    */
@@ -311,8 +322,10 @@ export class HlInfoClient implements InfoLike {
         // the bucket never reaches, and this wait would never end. There a
         // background request waits for a full bucket instead.
         const need = Math.min(w + BACKGROUND_HEADROOM, this.budget.capacity);
-        for (let wait = this.budget.msUntil(need); wait > 0; wait = this.budget.msUntil(need)) {
-          await this.sleepImpl(Math.min(wait, 2000));
+        // Up to backgroundMaxWaitMs (the indexer: lanes that pace themselves), then in line with the rest.
+        const until = this.backgroundMaxWaitMs > 0 ? this.clock() + this.backgroundMaxWaitMs : Number.POSITIVE_INFINITY;
+        for (let wait = this.budget.msUntil(need); wait > 0 && this.clock() < until; wait = this.budget.msUntil(need)) {
+          await this.sleepImpl(Math.max(1, Math.min(wait, 2000, until - this.clock())));
         }
       }
       // Every attempt pays: a retry is a real extra request against HL's window.

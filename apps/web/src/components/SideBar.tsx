@@ -73,8 +73,9 @@ export function SideBar({ address, hasLayout, dashLocked, onOpenSearch, tab, onN
   };
   return (
     <aside className="side" aria-label="Tools">
-      <a className="side__brand" href="/" aria-label="ValueDesk" title="ValueDesk">
+      <a className="side__brand" href="/" aria-label="ValueDesk, beta" title="ValueDesk">
         <BrandMark size={28} />
+        <span className="side__beta" aria-hidden="true">Beta</span>
       </a>
       <nav className="side__groups">
         {terminals.list.length > 0 && (

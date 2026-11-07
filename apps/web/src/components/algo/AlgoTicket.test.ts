@@ -60,7 +60,8 @@ test('from the US, its territories, the UK and Canada the ticket runs in this br
 
 test('elsewhere the stored choice runs', async () => {
   assert.equal(runsOf(await ticket('DE', 'hosted')), 'on ValueDesk');
-  assert.equal(runsOf(await ticket('DE', 'self')), 'on your copier');
+  // Self-hosted is no longer offered (owner 2026-11-07): a stored choice of it runs on ValueDesk.
+  assert.equal(runsOf(await ticket('DE', 'self')), 'on ValueDesk');
   assert.equal(runsOf(await ticket('DE', 'browser')), 'in this browser');
 });
 
@@ -109,13 +110,13 @@ test('there, an opening algo stays refused by the order button; one that only cl
   assert.equal(renderToMarkup(createElement(Gate, { opening: !closesOnly(true) })), 'may start');
 });
 
-test('where only the browser may run it, ValueDesk and Self-hosted show as unavailable, said in one line', async () => {
+test('where only the browser may run it, ValueDesk shows as unavailable, said in one line; no Self-hosted card', async () => {
   const { RunsOn } = await import('./AlgoTicket');
   const props = { place: 'browser' as const, onChange: () => {}, paper: false, setPaper: () => {} };
   const only = renderToMarkup(createElement(RunsOn, { ...props, onlyBrowser: true }));
   const card = (html: string, name: string) => new RegExp(`<button[^>]*>(?=<b>${name}</b>)`).exec(html)?.[0] ?? '';
   assert.match(card(only, 'ValueDesk'), / disabled/);
-  assert.match(card(only, 'Self-hosted'), / disabled/);
+  assert.equal(only.includes('Self-hosted'), false);
   assert.doesNotMatch(card(only, 'This browser'), / disabled/);
   assert.match(card(only, 'This browser'), /aria-checked/);
   assert.equal(only.split(LINE).length - 1, 1, 'the line, once');

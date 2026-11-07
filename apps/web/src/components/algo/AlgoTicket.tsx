@@ -1462,7 +1462,6 @@ function ASwitch({ title, hint, checked, onChange, on = 'On', off = 'Off' }: { t
 const PLACE_CARDS: ReadonlyArray<readonly [Place, string, string]> = [
   ['hosted', 'ValueDesk', 'Runs 24/7 on our executor, even with your browser closed.'],
   ['browser', 'This browser', 'Signed here with your trading key. Keep a ValueDesk tab open.'],
-  ['self', 'Self-hosted', 'Runs on the copier you host yourself.'],
 ];
 
 /**

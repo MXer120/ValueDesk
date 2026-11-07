@@ -197,6 +197,7 @@ average stays at its share.
 | `VALUESCAN_INDEX_STREAMS` | on | `0` = REST only |
 | `VALUESCAN_INDEX_LIGHTER` | 30 req/min | Lighter (60/min per IP; the API thread keeps 20, burst 8) |
 | `VALUESCAN_INDEX_ARCUS` | 450 weight/min | Arcus (1,500/min per IP; the API thread keeps 300) |
+| `VALUESCAN_ARCUS_CATCHUP` | on | `0` = no REST catch-up of Arcus's prints (`indexer/arcusCatchup.ts`, about 75 weight/min of its own; a walk after an outage at most 420) |
 
 - **SoDEX `/trades` is limited by Cloudflare, not by the gateway.** Verified
   2026-09-28: error 1015 on the fifth request in about 30 s, while the gateway's own

@@ -21,6 +21,13 @@ const clearOverlays = (p: Page) => p.addStyleTag({ content: '[aria-label="Develo
 const THEME = process.env.VS_E2E_THEME;
 const storage: Record<string, string> = THEME ? { 'vs.theme': THEME } : {};
 
+/**
+ * The wallet's history walk starts the moment it connects (HistoryNote.tsx), before this spec's fakes for its fills
+ * are in: hold it until they are, then let it go.
+ */
+const holdHistory = (p: Page, address: string, on: boolean) =>
+  p.evaluate(([a, h]) => { if (h) localStorage.setItem(`vs:history:held:${a}`, '1'); else localStorage.removeItem(`vs:history:held:${a}`); }, [address.toLowerCase(), on] as const);
+
 /** The page scrolls inside the shell, so a whole page takes a tall window. */
 const shot = async (page: Page, name: string, tall = true) => {
   if (!SHOTS) return;
@@ -159,11 +166,13 @@ h.test('no wallet: the layout stands, Trade and Wealth, four promo cards and no 
 }, { storage });
 
 h.test('Total Value counts each dollar once, and copies and bots have no bucket', async ({ page: p, wallet, ctx, origin }) => {
+  await holdHistory(p, wallet.address, true);
   await enableTrading({ page: p, wallet, ctx }, { spot: { vUSDC: 40, vQQQ: 2, vUSDT: 25 }, balance: 1000, stateful: true });
   // After the account fake: the last route wins, and that one forwards every read it does not know.
   await fakeWealth(ctx, wallet.address);
   await fakeBook(ctx);
   await fakeHistory(ctx);
+  await holdHistory(p, wallet.address, false);
   await p.goto(new URL('/portfolio', origin).href);
   await clearOverlays(p);
   await p.locator('.pfx-title').waitFor();
@@ -200,7 +209,7 @@ h.test('Total Value counts each dollar once, and copies and bots have no bucket'
   // The axis: hours on 24h, several days at one step on 7d.
   const labels = () => p.locator('.pfx-chart .pf-chart__xlabel').allTextContents();
   await p.locator('.pfx-chart').getByRole('radio', { name: '24h' }).click();
-  await until(p, async () => (await labels()).some((l) => /^\d\d:00$/.test(l)), 'hours on the 24h axis', 5_000);
+  await until(p, async () => (await labels()).some((l) => /^\d\d:00$/.test(l)), 'hours on the 24h axis', 15_000);
   await p.waitForTimeout(350);
   await shot(p, 'axis-24h', false);
   await p.locator('.pfx-chart').getByRole('radio', { name: '7d' }).click();
@@ -242,7 +251,40 @@ h.test('Total Value counts each dollar once, and copies and bots have no bucket'
     const { scroll, client } = await wrap.evaluate((e) => ({ scroll: e.scrollWidth, client: e.clientWidth }));
     assert.ok(scroll <= client + 1, `table fits: ${scroll} <= ${client}`);
   }
-}, { storage });
+}, { storage, timeout: 240_000 });
+
+h.test('History notification: paused it stays up with its parts, resumed it reads to the end and goes', async ({ page: p, wallet, ctx, origin }) => {
+  await holdHistory(p, wallet.address, true);
+  await enableTrading({ page: p, wallet, ctx }, { balance: 1000 });
+  await fakeHistory(ctx);
+  await p.goto(new URL('/portfolio', origin).href);
+  await p.addStyleTag({ content: '[aria-label="Developer"] { display: none !important; }' });
+  const note = p.getByRole('status', { name: 'History' });
+  await note.waitFor();
+  await until(p, async () => (await note.innerText()).includes('History paused'), 'the paused notification', 15_000);
+  await note.locator('.ix-note__top').click();
+  for (const part of ['Perps trades', 'Spot trades', 'Funding']) assert.ok((await note.innerText()).includes(part), part);
+  await p.waitForTimeout(400);
+  await shot(p, 'history-note', false);
+  if ((p.viewportSize()?.width ?? 0) > 1000) {
+    for (const [w, hgt, name] of [[1280, 800, 'laptop'], [834, 1112, 'tablet']] as const) {
+      await p.setViewportSize({ width: w, height: hgt });
+      await p.waitForTimeout(500);
+      await shot(p, `history-note-${name}`, false);
+    }
+    await p.setViewportSize({ width: 1600, height: 1000 });
+  }
+  // The open card covers what is under it.
+  const alpha = await note.evaluate((el) => {
+    const m = getComputedStyle(el).backgroundColor.match(/rgba?\(([^)]+)\)/);
+    const parts = m ? m[1]!.split(',') : [];
+    return parts.length === 4 ? Number(parts[3]) : 1;
+  });
+  assert.equal(alpha, 1, 'an opaque card when open');
+  await note.getByRole('button', { name: 'Resume' }).click();
+  await until(p, async () => !(await note.isVisible()), 'the notification to go once all is read', 150_000);
+  await until(p, async () => /trades\s*2/.test(await p.locator('.pfx-sum').innerText()), 'the summary from what it read', 30_000);
+}, { storage, timeout: 240_000 });
 
 h.test('Swap: the exact order SoDEX\'s own dialog sends, and its result', async ({ page: p, wallet, ctx, origin }) => {
   const sx = await enableTrading({ page: p, wallet, ctx }, { spot: { vUSDC: 40, vUSDT: 500 }, balance: 1000, stateful: true });

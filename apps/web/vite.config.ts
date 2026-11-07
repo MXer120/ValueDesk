@@ -139,6 +139,16 @@ logger.error = (msg, options) => {
 const DEV_API_PORT = /^\d{2,5}$/.test(process.env.VALUETRADE_DEV_API_PORT ?? '') ? process.env.VALUETRADE_DEV_API_PORT : '8797';
 
 /**
+ * VALUETRADE_DEV_API=prod: localhost on production's data (owner 2026-11-07: "for localhost i also just want to use
+ * the production indexer"). /api and /api/copy go to www.valuedesk.so as the site's own requests do (Vercel adds the
+ * origin secret and the viewer's country), the live heatmap socket to the instance. No local API or indexer runs (the
+ * local one held 5 GB). The local token is never sent there.
+ */
+const DEV_PROD = process.env.VALUETRADE_DEV_API === 'prod';
+const PROD_SITE = 'https://www.valuedesk.so';
+const PROD_WS = 'wss://161-97-154-121.sslip.io';
+
+/**
  * The build's name in client error reports and feedback (src/buildInfo.ts): the
  * commit Vercel builds (deploy/vercel/build.sh), else the minute of the build.
  * Public, like everything else in the bundle.
@@ -279,7 +289,31 @@ export default defineConfig({
     cors: false,
     // Proxy keeps the browser same-origin, so there is no CORS preflight on the
     // hot path and the WebSocket upgrade works without extra configuration.
-    proxy: {
+    proxy: DEV_PROD ? {
+      '/api': {
+        target: PROD_SITE,
+        changeOrigin: true,
+        secure: true,
+        configure: (proxy) => {
+          proxy.on('proxyReq', (proxyReq) => {
+            proxyReq.setHeader('origin', PROD_SITE);
+            proxyReq.removeHeader(TOKEN_HEADER);
+          });
+        },
+      },
+      '/ws': {
+        target: PROD_WS,
+        ws: true,
+        changeOrigin: true,
+        secure: true,
+        configure: (proxy) => {
+          proxy.on('proxyReqWs', (proxyReq) => {
+            proxyReq.setHeader('origin', PROD_SITE);
+            proxyReq.removeHeader(TOKEN_HEADER);
+          });
+        },
+      },
+    } : {
       // The copy executor (apps/executor, `npm start` there): hosted, the edge routes these the same way.
       '/api/copy': {
         target: 'http://127.0.0.1:8799',

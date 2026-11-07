@@ -1525,3 +1525,22 @@ button.oe-select[aria-expanded='true'] {
 .oe-unitswap:disabled { cursor: default; }
 .oe-unitswap:hover:not(:disabled) .oe-swap, .oe-unitswap:hover:not(:disabled) .oe-unitlabel { color: var(--text); }
 .oe-unitswap .oe-unitlabel { color: var(--text); }
+
+/* The algo orders in beta (owner, 2026-11-07, beta/access.ts): the open four on top, the rest in one block under one
+   blur, with one Get access over it that opens the Discord. The rows are 36px each, so the block can be as tall as its own. */
+.oe-pop--algo { grid-auto-rows: auto; }
+.oe-pop--algo .oe-pop__opt--algo { height: 36px; }
+.oe-pop__optbody { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.oe-pop__lockblock { position: relative; grid-column: 1 / -1; margin-top: 4px; padding-top: 6px; border-top: 1px solid rgb(var(--ink) / 0.08); }
+.oe-pop__lockgrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px; filter: blur(3px); opacity: 0.45; pointer-events: none; user-select: none; }
+.oe-pop__lockgrid .oe-pop__opt--algo { cursor: default; }
+.oe-pop__lockcta {
+  position: absolute; left: 50%; top: calc(50% + 3px); transform: translate(-50%, -50%);
+  display: inline-flex; align-items: center; gap: 8px; height: 34px; min-height: 0; padding: 0 14px 0 8px;
+  border: 1px solid rgb(var(--ink) / 0.12); border-radius: var(--radius-full); background: var(--bg-elevated);
+  color: var(--text); font: inherit; font-size: var(--fs-base); font-weight: 500; white-space: nowrap; cursor: pointer;
+  box-shadow: var(--depth-2);
+}
+.oe-pop__lockcta:hover { background: color-mix(in srgb, var(--text) 10%, var(--bg-elevated)); }
+.oe-pop__lockcta:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.oe-pop__lockcta .dv-devtag { margin: 0; }

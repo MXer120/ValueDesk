@@ -10,8 +10,6 @@ import { askTrade } from './components/TradeConfirm';
 import { useAsync, useConnState, useMediaQuery, useSession, useStored, useSymbols } from './hooks';
 import { hub } from './ws';
 import { Guarded } from './components/ErrorBoundary';
-import { BETA_CHANNEL } from './algo/liveAlgos';
-import { BOTS_ON } from './bots/routes';
 import { ShortcutsDialog, openShortcuts } from './components/ShortcutsDialog';
 import { CommandPalette, loadPalette, openPalette, paletteReady } from './components/palette/lazyPalette';
 import type { TradeContext } from './dashboard';
@@ -27,6 +25,7 @@ import { UnlockDialog } from './components/account/UnlockDialog';
 import { AccountSetup } from './setup/AccountSetup';
 import { OnboardingHost, useOnboardingGate } from './onboarding/OnboardingHost';
 import { IndexPrompt } from './components/IndexPrompt';
+import { HistoryNote } from './components/HistoryNote';
 import { useWalletBridge } from './components/account/useWallet';
 import { configureFromHealth } from './trading/config';
 import { restoreTrading } from './trading/session';
@@ -73,11 +72,9 @@ const LeaderboardPage = lazyPage('leaderboard', () => import('./components/leade
 const PortfolioDashboard = lazyPage('portfolio', () => import('./dashboard/PortfolioDashboard').then((m) => m.PortfolioDashboard));
 const ScanDashboard = lazyPage('scan', () => import('./dashboard/ScanDashboard').then((m) => m.ScanDashboard));
 /* Bots (components/bots/): automated strategies on the ValueDesk executor. */
-// Bots: the page on the beta channel only (owner, 2026-11-02); on the main site the nav shows "coming soon" and
-// there is no page (router.ts SOON_TABS): nothing of it is built in.
-const BotsPage = BETA_CHANNEL || BOTS_ON
-  ? lazyPage('bots', () => import('./components/bots/BotsPage').then((m) => m.BotsPage))
-  : lazyPage('bots', () => Promise.resolve(() => null));
+// Bots: for wallets on the beta list, on the beta site and the main one alike (owner, 2026-11-06); the page
+// shows everyone else how to get access (beta/access.ts). Real bots are the executor's to allow.
+const BotsPage = lazyPage('bots', () => import('./components/bots/BotsPage').then((m) => m.BotsPage));
 /* The market strip below is shown on no page today, so this never loads. */
 const TickerBar = lazyPage('ticker', () => import('./components/Market').then((m) => m.TickerBar));
 /* Impressum, privacy policy, terms (src/legal): one chunk for the three, loaded
@@ -627,7 +624,7 @@ function AppShell() {
 
         {shown === 'explore' && (
           <Guarded name="Explore">
-            <Explore address={address} onScan={openScanAddress} onOpenCopy={openCopy} onOpenSymbol={openSymbol} />
+            <Explore address={address} onScan={openScanAddress} onOpenCopy={openCopy} onOpenSymbol={openSymbol} onOpenCopyPage={() => setTab('copy')} />
           </Guarded>
         )}
 
@@ -694,6 +691,9 @@ function AppShell() {
         </Guarded>
         <Guarded name="Indexing">
           <IndexPrompt address={address} />
+        </Guarded>
+        <Guarded name="History">
+          <HistoryNote address={address} />
         </Guarded>
         {/* Maintenance as a notification: blue with its countdown while an update runs, green once done (status/MaintNote.tsx). */}
         <Guarded name="Maintenance notice">

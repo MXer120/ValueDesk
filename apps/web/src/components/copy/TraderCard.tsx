@@ -54,14 +54,14 @@ function nextInQueue(): void {
   }
 }
 
-/** The trader's curves and last trade, at most PEEK_CONCURRENCY at once; one request per trader per page view. */
-function peekProfile(venue: TraderRow['venue'], address: string): Promise<CardPeek | null> {
-  const key = `${venue}:${address}`;
+/** The trader's curves and last trade, at most PEEK_CONCURRENCY at once; one request per trader per page view (SoDEX: per window, as only the window shown is read). */
+function peekProfile(venue: TraderRow['venue'], address: string, window: Window): Promise<CardPeek | null> {
+  const key = venue === 'sodex' ? `${venue}:${address}:${window}` : `${venue}:${address}`;
   const hit = peeks.get(key);
   if (hit) return hit;
   const p = new Promise<CardPeek | null>((resolve) => {
     queue.push(() => {
-      vsApi.traderPeek(venue, address).then(resolve, () => resolve(null)).finally(() => {
+      vsApi.traderPeek(venue, address, window).then(resolve, () => resolve(null)).finally(() => {
         running -= 1;
         nextInQueue();
       });
@@ -105,7 +105,7 @@ export function useTraderPeek(row: TraderRow, w: BoardWindow): { ref: (el: HTMLE
   useEffect(() => {
     if (!seen) return;
     let dead = false;
-    void peekProfile(row.venue, row.address).then((p) => {
+    void peekProfile(row.venue, row.address, PROFILE_WINDOW[w]).then((p) => {
       if (dead) return;
       if (p) setPeek(peekOf(p, w));
       setDone(true);

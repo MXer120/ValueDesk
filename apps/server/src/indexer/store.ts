@@ -149,6 +149,19 @@ export interface FillRow {
   src: 0 | 1;
 }
 
+/** A raw fills row as walletFillRows reads it (side +1 bought, -1 sold). */
+export interface WalletFillRow {
+  id: string;
+  t: number;
+  symbol: string;
+  side: number;
+  px: number;
+  sz: number;
+  fee: number | null;
+  closed_pnl: number | null;
+  oid: string | null;
+}
+
 export interface CloseRow {
   venue: Venue;
   address: string;
@@ -967,11 +980,15 @@ export class IndexStore {
     });
   }
 
-  close(): void {
+  /** `lap`: called after each step with its name (the stop's timing line, worker.ts). */
+  close(lap: (step: string) => void = () => {}): void {
     this.checkpointer?.stop();
     this.checkpointer = null;
+    lap('checkpoint thread');
     if (!this.readOnly && this.path !== ':memory:') this.saveHeld();
+    lap('held rows');
     this.db.close();
+    lap('database close');
   }
 
   private checkpointer: Checkpointer | null = null;
@@ -1451,6 +1468,32 @@ export class IndexStore {
     ) as Record<string, number> | undefined;
     if (!r) return null;
     return { fromT: r.from_t!, toT: r.to_t!, exhausted: r.exhausted === 1, capped: r.capped === 1, restAt: r.rest_at! };
+  }
+
+  /**
+   * One wallet's raw fills with fromT <= t <= toT, newest first (time, then id), at most `limit`:
+   * a backwards walk of fills_t, no sort and no scan. `beforeId` continues a walk that stopped at
+   * (toT, beforeId): only rows older than that one. Read-only; the copy page's charts
+   * (indexer/walletFills.ts).
+   */
+  walletFillRows(venue: Venue, address: string, fromT: number, toT: number, limit: number, beforeId?: string): WalletFillRow[] {
+    const cols = 'SELECT id, t, symbol, side, px, sz, fee, closed_pnl, oid FROM fills INDEXED BY fills_t WHERE venue = ? AND address = ? AND t >= ? AND t <= ?';
+    const rows = beforeId === undefined
+      ? this.q(`${cols} ORDER BY t DESC, id DESC LIMIT ?`).all(venue, address, fromT, toT, limit)
+      : this.q(`${cols} AND (t < ? OR id < ?) ORDER BY t DESC, id DESC LIMIT ?`).all(venue, address, fromT, toT, toT, beforeId, limit);
+    return rows as unknown as WalletFillRow[];
+  }
+
+  /** The time of the wallet's newest fills row of any source (null: none) - one step down fills_t. Read-only (indexer/walletFills.ts lastTrades). */
+  newestRowT(venue: Venue, address: string): number | null {
+    const r = this.q('SELECT MAX(t) AS t FROM fills INDEXED BY fills_t WHERE venue = ? AND address = ?').get(venue, address) as { t?: number | null } | undefined;
+    return r?.t ?? null;
+  }
+
+  /** The day after the wallet's newest frozen day (0: none) - read from the file, not the writer's cache: raw rows exist from there on. */
+  rawFromDay(venue: Venue, address: string): number {
+    const r = this.q('SELECT MAX(day) AS d FROM fill_day WHERE venue = ? AND address = ? AND frozen = 1').get(venue, address) as { d: number | null } | undefined;
+    return r?.d == null ? 0 : r.d + 1;
   }
 
   /**
@@ -2047,7 +2090,9 @@ export class IndexStore {
     const d0 = Math.floor(fromT / DAY);
     const dk = `${venue}|${address}|${d0}`;
     const ver = this.dayVersion.get(dk) ?? 0;
-    const key = `${venue}|${address}|${fromT}|${ver}`;
+    const wk = `${venue}|${address}`;
+    const gone = this.rowsGone.get(wk) ?? 0;
+    const key = `${wk}|${fromT}|${ver}|${gone}`;
     if (this.partialMemo.has(key)) return this.partialMemo.get(key);
     const end = (d0 + 1) * DAY;
     const job = this.newJob(venue, address, fromT, end);
@@ -2072,8 +2117,8 @@ export class IndexStore {
         await pause();
       }
       // A row of the day written while it was read: what was read is not that day any more.
-      // So is one with rows taken away meanwhile (dropHeld).
-      if (job.keep && job.keep.length <= HELD_DAY_MAX && (this.dayVersion.get(dk) ?? 0) === ver && this.heldGen === gen) this.hold(dk, ver, fromT, job.keep);
+      // So is one with rows taken away meanwhile (dropHeld, or this wallet's rows: dropHeldOf).
+      if (job.keep && job.keep.length <= HELD_DAY_MAX && (this.dayVersion.get(dk) ?? 0) === ver && this.heldGen === gen && (this.rowsGone.get(wk) ?? 0) === gone) this.hold(dk, ver, fromT, job.keep);
       job.keep = undefined;
     }
     const out = this.finish(job).get(d0);
@@ -2130,6 +2175,31 @@ export class IndexStore {
     this.heldRows = 0;
     this.heldGen++;
   }
+
+  /**
+   * One wallet's raw rows are being deleted (a forgotten wallet, a frozen stretch): its held days and
+   * partial sums are void, nobody else's. Until 2026-11-07 every delete slice dropped ALL held rows
+   * (dropHeld): the once-a-day forget at the first build after 00:00 UTC queued ~426k rows of
+   * forgotten wallets, deleted a slice a second for over an hour, and each slice threw away the
+   * 18M held rows of everyone else - the first build after midnight read every first day from the
+   * fills again, again and again (105 min against 2-3). `rowsGone` keys the wallet's partial sums
+   * (partialMemo) and stops a read in flight from being held.
+   */
+  private dropHeldOf(venue: Venue, address: string): void {
+    const k = `${venue}|${address}`;
+    this.rowsGone.set(k, (this.rowsGone.get(k) ?? 0) + 1);
+    if (this.rowsGone.size > 100_000) {
+      // Bounded like dayVersion: a forgotten key would read 0 again, so everything goes once.
+      this.rowsGone.clear();
+      this.partialMemo.clear();
+      this.dropHeld();
+      return;
+    }
+    const prefix = `${k}|`;
+    for (const dk of [...this.held.keys()]) if (dk.startsWith(prefix)) this.letGo(dk);
+  }
+  /** `venue|address` -> bumped whenever raw rows of that wallet are deleted (dropHeldOf). */
+  private rowsGone = new Map<string, number>();
 
   /** A job fed from held rows from its start on, SCAN_CHUNK at a time, as scanStep would feed it. */
   private async eatHeld(job: ScanJob, h: HeldRows, pause: () => Promise<void>): Promise<void> {
@@ -2659,9 +2729,6 @@ export class IndexStore {
     const b = p.hi * DAY;
     const limit = this.slice;
     const t0 = Date.now();
-    // Raw rows go: no partial day summed from them stands (partialDayAsync keys on row changes, not deletions).
-    this.partialMemo.clear();
-    this.dropHeld();
     const frozen = `EXISTS (SELECT 1 FROM fill_day d WHERE d.venue = r.venue AND d.address = r.address AND d.day = CAST(r.t / ${DAY} AS INTEGER) AND d.frozen = 1)`;
     const n = Number(this.q(
       `DELETE FROM fills WHERE (venue, address, id) IN (
@@ -2676,6 +2743,8 @@ export class IndexStore {
       ).run(p.venue, p.address, a, b, limit).changes);
       this.totals.closes += c;
     }
+    // Raw rows went: no partial day of THIS wallet summed from them stands (partialDayAsync keys on row changes, not deletions).
+    if (n + c > 0) this.dropHeldOf(p.venue, p.address);
     const more = n >= limit || c >= limit;
     this.tune(Date.now() - t0, more);
     if (more) return false;
@@ -2687,17 +2756,18 @@ export class IndexStore {
 
   /** Delete up to `limit` of a drop job's raw rows. True when none is left. */
   private dropSlice(j: DropJob, limit: number): boolean {
-    this.partialMemo.clear();
-    this.dropHeld();
     const n = Number(this.q(
       `DELETE FROM fills WHERE (venue, address, id) IN (SELECT venue, address, id FROM fills WHERE venue = ? AND address = ? AND t < ? LIMIT ?)`,
     ).run(j.venue, j.address, j.before, limit).changes);
     this.totals.dropped += n;
+    // Only this wallet's held days and partial sums go (dropHeldOf), not everyone's.
+    if (n > 0) this.dropHeldOf(j.venue, j.address);
     if (n >= limit) return false;
     const c = Number(this.q(
       `DELETE FROM closes WHERE (venue, address, id) IN (SELECT venue, address, id FROM closes WHERE venue = ? AND address = ? AND t < ? LIMIT ?)`,
     ).run(j.venue, j.address, j.before, limit).changes);
     this.totals.dropped += c;
+    if (c > 0) this.dropHeldOf(j.venue, j.address);
     return c < limit;
   }
 
@@ -3917,6 +3987,46 @@ export class IndexStore {
       },
       rows,
     };
+  }
+
+  // --- rows a stop did not write (engine.ts spillUnwritten / replaySpill) --------------------------
+  //
+  // A stop wrote its whole write backlog into the fills a slice at a time, and that was the stop's minutes. Now the rows go
+  // here in one transaction of appends (no page of the big tables is touched), and the next start writes them first, each
+  // part leaving this table in the transaction that writes it: written once, whatever stops or crashes in between. Made
+  // by the writer when first needed, not in SCHEMA: a reader's schemaReady must not wait for it.
+
+  private spillTable(): void {
+    this.db.exec('CREATE TABLE IF NOT EXISTS write_spill (id INTEGER PRIMARY KEY, kind TEXT NOT NULL, rows TEXT NOT NULL)');
+  }
+
+  /** Parts of rows, in the order they were to be written, in one transaction. */
+  spillWrites(parts: ReadonlyArray<{ kind: 'fills'; rows: readonly FillRow[] } | { kind: 'activity'; rows: ReadonlyArray<{ venue: Venue; acct: string; hour: number; trades: number; volume: number }> }>): void {
+    if (!parts.length) return;
+    this.spillTable();
+    const ins = this.q('INSERT INTO write_spill (kind, rows) VALUES (?, ?)');
+    this.tx(() => {
+      for (const p of parts) if (p.rows.length) ins.run(p.kind, JSON.stringify(p.rows));
+    });
+  }
+
+  /** The spilled parts, oldest first: each part's id and how many rows it holds. */
+  spilledWrites(): Array<{ id: number; rows: number }> {
+    this.spillTable();
+    return (this.q("SELECT id, json_array_length(rows) AS n FROM write_spill ORDER BY id").all() as Array<{ id: number; n: number }>).map((r) => ({ id: r.id, rows: r.n }));
+  }
+
+  /** Write one spilled part and remove it, in one transaction. A part already gone (written before) does nothing. */
+  replaySpill(id: number): void {
+    const r = this.q('SELECT kind, rows FROM write_spill WHERE id = ?').get(id) as { kind: string; rows: string } | undefined;
+    if (!r) return;
+    const rows = JSON.parse(r.rows) as unknown[];
+    this.tx(() => {
+      if (r.kind === 'fills') this.putFills(rows as FillRow[]);
+      else if (r.kind === 'activity') this.addActivity(rows as Array<{ venue: Venue; acct: string; hour: number; trades: number; volume: number }>);
+      else throw new Error(`write_spill ${id}: unknown kind ${r.kind}`);
+      this.q('DELETE FROM write_spill WHERE id = ?').run(id);
+    });
   }
 
   /** Board rows for an address across every board (a trader's standing). */

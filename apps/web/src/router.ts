@@ -22,7 +22,6 @@
  * should not be built out of this app.
  */
 import { useCallback, useEffect, useState } from 'react';
-import { BOTS_ON } from './bots/routes';
 
 /**
  * Every page the SPA itself serves, IN NAV ORDER.
@@ -76,7 +75,8 @@ export const pathForTab = (tab: Tab): string => `/${tab}`;
  * beta channel (VITE_CHANNEL=beta, beta.valuedesk.so) has the page. /bots here lands where any unknown path does.
  */
 const CHANNEL = (import.meta as { env?: { VITE_CHANNEL?: string } }).env?.VITE_CHANNEL;
-export const soonTabs = (channel: string | undefined = CHANNEL): ReadonlySet<Tab> => new Set<Tab>(channel === 'beta' || BOTS_ON ? [] : ['bots']);
+/** No page is coming soon now: Bots opens everywhere and asks the beta list itself (owner 2026-11-06, beta/access.ts). */
+export const soonTabs = (_channel: string | undefined = CHANNEL): ReadonlySet<Tab> => new Set<Tab>();
 export const SOON_TABS = soonTabs();
 
 /**

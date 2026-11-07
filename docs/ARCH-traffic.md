@@ -354,8 +354,13 @@ Against this inventory, HOSTED_ROUTES should be:
   it is a 404 even past the gate, since the site's proxy adds the origin secret to every
   request.
 - **Add**: `GET /api/vs/builder/beta?address=` (cls `read`): whether a wallet is on the beta
-  list, for the hosted executor's live-bot gate (real bots: beta.valuedesk.so and the list only).
-  Internal, as the volume above: without the `X-Internal-Token` it is a 404.
+  list, for the hosted executor's live-bot gate (real bots: wallets on the list, on the beta
+  site or the main one since 2026-11-06). Internal, as the volume above: without the
+  `X-Internal-Token` it is a 404.
+- **Add**: `GET /api/vs/beta/listed?address=` (cls `read`): the same answer for the page,
+  without a token, about one address only - it decides what the page offers (Bots, the
+  advanced algo orders), never what runs: the executor asks the list again for the wallet
+  that signed (routes/builder.ts, apps/web/src/beta/access.ts).
 - **Add**: `GET /api/vs/status` (cls `read`): the public status page's report - each
   service's last probe and its 90 days, built from `status.db` at most every 30 s and
   cacheable at the edge as long (`perf.ts`); no input (routes/status.ts, ops/status.ts).

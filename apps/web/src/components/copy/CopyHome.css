@@ -843,3 +843,116 @@
   .cpy-mfoot__acts { flex: 1 1 100%; }
   .cpy-mfoot__acts .fx-cta { flex: 1 1 0; min-width: 0; }
 }
+
+/* ==== The copy setup, one column (owner, 2026-11-07; CopyModal.tsx) ==================================
+   Narrower than before, read top to bottom: the trader's figures in a row, copy or counter, the expected
+   PnL over a wide chart, the rules as cards under two tabs, the steps as a progress bar in the footer. */
+.modal.fx.cpy-modal.cpy-modal--v2 { max-width: 620px; }
+.cpy-v2head { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.cpy-v2head__sub { color: var(--muted); font-family: var(--font-text); font-size: var(--fs-xs); font-weight: 400; }
+.cpy-v2 { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.cpy-v2__top { display: flex; flex-direction: column; gap: 12px; }
+.cpy-v2__stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 0; }
+.cpy-v2__stats dt { color: var(--muted); font-size: var(--fs-micro); font-weight: 600; letter-spacing: var(--ls-caps); text-transform: uppercase; }
+.cpy-v2__stats dd { margin: 4px 0 0; font-family: var(--font-num); font-size: 17px; font-weight: 600; }
+.cpy-v2__stats dd.pos { color: var(--pos); }
+.cpy-v2__stats dd.neg { color: var(--neg); }
+.cpy-v2__stats .cpy-wr { align-items: flex-start; }
+.cpy-v2 .cpy-dir__opt { height: 36px; }
+
+/* The replay: no box of its own, the chart as wide as the window. */
+.cpy-v2ret { display: flex; flex-direction: column; gap: 4px; }
+.cpy-v2ret__v { font-family: var(--font-num); font-size: 20px; font-weight: 600; }
+.cpy-v2ret__v.pos { color: var(--pos); }
+.cpy-v2ret__v.neg { color: var(--neg); }
+.cpy-modal--v2 .cpy-replay__head { align-items: flex-start; }
+.cpy-modal--v2 .cpy-replay__chart,
+.cpy-modal--v2 .cpy-replay__chart .copy-chart { height: 190px; }
+.cpy-modal--v2 .cpy-pv { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
+/* The two tabs: the page tabs' underline, in the app's green. */
+.cpy-v2__tabs { display: flex; gap: 20px; margin-top: 4px; border-bottom: 1px solid var(--panel-line); }
+.cpy-v2__tab {
+  position: relative; display: inline-flex; align-items: center; gap: 6px; height: 36px; min-height: 0; padding: 0; border: 0; background: none;
+  color: var(--muted); font: inherit; font-size: var(--fs-xs); font-weight: 600; letter-spacing: var(--ls-caps); text-transform: uppercase; cursor: pointer;
+}
+.cpy-v2__tab:hover { color: var(--text); background: none; }
+.cpy-v2__tab.is-on { color: var(--text); }
+.cpy-v2__tab.is-on::after { content: ''; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; border-radius: 2px; background: var(--pos); }
+.cpy-v2__tabdot { width: 6px; height: 6px; border-radius: 50%; background: var(--neg); }
+
+/* A rule as a card: what it is on the left, its control on the right; a wide one stacks. */
+.cpy-v2__cards { display: flex; flex-direction: column; gap: 8px; }
+.cpy-v2card {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); padding: 12px 14px;
+  border: 1px solid rgb(var(--ink) / 0.07); border-radius: 12px; background: var(--fx-well);
+}
+.cpy-v2card--wide { flex-direction: column; align-items: stretch; }
+.cpy-v2card__text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.cpy-v2card__t { color: var(--text); font-size: var(--fs-base); font-weight: 600; }
+.cpy-v2card__d { color: var(--muted); font-size: var(--fs-xs); line-height: 1.45; }
+.cpy-v2card__d .cpy-rule__d { display: block; margin-top: 4px; }
+.cpy-v2card__ctl { flex: none; display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
+.cpy-v2card--wide .cpy-v2card__ctl { justify-content: flex-start; }
+.cpy-v2card .cpy-dfield { width: 150px; }
+.cpy-v2card .cpy-ferr { flex-basis: 100%; color: var(--neg); font-size: 12px; line-height: 1.4; }
+.cpy-v2card .cpy-lev { width: 100%; }
+.cpy-v2__reset { align-self: flex-start; }
+
+/* Step 2 in the same column. */
+.cpy-modal--v2 .cpy-fees { flex-direction: row; justify-content: space-between; gap: var(--sp-3); }
+.cpy-modal--v2 .cpy-fees > div { flex-direction: column; gap: 2px; }
+.cpy-modal--v2 .cpy-fees dt { font-size: var(--fs-micro); }
+
+/* The footer: the two steps as a bar and "1/2", the buttons on the right. */
+.cpy-modal--v2 .cpy-mfoot { flex-wrap: wrap; }
+.cpy-v2prog { display: inline-flex; align-items: center; gap: 10px; flex: none; }
+.cpy-v2prog__bar { display: inline-flex; gap: 4px; }
+.cpy-v2prog__seg { width: 44px; height: 4px; min-height: 0; padding: 0; border: 0; border-radius: 2px; background: rgb(var(--ink) / 0.12); cursor: pointer; }
+.cpy-v2prog__seg.is-on { background: var(--pos); }
+.cpy-v2prog__seg:disabled { cursor: default; }
+.cpy-v2prog__n { color: var(--muted); font-family: var(--font-num); font-size: var(--fs-xs); }
+.cpy-modal--v2 .cpy-mfoot__note { flex: 1 1 0; min-width: 0; }
+
+@media (max-width: 560px) {
+  .cpy-v2__stats { gap: 8px; }
+  .cpy-v2__stats dd { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cpy-v2card--wide .dlg-seg { display: flex; width: 100%; }
+  .cpy-v2card--wide .dlg-seg button { flex: 1 1 0; min-width: 0; padding: 0 6px; white-space: nowrap; font-size: var(--fs-xs); }
+  .cpy-v2card { flex-direction: column; align-items: stretch; }
+  .cpy-v2card .cpy-dfield { width: 100%; }
+  .cpy-modal--v2 .cpy-fees { flex-direction: column; }
+  .cpy-modal--v2 .cpy-mfoot__note { order: 3; flex-basis: 100%; }
+}
+
+/* The number in a box with its fill (CopyModal.tsx SlideField): drag across it, press the number to type. */
+.cpy-slide {
+  position: relative; display: inline-flex; align-items: center; justify-content: flex-end; gap: 4px; flex: none;
+  width: 150px; height: 40px; padding: 0 12px; overflow: hidden; border-radius: 10px;
+  background: rgb(var(--ink) / 0.06); box-shadow: inset 0 0 0 1px rgb(var(--ink) / 0.06);
+  cursor: ew-resize; touch-action: none; user-select: none;
+}
+.cpy-slide:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.cpy-slide.is-bad { box-shadow: inset 0 0 0 1px var(--neg); }
+.cpy-slide__fill {
+  position: absolute; left: 0; top: 0; bottom: 0; pointer-events: none;
+  background: color-mix(in srgb, var(--pos) 22%, transparent); border-right: 2px solid var(--pos);
+  transition: width 60ms linear;
+}
+.cpy-slide__v {
+  position: relative; min-height: 0; height: auto; padding: 2px 4px; border: 0; border-radius: 4px; background: none;
+  color: var(--text); font-family: var(--font-num); font-size: var(--fs-base); font-weight: 600; cursor: text;
+}
+.cpy-slide__v:hover { background: rgb(var(--ink) / 0.08); }
+.cpy-slide__in {
+  position: relative; width: 70px; height: 26px; min-height: 0; padding: 0 4px; border: 0; border-radius: 4px; background: rgb(var(--ink) / 0.1);
+  color: var(--text); font-family: var(--font-num); font-size: var(--fs-base); font-weight: 600; text-align: right; outline: none;
+}
+.cpy-slide.is-typing { cursor: default; }
+.cpy-slide__u { position: relative; color: var(--muted); font-size: var(--fs-xs); }
+@media (max-width: 560px) { .cpy-slide { width: 100%; } }
+
+/* Copy or counter: the same rounded corners as the window's other switches. */
+.cpy-modal--v2 .cpy-dir { border-radius: 10px; }
+.cpy-modal--v2 .cpy-dir__opt { border-radius: 8px; }
+.cpy-fees__sub { display: block; margin-top: 2px; color: var(--muted); font-size: var(--fs-micro); font-family: var(--font-num); }

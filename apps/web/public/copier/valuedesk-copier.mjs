@@ -42,9 +42,9 @@ var __toESM = (mod2, isNodeMode, target) => (target = mod2 != null ? __create(__
   mod2
 ));
 
-// ../../node_modules/ws/lib/constants.js
+// node_modules/ws/lib/constants.js
 var require_constants = __commonJS({
-  "../../node_modules/ws/lib/constants.js"(exports, module) {
+  "node_modules/ws/lib/constants.js"(exports, module) {
     "use strict";
     var BINARY_TYPES = ["nodebuffer", "arraybuffer", "fragments"];
     var hasBlob = typeof Blob !== "undefined";
@@ -65,9 +65,9 @@ var require_constants = __commonJS({
   }
 });
 
-// ../../node_modules/node-gyp-build/node-gyp-build.js
+// node_modules/node-gyp-build/node-gyp-build.js
 var require_node_gyp_build = __commonJS({
-  "../../node_modules/node-gyp-build/node-gyp-build.js"(exports, module) {
+  "node_modules/node-gyp-build/node-gyp-build.js"(exports, module) {
     var fs = __require("fs");
     var path = __require("path");
     var os = __require("os");
@@ -234,9 +234,9 @@ var require_node_gyp_build = __commonJS({
   }
 });
 
-// ../../node_modules/node-gyp-build/index.js
+// node_modules/node-gyp-build/index.js
 var require_node_gyp_build2 = __commonJS({
-  "../../node_modules/node-gyp-build/index.js"(exports, module) {
+  "node_modules/node-gyp-build/index.js"(exports, module) {
     var runtimeRequire = typeof __webpack_require__ === "function" ? __non_webpack_require__ : __require;
     if (typeof runtimeRequire.addon === "function") {
       module.exports = runtimeRequire.addon.bind(runtimeRequire);
@@ -246,9 +246,9 @@ var require_node_gyp_build2 = __commonJS({
   }
 });
 
-// ../../node_modules/bufferutil/fallback.js
+// node_modules/bufferutil/fallback.js
 var require_fallback = __commonJS({
-  "../../node_modules/bufferutil/fallback.js"(exports, module) {
+  "node_modules/bufferutil/fallback.js"(exports, module) {
     "use strict";
     var mask = (source, mask2, output, offset, length) => {
       for (var i = 0; i < length; i++) {
@@ -265,9 +265,9 @@ var require_fallback = __commonJS({
   }
 });
 
-// ../../node_modules/bufferutil/index.js
+// node_modules/bufferutil/index.js
 var require_bufferutil = __commonJS({
-  "../../node_modules/bufferutil/index.js"(exports, module) {
+  "node_modules/bufferutil/index.js"(exports, module) {
     "use strict";
     try {
       module.exports = require_node_gyp_build2()(__dirname);
@@ -277,9 +277,9 @@ var require_bufferutil = __commonJS({
   }
 });
 
-// ../../node_modules/ws/lib/buffer-util.js
+// node_modules/ws/lib/buffer-util.js
 var require_buffer_util = __commonJS({
-  "../../node_modules/ws/lib/buffer-util.js"(exports, module) {
+  "node_modules/ws/lib/buffer-util.js"(exports, module) {
     "use strict";
     var { EMPTY_BUFFER } = require_constants();
     var FastBuffer = Buffer[Symbol.species];
@@ -352,9 +352,9 @@ var require_buffer_util = __commonJS({
   }
 });
 
-// ../../node_modules/ws/lib/limiter.js
+// node_modules/ws/lib/limiter.js
 var require_limiter = __commonJS({
-  "../../node_modules/ws/lib/limiter.js"(exports, module) {
+  "node_modules/ws/lib/limiter.js"(exports, module) {
     "use strict";
     var kDone = /* @__PURE__ */ Symbol("kDone");
     var kRun = /* @__PURE__ */ Symbol("kRun");
@@ -402,9 +402,9 @@ var require_limiter = __commonJS({
   }
 });
 
-// ../../node_modules/ws/lib/permessage-deflate.js
+// node_modules/ws/lib/permessage-deflate.js
 var require_permessage_deflate = __commonJS({
-  "../../node_modules/ws/lib/permessage-deflate.js"(exports, module) {
+  "node_modules/ws/lib/permessage-deflate.js"(exports, module) {
     "use strict";
     var zlib = __require("zlib");
     var bufferUtil = require_buffer_util();
@@ -785,9 +785,9 @@ var require_permessage_deflate = __commonJS({
   }
 });
 
-// ../../node_modules/utf-8-validate/fallback.js
+// node_modules/utf-8-validate/fallback.js
 var require_fallback2 = __commonJS({
-  "../../node_modules/utf-8-validate/fallback.js"(exports, module) {
+  "node_modules/utf-8-validate/fallback.js"(exports, module) {
     "use strict";
     function isValidUTF8(buf) {
       const len = buf.length;
@@ -822,9 +822,9 @@ var require_fallback2 = __commonJS({
   }
 });
 
-// ../../node_modules/utf-8-validate/index.js
+// node_modules/utf-8-validate/index.js
 var require_utf_8_validate = __commonJS({
-  "../../node_modules/utf-8-validate/index.js"(exports, module) {
+  "node_modules/utf-8-validate/index.js"(exports, module) {
     "use strict";
     try {
       module.exports = require_node_gyp_build2()(__dirname);
@@ -834,9 +834,9 @@ var require_utf_8_validate = __commonJS({
   }
 });
 
-// ../../node_modules/ws/lib/validation.js
+// node_modules/ws/lib/validation.js
 var require_validation = __commonJS({
-  "../../node_modules/ws/lib/validation.js"(exports, module) {
+  "node_modules/ws/lib/validation.js"(exports, module) {
     "use strict";
     var { isUtf8 } = __require("buffer");
     var { hasBlob } = require_constants();
@@ -1035,9 +1035,9 @@ var require_validation = __commonJS({
   }
 });
 
-// ../../node_modules/ws/lib/receiver.js
+// node_modules/ws/lib/receiver.js
 var require_receiver = __commonJS({
-  "../../node_modules/ws/lib/receiver.js"(exports, module) {
+  "node_modules/ws/lib/receiver.js"(exports, module) {
     "use strict";
     var { Writable } = __require("stream");
     var PerMessageDeflate2 = require_permessage_deflate();
@@ -1658,9 +1658,9 @@ var require_receiver = __commonJS({
   }
 });
 
-// ../../node_modules/ws/lib/sender.js
+// node_modules/ws/lib/sender.js
 var require_sender = __commonJS({
-  "../../node_modules/ws/lib/sender.js"(exports, module) {
+  "node_modules/ws/lib/sender.js"(exports, module) {
     "use strict";
     var { Duplex } = __require("stream");
     var { randomFillSync } = __require("crypto");
@@ -2151,9 +2151,9 @@ var require_sender = __commonJS({
   }
 });
 
-// ../../node_modules/ws/lib/event-target.js
+// node_modules/ws/lib/event-target.js
 var require_event_target = __commonJS({
-  "../../node_modules/ws/lib/event-target.js"(exports, module) {
+  "node_modules/ws/lib/event-target.js"(exports, module) {
     "use strict";
     var { kForOnEventAttribute, kListener } = require_constants();
     var kCode = /* @__PURE__ */ Symbol("kCode");
@@ -2380,9 +2380,9 @@ var require_event_target = __commonJS({
   }
 });
 
-// ../../node_modules/ws/lib/extension.js
+// node_modules/ws/lib/extension.js
 var require_extension = __commonJS({
-  "../../node_modules/ws/lib/extension.js"(exports, module) {
+  "node_modules/ws/lib/extension.js"(exports, module) {
     "use strict";
     var { tokenChars } = require_validation();
     function push(dest, name, elem) {
@@ -2533,9 +2533,9 @@ var require_extension = __commonJS({
   }
 });
 
-// ../../node_modules/ws/lib/websocket.js
+// node_modules/ws/lib/websocket.js
 var require_websocket = __commonJS({
-  "../../node_modules/ws/lib/websocket.js"(exports, module) {
+  "node_modules/ws/lib/websocket.js"(exports, module) {
     "use strict";
     var EventEmitter = __require("events");
     var https = __require("https");
@@ -3429,9 +3429,9 @@ var require_websocket = __commonJS({
   }
 });
 
-// ../../node_modules/ws/lib/stream.js
+// node_modules/ws/lib/stream.js
 var require_stream = __commonJS({
-  "../../node_modules/ws/lib/stream.js"(exports, module) {
+  "node_modules/ws/lib/stream.js"(exports, module) {
     "use strict";
     var WebSocket2 = require_websocket();
     var { Duplex } = __require("stream");
@@ -3527,9 +3527,9 @@ var require_stream = __commonJS({
   }
 });
 
-// ../../node_modules/ws/lib/subprotocol.js
+// node_modules/ws/lib/subprotocol.js
 var require_subprotocol = __commonJS({
-  "../../node_modules/ws/lib/subprotocol.js"(exports, module) {
+  "node_modules/ws/lib/subprotocol.js"(exports, module) {
     "use strict";
     var { tokenChars } = require_validation();
     function parse(header) {
@@ -3572,9 +3572,9 @@ var require_subprotocol = __commonJS({
   }
 });
 
-// ../../node_modules/ws/lib/websocket-server.js
+// node_modules/ws/lib/websocket-server.js
 var require_websocket_server = __commonJS({
-  "../../node_modules/ws/lib/websocket-server.js"(exports, module) {
+  "node_modules/ws/lib/websocket-server.js"(exports, module) {
     "use strict";
     var EventEmitter = __require("events");
     var http = __require("http");
@@ -3973,10 +3973,10 @@ var require_websocket_server = __commonJS({
   }
 });
 
-// src/main.ts
+// apps/executor/src/main.ts
 import { join as join3 } from "node:path";
 
-// src/config.ts
+// apps/executor/src/config.ts
 import { existsSync } from "node:fs";
 import { homedir, platform } from "node:os";
 import { join, resolve } from "node:path";
@@ -4074,11 +4074,11 @@ function loadConfig(env = process.env) {
   };
 }
 
-// src/net.ts
+// apps/executor/src/net.ts
 import { Agent, request as httpsRequest } from "node:https";
 import { isIPv6 } from "node:net";
 
-// ../../node_modules/ws/wrapper.mjs
+// node_modules/ws/wrapper.mjs
 var import_stream = __toESM(require_stream(), 1);
 var import_extension = __toESM(require_extension(), 1);
 var import_permessage_deflate = __toESM(require_permessage_deflate(), 1);
@@ -4089,7 +4089,7 @@ var import_websocket = __toESM(require_websocket(), 1);
 var import_websocket_server = __toESM(require_websocket_server(), 1);
 var wrapper_default = import_websocket.default;
 
-// src/net.ts
+// apps/executor/src/net.ts
 function egress(localAddress) {
   if (!localAddress) {
     return {
@@ -4145,7 +4145,7 @@ function egress(localAddress) {
   return { fetch: bound2, factory, localAddress };
 }
 
-// src/db.ts
+// apps/executor/src/db.ts
 import { createHash } from "node:crypto";
 import { chmodSync, existsSync as existsSync2, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
@@ -4585,12 +4585,12 @@ function keyOf(r) {
   };
 }
 
-// src/secrets.ts
+// apps/executor/src/secrets.ts
 import { createCipheriv, createDecipheriv, createHmac, createPrivateKey, createPublicKey, diffieHellman, generateKeyPairSync, hkdfSync, randomBytes as randomBytes2, timingSafeEqual } from "node:crypto";
 import { chmodSync as chmodSync2, existsSync as existsSync3, mkdirSync as mkdirSync2, readFileSync as readFileSync2, writeFileSync as writeFileSync2 } from "node:fs";
 import { join as join2 } from "node:path";
 
-// ../../packages/sodex-core/src/network.ts
+// packages/sodex-core/src/network.ts
 var ENGINES = ["spot", "perps"];
 var SODEX_CHAIN_ID = {
   mainnet: 286623,
@@ -4609,7 +4609,7 @@ var enginePath = (engine) => `/api/v1/${engine}`;
 var DomainName = { spot: "spot", perps: "futures", universal: "universal" };
 var engineDomainName = (engine) => engine === "spot" ? DomainName.spot : DomainName.perps;
 
-// ../../node_modules/@noble/hashes/esm/_u64.js
+// node_modules/@noble/hashes/esm/_u64.js
 var U32_MASK64 = /* @__PURE__ */ BigInt(2 ** 32 - 1);
 var _32n = /* @__PURE__ */ BigInt(32);
 function fromBig(n, le = false) {
@@ -4632,7 +4632,7 @@ var rotlSL = (h, l, s) => l << s | h >>> 32 - s;
 var rotlBH = (h, l, s) => l << s - 32 | h >>> 64 - s;
 var rotlBL = (h, l, s) => h << s - 32 | l >>> 64 - s;
 
-// ../../node_modules/@noble/hashes/esm/utils.js
+// node_modules/@noble/hashes/esm/utils.js
 function isBytes(a) {
   return a instanceof Uint8Array || ArrayBuffer.isView(a) && a.constructor.name === "Uint8Array";
 }
@@ -4700,7 +4700,7 @@ function createHasher(hashCons) {
   return hashC;
 }
 
-// ../../node_modules/@noble/hashes/esm/sha3.js
+// node_modules/@noble/hashes/esm/sha3.js
 var _0n = BigInt(0);
 var _1n = BigInt(1);
 var _2n = BigInt(2);
@@ -4881,7 +4881,7 @@ var Keccak = class _Keccak extends Hash {
 var gen = (suffix, blockLen, outputLen) => createHasher(() => new Keccak(blockLen, suffix, outputLen));
 var keccak_256 = /* @__PURE__ */ (() => gen(1, 136, 256 / 8))();
 
-// ../../node_modules/@noble/curves/node_modules/@noble/hashes/esm/_assert.js
+// node_modules/@noble/curves/node_modules/@noble/hashes/esm/_assert.js
 function anumber2(n) {
   if (!Number.isSafeInteger(n) || n < 0)
     throw new Error("positive integer expected, got " + n);
@@ -4915,11 +4915,11 @@ function aoutput2(out, instance) {
   }
 }
 
-// ../../node_modules/@noble/curves/node_modules/@noble/hashes/esm/cryptoNode.js
+// node_modules/@noble/curves/node_modules/@noble/hashes/esm/cryptoNode.js
 import * as nc from "node:crypto";
 var crypto = nc && typeof nc === "object" && "webcrypto" in nc ? nc.webcrypto : nc && typeof nc === "object" && "randomBytes" in nc ? nc : void 0;
 
-// ../../node_modules/@noble/curves/node_modules/@noble/hashes/esm/utils.js
+// node_modules/@noble/curves/node_modules/@noble/hashes/esm/utils.js
 var createView = (arr) => new DataView(arr.buffer, arr.byteOffset, arr.byteLength);
 var rotr = (word2, shift) => word2 << 32 - shift | word2 >>> shift;
 function utf8ToBytes2(str2) {
@@ -4972,7 +4972,7 @@ function randomBytes(bytesLength = 32) {
   throw new Error("crypto.getRandomValues must be defined");
 }
 
-// ../../node_modules/@noble/curves/node_modules/@noble/hashes/esm/_md.js
+// node_modules/@noble/curves/node_modules/@noble/hashes/esm/_md.js
 function setBigUint64(view, byteOffset, value, isLE2) {
   if (typeof view.setBigUint64 === "function")
     return view.setBigUint64(byteOffset, value, isLE2);
@@ -5074,7 +5074,7 @@ var HashMD = class extends Hash2 {
   }
 };
 
-// ../../node_modules/@noble/curves/node_modules/@noble/hashes/esm/sha256.js
+// node_modules/@noble/curves/node_modules/@noble/hashes/esm/sha256.js
 var SHA256_K = /* @__PURE__ */ new Uint32Array([
   1116352408,
   1899447441,
@@ -5224,7 +5224,7 @@ var SHA256 = class extends HashMD {
 };
 var sha256 = /* @__PURE__ */ wrapConstructor(() => new SHA256());
 
-// ../../node_modules/@noble/curves/node_modules/@noble/hashes/esm/hmac.js
+// node_modules/@noble/curves/node_modules/@noble/hashes/esm/hmac.js
 var HMAC = class extends Hash2 {
   constructor(hash, _key) {
     super();
@@ -5289,7 +5289,7 @@ var HMAC = class extends Hash2 {
 var hmac = (hash, key2, message) => new HMAC(hash, key2).update(message).digest();
 hmac.create = (hash, key2) => new HMAC(hash, key2);
 
-// ../../node_modules/@noble/curves/esm/abstract/utils.js
+// node_modules/@noble/curves/esm/abstract/utils.js
 var utils_exports = {};
 __export(utils_exports, {
   aInRange: () => aInRange,
@@ -5557,7 +5557,7 @@ function memoized(fn) {
   };
 }
 
-// ../../node_modules/@noble/curves/esm/abstract/modular.js
+// node_modules/@noble/curves/esm/abstract/modular.js
 var _0n3 = BigInt(0);
 var _1n3 = BigInt(1);
 var _2n3 = /* @__PURE__ */ BigInt(2);
@@ -5833,7 +5833,7 @@ function mapHashToField(key2, fieldOrder, isLE2 = false) {
   return isLE2 ? numberToBytesLE(reduced, fieldLen) : numberToBytesBE(reduced, fieldLen);
 }
 
-// ../../node_modules/@noble/curves/esm/abstract/curve.js
+// node_modules/@noble/curves/esm/abstract/curve.js
 var _0n4 = BigInt(0);
 var _1n4 = BigInt(1);
 function constTimeNegate(condition2, item) {
@@ -6060,7 +6060,7 @@ function validateBasic(curve) {
   });
 }
 
-// ../../node_modules/@noble/curves/esm/abstract/weierstrass.js
+// node_modules/@noble/curves/esm/abstract/weierstrass.js
 function validateSigVerOpts(opts) {
   if (opts.lowS !== void 0)
     abool("lowS", opts.lowS);
@@ -6929,7 +6929,7 @@ function weierstrass(curveDef) {
   };
 }
 
-// ../../node_modules/@noble/curves/esm/_shortw_utils.js
+// node_modules/@noble/curves/esm/_shortw_utils.js
 function getHash(hash) {
   return {
     hash,
@@ -6942,7 +6942,7 @@ function createCurve(curveDef, defHash) {
   return { ...create(defHash), create };
 }
 
-// ../../node_modules/@noble/curves/esm/secp256k1.js
+// node_modules/@noble/curves/esm/secp256k1.js
 var secp256k1P = BigInt("0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f");
 var secp256k1N = BigInt("0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141");
 var _1n6 = BigInt(1);
@@ -7016,7 +7016,7 @@ var secp256k1 = createCurve({
 var _0n6 = BigInt(0);
 var Point = secp256k1.ProjectivePoint;
 
-// ../../packages/sodex-core/src/eip712.ts
+// packages/sodex-core/src/eip712.ts
 var SignatureType = {
   /** Exchange actions (orders, cancels, transfers, revokeAPIKey) - engine-specific domain. */
   EIP712: 1,
@@ -7267,7 +7267,7 @@ function recoverAddress(digest, rsv) {
 }
 var privateKeyToAddress = (privateKey) => bytesToHex2(keccak_256(secp256k1.getPublicKey(privateKey, false).slice(1)).slice(12));
 
-// ../../packages/sodex-core/src/decimal.ts
+// packages/sodex-core/src/decimal.ts
 var DECIMAL_RE = /^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$/;
 var DecimalError = class extends Error {
 };
@@ -7356,7 +7356,7 @@ function unscaleFromInt(n, scale) {
   return canonicalDecimal((neg ? "-" : "") + out);
 }
 
-// ../../packages/sodex-core/src/actions.ts
+// packages/sodex-core/src/actions.ts
 var OrderSide = { BUY: 1, SELL: 2 };
 var OrderType = { LIMIT: 1, MARKET: 2 };
 var TimeInForce = { GTC: 1, FOK: 2, IOC: 3, GTX: 4 };
@@ -7547,7 +7547,7 @@ var perpsActions = {
   cancelTwapOrder: (accountID, symbolID, orderID) => act("perps", "cancelTwapOrder", cancelTwapOrder(accountID, symbolID, orderID))
 };
 
-// ../../packages/sodex-core/src/keys.ts
+// packages/sodex-core/src/keys.ts
 function defaultRandom(length) {
   const c = globalThis.crypto;
   if (!c?.getRandomValues) throw new Error("no CSPRNG available (globalThis.crypto.getRandomValues)");
@@ -7574,7 +7574,7 @@ var MAX_TRADING_KEY_TTL_MS = 7 * DAY_MS;
 var MIN_TRADING_KEY_TTL_MS = 5 * 6e4;
 var isKeyExpired = (expiresAt, now = Date.now()) => !!expiresAt && expiresAt <= now;
 
-// ../../packages/sodex-core/src/nonce.ts
+// packages/sodex-core/src/nonce.ts
 var NONCE_WINDOW = { pastMs: 2 * DAY_MS, futureMs: DAY_MS };
 var DEFAULT_NONCE_WINDOW_MARGIN_MS = 6e4;
 var NonceWindowError = class extends RangeError {
@@ -7786,7 +7786,7 @@ var Manager = class {
 };
 var createMemoryNonceManager = (opts = {}) => new Manager({ ...opts, storage: null, channel: null, locks: null }, false);
 
-// ../../packages/sodex-core/src/request.ts
+// packages/sodex-core/src/request.ts
 var HEADER = {
   key: "X-API-Key",
   sign: "X-API-Sign",
@@ -7853,7 +7853,7 @@ async function signAndBuildWithNonceManager(action2, key2, opts) {
   return signAndBuild(action2, ref, { ...opts, nonce });
 }
 
-// ../../packages/sodex-core/src/builders.ts
+// packages/sodex-core/src/builders.ts
 var asRate = (v) => {
   const n = typeof v === "number" ? v : typeof v === "string" && /^\d+$/.test(v.trim()) ? Number(v) : NaN;
   return Number.isSafeInteger(n) && n > 0 ? n : null;
@@ -7876,7 +7876,7 @@ function approvedBuilderRates(data, builderID) {
   return out;
 }
 
-// ../../packages/sodex-core/src/envelope.ts
+// packages/sodex-core/src/envelope.ts
 var SodexApiError = class extends Error {
   constructor(code, message, httpStatus, path, body) {
     super(message);
@@ -7979,7 +7979,7 @@ function reportedRateLimit(get) {
   return { limit, remaining: rem !== null && rem <= limit ? rem : null };
 }
 
-// src/secrets.ts
+// apps/executor/src/secrets.ts
 function secretFile(dir, name) {
   mkdirSync2(dir, { recursive: true, mode: 448 });
   const path = join2(dir, name);
@@ -8127,12 +8127,12 @@ function openWith(kek, network, owner, address, sealed) {
   return pk;
 }
 
-// src/server.ts
+// apps/executor/src/server.ts
 import { createServer } from "node:http";
 import { timingSafeEqual as timingSafeEqual3 } from "node:crypto";
 import { isIP } from "node:net";
 
-// ../../packages/copy-engine/src/io.ts
+// packages/copy-engine/src/io.ts
 var WS_OPEN = 1;
 var host = globalThis;
 function unref(h) {
@@ -8167,7 +8167,7 @@ function randomId(prefix = "") {
   return prefix + s.slice(0, 16);
 }
 
-// ../../packages/copy-engine/src/confirm.ts
+// packages/copy-engine/src/confirm.ts
 var CONFIRM_READS = 2;
 var CONFIRM_GAP_MS = 2e3;
 async function confirmRead(first, read, view, o = {}) {
@@ -8191,7 +8191,7 @@ async function confirmRead(first, read, view, o = {}) {
 }
 var sizeView = (n) => n === null || n === void 0 ? "unread" : String(Number((n || 0).toPrecision(12)));
 
-// ../../packages/copy-engine/src/policy.ts
+// packages/copy-engine/src/policy.ts
 var COPY_TERMS_VERSION = "2026-11-02";
 var US_REGIONS = ["US", "PR", "VI", "GU", "AS", "MP", "UM"];
 var UK_CA_REGIONS = ["GB", "CA"];
@@ -8309,7 +8309,7 @@ function copyFeeFor(volumeUsd, ladder = COPY_FEE_LADDER) {
 }
 var BOT_FEE = 1;
 
-// ../../packages/copy-engine/src/sanctionsList.ts
+// packages/copy-engine/src/sanctionsList.ts
 var SANCTIONED_ADDRESSES = [
   "0x002471b8a185f9980708d0eaec5b289714f56f8d",
   "0x0330070fd38ec3bb94f58fa55d40368271e9e54a",
@@ -8407,7 +8407,7 @@ var SANCTIONED_ADDRESSES = [
   "0xfec8a60023265364d066a1212fde3930f6ae8da7"
 ];
 
-// ../../packages/copy-engine/src/sanctions.ts
+// packages/copy-engine/src/sanctions.ts
 function screenPolicy(policy, ...addresses) {
   const hit = sanctionedOf(addresses);
   if (hit === null) return policy;
@@ -8427,7 +8427,7 @@ function sanctionedOf(addresses) {
 var SANCTIONED_WALLET_REASON = "This wallet address is on a sanctions list, so ValueDesk cannot be used with it. If you believe this is a mistake, contact us at the address in the Impressum.";
 var SANCTIONED_LEADER_REASON = "This trader's wallet address is on a sanctions list, so it cannot be copied through ValueDesk.";
 
-// ../../packages/copy-engine/src/settings.ts
+// packages/copy-engine/src/settings.ts
 var ADDRESS2 = /^0x[0-9a-f]{40}$/;
 var COIN = /^[A-Z0-9]{1,20}$/;
 var DEFAULT_SETTINGS = {
@@ -8570,7 +8570,7 @@ var SettingsError = class extends Error {
   name = "SettingsError";
 };
 
-// ../../packages/copy-engine/src/markets.ts
+// packages/copy-engine/src/markets.ts
 var num = (v, fallback = NaN) => {
   const n = typeof v === "string" ? Number(v) : typeof v === "number" ? v : NaN;
   return Number.isFinite(n) ? n : fallback;
@@ -8758,7 +8758,7 @@ var snapPrice = (p, m) => {
   return s === "0" ? m.tickSize : s;
 };
 
-// ../../packages/copy-engine/src/planner.ts
+// packages/copy-engine/src/planner.ts
 var FLAT_EPS = 1e-9;
 var isFlat = (x) => !Number.isFinite(x) || Math.abs(x) < FLAT_EPS;
 var sign = (x) => isFlat(x) ? 0 : x > 0 ? 1 : -1;
@@ -9134,7 +9134,7 @@ function applyFill(state, symbol2, side, qty2, price2, fee, at) {
   else state.owned[symbol2] = { size: next, entry: price2, openedAt: at };
 }
 
-// ../../packages/copy-engine/src/sodex.ts
+// packages/copy-engine/src/sodex.ts
 var OutcomeUnknownError = class extends Error {
   name = "OutcomeUnknownError";
   outcomeUnknown = true;
@@ -9919,7 +9919,7 @@ function hlSpotCollateral(st, px2) {
   return sum;
 }
 
-// ../../packages/copy-engine/src/socket.ts
+// packages/copy-engine/src/socket.ts
 var LiveSocket = class {
   constructor(o) {
     this.o = o;
@@ -10050,7 +10050,7 @@ var LiveSocket = class {
   }
 };
 
-// ../../packages/copy-engine/src/feeds.ts
+// packages/copy-engine/src/feeds.ts
 var COALESCE_MS = 150;
 var key = (l) => `${l.venue}:${l.address.toLowerCase()}`;
 var LeaderBook = class {
@@ -10496,7 +10496,7 @@ var HyperliquidFeed = class {
   }
 };
 
-// ../../packages/copy-engine/src/orders.ts
+// packages/copy-engine/src/orders.ts
 function intentsAction(accountId, market, intents, builder) {
   return perpsActions.newOrder(
     accountId,
@@ -10618,7 +10618,7 @@ var PaperSink = class {
   }
 };
 
-// ../../packages/copy-engine/src/algo/math.ts
+// packages/copy-engine/src/algo/math.ts
 var DAY_MS2 = 864e5;
 function makeRng(seed) {
   let a = seed >>> 0;
@@ -10843,7 +10843,7 @@ function trail(s, side, price2, o) {
   return { state: { armed, extreme }, stop, fired };
 }
 
-// ../../packages/copy-engine/src/oracle.ts
+// packages/copy-engine/src/oracle.ts
 var ORACLE_VENUES = [
   "binanceFutures",
   "binanceSpot",
@@ -11119,7 +11119,7 @@ var OracleFeed = class {
   }
 };
 
-// ../../packages/copy-engine/src/algo/types.ts
+// packages/copy-engine/src/algo/types.ts
 var ALGO_KINDS = ["twap", "vwap", "pov", "iceberg", "chase", "scale", "dca", "swarm", "conditional", "trailing", "basket", "bracket", "sweep", "mm", "grid"];
 var BOT_KINDS = ["mm", "grid"];
 var SLIP_FROM = ["touch", "mid", "mark", "index", "oracleMid", "oracleFair"];
@@ -11133,7 +11133,7 @@ var SLIP_FROM_NAMES = {
 };
 var FINAL_STATUSES = /* @__PURE__ */ new Set(["done", "cancelled", "expired", "failed"]);
 
-// ../../packages/copy-engine/src/algo/spec.ts
+// packages/copy-engine/src/algo/spec.ts
 var AlgoSpecError = class extends Error {
   constructor(message, errors) {
     super(message);
@@ -11808,7 +11808,7 @@ var ALGO_NAMES = {
   grid: "Grid"
 };
 
-// ../../packages/copy-engine/src/notices.ts
+// packages/copy-engine/src/notices.ts
 var leaderShort = (s) => `${s.settings.leader.address.slice(0, 6)}\u2026${s.settings.leader.address.slice(-4)}`;
 var mk = (n) => ({ ...n, id: `${n.source}:${n.ref}:${n.kind}:${n.at}` });
 function algoName(a) {
@@ -11927,7 +11927,7 @@ function copyDelistedNotice(s, symbol2, size, at = Date.now()) {
 }
 var delistedDetail = (symbol2, size) => `${symbol2} is no longer listed on SoDEX. The copy still holds a ${size > 0 ? "long" : "short"} position of ${px(Math.abs(size))} there, and ValueDesk will not trade it any more: the copy does not close, reduce or add to it. What to do with it is yours to decide on SoDEX.`;
 
-// ../../packages/copy-engine/src/runtime.ts
+// packages/copy-engine/src/runtime.ts
 var RECONCILE_MS = 6e4;
 var FOLLOWER_REFRESH_MS = 3e4;
 var GUARD_MS = 2e3;
@@ -13814,7 +13814,7 @@ var CopyRuntime = class {
   }
 };
 
-// ../../packages/copy-engine/src/api.ts
+// packages/copy-engine/src/api.ts
 var COPY_DOMAIN = { name: "ValueDesk Copy", version: "1" };
 var COPY_TERMS_EXECUTOR = "valuedesk-copy-terms";
 var SITE_TERMS_EXECUTOR = "valuedesk-site-terms";
@@ -13926,7 +13926,7 @@ var ALGO_UPDATE_FIELDS = [
 ];
 var EXECUTOR_FEATURES = ["counter", "site-terms", "key-import", "algo-update", "bots", "multiplier"];
 
-// ../../packages/copy-engine/src/algo/bots.ts
+// packages/copy-engine/src/algo/bots.ts
 var BOT_SAMPLE_MS = 5 * 6e4;
 var BOT_SERIES_MAX = 1500;
 var emptyBook = () => ({ buyQty: 0, buyValue: 0, sellQty: 0, sellValue: 0, makerValue: 0, takerValue: 0, tradeFees: 0, builderFees: 0, fills: 0, series: [] });
@@ -14041,7 +14041,7 @@ function queueShare(q, side) {
   return own / (own + other);
 }
 
-// ../../packages/copy-engine/src/algo/sizes.ts
+// packages/copy-engine/src/algo/sizes.ts
 function money(n) {
   const a = Math.abs(n);
   const sign2 = n < 0 ? "-" : "";
@@ -14358,7 +14358,7 @@ function closeNote(pos, share, m, px2, out) {
   if (take > maxQ + 1e-12) out.notes.push(`Closing about ${money(take * px2)} is over ${maxWords(m, px2)}: it closes in ${Math.ceil(take / maxQ - 1e-9)} orders, one after the other.`);
 }
 
-// ../../packages/copy-engine/src/algo/limits.ts
+// packages/copy-engine/src/algo/limits.ts
 var OI_NEAR_SHARE = 0.8;
 function positionCapUsd(m, leverage) {
   const tiers = m.marginTiers;
@@ -14435,7 +14435,7 @@ function oiRoomWords(m, head2, price2) {
   return `Open interest on ${m.name} is at ${used}% of SoDEX's cap: about ${money(head2.room * price2)} (${coins2(head2.room)} ${m.base}) can still be added market-wide.`;
 }
 
-// ../../packages/copy-engine/src/algo/sweep.ts
+// packages/copy-engine/src/algo/sweep.ts
 var SWEEP_MAX_AGE_MS = 5e3;
 function sweepRefFor(s, quotes, sodex, now, maxAgeMs = SWEEP_MAX_AGE_MS) {
   const kind = s.reference ?? "oracleMid";
@@ -14478,7 +14478,7 @@ function sweepStep(s) {
   return { type: "send", price: price2, qty: qty2 };
 }
 
-// ../../packages/copy-engine/src/algo/plan.ts
+// packages/copy-engine/src/algo/plan.ts
 function exitLevels(side, x, avg) {
   const sign2 = side === "buy" ? 1 : -1;
   return {
@@ -14539,7 +14539,7 @@ function bandRefused(side, children, m, ref) {
   return children.filter((c) => c.price !== null && (side === "buy" ? c.price > ref * (1 + m.buyLimitUpRatio) + 1e-9 : c.price < ref * (1 - m.sellLimitDownRatio) - 1e-9)).length;
 }
 
-// ../../packages/copy-engine/src/algo/feed.ts
+// packages/copy-engine/src/algo/feed.ts
 var QUOTE_MAX_AGE_MS = 15e3;
 var HISTORY_MS = 60 * 6e4;
 var toNum = (v) => {
@@ -14801,7 +14801,7 @@ var AlgoFeed = class {
   }
 };
 
-// ../../packages/copy-engine/src/algo/sink.ts
+// packages/copy-engine/src/algo/sink.ts
 var TIF = { ioc: TimeInForce.IOC, gtx: TimeInForce.GTX, gtc: TimeInForce.GTC };
 function stopsAction(accountId, market, stops, builder) {
   return perpsActions.newOrder(
@@ -14913,7 +14913,7 @@ var KeyAlgoSink = class {
   }
 };
 
-// ../../packages/copy-engine/src/algo/reference.ts
+// packages/copy-engine/src/algo/reference.ts
 var BASIS_HALF_LIFE_MS = 3e4;
 var REF_MAX_AGE_MS = 2e3;
 var FairBasis = class {
@@ -14940,7 +14940,7 @@ var FairBasis = class {
   }
 };
 
-// ../../packages/copy-engine/src/algo/runtime.ts
+// packages/copy-engine/src/algo/runtime.ts
 var ALGO_TICK_MS = 500;
 var FLUSH_MS = 2e3;
 var MARKETS_REFRESH_MS2 = 10 * 6e4;
@@ -18320,14 +18320,14 @@ var AlgoRuntime = class {
   }
 };
 
-// ../../packages/copy-engine/src/index.ts
+// packages/copy-engine/src/index.ts
 var COPY_ENGINE_VERSION = "1.1.0";
 
-// src/service.ts
+// apps/executor/src/service.ts
 import { randomInt, timingSafeEqual as timingSafeEqual2 } from "node:crypto";
 import { existsSync as existsSync5 } from "node:fs";
 
-// src/audited.ts
+// apps/executor/src/audited.ts
 var said = (e) => e instanceof Error ? e.message : String(e);
 var intentRow = (i) => ({ clOrdID: i.clOrdID, side: i.side, quantity: i.quantity, limitPrice: i.limitPrice, reduceOnly: i.reduceOnly, leg: i.leg, notionalUsd: i.notionalUsd, clampedBy: i.clampedBy });
 var resultRow = (r) => ({ clOrdID: r.clOrdID, ok: r.ok, orderId: r.orderId, error: r.error, outcomeUnknown: r.outcomeUnknown });
@@ -18424,7 +18424,7 @@ function auditedAlgoSink(inner, db, builderOf) {
   };
 }
 
-// src/brake.ts
+// apps/executor/src/brake.ts
 import { readFileSync as readFileSync3, statSync as statSync2 } from "node:fs";
 var READ_EVERY_MS = 1e3;
 var MAINTENANCE_BRAKE_MAX_MS = 15 * 6e4;
@@ -18508,7 +18508,7 @@ var Brake = class {
   }
 };
 
-// src/guard.ts
+// apps/executor/src/guard.ts
 function classifyRejection(error) {
   const e = String(error ?? "");
   if (/^Not sent:/i.test(e)) return /order rate/i.test(e) ? "account-rate" : "local";
@@ -18701,7 +18701,7 @@ function guardedAlgoSink(inner, guard, budget, retryBudgetMs = LOCAL_RETRY_BUDGE
   };
 }
 
-// src/alerts.ts
+// apps/executor/src/alerts.ts
 import { readFileSync as readFileSync4 } from "node:fs";
 var DEDUPE_MS = 10 * 6e4;
 var PER_HOUR = 30;
@@ -18934,7 +18934,7 @@ function maintenanceFor(file, part, now = Date.now()) {
   }
 }
 
-// src/feed/ring.ts
+// apps/executor/src/feed/ring.ts
 import { closeSync, fstatSync, ftruncateSync, openSync, readSync, renameSync, statSync as statSync3, writeSync } from "node:fs";
 var DEFAULT_FEED_PATH = "/run/valuescan-feed/binance-l1";
 var MAGIC = "ARCFEED1";
@@ -19094,7 +19094,7 @@ function decode(b, at, n) {
   };
 }
 
-// src/feed/binance.ts
+// apps/executor/src/feed/binance.ts
 var BINANCE_FUTURES_WS = "wss://fstream.binance.com";
 var plainSockets = (url) => new wrapper_default(url, { perMessageDeflate: false });
 var SYMBOLS_PER_SOCKET = 8;
@@ -19162,7 +19162,7 @@ var BinanceBooks = class {
   }
 };
 
-// src/feed/reference.ts
+// apps/executor/src/feed/reference.ts
 import { existsSync as existsSync4 } from "node:fs";
 var POLL_MS = 2;
 var FALLBACK_AFTER_MS = 500;
@@ -19344,7 +19344,7 @@ var BinanceReference = class {
   }
 };
 
-// src/service.ts
+// apps/executor/src/service.ts
 var PAIR_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 var PAIR_MAX_TRIES = 10;
 var PAIR_LOCK_MS = 15 * 6e4;
@@ -20065,10 +20065,14 @@ var ExecutorService = class {
     return this.db.activity({ subId, limit: q.limit ?? 200, before: q.before });
   }
   /* ------------------------------------------------------------ algos ----- */
-  /** Whether real bots may start for this wallet through this request: the live-algo wallets, or the beta channel and the beta list. */
-  async liveBotFor(owner, ctx) {
+  /**
+   * Whether real bots may start for this wallet: the live-algo wallets, or a wallet on the beta list - from
+   * beta.valuedesk.so or the main site alike (owner, 2026-11-06: "if a wallet is whitelisted it can access it on
+   * the normal domain"). `owner` is the wallet that signed the request, so the list is asked about the signer.
+   */
+  async liveBotFor(owner, _ctx) {
     if (liveAlgosFor(this.cfg, owner)) return true;
-    return ctx.channel === "beta" && await this.betaListed(owner);
+    return this.betaListed(owner);
   }
   /** The beta list, asked of the API server (EXECUTOR_BETA_URL) and kept a minute; unreadable: not listed (fails closed). */
   betaCache = /* @__PURE__ */ new Map();
@@ -20340,7 +20344,7 @@ var ExecutorService = class {
   }
 };
 
-// src/server.ts
+// apps/executor/src/server.ts
 var BODY_LIMIT = 64 * 1024;
 var PREFIX = "/api/copy/v1";
 function withoutSeries(views) {
@@ -20598,7 +20602,7 @@ function createExecutorServer(svc, cfg, log) {
   });
 }
 
-// src/main.ts
+// apps/executor/src/main.ts
 var LEVELS = { debug: 10, info: 20, warn: 30, error: 40 };
 function logger(level) {
   const at = LEVELS[level];

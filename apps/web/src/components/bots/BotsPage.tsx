@@ -24,7 +24,7 @@ import { liveBotsFor } from '../../algo/liveAlgos';
 import { notify } from '../../toast';
 import { useConfirm } from '../Modal';
 import { useBots } from '../../bots/useBots';
-import { goBots, useBotsView, type BotsView } from '../../bots/routes';
+import { BOTS_ON, goBots, useBotsView, type BotsView } from '../../bots/routes';
 import { DEFAULT_BOT_FEE_TENTHS } from '../../bots/presets';
 import { BotSetupSheet, botReady } from './BotSetupSheet';
 import { botName } from './botWords';
@@ -36,6 +36,9 @@ import { BotsSavings } from './BotsSavings';
 import { StatusPill, type Tone } from './kit/kit';
 import type { BotState } from './botWords';
 import { STATE_WORD } from './botWords';
+import { applyForBeta, useBetaAccessState } from '../../beta/access';
+import { openConnectDialog } from '../account/connect';
+import { Button, EmptyState, Panel, Shell } from './kit/kit';
 import './bots.css';
 import './botsPages.css';
 
@@ -85,7 +88,39 @@ export function StatePill({ s, size = 'md' }: { s: BotState; size?: 'sm' | 'md' 
   return <StatusPill tone={STATE_TONE[s]} size={size} dot pulse={s === 'running'} className={`bots-state is-${s}`}>{STATE_WORD[s]}</StatusPill>;
 }
 
+/** Bots are in beta (owner, 2026-11-06): a wallet on the beta list gets the page, everyone else the way to apply. */
 export function BotsPage({ address, provider }: { address: string | null; provider: Eip1193Provider | null }) {
+  const listed = useBetaAccessState(address);
+  // Local builds of the section (BOTS_ON: dev, or VITE_BOTS) open it for any wallet; real orders stay the executor's call.
+  const access = BOTS_ON ? 'open' : listed;
+  if (access === 'open') return <BotsPageOpen address={address} provider={provider} />;
+  return (
+    <div className="tf bots-page">
+      <div className="bots-col">
+        <BotsHead title="Bots" sub="Market makers that run around the clock in your SoDEX account, from the ValueDesk executor." />
+        <Shell className="bots-locked">
+          <Panel>
+            <EmptyState
+              icon="robot"
+              title={access === 'checking' ? 'Checking beta access' : 'Bots are in beta'}
+              description={access === 'checking'
+                ? 'Checking whether this wallet has beta access…'
+                : <>Market-making and grid strategies that run around the clock, for beta testers for now. Apply on our Discord{address ? '; once your wallet is added, this page opens for it.' : ', then connect the wallet that was added.'}</>}
+              actions={access === 'checking' ? undefined : (
+                <>
+                  <Button variant="primary" onClick={applyForBeta}>Get access</Button>
+                  {!address && <Button variant="secondary" icon="wallet" onClick={() => void openConnectDialog()}>Connect wallet</Button>}
+                </>
+              )}
+            />
+          </Panel>
+        </Shell>
+      </div>
+    </div>
+  );
+}
+
+function BotsPageOpen({ address, provider }: { address: string | null; provider: Eip1193Provider | null }) {
   const view = useBotsView();
   const live = useLiveCopy(address, provider);
   const signedIn = readiness(live, 'hosted').connected;

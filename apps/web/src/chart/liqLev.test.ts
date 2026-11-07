@@ -8,7 +8,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { KLineData } from 'klinecharts';
 import type { LiqHeatmap as HeatApi } from '@sign/indexer/liqRead.js';
-import { isAllLev, levBandOf, levFilterOf, levRgb, levelWindow, robustMax, shownTotal, sideBands } from './liqLev';
+import { barFit, isAllLev, levBandOf, levFilterOf, levRgb, levelWindow, robustMax, shownTotal, sideBands } from './liqLev';
 import { cellOf, fitRanges, heatScale, type HeatPoint } from './liqHeatIndicator';
 import { mapData } from './liqMap';
 
@@ -111,4 +111,24 @@ test('the map of the levels now keeps the bands shown, and reads old rows', () =
   assert.deepEqual(all.bands, [[0, 0, 10_000, 5_000], [7_000, 0, 0, 0]]);
   const high = mapData(a, { lev: ['high'] })!;
   assert.deepEqual(high.rows.map((r) => [r[1], r[2]]), [[10_000, 0]], 'the old row and the low short are left out');
+});
+
+test('barFit: zoomed out at a fine step every real level fits; only a few lone outliers run past the axis', () => {
+  // ~13k bars like BTC at $1 zoomed out (the owner's screenshot, 2026-11-07): most under $4M, the axis was ~$33M (8x the
+  // 99th percentile) and some 20 real levels of $35-150M ran into its top.
+  let x = 7;
+  const r = () => { x = (x * 1664525 + 1013904223) >>> 0; return x / 2 ** 32; };
+  const bars = [...Array.from({ length: 12_980 }, () => 1e3 + r() ** 3 * 4e6), ...Array.from({ length: 20 }, () => 3.5e7 + r() * 1.15e8)];
+  const top = Math.max(...bars);
+  assert.equal(barFit(bars), top, 'no level is clipped');
+  assert.ok(robustMax(bars) < top, 'what the quantile scale did: the top of the tail clipped');
+  // SoDEX BTC: two ~$70M accounts beside levels under $0.3M - those two drawn at full, the rest readable.
+  const sodex = [...Array.from({ length: 400 }, (_, i) => 1e3 + (i % 50) * 5e3), 3e5, 7.8e7, 7.7e7];
+  assert.equal(barFit(sodex), 3e5);
+  // A single giant one; and no gap anywhere: the largest.
+  assert.equal(barFit([1, 2, 3, 100]), 3);
+  assert.equal(barFit([10, 9, 8, 7, 6, 5]), 10);
+  // More than three alone up there is not "a few": the largest.
+  assert.equal(barFit([100, 100, 100, 100, 1, 1]), 100);
+  assert.equal(barFit([]), 0);
 });

@@ -7,21 +7,22 @@
  *                    much the copy trades with, and the signatures that mode
  *                    still needs (copy/CopySetupSheet.tsx CopySetupSteps)
  *
- * Two columns: what you are copying and what it would have made you on the left
- * (the trader's PnL against yours, replayed from their real fills under these
- * rules), what you decide on the right. The steps slide into each other; with
- * reduced motion they swap. Step 2 shows only what the mode still needs: the
- * terms, sign-in, key or fee approval done before are a line of pills.
+ * One column (owner, 2026-11-07, after two reference screenshots, in our own style): the trader's
+ * figures in a row, copy or counter, the expected PnL replayed from their real fills over a wide chart,
+ * then the rules as cards - Rules and Risk & markets as two tabs - with the progress of the two steps
+ * in the footer. The steps slide into each other; with reduced motion they swap. Step 2 shows only
+ * what the mode still needs: the terms, sign-in, key or fee approval done before are a line of pills.
  *
  * Every number is the setup form's (setup.ts) and the backtest's (useCopy.ts);
  * nothing here starts anything until "Start copying", and that needs every step
  * of the mode done by the follower's own signatures.
  */
 import { decimalInput } from '../numberInput';
-import { useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import { COPY_FEE_MAX, EEA_MAX_LEVERAGE, feePercent, regionPolicy } from '@copy-engine';
+import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
+import { COPY_FEE_MAX, COPY_FEE_WINDOW_DAYS, EEA_MAX_LEVERAGE, copyFeeFor, feePercent, regionPolicy } from '@copy-engine';
+import { subscribeTerms, termsView } from '../../trading/terms';
 import { Modal } from '../Modal';
-import { DlgRow, DlgSection, DlgSwitch } from '../dialogParts';
+import { DlgSwitch } from '../dialogParts';
 import { LoadFailed } from '../LoadFailed';
 import { DASH, fmt, fmtUsd, shortAddr } from '../../format';
 import { notify } from '../../toast';
@@ -34,7 +35,7 @@ import { EquityChart } from './EquityChart';
 import { Avatar, CopyGlyph, CounterGlyph, WinRate, holdPeeks } from './TraderCard';
 import { coinOf } from './sim';
 import {
-  MULTIPLIER_PRESETS, SIZING_MODES, TAKER_RATE, fmtRate, fmtSignedPct, fmtSignedUsd, previewFigures, workedExample, type SetupField, type SetupState,
+  MULTIPLIER_MIN, SIZING_MODES, TAKER_RATE, fmtRate, fmtSignedPct, fmtSignedUsd, previewFigures, workedExample, type SetupField, type SetupState,
 } from './setup';
 import { FILL_LIMIT, type CopyContext } from './useCopy';
 import { NotCopyableNote, useNotCopyable } from './useNotCopyable';
@@ -68,6 +69,8 @@ export function CopyModal({ c, open, row, onClose, onStarted }: CopyModalProps) 
   }, [open, c.leader]);
   // The replay's fill walk goes first: the grid's card reads wait while the dialog is open.
   useEffect(() => (open ? holdPeeks() : undefined), [open]);
+  // Paper copies are not offered here any more (owner 2026-11-07): a setup kept from before starts live.
+  useEffect(() => { if (open && c.setup.paper) c.patchSetup({ paper: false }); }, [open, c.setup.paper]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!c.leader) return null;
   const counter = c.setup.direction === 'counter';
@@ -79,19 +82,13 @@ export function CopyModal({ c, open, row, onClose, onStarted }: CopyModalProps) 
   const errs = [...Object.values(c.parsed.errors), ...(Object.keys(c.parsed.errors).length ? [] : c.copyErrors)] as string[];
 
   const title = (
-    <span className="cpy-mtitle">
-      <Avatar address={c.leader} size={22} />
-      <span>{counter ? 'Counter-trade' : 'Copy'} {shortAddr(c.leader)}</span>
-      <span className="cpy-mtitle__venue">{VENUE_LABEL[c.venue]}</span>
-      <span className="cpy-msteps" role="list" aria-label="Steps">
-        <button type="button" role="listitem" className={`cpy-msteps__s${step === 1 ? ' is-on' : ' is-done'}`} onClick={() => setStep(1)}>
-          <i>1</i>Rules
-        </button>
-        <span className="cpy-msteps__line" aria-hidden="true" />
-        <button type="button" role="listitem" className={`cpy-msteps__s${step === 2 ? ' is-on' : ''}`} disabled={errs.length > 0} onClick={() => setStep(2)} title={errs[0]}>
-          <i>2</i>Where it runs
-        </button>
+    <span className="cpy-v2head">
+      <span className="cpy-mtitle">
+        <Avatar address={c.leader} size={22} />
+        <span>{counter ? 'Counter-trade' : 'Copy'} {shortAddr(c.leader)}</span>
+        <span className="cpy-mtitle__venue">{VENUE_LABEL[c.venue]}</span>
       </span>
+      <span className="cpy-v2head__sub">{step === 1 ? 'Set the rules your copy follows.' : 'Where the copier runs and what it trades with.'}</span>
     </span>
   );
 
@@ -114,13 +111,20 @@ export function CopyModal({ c, open, row, onClose, onStarted }: CopyModalProps) 
 
   const footer = (
     <div className="cpy-mfoot">
+      <span className="cpy-v2prog">
+        <span className="cpy-v2prog__bar" role="progressbar" aria-label="Steps" aria-valuemin={1} aria-valuemax={2} aria-valuenow={step}>
+          <button type="button" className="cpy-v2prog__seg is-on" aria-label="Step 1: rules" onClick={() => setStep(1)} />
+          <button type="button" className={`cpy-v2prog__seg${step === 2 ? ' is-on' : ''}`} aria-label="Step 2: where it runs" disabled={errs.length > 0} onClick={() => setStep(2)} title={errs[0]} />
+        </span>
+        <span className="cpy-v2prog__n">{step}/2</span>
+      </span>
       <span className="cpy-mfoot__note">
         {step === 1
           ? (errs.length ? <span className="cpy-mfoot__err">{errs[0]}</span> : 'Next: where the copier runs and what it trades with.')
           // A rule that is wrong (the amount to trade with is on this step) says so here: Start is off for it, and "Ready" would not be true.
           : errs.length ? <span className="cpy-mfoot__err">{errs[0]}</span>
           : ready ? (c.setup.paper ? 'Ready: a paper copy sends nothing to SoDEX.' : 'Ready to start.') : counterBlocked ? 'This copier cannot counter-trade.'
-          : multBlocked ? 'This copier copies at 1x only.' : 'Finish the steps on the right first.'}
+          : multBlocked ? 'This copier copies at 1x only.' : 'Finish the steps above first.'}
       </span>
       <span className="cpy-mfoot__acts">
         {step === 1 ? (
@@ -146,7 +150,7 @@ export function CopyModal({ c, open, row, onClose, onStarted }: CopyModalProps) 
   );
 
   return (
-    <Modal open={open} title={title} onClose={onClose} size="lg" className="fx cpy-modal" footer={footer} onBack={step === 2 ? () => setStep(1) : undefined}>
+    <Modal open={open} title={title} onClose={onClose} size="lg" className="fx cpy-modal cpy-modal--v2" footer={footer} onBack={step === 2 ? () => setStep(1) : undefined}>
       <div key={step} className={`cpy-stepview cpy-stepview--${dir.current}`}>
         {/* Said only once the executor has answered: before that, its features are not known. */}
         {step === 1 ? <RulesStep c={c} row={row} errs={errs} /> : <RunStep c={c} multBlocked={multBlocked && c.runOn !== 'browser' && !!c.live[c.runOn].info} />}
@@ -175,6 +179,10 @@ function RulesStep({ c, row, errs }: { c: CopyContext; row: TraderRow | null; er
   const counter = c.setup.direction === 'counter';
   // Which of their positions and recent coins a copy cannot follow on SoDEX, before it starts (owner, 2026-10-29).
   const copyVenue = c.venue === 'sodex' || c.venue === 'hyperliquid' ? c.venue : null;
+  const [tab, setTab] = useState<'rules' | 'risk'>('rules');
+  // A rule of the other tab that is wrong says so on its tab.
+  const riskBad = ['stopLoss', 'takeProfit', 'drawdown', 'allow', 'deny'].some((k) => (e as Record<string, string | undefined>)[k]);
+  const rulesBad = ['mode', 'ratioPct', 'notional', 'multiplier', 'maxLeverage', 'maxPosition', 'slippageBps'].some((k) => (e as Record<string, string | undefined>)[k]);
   const notCopyable = useNotCopyable({
     enabled: copyVenue !== null,
     venue: copyVenue ?? 'hyperliquid',
@@ -184,9 +192,9 @@ function RulesStep({ c, row, errs }: { c: CopyContext; row: TraderRow | null; er
   });
 
   return (
-    <div className="cpy-mgrid">
-      <aside className="cpy-mside">
-        <dl className="cpy-mstats">
+    <div className="cpy-v2">
+      <div className="cpy-v2__top">
+        <dl className="cpy-v2__stats">
           <div><dt>Equity</dt><dd>{av === null ? DASH : fmtUsd(av, 0)}</dd></div>
           <div><dt>30D PnL</dt><dd className={pnl30 === null ? '' : pnl30 >= 0 ? 'pos' : 'neg'}>{fmtSignedUsd(pnl30, 0)}</dd></div>
           <div><dt>Win rate</dt><dd><WinRate value={wr} closes={closes} /></dd></div>
@@ -216,10 +224,19 @@ function RulesStep({ c, row, errs }: { c: CopyContext; row: TraderRow | null; er
         )}
 
         <Preview c={c} />
-      </aside>
+      </div>
 
-      <div className="cpy-mmain dlg">
-        <Group title="Size">
+      <div className="cpy-v2__tabs" role="tablist" aria-label="Copy rules">
+        <button type="button" role="tab" aria-selected={tab === 'rules'} className={`cpy-v2__tab${tab === 'rules' ? ' is-on' : ''}`} onClick={() => setTab('rules')}>
+          Rules{rulesBad && <i className="cpy-v2__tabdot" aria-label="needs a fix" />}
+        </button>
+        <button type="button" role="tab" aria-selected={tab === 'risk'} className={`cpy-v2__tab${tab === 'risk' ? ' is-on' : ''}`} onClick={() => setTab('risk')}>
+          Risk & markets{riskBad && <i className="cpy-v2__tabdot" aria-label="needs a fix" />}
+        </button>
+      </div>
+
+      {tab === 'rules' ? (
+      <div className="cpy-v2__cards dlg" role="tabpanel">
           <Rule
             title="Sizing"
             hint={SIZING_MODES.find((m) => m.v === c.setup.mode)?.hint}
@@ -236,36 +253,18 @@ function RulesStep({ c, row, errs }: { c: CopyContext; row: TraderRow | null; er
             {c.setup.mode === 'fixedRatio' && <Num id={`${uid}-ratio`} value={c.setup.ratioPct} onChange={set('ratioPct')} unit="%" error={e.ratioPct} label="Percent of their size" />}
             {c.setup.mode === 'fixedNotional' && <Num id={`${uid}-notional`} value={c.setup.notional} onChange={set('notional')} unit="USDC" error={e.notional} label="Per trade" />}
           </Rule>
-          <Rule title="Multiplier" hint="Copies a multiple of the trader's positions. 1× mirrors them. Your caps below still apply." wide>
-            <span className="cpy-mult">
-              <span className="dlg-seg" role="group" aria-label="Multiplier presets">
-                {MULTIPLIER_PRESETS.map((m) => {
-                  const on = Number(c.setup.multiplier.replace(',', '.')) === m;
-                  return (
-                    <button key={m} type="button" aria-pressed={on} className={on ? 'is-on' : undefined} onClick={() => c.patchSetup({ multiplier: String(m) })}>
-                      {localize(String(m))}×
-                    </button>
-                  );
-                })}
-              </span>
-              <Num id={`${uid}-mult`} value={c.setup.multiplier} onChange={set('multiplier')} unit="×" error={e.multiplier} label="Multiplier" />
-            </span>
+          <Rule title="Multiplier" hint="Copies a multiple of the trader's positions. 1× mirrors them. Your caps below still apply.">
+            <SlideField value={c.setup.multiplier} min={MULTIPLIER_MIN} max={5} step={0.1} unit="×" onChange={set('multiplier')} error={e.multiplier} label="Multiplier" />
           </Rule>
-        </Group>
-
-        <Group title="Limits">
-          <Rule title="Max leverage" hint={eea ? `Caps every copied position. In the EU and EEA copies are capped at ${EEA_MAX_LEVERAGE}x.` : 'Caps every copied position, even when the trader uses more.'} wide>
-            <LevSlider value={c.setup.maxLeverage} max={eea ? EEA_MAX_LEVERAGE : LEV_MAX} onChange={set('maxLeverage')} error={e.maxLeverage} />
+          <Rule title="Max leverage" hint={eea ? `Caps every copied position. In the EU and EEA copies are capped at ${EEA_MAX_LEVERAGE}x.` : 'Caps every copied position, even when the trader uses more.'}>
+            <SlideField value={c.setup.maxLeverage} min={1} max={eea ? EEA_MAX_LEVERAGE : LEV_MAX} step={1} unit="×" onChange={set('maxLeverage')} error={e.maxLeverage} label="Max leverage" />
           </Rule>
           <Rule title="Max position" hint="The largest a single copied position may get, in dollars.">
             <Num id={`${uid}-maxpos`} value={c.setup.maxPosition} onChange={set('maxPosition')} unit="USDC" error={e.maxPosition} label="Max position" />
           </Rule>
           <Rule title="Max entry deviation" hint={`How far from the trader's price a copy may fill. ${c.setup.slippageBps || '0'} bps = ${fmtFixed(Number(c.setup.slippageBps || 0) / 100, 2)}%.`}>
-            <Num id={`${uid}-slip`} value={c.setup.slippageBps} onChange={set('slippageBps')} unit="bps" error={e.slippageBps} label="Slippage cap" />
+            <SlideField value={c.setup.slippageBps} min={0} max={100} step={1} unit="bps" onChange={set('slippageBps')} error={e.slippageBps} label="Max entry deviation" />
           </Rule>
-        </Group>
-
-        <Group title="Behaviour">
           <Rule
             title="Only new positions"
             hint={c.setup.onlyNew
@@ -274,14 +273,9 @@ function RulesStep({ c, row, errs }: { c: CopyContext; row: TraderRow | null; er
           >
             <Switch checked={c.setup.onlyNew} onChange={(v) => c.patchSetup({ onlyNew: v })} label="Only copy newly opened positions" on="Only new" off="Off" />
           </Rule>
-          <Rule title="Paper copy" hint="Follows the trader live and keeps the books, but sends nothing to SoDEX. No fee, no key.">
-            <Switch checked={c.setup.paper} onChange={(v) => c.patchSetup({ paper: v })} label="Paper copy" on="Paper" off="Live" />
-          </Rule>
-        </Group>
-
-        <details className="cpy-adv">
-          <summary>Risk controls and markets</summary>
-          <div className="cpy-rows">
+      </div>
+      ) : (
+      <div className="cpy-v2__cards dlg" role="tabpanel">
             <Rule title="Stop loss" hint="Closes a copied position when it has lost this share of its margin. Leave it empty to turn it off.">
               <Num id={`${uid}-sl`} value={c.setup.stopLoss} onChange={set('stopLoss')} unit="%" placeholder="off" error={e.stopLoss} label="Stop loss" />
             </Rule>
@@ -305,12 +299,10 @@ function RulesStep({ c, row, errs }: { c: CopyContext; row: TraderRow | null; er
                 <Switch checked={c.setup.confirmEach} onChange={(v) => c.patchSetup({ confirmEach: v })} label="Ask before each trade" on="Asks first" off="Automatic" />
               </Rule>
             )}
-          </div>
-          <button type="button" className="fx-link cpy-reset" onClick={c.resetSetup}>Back to the default rules</button>
-        </details>
-
-        {errs.length > 1 && <p className="fx-note fx-note--err">{errs.join(' ')}</p>}
       </div>
+      )}
+      <button type="button" className="fx-link cpy-reset cpy-v2__reset" onClick={c.resetSetup}>Reset</button>
+      {errs.length > 1 && <p className="fx-note fx-note--err">{errs.join(' ')}</p>}
     </div>
   );
 }
@@ -325,9 +317,13 @@ function Preview({ c }: { c: CopyContext }) {
   const r = c.sim.result;
   const counter = c.setup.direction === 'counter';
   const windows = [{ v: '7d', label: '7D' }, { v: '30d', label: '30D' }] as const;
+  const big = r && r.copiedFills + r.skippedFills > 0 && !Object.keys(c.parsed.errors).length ? previewFigures(r).you.roi : null;
   const head = (
     <div className="cpy-replay__head">
-      <span className="cpy-replay__k">{counter ? 'Expected PnL, counter-trading' : 'Expected PnL, copying'}</span>
+      <span className="cpy-v2ret">
+        <span className="cpy-replay__k">{counter ? 'Expected PnL, counter-trading' : 'Expected PnL, copying'} ({c.window === '7d' ? '7D' : '30D'})</span>
+        {big !== null && <b className={`cpy-v2ret__v${big > 0 ? ' pos' : big < 0 ? ' neg' : ''}`}>{fmtSignedPct(big)}</b>}
+      </span>
       <span className="cpy-seg cpy-seg--sm" role="group" aria-label="Replay window">
         {windows.map((w) => (
           <button key={w.v} type="button" aria-pressed={c.window === w.v} className={c.window === w.v ? 'is-on' : undefined} onClick={() => c.setWindow(w.v)}>{w.label}</button>
@@ -387,40 +383,71 @@ function Preview({ c }: { c: CopyContext }) {
   );
 }
 
-/** Max leverage on the order ticket's slider (OrderEntry.css .oe-slider), with its value and a few stops. */
 const LEV_MAX = 50;
-const LEV_STOPS = [1, 2, 3, 5, 10, 20] as const;
 
-function LevSlider({ value, max, onChange, error }: { value: string; max: number; onChange: (v: string) => void; error?: string }) {
-  const n = Number(value);
-  const cur = Number.isFinite(n) && n >= 1 ? Math.min(max, Math.round(n)) : 1;
-  const p = max > 1 ? (cur - 1) / (max - 1) : 1;
+/**
+ * A number in a box with its fill (owner 2026-11-07, after a reference): drag across the box, or arrow keys, to set it;
+ * a press on the number types it. A typed value may go past the slider's end (the setup's own limits say what holds).
+ */
+function SlideField({ value, min, max, step, unit, onChange, error, label }: {
+  value: string; min: number; max: number; step: number; unit: string; onChange: (v: string) => void; error?: string; label: string;
+}) {
+  const [typing, setTyping] = useState(false);
+  const n = Number(String(value).replace(',', '.'));
+  const cur = Number.isFinite(n) ? n : min;
+  const p = Math.max(0, Math.min(1, (cur - min) / Math.max(1e-9, max - min)));
+  const dp = step < 1 ? 1 : 0;
+  const snap = (v: number) => String(Number((Math.round(Math.max(min, Math.min(max, v)) / step) * step).toFixed(dp)));
+  const at = (e: ReactPointerEvent<HTMLElement>) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    onChange(snap(min + ((e.clientX - r.left) / Math.max(1, r.width)) * (max - min)));
+  };
   return (
-    <span className={`cpy-lev${error ? ' is-bad' : ''}`}>
-      <span className="oe-slider cpy-lev__slider">
-        <span className="oe-slider__rail" style={{ ['--oe-p' as string]: p } as CSSProperties}>
-          <span className="oe-slider__fill" />
+    <>
+      <span
+        className={`cpy-slide${error ? ' is-bad' : ''}${typing ? ' is-typing' : ''}`}
+        role="slider"
+        tabIndex={typing ? -1 : 0}
+        aria-label={label}
+        aria-valuemin={min}
+        aria-valuemax={max}
+        aria-valuenow={cur}
+        aria-valuetext={`${localize(String(cur))} ${unit}`}
+        title={error}
+        onPointerDown={(e) => {
+          if (typing || (e.target as HTMLElement).closest('.cpy-slide__v')) return;
+          e.currentTarget.setPointerCapture(e.pointerId);
+          at(e);
+        }}
+        onPointerMove={(e) => { if (e.currentTarget.hasPointerCapture(e.pointerId)) at(e); }}
+        onKeyDown={(e) => {
+          if (typing) return;
+          if (e.key === 'ArrowRight' || e.key === 'ArrowUp') { e.preventDefault(); onChange(snap(cur + step)); }
+          else if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') { e.preventDefault(); onChange(snap(cur - step)); }
+          else if (e.key === 'Enter') setTyping(true);
+        }}
+      >
+        <span className="cpy-slide__fill" style={{ width: `${p * 100}%` }} aria-hidden="true" />
+        {typing ? (
           <input
-            className="oe-slider__input"
-            type="range"
-            min={1}
-            max={max}
-            step={1}
-            value={cur}
-            aria-label="Max leverage"
-            aria-valuetext={`${cur}x`}
-            onChange={(e) => onChange(e.currentTarget.value)}
+            className="cpy-slide__in"
+            autoFocus
+            value={toInputText(value)}
+            onChange={(e) => onChange(decimalInput(e.target.value, { prev: value }))}
+            onBlur={() => setTyping(false)}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === 'Escape') { e.preventDefault(); setTyping(false); } }}
+            inputMode="decimal"
+            spellCheck={false}
+            aria-label={label}
+            aria-invalid={error ? true : undefined}
           />
-        </span>
-      </span>
-      <span className="cpy-lev__v">{cur}x</span>
-      <span className="cpy-lev__stops">
-        {LEV_STOPS.filter((x) => x <= max).map((x) => (
-          <button key={x} type="button" className={`cpy-chip${cur === x ? ' is-on' : ''}`} aria-pressed={cur === x} onClick={() => onChange(String(x))}>{x}x</button>
-        ))}
+        ) : (
+          <button type="button" className="cpy-slide__v" title="Type a value" onClick={() => setTyping(true)}>{localize(String(cur))}</button>
+        )}
+        <span className="cpy-slide__u" aria-hidden="true">{unit}</span>
       </span>
       {error && <small className="cpy-ferr" role="alert">{error}</small>}
-    </span>
+    </>
   );
 }
 
@@ -442,12 +469,18 @@ function RunStep({ c, multBlocked }: { c: CopyContext; multBlocked: boolean }) {
     return () => { dead = true; };
   }, [wallet]);
   const taker = TAKER_RATE.sodex;
-  const fee = c.setup.paper ? 0 : COPY_FEE_MAX / 100_000;
+  /* The copy fee this wallet pays (owner 2026-11-07: "get the users actual fee instead of up to"). The ValueDesk executor
+     charges the ladder's step of the wallet's 14-day volume (executor service.ts copyFeeFor); the fee terms carry that
+     volume when they count the same 14 days. This browser charges the top step (copy/browserCopier.ts). */
+  useSyncExternalStore(subscribeTerms, () => termsView(wallet)?.volumeUsd ?? null, () => null);
+  const tv = termsView(wallet);
+  const vol14 = tv && tv.volumeDays === COPY_FEE_WINDOW_DAYS ? tv.volumeUsd : null;
+  const feeTenths = c.setup.paper ? 0 : c.runOn === 'hosted' ? copyFeeFor(vol14) : COPY_FEE_MAX;
+  const fee = feeTenths / 100_000;
   const chips = useMemo(() => [0.25, 0.5, 0.75, 1], []);
 
   return (
-    <div className="cpy-mgrid">
-      <aside className="cpy-mside">
+    <div className="cpy-v2">
         <h3 className="cpy-h">Where the copier runs</h3>
         <ModeCards value={c.runOn} onChange={c.setRunOn} />
         {c.setup.direction === 'counter' && !supportsCounter(c.live, c.runOn) && (
@@ -469,13 +502,17 @@ function RunStep({ c, multBlocked }: { c: CopyContext; multBlocked: boolean }) {
           </p>
         )}
         <dl className="cpy-fees">
-          <div><dt>Copy fee</dt><dd>{c.setup.paper ? 'none (paper)' : `up to ${localize(feePercent(COPY_FEE_MAX))} per copied order`}</dd></div>
+          <div>
+            <dt>Your copy fee</dt>
+            <dd title={c.runOn === 'hosted' ? 'The step of your verified 14-day volume; it falls as the volume grows.' : 'A copy in this browser pays the first step.'}>
+              {c.setup.paper ? 'none (paper)' : `${localize(feePercent(feeTenths))} per copied order`}
+            </dd>
+            {c.runOn === 'hosted' && vol14 !== null && <small className="cpy-fees__sub">{`14-day volume ${fmtUsd(vol14, 0)}`}</small>}
+          </div>
           <div><dt>SoDEX taker fee</dt><dd>{fmtRate(taker)}</dd></div>
           <div><dt>Round trip, est.</dt><dd>{fmtRate(taker * 2 + fee * 2)} + slippage</dd></div>
         </dl>
-      </aside>
 
-      <div className="cpy-mmain">
         <div className="cpy-alloc">
           <label className="cpy-alloc__k" htmlFor={`${uid}-alloc`}>Trade with</label>
           <span className={`cpy-alloc__box${c.parsed.errors.allocation || c.copyErrors.some((x) => x.startsWith('Allocation')) ? ' is-bad' : ''}`}>
@@ -516,7 +553,6 @@ function RunStep({ c, multBlocked }: { c: CopyContext; multBlocked: boolean }) {
           You choose the trader and every rule; ValueDesk never holds your funds. Not investment advice: past results do not predict future
           ones. <a className="fx-link" href="/copy-terms" target="_blank" rel="noopener">Copy terms and risks</a>.
         </p>
-      </div>
     </div>
   );
 }
@@ -558,23 +594,17 @@ function Needs({ c }: { c: CopyContext }) {
 
 /* ============================================================= parts ====== */
 
-/* The Settings language (dialogParts.tsx): a labelled section, a row per rule
-   with its explanation in view, fields with their unit, switches that say what
-   they mean. */
-function Group({ title, children }: { title: string; children: ReactNode }) {
-  return <DlgSection label={title}>{children}</DlgSection>;
-}
-
+/* The Settings language (dialogParts.tsx): fields with their unit, switches that say what they mean. */
 /** One rule: its name, what it does in one line, its control, and an optional worked line. */
 function Rule({ title, hint, note, children, wide }: { title: string; hint?: string; note?: ReactNode; children: ReactNode; wide?: boolean }) {
   return (
-    <DlgRow
-      title={title}
-      line={hint || note ? <>{hint}{note && <span className="cpy-rule__d">{note}</span>}</> : undefined}
-      stack={wide}
-    >
-      {children}
-    </DlgRow>
+    <div className={`cpy-v2card${wide ? ' cpy-v2card--wide' : ''}`}>
+      <div className="cpy-v2card__text">
+        <span className="cpy-v2card__t">{title}</span>
+        {(hint || note) && <span className="cpy-v2card__d">{hint}{note && <span className="cpy-rule__d">{note}</span>}</span>}
+      </div>
+      <div className="cpy-v2card__ctl">{children}</div>
+    </div>
   );
 }
 
