@@ -26,9 +26,10 @@ test('legalForPath: tolerant like tabForPath, null for anything else', () => {
 });
 
 test('Bots on the main site: in the nav as coming soon, no route; the beta channel has the page', () => {
-  assert.ok(soonTabs(undefined).has('bots'));
+  // Bots is a page on the main site too: it asks the beta list itself (owner 2026-11-06).
+  assert.equal(soonTabs(undefined).size, 0);
   assert.equal(soonTabs('beta').size, 0);
-  assert.equal(tabForPath('/bots', soonTabs(undefined)), null, '/bots lands where an unknown path does');
+  assert.equal(tabForPath('/bots', soonTabs(undefined)), 'bots');
   assert.equal(tabForPath('/Bots/', soonTabs('beta')), 'bots');
   assert.equal(tabForPath('/copy', soonTabs(undefined)), 'copy');
 });

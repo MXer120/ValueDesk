@@ -939,10 +939,14 @@ export class ExecutorService {
 
   /* ------------------------------------------------------------ algos ----- */
 
-  /** Whether real bots may start for this wallet through this request: the live-algo wallets, or the beta channel and the beta list. */
-  private async liveBotFor(owner: string, ctx: RequestContext): Promise<boolean> {
+  /**
+   * Whether real bots may start for this wallet: the live-algo wallets, or a wallet on the beta list - from
+   * beta.valuedesk.so or the main site alike (owner, 2026-11-06: "if a wallet is whitelisted it can access it on
+   * the normal domain"). `owner` is the wallet that signed the request, so the list is asked about the signer.
+   */
+  private async liveBotFor(owner: string, _ctx: RequestContext): Promise<boolean> {
     if (liveAlgosFor(this.cfg, owner)) return true;
-    return ctx.channel === 'beta' && (await this.betaListed(owner));
+    return this.betaListed(owner);
   }
 
   /** The beta list, asked of the API server (EXECUTOR_BETA_URL) and kept a minute; unreadable: not listed (fails closed). */

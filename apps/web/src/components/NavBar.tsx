@@ -30,9 +30,8 @@ import { fmtDecimalString } from '../numStyle';
 import type { Engine } from '../api';
 import { BrandMark } from './BrandMark';
 
-/** beta.valuedesk.so (VITE_CHANNEL=beta): the Beta tag beside the brand, as the admin suite shows Dev. */
-const BETA = import.meta.env.VITE_CHANNEL === 'beta';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { applyForBeta, useBetaAccess } from '../beta/access';
 import { NAV_TABS, SOON_TABS, TAB_LABELS, pathForTab, type LegalPage, type SodexView, type Tab } from '../router';
 import { preloadWalletModal, warmWalletModal } from '../walletconnect';
 import { Notices } from './Notices';
@@ -135,6 +134,7 @@ export function NavBar({
      is exactly how a masked address would have leaked in one place while being
      hidden in another. */
   const maskAddr = useAddressMask();
+  const botsOpen = useBetaAccess(address);
   const addrRoot = useRef<HTMLDivElement>(null);
   const addrHover = useHoverMenu(addrRoot);
   const addrMenu = addrHover.open;
@@ -197,16 +197,15 @@ export function NavBar({
   return (
     <header ref={bar} className={`navbar${rail ? ' navbar--rail' : ''}`}>
       {/* The bar's ground over the page that scrolls behind it: blur bands under a tint (shell.css). */}
-      <div className="navbar__glass" aria-hidden="true"><i /><i /><i /><i /><i /><i /></div>
+      <div className="navbar__glass" aria-hidden="true" />
       <div className="navbar-inner">
         {!rail && (
           <span className="brand">
             <BrandMark />
             ValueDesk
-            {BETA && <span className="dv-devtag dv-devtag--beta">Beta</span>}
+            <span className="dv-devtag dv-devtag--beta brand__beta">Beta</span>
           </span>
         )}
-        {rail && BETA && <span className="dv-devtag dv-devtag--beta">Beta</span>}
         {rail && marketType && (
           <div className={`nav-seg-slot${onTrade ? ' is-on' : ''}`} aria-hidden={!onTrade}>
             <div className="nav-seg-slot__in">
@@ -217,7 +216,13 @@ export function NavBar({
         )}
         <nav className="navlinks">
           {NAV_TABS.map((t) => t === 'trade' ? (
-            <NavTrade key={t} tab={tab} engine={engine} onEngine={onEngine} onNavigate={onNavigate} onOpenSodex={onOpenSodex} sodexOn={sodexOn} label={TAB_LABELS[t]} />
+            <NavTrade key={t} tab={tab} botsOpen={botsOpen} engine={engine} onEngine={onEngine} onNavigate={onNavigate} onOpenSodex={onOpenSodex} sodexOn={sodexOn} label={TAB_LABELS[t]} />
+          ) : t === 'bots' && !botsOpen ? (
+            /* Bots are in beta (owner, 2026-11-06): the page is a wallet on the beta list's; everyone else applies on Discord. */
+            <button key={t} type="button" className="navlink navlink--soon navlink--access" title="Bots are in beta: apply for access on our Discord" onClick={applyForBeta}>
+              {TAB_LABELS[t]}
+              <span className="dv-devtag dv-devtag--beta">Get access</span>
+            </button>
           ) : SOON_TABS.has(t) ? (
             /* Coming soon (router.ts SOON_TABS): the name and a pill, no link - there is no page to open. */
             <span key={t} className="navlink navlink--soon" aria-disabled="true" title={`${TAB_LABELS[t]}: coming soon`}>

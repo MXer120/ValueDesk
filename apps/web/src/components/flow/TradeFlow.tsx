@@ -449,7 +449,10 @@ function HoleStrip({ gaps, from, to }: { gaps: ReadonlyArray<readonly [number, n
 function heldPill(c: VenueCoverage, named: boolean): string {
   const who = named ? `${VENUE_LABEL[c.venue]}: ` : '';
   if (c.unit === 'volume') return `${who}held ${pct(c.expected > 0 ? c.held / c.expected : 0, 1)} of volume`;
-  return `${named ? `${VENUE_LABEL[c.venue]}: held` : 'Held'} ${fmtNum(c.held)} of ${fmtNum(c.expected)} trades`;
+  // Whole sentences: a translation of a lone "Held" would be the paused copy's word (i18n catalogues).
+  return named
+    ? `${VENUE_LABEL[c.venue]}: held ${fmtNum(c.held)} of ${fmtNum(c.expected)} trades`
+    : `Held ${fmtNum(c.held)} of ${fmtNum(c.expected)} trades`;
 }
 
 /**

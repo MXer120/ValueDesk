@@ -52,6 +52,7 @@ import { useAccountResource } from '../accountFeeds';
 import { useAsync, useChannel, useStatus, useStored, useSymbolList } from '../hooks';
 import { knownUnlisted, notListed } from '../trading/listed';
 import { ALGO_MENU, menuName, type UiKind } from './algo/menu';
+import { OPEN_ALGO_KINDS, applyForBeta, useBetaAccessState } from '../beta/access';
 import { AlgoIcon } from './algo/AlgoIcon';
 import type { AlgoTicketHandle, AlgoTicketState } from './algo/AlgoTicket';
 import { DASH, fmt, fmtExactQuote, fmtPrice, fmtQty, fmtQuote, num, pick, precisionOf, shortAddr, coinLabel } from '../format';
@@ -770,6 +771,11 @@ export function OrderEntry({
   const tifPopRef = useRef<HTMLDivElement>(null);
   /* The algo tab names the algo picked last; pressed again it opens the menu of them. */
   const [algoKind, setAlgoKind] = useStored<UiKind>('vs.oe.algo', 'twap');
+  /* The advanced algos are for the beta (owner, 2026-11-06, beta/access.ts): a wallet the list says no to is back on TWAP. */
+  const betaAccess = useBetaAccessState(connectedAddress);
+  useEffect(() => {
+    if (betaAccess === 'closed' && !OPEN_ALGO_KINDS.has(algoKind)) setAlgoKind('twap');
+  }, [betaAccess, algoKind, setAlgoKind]);
   const algoBtnRef = useRef<HTMLButtonElement>(null);
   const algoPopRef = useRef<HTMLDivElement>(null);
   const algoRef = useRef<AlgoTicketHandle>(null);
@@ -2002,25 +2008,30 @@ export function OrderEntry({
             visibility: algoPos ? undefined : 'hidden',
           }}
         >
-          {ALGO_MENU.map((o) => (
-            <button
-              key={o.id}
-              type="button"
-              role="option"
-              aria-selected={algoKind === o.id}
-              tabIndex={algoKind === o.id ? 0 : -1}
-              className={`oe-pop__opt oe-pop__opt--algo${isAlgo && algoKind === o.id ? ' is-on' : ''}`}
-              title={o.detail}
-              onClick={() => {
-                setAlgoKind(o.id);
-                setType('algo');
-                setPop(null);
-              }}
-            >
-              <AlgoIcon kind={o.id} />
-              <b>{o.name}</b>
-            </button>
-          ))}
+          {ALGO_MENU.map((o) => {
+            const locked = betaAccess !== 'open' && !OPEN_ALGO_KINDS.has(o.id);
+            return (
+              <button
+                key={o.id}
+                type="button"
+                role="option"
+                aria-selected={algoKind === o.id}
+                aria-label={locked ? `${o.name}: in beta, get access` : undefined}
+                tabIndex={algoKind === o.id ? 0 : -1}
+                className={`oe-pop__opt oe-pop__opt--algo${isAlgo && algoKind === o.id ? ' is-on' : ''}${locked ? ' is-locked' : ''}`}
+                title={locked ? 'In beta: apply for access on our Discord' : o.detail}
+                onClick={() => {
+                  if (locked) { applyForBeta(); return; }
+                  setAlgoKind(o.id);
+                  setType('algo');
+                  setPop(null);
+                }}
+              >
+                <span className="oe-pop__optbody"><AlgoIcon kind={o.id} /><b>{o.name}</b></span>
+                {locked && <span className="oe-pop__access dv-devtag dv-devtag--beta">Get access</span>}
+              </button>
+            );
+          })}
         </div>,
         document.body,
       )}

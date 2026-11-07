@@ -116,4 +116,25 @@ export async function builderRoutes(app: FastifyInstance, opts: BuilderRouteOpti
       return reply.code(503).send({ ok: false, code: 'unavailable', error: 'the beta list is not readable' });
     }
   });
+
+  /**
+   * GET /api/vs/beta/listed?address=0x...  ->  {ok, listed}
+   *
+   * The same answer for the main site's page (owner, 2026-11-06: a whitelisted wallet gets Bots and the
+   * advanced orders on valuedesk.so too). It only decides what the page OFFERS: a real bot starts on
+   * the executor, which asks the list again for the wallet that signed the request (apps/executor
+   * service.ts liveBotFor), so a page told "listed" by anyone else still starts nothing real.
+   * It says whether one address is listed, never who is.
+   */
+  app.get('/api/vs/beta/listed', async (req, reply) => {
+    reply.header('Cache-Control', 'private, max-age=30');
+    const q = (req.query ?? {}) as Record<string, unknown>;
+    if (typeof q.address !== 'string' || !ADDRESS_RE.test(q.address)) return reply.code(400).send({ ok: false, error: 'a valid 0x wallet address is required' });
+    try {
+      return { ok: true, listed: betaWallets().includes(q.address.toLowerCase()) };
+    } catch (e) {
+      req.log.error({ err: e instanceof Error ? e.message : String(e) }, 'beta list: not readable');
+      return reply.code(503).send({ ok: false, code: 'unavailable', error: 'the beta list is not readable' });
+    }
+  });
 }
