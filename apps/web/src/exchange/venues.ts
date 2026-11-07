@@ -14,9 +14,9 @@
  * Hyperliquid's leaderboard (rank and aggregated PnL). That row lives in the
  * server's index - the file behind it is 39 MB - so it is one small index read.
  */
-import { NotAvailable, type TraderProfile, type TraderRow, type Venue, type VsBalance, type VsFill, type VsFunding, type VsOrder } from '@sign/valuedesk/types.js';
+import { NotAvailable, type TraderProfile, type TraderRow, type Venue, type VsBalance, type VsFill, type VsFunding, type VsOrder, type Window } from '@sign/valuedesk/types.js';
 import { shownLabel } from '@sign/valuedesk/labels.js';
-import { buildSodexProfile, fillLimit, sodexFills, type SodexTraderIo } from '@sign/valuedesk/sodex/traderCore.js';
+import { buildSodexProfile, fillLimit, sodexFills, sodexPeek, type SodexTraderIo } from '@sign/valuedesk/sodex/traderCore.js';
 import { gatewayReads } from '@sign/valuedesk/sodex/gatewayCore.js';
 import { coolingDown } from '@sign/valuedesk/sodex/util.js';
 import { hlFills, hlPeek, hlTrader, type CardPeek, type LbRowSource } from '@sign/valuedesk/hyperliquid/trader.js';
@@ -26,6 +26,7 @@ import { ACCOUNT_DETAIL, arcusProvider, lighterProvider, nameSpotFills, tradexyz
 import { dataReads } from './sodexData';
 import { gwGet } from './sodexGateway';
 import { RequestGate } from './gate';
+import { lastTradeHints } from './lastTradeHints';
 
 /** A venue failure, as the server's `{ok:false, code, error}` answered it. */
 export class VenueError extends Error {
@@ -74,6 +75,8 @@ const sodexIo: SodexTraderIo = {
 // Whole answers, briefly (the server kept a profile 30 s and fills 20 s).
 const answers = new RequestGate(500);
 const PROFILE_TTL = 30_000;
+/** The index's hint for a Hyperliquid trader's newest fill, batched per page of cards. */
+const hlHint = lastTradeHints();
 const FILLS_TTL = 20_000;
 
 // --- Hyperliquid: the leaderboard row comes from the index -------------------------------
@@ -178,15 +181,29 @@ export const venues = {
 
   /**
    * What a trader card shows - the curves and the last trade. Hyperliquid's without the profile's
-   * 2,000-fill sample (hlPeek: 754 KB for a busy trader, for one number); the other venues give
-   * their profile, which carries the same.
+   * 2,000-fill sample (hlPeek: 754 KB for a busy trader, for one number), its newest fill looked for
+   * from the index's hint (lastTradeHints.ts: one read instead of up to eight); SoDEX's for the card's
+   * window only (sodexPeek: 3 reads instead of the profile's 13, the profile when only it can say it
+   * the same way); the other venues give their profile, which carries the same.
    */
-  peek(venue: Venue, addressIn: string): Promise<CardPeek | null> {
+  peek(venue: Venue, addressIn: string, window: Window = '30d'): Promise<CardPeek | null> {
+    if (venue === 'sodex') {
+      return guarded(async () => {
+        const address = addressOf(addressIn);
+        const p = await answers.run(`peek:${venue}:${address}:${window}`, PROFILE_TTL, () => sodexPeek(sodexIo, address, window));
+        return p === undefined ? venues.trader(venue, address) : p;
+      });
+    }
     if (venue !== 'hyperliquid') return venues.trader(venue, addressIn);
     return guarded(async () => {
       const address = addressOf(addressIn);
-      return answers.run(`peek:${venue}:${address}`, PROFILE_TTL, () => hlPeek(address, hlInfo));
+      return answers.run(`peek:${venue}:${address}`, PROFILE_TTL, async () => hlPeek(address, hlInfo, Date.now(), await hlHint(address)));
     });
+  },
+
+  /** What fillsOf does to a venue's fills after reading them (Hyperliquid's '@123' spot coins named), for fills read elsewhere. */
+  nameFills(venue: Venue, fills: VsFill[]): Promise<VsFill[]> {
+    return venue === 'hyperliquid' ? nameSpotFills(fills) : Promise.resolve(fills);
   },
 
   /** The newest fills, newest first (the route's default limit was 2,000). */

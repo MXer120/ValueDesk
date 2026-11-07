@@ -164,6 +164,11 @@ export const HOSTED_ROUTES: readonly HostedRoute[] = [
   // One Hyperliquid leaderboard row from the index (the Scan profile's rank):
   // a lookup in the file already in memory, never a per-address upstream call.
   { method: 'GET', url: '/api/vs/lbrow', cls: 'read' },
+  // A tracked wallet's fills as the index holds them (indexer/walletFills.ts): indexed reads, kept five minutes;
+  // the Copy page's charts read the venue only for what the index does not hold.
+  { method: 'GET', url: '/api/vs/wallet/fills', cls: 'read' },
+  // The copy cards' hint: each Hyperliquid wallet's newest indexed fill time, one index step per wallet, kept a minute.
+  { method: 'GET', url: '/api/vs/last-trades', cls: 'read' },
   // The public status page (routes/status.ts, ops/status.ts): one report for everyone, rebuilt at most every 30 s.
   { method: 'GET', url: '/api/vs/status', cls: 'read' },
   { method: 'GET', url: '/api/vs/status/feed', cls: 'read' },

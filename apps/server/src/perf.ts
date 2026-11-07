@@ -89,6 +89,11 @@ export const CACHE_POLICIES: Readonly<Record<string, CachePolicy>> = {
   '/api/vs/screener': BOARD,
   // One Hyperliquid leaderboard row: it moves when the leaderboard file does.
   '/api/vs/lbrow': BOARD,
+  // A wallet's held fills (indexer/walletFills.ts): the process keeps an answer five minutes; an older copy only
+  // makes the browser's venue tail (after `heldTo`) longer, never wrong.
+  '/api/vs/wallet/fills': { cacheControl: 'public, max-age=60, stale-while-revalidate=240' },
+  // The copy cards' hint (indexer/walletFills.ts lastTrades): kept a minute by the process.
+  '/api/vs/last-trades': BOARD,
   '/api/vs/price': PRICE,
   // The liquidation heatmap moves every second (the live feed; the page streams it over /ws/liq):
   // the edge may share one answer per coin for five seconds.
