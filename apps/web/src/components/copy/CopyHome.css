@@ -924,3 +924,35 @@
   .cpy-modal--v2 .cpy-fees { flex-direction: column; }
   .cpy-modal--v2 .cpy-mfoot__note { order: 3; flex-basis: 100%; }
 }
+
+/* The number in a box with its fill (CopyModal.tsx SlideField): drag across it, press the number to type. */
+.cpy-slide {
+  position: relative; display: inline-flex; align-items: center; justify-content: flex-end; gap: 4px; flex: none;
+  width: 150px; height: 40px; padding: 0 12px; overflow: hidden; border-radius: 10px;
+  background: rgb(var(--ink) / 0.06); box-shadow: inset 0 0 0 1px rgb(var(--ink) / 0.06);
+  cursor: ew-resize; touch-action: none; user-select: none;
+}
+.cpy-slide:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.cpy-slide.is-bad { box-shadow: inset 0 0 0 1px var(--neg); }
+.cpy-slide__fill {
+  position: absolute; left: 0; top: 0; bottom: 0; pointer-events: none;
+  background: color-mix(in srgb, var(--pos) 22%, transparent); border-right: 2px solid var(--pos);
+  transition: width 60ms linear;
+}
+.cpy-slide__v {
+  position: relative; min-height: 0; height: auto; padding: 2px 4px; border: 0; border-radius: 4px; background: none;
+  color: var(--text); font-family: var(--font-num); font-size: var(--fs-base); font-weight: 600; cursor: text;
+}
+.cpy-slide__v:hover { background: rgb(var(--ink) / 0.08); }
+.cpy-slide__in {
+  position: relative; width: 70px; height: 26px; min-height: 0; padding: 0 4px; border: 0; border-radius: 4px; background: rgb(var(--ink) / 0.1);
+  color: var(--text); font-family: var(--font-num); font-size: var(--fs-base); font-weight: 600; text-align: right; outline: none;
+}
+.cpy-slide.is-typing { cursor: default; }
+.cpy-slide__u { position: relative; color: var(--muted); font-size: var(--fs-xs); }
+@media (max-width: 560px) { .cpy-slide { width: 100%; } }
+
+/* Copy or counter: the same rounded corners as the window's other switches. */
+.cpy-modal--v2 .cpy-dir { border-radius: 10px; }
+.cpy-modal--v2 .cpy-dir__opt { border-radius: 8px; }
+.cpy-fees__sub { display: block; margin-top: 2px; color: var(--muted); font-size: var(--fs-micro); font-family: var(--font-num); }
