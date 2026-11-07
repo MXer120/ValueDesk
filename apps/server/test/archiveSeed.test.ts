@@ -4,7 +4,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
-import { loadSeeds, seedLine } from '../src/indexer/archiveSeed.js';
+import { loadReadList, loadSeeds, readListDue, readListLine, seedLine } from '../src/indexer/archiveSeed.js';
 
 test('an archive line names its venue, address and notional', () => {
   assert.deepEqual(seedLine('0xAbC\tBTC\t-0.5\t1\t80000'), { venue: 'hyperliquid', address: '0xabc', notional: 40000 });
@@ -25,4 +25,47 @@ test('the archive loads per venue, a wallet\'s positions summed; no archive is a
   const none = await loadSeeds(join(dir, 'missing'));
   assert.equal(none.seeds.size, 0);
   assert.equal(none.at, null);
+});
+
+test('older replays beside the main file add wallets it does not name; the main file keeps its own', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'seed-'));
+  const head = 'address\tcoin\tszi\tlast_t\tlast_px\n';
+  writeFileSync(join(dir, 'hl-positions.tsv.gz'), gzipSync(`${head}0xa\tBTC\t1\t1\t100\n`));
+  writeFileSync(join(dir, 'hl-positions-pre20250727.tsv.gz'), gzipSync(
+    `${head}0xa\tETH\t5\t1\t10\n0xd\tSOL\t2\t1\t50\n0xd\tETH\t-1\t1\t10\n0xa\txyz:TSLA\t1\t1\t7\n`));
+  writeFileSync(join(dir, 'hl-positions.tsv.gz.bak'), gzipSync(`${head}0xz\tBTC\t1\t1\t1\n`));
+  writeFileSync(join(dir, 'hl-addresses.tsv.gz'), gzipSync('address\tfirst_t\tlast_t\tperp_fills\n0xy\t1\t1\t1\n'));
+  const { seeds, at } = await loadSeeds(dir);
+  assert.ok(at);
+  assert.deepEqual([...seeds.get('hyperliquid')!].sort(), [['0xa', 100], ['0xd', 110]], 'the older ETH of 0xa is not added to the main file\'s 0xa');
+  assert.deepEqual([...seeds.get('tradexyz')!], [['0xa', 7]], 'per venue: the main file names 0xa on Hyperliquid only');
+});
+
+test('an older replay alone still loads', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'seed-'));
+  writeFileSync(join(dir, 'hl-positions-pre20250727.tsv.gz'), gzipSync('address\tcoin\tszi\tlast_t\tlast_px\n0xd\tSOL\t2\t1\t50\n'));
+  const { seeds, at } = await loadSeeds(dir);
+  assert.ok(at);
+  assert.deepEqual([...seeds.get('hyperliquid')!], [['0xd', 100]]);
+});
+
+test('a read list names addresses only, each once, in the files\' order; known wallets are not due', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'seed-'));
+  const a = (n: number) => `0x${String(n).padStart(40, '0')}`;
+  writeFileSync(join(dir, 'hl-read-pre20250727.tsv.gz'), gzipSync(`address\tlast_t\tperp_fills\n${a(2)}\t5\t1\n${a(1).toUpperCase().replace('0X', '0x')}\t4\t9\n\nnot-an-address\t1\t1\n`));
+  writeFileSync(join(dir, 'hl-read-z.tsv.gz'), gzipSync(`${a(3)}\n${a(2)}\n`));
+  writeFileSync(join(dir, 'hl-positions.tsv.gz'), gzipSync(`address\tcoin\tszi\tlast_t\tlast_px\n${a(9)}\tBTC\t1\t1\t1\n`));
+  const list = await loadReadList(dir);
+  assert.deepEqual(list, [a(2), a(1), a(3)]);
+  assert.deepEqual([...readListDue(list, (x) => x === a(1))], [a(2), a(3)]);
+  assert.equal(readListLine('address\tlast_t'), null);
+  assert.deepEqual(await loadReadList(join(dir, 'missing')), []);
+  const { seeds } = await loadSeeds(dir);
+  assert.deepEqual([...seeds.get('hyperliquid')!.keys()], [a(9)], 'a read list is no seed: it names no position');
+});
+
+test('the read list waits below every other read the cohort lane plans', async () => {
+  const { READ_LIST_PRIO, pnlPrio } = await import('../src/indexer/cohortTracker.js');
+  assert.ok(READ_LIST_PRIO < pnlPrio(0), 'below the smallest PnL read');
+  assert.ok(READ_LIST_PRIO < 300, 'below the tail re-reads (300 + size) and the routine reconciles (400 + size)');
 });

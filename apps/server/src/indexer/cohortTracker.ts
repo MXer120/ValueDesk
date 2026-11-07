@@ -85,7 +85,7 @@ import { fineBandWidth, fineBands, fineSnapOf, liqCoin, snapOfNow } from '../val
 import { LiqLive } from '../valuedesk/liquidations/live.js';
 import { LiqFeedServer } from './liqFeed.js';
 import { deflateRawSync } from 'node:zlib';
-import { loadSeeds, type Seeds } from './archiveSeed.js';
+import { loadReadList, loadSeeds, readListDue, type Seeds } from './archiveSeed.js';
 import { mayPrune } from '../retention.js';
 import { OI_EXCESS, oiCheck, oiOver, oiRereads, oiStatus, overSides } from './oiCheck.js';
 import { RestReader } from './sodexCatchup.js';
@@ -124,6 +124,13 @@ export function fullPassDue(o: { lastAt: number | undefined; now: number; queued
 }
 /** An archive holder's notional from which its first read ranks with a trader's (USD). */
 const SEED_BONUS_MIN = 1_000;
+/**
+ * A wallet of the archive's read list (archiveSeed.ts loadReadList: it traded a perp in an older archive, and
+ * nothing says what it holds now) waits below every other read: the tail's (300+), the routine reconciles
+ * (400+) and the PnL reads (300+), so the boards' and the cohorts' own figures never wait for it. In the
+ * list's order (the most recent trader first). Once read, its book makes it a member like any other.
+ */
+export const READ_LIST_PRIO = 100;
 /** Coins kept per cohort in the hourly mix. */
 const MIX_COINS = 120;
 
@@ -861,6 +868,8 @@ export class CohortTracker {
   /** Holders the Hyperliquid fills archive found (archiveSeed.ts): read once each, the largest first. */
   private seeds: Seeds = new Map();
   private seedsAt: number | null = null;
+  /** Hyperliquid wallets to read once, without positions (archiveSeed.ts loadReadList), at READ_LIST_PRIO. */
+  private readList: string[] = [];
   /** How long Hyperliquid's stream was down across this start (its `stream_up`); Infinity = never up before. */
   private downAtStart = Number.POSITIVE_INFINITY;
   /** The hour's funding rates, taken in its last minutes and applied when it ends (fundingTick). */
@@ -962,6 +971,7 @@ export class CohortTracker {
       for (const [a, [flow, u0]] of Object.entries(saved)) if (Number.isFinite(flow) && Number.isFinite(u0)) this.pnlFlow.set(a, { flow, u0 });
     } catch { /* starts afresh: the PnL stands as read until the next read */ }
     void loadSeeds().then((r) => { this.seeds = r.seeds; this.seedsAt = r.at; }).catch((e) => (this.lastError = `archive seeds: ${String(e)}`));
+    void loadReadList().then((r) => { this.readList = r; }).catch((e) => (this.lastError = `archive read list: ${String(e)}`));
     this.hlc.start();
     this.hlh.start();
     this.scoh.start();
@@ -1275,6 +1285,12 @@ export class CohortTracker {
         for (const k of m.keys()) if (!books?.has(k)) unread++;
         return [v, { wallets: m.size, unread }];
       })) },
+      readList: (() => {
+        const books = this.books.get('hyperliquid');
+        let unread = 0;
+        for (const a of this.readList) if (!books?.has(a)) unread++;
+        return { wallets: this.readList.length, unread };
+      })(),
       rebuild: this.rebuild
         ? {
           span: this.rebuild.span, phase: this.rebuild.phase, planned: this.rebuild.plan.size, read: this.rebuild.read.size,
@@ -1991,6 +2007,17 @@ export class CohortTracker {
           await new Promise<void>((r) => setImmediate(r));
           mark('coh:plan');
           t0 = Date.now();
+        }
+      }
+      // The read list's wallets not read yet, below every other read (READ_LIST_PRIO).
+      if (venue === 'hyperliquid') {
+        for (const address of readListDue(this.readList, (a) => members.has(a) || books.has(a) || this.wanted.has(`${venue}|${a}`) || (this.seeds.get(venue)?.has(a) ?? false))) {
+          due.push([address, READ_LIST_PRIO]);
+          if (Date.now() - t0 > SLICE_MS) {
+            await new Promise<void>((r) => setImmediate(r));
+            mark('coh:plan');
+            t0 = Date.now();
+          }
         }
       }
       this.liqDue.set(venue, liqDue);
