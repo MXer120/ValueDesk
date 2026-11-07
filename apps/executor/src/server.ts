@@ -289,7 +289,7 @@ export function createExecutorServer(svc: ExecutorService, cfg: ExecutorConfig, 
       if (req.method === 'GET' && route === '/info') return send(res, 200, svc.info(ctx));
       if (req.method === 'GET' && route === '/health') return send(res, 200, svc.health());
       // Public like /info: no token, no signature; a read (240/min per client), no-store (the chart reads every few seconds).
-      if (req.method === 'GET' && route === '/bots/latency') return send(res, 200, svc.botLatency(svc.authenticate(bearer(req)), clampHours(url.searchParams.get('hours'))));
+      if (req.method === 'GET' && route === '/bots/latency') return send(res, 200, svc.botLatency(svc.authenticate(bearer(req)), clampHours(url.searchParams.get('hours')), url.searchParams.get('bot')));
       // The admin suite's user list (server 1 asks, with its internal token): every wallet this executor
       // knows. No token configured, or the wrong one: the route does not exist.
       if (req.method === 'GET' && route === '/internal/users') {

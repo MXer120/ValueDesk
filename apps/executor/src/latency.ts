@@ -28,10 +28,12 @@ export interface WriteTiming {
   status: number;
   /** The SoDEX account the write was for (0 when unknown). */
   accountId?: number;
+  /** Its market's SoDEX id (0 when unknown): one live bot per account and market, so this is a bot's own log. */
+  symbolId?: number;
 }
 
 /** The store id of one account's log in a region. */
-export const accountLogId = (regionId: string, accountId: number): string => `${regionId}:${accountId}`;
+export const accountLogId = (regionId: string, accountId: number, symbolId?: number): string => (symbolId ? `${regionId}:${accountId}:${symbolId}` : `${regionId}:${accountId}`);
 
 /** Place: POST .../trade/orders (and its batch, modify, replace). Cancel: DELETE .../trade/orders (and batch), schedule-cancel. Else null (leverage, margin). */
 export function classifyWrite(method: string, path: string): WriteKind | null {
@@ -207,7 +209,7 @@ export class WriteLatency {
   private accountLog(id: string, create = true): RegionLog | null {
     const have = this.accounts.get(id);
     if (have || !create) return have ?? null;
-    const m = /^(.+):(\d+)$/.exec(id);
+    const m = /^([^:]+):(\d+)(?::(\d+))?$/.exec(id);
     const region = m ? this.logs.get(m[1]!) : undefined;
     if (!region || Number(m![2]) <= 0) return null;
     const log = new RegionLog({ ...region.region, id });
@@ -229,6 +231,9 @@ export class WriteLatency {
       if (aid > 0) {
         const own = this.accountLog(accountLogId(regionId, aid));
         if (own) this.add(own, kind, ms, at);
+        const sid = Number(w.symbolId) || 0;
+        const bot = sid > 0 ? this.accountLog(accountLogId(regionId, aid, sid)) : null;
+        if (bot) this.add(bot, kind, ms, at);
       }
     } catch (e) {
       this.onError(e);
@@ -304,14 +309,14 @@ export class WriteLatency {
    * The chart's answer. With accountIds: only those accounts' writes, per region (a user's own bots); without: the
    * whole region (operators, tests).
    */
-  view(hours: number, accountIds?: readonly number[]): BotLatencyResponse {
+  view(hours: number, accountIds?: readonly number[], symbolId?: number): BotLatencyResponse {
     const at = this.now();
     const h = Math.max(1, Math.min(48, Math.round(hours) || 24));
     const open = Math.floor(at / LATENCY_BUCKET_MS) * LATENCY_BUCKET_MS;
     const slots = h * (3_600_000 / LATENCY_BUCKET_MS);
     const regions: BotLatencyResponse['regions'] = [];
     for (const base of this.logs.values()) {
-      const log = accountIds ? mergeLogs(base, accountIds.map((a) => this.accountLog(accountLogId(base.region.id, a), false)).filter((x): x is RegionLog => !!x)) : base;
+      const log = accountIds ? mergeLogs(base, accountIds.map((a) => this.accountLog(accountLogId(base.region.id, a, symbolId), false)).filter((x): x is RegionLog => !!x)) : base;
       const buckets: BotLatencyResponse['regions'][number]['buckets'] = [];
       for (let i = slots - 1; i >= 0; i--) {
         const t = open - i * LATENCY_BUCKET_MS;

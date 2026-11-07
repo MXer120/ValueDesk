@@ -37,9 +37,9 @@ export function bookFill(b: BotBook, side: Side, qty: number, value: number, mak
 }
 
 export const bookVolume = (b: BotBook): number => b.buyValue + b.sellValue;
-export const bookInventory = (b: BotBook): number => b.buyQty - b.sellQty;
+export const bookInventory = (b: BotBook): number => b.buyQty - b.sellQty + (b.carryQty ?? 0);
 /** Before fees, at the price `mark`. */
-export const bookGross = (b: BotBook, mark: number): number => b.sellValue - b.buyValue + bookInventory(b) * mark;
+export const bookGross = (b: BotBook, mark: number): number => b.sellValue - b.buyValue - (b.carryValue ?? 0) + bookInventory(b) * mark;
 /** After every fee. */
 export const bookNet = (b: BotBook, mark: number): number => bookGross(b, mark) - b.tradeFees - b.builderFees;
 

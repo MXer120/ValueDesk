@@ -242,6 +242,13 @@ export interface NewAlgo {
   id?: string;
   country?: string | null;
   observedCountry?: string | null;
+  /**
+   * A bot's restart (executor: algo-start with `restart`). `after`: it waits until that bot (the old one) has ended,
+   * then starts fresh. `takeOver`: the same wait (the old one only pulls its orders), then it carries what the old one
+   * held (BotBook.carryQty) and trades it on. Both name a bot of the same wallet; the executor checks that.
+   */
+  after?: string;
+  takeOver?: string;
 }
 
 const LIVE: ReadonlySet<ChildOrder['state']> = new Set(['sending', 'open', 'unknown']);
@@ -629,6 +636,11 @@ export class AlgoRuntime {
     return this.algos.get(id) ?? null;
   }
 
+  /** A market's SoDEX id, from the listed markets (null when not listed or not read yet). */
+  marketId(symbol: string): number | null {
+    return this.markets.get(symbol)?.id ?? null;
+  }
+
   list(owner?: string): AlgoRecord[] {
     const o = owner?.toLowerCase();
     return [...this.algos.values()].filter((a) => !o || a.owner === o).sort((x, y) => y.createdAt - x.createdAt);
@@ -681,6 +693,8 @@ export class AlgoRuntime {
       observedCountry: n.observedCountry ?? null,
       k: {},
     };
+    if (n.takeOver) { a.k.after = n.takeOver; a.k.takeOver = n.takeOver; }
+    else if (n.after) a.k.after = n.after;
     // Every child an order SoDEX takes, as the ticket said (sizes.ts): under its smallest or over its largest is refused, never merged or split.
     await this.startSizes(a);
     await this.startLimits(a);
@@ -1373,6 +1387,18 @@ export class AlgoRuntime {
   private async ready(a: AlgoRecord, now: number): Promise<boolean> {
     const s = a.spec;
     if (s.startAt !== null && now < s.startAt) return false;
+    // A restart: the bot it replaces ends first (closing what it holds, or only pulling its orders for a take-over).
+    if (typeof a.k.after === 'string') {
+      const old = this.algos.get(a.k.after);
+      if (old && !FINAL_STATUSES.has(old.status)) {
+        if (!a.k.afterSaid) {
+          a.k.afterSaid = true;
+          this.dirty.add(a.id);
+          await this.event(a, 'info', a.k.takeOver ? 'Waits for the old bot to pull its orders, then takes over what it holds.' : 'Waits for the old bot to close what it holds, then starts.');
+        }
+        return false;
+      }
+    }
     if (s.triggerPrice !== null) {
       const mk = this.market.mark(s.symbol)?.mark ?? null;
       if (mk === null) return false;
@@ -1448,6 +1474,18 @@ export class AlgoRuntime {
       a.k.waveAt = now;
     }
     if (s.bot) a.book ??= emptyBook();
+    // A take-over restart: what the old bot holds now becomes this one's, valued at the price now (its PnL starts at 0).
+    if (s.bot && typeof a.k.takeOver === 'string') {
+      const old = this.algos.get(a.k.takeOver);
+      const qty = old?.book ? bookInventory(old.book) : 0;
+      const px = this.market.mark(s.symbol)?.mark ?? a.arrival;
+      if (old && old.spec.symbol === s.symbol && qty !== 0 && px !== null && px > 0) {
+        a.book!.carryQty = qty;
+        a.book!.carryValue = qty * px;
+        await this.event(a, 'info', `Took over ${qty > 0 ? 'a long' : 'a short'} of ${Math.abs(qty)} from the old bot, at ${px}.`);
+      }
+      delete a.k.takeOver;
+    }
     if (FINAL_STATUSES.has(a.status)) return false;
     if (a.status === 'paused') {
       // Paused while it was starting: it is set up, and resumes as running.

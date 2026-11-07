@@ -588,20 +588,23 @@ const laneOf = (accountId: number, method: string, body: string | undefined): nu
   }
 };
 
-export function writeShape(method: string, path: string, body: string | undefined): { accountId: number; orders: number; priority: WritePriority } {
-  let p: { accountID?: unknown; orders?: unknown; cancels?: unknown } = {};
+export function writeShape(method: string, path: string, body: string | undefined): { accountId: number; orders: number; priority: WritePriority; symbolId: number } {
+  let p: { accountID?: unknown; orders?: unknown; cancels?: unknown; symbolID?: unknown } = {};
   try {
     p = body ? (JSON.parse(body) as typeof p) : {};
   } catch {
     p = {};
   }
   const accountId = Number(p.accountID) || 0;
-  if (method === 'DELETE') return { accountId, orders: Array.isArray(p.cancels) ? p.cancels.length : 1, priority: 'protect' };
+  // The market it is for (the write latency per bot: one live bot per account and market): the body's, else its first order's or cancel's.
+  const first = (x: unknown): number => (Array.isArray(x) && x[0] && typeof x[0] === 'object' ? Number((x[0] as { symbolID?: unknown }).symbolID) || 0 : 0);
+  const symbolId = Number(p.symbolID) || first(p.orders) || first(p.cancels);
+  if (method === 'DELETE') return { accountId, orders: Array.isArray(p.cancels) ? p.cancels.length : 1, priority: 'protect', symbolId };
   if (Array.isArray(p.orders)) {
     const all = p.orders as Array<{ reduceOnly?: unknown }>;
-    return { accountId, orders: all.length, priority: all.length > 0 && all.every((o) => o && o.reduceOnly === true) ? 'protect' : 'open' };
+    return { accountId, orders: all.length, priority: all.length > 0 && all.every((o) => o && o.reduceOnly === true) ? 'protect' : 'open', symbolId };
   }
-  return { accountId, orders: 1, priority: 'open' };
+  return { accountId, orders: 1, priority: 'open', symbolId };
 }
 
 /** A Retry-After header, in ms (seconds or an HTTP date); null when absent or unreadable. */
@@ -642,7 +645,7 @@ export interface SodexClientOptions {
   /** One send lane per account and market instead of per account: a cancel on one market does not wait for a write on another. Nonces need no order within SoDEX's window of 100. */
   lanesByMarket?: boolean;
   /** Each signed write's timing, for measuring the order path: time in the send queue, on the wire, the answer. */
-  onWrite?: (w: { method: string; path: string; queueMs: number; wireMs: number; status: number; accountId: number }) => void;
+  onWrite?: (w: { method: string; path: string; queueMs: number; wireMs: number; status: number; accountId: number; symbolId: number }) => void;
   fetch: FetchLike;
   budget?: WeightBudget;
   /** Per-account order rate (default: SoDEX's 20/s, 600/min). */
@@ -768,7 +771,7 @@ export class SodexClient {
     }
     const shape = writeShape(req.method, req.gatewayPath, req.body);
     // Weight of a signed write: 1 + floor(N/40) for a batch of N (research 01); the queue books it.
-    return this.queue.submit(sendClass(req.method, req.gatewayPath, shape.priority), shape.accountId, shape.orders, ((enqueued) => () => this.transmit<T>(req, enqueued, shape.accountId))(Date.now()), req.gatewayPath, this.lanesByMarket ? laneOf(shape.accountId, req.method, req.body) : shape.accountId);
+    return this.queue.submit(sendClass(req.method, req.gatewayPath, shape.priority), shape.accountId, shape.orders, ((enqueued) => () => this.transmit<T>(req, enqueued, shape.accountId, shape.symbolId))(Date.now()), req.gatewayPath, this.lanesByMarket ? laneOf(shape.accountId, req.method, req.body) : shape.accountId);
   }
 
   /** The request as it goes out: as built, or through the fast door (fastDoor) when it is a perps order or cancel. */
@@ -812,7 +815,7 @@ export class SodexClient {
   }
 
   /** One signed write on the wire (the queue decides when). */
-  private async transmit<T>(req: Pick<BuiltRequest, 'method' | 'gatewayPath' | 'headers' | 'body'>, enqueued = Date.now(), accountId = 0): Promise<T> {
+  private async transmit<T>(req: Pick<BuiltRequest, 'method' | 'gatewayPath' | 'headers' | 'body'>, enqueued = Date.now(), accountId = 0, symbolId = 0): Promise<T> {
     const ctl = abortController();
     const timer = timers.after(this.writeTimeoutMs, () => ctl.abort());
     const sentAt = Date.now();
@@ -829,7 +832,7 @@ export class SodexClient {
       timers.cancel(timer);
     }
     const text = await res.text().catch(() => '');
-    this.onWrite?.({ method: req.method, path: req.gatewayPath, queueMs: sentAt - enqueued, wireMs: Date.now() - sentAt, status: res.status, accountId });
+    this.onWrite?.({ method: req.method, path: req.gatewayPath, queueMs: sentAt - enqueued, wireMs: Date.now() - sentAt, status: res.status, accountId, symbolId });
     this.observe(res, text, req.gatewayPath, sentAt);
     // Cloudflare's 1015 page is HTML: refused at the edge, it never reached the exchange.
     if (isIpRateLimited(res.status, text)) throw new IpRateLimitedError(req.gatewayPath);

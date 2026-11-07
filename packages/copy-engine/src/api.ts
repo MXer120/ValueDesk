@@ -273,6 +273,12 @@ export interface UpdatePayload {
 export interface AlgoStartPayload {
   spec: Record<string, unknown>;
   seed: number;
+  /**
+   * A bot's restart with new settings (feature 'bot-restart'): the bot it replaces, and how.
+   *   'clean'     the old bot stops and closes what it holds (resting first); the new one starts once it has ended
+   *   'takeover'  the old bot only pulls its orders; the new one starts at once and trades on what it held (same market)
+   */
+  restart?: { from: string; how: 'clean' | 'takeover' };
 }
 
 export interface AlgoActionPayload {
@@ -375,7 +381,7 @@ export interface ExecutorInfo {
  * 'counter': the rules may carry direction 'counter' (planner.ts).
  * 'site-terms': it records 'accept-site-terms' (POST /site-terms); the site sends no record to one without it.
  */
-export const EXECUTOR_FEATURES = ['counter', 'site-terms', 'key-import', 'algo-update', 'bots', 'multiplier'] as const;
+export const EXECUTOR_FEATURES = ['counter', 'site-terms', 'key-import', 'algo-update', 'bots', 'multiplier', 'bot-restart'] as const;
 
 export interface SessionGrant {
   token: string;

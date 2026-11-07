@@ -700,6 +700,13 @@ export interface BotBook {
   tradeFees: number;
   builderFees: number;
   fills: number;
+  /**
+   * What it took over from the bot it replaced (a restart that keeps the position, runtime NewAlgo.takeOver): that
+   * bot's holding, signed, and its value at the price of the hand-over. Counted in what it holds and in its PnL (from
+   * the hand-over price, so it starts at zero), never in its volume.
+   */
+  carryQty?: number;
+  carryValue?: number;
   /** [time, volume so far, net PnL at the mark then, fees so far] - one point every few minutes, thinned as it grows. */
   series: Array<[number, number, number, number]>;
 }

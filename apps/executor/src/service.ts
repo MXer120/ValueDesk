@@ -1067,7 +1067,20 @@ export class ExecutorService {
     }
     const seed = Number(payload.seed);
     if (!Number.isSafeInteger(seed) || seed < 0 || seed > 0xffffffff) throw new ApiError(400, 'seed', 'seed must be a 32-bit whole number.');
-    const live = this.algos.list(owner).filter((a) => !FINAL_STATUSES.has(a.status));
+    // A restart (feature 'bot-restart'): the bot it replaces is this wallet's own bot; a take-over keeps its market and mode.
+    const r = payload.restart as { from?: unknown; how?: unknown } | undefined;
+    let old: AlgoRecord | null = null;
+    let how: 'clean' | 'takeover' | null = null;
+    if (r !== undefined && r !== null) {
+      if (typeof r !== 'object' || typeof r.from !== 'string' || (r.how !== 'clean' && r.how !== 'takeover')) throw new ApiError(400, 'restart', "restart must be { from: a bot's id, how: 'clean' or 'takeover' }.");
+      old = this.algos.get(r.from) ?? null;
+      how = r.how;
+      if (!old || old.owner !== owner || !old.spec.bot) throw new ApiError(404, 'algo', 'No such bot to restart.');
+      if (!spec.bot) throw new ApiError(400, 'restart', 'A bot restarts as a bot.');
+      if (how === 'takeover' && (old.spec.symbol !== spec.symbol || old.spec.paper !== spec.paper)) throw new ApiError(400, 'restart', 'Taking over keeps the market and practice or real orders. Use the normal restart to change them.');
+      if (FINAL_STATUSES.has(old.status) && how === 'takeover') throw new ApiError(409, 'restart', 'That bot has ended: start a new one instead.');
+    }
+    const live = this.algos.list(owner).filter((a) => !FINAL_STATUSES.has(a.status) && a.id !== old?.id);
     // A basket runs as itself and one algo per market (its legs, which count as they will run); a conditional's algo takes its place when it fires.
     const adds = 1 + (spec.kind === 'basket' ? spec.legs.length : 0);
     if (live.length + adds > this.cfg.maxAlgosPerOwner) {
@@ -1094,10 +1107,23 @@ export class ExecutorService {
       accountId = await this.sodex.accountId(owner);
       if (!accountId) throw new ApiError(412, 'account', 'This wallet has no SoDEX account yet. Deposit first.');
     }
+    // The old bot stops first, the way the restart says: closing what it holds (clean), or keeping it for the new one.
+    if (old && !FINAL_STATUSES.has(old.status)) {
+      const stopAs = how === 'clean' ? 'close' : 'keep';
+      try {
+        if ((old.spec.kind === 'mm' || old.spec.kind === 'grid') && old.spec.onStop !== stopAs) await this.algos.update(old.id, { onStop: stopAs });
+        await this.algos.cancel(old.id);
+      } catch (e) {
+        throw new ApiError(409, 'restart', `The old bot could not be stopped: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
     let a: AlgoRecord;
     try {
       const t = this.db.terms(owner);
-      a = await this.algos.add({ owner, accountId, mode: this.cfg.kind, spec, consent, seed, country: t?.country ?? null, observedCountry: normaliseCountry(ctx.viewerCountry) });
+      a = await this.algos.add({
+        owner, accountId, mode: this.cfg.kind, spec, consent, seed, country: t?.country ?? null, observedCountry: normaliseCountry(ctx.viewerCountry),
+        ...(old && how === 'takeover' ? { takeOver: old.id } : old && !FINAL_STATUSES.has(old.status) ? { after: old.id } : {}),
+      });
     } catch (e) {
       throw new ApiError(400, 'algo', e instanceof Error ? e.message : String(e));
     }
@@ -1147,7 +1173,14 @@ export class ExecutorService {
    * GET /bots/latency: the signed-write latency of this wallet's own SoDEX accounts (those its bots trade in), never
    * another wallet's or the executor's whole flow. A wallet whose bots only practise has no account here: empty.
    */
-  botLatency(owner: string, hours: number): BotLatencyResponse {
+  botLatency(owner: string, hours: number, botId?: string | null): BotLatencyResponse {
+    if (botId) {
+      // One bot: its account's writes on its market (one live bot per account and market). A practice bot sends none.
+      const a = this.algos.get(botId);
+      if (!a || a.owner !== owner) throw new ApiError(404, 'algo', 'No such bot.');
+      const sid = this.algos.marketId(a.spec.symbol);
+      return this.latency.view(hours, a.accountId > 0 && sid ? [a.accountId] : [], sid ?? undefined);
+    }
     const ids = [...new Set(this.algos.list(owner).map((a) => a.accountId).filter((x) => x > 0))];
     return this.latency.view(hours, ids);
   }

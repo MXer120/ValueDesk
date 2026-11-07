@@ -18,7 +18,7 @@ import { ApiError, type ExecutorService } from '../src/service.ts';
 const silent = { debug() {}, info() {}, warn() {}, error() {} };
 const TOKYO = [{ id: 'tokyo', label: 'Tokyo · SoDEX', where: 'ap-northeast-1 (Tokyo)' }];
 const T0 = 1_700_000_400_000; // a bucket start (divisible by 600 000)
-const place = (ms: number, accountId = 0) => ({ method: 'POST', path: '/api/v1/perps/trade/orders', queueMs: 0, wireMs: ms, status: 200, accountId });
+const place = (ms: number, accountId = 0, symbolId = 0) => ({ method: 'POST', path: '/api/v1/perps/trade/orders', queueMs: 0, wireMs: ms, status: 200, accountId, symbolId });
 const cancel = (ms: number) => ({ method: 'DELETE', path: '/api/v1/perps/trade/orders', queueMs: 2, wireMs: ms - 2, status: 200 });
 
 test('classify: orders are place, deletes and cancel paths are cancel, leverage is neither', () => {
@@ -218,4 +218,14 @@ test('GET /api/copy/v1/bots/latency: a session only, only its own accounts, the 
   } finally {
     server.close();
   }
+});
+
+test('per bot: one account on one market is one bot; its view holds only that market', () => {
+  const lat = new WriteLatency(TOKYO, null, () => T0 + 1_000);
+  for (let i = 0; i < 10; i++) lat.record('tokyo', place(300, 11, 1));
+  for (let i = 0; i < 4; i++) lat.record('tokyo', place(900, 11, 7));
+  assert.equal(lat.view(1, [11], 1).regions[0]!.buckets.at(-1)!.n, 10);
+  assert.equal(lat.view(1, [11], 7).regions[0]!.buckets.at(-1)!.n, 4);
+  assert.equal(lat.view(1, [11]).regions[0]!.buckets.at(-1)!.n, 14, 'the account: both markets');
+  assert.equal(lat.view(1, [12], 1).regions[0]!.buckets.at(-1)!.n, 0, 'another account on that market: nothing');
 });

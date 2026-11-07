@@ -953,3 +953,47 @@ test('Binance-led maker: stillBps sends only in a still market, restMs cancels w
   await step(r, a.id);
   assert.equal(r.ex.placed.length, before + 2, 'still again: both sides are back');
 });
+
+test('restart, take over: the old bot only pulls; the new one waits for it to end, then carries what it held at the price then', async () => {
+  const r = await rig();
+  const old = await add(r, { ...MM, onStop: 'keep' });
+  await step(r, old.id);
+  r.ex.fill(r.ex.side('buy')[0]!.clOrdID);
+  await settle();
+  const held = r.rt.view(old.id)!.bot!.inventory;
+  assert.ok(held > 0);
+  await r.rt.cancel(old.id);
+  const next = await r.rt.add({ owner: FOLLOWER, accountId: 42, mode: 'hosted', spec: { symbol: 'BTC-USD', ...MM, orderUsd: 60 }, seed: 7, takeOver: old.id });
+  await step(r, next.id);
+  await step(r, old.id, 500);
+  assert.equal(r.rt.get(old.id)!.status, 'cancelled', 'the old one ends at once: nothing to close');
+  await step(r, next.id, 500);
+  const v = r.rt.view(next.id)!;
+  assert.equal(v.algo.status, 'running');
+  assert.ok(Math.abs(v.bot!.inventory - held) < 1e-12, 'it holds what the old one held');
+  assert.equal(v.bot!.volume, 0, 'taking over is not volume');
+  assert.ok(Math.abs(v.bot!.grossPnl) < 1e-6, 'its PnL starts at zero, from the hand-over price');
+  assert.ok(Math.abs(r.ex.position - held) < 1e-12, 'nothing was traded for the hand-over');
+});
+
+test('restart, clean: the new bot waits until the old one has closed what it holds, then starts flat', async () => {
+  const r = await rig();
+  const old = await add(r, MM);
+  await step(r, old.id);
+  r.ex.fill(r.ex.side('buy')[0]!.clOrdID);
+  await settle();
+  await r.rt.cancel(old.id);
+  const next = await r.rt.add({ owner: FOLLOWER, accountId: 42, mode: 'hosted', spec: { symbol: 'BTC-USD', ...MM }, seed: 7, after: old.id });
+  await step(r, next.id, 500);
+  assert.equal(r.rt.get(next.id)!.status, 'scheduled', 'waits while the old one closes');
+  assert.equal([...r.ex.resting.values()].filter((o) => !o.reduceOnly).length, 0, 'the new one quotes nothing yet');
+  await step(r, old.id, 500);
+  await step(r, old.id, 61_000);
+  await step(r, old.id, 500);
+  await step(r, old.id, 500);
+  assert.equal(r.rt.get(old.id)!.status, 'cancelled');
+  await step(r, next.id, 500);
+  const v = r.rt.view(next.id)!;
+  assert.equal(v.algo.status, 'running');
+  assert.equal(v.bot!.inventory, 0);
+});
