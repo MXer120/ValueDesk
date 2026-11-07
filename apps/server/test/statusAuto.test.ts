@@ -106,6 +106,55 @@ test("the owner's own incident or maintenance stands instead; one they resolve s
   t.close();
 });
 
+/** The indexer's samples with what is behind, a minute each from `start`; the others up. */
+function playWhy(s: StatusStore, rows: Array<[St, string[]]>, start = M0): number {
+  rows.forEach(([state, why], i) => {
+    const m = start + i;
+    const others = (['website', 'api', 'executor'] as const).map((service) => ({ service, state: 'up' as const }));
+    s.auto.observe(m, [...others, { service: 'indexer', state, why }], m * 60_000);
+  });
+  return start + rows.length;
+}
+
+test('an indexer incident says what is behind in plain words; something new is one update, said once', () => {
+  const s = store();
+  let m = playWhy(s, Array(AUTO.degradedMin).fill(['degraded', ['lane:sdata']]));
+  const [n] = s.notices.all();
+  assert.ok(n);
+  assert.equal(n.title, 'Indexer degraded - figures may be behind');
+  assert.match(n.updates[0]!.text, /^Since .*: SoDEX PnL, rank and account value reads have stopped making progress: some SoDEX leaderboard figures may be hours old\. Detected by our automatic checks/);
+  m = playWhy(s, Array(3).fill(['degraded', ['lane:sdata', 'lane:sgw']]), m);
+  const later = s.notices.get(n.id)!;
+  assert.equal(later.updates.length, 2, 'one update, not one a minute');
+  assert.match(later.updates[1]!.text, /^Now also: SoDEX wallet trade reads have stopped making progress/);
+  playWhy(s, Array(AUTO.clearMin).fill(['up', []]), m);
+  assert.ok(s.notices.get(n.id)!.closedAt, 'resolved when it keeps up again');
+  // Codes it does not know, or a replayed record with none: the general words.
+  const r = store();
+  playWhy(r, Array(AUTO.degradedMin).fill(['degraded', ['nonsense']]));
+  assert.match(r.notices.all()[0]!.updates[0]!.text, /one of the indexer's data streams has been down/);
+  s.close();
+  r.close();
+});
+
+test("planned maintenance stays maintenance: a ship's window or the indexer stopping on purpose opens nothing", () => {
+  const s = store();
+  // ship.sh's maintenance for the indexer, 10 minutes, then the lanes still behind inside it.
+  s.notices.create({ kind: 'maintenance', title: 'Update v0.2.183', components: ['api', 'indexer'], startsAt: M0 * 60_000, endsAt: (M0 + 10) * 60_000 }, M0 * 60_000);
+  playWhy(s, Array(15).fill(['degraded', ['lag']]));
+  assert.equal(s.notices.all().length, 1, "only the ship's maintenance");
+  const t = store();
+  let m = playWhy(t, Array(25).fill(['degraded', ['stopping']]));
+  assert.equal(t.notices.all().length, 0, 'a stop of 25 minutes the indexer announced');
+  // A bad run does not carry across the stop: after it, ten fresh minutes are needed.
+  m = playWhy(t, Array(AUTO.degradedMin - 1).fill(['degraded', ['paused']]), m);
+  assert.equal(t.notices.all().length, 0);
+  playWhy(t, [['degraded', ['paused']]], m);
+  assert.match(t.notices.all()[0]!.updates[0]!.text, /stopped publishing new data/);
+  s.close();
+  t.close();
+});
+
 test('the record already there is played once', () => {
   const s = store();
   const now = (M0 + 120) * 60_000;

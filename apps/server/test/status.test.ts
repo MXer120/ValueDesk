@@ -12,6 +12,7 @@ import { StatusStore, probeAll, probeTargetsFromEnv, proberEnabled, startStatusP
 import { STATUS_DAYS, dayTone, lastDays, minutesExpected, uptimeOf } from '../src/ops/statusModel.js';
 import { statusRoutes, STATUS_CACHE_MS } from '../src/routes/status.js';
 import { CACHE_POLICIES, perfPlugin } from '../src/perf.js';
+import { FAIL_MIN, IndexerJudge, LAG_LIMIT_MS, LAG_MINUTES, LAG_OF, LANE_STALL_MS } from '../src/ops/indexerJudge.js';
 import { tempDir } from './builderFakes.js';
 
 const DIR = tempDir('vs-status-');
@@ -112,6 +113,90 @@ test('probes: an indexer stream back by the next status is up; down in both is d
   const stale = indexer(T0 - 10 * MIN);
   assert.equal(await stateOf(() => { reads++; return stale(); }), 'down');
   assert.equal(reads, 1, 'not asked again');
+});
+
+/** One indexer status a minute from T0: lanes as given, every stream up, the boards fresh. */
+type LaneNow = { queued: number; done: number; failed?: number };
+async function indexerRounds(rounds: Array<{ lanes?: Record<string, LaneNow>; lag?: number }>, judge = new IndexerJudge()) {
+  const out: Array<{ state: string; why: string[] }> = [];
+  for (const [i, r] of rounds.entries()) {
+    const t = T0 + i * MIN;
+    const s = (await probeAll({
+      targets: TARGETS, fetch: fakeFetch(ALL_UP), now: () => t, indexerRecheckMs: 0, indexerJudge: judge,
+      indexerStatus: () => ({ at: t - 5_000, sockets: { sodex: 1, hyperliquid: 1 }, lastBuildAt: t - 5 * MIN, lanes: r.lanes ?? {}, loopLagMs: { lastMinute: r.lag ?? 300, sinceStart: 40_000 } }),
+    })).find((x) => x.service === 'indexer')!;
+    out.push({ state: s.state, why: s.why ?? [] });
+  }
+  return out;
+}
+const minutesOf = <T>(n: number, f: (i: number) => T): T[] => Array.from({ length: n }, (_, i) => f(i));
+
+test('probes: a lane with work that finishes none for its limit is degraded; a long queue that moves is not', async () => {
+  const limit = LANE_STALL_MS.sdata! / MIN;
+  // sdata keeps thousands queued at its pace (production 2026-11-07: 3,142 queued, ~12 done a minute).
+  const moving = await indexerRounds(minutesOf(limit + 10, (i) => ({ lanes: { sdata: { queued: 5_000 - i, done: 13_000 + 12 * i } } })));
+  assert.ok(moving.every((r) => r.state === 'up'), 'a long queue that moves is up');
+  // Even slowly: one read in the window is progress.
+  const slow = await indexerRounds(minutesOf(limit + 10, (i) => ({ lanes: { sdata: { queued: 5_000, done: 100 + Math.floor(i / (limit - 1)) } } })));
+  assert.ok(slow.every((r) => r.state === 'up'), 'one read a window is still progress');
+  // 2026-11-06 14:44: the gateway lane froze with work queued.
+  const frozen = await indexerRounds(minutesOf(limit + 3, () => ({ lanes: { sdata: { queued: 5_683, done: 200 } } })));
+  assert.deepEqual(frozen.slice(0, limit).map((r) => r.state), Array(limit).fill('up'), 'not before its limit');
+  assert.equal(frozen[limit]!.state, 'degraded');
+  assert.deepEqual(frozen[limit]!.why, ['lane:sdata']);
+  // An empty lane does nothing and is fine.
+  const idle = await indexerRounds(minutesOf(limit + 5, () => ({ lanes: { strades: { queued: 0, done: 0 } } })));
+  assert.ok(idle.every((r) => r.state === 'up'));
+  // sgw waits out a rate limit 15 minutes by design: not degraded at 16.
+  const pause = await indexerRounds(minutesOf(17, () => ({ lanes: { sgw: { queued: 170, done: 3_000 } } })));
+  assert.ok(pause.every((r) => r.state === 'up'), 'a rate-limit pause is not a stall');
+});
+
+test('probes: an indexer restart (counts from zero) and a hole in the readings start the window again', async () => {
+  const limit = LANE_STALL_MS.hl! / MIN;
+  const judge = new IndexerJudge();
+  // Frozen at 900 until just before the limit, then a restart: frozen again at 0.
+  const rounds = [...minutesOf(limit - 1, () => ({ lanes: { hl: { queued: 2_500, done: 900 } } })), ...minutesOf(limit + 1, () => ({ lanes: { hl: { queued: 2_500, done: 0 } } }))];
+  const r = await indexerRounds(rounds, judge);
+  assert.ok(r.slice(0, -1).every((x) => x.state === 'up'), 'the restart is not counted as a stall of the old process');
+  assert.equal(r.at(-1)!.state, 'degraded', 'the new process frozen for the whole limit is');
+  // A fresh judge (the prober restarted) has no readings to claim anything from.
+  const one = await indexerRounds([{ lanes: { hl: { queued: 2_500, done: 0 } } }]);
+  assert.equal(one[0]!.state, 'up');
+});
+
+test('probes: reads failing and the thread far behind are degraded; a pause or a few failures are not', async () => {
+  const fails = await indexerRounds(minutesOf(8, (i) => ({ lanes: { hl: { queued: 2_500, done: 100 + i, failed: 2 * i } } })));
+  assert.equal(fails[4]!.state, 'up', '8 failures are under the limit');
+  assert.equal(fails[5]!.state, 'degraded', `${FAIL_MIN} failed against 5 done`);
+  assert.deepEqual(fails[5]!.why, ['fail:hl']);
+  const mostlyOk = await indexerRounds(minutesOf(8, (i) => ({ lanes: { hl: { queued: 2_500, done: 100 + 40 * i, failed: 2 * i } } })));
+  assert.ok(mostlyOk.every((r) => r.state === 'up'), 'failures while most reads succeed');
+  // 5 s is an ordinary minute (2026-11-07 10:40); a single long stall is not enough.
+  const lags = [5_000, LAG_LIMIT_MS, 3_000, LAG_LIMIT_MS + 5_000, 4_000, 20_000, 30_000, 2_000, 16_000];
+  const r = await indexerRounds(lags.map((lag) => ({ lag })));
+  assert.deepEqual(r.map((x) => x.state), [...Array(8).fill('up'), 'degraded'], `${LAG_MINUTES} minutes of ${LAG_OF} over ${LAG_LIMIT_MS} ms`);
+  assert.deepEqual(r.at(-1)!.why, ['lag']);
+});
+
+test('probes: what is behind comes with the sample, the boards and streams included', async () => {
+  const s = (await probeAll({ targets: TARGETS, fetch: fakeFetch(ALL_UP), now: () => T0, indexerRecheckMs: 0, indexerStatus: () => ({ at: T0 - 5_000, sockets: { sodex: null, hyperliquid: 1 }, lastBuildAt: T0 - 2 * 3_600_000 }) })).find((x) => x.service === 'indexer')!;
+  assert.equal(s.state, 'degraded');
+  assert.deepEqual(s.why, ['stream:sodex', 'boards']);
+  const up = (await probeAll({ targets: TARGETS, fetch: fakeFetch(ALL_UP), now: () => T0, indexerStatus: indexer(T0 - 5_000) })).find((x) => x.service === 'indexer')!;
+  assert.equal(up.why, undefined);
+});
+
+test('probes: an indexer not publishing with boards under an hour old is degraded, not down; stopping on purpose is said', async () => {
+  const stateOf = async (status: Record<string, unknown>) => (await probeAll({ targets: TARGETS, fetch: fakeFetch(ALL_UP), now: () => T0, indexerRecheckMs: 0, indexerStatus: () => status })).find((x) => x.service === 'indexer')!;
+  const base = { at: T0 - 5 * MIN, sockets: { sodex: 1 } };
+  const paused = await stateOf({ ...base, lastBuildAt: T0 - 50 * MIN, boardsAt: T0 - 8 * MIN });
+  assert.deepEqual([paused.state, paused.why], ['degraded', ['paused']]);
+  assert.equal((await stateOf({ ...base, lastBuildAt: T0 - 61 * MIN, boardsAt: T0 - 61 * MIN })).state, 'down', 'boards over an hour old');
+  assert.equal((await stateOf({ ...base, lastBuildAt: 0 })).state, 'down', 'no boards');
+  const stopping = await stateOf({ ...base, stopping: true });
+  assert.deepEqual([stopping.state, stopping.why], ['degraded', ['stopping']]);
+  assert.equal((await stateOf({ ...base, at: T0 - 30 * MIN, stopping: true })).state, 'down', 'a stop that never ended is not maintenance');
 });
 
 test('probes: a feed reconnecting is asked again; still not ok is degraded', async () => {
