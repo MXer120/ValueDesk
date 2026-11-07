@@ -38,7 +38,9 @@ import type { BotState } from './botWords';
 import { STATE_WORD } from './botWords';
 import { applyForBeta, useBetaAccessState } from '../../beta/access';
 import { openConnectDialog } from '../account/connect';
-import { Button, EmptyState, Panel, Shell, Skeleton } from './kit/kit';
+import { Button, EmptyState, Panel, Shell, Skeleton, StatusPill as Pill, Switch } from './kit/kit';
+import { demoBots, demoDefault, demoStarted, saveDemo } from '../../bots/demo';
+import { listBotsOn } from '../../algo/executorAlgos';
 import { hostedExecutor } from '../../copy/executor';
 import './bots.css';
 import './botsPages.css';
@@ -60,6 +62,8 @@ export interface BotsCtx {
   /** New settings by restart (feature 'bot-restart'): 'clean' closes first, 'takeover' hands what it holds to the new bot. */
   restart: (v: AlgoView, spec: Record<string, unknown>, how: 'clean' | 'takeover') => Promise<AlgoView>;
   canRestart: boolean;
+  /** Demo data (local builds): example bots, nothing sent anywhere. */
+  demo?: boolean;
   update: (id: string, patch: Record<string, unknown>) => Promise<void>;
   pause: (v: AlgoView) => Promise<void>;
   resume: (v: AlgoView) => Promise<void>;
@@ -185,12 +189,34 @@ function BotsPageOpen({ address, provider }: { address: string | null; provider:
       return v;
     },
     restart: async (v, spec, how) => {
-      const n = await start(spec, { from: v.algo.id, how });
-      notify('ok', how === 'clean' ? 'Restarting: the old bot closes, then the new one starts.' : 'Restarted: the new bot took over.');
+      if (live.hosted.info?.features?.includes('bot-restart')) {
+        const n = await start(spec, { from: v.algo.id, how });
+        notify('ok', how === 'clean' ? 'Restarting: the old bot closes, then the new one starts.' : 'Restarted: the new bot took over.');
+        goBots({ page: 'bot', id: n.algo.id });
+        return n;
+      }
+      // An executor without restarts: the same steps from here. The old bot stops the way the restart says, the new
+      // one starts once it has ended (one live bot per market). An instant one leaves the position in the account.
+      const s0 = v.algo.spec;
+      const want = how === 'clean' ? 'close' : 'keep';
+      if (!FINAL_STATUSES.has(v.algo.status)) {
+        if ((s0.kind === 'mm' || s0.kind === 'grid') && s0.onStop !== want) await update(v.algo.id, { onStop: want });
+        await act('cancel', v.algo.id);
+      }
+      notify('info', how === 'clean' ? 'Closing the old bot. The new one starts when it has: keep this page open.' : 'Stopping the old bot…');
+      const until = Date.now() + 20 * 60_000;
+      for (;;) {
+        const now = (await listBotsOn('hosted', false)).algos.find((x) => x.algo.id === v.algo.id);
+        if (!now || FINAL_STATUSES.has(now.algo.status)) break;
+        if (Date.now() > until) throw new Error('The old bot has not ended after 20 minutes. Start the new one when it has.');
+        await new Promise((res) => setTimeout(res, 2_000));
+      }
+      const n = await start(spec);
+      notify('ok', 'Restarted with the new settings.');
       goBots({ page: 'bot', id: n.algo.id });
       return n;
     },
-    canRestart: !!live.hosted.info?.features?.includes('bot-restart'),
+    canRestart: true,
     update: async (id, patch) => {
       await update(id, patch);
       notify('ok', 'Changes saved. They apply at once.');
@@ -234,16 +260,72 @@ function BotsPageOpen({ address, provider }: { address: string | null; provider:
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [address, bots, loading, error, ready, supported, live, busy, view]);
 
+  // Demo data (owner 2026-11-07), local builds only: on by default, the switch at the top right.
+  const [demo, setDemoOn] = useState(() => BOTS_ON && demoDefault());
+  const [demoList, setDemoList] = useState<AlgoView[]>(() => demoBots());
+  const setDemo = (on: boolean) => { setDemoOn(on); saveDemo(on); };
+  const demoCtx: BotsCtx = useMemo(() => {
+    const set = (id: string, f: (v: AlgoView) => AlgoView) => setDemoList((l) => l.map((x) => (x.algo.id === id ? f(x) : x)));
+    const status = (v: AlgoView, st: AlgoView['algo']['status'], why: string | null): AlgoView => ({
+      ...v,
+      algo: { ...v.algo, status: st, statusReason: why, endedAt: FINAL_STATUSES.has(st) ? Date.now() : v.algo.endedAt },
+      working: st === 'running' ? v.working ?? '2 orders working' : null,
+      bot: v.bot ? { ...v.bot, orders: st === 'running' ? v.bot.orders : [], ...(FINAL_STATUSES.has(st) ? { inventory: 0, inventoryUsd: 0 } : {}) } : v.bot,
+    });
+    const said = (t: string) => notify('ok', `${t} (demo: nothing sent)`);
+    return {
+      ...ctx,
+      demo: true,
+      address: ctx.address ?? '0xdemo',
+      bots: demoList,
+      loading: false,
+      error: null,
+      ready: true,
+      supported: true,
+      liveAllowed: true,
+      busy: null,
+      setup: () => said('Set up'),
+      setupWhy: () => null,
+      start: async (spec) => { const n = demoStarted(spec); setDemoList((l) => [n, ...l]); said(`${botName(n)} started`); return n; },
+      restart: async (v, spec, how) => {
+        const n = demoStarted(spec);
+        setDemoList((l) => [n, ...l.map((x) => (x.algo.id === v.algo.id ? status(x, 'cancelled', how === 'clean' ? 'Restarted: closed first.' : 'Restarted: handed over.') : x))]);
+        said(how === 'clean' ? 'Clean restart' : 'Instant restart');
+        goBots({ page: 'bot', id: n.algo.id });
+        return n;
+      },
+      canRestart: true,
+      update: async () => said('Saved'),
+      pause: async (v) => { set(v.algo.id, (x) => status(x, 'paused', 'Paused by you.')); said('Paused'); },
+      resume: async (v) => { set(v.algo.id, (x) => status(x, 'running', null)); said('Resumed'); },
+      stop: async (v) => { set(v.algo.id, (x) => status(x, 'cancelled', 'Stopped by you.')); said('Stopped'); },
+      remove: async (v) => { setDemoList((l) => l.filter((x) => x.algo.id !== v.algo.id)); if (view.page === 'bot') goBots({ page: 'overview' }); said('Deleted'); },
+      stopAll: async () => { setDemoList((l) => l.map((x) => (FINAL_STATUSES.has(x.algo.status) ? x : status(x, 'cancelled', 'Stopped by you.')))); said('Every bot stopped'); },
+      pauseAll: async (list) => { for (const v of list) set(v.algo.id, (x) => status(x, 'paused', 'Paused by you.')); said(`${list.length} paused`); },
+      resumeAll: async (list) => { for (const v of list) set(v.algo.id, (x) => status(x, 'running', null)); said(`${list.length} resumed`); },
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ctx, demoList, view]);
+  const c = demo ? demoCtx : ctx;
+
   let page: ReactNode;
-  if (view.page === 'new') page = <BotNewPage ctx={ctx} view={view} />;
-  else if (view.page === 'explore') page = <BotsExplore ctx={ctx} view={view} />;
-  else if (view.page === 'savings') page = <BotsSavings ctx={ctx} view={view} />;
-  else if (view.page === 'bot') page = <BotDetail ctx={ctx} view={view} id={view.id} />;
-  else page = <BotsOverview ctx={ctx} view={view} />;
+  if (view.page === 'new') page = <BotNewPage ctx={c} view={view} />;
+  else if (view.page === 'explore') page = <BotsExplore ctx={c} view={view} />;
+  else if (view.page === 'savings') page = <BotsSavings ctx={c} view={view} />;
+  else if (view.page === 'bot') page = <BotDetail ctx={c} view={view} id={view.id} />;
+  else page = <BotsOverview ctx={c} view={view} />;
 
   return (
     <div className="tf bots-page" aria-busy={loading}>
-      <div className="bots-col">{settling && view.page !== 'explore' ? <BotsSettling /> : page}</div>
+      <div className="bots-col">
+        {BOTS_ON && (
+          <div className="bots-demobar">
+            {demo && <Pill tone="brand" size="sm" dot>Example bots</Pill>}
+            <Switch checked={demo} onChange={setDemo} label="Demo data" />
+          </div>
+        )}
+        {settling && !demo && view.page !== 'explore' ? <BotsSettling /> : page}
+      </div>
       <BotSetupSheet open={!!setup} onClose={() => setSetup(null)} live={live} paper={setup?.paper ?? true} />
       {dialog}
     </div>

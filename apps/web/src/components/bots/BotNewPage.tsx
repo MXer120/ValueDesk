@@ -216,38 +216,20 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
   return (
     <>
       <BotsHead view={view} title="New bot" sub="Pick a bot, a market and a size, then start it." />
+      <nav className="bots-wsteps" aria-label="Steps">
+        <ol>
+          {STEPS.map((st, i) => (
+            <li key={st.title} className={i === step ? 'is-on' : i < step ? 'is-done' : ''}>
+              <button type="button" onClick={() => i <= step && setStep(i)} disabled={i > step} aria-current={i === step ? 'step' : undefined}>
+                <span className="bots-wsteps__t"><b>{i < step ? <Icon name="check" size={12} /> : <span className="bots-wsteps__n">{i + 1}</span>}{st.title}</b><small>{st.hint}</small></span>
+                <span className="bots-wsteps__seg" aria-hidden="true" />
+              </button>
+            </li>
+          ))}
+        </ol>
+        <span className="bots-wsteps__count">{step + 1}/4</span>
+      </nav>
       <div className="bots-wizard">
-        <aside className="bots-wizard__side">
-          <Shell className="bots-stepper">
-            <div className="bots-stepper__head">
-              <b>New bot</b>
-              <span>{step + 1} / 4</span>
-            </div>
-            <ProgressBar value={step + 1} max={4} size="sm" tone="positive" label="Steps done" />
-            <ol className="bots-steps">
-              {STEPS.map((s, i) => (
-                <li key={s.title} className={i === step ? 'is-on' : i < step ? 'is-done' : ''}>
-                  <button type="button" onClick={() => i <= step && setStep(i)} disabled={i > step} aria-current={i === step ? 'step' : undefined}>
-                    <span className="bots-steps__n">{i < step ? <Icon name="check" size={12} /> : i + 1}</span>
-                    <span className="bots-steps__t"><b>{s.title}</b><small>{s.hint}</small></span>
-                  </button>
-                </li>
-              ))}
-            </ol>
-            <div className="bots-stepper__est">
-              <span className="tf-tile bots-stepper__coin"><CoinIcon coin={d.symbol} size={20} /></span>
-              <span className="bots-stepper__est-t"><b>{d.symbol}</b><small>{STRATEGY_INFO[d.strategy].name}{noLead && d.strategy === 'market' ? ' · plain' : ''}</small></span>
-              <span className="bots-stepper__est-v"><b className="bots-est__v is-sm">{eff.strategy === 'grid' ? fmtUsd(floor.fees, 0) : fmtBpUsd(estBps)}</b><small>per $1M</small></span>
-            </div>
-            <div className="bots-stepper__act">
-              {step > 0 && <Button variant="secondary" size="md" icon="arrowLeft" onClick={back}>Back</Button>}
-              {step < 3
-                ? <Button variant="primary" size="md" className="bots-stepper__next" onClick={next}>Next</Button>
-                : <Button variant="primary" size="md" className="bots-stepper__next" icon="play" loading={busy} disabled={!can} onClick={() => void start()}>{busy ? 'Starting…' : paper ? 'Start practice bot' : 'Start bot'}</Button>}
-            </div>
-          </Shell>
-        </aside>
-
         <div className="bots-wizard__main">
           {step === 0 && (
             <Shell>
@@ -309,19 +291,41 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
                   <div><dt>Orders</dt><dd>{paper ? <StatusPill tone="brand" size="sm">Practice</StatusPill> : <StatusPill tone="warning" size="sm">Real</StatusPill>}</dd></div>
                 </dl>
                 <NameField d={d} set={set} />
-                {check.map((e) => <p key={e} className="bots-err" role="alert">{e}</p>)}
                 {why && ctx.address && <p className="bots-note">{why} <button type="button" className="bots-link" onClick={() => ctx.setup(paper)}>Set up</button></p>}
                 {!ctx.address && <p className="bots-note">Connect your wallet to start a bot.</p>}
-                {error && <p className="bots-err" role="alert">{error}</p>}
               </Panel>
-              {d.strategy === 'market' && est && (
-                <Panel className="bots-review__est">
-                  <Estimate m={est} gate={eff.strategy === 'market' && eff.gate} feeBps={feeBps} />
-                </Panel>
-              )}
             </Shell>
           )}
         </div>
+        <aside className="bots-newside">
+          <Shell className="bots-sidecard">
+            <ShellHeader tile={<CoinIcon coin={d.symbol} size={20} />} title={d.symbol} subtitle={`${STRATEGY_INFO[eff.strategy].name}${noLead && d.strategy === 'market' ? ' · no Binance price' : ''}`} aside={paper ? <StatusPill tone="brand" size="sm">Practice</StatusPill> : <StatusPill tone="warning" size="sm">Real</StatusPill>} />
+            <Panel className="bots-sidepanel">
+              {eff.strategy === 'grid' ? (
+                <div className="bots-est">
+                  <div className="bots-est__big">
+                    <span className="bots-est__k">Per $1M, before price moves</span>
+                    <RollingNumber value={floor.net < 0 ? `earns ${fmtUsd(-floor.net, 0)}` : fmtUsd(floor.net, 0)} className={`bots-est__v${floor.net < 0 ? ' pos' : ''}`} />
+                    <span className="bots-est__sub">fees {fmtUsd(floor.fees, 0)}{floor.edge !== null ? ` · steps earn ${fmtUsd(floor.edge, 0)}` : ''}</span>
+                  </div>
+                </div>
+              ) : markets.data ? <Estimate m={est} gate={eff.strategy === 'market' && eff.gate} feeBps={feeBps} /> : markets.error ? <p className="bots-fine">Estimates unavailable. Fees alone: {fmtUsd(floor.fees, 0)} per $1M.</p> : <div className="bots-skels"><Skeleton className="bots-skel is-big" /><Skeleton className="bots-skel" /></div>}
+              <div className="bots-sidepanel__facts">
+                <span><small>Order</small><b>{fmtUsd(d.orderUsd, 0)}</b></span>
+                <span><small>{d.strategy === 'grid' ? 'Levels' : 'Max holding'}</small><b>{d.strategy === 'grid' ? d.levels : fmtUsd(d.maxInventoryUsd, 0)}</b></span>
+                <span><small>Loss limit</small><b>{d.maxLossUsd === null ? 'None' : fmtUsd(d.maxLossUsd, 0)}</b></span>
+              </div>
+              {step === 3 && check.map((e) => <p key={e} className="bots-err" role="alert">{e}</p>)}
+              {step === 3 && error && <p className="bots-err" role="alert">{error}</p>}
+              <div className="bots-sidepanel__act">
+                {step > 0 && <Button variant="secondary" size="md" icon="arrowLeft" onClick={back}>Back</Button>}
+                {step < 3
+                  ? <Button variant="primary" size="md" className="bots-stepper__next" onClick={next}>Next<Icon name="arrowRight" size={14} /></Button>
+                  : <Button variant="primary" size="md" className="bots-stepper__next" icon="play" loading={busy} disabled={!can} onClick={() => void start()}>{busy ? 'Starting…' : paper ? 'Start practice bot' : 'Start bot'}</Button>}
+              </div>
+            </Panel>
+          </Shell>
+        </aside>
       </div>
     </>
   );

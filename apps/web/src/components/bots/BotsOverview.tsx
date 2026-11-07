@@ -15,12 +15,13 @@ import { fleetSeries, fleetTotals } from '../../bots/fleet';
 import { STRATEGIES, STRATEGY_INFO, botFeeWords, costPerMillion, draftFor, strategyOf, type Strategy } from '../../bots/presets';
 import { useBotLatency } from '../../bots/data';
 import { hostedExecutor } from '../../copy/executor';
+import { demoLatency } from '../../bots/demo';
 import { goBots, type BotsView } from '../../bots/routes';
 import { BotIcon } from './BotIcon';
 import { LatencyChart, mergeRegions, type ChartMark } from './LatencyChart';
 import { botName, botState, fmtPnl, statusWords } from './botWords';
 import { BotsHead, StatePill, isLive, type BotsCtx } from './BotsPage';
-import { Button, EmptyState, Icon, IconButton, Panel, ProgressBar, SearchField, Segmented, Shell, ShellHeader, Skeleton, StatCard, StatusPill } from './kit/kit';
+import { Button, EmptyState, Icon, IconButton, Panel, ProgressBar, SearchField, Segmented, Shell, ShellHeader, Skeleton, Sparkline, StatCard, StatusPill } from './kit/kit';
 
 const PAGE = 25;
 export const fmtCost = (cpm: number | null | undefined): string => (cpm === null || cpm === undefined ? DASH : cpm < 0 ? `earns ${fmtUsd(-cpm, 0)}` : fmtUsd(cpm, 0));
@@ -36,11 +37,13 @@ type Layout = 'tiles' | 'list';
  * This wallet's own bots' latency to SoDEX (never another wallet's), laid out like the owner's reference: icon tile,
  * "Latency", scope · window, the legend and the window switch on the right, the chart in its panel.
  */
-export function LatencyCard({ marks = [], ctx, bot, practice }: { marks?: ChartMark[]; ctx: BotsCtx; bot?: string; practice?: boolean }) {
+export function LatencyCard({ marks = [], ctx, bot, practice, compact }: { marks?: ChartMark[]; ctx: BotsCtx; bot?: string; practice?: boolean; compact?: boolean }) {
   const [hours, setHours] = useState<'6' | '24' | '48'>('24');
   const [region, setRegion] = useState<string>('all');
   const token = ctx.address && ctx.live.hosted.signedIn ? hostedExecutor.token(ctx.address) : null;
-  const lat = useBotLatency(48, token, bot);
+  const real = useBotLatency(48, ctx.demo ? null : token, bot);
+  const demoLat = useMemo(() => (ctx.demo ? demoLatency(Date.now(), bot ? bot.length : 3) : null), [ctx.demo, bot]);
+  const lat = demoLat ? { data: demoLat, error: null, loading: false, refresh: () => {} } : real;
   const regions = lat.data?.regions ?? [];
   const one = regions.find((r) => r.id === region) ?? null;
   const buckets = one ? one.buckets : mergeRegions(regions);
@@ -48,7 +51,7 @@ export function LatencyCard({ marks = [], ctx, bot, practice }: { marks?: ChartM
   const nowP95 = (one ? [one] : regions).map((r) => r.now.p95).filter((x): x is number => x !== null);
   const empty = (title: string, line: string) => <div className="bots-lat__well"><EmptyState icon="gauge" title={title} description={line} /></div>;
   return (
-    <Shell className="bots-latcard">
+    <Shell className={`bots-latcard${compact ? ' is-compact' : ''}`}>
       <ShellHeader
         icon="gauge"
         title="Latency"
@@ -62,27 +65,27 @@ export function LatencyCard({ marks = [], ctx, bot, practice }: { marks?: ChartM
         }
         aside={
           <>
-            <span className="bots-lat__legend" aria-hidden="true">
+            {!compact && <span className="bots-lat__legend" aria-hidden="true">
               <span><i className="is-p95" />p95</span>
               <span><i className="is-p50" />p50</span>
               <span><i className="is-p99" />p99</span>
-            </span>
+            </span>}
             <Segmented value={hours} label="Window" onChange={setHours} options={[{ value: '6', label: '6h' }, { value: '24', label: '24h' }, { value: '48', label: '48h' }]} />
           </>
         }
       />
       <Panel className="bots-lat__panel">
-        {practice
+        {practice && !ctx.demo
           ? empty('Practice bot', 'It sends no orders, so there is nothing to time.')
           : !ctx.address
           ? empty('Your bots only', 'Connect your wallet to see how fast your orders reach SoDEX.')
-          : !token
+          : !token && !ctx.demo
             ? empty('Your bots only', 'Finish the bot setup to see it.')
             : lat.error && !lat.data
               ? empty('Not available right now', `The executor did not answer (${lat.error}).`)
               : !lat.data
                 ? <Skeleton className="bots-lat__skel" />
-                : <LatencyChart buckets={buckets} bucketMs={lat.data.bucketMs} regionLabel={one ? one.id : regions.length === 1 ? regions[0]!.id : 'all regions'} marks={marks} hours={Number(hours)} />}
+                : <LatencyChart buckets={buckets} bucketMs={lat.data.bucketMs} regionLabel={one ? one.id : regions.length === 1 ? regions[0]!.id : 'all regions'} marks={marks} hours={Number(hours)} height={compact ? 170 : undefined} />}
       </Panel>
     </Shell>
   );
@@ -204,39 +207,66 @@ function Controls({ v, ctx }: { v: AlgoView; ctx: BotsCtx }) {
   );
 }
 
+function TileControls({ v, ctx }: { v: AlgoView; ctx: BotsCtx }) {
+  const state = botState(v);
+  const ended = state === 'ended' || state === 'failed';
+  const busy = ctx.busy === v.algo.id;
+  return (
+    <span className="bots-tile__ctl" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+      {!ended && state !== 'closing' && (state === 'paused'
+        ? <IconButton icon="play" label="Resume" disabled={busy} onClick={() => void ctx.resume(v)} />
+        : <IconButton icon="pause" label="Pause" disabled={busy} onClick={() => void ctx.pause(v)} />)}
+      {!ended && <IconButton icon="stop" label={state === 'closing' ? 'Stop now' : 'Stop'} className="is-danger" disabled={busy} onClick={() => void ctx.stop(v)} />}
+      {ended && <IconButton icon="trash" label="Delete" className="is-danger" disabled={busy} onClick={() => void ctx.remove(v)} />}
+    </span>
+  );
+}
+
 function BotTile({ v, ctx }: { v: AlgoView; ctx: BotsCtx }) {
   const st = strategyOf(v.algo.spec) ?? 'maker';
   const b = v.bot;
   const state = botState(v);
   const cap = v.algo.spec.kind === 'mm' ? v.algo.spec.maxInventoryUsd : null;
   const hold = Math.abs(b?.inventoryUsd ?? 0);
+  const pnl = b?.netPnl ?? 0;
+  const tone = pnl > 0.004 ? 'positive' : pnl < -0.004 ? 'negative' : 'neutral';
+  const trend = (v.algo.book?.series ?? []).map((p) => p[2]);
+  const gate = v.algo.spec.kind === 'mm' && (v.algo.spec.stillBps ?? 0) > 0;
+  const ended = state === 'ended' || state === 'failed';
   const open = () => goBots({ page: 'bot', id: v.algo.id });
+  const since = v.algo.startedAt ?? v.algo.createdAt;
+  const hours = Math.max(0, ((v.algo.endedAt ?? Date.now()) - since) / 3_600_000);
+  const age = hours >= 48 ? `${Math.floor(hours / 24)}d` : hours >= 1 ? `${Math.floor(hours)}h` : `${Math.max(1, Math.round(hours * 60))}m`;
   return (
     <li>
       <div role="link" tabIndex={0} className={`bots-tile bots-row is-${state}`} onClick={open} onKeyDown={(e) => e.key === 'Enter' && open()} aria-label={`${botName(v)}, ${v.algo.spec.symbol}`}>
-        {state === 'running' && <span className="bots-tile__glow" aria-hidden="true" />}
         <div className="bots-tile__top">
-          <span className="tf-tile bots-tile__coin"><CoinIcon coin={v.algo.spec.symbol} size={20} /></span>
+          <CoinIcon coin={v.algo.spec.symbol} size={30} />
           <div className="bots-tile__t">
             <p className="bots-tile__name">{botName(v)}</p>
-            <p className="bots-tile__sub"><BotIcon strategy={st} size={12} />{STRATEGY_INFO[st].name}{v.algo.spec.kind === 'mm' && (v.algo.spec.stillBps ?? 0) > 0 ? ' · gate' : ''}{v.algo.spec.paper ? ' · practice' : ''}</p>
+            <p className="bots-tile__sub">{v.algo.spec.symbol.replace(/-USD$/, '')} · {STRATEGY_INFO[st].name}{gate ? ' · gate' : ''}</p>
           </div>
-          <StatePill s={state} size="sm" />
+          <span className="bots-tile__pills">
+            {v.algo.spec.paper && <StatusPill size="sm" tone="brand">Practice</StatusPill>}
+            <StatePill s={state} size="sm" />
+          </span>
         </div>
-        <p className="bots-tile__status">{statusWords(v)}</p>
+        <div className="bots-tile__hero">
+          <div>
+            <p className="bots-tile__k">Net PnL</p>
+            <p className={`bots-tile__pnl is-${tone}`}>{fmtPnl(b?.netPnl)}</p>
+          </div>
+          {trend.length > 2 && <Sparkline values={trend} tone={tone} w={110} h={34} />}
+        </div>
         <dl className="bots-tile__nums">
           <div><dt>Volume</dt><dd>{b ? fmtUsd(b.volume, 0) : DASH}</dd></div>
-          <div><dt>Net PnL</dt><dd className={b && b.netPnl > 0.004 ? 'pos' : b && b.netPnl < -0.004 ? 'neg' : ''}>{fmtPnl(b?.netPnl)}</dd></div>
-          <div><dt>Per $1M</dt><dd>{fmtCost(b?.costPerMillion)}</dd></div>
+          <div><dt>Per $1M</dt><dd className={b?.costPerMillion !== null && b?.costPerMillion !== undefined && b.costPerMillion < 0 ? 'pos' : ''}>{fmtCost(b?.costPerMillion)}</dd></div>
+          <div><dt>Holding</dt><dd>{b ? fmtUsd(b.inventoryUsd, 0) : DASH}{cap ? <small> / {fmtUsd(cap, 0)}</small> : null}</dd></div>
         </dl>
-        {cap ? (
-          <div className="bots-tile__inv">
-            <ProgressBar value={hold} max={cap} size="sm" tone={hold / cap > 0.8 ? 'warning' : 'neutral'} kind="meter" label="Holding against its cap" valueText={`${fmtUsd(hold, 0)} of ${fmtUsd(cap, 0)}`} />
-            <span>Holding {fmtUsd(hold, 0)} of {fmtUsd(cap, 0)}</span>
-          </div>
-        ) : null}
+        {cap && !ended ? <ProgressBar value={hold} max={cap} size="sm" tone={hold / cap > 0.8 ? 'warning' : 'neutral'} kind="meter" label="Holding against its cap" className="bots-tile__bar" /> : <span className="bots-tile__bar is-none" />}
         <div className="bots-tile__foot">
-          <Controls v={v} ctx={ctx} />
+          <span className="bots-tile__status"><Icon name="clock" size={12} />{age} · {v.working ?? v.algo.statusReason ?? STRATEGY_INFO[st].name}</span>
+          <TileControls v={v} ctx={ctx} />
         </div>
       </div>
     </li>
@@ -285,7 +315,7 @@ export function BotsOverview({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
         case 'pnl': return b?.netPnl ?? -Infinity;
         case 'cost': return b?.costPerMillion ?? Infinity;
         case 'holding': return Math.abs(b?.inventoryUsd ?? 0);
-        default: return v.algo.startedAt ?? v.algo.createdAt;
+        default: return (isLive(v) ? 1e15 : 0) + (v.algo.startedAt ?? v.algo.createdAt);
       }
     };
     return [...list].sort((a, b) => {

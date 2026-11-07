@@ -11,7 +11,7 @@ import type { LatencyBucket, LatencyRegion } from '../../bots/data';
 
 export interface ChartMark { t: number; label: string; tone?: 'warn' | 'muted' }
 
-const H = 232;
+const H_DEFAULT = 232;
 const PAD = { l: 8, r: 46, t: 30, b: 24 };
 
 /** All regions as one: per bucket the worst p50 / p95 / p99 of any region (what the slowest user sees). */
@@ -74,14 +74,16 @@ export function niceScale(v: number): { top: number; step: number } {
   return { top: Math.max(step * Math.ceil(v / step), step), step };
 }
 
-export function LatencyChart({ buckets, bucketMs, regionLabel, marks = [], hours = 24 }: {
+export function LatencyChart({ buckets, bucketMs, regionLabel, marks = [], hours = 24, height }: {
   buckets: LatencyBucket[];
   bucketMs: number;
   /** For the elevated stretch's name ('tokyo'); several regions merged: 'all regions'. */
   regionLabel: string;
   marks?: ChartMark[];
   hours?: number;
+  height?: number;
 }) {
+  const H = height ?? H_DEFAULT;
   const wrap = useRef<HTMLDivElement>(null);
   const [w, setW] = useState(640);
   const [hover, setHover] = useState<number | null>(null);
@@ -161,6 +163,10 @@ export function LatencyChart({ buckets, bucketMs, regionLabel, marks = [], hours
           <filter id="bots-lat-glow" x="-10%" y="-40%" width="120%" height="180%">
             <feGaussianBlur stdDeviation="2.4" />
           </filter>
+          <pattern id="bots-lat-idle" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+            <rect width="6" height="6" fill="rgb(var(--ink) / 0.025)" />
+            <line x1="0" y1="0" x2="0" y2="6" stroke="rgb(var(--ink) / 0.08)" strokeWidth="2" />
+          </pattern>
           <filter id="bots-lat-hotglow" x="-20%" y="-60%" width="140%" height="220%">
             <feGaussianBlur stdDeviation="3.2" />
           </filter>
@@ -178,9 +184,18 @@ export function LatencyChart({ buckets, bucketMs, regionLabel, marks = [], hours
             </g>
           );
         })}
-        {idle.map(([a0, a1]) => (
-          <line key={`idle-${a0}`} x1={Math.max(PAD.l, x(a0) - ((bucketMs / (end - start)) * (w - PAD.l - PAD.r)) / 2)} x2={Math.min(w - PAD.r, x(a1))} y1={y(0)} y2={y(0)} className="bots-lat__idle" />
-        ))}
+        {idle.map(([a0, a1]) => {
+          const half = ((bucketMs / (end - start)) * (w - PAD.l - PAD.r)) / 2;
+          const x0 = Math.max(PAD.l, x(a0) - half);
+          const x1 = Math.min(w - PAD.r, x(a1) - half);
+          if (x1 - x0 < 2) return null;
+          return (
+            <g key={`idle-${a0}`} className="bots-lat__idle">
+              <rect x={x0} y={PAD.t - 6} width={x1 - x0} height={H - PAD.t - PAD.b + 6} fill="url(#bots-lat-idle)" rx={4} />
+              {x1 - x0 > 64 && !none && <text x={(x0 + x1) / 2} y={H - PAD.b - 8} textAnchor="middle">no orders</text>}
+            </g>
+          );
+        })}
         {none && <text x={(PAD.l + w - PAD.r) / 2} y={(PAD.t + H - PAD.b) / 2} textAnchor="middle" className="bots-lat__none">No orders in this window</text>}
         <path d={line('p99')} className="bots-lat__p99" />
         <path d={line('p50')} className="bots-lat__p50" />

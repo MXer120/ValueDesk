@@ -58,7 +58,15 @@ async function setUp(page: Page, wallet: TestWallet): Promise<void> {
 }
 
 // A build without the section: Bots is a "coming soon" name in the nav and no page (router.ts SOON_TABS).
+/** Demo data is on by default in local builds: these tests use the real executor's bots. */
+const realData = async (page: Page) => {
+  if (await page.evaluate(() => localStorage.getItem('vd.bots.demo') !== '0')) {
+    await page.evaluate(() => localStorage.setItem('vd.bots.demo', '0'));
+    await page.reload();
+  }
+};
 const comingSoon = async (page: Page) => {
+  await realData(page);
   await page.locator('.navlinks').first().waitFor();
   // Bots is coming soon only when the nav has no link to it (a beta pill on the link is not that).
   return (await page.locator('.navlinks a[href="/bots"]').count()) === 0;
@@ -152,34 +160,31 @@ h.test('a practice market maker: set up, New bot with the gate, its page, settin
 
   // Its page: running, the gate in its line, its own latency card.
   await until(page, async () => (await headState(page)).includes('Running'), 'it runs', 30_000);
-  assert.ok(await page.locator('.bots-head').getByText(/· gate/).first().isVisible());
+  assert.ok(await page.locator('.bots-head').getByText('Gate on', { exact: true }).first().isVisible());
   assert.ok(await page.locator('.bots-latcard').first().isVisible(), 'the bot has its latency card');
   await page.waitForTimeout(6_000);
   await shot(page, 'bot');
 
-  // Settings: read, then changed (a new order size, the gate off) and applied by a clean restart, one signature.
-  await page.getByRole('tab', { name: 'Settings', exact: true }).click();
-  await page.getByText('On · 12 bp in 60 s').waitFor();
-  await page.getByRole('button', { name: 'Change settings', exact: true }).click();
-  await page.getByRole('textbox', { name: 'Order size', exact: true }).fill('15');
-  await page.getByRole('button', { name: 'Advanced settings' }).click();
-  await page.getByRole('switch', { name: 'Market gate' }).click();
-  // The size, the holding that follows it, and the gate.
-  await until(page, async () => /[2-9] changes/.test((await page.locator('.bots-savebar').textContent()) ?? ''), 'the changes counted');
-  await shot(page, 'settings');
-  mark = wallet.mark();
-  await page.getByRole('button', { name: 'Restart with changes', exact: true }).click();
-  const dlg = page.getByRole('dialog', { name: 'Restart with the new settings' });
+  // Settings: read in their card, edited in Edit settings and applied by a clean restart (the default), one signature.
+  await page.locator('.bots-setcard').getByText('On · 12 bp in 60 s').waitFor();
+  await page.locator('.bots-head').getByRole('button', { name: 'Edit settings', exact: true }).click();
+  const dlg = page.getByRole('dialog', { name: 'Edit settings' });
   await dlg.waitFor();
+  await dlg.getByRole('textbox', { name: 'Order size', exact: true }).fill('15');
+  await dlg.getByRole('button', { name: 'Advanced settings' }).click();
+  await dlg.getByRole('switch', { name: 'Market gate' }).click();
+  // The size, the holding that follows it, and the gate.
+  await until(page, async () => /[2-9] changes/.test((await dlg.locator('.bots-edit__foot').textContent()) ?? ''), 'the changes counted');
   assert.equal(await dlg.getByRole('radio', { name: /Clean restart/ }).getAttribute('aria-checked'), 'true', 'the clean restart is the default');
   await page.waitForTimeout(500);
   await shot(page, 'restart');
+  mark = wallet.mark();
   await dlg.getByRole('button', { name: 'Clean restart', exact: true }).click();
   await page.waitForURL((u) => /^\/bots\/[^/]+$/.test(u.pathname) && u.pathname !== `/bots/${first}`, { timeout: 30_000 });
   assert.deepEqual(signedKinds(wallet, mark), ['algo'], 'one signature to restart');
   const id = new URL(page.url()).pathname.split('/')[2]!;
   await until(page, async () => (await headState(page)).includes('Running'), 'the new one runs', 40_000);
-  assert.equal(await page.locator('.bots-head').getByText(/· gate/).count(), 0, 'the gate is off');
+  assert.equal(await page.locator('.bots-head').getByText('Gate on', { exact: true }).count(), 0, 'the gate is off');
 
   // Pause and resume.
   const head = page.locator('.bots-head');
