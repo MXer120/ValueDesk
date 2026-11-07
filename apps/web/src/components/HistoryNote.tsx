@@ -3,27 +3,21 @@
  *
  * It is the walk the portfolio summary adds up (exchange/allTime.ts): every perps fill, spot fill and funding payment
  * back to the wallet's first, stored after each page, so a closed tab carries on from there next time. It starts when
- * a wallet connects. It stays up while any part is still reading, and while paused; once all of it reached the start
- * of the history, it goes. Hover (or a tap on the card) opens pause, speed and remove, as the indexing toast does.
+ * a wallet connects. It stays up until every part reached the start of the history (or SoDEX's oldest row), and while
+ * paused. The short reads that later fetch the newest rows are not "reading your history": with every part complete
+ * the card goes, though one of them runs (owner 2026-11-07: it sat at 99% for good, as one always came round again).
+ * Hover (or a tap on the card) opens pause, speed and remove, as the indexing toast does. In the navbar's lane it is
+ * pinned at the right end; new notifications come in on its left (shell.css).
  */
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { setIndexEnabled } from '../setup/indexer';
-import { WALK_SPEEDS, walks, type WalkScope, type WalkSpeed, type WalkState } from '../exchange/allTime';
+import { WALK_SPEEDS, walks, type WalkSpeed, type WalkState } from '../exchange/allTime';
+import { day, noteView, share } from './historyNoteView';
 import type { ScopeKind } from '@sign/historySync.js';
 import './IndexPrompt.css';
 
 const LABEL: Record<ScopeKind, string> = { 'trades-perps': 'Perps trades', 'trades-spot': 'Spot trades', funding: 'Funding' };
-
-const day = (ms: number): string => new Date(ms).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' });
-
-/** How far back each part has come, against the first trade SoDEX states. Below 100 until a part really reached it. */
-function share(s: WalkScope, first: number | null, now: number): number | null {
-  if (s.complete) return 1;
-  if (first === null) return null;
-  if (s.oldest === null) return 0;
-  return Math.max(0, Math.min(0.99, (now - s.oldest) / Math.max(1, now - first)));
-}
 
 export function HistoryNote({ address }: { address: string | null }) {
   const [state, setState] = useState<WalkState | null>(null);
@@ -61,8 +55,7 @@ export function HistoryNote({ address }: { address: string | null }) {
     return () => { off = true; window.clearTimeout(timer); };
   }, [address]);
 
-  const done = !!state && state.scopes.every((s) => s.complete && !s.running);
-  const visible = !!address && !!state && (!done || state.held);
+  const visible = !!address && !!state && noteView(state, Date.now()).visible;
   useEffect(() => {
     if (visible) document.body.dataset.vsHistory = 'on';
     else delete document.body.dataset.vsHistory;
@@ -74,18 +67,7 @@ export function HistoryNote({ address }: { address: string | null }) {
 
   const now = Date.now();
   const shares = state.scopes.map((s) => share(s, state.firstTradeAt, now));
-  const known = shares.filter((x): x is number => x !== null);
-  const pct = known.length === shares.length ? Math.floor((known.reduce((a, b) => a + b, 0) / known.length) * 100) : null;
-  const rows = state.scopes.reduce((a, s) => a + s.rows, 0);
-  const behind = state.scopes.filter((s) => !s.complete);
-  const oldest = behind.reduce<number | null>((m, s) => (s.oldest !== null && (m === null || s.oldest > m) ? s.oldest : m), null);
-  const failed = state.scopes.find((s) => s.error && s.error !== 'Paused on this device.' && !s.running);
-  const detail = state.held
-    ? `${rows.toLocaleString('en-US')} rows kept on this device. Resume to read the rest.`
-    : failed
-      ? `Waiting on SoDEX: ${failed.error}`
-      : [`${rows.toLocaleString('en-US')} rows`, oldest !== null ? `back to ${day(oldest)}` : 'starting', state.firstTradeAt ? `first trade ${day(state.firstTradeAt)}` : '']
-          .filter(Boolean).join(' · ');
+  const { pct, detail } = noteView(state, now);
 
   const card = (
     <aside className={`toast toast--info ix-note hn${open ? ' is-open' : ''}${state.held ? '' : ' is-on'}`} role="status" aria-label="History">
@@ -103,7 +85,7 @@ export function HistoryNote({ address }: { address: string | null }) {
           <span className="toast__title">{state.held ? 'History paused' : 'Reading your history'}</span>
           <span className="toast__detail">{detail}</span>
         </div>
-        <span className="ix-note__pct">{pct === null ? '…' : `${Math.min(99, pct)}%`}</span>
+        <span className="ix-note__pct">{pct === null ? '…' : `${pct}%`}</span>
       </div>
 
       <div className="ix-note__more">
@@ -148,7 +130,6 @@ export function HistoryNote({ address }: { address: string | null }) {
               Remove
             </button>
           </div>
-          <p className="hn-note">SoDEX allows about two pages of trades a minute, whatever the speed. It is kept on this device and goes on from here next time.</p>
         </div>
       </div>
 

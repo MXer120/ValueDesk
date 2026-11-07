@@ -261,6 +261,10 @@
   width: auto; max-width: 100%; pointer-events: auto;
 }
 .toasts.is-docked .toasts__live { display: flex; flex-direction: row; align-items: center; gap: 6px; }
+/* The indexing and history cards (toast.tsx #vs-toast-pin) are pinned at the lane's right end, next to the bell; the
+   notifications come in on their left, newest nearest (owner 2026-11-07). */
+.toasts.is-docked .toasts__live { order: 1; }
+.toasts.is-docked > #vs-toast-pin > * { order: 2; }
 .toasts.is-docked .toasts__live > .toast:nth-last-child(n + 4) { display: none; }
 .toasts.is-docked .toast {
   flex: 0 1 auto; height: 38px; max-width: 300px; min-width: 0; padding: 0 6px 0 7px; gap: 8px;
