@@ -104,8 +104,8 @@ export function Analytics() {
               <table className="dv-table">
                 <thead><tr><th>Last active</th><th>Where</th><th>Device</th><th>From</th><th>Landing</th><th className="right">Pages</th><th className="right">Time</th><th>Wallet</th></tr></thead>
                 <tbody>
-                  {(r.data?.recent ?? []).map((v, i) => (
-                    <tr key={i}>
+                  {(r.data?.recent ?? []).slice(0, 25).map((v, i) => (
+                    <tr key={`${v.started_at}-${i}`}>
                       <td>{ago(v.last_at)}</td>
                       <td>{v.country ? `${country(v.country)}${v.region ? ` · ${v.region}` : ''}` : 'Unknown'}</td>
                       <td>{[v.device, v.browser, v.os].filter(Boolean).join(' · ') || '–'}</td>

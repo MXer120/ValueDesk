@@ -227,6 +227,7 @@ export const HOSTED_ROUTES: readonly HostedRoute[] = [
   { method: 'POST', url: '/api/admin/builder', cls: 'admin' },
   { method: 'POST', url: '/api/admin/users', cls: 'admin' },
   { method: 'POST', url: '/api/admin/analytics', cls: 'admin' },
+  { method: 'POST', url: '/api/admin/overview', cls: 'admin' },
   { method: 'POST', url: '/api/admin/status', cls: 'admin' },
   { method: 'POST', url: '/api/admin/audit', cls: 'admin' },
   { method: 'POST', url: '/api/admin/page-error', cls: 'admin' },

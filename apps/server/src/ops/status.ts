@@ -85,6 +85,13 @@ export interface Sample {
   why?: string[];
 }
 
+/** The last probe round as the admin suite reads it (StatusStore.lastChecks). */
+export interface LastChecks {
+  at: number;
+  checks: Array<{ service: ServiceId; state: Exclude<ServiceState, 'unknown'>; ms: number | null; why: string[] }>;
+}
+const LAST_CHECKS_KEY = 'last_checks';
+
 export const statusDbPath = (): string => process.env.VALUESCAN_STATUS_DB?.trim() || join(dataDir(), 'status.db');
 
 const SCHEMA = `
@@ -167,12 +174,28 @@ export class StatusStore {
         if (Number(add.run(s.service, minute, STATE_CODE[s.state], s.ms).changes) === 0) continue;
         tally.run(s.service, day, s.state === 'up' ? 1 : 0, s.state === 'degraded' ? 1 : 0, s.state === 'down' ? 1 : 0);
       }
+      // The round's verdicts with their reasons, for the admin suite only (lastChecks): never on the public page.
+      this.notices.setMeta(LAST_CHECKS_KEY, JSON.stringify({ at: minute * 60_000, checks: samples.map((s) => ({ service: s.service, state: s.state, ms: s.ms, why: s.why ?? [] })) }));
       if (mayPrune('status')) this.db.prepare('DELETE FROM samples WHERE minute < ?').run(Math.floor((now - SAMPLE_KEEP_MS) / 60_000));
       if (mayPrune('status')) this.db.prepare('DELETE FROM days WHERE day < ?').run(utcDay(now - STATUS_KEEP_DAYS * 86_400_000));
       this.db.exec('COMMIT');
     } catch (err) {
       this.db.exec('ROLLBACK');
       throw err;
+    }
+  }
+
+  /**
+   * The last probe round: each service's verdict and what made it not up (indexer: indexerJudge.ts codes,
+   * e.g. `stream:arcus`, `lane:hl`, `lag`, `stopping`). The admin suite shows which check failed; the
+   * public report never carries it. Null before the first round of a prober that writes it.
+   */
+  lastChecks(): LastChecks | null {
+    try {
+      const v = JSON.parse(this.notices.getMeta(LAST_CHECKS_KEY) ?? 'null') as LastChecks | null;
+      return v && typeof v.at === 'number' && Array.isArray(v.checks) ? v : null;
+    } catch {
+      return null;
     }
   }
 

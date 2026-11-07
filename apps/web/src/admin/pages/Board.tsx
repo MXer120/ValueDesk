@@ -73,7 +73,7 @@ export function Board() {
     await call('board/add', { title: title.replace(/\s+/g, ' ').trim(), detail: '', area: '' });
     setTitle('');
   });
-  const move = (card: Card, to: Status) => write(`${card.id}`, async () => {
+  const move = (card: Card, to: Status) => write(`${card.id}:${to}`, async () => {
     await call('board/move', { id: card.id, status: to });
   });
 
@@ -128,7 +128,7 @@ export function Board() {
                           <div className="dv-row">
                             {boardMoves(c.status).map((m) => (
                               <button key={m.to} type="button" className={`dv-btn${m.to === 'reviewed' ? ' dv-btn--primary' : ''}`} disabled={!!busy} onClick={() => void move(c, m.to)}>
-                                {busy === `${c.id}` ? 'Moving…' : m.label}
+                                {busy === `${c.id}:${m.to}` ? 'Moving…' : m.label}
                               </button>
                             ))}
                           </div>

@@ -334,10 +334,19 @@ test('builder numbers: counted volume, fees = notional x rate / 100 000, kept be
   const listed = (await s.post('/api/admin/users', {}, auth)).json();
   assert.equal(listed.executorRead, true);
   const all = listed.users as Array<{ address: string; internal: boolean; builder: { fees: unknown; volume30d: number; signedFee: { perps: number } } | null }>;
-  assert.deepEqual(all.find((u) => u.address === ours), { address: ours, builder: null, activity: null, executor: null, ticket: null, internal: true }, 'our own wallet is listed, marked internal');
-  assert.deepEqual(all.find((u) => u.address === follower.owner), { address: follower.owner, builder: null, activity: null, executor: follower, ticket: null, internal: false }, "the executor's wallets are listed");
+  assert.deepEqual(all.find((u) => u.address === ours), { address: ours, builder: null, activity: null, executor: null, ticket: null, internal: true, beta: false }, 'our own wallet is listed, marked internal');
+  assert.deepEqual(all.find((u) => u.address === follower.owner), { address: follower.owner, builder: null, activity: null, executor: follower, ticket: null, internal: false, beta: false }, "the executor's wallets are listed");
   const users = all.filter((u) => !u.internal && u.builder);
   assert.equal(users.length, 1);
+  // The first page in one answer: the same numbers, only what it shows.
+  const ov = (await s.post('/api/admin/overview', {}, auth)).json();
+  assert.equal(ov.ok, true);
+  assert.equal(ov.builder.wallets.total, 1);
+  assert.equal(ov.builder.days.length, 14);
+  assert.equal(ov.top.length, 1);
+  assert.equal(ov.top[0].address, users[0]!.address);
+  assert.equal(ov.account.perps, 105.0717);
+  assert.deepEqual(ov.tickets, { open: 0, total: 0, latest: [] });
   assert.deepEqual(users[0]!.builder!.fees, { perps: 1_500_000, spot: 0 });
   assert.equal(users[0]!.builder!.volume30d, 10_000_000_000);
   assert.equal(users[0]!.builder!.signedFee.perps, 15);
@@ -439,6 +448,11 @@ test('beta list: a signed add and remove, for exactly that wallet, audited; the 
   const rename = await s.post('/api/admin/beta/add', { address: tester, label: 'Max', action: action(s.admin, 'beta.add', tester, { address: tester, label: 'Max' }) }, auth);
   assert.equal(rename.json().added, false);
   assert.deepEqual((await s.post('/api/admin/beta', {}, auth)).json().wallets.map((w: { label: string }) => w.label), ['Max']);
+  // The page says how soon a change counts for bots: the executor's minute.
+  assert.equal((await s.post('/api/admin/beta', {}, auth)).json().takesEffect.executorMs, 60_000);
+  // The Users page marks a listed wallet, even one no other source knows.
+  const listedUser = ((await s.post('/api/admin/users', {}, auth)).json().users as Array<{ address: string; beta: boolean }>).find((u) => u.address === tester);
+  assert.equal(listedUser?.beta, true);
 
   const remove = await s.post('/api/admin/beta/remove', { address: tester, action: action(s.admin, 'beta.remove', tester, { address: tester }) }, auth);
   assert.equal(remove.json().removed, true);

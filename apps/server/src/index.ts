@@ -45,6 +45,7 @@ import { analyticsRoutes, analyticsStore } from './routes/analytics.js';
 import { profileRoutes } from './routes/profiles.js';
 import { adminOriginsFrom } from './admin/auth.js';
 import { fetchExecutorHealth } from './admin/statusView.js';
+import { swr } from './admin/swr.js';
 import { openLedger } from './admin/builderStats.js';
 import { builderDbPath, dataDir } from './builder/paths.js';
 import { builderService } from './builder/service.js';
@@ -276,6 +277,10 @@ await app.register(profileRoutes, {
 let adminLedger: ReturnType<typeof openLedger> = null;
 let adminStatusDb: StatusStore | null = null;
 let adminErrorsDb: ClientErrorStore | null = null;
+const adminExecutorHealth = swr(
+  () => fetchExecutorHealth(process.env.VALUESCAN_ADMIN_EXECUTOR_HEALTH_URL?.trim() || 'https://www.valuedesk.so/api/copy/v1/health'),
+  { freshMs: 15_000, maxStaleMs: 5 * 60_000 },
+);
 await app.register(adminRoutes, {
   hosted: HOSTED,
   origins: ADMIN_ORIGINS,
@@ -284,10 +289,12 @@ await app.register(adminRoutes, {
   tiers: () => builderService().tiers.current(),
   status: {
     report: () => (adminStatusDb ??= new StatusStore()).report(),
+    checks: () => (adminStatusDb ??= new StatusStore()).lastChecks(),
     indexer: indexerStatus,
     brake: () => siteBrake(),
-    errors: () => (adminErrorsDb ??= new ClientErrorStore()).top({ limit: 50, order: 'recent' }),
-    executor: () => fetchExecutorHealth(process.env.VALUESCAN_ADMIN_EXECUTOR_HEALTH_URL?.trim() || 'https://www.valuedesk.so/api/copy/v1/health'),
+    errors: () => (adminErrorsDb ??= new ClientErrorStore()).top({ limit: 20, order: 'recent' }),
+    // Up to 5 s through the site and two servers: answered from the last read (15 s fresh), refreshed behind it.
+    executor: () => adminExecutorHealth.get().then(({ value, at }) => ({ ...(value as object), readAt: at })),
     home: process.env.VS_HOME?.trim() || '/opt/valuescan',
     dataDir: dataDir(),
   },
