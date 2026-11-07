@@ -137,11 +137,13 @@ export type CardPeek = Pick<TraderProfile, 'equity'> & { summary: Pick<TraderPro
  * shortest window that holds any, followed forward past HL's 2,000 an answer; none in 30 days,
  * the sample hlTrader takes. Null: the address never did anything on HL.
  */
-export async function hlPeek(address: string, info: InfoLike, now = Date.now(), hint: number | null = null): Promise<CardPeek | null> {
+export async function hlPeek(address: string, info: InfoLike, now = Date.now(), hint: number | null = null, known: number | null = null): Promise<CardPeek | null> {
   const user = address.toLowerCase();
+  // `known`: a newest-fill time Hyperliquid answered before, with no fill since by the index's complete span (the
+  // server's card cache, copyCards.ts): the same answer without asking again.
   const [portfolioR, lastR] = await Promise.allSettled([
     info.post<HlPortfolio>({ type: 'portfolio', user }, { ttlMs: PORTFOLIO_TTL_MS }),
-    newestFill(user, info, now, hint),
+    known !== null ? Promise.resolve(known) : newestFill(user, info, now, hint),
   ]);
   if (portfolioR.status === 'rejected' && lastR.status === 'rejected') throw portfolioR.reason;
   const portfolio = settled(portfolioR);

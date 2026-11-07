@@ -141,7 +141,20 @@ export const INDEXER_ENV = {
   walletBackfillPerMin: () => {
     const asked = Number(process.env.VALUESCAN_WALLET_BACKFILL);
     if (!(asked > 0)) return 0;
-    return Math.max(0.1, Math.min(asked, SODEX_HISTORY_PAIR_PER_MIN - INDEXER_ENV.sodexChecksPerMin() - (INDEXER_ENV.sodexTradesEnabled() ? INDEXER_ENV.sodexTradesPerMin() : 0)));
+    return Math.max(0.1, Math.min(asked, SODEX_HISTORY_PAIR_PER_MIN - INDEXER_ENV.sodexChecksPerMin() - (INDEXER_ENV.sodexTradesEnabled() ? INDEXER_ENV.sodexTradesPerMin() : INDEXER_ENV.sodexLeaderTradesPerMin())));
+  },
+  /**
+   * SoDEX `/trades` pages a minute for the Copy page's leaders only (the 'any' boards of COPY_WINDOWS, top and worst),
+   * back COPY_BACK_DAYS, while the boards' full backfill above is off: their copy setup then replays the index's fills
+   * (/api/vs/wallet/fills) instead of walking SoDEX in the browser, a couple of pages a minute per visitor. What the
+   * board's trade checks leave of SODEX_HISTORY_PAIR_PER_MIN, and never above it: 0.5 with the checks' 1 (1.5 of 2). 0 turns it off.
+   */
+  sodexLeaderTradesPerMin: () => {
+    const raw = process.env.VALUESCAN_INDEX_SODEX_LEADER_TRADES;
+    const asked = raw === undefined || raw.trim() === '' ? 0.5 : Number(raw);
+    if (!(asked > 0)) return 0;
+    const left = SODEX_HISTORY_PAIR_PER_MIN - INDEXER_ENV.sodexChecksPerMin();
+    return left >= 0.05 ? Math.max(0.05, Math.min(asked, left)) : 0;
   },
   /** How far back `/trades` reaches for a SoDEX board member (days). The stream covers everything after. */
   sodexTradesBackDays: () => envNum('VALUESCAN_INDEX_SODEX_TRADES_DAYS', 30, 1, 400),
@@ -154,6 +167,17 @@ export const INDEXER_ENV = {
   /** Set to 0 to run without the live streams (REST only). */
   streams: () => process.env.VALUESCAN_INDEX_STREAMS !== '0',
 };
+
+/** The Copy page's windows (web copy/gridModel.ts GRID_WINDOWS): their 'any' boards, top and worst, are its leaders. */
+export const COPY_WINDOWS: ReadonlySet<BoardWindow> = new Set(['7d', '30d', 'all']);
+/** How far back a SoDEX copy leader's fills are read (the copy setup replays 30 days for 24H, 7D and 30D). */
+export const COPY_BACK_DAYS = 30;
+/** The fills one copy setup replays (web copy/useCopy.ts FILL_LIMIT): a leader holding this many since its held start needs no older page. */
+export const COPY_FILLS = 5_000;
+/** A copy leader's place in the leader backfill: the default view's (30D top) first, then 30D worst, 7D, All. */
+export function copyLeaderPrio(window: BoardWindow, side: Side, i: number): number {
+  return (window === '30d' ? 3_000 : window === '7d' ? 2_000 : 1_000) + (side === 'top' ? 500 : 0) + Math.max(0, 100 - i);
+}
 
 const REBUILD_MS = 60_000;
 /** Per-trader answers are reused this long unless the trader's data changed. */
@@ -374,6 +398,10 @@ export class Indexer {
    */
   private sodexBreaks: Array<{ from: number; to: number; since: number }> = [];
   readonly strades: Lane;
+  /** SoDEX Copy page leaders (copyLeaderPrio), with the build that last listed them. */
+  private copyLeaders = new Map<string, { prio: number; at: number }>();
+  /** `h:<engine>:<address>` -> the held start at which the leader was found to hold COPY_FILLS fills (queueLeaderTrades). */
+  private leaderDeep = new Map<string, number>();
   readonly sdata: Lane;
   private hlStream: HlStream | null = null;
   private sodexStream: SodexStream | null = null;
@@ -480,7 +508,13 @@ export class Indexer {
     // is set). Each task reads ONE page (syncTrades maxPages: 1) and the lane then
     // rests, so its rate is `perMin`, capped at SODEX_HISTORY_PAIR_PER_MIN: the
     // measured /trades + /orders/history counter (~4 per 60 s per IP, then 1015).
-    this.strades = new Lane({ name: 'strades', perMin: INDEXER_ENV.sodexTradesPerMin(), gate: sodexGate, rateLimitPauseMs: 30 * 60_000 });
+    // With that off, the same lane reads the Copy page's leaders only (sodexLeaderTradesPerMin, queueHistory).
+    this.strades = new Lane({
+      name: 'strades',
+      perMin: INDEXER_ENV.sodexTradesEnabled() ? INDEXER_ENV.sodexTradesPerMin() : Math.max(0.05, INDEXER_ENV.sodexLeaderTradesPerMin()),
+      gate: sodexGate,
+      rateLimitPauseMs: 30 * 60_000,
+    });
     this.sdata = new Lane({ name: 'sdata', perMin: INDEXER_ENV.sodexDataPerMin(), gate: () => cooldownLeftMs() });
     const lighter = this.ext.get('lighter') as LighterVenue;
     const arcus = this.ext.get('arcus') as ArcusVenue;
@@ -1372,8 +1406,11 @@ export class Indexer {
         },
       });
     }
-    // Fills: the stream records them from now on. /trades only when explicitly enabled.
-    if (!INDEXER_ENV.sodexTradesEnabled()) return;
+    // Fills: the stream records them from now on. /trades only when explicitly enabled - or, for the Copy page's leaders, at their own drip.
+    if (!INDEXER_ENV.sodexTradesEnabled()) {
+      this.queueLeaderTrades(address, now);
+      return;
+    }
     const back = Math.max(from, now - INDEXER_ENV.sodexTradesBackDays() * DAY_MS);
     for (const engine of ['perps', 'spot'] as const) {
       if (this.strades.has(`h:${engine}:${address}`)) continue;
@@ -1382,6 +1419,38 @@ export class Indexer {
       this.strades.add({
         key: `h:${engine}:${address}`,
         prio,
+        run: async () => (await syncTrades(this.store, address, engine, back, { maxPages: 1, now: this.now() })).pages,
+      });
+    }
+  }
+
+  /**
+   * A SoDEX Copy page leader's fills back COPY_BACK_DAYS, one `/trades` page a task on the strades lane at
+   * sodexLeaderTradesPerMin: newest first (syncTrades), each engine until its held span reaches the start, the venue
+   * has nothing older, or the wallet holds COPY_FILLS fills since that span's start (the copy setup's replay is then
+   * answered from the index: walletFills covers a window whose newest FILL_LIMIT fills it holds). Then the stream keeps
+   * it, and a gap is read again from where it ends. Not a leader, or the drip off: nothing.
+   */
+  private queueLeaderTrades(address: string, now: number): void {
+    const leader = this.copyLeaders.get(address);
+    if (!leader || INDEXER_ENV.sodexLeaderTradesPerMin() <= 0) return;
+    const back = now - COPY_BACK_DAYS * DAY_MS;
+    for (const engine of ['perps', 'spot'] as const) {
+      const key = `h:${engine}:${address}`;
+      if (this.strades.has(key)) continue;
+      const cov = this.store.coverage('sodex', address, engine);
+      const current = !!cov && spanCovers({ ...cov, fromT: Math.min(cov.fromT, back) }, back, now, { staleMs: RESYNC_MS, streamSince: this.streamSince('sodex') });
+      if (current && (cov!.fromT <= back || cov!.exhausted)) continue;
+      // Counted at most once per held start (up to COPY_FILLS rows of one wallet), not on every build.
+      if (current && this.leaderDeep.get(key) === cov!.fromT) continue;
+      if (current && this.store.hasTrades('sodex', address, cov!.fromT, COPY_FILLS) >= COPY_FILLS) {
+        this.leaderDeep.set(key, cov!.fromT);
+        if (this.leaderDeep.size > 5_000) this.leaderDeep.delete(this.leaderDeep.keys().next().value!);
+        continue;
+      }
+      this.strades.add({
+        key,
+        prio: leader.prio,
         run: async () => (await syncTrades(this.store, address, engine, back, { maxPages: 1, now: this.now() })).pages,
       });
     }
@@ -1833,6 +1902,13 @@ export class Indexer {
       if (first !== null && now - first >= HOUR_MS) ref = this.store.boardRanksAt(key, first);
     }
 
+    if (venue === 'sodex' && filter === 'any' && COPY_WINDOWS.has(window)) {
+      res.picks.forEach((c, i) => {
+        const p = copyLeaderPrio(window, side, i);
+        const was = this.copyLeaders.get(c.address);
+        this.copyLeaders.set(c.address, { prio: was && was.at === now ? Math.max(was.prio, p) : p, at: now });
+      });
+    }
     const rows: BoardRow[] = res.picks.map((c, i) => {
       // Every pick is read in full over its window; the leaderboard's opening boards first.
       const prio = rowPrio(window, side, i, base - i);
@@ -2092,6 +2168,8 @@ export class Indexer {
     const wantHl = want.get('hyperliquid')!;
     const wantSodex = want.get('sodex')!;
     for (const [venue, set] of want) for (const a of set) this.wanted.set(`${venue}|${a}`, now);
+    // A leader no Copy page board listed in this build is not read for it any more (its queued page goes with retain below if no board wants it).
+    for (const [a, l] of this.copyLeaders) if (l.at < now) this.copyLeaders.delete(a);
     this.trackedHl = new Set([...wantHl, ...this.store.indexedAddresses('hyperliquid')]);
     for (const venue of this.ext.keys()) {
       this.trackedExt.set(venue, new Set([...want.get(venue)!, ...this.store.indexedAddresses(venue)]));

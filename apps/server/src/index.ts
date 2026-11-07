@@ -547,6 +547,14 @@ setTimeout(() => {
 // waited for a whole build: Explore 14.7 s, the screener 6.8 s.
 keepValuedeskWarm();
 
+// The Copy page's cards read ahead of visitors (valuedesk/copyCards.ts): on a hosted server unless
+// VALUESCAN_COPY_CARDS=0 (a laptop only with VALUESCAN_COPY_CARDS=1: it spends the venues' budgets of its address).
+if (HOSTED ? process.env.VALUESCAN_COPY_CARDS !== '0' : ['1', 'follow'].includes(process.env.VALUESCAN_COPY_CARDS?.trim() ?? '')) {
+  const { startCopyCards } = await import('./valuedesk/copyCards.js');
+  const { join } = await import('node:path');
+  startCopyCards(process.env.VALUESCAN_COPY_CARDS_FILE?.trim() || join(dataDir(), 'copy-cards.json'));
+}
+
 // Official economic results at the release second (valuedesk/releases.ts): one
 // watcher in this process, hosted or not; idle but for a minute's look at the
 // calendar outside the minutes around a release. VALUESCAN_RELEASES=0 turns it off.

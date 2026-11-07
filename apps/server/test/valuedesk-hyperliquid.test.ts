@@ -753,6 +753,14 @@ test('hlPeek with the index\'s hint: one read from the minute before it, the sam
   }
 });
 
+test('hlPeek with a newest fill known from before (the card cache, nothing after it in the index): only the portfolio is read', async () => {
+  const now = 1_790_000_000_000;
+  const info = fillsInfo([now - 5_000_000, now - 3_000_000]);
+  const peek = (await hlPeek(A2, info, now, now - 3_000_000, now - 3_000_000))!;
+  assert.equal(peek.summary.lastActive, now - 3_000_000);
+  assert.deepEqual(info.bodies.map((b) => b.type), ['portfolio']);
+});
+
 test('hlFills: one page answers a recent query, newest first, limited', async () => {
   const recent = Array.from({ length: 5 }, (_, i) => fill({ tid: 100 + i, time: 1000 - i * 10 }));
   const info = stubInfo(() => recent);
