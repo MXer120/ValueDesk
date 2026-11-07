@@ -44,8 +44,8 @@ import { LEV_BANDS, type LevBand } from '../valuedesk/liquidations/math.js';
 import { snapBand, trimRow, type LiqSnap, type SnapRow } from '../valuedesk/liquidations/levels.js';
 import type { LiqHistory } from './liqRead.js';
 import { liqJob } from './liqHistThread.js';
+import { liqRead, resetLiqReadThread, setMetaOf } from './liqReadThread.js';
 import { reader } from './reader.js';
-import type { IndexStore } from './store.js';
 
 /** The history the index lists (the view's 30 days). */
 export const RANGE_MS = 30 * 86_400_000;
@@ -240,18 +240,12 @@ function heldRows(key: string): SnapRow[] | undefined {
   return v;
 }
 
-/** Times and data lengths of a coin's snapshots in [from, to). octet_length reads no overflow page (SQLite 3.43+). */
-let lengthFn: 'octet_length' | 'length' = 'octet_length';
-function listed(s: IndexStore, coin: string, from: number, to: number): Array<{ t: number; n: number }> {
-  try {
-    return lengthFn === 'octet_length' ? s.liqHistMeta(coin, from, to) : s.liqHistMetaSlow(coin, from, to);
-  } catch (e) {
-    if (lengthFn === 'octet_length' && /octet_length/i.test(String((e as Error).message))) {
-      lengthFn = 'length';
-      return s.liqHistMetaSlow(coin, from, to);
-    }
-    throw e;
-  }
+/**
+ * Times and data lengths of a coin's snapshots in [from, to), read on the snapshot reader's thread (liqReadThread.ts):
+ * one page per snapshot, seconds from disk, so never on this one.
+ */
+async function listed(coin: string, from: number, to: number): Promise<Array<{ t: number; n: number }>> {
+  return (await liqRead({ op: 'list', coin, from, to }, reader)) ?? [];
 }
 
 /**
@@ -265,39 +259,50 @@ function listed(s: IndexStore, coin: string, from: number, to: number): Array<{ 
 export const RELIST_MS = 10 * 60_000;
 const lists = new Map<string, { at: number; from: number; rows: Array<{ t: number; n: number }> }>();
 
-function listing(s: IndexStore, coin: string, now: number): Array<{ t: number; n: number }> {
+async function listing(coin: string, now: number): Promise<Array<{ t: number; n: number }>> {
   const from = now - RANGE_MS - tileMs(T_LEVELS - 1);
   const held = lists.get(coin);
   const last = held?.rows.at(-1);
   if (held && last && now - held.at < RELIST_MS && from >= held.from) {
-    const tail = listed(s, coin, last.t, Number.MAX_SAFE_INTEGER);
+    const tail = await listed(coin, last.t, Number.MAX_SAFE_INTEGER);
     const keep = held.rows.filter((x) => x.t >= from && x.t < last.t);
     held.rows = keep.concat(tail);
     return held.rows;
   }
-  const rows = listed(s, coin, from, Number.MAX_SAFE_INTEGER);
+  const rows = await listed(coin, from, Number.MAX_SAFE_INTEGER);
   lists.set(coin, { at: now, from, rows });
   return rows;
 }
 
-/** The coins with snapshots, kept a minute: the statement scans the whole table (its key is coin, t). */
+/** The coins with snapshots, kept a minute. */
 const COINS_MS = 60_000;
 let coinsHeld: { at: number; coins: string[] } | null = null;
-function coinsOf(s: IndexStore, now: number): string[] {
-  if (!coinsHeld || now - coinsHeld.at >= COINS_MS || now < coinsHeld.at) coinsHeld = { at: now, coins: s.liqHistCoins() };
+async function coinsOf(now: number): Promise<string[]> {
+  if (!coinsHeld || now - coinsHeld.at >= COINS_MS || now < coinsHeld.at) coinsHeld = { at: now, coins: (await liqRead({ op: 'coins' }, reader)) ?? [] };
   return coinsHeld.coins;
 }
 
-/** A snapshot's meta and rows: held, else read and parsed (null: gone, or not JSON). */
-function snapOf(s: IndexStore, coin: string, venues: readonly Venue[], vk: string, at: { t: number; n: number }, wantRows: boolean): { meta: Meta; rows: SnapRow[] | null } | null {
+/** A snapshot's meta and rows when held (nothing to read), else undefined. */
+function heldSnap(vk: string, at: { t: number; n: number }, wantRows: boolean): { meta: Meta; rows: SnapRow[] | null } | undefined {
+  const meta = metas.get(vk)?.get(at.t);
+  if (!meta || meta.n !== at.n) return undefined;
+  if (!wantRows) return { meta, rows: null };
+  const rows = heldRows(`${vk}|${at.t}`);
+  return rows ? { meta, rows } : undefined;
+}
+
+/** What a snapshot's meta holds besides its time and length, worked out from its data (null: not JSON). Pure: the reader thread runs it too. */
+export function metaOfData(data: string, venues: readonly Venue[]): { p: number; st: number; sc: Float64Array } | null {
+  let snap: LiqSnap;
+  try { snap = JSON.parse(data) as LiqSnap; } catch { return null; }
+  return { p: snap.p, st: snap.st, sc: snapScales(snapRows(snap, venues)) };
+}
+setMetaOf(metaOfData);
+
+/** A snapshot's meta and rows from its data as read (null: gone, or not JSON). */
+function snapOf(venues: readonly Venue[], vk: string, at: { t: number; n: number }, wantRows: boolean, data: string | null): { meta: Meta; rows: SnapRow[] | null } | null {
   let byT = metas.get(vk);
   const meta = byT?.get(at.t);
-  if (meta && meta.n === at.n) {
-    if (!wantRows) return { meta, rows: null };
-    const rows = heldRows(`${vk}|${at.t}`);
-    if (rows) return { meta, rows };
-  }
-  const data = s.liqHistAt(coin, at.t);
   if (data === null) return null;
   let snap: LiqSnap;
   try { snap = JSON.parse(data) as LiqSnap; } catch { return null; }
@@ -405,13 +410,49 @@ export async function saveLiqMetas(): Promise<void> {
   } catch { /* a read-only directory: the metas are rebuilt after a restart, as before */ }
 }
 
-/** Each listed snapshot, read where needed, the loop given back every YIELD_MS of work. */
-async function walk(s: IndexStore, coin: string, venues: readonly Venue[], list: ReadonlyArray<{ t: number; n: number }>, wantRows: boolean, restMs = 0): Promise<Array<{ meta: Meta; rows: SnapRow[] | null }>> {
+/** Snapshots read in one go on the reader's thread (~75 KB each). */
+const READ_BATCH = 24;
+
+/** Each listed snapshot, read where needed (on the reader's thread, a batch at a time), the loop given back every YIELD_MS of work. */
+async function walk(coin: string, venues: readonly Venue[], list: ReadonlyArray<{ t: number; n: number }>, wantRows: boolean, restMs = 0): Promise<Array<{ meta: Meta; rows: SnapRow[] | null }>> {
   const vk = venueKey(coin, venues);
   const out: Array<{ meta: Meta; rows: SnapRow[] | null }> = [];
   let since = performance.now();
-  for (const at of list) {
-    const x = snapOf(s, coin, venues, vk, at, wantRows);
+  let read = new Map<number, string | null>();
+  let readMeta = new Map<number, { p: number; st: number; sc: Float64Array } | null>();
+  for (let i = 0; i < list.length; i++) {
+    const at = list[i]!;
+    let x: { meta: Meta; rows: SnapRow[] | null } | null | undefined = heldSnap(vk, at, wantRows);
+    if (x === undefined) {
+      const have = wantRows ? read.has(at.t) : readMeta.has(at.t);
+      if (!have) {
+        // This one and the next few not held either, in one read; the wait is not this thread's work.
+        const ts: number[] = [];
+        for (let j = i; j < list.length && ts.length < READ_BATCH; j++) if (heldSnap(vk, list[j]!, wantRows) === undefined) ts.push(list[j]!.t);
+        if (wantRows) {
+          const got = (await liqRead({ op: 'snaps', coin, ts }, reader)) ?? [];
+          read = new Map(ts.map((t, k) => [t, got[k] ?? null]));
+        } else {
+          // Only the metas: parsed where they are read, so the snapshots' JSON never reaches this thread's heap (its
+          // collections held the thread 8-10 s at 17:33 and 17:54 on 2026-11-07, during the background read).
+          const got = (await liqRead({ op: 'metas', coin, venues: [...venues], ts }, reader)) ?? [];
+          readMeta = new Map(ts.map((t, k) => [t, got[k] ?? null]));
+        }
+        since = performance.now();
+      }
+      if (wantRows) x = snapOf(venues, vk, at, true, read.get(at.t) ?? null);
+      else {
+        const got = readMeta.get(at.t) ?? null;
+        if (got) {
+          const m: Meta = { t: at.t, n: at.n, p: got.p, st: got.st, sc: got.sc };
+          let byT = metas.get(vk);
+          if (!byT) { byT = new Map(); metas.set(vk, byT); }
+          byT.set(at.t, m);
+          metasChanged();
+          x = { meta: m, rows: null };
+        } else x = null;
+      }
+    }
     if (x) out.push(x);
     if (performance.now() - since > YIELD_MS) {
       if (restMs > 0) await pause(restMs, undefined, { ref: false });
@@ -480,16 +521,15 @@ function shared<T>(key: string, run: () => Promise<T>): Promise<T> {
 export function liqTileIndex(coin: string, venues: readonly Venue[], now = Date.now()): Promise<LiqTileIndex | null> {
   const vk = venueKey(coin, venues);
   return shared(`i|${vk}|${Math.floor(now / 10_000)}`, async () => {
-    const s = reader();
-    if (!s) return null;
+    if (!reader()) return null;
     readMetas();
     let list: Array<{ t: number; n: number }> = [];
     let coins: string[] = [];
     try {
-      list = listing(s, coin, now).filter((x) => x.t >= now - RANGE_MS);
-      coins = coinsOf(s, now);
+      list = (await listing(coin, now)).filter((x) => x.t >= now - RANGE_MS);
+      coins = await coinsOf(now);
     } catch { /* the table arrives with the indexer's first start */ }
-    const snaps = (await walk(s, coin, venues, list, false)).map((x) => x.meta);
+    const snaps = (await walk(coin, venues, list, false)).map((x) => x.meta);
     trimMetas(vk, new Set(list.map((x) => x.t)));
     const last = snaps.at(-1);
     return {
@@ -512,17 +552,16 @@ export function liqTileIndex(coin: string, venues: readonly Venue[], now = Date.
  * Returns how many coins it went over.
  */
 export async function warmLiqMetas(now = Date.now(), restMs = WARM_REST_MS): Promise<number> {
-  const s = reader();
-  if (!s) return 0;
+  if (!reader()) return 0;
   readMetas();
   let coins: string[] = [];
-  try { coins = coinsOf(s, now); } catch { return 0; }
+  try { coins = await coinsOf(now); } catch { return 0; }
   const venues = [...VENUES];
   for (const coin of coins) {
     let list: Array<{ t: number; n: number }>;
-    try { list = listing(s, coin, now).filter((x) => x.t >= now - RANGE_MS); } catch { continue; }
+    try { list = (await listing(coin, now)).filter((x) => x.t >= now - RANGE_MS); } catch { continue; }
     if (!list.length) continue;
-    await walk(s, coin, venues, list, false, restMs);
+    await walk(coin, venues, list, false, restMs);
     trimMetas(venueKey(coin, venues), new Set(list.map((x) => x.t)));
     if (restMs > 0) await pause(restMs, undefined, { ref: false });
   }
@@ -568,18 +607,17 @@ export function tileAskOf(q: Record<string, string | undefined>, now = Date.now(
 export function liqTile(coin: string, venues: readonly Venue[], ask: TileAsk): Promise<LiqTile | null> {
   const vk = venueKey(coin, venues);
   return shared(`t|${vk}|${ask.tl}|${ask.tt}|${ask.pl}|${ask.band}|${ask.bw}|${ask.v ?? ''}`, async () => {
-    const s = reader();
-    if (!s) return null;
+    if (!reader()) return null;
     readMetas();
     const end = ask.tt + tileMs(ask.tl);
     let after: Array<{ t: number; n: number }> = [];
-    try { after = listing(s, coin, Date.now()).filter((x) => x.t >= ask.tt); } catch { /* no table yet */ }
+    try { after = (await listing(coin, Date.now())).filter((x) => x.t >= ask.tt); } catch { /* no table yet */ }
     const newest = after.at(-1)?.t ?? null;
     const upTo = Math.min(end - 1, ask.v ?? Number.MAX_SAFE_INTEGER);
     const list = after.filter((x) => x.t <= upTo);
     const span = bandSpan(ask.bw, ask.pl);
     const points: LiqTile['points'] = [];
-    for (const { meta, rows } of await walk(s, coin, venues, list, true)) {
+    for (const { meta, rows } of await walk(coin, venues, list, true)) {
       const b = (rows ?? []).filter((r) => bandOf(r[0], meta.st, span) === ask.band);
       points.push({ t: meta.t, p: meta.p, st: meta.st, b });
     }
@@ -594,7 +632,7 @@ export function resetLiqTiles(): void {
   rowsLru.clear();
   rowsHeld = 0;
   inflight.clear();
-  lengthFn = 'octet_length';
+  resetLiqReadThread();
   lists.clear();
   coinsHeld = null;
   metasFile = undefined;
