@@ -185,6 +185,45 @@ test('the kept answer, once the held span has grown at its end: only the new row
   assert.deepEqual((await get(`venue=hyperliquid&address=${BUSY}&from=${from}&limit=600`)).body, after.body);
 });
 
+test('REST rows only: the answer ends before the oldest stream print it meets, beside a REST fill or after the last REST read', async () => {
+  const MIX = '0x' + '9'.repeat(40);
+  const ONLY = '0x' + '8'.repeat(40);
+  const T = NOW - 2 * DAY;
+  store.putFills([
+    fill('hyperliquid', MIX, 'r1', NOW - 5 * DAY),
+    fill('hyperliquid', MIX, 'r2', NOW - 4 * DAY),
+    // An xyz: order's REST fill (aggregated) with two of its stream prints left beside it (production 2026-11-07).
+    fill('hyperliquid', MIX, 'r3', T, { symbol: 'xyz:KORU', sz: 715 }),
+    fill('hyperliquid', MIX, 's1', T, { symbol: 'xyz:KORU', sz: 484, fee: null, oid: null, src: 0 }),
+    fill('hyperliquid', MIX, 's2', T, { symbol: 'xyz:KORU', sz: 231, fee: null, oid: null, src: 0 }),
+    fill('hyperliquid', MIX, 'r4', NOW - DAY),
+    // After the last REST read: the stream's only.
+    fill('hyperliquid', MIX, 's3', NOW - 3_600_000, { fee: null, oid: null, src: 0 }),
+    fill('hyperliquid', ONLY, 's4', NOW - 3 * DAY, { fee: null, oid: null, src: 0 }),
+    fill('hyperliquid', ONLY, 's5', NOW - DAY, { fee: null, oid: null, src: 0 }),
+  ]);
+  store.addCoverage('hyperliquid', MIX, 'fills', { fromT: NOW - 10 * DAY, toT: NOW - 60_000 }, NOW);
+  store.addCoverage('hyperliquid', ONLY, 'fills', { fromT: NOW - 10 * DAY, toT: NOW - 60_000 }, NOW);
+  const from = NOW - 7 * DAY;
+  const mix = (await get(`venue=hyperliquid&address=${MIX}&from=${from}&limit=5000`)).body;
+  assert.equal(mix.covered, true);
+  // Up to the millisecond before the oldest print; the REST fill at that millisecond, r4 and s3 are the venue's to answer.
+  assert.equal(mix.heldTo, T - 1);
+  assert.deepEqual(mix.fills.map((f: { id: string }) => f.id), ['r2', 'r1']);
+  // A limit below the REST rows there: still none past the print.
+  const two = (await get(`venue=hyperliquid&address=${MIX}&from=${from}&limit=1`)).body;
+  assert.deepEqual([two.heldTo, two.fills.map((f: { id: string }) => f.id)], [T - 1, ['r2']]);
+  // Stream prints and no REST row below them: declined.
+  const only = (await get(`venue=hyperliquid&address=${ONLY}&from=${from}&limit=5000`)).body;
+  assert.equal(only.covered, false);
+  // Once REST has replaced the prints (dropStreamRows), the whole held span is answered.
+  store.dropStreamRows('hyperliquid', MIX, NOW - 10 * DAY, NOW);
+  const { clearWalletFills } = await import('../src/indexer/walletFills.js');
+  clearWalletFills();
+  const clean = (await get(`venue=hyperliquid&address=${MIX}&from=${from}&limit=5000`)).body;
+  assert.deepEqual([clean.heldTo, clean.fills.map((f: { id: string }) => f.id)], [NOW - 60_000, ['r4', 'r3', 'r2', 'r1']]);
+});
+
 test('the held span never starts before the raw rows the retention kept (a frozen day has only its sums)', async () => {
   const { heldSpan } = await import('../src/indexer/walletFills.js');
   const stub = (cov: { fromT: number; toT: number; exhausted: boolean; capped: boolean }, rawFromDay: number) =>

@@ -160,6 +160,8 @@ export interface WalletFillRow {
   fee: number | null;
   closed_pnl: number | null;
   oid: string | null;
+  /** 1: from the venue's REST answer; 0: a public-stream print (indexer/walletFills.ts answers REST rows only). */
+  src: number;
 }
 
 export interface CloseRow {
@@ -1477,7 +1479,7 @@ export class IndexStore {
    * (indexer/walletFills.ts).
    */
   walletFillRows(venue: Venue, address: string, fromT: number, toT: number, limit: number, beforeId?: string): WalletFillRow[] {
-    const cols = 'SELECT id, t, symbol, side, px, sz, fee, closed_pnl, oid FROM fills INDEXED BY fills_t WHERE venue = ? AND address = ? AND t >= ? AND t <= ?';
+    const cols = 'SELECT id, t, symbol, side, px, sz, fee, closed_pnl, oid, src FROM fills INDEXED BY fills_t WHERE venue = ? AND address = ? AND t >= ? AND t <= ?';
     const rows = beforeId === undefined
       ? this.q(`${cols} ORDER BY t DESC, id DESC LIMIT ?`).all(venue, address, fromT, toT, limit)
       : this.q(`${cols} AND (t < ? OR id < ?) ORDER BY t DESC, id DESC LIMIT ?`).all(venue, address, fromT, toT, toT, beforeId, limit);

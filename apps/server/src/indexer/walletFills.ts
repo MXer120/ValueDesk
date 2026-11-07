@@ -28,6 +28,16 @@
  * nothing older (exhausted, and not just its cap), but never before the raw
  * rows the retention kept (a frozen day has only its day sums).
  *
+ * REST ROWS ONLY. A held span can hold public-stream prints (src 0): after the
+ * last REST read (the stream moves to_t up) and, on Hyperliquid, left beside
+ * the REST fill of the same order (the REST row is aggregated, so its id is not
+ * the print's and the drop missed them - production 2026-11-07: 127 of 2,600
+ * fill times of one leader, all on xyz: markets, counted twice; the stream rows
+ * carry no fee or closed PnL either). So the answer ends before the OLDEST
+ * stream row it meets: `heldTo` is the millisecond before it, every row given
+ * is a REST row, and the venue answers the rest in the browser. Met before any
+ * REST row could be given: not covered.
+ *
  * Reads: the coverage rows and the frozen-day bound (primary-key lookups), and
  * one backwards walk of fills_t bounded by `limit`, in slices. A copy of each
  * answer is kept five minutes per (venue, address, from rounded to five
@@ -112,28 +122,42 @@ const notCovered = (reason: string): WalletFillsBody => ({ ok: true, covered: fa
  * snapshot: a REST read landing in between (it replaces stream prints) can leave one answer with
  * both copies of a few prints, for the five minutes it is kept.
  */
-async function readRows(store: IndexStore, venue: Venue, address: string, lower: number, upper: number, limit: number): Promise<WalletFillRow[]> {
-  const out: WalletFillRow[] = [];
-  if (upper < lower) return out;
+async function readRows(store: IndexStore, venue: Venue, address: string, lower: number, upper: number, limit: number): Promise<{ rows: WalletFillRow[]; cut: number | null }> {
+  let out: WalletFillRow[] = [];
+  // The oldest stream row met (REST ROWS ONLY): nothing at or after it is given.
+  let cut: number | null = null;
+  if (upper < lower) return { rows: out, cut };
   let at: { t: number; id: string } | null = null;
   while (out.length < limit) {
-    const n = Math.min(SLICE, limit - out.length);
+    const n = SLICE;
     const got: WalletFillRow[] = at ? store.walletFillRows(venue, address, lower, at.t, n, at.id) : store.walletFillRows(venue, address, lower, upper, n);
-    for (const r of got) out.push(r);
+    for (const r of got) {
+      if (Number(r.src) !== 1) {
+        // Newest first: every row kept so far is at or after this one.
+        cut = r.t;
+        out = [];
+      } else if (cut === null || r.t < cut) {
+        if (out.length < limit) out.push(r);
+      }
+    }
     if (got.length < n) break;
     const last = got[got.length - 1]!;
     at = { t: last.t, id: String(last.id) };
     await nextTurn();
   }
-  return out;
+  return { rows: out, cut };
 }
 
 async function answer(store: IndexStore, venue: Venue, address: string, q: WalletFillsQuery, span: Span): Promise<WalletFillsBody> {
   const from = q.from ?? 0;
-  const rows = await readRows(store, venue, address, Math.max(from, span.lo), Math.min(q.to ?? Number.POSITIVE_INFINITY, span.hi), q.limit);
+  const lower = Math.max(from, span.lo);
+  const { rows, cut } = await readRows(store, venue, address, lower, Math.min(q.to ?? Number.POSITIVE_INFINITY, span.hi), q.limit);
+  const heldTo = cut === null ? span.hi : cut - 1;
+  // No REST row below the stream row: nothing the venue's REST answer vouches for.
+  if (heldTo < lower || (cut !== null && !rows.length)) return notCovered('the index holds stream prints here that the venue\'s REST answer has not replaced');
   // The window starts before the held span: only complete if the newest `limit` fills all fall inside it.
   if (from < span.lo && rows.length < q.limit) return notCovered('the index holds this wallet from a later time');
-  return { ok: true, covered: true, heldTo: span.hi, fills: rows.map(rowToFill) };
+  return { ok: true, covered: true, heldTo, fills: rows.map(rowToFill) };
 }
 
 type Span = { lo: number; hi: number };
@@ -153,10 +177,12 @@ const kept = new Map<string, Kept>();
 async function moveUp(store: IndexStore, venue: Venue, address: string, q: WalletFillsQuery, prev: Promise<WalletFillsBody>, was: Span, span: Span): Promise<WalletFillsBody> {
   const body = await prev;
   if (!body.covered) return answer(store, venue, address, q, span);
+  // Cut short at a stream row: what lies above it does not change the answer.
+  if (body.heldTo < was.hi) return body;
   const to = q.to ?? Number.POSITIVE_INFINITY;
   const lower = Math.max(q.from ?? 0, span.lo, Math.min(to, was.hi) + 1);
-  const fresh = await readRows(store, venue, address, lower, Math.min(to, span.hi), q.limit);
-  return { ok: true, covered: true, heldTo: span.hi, fills: [...fresh.map(rowToFill), ...body.fills].slice(0, q.limit) };
+  const { rows: fresh, cut } = await readRows(store, venue, address, lower, Math.min(to, span.hi), q.limit);
+  return { ok: true, covered: true, heldTo: cut === null ? span.hi : Math.max(was.hi, cut - 1), fills: [...fresh.map(rowToFill), ...body.fills].slice(0, q.limit) };
 }
 
 /** The route's answer: the index this process reads, through the five-minute copy (requests for the same one share its read). */
