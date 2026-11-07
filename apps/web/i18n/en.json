@@ -461,7 +461,6 @@
 "{0}: each {1} would be about {2}, and the smallest under SoDEX's {3} minimum. Use at most {4} {5}, or raise it to {6}.",
 "{0}: handler failed",
 "{0}: held {1} of {2} trades",
-"{0}: in beta, get access",
 "{0}: its volume all held.",
 "{0}: left resting at {1} on SoDEX, as you chose.",
 "{0}: margin tiers",
