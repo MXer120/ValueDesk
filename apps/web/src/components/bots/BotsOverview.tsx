@@ -24,7 +24,10 @@ import { BotsHead, StatePill, isLive, type BotsCtx } from './BotsPage';
 import { Button, EmptyState, Icon, IconButton, Panel, ProgressBar, SearchField, Segmented, Shell, ShellHeader, Skeleton, Sparkline, StatCard, StatusPill } from './kit/kit';
 
 const PAGE = 25;
-export const fmtCost = (cpm: number | null | undefined): string => (cpm === null || cpm === undefined ? DASH : cpm < 0 ? `earns ${fmtUsd(-cpm, 0)}` : fmtUsd(cpm, 0));
+/** What $1M of volume did, signed: +$359 when it earned, −$185 when it cost (owner: never white, never "earns"). */
+export const fmtCost = (cpm: number | null | undefined): string => (cpm === null || cpm === undefined ? DASH : cpm < 0 ? `+${fmtUsd(-cpm, 0)}` : cpm > 0 ? `−${fmtUsd(cpm, 0)}` : fmtUsd(0, 0));
+export const costCls = (cpm: number | null | undefined): string => (cpm === null || cpm === undefined ? '' : cpm < 0 ? 'pos' : cpm > 0 ? 'neg' : '');
+export const costTone = (cpm: number | null | undefined): 'positive' | 'negative' | undefined => (cpm === null || cpm === undefined ? undefined : cpm < 0 ? 'positive' : cpm > 0 ? 'negative' : undefined);
 export { StatePill };
 
 type Show = 'all' | 'running' | 'paused' | 'ended';
@@ -115,12 +118,25 @@ export function FleetChart({ bots, title = 'Volume and net PnL', series: given }
   const s = useMemo(() => given ?? fleetSeries(bots, Date.now()), [bots, given]);
   const cut = SPAN_MS[span];
   const from = cut ? Date.now() - cut : -Infinity;
+  // Bars a chart can show: the volume summed into about 50 buckets for the timeframe (owner: every 5-min point
+  // became a forest of thin spikes), the net PnL as its last value in each.
   const series = useMemo<ChartSeries[]>(() => {
+    const vol = s.volume.filter((p) => p[0] >= from);
+    const pnl = s.pnl.filter((p) => p[0] >= from);
+    const first = vol[0]?.[0] ?? Date.now();
+    const width = (cut ?? Math.max(3_600_000, Date.now() - first)) / 50;
+    const steps = [300_000, 600_000, 900_000, 1_800_000, 3_600_000, 2 * 3_600_000, 4 * 3_600_000, 6 * 3_600_000, 12 * 3_600_000, 86_400_000];
+    const step = steps.find((x) => x >= width) ?? 86_400_000;
+    const bucket = (t: number) => Math.floor(t / step) * step;
+    const vb = new Map<number, number>();
+    for (const [t, v] of vol) vb.set(bucket(t), (vb.get(bucket(t)) ?? 0) + v);
+    const pb = new Map<number, number>();
+    for (const [t, v] of pnl) pb.set(bucket(t), v);
     const out: ChartSeries[] = [];
-    if (showVol) out.push({ key: 'vol', kind: 'bars', color: '#5b6b80', points: s.volume.filter((p) => p[0] >= from), format: (x) => fmtUsd(x, 0), title: 'Volume' });
-    if (showPnl) out.push({ key: 'pnl', kind: 'line', color: '#f7f7f7', negColor: '#ef4a3c', points: s.pnl.filter((p) => p[0] >= from), scale: 'left', format: (x) => fmtUsd(x, 2), title: 'Net PnL' });
+    if (showVol) out.push({ key: 'vol', kind: 'bars', color: '#5b6b80', points: [...vb.entries()].sort((x, y) => x[0] - y[0]), format: (x) => fmtUsd(x, 0), title: 'Volume' });
+    if (showPnl) out.push({ key: 'pnl', kind: 'line', color: '#f7f7f7', negColor: '#ef4a3c', points: [...pb.entries()].sort((x, y) => x[0] - y[0]), scale: 'left', format: (x) => fmtUsd(x, 2), title: 'Net PnL' });
     return out;
-  }, [s, from, showVol, showPnl]);
+  }, [s, from, cut, showVol, showPnl]);
   const enough = s.volume.filter((p) => p[0] >= from).length >= 3 && series.length > 0;
   return (
     <Shell className={`bots-chartcard${full ? ' is-full' : ''}`} ref={box as never}>
@@ -260,7 +276,7 @@ function BotTile({ v, ctx }: { v: AlgoView; ctx: BotsCtx }) {
         </div>
         <dl className="bots-tile__nums">
           <div><dt>Volume</dt><dd>{b ? fmtUsd(b.volume, 0) : DASH}</dd></div>
-          <div><dt>Per $1M</dt><dd className={b?.costPerMillion !== null && b?.costPerMillion !== undefined && b.costPerMillion < 0 ? 'pos' : ''}>{fmtCost(b?.costPerMillion)}</dd></div>
+          <div><dt>Per $1M</dt><dd className={costCls(b?.costPerMillion)}>{fmtCost(b?.costPerMillion)}</dd></div>
           <div><dt>Holding</dt><dd>{b ? fmtUsd(b.inventoryUsd, 0) : DASH}{cap ? <small> / {fmtUsd(cap, 0)}</small> : null}</dd></div>
         </dl>
         {cap && !ended ? <ProgressBar value={hold} max={cap} size="sm" tone={hold / cap > 0.8 ? 'warning' : 'neutral'} kind="meter" label="Holding against its cap" className="bots-tile__bar" /> : <span className="bots-tile__bar is-none" />}
@@ -371,7 +387,7 @@ export function BotsOverview({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
           <StatCard index={0} label="Running" value={ready ? `${t.running}` : DASH} hint={ready ? `of ${t.bots} bots` : undefined} />
           <StatCard index={1} label="Volume" value={val(fmtUsd(t.volume, 0))} trend={ready ? trendVol : undefined} />
           <StatCard index={2} label="Net PnL" value={val(fmtPnl(t.netPnl))} valueTone={ready ? pnlTone : undefined} trend={ready ? trendPnl : undefined} trendTone={pnlTone ?? 'neutral'} hint="After every fee" />
-          <StatCard index={3} label="Cost per $1M" value={val(fmtCost(t.costPerMillion))} valueTone={ready && t.costPerMillion !== null && t.costPerMillion < 0 ? 'positive' : undefined} hint="What the volume cost, net" />
+          <StatCard index={3} label="Per $1M" value={val(fmtCost(t.costPerMillion))} valueTone={ready ? costTone(t.costPerMillion) : undefined} hint="What the volume cost, net" />
           <StatCard index={4} label="Fees paid" value={val(fmtUsd(t.tradeFees + t.builderFees, 2))} hint={`At least ${fmtUsd(floor.fees, 0)} per $1M`} />
           <StatCard index={5} label="Holding" value={val(fmtUsd(t.holdingUsd, 0))} hint="From their own fills" />
         </div>
@@ -458,7 +474,7 @@ export function BotsOverview({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
                               <td><StatePill s={botState(v)} size="sm" /></td>
                               <td className="right num" data-k="Volume">{b ? fmtUsd(b.volume, 2) : DASH}</td>
                               <td className={`right num ${b && b.netPnl > 0.004 ? 'pos' : b && b.netPnl < -0.004 ? 'neg' : ''}`} data-k="Net PnL">{fmtPnl(b?.netPnl)}</td>
-                              <td className="right num" data-k="Per $1M">{fmtCost(b?.costPerMillion)}</td>
+                              <td className={`right num ${costCls(b?.costPerMillion)}`} data-k="Per $1M">{fmtCost(b?.costPerMillion)}</td>
                               <td className="right num" data-k="Holding">{b ? fmtUsd(b.inventoryUsd, 2) : DASH}</td>
                               <td className="right num dim" data-k="Started">{new Date(v.algo.startedAt ?? v.algo.createdAt).toISOString().slice(5, 16).replace('T', ' ')}</td>
                               <td className="right"><Controls v={v} ctx={ctx} /></td>

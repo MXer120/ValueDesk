@@ -11,11 +11,11 @@ import { CoinIcon } from '../CoinIcon';
 import { useBotMarkets, bpToPerMillion, type BotMarket } from '../../bots/data';
 import { goBots, type BotsView } from '../../bots/routes';
 import { BotsHead, type BotsCtx } from './BotsPage';
-import { TAKER_COLORS, Takers } from './BotNewPage';
+import { TAKER_COLORS, Takers, bpCls, fmtBpUsd } from './BotNewPage';
 import { Button, Checkbox, EmptyState, Icon, Inset, Panel, ProgressBar, SearchField, Segmented, Shell, ShellHeader, Skeleton, StatCard, StatusPill } from './kit/kit';
 
 type Key = 'cost' | 'gate' | 'patient' | 'fast' | 'spread' | 'vol' | 'room' | 'symbol';
-const usd = (bp: number | null | undefined) => (bp === null || bp === undefined ? DASH : bp < 0 ? `earns ${fmtUsd(-bpToPerMillion(bp), 0)}` : fmtUsd(bpToPerMillion(bp), 0));
+const usd = fmtBpUsd;
 const CONF_TONE = { high: 'positive', medium: 'warning', low: 'neutral' } as const;
 
 /** The 24 UTC hours: column height = volume, colour = cost (cheap toward --pos, dear toward --neg), from the 7 d profile. */
@@ -92,7 +92,7 @@ export function BotsExplore({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
         <ShellHeader icon="compass" title="Every market, estimated" subtitle={r.data ? `Read ${new Date(r.data.at).toISOString().slice(11, 16)} UTC · refreshes every 5 minutes` : 'Reading the markets…'} />
         <div className="bots-kpigrid is-4">
           <StatCard index={0} label="Markets read" value={r.data ? String(r.data.markets.length) : DASH} hint={`${list.length} match the filters`} />
-          <StatCard index={1} label="Lowest estimate" value={cheapest ? usd(cheapest.estCostBps) : DASH} hint={cheapest ? `${cheapest.base} · per $1M, all-in` : undefined} />
+          <StatCard index={1} label="Lowest estimate" value={cheapest ? usd(cheapest.estCostBps) : DASH} valueTone={cheapest ? (cheapest.estCostBps < 0 ? 'positive' : 'negative') : undefined} hint={cheapest ? `${cheapest.base} · per $1M, all-in` : undefined} />
           <StatCard index={2} label="Fees per $1M" value={fmtUsd(bpToPerMillion(feeBps), 0)} hint="The floor, before the spread kept" />
           <StatCard index={3} label="Window" value={win === '24h' ? '24 h' : '7 days'} hint={gate === 'on' ? 'Gate on' : 'Gate off'} />
         </div>
@@ -155,8 +155,8 @@ export function BotsExplore({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
                               <StatusPill size="sm" tone={CONF_TONE[m.confidence]} title={`${m.smallMakers.fills.toLocaleString('en-US')} fills by makers our size in the window`}>{m.confidence}</StatusPill>
                             </span>
                           </td>
-                          <td className={`right num bots-strong${c < feeBps ? ' pos' : ''}`} data-k="Per $1M">{usd(c)}<small className="bots-range">{usd(m.estCostLowBps)}–{usd(m.estCostHighBps)}</small></td>
-                          <td className="right num" data-k="With gate">{usd(m.gateCostBps)}</td>
+                          <td className={`right num bots-strong ${bpCls(c)}`} data-k="Per $1M">{usd(c)}<small className="bots-range">{usd(m.estCostLowBps)}–{usd(m.estCostHighBps)}</small></td>
+                          <td className={`right num ${bpCls(m.gateCostBps)}`} data-k="With gate">{usd(m.gateCostBps)}</td>
                           <td className="right" data-k="Patient taker"><span className="bots-share"><ProgressBar value={m.takers.t1002} max={1} size="sm" color={TAKER_COLORS.patient} label="Patient taker share" /><b>{Math.round(m.takers.t1002 * 100)}%</b></span></td>
                           <td className="right" data-k="Fast taker"><span className="bots-share"><ProgressBar value={m.takers.t23342} max={1} size="sm" color={TAKER_COLORS.fast} label="Fast taker share" /><b>{Math.round(m.takers.t23342 * 100)}%</b></span></td>
                           <td className="right num" data-k="Spread">{m.spreadBps.toFixed(2)} bp</td>
@@ -176,8 +176,8 @@ export function BotsExplore({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
                                 <Inset className="bots-xbox">
                                   <h4>Weekday and weekend</h4>
                                   <div className="bots-wk">
-                                    <div><small>Weekdays</small><b>{usd(m.weekdayCostBps)}</b></div>
-                                    <div><small>Weekends</small><b>{usd(m.weekendCostBps)}</b></div>
+                                    <div><small>Weekdays</small><b className={bpCls(m.weekdayCostBps)}>{usd(m.weekdayCostBps)}</b></div>
+                                    <div><small>Weekends</small><b className={bpCls(m.weekendCostBps)}>{usd(m.weekendCostBps)}</b></div>
                                   </div>
                                   <Takers m={m} />
                                   <div className="bots-ledger is-plain">

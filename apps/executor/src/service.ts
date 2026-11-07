@@ -172,6 +172,15 @@ function algoPatch(raw: unknown): AlgoUpdatePatch {
     if (r.outOfRange !== 'wait' && r.outOfRange !== 'stop') throw new ApiError(400, 'patch', 'outOfRange must be wait or stop.');
     out.outOfRange = r.outOfRange;
   }
+  // A volume maker's patient-taker gate and quiet windows: their shape here, their values judged by the spec parser (AlgoRuntime.update).
+  if (r.flowGate !== undefined) {
+    if (r.flowGate !== null && (typeof r.flowGate !== 'object' || Array.isArray(r.flowGate))) throw new ApiError(400, 'patch', 'flowGate must be an object or null.');
+    out.flowGate = r.flowGate as AlgoUpdatePatch['flowGate'];
+  }
+  if (r.quiet !== undefined) {
+    if (r.quiet !== null && !Array.isArray(r.quiet)) throw new ApiError(400, 'patch', 'quiet must be a list or null.');
+    out.quiet = r.quiet as AlgoUpdatePatch['quiet'];
+  }
   return out;
 }
 

@@ -17,6 +17,8 @@ import {
   type AlgoSpec,
   type BotLimits,
   type MmSpec,
+  type FlowGate,
+  type QuietWindow,
   BOT_KINDS,
   type ScaleSpec,
   type SweepSpec,
@@ -58,7 +60,7 @@ export const ALGO_LIMITS = {
   trailing: { trailPct: { min: 0.001, max: 0.5 }, chaseMs: { min: 1_000, max: 10 * MIN } },
   basket: { legs: { min: 2, max: 10 }, legUsd: { min: 10, max: 10_000_000 } },
   sweep: { slippageBps: { min: 1, max: 1_000 }, roundMs: { min: 500, max: MIN }, timeoutMs: { min: 5_000, max: DAY } },
-  mm: { orderUsd: { min: 10, max: 100_000 }, maxInventoryUsd: { min: 10, max: 1_000_000 }, offsetTicks: { min: -1, max: 1_000 }, chaseTicks: { min: 1, max: 1_000 }, minRepriceMs: { min: 1_000, max: MIN }, skewTicks: { min: 0, max: 1_000 }, edgeBps: { min: 0, max: 100 }, queueGuard: { min: 0, max: 0.5 }, levels: { min: 1, max: 5 }, moveGuard: { min: 0, max: 100 }, refBps: { min: 0, max: 50 }, pullBps: { min: 0, max: 20 }, placeBps: { min: 0, max: 20 }, calmBps: { min: 0, max: 20 }, calmMs: { min: 50, max: 10_000 }, stillBps: { min: 0, max: 500 }, stillMs: { min: 1_000, max: 120_000 }, restMs: { min: 500, max: 120_000 } },
+  mm: { orderUsd: { min: 10, max: 100_000 }, maxInventoryUsd: { min: 10, max: 1_000_000 }, offsetTicks: { min: -1, max: 1_000 }, chaseTicks: { min: 1, max: 1_000 }, minRepriceMs: { min: 1_000, max: MIN }, skewTicks: { min: 0, max: 1_000 }, edgeBps: { min: 0, max: 100 }, queueGuard: { min: 0, max: 0.5 }, levels: { min: 1, max: 5 }, moveGuard: { min: 0, max: 100 }, refBps: { min: 0, max: 50 }, pullBps: { min: 0, max: 20 }, placeBps: { min: 0, max: 20 }, calmBps: { min: 0, max: 20 }, calmMs: { min: 50, max: 10_000 }, stillBps: { min: 0, max: 500 }, stillMs: { min: 1_000, max: 120_000 }, restMs: { min: 500, max: 120_000 }, flowMinUsd: { min: 1_000, max: 100_000_000 }, flowWindowMs: { min: MIN, max: HOUR }, flowShrink: { min: 0.1, max: 1 }, quietWindows: 6 },
   grid: { levels: { min: 3, max: 60 }, orderUsd: { min: 10, max: 100_000 } },
   bot: { volumeTargetUsd: { min: 100, max: 1e10 }, maxLossUsd: { min: 1, max: 1e8 } },
   exitPct: { min: 0.001, max: 10 },
@@ -152,6 +154,54 @@ function oneOf<T extends string>(o: Obj, key: string, label: string, allowed: re
   if (typeof v === 'string' && (allowed as readonly string[]).includes(v)) return v as T;
   e[path] = `${label} must be one of ${allowed.join(', ')}.`;
   return fallback;
+}
+
+/** MmSpec.flowGate: null when absent (or null). */
+function flowGate(o: Obj, e: Errors): FlowGate | null {
+  const raw = o.flowGate;
+  if (raw === undefined || raw === null) return null;
+  if (!isObj(raw)) {
+    e.flowGate = 'The patient-taker gate must be an object (minUsd, windowMs, action, shrink).';
+    return null;
+  }
+  const L = ALGO_LIMITS.mm;
+  const minUsd = num(raw, 'minUsd', 'Patient-taker volume', L.flowMinUsd, e, 'flowGate.minUsd');
+  const windowMs = raw.windowMs === undefined || raw.windowMs === null ? 600_000 : int(raw, 'windowMs', 'Patient-taker window', L.flowWindowMs, e, 'flowGate.windowMs');
+  const action = oneOf(raw, 'action', 'When it is quiet', ['pause', 'shrink'] as const, 'pause', e, 'flowGate.action');
+  const shrink = raw.shrink === undefined || raw.shrink === null ? 0.5 : num(raw, 'shrink', 'Smaller size', L.flowShrink, e, 'flowGate.shrink');
+  return { minUsd, windowMs, action, shrink };
+}
+
+const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+/** MmSpec.quiet: null when absent, null or empty. */
+function quietWindows(o: Obj, e: Errors): QuietWindow[] | null {
+  const raw = o.quiet;
+  if (raw === undefined || raw === null) return null;
+  if (!Array.isArray(raw)) {
+    e.quiet = 'Quiet windows must be a list.';
+    return null;
+  }
+  if (!raw.length) return null;
+  const most = ALGO_LIMITS.mm.quietWindows;
+  if (raw.length > most) {
+    e.quiet = `At most ${most} quiet windows.`;
+    return null;
+  }
+  const out: QuietWindow[] = [];
+  raw.forEach((w: unknown, i) => {
+    const path = `quiet.${i}`;
+    if (!isObj(w)) {
+      e[path] = `Quiet window ${i + 1} must be an object (from, to, zone, days).`;
+      return;
+    }
+    for (const k of ['from', 'to'] as const) if (typeof w[k] !== 'string' || !HHMM.test(w[k] as string)) e[`${path}.${k}`] = `Quiet window ${i + 1}: ${k === 'from' ? 'the start' : 'the end'} must be a time like 09:30 (24 h).`;
+    if (typeof w.from === 'string' && w.from === w.to) e[`${path}.to`] = `Quiet window ${i + 1}: the end must differ from the start.`;
+    const zone = oneOf(w, 'zone', `Quiet window ${i + 1}: the time zone`, ['utc', 'new_york', 'london'] as const, 'utc', e, `${path}.zone`);
+    const days = oneOf(w, 'days', `Quiet window ${i + 1}: the days`, ['all', 'weekdays'] as const, 'all', e, `${path}.days`);
+    out.push({ from: String(w.from), to: String(w.to), zone, days });
+  });
+  return out;
 }
 
 const bool = (o: Obj, key: string, fallback = false): boolean => (typeof o[key] === 'boolean' ? (o[key] as boolean) : fallback);
@@ -678,6 +728,11 @@ export function checkAlgoSpec(input: unknown, depth = 0): AlgoSpecCheck {
           }
         }
       }
+      // With or without ref; only when set, so a spec without them keeps its canonical text.
+      const gate = flowGate(o, e);
+      if (gate) (spec as MmSpec).flowGate = gate;
+      const quiet = quietWindows(o, e);
+      if (quiet) (spec as MmSpec).quiet = quiet;
       break;
     }
     case 'grid': {

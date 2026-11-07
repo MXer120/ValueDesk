@@ -63,7 +63,7 @@ import type { AlgoSink, ChildRequest, ChildResult, StopRequest } from './sink.ts
 import { ALGO_NAMES, algoClosesOnly, algoQuantity, algoSymbols, opensPosition, parseAlgoSpec } from './spec.ts';
 import type { AlgoStore } from './store.ts';
 import type { AlgoUpdatePatch } from '../api.ts';
-import { bookFill, bookGross, bookInventory, bookNet, bookVolume, costPerMillion, emptyBook, gridAfterFill, gridPrices, gridQty, gridStart, mmQuotes, pastFair, sampleBook, type GridSide } from './bots.ts';
+import { bookFill, bookGross, bookInventory, bookNet, bookVolume, costPerMillion, emptyBook, gridAfterFill, gridPrices, gridQty, gridStart, mmQuotes, pastFair, PATIENT_TAKER_ACCOUNT, quietWindowAt, quietWords, sampleBook, usdWords, windowWords, type GridSide } from './bots.ts';
 import { FairBasis, REF_MAX_AGE_MS, type ReferenceSource } from './reference.ts';
 import {
   FINAL_STATUSES,
@@ -271,9 +271,11 @@ const EXITS_MAX_REFUSALS = 5;
 const UPDATABLE: ReadonlySet<string> = new Set(['limitPrice', 'upper', 'lower', 'maxSpreadBps', 'label', 'quantity']);
 /** ...and on a running bot (its market, range and levels are what it is: a different one is a new bot). */
 const BOT_UPDATABLE: Readonly<Record<'mm' | 'grid', ReadonlySet<string>>> = {
-  mm: new Set(['label', 'maxSpreadBps', 'upper', 'lower', 'orderUsd', 'maxInventoryUsd', 'offsetTicks', 'chaseTicks', 'minRepriceMs', 'skewTicks', 'edgeBps', 'queueGuard', 'levels', 'moveGuard', 'refBps', 'pullBps', 'placeBps', 'calmBps', 'calmMs', 'stillBps', 'stillMs', 'restMs', 'volumeTargetUsd', 'maxLossUsd', 'endAt', 'onStop']),
+  mm: new Set(['label', 'maxSpreadBps', 'upper', 'lower', 'orderUsd', 'maxInventoryUsd', 'offsetTicks', 'chaseTicks', 'minRepriceMs', 'skewTicks', 'edgeBps', 'queueGuard', 'levels', 'moveGuard', 'refBps', 'pullBps', 'placeBps', 'calmBps', 'calmMs', 'stillBps', 'stillMs', 'restMs', 'flowGate', 'quiet', 'volumeTargetUsd', 'maxLossUsd', 'endAt', 'onStop']),
   grid: new Set(['label', 'maxSpreadBps', 'upper', 'lower', 'orderUsd', 'volumeTargetUsd', 'maxLossUsd', 'endAt', 'onStop', 'outOfRange']),
 };
+/** How long the patient taker's prints are kept per market (the longest flowGate window). */
+const FLOW_KEEP_MS = 3_600_000;
 /** A bot closing what it holds rests at the touch this long before it takes... */
 const BOT_CLOSE_REST_MS = 60_000;
 /** ...and then takes with at most this slippage. */
@@ -342,6 +344,12 @@ export class AlgoRuntime {
   private heldNow = new Set<string>();
   /** When an account a bot pauses after last took: market:account -> ms. */
   private takerAt = new Map<string, number>();
+  /**
+   * What the patient taker (PATIENT_TAKER_ACCOUNT) took per market, for MmSpec.flowGate: USD per second, oldest first,
+   * an hour at most (the longest window), and since when it is watched. Kept only while a running or held volume
+   * maker on that market has a gate (onPrint drops it otherwise).
+   */
+  private flow = new Map<string, { since: number; b: Array<[number, number]> }>();
   /** When a held bot last tried to pull its quotes (pullHeldQuotes). */
   private heldPullAt = new Map<string, number>();
   private eventSeq = 0;
@@ -1047,6 +1055,7 @@ export class AlgoRuntime {
         ? `${live[0]!.tif === 'ioc' ? 'Taking' : 'Resting'} ${live[0]!.quantity - live[0]!.filled} at ${live[0]!.price}`
         : `${live.length} orders working`
       : null;
+    const gate = a.spec.kind === 'mm' && !FINAL_STATUSES.has(a.status) ? (a.k.mgate as string | undefined) : undefined;
     return {
       algo: a,
       target,
@@ -1057,7 +1066,7 @@ export class AlgoRuntime {
       marketVwap,
       nextAt,
       endsAt,
-      working,
+      working: gate ? (working ? `${working} \u00b7 ${gate}` : gate) : working,
       triggerPrice: s.kind === 'trailing' ? ((a.k.stop as number | undefined) ?? null) : null,
       conditions: s.kind === 'conditional' ? s.conditions.map((c, i) => ({ text: this.describeCondition(c), ok: Boolean((a.k.ok as boolean[] | undefined)?.[i]) })) : null,
       exits: (a.exitOrders ?? []).length
@@ -1739,6 +1748,44 @@ export class AlgoRuntime {
       await this.pullResting(a);
       return this.hold(a, `Held: the spread (${spreadBps(q).toFixed(1)} bp) is wider than your ${s.maxSpreadBps} bp.`);
     }
+    // A quiet window: pulled and held; when it ends the hold ends and it quotes again.
+    const qw = quietWindowAt(s.quiet, now);
+    if (qw) {
+      this.setGateNote(a, undefined);
+      await this.pullResting(a);
+      return this.hold(a, `Paused: quiet window ${quietWords(qw)}.`);
+    }
+    // The patient-taker gate: closed while what PATIENT_TAKER_ACCOUNT took here over its window is under minUsd.
+    let shrink = 1;
+    let gateNote: string | undefined;
+    if (s.flowGate) {
+      const g = s.flowGate;
+      const took = this.flowTook(s.symbol, g.windowMs, now);
+      if (took === null) {
+        gateNote = `Patient-taker gate open while it watches its first ${windowWords(g.windowMs)}`;
+        await this.noteOnce(a, 'flowfresh', `Patient-taker gate: watching this market from now; it stays open until it has ${windowWords(g.windowMs)} of history.`);
+      } else if (took < g.minUsd) {
+        const why = `the patient taker traded ${usdWords(took)} here in the last ${windowWords(g.windowMs)} (under your ${usdWords(g.minUsd)})`;
+        if (g.action === 'pause') {
+          this.setGateNote(a, undefined);
+          await this.pullResting(a);
+          return this.hold(a, `Paused: ${why}.`, 'Paused: the patient taker traded');
+        }
+        shrink = g.shrink;
+        gateNote = `Quoting smaller, ${usdWords(s.orderUsd * shrink)} a side: ${why}`;
+      }
+    }
+    this.setGateNote(a, gateNote);
+    // Shrunk or back to full size: what rests goes, and is placed again at the new size.
+    const shrunk = shrink < 1;
+    if (Boolean(a.k.mshrunk) !== shrunk) {
+      a.k.mshrunk = shrunk;
+      this.dirty.add(a.id);
+      const resting = this.live(a).filter((c) => c.tif !== 'ioc' && !c.cancelling);
+      if (resting.length) await this.cancelChildren(a, m, resting);
+    }
+    // The size quoted (the spec stays as signed); mmQuotes keeps each quote at SoDEX's minimum at least.
+    const sz = shrunk ? { ...s, orderUsd: s.orderUsd * shrink } : s;
     const inv = bookInventory(a.book!);
     const tick = Number(m.tickSize);
     // The Binance-led maker: no fair price (no feed here, or it went quiet), no quotes.
@@ -1751,15 +1798,15 @@ export class AlgoRuntime {
     const ago = (s.moveGuard ?? 0) > 0 ? this.market.priceAgo(s.symbol, 'mid', 2_000) : null;
     const moved = ago ? (mid(q) - ago) / tick : 0;
     const movesInto = (side: Side) => (s.moveGuard ?? 0) > 0 && (side === 'sell' ? moved >= s.moveGuard! : moved <= -s.moveGuard!) && (side === 'buy' ? inv >= 0 : inv <= 0);
-    const want = mmQuotes(s, q, m, inv, mk, s.noFair ? null : fair).filter((x) => !movesInto(x.side));
+    const want = mmQuotes(sz, q, m, inv, mk, s.noFair ? null : fair).filter((x) => !movesInto(x.side));
     // A ladder's front line: where a quote may stand at most (the touch, the skew and the edge as they are now, with no
     // step back). A ladder quote the touch came to is kept up to it - near the front of that queue is where its fills
     // are the bounce (a level that holds), not the sweep - and only one past it is pulled.
-    const front = (s.levels ?? 1) > 1 ? mmQuotes({ ...s, offsetTicks: Math.min(0, s.offsetTicks), queueGuard: 0 }, q, m, inv, mk, s.noFair ? null : fair) : want;
+    const front = (s.levels ?? 1) > 1 ? mmQuotes({ ...sz, offsetTicks: Math.min(0, s.offsetTicks), queueGuard: 0 }, q, m, inv, mk, s.noFair ? null : fair) : want;
     // What it would quote without the guards: a side missing only because of a guard is pulled no sooner than half
     // a second after it went out, and quoted again no sooner than minRepriceMs after (no cancel storm on a queue or a
     // price that flickers around the line).
-    const unguarded = (s.queueGuard ?? 0) > 0 || (s.moveGuard ?? 0) > 0 ? mmQuotes({ ...s, queueGuard: 0 }, q, m, inv, mk, s.noFair ? null : fair) : want;
+    const unguarded = (s.queueGuard ?? 0) > 0 || (s.moveGuard ?? 0) > 0 ? mmQuotes({ ...sz, queueGuard: 0 }, q, m, inv, mk, s.noFair ? null : fair) : want;
     const guardedAt = { ...((a.k.mguard as Record<string, number> | undefined) ?? {}) };
     const levels = Math.max(1, s.levels ?? 1);
     const live = this.live(a);
@@ -1782,7 +1829,7 @@ export class AlgoRuntime {
       // How many quotes this side may have resting: one, or up to the ladder - never more than the cap could take
       // (the adding side) or than it holds (the unwinding side) if all of them filled.
       const adds = side === 'buy' ? inv >= 0 : inv <= 0;
-      const room = adds ? Math.floor((s.maxInventoryUsd - Math.abs(inv) * mk) / s.orderUsd + 1e-9) : Math.ceil((Math.abs(inv) * mk) / s.orderUsd - 1e-9);
+      const room = adds ? Math.floor((s.maxInventoryUsd - Math.abs(inv) * mk) / sz.orderUsd + 1e-9) : Math.ceil((Math.abs(inv) * mk) / sz.orderUsd - 1e-9);
       const allowed = Math.max(1, Math.min(levels, room));
       const kept: ChildOrder[] = [];
       for (const c of [...standing].sort((x, y) => (side === 'buy' ? y.price - x.price : x.price - y.price))) {
@@ -1854,6 +1901,30 @@ export class AlgoRuntime {
     }
     a.k.mback = back;
     a.k.mretry = at;
+  }
+
+  /**
+   * USD the patient taker took on `symbol` over the last `windowMs`, or null while it has watched the market for less
+   * than that (the gate stays open then: a fresh bot is not paused for lack of history). Starts watching on the first call.
+   */
+  private flowTook(symbol: string, windowMs: number, now: number): number | null {
+    let f = this.flow.get(symbol);
+    if (!f) {
+      f = { since: now, b: [] };
+      this.flow.set(symbol, f);
+    }
+    if (now - f.since < windowMs) return null;
+    let sum = 0;
+    for (let i = f.b.length - 1; i >= 0 && f.b[i]![0] > now - windowMs; i--) sum += f.b[i]![1];
+    return sum;
+  }
+
+  /** A volume maker's gate line in its working text (view): set, changed or cleared. */
+  private setGateNote(a: AlgoRecord, text: string | undefined): void {
+    if (a.k.mgate === text) return;
+    if (text === undefined) delete a.k.mgate;
+    else a.k.mgate = text;
+    this.dirty.add(a.id);
   }
 
   /** Grid: every level with a side rests there post-only; a fill moves the gap (onChildDone, bots.ts gridAfterFill). */
@@ -3600,6 +3671,19 @@ export class AlgoRuntime {
 
   private onPrint(p: Print): void {
     const taker = p.taker === 'buy' ? p.buyer : p.seller;
+    const f = this.flow.get(p.symbol);
+    if (f) {
+      const gated = [...this.algos.values()].some((a) => a.spec.kind === 'mm' && a.spec.flowGate && a.spec.symbol === p.symbol && (a.status === 'running' || a.status === 'waiting'));
+      if (!gated) this.flow.delete(p.symbol);
+      else if (taker === PATIENT_TAKER_ACCOUNT) {
+        const now = Date.now();
+        const sec = Math.floor(now / 1_000) * 1_000;
+        const last = f.b[f.b.length - 1];
+        if (last && last[0] === sec) last[1] += p.qty * p.price;
+        else f.b.push([sec, p.qty * p.price]);
+        while (f.b.length && f.b[0]![0] <= now - FLOW_KEEP_MS) f.b.shift();
+      }
+    }
     for (const a of this.algos.values()) {
       const s = a.spec;
       if (s.kind !== 'mm' || s.pauseAfter !== taker || s.symbol !== p.symbol || a.status !== 'running' || !a.book) continue;
@@ -4022,10 +4106,19 @@ export class AlgoRuntime {
     await this.event(a, 'info', text);
   }
 
-  private async hold(a: AlgoRecord, reason: string): Promise<void> {
+  /** `same`: a reason that changes as it holds (a figure in it) - while held for one starting so, the line updates with no new event. */
+  private async hold(a: AlgoRecord, reason: string, same?: string): Promise<void> {
     this.heldNow.add(a.id);
     // Paused or ended meanwhile: that stands; a hold does not overwrite it.
     if (this.stopped(a)) return;
+    if (same && a.status === 'waiting' && a.statusReason?.startsWith(same)) {
+      if (a.statusReason !== reason) {
+        a.statusReason = reason;
+        this.dirty.add(a.id);
+        this.host.onChange?.(a.id);
+      }
+      return;
+    }
     if (a.status === 'scheduled') {
       if (a.statusReason !== reason) {
         a.statusReason = reason;

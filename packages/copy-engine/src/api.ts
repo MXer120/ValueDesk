@@ -22,6 +22,7 @@ import { ZERO_ADDRESS, bytesToHex, hashTypedData, hexToBytes, recoverAddress, ty
 import type { RegionPolicy } from './policy.ts';
 import type { CopyView } from './runtime.ts';
 import type { ActivityEntry, CopyMode, CopySettings } from './types.ts';
+import type { FlowGate, QuietWindow } from './algo/types.ts';
 
 export const COPY_DOMAIN = { name: 'ValueDesk Copy', version: '1' } as const;
 
@@ -319,6 +320,9 @@ export interface AlgoUpdatePatch {
   stillBps?: number;
   stillMs?: number;
   restMs?: number;
+  /** A volume maker's patient-taker gate and quiet windows (null: off); checked by the spec parser. */
+  flowGate?: FlowGate | null;
+  quiet?: QuietWindow[] | null;
   volumeTargetUsd?: number | null;
   maxLossUsd?: number | null;
   endAt?: number | null;
@@ -329,7 +333,7 @@ export interface AlgoUpdatePatch {
 /** The fields of an AlgoUpdatePatch, for checking a signed one. */
 export const ALGO_UPDATE_FIELDS: ReadonlyArray<keyof AlgoUpdatePatch> = [
   'quantity', 'limitPrice', 'maxSpreadBps', 'label',
-  'orderUsd', 'maxInventoryUsd', 'offsetTicks', 'chaseTicks', 'minRepriceMs', 'skewTicks', 'edgeBps', 'queueGuard', 'levels', 'moveGuard', 'refBps', 'pullBps', 'placeBps', 'calmBps', 'calmMs', 'stillBps', 'stillMs', 'restMs', 'volumeTargetUsd', 'maxLossUsd', 'endAt', 'onStop', 'outOfRange',
+  'orderUsd', 'maxInventoryUsd', 'offsetTicks', 'chaseTicks', 'minRepriceMs', 'skewTicks', 'edgeBps', 'queueGuard', 'levels', 'moveGuard', 'refBps', 'pullBps', 'placeBps', 'calmBps', 'calmMs', 'stillBps', 'stillMs', 'restMs', 'flowGate', 'quiet', 'volumeTargetUsd', 'maxLossUsd', 'endAt', 'onStop', 'outOfRange',
 ];
 
 /* -------------------------------------------------------------- responses ----- */

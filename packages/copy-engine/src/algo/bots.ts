@@ -10,7 +10,7 @@
  */
 import type { MarketInfo } from '../types.ts';
 import { floorStep, minChildQty, snapDown, snapUp, type Quote } from './math.ts';
-import type { BotBook, GridSpec, MmSpec, Side } from './types.ts';
+import type { BotBook, GridSpec, MmSpec, QuietWindow, Side } from './types.ts';
 
 /** One point of a bot's series every this often... */
 export const BOT_SAMPLE_MS = 5 * 60_000;
@@ -222,3 +222,68 @@ export const feesPerMillion = (c: BotCostModel): { trade: number; builder: numbe
   builder: c.builderFee * 1_000_000,
   total: (c.makerFee + c.builderFee) * 1_000_000,
 });
+
+/* ------------------------------------------------- volume maker: gates and quiet windows ----- */
+
+/**
+ * The patient taker: SoDEX account 1002, the taker whose fills cost a maker little (it takes resting size and does not
+ * run the price on; measured live 2026-11-04/05, docs/BOTS-LIVE-RUNS.md). While it is away or quiet on a market, the
+ * flow left is mostly the takers that pick makers off, so MmSpec.flowGate pauses or shrinks the quotes there.
+ */
+export const PATIENT_TAKER_ACCOUNT = 1002;
+
+const ZONES: Readonly<Record<QuietWindow['zone'], string>> = { utc: 'UTC', new_york: 'America/New_York', london: 'Europe/London' };
+const ZONE_WORDS: Readonly<Record<QuietWindow['zone'], string>> = { utc: 'UTC', new_york: 'New York', london: 'London' };
+const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const formats = new Map<string, Intl.DateTimeFormat>();
+
+/** The local time in a zone at `at` (ms): minutes since midnight and the weekday (0 Sunday .. 6 Saturday), DST included. */
+export function zoneTime(at: number, zone: QuietWindow['zone']): { minutes: number; weekday: number } {
+  let f = formats.get(zone);
+  if (!f) {
+    f = new Intl.DateTimeFormat('en-US', { timeZone: ZONES[zone], hourCycle: 'h23', hour: '2-digit', minute: '2-digit', weekday: 'short' });
+    formats.set(zone, f);
+  }
+  let h = 0;
+  let m = 0;
+  let wd = 0;
+  for (const p of f.formatToParts(new Date(at))) {
+    if (p.type === 'hour') h = Number(p.value) % 24;
+    else if (p.type === 'minute') m = Number(p.value);
+    else if (p.type === 'weekday') wd = Math.max(0, DAYS.indexOf(p.value));
+  }
+  return { minutes: h * 60 + m, weekday: wd };
+}
+
+const minutesOf = (hhmm: string): number => Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3, 5));
+
+/** The quiet window `at` is inside (the first of them), or null. One past midnight counts by the day it began. */
+export function quietWindowAt(windows: readonly QuietWindow[] | undefined, at: number): QuietWindow | null {
+  for (const w of windows ?? []) {
+    const { minutes, weekday } = zoneTime(at, w.zone);
+    const from = minutesOf(w.from);
+    const to = minutesOf(w.to);
+    const dayOk = (d: number) => w.days === 'all' || (d >= 1 && d <= 5);
+    const inside = from < to ? minutes >= from && minutes < to && dayOk(weekday) : (minutes >= from && dayOk(weekday)) || (minutes < to && dayOk((weekday + 6) % 7));
+    if (inside) return w;
+  }
+  return null;
+}
+
+/** '09:20–09:45 New York'. */
+export const quietWords = (w: QuietWindow): string => `${w.from}–${w.to} ${ZONE_WORDS[w.zone]}`;
+
+/** '$950', '$12.5k', '$3.2M'. */
+export function usdWords(x: number): string {
+  const a = Math.abs(x);
+  const cut = (n: number, d: number) => n.toFixed(d).replace(/\.0+$/, '');
+  if (a < 1_000) return `$${Math.round(x)}`;
+  if (a < 1_000_000) return `$${cut(x / 1_000, a < 10_000 ? 1 : 0)}k`;
+  return `$${cut(x / 1_000_000, a < 10_000_000 ? 1 : 0)}M`;
+}
+
+/** '10 min', '1 h', '90 min'. */
+export const windowWords = (ms: number): string => {
+  const min = Math.round(ms / 60_000);
+  return min % 60 === 0 ? `${min / 60} h` : `${min} min`;
+};

@@ -306,7 +306,30 @@ function BotsPageOpen({ address, provider }: { address: string | null; provider:
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ctx, demoList, view]);
-  const c = demo ? demoCtx : ctx;
+  const base = demo ? demoCtx : ctx;
+  // Confirmations (owner 2026-11-07): pause and resume ask first; a stop asks in BotsCtx.stop (real) and here (demo).
+  const c: BotsCtx = useMemo(() => ({
+    ...base,
+    pause: async (v) => {
+      if (await confirm({ title: `Pause ${botName(v)}?`, body: 'It pulls its orders and keeps what it holds. Resume any time.', confirmLabel: 'Pause bot' })) await base.pause(v);
+    },
+    resume: async (v) => {
+      if (await confirm({ title: `Resume ${botName(v)}?`, body: `It quotes again on ${v.algo.spec.symbol} with the same settings.`, confirmLabel: 'Resume bot' })) await base.resume(v);
+    },
+    pauseAll: async (list) => {
+      if (await confirm({ title: `Pause ${list.length} bot${list.length === 1 ? '' : 's'}?`, body: 'Each pulls its orders and keeps what it holds.', confirmLabel: 'Pause all' })) await base.pauseAll(list);
+    },
+    resumeAll: async (list) => {
+      if (await confirm({ title: `Resume ${list.length} bot${list.length === 1 ? '' : 's'}?`, body: 'Each quotes again with its own settings.', confirmLabel: 'Resume all' })) await base.resumeAll(list);
+    },
+    stop: base.demo
+      ? async (v, how) => { if (how !== 'ask' && how !== undefined) return base.stop(v, how); if (await confirm({ title: `Stop ${botName(v)}?`, body: 'It pulls its orders and closes what it holds.', confirmLabel: 'Stop bot', danger: true })) await base.stop(v, 'close'); }
+      : base.stop,
+    remove: base.demo
+      ? async (v) => { if (await confirm({ title: `Delete ${botName(v)}?`, body: 'It leaves your list.', confirmLabel: 'Delete', danger: true })) await base.remove(v); }
+      : base.remove,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [base]);
 
   let page: ReactNode;
   if (view.page === 'new') page = <BotNewPage ctx={c} view={view} />;

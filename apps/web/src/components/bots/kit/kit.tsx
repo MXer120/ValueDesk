@@ -109,7 +109,7 @@ export function ShellHeader({ icon, tile, title, subtitle, aside, as: H = 'h3', 
 
 /* --------------------------------------------------------------- buttons ----- */
 
-export type ButtonVariant = 'primary' | 'secondary' | 'quiet' | 'danger';
+export type ButtonVariant = 'primary' | 'secondary' | 'quiet' | 'danger' | 'go';
 export function Button({ variant = 'secondary', size = 'sm', icon, loading, disabled, className, children, type = 'button', ...p }: ComponentProps<'button'> & {
   variant?: ButtonVariant;
   size?: 'sm' | 'md';

@@ -139,11 +139,12 @@ h.test('a practice market maker: set up, New bot with the gate, its page, settin
   await shot(page, 'new-1');
   const next = page.getByRole('button', { name: 'Next', exact: true });
   await next.click();
-  await page.getByRole('radiogroup', { name: 'Market' }).waitFor({ timeout: 20_000 });
-  await page.getByRole('radio', { name: /BTC-USD/ }).first().click();
+  await page.getByRole('radiogroup', { name: 'Market', exact: true }).waitFor({ timeout: 20_000 });
+  await page.getByRole('searchbox', { name: 'Search a market' }).fill('BTC');
+  await page.getByRole('radio', { name: 'BTC-USD', exact: true }).first().click();
   await shot(page, 'new-2');
   await next.click();
-  await page.getByRole('button', { name: 'Advanced settings' }).click();
+  await page.getByRole('tab', { name: /Safeguards/ }).click();
   const gate = page.getByRole('switch', { name: 'Market gate' });
   await gate.click();
   await until(page, async () => (await gate.getAttribute('aria-checked')) === 'true', 'gate on');
@@ -154,6 +155,8 @@ h.test('a practice market maker: set up, New bot with the gate, its page, settin
   await shot(page, 'new');
   let mark = wallet.mark();
   await page.getByRole('button', { name: 'Start practice bot', exact: true }).click();
+  // Start asks first, with what starts.
+  await page.getByRole('dialog', { name: /^Start / }).getByRole('button', { name: 'Start practice bot', exact: true }).click();
   await page.waitForURL((u) => /^\/bots\/[^/]+$/.test(u.pathname) && !['/bots/new', '/bots/explore', '/bots/savings'].includes(u.pathname), { timeout: 30_000 });
   assert.deepEqual(signedKinds(wallet, mark), ['algo'], 'one signature to start');
   const first = new URL(page.url()).pathname.split('/')[2]!;
@@ -171,7 +174,7 @@ h.test('a practice market maker: set up, New bot with the gate, its page, settin
   const dlg = page.getByRole('dialog', { name: 'Edit settings' });
   await dlg.waitFor();
   await dlg.getByRole('textbox', { name: 'Order size', exact: true }).fill('15');
-  await dlg.getByRole('button', { name: 'Advanced settings' }).click();
+  await dlg.getByRole('tab', { name: /Safeguards/ }).click();
   await dlg.getByRole('switch', { name: 'Market gate' }).click();
   // The size, the holding that follows it, and the gate.
   await until(page, async () => /[2-9] changes/.test((await dlg.locator('.bots-edit__foot').textContent()) ?? ''), 'the changes counted');
@@ -190,8 +193,10 @@ h.test('a practice market maker: set up, New bot with the gate, its page, settin
   const head = page.locator('.bots-head');
   mark = wallet.mark();
   await head.getByRole('button', { name: 'Pause', exact: true }).click();
+  await page.getByRole('dialog', { name: /^Pause / }).getByRole('button', { name: 'Pause bot', exact: true }).click();
   await head.getByRole('button', { name: 'Resume', exact: true }).waitFor({ state: 'visible', timeout: 20_000 });
   await head.getByRole('button', { name: 'Resume', exact: true }).click();
+  await page.getByRole('dialog', { name: /^Resume / }).getByRole('button', { name: 'Resume bot', exact: true }).click();
   await head.getByRole('button', { name: 'Pause', exact: true }).waitFor({ state: 'visible', timeout: 20_000 });
   assert.deepEqual(signedKinds(wallet, mark), ['algo', 'algo']);
   await page.getByRole('tab', { name: 'Activity', exact: true }).click();

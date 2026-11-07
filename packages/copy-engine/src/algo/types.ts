@@ -541,6 +541,37 @@ export interface MmSpec extends AlgoBase, BotLimits {
   pauseMs?: number;
   /** With `ref`: a resting quote is cancelled this long after it went out, wherever the price is (0: off). */
   restMs?: number;
+  /**
+   * The patient-taker gate (absent: off; with or without `ref`). The patient taker (bots.ts PATIENT_TAKER_ACCOUNT,
+   * SoDEX account 1002) is the taker whose fills cost a maker little. While what it took on this market over the last
+   * windowMs is under minUsd the gate is closed: 'pause' pulls the quotes and holds, 'shrink' quotes orderUsd x shrink
+   * (never under SoDEX's minimum). For the first windowMs it watches a market the gate stays open.
+   */
+  flowGate?: FlowGate;
+  /** Quiet windows (absent: none; at most 6; with or without `ref`): inside one the quotes are pulled and it holds. */
+  quiet?: QuietWindow[];
+}
+
+/** MmSpec.flowGate. */
+export interface FlowGate {
+  /** USD the patient taker took here over windowMs under which the gate is closed (1,000..100,000,000). */
+  minUsd: number;
+  /** The window, ms (60,000..3,600,000; default 600,000). */
+  windowMs: number;
+  /** Closed: pull and hold, or quote smaller. */
+  action: 'pause' | 'shrink';
+  /** 'shrink': the share of orderUsd quoted while closed (0.1..1; default 0.5). Kept with 'pause' too. */
+  shrink: number;
+}
+
+/** MmSpec.quiet: from 'HH:MM' to 'HH:MM' (24 h, crossing midnight when from > to) in a zone's local time. */
+export interface QuietWindow {
+  from: string;
+  to: string;
+  /** UTC, or the local time (DST included) of America/New_York or Europe/London. */
+  zone: 'utc' | 'new_york' | 'london';
+  /** Every day, or Monday to Friday in that zone (a window past midnight goes by the day it began). */
+  days: 'all' | 'weekdays';
 }
 
 /**

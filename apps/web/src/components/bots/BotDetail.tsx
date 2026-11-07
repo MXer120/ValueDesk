@@ -18,12 +18,12 @@ import { useBotEvents } from '../../bots/useBots';
 import { demoEvents } from '../../bots/demo';
 import { useBotMarkets } from '../../bots/data';
 import { goBots, type BotsView } from '../../bots/routes';
-import { STRATEGY_INFO, botFeeWords, draftOfSpec, gridRange, patchOf, specOf, strategyOf, type BotDraft } from '../../bots/presets';
+import { STRATEGY_INFO, botFeeWords, draftOfSpec, gridRange, specChanges, specOf, strategyOf, type BotDraft } from '../../bots/presets';
 import { BotIcon } from './BotIcon';
 import { botSeries } from './BotSheet';
 import { BotSettings, NameField } from './BotSettings';
 import { Estimate, effectiveDraft } from './BotNewPage';
-import { FleetChart, LatencyCard, fmtCost } from './BotsOverview';
+import { FleetChart, LatencyCard, costTone, fmtCost } from './BotsOverview';
 import { botName, botState, fmtPnl, statusWords } from './botWords';
 import { BotsHead, StatePill, type BotsCtx } from './BotsPage';
 import { Button, EmptyState, Icon, IconButton, Inset, Panel, Shell, ShellHeader, Skeleton, StatCard, StatusPill, Tabs, type Tone } from './kit/kit';
@@ -57,6 +57,9 @@ function SettingsView({ d }: { d: BotDraft }) {
     ...(d.strategy === 'market' ? [['Market gate', d.gate ? `On · ${d.gateBps} bp in ${d.gateWindowS} s` : 'Off'] as [string, string], ['Longest rest', `${d.restS} s`] as [string, string]] : []),
     ...(d.strategy !== 'grid' ? [['Quote at', d.offsetTicks < 0 ? '1 tick inside' : 'Best price'] as [string, string]] : []),
     ...(d.strategy === 'market' ? [['Pause if spread over', d.maxSpreadBps === null ? 'Off' : `${d.maxSpreadBps} bp`] as [string, string]] : []),
+    ...(d.strategy !== 'grid' ? [['Flow gate', d.flowOn ? `${d.flowAction === 'pause' ? 'Pause' : `${Math.round(d.flowShrink * 100)}% size`} under ${fmtUsd(d.flowMinUsd, 0)} / ${d.flowWindowMin} min` : 'Off'] as [string, string]] : []),
+    ['Quiet hours', d.quiet.length ? d.quiet.map((w) => `${w.from}–${w.to} ${w.zone === 'new_york' ? 'NY' : w.zone === 'london' ? 'LDN' : 'UTC'}`).join(', ') : 'Off'],
+    ...(d.ladder > 1 ? [['Levels per side', String(d.ladder)] as [string, string]] : []),
     ['Stop if it loses', d.maxLossUsd === null ? 'No limit' : fmtUsd(d.maxLossUsd, 2)],
     ['Stop after', d.volumeTargetUsd === null ? 'You stop it' : `${fmtUsd(d.volumeTargetUsd, 0)} traded`],
     ['On stop', d.onStop === 'close' ? 'Close position' : 'Keep it'],
@@ -81,7 +84,7 @@ function EditSettings({ v, ctx, open, onClose }: { v: AlgoView; ctx: BotsCtx; op
   // Reset when it opens only: the list refreshes every few seconds with a new spec object, which must not wipe the edits.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { if (open) { setD(before); setHow('clean'); setError(null); } }, [open]);
-  const n = Object.keys(patchOf(before, d)).length + (d.label.trim() !== before.label.trim() ? 1 : 0);
+  const n = specChanges(before, d).length;
   const holds = Math.abs(v.bot?.inventory ?? 0) > 0;
   const restart = async () => {
     setBusy(true);
@@ -259,7 +262,7 @@ export function BotDetail({ ctx, view, id }: { ctx: BotsCtx; view: BotsView; id:
         <div className="bots-kpigrid is-5">
           <StatCard index={0} label="Net PnL" value={fmtPnl(b?.netPnl)} valueTone={pnlTone} trend={trendPnl} trendTone={pnlTone ?? 'neutral'} hint="After fees" />
           <StatCard index={1} label="Volume" value={b ? fmtUsd(b.volume, 0) : DASH} trend={trendVol} hint={b ? `${b.fills.toLocaleString('en-US')} fills · ${Math.round(b.makerShare * 100)}% maker` : undefined} />
-          <StatCard index={2} label="Cost per $1M" value={fmtCost(b?.costPerMillion)} valueTone={b?.costPerMillion !== null && b?.costPerMillion !== undefined && b.costPerMillion < 0 ? 'positive' : undefined} hint={estBps !== null ? `Estimate ${fmtCost(estBps * 100)}` : undefined} />
+          <StatCard index={2} label="Per $1M" value={fmtCost(b?.costPerMillion)} valueTone={costTone(b?.costPerMillion)} hint={estBps !== null ? `Estimate ${fmtCost(estBps * 100)}` : undefined} />
           <StatCard index={3} label="Fees paid" value={b ? fmtUsd(b.tradeFees + b.builderFees, 2) : DASH} hint={`incl. ${botFeeWords()} ValueDesk`} />
           <StatCard index={4} label="Holding" value={b ? fmtUsd(b.inventoryUsd, 2) : DASH} goal={cap ? { ratio: Math.min(1, hold / cap), label: `Cap ${fmtUsd(cap, 0)}` } : undefined} />
         </div>

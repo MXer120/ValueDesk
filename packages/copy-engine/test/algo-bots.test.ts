@@ -28,6 +28,9 @@ import {
   queueShare,
   pastFair,
   FairBasis,
+  PATIENT_TAKER_ACCOUNT,
+  quietWindowAt,
+  zoneTime,
   BOT_FEE,
   type ReferenceSource,
   type RefQuote,
@@ -103,7 +106,15 @@ class FakeMarket implements AlgoMarket {
   volume() {
     return { qty: 0, usd: 0 };
   }
-  onPrint(_cb: (p: Print) => void): void {}
+  printCbs: Array<(p: Print) => void> = [];
+  onPrint(cb: (p: Print) => void): void {
+    this.printCbs.push(cb);
+  }
+  /** A public print on BTC-USD: `taker` the account that took (the buyer when it bought). */
+  print(taker: number, qty: number, price = this.mk, side: 'buy' | 'sell' = 'buy'): void {
+    const p: Print = { symbol: 'BTC-USD', price, qty, buyer: side === 'buy' ? taker : 5, seller: side === 'buy' ? 5 : taker, taker: side, at: Date.now() };
+    for (const cb of this.printCbs) cb(p);
+  }
   onOrder(cb: (u: OrderUpdate) => void): void {
     this.orderCbs.push(cb);
   }
@@ -113,6 +124,7 @@ class FakeMarket implements AlgoMarket {
   }
   forget(): void {
     this.orderCbs = [];
+    this.printCbs = [];
   }
 }
 
@@ -996,4 +1008,171 @@ test('restart, clean: the new bot waits until the old one has closed what it hol
   const v = r.rt.view(next.id)!;
   assert.equal(v.algo.status, 'running');
   assert.equal(v.bot!.inventory, 0);
+});
+
+/* ------------------------------------------- volume maker: patient-taker gate and quiet windows ----- */
+
+test('spec: flowGate and quiet parse with their defaults, with or without ref; a spec without them keeps its text', () => {
+  const s = parseAlgoSpec({ kind: 'mm', symbol: 'BTC-USD', orderUsd: 50, maxInventoryUsd: 200, flowGate: { minUsd: 25_000 }, quiet: [{ from: '09:20', to: '09:45', zone: 'new_york' }] });
+  if (s.kind !== 'mm') return assert.fail('mm');
+  assert.deepEqual(s.flowGate, { minUsd: 25_000, windowMs: 600_000, action: 'pause', shrink: 0.5 });
+  assert.deepEqual(s.quiet, [{ from: '09:20', to: '09:45', zone: 'new_york', days: 'all' }]);
+  const r = parseAlgoSpec({ kind: 'mm', symbol: 'BTC-USD', orderUsd: 50, maxInventoryUsd: 200, ref: 'binance', flowGate: { minUsd: 1_000, windowMs: 60_000, action: 'shrink', shrink: 0.25 }, quiet: [{ from: '23:00', to: '01:00', zone: 'london', days: 'weekdays' }] });
+  if (r.kind !== 'mm') return assert.fail('mm');
+  assert.deepEqual(r.flowGate, { minUsd: 1_000, windowMs: 60_000, action: 'shrink', shrink: 0.25 });
+  assert.equal(r.quiet![0]!.days, 'weekdays');
+  const plain = parseAlgoSpec({ kind: 'mm', symbol: 'BTC-USD', orderUsd: 50, maxInventoryUsd: 200, flowGate: null, quiet: [] });
+  assert.ok(!canonicalJSON(plain).includes('flowGate') && !canonicalJSON(plain).includes('quiet'));
+});
+
+test('spec: flowGate and quiet refusals name the field', () => {
+  const e = (x: Record<string, unknown>) => checkAlgoSpec({ kind: 'mm', symbol: 'BTC-USD', orderUsd: 50, maxInventoryUsd: 200, ...x }).errors;
+  assert.ok(e({ flowGate: 5 }).flowGate);
+  assert.ok(e({ flowGate: { minUsd: 500 } })['flowGate.minUsd']);
+  assert.ok(e({ flowGate: { minUsd: 200_000_000 } })['flowGate.minUsd']);
+  assert.ok(e({ flowGate: {} })['flowGate.minUsd'], 'minUsd is needed');
+  assert.ok(e({ flowGate: { minUsd: 5_000, windowMs: 30_000 } })['flowGate.windowMs']);
+  assert.ok(e({ flowGate: { minUsd: 5_000, windowMs: 4_000_000 } })['flowGate.windowMs']);
+  assert.ok(e({ flowGate: { minUsd: 5_000, windowMs: 60_000.5 } })['flowGate.windowMs']);
+  assert.ok(e({ flowGate: { minUsd: 5_000, action: 'stop' } })['flowGate.action']);
+  assert.ok(e({ flowGate: { minUsd: 5_000, action: 'shrink', shrink: 0.05 } })['flowGate.shrink']);
+  assert.ok(e({ flowGate: { minUsd: 5_000, action: 'shrink', shrink: 1.5 } })['flowGate.shrink']);
+  assert.ok(e({ quiet: 'always' }).quiet);
+  const w = { from: '09:20', to: '09:45', zone: 'utc' };
+  assert.ok(e({ quiet: Array.from({ length: 7 }, () => w) }).quiet, 'at most 6');
+  assert.deepEqual(Object.keys(e({ quiet: Array.from({ length: 6 }, () => w) })), []);
+  assert.ok(e({ quiet: [{ ...w, from: '9:20' }] })['quiet.0.from']);
+  assert.ok(e({ quiet: [w, { ...w, to: '24:00' }] })['quiet.1.to']);
+  assert.ok(e({ quiet: [{ ...w, to: '09:20' }] })['quiet.0.to'], 'start and end differ');
+  assert.ok(e({ quiet: [{ ...w, zone: 'tokyo' }] })['quiet.0.zone']);
+  assert.ok(e({ quiet: [{ ...w, days: 'weekends' }] })['quiet.0.days']);
+  assert.ok(e({ quiet: [7] })['quiet.0']);
+});
+
+test('quiet windows: New York and London local time across DST; weekdays; a window past midnight goes by the day it began', () => {
+  const ny = [{ from: '09:20', to: '09:45', zone: 'new_york', days: 'all' }] as const;
+  // 09:30 New York is 14:30 UTC in winter (EST), 13:30 UTC in summer (EDT).
+  assert.ok(quietWindowAt([...ny], Date.UTC(2026, 0, 15, 14, 30)));
+  assert.equal(quietWindowAt([...ny], Date.UTC(2026, 0, 15, 13, 30)), null);
+  assert.ok(quietWindowAt([...ny], Date.UTC(2026, 6, 15, 13, 30)));
+  assert.equal(quietWindowAt([...ny], Date.UTC(2026, 6, 15, 14, 30)), null);
+  // The weeks between the US (8 March 2026) and the UK (29 March) clock change: New York on EDT, London still on GMT.
+  assert.ok(quietWindowAt([...ny], Date.UTC(2026, 2, 16, 13, 30)));
+  assert.equal(zoneTime(Date.UTC(2026, 2, 16, 13, 30), 'london').minutes, 13 * 60 + 30);
+  assert.equal(zoneTime(Date.UTC(2026, 6, 16, 13, 30), 'london').minutes, 14 * 60 + 30);
+  // The end is not inside; the start is.
+  assert.ok(quietWindowAt([...ny], Date.UTC(2026, 0, 15, 14, 20)));
+  assert.equal(quietWindowAt([...ny], Date.UTC(2026, 0, 15, 14, 45)), null);
+  // Weekdays: Saturday 17 January 2026 is not one.
+  const wk = [{ from: '09:20', to: '09:45', zone: 'new_york', days: 'weekdays' }] as const;
+  assert.ok(quietWindowAt([...wk], Date.UTC(2026, 0, 16, 14, 30)));
+  assert.equal(quietWindowAt([...wk], Date.UTC(2026, 0, 17, 14, 30)), null);
+  // 23:00-01:00 UTC on weekdays: Saturday 00:30 is Friday's window; Monday 00:30 would be Sunday's.
+  const night = [{ from: '23:00', to: '01:00', zone: 'utc', days: 'weekdays' }] as const;
+  assert.ok(quietWindowAt([...night], Date.UTC(2026, 0, 17, 0, 30)));
+  assert.equal(quietWindowAt([...night], Date.UTC(2026, 0, 19, 0, 30)), null);
+  assert.ok(quietWindowAt([...night], Date.UTC(2026, 0, 19, 23, 30)));
+  assert.equal(quietWindowAt([...night], Date.UTC(2026, 0, 19, 1, 0)), null);
+});
+
+test('volume maker quiet window: pulls its quotes and holds inside it; quotes again when it ends', async () => {
+  const r = await rig();
+  // T0 is 08:00 UTC: the window starts five minutes on.
+  const a = await add(r, { ...MM, quiet: [{ from: '08:05', to: '08:30', zone: 'utc' }] });
+  await step(r, a.id);
+  assert.equal(r.ex.resting.size, 2);
+  const held = await step(r, a.id, 5 * 60_000);
+  assert.equal(r.ex.resting.size, 0, 'nothing rests inside the window');
+  assert.equal(held.status, 'waiting');
+  assert.equal(held.statusReason, 'Paused: quiet window 08:05–08:30 UTC.');
+  const placed = r.ex.placed.length;
+  await step(r, a.id, 10 * 60_000);
+  assert.equal(r.ex.placed.length, placed, 'nothing new inside the window');
+  const back = await step(r, a.id, 16 * 60_000);
+  await step(r, a.id, 500);
+  assert.equal(back.status, 'running');
+  assert.equal(r.ex.resting.size, 2, 'quotes again after it');
+});
+
+test('volume maker patient-taker gate: open while it has less than its window of history; pauses while the patient taker is quiet, quotes when it trades', async () => {
+  const r = await rig();
+  const a = await add(r, { ...MM, onStop: 'keep', flowGate: { minUsd: 10_000, windowMs: 60_000, action: 'pause' } });
+  await step(r, a.id);
+  assert.equal(r.ex.resting.size, 2, 'a fresh bot is not paused for lack of history');
+  assert.ok(r.rt.view(a.id)!.working?.includes('Patient-taker gate open'));
+  assert.equal((await r.rt.events(a.id, { limit: 500 })).filter((x) => x.text.startsWith('Patient-taker gate: watching')).length, 1);
+  // Others trade, and the patient taker makes (it was not the taker): neither counts.
+  r.market.print(77, 1);
+  r.market.print(PATIENT_TAKER_ACCOUNT, 1, 60_000, 'sell');
+  (r.market.printCbs[0]!)({ symbol: 'BTC-USD', price: 60_000, qty: 1, buyer: PATIENT_TAKER_ACCOUNT, seller: 9, taker: 'sell', at: Date.now() });
+  const held = await step(r, a.id, 61_000);
+  assert.equal(held.status, 'waiting');
+  assert.equal(r.ex.resting.size, 0, 'its quotes are pulled');
+  assert.match(held.statusReason!, /^Paused: the patient taker traded \$0 here in the last 1 min \(under your \$10k\)\.$/);
+  // It takes $6k: still under; the line follows with no new event.
+  const events = (await r.rt.events(a.id, { limit: 500 })).length;
+  r.market.print(PATIENT_TAKER_ACCOUNT, 0.1);
+  const still = await step(r, a.id, 500);
+  assert.equal(still.statusReason, 'Paused: the patient taker traded $6k here in the last 1 min (under your $10k).');
+  assert.equal(r.ex.resting.size, 0);
+  assert.equal((await r.rt.events(a.id, { limit: 500 })).length, events, 'no event per figure');
+  // Another $6k: $12k over the minute, the gate opens and it quotes again.
+  r.market.print(PATIENT_TAKER_ACCOUNT, 0.1);
+  const open = await step(r, a.id, 500);
+  await step(r, a.id, 500);
+  assert.equal(open.status, 'running');
+  assert.equal(r.ex.resting.size, 2);
+  // A minute on the prints are out of the window: paused again.
+  await step(r, a.id, 61_000);
+  assert.equal(r.ex.resting.size, 0);
+  assert.equal(r.rt.get(a.id)!.status, 'waiting');
+});
+
+test('volume maker patient-taker gate, shrink: quotes half the size while it is quiet, never under SoDEX\'s minimum, full size once it trades', async () => {
+  const r = await rig();
+  const a = await add(r, { ...MM, flowGate: { minUsd: 10_000, windowMs: 60_000, action: 'shrink', shrink: 0.5 } });
+  await step(r, a.id);
+  const full = Number(r.ex.side('buy')[0]!.quantity);
+  assert.equal(full, 0.001);
+  await step(r, a.id, 61_000);
+  await step(r, a.id, 500);
+  assert.equal(r.rt.get(a.id)!.status, 'running', 'shrink keeps quoting');
+  assert.equal(r.ex.resting.size, 2);
+  assert.ok(r.ex.side('buy').every((o) => Number(o.quantity) === full / 2), 'half the size');
+  // The ask at 60,002: $30 floors to 0.00049 there (the step), as the full $60 floored to 0.00099.
+  assert.ok(r.ex.side('sell').every((o) => Number(o.quantity) === 0.00049));
+  assert.match(r.rt.view(a.id)!.working!, /Quoting smaller, \$30 a side: the patient taker traded \$0 here in the last 1 min \(under your \$10k\)/);
+  assert.equal((r.rt.get(a.id)!.spec as { orderUsd: number }).orderUsd, 60, 'the spec stays as signed');
+  r.market.print(PATIENT_TAKER_ACCOUNT, 0.2);
+  await step(r, a.id, 500);
+  await step(r, a.id, 500);
+  assert.ok(r.ex.side('buy').every((o) => Number(o.quantity) === full), 'full size again');
+  assert.ok(!r.rt.view(a.id)!.working?.includes('smaller'));
+
+  const r2 = await rig();
+  const b = await add(r2, { ...MM, flowGate: { minUsd: 10_000, windowMs: 60_000, action: 'shrink', shrink: 0.1 } });
+  await step(r2, b.id);
+  await step(r2, b.id, 61_000);
+  await step(r2, b.id, 500);
+  // $6 is under SoDEX's $10 minimum: the minimum goes out.
+  assert.ok(r2.ex.side('buy').length && r2.ex.side('buy').every((o) => Number(o.quantity) === 0.00017));
+});
+
+test('volume maker update: flowGate and quiet change on a running bot, checked like at the start; null turns them off', async () => {
+  const r = await rig();
+  const a = await add(r, MM);
+  await step(r, a.id);
+  await r.rt.update(a.id, { quiet: [{ from: '08:00', to: '09:00', zone: 'utc', days: 'all' }] });
+  const held = await step(r, a.id, 500);
+  assert.equal(held.status, 'waiting');
+  assert.equal(r.ex.resting.size, 0);
+  await assert.rejects(r.rt.update(a.id, { flowGate: { minUsd: 10, windowMs: 60_000, action: 'pause', shrink: 0.5 } }));
+  await assert.rejects(r.rt.update(a.id, { quiet: [{ from: '08:00', to: '08:00', zone: 'utc', days: 'all' }] }));
+  await r.rt.update(a.id, { quiet: null, flowGate: { minUsd: 5_000, windowMs: 120_000, action: 'shrink', shrink: 0.5 } });
+  const s = r.rt.get(a.id)!.spec as { quiet?: unknown; flowGate?: unknown };
+  assert.equal(s.quiet, undefined);
+  assert.deepEqual(s.flowGate, { minUsd: 5_000, windowMs: 120_000, action: 'shrink', shrink: 0.5 });
+  await step(r, a.id, 61_000);
+  await step(r, a.id, 500);
+  assert.equal(r.ex.resting.size, 2, 'quotes again');
 });

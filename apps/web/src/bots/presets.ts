@@ -87,6 +87,16 @@ export const STRATEGY_INFO: Record<Strategy, { name: string; kind: AlgoSpec['kin
   },
 };
 
+export interface QuietWindow { from: string; to: string; zone: 'utc' | 'new_york' | 'london'; days: 'all' | 'weekdays' }
+/** The usual quiet windows (zone time): the New York cash open and close, the London open. */
+export const QUIET_PRESETS: Array<{ id: string; label: string; w: QuietWindow }> = [
+  { id: 'ny-open', label: 'New York open', w: { from: '09:25', to: '09:50', zone: 'new_york', days: 'weekdays' } },
+  { id: 'ny-close', label: 'New York close', w: { from: '15:55', to: '16:10', zone: 'new_york', days: 'weekdays' } },
+  { id: 'ldn-open', label: 'London open', w: { from: '07:55', to: '08:20', zone: 'london', days: 'weekdays' } },
+  { id: 'us-data', label: 'US data 8:30', w: { from: '08:25', to: '08:45', zone: 'new_york', days: 'weekdays' } },
+];
+export const FLOW_DEFAULT = { flowMinUsd: 250_000, flowWindowMin: 10, flowAction: 'pause' as const, flowShrink: 0.5 };
+
 /** What the form holds: every strategy's fields, the market and the switches. */
 export interface BotDraft {
   strategy: Strategy;
@@ -128,6 +138,17 @@ export interface BotDraft {
   low: number | null;
   high: number | null;
   levels: number;
+  /* safeguards (engine flowGate / quiet, owner 2026-11-07) */
+  /** The flow gate: pause, or quote smaller, while the patient taker (1002) traded less than flowMinUsd here over flowWindowMin. */
+  flowOn: boolean;
+  flowMinUsd: number;
+  flowWindowMin: number;
+  flowAction: 'pause' | 'shrink';
+  flowShrink: number;
+  /** Quiet windows: no quotes in these (zone time, HH:MM), e.g. around the New York open. */
+  quiet: QuietWindow[];
+  /** Stops after this many hours (null: runs until stopped): spec endAt from its start. */
+  runHours: number | null;
   /* limits */
   volumeTargetUsd: number | null;
   maxLossUsd: number | null;
@@ -194,6 +215,10 @@ export function draftFor(strategy: Strategy, preset: PresetId = 'balanced', symb
     maxLossUsd: null,
     onStop: 'close',
     outOfRange: 'wait',
+    flowOn: false,
+    ...FLOW_DEFAULT,
+    quiet: [],
+    runHours: null,
     ...(strategy === 'market' ? R10 : {}),
     ...PRESET_VALUES[strategy][preset],
   };
@@ -227,14 +252,47 @@ export function specOf(d: BotDraft, mark: number | null): Record<string, unknown
       chaseTicks: d.chaseTicks, minRepriceMs: d.minRepriceMs, restMs: Math.round(d.restS * 1000),
       ...(d.gate ? { stillBps: d.gateBps, stillMs: Math.round(d.gateWindowS * 1000) } : {}),
       ...(d.maxSpreadBps !== null ? { maxSpreadBps: d.maxSpreadBps } : {}),
+      ...(d.refBps > 0 ? { refBps: d.refBps } : {}), ...(d.pullBps > 0 ? { pullBps: d.pullBps } : {}),
+      ...(d.ladder > 1 ? { levels: d.ladder } : {}), ...(d.moveGuard > 0 ? { moveGuard: d.moveGuard } : {}),
+      ...safeguards(d),
     };
   }
   if (isMaker(d.strategy)) {
     const lead = d.strategy === 'lead' ? { ref: 'binance', ...(d.refBps > 0 ? { refBps: d.refBps } : {}), ...(d.pullBps > 0 ? { pullBps: d.pullBps } : {}) } : {};
-    return { ...base, ...limits, ...lead, kind: 'mm', offsetTicks: d.offsetTicks, orderUsd: d.orderUsd, maxInventoryUsd: d.maxInventoryUsd, skewTicks: d.skewTicks, chaseTicks: d.chaseTicks, minRepriceMs: d.minRepriceMs, ...(d.edgeBps > 0 ? { edgeBps: d.edgeBps } : {}), ...(d.queueGuard > 0 ? { queueGuard: d.queueGuard } : {}), ...(d.ladder > 1 ? { levels: d.ladder } : {}), ...(d.moveGuard > 0 ? { moveGuard: d.moveGuard } : {}) };
+    return { ...base, ...limits, ...lead, ...safeguards(d), kind: 'mm', offsetTicks: d.offsetTicks, orderUsd: d.orderUsd, maxInventoryUsd: d.maxInventoryUsd, skewTicks: d.skewTicks, chaseTicks: d.chaseTicks, minRepriceMs: d.minRepriceMs, ...(d.edgeBps > 0 ? { edgeBps: d.edgeBps } : {}), ...(d.queueGuard > 0 ? { queueGuard: d.queueGuard } : {}), ...(d.ladder > 1 ? { levels: d.ladder } : {}), ...(d.moveGuard > 0 ? { moveGuard: d.moveGuard } : {}) };
   }
   const r = gridRange(d, mark);
   return { ...base, ...limits, kind: 'grid', low: r?.low ?? null, high: r?.high ?? null, levels: d.levels, orderUsd: d.orderUsd, spacing: 'geometric', outOfRange: d.outOfRange };
+}
+
+/** The flow gate, the quiet windows and the run time, as the spec carries them (engine flowGate / quiet / endAt). */
+function safeguards(d: BotDraft): Record<string, unknown> {
+  return {
+    ...(d.flowOn ? { flowGate: { minUsd: d.flowMinUsd, windowMs: Math.round(d.flowWindowMin * 60_000), action: d.flowAction, shrink: d.flowShrink } } : {}),
+    ...(d.quiet.length ? { quiet: d.quiet.map((w) => ({ ...w })) } : {}),
+    ...(d.runHours !== null && d.runHours > 0 ? { endAt: Date.now() + Math.round(d.runHours * 3_600_000) } : {}),
+  };
+}
+
+/** The safeguards a spec carries, back as draft fields. */
+function safeguardsOf(s: AlgoSpec): Partial<BotDraft> {
+  const x = s as unknown as { flowGate?: { minUsd: number; windowMs: number; action: 'pause' | 'shrink'; shrink: number }; quiet?: QuietWindow[]; endAt?: number | null };
+  return {
+    ...(x.flowGate ? { flowOn: true, flowMinUsd: x.flowGate.minUsd, flowWindowMin: x.flowGate.windowMs / 60_000, flowAction: x.flowGate.action, flowShrink: x.flowGate.shrink } : {}),
+    ...(x.quiet ? { quiet: x.quiet.map((w) => ({ ...w })) } : {}),
+  };
+}
+
+/** What changed between two drafts, as spec fields (the restart's "N changes"). endAt is a time from now: not a change. */
+export function specChanges(before: BotDraft, after: BotDraft): string[] {
+  const a = specOf(before, null);
+  const b = specOf(after, null);
+  delete a.endAt;
+  delete b.endAt;
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+  const out = [...keys].filter((k) => JSON.stringify(a[k]) !== JSON.stringify(b[k]));
+  if (after.runHours !== before.runHours) out.push('endAt');
+  return out;
 }
 
 /** The draft a running bot's spec reads back as (the Edit form). */
@@ -245,6 +303,8 @@ export function draftOfSpec(s: AlgoSpec): BotDraft {
       skewTicks: s.skewTicks, chaseTicks: s.chaseTicks, minRepriceMs: s.minRepriceMs, restS: s.restMs / 1000,
       gate: (s.stillBps ?? 0) > 0, gateBps: s.stillBps ?? GATE_DEFAULT.gateBps, gateWindowS: (s.stillMs ?? GATE_DEFAULT.gateWindowS * 1000) / 1000,
       maxSpreadBps: s.maxSpreadBps, volumeTargetUsd: s.volumeTargetUsd, maxLossUsd: s.maxLossUsd, onStop: s.onStop,
+      refBps: s.refBps ?? 0, pullBps: s.pullBps ?? 0, ladder: s.levels ?? 1, moveGuard: s.moveGuard ?? 0,
+      ...safeguardsOf(s),
     };
   }
   if (s.kind === 'mm') {
