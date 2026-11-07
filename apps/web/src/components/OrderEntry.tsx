@@ -2008,30 +2008,40 @@ export function OrderEntry({
             visibility: algoPos ? undefined : 'hidden',
           }}
         >
-          {ALGO_MENU.map((o) => {
-            const locked = betaAccess !== 'open' && !OPEN_ALGO_KINDS.has(o.id);
-            return (
-              <button
-                key={o.id}
-                type="button"
-                role="option"
-                aria-selected={algoKind === o.id}
-                aria-label={locked ? `${o.name}: in beta, get access` : undefined}
-                tabIndex={algoKind === o.id ? 0 : -1}
-                className={`oe-pop__opt oe-pop__opt--algo${isAlgo && algoKind === o.id ? ' is-on' : ''}${locked ? ' is-locked' : ''}`}
-                title={locked ? 'In beta: apply for access on our Discord' : o.detail}
-                onClick={() => {
-                  if (locked) { applyForBeta(); return; }
-                  setAlgoKind(o.id);
-                  setType('algo');
-                  setPop(null);
-                }}
-              >
-                <span className="oe-pop__optbody"><AlgoIcon kind={o.id} /><b>{o.name}</b></span>
-                {locked && <span className="oe-pop__access dv-devtag dv-devtag--beta">Get access</span>}
+          {/* Without beta access the open four come first and the rest sit under one blur with one Get access (owner 2026-11-07). */}
+          {ALGO_MENU.filter((o) => betaAccess === 'open' || OPEN_ALGO_KINDS.has(o.id)).map((o) => (
+            <button
+              key={o.id}
+              type="button"
+              role="option"
+              aria-selected={algoKind === o.id}
+              tabIndex={algoKind === o.id ? 0 : -1}
+              className={`oe-pop__opt oe-pop__opt--algo${isAlgo && algoKind === o.id ? ' is-on' : ''}`}
+              title={o.detail}
+              onClick={() => {
+                setAlgoKind(o.id);
+                setType('algo');
+                setPop(null);
+              }}
+            >
+              <span className="oe-pop__optbody"><AlgoIcon kind={o.id} /><b>{o.name}</b></span>
+            </button>
+          ))}
+          {betaAccess !== 'open' && (
+            <div className="oe-pop__lockblock">
+              <div className="oe-pop__lockgrid" aria-hidden="true">
+                {ALGO_MENU.filter((o) => !OPEN_ALGO_KINDS.has(o.id)).map((o) => (
+                  <span key={o.id} className="oe-pop__opt oe-pop__opt--algo is-locked">
+                    <span className="oe-pop__optbody"><AlgoIcon kind={o.id} /><b>{o.name}</b></span>
+                  </span>
+                ))}
+              </div>
+              <button type="button" className="oe-pop__lockcta" title="In beta: apply for access on our Discord" onClick={applyForBeta}>
+                <span className="dv-devtag dv-devtag--beta">Beta</span>
+                Get access
               </button>
-            );
-          })}
+            </div>
+          )}
         </div>,
         document.body,
       )}
