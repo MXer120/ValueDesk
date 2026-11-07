@@ -384,7 +384,7 @@ const MAJORS: ReadonlyArray<{ title: string; line: string; pill?: string; icon: 
   { title: 'Terminals', line: 'Arrange panels into layouts of your own and switch between them.', icon: <><rect x="3" y="3" width="6" height="14" rx="1.5" /><rect x="11" y="3" width="6" height="6" rx="1.5" /><rect x="11" y="11" width="6" height="6" rx="1.5" /></> },
   { title: 'News and calendar', line: 'Market news, the economic calendar with results, and the Fed live.', icon: <><rect x="3" y="4" width="14" height="13" rx="2" /><path d="M3 8h14M7 2.5v3M13 2.5v3" /></> },
   { title: 'Algo orders', line: 'TWAP, VWAP, chase and more, previewed before they run.', pill: 'Practice', icon: <><path d="M3 15c3 0 3-8 6-8s3 5 5 5 2-4 3-6" /></> },
-  { title: 'Bots', line: 'Automated market-making and grid strategies.', pill: 'Coming soon', icon: <><rect x="4" y="7" width="12" height="9" rx="2" /><path d="M10 7V4M8 11v1M12 11v1" /></> },
+  { title: 'Bots', line: 'Automated market-making and grid strategies.', pill: 'Beta', icon: <><rect x="4" y="7" width="12" height="9" rx="2" /><path d="M10 7V4M8 11v1M12 11v1" /></> },
 ];
 
 function OverviewStep({ onNext }: { onNext: () => void }) {
