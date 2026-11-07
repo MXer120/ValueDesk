@@ -428,24 +428,24 @@ test('a page error goes into the audit log, only with a session, cut to size', a
 
 // --- the beta list (beta.valuedesk.so) --------------------------------------------------------
 
-test('beta list: a signed add and remove, for exactly that wallet, audited; the list reads it', async () => {
+test('beta list: add and remove with the session alone (no signature, owner 2026-11-07), signed-in only, audited; the list reads it', async () => {
   const s = await suite();
   const auth = await s.login();
   const tester = newWallet().address;
   assert.deepEqual((await s.post('/api/admin/beta', {}, auth)).json().wallets, []);
-  // Unsigned, or signed for another wallet or another action: refused.
-  assert.equal((await s.post('/api/admin/beta/add', { address: tester, label: 'Max' }, auth)).statusCode, 403);
-  const other = newWallet().address;
-  assert.equal((await s.post('/api/admin/beta/add', { address: tester, label: 'Max', action: action(s.admin, 'beta.add', other, { address: other, label: 'Max' }) }, auth)).statusCode, 403);
-  assert.equal((await s.post('/api/admin/beta/add', { address: tester, label: 'Max', action: action(s.admin, 'beta.remove', tester, { address: tester, label: 'Max' }) }, auth)).statusCode, 403);
-  assert.equal((await s.post('/api/admin/beta/add', { address: 'nope', label: '', action: action(s.admin, 'beta.add', 'nope', {}) }, auth)).statusCode, 400);
+  // Without a session: refused, nothing written.
+  const anon = await s.post('/api/admin/beta/add', { address: tester, label: 'Max' }, {});
+  assert.ok(anon.statusCode === 401 || anon.statusCode === 403, String(anon.statusCode));
+  assert.equal((await s.post('/api/admin/beta/remove', { address: tester }, {})).statusCode, anon.statusCode);
+  assert.deepEqual(s.store.betaWallets(), []);
+  assert.equal((await s.post('/api/admin/beta/add', { address: 'nope', label: '' }, auth)).statusCode, 400);
 
-  const add = await s.post('/api/admin/beta/add', { address: `0x${tester.slice(2).toUpperCase()}`, label: '  Max   T. ', action: action(s.admin, 'beta.add', tester, { address: tester, label: 'Max T.' }) }, auth);
+  const add = await s.post('/api/admin/beta/add', { address: `0x${tester.slice(2).toUpperCase()}`, label: '  Max   T. ' }, auth);
   assert.equal(add.statusCode, 200, add.body);
   assert.equal(add.json().added, true);
   assert.deepEqual(s.store.betaWallets().map((w) => [w.address, w.label, w.addedBy]), [[tester, 'Max T.', s.admin.address]]);
   // A rename keeps it once.
-  const rename = await s.post('/api/admin/beta/add', { address: tester, label: 'Max', action: action(s.admin, 'beta.add', tester, { address: tester, label: 'Max' }) }, auth);
+  const rename = await s.post('/api/admin/beta/add', { address: tester, label: 'Max' }, auth);
   assert.equal(rename.json().added, false);
   assert.deepEqual((await s.post('/api/admin/beta', {}, auth)).json().wallets.map((w: { label: string }) => w.label), ['Max']);
   // The page says how soon a change counts for bots: the executor's minute.
@@ -454,11 +454,13 @@ test('beta list: a signed add and remove, for exactly that wallet, audited; the 
   const listedUser = ((await s.post('/api/admin/users', {}, auth)).json().users as Array<{ address: string; beta: boolean }>).find((u) => u.address === tester);
   assert.equal(listedUser?.beta, true);
 
-  const remove = await s.post('/api/admin/beta/remove', { address: tester, action: action(s.admin, 'beta.remove', tester, { address: tester }) }, auth);
+  const remove = await s.post('/api/admin/beta/remove', { address: tester }, auth);
   assert.equal(remove.json().removed, true);
   assert.deepEqual(s.store.betaWallets(), []);
-  const kinds = s.store.auditRows({ limit: 20 }).filter((r) => r.kind.startsWith('beta.')).map((r) => `${r.kind}:${r.ok}`).reverse();
-  assert.deepEqual(kinds, ['beta.add:false', 'beta.add:false', 'beta.add:false', 'beta.add:true', 'beta.add:true', 'beta.remove:true']);
+  // Every change in the audit log, with the session's wallet.
+  const rows = s.store.auditRows({ limit: 20 }).filter((r) => r.kind.startsWith('beta.')).reverse();
+  assert.deepEqual(rows.map((r) => `${r.kind}:${r.ok}`), ['beta.add:true', 'beta.add:true', 'beta.remove:true']);
+  assert.ok(rows.every((r) => r.wallet === s.admin.address));
 });
 
 // --- the kanban board ------------------------------------------------------------------------------

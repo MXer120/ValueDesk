@@ -8,13 +8,11 @@
  * whitelist for bots, and no add was ever sent (prod audit log and API log: 0 beta.add). It now says what
  * a listed wallet gets and how soon, checks any address as it is typed, and confirms every change.
  *
- * Adding, renaming or removing asks the builder wallet for a signature naming that wallet (admin/signIn.ts).
+ * Adding, renaming or removing needs only the signed-in session (owner 2026-11-07: "i dont want to sign for everyone
+ * that gets added to beta"); each change is in the audit log with the session's wallet.
  */
 import { useEffect, useState } from 'react';
 import { call } from '../api';
-import { signAction } from '../wallet';
-import { useWallet } from '../WalletPicker';
-import { isUserRejection } from '../../wallet';
 import { ago, int, short, when } from '../format';
 import { Empty, Note, Page, Pill, Section, useAdmin } from '../ui';
 
@@ -39,7 +37,6 @@ const secs = (ms: number | undefined, fallback: string): string => (ms ? (ms >= 
 
 export function Beta() {
   const list = useAdmin<BetaAnswer>('beta');
-  const { ensure } = useWallet();
   const [address, setAddress] = useState('');
   const [label, setLabel] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
@@ -65,7 +62,7 @@ export function Beta() {
       setDone({ text: said(target), address: target, at: Date.now() });
       list.reload();
     } catch (e) {
-      setError(isUserRejection(e) ? 'You declined the signature in the wallet. Nothing changed.' : e instanceof Error ? e.message : String(e));
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(null);
     }
@@ -74,26 +71,21 @@ export function Beta() {
     const payload = { address: typed.toLowerCase(), label: cleanLabel };
     const rename = !!found;
     return write('add', async () => {
-      const c = await ensure();
-      const action = await signAction(c, 'beta.add', payload.address, payload, `${rename ? 'Rename' : 'Give beta access to'} ${payload.label || payload.address}`);
-      const r = await call<{ wallets?: BetaWallet[] }>('beta/add', { ...payload, action });
+      const r = await call<{ wallets?: BetaWallet[] }>('beta/add', payload);
       setAddress('');
       setLabel('');
       return r;
     }, (w) => (rename ? `Renamed ${short(w)}.` : `${short(w)} is on the list. Real bots and every algo order open for it within ${secs(fx?.executorMs, 'a minute')} (or on a reload of the site); beta.valuedesk.so lets it in now.`), payload.address);
   };
   const remove = (w: BetaWallet) => write(w.address, async () => {
-    const c = await ensure();
-    const payload = { address: w.address };
-    const action = await signAction(c, 'beta.remove', w.address, payload, `Take beta access from ${w.label || w.address}`);
-    return call<{ wallets?: BetaWallet[] }>('beta/remove', { ...payload, action });
+    return call<{ wallets?: BetaWallet[] }>('beta/remove', { address: w.address });
   }, (a) => `${short(a)} is off the list. Its bots are held within ${secs(fx?.executorMs, 'a minute')}; beta.valuedesk.so turns it away within ${secs(fx?.betaSiteMs, '10 s')}.`, w.address);
 
   const n = wallets.length;
   return (
     <Page
       title={n ? `${int(n)} wallet${n === 1 ? '' : 's'} with beta access` : 'No wallet has beta access yet'}
-      line="Add the wallet you trade with, the one you connect on valuedesk.so. Each change asks the builder wallet to sign."
+      line="Add the wallet you trade with, the one you connect on valuedesk.so. No signature needed: your sign-in covers it."
       tone={n ? 'pos' : 'unknown'}
       loaded={list}
     >
@@ -133,7 +125,7 @@ export function Beta() {
             <input type="text" value={label} maxLength={LABEL_MAX} onChange={(e) => setLabel(e.target.value)} placeholder={found?.label || 'Name (optional)'} aria-label="Name" autoComplete="off" />
           </label>
           <button type="submit" className="dv-btn dv-btn--primary" disabled={!valid || !!busy || (!!found && (!cleanLabel || cleanLabel === found.label))}>
-            {busy === 'add' ? 'Waiting for the signature…' : found ? 'Rename' : 'Give access'}
+            {busy === 'add' ? 'Saving…' : found ? 'Rename' : 'Give access'}
           </button>
         </form>
         <div className="dv-beta__check" aria-live="polite">
@@ -165,7 +157,7 @@ export function Beta() {
                 </div>
                 <span className="st-ms dv-wlist__when" title={`${when(w.addedAt)} by ${w.addedBy}`}>added {ago(w.addedAt)}</span>
                 <button type="button" className="dv-btn" disabled={!!busy} onClick={() => void remove(w)}>
-                  {busy === w.address ? 'Signing…' : 'Remove'}
+                  {busy === w.address ? 'Removing…' : 'Remove'}
                 </button>
               </li>
             ))}

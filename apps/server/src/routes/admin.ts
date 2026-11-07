@@ -21,8 +21,8 @@
  *   POST /api/admin/page-error       {message, stack, where, route, build, browser}: an error the page hit,
  *                                    into the audit log (the page shows it too - apps/web/src/admin/Crash.tsx)
  *   POST /api/admin/beta             the wallets that may use beta.valuedesk.so (beta/gate.ts reads the list)
- *   POST /api/admin/beta/add         {address, label, action}: put a wallet on it, or rename it (signed)
- *   POST /api/admin/beta/remove      {address, action}: take a wallet off it (signed); out within seconds
+ *   POST /api/admin/beta/add         {address, label}: put a wallet on it, or rename it (the session is enough, owner 2026-11-07)
+ *   POST /api/admin/beta/remove      {address}: take a wallet off it (the session is enough); out within seconds
  *   POST /api/admin/board            the kanban board's cards
  *   POST /api/admin/board/add        {title, detail, area}: a planned feature (the session is enough, owner 2026-11-05)
  *   POST /api/admin/board/move       {id, status}: another column, "reviewed" included (the session is enough)
@@ -292,6 +292,17 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOptions 
   });
 
   /** A write's signature, checked and its nonce spent - or the refusal sent (and audited). */
+  /**
+   * A write the signed-in session is enough for (builder wallet + password, 24 h): paced like a signed one and audited by the
+   * route. The beta list since 2026-11-07 (owner: "i dont want to sign for everyone that gets added to beta"), like the board.
+   */
+  const paced = (req: FastifyRequest, reply: FastifyReply): boolean => {
+    const wait = limiter.take(`write|${session(req).wallet}`, limits.write, now());
+    if (wait === null) return true;
+    void tooMany(reply, wait);
+    return false;
+  };
+
   const signed = (req: FastifyRequest, reply: FastifyReply, action: AdminActionName, target: string, payload: unknown): boolean => {
     const s = session(req);
     const wait = limiter.take(`write|${s.wallet}`, limits.write, now());
@@ -595,7 +606,7 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOptions 
     const label = typeof b.label === 'string' ? b.label.replace(/\s+/g, ' ').trim() : '';
     if (!/^0x[0-9a-f]{40}$/.test(address)) return reply.code(400).send({ ok: false, error: 'address must be a 0x wallet address' });
     if (label.length > BETA_LABEL_MAX) return reply.code(400).send({ ok: false, error: `the name must be at most ${BETA_LABEL_MAX} characters` });
-    if (!signed(req, reply, 'beta.add', address, { address, label })) return reply;
+    if (!paced(req, reply)) return reply;
     const s = session(req);
     const added = store().addBetaWallet(address, label, s.wallet, now());
     store().audit({ kind: 'beta.add', ok: true, wallet: s.wallet, client: clientKey(req.ip), country: countryOf(req), detail: { address, label, added } }, now());
@@ -606,7 +617,7 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOptions 
     const b = bodyOf(req);
     const address = typeof b.address === 'string' ? b.address.trim().toLowerCase() : '';
     if (!/^0x[0-9a-f]{40}$/.test(address)) return reply.code(400).send({ ok: false, error: 'address must be a 0x wallet address' });
-    if (!signed(req, reply, 'beta.remove', address, { address })) return reply;
+    if (!paced(req, reply)) return reply;
     const s = session(req);
     const removed = store().removeBetaWallet(address);
     store().audit({ kind: 'beta.remove', ok: true, wallet: s.wallet, client: clientKey(req.ip), country: countryOf(req), detail: { address, removed } }, now());
