@@ -149,6 +149,19 @@ export interface FillRow {
   src: 0 | 1;
 }
 
+/** A raw fills row as walletFillRows reads it (side +1 bought, -1 sold). */
+export interface WalletFillRow {
+  id: string;
+  t: number;
+  symbol: string;
+  side: number;
+  px: number;
+  sz: number;
+  fee: number | null;
+  closed_pnl: number | null;
+  oid: string | null;
+}
+
 export interface CloseRow {
   venue: Venue;
   address: string;
@@ -1451,6 +1464,26 @@ export class IndexStore {
     ) as Record<string, number> | undefined;
     if (!r) return null;
     return { fromT: r.from_t!, toT: r.to_t!, exhausted: r.exhausted === 1, capped: r.capped === 1, restAt: r.rest_at! };
+  }
+
+  /**
+   * One wallet's raw fills with fromT <= t <= toT, newest first (time, then id), at most `limit`:
+   * a backwards walk of fills_t, no sort and no scan. `beforeId` continues a walk that stopped at
+   * (toT, beforeId): only rows older than that one. Read-only; the copy page's charts
+   * (indexer/walletFills.ts).
+   */
+  walletFillRows(venue: Venue, address: string, fromT: number, toT: number, limit: number, beforeId?: string): WalletFillRow[] {
+    const cols = 'SELECT id, t, symbol, side, px, sz, fee, closed_pnl, oid FROM fills INDEXED BY fills_t WHERE venue = ? AND address = ? AND t >= ? AND t <= ?';
+    const rows = beforeId === undefined
+      ? this.q(`${cols} ORDER BY t DESC, id DESC LIMIT ?`).all(venue, address, fromT, toT, limit)
+      : this.q(`${cols} AND (t < ? OR id < ?) ORDER BY t DESC, id DESC LIMIT ?`).all(venue, address, fromT, toT, toT, beforeId, limit);
+    return rows as unknown as WalletFillRow[];
+  }
+
+  /** The day after the wallet's newest frozen day (0: none) - read from the file, not the writer's cache: raw rows exist from there on. */
+  rawFromDay(venue: Venue, address: string): number {
+    const r = this.q('SELECT MAX(day) AS d FROM fill_day WHERE venue = ? AND address = ? AND frozen = 1').get(venue, address) as { d: number | null } | undefined;
+    return r?.d == null ? 0 : r.d + 1;
   }
 
   /**

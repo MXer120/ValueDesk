@@ -189,6 +189,11 @@ export const venues = {
     });
   },
 
+  /** What fillsOf does to a venue's fills after reading them (Hyperliquid's '@123' spot coins named), for fills read elsewhere. */
+  nameFills(venue: Venue, fills: VsFill[]): Promise<VsFill[]> {
+    return venue === 'hyperliquid' ? nameSpotFills(fills) : Promise.resolve(fills);
+  },
+
   /** The newest fills, newest first (the route's default limit was 2,000). */
   fills(venue: Venue, addressIn: string, o: { from?: number; to?: number; limit?: number } = {}): Promise<VsFill[]> {
     return guarded(async () => {

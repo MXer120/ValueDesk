@@ -28,10 +28,12 @@
  *   GET /api/vs/live?channel   (one of the Live Feed's YouTube channels: its stream on air; YOUTUBE_API_KEY, else not_available)
  *   GET /api/vs/screener?...   (query owned by valuedesk/screener.ts)
  *   GET /api/vs/lbrow?venue=hyperliquid&address   (one leaderboard row from the index)
+ *   GET /api/vs/wallet/fills?venue&address&from&to&limit   (a tracked wallet's fills from the index, up to what it holds - indexer/walletFills.ts)
  *   GET /api/vs/index/status   (the indexer's full diagnostics; never on a hosted server)
  *   GET /api/vs/index/health   (its health in numbers, for monitoring on the instance)
  */
 import { walletHistoryFor } from '../indexer/walletHistory.js';
+import { walletFills } from '../indexer/walletFills.js';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import {
   CORE_VENUES,
@@ -186,6 +188,24 @@ export async function valuedeskRoutes(app: FastifyInstance) {
     const held = walletHistoryFor(address, kind);
     if (!held) return reply.code(503).send({ ok: false, code: 'indexing', error: 'No wallet history here yet.' });
     return { ok: true, ...held };
+  });
+
+  // A tracked wallet's fills from the index, for the Copy page's charts (indexer/walletFills.ts): {covered:false}
+  // unless the index holds the window, and then the fills up to `heldTo` - the browser reads the rest from the venue.
+  // The address goes in the query, which the server's log leaves out (legal/privacy.ts section 2).
+  app.get('/api/vs/wallet/fills', async (req, reply) => {
+    try {
+      const q = req.query as Q;
+      const from = numOf(q.from);
+      const to = numOf(q.to);
+      return await walletFills(venueOf(q, false), addressOf(q), {
+        ...(from !== undefined ? { from: Math.trunc(from) } : {}),
+        ...(to !== undefined ? { to: Math.trunc(to) } : {}),
+        limit: intOf(q.limit, 2000, 1, 100_000),
+      });
+    } catch (e) {
+      return fail(reply, e);
+    }
   });
 
   app.get('/api/vs/leaderboard', async (req, reply) => {
