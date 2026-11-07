@@ -1,15 +1,17 @@
 /**
- * The Bots page (components/bots/*): what it shows before a wallet, the executor setup it walks through
- * (sign-in, the copy terms with ValueDesk's own first), and a practice volume maker from preset to stop and
- * delete - each start, pause, edit and stop one wallet signature ('algo'), nothing else signed.
+ * The Bots section (components/bots/*, bots/routes.ts): the sidebar's Bots group, what Overview shows before a
+ * wallet, the executor setup (sign-in, the copy terms with ValueDesk's own first), and a practice market maker
+ * from New bot to its own page - start, change settings, the market gate, pause, resume, stop, delete - each one
+ * wallet signature ('algo'), nothing else signed; then Explore (every market's estimate, a market's detail, Start
+ * bot there) and Savings.
  *
  * Against the dev web the ValueDesk executor is the local one (127.0.0.1:8799): every bot here is a practice
  * run against SoDEX's live book, and nothing reaches SoDEX. Screenshots of each state land in
  * e2e/ui/.out/bots-*.png (with @phone on a phone) for the design review.
  *
- * The page is built into the beta channel only (owner, 2026-11-02): run this against the beta dev web
- * (`--web http://localhost:5181`, VITE_CHANNEL=beta). Against the main build the tab is "coming soon", and that is
- * what the first test checks there; the second has nothing to do.
+ * The section is in dev builds, the beta channel and VITE_BOTS=1 builds (BOTS_ON): run this against the bots dev
+ * web (--web http://localhost:5186, the bots worktree, launch config bots-wt-web). Against a build without it the
+ * tab is "coming soon", which the first test checks; the others have nothing to do.
  */
 import assert from 'node:assert/strict';
 import { join, dirname } from 'node:path';
@@ -52,143 +54,145 @@ async function setUp(page: Page, wallet: TestWallet): Promise<void> {
   await sheet.waitFor({ state: 'hidden' });
 }
 
-// The main build: Bots is a "coming soon" name in the nav and no page (router.ts SOON_TABS); /bots lands on Trade.
+// A build without the section: Bots is a "coming soon" name in the nav and no page (router.ts SOON_TABS).
 const comingSoon = async (page: Page) => {
   await page.locator('.navlinks').first().waitFor();
   return (await page.locator('.navlink--soon').count()) > 0;
 };
+const pages = (page: Page) => page.getByRole('navigation', { name: 'Bots pages' });
+const go = async (page: Page, name: 'Overview' | 'New bot' | 'Explore' | 'Savings', heading: string) => {
+  await pages(page).getByRole('button', { name, exact: true }).click();
+  await page.getByRole('heading', { name: heading, exact: true }).waitFor();
+};
+const signedKinds = (wallet: TestWallet, mark: number) => wallet.since(mark).filter((r) => r.outcome === 'signed').map((r) => r.kind);
+const headState = async (page: Page) => (await page.locator('.bots-head .bots-state').first().textContent()) ?? '';
 
-h.test('before a wallet: the two strategies (no DCA bot), what each costs, and Connect', async ({ page }) => {
+h.test('before a wallet: the sidebar Bots group, Overview, latency, Explore and New bot read without one', async ({ page }) => {
   if (await comingSoon(page)) {
-    // The main build: "Bots" and a "Coming soon" pill in the nav, no link, and /bots went to the default page.
-    const soon = page.locator('.navlink--soon');
-    assert.ok(await soon.getByText('Coming soon', { exact: true }).isVisible());
     assert.equal(await page.locator('.navlinks a[href="/bots"]').count(), 0, 'no link to a page that is not there');
-    await page.waitForURL((u) => u.pathname !== '/bots');
-    assert.equal(await page.getByRole('heading', { name: 'Bots', exact: true }).count(), 0, 'no Bots page on the main site');
     await shot(page, 'soon');
     return;
   }
   await page.getByRole('heading', { name: 'Bots', exact: true }).waitFor();
-  for (const name of ['Volume maker', 'Grid']) assert.ok(await page.getByRole('button', { name: new RegExp(name) }).first().isVisible(), name);
-  assert.equal(await page.getByText('DCA bot').count(), 0, 'a DCA is an algo order, not a bot');
-  assert.ok(await page.getByText('$130').first().isVisible(), 'fees per $1M: 1.2 bp maker + 0.1 bp');
   assert.ok(await page.getByRole('button', { name: 'Connect wallet' }).first().isVisible());
+  for (const name of ['Market maker', 'Grid']) assert.ok(await page.getByRole('button', { name: new RegExp(name) }).first().isVisible(), name);
+  assert.equal(await page.getByText('Volume maker', { exact: true }).count(), 0, 'the volume maker is no longer offered');
+  // The latency card: the chart or its empty state, never an error.
+  await page.locator('.bots-latcard').waitFor();
+  await until(page, async () => (await page.locator('.bots-lat__chart svg, .bots-lat__empty').count()) > 0, 'latency drawn or empty', 20_000);
+  assert.equal(await page.locator('.bots-latcard').getByText(/not available from the executor/).count(), 0, 'the executor answers latency');
   await shot(page, 'no-wallet');
-}, { path: '/bots' });
+  if (!PHONE) {
+    // The rail's foot: Bots, New bot, Explore, Savings.
+    const rail = page.getByRole('group', { name: 'Bots' });
+    for (const name of ['Bots', 'New bot', 'Explore bot markets', 'Bot savings']) assert.ok(await rail.getByRole('button', { name, exact: true }).isVisible(), name);
+    await rail.getByRole('button', { name: 'Explore bot markets', exact: true }).click();
+    await page.getByRole('heading', { name: 'Explore', exact: true }).waitFor();
+    await page.waitForURL((u) => u.pathname === '/bots/explore');
+  } else await go(page, 'Explore', 'Explore');
+  await page.locator('.bots-xtable tbody tr').first().waitFor({ timeout: 20_000 });
+  await shot(page, 'explore');
+  await page.getByRole('tab', { name: 'Any room', exact: true }).click();
+  const rows = await page.locator('.bots-xtable tbody tr.bots-row').count();
+  assert.ok(rows >= 5, `markets listed: ${rows}`);
+  await page.getByRole('textbox', { name: 'Search markets' }).fill('ETH');
+  const eth = page.locator('.bots-xtable tbody tr.bots-row', { hasText: 'ETH' }).first();
+  await eth.click();
+  await page.getByText('Weekday and weekend').waitFor();
+  await shot(page, 'explore-eth');
+  await eth.getByRole('button', { name: 'Start bot', exact: true }).click();
+  await page.getByRole('heading', { name: 'New bot', exact: true }).waitFor();
+  await page.waitForURL((u) => u.pathname === '/bots/new' && u.searchParams.get('market') === 'ETH-USD');
+  await until(page, async () => /\$\d/.test((await page.locator('.bots-est__v').first().textContent()) ?? ''), 'the estimate per $1M', 20_000);
+  assert.ok(await page.getByText('Connect your wallet to start a bot.').isVisible());
+  await shot(page, 'new-no-wallet');
+  await go(page, 'Savings', 'Savings');
+  assert.ok(await page.getByText('No wallet connected').isVisible());
+}, { path: '/bots', timeout: 120_000 });
 
-h.test('a practice volume maker: set up, preset, start, its window, pause, edit, stop, delete - one signature each', async ({ page, wallet }) => {
-  if (await comingSoon(page)) return; // the main build: the page is on the beta only
+h.test('a practice market maker: set up, New bot with the gate, its page, settings, pause, stop, delete - one signature each', async ({ page, wallet }) => {
+  if (await comingSoon(page)) return;
   await connectWallet(page);
   await page.getByRole('heading', { name: 'Bots', exact: true }).waitFor();
   await shot(page, 'setup-needed');
   await setUp(page, wallet);
 
-  // Empty: the strategies; pick the volume maker.
-  await page.getByText('Pick a strategy. Each starts as a practice run').waitFor({ state: 'visible', timeout: 20_000 });
-  await shot(page, 'empty');
-  await page.getByRole('button', { name: /Volume maker/ }).first().click();
-  const form = page.getByRole('dialog', { name: 'New volume maker' });
-  await form.waitFor({ state: 'visible' });
-  assert.ok(await form.getByRole('button', { name: 'Balanced', exact: true }).getAttribute('aria-pressed').then((x) => x === 'true'), 'Balanced by default');
-  await form.getByRole('button', { name: 'Steady', exact: true }).click();
-  assert.ok(await form.getByRole('switch', { name: 'Practice' }).isDisabled(), 'live bots are off for this wallet: practice only');
-  // SoDEX's 1.2 bp ($120) and the 0.1 bp bot fee ($10) per $1M, less one tick a round trip at the touch.
-  await until(page, async () => { const t = (await form.locator('.bots-cost').textContent()) ?? ''; return /\$120/.test(t) && /\$10/.test(t) && /Spread earned/.test(t); }, 'the cost per $1M');
-  await shot(page, 'form');
+  // New bot: the market maker by default (R10), Steady, the market gate on.
+  await go(page, 'New bot', 'New bot');
+  assert.equal(await page.getByRole('radio', { name: /Market maker/ }).getAttribute('aria-checked'), 'true');
+  await page.getByRole('button', { name: 'Steady', exact: true }).click();
+  const gate = page.getByRole('switch', { name: 'Market gate' });
+  await gate.click();
+  await until(page, async () => (await gate.getAttribute('aria-checked')) === 'true', 'gate on');
+  assert.match((await page.locator('.bots-summary').textContent()) ?? '', /adds no quote while Binance moved more than 12 bp in 60 s/);
+  assert.ok(await page.getByRole('switch', { name: 'Practice' }).isDisabled(), 'real orders are off for this wallet: practice only');
+  await shot(page, 'new');
   let mark = wallet.mark();
-  await form.getByRole('button', { name: 'Start practice bot', exact: true }).click();
-  await form.waitFor({ state: 'hidden', timeout: 30_000 });
-  assert.deepEqual(wallet.since(mark).filter((r) => r.outcome === 'signed').map((r) => r.kind), ['algo'], 'one signature to start');
+  await page.getByRole('button', { name: 'Start practice bot', exact: true }).click();
+  await page.waitForURL((u) => /^\/bots\/[^/]+$/.test(u.pathname) && !['/bots/new', '/bots/explore', '/bots/savings'].includes(u.pathname), { timeout: 30_000 });
+  assert.deepEqual(signedKinds(wallet, mark), ['algo'], 'one signature to start');
+  const id = new URL(page.url()).pathname.split('/')[2]!;
 
-  // Its window opens on the overview.
-  const sheet = page.getByRole('dialog', { name: /^Volume maker BTC$/ });
-  await sheet.waitFor({ state: 'visible' });
-  await until(page, async () => (await sheet.locator('.bots-state, .algo-st__status').first().textContent())?.includes('Running') ?? false, 'it runs', 30_000);
-  await page.waitForTimeout(8_000);
-  await shot(page, 'sheet');
-  await sheet.getByRole('button', { name: 'Activity', exact: true }).click();
-  await sheet.locator('.bots-log li').first().waitFor({ state: 'visible', timeout: 20_000 });
+  // Its page: running, the gate in its line.
+  await until(page, async () => (await headState(page)).includes('Running'), 'it runs', 30_000);
+  assert.ok(await page.getByText(/market gate on/).first().isVisible());
+  await page.waitForTimeout(6_000);
+  await shot(page, 'bot');
+
+  // Settings: a new order size and the gate off, one signature.
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.getByRole('textbox', { name: 'Each side' }).fill('15');
+  await page.getByRole('switch', { name: 'Market gate' }).click();
+  await until(page, async () => /2 changes/.test((await page.locator('.bots-savebar').textContent()) ?? ''), 'two changes');
+  await shot(page, 'settings');
+  mark = wallet.mark();
+  await page.getByRole('button', { name: 'Save changes', exact: true }).click();
+  await toast(page, 'Changes saved. They apply at once.').waitFor({ state: 'visible', timeout: 30_000 });
+  assert.deepEqual(signedKinds(wallet, mark), ['algo'], 'one signature to save');
+  await until(page, async () => (await page.getByText(/market gate on/).count()) === 0, 'the gate is off', 20_000);
+
+  // Pause and resume.
+  const head = page.locator('.bots-head');
+  mark = wallet.mark();
+  await head.getByRole('button', { name: 'Pause', exact: true }).click();
+  await head.getByRole('button', { name: 'Resume', exact: true }).waitFor({ state: 'visible', timeout: 20_000 });
+  await head.getByRole('button', { name: 'Resume', exact: true }).click();
+  await head.getByRole('button', { name: 'Pause', exact: true }).waitFor({ state: 'visible', timeout: 20_000 });
+  assert.deepEqual(signedKinds(wallet, mark), ['algo', 'algo']);
+  await page.getByRole('button', { name: 'Activity', exact: true }).click();
+  await page.locator('.bots-log li').first().waitFor({ state: 'visible', timeout: 20_000 });
   await shot(page, 'activity');
-  await sheet.getByRole('button', { name: 'Overview', exact: true }).click();
 
-  mark = wallet.mark();
-  await sheet.getByRole('button', { name: 'Pause', exact: true }).click();
-  await sheet.getByRole('button', { name: 'Resume', exact: true }).waitFor({ state: 'visible', timeout: 20_000 });
-  await sheet.getByRole('button', { name: 'Resume', exact: true }).click();
-  await sheet.getByRole('button', { name: 'Pause', exact: true }).waitFor({ state: 'visible', timeout: 20_000 });
-  assert.deepEqual(wallet.since(mark).filter((r) => r.outcome === 'signed').map((r) => r.kind), ['algo', 'algo']);
-  await sheet.getByRole('button', { name: 'Close', exact: true }).first().click();
-  await sheet.waitFor({ state: 'hidden' });
-
-  // The list.
-  const row = page.getByRole('row', { name: /Volume maker BTC/ });
+  // The overview lists it; search finds it and misses well.
+  await go(page, 'Overview', 'Bots');
+  const row = page.locator('tr.bots-row').filter({ hasText: 'BTC-USD' }).first();
   await row.waitFor({ state: 'visible' });
-  await shot(page, 'list');
+  await page.getByRole('textbox', { name: 'Search bots' }).fill('zzz');
+  await page.getByText('No bot matches').waitFor();
+  await page.getByRole('textbox', { name: 'Search bots' }).fill('BTC');
+  await row.waitFor({ state: 'visible' });
+  await shot(page, 'overview');
 
-  // A row's controls: in the row on a wide screen; on a phone the row opens its window, which has them.
-  const win = page.getByRole('dialog', { name: /^Volume maker BTC$/ });
-  const control = async (name: string) => {
-    if (!PHONE) return row.getByRole('button', { name, exact: true }).click();
-    if (!(await win.isVisible())) {
-      await row.click();
-      await win.waitFor({ state: 'visible' });
-    }
-    await win.getByRole('button', { name, exact: true }).click();
-  };
-  const closeWin = async () => {
-    if (await win.isVisible()) {
-      await win.getByRole('button', { name: 'Close', exact: true }).first().click();
-      await win.waitFor({ state: 'hidden' });
-    }
-  };
-  const state = async () => (await row.locator('.bots-state').textContent()) ?? '';
-
-  // Edit: a new order size, saved as one signature.
-  await control('Edit');
-  const edit = page.getByRole('dialog', { name: 'Edit volume maker' });
-  await edit.waitFor({ state: 'visible' });
-  await shot(page, 'edit');
-  const each = edit.getByRole('textbox', { name: 'Each side' });
-  await each.fill('25');
-  mark = wallet.mark();
-  await edit.getByRole('button', { name: 'Save changes', exact: true }).click();
-  await edit.waitFor({ state: 'hidden', timeout: 30_000 });
-  assert.deepEqual(wallet.since(mark).filter((r) => r.outcome === 'signed').map((r) => r.kind), ['algo']);
-  await closeWin();
-
-  // Stop (what it holds is closed first: a second stop ends it at once), then delete.
-  await control('Stop');
-  await page.getByRole('dialog', { name: /^Stop Volume maker BTC\?/ }).getByRole('button', { name: 'Stop bot', exact: true }).click();
-  await closeWin();
-  await until(page, async () => ['Stopped', 'Closing'].includes(await state()), 'stopped or closing', 30_000);
-  if ((await state()) === 'Closing') {
-    await control('Stop now');
+  // Stop from its page (what it holds is closed: a second stop ends it at once), then delete.
+  await row.click();
+  await page.waitForURL((u) => u.pathname === `/bots/${id}`);
+  await head.getByRole('button', { name: /^Stop( and close)?$/ }).click();
+  const confirmStop = page.getByRole('dialog', { name: /^Stop / });
+  if (await confirmStop.isVisible({ timeout: 3_000 }).catch(() => false)) await confirmStop.getByRole('button', { name: 'Stop bot', exact: true }).click();
+  await until(page, async () => /Stopped|Closing/.test(await headState(page)), 'stopped or closing', 30_000);
+  if (/Closing/.test(await headState(page))) {
+    await head.getByRole('button', { name: 'Stop now', exact: true }).click();
     await page.getByRole('dialog', { name: /^Stop / }).getByRole('button', { name: 'Stop bot', exact: true }).click();
-    await closeWin();
-    await until(page, async () => (await state()) === 'Stopped', 'stopped at once', 30_000);
+    await until(page, async () => /Stopped/.test(await headState(page)), 'stopped at once', 30_000);
   }
   await shot(page, 'stopped');
-  await control('Delete');
+  await head.getByRole('button', { name: 'Delete', exact: true }).click();
   await page.getByRole('dialog', { name: /^Delete / }).getByRole('button', { name: 'Delete', exact: true }).click();
-  await row.waitFor({ state: 'hidden', timeout: 20_000 });
-}, { path: '/bots', timeout: 240_000 });
-
-h.test('the Binance-led maker: the third strategy, its form with the two Binance distances and what it costs', async ({ page }) => {
-  if (await comingSoon(page)) return; // the main build: the page is on the beta only
-  await connectWallet(page);
+  await page.waitForURL((u) => u.pathname === '/bots', { timeout: 20_000 });
   await page.getByRole('heading', { name: 'Bots', exact: true }).waitFor();
-  for (const name of ['Volume maker', 'Binance-led maker', 'Grid']) assert.ok(await page.getByRole('button', { name: new RegExp(name) }).first().isVisible(), name);
-  await shot(page, 'strategies');
-  await page.getByRole('button', { name: /Binance-led maker/ }).first().click();
-  const form = page.getByRole('dialog', { name: 'New binance-led maker' });
-  await form.waitFor({ state: 'visible' });
-  for (const row of ['Pull distance', 'Distance from Binance', 'Inventory cap', 'Loss limit']) assert.ok(await form.getByText(row, { exact: true }).first().isVisible(), row);
-  assert.equal(await form.getByText('Distance from the mid', { exact: true }).count(), 0, 'its distance is from Binance, not the mid');
-  assert.match((await form.locator('.bots-summary').textContent()) ?? '', /0\.5 bp from Binance/);
-  await until(page, async () => /\$120/.test((await form.locator('.bots-cost').textContent()) ?? ''), 'the cost per $1M');
-  await page.waitForTimeout(600);
-  await shot(page, 'lead-form');
-  await form.getByRole('button', { name: 'Cancel', exact: true }).click();
-  await form.waitFor({ state: 'hidden' });
-});
+
+  // Savings, with a wallet: the fee tier, staking and the bots' cards.
+  await go(page, 'Savings', 'Savings');
+  for (const t of ['Fee tier', 'Staking', 'Your bots']) await page.getByText(t, { exact: true }).first().waitFor();
+  await shot(page, 'savings');
+}, { path: '/bots', timeout: 300_000 });

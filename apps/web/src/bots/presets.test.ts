@@ -62,8 +62,8 @@ test('cost per $1M: 1.2 bp maker + 0.1 bp bot fee = $130; the maker gets one tic
   assert.equal(Math.round(costPerMillion(draftFor('maker'), null, null).fees), 130);
 });
 
-test('the Bots page runs the two makers and the grid; a DCA is an algo order', () => {
-  assert.deepEqual([...STRATEGIES], ['maker', 'lead', 'grid']);
+test('a new bot is the market maker (R10) or the grid; a DCA is an algo order', () => {
+  assert.deepEqual([...STRATEGIES], ['market', 'grid']);
   assert.ok(checkAlgoSpec({ kind: 'dca', symbol: 'BTC-USD', side: 'buy', perOrderUsd: 20, orders: 3, intervalMs: 3_600_000, bot: true, exec: { style: 'maker' } }).errors.bot);
 });
 
@@ -103,4 +103,27 @@ test('Binance-led maker: a volume maker with ref binance; its distances only abo
   assert.deepEqual(patchOf(back, { ...back, pullBps: 1, refBps: 2 }), { pullBps: 1, refBps: 2 });
   // A plain maker stays a plain maker.
   assert.equal(strategyOf(parseAlgoSpec(specOf(draftFor('maker'), 60_000))), 'maker');
+});
+
+test('market maker: R10 by default, the gate a switch, and a running one patches only what changed', () => {
+  const d = draftFor('market', 'steady', 'ETH-USD');
+  const spec = specOf(d, 3000) as Record<string, unknown>;
+  assert.equal(spec.kind, 'mm');
+  assert.equal(spec.ref, 'binance');
+  assert.equal(spec.restMs, 10_000);
+  assert.equal(spec.chaseTicks, 40);
+  assert.equal(spec.offsetTicks, 0);
+  assert.equal(spec.skewTicks, 0);
+  assert.equal(spec.stillBps, undefined, 'gate off by default');
+  const gated = specOf({ ...d, gate: true }, 3000) as Record<string, unknown>;
+  assert.equal(gated.stillBps, 12);
+  assert.equal(gated.stillMs, 60_000);
+  const parsed = parseAlgoSpec(gated);
+  assert.equal(strategyOf({ ...parsed, bot: true } as never), 'market');
+  const back = draftOfSpec(parsed);
+  assert.equal(back.strategy, 'market');
+  assert.equal(back.gate, true);
+  assert.deepEqual(patchOf(back, { ...back, gate: false }), { stillBps: 0 });
+  assert.deepEqual(patchOf(back, { ...back, restS: 20 }), { restMs: 20_000 });
+  assert.deepEqual(patchOf({ ...back, gate: false }, { ...back, gate: true }), { stillBps: 12, stillMs: 60_000 });
 });

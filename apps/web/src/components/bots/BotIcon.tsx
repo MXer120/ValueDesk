@@ -8,6 +8,16 @@ import type { ReactNode } from 'react';
 import type { Strategy } from '../../bots/presets';
 
 const GLYPHS: Record<Strategy, ReactNode> = {
+  // The market maker: two resting quotes either side of the price, a clock arc for the rest it keeps.
+  market: (
+    <>
+      <path d="M3 10h14" />
+      <path d="M5 6.5h4.5M10.5 13.5H15" />
+      <circle cx="5" cy="6.5" r="1.2" />
+      <circle cx="15" cy="13.5" r="1.2" />
+      <path d="M13.2 4.2a3 3 0 1 1-1.9 3.9" strokeOpacity="0.55" />
+    </>
+  ),
   maker: (
     <>
       <path d="M3 10h14" />

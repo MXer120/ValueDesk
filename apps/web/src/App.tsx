@@ -11,6 +11,7 @@ import { useAsync, useConnState, useMediaQuery, useSession, useStored, useSymbol
 import { hub } from './ws';
 import { Guarded } from './components/ErrorBoundary';
 import { BETA_CHANNEL } from './algo/liveAlgos';
+import { BOTS_ON } from './bots/routes';
 import { ShortcutsDialog, openShortcuts } from './components/ShortcutsDialog';
 import { CommandPalette, loadPalette, openPalette, paletteReady } from './components/palette/lazyPalette';
 import type { TradeContext } from './dashboard';
@@ -74,7 +75,7 @@ const ScanDashboard = lazyPage('scan', () => import('./dashboard/ScanDashboard')
 /* Bots (components/bots/): automated strategies on the ValueDesk executor. */
 // Bots: the page on the beta channel only (owner, 2026-11-02); on the main site the nav shows "coming soon" and
 // there is no page (router.ts SOON_TABS): nothing of it is built in.
-const BotsPage = BETA_CHANNEL
+const BotsPage = BETA_CHANNEL || BOTS_ON
   ? lazyPage('bots', () => import('./components/bots/BotsPage').then((m) => m.BotsPage))
   : lazyPage('bots', () => Promise.resolve(() => null));
 /* The market strip below is shown on no page today, so this never loads. */

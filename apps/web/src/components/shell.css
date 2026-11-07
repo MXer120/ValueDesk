@@ -353,3 +353,7 @@
   100% { clip-path: inset(0 calc(100% - 44px) 0 0 round 14px); opacity: 0; }
 }
 @media (prefers-reduced-motion: reduce) { .side__money { animation: none; } }
+
+/* The Bots section at the foot of the rail (SideBar.tsx BotsGroup): above Settings and the wallet. */
+.side__bots { margin-top: auto; padding-top: 4px; }
+.side__bots ~ .side__wallet { margin-top: 6px; }

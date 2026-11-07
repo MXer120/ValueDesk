@@ -152,9 +152,42 @@ const buildId = (): string => {
 /** The second build (tools/build-admin.mjs): the admin page alone, added to the site's dist. */
 const ADMIN_PAGE = process.env.VS_WEB_PAGE === 'admin';
 
+/**
+ * Dev only (VS_BOTS_FIXTURES=<dir>): the Bots section's market estimates from a saved answer of the real computation
+ * (apps/server flow/botMarkets.ts over production's recorded trades), since a laptop's API has no trade history to
+ * compute them from. Serves <dir>/bm-24h.json and bm-7d.json at /api/vs/bots/markets (and <dir>/latency.json at
+ * /api/copy/v1/bots/latency with VS_BOTS_LATENCY=1). Never in a build.
+ */
+function botsFixtures(): Plugin {
+  const dir = process.env.VS_BOTS_FIXTURES?.trim();
+  return {
+    name: 'vs-bots-fixtures',
+    apply: 'serve',
+    configureServer(server) {
+      if (!dir) return;
+      server.middlewares.use((req, res, next) => {
+        // The executor's latency too, when VS_BOTS_LATENCY=1: a real series saved from the test box's live runs (a
+        // laptop's executor sends no order to SoDEX, so its chart is empty).
+        if (req.url?.startsWith('/api/copy/v1/bots/latency') && process.env.VS_BOTS_LATENCY === '1' && existsSync(join(dir, 'latency.json'))) {
+          res.setHeader('Content-Type', 'application/json');
+          res.setHeader('Cache-Control', 'no-store');
+          return res.end(readFileSync(join(dir, 'latency.json')));
+        }
+        if (!req.url?.startsWith('/api/vs/bots/markets')) return next();
+        const w = new URL(req.url, 'http://x').searchParams.get('window') === '7d' ? '7d' : '24h';
+        const f = join(dir, `bm-${w}.json`);
+        if (!existsSync(f)) return next();
+        res.setHeader('Content-Type', 'application/json');
+        res.setHeader('Cache-Control', 'no-store');
+        res.end(readFileSync(f));
+      });
+    },
+  };
+}
+
 export default defineConfig({
   customLogger: logger,
-  plugins: [react(), trackAppOrigin(), preloadPalette(), thirdPartyLicences()],
+  plugins: [react(), trackAppOrigin(), preloadPalette(), thirdPartyLicences(), botsFixtures()],
   define: { __VS_BUILD__: JSON.stringify(buildId()) },
   /*
    * The EIP-712 signing layer is SHARED with the backend, not copied.

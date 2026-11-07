@@ -38,7 +38,7 @@ import {
 import { parseAlgoSpec } from '@copy-engine';
 
 /** One number, drawn like the ticket's Price and Amount boxes (AlgoTicket's Field): name left, value right, unit. */
-function NumField({ label, value, onChange, unit, placeholder, disabled, err, optional }: {
+export function NumField({ label, value, onChange, unit, placeholder, disabled, err, optional }: {
   label: string; value: number | null; onChange: (v: number | null) => void; unit?: string; placeholder?: string; disabled?: boolean; err?: string | null;
   /** Empty means none (a limit that is off). */
   optional?: boolean;

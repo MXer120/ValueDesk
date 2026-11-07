@@ -17,8 +17,12 @@
 import type { AlgoSpec, MarketInfo } from '@copy-engine';
 import { gridPrices, gridStepPct } from '@copy-engine';
 
-export type Strategy = 'maker' | 'lead' | 'grid';
-export const STRATEGIES: readonly Strategy[] = ['maker', 'lead', 'grid'];
+export type Strategy = 'market' | 'maker' | 'lead' | 'grid';
+/**
+ * What a new bot can be (owner, 2026-11-07): the market maker (R10, the live-tested setting) and the grid. The
+ * volume maker and the Binance-led maker before it still run and show, they are no longer offered.
+ */
+export const STRATEGIES: readonly Strategy[] = ['market', 'grid'];
 /** The volume makers (kind 'mm'): the same sizes, cap and guards; `lead` adds its Binance distances. */
 export const isMaker = (s: Strategy): boolean => s !== 'grid';
 
@@ -33,6 +37,18 @@ export const DEFAULT_BOT_FEE_TENTHS = 1;
 export const botFeeWords = (tenths: number = DEFAULT_BOT_FEE_TENTHS): string => `${(tenths / 10).toFixed(1)} bp`;
 
 export const STRATEGY_INFO: Record<Strategy, { name: string; kind: AlgoSpec['kind']; line: string; how: string[]; risk: string; best: string }> = {
+  market: {
+    name: 'Market maker',
+    kind: 'mm',
+    line: 'Rests a buy and a sell at the best price, priced off Binance, and earns the spread. The lowest cost per $1M we measured.',
+    how: [
+      'Keeps one buy and one sell resting at the best price, for up to 10 seconds each, then places it again.',
+      'Reads Binance futures, where prices move first: a quote Binance has moved through is pulled at once.',
+      'Every fill rests on the book: the maker fee, never the spread. What it holds is unwound first.',
+    ],
+    risk: 'If the price runs one way it holds up to the cap and the move counts against it. The loss limit stops it. It holds while the Binance price is not fresh.',
+    best: 'Liquid coins Binance lists. Explore shows what it costs on each.',
+  },
   maker: {
     name: 'Volume maker',
     kind: 'mm',
@@ -98,6 +114,15 @@ export interface BotDraft {
   refBps: number;
   /** The adding side is not quoted, and is pulled, within this many bp of the fair price. */
   pullBps: number;
+  /* market maker (R10) */
+  /** The longest a quote rests before it is placed again, seconds (spec restMs). */
+  restS: number;
+  /** The market gate: no new quote while Binance moved more than gateBps over the last gateWindowS (spec stillBps / stillMs). */
+  gate: boolean;
+  gateBps: number;
+  gateWindowS: number;
+  /** Not quoted while SoDEX's spread is wider than this, bp (null: no limit). */
+  maxSpreadBps: number | null;
   /* grid */
   rangePct: number;
   low: number | null;
@@ -112,6 +137,11 @@ export interface BotDraft {
 
 /** The presets, per strategy. Prices of a grid come from the mark when it is set up (rangePct either way). */
 export const PRESET_VALUES: Record<Strategy, Record<PresetId, Partial<BotDraft>>> = {
+  market: {
+    steady: { orderUsd: 12, maxInventoryUsd: 24, maxLossUsd: 3 },
+    balanced: { orderUsd: 50, maxInventoryUsd: 150, maxLossUsd: 10 },
+    active: { orderUsd: 150, maxInventoryUsd: 450, maxLossUsd: 30 },
+  },
   maker: {
     steady: { orderUsd: 20, maxInventoryUsd: 60, skewTicks: 4, chaseTicks: 2, minRepriceMs: 5_000, maxLossUsd: 3 },
     balanced: { orderUsd: 50, maxInventoryUsd: 200, skewTicks: 4, chaseTicks: 2, minRepriceMs: 3_000, maxLossUsd: 10 },
@@ -129,12 +159,21 @@ export const PRESET_VALUES: Record<Strategy, Record<PresetId, Partial<BotDraft>>
   },
 };
 
+/** R10, the setting the live tests kept (docs/BOTS-UI.md): at the touch, no skew, re-placed after 10 s, no chase. */
+export const R10 = { offsetTicks: 0, skewTicks: 0, chaseTicks: 40, minRepriceMs: 1_000, restS: 10 } as const;
+/** The market gate the backtest kept: 12 bp of Binance path over a minute. */
+export const GATE_DEFAULT = { gateBps: 12, gateWindowS: 60 } as const;
+
 export function draftFor(strategy: Strategy, preset: PresetId = 'balanced', symbol = 'BTC-USD'): BotDraft {
   return {
     strategy,
     symbol,
     label: '',
     paper: true,
+    restS: R10.restS,
+    gate: false,
+    ...GATE_DEFAULT,
+    maxSpreadBps: null,
     offsetTicks: -1,
     orderUsd: 50,
     maxInventoryUsd: 200,
@@ -155,6 +194,7 @@ export function draftFor(strategy: Strategy, preset: PresetId = 'balanced', symb
     maxLossUsd: null,
     onStop: 'close',
     outOfRange: 'wait',
+    ...(strategy === 'market' ? R10 : {}),
     ...PRESET_VALUES[strategy][preset],
   };
 }
@@ -181,6 +221,14 @@ const roundSig = (x: number): number => Number(x.toPrecision(6));
 export function specOf(d: BotDraft, mark: number | null): Record<string, unknown> {
   const base = { symbol: d.symbol, paper: d.paper, label: d.label.trim() || null };
   const limits = { volumeTargetUsd: d.volumeTargetUsd, maxLossUsd: d.maxLossUsd, onStop: d.onStop };
+  if (d.strategy === 'market') {
+    return {
+      ...base, ...limits, kind: 'mm', ref: 'binance', offsetTicks: d.offsetTicks, orderUsd: d.orderUsd, maxInventoryUsd: d.maxInventoryUsd, skewTicks: d.skewTicks,
+      chaseTicks: d.chaseTicks, minRepriceMs: d.minRepriceMs, restMs: Math.round(d.restS * 1000),
+      ...(d.gate ? { stillBps: d.gateBps, stillMs: Math.round(d.gateWindowS * 1000) } : {}),
+      ...(d.maxSpreadBps !== null ? { maxSpreadBps: d.maxSpreadBps } : {}),
+    };
+  }
   if (isMaker(d.strategy)) {
     const lead = d.strategy === 'lead' ? { ref: 'binance', ...(d.refBps > 0 ? { refBps: d.refBps } : {}), ...(d.pullBps > 0 ? { pullBps: d.pullBps } : {}) } : {};
     return { ...base, ...limits, ...lead, kind: 'mm', offsetTicks: d.offsetTicks, orderUsd: d.orderUsd, maxInventoryUsd: d.maxInventoryUsd, skewTicks: d.skewTicks, chaseTicks: d.chaseTicks, minRepriceMs: d.minRepriceMs, ...(d.edgeBps > 0 ? { edgeBps: d.edgeBps } : {}), ...(d.queueGuard > 0 ? { queueGuard: d.queueGuard } : {}), ...(d.ladder > 1 ? { levels: d.ladder } : {}), ...(d.moveGuard > 0 ? { moveGuard: d.moveGuard } : {}) };
@@ -191,6 +239,14 @@ export function specOf(d: BotDraft, mark: number | null): Record<string, unknown
 
 /** The draft a running bot's spec reads back as (the Edit form). */
 export function draftOfSpec(s: AlgoSpec): BotDraft {
+  if (s.kind === 'mm' && s.ref && s.restMs) {
+    return {
+      ...draftFor('market', 'balanced', s.symbol), label: s.label ?? '', paper: s.paper, offsetTicks: s.offsetTicks, orderUsd: s.orderUsd, maxInventoryUsd: s.maxInventoryUsd,
+      skewTicks: s.skewTicks, chaseTicks: s.chaseTicks, minRepriceMs: s.minRepriceMs, restS: s.restMs / 1000,
+      gate: (s.stillBps ?? 0) > 0, gateBps: s.stillBps ?? GATE_DEFAULT.gateBps, gateWindowS: (s.stillMs ?? GATE_DEFAULT.gateWindowS * 1000) / 1000,
+      maxSpreadBps: s.maxSpreadBps, volumeTargetUsd: s.volumeTargetUsd, maxLossUsd: s.maxLossUsd, onStop: s.onStop,
+    };
+  }
   if (s.kind === 'mm') {
     return { ...draftFor(s.ref ? 'lead' : 'maker', 'balanced', s.symbol), refBps: s.refBps ?? 0, pullBps: s.pullBps ?? 0, label: s.label ?? '', paper: s.paper, offsetTicks: s.offsetTicks, orderUsd: s.orderUsd, maxInventoryUsd: s.maxInventoryUsd, skewTicks: s.skewTicks, chaseTicks: s.chaseTicks, minRepriceMs: s.minRepriceMs, edgeBps: s.edgeBps ?? 0, queueGuard: s.queueGuard ?? 0, ladder: s.levels ?? 1, moveGuard: s.moveGuard ?? 0, volumeTargetUsd: s.volumeTargetUsd, maxLossUsd: s.maxLossUsd, onStop: s.onStop };
   }
@@ -202,6 +258,18 @@ export function draftOfSpec(s: AlgoSpec): BotDraft {
 
 /** What an Edit may send (runtime BOT_UPDATABLE): only the fields that changed. */
 export function patchOf(before: BotDraft, after: BotDraft): Record<string, unknown> {
+  if (after.strategy === 'market') {
+    const out: Record<string, unknown> = {};
+    for (const k of ['offsetTicks', 'orderUsd', 'maxInventoryUsd', 'skewTicks', 'volumeTargetUsd', 'maxLossUsd', 'onStop', 'maxSpreadBps'] as const) if (before[k] !== after[k]) out[k] = after[k];
+    if (before.restS !== after.restS) out.restMs = Math.round(after.restS * 1000);
+    // The gate off is stillBps 0 (the spec drops it); on, both numbers so a change of one keeps the other.
+    if (before.gate !== after.gate || (after.gate && (before.gateBps !== after.gateBps || before.gateWindowS !== after.gateWindowS))) {
+      out.stillBps = after.gate ? after.gateBps : 0;
+      if (after.gate) out.stillMs = Math.round(after.gateWindowS * 1000);
+    }
+    if (before.label.trim() !== after.label.trim()) out.label = after.label.trim() || null;
+    return out;
+  }
   const keys: Array<keyof BotDraft> =
     after.strategy === 'maker' ? ['offsetTicks', 'orderUsd', 'maxInventoryUsd', 'skewTicks', 'chaseTicks', 'minRepriceMs', 'edgeBps', 'queueGuard', 'ladder', 'moveGuard', 'volumeTargetUsd', 'maxLossUsd', 'onStop']
     : after.strategy === 'lead' ? ['orderUsd', 'maxInventoryUsd', 'skewTicks', 'chaseTicks', 'minRepriceMs', 'refBps', 'pullBps', 'volumeTargetUsd', 'maxLossUsd', 'onStop']
@@ -215,7 +283,7 @@ export function patchOf(before: BotDraft, after: BotDraft): Record<string, unkno
 /** The strategy a running algo is (null: not one of the page's bots - a bot DCA from before 2026-11-02 included). */
 export function strategyOf(s: AlgoSpec): Strategy | null {
   if (!s.bot) return null;
-  return s.kind === 'mm' ? (s.ref ? 'lead' : 'maker') : s.kind === 'grid' ? 'grid' : null;
+  return s.kind === 'mm' ? (s.ref && s.restMs ? 'market' : s.ref ? 'lead' : 'maker') : s.kind === 'grid' ? 'grid' : null;
 }
 
 /* ------------------------------------------------------------------- cost ----- */

@@ -60,7 +60,7 @@ function Kpi({ k, v, cls, hint }: { k: string; v: ReactNode; cls?: string; hint?
   );
 }
 
-function Overview({ v, actions }: { v: AlgoView; actions: ReactNode }) {
+export function Overview({ v, actions }: { v: AlgoView; actions: ReactNode }) {
   const b = v.bot;
   const series = useMemo(() => botSeries(v), [v]);
   const fees = b ? b.tradeFees + b.builderFees : 0;
@@ -118,7 +118,7 @@ function Overview({ v, actions }: { v: AlgoView; actions: ReactNode }) {
   );
 }
 
-function Trades({ events }: { events: AlgoEvent[] | null }) {
+export function Trades({ events }: { events: AlgoEvent[] | null }) {
   const fills = (events ?? []).filter((e) => e.kind === 'fill' && e.price !== null && e.qty !== null);
   if (!events) return <p className="oe-hint">Reading its trades…</p>;
   if (!fills.length) return <p className="oe-hint">No fill yet. Its orders rest at the best price and fill when the market trades into them.</p>;
@@ -144,7 +144,7 @@ function Trades({ events }: { events: AlgoEvent[] | null }) {
 
 const KIND_WORD: Record<AlgoEvent['kind'], string> = { status: 'Status', order: 'Order', fill: 'Fill', cancel: 'Cancel', skip: 'Skip', error: 'Error', info: 'Info' };
 
-function Activity({ events, error }: { events: AlgoEvent[] | null; error: string | null }) {
+export function Activity({ events, error }: { events: AlgoEvent[] | null; error: string | null }) {
   if (error && !events) return <p className="fx-note fx-note--err">{error}</p>;
   if (!events) return <p className="oe-hint">Reading its log…</p>;
   if (!events.length) return <p className="oe-hint">Nothing yet.</p>;
