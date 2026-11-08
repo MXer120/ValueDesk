@@ -1409,3 +1409,27 @@ test('volume maker near the cap (owner 2026-11-08): the adding quote shrinks to 
   // $5 left is under SoDEX's minimum order ($10 here): no bid.
   assert.equal(mmQuotes(s, q, MKT, (180 - 5) / 60_000, 60_000).some((x) => x.side === 'buy'), false);
 });
+
+test('every setting saves in place (owner 2026-11-08): post-only, the oracle, leverage and a grid range change on a running bot, no restart', async () => {
+  const r = await rig();
+  const a = await addSeed(r, MM, 41);
+  await step(r, a.id);
+  await r.rt.update(a.id, { postOnly: false, leverage: 4 } as never);
+  await settle();
+  await step(r, a.id, 4_000);
+  const b = r.rt.get(a.id)!;
+  assert.equal((b.spec as { postOnly?: false }).postOnly, false);
+  assert.equal(b.spec.leverage, 4);
+  assert.ok(r.ex.placed.slice(-2).every((o) => o.tif === 'gtc'), 'quotes now plain limits');
+  await r.rt.update(a.id, { postOnly: true } as never);
+  assert.equal((r.rt.get(a.id)!.spec as { postOnly?: false }).postOnly, undefined, 'back on: left out of the spec');
+  const g = await addSeed(r, { kind: 'grid', low: 59_000, high: 61_000, levels: 6, orderUsd: 20, maxLossUsd: 100 }, 42);
+  await step(r, g.id);
+  await r.rt.update(g.id, { low: 59_500, high: 60_500, levels: 4 } as never);
+  await settle();
+  await step(r, g.id, 4_000);
+  const gs = r.rt.get(g.id)!;
+  assert.equal((gs.spec as { levels: number }).levels, 4);
+  assert.equal((gs.k.gp as number[]).length, 4);
+  assert.equal(gs.status, 'running');
+});

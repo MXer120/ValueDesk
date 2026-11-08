@@ -261,13 +261,13 @@ export function fleetWindow(s: FleetSeries, from: number): { volume: number; net
 
 /** What the executor changes on a running bot in place (runtime BOT_UPDATABLE, executor algoPatch). */
 const IN_PLACE: Record<'mm' | 'grid', ReadonlySet<string>> = {
-  mm: new Set(['label', 'maxSpreadBps', 'orderUsd', 'maxInventoryUsd', 'offsetTicks', 'chaseTicks', 'minRepriceMs', 'skewTicks', 'edgeBps', 'queueGuard', 'levels', 'moveGuard', 'refBps', 'pullBps', 'stillBps', 'stillMs', 'restMs', 'flowGate', 'quiet', 'quietOnly', 'news', 'volumeTargetUsd', 'maxLossUsd', 'endAt', 'onStop']),
-  grid: new Set(['label', 'maxSpreadBps', 'orderUsd', 'volumeTargetUsd', 'maxLossUsd', 'endAt', 'onStop', 'outOfRange']),
+  mm: new Set(['ref', 'noFair', 'placeBps', 'calmBps', 'calmMs', 'pauseAfter', 'pauseMs', 'leverage', 'marginMode', 'postOnly', 'label', 'maxSpreadBps', 'orderUsd', 'maxInventoryUsd', 'offsetTicks', 'chaseTicks', 'minRepriceMs', 'skewTicks', 'edgeBps', 'queueGuard', 'levels', 'moveGuard', 'refBps', 'pullBps', 'stillBps', 'stillMs', 'restMs', 'flowGate', 'quiet', 'quietOnly', 'news', 'volumeTargetUsd', 'maxLossUsd', 'endAt', 'onStop']),
+  grid: new Set(['low', 'high', 'levels', 'spacing', 'leverage', 'marginMode', 'postOnly', 'label', 'maxSpreadBps', 'orderUsd', 'volumeTargetUsd', 'maxLossUsd', 'endAt', 'onStop', 'outOfRange']),
 };
 /** Fields a patch may clear with null (their absence in the new spec). */
-const CLEARABLE = new Set(['label', 'maxSpreadBps', 'volumeTargetUsd', 'maxLossUsd', 'endAt', 'flowGate', 'quiet', 'quietOnly', 'news']);
+const CLEARABLE = new Set(['label', 'maxSpreadBps', 'volumeTargetUsd', 'maxLossUsd', 'endAt', 'flowGate', 'quiet', 'quietOnly', 'news', 'ref', 'refBps', 'pullBps', 'placeBps', 'calmBps', 'calmMs', 'pauseAfter', 'pauseMs', 'edgeBps', 'queueGuard', 'moveGuard', 'levels', 'leverage', 'marginMode', 'restMs']);
 /** Off in the spec is the field left out; in a patch it is this value. */
-const OFF_VALUE: Record<string, unknown> = { stillBps: 0, stillMs: 0, quietOnly: false };
+const OFF_VALUE: Record<string, unknown> = { stillBps: 0, stillMs: 0, quietOnly: false, postOnly: true, noFair: false };
 
 /**
  * A settings change as an in-place update, when the executor can make it on the running bot (a name, a loss limit,

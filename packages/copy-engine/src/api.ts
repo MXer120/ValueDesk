@@ -332,12 +332,24 @@ export interface AlgoUpdatePatch {
   endAt?: number | null;
   onStop?: 'close' | 'keep';
   outOfRange?: 'wait' | 'stop';
+  /** Every setting saves in place (owner 2026-11-08): the oracle, the gate's pause, leverage, post-only, a grid's range. */
+  ref?: 'binance' | null;
+  noFair?: boolean;
+  pauseAfter?: number | null;
+  pauseMs?: number | null;
+  leverage?: number | null;
+  marginMode?: 'cross' | 'isolated' | null;
+  postOnly?: boolean;
+  low?: number;
+  high?: number;
+  spacing?: 'linear' | 'geometric';
 }
 
 /** The fields of an AlgoUpdatePatch, for checking a signed one. */
 export const ALGO_UPDATE_FIELDS: ReadonlyArray<keyof AlgoUpdatePatch> = [
   'quantity', 'limitPrice', 'maxSpreadBps', 'label',
   'orderUsd', 'maxInventoryUsd', 'offsetTicks', 'chaseTicks', 'minRepriceMs', 'skewTicks', 'edgeBps', 'queueGuard', 'levels', 'moveGuard', 'refBps', 'pullBps', 'placeBps', 'calmBps', 'calmMs', 'stillBps', 'stillMs', 'restMs', 'flowGate', 'quiet', 'quietOnly', 'news', 'volumeTargetUsd', 'maxLossUsd', 'endAt', 'onStop', 'outOfRange',
+  'ref', 'noFair', 'pauseAfter', 'pauseMs', 'leverage', 'marginMode', 'postOnly', 'low', 'high', 'spacing',
 ];
 
 /* -------------------------------------------------------------- responses ----- */

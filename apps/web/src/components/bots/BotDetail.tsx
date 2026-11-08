@@ -105,6 +105,8 @@ function SettingsTab({ v, ctx }: { v: AlgoView; ctx: BotsCtx }) {
   useEffect(() => { if (!n) setD(before); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [before]);
   const holds = Math.abs(v.bot?.inventory ?? 0) > 0;
   const ended = botState(v) === 'ended' || botState(v) === 'failed';
+  // Closing what it holds: no change and no restart until it has stopped (audit 2026-11-09: a restart then orphaned it).
+  const closing = !ended && v.bot?.closing === true;
   const next = () => specOf(effectiveDraft({ ...d, paper: v.algo.spec.paper }, est), null);
   // What the executor changes in place (no restart, nothing closed): a Save. Anything else restarts.
   const patch = useMemo(() => {
@@ -138,20 +140,20 @@ function SettingsTab({ v, ctx }: { v: AlgoView; ctx: BotsCtx }) {
   return (
     <div className="bots-settingspage">
       <Shell className="bots-stgshell">
-        <ShellHeader icon="gear" title="Settings" subtitle={ended ? 'As it ran. Run it again to start a new bot with them.' : 'Change anything: a name, limits and sizes save in place, other changes restart it.'} aside={n ? <Button variant="quiet" onClick={() => setD(before)}>Undo changes</Button> : ended ? <Button variant="secondary" icon="play" onClick={() => ctx.runAgain(v)}>Run again</Button> : undefined} />
+        <ShellHeader icon="gear" title="Settings" subtitle={ended ? 'As it ran. Run it again to start a new bot with them.' : closing ? 'It is closing what it holds: settings can change again once it has stopped.' : 'Every setting saves to the running bot at once: nothing restarts, nothing is closed.'} aside={n ? <Button variant="quiet" onClick={() => setD(before)}>Undo changes</Button> : ended ? <Button variant="secondary" icon="play" onClick={() => ctx.runAgain(v)}>Run again</Button> : undefined} />
         <Panel className="bots-sizepanel">
-          <fieldset className="bots-fieldset" disabled={ended}>
+          <fieldset className="bots-fieldset" disabled={ended || closing}>
             <BotSettings d={d} set={(p) => setD((x) => ({ ...x, ...p }))} range={d.strategy === 'grid' ? gridRange(d, null) : null} mark={v.bot?.mark ?? null} liveAllowed={ctx.liveAllowed} hidePractice noLead={est?.lead === null} lev={{ ...lev, max: leverageCap(lev.max, regionMax) }} />
             <NameField d={d} set={(p) => setD((x) => ({ ...x, ...p }))} />
           </fieldset>
         </Panel>
       </Shell>
       {error && <p className="bots-err" role="alert">{error}</p>}
-      {!ended && (
+      {!ended && !closing && (
         <div className={`bots-restartbar${n ? ' is-dirty' : ''}`}>
           <span className="bots-restartbar__t">
             <b>{n ? `${n} change${n === 1 ? '' : 's'}` : 'No change yet'}</b>
-            <small>{!n ? 'Edit any setting above.' : patch ? 'Save changes the running bot: nothing restarts, nothing is closed.' : 'These change how or where it quotes: a restart applies them.'}</small>
+            <small>{!n ? 'Edit any setting above.' : patch ? 'Save changes the running bot: nothing restarts, nothing is closed.' : 'This change makes it another bot (its market, its type, or practice and real): a restart applies it.'}</small>
           </span>
           {patch ? (
             <Button variant="go" icon="check" disabled={busy !== null} loading={busy === 'save'} onClick={() => void save()}>Save</Button>

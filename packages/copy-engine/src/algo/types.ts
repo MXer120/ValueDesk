@@ -453,6 +453,11 @@ export interface BotLimits {
   /** Stop at this time. null = until stopped. */
   endAt: number | null;
   onStop: BotStop;
+  /**
+   * false: its quotes and grid levels go out as plain limit orders, which may trade at once as a taker (and pay the
+   * taker fee); absent: post-only (the default, owner 2026-11-08: changeable per bot in its advanced settings).
+   */
+  postOnly?: false;
 }
 
 /**

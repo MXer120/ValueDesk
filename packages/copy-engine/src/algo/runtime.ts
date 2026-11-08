@@ -296,8 +296,9 @@ const EXITS_MAX_REFUSALS = 5;
 const UPDATABLE: ReadonlySet<string> = new Set(['limitPrice', 'upper', 'lower', 'maxSpreadBps', 'label', 'quantity']);
 /** ...and on a running bot (its market, range and levels are what it is: a different one is a new bot). */
 const BOT_UPDATABLE: Readonly<Record<'mm' | 'grid', ReadonlySet<string>>> = {
-  mm: new Set(['label', 'maxSpreadBps', 'upper', 'lower', 'orderUsd', 'maxInventoryUsd', 'offsetTicks', 'chaseTicks', 'minRepriceMs', 'skewTicks', 'edgeBps', 'queueGuard', 'levels', 'moveGuard', 'refBps', 'pullBps', 'placeBps', 'calmBps', 'calmMs', 'stillBps', 'stillMs', 'restMs', 'flowGate', 'quiet', 'quietOnly', 'news', 'volumeTargetUsd', 'maxLossUsd', 'endAt', 'onStop']),
-  grid: new Set(['label', 'maxSpreadBps', 'upper', 'lower', 'orderUsd', 'volumeTargetUsd', 'maxLossUsd', 'endAt', 'onStop', 'outOfRange']),
+  // Everything but the market, the kind and practice or real (owner 2026-11-08: every setting saves in place, no restart).
+  mm: new Set(['ref', 'noFair', 'placeBps', 'calmBps', 'calmMs', 'pauseAfter', 'pauseMs', 'leverage', 'marginMode', 'postOnly', 'label', 'maxSpreadBps', 'upper', 'lower', 'orderUsd', 'maxInventoryUsd', 'offsetTicks', 'chaseTicks', 'minRepriceMs', 'skewTicks', 'edgeBps', 'queueGuard', 'levels', 'moveGuard', 'refBps', 'pullBps', 'placeBps', 'calmBps', 'calmMs', 'stillBps', 'stillMs', 'restMs', 'flowGate', 'quiet', 'quietOnly', 'news', 'volumeTargetUsd', 'maxLossUsd', 'endAt', 'onStop']),
+  grid: new Set(['low', 'high', 'levels', 'spacing', 'leverage', 'marginMode', 'postOnly', 'label', 'maxSpreadBps', 'upper', 'lower', 'orderUsd', 'volumeTargetUsd', 'maxLossUsd', 'endAt', 'onStop', 'outOfRange']),
 };
 /** How long the patient taker's prints are kept per market (the longest flowGate window). */
 const FLOW_KEEP_MS = 3_600_000;
@@ -1077,12 +1078,29 @@ export class AlgoRuntime {
     // A grid's new order size applies to every level: the per-level sizes its fills set are dropped (audit 2026-11-09:
     // they kept the old size for good after the first fill).
     if (spec.kind === 'grid' && 'orderUsd' in patch) delete a.k.gz;
+    // A grid's new range, levels or spacing: laid out again around the price now (what it holds stays in its book);
+    // every level resting is pulled below and placed again (owner 2026-11-08: no restart for any setting).
+    const relayout = spec.kind === 'grid' && ['low', 'high', 'levels', 'spacing'].some((k) => k in patch);
+    if (relayout && spec.kind === 'grid') {
+      const m = this.markets.get(spec.symbol);
+      if (m) {
+        const prices = gridPrices(spec, m.tickSize);
+        const q = this.market.quote(spec.symbol);
+        const px = this.market.mark(spec.symbol)?.mark ?? (q ? mid(q) : (spec.low + spec.high) / 2);
+        a.k.gp = prices;
+        a.k.gs = gridStart(prices, px);
+        delete a.k.gz;
+        delete a.k.gretry;
+      }
+    }
     // A bot's new sizes and distances apply at once: what rests is pulled, and placed again as they say.
-    if ((spec.kind === 'mm' || spec.kind === 'grid') && ['orderUsd', 'offsetTicks', 'skewTicks', 'maxInventoryUsd', 'edgeBps'].some((k) => k in patch)) {
+    if ((spec.kind === 'mm' || spec.kind === 'grid') && (relayout || ['orderUsd', 'offsetTicks', 'skewTicks', 'maxInventoryUsd', 'edgeBps', 'postOnly', 'ref', 'noFair', 'refBps', 'leverage'].some((k) => k in patch))) {
       const m = this.markets.get(spec.symbol);
       const resting = this.live(a).filter((c) => c.tif !== 'ioc' && !c.cancelling);
       if (m && resting.length) await this.cancelChildren(a, m, resting);
     }
+    // A bot switched to or from the oracle watches (or stops watching) the Binance feed for its market now.
+    if ('ref' in patch) this.syncWatch();
     const after = this.targetOf(a);
     if (patch.quantity !== undefined && before !== null && after !== null && a.startedAt !== null && (spec.kind === 'twap' || spec.kind === 'vwap')) {
       // A schedule spreads the change over what is still to come (from the next slice on): nothing extra is due at once.
@@ -2221,7 +2239,7 @@ export class AlgoRuntime {
           if (path === null || path >= s.stillBps!) continue;
         }
       }
-      send.push({ side, price: w.price, quantity: qty, tif: 'gtx', tag: side === 'buy' ? 'bid' : 'ask', ...(adds ? {} : { reduceOnly: true }) });
+      send.push({ side, price: w.price, quantity: qty, tif: s.postOnly === false ? 'gtc' : 'gtx', tag: side === 'buy' ? 'bid' : 'ask', ...(adds ? {} : { reduceOnly: true }) });
     }
     a.k.mguard = guardedAt;
     if (pull.length) await this.cancelChildren(a, m, pull);
@@ -2304,7 +2322,7 @@ export class AlgoRuntime {
       // Its size: a level's own (what is left of it after a partial fill, or a counterpart for what filled), else the grid's.
       const qty = this.gridLevelQty(a, i, p, m);
       if (qty < minChildQty(m, p) - 1e-12) continue;
-      send.push({ side: want, price: p, quantity: qty, tif: 'gtx', tag: `grid ${i + 1}/${n}` });
+      send.push({ side: want, price: p, quantity: qty, tif: (a.spec as { postOnly?: false }).postOnly === false ? 'gtc' : 'gtx', tag: `grid ${i + 1}/${n}` });
     }
     if (pull.length) await this.cancelChildren(a, m, pull);
     // One signed batch a step, at most 50 orders (the rest the next step).

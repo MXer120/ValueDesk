@@ -206,6 +206,35 @@ function algoPatch(raw: unknown): AlgoUpdatePatch {
     if (r.news !== null && (typeof r.news !== 'object' || Array.isArray(r.news))) throw new ApiError(400, 'patch', 'news must be an object or null.');
     out.news = r.news as AlgoUpdatePatch['news'];
   }
+  // The rest of a bot's settings (owner 2026-11-08: everything saves in place): their shape here, their values judged
+  // by the spec parser (AlgoRuntime.update).
+  if (r.ref !== undefined) {
+    if (r.ref !== null && r.ref !== 'binance') throw new ApiError(400, 'patch', 'ref must be binance or null.');
+    out.ref = r.ref as 'binance' | null;
+  }
+  for (const k of ['noFair', 'postOnly'] as const) {
+    if (r[k] === undefined) continue;
+    if (typeof r[k] !== 'boolean') throw new ApiError(400, 'patch', `${k} must be true or false.`);
+    out[k] = r[k] as boolean;
+  }
+  for (const k of ['pauseAfter', 'pauseMs', 'leverage'] as const) {
+    if (r[k] === undefined) continue;
+    if (r[k] !== null && !(typeof r[k] === 'number' && Number.isFinite(r[k]) && (r[k] as number) > 0)) throw new ApiError(400, 'patch', `${k} must be a positive number or null.`);
+    out[k] = r[k] as number | null;
+  }
+  if (r.marginMode !== undefined) {
+    if (r.marginMode !== null && r.marginMode !== 'cross' && r.marginMode !== 'isolated') throw new ApiError(400, 'patch', 'marginMode must be cross, isolated or null.');
+    out.marginMode = r.marginMode as 'cross' | 'isolated' | null;
+  }
+  for (const k of ['low', 'high'] as const) {
+    if (r[k] === undefined) continue;
+    if (!(typeof r[k] === 'number' && Number.isFinite(r[k]) && (r[k] as number) > 0)) throw new ApiError(400, 'patch', `${k} must be a positive number.`);
+    out[k] = r[k] as number;
+  }
+  if (r.spacing !== undefined) {
+    if (r.spacing !== 'linear' && r.spacing !== 'geometric') throw new ApiError(400, 'patch', 'spacing must be linear or geometric.');
+    out.spacing = r.spacing;
+  }
   return out;
 }
 

@@ -331,6 +331,8 @@ function botLimits(o: Obj, e: Errors, paper: boolean): BotLimits {
     maxLossUsd,
     endAt: time(o, 'endAt', 'End time', e),
     onStop: oneOf(o, 'onStop', 'When it stops', ['close', 'keep'] as const, 'close', e),
+    // Post-only unless switched off (kept out of the spec while on, so a spec from before reads the same).
+    ...(o.postOnly === false ? { postOnly: false as const } : o.postOnly === undefined || o.postOnly === true || o.postOnly === null ? {} : (e.postOnly = 'Post-only is on or off (true or false).', {})),
   };
 }
 

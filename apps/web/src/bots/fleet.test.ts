@@ -139,7 +139,7 @@ test('a read sent before the last action on a bot keeps the bot as the action le
   assert.equal(keepActed([stale, other], [stopped], 900, acted)[1], other);
 });
 
-test('settings: a rename, loss limit, run time or size updates in place; a market, kind or leverage change restarts', () => {
+test('settings: everything updates in place (owner 2026-11-08), leverage and a grid range included; a market or kind change restarts', () => {
   const base = { kind: 'mm', symbol: 'BTC-USD', paper: false, label: null, orderUsd: 20, maxLossUsd: 50, onStop: 'close', stillBps: 2, stillMs: 60_000 };
   assert.deepEqual(inPlacePatch(base, { ...base, label: 'Mine', maxLossUsd: 80 }, false), { label: 'Mine', maxLossUsd: 80 });
   assert.deepEqual(inPlacePatch(base, { ...base, endAt: 123 }, true), { endAt: 123 });
@@ -147,11 +147,12 @@ test('settings: a rename, loss limit, run time or size updates in place; a marke
   const { stillBps: _a, stillMs: _b, ...noGate } = base;
   assert.deepEqual(inPlacePatch(base, noGate, false), { stillBps: 0, stillMs: 0 }, 'the gate off');
   assert.equal(inPlacePatch(base, { ...base, symbol: 'ETH-USD' }, false), null);
-  assert.equal(inPlacePatch(base, { ...base, leverage: 3 }, false), null);
+  assert.deepEqual(inPlacePatch(base, { ...base, leverage: 3 }, false), { leverage: 3 });
+  assert.equal(inPlacePatch(base, { ...base, paper: true }, false), null, 'practice and real are two bots');
   assert.equal(inPlacePatch(base, { ...base, kind: 'grid' }, false), null);
   assert.equal(inPlacePatch(base, base, false), null, 'nothing changed');
   const grid = { kind: 'grid', symbol: 'BTC-USD', low: 1, high: 2, levels: 10, orderUsd: 20 };
-  assert.equal(inPlacePatch(grid, { ...grid, levels: 12 }, false), null, "a grid's levels restart it");
+  assert.deepEqual(inPlacePatch(grid, { ...grid, levels: 12, low: 1.2 }, false), { levels: 12, low: 1.2 }, "a grid's range and levels save in place");
   assert.deepEqual(inPlacePatch(grid, { ...grid, orderUsd: 30 }, false), { orderUsd: 30 });
 });
 

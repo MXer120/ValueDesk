@@ -186,6 +186,9 @@ export function BotSettings({ d, set, range, mark, liveAllowed, noLead, hidePrac
               <Row label="Levels">
                 <Segmented label="Levels" value={[5, 10, 20].includes(d.levels) ? String(d.levels) : 'x'} onChange={(v) => v !== 'x' && set({ levels: Number(v) })} options={[{ value: '5', label: '5' }, { value: '10', label: '10' }, { value: '20', label: '20' }, ...([5, 10, 20].includes(d.levels) ? [] : [{ value: 'x', label: String(d.levels) }])]} />
               </Row>
+              <Row label={<Term t="postOnly">Order type</Term>} tag={<R10Tag on={d.postOnly} reset={() => set({ postOnly: true })} />} hint={d.postOnly ? 'Post-only: every order rests in the book and pays the maker fee. One that would trade at once is refused by SoDEX and placed again.' : 'Limit: an order that crosses the book trades at once as a taker and pays the taker fee.'}>
+                <Segmented label="Order type" value={d.postOnly ? 'post' : 'limit'} onChange={(v) => set({ postOnly: v === 'post' })} options={[{ value: 'post', label: 'Post-only' }, { value: 'limit', label: 'Limit (may take)' }]} />
+              </Row>
             </>
           )}
           <Row label="Order size" hint={(mark && mark > 0) || sizeNotes.length ? <>{mark && mark > 0 ? `≈ ${(d.orderUsd / mark).toPrecision(3)} ${d.symbol.replace(/-USD$/, '')} per order.` : null}{sizeNotes.map((n) => <span key={n}> {n}</span>)}</> : undefined}>
@@ -280,6 +283,9 @@ export function BotSettings({ d, set, range, mark, liveAllowed, noLead, hidePrac
               </Row>
               <Row label="Pause on fast moves" tag={<R10Tag on={d.moveGuard === 0} reset={() => set({ moveGuard: 0 })} />} hint="The side the price runs into waits once it moved this many steps in 2 seconds.">
                 <NumberField label="Ticks" value={d.moveGuard} onChange={(v) => set({ moveGuard: Math.max(0, Math.min(100, v ?? 0)) })} unit="ticks" placeholder="Off" />
+              </Row>
+              <Row label={<Term t="postOnly">Order type</Term>} tag={<R10Tag on={d.postOnly} reset={() => set({ postOnly: true })} />} hint={d.postOnly ? 'Post-only: every order rests in the book and pays the maker fee. One that would trade at once is refused by SoDEX and placed again.' : 'Limit: an order that crosses the book trades at once as a taker and pays the taker fee.'}>
+                <Segmented label="Order type" value={d.postOnly ? 'post' : 'limit'} onChange={(v) => set({ postOnly: v === 'post' })} options={[{ value: 'post', label: 'Post-only' }, { value: 'limit', label: 'Limit (may take)' }]} />
               </Row>
             </div>
           )}

@@ -149,6 +149,8 @@ export interface BotDraft {
    * free in the account (autoLeverage). Off once the user sets one by hand; a running bot's draft starts off.
    */
   leverageAuto: boolean;
+  /** Quotes and levels post-only (maker only, the default); off: plain limits that may take (owner 2026-11-08). */
+  postOnly: boolean;
   /* grid */
   rangePct: number;
   low: number | null;
@@ -223,6 +225,7 @@ export function draftFor(strategy: Strategy, preset: PresetId = 'balanced', symb
     maxSpreadBps: 20,
     leverage: null,
     leverageAuto: true,
+    postOnly: true,
     offsetTicks: -1,
     orderUsd: 50,
     maxInventoryUsd: 200,
@@ -274,7 +277,7 @@ const roundSig = (x: number): number => Number(x.toPrecision(6));
 
 /** The spec the wallet signs (parseAlgoSpec form; the executor checks it again). */
 export function specOf(d: BotDraft, mark: number | null): Record<string, unknown> {
-  const base = { symbol: d.symbol, paper: d.paper, label: d.label.trim() || null, ...(d.leverage !== null ? { leverage: d.leverage } : {}) };
+  const base = { symbol: d.symbol, paper: d.paper, label: d.label.trim() || null, ...(d.leverage !== null ? { leverage: d.leverage } : {}), ...(d.postOnly === false ? { postOnly: false } : {}) };
   const limits = { volumeTargetUsd: d.volumeTargetUsd, maxLossUsd: d.maxLossUsd, onStop: d.onStop };
   if (d.strategy === 'market') {
     return {
@@ -360,16 +363,16 @@ export function draftOfSpec(s: AlgoSpec, now = Date.now()): BotDraft {
       ...draftFor('market', 'balanced', s.symbol), label: s.label ?? '', paper: s.paper, offsetTicks: s.offsetTicks, orderUsd: s.orderUsd, maxInventoryUsd: s.maxInventoryUsd,
       skewTicks: s.skewTicks, chaseTicks: s.chaseTicks, minRepriceMs: s.minRepriceMs, restS: s.restMs / 1000,
       gate: (s.stillBps ?? 0) > 0, gateBps: s.stillBps ?? GATE_DEFAULT.gateBps, gateWindowS: (s.stillMs ?? GATE_DEFAULT.gateWindowS * 1000) / 1000,
-      maxSpreadBps: s.maxSpreadBps, leverage: s.leverage ?? null, volumeTargetUsd: s.volumeTargetUsd, maxLossUsd: s.maxLossUsd, onStop: s.onStop,
+      maxSpreadBps: s.maxSpreadBps, leverage: s.leverage ?? null, leverageAuto: false, postOnly: (s as { postOnly?: false }).postOnly !== false, volumeTargetUsd: s.volumeTargetUsd, maxLossUsd: s.maxLossUsd, onStop: s.onStop,
       refBps: s.refBps ?? 0, pullBps: s.pullBps ?? 0, ladder: s.levels ?? 1, moveGuard: s.moveGuard ?? 0, noFair: !!s.noFair,
       ...safeguardsOf(s, now),
     };
   }
   if (s.kind === 'mm') {
-    return { ...draftFor(s.ref ? 'lead' : 'maker', 'balanced', s.symbol), refBps: s.refBps ?? 0, pullBps: s.pullBps ?? 0, label: s.label ?? '', paper: s.paper, offsetTicks: s.offsetTicks, orderUsd: s.orderUsd, maxInventoryUsd: s.maxInventoryUsd, skewTicks: s.skewTicks, chaseTicks: s.chaseTicks, minRepriceMs: s.minRepriceMs, edgeBps: s.edgeBps ?? 0, queueGuard: s.queueGuard ?? 0, ladder: s.levels ?? 1, moveGuard: s.moveGuard ?? 0, volumeTargetUsd: s.volumeTargetUsd, maxLossUsd: s.maxLossUsd, onStop: s.onStop, maxSpreadBps: s.maxSpreadBps ?? null, leverage: s.leverage ?? null, leverageAuto: false, ...safeguardsOf(s, now) };
+    return { ...draftFor(s.ref ? 'lead' : 'maker', 'balanced', s.symbol), refBps: s.refBps ?? 0, pullBps: s.pullBps ?? 0, label: s.label ?? '', paper: s.paper, offsetTicks: s.offsetTicks, orderUsd: s.orderUsd, maxInventoryUsd: s.maxInventoryUsd, skewTicks: s.skewTicks, chaseTicks: s.chaseTicks, minRepriceMs: s.minRepriceMs, edgeBps: s.edgeBps ?? 0, queueGuard: s.queueGuard ?? 0, ladder: s.levels ?? 1, moveGuard: s.moveGuard ?? 0, volumeTargetUsd: s.volumeTargetUsd, maxLossUsd: s.maxLossUsd, onStop: s.onStop, maxSpreadBps: s.maxSpreadBps ?? null, leverage: s.leverage ?? null, leverageAuto: false, postOnly: (s as { postOnly?: false }).postOnly !== false, ...safeguardsOf(s, now) };
   }
   if (s.kind === 'grid') {
-    return { ...draftFor('grid', 'balanced', s.symbol), label: s.label ?? '', paper: s.paper, leverage: s.leverage ?? null, leverageAuto: false, low: s.low, high: s.high, levels: s.levels, orderUsd: s.orderUsd, volumeTargetUsd: s.volumeTargetUsd, maxLossUsd: s.maxLossUsd, onStop: s.onStop, outOfRange: s.outOfRange, maxSpreadBps: s.maxSpreadBps, runHours: runHoursLeft(s.endAt, now), endAt: runHoursLeft(s.endAt, now) !== null ? s.endAt : null, runHoursAt: runHoursLeft(s.endAt, now) };
+    return { ...draftFor('grid', 'balanced', s.symbol), label: s.label ?? '', paper: s.paper, leverage: s.leverage ?? null, leverageAuto: false, postOnly: (s as { postOnly?: false }).postOnly !== false, low: s.low, high: s.high, levels: s.levels, orderUsd: s.orderUsd, volumeTargetUsd: s.volumeTargetUsd, maxLossUsd: s.maxLossUsd, onStop: s.onStop, outOfRange: s.outOfRange, maxSpreadBps: s.maxSpreadBps, runHours: runHoursLeft(s.endAt, now), endAt: runHoursLeft(s.endAt, now) !== null ? s.endAt : null, runHoursAt: runHoursLeft(s.endAt, now) };
   }
   return draftFor('maker', 'balanced', s.symbol);
 }
