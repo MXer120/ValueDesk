@@ -52,6 +52,7 @@
  * a minute to while it reads.
  */
 import { VENUES, type Venue } from '../valuedesk/types.js';
+import { activeAccountsAsync } from './activeScan.js';
 import type { LbSnapshot } from '../valuedesk/hyperliquid/leaderboard.js';
 import type { Pacer } from '../valuedesk/extra/http.js';
 import {
@@ -1395,7 +1396,7 @@ export class CohortTracker {
       for (const [a, p] of s.pnlAll(venue)) put(a, { pnl: p });
       for (const [a, v] of s.accountValues(venue)) put(a, { equity: v });
       if (venue === 'tradexyz' || venue === 'arcus') {
-        for (const a of s.activeAccounts(venue, { day: dayOf(this.d.now() - 30 * DAY_MS) }, 1, 50_000)) put(a.acct, {});
+        for (const a of await activeAccountsAsync(s, venue, { day: dayOf(this.d.now() - 30 * DAY_MS) }, 1, 50_000)) put(a.acct, {});
       }
       // Each range's PnL where the venue's lists (or the index) have a fresh one.
       const now = this.d.now();

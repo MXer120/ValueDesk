@@ -22,6 +22,7 @@
  * Nothing here signs, trades or moves funds; every request is a public read.
  */
 import { WalletBackfill, WalletHistoryDb } from './walletHistory.js';
+import { activeAccountsAsync } from './activeScan.js';
 import { pageSource } from '../history.js';
 import { hlInfo, hlLeaderboard } from '../valuedesk/hyperliquid/index.js';
 import type { LbSnapshot } from '../valuedesk/hyperliquid/leaderboard.js';
@@ -1529,7 +1530,7 @@ export class Indexer {
     if (now - (this.lookupScanAt[w] ?? 0) < LOOKUP_SCAN_MS) return;
     this.lookupScanAt[w] = now;
     const from = windowStart(w, now);
-    const active = this.store.activeAccounts('sodex', HOUR_WINDOWS.has(w) ? { hour: hourOf(from) } : { day: dayOf(from) }, 1, LOOKUP_ACTIVE);
+    const active = await activeAccountsAsync(this.store, 'sodex', HOUR_WINDOWS.has(w) ? { hour: hourOf(from) } : { day: dayOf(from) }, 1, LOOKUP_ACTIVE);
     if (!active.length) return;
     const ids = active.map((a) => Number(a.acct)).filter((n) => Number.isInteger(n) && n > 0);
     const known = this.store.accountIds('sodex');

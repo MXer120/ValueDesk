@@ -28,6 +28,7 @@ import {
   type ArcusLbWindow,
 } from '../../valuedesk/extra/arcus.js';
 import { Lane } from '../lanes.js';
+import { activeAccountsAsync } from '../activeScan.js';
 import { MIN_ROW_T, type FillRow } from '../store.js';
 import { ArcusStream, type ArcusWsTrade, type Print } from '../streams.js';
 import { dayOf, DAY_MS } from '../windows.js';
@@ -120,7 +121,7 @@ export class ArcusVenue implements ExtVenue {
     return WINDOWS_WITH_PNL.includes(window) && this.listAt > 0 && this.portfolios > 0 && this.lane.countPrefix('pf:') === 0;
   }
 
-  refresh(now: number): void {
+  async refresh(now: number): Promise<void> {
     if (now - this.listAt >= LIST_EVERY_MS) {
       this.listAt = now;
       for (const w of ['24h', '30d', 'all'] as ArcusLbWindow[]) {
@@ -143,7 +144,7 @@ export class ArcusVenue implements ExtVenue {
       }
     }
     // Everyone the stream saw in the last 30 days, most volume first, plus the lists.
-    const active = this.ctx.store.activeAccounts('arcus', { day: dayOf(now - 30 * DAY_MS) }, 1, MAX_TRADERS).map((a) => a.acct);
+    const active = (await activeAccountsAsync(this.ctx.store, 'arcus', { day: dayOf(now - 30 * DAY_MS) }, 1, MAX_TRADERS)).map((a) => a.acct);
     const traders = [...new Set([...this.listed, ...active])].slice(0, MAX_TRADERS);
     traders.forEach((address, i) => {
       if (now - (this.portfolioAt.get(address) ?? 0) < PORTFOLIO_TTL_MS) return;

@@ -28,13 +28,17 @@ export type LiqRead =
   // 4-11 s, about 200 stalls an hour with the copy warmer on). They run on their own thread ('fills' lane), not behind
   // the heatmap's reads.
   | { op: 'fillRows'; venue: Venue; address: string; fromT: number; toT: number; limit: number; beforeId?: string }
-  | { op: 'fillsNet'; venue: Venue; address: string; fromT: number; toT: number };
+  | { op: 'fillsNet'; venue: Venue; address: string; fromT: number; toT: number }
+  // The indexer's aggregate over a window of activity rows (2026-11-08: trade.xyz's all-time board and the cohort
+  // members summed every account of the window on the indexer's thread, 33-74 s stalls). Its own lane ('scan').
+  | { op: 'activeAccounts'; venue: Venue; from: { hour: number } | { day: number }; minTrades: number; limit: number };
 
 type Answer<R extends LiqRead> = R extends { op: 'list' } ? Array<{ t: number; n: number }>
   : R extends { op: 'coins' } ? string[]
   : R extends { op: 'metas' } ? Array<MetaWire | null>
   : R extends { op: 'fillRows' } ? WalletFillRow[]
   : R extends { op: 'fillsNet' } ? Array<{ symbol: string; net: number }>
+  : R extends { op: 'activeAccounts' } ? Array<{ acct: string; trades: number; volume: number }>
   : Array<string | null>;
 
 /** liqTiles.ts registers how a meta is worked out (no import cycle from here). */
@@ -70,6 +74,7 @@ export function runRead(s: IndexStore, r: LiqRead): unknown {
     // Plain objects: node:sqlite rows have a null prototype, which posts fine but is spread to be safe.
     case 'fillRows': return s.walletFillRows(r.venue, r.address, r.fromT, r.toT, r.limit, r.beforeId).map((x) => ({ ...x }));
     case 'fillsNet': return s.fillsNetBySymbol(r.venue, r.address, r.fromT, r.toT).map((x) => ({ ...x }));
+    case 'activeAccounts': return s.activeAccounts(r.venue, r.from, r.minTrades, r.limit);
   }
 }
 
@@ -94,7 +99,7 @@ if (!isMainThread && (workerData as { liqReadThread?: boolean } | null)?.liqRead
 // --- the API side ------------------------------------------------------------------------------
 
 /** Each lane has its own thread and connection: the copy fills never wait behind a heatmap read, nor it behind them. */
-export type ReadLane = 'liq' | 'fills';
+export type ReadLane = 'liq' | 'fills' | 'scan';
 type Waiting = { ok: (v: unknown) => void; no: (e: Error) => void; timer: NodeJS.Timeout };
 const lanes = new Map<ReadLane, { worker: Worker | null; waiting: Map<number, Waiting> }>();
 let nextId = 1;
@@ -151,7 +156,7 @@ export function liqRead<R extends LiqRead>(read: R, inline: () => IndexStore | n
     const s = inline();
     return Promise.resolve(s ? (runRead(s, read) as Answer<R>) : null);
   }
-  const l: ReadLane = read.op === 'fillRows' || read.op === 'fillsNet' ? 'fills' : 'liq';
+  const l: ReadLane = read.op === 'fillRows' || read.op === 'fillsNet' ? 'fills' : read.op === 'activeAccounts' ? 'scan' : 'liq';
   const x = laneOf(l);
   const id = nextId++;
   const started = Date.now();
