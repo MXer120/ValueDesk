@@ -69,7 +69,14 @@ export async function signCopy(provider: Eip1193Provider, owner: string, executo
   return { ...req, signature };
 }
 
-const sessionKey = (base: string, owner: string) => `vd.copy.session:${base}:${owner.toLowerCase()}`;
+/**
+ * Where a read token is kept: per base, executor and wallet (owner 2026-11-08: "i need to sign in multiple times a
+ * day"). Keyed by the executor's id too, so two executors behind one base (production and the test box on localhost,
+ * or an executor replaced behind the same address) each keep their own token instead of discarding the other's.
+ */
+const sessionKey = (base: string, owner: string, id?: string | null) => `vd.copy.session:${base}${id ? `#${id}` : ''}:${owner.toLowerCase()}`;
+/** The id of the executor last seen behind a base, so a token can be looked up before /info answers again. */
+const lastIdKey = (base: string) => `vd.copy.exec:${base}`;
 
 export class ExecutorClient {
   private at: string;
@@ -126,7 +133,21 @@ export class ExecutorClient {
     return data as T;
   }
 
-  info = () => this.call<ExecutorInfo>('GET', '/info');
+  info = async (): Promise<ExecutorInfo> => {
+    const i = await this.call<ExecutorInfo>('GET', '/info');
+    if (i?.executorId) {
+      this.id = i.executorId;
+      try { localStorage.setItem(lastIdKey(this.base), i.executorId); } catch { /* private mode */ }
+    }
+    return i;
+  };
+
+  /** The executor behind this base, as its /info last said (null until it answered). */
+  private id: string | null = null;
+  private idNow(): string | null {
+    if (this.id) return this.id;
+    try { return localStorage.getItem(lastIdKey(this.base)); } catch { return null; }
+  }
 
   /* ---------------------------------------------------------- session ----- */
 
@@ -135,9 +156,17 @@ export class ExecutorClient {
   token(owner: string): string | null {
     try {
       // A token from before 2026-11-08 sits in this tab's sessionStorage: carried over once, no new signature.
+      const id = this.idNow();
+      const key = sessionKey(this.base, owner, id);
+      // Carried over once, no new signature: a token from before 2026-11-08 (this tab's sessionStorage), or one kept
+      // without the executor's id (it is tried, and dropped if the executor refuses it).
       const old = sessionStorage.getItem(sessionKey(this.base, owner));
-      if (old) { localStorage.setItem(sessionKey(this.base, owner), old); sessionStorage.removeItem(sessionKey(this.base, owner)); }
-      const raw = localStorage.getItem(sessionKey(this.base, owner));
+      if (old) { localStorage.setItem(key, old); sessionStorage.removeItem(sessionKey(this.base, owner)); }
+      if (id) {
+        const legacy = localStorage.getItem(sessionKey(this.base, owner));
+        if (legacy) { if (!localStorage.getItem(key)) localStorage.setItem(key, legacy); localStorage.removeItem(sessionKey(this.base, owner)); }
+      }
+      const raw = localStorage.getItem(key);
       if (!raw) return null;
       const g = JSON.parse(raw) as SessionGrant;
       if (!(g.expiresAt > Date.now() + 60_000)) return null;
@@ -151,7 +180,7 @@ export class ExecutorClient {
   private forget(): void {
     if (!this.ownerCache) return;
     try {
-      localStorage.removeItem(sessionKey(this.base, this.ownerCache));
+      localStorage.removeItem(sessionKey(this.base, this.ownerCache, this.idNow()));
     } catch {
       /* private mode */
     }
@@ -164,7 +193,7 @@ export class ExecutorClient {
     const request = await signCopy(provider, owner, executorId, 'session', {});
     const g = await this.call<SessionGrant>('POST', '/session', { body: { request }, pairing });
     try {
-      localStorage.setItem(sessionKey(this.base, owner), JSON.stringify(g));
+      localStorage.setItem(sessionKey(this.base, owner, this.id ?? executorId), JSON.stringify(g));
     } catch {
       /* storage refused: one signature per load */
     }
