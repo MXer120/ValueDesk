@@ -284,6 +284,11 @@ export interface NewAlgo {
    */
   after?: string;
   takeOver?: string;
+  /**
+   * What was checked before it started (the executor's start checks, owner 2026-11-08: the user sees a bot's checks
+   * in its activity, as one line each): written to its log right after "placed".
+   */
+  checks?: readonly string[];
 }
 
 const LIVE: ReadonlySet<ChildOrder['state']> = new Set(['sending', 'open', 'unknown']);
@@ -787,6 +792,7 @@ export class AlgoRuntime {
     this.syncWatch();
     const what = spec.kind === 'basket' ? `Basket of ${spec.legs.length} markets` : `${ALGO_NAMES[spec.kind]} ${spec.side === 'buy' ? 'buy' : 'sell'} on ${spec.symbol}`;
     await this.event(a, 'status', `${what} placed${spec.paper ? ' (paper: nothing is sent)' : ''}.`);
+    for (const c of n.checks ?? []) await this.event(a, 'info', `Check passed: ${c}`);
     this.host.onChange?.(a.id);
     return a;
   }
@@ -3338,7 +3344,12 @@ export class AlgoRuntime {
     if (sink && opening && lev !== null && this.leverageSet.get(`${a.id}|${m.name}`) !== want) {
       this.leverageSet.set(`${a.id}|${m.name}`, want!);
       const refused = await sink.setLeverage(a, m, lev, s.marginMode ?? 'cross').then(
-        () => { delete a.k.levBack; delete a.k.levRetryAt; return null; },
+        async () => {
+          delete a.k.levBack;
+          delete a.k.levRetryAt;
+          if (s.bot) await this.event(a, 'info', `Check passed: leverage ${lev}x ${s.marginMode ?? 'cross'} set on ${m.name}.`);
+          return null;
+        },
         async (e: unknown) => {
           // Not set: an opening child asks again after a wait (a minute, doubling to 15).
           this.leverageSet.delete(`${a.id}|${m.name}`);
@@ -4828,8 +4839,18 @@ export class AlgoRuntime {
     }
   }
 
-  private async event(a: AlgoRecord, kind: AlgoEventKind, text: string, c?: Partial<ChildOrder>, maker?: boolean): Promise<void> {
+  private async event(a: AlgoRecord, kind: AlgoEventKind, raw: string, c?: Partial<ChildOrder>, maker?: boolean): Promise<void> {
     const at = Date.now();
+    // A bot's activity shows plain words for an error (owner 2026-11-08): the text an exchange or a server gave stays in
+    // the executor's own log, never on the page.
+    let text = raw;
+    if (a.spec.bot && kind === 'error') {
+      const m = /^(.*?(?:failed|not set|refused [^:]*|rejected [^:]*|could not be cancelled)): (.+)$/i.exec(raw);
+      if (m) {
+        text = /^step failed$/i.test(m[1]!) ? 'Something went wrong on our side; it goes on, and we see the details in our server log.' : `${m[1]}: ${refusalWords(refusalKind(m[2]))}.`;
+        this.host.log.warn('bot: error', { algo: a.id, owner: a.owner, symbol: a.spec.symbol, text: raw });
+      }
+    }
     const e: AlgoEvent = {
       // Sorts by time, then by the order it was written: lines of one millisecond keep their order.
       id: `e${at.toString(36)}${(++this.eventSeq).toString(36).padStart(6, '0')}${randomId().slice(0, 4)}`,

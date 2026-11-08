@@ -1937,10 +1937,22 @@ export class ExecutorService {
         throw new ApiError(409, 'restart', `The old bot could not be stopped: ${e instanceof Error ? e.message : String(e)}`);
       }
     }
+    // The checks it passed, for its activity (owner 2026-11-08: a status channel per bot; no server details there).
+    const checks: string[] = [];
+    if (spec.kind === 'mm' || spec.kind === 'grid') {
+      checks.push(`${spec.symbol} is trading on SoDEX, and the order size is at least its minimum order.`);
+      if (!spec.paper) {
+        checks.push('Your trading key is approved and your SoDEX account was found.');
+        checks.push('Beta access and a place on the servers.');
+        checks.push(`Nothing else of yours trades ${spec.symbol} (no other bot, position, copy or algo order).`);
+        checks.push('Your free margin covers what it sets aside.');
+      }
+    }
     let a: AlgoRecord;
     try {
       const t = this.db.terms(owner);
       a = await this.algos.add({
+        checks,
         owner, accountId, mode: this.cfg.kind, spec, consent, seed, country: t?.country ?? null, observedCountry: normaliseCountry(ctx.viewerCountry),
         ...(old && how === 'takeover' ? { takeOver: old.id } : old && !FINAL_STATUSES.has(old.status) ? { after: old.id } : {}),
       });
