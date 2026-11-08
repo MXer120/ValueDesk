@@ -12,7 +12,7 @@
  * they ask for it, read inline as before.
  */
 import { Worker, isMainThread, parentPort, workerData } from 'node:worker_threads';
-import type { IndexStore } from './store.js';
+import type { IndexStore, WalletFillRow } from './store.js';
 import type { Venue } from '../valuedesk/types.js';
 
 /** A snapshot's meta without its time and length (liqTiles.ts metaOfData). */
@@ -23,11 +23,18 @@ export type LiqRead =
   | { op: 'coins' }
   | { op: 'snaps'; coin: string; ts: number[] }
   /** Only the metas, parsed where read: the snapshots' JSON never reaches the asking thread. */
-  | { op: 'metas'; coin: string; venues: Venue[]; ts: number[] };
+  | { op: 'metas'; coin: string; venues: Venue[]; ts: number[] }
+  // The copy page's fills (walletFills.ts, 2026-11-08: a busy wallet's rows not in the page cache held the API thread
+  // 4-11 s, about 200 stalls an hour with the copy warmer on). They run on their own thread ('fills' lane), not behind
+  // the heatmap's reads.
+  | { op: 'fillRows'; venue: Venue; address: string; fromT: number; toT: number; limit: number; beforeId?: string }
+  | { op: 'fillsNet'; venue: Venue; address: string; fromT: number; toT: number };
 
 type Answer<R extends LiqRead> = R extends { op: 'list' } ? Array<{ t: number; n: number }>
   : R extends { op: 'coins' } ? string[]
   : R extends { op: 'metas' } ? Array<MetaWire | null>
+  : R extends { op: 'fillRows' } ? WalletFillRow[]
+  : R extends { op: 'fillsNet' } ? Array<{ symbol: string; net: number }>
   : Array<string | null>;
 
 /** liqTiles.ts registers how a meta is worked out (no import cycle from here). */
@@ -60,6 +67,9 @@ export function runRead(s: IndexStore, r: LiqRead): unknown {
       const f = metaOf;
       return r.ts.map((t) => { const d = s.liqHistAt(r.coin, t); return d === null ? null : f(d, r.venues); });
     }
+    // Plain objects: node:sqlite rows have a null prototype, which posts fine but is spread to be safe.
+    case 'fillRows': return s.walletFillRows(r.venue, r.address, r.fromT, r.toT, r.limit, r.beforeId).map((x) => ({ ...x }));
+    case 'fillsNet': return s.fillsNetBySymbol(r.venue, r.address, r.fromT, r.toT).map((x) => ({ ...x }));
   }
 }
 
@@ -83,11 +93,19 @@ if (!isMainThread && (workerData as { liqReadThread?: boolean } | null)?.liqRead
 
 // --- the API side ------------------------------------------------------------------------------
 
-let worker: Worker | null = null;
+/** Each lane has its own thread and connection: the copy fills never wait behind a heatmap read, nor it behind them. */
+export type ReadLane = 'liq' | 'fills';
+type Waiting = { ok: (v: unknown) => void; no: (e: Error) => void; timer: NodeJS.Timeout };
+const lanes = new Map<ReadLane, { worker: Worker | null; waiting: Map<number, Waiting> }>();
 let nextId = 1;
-const waiting = new Map<number, { ok: (v: unknown) => void; no: (e: Error) => void; timer: NodeJS.Timeout }>();
-/** Reads done and failed, and the longest, for the health answer. */
+/** Reads done and failed, and the longest, for the health answer (both lanes). */
 export const liqReadStats = { done: 0, failed: 0, restarts: 0, longestMs: 0 };
+
+function laneOf(l: ReadLane) {
+  let x = lanes.get(l);
+  if (!x) { x = { worker: null, waiting: new Map() }; lanes.set(l, x); }
+  return x;
+}
 
 function threadOn(): boolean {
   const v = process.env.VALUESCAN_LIQ_THREAD;
@@ -96,66 +114,73 @@ function threadOn(): boolean {
   return !process.env.NODE_TEST_CONTEXT;
 }
 
-function failAll(why: string): void {
-  for (const r of waiting.values()) { clearTimeout(r.timer); r.no(new Error(why)); }
-  waiting.clear();
+function failAll(l: ReadLane, why: string): void {
+  const x = laneOf(l);
+  for (const r of x.waiting.values()) { clearTimeout(r.timer); r.no(new Error(why)); }
+  x.waiting.clear();
 }
 
-function thread(): Worker {
-  if (worker) return worker;
-  const w = new Worker(new URL(import.meta.url), { workerData: { liqReadThread: true }, resourceLimits: { maxOldGenerationSizeMb: 512 } });
-  worker = w;
+function thread(l: ReadLane): Worker {
+  const x = laneOf(l);
+  if (x.worker) return x.worker;
+  const w = new Worker(new URL(import.meta.url), { workerData: { liqReadThread: true, lane: l }, resourceLimits: { maxOldGenerationSizeMb: 512 } });
+  x.worker = w;
   w.unref();
   w.on('message', (m: { id: number; rows?: unknown; error?: string }) => {
-    const r = waiting.get(m.id);
+    const r = x.waiting.get(m.id);
     if (!r) return;
-    waiting.delete(m.id);
+    x.waiting.delete(m.id);
     clearTimeout(r.timer);
     if (m.error !== undefined) { liqReadStats.failed++; r.no(new Error(m.error)); return; }
     liqReadStats.done++;
     r.ok(m.rows);
   });
   const gone = () => {
-    if (worker !== w) return;
-    worker = null;
-    failAll('the snapshot reader stopped');
+    if (x.worker !== w) return;
+    x.worker = null;
+    failAll(l, 'the index reader stopped');
   };
   w.on('error', gone);
   w.on('exit', gone);
   return w;
 }
 
-/** A read of the snapshot table off this thread (null: no index file yet). */
+/** A read of the index off this thread (null: no index file yet). Fills reads go on the 'fills' lane. */
 export function liqRead<R extends LiqRead>(read: R, inline: () => IndexStore | null): Promise<Answer<R> | null> {
   if (!threadOn()) {
     const s = inline();
     return Promise.resolve(s ? (runRead(s, read) as Answer<R>) : null);
   }
+  const l: ReadLane = read.op === 'fillRows' || read.op === 'fillsNet' ? 'fills' : 'liq';
+  const x = laneOf(l);
   const id = nextId++;
   const started = Date.now();
   return new Promise((ok, no) => {
     const timer = setTimeout(() => {
       liqReadStats.restarts++;
-      const w = worker;
-      worker = null;
-      failAll('the snapshot read took too long');
+      const w = x.worker;
+      x.worker = null;
+      failAll(l, 'the index read took too long');
       void w?.terminate();
     }, READ_MS);
     timer.unref();
-    waiting.set(id, {
+    x.waiting.set(id, {
       ok: (v) => { liqReadStats.longestMs = Math.max(liqReadStats.longestMs, Date.now() - started); ok(v as Answer<R> | null); },
       no, timer,
     });
-    thread().postMessage({ id, read });
+    thread(l).postMessage({ id, read });
   });
 }
 
-/** Tests: stop the thread. */
+/** Tests: stop the threads. */
 export async function stopLiqReadThread(): Promise<void> {
-  const w = worker;
-  worker = null;
-  failAll('stopped');
-  await w?.terminate();
+  const ws: Worker[] = [];
+  for (const [l, x] of lanes) {
+    if (x.worker) ws.push(x.worker);
+    x.worker = null;
+    failAll(l, 'stopped');
+  }
+  await Promise.all(ws.map((w) => w.terminate()));
 }
 
 /** Tests: the octet_length fallback forgotten. */

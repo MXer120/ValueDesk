@@ -48,6 +48,7 @@ import { mkdir, open, readFile, rename } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Venue, VsFill } from '../valuedesk/types.js';
 import { reader } from './reader.js';
+import { liqRead } from './liqReadThread.js';
 import type { HistoryKind, IndexStore, WalletFillRow } from './store.js';
 
 const DAY_MS = 86_400_000;
@@ -55,8 +56,8 @@ export const WALLET_FILLS_TTL_MS = 5 * 60_000;
 /** The most fills one answer carries (the Copy page asks 5,000); a larger ask is left to the venue. */
 export const WALLET_FILLS_MAX = 10_000;
 const CACHE_MAX = 2_000;
-/** Rows per synchronous read (about 150 ms when none is in the page cache). */
-const SLICE = 250;
+/** Rows per read on the fills thread (one message each way; the API thread parses nothing of SQLite's). */
+const SLICE = 1_000;
 
 export type WalletFillsBody =
   | { ok: true; covered: false; reason: string }
@@ -136,7 +137,11 @@ async function readRows(store: IndexStore, venue: Venue, address: string, lower:
   let restSeen = false;
   while (out.length < limit) {
     const n = SLICE;
-    const got: WalletFillRow[] = at ? store.walletFillRows(venue, address, lower, at.t, n, at.id) : store.walletFillRows(venue, address, lower, upper, n);
+    // On the 'fills' read thread (liqReadThread.ts): the API thread only waits, it never runs the statement.
+    const got: WalletFillRow[] = (await liqRead(
+      at ? { op: 'fillRows', venue, address, fromT: lower, toT: at.t, limit: n, beforeId: at.id } : { op: 'fillRows', venue, address, fromT: lower, toT: upper, limit: n },
+      () => store,
+    )) ?? [];
     for (const r of got) {
       if (Number(r.src) === 1) restSeen = true;
       else if (!restSeen) {
@@ -221,7 +226,7 @@ interface Newest {
 const XYZ = 'xyz:';
 /** How far a book may lie from the answer's end for its positions to be said (books are read about hourly). */
 export const POSITIONS_SPAN_MS = 4 * 3_600_000;
-export function positionsAt(store: IndexStore, venue: Venue, address: string, at: number, span: Span): Array<{ symbol: string; side: 'long' | 'short'; size: number }> | null {
+export async function positionsAt(store: IndexStore, venue: Venue, address: string, at: number, span: Span): Promise<Array<{ symbol: string; side: 'long' | 'short'; size: number }> | null> {
   const books: Array<{ dex: 'main' | 'xyz'; book: ReturnType<IndexStore['cohortBook']> }> = venue === 'hyperliquid'
     ? [{ dex: 'main', book: store.cohortBook('hyperliquid', address) }, { dex: 'xyz', book: store.cohortBook('tradexyz', address) }]
     : venue === 'sodex' ? [{ dex: 'main', book: store.cohortBook('sodex', address) }] : [];
@@ -239,7 +244,8 @@ export function positionsAt(store: IndexStore, venue: Venue, address: string, at
       if (mine(sym)) size.set(sym, (size.get(sym) ?? 0) + p.szi);
     }
     const sign = at >= book.at ? 1 : -1;
-    for (const r of store.fillsNetBySymbol(venue, address, Math.min(book.at, at), Math.max(book.at, at))) {
+    const net = (await liqRead({ op: 'fillsNet', venue, address, fromT: Math.min(book.at, at), toT: Math.max(book.at, at) }, () => store)) ?? [];
+    for (const r of net) {
       if (mine(r.symbol)) size.set(r.symbol, (size.get(r.symbol) ?? 0) + sign * r.net);
     }
   }
@@ -251,10 +257,10 @@ export function positionsAt(store: IndexStore, venue: Venue, address: string, at
   return out.sort((a, b) => (a.symbol < b.symbol ? -1 : a.symbol > b.symbol ? 1 : 0));
 }
 
-function withPositions(store: IndexStore, venue: Venue, address: string, n: Newest): Newest {
+async function withPositions(store: IndexStore, venue: Venue, address: string, n: Newest): Promise<Newest> {
   if (!n.covered || n.positionsAt === n.heldTo) return n;
-  let p: ReturnType<typeof positionsAt> = null;
-  try { p = positionsAt(store, venue, address, n.heldTo, n.span); } catch { p = null; }
+  let p: Awaited<ReturnType<typeof positionsAt>> = null;
+  try { p = await positionsAt(store, venue, address, n.heldTo, n.span); } catch { p = null; }
   const positions = p ? JSON.stringify(p) : null;
   return { ...n, positions, positionsAt: n.heldTo, bytes: n.bytes - (n.positions?.length ?? 0) + (positions?.length ?? 0) };
 }
@@ -406,7 +412,7 @@ async function newestOf(store: IndexStore, venue: Venue, address: string, limit:
   } else if (now - cur.at >= REBUILD_MS) {
     // Read whole again behind this answer; this one is topped up meanwhile.
     if (!building.has(`${key}|re`)) {
-      const re = buildNewest(store, venue, address, limit, span, now).then((n) => keep(key, withPositions(store, venue, address, n)));
+      const re = buildNewest(store, venue, address, limit, span, now).then(async (n) => keep(key, await withPositions(store, venue, address, n)));
       building.set(`${key}|re`, re);
       re.catch(() => {}).finally(() => building.delete(`${key}|re`));
     }
@@ -418,7 +424,7 @@ async function newestOf(store: IndexStore, venue: Venue, address: string, limit:
     newest.set(key, cur); // most recently used
     return cur;
   }
-  const kept = job.then((n) => keep(key, withPositions(store, venue, address, n)));
+  const kept = job.then(async (n) => keep(key, await withPositions(store, venue, address, n)));
   building.set(key, kept);
   try {
     return await kept;

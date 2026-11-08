@@ -299,9 +299,9 @@ test('the positions at the answer\'s end: the book plus the fills since (or less
   const { positionsAt, heldSpan } = await import('../src/indexer/walletFills.js');
   const span = heldSpan(store, 'hyperliquid', P)!;
   // At a time before the book's read: the fills between come off it.
-  assert.deepEqual(positionsAt(store, 'hyperliquid', P, bookAt - 2 * 3_600_000, span), [{ symbol: 'BTC', side: 'short', size: 5 }, { symbol: 'ETH', side: 'short', size: 3 }, { symbol: 'xyz:GOLD', side: 'long', size: 4 }]);
+  assert.deepEqual(await positionsAt(store, 'hyperliquid', P, bookAt - 2 * 3_600_000, span), [{ symbol: 'BTC', side: 'short', size: 5 }, { symbol: 'ETH', side: 'short', size: 3 }, { symbol: 'xyz:GOLD', side: 'long', size: 4 }]);
   // A book read after the held span ends: the fills between are not all held - nothing said.
-  assert.equal(positionsAt(store, 'hyperliquid', P, NOW - 60_000, { lo: span.lo, hi: bookAt - 1 }), null);
+  assert.equal(await positionsAt(store, 'hyperliquid', P, NOW - 60_000, { lo: span.lo, hi: bookAt - 1 }), null);
 });
 
 test('saved to disk and read back after a start: the same answer, then topped up from there', async () => {
@@ -326,6 +326,32 @@ test('saved to disk and read back after a start: the same answer, then topped up
     assert.deepEqual(c.fills.map((f: { id: string }) => f.id), ['k3', 'k2', 'k1']);
   } finally {
     W.setWalletFillsDir(null);
+    W.clearWalletFills();
+  }
+});
+
+test('on the fills read thread (production): the same answers byte for byte, and no fills statement runs on the API thread', async () => {
+  const { IndexStore } = await import('../src/indexer/store.js');
+  const W = await import('../src/indexer/walletFills.js');
+  const R = await import('../src/indexer/liqReadThread.js');
+  const urls = [`venue=hyperliquid&address=${HL}&from=${NOW - 30 * DAY}&limit=5000`, `venue=hyperliquid&address=${BUSY}&from=${NOW - 5 * DAY}&limit=5000`, `venue=hyperliquid&address=${BUSY}&from=${NOW - 5 * DAY}&limit=300`];
+  const ask = async (q: string) => (await app.inject({ method: 'GET', url: `/api/vs/wallet/fills?${q}` })).body;
+  W.clearWalletFills();
+  const inline: string[] = [];
+  for (const q of urls) inline.push(await ask(q));
+  const reads = ['walletFillRows', 'fillsNetBySymbol'] as const;
+  const kept = reads.map((k) => IndexStore.prototype[k]);
+  try {
+    W.clearWalletFills();
+    process.env.VALUESCAN_LIQ_THREAD = '1';
+    for (const k of reads) (IndexStore.prototype as unknown as Record<string, unknown>)[k] = () => { throw new Error(`${k} ran on the API thread`); };
+    for (let i = 0; i < urls.length; i++) assert.equal(await ask(urls[i]!), inline[i]);
+    assert.ok(JSON.parse(inline[1]!).fills.length >= 700, "the busy wallet in several slices");
+    assert.ok(R.liqReadStats.done >= 3, JSON.stringify(R.liqReadStats));
+  } finally {
+    reads.forEach((k, i) => { (IndexStore.prototype as unknown as Record<string, unknown>)[k] = kept[i]; });
+    delete process.env.VALUESCAN_LIQ_THREAD;
+    await R.stopLiqReadThread();
     W.clearWalletFills();
   }
 });
