@@ -25,3 +25,20 @@ test('flows are upserted row by row and ended flows leave the table', async () =
     store.close();
   }
 });
+
+test('the newest cohort series and mix time is kept by the writes, not scanned', async () => {
+  const { IndexStore } = await import('../src/indexer/store.js');
+  const store = new IndexStore(join(dir, 'lastT.db'));
+  try {
+    assert.equal(store.cohortSeriesLastT(), 0);
+    assert.equal(store.cohortMixLastT(), 0);
+    store.putCohortSeries([{ scope: 'all', cohort: 'a', t: 300, long: 1, short: 2 }, { scope: 'all', cohort: 'b', t: 500, long: 1, short: 2 }]);
+    store.putCohortSeries([{ scope: 'all', cohort: 'a', t: 100, long: 1, short: 2, rebuilt: true }]);
+    store.putCohortMix([{ scope: 'all', cohort: 'a', t: 7_200, data: '{}' }]);
+    assert.equal(store.cohortSeriesLastT(), 500);
+    assert.equal(store.cohortMixLastT(), 7_200);
+    assert.equal(store.getMeta('cohort_series_last_t'), '500');
+  } finally {
+    store.close();
+  }
+});

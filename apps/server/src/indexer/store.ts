@@ -72,6 +72,9 @@ import { closeRuns, type CloseFill } from '../valuedesk/winRate.js';
 import { mayPrune } from '../retention.js';
 
 export const SCHEMA_VERSION = 1;
+/** Meta keys: the newest t of cohort_series and cohort_mix (lastT). */
+const SERIES_LAST_T_META = 'cohort_series_last_t';
+const MIX_LAST_T_META = 'cohort_mix_last_t';
 /**
  * The writer connection's page cache at most, in KiB (PRAGMA cache_size). Its own memory: nothing else on the machine can
  * push it out, as a backup's reads did to the OS's cache (a 413 s stall, 2026-11-05). Taken as used; the server has 46 GB.
@@ -3437,6 +3440,7 @@ export class IndexStore {
     this.tx(() => {
       const ins = this.q('INSERT OR REPLACE INTO cohort_series (scope, cohort, t, lng, shrt, wallets, covered, src) VALUES (?, ?, ?, ?, ?, 0, 0, ?)');
       for (const r of rows) ins.run(r.scope, r.cohort, r.t, r.long, r.short, r.rebuilt ? 1 : 0);
+      this.keepLastT(SERIES_LAST_T_META, rows);
     });
   }
 
@@ -3454,8 +3458,7 @@ export class IndexStore {
   }
 
   cohortSeriesLastT(): number {
-    const r = this.q('SELECT MAX(t) AS t FROM cohort_series').get() as { t: number | null } | undefined;
-    return r?.t ?? 0;
+    return this.lastT(SERIES_LAST_T_META, 'cohort_series');
   }
 
   pruneCohortSeries(beforeT: number): void {
@@ -3466,7 +3469,30 @@ export class IndexStore {
     this.tx(() => {
       const ins = this.q('INSERT OR REPLACE INTO cohort_mix (scope, cohort, t, data, src) VALUES (?, ?, ?, ?, ?)');
       for (const r of rows) ins.run(r.scope, r.cohort, r.t, r.data, r.rebuilt ? 1 : 0);
+      this.keepLastT(MIX_LAST_T_META, rows);
     });
+  }
+
+  /** The newest t written to a cohort table, kept in meta (inside the write's transaction). */
+  private keepLastT(key: string, rows: ReadonlyArray<{ t: number }>): void {
+    let t = 0;
+    for (const r of rows) if (r.t > t) t = r.t;
+    if (!t) return;
+    const was = Number(this.getMeta(key)) || 0;
+    if (t > was) this.setMeta(key, String(t));
+  }
+
+  /**
+   * The newest t of a cohort table: from meta, or once by MAX(t) - a scan of the whole table, as its key starts with
+   * scope and cohort (2026-11-08: 22% and 16% of a 27 s start-up stall for cohort_mix and cohort_series).
+   */
+  private lastT(key: string, table: 'cohort_series' | 'cohort_mix'): number {
+    const kept = Number(this.getMeta(key));
+    if (kept > 0) return kept;
+    const r = this.q(`SELECT MAX(t) AS t FROM ${table}`).get() as { t: number | null } | undefined;
+    const t = r?.t ?? 0;
+    if (t) this.setMeta(key, String(t));
+    return t;
   }
 
   /** Hourly per-coin and per-sector [long, short] of a cohort. */
@@ -3517,8 +3543,7 @@ export class IndexStore {
   }
 
   cohortMixLastT(): number {
-    const r = this.q('SELECT MAX(t) AS t FROM cohort_mix').get() as { t: number | null } | undefined;
-    return r?.t ?? 0;
+    return this.lastT(MIX_LAST_T_META, 'cohort_mix');
   }
 
   pruneCohortMix(beforeT: number): void {
