@@ -794,7 +794,8 @@ export class AlgoRuntime {
     this.algos.set(a.id, a);
     await this.host.store.saveAlgo(a);
     this.syncWatch();
-    const what = spec.kind === 'basket' ? `Basket of ${spec.legs.length} markets` : `${ALGO_NAMES[spec.kind]} ${spec.side === 'buy' ? 'buy' : 'sell'} on ${spec.symbol}`;
+    // A bot has no side of its own: "Market maker on BTC-USD", never "Volume maker buy" (audit 2026-11-08).
+    const what = spec.kind === 'basket' ? `Basket of ${spec.legs.length} markets` : spec.kind === 'mm' ? `Market maker on ${spec.symbol}` : spec.kind === 'grid' ? `Grid on ${spec.symbol}` : `${ALGO_NAMES[spec.kind]} ${spec.side === 'buy' ? 'buy' : 'sell'} on ${spec.symbol}`;
     await this.event(a, 'status', `${what} placed${spec.paper ? ' (paper: nothing is sent)' : ''}.`);
     for (const c of n.checks ?? []) await this.event(a, 'info', `Check passed: ${c}`);
     this.host.onChange?.(a.id);
