@@ -142,6 +142,25 @@ test('a day bar tells its day: uptime, minutes, and that day\'s incidents and ma
   assert.match(render(createElement(DayTip, { d: m, index: 0, count: 90 })), /No data/);
 });
 
+test('a day with more than one kind of issue: the longest in full colour, the shorter ones dashed', () => {
+  // 60 min maintenance (13:00-14:00) and 12 probed minutes degraded: maintenance full, degraded dashed.
+  const done = maint({ closedAt: T0 + 2 * H });
+  const d = D.dayDetail(['2026-10-27', 1300, 12, 0], 'api', [done], T0 + 12 * H);
+  assert.equal(d.tone, 'maintenance');
+  assert.deepEqual(d.extra, [{ tone: 'degraded', minutes: 12 }]);
+  assert.ok(d.facts.includes('12 min degraded') && d.facts.includes('1 h maintenance'), 'the tooltip lists each with its duration');
+  // Degraded the longer one: it takes the full colour, maintenance goes dashed.
+  const e = D.dayDetail(['2026-10-27', 1200, 120, 0], 'api', [done], T0 + 12 * H);
+  assert.equal(e.tone, 'degraded');
+  assert.deepEqual(e.extra, [{ tone: 'maintenance', minutes: 60 }]);
+  // One kind only: no dashes, and the bar's colour is the old rule's.
+  const one = D.dayDetail(['2026-10-27', 1300, 12, 0], 'api', [], T0 + 12 * H);
+  assert.equal(one.tone, 'degraded');
+  assert.deepEqual(one.extra, []);
+  const tied = D.dayIssues(['2026-10-27', 1300, 30, 30], [], T0 + 12 * H);
+  assert.deepEqual(tied.map((x) => x.tone), ['partial', 'degraded'], 'a tie: the worse one in full colour');
+});
+
 test('a notice card: title, impact, components, times and the timeline newest first - as text', () => {
   const evil = incident({ title: '<img src=x onerror=alert(1)>', updates: [{ at: T0 - H, stage: 'investigating', text: '<script>alert(1)</script>\nline two' }] });
   const html = render(createElement(NoticeCard, { n: evil, now: T0, open: true }));

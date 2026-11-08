@@ -70,6 +70,26 @@
 .st-bar.is-down { background: var(--neg); }
 .st-bar.is-nodata { background: rgb(var(--ink) / 0.1); }
 .st-bar.is-maintenance { background: var(--st-maint); }
+/* A day with more than one kind of issue: the longest stays the bar's full colour
+   at the bottom, each shorter one is a dashed segment above it in its own colour. */
+.st-bar.is-mixed { display: flex; flex-direction: column; overflow: hidden; background: none; }
+.st-bar.is-mixed::after { content: ''; flex: 1 1 0; min-height: 40%; background: var(--st-bar-tone); }
+.st-bar.is-up { --st-bar-tone: var(--pos); }
+.st-bar.is-degraded { --st-bar-tone: var(--warn); }
+.st-bar.is-partial { --st-bar-tone: color-mix(in srgb, var(--warn) 55%, var(--neg)); }
+.st-bar.is-down { --st-bar-tone: var(--neg); }
+.st-bar.is-maintenance { --st-bar-tone: var(--st-maint); }
+.st-bar__dash {
+  flex: 0 0 auto; height: 30%; max-height: 9px; min-height: 7px;
+  background: repeating-linear-gradient(180deg, var(--st-dash) 0 2px, transparent 2px 3.5px);
+}
+.st-bar__dash.is-degraded { --st-dash: var(--warn); }
+.st-bar__dash.is-partial { --st-dash: color-mix(in srgb, var(--warn) 55%, var(--neg)); }
+.st-bar__dash.is-down { --st-dash: var(--neg); }
+.st-bar__dash.is-maintenance { --st-dash: var(--st-maint); }
+.st-bar__dash + .st-bar__dash { margin-top: 1px; }
+.st-legend .st-bar.is-mixed { display: inline-flex; }
+.st-legend .st-bar__dash { min-height: 5px; height: 5px; }
 .st-bars .st-bar:hover,
 .st-bars .st-bar.is-active { opacity: 0.7; }
 .st-bars:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; border-radius: 3px; }

@@ -164,7 +164,10 @@ export function noticeTimes(n: Notice, now: number): string {
 
 export interface DayDetail {
   day: string;
+  /** The bar's full colour: the kind of issue that lasted longest that day (or up / no data). */
   tone: DayToneShown;
+  /** The day's shorter kinds of issue, longest first: drawn dashed on top of the bar in their own colours. */
+  extra: Array<{ tone: DayToneShown; minutes: number }>;
   /** "27 Oct 2026". */
   date: string;
   /** "99.86% up", or null for no data. */
@@ -174,6 +177,42 @@ export interface DayDetail {
   /** That day's incidents and maintenance on this service. */
   notices: Array<{ id: number; label: string; title: string; times: string }>;
 }
+
+const ISSUE_RANK: Record<DayToneShown, number> = { nodata: 0, up: 1, maintenance: 2, degraded: 3, partial: 4, down: 5 };
+const IMPACT_ISSUE: Record<Impact, DayToneShown> = { minor: 'degraded', major: 'partial', critical: 'down' };
+
+/**
+ * The kinds of issue one day had and how long each lasted, longest first (ties: the
+ * worse one first). Probed minutes give degraded and down (down is "partial" below a
+ * tenth of the day's probes, as the bar's own rule); each incident adds its impact's
+ * kind and each maintenance its window, both clipped to the day. Where the probes
+ * and a notice say the same kind, the longer count stands (they mostly overlap).
+ */
+export function dayIssues(d: DayTuple, onDay: readonly Notice[], now: number): Array<{ tone: DayToneShown; minutes: number }> {
+  const [day, up, deg, down] = d;
+  const probed = up + deg + down;
+  const mins = new Map<DayToneShown, number>();
+  const add = (tone: DayToneShown, m: number) => {
+    if (m > 0) mins.set(tone, Math.max(mins.get(tone) ?? 0, m));
+  };
+  if (down) add(down / probed >= 0.1 ? 'down' : 'partial', down);
+  add('degraded', deg);
+  const start = Date.parse(`${day}T00:00:00Z`);
+  const end = start + 86_400_000;
+  const noticeMins = new Map<DayToneShown, number>();
+  for (const n of onDay) {
+    const tone: DayToneShown | null = n.kind === 'maintenance' ? 'maintenance' : n.impact ? IMPACT_ISSUE[n.impact] : null;
+    if (!tone) continue;
+    const [from, to] = noticeSpan(n, now);
+    const m = Math.max(1, Math.round((Math.min(to, end) - Math.max(from, start)) / 60_000));
+    noticeMins.set(tone, (noticeMins.get(tone) ?? 0) + m);
+  }
+  for (const [tone, m] of noticeMins) add(tone, Math.min(m, MINUTES_PER_DAY));
+  return [...mins].map(([tone, minutes]) => ({ tone, minutes }))
+    .sort((a, b) => b.minutes - a.minutes || ISSUE_RANK[b.tone] - ISSUE_RANK[a.tone]);
+}
+
+const MINUTES_PER_DAY = 1440;
 
 /** Everything one day bar's tooltip says. */
 export function dayDetail(d: DayTuple, service: ServiceId, notices: readonly Notice[], now: number): DayDetail {
@@ -186,9 +225,14 @@ export function dayDetail(d: DayTuple, service: ServiceId, notices: readonly Not
   if (deg) facts.push(`${fmtMinutes(deg)} degraded`);
   const missing = Math.max(0, minutesExpected(day, now) - probed);
   if (probed && missing >= 5) facts.push(`${fmtMinutes(missing)} no data`);
+  const issues = dayIssues(d, onDay, now);
+  const maint = issues.find((x) => x.tone === 'maintenance');
+  if (maint) facts.push(`${fmtMinutes(maint.minutes)} maintenance`);
+  const [main, ...extra] = issues;
   return {
     day,
-    tone: dayToneWith(d, onDay),
+    tone: issues.length > 1 ? main!.tone : dayToneWith(d, onDay),
+    extra,
     date: new Date(`${day}T12:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' }),
     uptime: pct === null ? null : `${pct >= 99.995 ? '100' : fmtFixed(pct, 2)}% up`,
     facts,
