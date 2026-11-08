@@ -1439,7 +1439,17 @@ function history(s: IndexStore, scope: string, fromT: number, f: CohortFilter, c
  * 0 before there is one (never builds one: the heatmap's request path calls it).
  */
 export function internalOiNow(venue: Venue, coin: string): number {
-  return cohortLoad?.internal.get(`${venue}|${coin}`) ?? 0;
+  const k = `${venue}|${coin}`;
+  return cohortLoad?.internal.get(k) ?? pushedInternal?.get(k) ?? 0;
+}
+
+/** The load in use's internal open interest as the cohort thread sent it (cohortThread.ts): the API thread holds no load. */
+let pushedInternal: ReadonlyMap<string, number> | null = null;
+export function setPushedInternal(m: ReadonlyMap<string, number> | null): void { pushedInternal = m; }
+
+/** The load in use's time and internal open interest (null: none yet), for the cohort thread to send on. */
+export function cohortInternal(): { at: number; internal: ReadonlyMap<string, number> } | null {
+  return cohortLoad ? { at: cohortLoad.at, internal: cohortLoad.internal } : null;
 }
 
 /**

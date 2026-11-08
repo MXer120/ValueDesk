@@ -56,10 +56,11 @@ import { hlPriceSeries } from '../valuedesk/hyperliquid/price.js';
 import { ACCOUNT_DETAIL, arcusProvider, lighterProvider, nameSpotFills, tradexyzProvider } from '../valuedesk/extra/providers.js';
 import { applyCachedCurves, attachPodiumCurves } from '../valuedesk/curves.js';
 import { CARDS_PER_REQUEST, CARD_VENUES, copyCards, isCardWindow } from '../valuedesk/copyCards.js';
-import { attachStats, markSodexTrades, type SodexTradeNote, boardPage, cohortDetail, cohortFocus, cohortMap, cohortWallets, cohortsPrepare, cohortsReady, cohortsRead, excludedNow, indexerStatus, indexerStatusJudged, netPage } from '../indexer/read.js';
+import { attachStats, markSodexTrades, type SodexTradeNote, boardPage, indexerStatus, indexerStatusJudged, netPage } from '../indexer/read.js';
+import { cohortJob, type CohortJob } from '../indexer/cohortThread.js';
 import { booksOverOi } from '../indexer/read.js';
 import { isCohortId, isSector, type CohortFilter, type CohortRange, type WalletSort } from '../valuedesk/cohorts/model.js';
-import { fineAskOf, fineDrawOf, isLiqRange, levFilterOf, liqHeatmap, liqHeatmapFine, liqHeatmapOf, liqWallets, walletLiqs } from '../indexer/liqRead.js';
+import { fineAskOf, fineDrawOf, isLiqRange, levFilterOf, liqHeatmap } from '../indexer/liqRead.js';
 import { LiqBusy, liqJob, okJson } from '../indexer/liqHistThread.js';
 import { TILE_FINAL_CACHE, TILE_INDEX_CACHE, TILE_WALLET_CACHE, keepLiqMetasWarm, liqTile, liqTileIndex, liqTileIndexOf, liqTileOf, tileAskOf } from '../indexer/liqTiles.js';
 import { watchAddresses } from '../indexer/host.js';
@@ -153,6 +154,16 @@ function numOf(v: string | undefined): number | undefined {
   if (v === undefined || v === '') return undefined;
   const n = Number(v);
   return Number.isFinite(n) ? n : undefined;
+}
+
+/**
+ * A cohort job (indexer/cohortThread.ts): the cohorts and the heatmap answers that read the books run on their own
+ * thread, and their JSON comes back whole - this thread neither builds nor parses it.
+ */
+async function sendCohortJob(reply: FastifyReply, job: CohortJob) {
+  const json = await cohortJob(job);
+  if (json === null) return fail(reply, new NotAvailable('The index is not running yet'));
+  return reply.type('application/json; charset=utf-8').send(json);
 }
 
 function fail(reply: FastifyReply, e: unknown) {
@@ -551,10 +562,7 @@ export async function valuedeskRoutes(app: FastifyInstance) {
   app.get('/api/vs/cohorts', async (req, reply) => {
     try {
       const q = req.query as Q;
-      await cohortsPrepare(cohortVenues(q), [cohortFilter(q), {}]);
-      const body = cohortsRead(cohortVenues(q), cohortFilter(q));
-      if (!body) return fail(reply, new NotAvailable('The index is not running yet'));
-      return { ok: true, ...body };
+      return await sendCohortJob(reply, { op: 'cohorts', venues: cohortVenues(q), f: cohortFilter(q) });
     } catch (e) {
       return fail(reply, e);
     }
@@ -574,11 +582,12 @@ export async function valuedeskRoutes(app: FastifyInstance) {
       const ws = walletsOf(q);
       const fine = fineAskOf(q);
       if (typeof fine === 'string') throw bad(fine);
-      // The wallet filter and exact steps read the cohort load: never an old one (read.ts STALE_MAX_MS).
-      if (ws.length || fine) await cohortsReady();
+      // The wallet filter and exact steps read the cohort load (its thread; never an old load, read.ts STALE_MAX_MS).
       const side = q.side === 'long' || q.side === 'short' ? q.side : null;
-      const body = fine ? await liqHeatmapFine(coin, cohortVenues(q), fine, { wallets: new Set(ws), side, lev: levFilterOf(q.lev) })
-        : ws.length ? await liqHeatmapOf(coin, cohortVenues(q), ws) : await liqHeatmap(coin, cohortVenues(q));
+      const lev = levFilterOf(q.lev);
+      if (fine) return await sendCohortJob(reply, { op: 'liqFine', coin, venues: cohortVenues(q), ask: fine, wallets: ws, side, lev: lev ? [...lev] : null });
+      if (ws.length) return await sendCohortJob(reply, { op: 'liqOf', coin, venues: cohortVenues(q), wallets: ws });
+      const body = await liqHeatmap(coin, cohortVenues(q));
       if (!body) return fail(reply, new NotAvailable('The index is not running yet'));
       return { ok: true, ...body, overOi: booksOverOi(cohortVenues(q), coin) };
     } catch (e) {
@@ -596,10 +605,8 @@ export async function valuedeskRoutes(app: FastifyInstance) {
       if (!coin) throw bad('coin= is required');
       if (q.side !== 'long' && q.side !== 'short') throw bad('side= must be long or short');
       if (!(from >= 0) || !(to > from)) throw bad('from= and to= must be a price range');
-      await cohortsReady();
-      const body = await liqWallets(coin, cohortVenues(q), q.side, from, to, 25, walletsOf(q), levFilterOf(q.lev));
-      if (!body) return fail(reply, new NotAvailable('The index is not running yet'));
-      return { ok: true, ...body };
+      const lev = levFilterOf(q.lev);
+      return await sendCohortJob(reply, { op: 'liqWallets', coin, venues: cohortVenues(q), side: q.side, from, to, limit: 25, wallets: walletsOf(q), lev: lev ? [...lev] : null });
     } catch (e) {
       return fail(reply, e);
     }
@@ -611,10 +618,7 @@ export async function valuedeskRoutes(app: FastifyInstance) {
       const q = req.query as Q;
       const ws = walletsOf(q);
       if (!ws.length) throw bad('wallets= is required: up to 10 0x addresses, comma separated');
-      await cohortsReady();
-      const body = await walletLiqs(ws, cohortVenues(q));
-      if (!body) return fail(reply, new NotAvailable('The index is not running yet'));
-      return { ok: true, wallets: ws, asOf: body.asOf, positions: body.positions };
+      return await sendCohortJob(reply, { op: 'positions', venues: cohortVenues(q), wallets: ws });
     } catch (e) {
       return fail(reply, e);
     }
@@ -791,10 +795,7 @@ export async function valuedeskRoutes(app: FastifyInstance) {
       const q = req.query as Q;
       if (!isCohortId(q.cohort)) return fail(reply, new NotAvailable('Unknown cohort'));
       const range: CohortRange = q.range === '1d' || q.range === '30d' ? q.range : '7d';
-      await cohortsPrepare(cohortVenues(q), [cohortFilter(q)]);
-      const body = cohortDetail(cohortVenues(q), q.cohort, range, cohortFilter(q));
-      if (!body) return fail(reply, new NotAvailable('The index is not running yet'));
-      return { ok: true, ...body };
+      return await sendCohortJob(reply, { op: 'detail', venues: cohortVenues(q), cohort: q.cohort, range, f: cohortFilter(q) });
     } catch (e) {
       return fail(reply, e);
     }
@@ -856,8 +857,7 @@ export async function valuedeskRoutes(app: FastifyInstance) {
    */
   app.get('/api/vs/excluded', async (_req, reply) => {
     try {
-      await cohortsReady();
-      return { ok: true, wallets: excludedNow() };
+      return await sendCohortJob(reply, { op: 'excluded' });
     } catch (e) {
       return fail(reply, e);
     }
@@ -879,10 +879,7 @@ export async function valuedeskRoutes(app: FastifyInstance) {
   app.get('/api/vs/cohorts/map', async (req, reply) => {
     try {
       const q = req.query as Q;
-      await cohortsPrepare(cohortVenues(q), [{}]);
-      const body = cohortMap(cohortVenues(q), isCohortId(q.cohort) ? q.cohort : null);
-      if (!body) return fail(reply, new NotAvailable('The index is not running yet'));
-      return { ok: true, ...body };
+      return await sendCohortJob(reply, { op: 'map', venues: cohortVenues(q), cohort: isCohortId(q.cohort) ? q.cohort : null });
     } catch (e) {
       return fail(reply, e);
     }
@@ -895,10 +892,7 @@ export async function valuedeskRoutes(app: FastifyInstance) {
       const f = cohortFilter(q);
       if (!f.coin && !f.sector) return fail(reply, new NotAvailable('Name a coin or a sector'));
       const range: CohortRange = q.range === '1d' || q.range === '30d' ? q.range : '7d';
-      await cohortsPrepare(cohortVenues(q), [f]);
-      const body = cohortFocus(cohortVenues(q), f, range);
-      if (!body) return fail(reply, new NotAvailable('The index is not running yet'));
-      return { ok: true, ...body };
+      return await sendCohortJob(reply, { op: 'focus', venues: cohortVenues(q), f, range });
     } catch (e) {
       return fail(reply, e);
     }
@@ -912,12 +906,9 @@ export async function valuedeskRoutes(app: FastifyInstance) {
       const sort: WalletSort = WALLET_SORTS.find((x) => x === q.sort) ?? 'equity';
       // `range` (1d | 7d | 30d, default 30d): the window of the PnL and win-rate columns. Membership stays all-time.
       const range: WalletRange = COHORT_RANGES.find((x) => x === q.range) ?? '30d';
-      await cohortsPrepare(cohortVenues(q), []);
-      const body = cohortWallets(cohortVenues(q), q.cohort, cohortFilter(q), {
+      return await sendCohortJob(reply, { op: 'wallets', venues: cohortVenues(q), cohort: q.cohort, f: cohortFilter(q), o: {
         sort, dir: q.dir === 'asc' ? 'asc' : 'desc', offset: intOf(q.offset, 0, 0, 1_000_000), limit: intOf(q.limit, 50, 1, 200), range,
-      });
-      if (!body) return fail(reply, new NotAvailable('The index is not running yet'));
-      return { ok: true, ...body };
+      } });
     } catch (e) {
       return fail(reply, e);
     }

@@ -372,7 +372,23 @@ function internalOiOf(venue: Venue, coin: string): number {
   return internalOiNow(venue, coin);
 }
 
+/**
+ * On the cohort thread (cohortThread.ts) the venues' markets come from the API thread, which holds the venue clients and
+ * their budgets; the SoDEX internal pair comes with them.
+ */
+let marketsSource: ((venues: readonly Venue[]) => Promise<{ markets: Map<Venue, VenueMarkets | null>; sodex: Map<string, number> | null }>) | null = null;
+export function setMarketsSource(f: typeof marketsSource): void { marketsSource = f; }
+/** The SoDEX internal pair as the API thread last read it (null: none yet), for the cohort thread's asks. */
+export function sodexInternalHeld(): Map<string, number> | null {
+  return sodexInternal && Date.now() - sodexInternal.at < SODEX_INTERNAL_FRESH_MS ? sodexInternal.byCoin : null;
+}
+
 export async function marketsFor(venues: readonly Venue[]): Promise<Map<Venue, VenueMarkets | null>> {
+  if (marketsSource) {
+    const got = await marketsSource(venues);
+    if (got.sodex) sodexInternal = { at: Date.now(), byCoin: got.sodex };
+    return got.markets;
+  }
   if (venues.includes('sodex')) {
     // At most one read in 15 s however many ask, and a page never waits for it: the next one has it.
     void sodexInternalNow().then((byCoin) => { if (byCoin) sodexInternal = { at: Date.now(), byCoin }; });
