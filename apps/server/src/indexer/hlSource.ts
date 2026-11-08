@@ -134,7 +134,13 @@ export async function hlSyncFills(store: IndexStore, address: string, fromT: num
     if (held && held.toT < o.now) {
       const since = o.streamSince ?? null;
       const bridgeTo = since !== null && since > held.toT ? since + BRIDGE_PAST_MS : null;
-      if (bridgeTo !== null && bridgeTo < o.now) {
+      if (since !== null && since <= held.toT) {
+        // THE STREAM COVERS IT (2026-11-08): the held range reaches into the stream's current connection, which has every
+        // print since (the engine's advanceCoverage keeps it within 30 s of now). The REST page here asked [toT, now] and
+        // came back empty, 20 weight each: with the two-hourly resyncs that was about the whole board budget, ~6 reads a
+        // minute with 1,500 waiting. Nothing is asked; the page budget goes to the reach-back below.
+        store.touchRest('hyperliquid', address, 'fills', o.now);
+      } else if (bridgeTo !== null && bridgeTo < o.now) {
         // Only the gap before the stream's connection; the stream's rows after it stay.
         const r = await run(held.toT, null, bridgeTo);
         store.addCoverage('hyperliquid', address, 'fills', { fromT: held.toT, toT: r.end === 'now' ? bridgeTo : r.lastT }, o.now);
@@ -168,9 +174,9 @@ export async function hlSyncFills(store: IndexStore, address: string, fromT: num
  * there, with few rows), then the whole window (an inactive one returns few
  * rows there). Returns the weight spent.
  */
-export async function hlQuickCheck(store: IndexStore, address: string, fromT: number, now: number): Promise<number> {
+export async function hlQuickCheck(store: IndexStore, address: string, fromT: number, now: number, streamSince: number | null = null): Promise<number> {
   if (store.coverage('hyperliquid', address, 'fills')) {
-    const r = await hlSyncFills(store, address, fromT, { maxPages: 1, now });
+    const r = await hlSyncFills(store, address, fromT, { maxPages: 1, now, streamSince });
     return r.pages * 20 + Math.ceil(r.rows / 20);
   }
   const sliceFrom = Math.max(fromT, now - 10 * 60_000);
@@ -192,7 +198,7 @@ export async function hlQuickCheck(store: IndexStore, address: string, fromT: nu
   let cost = 20 + Math.ceil(list.length / 20);
   if (store.orderCount('hyperliquid', address, fromT) >= 2) return cost;
   if (sliceFrom > fromT) {
-    const r = await hlSyncFills(store, address, fromT, { maxPages: 1, now });
+    const r = await hlSyncFills(store, address, fromT, { maxPages: 1, now, streamSince });
     cost += r.pages * 20 + Math.ceil(r.rows / 20);
     if (store.orderCount('hyperliquid', address, fromT) >= 2) return cost;
   }

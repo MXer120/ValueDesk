@@ -61,3 +61,32 @@ test('a catch-up after a stream break asks only for the gap and keeps the stream
     rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 });
   }
 });
+
+test('a held range the stream covers costs no request: its REST check moves, the page budget goes to the reach-back', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'vs-bridge-'));
+  const store = new IndexStore(join(dir, 'i.db'));
+  const post = hlInfo.post;
+  try {
+    const now = Math.floor(Date.now() / 1000) * 1000 - 2 * H;
+    const since = now - 5 * H;
+    // Held to 20 s ago, inside the stream's connection; checked by REST 3 h ago; starts 10 days back.
+    store.addCoverage('hyperliquid', A, 'fills', { fromT: now - 10 * 24 * H, toT: now - 20_000 }, now - 3 * H);
+    const asked: Array<Record<string, unknown>> = [];
+    hlInfo.post = (async (body: Record<string, unknown>) => { asked.push(body); return []; }) as typeof hlInfo.post;
+
+    await hlSyncFills(store, A, now, { maxPages: 1, now, streamSince: since });
+    assert.equal(asked.length, 0, 'no empty catch-up page');
+    const cov = store.coverage('hyperliquid', A, 'fills')!;
+    assert.equal(cov.restAt, now);
+    assert.equal(cov.toT, now - 20_000, 'the range stays where the stream took it');
+
+    // Asked to reach further back: the one page goes there.
+    await hlSyncFills(store, A, now - 20 * 24 * H, { maxPages: 1, now, streamSince: since });
+    assert.equal(asked.length, 1);
+    assert.equal(asked[0]!.startTime, now - 20 * 24 * H);
+  } finally {
+    hlInfo.post = post;
+    store.close();
+    rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 });
+  }
+});

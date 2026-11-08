@@ -1290,7 +1290,7 @@ export class Indexer {
     if (ext) return ext.queueCheck(address, from, prio);
     const now = this.now();
     if (venue === 'hyperliquid') {
-      this.hl.add({ key: `q:${address}`, prio, run: () => hlQuickCheck(this.store, address, from, this.now()) });
+      this.hl.add({ key: `q:${address}`, prio, run: () => hlQuickCheck(this.store, address, from, this.now(), this.socketOf('hyperliquid')) });
       return;
     }
     // SoDEX: closed positions first (not rate limited like /trades), which prove trades but

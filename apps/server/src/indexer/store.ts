@@ -924,6 +924,9 @@ export class IndexStore {
     this.aggRefreshMs = opts.aggRefreshMs ?? 10 * 60_000;
     this.retainDays = opts.retainDays ?? retainDays();
     this.db.exec('PRAGMA busy_timeout = 5000');
+    // Sorts and DISTINCT / GROUP BY b-trees in memory, not in temp files on the disk the index already keeps busy
+    // (pnlRanked's ORDER BY over up to ~100k rows, hasTrades' DISTINCT; 2026-11-08).
+    this.db.exec('PRAGMA temp_store = MEMORY');
     if (!opts.readOnly) {
       this.db.exec(`PRAGMA busy_timeout = ${WRITER_BUSY_MS}`);
       // Only takes effect on a file with no table yet: pages freed later can then be
@@ -1510,6 +1513,16 @@ export class IndexStore {
    * if the two touch or overlap; otherwise the newer range wins (the gap is
    * refilled by the next backfill).
    */
+  /**
+   * The held range's last REST check moved to `now` without a read: the stream covers it to now (hlSyncFills). The range
+   * and the wallet's version stay (nothing new was stored, so no board figure needs summing again).
+   */
+  touchRest(venue: Venue, address: string, kind: HistoryKind, now: number): void {
+    if (this.readOnly) return;
+    if (venue === 'hyperliquid' && kind === 'fills') this.touchRest('tradexyz', address, kind, now);
+    this.q('UPDATE coverage SET rest_at = ? WHERE venue = ? AND address = ? AND kind = ? AND rest_at < ?').run(now, venue, address, kind, now);
+  }
+
   addCoverage(venue: Venue, address: string, kind: HistoryKind, span: { fromT: number; toT: number; exhausted?: boolean; capped?: boolean }, now: number): Coverage {
     // A Hyperliquid fill history is also the xyz dex's history over the same span.
     if (venue === 'hyperliquid' && kind === 'fills') this.addCoverage('tradexyz', address, kind, span, now);
@@ -2491,8 +2504,10 @@ export class IndexStore {
       // or not, and the boards summed every trader's first day again from the fills: partialDayAsync
       // was 44% of the indexer's thread in that night's production profile.
       if (gone > 0) {
+        // Only this wallet's days in the range moved; every other memo entry still stands (2026-11-08: the clear of all
+        // of them on each drop - most Hyperliquid pages of a tracked wallet - had every board candidate's first day
+        // summed again from the fills).
         this.markRange(v, address, fromT, toT, first);
-        this.partialMemo.clear();
         // Held rows are not cleared: markRange has moved the version of every day that lost rows.
       }
     }
