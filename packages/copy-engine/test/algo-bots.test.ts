@@ -658,11 +658,13 @@ test('grid: a level the price is through waits instead of being refused; sizes r
   assert.ok(r.ex.placed.every((o) => Number(o.price) % 1 === 0), 'on the tick');
 });
 
-test('grid: an update may change the size and limits, not the range', async () => {
+test('grid: an update changes the size, limits and range in place; never the market', async () => {
   const r = await rig();
   const a = await add(r, { kind: 'grid', maxLossUsd: 1_000_000, low: 59_000, high: 61_000, levels: 5, orderUsd: 30, spacing: 'linear' });
   await step(r, a.id);
-  await assert.rejects(r.rt.update(a.id, { low: 58_000 } as never), /range and levels/);
+  await assert.rejects(r.rt.update(a.id, { symbol: 'ETH-USD' } as never), /market/);
+  await r.rt.update(a.id, { low: 58_000 } as never);
+  assert.equal((r.rt.get(a.id)!.spec as { low: number }).low, 58_000);
   await r.rt.update(a.id, { orderUsd: 40, maxLossUsd: 5 });
   await settle();
   assert.equal(r.ex.resting.size, 0, 'pulled for the new size');

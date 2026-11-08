@@ -301,7 +301,9 @@ test('guard: refusals sorted into classes', () => {
     ['no copy key is available', 'key'],
     ['Rate limit exceeded for address', 'account-rate'],
     ["Not sent: SoDEX's rate limit is cooling down (12 s left)", 'local'],
-    ['Not sent: account 42 is at SoDEX\'s order rate (20 a second)', 'account-rate'],
+    ['Not sent: account 42 is at SoDEX\'s order rate (20 a second)', 'local'], // never left: waited out, never a strike (research 2026-11-09)
+    ['post only order would take', 'post-only'],
+    ['nonce already used', 'nonce'],
     ['SoDEX rate limit (HTTP 429) - backing off', 'ip-rate'],
     ['position not found: 1', 'gone'],
     ['no position to reduce', 'gone'],

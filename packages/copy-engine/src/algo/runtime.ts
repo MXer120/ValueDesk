@@ -61,6 +61,7 @@ import { checkLimits, limitLeverage, oiHeadroom, oiRoomWords, positionCapUsd, li
 import { checkSizes, coins, maxWords, minWords, money } from './sizes.ts';
 import type { AlgoSink, ChildRequest, ChildResult, StopRequest } from './sink.ts';
 import { ALGO_NAMES, algoClosesOnly, algoQuantity, algoSymbols, opensPosition, parseAlgoSpec } from './spec.ts';
+import { countsAsFailure, refusalKind, refusalWords } from './refusals.ts';
 import type { AlgoStore } from './store.ts';
 import type { AlgoUpdatePatch } from '../api.ts';
 import { bookFill, bookGross, bookInventory, bookNet, bookVolume, botQuoteUsd, costPerMillion, emptyBook, gridPrices, gridQty, gridStart, mmQuotes, pastFair, PATIENT_TAKER_ACCOUNT, INFORMED_TAKER_ACCOUNT, newsAt, quietWindowAt, quietWords, sampleBook, usdWords, windowWords, type GridSide } from './bots.ts';
@@ -126,6 +127,15 @@ const UNLISTED_SETTLE_MS = 20 * 60_000;
 const FILLS_PAGE = 100;
 const DONE_KEPT = 60;
 const MAX_CONSEC_REJECTS = 25;
+/** A bot whose unknown refusals reached MAX_CONSEC_REJECTS this many times (each followed by a wait) closes what it holds and stops: the last resort. */
+const BOT_FAIL_ROUNDS = 4;
+/** A bot's wait after MAX_CONSEC_REJECTS unknown refusals: this, doubling, at most BOT_FAIL_WAIT_MAX_MS. */
+const BOT_FAIL_WAIT_MS = 60_000;
+const BOT_FAIL_WAIT_MAX_MS = 15 * 60_000;
+/** A bot's side that adds waits this long after a margin refusal (the reducing side goes on). */
+const BOT_MARGIN_WAIT_MS = 30_000;
+/** A refused leverage change is asked again no sooner than this, doubling to 15 min (it was re-sent every step). */
+const LEVERAGE_RETRY_MS = 60_000;
 /** A refusal by SoDEX's open-interest cap, position limit or open-order cap holds the algo this long (doubling, at most 15 min)... */
 const LIMIT_RETRY_MS = 60_000;
 /** ...and stops it at the this-many-th with no fill in between: no retry storm against a limit. */
@@ -1369,10 +1379,17 @@ export class AlgoRuntime {
         return;
       }
     }
-    // SoDEX refused it at one of its limits (onLimit): nothing goes out until the wait is over.
-    if (typeof a.k.limitUntil === 'number' && now < a.k.limitUntil) {
+    // SoDEX refused it at one of its limits (onLimit): nothing goes out until the wait is over. A bot keeps quoting the
+    // side that reduces what it holds; only what opens waits (send).
+    if (typeof a.k.limitUntil === 'number' && now < a.k.limitUntil && !a.spec.bot) {
       await this.pullHeldQuotes(a, now);
       await this.hold(a, String(a.k.limitReason ?? 'Held: a SoDEX limit is reached.'));
+      return;
+    }
+    // A bot that kept being refused for reasons nothing here handles waits a while (sendOutcome), quotes pulled.
+    if (a.spec.bot && !a.k.closing && typeof a.k.failUntil === 'number' && now < a.k.failUntil) {
+      await this.pullHeldQuotes(a, now);
+      await this.hold(a, `Held: SoDEX kept refusing its orders; it tries again at ${utcWords(a.k.failUntil)}.`);
       return;
     }
     if (m.status !== 'TRADING') {
@@ -1897,9 +1914,10 @@ export class AlgoRuntime {
    * A bot reached one of its limits, or was stopped: with `onStop: 'close'` and something held, it pulls its
    * quotes and closes that first (stepBotClose). Returns whether it is now closing (false: end it here).
    */
-  private async stopBot(a: AlgoRecord, status: AlgoStatus, reason: string, now = false): Promise<boolean> {
+  private async stopBot(a: AlgoRecord, status: AlgoStatus, reason: string, now = false, force = false): Promise<boolean> {
     const s = a.spec;
-    if (!(s.kind === 'mm' || s.kind === 'grid') || s.onStop !== 'close' || !a.book) return false;
+    // `force`: the last resort (tooManyRefusals, a delisting) closes whatever On stop says.
+    if (!(s.kind === 'mm' || s.kind === 'grid') || (s.onStop !== 'close' && !force) || !a.book) return false;
     const m = this.markets.get(s.symbol);
     const held = Math.abs(bookInventory(a.book));
     const px = this.market.mark(s.symbol)?.mark ?? null;
@@ -3283,6 +3301,14 @@ export class AlgoRuntime {
       await this.hold(a, 'The trading key for this algo is not available here.');
       return [];
     }
+    // A bot under a margin or limit wait (refusal handling): what adds waits, what reduces goes out.
+    if (s.bot && !s.paper) {
+      const until = Math.max(Number(a.k.marginUntil ?? 0), Number(a.k.limitUntil ?? 0));
+      if (until > Date.now()) {
+        list = list.filter((x) => x.reduceOnly ?? s.reduceOnly);
+        if (!list.length) return [];
+      }
+    }
     const opening = list.some((x) => !(x.reduceOnly ?? s.reduceOnly));
     const brake = s.paper ? null : this.host.brake?.(a) ?? null;
     // A bot's close is reduce-only: it only makes a position smaller, as an exit does, so the brake lets it through.
@@ -3304,13 +3330,21 @@ export class AlgoRuntime {
     // Per algo: each sets its leverage and margin mode at its first opening child. Shared by the wallet's algos on the
     // market, one algo trusted what an earlier one set although the follower may have changed it since (the same
     // live run as the copier's: an isolated position opened on cross, 2026-10-30).
+    // A refused leverage change waits before it is asked again (research 2026-11-09: it was re-sent every step).
+    if (sink && opening && lev !== null && s.bot && this.leverageSet.get(`${a.id}|${m.name}`) !== want && Number(a.k.levRetryAt ?? 0) > Date.now()) {
+      await this.hold(a, `Held: SoDEX did not set ${lev}x on ${m.name} yet; trying again at ${utcWords(Number(a.k.levRetryAt))}.`);
+      return [];
+    }
     if (sink && opening && lev !== null && this.leverageSet.get(`${a.id}|${m.name}`) !== want) {
       this.leverageSet.set(`${a.id}|${m.name}`, want!);
       const refused = await sink.setLeverage(a, m, lev, s.marginMode ?? 'cross').then(
-        () => null,
+        () => { delete a.k.levBack; delete a.k.levRetryAt; return null; },
         async (e: unknown) => {
-          // Not set: the next opening child asks again.
+          // Not set: an opening child asks again after a wait (a minute, doubling to 15).
           this.leverageSet.delete(`${a.id}|${m.name}`);
+          const back = Math.min(15 * 60_000, Number(a.k.levBack ?? LEVERAGE_RETRY_MS / 2) * 2);
+          a.k.levBack = back;
+          a.k.levRetryAt = Date.now() + back;
           const why = e instanceof Error ? e.message : String(e);
           await this.event(a, 'error', `Leverage not set: ${why}`);
           return why;
@@ -3408,6 +3442,7 @@ export class AlgoRuntime {
       if (r.ok) {
         if (c.state === 'sending') c.state = 'open';
         a.k.consecRejects = 0;
+        if (a.k.failRounds) delete a.k.failRounds;
       } else if (r.outcomeUnknown) {
         if (c.state === 'sending') c.state = 'unknown';
         await this.event(a, 'error', `No answer from SoDEX for ${c.tag}; checking what happened (never re-sent).`, c);
@@ -3415,9 +3450,9 @@ export class AlgoRuntime {
         c.state = 'done';
         c.cancelling = false;
         a.rejects++;
-        a.k.consecRejects = Number(a.k.consecRejects ?? 0) + 1;
         this.lastRefusal.set(a.id, r.error ?? '');
-        await this.event(a, 'error', `SoDEX refused ${c.tag}: ${r.error}`, c);
+        this.refusalSeen(a, c, r.error ?? '');
+        await this.event(a, 'error', s.bot ? `SoDEX refused ${c.tag}: ${refusalWords(refusalKind(r.error))}.` : `SoDEX refused ${c.tag}: ${r.error}`, c);
         this.botRefused(a, c, r.error ?? '');
         limit ??= limitRefusal(r.error, m.name);
       }
@@ -3439,7 +3474,7 @@ export class AlgoRuntime {
     await this.save(a);
     if (limit) await this.onLimit(a, limit);
     // A bot's close has its own refusal count (stepBotClose): refusals while it closes do not end it with the position open.
-    if (Number(a.k.consecRejects ?? 0) >= MAX_CONSEC_REJECTS && !(s.bot && a.k.closing)) await this.endBot(a, 'failed', `SoDEX refused ${MAX_CONSEC_REJECTS} orders in a row; stopped. The last reason is in the log.`);
+    if (Number(a.k.consecRejects ?? 0) >= MAX_CONSEC_REJECTS && !(s.bot && a.k.closing)) await this.tooManyRefusals(a);
     this.host.onChange?.(a.id);
     return children;
   }
@@ -3560,7 +3595,8 @@ export class AlgoRuntime {
     if (a.spec.bot && a.k.closing) return;
     const n = Number(a.k.limitHits ?? 0) + 1;
     a.k.limitHits = n;
-    if (n >= LIMIT_MAX_HITS) {
+    // A bot never ends for a limit (owner 2026-11-08): what adds waits (a minute doubling to 15), what reduces goes on.
+    if (n >= LIMIT_MAX_HITS && !a.spec.bot) {
       await this.endBot(a, 'failed', `Stopped: ${lim.text} SoDEX refused it ${n} times with nothing filled in between.`);
       return;
     }
@@ -3574,7 +3610,50 @@ export class AlgoRuntime {
     a.k.limitReason = `Held: ${lim.text}${room} Trying again in ${Math.round(wait / 60_000)} min.`;
     this.dirty.add(a.id);
     if (m) await this.limitNotice(a, m, lim.kind, 'held', `SoDEX refused an order: ${lim.text}${room} It tries again in ${Math.round(wait / 60_000)} min.`);
+    if (a.spec.bot) {
+      await this.event(a, 'info', `${lim.text}${room} New orders wait ${Math.round(wait / 60_000)} min; what it holds is still unwound.`);
+      return;
+    }
     await this.hold(a, a.k.limitReason as string);
+  }
+
+  /**
+   * A refusal seen (in the answer or on the socket): only one nothing else handles counts toward MAX_CONSEC_REJECTS
+   * (refusals.ts); a bot's margin refusal makes what adds wait a moment. The full text goes to the host's log only.
+   */
+  private refusalSeen(a: AlgoRecord, c: ChildOrder, text: string): void {
+    const kind = refusalKind(text);
+    // Algo orders count every refusal as before; a bot only what nothing here handles (owner 2026-11-08).
+    if (!a.spec.bot || countsAsFailure(kind)) a.k.consecRejects = Number(a.k.consecRejects ?? 0) + 1;
+    if (a.spec.bot && kind === 'margin' && !c.reduceOnly) a.k.marginUntil = Date.now() + BOT_MARGIN_WAIT_MS;
+    this.host.log.warn('algo: SoDEX refused a child', { algo: a.id, owner: a.owner, symbol: a.spec.symbol, tag: c.tag, kind, text });
+    this.dirty.add(a.id);
+  }
+
+  /**
+   * MAX_CONSEC_REJECTS refusals in a row that nothing here handles. An algo order ends. A bot waits instead (its
+   * quotes pulled, a minute doubling to 15) and tries again; only after BOT_FAIL_ROUNDS such rounds does it close what
+   * it holds - whatever its On stop says - and stop (owner 2026-11-08: never stop with its position or quotes left).
+   */
+  private async tooManyRefusals(a: AlgoRecord): Promise<void> {
+    if (!a.spec.bot) {
+      await this.endBot(a, 'failed', `SoDEX refused ${MAX_CONSEC_REJECTS} orders in a row; stopped. The last reason is in the log.`);
+      return;
+    }
+    const rounds = Number(a.k.failRounds ?? 0) + 1;
+    a.k.failRounds = rounds;
+    a.k.consecRejects = 0;
+    if (rounds >= BOT_FAIL_ROUNDS) {
+      const reason = `Stopped: SoDEX kept refusing its orders (${rounds} rounds of ${MAX_CONSEC_REJECTS}, with waits between). It closed what it held first.`;
+      this.host.log.error?.('bot: last resort, closing and stopping', { algo: a.id, owner: a.owner, symbol: a.spec.symbol, last: this.lastRefusal.get(a.id) ?? '' });
+      if (!(await this.stopBot(a, 'failed', reason, false, true))) await this.end(a, 'failed', reason);
+      return;
+    }
+    const wait = Math.min(BOT_FAIL_WAIT_MAX_MS, BOT_FAIL_WAIT_MS * 2 ** (rounds - 1));
+    a.k.failUntil = Date.now() + wait;
+    this.dirty.add(a.id);
+    await this.pullResting(a);
+    await this.event(a, 'error', `SoDEX refused ${MAX_CONSEC_REJECTS} orders in a row. It waits ${Math.round(wait / 60_000)} min with its quotes pulled, then goes on (round ${rounds} of ${BOT_FAIL_ROUNDS}; after the last it closes what it holds and stops).`);
   }
 
   private async cancelChildren(a: AlgoRecord, m: MarketInfo, list: ChildOrder[]): Promise<void> {
@@ -3707,8 +3786,9 @@ export class AlgoRuntime {
       const closing = a.k.closing as BotClosing | undefined;
       if (u.status === 'REJECTED' && was !== 'done') {
         a.rejects++;
-        a.k.consecRejects = Number(a.k.consecRejects ?? 0) + 1;
-        void this.event(a, 'error', `SoDEX rejected ${c.tag}${u.reason ? `: ${u.reason}` : ''}.`, c);
+        this.refusalSeen(a, c, u.reason ?? '');
+        void this.event(a, 'error', a.spec.bot ? `SoDEX rejected ${c.tag}: ${refusalWords(refusalKind(u.reason))}.` : `SoDEX rejected ${c.tag}${u.reason ? `: ${u.reason}` : ''}.`, c);
+        if (Number(a.k.consecRejects ?? 0) >= MAX_CONSEC_REJECTS && a.spec.bot && !a.k.closing) void this.tooManyRefusals(a);
         const lim = limitRefusal(u.reason, a.spec.symbol);
         if (lim) void this.onLimit(a, lim);
         // A grid level refused (a post-only the price reached meanwhile) goes out again after a moment, not on the next step.

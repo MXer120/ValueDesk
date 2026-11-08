@@ -332,17 +332,31 @@ test('A2: a bound that stops a bot closes what it holds (onStop close) instead o
   assert.ok(r.ex.placed.some((o) => o.reduceOnly), 'a reduce-only close placed');
 });
 
-test('A2: 25 refusals in a row close what it holds instead of failing with it open', async () => {
+test('refusals a bot understands never stop it: margin refusals hold what adds, what reduces goes on (owner 2026-11-08)', async () => {
   const r = await rig();
   const a = await holding(r);
   r.ex.refuse = 'insufficient margin';
   for (let i = 0; i < 30; i++) await step(r, a.id, 61_000);
   const b = r.rt.get(a.id)!;
-  assert.notEqual(b.status, 'failed');
-  assert.ok(b.k.closing, 'closing what it holds');
+  assert.equal(b.status, 'running');
+  assert.ok(!b.k.closing, 'not closing: margin is not a reason to stop');
+  assert.ok(Number(b.k.consecRejects ?? 0) === 0, 'not counted');
   r.ex.refuse = null;
   await step(r, a.id, 31_000);
-  assert.ok(r.ex.placed.some((o) => o.reduceOnly), 'the close goes out once SoDEX takes orders');
+  assert.ok(r.ex.placed.length > 0, 'it quotes again once SoDEX takes orders');
+});
+
+test('refusals nothing handles: a bot waits (quotes pulled) between rounds; only after the last round it closes what it holds - even set to keep - and stops', async () => {
+  const r = await rig();
+  const a = await holding(r, { onStop: 'keep' });
+  r.ex.refuse = 'something odd happened';
+  for (let i = 0; i < 400 && !r.rt.get(a.id)!.k.closing && !['failed', 'cancelled'].includes(r.rt.get(a.id)!.status); i++) await step(r, a.id, 20_000);
+  const b = r.rt.get(a.id)!;
+  assert.ok(Number(b.k.failRounds ?? 0) >= 4 || b.k.closing, 'went through its rounds');
+  assert.ok(b.k.closing, 'closing what it holds although On stop is keep');
+  r.ex.refuse = null;
+  for (let i = 0; i < 5; i++) await step(r, a.id, 61_000);
+  assert.ok(r.ex.placed.some((o) => o.reduceOnly), 'the close goes out');
 });
 
 test('A2: the close is not given up for post-only refusals; three position refusals end it', async () => {
@@ -426,6 +440,8 @@ test('A3: a leverage change SoDEX refused holds what opens; it goes out once lev
   assert.match(b.statusReason ?? '', /did not set 3x/);
   r.ex.levFail = false;
   await step(r, a.id, 500);
+  assert.equal(r.ex.placed.length, 0, 'asked again only after a wait (no change sent every step)');
+  await step(r, a.id, 61_000);
   assert.equal(r.ex.placed.length, 2);
 });
 
