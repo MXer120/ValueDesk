@@ -25,7 +25,7 @@ still failing after it" came right after a ship: start with that ship (`deploy/.
 
    That stops, within a second on the executor and within 30 s in every open browser tab: every order from
    the site, every copy order, every live algo (held, not cancelled). Stops already resting on SoDEX stay, so
-   positions keep their protection. A bot's quotes come off, as they do on a clean stop (not a bot's order closing what it holds), and it quotes again when the brake lifts. Followers can still pause, stop, stop-and-close and cancel.
+   positions keep their protection. A bot's quotes come off, as they do on a clean stop, and it quotes again when the brake lifts. A bot that is closing what it holds (a clean stop, its loss limit, its end time) keeps closing under the brake: those orders are reduce-only, so they only ever shrink a position. Followers can still pause, stop, stop-and-close and cancel. A VIP move that fails while the brake is on leaves the wallet's bots paused (never resumed under the brake), and the VIP side resumes nothing it takes in while its brake is on.
    Narrower: `brake.sh on copies,algos "..."` (the site keeps trading), `brake.sh on trading "..."`.
 
 2. **Check it took:**
@@ -83,6 +83,7 @@ for the account (the truth about fills), and the consents table (every signed in
 | A server compromised (or suspected) | Brake (all), then stop the executor: `sudo systemctl stop valuescan-executor` | Rotate every secret that box held: `deploy/release/rotate.sh list`, each with a plan first (docs/deploy/SECRETS.md, "After a leak"). The executor's `kek` protects followers' sealed keys: if the box is compromised assume they are exposed - followers must revoke the ValueDesk key on SoDEX (copy setup shows how) and register a new one. Rebuild from git on a fresh box; restore the database from the off-server backup. |
 | Disk full | `df -h`; `journalctl --vacuum-size=...` only as a last resort | The health check warns before it is full. Grow the disk or prune the index. |
 | A sanctioned wallet slipped through | Stop its copies/algos (they are held already when the list matches) | Update the list (`packages/copy-engine` sanctions list and its update script), release, document. |
+| VIP MOVE NOT CONFIRMED / VIP KEY DOES NOT MATCH | No brake needed: the wallet's bots stay paused on the standard executor | Ask the VIP executor how the job ended: `POST /internal/vip/import/status` with `X-Internal-Token` and `{owner, job}` (job id in the alert; `GET /vip/move` as the wallet shows it). `done`: the bots run on VIP - end them on the standard side (handed over) and mark the wallet moved. `failed`/`abandoned`: resume them on the standard side. A key mismatch means `EXECUTOR_VIP_PUBKEY` and the VIP box's import key differ: nothing was sent; check which is right before any move. |
 | Fee or builder charge wrong | No brake needed unless it is still happening | Builder ledger on server 1 (`builder.db`), the fee ladder, the audit log's `builder` field per order. Refund via the builder account if owed. |
 | Vercel down | Nothing on our side | The API and executor keep running; followers' copies and algos keep trading on the executor. |
 

@@ -40,7 +40,9 @@ export type AlertKind =
   | 'crash-restart'
   | 'fatal'
   | 'audit-broken'
-  | 'queue-slow';
+  | 'queue-slow'
+  | 'vip-move-unknown'
+  | 'vip-key-mismatch';
 
 /** Sends one plain-text message; true when it was accepted. Never throws. */
 export type AlertSender = (text: string) => Promise<boolean>;
@@ -68,6 +70,8 @@ const LABEL: Record<AlertKind, string> = {
   fatal: 'EXECUTOR STOPPING ON AN ERROR',
   'audit-broken': 'AUDIT CHAIN BROKEN',
   'queue-slow': 'CLOSES AND STOPS WAITING',
+  'vip-move-unknown': 'VIP MOVE NOT CONFIRMED',
+  'vip-key-mismatch': 'VIP KEY DOES NOT MATCH',
 };
 
 /**
@@ -98,6 +102,8 @@ export const CLASS: Record<AlertKind, AlertClass> = {
   fatal: 'failure',
   'audit-broken': 'failure',
   'queue-slow': 'failure',
+  'vip-move-unknown': 'failure',
+  'vip-key-mismatch': 'failure',
 };
 const head = (c: AlertClass, what: string): string => `${LABELS[c]} · ${what}`;
 

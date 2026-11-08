@@ -46,19 +46,29 @@ SOL, XRP, HYPE) with a queue model put it at 3-5% less cost; live on BTC it was 
 The Bots page has its own setup sheet (components/bots/BotSetupSheet.tsx): the copy setup's steps
 (CopySetupSteps with `bots`), worded for bots - no executor to pick, no sign-in step of its own (the terms step's
 "Sign and accept" signs in to the executor as well; a returning wallet whose terms stand gets "Continue"), the
-risks of a bot, the 0.5 bp fee, "the trading key". Practice: connect, terms. Real: plus the fee and the key.
+risks of a bot, the bot fee (0.5 bp at most), "the trading key". Practice: connect, terms. Real: plus the fee and the key.
 The signed terms text is unchanged (it still names the DCA bot among the bots): changing it would make every
 wallet sign again.
 
 ## The fee
 
-Bots carry **1 tenth of a bp (0.1 bp)** on every order since 2026-11-04 (0.5 bp before; `BOT_FEE`,
-packages/copy-engine/src/policy.ts), so the fee floor is 1.3 bp, $130 per $1M. The terms of 2026-11-02 still name
-0.5 bp: a bot is charged less than they say until their next version. Whatever
-the volume - not the copy ladder (2.5 → 1 bp), which other hosted algos keep. SoDEX charges each order the fee it
-names, up to the account's approved ceiling, so the copy approval (25) already covers it: a user approves nothing
-new. Where the fee is chosen: `ExecutorService.algoFee` (apps/executor/src/service.ts), used by the algo sink's
-builder, the approval check and the fee estimate alike.
+Bots carry the **bot fee ladder** (owner 2026-11-08; `BOT_FEE_LADDER`, packages/copy-engine/src/policy.ts), tenths of
+a bp by the wallet's own 14-day volume:
+
+| 14-day volume | from $0 | $100k | $250k | $500k | $10M |
+|---|---|---|---|---|---|
+| Bot fee | 0.5 bp | 0.4 bp | 0.3 bp | 0.2 bp | 0.1 bp |
+
+Lower than its step: **VIP** ($1M of its own volume in 14 days) pays the lowest step (0.1 bp); so does a **VIP
+program** from server 1 - the beta's 30 days from the wallet's listing (admin/store.ts `activeFeePrograms`, "Beta
+VIP") or one set on the dev page. The executor reads them with the volume (GET /api/vs/builder/volume: `vip`,
+`fees.bots` with its `until`) every 2 minutes; one not read again for 6 hours stops counting. There is one source for
+the beta's 30 days: server 1's (the executor no longer counts its own from the first bot). The fee a wallet pays now
+is on `/me` as `bots: { feeTenths, vip, until }`. The top step (0.5 bp) is what the terms of 2026-11-02 name. Other
+hosted algos keep the copy ladder (2.5 -> 1 bp). SoDEX charges each order the fee it names, up to the account's
+approved ceiling, so the copy approval (25) already covers it: a user approves nothing new. Where the fee is chosen:
+`ExecutorService.algoFee`/`botFee` (apps/executor/src/service.ts), used by the algo sink's builder, the approval
+check and the fee estimate alike.
 
 ## The engine
 
@@ -81,16 +91,38 @@ leverage and gross exposure, blocked regions held), the live allowlist, and the 
 
 ## Live gate
 
-Real bots follow real algos: off for everyone except `EXECUTOR_LIVE_ALGOS_WALLETS` on server 2 (the test
-follower), and the web's `LIVE_ALGOS` switch (apps/web/src/algo/liveAlgos.ts). Practice bots run for everyone
-against the real book and send nothing.
+A **real** bot starts on the hosted executor when, in order (each refusal has a `code` the web maps to a button):
+- the signer's wallet is on the **beta list** (server 1's admin suite, asked as GET /api/vs/builder/beta), from
+  valuedesk.so or beta.valuedesk.so alike, or is one of `EXECUTOR_LIVE_ALGOS_WALLETS` (the test follower) - else
+  `403 beta` ("ask on Discord"). Every answer is kept in the executor's db: when server 1 does not answer, the last
+  known one stands. A running real bot is held only on an explicit "not listed", never because the list was down;
+  a wallet never answered for is refused a new real bot (fails closed).
+- the executor runs fewer than `EXECUTOR_MAX_LIVE_BOTS` real bots, every wallet together (default 10, ~10 bots with
+  pushed fills per IP measured 2026-11-05) - else `429 bot-capacity`;
+- the brake is off; the trading key is registered (`412 key`); the wallet has a SoDEX account (`412 account`);
+- nothing else of the wallet's trades that market: no other real bot (`409 bot-market`), no live algo order
+  (`409 market-algo`), no live copy that holds it, whose leader holds it or whose allow list names the coin
+  (`409 market-copy`), no position the bot did not open (`409 market-position`, read at start);
+- the margin fits: its running real bots (each at its leverage, its market's minimum order, the region's ceiling)
+  plus its live copies' allocations plus this bot's margin are at most the account's equity (`409 margin`, with
+  `detail` {needUsd, freeUsd, reservedUsd, equityUsd}); equity that cannot be read is `503 margin-unknown`. The same
+  check runs on a signed update that makes a bot need more margin, and on a live copy subscribed or raised while real
+  bots run.
+- the wallet's bots are not moving to (`409 vip-moving`) or already on (`409 moved`) the VIP servers.
+Practice bots run for everyone against the real book and send nothing.
+
+The trading key: the engine reads its expiry (host `keyExpiresAt`) and pulls the quotes before it; the wallet gets a
+notice about 24 h and 1 h before a key that real bots use expires (id `key-expiry:24h|1h:...`).
 
 ## Tests
 
 - `packages/copy-engine/test/algo-bots.test.ts`: quotes, skew, cap, grid moves, book and series; the runtime
   against a fake SoDEX: post-only refusals, partial fills, re-price pause, 429s in a row, restart, brake, key
   expiry, the kill switch, volume target and loss limit, stop-and-close, pause/resume, updates.
-- `apps/executor/test/bots.test.ts`: the bot fee (0.5 bp) vs the ladder, the live gate, signed updates, archive.
+- `apps/executor/test/bots.test.ts`: the bot fee ladder vs the copy ladder, the live gate, signed updates, archive.
+- `apps/executor/test/bots-launch.test.ts`: the launch audit's fixes - margin (start, update, copies, unreadable),
+  one market per bot, the real-bot cap, the beta answer kept, key-expiry notices, the fee on /me, refusal codes, the
+  VIP move (pinned key, timeout asked about, all-or-nothing import, brake, restart), calendar stop.
 - `apps/web/src/bots/presets.test.ts`: every preset a valid spec, read-back, patches, cost per $1M.
 - `apps/web/e2e/ui/bots.spec.ts`: the page on desktop and phone, setup to delete, one signature per action.
 - Live: `apps/executor/tools/live-test/scenarios/bots.ts` (`--only 'bot.*' --slow`): `bot.maker`, `bot.grid`,

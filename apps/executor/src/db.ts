@@ -61,6 +61,14 @@ CREATE TABLE IF NOT EXISTS keys (
 CREATE TABLE IF NOT EXISTS terms (owner TEXT PRIMARY KEY, json TEXT NOT NULL) WITHOUT ROWID;
 -- A wallet whose bots moved to the VIP executor (the page then talks to that one).
 CREATE TABLE IF NOT EXISTS moves (owner TEXT PRIMARY KEY, tier TEXT NOT NULL, at INTEGER NOT NULL) WITHOUT ROWID;
+-- The beta list's last answer per wallet (server 1, /api/vs/builder/beta): a server-1 outage keeps the last known
+-- answer instead of holding every real bot; only an explicit "not listed" holds them.
+CREATE TABLE IF NOT EXISTS beta (owner TEXT PRIMARY KEY, listed INTEGER NOT NULL, at INTEGER NOT NULL) WITHOUT ROWID;
+-- VIP moves (vip.ts): the sending side's jobs, so a restart can say how a move ended; the receiving side's imports,
+-- so the sender can ask how one it could not confirm ended (a timeout), and one it gave up on never runs late.
+CREATE TABLE IF NOT EXISTS vip_jobs (id TEXT PRIMARY KEY, owner TEXT NOT NULL, json TEXT NOT NULL, updated_at INTEGER NOT NULL) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS vip_jobs_owner ON vip_jobs (owner, updated_at);
+CREATE TABLE IF NOT EXISTS vip_imports (job TEXT PRIMARY KEY, owner TEXT NOT NULL, state TEXT NOT NULL, json TEXT NOT NULL, at INTEGER NOT NULL) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS consents (
   seq INTEGER PRIMARY KEY AUTOINCREMENT,
   owner TEXT NOT NULL,
@@ -506,6 +514,40 @@ export class ExecutorDb implements CopyStore, AlgoStore, LatencyStore {
   setMoved(owner: string, tier: string | null): void {
     if (tier === null) this.q('DELETE FROM moves WHERE owner = ?').run(owner);
     else this.q('INSERT INTO moves (owner, tier, at) VALUES (?, ?, ?) ON CONFLICT (owner) DO UPDATE SET tier = excluded.tier, at = excluded.at').run(owner, tier, Date.now());
+  }
+
+  /* ----------------------------------------------------------- beta ----- */
+
+  /** The beta list's last answer for a wallet (null: never answered). */
+  betaAnswer(owner: string): { listed: boolean; at: number } | null {
+    const r = this.q('SELECT listed, at FROM beta WHERE owner = ?').get(owner.toLowerCase()) as Row | undefined;
+    return r ? { listed: Number(r.listed) === 1, at: Number(r.at) } : null;
+  }
+
+  setBetaAnswer(owner: string, listed: boolean, at = Date.now()): void {
+    this.q('INSERT INTO beta (owner, listed, at) VALUES (?, ?, ?) ON CONFLICT (owner) DO UPDATE SET listed = excluded.listed, at = excluded.at').run(owner.toLowerCase(), listed ? 1 : 0, at);
+  }
+
+  /* ------------------------------------------------------- vip moves ----- */
+
+  saveVipJob(j: { id: string; owner: string }): void {
+    this.q('INSERT INTO vip_jobs (id, owner, json, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT (id) DO UPDATE SET json = excluded.json, updated_at = excluded.updated_at').run(j.id, j.owner, JSON.stringify(j), Date.now());
+  }
+
+  /** Every move job (newest first), or one wallet's. */
+  vipJobs<T>(owner?: string): T[] {
+    const rows = owner ? (this.q('SELECT json FROM vip_jobs WHERE owner = ? ORDER BY updated_at DESC').all(owner) as Row[]) : (this.q('SELECT json FROM vip_jobs ORDER BY updated_at DESC').all() as Row[]);
+    return rows.map((r) => JSON.parse(String(r.json)) as T);
+  }
+
+  /** The receiving side's record of one move: 'running', 'done', 'failed' or 'abandoned' (the sender gave up on it first). */
+  vipImport(job: string): { owner: string; state: string; data: Record<string, unknown>; at: number } | null {
+    const r = this.q('SELECT owner, state, json, at FROM vip_imports WHERE job = ?').get(job) as Row | undefined;
+    return r ? { owner: String(r.owner), state: String(r.state), data: JSON.parse(String(r.json)) as Record<string, unknown>, at: Number(r.at) } : null;
+  }
+
+  setVipImport(job: string, owner: string, state: string, data: Record<string, unknown> = {}): void {
+    this.q('INSERT INTO vip_imports (job, owner, state, json, at) VALUES (?, ?, ?, ?, ?) ON CONFLICT (job) DO UPDATE SET state = excluded.state, json = excluded.json, at = excluded.at').run(job, owner, state, JSON.stringify(data), Date.now());
   }
 
   /** A wallet's signed record (its terms and every request it signed), for a VIP move. */

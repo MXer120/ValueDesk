@@ -12,7 +12,11 @@
  *   finish  here the bots end as handed over (nothing closed), the key is dropped, the wallet is marked moved
  *
  * Both executors keep the same executor id, so every signature the wallet made reads the same on both. A failure
- * before the VIP side took the bots resumes them here.
+ * the VIP side confirms (its import failed, or it gave the job up) resumes the bots here - never under the brake. A
+ * send that was not answered cleanly (a timeout) is asked about (POST /internal/vip/import/status, which also gives
+ * up a job not begun), never guessed: with no answer the bots stay paused (outcome 'unknown') and the operator is told.
+ * The move runs inside the wallet's queue; its starts and resumes are refused while it runs; jobs are kept in the db.
+ * The key is sealed only to the pinned EXECUTOR_VIP_PUBKEY, and EXECUTOR_VIP_URL must be https (or loopback).
  */
 import { randomBytes } from 'node:crypto';
 
@@ -29,6 +33,11 @@ export interface VipJob {
   error: string | null;
   /** The VIP executor's read token for this wallet (only to its owner): the page goes on there without signing again. */
   session: { token: string; expiresAt: number } | null;
+  /**
+   * How it ended for the bots: moved (the VIP side took them), not-moved (it did not; they resumed here unless the
+   * brake is on), unknown (the VIP side did not confirm either way: they stay paused here, the operator is told).
+   */
+  outcome?: 'moved' | 'not-moved' | 'unknown';
 }
 
 export const VIP_STEPS: Array<{ id: VipStepId; label: string }> = [

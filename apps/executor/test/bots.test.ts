@@ -97,7 +97,7 @@ test('bots: a practice bot starts for anyone; a live one only for the wallets re
   assert.equal(v.algo.spec.kind, 'mm');
   assert.equal(v.algo.spec.bot, true);
   assert.ok(v.bot, 'its view carries the bot figures');
-  assert.equal(await code(svc.algoStart(w.sign(svc.executorId, 'algo-start', { spec: { ...MM, paper: false }, seed: 3 }), ctx)), '403:paper-only');
+  assert.equal(await code(svc.algoStart(w.sign(svc.executorId, 'algo-start', { spec: { ...MM, maxLossUsd: 50, paper: false }, seed: 3 }), ctx)), '403:beta');
   // Several practice bots on one market are fine (nothing reaches SoDEX).
   await svc.algoStart(w.sign(svc.executorId, 'algo-start', { spec: { kind: 'grid', symbol: 'BTC-USD', low: 50_000, high: 70_000, levels: 10, orderUsd: 20, paper: true }, seed: 4 }), ctx);
   assert.equal(svc.algoList(w.address).length, 2);
@@ -146,14 +146,14 @@ test('bots: real bots only for a listed wallet, on the beta site or the main one
   const beta = { viewerCountry: 'SG', channel: 'beta' as const };
   const main = { viewerCountry: 'SG', channel: 'main' as const };
   for (const x of [w, other]) svc.acceptTerms(x.sign(svc.executorId, 'accept-terms', TERMS), main);
-  const live = { ...MM, paper: false };
+  const live = { ...MM, maxLossUsd: 50, paper: false };
   BETA = [w.address];
   // Listed, from beta or from the main site: past the gate - it stops at the key it has not registered yet.
   assert.equal(await code(svc.algoStart(w.sign(svc.executorId, 'algo-start', { spec: live, seed: 1 }), beta)), '412:key');
   assert.equal(await code(svc.algoStart(w.sign(svc.executorId, 'algo-start', { spec: live, seed: 2 }), main)), '412:key');
   // A wallet that is not listed: refused from either.
-  assert.equal(await code(svc.algoStart(other.sign(svc.executorId, 'algo-start', { spec: live, seed: 3 }), beta)), '403:paper-only');
-  assert.equal(await code(svc.algoStart(other.sign(svc.executorId, 'algo-start', { spec: live, seed: 6 }), main)), '403:paper-only');
+  assert.equal(await code(svc.algoStart(other.sign(svc.executorId, 'algo-start', { spec: live, seed: 3 }), beta)), '403:beta');
+  assert.equal(await code(svc.algoStart(other.sign(svc.executorId, 'algo-start', { spec: live, seed: 6 }), main)), '403:beta');
   // A live algo that is not a bot is not opened by the beta list.
   assert.equal(await code(svc.algoStart(w.sign(svc.executorId, 'algo-start', { spec: { kind: 'twap', symbol: 'BTC-USD', side: 'buy', quantity: '0.01', durationMs: 600_000, slices: 10 }, seed: 4 }), beta)), '403:paper-only');
   await cleanup();
@@ -162,7 +162,7 @@ test('bots: real bots only for a listed wallet, on the beta site or the main one
   const b = make({ EXECUTOR_BUILDER_URL: 'http://127.0.0.1:9/api/vs/builder/volume', EXECUTOR_BUILDER_TOKEN: 't' });
   const z = new Wallet();
   b.svc.acceptTerms(z.sign(b.svc.executorId, 'accept-terms', TERMS), main);
-  assert.equal(await code(b.svc.algoStart(z.sign(b.svc.executorId, 'algo-start', { spec: live, seed: 5 }), beta)), '403:paper-only');
+  assert.equal(await code(b.svc.algoStart(z.sign(b.svc.executorId, 'algo-start', { spec: live, seed: 5 }), beta)), '403:beta');
   await b.cleanup();
   BETA = [];
 });

@@ -11,15 +11,21 @@ const RETRY_MS = 60_000;
 export class CalendarFeed {
   private list: NewsEvent[] | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
+  /** Between start() and stop(): a read that was under way when stop() came does not arm the next one. */
+  private active = false;
+  private reading = false;
 
   constructor(private readonly opts: { url: string; fetch: FetchLike; log?: { warn(msg: string, data?: Record<string, unknown>): void } }) {}
 
   start(): void {
-    if (this.timer) return;
+    this.active = true;
+    // A read under way arms the next one itself.
+    if (this.timer || this.reading) return;
     void this.read();
   }
 
   stop(): void {
+    this.active = false;
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
   }
@@ -30,6 +36,8 @@ export class CalendarFeed {
 
   private async read(): Promise<void> {
     let next = EVERY_MS;
+    this.timer = null;
+    this.reading = true;
     try {
       const now = Date.now();
       const u = new URL(this.opts.url);
@@ -48,7 +56,11 @@ export class CalendarFeed {
     } catch (err) {
       next = RETRY_MS;
       this.opts.log?.warn('calendar read failed; the news gate keeps the last list', { err: err instanceof Error ? err.message : String(err) });
+    } finally {
+      this.reading = false;
     }
+    // Stopped while this read was out: nothing is armed (a later start() reads again).
+    if (!this.active) return;
     this.timer = setTimeout(() => void this.read(), next);
     this.timer.unref?.();
   }

@@ -310,6 +310,12 @@ export function createExecutorServer(svc: ExecutorService, cfg: ExecutorConfig, 
         if (!cfg.vipToken || !safeEqual(cfg.vipToken, token)) throw new ApiError(404, 'path', 'not found');
         return send(res, 200, await svc.vipImport(await readJson(req)));
       }
+      // The standard side asks how a move it could not confirm ended (a send that timed out): never resumed on a guess.
+      if (req.method === 'POST' && route === '/internal/vip/import/status') {
+        const token = String(req.headers['x-internal-token'] ?? '');
+        if (!cfg.vipToken || !safeEqual(cfg.vipToken, token)) throw new ApiError(404, 'path', 'not found');
+        return send(res, 200, svc.vipImportStatus(await readJson(req)));
+      }
       if (req.method === 'GET' && route === '/me') return send(res, 200, svc.me(svc.authenticate(bearer(req)), ctx));
       if (req.method === 'GET' && route === '/consents') return send(res, 200, { consents: svc.consents(svc.authenticate(bearer(req))) });
       if (req.method === 'GET' && route === '/algos') {
@@ -359,7 +365,8 @@ export function createExecutorServer(svc: ExecutorService, cfg: ExecutorConfig, 
     } catch (e) {
       const err = e instanceof ApiError ? e : new ApiError(500, 'internal', 'Something went wrong in the executor.');
       if (!(e instanceof ApiError)) log.error('executor: request failed', { path, error: String(e) });
-      send(res, err.status, { ok: false, code: err.code, error: err.message });
+      // A refusal's figures (a bot's margin: what it needs, what is free) go with it, for the page to show.
+      send(res, err.status, { ok: false, code: err.code, error: err.message, ...(err.detail ? { detail: err.detail } : {}) });
     } finally {
       if (path !== `${PREFIX}/health`) log.debug('request', { method: req.method, path, ms: Date.now() - t0, status: res.statusCode });
       // Every write, and every read that was refused, into the audit log: who asked for what, from where, and the answer.

@@ -29,6 +29,10 @@
  *   EXECUTOR_KEY_TTL_DAYS    the longest key lifetime a follower may register (default and at most 180)
  *   EXECUTOR_MAX_COPIES      copies per wallet (default 10)
  *   EXECUTOR_MAX_ALGOS       live algo orders (TWAP, VWAP, ...) per wallet (default 20)
+ *   EXECUTOR_MAX_LIVE_BOTS   real (non-practice) bots running on this executor, all wallets together (default 10:
+ *                            ~10 bots with pushed fills per IP, measured 2026-11-05); a start past it is a 429
+ *   EXECUTOR_VIP_PUBKEY      standard tier: the VIP executor's key-import public key (base64url SPKI, as its /info
+ *                            shows it); a move seals the wallet's key only to this key, never to one read over the wire
  *   EXECUTOR_BUILDER_DB      hosted: the builder ledger (read-only) the copy fee tier is read from, when
  *                            it is on this server
  *   EXECUTOR_BUILDER_URL     hosted: or the API server's GET /api/vs/builder/volume, when the ledger is on
@@ -63,6 +67,8 @@ export interface ExecutorConfig {
   keyTtlDaysMax: number;
   maxCopiesPerOwner: number;
   maxAlgosPerOwner: number;
+  /** Real bots running on this executor, every wallet together (EXECUTOR_MAX_LIVE_BOTS, default 10). */
+  maxLiveBots: number;
   builderDb: string | null;
   /** The API's builder volume route and its internal token (the ledger on another server). */
   builderUrl: string | null;
@@ -91,6 +97,8 @@ export interface ExecutorConfig {
   vipUrl: string | null;
   vipCheckUrl: string | null;
   vipOpen: boolean;
+  /** EXECUTOR_VIP_PUBKEY: the VIP executor's pinned key-import public key; unset: no move (the key would go to whatever /info says). */
+  vipPubkey: string | null;
   localAddress: string | null;
   logLevel: 'debug' | 'info' | 'warn' | 'error';
   /** The executor id requests are signed for; null = the default (hosted: by network; self: its own, kept in its data). */
@@ -175,6 +183,14 @@ export function vipCheckUrlFrom(raw: string | undefined, builderRaw: string | un
   return u.toString();
 }
 
+/** EXECUTOR_VIP_PUBKEY: a base64url SPKI (a P-256 public key is 91 bytes, ~122 characters); unset: null. */
+export function vipPubkeyFrom(raw: string | undefined): string | null {
+  const v = raw?.trim();
+  if (!v) return null;
+  if (!/^[A-Za-z0-9_-]{60,400}$/.test(v)) throw new Error('EXECUTOR_VIP_PUBKEY must be the VIP executor key-import public key (base64url, as its /info shows keyImport.publicKey)');
+  return v;
+}
+
 /** EXECUTOR_LIVE_ALGOS_WALLETS: unset is no wallet; '*' every wallet; else a list of addresses. */
 export function liveAlgoWalletsFrom(raw: string | undefined): readonly string[] | '*' {
   const s = raw?.trim() ?? '';
@@ -232,6 +248,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ExecutorConfig
     keyTtlDaysMax: Number.isFinite(ttl) && ttl >= 1 ? Math.min(Math.floor(ttl), 180) : 180,
     maxCopiesPerOwner: Math.max(1, Math.min(50, Number(env.EXECUTOR_MAX_COPIES ?? 10) || 10)),
     maxAlgosPerOwner: Math.max(1, Math.min(100, Number(env.EXECUTOR_MAX_ALGOS ?? 20) || 20)),
+    maxLiveBots: Math.max(1, Math.min(1000, Math.floor(Number(env.EXECUTOR_MAX_LIVE_BOTS ?? 10)) || 10)),
     builderDb: env.EXECUTOR_BUILDER_DB?.trim() || null,
     builderUrl: builderUrl(env.EXECUTOR_BUILDER_URL),
     builderToken: env.EXECUTOR_BUILDER_TOKEN?.trim() || null,
@@ -242,6 +259,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ExecutorConfig
     vipUrl: env.EXECUTOR_VIP_URL?.trim() ? builderUrl(env.EXECUTOR_VIP_URL) : null,
     vipCheckUrl: vipCheckUrlFrom(env.EXECUTOR_VIP_CHECK_URL, env.EXECUTOR_BUILDER_URL),
     vipOpen: env.EXECUTOR_VIP_OPEN?.trim() === '1',
+    vipPubkey: vipPubkeyFrom(env.EXECUTOR_VIP_PUBKEY),
     localAddress: env.EXECUTOR_LOCAL_ADDRESS?.trim() || null,
     logLevel: level === 'debug' || level === 'warn' || level === 'error' ? level : 'info',
     executorId,

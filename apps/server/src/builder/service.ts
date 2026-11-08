@@ -17,7 +17,7 @@
  * timer but the one that looks for the file, and the answer says so.
  */
 import { AdminStore, type FeeProgram } from '../admin/store.js';
-import { lowered, soonestEnd, type Lowered } from './programs.js';
+import { VIP_PROGRAM_FEE, lowered, soonestEnd, type Lowered } from './programs.js';
 import { channelFrom } from '../beta/gate.js';
 import { NET, NETWORK } from '../config.js';
 import { sodex } from '../sodex/rest.js';
@@ -290,6 +290,20 @@ export class BuilderService {
   /** Whether a wallet is VIP now ($1M of its own volume in 14 days): read from the ledger on every ask. */
   vipNow(address: string): boolean {
     return isVip(this.vipOf(address.toLowerCase()));
+  }
+
+  /**
+   * The VIP program running for this wallet now (a program whose fee is VIP_PROGRAM_FEE: the beta's 30 days from its
+   * listing, or one set on the dev page), or null. Of several, the one that lasts longest (no end counts longest).
+   * Told by its fee, never by its label (a label is free text on the dev page).
+   */
+  vipProgramOf(address: string, now = this.now()): FeeProgram | null {
+    let best: FeeProgram | null = null;
+    for (const g of this.programsOf(address.toLowerCase(), now)) {
+      if (g.fee !== VIP_PROGRAM_FEE || g.from > now || (g.until !== null && g.until <= now)) continue;
+      if (!best || (best.until !== null && (g.until === null || g.until > best.until))) best = g;
+    }
+    return best;
   }
 
   /** What VIP and the running programs lower each product to, for this wallet now (programs.ts). */

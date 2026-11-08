@@ -143,9 +143,9 @@ export async function builderRoutes(app: FastifyInstance, opts: BuilderRouteOpti
     if (typeof q.address !== 'string' || !ADDRESS_RE.test(q.address)) return reply.code(400).send({ ok: false, error: 'a valid 0x wallet address is required' });
     const v = service.vipOf(q.address.toLowerCase());
     if (!v) return reply.code(503).send({ ok: false, code: 'unavailable', error: 'the builder ledger is not open' });
-    // A VIP program covers futures too; the volume milestone alone lowers only bots (builder/programs.ts).
-    const perps = service.loweredFor(q.address.toLowerCase()).fees.perps;
-    const promo = perps && /VIP/.test(perps.why) ? { until: perps.until, label: perps.why } : null;
+    // A VIP program (fee VIP_PROGRAM_FEE: the beta's 30 days, or one from the dev page) - told by its fee, not its label.
+    const g = service.vipProgramOf(q.address.toLowerCase());
+    const promo = g ? { until: g.until, label: g.label || 'VIP program' } : null;
     return { ok: true, eligible: isVip(v) || !!promo, volumeUsd: v.volumeUsd, minUsd: VIP_MIN_USD, days: VIP_DAYS, promo };
   });
 
