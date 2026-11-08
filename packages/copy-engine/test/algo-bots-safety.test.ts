@@ -588,3 +588,18 @@ test('notices: a bot is named by its label, else "Market maker / Grid on SYMBOL"
   const g = await add(r, { kind: 'grid', low: 59_000, high: 61_000, levels: 5, orderUsd: 30, maxLossUsd: 100, label: 'My grid' });
   assert.equal(algoName(g), 'My grid');
 });
+
+test('a bot whose position was closed outside it (by hand, a stop, a liquidation): booked closed at the mark, PnL unchanged, quotes on from flat (owner 2026-11-08)', async () => {
+  const r = await rig();
+  const a = await holding(r);
+  const before = r.rt.view(a.id)!.bot!;
+  assert.ok(before.inventory > 0);
+  r.ex.position = 0; // closed on SoDEX by hand
+  for (let i = 0; i < 3; i++) await step(r, a.id, 31_000);
+  const b = r.rt.get(a.id)!;
+  assert.equal(b.status, 'running');
+  const v = r.rt.view(a.id)!.bot!;
+  assert.ok(Math.abs(v.inventory) < 1e-12, 'booked flat');
+  const log = (await r.rt.events(a.id, { limit: 200 })).map((e) => e.text).join(' | ');
+  assert.match(log, /closed outside it/);
+});

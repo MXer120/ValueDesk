@@ -145,6 +145,10 @@ const LIMIT_WORDS_MS = 10 * 60_000;
 const PROBLEM_RECHECK_MS = 60_000;
 /** pollOrders: at most one REST read of open orders this often for the whole runtime (60 a minute, a fraction of the per-IP budget)... */
 const ORDER_POLL_SPACING_MS = 1_000;
+/** After a restart or a drop (resync), orders are read this often instead, so 20 bots are known again in seconds. */
+const ORDER_RESYNC_SPACING_MS = 200;
+/** A real bot's holding is checked against the account's position this often (positionConfirmed: reads that agree). */
+const BOT_POSITION_CHECK_MS = 30_000;
 /** ...each algo at most this often... */
 const ORDER_POLL_MIN_MS = 3_000;
 /** ...and the socket's places are given out again (by what each wallet has on the book) this often. */
@@ -635,7 +639,7 @@ export class AlgoRuntime {
    * (settleStale), so no fill is lost.
    */
   async pollOrders(now = Date.now()): Promise<void> {
-    if (this.polling || now - this.lastPollAt < ORDER_POLL_SPACING_MS) return;
+    if (this.polling || now - this.lastPollAt < (this.resync.size ? ORDER_RESYNC_SPACING_MS : ORDER_POLL_SPACING_MS)) return;
     if (now - this.watchedAt >= ORDER_WATCH_EVERY_MS) {
       this.watchedAt = now;
       this.syncWatch();
@@ -1879,6 +1883,7 @@ export class AlgoRuntime {
     const mk = this.market.mark(a.spec.symbol)?.mark ?? (q ? mid(q) : null);
     const b = (a.book ??= emptyBook());
     if (mk !== null && sampleBook(b, mk, now)) this.dirty.add(a.id);
+    if (!a.k.closing && mk !== null) await this.checkOutside(a, m, mk, now);
     if (!a.k.closing) await this.botLimitsHit(a, mk, now);
     if (FINAL_STATUSES.has(a.status)) return true;
     if (!a.k.closing) return false;
@@ -1903,6 +1908,55 @@ export class AlgoRuntime {
     await this.stepBotClose(a, m, q, mk, now);
     if (!this.heldNow.has(a.id) && !FINAL_STATUSES.has(a.status)) await this.run(a);
     return true;
+  }
+
+  /**
+   * The bot's holding against the account's position on its market (owner 2026-11-08: "position closed outside it -
+   * handle it well"). A bot runs only where nothing else of the wallet trades, so the two agree unless something
+   * outside it moved the position: a close by hand, a liquidation, a stop. Every BOT_POSITION_CHECK_MS, when nothing
+   * of its own is in flight, the position is read until the reads agree (positionConfirmed), then:
+   *   - closed outside (flat): the bot's holding is booked closed at the mark (its PnL stays what it was at that price),
+   *     and it quotes on from flat - its resting quotes are pulled and placed again;
+   *   - reduced outside (same side, smaller): booked down to what the account holds;
+   *   - grown or turned outside (a trade by hand): left alone - that position is yours, the bot manages its own part
+   *     only (said once).
+   * Each case is in its log and a notice.
+   */
+  private async checkOutside(a: AlgoRecord, m: MarketInfo, mk: number, now: number): Promise<void> {
+    if (a.spec.paper || !a.book || a.status !== 'running') return;
+    if (now - Number(a.k.posCheckAt ?? 0) < BOT_POSITION_CHECK_MS) return;
+    // Something of its own in flight (sending, unknown, a cancel, a fill seconds ago): its own fills explain a gap.
+    if (this.live(a).some((c) => c.state !== 'open' || c.cancelling) || now - Number(a.k.lastFillAt ?? 0) < 5_000) return;
+    a.k.posCheckAt = now;
+    const inv = bookInventory(a.book);
+    const pos = await this.positionConfirmed(a, a.spec.symbol);
+    if (pos === null || pos === 'disagree') return;
+    const step = Number(m.stepSize);
+    if (Math.abs(pos - inv) < step / 2) {
+      delete a.k.outsideSaid;
+      return;
+    }
+    const same = Math.sign(pos) === Math.sign(inv) || Math.abs(pos) < step / 2;
+    if (Math.abs(inv) >= step / 2 && same && Math.abs(pos) < Math.abs(inv)) {
+      // Closed or reduced outside: book the difference closed at the mark.
+      const gone = inv - pos;
+      a.book.carryQty = (a.book.carryQty ?? 0) - gone;
+      a.book.carryValue = (a.book.carryValue ?? 0) - gone * mk;
+      this.dirty.add(a.id);
+      await this.pullResting(a);
+      const flat = Math.abs(pos) < step / 2;
+      const text = flat
+        ? `Its ${m.name} position (${dec(Math.abs(inv))} ${m.base}) was closed outside it (by hand, a stop or a liquidation): booked closed at ${dec(mk)}. It quotes on from flat.`
+        : `Its ${m.name} position was reduced outside it, from ${dec(inv)} to ${dec(pos)} ${m.base}: the difference is booked closed at ${dec(mk)}.`;
+      await this.event(a, 'info', text);
+      this.host.onNotice?.({ id: `algo:${a.id}:closed:${now}`, owner: a.owner, source: 'algo', ref: a.id, kind: 'closed', grade: 'warn', title: `${algoName(a)}: position ${flat ? 'closed' : 'reduced'} outside it`, body: text, at: now, paper: false });
+      return;
+    }
+    if (!a.k.outsideSaid) {
+      a.k.outsideSaid = true;
+      this.dirty.add(a.id);
+      await this.event(a, 'info', `Your ${m.name} position (${dec(pos)} ${m.base}) is more than this bot holds (${dec(inv)}): the rest is yours, and the bot manages only its own part.`);
+    }
   }
 
   /**
@@ -3864,6 +3918,7 @@ export class AlgoRuntime {
     a.fees += dv * rate;
     if (a.spec.bot) {
       a.book ??= emptyBook();
+      a.k.lastFillAt = Date.now();
       bookFill(a.book, c.side, dq, dv, isMaker, tradeRate, this.host.builderRate?.(a) ?? 0);
     }
     if (a.k.consecRejects) a.k.consecRejects = 0;
