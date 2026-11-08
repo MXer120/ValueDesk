@@ -547,7 +547,7 @@ export function refusalOf(code: string | null | undefined, message: string, many
     case 'beta': return { text: 'Real bots are open to beta testers only for now. Run it as practice, or ask on Discord to be added.', action: 'discord', label: 'Ask on Discord' };
     case 'limit': return { text: 'You already run the most bots and algo orders allowed at once. Stop one first.', action: 'stop-other', label: 'See my bots' };
     case 'margin': return { text: `Your futures account does not have enough free margin for ${it}. Lower the order size or max holding, deposit more, or stop another bot or copy.`, action: 'deposit', label: 'Deposit' };
-    case 'bot-market': return { text: 'You already run a real bot on this market. Stop it first, or pick another market.', action: 'stop-other', label: 'Stop the other bot' };
+    case 'bot-leverage': return { text: `${message} Change the leverage in Size & risk.`, action: 'size', label: 'Change the leverage' };
     case 'live-cap': return { text: 'Real bots are full on our servers right now. Run it as practice, or ask on Discord when a place opens.', action: 'discord', label: 'Ask on Discord' };
     case 'move': return { text: 'Your bots are moving to another server right now. Wait for the move to finish, then start again.', action: null, label: null };
     case 'spec':

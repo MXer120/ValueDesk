@@ -18,6 +18,7 @@ import {
   bookFill,
   bookNet,
   bookVolume,
+  bookInventory,
   costPerMillion,
   sampleBook,
   BOT_SERIES_MAX,
@@ -153,7 +154,10 @@ class Exchange implements AlgoSink {
       const q = this.m.q;
       const touch = o.side === 'buy' ? q.ask : q.bid;
       const crosses = o.side === 'buy' ? Number(o.price) >= touch : Number(o.price) <= touch;
-      if (o.tif === 'gtx' && crosses) {
+      // SoDEX judges reduce-only against the account's whole position: one that would grow it is refused.
+      if (o.reduceOnly && (o.side === 'sell' ? this.position <= 1e-12 : this.position >= -1e-12)) {
+        setImmediate(() => this.m.order({ clOrdID: o.clOrdID, status: 'REJECTED', reason: 'reduce only order would increase position' }));
+      } else if (o.tif === 'gtx' && crosses) {
         setImmediate(() => this.m.order({ clOrdID: o.clOrdID, status: 'REJECTED', reason: 'post only order would take' }));
       } else if (o.tif === 'ioc') {
         let qty = crosses ? Number(o.quantity) : 0;
@@ -1280,4 +1284,92 @@ test('smart margining: a copy sets aside its allocation while it can hold positi
   assert.equal(botReserveUsd(maker), 100);
   assert.ok(copyReserveUsd(c('active', 400)) + botReserveUsd(maker) <= 500);
   assert.ok(copyReserveUsd(c('active', 450)) + botReserveUsd(maker) > 500);
+});
+
+/* ------------------------------------------- several bots on one market (owner 2026-11-08) ----- */
+
+const addSeed = (r: Rig, spec: Record<string, unknown>, seed: number) => r.rt.add({ owner: FOLLOWER, accountId: 42, mode: 'hosted', spec: { symbol: 'BTC-USD', ...spec }, seed });
+const ofBot = (r: Rig, id: string, side: 'buy' | 'sell') => r.ex.side(side).filter((x) => x.clOrdID.includes(id.slice(1, 13)));
+
+test('two bots of one wallet on one market: each unwinds only what it bought itself, without the SoDEX flag; a stopping one never takes into the other', async () => {
+  const r = await rig();
+  const a = await addSeed(r, MM, 11);
+  const b = await addSeed(r, MM, 12);
+  assert.notEqual(a.id, b.id);
+  await step(r, a.id);
+  await step(r, b.id);
+  // A buys once; B holds nothing.
+  r.ex.fill(ofBot(r, a.id, 'buy')[0]!.clOrdID);
+  await settle();
+  await step(r, a.id, 4_000);
+  await step(r, b.id);
+  const held = bookInventory(r.rt.get(a.id)!.book!);
+  assert.ok(held > 0);
+  assert.equal(bookInventory(r.rt.get(b.id)!.book!), 0, 'the fill of A is not in the book of B');
+  const asks = ofBot(r, a.id, 'sell');
+  assert.equal(asks.length, 1);
+  assert.equal(asks[0]!.reduceOnly, false, 'sharing its market, it unwinds without the SoDEX reduce-only flag');
+  assert.ok(Number(asks[0]!.quantity) <= held + 1e-12, 'never more than it holds itself');
+  // A stops: after a minute its taker stops one tick short of B's bid (never trading with the wallet's own bot).
+  const bBid = ofBot(r, b.id, 'buy')[0]!;
+  assert.equal(Number(bBid.price), 60_000);
+  await r.rt.cancel(a.id);
+  await settle();
+  await step(r, a.id, 500);
+  await step(r, a.id, 61_000);
+  await step(r, a.id, 500);
+  await step(r, a.id, 500);
+  const takes = r.ex.placed.filter((o) => o.clOrdID.includes(a.id.slice(1, 13)) && o.tif === 'ioc');
+  assert.ok(takes.every((o) => Number(o.price) > 60_000), 'no taker priced into its own other bot');
+  assert.ok(r.ex.resting.has(bBid.clOrdID), 'the bid of B untouched');
+  assert.equal(r.rt.otherBotWall(r.rt.get(a.id)!, 'BTC-USD', 'sell'), 60_000);
+});
+
+test('a position the wallet opened by hand is left alone: SoDEX refusing the reduce-only close makes the bot close only its own holding', async () => {
+  const r = await rig();
+  r.ex.position = -0.01; // the wallet's own short, opened by hand
+  const a = await addSeed(r, MM, 21);
+  await step(r, a.id);
+  r.ex.fill(ofBot(r, a.id, 'buy')[0]!.clOrdID);
+  await settle();
+  const held = bookInventory(r.rt.get(a.id)!.book!);
+  assert.ok(held > 0);
+  const before = r.ex.placed.length;
+  await r.rt.cancel(a.id);
+  await settle();
+  // Its close goes out reduce-only (alone on the market); SoDEX refuses it: the account is short.
+  for (let i = 0; i < 6 && !ofBot(r, a.id, 'sell').length; i++) await step(r, a.id, 1_500);
+  const sent = r.ex.placed.slice(before).filter((o) => o.clOrdID.includes(a.id.slice(1, 13)));
+  assert.ok(sent[0]?.reduceOnly, 'first try with the flag');
+  assert.equal(r.rt.get(a.id)!.k.plainReduce, true, 'a position is there that is not only the holding of the bot');
+  const close = ofBot(r, a.id, 'sell')[0]!;
+  assert.equal(close.reduceOnly, false);
+  assert.ok(Math.abs(Number(close.quantity) - held) < 1e-12, 'exactly what it bought');
+  r.ex.fill(close.clOrdID);
+  await settle();
+  await step(r, a.id, 500);
+  assert.ok(Math.abs(r.ex.position - -0.01) < 1e-12, 'the own short of the wallet is as it was');
+  assert.equal(r.rt.get(a.id)!.status, 'cancelled');
+  const log = (await r.rt.events(a.id, { limit: 500 })).map((e) => e.text).join(' | ');
+  assert.match(log, /unwinds only what it bought or sold itself and leaves the rest of the position alone/);
+});
+
+test('a bot alone on its market whose holding was closed by hand: the reduce-only close is refused, the account reads flat, and it ends instead of opening the other way', async () => {
+  const r = await rig();
+  const a = await addSeed(r, MM, 31);
+  await step(r, a.id);
+  r.ex.fill(ofBot(r, a.id, 'buy')[0]!.clOrdID);
+  await settle();
+  r.ex.position = 0; // closed on SoDEX by hand
+  const before = r.ex.placed.length;
+  await r.rt.cancel(a.id);
+  await settle();
+  for (let i = 0; i < 12 && r.rt.get(a.id)!.status === 'running'; i++) await step(r, a.id, 5_000);
+  const end = r.rt.get(a.id)!;
+  assert.equal(end.status, 'cancelled');
+  assert.match(end.statusReason ?? '', /not there any more/);
+  assert.equal(end.k.plainReduce, undefined, 'never switched to unwinding without the flag');
+  assert.ok(Math.abs(r.ex.position) < 1e-12, 'nothing opened the other way');
+  const closes = r.ex.placed.slice(before).filter((o) => o.clOrdID.includes(a.id.slice(1, 13)));
+  assert.ok(closes.length >= 1 && closes.every((o) => o.reduceOnly && o.side === 'sell'), 'every close went with the flag');
 });

@@ -230,14 +230,16 @@ export class ApiError extends Error {
  *   bot-capacity     this executor's real-bot cap      -> try later / practice
  *   margin           the account cannot hold it        -> detail {needUsd, freeUsd, reservedUsd, equityUsd}; lower size
  *   margin-unknown   SoDEX's balance did not answer    -> try again
- *   bot-market       another bot of the wallet on it   -> stop that bot (detail {algoId})
+ *   bot-leverage     another real bot of the wallet on that market uses another leverage (SoDEX keeps one per
+ *                    market and account)                -> use its leverage (detail {algoId, leverage})
  *   market-copy      a copy trades that market         -> stop the copy (detail {copyId})
  *   market-algo      an algo order runs on it          -> cancel it (detail {algoId})
- *   market-position  a position the bot did not open   -> close it (detail {symbol, size})
+ * Several bots may share a market, and a position the wallet holds there is left alone: each bot unwinds only what it
+ * bought or sold itself (owner 2026-11-08; runtime.ts send / botRefused).
  *   vip-moving       a VIP move runs for the wallet    -> wait
  *   moved            the wallet's bots run on VIP      -> open the VIP servers
  */
-export type BotRefusalCode = 'key' | 'account' | 'beta' | 'limit' | 'bot-capacity' | 'margin' | 'margin-unknown' | 'bot-market' | 'market-copy' | 'market-algo' | 'market-position' | 'vip-moving' | 'moved';
+export type BotRefusalCode = 'key' | 'account' | 'beta' | 'limit' | 'bot-capacity' | 'margin' | 'margin-unknown' | 'bot-leverage' | 'market-copy' | 'market-algo' | 'vip-moving' | 'moved';
 
 const usd = (x: number) => `$${Math.round(x).toLocaleString('en-US')}`;
 
@@ -1679,11 +1681,11 @@ export class ExecutorService {
   }
 
   /**
-   * A3: a real bot does not share its market with anything else of the wallet's - its inventory, cap and close come
-   * from its own fills, so another copy, algo or position on that market would be traded as if it were the bot's.
-   * `old`: the bot a restart replaces (what it holds is the new one's to take over or close).
+   * A3: a real bot does not share its market with a copy or an algo order of the wallet's. A copy follows the account's
+   * position on SoDEX (it would take a bot's holding as its own), and an algo order may close the whole position. Other
+   * bots and a position you hold are fine: each bot unwinds only its own fills (owner 2026-11-08).
    */
-  private marketConflict(owner: string, spec: AlgoSpec, live: AlgoRecord[], positions: Record<string, { size: number }> | null, old: AlgoRecord | null): void {
+  private marketConflict(owner: string, spec: AlgoSpec, live: AlgoRecord[]): void {
     const sym = spec.symbol;
     const coin = coinOf('sodex', sym);
     const algo = live.find((x) => x.spec?.bot !== true && !x.spec.paper && algoSymbols(x.spec).includes(sym));
@@ -1698,10 +1700,6 @@ export class ExecutorService {
         const who = `${c.settings.leader.address.slice(0, 6)}…${c.settings.leader.address.slice(-4)}`;
         throw new ApiError(409, 'market-copy', `Your copy of ${who} trades ${sym}. Stop that copy, or start the bot on another market: both would trade the same position.`, { copyId: c.id, symbol: sym });
       }
-    }
-    const pos = positions?.[sym];
-    if (pos && pos.size !== 0 && !(old && old.spec.symbol === sym)) {
-      throw new ApiError(409, 'market-position', `You hold a ${sym} position (${pos.size}) that this bot did not open. Close it first, or pick another market: a bot only manages what it opened itself.`, { symbol: sym, size: pos.size });
     }
   }
 
@@ -1756,10 +1754,14 @@ export class ExecutorService {
       if (spec.bot) throw new ApiError(429, 'limit', `You already run ${live.length} bots and orders here; ${this.cfg.maxAlgosPerOwner} is the most at once. Stop one first.`);
       throw new ApiError(429, 'limit', adds > 1 ? `At most ${this.cfg.maxAlgosPerOwner} algo orders run at once here, and this basket runs ${adds} (itself and one per market). ${live.length ? 'Cancel one first, or use fewer markets.' : 'Use fewer markets.'}` : `At most ${this.cfg.maxAlgosPerOwner} algo orders run at once here. Cancel one first.`);
     }
-    // One live bot per wallet and market: two would quote against each other's orders and share one position.
+    // Several real bots may share a market (owner 2026-11-08), at one leverage: SoDEX keeps one per market and account,
+    // so a second bot setting another would change the first one's.
     if ((spec.kind === 'mm' || spec.kind === 'grid') && !spec.paper) {
-      const other = live.find((x) => (x.spec.kind === 'mm' || x.spec.kind === 'grid') && !x.spec.paper && x.spec.symbol === spec.symbol);
-      if (other) throw new ApiError(409, 'bot-market', `A bot of yours already trades ${spec.symbol}${other.spec.label ? ` ("${other.spec.label}")` : ''}. Stop it first, or choose another market.`, { algoId: other.id, symbol: spec.symbol });
+      const other = live.find((x) => (x.spec.kind === 'mm' || x.spec.kind === 'grid') && !x.spec.paper && x.spec.symbol === spec.symbol && (x.spec.leverage ?? null) !== (spec.leverage ?? null));
+      if (other) {
+        const lev = other.spec.leverage !== null && other.spec.leverage !== undefined ? `${other.spec.leverage}x` : 'the leverage your account already has';
+        throw new ApiError(409, 'bot-leverage', `Your bot${other.spec.label ? ` "${other.spec.label}"` : ''} on ${spec.symbol} uses ${lev}. Bots on one market share one leverage: set ${lev} for this one too.`, { algoId: other.id, symbol: spec.symbol, leverage: other.spec.leverage ?? null });
+      }
     }
     // Real BOTS: the wallets real algos are on for (the test follower), else a wallet on the beta list (either site).
     if (spec.bot && !spec.paper && !(await this.liveBotFor(owner, ctx))) {
@@ -1784,10 +1786,9 @@ export class ExecutorService {
       accountId = await this.sodex.accountId(owner);
       if (!accountId) throw new ApiError(412, 'account', spec.bot ? 'Deposit to SoDEX first: this wallet has no SoDEX account yet.' : 'This wallet has no SoDEX account yet. Deposit first.');
       if (spec.bot) {
-        // A3: nothing else of the wallet's on this market (an algo or a copy: no read needed; a position: read now).
-        this.marketConflict(owner, spec, live, null, old);
+        // A3: no copy or algo order of the wallet's on this market (other bots and your own position are fine).
+        this.marketConflict(owner, spec, live);
         const acct = await this.accountOf(owner);
-        this.marketConflict(owner, spec, live, acct.positions, old);
         // Smart margining (owner 2026-11-08): the wallet's real bots (their margin at their leverage, the market's
         // minimum order and the region ceiling) and its live copies (their allocation) set aside no more than it holds.
         const r = await this.reservedOf(owner, { skipAlgo: old?.id });

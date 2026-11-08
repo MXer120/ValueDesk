@@ -661,7 +661,14 @@ export interface ChildOrder {
   price: number;
   quantity: number;
   tif: ChildTif;
+  /** It only makes the algo's OWN position smaller (a bot: its own holding, never more). */
   reduceOnly: boolean;
+  /**
+   * Whether SoDEX's reduce-only flag went with it. SoDEX judges that flag against the account's whole position on the
+   * market, so a bot that shares its market (another bot, an order, your own position) unwinds its own holding without
+   * it: the bot's own book bounds the size instead (runtime.ts send, owner 2026-11-08). Absent: same as reduceOnly.
+   */
+  exchReduceOnly?: boolean;
   filled: number;
   /** Sum of fill qty x price. */
   value: number;

@@ -404,6 +404,8 @@ export class AlgoRuntime {
   private exitsFlatSince = new Map<string, number>();
   /** Algos whose position reads disagreed: not read again for a decision before this (positionConfirmed). */
   private confirmRetryAt = new Map<string, number>();
+  /** Bots whose refused reduce-only order is being checked against the account's position (reduceRefused). */
+  private reduceChecks = new Set<string>();
   private paper = new Map<string, PaperOrder>();
   private timers: unknown[] = [];
   private running = false;
@@ -1934,12 +1936,57 @@ export class AlgoRuntime {
         }
       }
     }
-    const before = a.rejects;
-    const sent = await this.send(a, m, [{ side, price, quantity: qty, tif: take ? 'ioc' : 'gtx', tag: take ? 'close (take)' : 'close', reduceOnly: true }]);
-    const c = a.k.closing as BotClosing | undefined;
-    if (!c || !sent.length) return;
-    // Refused in the answer itself; one refused later on the socket, and one SoDEX took, are booked in onOrderUpdate.
-    if (a.rejects > before) this.closeRefused(c, this.lastRefusal.get(a.id) ?? '');
+    // A refusal (in the answer: send; later on the socket: onOrderUpdate) is booked by botRefused.
+    await this.send(a, m, [{ side, price, quantity: qty, tif: take ? 'ioc' : 'gtx', tag: take ? 'close (take)' : 'close', reduceOnly: true }]);
+  }
+
+  /**
+   * A bot's order SoDEX refused. A reduce-only one refused for the position ("nothing to reduce"): the account's
+   * position is read (confirmed) - none there, the bot's holding was closed outside it (a close counts that toward
+   * giving up, as before); one there, it is a position the bot did not open (yours, or what is left of one), so from
+   * now on the bot unwinds without SoDEX's flag, its own book bounding the size, and never touches the rest
+   * (owner 2026-11-08). Any other refused close just waits a moment (closeRefused).
+   */
+  private botRefused(a: AlgoRecord, c: ChildOrder, reason: string): void {
+    if (!a.spec.bot) return;
+    const closing = a.k.closing as BotClosing | undefined;
+    const isClose = !!closing && c.tag.startsWith('close');
+    if (!a.spec.paper && c.reduceOnly && c.exchReduceOnly !== false && POSITION_REFUSAL.test(reason)) {
+      if (isClose) closing!.retryAt = Date.now() + BOT_CLOSE_RETRY_MS;
+      void this.reduceRefused(a, isClose, reason);
+      return;
+    }
+    if (isClose) this.closeRefused(closing!, reason);
+  }
+
+  private async reduceRefused(a: AlgoRecord, isClose: boolean, reason: string): Promise<void> {
+    if (this.reduceChecks.has(a.id)) return;
+    this.reduceChecks.add(a.id);
+    try {
+      const pos = await this.positionConfirmed(a, a.spec.symbol);
+      const closing = a.k.closing as BotClosing | undefined;
+      if (pos === null || pos === 'disagree' || Math.abs(pos) <= 1e-12) {
+        if (isClose && closing) this.closeRefused(closing, reason);
+        return;
+      }
+      if (a.k.plainReduce !== true) {
+        a.k.plainReduce = true;
+        this.dirty.add(a.id);
+        await this.event(a, 'info', `Your ${a.spec.symbol} position (${dec(pos)}) is not only this bot's: from now on it unwinds only what it bought or sold itself and leaves the rest of the position alone.`);
+      }
+      if (isClose && closing) this.closeTaken(closing);
+    } finally {
+      this.reduceChecks.delete(a.id);
+    }
+  }
+
+  /** Whether another of the wallet's running algos or bots (real with real, practice with practice) trades this bot's market. */
+  private sharesMarket(a: AlgoRecord): boolean {
+    for (const x of this.algos.values()) {
+      if (x.id === a.id || x.owner !== a.owner || !!x.spec.paper !== !!a.spec.paper || FINAL_STATUSES.has(x.status)) continue;
+      if (algoSymbols(x.spec).includes(a.spec.symbol)) return true;
+    }
+    return false;
   }
 
   /** SoDEX took a close (it rests or filled): the refusal count and the wait start over. */
@@ -1957,13 +2004,15 @@ export class AlgoRuntime {
   }
 
   /**
-   * The nearest price another user's bot rests at, on the side a taker `side` of this bot would fill against (the
-   * highest bid for a sell, the lowest ask for a buy), live bots against live, practice against practice; null: none.
+   * The nearest price another bot rests at - another user's (never into their bot, terms 2026-11-02) or another of
+   * this wallet's on the same market (never trading with itself, owner 2026-11-08) - on the side a taker `side` of this
+   * bot would fill against (the highest bid for a sell, the lowest ask for a buy), live bots against live, practice
+   * against practice; null: none.
    */
   otherBotWall(a: AlgoRecord, symbol: string, side: Side): number | null {
     let wall: number | null = null;
     for (const x of this.algos.values()) {
-      if (x.owner === a.owner || !x.spec.bot || x.spec.symbol !== symbol || x.spec.paper !== a.spec.paper || FINAL_STATUSES.has(x.status)) continue;
+      if (x.id === a.id || !x.spec.bot || x.spec.symbol !== symbol || x.spec.paper !== a.spec.paper || FINAL_STATUSES.has(x.status)) continue;
       for (const c of x.children) {
         if (!LIVE.has(c.state) || c.tif === 'ioc' || c.side === side) continue;
         if (wall === null || (side === 'sell' ? c.price > wall : c.price < wall)) wall = c.price;
@@ -3259,6 +3308,8 @@ export class AlgoRuntime {
     const now = Date.now();
     const children: ChildOrder[] = [];
     const reqs: ChildRequest[] = [];
+    // A real bot that shares its market, or found a position there it did not open, unwinds without SoDEX's flag.
+    const plain = !s.paper && !!s.bot && (a.k.plainReduce === true || this.sharesMarket(a));
     for (const x of list) {
       const clOrdID = this.clOrdIdFor(a);
       // On SoDEX's tick, never worse for the trader: a price a trader typed (an iceberg's, a bracket's or a
@@ -3266,8 +3317,9 @@ export class AlgoRuntime {
       const price = Number(dec(onTick(x.price, x.side, m.tickSize)));
       const quantity = Number(dec(x.quantity));
       const c: ChildOrder = { clOrdID, orderId: null, side: x.side, price, quantity, tif: x.tif, reduceOnly: x.reduceOnly ?? s.reduceOnly, filled: 0, value: 0, state: 'sending', placedAt: now, updatedAt: now, cancelling: false, tag: x.tag };
+      if (plain && c.reduceOnly) c.exchReduceOnly = false;
       children.push(c);
-      reqs.push({ clOrdID, side: c.side, price: dec(price), quantity: dec(quantity), tif: c.tif, reduceOnly: c.reduceOnly });
+      reqs.push({ clOrdID, side: c.side, price: dec(price), quantity: dec(quantity), tif: c.tif, reduceOnly: c.exchReduceOnly ?? c.reduceOnly });
       a.children.push(c);
       this.byClOrd.set(clOrdID, a.id);
     }
@@ -3307,6 +3359,7 @@ export class AlgoRuntime {
         a.k.consecRejects = Number(a.k.consecRejects ?? 0) + 1;
         this.lastRefusal.set(a.id, r.error ?? '');
         await this.event(a, 'error', `SoDEX refused ${c.tag}: ${r.error}`, c);
+        this.botRefused(a, c, r.error ?? '');
         limit ??= limitRefusal(r.error, m.name);
       }
     }
@@ -3603,7 +3656,7 @@ export class AlgoRuntime {
         if (a.spec.kind === 'grid' && gridLevelOf(c) >= 0) a.k.gretry = { ...((a.k.gretry as Record<string, number> | undefined) ?? {}), [gridLevelOf(c)]: Date.now() + GRID_RETRY_MS };
         // A volume maker's quote refused later (on the socket, not in the answer) backs off as one refused in the answer does (stepMm).
         if (a.spec.kind === 'mm' && (c.tag === 'bid' || c.tag === 'ask')) this.mmBackOff(a, c.side);
-        if (closing && c.tag.startsWith('close')) this.closeRefused(closing, u.reason ?? '');
+        this.botRefused(a, c, u.reason ?? '');
       } else if (closing && c.tag.startsWith('close') && c.filled > 1e-12) this.closeTaken(closing);
       this.onChildDone(a, c);
     } else {

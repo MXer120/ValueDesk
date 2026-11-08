@@ -352,6 +352,8 @@ test('A2: the close is not given up for post-only refusals; three position refus
   r.ex.refuse = 'post only order would take';
   for (let i = 0; i < 6; i++) await step(r, a.id, 31_000);
   assert.ok(r.rt.get(a.id)!.k.closing, 'still closing');
+  // Closed on SoDEX by hand: the account reads flat, so the refusals say the holding is gone (not a position of yours).
+  r.ex.position = 0;
   r.ex.refuse = 'reduce only order rejected: no position';
   for (let i = 0; i < 4; i++) await step(r, a.id, 31_000);
   const b = r.rt.get(a.id)!;
