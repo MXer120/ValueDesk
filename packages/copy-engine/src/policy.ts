@@ -223,11 +223,11 @@ export const BOT_FEE = 1;
  * The terms name 0.5 bp: the top step stays within them. Not live until the executor that uses it ships.
  */
 export const BOT_FEE_LADDER: readonly CopyFeeStep[] = [
-  { fromUsd: 0, fee: 5 },
-  { fromUsd: 100_000, fee: 4 },
-  { fromUsd: 250_000, fee: 3 },
-  { fromUsd: 500_000, fee: 2 },
-  { fromUsd: 10_000_000, fee: 1 },
+  // Owner 2026-11-09: 0.3 / 0.25 / 0.20 / 0.15 / 0.12 / 0.10 bp at $0 / $100k / $250k / $500k / $1M / $10M, rounded
+  // down to the whole tenths SoDEX carries (never more than the table): 0.3 bp, 0.2 bp from $100k, 0.1 bp from $500k.
+  { fromUsd: 0, fee: 3 },
+  { fromUsd: 100_000, fee: 2 },
+  { fromUsd: 500_000, fee: 1 },
 ];
 export const BOT_FEE_VIP = 1;
 export const BETA_VIP_DAYS = 30;

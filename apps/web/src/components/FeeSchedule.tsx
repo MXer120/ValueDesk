@@ -12,6 +12,7 @@
 import { fmtFixed, localize } from '../numStyle';
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { builderRateToFraction } from '@sodex-core';
+import { BOT_FEE_LADDER, BOT_FEE_VIP } from '@copy-engine';
 import {
   BUILDER_LADDER,
   COPY_LADDER,
@@ -298,6 +299,16 @@ function Sodex({
   );
 }
 
+/** The bot ladder's band labels, as the copy ladder's (the milestone belongs to the higher row). */
+function botVolumeLabel(index: number): string {
+  const row = BOT_FEE_LADDER[index];
+  if (!row) return '-';
+  const next = BOT_FEE_LADDER[index + 1];
+  const usd = (n: number) => `$${Math.round(n).toLocaleString('en-US')}`;
+  if (index === 0 && next) return `< ${usd(next.fromUsd)}`;
+  return `≥ ${usd(row.fromUsd)}`;
+}
+
 function ValueDesk({ address }: { address: string | null }) {
   const held = address ? currentTerms(address) : null;
   const reported = held?.display.tierIndex ?? null;
@@ -307,6 +318,7 @@ function ValueDesk({ address }: { address: string | null }) {
   const fromVolume = volume !== null ? ladderIndex(volume, BUILDER_LADDER.map((row) => row.minVolumeUsd)) : null;
   const row = inRange ? reported : fromVolume !== null ? fromVolume : address ? builderTierIndex(perpsFee, 'perps', null) : null;
   const copyRow = volume !== null ? ladderIndex(volume, COPY_LADDER.map((r) => r.minVolumeUsd)) : null;
+  const botRow = volume !== null ? ladderIndex(volume, BOT_FEE_LADDER.map((r) => r.fromUsd)) : null;
 
   return (
     <>
@@ -334,6 +346,38 @@ function ValueDesk({ address }: { address: string | null }) {
                   <td className="num">{fmtRate(builderRateToFraction(tier.spot))}</td>
                 </tr>
               ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="fee-sched__block">
+        <h3>Bots</h3>
+        <div className="fee-sched__frame">
+          <table className="fee-sched__table">
+            <thead>
+              <tr>
+                <th>Tier</th>
+                <th>{VOLUME_WINDOW_DAYS}d Volume</th>
+                <th className="num">Fee</th>
+              </tr>
+            </thead>
+            <tbody>
+              {BOT_FEE_LADDER.map((tier, i) => (
+                <tr key={tier.fromUsd} className={botRow === i ? 'is-you' : undefined}>
+                  <td>
+                    {i}
+                    {botRow === i && <span className="fee-sched__pill">This volume</span>}
+                  </td>
+                  <td>{botVolumeLabel(i)}</td>
+                  <td className="num">{fmtRate(builderRateToFraction(tier.fee))}</td>
+                </tr>
+              ))}
+              <tr>
+                <td>VIP</td>
+                <td>≥ $1,000,000 own volume, or a VIP program</td>
+                <td className="num">{fmtRate(builderRateToFraction(BOT_FEE_VIP))}</td>
+              </tr>
             </tbody>
           </table>
         </div>

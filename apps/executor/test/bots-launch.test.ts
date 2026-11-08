@@ -308,7 +308,7 @@ test('B: /me carries the bot fee - the ladder by volume, or a program\'s (the be
   const h = make(env, { volume: { usd: 0 } });
   const fresh = (s: ExecutorService) => (s as unknown as { freshVolume(o: string): Promise<number | null> }).freshVolume(w.address);
   await fresh(h.svc);
-  assert.deepEqual(h.svc.me(w.address, ctx).bots, { feeTenths: 5, vip: false, until: null });
+  assert.deepEqual(h.svc.me(w.address, ctx).bots, { feeTenths: 3, vip: false, until: null });
   const until = Date.now() + 10 * 86_400_000;
   h.w.volume = { usd: 300_000, fees: { bots: { fee: 1, until } } };
   (h.svc as unknown as { volumes: Map<string, unknown> }).volumes.clear();
@@ -322,7 +322,7 @@ test('B: /me carries the bot fee - the ladder by volume, or a program\'s (the be
   // C: perks not read again for 6 h end (VIP included): the ladder again.
   const perks = (h.svc as unknown as { perks: Map<string, { at: number }> }).perks;
   perks.get(w.address)!.at = Date.now() - 7 * 3_600_000;
-  assert.deepEqual(h.svc.me(w.address, ctx).bots, { feeTenths: 2, vip: false, until: null }, 'the ladder at $1.5M');
+  assert.deepEqual(h.svc.me(w.address, ctx).bots, { feeTenths: 1, vip: false, until: null }, 'the ladder at $1.5M');
   await h.cleanup();
 });
 

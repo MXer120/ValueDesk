@@ -109,7 +109,7 @@ export function BotsHead({ title, sub, actions, lead }: { view?: BotsView; title
 
 export type StopHow = 'close' | 'instant' | 'keep';
 
-/** The ladder's first step (0.5 bp), the fee a wallet pays before its volume lowers it; never the old flat 0.1 bp. */
+/** The ladder's first step (0.3 bp since 2026-11-09), the fee a wallet pays before its volume lowers it. */
 export const BOT_FEE_FIRST_STEP_TENTHS = 5;
 
 /**

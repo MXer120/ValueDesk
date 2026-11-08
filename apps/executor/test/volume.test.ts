@@ -78,7 +78,7 @@ test('fees: VIP and a program from the same read lower copy and bot fees; a prog
   const fee = (spec: Record<string, unknown>) => (svc as unknown as { algoFee(a: { owner: string; spec: unknown }): Promise<number> }).algoFee({ owner: OWNER, spec });
   await fresh(OWNER);
   assert.equal(await fee({ kind: 'twap' }), 0, 'copy and algo orders: the program, 0');
-  assert.equal(await fee({ kind: 'mm', bot: true }), 5, 'bots: not in the program, the bot ladder ($50K: 0.5 bp)');
+  assert.equal(await fee({ kind: 'mm', bot: true }), 3, 'bots: not in the program, the bot ladder ($50K: 0.3 bp)');
   const realNow = Date.now;
   Date.now = () => until + 1;
   try {
