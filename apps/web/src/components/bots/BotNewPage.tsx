@@ -97,19 +97,23 @@ const TYPE_ABOUT: Record<Category, { line: string; good: string }> = {
   grid: { line: 'Buys lower and sells higher inside a price range you set.', good: 'For a market moving sideways.' },
 };
 
-/** The wizard's places (owner 2026-11-08): bot type, preset, settings in parts (markets first), review. */
-type Part = Sec | 'market';
-const PART_NAMES: Record<Part, string> = { market: 'Markets', ...SEC_NAMES };
-type Place = { step: 0 | 1 | 2 | 3; part?: Part };
+/**
+ * The wizard's places (owner 2026-11-08): bot type, markets (so the presets' costs are those markets'), preset,
+ * settings in three parts, review.
+ */
+type Part = Sec;
+const PART_NAMES: Record<Part, string> = SEC_NAMES;
+type Place = { step: 0 | 1 | 2 | 3 | 4; part?: Part };
 const STEPS = [
   { title: 'Bot type', hint: 'Market maker or grid' },
+  { title: 'Markets', hint: 'Where it trades' },
   { title: 'Preset', hint: 'A setup we tested' },
-  { title: 'Settings', hint: 'Markets, size, safeguards' },
+  { title: 'Settings', hint: 'Size, quoting, safeguards' },
   { title: 'Review', hint: 'Name and start' },
 ] as const;
 // A grid has one preset and no quoting: both are skipped.
 const placesFor = (grid: boolean): Place[] => [
-  { step: 0 }, ...(grid ? [] : [{ step: 1 as const }]), { step: 2, part: 'market' }, { step: 2, part: 'size' }, ...(grid ? [] : [{ step: 2 as const, part: 'quote' as const }]), { step: 2, part: 'guard' }, { step: 3 },
+  { step: 0 }, { step: 1 }, ...(grid ? [] : [{ step: 2 as const }]), { step: 3, part: 'size' }, ...(grid ? [] : [{ step: 3 as const, part: 'quote' as const }]), { step: 3, part: 'guard' }, { step: 4 },
 ];
 
 /** A market without an oracle runs the plain maker: quotes off SoDEX's book, no gate, no rest. */
@@ -198,6 +202,14 @@ function MarketStep({ picked, toggle, markets, costOf }: { picked: string[]; tog
 /** How much a bot trades against the default, in a word and three bars (owner 2026-11-08: for someone new). */
 const volumeWord = (x: number): { n: 1 | 2 | 3; word: string } => (x >= 1.1 ? { n: 3, word: 'Trades the most' } : x >= 0.9 ? { n: 2, word: 'Trades normally' } : { n: 1, word: 'Trades less' });
 const TRACK = { proven: { tone: 'positive', label: 'Proven live' }, tested: { tone: 'neutral', label: 'Tested' }, early: { tone: 'warning', label: 'New' } } as const;
+/** One bot's estimate over several markets: the plain average (each market gets one bot of the same size). */
+function estimateOver(ms: readonly BotMarket[], f: (m: BotMarket) => BotEstimate): BotEstimate | null {
+  const es = ms.map(f).filter((e) => e.bp !== null);
+  if (!es.length) return null;
+  const avg = (g: (e: BotEstimate) => number | null) => { const xs = es.map(g).filter((x): x is number => x !== null); return xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null; };
+  return { ...es[0]!, bp: avg((e) => e.bp), low: avg((e) => e.low), high: avg((e) => e.high), volumeX: avg((e) => e.volumeX) ?? 1 };
+}
+
 /** A cost per $1M without the sign wall: a cost reads as a plain amount, earnings in green with a plus. */
 const costText = (bp: number): { v: string; k: string; cls: string } => (bp < 0 ? { v: `+${fmtUsd(-bpToPerMillion(bp), 0)}`, k: 'earned per $1M traded', cls: 'pos' } : { v: fmtUsd(bpToPerMillion(bp), 0), k: 'cost per $1M traded', cls: '' });
 
@@ -206,8 +218,7 @@ const costText = (bp: number): { v: string; k: string; cls: string } => (bp < 0 
  * sentence, the cost as the one number, how much it trades and how well it is tested in a word each; the test name and
  * the runs behind it open only on the picked bot.
  */
-function RecipeRow({ rc, on, pick, est, market, best }: { rc: Recipe; on: boolean; pick: () => void; est: BotEstimate | null; market: string; best: boolean }) {
-  const coin = market.replace(/-USD$/, '');
+function RecipeRow({ rc, on, pick, est, where, best }: { rc: Recipe; on: boolean; pick: () => void; est: BotEstimate | null; where: string; best: boolean }) {
   const vol = est ? volumeWord(est.volumeX) : null;
   const c = est && est.bp !== null ? costText(est.bp) : null;
   const nc = est?.lines.filter((l) => l.counted === false && l.bp !== null) ?? [];
@@ -217,7 +228,7 @@ function RecipeRow({ rc, on, pick, est, market, best }: { rc: Recipe; on: boolea
       <span className={`bots-radio${on ? ' is-on' : ''}`} aria-hidden="true" />
       <StrategyTile strategy={rc.strategy} size={40} />
       <span className="bots-strow__t">
-        <b>{rc.name}{best && <StatusPill size="sm" tone="positive" dot>Best on {coin}</StatusPill>}</b>
+        <b>{rc.name}{best && <StatusPill size="sm" tone="positive" dot>Best {where.startsWith('on ') ? where : 'for these markets'}</StatusPill>}</b>
         <small>{rc.plain}</small>
         {rc.category === 'market' && (
           <span className="bots-rrow__facts">
@@ -237,7 +248,7 @@ function RecipeRow({ rc, on, pick, est, market, best }: { rc: Recipe; on: boolea
       </span>
       <span className="bots-strow__n">
         {c
-          ? <><b className={c.cls}>{c.v}</b><small>{c.k}</small><small>on {coin}</small></>
+          ? <><b className={c.cls}>{c.v}</b><small>{c.k}</small><small>{where}</small></>
           : <><b className="dim">{DASH}</b><small>{rc.category === 'grid' ? 'set by its range' : 'not enough trades yet'}</small></>}
       </span>
     </button>
@@ -300,16 +311,19 @@ function Receipt({ d, eff, picked, markets, feeBps, paper, floor, runs, children
   const need = (d.strategy === 'grid' ? d.orderUsd * d.levels : d.maxInventoryUsd + d.orderUsd * 2) * picked.length;
   const name = d.label.trim() || `${rc.name}${picked.length === 1 ? ` ${picked[0]!.replace(/-USD$/, '')}` : ''}`;
   const guards = [
-    { id: 'gate', icon: 'pulse' as const, label: 'Market gate', on: eff.strategy === 'market' && eff.gate },
+    { id: 'gate', icon: 'pulse' as const, label: 'Volatility gate', on: eff.strategy === 'market' && eff.gate },
     { id: 'flow', icon: 'robot' as const, label: 'Flow gate', on: !grid && d.flowOn },
-    { id: 'quiet', icon: 'clock' as const, label: 'Quiet hours', on: d.quiet.length > 0 },
+    { id: 'quiet', icon: 'clock' as const, label: 'Trading hours', on: d.quiet.length > 0 },
+    { id: 'news', icon: 'bolt' as const, label: 'News gate', on: !grid && d.news !== null },
     { id: 'spread', icon: 'layers' as const, label: 'Spread limit', on: d.maxSpreadBps !== null },
   ];
   return (
     <div className="bots-rc">
       <header className="bots-rc__head">
-        <BotAvatar symbol={picked[0] ?? d.symbol} strategy={eff.strategy} size={44} />
-        <span className="bots-rc__name"><b>{name}</b><small>{rc.name}</small></span>
+        {picked.length > 1
+          ? <span className="bots-rc__coins" aria-label={picked.join(', ')}>{picked.slice(0, 3).map((x) => <CoinIcon key={x} coin={x} size={28} />)}{picked.length > 3 && <b>+{picked.length - 3}</b>}</span>
+          : <BotAvatar symbol={picked[0] ?? d.symbol} strategy={eff.strategy} size={44} />}
+        <span className="bots-rc__name"><b>{name}</b><small>{picked.length > 1 ? `${rc.name} · ${picked.map((x) => x.replace(/-USD$/, '')).join(', ')}` : rc.name}</small></span>
         <StatusPill size="sm" tone={paper ? 'neutral' : 'positive'} dot>{paper ? 'Practice' : 'Live'}</StatusPill>
       </header>
 
@@ -384,7 +398,8 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
   const [picked, setPicked] = useState<string[]>(() => [view.market ?? 'BTC-USD']);
   const grid = d.strategy === 'grid';
   const places = placesFor(grid);
-  const [at, setAt] = useState(view.market && view.kind !== 'grid' ? 1 : 0);
+  // From Explore (a market given): its markets are picked, the preset is next.
+  const [at, setAt] = useState(view.market ? 2 : 0);
   const place = places[Math.min(at, places.length - 1)]!;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -454,16 +469,18 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
   const back = () => setAt((s) => Math.max(0, s - 1));
   const goStep = (i: number) => { const k = places.findIndex((p) => p.step === i); if (k >= 0 && k <= at) setAt(k); };
   const startLabel = busy ? 'Starting…' : paper ? (picked.length > 1 ? `Start ${picked.length} practice bots` : 'Start practice bot') : (picked.length > 1 ? `Start ${picked.length} bots` : 'Start bot');
-  const parts = places.filter((p) => p.step === 2).map((p) => p.part!);
+  const parts = places.filter((p) => p.step === 3).map((p) => p.part!);
   const pickRecipe = (id: RecipeId) => {
     setD((x) => fromRecipe(id, x.symbol, x));
     if (RECIPE[id].strategy === 'grid') setPicked((xs) => xs.slice(0, 1));
   };
   // The picker: the best on this market first (credited only for measured edges: bestOf), then cheapest first.
-  const scored = recipesOf(cat).map((rc) => ({ id: rc.id, rc, e: est && rc.category === 'market' ? estimate(effectiveDraft(fromRecipe(rc.id, d.symbol, d), est), est, runs) : null }));
-  const bestId = cat === 'market' && est ? bestOf(scored.filter((x): x is typeof x & { e: BotEstimate } => !!x.e && x.e.bp !== null).map((x) => ({ id: x.id, est: x.e })))?.id ?? null : null;
+  const pickedMs = picked.map((x) => markets.data?.markets.find((m) => m.symbol === x) ?? null).filter((m): m is BotMarket => !!m);
+  const scored = recipesOf(cat).map((rc) => ({ id: rc.id, rc, e: rc.category === 'market' ? estimateOver(pickedMs, (m) => estimate(effectiveDraft(fromRecipe(rc.id, m.symbol, d), m), m, runs)) : null }));
+  const where = picked.length === 1 ? `on ${picked[0]!.replace(/-USD$/, '')}` : `average, ${picked.length} markets`;
+  const bestId = cat === 'market' && pickedMs.length ? bestOf(scored.filter((x): x is typeof x & { e: BotEstimate } => !!x.e && x.e.bp !== null).map((x) => ({ id: x.id, est: x.e })))?.id ?? null : null;
   const rows = [...scored].sort((a, b) => (a.id === bestId ? -1 : b.id === bestId ? 1 : (a.e?.bp ?? 99) - (b.e?.bp ?? 99)));
-  const nextLabel =place.step === 2 && place.part !== parts[parts.length - 1] ? `Next: ${PART_NAMES[parts[parts.indexOf(place.part!) + 1]!]}` : 'Next';
+  const nextLabel = place.step === 3 && place.part !== parts[parts.length - 1] ? `Next: ${PART_NAMES[parts[parts.indexOf(place.part!) + 1]!]}` : 'Next';
 
   return (
     <>
@@ -476,7 +493,7 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
               <button type="button" onClick={() => goStep(i)} disabled={i > place.step} aria-current={i === place.step ? 'step' : undefined}>
                 <span className="bots-wsteps__t">
                   <b>{i < place.step ? <Icon name="check" size={12} /> : <span className="bots-wsteps__n">{i + 1}</span>}{st.title}</b>
-                  {i === 2 ? (
+                  {i === 3 ? (
                     <span className="bots-wsteps__subs">
                       {parts.map((p) => {
                         const k = places.findIndex((x) => x.part === p);
@@ -485,12 +502,12 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
                     </span>
                   ) : <small>{st.hint}</small>}
                 </span>
-                <span className="bots-wsteps__seg" aria-hidden="true">{i === 2 && <span className="bots-wsteps__fill" style={{ width: place.step > 2 ? '100%' : place.step < 2 ? '0%' : `${((parts.indexOf(place.part!) + 1) / parts.length) * 100}%` }} />}</span>
+                <span className="bots-wsteps__seg" aria-hidden="true">{i === 3 && <span className="bots-wsteps__fill" style={{ width: place.step > 3 ? '100%' : place.step < 3 ? '0%' : `${((parts.indexOf(place.part!) + 1) / parts.length) * 100}%` }} />}</span>
               </button>
             </li>
           ))}
         </ol>
-        <span className="bots-wsteps__count">{place.step + 1}/4{place.part ? ` · ${PART_NAMES[place.part]}` : ''}</span>
+        <span className="bots-wsteps__count">{place.step + 1}/{STEPS.length}{place.part ? ` · ${PART_NAMES[place.part]}` : ''}</span>
       </nav>
       <div className="bots-wizard">
         <div className="bots-wizard__main">
@@ -518,25 +535,25 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
             </Shell>
           )}
 
-          {place.step === 1 && (
+          {place.step === 2 && (
             <Shell>
-              <ShellHeader icon="star" title="Preset" subtitle="Setups we tested. Lower cost is better." />
+              <ShellHeader icon="star" title="Preset" subtitle={`Setups we tested, ${picked.length === 1 ? `on ${picked[0]!.replace(/-USD$/, '')}` : `on your ${picked.length} markets`}. Lower cost is better.`} />
               <div className="bots-strows" role="radiogroup" aria-label="Preset">
                 {rows.map(({ rc, e }) => (
-                  <RecipeRow key={rc.id} rc={rc} on={rid === rc.id} pick={() => pickRecipe(rc.id)} market={d.symbol} est={e} best={rc.id === bestId} />
+                  <RecipeRow key={rc.id} rc={rc} on={rid === rc.id} pick={() => pickRecipe(rc.id)} where={where} est={e} best={rc.id === bestId} />
                 ))}
               </div>
             </Shell>
           )}
 
-          {place.step === 2 && place.part === 'market' && (
+          {place.step === 1 && (
             <Shell>
-              <ShellHeader icon="compass" title="Markets" subtitle={grid ? 'One market for a grid.' : `Tick one or several: one ${RECIPE[rid].name.toLowerCase()} each.`} aside={<Button variant="quiet" onClick={() => goBots({ page: 'explore' })}>Compare all<Icon name="arrowRight" size={13} /></Button>} />
+              <ShellHeader icon="compass" title="Markets" subtitle={grid ? 'One market for a grid.' : 'Tick one or several: one bot each, with the same settings.'} aside={<Button variant="quiet" onClick={() => goBots({ page: 'explore' })}>Compare all<Icon name="arrowRight" size={13} /></Button>} />
               <MarketStep picked={picked} toggle={toggle} markets={markets.data?.markets ?? (markets.error ? [] : null)} costOf={costOf} />
             </Shell>
           )}
 
-          {place.step === 2 && place.part !== 'market' && (
+          {place.step === 3 && (
             <Shell>
               <ShellHeader icon="gear" title={PART_NAMES[place.part!]} subtitle={place.part === 'size' ? (picked.length > 1 ? `The same for all ${picked.length} markets.` : 'Uses your SoDEX futures USDC.') : place.part === 'quote' ? `${RECIPE[rid].name}'s values, marked Default where they are unchanged.` : 'Each one moves the estimate on the right.'} />
               <Panel className="bots-sizepanel">
@@ -545,7 +562,7 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
             </Shell>
           )}
 
-          {place.step === 3 && (
+          {place.step === 4 && (
             <Shell>
               <ShellHeader icon="check" title="Review" subtitle="Check the receipt, name it, start." />
               <Panel className="bots-review">

@@ -22,7 +22,7 @@ import { ZERO_ADDRESS, bytesToHex, hashTypedData, hexToBytes, recoverAddress, ty
 import type { RegionPolicy } from './policy.ts';
 import type { CopyView } from './runtime.ts';
 import type { ActivityEntry, CopyMode, CopySettings } from './types.ts';
-import type { FlowGate, QuietWindow } from './algo/types.ts';
+import type { FlowGate, NewsGate, QuietWindow } from './algo/types.ts';
 
 export const COPY_DOMAIN = { name: 'ValueDesk Copy', version: '1' } as const;
 
@@ -323,6 +323,8 @@ export interface AlgoUpdatePatch {
   /** A volume maker's patient-taker gate and quiet windows (null: off); checked by the spec parser. */
   flowGate?: FlowGate | null;
   quiet?: QuietWindow[] | null;
+  quietOnly?: boolean | null;
+  news?: NewsGate | null;
   volumeTargetUsd?: number | null;
   maxLossUsd?: number | null;
   endAt?: number | null;

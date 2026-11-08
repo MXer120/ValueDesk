@@ -5,7 +5,8 @@
  *   Size & risk   order size, max holding, loss limit, volume target, run time, on stop
  *   Quoting       rest, follow the oracle, quote at; Advanced: distance from oracle, pull distance, levels, re-price,
  *                 chase, skew, move guard
- *   Safeguards    market gate (oracle moves), flow gate (uninformed flow away), quiet hours (NY open...), spread
+ *   Safeguards    volatility gate (oracle moves now), flow gate (uninformed flow away), trading hours (pause in or
+ *                 trade only in set hours, over a chart of hourly moves: HoursGate), news gate (US releases), spread
  *
  * The oracle is the price the bot quotes off: Binance futures' mid, times SoDEX's gap to it.
  * New bot shows one part per sub-step (`part`); a bot's Settings tab shows them as tabs. R10's values are marked
@@ -13,7 +14,8 @@
  */
 import { useState, type ReactNode } from 'react';
 import { fmtUsd } from '../../format';
-import { FLOW_DEFAULT, GATE_DEFAULT, QUIET_PRESETS, R10, type BotDraft, type QuietWindow } from '../../bots/presets';
+import { FLOW_DEFAULT, GATE_DEFAULT, NEWS_DEFAULT, QUIET_PRESETS, R10, type BotDraft } from '../../bots/presets';
+import { HoursGate } from './HoursGate';
 import { RECIPE, recipeOfDraft } from '../../bots/recipes';
 import { Button, Field, Icon, NumberField, Segmented, Slider, StatusPill, Switch, Tabs, TextInput } from './kit/kit';
 
@@ -21,7 +23,6 @@ const TARGETS = [null, 50_000, 250_000, 1_000_000] as const;
 const tgtKey = (v: number | null): string => (v === null ? 'none' : TARGETS.includes(v as never) ? String(v) : 'custom');
 export type Sec = 'size' | 'quote' | 'guard';
 export const SEC_NAMES: Record<Sec, string> = { size: 'Size & risk', quote: 'Quoting', guard: 'Safeguards' };
-const ZONE: Record<QuietWindow['zone'], string> = { utc: 'UTC', new_york: 'New York', london: 'London' };
 
 function Row({ label, hint, children, wide, tag }: { label: ReactNode; hint?: ReactNode; children: ReactNode; wide?: boolean; tag?: ReactNode }) {
   return (
@@ -73,10 +74,7 @@ export function BotSettings({ d, set, range, mark, liveAllowed, noLead, hidePrac
   const mm = d.strategy !== 'grid';
   const market = d.strategy === 'market' && !noLead;
   const holdX = d.orderUsd > 0 ? d.maxInventoryUsd / d.orderUsd : 3;
-  const addQuiet = (w: QuietWindow) => set({ quiet: [...d.quiet, w].slice(0, 6) });
-  const dropQuiet = (i: number) => set({ quiet: d.quiet.filter((_, j) => j !== i) });
-  const hasQuiet = (w: QuietWindow) => d.quiet.some((x) => x.from === w.from && x.to === w.to && x.zone === w.zone);
-  const guards = (market && d.gate ? 1 : 0) + (mm && d.flowOn ? 1 : 0) + (d.quiet.length ? 1 : 0) + (d.maxSpreadBps !== null ? 1 : 0);
+  const guards = (market && d.gate ? 1 : 0) + (mm && d.flowOn ? 1 : 0) + (d.quiet.length ? 1 : 0) + (d.news ? 1 : 0) + (d.maxSpreadBps !== null ? 1 : 0);
   const advChanged = [d.refBps !== 0, d.pullBps !== 0, d.ladder !== 1, d.minRepriceMs !== R10.minRepriceMs, d.chaseTicks !== R10.chaseTicks, d.skewTicks !== R10.skewTicks, d.moveGuard !== 0].filter(Boolean).length;
 
   return (
@@ -206,7 +204,7 @@ export function BotSettings({ d, set, range, mark, liveAllowed, noLead, hidePrac
       {sec === 'guard' && (
         <div className="bots-guards">
           {market && (
-            <Guard icon="pulse" title="Market gate" line="Pause while the oracle moves fast" on={d.gate} set={(on) => set({ gate: on, ...(on && !d.gateBps ? GATE_DEFAULT : {}) })}>
+            <Guard icon="pulse" title="Volatility gate" line="Pauses the moment the price moves fast, at any hour" on={d.gate} set={(on) => set({ gate: on, ...(on && !d.gateBps ? GATE_DEFAULT : {}) })}>
               <div className="bots-pair">
                 <NumberField label="Moves" value={d.gateBps} onChange={(v) => set({ gateBps: Math.max(1, Math.min(500, v ?? GATE_DEFAULT.gateBps)) })} unit="bp" />
                 <NumberField label="Over" value={d.gateWindowS} onChange={(v) => set({ gateWindowS: Math.max(1, Math.min(120, Math.round(v ?? GATE_DEFAULT.gateWindowS))) })} unit="s" />
@@ -233,36 +231,32 @@ export function BotSettings({ d, set, range, mark, liveAllowed, noLead, hidePrac
               </div>
             </Guard>
           )}
-          <Guard icon="clock" title="Quiet hours" line={d.quiet.length ? `${d.quiet.length} window${d.quiet.length === 1 ? '' : 's'}` : 'Pause around the New York open'} on={d.quiet.length > 0} set={(on) => set({ quiet: on ? [QUIET_PRESETS[0]!.w] : [] })}>
-            <div className="bots-quiet">
-              <div className="bots-quiet__presets">
-                {QUIET_PRESETS.map((p) => (
-                  <button key={p.id} type="button" className={`bots-chip${hasQuiet(p.w) ? ' is-on' : ''}`} aria-pressed={hasQuiet(p.w)} onClick={() => (hasQuiet(p.w) ? set({ quiet: d.quiet.filter((x) => !(x.from === p.w.from && x.to === p.w.to && x.zone === p.w.zone)) }) : addQuiet(p.w))}>
-                    {hasQuiet(p.w) && <Icon name="check" size={12} />}<b>{p.label}</b><small>{p.w.from}–{p.w.to}</small>
-                  </button>
-                ))}
-              </div>
-              <ul className="bots-quiet__list">
-                {d.quiet.map((w, i) => (
-                  <li key={`${w.from}-${w.to}-${w.zone}-${i}`}>
-                    <TextInput aria-label="From" value={w.from} maxLength={5} onChange={(e) => set({ quiet: d.quiet.map((x, j) => (j === i ? { ...x, from: e.target.value } : x)) })} />
-                    <span>to</span>
-                    <TextInput aria-label="To" value={w.to} maxLength={5} onChange={(e) => set({ quiet: d.quiet.map((x, j) => (j === i ? { ...x, to: e.target.value } : x)) })} />
-                    <Segmented label="Zone" value={w.zone} onChange={(z) => set({ quiet: d.quiet.map((x, j) => (j === i ? { ...x, zone: z } : x)) })} options={[{ value: 'new_york', label: 'NY' }, { value: 'london', label: 'LDN' }, { value: 'utc', label: 'UTC' }]} />
-                    <Segmented label="Days" value={w.days} onChange={(dd) => set({ quiet: d.quiet.map((x, j) => (j === i ? { ...x, days: dd } : x)) })} options={[{ value: 'weekdays', label: 'Mon–Fri' }, { value: 'all', label: 'Every day' }]} />
-                    <button type="button" className="tf-btn is-quiet is-icon is-sm" aria-label={`Remove ${w.from}–${w.to} ${ZONE[w.zone]}`} onClick={() => dropQuiet(i)}><Icon name="x" size={12} /></button>
-                  </li>
-                ))}
-              </ul>
-              {d.quiet.length < 6 && <Button variant="quiet" icon="plus" onClick={() => addQuiet({ from: '12:00', to: '12:30', zone: 'utc', days: 'all' })}>Add a window</Button>}
-            </div>
+          <Guard icon="clock" title="Trading hours" line={d.quiet.length ? `${d.quiet.length} window${d.quiet.length === 1 ? '' : 's'}: ${d.quietOnly ? 'trades only in them' : 'paused in them'}` : 'Pause at set hours, or trade only in them'} on={d.quiet.length > 0} set={(on) => set({ quiet: on ? [QUIET_PRESETS[0]!.w] : [], quietOnly: false })}>
+            <HoursGate d={d} set={set} />
           </Guard>
+          {mm && (
+            <Guard icon="bolt" title="News gate" line={d.news ? `Off ${d.news.beforeMin} min before to ${d.news.afterMin} min after each ${d.news.level === 'high' ? 'major' : 'major or medium'} US release` : 'Pause around CPI, jobs, the Fed and other US releases'} on={d.news !== null} set={(on) => set({ news: on ? { ...NEWS_DEFAULT } : null })}>
+              {d.news && (
+                <div className="bots-fgrid is-2">
+                  <Row label="Which releases" hint={d.news.level === 'high' ? 'CPI, jobs report, FOMC, GDP, PCE.' : 'Also PPI, JOLTS, ISM, retail sales.'}>
+                    <Segmented label="Which releases" value={d.news.level} onChange={(v) => set({ news: { ...d.news!, level: v } })} options={[{ value: 'high', label: 'Major' }, { value: 'medium', label: 'Major and medium' }]} />
+                  </Row>
+                  <Row label="Pause from">
+                    <Segmented label="Minutes before" value={String(d.news.beforeMin)} onChange={(v) => set({ news: { ...d.news!, beforeMin: Number(v) } })} options={[{ value: '0', label: 'At release' }, { value: '2', label: '2 min before' }, { value: '5', label: '5 min before' }, { value: '15', label: '15 min before' }]} />
+                  </Row>
+                  <Row label="Until">
+                    <Segmented label="Minutes after" value={String(d.news.afterMin)} onChange={(v) => set({ news: { ...d.news!, afterMin: Number(v) } })} options={[{ value: '5', label: '5 min after' }, { value: '10', label: '10 min after' }, { value: '30', label: '30 min after' }, { value: '60', label: '1 h after' }]} />
+                  </Row>
+                </div>
+              )}
+            </Guard>
+          )}
           {market && (
             <Guard icon="layers" title="Spread limit" line="Pause on a wide spread" on={d.maxSpreadBps !== null} set={(on) => set({ maxSpreadBps: on ? 10 : null })}>
               <Segmented label="Pause if spread over" value={d.maxSpreadBps === null ? '10' : [5, 10, 20].includes(d.maxSpreadBps) ? String(d.maxSpreadBps) : 'x'} onChange={(v) => v !== 'x' && set({ maxSpreadBps: Number(v) })} options={[{ value: '5', label: '5 bp' }, { value: '10', label: '10 bp' }, { value: '20', label: '20 bp' }, ...(d.maxSpreadBps === null || [5, 10, 20].includes(d.maxSpreadBps) ? [] : [{ value: 'x', label: `${d.maxSpreadBps} bp` }])]} />
             </Guard>
           )}
-          {noLead && d.strategy === 'market' && <p className="bots-note"><StatusPill size="sm">no oracle</StatusPill> The market gate needs the oracle and is off here.</p>}
+          {noLead && d.strategy === 'market' && <p className="bots-note"><StatusPill size="sm">no oracle</StatusPill> The volatility gate needs the oracle and is off here.</p>}
         </div>
       )}
 

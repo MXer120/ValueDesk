@@ -19,6 +19,7 @@ import {
   type MmSpec,
   type FlowGate,
   type QuietWindow,
+  type NewsGate,
   BOT_KINDS,
   type ScaleSpec,
   type SweepSpec,
@@ -198,10 +199,25 @@ function quietWindows(o: Obj, e: Errors): QuietWindow[] | null {
     for (const k of ['from', 'to'] as const) if (typeof w[k] !== 'string' || !HHMM.test(w[k] as string)) e[`${path}.${k}`] = `Quiet window ${i + 1}: ${k === 'from' ? 'the start' : 'the end'} must be a time like 09:30 (24 h).`;
     if (typeof w.from === 'string' && w.from === w.to) e[`${path}.to`] = `Quiet window ${i + 1}: the end must differ from the start.`;
     const zone = oneOf(w, 'zone', `Quiet window ${i + 1}: the time zone`, ['utc', 'new_york', 'london'] as const, 'utc', e, `${path}.zone`);
-    const days = oneOf(w, 'days', `Quiet window ${i + 1}: the days`, ['all', 'weekdays'] as const, 'all', e, `${path}.days`);
+    const days = oneOf(w, 'days', `Quiet window ${i + 1}: the days`, ['all', 'weekdays', 'trading'] as const, 'all', e, `${path}.days`);
     out.push({ from: String(w.from), to: String(w.to), zone, days });
   });
   return out;
+}
+
+/** MmSpec.news: null when absent or null. */
+function newsGate(o: Obj, e: Errors): NewsGate | null {
+  const raw = o.news;
+  if (raw === undefined || raw === null) return null;
+  if (!isObj(raw)) {
+    e.news = 'The news gate must be an object (beforeMin, afterMin, level).';
+    return null;
+  }
+  const beforeMin = int(raw, 'beforeMin', 'Minutes before a release', { min: 0, max: 240 }, e, 'news.beforeMin');
+  const afterMin = int(raw, 'afterMin', 'Minutes after a release', { min: 0, max: 240 }, e, 'news.afterMin');
+  if (beforeMin + afterMin <= 0) e['news.afterMin'] = 'The news gate needs some minutes before or after a release.';
+  const level = oneOf(raw, 'level', 'Which releases', ['high', 'medium'] as const, 'high', e, 'news.level');
+  return { beforeMin, afterMin, level };
 }
 
 const bool = (o: Obj, key: string, fallback = false): boolean => (typeof o[key] === 'boolean' ? (o[key] as boolean) : fallback);
@@ -733,6 +749,13 @@ export function checkAlgoSpec(input: unknown, depth = 0): AlgoSpecCheck {
       if (gate) (spec as MmSpec).flowGate = gate;
       const quiet = quietWindows(o, e);
       if (quiet) (spec as MmSpec).quiet = quiet;
+      // Trade only inside the windows: needs at least one.
+      if (o.quietOnly === true) {
+        if (quiet) (spec as MmSpec).quietOnly = true;
+        else e.quiet = 'Trading only in set hours needs at least one window.';
+      }
+      const news = newsGate(o, e);
+      if (news) (spec as MmSpec).news = news;
       break;
     }
     case 'grid': {

@@ -76,7 +76,8 @@ export function quietCover(ws: readonly QuietWindow[], at = new Date()): number[
     if (a === null || b === null) continue;
     const off = offsetH(w.zone, at) * 60;
     const len = b > a ? b - a : b + 1440 - a;
-    const days = w.days === 'weekdays' ? 5 / 7 : 1;
+    // Trading days: Monday to Friday less about ten exchange holidays a year.
+    const days = w.days === 'weekdays' ? 5 / 7 : w.days === 'trading' ? (5 / 7) * (251 / 261) : 1;
     for (let m = 0; m < len; m++) {
       const u = (((a + m - off) % 1440) + 1440) % 1440;
       const h = Math.floor(u / 60);
@@ -145,12 +146,12 @@ export function estimate(d: BotDraft, m: BotMarket | null, runs: readonly OwnRun
   if (d.gate && !noOracle) {
     if (m.gateCostBps !== null) {
       const g = m.gateCostBps - m.estCostBps;
-      lines.push({ id: 'gate', label: 'Market gate', bp: g, source: 'market', note: `Quotes ${Math.round((m.gateShare ?? 1) * 100)}% of the time` });
+      lines.push({ id: 'gate', label: 'Volatility gate', bp: g, source: 'market', note: `Quotes ${Math.round((m.gateShare ?? 1) * 100)}% of the time` });
       bp += g;
       x *= m.gateShare ?? 1;
     } else {
       const ok = !unproven(RECIPE.r10g.deltaBps, RECIPE.r10g);
-      lines.push({ id: 'gate', label: 'Market gate', bp: RECIPE.r10g.deltaBps, source: 'tests', note: ok ? 'Too few calm fills here: the backtest\'s figure' : `Too few calm fills here. ${NOT_COUNTED}`, counted: ok });
+      lines.push({ id: 'gate', label: 'Volatility gate', bp: RECIPE.r10g.deltaBps, source: 'tests', note: ok ? 'Too few calm fills here: the backtest\'s figure' : `Too few calm fills here. ${NOT_COUNTED}`, counted: ok });
       if (ok) bp += RECIPE.r10g.deltaBps;
       x *= RECIPE.r10g.volumeX;
     }
@@ -172,7 +173,8 @@ export function estimate(d: BotDraft, m: BotMarket | null, runs: readonly OwnRun
     x *= g.x;
   }
   if (d.quiet.length) {
-    const cover = quietCover(d.quiet);
+    // Trading only in the windows: everything else is covered.
+    const cover = d.quietOnly ? quietCover(d.quiet).map((c) => 1 - c) : quietCover(d.quiet);
     let wAll = 0, cAll = 0, wKeep = 0, cKeep = 0;
     for (const h of m.hourly) {
       const w = h.volumeUsdH;
@@ -182,10 +184,13 @@ export function estimate(d: BotDraft, m: BotMarket | null, runs: readonly OwnRun
     }
     const measured = m.hourly.some((h) => h.costBps !== null && cover[h.h]! > 0);
     const g = wKeep > 0 && wAll > 0 ? cKeep / wKeep - cAll / wAll : 0;
-    lines.push({ id: 'quiet', label: 'Quiet hours', bp: measured ? g : null, source: measured ? 'market' : 'none', note: `Off ${Math.round((1 - (wAll > 0 ? wKeep / wAll : 1)) * 100)}% of the volume` });
+    lines.push({ id: 'quiet', label: d.quietOnly ? 'Trading hours' : 'Pause hours', bp: measured ? g : null, source: measured ? 'market' : 'none', note: `Off ${Math.round((1 - (wAll > 0 ? wKeep / wAll : 1)) * 100)}% of the volume` });
     if (measured) bp += g;
     x *= wAll > 0 ? wKeep / wAll : 1;
   }
+
+  // The news gate: a few minutes around each US release; its cost here is not measured yet.
+  if (d.news) lines.push({ id: 'news', label: 'News gate', bp: null, source: 'none', note: `Off ${d.news.beforeMin} min before to ${d.news.afterMin} min after each ${d.news.level === 'high' ? 'major' : 'major or medium'} US release` });
 
   // The wallet's own runs: this market and bot first (weight by volume), else the fleet's bias.
   let learned: BotEstimate['learned'] = null;

@@ -10,7 +10,7 @@
  */
 import type { MarketInfo } from '../types.ts';
 import { floorStep, minChildQty, snapDown, snapUp, type Quote } from './math.ts';
-import type { BotBook, GridSpec, MmSpec, QuietWindow, Side } from './types.ts';
+import type { BotBook, GridSpec, MmSpec, NewsEvent, NewsGate, QuietWindow, Side } from './types.ts';
 
 /** One point of a bot's series every this often... */
 export const BOT_SAMPLE_MS = 5 * 60_000;
@@ -237,22 +237,117 @@ const ZONE_WORDS: Readonly<Record<QuietWindow['zone'], string>> = { utc: 'UTC', 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const formats = new Map<string, Intl.DateTimeFormat>();
 
-/** The local time in a zone at `at` (ms): minutes since midnight and the weekday (0 Sunday .. 6 Saturday), DST included. */
-export function zoneTime(at: number, zone: QuietWindow['zone']): { minutes: number; weekday: number } {
+/**
+ * The local time in a zone at `at` (ms): minutes since midnight, the weekday (0 Sunday .. 6 Saturday) and the date
+ * ('YYYY-MM-DD'), DST included.
+ */
+export function zoneTime(at: number, zone: QuietWindow['zone']): { minutes: number; weekday: number; date: string } {
   let f = formats.get(zone);
   if (!f) {
-    f = new Intl.DateTimeFormat('en-US', { timeZone: ZONES[zone], hourCycle: 'h23', hour: '2-digit', minute: '2-digit', weekday: 'short' });
+    f = new Intl.DateTimeFormat('en-US', { timeZone: ZONES[zone], hourCycle: 'h23', hour: '2-digit', minute: '2-digit', weekday: 'short', year: 'numeric', month: '2-digit', day: '2-digit' });
     formats.set(zone, f);
   }
   let h = 0;
   let m = 0;
   let wd = 0;
+  let y = '1970';
+  let mo = '01';
+  let dd = '01';
   for (const p of f.formatToParts(new Date(at))) {
     if (p.type === 'hour') h = Number(p.value) % 24;
     else if (p.type === 'minute') m = Number(p.value);
     else if (p.type === 'weekday') wd = Math.max(0, DAYS.indexOf(p.value));
+    else if (p.type === 'year') y = p.value;
+    else if (p.type === 'month') mo = p.value;
+    else if (p.type === 'day') dd = p.value;
   }
-  return { minutes: h * 60 + m, weekday: wd };
+  return { minutes: h * 60 + m, weekday: wd, date: `${y}-${mo}-${dd}` };
+}
+
+/* Exchange holidays, by rule (so no table runs out): NYSE, and the London Stock Exchange (England's bank holidays). */
+const ymd = (y: number, m: number, d: number): string => `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+const dow = (y: number, m: number, d: number): number => new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+const shiftDay = (y: number, m: number, d: number, by: number): string => {
+  const t = new Date(Date.UTC(y, m - 1, d + by));
+  return ymd(t.getUTCFullYear(), t.getUTCMonth() + 1, t.getUTCDate());
+};
+/** The n-th (1-based; -1 the last) weekday `wd` of a month. */
+function nthWeekday(y: number, m: number, wd: number, n: number): string {
+  if (n > 0) return ymd(y, m, 1 + ((wd - dow(y, m, 1) + 7) % 7) + (n - 1) * 7);
+  const days = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  return ymd(y, m, days - ((dow(y, m, days) - wd + 7) % 7));
+}
+/** Easter Sunday (Gregorian): [month, day]. */
+function easter(y: number): [number, number] {
+  const a = y % 19;
+  const b = Math.floor(y / 100);
+  const c = y % 100;
+  const d = Math.floor(b / 4);
+  const e = b % 4;
+  const f = Math.floor((b + 8) / 25);
+  const g = Math.floor((b - f + 1) / 3);
+  const h = (19 * a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4);
+  const k = c % 4;
+  const l = (32 + 2 * e + 2 * i - h - k) % 7;
+  const m = Math.floor((a + 11 * h + 22 * l) / 451);
+  return [Math.floor((h + l - 7 * m + 114) / 31), ((h + l - 7 * m + 114) % 31) + 1];
+}
+/** A US fixed holiday as NYSE observes it: Saturday to Friday, Sunday to Monday. */
+const usObserved = (y: number, m: number, d: number): string => {
+  const w = dow(y, m, d);
+  return w === 6 ? shiftDay(y, m, d, -1) : w === 0 ? shiftDay(y, m, d, 1) : ymd(y, m, d);
+};
+const holidayCache = new Map<string, Set<string>>();
+/** NYSE's full-day closures in a year (a Saturday New Year is not moved back into December, as NYSE does). */
+export function nyseHolidays(y: number): Set<string> {
+  const key = `ny${y}`;
+  const hit = holidayCache.get(key);
+  if (hit) return hit;
+  const [em, ed] = easter(y);
+  const s = new Set([
+    dow(y, 1, 1) === 6 ? '' : usObserved(y, 1, 1),
+    nthWeekday(y, 1, 1, 3),
+    nthWeekday(y, 2, 1, 3),
+    shiftDay(y, em, ed, -2),
+    nthWeekday(y, 5, 1, -1),
+    ...(y >= 2022 ? [usObserved(y, 6, 19)] : []),
+    usObserved(y, 7, 4),
+    nthWeekday(y, 9, 1, 1),
+    nthWeekday(y, 11, 4, 4),
+    usObserved(y, 12, 25),
+  ].filter(Boolean));
+  holidayCache.set(key, s);
+  return s;
+}
+/** The London Stock Exchange's closures in a year: England's bank holidays, weekend ones moved to the next weekday. */
+export function lseHolidays(y: number): Set<string> {
+  const key = `ldn${y}`;
+  const hit = holidayCache.get(key);
+  if (hit) return hit;
+  const [em, ed] = easter(y);
+  const ny = dow(y, 1, 1);
+  const xmas = dow(y, 12, 25);
+  const xs = xmas === 6 ? [ymd(y, 12, 27), ymd(y, 12, 28)] : xmas === 0 ? [ymd(y, 12, 26), ymd(y, 12, 27)] : xmas === 5 ? [ymd(y, 12, 25), ymd(y, 12, 28)] : [ymd(y, 12, 25), ymd(y, 12, 26)];
+  const s = new Set([
+    ny === 6 ? ymd(y, 1, 3) : ny === 0 ? ymd(y, 1, 2) : ymd(y, 1, 1),
+    shiftDay(y, em, ed, -2),
+    shiftDay(y, em, ed, 1),
+    nthWeekday(y, 5, 1, 1),
+    nthWeekday(y, 5, 1, -1),
+    nthWeekday(y, 8, 1, -1),
+    ...xs,
+  ]);
+  holidayCache.set(key, s);
+  return s;
+}
+/** Whether a zone's exchange trades on a local date (a weekday, no holiday). UTC: Monday to Friday. */
+export function tradingDay(zone: QuietWindow['zone'], date: string, weekday: number): boolean {
+  if (weekday === 0 || weekday === 6) return false;
+  const y = Number(date.slice(0, 4));
+  if (zone === 'new_york') return !nyseHolidays(y).has(date);
+  if (zone === 'london') return !lseHolidays(y).has(date);
+  return true;
 }
 
 const minutesOf = (hhmm: string): number => Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3, 5));
@@ -260,12 +355,28 @@ const minutesOf = (hhmm: string): number => Number(hhmm.slice(0, 2)) * 60 + Numb
 /** The quiet window `at` is inside (the first of them), or null. One past midnight counts by the day it began. */
 export function quietWindowAt(windows: readonly QuietWindow[] | undefined, at: number): QuietWindow | null {
   for (const w of windows ?? []) {
-    const { minutes, weekday } = zoneTime(at, w.zone);
+    const { minutes, weekday, date } = zoneTime(at, w.zone);
     const from = minutesOf(w.from);
     const to = minutesOf(w.to);
-    const dayOk = (d: number) => w.days === 'all' || (d >= 1 && d <= 5);
-    const inside = from < to ? minutes >= from && minutes < to && dayOk(weekday) : (minutes >= from && dayOk(weekday)) || (minutes < to && dayOk((weekday + 6) % 7));
+    // The day the window began: today, or (past midnight, before `to`) yesterday.
+    const dayOk = (back: boolean): boolean => {
+      if (w.days === 'all') return true;
+      const d = back ? (weekday + 6) % 7 : weekday;
+      if (w.days === 'weekdays') return d >= 1 && d <= 5;
+      return tradingDay(w.zone, back ? zoneTime(at - 86_400_000, w.zone).date : date, d);
+    };
+    const inside = from < to ? minutes >= from && minutes < to && dayOk(false) : (minutes >= from && dayOk(false)) || (minutes < to && dayOk(true));
     if (inside) return w;
+  }
+  return null;
+}
+
+/** The release a news gate holds for at `at` (of its level or above, timed, not all-day), or null. */
+export function newsAt(gate: NewsGate | undefined, events: readonly NewsEvent[], at: number): NewsEvent | null {
+  if (!gate) return null;
+  for (const ev of events) {
+    if (ev.allDay || ev.importance === 'low' || (gate.level === 'high' && ev.importance !== 'high')) continue;
+    if (at >= ev.time - gate.beforeMin * 60_000 && at < ev.time + gate.afterMin * 60_000) return ev;
   }
   return null;
 }

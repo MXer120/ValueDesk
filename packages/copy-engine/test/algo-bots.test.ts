@@ -30,6 +30,10 @@ import {
   FairBasis,
   PATIENT_TAKER_ACCOUNT,
   quietWindowAt,
+  newsAt,
+  nyseHolidays,
+  lseHolidays,
+  type NewsEvent,
   zoneTime,
   BOT_FEE,
   type ReferenceSource,
@@ -217,6 +221,7 @@ interface Rig {
   store: MemoryAlgoStore;
   brake: string | null;
   problem: string | null;
+  events?: NewsEvent[] | null;
 }
 
 function runtimeFor(r: Rig): AlgoRuntime {
@@ -239,6 +244,7 @@ function runtimeFor(r: Rig): AlgoRuntime {
     ...(r.ref ? { reference: r.ref } : {}),
     brake: () => r.brake,
     problem: async () => r.problem,
+    events: () => r.events ?? null,
     lookup: async (_a, _s, history) =>
       [...r.ex.resting.values()].filter(() => !history).map((x) => ({ clOrdID: x.clOrdID, orderId: '1', status: 'NEW', executedQty: x.filled, executedValue: x.filled * Number(x.price) })),
   });
@@ -1073,6 +1079,61 @@ test('quiet windows: New York and London local time across DST; weekdays; a wind
   assert.equal(quietWindowAt([...night], Date.UTC(2026, 0, 19, 0, 30)), null);
   assert.ok(quietWindowAt([...night], Date.UTC(2026, 0, 19, 23, 30)));
   assert.equal(quietWindowAt([...night], Date.UTC(2026, 0, 19, 1, 0)), null);
+});
+
+test('trading days: NYSE and London holidays by rule; a trading-days window skips them', () => {
+  // NYSE 2026: Good Friday 3 April, Independence Day observed Friday 3 July, Thanksgiving 26 November.
+  const ny26 = nyseHolidays(2026);
+  for (const d of ['2026-01-01', '2026-01-19', '2026-02-16', '2026-04-03', '2026-05-25', '2026-06-19', '2026-07-03', '2026-09-07', '2026-11-26', '2026-12-25']) assert.ok(ny26.has(d), d);
+  assert.equal(ny26.size, 10);
+  // 2027: Juneteenth on a Saturday is Friday 18 June; Christmas on a Saturday is Friday 24 December; New Year on a Friday.
+  for (const d of ['2027-01-01', '2027-03-26', '2027-06-18', '2027-07-05', '2027-12-24']) assert.ok(nyseHolidays(2027).has(d), d);
+  // 2028 starts on a Saturday: NYSE takes no day for it.
+  assert.ok(!nyseHolidays(2028).has('2027-12-31') && !nyseHolidays(2028).has('2028-01-03'));
+  // London 2026: Easter Monday 6 April, bank holidays 4 May, 25 May, 31 August; Boxing Day on a Saturday is Monday 28 December.
+  for (const d of ['2026-01-01', '2026-04-03', '2026-04-06', '2026-05-04', '2026-05-25', '2026-08-31', '2026-12-25', '2026-12-28']) assert.ok(lseHolidays(2026).has(d), d);
+  const open = [{ from: '09:25', to: '09:50', zone: 'new_york', days: 'trading' }] as const;
+  // Thursday 26 November 2026 (Thanksgiving) is skipped; Wednesday the 25th is not. 09:30 EST = 14:30 UTC.
+  assert.equal(quietWindowAt([...open], Date.UTC(2026, 10, 26, 14, 30)), null);
+  assert.ok(quietWindowAt([...open], Date.UTC(2026, 10, 25, 14, 30)));
+  // A Saturday is no trading day either.
+  assert.equal(quietWindowAt([...open], Date.UTC(2026, 10, 28, 14, 30)), null);
+});
+
+test('news gate: held from before to after a timed release of its level; low and all-day ones are skipped', () => {
+  const t = Date.UTC(2026, 10, 13, 13, 30);
+  const evs: NewsEvent[] = [{ time: t, short: 'CPI', importance: 'high' }, { time: t + 3_600_000, short: 'Claims', importance: 'low' }, { time: t + 7_200_000, short: 'PPI', importance: 'medium' }, { time: t + 9_000_000, short: 'GDP', importance: 'high', allDay: true }];
+  const g = { beforeMin: 5, afterMin: 15, level: 'high' } as const;
+  assert.equal(newsAt(g, evs, t - 5 * 60_000)?.short, 'CPI');
+  assert.equal(newsAt(g, evs, t - 6 * 60_000), null);
+  assert.equal(newsAt(g, evs, t + 14 * 60_000)?.short, 'CPI');
+  assert.equal(newsAt(g, evs, t + 15 * 60_000), null);
+  assert.equal(newsAt(g, evs, t + 3_600_000), null, 'a low one never');
+  assert.equal(newsAt(g, evs, t + 7_200_000), null, 'medium is not high');
+  assert.equal(newsAt({ ...g, level: 'medium' }, evs, t + 7_200_000)?.short, 'PPI');
+  assert.equal(newsAt(g, evs, t + 9_000_000), null, 'no time: skipped');
+  assert.ok(parseAlgoSpec({ kind: 'mm', symbol: 'BTC-USD', orderUsd: 50, maxInventoryUsd: 200, news: g }).kind === 'mm');
+  assert.throws(() => parseAlgoSpec({ kind: 'mm', symbol: 'BTC-USD', orderUsd: 50, maxInventoryUsd: 200, news: { beforeMin: 0, afterMin: 0 } }));
+  assert.throws(() => parseAlgoSpec({ kind: 'mm', symbol: 'BTC-USD', orderUsd: 50, maxInventoryUsd: 200, quietOnly: true }), 'trading hours need a window');
+});
+
+test('volume maker trading hours (quietOnly): quotes only inside its windows; the news gate holds around a release', async () => {
+  const r = await rig();
+  // T0 is 08:00 UTC: it trades 08:05-08:30 only.
+  const a = await add(r, { ...MM, quiet: [{ from: '08:05', to: '08:30', zone: 'utc' }], quietOnly: true });
+  const out = await step(r, a.id);
+  assert.equal(r.ex.resting.size, 0, 'outside its hours nothing rests');
+  assert.match(out.statusReason ?? '', /outside your trading hours/);
+  await step(r, a.id, 5 * 60_000);
+  await step(r, a.id, 500);
+  assert.equal(r.ex.resting.size, 2, 'inside them it quotes');
+  // News: a CPI release one minute on, held 2 minutes before to 10 after.
+  r.events = [{ time: clock + 60_000, short: 'CPI', importance: 'high' }];
+  const b = await add(r, { ...MM, news: { beforeMin: 2, afterMin: 10, level: 'high' } });
+  const held = await step(r, b.id);
+  assert.match(held.statusReason ?? '', /CPI .* \(news gate\)/);
+  const back = await step(r, b.id, 12 * 60_000);
+  assert.equal(back.status, 'running');
 });
 
 test('volume maker quiet window: pulls its quotes and holds inside it; quotes again when it ends', async () => {

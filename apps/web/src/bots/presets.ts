@@ -87,14 +87,20 @@ export const STRATEGY_INFO: Record<Strategy, { name: string; kind: AlgoSpec['kin
   },
 };
 
-export interface QuietWindow { from: string; to: string; zone: 'utc' | 'new_york' | 'london'; days: 'all' | 'weekdays' }
-/** The usual quiet windows (zone time): the New York cash open and close, the London open. */
+/** 'trading': the exchange's trading days in that zone (NYSE for New York, LSE for London), holidays skipped (engine bots.ts). */
+export interface QuietWindow { from: string; to: string; zone: 'utc' | 'new_york' | 'london'; days: 'all' | 'weekdays' | 'trading' }
+/** The usual session windows (zone time), on the exchange's trading days: its holidays are skipped. */
 export const QUIET_PRESETS: Array<{ id: string; label: string; w: QuietWindow }> = [
-  { id: 'ny-open', label: 'New York open', w: { from: '09:25', to: '09:50', zone: 'new_york', days: 'weekdays' } },
-  { id: 'ny-close', label: 'New York close', w: { from: '15:55', to: '16:10', zone: 'new_york', days: 'weekdays' } },
-  { id: 'ldn-open', label: 'London open', w: { from: '07:55', to: '08:20', zone: 'london', days: 'weekdays' } },
-  { id: 'us-data', label: 'US data 8:30', w: { from: '08:25', to: '08:45', zone: 'new_york', days: 'weekdays' } },
+  { id: 'ny-open', label: 'New York open', w: { from: '09:25', to: '09:50', zone: 'new_york', days: 'trading' } },
+  { id: 'ny-close', label: 'New York close', w: { from: '15:55', to: '16:10', zone: 'new_york', days: 'trading' } },
+  { id: 'ldn-open', label: 'London open', w: { from: '07:55', to: '08:20', zone: 'london', days: 'trading' } },
+  { id: 'ny-session', label: 'New York session', w: { from: '09:30', to: '16:00', zone: 'new_york', days: 'trading' } },
+  { id: 'ldn-session', label: 'London session', w: { from: '08:00', to: '16:30', zone: 'london', days: 'trading' } },
+  { id: 'asia', label: 'Asia morning', w: { from: '00:00', to: '03:00', zone: 'utc', days: 'weekdays' } },
 ];
+/** The news gate (engine MmSpec.news): off the book from beforeMin before to afterMin after each US release of its level. */
+export interface NewsGate { beforeMin: number; afterMin: number; level: 'high' | 'medium' }
+export const NEWS_DEFAULT: NewsGate = { beforeMin: 2, afterMin: 10, level: 'high' };
 export const FLOW_DEFAULT = { flowMinUsd: 250_000, flowWindowMin: 10, flowAction: 'pause' as const, flowShrink: 0.5 };
 
 /** What the form holds: every strategy's fields, the market and the switches. */
@@ -147,8 +153,11 @@ export interface BotDraft {
   flowWindowMin: number;
   flowAction: 'pause' | 'shrink';
   flowShrink: number;
-  /** Quiet windows: no quotes in these (zone time, HH:MM), e.g. around the New York open. */
+  /** Time windows (zone time, HH:MM): paused inside them, or (quietOnly) trading only inside them. */
   quiet: QuietWindow[];
+  quietOnly: boolean;
+  /** The news gate (null: off). */
+  news: NewsGate | null;
   /** Stops after this many hours (null: runs until stopped): spec endAt from its start. */
   runHours: number | null;
   /* limits */
@@ -221,6 +230,8 @@ export function draftFor(strategy: Strategy, preset: PresetId = 'balanced', symb
     flowOn: false,
     ...FLOW_DEFAULT,
     quiet: [],
+    quietOnly: false,
+    news: null,
     runHours: null,
     ...(strategy === 'market' ? R10 : {}),
     ...PRESET_VALUES[strategy][preset],
@@ -273,17 +284,19 @@ export function specOf(d: BotDraft, mark: number | null): Record<string, unknown
 function safeguards(d: BotDraft): Record<string, unknown> {
   return {
     ...(d.flowOn ? { flowGate: { minUsd: d.flowMinUsd, windowMs: Math.round(d.flowWindowMin * 60_000), action: d.flowAction, shrink: d.flowShrink } } : {}),
-    ...(d.quiet.length ? { quiet: d.quiet.map((w) => ({ ...w })) } : {}),
+    ...(d.quiet.length ? { quiet: d.quiet.map((w) => ({ ...w })), ...(d.quietOnly ? { quietOnly: true } : {}) } : {}),
+    ...(d.news ? { news: { ...d.news } } : {}),
     ...(d.runHours !== null && d.runHours > 0 ? { endAt: Date.now() + Math.round(d.runHours * 3_600_000) } : {}),
   };
 }
 
 /** The safeguards a spec carries, back as draft fields. */
 function safeguardsOf(s: AlgoSpec): Partial<BotDraft> {
-  const x = s as unknown as { flowGate?: { minUsd: number; windowMs: number; action: 'pause' | 'shrink'; shrink: number }; quiet?: QuietWindow[]; endAt?: number | null };
+  const x = s as unknown as { flowGate?: { minUsd: number; windowMs: number; action: 'pause' | 'shrink'; shrink: number }; quiet?: QuietWindow[]; quietOnly?: boolean; news?: NewsGate; endAt?: number | null };
   return {
     ...(x.flowGate ? { flowOn: true, flowMinUsd: x.flowGate.minUsd, flowWindowMin: x.flowGate.windowMs / 60_000, flowAction: x.flowGate.action, flowShrink: x.flowGate.shrink } : {}),
-    ...(x.quiet ? { quiet: x.quiet.map((w) => ({ ...w })) } : {}),
+    ...(x.quiet ? { quiet: x.quiet.map((w) => ({ ...w })), quietOnly: x.quietOnly === true } : {}),
+    ...(x.news ? { news: { ...x.news } } : {}),
   };
 }
 

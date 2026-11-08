@@ -88,6 +88,7 @@ import { shortWallet, type Alerts } from './alerts.ts';
 import { plainSockets } from './feed/binance.ts';
 import { BinanceReference } from './feed/reference.ts';
 import { DEFAULT_FEED_PATH } from './feed/ring.ts';
+import { CalendarFeed } from './calendar.ts';
 
 /** The pairing code's letters: no 0/O, 1/I/L, so it reads back from a terminal without doubt. */
 const PAIR_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
@@ -181,6 +182,14 @@ function algoPatch(raw: unknown): AlgoUpdatePatch {
     if (r.quiet !== null && !Array.isArray(r.quiet)) throw new ApiError(400, 'patch', 'quiet must be a list or null.');
     out.quiet = r.quiet as AlgoUpdatePatch['quiet'];
   }
+  if (r.quietOnly !== undefined) {
+    if (r.quietOnly !== null && typeof r.quietOnly !== 'boolean') throw new ApiError(400, 'patch', 'quietOnly must be true, false or null.');
+    out.quietOnly = r.quietOnly as boolean | null;
+  }
+  if (r.news !== undefined) {
+    if (r.news !== null && (typeof r.news !== 'object' || Array.isArray(r.news))) throw new ApiError(400, 'patch', 'news must be an object or null.');
+    out.news = r.news as AlgoUpdatePatch['news'];
+  }
   return out;
 }
 
@@ -256,6 +265,8 @@ export class ExecutorService {
   readonly algos: AlgoRuntime;
   /** The Binance-led maker's reference (feed/reference.ts); null on a self-hosted executor. */
   readonly reference: BinanceReference | null;
+  /** The economic calendar, for a bot's news gate (calendar.ts); null without a calendar URL. */
+  readonly calendar: CalendarFeed | null;
   readonly sodex: SodexClient;
   /** Signed-write latency to SoDEX per 10 min (latency.ts), for GET /bots/latency. */
   readonly latency: WriteLatency;
@@ -339,6 +350,7 @@ export class ExecutorService {
     const oracleFeed = new OracleFeed({ fetch: deps.fetch });
     // The Binance-led maker's reference: the box's shared Binance feed (valuescan-feed), own sockets while it is down. Hosted only.
     this.reference = cfg.kind === 'hosted' ? new BinanceReference({ path: process.env.EXECUTOR_FEED_PATH || DEFAULT_FEED_PATH, factory: plainSockets, log: deps.log }) : null;
+    this.calendar = cfg.calendarUrl ? new CalendarFeed({ url: cfg.calendarUrl, fetch: deps.fetch, log: deps.log }) : null;
     this.algos = new AlgoRuntime({
       store: db,
       sodex: this.sodex,
@@ -355,6 +367,8 @@ export class ExecutorService {
       // Hyperliquid, OKX and Bybit, each read at most once a second per coin for every algo here.
       oracle: (coin) => oracleFeed.quotes(coin),
       ...(this.reference ? { reference: this.reference } : {}),
+      // A bot's news gate: the API server's economic calendar, read every 30 minutes.
+      events: () => this.calendar?.events() ?? null,
       // An algo failed, stopped, held or finished: kept for the follower to read after signing in.
       onNotice: (n) => db.addNotice(n),
       confirmGapMs: deps.readGapMs,
@@ -363,6 +377,7 @@ export class ExecutorService {
 
   async start(): Promise<void> {
     this.latency.start();
+    this.calendar?.start();
     this.signerSweep ??= setInterval(() => this.sweepSigners(), 30_000);
     this.signerSweep.unref?.();
     // The per-IP rate limit, to the operator: SoDEX's 429 / Cloudflare 1015 opens a cooldown for every wallet here.
@@ -386,6 +401,7 @@ export class ExecutorService {
     this.signerSweep = null;
     await this.algos.stop();
     this.reference?.stop();
+    this.calendar?.stop();
     await this.runtime.stop();
     // Last: a stop still signs (what a step had on its way, the bots' cancels), and a wiped key signs nothing valid.
     for (const owner of [...this.signers.keys()]) this.forgetSigner(owner, true);

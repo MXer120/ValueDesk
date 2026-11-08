@@ -550,6 +550,27 @@ export interface MmSpec extends AlgoBase, BotLimits {
   flowGate?: FlowGate;
   /** Quiet windows (absent: none; at most 6; with or without `ref`): inside one the quotes are pulled and it holds. */
   quiet?: QuietWindow[];
+  /** true: the windows are the hours it trades in, and outside all of them it holds (absent: it pauses inside them). */
+  quietOnly?: boolean;
+  /** The news gate (absent: off): held from beforeMin before to afterMin after each timed US release of its level. */
+  news?: NewsGate;
+}
+
+/** MmSpec.news. */
+export interface NewsGate {
+  beforeMin: number;
+  afterMin: number;
+  /** 'high': CPI, jobs, FOMC, GDP, PCE; 'medium' adds PPI, JOLTS, ISM, retail sales and the like. */
+  level: 'high' | 'medium';
+}
+
+/** A dated release the host knows of (the economic calendar), for MmSpec.news. */
+export interface NewsEvent {
+  time: number;
+  short: string;
+  importance: 'high' | 'medium' | 'low';
+  /** Only the date is known: the gate skips it. */
+  allDay?: boolean;
 }
 
 /** MmSpec.flowGate. */
@@ -570,8 +591,12 @@ export interface QuietWindow {
   to: string;
   /** UTC, or the local time (DST included) of America/New_York or Europe/London. */
   zone: 'utc' | 'new_york' | 'london';
-  /** Every day, or Monday to Friday in that zone (a window past midnight goes by the day it began). */
-  days: 'all' | 'weekdays';
+  /**
+   * Every day, Monday to Friday in that zone, or 'trading': the exchange's trading days there (NYSE for New York, the
+   * London Stock Exchange for London, Monday to Friday for UTC), holidays skipped. A window past midnight goes by the
+   * day it began.
+   */
+  days: 'all' | 'weekdays' | 'trading';
 }
 
 /**

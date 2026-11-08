@@ -63,7 +63,7 @@ import type { AlgoSink, ChildRequest, ChildResult, StopRequest } from './sink.ts
 import { ALGO_NAMES, algoClosesOnly, algoQuantity, algoSymbols, opensPosition, parseAlgoSpec } from './spec.ts';
 import type { AlgoStore } from './store.ts';
 import type { AlgoUpdatePatch } from '../api.ts';
-import { bookFill, bookGross, bookInventory, bookNet, bookVolume, costPerMillion, emptyBook, gridAfterFill, gridPrices, gridQty, gridStart, mmQuotes, pastFair, PATIENT_TAKER_ACCOUNT, quietWindowAt, quietWords, sampleBook, usdWords, windowWords, type GridSide } from './bots.ts';
+import { bookFill, bookGross, bookInventory, bookNet, bookVolume, costPerMillion, emptyBook, gridAfterFill, gridPrices, gridQty, gridStart, mmQuotes, pastFair, PATIENT_TAKER_ACCOUNT, newsAt, quietWindowAt, quietWords, sampleBook, usdWords, windowWords, type GridSide } from './bots.ts';
 import { FairBasis, REF_MAX_AGE_MS, type ReferenceSource } from './reference.ts';
 import {
   FINAL_STATUSES,
@@ -80,6 +80,7 @@ import {
   type Condition,
   type ExecSpec,
   type Side,
+  type NewsEvent,
 } from './types.ts';
 
 export const ALGO_TICK_MS = 500;
@@ -209,6 +210,8 @@ export interface AlgoHost {
   /** Volume candles (default: SoDEX REST). */
   candles?(symbol: string, interval: string, startTime: number, endTime: number): Promise<Candle[]>;
   /** Order lookups (default: SoDEX REST). `history` reads are drip-limited; the runtime asks rarely. */
+  /** The economic calendar's releases around now (cached by the host, read every tick), for MmSpec.news; absent: none. */
+  events?(): readonly NewsEvent[] | null;
   lookup?(a: AlgoRecord, symbol: string, history: boolean): Promise<Array<{ clOrdID: string; orderId: string; status: string; executedQty: number; executedValue: number }>>;
   /**
    * A sweep's outside reference: every oracle venue's quote for the coin
@@ -271,7 +274,7 @@ const EXITS_MAX_REFUSALS = 5;
 const UPDATABLE: ReadonlySet<string> = new Set(['limitPrice', 'upper', 'lower', 'maxSpreadBps', 'label', 'quantity']);
 /** ...and on a running bot (its market, range and levels are what it is: a different one is a new bot). */
 const BOT_UPDATABLE: Readonly<Record<'mm' | 'grid', ReadonlySet<string>>> = {
-  mm: new Set(['label', 'maxSpreadBps', 'upper', 'lower', 'orderUsd', 'maxInventoryUsd', 'offsetTicks', 'chaseTicks', 'minRepriceMs', 'skewTicks', 'edgeBps', 'queueGuard', 'levels', 'moveGuard', 'refBps', 'pullBps', 'placeBps', 'calmBps', 'calmMs', 'stillBps', 'stillMs', 'restMs', 'flowGate', 'quiet', 'volumeTargetUsd', 'maxLossUsd', 'endAt', 'onStop']),
+  mm: new Set(['label', 'maxSpreadBps', 'upper', 'lower', 'orderUsd', 'maxInventoryUsd', 'offsetTicks', 'chaseTicks', 'minRepriceMs', 'skewTicks', 'edgeBps', 'queueGuard', 'levels', 'moveGuard', 'refBps', 'pullBps', 'placeBps', 'calmBps', 'calmMs', 'stillBps', 'stillMs', 'restMs', 'flowGate', 'quiet', 'quietOnly', 'news', 'volumeTargetUsd', 'maxLossUsd', 'endAt', 'onStop']),
   grid: new Set(['label', 'maxSpreadBps', 'upper', 'lower', 'orderUsd', 'volumeTargetUsd', 'maxLossUsd', 'endAt', 'onStop', 'outOfRange']),
 };
 /** How long the patient taker's prints are kept per market (the longest flowGate window). */
@@ -1748,12 +1751,26 @@ export class AlgoRuntime {
       await this.pullResting(a);
       return this.hold(a, `Held: the spread (${spreadBps(q).toFixed(1)} bp) is wider than your ${s.maxSpreadBps} bp.`);
     }
-    // A quiet window: pulled and held; when it ends the hold ends and it quotes again.
+    // A quiet window: pulled and held; when it ends the hold ends and it quotes again. With quietOnly the windows are
+    // the hours it trades in, and it holds outside all of them.
     const qw = quietWindowAt(s.quiet, now);
-    if (qw) {
+    if (s.quietOnly ? !qw : qw) {
       this.setGateNote(a, undefined);
       await this.pullResting(a);
-      return this.hold(a, `Paused: quiet window ${quietWords(qw)}.`);
+      return this.hold(a, s.quietOnly ? `Paused: outside your trading hours (${(s.quiet ?? []).map(quietWords).join(', ')}).` : `Paused: quiet window ${quietWords(qw!)}.`);
+    }
+    // The news gate: held around each timed release of its level (the host's calendar). No calendar here: it stays open.
+    if (s.news) {
+      const events = this.host.events?.() ?? null;
+      if (events === null) await this.noteOnce(a, 'newsnone', 'News gate: no economic calendar on this host, so it stays open.');
+      else {
+        const ev = newsAt(s.news, events, now);
+        if (ev) {
+          this.setGateNote(a, undefined);
+          await this.pullResting(a);
+          return this.hold(a, `Paused: ${ev.short} at ${new Date(ev.time).toISOString().slice(11, 16)} UTC (news gate).`, 'Paused: news gate');
+        }
+      }
     }
     // The patient-taker gate: closed while what PATIENT_TAKER_ACCOUNT took here over its window is under minUsd.
     let shrink = 1;

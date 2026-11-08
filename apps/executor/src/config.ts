@@ -74,6 +74,11 @@ export interface ExecutorConfig {
    * wallets real algos are on for (EXECUTOR_LIVE_ALGOS_WALLETS: the test follower).
    */
   betaUrl: string | null;
+  /**
+   * EXECUTOR_CALENDAR_URL: the API server's /api/vs/calendar (public), for a bot's news gate. Unset: derived from
+   * EXECUTOR_BUILDER_URL (same server); neither: no calendar, and a news gate stays open (it says so).
+   */
+  calendarUrl: string | null;
   localAddress: string | null;
   logLevel: 'debug' | 'info' | 'warn' | 'error';
   /** The executor id requests are signed for; null = the default (hosted: by network; self: its own, kept in its data). */
@@ -132,6 +137,17 @@ export function betaUrlFrom(raw: string | undefined, builderRaw: string | undefi
   const u = new URL(b);
   if (!/\/volume$/.test(u.pathname)) return null;
   u.pathname = u.pathname.replace(/\/volume$/, '/beta');
+  u.search = '';
+  return u.toString();
+}
+
+/** EXECUTOR_CALENDAR_URL, else the builder URL's server with /api/vs/calendar. */
+export function calendarUrlFrom(raw: string | undefined, builderRaw: string | undefined): string | null {
+  if (raw?.trim()) return builderUrl(raw);
+  const b = builderUrl(builderRaw);
+  if (!b) return null;
+  const u = new URL(b);
+  u.pathname = '/api/vs/calendar';
   u.search = '';
   return u.toString();
 }
@@ -197,6 +213,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ExecutorConfig
     builderUrl: builderUrl(env.EXECUTOR_BUILDER_URL),
     builderToken: env.EXECUTOR_BUILDER_TOKEN?.trim() || null,
     betaUrl: betaUrlFrom(env.EXECUTOR_BETA_URL, env.EXECUTOR_BUILDER_URL),
+    calendarUrl: calendarUrlFrom(env.EXECUTOR_CALENDAR_URL, env.EXECUTOR_BUILDER_URL),
     localAddress: env.EXECUTOR_LOCAL_ADDRESS?.trim() || null,
     logLevel: level === 'debug' || level === 'warn' || level === 'error' ? level : 'info',
     executorId,
