@@ -31,6 +31,7 @@ import {
   PATIENT_TAKER_ACCOUNT,
   quietWindowAt,
   checkSizes,
+  botReserveUsd,
   newsAt,
   nyseHolidays,
   lseHolidays,
@@ -1241,4 +1242,26 @@ test('volume maker update: flowGate and quiet change on a running bot, checked l
   await step(r, a.id, 61_000);
   await step(r, a.id, 500);
   assert.equal(r.ex.resting.size, 2, 'quotes again');
+});
+
+test('bot takers: each print a bot made names who took it - the uninformed (1002), the informed (23342), others; its own takes are not counted', async () => {
+  const r = await rig();
+  const a = await add(r, MM);
+  await step(r, a.id);
+  const cb = r.market.printCbs[0]!;
+  cb({ symbol: 'BTC-USD', price: 60_000, qty: 0.001, buyer: 42, seller: PATIENT_TAKER_ACCOUNT, taker: 'sell', at: Date.now() });
+  cb({ symbol: 'BTC-USD', price: 60_002, qty: 0.002, buyer: 23342, seller: 42, taker: 'buy', at: Date.now() });
+  cb({ symbol: 'BTC-USD', price: 60_002, qty: 0.001, buyer: 77, seller: 42, taker: 'buy', at: Date.now() });
+  cb({ symbol: 'BTC-USD', price: 60_002, qty: 0.5, buyer: 42, seller: 9, taker: 'buy', at: Date.now() });
+  cb({ symbol: 'ETH-USD', price: 3_000, qty: 1, buyer: 42, seller: 1002, taker: 'sell', at: Date.now() });
+  const t = r.rt.view(a.id)!.bot!.takers!;
+  assert.ok(Math.abs(t.t1002 - 60) < 1e-6, String(t.t1002));
+  assert.ok(Math.abs(t.t23342 - 120.004) < 1e-6, String(t.t23342));
+  assert.ok(Math.abs(t.other - 60.002) < 1e-6, 'its own take (42 the taker) is not counted');
+});
+
+test('smart margining: what a bot sets aside - a maker its max holding and a quote each side per level, a grid an order per level', () => {
+  assert.equal(botReserveUsd(parseAlgoSpec({ kind: 'mm', symbol: 'BTC-USD', orderUsd: 50, maxInventoryUsd: 150 })), 250);
+  assert.equal(botReserveUsd(parseAlgoSpec({ kind: 'mm', symbol: 'BTC-USD', orderUsd: 20, maxInventoryUsd: 100, levels: 3 })), 220);
+  assert.equal(botReserveUsd(parseAlgoSpec({ kind: 'grid', symbol: 'BTC-USD', low: 50_000, high: 70_000, levels: 10, orderUsd: 12 })), 120);
 });

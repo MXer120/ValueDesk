@@ -63,7 +63,7 @@ import type { AlgoSink, ChildRequest, ChildResult, StopRequest } from './sink.ts
 import { ALGO_NAMES, algoClosesOnly, algoQuantity, algoSymbols, opensPosition, parseAlgoSpec } from './spec.ts';
 import type { AlgoStore } from './store.ts';
 import type { AlgoUpdatePatch } from '../api.ts';
-import { bookFill, bookGross, bookInventory, bookNet, bookVolume, costPerMillion, emptyBook, gridAfterFill, gridPrices, gridQty, gridStart, mmQuotes, pastFair, PATIENT_TAKER_ACCOUNT, newsAt, quietWindowAt, quietWords, sampleBook, usdWords, windowWords, type GridSide } from './bots.ts';
+import { bookFill, bookGross, bookInventory, bookNet, bookVolume, costPerMillion, emptyBook, gridAfterFill, gridPrices, gridQty, gridStart, mmQuotes, pastFair, PATIENT_TAKER_ACCOUNT, INFORMED_TAKER_ACCOUNT, newsAt, quietWindowAt, quietWords, sampleBook, usdWords, windowWords, type GridSide } from './bots.ts';
 import { FairBasis, REF_MAX_AGE_MS, type ReferenceSource } from './reference.ts';
 import {
   FINAL_STATUSES,
@@ -803,7 +803,7 @@ export class AlgoRuntime {
    */
   async adopt(rec: AlgoRecord): Promise<AlgoRecord> {
     if (this.algos.has(rec.id)) throw new Error('This algo is here already.');
-    const a = structuredClone(rec);
+    const a = JSON.parse(JSON.stringify(rec)) as AlgoRecord;
     for (const c of a.children) {
       this.byClOrd.set(c.clOrdID, a.id);
       if (LIVE.has(c.state) && !a.spec.paper) c.state = 'unknown';
@@ -867,7 +867,7 @@ export class AlgoRuntime {
    * stays filled, and its exits stay on SoDEX to protect that (the log says so).
    * `pullAll` (the kill switch) pulls its exits and anything it left resting too.
    */
-  async cancel(id: string, o: { pullAll?: boolean } = {}): Promise<AlgoRecord> {
+  async cancel(id: string, o: { pullAll?: boolean; now?: boolean } = {}): Promise<AlgoRecord> {
     const a = this.need(id);
     if (FINAL_STATUSES.has(a.status)) {
       // An ended algo keeps only what protects or finishes what it filled (its exits, a child left resting): cancelling it pulls those.
@@ -876,7 +876,8 @@ export class AlgoRuntime {
     }
     for (const c of this.linkedOf(a)) if (!FINAL_STATUSES.has(c.status)) await this.cancel(c.id, o);
     // A bot set to close what it holds stops by closing it first (the next steps); a second stop, or the kill switch, ends it at once.
-    if (!o.pullAll && !a.k.closing && (await this.stopBot(a, 'cancelled', 'Stopped by you.'))) return a;
+    // `now` (Instant stop): the close takes at once (a capped taker) instead of resting at the touch first.
+    if (!o.pullAll && !a.k.closing && (await this.stopBot(a, 'cancelled', 'Stopped by you.', o.now === true))) return a;
     await this.end(a, 'cancelled', a.k.closing ? 'Stopped by you; what it still holds is left as it is.' : a.spec.bot ? 'Stopped by you.' : 'Cancelled by you.');
     if (o.pullAll) {
       for (const c of this.linkedOf(a)) if (this.hasLeftovers(c)) await this.pullLeftovers(c);
@@ -1046,8 +1047,8 @@ export class AlgoRuntime {
     return base * share + due;
   }
 
-  async events(id: string, q: { limit?: number; before?: number } = {}): Promise<AlgoEvent[]> {
-    return this.host.store.algoEvents({ algoId: id, limit: q.limit ?? 200, before: q.before });
+  async events(id: string, q: { limit?: number; before?: number; after?: number } = {}): Promise<AlgoEvent[]> {
+    return this.host.store.algoEvents({ algoId: id, limit: q.limit ?? 200, before: q.before, after: q.after });
   }
 
   /* ---------------------------------------------------------------- views ----- */
@@ -1144,6 +1145,7 @@ export class AlgoRuntime {
       mark,
       orders: this.live(a).filter((c) => c.tif !== 'ioc' && !c.cancelling).map((c) => ({ side: c.side, price: c.price, quantity: c.quantity - c.filled, tag: c.tag })),
       closing: !!a.k.closing,
+      ...(b.takers ? { takers: { ...b.takers } } : {}),
     };
   }
 
@@ -1688,14 +1690,14 @@ export class AlgoRuntime {
    * A bot reached one of its limits, or was stopped: with `onStop: 'close'` and something held, it pulls its
    * quotes and closes that first (stepBotClose). Returns whether it is now closing (false: end it here).
    */
-  private async stopBot(a: AlgoRecord, status: AlgoStatus, reason: string): Promise<boolean> {
+  private async stopBot(a: AlgoRecord, status: AlgoStatus, reason: string, now = false): Promise<boolean> {
     const s = a.spec;
     if (!(s.kind === 'mm' || s.kind === 'grid') || s.onStop !== 'close' || !a.book) return false;
     const m = this.markets.get(s.symbol);
     const held = Math.abs(bookInventory(a.book));
     const px = this.market.mark(s.symbol)?.mark ?? null;
     if (!m || held < Number(m.stepSize) || (px !== null && held < minChildQty(m, px) - 1e-12)) return false;
-    const closing: BotClosing = { status, reason, at: Date.now() };
+    const closing: BotClosing = { status, reason, at: now ? Date.now() - BOT_CLOSE_REST_MS : Date.now() };
     a.k.closing = closing;
     await this.pullResting(a);
     await this.save(a);
@@ -3320,7 +3322,7 @@ export class AlgoRuntime {
       bookFill(a.book, c.side, dq, dv, isMaker, isMaker ? (m?.makerFee ?? (m?.takerFee ?? 0.0004) / 2) : (m?.takerFee ?? 0.0004), this.host.builderRate?.(a) ?? 0);
     }
     if (a.k.consecRejects) a.k.consecRejects = 0;
-    void this.event(a, 'fill', `Filled ${dec(dq)} @ ${(dv / dq).toPrecision(8).replace(/\.?0+$/, '')}${isMaker ? ' (maker)' : ''}.`, { ...c, quantity: dq, price: dv / dq });
+    void this.event(a, 'fill', `Filled ${dec(dq)} @ ${(dv / dq).toPrecision(8).replace(/\.?0+$/, '')}.`, { ...c, quantity: dq, price: dv / dq }, isMaker);
   }
 
   /* --------------------------------------------------------------- exits ----- */
@@ -3761,7 +3763,25 @@ export class AlgoRuntime {
       a.marketValue += p.qty * p.price;
       this.dirty.add(a.id);
     }
+    // A bot's own fill: the other side of the print is who took its quote.
+    if (p.buyer >= 0 && p.seller >= 0) {
+      for (const a of this.algos.values()) {
+        if ((a.spec.kind !== 'mm' && a.spec.kind !== 'grid') || a.spec.paper || a.spec.symbol !== p.symbol || !a.book) continue;
+        if (taker === a.accountId || (p.buyer !== a.accountId && p.seller !== a.accountId)) continue;
+        this.countTaker(a, taker, p.qty * p.price);
+      }
+    }
     if (this.paper.size) this.paperOnPrint(p);
+  }
+
+  /** BotBook.takers: one fill's USD to the taker that took it. */
+  private countTaker(a: AlgoRecord, taker: number, usd: number): void {
+    if (!a.book || !(usd > 0)) return;
+    const t = (a.book.takers ??= { t1002: 0, t23342: 0, other: 0 });
+    if (taker === PATIENT_TAKER_ACCOUNT) t.t1002 += usd;
+    else if (taker === INFORMED_TAKER_ACCOUNT) t.t23342 += usd;
+    else t.other += usd;
+    this.dirty.add(a.id);
   }
 
   /**
@@ -4123,6 +4143,7 @@ export class AlgoRuntime {
       o.value += q * o.price;
       const a = this.algos.get(o.algoId);
       if (a) this.paperPosition(a, o.side, q);
+      if (a && (a.spec.kind === 'mm' || a.spec.kind === 'grid')) this.countTaker(a, p.taker === 'buy' ? p.buyer : p.seller, q * o.price);
       const done = o.left <= 1e-12;
       if (done) this.paper.delete(o.clOrdID);
       this.onOrderUpdate({ clOrdID: o.clOrdID, orderId: `paper-${o.clOrdID}`, symbol: o.symbol, status: done ? 'FILLED' : 'PARTIALLY_FILLED', filledQty: o.filled, filledValue: o.value, maker: true, reason: null, at: p.at });
@@ -4249,7 +4270,7 @@ export class AlgoRuntime {
     }
   }
 
-  private async event(a: AlgoRecord, kind: AlgoEventKind, text: string, c?: Partial<ChildOrder>): Promise<void> {
+  private async event(a: AlgoRecord, kind: AlgoEventKind, text: string, c?: Partial<ChildOrder>, maker?: boolean): Promise<void> {
     const at = Date.now();
     const e: AlgoEvent = {
       // Sorts by time, then by the order it was written: lines of one millisecond keep their order.
@@ -4264,6 +4285,8 @@ export class AlgoRuntime {
       price: c?.price ?? null,
       qty: c?.quantity ?? null,
       paper: a.spec.paper,
+      ...(c?.tif ? { tif: c.tif } : {}),
+      ...(maker !== undefined ? { maker } : {}),
     };
     await this.host.store.addAlgoEvent(e).catch((err) => this.host.log.error('algo: event not saved', { error: String(err) }));
   }

@@ -439,12 +439,13 @@ export class ExecutorDb implements CopyStore, AlgoStore, LatencyStore {
     this.q('INSERT OR IGNORE INTO algo_events (id, algo_id, owner, at, json) VALUES (?, ?, ?, ?, ?)').run(e.id, e.algoId, e.owner, e.at, JSON.stringify(e));
   }
 
-  async algoEvents(q: { algoId?: string; owner?: string; limit?: number; before?: number }): Promise<AlgoEvent[]> {
+  async algoEvents(q: { algoId?: string; owner?: string; limit?: number; before?: number; after?: number }): Promise<AlgoEvent[]> {
     const limit = Math.max(1, Math.min(1000, q.limit ?? 200));
     const before = q.before ?? Number.MAX_SAFE_INTEGER;
+    const after = q.after ?? -1;
     const rows = q.algoId
-      ? (this.q('SELECT json FROM algo_events WHERE algo_id = ? AND at < ? ORDER BY at DESC, id DESC LIMIT ?').all(q.algoId, before, limit) as Row[])
-      : (this.q('SELECT json FROM algo_events WHERE owner = ? AND at < ? ORDER BY at DESC, id DESC LIMIT ?').all(q.owner ?? '', before, limit) as Row[]);
+      ? (this.q('SELECT json FROM algo_events WHERE algo_id = ? AND at < ? AND at > ? ORDER BY at DESC, id DESC LIMIT ?').all(q.algoId, before, after, limit) as Row[])
+      : (this.q('SELECT json FROM algo_events WHERE owner = ? AND at < ? AND at > ? ORDER BY at DESC, id DESC LIMIT ?').all(q.owner ?? '', before, after, limit) as Row[]);
     return rows.map((r) => JSON.parse(String(r.json)) as AlgoEvent);
   }
 

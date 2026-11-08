@@ -77,18 +77,16 @@ export function BotSettings({ d, set, range, mark, liveAllowed, noLead, hidePrac
   const guards = (market && d.gate ? 1 : 0) + (mm && d.flowOn ? 1 : 0) + (d.quiet.length ? 1 : 0) + (d.news ? 1 : 0) + (d.maxSpreadBps !== null ? 1 : 0);
   const advChanged = [d.refBps !== 0, d.pullBps !== 0, d.ladder !== 1, d.minRepriceMs !== R10.minRepriceMs, d.chaseTicks !== R10.chaseTicks, d.skewTicks !== R10.skewTicks, d.moveGuard !== 0].filter(Boolean).length;
 
-  return (
-    <div className="bots-settings">
-      {!part && <Tabs<Sec>
-        label="Settings"
-        value={sec}
-        onChange={setSec}
-        tabs={[
-          { value: 'size', label: 'Size & risk' },
-          ...(mm ? [{ value: 'quote' as const, label: 'Quoting' }] : []),
-          { value: 'guard', label: 'Safeguards', count: guards || undefined },
-        ]}
-      />}
+  const SECS: Array<{ id: Sec; icon: 'wallet' | 'layers' | 'shield'; label: string; count?: number }> = [
+    { id: 'size', icon: 'wallet', label: 'Size & risk' },
+    ...(mm ? [{ id: 'quote' as const, icon: 'layers' as const, label: 'Quoting' }] : []),
+    { id: 'guard', icon: 'shield', label: 'Safeguards', count: guards || undefined },
+  ];
+  const cur = SECS.find((x) => x.id === sec) ?? SECS[0]!;
+  // The bot page: laid out as ValueDesk's own Settings (owner 2026-11-08): the sections down the left, the chosen
+  // one on a glass pane, each setting a title over its line and its control, hairlines between.
+  const body = (
+    <>
 
       {sec === 'size' && (
         <div className="bots-fgrid">
@@ -269,6 +267,22 @@ export function BotSettings({ d, set, range, mark, liveAllowed, noLead, hidePrac
           <Switch checked={!liveAllowed || d.paper} disabled={!liveAllowed} onChange={(on) => set({ paper: on })} label="Practice" hideLabel />
         </div>
       )}
+    </>
+  );
+  if (part) return <div className="bots-settings">{body}</div>;
+  return (
+    <div className="bots-settings is-stg">
+      <nav className="bots-stg__nav" aria-label="Settings sections">
+        {SECS.map((x) => (
+          <button key={x.id} type="button" className={`stg__tab${sec === x.id ? ' is-on' : ''}`} aria-current={sec === x.id ? 'page' : undefined} onClick={() => setSec(x.id)}>
+            <Icon name={x.icon} size={16} /><span>{x.label}</span>{x.count ? <em className="bots-stg__n">{x.count}</em> : null}
+          </button>
+        ))}
+      </nav>
+      <div className="stg__pane bots-stg__pane" key={sec}>
+        <div className="stg__panehead"><Icon name={cur.icon} size={20} /><h3>{cur.label}</h3></div>
+        {body}
+      </div>
     </div>
   );
 }

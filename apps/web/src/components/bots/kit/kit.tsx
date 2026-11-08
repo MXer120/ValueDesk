@@ -46,7 +46,8 @@ const PATHS = {
   up: <path d="M6.5 13.5 13.5 6.5M8 6.5h5.5V12" />,
   down: <path d="M6.5 6.5 13.5 13.5M13.5 8v5.5H8" />,
   flat: <path d="M5.5 10h9" />,
-  gear: <><circle cx="10" cy="10" r="2.4" /><path d="M10 3.5v2M10 14.5v2M3.5 10h2M14.5 10h2M5.4 5.4l1.4 1.4M13.2 13.2l1.4 1.4M5.4 14.6l1.4-1.4M13.2 6.8l1.4-1.4" /></>,
+  // Settings: the app's own settings mark (PrefsIcon, three sliders), not a sun (owner 2026-11-08).
+  gear: <><path d="M2.5 5h8.3M15.2 5h2.3M2.5 10h2.3M9.2 10h8.3M2.5 15h6.8M13.7 15h3.8" opacity="0.7" /><circle cx="13" cy="5" r="2.2" /><circle cx="7" cy="10" r="2.2" /><circle cx="11.5" cy="15" r="2.2" /></>,
   list: <path d="M5 6h10M5 10h10M5 14h10" />,
   clock: <><circle cx="10" cy="10" r="6.5" /><path d="M10 6.5V10l2.4 1.5" /></>,
   bolt: <path d="M11 3.5 5.5 11H10l-1 5.5L14.5 9H10z" />,

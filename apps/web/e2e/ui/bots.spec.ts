@@ -200,7 +200,7 @@ h.test('a practice market maker: set up, New bot with the gate, its page, settin
   const sp = page.locator('.bots-settingspage');
   await sp.waitFor();
   await sp.getByRole('textbox', { name: 'Order size', exact: true }).fill('15');
-  await sp.getByRole('tab', { name: /Safeguards/ }).click();
+  await sp.locator('.bots-stg__nav').getByRole('button', { name: /Safeguards/ }).click();
   assert.equal(await sp.getByRole('switch', { name: 'Volatility gate' }).getAttribute('aria-checked'), 'true', 'it shows what runs: the gate on');
   await sp.getByRole('switch', { name: 'Volatility gate' }).click();
   // The size, the holding that follows it, and the gate.
@@ -226,7 +226,10 @@ h.test('a practice market maker: set up, New bot with the gate, its page, settin
   await head.getByRole('button', { name: 'Pause', exact: true }).waitFor({ state: 'visible', timeout: 20_000 });
   assert.deepEqual(signedKinds(wallet, mark), ['algo', 'algo']);
   await page.getByRole('tab', { name: 'Activity', exact: true }).click();
-  await page.locator('.bots-log li').first().waitFor({ state: 'visible', timeout: 20_000 });
+  await page.locator('.bots-flog__row').first().waitFor({ state: 'visible', timeout: 20_000 });
+  // A line opens to what is known of it.
+  await page.locator('.bots-flog__line').first().click();
+  await page.locator('.bots-flog__more').first().waitFor({ state: 'visible' });
   await shot(page, 'activity');
 
   // The overview lists it; search finds it and misses well.
@@ -242,9 +245,12 @@ h.test('a practice market maker: set up, New bot with the gate, its page, settin
   // Stop from its page (what it holds is closed: a second stop ends it at once), then delete.
   await row.click();
   await page.waitForURL((u) => u.pathname === `/bots/${id}`);
-  await head.getByRole('button', { name: /^Stop( and close)?$/ }).click();
-  const confirmStop = page.getByRole('dialog', { name: /^Stop / });
-  if (await confirmStop.isVisible({ timeout: 3_000 }).catch(() => false)) await confirmStop.getByRole('button', { name: 'Stop bot', exact: true }).click();
+  // One Stop button; its three ways in a menu (hover or press).
+  await head.getByRole('button', { name: /^Stop$/ }).click();
+  const ways = page.getByRole('menu', { name: 'Stop' });
+  for (const w of ['Clean stop', 'Instant stop', 'Stop and keep position']) await ways.getByRole('menuitem', { name: new RegExp(w) }).waitFor({ state: 'visible' });
+  await shot(page, 'stop-menu');
+  await ways.getByRole('menuitem', { name: /Clean stop/ }).click();
   await until(page, async () => /Stopped|Closing/.test(await headState(page)), 'stopped or closing', 30_000);
   if (/Closing/.test(await headState(page))) {
     await head.getByRole('button', { name: 'Stop now', exact: true }).click();

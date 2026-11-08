@@ -12,7 +12,7 @@
  * each safeguard, the wallet's own bots: bots/estimate.ts), what will run, and the balance it needs.
  */
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { checkSizes, parseAlgoSpec, type MarketInfo } from '@copy-engine';
+import { botReserveUsd, checkSizes, parseAlgoSpec, type MarketInfo } from '@copy-engine';
 import { DASH, fmtUsd } from '../../format';
 import { useSymbols } from '../../hooks';
 import { useConfirm } from '../Modal';
@@ -26,6 +26,7 @@ import { CATEGORIES, RECIPE, recipeOfDraft, recipesOf, type Category, type Recip
 import { bestOf, estimate, ownRuns, type BotEstimate, type EstLine, type OwnRun } from '../../bots/estimate';
 import { BotAvatar, StrategyTile } from './BotIcon';
 import { BrandMark } from '../BrandMark';
+import { useAllocation } from './Allocation';
 import { BotSettings, NameField, SEC_NAMES, type Sec } from './BotSettings';
 import { BotsHead, type BotsCtx } from './BotsPage';
 import { Button, Icon, Inset, Panel, ProgressBar, RollingNumber, SearchField, Segmented, SegmentedBar, Shell, ShellHeader, Skeleton, StatusPill } from './kit/kit';
@@ -279,10 +280,12 @@ function RangeTrack({ low, high, v }: { low: number; high: number; v: number }) 
 }
 
 /** The receipt: the estimate, how it adds up, what will run, what it needs. */
-function Receipt({ d, eff, picked, markets, feeBps, paper, floor, runs, chosen, children }: {
+function Receipt({ d, eff, picked, markets, feeBps, paper, floor, runs, chosen, children, free = null }: {
   d: BotDraft; eff: BotDraft; picked: string[]; markets: BotMarket[]; feeBps: number; paper: boolean; floor: ReturnType<typeof costPerMillion>; runs: readonly OwnRun[];
   /** On or past the Markets step: before that the receipt names the preset only, with our mark. */
   chosen: boolean; children: ReactNode;
+  /** The futures margin free for new bots (null while unknown). */
+  free?: number | null;
 }) {
   const grid = eff.strategy === 'grid';
   const rc = RECIPE[recipeOfDraft(d)];
@@ -390,7 +393,8 @@ function Receipt({ d, eff, picked, markets, feeBps, paper, floor, runs, chosen, 
       </section>
 
       <footer className="bots-rc__foot">
-        <div><span>Balance needed</span><b>about {fmtUsd(need, 0)}</b></div>
+        <div><span>Sets aside</span><b className={!paper && free !== null && need > free ? 'neg' : ''}>about {fmtUsd(need, 0)}</b></div>
+        <div><span>Free for bots</span><b>{free === null ? DASH : fmtUsd(free, 0)}</b></div>
         <div><span>Signatures</span><b>{Math.max(1, picked.length)}</b></div>
       </footer>
       {children}
@@ -452,7 +456,11 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
     }
   }, [eff, mark, market, paper]);
   const why = ctx.setupWhy(paper);
-  const can = !check.length && !why && ctx.ready && (!grid || !!range) && picked.length > 0;
+  // Smart margining: a real bot (each of several) sets aside what it needs; together they fit the free margin.
+  const alloc = useAllocation(ctx);
+  const needAll = picked.reduce((t, s) => { try { return t + botReserveUsd(parseAlgoSpec(specFor(s))); } catch { return t; } }, 0);
+  const short = !paper && alloc.free !== null && needAll > alloc.free + 1e-6 ? needAll - alloc.free : 0;
+  const can = !check.length && !why && ctx.ready && (!grid || !!range) && picked.length > 0 && short === 0;
 
   const { confirm, dialog } = useConfirm();
   const start = async () => {
@@ -590,6 +598,7 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
               <Panel className="bots-review">
                 <NameField d={d} set={set} />
                 {check.map((e) => <p key={e} className="bots-err" role="alert">{e}</p>)}
+                {short > 0 && <p className="bots-err" role="alert">{picked.length > 1 ? 'These bots' : 'This bot'} would set aside {fmtUsd(needAll, 0)}, but only {fmtUsd(alloc.free ?? 0, 0)} of your futures account is free ({fmtUsd(alloc.used, 0)} is with your other bots). Lower the size or max holding, or stop a bot.</p>}
                 {why && ctx.address && <p className="bots-note">{why} <button type="button" className="bots-link" onClick={() => ctx.setup(paper)}>Set up</button></p>}
                 {!ctx.address && <p className="bots-note">Connect your wallet to start a bot.</p>}
                 {error && <p className="bots-err" role="alert">{error}</p>}
@@ -603,7 +612,7 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
 
         <aside className="bots-newside">
           <Shell className="bots-sidecard">
-            <Receipt chosen={place.step >= 1} d={d} eff={eff} picked={picked} markets={markets.data?.markets ?? []} feeBps={feeBps} paper={paper} floor={floor} runs={runs}>
+            <Receipt chosen={place.step >= 1} d={d} eff={eff} picked={picked} markets={markets.data?.markets ?? []} feeBps={feeBps} paper={paper} floor={floor} runs={runs} free={alloc.free}>
               <div className="bots-sidepanel__act">
                 {at > 0 && <Button variant="secondary" size="md" icon="arrowLeft" onClick={back}>Back</Button>}
                 {at < last

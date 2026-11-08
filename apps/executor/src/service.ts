@@ -38,6 +38,7 @@ import {
   canonicalSettings,
   copyFeeFor,
   BOT_FEE,
+  botReserveUsd,
   BOT_FEE_LADDER,
   BOT_FEE_VIP,
   BETA_VIP_DAYS,
@@ -1302,6 +1303,22 @@ export class ExecutorService {
       if (!k || !k.registered) throw new ApiError(412, 'key', 'Register this executor\'s key on SoDEX first (copy setup, "Approve agent").');
       accountId = await this.sodex.accountId(owner);
       if (!accountId) throw new ApiError(412, 'account', 'This wallet has no SoDEX account yet. Deposit first.');
+      // Smart margining (owner 2026-11-08): the wallet's real bots together set aside no more than its account holds.
+      if (spec.bot) {
+        const others = live.filter((x) => x.spec.bot === true && !x.spec.paper);
+        const reserved = others.reduce((t, x) => t + botReserveUsd(x.spec), 0);
+        const need = botReserveUsd(spec);
+        let equity: number | null = null;
+        try {
+          equity = (await this.sodex.follower(owner)).equity;
+        } catch {
+          /* unreadable: not refused for it, the bot's own limits still hold */
+        }
+        if (equity !== null && reserved + need > equity + 1e-6) {
+          const usd = (x: number) => `$${Math.round(x).toLocaleString('en-US')}`;
+          throw new ApiError(409, 'margin', `Your bots would set aside ${usd(reserved + need)} (this one ${usd(need)}${others.length ? `, ${others.length} running ${usd(reserved)}` : ''}), more than your futures account holds (${usd(equity)}). Lower its size or max holding, or stop a bot.`);
+        }
+      }
     }
     // The old bot stops first, the way the restart says: closing what it holds (clean), or keeping it for the new one.
     if (old && !FINAL_STATUSES.has(old.status)) {
@@ -1348,7 +1365,7 @@ export class ExecutorService {
         if (!a.spec.paper) this.needNoBrake('algos');
         this.needTerms(owner, ctx);
         touched = [await this.algos.resume(a.id).catch(fail)];
-      } else if (op === 'cancel') touched = [await this.algos.cancel(a.id).catch(fail)];
+      } else if (op === 'cancel') touched = [await this.algos.cancel(a.id, { now: payload.now === true }).catch(fail)];
       else if (op === 'archive') touched = [await this.algos.archive(a.id).catch(fail)];
       else if (op === 'update') {
         // A bigger size is more trading: the terms in force are needed, as for a resume.
@@ -1381,6 +1398,13 @@ export class ExecutorService {
     return this.latency.view(hours, ids);
   }
 
+  /** One of the wallet's algos (the bot page's live read, every second while it is open). */
+  algoOne(owner: string, id: string): AlgoView {
+    const a = this.algos.get(id);
+    if (!a || a.owner !== owner) throw new ApiError(404, 'algo', 'No such algo order.');
+    return this.algos.view(id)!;
+  }
+
   algoList(owner: string): AlgoView[] {
     return this.algos
       .list(owner)
@@ -1390,10 +1414,12 @@ export class ExecutorService {
       .filter((v): v is AlgoView => v !== null);
   }
 
-  async algoEvents(owner: string, id: string, q: { limit?: number; before?: number }): Promise<AlgoEvent[]> {
+  async algoEvents(owner: string, id: string, q: { limit?: number; before?: number; after?: number }): Promise<AlgoEvent[]> {
     const a = this.algos.get(id);
     if (!a || a.owner !== owner) throw new ApiError(404, 'algo', 'No such algo order.');
-    return this.algos.events(id, { limit: q.limit ?? 200, before: q.before });
+    // A bot's log is read a page at a time (owner 2026-11-08: no bulk copy of how a bot works): at most 50 lines.
+    const most = a.spec?.bot === true ? 50 : 1000;
+    return this.algos.events(id, { limit: Math.min(most, q.limit ?? 200), before: q.before, after: q.after });
   }
 
   /** Every signed instruction of this wallet (newest first): the follower's own record. */

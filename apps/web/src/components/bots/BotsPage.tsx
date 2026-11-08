@@ -14,7 +14,7 @@
  * One shell holds what every page needs (the wallet's executor setup, the bots, the confirm dialog), so moving
  * between pages keeps the list on screen.
  */
-import { useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { AlgoView } from '@copy-engine';
 import { FINAL_STATUSES } from '@copy-engine';
 import type { Eip1193Provider } from '../../wallet';
@@ -67,7 +67,8 @@ export interface BotsCtx {
   update: (id: string, patch: Record<string, unknown>) => Promise<void>;
   pause: (v: AlgoView) => Promise<void>;
   resume: (v: AlgoView) => Promise<void>;
-  stop: (v: AlgoView, how?: 'ask' | 'close' | 'keep') => Promise<void>;
+  /** 'close' (Clean stop: rests at the best price, a capped taker after a minute), 'instant' (closes now with a capped taker), 'keep' (stops, the position stays). */
+  stop: (v: AlgoView, how?: 'ask' | 'close' | 'instant' | 'keep') => Promise<void>;
   remove: (v: AlgoView) => Promise<void>;
   stopAll: () => Promise<void>;
   pauseAll: (list: AlgoView[]) => Promise<void>;
@@ -143,7 +144,10 @@ function BotsPageOpen({ address, provider }: { address: string | null; provider:
   const view = useBotsView();
   const live = useLiveCopy(address, provider);
   const signedIn = readiness(live, 'hosted').connected;
-  const { bots, loading, error, start, act, stopAll, update } = useBots(address, signedIn);
+  const { bots, loading, error, start, act, stopAll, update, focus } = useBots(address, signedIn);
+  // The bot whose page is open is read every second.
+  const focusId = view.page === 'bot' ? view.id : null;
+  useEffect(() => { focus(focusId); }, [focus, focusId]);
   // Until the wallet's state is read (owner 2026-11-07: it showed the signed-out page, then the setup, then the
   // bots): the live state follows the wallet, a stored session is checked with the executor, the first list loads.
   const settling = !!address && (
@@ -228,7 +232,7 @@ function BotsPageOpen({ address, provider }: { address: string | null; provider:
       const holding = Math.abs(v.bot?.inventory ?? 0) > 0;
       let close = (s.kind === 'mm' || s.kind === 'grid') && s.onStop === 'close';
       if (how !== 'ask') {
-        close = how === 'close';
+        close = how === 'close' || how === 'instant';
         // Stopping the other way than the bot was set to: the setting first, then the stop.
         if ((s.kind === 'mm' || s.kind === 'grid') && (s.onStop === 'close') !== close) await update(v.algo.id, { onStop: close ? 'close' : 'keep' });
       } else {
@@ -242,7 +246,7 @@ function BotsPageOpen({ address, provider }: { address: string | null; provider:
         });
         if (!ok) return;
       }
-      await run(v.algo.id, () => act('cancel', v.algo.id), close && holding ? 'Stopping: closing what it holds.' : 'Bot stopped.');
+      await run(v.algo.id, () => act('cancel', v.algo.id, { now: how === 'instant' }), close && holding ? (how === 'instant' ? 'Stopping: closing what it holds now.' : 'Stopping: closing what it holds.') : 'Bot stopped.');
     },
     remove: async (v) => {
       const ok = await confirm({ title: `Delete ${botName(v)}?`, body: 'It leaves your list. Its record and log stay kept on the executor.', confirmLabel: 'Delete', danger: true });

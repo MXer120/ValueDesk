@@ -765,6 +765,12 @@ export interface BotBook {
   carryValue?: number;
   /** [time, volume so far, net PnL at the mark then, fees so far] - one point every few minutes, thinned as it grows. */
   series: Array<[number, number, number, number]>;
+  /**
+   * Who took its quotes, USD (owner 2026-11-08: the bot page shows the bot's own split, not the market's): the
+   * uninformed taker (account 1002), the informed one (23342), everyone else. From the trade stream, where a print
+   * names both accounts; a practice fill counts the print it filled against.
+   */
+  takers?: { t1002: number; t23342: number; other: number };
 }
 
 export type AlgoEventKind = 'status' | 'order' | 'fill' | 'cancel' | 'skip' | 'error' | 'info';
@@ -782,6 +788,10 @@ export interface AlgoEvent {
   price: number | null;
   qty: number | null;
   paper: boolean;
+  /** The order's kind (post-only, IOC...) for an order, cancel or fill line; absent on older lines. */
+  tif?: ChildTif;
+  /** A fill: whether it rested (maker) or took. */
+  maker?: boolean;
 }
 
 /** What a trader sees of one algo. */
@@ -837,4 +847,6 @@ export interface BotView {
   orders: Array<{ side: Side; price: number; quantity: number; tag: string }>;
   /** Stopping: closing what it holds. */
   closing: boolean;
+  /** Who took its quotes, USD (BotBook.takers); absent until a fill is seen on the trade stream. */
+  takers?: { t1002: number; t23342: number; other: number };
 }

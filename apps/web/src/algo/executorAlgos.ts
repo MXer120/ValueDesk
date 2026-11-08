@@ -93,12 +93,12 @@ export async function startOn(mode: ExecutorMode, spec: unknown, seed: number, r
 }
 
 /** Pause, resume or cancel one algo on an executor (or cancel all there): one wallet signature. */
-export async function actOn(mode: ExecutorMode, op: 'pause' | 'resume' | 'cancel' | 'cancel-all' | 'archive', id?: string): Promise<AlgoView[]> {
+export async function actOn(mode: ExecutorMode, op: 'pause' | 'resume' | 'cancel' | 'cancel-all' | 'archive', id?: string, o: { now?: boolean } = {}): Promise<AlgoView[]> {
   const { owner, provider } = needWallet();
   const client = clientFor(mode);
   const info = getLiveCopy()[mode].info;
   if (!client || !info) throw new Error('That executor is not connected.');
-  const request = await signCopy(provider, owner, info.executorId, 'algo-action', id ? { op, id } : { op });
+  const request = await signCopy(provider, owner, info.executorId, 'algo-action', id ? { op, id, ...(o.now ? { now: true } : {}) } : { op });
   return (await call<{ algos: AlgoView[] }>(client, 'POST', '/algos/action', { body: { request } })).algos;
 }
 
@@ -141,10 +141,20 @@ export async function listBotsOn(mode: ExecutorMode, series: boolean): Promise<{
   return { algos: r.algos, noSeries: r.noSeries === true };
 }
 
-export async function eventsOn(mode: ExecutorMode, id: string, limit = 200): Promise<AlgoEvent[]> {
+export async function eventsOn(mode: ExecutorMode, id: string, limit = 200, o: { before?: number; after?: number } = {}): Promise<AlgoEvent[]> {
   const owner = getLiveCopy().owner;
   const client = clientFor(mode);
   const token = owner && client ? client.token(owner) : null;
   if (!client || !token) return [];
-  return (await call<{ events: AlgoEvent[] }>(client, 'GET', `/algos/${encodeURIComponent(id)}/events?limit=${limit}`, { token })).events;
+  const q = `limit=${limit}${o.after !== undefined ? `&after=${o.after}` : o.before !== undefined ? `&before=${o.before}` : ''}`;
+  return (await call<{ events: AlgoEvent[] }>(client, 'GET', `/algos/${encodeURIComponent(id)}/events?${q}`, { token })).events;
+}
+
+/** One algo, without its series (null: not readable here). */
+export async function viewOn(mode: ExecutorMode, id: string): Promise<AlgoView | null> {
+  const owner = getLiveCopy().owner;
+  const client = clientFor(mode);
+  const token = owner && client ? client.token(owner) : null;
+  if (!client || !token) return null;
+  return (await call<{ algo: AlgoView }>(client, 'GET', `/algos/${encodeURIComponent(id)}?series=0`, { token })).algo;
 }

@@ -108,8 +108,20 @@ export interface ChartSeries {
   /** How values print on the axis and crosshair. */
   format?: (v: number) => string;
   title?: string;
+  /** A line: fill the area between it and zero (a soft gradient), split at zero when negColor is set. */
+  area?: boolean;
   /** One point picked out with a dot and a label (a calendar card: the release just out). Time in ms. */
   mark?: { time: number; text?: string; color?: string };
+}
+
+/** A colour ('#rrggbb' or 'rgb(...)') at an alpha, for the area fills. */
+function withAlpha(c: string, a: number): string {
+  const m = /^#([0-9a-f]{6})$/i.exec(c.trim());
+  if (m) {
+    const n = parseInt(m[1]!, 16);
+    return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
+  }
+  return `color-mix(in srgb, ${c} ${Math.round(a * 100)}%, transparent)`;
 }
 
 // --- the data --------------------------------------------------------------------
@@ -476,19 +488,49 @@ function drawSeries({ ctx, chart, xAxis, yAxis, bounding }: IndicatorDrawParams<
     while (lo > 0 && !isNum(rows[lo]?.vals[s.key])) lo--;
     let hi = to;
     while (hi < n - 1 && !isNum(rows[hi]?.vals[s.key])) hi++;
-    ctx.beginPath();
-    let started = false;
+    // The path once; drawn plain, or (s.area / s.negColor) as a filled area and a line split at zero.
+    const pts: Array<[number, number]> = [];
     for (let i = Math.max(0, lo); i <= Math.min(n - 1, hi); i++) {
       const v = rows[i]!.vals[s.key];
-      if (!isNum(v)) continue;
-      if (started) ctx.lineTo(x(i), y(v));
-      else {
-        ctx.moveTo(x(i), y(v));
-        started = true;
-      }
+      if (isNum(v)) pts.push([x(i), y(v)]);
     }
-    ctx.strokeStyle = s.color;
-    ctx.stroke();
+    if (!pts.length) continue;
+    const trace = () => {
+      ctx.beginPath();
+      pts.forEach(([px, py], k) => (k ? ctx.lineTo(px, py) : ctx.moveTo(px, py)));
+    };
+    if (!s.area) {
+      trace();
+      ctx.strokeStyle = s.color;
+      ctx.stroke();
+      continue;
+    }
+    const y0 = Math.max(0, Math.min(bounding.height, y(0)));
+    const parts: Array<[number, number, string]> = s.negColor ? [[0, y0, s.color], [y0, bounding.height - y0, s.negColor]] : [[0, bounding.height, s.color]];
+    for (const [top, h, col] of parts) {
+      if (h <= 0) continue;
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(0, top, bounding.width, h);
+      ctx.clip();
+      if (s.area) {
+        trace();
+        ctx.lineTo(pts[pts.length - 1]![0], y0);
+        ctx.lineTo(pts[0]![0], y0);
+        ctx.closePath();
+        const g = ctx.createLinearGradient(0, top === 0 ? 0 : bounding.height, 0, y0);
+        g.addColorStop(0, withAlpha(col, 0.28));
+        g.addColorStop(1, withAlpha(col, 0.02));
+        ctx.fillStyle = g;
+        ctx.fill();
+      }
+      trace();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = col;
+      ctx.stroke();
+      ctx.restore();
+    }
+    ctx.lineWidth = 1.5;
   }
 
   for (const s of list) {

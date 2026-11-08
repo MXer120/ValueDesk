@@ -1001,3 +1001,148 @@
 @media (prefers-reduced-motion: reduce) {
   .bots-vipmove, .bots-vipmove *, .bots-vipmove__bg { animation: none !important; }
 }
+
+/* Stop: one button, its three ways in the app's menu pop-up (StopMenu). */
+.bots-stopmenu { position: relative; display: inline-flex; }
+.bots-stopmenu__chev { margin-left: 2px; transition: transform 150ms var(--tf-ease); }
+.bots-stopmenu__btn.is-open .bots-stopmenu__chev { transform: rotate(180deg); }
+.bots-stopmenu__menu { position: absolute; top: calc(100% + 6px); right: 0; z-index: 40; min-width: 300px; padding: 6px; }
+.bots-stopmenu__row { display: flex; align-items: flex-start; gap: 10px; width: 100%; text-align: left; }
+.bots-stopmenu__row .menu-row__ic { margin-top: 2px; }
+.bots-stopmenu__t { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.bots-stopmenu__t .menu-row__label { display: inline-flex; align-items: center; gap: 8px; }
+.bots-stopmenu__t em { padding: 0 6px; height: 16px; line-height: 16px; border-radius: 4px; background: color-mix(in srgb, var(--pos) 16%, transparent); color: var(--pos); font-size: 10px; font-style: normal; font-weight: 600; }
+.bots-stopmenu__t small { font-size: 11.5px; color: var(--muted); white-space: normal; }
+.bots-stopmenu__row.is-instant .menu-row__ic { color: var(--neg); }
+
+/* A bot's log as it sees it (BotLog): a scrolling feed, more on scroll, a line opens. Not selectable in one go. */
+.bots-flog { display: flex; flex-direction: column; gap: 10px; user-select: none; -webkit-user-select: none; }
+.bots-flog__bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.bots-flog__live { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; font-size: 12px; color: var(--muted); }
+.bots-flog__live i { width: 7px; height: 7px; border-radius: 50%; background: var(--pos); box-shadow: 0 0 0 0 color-mix(in srgb, var(--pos) 60%, transparent); animation: flogLive 2s ease-out infinite; }
+@keyframes flogLive { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--pos) 55%, transparent); } 100% { box-shadow: 0 0 0 7px transparent; } }
+.bots-flog__list { max-height: 520px; overflow-y: auto; margin: 0; padding: 0 4px 0 0; list-style: none; display: flex; flex-direction: column; gap: 2px; overscroll-behavior: contain; }
+.bots-flog__row { border-radius: 8px; transition: background-color 150ms var(--tf-ease); }
+.bots-flog__row:hover, .bots-flog__row.is-open { background: rgb(var(--ink) / 0.04); }
+.bots-flog__row.is-open { background: rgb(var(--ink) / 0.06); }
+.bots-flog__line { display: grid; grid-template-columns: 64px 22px minmax(0, 1fr) auto 14px; align-items: center; gap: 10px; width: 100%; padding: 7px 10px; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.bots-flog__line time { font-family: var(--font-num); font-size: 12px; color: var(--dim); }
+.bots-flog__ic { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 6px; background: rgb(var(--ink) / 0.06); color: var(--muted); }
+.bots-flog__ic.is-positive { background: color-mix(in srgb, var(--pos) 16%, transparent); color: var(--pos); }
+.bots-flog__ic.is-negative { background: color-mix(in srgb, var(--neg) 16%, transparent); color: var(--neg); }
+.bots-flog__ic.is-warning { background: color-mix(in srgb, var(--warn, #e0a030) 16%, transparent); color: var(--warn, #e0a030); }
+.bots-flog__ic.is-brand { background: color-mix(in srgb, var(--accent, #7b8cff) 16%, transparent); color: var(--accent, #7b8cff); }
+.bots-flog__what { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 13px; }
+.bots-flog__what b { font-weight: 500; flex: none; }
+.bots-flog__txt { overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
+.bots-flog__side { flex: none; padding: 0 6px; height: 18px; line-height: 18px; border-radius: 4px; font-size: 11px; font-weight: 600; }
+.bots-flog__side.is-buy { background: color-mix(in srgb, var(--pos) 16%, transparent); color: var(--pos); }
+.bots-flog__side.is-sell { background: color-mix(in srgb, var(--neg) 16%, transparent); color: var(--neg); }
+.bots-flog__num { font-family: var(--font-num); font-size: 12.5px; color: var(--text); white-space: nowrap; }
+.bots-flog__val { font-family: var(--font-num); font-size: 12.5px; color: var(--muted); }
+.bots-flog__row.is-fill .bots-flog__val { color: var(--text); }
+.bots-flog__chev { color: var(--dim); transition: transform 150ms var(--tf-ease); }
+.bots-flog__row.is-open .bots-flog__chev { transform: rotate(180deg); }
+.bots-flog__more { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px 16px; margin: 0; padding: 4px 14px 12px 106px; animation: flogOpen 180ms var(--tf-ease) both; }
+.bots-flog__more div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.bots-flog__more div.is-wide { grid-column: 1 / -1; }
+.bots-flog__more dt { font-size: 11px; color: var(--dim); }
+.bots-flog__more dd { margin: 0; font-family: var(--font-num); font-size: 12.5px; color: var(--text); overflow-wrap: anywhere; }
+.bots-flog__more .is-wide dd { font-family: inherit; color: var(--muted); }
+@keyframes flogOpen { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+.bots-flog__end { padding: 10px; text-align: center; font-size: 12px; color: var(--dim); }
+@media (max-width: 720px) {
+  .bots-flog__line { grid-template-columns: 56px 22px minmax(0, 1fr) 14px; }
+  .bots-flog__val { display: none; }
+  .bots-flog__more { grid-template-columns: repeat(2, minmax(0, 1fr)); padding-left: 14px; }
+}
+
+/* Margin (Allocation): the account split by bot. */
+.bots-alloc__b, .bots-alloc__one { display: flex; flex-direction: column; gap: 12px; }
+.bots-alloc__nums { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.bots-alloc__nums span { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.bots-alloc__nums small { font-size: 11.5px; color: var(--muted); }
+.bots-alloc__nums b { font-family: var(--font-num); font-size: 18px; font-weight: 500; }
+.bots-alloc__one .bots-alloc__nums b { font-size: 15px; }
+.bots-alloc__bar { display: flex; gap: 2px; height: 10px; overflow: hidden; border-radius: 9999px; background: rgb(var(--ink) / 0.07); }
+.bots-alloc__bar i { display: block; height: 100%; border-radius: 2px; transition: width 400ms var(--tf-ease); }
+.bots-alloc__list { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 6px 18px; margin: 0; padding: 0; list-style: none; }
+.bots-alloc__list li { display: grid; grid-template-columns: 8px 16px minmax(0, 1fr) auto auto; align-items: center; gap: 8px; font-size: 12.5px; }
+.bots-alloc__list li > i { width: 8px; height: 8px; border-radius: 2px; }
+.bots-alloc__list li span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+.bots-alloc__list li b { font-family: var(--font-num); font-weight: 500; }
+.bots-alloc__list li small { min-width: 32px; text-align: right; font-family: var(--font-num); color: var(--dim); }
+@media (max-width: 640px) { .bots-alloc__nums { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* The bot page's Settings, laid out as ValueDesk's Settings (SettingsMenu.css .stg): sections down the left, the
+   chosen one on the inner glass pane (.stg__pane, its light across the top), rows parted by hairlines. */
+.bots-stgshell.tf-shell {
+  padding: 0; border: 1px solid rgb(var(--ink) / 0.08); border-radius: 22px; overflow: hidden;
+  background:
+    radial-gradient(120% 90% at 0% 0%, color-mix(in srgb, var(--stg-glow, #ffffff) var(--stg-glow-a, 6%), transparent), transparent 55%),
+    linear-gradient(165deg, color-mix(in srgb, var(--stg-tint, #1c1f21) var(--stg-tint-a, 74%), transparent), color-mix(in srgb, color-mix(in srgb, var(--stg-tint, #1c1f21), #000 var(--stg-shade, 45%)) var(--stg-shade-a, 50%), transparent));
+  -webkit-backdrop-filter: blur(var(--stg-blur, 30px)) saturate(var(--stg-sat, 1.3));
+  backdrop-filter: blur(var(--stg-blur, 30px)) saturate(var(--stg-sat, 1.3));
+  box-shadow: inset 0 1px 0 rgb(var(--ink) / 0.05);
+}
+.bots-stgshell > .tf-shell-head, .bots-stgshell > header { padding: 18px 20px 0; }
+.bots-stgshell .bots-sizepanel { background: transparent; padding: 10px; }
+.bots-settings.is-stg { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 10px; align-items: start; }
+.bots-stg__nav { display: flex; flex-direction: column; gap: 4px; padding: 8px 4px; position: sticky; top: 12px; }
+.bots-stg__nav .stg__tab { position: relative; }
+.bots-stg__n { margin-left: auto; padding: 0 6px; min-width: 18px; height: 18px; line-height: 18px; border-radius: 9999px; background: color-mix(in srgb, var(--pos) 18%, transparent); color: var(--pos); font-size: 11px; font-style: normal; font-weight: 600; text-align: center; }
+.bots-stg__pane.stg__pane { padding: 24px 28px 22px; overflow: visible; }
+.bots-stg__pane .stg__panehead { margin-bottom: 6px; }
+.bots-stg__pane .stg__panehead h3 { font-size: 20px; }
+/* Each field as a Settings row: its title over its hint, the control under them, a hairline above. */
+.bots-settings.is-stg .bots-fgrid { display: flex; flex-direction: column; gap: 0; }
+.bots-settings.is-stg .bots-f { display: grid; grid-template-columns: minmax(0, 1fr); row-gap: 10px; padding: 18px 0; border-top: 1px solid rgb(var(--ink) / 0.07); }
+.bots-settings.is-stg .bots-fgrid > .bots-f:first-child { border-top-color: transparent; padding-top: 10px; }
+.bots-settings.is-stg .bots-f__l span { color: var(--text); font-size: 14.5px; font-weight: 550; }
+.bots-settings.is-stg .bots-f__h { order: 2; margin: -4px 0 0; color: var(--dim); font-size: 12.5px; line-height: 1.45; }
+.bots-settings.is-stg .bots-f__c { order: 3; }
+.bots-settings.is-stg .bots-guards { gap: 0; }
+.bots-settings.is-stg .bots-guard { border: 0; border-top: 1px solid rgb(var(--ink) / 0.07); border-radius: 0; background: transparent; }
+.bots-settings.is-stg .bots-guard:first-child { border-top-color: transparent; }
+.bots-settings.is-stg .bots-guard.is-on { background: transparent; }
+.bots-settings.is-stg .bots-guard__h { padding: 16px 0; }
+.bots-settings.is-stg .bots-guard__b { padding: 0 0 18px 44px; }
+@media (max-width: 860px) {
+  .bots-settings.is-stg { grid-template-columns: minmax(0, 1fr); }
+  .bots-stg__nav { position: static; flex-direction: row; overflow-x: auto; }
+  .bots-stg__nav .stg__tab { width: auto; flex: none; }
+  .bots-stg__pane.stg__pane { padding: 18px 16px; }
+}
+
+/* The glare of ValueDesk's panes on the bot pages (owner 2026-11-08): a soft light across each card's top corner. */
+.bots-page .tf-shell:not(.bots-stgshell) {
+  background:
+    radial-gradient(110% 70% at 0% 0%, color-mix(in srgb, var(--stg-glow, #ffffff) calc(var(--stg-glow-a, 6%) * 0.7), transparent), transparent 60%),
+    var(--tf-surface);
+  box-shadow: inset 0 1px 0 rgb(var(--ink) / 0.05);
+}
+
+/* The bot pages in the app's glass look (appearance.css, html[data-glass]): every card a tinted, blurred pane with
+   the light across its top corner, on a layer under its content (so a menu opened inside still blurs the page). */
+html[data-glass] .bots-page .tf-shell:not(.bots-stgshell) { position: relative; background: transparent; border-color: rgb(var(--ink) / 0.07); box-shadow: none; }
+html[data-glass] .bots-page .tf-shell:not(.bots-stgshell)::before {
+  content: ''; position: absolute; inset: -1px; z-index: -1; border-radius: inherit; pointer-events: none;
+  background:
+    radial-gradient(90% 60% at 20% 0%, color-mix(in srgb, var(--stg-glow) var(--stg-glow-a), transparent), transparent 70%),
+    color-mix(in srgb, var(--stg-tint) var(--pn-a), transparent);
+  -webkit-backdrop-filter: blur(var(--pn-blur)) saturate(var(--stg-sat));
+  backdrop-filter: blur(var(--pn-blur)) saturate(var(--stg-sat));
+}
+html[data-glass] .bots-page .tf-panel { background: rgb(var(--ink) / 0.035); }
+html[data-glass] .bots-page { background: transparent; }
+
+/* The chart card's figures for its timeframe, and its legend in the series' colours. */
+.bots-chartsum { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; padding: 4px 14px 10px; }
+.bots-chartsum span { display: flex; flex-direction: column; gap: 2px; }
+.bots-chartsum small { font-size: 11.5px; color: var(--muted); }
+.bots-chartsum b { font-family: var(--font-num); font-size: 18px; font-weight: 500; }
+.bots-toggle i.is-pnl { background: linear-gradient(90deg, var(--pos) 50%, var(--neg) 50%); }
+.bots-toggle i.is-vol { background: #3d4a5c; }
+.bots-stopmenu__menu.menu-popup { left: auto; right: 0; }
+.bots-stopmenu__row.menu-row { height: auto; min-height: 0; padding: 9px 10px; align-items: flex-start; }
+.bots-stopmenu__row + .bots-stopmenu__row { margin-top: 2px; }

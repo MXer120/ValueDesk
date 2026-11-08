@@ -10,7 +10,7 @@
  */
 import type { MarketInfo } from '../types.ts';
 import { floorStep, minChildQty, snapDown, snapUp, type Quote } from './math.ts';
-import type { BotBook, GridSpec, MmSpec, NewsEvent, NewsGate, QuietWindow, Side } from './types.ts';
+import type { AlgoSpec, BotBook, GridSpec, MmSpec, NewsEvent, NewsGate, QuietWindow, Side } from './types.ts';
 
 /** One point of a bot's series every this often... */
 export const BOT_SAMPLE_MS = 5 * 60_000;
@@ -231,6 +231,8 @@ export const feesPerMillion = (c: BotCostModel): { trade: number; builder: numbe
  * flow left is mostly the takers that pick makers off, so MmSpec.flowGate pauses or shrinks the quotes there.
  */
 export const PATIENT_TAKER_ACCOUNT = 1002;
+/** The informed taker: SoDEX account 23342, whose fills cost a small maker about 1 bp each (measured 2026-11-04). */
+export const INFORMED_TAKER_ACCOUNT = 23342;
 
 const ZONES: Readonly<Record<QuietWindow['zone'], string>> = { utc: 'UTC', new_york: 'America/New_York', london: 'Europe/London' };
 const ZONE_WORDS: Readonly<Record<QuietWindow['zone'], string>> = { utc: 'UTC', new_york: 'New York', london: 'London' };
@@ -369,6 +371,18 @@ export function quietWindowAt(windows: readonly QuietWindow[] | undefined, at: n
     if (inside) return w;
   }
   return null;
+}
+
+/**
+ * What a bot sets aside of the account (owner 2026-11-08, smart margining: ten bots cannot all count on the same
+ * $100): a volume maker its max holding plus a quote each side at every level, a grid one order per level. The
+ * figure New bot shows as "balance needed"; the executor refuses a real bot that would take the wallet's bots past
+ * its account value.
+ */
+export function botReserveUsd(s: AlgoSpec): number {
+  if (s.kind === 'mm') return s.maxInventoryUsd + 2 * s.orderUsd * Math.max(1, s.levels ?? 1);
+  if (s.kind === 'grid') return s.orderUsd * s.levels;
+  return 0;
 }
 
 /** The release a news gate holds for at `at` (of its level or above, timed, not all-day), or null. */

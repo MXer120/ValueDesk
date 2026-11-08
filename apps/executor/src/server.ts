@@ -228,11 +228,17 @@ export function createExecutorServer(svc: ExecutorService, cfg: ExecutorConfig, 
   };
 
   /** A log page's `limit` (1-1000, default 200) and `before` (a time); anything else is a 400. */
-  const page = (url: URL): { limit: number; before?: number } => {
+  const page = (url: URL): { limit: number; before?: number; after?: number } => {
     const l = url.searchParams.get('limit');
     const b = url.searchParams.get('before');
+    const af = url.searchParams.get('after');
     const limit = l === null ? 200 : Number(l);
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 1000) throw new ApiError(400, 'limit', 'limit must be a whole number from 1 to 1000.');
+    if (af !== null) {
+      const after = Number(af);
+      if (!Number.isSafeInteger(after) || after < 0) throw new ApiError(400, 'after', 'after must be a time in milliseconds.');
+      return { limit, after };
+    }
     if (b === null) return { limit };
     const before = Number(b);
     if (!Number.isSafeInteger(before) || before < 0) throw new ApiError(400, 'before', 'before must be a time in milliseconds.');
@@ -316,6 +322,12 @@ export function createExecutorServer(svc: ExecutorService, cfg: ExecutorConfig, 
         const owner = svc.authenticate(bearer(req));
         const grades = (url.searchParams.get('grades') ?? '').split(',').filter(Boolean);
         return send(res, 200, { notices: svc.notices(owner, { ...page(url), grades }) });
+      }
+      // One bot, without its series (the page keeps the series it has): what its page reads every second.
+      const algoOne = /^\/algos\/([A-Za-z0-9_-]{1,40})$/.exec(route);
+      if (req.method === 'GET' && algoOne && algoOne[1] !== 'action') {
+        const v = svc.algoOne(svc.authenticate(bearer(req)), algoOne[1]!);
+        return send(res, 200, { algo: url.searchParams.get('series') === '0' ? withoutSeries([v])[0] : v });
       }
       const algoEv = /^\/algos\/([A-Za-z0-9_-]{1,40})\/events$/.exec(route);
       if (req.method === 'GET' && algoEv) {

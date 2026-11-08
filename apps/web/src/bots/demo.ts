@@ -144,6 +144,8 @@ function viewOf(s: Seed, now: number): AlgoView {
           : [{ side: 'buy' as const, price: Math.round((s.price - half) * 100) / 100, quantity: Math.round((20 / s.price) * 1e5) / 1e5, tag: 'b' }, { side: 'sell' as const, price: Math.round((s.price + half) * 100) / 100, quantity: Math.round((20 / s.price) * 1e5) / 1e5, tag: 's' }]
         : [],
       closing: false,
+      // Example split: a bot that earns was taken mostly by uninformed flow.
+      takers: vol > 0 ? { t1002: vol * (pnl > 0 ? 0.62 : 0.34), t23342: vol * (pnl > 0 ? 0.24 : 0.55), other: vol * (pnl > 0 ? 0.14 : 0.11) } : undefined,
     },
   };
 }

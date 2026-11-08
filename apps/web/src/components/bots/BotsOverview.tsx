@@ -5,7 +5,7 @@
  * every bot shown.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { AlgoView } from '@copy-engine';
+import { FINAL_STATUSES, type AlgoView } from '@copy-engine';
 import { DASH, fmtUsd } from '../../format';
 import { SetupProgress } from '../../copy/CopySetupSheet';
 import { openConnectDialog } from '../account/connect';
@@ -20,6 +20,8 @@ import { goBots, type BotsView } from '../../bots/routes';
 import { BotAvatar, BotIcon } from './BotIcon';
 import { LatencyChart, mergeRegions, type ChartMark } from './LatencyChart';
 import { botName, botState, fmtPnl, statusWords } from './botWords';
+import { StopMenu } from './StopMenu';
+import { AllocationPanel } from './Allocation';
 import { BotsHead, StatePill, isLive, type BotsCtx } from './BotsPage';
 import { Button, EmptyState, Icon, IconButton, Panel, ProgressBar, SearchField, Segmented, Shell, ShellHeader, Skeleton, Sparkline, StatCard, StatusPill } from './kit/kit';
 
@@ -133,10 +135,18 @@ export function FleetChart({ bots, title = 'Volume and net PnL', series: given }
     const pb = new Map<number, number>();
     for (const [t, v] of pnl) pb.set(bucket(t), v);
     const out: ChartSeries[] = [];
-    if (showVol) out.push({ key: 'vol', kind: 'bars', color: '#5b6b80', points: [...vb.entries()].sort((x, y) => x[0] - y[0]), format: (x) => fmtUsd(x, 0), title: 'Volume' });
-    if (showPnl) out.push({ key: 'pnl', kind: 'line', color: '#f7f7f7', negColor: '#ef4a3c', points: [...pb.entries()].sort((x, y) => x[0] - y[0]), scale: 'left', format: (x) => fmtUsd(x, 2), title: 'Net PnL' });
+    if (showVol) out.push({ key: 'vol', kind: 'bars', color: '#3d4a5c', points: [...vb.entries()].sort((x, y) => x[0] - y[0]), format: (x) => fmtUsd(x, 0), title: 'Volume' });
+    if (showPnl) out.push({ key: 'pnl', kind: 'line', area: true, color: '#00b481', negColor: '#ef4a3c', points: [...pb.entries()].sort((x, y) => x[0] - y[0]), scale: 'left', format: (x) => fmtUsd(x, 2), title: 'Net PnL' });
     return out;
   }, [s, from, cut, showVol, showPnl]);
+  // The timeframe in three figures: what was traded, what the net PnL moved, and what $1M of it cost.
+  const sums = useMemo(() => {
+    const vol = s.volume.filter((p) => p[0] >= from).reduce((t, p) => t + p[1], 0);
+    const pnl = s.pnl.filter((p) => p[0] >= from);
+    const before = s.pnl.filter((p) => p[0] < from).at(-1)?.[1] ?? (pnl[0]?.[1] ?? 0);
+    const moved = pnl.length ? pnl[pnl.length - 1]![1] - (cut ? before : 0) : 0;
+    return { vol, moved, per: vol >= 1 ? (-moved / vol) * 1_000_000 : null };
+  }, [s, from, cut]);
   const enough = s.volume.filter((p) => p[0] >= from).length >= 3 && series.length > 0;
   return (
     <Shell className={`bots-chartcard${full ? ' is-full' : ''}`} ref={box as never}>
@@ -147,6 +157,11 @@ export function FleetChart({ bots, title = 'Volume and net PnL', series: given }
               <button type="button" className={`bots-toggle${showPnl ? ' is-on' : ''}`} aria-pressed={showPnl} onClick={() => setShowPnl(!showPnl)}><i className="is-pnl" />Net PnL</button>
             </span>
             <Segmented value={span} label="Timeframe" onChange={setSpan} options={[{ value: '1h', label: '1H' }, { value: '6h', label: '6H' }, { value: '24h', label: '24H' }, { value: '7d', label: '7D' }, { value: 'all', label: 'All' }]} />
+      </div>
+      <div className="bots-chartsum">
+        <span><small>Volume</small><b>{fmtUsd(sums.vol, 0)}</b></span>
+        <span><small>Net PnL</small><b className={sums.moved > 0.004 ? 'pos' : sums.moved < -0.004 ? 'neg' : ''}>{fmtPnl(sums.moved)}</b></span>
+        <span><small>Per $1M</small><b className={sums.per === null ? '' : sums.per < 0 ? 'pos' : 'neg'}>{fmtCost(sums.per)}</b></span>
       </div>
       <Panel className="bots-chartpanel">
         {enough
@@ -217,7 +232,7 @@ function Controls({ v, ctx }: { v: AlgoView; ctx: BotsCtx }) {
       {!ended && state !== 'closing' && (state === 'paused'
         ? <Button variant="quiet" icon="play" disabled={busy} onClick={() => void ctx.resume(v)}>Resume</Button>
         : <Button variant="quiet" icon="pause" disabled={busy} onClick={() => void ctx.pause(v)}>Pause</Button>)}
-      {!ended && <Button variant="danger" icon="stop" disabled={busy} onClick={() => void ctx.stop(v)}>{state === 'closing' ? 'Stop now' : 'Stop'}</Button>}
+      {!ended && <StopMenu v={v} ctx={ctx} closing={state === 'closing'} />}
       {ended && <Button variant="danger" icon="trash" disabled={busy} onClick={() => void ctx.remove(v)}>Delete</Button>}
     </span>
   );
@@ -397,6 +412,8 @@ export function BotsOverview({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
         <LatencyCard marks={marks} ctx={ctx} />
         <FleetChart bots={ready ? bots : []} />
       </div>
+
+      {ready && bots.some((v) => !FINAL_STATUSES.has(v.algo.status)) && <AllocationPanel ctx={ctx} />}
 
       {!ready || (!bots.length && !ctx.loading) ? (
         <Shell className="bots-listcard">
