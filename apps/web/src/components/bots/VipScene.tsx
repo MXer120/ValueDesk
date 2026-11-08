@@ -36,11 +36,12 @@ const COLS = [0, 4, 1, 3, 2] as const;
 const ROWS = [0, 0, 1, 1, 2] as const;
 
 /** The ValueDesk mark in gold, its five blocks dropping in one by one, then a glare across them. */
-export function GoldMark({ size = 96 }: { size?: number }) {
+/** `still`: no drop-in (a mark that arrives by flight, or sits small in a strip). */
+export function GoldMark({ size = 96, still }: { size?: number; still?: boolean }) {
   // Ids of its own: several marks on one page (the strip, the pass, the lockup) must not share a gradient.
   const u = useId().replace(/:/g, '');
   return (
-    <svg className="vipx-mark" width={size} height={size} viewBox="0 0 32 32" aria-hidden="true">
+    <svg className={`vipx-mark${still ? ' is-still' : ''}`} width={size} height={size} viewBox="0 0 32 32" aria-hidden="true">
       <defs>
         <linearGradient id={`${u}g`} x1="0" y1="0" x2="1" y2="1">
           <stop offset="0" stopColor="#fff1c2" /><stop offset="0.45" stopColor="#f6dc8e" /><stop offset="0.75" stopColor="#d4a748" /><stop offset="1" stopColor="#fbe3a0" />

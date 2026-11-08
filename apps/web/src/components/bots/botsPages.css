@@ -1438,3 +1438,44 @@ html[data-glass] .bots-page { background: transparent; }
 .vipx .bots-vipmove__node.is-from.is-off .bots-vipmove__core { stroke: rgb(var(--ink) / 0.14); }
 .vipx .bots-vipmove__node.is-from.is-off text { fill: var(--dim); }
 .vipx .bots-vipmove__node.is-from.is-off .bots-vipmove__halo { opacity: 0.3; }
+
+/* One ground for both VIP scenes (BotsVip stage): the scenes stand on it, transparent; it fades out with the last. */
+.vipx-stage { position: fixed; z-index: 34; top: var(--navbar-h, 56px); left: var(--rail-w, 68px); right: 0; bottom: 0; overflow: hidden; background: #0b0b0b; pointer-events: none; animation: vipIn 420ms ease both; }
+@media (max-width: 900px) { .vipx-stage { left: 0; } }
+.vipx-stage.is-fading { animation: vipxOut 320ms cubic-bezier(.4, 0, .2, 1) both; }
+.bots-vipmove.vipx { background: transparent; }
+.vipx-mark.is-still .vipx-mark__b { animation: none; }
+
+/* The mark's flight from the middle to the lockup (FLIP in UnlockScene); the words come in around it. */
+.vipx-intro__mark { display: grid; place-items: center; will-change: transform; }
+.vipx-intro__mark > span { grid-area: 1 / 1; display: grid; place-items: center; }
+.vipx-intro__plain { animation-duration: 900ms; }
+.vipx-win.is-gold .vipx-intro__gold { animation-duration: 900ms; }
+.vipx-win.is-gold .vipx-intro__flash { animation-duration: 1300ms; }
+.vipx-win.is-fly .vipx-intro__plain { opacity: 0; }
+.vipx-win.is-fly .vipx-intro__gold { opacity: 1; }
+.vipx-win.is-fly .vipx-intro__flash { display: none; }
+.vipx-win.is-fly .vipx-win__in, .vipx-win.is-card .vipx-win__in { animation: none; }
+.vipx-win.is-fly .vipx-lockup, .vipx-win.is-card .vipx-lockup { animation: none; }
+.vipx-win.is-fly .vipx-lockup__rule, .vipx-win.is-fly .vipx-lockup__name { animation: vipxFade 600ms 380ms ease both; }
+.vipx-win.is-fly .vipx-win__h { animation-delay: 300ms; }
+.vipx-win.is-fly .vipx-win__p { animation-delay: 420ms; }
+.vipx-win.is-fly .vipx-win__act { animation-delay: 540ms; }
+.vipx-win.is-fly .vipx-tilt .vipx-pass { animation-delay: 260ms; }
+@keyframes vipxFade { from { opacity: 0; } to { opacity: 1; } }
+.vipx-lockup__mark { display: inline-grid; }
+
+/* Share popup (VipShare.tsx): the card's preview, Image / GIF, copy, download. */
+.vipshare { --g-hi: #fff1c2; --g-1: #f6dc8e; --g-2: #d4a748; }
+.vipshare__bar { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.vipshare__bar small { font-size: 12.5px; color: var(--muted); }
+.vipshare__preview { position: relative; overflow: hidden; aspect-ratio: 1200 / 675; border-radius: 14px; background: #0b0b0b; box-shadow: inset 0 0 0 1px rgba(246, 220, 142, 0.18); }
+.vipshare__preview img { display: block; width: 100%; height: 100%; object-fit: cover; transition: opacity 200ms ease; }
+.vipshare__preview.is-busy img { opacity: 0.35; }
+.vipshare__busy { position: absolute; inset: 0; display: grid; place-items: center; font-size: 13px; color: #f6dc8e; }
+.vipshare__act { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+.vipshare__act .vipx-cta, .vipshare__act .vipx-later { height: 40px; }
+.vipshare__act button:disabled { opacity: 0.5; cursor: default; }
+.vipshare__fine { margin: 10px 0 0; font-size: 12px; color: var(--dim); }
+.vipx-win__h { font-size: clamp(30px, 3.3vw, 54px); }
+.vipx-win__h .vipx-goldtext { white-space: nowrap; }
