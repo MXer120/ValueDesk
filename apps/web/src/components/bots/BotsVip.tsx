@@ -5,6 +5,7 @@
  * travelling between them, each step as it lands and the clock (the owner's bar: under 20 seconds).
  */
 import { useEffect, useRef, useState } from 'react';
+import { onVipPlay } from '../../bots/vipDemo';
 import type { VipMoveView } from '@copy-engine';
 import { fmtUsd } from '../../format';
 import { VIP_BASE, hostedExecutor } from '../../copy/executor';
@@ -136,10 +137,71 @@ function MoveScene({ job, onClose, from, to }: { job: VipMoveView | null; onClos
   );
 }
 
+/* ------------------------------------------------------------------ the unlock, full screen ----- */
+
+const PERKS = [
+  { icon: 'coins' as const, t: 'The lowest ValueDesk fee', s: 'On futures, spot, copy trading and bots' },
+  { icon: 'bolt' as const, t: 'VIP servers', s: 'Your bots next to SoDEX on AWS Tokyo' },
+  { icon: 'clock' as const, t: 'Faster orders', s: 'About 265 ms against 420 ms in our tests' },
+];
+
+/** Becoming VIP: a gold burst, the badge, what it brings, and the move one press away. */
+function UnlockScene({ onMove, onClose, volume }: { onMove: () => void; onClose: () => void; volume: number | null }) {
+  return (
+    <div className="bots-vipmove bots-vipwin" role="dialog" aria-modal="true" aria-label="You are VIP">
+      <div className="bots-vipwin__bg" aria-hidden="true" />
+      <div className="bots-vipwin__sparks" aria-hidden="true">{Array.from({ length: 18 }, (_, i) => <i key={i} style={{ ['--a' as string]: `${i * 20}deg`, ['--d' as string]: `${(i % 6) * 70}ms` }} />)}</div>
+      <div className="bots-vipmove__in">
+        <div className="bots-vipwin__badge" aria-hidden="true"><span>VIP</span><i /><i /></div>
+        <header className="bots-vipmove__head">
+          <StatusPill tone="warning" dot>Unlocked</StatusPill>
+          <h2>You are VIP</h2>
+          <p>{volume !== null ? `${fmtUsd(volume, 0)} traded in 14 days.` : '$1M traded in 14 days.'} It holds while you stay above $1M.</p>
+        </header>
+        <ul className="bots-vipwin__perks">
+          {PERKS.map((x, i) => (
+            <li key={x.t} style={{ animationDelay: `${600 + i * 140}ms` }}>
+              <span className="bots-vipwin__ic"><Icon name={x.icon} size={16} /></span>
+              <span><b>{x.t}</b><small>{x.s}</small></span>
+            </li>
+          ))}
+        </ul>
+        <div className="bots-vipmove__act bots-vipwin__act">
+          <Button variant="go" size="md" icon="bolt" onClick={onMove}>Move my bots to VIP servers</Button>
+          <Button variant="secondary" size="md" onClick={onClose}>Later</Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** A made-up move for the demo: every step done in a few hundred ms (the scene paces them). */
+function demoJob(bots: number): VipMoveView {
+  const t = Date.now();
+  const ms = [140, 60, 90, 210, 120, 70];
+  const labels = ['Checking your VIP status', 'Pausing your bots', 'Sealing your key to the VIP servers', 'Handing over bots and books', 'Starting on AWS Tokyo', 'Releasing the standard servers'];
+  const ids = ['check', 'pause', 'seal', 'send', 'start', 'finish'];
+  return { id: 'demo', state: 'done', startedAt: t, endedAt: t + ms.reduce((a, b) => a + b, 0), steps: ids.map((id, i) => ({ id, label: labels[i]!, state: 'done', ms: ms[i]! })), bots, error: null, session: null };
+}
+
+/** The progress to VIP: a gold bar with a glare running across it. */
+function GoldBar({ value }: { value: number }) {
+  const v = Math.max(0, Math.min(1, value));
+  return (
+    <div className={`bots-goldbar${v >= 1 ? ' is-full' : ''}`} role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(v * 100)} aria-label="Progress to VIP">
+      <i style={{ width: `${Math.max(v > 0 ? 2 : 0, v * 100)}%` }} />
+    </div>
+  );
+}
+
 /* ------------------------------------------------------------------ the panel ----- */
 
-export function BotsVip({ ctx }: { ctx: BotsCtx }) {
-  const el = useEligibility(ctx.address);
+/** The card (Overview compact, Savings full); `stage`: no card, only the scenes, listening to the demo controls and showing the unlock once. */
+export function BotsVip({ ctx, compact, stage }: { ctx: BotsCtx; compact?: boolean; stage?: boolean }) {
+  const real = useEligibility(ctx.demo ? null : ctx.address);
+  // Example bots: a wallet most of the way there.
+  const el = ctx.demo ? { eligible: false, volumeUsd: 684_000, minUsd: 1_000_000, days: 14 } : real;
+  const [unlock, setUnlock] = useState(false);
   const info = ctx.live.hosted.info;
   const onVip = hostedExecutor.base === VIP_BASE || info?.vip?.tier === 'vip';
   const canMove = !!info?.vip?.canMove && (el?.eligible || !!info.vip.open);
@@ -149,6 +211,19 @@ export function BotsVip({ ctx }: { ctx: BotsCtx }) {
   const [fromAt, setFromAt] = useState('');
   const [err, setErr] = useState<string | null>(null);
   const { confirm, dialog } = useConfirm();
+  // The demo controls beside "Demo data" (bots/vipDemo.ts).
+  useEffect(() => (!stage ? undefined : onVipPlay((p) => {
+    if (p === 'unlock') { setUnlock(true); return; }
+    setFromAt(info?.location ?? 'Tokyo, Japan (Contabo)');
+    setJob(demoJob(Math.max(1, ctx.bots.filter((v) => !v.algo.endedAt).length)));
+    setOpen(true);
+  })), [stage, info?.location, ctx.bots]);
+  // A wallet that just became VIP sees the unlock once (this browser).
+  useEffect(() => {
+    if (!stage || !ctx.address || !real?.eligible) return;
+    const k = `vs.vip.seen.${ctx.address.toLowerCase()}`;
+    try { if (!localStorage.getItem(k)) { localStorage.setItem(k, '1'); setUnlock(true); } } catch { /* private mode */ }
+  }, [stage, ctx.address, real?.eligible]);
 
   // Follow the move: the standard executor's job, every quarter second until it ends.
   useEffect(() => {
@@ -188,8 +263,9 @@ export function BotsVip({ ctx }: { ctx: BotsCtx }) {
     <>
       {dialog}
       {open && <MoveScene job={job} from={fromAt} to="AWS Tokyo" onClose={() => { setOpen(false); setJob(null); }} />}
-      <Shell className="bots-vip">
-        <ShellHeader icon="bolt" title="VIP servers" subtitle={onVip ? 'Your bots run on AWS Tokyo.' : 'Unlocks at $1M of your volume in 14 days.'} aside={onVip ? <StatusPill tone="positive" dot>VIP · AWS Tokyo</StatusPill> : el?.eligible ? <StatusPill tone="positive" dot>Unlocked</StatusPill> : null} />
+      {unlock && <UnlockScene volume={el && el.volumeUsd >= el.minUsd ? el.volumeUsd : null} onClose={() => setUnlock(false)} onMove={() => { setUnlock(false); if (ctx.demo) { setFromAt(info?.location ?? 'Tokyo, Japan (Contabo)'); setJob(demoJob(Math.max(1, ctx.bots.filter((v) => !v.algo.endedAt).length))); setOpen(true); } else void move(); }} />}
+      {!stage && <Shell className={`bots-vip${compact ? ' is-compact' : ''}`}>
+        <ShellHeader icon="bolt" title={onVip ? 'VIP' : 'Become VIP'} subtitle={onVip ? 'Your bots run on AWS Tokyo, at the lowest fee.' : 'At $1M of your volume in 14 days: the lowest fee on everything, and VIP servers.'} aside={onVip ? <StatusPill tone="positive" dot>VIP · AWS Tokyo</StatusPill> : el?.eligible ? <StatusPill tone="positive" dot>Unlocked</StatusPill> : null} />
         <Panel className="bots-vip__b">
           {onVip ? (
             <div className="bots-vip__on">
@@ -198,28 +274,28 @@ export function BotsVip({ ctx }: { ctx: BotsCtx }) {
             </div>
           ) : (
             <>
-              <div className="bots-vip__bars is-one">
-                <div>
-                  <span>14-day volume</span>
-                  <ProgressBar value={volPct} max={1} size="md" color="var(--pos)" label="14-day volume toward VIP" />
-                  <b>{el ? `${fmtUsd(el.volumeUsd, 0)} of ${fmtUsd(el.minUsd, 0)}` : '—'}</b>
-                </div>
+              <div className="bots-vip__prog">
+                <div className="bots-vip__nums"><b>{el ? fmtUsd(el.volumeUsd, 0) : '—'}</b><span>of {fmtUsd(el?.minUsd ?? 1_000_000, 0)} in 14 days</span><em>{el ? `${Math.floor(volPct * 100)}%` : ''}</em></div>
+                <GoldBar value={volPct} />
+                {el && !el.eligible && <small className="bots-fine">{fmtUsd(Math.max(0, el.minUsd - el.volumeUsd), 0)} to go.</small>}
               </div>
-              <ul className="bots-vip__perks">
-                <li><Icon name="clock" size={13} />Orders answered faster: about 265 ms against 420 ms in our tests</li>
-                <li><Icon name="coins" size={13} />The lowest bot fee, 0.1 bp</li>
-                <li><Icon name="layers" size={13} />Moves in seconds, bots and books as they are</li>
-              </ul>
+              {!compact && (
+                <ul className="bots-vip__perks">
+                  <li><Icon name="coins" size={13} />The lowest ValueDesk fee on futures, spot, copy and bots</li>
+                  <li><Icon name="bolt" size={13} />VIP servers on AWS Tokyo, next to SoDEX</li>
+                  <li><Icon name="clock" size={13} />Orders answered faster: about 265 ms against 420 ms in our tests</li>
+                </ul>
+              )}
               {err && <p className="bots-err" role="alert">{err}</p>}
-              <div className="bots-vip__act">
+              {(!compact || canMove) && <div className="bots-vip__act">
                 <Button variant="primary" size="md" icon="bolt" disabled={!canMove || !ctx.ready} onClick={() => void move()}>Move to VIP</Button>
                 {!info?.vip?.canMove && <small className="bots-fine">The VIP servers open soon.</small>}
                 {info?.vip?.canMove && !canMove && <small className="bots-fine">Unlocks at $1M in 14 days.</small>}
-              </div>
+              </div>}
             </>
           )}
         </Panel>
-      </Shell>
+      </Shell>}
     </>
   );
 }

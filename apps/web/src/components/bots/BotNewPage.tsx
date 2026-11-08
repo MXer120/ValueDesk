@@ -35,6 +35,9 @@ import { Button, Icon, Inset, Panel, ProgressBar, RollingNumber, SearchField, Se
 export const fmtBpUsd = (bp: number | null | undefined): string => (bp === null || bp === undefined ? DASH : bp < 0 ? `+${fmtUsd(-bpToPerMillion(bp), 0)}` : bp > 0 ? `−${fmtUsd(bpToPerMillion(bp), 0)}` : fmtUsd(0, 0));
 export const bpCls = (bp: number | null | undefined): string => (bp === null || bp === undefined ? '' : bp < 0 ? 'pos' : bp > 0 ? 'neg' : '');
 const CONF_TONE = { high: 'positive', medium: 'warning', low: 'neutral' } as const;
+/** How much an estimate rests on, in words (owner 2026-11-08: "medium" said nothing). */
+export const CONF_WORDS = { high: 'Plenty of trades', medium: 'Fewer trades', low: 'Few trades' } as const;
+export const CONF_HINT = 'How many trades on this market the estimate rests on: the fewer, the less sure it is.';
 /** Who takes small makers' quotes: uninformed flow (1002, cheap to fill), informed flow (23342, about 1 bp a fill). */
 export const TAKER_COLORS = { patient: 'var(--pos)', fast: 'var(--neg)', other: 'rgb(var(--ink) / 0.28)' };
 const SOURCE: Record<EstLine['source'], string> = { market: 'This market\'s trades', tests: 'Our live runs and backtests', yours: 'Your own bots', none: 'Not measured here' };
@@ -78,7 +81,7 @@ export function Estimate({ m, gate, feeBps, compact, d, runs }: { m: BotMarket |
         <RollingNumber value={fmtBpUsd(est)} className={`bots-est__v ${bpCls(est)}`} />
         <span className="bots-est__sub">
           {fmtBpUsd(low)} to {fmtBpUsd(high)}
-          <StatusPill size="sm" tone={CONF_TONE[conf]} dot>{conf}</StatusPill>
+          <StatusPill size="sm" tone={CONF_TONE[conf]} dot title={CONF_HINT}>{CONF_WORDS[conf]}</StatusPill>
         </span>
       </div>
       <Takers m={m} />
@@ -352,7 +355,7 @@ function Receipt({ d, eff, picked, markets, feeBps, paper, floor, runs, chosen, 
           </>
         )}
         <span className="bots-rc__meta">
-          {conf && <StatusPill size="sm" tone={CONF_TONE[conf]} dot>{conf}</StatusPill>}
+          {conf && <StatusPill size="sm" tone={CONF_TONE[conf]} dot title={CONF_HINT}>{CONF_WORDS[conf]}</StatusPill>}
           {!grid && volX < 0.995 && <span className="bots-rc__chip"><Icon name="clock" size={12} />Quotes {Math.round(volX * 100)}% of the time</span>}
           {learned && <span className="bots-rc__chip is-learn"><Icon name="bolt" size={12} />Learned from {fmtUsd(learned.volumeUsd, 0)} of your bots</span>}
         </span>

@@ -19,7 +19,7 @@ import { bestOf, estimate, ownRuns, rankRecipes, type OwnRun } from '../../bots/
 import { StrategyTile } from './BotIcon';
 import { goBots, type BotsView } from '../../bots/routes';
 import { BotsHead, type BotsCtx } from './BotsPage';
-import { TAKER_COLORS, Takers, bpCls, fmtBpUsd } from './BotNewPage';
+import { CONF_HINT, CONF_WORDS, TAKER_COLORS, Takers, bpCls, fmtBpUsd } from './BotNewPage';
 import { Button, Checkbox, EmptyState, Icon, Panel, ProgressBar, SearchField, Segmented, Shell, ShellHeader, Skeleton, StatCard, StatusPill } from './kit/kit';
 
 type Key = 'cost' | 'bot' | 'uninformed' | 'informed' | 'spread' | 'vol' | 'activity' | 'symbol';
@@ -52,34 +52,28 @@ function HourProfile({ m, feeBps }: { m: BotMarket; feeBps: number }) {
 const PROOF = { proven: { tone: 'positive', label: 'Proven live' }, tested: { tone: 'neutral', label: 'Tested' }, early: { tone: 'warning', label: 'Early' } } as const;
 const BASE = draftFor('market');
 
-/** Every bot on one market, cheapest first, each with what it rests on. */
-function BotsHere({ m, runs }: { m: BotMarket; runs: readonly OwnRun[] }) {
+/**
+ * Every bot on one market, cheapest first: pick one to see its results here (owner 2026-11-08: "users cant switch
+ * between bots on koru to view different results"). The pick shows its cost per $1M with its range, how much it
+ * trades, how the estimate adds up and what our tests measured; Configure starts it.
+ */
+function BotsHere({ m, runs, sel, pick }: { m: BotMarket; runs: readonly OwnRun[]; sel: RecipeId | null; pick: (id: RecipeId) => void }) {
   const ranked = rankRecipes(m, BASE, runs);
   const best = bestOf(ranked);
   return (
-    <section className="bots-xd__b is-full">
-      <h4>Bots on {m.base} <small>{ranked.length} {ranked.length === 1 ? 'fits' : 'compared on this market\'s reading'}</small></h4>
-      <div className="bots-xbots" role="list">
+    <section className="bots-xd__b">
+      <h4>Bots on {m.base} <small>{ranked.length === 1 ? 'one fits' : `${ranked.length} compared`}</small></h4>
+      <div className="bots-xbots" role="radiogroup" aria-label={`Bots on ${m.base}`}>
         {ranked.map(({ id, est }) => {
           const rc = RECIPE[id];
           const top = best?.id === id;
+          const on = (sel ?? best?.id) === id;
           return (
-            <div key={id} className={`bots-xbot${top ? ' is-best' : ''}`} role="listitem">
-              <StrategyTile strategy={rc.strategy} size={32} />
-              <span className="bots-xbot__t">
-                <b>{rc.name}{top && <StatusPill size="sm" tone="positive">best here</StatusPill>}</b>
-                <small>{rc.line}</small>
-              </span>
-              <span className="bots-xbot__ev">
-                {rc.evidence.slice(0, 2).map((e) => <span key={e.what} className={`bots-ev is-${e.kind}`}>{e.what}<b className={bpCls(e.bp)}>{fmtBpUsd(e.bp)}</b></span>)}
-                <StatusPill size="sm" tone={PROOF[rc.proof].tone}>{PROOF[rc.proof].label}</StatusPill>
-              </span>
-              <span className="bots-xbot__n">
-                <b className={bpCls(est.bp)}>{fmtBpUsd(est.bp)}</b>
-                <small>{Math.round(est.volumeX * 100)}% volume</small>
-              </span>
-              <Button variant={top ? 'primary' : 'secondary'} size="sm" onClick={() => goBots({ page: 'new', market: m.symbol, kind: id })}>Configure</Button>
-            </div>
+            <button key={id} type="button" role="radio" aria-checked={on} className={`bots-xbot${top ? ' is-best' : ''}${on ? ' is-on' : ''}`} onClick={() => pick(id)}>
+              <StrategyTile strategy={rc.strategy} size={28} />
+              <span className="bots-xbot__t"><b>{rc.name}</b>{top && <StatusPill size="sm" tone="positive" dot>Best here</StatusPill>}</span>
+              <span className="bots-xbot__n"><b className={bpCls(est.bp)}>{fmtBpUsd(est.bp)}</b></span>
+            </button>
           );
         })}
       </div>
@@ -87,21 +81,37 @@ function BotsHere({ m, runs }: { m: BotMarket; runs: readonly OwnRun[] }) {
   );
 }
 
+/** The picked bot on this market: its estimate, how it adds up, its tests. */
+function BotResult({ m, id, runs }: { m: BotMarket; id: RecipeId; runs: readonly OwnRun[] }) {
+  const rc = RECIPE[id];
+  const est = rankRecipes(m, BASE, runs).find((x) => x.id === id)?.est ?? null;
+  if (!est || est.bp === null) return <section className="bots-xd__b"><h4>{rc.name}</h4><p className="bots-fine">No estimate for this bot here.</p></section>;
+  const lines = est.lines.filter((l) => l.id !== 'market');
+  return (
+    <section className="bots-xd__b bots-xres">
+      <h4>{rc.name} on {m.base}</h4>
+      <p className={`bots-xd__big ${bpCls(est.bp)}`}>{fmtBpUsd(est.bp)}<small> per $1M</small></p>
+      <p className="bots-xd__sub">{fmtBpUsd(est.low)} to {fmtBpUsd(est.high)} <StatusPill size="sm" tone={CONF_TONE[est.confidence ?? m.confidence]} dot title={CONF_HINT}>{CONF_WORDS[est.confidence ?? m.confidence]}</StatusPill></p>
+      <dl className="bots-xd__grid">
+        <div><dt>Trades</dt><dd>{Math.round(est.volumeX * 100)}% of the default</dd></div>
+        <div><dt>Track record</dt><dd>{PROOF[rc.proof].label}</dd></div>
+        <div><dt>Market reading</dt><dd className={bpCls(m.estCostBps)}>{fmtBpUsd(m.estCostBps)}</dd></div>
+        {lines.map((l) => <div key={l.id} title={l.note}><dt>{l.label}</dt><dd className={l.counted === false ? 'dim' : bpCls(l.bp)}>{l.bp === null ? 'not measured' : fmtBpUsd(l.bp)}{l.counted === false ? ' (not counted)' : ''}</dd></div>)}
+      </dl>
+      {rc.evidence.length > 0 && <div className="bots-xres__ev">{rc.evidence.map((e) => <span key={e.what} className={`bots-ev is-${e.kind}`}><i aria-hidden="true" />{e.what}<b className={bpCls(e.bp)}>{fmtBpUsd(e.bp)}</b></span>)}</div>}
+      <Button variant="primary" size="sm" icon="gear" onClick={() => goBots({ page: 'new', market: m.symbol, kind: id })}>Configure {rc.name.toLowerCase()}</Button>
+    </section>
+  );
+}
+
 function Detail({ m, feeBps, runs }: { m: BotMarket; feeBps: number; runs: readonly OwnRun[] }) {
+  const [sel, setSel] = useState<RecipeId | null>(null);
+  const best = bestOf(rankRecipes(m, BASE, runs));
+  const id = sel ?? best?.id ?? 'r10';
   return (
     <div className="bots-xd">
-      <BotsHere m={m} runs={runs} />
-      <section className="bots-xd__b">
-        <h4>Per $1M</h4>
-        <p className={`bots-xd__big ${bpCls(m.estCostBps)}`}>{fmtBpUsd(m.estCostBps)}</p>
-        <p className="bots-xd__sub">{fmtBpUsd(m.estCostLowBps)} to {fmtBpUsd(m.estCostHighBps)} <StatusPill size="sm" tone={CONF_TONE[m.confidence]} dot>{m.confidence}</StatusPill></p>
-        <dl className="bots-xd__grid">
-          <div><dt>Gate on</dt><dd className={bpCls(m.gateCostBps)}>{fmtBpUsd(m.gateCostBps)}</dd></div>
-          <div><dt>Weekdays</dt><dd className={bpCls(m.weekdayCostBps)}>{fmtBpUsd(m.weekdayCostBps)}</dd></div>
-          <div><dt>Weekends</dt><dd className={bpCls(m.weekendCostBps)}>{fmtBpUsd(m.weekendCostBps)}</dd></div>
-          <div><dt>Fees</dt><dd className="neg">{fmtBpUsd(feeBps)}</dd></div>
-        </dl>
-      </section>
+      <BotsHere m={m} runs={runs} sel={sel} pick={setSel} />
+      <BotResult m={m} id={id} runs={runs} />
       <section className="bots-xd__b">
         <h4>Flow</h4>
         <Takers m={m} />
@@ -110,6 +120,9 @@ function Detail({ m, feeBps, runs }: { m: BotMarket; feeBps: number; runs: reado
           <div><dt>Kept, informed</dt><dd className={(m.smallMakers.on23342Bps ?? 0) >= 0 ? 'pos' : 'neg'}>{bp(m.smallMakers.on23342Bps)}</dd></div>
           <div><dt>Makers our size</dt><dd>{m.smallMakers.count}</dd></div>
           <div><dt>Their volume</dt><dd>{fmtUsd(m.smallMakers.volumeUsdH, 0)}/h</dd></div>
+          <div><dt>Weekdays</dt><dd className={bpCls(m.weekdayCostBps)}>{fmtBpUsd(m.weekdayCostBps)}</dd></div>
+          <div><dt>Weekends</dt><dd className={bpCls(m.weekendCostBps)}>{fmtBpUsd(m.weekendCostBps)}</dd></div>
+          <div><dt>Fees</dt><dd className="neg">{fmtBpUsd(feeBps)}</dd></div>
         </dl>
       </section>
       <section className="bots-xd__b is-wide">
@@ -182,8 +195,9 @@ export function BotsExplore({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
   const costOf = (m: BotMarket) => rows.get(m.symbol)?.bp ?? m.estCostBps;
   const best = list.length ? [...list].sort((a, b) => costOf(a) - costOf(b))[0] : null;
   const pickName = pick === 'best' ? 'Best bot' : RECIPE[pick].name;
-  const head = (k: Key, label: string, right = true, title?: string) => (
-    <th className={right ? 'right' : undefined} title={title} aria-sort={sort.k === k ? (sort.desc ? 'descending' : 'ascending') : undefined}>
+  // A column's class says when it goes on a narrow screen (botsPages.css, the table's container): xc-a first, xc-b next.
+  const head = (k: Key, label: string, right = true, title?: string, cls = '') => (
+    <th className={[right ? 'right' : '', cls].filter(Boolean).join(' ') || undefined} title={title} aria-sort={sort.k === k ? (sort.desc ? 'descending' : 'ascending') : undefined}>
       <button type="button" className={`bots-th${sort.k === k ? ' is-on' : ''}`} onClick={() => setSort((s) => ({ k, desc: s.k === k ? !s.desc : k === 'uninformed' || k === 'activity' || k === 'vol' }))}>
         {label}{sort.k === k && <Icon name={sort.desc ? 'down' : 'up'} size={10} />}
       </button>
@@ -235,7 +249,6 @@ export function BotsExplore({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
           ) : (
             <div className="bots-tablewrap">
               <table className="bots-table bots-mt bots-xtable">
-                <colgroup><col style={{ width: 28 }} /><col /><col style={{ width: 120 }} /><col style={{ width: 170 }} /><col style={{ width: 132 }} /><col style={{ width: 132 }} /><col style={{ width: 84 }} /><col style={{ width: 92 }} /><col style={{ width: 112 }} /><col style={{ width: 150 }} /></colgroup>
                 <thead>
                   <tr>
                     <th />
@@ -243,10 +256,10 @@ export function BotsExplore({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
                     {head('cost', 'Per $1M', true, `What $1M of ${pick === 'best' ? 'the best bot' : pickName}'s volume is estimated to do here, all-in`)}
                     {head('bot', pick === 'best' ? 'Best bot' : 'Bot', false)}
                     {head('uninformed', 'Uninformed', true, "Share of small makers' fills taken by uninformed flow (cheap)")}
-                    {head('informed', 'Informed', true, 'Share taken by informed flow (about 1 bp a fill)')}
-                    {head('spread', 'Spread')}
-                    {head('vol', 'Moves', true, 'How far the price travels per hour')}
-                    {head('activity', 'Activity / h', true, "The market's traded volume per hour")}
+                    {head('informed', 'Informed', true, 'Share taken by informed flow (about 1 bp a fill)', 'xc-b')}
+                    {head('spread', 'Spread', true, undefined, 'xc-a')}
+                    {head('vol', 'Moves', true, 'How far the price travels per hour', 'xc-a')}
+                    {head('activity', 'Activity / h', true, "The market's traded volume per hour", 'xc-b')}
                     <th className="right"><span className="tf-sr">Configure</span></th>
                   </tr>
                 </thead>
@@ -265,18 +278,17 @@ export function BotsExplore({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
                             <span className="bots-mt__name">
                               <CoinIcon coin={m.symbol} size={22} />
                               <span><b>{m.base}</b><small>{m.symbol}</small></span>
-                              {m.confidence !== 'high' && <StatusPill size="sm" tone={CONF_TONE[m.confidence]}>{m.confidence}</StatusPill>}
                               {m.lead === null && <StatusPill size="sm">no oracle</StatusPill>}
                             </span>
                           </td>
-                          <td className={`right num bots-strong ${bpCls(c)}`}>{fmtBpUsd(c)}<small className="bots-range">{fmtBpUsd(m.estCostLowBps + shift)} to {fmtBpUsd(m.estCostHighBps + shift)}</small></td>
+                          <td className={`right num bots-strong ${bpCls(c)}`}>{fmtBpUsd(c)}<small className="bots-range">{m.confidence === 'high' ? `${fmtBpUsd(m.estCostLowBps + shift)} to ${fmtBpUsd(m.estCostHighBps + shift)}` : <span title={CONF_HINT}>{CONF_WORDS[m.confidence]}</span>}</small></td>
                           <td><span className="bots-xbotcell"><StrategyTile strategy={rc.strategy} size={22} /><span><b>{rc.name}</b>{pick === 'best' && row && row.n > 1 && <small>best of {row.n}</small>}</span></span></td>
                           <td className="right"><span className="bots-share"><ProgressBar value={m.takers.t1002} max={1} size="sm" color={TAKER_COLORS.patient} label="Uninformed flow share" /><b>{Math.round(m.takers.t1002 * 100)}%</b></span></td>
-                          <td className="right"><span className="bots-share"><ProgressBar value={m.takers.t23342} max={1} size="sm" color={TAKER_COLORS.fast} label="Informed flow share" /><b>{Math.round(m.takers.t23342 * 100)}%</b></span></td>
-                          <td className="right num dim">{m.spreadBps < 0.05 ? '<0.1' : m.spreadBps.toFixed(1)} bp</td>
-                          <td className="right num dim">{Math.round(m.volBpsH)} bp/h</td>
-                          <td className="right num">{fmtUsd(m.volumeUsdH, 0)}</td>
-                          <td className="right"><Button variant="secondary" icon="gear" onClick={(e) => { e.stopPropagation(); goBots({ page: 'new', market: m.symbol, kind: row?.id ?? null }); }}>Configure bot</Button></td>
+                          <td className="right xc-b"><span className="bots-share"><ProgressBar value={m.takers.t23342} max={1} size="sm" color={TAKER_COLORS.fast} label="Informed flow share" /><b>{Math.round(m.takers.t23342 * 100)}%</b></span></td>
+                          <td className="right num dim xc-a">{m.spreadBps < 0.05 ? '<0.1' : m.spreadBps.toFixed(1)} bp</td>
+                          <td className="right num dim xc-a">{Math.round(m.volBpsH)} bp/h</td>
+                          <td className="right num xc-b">{fmtUsd(m.volumeUsdH, 0)}</td>
+                          <td className="right"><Button variant="secondary" icon="gear" className="bots-xcfg" aria-label={`Configure a bot on ${m.base}`} onClick={(e) => { e.stopPropagation(); goBots({ page: 'new', market: m.symbol, kind: row?.id ?? null }); }}><span>Configure</span></Button></td>
                         </tr>
                         {isOpen && (
                           <tr className="bots-xdetail">

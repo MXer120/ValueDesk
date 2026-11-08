@@ -64,7 +64,7 @@ const CC0_COINS = { NMR: 'nmr', RAY: 'ray' }; // Numeraire, Raydium
 export const COIN_SITES = {
   // US stocks
   ADI: 'analog.com', ARM: 'arm.com', AVGO: 'broadcom.com', AXTI: 'axt.com', BAC: 'bankofamerica.com', BE: 'bloomenergy.com',
-  CCL: 'carnival.com', CIFR: 'ciphermining.com', EBAY: 'ebay.com', F: 'ford.com', IONQ: 'ionq.com', MELI: 'mercadolibre.com',
+  CCL: 'carnival.com', CIFR: 'ciphermining.com', EBAY: 'ebay.com', MCD: 'mcdonalds.com', NKE: 'nike.com', F: 'ford.com', IONQ: 'ionq.com', MELI: 'mercadolibre.com',
   MRNA: 'modernatx.com', NBIS: 'nebius.com', QCOM: 'qualcomm.com', SMCI: 'supermicro.com', SOFI: 'sofi.com', TTWO: 'take2games.com',
   LITE: 'lumentum.com',
   // Other listings and pre-IPO

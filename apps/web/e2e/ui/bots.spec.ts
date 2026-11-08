@@ -114,7 +114,7 @@ h.test('before a wallet: the sidebar Bots group, Overview, latency, Explore and 
   await eth.click();
   await page.locator('.bots-xd').getByText('Weekdays', { exact: true }).waitFor();
   await shot(page, 'explore-eth');
-  await eth.getByRole('button', { name: 'Configure bot', exact: true }).click();
+  await eth.getByRole('button', { name: 'Configure a bot on ETH', exact: true }).click();
   await page.getByRole('heading', { name: 'New bot', exact: true }).waitFor();
   await page.waitForURL((u) => u.pathname === '/bots/new' && u.searchParams.get('market') === 'ETH-USD');
   await until(page, async () => /\$\d/.test((await page.locator('.bots-rc__v').first().textContent()) ?? ''), 'the estimate per $1M', 20_000);

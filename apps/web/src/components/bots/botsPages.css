@@ -1147,3 +1147,74 @@ html[data-glass] .bots-page { background: transparent; }
 .bots-stopmenu__row.menu-row { height: auto; min-height: 0; padding: 9px 10px; align-items: flex-start; }
 .bots-stopmenu__row + .bots-stopmenu__row { margin-top: 2px; }
 .bots-vip__bars.is-one { grid-template-columns: minmax(0, 1fr); }
+
+/* Explore v3: the table keeps its columns (it scrolls sideways when narrow), a market's bots are a pick list and
+   the picked bot's results sit beside it. */
+.bots-xtable .bots-mt__name { min-width: 0; }
+.bots-xtable .bots-mt__name small { white-space: nowrap; }
+.bots-xbot { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; align-items: center; gap: 10px; width: 100%; padding: 8px 10px; border: 1px solid transparent; border-radius: 8px; background: rgb(var(--ink) / 0.025); color: inherit; font: inherit; text-align: left; cursor: pointer; transition: background-color 150ms var(--tf-ease), border-color 150ms var(--tf-ease); }
+.bots-xbot:hover { background: rgb(var(--ink) / 0.05); }
+.bots-xbot.is-on { border-color: rgb(var(--ink) / 0.22); background: rgb(var(--ink) / 0.06); }
+.bots-xbot__t { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.bots-xbot__t b { font-size: 13px; font-weight: 500; }
+.bots-xbot__n b { font-family: var(--font-num); font-size: 13px; font-weight: 500; }
+.bots-xres .bots-xd__big small { margin-left: 6px; font-size: 12px; color: var(--muted); }
+.bots-xres__ev { display: flex; flex-wrap: wrap; gap: 6px; }
+.bots-xres .tf-btn { align-self: flex-start; }
+.bots-xbot .bots-xbot__t { flex-direction: row; justify-content: flex-start; align-items: center; text-align: left; }
+.bots-xbot .bots-xbot__n { text-align: right; }
+
+/* Become VIP: a gold progress bar with a glare across it, the unlock scene, the demo controls. */
+.bots-vip { --gold-1: #f6d27a; --gold-2: #e0a93b; --gold-3: #b9832a; }
+.bots-vip__prog { display: flex; flex-direction: column; gap: 8px; }
+.bots-vip__nums { display: flex; align-items: baseline; gap: 8px; }
+.bots-vip__nums b { font-family: var(--font-num); font-size: 22px; font-weight: 500; color: var(--gold-1); }
+.bots-vip__nums span { font-size: 12.5px; color: var(--muted); }
+.bots-vip__nums em { margin-left: auto; font-family: var(--font-num); font-style: normal; font-size: 13px; color: var(--gold-1); }
+.bots-goldbar { position: relative; height: 12px; overflow: hidden; border-radius: 9999px; background: rgb(var(--ink) / 0.07); box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.35); }
+.bots-goldbar > i { position: relative; display: block; height: 100%; overflow: hidden; border-radius: inherit; background: linear-gradient(90deg, #b9832a 0%, #e0a93b 45%, #f6d27a 80%, #fff1c4 100%); box-shadow: 0 0 12px rgba(246, 210, 122, 0.45); transition: width 900ms cubic-bezier(.2,.8,.2,1); }
+.bots-goldbar > i::after { content: ''; position: absolute; inset: 0; width: 40%; background: linear-gradient(100deg, transparent 0%, rgba(255, 255, 255, 0.75) 50%, transparent 100%); transform: translateX(-120%); animation: goldGlare 2.6s ease-in-out infinite; }
+.bots-goldbar.is-full > i { box-shadow: 0 0 18px rgba(246, 210, 122, 0.7); }
+@keyframes goldGlare { 0% { transform: translateX(-120%); } 55%, 100% { transform: translateX(320%); } }
+.bots-vip.is-compact .bots-vip__b { gap: 10px; }
+.bots-vip .tf-shell-head .tf-tile, .bots-vip > header .tf-tile { color: var(--gold-1); background: color-mix(in srgb, #e0a93b 16%, transparent); }
+
+.bots-vipwin { --gold-1: #f6d27a; }
+.bots-vipwin__bg { position: absolute; inset: 0; pointer-events: none; background: radial-gradient(50% 45% at 50% 32%, rgba(246, 210, 122, 0.22), transparent 70%), radial-gradient(80% 60% at 50% 100%, rgba(224, 169, 59, 0.08), transparent 70%); animation: vipIn 600ms ease both; }
+.bots-vipwin__badge { position: relative; display: grid; place-items: center; width: 132px; height: 132px; margin-top: 8px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #fff3cf 0%, #f6d27a 30%, #e0a93b 62%, #9b6b1f 100%); box-shadow: 0 0 60px rgba(246, 210, 122, 0.55), inset 0 -6px 18px rgba(0, 0, 0, 0.25); animation: vipBadge 900ms cubic-bezier(.2,1.4,.3,1) both; }
+.bots-vipwin__badge span { font-family: var(--font-display, var(--font-num)); font-size: 36px; font-weight: 700; letter-spacing: 0.06em; color: #3a2606; text-shadow: 0 1px 0 rgba(255, 255, 255, 0.5); }
+.bots-vipwin__badge i { position: absolute; inset: -10px; border-radius: 50%; border: 2px solid rgba(246, 210, 122, 0.8); opacity: 0; animation: vipBurst 1.4s 500ms ease-out both; }
+.bots-vipwin__badge i + i { inset: -24px; animation-delay: 750ms; border-width: 1px; }
+.bots-vipwin__sparks { position: absolute; left: 50%; top: 32%; width: 0; height: 0; pointer-events: none; }
+.bots-vipwin__sparks i { position: absolute; width: 6px; height: 6px; border-radius: 50%; background: #f6d27a; box-shadow: 0 0 10px #f6d27a; opacity: 0; transform: rotate(var(--a)) translateX(0); animation: vipSpark 1.2s calc(450ms + var(--d)) cubic-bezier(.1,.8,.3,1) both; }
+@keyframes vipSpark { 0% { opacity: 1; transform: rotate(var(--a)) translateX(10px) scale(1); } 100% { opacity: 0; transform: rotate(var(--a)) translateX(190px) scale(0.3); } }
+@keyframes vipBadge { 0% { opacity: 0; transform: scale(0.4) rotate(-12deg); } 100% { opacity: 1; transform: none; } }
+.bots-vipwin h2 { color: var(--gold-1); }
+.bots-vipwin__perks { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; width: 100%; max-width: 820px; margin: 0; padding: 0; list-style: none; }
+.bots-vipwin__perks li { display: flex; align-items: flex-start; gap: 12px; padding: 14px; border-radius: 12px; border: 1px solid rgba(246, 210, 122, 0.22); background: rgba(246, 210, 122, 0.05); animation: vipUp 500ms ease both; }
+.bots-vipwin__perks li span:last-child { display: flex; flex-direction: column; gap: 2px; }
+.bots-vipwin__perks b { font-size: 14px; font-weight: 600; }
+.bots-vipwin__perks small { font-size: 12px; color: var(--muted); }
+.bots-vipwin__ic { display: grid; place-items: center; flex: none; width: 30px; height: 30px; border-radius: 8px; background: rgba(246, 210, 122, 0.16); color: var(--gold-1); }
+.bots-vipwin__act { display: flex; gap: 8px; animation-delay: 1s; }
+@media (max-width: 720px) { .bots-vipwin__perks { grid-template-columns: minmax(0, 1fr); } }
+
+.bots-demobar__play { display: inline-flex; gap: 6px; }
+
+/* Explore v4 (owner 2026-11-08: "still bugs on the sides"): the table fits its card, never scrolls sideways; on a
+   narrower card the less telling columns go (xc-a: spread, moves; then xc-b: informed, activity), and Configure
+   becomes its icon. */
+.bots-tablewrap:has(.bots-xtable) { container-type: inline-size; overflow-x: hidden; }
+.bots-xtable { width: 100%; table-layout: auto; }
+.bots-xtable th, .bots-xtable td { white-space: nowrap; }
+.bots-xtable td:first-child, .bots-xtable th:first-child { width: 28px; padding-right: 0; }
+.bots-xtable .bots-mt__name { min-width: 150px; }
+.bots-xtable .bots-share { min-width: 110px; }
+.bots-xtable .bots-xcfg { white-space: nowrap; }
+@container (max-width: 1180px) { .bots-xtable .xc-a { display: none; } }
+@container (max-width: 940px) { .bots-xtable .xc-b { display: none; } }
+@container (max-width: 700px) { .bots-xtable .bots-xcfg span { display: none; } .bots-xtable .bots-xbotcell small { display: none; } }
+.bots-xdetail > td { white-space: normal; padding: 6px 8px 12px; }
+/* The market step's phone rule (price, spread) is not Explore's: its third column is the cost. */
+.bots-xtable th:nth-child(3), .bots-xtable td:nth-child(3) { display: table-cell; }
+@container (max-width: 560px) { .bots-xtable th:nth-child(4), .bots-xtable td:nth-child(4), .bots-xtable th:nth-child(5), .bots-xtable td:nth-child(5) { display: none; } .bots-xtable .bots-mt__name { min-width: 0; } .bots-xtable td, .bots-xtable th { padding-left: 8px; padding-right: 8px; } }

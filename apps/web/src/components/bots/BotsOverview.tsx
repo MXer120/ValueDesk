@@ -22,6 +22,7 @@ import { LatencyChart, mergeRegions, type ChartMark } from './LatencyChart';
 import { botName, botState, fmtPnl, statusWords } from './botWords';
 import { StopMenu } from './StopMenu';
 import { AllocationPanel } from './Allocation';
+import { BotsVip } from './BotsVip';
 import { BotsHead, StatePill, isLive, type BotsCtx } from './BotsPage';
 import { Button, EmptyState, Icon, IconButton, Panel, ProgressBar, SearchField, Segmented, Shell, ShellHeader, Skeleton, Sparkline, StatCard, StatusPill } from './kit/kit';
 
@@ -414,6 +415,8 @@ export function BotsOverview({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
       </div>
 
       {ready && bots.some((v) => !FINAL_STATUSES.has(v.algo.status)) && <AllocationPanel ctx={ctx} />}
+
+      {(ctx.address || ctx.demo) && <BotsVip ctx={ctx} compact />}
 
       {!ready || (!bots.length && !ctx.loading) ? (
         <Shell className="bots-listcard">

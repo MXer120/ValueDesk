@@ -14,6 +14,8 @@
  * One shell holds what every page needs (the wallet's executor setup, the bots, the confirm dialog), so moving
  * between pages keeps the list on screen.
  */
+import { playVip } from '../../bots/vipDemo';
+import { BotsVip } from './BotsVip';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { AlgoView } from '@copy-engine';
 import { FINAL_STATUSES } from '@copy-engine';
@@ -350,12 +352,19 @@ function BotsPageOpen({ address, provider }: { address: string | null; provider:
       <div className="bots-col">
         {BOTS_ON && (
           <div className="bots-demobar">
+            {demo && (
+              <span className="bots-demobar__play" aria-label="Play the VIP animations">
+                <Button variant="quiet" size="sm" icon="play" onClick={() => playVip('unlock')}>VIP unlock</Button>
+                <Button variant="quiet" size="sm" icon="play" onClick={() => playVip('move')}>Move to VIP</Button>
+              </span>
+            )}
             {demo && <Pill tone="brand" size="sm" dot>Example bots</Pill>}
             <Switch checked={demo} onChange={setDemo} label="Demo data" />
           </div>
         )}
         {settling && !demo && view.page !== 'explore' ? <BotsSettling /> : page}
       </div>
+      {BOTS_ON && <BotsVip ctx={c} stage />}
       <BotSetupSheet open={!!setup} onClose={() => setSetup(null)} live={live} paper={setup?.paper ?? true} />
       {dialog}
     </div>
