@@ -1529,7 +1529,14 @@ const SORT_VALUE: Record<WalletSort, (r: CohortWalletRow) => number | null> = {
  */
 function attachWinRates(s: IndexStore, rows: WalletRow[], range: CohortRange): void {
   const byVenue = new Map<Venue, string[]>();
-  for (const r of rows) for (const v of r.venues) byVenue.set(v, [...(byVenue.get(v) ?? []), r.address]);
+  // Pushed: copying the list for every row was quadratic (tens of thousands of rows on a large cohort, 2026-11-08).
+  for (const r of rows) {
+    for (const v of r.venues) {
+      let list = byVenue.get(v);
+      if (!list) byVenue.set(v, (list = []));
+      list.push(r.address);
+    }
+  }
   const stats = new Map<Venue, ReturnType<IndexStore['traderStats']>>();
   for (const [v, list] of byVenue) stats.set(v, s.traderStats(v, range, list));
   for (const r of rows) {

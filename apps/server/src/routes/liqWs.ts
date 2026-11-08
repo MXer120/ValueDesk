@@ -127,13 +127,29 @@ function fineRows(g: Group, only: Set<number> | null): Map<number, LiqRow> {
   const out = new Map<number, LiqRow>();
   const f = liqFeed().coins.get(g.coin)?.f;
   if (!f || !g.fine) return out;
+  const put = (j: number, y: number[]) => {
+    const row = [j, ...y] as LiqRow;
+    const x = out.get(j);
+    if (x) addRow(x, row); else out.set(j, row);
+  };
+  const fk = g.fine.k;
   for (const v of g.venues) {
-    for (const [i, y] of f.v.get(v) ?? []) {
+    const held = f.v.get(v);
+    if (!held) continue;
+    if (only && only.size * fk < held.size) {
+      // Only the streamed cells' own sources looked up (2026-11-08: the whole fine layer was walked every second).
+      for (const j of only) {
+        for (let i = j * fk; i < (j + 1) * fk; i++) {
+          const y = held.get(i);
+          if (y && fineIdx(g, f.st, i) === j) put(j, y);
+        }
+      }
+      continue;
+    }
+    for (const [i, y] of held) {
       const j = fineIdx(g, f.st, i);
       if (j === null || (only && !only.has(j))) continue;
-      const row = [j, ...y] as LiqRow;
-      const x = out.get(j);
-      if (x) addRow(x, row); else out.set(j, row);
+      put(j, y);
     }
   }
   return out;
@@ -185,14 +201,21 @@ function deltaFor(g: Group, ch: { b: Map<Venue, Set<number>>; c: Set<Venue> }): 
   for (const v of g.venues) for (const i of ch.b.get(v) ?? []) idx.add(Math.floor(i / g.k));
   const now = new Map<number, LiqRow>();
   if (idx.size) {
+    const put = (j: number, y: number[]) => {
+      // y is the row without its index: shifted one place, as the row it was.
+      const row = [j, ...y] as LiqRow;
+      const x = now.get(j);
+      if (x) addRow(x, row); else now.set(j, row);
+    };
     for (const v of g.venues) {
-      for (const [i, y] of c.v.get(v)?.b ?? []) {
-        const j = Math.floor(i / g.k);
-        if (!idx.has(j)) continue;
-        // y is the row without its index: shifted one place, as the row it was.
-        const row = [j, ...y] as LiqRow;
-        const x = now.get(j);
-        if (x) addRow(x, row); else now.set(j, row);
+      const held = c.v.get(v)?.b;
+      if (!held) continue;
+      // Every second, per group: only the changed buckets' own cells looked up, not every bucket of the venue walked
+      // (2026-11-08) - unless the changed cells outnumber what is held.
+      if (idx.size * g.k < held.size) {
+        for (const j of idx) for (let i = j * g.k; i < (j + 1) * g.k; i++) { const y = held.get(i); if (y) put(j, y); }
+      } else {
+        for (const [i, y] of held) { const j = Math.floor(i / g.k); if (idx.has(j)) put(j, y); }
       }
     }
   }
@@ -376,3 +399,6 @@ export const _liveHeat = (coin: string, venues: readonly Venue[]) => {
   const src = liveSrc(coin);
   return src ? heatOf(coin, venues, src, new Map(venues.map((v) => [v, marketsNow(v)]))) : null;
 };
+/** Tests: one group's delta and fine rows as the tick builds them. */
+export const _deltaFor = deltaFor;
+export const _fineRows = fineRows;
