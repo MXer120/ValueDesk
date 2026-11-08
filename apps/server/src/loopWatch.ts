@@ -96,7 +96,10 @@ export class LoopWatch {
     // A moment later: the observer delivers the stall's collections after it.
     const said = setTimeout(() => {
       stall.gcMs = gcWithin(from, now);
-      this.log({ stallMs: late, by: stall.by, inFlight: stall.inFlight, gcMs: stall.gcMs }, `api thread stalled ${(late / 1000).toFixed(1)} s, started by ${stall.by ?? 'unknown'}`);
+      // The heap with each stall (2026-11-08): GC pauses of 8-11 s came on a heap near its limit, which only this shows.
+      const m = process.memoryUsage();
+      const mb = (x: number) => Math.round(x / 1048576);
+      this.log({ stallMs: late, by: stall.by, inFlight: stall.inFlight, gcMs: stall.gcMs, heapMb: mb(m.heapUsed), heapTotalMb: mb(m.heapTotal), rssMb: mb(m.rss), extMb: mb(m.external + m.arrayBuffers) },`api thread stalled ${(late / 1000).toFixed(1)} s, started by ${stall.by ?? 'unknown'}`);
     }, 1_000);
     said.unref();
   }

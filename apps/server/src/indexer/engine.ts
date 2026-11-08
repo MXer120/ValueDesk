@@ -275,6 +275,8 @@ const ADVANCE_MS = 30_000;
 const RANK_BACK_MS = DAY_MS;
 /** Indexed wallets per venue whose figures are refreshed per pass beyond the boards (trader_stats). */
 const STATS_SWEEP = 50;
+/** The most one build spends on sweepStats (all venues together); VALUESCAN_INDEX_SWEEP_MS, 30 s to 30 min. */
+const sweepBudgetMs = () => envNum('VALUESCAN_INDEX_SWEEP_MS', 4 * 60_000, 30_000, 30 * 60_000);
 const STATS_WINDOWS: readonly BoardWindow[] = ['1d', '7d', '30d', 'all'];
 /** History kinds whose fills the streams write for a tracked wallet. */
 const STREAM_KINDS: Record<Venue, HistoryKind[]> = { hyperliquid: ['fills'], tradexyz: ['fills'], sodex: ['perps', 'spot'], lighter: ['fills'], arcus: ['fills'] };
@@ -490,6 +492,8 @@ export class Indexer {
   /** Board key -> the hour its ranks were last snapshotted. */
   private rankSnapAt = new Map<string, number>();
   private statsSweep = Object.fromEntries(VENUES.map((v) => [v, 0])) as Record<Venue, number>;
+  /** Which venue sweepStats starts with this build. */
+  private sweepTurn = 0;
   private pendingStats: TraderStatsRow[] = [];
   /** SoDEX accounts whose analytics booked a balance as profit (sodex/mappers.ts chartSuspect). */
   private suspectSodex = new Set<string>();
@@ -2015,11 +2019,21 @@ export class Indexer {
    * round-robin, so every indexed wallet is refreshed within the hour.
    */
   private async sweepStats(now: number): Promise<void> {
-    for (const venue of VENUES) {
+    // A TIME BUDGET (2026-11-08): this ran inside the build to the end, 23 min of a 55 min build (busy wallets' fills read
+    // whole per window), and builds of 50-70 min tripped "boards not rebuilt for over an hour" though every board was
+    // written. Now each venue gets its share of SWEEP_BUDGET_MS and the round-robin carries on from there next build;
+    // the venue that starts rotates, so none is always last.
+    const t0 = Date.now();
+    const order = VENUES.map((_, j) => VENUES[(j + this.sweepTurn) % VENUES.length]!);
+    this.sweepTurn = (this.sweepTurn + 1) % VENUES.length;
+    for (let vi = 0; vi < order.length; vi++) {
+      const venue = order[vi]!;
       const all = this.store.indexedAddresses(venue);
       if (!all.length) continue;
+      // What is left of the budget, shared by the venues still to go.
+      const until = Date.now() + Math.max(0, (sweepBudgetMs() - (Date.now() - t0)) / (order.length - vi));
       let i = this.statsSweep[venue] % all.length;
-      for (let k = 0; k < Math.min(STATS_SWEEP, all.length); k++, i = (i + 1) % all.length) {
+      for (let k = 0; k < Math.min(STATS_SWEEP, all.length) && Date.now() < until; k++, i = (i + 1) % all.length) {
         const address = all[i]!;
         for (const window of STATS_WINDOWS) {
           const from = statsFrom(window, now);
