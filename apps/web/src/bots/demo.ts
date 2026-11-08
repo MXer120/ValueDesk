@@ -58,7 +58,7 @@ const SEEDS: Seed[] = [
   { id: 'demo-koru', name: 'KORU', symbol: 'KORU-USD', price: 6.99, strategy: 'market', status: 'running', hours: 6, volH: 420, costBps: -3.6, hold: 0.7 },
   { id: 'demo-sol', name: 'SOL maker', symbol: 'SOL-USD', price: 186.2, strategy: 'market', status: 'paused', hours: 20, volH: 800, costBps: 2.1, hold: 0, reason: 'Paused by you.' },
   { id: 'demo-zec', name: 'ZEC grid', symbol: 'ZEC-USD', price: 1_289, strategy: 'grid', status: 'running', hours: 14, volH: 300, costBps: 0.9, hold: 0.35 },
-  { id: 'demo-hype', name: 'HYPE', symbol: 'HYPE-USD', price: 78.06, strategy: 'market', status: 'waiting', hours: 1, volH: 0, costBps: 0, hold: 0, reason: 'Waits for the Binance price.' },
+  { id: 'demo-hype', name: 'HYPE', symbol: 'HYPE-USD', price: 78.06, strategy: 'market', status: 'waiting', hours: 1, volH: 0, costBps: 0, hold: 0, reason: 'Waits for the oracle price.' },
   { id: 'demo-lit', name: 'LIT practice', symbol: 'LIT-USD', price: 3.24, strategy: 'market', status: 'running', hours: 9, volH: 260, costBps: 1.4, paper: true, hold: -0.1 },
   { id: 'demo-xrp', name: 'XRP maker', symbol: 'XRP-USD', price: 2.41, strategy: 'market', status: 'cancelled', hours: 40, volH: 1_100, costBps: 2.4, hold: 0, reason: 'Stopped by you.' },
   { id: 'demo-nke', name: 'NKE', symbol: 'NKE-USD', price: 71.3, strategy: 'market', status: 'failed', hours: 3, volH: 150, costBps: 3.1, hold: 0, reason: 'Stopped: the loss limit of $3 was reached.' },

@@ -22,6 +22,7 @@ import { BotAvatar, BotIcon } from './BotIcon';
 import { botSeries } from './BotSheet';
 import { BotSettings, NameField } from './BotSettings';
 import { Estimate, effectiveDraft } from './BotNewPage';
+import { ownRuns } from '../../bots/estimate';
 import { FleetChart, LatencyCard, costTone, fmtCost } from './BotsOverview';
 import { botName, botState, fmtPnl, statusWords } from './botWords';
 import { BotsHead, StatePill, type BotsCtx } from './BotsPage';
@@ -255,7 +256,7 @@ export function BotDetail({ ctx, view, id }: { ctx: BotsCtx; view: BotsView; id:
               <Shell className="bots-sidecard is-plain">
                 <ShellHeader icon="compass" title="This market" subtitle="Estimate against this bot" aside={<Button variant="quiet" onClick={() => goBots({ page: 'savings' })}>Lower it</Button>} />
                 <Panel className="bots-sidepanel">
-                  {markets.data ? <Estimate m={est} gate={gate} feeBps={feeBps} compact /> : markets.error ? <p className="bots-fine">Estimates unavailable.</p> : <div className="bots-skels"><Skeleton className="bots-skel is-big" /></div>}
+                  {markets.data ? <Estimate m={est} gate={gate} feeBps={feeBps} compact d={effectiveDraft(draftOfSpec(v.algo.spec), est)} runs={ownRuns(ctx.bots, markets.data?.markets ?? null)} /> : markets.error ? <p className="bots-fine">Estimates unavailable.</p> : <div className="bots-skels"><Skeleton className="bots-skel is-big" /></div>}
                 </Panel>
               </Shell>
             )}

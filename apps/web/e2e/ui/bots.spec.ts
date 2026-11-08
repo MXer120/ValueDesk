@@ -117,9 +117,9 @@ h.test('before a wallet: the sidebar Bots group, Overview, latency, Explore and 
   await eth.getByRole('button', { name: 'Configure bot', exact: true }).click();
   await page.getByRole('heading', { name: 'New bot', exact: true }).waitFor();
   await page.waitForURL((u) => u.pathname === '/bots/new' && u.searchParams.get('market') === 'ETH-USD');
-  await until(page, async () => /\$\d/.test((await page.locator('.bots-receipt__v').first().textContent()) ?? ''), 'the estimate per $1M', 20_000);
-  await page.getByRole('button', { name: 'Next', exact: true }).click();
-  await page.getByRole('button', { name: 'Next', exact: true }).click();
+  await until(page, async () => /\$\d/.test((await page.locator('.bots-rc__v').first().textContent()) ?? ''), 'the estimate per $1M', 20_000);
+  // Market, then Settings in its three parts (Size & risk, Quoting, Safeguards), then Review.
+  for (let i = 0; i < 4; i++) await page.getByRole('button', { name: /^Next/ }).click();
   await page.getByText('Connect your wallet to start a bot.').waitFor();
   await shot(page, 'new-no-wallet');
   await go(page, 'Savings', 'Savings');
@@ -133,11 +133,14 @@ h.test('a practice market maker: set up, New bot with the gate, its page, settin
   await shot(page, 'setup-needed');
   await setUp(page, wallet);
 
-  // New bot, four steps: the market maker (R10), BTC, the gate on under Advanced, then Review and Start.
+  // New bot, four steps: the market maker category's oracle maker (R10), BTC, Settings in three parts with the gate on
+  // in Safeguards, then Review and Start.
   await go(page, 'New bot', 'New bot');
-  assert.equal(await page.getByRole('radio', { name: /Market maker/ }).getAttribute('aria-checked'), 'true');
+  assert.equal(await page.getByRole('tab', { name: /Market maker/ }).getAttribute('aria-selected'), 'true');
+  assert.equal(await page.getByRole('radio', { name: 'Oracle maker', exact: true }).getAttribute('aria-checked'), 'true');
+  assert.ok((await page.locator('.bots-rrow').count()) >= 5, 'several market makers to pick from');
   await shot(page, 'new-1');
-  const next = page.getByRole('button', { name: 'Next', exact: true });
+  const next = page.getByRole('button', { name: /^Next/ });
   await next.click();
   await page.getByRole('table', { name: 'Markets' }).waitFor({ timeout: 20_000 });
   await page.getByRole('searchbox', { name: 'Search a market' }).fill('BTC');
@@ -145,14 +148,22 @@ h.test('a practice market maker: set up, New bot with the gate, its page, settin
   assert.equal(await page.getByRole('checkbox', { name: 'BTC-USD', exact: true }).first().getAttribute('aria-checked'), 'true');
   await shot(page, 'new-2');
   await next.click();
-  await page.getByRole('tab', { name: /Safeguards/ }).click();
+  await page.getByText('Order size', { exact: true }).first().waitFor();
+  assert.ok(await page.getByRole('switch', { name: 'Practice' }).isDisabled(), 'real orders are off for this wallet: practice only');
+  await next.click();
+  await page.getByRole('button', { name: /Advanced settings/ }).waitFor();
+  assert.ok(await page.getByText('Follow the oracle', { exact: true }).isVisible(), 'quoting reads the oracle');
+  await next.click();
+  const before = (await page.locator('.bots-rc__v').textContent()) ?? '';
   const gate = page.getByRole('switch', { name: 'Market gate' });
   await gate.click();
   await until(page, async () => (await gate.getAttribute('aria-checked')) === 'true', 'gate on');
-  assert.ok(await page.getByRole('switch', { name: 'Practice' }).isDisabled(), 'real orders are off for this wallet: practice only');
+  // The gate is a line of the estimate now (read on this market's calm minutes).
+  await until(page, async () => (await page.locator('.bots-rc__line', { hasText: 'Market gate' }).count()) === 1, 'the gate in the estimate');
+  assert.ok(before.length > 0);
   await shot(page, 'new-3');
   await next.click();
-  await until(page, async () => /Safeguards\s*Gate/.test((await page.locator('.bots-receipt').textContent()) ?? ''), 'the receipt lists the gate');
+  await until(page, async () => (await page.locator('.bots-rc__guard.is-on', { hasText: 'Market gate' }).count()) === 1, 'the receipt shows the gate on');
   await shot(page, 'new');
   let mark = wallet.mark();
   await page.getByRole('button', { name: 'Start practice bot', exact: true }).click();

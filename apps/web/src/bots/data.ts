@@ -27,6 +27,12 @@ export interface BotMarket {
   estCostLowBps: number;
   estCostHighBps: number;
   gateCostBps: number | null;
+  /** Share of small makers' volume the market gate keeps (server since 2026-11-08; absent before). */
+  gateShare?: number | null;
+  /** The flow gate's reading per threshold (1002's USD over 10 min): cost while it held, and the volume share. */
+  flowGate?: Array<{ minUsd: number; costBps: number | null; share: number }>;
+  /** The spread limit's reading per limit (bp). */
+  spreadGate?: Array<{ maxBps: number; costBps: number | null; share: number }>;
   capacityUsdH: number;
   confidence: 'high' | 'medium' | 'low';
   weekdayCostBps: number | null;

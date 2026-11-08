@@ -59,6 +59,15 @@ export interface BotMarket {
   estCostBps: number;
   estCostLowBps: number; estCostHighBps: number;
   gateCostBps: number | null;
+  /** The share of small makers' volume the market gate keeps (null with gateCostBps). */
+  gateShare?: number | null;
+  /**
+   * The flow gate: the estimate over the small-maker fills while uninformed flow (1002) traded at least minUsd here
+   * over the 10 minutes before, and the share of volume that keeps. costBps null under GATE_MIN_FILLS.
+   */
+  flowGate?: Array<{ minUsd: number; costBps: number | null; share: number }>;
+  /** The spread limit: the same over the fills while the last measured spread was at most maxBps. */
+  spreadGate?: Array<{ maxBps: number; costBps: number | null; share: number }>;
   capacityUsdH: number;
   confidence: 'high' | 'medium' | 'low';
   weekdayCostBps: number | null; weekendCostBps: number | null;
@@ -130,6 +139,10 @@ const MID30_TO = 35_000;
 const PAIR_MS = 10_000;
 const SPREAD_PAIR_MS = 2_000;
 const GATE_S = 60;
+/** The flow gate's thresholds (1002's USD over FLOW_MS) and the spread limit's (bp), as the bot settings offer them. */
+export const FLOW_GATE_USD = [100_000, 250_000, 500_000, 1_000_000] as const;
+export const SPREAD_GATE_BPS = [5, 10, 20] as const;
+const FLOW_MS = 10 * 60_000;
 const SPREAD_SAMPLES = 50_000;
 const YIELD_MS = 8;
 export const BOT_MARKETS_TTL = 5 * 60_000;
@@ -181,6 +194,9 @@ export interface WindowStats {
   estCostLowBps: number;
   estCostHighBps: number;
   gateCostBps: number | null;
+  gateShare: number | null;
+  flowGate: NonNullable<BotMarket['flowGate']>;
+  spreadGate: NonNullable<BotMarket['spreadGate']>;
   capacityUsdH: number;
   confidence: BotMarket['confidence'];
   /** Calibration only: each watched maker's own fills and cost, on the same measure. */
@@ -319,6 +335,24 @@ export async function analyzeMarket(p: PrintCols, o: AnalyzeOpts, yieldNow: () =
     f.path[j] = path;
   }
 
+  // Per fill: 1002's taker USD over the 10 minutes before (the flow gate) and the last measured spread (the limit).
+  const u10 = new Float64Array(f.n);
+  const sprAt = new Float64Array(f.n);
+  {
+    let lo = 0, sum = 0, g = 0;
+    for (let j = 0; j < f.n; j++) {
+      if ((j & 4095) === 0) await yieldNow();
+      while (lo < j && f.t[lo]! <= f.t[j]! - FLOW_MS) { if (f.cls[lo] === 0) sum -= f.ntl[lo]!; lo++; }
+      u10[j] = sum;
+      if (f.cls[j] === 0) sum += f.ntl[j]!;
+      while (g < gapT.length && gapT[g]! <= f.t[j]!) g++;
+      // The median of the last three readings in the minute before: one opposite-side pair alone is noisy.
+      if (g > 0 && f.t[j]! - gapT[g - 1]! < 60_000) {
+        const x = gapV[g - 1]!, y = g > 1 ? gapV[g - 2]! : x, z = g > 2 ? gapV[g - 3]! : y;
+        sprAt[j] = Math.max(Math.min(x, y), Math.min(Math.max(x, y), z));
+      } else sprAt[j] = 0; // no reading in the minute before: the limit has nothing to pause on, as the bot (it sees the book).
+    }
+  }
   const spanH = (from: number): number => Math.max(1 / 60, (o.now - Math.max(from, firstT)) / HOUR_MS);
   const spreadOf = (from: number): number => {
     let lo = 0;
@@ -370,6 +404,8 @@ export async function analyzeMarket(p: PrintCols, o: AnalyzeOpts, yieldNow: () =
     const perMaker = new Map<number, { v: number; mk: number; n: number }>();
     const makers = new Set<number>();
     let sv = 0, smk = 0, sn = 0, gv = 0, gmk = 0, gn = 0;
+    const fg = FLOW_GATE_USD.map(() => ({ v: 0, mk: 0, n: 0 }));
+    const sg = SPREAD_GATE_BPS.map(() => ({ v: 0, mk: 0, n: 0 }));
     const cv = [0, 0, 0], cmk = [0, 0, 0];
     const hourV = new Map<number, number>();
     const hourMk = new Map<number, number>();
@@ -385,6 +421,8 @@ export async function analyzeMarket(p: PrintCols, o: AnalyzeOpts, yieldNow: () =
       hourV.set(h, (hourV.get(h) ?? 0) + v);
       hourMk.set(h, (hourMk.get(h) ?? 0) + v * mk);
       if (f.path[j]! < GATE_PATH_BPS) { gv += v; gmk += v * mk; gn++; }
+      for (let k = 0; k < FLOW_GATE_USD.length; k++) if (u10[j]! >= FLOW_GATE_USD[k]!) { const x = fg[k]!; x.v += v; x.mk += v * mk; x.n++; }
+      for (let k = 0; k < SPREAD_GATE_BPS.length; k++) if (sprAt[j]! <= SPREAD_GATE_BPS[k]!) { const x = sg[k]!; x.v += v; x.mk += v * mk; x.n++; }
     }
     // No small maker at all: all makers' markout stands in (fills 0 says how little it rests on).
     const markout = sv > 0 ? smk / sv : total > 0 ? allMk / total : 0;
@@ -416,6 +454,9 @@ export async function analyzeMarket(p: PrintCols, o: AnalyzeOpts, yieldNow: () =
       estCostLowBps: r2(low),
       estCostHighBps: r2(high),
       gateCostBps: gn >= GATE_MIN_FILLS ? r2(fee - gmk / gv) : null,
+      gateShare: gn >= GATE_MIN_FILLS && sv > 0 ? r2(gv / sv) : null,
+      flowGate: FLOW_GATE_USD.map((minUsd, k) => ({ minUsd, costBps: fg[k]!.n >= GATE_MIN_FILLS ? r2(fee - fg[k]!.mk / fg[k]!.v) : null, share: sv > 0 ? r2(fg[k]!.v / sv) : 0 })),
+      spreadGate: SPREAD_GATE_BPS.map((maxBps, k) => ({ maxBps, costBps: sg[k]!.n >= GATE_MIN_FILLS ? r2(fee - sg[k]!.mk / sg[k]!.v) : null, share: sv > 0 ? r2(sg[k]!.v / sv) : 0 })),
       capacityUsdH: r2(sv / hours),
       confidence: sn >= 2000 ? 'high' : sn >= 300 ? 'medium' : 'low',
     };

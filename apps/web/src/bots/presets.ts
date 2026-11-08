@@ -40,14 +40,14 @@ export const STRATEGY_INFO: Record<Strategy, { name: string; kind: AlgoSpec['kin
   market: {
     name: 'Market maker',
     kind: 'mm',
-    line: 'Rests a buy and a sell at the best price, priced off Binance, and earns the spread. The lowest cost per $1M we measured.',
+    line: 'Rests a buy and a sell at the best price, priced off the oracle, and earns the spread. The lowest cost per $1M we measured.',
     how: [
       'Keeps one buy and one sell resting at the best price, for up to 10 seconds each, then places it again.',
-      'Reads Binance futures, where prices move first: a quote Binance has moved through is pulled at once.',
+      'Reads the oracle (Binance futures, where prices move first): a quote the oracle moved through is pulled at once.',
       'Every fill rests on the book: the maker fee, never the spread. What it holds is unwound first.',
     ],
-    risk: 'If the price runs one way it holds up to the cap and the move counts against it. The loss limit stops it. It holds while the Binance price is not fresh.',
-    best: 'Liquid coins Binance lists. Explore shows what it costs on each.',
+    risk: 'If the price runs one way it holds up to the cap and the move counts against it. The loss limit stops it. It holds while the oracle price is not fresh.',
+    best: 'Liquid coins with an oracle. Explore shows what it costs on each.',
   },
   maker: {
     name: 'Volume maker',
@@ -127,6 +127,8 @@ export interface BotDraft {
   /* market maker (R10) */
   /** The longest a quote rests before it is placed again, seconds (spec restMs). */
   restS: number;
+  /** Rests at SoDEX's touch with no limit or pull at the oracle; the oracle only feeds the gate (spec noFair, N5). */
+  noFair: boolean;
   /** The market gate: no new quote while Binance moved more than gateBps over the last gateWindowS (spec stillBps / stillMs). */
   gate: boolean;
   gateBps: number;
@@ -192,6 +194,7 @@ export function draftFor(strategy: Strategy, preset: PresetId = 'balanced', symb
     label: '',
     paper: true,
     restS: R10.restS,
+    noFair: false,
     gate: false,
     ...GATE_DEFAULT,
     maxSpreadBps: null,
@@ -254,6 +257,7 @@ export function specOf(d: BotDraft, mark: number | null): Record<string, unknown
       ...(d.maxSpreadBps !== null ? { maxSpreadBps: d.maxSpreadBps } : {}),
       ...(d.refBps > 0 ? { refBps: d.refBps } : {}), ...(d.pullBps > 0 ? { pullBps: d.pullBps } : {}),
       ...(d.ladder > 1 ? { levels: d.ladder } : {}), ...(d.moveGuard > 0 ? { moveGuard: d.moveGuard } : {}),
+      ...(d.noFair ? { noFair: true } : {}),
       ...safeguards(d),
     };
   }
@@ -303,12 +307,12 @@ export function draftOfSpec(s: AlgoSpec): BotDraft {
       skewTicks: s.skewTicks, chaseTicks: s.chaseTicks, minRepriceMs: s.minRepriceMs, restS: s.restMs / 1000,
       gate: (s.stillBps ?? 0) > 0, gateBps: s.stillBps ?? GATE_DEFAULT.gateBps, gateWindowS: (s.stillMs ?? GATE_DEFAULT.gateWindowS * 1000) / 1000,
       maxSpreadBps: s.maxSpreadBps, volumeTargetUsd: s.volumeTargetUsd, maxLossUsd: s.maxLossUsd, onStop: s.onStop,
-      refBps: s.refBps ?? 0, pullBps: s.pullBps ?? 0, ladder: s.levels ?? 1, moveGuard: s.moveGuard ?? 0,
+      refBps: s.refBps ?? 0, pullBps: s.pullBps ?? 0, ladder: s.levels ?? 1, moveGuard: s.moveGuard ?? 0, noFair: !!s.noFair,
       ...safeguardsOf(s),
     };
   }
   if (s.kind === 'mm') {
-    return { ...draftFor(s.ref ? 'lead' : 'maker', 'balanced', s.symbol), refBps: s.refBps ?? 0, pullBps: s.pullBps ?? 0, label: s.label ?? '', paper: s.paper, offsetTicks: s.offsetTicks, orderUsd: s.orderUsd, maxInventoryUsd: s.maxInventoryUsd, skewTicks: s.skewTicks, chaseTicks: s.chaseTicks, minRepriceMs: s.minRepriceMs, edgeBps: s.edgeBps ?? 0, queueGuard: s.queueGuard ?? 0, ladder: s.levels ?? 1, moveGuard: s.moveGuard ?? 0, volumeTargetUsd: s.volumeTargetUsd, maxLossUsd: s.maxLossUsd, onStop: s.onStop };
+    return { ...draftFor(s.ref ? 'lead' : 'maker', 'balanced', s.symbol), refBps: s.refBps ?? 0, pullBps: s.pullBps ?? 0, label: s.label ?? '', paper: s.paper, offsetTicks: s.offsetTicks, orderUsd: s.orderUsd, maxInventoryUsd: s.maxInventoryUsd, skewTicks: s.skewTicks, chaseTicks: s.chaseTicks, minRepriceMs: s.minRepriceMs, edgeBps: s.edgeBps ?? 0, queueGuard: s.queueGuard ?? 0, ladder: s.levels ?? 1, moveGuard: s.moveGuard ?? 0, volumeTargetUsd: s.volumeTargetUsd, maxLossUsd: s.maxLossUsd, onStop: s.onStop, maxSpreadBps: s.maxSpreadBps ?? null, ...safeguardsOf(s) };
   }
   if (s.kind === 'grid') {
     return { ...draftFor('grid', 'balanced', s.symbol), label: s.label ?? '', paper: s.paper, low: s.low, high: s.high, levels: s.levels, orderUsd: s.orderUsd, volumeTargetUsd: s.volumeTargetUsd, maxLossUsd: s.maxLossUsd, onStop: s.onStop, outOfRange: s.outOfRange };

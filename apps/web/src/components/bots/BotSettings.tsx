@@ -1,21 +1,26 @@
 /**
- * A bot's settings in three tabs (owner 2026-11-07: "too simple for us settings wise"):
+ * A bot's settings in three parts (owner 2026-11-07: "too simple for us settings wise"; 2026-11-08: three sub-steps
+ * in New bot, quoting simple with advanced settings):
  *
  *   Size & risk   order size, max holding, loss limit, volume target, run time, on stop
- *   Quoting       how R10 quotes: rest, place, distance from Binance, pull distance, levels, re-price, chase, skew
- *   Safeguards    market gate (Binance moves), flow gate (uninformed flow away), quiet hours (NY open...), spread
+ *   Quoting       rest, follow the oracle, quote at; Advanced: distance from oracle, pull distance, levels, re-price,
+ *                 chase, skew, move guard
+ *   Safeguards    market gate (oracle moves), flow gate (uninformed flow away), quiet hours (NY open...), spread
  *
- * Shared by New bot (step Size) and a bot's Edit settings (applied by a restart). R10's values are marked and one
- * press away. Built from the Bots kit.
+ * The oracle is the price the bot quotes off: Binance futures' mid, times SoDEX's gap to it.
+ * New bot shows one part per sub-step (`part`); a bot's Settings tab shows them as tabs. R10's values are marked
+ * and one press away. Built from the Bots kit.
  */
 import { useState, type ReactNode } from 'react';
 import { fmtUsd } from '../../format';
 import { FLOW_DEFAULT, GATE_DEFAULT, QUIET_PRESETS, R10, type BotDraft, type QuietWindow } from '../../bots/presets';
+import { RECIPE, recipeOfDraft } from '../../bots/recipes';
 import { Button, Field, Icon, NumberField, Segmented, Slider, StatusPill, Switch, Tabs, TextInput } from './kit/kit';
 
 const TARGETS = [null, 50_000, 250_000, 1_000_000] as const;
 const tgtKey = (v: number | null): string => (v === null ? 'none' : TARGETS.includes(v as never) ? String(v) : 'custom');
-type Sec = 'size' | 'quote' | 'guard';
+export type Sec = 'size' | 'quote' | 'guard';
+export const SEC_NAMES: Record<Sec, string> = { size: 'Size & risk', quote: 'Quoting', guard: 'Safeguards' };
 const ZONE: Record<QuietWindow['zone'], string> = { utc: 'UTC', new_york: 'New York', london: 'London' };
 
 function Row({ label, hint, children, wide, tag }: { label: ReactNode; hint?: ReactNode; children: ReactNode; wide?: boolean; tag?: ReactNode }) {
@@ -47,19 +52,23 @@ function Guard({ title, line, on, set, children, icon }: { title: string; line: 
   );
 }
 
-export function BotSettings({ d, set, range, mark, liveAllowed, noLead, hidePractice }: {
+export function BotSettings({ d, set, range, mark, liveAllowed, noLead, hidePractice, part }: {
   d: BotDraft;
   set: (p: Partial<BotDraft>) => void;
   range: { low: number; high: number } | null;
   mark: number | null;
   liveAllowed: boolean;
-  /** This market has no Binance price: the market maker runs plain (no gate, no rest, no Binance distances). */
+  /** This market has no oracle: the market maker runs plain (no gate, no rest, no oracle distances). */
   noLead?: boolean;
   hidePractice?: boolean;
+  /** One part only, no tabs (New bot's sub-steps). */
+  part?: Sec;
   /** Kept for callers from before the restart flow. */
   running?: boolean;
 }) {
-  const [sec, setSec] = useState<Sec>('size');
+  const [tab, setSec] = useState<Sec>('size');
+  const [adv, setAdv] = useState(false);
+  const sec = part ?? tab;
   const [customTgt, setCustomTgt] = useState(tgtKey(d.volumeTargetUsd) === 'custom');
   const mm = d.strategy !== 'grid';
   const market = d.strategy === 'market' && !noLead;
@@ -68,10 +77,11 @@ export function BotSettings({ d, set, range, mark, liveAllowed, noLead, hidePrac
   const dropQuiet = (i: number) => set({ quiet: d.quiet.filter((_, j) => j !== i) });
   const hasQuiet = (w: QuietWindow) => d.quiet.some((x) => x.from === w.from && x.to === w.to && x.zone === w.zone);
   const guards = (market && d.gate ? 1 : 0) + (mm && d.flowOn ? 1 : 0) + (d.quiet.length ? 1 : 0) + (d.maxSpreadBps !== null ? 1 : 0);
+  const advChanged = [d.refBps !== 0, d.pullBps !== 0, d.ladder !== 1, d.minRepriceMs !== R10.minRepriceMs, d.chaseTicks !== R10.chaseTicks, d.skewTicks !== R10.skewTicks, d.moveGuard !== 0].filter(Boolean).length;
 
   return (
     <div className="bots-settings">
-      <Tabs<Sec>
+      {!part && <Tabs<Sec>
         label="Settings"
         value={sec}
         onChange={setSec}
@@ -80,7 +90,7 @@ export function BotSettings({ d, set, range, mark, liveAllowed, noLead, hidePrac
           ...(mm ? [{ value: 'quote' as const, label: 'Quoting' }] : []),
           { value: 'guard', label: 'Safeguards', count: guards || undefined },
         ]}
-      />
+      />}
 
       {sec === 'size' && (
         <div className="bots-fgrid">
@@ -138,47 +148,65 @@ export function BotSettings({ d, set, range, mark, liveAllowed, noLead, hidePrac
       )}
 
       {sec === 'quote' && mm && (
-        <div className="bots-fgrid">
-          {market && (
-            <Row label="Longest rest" tag={<R10Tag on={d.restS === R10.restS} reset={() => set({ restS: R10.restS })} />} hint="Re-placed after this, filled or not.">
-              <Segmented label="Longest rest" value={[5, 10, 20, 30].includes(d.restS) ? String(d.restS) : 'x'} onChange={(v) => v !== 'x' && set({ restS: Number(v) })} options={[{ value: '5', label: '5s' }, { value: '10', label: '10s' }, { value: '20', label: '20s' }, { value: '30', label: '30s' }, ...([5, 10, 20, 30].includes(d.restS) ? [] : [{ value: 'x', label: `${d.restS}s` }])]} />
+        <div className="bots-quoting">
+          <div className="bots-fgrid">
+            {market && (
+              <Row label="Follow the oracle" tag={<R10Tag on={!d.noFair} reset={() => set({ noFair: false })} />} hint={d.noFair ? 'Rests at the best price; the oracle only feeds the market gate.' : 'Pulls a quote the oracle moved through.'}>
+                <Segmented label="Follow the oracle" value={d.noFair ? 'touch' : 'oracle'} onChange={(v) => set({ noFair: v === 'touch' })} options={[{ value: 'oracle', label: 'Follow oracle' }, { value: 'touch', label: 'Touch only' }]} />
+              </Row>
+            )}
+            {market && (
+              <Row label="Longest rest" tag={<R10Tag on={d.restS === R10.restS} reset={() => set({ restS: R10.restS })} />} hint="Re-placed after this, filled or not.">
+                <Segmented label="Longest rest" value={[5, 10, 20, 30].includes(d.restS) ? String(d.restS) : 'x'} onChange={(v) => v !== 'x' && set({ restS: Number(v) })} options={[{ value: '5', label: '5s' }, { value: '10', label: '10s' }, { value: '20', label: '20s' }, { value: '30', label: '30s' }, ...([5, 10, 20, 30].includes(d.restS) ? [] : [{ value: 'x', label: `${d.restS}s` }])]} />
+              </Row>
+            )}
+            <Row label="Quote at" tag={<R10Tag on={d.offsetTicks === R10.offsetTicks} reset={() => set({ offsetTicks: R10.offsetTicks })} />}>
+              <Segmented label="Quote at" value={d.offsetTicks < 0 ? 'inside' : d.offsetTicks > 0 ? 'back' : 'touch'} options={[{ value: 'inside', label: '1 tick inside' }, { value: 'touch', label: 'Best price' }, { value: 'back', label: '1 tick back' }]} onChange={(v) => set({ offsetTicks: v === 'inside' ? -1 : v === 'back' ? 1 : 0 })} />
             </Row>
+          </div>
+          <button type="button" className={`bots-adv${adv ? ' is-open' : ''}`} aria-expanded={adv} onClick={() => setAdv((x) => !x)}>
+            <Icon name="gear" size={14} />
+            <b>Advanced settings</b>
+            {advChanged > 0 && <StatusPill size="sm" tone="warning">{advChanged} changed</StatusPill>}
+            <span className="bots-adv__sp" />
+            <Icon name="down" size={14} />
+          </button>
+          {adv && (
+            <div className="bots-fgrid bots-adv__body">
+              {market && !d.noFair && (
+                <Row label="Distance from oracle" tag={<R10Tag on={d.refBps === 0} reset={() => set({ refBps: 0 })} />} hint="Where the adding side rests. 0: at SoDEX's best price.">
+                  <NumberField label="Rest" value={d.refBps} onChange={(v) => set({ refBps: Math.max(0, Math.min(50, v ?? 0)) })} unit="bp" />
+                </Row>
+              )}
+              {market && !d.noFair && (
+                <Row label="Pull distance" tag={<R10Tag on={d.pullBps === 0} reset={() => set({ pullBps: 0 })} />} hint="Pulls the adding side this close to the oracle.">
+                  <NumberField label="Pull within" value={d.pullBps} onChange={(v) => set({ pullBps: Math.max(0, Math.min(20, v ?? 0)) })} unit="bp" />
+                </Row>
+              )}
+              <Row label="Levels per side" tag={<R10Tag on={d.ladder === 1} reset={() => set({ ladder: 1 })} />} hint="More levels keep queue places as the touch moves.">
+                <Segmented label="Levels per side" value={String(d.ladder)} onChange={(v) => set({ ladder: Number(v) })} options={[{ value: '1', label: '1' }, { value: '2', label: '2' }, { value: '3', label: '3' }]} />
+              </Row>
+              <Row label="Re-price at most every" tag={<R10Tag on={d.minRepriceMs === R10.minRepriceMs} reset={() => set({ minRepriceMs: R10.minRepriceMs })} />}>
+                <Segmented label="Re-price" value={[1000, 2000, 5000].includes(d.minRepriceMs) ? String(d.minRepriceMs) : 'x'} onChange={(v) => v !== 'x' && set({ minRepriceMs: Number(v) })} options={[{ value: '1000', label: '1s' }, { value: '2000', label: '2s' }, { value: '5000', label: '5s' }, ...([1000, 2000, 5000].includes(d.minRepriceMs) ? [] : [{ value: 'x', label: `${d.minRepriceMs / 1000}s` }])]} />
+              </Row>
+              <Row label="Follow the touch" tag={<R10Tag on={d.chaseTicks === R10.chaseTicks} reset={() => set({ chaseTicks: R10.chaseTicks })} />} hint="Re-quote once the best price moved this far.">
+                <NumberField label="After" value={d.chaseTicks} onChange={(v) => set({ chaseTicks: Math.max(1, Math.min(1000, Math.round(v ?? 1))) })} unit="ticks" />
+              </Row>
+              <Row label="Inventory skew" tag={<R10Tag on={d.skewTicks === R10.skewTicks} reset={() => set({ skewTicks: R10.skewTicks })} />} hint="At the cap, the adding side steps back this far.">
+                <NumberField label="Skew" value={d.skewTicks} onChange={(v) => set({ skewTicks: Math.max(0, Math.round(v ?? 0)) })} unit="ticks" />
+              </Row>
+              <Row label="Move guard" tag={<R10Tag on={d.moveGuard === 0} reset={() => set({ moveGuard: 0 })} />} hint="The side the mid runs into waits after this many ticks in 2 s.">
+                <NumberField label="Ticks" value={d.moveGuard} onChange={(v) => set({ moveGuard: Math.max(0, Math.min(100, v ?? 0)) })} unit="ticks" placeholder="Off" />
+              </Row>
+            </div>
           )}
-          <Row label="Quote at" tag={<R10Tag on={d.offsetTicks === R10.offsetTicks} reset={() => set({ offsetTicks: R10.offsetTicks })} />}>
-            <Segmented label="Quote at" value={d.offsetTicks < 0 ? 'inside' : d.offsetTicks > 0 ? 'back' : 'touch'} options={[{ value: 'inside', label: '1 tick inside' }, { value: 'touch', label: 'Best price' }, { value: 'back', label: '1 tick back' }]} onChange={(v) => set({ offsetTicks: v === 'inside' ? -1 : v === 'back' ? 1 : 0 })} />
-          </Row>
-          <Row label="Levels per side" tag={<R10Tag on={d.ladder === 1} reset={() => set({ ladder: 1 })} />} hint="More levels keep queue places as the touch moves.">
-            <Segmented label="Levels per side" value={String(d.ladder)} onChange={(v) => set({ ladder: Number(v) })} options={[{ value: '1', label: '1' }, { value: '2', label: '2' }, { value: '3', label: '3' }]} />
-          </Row>
-          {market && (
-            <Row label="Distance from Binance" tag={<R10Tag on={d.refBps === 0} reset={() => set({ refBps: 0 })} />} hint="Where the adding side rests. 0: at SoDEX's best price.">
-              <NumberField label="Rest" value={d.refBps} onChange={(v) => set({ refBps: Math.max(0, Math.min(50, v ?? 0)) })} unit="bp" />
-            </Row>
-          )}
-          {market && (
-            <Row label="Pull distance" tag={<R10Tag on={d.pullBps === 0} reset={() => set({ pullBps: 0 })} />} hint="Pulls the adding side this close to Binance.">
-              <NumberField label="Pull within" value={d.pullBps} onChange={(v) => set({ pullBps: Math.max(0, Math.min(20, v ?? 0)) })} unit="bp" />
-            </Row>
-          )}
-          <Row label="Re-price at most every" tag={<R10Tag on={d.minRepriceMs === R10.minRepriceMs} reset={() => set({ minRepriceMs: R10.minRepriceMs })} />}>
-            <Segmented label="Re-price" value={[1000, 2000, 5000].includes(d.minRepriceMs) ? String(d.minRepriceMs) : 'x'} onChange={(v) => v !== 'x' && set({ minRepriceMs: Number(v) })} options={[{ value: '1000', label: '1s' }, { value: '2000', label: '2s' }, { value: '5000', label: '5s' }, ...([1000, 2000, 5000].includes(d.minRepriceMs) ? [] : [{ value: 'x', label: `${d.minRepriceMs / 1000}s` }])]} />
-          </Row>
-          <Row label="Follow the touch" tag={<R10Tag on={d.chaseTicks === R10.chaseTicks} reset={() => set({ chaseTicks: R10.chaseTicks })} />} hint="Re-quote once the best price moved this far.">
-            <NumberField label="After" value={d.chaseTicks} onChange={(v) => set({ chaseTicks: Math.max(1, Math.min(1000, Math.round(v ?? 1))) })} unit="ticks" />
-          </Row>
-          <Row label="Inventory skew" tag={<R10Tag on={d.skewTicks === R10.skewTicks} reset={() => set({ skewTicks: R10.skewTicks })} />} hint="At the cap, the adding side steps back this far.">
-            <NumberField label="Skew" value={d.skewTicks} onChange={(v) => set({ skewTicks: Math.max(0, Math.round(v ?? 0)) })} unit="ticks" />
-          </Row>
-          <Row label="Move guard" tag={<R10Tag on={d.moveGuard === 0} reset={() => set({ moveGuard: 0 })} />} hint="The side the mid runs into waits after this many ticks in 2 s.">
-            <NumberField label="Ticks" value={d.moveGuard} onChange={(v) => set({ moveGuard: Math.max(0, Math.min(100, v ?? 0)) })} unit="ticks" placeholder="Off" />
-          </Row>
         </div>
       )}
 
       {sec === 'guard' && (
         <div className="bots-guards">
           {market && (
-            <Guard icon="pulse" title="Market gate" line="Pause on fast moves" on={d.gate} set={(on) => set({ gate: on, ...(on && !d.gateBps ? GATE_DEFAULT : {}) })}>
+            <Guard icon="pulse" title="Market gate" line="Pause while the oracle moves fast" on={d.gate} set={(on) => set({ gate: on, ...(on && !d.gateBps ? GATE_DEFAULT : {}) })}>
               <div className="bots-pair">
                 <NumberField label="Moves" value={d.gateBps} onChange={(v) => set({ gateBps: Math.max(1, Math.min(500, v ?? GATE_DEFAULT.gateBps)) })} unit="bp" />
                 <NumberField label="Over" value={d.gateWindowS} onChange={(v) => set({ gateWindowS: Math.max(1, Math.min(120, Math.round(v ?? GATE_DEFAULT.gateWindowS))) })} unit="s" />
@@ -234,7 +262,7 @@ export function BotSettings({ d, set, range, mark, liveAllowed, noLead, hidePrac
               <Segmented label="Pause if spread over" value={d.maxSpreadBps === null ? '10' : [5, 10, 20].includes(d.maxSpreadBps) ? String(d.maxSpreadBps) : 'x'} onChange={(v) => v !== 'x' && set({ maxSpreadBps: Number(v) })} options={[{ value: '5', label: '5 bp' }, { value: '10', label: '10 bp' }, { value: '20', label: '20 bp' }, ...(d.maxSpreadBps === null || [5, 10, 20].includes(d.maxSpreadBps) ? [] : [{ value: 'x', label: `${d.maxSpreadBps} bp` }])]} />
             </Guard>
           )}
-          {noLead && d.strategy === 'market' && <p className="bots-note"><StatusPill size="sm">no Binance price</StatusPill> The market gate needs Binance and is off here.</p>}
+          {noLead && d.strategy === 'market' && <p className="bots-note"><StatusPill size="sm">no oracle</StatusPill> The market gate needs the oracle and is off here.</p>}
         </div>
       )}
 
@@ -255,7 +283,7 @@ export function BotSettings({ d, set, range, mark, liveAllowed, noLead, hidePrac
 export function NameField({ d, set }: { d: BotDraft; set: (p: Partial<BotDraft>) => void }) {
   return (
     <Field label="Bot name" htmlFor="bot-name">
-      <TextInput id="bot-name" maxLength={40} placeholder={`${d.strategy === 'grid' ? 'Grid' : 'Market maker'} ${d.symbol.replace(/-USD$/, '')}`} value={d.label} onChange={(e) => set({ label: e.target.value })} aria-label="Name" />
+      <TextInput id="bot-name" maxLength={40} placeholder={`${RECIPE[recipeOfDraft(d)].name} ${d.symbol.replace(/-USD$/, '')}`} value={d.label} onChange={(e) => set({ label: e.target.value })} aria-label="Name" />
     </Field>
   );
 }

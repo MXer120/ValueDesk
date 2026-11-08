@@ -1,13 +1,15 @@
 /**
- * Bots > New bot, in four steps, with a receipt beside them (owner 2026-11-07):
+ * Bots > New bot, in four steps, with a receipt beside them (owner 2026-11-07, 2026-11-08):
  *
- *   1 Bot      market maker (R10) or grid
+ *   1 Bot      a category (market maker, grid), then one of its bots: every setting our live runs and backtests
+ *              kept is a bot of its own (bots/recipes.ts), with what it was measured at
  *   2 Market   one or several markets from a ranked table: price, activity per hour, what $1M does there, the
  *              uninformed flow's share, the spread. Several markets start one bot each, with the same settings.
- *   3 Settings Size & risk, Quoting, Safeguards (BotSettings)
+ *   3 Settings three sub-steps: Size & risk, Quoting (simple, advanced folded), Safeguards (BotSettings)
  *   4 Review   the name; the receipt holds the rest; Start (asks first; one signature per bot)
  *
- * The receipt on the right lists what will run and what it is estimated to cost, line by line.
+ * The receipt on the right: the estimate per $1M with its range, how it adds up (the market's reading, the bot,
+ * each safeguard, the wallet's own bots: bots/estimate.ts), what will run, and the balance it needs.
  */
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { checkSizes, parseAlgoSpec, type MarketInfo } from '@copy-engine';
@@ -19,9 +21,11 @@ import { useHistory } from '../algo/liveData';
 import { CoinIcon } from '../CoinIcon';
 import { useBotMarkets, bpToPerMillion, type BotMarket } from '../../bots/data';
 import { goBots, type BotsView } from '../../bots/routes';
-import { STRATEGIES, STRATEGY_INFO, costPerMillion, draftFor, gridRange, specOf, type BotDraft, type Strategy } from '../../bots/presets';
+import { STRATEGY_INFO, costPerMillion, draftFor, gridRange, specOf, type BotDraft, type Strategy } from '../../bots/presets';
+import { CATEGORIES, RECIPE, recipeOfDraft, recipesOf, type Category, type Recipe, type RecipeId } from '../../bots/recipes';
+import { estimate, ownRuns, type BotEstimate, type EstLine, type OwnRun } from '../../bots/estimate';
 import { BotAvatar, StrategyTile } from './BotIcon';
-import { BotSettings, NameField } from './BotSettings';
+import { BotSettings, NameField, SEC_NAMES, type Sec } from './BotSettings';
 import { BotsHead, type BotsCtx } from './BotsPage';
 import { Button, Icon, Inset, Panel, ProgressBar, RollingNumber, SearchField, Segmented, SegmentedBar, Shell, ShellHeader, Skeleton, StatusPill } from './kit/kit';
 
@@ -31,6 +35,8 @@ export const bpCls = (bp: number | null | undefined): string => (bp === null || 
 const CONF_TONE = { high: 'positive', medium: 'warning', low: 'neutral' } as const;
 /** Who takes small makers' quotes: uninformed flow (1002, cheap to fill), informed flow (23342, about 1 bp a fill). */
 export const TAKER_COLORS = { patient: 'var(--pos)', fast: 'var(--neg)', other: 'rgb(var(--ink) / 0.28)' };
+const PROOF = { proven: { tone: 'positive', label: 'Proven live' }, tested: { tone: 'neutral', label: 'Tested' }, early: { tone: 'warning', label: 'Early' } } as const;
+const SOURCE: Record<EstLine['source'], string> = { market: 'This market\'s trades', tests: 'Our live runs and backtests', yours: 'Your own bots', none: 'Not measured here' };
 
 /** Who takes small makers' quotes on a market. */
 export function Takers({ m }: { m: BotMarket }) {
@@ -55,19 +61,23 @@ export function Takers({ m }: { m: BotMarket }) {
   );
 }
 
-/** What Explore estimates for a market: the number, its range, how sure, who takes, the split. */
-export function Estimate({ m, gate, feeBps, compact }: { m: BotMarket | null; gate: boolean; feeBps: number; compact?: boolean }) {
+/** What a bot is estimated to do on a market: the number, its range, how sure, who takes, the split. */
+export function Estimate({ m, gate, feeBps, compact, d, runs }: { m: BotMarket | null; gate: boolean; feeBps: number; compact?: boolean; d?: BotDraft; runs?: readonly OwnRun[] }) {
   if (!m) return <p className="bots-fine">Too few trades here to estimate.</p>;
-  const est = gate && m.gateCostBps !== null ? m.gateCostBps : m.estCostBps;
+  const e = d ? estimate(d, m, runs) : null;
+  const est = e?.bp ?? (gate && m.gateCostBps !== null ? m.gateCostBps : m.estCostBps);
+  const low = e?.low ?? m.estCostLowBps;
+  const high = e?.high ?? m.estCostHighBps;
+  const conf = e?.confidence ?? m.confidence;
   const losses = est - feeBps;
   return (
     <div className="bots-est">
       <div className="bots-est__big">
-        <span className="bots-est__k">Per $1M{gate ? ' · gate on' : ''}</span>
+        <span className="bots-est__k">Per $1M{e?.learned ? ' · learned' : gate ? ' · gate on' : ''}</span>
         <RollingNumber value={fmtBpUsd(est)} className={`bots-est__v ${bpCls(est)}`} />
         <span className="bots-est__sub">
-          {fmtBpUsd(m.estCostLowBps)} to {fmtBpUsd(m.estCostHighBps)}
-          <StatusPill size="sm" tone={CONF_TONE[m.confidence]} dot>{m.confidence}</StatusPill>
+          {fmtBpUsd(low)} to {fmtBpUsd(high)}
+          <StatusPill size="sm" tone={CONF_TONE[conf]} dot>{conf}</StatusPill>
         </span>
       </div>
       <Takers m={m} />
@@ -82,21 +92,26 @@ export function Estimate({ m, gate, feeBps, compact }: { m: BotMarket | null; ga
   );
 }
 
+/** The wizard's places: four steps, the third in three parts. */
+type Place = { step: 0 | 1 | 2 | 3; part?: Sec };
 const STEPS = [
   { title: 'Bot', hint: 'What it does' },
   { title: 'Market', hint: 'Where it trades' },
-  { title: 'Settings', hint: 'Size and safeguards' },
+  { title: 'Settings', hint: 'Size, quoting, safeguards' },
   { title: 'Review', hint: 'Name and start' },
 ] as const;
+const placesFor = (grid: boolean): Place[] => [
+  { step: 0 }, { step: 1 }, { step: 2, part: 'size' }, ...(grid ? [] : [{ step: 2 as const, part: 'quote' as const }]), { step: 2, part: 'guard' }, { step: 3 },
+];
 
-/** A market without a Binance price runs the plain maker: quotes off SoDEX's book, no gate, no rest. */
+/** A market without an oracle runs the plain maker: quotes off SoDEX's book, no gate, no rest. */
 export const noLeadOf = (m: BotMarket | null | undefined): boolean => m?.lead === null;
 export const effectiveDraft = (d: BotDraft, m: BotMarket | null | undefined): BotDraft => (d.strategy === 'market' && noLeadOf(m) ? { ...d, strategy: 'maker', gate: false } : d);
 
 type MSort = 'best' | 'activity' | 'uninformed' | 'spread';
 
 /** The markets, ranked; tick one or several. Activity is the market's own volume per hour (a bot's size does not change it). */
-function MarketStep({ picked, toggle, markets }: { picked: string[]; toggle: (s: string) => void; markets: BotMarket[] | null }) {
+function MarketStep({ picked, toggle, markets, costOf }: { picked: string[]; toggle: (s: string) => void; markets: BotMarket[] | null; costOf: (m: BotMarket) => number | null }) {
   const [q, setQ] = useState('');
   const [sort, setSort] = useState<MSort>('best');
   const [all, setAll] = useState(false);
@@ -104,11 +119,11 @@ function MarketStep({ picked, toggle, markets }: { picked: string[]; toggle: (s:
   const needle = q.trim().toLowerCase();
   const list = useMemo(() => {
     const xs = (markets ?? []).filter((m) => (!needle || m.symbol.toLowerCase().includes(needle)) && (all || needle || m.confidence !== 'low'));
-    const by: Record<MSort, (m: BotMarket) => number> = { best: (m) => m.estCostBps, activity: (m) => -m.volumeUsdH, uninformed: (m) => -m.takers.t1002, spread: (m) => m.spreadBps };
+    const by: Record<MSort, (m: BotMarket) => number> = { best: (m) => costOf(m) ?? 99, activity: (m) => -m.volumeUsdH, uninformed: (m) => -m.takers.t1002, spread: (m) => m.spreadBps };
     return [...xs].sort((x, y) => by[sort](x) - by[sort](y));
-  }, [markets, needle, sort, all]);
+  }, [markets, needle, sort, all, costOf]);
   const shown = all || needle ? list : list.slice(0, 10);
-  const best = useMemo(() => (markets ?? []).filter((m) => m.confidence === 'high').sort((x, y) => x.estCostBps - y.estCostBps)[0]?.symbol ?? null, [markets]);
+  const best = useMemo(() => (markets ?? []).filter((m) => m.confidence === 'high').sort((x, y) => (costOf(x) ?? 99) - (costOf(y) ?? 99))[0]?.symbol ?? null, [markets, costOf]);
   const extra = needle ? [...byName.keys()].filter((x) => x.toLowerCase().includes(needle) && !(markets ?? []).some((m) => m.symbol === x)).slice(0, 12) : [];
   if (!markets) return <div className="bots-skels">{[0, 1, 2, 3, 4].map((i) => <Skeleton key={i} className="bots-skel" />)}</div>;
   const head = (k: MSort, label: string, title?: string) => (
@@ -118,6 +133,7 @@ function MarketStep({ picked, toggle, markets }: { picked: string[]; toggle: (s:
   );
   const row = (symbol: string, m: BotMarket | null) => {
     const on = picked.includes(symbol);
+    const c = m ? costOf(m) : null;
     return (
       <tr key={symbol} role="checkbox" aria-checked={on} aria-label={symbol} tabIndex={0} className={`bots-row${on ? ' is-picked' : ''}`} onClick={() => toggle(symbol)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(symbol); } }}>
         <td className="bots-mt__pick"><span className={`bots-tick${on ? ' is-on' : ''}`} aria-hidden="true">{on && <Icon name="check" size={11} />}</span></td>
@@ -126,13 +142,13 @@ function MarketStep({ picked, toggle, markets }: { picked: string[]; toggle: (s:
             <CoinIcon coin={symbol} size={22} />
             <span><b>{symbol.replace(/-USD$/, '')}</b><small>{symbol}</small></span>
             {symbol === best && <StatusPill size="sm" tone="positive">best</StatusPill>}
-            {m?.lead === null && <StatusPill size="sm">no Binance</StatusPill>}
+            {m?.lead === null && <StatusPill size="sm">no oracle</StatusPill>}
             {!m && <StatusPill size="sm">little traded</StatusPill>}
           </span>
         </td>
         <td className="right num dim">{m ? fmtUsd(m.price) : DASH}</td>
         <td className="right num">{m ? fmtUsd(m.volumeUsdH, 0) : DASH}</td>
-        <td className={`right num bots-strong ${m ? bpCls(m.estCostBps) : ''}`}>{m ? fmtBpUsd(m.estCostBps) : DASH}</td>
+        <td className={`right num bots-strong ${bpCls(c)}`}>{fmtBpUsd(c)}</td>
         <td className="right">{m ? <span className="bots-share"><ProgressBar value={m.takers.t1002} max={1} size="sm" color={TAKER_COLORS.patient} label="Uninformed flow share" /><b>{Math.round(m.takers.t1002 * 100)}%</b></span> : DASH}</td>
         <td className="right num dim">{m ? `${m.spreadBps.toFixed(1)} bp` : DASH}</td>
       </tr>
@@ -155,7 +171,7 @@ function MarketStep({ picked, toggle, markets }: { picked: string[]; toggle: (s:
               <th>Market</th>
               <th className="right">Price</th>
               {head('activity', 'Activity / h', "The market's traded volume per hour, last day")}
-              {head('best', 'Per $1M', "What $1M of a small maker's volume did here, all-in")}
+              {head('best', 'Per $1M', 'What $1M of this bot is estimated to do here, all-in')}
               {head('uninformed', 'Uninformed', "Share of small makers' fills taken by uninformed flow")}
               {head('spread', 'Spread')}
             </tr>
@@ -171,84 +187,200 @@ function MarketStep({ picked, toggle, markets }: { picked: string[]; toggle: (s:
   );
 }
 
-/** The receipt: what will run, line by line, and what it is estimated to do per $1M. */
-function Receipt({ d, eff, picked, markets, feeBps, paper, floor, step, children }: {
-  d: BotDraft; eff: BotDraft; picked: string[]; markets: BotMarket[]; feeBps: number; paper: boolean; floor: ReturnType<typeof costPerMillion>; step: number; children: ReactNode;
-}) {
-  const known = picked.map((s) => markets.find((m) => m.symbol === s) ?? null).filter((m): m is BotMarket => !!m);
-  const gate = eff.strategy === 'market' && eff.gate;
-  const bp = (m: BotMarket) => (gate && m.gateCostBps !== null ? m.gateCostBps : m.estCostBps);
-  const avg = known.length ? known.reduce((x, m) => x + bp(m), 0) / known.length : null;
-  const guards = [eff.strategy === 'market' && eff.gate ? 'Gate' : null, d.flowOn ? 'Flow' : null, d.quiet.length ? 'Quiet hours' : null, d.maxSpreadBps !== null ? 'Spread' : null].filter(Boolean);
-  const need = (d.strategy === 'grid' ? d.orderUsd * d.levels : d.maxInventoryUsd + d.orderUsd * 2) * picked.length;
-  const name = d.label.trim() || `${STRATEGY_INFO[eff.strategy].name}${picked.length === 1 ? ` ${picked[0]!.replace(/-USD$/, '')}` : ''}`;
-  const grid = eff.strategy === 'grid';
+/** One bot to pick: what it is, what it was measured at, what it is estimated to do on the market. */
+function RecipeRow({ rc, on, pick, est, market }: { rc: Recipe; on: boolean; pick: () => void; est: BotEstimate | null; market: string }) {
   return (
-    <div className="bots-receipt">
-      <div className="bots-receipt__head">
-        <BotAvatar symbol={picked[0] ?? d.symbol} strategy={eff.strategy} size={40} />
-        <span><b>{name}</b><small>{paper ? 'Practice · no orders sent' : 'Real orders'}</small></span>
-      </div>
-      <dl className="bots-receipt__lines">
-        <div><dt>Strategy</dt><dd>{STRATEGY_INFO[eff.strategy].name}{eff.strategy === 'market' ? ' · R10' : ''}</dd></div>
-        <div><dt>{picked.length === 1 ? 'Market' : `Markets · ${picked.length}`}</dt><dd className="bots-receipt__mkts">{picked.length ? picked.map((s) => <span key={s}><CoinIcon coin={s} size={14} />{s.replace(/-USD$/, '')}</span>) : DASH}</dd></div>
-        <div><dt>Order size</dt><dd>{fmtUsd(d.orderUsd, 0)}{grid ? ` × ${d.levels}` : ' a side'}</dd></div>
-        {!grid && <div><dt>Max holding</dt><dd>{fmtUsd(d.maxInventoryUsd, 0)}</dd></div>}
-        <div><dt>Loss limit</dt><dd>{d.maxLossUsd === null ? 'None' : fmtUsd(d.maxLossUsd, 0)}</dd></div>
-        <div><dt>Safeguards</dt><dd>{guards.length ? guards.join(' · ') : 'None'}</dd></div>
-      </dl>
-      <div className="bots-receipt__cut" aria-hidden="true" />
-      <dl className="bots-receipt__lines">
-        <div><dt>Fees per $1M</dt><dd className="neg">{fmtBpUsd(feeBps)}</dd></div>
-        {grid
-          ? <div><dt>Grid steps per $1M</dt><dd className="pos">{floor.edge !== null ? `+${fmtUsd(floor.edge, 0)}` : DASH}</dd></div>
-          : known.length === 1
-            ? <div><dt>Price moves</dt><dd className={bp(known[0]!) - feeBps > 0 ? 'neg' : 'pos'}>{bp(known[0]!) - feeBps > 0 ? '−' : '+'}{fmtUsd(Math.abs(bpToPerMillion(bp(known[0]!) - feeBps)), 0)}</dd></div>
-            : known.map((m) => <div key={m.symbol}><dt>{m.base}</dt><dd className={bpCls(bp(m))}>{fmtBpUsd(bp(m))}</dd></div>)}
-      </dl>
-      <div className="bots-receipt__total">
-        <span>Est. per $1M{picked.length > 1 ? ', average' : ''}</span>
-        <RollingNumber value={grid ? (floor.net < 0 ? `+${fmtUsd(-floor.net, 0)}` : `−${fmtUsd(floor.net, 0)}`) : fmtBpUsd(avg)} className={`bots-receipt__v ${grid ? (floor.net < 0 ? 'pos' : 'neg') : bpCls(avg)}`} />
-      </div>
-      {known.length === 1 && step < 3 && <Takers m={known[0]!} />}
-      <dl className="bots-receipt__lines is-foot">
-        <div><dt>Balance needed</dt><dd>about {fmtUsd(need, 0)}</dd></div>
-        <div><dt>Signatures</dt><dd>{Math.max(1, picked.length)}</dd></div>
-      </dl>
+    <button type="button" role="radio" aria-checked={on} aria-label={rc.name} className={`bots-strow bots-rrow${on ? ' is-on' : ''}`} onClick={pick}>
+      <span className={`bots-radio${on ? ' is-on' : ''}`} aria-hidden="true" />
+      <StrategyTile strategy={rc.strategy} size={40} />
+      <span className="bots-strow__t">
+        <b>{rc.name}<span className="bots-code">{rc.code}</span>{rc.tag && <StatusPill size="sm" tone="positive">{rc.tag}</StatusPill>}</b>
+        <small>{rc.line}</small>
+        {rc.evidence.length > 0 && (
+          <span className="bots-rrow__ev">
+            {rc.evidence.slice(0, 3).map((e) => <span key={e.what} className={`bots-ev is-${e.kind}`}><i aria-hidden="true" />{e.what}<b className={bpCls(e.bp)}>{fmtBpUsd(e.bp)}</b></span>)}
+            <StatusPill size="sm" tone={PROOF[rc.proof].tone}>{PROOF[rc.proof].label}</StatusPill>
+          </span>
+        )}
+      </span>
+      <span className="bots-strow__n">
+        {est && est.bp !== null
+          ? <><b className={bpCls(est.bp)}>{fmtBpUsd(est.bp)}</b><small>per $1M on {market.replace(/-USD$/, '')}</small>{rc.id !== 'r10' && <small>{Math.round(est.volumeX * 100)}% volume</small>}</>
+          : <><b className="dim">{DASH}</b><small>{rc.category === 'grid' ? 'set by its range' : 'no reading'}</small></>}
+      </span>
+    </button>
+  );
+}
+
+/** A signed bar for one line of the receipt: left of the middle earns, right costs. */
+function LineBar({ bp, max }: { bp: number | null; max: number }) {
+  if (bp === null) return <span className="bots-rc__bar is-none" />;
+  const w = Math.min(50, (Math.abs(bp) / max) * 50);
+  return <span className="bots-rc__bar"><i className={bp > 0 ? 'neg' : 'pos'} style={bp > 0 ? { left: '50%', width: `${w}%` } : { right: '50%', width: `${w}%` }} /></span>;
+}
+
+/** The estimate's range, from low to high, with the estimate on it and zero marked. */
+function RangeTrack({ low, high, v }: { low: number; high: number; v: number }) {
+  const lo = Math.min(low, v, 0) - 0.2;
+  const hi = Math.max(high, v, 0) + 0.2;
+  // Costlier to the left, earning to the right (the labels read the same way).
+  const at = (x: number) => `${((hi - x) / (hi - lo)) * 100}%`;
+  return (
+    <div className="bots-rc__range" aria-hidden="true">
+      <span className="bots-rc__rtrack"><i style={{ left: at(Math.max(low, high)), width: `calc(${at(Math.min(low, high))} - ${at(Math.max(low, high))})` }} /></span>
+      <span className="bots-rc__rzero" style={{ left: at(0) }} />
+      <span className={`bots-rc__rdot ${bpCls(v)}`} style={{ left: at(v) }} />
+    </div>
+  );
+}
+
+/** The receipt: the estimate, how it adds up, what will run, what it needs. */
+function Receipt({ d, eff, picked, markets, feeBps, paper, floor, runs, children }: {
+  d: BotDraft; eff: BotDraft; picked: string[]; markets: BotMarket[]; feeBps: number; paper: boolean; floor: ReturnType<typeof costPerMillion>; runs: readonly OwnRun[]; children: ReactNode;
+}) {
+  const grid = eff.strategy === 'grid';
+  const rc = RECIPE[recipeOfDraft(d)];
+  const ests = picked.map((s) => markets.find((m) => m.symbol === s) ?? null).filter((m): m is BotMarket => !!m).map((m) => ({ m, e: estimate(effectiveDraft({ ...d, symbol: m.symbol }, m), m, runs) }));
+  const known = ests.filter((x) => x.e.bp !== null);
+  const avg = (f: (e: BotEstimate) => number | null) => { const xs = known.map((x) => f(x.e)).filter((x): x is number => x !== null); return xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null; };
+  const bp = grid ? floor.net / 100 : avg((e) => e.bp);
+  const low = grid ? null : avg((e) => e.low);
+  const high = grid ? null : avg((e) => e.high);
+  const volX = avg((e) => e.volumeX) ?? 1;
+  // The lines, averaged over the picked markets: fees, price moves, then the bot and each safeguard.
+  const lines: Array<{ id: string; label: string; bp: number | null; source: EstLine['source']; note?: string }> = [];
+  if (grid) {
+    lines.push({ id: 'fees', label: 'Fees', bp: feeBps, source: 'market' });
+    lines.push({ id: 'steps', label: 'Grid steps', bp: floor.edge !== null ? -floor.edge / 100 : null, source: 'market' });
+  } else if (known.length) {
+    lines.push({ id: 'fees', label: 'Fees', bp: feeBps, source: 'market' });
+    lines.push({ id: 'moves', label: 'Price moves', bp: avg((e) => (e.lines.find((l) => l.id === 'market')?.bp ?? 0) - feeBps), source: 'market' });
+    const ids = [...new Set(known.flatMap((x) => x.e.lines.map((l) => l.id)))].filter((id) => id !== 'market');
+    for (const id of ids) {
+      const ls = known.map((x) => x.e.lines.find((l) => l.id === id)).filter((l): l is EstLine => !!l);
+      const vals = ls.map((l) => l.bp).filter((x): x is number => x !== null);
+      lines.push({ id, label: ls[0]!.label, bp: vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null, source: ls[0]!.source, note: ls.length === 1 ? ls[0]!.note : undefined });
+    }
+  }
+  const maxAbs = Math.max(0.5, ...lines.map((l) => Math.abs(l.bp ?? 0)));
+  const learned = known.map((x) => x.e.learned).find((l) => !!l) ?? null;
+  const conf = known[0]?.e.confidence ?? null;
+  const need = (d.strategy === 'grid' ? d.orderUsd * d.levels : d.maxInventoryUsd + d.orderUsd * 2) * picked.length;
+  const name = d.label.trim() || `${rc.name}${picked.length === 1 ? ` ${picked[0]!.replace(/-USD$/, '')}` : ''}`;
+  const guards = [
+    { id: 'gate', icon: 'pulse' as const, label: 'Market gate', on: eff.strategy === 'market' && eff.gate },
+    { id: 'flow', icon: 'robot' as const, label: 'Flow gate', on: !grid && d.flowOn },
+    { id: 'quiet', icon: 'clock' as const, label: 'Quiet hours', on: d.quiet.length > 0 },
+    { id: 'spread', icon: 'layers' as const, label: 'Spread limit', on: d.maxSpreadBps !== null },
+  ];
+  return (
+    <div className="bots-rc">
+      <header className="bots-rc__head">
+        <BotAvatar symbol={picked[0] ?? d.symbol} strategy={eff.strategy} size={44} />
+        <span className="bots-rc__name"><b>{name}</b><small>{rc.name} · {rc.code}</small></span>
+        <StatusPill size="sm" tone={paper ? 'neutral' : 'positive'} dot>{paper ? 'Practice' : 'Live'}</StatusPill>
+      </header>
+
+      <section className="bots-rc__hero">
+        <span className="bots-rc__k">Estimated per $1M{picked.length > 1 ? `, ${picked.length} markets` : ''}</span>
+        <RollingNumber value={fmtBpUsd(bp)} className={`bots-rc__v ${bpCls(bp)}`} />
+        {low !== null && high !== null && bp !== null && (
+          <>
+            <RangeTrack low={low} high={high} v={bp} />
+            <span className="bots-rc__rl"><span>{fmtBpUsd(Math.max(low, high))}</span><span>{fmtBpUsd(Math.min(low, high))}</span></span>
+          </>
+        )}
+        <span className="bots-rc__meta">
+          {conf && <StatusPill size="sm" tone={CONF_TONE[conf]} dot>{conf}</StatusPill>}
+          {!grid && volX < 0.995 && <span className="bots-rc__chip"><Icon name="clock" size={12} />Quotes {Math.round(volX * 100)}% of the time</span>}
+          {learned && <span className="bots-rc__chip is-learn"><Icon name="bolt" size={12} />Learned from {fmtUsd(learned.volumeUsd, 0)} of your bots</span>}
+        </span>
+      </section>
+
+      {lines.length > 0 && (
+        <section className="bots-rc__sum" aria-label="How it adds up">
+          {lines.map((l) => (
+            <div key={l.id} className="bots-rc__line" title={`${SOURCE[l.source]}${l.note ? ` · ${l.note}` : ''}`}>
+              <span className="bots-rc__ll"><i className={`bots-src is-${l.source}`} aria-hidden="true" />{l.label}</span>
+              <LineBar bp={l.bp} max={maxAbs} />
+              <b className={bpCls(l.bp)}>{l.bp === null ? 'n/a' : fmtBpUsd(l.bp)}</b>
+              {l.note && <small className="bots-rc__note">{l.note}</small>}
+            </div>
+          ))}
+          <div className="bots-rc__srckey"><span><i className="bots-src is-market" />Market data</span><span><i className="bots-src is-tests" />Tests</span><span><i className="bots-src is-yours" />Your bots</span></div>
+        </section>
+      )}
+
+      <section className="bots-rc__tiles">
+        <div className="bots-rc__tile is-wide">
+          <span>{picked.length === 1 ? 'Market' : `Markets · ${picked.length}`}</span>
+          <b className="bots-rc__mkts">{picked.length ? picked.map((s) => <span key={s}><CoinIcon coin={s} size={16} />{s.replace(/-USD$/, '')}</span>) : DASH}</b>
+        </div>
+        <div className="bots-rc__tile"><span>Order size</span><b>{fmtUsd(d.orderUsd, 0)}<small>{grid ? ` × ${d.levels}` : ' a side'}</small></b></div>
+        {!grid ? <div className="bots-rc__tile"><span>Max holding</span><b>{fmtUsd(d.maxInventoryUsd, 0)}</b></div> : <div className="bots-rc__tile"><span>Levels</span><b>{d.levels}</b></div>}
+        <div className="bots-rc__tile"><span>Loss limit</span><b>{d.maxLossUsd === null ? 'None' : fmtUsd(d.maxLossUsd, 0)}</b></div>
+        <div className="bots-rc__tile"><span>Runs</span><b>{d.runHours === null ? 'Until stopped' : d.runHours >= 168 ? `${Math.round(d.runHours / 24)} days` : `${d.runHours} h`}</b></div>
+      </section>
+
+      <section className="bots-rc__guards" aria-label="Safeguards">
+        {guards.map((g) => (
+          <span key={g.id} className={`bots-rc__guard${g.on ? ' is-on' : ''}`} title={`${g.label}: ${g.on ? 'on' : 'off'}`}>
+            <Icon name={g.icon} size={13} /><span>{g.label}</span>
+          </span>
+        ))}
+      </section>
+
+      <footer className="bots-rc__foot">
+        <div><span>Balance needed</span><b>about {fmtUsd(need, 0)}</b></div>
+        <div><span>Signatures</span><b>{Math.max(1, picked.length)}</b></div>
+      </footer>
       {children}
     </div>
   );
 }
 
 export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView, { page: 'new' }> }) {
-  const startKind: Strategy = view.kind === 'grid' ? 'grid' : 'market';
-  const [d, setD] = useState<BotDraft>(() => draftFor(startKind, 'balanced', view.market ?? 'BTC-USD'));
+  const startRecipe: RecipeId = view.kind && view.kind in RECIPE ? (view.kind as RecipeId) : view.kind === 'grid' ? 'grid' : 'r10';
+  const fromRecipe = (id: RecipeId, symbol: string, keep?: BotDraft): BotDraft => {
+    const rc = RECIPE[id];
+    const base = draftFor(rc.strategy, 'balanced', symbol);
+    const size = keep && keep.strategy !== 'grid' && rc.strategy !== 'grid' ? { orderUsd: keep.orderUsd, maxInventoryUsd: keep.maxInventoryUsd, maxLossUsd: keep.maxLossUsd, flowOn: keep.flowOn, quiet: keep.quiet, maxSpreadBps: keep.maxSpreadBps, runHours: keep.runHours } : {};
+    return { ...base, ...rc.params, ...size, strategy: rc.strategy, label: keep?.label ?? '', paper: keep?.paper ?? true };
+  };
+  const [d, setD] = useState<BotDraft>(() => fromRecipe(startRecipe, view.market ?? 'BTC-USD'));
+  const [cat, setCat] = useState<Category>(RECIPE[startRecipe].category);
   const [picked, setPicked] = useState<string[]>(() => [view.market ?? 'BTC-USD']);
-  const [step, setStep] = useState(view.market ? 1 : 0);
+  const grid = d.strategy === 'grid';
+  const places = placesFor(grid);
+  const [at, setAt] = useState(view.market ? 1 : 0);
+  const place = places[Math.min(at, places.length - 1)]!;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => { if (view.market) { setD((x) => ({ ...x, symbol: view.market! })); setPicked([view.market]); } }, [view.market]);
   const set = (p: Partial<BotDraft>) => setD((x) => ({ ...x, ...p }));
   // The first picked market leads the form (its price, its minimum size); the others start with the same settings.
   useEffect(() => { if (picked[0] && picked[0] !== d.symbol) setD((x) => ({ ...x, symbol: picked[0]!, low: null, high: null })); }, [picked, d.symbol]);
-  const toggle = (s: string) => setPicked((xs) => (xs.includes(s) ? (xs.length > 1 ? xs.filter((x) => x !== s) : xs) : d.strategy === 'grid' ? [s] : [...xs, s].slice(0, 8)));
+  const toggle = (s: string) => setPicked((xs) => (xs.includes(s) ? (xs.length > 1 ? xs.filter((x) => x !== s) : xs) : grid ? [s] : [...xs, s].slice(0, 8)));
   const { byName } = useSymbols('perps');
   const sym = byName.get(d.symbol);
   const market: MarketInfo | null = sym ? marketOf(sym) : null;
   const hist = useHistory(d.symbol, true, 10);
   const mark = hist?.length ? hist[hist.length - 1]!.p : null;
-  const range = d.strategy === 'grid' ? gridRange(d, mark) : null;
+  const range = grid ? gridRange(d, mark) : null;
   const markets = useBotMarkets('24h');
+  const runs = useMemo(() => ownRuns(ctx.bots, markets.data?.markets ?? null), [ctx.bots, markets.data]);
   const est = markets.data?.markets.find((m) => m.symbol === d.symbol) ?? null;
   const noLead = noLeadOf(est);
   const eff = effectiveDraft(d, est);
   const feeBps = markets.data ? markets.data.fee.makerBps + ctx.feeTenths / 10 : 1.2 + ctx.feeTenths / 10;
   const floor = costPerMillion(eff, market, mark, ctx.feeTenths);
   const paper = !ctx.liveAllowed || d.paper;
+  const costOf = useMemo(() => (m: BotMarket) => estimate(effectiveDraft({ ...d, symbol: m.symbol }, m), m, runs).bp, [d, runs]);
   const specFor = (s: string) => {
     const m = markets.data?.markets.find((x) => x.symbol === s) ?? null;
     return specOf({ ...effectiveDraft({ ...d, symbol: s }, m), paper }, s === d.symbol ? mark : null);
   };
+  const rid = recipeOfDraft(d);
 
   const check = useMemo(() => {
     try {
@@ -260,14 +392,14 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
     }
   }, [eff, mark, market, paper]);
   const why = ctx.setupWhy(paper);
-  const can = !check.length && !why && ctx.ready && (d.strategy !== 'grid' || !!range) && picked.length > 0;
+  const can = !check.length && !why && ctx.ready && (!grid || !!range) && picked.length > 0;
 
   const { confirm, dialog } = useConfirm();
   const start = async () => {
     const many = picked.length > 1;
     const ok = await confirm({
-      title: many ? `Start ${picked.length} bots?` : `Start ${d.label.trim() || `${STRATEGY_INFO[eff.strategy].name} ${d.symbol.replace(/-USD$/, '')}`}?`,
-      body: `${STRATEGY_INFO[eff.strategy].name} on ${picked.join(', ')}, ${fmtUsd(d.orderUsd, 0)} orders${d.strategy === 'grid' ? '' : `, up to ${fmtUsd(d.maxInventoryUsd, 0)} held each`}${d.maxLossUsd !== null ? `, stops at a ${fmtUsd(d.maxLossUsd, 0)} loss` : ''}. ${paper ? 'Practice: no orders are sent.' : 'Real orders in your SoDEX account.'}${many ? ` One signature per bot (${picked.length}).` : ''}`,
+      title: many ? `Start ${picked.length} bots?` : `Start ${d.label.trim() || `${RECIPE[rid].name} ${d.symbol.replace(/-USD$/, '')}`}?`,
+      body: `${RECIPE[rid].name} on ${picked.join(', ')}, ${fmtUsd(d.orderUsd, 0)} orders${grid ? '' : `, up to ${fmtUsd(d.maxInventoryUsd, 0)} held each`}${d.maxLossUsd !== null ? `, stops at a ${fmtUsd(d.maxLossUsd, 0)} loss` : ''}. ${paper ? 'Practice: no orders are sent.' : 'Real orders in your SoDEX account.'}${many ? ` One signature per bot (${picked.length}).` : ''}`,
       confirmLabel: paper ? (many ? `Start ${picked.length} practice bots` : 'Start practice bot') : (many ? `Start ${picked.length} bots` : 'Start bot'),
     });
     if (!ok) return;
@@ -285,9 +417,17 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
     }
   };
 
-  const next = () => setStep((s) => Math.min(3, s + 1));
-  const back = () => setStep((s) => Math.max(0, s - 1));
+  const last = places.length - 1;
+  const next = () => setAt((s) => Math.min(last, s + 1));
+  const back = () => setAt((s) => Math.max(0, s - 1));
+  const goStep = (i: number) => { const k = places.findIndex((p) => p.step === i); if (k >= 0 && k <= at) setAt(k); };
   const startLabel = busy ? 'Starting…' : paper ? (picked.length > 1 ? `Start ${picked.length} practice bots` : 'Start practice bot') : (picked.length > 1 ? `Start ${picked.length} bots` : 'Start bot');
+  const parts = places.filter((p) => p.step === 2).map((p) => p.part!);
+  const pickRecipe = (id: RecipeId) => {
+    setD((x) => fromRecipe(id, x.symbol, x));
+    if (RECIPE[id].strategy === 'grid') setPicked((xs) => xs.slice(0, 1));
+  };
+  const nextLabel = place.step === 2 && place.part !== parts[parts.length - 1] ? `Next: ${SEC_NAMES[parts[parts.indexOf(place.part!) + 1]!]}` : 'Next';
 
   return (
     <>
@@ -296,62 +436,76 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
       <nav className="bots-wsteps" aria-label="Steps">
         <ol>
           {STEPS.map((st, i) => (
-            <li key={st.title} className={i === step ? 'is-on' : i < step ? 'is-done' : ''}>
-              <button type="button" onClick={() => i <= step && setStep(i)} disabled={i > step} aria-current={i === step ? 'step' : undefined}>
-                <span className="bots-wsteps__t"><b>{i < step ? <Icon name="check" size={12} /> : <span className="bots-wsteps__n">{i + 1}</span>}{st.title}</b><small>{st.hint}</small></span>
-                <span className="bots-wsteps__seg" aria-hidden="true" />
+            <li key={st.title} className={i === place.step ? 'is-on' : i < place.step ? 'is-done' : ''}>
+              <button type="button" onClick={() => goStep(i)} disabled={i > place.step} aria-current={i === place.step ? 'step' : undefined}>
+                <span className="bots-wsteps__t">
+                  <b>{i < place.step ? <Icon name="check" size={12} /> : <span className="bots-wsteps__n">{i + 1}</span>}{st.title}</b>
+                  {i === 2 ? (
+                    <span className="bots-wsteps__subs">
+                      {parts.map((p) => {
+                        const k = places.findIndex((x) => x.part === p);
+                        return <span key={p} className={`bots-wsub${place.part === p ? ' is-on' : k < at ? ' is-done' : ''}`} onClick={(e) => { if (k <= at) { e.stopPropagation(); setAt(k); } }}>{SEC_NAMES[p]}</span>;
+                      })}
+                    </span>
+                  ) : <small>{st.hint}</small>}
+                </span>
+                <span className="bots-wsteps__seg" aria-hidden="true">{i === 2 && <span className="bots-wsteps__fill" style={{ width: place.step > 2 ? '100%' : place.step < 2 ? '0%' : `${((parts.indexOf(place.part!) + 1) / parts.length) * 100}%` }} />}</span>
               </button>
             </li>
           ))}
         </ol>
-        <span className="bots-wsteps__count">{step + 1}/4</span>
+        <span className="bots-wsteps__count">{place.step + 1}/4{place.part ? ` · ${SEC_NAMES[place.part]}` : ''}</span>
       </nav>
       <div className="bots-wizard">
         <div className="bots-wizard__main">
-          {step === 0 && (
+          {place.step === 0 && (
             <Shell>
-              <ShellHeader icon="layers" title="Strategy" subtitle="Maker fee only, never the spread." />
-              <div className="bots-strows" role="radiogroup" aria-label="Strategy">
-                {STRATEGIES.map((st) => {
-                  const c = costPerMillion(draftFor(st), null, null, ctx.feeTenths);
-                  const on = d.strategy === st;
+              <ShellHeader icon="layers" title="Bot" subtitle="A category, then one of its bots. Each one is a setting we tested." />
+              <div className="bots-cats" role="tablist" aria-label="Category">
+                {CATEGORIES.map((c) => {
+                  const on = cat === c.id;
+                  const n = recipesOf(c.id).length;
                   return (
-                    <button key={st} type="button" role="radio" aria-checked={on} aria-label={STRATEGY_INFO[st].name} className={`bots-strow${on ? ' is-on' : ''}`} onClick={() => { setD({ ...draftFor(st, 'balanced', d.symbol), label: d.label, paper: d.paper }); if (st === 'grid') setPicked((xs) => xs.slice(0, 1)); }}>
-                      <span className={`bots-radio${on ? ' is-on' : ''}`} aria-hidden="true" />
-                      <StrategyTile strategy={st} size={44} />
-                      <span className="bots-strow__t">
-                        <b>{STRATEGY_INFO[st].name}{st === 'market' && <StatusPill size="sm" tone="positive">R10</StatusPill>}</b>
-                        <small>{STRATEGY_INFO[st].line}</small>
-                      </span>
-                      <span className="bots-strow__n">
-                        {st === 'market' && est
-                          ? <><b className={bpCls(est.estCostBps)}>{fmtBpUsd(est.estCostBps)}</b><small>per $1M on {est.base}</small></>
-                          : <><b className="neg">−{fmtUsd(c.fees, 0)}</b><small>fees per $1M</small></>}
-                      </span>
+                    <button key={c.id} type="button" role="tab" aria-selected={on} className={`bots-cat${on ? ' is-on' : ''}`} onClick={() => { setCat(c.id); if (RECIPE[rid].category !== c.id) pickRecipe(recipesOf(c.id)[0]!.id); }}>
+                      <StrategyTile strategy={c.id === 'grid' ? 'grid' : 'market'} size={36} />
+                      <span><b>{c.name}</b><small>{c.line}</small></span>
+                      <span className="bots-cat__n">{n} {n === 1 ? 'bot' : 'bots'}</span>
                     </button>
                   );
                 })}
               </div>
+              <div className="bots-strows" role="radiogroup" aria-label="Bot">
+                {recipesOf(cat).map((rc) => (
+                  <RecipeRow
+                    key={rc.id}
+                    rc={rc}
+                    on={rid === rc.id}
+                    pick={() => pickRecipe(rc.id)}
+                    market={d.symbol}
+                    est={est && rc.category === 'market' ? estimate(effectiveDraft({ ...fromRecipe(rc.id, d.symbol, d) }, est), est, runs) : null}
+                  />
+                ))}
+              </div>
             </Shell>
           )}
 
-          {step === 1 && (
+          {place.step === 1 && (
             <Shell>
-              <ShellHeader icon="compass" title="Markets" subtitle={d.strategy === 'grid' ? 'One market for a grid.' : 'Tick one or several: one bot each.'} aside={<Button variant="quiet" onClick={() => goBots({ page: 'explore' })}>Compare all<Icon name="arrowRight" size={13} /></Button>} />
-              <MarketStep picked={picked} toggle={toggle} markets={markets.data?.markets ?? (markets.error ? [] : null)} />
+              <ShellHeader icon="compass" title="Markets" subtitle={grid ? 'One market for a grid.' : `Tick one or several: one ${RECIPE[rid].name.toLowerCase()} each.`} aside={<Button variant="quiet" onClick={() => goBots({ page: 'explore' })}>Compare all<Icon name="arrowRight" size={13} /></Button>} />
+              <MarketStep picked={picked} toggle={toggle} markets={markets.data?.markets ?? (markets.error ? [] : null)} costOf={costOf} />
             </Shell>
           )}
 
-          {step === 2 && (
+          {place.step === 2 && (
             <Shell>
-              <ShellHeader icon="gear" title="Settings" subtitle={picked.length > 1 ? `The same for all ${picked.length} markets.` : 'Uses your SoDEX futures USDC.'} />
+              <ShellHeader icon="gear" title={SEC_NAMES[place.part!]} subtitle={place.part === 'size' ? (picked.length > 1 ? `The same for all ${picked.length} markets.` : 'Uses your SoDEX futures USDC.') : place.part === 'quote' ? `${RECIPE[rid].name}'s values, marked R10 where they match.` : 'Each one moves the estimate on the right.'} />
               <Panel className="bots-sizepanel">
-                <BotSettings d={d} set={set} range={range} mark={mark} liveAllowed={ctx.liveAllowed} noLead={noLead} />
+                <BotSettings d={d} set={set} range={range} mark={mark} liveAllowed={ctx.liveAllowed} noLead={noLead} part={place.part} hidePractice={place.part !== 'size'} />
               </Panel>
             </Shell>
           )}
 
-          {step === 3 && (
+          {place.step === 3 && (
             <Shell>
               <ShellHeader icon="check" title="Review" subtitle="Check the receipt, name it, start." />
               <Panel className="bots-review">
@@ -362,7 +516,7 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
                 {error && <p className="bots-err" role="alert">{error}</p>}
               </Panel>
               {picked.length === 1 && est && (
-                <Panel className="bots-review__est"><Estimate m={est} gate={eff.strategy === 'market' && eff.gate} feeBps={feeBps} /></Panel>
+                <Panel className="bots-review__est"><Estimate m={est} gate={eff.strategy === 'market' && eff.gate} feeBps={feeBps} d={eff} runs={runs} /></Panel>
               )}
             </Shell>
           )}
@@ -370,11 +524,11 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
 
         <aside className="bots-newside">
           <Shell className="bots-sidecard">
-            <Receipt d={d} eff={eff} picked={picked} markets={markets.data?.markets ?? []} feeBps={feeBps} paper={paper} floor={floor} step={step}>
+            <Receipt d={d} eff={eff} picked={picked} markets={markets.data?.markets ?? []} feeBps={feeBps} paper={paper} floor={floor} runs={runs}>
               <div className="bots-sidepanel__act">
-                {step > 0 && <Button variant="secondary" size="md" icon="arrowLeft" onClick={back}>Back</Button>}
-                {step < 3
-                  ? <Button variant="primary" size="md" className="bots-stepper__next" onClick={next}>Next<Icon name="arrowRight" size={14} /></Button>
+                {at > 0 && <Button variant="secondary" size="md" icon="arrowLeft" onClick={back}>Back</Button>}
+                {at < last
+                  ? <Button variant="primary" size="md" className="bots-stepper__next" onClick={next}>{nextLabel}<Icon name="arrowRight" size={14} /></Button>
                   : <Button variant="go" size="md" className="bots-stepper__next" icon="play" loading={busy} disabled={!can} onClick={() => void start()}>{startLabel}</Button>}
               </div>
             </Receipt>
@@ -384,3 +538,6 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
     </>
   );
 }
+
+/** Kept for callers that name a strategy's line. */
+export const strategyLine = (s: Strategy): string => STRATEGY_INFO[s].line;

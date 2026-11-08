@@ -80,3 +80,16 @@ Measured per signed write to SoDEX: send to answer (queue + wire, ms), orders an
 - `BOTS_ON` = dev builds, or `VITE_BOTS=1`. Off: no sidebar section, `/bots/*` falls back as today.
 - Sidebar bottom (above Settings): Bots (overview), New bot, Explore, Savings.
 - Routes: `/bots` overview, `/bots/new`, `/bots/explore`, `/bots/savings`, `/bots/<id>` detail.
+
+## Bots and the estimate (2026-11-08)
+
+- **Bots** (`apps/web/src/bots/recipes.ts`): "Market maker" is a category; every setting the live runs and replays
+  kept is a bot of its own: Oracle maker (R10), Calm oracle maker (R10 + gate), Skewed oracle maker (S1, early),
+  Touch maker (N5, `noFair`), Calm touch maker (N5 + gate), Book maker (plain, no oracle); and the Range grid. Each
+  carries its difference to R10 and where it was measured. "Oracle" in the UI is the price R10 quotes off (Binance
+  futures' mid times SoDEX's gap).
+- **Estimate** (`apps/web/src/bots/estimate.ts`): the market's reading (R10's), plus the bot's tested difference, plus
+  each safeguard read on the market's own fills (server `botMarkets.ts`: `gateShare`, `flowGate` per 1002 USD over
+  10 min, `spreadGate` per limit; quiet hours from the hourly profile), plus the wallet's own live bots blended in
+  by volume (weight v / (v + $250K) on that market and bot, the fleet's bias against $1M elsewhere). Explore calls a
+  bot best only on an edge measured on that market, by the wallet's bots, or repeated live.
