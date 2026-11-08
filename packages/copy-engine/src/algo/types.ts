@@ -858,6 +858,8 @@ export interface BotView {
   costPerMillion: number | null;
   fills: number;
   mark: number | null;
+  /** SoDEX's minimum order on its market at the mark now, USD (null: not known). Absent on an older executor. */
+  minOrderUsd?: number | null;
   /** Its quotes or levels on SoDEX now. */
   orders: Array<{ side: Side; price: number; quantity: number; tag: string }>;
   /** Stopping: closing what it holds. */

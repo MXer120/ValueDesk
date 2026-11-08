@@ -6,7 +6,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { checkAlgoSpec, parseAlgoSpec, type AlgoSpec, type MarketInfo } from '@copy-engine';
-import { PRESETS, PRESET_VALUES, STRATEGIES, botNeedUsd, chartHours, chartWindows, cheapestMakerMarkets, clampLeverage, costPerMillion, draftFor, draftOfSpec, gridRange, isChartWindow, leverageCap, minQuoteUsd, offWords, patchOf, planMarkets, presetOf, refusalOf, runHoursLeft, specOf, startLeverage, strategyOf, type MarketPlan } from './presets';
+import { PRESETS, PRESET_VALUES, STRATEGIES, botNeedUsd, chartHours, chartWindows, cheapestMakerMarkets, clampLeverage, costPerMillion, draftFor, draftOfSpec, gridRange, isChartWindow, leverageCap, minQuoteUsd, offWords, patchOf, planMarkets, presetOf, refusalOf, runHoursLeft, specOf, autoLeverage, strategyOf, type MarketPlan } from './presets';
 import { draftOfRecipe, recipeOfDraft } from './recipes';
 
 const BTC = { tickSize: '1', makerFee: 0.00012 } as Pick<MarketInfo, 'tickSize' | 'makerFee'>;
@@ -194,16 +194,17 @@ test('leverage: under the market\'s maximum and the region\'s ceiling; none befo
   assert.equal(leverageCap(50, null), 50);
   assert.equal(leverageCap(50, 2), 2, 'EEA 2x');
   assert.equal(leverageCap(1, 2), 1);
-  assert.equal(startLeverage(20, null, false), null, 'account not read yet');
-  assert.equal(startLeverage(20, null, true), 3);
-  assert.equal(startLeverage(20, 10, true), 10, 'what SoDEX already uses there');
-  assert.equal(startLeverage(2, 10, true), 2);
-  assert.equal(startLeverage(null, 10, true), null);
+  // Auto (owner 2026-11-08): the lowest leverage at which the margin fits the free account with a tenth to spare.
+  assert.equal(autoLeverage(300, 1000, 20), 1, 'fits at 1x');
+  assert.equal(autoLeverage(300, 100, 20), 4, '300 / 90 -> 4x');
+  assert.equal(autoLeverage(300, 10, 20), 20, 'capped by the market');
+  assert.equal(autoLeverage(300, null, 20), 1, 'practice or no wallet');
+  assert.equal(autoLeverage(300, 100, null), null, 'market maximum unknown');
   assert.equal(clampLeverage(20, 5), 5);
   assert.equal(clampLeverage(null, 5), null);
 });
 
-test('several markets: each checked with its own price and rules before anything is signed; leverage per market; margin on the real quote', () => {
+test('several markets: each checked with its own price and rules before anything is signed; leverage per market; an order under the minimum refused; margin on the real quote', () => {
   const d = { ...draftOfRecipe('r10', 'BTC-USD'), orderUsd: 12, maxInventoryUsd: 300, leverage: 10, paper: false };
   const markets: Record<string, { market: MarketInfo; price: number; maxLeverage: number }> = {
     // BTC: minimum 0.0001 BTC ($5 minimum value) = $7.80: $12 goes out as it is.
@@ -219,7 +220,8 @@ test('several markets: each checked with its own price and rules before anything
   assert.equal(btc.quoteUsd, 12);
   assert.equal(btc.spec!.leverage, 10);
   assert.equal(big.spec!.leverage, 5, 'clamped to that market\'s maximum');
-  assert.ok(big.notes.length === 1 && /minimum/.test(big.notes[0]!), JSON.stringify(big.notes));
+  // An order under the market's minimum cannot be started (owner 2026-11-08): no silent raise.
+  assert.ok(big.errors.some((e) => /under SoDEX's minimum order on BIG/.test(e)), JSON.stringify(big.errors));
   assert.equal(big.quoteUsd, 100);
   // BTC: (300 + 2 x 12) / 10 = 32.4; BIG at the real $100 quote: (300 + 2 x 100) / 5 = 100.
   assert.ok(Math.abs(btc.marginUsd - 32.4) < 1e-9, String(btc.marginUsd));
@@ -228,9 +230,6 @@ test('several markets: each checked with its own price and rules before anything
   const small = planMarkets({ ...d, maxInventoryUsd: 24 }, ['BTC-USD', 'BIG-USD'], (s) => markets[s]!, { paper: false, mark: 78_000 });
   assert.deepEqual(small[0]!.errors, []);
   assert.ok(small[1]!.errors.length > 0, 'BIG: $24 cap under a $100 quote');
-  // The region's ceiling binds every market.
-  const eea = planMarkets(d, ['BTC-USD'], (s) => markets[s]!, { paper: false, regionMax: 2, mark: 78_000 });
-  assert.equal(eea[0]!.spec!.leverage, 2);
   // A size SoDEX refuses on one market shows on that market.
   const huge = planMarkets({ ...d, orderUsd: 50_000, maxInventoryUsd: 100_000 }, ['BIG-USD'], (s) => ({ ...markets[s]!, market: mkt({ ...markets[s]!.market, maxQuantity: '100' }) }), { paper: false });
   assert.ok(huge[0]!.errors.length > 0, 'over the largest order');

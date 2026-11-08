@@ -64,7 +64,9 @@ function SpreadPick({ d, set }: { d: BotDraft; set: (p: Partial<BotDraft>) => vo
 function LeverageRow({ d, set, lev, max }: { d: BotDraft; set: (p: Partial<BotDraft>) => void; lev: BotLeverage; max: number }) {
   // Before the account answered the bot has no leverage yet: the margin then counts 1x, as the executor does.
   const now = d.leverage === null ? null : Math.min(max, d.leverage);
-  const shown = now ?? Math.min(3, max);
+  const shown = now ?? 1;
+  // A hand-set leverage turns Auto off; Auto puts it back to what the sizing needs (autoLeverage).
+  const pick = (x: number) => set({ leverage: Math.max(1, Math.min(max, Math.round(x))), leverageAuto: false });
   const picks = [1, 2, 3, 5, 10, 20].filter((x) => x <= max);
   const spec = (d.strategy === 'grid'
     ? { kind: 'grid', orderUsd: d.orderUsd, levels: d.levels, leverage: now }
@@ -72,12 +74,17 @@ function LeverageRow({ d, set, lev, max }: { d: BotDraft; set: (p: Partial<BotDr
   const margin = botNeedUsd(spec);
   const lower = lev.open && lev.held !== null && now !== null && now < lev.held;
   return (
-    <Row label={<Term t="margin">Leverage</Term>} wide hint={<>Sets aside about <b>{fmtUsd(margin, 0)}</b> of margin {now === null ? 'at 1× (reading your account)' : `at ${now}×`}. Up to {max}× here.</>}>
+    <Row
+      label={<Term t="margin">Leverage</Term>}
+      wide
+      tag={d.leverageAuto ? <span className="bots-r10">Auto</span> : <button type="button" className="bots-r10 is-off" onClick={() => set({ leverageAuto: true })} title="Back to the leverage the sizing needs">Auto</button>}
+      hint={<>Sets aside about <b>{fmtUsd(margin, 0)}</b> of margin {now === null ? 'at 1× (reading your account)' : `at ${now}×`}. {d.leverageAuto ? 'Auto: the lowest leverage at which this fits your free margin.' : 'Set by you.'} Up to {max}× on this market.</>}
+    >
       <div className="bots-sizeline">
-        <Slider label="Leverage slider" value={shown} min={1} max={max} step={1} onChange={(x) => set({ leverage: Math.round(x) })} minLabel="1×" maxLabel={`${max}×`} />
-        <NumberField label="Leverage" hideLabel value={now} onChange={(x) => x !== null && set({ leverage: Math.max(1, Math.min(max, Math.round(x))) })} unit="×" className="bots-sizeline__n" />
+        <Slider label="Leverage slider" value={shown} min={1} max={max} step={1} onChange={pick} minLabel="1×" maxLabel={`${max}×`} />
+        <NumberField label="Leverage" hideLabel value={now} onChange={(x) => x !== null && pick(x)} unit="×" className="bots-sizeline__n" />
       </div>
-      <div className="bots-levpicks">{picks.map((x) => <button key={x} type="button" className={`bots-levpick${now === x ? ' is-on' : ''}`} aria-pressed={now === x} onClick={() => set({ leverage: x })}>{x}×</button>)}</div>
+      <div className="bots-levpicks">{picks.map((x) => <button key={x} type="button" className={`bots-levpick${now === x ? ' is-on' : ''}`} aria-pressed={now === x} onClick={() => pick(x)}>{x}×</button>)}</div>
       {lev.open && (
         <p className={`bots-note${lower ? ' is-warn' : ''}`} role="note">
           <Icon name="warning" size={13} />

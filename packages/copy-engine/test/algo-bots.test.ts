@@ -1397,3 +1397,15 @@ test('trading hours in any time zone (owner 2026-11-08): the own clock of the ow
   assert.equal(e([{ from: '09:00', to: '10:00', zone: 'Asia/Tokyo', days: 'all' }])['quiet.0.zone'], undefined);
   assert.match(e([{ from: '09:00', to: '10:00', zone: 'Mars/Olympus', days: 'all' }])['quiet.0.zone'] ?? '', /time zone name such as Europe\/Berlin/);
 });
+
+test('volume maker near the cap (owner 2026-11-08): the adding quote shrinks to what is left to the cap, never past it; under one minimum order it waits', () => {
+  const q = { bid: 60_000, ask: 60_002, at: 0 };
+  const s = { orderUsd: 60, maxInventoryUsd: 180, offsetTicks: 0, skewTicks: 0 };
+  // Long $150 of $180 at 60,000: $30 is left, so the bid is 0.0005 BTC ($30), not a full $60 order.
+  const near = mmQuotes(s, q, MKT, 0.0025, 60_000).find((x) => x.side === 'buy')!;
+  assert.ok(near, 'still quoted');
+  assert.ok(Math.abs(near.quantity - 0.0005) < 1e-12, String(near.quantity));
+  assert.ok(0.0025 * 60_000 + near.quantity * near.price <= 180 + 1e-6, 'never past the cap');
+  // $5 left is under SoDEX's minimum order ($10 here): no bid.
+  assert.equal(mmQuotes(s, q, MKT, (180 - 5) / 60_000, 60_000).some((x) => x.side === 'buy'), false);
+});

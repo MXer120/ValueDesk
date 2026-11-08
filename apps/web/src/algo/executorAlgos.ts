@@ -118,12 +118,12 @@ export async function startOn(mode: ExecutorMode, spec: unknown, seed: number, r
 }
 
 /** Pause, resume or cancel one algo on an executor (or cancel all there): one wallet signature. */
-export async function actOn(mode: ExecutorMode, op: 'pause' | 'resume' | 'cancel' | 'cancel-all' | 'archive', id?: string, o: { now?: boolean } = {}): Promise<AlgoView[]> {
+export async function actOn(mode: ExecutorMode, op: 'pause' | 'resume' | 'cancel' | 'cancel-all' | 'archive', id?: string, o: { now?: boolean; how?: 'close' | 'instant' | 'keep' } = {}): Promise<AlgoView[]> {
   const { owner, provider } = needWallet();
   const client = clientFor(mode);
   const info = getLiveCopy()[mode].info;
   if (!client || !info) throw new Error('That executor is not connected.');
-  const request = await signCopy(provider, owner, info.executorId, 'algo-action', id ? { op, id, ...(o.now ? { now: true } : {}) } : { op });
+  const request = await signCopy(provider, owner, info.executorId, 'algo-action', id ? { op, id, ...(o.now ? { now: true } : {}), ...(o.how ? { how: o.how } : {}) } : { op });
   return (await call<{ algos: AlgoView[] }>(client, 'POST', '/algos/action', { body: { request } })).algos;
 }
 

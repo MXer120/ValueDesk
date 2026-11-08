@@ -933,7 +933,7 @@ export class AlgoRuntime {
    * stays filled, and its exits stay on SoDEX to protect that (the log says so).
    * `pullAll` (the kill switch) pulls its exits and anything it left resting too.
    */
-  async cancel(id: string, o: { pullAll?: boolean; now?: boolean } = {}): Promise<AlgoRecord> {
+  async cancel(id: string, o: { pullAll?: boolean; now?: boolean; keep?: boolean; close?: boolean } = {}): Promise<AlgoRecord> {
     const a = this.need(id);
     if (FINAL_STATUSES.has(a.status)) {
       // An ended algo keeps only what protects or finishes what it filled (its exits, a child left resting): cancelling it pulls those.
@@ -943,6 +943,17 @@ export class AlgoRuntime {
     for (const c of this.linkedOf(a)) if (!FINAL_STATUSES.has(c.status)) await this.cancel(c.id, o);
     // A bot set to close what it holds stops by closing it first (the next steps); a second stop, or the kill switch, ends it at once.
     // `now` (Instant stop): the close takes at once (a capped taker) instead of resting at the touch first.
+    // `keep` / `close`: this stop's choice over the bot's On stop setting (the stop menu), with no settings change
+    // first - a stop never waits behind the brake, the terms or a move (audit 2026-11-09).
+    if (a.spec.bot && (o.keep || o.close) && (a.spec.kind === 'mm' || a.spec.kind === 'grid')) {
+      const want = o.keep ? 'keep' : 'close';
+      if (a.spec.onStop !== want) {
+        (a.spec as { onStop: string }).onStop = want;
+        await this.save(a);
+      }
+    }
+    // A bot already closing that is stopped again with `close` keeps closing (a second Clean stop never orphans it).
+    if (a.k.closing && o.close && !o.pullAll) return a;
     if (!o.pullAll && !a.k.closing && (await this.stopBot(a, 'cancelled', 'Stopped by you.', o.now === true))) return a;
     await this.end(a, 'cancelled', a.k.closing ? 'Stopped by you; what it still holds is left as it is.' : a.spec.bot ? 'Stopped by you.' : 'Cancelled by you.');
     if (o.pullAll) {
@@ -1052,8 +1063,20 @@ export class AlgoRuntime {
       const taking = this.live(a).filter((c) => c.tif === 'ioc' || c.cancelling || c.state === 'unknown').reduce((x, c) => x + Math.max(0, c.quantity - c.filled), 0);
       if (a.filled + taking >= want - 1e-12) throw new Error(`An order is filling right now: the new size must be more than ${dec(a.filled + taking)}.`);
     }
-    const spec = parseAlgoSpec(next);
+    let spec: AlgoSpec;
+    try {
+      spec = parseAlgoSpec(next);
+    } catch (e) {
+      // A real bot started before the loss limit was required (audit 2026-11-08) is still changed - and stopped, and
+      // restarted - without one, as it ran; the rule binds new bots and any change that sets a limit (audit 2026-11-09).
+      const legacy = a.spec.bot && !a.spec.paper && (a.spec as { maxLossUsd?: number | null }).maxLossUsd == null && next.maxLossUsd == null && /loss limit/i.test(String(e instanceof Error ? e.message : e));
+      if (!legacy) throw e;
+      spec = { ...parseAlgoSpec({ ...next, paper: true }), paper: false } as AlgoSpec;
+    }
     a.spec = spec;
+    // A grid's new order size applies to every level: the per-level sizes its fills set are dropped (audit 2026-11-09:
+    // they kept the old size for good after the first fill).
+    if (spec.kind === 'grid' && 'orderUsd' in patch) delete a.k.gz;
     // A bot's new sizes and distances apply at once: what rests is pulled, and placed again as they say.
     if ((spec.kind === 'mm' || spec.kind === 'grid') && ['orderUsd', 'offsetTicks', 'skewTicks', 'maxInventoryUsd', 'edgeBps'].some((k) => k in patch)) {
       const m = this.markets.get(spec.symbol);
@@ -1211,6 +1234,8 @@ export class AlgoRuntime {
       costPerMillion: costPerMillion(b, px),
       fills: b.fills,
       mark,
+      // SoDEX's minimum order at the mark now (USD): the page counts margin on it as the executor does (audit 2026-11-09).
+      minOrderUsd: (() => { const m = this.markets.get(a.spec.symbol); return m && px > 0 ? minChildQty(m, px) * px : null; })(),
       orders: this.live(a).filter((c) => c.tif !== 'ioc' && !c.cancelling).map((c) => ({ side: c.side, price: c.price, quantity: c.quantity - c.filled, tag: c.tag })),
       closing: !!a.k.closing,
       ...(b.takers ? { takers: { ...b.takers } } : {}),
@@ -2162,6 +2187,13 @@ export class AlgoRuntime {
       }
       // More than it may have: the farthest go.
       while (kept.length > allowed) pull.push(kept.pop()!);
+      // The adding side never rests more than is left to the cap (owner 2026-11-08): what rests past it (the holding
+      // grew since they went out) is pulled from the farthest, and placed again smaller on a later step.
+      const capLeftUsd = adds ? Math.max(0, s.maxInventoryUsd - Math.abs(inv) * mk) : Infinity;
+      if (adds) {
+        const usdOf = (c: ChildOrder) => Math.max(0, c.quantity - c.filled) * c.price;
+        while (kept.length && kept.reduce((t, c) => t + usdOf(c), 0) > capLeftUsd + 1e-9) pull.push(kept.pop()!);
+      }
       // A cancel not confirmed yet - sent before or now - still counts (it may still fill); and one quote at the price wanted is enough.
       const cancelling = mine.length - kept.length;
       if (kept.length + cancelling >= allowed || kept.some((c) => Math.abs(c.price - w.price) < tick / 2)) continue;
@@ -2170,7 +2202,10 @@ export class AlgoRuntime {
       // The unwinding side's new quote: what is left to unwind after the ones already resting - never raised past it
       // (reduce-only, with the resting ones it never adds up to more than it holds); under SoDEX's minimum it waits.
       const restingQty = kept.reduce((x, c) => x + Math.max(0, c.quantity - c.filled), 0);
-      const qty = adds ? w.quantity : Math.min(w.quantity, floorStep(Math.abs(inv) - restingQty, m));
+      // The adding side: what is left to the cap after the quotes resting there, as close to it as the lot allows.
+      const keptUsd = kept.reduce((x, c) => x + Math.max(0, c.quantity - c.filled) * c.price, 0);
+      const qty = adds ? Math.min(w.quantity, floorStep(Math.max(0, capLeftUsd - keptUsd) / w.price, m)) : Math.min(w.quantity, floorStep(Math.abs(inv) - restingQty, m));
+      if (adds && qty < minChildQty(m, w.price) - 1e-12) continue;
       if (!adds && (restingQty >= Math.abs(inv) - 1e-12 || qty < minChildQty(m, w.price) - 1e-12)) continue;
       // Pickier to send than to keep (the adding side): far enough from fair for the time an order takes to land, and not while the reference runs at it.
       if (fair !== null && adds) {
@@ -3243,7 +3278,8 @@ export class AlgoRuntime {
       return [];
     }
     // The region's leverage ceiling (EEA 2x): on the leverage set, and on the gross exposure an opening child may reach.
-    const ceiling = !s.paper ? (this.host.policyFor?.(a)?.maxLeverage ?? null) : null;
+    // Bots: no region ceiling, only the market's maximum (owner 2026-11-08). Algo orders keep their region's.
+    const ceiling = !s.paper && !s.bot ? (this.host.policyFor?.(a)?.maxLeverage ?? null) : null;
     const leverage = ceiling !== null ? Math.min(s.leverage ?? ceiling, ceiling) : s.leverage;
     const lev = leverage !== null ? Math.min(leverage, m.maxLeverage) : null;
     const want = lev !== null ? `${lev}|${s.marginMode ?? 'cross'}` : null;

@@ -143,8 +143,9 @@ export function botQuoteUsd(orderUsd: number, m: MarketInfo, price: number): num
  *     `edgeBps` from both the mid and the mark (in a wide spread: one tick inside, never closer to fair than that);
  *   - the side that adds to what it holds steps back by skewTicks x |held| / cap (rounded), so the side
  *     that unwinds is the one at the touch;
- *   - a quote under SoDEX's minimum is raised to it, and the cap counts that real size: a side whose quote would
- *     take what it holds past the cap is not quoted;
+ *   - a quote under SoDEX's minimum is raised to it, and the cap counts that real size. Near the cap the adding
+ *     side quotes SMALLER - just what is left to the cap, as close to it as SoDEX's lot allows, never past it - and
+ *     not at all once less than one minimum order is left (owner 2026-11-08);
  *   - the side that unwinds is reduce-only and never more than it holds (it ends flat, never the other way); what it
  *     holds under SoDEX's minimum is not quoted (no order SoDEX takes can unwind it without flipping);
  *   - with a queue guard, the side that adds is not quoted while its own best price's queue is thin (queueShare);
@@ -159,9 +160,8 @@ export function mmQuotes(s: Pick<MmSpec, 'orderUsd' | 'maxInventoryUsd' | 'offse
   const room = Math.round((q.ask - q.bid) / tick);
   for (const side of ['buy', 'sell'] as const) {
     const adds = side === 'buy' ? inventory >= 0 : inventory <= 0;
-    // The cap, early (the exact check on the real size follows once the price is known): an order on the adding side
-    // may not take what it holds past it.
-    if (adds && Math.abs(invUsd) + s.orderUsd > s.maxInventoryUsd + 1e-9) continue;
+    // The cap, early: nothing left to add.
+    if (adds && Math.abs(invUsd) >= s.maxInventoryUsd - 1e-9) continue;
     // The queue guard: a thin queue on its own side is about to be traded through - the fill would be the move against it.
     const share = queueShare(q, side);
     if (adds && (s.queueGuard ?? 0) > 0 && share !== null && share < s.queueGuard!) continue;
@@ -194,8 +194,11 @@ export function mmQuotes(s: Pick<MmSpec, 'orderUsd' | 'maxInventoryUsd' | 'offse
     if (!(price > 0)) continue;
     let qty = Math.max(floorStep(s.orderUsd / price, m), minChildQty(m, price));
     if (adds) {
-      // The cap on the size that really goes out (SoDEX's minimum included).
-      if (Math.abs(invUsd) + botQuoteUsd(s.orderUsd, m, price) > s.maxInventoryUsd + 1e-9) continue;
+      // The cap on the size that really goes out: what is left to the cap at this price, on SoDEX's lot; under its
+      // minimum order nothing (a minimum-size quote would take it past the cap).
+      const left = floorStep(Math.max(0, s.maxInventoryUsd - Math.abs(invUsd)) / price, m);
+      qty = Math.min(qty, left);
+      if (qty < minChildQty(m, price) - 1e-12) continue;
       out.push({ side, price, quantity: qty });
       continue;
     }

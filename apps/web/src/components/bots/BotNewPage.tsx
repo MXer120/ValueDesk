@@ -25,7 +25,7 @@ import { useHistory } from '../algo/liveData';
 import { CoinIcon } from '../CoinIcon';
 import { useBotMarkets, bpToPerMillion, type BotMarket } from '../../bots/data';
 import { goBots, type BotsView } from '../../bots/routes';
-import { STRATEGY_INFO, clampLeverage, draftOfSpec, costPerMillion, gridRange, leverageCap, planMarkets, refusalOf, startLeverage, type BotDraft, type RefusalAction, type Strategy } from '../../bots/presets';
+import { STRATEGY_INFO, autoLeverage, clampLeverage, draftOfSpec, costPerMillion, gridRange, leverageCap, planMarkets, refusalOf, type BotDraft, type RefusalAction, type Strategy } from '../../bots/presets';
 import { CATEGORIES, RECIPE, draftOfRecipe, recipeOfDraft, recipesOf, type Category, type Recipe, type RecipeId } from '../../bots/recipes';
 import { bestOf, estimate, feeAdjOf, ownRuns, type BotEstimate, type EstLine, type OwnRun } from '../../bots/estimate';
 import { BotAvatar, StrategyTile } from './BotIcon';
@@ -478,9 +478,9 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
   const markets = useBotMarkets('24h');
   const paper = !ctx.liveAllowed || d.paper;
 
-  // Leverage (audit A4): under every picked market's maximum and the region's ceiling (EEA 2x); none offered while a
-  // maximum is unknown; reset when the lead market changes; its start (held, else 3x) only once the account answered.
-  const regionMax = regionPolicy(ctx.live.terms?.country ?? null, ctx.live.viewerCountry).maxLeverage;
+  // Leverage: under every picked market's maximum, nothing else (owner 2026-11-08); none offered while a maximum is
+  // unknown. Auto (the default) follows the sizing: the lowest leverage at which the margin fits (autoLeverage below).
+  const regionMax: number | null = null;
   const lev = useBotLeverage(ctx.address, d.symbol);
   const maxes = picked.map((x) => byName.get(x)?.maxLeverage ?? null);
   const levCap = maxes.some((x) => x === null || x === undefined) ? null : leverageCap(Math.min(...(maxes as number[])), regionMax);
@@ -493,13 +493,10 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
     setD((x) => (x.leverage === null ? x : { ...x, leverage: null }));
   }, [d.symbol]);
   useEffect(() => {
-    if (d.leverage === null) {
-      const v = startLeverage(levCap, lev.held, lev.loaded);
-      if (v !== null) setD((x) => (x.leverage === null ? { ...x, leverage: v } : x));
-    } else if (levCap !== null && clampLeverage(d.leverage, levCap) !== d.leverage) {
+    if (d.leverage !== null && levCap !== null && clampLeverage(d.leverage, levCap) !== d.leverage) {
       setD((x) => ({ ...x, leverage: clampLeverage(x.leverage, levCap) }));
     }
-  }, [levCap, lev.held, lev.loaded, d.leverage]);
+  }, [levCap, d.leverage]);
 
   // Markets a real bot of this wallet already trades (the executor's one real bot per market).
   const runningReal = useMemo(() => new Set(ctx.bots.filter((v) => v.algo.spec.bot && !v.algo.spec.paper && !FINAL_STATUSES.has(v.algo.status)).map((v) => v.algo.spec.symbol)), [ctx.bots]);
@@ -540,6 +537,12 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
   const hostedCopyUsd = alloc.copies.filter((c) => !c.mode || c.mode === 'hosted').reduce((t, c) => t + c.usd, 0);
   const free = alloc.equity === null ? null : Math.max(0, alloc.equity - alloc.botUsd - hostedCopyUsd);
   const short = !paper && free !== null && needAll > free + 1e-6 ? needAll - free : 0;
+  // Auto leverage (owner 2026-11-08): what the bots may hold and quote at 1x, against what is free.
+  const reserveAll = plans.reduce((t, x) => t + x.marginUsd * Math.max(1, d.leverage ?? 1), 0);
+  const autoLev = autoLeverage(reserveAll, paper ? null : free, levCap);
+  useEffect(() => {
+    if (d.leverageAuto && autoLev !== null && d.leverage !== autoLev) setD((x) => ({ ...x, leverage: autoLev }));
+  }, [d.leverageAuto, autoLev, d.leverage]);
   const clash = paper ? [] : picked.filter((x) => runningReal.has(x));
   const whyNot: string | null =
     !ctx.address ? 'Connect your wallet to start a bot.'

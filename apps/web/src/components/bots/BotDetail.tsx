@@ -93,8 +93,8 @@ function SettingsTab({ v, ctx }: { v: AlgoView; ctx: BotsCtx }) {
   const before = useMemo(() => draftOfSpec(v.algo.spec), [v.algo.spec]);
   const [d, setD] = useState<BotDraft>(before);
   const lev = useBotLeverage(ctx.address, v.algo.spec.symbol);
-  // The region's leverage ceiling (EEA 2x) on top of the market's, as New bot caps it.
-  const regionMax = regionPolicy(ctx.live.terms?.country ?? null, ctx.live.viewerCountry).maxLeverage;
+  // Only the market's maximum caps a bot's leverage (owner 2026-11-08).
+  const regionMax: number | null = null;
   const [busy, setBusy] = useState<How | 'save' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const markets = useBotMarkets('24h');
@@ -255,7 +255,7 @@ export function LimitsProgress({ v }: { v: AlgoView }) {
     const net = b?.netPnl ?? 0;
     const lost = Math.max(0, -net);
     const r = lost / s.maxLossUsd;
-    rows.push({ id: 'loss', title: 'Loss limit', ratio: r, tone: r >= 0.8 ? 'negative' : r >= 0.5 ? 'warning' : 'brand', text: net >= 0 ? `In profit ${fmtUsd(net, 2)}: none of its ${fmtUsd(s.maxLossUsd, 0)} used` : `${fmtUsd(lost, 2)} of ${fmtUsd(s.maxLossUsd, 0)} used · stops and closes at ${fmtUsd(-s.maxLossUsd, 0)}` });
+    rows.push({ id: 'loss', title: 'Loss limit', ratio: r, tone: r >= 0.8 ? 'negative' : r >= 0.5 ? 'warning' : 'brand', text: net >= 0 ? `In profit ${fmtUsd(net, 2)}: none of its ${fmtUsd(s.maxLossUsd, 0)} used` : `${fmtUsd(lost, 2)} of ${fmtUsd(s.maxLossUsd, 0)} used · stops at ${fmtUsd(-s.maxLossUsd, 0)}${(s as { onStop?: string }).onStop === 'keep' ? ', keeping what it holds' : ' and closes what it holds'}` });
   }
   if (typeof s.endAt === 'number') {
     const start = v.algo.startedAt ?? v.algo.createdAt;

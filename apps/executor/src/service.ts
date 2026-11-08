@@ -1705,6 +1705,18 @@ export class ExecutorService {
    * the minimum value): a bot's quote is raised to it, so its margin counts it (botMarginUsd's minOrderUsd). A market
    * not read is left out (the margin then counts the bot's own sizes).
    */
+  /**
+   * A bot's order is at least SoDEX's minimum order on its market (owner 2026-11-08: such a bot cannot be configured;
+   * the engine no longer gets to raise every quote behind the user's back). Unreadable minimums let it through (the
+   * engine still raises a quote to the minimum, and the cap and margin count that real size).
+   */
+  private async needOrderOverMinimum(symbol: string, orderUsd: number): Promise<void> {
+    const min = (await this.minOrderUsd([symbol])).get(symbol);
+    if (min !== undefined && orderUsd < min - 0.005) {
+      throw new ApiError(400, 'size', `The order size ($${orderUsd.toFixed(2)}) is under SoDEX's minimum order on ${symbol} (about $${(Math.ceil(min * 100) / 100).toFixed(2)}). Raise it to at least that.`, { symbol, minUsd: min });
+    }
+  }
+
   private async minOrderUsd(symbols: readonly string[]): Promise<Map<string, number>> {
     const out = new Map<string, number>();
     if (!symbols.length) return out;
@@ -1747,7 +1759,8 @@ export class ExecutorService {
   private async reservedOf(owner: string, o: { skipAlgo?: string; copy?: { id: string | null; usd: number } } = {}): Promise<{ bots: number; nBots: number; copies: number }> {
     const running = this.algos.list(owner).filter((x) => x.spec?.bot === true && !x.spec.paper && !FINAL_STATUSES.has(x.status) && x.id !== o.skipAlgo);
     const mins = await this.minOrderUsd(running.map((x) => x.spec.symbol));
-    const bots = running.reduce((t, x) => t + marginOf(x.spec, mins.get(x.spec.symbol), this.algoPolicy(x).maxLeverage ?? undefined), 0);
+    // Bots: no region ceiling, only the market's maximum (owner 2026-11-08).
+    const bots = running.reduce((t, x) => t + marginOf(x.spec, mins.get(x.spec.symbol)), 0);
     let copies = 0;
     for (const c of this.runtime.list(owner)) copies += o.copy && c.id === o.copy.id ? o.copy.usd : copyReserveUsd(c);
     if (o.copy && o.copy.id === null) copies += o.copy.usd;
@@ -1820,6 +1833,7 @@ export class ExecutorService {
     const seed = Number(payload.seed);
     if (!Number.isSafeInteger(seed) || seed < 0 || seed > 0xffffffff) throw new ApiError(400, 'seed', 'seed must be a 32-bit whole number.');
     if (spec.bot) this.needNotMoved(owner);
+    if (spec.kind === 'mm' || spec.kind === 'grid') await this.needOrderOverMinimum(spec.symbol, spec.orderUsd);
     // A restart (feature 'bot-restart'): the bot it replaces is this wallet's own bot; a take-over keeps its market and mode.
     const r = payload.restart as { from?: unknown; how?: unknown } | undefined;
     let old: AlgoRecord | null = null;
@@ -1875,7 +1889,7 @@ export class ExecutorService {
         // Smart margining (owner 2026-11-08): the wallet's real bots (their margin at their leverage, the market's
         // minimum order and the region ceiling) and its live copies (their allocation) set aside no more than it holds.
         const r = await this.reservedOf(owner, { skipAlgo: old?.id });
-        const need = marginOf(spec, (await this.minOrderUsd([spec.symbol])).get(spec.symbol), this.ceilingFor(owner, ctx));
+        const need = marginOf(spec, (await this.minOrderUsd([spec.symbol])).get(spec.symbol));
         if (r.bots + r.copies + need > acct.equity + 1e-6) {
           const free = Math.max(0, acct.equity - r.bots - r.copies);
           const held = [...(r.nBots ? [`${r.nBots} running ${r.nBots === 1 ? 'bot' : 'bots'} ${usd(r.bots)}`] : []), ...(r.copies > 0 ? [`copy trading ${usd(r.copies)}`] : [])];
@@ -1887,8 +1901,9 @@ export class ExecutorService {
     if (old && !FINAL_STATUSES.has(old.status)) {
       const stopAs = how === 'clean' ? 'close' : 'keep';
       try {
-        if ((old.spec.kind === 'mm' || old.spec.kind === 'grid') && old.spec.onStop !== stopAs) await this.algos.update(old.id, { onStop: stopAs });
-        await this.algos.cancel(old.id);
+        // The choice rides on the stop (no update first): an old bot already closing keeps closing on a clean restart
+        // and the new one waits for it (audit 2026-11-09: it was ended with its position left).
+        await this.algos.cancel(old.id, stopAs === 'keep' ? { keep: true } : { close: true });
       } catch (e) {
         throw new ApiError(409, 'restart', `The old bot could not be stopped: ${e instanceof Error ? e.message : String(e)}`);
       }
@@ -1924,9 +1939,8 @@ export class ExecutorService {
     if (a.spec?.bot !== true || a.spec.paper || FINAL_STATUSES.has(a.status)) return;
     const next = { ...a.spec, ...patch } as AlgoSpec;
     const min = (await this.minOrderUsd([a.spec.symbol])).get(a.spec.symbol);
-    const ceiling = this.algoPolicy(a).maxLeverage ?? this.ceilingFor(owner, ctx);
-    const before = marginOf(a.spec, min, ceiling);
-    const need = marginOf(next, min, ceiling);
+    const before = marginOf(a.spec, min);
+    const need = marginOf(next, min);
     if (!(need > before + 1e-9)) return;
     const acct = await this.accountOf(owner);
     const r = await this.reservedOf(owner, { skipAlgo: a.id });
@@ -1952,7 +1966,7 @@ export class ExecutorService {
         if (!a.spec.paper) this.needNoBrake('algos');
         this.needTerms(owner, ctx);
         touched = [await this.algos.resume(a.id).catch(fail)];
-      } else if (op === 'cancel') touched = [await this.algos.cancel(a.id, { now: payload.now === true }).catch(fail)];
+      } else if (op === 'cancel') touched = [await this.algos.cancel(a.id, { now: payload.now === true, keep: payload.how === 'keep', close: payload.how === 'close' || payload.how === 'instant' }).catch(fail)];
       else if (op === 'archive') touched = [await this.algos.archive(a.id).catch(fail)];
       else if (op === 'update') {
         // A bigger size is more trading: the terms in force are needed, as for a resume.

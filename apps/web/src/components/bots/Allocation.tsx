@@ -8,7 +8,8 @@
  * copy and every bot as blocks of the account, then the breakdown, then what is free.
  */
 import { useMemo } from 'react';
-import { FINAL_STATUSES, botMarginUsd, copyReserveUsd, type AlgoView } from '@copy-engine';
+import { FINAL_STATUSES, copyReserveUsd, type AlgoView } from '@copy-engine';
+import { botNeedUsd } from '../../bots/presets';
 import { DASH, fmtUsd, num, shortAddr } from '../../format';
 import { api } from '../../api';
 import { useAccountResource } from '../../accountFeeds';
@@ -59,7 +60,9 @@ export interface MarginCopy { id: string; leader: string; mode: string; status: 
 
 export function marginOf(bots: readonly AlgoView[], copies: readonly MarginCopy[], equity: number | null, positionsMargin = 0): Allocation {
   const running = bots.filter((v) => v.algo.spec.bot === true && !FINAL_STATUSES.has(v.algo.status));
-  const real = running.filter((v) => !v.algo.spec.paper).map((v) => ({ v, usd: botMarginUsd(v.algo.spec) })).filter((x) => x.usd > 0).sort((a, b) => b.usd - a.usd);
+  // On the quote SoDEX really takes (its minimum where that is larger), as the executor counts it (audit 2026-11-09).
+  const need = (v: AlgoView) => botNeedUsd(v.algo.spec, v.bot?.minOrderUsd ?? 0);
+  const real = running.filter((v) => !v.algo.spec.paper).map((v) => ({ v, usd: need(v) })).filter((x) => x.usd > 0).sort((a, b) => b.usd - a.usd);
   const practice = running.filter((v) => v.algo.spec.paper);
   const cs = copies.map((c) => ({ c, usd: copyReserveUsd(c) })).filter((x) => x.usd > 0).sort((a, b) => b.usd - a.usd);
   const copyItems: MarginItem[] = cs.map(({ c, usd }, i) => ({ id: `copy:${c.id}`, kind: 'copy', label: `Copying ${shortAddr(c.leader)}`, usd, color: COPY_SHADES[i % COPY_SHADES.length]!, mode: c.mode }));
@@ -76,7 +79,7 @@ export function marginOf(bots: readonly AlgoView[], copies: readonly MarginCopy[
     equity, copies: copyItems, bots: botItems, perpsUsd, copyUsd, botUsd, used,
     free: equity === null ? null : Math.max(0, equity - used),
     freeForBots: equity === null ? null : Math.max(0, equity - botUsd - executorCopies),
-    practice: practice.length, practiceUsd: practice.reduce((t, v) => t + botMarginUsd(v.algo.spec), 0),
+    practice: practice.length, practiceUsd: practice.reduce((t, v) => t + need(v), 0),
   };
 }
 
@@ -212,7 +215,7 @@ export function AllocationPanel({ ctx }: { ctx: BotsCtx }) {
 /** One bot's share, for its page. */
 export function BotAllocation({ v, ctx }: { v: AlgoView; ctx: BotsCtx }) {
   const a = useAllocation(ctx);
-  const usd = botMarginUsd(v.algo.spec);
+  const usd = botNeedUsd(v.algo.spec, v.bot?.minOrderUsd ?? 0);
   const eq = a.equity;
   const scale = Math.max(eq ?? 0, a.used, 1);
   const mine = v.algo.spec.paper ? 0 : usd;

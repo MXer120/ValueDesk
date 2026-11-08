@@ -28,7 +28,7 @@ export interface BotsState {
   error: string | null;
   refresh: () => Promise<void>;
   start: (spec: Record<string, unknown>, restart?: { from: string; how: 'clean' | 'takeover' }) => Promise<AlgoView>;
-  act: (op: 'pause' | 'resume' | 'cancel' | 'archive', id: string, o?: { now?: boolean }) => Promise<void>;
+  act: (op: 'pause' | 'resume' | 'cancel' | 'archive', id: string, o?: { now?: boolean; how?: 'close' | 'instant' | 'keep' }) => Promise<void>;
   stopAll: () => Promise<void>;
   /** `terms: false`: a change that only serves a stop (it never waits for the terms). */
   update: (id: string, patch: AlgoUpdatePatch, o?: { terms?: boolean }) => Promise<void>;
@@ -136,7 +136,7 @@ export function useBots(owner: string | null, signedIn: boolean): BotsState {
     if (restart) void refresh();
     return v;
   }, [merge, refresh]);
-  const act = useCallback((op: 'pause' | 'resume' | 'cancel' | 'archive', id: string, o: { now?: boolean } = {}) => acting([id], () => actOn('hosted', op, id, o)), [acting]);
+  const act = useCallback((op: 'pause' | 'resume' | 'cancel' | 'archive', id: string, o: { now?: boolean; how?: 'close' | 'instant' | 'keep' } = {}) => acting([id], () => actOn('hosted', op, id, o)), [acting]);
   const stopAll = useCallback(() => acting(shown.current.filter((v) => !FINAL_STATUSES.has(v.algo.status)).map((v) => v.algo.id), () => actOn('hosted', 'cancel-all')), [acting]);
   const update = useCallback((id: string, patch: AlgoUpdatePatch, o: { terms?: boolean } = {}) => acting([id], () => updateOn('hosted', id, patch, o)), [acting]);
 

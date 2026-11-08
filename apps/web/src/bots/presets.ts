@@ -144,6 +144,11 @@ export interface BotDraft {
   maxSpreadBps: number | null;
   /** The leverage SoDEX is set to on the market before the first order (null: as the account holds it). */
   leverage: number | null;
+  /**
+   * Leverage follows the sizing (owner 2026-11-08): the lowest whole leverage at which the bot's margin fits what is
+   * free in the account (autoLeverage). Off once the user sets one by hand; a running bot's draft starts off.
+   */
+  leverageAuto: boolean;
   /* grid */
   rangePct: number;
   low: number | null;
@@ -163,6 +168,12 @@ export interface BotDraft {
   news: NewsGate | null;
   /** Stops after this many hours (null: runs until stopped): spec endAt from its start. */
   runHours: number | null;
+  /**
+   * A running bot's exact end and the hours it read back as (draftOfSpec): kept as it is while runHours is not
+   * changed, so a save or restart never moves the end (audit 2026-11-09: it gained up to 59 min each time).
+   */
+  endAt?: number | null;
+  runHoursAt?: number | null;
   /* limits */
   volumeTargetUsd: number | null;
   maxLossUsd: number | null;
@@ -211,6 +222,7 @@ export function draftFor(strategy: Strategy, preset: PresetId = 'balanced', symb
     ...GATE_DEFAULT,
     maxSpreadBps: 20,
     leverage: null,
+    leverageAuto: true,
     offsetTicks: -1,
     orderUsd: 50,
     maxInventoryUsd: 200,
@@ -292,6 +304,7 @@ export function specOf(d: BotDraft, mark: number | null): Record<string, unknown
 
 /** The run time as the spec's end (engine botLimits.endAt): from now, the hours the draft says. */
 function runEnd(d: BotDraft, now = Date.now()): { endAt?: number } {
+  if (d.endAt !== undefined && d.endAt !== null && d.runHours === (d.runHoursAt ?? null) && d.endAt > now) return { endAt: d.endAt };
   return d.runHours !== null && d.runHours > 0 ? { endAt: now + Math.round(d.runHours * 3_600_000) } : {};
 }
 
@@ -314,8 +327,11 @@ function safeguards(d: BotDraft): Record<string, unknown> {
 /** The safeguards a spec carries, back as draft fields. */
 function safeguardsOf(s: AlgoSpec, now: number): Partial<BotDraft> {
   const x = s as unknown as { flowGate?: { minUsd: number; windowMs: number; action: 'pause' | 'shrink'; shrink: number }; quiet?: QuietWindow[]; quietOnly?: boolean; news?: NewsGate; endAt?: number | null };
+  const left = runHoursLeft(x.endAt, now);
   return {
-    runHours: runHoursLeft(x.endAt, now),
+    runHours: left,
+    endAt: left !== null ? (x.endAt ?? null) : null,
+    runHoursAt: left,
     ...(x.flowGate ? { flowOn: true, flowMinUsd: x.flowGate.minUsd, flowWindowMin: x.flowGate.windowMs / 60_000, flowAction: x.flowGate.action, flowShrink: x.flowGate.shrink } : {}),
     ...(x.quiet ? { quiet: x.quiet.map((w) => ({ ...w })), quietOnly: x.quietOnly === true } : {}),
     ...(x.news ? { news: { ...x.news } } : {}),
@@ -330,7 +346,10 @@ export function specChanges(before: BotDraft, after: BotDraft): string[] {
   delete b.endAt;
   const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
   const out = [...keys].filter((k) => JSON.stringify(a[k]) !== JSON.stringify(b[k]));
-  if (after.runHours !== before.runHours) out.push('endAt');
+  // The run time changed only when the user changed it: an edit started from a read-back keeps its own reading, so an
+  // hour boundary passing while it is open is not a change (audit 2026-11-09).
+  const changed = after.runHoursAt !== undefined ? after.runHours !== after.runHoursAt : after.runHours !== before.runHours;
+  if (changed) out.push('endAt');
   return out;
 }
 
@@ -347,10 +366,10 @@ export function draftOfSpec(s: AlgoSpec, now = Date.now()): BotDraft {
     };
   }
   if (s.kind === 'mm') {
-    return { ...draftFor(s.ref ? 'lead' : 'maker', 'balanced', s.symbol), refBps: s.refBps ?? 0, pullBps: s.pullBps ?? 0, label: s.label ?? '', paper: s.paper, offsetTicks: s.offsetTicks, orderUsd: s.orderUsd, maxInventoryUsd: s.maxInventoryUsd, skewTicks: s.skewTicks, chaseTicks: s.chaseTicks, minRepriceMs: s.minRepriceMs, edgeBps: s.edgeBps ?? 0, queueGuard: s.queueGuard ?? 0, ladder: s.levels ?? 1, moveGuard: s.moveGuard ?? 0, volumeTargetUsd: s.volumeTargetUsd, maxLossUsd: s.maxLossUsd, onStop: s.onStop, maxSpreadBps: s.maxSpreadBps ?? null, leverage: s.leverage ?? null, ...safeguardsOf(s, now) };
+    return { ...draftFor(s.ref ? 'lead' : 'maker', 'balanced', s.symbol), refBps: s.refBps ?? 0, pullBps: s.pullBps ?? 0, label: s.label ?? '', paper: s.paper, offsetTicks: s.offsetTicks, orderUsd: s.orderUsd, maxInventoryUsd: s.maxInventoryUsd, skewTicks: s.skewTicks, chaseTicks: s.chaseTicks, minRepriceMs: s.minRepriceMs, edgeBps: s.edgeBps ?? 0, queueGuard: s.queueGuard ?? 0, ladder: s.levels ?? 1, moveGuard: s.moveGuard ?? 0, volumeTargetUsd: s.volumeTargetUsd, maxLossUsd: s.maxLossUsd, onStop: s.onStop, maxSpreadBps: s.maxSpreadBps ?? null, leverage: s.leverage ?? null, leverageAuto: false, ...safeguardsOf(s, now) };
   }
   if (s.kind === 'grid') {
-    return { ...draftFor('grid', 'balanced', s.symbol), label: s.label ?? '', paper: s.paper, leverage: s.leverage ?? null, low: s.low, high: s.high, levels: s.levels, orderUsd: s.orderUsd, volumeTargetUsd: s.volumeTargetUsd, maxLossUsd: s.maxLossUsd, onStop: s.onStop, outOfRange: s.outOfRange, maxSpreadBps: s.maxSpreadBps, runHours: runHoursLeft(s.endAt, now) };
+    return { ...draftFor('grid', 'balanced', s.symbol), label: s.label ?? '', paper: s.paper, leverage: s.leverage ?? null, leverageAuto: false, low: s.low, high: s.high, levels: s.levels, orderUsd: s.orderUsd, volumeTargetUsd: s.volumeTargetUsd, maxLossUsd: s.maxLossUsd, onStop: s.onStop, outOfRange: s.outOfRange, maxSpreadBps: s.maxSpreadBps, runHours: runHoursLeft(s.endAt, now), endAt: runHoursLeft(s.endAt, now) !== null ? s.endAt : null, runHoursAt: runHoursLeft(s.endAt, now) };
   }
   return draftFor('maker', 'balanced', s.symbol);
 }
@@ -477,10 +496,16 @@ export function leverageCap(marketMax: number | null | undefined, regionMax: num
   return Math.max(1, Math.floor(Math.min(marketMax, r)));
 }
 
-/** The leverage a new bot starts at once the account has answered: what SoDEX already uses there, else 3x, under the cap. */
-export function startLeverage(cap: number | null, held: number | null, loaded: boolean): number | null {
-  if (cap === null || !loaded) return null;
-  return Math.max(1, Math.min(cap, Math.round(held ?? 3)));
+/**
+ * The leverage that follows the sizing (owner 2026-11-08): the lowest whole leverage at which `reserveUsd` (what the bot
+ * may hold and quote, at 1x) fits in `freeUsd` with a tenth to spare, up to the market's maximum. Nothing free known
+ * (practice, no wallet): 1x. null while the market's maximum is unknown.
+ */
+export function autoLeverage(reserveUsd: number, freeUsd: number | null, cap: number | null): number | null {
+  if (cap === null) return null;
+  if (freeUsd === null || !(reserveUsd > 0)) return 1;
+  if (!(freeUsd > 0)) return cap;
+  return Math.max(1, Math.min(cap, Math.ceil(reserveUsd / (freeUsd * 0.9) - 1e-9)));
 }
 
 /** A chosen leverage kept under the cap (null stays null: the spec then leaves the account's own). */
@@ -488,6 +513,9 @@ export function clampLeverage(v: number | null, cap: number | null): number | nu
   if (v === null) return null;
   return cap === null ? v : Math.max(1, Math.min(cap, Math.round(v)));
 }
+
+/** $12.34 without a locale (errors read the same everywhere). */
+const fmtUsdPlain = (x: number): string => `$${x.toFixed(x >= 100 ? 0 : 2)}`;
 
 /* ---------------------------------------------------------- start, per market ----- */
 
@@ -553,7 +581,11 @@ export function planMarkets(
     const px = parsed.kind === 'grid' ? (gridRange(x, price)?.low ?? price) : price;
     const r = checkSizes(parsed, market, { price, seed: 1, now: o.now ?? Date.now() });
     const min = minQuoteUsd(market, px);
-    return { symbol, spec, errors: r.errors, notes: r.notes ?? [], quoteUsd: Math.max(x.orderUsd, min), marginUsd: botNeedUsd(parsed, min, o.regionMax ?? null) };
+    // An order under SoDEX's minimum is not raised behind the user's back: it cannot be started (owner 2026-11-08).
+    const errors = [...r.errors];
+    if (min > 0 && x.orderUsd < min - 0.005) errors.push(`The order size is under SoDEX's minimum order on ${symbol.replace(/-USD$/, '')} (about ${fmtUsdPlain(Math.ceil(min * 100) / 100)}). Raise it to at least that.`);
+    if (min > 0 && parsed.kind === 'mm' && parsed.maxInventoryUsd < Math.max(x.orderUsd, min) - 0.005) errors.push(`Max holding must be at least one order (${fmtUsdPlain(Math.max(x.orderUsd, min))}).`);
+    return { symbol, spec, errors, notes: [], quoteUsd: Math.max(x.orderUsd, min), marginUsd: botNeedUsd(parsed, min, o.regionMax ?? null) };
   });
 }
 
@@ -574,8 +606,17 @@ export function refusalOf(code: string | null | undefined, message: string, many
     case 'limit': return { text: 'You already run the most bots and algo orders allowed at once. Stop one first.', action: 'stop-other', label: 'See my bots' };
     case 'margin': return { text: `Your futures account does not have enough free margin for ${it}. Lower the order size or max holding, deposit more, or stop another bot or copy.`, action: 'deposit', label: 'Deposit' };
     case 'bot-market': return { text: 'You already run a real bot on this market. Stop it first, or pick another market.', action: 'stop-other', label: 'Stop the other bot' };
-    case 'live-cap': return { text: 'Real bots are full on our servers right now. Run it as practice, or ask on Discord when a place opens.', action: 'discord', label: 'Ask on Discord' };
-    case 'move': return { text: 'Your bots are moving to another server right now. Wait for the move to finish, then start again.', action: null, label: null };
+    // The executor's own codes (apps/executor service.ts BotRefusalCode), each with its one thing to do (audit 2026-11-09).
+    case 'bot-capacity':
+    case 'live-cap': return { text: 'Real bots are full on our servers right now. Run it as practice, or try again later.', action: 'practice', label: 'Run as practice' };
+    case 'margin-unknown': return { text: 'SoDEX did not tell your account balance just now, so the margin could not be checked. Try again in a moment.', action: null, label: null };
+    case 'market-position': return { text: `${message} A bot starts only on a market where you hold nothing: close it in Trade first, or pick another market.`, action: null, label: null };
+    case 'market-copy': return { text: `${message} Stop that copy in Copy trading, or pick another market.`, action: null, label: null };
+    case 'market-algo': return { text: `${message} Cancel it in Trade, or pick another market.`, action: null, label: null };
+    case 'moved': return { text: 'Your bots run on the other servers now. Reload to manage them there.', action: null, label: null };
+    case 'vip-moving':
+    case 'move': return { text: 'Your bots are moving between servers right now. Wait for the move to finish, then start again.', action: null, label: null };
+    case 'size':
     case 'spec':
     case 'algo': return /size|minimum|order|holding|cap/i.test(message) ? { text: message, action: 'size', label: 'Change the size' } : { text: message, action: null, label: null };
     default: return { text: message, action: null, label: null };

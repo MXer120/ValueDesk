@@ -277,19 +277,9 @@ function BotsPageOpen({ address, provider }: { address: string | null; provider:
       setBusy(null);
     }
   };
-  /** A stop the bot was not set for: its on-stop setting first (never behind the terms), then the stop itself. */
+  /** A stop as chosen in the menu: the choice rides on the stop itself (no settings change first, audit 2026-11-09). */
   const stopAs = async (v: AlgoView, how: StopHow) => {
-    const s = v.algo.spec;
-    const close = how !== 'keep';
-    if ((s.kind === 'mm' || s.kind === 'grid') && (s.onStop === 'close') !== close) {
-      try {
-        await update(v.algo.id, { onStop: close ? 'close' : 'keep' }, { terms: false });
-      } catch (e) {
-        // The stop would go out the other way than chosen: nothing is sent, and the page says why.
-        throw new Error(`${botName(v)} was not stopped: its stop setting could not be changed (${e instanceof Error ? e.message : String(e)}). Try again, or pick ${close ? '"Stop and keep position"' : 'a stop that closes'}.`);
-      }
-    }
-    await act('cancel', v.algo.id, { now: how === 'instant' });
+    await act('cancel', v.algo.id, { now: how === 'instant', how });
   };
 
   const ctx: BotsCtx = useMemo(() => ({
@@ -391,24 +381,31 @@ function BotsPageOpen({ address, provider }: { address: string | null; provider:
     },
     stopAll: async (how = 'keep') => {
       const live = bots.filter((v) => !FINAL_STATUSES.has(v.algo.status));
+      // Bots only, one stop each (audit 2026-11-09: the wallet-wide kill switch also cancelled the wallet's other algo
+      // orders and their stop-losses).
       const body = how === 'keep'
-        ? 'Every bot pulls its orders at once. Nothing is closed: what they hold stays in your account.'
+        ? `Every bot (${live.length}) pulls its orders at once. Nothing is closed: what they hold stays in your account. Your other algo orders are not touched.`
         : how === 'instant'
-          ? `Every bot pulls its orders and closes what it holds now, with a capped taker. One signature per bot (${live.length}), more where a bot was set to keep its position.`
-          : `Every bot pulls its orders and closes what it holds: resting at the best price first, a capped taker after a minute. One signature per bot (${live.length}), more where a bot was set to keep its position.`;
+          ? `Every bot (${live.length}) pulls its orders and closes what it holds now, with a capped taker. Your other algo orders are not touched.`
+          : `Every bot (${live.length}) pulls its orders and closes what it holds: resting at the best price first, a capped taker after a minute. Your other algo orders are not touched.`;
       const ok = await confirm({ title: 'Stop every bot?', body, confirmLabel: 'Stop all', danger: true });
       if (!ok) return;
-      if (how === 'keep') { await run('all', stopAll, 'Every bot stopped.'); return; }
       await run('all', async () => {
         const failed: string[] = [];
         for (const v of live) {
           try { await stopAs(v, how); } catch (e) { failed.push(`${botName(v)}: ${e instanceof Error ? e.message : String(e)}`); }
         }
         if (failed.length) throw new Error(`${failed.length} of ${live.length} not stopped. ${failed.join(' ')}`);
-      }, how === 'instant' ? 'Every bot is stopping and closing what it holds now.' : 'Every bot is stopping and closing what it holds.');
+      }, how === 'keep' ? 'Every bot stopped.' : how === 'instant' ? 'Every bot is stopping and closing what it holds now.' : 'Every bot is stopping and closing what it holds.');
     },
     runAgain: (v, real) => {
-      const spec = { ...specOf({ ...draftOfSpec(v.algo.spec), paper: real ? false : v.algo.spec.paper }, null), bot: true };
+      // An ended bot ran for its whole time: Run again keeps that run time (audit 2026-11-09: it came back unlimited).
+      const was = v.algo.spec as { endAt?: number | null };
+      const start = v.algo.startedAt ?? v.algo.createdAt;
+      const ranH = typeof was.endAt === 'number' && was.endAt > start ? Math.max(1, Math.round((was.endAt - start) / 3_600_000)) : null;
+      const base = draftOfSpec(v.algo.spec);
+      const d = { ...base, paper: real ? false : v.algo.spec.paper, ...(base.runHours === null && ranH !== null ? { runHours: ranH, endAt: null, runHoursAt: null } : {}) };
+      const spec = { ...specOf(d, null), bot: true };
       try { sessionStorage.setItem(BOTS_PREFILL_KEY, JSON.stringify({ from: v.algo.id, at: Date.now(), spec })); } catch { /* private mode: New bot opens on the market and kind */ }
       goBots({ page: 'new', market: v.algo.spec.symbol, kind: strategyOf(v.algo.spec) ?? null });
     },
