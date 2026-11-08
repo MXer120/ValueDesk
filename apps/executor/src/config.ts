@@ -99,6 +99,12 @@ export interface ExecutorConfig {
   vipOpen: boolean;
   /** EXECUTOR_VIP_PUBKEY: the VIP executor's pinned key-import public key; unset: no move (the key would go to whatever /info says). */
   vipPubkey: string | null;
+  /**
+   * The VIP executor's way back (vip.ts BACK): EXECUTOR_STD_URL (the standard executor's API base, https or loopback)
+   * and EXECUTOR_STD_PUBKEY (its pinned key-import public key). Either unset: no wallet is moved back.
+   */
+  stdUrl: string | null;
+  stdPubkey: string | null;
   localAddress: string | null;
   logLevel: 'debug' | 'info' | 'warn' | 'error';
   /** The executor id requests are signed for; null = the default (hosted: by network; self: its own, kept in its data). */
@@ -184,10 +190,10 @@ export function vipCheckUrlFrom(raw: string | undefined, builderRaw: string | un
 }
 
 /** EXECUTOR_VIP_PUBKEY: a base64url SPKI (a P-256 public key is 91 bytes, ~122 characters); unset: null. */
-export function vipPubkeyFrom(raw: string | undefined): string | null {
+export function vipPubkeyFrom(raw: string | undefined, name = 'EXECUTOR_VIP_PUBKEY'): string | null {
   const v = raw?.trim();
   if (!v) return null;
-  if (!/^[A-Za-z0-9_-]{60,400}$/.test(v)) throw new Error('EXECUTOR_VIP_PUBKEY must be the VIP executor key-import public key (base64url, as its /info shows keyImport.publicKey)');
+  if (!/^[A-Za-z0-9_-]{60,400}$/.test(v)) throw new Error(`${name} must be the other executor's key-import public key (base64url, as its /info shows keyImport.publicKey)`);
   return v;
 }
 
@@ -260,6 +266,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ExecutorConfig
     vipCheckUrl: vipCheckUrlFrom(env.EXECUTOR_VIP_CHECK_URL, env.EXECUTOR_BUILDER_URL),
     vipOpen: env.EXECUTOR_VIP_OPEN?.trim() === '1',
     vipPubkey: vipPubkeyFrom(env.EXECUTOR_VIP_PUBKEY),
+    stdUrl: env.EXECUTOR_STD_URL?.trim() ? builderUrl(env.EXECUTOR_STD_URL) : null,
+    stdPubkey: vipPubkeyFrom(env.EXECUTOR_STD_PUBKEY, 'EXECUTOR_STD_PUBKEY'),
     localAddress: env.EXECUTOR_LOCAL_ADDRESS?.trim() || null,
     logLevel: level === 'debug' || level === 'warn' || level === 'error' ? level : 'info',
     executorId,

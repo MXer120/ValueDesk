@@ -862,8 +862,11 @@ export class AlgoRuntime {
    * paused with its quotes pulled), taken in under the same id. Live children it still names are asked about on
    * SoDEX, as after a restart. Resume it to go on.
    */
-  async adopt(rec: AlgoRecord): Promise<AlgoRecord> {
-    if (this.algos.has(rec.id)) throw new Error('This algo is here already.');
+  async adopt(rec: AlgoRecord, note = 'Moved to the VIP servers: it goes on from here with the same book.'): Promise<AlgoRecord> {
+    const here = this.algos.get(rec.id);
+    // A bot this side handed over earlier (a move up, then back, or back and up again) comes home: the record that
+    // arrives carries everything since, so it replaces the ended one. Any other record here refuses.
+    if (here && !(FINAL_STATUSES.has(here.status) && here.k.handedOver === true)) throw new Error('This algo is here already.');
     const a = JSON.parse(JSON.stringify(rec)) as AlgoRecord;
     for (const c of a.children) {
       this.byClOrd.set(c.clOrdID, a.id);
@@ -873,9 +876,10 @@ export class AlgoRuntime {
         c.cancelling = false;
       }
     }
+    delete a.k.handedOver;
     this.algos.set(a.id, a);
     await this.save(a);
-    await this.event(a, 'info', 'Moved to the VIP servers: it goes on from here with the same book.');
+    await this.event(a, 'info', note);
     this.syncWatch();
     this.host.onChange?.(a.id);
     return a;
@@ -891,6 +895,7 @@ export class AlgoRuntime {
     await this.pullResting(a);
     a.status = 'cancelled';
     a.statusReason = reason;
+    a.k.handedOver = true;
     a.endedAt = Date.now();
     a.updatedAt = a.endedAt;
     await this.save(a);

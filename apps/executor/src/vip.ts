@@ -17,6 +17,11 @@
  * up a job not begun), never guessed: with no answer the bots stay paused (outcome 'unknown') and the operator is told.
  * The move runs inside the wallet's queue; its starts and resumes are refused while it runs; jobs are kept in the db.
  * The key is sealed only to the pinned EXECUTOR_VIP_PUBKEY, and EXECUTOR_VIP_URL must be https (or loopback).
+ *
+ * BACK (owner 2026-11-08): the same move the other way. The VIP executor asks the API server about each wallet whose
+ * bots run there every VIP_SWEEP_MS; one that is no longer VIP (under $1M in 14 days, no program) moves back to the
+ * standard executor (EXECUTOR_STD_URL, key sealed to the pinned EXECUTOR_STD_PUBKEY, same token) - at most ONE
+ * downgrade per wallet per UTC day, so a wallet near the line is never moved to and fro. Upgrades are never limited.
  */
 import { randomBytes } from 'node:crypto';
 
@@ -25,6 +30,10 @@ export interface VipStep { id: VipStepId; label: string; state: 'wait' | 'run' |
 export interface VipJob {
   id: string;
   owner: string;
+  /** up: standard -> VIP (the wallet asked); down: VIP -> standard (VIP ended). Absent: up (jobs from before). */
+  direction?: 'up' | 'down';
+  /** Why a move back happened (the API server's words), for the wallet. */
+  reason?: string;
   state: 'running' | 'done' | 'failed';
   startedAt: number;
   endedAt: number | null;
@@ -49,14 +58,36 @@ export const VIP_STEPS: Array<{ id: VipStepId; label: string }> = [
   { id: 'finish', label: 'Releasing the standard servers' },
 ];
 
-export function newVipJob(owner: string): VipJob {
+export const VIP_STEPS_DOWN: Array<{ id: VipStepId; label: string }> = [
+  { id: 'check', label: 'VIP ended: moving back' },
+  { id: 'pause', label: 'Pausing your bots' },
+  { id: 'seal', label: 'Sealing your key to the standard servers' },
+  { id: 'send', label: 'Handing over bots and books' },
+  { id: 'start', label: 'Starting on the standard servers' },
+  { id: 'finish', label: 'Releasing the VIP servers' },
+];
+
+/** How often the VIP executor asks whether its wallets are still VIP. */
+export const VIP_SWEEP_MS = 10 * 60_000;
+
+/** The UTC day of a time (days since 1970-01-01). */
+export const utcDay = (ms: number): number => Math.floor(ms / 86_400_000);
+
+/** Whether the wallet was already moved back (a down move began) on the UTC day of `now`: one downgrade a day at most. */
+export function downgradedToday(jobs: readonly VipJob[], now: number): boolean {
+  return jobs.some((j) => j.direction === 'down' && utcDay(j.startedAt) === utcDay(now));
+}
+
+export function newVipJob(owner: string, direction: 'up' | 'down' = 'up', reason?: string): VipJob {
   return {
     id: randomBytes(8).toString('hex'),
     owner,
+    direction,
+    ...(reason ? { reason } : {}),
     state: 'running',
     startedAt: Date.now(),
     endedAt: null,
-    steps: VIP_STEPS.map((s) => ({ ...s, state: 'wait', ms: null })),
+    steps: (direction === 'down' ? VIP_STEPS_DOWN : VIP_STEPS).map((s) => ({ ...s, state: 'wait', ms: null })),
     bots: 0,
     error: null,
     session: null,

@@ -146,7 +146,7 @@ export function refusalOf(e: unknown, act: { setup: () => void; deposit: () => v
     case 'live-cap': return n('bot-capacity', 'The servers run as many bots with real orders as they safely can right now. Try again later, or start it as practice.');
     case 'vip-moving':
     case 'move': return n('vip-moving', 'Your bots are moving to the VIP servers. Try again in a minute, once the move is done.');
-    case 'moved': return n('moved', 'Your bots run on the VIP servers now. Reload to talk to them there.', { label: 'Reload', run: act.vip });
+    case 'moved': return n('moved', /standard/i.test(said) ? 'Your bots moved back to the standard servers (VIP ended). Reload to manage them there.' : 'Your bots run on the VIP servers now. Reload to talk to them there.', { label: 'Reload', run: act.vip });
     default: return null;
   }
 }

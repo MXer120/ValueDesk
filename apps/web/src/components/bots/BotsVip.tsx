@@ -444,6 +444,7 @@ export function BotsVip({ ctx, compact, stage, strip }: { ctx: BotsCtx; compact?
             <div className="bots-vip__on">
               <span className="bots-vip__badge" aria-hidden="true"><GoldMark size={26} /></span>
               <p>Your bots run on the dedicated VIP servers: orders 1.6× faster, latency down 37% in our tests.</p>
+              <small className="bots-fine">VIP holds while you trade $1M in 14 days. Below it, your bots move back to the standard servers with their books (at most once a day, checked every 10 minutes), and you can move up again whenever you qualify.</small>
             </div>
           ) : (
             <>

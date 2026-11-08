@@ -104,7 +104,7 @@ import { plainSockets } from './feed/binance.ts';
 import { BinanceReference } from './feed/reference.ts';
 import { DEFAULT_FEED_PATH } from './feed/ring.ts';
 import { CalendarFeed } from './calendar.ts';
-import { newVipJob, vipJobView, vipStep, type VipJob } from './vip.ts';
+import { VIP_SWEEP_MS, downgradedToday, newVipJob, vipJobView, vipStep, type VipJob } from './vip.ts';
 
 /** The pairing code's letters: no 0/O, 1/I/L, so it reads back from a terminal without doubt. */
 const PAIR_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
@@ -503,6 +503,10 @@ export class ExecutorService {
     this.signerSweep ??= setInterval(() => {
       this.sweepSigners();
       this.warnKeyExpiry();
+      if (this.canMoveBack() && Date.now() - this.vipSweepAt >= VIP_SWEEP_MS) {
+        this.vipSweepAt = Date.now();
+        void this.sweepVip().catch((e) => this.deps.log.warn('vip: sweep failed', { error: String(e) }));
+      }
     }, 30_000);
     this.failInterruptedVipJobs();
     this.signerSweep.unref?.();
@@ -569,7 +573,7 @@ export class ExecutorService {
       algos: { maxPerOwner: this.cfg.maxAlgosPerOwner },
       bots: { fee: BOT_FEE, ladder: BOT_FEE_LADDER, vipFee: BOT_FEE_VIP, betaVipDays: BETA_VIP_DAYS },
       features: [...EXECUTOR_FEATURES],
-      vip: { tier: this.cfg.tier, canMove: this.cfg.tier === 'standard' && !!this.cfg.vipUrl && !!this.cfg.vipToken && !!this.cfg.vipPubkey, location: this.cfg.location, open: this.cfg.vipOpen },
+      vip: { tier: this.cfg.tier, canMove: this.cfg.tier === 'standard' && !!this.cfg.vipUrl && !!this.cfg.vipToken && !!this.cfg.vipPubkey, canMoveBack: this.canMoveBack(), location: this.cfg.location, open: this.cfg.vipOpen },
       brake: this.brakeView(),
     };
   }
@@ -759,7 +763,7 @@ export class ExecutorService {
         .map((s) => this.runtime.view(s.id))
         .filter((v): v is CopyView => v !== null)
         .sort((a, b) => b.subscription.createdAt - a.subscription.createdAt),
-      movedTo: this.db.moved(owner)?.tier === 'vip' ? 'vip' : null,
+      movedTo: this.movedAway(owner),
       bots: this.botFeeView(owner),
     };
   }
@@ -790,6 +794,65 @@ export class ExecutorService {
     void this.serial(owner, () => this.runVipMove(job)).catch(() => undefined);
     return vipJobView(job);
   }
+
+  /** Where the wallet's bots run when it is not here: the other executor's tier, else null. */
+  private movedAway(owner: string): 'vip' | 'standard' | null {
+    const t = this.db.moved(owner)?.tier;
+    return (t === 'vip' || t === 'standard') && t !== this.cfg.tier ? t : null;
+  }
+
+  /** This executor takes moves in: the VIP one (up), or a standard one paired with a VIP one (back). */
+  private takesMoves(): boolean {
+    return this.cfg.tier === 'vip' || !!this.cfg.vipUrl;
+  }
+
+  /** The VIP executor can move wallets back (vip.ts BACK): the standard one's URL, its pinned key and the token. */
+  private canMoveBack(): boolean {
+    return this.cfg.tier === 'vip' && !!this.cfg.stdUrl && !!this.cfg.vipToken && !!this.cfg.stdPubkey;
+  }
+
+  /**
+   * Move a wallet's bots back to the standard executor (VIP side; vip.ts BACK). At most one move back per wallet per
+   * UTC day (a second the same day returns null and moves nothing); none while another move of the wallet runs.
+   */
+  vipMoveBack(owner: string, reason: string, now = Date.now()): VipJob | null {
+    if (!this.canMoveBack()) return null;
+    if (this.vipMoving(owner) || this.movedAway(owner)) return null;
+    if (downgradedToday([...(this.vipJobs.has(owner) ? [this.vipJobs.get(owner)!] : []), ...this.db.vipJobs<VipJob>(owner)], now)) return null;
+    const job = newVipJob(owner, 'down', reason);
+    this.vipJobs.set(owner, job);
+    this.db.saveVipJob(job);
+    void this.serial(owner, () => this.runVipMove(job)).catch(() => undefined);
+    return vipJobView(job);
+  }
+
+  /**
+   * VIP side, every VIP_SWEEP_MS: each wallet with bots running here is asked about (vipEligible, twice, a moment
+   * apart: one answer never moves anyone); one that is no longer VIP moves back (vipMoveBack: once a UTC day). A read
+   * that fails moves nobody. Returns the jobs started.
+   */
+  async sweepVip(now = Date.now()): Promise<VipJob[]> {
+    if (!this.canMoveBack() || this.cfg.vipOpen) return [];
+    const owners = new Set(this.algos.list().filter((a) => a.spec?.bot === true && !FINAL_STATUSES.has(a.status)).map((a) => a.owner));
+    const out: VipJob[] = [];
+    for (const owner of owners) {
+      if (this.movedAway(owner) || this.vipMoving(owner)) continue;
+      if (downgradedToday(this.db.vipJobs<VipJob>(owner), now)) continue;
+      try {
+        const a = await this.vipEligible(owner);
+        if (a.ok) continue;
+        await sleep(this.deps.readGapMs ?? 2_000);
+        const b = await this.vipEligible(owner);
+        if (b.ok) continue;
+        const j = this.vipMoveBack(owner, b.why, now);
+        if (j) out.push(j);
+      } catch (e) {
+        this.deps.log.warn('vip: status read failed; nobody moved back', { owner, error: String(e) });
+      }
+    }
+    return out;
+  }
+  private vipSweepAt = 0;
 
   /** The wallet's last move, as it stands (this process's, else the db's: a move from before a restart). */
   vipJob(owner: string): VipJob | null {
@@ -853,9 +916,13 @@ export class ExecutorService {
 
   private async runVipMove(job: VipJob): Promise<void> {
     const owner = job.owner;
-    const vip = this.cfg.vipUrl!.replace(/\/+$/, '');
+    // Up: this standard executor hands to the VIP one. Down (vip.ts BACK): this VIP executor hands back to the standard one.
+    const down = job.direction === 'down';
+    const vip = (down ? this.cfg.stdUrl! : this.cfg.vipUrl!).replace(/\/+$/, '');
     const token = this.cfg.vipToken ?? '';
-    const pinned = this.cfg.vipPubkey!;
+    const pinned = down ? this.cfg.stdPubkey! : this.cfg.vipPubkey!;
+    const there = down ? 'standard' : 'VIP';
+    const pinName = down ? 'EXECUTOR_STD_PUBKEY' : 'EXECUTOR_VIP_PUBKEY';
     const bots = this.algos.list(owner).filter((a) => a.spec?.bot === true && !FINAL_STATUSES.has(a.status));
     job.bots = bots.length;
     const paused: string[] = [];
@@ -870,8 +937,11 @@ export class ExecutorService {
     };
     try {
       await step('check', async () => {
-        const e = await this.vipEligible(owner);
-        if (!e.ok) throw new Error(e.why);
+        // Up needs VIP; down happens because it ended (sweepVip asked already).
+        if (!down) {
+          const e = await this.vipEligible(owner);
+          if (!e.ok) throw new Error(e.why);
+        }
         if (this.runtime.list(owner).some((s) => s.status !== 'stopped')) throw new Error('Stop your copies first: they keep their key on these servers.');
         if (this.algos.list(owner).some((a) => a.spec?.bot !== true && !FINAL_STATUSES.has(a.status))) throw new Error('Let your algo orders finish first: only bots move.');
         if (!this.db.key(owner, 'active') && bots.some((a) => !a.spec.paper)) throw new Error('Set up your SoDEX key first.');
@@ -886,12 +956,12 @@ export class ExecutorService {
       const envelope = await step('seal', async () => {
         const res = await this.deps.fetch(`${vip}/info`, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(5_000) });
         const info = JSON.parse(await res.text()) as { executorId?: string; keyImport?: { publicKey?: string }; vip?: { tier?: string } };
-        if (!res.ok || info.vip?.tier !== 'vip' || !info.keyImport?.publicKey) throw new Error('The VIP servers did not answer.');
-        if (info.executorId !== this.executorId) throw new Error('The VIP servers run under another executor id.');
-        // The key is sealed to the pinned public key only (EXECUTOR_VIP_PUBKEY), never to one read over the wire.
+        if (!res.ok || info.vip?.tier !== (down ? 'standard' : 'vip') || !info.keyImport?.publicKey) throw new Error(`The ${there} servers did not answer.`);
+        if (info.executorId !== this.executorId) throw new Error(`The ${there} servers run under another executor id.`);
+        // The key is sealed to the pinned public key only (EXECUTOR_VIP_PUBKEY / EXECUTOR_STD_PUBKEY), never to one read over the wire.
         if (info.keyImport.publicKey !== pinned) {
-          this.deps.alerts?.raise('vip-key-mismatch', '', `The VIP servers' /info shows an import key that is not EXECUTOR_VIP_PUBKEY; no key was sent (move of ${shortWallet(owner)}).`);
-          throw new Error('The VIP servers did not prove who they are. Nothing was sent; your bots stay here.');
+          this.deps.alerts?.raise('vip-key-mismatch', '', `The ${there} servers' /info shows an import key that is not ${pinName}; no key was sent (move of ${shortWallet(owner)}).`);
+          throw new Error(`The ${there} servers did not prove who they are. Nothing was sent; your bots stay here.`);
         }
         // Practice bots only, no key here: nothing to seal.
         const k = this.db.key(owner, 'active');
@@ -932,19 +1002,19 @@ export class ExecutorService {
         }
         if (o.state === 'unknown') {
           unknown = true;
-          throw new Error('The VIP servers did not confirm the move. Your bots stay paused until ValueDesk has checked where they run.');
+          throw new Error(`The ${there} servers did not confirm the move. Your bots stay paused until ValueDesk has checked where they run.`);
         }
-        throw new Error(b?.error ?? (res ? `The VIP servers answered HTTP ${res.status}.` : 'The VIP servers did not answer.'));
+        throw new Error(b?.error ?? (res ? `The ${there} servers answered HTTP ${res.status}.` : `The ${there} servers did not answer.`));
       });
       await step('start', async () => {
         job.session = answer?.session ?? null;
       });
       await step('finish', async () => {
-        for (const a of bots) await this.algos.handOver(a.id, 'Moved to the VIP servers (AWS Tokyo).');
+        for (const a of bots) await this.algos.handOver(a.id, down ? `Moved back to the standard servers: ${job.reason ?? 'VIP ended'}` : 'Moved to the VIP servers (AWS Tokyo).');
         this.db.deleteKeys(owner);
         this.forgetSigner(owner);
-        this.db.setMoved(owner, 'vip');
-        this.deps.log.info('vip: moved', { owner, bots: bots.length, ms: Date.now() - job.startedAt });
+        this.db.setMoved(owner, down ? 'standard' : 'vip');
+        this.deps.log.info(down ? 'vip: moved back' : 'vip: moved', { owner, bots: bots.length, ms: Date.now() - job.startedAt });
       });
       job.state = 'done';
       job.outcome = 'moved';
@@ -954,7 +1024,7 @@ export class ExecutorService {
       if (handed) job.outcome = 'moved';
       else if (unknown) {
         job.outcome = 'unknown';
-        this.deps.alerts?.raise('vip-move-unknown', `owner:${owner}`, `A VIP move of ${shortWallet(owner)} (job ${job.id}) was not confirmed by the VIP side; its ${bots.length} bot(s) stay paused here. Check the VIP side's import before resuming or finishing it.`);
+        this.deps.alerts?.raise('vip-move-unknown', `owner:${owner}`, `A ${down ? 'move back to standard' : 'VIP move'} of ${shortWallet(owner)} (job ${job.id}) was not confirmed by the ${there} side; its ${bots.length} bot(s) stay paused here. Check that side's import (POST /internal/vip/import/status) before resuming or finishing it.`);
       } else {
         job.outcome = 'not-moved';
         // Not taken by the VIP side (its answer says so): back to what it was here - but never under the brake.
@@ -976,7 +1046,8 @@ export class ExecutorService {
    * was here. The job's outcome is kept (vipImportStatus); a job the sender gave up on is refused.
    */
   async vipImport(body: unknown): Promise<{ ok: true; session: { token: string; expiresAt: number }; started: number; held: number }> {
-    if (this.cfg.tier !== 'vip') throw new ApiError(404, 'path', 'not found');
+    // The VIP side takes a move up; a standard side paired with a VIP one (EXECUTOR_VIP_URL) takes a move back.
+    if (!this.takesMoves()) throw new ApiError(404, 'path', 'not found');
     if (!body || typeof body !== 'object' || Array.isArray(body)) throw new ApiError(400, 'vip', 'A move needs a body: the wallet, its key and its bots.');
     const b = body as { owner?: unknown; job?: unknown; key?: { name?: unknown; address?: unknown; expiresAt?: unknown; envelope?: unknown } | null; record?: { terms?: unknown; consents?: unknown }; algos?: unknown; resume?: unknown };
     const owner = typeof b.owner === 'string' && /^0x[0-9a-f]{40}$/.test(b.owner) ? b.owner : null;
@@ -1020,12 +1091,14 @@ export class ExecutorService {
         for (const c of Array.isArray(b.record?.consents) ? (b.record!.consents as ConsentRow[]) : []) if (c.owner === owner) this.db.addConsent(c);
         for (const rec of recs) {
           const here = this.algos.get(rec.id);
-          if (here) {
+          // Handed over from here in an earlier move (up then back, or back then up): it comes home (adopt replaces it).
+          const home = here !== null && here !== undefined && here.owner === owner && FINAL_STATUSES.has(here.status) && here.k.handedOver === true;
+          if (here && !home) {
             // Taken in by an earlier try of this move and still running here: skipped, not doubled.
             if (here.owner !== owner || FINAL_STATUSES.has(here.status)) throw new ApiError(409, 'vip', `Bot ${rec.id} has ended here already; it cannot be taken in again.`);
             continue;
           }
-          await this.algos.adopt(rec);
+          await this.algos.adopt(rec, this.cfg.tier === 'vip' ? 'Moved to the VIP servers: it goes on from here with the same book.' : 'Moved back to the standard servers: it goes on from here with the same book.');
           adopted.push(rec.id);
         }
       } catch (e) {
@@ -1061,6 +1134,15 @@ export class ExecutorService {
       }
       this.db.setMoved(owner, null);
       this.db.setVipImport(job, owner, 'done', { started, held, ids: recs.map((r) => r.id) });
+      // Moved back: the wallet is told here, where its page now reads.
+      if (this.cfg.tier === 'standard') {
+        this.db.addNotice({
+          id: `vip-back:${job}`, owner, source: 'algo', ref: recs[0]?.id ?? owner, kind: 'vip-back', grade: 'info',
+          title: 'Your bots moved back to the standard servers',
+          body: `VIP needs $1M of your own volume in 14 days (or a VIP program). ${recs.length} bot${recs.length === 1 ? '' : 's'} moved back with ${recs.length === 1 ? 'its' : 'their'} books and keep running here. You can move to VIP again any time you qualify.`,
+          at: Date.now(), paper: false,
+        });
+      }
       this.deps.log.info('vip: took in', { owner, job, bots: recs.length, started, held });
       return { ok: true as const, session: this.secrets.issueSession(owner, SESSION_TTL_MS), started, held };
     });
@@ -1072,7 +1154,7 @@ export class ExecutorService {
    * so its import - should it still arrive - is refused (vipImport), and the answer is final.
    */
   vipImportStatus(body: unknown): { ok: true; state: string; session?: { token: string; expiresAt: number } } {
-    if (this.cfg.tier !== 'vip') throw new ApiError(404, 'path', 'not found');
+    if (!this.takesMoves()) throw new ApiError(404, 'path', 'not found');
     const b = (body && typeof body === 'object' ? body : {}) as { owner?: unknown; job?: unknown; abandon?: unknown };
     const owner = typeof b.owner === 'string' && /^0x[0-9a-f]{40}$/.test(b.owner) ? b.owner : null;
     const job = typeof b.job === 'string' && /^[0-9a-f]{16}$/.test(b.job) ? b.job : null;
@@ -1711,7 +1793,9 @@ export class ExecutorService {
   /** A wallet whose bots moved to the VIP executor starts none here; one whose move runs starts nothing until it ends. */
   private needNotMoved(owner: string): void {
     if (this.vipMoving(owner)) throw new ApiError(409, 'vip-moving', 'Your bots are moving to the VIP servers right now. Wait for the move to finish, then try again. Stopping a bot still works.');
-    if (this.cfg.tier === 'standard' && this.db.moved(owner)?.tier === 'vip') throw new ApiError(409, 'moved', 'Your bots run on the VIP servers now. Start and manage them there.');
+    const away = this.movedAway(owner);
+    if (away === 'vip') throw new ApiError(409, 'moved', 'Your bots run on the VIP servers now. Start and manage them there.');
+    if (away === 'standard') throw new ApiError(409, 'moved', 'Your bots moved back to the standard servers (VIP ended). Start and manage them there.');
   }
 
   /** Start an algo order for the wallet that signed it. */

@@ -29,7 +29,7 @@ import type { Eip1193Provider } from '../wallet';
 import { logger } from '../log';
 import { pollEvery } from '../exchange/visibility';
 import { BROWSER_KEY_NAME, browserCopier, type BrowserKey, type CopierRole, type PendingConfirm } from './browserCopier';
-import { DEFAULT_SELF_URL, ExecutorClient, ExecutorError, HOSTED_BASE, VIP_BASE, hostedExecutor, keepVipSession, selfBase, selfUrlProblem, setVipMoved, signCopy, standardExecutor, vipMoved } from './executor';
+import { DEFAULT_SELF_URL, ExecutorClient, ExecutorError, HOSTED_BASE, VIP_BASE, hostedExecutor, keepSessionAt, keepVipSession, selfBase, selfUrlProblem, setVipMoved, signCopy, standardExecutor, vipMoved } from './executor';
 import { MAX_BROWSER_KEY_DAYS, approveCopyFee, copyFeeApproval, copyKeyRegistered, registerCopyKey, revokeCopyKey } from './sodexSetup';
 import { acceptCopyTerms, adoptRecordedTerms, localTerms, recordPendingTerms, sendTermsTo, type LocalTerms } from './terms';
 import { requireTermsOrThrow } from '../legal/acceptance';
@@ -360,6 +360,22 @@ async function loadMe(mode: 'hosted' | 'self', token: string): Promise<void> {
     if (mode === 'hosted' && me.movedTo === 'vip' && state.owner && hostedExecutor.base !== VIP_BASE) {
       setVipMoved(state.owner, true);
       pointHostedAt(state.owner);
+      void refreshHosted();
+      return;
+    }
+    // The VIP executor says the bots moved back to standard (VIP ended): go back there, with the read token the move
+    // brought from the standard side when it has one (else one signature there, as for any sign-in).
+    if (mode === 'hosted' && me.movedTo === 'standard' && state.owner && hostedExecutor.base === VIP_BASE) {
+      const owner2 = state.owner;
+      try {
+        const j = (await hostedExecutor.vipJob(token)).job;
+        if (j?.direction === 'down' && j.session) keepSessionAt(HOSTED_BASE, owner2, hostedExecutor.executorIdNow(), j.session);
+      } catch {
+        /* no token: a sign-in there */
+      }
+      if (!current()) return;
+      setVipMoved(owner2, false);
+      pointHostedAt(owner2);
       void refreshHosted();
       return;
     }

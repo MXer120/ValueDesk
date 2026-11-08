@@ -45,6 +45,8 @@ interface World {
   volume: { usd: number; vip?: boolean; fees?: { bots?: { fee: number; until: number | null } | null } } | null;
   /** The VIP side's answers (a function: called with the path and body). */
   vip?: (path: string, body: unknown) => Promise<{ status: number; body: unknown }>;
+  /** The standard side's answers, for the VIP side's move back. */
+  std?: (path: string, body: unknown) => Promise<{ status: number; body: unknown }>;
 }
 
 function fakeFetch(w: World): FetchLike {
@@ -57,6 +59,15 @@ function fakeFetch(w: World): FetchLike {
       if (!w.vip) throw new Error('vip down');
       const r = await w.vip(path, init?.body ? JSON.parse(String(init.body)) : null);
       return json(r.status, r.body);
+    }
+    if (u.hostname === 'std.test') {
+      if (!w.std) throw new Error('std down');
+      const r = await w.std(path, init?.body ? JSON.parse(String(init.body)) : null);
+      return json(r.status, r.body);
+    }
+    if (path === '/api/vs/bots/vip') {
+      if (!w.volume) return json(503, { ok: false });
+      return json(200, { ok: true, eligible: w.volume.vip === true, volumeUsd: w.volume.usd, minUsd: 1_000_000 });
     }
     if (path.startsWith('/api/vs/builder/beta')) {
       if (w.beta === null) return json(503, { ok: false });
@@ -594,4 +605,84 @@ test('C: wallet caches are bounded (oldest out first)', () => {
   assert.deepEqual([...m.keys()], ['w7', 'w8', 'w9']);
   remember(m, 'w8', 80, 3);
   assert.deepEqual([...m.keys()], ['w7', 'w9', 'w8'], 'used again: newest');
+});
+
+/* ------------------------------------------------- VIP both ways (owner 2026-11-08) ----- */
+
+/** A standard and a VIP executor that can move a wallet either way (the VIP side asks the API server about VIP). */
+function both() {
+  const stdDir = mkdtempSync(join(tmpdir(), 'vd-std-'));
+  const vipDir = mkdtempSync(join(tmpdir(), 'vd-vip2-'));
+  const stdPub = new Secrets(stdDir).importPublicKey();
+  const vipPub = new Secrets(vipDir).importPublicKey();
+  const vip = make({ EXECUTOR_TIER: 'vip', EXECUTOR_VIP_TOKEN: 'tok', EXECUTOR_STD_URL: 'https://std.test/api/copy/v1', EXECUTOR_STD_PUBKEY: stdPub, EXECUTOR_VIP_CHECK_URL: 'https://api.test/api/vs/bots/vip' }, { volume: { usd: 2_000_000, vip: true } }, { dir: vipDir });
+  const std = make({ EXECUTOR_VIP_URL: 'https://vip.test/api/copy/v1', EXECUTOR_VIP_TOKEN: 'tok', EXECUTOR_VIP_PUBKEY: vipPub, EXECUTOR_VIP_CHECK_URL: 'https://api.test/api/vs/bots/vip' }, { volume: { usd: 2_000_000, vip: true } }, { dir: stdDir });
+  std.w.vip = (path, body) => route(vip.svc, path, body);
+  vip.w.std = (path, body) => route(std.svc, path, body);
+  return { vip, std, cleanup: async () => { await std.cleanup(); await vip.cleanup(); rmSync(stdDir, { recursive: true, force: true }); rmSync(vipDir, { recursive: true, force: true }); } };
+}
+
+test('VIP both ways: up, then back when VIP ends (bots, books and the key go home; the wallet is told), at most once a UTC day; up again any time', async () => {
+  const w = new Wallet();
+  const p = both();
+  p.std.svc.acceptTerms(w.sign(p.std.svc.executorId, 'accept-terms', TERMS()), ctx);
+  const b = await start(p.std, w, { ...MM, paper: true });
+  assert.equal(p.vip.svc.info(ctx).vip?.canMoveBack, true);
+  assert.equal(p.std.svc.info(ctx).vip?.canMoveBack, false);
+  // Up.
+  p.std.svc.vipMove(w.sign(p.std.svc.executorId, 'vip-move', {}), ctx);
+  await until(() => p.std.svc.vipJob(w.address)?.state !== 'running');
+  assert.equal(p.std.svc.vipJob(w.address)!.state, 'done', p.std.svc.vipJob(w.address)!.error ?? '');
+  assert.equal(p.std.svc.me(w.address, ctx).movedTo, 'vip');
+  assert.equal(p.vip.svc.me(w.address, ctx).movedTo, null);
+  // Still VIP: the sweep moves nobody.
+  assert.deepEqual(await p.vip.svc.sweepVip(), []);
+  // VIP ends: the sweep moves the wallet back.
+  p.vip.w.volume = { usd: 300_000, vip: false };
+  const jobs = await p.vip.svc.sweepVip();
+  assert.equal(jobs.length, 1);
+  assert.equal(jobs[0]!.direction, 'down');
+  await until(() => p.vip.svc.vipJob(w.address)?.state !== 'running');
+  const back = p.vip.svc.vipJob(w.address)!;
+  assert.equal(back.state, 'done', back.error ?? '');
+  assert.equal(back.outcome, 'moved');
+  assert.match(back.reason ?? '', /Not VIP yet: 300,000 of \$1,000,000/);
+  assert.equal(p.vip.svc.algos.get(b.algo.id)!.status, 'cancelled', 'ended on VIP (handed over)');
+  assert.equal(p.std.svc.algos.get(b.algo.id)!.status, 'scheduled', 'home again and resumed on standard');
+  assert.equal(p.std.svc.me(w.address, ctx).movedTo, null);
+  assert.equal(p.vip.svc.me(w.address, ctx).movedTo, 'standard');
+  assert.equal(await code(start(p.vip, w, { ...MM, paper: true }, 9)), '409:moved', 'the VIP side starts nothing for it now');
+  assert.ok(p.std.db.notices(w.address).some((n: { kind: string }) => n.kind === 'vip-back'), 'the wallet is told where it reads');
+  // Up again the same day: upgrades are never limited.
+  p.std.w.volume = { usd: 1_200_000, vip: true };
+  p.vip.w.volume = { usd: 1_200_000, vip: true };
+  p.std.svc.vipMove(w.sign(p.std.svc.executorId, 'vip-move', {}), ctx);
+  await until(() => p.std.svc.vipJob(w.address)?.state !== 'running');
+  assert.equal(p.std.svc.vipJob(w.address)!.state, 'done', p.std.svc.vipJob(w.address)!.error ?? '');
+  assert.equal(p.vip.svc.algos.get(b.algo.id)!.status, 'scheduled', 'running on VIP again');
+  // VIP ends again the same UTC day: no second move back until tomorrow.
+  p.vip.w.volume = { usd: 300_000, vip: false };
+  assert.deepEqual(await p.vip.svc.sweepVip(), [], 'one move back per UTC day');
+  assert.equal(p.vip.svc.vipMoveBack(w.address, 'again'), null);
+  assert.equal(p.vip.svc.algos.get(b.algo.id)!.status, 'scheduled');
+  const tomorrow = (Math.floor(Date.now() / 86_400_000) + 1) * 86_400_000 + 60_000;
+  assert.equal((await p.vip.svc.sweepVip(tomorrow)).length, 1, 'the next UTC day it moves back');
+  await until(() => p.vip.svc.vipJob(w.address)?.state !== 'running');
+  assert.equal(p.std.svc.algos.get(b.algo.id)!.status, 'scheduled');
+  await p.cleanup();
+});
+
+test('VIP both ways: a failed read of VIP status moves nobody back; without EXECUTOR_STD_URL / _PUBKEY nobody is moved back', async () => {
+  const w = new Wallet();
+  const p = both();
+  p.std.svc.acceptTerms(w.sign(p.std.svc.executorId, 'accept-terms', TERMS()), ctx);
+  const b = await start(p.std, w, { ...MM, paper: true });
+  p.std.svc.vipMove(w.sign(p.std.svc.executorId, 'vip-move', {}), ctx);
+  await until(() => p.std.svc.vipJob(w.address)?.state !== 'running');
+  p.vip.w.volume = null; // the API server does not answer
+  assert.deepEqual(await p.vip.svc.sweepVip(), []);
+  assert.equal(p.vip.svc.algos.get(b.algo.id)!.status, 'scheduled');
+  assert.equal(loadConfig({ EXECUTOR_EDGE: 'none', EXECUTOR_TIER: 'vip', EXECUTOR_STD_URL: 'https://std.test/x' }).stdPubkey, null);
+  assert.throws(() => loadConfig({ EXECUTOR_EDGE: 'none', EXECUTOR_STD_PUBKEY: 'short!' }), /EXECUTOR_STD_PUBKEY/);
+  await p.cleanup();
 });

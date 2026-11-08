@@ -17,7 +17,7 @@ import type { AssetVerdict, Subscription, SubscriptionStatus } from './types.ts'
 /** How much it matters: info (finished, closed by its stop), warn (stopped or held by the engine, made smaller outside), error (failed, halted, a position closed outside, a liquidation). */
 export type NoticeGrade = 'info' | 'warn' | 'error';
 export type NoticeSource = 'algo' | 'copy';
-export type NoticeKind = 'done' | 'ended' | 'failed' | 'stopped' | 'held' | 'halted' | 'blocked' | 'paused' | 'closed' | 'reduced' | 'different-asset' | 'same-asset' | 'not-copied' | 'delisted' | 'key-expiry';
+export type NoticeKind = 'done' | 'ended' | 'failed' | 'stopped' | 'held' | 'halted' | 'blocked' | 'paused' | 'closed' | 'reduced' | 'different-asset' | 'same-asset' | 'not-copied' | 'delisted' | 'key-expiry' | 'vip-back';
 
 export interface EngineNotice {
   /** Stable for one event: `${source}:${ref}:${kind}:${at}` - a repeat is the same notice. */

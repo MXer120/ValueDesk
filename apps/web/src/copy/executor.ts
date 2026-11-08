@@ -153,6 +153,10 @@ export class ExecutorClient {
 
   /** The executor behind this base, as its /info last said (null until it answered). */
   private id: string | null = null;
+  /** The executor id behind this base (last /info), for keys another base's token is kept under. */
+  executorIdNow(): string | null {
+    return this.idNow();
+  }
   private idNow(): string | null {
     if (this.id) return this.id;
     try { return localStorage.getItem(lastIdKey(this.base)); } catch { return null; }
@@ -278,6 +282,17 @@ export function setVipMoved(owner: string, on: boolean): void {
     localStorage.setItem(VIP_KEY, [...xs].join(','));
   } catch {
     /* private mode: the standard executor's record still sends the page there */
+  }
+}
+/**
+ * Keep a read token one executor issued for the other in a move (no second signature): the VIP one's after a move up,
+ * the standard one's after a move back. `id`: the executor id both run under (the key the client reads first).
+ */
+export function keepSessionAt(base: string, owner: string, id: string | null, g: { token: string; expiresAt: number }): void {
+  try {
+    localStorage.setItem(sessionKey(base, owner.toLowerCase(), id), JSON.stringify(g));
+  } catch {
+    /* private mode */
   }
 }
 /** Keep a session token the VIP executor issued in a move (no second signature). */

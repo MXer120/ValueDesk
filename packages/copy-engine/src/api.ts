@@ -367,7 +367,7 @@ export interface ExecutorInfo {
   /** fee: the old flat bot fee (kept for older pages); ladder: the bot fee by 14-day volume (policy.ts BOT_FEE_LADDER). */
   bots?: { fee: number; ladder?: ReadonlyArray<{ fromUsd: number; fee: number }>; vipFee?: number; betaVipDays?: number };
   /** VIP (apps/executor vip.ts): this executor's tier, and whether it can move a wallet's bots to the VIP one. */
-  vip?: { tier: 'standard' | 'vip'; canMove: boolean; location: string; /** Moves without the VIP check (tests, local runs). */ open?: boolean };
+  vip?: { tier: 'standard' | 'vip'; canMove: boolean; /** The VIP executor moves wallets that lost VIP back to the standard one (once a UTC day). */ canMoveBack?: boolean; location: string; /** Moves without the VIP check (tests, local runs). */ open?: boolean };
   /**
    * A SoDEX API key the follower made themselves can be brought here: its private key
    * encrypted to `publicKey` (ECDH P-256, HKDF-SHA256 with `info` - '<owner>' replaced by
@@ -422,8 +422,11 @@ export interface MeResponse {
   policy: RegionPolicy;
   key: KeyInfo | null;
   copies: CopyView[];
-  /** Its bots moved to the VIP executor (the page then talks to that one). Absent on an older executor. */
-  movedTo?: 'vip' | null;
+  /**
+   * Its bots run on the other executor: 'vip' (read on the standard one after a move up) or 'standard' (read on the VIP
+   * one after a move back). The page then talks to that one. Absent on an older executor.
+   */
+  movedTo?: 'vip' | 'standard' | null;
   /**
    * The wallet's bot fee now (the executor's botFee: the bot ladder by its 14-day volume, or lower by VIP or a fee
    * program such as the beta's 30 days): tenths of a bp, whether it is VIP's, and until when a lowered fee lasts
@@ -457,6 +460,10 @@ export interface VipMoveView {
   session: { token: string; expiresAt: number } | null;
   /** How it ended for the bots: moved, not-moved (resumed here), unknown (paused here until checked). Absent on an older executor. */
   outcome?: 'moved' | 'not-moved' | 'unknown';
+  /** up: to VIP (the wallet asked); down: back to standard (VIP ended, at most once a UTC day). Absent: up. */
+  direction?: 'up' | 'down';
+  /** Why it moved back (the API server's words). */
+  reason?: string;
 }
 
 export interface ActivityResponse {
