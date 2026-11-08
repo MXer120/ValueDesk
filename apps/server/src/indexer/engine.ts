@@ -499,7 +499,9 @@ export class Indexer {
   private suspectSodex = new Set<string>();
 
   constructor(readonly store: IndexStore, private readonly now: () => number = Date.now) {
-    this.hl = new Lane({ name: 'hl', perMin: INDEXER_ENV.hlWeightPerMin() });
+    // The read's own time counts toward its rest (2026-11-08: 12,148 weight in 2.6 h, ~78 of the 200 a minute it may spend -
+    // each page's write takes seconds on the busy thread, and the full rest came on top). Still at most perMin on average.
+    this.hl = new Lane({ name: 'hl', perMin: INDEXER_ENV.hlWeightPerMin(), creditTaskTime: true });
     // SoDEX gateway lanes count requests. Both stand back while any cooldown
     // runs (the trading UI shares the IP) or this process has spent a third of
     // the gateway's minute (the limit SoDEX reports: 6000 on 2026-10-31), and
@@ -2035,7 +2037,11 @@ export class Indexer {
       let i = this.statsSweep[venue] % all.length;
       for (let k = 0; k < Math.min(STATS_SWEEP, all.length) && Date.now() < until; k++, i = (i + 1) % all.length) {
         const address = all[i]!;
+        const w0 = Date.now();
         for (const window of STATS_WINDOWS) {
+          // Inside a wallet too (2026-11-08: one sweep ran 546 s against its 4 min): a market maker's windows each read
+          // their partial first day, and on the busy thread that ran on for minutes. The rest of its windows come next time.
+          if (Date.now() >= until) break;
           const from = statsFrom(window, now);
           this.step = `sweep ${venue}`;
           const st = await this.pickStatsAsync(venue, address, window, from, now);
@@ -2045,6 +2051,7 @@ export class Indexer {
             wins: st.stats.wins, closes: st.stats.closes, winExact: st.wrExact, winFrom: st.wrFrom, at: now,
           });
         }
+        if (Date.now() - w0 > 60_000) console.log(`[indexer] sweep: ${venue} ${address} took ${Math.round((Date.now() - w0) / 1000)} s`);
         await this.breathe();
       }
       this.statsSweep[venue] = i;

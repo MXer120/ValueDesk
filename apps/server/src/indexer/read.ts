@@ -380,9 +380,11 @@ const SLICE_MS = 8;
 /**
  * Sets and filters asked for are summed ahead for this long after their last read. The default
  * page (warmCohorts' scope) is rebuilt always: until 2026-10-31 every rebuild stopped after 5 min
- * without a read, and the next visitor waited 11-16 s for a load 25 min old.
+ * without a read, and the next visitor waited 11-16 s for a load 25 min old. An hour since the cohorts run on their own
+ * thread (cohortThread.ts, 2026-11-08): the netting no longer holds the API, and a scope asked five minutes ago was
+ * cold again - 8.8-9.8 s for one venue's page, 18 s for an asset's focus.
  */
-export const KEEP_WARM_MS = 5 * 60_000;
+export const KEEP_WARM_MS = 60 * 60_000;
 /** A rebuild starts at least this long before the load in use expires (longer once the last one's time is known). */
 const REBUILD_LEAD_MS = 15_000;
 /** Sets of venues, and filters per set, that are rebuilt ahead. */
@@ -1408,7 +1410,24 @@ function thin<T>(rows: T[], max: number): T[] {
 }
 
 /** [t, long, short] over time: the 15-minute series unfiltered, the hourly mix under a filter. */
+/**
+ * Kept a minute per scope, filter, cohort and start minute (2026-11-08): an asset's series is the cohort_mix rows of every
+ * cohort over up to 30 days with their JSON parsed (~8.6k rows, ~30 MB), read again for each request.
+ */
+const historyKept = new Map<string, { at: number; out: Map<string, CohortPoint[]> }>();
+const HISTORY_KEEP_MS = 60_000;
+
 function history(s: IndexStore, scope: string, fromT: number, f: CohortFilter, cohort?: CohortId): Map<string, CohortPoint[]> {
+  const key = `${scope}|${Math.floor(fromT / 60_000)}|${f.coin ?? ''}|${f.sector ?? ''}|${cohort ?? ''}`;
+  const hit = historyKept.get(key);
+  if (hit && Date.now() - hit.at < HISTORY_KEEP_MS) return hit.out;
+  const out = historyRead(s, scope, fromT, f, cohort);
+  if (historyKept.size >= 200) historyKept.clear();
+  historyKept.set(key, { at: Date.now(), out });
+  return out;
+}
+
+function historyRead(s: IndexStore, scope: string, fromT: number, f: CohortFilter, cohort?: CohortId): Map<string, CohortPoint[]> {
   const out = new Map<string, CohortPoint[]>();
   const push = (c: string, p: CohortPoint) => {
     const l = out.get(c) ?? [];

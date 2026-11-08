@@ -85,6 +85,9 @@ export async function runCohortJob(j: CohortJob): Promise<string | null> {
     }
     case 'warm':
       await R.warmCohorts(j.venues);
+      // Each venue alone too (the venue picker's pages), then kept summed ahead (read.ts KEEP_WARM_MS): a first visit
+      // to one venue's cohorts waited 8.8-9.8 s for its netting (2026-11-08).
+      if (j.venues.length > 1) for (const v of j.venues) await R.cohortsPrepare([v], [{}]);
       return 'null';
   }
 }
