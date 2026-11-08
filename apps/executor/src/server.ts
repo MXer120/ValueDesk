@@ -301,7 +301,7 @@ export function createExecutorServer(svc: ExecutorService, cfg: ExecutorConfig, 
       if (req.method === 'GET' && route === '/vip/move') return send(res, 200, { job: svc.vipJob(svc.authenticate(bearer(req))) });
       if (req.method === 'POST' && route === '/internal/vip/import') {
         const token = String(req.headers['x-internal-token'] ?? '');
-        if (!cfg.builderToken || !safeEqual(cfg.builderToken, token)) throw new ApiError(404, 'path', 'not found');
+        if (!cfg.vipToken || !safeEqual(cfg.vipToken, token)) throw new ApiError(404, 'path', 'not found');
         return send(res, 200, await svc.vipImport(await readJson(req)));
       }
       if (req.method === 'GET' && route === '/me') return send(res, 200, svc.me(svc.authenticate(bearer(req)), ctx));

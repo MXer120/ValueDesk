@@ -450,7 +450,7 @@ export class ExecutorService {
       algos: { maxPerOwner: this.cfg.maxAlgosPerOwner },
       bots: { fee: BOT_FEE, ladder: BOT_FEE_LADDER, vipFee: BOT_FEE_VIP, betaVipDays: BETA_VIP_DAYS },
       features: [...EXECUTOR_FEATURES],
-      vip: { tier: this.cfg.tier, canMove: this.cfg.tier === 'standard' && !!this.cfg.vipUrl, location: this.cfg.location, open: this.cfg.vipOpen },
+      vip: { tier: this.cfg.tier, canMove: this.cfg.tier === 'standard' && !!this.cfg.vipUrl && !!this.cfg.vipToken, location: this.cfg.location, open: this.cfg.vipOpen },
       brake: this.brakeView(),
     };
   }
@@ -651,7 +651,7 @@ export class ExecutorService {
   /** Start moving the signer's bots to the VIP executor (vip.ts). One job per wallet at a time. */
   vipMove(req: unknown, ctx: RequestContext): VipJob {
     const { owner } = this.accept(req, 'vip-move', ctx);
-    if (this.cfg.tier !== 'standard' || !this.cfg.vipUrl) throw new ApiError(404, 'vip', 'The VIP servers are not set up on this executor.');
+    if (this.cfg.tier !== 'standard' || !this.cfg.vipUrl || !this.cfg.vipToken) throw new ApiError(404, 'vip', 'The VIP servers are not set up on this executor.');
     const cur = this.vipJobs.get(owner);
     if (cur?.state === 'running') return vipJobView(cur);
     const job = newVipJob(owner);
@@ -680,7 +680,7 @@ export class ExecutorService {
   private async runVipMove(job: VipJob): Promise<void> {
     const owner = job.owner;
     const vip = this.cfg.vipUrl!.replace(/\/+$/, '');
-    const token = this.cfg.builderToken ?? '';
+    const token = this.cfg.vipToken ?? '';
     const bots = this.algos.list(owner).filter((a) => a.spec?.bot === true && !FINAL_STATUSES.has(a.status));
     job.bots = bots.length;
     const paused: string[] = [];

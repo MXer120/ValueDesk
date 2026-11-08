@@ -8,7 +8,7 @@
  *   seal    its SoDEX API key, re-sealed to the VIP executor's import key (Secrets.sealTo: ECDH + AES-GCM, the
  *           format a browser import uses) - never in the clear on the wire
  *   send    the key, its signed record (terms, consents) and its bots' records (books, children) to the VIP
- *           executor's internal import (X-Internal-Token); it adopts them under the same ids and resumes them
+ *           executor's internal import (X-Internal-Token = EXECUTOR_VIP_TOKEN); it adopts them under the same ids and resumes them
  *   finish  here the bots end as handed over (nothing closed), the key is dropped, the wallet is marked moved
  *
  * Both executors keep the same executor id, so every signature the wallet made reads the same on both. A failure

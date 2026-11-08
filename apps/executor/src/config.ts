@@ -83,9 +83,11 @@ export interface ExecutorConfig {
    * VIP (vip.ts): EXECUTOR_TIER 'standard' (default) or 'vip' (the AWS Tokyo box). A standard executor with
    * EXECUTOR_VIP_URL (the VIP executor's API base, e.g. https://vip.internal/api/copy/v1) offers the move; it asks
    * EXECUTOR_VIP_CHECK_URL (else the builder URL's server /api/vs/bots/vip) whether a wallet is VIP, unless
-   * EXECUTOR_VIP_OPEN=1 (tests, local runs). Both sides use EXECUTOR_BUILDER_TOKEN as the internal token.
+   * EXECUTOR_VIP_OPEN=1 (tests, local runs). Both sides share EXECUTOR_VIP_TOKEN (its own secret, not the API
+   * server's internal token: a leaked VIP token reads nothing on the API server). Unset: no move.
    */
   tier: 'standard' | 'vip';
+  vipToken: string | null;
   vipUrl: string | null;
   vipCheckUrl: string | null;
   vipOpen: boolean;
@@ -236,6 +238,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ExecutorConfig
     betaUrl: betaUrlFrom(env.EXECUTOR_BETA_URL, env.EXECUTOR_BUILDER_URL),
     calendarUrl: calendarUrlFrom(env.EXECUTOR_CALENDAR_URL, env.EXECUTOR_BUILDER_URL),
     tier: env.EXECUTOR_TIER?.trim() === 'vip' ? 'vip' : 'standard',
+    vipToken: env.EXECUTOR_VIP_TOKEN?.trim() || null,
     vipUrl: env.EXECUTOR_VIP_URL?.trim() ? builderUrl(env.EXECUTOR_VIP_URL) : null,
     vipCheckUrl: vipCheckUrlFrom(env.EXECUTOR_VIP_CHECK_URL, env.EXECUTOR_BUILDER_URL),
     vipOpen: env.EXECUTOR_VIP_OPEN?.trim() === '1',
