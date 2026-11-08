@@ -24,7 +24,12 @@ import {
   type SignedCopyRequest,
   type SiteTermsRecord,
   type VipMoveView,
+  DELEGABLE_ACTIONS,
+  DELEGATION_TTL_MS,
+  signCopyRequestWithKey,
 } from '@copy-engine';
+import { bytesToHex, hexToBytes, privateKeyToAddress } from '@sodex-core';
+import { secp256k1 } from '@noble/curves/secp256k1';
 import { getChainId, signTypedData, type Eip1193Provider } from '../wallet';
 
 export const HOSTED_BASE = '/api/copy/v1';
@@ -67,8 +72,82 @@ export function selfUrlProblem(url: string): string | null {
 export async function signCopy(provider: Eip1193Provider, owner: string, executor: string, action: CopyAction, payload: unknown): Promise<SignedCopyRequest> {
   const chainId = await getChainId(provider);
   const req = buildCopyRequest({ action, owner, executor, payload, chainId });
+  // Everyday actions (start, stop, pause, save, sign-in...) are signed by this browser's day key: the wallet signs
+  // once a day at most (owner 2026-11-08). The terms and a trading key always take the wallet itself.
+  if (DELEGABLE_ACTIONS.has(action)) {
+    const day = await dayKey(provider, owner, executor, chainId);
+    if (day) return { ...req, signature: signCopyRequestWithKey(req, day.key), delegation: day.approval };
+  }
   const signature = await signTypedData(provider, owner, copyRequestTypedData(req));
   return { ...req, signature };
+}
+
+/**
+ * The day key: a secp256k1 key made in this browser, approved by the wallet with one 'delegate' signature, valid 24 h
+ * (DELEGATION_TTL_MS) for this executor id. Kept in localStorage (a new one is approved once it has less than ten
+ * minutes left, or when storage is refused). It can sign only DELEGABLE_ACTIONS; the executor checks the approval on
+ * every request (verifyCopyRequest), so nothing about it is stored there.
+ */
+interface DayKey { key: Uint8Array; approval: SignedCopyRequest; expiresAt: number }
+const dayKeyName = (executor: string, owner: string, chainId: number) => `vd.copy.daykey:${executor}:${chainId}:${owner.toLowerCase()}`;
+const dayKeys = new Map<string, DayKey>();
+const dayKeyPending = new Map<string, Promise<DayKey | null>>();
+async function dayKey(provider: Eip1193Provider, owner: string, executor: string, chainId: number): Promise<DayKey | null> {
+  const name = dayKeyName(executor, owner, chainId);
+  const fresh = (d: DayKey | null | undefined): d is DayKey => !!d && d.expiresAt - Date.now() > 10 * 60_000;
+  const held = dayKeys.get(name);
+  if (fresh(held)) return held;
+  try {
+    const raw = localStorage.getItem(name);
+    if (raw) {
+      const j = JSON.parse(raw) as { key: string; approval: SignedCopyRequest; expiresAt: number };
+      const d: DayKey = { key: hexToBytes(j.key as `0x${string}`), approval: j.approval, expiresAt: j.expiresAt };
+      if (fresh(d)) {
+        dayKeys.set(name, d);
+        return d;
+      }
+    }
+  } catch {
+    /* unreadable: a new one */
+  }
+  // One approval at a time: actions that wait on it all use the same key.
+  const pending = dayKeyPending.get(name);
+  if (pending) return pending;
+  const make = (async (): Promise<DayKey | null> => {
+    const key = secp256k1.utils.randomPrivateKey();
+    const address = privateKeyToAddress(key).toLowerCase();
+    const expiresAt = Date.now() + DELEGATION_TTL_MS - 60_000;
+    const req = buildCopyRequest({ action: 'delegate', owner, executor, payload: { key: address, expiresAt }, chainId, ttlMs: DELEGATION_TTL_MS - 60_000 });
+    const signature = await signTypedData(provider, owner, copyRequestTypedData(req));
+    const d: DayKey = { key, approval: { ...req, signature }, expiresAt };
+    dayKeys.set(name, d);
+    try {
+      localStorage.setItem(name, JSON.stringify({ key: bytesToHex(key), approval: d.approval, expiresAt }));
+    } catch {
+      /* private mode: kept in this tab only */
+    }
+    return d;
+  })();
+  dayKeyPending.set(name, make);
+  try {
+    return await make;
+  } finally {
+    dayKeyPending.delete(name);
+  }
+}
+
+/** Forget this browser's day keys for a wallet (sign-out, a refused approval): the next action asks the wallet again. */
+export function forgetDayKeys(owner: string): void {
+  const o = owner.toLowerCase();
+  for (const k of [...dayKeys.keys()]) if (k.endsWith(`:${o}`)) dayKeys.delete(k);
+  try {
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith('vd.copy.daykey:') && k.endsWith(`:${o}`)) localStorage.removeItem(k);
+    }
+  } catch {
+    /* private mode */
+  }
 }
 
 /**

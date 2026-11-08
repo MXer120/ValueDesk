@@ -395,7 +395,7 @@ export function BotsVip({ ctx, compact, stage, strip }: { ctx: BotsCtx; compact?
   const move = async () => {
     const ok = await confirm({
       title: 'Move your bots to the VIP servers?',
-      body: 'Your bots pause for a few seconds, then go on from the VIP servers with the same books and settings. Nothing is closed. One signature.',
+      body: 'Your bots pause for a few seconds, then go on from the VIP servers with the same books and settings. Nothing is closed.',
       confirmLabel: 'Move to VIP',
     });
     if (!ok) { setHandoff(false); return; }

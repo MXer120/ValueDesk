@@ -18,7 +18,7 @@
  * Reads use a short-lived session token obtained with one signed 'session'
  * request.
  */
-import { ZERO_ADDRESS, bytesToHex, hashTypedData, hexToBytes, recoverAddress, type TypedData } from '../../sodex-core/src/index.ts';
+import { ZERO_ADDRESS, bytesToHex, hashTypedData, hexToBytes, recoverAddress, signDigest, type TypedData } from '../../sodex-core/src/index.ts';
 import type { RegionPolicy } from './policy.ts';
 import type { CopyView } from './runtime.ts';
 import type { ActivityEntry, CopyMode, CopySettings } from './types.ts';
@@ -59,9 +59,22 @@ export type CopyAction =
   /** Pause, resume or cancel an algo order, or cancel all of them. */
   | 'algo-action'
   /** Move this wallet's bots to the VIP executor (payload {to: 'vip'}): one signature, run server to server. */
-  | 'vip-move';
+  | 'vip-move'
+  /**
+   * Let a key this browser made sign this wallet's everyday actions for at most a day (payload {key, expiresAt}):
+   * the one wallet signature a day (owner 2026-11-08: "not every action should need a sign ... once per day max").
+   */
+  | 'delegate';
 
-export const COPY_ACTIONS: readonly CopyAction[] = ['session', 'accept-terms', 'accept-site-terms', 'create-key', 'delete-key', 'subscribe', 'update', 'pause', 'resume', 'stop', 'stop-all', 'algo-start', 'algo-action', 'vip-move'];
+export const COPY_ACTIONS: readonly CopyAction[] = ['session', 'accept-terms', 'accept-site-terms', 'create-key', 'delete-key', 'subscribe', 'update', 'pause', 'resume', 'stop', 'stop-all', 'algo-start', 'algo-action', 'vip-move', 'delegate'];
+
+/**
+ * What a day key (action 'delegate') may sign: the everyday actions. Never the terms, a trading key's creation or
+ * removal, or another delegation - those always take the wallet itself.
+ */
+export const DELEGABLE_ACTIONS: ReadonlySet<CopyAction> = new Set<CopyAction>(['session', 'subscribe', 'update', 'pause', 'resume', 'stop', 'stop-all', 'algo-start', 'algo-action', 'vip-move']);
+/** How long a day key lives at most. */
+export const DELEGATION_TTL_MS = 24 * 60 * 60_000;
 
 export const COPY_REQUEST_FIELDS = [
   { name: 'action', type: 'string' },
@@ -87,6 +100,11 @@ export interface CopyRequest {
 export interface SignedCopyRequest extends CopyRequest {
   /** 0x + 65 bytes (r, s, v). */
   signature: string;
+  /**
+   * Signed by a day key, not the wallet: the wallet's own signed 'delegate' request naming that key, valid now. Only
+   * for DELEGABLE_ACTIONS (verifyCopyRequest).
+   */
+  delegation?: SignedCopyRequest;
 }
 
 /** JSON with object keys sorted at every level: the exact text a wallet shows and signs. */
@@ -135,7 +153,7 @@ export const REQUEST_TTL_MS = 5 * 60_000;
 export const TERMS_TTL_MS = 365 * 86_400_000;
 /** An acceptance of terms - the copy terms or ValueDesk's own: a statement, valid a year. */
 export const isStatement = (action: CopyAction): boolean => action === 'accept-terms' || action === 'accept-site-terms';
-const MAX_WINDOW_MS = (action: CopyAction): number => (isStatement(action) ? TERMS_TTL_MS + 86_400_000 : 60 * 60_000);
+const MAX_WINDOW_MS = (action: CopyAction): number => (isStatement(action) ? TERMS_TTL_MS + 86_400_000 : action === 'delegate' ? DELEGATION_TTL_MS + 60_000 : 60 * 60_000);
 
 /** Build an unsigned request for `action` with `payload`, valid for `ttlMs`. */
 export function buildCopyRequest(o: { action: CopyAction; owner: string; executor: string; payload: unknown; chainId: number; now?: number; ttlMs?: number }): CopyRequest {
@@ -181,7 +199,8 @@ export function verifyCopyRequest(r: unknown, o: { executor: string; now?: numbe
   if (deadline < now) return { ok: false, error: "this request has expired; sign it again (if it keeps happening, check your computer's clock: it may be behind)" };
   if (deadline - nonce > MAX_WINDOW_MS(action)) return { ok: false, error: 'this request is valid for longer than allowed' };
   const skew = o.maxAgeMs ?? 15 * 60_000;
-  if (nonce - now > skew || (!isStatement(action) && now - nonce > skew)) return { ok: false, error: 'the request time is too far from now; check your clock' };
+  // A delegation is signed once and used all day: its deadline bounds it, not its age.
+  if (nonce - now > skew || (!isStatement(action) && action !== 'delegate' && now - nonce > skew)) return { ok: false, error: 'the request time is too far from now; check your clock' };
   let payload: unknown;
   try {
     payload = JSON.parse(q.payload);
@@ -197,8 +216,25 @@ export function verifyCopyRequest(r: unknown, o: { executor: string; now?: numbe
   } catch {
     return { ok: false, error: 'the signature cannot be read' };
   }
-  if (signer !== owner) return { ok: false, error: 'the signature is not from this wallet' };
+  if (signer !== owner) {
+    // A day key's signature: the wallet's delegation must name this key, for this executor, and be valid now.
+    const d = q.delegation as SignedCopyRequest | undefined;
+    if (!d || !DELEGABLE_ACTIONS.has(action)) return { ok: false, error: 'the signature is not from this wallet' };
+    if (d.action !== 'delegate' || (d as { delegation?: unknown }).delegation !== undefined) return { ok: false, error: 'the day key\'s approval is not a delegation' };
+    const dv = verifyCopyRequest(d, { executor: o.executor, now, maxAgeMs: o.maxAgeMs });
+    if (!dv.ok) return { ok: false, error: `the day key's approval does not hold: ${dv.error}` };
+    if (d.owner.toLowerCase() !== owner) return { ok: false, error: 'the day key was approved by another wallet' };
+    const p = dv.payload as { key?: unknown; expiresAt?: unknown };
+    if (typeof p.key !== 'string' || p.key.toLowerCase() !== signer) return { ok: false, error: 'the signature is not from this wallet or its day key' };
+    if (typeof p.expiresAt !== 'number' || !(p.expiresAt > now) || p.expiresAt - Number(d.nonce) > DELEGATION_TTL_MS + 60_000) return { ok: false, error: 'the day key has expired; approve a new one with your wallet' };
+  }
   return { ok: true, digest, payload };
+}
+
+/** Sign a request with a day key (a 32-byte secp256k1 private key): 0x + r, s, v as the wallet would. */
+export function signCopyRequestWithKey(r: CopyRequest, privateKey: Uint8Array): string {
+  const wire = signDigest(hexToBytes(copyRequestDigest(r)), privateKey, 0);
+  return bytesToHex(wire.slice(1));
 }
 
 /* --------------------------------------------------------------- payloads ----- */

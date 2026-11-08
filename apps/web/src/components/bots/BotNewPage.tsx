@@ -6,7 +6,7 @@
  *   2 Market   one or several markets from a ranked table: price, activity per hour, what $1M does there, the
  *              uninformed flow's share, the spread. Several markets start one bot each, with the same settings.
  *   3 Settings three sub-steps: Size & risk, Quoting (simple, advanced folded), Safeguards (BotSettings)
- *   4 Review   the name; the receipt holds the rest; Start (asks first; one signature per bot)
+ *   4 Review   the name; the receipt holds the rest; Start (asks first; the wallet signs at most once a day)
  *
  * The receipt on the right: the estimate per $1M with its range, how it adds up (the market's reading, the bot,
  * each safeguard, the wallet's own bots: bots/estimate.ts), what will run, and the balance it needs.
@@ -428,7 +428,7 @@ function Receipt({ d, eff, picked, markets, feeBps, feeAdj, paper, floor, runs, 
         <div><span>Sets aside</span><b className={!paper && free !== null && need > free ? 'neg' : ''}>about {fmtUsd(need, 0)}</b></div>
         <div title="Your futures account less what your real bots and copies set aside."><span>Free for bots</span><b>{free === null ? DASH : fmtUsd(free, 0)}</b></div>
         {ownUsd >= 1 && <div title="Margin your own open positions hold now. Not set aside for bots, but it moves with them."><span>Your positions use</span><b>{fmtUsd(ownUsd, 0)}</b></div>}
-        <div><span>Signatures</span><b>{Math.max(1, picked.length)}</b></div>
+        <div title="Your wallet approves a key in this browser once a day; it signs your bot actions until then."><span>Wallet signatures</span><b>at most 1 a day</b></div>
       </footer>
       {children}
     </div>
@@ -563,7 +563,7 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
     const list = [...picked];
     const ok = await confirm({
       title: many ? `Start ${list.length} bots?` : `Start ${d.label.trim() || `${RECIPE[rid].name} ${d.symbol.replace(/-USD$/, '')}`}?`,
-      body: `${RECIPE[rid].name} on ${list.join(', ')}, ${fmtUsd(d.orderUsd, 0)} orders${grid ? '' : `, up to ${fmtUsd(d.maxInventoryUsd, 0)} held each`}${d.maxLossUsd !== null ? `, stops at a ${fmtUsd(d.maxLossUsd, 0)} loss` : ''}.${allNotes.length ? ` ${allNotes.join(' ')}` : ''} ${paper ? 'Practice: no orders are sent.' : `Real orders in your SoDEX account, about ${fmtUsd(needAll, 0)} of margin set aside.`}${many ? ` One signature per bot (${list.length}).` : ''}`,
+      body: `${RECIPE[rid].name} on ${list.join(', ')}, ${fmtUsd(d.orderUsd, 0)} orders${grid ? '' : `, up to ${fmtUsd(d.maxInventoryUsd, 0)} held each`}${d.maxLossUsd !== null ? `, stops at a ${fmtUsd(d.maxLossUsd, 0)} loss` : ''}.${allNotes.length ? ` ${allNotes.join(' ')}` : ''} ${paper ? 'Practice: no orders are sent.' : `Real orders in your SoDEX account, about ${fmtUsd(needAll, 0)} of margin set aside.`}${' Your wallet signs at most once a day; this browser signs the rest.'}`,
       confirmLabel: paper ? (many ? `Start ${list.length} practice bots` : 'Start practice bot') : (many ? `Start ${list.length} bots` : 'Start bot'),
     });
     if (!ok) return;
