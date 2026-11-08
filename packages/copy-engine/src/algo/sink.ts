@@ -129,21 +129,42 @@ export function childrenAction(accountId: number, market: MarketInfo, orders: re
 
 const describe = (e: unknown): string => (e instanceof SodexApiError ? `${e.message}${e.hint ? ` (${e.hint})` : ''}` : e instanceof Error ? e.message : String(e));
 
-/** Rows of a batch answer, matched to the children by client order id. */
+/**
+ * Rows of a batch answer, matched to the children by client order id. A failure row that names none of them is
+ * SoDEX's pre-validation refusing the whole batch (returned once for all of it): every child is refused. A child
+ * with no row of its own proves nothing - it may or may not rest - so it is `outcomeUnknown` (looked up, never
+ * re-sent), not placed: counted as placed it was a ghost "open" order that reset the refusal count.
+ */
 export function readBatch(data: unknown, orders: readonly ChildRequest[]): ChildResult[] {
-  const list = Array.isArray(data) ? (data as OrderResult[]) : unwrapList<OrderResult>(data, 'orders');
-  const failed = new Set(failedOrders(list).map((r) => r.clOrdID));
+  const list = (Array.isArray(data) ? (data as OrderResult[]) : unwrapList<OrderResult>(data, 'orders')).filter((r) => r && typeof r === 'object');
+  const ids = new Set(orders.map((o) => o.clOrdID));
+  const bad = failedOrders(list);
+  const failed = new Set(bad.map((r) => r.clOrdID));
+  const whole = bad.find((r) => !r.clOrdID || !ids.has(r.clOrdID)) ?? null;
   return orders.map((o) => {
     const row = list.find((r) => r.clOrdID === o.clOrdID);
-    const bad = failed.has(o.clOrdID);
-    return {
-      clOrdID: o.clOrdID,
-      ok: !bad,
-      orderId: row?.orderID !== undefined ? String(row.orderID) : null,
-      error: bad ? row?.error || `code ${row?.code}` : null,
-      outcomeUnknown: false,
-    };
+    const own = failed.has(o.clOrdID);
+    if (own || (whole && !(row && row.code === 0))) {
+      const r = own ? row : whole;
+      return { clOrdID: o.clOrdID, ok: false, orderId: null, error: r?.error || `code ${r?.code}`, outcomeUnknown: false };
+    }
+    if (!row) return { clOrdID: o.clOrdID, ok: false, orderId: null, error: 'SoDEX answered without a row for this order', outcomeUnknown: true };
+    return { clOrdID: o.clOrdID, ok: true, orderId: row.orderID !== undefined ? String(row.orderID) : null, error: null, outcomeUnknown: false };
   });
+}
+
+/** An order a cancel could not find is gone already: not an error. */
+const GONE = /not found|unknown order|does not exist|already/i;
+
+/**
+ * The rows of a cancel's answer SoDEX refused for another reason than the order being gone (an order it found and
+ * did not cancel: it may still fill). Empty: every order is cancelled or gone.
+ */
+export function cancelFailures(data: unknown): string[] {
+  const list = Array.isArray(data) ? (data as OrderResult[]) : unwrapList<OrderResult>(data, 'orders');
+  return failedOrders(list)
+    .filter((r) => !GONE.test(r.error ?? ''))
+    .map((r) => `${r.clOrdID ? `${r.clOrdID}: ` : ''}${r.error || `code ${r.code}`}`);
 }
 
 /** Signs with a key registered on the trader's SoDEX account (the executors' sink). */
@@ -190,12 +211,16 @@ export class KeyAlgoSink implements AlgoSink {
 
   async cancel(a: AlgoRecord, market: MarketInfo, clOrdIDs: string[]): Promise<void> {
     if (!clOrdIDs.length) return;
+    let data: unknown;
     try {
-      await this.signAndSend(perpsActions.cancelOrder(a.accountId, clOrdIDs.map((clOrdID) => ({ symbolID: market.id, clOrdID }))));
+      data = await this.signAndSend(perpsActions.cancelOrder(a.accountId, clOrdIDs.map((clOrdID) => ({ symbolID: market.id, clOrdID }))));
     } catch (e) {
-      if (e instanceof SodexApiError && /not found|unknown order|does not exist|already/i.test(e.message)) return;
+      if (e instanceof SodexApiError && GONE.test(e.message)) return;
       throw e;
     }
+    // A batch the envelope calls a success can still refuse some rows: those orders rest on, so the caller must know.
+    const bad = cancelFailures(data);
+    if (bad.length) throw new Error(`SoDEX did not cancel ${bad.length} order${bad.length === 1 ? '' : 's'}: ${bad.join('; ')}`);
   }
 
   async setLeverage(a: AlgoRecord, market: MarketInfo, leverage: number, margin: MarginChoice): Promise<void> {

@@ -32,8 +32,8 @@ const BASE: Record<AlgoKind, Record<string, unknown>> = {
   basket: { kind: 'basket', symbol: 'BTC-USD', side: 'buy', legs: [{ symbol: 'BTC-USD', side: 'buy', usd: 100 }, { symbol: 'ETH-USD', side: 'sell', usd: 100 }], style: 'swarm', clips: 4, inFlight: 2, waveMs: 1_000, slippageBps: 20 },
   bracket: { kind: 'bracket', symbol: 'BTC-USD', side: 'buy', quantity: '0.01', entry: 'market', exits: { tpPct: 0.02 } },
   sweep: { kind: 'sweep', symbol: 'BTC-USD', side: 'buy', quantity: '0.01', slippageBps: 10 },
-  mm: { kind: 'mm', symbol: 'BTC-USD', orderUsd: 20, maxInventoryUsd: 100 },
-  grid: { kind: 'grid', symbol: 'BTC-USD', low: 55_000, high: 65_000, levels: 10, orderUsd: 20 },
+  mm: { kind: 'mm', maxLossUsd: 1_000_000, symbol: 'BTC-USD', orderUsd: 20, maxInventoryUsd: 100 },
+  grid: { kind: 'grid', maxLossUsd: 1_000_000, symbol: 'BTC-USD', low: 55_000, high: 65_000, levels: 10, orderUsd: 20 },
 };
 
 const accepted = (x: Record<string, unknown>, what: string): AlgoSpec => {

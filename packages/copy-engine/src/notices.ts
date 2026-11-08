@@ -17,7 +17,7 @@ import type { AssetVerdict, Subscription, SubscriptionStatus } from './types.ts'
 /** How much it matters: info (finished, closed by its stop), warn (stopped or held by the engine, made smaller outside), error (failed, halted, a position closed outside, a liquidation). */
 export type NoticeGrade = 'info' | 'warn' | 'error';
 export type NoticeSource = 'algo' | 'copy';
-export type NoticeKind = 'done' | 'ended' | 'failed' | 'stopped' | 'held' | 'halted' | 'blocked' | 'paused' | 'closed' | 'reduced' | 'different-asset' | 'same-asset' | 'not-copied' | 'delisted';
+export type NoticeKind = 'done' | 'ended' | 'failed' | 'stopped' | 'held' | 'halted' | 'blocked' | 'paused' | 'closed' | 'reduced' | 'different-asset' | 'same-asset' | 'not-copied' | 'delisted' | 'key-expiry';
 
 export interface EngineNotice {
   /** Stable for one event: `${source}:${ref}:${kind}:${at}` - a repeat is the same notice. */
@@ -45,6 +45,8 @@ const mk = (n: Omit<EngineNotice, 'id'>): EngineNotice => ({ ...n, id: `${n.sour
 export function algoName(a: AlgoRecord): string {
   const s = a.spec;
   if (s.kind === 'basket') return `Basket of ${s.legs.length} markets`;
+  // A bot buys and sells: its own name, else what it is and where - never a side (it is not "a buy").
+  if (s.kind === 'mm' || s.kind === 'grid') return s.label ?? `${s.kind === 'mm' ? 'Market maker' : 'Grid'} on ${s.symbol}`;
   return `${ALGO_NAMES[s.kind]} ${'side' in s && s.side === 'sell' ? 'sell' : 'buy'} on ${'symbol' in s ? s.symbol : ''}`.trim();
 }
 

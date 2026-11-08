@@ -337,7 +337,7 @@ export interface AlgoUpdatePatch {
 /** The fields of an AlgoUpdatePatch, for checking a signed one. */
 export const ALGO_UPDATE_FIELDS: ReadonlyArray<keyof AlgoUpdatePatch> = [
   'quantity', 'limitPrice', 'maxSpreadBps', 'label',
-  'orderUsd', 'maxInventoryUsd', 'offsetTicks', 'chaseTicks', 'minRepriceMs', 'skewTicks', 'edgeBps', 'queueGuard', 'levels', 'moveGuard', 'refBps', 'pullBps', 'placeBps', 'calmBps', 'calmMs', 'stillBps', 'stillMs', 'restMs', 'flowGate', 'quiet', 'volumeTargetUsd', 'maxLossUsd', 'endAt', 'onStop', 'outOfRange',
+  'orderUsd', 'maxInventoryUsd', 'offsetTicks', 'chaseTicks', 'minRepriceMs', 'skewTicks', 'edgeBps', 'queueGuard', 'levels', 'moveGuard', 'refBps', 'pullBps', 'placeBps', 'calmBps', 'calmMs', 'stillBps', 'stillMs', 'restMs', 'flowGate', 'quiet', 'quietOnly', 'news', 'volumeTargetUsd', 'maxLossUsd', 'endAt', 'onStop', 'outOfRange',
 ];
 
 /* -------------------------------------------------------------- responses ----- */
@@ -424,6 +424,25 @@ export interface MeResponse {
   copies: CopyView[];
   /** Its bots moved to the VIP executor (the page then talks to that one). Absent on an older executor. */
   movedTo?: 'vip' | null;
+  /**
+   * The wallet's bot fee now (the executor's botFee: the bot ladder by its 14-day volume, or lower by VIP or a fee
+   * program such as the beta's 30 days): tenths of a bp, whether it is VIP's, and until when a lowered fee lasts
+   * (null: no end, or the ladder's own step). Absent on an older executor.
+   */
+  bots?: { feeTenths: number; vip: boolean; until: number | null };
+}
+
+/**
+ * An executor's refusal as the web reads it: `{ ok: false, code, error, detail? }`. A bot's codes (service.ts
+ * BotRefusalCode): key, account, beta, limit, bot-capacity, margin, margin-unknown, bot-market, market-copy,
+ * market-algo, market-position, vip-moving, moved. `detail` carries figures for some of them (margin: needUsd,
+ * freeUsd, reservedUsd, equityUsd; market-*: the copy, algo or position in the way).
+ */
+export interface ExecutorRefusal {
+  ok: false;
+  code: string;
+  error: string;
+  detail?: Record<string, unknown>;
 }
 
 /** A VIP move as its owner reads it (POST /vip/move starts it, GET /vip/move follows it). */
@@ -436,6 +455,8 @@ export interface VipMoveView {
   bots: number;
   error: string | null;
   session: { token: string; expiresAt: number } | null;
+  /** How it ended for the bots: moved, not-moved (resumed here), unknown (paused here until checked). Absent on an older executor. */
+  outcome?: 'moved' | 'not-moved' | 'unknown';
 }
 
 export interface ActivityResponse {

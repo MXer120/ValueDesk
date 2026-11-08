@@ -763,6 +763,11 @@ export interface BotBook {
    */
   carryQty?: number;
   carryValue?: number;
+  /**
+   * The mark when it ended. An ended bot is valued at it, not at the mark now: what it kept (a "keep" stop, Stop all)
+   * is no longer its to manage, so its PnL and series stop moving at the stop.
+   */
+  endMark?: number;
   /** [time, volume so far, net PnL at the mark then, fees so far] - one point every few minutes, thinned as it grows. */
   series: Array<[number, number, number, number]>;
   /**

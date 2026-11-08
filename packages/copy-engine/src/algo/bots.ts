@@ -124,6 +124,17 @@ export interface MmQuote {
   side: Side;
   price: number;
   quantity: number;
+  /** The side that unwinds what it holds: reduce-only, never more than it holds (it cannot flip the position). */
+  reduceOnly?: boolean;
+}
+
+/**
+ * What one quote really is in USD at `price`: the order size, or SoDEX's minimum order where that is larger (each
+ * quote goes out at the minimum at least). The cap, the ladder's room and the margin a bot sets aside count this,
+ * not orderUsd: a $12 order on a market with a $100 minimum holds $100 a fill.
+ */
+export function botQuoteUsd(orderUsd: number, m: MarketInfo, price: number): number {
+  return price > 0 ? Math.max(orderUsd, minChildQty(m, price) * price) : orderUsd;
 }
 
 /**
@@ -132,9 +143,10 @@ export interface MmQuote {
  *     `edgeBps` from both the mid and the mark (in a wide spread: one tick inside, never closer to fair than that);
  *   - the side that adds to what it holds steps back by skewTicks x |held| / cap (rounded), so the side
  *     that unwinds is the one at the touch;
- *   - a side that would take it past the cap is not quoted; the side that unwinds is sized up to what it
- *     holds when that is less than one order, so it can always reach flat;
- *   - a quote under SoDEX's minimum is raised to it;
+ *   - a quote under SoDEX's minimum is raised to it, and the cap counts that real size: a side whose quote would
+ *     take what it holds past the cap is not quoted;
+ *   - the side that unwinds is reduce-only and never more than it holds (it ends flat, never the other way); what it
+ *     holds under SoDEX's minimum is not quoted (no order SoDEX takes can unwind it without flipping);
  *   - with a queue guard, the side that adds is not quoted while its own best price's queue is thin (queueShare);
  *   - with `fair` (the Binance-led maker, spec.ref): the side that adds rests refBps from it (0: at the touch as above)
  *     and is not quoted within pullBps of it; the side that unwinds at a quarter of refBps, never through it.
@@ -147,7 +159,8 @@ export function mmQuotes(s: Pick<MmSpec, 'orderUsd' | 'maxInventoryUsd' | 'offse
   const room = Math.round((q.ask - q.bid) / tick);
   for (const side of ['buy', 'sell'] as const) {
     const adds = side === 'buy' ? inventory >= 0 : inventory <= 0;
-    // The cap: an order on the adding side may not take what it holds past it.
+    // The cap, early (the exact check on the real size follows once the price is known): an order on the adding side
+    // may not take what it holds past it.
     if (adds && Math.abs(invUsd) + s.orderUsd > s.maxInventoryUsd + 1e-9) continue;
     // The queue guard: a thin queue on its own side is about to be traded through - the fill would be the move against it.
     const share = queueShare(q, side);
@@ -179,11 +192,17 @@ export function mmQuotes(s: Pick<MmSpec, 'orderUsd' | 'maxInventoryUsd' | 'offse
     price = side === 'buy' ? Math.min(price, q.ask - tick) : Math.max(price, q.bid + tick);
     price = side === 'buy' ? snapDown(price, m.tickSize) : snapUp(price, m.tickSize);
     if (!(price > 0)) continue;
-    let qty = floorStep(s.orderUsd / price, m);
-    // The unwinding side: no more than it holds where that is less than an order (it ends flat, not the other way).
-    if (!adds && Math.abs(inventory) > 0 && Math.abs(inventory) < qty) qty = floorStep(Math.abs(inventory), m);
-    qty = Math.max(qty, minChildQty(m, price));
-    out.push({ side, price, quantity: qty });
+    let qty = Math.max(floorStep(s.orderUsd / price, m), minChildQty(m, price));
+    if (adds) {
+      // The cap on the size that really goes out (SoDEX's minimum included).
+      if (Math.abs(invUsd) + botQuoteUsd(s.orderUsd, m, price) > s.maxInventoryUsd + 1e-9) continue;
+      out.push({ side, price, quantity: qty });
+      continue;
+    }
+    // The unwinding side: no more than it holds, reduce-only. Under SoDEX's minimum it cannot be quoted at all.
+    qty = Math.min(qty, floorStep(Math.abs(inventory), m));
+    if (qty < minChildQty(m, price) - 1e-12) continue;
+    out.push({ side, price, quantity: qty, reduceOnly: true });
   }
   return out;
 }
@@ -379,19 +398,24 @@ export function quietWindowAt(windows: readonly QuietWindow[] | undefined, at: n
  * figure New bot shows as "balance needed"; the executor refuses a real bot that would take the wallet's bots past
  * its account value.
  */
-export function botReserveUsd(s: AlgoSpec): number {
-  if (s.kind === 'mm') return s.maxInventoryUsd + 2 * s.orderUsd * Math.max(1, s.levels ?? 1);
-  if (s.kind === 'grid') return s.orderUsd * s.levels;
+export function botReserveUsd(s: AlgoSpec, minOrderUsd?: number | null): number {
+  // Each quote at its real size: SoDEX's minimum order where that is above the order size (botQuoteUsd).
+  const each = s.kind === 'mm' || s.kind === 'grid' ? Math.max(s.orderUsd, minOrderUsd ?? 0) : 0;
+  if (s.kind === 'mm') return s.maxInventoryUsd + 2 * each * Math.max(1, s.levels ?? 1);
+  if (s.kind === 'grid') return each * s.levels;
   return 0;
 }
 
 /**
  * The MARGIN a bot sets aside (owner 2026-11-08: "this needs to be margin allocated"): what it may hold and quote
  * (botReserveUsd, notional) at its leverage. A bot with no leverage of its own counts at 1x (the most it could need).
+ * `minOrderUsd`: SoDEX's minimum order on its market (each quote is at least that); `ceiling`: the region's leverage
+ * ceiling (EEA 2x) - the bot trades at no more than it, so its margin is counted at no more than it either.
  */
-export function botMarginUsd(s: AlgoSpec): number {
-  const lev = Math.max(1, Math.floor(s.leverage ?? 1));
-  return botReserveUsd(s) / lev;
+export function botMarginUsd(s: AlgoSpec, minOrderUsd?: number | null, ceiling?: number | null): number {
+  const own = s.leverage ?? 1;
+  const lev = Math.max(1, Math.floor(ceiling !== null && ceiling !== undefined && ceiling > 0 ? Math.min(own, ceiling) : own));
+  return botReserveUsd(s, minOrderUsd) / lev;
 }
 
 /**

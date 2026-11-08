@@ -245,7 +245,10 @@ export function checkSizes(s: AlgoSpec, m: MarketInfo, ctx: SizeContext): SizeCh
       // so that is a note, not an error. Only a quote over SoDEX's largest is refused.
       const q = floorStep(s.orderUsd / px, m);
       const minQ = minChildQty(m, px);
-      if (q < minQ - 1e-12) out.notes.push(`Each quote goes out at SoDEX's minimum here, about ${moneyUp(minQ * px)}.`);
+      // A max holding under one quote at its real size could never quote the side that adds: the bot would hold
+      // nothing and trade nothing, or (as it was before) hold several times what the trader set. Refused.
+      if (s.maxInventoryUsd < minQ * px - 1e-9) out.errors.push(`Your max holding (${money(s.maxInventoryUsd)}) is under one quote here: each quote goes out at ${minWords(m, px)}. Raise the max holding to at least ${moneyUp(minQ * px)}.`);
+      else if (q < minQ - 1e-12) out.notes.push(`Each quote goes out at SoDEX's minimum here, about ${moneyUp(minQ * px)}.`);
       else out.errors.push(...oneOrder(q, px, m, 'Each quote'));
       break;
     }

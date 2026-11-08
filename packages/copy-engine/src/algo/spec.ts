@@ -313,12 +313,18 @@ function base(o: Obj, kind: AlgoKind, e: Errors): AlgoBase {
   return b;
 }
 
-/** A bot's limits: volume target, loss limit, end time, what happens to what it holds when it stops. */
-function botLimits(o: Obj, e: Errors): BotLimits {
+/**
+ * A bot's limits: volume target, loss limit, end time, what happens to what it holds when it stops. A real bot
+ * (not practice) must have a loss limit (audit 2026-11-08): it trades unattended with real money, and the loss
+ * limit is what stops it when the market runs against what it holds.
+ */
+function botLimits(o: Obj, e: Errors, paper: boolean): BotLimits {
   const L = ALGO_LIMITS.bot;
+  const maxLossUsd = opt(o, 'maxLossUsd', 'Loss limit', L.maxLossUsd, e);
+  if (!paper && maxLossUsd === null && !e.maxLossUsd) e.maxLossUsd = 'A real bot needs a loss limit: set the most it may lose before it stops.';
   return {
     volumeTargetUsd: opt(o, 'volumeTargetUsd', 'Volume target', L.volumeTargetUsd, e),
-    maxLossUsd: opt(o, 'maxLossUsd', 'Loss limit', L.maxLossUsd, e),
+    maxLossUsd,
     endAt: time(o, 'endAt', 'End time', e),
     onStop: oneOf(o, 'onStop', 'When it stops', ['close', 'keep'] as const, 'close', e),
   };
@@ -704,7 +710,7 @@ export function checkAlgoSpec(input: unknown, depth = 0): AlgoSpecCheck {
       if (b.reduceOnly) e.reduceOnly = 'A volume maker quotes both sides: it cannot be reduce-only.';
       spec = {
         ...b,
-        ...botLimits(o, e),
+        ...botLimits(o, e, b.paper),
         kind,
         side: 'buy',
         orderUsd,
@@ -766,7 +772,7 @@ export function checkAlgoSpec(input: unknown, depth = 0): AlgoSpecCheck {
       if (b.reduceOnly) e.reduceOnly = 'A grid buys and sells: it cannot be reduce-only.';
       spec = {
         ...b,
-        ...botLimits(o, e),
+        ...botLimits(o, e, b.paper),
         kind,
         side: 'buy',
         low,

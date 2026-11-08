@@ -90,6 +90,16 @@ export interface AlgoMarket {
 
 /** A quote older than this is not a price. */
 export const QUOTE_MAX_AGE_MS = 15_000;
+/**
+ * ...and for a bot, this (audit 2026-11-08): a bot rests quotes at the touch, and a touch 15 s old is where takers
+ * fill them after the price has gone. The feed keeps quotes fresh on still markets (refreshQuotes), so a bot holds
+ * only when SoDEX's prices really stop coming.
+ */
+export const BOT_QUOTE_MAX_AGE_MS = 3_000;
+/** A watched market's quote older than this is read by REST (refreshQuotes)... */
+const QUOTE_REFRESH_AGE_MS = 1_000;
+/** ...at most this often for all of them (one read of every market's best prices, weight 2). */
+const QUOTE_REFRESH_EVERY_MS = 1_500;
 const HISTORY_MS = 60 * 60_000;
 
 interface Sample {
@@ -117,6 +127,12 @@ export interface AlgoFeedOptions {
   wsOrigin?: string;
   /** Wallets one socket (one IP) may follow on account channels (default ACCOUNT_USERS_PER_IP). */
   maxAccountUsers?: number;
+  /**
+   * SoDEX's best prices of every market by REST (GET /api/v1/perps/markets/bookTickers). The socket's bookTicker
+   * may stay silent while a market does not move: a watched quote that ages is read here (refreshQuotes), so a still
+   * market keeps a fresh price. Absent: socket only.
+   */
+  bookTickers?: () => Promise<unknown>;
 }
 
 /**
@@ -144,6 +160,8 @@ export class AlgoFeed implements AlgoMarket {
   private orderCbs: Array<(u: OrderUpdate) => void> = [];
   private stateCbs: Array<(up: boolean) => void> = [];
   private sampler: unknown = null;
+  private refreshing = false;
+  private refreshedAt = 0;
 
   constructor(private readonly o: AlgoFeedOptions) {
     const origin = o.wsOrigin ?? GATEWAY_WS_ORIGIN[o.network];
@@ -163,7 +181,11 @@ export class AlgoFeed implements AlgoMarket {
 
   start(): void {
     this.socket.start();
-    this.sampler ??= timers.every(1_000, () => this.sample());
+    this.sampler ??= timers.every(500, () => {
+      const now = Date.now();
+      if (now - this.sampledAt >= 1_000) this.sample(now);
+      void this.refreshQuotes(now);
+    });
   }
 
   stop(): void {
@@ -314,7 +336,44 @@ export class AlgoFeed implements AlgoMarket {
     }
   }
 
+  /**
+   * Watched markets whose quote is older than QUOTE_REFRESH_AGE_MS (a still market the socket says nothing about, or
+   * a subscription that went quiet) read their best prices by REST - at most every QUOTE_REFRESH_EVERY_MS, one read
+   * for all of them. A REST answer never overwrites a socket quote newer than the read.
+   */
+  async refreshQuotes(now = Date.now()): Promise<void> {
+    if (!this.o.bookTickers || this.refreshing || now - this.refreshedAt < QUOTE_REFRESH_EVERY_MS || !this.symbols.size) return;
+    const stale = [...this.symbols].filter((s) => now - (this.quotes.get(s)?.at ?? 0) > QUOTE_REFRESH_AGE_MS);
+    if (!stale.length) return;
+    this.refreshing = true;
+    this.refreshedAt = now;
+    try {
+      const data = await this.o.bookTickers();
+      const list = Array.isArray(data) ? data : ((data as { bookTickers?: unknown[] } | null)?.bookTickers ?? []);
+      const at = Date.now();
+      for (const r of list as Array<Record<string, unknown>>) {
+        const s = typeof r.symbol === 'string' ? r.symbol.toUpperCase() : typeof r.s === 'string' ? r.s.toUpperCase() : null;
+        if (!s || !stale.includes(s)) continue;
+        const bid = toNum(r.bidPx ?? r.bidPrice ?? r.b);
+        const ask = toNum(r.askPx ?? r.askPrice ?? r.a);
+        if (bid === null || ask === null || !(bid > 0) || !(ask >= bid)) continue;
+        const prev = this.quotes.get(s);
+        if (prev && prev.at >= now) continue;
+        const bidSz = toNum(r.bidSz ?? r.bidQty ?? r.B);
+        const askSz = toNum(r.askSz ?? r.askQty ?? r.A);
+        this.quotes.set(s, { bid, ask, at, ...(bidSz !== null && bidSz >= 0 ? { bidSz } : {}), ...(askSz !== null && askSz >= 0 ? { askSz } : {}) });
+      }
+    } catch (e) {
+      this.o.log?.warn('algo feed: best prices by REST failed', { error: String(e) });
+    } finally {
+      this.refreshing = false;
+    }
+  }
+
+  private sampledAt = 0;
+
   private sample(now = Date.now()): void {
+    this.sampledAt = now;
     for (const s of this.symbols) {
       const q = this.quote(s);
       const m = this.marks.get(s);

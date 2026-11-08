@@ -276,26 +276,26 @@ async function step(r: Rig, id: string, advanceMs = 0): Promise<AlgoRecord> {
 }
 
 const add = (r: Rig, spec: Record<string, unknown>) => r.rt.add({ owner: FOLLOWER, accountId: 42, mode: 'hosted', spec: { symbol: 'BTC-USD', ...spec }, seed: 7 });
-const MM = { kind: 'mm', orderUsd: 60, maxInventoryUsd: 180, chaseTicks: 2, minRepriceMs: 3_000, skewTicks: 4 };
+const MM = { kind: 'mm', maxLossUsd: 1_000_000, orderUsd: 60, maxInventoryUsd: 180, chaseTicks: 2, minRepriceMs: 3_000, skewTicks: 4 };
 
 /* ------------------------------------------------------------------ the spec ----- */
 
 test('spec: a volume maker parses with its defaults and is always a bot', () => {
-  const s = parseAlgoSpec({ kind: 'mm', symbol: 'BTC-USD', orderUsd: 50, maxInventoryUsd: 200 });
+  const s = parseAlgoSpec({ kind: 'mm', maxLossUsd: 1_000_000, symbol: 'BTC-USD', orderUsd: 50, maxInventoryUsd: 200 });
   assert.equal(s.kind, 'mm');
   assert.equal(s.bot, true);
   if (s.kind !== 'mm') return;
-  assert.deepEqual([s.offsetTicks, s.chaseTicks, s.minRepriceMs, s.skewTicks, s.onStop, s.volumeTargetUsd, s.maxLossUsd], [0, 2, 3_000, 3, 'close', null, null]);
+  assert.deepEqual([s.offsetTicks, s.chaseTicks, s.minRepriceMs, s.skewTicks, s.onStop, s.volumeTargetUsd, s.maxLossUsd], [0, 2, 3_000, 3, 'close', null, 1_000_000]);
 });
 
 test('spec: refusals name the field', () => {
-  assert.ok(checkAlgoSpec({ kind: 'mm', symbol: 'BTC-USD', orderUsd: 100, maxInventoryUsd: 50 }).errors.maxInventoryUsd);
-  assert.ok(checkAlgoSpec({ kind: 'mm', symbol: 'BTC-USD', orderUsd: 5, maxInventoryUsd: 50 }).errors.orderUsd);
-  assert.ok(checkAlgoSpec({ kind: 'grid', symbol: 'BTC-USD', low: 60_000, high: 59_000, levels: 10, orderUsd: 20 }).errors.high);
-  assert.ok(checkAlgoSpec({ kind: 'grid', symbol: 'BTC-USD', low: 50_000, high: 70_000, levels: 61, orderUsd: 20 }).errors.levels);
+  assert.ok(checkAlgoSpec({ kind: 'mm', maxLossUsd: 1_000_000, symbol: 'BTC-USD', orderUsd: 100, maxInventoryUsd: 50 }).errors.maxInventoryUsd);
+  assert.ok(checkAlgoSpec({ kind: 'mm', maxLossUsd: 1_000_000, symbol: 'BTC-USD', orderUsd: 5, maxInventoryUsd: 50 }).errors.orderUsd);
+  assert.ok(checkAlgoSpec({ kind: 'grid', maxLossUsd: 1_000_000, symbol: 'BTC-USD', low: 60_000, high: 59_000, levels: 10, orderUsd: 20 }).errors.high);
+  assert.ok(checkAlgoSpec({ kind: 'grid', maxLossUsd: 1_000_000, symbol: 'BTC-USD', low: 50_000, high: 70_000, levels: 61, orderUsd: 20 }).errors.levels);
   assert.ok(checkAlgoSpec({ kind: 'twap', symbol: 'BTC-USD', side: 'buy', quantity: '1', durationMs: 600_000, slices: 10, bot: true }).errors.bot);
-  assert.ok(checkAlgoSpec({ kind: 'mm', symbol: 'BTC-USD', orderUsd: 50, maxInventoryUsd: 200, exits: { slPct: 0.1 } }).errors.exits);
-  assert.ok(checkAlgoSpec({ kind: 'mm', symbol: 'BTC-USD', orderUsd: 50, maxInventoryUsd: 200, minRepriceMs: 200 }).errors.minRepriceMs, 'no re-price storm: at least a second');
+  assert.ok(checkAlgoSpec({ kind: 'mm', maxLossUsd: 1_000_000, symbol: 'BTC-USD', orderUsd: 50, maxInventoryUsd: 200, exits: { slPct: 0.1 } }).errors.exits);
+  assert.ok(checkAlgoSpec({ kind: 'mm', maxLossUsd: 1_000_000, symbol: 'BTC-USD', orderUsd: 50, maxInventoryUsd: 200, minRepriceMs: 200 }).errors.minRepriceMs, 'no re-price storm: at least a second');
 });
 
 test('spec: only the volume maker and the grid are bots (a DCA is an algo order); a spec from before bots keeps its signed text', () => {
@@ -525,7 +525,7 @@ test('volume maker: every hold that stops it re-pricing takes its quotes off, an
 
 test('grid: the brake takes its levels off; they go back when it lifts', async () => {
   const r = await rig();
-  const a = await add(r, { kind: 'grid', low: 59_000, high: 61_000, levels: 5, orderUsd: 60, onStop: 'keep' });
+  const a = await add(r, { kind: 'grid', maxLossUsd: 1_000_000, low: 59_000, high: 61_000, levels: 5, orderUsd: 60, onStop: 'keep' });
   await step(r, a.id);
   const levels = r.ex.resting.size;
   assert.ok(levels > 0);
@@ -616,7 +616,7 @@ test('volume maker: a restart keeps the book and what rests; nothing is placed t
 
 test('grid: rests on every level but the gap; a buy filled puts a sell one level up; pause and resume', async () => {
   const r = await rig();
-  const a = await add(r, { kind: 'grid', low: 59_000, high: 61_000, levels: 5, orderUsd: 30, spacing: 'linear' });
+  const a = await add(r, { kind: 'grid', maxLossUsd: 1_000_000, low: 59_000, high: 61_000, levels: 5, orderUsd: 30, spacing: 'linear' });
   await step(r, a.id);
   const prices = (side: 'buy' | 'sell') => r.ex.side(side).map((x) => Number(x.price)).sort((x, y) => x - y);
   assert.deepEqual(prices('buy'), [59_000, 59_500]);
@@ -639,11 +639,11 @@ test('grid: rests on every level but the gap; a buy filled puts a sell one level
 test('grid: a level the price is through waits instead of being refused; sizes reach SoDEX\'s minimum', async () => {
   const r = await rig();
   // Owner 2026-11-08: a bot thinks in USD; a level the step puts under SoDEX's minimum goes out at it, said in a note.
-  const low = await add(r, { kind: 'grid', low: 59_000, high: 61_000, levels: 5, orderUsd: 10, spacing: 'linear' });
+  const low = await add(r, { kind: 'grid', maxLossUsd: 1_000_000, low: 59_000, high: 61_000, levels: 5, orderUsd: 10, spacing: 'linear' });
   assert.ok(low.id);
   assert.ok(checkSizes(low.spec, MKT, { price: 60_000, seed: 1, now: clock }).notes.some((n) => n.includes("SoDEX's minimum")));
   await r.rt.cancel(low.id);
-  const a = await add(r, { kind: 'grid', low: 59_000, high: 61_000, levels: 5, orderUsd: 11, spacing: 'linear' });
+  const a = await add(r, { kind: 'grid', maxLossUsd: 1_000_000, low: 59_000, high: 61_000, levels: 5, orderUsd: 11, spacing: 'linear' });
   r.market.set(60_600, 60_602);
   await step(r, a.id);
   // The gap is nearest 60,601: 60,500. Buys at 59,000 / 59,500 / 60,000 rest; the sell at 61,000 rests.
@@ -654,7 +654,7 @@ test('grid: a level the price is through waits instead of being refused; sizes r
 
 test('grid: an update may change the size and limits, not the range', async () => {
   const r = await rig();
-  const a = await add(r, { kind: 'grid', low: 59_000, high: 61_000, levels: 5, orderUsd: 30, spacing: 'linear' });
+  const a = await add(r, { kind: 'grid', maxLossUsd: 1_000_000, low: 59_000, high: 61_000, levels: 5, orderUsd: 30, spacing: 'linear' });
   await step(r, a.id);
   await assert.rejects(r.rt.update(a.id, { low: 58_000 } as never), /range and levels/);
   await r.rt.update(a.id, { orderUsd: 40, maxLossUsd: 5 });
@@ -724,7 +724,7 @@ test('volume maker edge: quotes at least edgeBps from the mid - a round trip ear
   assert.ok(bid!.price <= 59_989 && bid!.price >= 59_988, String(bid!.price));
   assert.ok(ask!.price >= 60_013 && ask!.price <= 60_014, String(ask!.price));
   assert.equal(mmQuotes({ ...s, edgeBps: 0 }, q, MKT, 0, 60_001)[0]!.price, 60_000, 'no edge: the touch');
-  const parsed = parseAlgoSpec({ kind: 'mm', symbol: 'BTC-USD', orderUsd: 50, maxInventoryUsd: 200 });
+  const parsed = parseAlgoSpec({ kind: 'mm', maxLossUsd: 1_000_000, symbol: 'BTC-USD', orderUsd: 50, maxInventoryUsd: 200 });
   assert.ok(!('edgeBps' in parsed), 'no edge: not in the signed text');
 });
 
@@ -833,7 +833,7 @@ test('volume maker move guard: a mid that jumped up 2 ticks in 2 s pulls the ask
 
 test('grid: a level SoDEX refuses waits (3 s, doubling) instead of being sent every step into the refusal limit', async () => {
   const r = await rig();
-  const a = await add(r, { kind: 'grid', low: 59_000, high: 61_000, levels: 5, orderUsd: 30, spacing: 'linear' });
+  const a = await add(r, { kind: 'grid', maxLossUsd: 1_000_000, low: 59_000, high: 61_000, levels: 5, orderUsd: 30, spacing: 'linear' });
   r.ex.refuse = 'insufficient margin';
   for (let i = 0; i < 40; i++) await step(r, a.id, 500);
   const x = r.rt.get(a.id)!;
@@ -847,11 +847,11 @@ test('grid: a level SoDEX refuses waits (3 s, doubling) instead of being sent ev
 /* ------------------------------------------------------- the Binance-led maker ----- */
 
 test('Binance-led maker spec: ref is binance only; its distances only with it, in range', () => {
-  const ok = parseAlgoSpec({ kind: 'mm', symbol: 'BTC-USD', orderUsd: 60, maxInventoryUsd: 180, ref: 'binance', refBps: 2, pullBps: 0.5 });
+  const ok = parseAlgoSpec({ kind: 'mm', maxLossUsd: 1_000_000, symbol: 'BTC-USD', orderUsd: 60, maxInventoryUsd: 180, ref: 'binance', refBps: 2, pullBps: 0.5 });
   assert.ok(ok.kind === 'mm' && ok.ref === 'binance' && ok.refBps === 2 && ok.pullBps === 0.5);
-  assert.match(JSON.stringify(checkAlgoSpec({ kind: 'mm', symbol: 'BTC-USD', orderUsd: 60, maxInventoryUsd: 180, ref: 'okx' }).errors), /binance/);
-  assert.ok(!checkAlgoSpec({ kind: 'mm', symbol: 'BTC-USD', orderUsd: 60, maxInventoryUsd: 180, ref: 'binance', refBps: 80 }).spec, 'refBps above 50');
-  const none = parseAlgoSpec({ kind: 'mm', symbol: 'BTC-USD', orderUsd: 60, maxInventoryUsd: 180, refBps: 2 });
+  assert.match(JSON.stringify(checkAlgoSpec({ kind: 'mm', maxLossUsd: 1_000_000, symbol: 'BTC-USD', orderUsd: 60, maxInventoryUsd: 180, ref: 'okx' }).errors), /binance/);
+  assert.ok(!checkAlgoSpec({ kind: 'mm', maxLossUsd: 1_000_000, symbol: 'BTC-USD', orderUsd: 60, maxInventoryUsd: 180, ref: 'binance', refBps: 80 }).spec, 'refBps above 50');
+  const none = parseAlgoSpec({ kind: 'mm', maxLossUsd: 1_000_000, symbol: 'BTC-USD', orderUsd: 60, maxInventoryUsd: 180, refBps: 2 });
   assert.ok(none.kind === 'mm' && none.refBps === undefined, 'refBps without ref is dropped: a plain maker keeps its signed text');
 });
 
@@ -1026,20 +1026,20 @@ test('restart, clean: the new bot waits until the old one has closed what it hol
 /* ------------------------------------------- volume maker: patient-taker gate and quiet windows ----- */
 
 test('spec: flowGate and quiet parse with their defaults, with or without ref; a spec without them keeps its text', () => {
-  const s = parseAlgoSpec({ kind: 'mm', symbol: 'BTC-USD', orderUsd: 50, maxInventoryUsd: 200, flowGate: { minUsd: 25_000 }, quiet: [{ from: '09:20', to: '09:45', zone: 'new_york' }] });
+  const s = parseAlgoSpec({ kind: 'mm', maxLossUsd: 1_000_000, symbol: 'BTC-USD', orderUsd: 50, maxInventoryUsd: 200, flowGate: { minUsd: 25_000 }, quiet: [{ from: '09:20', to: '09:45', zone: 'new_york' }] });
   if (s.kind !== 'mm') return assert.fail('mm');
   assert.deepEqual(s.flowGate, { minUsd: 25_000, windowMs: 600_000, action: 'pause', shrink: 0.5 });
   assert.deepEqual(s.quiet, [{ from: '09:20', to: '09:45', zone: 'new_york', days: 'all' }]);
-  const r = parseAlgoSpec({ kind: 'mm', symbol: 'BTC-USD', orderUsd: 50, maxInventoryUsd: 200, ref: 'binance', flowGate: { minUsd: 1_000, windowMs: 60_000, action: 'shrink', shrink: 0.25 }, quiet: [{ from: '23:00', to: '01:00', zone: 'london', days: 'weekdays' }] });
+  const r = parseAlgoSpec({ kind: 'mm', maxLossUsd: 1_000_000, symbol: 'BTC-USD', orderUsd: 50, maxInventoryUsd: 200, ref: 'binance', flowGate: { minUsd: 1_000, windowMs: 60_000, action: 'shrink', shrink: 0.25 }, quiet: [{ from: '23:00', to: '01:00', zone: 'london', days: 'weekdays' }] });
   if (r.kind !== 'mm') return assert.fail('mm');
   assert.deepEqual(r.flowGate, { minUsd: 1_000, windowMs: 60_000, action: 'shrink', shrink: 0.25 });
   assert.equal(r.quiet![0]!.days, 'weekdays');
-  const plain = parseAlgoSpec({ kind: 'mm', symbol: 'BTC-USD', orderUsd: 50, maxInventoryUsd: 200, flowGate: null, quiet: [] });
+  const plain = parseAlgoSpec({ kind: 'mm', maxLossUsd: 1_000_000, symbol: 'BTC-USD', orderUsd: 50, maxInventoryUsd: 200, flowGate: null, quiet: [] });
   assert.ok(!canonicalJSON(plain).includes('flowGate') && !canonicalJSON(plain).includes('quiet'));
 });
 
 test('spec: flowGate and quiet refusals name the field', () => {
-  const e = (x: Record<string, unknown>) => checkAlgoSpec({ kind: 'mm', symbol: 'BTC-USD', orderUsd: 50, maxInventoryUsd: 200, ...x }).errors;
+  const e = (x: Record<string, unknown>) => checkAlgoSpec({ kind: 'mm', maxLossUsd: 1_000_000, symbol: 'BTC-USD', orderUsd: 50, maxInventoryUsd: 200, ...x }).errors;
   assert.ok(e({ flowGate: 5 }).flowGate);
   assert.ok(e({ flowGate: { minUsd: 500 } })['flowGate.minUsd']);
   assert.ok(e({ flowGate: { minUsd: 200_000_000 } })['flowGate.minUsd']);
@@ -1119,9 +1119,9 @@ test('news gate: held from before to after a timed release of its level; low and
   assert.equal(newsAt(g, evs, t + 7_200_000), null, 'medium is not high');
   assert.equal(newsAt({ ...g, level: 'medium' }, evs, t + 7_200_000)?.short, 'PPI');
   assert.equal(newsAt(g, evs, t + 9_000_000), null, 'no time: skipped');
-  assert.ok(parseAlgoSpec({ kind: 'mm', symbol: 'BTC-USD', orderUsd: 50, maxInventoryUsd: 200, news: g }).kind === 'mm');
-  assert.throws(() => parseAlgoSpec({ kind: 'mm', symbol: 'BTC-USD', orderUsd: 50, maxInventoryUsd: 200, news: { beforeMin: 0, afterMin: 0 } }));
-  assert.throws(() => parseAlgoSpec({ kind: 'mm', symbol: 'BTC-USD', orderUsd: 50, maxInventoryUsd: 200, quietOnly: true }), 'trading hours need a window');
+  assert.ok(parseAlgoSpec({ kind: 'mm', maxLossUsd: 1_000_000, symbol: 'BTC-USD', orderUsd: 50, maxInventoryUsd: 200, news: g }).kind === 'mm');
+  assert.throws(() => parseAlgoSpec({ kind: 'mm', maxLossUsd: 1_000_000, symbol: 'BTC-USD', orderUsd: 50, maxInventoryUsd: 200, news: { beforeMin: 0, afterMin: 0 } }));
+  assert.throws(() => parseAlgoSpec({ kind: 'mm', maxLossUsd: 1_000_000, symbol: 'BTC-USD', orderUsd: 50, maxInventoryUsd: 200, quietOnly: true }), 'trading hours need a window');
 });
 
 test('volume maker trading hours (quietOnly): quotes only inside its windows; the news gate holds around a release', async () => {
@@ -1262,9 +1262,9 @@ test('bot takers: each print a bot made names who took it - the uninformed (1002
 });
 
 test('smart margining: what a bot sets aside - a maker its max holding and a quote each side per level, a grid an order per level', () => {
-  assert.equal(botReserveUsd(parseAlgoSpec({ kind: 'mm', symbol: 'BTC-USD', orderUsd: 50, maxInventoryUsd: 150 })), 250);
-  assert.equal(botReserveUsd(parseAlgoSpec({ kind: 'mm', symbol: 'BTC-USD', orderUsd: 20, maxInventoryUsd: 100, levels: 3 })), 220);
-  assert.equal(botReserveUsd(parseAlgoSpec({ kind: 'grid', symbol: 'BTC-USD', low: 50_000, high: 70_000, levels: 10, orderUsd: 12 })), 120);
+  assert.equal(botReserveUsd(parseAlgoSpec({ kind: 'mm', maxLossUsd: 1_000_000, symbol: 'BTC-USD', orderUsd: 50, maxInventoryUsd: 150 })), 250);
+  assert.equal(botReserveUsd(parseAlgoSpec({ kind: 'mm', maxLossUsd: 1_000_000, symbol: 'BTC-USD', orderUsd: 20, maxInventoryUsd: 100, levels: 3 })), 220);
+  assert.equal(botReserveUsd(parseAlgoSpec({ kind: 'grid', maxLossUsd: 1_000_000, symbol: 'BTC-USD', low: 50_000, high: 70_000, levels: 10, orderUsd: 12 })), 120);
 });
 
 test('smart margining: a copy sets aside its allocation while it can hold positions, nothing stopped or on paper (owner 2026-11-08)', () => {
@@ -1276,7 +1276,7 @@ test('smart margining: a copy sets aside its allocation while it can hold positi
   assert.equal(copyReserveUsd(c('active', 250, true)), 0, 'paper');
   assert.equal(copyReserveUsd(c('active', -5)), 0, 'never negative');
   // A maker with $60 holding and $20 a side sets aside $100: on a $500 account it fits beside a $400 copy, not a $450 one.
-  const maker = { kind: 'mm', maxInventoryUsd: 60, orderUsd: 20 } as Parameters<typeof botReserveUsd>[0];
+  const maker = { kind: 'mm', maxLossUsd: 1_000_000, maxInventoryUsd: 60, orderUsd: 20 } as Parameters<typeof botReserveUsd>[0];
   assert.equal(botReserveUsd(maker), 100);
   assert.ok(copyReserveUsd(c('active', 400)) + botReserveUsd(maker) <= 500);
   assert.ok(copyReserveUsd(c('active', 450)) + botReserveUsd(maker) > 500);
