@@ -14,6 +14,7 @@
  * and Bots are not places. They trade from the same Perps and Spot accounts, so they sit past
  * a divider, carry an "Activity" label, and show what they did, with no balance of their own.
  */
+import { PortfolioMargin } from '../bots/Allocation';
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { AccountTabs } from '../AccountTabs';
 import { ReadFailed } from '../AccountHistory';
@@ -612,6 +613,7 @@ export function PortfolioPage({ c, provider, onOpenMarket, onOpenTab }: { c: Por
           </div>
           <Promos w={w} onOpenTab={onOpenTab} onWealth={goWealth} botsOpen={botsOpen} />
           <FeeStrip c={c} />
+          {!c.readOnly && <PortfolioMargin address={c.address} provider={provider} />}
           <SummaryPanel c={c} />
           <div id="pfx-sections">
             <Sections c={c} w={w} provider={provider} section={section} setSection={setSection} onOpenMarket={onOpenMarket} onOpenTab={onOpenTab} onWealth={goWealth} />

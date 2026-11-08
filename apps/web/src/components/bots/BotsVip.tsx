@@ -4,7 +4,7 @@
  * server to server (apps/executor vip.ts), and the page follows it full screen: the two server sites, the bots
  * travelling between them, each step as it lands and the clock (the owner's bar: under 20 seconds).
  */
-import { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { onVipPlay } from '../../bots/vipDemo';
 import type { VipMoveView } from '@copy-engine';
 import { fmtUsd } from '../../format';
@@ -12,8 +12,10 @@ import { VIP_BASE, hostedExecutor } from '../../copy/executor';
 import { finishVipMove, readVipMove, startVipMove } from '../../copy/live';
 import { useConfirm } from '../Modal';
 import type { BotsCtx } from './BotsPage';
+import { goBots } from '../../bots/routes';
 import { Button, Icon, Panel, Shell, ShellHeader, StatusPill } from './kit/kit';
 import { GoldMark, VipGround, VipPass, vipPerks } from './VipScene';
+import { BrandMark } from '../BrandMark';
 
 interface Eligibility { eligible: boolean; volumeUsd: number; minUsd: number; days: number; promo?: { until: number | null; label: string } | null }
 
@@ -39,7 +41,8 @@ const STEP_ICON = { check: 'shield', pause: 'pause', seal: 'shield', send: 'laye
 /** Each step is shown for at least this long, so a move that took 80 ms on the servers still reads step by step. */
 const STEP_SHOW_MS = 550;
 
-function MoveScene({ job, onClose }: { job: VipMoveView | null; onClose: () => void }) {
+function MoveScene({ job, onClose, handoff }: { job: VipMoveView | null; onClose: () => void; handoff?: boolean }) {
+  const [closing, close] = useExit(onClose);
   const [now, setNow] = useState(Date.now());
   const t0 = useRef(Date.now());
   // How many steps the scene has shown: one more every STEP_SHOW_MS, never past what the servers finished.
@@ -72,7 +75,7 @@ function MoveScene({ job, onClose }: { job: VipMoveView | null; onClose: () => v
   const progress = real.length ? Math.min(1, shown / real.length) : 0;
   const done = state === 'done';
   return (
-    <div className={`bots-vipmove vipx is-${state}`} role="dialog" aria-modal="true" aria-label="Moving your bots to the VIP servers">
+    <div className={`bots-vipmove vipx is-${state}${handoff ? ' is-handoff' : ''}${closing ? ' is-closing' : ''}`} role="dialog" aria-modal="true" aria-label="Moving your bots to the VIP servers">
       {/* The gold comes up as the move goes: dim while it runs, full once the bots are on VIP. */}
       <VipGround lit={done ? 1 : 0.25 + progress * 0.45} />
       {done && <div className="vipx-burst" aria-hidden="true">{Array.from({ length: 22 }, (_, i) => <i key={i} style={{ ['--a' as string]: `${i * (360 / 22)}deg`, ['--d' as string]: `${(i % 5) * 60}ms` }} />)}</div>}
@@ -93,7 +96,7 @@ function MoveScene({ job, onClose }: { job: VipMoveView | null; onClose: () => v
               <radialGradient id="vipcore" cx="0.35" cy="0.3" r="0.8">
                 <stop offset="0" stopColor="#fff1c2" /><stop offset="0.45" stopColor="#f6dc8e" /><stop offset="0.8" stopColor="#d4a748" /><stop offset="1" stopColor="#8a651f" />
               </radialGradient>
-              <path id="viproute" d="M150,170 C330,40 570,40 750,170" />
+              <path id="viproute" d="M186,146 C330,30 570,30 712,146" />
             </defs>
             <use href="#viproute" className="bots-vipmove__track" />
             <use href="#viproute" className={`bots-vipmove__flow${state === 'running' ? ' is-on' : ''}`} stroke="url(#vipline)" />
@@ -138,8 +141,8 @@ function MoveScene({ job, onClose }: { job: VipMoveView | null; onClose: () => v
 
         {state !== 'running' && (
           <div className="bots-vipmove__act">
-            {done ? <button type="button" className="vipx-cta" onClick={onClose}><Icon name="check" size={15} />Done</button>
-              : <Button variant="secondary" size="md" onClick={onClose}>Close</Button>}
+            {done ? <button type="button" className="vipx-cta" onClick={close}><Icon name="check" size={15} />Done</button>
+              : <Button variant="secondary" size="md" onClick={close}>Close</Button>}
           </div>
         )}
       </div>
@@ -149,29 +152,100 @@ function MoveScene({ job, onClose }: { job: VipMoveView | null; onClose: () => v
 
 /* ------------------------------------------------------------------ the unlock, full screen ----- */
 
+/** Close with a short exit (the scene fades and settles) before it unmounts; at once when motion is reduced. */
+function useExit(onDone: () => void, ms = 320): [boolean, () => void] {
+  const [closing, setClosing] = useState(false);
+  const done = useRef(onDone);
+  done.current = onDone;
+  const close = () => {
+    if (closing) return;
+    const still = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    if (still) { done.current(); return; }
+    setClosing(true);
+    window.setTimeout(() => done.current(), ms);
+  };
+  return [closing, close];
+}
+
+/** The pass leans toward the pointer a little (a few degrees), and back when it leaves; not on touch or reduced motion. */
+function useTilt(): { ref: React.RefObject<HTMLDivElement>; onMove: (e: React.PointerEvent) => void; onLeave: () => void } {
+  const ref = useRef<HTMLDivElement>(null);
+  const frame = useRef(0);
+  const set = (x: number, y: number) => {
+    cancelAnimationFrame(frame.current);
+    frame.current = requestAnimationFrame(() => {
+      const el = ref.current;
+      if (!el) return;
+      el.style.setProperty('--tx', `${(x * 10).toFixed(2)}deg`);
+      el.style.setProperty('--ty', `${(-y * 8).toFixed(2)}deg`);
+      el.style.setProperty('--sx', `${50 + x * 40}%`);
+    });
+  };
+  const onMove = (e: React.PointerEvent) => {
+    if (e.pointerType === 'touch' || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
+    const el = ref.current;
+    if (!el) return;
+    const b = el.getBoundingClientRect();
+    // -1..1 from the pass's centre, eased so the far corners of the screen do not throw it around.
+    const x = Math.max(-1, Math.min(1, (e.clientX - (b.left + b.width / 2)) / (b.width * 1.2)));
+    const y = Math.max(-1, Math.min(1, (e.clientY - (b.top + b.height / 2)) / (b.height * 1.2)));
+    set(x, y);
+  };
+  useEffect(() => () => cancelAnimationFrame(frame.current), []);
+  return { ref, onMove, onLeave: () => set(0, 0) };
+}
+
+/** How long the mark stays plain, then gold, before the card comes in. */
+const LOGO_MS = 750;
+const GOLD_MS = 1500;
+
 /**
- * Becoming VIP, in the launch post's look: the gold mark and the words on the left, the gold pass on the right.
- * `promo`: the beta's VIP for 30 days (every product's lowest fee, until a date); otherwise the $1M milestone.
+ * Becoming VIP (owner 2026-11-08): the ValueDesk mark as it is, then it turns gold, then the words and the gold pass
+ * come in, in the launch post's look. `promo`: the beta's VIP for 30 days (every product's lowest fee, until a date);
+ * otherwise the $1M milestone. The move button hands the same ground over to the move scene.
  */
 function UnlockScene({ onMove, onClose, volume, promo }: { onMove: () => void; onClose: () => void; volume: number | null; promo: { until: number | null } | null }) {
   const days = promo?.until ? Math.max(1, Math.ceil((promo.until - Date.now()) / 86_400_000)) : null;
+  const still = typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  const [phase, setPhase] = useState<'logo' | 'gold' | 'card'>(still ? 'card' : 'logo');
+  useEffect(() => {
+    if (still) return;
+    const a = window.setTimeout(() => setPhase('gold'), LOGO_MS);
+    const b = window.setTimeout(() => setPhase('card'), GOLD_MS);
+    return () => { window.clearTimeout(a); window.clearTimeout(b); };
+  }, [still]);
+  const [closing, close] = useExit(onClose);
+  // Moving: the words and the pass leave, the ground stays for the move scene.
+  const [leaving, leave] = useExit(onMove, 380);
+  const tilt = useTilt();
   return (
-    <div className="bots-vipmove vipx vipx-win" role="dialog" aria-modal="true" aria-label="You are VIP">
-      <VipGround />
-      <div className="vipx-win__in">
-        <div className="vipx-win__say">
-          <div className="vipx-lockup"><GoldMark size={56} /><span className="vipx-lockup__rule" /><span className="vipx-lockup__name">ValueDesk</span></div>
-          <h2 className="vipx-win__h">You are VIP.<br /><span className="vipx-goldtext">{promo ? `VIP for ${days ?? 30} days.` : 'Bot fees slashed.'}</span></h2>
-          <p className="vipx-win__p">{promo
-            ? 'The lowest fees on futures, spot, copy trading and bots, the VIP servers and new features first.'
-            : `${volume !== null ? fmtUsd(volume, 0) : '$1M'} traded in 14 days. Your bots pay the lowest fee and may move to the VIP servers. It holds while you stay above $1M.`}</p>
-          <div className="vipx-win__act">
-            <button type="button" className="vipx-cta" onClick={onMove}><Icon name="bolt" size={15} />Move my bots to VIP servers</button>
-            <button type="button" className="vipx-later" onClick={onClose}>Later</button>
+    <div className={`bots-vipmove vipx vipx-win is-${phase}${closing ? ' is-closing' : ''}${leaving ? ' is-leaving' : ''}`} role="dialog" aria-modal="true" aria-label="You are VIP" onPointerMove={tilt.onMove} onPointerLeave={tilt.onLeave}>
+      <VipGround lit={phase === 'logo' ? 0.25 : 1} />
+      {phase !== 'card' && (
+        <div className="vipx-intro" aria-hidden="true">
+          <span className="vipx-intro__plain"><BrandMark size={150} /></span>
+          <span className="vipx-intro__gold"><GoldMark size={150} /></span>
+          <span className="vipx-intro__flash" />
+        </div>
+      )}
+      {phase === 'card' && (
+        <div className="vipx-win__in">
+          <div className="vipx-win__say">
+            <div className="vipx-lockup"><GoldMark size={56} /><span className="vipx-lockup__rule" /><span className="vipx-lockup__name">ValueDesk</span></div>
+            <h2 className="vipx-win__h">You are VIP.<br /><span className="vipx-goldtext">{promo ? `VIP for ${days ?? 30} days.` : 'Bot fees slashed.'}</span></h2>
+            <p className="vipx-win__p">{promo
+              ? 'The lowest fees on futures, spot, copy trading and bots, the VIP servers and new features first.'
+              : `${volume !== null ? fmtUsd(volume, 0) : '$1M'} traded in 14 days. Your bots pay the lowest fee and may move to the VIP servers. It holds while you stay above $1M.`}</p>
+            <div className="vipx-win__act">
+              <button type="button" className="vipx-cta" onClick={leave}><Icon name="bolt" size={15} />Move my bots to VIP servers</button>
+              <button type="button" className="vipx-later" onClick={close}>Later</button>
+            </div>
+          </div>
+          <div className="vipx-tilt" ref={tilt.ref}>
+            <VipPass delay={180} pill={promo ? `${days ?? 30} days` : '$1M · 14 days'} line={promo ? 'Early access pass' : 'Volume milestone'} perks={vipPerks(!!promo)} />
           </div>
         </div>
-        <VipPass delay={260} pill={promo ? `${days ?? 30} days` : '$1M · 14 days'} line={promo ? 'Early access pass' : 'Volume milestone'} perks={vipPerks(!!promo)} />
-      </div>
+      )}
     </div>
   );
 }
@@ -200,7 +274,7 @@ function GoldBar({ value }: { value: number }) {
 const PERK_ICON = { tag: 'coins', server: 'layers', bolt: 'bolt', star: 'star' } as const;
 
 /** The card (Overview compact, Savings full); `stage`: no card, only the scenes, listening to the demo controls and showing the unlock once. */
-export function BotsVip({ ctx, compact, stage }: { ctx: BotsCtx; compact?: boolean; stage?: boolean }) {
+export function BotsVip({ ctx, compact, stage, strip }: { ctx: BotsCtx; compact?: boolean; stage?: boolean; strip?: boolean }) {
   const real = useEligibility(ctx.demo ? null : ctx.address);
   // Example bots: a wallet most of the way there.
   const el = ctx.demo ? { eligible: false, volumeUsd: 684_000, minUsd: 1_000_000, days: 14 } : real;
@@ -212,6 +286,8 @@ export function BotsVip({ ctx, compact, stage }: { ctx: BotsCtx; compact?: boole
   const canMove = !!info?.vip?.canMove && (el?.eligible || !!info.vip.open);
   const [job, setJob] = useState<VipMoveView | null>(null);
   const [open, setOpen] = useState(false);
+  // The move straight after the unlock: one ground, no fade between them.
+  const [handoff, setHandoff] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const { confirm, dialog } = useConfirm();
   // The demo controls beside "Demo data" (bots/vipDemo.ts).
@@ -260,11 +336,24 @@ export function BotsVip({ ctx, compact, stage }: { ctx: BotsCtx; compact?: boole
   };
 
   const volPct = el ? Math.min(1, el.volumeUsd / el.minUsd) : 0;
+  // One slim line for the top of the Overview: the gold bar, how far, and the way to the perks (Savings).
+  if (strip) {
+    const vip = onVip || el?.eligible;
+    return (
+      <div className="vipstrip" role="group" aria-label="VIP">
+        <GoldMark size={22} />
+        <b className="vipstrip__t">{onVip ? 'VIP' : vip ? 'VIP unlocked' : 'Become VIP'}</b>
+        {!vip && <><GoldBar value={volPct} /><span className="vipstrip__n"><em>{el ? fmtUsd(el.volumeUsd, 0) : '—'}</em> of {fmtUsd(el?.minUsd ?? 1_000_000, 0)} in 14 days</span></>}
+        {vip && <span className="vipstrip__n">{onVip ? 'Your bots run on the VIP servers.' : el?.promo ? 'The lowest fees everywhere, and VIP servers.' : 'Bot fees slashed, and VIP servers.'}</span>}
+        <button type="button" className="vipstrip__go" onClick={() => goBots({ page: 'savings' })}>{vip && !onVip ? 'Move to VIP' : 'Perks'}<Icon name="arrowRight" size={13} /></button>
+      </div>
+    );
+  }
   return (
     <>
       {dialog}
-      {open && <MoveScene job={job} onClose={() => { setOpen(false); setJob(null); }} />}
-      {unlock && <UnlockScene promo={ctx.demo ? (demoPromo ? { until: Date.now() + 30 * 86_400_000 } : null) : el?.promo ?? null} volume={el && el.volumeUsd >= el.minUsd ? el.volumeUsd : null} onClose={() => setUnlock(false)} onMove={() => { setUnlock(false); if (ctx.demo) { setJob(demoJob(Math.max(1, ctx.bots.filter((v) => !v.algo.endedAt).length))); setOpen(true); } else void move(); }} />}
+      {open && <MoveScene job={job} handoff={handoff} onClose={() => { setOpen(false); setJob(null); setHandoff(false); }} />}
+      {unlock && <UnlockScene promo={ctx.demo ? (demoPromo ? { until: Date.now() + 30 * 86_400_000 } : null) : el?.promo ?? null} volume={el && el.volumeUsd >= el.minUsd ? el.volumeUsd : null} onClose={() => setUnlock(false)} onMove={() => { setUnlock(false); setHandoff(true); if (ctx.demo) { setJob(demoJob(Math.max(1, ctx.bots.filter((v) => !v.algo.endedAt).length))); setOpen(true); } else void move(); }} />}
       {!stage && <Shell className={`bots-vip${compact ? ' is-compact' : ''}`}>
         <ShellHeader icon="bolt" title={onVip ? 'VIP' : 'Become VIP'} subtitle={onVip ? 'Your bots run on the VIP servers, at the lowest bot fee.' : el?.promo ? 'Your beta VIP: the lowest fee on everything, and VIP servers.' : 'At $1M of your volume in 14 days: bot fees slashed, and VIP servers.'} aside={onVip ? <StatusPill tone="warning" dot>VIP servers</StatusPill> : el?.eligible ? <StatusPill tone="positive" dot>Unlocked</StatusPill> : null} />
         <Panel className="bots-vip__b">

@@ -420,6 +420,8 @@ export function BotsOverview({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
         ) : undefined}
       />
 
+      {(ctx.address || ctx.demo) && <BotsVip ctx={ctx} strip />}
+
       {!ctx.ready && (!ctx.seen || !bots.length) && <Setup ctx={ctx} />}
 
       <Shell className="bots-kpis">
@@ -439,9 +441,7 @@ export function BotsOverview({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
         <FleetChart bots={ready ? bots : []} />
       </div>
 
-      {ready && bots.some((v) => !FINAL_STATUSES.has(v.algo.status)) && <AllocationPanel ctx={ctx} />}
-
-      {(ctx.address || ctx.demo) && <BotsVip ctx={ctx} compact />}
+      {ready && <AllocationPanel ctx={ctx} />}
 
       {!ready || (!bots.length && !ctx.loading) ? (
         <Shell className="bots-listcard">

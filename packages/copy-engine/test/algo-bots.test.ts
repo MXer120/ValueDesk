@@ -7,6 +7,7 @@
 import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  copyReserveUsd,
   AlgoRuntime,
   MemoryAlgoStore,
   silentLogger,
@@ -1264,4 +1265,19 @@ test('smart margining: what a bot sets aside - a maker its max holding and a quo
   assert.equal(botReserveUsd(parseAlgoSpec({ kind: 'mm', symbol: 'BTC-USD', orderUsd: 50, maxInventoryUsd: 150 })), 250);
   assert.equal(botReserveUsd(parseAlgoSpec({ kind: 'mm', symbol: 'BTC-USD', orderUsd: 20, maxInventoryUsd: 100, levels: 3 })), 220);
   assert.equal(botReserveUsd(parseAlgoSpec({ kind: 'grid', symbol: 'BTC-USD', low: 50_000, high: 70_000, levels: 10, orderUsd: 12 })), 120);
+});
+
+test('smart margining: a copy sets aside its allocation while it can hold positions, nothing stopped or on paper (owner 2026-11-08)', () => {
+  const c = (status: string, allocationUsd: number, paper = false) => ({ status, settings: { allocationUsd, paper } });
+  assert.equal(copyReserveUsd(c('active', 250)), 250);
+  assert.equal(copyReserveUsd(c('paused', 150)), 150, 'paused still holds');
+  assert.equal(copyReserveUsd(c('halted', 90)), 90);
+  assert.equal(copyReserveUsd(c('stopped', 250)), 0);
+  assert.equal(copyReserveUsd(c('active', 250, true)), 0, 'paper');
+  assert.equal(copyReserveUsd(c('active', -5)), 0, 'never negative');
+  // A maker with $60 holding and $20 a side sets aside $100: on a $500 account it fits beside a $400 copy, not a $450 one.
+  const maker = { kind: 'mm', maxInventoryUsd: 60, orderUsd: 20 } as Parameters<typeof botReserveUsd>[0];
+  assert.equal(botReserveUsd(maker), 100);
+  assert.ok(copyReserveUsd(c('active', 400)) + botReserveUsd(maker) <= 500);
+  assert.ok(copyReserveUsd(c('active', 450)) + botReserveUsd(maker) > 500);
 });

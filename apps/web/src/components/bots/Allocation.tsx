@@ -1,79 +1,182 @@
 /**
- * Smart margining (owner 2026-11-08): what each bot sets aside of the futures account (copy-engine botReserveUsd:
- * a maker's max holding and a quote each side, a grid an order per level), against what the account holds. The
- * executor refuses a real bot that would take the total past it; this shows the split for all bots and for one.
- * Practice bots set nothing aside: they are listed apart, as what they would need for real.
+ * Smart margining (owner 2026-11-08): what copy trading and each bot set aside of the futures account, against
+ * what it holds. A copy sets aside its allocation (copy-engine copyReserveUsd), a bot its max holding and a quote
+ * each side, a grid an order per level (botReserveUsd). The executor refuses a real bot that would take copies and
+ * bots together past the account, and New bot says so first. Practice bots and paper copies set nothing aside.
+ *
+ * The panel (Bots overview, Portfolio): Simple is the account, copy trading, bots and free; Detailed shows every
+ * copy and every bot as blocks of the account, then the breakdown, then what is free.
  */
-import { FINAL_STATUSES, botReserveUsd, type AlgoView } from '@copy-engine';
-import { DASH, fmtUsd } from '../../format';
+import { useMemo } from 'react';
+import { FINAL_STATUSES, botReserveUsd, copyReserveUsd, type AlgoView } from '@copy-engine';
+import { DASH, fmtUsd, shortAddr } from '../../format';
+import { useStored } from '../../hooks';
+import { copyRows, readiness, useLiveCopy, type LiveCopy } from '../../copy/live';
+import { useBots } from '../../bots/useBots';
+import type { Eip1193Provider } from '../../wallet';
 import { useAccountTotals } from '../account/useAccountTotals';
 import { CoinIcon } from '../CoinIcon';
 import { botName } from './botWords';
 import type { BotsCtx } from './BotsPage';
-import { Panel, Shell, ShellHeader, StatusPill } from './kit/kit';
+import { Icon, Panel, Segmented, Shell, ShellHeader, StatusPill } from './kit/kit';
 
-const COLORS = ['var(--pos)', '#5b8def', '#c18cff', '#f0b44c', '#4cc9d4', '#f07c6c', '#9bd46a', '#e58ac9'];
+const COPY_COLOR = '#5b8def';
+const BOT_COLOR = 'var(--pos)';
+const COPY_SHADES = ['#5b8def', '#86a9f5', '#3f6fd1', '#a9c1ff', '#2f58b0'];
+const BOT_SHADES = ['var(--pos)', '#c18cff', '#f0b44c', '#4cc9d4', '#f07c6c', '#9bd46a', '#e58ac9'];
+
+export interface MarginItem { id: string; kind: 'copy' | 'bot'; label: string; usd: number; color: string; coin?: string; mode?: string }
 
 export interface Allocation {
   /** The futures account value (null while unknown). */
   equity: number | null;
+  copies: MarginItem[];
+  bots: MarginItem[];
+  copyUsd: number;
+  botUsd: number;
+  /** Copies and bots together. */
   used: number;
   free: number | null;
-  real: Array<{ v: AlgoView; usd: number }>;
-  practice: Array<{ v: AlgoView; usd: number }>;
+  /** Practice bots: what they would need for real. */
+  practiceUsd: number;
+  practice: number;
 }
 
-export function allocationOf(bots: readonly AlgoView[], equity: number | null): Allocation {
+/** A copy as the panel needs it (copy/live.ts copyRows, or the demo's). */
+export interface MarginCopy { id: string; leader: string; mode: string; status: string; settings: { allocationUsd: number; paper: boolean } }
+
+export function marginOf(bots: readonly AlgoView[], copies: readonly MarginCopy[], equity: number | null): Allocation {
   const running = bots.filter((v) => v.algo.spec.bot === true && !FINAL_STATUSES.has(v.algo.status));
-  const real = running.filter((v) => !v.algo.spec.paper).map((v) => ({ v, usd: botReserveUsd(v.algo.spec) })).sort((a, b) => b.usd - a.usd);
-  const practice = running.filter((v) => v.algo.spec.paper).map((v) => ({ v, usd: botReserveUsd(v.algo.spec) }));
-  const used = real.reduce((t, x) => t + x.usd, 0);
-  return { equity, used, free: equity === null ? null : Math.max(0, equity - used), real, practice };
+  const real = running.filter((v) => !v.algo.spec.paper).map((v) => ({ v, usd: botReserveUsd(v.algo.spec) })).filter((x) => x.usd > 0).sort((a, b) => b.usd - a.usd);
+  const practice = running.filter((v) => v.algo.spec.paper);
+  const cs = copies.map((c) => ({ c, usd: copyReserveUsd(c) })).filter((x) => x.usd > 0).sort((a, b) => b.usd - a.usd);
+  const copyItems: MarginItem[] = cs.map(({ c, usd }, i) => ({ id: `copy:${c.id}`, kind: 'copy', label: `Copying ${shortAddr(c.leader)}`, usd, color: COPY_SHADES[i % COPY_SHADES.length]!, mode: c.mode }));
+  const botItems: MarginItem[] = real.map(({ v, usd }, i) => ({ id: `bot:${v.algo.id}`, kind: 'bot', label: botName(v), usd, color: BOT_SHADES[i % BOT_SHADES.length]!, coin: v.algo.spec.symbol }));
+  const copyUsd = copyItems.reduce((t, x) => t + x.usd, 0);
+  const botUsd = botItems.reduce((t, x) => t + x.usd, 0);
+  const used = copyUsd + botUsd;
+  return {
+    equity, copies: copyItems, bots: botItems, copyUsd, botUsd, used,
+    free: equity === null ? null : Math.max(0, equity - used),
+    practice: practice.length, practiceUsd: practice.reduce((t, v) => t + botReserveUsd(v.algo.spec), 0),
+  };
 }
+
+/** The wallet's copies in every mode, as the panel counts them. */
+export function marginCopies(live: LiveCopy | null): MarginCopy[] {
+  if (!live) return [];
+  return copyRows(live).map(({ mode, view }) => ({ id: view.subscription.id, leader: view.subscription.settings.leader.address, mode, status: view.subscription.status, settings: view.subscription.settings }));
+}
+
+/** Example copies beside the example bots. */
+const DEMO_COPIES: MarginCopy[] = [
+  { id: 'demo-c1', leader: '0x8f2a6b1c9d0e4f5a7b3c2d1e0f9a8b7c6d5e41c9', mode: 'hosted', status: 'active', settings: { allocationUsd: 250, paper: false } },
+  { id: 'demo-c2', leader: '0x31c7d2e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b7e0', mode: 'hosted', status: 'paused', settings: { allocationUsd: 150, paper: false } },
+];
 
 /** The account value bots are measured against: the real one, or (example bots) one that fits them. */
 export function useAllocation(ctx: BotsCtx): Allocation {
   const totals = useAccountTotals(ctx.demo ? null : ctx.address);
-  const demoEquity = ctx.demo ? Math.max(500, Math.ceil(ctx.bots.reduce((t, v) => t + (FINAL_STATUSES.has(v.algo.status) ? 0 : botReserveUsd(v.algo.spec)), 0) * 1.4 / 100) * 100) : null;
-  const all = allocationOf(ctx.bots, ctx.demo ? demoEquity : totals.perpsUsd);
-  return all;
+  const copies = ctx.demo ? DEMO_COPIES : marginCopies(ctx.live);
+  return useMemo(() => {
+    if (!ctx.demo) return marginOf(ctx.bots, copies, totals.perpsUsd);
+    const a = marginOf(ctx.bots, copies, null);
+    return marginOf(ctx.bots, copies, Math.max(500, Math.ceil((a.used * 1.3) / 100) * 100));
+  }, [ctx.demo, ctx.bots, copies, totals.perpsUsd]);
 }
 
-/** The whole account: one bar, a segment per real bot, the rest free. */
-export function AllocationPanel({ ctx }: { ctx: BotsCtx }) {
-  const a = useAllocation(ctx);
+/* ------------------------------------------------------------------ the panel ----- */
+
+/** Blocks of the account: 100, so one block is 1%. */
+const CELLS = 100;
+
+/** The account as CELLS blocks: each copy and bot its share, in its colour, the rest free. */
+function Blocks({ a }: { a: Allocation }) {
+  const items = [...a.copies, ...a.bots];
+  const scale = Math.max(a.equity ?? 0, a.used, 1);
+  // Cumulative rounding: the blocks add up to the share in use, each item at least one block when it holds anything.
+  const cells: Array<MarginItem | null> = [];
+  let acc = 0;
+  for (const x of items) {
+    const end = Math.max(cells.length + 1, Math.round(((acc + x.usd) / scale) * CELLS));
+    acc += x.usd;
+    while (cells.length < Math.min(CELLS, end)) cells.push(x);
+  }
+  while (cells.length < CELLS) cells.push(null);
+  return (
+    <div className="mg-blocks" role="img" aria-label={`${fmtUsd(a.used, 0)} set aside of ${a.equity === null ? 'an unknown amount' : fmtUsd(a.equity, 0)}, in blocks of ${fmtUsd(scale / CELLS, 0)}`}>
+      {cells.map((x, i) => <i key={i} className={x ? `is-${x.kind}` : 'is-free'} style={x ? { background: x.color, animationDelay: `${i * 5}ms` } : { animationDelay: `${i * 5}ms` }} title={x ? `${x.label}: ${fmtUsd(x.usd, 0)}` : 'Free'} />)}
+    </div>
+  );
+}
+
+function Row({ color, label, usd, eq, coin, sub }: { color: string; label: string; usd: number; eq: number | null; coin?: string; sub?: string }) {
+  return (
+    <li>
+      <i style={{ background: color }} aria-hidden="true" />
+      {coin ? <CoinIcon coin={coin} size={16} /> : <span className="mg-copyic"><Icon name="layers" size={10} /></span>}
+      <span>{label}{sub && <small> · {sub}</small>}</span>
+      <b>{fmtUsd(usd, 0)}</b>
+      <small>{eq ? `${Math.round((usd / eq) * 100)}%` : ''}</small>
+    </li>
+  );
+}
+
+/** Margin, the whole account: Simple (copy trading, bots, free) or Detailed (every copy and bot). */
+export function MarginPanel({ a, note, className }: { a: Allocation; note?: string | null; className?: string }) {
+  const [view, setView] = useStored<'simple' | 'detailed'>('vs.margin.view', 'simple');
   const eq = a.equity;
   const over = eq !== null && a.used > eq + 1e-6;
   const scale = Math.max(eq ?? 0, a.used, 1);
+  const pct = (x: number) => `${(x / scale) * 100}%`;
   return (
-    <Shell className="bots-alloc">
-      <ShellHeader icon="wallet" title="Margin" subtitle="What your bots set aside of your futures account" aside={over ? <StatusPill tone="negative" dot>Over by {fmtUsd(a.used - eq!, 0)}</StatusPill> : eq !== null ? <StatusPill tone="positive" dot>{fmtUsd(a.free!, 0)} free</StatusPill> : null} />
+    <Shell className={`bots-alloc mg${className ? ` ${className}` : ''}`}>
+      <ShellHeader
+        icon="wallet"
+        title="Margin"
+        subtitle="What copy trading and bots set aside of your futures account"
+        aside={<>
+          {over ? <StatusPill tone="negative" dot>Over by {fmtUsd(a.used - eq!, 0)}</StatusPill> : eq !== null ? <StatusPill tone="positive" dot>{fmtUsd(a.free!, 0)} free</StatusPill> : null}
+          <Segmented value={view} label="Margin view" onChange={setView} options={[{ value: 'simple', label: 'Simple' }, { value: 'detailed', label: 'Detailed' }]} />
+        </>}
+      />
       <Panel className="bots-alloc__b">
-        <div className="bots-alloc__nums">
-          <span><small>Account</small><b>{eq === null ? DASH : fmtUsd(eq, 0)}</b></span>
-          <span><small>Set aside</small><b>{fmtUsd(a.used, 0)}</b></span>
-          <span><small>Free for new bots</small><b className={over ? 'neg' : ''}>{a.free === null ? DASH : fmtUsd(a.free, 0)}</b></span>
+        <div className="bots-alloc__nums mg-nums">
+          <span><small>Futures account</small><b>{eq === null ? DASH : fmtUsd(eq, 0)}</b></span>
+          <span><small><i style={{ background: COPY_COLOR }} />Copy trading</small><b>{fmtUsd(a.copyUsd, 0)}</b></span>
+          <span><small><i style={{ background: BOT_COLOR }} />Bots</small><b>{fmtUsd(a.botUsd, 0)}</b></span>
+          <span><small><i className="is-free" />Free</small><b className={over ? 'neg' : ''}>{a.free === null ? DASH : fmtUsd(a.free, 0)}</b></span>
         </div>
-        <div className="bots-alloc__bar" role="img" aria-label={`Set aside ${fmtUsd(a.used, 0)} of ${eq === null ? 'an unknown amount' : fmtUsd(eq, 0)}`}>
-          {a.real.map((x, i) => <i key={x.v.algo.id} style={{ width: `${(x.usd / scale) * 100}%`, background: COLORS[i % COLORS.length] }} title={`${botName(x.v)}: ${fmtUsd(x.usd, 0)}`} />)}
-        </div>
-        {a.real.length > 0 ? (
-          <ul className="bots-alloc__list">
-            {a.real.map((x, i) => (
-              <li key={x.v.algo.id}>
-                <i style={{ background: COLORS[i % COLORS.length] }} aria-hidden="true" />
-                <CoinIcon coin={x.v.algo.spec.symbol} size={16} />
-                <span>{botName(x.v)}</span>
-                <b>{fmtUsd(x.usd, 0)}</b>
-                <small>{eq ? `${Math.round((x.usd / eq) * 100)}%` : ''}</small>
-              </li>
-            ))}
-          </ul>
-        ) : <p className="bots-fine">No real bot runs: nothing is set aside.</p>}
-        {a.practice.length > 0 && !ctx.demo && <p className="bots-fine">{a.practice.length} practice bot{a.practice.length === 1 ? '' : 's'} set nothing aside (they would need {fmtUsd(a.practice.reduce((t, x) => t + x.usd, 0), 0)} for real).</p>}
+        {view === 'simple' ? (
+          <div className="bots-alloc__bar mg-bar" role="img" aria-label={`Copy trading ${fmtUsd(a.copyUsd, 0)}, bots ${fmtUsd(a.botUsd, 0)}, free ${a.free === null ? 'unknown' : fmtUsd(a.free, 0)}`}>
+            {a.copyUsd > 0 && <i style={{ width: pct(a.copyUsd), background: COPY_COLOR }} title={`Copy trading: ${fmtUsd(a.copyUsd, 0)}`} />}
+            {a.botUsd > 0 && <i style={{ width: pct(a.botUsd), background: BOT_COLOR }} title={`Bots: ${fmtUsd(a.botUsd, 0)}`} />}
+          </div>
+        ) : (
+          <>
+            <Blocks a={a} />
+            <div className="mg-groups">
+              <section>
+                <h4><i style={{ background: COPY_COLOR }} />Copy trading <b>{fmtUsd(a.copyUsd, 0)}</b></h4>
+                {a.copies.length ? <ul className="bots-alloc__list">{a.copies.map((x) => <Row key={x.id} color={x.color} label={x.label} usd={x.usd} eq={eq} sub={x.mode === 'hosted' ? undefined : x.mode} />)}</ul> : <p className="bots-fine">No copy sets anything aside.</p>}
+              </section>
+              <section>
+                <h4><i style={{ background: BOT_COLOR }} />Bots <b>{fmtUsd(a.botUsd, 0)}</b></h4>
+                {a.bots.length ? <ul className="bots-alloc__list">{a.bots.map((x) => <Row key={x.id} color={x.color} label={x.label} usd={x.usd} eq={eq} coin={x.coin} />)}</ul> : <p className="bots-fine">No real bot runs.</p>}
+              </section>
+            </div>
+            <div className="mg-free"><i className="is-free" aria-hidden="true" /><span>Free for new bots and copies</span><b className={over ? 'neg' : ''}>{a.free === null ? DASH : fmtUsd(a.free, 0)}</b><small>{eq ? `${Math.round(((a.free ?? 0) / eq) * 100)}%` : ''}</small></div>
+          </>
+        )}
+        {note ? <p className="bots-fine">{note}</p> : a.practice > 0 ? <p className="bots-fine">{a.practice} practice bot{a.practice === 1 ? '' : 's'} set nothing aside (they would need {fmtUsd(a.practiceUsd, 0)} for real).</p> : null}
       </Panel>
     </Shell>
   );
+}
+
+/** The Bots overview's panel. */
+export function AllocationPanel({ ctx }: { ctx: BotsCtx }) {
+  return <MarginPanel a={useAllocation(ctx)} note={ctx.demo ? 'Example bots and copies.' : null} />;
 }
 
 /** One bot's share, for its page. */
@@ -81,18 +184,37 @@ export function BotAllocation({ v, ctx }: { v: AlgoView; ctx: BotsCtx }) {
   const a = useAllocation(ctx);
   const usd = botReserveUsd(v.algo.spec);
   const eq = a.equity;
+  const scale = Math.max(eq ?? 0, a.used, 1);
+  const mine = v.algo.spec.paper ? 0 : usd;
   return (
     <div className="bots-alloc__one">
       <div className="bots-alloc__nums">
         <span><small>This bot sets aside</small><b>{fmtUsd(usd, 0)}</b></span>
         <span><small>Of your account</small><b>{eq ? `${Math.round((usd / eq) * 100)}%` : DASH}</b></span>
-        <span><small>Free for new bots</small><b>{a.free === null ? DASH : fmtUsd(a.free, 0)}</b></span>
+        <span><small>Free</small><b>{a.free === null ? DASH : fmtUsd(a.free, 0)}</b></span>
       </div>
       <div className="bots-alloc__bar">
-        <i style={{ width: `${eq ? Math.min(100, (usd / Math.max(eq, a.used)) * 100) : 0}%`, background: 'var(--pos)' }} />
-        <i style={{ width: `${eq ? Math.min(100, ((a.used - (v.algo.spec.paper ? 0 : usd)) / Math.max(eq, a.used)) * 100) : 0}%`, background: 'rgb(var(--ink) / 0.22)' }} />
+        <i style={{ width: `${(mine / scale) * 100}%`, background: 'var(--pos)' }} />
+        <i style={{ width: `${(Math.max(0, a.botUsd - mine) / scale) * 100}%`, background: '#c18cff' }} />
+        <i style={{ width: `${(a.copyUsd / scale) * 100}%`, background: COPY_COLOR }} />
       </div>
-      <small className="bots-fine">{v.algo.spec.paper ? 'Practice: nothing is set aside; this is what it would need for real.' : <span className="bots-takers__key"><span><i style={{ background: 'var(--pos)' }} />This bot</span><span><i style={{ background: 'rgb(var(--ink) / 0.22)' }} />Your other bots</span><span><i style={{ background: 'rgb(var(--ink) / 0.07)' }} />Free</span></span>}</small>
+      <small className="bots-fine">{v.algo.spec.paper ? 'Practice: nothing is set aside; this is what it would need for real.' : <span className="bots-takers__key"><span><i style={{ background: 'var(--pos)' }} />This bot</span><span><i style={{ background: '#c18cff' }} />Other bots</span><span><i style={{ background: COPY_COLOR }} />Copy trading</span><span><i style={{ background: 'rgb(var(--ink) / 0.07)' }} />Free</span></span>}</small>
     </div>
   );
+}
+
+/**
+ * Portfolio's panel (owner 2026-11-08: users see what they have given to copy trading and bots there): the wallet's
+ * own copies and bots, read with the executor sign-in the Bots and Copy pages keep (nothing is signed here). Not
+ * shown for someone else's account (Scan), nor until the wallet is signed in to the executor.
+ */
+export function PortfolioMargin({ address, provider }: { address: string | null; provider: Eip1193Provider | null }) {
+  const live = useLiveCopy(address, provider);
+  const signedIn = readiness(live, 'hosted').connected;
+  const { bots } = useBots(address, signedIn);
+  const totals = useAccountTotals(address);
+  const copies = marginCopies(live);
+  const a = useMemo(() => marginOf(bots, copies, totals.perpsUsd), [bots, copies, totals.perpsUsd]);
+  if (!address || !signedIn) return null;
+  return <MarginPanel a={a} className="pf-margin" />;
 }

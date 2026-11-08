@@ -39,6 +39,7 @@ import {
   copyFeeFor,
   BOT_FEE,
   botReserveUsd,
+  copyReserveUsd,
   BOT_FEE_LADDER,
   BOT_FEE_VIP,
   BETA_VIP_DAYS,
@@ -1328,10 +1329,13 @@ export class ExecutorService {
       if (!k || !k.registered) throw new ApiError(412, 'key', 'Register this executor\'s key on SoDEX first (copy setup, "Approve agent").');
       accountId = await this.sodex.accountId(owner);
       if (!accountId) throw new ApiError(412, 'account', 'This wallet has no SoDEX account yet. Deposit first.');
-      // Smart margining (owner 2026-11-08): the wallet's real bots together set aside no more than its account holds.
+      // Smart margining (owner 2026-11-08): the wallet's real bots and its hosted copies together set aside no more
+      // than its account holds - a copy's allocation counts as taken (copyReserveUsd).
       if (spec.bot) {
         const others = live.filter((x) => x.spec.bot === true && !x.spec.paper);
-        const reserved = others.reduce((t, x) => t + botReserveUsd(x.spec), 0);
+        const copies = this.runtime.list(owner).reduce((t, c) => t + copyReserveUsd(c), 0);
+        const bots = others.reduce((t, x) => t + botReserveUsd(x.spec), 0);
+        const reserved = bots + copies;
         const need = botReserveUsd(spec);
         let equity: number | null = null;
         try {
@@ -1341,7 +1345,8 @@ export class ExecutorService {
         }
         if (equity !== null && reserved + need > equity + 1e-6) {
           const usd = (x: number) => `$${Math.round(x).toLocaleString('en-US')}`;
-          throw new ApiError(409, 'margin', `Your bots would set aside ${usd(reserved + need)} (this one ${usd(need)}${others.length ? `, ${others.length} running ${usd(reserved)}` : ''}), more than your futures account holds (${usd(equity)}). Lower its size or max holding, or stop a bot.`);
+          const parts = [`this bot ${usd(need)}`, ...(others.length ? [`${others.length} running ${others.length === 1 ? 'bot' : 'bots'} ${usd(bots)}`] : []), ...(copies > 0 ? [`copy trading ${usd(copies)}`] : [])];
+          throw new ApiError(409, 'margin', `This would set aside ${usd(reserved + need)} (${parts.join(', ')}), more than your futures account holds (${usd(equity)}). Only ${usd(Math.max(0, equity - reserved))} is free: lower its size or max holding, or stop a bot or a copy.`);
         }
       }
     }

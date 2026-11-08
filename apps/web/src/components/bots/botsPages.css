@@ -1358,3 +1358,83 @@ html[data-glass] .bots-page { background: transparent; }
 .vipx.is-done .bots-vipmove__sites > span:last-child b { color: var(--g-1); }
 .vipx.is-done::after { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 70%; pointer-events: none; background: radial-gradient(40% 50% at 72% 45%, rgba(246, 220, 142, 0.16), transparent 70%); animation: vipIn 900ms ease both; }
 .vipx-burst { left: 50%; top: 22%; }
+
+/* Become VIP, one slim line at the top of the Overview (owner 2026-11-08: "smaller, ideal fit somewhere at the top"). */
+.vipstrip { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 9px 10px 9px 14px; border-radius: 14px; border: 1px solid rgba(246, 220, 142, 0.22); background: linear-gradient(100deg, rgba(212, 167, 72, 0.12), rgba(212, 167, 72, 0.03) 60%, transparent); }
+.vipstrip .vipx-mark { flex: none; filter: drop-shadow(0 2px 8px rgba(246, 220, 142, 0.35)); }
+.vipstrip__t { flex: none; font-size: 13.5px; font-weight: 600; background: linear-gradient(170deg, #fff1c2, #f6dc8e 50%, #d4a748); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.vipstrip .bots-goldbar { flex: 1; min-width: 80px; max-width: 420px; height: 8px; }
+.vipstrip__n { flex: none; font-size: 12.5px; color: var(--muted); white-space: nowrap; }
+.vipstrip__n em { font-style: normal; font-family: var(--font-num); color: #f6dc8e; }
+.vipstrip__go { display: inline-flex; flex: none; align-items: center; gap: 4px; margin-left: auto; padding: 6px 10px; border: 0; border-radius: 9px; background: rgba(246, 220, 142, 0.1); color: #f6dc8e; font: inherit; font-size: 12.5px; font-weight: 500; cursor: pointer; transition: background-color 150ms ease; }
+.vipstrip__go:hover { background: rgba(246, 220, 142, 0.18); }
+@media (max-width: 640px) { .vipstrip { flex-wrap: wrap; } .vipstrip .bots-goldbar { order: 5; flex-basis: 100%; max-width: none; } }
+
+/* Margin: Simple / Detailed. */
+.mg-nums { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.mg-nums small { display: inline-flex; align-items: center; gap: 6px; }
+.mg-nums small i, .mg-groups h4 i, .mg-free > i { width: 8px; height: 8px; border-radius: 2px; flex: none; }
+.mg i.is-free { background: rgb(var(--ink) / 0.12); }
+.mg-bar > i { transition: width 400ms var(--tf-ease, ease); }
+.mg-blocks { display: grid; grid-template-columns: repeat(25, minmax(0, 1fr)); gap: 3px; }
+.mg-blocks > i { aspect-ratio: 1.5; border-radius: 3px; animation: mgIn 320ms var(--tf-ease, ease) both; }
+.mg-blocks > i.is-free { background: rgb(var(--ink) / 0.06); box-shadow: inset 0 0 0 1px rgb(var(--ink) / 0.05); }
+@keyframes mgIn { from { opacity: 0; transform: scale(0.6); } to { opacity: 1; transform: none; } }
+.mg-groups { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+.mg-groups h4 { display: flex; align-items: center; gap: 8px; margin: 0 0 6px; font-size: 12.5px; font-weight: 500; color: var(--muted); }
+.mg-groups h4 b { margin-left: auto; font-family: var(--font-num); color: var(--text); font-weight: 500; }
+.mg-groups .bots-alloc__list { grid-template-columns: minmax(0, 1fr); }
+.mg-free { display: flex; align-items: center; gap: 8px; padding-top: 10px; border-top: 1px dashed rgb(var(--ink) / 0.12); font-size: 13px; }
+.mg-free span { flex: 1; color: var(--muted); }
+.mg-free b { font-family: var(--font-num); font-weight: 500; }
+.mg-free small { width: 34px; text-align: right; font-size: 12px; color: var(--dim); }
+@media (max-width: 720px) { .mg-nums { grid-template-columns: repeat(2, minmax(0, 1fr)); } .mg-groups { grid-template-columns: minmax(0, 1fr); } .mg-blocks { grid-template-columns: repeat(20, minmax(0, 1fr)); } }
+
+/* VIP scenes, round 3 (owner 2026-11-08): under the rail and navbar so the wallet and menus open over them; the
+   plain mark turning gold before the card; one ground from the unlock into the move; soft exits; the pass leans
+   toward the pointer; solid server nodes so the gold line runs beneath STD and VIP. */
+.bots-vipmove.vipx { z-index: 35; }
+.vipx.is-handoff, .vipx.is-handoff .vipx-ground__dots { animation: none; }
+.vipx.is-closing { animation: vipxOut 320ms cubic-bezier(.4, 0, .2, 1) both; pointer-events: none; }
+.vipx.is-closing .bots-vipmove__in, .vipx.is-closing .vipx-win__in { animation: vipxSettle 320ms cubic-bezier(.4, 0, .2, 1) both; }
+@keyframes vipxOut { to { opacity: 0; } }
+@keyframes vipxSettle { to { opacity: 0; transform: translateY(10px) scale(0.985); } }
+.vipx-win.is-leaving { pointer-events: none; }
+.vipx-win.is-leaving .vipx-win__say { animation: vipxSayOut 380ms cubic-bezier(.4, 0, .2, 1) both; }
+.vipx-win.is-leaving .vipx-tilt { animation: vipxPassOut 380ms cubic-bezier(.4, 0, .2, 1) both; }
+@keyframes vipxSayOut { to { opacity: 0; transform: translateX(-24px); } }
+@keyframes vipxPassOut { to { opacity: 0; transform: perspective(1400px) rotateY(-4deg) translateY(-18px) scale(0.92); } }
+
+.vipx-intro { position: absolute; inset: 0; z-index: 1; display: grid; place-items: center; pointer-events: none; }
+.vipx-intro > span { grid-area: 1 / 1; display: grid; place-items: center; }
+.vipx-intro__plain { animation: vipxPlainIn 600ms cubic-bezier(.2, .9, .2, 1) both; transition: opacity 420ms ease, transform 420ms ease, filter 420ms ease; }
+.vipx-intro__plain .brand-mark { filter: drop-shadow(0 6px 30px rgba(0, 180, 129, 0.25)); }
+.vipx-intro__gold { opacity: 0; }
+.vipx-intro__gold .vipx-mark__b { animation: none; }
+.vipx-intro__flash { width: 160px; height: 160px; border-radius: 50%; background: radial-gradient(circle, rgba(255, 241, 194, 0.85) 0%, rgba(246, 220, 142, 0.35) 40%, transparent 70%); opacity: 0; }
+.vipx-win.is-gold .vipx-intro__plain { opacity: 0; transform: scale(1.08); filter: blur(2px); }
+.vipx-win.is-gold .vipx-intro__gold { animation: vipxGoldIn 640ms cubic-bezier(.2, 1.3, .3, 1) both; }
+.vipx-win.is-gold .vipx-intro__flash { animation: vipxFlash 900ms ease-out both; }
+@keyframes vipxPlainIn { from { opacity: 0; transform: scale(0.82); } to { opacity: 1; transform: none; } }
+@keyframes vipxGoldIn { 0% { opacity: 0; transform: scale(0.9); filter: brightness(2.2); } 60% { opacity: 1; transform: scale(1.04); } 100% { opacity: 1; transform: none; filter: none; } }
+@keyframes vipxFlash { 0% { opacity: 0.95; transform: scale(0.2); } 100% { opacity: 0; transform: scale(2.6); } }
+.vipx-win.is-card .vipx-win__in { animation: vipxIn 520ms cubic-bezier(.2, .9, .2, 1) both; }
+@keyframes vipxIn { from { opacity: 0; transform: scale(0.97); } to { opacity: 1; transform: none; } }
+
+.vipx-tilt { --tx: 0deg; --ty: 0deg; --sx: 50%; transform: perspective(1400px) rotateY(calc(-9deg + var(--tx))) rotateX(var(--ty)) rotateZ(-2deg); transform-style: preserve-3d; transition: transform 260ms cubic-bezier(.2, .8, .2, 1); will-change: transform; }
+.vipx-tilt .vipx-pass { transform: none; animation: vipxPassIn 900ms cubic-bezier(.2, .9, .2, 1) both; }
+.vipx-tilt .vipx-pass::after { content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; background: radial-gradient(55% 45% at var(--sx) 18%, rgba(255, 241, 194, 0.16), transparent 70%); transition: background 260ms ease; }
+@keyframes vipxPassIn { from { opacity: 0; transform: translateY(34px) rotateY(-14deg) scale(0.94); } to { opacity: 1; transform: none; } }
+@media (max-width: 860px) { .vipx-tilt { transform: none; } }
+
+.vipx .bots-vipmove__core { fill: #161513; }
+.vipx .bots-vipmove__node.is-to .bots-vipmove__core { fill: #1b1810; }
+.vipx .bots-vipmove__node text { paint-order: stroke; stroke: #161513; stroke-width: 3px; }
+.vipx .bots-vipmove__node.is-to.is-lit text { stroke: none; }
+@media (prefers-reduced-motion: reduce) { .vipx-tilt { transition: none; } }
+
+.mg-copyic { display: grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; background: rgba(91, 141, 239, 0.18); color: #86a9f5; }
+.vipx .bots-vipmove__node.is-from.is-off { opacity: 1; }
+.vipx .bots-vipmove__node.is-from.is-off .bots-vipmove__core { stroke: rgb(var(--ink) / 0.14); }
+.vipx .bots-vipmove__node.is-from.is-off text { fill: var(--dim); }
+.vipx .bots-vipmove__node.is-from.is-off .bots-vipmove__halo { opacity: 0.3; }

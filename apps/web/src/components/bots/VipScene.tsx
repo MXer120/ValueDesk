@@ -4,7 +4,7 @@
  * drifting up, DESK down), thin gold lines running along the grid, and the gold ValueDesk mark in place of a medal.
  * The pass on the right is the post's gold card: what VIP brings, worded for how the wallet got it.
  */
-import type { ReactNode } from 'react';
+import { useId, type ReactNode } from 'react';
 
 /* ------------------------------------------------------------------ the ground ----- */
 
@@ -37,23 +37,25 @@ const ROWS = [0, 0, 1, 1, 2] as const;
 
 /** The ValueDesk mark in gold, its five blocks dropping in one by one, then a glare across them. */
 export function GoldMark({ size = 96 }: { size?: number }) {
+  // Ids of its own: several marks on one page (the strip, the pass, the lockup) must not share a gradient.
+  const u = useId().replace(/:/g, '');
   return (
     <svg className="vipx-mark" width={size} height={size} viewBox="0 0 32 32" aria-hidden="true">
       <defs>
-        <linearGradient id="vipx-gold" x1="0" y1="0" x2="1" y2="1">
+        <linearGradient id={`${u}g`} x1="0" y1="0" x2="1" y2="1">
           <stop offset="0" stopColor="#fff1c2" /><stop offset="0.45" stopColor="#f6dc8e" /><stop offset="0.75" stopColor="#d4a748" /><stop offset="1" stopColor="#fbe3a0" />
         </linearGradient>
-        <linearGradient id="vipx-glare" x1="0" y1="0" x2="1" y2="0">
+        <linearGradient id={`${u}l`} x1="0" y1="0" x2="1" y2="0">
           <stop offset="0" stopColor="#fff8e0" stopOpacity="0" /><stop offset="0.5" stopColor="#fff8e0" stopOpacity="0.75" /><stop offset="1" stopColor="#fff8e0" stopOpacity="0" />
         </linearGradient>
-        <clipPath id="vipx-blocks">
+        <clipPath id={`${u}b`}>
           {COLS.map((c, i) => <rect key={i} x={c * 6.6} y={4.2 + ROWS[i]! * 8.2} width={5.6} height={7.2} rx={1.5} />)}
         </clipPath>
       </defs>
       {COLS.map((c, i) => (
-        <rect key={i} className="vipx-mark__b" style={{ animationDelay: `${120 + i * 90}ms` }} x={c * 6.6} y={4.2 + ROWS[i]! * 8.2} width={5.6} height={7.2} rx={1.5} fill="url(#vipx-gold)" />
+        <rect key={i} className="vipx-mark__b" style={{ animationDelay: `${120 + i * 90}ms` }} x={c * 6.6} y={4.2 + ROWS[i]! * 8.2} width={5.6} height={7.2} rx={1.5} fill={`url(#${u}g)`} />
       ))}
-      <g clipPath="url(#vipx-blocks)"><rect className="vipx-mark__glare" x="-14" y="0" width="12" height="32" fill="url(#vipx-glare)" /></g>
+      <g clipPath={`url(#${u}b)`}><rect className="vipx-mark__glare" x="-14" y="0" width="12" height="32" fill={`url(#${u}l)`} /></g>
     </svg>
   );
 }

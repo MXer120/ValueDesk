@@ -612,7 +612,7 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
               <Panel className="bots-review">
                 <NameField d={d} set={set} />
                 {check.map((e) => <p key={e} className="bots-err" role="alert">{e}</p>)}
-                {short > 0 && <p className="bots-err" role="alert">{picked.length > 1 ? 'These bots' : 'This bot'} would set aside {fmtUsd(needAll, 0)}, but only {fmtUsd(alloc.free ?? 0, 0)} of your futures account is free ({fmtUsd(alloc.used, 0)} is with your other bots). Lower the size or max holding, or stop a bot.</p>}
+                {short > 0 && <p className="bots-err" role="alert">{picked.length > 1 ? 'These bots' : 'This bot'} would set aside {fmtUsd(needAll, 0)}, but only {fmtUsd(alloc.free ?? 0, 0)} of your futures account is free ({[alloc.botUsd > 0 ? `${fmtUsd(alloc.botUsd, 0)} with your other bots` : '', alloc.copyUsd > 0 ? `${fmtUsd(alloc.copyUsd, 0)} with copy trading` : ''].filter(Boolean).join(', ') || 'nothing set aside yet'}). Lower the size or max holding, or stop a bot or a copy.</p>}
                 {why && ctx.address && <p className="bots-note">{why} <button type="button" className="bots-link" onClick={() => ctx.setup(paper)}>Set up</button></p>}
                 {!ctx.address && <p className="bots-note">Connect your wallet to start a bot.</p>}
                 {error && <p className="bots-err" role="alert">{error}</p>}

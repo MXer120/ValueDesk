@@ -385,6 +385,16 @@ export function botReserveUsd(s: AlgoSpec): number {
   return 0;
 }
 
+/**
+ * What a copy sets aside of the wallet's futures account (owner 2026-11-08, smart margining across copy trading and
+ * bots): its allocation while it can hold positions (active, paused, halted, blocked); nothing once stopped, nothing
+ * for a paper copy. A bot is refused when the copies' and the bots' together would pass the account.
+ */
+export function copyReserveUsd(c: { status: string; settings: { allocationUsd: number; paper: boolean } }): number {
+  if (c.status === 'stopped' || c.settings.paper) return 0;
+  return Math.max(0, Number(c.settings.allocationUsd) || 0);
+}
+
 /** The release a news gate holds for at `at` (of its level or above, timed, not all-day), or null. */
 export function newsAt(gate: NewsGate | undefined, events: readonly NewsEvent[], at: number): NewsEvent | null {
   if (!gate) return null;

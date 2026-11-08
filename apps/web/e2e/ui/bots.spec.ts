@@ -314,6 +314,19 @@ h.test('VIP: a practice bot moves to the VIP executor with one signature, full s
   await page.waitForURL((u) => /^\/bots\/[^/]+$/.test(u.pathname) && !['/bots/new', '/bots/explore', '/bots/savings'].includes(u.pathname), { timeout: 30_000 });
   const id = new URL(page.url()).pathname.split('/')[2]!;
   await until(page, async () => (await headState(page)).includes('Running'), 'it runs', 30_000);
+  const botUrl = page.url();
+
+  // Portfolio shows the same margin panel (copy trading, bots, free), on the kept sign-in: nothing is signed.
+  const before = wallet.mark();
+  await page.goto(new URL('/portfolio', page.url()).toString());
+  const margin = page.locator('.pf-margin');
+  await margin.waitFor({ state: 'visible', timeout: 30_000 });
+  await margin.getByText('Detailed', { exact: true }).click();
+  await margin.locator('.mg-blocks').waitFor({ state: 'visible' });
+  await shot(page, 'portfolio-margin');
+  assert.deepEqual(signedKinds(wallet, before), [], 'Portfolio reads the margin without a signature');
+  await page.goto(botUrl);
+  await until(page, async () => (await headState(page)).includes('Running'), 'back on the bot', 30_000);
 
   await go(page, 'Savings', 'Savings');
   const panel = page.locator('.bots-vip');
