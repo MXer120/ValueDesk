@@ -36,6 +36,8 @@ export class ExecutorError extends Error {
     message: string,
     readonly status: number,
     readonly code: string,
+    /** Figures that go with a refusal (a bot's margin, the bot already on that market), as the executor sent them. */
+    readonly detail: Record<string, unknown> | null = null,
   ) {
     super(message);
   }
@@ -91,9 +93,16 @@ export class ExecutorClient {
     return this.at;
   }
 
-  /** VIP: the hosted client talks to the VIP executor from now on (its own tokens, its own data). */
+  /**
+   * VIP: the hosted client talks to the VIP executor from now on (its own tokens, its own data). The executor id
+   * and the wallet the last token was for belong to the old base: dropped, so a token is never filed under the
+   * other executor's id (audit A5).
+   */
   setBase(base: string): void {
+    if (base === this.at) return;
     this.at = base;
+    this.id = null;
+    this.ownerCache = null;
   }
 
   private async call<T>(method: 'GET' | 'POST', path: string, o: { body?: unknown; token?: string | null; pairing?: string | null } = {}): Promise<T> {
@@ -126,9 +135,9 @@ export class ExecutorClient {
       /* not JSON */
     }
     if (!res.ok) {
-      const d = (data ?? {}) as { error?: string; code?: string };
-      if (res.status === 401 && d.code === 'session') this.forget();
-      throw new ExecutorError(d.error || `The executor answered HTTP ${res.status}.`, res.status, d.code || 'http');
+      const d = (data ?? {}) as { error?: string; code?: string; detail?: unknown };
+      if (res.status === 401 && d.code === 'session') this.forgetSession();
+      throw new ExecutorError(d.error || `The executor answered HTTP ${res.status}.`, res.status, d.code || 'http', d.detail && typeof d.detail === 'object' ? (d.detail as Record<string, unknown>) : null);
     }
     return data as T;
   }
@@ -177,7 +186,8 @@ export class ExecutorClient {
     }
   }
 
-  private forget(): void {
+  /** Drop the read token kept for the wallet last signed in here (the executor refused it). */
+  forgetSession(): void {
     if (!this.ownerCache) return;
     try {
       localStorage.removeItem(sessionKey(this.base, this.ownerCache, this.idNow()));
@@ -228,6 +238,22 @@ export class ExecutorClient {
 }
 
 export const hostedExecutor = new ExecutorClient(HOSTED_BASE, 'hosted');
+/**
+ * The standard executor whatever the hosted client points at: a VIP move is followed here to its end, also after
+ * the hosted client has switched to the VIP base (same base, so the same kept token).
+ */
+export const standardExecutor = new ExecutorClient(HOSTED_BASE, 'hosted');
+
+/**
+ * The wallet's bot fee and VIP standing as the executor's /me says it (contract 2026-11-08: `bots`, tenths of a bp).
+ * Read defensively: an executor from before it says nothing, and the page falls back to the ladder's first step.
+ */
+export interface MeBots { feeTenths: number; vip: boolean; until: number | null }
+export function meBots(me: MeResponse | null | undefined): MeBots | null {
+  const b = (me as (MeResponse & { bots?: Partial<MeBots> | null }) | null | undefined)?.bots;
+  if (!b || typeof b.feeTenths !== 'number' || !Number.isFinite(b.feeTenths) || b.feeTenths < 0) return null;
+  return { feeTenths: b.feeTenths, vip: b.vip === true, until: typeof b.until === 'number' ? b.until : null };
+}
 
 /**
  * VIP (owner 2026-11-08): a wallet whose bots moved to the VIP executor (AWS Tokyo) talks to it through this base;
@@ -253,10 +279,6 @@ export function setVipMoved(owner: string, on: boolean): void {
   } catch {
     /* private mode: the standard executor's record still sends the page there */
   }
-}
-/** Point the hosted client at the wallet's executor: VIP when it moved there. */
-export function pointHostedAt(owner: string | null): void {
-  hostedExecutor.setBase(owner && vipMoved(owner) ? VIP_BASE : HOSTED_BASE);
 }
 /** Keep a session token the VIP executor issued in a move (no second signature). */
 export function keepVipSession(owner: string, g: { token: string; expiresAt: number }): void {

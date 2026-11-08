@@ -28,7 +28,10 @@ export function botsViewFor(pathname: string, search = ''): BotsView {
   if (sub === 'new') { const q = new URLSearchParams(search); return { page: 'new', market: q.get('market'), kind: q.get('kind') }; }
   if (sub === 'explore') return { page: 'explore' };
   if (sub === 'savings') return { page: 'savings' };
-  return { page: 'bot', id: decodeURIComponent(segs[1]!) };
+  // A malformed escape (/bots/%E0) is a bot id nobody has, not a page that throws.
+  let id = segs[1]!;
+  try { id = decodeURIComponent(id); } catch { /* kept as typed */ }
+  return { page: 'bot', id };
 }
 
 export function pathForBots(v: BotsView): string {

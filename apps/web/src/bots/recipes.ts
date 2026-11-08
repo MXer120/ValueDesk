@@ -10,7 +10,7 @@
  * Pure: the page and its tests read the same numbers.
  */
 import type { AlgoSpec } from '@copy-engine';
-import { GATE_DEFAULT, R10, type BotDraft, type Strategy } from './presets';
+import { GATE_DEFAULT, R10, draftFor, type BotDraft, type Strategy } from './presets';
 
 export type RecipeId = 'r10' | 'r10g' | 's1' | 'n5' | 'n5g' | 'touch' | 'grid';
 export type Category = 'market' | 'grid';
@@ -146,4 +146,34 @@ export function recipeOfDraft(d: BotDraft): RecipeId {
   if (d.gate) return 'r10g';
   if (d.skewTicks > 0) return 's1';
   return 'r10';
+}
+
+/**
+ * The draft a picked bot makes: the bot's own quoting values over its strategy's defaults, and everything else the
+ * user already set kept (audit A4: a preset change dropped leverage, news, flow gate, volume target, on stop, and
+ * turned "trade only 14-16" into "skip 14-16"). Sizes (order, max holding, loss limit) carry over only inside one
+ * category: a grid's order is per level, a market maker's per side.
+ */
+export function draftOfRecipe(id: RecipeId, symbol: string, keep?: BotDraft): BotDraft {
+  const rc = RECIPE[id];
+  const base = draftFor(rc.strategy, 'balanced', symbol);
+  if (!keep) return { ...base, ...rc.params, strategy: rc.strategy };
+  const sameKind = (keep.strategy === 'grid') === (rc.strategy === 'grid');
+  const kept: Partial<BotDraft> = {
+    label: keep.label,
+    paper: keep.paper,
+    leverage: keep.leverage,
+    maxSpreadBps: keep.maxSpreadBps,
+    flowOn: keep.flowOn, flowMinUsd: keep.flowMinUsd, flowWindowMin: keep.flowWindowMin, flowAction: keep.flowAction, flowShrink: keep.flowShrink,
+    quiet: keep.quiet.map((w) => ({ ...w })),
+    quietOnly: keep.quietOnly,
+    news: keep.news ? { ...keep.news } : null,
+    runHours: keep.runHours,
+    volumeTargetUsd: keep.volumeTargetUsd,
+    onStop: keep.onStop,
+    outOfRange: keep.outOfRange,
+    ...(sameKind ? { orderUsd: keep.orderUsd, maxInventoryUsd: keep.maxInventoryUsd, maxLossUsd: keep.maxLossUsd } : {}),
+    ...(sameKind && rc.strategy === 'grid' ? { rangePct: keep.rangePct, low: keep.low, high: keep.high, levels: keep.levels } : {}),
+  };
+  return { ...base, ...kept, ...rc.params, strategy: rc.strategy };
 }

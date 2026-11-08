@@ -11,7 +11,7 @@ import { SetupProgress } from '../../copy/CopySetupSheet';
 import { openConnectDialog } from '../account/connect';
 import { CoinIcon } from '../CoinIcon';
 import { SeriesChart, type ChartSeries } from '../datachart/SeriesChart';
-import { cleanUsd, fleetSeries, fleetTotals, fleetWindow, foldRuns } from '../../bots/fleet';
+import { cleanUsd, fleetSeries, fleetTotals, fleetWindow, foldRuns, realBots, type FleetSeries } from '../../bots/fleet';
 import { useStored } from '../../hooks';
 import { ErrorBoundary } from '../ErrorBoundary';
 import { STRATEGIES, STRATEGY_INFO, botFeeWords, costPerMillion, draftFor, strategyOf, type Strategy } from '../../bots/presets';
@@ -105,7 +105,11 @@ type Span = '1h' | '6h' | '24h' | '7d' | 'all';
 const SPAN_MS: Record<Span, number | null> = { '1h': 3_600_000, '6h': 6 * 3_600_000, '24h': 86_400_000, '7d': 7 * 86_400_000, all: null };
 
 /** Volume and net PnL of every bot together: timeframes, series on and off, and the whole card full screen. */
-export function FleetChart({ bots, title = 'Volume and net PnL', series: given }: { bots: AlgoView[]; title?: string; series?: { volume: Array<[number, number]>; pnl: Array<[number, number]>; fees: Array<[number, number]> } }) {
+/**
+ * The chart only: the timeframe's figures are the Fleet panel's (Overview) and the KPI cards' (a bot's page), not
+ * repeated here. The series is built for the timeframe (fleet.ts fleetSeries `from`), so 1H and 6H keep their points.
+ */
+export function FleetChart({ bots, title = 'Volume and net PnL', series: given, empty }: { bots: AlgoView[]; title?: string; series?: FleetSeries; empty?: { title: string; line: string } }) {
   const [span, setSpan] = useState<Span>('24h');
   const [showVol, setShowVol] = useState(true);
   const [showPnl, setShowPnl] = useState(true);
@@ -120,9 +124,10 @@ export function FleetChart({ bots, title = 'Volume and net PnL', series: given }
     if (document.fullscreenElement) void document.exitFullscreen();
     else void box.current?.requestFullscreen?.();
   };
-  const s = useMemo(() => given ?? fleetSeries(bots, Date.now()), [bots, given]);
   const cut = SPAN_MS[span];
-  const from = cut ? Date.now() - cut : -Infinity;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const from = useMemo(() => (cut ? Date.now() - cut : -Infinity), [cut, bots]);
+  const s = useMemo(() => given ?? fleetSeries(bots, Date.now(), undefined, Number.isFinite(from) ? from : undefined), [bots, given, from]);
   // Bars a chart can show: the volume summed into about 50 buckets for the timeframe (owner: every 5-min point
   // became a forest of thin spikes), the net PnL as its last value in each.
   const series = useMemo<ChartSeries[]>(() => {
@@ -146,15 +151,6 @@ export function FleetChart({ bots, title = 'Volume and net PnL', series: given }
     if (showPnl) out.push({ key: 'pnl', kind: 'line', area: true, color: '#00b481', negColor: '#ef4a3c', points: [...pb.entries()].sort((x, y) => x[0] - y[0]), scale: 'left', format: (x) => fmtUsd(x, 2), title: 'Net PnL' });
     return out;
   }, [s, from, cut, showVol, showPnl]);
-  // The timeframe in three figures: what was traded, what the net PnL moved, and what $1M of it cost.
-  const sums = useMemo(() => {
-    const vol = s.volume.filter((p) => p[0] >= from).reduce((t, p) => t + p[1], 0);
-    const pnl = s.pnl.filter((p) => p[0] >= from);
-    // Before the window: the last value then; a fleet that started inside the window started at 0.
-    const before = s.pnl.filter((p) => p[0] < from).at(-1)?.[1] ?? 0;
-    const moved = pnl.length ? pnl[pnl.length - 1]![1] - (cut ? before : 0) : 0;
-    return { vol, moved, per: vol >= 1 ? (-moved / vol) * 1_000_000 : null };
-  }, [s, from, cut]);
   const enough = s.volume.filter((p) => p[0] >= from).length >= 3 && series.length > 0;
   return (
     <Shell className={`bots-chartcard${full ? ' is-full' : ''}`} ref={box as never}>
@@ -166,15 +162,10 @@ export function FleetChart({ bots, title = 'Volume and net PnL', series: given }
             </span>
             <Segmented value={span} label="Timeframe" onChange={setSpan} options={[{ value: '1h', label: '1H' }, { value: '6h', label: '6H' }, { value: '24h', label: '24H' }, { value: '7d', label: '7D' }, { value: 'all', label: 'All' }]} />
       </div>
-      <div className="bots-chartsum">
-        <span><small>Volume</small><b>{fmtUsd(sums.vol, 0)}</b></span>
-        <span><small>Net PnL</small><b className={sums.moved > 0.004 ? 'pos' : sums.moved < -0.004 ? 'neg' : ''}>{fmtPnl(sums.moved)}</b></span>
-        <span><small>Per $1M</small><b className={sums.per === null ? '' : sums.per < 0 ? 'pos' : 'neg'}>{fmtCost(sums.per)}</b></span>
-      </div>
       <Panel className="bots-chartpanel">
         {enough
           ? <SeriesChart key={`${span}-${full}`} series={series} height={full ? Math.max(320, window.innerHeight - 150) : 232} daily={false} magnet />
-          : <EmptyState icon="chart" title={bots.length ? 'Not enough points yet' : 'No bot yet'} description={bots.length ? 'A point every 5 minutes. Try a longer timeframe.' : 'Start a bot to chart it here.'} />}
+          : <EmptyState icon="chart" title={bots.length ? 'Not enough points yet' : empty?.title ?? 'No bot yet'} description={bots.length ? 'A point every 5 minutes. Try a longer timeframe.' : empty?.line ?? 'Start a bot to chart it here.'} />}
       </Panel>
     </Shell>
   );
@@ -221,7 +212,7 @@ function knownHere(address: string): boolean {
 }
 
 /** Sign in, and while the wallet is open the button says it waits for the approval there (owner 2026-11-08). */
-function SignInButton({ ctx }: { ctx: BotsCtx }) {
+export function SignInButton({ ctx }: { ctx: BotsCtx }) {
   const [waiting, setWaiting] = useState(false);
   const go = async () => {
     setWaiting(true);
@@ -294,7 +285,7 @@ function TileControls({ v, ctx }: { v: AlgoView; ctx: BotsCtx }) {
       {!ended && state !== 'closing' && (state === 'paused'
         ? <IconButton icon="play" label="Resume" disabled={busy} onClick={() => void ctx.resume(v)} />
         : <IconButton icon="pause" label="Pause" disabled={busy} onClick={() => void ctx.pause(v)} />)}
-      {!ended && <IconButton icon="stop" label={state === 'closing' ? 'Stop now' : 'Stop'} className="is-danger" disabled={busy} onClick={() => void ctx.stop(v)} />}
+      {!ended && <StopMenu v={v} ctx={ctx} closing={state === 'closing'} compact />}
       {ended && <IconButton icon="trash" label="Delete" className="is-danger" disabled={busy} onClick={() => void ctx.remove(v)} />}
     </span>
   );
@@ -317,7 +308,7 @@ function BotTile({ v, ctx, runs = 1 }: { v: AlgoView; ctx: BotsCtx; runs?: numbe
   const age = hours >= 48 ? `${Math.floor(hours / 24)}d` : hours >= 1 ? `${Math.floor(hours)}h` : `${Math.max(1, Math.round(hours * 60))}m`;
   return (
     <li>
-      <div role="link" tabIndex={0} className={`bots-tile bots-row is-${state}`} onClick={open} onKeyDown={(e) => e.key === 'Enter' && open()} aria-label={`${botName(v)}, ${v.algo.spec.symbol}`}>
+      <div role="link" tabIndex={0} className={`bots-tile bots-row is-${state}`} onClick={open} onKeyDown={(e) => { if (e.key === 'Enter' && e.target === e.currentTarget) open(); }} aria-label={`${botName(v)}, ${v.algo.spec.symbol}`}>
         <div className="bots-tile__top">
           <BotAvatar symbol={v.algo.spec.symbol} strategy={st} size={38} />
           <div className="bots-tile__t">
@@ -361,9 +352,12 @@ export function BotsOverview({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
   const [fleetSpan, setFleetSpan] = useStored<Span>('vs.bots.fleetSpan', '24h');
   const [layout, setLayout] = useState<Layout | null>(null);
   const t = useMemo(() => fleetTotals(bots), [bots]);
-  // The list: a bot's stopped runs folded into one row (foldRuns); the figures above still count every bot.
+  // The list: a bot's stopped runs folded into one row (foldRuns); the figures above count every real bot.
   const folded = useMemo(() => foldRuns(bots, botName), [bots]);
-  const s = useMemo(() => fleetSeries(bots, Date.now()), [bots]);
+  // Money is real bots' only (practice is counted on its own): the panel's series is built for its timeframe.
+  const real = useMemo(() => realBots(bots), [bots]);
+  const fleetFrom = useMemo(() => (SPAN_MS[fleetSpan] ? Date.now() - SPAN_MS[fleetSpan]! : -Infinity), [fleetSpan, real]);
+  const s = useMemo(() => fleetSeries(real, Date.now(), undefined, Number.isFinite(fleetFrom) ? fleetFrom : undefined), [real, fleetFrom]);
   const floor = costPerMillion(draftFor('market'), null, null, ctx.feeTenths);
   const lay: Layout = layout ?? (bots.length > 12 ? 'list' : 'tiles');
 
@@ -430,11 +424,12 @@ export function BotsOverview({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
   const val = (x: string) => (ready ? x : DASH);
   // The Fleet panel's timeframe (24 hours by default): volume, net PnL (at the mark), fees and cost in it; volume and
   // PnL sparklines both as running totals inside it.
-  const fw = useMemo(() => fleetWindow(s, SPAN_MS[fleetSpan] ? Date.now() - SPAN_MS[fleetSpan]! : -Infinity), [s, fleetSpan]);
+  const fw = useMemo(() => fleetWindow(s, fleetFrom), [s, fleetFrom]);
   const trendVol = fw.volTrend;
   const trendPnl = fw.pnlTrend;
   const pnlTone = fw.netPnl > 0.004 ? 'positive' : fw.netPnl < -0.004 ? 'negative' : undefined;
-  const stopped = t.bots - t.running;
+  const heldAll = bots.filter(isLive).reduce((x, v) => x + Math.abs(v.bot?.inventoryUsd ?? 0), 0);
+  const fleetLine = [`${t.running} running`, t.paused ? `${t.paused} paused` : '', t.stopped ? `${t.stopped} stopped` : '', t.practice.bots ? `${t.practice.bots} practice (not counted)` : ''].filter(Boolean).join(' · ');
 
   return (
     <>
@@ -444,7 +439,7 @@ export function BotsOverview({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
         sub="Market makers running 24/7 in your SoDEX account."
         actions={ready ? (
           <>
-            {anyRunning && <Button variant="danger" icon="stop" disabled={ctx.busy === 'all'} onClick={() => void ctx.stopAll()}>Stop all</Button>}
+            {anyRunning && <StopMenu ctx={ctx} label="Stop all" held={heldAll} disabled={ctx.busy === 'all'} onPick={(how) => void ctx.stopAll(how)} />}
             <Button variant="primary" icon="plus" onClick={() => (ctx.ready ? goBots({ page: 'new', market: null, kind: null }) : ctx.setup(true))}>New bot</Button>
           </>
         ) : undefined}
@@ -456,14 +451,14 @@ export function BotsOverview({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
 
       <ErrorBoundary name="Fleet">
       <Shell className="bots-kpis">
-        <ShellHeader icon="robot" title="Fleet" subtitle={ready ? `${t.running} running${stopped ? ` · ${stopped} stopped` : ''}` : 'Your bots, together'} aside={<Segmented value={fleetSpan} label="Fleet timeframe" onChange={setFleetSpan} options={[{ value: '24h', label: '24H' }, { value: '7d', label: '7D' }, { value: 'all', label: 'All' }]} />} />
+        <ShellHeader icon="robot" title="Fleet" subtitle={ready ? fleetLine : 'Your bots, together'} aside={<Segmented value={fleetSpan} label="Fleet timeframe" onChange={setFleetSpan} options={[{ value: '24h', label: '24H' }, { value: '7d', label: '7D' }, { value: 'all', label: 'All' }]} />} />
         <div className="bots-kpigrid">
-          <StatCard index={0} label="Running" value={ready ? `${t.running}` : DASH} hint={ready ? (stopped ? `${stopped} stopped` : `of ${t.bots} bots`) : undefined} />
+          <StatCard index={0} label="Running" value={ready ? `${t.running}` : DASH} hint={ready ? [t.paused ? `${t.paused} paused` : '', t.practice.running ? `${t.practice.running} practice` : '', t.bots ? `of ${t.bots} real` : ''].filter(Boolean).join(' · ') || undefined : undefined} />
           <StatCard index={1} label="Volume" value={val(fmtUsd(fw.volume, 0))} trend={ready ? trendVol : undefined} />
           <StatCard index={2} label="Net PnL" value={val(fmtPnl(fw.netPnl))} valueTone={ready ? pnlTone : undefined} trend={ready ? trendPnl : undefined} trendTone={pnlTone ?? 'neutral'} hint="After every fee, open positions at the mark" />
           <StatCard index={3} label="Per $1M" value={val(fmtCost(fw.costPerMillion))} valueTone={ready ? costTone(fw.costPerMillion) : undefined} hint="What the volume cost, net" />
           <StatCard index={4} label="Fees paid" value={val(fmtUsd(fw.fees, 2))} hint={`At least ${fmtUsd(floor.fees, 0)} per $1M`} />
-          <StatCard index={5} label="Holding" value={val(fmtUsd(cleanUsd(t.holdingUsd), 0))} hint="Running bots, now" />
+          <StatCard index={5} label="Holding" value={val(fmtUsd(cleanUsd(t.holdingUsd), 0))} hint={t.holdingUsd > 0.005 ? `Long ${fmtUsd(t.longUsd, 0)} · short ${fmtUsd(t.shortUsd, 0)}` : 'Running bots, now'} />
         </div>
       </Shell>
 
@@ -471,7 +466,7 @@ export function BotsOverview({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
 
       <div className="bots-two">
         <ErrorBoundary name="Latency"><LatencyCard marks={marks} ctx={ctx} /></ErrorBoundary>
-        <ErrorBoundary name="Volume and net PnL"><FleetChart bots={ready ? bots : []} /></ErrorBoundary>
+        <ErrorBoundary name="Volume and net PnL"><FleetChart bots={ready ? real : []} empty={ready && t.practice.bots ? { title: 'No real bot yet', line: 'Practice bots are not charted with real money.' } : undefined} /></ErrorBoundary>
       </div>
 
       {ready && <ErrorBoundary name="Margin"><AllocationPanel ctx={ctx} /></ErrorBoundary>}
@@ -486,7 +481,7 @@ export function BotsOverview({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
         <Shell className="bots-listcard">
           <ShellHeader
             icon="list"
-            title={<>Your bots <span className="bots-count">{bots.length}</span></>}
+            title={<>Your bots <span className="bots-count">{counts.all}</span></>}
             subtitle={`${counts.running} running · ${counts.paused} paused · ${counts.ended} stopped`}
             aside={
               <>
@@ -539,7 +534,7 @@ export function BotsOverview({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
                           const b = v.bot;
                           const open = () => goBots({ page: 'bot', id: v.algo.id });
                           return (
-                            <tr key={v.algo.id} className="bots-row" tabIndex={0} onClick={open} onKeyDown={(e) => e.key === 'Enter' && open()}>
+                            <tr key={v.algo.id} className="bots-row" tabIndex={0} onClick={open} onKeyDown={(e) => { if (e.key === 'Enter' && e.target === e.currentTarget) open(); }}>
                               <td>
                                 <span className="bots-who">
                                   <BotAvatar symbol={v.algo.spec.symbol} strategy={st} size={30} />

@@ -7,7 +7,7 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import type { AlgoEvent } from '@copy-engine';
-import { fmtDateTime, fmtUsd } from '../../format';
+import { fmtDateTime, fmtQty, fmtUsd } from '../../format';
 import { EmptyState, Icon, Skeleton, type Tone } from './kit/kit';
 
 type Filter = 'all' | 'fill' | 'order' | 'status';
@@ -48,7 +48,7 @@ function Row({ e, open, toggle }: { e: AlgoEvent; open: boolean; toggle: () => v
           {trade ? (
             <>
               <span className={`bots-flog__side is-${e.side}`}>{e.side === 'buy' ? 'Buy' : 'Sell'}</span>
-              <span className="bots-flog__num">{e.qty} @ {priceText(e.price!)}</span>
+              <span className="bots-flog__num">{fmtQty(e.qty!)} @ {priceText(e.price!)}</span>
             </>
           ) : <span className="bots-flog__txt">{plain(e)}</span>}
         </span>
@@ -61,7 +61,7 @@ function Row({ e, open, toggle }: { e: AlgoEvent; open: boolean; toggle: () => v
           {type && <div><dt>Order type</dt><dd>{type}</dd></div>}
           {trade && <div><dt>Side</dt><dd>{e.side === 'buy' ? 'Buy' : 'Sell'}</dd></div>}
           {trade && <div><dt>Price</dt><dd>{priceText(e.price!)}</dd></div>}
-          {trade && <div><dt>Size</dt><dd>{e.qty}</dd></div>}
+          {trade && <div><dt>Size</dt><dd>{fmtQty(e.qty!)}</dd></div>}
           {trade && <div><dt>Value</dt><dd>{fmtUsd(e.price! * e.qty!, 2)}</dd></div>}
           {e.paper && <div><dt>Practice</dt><dd>No order sent</dd></div>}
           <div className="is-wide"><dt>What happened</dt><dd>{plain(e)}</dd></div>

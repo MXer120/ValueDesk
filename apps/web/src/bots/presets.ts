@@ -15,7 +15,7 @@
  * Pure: the page and its tests read the same numbers.
  */
 import type { AlgoSpec, MarketInfo } from '@copy-engine';
-import { gridPrices, gridStepPct } from '@copy-engine';
+import { botMarginUsd, checkSizes, gridPrices, gridStepPct, minChildQty, parseAlgoSpec } from '@copy-engine';
 
 export type Strategy = 'market' | 'maker' | 'lead' | 'grid';
 /**
@@ -277,10 +277,27 @@ export function specOf(d: BotDraft, mark: number | null): Record<string, unknown
   }
   if (isMaker(d.strategy)) {
     const lead = d.strategy === 'lead' ? { ref: 'binance', ...(d.refBps > 0 ? { refBps: d.refBps } : {}), ...(d.pullBps > 0 ? { pullBps: d.pullBps } : {}) } : {};
-    return { ...base, ...limits, ...lead, ...safeguards(d), kind: 'mm', offsetTicks: d.offsetTicks, orderUsd: d.orderUsd, maxInventoryUsd: d.maxInventoryUsd, skewTicks: d.skewTicks, chaseTicks: d.chaseTicks, minRepriceMs: d.minRepriceMs, ...(d.edgeBps > 0 ? { edgeBps: d.edgeBps } : {}), ...(d.queueGuard > 0 ? { queueGuard: d.queueGuard } : {}), ...(d.ladder > 1 ? { levels: d.ladder } : {}), ...(d.moveGuard > 0 ? { moveGuard: d.moveGuard } : {}) };
+    return { ...base, ...limits, ...lead, ...safeguards(d), ...(d.maxSpreadBps !== null ? { maxSpreadBps: d.maxSpreadBps } : {}), kind: 'mm', offsetTicks: d.offsetTicks, orderUsd: d.orderUsd, maxInventoryUsd: d.maxInventoryUsd, skewTicks: d.skewTicks, chaseTicks: d.chaseTicks, minRepriceMs: d.minRepriceMs, ...(d.edgeBps > 0 ? { edgeBps: d.edgeBps } : {}), ...(d.queueGuard > 0 ? { queueGuard: d.queueGuard } : {}), ...(d.ladder > 1 ? { levels: d.ladder } : {}), ...(d.moveGuard > 0 ? { moveGuard: d.moveGuard } : {}) };
   }
+  // A grid takes the spread limit and the end time (spec base / botLimits); the flow gate, trading hours and news gate
+  // are the volume maker's only (spec.ts parses them for 'mm'), so a grid never carries them.
   const r = gridRange(d, mark);
-  return { ...base, ...limits, kind: 'grid', low: r?.low ?? null, high: r?.high ?? null, levels: d.levels, orderUsd: d.orderUsd, spacing: 'geometric', outOfRange: d.outOfRange };
+  return {
+    ...base, ...limits, kind: 'grid', low: r?.low ?? null, high: r?.high ?? null, levels: d.levels, orderUsd: d.orderUsd, spacing: 'geometric', outOfRange: d.outOfRange,
+    ...(d.maxSpreadBps !== null ? { maxSpreadBps: d.maxSpreadBps } : {}),
+    ...runEnd(d),
+  };
+}
+
+/** The run time as the spec's end (engine botLimits.endAt): from now, the hours the draft says. */
+function runEnd(d: BotDraft, now = Date.now()): { endAt?: number } {
+  return d.runHours !== null && d.runHours > 0 ? { endAt: now + Math.round(d.runHours * 3_600_000) } : {};
+}
+
+/** A spec's end as the hours it still has, rounded up to a whole hour (null: no end, or already past). */
+export function runHoursLeft(endAt: number | null | undefined, now = Date.now()): number | null {
+  if (endAt === null || endAt === undefined || !Number.isFinite(endAt) || endAt <= now) return null;
+  return Math.max(1, Math.ceil((endAt - now) / 3_600_000));
 }
 
 /** The flow gate, the quiet windows and the run time, as the spec carries them (engine flowGate / quiet / endAt). */
@@ -289,14 +306,15 @@ function safeguards(d: BotDraft): Record<string, unknown> {
     ...(d.flowOn ? { flowGate: { minUsd: d.flowMinUsd, windowMs: Math.round(d.flowWindowMin * 60_000), action: d.flowAction, shrink: d.flowShrink } } : {}),
     ...(d.quiet.length ? { quiet: d.quiet.map((w) => ({ ...w })), ...(d.quietOnly ? { quietOnly: true } : {}) } : {}),
     ...(d.news ? { news: { ...d.news } } : {}),
-    ...(d.runHours !== null && d.runHours > 0 ? { endAt: Date.now() + Math.round(d.runHours * 3_600_000) } : {}),
+    ...runEnd(d),
   };
 }
 
 /** The safeguards a spec carries, back as draft fields. */
-function safeguardsOf(s: AlgoSpec): Partial<BotDraft> {
+function safeguardsOf(s: AlgoSpec, now: number): Partial<BotDraft> {
   const x = s as unknown as { flowGate?: { minUsd: number; windowMs: number; action: 'pause' | 'shrink'; shrink: number }; quiet?: QuietWindow[]; quietOnly?: boolean; news?: NewsGate; endAt?: number | null };
   return {
+    runHours: runHoursLeft(x.endAt, now),
     ...(x.flowGate ? { flowOn: true, flowMinUsd: x.flowGate.minUsd, flowWindowMin: x.flowGate.windowMs / 60_000, flowAction: x.flowGate.action, flowShrink: x.flowGate.shrink } : {}),
     ...(x.quiet ? { quiet: x.quiet.map((w) => ({ ...w })), quietOnly: x.quietOnly === true } : {}),
     ...(x.news ? { news: { ...x.news } } : {}),
@@ -315,8 +333,8 @@ export function specChanges(before: BotDraft, after: BotDraft): string[] {
   return out;
 }
 
-/** The draft a running bot's spec reads back as (the Edit form). */
-export function draftOfSpec(s: AlgoSpec): BotDraft {
+/** The draft a running bot's spec reads back as (the Edit form; a restart keeps its end time as the hours left). */
+export function draftOfSpec(s: AlgoSpec, now = Date.now()): BotDraft {
   if (s.kind === 'mm' && s.ref && s.restMs) {
     return {
       ...draftFor('market', 'balanced', s.symbol), label: s.label ?? '', paper: s.paper, offsetTicks: s.offsetTicks, orderUsd: s.orderUsd, maxInventoryUsd: s.maxInventoryUsd,
@@ -324,14 +342,14 @@ export function draftOfSpec(s: AlgoSpec): BotDraft {
       gate: (s.stillBps ?? 0) > 0, gateBps: s.stillBps ?? GATE_DEFAULT.gateBps, gateWindowS: (s.stillMs ?? GATE_DEFAULT.gateWindowS * 1000) / 1000,
       maxSpreadBps: s.maxSpreadBps, leverage: s.leverage ?? null, volumeTargetUsd: s.volumeTargetUsd, maxLossUsd: s.maxLossUsd, onStop: s.onStop,
       refBps: s.refBps ?? 0, pullBps: s.pullBps ?? 0, ladder: s.levels ?? 1, moveGuard: s.moveGuard ?? 0, noFair: !!s.noFair,
-      ...safeguardsOf(s),
+      ...safeguardsOf(s, now),
     };
   }
   if (s.kind === 'mm') {
-    return { ...draftFor(s.ref ? 'lead' : 'maker', 'balanced', s.symbol), refBps: s.refBps ?? 0, pullBps: s.pullBps ?? 0, label: s.label ?? '', paper: s.paper, offsetTicks: s.offsetTicks, orderUsd: s.orderUsd, maxInventoryUsd: s.maxInventoryUsd, skewTicks: s.skewTicks, chaseTicks: s.chaseTicks, minRepriceMs: s.minRepriceMs, edgeBps: s.edgeBps ?? 0, queueGuard: s.queueGuard ?? 0, ladder: s.levels ?? 1, moveGuard: s.moveGuard ?? 0, volumeTargetUsd: s.volumeTargetUsd, maxLossUsd: s.maxLossUsd, onStop: s.onStop, maxSpreadBps: s.maxSpreadBps ?? null, leverage: s.leverage ?? null, ...safeguardsOf(s) };
+    return { ...draftFor(s.ref ? 'lead' : 'maker', 'balanced', s.symbol), refBps: s.refBps ?? 0, pullBps: s.pullBps ?? 0, label: s.label ?? '', paper: s.paper, offsetTicks: s.offsetTicks, orderUsd: s.orderUsd, maxInventoryUsd: s.maxInventoryUsd, skewTicks: s.skewTicks, chaseTicks: s.chaseTicks, minRepriceMs: s.minRepriceMs, edgeBps: s.edgeBps ?? 0, queueGuard: s.queueGuard ?? 0, ladder: s.levels ?? 1, moveGuard: s.moveGuard ?? 0, volumeTargetUsd: s.volumeTargetUsd, maxLossUsd: s.maxLossUsd, onStop: s.onStop, maxSpreadBps: s.maxSpreadBps ?? null, leverage: s.leverage ?? null, ...safeguardsOf(s, now) };
   }
   if (s.kind === 'grid') {
-    return { ...draftFor('grid', 'balanced', s.symbol), label: s.label ?? '', paper: s.paper, leverage: s.leverage ?? null, low: s.low, high: s.high, levels: s.levels, orderUsd: s.orderUsd, volumeTargetUsd: s.volumeTargetUsd, maxLossUsd: s.maxLossUsd, onStop: s.onStop, outOfRange: s.outOfRange };
+    return { ...draftFor('grid', 'balanced', s.symbol), label: s.label ?? '', paper: s.paper, leverage: s.leverage ?? null, low: s.low, high: s.high, levels: s.levels, orderUsd: s.orderUsd, volumeTargetUsd: s.volumeTargetUsd, maxLossUsd: s.maxLossUsd, onStop: s.onStop, outOfRange: s.outOfRange, maxSpreadBps: s.maxSpreadBps, runHours: runHoursLeft(s.endAt, now) };
   }
   return draftFor('maker', 'balanced', s.symbol);
 }
@@ -351,9 +369,9 @@ export function patchOf(before: BotDraft, after: BotDraft): Record<string, unkno
     return out;
   }
   const keys: Array<keyof BotDraft> =
-    after.strategy === 'maker' ? ['offsetTicks', 'orderUsd', 'maxInventoryUsd', 'skewTicks', 'chaseTicks', 'minRepriceMs', 'edgeBps', 'queueGuard', 'ladder', 'moveGuard', 'volumeTargetUsd', 'maxLossUsd', 'onStop']
-    : after.strategy === 'lead' ? ['orderUsd', 'maxInventoryUsd', 'skewTicks', 'chaseTicks', 'minRepriceMs', 'refBps', 'pullBps', 'volumeTargetUsd', 'maxLossUsd', 'onStop']
-    : ['orderUsd', 'volumeTargetUsd', 'maxLossUsd', 'onStop', 'outOfRange'];
+    after.strategy === 'maker' ? ['offsetTicks', 'orderUsd', 'maxInventoryUsd', 'skewTicks', 'chaseTicks', 'minRepriceMs', 'edgeBps', 'queueGuard', 'ladder', 'moveGuard', 'volumeTargetUsd', 'maxLossUsd', 'onStop', 'maxSpreadBps']
+    : after.strategy === 'lead' ? ['orderUsd', 'maxInventoryUsd', 'skewTicks', 'chaseTicks', 'minRepriceMs', 'refBps', 'pullBps', 'volumeTargetUsd', 'maxLossUsd', 'onStop', 'maxSpreadBps']
+    : ['orderUsd', 'volumeTargetUsd', 'maxLossUsd', 'onStop', 'outOfRange', 'maxSpreadBps'];
   const out: Record<string, unknown> = {};
   for (const k of keys) if (before[k] !== after[k]) out[k === 'ladder' ? 'levels' : k] = after[k];
   if (before.label.trim() !== after.label.trim()) out.label = after.label.trim() || null;
@@ -364,6 +382,178 @@ export function patchOf(before: BotDraft, after: BotDraft): Record<string, unkno
 export function strategyOf(s: AlgoSpec): Strategy | null {
   if (!s.bot) return null;
   return s.kind === 'mm' ? (s.ref && s.restMs ? 'market' : s.ref ? 'lead' : 'maker') : s.kind === 'grid' ? 'grid' : null;
+}
+
+/* ------------------------------------------------------ trading hours chart ----- */
+/*
+ * The hours chart (HoursGate) works in the viewer's own clock, `offMin` minutes off UTC, and stores UTC windows. A
+ * half-hour zone (UTC+5:30, offMin 330) was rounded to +6 (audit B), so a picked hour landed 30 minutes off: here a
+ * local hour j is UTC minute j*60 - offMin to + 60, and its window keeps the minutes ('18:30'-'19:30').
+ */
+const minOf = (t: string): number | null => {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(t.trim());
+  if (!m) return null;
+  const h = Number(m[1]), mi = Number(m[2]);
+  return h < 24 && mi < 60 ? h * 60 + mi : null;
+};
+const hhmm = (m: number): string => { const x = ((m % 1440) + 1440) % 1440; return `${String(Math.floor(x / 60)).padStart(2, '0')}:${String(x % 60).padStart(2, '0')}`; };
+
+/** "UTC+5:30", "UTC−4", "UTC+0". */
+export function offWords(offMin: number): string {
+  const a = Math.abs(offMin);
+  return `UTC${offMin >= 0 ? '+' : '−'}${Math.floor(a / 60)}${a % 60 ? `:${String(a % 60).padStart(2, '0')}` : ''}`;
+}
+
+/** A window the chart made for a viewer `offMin` off UTC: UTC, every day, starting and ending on that viewer's hour (or the whole day). */
+export function isChartWindow(w: QuietWindow, offMin: number): boolean {
+  if (w.zone !== 'utc' || w.days !== 'all') return false;
+  if (w.from === '00:00' && w.to === '23:59') return true;
+  const a = minOf(w.from), b = minOf(w.to);
+  if (a === null || b === null) return false;
+  return ((a + offMin) % 60 + 60) % 60 === 0 && ((b + offMin) % 60 + 60) % 60 === 0;
+}
+
+/** The viewer's hours (0-23 of their clock) the chart windows cover. */
+export function chartHours(ws: readonly QuietWindow[], offMin: number): Set<number> {
+  const hours = new Set<number>();
+  for (const w of ws) {
+    if (!isChartWindow(w, offMin)) continue;
+    if (w.from === '00:00' && w.to === '23:59') { for (let h = 0; h < 24; h++) hours.add(h); continue; }
+    const a = minOf(w.from)!, b = minOf(w.to)!;
+    const len = b > a ? b - a : b + 1440 - a;
+    const start = Math.round((((a + offMin) % 1440) + 1440) % 1440 / 60);
+    for (let k = 0; k < Math.round(len / 60); k++) hours.add((start + k) % 24);
+  }
+  return hours;
+}
+
+/** The viewer's hours back as joined UTC windows (every day). */
+export function chartWindows(hours: ReadonlySet<number>, offMin: number): QuietWindow[] {
+  if (hours.size >= 24) return [{ from: '00:00', to: '23:59', zone: 'utc', days: 'all' }];
+  const out: QuietWindow[] = [];
+  for (let h = 0; h < 24; h++) {
+    if (!hours.has(h) || hours.has((h + 23) % 24)) continue;
+    let e = h;
+    while (hours.has((e + 1) % 24)) e = (e + 1) % 24;
+    out.push({ from: hhmm(h * 60 - offMin), to: hhmm((e + 1) * 60 - offMin), zone: 'utc', days: 'all' });
+  }
+  return out;
+}
+
+/* --------------------------------------------------------------- leverage ----- */
+/**
+ * The leverage a bot may use: the market's maximum and the region's ceiling (EEA 2x), whichever is lower; null while
+ * the market's maximum is unknown (no slider is offered then: 20x before the market says is how A4 started).
+ */
+export function leverageCap(marketMax: number | null | undefined, regionMax: number | null | undefined): number | null {
+  if (marketMax === null || marketMax === undefined || !(marketMax >= 1)) return null;
+  const r = regionMax !== null && regionMax !== undefined && regionMax >= 1 ? regionMax : Infinity;
+  return Math.max(1, Math.floor(Math.min(marketMax, r)));
+}
+
+/** The leverage a new bot starts at once the account has answered: what SoDEX already uses there, else 3x, under the cap. */
+export function startLeverage(cap: number | null, held: number | null, loaded: boolean): number | null {
+  if (cap === null || !loaded) return null;
+  return Math.max(1, Math.min(cap, Math.round(held ?? 3)));
+}
+
+/** A chosen leverage kept under the cap (null stays null: the spec then leaves the account's own). */
+export function clampLeverage(v: number | null, cap: number | null): number | null {
+  if (v === null) return null;
+  return cap === null ? v : Math.max(1, Math.min(cap, Math.round(v)));
+}
+
+/* ---------------------------------------------------------- start, per market ----- */
+
+/** The smallest quote SoDEX takes on a market at a price (USD): a bot's smaller quote goes out at this (mmQuotes / gridQty). */
+export function minQuoteUsd(m: MarketInfo, price: number | null): number {
+  if (!price || !(price > 0)) return 0;
+  return minChildQty(m, price) * price;
+}
+
+type MarginFn = (s: AlgoSpec, minOrderUsd?: number, ceiling?: number) => number;
+/**
+ * The margin a real bot sets aside, as the executor counts it (copy-engine botMarginUsd), on the quote SoDEX really
+ * takes: an order under the market's minimum goes out at the minimum, so it is counted at the minimum (audit A3), and
+ * the leverage at most the region's ceiling. Passed to the engine too (botMarginUsd(s, minOrderUsd, ceiling) where it
+ * takes them); both ways give the same number.
+ */
+export function botNeedUsd(spec: AlgoSpec, minOrderUsd = 0, ceiling: number | null = null): number {
+  const min = Number.isFinite(minOrderUsd) && minOrderUsd > 0 ? minOrderUsd : 0;
+  const leverage = clampLeverage(spec.leverage ?? null, ceiling);
+  const s = spec.kind === 'mm'
+    ? { ...spec, orderUsd: Math.max(spec.orderUsd, min), leverage }
+    : spec.kind === 'grid' ? { ...spec, orderUsd: Math.max(spec.orderUsd, min), leverage } : spec;
+  return (botMarginUsd as MarginFn)(s as AlgoSpec, min || undefined, ceiling ?? undefined);
+}
+
+export interface MarketPlan {
+  symbol: string;
+  /** The spec to sign (null: it does not parse). */
+  spec: Record<string, unknown> | null;
+  errors: string[];
+  /** checkSizes notes: "Each quote goes out at SoDEX's minimum here, about $X". */
+  notes: string[];
+  /** The quote SoDEX really takes, USD (the order, or the market's minimum when that is larger). */
+  quoteUsd: number;
+  /** Its margin (botNeedUsd). */
+  marginUsd: number;
+}
+
+/**
+ * Every picked market checked before anything is signed (audit A4: sizes were checked on the first market only, so
+ * a start failed half way): each with its own market rules, its own price and its leverage under its own maximum
+ * and the region's ceiling.
+ */
+export function planMarkets(
+  d: BotDraft,
+  symbols: readonly string[],
+  look: (symbol: string) => { market: MarketInfo | null; price: number | null; maxLeverage: number | null; draft?: BotDraft },
+  o: { paper: boolean; regionMax?: number | null; mark?: number | null; now?: number },
+): MarketPlan[] {
+  return symbols.map((symbol) => {
+    const { market, price, maxLeverage, draft } = look(symbol);
+    const cap = leverageCap(maxLeverage, o.regionMax ?? null);
+    const base = draft ?? d;
+    const x: BotDraft = { ...base, symbol, paper: o.paper, leverage: clampLeverage(base.leverage, cap) };
+    const spec = specOf(x, symbol === d.symbol ? (o.mark ?? price) : price);
+    let parsed: AlgoSpec;
+    try {
+      parsed = parseAlgoSpec(spec);
+    } catch (e) {
+      return { symbol, spec: null, errors: [e instanceof Error ? e.message : String(e)], notes: [], quoteUsd: x.orderUsd, marginUsd: 0 };
+    }
+    if (!market) return { symbol, spec, errors: [], notes: [], quoteUsd: x.orderUsd, marginUsd: botNeedUsd(parsed, 0, o.regionMax ?? null) };
+    const px = parsed.kind === 'grid' ? (gridRange(x, price)?.low ?? price) : price;
+    const r = checkSizes(parsed, market, { price, seed: 1, now: o.now ?? Date.now() });
+    const min = minQuoteUsd(market, px);
+    return { symbol, spec, errors: r.errors, notes: r.notes ?? [], quoteUsd: Math.max(x.orderUsd, min), marginUsd: botNeedUsd(parsed, min, o.regionMax ?? null) };
+  });
+}
+
+/* ---------------------------------------------------------------- refusals ----- */
+
+export type RefusalAction = 'setup' | 'deposit' | 'stop-other' | 'discord' | 'size' | 'practice' | null;
+/**
+ * An executor refusal (ExecutorError.code, apps/executor service.ts) in plain words, with the one thing to do about
+ * it (audit B: the raw messages named copy-trading steps, "algo orders" and beta.valuedesk.so, with no button).
+ */
+export function refusalOf(code: string | null | undefined, message: string, many = false): { text: string; action: RefusalAction; label: string | null } {
+  const it = many ? 'these bots' : 'this bot';
+  switch (code) {
+    case 'key': return { text: 'Real orders need a trading key on SoDEX first. Set it up once, then start again.', action: 'setup', label: 'Set up real orders' };
+    case 'account': return { text: 'Your wallet has no SoDEX account yet. Deposit USDC first, then start again.', action: 'deposit', label: 'Deposit' };
+    case 'paper-only':
+    case 'beta': return { text: 'Real bots are open to beta testers only for now. Run it as practice, or ask on Discord to be added.', action: 'discord', label: 'Ask on Discord' };
+    case 'limit': return { text: 'You already run the most bots and algo orders allowed at once. Stop one first.', action: 'stop-other', label: 'See my bots' };
+    case 'margin': return { text: `Your futures account does not have enough free margin for ${it}. Lower the order size or max holding, deposit more, or stop another bot or copy.`, action: 'deposit', label: 'Deposit' };
+    case 'bot-market': return { text: 'You already run a real bot on this market. Stop it first, or pick another market.', action: 'stop-other', label: 'Stop the other bot' };
+    case 'live-cap': return { text: 'Real bots are full on our servers right now. Run it as practice, or ask on Discord when a place opens.', action: 'discord', label: 'Ask on Discord' };
+    case 'move': return { text: 'Your bots are moving to another server right now. Wait for the move to finish, then start again.', action: null, label: null };
+    case 'spec':
+    case 'algo': return /size|minimum|order|holding|cap/i.test(message) ? { text: message, action: 'size', label: 'Change the size' } : { text: message, action: null, label: null };
+    default: return { text: message, action: null, label: null };
+  }
 }
 
 /* ------------------------------------------------------------------- cost ----- */

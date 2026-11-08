@@ -12,12 +12,12 @@
  * New bot shows one part per sub-step (`part`); a bot's Settings tab shows them as tabs. R10's values are marked
  * and one press away. Built from the Bots kit.
  */
-import { useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { fmtUsd } from '../../format';
-import { FLOW_DEFAULT, GATE_DEFAULT, NEWS_DEFAULT, QUIET_PRESETS, R10, type BotDraft } from '../../bots/presets';
+import { FLOW_DEFAULT, GATE_DEFAULT, NEWS_DEFAULT, QUIET_PRESETS, R10, botNeedUsd, type BotDraft } from '../../bots/presets';
+import type { AlgoSpec } from '@copy-engine';
 import { HoursGate } from './HoursGate';
 import { RECIPE, recipeOfDraft } from '../../bots/recipes';
-import { botMarginUsd, type AlgoSpec } from '@copy-engine';
 import type { BotLeverage } from '../../bots/leverage';
 import { Button, Field, Icon, NumberField, Segmented, Slider, StatusPill, Switch, Tabs, TextInput } from './kit/kit';
 
@@ -49,7 +49,7 @@ function SpreadPick({ d, set }: { d: BotDraft; set: (p: Partial<BotDraft>) => vo
   const [custom, setCustom] = useState(!SPREAD_PICKS.includes(v));
   return (
     <div className="bots-spreadpick">
-      <Segmented label="Pause if spread over" value={custom ? 'custom' : String(v)} onChange={(x) => { if (x === 'custom') setCustom(true); else { setCustom(false); set({ maxSpreadBps: Number(x) }); } }} options={[...SPREAD_PICKS.map((b) => ({ value: String(b), label: `${b} bp` })), { value: 'custom', label: 'Custom' }]} />
+      <Segmented label="Pause if the spread is over" value={custom ? 'custom' : String(v)} onChange={(x) => { if (x === 'custom') setCustom(true); else { setCustom(false); set({ maxSpreadBps: Number(x) }); } }} options={[...SPREAD_PICKS.map((b) => ({ value: String(b), label: `${b} bp` })), { value: 'custom', label: 'Custom' }]} />
       {custom && <NumberField label="Spread limit" hideLabel value={v} onChange={(x) => x !== null && x >= 1 && set({ maxSpreadBps: Math.round(x) })} unit="bp" />}
     </div>
   );
@@ -60,20 +60,23 @@ function SpreadPick({ d, set }: { d: BotDraft; set: (p: Partial<BotDraft>) => vo
  * aside. With a position open on the market SoDEX takes a higher leverage (verified live) but a lower one is not
  * verified: the row says so, and the position's own margin stays as it is.
  */
-function LeverageRow({ d, set, lev }: { d: BotDraft; set: (p: Partial<BotDraft>) => void; lev: BotLeverage }) {
-  const max = lev.max ?? 20;
-  const now = d.leverage ?? lev.held ?? Math.min(3, max);
+function LeverageRow({ d, set, lev, max }: { d: BotDraft; set: (p: Partial<BotDraft>) => void; lev: BotLeverage; max: number }) {
+  // Before the account answered the bot has no leverage yet: the margin then counts 1x, as the executor does.
+  const now = d.leverage === null ? null : Math.min(max, d.leverage);
+  const shown = now ?? Math.min(3, max);
   const picks = [1, 2, 3, 5, 10, 20].filter((x) => x <= max);
-  const notional = botMarginUsd({ kind: 'mm', maxInventoryUsd: d.maxInventoryUsd, orderUsd: d.orderUsd, levels: d.ladder, leverage: 1 } as unknown as AlgoSpec);
-  const margin = d.strategy === 'grid' ? (d.orderUsd * d.levels) / now : notional / now;
-  const lower = lev.open && lev.held !== null && now < lev.held;
+  const spec = (d.strategy === 'grid'
+    ? { kind: 'grid', orderUsd: d.orderUsd, levels: d.levels, leverage: now }
+    : { kind: 'mm', maxInventoryUsd: d.maxInventoryUsd, orderUsd: d.orderUsd, levels: d.ladder, leverage: now }) as unknown as AlgoSpec;
+  const margin = botNeedUsd(spec);
+  const lower = lev.open && lev.held !== null && now !== null && now < lev.held;
   return (
-    <Row label="Leverage" wide hint={<>Sets aside about <b>{fmtUsd(margin, 0)}</b> of margin at {now}×{lev.held !== null && d.leverage === null ? ' (as your account holds it)' : ''}. Up to {max}× on this market.</>}>
+    <Row label="Leverage" wide hint={<>Sets aside about <b>{fmtUsd(margin, 0)}</b> of margin {now === null ? 'at 1× (reading your account)' : `at ${now}×`}. Up to {max}× here.</>}>
       <div className="bots-sizeline">
-        <Slider label="Leverage slider" value={now} min={1} max={max} step={1} onChange={(x) => set({ leverage: Math.round(x) })} minLabel="1×" maxLabel={`${max}×`} />
+        <Slider label="Leverage slider" value={shown} min={1} max={max} step={1} onChange={(x) => set({ leverage: Math.round(x) })} minLabel="1×" maxLabel={`${max}×`} />
         <NumberField label="Leverage" hideLabel value={now} onChange={(x) => x !== null && set({ leverage: Math.max(1, Math.min(max, Math.round(x))) })} unit="×" className="bots-sizeline__n" />
       </div>
-      <div className="bots-levpicks">{picks.map((x) => <button key={x} type="button" className={`bots-levpick${now === x ? ' is-on' : ''}`} onClick={() => set({ leverage: x })}>{x}×</button>)}</div>
+      <div className="bots-levpicks">{picks.map((x) => <button key={x} type="button" className={`bots-levpick${now === x ? ' is-on' : ''}`} aria-pressed={now === x} onClick={() => set({ leverage: x })}>{x}×</button>)}</div>
       {lev.open && (
         <p className={`bots-note${lower ? ' is-warn' : ''}`} role="note">
           <Icon name="warning" size={13} />
@@ -100,7 +103,7 @@ function Guard({ title, line, on, set, children, icon }: { title: string; line: 
   );
 }
 
-export function BotSettings({ d, set, range, mark, liveAllowed, noLead, hidePractice, part, lev }: {
+export function BotSettings({ d, set, range, mark, liveAllowed, noLead, hidePractice, part, lev, sizeErrors = [], sizeNotes = [] }: {
   d: BotDraft;
   set: (p: Partial<BotDraft>) => void;
   range: { low: number; high: number } | null;
@@ -113,8 +116,12 @@ export function BotSettings({ d, set, range, mark, liveAllowed, noLead, hidePrac
   part?: Sec;
   /** Kept for callers from before the restart flow. */
   running?: boolean;
-  /** The market's leverage facts (bots/leverage.ts); absent: no leverage row. */
+  /** The market's leverage facts (bots/leverage.ts), `max` already under the region's ceiling; absent or no max: no leverage row. */
   lev?: BotLeverage;
+  /** The order size's problems on the lead market (checkSizes errors), shown at the field. */
+  sizeErrors?: readonly string[];
+  /** checkSizes notes: the quote goes out at SoDEX's minimum. */
+  sizeNotes?: readonly string[];
 }) {
   const [tab, setSec] = useState<Sec>('size');
   const [adv, setAdv] = useState(false);
@@ -123,7 +130,28 @@ export function BotSettings({ d, set, range, mark, liveAllowed, noLead, hidePrac
   const mm = d.strategy !== 'grid';
   const market = d.strategy === 'market' && !noLead;
   const holdX = d.orderUsd > 0 ? d.maxInventoryUsd / d.orderUsd : 3;
-  const guards = (market && d.gate ? 1 : 0) + (mm && d.flowOn ? 1 : 0) + (d.quiet.length ? 1 : 0) + (d.news ? 1 : 0) + (d.maxSpreadBps !== null ? 1 : 0);
+  // Max holding as a multiple of the order, kept as it was set (audit B: re-derived from the rounded dollars on every
+  // keystroke, it drifted while the order size was typed). It changes only when max holding itself is set, or the
+  // draft changes from outside (a preset, a restart).
+  const [ratio, setRatio] = useState(holdX);
+  const ownInv = useRef<number | null>(null);
+  useEffect(() => {
+    if (ownInv.current !== null && ownInv.current === d.maxInventoryUsd) return;
+    ownInv.current = null;
+    if (d.orderUsd > 0) setRatio(d.maxInventoryUsd / d.orderUsd);
+  }, [d.maxInventoryUsd, d.orderUsd]);
+  const setOrder = (v: number) => {
+    if (!mm) return set({ orderUsd: v });
+    const inv = Math.max(v, Math.round(v * ratio));
+    ownInv.current = inv;
+    set({ orderUsd: v, maxInventoryUsd: inv });
+  };
+  const setHold = (inv: number) => {
+    if (d.orderUsd > 0) setRatio(inv / d.orderUsd);
+    ownInv.current = inv;
+    set({ maxInventoryUsd: inv });
+  };
+  const guards = (market && d.gate ? 1 : 0) + (mm && d.flowOn ? 1 : 0) + (mm && d.quiet.length ? 1 : 0) + (mm && d.news ? 1 : 0) + (d.maxSpreadBps !== null ? 1 : 0);
   const advChanged = [d.refBps !== 0, d.pullBps !== 0, d.ladder !== 1, d.minRepriceMs !== R10.minRepriceMs, d.chaseTicks !== R10.chaseTicks, d.skewTicks !== R10.skewTicks, d.moveGuard !== 0].filter(Boolean).length;
 
   const SECS: Array<{ id: Sec; icon: 'wallet' | 'layers' | 'shield'; label: string; count?: number }> = [
@@ -152,25 +180,26 @@ export function BotSettings({ d, set, range, mark, liveAllowed, noLead, hidePrac
               </Row>
             </>
           )}
-          <Row label="Order size" hint={mark && mark > 0 ? `≈ ${(d.orderUsd / mark).toPrecision(3)} ${d.symbol.replace(/-USD$/, '')} per order` : undefined}>
+          <Row label="Order size" hint={(mark && mark > 0) || sizeNotes.length ? <>{mark && mark > 0 ? `≈ ${(d.orderUsd / mark).toPrecision(3)} ${d.symbol.replace(/-USD$/, '')} per order.` : null}{sizeNotes.map((n) => <span key={n}> {n}</span>)}</> : undefined}>
             <div className="bots-sizeline">
-              <Slider label="Order size slider" value={d.orderUsd} min={10} max={500} step={1} onChange={(v) => set({ orderUsd: v, ...(mm ? { maxInventoryUsd: Math.round(v * holdX) } : {}) })} minLabel="$10" maxLabel="$500" />
-              <NumberField label="Order size" hideLabel value={d.orderUsd} onChange={(v) => v !== null && set({ orderUsd: v, ...(mm ? { maxInventoryUsd: Math.round(v * holdX) } : {}) })} unit="USD" className="bots-sizeline__n" />
+              <Slider label="Order size slider" value={d.orderUsd} min={10} max={500} step={1} onChange={(v) => setOrder(v)} minLabel="$10" maxLabel="$500" />
+              <NumberField label="Order size" hideLabel value={d.orderUsd} onChange={(v) => v !== null && setOrder(v)} error={sizeErrors[0] ?? null} unit="USD" className="bots-sizeline__n" />
             </div>
+            {sizeErrors.slice(1).map((e) => <p key={e} className="bots-err" role="alert">{e}</p>)}
           </Row>
           {mm && (
-            <Row label="Max holding" hint={`${holdX.toFixed(1)}× the order. At the cap it only unwinds.`}>
+            <Row label="Max holding" hint={`${holdX.toFixed(1)}× the order: the most it holds either way. At the cap it only unwinds.`}>
               <div className="bots-sizeline">
-                <Slider label="Max holding slider" value={holdX} min={1} max={10} step={0.5} onChange={(x) => set({ maxInventoryUsd: Math.round(d.orderUsd * x) })} minLabel="1×" maxLabel="10×" />
-                <NumberField label="Max holding" hideLabel value={d.maxInventoryUsd} onChange={(v) => v !== null && set({ maxInventoryUsd: v })} unit="USD" className="bots-sizeline__n" />
+                <Slider label="Max holding slider" value={Math.min(10, Math.max(1, ratio))} min={1} max={10} step={0.5} onChange={(x) => setHold(Math.round(d.orderUsd * x))} minLabel="1×" maxLabel="10×" />
+                <NumberField label="Max holding" hideLabel value={d.maxInventoryUsd} onChange={(v) => v !== null && setHold(v)} unit="USD" className="bots-sizeline__n" />
               </div>
             </Row>
           )}
-          <Row label="Stop if it loses" hint="Net, after every fee.">
+          <Row label="Stop if it loses" hint="Net, after every fee. Then it stops as On stop says.">
             <NumberField label="Loss" value={d.maxLossUsd} optional onChange={(v) => set({ maxLossUsd: v })} unit="USD" />
           </Row>
-          {lev && <LeverageRow d={d} set={set} lev={lev} />}
-          <Row label="Stop after trading" wide>
+          {lev && lev.max !== null && <LeverageRow d={d} set={set} lev={lev} max={lev.max} />}
+          <Row label="Stop after trading" wide hint="Stops once it has bought and sold this much in total.">
             <Segmented
               label="Stop after trading"
               value={customTgt ? 'custom' : tgtKey(d.volumeTargetUsd)}
@@ -179,14 +208,14 @@ export function BotSettings({ d, set, range, mark, liveAllowed, noLead, hidePrac
             />
             {customTgt && <NumberField label="After" value={d.volumeTargetUsd} optional onChange={(v) => set({ volumeTargetUsd: v })} unit="USD" />}
           </Row>
-          <Row label="Run for">
+          <Row label="Run for" hint="Stops by itself after this long.">
             <Segmented label="Run for" value={d.runHours === null ? 'open' : [1, 8, 24, 168].includes(d.runHours) ? String(d.runHours) : 'x'} onChange={(v) => v !== 'x' && set({ runHours: v === 'open' ? null : Number(v) })} options={[{ value: 'open', label: 'Until stopped' }, { value: '1', label: '1h' }, { value: '8', label: '8h' }, { value: '24', label: '24h' }, { value: '168', label: '7d' }, ...(d.runHours === null || [1, 8, 24, 168].includes(d.runHours) ? [] : [{ value: 'x', label: `${d.runHours}h` }])]} />
           </Row>
-          <Row label="On stop">
+          <Row label="On stop" hint={d.onStop === 'close' ? 'When it stops, it sells or buys back what it holds.' : 'When it stops, what it holds stays open in your account.'}>
             <Segmented label="When it stops" value={d.onStop} options={[{ value: 'close', label: 'Close position' }, { value: 'keep', label: 'Keep it' }]} onChange={(v) => set({ onStop: v })} />
           </Row>
           {d.strategy === 'grid' && (
-            <Row label="Out of range">
+            <Row label="Out of range" hint={d.outOfRange === 'wait' ? 'If the price leaves the range, it waits for it to come back.' : 'If the price leaves the range, it stops.'}>
               <Segmented label="Out of the range" value={d.outOfRange} options={[{ value: 'wait', label: 'Wait' }, { value: 'stop', label: 'Stop' }]} onChange={(v) => set({ outOfRange: v })} />
             </Row>
           )}
@@ -206,8 +235,8 @@ export function BotSettings({ d, set, range, mark, liveAllowed, noLead, hidePrac
                 <Segmented label="Longest rest" value={[5, 10, 20, 30].includes(d.restS) ? String(d.restS) : 'x'} onChange={(v) => v !== 'x' && set({ restS: Number(v) })} options={[{ value: '5', label: '5s' }, { value: '10', label: '10s' }, { value: '20', label: '20s' }, { value: '30', label: '30s' }, ...([5, 10, 20, 30].includes(d.restS) ? [] : [{ value: 'x', label: `${d.restS}s` }])]} />
               </Row>
             )}
-            <Row label="Quote at" tag={<R10Tag on={d.offsetTicks === R10.offsetTicks} reset={() => set({ offsetTicks: R10.offsetTicks })} />}>
-              <Segmented label="Quote at" value={d.offsetTicks < 0 ? 'inside' : d.offsetTicks > 0 ? 'back' : 'touch'} options={[{ value: 'inside', label: '1 tick inside' }, { value: 'touch', label: 'Best price' }, { value: 'back', label: '1 tick back' }]} onChange={(v) => set({ offsetTicks: v === 'inside' ? -1 : v === 'back' ? 1 : 0 })} />
+            <Row label="Quote at" tag={<R10Tag on={d.offsetTicks === R10.offsetTicks} reset={() => set({ offsetTicks: R10.offsetTicks })} />} hint="A step is the smallest price move on this market (a tick).">
+              <Segmented label="Quote at" value={d.offsetTicks < 0 ? 'inside' : d.offsetTicks > 0 ? 'back' : 'touch'} options={[{ value: 'inside', label: '1 step better' }, { value: 'touch', label: 'Best price' }, { value: 'back', label: '1 step back' }]} onChange={(v) => set({ offsetTicks: v === 'inside' ? -1 : v === 'back' ? 1 : 0 })} />
             </Row>
           </div>
           <button type="button" className={`bots-adv${adv ? ' is-open' : ''}`} aria-expanded={adv} onClick={() => setAdv((x) => !x)}>
@@ -220,12 +249,12 @@ export function BotSettings({ d, set, range, mark, liveAllowed, noLead, hidePrac
           {adv && (
             <div className="bots-fgrid bots-adv__body">
               {market && !d.noFair && (
-                <Row label="Distance from oracle" tag={<R10Tag on={d.refBps === 0} reset={() => set({ refBps: 0 })} />} hint="Where the adding side rests. 0: at SoDEX's best price.">
+                <Row label="Distance from oracle" tag={<R10Tag on={d.refBps === 0} reset={() => set({ refBps: 0 })} />} hint="Where the side that adds to what it holds rests, in bp (1 bp = 0.01%). 0: at SoDEX's best price.">
                   <NumberField label="Rest" value={d.refBps} onChange={(v) => set({ refBps: Math.max(0, Math.min(50, v ?? 0)) })} unit="bp" />
                 </Row>
               )}
               {market && !d.noFair && (
-                <Row label="Pull distance" tag={<R10Tag on={d.pullBps === 0} reset={() => set({ pullBps: 0 })} />} hint="Pulls the adding side this close to the oracle.">
+                <Row label="Pull distance" tag={<R10Tag on={d.pullBps === 0} reset={() => set({ pullBps: 0 })} />} hint="Pulls that side when the oracle comes this close, in bp.">
                   <NumberField label="Pull within" value={d.pullBps} onChange={(v) => set({ pullBps: Math.max(0, Math.min(20, v ?? 0)) })} unit="bp" />
                 </Row>
               )}
@@ -235,13 +264,13 @@ export function BotSettings({ d, set, range, mark, liveAllowed, noLead, hidePrac
               <Row label="Re-price at most every" tag={<R10Tag on={d.minRepriceMs === R10.minRepriceMs} reset={() => set({ minRepriceMs: R10.minRepriceMs })} />}>
                 <Segmented label="Re-price" value={[1000, 2000, 5000].includes(d.minRepriceMs) ? String(d.minRepriceMs) : 'x'} onChange={(v) => v !== 'x' && set({ minRepriceMs: Number(v) })} options={[{ value: '1000', label: '1s' }, { value: '2000', label: '2s' }, { value: '5000', label: '5s' }, ...([1000, 2000, 5000].includes(d.minRepriceMs) ? [] : [{ value: 'x', label: `${d.minRepriceMs / 1000}s` }])]} />
               </Row>
-              <Row label="Follow the touch" tag={<R10Tag on={d.chaseTicks === R10.chaseTicks} reset={() => set({ chaseTicks: R10.chaseTicks })} />} hint="Re-quote once the best price moved this far.">
+              <Row label="Re-quote after the price moves" tag={<R10Tag on={d.chaseTicks === R10.chaseTicks} reset={() => set({ chaseTicks: R10.chaseTicks })} />} hint="Moves its quotes once the best price moved this many steps.">
                 <NumberField label="After" value={d.chaseTicks} onChange={(v) => set({ chaseTicks: Math.max(1, Math.min(1000, Math.round(v ?? 1))) })} unit="ticks" />
               </Row>
-              <Row label="Inventory skew" tag={<R10Tag on={d.skewTicks === R10.skewTicks} reset={() => set({ skewTicks: R10.skewTicks })} />} hint="At the cap, the adding side steps back this far.">
+              <Row label="Step back when holding" tag={<R10Tag on={d.skewTicks === R10.skewTicks} reset={() => set({ skewTicks: R10.skewTicks })} />} hint="At the cap, the side that would add more steps back this many steps.">
                 <NumberField label="Skew" value={d.skewTicks} onChange={(v) => set({ skewTicks: Math.max(0, Math.round(v ?? 0)) })} unit="ticks" />
               </Row>
-              <Row label="Move guard" tag={<R10Tag on={d.moveGuard === 0} reset={() => set({ moveGuard: 0 })} />} hint="The side the mid runs into waits after this many ticks in 2 s.">
+              <Row label="Pause on fast moves" tag={<R10Tag on={d.moveGuard === 0} reset={() => set({ moveGuard: 0 })} />} hint="The side the price runs into waits once it moved this many steps in 2 seconds.">
                 <NumberField label="Ticks" value={d.moveGuard} onChange={(v) => set({ moveGuard: Math.max(0, Math.min(100, v ?? 0)) })} unit="ticks" placeholder="Off" />
               </Row>
             </div>
@@ -253,6 +282,7 @@ export function BotSettings({ d, set, range, mark, liveAllowed, noLead, hidePrac
         <div className="bots-guards">
           {market && (
             <Guard icon="pulse" title="Volatility gate" line="Pauses the moment the price moves fast, at any hour" on={d.gate} set={(on) => set({ gate: on, ...(on && !d.gateBps ? GATE_DEFAULT : {}) })}>
+              <p className="bots-f__h">Pauses while the oracle moved more than this. bp: a hundredth of a percent (1 bp = 0.01%).</p>
               <div className="bots-pair">
                 <NumberField label="Moves" value={d.gateBps} onChange={(v) => set({ gateBps: Math.max(1, Math.min(500, v ?? GATE_DEFAULT.gateBps)) })} unit="bp" />
                 <NumberField label="Over" value={d.gateWindowS} onChange={(v) => set({ gateWindowS: Math.max(1, Math.min(120, Math.round(v ?? GATE_DEFAULT.gateWindowS))) })} unit="s" />
@@ -279,9 +309,9 @@ export function BotSettings({ d, set, range, mark, liveAllowed, noLead, hidePrac
               </div>
             </Guard>
           )}
-          <Guard icon="clock" title="Trading hours" line={d.quiet.length ? `${d.quiet.length} window${d.quiet.length === 1 ? '' : 's'}: ${d.quietOnly ? 'trades only in them' : 'paused in them'}` : 'Pause at set hours, or trade only in them'} on={d.quiet.length > 0} set={(on) => set({ quiet: on ? [QUIET_PRESETS[0]!.w] : [], quietOnly: false })}>
+          {mm && <Guard icon="clock" title="Trading hours" line={d.quiet.length ? `${d.quiet.length} window${d.quiet.length === 1 ? '' : 's'}: ${d.quietOnly ? 'trades only in them' : 'paused in them'}` : 'Pause at set hours, or trade only in them'} on={d.quiet.length > 0} set={(on) => set({ quiet: on ? [QUIET_PRESETS[0]!.w] : [], quietOnly: false })}>
             <HoursGate d={d} set={set} />
-          </Guard>
+          </Guard>}
           {mm && (
             <Guard icon="bolt" title="News gate" line={d.news ? `Off ${d.news.beforeMin} min before to ${d.news.afterMin} min after each ${d.news.level === 'high' ? 'major' : 'major or medium'} US release` : 'Pause around CPI, jobs, the Fed and other US releases'} on={d.news !== null} set={(on) => set({ news: on ? { ...NEWS_DEFAULT } : null })}>
               {d.news && (
@@ -299,11 +329,9 @@ export function BotSettings({ d, set, range, mark, liveAllowed, noLead, hidePrac
               )}
             </Guard>
           )}
-          {market && (
-            <Guard icon="layers" title="Spread limit" line="Pause on a wide spread" on={d.maxSpreadBps !== null} set={(on) => set({ maxSpreadBps: on ? 20 : null })}>
-              <SpreadPick d={d} set={set} />
-            </Guard>
-          )}
+          <Guard icon="layers" title="Spread limit" line="Pauses while the gap between the best buy and sell is wider than this (1 bp = 0.01%)" on={d.maxSpreadBps !== null} set={(on) => set({ maxSpreadBps: on ? 20 : null })}>
+            <SpreadPick d={d} set={set} />
+          </Guard>
           {noLead && d.strategy === 'market' && <p className="bots-note"><StatusPill size="sm">no oracle</StatusPill> The volatility gate needs the oracle and is off here.</p>}
         </div>
       )}

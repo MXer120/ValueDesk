@@ -11,7 +11,9 @@
  * Every figure is the user's own (their tier and staking from SoDEX, their bots' volume) times the published tables
  * or Explore's estimates; nothing is promised.
  */
-import { useMemo, type ReactNode } from 'react';
+import { type ReactNode } from 'react';
+import type { AlgoView } from '@copy-engine';
+import { notify } from '../../toast';
 import { DASH, fmtUsd } from '../../format';
 import { FEE_TIERS, STAKING_TIERS, fmtSoso, fmtThreshold, feeTierAt, stakingTierAt } from '../../fees';
 import { useVenueFees } from '../useVenueFees';
@@ -31,11 +33,13 @@ const DAY = 86_400_000;
 const monthWords = (m: number | null): string => (m === null ? 'at your volume' : m < 1 ? 'under $1 a month at your pace' : `≈ ${fmtUsd(m, 0)} a month at your pace`);
 const month = (perDay: number) => perDay * 30;
 
-/** A bot's volume per day: what it traded over the time it has run (at least an hour). */
-function perDayOf(volume: number, since: number, now: number): number {
-  const days = Math.max(1 / 24, (now - since) / DAY);
+/** A bot's volume per day: what it traded over the time it ran (start to its end, or now; at least an hour). */
+function perDayOf(volume: number, since: number, until: number): number {
+  const days = Math.max(1 / 24, (until - since) / DAY);
   return volume / days;
 }
+/** A bot's pace: over the time it ran, never counting days after it stopped. */
+const paceOf = (v: AlgoView, now: number): number => perDayOf(v.bot?.volume ?? 0, v.algo.startedAt ?? v.algo.createdAt, v.algo.endedAt ?? now);
 
 function Saving({ title, line, perMonth, perMillion, action, icon, tile, tone = 'neutral' }: {
   title: string; line: string; perMonth: number | null; perMillion: number | null; action?: ReactNode; icon?: IconName; tile?: ReactNode; tone?: Tone;
@@ -75,10 +79,14 @@ export function BotsSavings({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
   const now = Date.now();
   const live = ctx.bots.filter(isLive).filter((v) => !v.algo.spec.paper);
   const all = ctx.bots.filter((v) => !v.algo.spec.paper);
-  const pace = useMemo(() => all.reduce((x, v) => x + perDayOf(v.bot?.volume ?? 0, v.algo.startedAt ?? v.algo.createdAt, now), 0), [all, now]);
-  const practicePace = useMemo(() => ctx.bots.filter((v) => v.algo.spec.paper).reduce((x, v) => x + perDayOf(v.bot?.volume ?? 0, v.algo.startedAt ?? v.algo.createdAt, now), 0), [ctx.bots, now]);
+  // The pace now: the real bots running, each over the time it has run. With none running, the pace the stopped
+  // ones kept while they ran (not their volume spread over the days since they stopped); then practice.
+  const livePace = live.reduce((x, v) => x + paceOf(v, now), 0);
+  const pastPace = all.length ? Math.max(...all.map((v) => paceOf(v, now))) : 0;
+  const practicePace = ctx.bots.filter((v) => v.algo.spec.paper && isLive(v)).reduce((x, v) => x + paceOf(v, now), 0);
+  const pace = livePace > 0 ? livePace : pastPace;
   const perDay = pace > 0 ? pace : practicePace;
-  const basis = pace > 0 ? "your bots' real volume" : practicePace > 0 ? "your practice bots' volume" : null;
+  const basis = livePace > 0 ? "your running bots' real volume" : pastPace > 0 ? "the pace your last real bot kept" : practicePace > 0 ? "your practice bots' volume" : null;
 
   const perps = fees.perps;
   const tier = feeTierAt(perps?.feeTier ?? 0) ?? FEE_TIERS[0]!;
@@ -99,7 +107,7 @@ export function BotsSavings({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
   const best = (markets.data?.markets ?? []).filter((m) => m.confidence === 'high').sort((a, b) => a.estCostBps - b.estCostBps)[0] ?? null;
   const moves = live.filter((v) => v.algo.spec.kind === 'mm').map((v) => {
     const here = est.get(v.algo.spec.symbol);
-    const pd = perDayOf(v.bot?.volume ?? 0, v.algo.startedAt ?? v.algo.createdAt, now);
+    const pd = paceOf(v, now);
     if (!here || !best || best.symbol === v.algo.spec.symbol) return null;
     const room = best.capacityUsdH * 24 > pd;
     const perM = bpToPerMillion(here.estCostBps - best.estCostBps);
@@ -108,14 +116,14 @@ export function BotsSavings({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
   const gates = live.filter((v) => v.algo.spec.kind === 'mm' && v.algo.spec.ref && !(v.algo.spec.stillBps ?? 0)).map((v) => {
     const here = est.get(v.algo.spec.symbol);
     if (!here || here.gateCostBps === null || here.gateCostBps >= here.estCostBps) return null;
-    const pd = perDayOf(v.bot?.volume ?? 0, v.algo.startedAt ?? v.algo.createdAt, now);
+    const pd = paceOf(v, now);
     const perM = bpToPerMillion(here.estCostBps - here.gateCostBps);
     return { v, perM, perMonth: month((perM / 1_000_000) * pd) };
   }).filter((x): x is NonNullable<typeof x> => !!x);
 
   const turnOnGate = async (v: (typeof gates)[number]['v']) => {
     const before = draftOfSpec(v.algo.spec);
-    await ctx.update(v.algo.id, patchOf(before, { ...before, gate: true }));
+    try { await ctx.update(v.algo.id, patchOf(before, { ...before, gate: true })); } catch (e) { notify('error', e instanceof Error ? e.message : String(e)); }
   };
 
   const totalPerM = (tierSavePerM ?? 0) + (stakeRows[0]?.perM ?? 0) + Math.max(0, ...moves.map((m) => m.perM), ...gates.map((g) => g.perM));
@@ -151,7 +159,7 @@ export function BotsSavings({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
               <StatCard index={0} label="Your maker fee" value={perps ? `${(makerNow * 10_000).toFixed(2)} bp` : DASH} hint="Staking included" />
               <StatCard index={1} label="Fee tier" value={perps ? `Tier ${tier.tier}` : DASH} hint={`Maker ${(tier.perpsMaker * 10_000).toFixed(1)} bp here`} />
               <StatCard index={2} label="Staking" value={perps ? (stake.discount ? `${Math.round(stake.discount * 100)}% off` : 'None') : DASH} hint="Off every SoDEX fee" />
-              <StatCard index={3} label="Bots trade" value={perDay > 0 ? `${fmtUsd(perDay, 0)}/day` : DASH} hint="Over the time they ran" />
+              <StatCard index={3} label="Bots trade" value={perDay > 0 ? `${fmtUsd(perDay, 0)}/day` : DASH} hint={livePace > 0 ? 'Running bots, over the time they ran' : 'While they ran'} />
               <StatCard index={4} label="Could save per $1M" value={totalPerM > 0 ? fmtUsd(totalPerM, 0) : DASH} valueTone={totalPerM > 0 ? 'positive' : undefined} hint={total > 0 ? monthWords(total) : 'What applies, added up'} />
             </div>
           </Shell>

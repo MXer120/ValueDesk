@@ -9,7 +9,7 @@ import { parseAlgoSpec, type AlgoSpec, type AlgoView } from '@copy-engine';
 import type { BotMarket } from './data';
 import { draftFor, draftOfSpec, specOf, type BotDraft } from './presets';
 import { RECIPE, RECIPES, recipeOfDraft, recipeOfSpec } from './recipes';
-import { PRIOR_USD, bestOf, estimate, ownRuns, quietCover, rankRecipes } from './estimate';
+import { PRIOR_USD, bestOf, estimate, feeAdjOf, ownRuns, quietCover, quietCoverLocal, rankRecipes } from './estimate';
 
 const M: BotMarket = {
   symbol: 'ETH-USD', base: 'ETH', tick: 0.01, tickBps: 0.03, price: 3000, volumeUsdH: 2_000_000, spreadBps: 0.1, volBpsH: 100,
@@ -126,4 +126,34 @@ test('ranking: cheapest first; an early bot is never called best', () => {
   for (let i = 1; i < ranked.length; i++) assert.ok((ranked[i - 1]!.est.bp ?? 99) <= (ranked[i]!.est.bp ?? 99));
   assert.notEqual(RECIPE[bestOf(ranked)!.id].proof, 'early');
   assert.deepEqual(rankRecipes({ ...M, lead: null }, draftFor('market')).map((x) => x.id), ['touch']);
+});
+
+test('fees: the wallet\'s own bot fee, not the flat 0.1 bp the reading was made with', () => {
+  assert.equal(feeAdjOf(1, 0.1), 0);
+  assert.ok(Math.abs(feeAdjOf(5, 0.1) - 0.4) < 1e-12, 'the 0.5 bp step of the ladder');
+  const e = estimate(r10(), M, [], feeAdjOf(5, 0.1));
+  assert.ok(Math.abs(e.bp! - 2.0) < 1e-9, String(e.bp));
+  assert.ok(Math.abs(e.low! - 1.6) < 1e-9 && Math.abs(e.high! - 2.5) < 1e-9, `${e.low} ${e.high}`);
+  assert.ok(Math.abs(e.lines.find((l) => l.id === 'market')!.bp! - 2.0) < 1e-9, 'the market line carries it, so price moves stay the same');
+  // A VIP at 0.1 bp pays what the reading assumed.
+  assert.equal(estimate(r10(), M, [], feeAdjOf(1, 0.1)).bp, 1.6);
+});
+
+test('quiet cover per hour of a half-hour clock (UTC+5:30): an Indian 14:00-16:00 window covers exactly those two hours', () => {
+  const w = [{ from: '08:30', to: '10:30', zone: 'utc' as const, days: 'all' as const }];
+  const local = quietCoverLocal(w, 330);
+  assert.equal(local[14], 1);
+  assert.equal(local[15], 1);
+  assert.equal(local[13], 0);
+  assert.equal(local[16], 0);
+  // By UTC hour the same window is half of 08, all of 09, half of 10.
+  const utc = quietCover(w);
+  assert.equal(utc[8], 0.5);
+  assert.equal(utc[9], 1);
+  assert.equal(utc[10], 0.5);
+});
+
+test('the spread limit moves the book maker\'s estimate too (it is sent for every bot now)', () => {
+  const plain = { ...draftFor('maker', 'balanced', 'ETH-USD'), ...RECIPE.touch.params, maxSpreadBps: 5 };
+  assert.ok(estimate(plain, M).lines.some((l) => l.id === 'spread'));
 });

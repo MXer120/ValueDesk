@@ -5,8 +5,9 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { checkAlgoSpec, parseAlgoSpec, type MarketInfo } from '@copy-engine';
-import { PRESETS, PRESET_VALUES, STRATEGIES, cheapestMakerMarkets, costPerMillion, draftFor, draftOfSpec, gridRange, patchOf, presetOf, specOf, strategyOf } from './presets';
+import { checkAlgoSpec, parseAlgoSpec, type AlgoSpec, type MarketInfo } from '@copy-engine';
+import { PRESETS, PRESET_VALUES, STRATEGIES, botNeedUsd, chartHours, chartWindows, cheapestMakerMarkets, clampLeverage, costPerMillion, draftFor, draftOfSpec, gridRange, isChartWindow, leverageCap, minQuoteUsd, offWords, patchOf, planMarkets, presetOf, refusalOf, runHoursLeft, specOf, startLeverage, strategyOf, type MarketPlan } from './presets';
+import { draftOfRecipe, recipeOfDraft } from './recipes';
 
 const BTC = { tickSize: '1', makerFee: 0.00012 } as Pick<MarketInfo, 'tickSize' | 'makerFee'>;
 const MARK = 78_000;
@@ -126,4 +127,149 @@ test('market maker: R10 by default, the gate a switch, and a running one patches
   assert.deepEqual(patchOf(back, { ...back, gate: false }), { stillBps: 0 });
   assert.deepEqual(patchOf(back, { ...back, restS: 20 }), { restMs: 20_000 });
   assert.deepEqual(patchOf({ ...back, gate: false }, { ...back, gate: true }), { stillBps: 12, stillMs: 60_000 });
+});
+
+/* ---------------------------------------------------- launch audit A4 / B (2026-11-08) ----- */
+
+const mkt = (o: Partial<MarketInfo> = {}): MarketInfo => ({
+  id: 1, name: 'BTC-USD', base: 'BTC', tickSize: '1', stepSize: '0.0001', minQuantity: '0.0001', maxQuantity: '100', marketMaxQuantity: null,
+  minNotional: 5, maxNotional: null, maxLeverage: 20, makerFee: 0.00012, ...o,
+} as MarketInfo);
+
+test('a grid carries its run time and spread limit; a restart reads the end time back as the hours left (rounded up)', () => {
+  const now = 1_800_000_000_000;
+  const d = { ...draftFor('grid', 'balanced'), runHours: 8, maxSpreadBps: 30 };
+  const spec = specOf(d, MARK);
+  assert.ok(typeof spec.endAt === 'number' && Math.abs((spec.endAt as number) - Date.now() - 8 * 3_600_000) < 5_000, String(spec.endAt));
+  assert.equal(spec.maxSpreadBps, 30);
+  assert.equal(spec.quiet, undefined, 'a grid never carries trading hours');
+  const parsed = parseAlgoSpec(spec) as Extract<AlgoSpec, { kind: 'grid' }>;
+  assert.equal(parsed.endAt, spec.endAt);
+  assert.equal(parsed.maxSpreadBps, 30);
+  const back = draftOfSpec({ ...parsed, endAt: now + 7.2 * 3_600_000 }, now);
+  assert.equal(back.runHours, 8, '7.2 h left rounds up to 8');
+  assert.equal(back.maxSpreadBps, 30);
+  // No spread limit stays none on the way back (it used to come back as 20).
+  assert.equal(draftOfSpec(parseAlgoSpec(specOf({ ...d, maxSpreadBps: null }, MARK)), now).maxSpreadBps, null);
+  // An end already past: no run time.
+  assert.equal(draftOfSpec({ ...parsed, endAt: now - 1 }, now).runHours, null);
+  assert.equal(runHoursLeft(now + 1, now), 1);
+});
+
+test('the market maker and the book maker keep their end time and spread limit through a restart', () => {
+  const now = 1_800_000_000_000;
+  for (const r of ['r10', 'touch'] as const) {
+    const d = { ...draftOfRecipe(r, 'ETH-USD'), runHours: 24, maxSpreadBps: 10 };
+    const spec = specOf(d, 3000);
+    assert.equal(spec.maxSpreadBps, 10, r);
+    const back = draftOfSpec({ ...parseAlgoSpec(spec), endAt: now + 23.5 * 3_600_000 } as never, now);
+    assert.equal(back.runHours, 24, r);
+    assert.equal(back.maxSpreadBps, 10, r);
+  }
+});
+
+test('a preset change keeps every setting that is not the preset\'s: leverage, news, hours (and trade-only), flow gate, target, on stop, loss limit, run time', () => {
+  const mine = {
+    ...draftOfRecipe('r10', 'ETH-USD'), leverage: 5, news: { beforeMin: 5, afterMin: 30, level: 'medium' as const },
+    quiet: [{ from: '14:00', to: '16:00', zone: 'utc' as const, days: 'all' as const }], quietOnly: true,
+    flowOn: true, flowMinUsd: 500_000, flowWindowMin: 30, flowAction: 'shrink' as const, flowShrink: 0.25,
+    volumeTargetUsd: 250_000, onStop: 'keep' as const, maxLossUsd: 7, runHours: 8, orderUsd: 80, maxInventoryUsd: 240, maxSpreadBps: 50, label: 'night', paper: false,
+  };
+  for (const id of ['r10g', 's1', 'n5', 'n5g', 'touch'] as const) {
+    const x = draftOfRecipe(id, 'ETH-USD', mine);
+    for (const k of ['leverage', 'news', 'quiet', 'quietOnly', 'flowOn', 'flowMinUsd', 'flowWindowMin', 'flowAction', 'flowShrink', 'volumeTargetUsd', 'onStop', 'maxLossUsd', 'runHours', 'orderUsd', 'maxInventoryUsd', 'maxSpreadBps', 'label', 'paper'] as const) {
+      assert.deepEqual(x[k], mine[k], `${id} ${k}`);
+    }
+    assert.equal(recipeOfDraft(x), id, `${id} is itself`);
+  }
+  // To a grid: its own sizes (per level), the rest kept.
+  const g = draftOfRecipe('grid', 'ETH-USD', mine);
+  assert.equal(g.orderUsd, draftFor('grid').orderUsd);
+  assert.equal(g.leverage, 5);
+  assert.equal(g.runHours, 8);
+});
+
+test('leverage: under the market\'s maximum and the region\'s ceiling; none before the maximum is known; its start only once the account answered', () => {
+  assert.equal(leverageCap(null, null), null, 'unknown maximum: no slider');
+  assert.equal(leverageCap(50, null), 50);
+  assert.equal(leverageCap(50, 2), 2, 'EEA 2x');
+  assert.equal(leverageCap(1, 2), 1);
+  assert.equal(startLeverage(20, null, false), null, 'account not read yet');
+  assert.equal(startLeverage(20, null, true), 3);
+  assert.equal(startLeverage(20, 10, true), 10, 'what SoDEX already uses there');
+  assert.equal(startLeverage(2, 10, true), 2);
+  assert.equal(startLeverage(null, 10, true), null);
+  assert.equal(clampLeverage(20, 5), 5);
+  assert.equal(clampLeverage(null, 5), null);
+});
+
+test('several markets: each checked with its own price and rules before anything is signed; leverage per market; margin on the real quote', () => {
+  const d = { ...draftOfRecipe('r10', 'BTC-USD'), orderUsd: 12, maxInventoryUsd: 300, leverage: 10, paper: false };
+  const markets: Record<string, { market: MarketInfo; price: number; maxLeverage: number }> = {
+    // BTC: minimum 0.0001 BTC ($5 minimum value) = $7.80: $12 goes out as it is.
+    'BTC-USD': { market: mkt(), price: 78_000, maxLeverage: 20 },
+    // A market whose smallest quote is $100: $12 goes out at $100, the margin counts $100.
+    'BIG-USD': { market: mkt({ name: 'BIG-USD', base: 'BIG', tickSize: '0.01', stepSize: '1', minQuantity: '1', minNotional: 10 }), price: 100, maxLeverage: 5 },
+  };
+  const plans = planMarkets(d, ['BTC-USD', 'BIG-USD'], (s) => ({ ...markets[s]!, maxLeverage: markets[s]!.maxLeverage }), { paper: false, mark: 78_000 });
+  assert.equal(plans.length, 2);
+  const [btc, big] = plans as [MarketPlan, MarketPlan];
+  assert.deepEqual(btc.errors, []);
+  assert.deepEqual(btc.notes, []);
+  assert.equal(btc.quoteUsd, 12);
+  assert.equal(btc.spec!.leverage, 10);
+  assert.equal(big.spec!.leverage, 5, 'clamped to that market\'s maximum');
+  assert.ok(big.notes.length === 1 && /minimum/.test(big.notes[0]!), JSON.stringify(big.notes));
+  assert.equal(big.quoteUsd, 100);
+  // BTC: (300 + 2 x 12) / 10 = 32.4; BIG at the real $100 quote: (300 + 2 x 100) / 5 = 100.
+  assert.ok(Math.abs(btc.marginUsd - 32.4) < 1e-9, String(btc.marginUsd));
+  assert.ok(Math.abs(big.marginUsd - 100) < 1e-9, String(big.marginUsd));
+  // A max holding under one real quote is refused on that market (engine checkSizes), before anything is signed.
+  const small = planMarkets({ ...d, maxInventoryUsd: 24 }, ['BTC-USD', 'BIG-USD'], (s) => markets[s]!, { paper: false, mark: 78_000 });
+  assert.deepEqual(small[0]!.errors, []);
+  assert.ok(small[1]!.errors.length > 0, 'BIG: $24 cap under a $100 quote');
+  // The region's ceiling binds every market.
+  const eea = planMarkets(d, ['BTC-USD'], (s) => markets[s]!, { paper: false, regionMax: 2, mark: 78_000 });
+  assert.equal(eea[0]!.spec!.leverage, 2);
+  // A size SoDEX refuses on one market shows on that market.
+  const huge = planMarkets({ ...d, orderUsd: 50_000, maxInventoryUsd: 100_000 }, ['BIG-USD'], (s) => ({ ...markets[s]!, market: mkt({ ...markets[s]!.market, maxQuantity: '100' }) }), { paper: false });
+  assert.ok(huge[0]!.errors.length > 0, 'over the largest order');
+});
+
+test('the margin counted for a bot: botMarginUsd on the real quote, the leverage under the ceiling', () => {
+  const spec = parseAlgoSpec(specOf({ ...draftOfRecipe('r10', 'BTC-USD'), orderUsd: 12, maxInventoryUsd: 24, leverage: 3 }, MARK));
+  assert.ok(Math.abs(botNeedUsd(spec) - 16) < 1e-9);
+  assert.ok(Math.abs(botNeedUsd(spec, 100) - 224 / 3) < 1e-9, '(24 + 2 x 100) / 3');
+  assert.ok(Math.abs(botNeedUsd(spec, 0, 2) - 24) < 1e-9, 'EEA: counted at 2x');
+  assert.ok(Math.abs(minQuoteUsd(mkt(), 78_000) - 7.8) < 1e-9, '0.0001 BTC at $78,000 (over the $5 minimum)');
+  assert.ok(Math.abs(minQuoteUsd(mkt({ minNotional: 10 }), 78_000) - 15.6) < 1e-9, '$10 minimum: two steps');
+});
+
+test('an executor refusal reads as a sentence with the one thing to do', () => {
+  assert.equal(refusalOf('key', 'x').action, 'setup');
+  assert.equal(refusalOf('account', 'x').action, 'deposit');
+  assert.equal(refusalOf('margin', 'x').label, 'Deposit');
+  assert.equal(refusalOf('bot-market', 'x').label, 'Stop the other bot');
+  assert.equal(refusalOf('paper-only', 'x').label, 'Ask on Discord');
+  assert.equal(refusalOf('beta', 'x').label, 'Ask on Discord');
+  assert.equal(refusalOf('live-cap', 'x').action, 'discord');
+  assert.equal(refusalOf('limit', 'x').action, 'stop-other');
+  assert.equal(refusalOf('move', 'x').action, null);
+  assert.ok(!/beta\.valuedesk|algo order|copy/i.test(refusalOf('paper-only', 'Real bots run on beta.valuedesk.so').text));
+  assert.deepEqual(refusalOf('weird', 'Something odd.'), { text: 'Something odd.', action: null, label: null });
+});
+
+test('trading hours chart: a half-hour zone (UTC+5:30) keeps its half hour; whole-hour zones unchanged', () => {
+  // 14:00-16:00 in India (UTC+5:30) is 08:30-10:30 UTC.
+  const w = chartWindows(new Set([14, 15]), 330);
+  assert.deepEqual(w, [{ from: '08:30', to: '10:30', zone: 'utc', days: 'all' }]);
+  assert.ok(isChartWindow(w[0]!, 330));
+  assert.ok(!isChartWindow(w[0]!, 60), 'not on a UTC+1 hour');
+  assert.deepEqual([...chartHours(w, 330)].sort((a, b) => a - b), [14, 15]);
+  // UTC+1: 14-16 local is 13:00-15:00 UTC; across midnight joins.
+  assert.deepEqual(chartWindows(new Set([14, 15]), 60), [{ from: '13:00', to: '15:00', zone: 'utc', days: 'all' }]);
+  assert.deepEqual(chartWindows(new Set([23, 0]), 0), [{ from: '23:00', to: '01:00', zone: 'utc', days: 'all' }]);
+  assert.equal(offWords(330), 'UTC+5:30');
+  assert.equal(offWords(-240), 'UTC−4');
+  assert.equal(offWords(0), 'UTC+0');
 });

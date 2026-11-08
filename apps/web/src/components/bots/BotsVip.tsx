@@ -10,7 +10,8 @@ import { onVipPlay } from '../../bots/vipDemo';
 import type { VipMoveView } from '@copy-engine';
 import { fmtUsd } from '../../format';
 import { VIP_BASE, hostedExecutor } from '../../copy/executor';
-import { finishVipMove, readVipMove, startVipMove } from '../../copy/live';
+import { dismissVipMove, startVipMove, useVipFollow } from '../../copy/live';
+import { notify } from '../../toast';
 import { useConfirm } from '../Modal';
 import type { BotsCtx } from './BotsPage';
 import { goBots } from '../../bots/routes';
@@ -31,13 +32,18 @@ function useEligibility(address: string | null): Eligibility | null {
   const [e, setE] = useState<Eligibility | null>(null);
   const [, force] = useState(0);
   useEffect(() => {
-    if (!address) return setE(null);
+    // Another wallet: the last one's standing goes at once (never shown for the new one while its read is out).
+    setE(null);
+    if (!address) return;
     let live = true;
+    // Only the newest read counts: an older answer arriving late is dropped.
+    let seq = 0;
     const read = () => {
       if (document.visibilityState === 'hidden') return;
+      const mine = ++seq;
       fetch(`/api/vs/bots/vip?address=${address.toLowerCase()}`, { headers: { Accept: 'application/json' } })
         .then((r) => { const was = vipReadMissing; vipReadMissing = r.status === 404; if (live && was !== vipReadMissing) force((n) => n + 1); return r.ok ? r.json() : null; })
-        .then((b: (Eligibility & { ok?: boolean }) | null) => { if (live && b?.ok) setE(b); })
+        .then((b: (Eligibility & { ok?: boolean }) | null) => { if (live && mine === seq && b?.ok) setE(b); })
         .catch(() => undefined);
     };
     read();
@@ -56,8 +62,15 @@ const STEP_ICON = { check: 'shield', pause: 'pause', seal: 'shield', send: 'laye
 /** Each step is shown for at least this long, so a move that took 80 ms on the servers still reads step by step. */
 const STEP_SHOW_MS = 550;
 
-function MoveScene({ job, onClose, handoff, stage, onShare }: { job: VipMoveView | null; onClose: () => void; handoff?: boolean; stage: VipStage; onShare: (secs: number) => void }) {
+/** Move scenes on screen (the card's and the stage's): a move resumed on load opens one only when none is up. */
+let scenesUp = 0;
+/** The Savings card asks the page-level stage to open or close the move scene. */
+const SCENE_OPEN = 'vs:vip-scene-open';
+const SCENE_CLOSE = 'vs:vip-scene-close';
+
+function MoveScene({ job, onClose, handoff, stage, onShare, stalled, error }: { job: VipMoveView | null; onClose: () => void; handoff?: boolean; stage: VipStage; onShare: (secs: number) => void; stalled?: boolean; error?: string | null }) {
   const [closing, close] = useExit(onClose, 320, stage.fade);
+  useEffect(() => { scenesUp++; return () => { scenesUp--; }; }, []);
   const [now, setNow] = useState(Date.now());
   const t0 = useRef(Date.now());
   // How many steps the scene has shown: one more every STEP_SHOW_MS, never past what the servers finished.
@@ -79,7 +92,8 @@ function MoveScene({ job, onClose, handoff, stage, onShare }: { job: VipMoveView
   }, [doneAt]);
   const secs = ((doneAt ?? now) - t0.current) / 1000;
   const serverSecs = job?.endedAt ? (job.endedAt - job.startedAt) / 1000 : null;
-  const state = !job ? 'running' : revealed ? job.state : 'running';
+  // Failed to start (the signature refused, the executor said no): the scene says so instead of waiting on.
+  const state = error && (!job || job.state !== 'done') ? 'failed' : !job ? 'running' : revealed ? job.state : 'running';
   // A step as the scene shows it: the real state for those it reached, running for the next, waiting after.
   const view = real.map((x, i) => ({ ...x, ms: i < shown ? x.ms : null, state: i < shown ? x.state : i === shown && state === 'running' ? 'run' : 'wait' } as typeof x));
   const step = (id: string) => view.find((s) => s.id === id)?.state ?? 'wait';
@@ -100,7 +114,7 @@ function MoveScene({ job, onClose, handoff, stage, onShare }: { job: VipMoveView
         <header className="bots-vipmove__head">
           <span className={`vipx-pill${done ? ' is-gold' : state === 'failed' ? ' is-bad' : ''}`}><i />{done ? 'On VIP' : state === 'failed' ? 'Stopped' : 'Moving'}</span>
           <h2 className={done ? 'vipx-goldtext' : undefined}>{done ? 'Your bots run on the VIP servers' : state === 'failed' ? 'The move stopped' : 'Moving your bots to the VIP servers'}</h2>
-          <p>{done ? job?.bots === 1 ? '1 bot moved with its book. Nothing was closed.' : `${job?.bots ?? 0} bots moved with their books. Nothing was closed.` : state === 'failed' ? (job?.error ?? 'Something went wrong.') : 'Your bots pause for a few seconds and go on where they were.'}</p>
+          <p>{done ? job?.bots === 1 ? '1 bot moved with its book. Nothing was closed.' : `${job?.bots ?? 0} bots moved with their books. Nothing was closed.` : state === 'failed' ? (job?.error ?? error ?? 'Something went wrong.') : stalled ? 'The servers have not answered for a while. Your bots keep running where they are; this page switches to the VIP servers when the move is done, also after a reload.' : 'Your bots pause for a few seconds and go on where they were.'}</p>
         </header>
 
         <div className="bots-vipmove__stage">
@@ -156,12 +170,12 @@ function MoveScene({ job, onClose, handoff, stage, onShare }: { job: VipMoveView
           {!job && <li className="is-run"><span className="bots-vipmove__dot"><Icon name="wallet" size={13} /></span><span className="bots-vipmove__lab">Waiting for your signature</span><span className="bots-vipmove__ms">…</span></li>}
         </ol>
 
-        {state !== 'running' && (
-          <div className="bots-vipmove__act">
-            {done ? <><button type="button" className="vipx-cta" onClick={close}><Icon name="check" size={15} />Done</button><button type="button" className="vipx-icon" aria-label="Share" title="Share" onClick={() => onShare(secs)}><Icon name="share" size={17} /></button></>
-              : <Button variant="secondary" size="md" onClick={close}>Close</Button>}
-          </div>
-        )}
+        <div className="bots-vipmove__act">
+          {done ? <><button type="button" className="vipx-cta" onClick={close}><Icon name="check" size={15} />Done</button><button type="button" className="vipx-icon" aria-label="Share" title="Share" onClick={() => onShare(serverSecs ?? secs)}><Icon name="share" size={17} /></button></>
+            : state !== 'running' || stalled ? <Button variant="secondary" size="md" onClick={close}>Close</Button>
+              // Never a trap: the move is followed outside this scene and switches the page when it is done.
+              : job ? <button type="button" className="vipx-later" onClick={close}>Hide, keep moving</button> : null}
+        </div>
       </div>
     </div>
   );
@@ -328,8 +342,14 @@ export function BotsVip({ ctx, compact, stage, strip }: { ctx: BotsCtx; compact?
   const info = ctx.live.hosted.info;
   const onVip = hostedExecutor.base === VIP_BASE || info?.vip?.tier === 'vip';
   const canMove = !!info?.vip?.canMove && (el?.eligible || !!info.vip.open);
-  const [job, setJob] = useState<VipMoveView | null>(null);
+  // The real move is live.ts's (followed to its end outside React); the demo's is this card's own.
+  const follow = useVipFollow();
+  const mine = !ctx.demo && ctx.address && follow.owner === ctx.address.toLowerCase() ? follow : null;
+  const [demoJobNow, setJob] = useState<VipMoveView | null>(null);
+  const job = ctx.demo ? demoJobNow : mine?.job ?? null;
   const [open, setOpen] = useState(false);
+  /** The move the user closed: not opened again by itself. */
+  const hidden = useRef<string | null>(null);
   // The move straight after the unlock: one ground, no fade between them.
   const [handoff, setHandoff] = useState(false);
   // One ground under both scenes (owner 2026-11-08: the unlock and the move must not shift it): mounted while either
@@ -354,19 +374,23 @@ export function BotsVip({ ctx, compact, stage, strip }: { ctx: BotsCtx; compact?
     try { if (!localStorage.getItem(k)) { localStorage.setItem(k, '1'); setUnlock(true); } } catch { /* private mode */ }
   }, [stage, ctx.address, real?.eligible]);
 
-  // Follow the move: the standard executor's job, every quarter second until it ends.
+  // A real move's scene always lives in the page-level stage (owner rule: a page change must not lose it): the
+  // Savings card asks the stage to open it; when the move finishes the page switches executor and may remount the card.
   useEffect(() => {
-    if (!open || !job || job.state !== 'running') return;
-    let live = true;
-    const id = window.setInterval(() => {
-      readVipMove().then((j) => {
-        if (!live || !j) return;
-        setJob(j);
-        if (j.state === 'done') finishVipMove(j);
-      }).catch(() => undefined);
-    }, 250);
-    return () => { live = false; window.clearInterval(id); };
-  }, [open, job]);
+    if (!stage) return;
+    const openIt = () => { hidden.current = null; setFading(false); setOpen(true); };
+    const closeIt = () => { setOpen(false); setHandoff(false); setFading(false); };
+    window.addEventListener(SCENE_OPEN, openIt);
+    window.addEventListener(SCENE_CLOSE, closeIt);
+    return () => { window.removeEventListener(SCENE_OPEN, openIt); window.removeEventListener(SCENE_CLOSE, closeIt); };
+  }, [stage]);
+
+  // A move picked up again on load (live.ts resumeVipMove: started in a tab that closed): the scene comes back.
+  useEffect(() => {
+    if (!stage || ctx.demo || open || scenesUp > 0 || !mine?.following || !mine.job || mine.job.state !== 'running' || hidden.current === mine.job.id) return;
+    setFading(false);
+    setOpen(true);
+  }, [stage, ctx.demo, open, mine?.following, mine?.job]);
 
   const move = async () => {
     const ok = await confirm({
@@ -376,14 +400,19 @@ export function BotsVip({ ctx, compact, stage, strip }: { ctx: BotsCtx; compact?
     });
     if (!ok) { setHandoff(false); return; }
     setErr(null);
-    setJob(null);
-    setOpen(true);
+    hidden.current = null;
+    if (stage) setOpen(true); else window.dispatchEvent(new Event(SCENE_OPEN));
     try {
-      setJob(await startVipMove());
+      await startVipMove();
     } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
       setOpen(false);
+      if (!stage) window.dispatchEvent(new Event(SCENE_CLOSE));
       setHandoff(false);
-      setErr(e instanceof Error ? e.message : String(e));
+      setFading(false);
+      setErr(msg);
+      // The stage has no card to show it on: said where the user is.
+      if (stage) notify('error', `The move to the VIP servers did not start: ${msg}`);
     }
   };
 
@@ -405,7 +434,7 @@ export function BotsVip({ ctx, compact, stage, strip }: { ctx: BotsCtx; compact?
     <>
       {dialog}
       {(open || unlock || handoff) && <div className={`vipx-stage${fading ? ' is-fading' : ''}${handoff ? ' is-held' : ''}`} aria-hidden="true"><VipGround lit={lit} /></div>}
-      {open && <MoveScene job={job} handoff={handoff} stage={stageApi} onShare={(secs) => setShare({ kind: 'move', bots: job?.bots ?? 1, secs })} onClose={() => { setOpen(false); setJob(null); setHandoff(false); setFading(false); }} />}
+      {open && (stage || ctx.demo) && <MoveScene job={job} handoff={handoff} stage={stageApi} stalled={!!mine?.stalled} error={mine?.error ?? null} onShare={(secs) => setShare({ kind: 'move', bots: job?.bots ?? 1, secs })} onClose={() => { hidden.current = job?.id ?? null; setOpen(false); setJob(null); setHandoff(false); setFading(false); if (!ctx.demo) dismissVipMove(); }} />}
       {share && <VipShare what={share} onClose={() => setShare(null)} />}
       {unlock && <UnlockScene stage={stageApi} onShare={() => setShare({ kind: 'unlock', promo: ctx.demo ? demoPromo : !!el?.promo })} promo={ctx.demo ? (demoPromo ? { until: Date.now() + 30 * 86_400_000 } : null) : el?.promo ?? null} volume={el && el.volumeUsd >= el.minUsd ? el.volumeUsd : null} onClose={() => { setUnlock(false); setFading(false); }} onMove={() => { setUnlock(false); setHandoff(true); if (ctx.demo) { setJob(demoJob(Math.max(1, ctx.bots.filter((v) => !v.algo.endedAt).length))); setOpen(true); } else void move(); }} />}
       {!stage && <Shell className={`bots-vip${compact ? ' is-compact' : ''}`}>

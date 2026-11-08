@@ -15,7 +15,7 @@ import { CoinIcon } from '../CoinIcon';
 import { useBotMarkets, type BotMarket } from '../../bots/data';
 import { draftFor } from '../../bots/presets';
 import { RECIPE, recipesOf, type RecipeId } from '../../bots/recipes';
-import { bestOf, estimate, ownRuns, rankRecipes, type OwnRun } from '../../bots/estimate';
+import { bestOf, estimate, feeAdjOf, ownRuns, rankRecipes, type OwnRun } from '../../bots/estimate';
 import { StrategyTile } from './BotIcon';
 import { goBots, type BotsView } from '../../bots/routes';
 import { BotsHead, type BotsCtx } from './BotsPage';
@@ -57,8 +57,8 @@ const BASE = draftFor('market');
  * between bots on koru to view different results"). The pick shows its cost per $1M with its range, how much it
  * trades, how the estimate adds up and what our tests measured; Configure starts it.
  */
-function BotsHere({ m, runs, sel, pick }: { m: BotMarket; runs: readonly OwnRun[]; sel: RecipeId | null; pick: (id: RecipeId) => void }) {
-  const ranked = rankRecipes(m, BASE, runs);
+function BotsHere({ m, runs, sel, pick, feeAdj = 0 }: { m: BotMarket; runs: readonly OwnRun[]; sel: RecipeId | null; pick: (id: RecipeId) => void; feeAdj?: number }) {
+  const ranked = rankRecipes(m, BASE, runs, feeAdj);
   const best = bestOf(ranked);
   return (
     <section className="bots-xd__b">
@@ -82,9 +82,9 @@ function BotsHere({ m, runs, sel, pick }: { m: BotMarket; runs: readonly OwnRun[
 }
 
 /** The picked bot on this market: its estimate, how it adds up, its tests. */
-function BotResult({ m, id, runs }: { m: BotMarket; id: RecipeId; runs: readonly OwnRun[] }) {
+function BotResult({ m, id, runs, feeAdj = 0 }: { m: BotMarket; id: RecipeId; runs: readonly OwnRun[]; feeAdj?: number }) {
   const rc = RECIPE[id];
-  const est = rankRecipes(m, BASE, runs).find((x) => x.id === id)?.est ?? null;
+  const est = rankRecipes(m, BASE, runs, feeAdj).find((x) => x.id === id)?.est ?? null;
   if (!est || est.bp === null) return <section className="bots-xd__b"><h4>{rc.name}</h4><p className="bots-fine">No estimate for this bot here.</p></section>;
   const lines = est.lines.filter((l) => l.id !== 'market');
   return (
@@ -104,14 +104,14 @@ function BotResult({ m, id, runs }: { m: BotMarket; id: RecipeId; runs: readonly
   );
 }
 
-function Detail({ m, feeBps, runs }: { m: BotMarket; feeBps: number; runs: readonly OwnRun[] }) {
+function Detail({ m, feeBps, runs, feeAdj = 0 }: { m: BotMarket; feeBps: number; runs: readonly OwnRun[]; feeAdj?: number }) {
   const [sel, setSel] = useState<RecipeId | null>(null);
-  const best = bestOf(rankRecipes(m, BASE, runs));
+  const best = bestOf(rankRecipes(m, BASE, runs, feeAdj));
   const id = sel ?? best?.id ?? 'r10';
   return (
     <div className="bots-xd">
-      <BotsHere m={m} runs={runs} sel={sel} pick={setSel} />
-      <BotResult m={m} id={id} runs={runs} />
+      <BotsHere m={m} runs={runs} sel={sel} pick={setSel} feeAdj={feeAdj} />
+      <BotResult m={m} id={id} runs={runs} feeAdj={feeAdj} />
       <section className="bots-xd__b">
         <h4>Flow</h4>
         <Takers m={m} />
@@ -152,17 +152,19 @@ export function BotsExplore({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
   const r = useBotMarkets(win);
   const feeBps = r.data ? r.data.fee.makerBps + r.data.fee.builderBps : 1.3;
   const runs = useMemo(() => ownRuns(ctx.bots, r.data?.markets ?? null), [ctx.bots, r.data]);
+  // The wallet's own bot fee in every estimate (the server's reading is at the flat fee).
+  const feeAdj = feeAdjOf(ctx.feeTenths, r.data?.fee.builderBps);
   // Each market's figure for the picked bot, or its best bot.
   const rows = useMemo(() => {
     const out = new Map<string, { id: RecipeId; bp: number | null; volumeX: number; n: number }>();
     for (const m of r.data?.markets ?? []) {
       if (pick === 'best') {
-        const ranked = rankRecipes(m, BASE, runs);
+        const ranked = rankRecipes(m, BASE, runs, feeAdj);
         const top = bestOf(ranked)!;
         out.set(m.symbol, { id: top.id, bp: top.est.bp, volumeX: top.est.volumeX, n: ranked.length });
       } else {
         const id: RecipeId = m.lead === null && RECIPE[pick].oracle ? 'touch' : pick;
-        const e = estimate({ ...BASE, ...RECIPE[id].params, strategy: RECIPE[id].strategy, symbol: m.symbol }, m, runs);
+        const e = estimate({ ...BASE, ...RECIPE[id].params, strategy: RECIPE[id].strategy, symbol: m.symbol }, m, runs, feeAdj);
         out.set(m.symbol, { id, bp: e.bp, volumeX: e.volumeX, n: 1 });
       }
     }
@@ -272,7 +274,7 @@ export function BotsExplore({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
                     const isOpen = open === m.symbol;
                     return (
                       <Fragment key={m.symbol}>
-                        <tr className={`bots-row${isOpen ? ' is-open' : ''}`} tabIndex={0} aria-expanded={isOpen} onClick={() => setOpen(isOpen ? null : m.symbol)} onKeyDown={(e) => e.key === 'Enter' && setOpen(isOpen ? null : m.symbol)}>
+                        <tr className={`bots-row${isOpen ? ' is-open' : ''}`} tabIndex={0} aria-expanded={isOpen} onClick={() => setOpen(isOpen ? null : m.symbol)} onKeyDown={(e) => { if (e.key === 'Enter' && e.target === e.currentTarget) setOpen(isOpen ? null : m.symbol); }}>
                           <td><Icon name="arrowRight" size={12} className="bots-chev" /></td>
                           <td>
                             <span className="bots-mt__name">
@@ -292,7 +294,7 @@ export function BotsExplore({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
                         </tr>
                         {isOpen && (
                           <tr className="bots-xdetail">
-                            <td colSpan={10}><Detail m={m} feeBps={feeBps} runs={runs} /></td>
+                            <td colSpan={10}><Detail m={m} feeBps={feeBps} runs={runs} feeAdj={feeAdj} /></td>
                           </tr>
                         )}
                       </Fragment>

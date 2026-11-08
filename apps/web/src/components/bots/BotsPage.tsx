@@ -29,7 +29,7 @@ import { notify } from '../../toast';
 import { useConfirm } from '../Modal';
 import { useBots } from '../../bots/useBots';
 import { BOTS_ON, goBots, useBotsView, type BotsView } from '../../bots/routes';
-import { DEFAULT_BOT_FEE_TENTHS } from '../../bots/presets';
+import { specOf, draftOfSpec, strategyOf } from '../../bots/presets';
 import { BotSetupSheet, botReady } from './BotSetupSheet';
 import { botName } from './botWords';
 import { BotsOverview } from './BotsOverview';
@@ -42,10 +42,11 @@ import type { BotState } from './botWords';
 import { STATE_WORD } from './botWords';
 import { applyForBeta, useBetaAccessState } from '../../beta/access';
 import { openConnectDialog } from '../account/connect';
-import { Button, EmptyState, Panel, Shell, Skeleton, StatusPill as Pill, Switch } from './kit/kit';
+import { Button, EmptyState, Icon, IconButton, Panel, Shell, Skeleton, StatusPill as Pill, Switch } from './kit/kit';
 import { demoBots, demoDefault, demoStarted, saveDemo } from '../../bots/demo';
 import { listBotsOn } from '../../algo/executorAlgos';
-import { hostedExecutor } from '../../copy/executor';
+import { ExecutorError, hostedExecutor, meBots } from '../../copy/executor';
+import { requestDeposit } from '../account/actions';
 import './bots.css';
 import './botsPages.css';
 
@@ -63,6 +64,7 @@ export interface BotsCtx {
   signIn: () => Promise<void>;
   supported: boolean;
   liveAllowed: boolean;
+  /** This wallet's bot fee now, tenths of a bp: the executor's /me (its ladder step or VIP), else the ladder's first step. */
   feeTenths: number;
   busy: string | null;
   setup: (paper: boolean) => void;
@@ -76,10 +78,16 @@ export interface BotsCtx {
   update: (id: string, patch: Record<string, unknown>) => Promise<void>;
   pause: (v: AlgoView) => Promise<void>;
   resume: (v: AlgoView) => Promise<void>;
-  /** 'close' (Clean stop: rests at the best price, a capped taker after a minute), 'instant' (closes now with a capped taker), 'keep' (stops, the position stays). */
-  stop: (v: AlgoView, how?: 'ask' | 'close' | 'instant' | 'keep') => Promise<void>;
+  /**
+   * 'close' (Clean stop: rests at the best price, a capped taker after a minute), 'instant' (closes now with a capped
+   * taker), 'keep' (stops, the position stays), 'now' (a bot already closing: it ends, what is left stays).
+   */
+  stop: (v: AlgoView, how?: StopHow | 'ask' | 'now') => Promise<void>;
   remove: (v: AlgoView) => Promise<void>;
-  stopAll: () => Promise<void>;
+  /** Every running bot, the same three ways as one bot ('keep' when not given). */
+  stopAll: (how?: StopHow) => Promise<void>;
+  /** A stopped bot again, or a practice bot with real orders: New bot opens filled with its settings. */
+  runAgain: (v: AlgoView, real?: boolean) => void;
   pauseAll: (list: AlgoView[]) => Promise<void>;
   resumeAll: (list: AlgoView[]) => Promise<void>;
   live: ReturnType<typeof useLiveCopy>;
@@ -98,6 +106,66 @@ export function BotsHead({ title, sub, actions, lead }: { view?: BotsView; title
     </header>
   );
 }
+
+export type StopHow = 'close' | 'instant' | 'keep';
+
+/** The ladder's first step (0.5 bp), the fee a wallet pays before its volume lowers it; never the old flat 0.1 bp. */
+export const BOT_FEE_FIRST_STEP_TENTHS = 5;
+
+/**
+ * Where New bot reads a bot to start again (Run again, Run with real orders): its spec, kept for this tab only.
+ * BotNewPage owns reading it (bots/routes.ts has no room for a whole spec in the URL).
+ */
+export const BOTS_PREFILL_KEY = 'vs.bots.prefill';
+
+/** A refusal or a warning the page shows above its content: one plain sentence and the one button that helps. */
+export interface BotsNotice { id: string; tone: Tone; text: string; action?: { label: string; run: () => void } }
+
+/**
+ * The executor's refusal codes (apps/executor service.ts BotRefusalCode, and the first contract's names) as a
+ * sentence and the one button that helps, in the page's words. The executor's own sentence is kept where it names
+ * the bot or the figures; null: not a refusal this page knows (shown as it came).
+ */
+export function refusalOf(e: unknown, act: { setup: () => void; deposit: () => void; beta: () => void; open: (id: string) => void; signIn: () => void; vip: () => void }): BotsNotice | null {
+  if (!(e instanceof ExecutorError)) return null;
+  const said = e.message;
+  const algoId = typeof e.detail?.algoId === 'string' ? e.detail.algoId : null;
+  const n = (id: string, text: string, action?: BotsNotice['action']): BotsNotice => ({ id, tone: 'warning', text, action });
+  switch (e.code) {
+    case 'session': return n('session', said, { label: 'Sign in', run: act.signIn });
+    case 'key': return n('key', 'Your trading key is missing or has expired, so real orders cannot be sent. Approve a new one in the bot setup.', { label: 'Open setup', run: act.setup });
+    case 'account': return n('account', 'This wallet has no SoDEX account yet. Deposit first: the first deposit opens it.', { label: 'Deposit', run: act.deposit });
+    case 'beta': return n('beta', 'Bots with real orders are for wallets on the beta list for now. Practice bots work for everyone.', { label: 'Get access', run: act.beta });
+    case 'limit': return n('limit', 'This wallet runs as many bots and algo orders as it may. Stop one to start another.');
+    case 'margin': return n('margin', `${said} Lower its size or holding cap, stop another bot, or add funds.`, { label: 'Deposit', run: act.deposit });
+    case 'margin-unknown': return n('margin-unknown', 'SoDEX did not tell your account balance just now, so the margin could not be checked. Try again in a moment.');
+    case 'bot-market': return n('bot-market', said, algoId ? { label: 'Open that bot', run: () => act.open(algoId) } : undefined);
+    case 'market-copy': return n('market-copy', `${said} Stop that copy in Copy trading, or pick another market.`);
+    case 'market-algo': return n('market-algo', `${said} Cancel it in Trade, or pick another market.`);
+    case 'market-position': return n('market-position', `${said} Close it in Trade, or pick another market.`);
+    case 'bot-capacity':
+    case 'live-cap': return n('bot-capacity', 'The servers run as many bots with real orders as they safely can right now. Try again later, or start it as practice.');
+    case 'vip-moving':
+    case 'move': return n('vip-moving', 'Your bots are moving to the VIP servers. Try again in a minute, once the move is done.');
+    case 'moved': return n('moved', 'Your bots run on the VIP servers now. Reload to talk to them there.', { label: 'Reload', run: act.vip });
+    default: return null;
+  }
+}
+
+/** One notice: an icon, the sentence, its button and a close. */
+export function BotsNoticeBar({ n, onClose }: { n: BotsNotice; onClose?: () => void }) {
+  return (
+    <div className={`bots-notice is-${n.tone}`} role={n.tone === 'negative' ? 'alert' : 'status'}>
+      <span className={`tf-tile is-${n.tone} bots-notice__ic`} aria-hidden="true"><Icon name={n.tone === 'negative' || n.tone === 'warning' ? 'warning' : 'bolt'} size={15} /></span>
+      <p className="bots-notice__t">{n.text}</p>
+      {n.action && <Button variant="secondary" onClick={n.action.run}>{n.action.label}</Button>}
+      {onClose && <IconButton icon="x" label="Dismiss" onClick={onClose} />}
+    </div>
+  );
+}
+
+/** Days before the trading key expires that the page starts to say so. */
+const KEY_WARN_MS = 7 * 86_400_000;
 
 const STATE_TONE: Record<BotState, Tone> = { running: 'positive', waiting: 'warning', paused: 'neutral', closing: 'warning', ended: 'neutral', failed: 'negative' };
 
@@ -187,16 +255,41 @@ function BotsPageOpen({ address, provider }: { address: string | null; provider:
     setSetup({ paper: true });
   }, [outdated, address]);
 
+  // A refusal the executor gave a code (contract 2026-11-08): a sentence and a button above the page.
+  const [notice, setNotice] = useState<BotsNotice | null>(null);
+  useEffect(() => { setNotice(null); }, [address]);
+  const signInNow = async () => {
+    try { await signInExecutor('hosted'); setNotice(null); } catch (e) { notify('error', e instanceof Error ? e.message : String(e)); }
+  };
+  const said = (e: unknown) => {
+    const n = refusalOf(e, { setup: () => setSetup({ paper: false }), deposit: () => requestDeposit(), beta: applyForBeta, open: (id) => goBots({ page: 'bot', id }), signIn: () => void signInNow(), vip: () => window.location.reload() });
+    if (n) setNotice(n);
+    else notify('error', e instanceof Error ? e.message : String(e));
+  };
   const run = async (id: string, what: () => Promise<void>, done?: string) => {
     setBusy(id);
     try {
       await what();
       if (done) notify('ok', done);
     } catch (e) {
-      notify('error', e instanceof Error ? e.message : String(e));
+      said(e);
     } finally {
       setBusy(null);
     }
+  };
+  /** A stop the bot was not set for: its on-stop setting first (never behind the terms), then the stop itself. */
+  const stopAs = async (v: AlgoView, how: StopHow) => {
+    const s = v.algo.spec;
+    const close = how !== 'keep';
+    if ((s.kind === 'mm' || s.kind === 'grid') && (s.onStop === 'close') !== close) {
+      try {
+        await update(v.algo.id, { onStop: close ? 'close' : 'keep' }, { terms: false });
+      } catch (e) {
+        // The stop would go out the other way than chosen: nothing is sent, and the page says why.
+        throw new Error(`${botName(v)} was not stopped: its stop setting could not be changed (${e instanceof Error ? e.message : String(e)}). Try again, or pick ${close ? '"Stop and keep position"' : 'a stop that closes'}.`);
+      }
+    }
+    await act('cancel', v.algo.id, { now: how === 'instant' });
   };
 
   const ctx: BotsCtx = useMemo(() => ({
@@ -211,7 +304,7 @@ function BotsPageOpen({ address, provider }: { address: string | null; provider:
     },
     supported,
     liveAllowed: liveBotsFor(address),
-    feeTenths: live.hosted.info?.bots?.fee ?? DEFAULT_BOT_FEE_TENTHS,
+    feeTenths: meBots(live.hosted.me)?.feeTenths ?? live.hosted.info?.bots?.ladder?.[0]?.fee ?? BOT_FEE_FIRST_STEP_TENTHS,
     busy,
     live,
     setup: (paper) => setSetup({ paper }),
@@ -233,7 +326,7 @@ function BotsPageOpen({ address, provider }: { address: string | null; provider:
       const s0 = v.algo.spec;
       const want = how === 'clean' ? 'close' : 'keep';
       if (!FINAL_STATUSES.has(v.algo.status)) {
-        if ((s0.kind === 'mm' || s0.kind === 'grid') && s0.onStop !== want) await update(v.algo.id, { onStop: want });
+        if ((s0.kind === 'mm' || s0.kind === 'grid') && s0.onStop !== want) await update(v.algo.id, { onStop: want }, { terms: false });
         await act('cancel', v.algo.id);
       }
       notify('info', how === 'clean' ? 'Closing the old bot. The new one starts when it has: keep this page open.' : 'Stopping the old bot…');
@@ -258,24 +351,36 @@ function BotsPageOpen({ address, provider }: { address: string | null; provider:
     resume: (v) => run(v.algo.id, () => act('resume', v.algo.id), `${botName(v)} resumed.`),
     stop: async (v, how = 'ask') => {
       const s = v.algo.spec;
+      const held = Math.abs(v.bot?.inventoryUsd ?? 0);
       const holding = Math.abs(v.bot?.inventory ?? 0) > 0;
-      let close = (s.kind === 'mm' || s.kind === 'grid') && s.onStop === 'close';
-      if (how !== 'ask') {
-        close = how === 'close' || how === 'instant';
-        // Stopping the other way than the bot was set to: the setting first, then the stop.
-        if ((s.kind === 'mm' || s.kind === 'grid') && (s.onStop === 'close') !== close) await update(v.algo.id, { onStop: close ? 'close' : 'keep' });
-      } else {
+      // Already closing: a second stop ends it where it is (runtime cancel on a closing bot), what is left stays.
+      if (how === 'now' || (how === 'ask' && v.bot?.closing)) {
+        const ok = await confirm({
+          title: `Stop closing ${botName(v)}?`,
+          body: holding ? `It stops closing and ends now. What it still holds (${fmtUsd(held, 2)}) stays in your account as it is: close it yourself in Trade.` : 'It ends now. It holds nothing.',
+          confirmLabel: 'Stop now',
+          danger: true,
+        });
+        if (ok) await run(v.algo.id, () => act('cancel', v.algo.id), holding ? 'Stopped. What it still held stays in your account.' : 'Bot stopped.');
+        return;
+      }
+      let way: StopHow;
+      if (how !== 'ask') way = how;
+      else {
+        const close = (s.kind === 'mm' || s.kind === 'grid') && s.onStop === 'close';
         const ok = await confirm({
           title: `Stop ${botName(v)}?`,
           body: close && holding
-            ? `It pulls its orders and closes what it holds (${fmtUsd(Math.abs(v.bot!.inventoryUsd), 2)}): resting at the best price first, a capped taker after a minute.`
-            : holding ? `It pulls its orders. What it holds (${fmtUsd(Math.abs(v.bot!.inventoryUsd), 2)}) stays in your account as it is.` : 'It pulls its orders. It holds nothing.',
+            ? `It pulls its orders and closes what it holds (${fmtUsd(held, 2)}): resting at the best price first, a capped taker after a minute.`
+            : holding ? `It pulls its orders. What it holds (${fmtUsd(held, 2)}) stays in your account as it is.` : 'It pulls its orders. It holds nothing.',
           confirmLabel: 'Stop bot',
           danger: true,
         });
         if (!ok) return;
+        way = close ? 'close' : 'keep';
       }
-      await run(v.algo.id, () => act('cancel', v.algo.id, { now: how === 'instant' }), close && holding ? (how === 'instant' ? 'Stopping: closing what it holds now.' : 'Stopping: closing what it holds.') : 'Bot stopped.');
+      const closes = way !== 'keep' && holding;
+      await run(v.algo.id, () => stopAs(v, way), closes ? (way === 'instant' ? 'Stopping: closing what it holds now.' : 'Stopping: closing what it holds.') : 'Bot stopped.');
     },
     remove: async (v) => {
       const ok = await confirm({ title: `Delete ${botName(v)}?`, body: 'It leaves your list. Its record and log stay kept on the executor.', confirmLabel: 'Delete', danger: true });
@@ -284,14 +389,33 @@ function BotsPageOpen({ address, provider }: { address: string | null; provider:
         if (view.page === 'bot' && view.id === v.algo.id) goBots({ page: 'overview' });
       }, 'Bot deleted.');
     },
-    stopAll: async () => {
-      const ok = await confirm({ title: 'Stop every bot?', body: 'Every bot pulls its orders at once. Nothing is closed: what they hold stays in your account.', confirmLabel: 'Stop all', danger: true });
-      if (ok) await run('all', stopAll, 'Every bot stopped.');
+    stopAll: async (how = 'keep') => {
+      const live = bots.filter((v) => !FINAL_STATUSES.has(v.algo.status));
+      const body = how === 'keep'
+        ? 'Every bot pulls its orders at once. Nothing is closed: what they hold stays in your account.'
+        : how === 'instant'
+          ? `Every bot pulls its orders and closes what it holds now, with a capped taker. One signature per bot (${live.length}), more where a bot was set to keep its position.`
+          : `Every bot pulls its orders and closes what it holds: resting at the best price first, a capped taker after a minute. One signature per bot (${live.length}), more where a bot was set to keep its position.`;
+      const ok = await confirm({ title: 'Stop every bot?', body, confirmLabel: 'Stop all', danger: true });
+      if (!ok) return;
+      if (how === 'keep') { await run('all', stopAll, 'Every bot stopped.'); return; }
+      await run('all', async () => {
+        const failed: string[] = [];
+        for (const v of live) {
+          try { await stopAs(v, how); } catch (e) { failed.push(`${botName(v)}: ${e instanceof Error ? e.message : String(e)}`); }
+        }
+        if (failed.length) throw new Error(`${failed.length} of ${live.length} not stopped. ${failed.join(' ')}`);
+      }, how === 'instant' ? 'Every bot is stopping and closing what it holds now.' : 'Every bot is stopping and closing what it holds.');
+    },
+    runAgain: (v, real) => {
+      const spec = { ...specOf({ ...draftOfSpec(v.algo.spec), paper: real ? false : v.algo.spec.paper }, null), bot: true };
+      try { sessionStorage.setItem(BOTS_PREFILL_KEY, JSON.stringify({ from: v.algo.id, at: Date.now(), spec })); } catch { /* private mode: New bot opens on the market and kind */ }
+      goBots({ page: 'new', market: v.algo.spec.symbol, kind: strategyOf(v.algo.spec) ?? null });
     },
     pauseAll: (list) => run('all', async () => { for (const v of list) await act('pause', v.algo.id); }, `${list.length} bot${list.length === 1 ? '' : 's'} paused.`),
     resumeAll: (list) => run('all', async () => { for (const v of list) await act('resume', v.algo.id); }, `${list.length} bot${list.length === 1 ? '' : 's'} resumed.`),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [address, bots, loading, error, ready, seen, supported, live, busy, view]);
+  }), [address, bots, loading, error, ready, seen, supported, live, busy, view, update, act, stopAll, start, confirm]);
 
   // Demo data (owner 2026-11-07), local builds only: on by default, the switch at the top right.
   const [demo, setDemoOn] = useState(() => BOTS_ON && demoDefault());
@@ -336,6 +460,7 @@ function BotsPageOpen({ address, provider }: { address: string | null; provider:
       stop: async (v) => { set(v.algo.id, (x) => status(x, 'cancelled', 'Stopped by you.')); said('Stopped'); },
       remove: async (v) => { setDemoList((l) => l.filter((x) => x.algo.id !== v.algo.id)); if (view.page === 'bot') goBots({ page: 'overview' }); said('Deleted'); },
       stopAll: async () => { setDemoList((l) => l.map((x) => (FINAL_STATUSES.has(x.algo.status) ? x : status(x, 'cancelled', 'Stopped by you.')))); said('Every bot stopped'); },
+      runAgain: (v, real) => { said(real ? 'Run with real orders' : 'Run again'); goBots({ page: 'new', market: v.algo.spec.symbol, kind: strategyOf(v.algo.spec) ?? null }); },
       pauseAll: async (list) => { for (const v of list) set(v.algo.id, (x) => status(x, 'paused', 'Paused by you.')); said(`${list.length} paused`); },
       resumeAll: async (list) => { for (const v of list) set(v.algo.id, (x) => status(x, 'running', null)); said(`${list.length} resumed`); },
     };
@@ -361,13 +486,28 @@ function BotsPageOpen({ address, provider }: { address: string | null; provider:
       ? async (v, how) => { if (how !== 'ask' && how !== undefined) return base.stop(v, how); if (await confirm({ title: `Stop ${botName(v)}?`, body: 'It pulls its orders and closes what it holds.', confirmLabel: 'Stop bot', danger: true })) await base.stop(v, 'close'); }
       : base.stop,
     stopAll: base.demo
-      ? async () => { if (await confirm({ title: 'Stop every bot?', body: 'Every bot pulls its orders. What they hold stays as it is.', confirmLabel: 'Stop all', danger: true })) await base.stopAll(); }
+      ? async (how) => { if (await confirm({ title: 'Stop every bot?', body: how && how !== 'keep' ? 'Every bot pulls its orders and closes what it holds.' : 'Every bot pulls its orders. What they hold stays as it is.', confirmLabel: 'Stop all', danger: true })) await base.stopAll(how); }
       : base.stopAll,
     remove: base.demo
       ? async (v) => { if (await confirm({ title: `Delete ${botName(v)}?`, body: 'It leaves your list.', confirmLabel: 'Delete', danger: true })) await base.remove(v); }
       : base.remove,
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [base]);
+
+  // The trading key's end, said before it comes (audit B): real bots stop sending orders once it has expired.
+  const keyEnds = live.hosted.me?.key?.registered ? live.hosted.me.key.expiresAt : null;
+  const realLive = bots.some((v) => !v.algo.spec.paper && !FINAL_STATUSES.has(v.algo.status));
+  const [keyNow] = useState(() => Date.now());
+  const keyWarn: BotsNotice | null = !demo && seen && keyEnds !== null && keyEnds - keyNow < KEY_WARN_MS && (realLive || keyEnds - keyNow < 3 * 86_400_000) && (view.page === 'overview' || view.page === 'bot')
+    ? {
+        id: 'key-expiry',
+        tone: keyEnds <= keyNow ? 'negative' : 'warning',
+        text: keyEnds <= keyNow
+          ? 'Your trading key has expired: real bots cannot send or pull orders. Renew it now.'
+          : `Your trading key expires in ${Math.max(1, Math.round((keyEnds - keyNow) / 86_400_000))} day${Math.round((keyEnds - keyNow) / 86_400_000) === 1 ? '' : 's'} (${new Date(keyEnds).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}). Real bots stop sending orders then: renew it before.`,
+        action: { label: 'Renew', run: () => setSetup({ paper: false }) },
+      }
+    : null;
 
   let page: ReactNode;
   if (view.page === 'new') page = <BotNewPage ctx={c} view={view} />;
@@ -394,6 +534,8 @@ function BotsPageOpen({ address, provider }: { address: string | null; provider:
         )}
         {/* One section failing never takes the Bots pages down (owner 2026-11-08): the page has its own boundary, reset
             when another page is opened, and the Overview one per panel. */}
+        {!demo && notice && <BotsNoticeBar n={notice} onClose={() => setNotice(null)} />}
+        {keyWarn && <BotsNoticeBar n={keyWarn} />}
         <ErrorBoundary key={view.page} name="This page" bare>{settling && !demo && view.page !== 'explore' ? <BotsSettling /> : page}</ErrorBoundary>
       </div>
       {BOTS_ON && <ErrorBoundary name="VIP" bare><BotsVip ctx={c} stage /></ErrorBoundary>}

@@ -68,23 +68,41 @@ const mins = (hhmm: string): number | null => {
   return h < 24 && mi < 60 ? h * 60 + mi : null;
 };
 
-/** How much of each UTC hour of the week the windows cover, averaged to the hour of day (0..1 each). */
-export function quietCover(ws: readonly QuietWindow[], at = new Date()): number[] {
-  const cover = new Array<number>(24).fill(0);
+/** How much of each UTC minute of the day the windows cover (0..1 each; weekdays count 5/7, trading days a little less). */
+export function quietCoverMinutes(ws: readonly QuietWindow[], at = new Date()): number[] {
+  const cover = new Array<number>(1440).fill(0);
   for (const w of ws) {
     const a = mins(w.from), b = mins(w.to);
     if (a === null || b === null) continue;
-    const off = offsetH(w.zone, at) * 60;
+    const off = Math.round(offsetH(w.zone, at) * 60);
     const len = b > a ? b - a : b + 1440 - a;
     // Trading days: Monday to Friday less about ten exchange holidays a year.
     const days = w.days === 'weekdays' ? 5 / 7 : w.days === 'trading' ? (5 / 7) * (251 / 261) : 1;
     for (let m = 0; m < len; m++) {
       const u = (((a + m - off) % 1440) + 1440) % 1440;
-      const h = Math.floor(u / 60);
-      cover[h] = Math.min(1, cover[h]! + days / 60);
+      cover[u] = Math.min(1, cover[u]! + days);
     }
   }
   return cover;
+}
+
+/** How much of each UTC hour of the week the windows cover, averaged to the hour of day (0..1 each). */
+export function quietCover(ws: readonly QuietWindow[], at = new Date()): number[] {
+  const m = quietCoverMinutes(ws, at);
+  return Array.from({ length: 24 }, (_, h) => m.slice(h * 60, h * 60 + 60).reduce((a, b) => a + b, 0) / 60);
+}
+
+/**
+ * The same, per hour of a clock `offMin` minutes off UTC (the viewer's own; a half-hour zone such as UTC+5:30
+ * included): hour j of that clock is UTC minutes j*60 - offMin to j*60 - offMin + 60.
+ */
+export function quietCoverLocal(ws: readonly QuietWindow[], offMin: number, at = new Date()): number[] {
+  const m = quietCoverMinutes(ws, at);
+  return Array.from({ length: 24 }, (_, j) => {
+    let t = 0;
+    for (let k = 0; k < 60; k++) t += m[(((j * 60 + k - offMin) % 1440) + 1440) % 1440]!;
+    return t / 60;
+  });
 }
 
 /** The bucket a setting falls in: the flow gate's threshold per 10 minutes (its window scales it). */
@@ -121,17 +139,22 @@ export function ownRuns(bots: readonly AlgoView[], markets: readonly BotMarket[]
   return out;
 }
 
-/** The estimate for a draft on a market, with its lines. */
-export function estimate(d: BotDraft, m: BotMarket | null, runs: readonly OwnRun[] = []): BotEstimate {
+/**
+ * The estimate for a draft on a market, with its lines. `feeAdjBps`: the wallet's own bot fee less the one the
+ * market's reading was made with (BotMarketsResponse.fee.builderBps), so the estimate charges what this wallet pays
+ * (the executor's fee ladder, /me bots.feeTenths), never a flat 0.1 bp.
+ */
+export function estimate(d: BotDraft, m: BotMarket | null, runs: readonly OwnRun[] = [], feeAdjBps = 0): BotEstimate {
   const lines: EstLine[] = [];
   if (!m) return { bp: null, low: null, high: null, volumeX: 1, lines, learned: null, confidence: null };
   const rid = recipeOfDraft(d);
   const r = RECIPE[rid];
   if (d.strategy === 'grid') return { bp: null, low: null, high: null, volumeX: 1, lines, learned: null, confidence: m.confidence };
   const noOracle = m.lead === null;
-  let bp = m.estCostBps;
+  const adj = Number.isFinite(feeAdjBps) ? feeAdjBps : 0;
+  let bp = m.estCostBps + adj;
   let x = 1;
-  lines.push({ id: 'market', label: 'Market reading', bp: m.estCostBps, source: 'market' });
+  lines.push({ id: 'market', label: 'Market reading', bp: m.estCostBps + adj, source: 'market' });
 
   // The bot: its measured difference, except the gate part (measured on this market below when it can be).
   const own = noOracle ? RECIPE.touch : r;
@@ -164,7 +187,7 @@ export function estimate(d: BotDraft, m: BotMarket | null, runs: readonly OwnRun
     if (g.bp !== null) bp += g.bp;
     x *= g.x;
   }
-  if (d.maxSpreadBps !== null && d.strategy === 'market') {
+  if (d.maxSpreadBps !== null) {
     const xs = m.spreadGate ?? [];
     const b = [...xs].reverse().find((s) => s.maxBps <= d.maxSpreadBps!) ?? xs[0] ?? null;
     const g = gated(m.estCostBps, b, null);
@@ -220,10 +243,10 @@ export function estimate(d: BotDraft, m: BotMarket | null, runs: readonly OwnRun
 }
 
 /** The bots a market suits, cheapest first (Explore): every market maker on its reading. */
-export function rankRecipes(m: BotMarket, base: BotDraft, runs: readonly OwnRun[] = []): Array<{ id: RecipeId; est: BotEstimate }> {
+export function rankRecipes(m: BotMarket, base: BotDraft, runs: readonly OwnRun[] = [], feeAdjBps = 0): Array<{ id: RecipeId; est: BotEstimate }> {
   const ids: RecipeId[] = m.lead === null ? ['touch'] : ['r10', 'r10g', 's1', 'n5', 'n5g', 'touch'];
   return ids
-    .map((id) => ({ id, est: estimate({ ...base, ...RECIPE[id].params, strategy: RECIPE[id].strategy, symbol: m.symbol }, m, runs) }))
+    .map((id) => ({ id, est: estimate({ ...base, ...RECIPE[id].params, strategy: RECIPE[id].strategy, symbol: m.symbol }, m, runs, feeAdjBps) }))
     .sort((a, b) => (a.est.bp ?? 99) - (b.est.bp ?? 99));
 }
 
@@ -236,3 +259,7 @@ export function bestOf<T extends { id: RecipeId; est: BotEstimate }>(ranked: rea
   const r = (x: T): number => (x.est.bp === null ? 99 : Math.round(x.est.bp * 100) / 100);
   return [...ranked].sort((a, b) => r(a) - r(b) || ids.indexOf(a.id) - ids.indexOf(b.id))[0] ?? null;
 }
+
+/** The fee difference `estimate` takes: the wallet's bot fee (tenths of a bp) less the reading's (bp). */
+export const feeAdjOf = (feeTenths: number, readingBuilderBps: number | null | undefined): number =>
+  Number.isFinite(feeTenths) ? feeTenths / 10 - (readingBuilderBps ?? 0.1) : 0;

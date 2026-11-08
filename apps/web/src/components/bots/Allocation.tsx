@@ -39,9 +39,16 @@ export interface Allocation {
   perpsUsd: number;
   copyUsd: number;
   botUsd: number;
-  /** Copies and bots together. */
+  /** Your own positions, copies and bots together (the panel's line). */
   used: number;
+  /** What the account has left after all of it, for the panel. */
   free: number | null;
+  /**
+   * What a new bot may set aside: the account less bots and the executor's copies, as the executor's start check
+   * counts it (own positions are shown, not part of this; copies running in a browser tab are not the executor's).
+   * New bot gates on this number.
+   */
+  freeForBots: number | null;
   /** Practice bots: what they would need for real. */
   practiceUsd: number;
   practice: number;
@@ -64,9 +71,11 @@ export function marginOf(bots: readonly AlgoView[], copies: readonly MarginCopy[
   const botPos = running.filter((v) => !v.algo.spec.paper).reduce((t, v) => t + Math.abs(v.bot?.inventoryUsd ?? 0) / Math.max(1, v.algo.spec.leverage ?? 1), 0);
   const perpsUsd = Math.max(0, positionsMargin - botPos);
   const used = perpsUsd + copyUsd + botUsd;
+  const executorCopies = cs.filter(({ c }) => c.mode !== 'browser').reduce((t, x) => t + x.usd, 0);
   return {
     equity, copies: copyItems, bots: botItems, perpsUsd, copyUsd, botUsd, used,
     free: equity === null ? null : Math.max(0, equity - used),
+    freeForBots: equity === null ? null : Math.max(0, equity - botUsd - executorCopies),
     practice: practice.length, practiceUsd: practice.reduce((t, v) => t + botMarginUsd(v.algo.spec), 0),
   };
 }
@@ -188,6 +197,7 @@ export function MarginPanel({ a, note, className }: { a: Allocation; note?: stri
           </>
         )}
         {over && <p className="bots-err mg-why">{fmtUsd(a.used, 0)} of margin is taken against a {fmtUsd(eq!, 0)} account: your own positions, each copy's allocation, and each bot's holding cap and quotes at its leverage. Raise a bot's leverage, lower its size or holding cap, or add funds.</p>}
+        {a.freeForBots !== null && a.perpsUsd > 0.5 && <p className="bots-fine">New bots can set aside up to {fmtUsd(a.freeForBots, 0)}: your own positions show here, but the start check counts bots and copies only.</p>}
         {note ? <p className="bots-fine">{note}</p> : a.practice > 0 ? <p className="bots-fine">{a.practice} practice bot{a.practice === 1 ? '' : 's'} set nothing aside (they would need {fmtUsd(a.practiceUsd, 0)} for real).</p> : null}
       </Panel>
     </Shell>
@@ -211,7 +221,7 @@ export function BotAllocation({ v, ctx }: { v: AlgoView; ctx: BotsCtx }) {
       <div className="bots-alloc__nums">
         <span><small>This bot sets aside</small><b>{fmtUsd(usd, 0)}</b></span>
         <span><small>Of your account</small><b>{eq ? `${Math.round((usd / eq) * 100)}%` : DASH}</b></span>
-        <span><small>Free</small><b>{a.free === null ? DASH : fmtUsd(a.free, 0)}</b></span>
+        <span><small>Free for bots</small><b>{a.freeForBots === null ? DASH : fmtUsd(a.freeForBots, 0)}</b></span>
       </div>
       <div className="bots-alloc__bar">
         <i style={{ width: `${(a.perpsUsd / scale) * 100}%`, background: PERPS_COLOR }} />

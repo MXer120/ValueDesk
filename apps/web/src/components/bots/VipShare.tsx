@@ -86,6 +86,8 @@ function draw(c: CanvasRenderingContext2D, what: ShareWhat, t: number, k: number
   let fs = 58;
   const fits = () => { c.font = `600 ${fs}px "Space Grotesk", sans-serif`; return Math.max(c.measureText(L.head).width, c.measureText(L.gold).width) <= 540; };
   while (fs > 34 && !fits()) fs -= 2;
+  // The size the loop settled on (it can stop at 34 without measuring it, leaving the last size tried set).
+  c.font = `600 ${fs}px "Space Grotesk", sans-serif`;
   c.fillStyle = '#ffffff'; c.fillText(L.head, 96, 300);
   c.fillStyle = goldFill(c, 96, 320, 600, 380); c.fillText(L.gold, 96, 300 + fs * 1.15);
   c.font = '400 21px "IBM Plex Sans", sans-serif'; c.fillStyle = 'rgba(255,255,255,0.62)';

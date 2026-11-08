@@ -183,25 +183,39 @@ function devTestExecutor(): Plugin {
       if (!base || !/^http:\/\/(127\.0\.0\.1|localhost):\d+$/.test(base)) return;
       const target = new URL(base);
       let up = false;
-      const probe = () => {
-        const q = httpRequest({ host: target.hostname, port: target.port, path: '/api/copy/v1/info', method: 'GET', timeout: 2500 }, (res) => { up = res.statusCode === 200; res.resume(); });
-        q.on('timeout', () => { up = false; q.destroy(); });
-        q.on('error', () => { up = false; });
+      // The first probe's answer, waited for by the requests that arrive before it (a page loaded with the dev server
+      // went to production for its first reads, then to the test box: two executors, two sign-ins).
+      const probe = (): Promise<void> => new Promise((done) => {
+        const q = httpRequest({ host: target.hostname, port: target.port, path: '/api/copy/v1/info', method: 'GET', timeout: 2500 }, (res) => { up = res.statusCode === 200; res.resume(); res.on('end', () => done()); res.on('error', () => done()); });
+        q.on('timeout', () => { up = false; q.destroy(); done(); });
+        q.on('error', () => { up = false; done(); });
         q.end();
-      };
-      probe();
-      const timer = setInterval(probe, 5000);
+      });
+      const first = probe();
+      const timer = setInterval(() => { void probe(); }, 5000);
       server.httpServer?.on('close', () => clearInterval(timer));
       server.middlewares.use((req, res, next) => {
-        if (!up || !req.url || !req.url.startsWith('/api/copy/')) return next();
-        const headers = { ...req.headers, host: target.host };
-        delete headers[TOKEN_HEADER];
-        const out = httpRequest({ host: target.hostname, port: target.port, path: req.url, method: req.method, headers }, (pres) => {
-          res.writeHead(pres.statusCode ?? 502, { ...pres.headers, 'x-vs-dev-executor': 'test' });
-          pres.pipe(res);
+        if (!req.url || !req.url.startsWith('/api/copy/')) return next();
+        void first.then(() => {
+          if (!up) return next();
+          const headers = { ...req.headers, host: target.host };
+          delete headers[TOKEN_HEADER];
+          const out = httpRequest({ host: target.hostname, port: target.port, path: req.url, method: req.method, headers }, (pres) => {
+            res.writeHead(pres.statusCode ?? 502, { ...pres.headers, 'x-vs-dev-executor': 'test' });
+            pres.pipe(res);
+            // The test box broke off mid-answer: the browser's response ends too, never left hanging.
+            pres.on('error', () => res.destroy());
+            pres.on('aborted', () => res.destroy());
+          });
+          out.on('error', () => {
+            up = false;
+            if (!res.headersSent) { res.statusCode = 502; res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ error: 'the test executor did not answer' })); }
+            else res.destroy();
+          });
+          // The browser went away (a closed tab, an aborted read): the request to the test box stops as well.
+          res.on('close', () => { if (!res.writableFinished) out.destroy(); });
+          req.pipe(out);
         });
-        out.on('error', () => { up = false; if (!res.headersSent) { res.statusCode = 502; res.end(JSON.stringify({ error: 'the test executor did not answer' })); } });
-        req.pipe(out);
       });
     },
   };

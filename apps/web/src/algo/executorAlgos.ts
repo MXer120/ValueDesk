@@ -13,7 +13,7 @@ import { liveBotsFor, requirePaperAlgo } from './liveAlgos';
 import type { AlgoEvent, AlgoUpdatePatch, AlgoView } from '@copy-engine';
 import { ExecutorClient, ExecutorError, hostedExecutor, selfBase, signCopy } from '../copy/executor';
 import { requireTermsOrThrow } from '../legal/acceptance';
-import { getLiveCopy, readiness, type CopyModeId } from '../copy/live';
+import { getLiveCopy, markSignedOut, readiness, type CopyModeId } from '../copy/live';
 import { algoProvider } from './algoBus';
 
 export type ExecutorMode = Exclude<CopyModeId, 'browser'>;
@@ -72,10 +72,35 @@ async function call<T>(client: ExecutorClient, method: 'GET' | 'POST', path: str
     /* not JSON */
   }
   if (!res.ok) {
-    const d = (data ?? {}) as { error?: string; code?: string };
-    throw new ExecutorError(d.error || `The executor answered HTTP ${res.status}.`, res.status, d.code || 'http');
+    const d = (data ?? {}) as { error?: string; code?: string; detail?: unknown };
+    // The executor no longer takes this read token: forget it and say signed out, so the page offers Sign in.
+    if (res.status === 401 && d.code === 'session') {
+      client.forgetSession();
+      markSignedOut(client.kind === 'self' ? 'self' : 'hosted');
+      throw sessionGone(client.kind === 'self' ? 'self' : 'hosted');
+    }
+    throw new ExecutorError(d.error || `The executor answered HTTP ${res.status}.`, res.status, d.code || 'http', d.detail && typeof d.detail === 'object' ? (d.detail as Record<string, unknown>) : null);
   }
   return data as T;
+}
+
+/** No read token for this wallet (expired, refused, another executor): an error the page shows with Sign in (audit A5). */
+export function sessionGone(mode: ExecutorMode): ExecutorError {
+  return new ExecutorError(`Your sign-in to ${mode === 'hosted' ? 'the ValueDesk executor' : 'your copier'} ended. Sign in again to see and control your bots; they keep running meanwhile.`, 401, 'session');
+}
+
+/** The read token for a list or a log, or a session error (never a quiet empty answer: that read as "no bots"). */
+function readToken(mode: ExecutorMode): { client: ExecutorClient; token: string } {
+  const owner = getLiveCopy().owner;
+  const client = clientFor(mode);
+  if (!owner) throw new Error('Connect your wallet first.');
+  if (!client) throw new Error('That executor is not connected.');
+  const token = client.token(owner);
+  if (!token) {
+    markSignedOut(mode);
+    throw sessionGone(mode);
+  }
+  return { client, token };
 }
 
 /** Start an algo on an executor: one wallet signature over the spec. */
@@ -107,14 +132,17 @@ export function canUpdateOn(mode: ExecutorMode): boolean {
   return !!getLiveCopy()[mode].info?.features?.includes('algo-update');
 }
 
-/** Change a running algo on an executor (its size, limit price...): one wallet signature. */
-export async function updateOn(mode: ExecutorMode, id: string, patch: AlgoUpdatePatch): Promise<AlgoView[]> {
+/**
+ * Change a running algo on an executor (its size, limit price...): one wallet signature. `terms: false` for a change
+ * that only serves a stop (its on-stop behaviour): a stop never waits for the terms (owner 2026-11-08).
+ */
+export async function updateOn(mode: ExecutorMode, id: string, patch: AlgoUpdatePatch, o: { terms?: boolean } = {}): Promise<AlgoView[]> {
   const { owner, provider } = needWallet();
   const client = clientFor(mode);
   const info = getLiveCopy()[mode].info;
   if (!client || !info) throw new Error('That executor is not connected.');
   if (!canUpdateOn(mode)) throw new Error(`${mode === 'hosted' ? 'The ValueDesk executor' : 'Your copier'} cannot change a running algo yet (update it).`);
-  await requireTermsOrThrow({ owner, reason: 'change this algo order' });
+  if (o.terms !== false) await requireTermsOrThrow({ owner, reason: 'change this algo order' });
   const request = await signCopy(provider, owner, info.executorId, 'algo-action', { op: 'update', id, patch });
   return (await call<{ algos: AlgoView[] }>(client, 'POST', '/algos/action', { body: { request } })).algos;
 }
@@ -133,28 +161,20 @@ export async function listOn(mode: ExecutorMode): Promise<AlgoView[]> {
  * (`noSeries`; an older one sends them anyway, and says nothing).
  */
 export async function listBotsOn(mode: ExecutorMode, series: boolean): Promise<{ algos: AlgoView[]; noSeries: boolean }> {
-  const owner = getLiveCopy().owner;
-  const client = clientFor(mode);
-  const token = owner && client ? client.token(owner) : null;
-  if (!client || !token || !getLiveCopy()[mode].info?.algos) return { algos: [], noSeries: false };
+  const { client, token } = readToken(mode);
+  if (!getLiveCopy()[mode].info?.algos) return { algos: [], noSeries: false };
   const r = await call<{ algos: AlgoView[]; noSeries?: boolean }>(client, 'GET', series ? '/algos' : '/algos?series=0', { token });
   return { algos: r.algos, noSeries: r.noSeries === true };
 }
 
 export async function eventsOn(mode: ExecutorMode, id: string, limit = 200, o: { before?: number; after?: number } = {}): Promise<AlgoEvent[]> {
-  const owner = getLiveCopy().owner;
-  const client = clientFor(mode);
-  const token = owner && client ? client.token(owner) : null;
-  if (!client || !token) return [];
+  const { client, token } = readToken(mode);
   const q = `limit=${limit}${o.after !== undefined ? `&after=${o.after}` : o.before !== undefined ? `&before=${o.before}` : ''}`;
   return (await call<{ events: AlgoEvent[] }>(client, 'GET', `/algos/${encodeURIComponent(id)}/events?${q}`, { token })).events;
 }
 
-/** One algo, without its series (null: not readable here). */
+/** One algo, without its series (a session error when signed out). */
 export async function viewOn(mode: ExecutorMode, id: string): Promise<AlgoView | null> {
-  const owner = getLiveCopy().owner;
-  const client = clientFor(mode);
-  const token = owner && client ? client.token(owner) : null;
-  if (!client || !token) return null;
+  const { client, token } = readToken(mode);
   return (await call<{ algo: AlgoView }>(client, 'GET', `/algos/${encodeURIComponent(id)}?series=0`, { token })).algo;
 }

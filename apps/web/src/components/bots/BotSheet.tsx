@@ -10,11 +10,11 @@
  */
 import { useMemo, useState, type ReactNode } from 'react';
 import { FINAL_STATUSES, type AlgoEvent, type AlgoView } from '@copy-engine';
-import { DASH, fmtDateTime, fmtTime, fmtUsd, signClass } from '../../format';
+import { DASH, fmtDateTime, fmtQty, fmtTime, fmtUsd, signClass } from '../../format';
 import { Modal } from '../Modal';
 import { SeriesChart, type ChartSeries } from '../datachart/SeriesChart';
 import { BotIcon } from './BotIcon';
-import { STRATEGY_INFO, botFeeWords, strategyOf } from '../../bots/presets';
+import { STRATEGY_INFO, strategyOf } from '../../bots/presets';
 import { useBotEvents } from '../../bots/useBots';
 import { botName, fmtPnl, statusWords } from './botWords';
 
@@ -89,10 +89,10 @@ export function Overview({ v, actions }: { v: AlgoView; actions: ReactNode }) {
           <dl className="bots-ledger">
             <dt>Spread and price</dt><dd className={signClass(b?.grossPnl)}>{b ? fmtPnl(b.grossPnl) : DASH}</dd>
             <dt>SoDEX trading fees</dt><dd>{b ? `−${fmtUsd(b.tradeFees, 2)}` : DASH}</dd>
-            <dt>ValueDesk fee ({botFeeWords()})</dt><dd>{b ? `−${fmtUsd(b.builderFees, 2)}` : DASH}</dd>
+            <dt>ValueDesk fee</dt><dd>{b ? `−${fmtUsd(b.builderFees, 2)}` : DASH}</dd>
             <dt className="is-total">Net PnL</dt><dd className={`is-total ${signClass(b?.netPnl)}`}>{b ? fmtPnl(b.netPnl) : DASH}</dd>
           </dl>
-          <p className="bots-fine">{b ? `${b.fills} fills, ${Math.round(b.makerShare * 100)}% resting (maker). Fees are estimated at SoDEX's maker rate and the ${botFeeWords()} bot fee; SoDEX's own trades list the exact ones.` : ''}</p>
+          <p className="bots-fine">{b ? `${b.fills} fills, ${Math.round(b.makerShare * 100)}% resting (maker). Fees are estimated at SoDEX's maker rate and your bot fee; SoDEX's own trades list the exact ones.` : ''}</p>
         </section>
         <section className="bots-box">
           <h4>On the book now</h4>
@@ -104,7 +104,7 @@ export function Overview({ v, actions }: { v: AlgoView; actions: ReactNode }) {
                   <tr key={`${o.tag}-${o.price}`}>
                     <td><span className={`bots-side is-${o.side}`}>{o.side === 'buy' ? 'Buy' : 'Sell'}</span></td>
                     <td>{fmtUsd(o.price)}</td>
-                    <td>{o.quantity}</td>
+                    <td>{fmtQty(o.quantity)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -132,7 +132,7 @@ export function Trades({ events }: { events: AlgoEvent[] | null }) {
               <td>{fmtDateTime(e.at)}</td>
               <td><span className={`bots-side is-${e.side ?? 'buy'}`}>{e.side === 'sell' ? 'Sell' : 'Buy'}</span></td>
               <td>{fmtUsd(e.price!)}</td>
-              <td>{e.qty}</td>
+              <td>{fmtQty(e.qty!)}</td>
               <td>{fmtUsd(e.price! * e.qty!, 2)}</td>
             </tr>
           ))}

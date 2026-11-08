@@ -4,7 +4,7 @@
  * sign-in is part of the terms step rather than a step of its own:
  *
  *   practice   connect, terms
- *   real       connect, terms, fee (0.1 bp), trading key
+ *   real       connect, terms, fee (the wallet's own bot fee, /me bots.feeTenths), trading key
  */
 import { readiness, type LiveCopy } from '../../copy/live';
 import { CopySetupSteps, SetupProgress, copyReady } from '../../copy/CopySetupSheet';
@@ -12,6 +12,16 @@ import { botFeeWords } from '../../bots/presets';
 import { Modal } from '../Modal';
 import '../funds/funds.css';
 import '../../copy/copy.css';
+
+/** The wallet's bot fee in tenths of a bp: the executor's /me (fee ladder, VIP), else /info's, else the default. */
+export function botFeeTenthsOf(live: LiveCopy): number | undefined {
+  const me = live.hosted.me as unknown as { bots?: { feeTenths?: unknown } } | null;
+  const t = me?.bots?.feeTenths;
+  if (typeof t === 'number' && Number.isFinite(t) && t >= 0) return t;
+  const info = live.hosted.info as unknown as { bots?: { fee?: unknown } } | null;
+  const f = info?.bots?.fee;
+  return typeof f === 'number' && Number.isFinite(f) && f >= 0 ? f : undefined;
+}
 
 /** Ready to start a bot (practice: no fee and no key), or the step still missing in words. */
 export function botReady(live: LiveCopy, paper: boolean): { ready: boolean; why: string | null } {
@@ -22,7 +32,7 @@ export function botReady(live: LiveCopy, paper: boolean): { ready: boolean; why:
   if (!r.terms) return { ready: false, why: 'Accept the terms in the bot setup.' };
   if (!copyReady(live, 'hosted', true)) return { ready: false, why: 'Bots are not available where you are.' };
   if (copyReady(live, 'hosted', paper)) return { ready: true, why: null };
-  if (!r.fee) return { ready: false, why: `Approve the ${botFeeWords()} fee in the bot setup for real orders.` };
+  if (!r.fee) return { ready: false, why: `Approve the ${botFeeWords(botFeeTenthsOf(live))} fee in the bot setup for real orders.` };
   return { ready: false, why: 'Approve the trading key in the bot setup for real orders.' };
 }
 

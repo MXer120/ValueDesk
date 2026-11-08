@@ -126,7 +126,7 @@ h.test('before a wallet: the sidebar Bots group, Overview, latency, Explore and 
   await until(page, async () => /\$\d/.test((await page.locator('.bots-rc__v').first().textContent()) ?? ''), 'the estimate per $1M', 20_000);
   // From the preset (Explore picked the market): Settings in its three parts, then Review.
   for (let i = 0; i < 4; i++) await page.getByRole('button', { name: /^Next/ }).click();
-  await page.getByText('Connect your wallet to start a bot.').waitFor();
+  await page.getByText('Connect your wallet to start a bot.').first().waitFor();
   await shot(page, 'new-no-wallet');
   await go(page, 'Savings', 'Savings');
   assert.ok(await page.getByText('No wallet connected').isVisible());
@@ -196,12 +196,13 @@ h.test('a practice market maker: set up, New bot with the gate, its page, settin
 
   // Its page: running, the gate in its line, its own latency card.
   await until(page, async () => (await headState(page)).includes('Running'), 'it runs', 30_000);
-  assert.ok(await page.locator('.bots-head').getByText('Gate on', { exact: true }).first().isVisible());
+  assert.ok(await page.locator('.bots-head').getByText(/market gate/).first().isVisible(), 'its safeguards in the header');
   assert.ok(await page.locator('.bots-latcard').first().isVisible(), 'the bot has its latency card');
   await page.waitForTimeout(6_000);
   await shot(page, 'bot');
 
-  // Settings: the Settings tab is the form itself; a change is applied by Clean restart (the recommended button), one signature.
+  // Settings: the Settings tab is the form itself; a size and the gate change on the running bot (Save, one signature,
+  // nothing restarts); a market or quoting change would restart it.
   await page.locator('.bots-head').getByRole('button', { name: 'Edit settings', exact: true }).click();
   const sp = page.locator('.bots-settingspage');
   await sp.waitFor();
@@ -214,13 +215,13 @@ h.test('a practice market maker: set up, New bot with the gate, its page, settin
   await page.waitForTimeout(400);
   await shot(page, 'restart');
   mark = wallet.mark();
-  await page.locator('.bots-restartbar').getByRole('button', { name: /Clean restart/ }).click();
-  await page.waitForURL((u) => /^\/bots\/[^/]+$/.test(u.pathname) && u.pathname !== `/bots/${first}`, { timeout: 30_000 });
-  assert.deepEqual(signedKinds(wallet, mark), ['algo'], 'one signature to restart');
-  const id = new URL(page.url()).pathname.split('/')[2]!;
-  // A clean restart's new bot can wait on its oracle price first (the local executor's feed warming up): 90 s.
-  await until(page, async () => (await headState(page)).includes('Running'), 'the new one runs', 90_000);
-  assert.equal(await page.locator('.bots-head').getByText('Gate on', { exact: true }).count(), 0, 'the gate is off');
+  await page.locator('.bots-restartbar').getByRole('button', { name: 'Save', exact: true }).click();
+  await until(page, async () => signedKinds(wallet, mark).length === 1, 'one signature to save', 30_000);
+  assert.deepEqual(signedKinds(wallet, mark), ['algo'], 'one signature to save');
+  const id = first;
+  assert.equal(new URL(page.url()).pathname, `/bots/${first}`, 'the same bot: nothing restarted');
+  await until(page, async () => (await page.locator('.bots-head').getByText(/market gate/).count()) === 0, 'the gate is off', 30_000);
+  await until(page, async () => (await headState(page)).includes('Running'), 'it still runs', 30_000);
 
   // Pause and resume.
   const head = page.locator('.bots-head');
@@ -261,7 +262,7 @@ h.test('a practice market maker: set up, New bot with the gate, its page, settin
   await until(page, async () => /Stopped|Closing/.test(await headState(page)), 'stopped or closing', 30_000);
   if (/Closing/.test(await headState(page))) {
     await head.getByRole('button', { name: 'Stop now', exact: true }).click();
-    await page.getByRole('dialog', { name: /^Stop / }).getByRole('button', { name: 'Stop bot', exact: true }).click();
+    await page.getByRole('dialog', { name: /^Stop closing / }).getByRole('button', { name: 'Stop now', exact: true }).click();
     await until(page, async () => /Stopped/.test(await headState(page)), 'stopped at once', 30_000);
   }
   await shot(page, 'stopped');
@@ -280,9 +281,10 @@ h.test('a practice market maker: set up, New bot with the gate, its page, settin
   await page.evaluate(() => sessionStorage.clear());
   await page.reload();
   await go(page, 'Overview', 'Bots');
-  await page.getByText('Your bots', { exact: false }).first().waitFor({ state: 'visible', timeout: 30_000 });
+  // Signed in: the Fleet panel counts the wallet's bots (its one bot was deleted: no list, the strategies show).
+  await page.locator('.bots-kpis').getByText(/\d+ running/).first().waitFor({ state: 'visible', timeout: 30_000 });
   assert.deepEqual(signedKinds(wallet, mark), [], 'a new tab signs nothing');
-  assert.equal(await page.getByText('Start here', { exact: true }).count(), 0, 'no setup card');
+  await until(page, async () => (await page.getByText('Start here', { exact: true }).count()) === 0, 'no setup card', 15_000);
 
   // A new browser for the same wallet (nothing kept here): one sign-in signature, the terms are not asked again.
   await page.evaluate(() => {
@@ -296,7 +298,8 @@ h.test('a practice market maker: set up, New bot with the gate, its page, settin
   assert.equal(await page.getByText('Accept the terms', { exact: false }).count(), 0, 'signed out is a sign-in, not the terms');
   mark = wallet.mark();
   await signIn.getByRole('button', { name: 'Sign in', exact: true }).click();
-  await page.getByText('Your bots', { exact: false }).first().waitFor({ state: 'visible', timeout: 30_000 });
+  // Signed in: the Fleet panel counts the wallet's bots (its one bot was deleted: no list, the strategies show).
+  await page.locator('.bots-kpis').getByText(/\d+ running/).first().waitFor({ state: 'visible', timeout: 30_000 });
   await until(page, async () => (await page.locator('.bots-setupcard').count()) === 0, 'the card goes once signed in', 30_000);
   assert.deepEqual(signedKinds(wallet, mark), ['copy-sign-in'], 'returning wallet: sign in only, no second terms signature');
   assert.equal(await page.getByRole('checkbox', { name: /^I am at least 18/ }).count(), 0, 'no terms form');

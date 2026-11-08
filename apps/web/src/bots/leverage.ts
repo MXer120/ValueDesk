@@ -20,6 +20,8 @@ export interface BotLeverage {
   init: number | null;
   /** A position is open on the market now. */
   open: boolean;
+  /** The account state has answered (or failed, or there is no wallet): only then is `held` known to be null. */
+  loaded: boolean;
 }
 
 type Row = Record<string, unknown>;
@@ -41,5 +43,6 @@ export function useBotLeverage(address: string | null, symbol: string): BotLever
     init: sym?.initLeverage ?? null,
     held: accountLeverage(state, symbol)?.leverage ?? null,
     open: hasOpenPosition(state, symbol),
+    loaded: !address || acct.data != null || acct.error != null,
   };
 }

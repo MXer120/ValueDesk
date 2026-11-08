@@ -9,17 +9,16 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { zoneTime } from '@copy-engine';
 import { fetchKlineRows } from '../../chart/klines';
 import { QUIET_PRESETS, type BotDraft, type QuietWindow } from '../../bots/presets';
-import { quietCover } from '../../bots/estimate';
+import { quietCoverLocal } from '../../bots/estimate';
+import { chartHours, chartWindows, isChartWindow, offWords } from '../../bots/presets';
 import { Button, Icon, Segmented, TextInput } from './kit/kit';
 
 const MOST = 6;
 const DAYS: Record<QuietWindow['days'], string> = { all: 'every day', weekdays: 'Monday to Friday', trading: 'on trading days' };
-/** The viewer's whole-hour offset from UTC (a half-hour zone rounds). */
-const localOff = (): number => Math.round(-new Date().getTimezoneOffset() / 60);
+/** The viewer's offset from UTC in minutes (UTC+5:30 is 330: a half-hour zone is not rounded). */
+const localOffMin = (): number => -new Date().getTimezoneOffset();
 const hh = (h: number): string => `${String(((h % 24) + 24) % 24).padStart(2, '0')}:00`;
 const same = (a: QuietWindow, b: QuietWindow) => a.from === b.from && a.to === b.to && a.zone === b.zone && a.days === b.days;
-/** A window the chart made: UTC, every day, on the hour. */
-const isHourly = (w: QuietWindow) => w.zone === 'utc' && w.days === 'all' && w.from.endsWith(':00') && (w.to.endsWith(':00') || w.to === '23:59');
 const PICKS = QUIET_PRESETS.filter((p) => ['ny-open', 'ldn-open', 'ny-close', 'asia'].includes(p.id));
 
 /** A window's times in the viewer's clock today ('15:25–15:50'). */
@@ -74,9 +73,9 @@ function useHourlyMoves(symbol: string): { days: Array<Array<number | null>>; av
   }, [rows]);
 }
 
-/** The chart: 24 hours in the viewer's time; the hours it does not trade shaded; click or drag to pick hours. */
+/** The chart: 24 hours in the viewer's time (`cover` per local hour); the hours it does not trade shaded; click or drag to pick hours. */
 function MoveChart({ moves, cover, only, pick }: { moves: ReturnType<typeof useHourlyMoves>; cover: number[]; only: boolean; pick: (fromLocal: number, toLocal: number) => void }) {
-  const off = localOff();
+  const offMin = localOffMin();
   const [hover, setHover] = useState<number | null>(null);
   const [drag, setDrag] = useState<{ a: number; b: number } | null>(null);
   const dragRef = useRef(drag);
@@ -95,15 +94,24 @@ function MoveChart({ moves, cover, only, pick }: { moves: ReturnType<typeof useH
   }, []);
   const W = 640, H = 132, P = 6, B = 18;
   const colW = (W - P * 2) / 24;
-  const utcOf = (j: number) => (((j - off) % 24) + 24) % 24;
+  // Local hour j starts at UTC minute j*60 - offMin: in a half-hour zone it spans two UTC hours, half each.
+  const startU = (j: number) => ((((j * 60 - offMin) % 1440) + 1440) % 1440);
+  const utcOf = (j: number) => Math.floor(startU(j) / 60);
+  const half = startU(0) % 60 !== 0;
+  const pickVal = (row: ReadonlyArray<number | null>, j: number): number | null => {
+    const a = row[utcOf(j)] ?? null;
+    if (!half) return a;
+    const b = row[(utcOf(j) + 1) % 24] ?? null;
+    return a === null ? b : b === null ? a : (a + b) / 2;
+  };
   const all = moves ? moves.days.flat().filter((x): x is number => x !== null) : [];
   const top = all.length ? Math.max(...all) * 1.05 : 1;
   const y = (v: number) => P + (H - B - P) * (1 - v / top);
   const xAt = (j: number) => P + colW * (j + 0.5);
-  const at = (j: number) => moves?.avg[utcOf(j)] ?? null;
+  const at = (j: number) => (moves ? pickVal(moves.avg, j) : null);
   const line = Array.from({ length: 24 }, (_, j) => at(j)).map((v, j) => (v === null ? '' : `${j ? 'L' : 'M'}${xAt(j).toFixed(1)},${y(v).toFixed(1)}`)).join('');
   // The 7-day range: the calmest and the roughest day at each hour.
-  const vals = (j: number) => moves?.days.map((d) => d[utcOf(j)]).filter((x): x is number => x !== null) ?? [];
+  const vals = (j: number) => moves?.days.map((d) => pickVal(d, j)).filter((x): x is number => x !== null) ?? [];
   const lo = (j: number) => (vals(j).length ? Math.min(...vals(j)) : 0);
   const hi = (j: number) => (vals(j).length ? Math.max(...vals(j)) : 0);
   const band = moves ? `${Array.from({ length: 24 }, (_, j) => `${j ? 'L' : 'M'}${xAt(j).toFixed(1)},${y(hi(j)).toFixed(1)}`).join('')}${Array.from({ length: 24 }, (_, k) => `L${xAt(23 - k).toFixed(1)},${y(lo(23 - k)).toFixed(1)}`).join('')}Z` : '';
@@ -113,7 +121,7 @@ function MoveChart({ moves, cover, only, pick }: { moves: ReturnType<typeof useH
     <div className="bots-hchart">
       <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label="How much the price moves at each hour, last 7 days" onPointerLeave={() => setHover(null)}>
         {Array.from({ length: 24 }, (_, j) => {
-          const c = cover[utcOf(j)] ?? 0;
+          const c = cover[j] ?? 0;
           const shade = only ? 1 - c : c;
           return (
             <g key={j}>
@@ -134,7 +142,7 @@ function MoveChart({ moves, cover, only, pick }: { moves: ReturnType<typeof useH
         {hover !== null && v !== null && <circle className="bots-hchart__dot" cx={xAt(hover)} cy={y(v)} r={3.5} />}
       </svg>
       <div className="bots-hchart__key">
-        <span className="bots-hchart__tz">Your time, UTC{off >= 0 ? '+' : '−'}{Math.abs(off)}</span>
+        <span className="bots-hchart__tz">Your time, {offWords(offMin)}</span>
         <span><i className="is-avg" />Average move, last 7 days</span>
         <span><i className="is-band" />Range</span>
         <span className="bots-hchart__read">{hover !== null ? `${hh(hover)}–${hh(hover + 1)}${v !== null ? ` · moves ${v.toFixed(0)} bp` : ''}` : moves ? 'Click or drag across hours' : 'Reading the last 7 days…'}</span>
@@ -146,39 +154,28 @@ function MoveChart({ moves, cover, only, pick }: { moves: ReturnType<typeof useH
 export function HoursGate({ d, set }: { d: BotDraft; set: (p: Partial<BotDraft>) => void }) {
   const moves = useHourlyMoves(d.symbol);
   const [exact, setExact] = useState(false);
-  const cover = useMemo(() => quietCover(d.quiet), [d.quiet]);
-  const off = localOff();
+  const offMin = localOffMin();
+  // Covered share of each hour of the viewer's clock (a half-hour zone counted to the minute).
+  const cover = useMemo(() => quietCoverLocal(d.quiet, offMin), [d.quiet, offMin]);
   const has = (w: QuietWindow) => d.quiet.some((x) => same(x, w));
   const put = (ws: QuietWindow[]) => set({ quiet: ws.slice(0, MOST) });
-  /** The chart's UTC hours with `utcHours` set on or off, back as joined windows (the other windows kept). */
-  const withHours = (utcHours: number[], on: boolean) => {
-    const hours = new Set<number>();
-    for (const w of d.quiet.filter(isHourly)) {
-      const a = Number(w.from.slice(0, 2));
-      const b = w.to === '23:59' ? 24 : Number(w.to.slice(0, 2));
-      const n = b > a ? b - a : b + 24 - a;
-      for (let k = 0; k < n; k++) hours.add((a + k) % 24);
-    }
-    for (const h of utcHours) { if (on) hours.add(h); else hours.delete(h); }
-    const runs: QuietWindow[] = [];
-    if (hours.size === 24) runs.push({ from: '00:00', to: '23:59', zone: 'utc', days: 'all' });
-    else {
-      for (let h = 0; h < 24; h++) {
-        if (!hours.has(h) || hours.has((h + 23) % 24)) continue;
-        let e = h;
-        while (hours.has((e + 1) % 24)) e = (e + 1) % 24;
-        runs.push({ from: hh(h), to: hh(e + 1), zone: 'utc', days: 'all' });
-      }
-    }
-    put([...d.quiet.filter((w) => !isHourly(w)), ...runs]);
+  /** The chart's hours (the viewer's clock) with `localHours` set on or off, back as joined UTC windows (the other windows kept). */
+  const withHours = (localHours: number[], on: boolean) => {
+    const hours = chartHours(d.quiet, offMin);
+    for (const h of localHours) { if (on) hours.add(h); else hours.delete(h); }
+    put([...d.quiet.filter((w) => !isChartWindow(w, offMin)), ...chartWindows(hours, offMin)]);
   };
   // A click toggles an hour; a drag sets the whole stretch to the first hour's opposite.
   const pickHours = (a: number, b: number) => {
-    const utc = Array.from({ length: b - a + 1 }, (_, k) => (((a + k - off) % 24) + 24) % 24);
-    withHours(utc, (cover[utc[0]!] ?? 0) < 0.5);
+    const hs = Array.from({ length: b - a + 1 }, (_, k) => (a + k) % 24);
+    withHours(hs, (cover[hs[0]!] ?? 0) < 0.5);
   };
-  // The three hours that moved most on average.
-  const busiest = useMemo(() => (moves ? moves.avg.map((v, h) => ({ v: v ?? 0, h })).sort((x, y) => y.v - x.v).slice(0, 3).map((x) => x.h) : []), [moves]);
+  // The three hours that moved most on average, as hours of the viewer's clock.
+  const busiest = useMemo(() => {
+    if (!moves) return [];
+    const sh = offMin / 60;
+    return moves.avg.map((v, h) => ({ v: v ?? 0, h })).sort((x, y) => y.v - x.v).slice(0, 3).map((x) => ((Math.round(x.h + sh) % 24) + 24) % 24);
+  }, [moves, offMin]);
   const busyOn = busiest.length > 0 && busiest.every((h) => (cover[h] ?? 0) >= 0.99);
   const only = d.quietOnly;
   return (

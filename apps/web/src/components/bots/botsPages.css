@@ -1509,3 +1509,26 @@ html[data-glass] .bots-page { background: transparent; }
 .bots-note.is-warn { color: var(--warn, #f0b44c); }
 .bots-note svg { flex: none; vertical-align: -2px; margin-right: 6px; }
 .mg-perps { border-top: 0; padding-top: 0; }
+
+/* A refusal or a warning above the page (BotsNoticeBar): an icon tile, the sentence, one button. Kind by the tile's
+   colour, never a one-side edge. */
+.bots-notice { display: flex; align-items: center; gap: 12px; margin: 0 0 14px; padding: 10px 10px 10px 12px; border-radius: var(--radius-card, 16px); border: 1px solid var(--panel-line); background: var(--bg-elevated); }
+.bots-notice__ic { width: 30px; height: 30px; border-radius: 10px; }
+.bots-notice__t { flex: 1; min-width: 0; margin: 0; font-size: 13px; line-height: 1.45; color: var(--tf-text, inherit); }
+.bots-notice.is-negative { border-color: color-mix(in srgb, var(--tf-neg) 35%, var(--panel-line)); }
+@media (max-width: 640px) { .bots-notice { flex-wrap: wrap; } .bots-notice__t { flex-basis: calc(100% - 46px); } }
+
+/* The Stop menu as a tile's icon button. */
+.bots-stopmenu.is-compact .bots-stopmenu__btn.is-icon { width: 28px; padding: 0; justify-content: center; background: none; color: var(--tf-muted); }
+.bots-stopmenu.is-compact .bots-stopmenu__btn.is-icon:hover:not(:disabled), .bots-stopmenu.is-compact .bots-stopmenu__btn.is-open { color: var(--tf-neg); background: color-mix(in srgb, var(--tf-neg) 12%, transparent); }
+.bots-stopmenu.is-compact .bots-stopmenu__menu { cursor: default; }
+
+/* A real bot without a loss limit, said in the header. */
+.bots-chipx.is-warn { color: var(--tf-warn, #e0a93b); background: color-mix(in srgb, var(--tf-warn, #e0a93b) 14%, transparent); }
+
+/* New bot's market list: a market where a real bot of the wallet already runs (one per market). */
+tr.bots-row.is-blocked, .bots-table tbody tr.bots-row.is-blocked { opacity: 0.5; cursor: not-allowed; }
+tr.bots-row.is-blocked:hover, .bots-table tbody tr.bots-row.is-blocked:hover { background: rgb(var(--ink) / 0.015); }
+/* A tile with its Stop menu open sits above the tiles after it (the faded controls would make their own layer). */
+.bots-tiles > li:has(.bots-stopmenu__btn.is-open) { position: relative; z-index: 45; }
+.bots-tile__ctl:has(.bots-stopmenu__btn.is-open) { opacity: 1; }

@@ -5,32 +5,37 @@
  *   Clean restart (recommended)  the bot stops and closes what it holds; the new one starts flat once it has
  *   Instant restart              the new one starts at once and takes over what the old one holds (same market)
  *
- * One wallet signature either way (executor feature 'bot-restart'). An executor without it applies the changes in
- * place, as before. Pause, resume, stop and delete stay in the header.
+ * One wallet signature either way (executor feature 'bot-restart'). A change the executor makes on the running bot
+ * (a name, a loss limit, a run time, a volume target, sizes and distances: fleet.ts inPlacePatch) is a plain Save
+ * instead, and nothing restarts. A stopped bot runs again, and a practice bot runs with real orders, from New bot
+ * filled with its settings. Pause, resume, stop and delete stay in the header.
  */
 import { useEffect, useMemo, useState } from 'react';
-import { FINAL_STATUSES, type AlgoEvent, type AlgoView } from '@copy-engine';
-import { DASH, fmtDateTime, fmtTime, fmtUsd } from '../../format';
+import { FINAL_STATUSES, regionPolicy, type AlgoEvent, type AlgoView } from '@copy-engine';
+import { DASH, fmtDateTime, fmtQty, fmtUsd } from '../../format';
 import { fmtPriceAuto } from '../palette/model';
 import { useBotLeverage } from '../../bots/leverage';
 import { CoinIcon } from '../CoinIcon';
 import { SeriesChart } from '../datachart/SeriesChart';
 import { useBotLog } from '../../bots/useBots';
+import { inPlacePatch } from '../../bots/fleet';
+import { canUpdateOn } from '../../algo/executorAlgos';
 import { BotLog } from './BotLog';
 import { demoEvents } from '../../bots/demo';
 import { useBotMarkets } from '../../bots/data';
 import { goBots, type BotsView } from '../../bots/routes';
-import { STRATEGY_INFO, botFeeWords, draftOfSpec, gridRange, specChanges, specOf, strategyOf, type BotDraft } from '../../bots/presets';
+import { STRATEGY_INFO, botFeeWords, draftOfSpec, leverageCap, gridRange, specChanges, specOf, strategyOf, type BotDraft } from '../../bots/presets';
 import { BotAvatar, BotIcon } from './BotIcon';
 import { botSeries } from './BotSheet';
 import { BotSettings, NameField } from './BotSettings';
 import { StopMenu } from './StopMenu';
 import { BotAllocation } from './Allocation';
-import { TAKER_COLORS, effectiveDraft, fmtBpUsd } from './BotNewPage';
-import { estimate, ownRuns } from '../../bots/estimate';
+import { TAKER_COLORS, effectiveDraft } from './BotNewPage';
+import { estimate, feeAdjOf, ownRuns } from '../../bots/estimate';
 import { FleetChart, LatencyCard, costTone, fmtCost } from './BotsOverview';
 import { botName, botState, fmtPnl, statusWords } from './botWords';
 import { BotsHead, StatePill, type BotsCtx } from './BotsPage';
+import { SignInButton } from './BotsOverview';
 import { Button, EmptyState, Icon, IconButton, Inset, Panel, RollingNumber, SegmentedBar, Shell, ShellHeader, Skeleton, StatCard, StatusPill, Tabs, type Tone } from './kit/kit';
 
 type Tab = 'overview' | 'settings' | 'orders' | 'trades' | 'activity';
@@ -48,6 +53,33 @@ function Controls({ v, ctx }: { v: AlgoView; ctx: BotsCtx }) {
         : <Button variant="secondary" icon="pause" disabled={busy} onClick={() => void ctx.pause(v)}>Pause</Button>)}
       {!ended && <StopMenu v={v} ctx={ctx} closing={st === 'closing'} />}
       {ended && <Button variant="danger" icon="trash" disabled={busy} onClick={() => void ctx.remove(v)}>Delete</Button>}
+      {ended && <Button variant="primary" icon="play" onClick={() => ctx.runAgain(v)}>Run again</Button>}
+      {v.algo.spec.paper && ctx.liveAllowed && <Button variant={ended ? 'secondary' : 'primary'} icon="bolt" onClick={() => ctx.runAgain(v, true)} title="New bot opens with these settings, set to real orders">Run with real orders</Button>}
+    </>
+  );
+}
+
+/** A bot's leverage, safeguards and limits as the header's chips (what it runs with, at a glance). */
+function SpecChips({ v }: { v: AlgoView }) {
+  const s = v.algo.spec as AlgoView['algo']['spec'] & { stillBps?: number; flowGate?: unknown; quiet?: unknown[]; news?: unknown; maxLossUsd?: number | null; volumeTargetUsd?: number | null; endAt?: number | null; maxInventoryUsd?: number };
+  const guards = [
+    (s.stillBps ?? 0) > 0 ? 'market gate' : '',
+    s.flowGate ? 'flow gate' : '',
+    s.quiet?.length ? 'trading hours' : '',
+    s.news ? 'news pause' : '',
+    s.maxSpreadBps ? `spread limit ${s.maxSpreadBps} bp` : '',
+  ].filter(Boolean);
+  const limits = [
+    typeof s.maxLossUsd === 'number' ? `loss limit ${fmtUsd(s.maxLossUsd, 0)}` : '',
+    typeof s.maxInventoryUsd === 'number' ? `holds up to ${fmtUsd(s.maxInventoryUsd, 0)}` : '',
+    typeof s.volumeTargetUsd === 'number' ? `stops at ${fmtUsd(s.volumeTargetUsd, 0)} traded` : '',
+    typeof s.endAt === 'number' ? `ends ${fmtDateTime(s.endAt)}` : '',
+  ].filter(Boolean);
+  return (
+    <>
+      <span className="bots-chipx" title="Leverage it trades at">{s.leverage ? `${s.leverage}x` : 'Account leverage'}</span>
+      <span className="bots-chipx" title="Safeguards on">{guards.length ? guards.join(' · ') : 'No safeguard on'}</span>
+      <span className={`bots-chipx${typeof s.maxLossUsd === 'number' ? '' : ' is-warn'}`} title="Limits">{limits.length ? limits.join(' · ') : 'No limit set'}</span>
     </>
   );
 }
@@ -60,7 +92,9 @@ function SettingsTab({ v, ctx }: { v: AlgoView; ctx: BotsCtx }) {
   const before = useMemo(() => draftOfSpec(v.algo.spec), [v.algo.spec]);
   const [d, setD] = useState<BotDraft>(before);
   const lev = useBotLeverage(ctx.address, v.algo.spec.symbol);
-  const [busy, setBusy] = useState<How | null>(null);
+  // The region's leverage ceiling (EEA 2x) on top of the market's, as New bot caps it.
+  const regionMax = regionPolicy(ctx.live.terms?.country ?? null, ctx.live.viewerCountry).maxLeverage;
+  const [busy, setBusy] = useState<How | 'save' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const markets = useBotMarkets('24h');
   const est = markets.data?.markets.find((m) => m.symbol === v.algo.spec.symbol) ?? null;
@@ -70,11 +104,30 @@ function SettingsTab({ v, ctx }: { v: AlgoView; ctx: BotsCtx }) {
   useEffect(() => { if (!n) setD(before); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [before]);
   const holds = Math.abs(v.bot?.inventory ?? 0) > 0;
   const ended = botState(v) === 'ended' || botState(v) === 'failed';
+  const next = () => specOf(effectiveDraft({ ...d, paper: v.algo.spec.paper }, est), null);
+  // What the executor changes in place (no restart, nothing closed): a Save. Anything else restarts.
+  const patch = useMemo(() => {
+    if (!n || ended || (!ctx.demo && !canUpdateOn('hosted'))) return null;
+    return inPlacePatch(specOf(effectiveDraft({ ...before, paper: v.algo.spec.paper }, est), null), next(), changes.includes('endAt'));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [n, ended, before, d, est, ctx.demo]);
   const restart = async (how: How) => {
     setBusy(how);
     setError(null);
     try {
-      await ctx.restart(v, specOf(effectiveDraft({ ...d, paper: v.algo.spec.paper }, est), null), how);
+      await ctx.restart(v, next(), how);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+  const save = async () => {
+    if (!patch) return;
+    setBusy('save');
+    setError(null);
+    try {
+      await ctx.update(v.algo.id, patch);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -84,10 +137,10 @@ function SettingsTab({ v, ctx }: { v: AlgoView; ctx: BotsCtx }) {
   return (
     <div className="bots-settingspage">
       <Shell className="bots-stgshell">
-        <ShellHeader icon="gear" title="Settings" subtitle={ended ? 'As it ran. Start a new bot to change them.' : 'Change anything, then restart to apply.'} aside={n ? <Button variant="quiet" onClick={() => setD(before)}>Undo changes</Button> : undefined} />
+        <ShellHeader icon="gear" title="Settings" subtitle={ended ? 'As it ran. Run it again to start a new bot with them.' : 'Change anything: a name, limits and sizes save in place, other changes restart it.'} aside={n ? <Button variant="quiet" onClick={() => setD(before)}>Undo changes</Button> : ended ? <Button variant="secondary" icon="play" onClick={() => ctx.runAgain(v)}>Run again</Button> : undefined} />
         <Panel className="bots-sizepanel">
           <fieldset className="bots-fieldset" disabled={ended}>
-            <BotSettings d={d} set={(p) => setD((x) => ({ ...x, ...p }))} range={d.strategy === 'grid' ? gridRange(d, null) : null} mark={v.bot?.mark ?? null} liveAllowed={ctx.liveAllowed} hidePractice noLead={est?.lead === null} lev={lev} />
+            <BotSettings d={d} set={(p) => setD((x) => ({ ...x, ...p }))} range={d.strategy === 'grid' ? gridRange(d, null) : null} mark={v.bot?.mark ?? null} liveAllowed={ctx.liveAllowed} hidePractice noLead={est?.lead === null} lev={{ ...lev, max: leverageCap(lev.max, regionMax) }} />
             <NameField d={d} set={(p) => setD((x) => ({ ...x, ...p }))} />
           </fieldset>
         </Panel>
@@ -97,10 +150,16 @@ function SettingsTab({ v, ctx }: { v: AlgoView; ctx: BotsCtx }) {
         <div className={`bots-restartbar${n ? ' is-dirty' : ''}`}>
           <span className="bots-restartbar__t">
             <b>{n ? `${n} change${n === 1 ? '' : 's'}` : 'No change yet'}</b>
-            <small>{n ? 'A restart applies them.' : 'Edit any setting above.'}</small>
+            <small>{!n ? 'Edit any setting above.' : patch ? 'Save changes the running bot: nothing restarts, nothing is closed.' : 'These change how or where it quotes: a restart applies them.'}</small>
           </span>
-          <Button variant="secondary" icon="bolt" disabled={!n || busy !== null} loading={busy === 'takeover'} onClick={() => void restart('takeover')} title={holds ? 'Starts now and keeps its position.' : 'Starts now.'}>Instant restart</Button>
-          <Button variant="go" icon="shield" disabled={!n || busy !== null} loading={busy === 'clean'} onClick={() => void restart('clean')} title={holds ? 'Closes its position, then starts fresh.' : 'Stops, then starts fresh.'}>Clean restart<span className="bots-rec">Recommended</span></Button>
+          {patch ? (
+            <Button variant="go" icon="check" disabled={busy !== null} loading={busy === 'save'} onClick={() => void save()}>Save</Button>
+          ) : (
+            <>
+              <Button variant="secondary" icon="bolt" disabled={!n || busy !== null} loading={busy === 'takeover'} onClick={() => void restart('takeover')} title={holds ? 'Starts now and keeps its position.' : 'Starts now.'}>Instant restart</Button>
+              <Button variant="go" icon="shield" disabled={!n || busy !== null} loading={busy === 'clean'} onClick={() => void restart('clean')} title={holds ? 'Closes its position, then starts fresh.' : 'Stops, then starts fresh.'}>Clean restart<span className="bots-rec">Recommended</span></Button>
+            </>
+          )}
         </div>
       )}
     </div>
@@ -112,7 +171,7 @@ function SettingsTab({ v, ctx }: { v: AlgoView; ctx: BotsCtx }) {
  * per $1M from its own fills and fees, who took its quotes (BotBook.takers, from the trade stream), and the market's
  * estimate beside it only as a comparison.
  */
-function RealCost({ v, estBp }: { v: AlgoView; estBp: number | null }) {
+function RealCost({ v }: { v: AlgoView }) {
   const b = v.bot;
   const t = b?.takers;
   const sum = t ? t.t1002 + t.t23342 + t.other : 0;
@@ -122,7 +181,7 @@ function RealCost({ v, estBp }: { v: AlgoView; estBp: number | null }) {
       <div className="bots-est__big">
         <span className="bots-est__k">Per $1M, this bot{b ? ` · ${fmtUsd(b.volume, 0)} traded` : ''}</span>
         <RollingNumber value={cost === null ? DASH : fmtCost(cost)} className={`bots-est__v ${cost === null ? '' : cost < 0 ? 'pos' : 'neg'}`} />
-        <span className="bots-est__sub">{estBp !== null ? <>Estimate for this market {fmtBpUsd(estBp)}</> : 'No estimate for this market'}</span>
+        <span className="bots-est__sub">{Math.abs(b?.inventory ?? 0) > 0 ? 'After fees, with what it holds valued at the price now' : 'After fees, from its own fills'}</span>
       </div>
       {t && sum > 0 ? (
         <div className="bots-takers">
@@ -159,7 +218,7 @@ function Orders({ v }: { v: AlgoView }) {
           <tr key={`${o.tag}-${o.price}`}>
             <td><StatusPill size="sm" tone={o.side === 'buy' ? 'positive' : 'negative'}>{o.side === 'buy' ? 'Buy' : 'Sell'}</StatusPill></td>
             <td className="right num">${fmtPriceAuto(o.price)}</td>
-            <td className="right num">{o.quantity}</td>
+            <td className="right num">{fmtQty(o.quantity)}</td>
             <td className="right num">{fmtUsd(o.price * o.quantity, 2)}</td>
           </tr>
         ))}
@@ -182,8 +241,10 @@ export function BotDetail({ ctx, view, id }: { ctx: BotsCtx; view: BotsView; id:
         <BotsHead view={view} title="Bot" lead={back} />
         <Shell>
           <Panel>
-            {ctx.loading ? <div className="bots-skels"><Skeleton className="bots-skel" /><Skeleton className="bots-skel" /></div> : (
-              <EmptyState icon="robot" title="No such bot" description={ctx.address ? 'Not one of your bots, or deleted.' : 'Connect the wallet it runs for.'} actions={<Button onClick={() => goBots({ page: 'overview' })}>All bots</Button>} />
+            {ctx.address && ctx.supported && !ctx.seen ? (
+              <EmptyState icon="wallet" title="Sign in to see this bot" description="Your sign-in to the ValueDesk executor ended. Your bots keep running; sign in to see and control them. It is a free signature." actions={<SignInButton ctx={ctx} />} />
+            ) : ctx.loading ? <div className="bots-skels"><Skeleton className="bots-skel" /><Skeleton className="bots-skel" /></div> : (
+              <EmptyState icon="robot" title={ctx.error ? 'Your bots could not be read' : 'No such bot'} description={ctx.error ?? (ctx.address ? 'Not one of your bots, or deleted.' : 'Connect the wallet it runs for.')} actions={<Button onClick={() => goBots({ page: 'overview' })}>All bots</Button>} />
             )}
           </Panel>
         </Shell>
@@ -192,8 +253,6 @@ export function BotDetail({ ctx, view, id }: { ctx: BotsCtx; view: BotsView; id:
   }
   const strategy = strategyOf(v.algo.spec) ?? 'maker';
   const est = markets.data?.markets.find((m) => m.symbol === v.algo.spec.symbol) ?? null;
-  const gate = v.algo.spec.kind === 'mm' && (v.algo.spec.stillBps ?? 0) > 0;
-  const feeBps = (markets.data?.fee.makerBps ?? 1.2) + ctx.feeTenths / 10;
   const b = v.bot;
   const cap = v.algo.spec.kind === 'mm' ? v.algo.spec.maxInventoryUsd : null;
   const hold = Math.abs(b?.inventoryUsd ?? 0);
@@ -201,7 +260,8 @@ export function BotDetail({ ctx, view, id }: { ctx: BotsCtx; view: BotsView; id:
   const trendPnl = (v.algo.book?.series ?? []).map((p) => p[2]);
   const trendVol = (v.algo.book?.series ?? []).map((p) => p[1]);
   const ended = botState(v) === 'ended' || botState(v) === 'failed';
-  const estBps = est ? (gate && est.gateCostBps !== null ? est.gateCostBps : est.estCostBps) : null;
+  // One estimate on the page: the market's, blended with this wallet's own runs (estimate.ts), as New bot shows it.
+  const estBps = v.algo.spec.kind === 'mm' && markets.data ? estimate(effectiveDraft(draftOfSpec(v.algo.spec), est), est, ownRuns(ctx.bots, markets.data.markets), feeAdjOf(ctx.feeTenths, markets.data.fee.builderBps)).bp : null;
   return (
     <>
       <BotsHead
@@ -212,7 +272,7 @@ export function BotDetail({ ctx, view, id }: { ctx: BotsCtx; view: BotsView; id:
           <span className="bots-chips">
             <span className="bots-chipx"><BotIcon strategy={strategy} size={12} />{STRATEGY_INFO[strategy].name}</span>
             <span className="bots-chipx">{v.algo.spec.symbol}</span>
-            {gate && <span className="bots-chipx">Gate on</span>}
+            <SpecChips v={v} />
             <span className="bots-chipx"><Icon name="clock" size={12} />since {fmtDateTime(v.algo.startedAt ?? v.algo.createdAt)}</span>
             <span className="bots-chipx is-plain">{statusWords(v)}</span>
           </span>
@@ -225,8 +285,8 @@ export function BotDetail({ ctx, view, id }: { ctx: BotsCtx; view: BotsView; id:
           <StatCard index={0} label="Net PnL" value={fmtPnl(b?.netPnl)} valueTone={pnlTone} trend={trendPnl} trendTone={pnlTone ?? 'neutral'} hint="After fees" />
           <StatCard index={1} label="Volume" value={b ? fmtUsd(b.volume, 0) : DASH} trend={trendVol} hint={b ? `${b.fills.toLocaleString('en-US')} fills · ${Math.round(b.makerShare * 100)}% maker` : undefined} />
           <StatCard index={2} label="Per $1M" value={fmtCost(b?.costPerMillion)} valueTone={costTone(b?.costPerMillion)} hint={estBps !== null ? `Estimate ${fmtCost(estBps * 100)}` : undefined} />
-          <StatCard index={3} label="Fees paid" value={b ? fmtUsd(b.tradeFees + b.builderFees, 2) : DASH} hint={`incl. ${botFeeWords()} ValueDesk`} />
-          <StatCard index={4} label="Holding" value={b ? fmtUsd(b.inventoryUsd, 2) : DASH} goal={cap ? { ratio: Math.min(1, hold / cap), label: `Cap ${fmtUsd(cap, 0)}` } : undefined} />
+          <StatCard index={3} label="Fees paid" value={b ? fmtUsd(b.tradeFees + b.builderFees, 2) : DASH} hint={`SoDEX's and ValueDesk's (yours now ${botFeeWords(ctx.feeTenths)})`} />
+          <StatCard index={4} label="Holding" value={!b || ended ? DASH : fmtUsd(b.inventoryUsd, 2)} hint={!b || ended ? (ended ? 'Stopped: it manages nothing now' : undefined) : b.inventoryUsd > 0.005 ? 'Long' : b.inventoryUsd < -0.005 ? 'Short' : 'Flat'} goal={cap && !ended ? { ratio: Math.min(1, hold / cap), label: `Cap ${fmtUsd(cap, 0)}` } : undefined} />
         </div>
       </Shell>
 
@@ -254,9 +314,9 @@ export function BotDetail({ ctx, view, id }: { ctx: BotsCtx; view: BotsView; id:
             )}
             {v.algo.spec.kind === 'mm' && (
               <Shell className="bots-sidecard is-plain">
-                <ShellHeader icon="compass" title="Your cost here" subtitle="Paid so far, and who took its quotes" aside={<Button variant="quiet" onClick={() => goBots({ page: 'savings' })}>Lower it</Button>} />
+                <ShellHeader icon="compass" title="Your cost here" subtitle={Math.abs(b?.inventory ?? 0) > 0 ? 'So far, open position included at the price now' : 'So far, and who took its quotes'} aside={<Button variant="quiet" onClick={() => goBots({ page: 'savings' })}>Lower it</Button>} />
                 <Panel className="bots-sidepanel">
-                  <RealCost v={v} estBp={markets.data ? estimate(effectiveDraft(draftOfSpec(v.algo.spec), est), est, ownRuns(ctx.bots, markets.data.markets)).bp : null} />
+                  <RealCost v={v} />
                 </Panel>
               </Shell>
             )}
