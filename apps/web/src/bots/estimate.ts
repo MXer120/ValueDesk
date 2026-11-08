@@ -14,7 +14,7 @@
  *               the fleet's bias against its estimates. The more they trade, the more it weighs.
  * A layer without enough fills under it falls back to the tests' figure, or says it is not measured.
  */
-import type { AlgoView } from '@copy-engine';
+import { ianaZone, type AlgoView } from '@copy-engine';
 import type { BotMarket } from './data';
 import type { BotDraft, QuietWindow } from './presets';
 import { RECIPE, recipeOfDraft, recipeOfSpec, type Recipe, type RecipeId } from './recipes';
@@ -47,12 +47,10 @@ const unproven = (delta: number, rc: Recipe): boolean => delta < 0 && rc.proof !
 /** The fleet's bias needs more: it is the same bias carried to other markets. */
 const FLEET_PRIOR_USD = 1_000_000;
 
-const ZONES: Record<QuietWindow['zone'], string> = { utc: 'UTC', new_york: 'America/New_York', london: 'Europe/London' };
-
-/** A zone's offset from UTC now, hours (New York -5 or -4). */
+/** A zone's offset from UTC now, hours (New York -5 or -4; any IANA zone, Asia/Kolkata 5.5). */
 function offsetH(zone: QuietWindow['zone'], at = new Date()): number {
   if (zone === 'utc') return 0;
-  const p = new Intl.DateTimeFormat('en-US', { timeZone: ZONES[zone], hour: 'numeric', minute: 'numeric', hourCycle: 'h23' }).formatToParts(at);
+  const p = new Intl.DateTimeFormat('en-US', { timeZone: ianaZone(zone), hour: 'numeric', minute: 'numeric', hourCycle: 'h23' }).formatToParts(at);
   const h = Number(p.find((x) => x.type === 'hour')?.value ?? 0) + Number(p.find((x) => x.type === 'minute')?.value ?? 0) / 60;
   const u = at.getUTCHours() + at.getUTCMinutes() / 60;
   let d = h - u;

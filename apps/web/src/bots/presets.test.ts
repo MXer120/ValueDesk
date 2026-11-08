@@ -273,3 +273,13 @@ test('trading hours chart: a half-hour zone (UTC+5:30) keeps its half hour; whol
   assert.equal(offWords(-240), 'UTC−4');
   assert.equal(offWords(0), 'UTC+0');
 });
+
+test('chart hours in the own zone of the viewer (owner 2026-11-08): stored as the clock of that zone, read back the same, UTC ones from before still read', () => {
+  const w = chartWindows(new Set([9, 10, 11]), 60, 'Europe/Berlin');
+  assert.deepEqual(w, [{ from: '09:00', to: '12:00', zone: 'Europe/Berlin', days: 'all' }]);
+  assert.ok(isChartWindow(w[0]!, 60, 'Europe/Berlin'));
+  assert.deepEqual([...chartHours(w, 120, 'Europe/Berlin')].sort((a, b) => a - b), [9, 10, 11], 'the same hours after the clock change');
+  const old = chartWindows(new Set([9]), 60);
+  assert.deepEqual([...chartHours(old, 60, 'Europe/Berlin')], [9], 'a UTC window from before still shows');
+  assert.deepEqual(chartWindows(new Set(Array.from({ length: 24 }, (_, h) => h)), 60, 'Europe/Berlin'), [{ from: '00:00', to: '23:59', zone: 'Europe/Berlin', days: 'all' }]);
+});

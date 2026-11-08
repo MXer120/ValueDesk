@@ -26,18 +26,29 @@ type Key = 'cost' | 'bot' | 'uninformed' | 'informed' | 'spread' | 'vol' | 'acti
 const CONF_TONE = { high: 'positive', medium: 'warning', low: 'neutral' } as const;
 const bp = (x: number | null) => (x === null ? DASH : `${x >= 0 ? '+' : '−'}${Math.abs(x).toFixed(2)} bp`);
 
-/** The 24 UTC hours: column height = volume, colour = what $1M did (green earned, red cost), from the 7 d profile. */
+/**
+ * The 24 hours in the viewer's own clock (owner 2026-11-08: time zones everywhere): column height = volume, colour =
+ * what $1M did (green earned, red cost), from the 7 d profile. The profile is by UTC hour; the bars start at the
+ * viewer's midnight, each labelled with its own local start (a half-hour zone shows ':30').
+ */
 function HourProfile({ m, feeBps }: { m: BotMarket; feeBps: number }) {
   const maxV = Math.max(1, ...m.hourly.map((h) => h.volumeUsdH));
   const now = new Date().getUTCHours();
+  const off = -new Date().getTimezoneOffset();
+  const order = Array.from({ length: 24 }, (_, j) => (((Math.floor((j * 60 - off) / 60) % 24) + 24) % 24));
+  const localStart = (u: number) => {
+    const t = (((u * 60 + off) % 1440) + 1440) % 1440;
+    return `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`;
+  };
+  const byH = new Map(m.hourly.map((h) => [h.h, h]));
   return (
     <div className="bots-hp">
-      <div className="bots-hp__bars" role="img" aria-label="What $1M did and how much traded, by UTC hour, last 7 days">
-        {m.hourly.map((h) => {
+      <div className="bots-hp__bars" role="img" aria-label="What $1M did and how much traded, by hour of your day, last 7 days">
+        {order.map((u) => byH.get(u)).filter((h): h is NonNullable<typeof h> => !!h).map((h) => {
           const c = h.costBps;
           const tone = c === null ? 'none' : c <= 0 ? 'earn' : c <= feeBps + 0.4 ? 'mid' : 'dear';
           return (
-            <span key={h.h} className={`bots-hp__h is-${tone}${h.h === now ? ' is-now' : ''}`} title={`${String(h.h).padStart(2, '0')}:00 UTC · ${c === null ? 'too few fills' : `${fmtBpUsd(c)} per $1M`} · ${fmtUsd(h.volumeUsdH, 0)}/h`}>
+            <span key={h.h} className={`bots-hp__h is-${tone}${h.h === now ? ' is-now' : ''}`} title={`${localStart(h.h)} your time · ${c === null ? 'too few fills' : `${fmtBpUsd(c)} per $1M`} · ${fmtUsd(h.volumeUsdH, 0)}/h`}>
               <i style={{ height: `${Math.max(6, (h.volumeUsdH / maxV) * 100)}%` }} />
             </span>
           );
@@ -126,7 +137,7 @@ function Detail({ m, feeBps, runs, feeAdj = 0 }: { m: BotMarket; feeBps: number;
         </dl>
       </section>
       <section className="bots-xd__b is-wide">
-        <h4>By hour, UTC <small>last 7 days</small></h4>
+        <h4>By hour, your time <small>last 7 days</small></h4>
         <HourProfile m={m} feeBps={feeBps} />
         <dl className="bots-xd__grid is-4">
           <div><dt>Activity</dt><dd>{fmtUsd(m.volumeUsdH, 0)}/h</dd></div>
@@ -211,7 +222,7 @@ export function BotsExplore({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
       <BotsHead view={view} title="Explore" sub="What every bot does per $1M on every market, from the market's own trades." />
 
       <Shell className="bots-kpis">
-        <ShellHeader icon="compass" title="Every market, estimated" subtitle={r.data ? `Read ${new Date(r.data.at).toISOString().slice(11, 16)} UTC · every 5 minutes` : 'Reading the markets…'} />
+        <ShellHeader icon="compass" title="Every market, estimated" subtitle={r.data ? `Read ${new Date(r.data.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · every 5 minutes` : 'Reading the markets…'} />
         <div className="bots-kpigrid is-4">
           <StatCard index={0} label="Markets read" value={r.data ? String(r.data.markets.length) : DASH} hint={`${list.length} match the filters`} />
           <StatCard index={1} label="Best per $1M" value={best ? fmtBpUsd(costOf(best)) : DASH} valueTone={best ? (costOf(best) < 0 ? 'positive' : 'negative') : undefined} hint={best ? `${best.base}, ${RECIPE[rows.get(best.symbol)?.id ?? 'r10'].name}` : undefined} />

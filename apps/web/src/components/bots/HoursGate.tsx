@@ -6,11 +6,11 @@
  * Sessions run on the exchange's trading days, holidays skipped (engine bots.ts tradingDay).
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { zoneTime } from '@copy-engine';
+import { zoneTime, zoneWords } from '@copy-engine';
 import { fetchKlineRows } from '../../chart/klines';
 import { QUIET_PRESETS, type BotDraft, type QuietWindow } from '../../bots/presets';
 import { quietCoverLocal } from '../../bots/estimate';
-import { chartHours, chartWindows, isChartWindow, offWords } from '../../bots/presets';
+import { chartHours, chartWindows, isChartWindow, localZone, offWords } from '../../bots/presets';
 import { Button, Icon, Segmented, TextInput } from './kit/kit';
 
 const MOST = 6;
@@ -19,6 +19,13 @@ const DAYS: Record<QuietWindow['days'], string> = { all: 'every day', weekdays: 
 const localOffMin = (): number => -new Date().getTimezoneOffset();
 const hh = (h: number): string => `${String(((h % 24) + 24) % 24).padStart(2, '0')}:00`;
 const same = (a: QuietWindow, b: QuietWindow) => a.from === b.from && a.to === b.to && a.zone === b.zone && a.days === b.days;
+/** The zones a window can be set in: the viewer's own first, New York, London, UTC, and the window's own if another. */
+function zoneOptions(own: string, cur: string): Array<{ value: string; label: string }> {
+  const xs = [{ value: own, label: `${zoneWords(own)} (yours)` }, { value: 'new_york', label: 'NY' }, { value: 'london', label: 'LDN' }, { value: 'utc', label: 'UTC' }];
+  const out = xs.filter((x, i) => xs.findIndex((y) => y.value === x.value) === i && !(x.value === own && (own === 'UTC' || own === 'Etc/UTC')));
+  if (!out.some((x) => x.value === cur)) out.push({ value: cur, label: zoneWords(cur) });
+  return out;
+}
 const PICKS = QUIET_PRESETS.filter((p) => ['ny-open', 'ldn-open', 'ny-close', 'asia'].includes(p.id));
 
 /** A window's times in the viewer's clock today ('15:25–15:50'). */
@@ -155,15 +162,17 @@ export function HoursGate({ d, set }: { d: BotDraft; set: (p: Partial<BotDraft>)
   const moves = useHourlyMoves(d.symbol);
   const [exact, setExact] = useState(false);
   const offMin = localOffMin();
+  // Hours picked on the chart are kept in the viewer's own zone, so they stay those hours across daylight saving.
+  const zone = useMemo(localZone, []);
   // Covered share of each hour of the viewer's clock (a half-hour zone counted to the minute).
   const cover = useMemo(() => quietCoverLocal(d.quiet, offMin), [d.quiet, offMin]);
   const has = (w: QuietWindow) => d.quiet.some((x) => same(x, w));
   const put = (ws: QuietWindow[]) => set({ quiet: ws.slice(0, MOST) });
   /** The chart's hours (the viewer's clock) with `localHours` set on or off, back as joined UTC windows (the other windows kept). */
   const withHours = (localHours: number[], on: boolean) => {
-    const hours = chartHours(d.quiet, offMin);
+    const hours = chartHours(d.quiet, offMin, zone);
     for (const h of localHours) { if (on) hours.add(h); else hours.delete(h); }
-    put([...d.quiet.filter((w) => !isChartWindow(w, offMin)), ...chartWindows(hours, offMin)]);
+    put([...d.quiet.filter((w) => !isChartWindow(w, offMin, zone)), ...chartWindows(hours, offMin, zone)]);
   };
   // A click toggles an hour; a drag sets the whole stretch to the first hour's opposite.
   const pickHours = (a: number, b: number) => {
@@ -225,7 +234,7 @@ export function HoursGate({ d, set }: { d: BotDraft; set: (p: Partial<BotDraft>)
               <TextInput aria-label="From" value={w.from} maxLength={5} onChange={(e) => put(d.quiet.map((x, j) => (j === i ? { ...x, from: e.target.value } : x)))} />
               <span>to</span>
               <TextInput aria-label="To" value={w.to} maxLength={5} onChange={(e) => put(d.quiet.map((x, j) => (j === i ? { ...x, to: e.target.value } : x)))} />
-              <Segmented label="Zone" value={w.zone} onChange={(z) => put(d.quiet.map((x, j) => (j === i ? { ...x, zone: z } : x)))} options={[{ value: 'new_york', label: 'NY' }, { value: 'london', label: 'LDN' }, { value: 'utc', label: 'UTC' }]} />
+              <Segmented label="Zone" value={w.zone} onChange={(z) => put(d.quiet.map((x, j) => (j === i ? { ...x, zone: z } : x)))} options={zoneOptions(zone, w.zone)} />
               <Segmented label="Days" value={w.days} onChange={(dd) => put(d.quiet.map((x, j) => (j === i ? { ...x, days: dd } : x)))} options={[{ value: 'trading', label: 'Trading days' }, { value: 'weekdays', label: 'Mon–Fri' }, { value: 'all', label: 'Every day' }]} />
             </li>
           ))}
@@ -233,7 +242,7 @@ export function HoursGate({ d, set }: { d: BotDraft; set: (p: Partial<BotDraft>)
       )}
       <div className="bots-tgate__act">
         <Button variant="quiet" onClick={() => setExact((x) => !x)}>{exact ? 'Hide exact times' : 'Exact times'}</Button>
-        {exact && d.quiet.length < MOST && <Button variant="quiet" icon="plus" onClick={() => put([...d.quiet, { from: '12:00', to: '12:30', zone: 'utc', days: 'all' }])}>Add a window</Button>}
+        {exact && d.quiet.length < MOST && <Button variant="quiet" icon="plus" onClick={() => put([...d.quiet, { from: '12:00', to: '12:30', zone, days: 'all' }])}>Add a window</Button>}
       </div>
     </div>
   );

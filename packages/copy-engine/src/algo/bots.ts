@@ -253,8 +253,30 @@ export const PATIENT_TAKER_ACCOUNT = 1002;
 /** The informed taker: SoDEX account 23342, whose fills cost a small maker about 1 bp each (measured 2026-11-04). */
 export const INFORMED_TAKER_ACCOUNT = 23342;
 
-const ZONES: Readonly<Record<QuietWindow['zone'], string>> = { utc: 'UTC', new_york: 'America/New_York', london: 'Europe/London' };
-const ZONE_WORDS: Readonly<Record<QuietWindow['zone'], string>> = { utc: 'UTC', new_york: 'New York', london: 'London' };
+const ZONES: Readonly<Record<string, string>> = { utc: 'UTC', new_york: 'America/New_York', london: 'Europe/London' };
+const ZONE_WORDS: Readonly<Record<string, string>> = { utc: 'UTC', new_york: 'New York', london: 'London' };
+/** The IANA name behind a window's zone ('new_york' -> 'America/New_York'; an IANA name is itself). */
+export const ianaZone = (zone: string): string => ZONES[zone] ?? zone;
+/** A zone in words: 'New York', 'Berlin' for Europe/Berlin, 'Ho Chi Minh' for Asia/Ho_Chi_Minh. */
+export const zoneWords = (zone: string): string => ZONE_WORDS[zone] ?? (zone.split('/').pop() ?? zone).replace(/_/g, ' ');
+const zoneOk = new Map<string, boolean>();
+/** Whether `zone` is one a window may use: utc, new_york, london, or an IANA time zone this runtime knows. */
+export function validZone(zone: unknown): zone is string {
+  if (typeof zone !== 'string' || zone.length > 64) return false;
+  if (zone in ZONES) return true;
+  if (!/^[A-Za-z][A-Za-z0-9_+-]*(\/[A-Za-z0-9_+-]+){0,2}$/.test(zone)) return false;
+  let ok = zoneOk.get(zone);
+  if (ok === undefined) {
+    try {
+      new Intl.DateTimeFormat('en-US', { timeZone: zone });
+      ok = true;
+    } catch {
+      ok = false;
+    }
+    zoneOk.set(zone, ok);
+  }
+  return ok;
+}
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const formats = new Map<string, Intl.DateTimeFormat>();
 
@@ -265,7 +287,7 @@ const formats = new Map<string, Intl.DateTimeFormat>();
 export function zoneTime(at: number, zone: QuietWindow['zone']): { minutes: number; weekday: number; date: string } {
   let f = formats.get(zone);
   if (!f) {
-    f = new Intl.DateTimeFormat('en-US', { timeZone: ZONES[zone], hourCycle: 'h23', hour: '2-digit', minute: '2-digit', weekday: 'short', year: 'numeric', month: '2-digit', day: '2-digit' });
+    f = new Intl.DateTimeFormat('en-US', { timeZone: ianaZone(zone), hourCycle: 'h23', hour: '2-digit', minute: '2-digit', weekday: 'short', year: 'numeric', month: '2-digit', day: '2-digit' });
     formats.set(zone, f);
   }
   let h = 0;
@@ -439,7 +461,7 @@ export function newsAt(gate: NewsGate | undefined, events: readonly NewsEvent[],
 }
 
 /** '09:20–09:45 New York'. */
-export const quietWords = (w: QuietWindow): string => `${w.from}–${w.to} ${ZONE_WORDS[w.zone]}`;
+export const quietWords = (w: QuietWindow): string => `${w.from}–${w.to} ${zoneWords(w.zone)}`;
 
 /** '$950', '$12.5k', '$3.2M'. */
 export function usdWords(x: number): string {

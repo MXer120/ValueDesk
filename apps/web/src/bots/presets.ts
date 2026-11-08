@@ -88,7 +88,8 @@ export const STRATEGY_INFO: Record<Strategy, { name: string; kind: AlgoSpec['kin
 };
 
 /** 'trading': the exchange's trading days in that zone (NYSE for New York, LSE for London), holidays skipped (engine bots.ts). */
-export interface QuietWindow { from: string; to: string; zone: 'utc' | 'new_york' | 'london'; days: 'all' | 'weekdays' | 'trading' }
+/** A trading-hours window; zone: utc, new_york, london or any IANA zone (the viewer's own clock, DST followed). */
+export interface QuietWindow { from: string; to: string; zone: 'utc' | 'new_york' | 'london' | (string & {}); days: 'all' | 'weekdays' | 'trading' }
 /** The usual session windows (zone time), on the exchange's trading days: its holidays are skipped. */
 export const QUIET_PRESETS: Array<{ id: string; label: string; w: QuietWindow }> = [
   { id: 'ny-open', label: 'New York open', w: { from: '09:25', to: '09:50', zone: 'new_york', days: 'trading' } },
@@ -404,9 +405,28 @@ export function offWords(offMin: number): string {
   return `UTC${offMin >= 0 ? '+' : '−'}${Math.floor(a / 60)}${a % 60 ? `:${String(a % 60).padStart(2, '0')}` : ''}`;
 }
 
-/** A window the chart made for a viewer `offMin` off UTC: UTC, every day, starting and ending on that viewer's hour (or the whole day). */
-export function isChartWindow(w: QuietWindow, offMin: number): boolean {
-  if (w.zone !== 'utc' || w.days !== 'all') return false;
+/** The viewer's own time zone (IANA, e.g. 'Europe/Berlin'); 'UTC' where the browser does not say. */
+export function localZone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  } catch {
+    return 'UTC';
+  }
+}
+
+/**
+ * A window the chart made: in the viewer's own zone `zone` (owner 2026-11-08: a picked hour stays that hour of their
+ * clock across daylight saving), every day, on the hour (or the whole day); or, from before, UTC on the hour of a
+ * viewer `offMin` off UTC.
+ */
+export function isChartWindow(w: QuietWindow, offMin: number, zone?: string): boolean {
+  if (w.days !== 'all') return false;
+  if (zone && w.zone === zone && zone !== 'utc') {
+    if (w.from === '00:00' && w.to === '23:59') return true;
+    const a = minOf(w.from), b = minOf(w.to);
+    return a !== null && b !== null && a % 60 === 0 && b % 60 === 0;
+  }
+  if (w.zone !== 'utc') return false;
   if (w.from === '00:00' && w.to === '23:59') return true;
   const a = minOf(w.from), b = minOf(w.to);
   if (a === null || b === null) return false;
@@ -414,28 +434,34 @@ export function isChartWindow(w: QuietWindow, offMin: number): boolean {
 }
 
 /** The viewer's hours (0-23 of their clock) the chart windows cover. */
-export function chartHours(ws: readonly QuietWindow[], offMin: number): Set<number> {
+export function chartHours(ws: readonly QuietWindow[], offMin: number, zone?: string): Set<number> {
   const hours = new Set<number>();
   for (const w of ws) {
-    if (!isChartWindow(w, offMin)) continue;
+    if (!isChartWindow(w, offMin, zone)) continue;
     if (w.from === '00:00' && w.to === '23:59') { for (let h = 0; h < 24; h++) hours.add(h); continue; }
     const a = minOf(w.from)!, b = minOf(w.to)!;
     const len = b > a ? b - a : b + 1440 - a;
-    const start = Math.round((((a + offMin) % 1440) + 1440) % 1440 / 60);
+    // In the viewer's zone the window's hours are their clock's; a UTC one is shifted by their offset now.
+    const own = !!zone && w.zone === zone && zone !== 'utc';
+    const start = Math.round(((((own ? a : a + offMin) % 1440) + 1440) % 1440) / 60);
     for (let k = 0; k < Math.round(len / 60); k++) hours.add((start + k) % 24);
   }
   return hours;
 }
 
-/** The viewer's hours back as joined UTC windows (every day). */
-export function chartWindows(hours: ReadonlySet<number>, offMin: number): QuietWindow[] {
-  if (hours.size >= 24) return [{ from: '00:00', to: '23:59', zone: 'utc', days: 'all' }];
+/**
+ * The viewer's hours back as joined windows, every day: in their own zone `zone` when given (the engine follows its
+ * daylight saving), else UTC at their offset now.
+ */
+export function chartWindows(hours: ReadonlySet<number>, offMin: number, zone?: string): QuietWindow[] {
+  const z = zone && zone !== 'utc' ? zone : null;
+  if (hours.size >= 24) return [{ from: '00:00', to: '23:59', zone: z ?? 'utc', days: 'all' }];
   const out: QuietWindow[] = [];
   for (let h = 0; h < 24; h++) {
     if (!hours.has(h) || hours.has((h + 23) % 24)) continue;
     let e = h;
     while (hours.has((e + 1) % 24)) e = (e + 1) % 24;
-    out.push({ from: hhmm(h * 60 - offMin), to: hhmm((e + 1) * 60 - offMin), zone: 'utc', days: 'all' });
+    out.push(z ? { from: hhmm(h * 60), to: hhmm((e + 1) * 60), zone: z, days: 'all' } : { from: hhmm(h * 60 - offMin), to: hhmm((e + 1) * 60 - offMin), zone: 'utc', days: 'all' });
   }
   return out;
 }

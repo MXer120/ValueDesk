@@ -10,6 +10,7 @@
 import { canonicalDecimal } from '../../../sodex-core/src/index.ts';
 import { DEFAULT_EXEC, withinLimit } from './math.ts';
 import { isOracleVenue } from '../oracle.ts';
+import { validZone } from './bots.ts';
 import {
   ALGO_KINDS,
   type AlgoBase,
@@ -198,7 +199,10 @@ function quietWindows(o: Obj, e: Errors): QuietWindow[] | null {
     }
     for (const k of ['from', 'to'] as const) if (typeof w[k] !== 'string' || !HHMM.test(w[k] as string)) e[`${path}.${k}`] = `Quiet window ${i + 1}: ${k === 'from' ? 'the start' : 'the end'} must be a time like 09:30 (24 h).`;
     if (typeof w.from === 'string' && w.from === w.to) e[`${path}.to`] = `Quiet window ${i + 1}: the end must differ from the start.`;
-    const zone = oneOf(w, 'zone', `Quiet window ${i + 1}: the time zone`, ['utc', 'new_york', 'london'] as const, 'utc', e, `${path}.zone`);
+    // utc, new_york, london, or any IANA time zone (owner 2026-11-08: time zones everywhere).
+    const z = w.zone === undefined || w.zone === null || w.zone === '' ? 'utc' : w.zone;
+    if (!validZone(z)) e[`${path}.zone`] = `Quiet window ${i + 1}: the time zone must be utc, new_york, london or a time zone name such as Europe/Berlin.`;
+    const zone = validZone(z) ? z : 'utc';
     const days = oneOf(w, 'days', `Quiet window ${i + 1}: the days`, ['all', 'weekdays', 'trading'] as const, 'all', e, `${path}.days`);
     out.push({ from: String(w.from), to: String(w.to), zone, days });
   });

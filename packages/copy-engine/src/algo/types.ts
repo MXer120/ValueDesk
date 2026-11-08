@@ -589,12 +589,15 @@ export interface FlowGate {
 export interface QuietWindow {
   from: string;
   to: string;
-  /** UTC, or the local time (DST included) of America/New_York or Europe/London. */
-  zone: 'utc' | 'new_york' | 'london';
+  /**
+   * UTC, the local time (DST included) of New York or London, or any IANA time zone ('Europe/Berlin',
+   * 'Asia/Kolkata': the bot's owner's own clock, its daylight saving followed). Owner 2026-11-08: time zones everywhere.
+   */
+  zone: 'utc' | 'new_york' | 'london' | (string & {});
   /**
    * Every day, Monday to Friday in that zone, or 'trading': the exchange's trading days there (NYSE for New York, the
-   * London Stock Exchange for London, Monday to Friday for UTC), holidays skipped. A window past midnight goes by the
-   * day it began.
+   * London Stock Exchange for London, Monday to Friday for UTC and any other zone), holidays skipped. A window past
+   * midnight goes by the day it began.
    */
   days: 'all' | 'weekdays' | 'trading';
 }

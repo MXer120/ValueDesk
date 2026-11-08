@@ -550,7 +550,7 @@ export function BotsOverview({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
                               <td className={`right num ${b && b.netPnl > 0.004 ? 'pos' : b && b.netPnl < -0.004 ? 'neg' : ''}`} data-k="Net PnL">{fmtPnl(b?.netPnl)}</td>
                               <td className={`right num ${costCls(b?.costPerMillion)}`} data-k="Per $1M">{fmtCost(b?.costPerMillion)}</td>
                               <td className="right num" data-k="Holding">{!b || !isLive(v) ? DASH : fmtUsd(cleanUsd(b.inventoryUsd), 2)}</td>
-                              <td className="right num dim" data-k="Started">{new Date(v.algo.startedAt ?? v.algo.createdAt).toISOString().slice(5, 16).replace('T', ' ')}</td>
+                              <td className="right num dim" data-k="Started">{new Date(v.algo.startedAt ?? v.algo.createdAt).toLocaleString([], { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</td>
                               <td className="right"><Controls v={v} ctx={ctx} /></td>
                             </tr>
                           );

@@ -123,7 +123,7 @@ export function LatencyChart({ buckets, bucketMs, regionLabel, marks = [], hours
   const first = Math.ceil(start / (hourStep * 3_600_000)) * hourStep * 3_600_000;
   for (let t = first; t <= end; t += hourStep * 3_600_000) hourTicks.push(t);
   const hb = hover !== null ? shown[hover] : null;
-  const fmtHour = (t: number) => new Date(t).toISOString().slice(11, 16);
+  const fmtHour = (t: number) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
 
   // Stretches without a write: a dashed line at 0 (owner: never a gap that reads as missing data).
   const idle: Array<[number, number]> = [];
@@ -225,7 +225,7 @@ export function LatencyChart({ buckets, bucketMs, regionLabel, marks = [], hours
       </svg>
       {hb && (
         <div className="bots-lat__tip" style={{ left: Math.min(Math.max(x(hb.t) - 70, 4), w - 150) }} role="status">
-          <b>{fmtHour(hb.t)}–{fmtHour(hb.t + bucketMs)} UTC</b>
+          <b>{fmtHour(hb.t)}–{fmtHour(hb.t + bucketMs)}</b>
           <span><i className="is-p95" />p95 {hb.p95 ?? '—'} ms</span>
           <span><i className="is-p50" />p50 {hb.p50 ?? '—'} ms</span>
           <span><i className="is-p99" />p99 {hb.p99 ?? '—'} ms</span>

@@ -32,6 +32,8 @@ import {
   FairBasis,
   PATIENT_TAKER_ACCOUNT,
   quietWindowAt,
+  quietWords,
+  validZone,
   checkSizes,
   botReserveUsd,
   newsAt,
@@ -1372,4 +1374,26 @@ test('a bot alone on its market whose holding was closed by hand: the reduce-onl
   assert.ok(Math.abs(r.ex.position) < 1e-12, 'nothing opened the other way');
   const closes = r.ex.placed.slice(before).filter((o) => o.clOrdID.includes(a.id.slice(1, 13)));
   assert.ok(closes.length >= 1 && closes.every((o) => o.reduceOnly && o.side === 'sell'), 'every close went with the flag');
+});
+
+test('trading hours in any time zone (owner 2026-11-08): the own clock of the owner with its daylight saving, half-hour zones exact; unknown zones refused', () => {
+  // 09:00-10:00 Berlin: 08:00 UTC in winter (CET), 07:00 UTC in summer (CEST).
+  const ber = [{ from: '09:00', to: '10:00', zone: 'Europe/Berlin', days: 'all' }];
+  assert.ok(quietWindowAt(ber, Date.UTC(2026, 0, 15, 8, 30)));
+  assert.equal(quietWindowAt(ber, Date.UTC(2026, 0, 15, 7, 30)), null);
+  assert.ok(quietWindowAt(ber, Date.UTC(2026, 6, 15, 7, 30)));
+  assert.equal(quietWindowAt(ber, Date.UTC(2026, 6, 15, 8, 30)), null);
+  // Kolkata is UTC+5:30 all year: 18:00-19:00 there is 12:30-13:30 UTC.
+  const kol = [{ from: '18:00', to: '19:00', zone: 'Asia/Kolkata', days: 'weekdays' }];
+  assert.ok(quietWindowAt(kol, Date.UTC(2026, 0, 15, 12, 45)));
+  assert.equal(quietWindowAt(kol, Date.UTC(2026, 0, 15, 12, 15)), null);
+  assert.equal(quietWindowAt(kol, Date.UTC(2026, 0, 17, 12, 45)), null, 'Saturday there');
+  assert.equal(quietWords(ber[0]!), '09:00–10:00 Berlin');
+  assert.equal(validZone('Europe/Berlin'), true);
+  assert.equal(validZone('new_york'), true);
+  assert.equal(validZone('Mars/Olympus'), false);
+  assert.equal(validZone('../etc'), false);
+  const e = (quiet: unknown) => checkAlgoSpec({ kind: 'mm', symbol: 'BTC-USD', orderUsd: 50, maxInventoryUsd: 200, maxLossUsd: 10, quiet }).errors;
+  assert.equal(e([{ from: '09:00', to: '10:00', zone: 'Asia/Tokyo', days: 'all' }])['quiet.0.zone'], undefined);
+  assert.match(e([{ from: '09:00', to: '10:00', zone: 'Mars/Olympus', days: 'all' }])['quiet.0.zone'] ?? '', /time zone name such as Europe\/Berlin/);
 });
