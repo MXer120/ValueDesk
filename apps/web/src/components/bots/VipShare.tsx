@@ -6,9 +6,8 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { Modal } from '../Modal';
-import { notify } from '../../toast';
 import { encodeGif } from '../../bots/gif';
-import { Segmented } from './kit/kit';
+import { Icon, Segmented } from './kit/kit';
 
 export type ShareWhat = { kind: 'unlock'; promo: boolean } | { kind: 'move'; bots: number; secs: number };
 
@@ -170,6 +169,7 @@ export function VipShare({ what, onClose }: { what: ShareWhat; onClose: () => vo
   const [url, setUrl] = useState<string | null>(null);
   const [busy, setBusy] = useState(true);
   const made = useRef(new Map<Format, Blob>());
+  const [note, setNote] = useState<string | null>(null);
   useEffect(() => {
     let live = true;
     const have = made.current.get(format);
@@ -182,7 +182,7 @@ export function VipShare({ what, onClose }: { what: ShareWhat; onClose: () => vo
         setUrl((old) => { if (old) URL.revokeObjectURL(old); return URL.createObjectURL(b); });
         setBusy(false);
       })
-      .catch((e) => { if (live) { setBusy(false); notify('error', e instanceof Error ? e.message : String(e)); } });
+      .catch((e) => { if (live) { setBusy(false); setNote(e instanceof Error ? e.message : String(e)); } });
     return () => { live = false; };
   }, [format, what]);
   useEffect(() => () => { if (url) URL.revokeObjectURL(url); }, [url]);
@@ -191,14 +191,21 @@ export function VipShare({ what, onClose }: { what: ShareWhat; onClose: () => vo
   const file = blob ? new File([blob], name, { type: blob.type }) : null;
   const canShare = !!file && typeof navigator.canShare === 'function' && navigator.canShare({ files: [file] });
 
+  // What the last copy did, said in the popup for a few seconds (not a toast that stays).
+  const noteTimer = useRef(0);
+  const say = (t: string) => { setNote(t); window.clearTimeout(noteTimer.current); noteTimer.current = window.setTimeout(() => setNote(null), 4500); };
+  useEffect(() => () => window.clearTimeout(noteTimer.current), []);
   const copy = async () => {
     if (!blob) return;
+    // Most browsers take only PNG on the clipboard: a GIF is copied as the still card there, and downloads animated.
+    const gifOk = format !== 'gif' || (typeof ClipboardItem !== 'undefined' && typeof ClipboardItem.supports === 'function' && ClipboardItem.supports('image/gif'));
     try {
-      await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
-      notify('ok', format === 'gif' ? 'GIF copied.' : 'Image copied.');
+      const b = gifOk ? blob : made.current.get('image') ?? await makePng(what);
+      if (!gifOk) made.current.set('image', b);
+      await navigator.clipboard.write([new ClipboardItem({ [b.type]: b })]);
+      say(format === 'gif' ? (gifOk ? 'GIF copied.' : 'Copied as a still image: this browser copies GIFs as PNG. Download keeps the animation.') : 'Image copied.');
     } catch {
-      // Most browsers put only PNG on the clipboard: the GIF still downloads.
-      notify('error', format === 'gif' ? 'This browser copies images as PNG only. Download the GIF instead.' : 'This browser did not allow copying the image. Download it instead.');
+      say('This browser did not allow copying. Download it instead.');
     }
   };
   const download = () => {
@@ -222,11 +229,11 @@ export function VipShare({ what, onClose }: { what: ShareWhat; onClose: () => vo
         {busy && <span className="vipshare__busy">{format === 'gif' ? 'Making the GIF…' : 'Drawing…'}</span>}
       </div>
       <div className="vipshare__act">
-        <button type="button" className="vipx-cta" disabled={!blob || busy} onClick={() => void copy()}>Copy</button>
-        <button type="button" className="vipx-later" disabled={!blob || busy} onClick={download}>Download</button>
-        {canShare && <button type="button" className="vipx-later" disabled={busy} onClick={() => void shareSheet()}>Share…</button>}
+        <button type="button" className="vipx-cta" disabled={!blob || busy} onClick={() => void copy()}><Icon name="layers" size={15} />Copy</button>
+        <button type="button" className="vipx-later" disabled={!blob || busy} onClick={download}><Icon name="down" size={14} />Download</button>
+        {canShare && <button type="button" className="vipx-icon" aria-label="Share" title="Share" disabled={busy} onClick={() => void shareSheet()}><Icon name="share" size={17} /></button>}
       </div>
-      <p className="vipshare__fine">Made in your browser: nothing is uploaded.</p>
+      {note ? <p className="vipshare__note" role="status">{note}</p> : <p className="vipshare__fine">Made in your browser: nothing is uploaded.</p>}
     </Modal>
   );
 }

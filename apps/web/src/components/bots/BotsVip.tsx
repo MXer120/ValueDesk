@@ -144,7 +144,7 @@ function MoveScene({ job, onClose, handoff, stage, onShare }: { job: VipMoveView
 
         {state !== 'running' && (
           <div className="bots-vipmove__act">
-            {done ? <><button type="button" className="vipx-cta" onClick={close}><Icon name="check" size={15} />Done</button><button type="button" className="vipx-later" onClick={() => onShare(secs)}>Share</button></>
+            {done ? <><button type="button" className="vipx-cta" onClick={close}><Icon name="check" size={15} />Done</button><button type="button" className="vipx-icon" aria-label="Share" title="Share" onClick={() => onShare(secs)}><Icon name="share" size={17} /></button></>
               : <Button variant="secondary" size="md" onClick={close}>Close</Button>}
           </div>
         )}
@@ -267,8 +267,8 @@ function UnlockScene({ onMove, onClose, onShare, volume, promo, stage }: { onMov
               : `${volume !== null ? fmtUsd(volume, 0) : '$1M'} traded in 14 days. Your bots pay the lowest fee and may move to the VIP servers. It holds while you stay above $1M.`}</p>
             <div className="vipx-win__act">
               <button type="button" className="vipx-cta" onClick={leave}><Icon name="bolt" size={15} />Move my bots to VIP servers</button>
-              <button type="button" className="vipx-later" onClick={onShare}>Share</button>
               <button type="button" className="vipx-later" onClick={close}>Later</button>
+              <button type="button" className="vipx-icon" aria-label="Share" title="Share" onClick={onShare}><Icon name="share" size={17} /></button>
             </div>
           </div>
           <div className="vipx-tilt" ref={tilt.ref}>

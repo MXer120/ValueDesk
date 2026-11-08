@@ -57,6 +57,7 @@ const PATHS = {
   arrowRight: <path d="M8 4.5 13.5 10 8 15.5" />,
   star: <path d="m10 3.8 1.9 3.9 4.2.6-3 3 .7 4.2L10 13.5l-3.8 2 .7-4.2-3-3 4.2-.6z" />,
   wallet: <><rect x="3" y="5.5" width="14" height="10" rx="2.4" /><path d="M3 8.5h10.5M13 12h1.5" /></>,
+  share: <><path d="M10 12.5V3.5M6.8 6.7 10 3.5l3.2 3.2" /><path d="M5.5 10v4.5a1.5 1.5 0 0 0 1.5 1.5h6a1.5 1.5 0 0 0 1.5-1.5V10" /></>,
   expand: <path d="M4 8V4h4M12 4h4v4M16 12v4h-4M8 16H4v-4" />,
   grid: <><path d="M4 7h12M4 10h12M4 13h12" /><circle cx="7" cy="7" r="1" /><circle cx="12" cy="10" r="1" /><circle cx="9" cy="13" r="1" /></>,
 } as const;

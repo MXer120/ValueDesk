@@ -1479,3 +1479,11 @@ html[data-glass] .bots-page { background: transparent; }
 .vipshare__fine { margin: 10px 0 0; font-size: 12px; color: var(--dim); }
 .vipx-win__h { font-size: clamp(30px, 3.3vw, 54px); }
 .vipx-win__h .vipx-goldtext { white-space: nowrap; }
+.bots-vipmove__act { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 10px; }
+.vipx-icon { display: inline-grid; place-items: center; width: 46px; height: 46px; padding: 0; border: 1px solid rgba(246, 220, 142, 0.28); border-radius: 50%; background: rgba(246, 220, 142, 0.06); color: #f6dc8e; cursor: pointer; transition: background-color 150ms ease, border-color 150ms ease, transform 150ms ease; }
+.vipx-icon:hover { background: rgba(246, 220, 142, 0.14); border-color: rgba(246, 220, 142, 0.45); }
+.vipx-icon:active { transform: scale(0.96); }
+.vipx-icon:focus-visible { outline: 2px solid #f6dc8e; outline-offset: 3px; }
+.vipshare__note { margin: 10px 0 0; font-size: 12.5px; color: #f6dc8e; }
+.vipshare__act .vipx-later { display: inline-flex; align-items: center; gap: 6px; }
+.vipshare__act .vipx-icon { width: 40px; height: 40px; }
