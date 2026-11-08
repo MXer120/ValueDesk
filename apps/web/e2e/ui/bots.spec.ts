@@ -58,7 +58,8 @@ async function setUp(page: Page, wallet: TestWallet): Promise<void> {
   await site.getByRole('button', { name: 'Only necessary', exact: true }).click();
   await toast(page, 'Terms accepted.').waitFor({ state: 'visible', timeout: 30_000 });
   await sheet.getByText('Ready to run bots').waitFor({ state: 'visible', timeout: 20_000 });
-  assert.deepEqual(wallet.since(mark).filter((r) => r.outcome === 'signed').map((r) => r.kind), ['copy-sign-in', 'site-terms', 'copy-terms']);
+  // The day key (owner 2026-11-08): the sign-in asks the wallet for it once; the terms always take the wallet itself.
+  assert.deepEqual(wallet.since(mark).filter((r) => r.outcome === 'signed').map((r) => r.kind), ['day-key', 'site-terms', 'copy-terms']);
   await sheet.locator('.cs-actions').getByRole('button', { name: 'Close', exact: true }).click();
   await sheet.waitFor({ state: 'hidden' });
 }
@@ -132,7 +133,7 @@ h.test('before a wallet: the sidebar Bots group, Overview, latency, Explore and 
   assert.ok(await page.getByText('No wallet connected').isVisible());
 }, { path: '/bots', timeout: 120_000 });
 
-h.test('a practice market maker: set up, New bot with the gate, its page, settings, pause, stop, delete - one signature each', async ({ page, wallet }) => {
+h.test('a practice market maker: set up, New bot with the gate, its page, settings, pause, stop, delete - the wallet signs once a day', async ({ page, wallet }) => {
   if (await comingSoon(page)) return;
   await connectWallet(page);
   await page.getByRole('heading', { name: 'Bots', exact: true }).waitFor();
@@ -191,7 +192,7 @@ h.test('a practice market maker: set up, New bot with the gate, its page, settin
   // Start asks first, with what starts.
   await page.getByRole('dialog', { name: /^Start / }).getByRole('button', { name: 'Start practice bot', exact: true }).click();
   await page.waitForURL((u) => /^\/bots\/[^/]+$/.test(u.pathname) && !['/bots/new', '/bots/explore', '/bots/savings'].includes(u.pathname), { timeout: 30_000 });
-  assert.deepEqual(signedKinds(wallet, mark), ['algo'], 'one signature to start');
+  assert.deepEqual(signedKinds(wallet, mark), [], 'no wallet signature to start: the day key signs it');
   const first = new URL(page.url()).pathname.split('/')[2]!;
 
   // Its page: running, the gate in its line, its own latency card.
@@ -216,8 +217,8 @@ h.test('a practice market maker: set up, New bot with the gate, its page, settin
   await shot(page, 'restart');
   mark = wallet.mark();
   await page.locator('.bots-restartbar').getByRole('button', { name: 'Save', exact: true }).click();
-  await until(page, async () => signedKinds(wallet, mark).length === 1, 'one signature to save', 30_000);
-  assert.deepEqual(signedKinds(wallet, mark), ['algo'], 'one signature to save');
+  await until(page, async () => /saved|apply at once/i.test((await page.locator('body').textContent()) ?? '') || (await page.locator('.bots-restartbar.is-dirty').count()) === 0, 'saved', 30_000);
+  assert.deepEqual(signedKinds(wallet, mark), [], 'no wallet signature to save: the day key signs it');
   const id = first;
   assert.equal(new URL(page.url()).pathname, `/bots/${first}`, 'the same bot: nothing restarted');
   await until(page, async () => (await page.locator('.bots-head').getByText(/market gate/).count()) === 0, 'the gate is off', 30_000);
@@ -232,7 +233,7 @@ h.test('a practice market maker: set up, New bot with the gate, its page, settin
   await head.getByRole('button', { name: 'Resume', exact: true }).click();
   await page.getByRole('dialog', { name: /^Resume / }).getByRole('button', { name: 'Resume bot', exact: true }).click();
   await head.getByRole('button', { name: 'Pause', exact: true }).waitFor({ state: 'visible', timeout: 20_000 });
-  assert.deepEqual(signedKinds(wallet, mark), ['algo', 'algo']);
+  assert.deepEqual(signedKinds(wallet, mark), [], 'pause and resume: the day key signs them');
   await page.getByRole('tab', { name: 'Activity', exact: true }).click();
   await page.locator('.bots-flog__row').first().waitFor({ state: 'visible', timeout: 20_000 });
   // A line opens to what is known of it.
@@ -301,11 +302,11 @@ h.test('a practice market maker: set up, New bot with the gate, its page, settin
   // Signed in: the Fleet panel counts the wallet's bots (its one bot was deleted: no list, the strategies show).
   await page.locator('.bots-kpis').getByText(/\d+ running/).first().waitFor({ state: 'visible', timeout: 30_000 });
   await until(page, async () => (await page.locator('.bots-setupcard').count()) === 0, 'the card goes once signed in', 30_000);
-  assert.deepEqual(signedKinds(wallet, mark), ['copy-sign-in'], 'returning wallet: sign in only, no second terms signature');
+  assert.deepEqual(signedKinds(wallet, mark), [], 'returning wallet the same day: the day key signs the sign-in, no terms signature');
   assert.equal(await page.getByRole('checkbox', { name: /^I am at least 18/ }).count(), 0, 'no terms form');
 }, { path: '/bots', timeout: 300_000 });
 
-h.test('VIP: a practice bot moves to the VIP executor with one signature, full screen, in under 20 seconds, and runs on', async ({ page, wallet }) => {
+h.test('VIP: a practice bot moves to the VIP executor with no extra signature (the day key), full screen, in under 20 seconds, and runs on', async ({ page, wallet }) => {
   if (await comingSoon(page)) return;
   await connectWallet(page);
   await page.getByRole('heading', { name: 'Bots', exact: true }).waitFor();
@@ -348,7 +349,7 @@ h.test('VIP: a practice bot moves to the VIP executor with one signature, full s
   assert.ok(secs > 0 && secs < 20, `moved in ${secs} s`);
   await page.waitForTimeout(1_200);
   await shot(page, 'vip-done');
-  assert.equal(wallet.since(mark).filter((r) => r.outcome === 'signed').length, 1, 'one signature');
+  assert.equal(wallet.since(mark).filter((r) => r.outcome === 'signed').length, 0, 'no wallet signature: the day key signs the move');
   await scene.getByRole('button', { name: 'Done', exact: true }).click();
   await panel.getByText('VIP servers', { exact: true }).waitFor({ state: 'visible', timeout: 20_000 });
 
