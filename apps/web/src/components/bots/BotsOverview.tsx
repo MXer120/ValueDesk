@@ -203,7 +203,31 @@ function StrategyPick({ ctx }: { ctx: BotsCtx }) {
   );
 }
 
+/** This browser saw the wallet set up before (terms or a sign-in kept, any version): its bots are spoken of. */
+function knownHere(address: string): boolean {
+  try {
+    const a = address.toLowerCase();
+    return Object.keys(localStorage).some((k) => k === `vd.copy.terms:${a}` || (k.startsWith('vd.copy.session:') && k.endsWith(`:${a}`)));
+  } catch {
+    return false;
+  }
+}
+
 function Setup({ ctx }: { ctx: BotsCtx }) {
+  // Signed out (a new browser, or 30 days on): one read signature, never the terms again - they are on record.
+  if (ctx.address && ctx.supported && !ctx.seen) {
+    return (
+      <Shell className="bots-setupcard">
+        <ShellHeader icon="wallet" title="Sign in to your bots" subtitle="One free signature, it only reads" />
+        <Panel className="bots-setup">
+          <p className="bots-setup__line">{knownHere(ctx.address)
+            ? 'Your bots keep running. Sign in to see them and to pause, stop or close them. It changes nothing and lasts 30 days in this browser.'
+            : 'It shows your bots, or the setup if this wallet has none yet. It changes nothing and lasts 30 days in this browser.'}</p>
+          <Button variant="primary" icon="wallet" onClick={() => void ctx.signIn()}>Sign in</Button>
+        </Panel>
+      </Shell>
+    );
+  }
   const body = !ctx.address
     ? { line: 'Bots trade around the clock in your own SoDEX account, from the ValueDesk executor. Connect the wallet whose account they trade in.', act: <Button variant="primary" icon="wallet" onClick={() => void openConnectDialog()}>Connect wallet</Button> }
     : !ctx.supported
@@ -375,7 +399,8 @@ export function BotsOverview({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
     </th>
   );
 
-  const ready = ctx.ready;
+  // Signed in shows the bots and their stop buttons; only starting new ones waits for the setup (ctx.ready).
+  const ready = ctx.seen;
   const val = (x: string) => (ready ? x : DASH);
   const trendVol = s.volume.map((p) => p[1]);
   const trendPnl = s.pnl.map((p) => p[1]);
@@ -390,12 +415,12 @@ export function BotsOverview({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
         actions={ready ? (
           <>
             {anyRunning && <Button variant="danger" icon="stop" disabled={ctx.busy === 'all'} onClick={() => void ctx.stopAll()}>Stop all</Button>}
-            <Button variant="primary" icon="plus" onClick={() => goBots({ page: 'new', market: null, kind: null })}>New bot</Button>
+            <Button variant="primary" icon="plus" onClick={() => (ctx.ready ? goBots({ page: 'new', market: null, kind: null }) : ctx.setup(true))}>New bot</Button>
           </>
         ) : undefined}
       />
 
-      {!ready && <Setup ctx={ctx} />}
+      {!ctx.ready && (!ctx.seen || !bots.length) && <Setup ctx={ctx} />}
 
       <Shell className="bots-kpis">
         <ShellHeader icon="robot" title="Fleet" subtitle={ready ? `${t.running} of ${t.bots} running` : 'Your bots, together'} />

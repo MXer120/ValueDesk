@@ -201,6 +201,9 @@ const rowHash = (r: { at: number; kind: string; ok: boolean; wallet: string | nu
 export type FeeProduct = 'perps' | 'spot' | 'copy' | 'bots';
 export const FEE_PRODUCTS: readonly FeeProduct[] = ['perps', 'spot', 'copy', 'bots'];
 
+/** The beta promotion's length (packages/copy-engine policy.ts BETA_VIP_DAYS, the executor's bot side of it). */
+export const BETA_VIP_DAYS = 30;
+
 export interface FeeProgram {
   id: number;
   address: string;
@@ -441,7 +444,15 @@ export class AdminStore {
   /** The programs of one wallet that are running at `now`. */
   activeFeePrograms(address: string, now = Date.now()): FeeProgram[] {
     const rows = this.db.prepare('SELECT * FROM fee_programs WHERE address = ? AND from_at <= ? AND (until_at IS NULL OR until_at > ?)').all(address.toLowerCase(), now, now) as Array<Record<string, unknown>>;
-    return rows.map(programOf);
+    const out = rows.map(programOf);
+    // The beta promotion: VIP on every product for BETA_VIP_DAYS from the listing, then the wallet's tier again.
+    const beta = this.db.prepare('SELECT added_at FROM beta_wallets WHERE address = ?').get(address.toLowerCase()) as { added_at: number } | undefined;
+    if (beta) {
+      const from = Number(beta.added_at);
+      const until = from + BETA_VIP_DAYS * 86_400_000;
+      if (from <= now && until > now) out.push({ id: 0, address: address.toLowerCase(), products: ['perps', 'spot', 'copy', 'bots'], fee: -1, from, until, label: 'Beta VIP', addedAt: from, addedBy: 'beta' });
+    }
+    return out;
   }
 
   /** One program per wallet, the same for each; their ids. */

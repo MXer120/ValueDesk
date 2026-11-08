@@ -30,6 +30,12 @@ const shot = (page: Page, name: string) => page.screenshot({ path: join(OUT, `bo
  * bots, whose "Sign and accept" signs in to the executor as well; nothing of the copy setup shows.
  */
 async function setUp(page: Page, wallet: TestWallet): Promise<void> {
+  const mark = wallet.mark();
+  // Signed out, the page asks for the read sign-in first (one signature); a new wallet then gets the setup.
+  const signIn = page.locator('.bots-setupcard').getByRole('button', { name: 'Sign in', exact: true });
+  await signIn.waitFor({ state: 'visible', timeout: 20_000 });
+  await signIn.click();
+  await page.getByRole('button', { name: 'Set up', exact: true }).first().waitFor({ state: 'visible', timeout: 30_000 });
   await page.getByRole('button', { name: 'Set up', exact: true }).first().click();
   const sheet = page.getByRole('dialog', { name: 'Bot setup' });
   await sheet.waitFor({ state: 'visible' });
@@ -39,9 +45,9 @@ async function setUp(page: Page, wallet: TestWallet): Promise<void> {
     assert.equal(await sheet.getByText(copyWords).count(), 0, `no copy setup wording: ${copyWords}`);
   }
   const step = (t: string) => sheet.getByRole('listitem').filter({ hasText: t });
-  const mark = wallet.mark();
-  // Sign in first; with no acceptance on record for this wallet, the terms form opens.
-  await step('Accept the terms').getByRole('button', { name: 'Continue', exact: true }).click();
+  // Signed in already; with no acceptance on record for this wallet, the terms form opens.
+  const cont = step('Accept the terms').getByRole('button', { name: /^(Continue|Review)$/ });
+  if (await cont.count()) await cont.click();
   await sheet.getByRole('checkbox', { name: /^I am at least 18/ }).waitFor({ state: 'visible', timeout: 30_000 });
   assert.equal(await sheet.getByText(/EU and EEA/).count(), 0, 'no copy leverage note in the bot setup');
   for (const s of [/^I am at least 18/, /^I am not a US person/, /^I chose every bot/, /^I have read the terms and risk disclosure/]) await sheet.getByRole('checkbox', { name: s }).check();
@@ -268,21 +274,31 @@ h.test('a practice market maker: set up, New bot with the gate, its page, settin
   for (const t of ['Fee tier', 'Staking', 'Your bots']) await page.getByText(t, { exact: true }).first().waitFor();
   await shot(page, 'savings');
 
+  // A new tab of this browser (owner 2026-11-08: no re-signing): the sign-in is kept, nothing is signed.
+  mark = wallet.mark();
+  await page.evaluate(() => sessionStorage.clear());
+  await page.reload();
+  await go(page, 'Overview', 'Bots');
+  await page.getByText('Your bots', { exact: false }).first().waitFor({ state: 'visible', timeout: 30_000 });
+  assert.deepEqual(signedKinds(wallet, mark), [], 'a new tab signs nothing');
+  assert.equal(await page.getByText('Start here', { exact: true }).count(), 0, 'no setup card');
+
   // A new browser for the same wallet (nothing kept here): one sign-in signature, the terms are not asked again.
   await page.evaluate(() => {
-    for (const k of Object.keys(localStorage)) if (k.startsWith('vd.copy.terms:')) localStorage.removeItem(k);
+    for (const k of Object.keys(localStorage)) if (k.startsWith('vd.copy.terms:') || k.startsWith('vd.copy.session:')) localStorage.removeItem(k);
     sessionStorage.clear();
   });
   await page.reload();
   await go(page, 'Overview', 'Bots');
-  await page.getByRole('button', { name: 'Set up', exact: true }).first().click();
-  const again = page.getByRole('dialog', { name: 'Bot setup' });
-  await again.waitFor({ state: 'visible' });
+  const signIn = page.locator('.bots-setupcard').filter({ hasText: 'Sign in to your bots' });
+  await signIn.waitFor({ state: 'visible', timeout: 30_000 });
+  assert.equal(await page.getByText('Accept the terms', { exact: false }).count(), 0, 'signed out is a sign-in, not the terms');
   mark = wallet.mark();
-  await again.getByRole('listitem').filter({ hasText: 'Accept the terms' }).getByRole('button', { name: 'Continue', exact: true }).click();
-  await again.getByText('Ready to run bots').waitFor({ state: 'visible', timeout: 30_000 });
+  await signIn.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await page.getByText('Your bots', { exact: false }).first().waitFor({ state: 'visible', timeout: 30_000 });
+  await until(page, async () => (await page.locator('.bots-setupcard').count()) === 0, 'the card goes once signed in', 30_000);
   assert.deepEqual(signedKinds(wallet, mark), ['copy-sign-in'], 'returning wallet: sign in only, no second terms signature');
-  assert.equal(await again.getByRole('checkbox', { name: /^I am at least 18/ }).count(), 0, 'no terms form');
+  assert.equal(await page.getByRole('checkbox', { name: /^I am at least 18/ }).count(), 0, 'no terms form');
 }, { path: '/bots', timeout: 300_000 });
 
 h.test('VIP: a practice bot moves to the VIP executor with one signature, full screen, in under 20 seconds, and runs on', async ({ page, wallet }) => {
@@ -317,7 +333,7 @@ h.test('VIP: a practice bot moves to the VIP executor with one signature, full s
   await shot(page, 'vip-done');
   assert.equal(wallet.since(mark).filter((r) => r.outcome === 'signed').length, 1, 'one signature');
   await scene.getByRole('button', { name: 'Done', exact: true }).click();
-  await panel.getByText('VIP · AWS Tokyo').waitFor({ state: 'visible', timeout: 20_000 });
+  await panel.getByText('VIP servers', { exact: true }).waitFor({ state: 'visible', timeout: 20_000 });
 
   // The same bot, same id, running on the VIP executor.
   await page.goto(new URL(`/bots/${id}`, page.url()).toString());

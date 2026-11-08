@@ -18,7 +18,8 @@ export function botReady(live: LiveCopy, paper: boolean): { ready: boolean; why:
   if (!live.owner) return { ready: false, why: 'Connect your wallet.' };
   if (!live.hosted.info) return { ready: false, why: 'The ValueDesk executor is not reachable right now.' };
   const r = readiness(live, 'hosted');
-  if (!r.terms || !r.connected) return { ready: false, why: 'Accept the terms in the bot setup.' };
+  if (!r.connected) return { ready: false, why: 'Sign in to the ValueDesk executor (one free signature).' };
+  if (!r.terms) return { ready: false, why: 'Accept the terms in the bot setup.' };
   if (!copyReady(live, 'hosted', true)) return { ready: false, why: 'Bots are not available where you are.' };
   if (copyReady(live, 'hosted', paper)) return { ready: true, why: null };
   if (!r.fee) return { ready: false, why: `Approve the ${botFeeWords()} fee in the bot setup for real orders.` };

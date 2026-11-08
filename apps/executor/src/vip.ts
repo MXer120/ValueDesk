@@ -36,7 +36,7 @@ export const VIP_STEPS: Array<{ id: VipStepId; label: string }> = [
   { id: 'pause', label: 'Pausing your bots' },
   { id: 'seal', label: 'Sealing your key to the VIP servers' },
   { id: 'send', label: 'Handing over bots and books' },
-  { id: 'start', label: 'Starting on AWS Tokyo' },
+  { id: 'start', label: 'Starting on the VIP servers' },
   { id: 'finish', label: 'Releasing the standard servers' },
 ];
 

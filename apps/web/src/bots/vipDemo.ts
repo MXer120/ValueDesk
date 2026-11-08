@@ -2,7 +2,7 @@
  * The demo controls beside "Demo data" (owner 2026-11-08: trigger the VIP unlock and the move, to see the
  * animations): one event the VIP card listens to. Nothing is sent anywhere; the move plays a made-up job.
  */
-export type VipPlay = 'unlock' | 'move';
+export type VipPlay = 'unlock' | 'unlock-promo' | 'move';
 const subs = new Set<(p: VipPlay) => void>();
 
 export function playVip(p: VipPlay): void {

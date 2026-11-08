@@ -25,12 +25,15 @@ const cfgOf = () => {
   return r.config;
 };
 
-test('lowered: the lowest program per product; VIP is the last tier everywhere; not started or ended counts for nothing', () => {
+test('lowered: the lowest program per product; VIP is the lowest bot fee, a VIP program the last tier everywhere; not started or ended counts for nothing', () => {
   const cfg = cfgOf();
   const none = lowered([], false, cfg, T0);
   assert.deepEqual(none.fees, {});
+  // The $1M milestone lowers the bot fee only (owner 2026-11-08); a VIP program (the beta promotion) lowers all four.
   const vip = lowered([], true, cfg, T0);
-  assert.deepEqual([vip.fees.perps?.fee, vip.fees.spot?.fee, vip.fees.copy?.fee, vip.fees.bots?.fee], [15, 20, 10, 1]);
+  assert.deepEqual([vip.fees.perps?.fee, vip.fees.spot?.fee, vip.fees.copy?.fee, vip.fees.bots?.fee], [undefined, undefined, undefined, 1]);
+  const promo = lowered([prog({ fee: VIP_PROGRAM_FEE })], false, cfg, T0);
+  assert.deepEqual([promo.fees.perps?.fee, promo.fees.spot?.fee, promo.fees.copy?.fee, promo.fees.bots?.fee], [15, 20, 10, 1]);
   const two = lowered([prog({ fee: 8, products: ['perps'] }), prog({ id: 2, fee: 3, products: ['perps', 'copy'], until: T0 + DAY })], false, cfg, T0);
   assert.equal(two.fees.perps?.fee, 3);
   assert.equal(two.fees.perps?.until, T0 + DAY);
@@ -108,4 +111,18 @@ test('admin store: a VIP program is kept as VIP (-1), not as a 0 fee', () => {
   after(() => s.close());
   s.addFeePrograms({ addresses: [A], products: ['bots'], fee: VIP_PROGRAM_FEE, from: T0, until: null, label: 'VIP', by: addr(1) }, T0);
   assert.equal(s.activeFeePrograms(A, T0 + 1)[0]!.fee, VIP_PROGRAM_FEE);
+});
+
+test('admin store: a beta wallet is VIP on every product for 30 days from its listing, then not', () => {
+  const dir = tempDir('vs-fees-beta-');
+  const s = new AdminStore(join(dir, 'admin.db'));
+  after(() => s.close());
+  s.addBetaWallet(A, 'tester', addr(1), T0);
+  const on = s.activeFeePrograms(A, T0 + DAY);
+  assert.equal(on.length, 1);
+  assert.equal(on[0]!.fee, VIP_PROGRAM_FEE);
+  assert.deepEqual(on[0]!.products, ['perps', 'spot', 'copy', 'bots']);
+  assert.equal(on[0]!.until, T0 + 30 * DAY);
+  assert.equal(s.activeFeePrograms(A, T0 + 30 * DAY).length, 0, 'back to the tier after 30 days');
+  assert.equal(s.activeFeePrograms(addr(9), T0 + DAY).length, 0, 'not on the list');
 });

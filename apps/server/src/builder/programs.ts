@@ -1,8 +1,10 @@
 /**
  * The ValueDesk builder fee a wallet pays on each product, past its volume tier (owner 2026-11-08):
  *
- *   VIP        $1M of the wallet's own counted volume in 14 days (BuilderService.vipOf):
- *              the lowest tier on every product - the site's futures and spot orders, copy trading and bots
+ *   VIP        $1M of the wallet's own counted volume in 14 days (BuilderService.vipOf): the lowest bot fee
+ *              (owner 2026-11-08: "for normal milestone hit only bot fees"); the other products keep their tier
+ *   beta VIP   a wallet on the beta list, for 30 days from its listing (admin/store.ts activeFeePrograms): a VIP
+ *              program, the lowest tier on every product - futures, spot, copy trading and bots
  *   programs   set on the dev page for one or many wallets: a fee (tenths of a bp, never below 0) or "VIP" on
  *              some products, from a time, until a time or until ended by hand ("VIP for 30 days", "0 for the
  *              launch week")
@@ -56,7 +58,7 @@ export function lowered(programs: readonly FeeProgram[], vip: boolean, cfg: Tier
     // The lower fee wins; at the same fee the longer one (no end counts longest).
     if (!cur || f < cur.fee || (f === cur.fee && (until === null || (cur.until !== null && until > cur.until)))) out.fees[p] = { fee: f, why, until };
   };
-  if (vip) for (const p of ['perps', 'spot', 'copy', 'bots'] as const) offer(p, top[p], 'VIP', null);
+  if (vip) offer('bots', top.bots, 'VIP', null);
   for (const g of programs) {
     if (g.from > now || (g.until !== null && g.until <= now)) continue;
     for (const p of g.products) offer(p, g.fee === VIP_PROGRAM_FEE ? top[p] : g.fee, g.label || (g.fee === VIP_PROGRAM_FEE ? 'VIP program' : 'Fee program'), g.until);

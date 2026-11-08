@@ -6,7 +6,8 @@
  * (packages/copy-engine/src/api.ts): the wallet shows the action and the exact
  * payload, the executor checks the signature and keeps it as the record of
  * the instruction. Reads use a session token from one signed 'session'
- * request, kept in this tab's sessionStorage until it expires.
+ * request, kept in this browser's localStorage until it expires (owner 2026-11-08: a new tab or a restart must not
+ * ask for a signature again; the token only reads, every change is signed on its own).
  */
 import type { KeyImportEnvelope } from './keyImport';
 import {
@@ -133,7 +134,10 @@ export class ExecutorClient {
 
   token(owner: string): string | null {
     try {
-      const raw = sessionStorage.getItem(sessionKey(this.base, owner));
+      // A token from before 2026-11-08 sits in this tab's sessionStorage: carried over once, no new signature.
+      const old = sessionStorage.getItem(sessionKey(this.base, owner));
+      if (old) { localStorage.setItem(sessionKey(this.base, owner), old); sessionStorage.removeItem(sessionKey(this.base, owner)); }
+      const raw = localStorage.getItem(sessionKey(this.base, owner));
       if (!raw) return null;
       const g = JSON.parse(raw) as SessionGrant;
       if (!(g.expiresAt > Date.now() + 60_000)) return null;
@@ -147,7 +151,7 @@ export class ExecutorClient {
   private forget(): void {
     if (!this.ownerCache) return;
     try {
-      sessionStorage.removeItem(sessionKey(this.base, this.ownerCache));
+      localStorage.removeItem(sessionKey(this.base, this.ownerCache));
     } catch {
       /* private mode */
     }
@@ -160,9 +164,9 @@ export class ExecutorClient {
     const request = await signCopy(provider, owner, executorId, 'session', {});
     const g = await this.call<SessionGrant>('POST', '/session', { body: { request }, pairing });
     try {
-      sessionStorage.setItem(sessionKey(this.base, owner), JSON.stringify(g));
+      localStorage.setItem(sessionKey(this.base, owner), JSON.stringify(g));
     } catch {
-      /* private mode: one signature per load */
+      /* storage refused: one signature per load */
     }
     this.ownerCache = owner;
     return g.token;
@@ -228,7 +232,7 @@ export function pointHostedAt(owner: string | null): void {
 /** Keep a session token the VIP executor issued in a move (no second signature). */
 export function keepVipSession(owner: string, g: { token: string; expiresAt: number }): void {
   try {
-    sessionStorage.setItem(sessionKey(VIP_BASE, owner.toLowerCase()), JSON.stringify(g));
+    localStorage.setItem(sessionKey(VIP_BASE, owner.toLowerCase()), JSON.stringify(g));
   } catch {
     /* private mode */
   }

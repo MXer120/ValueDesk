@@ -244,7 +244,8 @@ const SIGNER_IDLE_MS = 2 * 60_000;
 /** At most this many followers' volumes are remembered (the rest is read again). */
 const VOLUMES_MAX = 20_000;
 
-const SESSION_TTL_MS = 12 * 60 * 60_000;
+/** A read token (it changes nothing: every write is signed on its own). 30 days, owner 2026-11-08: "as minimal changes as possible where users need to re-sign". */
+const SESSION_TTL_MS = 30 * 24 * 60 * 60_000;
 /** How long a follower's volume (the copy fee step) is used before it is read again. */
 /** The volume and the fee perks (VIP, programs) of a wallet are read again this often (owner 2026-11-08: a program reaches orders within minutes). */
 const VOLUME_TTL_MS = 2 * 60_000;

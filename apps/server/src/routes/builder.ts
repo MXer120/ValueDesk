@@ -130,10 +130,11 @@ export async function builderRoutes(app: FastifyInstance, opts: BuilderRouteOpti
    * It says whether one address is listed, never who is.
    */
   /**
-   * GET /api/vs/bots/vip?address=0x...  ->  {ok, eligible, volumeUsd, minUsd, days}
+   * GET /api/vs/bots/vip?address=0x...  ->  {ok, eligible, volumeUsd, minUsd, days, promo}
    *
-   * VIP (owner 2026-11-08): a wallet with $1M of its own counted volume in 14 days - the lowest fee on every product,
-   * and its bots may move to the VIP executor (AWS Tokyo). What the page shows as progress, and what the executors
+   * VIP (owner 2026-11-08): a wallet with $1M of its own counted volume in 14 days - the lowest bot fee - or one on a
+   * VIP program (the beta's 30 days: promo {until, label}, the lowest fee on every product). Either may move its bots
+   * to the VIP executor. What the page shows as progress, and what the executors
    * ask before a move. A wallet's builder volume is public on SoDEX already; it says nothing of anyone else.
    */
   app.get('/api/vs/bots/vip', async (req, reply) => {
@@ -142,7 +143,10 @@ export async function builderRoutes(app: FastifyInstance, opts: BuilderRouteOpti
     if (typeof q.address !== 'string' || !ADDRESS_RE.test(q.address)) return reply.code(400).send({ ok: false, error: 'a valid 0x wallet address is required' });
     const v = service.vipOf(q.address.toLowerCase());
     if (!v) return reply.code(503).send({ ok: false, code: 'unavailable', error: 'the builder ledger is not open' });
-    return { ok: true, eligible: isVip(v), volumeUsd: v.volumeUsd, minUsd: VIP_MIN_USD, days: VIP_DAYS };
+    // A VIP program covers futures too; the volume milestone alone lowers only bots (builder/programs.ts).
+    const perps = service.loweredFor(q.address.toLowerCase()).fees.perps;
+    const promo = perps && /VIP/.test(perps.why) ? { until: perps.until, label: perps.why } : null;
+    return { ok: true, eligible: isVip(v) || !!promo, volumeUsd: v.volumeUsd, minUsd: VIP_MIN_USD, days: VIP_DAYS, promo };
   });
 
   app.get('/api/vs/beta/listed', async (req, reply) => {

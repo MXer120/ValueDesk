@@ -21,7 +21,8 @@ import type { AlgoView } from '@copy-engine';
 import { FINAL_STATUSES } from '@copy-engine';
 import type { Eip1193Provider } from '../../wallet';
 import { fmtUsd } from '../../format';
-import { useLiveCopy, readiness } from '../../copy/live';
+import { useLiveCopy, readiness, signIn as signInExecutor } from '../../copy/live';
+import { COPY_TERMS_VERSION } from '@copy-engine';
 import { liveBotsFor } from '../../algo/liveAlgos';
 import { notify } from '../../toast';
 import { useConfirm } from '../Modal';
@@ -54,6 +55,11 @@ export interface BotsCtx {
   error: string | null;
   /** The executor runs bots and this wallet is set up for practice ones. */
   ready: boolean;
+  /** Signed in to the executor: the bots show and can be paused, stopped and closed - whatever the terms (owner
+   *  2026-11-08: "users always need to be able to stop bots or reduce positions"). Starting needs `ready`. */
+  seen: boolean;
+  /** One free signature that only reads (30 days in this browser). */
+  signIn: () => Promise<void>;
   supported: boolean;
   liveAllowed: boolean;
   feeTenths: number;
@@ -162,7 +168,18 @@ function BotsPageOpen({ address, provider }: { address: string | null; provider:
   const [busy, setBusy] = useState<string | null>(null);
   const { confirm, dialog } = useConfirm();
   const supported = !live.hosted.info || !!live.hosted.info.features?.includes('bots');
-  const ready = !!address && supported && signedIn && botReady(live, true).ready;
+  const seen = !!address && supported && signedIn;
+  const ready = seen && botReady(live, true).ready;
+  // A new version of terms the wallet accepted before: the setup opens once as a popup, over the bots (which stay
+  // visible and stoppable). A first visit gets the "Start here" card instead.
+  const recorded = live.hosted.me?.terms ?? null;
+  const outdated = seen && !!recorded && recorded.termsVersion !== COPY_TERMS_VERSION && !live.terms;
+  useEffect(() => {
+    if (!outdated || !address) return;
+    const k = `vd.bots.termsPopup:${address.toLowerCase()}:${COPY_TERMS_VERSION}`;
+    try { if (sessionStorage.getItem(k)) return; sessionStorage.setItem(k, '1'); } catch { /* private mode */ }
+    setSetup({ paper: true });
+  }, [outdated, address]);
 
   const run = async (id: string, what: () => Promise<void>, done?: string) => {
     setBusy(id);
@@ -182,6 +199,10 @@ function BotsPageOpen({ address, provider }: { address: string | null; provider:
     loading,
     error,
     ready,
+    seen,
+    signIn: async () => {
+      try { await signInExecutor('hosted'); } catch (e) { notify('error', e instanceof Error ? e.message : String(e)); }
+    },
     supported,
     liveAllowed: liveBotsFor(address),
     feeTenths: live.hosted.info?.bots?.fee ?? DEFAULT_BOT_FEE_TENTHS,
@@ -264,7 +285,7 @@ function BotsPageOpen({ address, provider }: { address: string | null; provider:
     pauseAll: (list) => run('all', async () => { for (const v of list) await act('pause', v.algo.id); }, `${list.length} bot${list.length === 1 ? '' : 's'} paused.`),
     resumeAll: (list) => run('all', async () => { for (const v of list) await act('resume', v.algo.id); }, `${list.length} bot${list.length === 1 ? '' : 's'} resumed.`),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [address, bots, loading, error, ready, supported, live, busy, view]);
+  }), [address, bots, loading, error, ready, seen, supported, live, busy, view]);
 
   // Demo data (owner 2026-11-07), local builds only: on by default, the switch at the top right.
   const [demo, setDemoOn] = useState(() => BOTS_ON && demoDefault());
@@ -287,6 +308,8 @@ function BotsPageOpen({ address, provider }: { address: string | null; provider:
       loading: false,
       error: null,
       ready: true,
+      seen: true,
+      signIn: async () => said('Sign in'),
       supported: true,
       liveAllowed: true,
       busy: null,
@@ -355,6 +378,7 @@ function BotsPageOpen({ address, provider }: { address: string | null; provider:
             {demo && (
               <span className="bots-demobar__play" aria-label="Play the VIP animations">
                 <Button variant="quiet" size="sm" icon="play" onClick={() => playVip('unlock')}>VIP unlock</Button>
+                <Button variant="quiet" size="sm" icon="play" onClick={() => playVip('unlock-promo')}>Beta VIP unlock</Button>
                 <Button variant="quiet" size="sm" icon="play" onClick={() => playVip('move')}>Move to VIP</Button>
               </span>
             )}

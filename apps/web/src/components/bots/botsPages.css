@@ -1251,3 +1251,110 @@ html[data-glass] .bots-page { background: transparent; }
 .bots-demobar label, .bots-demobar .tf-choice { align-items: center; }
 @media (max-width: 640px) { .tf-shellhead:has(> .tf-shellhead__aside > .tf-btn:only-child) { flex-wrap: nowrap; } .tf-shellhead__aside:has(> .tf-btn:only-child) { width: auto; padding-left: 0; } }
 .bots-page .dc-legend { right: 78px; }
+
+/* VIP scenes in the launch post's look (VipScene.tsx; marketing/video/src/launch/xbrand.tsx VipPost). Gold tokens. */
+.vipx { --g-hi: #fff1c2; --g-1: #f6dc8e; --g-2: #d4a748; --g-3: #8a651f; --g-text: #f8e7b5; --g-muted: rgba(248, 231, 181, 0.62); --g-line: rgba(246, 220, 142, 0.2); background: #0b0b0b; overflow: hidden auto; }
+.vipx-goldtext { background: linear-gradient(170deg, var(--g-hi) 10%, var(--g-1) 45%, var(--g-2) 75%, #f3d58a 100%); -webkit-background-clip: text; background-clip: text; color: transparent; }
+
+/* The ground: soft top light, dot grid, ghost letters drifting, gold lines running on the grid, a vignette. */
+.vipx-ground { position: absolute; inset: 0; pointer-events: none; overflow: hidden; --lit: 1; }
+.vipx-ground__light { position: absolute; inset: 0; background: radial-gradient(70% 60% at 62% 40%, rgba(212, 167, 72, calc(0.22 * var(--lit))) 0%, rgba(212, 167, 72, 0) 70%), radial-gradient(90% 75% at 50% 18%, #191919 0%, #0b0b0b 72%); transition: background 900ms ease; animation: vipxBreathe 7s ease-in-out infinite alternate; }
+.vipx-ground__dots { position: absolute; inset: 0; background-image: radial-gradient(rgba(255, 255, 255, 0.09) 1.3px, transparent 1.6px); background-size: 44px 44px; background-position: 22px 22px; animation: vipIn 900ms ease both; }
+.vipx-ground__vignette { position: absolute; inset: 0; background: radial-gradient(120% 100% at 50% 50%, transparent 55%, rgba(0, 0, 0, 0.55) 100%); }
+.vipx-ghost { position: absolute; top: 0; display: block; word-spacing: 0.3em; font-family: var(--font-display); font-weight: 700; font-size: clamp(110px, 13vw, 190px); line-height: 1.02; color: transparent; -webkit-text-stroke: 1.5px rgba(246, 220, 142, calc(0.05 + 0.07 * var(--lit))); white-space: nowrap; writing-mode: vertical-rl; transform: rotate(180deg); }
+.vipx-ghost span { display: inline; }
+.vipx-ghost.is-value { left: 2%; animation: vipxUp 26s linear infinite; }
+.vipx-ghost.is-desk { right: 2%; transform: none; animation: vipxDown 26s linear infinite; }
+@keyframes vipxUp { from { translate: 0 0; } to { translate: 0 -50%; } }
+@keyframes vipxDown { from { translate: 0 -50%; } to { translate: 0 0; } }
+@keyframes vipxBreathe { from { opacity: 0.85; } to { opacity: 1; } }
+.vipx-line { position: absolute; display: block; height: 2px; border-radius: 2px; background: linear-gradient(90deg, transparent, var(--g-1) 30%, var(--g-2) 70%, transparent); opacity: calc(0.35 + 0.55 * var(--lit)); box-shadow: 0 0 10px rgba(246, 220, 142, calc(0.35 * var(--lit))); animation: vipxRun 6.5s ease-in-out infinite; }
+.vipx-line.is-v { width: 2px; height: auto; background: linear-gradient(180deg, transparent, var(--g-1) 30%, var(--g-2) 70%, transparent); animation-name: vipxRunV; }
+@keyframes vipxRun { 0% { transform: translateX(-60px); opacity: 0; } 20% { opacity: calc(0.35 + 0.55 * var(--lit)); } 80% { opacity: calc(0.35 + 0.55 * var(--lit)); } 100% { transform: translateX(140px); opacity: 0; } }
+@keyframes vipxRunV { 0% { transform: translateY(-60px); opacity: 0; } 20% { opacity: calc(0.35 + 0.55 * var(--lit)); } 80% { opacity: calc(0.35 + 0.55 * var(--lit)); } 100% { transform: translateY(140px); opacity: 0; } }
+
+/* The gold mark: blocks drop in, a glare passes. */
+.vipx-mark { display: block; overflow: visible; filter: drop-shadow(0 4px 18px rgba(246, 220, 142, 0.35)); }
+.vipx-mark__b { animation: vipxBlock 520ms cubic-bezier(.2, 1.4, .3, 1) both; transform-box: fill-box; transform-origin: center; }
+@keyframes vipxBlock { from { opacity: 0; transform: translateY(-9px) scale(0.6); } to { opacity: 1; transform: none; } }
+.vipx-mark__glare { animation: vipxGlare 3.4s 900ms ease-in-out infinite; }
+@keyframes vipxGlare { 0% { transform: translateX(0); } 45%, 100% { transform: translateX(52px); } }
+
+/* The unlock: words left, pass right. */
+.vipx-win__in { position: relative; display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr); align-items: center; gap: clamp(28px, 5vw, 72px); width: min(1120px, 100%); padding: 40px clamp(20px, 5vw, 64px); }
+.vipx-win__say { display: flex; flex-direction: column; gap: 22px; min-width: 0; }
+.vipx-lockup { display: flex; align-items: center; gap: 16px; animation: vipUp 500ms ease both; }
+.vipx-lockup__rule { width: 1px; height: 34px; background: rgba(255, 255, 255, 0.22); }
+.vipx-lockup__name { font-family: var(--font-display); font-weight: 600; font-size: 30px; letter-spacing: -0.02em; color: #fff; }
+.vipx-win__h { margin: 0; font-family: var(--font-display); font-weight: 600; font-size: clamp(34px, 4.4vw, 60px); line-height: 1.04; letter-spacing: -0.035em; color: #fff; animation: vipUp 560ms 120ms ease both; }
+.vipx-win__p { margin: 0; max-width: 520px; font-size: 16px; line-height: 1.5; color: rgba(255, 255, 255, 0.62); animation: vipUp 560ms 220ms ease both; }
+.vipx-win__act { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; animation: vipUp 560ms 320ms ease both; }
+.vipx-cta { position: relative; display: inline-flex; align-items: center; gap: 8px; height: 46px; padding: 0 22px; overflow: hidden; border: 0; border-radius: 9999px; background: linear-gradient(170deg, var(--g-hi) 0%, var(--g-1) 40%, var(--g-2) 100%); color: #2a1f0b; font: inherit; font-size: 15px; font-weight: 600; cursor: pointer; box-shadow: 0 8px 28px rgba(212, 167, 72, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.6); transition: transform 150ms ease, box-shadow 150ms ease; }
+.vipx-cta:hover { transform: translateY(-1px); box-shadow: 0 10px 34px rgba(212, 167, 72, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.6); }
+.vipx-cta:active { transform: scale(0.98); }
+.vipx-cta::after { content: ''; position: absolute; inset: 0; width: 40%; background: linear-gradient(100deg, transparent, rgba(255, 248, 224, 0.7), transparent); transform: translateX(-140%); animation: vipxCta 3.2s 1.2s ease-in-out infinite; }
+@keyframes vipxCta { 0% { transform: translateX(-140%); } 50%, 100% { transform: translateX(360%); } }
+.vipx-cta:focus-visible, .vipx-later:focus-visible { outline: 2px solid var(--g-1); outline-offset: 3px; }
+.vipx-later { height: 46px; padding: 0 18px; border: 1px solid rgba(255, 255, 255, 0.16); border-radius: 9999px; background: rgba(255, 255, 255, 0.04); color: rgba(255, 255, 255, 0.8); font: inherit; font-size: 14px; font-weight: 500; cursor: pointer; }
+.vipx-later:hover { background: rgba(255, 255, 255, 0.08); }
+
+/* The pass: dark metal with a moving sheen, tilted a touch, rising in. */
+.vipx-pass { position: relative; display: flex; flex-direction: column; padding: 26px 28px 14px; overflow: hidden; border-radius: 26px; border: 1px solid rgba(246, 220, 142, 0.38); background: linear-gradient(135deg, #5a4214 0%, #2a1f0b 34%, #3d2d10 52%, #7a5a1e 74%, #2b200c 100%); box-shadow: 0 40px 90px rgba(0, 0, 0, 0.6), 0 0 80px rgba(212, 167, 72, 0.18), inset 0 1px 0 rgba(255, 241, 194, 0.35); transform: perspective(1400px) rotateY(-9deg) rotateZ(-2deg); animation: vipxPass 900ms cubic-bezier(.2, .9, .2, 1) both; }
+@keyframes vipxPass { from { opacity: 0; transform: perspective(1400px) rotateY(-24deg) rotateZ(-4deg) translateY(30px) scale(0.94); } to { opacity: 1; transform: perspective(1400px) rotateY(-9deg) rotateZ(-2deg); } }
+.vipx-pass__sheen { position: absolute; inset: -20%; background: linear-gradient(115deg, rgba(255, 241, 194, 0) 38%, rgba(255, 241, 194, 0.2) 48%, rgba(255, 241, 194, 0) 58%); animation: vipxSheen 5s 1.2s ease-in-out infinite; pointer-events: none; }
+@keyframes vipxSheen { 0% { transform: translateX(-60%); } 55%, 100% { transform: translateX(60%); } }
+.vipx-pass__top { position: relative; display: flex; align-items: center; justify-content: space-between; }
+.vipx-pass__pill { padding: 6px 14px; border-radius: 9999px; background: rgba(246, 220, 142, 0.16); color: var(--g-text); font-family: var(--font-num); font-size: 14px; font-weight: 500; }
+.vipx-pass__vip { position: relative; margin-top: 18px; font-family: var(--font-display); font-weight: 700; font-size: clamp(72px, 8vw, 104px); line-height: 0.9; letter-spacing: -0.05em; background: linear-gradient(170deg, var(--g-hi) 10%, var(--g-1) 45%, var(--g-2) 75%, #f3d58a 100%); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.vipx-pass__line { position: relative; margin: 8px 0 14px; font-size: 15px; color: var(--g-muted); }
+.vipx-pass__perks { position: relative; margin: 0; padding: 0; list-style: none; }
+.vipx-perk { display: flex; align-items: center; gap: 16px; padding: 14px 0; border-top: 1px solid var(--g-line); animation: vipUp 480ms ease both; }
+.vipx-perk__ic { display: grid; place-items: center; flex: none; width: 46px; height: 46px; border-radius: 13px; background: linear-gradient(145deg, #fff1c2 0%, #f6dc8e 40%, #d4a748 100%); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.6); }
+.vipx-perk__t { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.vipx-perk__t b { font-family: var(--font-display); font-size: 19px; font-weight: 600; letter-spacing: -0.01em; color: #fff8e6; }
+.vipx-perk__t small { font-size: 14px; color: var(--g-muted); }
+.vipx-perk__chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.vipx-perk__chips em { padding: 3px 10px; border-radius: 9999px; background: rgba(246, 220, 142, 0.18); color: var(--g-text); font-size: 12.5px; font-style: normal; font-weight: 500; }
+@media (max-width: 860px) {
+  .vipx-win__in { grid-template-columns: minmax(0, 1fr); padding-top: 28px; }
+  .vipx-pass { transform: none; animation-name: vipUp; }
+  .vipx-ghost { font-size: 96px; }
+}
+
+/* The move, gold: the pill, packets, the VIP node, the steps; at the end everything turns to gold with a burst. */
+.vipx .bots-vipmove__in { z-index: 1; }
+.vipx-pill { display: inline-flex; align-items: center; gap: 7px; padding: 5px 12px; border-radius: 9999px; background: rgba(255, 255, 255, 0.07); color: rgba(255, 255, 255, 0.85); font-size: 12.5px; font-weight: 500; }
+.vipx-pill i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; animation: vipxBlink 1.2s ease-in-out infinite; }
+.vipx-pill.is-gold { background: rgba(246, 220, 142, 0.16); color: var(--g-1); }
+.vipx-pill.is-gold i, .vipx-pill.is-bad i { animation: none; }
+.vipx-pill.is-bad { background: color-mix(in srgb, var(--neg) 16%, transparent); color: var(--neg); }
+@keyframes vipxBlink { 50% { opacity: 0.3; } }
+.vipx .bots-vipmove__head h2 { font-family: var(--font-display); font-size: clamp(24px, 3vw, 34px); letter-spacing: -0.025em; }
+.vipx .bots-vipmove__pkt rect { fill: var(--g-1); filter: drop-shadow(0 0 7px rgba(246, 220, 142, 0.85)); }
+.vipx .bots-vipmove__node.is-to .bots-vipmove__core { stroke: rgba(246, 220, 142, 0.55); fill: rgba(246, 220, 142, 0.06); }
+.vipx .bots-vipmove__node.is-to.is-lit .bots-vipmove__core { stroke: var(--g-hi); filter: drop-shadow(0 0 22px rgba(246, 220, 142, 0.6)); }
+.vipx .bots-vipmove__node.is-to.is-lit text { fill: #2a1f0b; }
+.vipx .bots-vipmove__node.is-to .bots-vipmove__halo { stroke: rgba(246, 220, 142, 0.3); }
+.vipx .bots-vipmove__ring { stroke: var(--g-1); }
+.vipx .bots-vipmove__node.is-to.is-lit .bots-vipmove__ring.is-2 { animation-delay: 260ms; }
+.vipx .bots-vipmove__steps li { background: rgba(255, 255, 255, 0.03); border-color: rgba(255, 255, 255, 0.08); }
+.vipx .bots-vipmove__steps li.is-run { border-color: rgba(246, 220, 142, 0.35); background: rgba(246, 220, 142, 0.05); }
+.vipx .bots-vipmove__steps li.is-run .bots-vipmove__dot { background: conic-gradient(var(--g-1) 0 25%, rgba(255, 255, 255, 0.08) 25% 100%); }
+.vipx .bots-vipmove__steps li.is-done .bots-vipmove__dot { background: rgba(246, 220, 142, 0.18); color: var(--g-1); }
+.vipx.is-done .bots-vipmove__flow { stroke: var(--g-1); opacity: 0.9; filter: drop-shadow(0 0 6px rgba(246, 220, 142, 0.6)); }
+.vipx.is-done .bots-vipmove__clock b { background: linear-gradient(170deg, var(--g-hi), var(--g-1) 50%, var(--g-2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.vipx.is-done .bots-vipmove__steps li { border-color: var(--g-line); background: rgba(246, 220, 142, 0.05); animation: vipxGold 700ms ease both; }
+@keyframes vipxGold { from { background: rgba(255, 255, 255, 0.03); } to { background: rgba(246, 220, 142, 0.05); } }
+.vipx-burst { position: absolute; left: 50%; top: 42%; width: 0; height: 0; pointer-events: none; z-index: 2; }
+.vipx-burst i { position: absolute; width: 3px; height: 26px; border-radius: 2px; background: linear-gradient(180deg, var(--g-hi), var(--g-2)); opacity: 0; transform: rotate(var(--a)) translateY(0); animation: vipxRay 1.3s calc(80ms + var(--d)) cubic-bezier(.1, .8, .3, 1) both; }
+@keyframes vipxRay { 0% { opacity: 1; transform: rotate(var(--a)) translateY(-20px) scaleY(0.4); } 100% { opacity: 0; transform: rotate(var(--a)) translateY(-280px) scaleY(1.2); } }
+@media (prefers-reduced-motion: reduce) {
+  .vipx *, .vipx-ground * { animation: none !important; }
+}
+.vipx .bots-vipmove__node.is-to.is-lit .bots-vipmove__core { fill: url(#vipcore); stroke: var(--g-hi); }
+.vipx .bots-vipmove__node.is-to.is-lit text { fill: #2a1f0b; font-size: 18px; font-weight: 700; }
+.vipx .bots-vipmove__node.is-to.is-lit .bots-vipmove__halo { stroke: rgba(246, 220, 142, 0.55); stroke-width: 1.5; }
+.vipx .vipx-goldtext { padding-bottom: 0.12em; }
+.vipx.is-done .bots-vipmove__sites > span:last-child b { color: var(--g-1); }
+.vipx.is-done::after { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 70%; pointer-events: none; background: radial-gradient(40% 50% at 72% 45%, rgba(246, 220, 142, 0.16), transparent 70%); animation: vipIn 900ms ease both; }
+.vipx-burst { left: 50%; top: 22%; }
