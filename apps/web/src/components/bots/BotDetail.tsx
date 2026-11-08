@@ -36,7 +36,7 @@ import { FleetChart, LatencyCard, costTone, fmtCost } from './BotsOverview';
 import { botName, botState, fmtPnl, statusWords } from './botWords';
 import { BotsHead, StatePill, type BotsCtx } from './BotsPage';
 import { SignInButton } from './BotsOverview';
-import { Button, EmptyState, Icon, IconButton, Inset, Panel, RollingNumber, SegmentedBar, Shell, ShellHeader, Skeleton, StatCard, StatusPill, Tabs, type Tone } from './kit/kit';
+import { Button, EmptyState, Icon, IconButton, Inset, Panel, ProgressBar, RollingNumber, SegmentedBar, Shell, ShellHeader, Skeleton, StatCard, StatusPill, Tabs, type Tone } from './kit/kit';
 
 type Tab = 'overview' | 'settings' | 'orders' | 'trades' | 'activity';
 type How = 'clean' | 'takeover';
@@ -227,6 +227,58 @@ function Orders({ v }: { v: AlgoView }) {
   );
 }
 
+/** Time left in words: '2 d 4 h', '3 h 10 min', '12 min'. */
+function leftWords(ms: number): string {
+  const m = Math.max(0, Math.round(ms / 60_000));
+  if (m >= 1440) return `${Math.floor(m / 1440)} d ${Math.floor((m % 1440) / 60)} h`;
+  if (m >= 60) return `${Math.floor(m / 60)} h ${m % 60} min`;
+  return `${m} min`;
+}
+
+/**
+ * How far a running bot is toward each limit it stops at (owner 2026-11-08): the loss limit (net PnL after fees, open
+ * position at the price now, as the engine checks it), its end time, its volume target. Each one set gets a bar;
+ * the loss bar turns amber past half and red past 80%.
+ */
+export function LimitsProgress({ v }: { v: AlgoView }) {
+  const s = v.algo.spec as AlgoView['algo']['spec'] & { maxLossUsd?: number | null; volumeTargetUsd?: number | null; endAt?: number | null };
+  const b = v.bot;
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (typeof s.endAt !== 'number') return;
+    const t = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(t);
+  }, [s.endAt]);
+  const rows: Array<{ id: string; title: string; ratio: number; tone: Tone; text: string }> = [];
+  if (typeof s.maxLossUsd === 'number' && s.maxLossUsd > 0) {
+    const net = b?.netPnl ?? 0;
+    const lost = Math.max(0, -net);
+    const r = lost / s.maxLossUsd;
+    rows.push({ id: 'loss', title: 'Loss limit', ratio: r, tone: r >= 0.8 ? 'negative' : r >= 0.5 ? 'warning' : 'brand', text: net >= 0 ? `In profit ${fmtUsd(net, 2)}: none of its ${fmtUsd(s.maxLossUsd, 0)} used` : `${fmtUsd(lost, 2)} of ${fmtUsd(s.maxLossUsd, 0)} used · stops and closes at ${fmtUsd(-s.maxLossUsd, 0)}` });
+  }
+  if (typeof s.endAt === 'number') {
+    const start = v.algo.startedAt ?? v.algo.createdAt;
+    const r = s.endAt > start ? (now - start) / (s.endAt - start) : 1;
+    rows.push({ id: 'end', title: 'Run time', ratio: r, tone: 'brand', text: now >= s.endAt ? `Ended ${fmtDateTime(s.endAt)}` : `${leftWords(s.endAt - now)} left · ends ${fmtDateTime(s.endAt)}` });
+  }
+  if (typeof s.volumeTargetUsd === 'number' && s.volumeTargetUsd > 0) {
+    const vol = b?.volume ?? 0;
+    rows.push({ id: 'vol', title: 'Volume target', ratio: vol / s.volumeTargetUsd, tone: 'positive', text: `${fmtUsd(vol, 0)} of ${fmtUsd(s.volumeTargetUsd, 0)} traded` });
+  }
+  if (!rows.length) return <p className="bots-fine">No limits set: it runs until you stop it.{v.algo.spec.paper ? '' : ' Set a loss limit in Settings.'}</p>;
+  return (
+    <div className="bots-limits">
+      {rows.map((x) => (
+        <div key={x.id} className="bots-limits__row">
+          <div className="bots-limits__head"><b>{x.title}</b><span className="num">{Math.min(100, Math.round(x.ratio * 100))}%</span></div>
+          <ProgressBar value={Math.min(1, Math.max(0, x.ratio))} max={1} size="sm" tone={x.tone} label={x.title} valueText={x.text} />
+          <small className="bots-fine">{x.text}</small>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function BotDetail({ ctx, view, id }: { ctx: BotsCtx; view: BotsView; id: string }) {
   const v = ctx.bots.find((x) => x.algo.id === id) ?? null;
   const [tab, setTab] = useState<Tab>('overview');
@@ -306,6 +358,12 @@ export function BotDetail({ ctx, view, id }: { ctx: BotsCtx; view: BotsView; id:
           </div>
           <aside className="bots-dgrid__side">
             <LatencyCard ctx={ctx} bot={v.algo.id} practice={v.algo.spec.paper} compact marks={v.algo.startedAt ? [{ t: v.algo.startedAt, label: 'Started' }] : []} />
+            {!ended && (
+              <Shell className="bots-sidecard is-plain">
+                <ShellHeader icon="shield" title="Limits" subtitle="How close it is to each point where it stops" />
+                <Panel className="bots-sidepanel"><LimitsProgress v={v} /></Panel>
+              </Shell>
+            )}
             {!ended && (
               <Shell className="bots-sidecard is-plain">
                 <ShellHeader icon="wallet" title="Margin" subtitle="What this bot sets aside of your account" />

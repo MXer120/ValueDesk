@@ -1532,3 +1532,9 @@ tr.bots-row.is-blocked:hover, .bots-table tbody tr.bots-row.is-blocked:hover { b
 /* A tile with its Stop menu open sits above the tiles after it (the faded controls would make their own layer). */
 .bots-tiles > li:has(.bots-stopmenu__btn.is-open) { position: relative; z-index: 45; }
 .bots-tile__ctl:has(.bots-stopmenu__btn.is-open) { opacity: 1; }
+
+/* Limits on the bot page: one bar per limit it stops at (owner 2026-11-08). */
+.bots-limits { display: flex; flex-direction: column; gap: 14px; }
+.bots-limits__row { display: flex; flex-direction: column; gap: 6px; }
+.bots-limits__head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; font-size: 13px; }
+.bots-limits__head span { color: rgb(var(--ink) / 0.6); font-size: 12px; }
