@@ -122,3 +122,24 @@ test('a maker that fills rarely, a person leaving a limit order, is not one like
   const a = await analyzeMarket(one, { now: T0 + N * 1000 + 200_000, makerBps: MAKER_BPS, builderBps: BOT_BUILDER_BPS, id1002: P1002, id23342: P23342 }, () => undefined);
   assert.equal(a!.w24.smallMakers.count, 20);
 });
+
+test('a recorder outage (a span the coverage ledger marks short) is left out of the volume and of the hours it is divided by', async () => {
+  const { cols } = market();
+  const now = T0 + N * 1000 + 200_000;
+  const hole: [number, number] = [T0 + 300_000, T0 + 600_000];
+  // The outage: 4 of 5 prints in the span never reached the recorder.
+  const keep: number[] = [];
+  for (let i = 0; i < cols.n; i++) { const t = cols.t[i]!; if (!(t >= hole[0] && t < hole[1]) || i % 5 === 0) keep.push(i); }
+  const lossy: PrintCols = { n: keep.length, t: new Float64Array(keep.map((i) => cols.t[i]!)), px: new Float64Array(keep.map((i) => cols.px[i]!)), sz: new Float64Array(keep.map((i) => cols.sz[i]!)), buyer: new Uint32Array(keep.map((i) => cols.buyer[i]!)), seller: new Uint32Array(keep.map((i) => cols.seller[i]!)), taker: new Uint8Array(keep.map((i) => cols.taker[i]!)) };
+  const opts = { now, makerBps: MAKER_BPS, builderBps: BOT_BUILDER_BPS, id1002: P1002, id23342: P23342 };
+  const naive = await analyzeMarket(lossy, opts, () => undefined);
+  const fixed = await analyzeMarket(lossy, { ...opts, holes: [hole] }, () => undefined);
+  // What it should read: the volume outside the outage over the hours outside it.
+  let outside = 0;
+  for (let i = 0; i < cols.n; i++) { const t = cols.t[i]!; if (!(t >= hole[0] && t < hole[1])) outside += cols.px[i]! * cols.sz[i]!; }
+  const hours = (now - T0 - (hole[1] - hole[0])) / 3_600_000;
+  close(fixed!.w24.volumeUsdH, outside / hours, 0.5);
+  assert.ok(naive!.w24.volumeUsdH < fixed!.w24.volumeUsdH, `the outage lowered it: ${naive!.w24.volumeUsdH} vs ${fixed!.w24.volumeUsdH}`);
+  // The small makers' fills of the outage are not counted either.
+  assert.ok(fixed!.w24.smallMakers.fills < naive!.w24.smallMakers.fills);
+});

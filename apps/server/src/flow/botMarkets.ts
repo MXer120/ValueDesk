@@ -39,7 +39,7 @@
 import { setImmediate as nextTurn } from 'node:timers/promises';
 import { CHUNK_MS, DAY_MS, HOUR_MS, TAKER_BUYER, TAKER_SELLER, decodeChunk, type PrintCols } from './codec.js';
 import { flowReader, type FlowStore } from './store.js';
-import { kindOf } from './read.js';
+import { flowHoles, kindOf } from './read.js';
 import { coinOf } from '../valuedesk/cohorts/model.js';
 import { symbols as sodexSymbols, type Symbol as SodexSymbol } from '../sodex/symbols.js';
 import { findSymbol } from '../sodex/symbolRef.js';
@@ -170,6 +170,36 @@ export interface AnalyzeOpts {
   id23342: number | null;
   /** Calibration only (BOTS_MARKETS_WATCH): flow_party ids whose own cost is reported next to the estimate. */
   watch?: number[];
+  /**
+   * Spans the flow does not hold whole (read.ts flowHoles: the coverage ledger's short slots), sorted and disjoint. Their
+   * prints are left out of every figure and their time out of every per-hour divisor, so a recorder outage (SoDEX lost
+   * 21-87% of its prints a day from 2026-10-31 to 11-06) neither lowers the volume nor skews who takes. Absent: all held.
+   */
+  holes?: ReadonlyArray<readonly [number, number]>;
+}
+
+/** Whether t falls in one of the sorted, disjoint spans (binary search). */
+export function inSpans(spans: ReadonlyArray<readonly [number, number]>, t: number): boolean {
+  let lo = 0, hi = spans.length - 1;
+  while (lo <= hi) {
+    const m = (lo + hi) >> 1;
+    const s = spans[m]!;
+    if (t < s[0]) hi = m - 1;
+    else if (t >= s[1]) lo = m + 1;
+    else return true;
+  }
+  return false;
+}
+
+/** How much of [a, b) the sorted, disjoint spans cover (ms). */
+export function overlapMs(spans: ReadonlyArray<readonly [number, number]>, a: number, b: number): number {
+  let x = 0;
+  for (const [s, e] of spans) {
+    if (e <= a) continue;
+    if (s >= b) break;
+    x += Math.min(e, b) - Math.max(s, a);
+  }
+  return x;
 }
 
 /** Eligible maker fills of one market, column per field, time order. */
@@ -249,6 +279,8 @@ export async function analyzeMarket(p: PrintCols, o: AnalyzeOpts, yieldNow: () =
   const from7 = o.now - W7;
   const from24 = o.now - W24;
   const fee = o.makerBps + o.builderBps;
+  const holes = o.holes ?? [];
+  const held = (t: number): boolean => !holes.length || !inSpans(holes, t);
   // First print inside the 7 d window.
   let i0 = 0;
   while (i0 < p.n && p.t[i0]! < from7 - GATE_S * 1000) i0++;
@@ -278,7 +310,7 @@ export async function analyzeMarket(p: PrintCols, o: AnalyzeOpts, yieldNow: () =
     const m = Math.abs(lastBuyT - lastSellT) < PAIR_MS ? (lastBuy + lastSell) / 2 : px;
     const s = Math.floor(t / 1000) - s0;
     if (s >= 0 && s < ns) mid[s] = m;
-    if (t >= from7 && t < o.now) {
+    if (t >= from7 && t < o.now && held(t)) {
       const ntl = px * p.sz[i]!;
       vol7 += ntl;
       if (t >= from24) vol24 += ntl;
@@ -309,6 +341,7 @@ export async function analyzeMarket(p: PrintCols, o: AnalyzeOpts, yieldNow: () =
     if ((i & 4095) === 0) await yieldNow();
     const t = p.t[i]!;
     if (t > cut) break;
+    if (!held(t)) continue;
     const tk = p.taker[i]!;
     if (tk !== TAKER_BUYER && tk !== TAKER_SELLER) continue;
     const buyer = p.buyer[i]!, seller = p.seller[i]!;
@@ -353,7 +386,8 @@ export async function analyzeMarket(p: PrintCols, o: AnalyzeOpts, yieldNow: () =
       } else sprAt[j] = 0; // no reading in the minute before: the limit has nothing to pause on, as the bot (it sees the book).
     }
   }
-  const spanH = (from: number): number => Math.max(1 / 60, (o.now - Math.max(from, firstT)) / HOUR_MS);
+  // The window's hours since the first print, less the time the flow does not hold whole.
+  const spanH = (from: number): number => { const a = Math.max(from, firstT); return Math.max(1 / 60, (o.now - a - overlapMs(holes, a, o.now)) / HOUR_MS); };
   const spreadOf = (from: number): number => {
     let lo = 0;
     while (lo < gapT.length && gapT[lo]! < from) lo++;
@@ -486,7 +520,7 @@ export async function analyzeMarket(p: PrintCols, o: AnalyzeOpts, yieldNow: () =
   for (let h = Math.floor(Math.max(from7, firstT) / HOUR_MS); h * HOUR_MS < o.now; h++) {
     const a = Math.max(h * HOUR_MS, from7, firstT);
     const b = Math.min((h + 1) * HOUR_MS, o.now);
-    if (b > a) hodCount[h % 24] = hodCount[h % 24]! + (b - a) / HOUR_MS;
+    if (b > a) hodCount[h % 24] = hodCount[h % 24]! + (b - a - overlapMs(holes, a, b)) / HOUR_MS;
   }
   const costOf = (x: { v: number; mk: number; n: number }, min: number): number | null => (x.n >= min && x.v > 0 ? r2(fee - x.mk / x.v) : null);
   return {
@@ -577,7 +611,8 @@ async function compute(s: FlowStore, now: number): Promise<Computed> {
     parts.length = 0;
     const sym = findSymbol(list, m.symbol);
     const makerBps = feeBpsOf(sym) ?? common;
-    const a = await analyzeMarket(cols, { now, makerBps, builderBps: BOT_BUILDER_BPS, id1002, id23342, watch }, y);
+    const holes = flowHoles(m.symbol, now - W7, now, now) ?? undefined;
+    const a = await analyzeMarket(cols, { now, makerBps, builderBps: BOT_BUILDER_BPS, id1002, id23342, watch, holes }, y);
     if (!a) continue;
     if (watch.length) calibration.push({ symbol: m.symbol, w7: a.w7.watched ?? [], w24: a.w24.watched ?? [], est7: a.w7.estCostBps, est24: a.w24.estCostBps });
     const base = sym?.baseCoin?.replace(/^v(?=[A-Z])/, '') || coinOf(m.symbol);
