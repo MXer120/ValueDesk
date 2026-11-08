@@ -120,7 +120,7 @@ export function BotSettings({ d, set, range, mark, liveAllowed, noLead, hidePrac
           <Row label="Stop if it loses" hint="Net, after every fee.">
             <NumberField label="Loss" value={d.maxLossUsd} optional onChange={(v) => set({ maxLossUsd: v })} unit="USD" />
           </Row>
-          <Row label="Stop after trading">
+          <Row label="Stop after trading" wide>
             <Segmented
               label="Stop after trading"
               value={customTgt ? 'custom' : tgtKey(d.volumeTargetUsd)}

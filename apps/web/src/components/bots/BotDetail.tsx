@@ -11,6 +11,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { FINAL_STATUSES, type AlgoEvent, type AlgoView } from '@copy-engine';
 import { DASH, fmtDateTime, fmtTime, fmtUsd } from '../../format';
+import { fmtPriceAuto } from '../palette/model';
 import { CoinIcon } from '../CoinIcon';
 import { SeriesChart } from '../datachart/SeriesChart';
 import { useBotLog } from '../../bots/useBots';
@@ -138,7 +139,7 @@ function RealCost({ v, estBp }: { v: AlgoView; estBp: number | null }) {
             <span><i style={{ background: TAKER_COLORS.fast }} />Informed <b>{Math.round((t.t23342 / sum) * 100)}%</b></span>
             <span><i style={{ background: TAKER_COLORS.other }} />Others <b>{Math.round((t.other / sum) * 100)}%</b></span>
           </div>
-          <small className="bots-fine">Of {fmtUsd(sum, 0)} its quotes filled.</small>
+          <small className="bots-fine">Share of the {fmtUsd(sum, 0)} its quotes filled.</small>
         </div>
       ) : <p className="bots-fine">Who takes its quotes shows after its first fills.</p>}
     </div>
@@ -155,7 +156,7 @@ function Orders({ v }: { v: AlgoView }) {
         {[...b.orders].sort((x, y) => y.price - x.price).slice(0, 20).map((o) => (
           <tr key={`${o.tag}-${o.price}`}>
             <td><StatusPill size="sm" tone={o.side === 'buy' ? 'positive' : 'negative'}>{o.side === 'buy' ? 'Buy' : 'Sell'}</StatusPill></td>
-            <td className="right num">{fmtUsd(o.price)}</td>
+            <td className="right num">${fmtPriceAuto(o.price)}</td>
             <td className="right num">{o.quantity}</td>
             <td className="right num">{fmtUsd(o.price * o.quantity, 2)}</td>
           </tr>
@@ -251,7 +252,7 @@ export function BotDetail({ ctx, view, id }: { ctx: BotsCtx; view: BotsView; id:
             )}
             {v.algo.spec.kind === 'mm' && (
               <Shell className="bots-sidecard is-plain">
-                <ShellHeader icon="compass" title="Your cost here" subtitle="What this bot really paid, and who took its quotes" aside={<Button variant="quiet" onClick={() => goBots({ page: 'savings' })}>Lower it</Button>} />
+                <ShellHeader icon="compass" title="Your cost here" subtitle="Paid so far, and who took its quotes" aside={<Button variant="quiet" onClick={() => goBots({ page: 'savings' })}>Lower it</Button>} />
                 <Panel className="bots-sidepanel">
                   <RealCost v={v} estBp={markets.data ? estimate(effectiveDraft(draftOfSpec(v.algo.spec), est), est, ownRuns(ctx.bots, markets.data.markets)).bp : null} />
                 </Panel>

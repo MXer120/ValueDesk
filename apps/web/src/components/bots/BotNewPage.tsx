@@ -88,7 +88,13 @@ export function Estimate({ m, gate, feeBps, compact, d, runs }: { m: BotMarket |
       {!compact && (
         <Inset className="bots-ledger">
           <div><span>Fees</span><b className="neg">{fmtBpUsd(feeBps)}</b></div>
-          <div><span>{losses >= 0 ? 'Price moves' : 'Spread kept'}</span><b className={losses > 0 ? 'neg' : 'pos'}>{losses > 0 ? '−' : '+'}{fmtUsd(Math.abs(bpToPerMillion(losses)), 0)}</b></div>
+          {(() => {
+            // The same lines as the receipt beside it: price moves on their own, then the bot's own lines (bots elsewhere, gates).
+            const moves = e ? (e.lines.find((l) => l.id === 'market')?.bp ?? est) - feeBps : losses;
+            const rest = e ? e.lines.filter((l) => l.id !== 'market' && l.bp !== null && l.counted !== false && Math.abs(l.bp) >= 0.005) : [];
+            const row = (k: string, label: string, bp: number) => <div key={k}><span>{label}</span><b className={bp > 0 ? 'neg' : 'pos'}>{bp > 0 ? '−' : '+'}{fmtUsd(Math.abs(bpToPerMillion(bp)), 0)}</b></div>;
+            return [row('moves', moves >= 0 ? 'Price moves' : 'Spread kept', moves), ...rest.map((l) => row(l.id, l.label, l.bp!))];
+          })()}
           <div className="is-total"><span>All-in</span><b className={bpCls(est)}>{fmtBpUsd(est)}</b></div>
         </Inset>
       )}
@@ -139,7 +145,12 @@ function MarketStep({ picked, toggle, markets, costOf }: { picked: string[]; tog
     const by: Record<MSort, (m: BotMarket) => number> = { best: (m) => costOf(m) ?? 99, activity: (m) => -m.volumeUsdH, uninformed: (m) => -m.takers.t1002, spread: (m) => m.spreadBps };
     return [...xs].sort((x, y) => by[sort](x) - by[sort](y));
   }, [markets, needle, sort, all, costOf]);
-  const shown = all || needle ? list : list.slice(0, 10);
+  // What is ticked stays on top, so a preselected market (BTC, or one sent from Explore) is never hidden below the fold.
+  const shown = useMemo(() => {
+    const top = needle ? [] : list.filter((m) => picked.includes(m.symbol));
+    const rest = list.filter((m) => !top.includes(m));
+    return [...top, ...(all || needle ? rest : rest.slice(0, Math.max(0, 10 - top.length)))];
+  }, [list, picked, all, needle]);
   const best = useMemo(() => (markets ?? []).filter((m) => m.confidence === 'high').sort((x, y) => (costOf(x) ?? 99) - (costOf(y) ?? 99))[0]?.symbol ?? null, [markets, costOf]);
   const extra = needle ? [...byName.keys()].filter((x) => x.toLowerCase().includes(needle) && !(markets ?? []).some((m) => m.symbol === x)).slice(0, 12) : [];
   if (!markets) return <div className="bots-skels">{[0, 1, 2, 3, 4].map((i) => <Skeleton key={i} className="bots-skel" />)}</div>;
@@ -199,7 +210,7 @@ function MarketStep({ picked, toggle, markets, costOf }: { picked: string[]; tog
           </tbody>
         </table>
       </div>
-      {!all && !needle && list.length > 10 && <button type="button" className="bots-more__t" onClick={() => setAll(true)}>Show {list.length - 10} more<Icon name="arrowRight" size={13} /></button>}
+      {!all && !needle && list.length > shown.length && <button type="button" className="bots-more__t" onClick={() => setAll(true)}>Show {list.length - shown.length} more<Icon name="arrowRight" size={13} /></button>}
     </Panel>
   );
 }
@@ -379,7 +390,7 @@ function Receipt({ d, eff, picked, markets, feeBps, paper, floor, runs, chosen, 
       <section className="bots-rc__tiles">
         <div className="bots-rc__tile is-wide">
           <span>{picked.length === 1 ? 'Market' : `Markets · ${picked.length}`}</span>
-          <b className="bots-rc__mkts">{!chosen ? <span className="dim">Next step</span> : picked.length ? picked.map((s) => <span key={s}><CoinIcon coin={s} size={16} />{s.replace(/-USD$/, '')}</span>) : DASH}</b>
+          <b className="bots-rc__mkts">{!chosen ? <span className="dim">Picked in the next step</span> : picked.length ? picked.map((s) => <span key={s}><CoinIcon coin={s} size={16} />{s.replace(/-USD$/, '')}</span>) : DASH}</b>
         </div>
         <div className="bots-rc__tile"><span>Order size</span><b>{fmtUsd(d.orderUsd, 0)}<small>{grid ? ` × ${d.levels}` : ' a side'}</small></b></div>
         {!grid ? <div className="bots-rc__tile"><span>Max holding</span><b>{fmtUsd(d.maxInventoryUsd, 0)}</b></div> : <div className="bots-rc__tile"><span>Levels</span><b>{d.levels}</b></div>}

@@ -140,8 +140,8 @@ function viewOf(s: Seed, now: number): AlgoView {
       mark: s.price,
       orders: live
         ? s.strategy === 'grid'
-          ? [-3, -2, -1, 1, 2, 3].map((k) => ({ side: k < 0 ? ('buy' as const) : ('sell' as const), price: Math.round(s.price * (1 + k * 0.004) * 100) / 100, quantity: Math.round((20 / s.price) * 1e5) / 1e5, tag: `g${k}` }))
-          : [{ side: 'buy' as const, price: Math.round((s.price - half) * 100) / 100, quantity: Math.round((20 / s.price) * 1e5) / 1e5, tag: 'b' }, { side: 'sell' as const, price: Math.round((s.price + half) * 100) / 100, quantity: Math.round((20 / s.price) * 1e5) / 1e5, tag: 's' }]
+          ? [-3, -2, -1, 1, 2, 3].map((k) => ({ side: k < 0 ? ('buy' as const) : ('sell' as const), price: onTick(s.price * (1 + k * 0.004), s.price, k < 0 ? -1 : 1), quantity: Math.round((20 / s.price) * 1e5) / 1e5, tag: `g${k}` }))
+          : [{ side: 'buy' as const, price: onTick(s.price - half, s.price, -1), quantity: Math.round((20 / s.price) * 1e5) / 1e5, tag: 'b' }, { side: 'sell' as const, price: onTick(s.price + half, s.price, 1), quantity: Math.round((20 / s.price) * 1e5) / 1e5, tag: 's' }]
         : [],
       closing: false,
       // Example split: a bot that earns was taken mostly by uninformed flow.
@@ -174,12 +174,19 @@ export function demoEvents(v: AlgoView, now = Date.now()): AlgoEvent[] {
     const at = now - i * 7 * 60_000 - Math.round(r() * 300_000);
     if (at < start) break;
     const side = r() > 0.5 ? 'buy' : 'sell';
-    const price = Math.round(px * (1 + (r() - 0.5) * 0.002) * 100) / 100;
+    const price = onTick(px * (1 + (r() - 0.5) * 0.002), px, 1);
     const qty = Math.round((20 / px) * 1e5) / 1e5;
     if (i % 5 === 3) out.push({ id: `${v.algo.id}-c${i}`, algoId: v.algo.id, owner: v.algo.owner, at, kind: 'cancel', text: `Pulled the ${side} at ${price}: the price moved.` } as AlgoEvent);
     else out.push({ id: `${v.algo.id}-f${i}`, algoId: v.algo.id, owner: v.algo.owner, at, kind: 'fill', side, price, qty, text: `Filled ${side} ${qty} at ${price} (maker).` } as AlgoEvent);
   }
   return out.sort((a, b) => b.at - a.at);
+}
+
+/** A demo price on a 5-digit tick, buys rounded down and sells up, so a bid never meets the ask on a cheap coin. */
+function onTick(x: number, ref: number, dir: -1 | 1): number {
+  const step = 10 ** (Math.floor(Math.log10(ref)) - 3);
+  const n = dir < 0 ? Math.floor(x / step) : Math.ceil(x / step);
+  return Number((n * step).toPrecision(8));
 }
 
 /** 48 h of latency: steady around 300 ms, one slow stretch, a quiet night with no orders. */

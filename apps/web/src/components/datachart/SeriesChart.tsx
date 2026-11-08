@@ -518,10 +518,16 @@ function drawSeries({ ctx, chart, xAxis, yAxis, bounding }: IndicatorDrawParams<
         ctx.lineTo(pts[pts.length - 1]![0], y0);
         ctx.lineTo(pts[0]![0], y0);
         ctx.closePath();
-        const g = ctx.createLinearGradient(0, top === 0 ? 0 : bounding.height, 0, y0);
-        g.addColorStop(0, withAlpha(col, 0.28));
-        g.addColorStop(1, withAlpha(col, 0.02));
-        ctx.fillStyle = g;
+        // From the far edge to zero: the top for the part above zero, the bottom for the part below (an all-negative
+        // line has zero at the top, so "top === 0" cannot tell the two apart).
+        const far = s.negColor && col === s.negColor ? bounding.height : 0;
+        if (Math.abs(far - y0) < 1) ctx.fillStyle = withAlpha(col, 0.12);
+        else {
+          const g = ctx.createLinearGradient(0, far, 0, y0);
+          g.addColorStop(0, withAlpha(col, 0.28));
+          g.addColorStop(1, withAlpha(col, 0.02));
+          ctx.fillStyle = g;
+        }
         ctx.fill();
       }
       trace();

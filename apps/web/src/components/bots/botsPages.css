@@ -1218,3 +1218,36 @@ html[data-glass] .bots-page { background: transparent; }
 /* The market step's phone rule (price, spread) is not Explore's: its third column is the cost. */
 .bots-xtable th:nth-child(3), .bots-xtable td:nth-child(3) { display: table-cell; }
 @container (max-width: 560px) { .bots-xtable th:nth-child(4), .bots-xtable td:nth-child(4), .bots-xtable th:nth-child(5), .bots-xtable td:nth-child(5) { display: none; } .bots-xtable .bots-mt__name { min-width: 0; } .bots-xtable td, .bots-xtable th { padding-left: 8px; padding-right: 8px; } }
+
+/* The gold bar as metal (owner 2026-11-08, the launch art): deep olive gold to bright gold and back, a lit top edge, and a glare that sweeps across it - light gold, never white. */
+.bots-goldbar { height: 12px; background: rgba(60, 44, 12, 0.55); box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(201, 160, 72, 0.18); }
+.bots-goldbar > i { background: linear-gradient(180deg, rgba(255, 236, 170, 0.55) 0%, rgba(255, 236, 170, 0) 45%, rgba(0, 0, 0, 0.18) 100%), linear-gradient(90deg, #6e5115 0%, #9c7426 22%, #c9a04a 45%, #e8c874 62%, #c39a44 80%, #8a651f 100%); box-shadow: 0 0 10px rgba(201, 160, 72, 0.35); }
+.bots-goldbar > i::after { width: 28%; background: linear-gradient(100deg, rgba(255, 226, 140, 0) 0%, rgba(255, 222, 130, 0.28) 40%, rgba(255, 232, 160, 0.5) 50%, rgba(255, 222, 130, 0.28) 60%, rgba(255, 226, 140, 0) 100%); filter: blur(1px); animation: goldGlare 3.2s ease-in-out infinite; }
+.bots-vip__nums b, .bots-vip__nums em { background: linear-gradient(180deg, #f3d98f 0%, #d4a94c 55%, #a77c2a 100%); -webkit-background-clip: text; background-clip: text; color: transparent; }
+/* Visual sweep 2026-11-08: panels that had no inner padding. */
+.bots-alloc__b, .bots-vip__b, .bots-sidepanel .bots-alloc__one { padding: 14px 16px; }
+.bots-sidepanel .bots-alloc__one { padding: 0; }
+.bots-latcard .tf-shellhead { flex-wrap: wrap; row-gap: 8px; }
+.bots-latcard .tf-shellhead__t { min-width: 220px; }
+.bots-vip .tf-tile { color: #e8c874; background: rgba(201, 160, 72, 0.16); }
+/* Sweep 2026-11-08: one line per step so every bar sits level; the type cards line their titles up. */
+.bots-wsteps__subs { flex-wrap: nowrap; overflow: hidden; white-space: nowrap; mask-image: linear-gradient(90deg, #000 85%, transparent); }
+.bots-wsteps__t small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bots-wsteps button { justify-content: flex-end; height: 100%; }
+.bots-wsteps ol { align-items: end; }
+.bots-type { align-items: start; }
+.bots-type > .bots-radio { margin-top: 14px; }
+.bots-rc__foot { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.bots-wsteps { align-items: flex-end; }
+.bots-wsteps__count { align-self: flex-end; margin-bottom: -2px; line-height: 1; white-space: nowrap; }
+.bots-mt th:last-child, .bots-mt td:last-child { padding-right: 14px; }
+.bots-mt th:first-child, .bots-mt td:first-child { padding-left: 12px; }
+.bots-wsteps__count { min-width: 118px; text-align: right; }
+@media (max-width: 720px) { .bots-wsteps__count { min-width: 0; } }
+.bots-demobar { flex-wrap: wrap; row-gap: 6px; min-width: 0; }
+.bots-demobar .tf-choice__l { white-space: nowrap; }
+@media (max-width: 640px) { .bots-demobar { justify-content: flex-start; margin-bottom: 0; } .bots-demobar__play { flex-wrap: wrap; } }
+@media (max-width: 640px) { .bots-page .tf-stat__hint { white-space: normal; } }
+.bots-demobar label, .bots-demobar .tf-choice { align-items: center; }
+@media (max-width: 640px) { .tf-shellhead:has(> .tf-shellhead__aside > .tf-btn:only-child) { flex-wrap: nowrap; } .tf-shellhead__aside:has(> .tf-btn:only-child) { width: auto; padding-left: 0; } }
+.bots-page .dc-legend { right: 78px; }

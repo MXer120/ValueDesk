@@ -35,7 +35,7 @@ export function allocationOf(bots: readonly AlgoView[], equity: number | null): 
 export function useAllocation(ctx: BotsCtx): Allocation {
   const totals = useAccountTotals(ctx.demo ? null : ctx.address);
   const demoEquity = ctx.demo ? Math.max(500, Math.ceil(ctx.bots.reduce((t, v) => t + (FINAL_STATUSES.has(v.algo.status) ? 0 : botReserveUsd(v.algo.spec)), 0) * 1.4 / 100) * 100) : null;
-  const all = allocationOf(ctx.demo ? ctx.bots.map((v) => ({ ...v, algo: { ...v.algo, spec: { ...v.algo.spec, paper: false } } }) as AlgoView) : ctx.bots, ctx.demo ? demoEquity : totals.perpsUsd);
+  const all = allocationOf(ctx.bots, ctx.demo ? demoEquity : totals.perpsUsd);
   return all;
 }
 
@@ -92,7 +92,7 @@ export function BotAllocation({ v, ctx }: { v: AlgoView; ctx: BotsCtx }) {
         <i style={{ width: `${eq ? Math.min(100, (usd / Math.max(eq, a.used)) * 100) : 0}%`, background: 'var(--pos)' }} />
         <i style={{ width: `${eq ? Math.min(100, ((a.used - (v.algo.spec.paper ? 0 : usd)) / Math.max(eq, a.used)) * 100) : 0}%`, background: 'rgb(var(--ink) / 0.22)' }} />
       </div>
-      <small className="bots-fine">{v.algo.spec.paper ? 'Practice: nothing is set aside; this is what it would need for real.' : 'Green: this bot. Grey: your other bots.'}</small>
+      <small className="bots-fine">{v.algo.spec.paper ? 'Practice: nothing is set aside; this is what it would need for real.' : <span className="bots-takers__key"><span><i style={{ background: 'var(--pos)' }} />This bot</span><span><i style={{ background: 'rgb(var(--ink) / 0.22)' }} />Your other bots</span><span><i style={{ background: 'rgb(var(--ink) / 0.07)' }} />Free</span></span>}</small>
     </div>
   );
 }
