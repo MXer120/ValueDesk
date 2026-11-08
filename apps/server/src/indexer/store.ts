@@ -757,6 +757,8 @@ const WAL_LIMIT_BYTES = 1024 * 1024 * 1024;
  * for a full checkpoint. Past Checkpointer's HUNG_MS, so a hung thread is ended first: an error here would lose a write.
  */
 const WRITER_BUSY_MS = 200_000;
+/** A write transaction part (lock wait, body, commit) longer than this is logged (tx). */
+const SLOW_TX_MS = 5_000;
 const WAL_CHECKPOINT_PAGES = 16_000;
 /** Rows per transaction when a history page is written a slice at a time: 2,000 rows were seconds of the thread. */
 const FILL_SLICE = 50;
@@ -1299,11 +1301,20 @@ export class IndexStore {
         this.depth--;
       }
     }
+    // Timed (2026-11-08): single small writes held the indexer's thread 93 s and 161 s, the whole budget of a turn being
+    // 2 s - a lock, the disk or the work? Any part over SLOW_TX_MS is logged with its split.
+    const t0 = performance.now();
     this.db.exec('BEGIN IMMEDIATE');
+    const t1 = performance.now();
     this.depth = 1;
     try {
       const out = fn();
+      const t2 = performance.now();
       this.db.exec('COMMIT');
+      const t3 = performance.now();
+      if (t1 - t0 > SLOW_TX_MS || t2 - t1 > SLOW_TX_MS || t3 - t2 > SLOW_TX_MS) {
+        console.log(`[indexer] slow write: lock wait ${Math.round(t1 - t0)} ms, body ${Math.round(t2 - t1)} ms, commit ${Math.round(t3 - t2)} ms, checkpoint ${this.checkpointer?.state.running ? 'thread' : 'writer'}`);
+      }
       return out;
     } catch (e) {
       this.db.exec('ROLLBACK');
