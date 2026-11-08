@@ -8,8 +8,10 @@
  * copy and every bot as blocks of the account, then the breakdown, then what is free.
  */
 import { useMemo } from 'react';
-import { FINAL_STATUSES, botReserveUsd, copyReserveUsd, type AlgoView } from '@copy-engine';
-import { DASH, fmtUsd, shortAddr } from '../../format';
+import { FINAL_STATUSES, botMarginUsd, copyReserveUsd, type AlgoView } from '@copy-engine';
+import { DASH, fmtUsd, num, shortAddr } from '../../format';
+import { api } from '../../api';
+import { useAccountResource } from '../../accountFeeds';
 import { useStored } from '../../hooks';
 import { copyRows, readiness, useLiveCopy, type LiveCopy } from '../../copy/live';
 import { useBots } from '../../bots/useBots';
@@ -20,6 +22,7 @@ import { botName } from './botWords';
 import type { BotsCtx } from './BotsPage';
 import { Icon, Panel, Segmented, Shell, ShellHeader, StatusPill } from './kit/kit';
 
+const PERPS_COLOR = '#c9cfd8';
 const COPY_COLOR = '#5b8def';
 const BOT_COLOR = 'var(--pos)';
 const COPY_SHADES = ['#5b8def', '#86a9f5', '#3f6fd1', '#a9c1ff', '#2f58b0'];
@@ -32,6 +35,8 @@ export interface Allocation {
   equity: number | null;
   copies: MarginItem[];
   bots: MarginItem[];
+  /** Margin your own open positions hold now (the account's position margin, less what the bots' positions hold). */
+  perpsUsd: number;
   copyUsd: number;
   botUsd: number;
   /** Copies and bots together. */
@@ -45,20 +50,24 @@ export interface Allocation {
 /** A copy as the panel needs it (copy/live.ts copyRows, or the demo's). */
 export interface MarginCopy { id: string; leader: string; mode: string; status: string; settings: { allocationUsd: number; paper: boolean } }
 
-export function marginOf(bots: readonly AlgoView[], copies: readonly MarginCopy[], equity: number | null): Allocation {
+export function marginOf(bots: readonly AlgoView[], copies: readonly MarginCopy[], equity: number | null, positionsMargin = 0): Allocation {
   const running = bots.filter((v) => v.algo.spec.bot === true && !FINAL_STATUSES.has(v.algo.status));
-  const real = running.filter((v) => !v.algo.spec.paper).map((v) => ({ v, usd: botReserveUsd(v.algo.spec) })).filter((x) => x.usd > 0).sort((a, b) => b.usd - a.usd);
+  const real = running.filter((v) => !v.algo.spec.paper).map((v) => ({ v, usd: botMarginUsd(v.algo.spec) })).filter((x) => x.usd > 0).sort((a, b) => b.usd - a.usd);
   const practice = running.filter((v) => v.algo.spec.paper);
   const cs = copies.map((c) => ({ c, usd: copyReserveUsd(c) })).filter((x) => x.usd > 0).sort((a, b) => b.usd - a.usd);
   const copyItems: MarginItem[] = cs.map(({ c, usd }, i) => ({ id: `copy:${c.id}`, kind: 'copy', label: `Copying ${shortAddr(c.leader)}`, usd, color: COPY_SHADES[i % COPY_SHADES.length]!, mode: c.mode }));
   const botItems: MarginItem[] = real.map(({ v, usd }, i) => ({ id: `bot:${v.algo.id}`, kind: 'bot', label: botName(v), usd, color: BOT_SHADES[i % BOT_SHADES.length]!, coin: v.algo.spec.symbol }));
   const copyUsd = copyItems.reduce((t, x) => t + x.usd, 0);
   const botUsd = botItems.reduce((t, x) => t + x.usd, 0);
-  const used = copyUsd + botUsd;
+  // What the running bots' own positions hold of the account's position margin (their holding at their leverage):
+  // taken off, so Perps is the margin of the user's own positions and a bot's is not counted twice.
+  const botPos = running.filter((v) => !v.algo.spec.paper).reduce((t, v) => t + Math.abs(v.bot?.inventoryUsd ?? 0) / Math.max(1, v.algo.spec.leverage ?? 1), 0);
+  const perpsUsd = Math.max(0, positionsMargin - botPos);
+  const used = perpsUsd + copyUsd + botUsd;
   return {
-    equity, copies: copyItems, bots: botItems, copyUsd, botUsd, used,
+    equity, copies: copyItems, bots: botItems, perpsUsd, copyUsd, botUsd, used,
     free: equity === null ? null : Math.max(0, equity - used),
-    practice: practice.length, practiceUsd: practice.reduce((t, v) => t + botReserveUsd(v.algo.spec), 0),
+    practice: practice.length, practiceUsd: practice.reduce((t, v) => t + botMarginUsd(v.algo.spec), 0),
   };
 }
 
@@ -77,12 +86,25 @@ const DEMO_COPIES: MarginCopy[] = [
 /** The account value bots are measured against: the real one, or (example bots) one that fits them. */
 export function useAllocation(ctx: BotsCtx): Allocation {
   const totals = useAccountTotals(ctx.demo ? null : ctx.address);
+  const pm = usePositionsMargin(ctx.demo ? null : ctx.address);
   const copies = ctx.demo ? DEMO_COPIES : marginCopies(ctx.live);
   return useMemo(() => {
-    if (!ctx.demo) return marginOf(ctx.bots, copies, totals.perpsUsd);
-    const a = marginOf(ctx.bots, copies, null);
-    return marginOf(ctx.bots, copies, Math.max(500, Math.ceil((a.used * 1.3) / 100) * 100));
-  }, [ctx.demo, ctx.bots, copies, totals.perpsUsd]);
+    if (!ctx.demo) return marginOf(ctx.bots, copies, totals.perpsUsd, pm);
+    // Example: $120 of own positions beside the example bots and copies.
+    const a = marginOf(ctx.bots, copies, null, 120);
+    return marginOf(ctx.bots, copies, Math.max(500, Math.ceil((a.used * 1.3) / 100) * 100), 120);
+  }, [ctx.demo, ctx.bots, copies, totals.perpsUsd, pm]);
+}
+
+/**
+ * The margin the account's open positions hold now: SoDEX's perps state, isolated position margin (im) plus cross
+ * position margin (cm). Read from the shared account feed (the order ticket's), every 20 s.
+ */
+function usePositionsMargin(address: string | null): number {
+  const acct = useAccountResource(address ? `state:perps:${address}` : null, () => api.state('perps', address!), 20_000);
+  const st = (acct.data as { state?: Record<string, unknown> } | null)?.state;
+  const n = (x: unknown) => { const v = num(x); return Number.isFinite(v) ? v : 0; };
+  return st ? n(st.im) + n(st.cm) : 0;
 }
 
 /* ------------------------------------------------------------------ the panel ----- */
@@ -141,15 +163,17 @@ export function MarginPanel({ a, note, className }: { a: Allocation; note?: stri
       <Panel className="bots-alloc__b">
         <div className="bots-alloc__nums mg-nums">
           <span><small>Futures account</small><b>{eq === null ? DASH : fmtUsd(eq, 0)}</b></span>
+          <span><small><i style={{ background: PERPS_COLOR }} />Perps</small><b>{fmtUsd(a.perpsUsd, 0)}</b></span>
           <span><small><i style={{ background: COPY_COLOR }} />Copy trading</small><b>{fmtUsd(a.copyUsd, 0)}</b></span>
           <span><small><i style={{ background: BOT_COLOR }} />Bots</small><b>{fmtUsd(a.botUsd, 0)}</b></span>
           <span><small><i className="is-free" />Free</small><b className={over ? 'neg' : ''}>{a.free === null ? DASH : fmtUsd(a.free, 0)}</b></span>
         </div>
         {view === 'simple' ? (
-          <MarginLine a={a} segs={[{ id: 'copy', usd: a.copyUsd, color: COPY_COLOR, label: 'Copy trading' }, { id: 'bots', usd: a.botUsd, color: BOT_COLOR, label: 'Bots' }]} />
+          <MarginLine a={a} segs={[{ id: 'perps', usd: a.perpsUsd, color: PERPS_COLOR, label: 'Your own positions' }, { id: 'copy', usd: a.copyUsd, color: COPY_COLOR, label: 'Copy trading' }, { id: 'bots', usd: a.botUsd, color: BOT_COLOR, label: 'Bots' }]} />
         ) : (
           <>
-            <MarginLine a={a} segs={[...a.copies, ...a.bots]} />
+            <MarginLine a={a} segs={[{ id: 'perps', usd: a.perpsUsd, color: PERPS_COLOR, label: 'Your own positions' }, ...a.copies, ...a.bots]} />
+            <div className="mg-free mg-perps"><i style={{ background: PERPS_COLOR }} aria-hidden="true" /><span>Your own positions (margin they hold now)</span><b>{fmtUsd(a.perpsUsd, 0)}</b><small>{eq ? `${Math.round((a.perpsUsd / eq) * 100)}%` : ''}</small></div>
             <div className="mg-groups">
               <section>
                 <h4><i style={{ background: COPY_COLOR }} />Copy trading <b>{fmtUsd(a.copyUsd, 0)}</b></h4>
@@ -163,7 +187,7 @@ export function MarginPanel({ a, note, className }: { a: Allocation; note?: stri
             <div className="mg-free"><i className="is-free" aria-hidden="true" /><span>Free for new bots and copies</span><b className={over ? 'neg' : ''}>{a.free === null ? DASH : fmtUsd(a.free, 0)}</b><small>{eq ? `${Math.round(((a.free ?? 0) / eq) * 100)}%` : ''}</small></div>
           </>
         )}
-        {over && <p className="bots-err mg-why">Set aside counts what your bots may hold (their holding cap) and their quotes at full value, and each copy's allocation: {fmtUsd(a.used, 0)} against a {fmtUsd(eq!, 0)} account. At full holding they would trade on leverage. Lower a bot's size or holding cap, or add funds.</p>}
+        {over && <p className="bots-err mg-why">{fmtUsd(a.used, 0)} of margin is taken against a {fmtUsd(eq!, 0)} account: your own positions, each copy's allocation, and each bot's holding cap and quotes at its leverage. Raise a bot's leverage, lower its size or holding cap, or add funds.</p>}
         {note ? <p className="bots-fine">{note}</p> : a.practice > 0 ? <p className="bots-fine">{a.practice} practice bot{a.practice === 1 ? '' : 's'} set nothing aside (they would need {fmtUsd(a.practiceUsd, 0)} for real).</p> : null}
       </Panel>
     </Shell>
@@ -178,7 +202,7 @@ export function AllocationPanel({ ctx }: { ctx: BotsCtx }) {
 /** One bot's share, for its page. */
 export function BotAllocation({ v, ctx }: { v: AlgoView; ctx: BotsCtx }) {
   const a = useAllocation(ctx);
-  const usd = botReserveUsd(v.algo.spec);
+  const usd = botMarginUsd(v.algo.spec);
   const eq = a.equity;
   const scale = Math.max(eq ?? 0, a.used, 1);
   const mine = v.algo.spec.paper ? 0 : usd;
@@ -190,11 +214,12 @@ export function BotAllocation({ v, ctx }: { v: AlgoView; ctx: BotsCtx }) {
         <span><small>Free</small><b>{a.free === null ? DASH : fmtUsd(a.free, 0)}</b></span>
       </div>
       <div className="bots-alloc__bar">
-        <i style={{ width: `${(mine / scale) * 100}%`, background: 'var(--pos)' }} />
-        <i style={{ width: `${(Math.max(0, a.botUsd - mine) / scale) * 100}%`, background: '#c18cff' }} />
+        <i style={{ width: `${(a.perpsUsd / scale) * 100}%`, background: PERPS_COLOR }} />
         <i style={{ width: `${(a.copyUsd / scale) * 100}%`, background: COPY_COLOR }} />
+        <i style={{ width: `${(Math.max(0, a.botUsd - mine) / scale) * 100}%`, background: '#c18cff' }} />
+        <i style={{ width: `${(mine / scale) * 100}%`, background: 'var(--pos)' }} />
       </div>
-      <small className="bots-fine">{v.algo.spec.paper ? 'Practice: nothing is set aside; this is what it would need for real.' : <span className="bots-takers__key"><span><i style={{ background: 'var(--pos)' }} />This bot</span><span><i style={{ background: '#c18cff' }} />Other bots</span><span><i style={{ background: COPY_COLOR }} />Copy trading</span><span><i style={{ background: 'rgb(var(--ink) / 0.07)' }} />Free</span></span>}</small>
+      <small className="bots-fine">{v.algo.spec.paper ? 'Practice: nothing is set aside; this is what it would need for real.' : <span className="bots-takers__key"><span><i style={{ background: PERPS_COLOR }} />Your positions</span><span><i style={{ background: COPY_COLOR }} />Copy trading</span><span><i style={{ background: '#c18cff' }} />Other bots</span><span><i style={{ background: 'var(--pos)' }} />This bot</span><span><i style={{ background: 'rgb(var(--ink) / 0.07)' }} />Free</span></span>}</small>
     </div>
   );
 }
@@ -210,7 +235,8 @@ export function PortfolioMargin({ address, provider }: { address: string | null;
   const { bots } = useBots(address, signedIn);
   const totals = useAccountTotals(address);
   const copies = marginCopies(live);
-  const a = useMemo(() => marginOf(bots, copies, totals.perpsUsd), [bots, copies, totals.perpsUsd]);
+  const pm = usePositionsMargin(address);
+  const a = useMemo(() => marginOf(bots, copies, totals.perpsUsd, pm), [bots, copies, totals.perpsUsd, pm]);
   if (!address || !signedIn) return null;
   return <MarginPanel a={a} className="pf-margin" />;
 }

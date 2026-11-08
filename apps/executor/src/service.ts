@@ -40,6 +40,7 @@ import {
   BOT_FEE,
   botReserveUsd,
   copyReserveUsd,
+  botMarginUsd,
   BOT_FEE_LADDER,
   BOT_FEE_VIP,
   BETA_VIP_DAYS,
@@ -1329,14 +1330,14 @@ export class ExecutorService {
       if (!k || !k.registered) throw new ApiError(412, 'key', 'Register this executor\'s key on SoDEX first (copy setup, "Approve agent").');
       accountId = await this.sodex.accountId(owner);
       if (!accountId) throw new ApiError(412, 'account', 'This wallet has no SoDEX account yet. Deposit first.');
-      // Smart margining (owner 2026-11-08): the wallet's real bots and its hosted copies together set aside no more
-      // than its account holds - a copy's allocation counts as taken (copyReserveUsd).
+      // Smart margining (owner 2026-11-08): the wallet's real bots (their margin at their leverage, botMarginUsd) and its
+      // hosted copies (their allocation, copyReserveUsd) together set aside no more than its account holds.
       if (spec.bot) {
         const others = live.filter((x) => x.spec.bot === true && !x.spec.paper);
         const copies = this.runtime.list(owner).reduce((t, c) => t + copyReserveUsd(c), 0);
-        const bots = others.reduce((t, x) => t + botReserveUsd(x.spec), 0);
+        const bots = others.reduce((t, x) => t + botMarginUsd(x.spec), 0);
         const reserved = bots + copies;
-        const need = botReserveUsd(spec);
+        const need = botMarginUsd(spec);
         let equity: number | null = null;
         try {
           equity = (await this.sodex.follower(owner)).equity;

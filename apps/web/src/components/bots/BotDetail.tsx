@@ -12,6 +12,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { FINAL_STATUSES, type AlgoEvent, type AlgoView } from '@copy-engine';
 import { DASH, fmtDateTime, fmtTime, fmtUsd } from '../../format';
 import { fmtPriceAuto } from '../palette/model';
+import { useBotLeverage } from '../../bots/leverage';
 import { CoinIcon } from '../CoinIcon';
 import { SeriesChart } from '../datachart/SeriesChart';
 import { useBotLog } from '../../bots/useBots';
@@ -58,6 +59,7 @@ function Controls({ v, ctx }: { v: AlgoView; ctx: BotsCtx }) {
 function SettingsTab({ v, ctx }: { v: AlgoView; ctx: BotsCtx }) {
   const before = useMemo(() => draftOfSpec(v.algo.spec), [v.algo.spec]);
   const [d, setD] = useState<BotDraft>(before);
+  const lev = useBotLeverage(ctx.address, v.algo.spec.symbol);
   const [busy, setBusy] = useState<How | null>(null);
   const [error, setError] = useState<string | null>(null);
   const markets = useBotMarkets('24h');
@@ -85,7 +87,7 @@ function SettingsTab({ v, ctx }: { v: AlgoView; ctx: BotsCtx }) {
         <ShellHeader icon="gear" title="Settings" subtitle={ended ? 'As it ran. Start a new bot to change them.' : 'Change anything, then restart to apply.'} aside={n ? <Button variant="quiet" onClick={() => setD(before)}>Undo changes</Button> : undefined} />
         <Panel className="bots-sizepanel">
           <fieldset className="bots-fieldset" disabled={ended}>
-            <BotSettings d={d} set={(p) => setD((x) => ({ ...x, ...p }))} range={d.strategy === 'grid' ? gridRange(d, null) : null} mark={v.bot?.mark ?? null} liveAllowed={ctx.liveAllowed} hidePractice noLead={est?.lead === null} />
+            <BotSettings d={d} set={(p) => setD((x) => ({ ...x, ...p }))} range={d.strategy === 'grid' ? gridRange(d, null) : null} mark={v.bot?.mark ?? null} liveAllowed={ctx.liveAllowed} hidePractice noLead={est?.lead === null} lev={lev} />
             <NameField d={d} set={(p) => setD((x) => ({ ...x, ...p }))} />
           </fieldset>
         </Panel>

@@ -17,6 +17,8 @@ import { fmtUsd } from '../../format';
 import { FLOW_DEFAULT, GATE_DEFAULT, NEWS_DEFAULT, QUIET_PRESETS, R10, type BotDraft } from '../../bots/presets';
 import { HoursGate } from './HoursGate';
 import { RECIPE, recipeOfDraft } from '../../bots/recipes';
+import { botMarginUsd, type AlgoSpec } from '@copy-engine';
+import type { BotLeverage } from '../../bots/leverage';
 import { Button, Field, Icon, NumberField, Segmented, Slider, StatusPill, Switch, Tabs, TextInput } from './kit/kit';
 
 const TARGETS = [null, 50_000, 250_000, 1_000_000] as const;
@@ -39,6 +41,51 @@ function R10Tag({ on, reset }: { on: boolean; reset: () => void }) {
   return on ? <span className="bots-r10">Default</span> : <button type="button" className="bots-r10 is-off" onClick={reset} title="Back to the default">Reset</button>;
 }
 
+const SPREAD_PICKS = [10, 20, 50];
+
+/** The spread limit: 10, 20 (the default) or 50 bp, or any whole number of bp typed in (owner 2026-11-08). */
+function SpreadPick({ d, set }: { d: BotDraft; set: (p: Partial<BotDraft>) => void }) {
+  const v = d.maxSpreadBps ?? 20;
+  const [custom, setCustom] = useState(!SPREAD_PICKS.includes(v));
+  return (
+    <div className="bots-spreadpick">
+      <Segmented label="Pause if spread over" value={custom ? 'custom' : String(v)} onChange={(x) => { if (x === 'custom') setCustom(true); else { setCustom(false); set({ maxSpreadBps: Number(x) }); } }} options={[...SPREAD_PICKS.map((b) => ({ value: String(b), label: `${b} bp` })), { value: 'custom', label: 'Custom' }]} />
+      {custom && <NumberField label="Spread limit" hideLabel value={v} onChange={(x) => x !== null && x >= 1 && set({ maxSpreadBps: Math.round(x) })} unit="bp" />}
+    </div>
+  );
+}
+
+/**
+ * The leverage the bot sets on its market before its first order (owner 2026-11-08), and the margin that makes it set
+ * aside. With a position open on the market SoDEX takes a higher leverage (verified live) but a lower one is not
+ * verified: the row says so, and the position's own margin stays as it is.
+ */
+function LeverageRow({ d, set, lev }: { d: BotDraft; set: (p: Partial<BotDraft>) => void; lev: BotLeverage }) {
+  const max = lev.max ?? 20;
+  const now = d.leverage ?? lev.held ?? Math.min(3, max);
+  const picks = [1, 2, 3, 5, 10, 20].filter((x) => x <= max);
+  const notional = botMarginUsd({ kind: 'mm', maxInventoryUsd: d.maxInventoryUsd, orderUsd: d.orderUsd, levels: d.ladder, leverage: 1 } as unknown as AlgoSpec);
+  const margin = d.strategy === 'grid' ? (d.orderUsd * d.levels) / now : notional / now;
+  const lower = lev.open && lev.held !== null && now < lev.held;
+  return (
+    <Row label="Leverage" wide hint={<>Sets aside about <b>{fmtUsd(margin, 0)}</b> of margin at {now}×{lev.held !== null && d.leverage === null ? ' (as your account holds it)' : ''}. Up to {max}× on this market.</>}>
+      <div className="bots-sizeline">
+        <Slider label="Leverage slider" value={now} min={1} max={max} step={1} onChange={(x) => set({ leverage: Math.round(x) })} minLabel="1×" maxLabel={`${max}×`} />
+        <NumberField label="Leverage" hideLabel value={now} onChange={(x) => x !== null && set({ leverage: Math.max(1, Math.min(max, Math.round(x))) })} unit="×" className="bots-sizeline__n" />
+      </div>
+      <div className="bots-levpicks">{picks.map((x) => <button key={x} type="button" className={`bots-levpick${now === x ? ' is-on' : ''}`} onClick={() => set({ leverage: x })}>{x}×</button>)}</div>
+      {lev.open && (
+        <p className={`bots-note${lower ? ' is-warn' : ''}`} role="note">
+          <Icon name="warning" size={13} />
+          {lower
+            ? `A position is open on this market at ${lev.held}×. SoDEX may refuse a lower leverage on it until it is closed; the bot then quotes at ${lev.held}×.`
+            : `A position is open on this market${lev.held !== null ? ` at ${lev.held}×` : ''}. A higher leverage applies to it too (SoDEX takes it, its margin stays as it is).`}
+        </p>
+      )}
+    </Row>
+  );
+}
+
 /** A card for one safeguard: title, its switch, a line, and its settings when on. */
 function Guard({ title, line, on, set, children, icon }: { title: string; line: string; on: boolean; set: (v: boolean) => void; children?: ReactNode; icon: Parameters<typeof Icon>[0]['name'] }) {
   return (
@@ -53,7 +100,7 @@ function Guard({ title, line, on, set, children, icon }: { title: string; line: 
   );
 }
 
-export function BotSettings({ d, set, range, mark, liveAllowed, noLead, hidePractice, part }: {
+export function BotSettings({ d, set, range, mark, liveAllowed, noLead, hidePractice, part, lev }: {
   d: BotDraft;
   set: (p: Partial<BotDraft>) => void;
   range: { low: number; high: number } | null;
@@ -66,6 +113,8 @@ export function BotSettings({ d, set, range, mark, liveAllowed, noLead, hidePrac
   part?: Sec;
   /** Kept for callers from before the restart flow. */
   running?: boolean;
+  /** The market's leverage facts (bots/leverage.ts); absent: no leverage row. */
+  lev?: BotLeverage;
 }) {
   const [tab, setSec] = useState<Sec>('size');
   const [adv, setAdv] = useState(false);
@@ -120,6 +169,7 @@ export function BotSettings({ d, set, range, mark, liveAllowed, noLead, hidePrac
           <Row label="Stop if it loses" hint="Net, after every fee.">
             <NumberField label="Loss" value={d.maxLossUsd} optional onChange={(v) => set({ maxLossUsd: v })} unit="USD" />
           </Row>
+          {lev && <LeverageRow d={d} set={set} lev={lev} />}
           <Row label="Stop after trading" wide>
             <Segmented
               label="Stop after trading"
@@ -250,8 +300,8 @@ export function BotSettings({ d, set, range, mark, liveAllowed, noLead, hidePrac
             </Guard>
           )}
           {market && (
-            <Guard icon="layers" title="Spread limit" line="Pause on a wide spread" on={d.maxSpreadBps !== null} set={(on) => set({ maxSpreadBps: on ? 10 : null })}>
-              <Segmented label="Pause if spread over" value={d.maxSpreadBps === null ? '10' : [5, 10, 20].includes(d.maxSpreadBps) ? String(d.maxSpreadBps) : 'x'} onChange={(v) => v !== 'x' && set({ maxSpreadBps: Number(v) })} options={[{ value: '5', label: '5 bp' }, { value: '10', label: '10 bp' }, { value: '20', label: '20 bp' }, ...(d.maxSpreadBps === null || [5, 10, 20].includes(d.maxSpreadBps) ? [] : [{ value: 'x', label: `${d.maxSpreadBps} bp` }])]} />
+            <Guard icon="layers" title="Spread limit" line="Pause on a wide spread" on={d.maxSpreadBps !== null} set={(on) => set({ maxSpreadBps: on ? 20 : null })}>
+              <SpreadPick d={d} set={set} />
             </Guard>
           )}
           {noLead && d.strategy === 'market' && <p className="bots-note"><StatusPill size="sm">no oracle</StatusPill> The volatility gate needs the oracle and is off here.</p>}

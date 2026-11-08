@@ -1498,3 +1498,14 @@ html[data-glass] .bots-page { background: transparent; }
 .mg-edge.is-over i { background: var(--neg); }
 .mg-why { margin: 0; font-size: 12.5px; }
 .bots-signin { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.mg-nums { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+@media (max-width: 720px) { .mg-nums { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.bots-spreadpick { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.bots-spreadpick .tf-field, .bots-spreadpick .tf-num { width: 120px; }
+.bots-levpicks { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.bots-levpick { padding: 4px 10px; border: 1px solid var(--panel-line); border-radius: 9999px; background: rgb(var(--ink) / 0.03); color: var(--text); font: inherit; font-family: var(--font-num); font-size: 12.5px; cursor: pointer; }
+.bots-levpick:hover { background: rgb(var(--ink) / 0.07); }
+.bots-levpick.is-on { border-color: var(--text); background: rgb(var(--ink) / 0.09); }
+.bots-note.is-warn { color: var(--warn, #f0b44c); }
+.bots-note svg { flex: none; vertical-align: -2px; margin-right: 6px; }
+.mg-perps { border-top: 0; padding-top: 0; }

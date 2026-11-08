@@ -386,6 +386,15 @@ export function botReserveUsd(s: AlgoSpec): number {
 }
 
 /**
+ * The MARGIN a bot sets aside (owner 2026-11-08: "this needs to be margin allocated"): what it may hold and quote
+ * (botReserveUsd, notional) at its leverage. A bot with no leverage of its own counts at 1x (the most it could need).
+ */
+export function botMarginUsd(s: AlgoSpec): number {
+  const lev = Math.max(1, Math.floor(s.leverage ?? 1));
+  return botReserveUsd(s) / lev;
+}
+
+/**
  * What a copy sets aside of the wallet's futures account (owner 2026-11-08, smart margining across copy trading and
  * bots): its allocation while it can hold positions (active, paused, halted, blocked); nothing once stopped, nothing
  * for a paper copy. A bot is refused when the copies' and the bots' together would pass the account.

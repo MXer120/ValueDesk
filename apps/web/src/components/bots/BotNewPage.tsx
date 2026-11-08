@@ -12,7 +12,8 @@
  * each safeguard, the wallet's own bots: bots/estimate.ts), what will run, and the balance it needs.
  */
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { botReserveUsd, checkSizes, parseAlgoSpec, type MarketInfo } from '@copy-engine';
+import { botMarginUsd, checkSizes, parseAlgoSpec, type MarketInfo } from '@copy-engine';
+import { useBotLeverage } from '../../bots/leverage';
 import { DASH, fmtUsd } from '../../format';
 import { useSymbols } from '../../hooks';
 import { useConfirm } from '../Modal';
@@ -328,7 +329,8 @@ function Receipt({ d, eff, picked, markets, feeBps, paper, floor, runs, chosen, 
   const maxAbs = Math.max(0.5, ...lines.map((l) => Math.abs(l.bp ?? 0)));
   const learned = known.map((x) => x.e.learned).find((l) => !!l) ?? null;
   const conf = known[0]?.e.confidence ?? null;
-  const need = (d.strategy === 'grid' ? d.orderUsd * d.levels : d.maxInventoryUsd + d.orderUsd * 2) * picked.length;
+  // Margin: what it may hold and quote, at its leverage (copy-engine botMarginUsd).
+  const need = ((d.strategy === 'grid' ? d.orderUsd * d.levels : d.maxInventoryUsd + d.orderUsd * 2) / Math.max(1, d.leverage ?? 1)) * picked.length;
   const name = d.label.trim() || `${rc.name}${chosen && picked.length === 1 ? ` ${picked[0]!.replace(/-USD$/, '')}` : ''}`;
   const guards = [
     { id: 'gate', icon: 'pulse' as const, label: 'Volatility gate', on: eff.strategy === 'market' && eff.gate },
@@ -425,6 +427,14 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
     return { ...base, ...rc.params, ...size, strategy: rc.strategy, label: keep?.label ?? '', paper: keep?.paper ?? true };
   };
   const [d, setD] = useState<BotDraft>(() => fromRecipe(startRecipe, view.market ?? 'BTC-USD'));
+  // The leverage it starts at: what SoDEX already uses for the account on the market, else 3x (a bot's default; SoDEX's
+  // own starting leverage is often 20x, too much for a bot nobody watches), never above the market's maximum.
+  const lev = useBotLeverage(ctx.address, d.symbol);
+  useEffect(() => {
+    if (d.leverage !== null || lev.max === null) return;
+    const start = Math.min(lev.max, lev.held ?? 3);
+    setD((x) => (x.leverage === null ? { ...x, leverage: start } : x));
+  }, [lev.held, lev.max, d.leverage]);
   const [cat, setCat] = useState<Category>(RECIPE[startRecipe].category);
   const [picked, setPicked] = useState<string[]>(() => [view.market ?? 'BTC-USD']);
   const grid = d.strategy === 'grid';
@@ -472,7 +482,7 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
   const why = ctx.setupWhy(paper);
   // Smart margining: a real bot (each of several) sets aside what it needs; together they fit the free margin.
   const alloc = useAllocation(ctx);
-  const needAll = picked.reduce((t, s) => { try { return t + botReserveUsd(parseAlgoSpec(specFor(s))); } catch { return t; } }, 0);
+  const needAll = picked.reduce((t, s) => { try { return t + botMarginUsd(parseAlgoSpec(specFor(s))); } catch { return t; } }, 0);
   const short = !paper && alloc.free !== null && needAll > alloc.free + 1e-6 ? needAll - alloc.free : 0;
   const can = !check.length && !why && ctx.ready && (!grid || !!range) && picked.length > 0 && short === 0;
 
@@ -601,7 +611,7 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
             <Shell>
               <ShellHeader icon="gear" title={PART_NAMES[place.part!]} subtitle={place.part === 'size' ? (picked.length > 1 ? `The same for all ${picked.length} markets.` : 'Uses your SoDEX futures USDC.') : place.part === 'quote' ? `${RECIPE[rid].name}'s values, marked Default where they are unchanged.` : 'Each one moves the estimate on the right.'} />
               <Panel className="bots-sizepanel">
-                <BotSettings d={d} set={set} range={range} mark={mark} liveAllowed={ctx.liveAllowed} noLead={noLead} part={place.part as Sec} hidePractice={place.part !== 'size'} />
+                <BotSettings d={d} set={set} range={range} mark={mark} liveAllowed={ctx.liveAllowed} noLead={noLead} part={place.part as Sec} hidePractice={place.part !== 'size'} lev={lev} />
               </Panel>
             </Shell>
           )}
