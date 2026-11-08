@@ -91,16 +91,25 @@ export function Estimate({ m, gate, feeBps, compact, d, runs }: { m: BotMarket |
   );
 }
 
-/** The wizard's places: four steps, the third in three parts. */
-type Place = { step: 0 | 1 | 2 | 3; part?: Sec };
+/** The two bot types, said plainly. */
+const TYPE_ABOUT: Record<Category, { line: string; good: string }> = {
+  market: { line: 'Keeps a buy and a sell at the best price, all day.', good: 'For building trading volume at the lowest cost.' },
+  grid: { line: 'Buys lower and sells higher inside a price range you set.', good: 'For a market moving sideways.' },
+};
+
+/** The wizard's places (owner 2026-11-08): bot type, preset, settings in parts (markets first), review. */
+type Part = Sec | 'market';
+const PART_NAMES: Record<Part, string> = { market: 'Markets', ...SEC_NAMES };
+type Place = { step: 0 | 1 | 2 | 3; part?: Part };
 const STEPS = [
-  { title: 'Bot', hint: 'What it does' },
-  { title: 'Market', hint: 'Where it trades' },
-  { title: 'Settings', hint: 'Size, quoting, safeguards' },
+  { title: 'Bot type', hint: 'Market maker or grid' },
+  { title: 'Preset', hint: 'A setup we tested' },
+  { title: 'Settings', hint: 'Markets, size, safeguards' },
   { title: 'Review', hint: 'Name and start' },
 ] as const;
+// A grid has one preset and no quoting: both are skipped.
 const placesFor = (grid: boolean): Place[] => [
-  { step: 0 }, { step: 1 }, { step: 2, part: 'size' }, ...(grid ? [] : [{ step: 2 as const, part: 'quote' as const }]), { step: 2, part: 'guard' }, { step: 3 },
+  { step: 0 }, ...(grid ? [] : [{ step: 1 as const }]), { step: 2, part: 'market' }, { step: 2, part: 'size' }, ...(grid ? [] : [{ step: 2 as const, part: 'quote' as const }]), { step: 2, part: 'guard' }, { step: 3 },
 ];
 
 /** A market without an oracle runs the plain maker: quotes off SoDEX's book, no gate, no rest. */
@@ -218,7 +227,7 @@ function RecipeRow({ rc, on, pick, est, market, best }: { rc: Recipe; on: boolea
         )}
         {on && rc.evidence.length > 0 && (
           <span className="bots-rrow__how">
-            <span className="bots-rrow__howk">How we know<span className="bots-code">{rc.code}</span></span>
+            <span className="bots-rrow__howk">How we know</span>
             <span className="bots-rrow__ev">
               {rc.evidence.slice(0, 3).map((e) => { const x = costText(e.bp); return <span key={e.what} className={`bots-ev is-${e.kind}`}><i aria-hidden="true" />{e.what}<b className={x.cls}>{x.v}</b></span>; })}
             </span>
@@ -300,13 +309,13 @@ function Receipt({ d, eff, picked, markets, feeBps, paper, floor, runs, children
     <div className="bots-rc">
       <header className="bots-rc__head">
         <BotAvatar symbol={picked[0] ?? d.symbol} strategy={eff.strategy} size={44} />
-        <span className="bots-rc__name"><b>{name}</b><small>{rc.name} · {rc.code}</small></span>
+        <span className="bots-rc__name"><b>{name}</b><small>{rc.name}</small></span>
         <StatusPill size="sm" tone={paper ? 'neutral' : 'positive'} dot>{paper ? 'Practice' : 'Live'}</StatusPill>
       </header>
 
       <section className="bots-rc__hero">
-        <span className="bots-rc__k">Estimated per $1M{picked.length > 1 ? `, ${picked.length} markets` : ''}</span>
-        <RollingNumber value={fmtBpUsd(bp)} className={`bots-rc__v ${bpCls(bp)}`} />
+        <span className="bots-rc__k">{bp !== null && bp < 0 ? 'Estimated earnings' : 'Estimated cost'} per $1M traded{picked.length > 1 ? `, ${picked.length} markets` : ''}</span>
+        <RollingNumber value={bp === null ? DASH : costText(bp).v} className={`bots-rc__v ${bp === null ? '' : costText(bp).cls}`} />
         {low !== null && high !== null && bp !== null && (
           <>
             <RangeTrack low={low} high={high} v={bp} />
@@ -375,7 +384,7 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
   const [picked, setPicked] = useState<string[]>(() => [view.market ?? 'BTC-USD']);
   const grid = d.strategy === 'grid';
   const places = placesFor(grid);
-  const [at, setAt] = useState(view.market ? 1 : 0);
+  const [at, setAt] = useState(view.market && view.kind !== 'grid' ? 1 : 0);
   const place = places[Math.min(at, places.length - 1)]!;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -454,7 +463,7 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
   const scored = recipesOf(cat).map((rc) => ({ id: rc.id, rc, e: est && rc.category === 'market' ? estimate(effectiveDraft(fromRecipe(rc.id, d.symbol, d), est), est, runs) : null }));
   const bestId = cat === 'market' && est ? bestOf(scored.filter((x): x is typeof x & { e: BotEstimate } => !!x.e && x.e.bp !== null).map((x) => ({ id: x.id, est: x.e })))?.id ?? null : null;
   const rows = [...scored].sort((a, b) => (a.id === bestId ? -1 : b.id === bestId ? 1 : (a.e?.bp ?? 99) - (b.e?.bp ?? 99)));
-  const nextLabel =place.step === 2 && place.part !== parts[parts.length - 1] ? `Next: ${SEC_NAMES[parts[parts.indexOf(place.part!) + 1]!]}` : 'Next';
+  const nextLabel =place.step === 2 && place.part !== parts[parts.length - 1] ? `Next: ${PART_NAMES[parts[parts.indexOf(place.part!) + 1]!]}` : 'Next';
 
   return (
     <>
@@ -471,7 +480,7 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
                     <span className="bots-wsteps__subs">
                       {parts.map((p) => {
                         const k = places.findIndex((x) => x.part === p);
-                        return <span key={p} className={`bots-wsub${place.part === p ? ' is-on' : k < at ? ' is-done' : ''}`} onClick={(e) => { if (k <= at) { e.stopPropagation(); setAt(k); } }}>{SEC_NAMES[p]}</span>;
+                        return <span key={p} className={`bots-wsub${place.part === p ? ' is-on' : k < at ? ' is-done' : ''}`} onClick={(e) => { if (k <= at) { e.stopPropagation(); setAt(k); } }}>{PART_NAMES[p]}</span>;
                       })}
                     </span>
                   ) : <small>{st.hint}</small>}
@@ -481,28 +490,38 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
             </li>
           ))}
         </ol>
-        <span className="bots-wsteps__count">{place.step + 1}/4{place.part ? ` · ${SEC_NAMES[place.part]}` : ''}</span>
+        <span className="bots-wsteps__count">{place.step + 1}/4{place.part ? ` · ${PART_NAMES[place.part]}` : ''}</span>
       </nav>
       <div className="bots-wizard">
         <div className="bots-wizard__main">
           {place.step === 0 && (
             <Shell>
-              <ShellHeader icon="layers" title="Pick a bot" subtitle={cat === 'grid' ? 'Trades inside a price range you set.' : 'Lower cost is better.'} />
-              <div className="bots-cats" role="tablist" aria-label="Category">
+              <ShellHeader icon="layers" title="Bot type" subtitle="What should your bot do?" />
+              <div className="bots-types" role="radiogroup" aria-label="Bot type">
                 {CATEGORIES.map((c) => {
                   const on = cat === c.id;
                   const n = recipesOf(c.id).length;
                   return (
-                    <button key={c.id} type="button" role="tab" aria-selected={on} className={`bots-cat${on ? ' is-on' : ''}`} onClick={() => { setCat(c.id); if (RECIPE[rid].category !== c.id) pickRecipe(recipesOf(c.id)[0]!.id); }}>
-                      <StrategyTile strategy={c.id === 'grid' ? 'grid' : 'market'} size={36} />
-                      <span><b>{c.name}</b><small>{c.line}</small></span>
-                      <span className="bots-cat__n">{n} {n === 1 ? 'bot' : 'bots'}</span>
+                    <button key={c.id} type="button" role="radio" aria-checked={on} aria-label={c.name} className={`bots-type${on ? ' is-on' : ''}`} onClick={() => { setCat(c.id); if (RECIPE[rid].category !== c.id) pickRecipe(recipesOf(c.id)[0]!.id); }}>
+                      <span className={`bots-radio${on ? ' is-on' : ''}`} aria-hidden="true" />
+                      <StrategyTile strategy={c.id === 'grid' ? 'grid' : 'market'} size={48} />
+                      <span className="bots-type__t">
+                        <b>{c.name}</b>
+                        <span>{TYPE_ABOUT[c.id].line}</span>
+                        <small>{TYPE_ABOUT[c.id].good}</small>
+                      </span>
+                      <span className="bots-cat__n">{n} {n === 1 ? 'preset' : 'presets'}</span>
                     </button>
                   );
                 })}
               </div>
-              {cat === 'market' && <p className="bots-pickhint"><Icon name="coins" size={13} />The cost is what you pay in fees and price moves for every $1M your bot trades on {d.symbol.replace(/-USD$/, '')}. The best bot is the cheapest one we can stand behind.</p>}
-              <div className="bots-strows" role="radiogroup" aria-label="Bot">
+            </Shell>
+          )}
+
+          {place.step === 1 && (
+            <Shell>
+              <ShellHeader icon="star" title="Preset" subtitle="Setups we tested. Lower cost is better." />
+              <div className="bots-strows" role="radiogroup" aria-label="Preset">
                 {rows.map(({ rc, e }) => (
                   <RecipeRow key={rc.id} rc={rc} on={rid === rc.id} pick={() => pickRecipe(rc.id)} market={d.symbol} est={e} best={rc.id === bestId} />
                 ))}
@@ -510,18 +529,18 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
             </Shell>
           )}
 
-          {place.step === 1 && (
+          {place.step === 2 && place.part === 'market' && (
             <Shell>
               <ShellHeader icon="compass" title="Markets" subtitle={grid ? 'One market for a grid.' : `Tick one or several: one ${RECIPE[rid].name.toLowerCase()} each.`} aside={<Button variant="quiet" onClick={() => goBots({ page: 'explore' })}>Compare all<Icon name="arrowRight" size={13} /></Button>} />
               <MarketStep picked={picked} toggle={toggle} markets={markets.data?.markets ?? (markets.error ? [] : null)} costOf={costOf} />
             </Shell>
           )}
 
-          {place.step === 2 && (
+          {place.step === 2 && place.part !== 'market' && (
             <Shell>
-              <ShellHeader icon="gear" title={SEC_NAMES[place.part!]} subtitle={place.part === 'size' ? (picked.length > 1 ? `The same for all ${picked.length} markets.` : 'Uses your SoDEX futures USDC.') : place.part === 'quote' ? `${RECIPE[rid].name}'s values, marked R10 where they match.` : 'Each one moves the estimate on the right.'} />
+              <ShellHeader icon="gear" title={PART_NAMES[place.part!]} subtitle={place.part === 'size' ? (picked.length > 1 ? `The same for all ${picked.length} markets.` : 'Uses your SoDEX futures USDC.') : place.part === 'quote' ? `${RECIPE[rid].name}'s values, marked Default where they are unchanged.` : 'Each one moves the estimate on the right.'} />
               <Panel className="bots-sizepanel">
-                <BotSettings d={d} set={set} range={range} mark={mark} liveAllowed={ctx.liveAllowed} noLead={noLead} part={place.part} hidePractice={place.part !== 'size'} />
+                <BotSettings d={d} set={set} range={range} mark={mark} liveAllowed={ctx.liveAllowed} noLead={noLead} part={place.part as Sec} hidePractice={place.part !== 'size'} />
               </Panel>
             </Shell>
           )}

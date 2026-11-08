@@ -118,8 +118,8 @@ h.test('before a wallet: the sidebar Bots group, Overview, latency, Explore and 
   await page.getByRole('heading', { name: 'New bot', exact: true }).waitFor();
   await page.waitForURL((u) => u.pathname === '/bots/new' && u.searchParams.get('market') === 'ETH-USD');
   await until(page, async () => /\$\d/.test((await page.locator('.bots-rc__v').first().textContent()) ?? ''), 'the estimate per $1M', 20_000);
-  // Market, then Settings in its three parts (Size & risk, Quoting, Safeguards), then Review.
-  for (let i = 0; i < 4; i++) await page.getByRole('button', { name: /^Next/ }).click();
+  // From the preset: Settings in its four parts (Markets, Size & risk, Quoting, Safeguards), then Review.
+  for (let i = 0; i < 5; i++) await page.getByRole('button', { name: /^Next/ }).click();
   await page.getByText('Connect your wallet to start a bot.').waitFor();
   await shot(page, 'new-no-wallet');
   await go(page, 'Savings', 'Savings');
@@ -133,10 +133,12 @@ h.test('a practice market maker: set up, New bot with the gate, its page, settin
   await shot(page, 'setup-needed');
   await setUp(page, wallet);
 
-  // New bot, four steps: the market maker category's oracle maker (R10), BTC, Settings in three parts with the gate on
-  // in Safeguards, then Review and Start.
+  // New bot, four steps: bot type (market maker), preset (the oracle maker), Settings in four parts (BTC, size,
+  // quoting, the gate on in Safeguards), then Review and Start.
   await go(page, 'New bot', 'New bot');
-  assert.equal(await page.getByRole('tab', { name: /Market maker/ }).getAttribute('aria-selected'), 'true');
+  assert.equal(await page.getByRole('radio', { name: 'Market maker', exact: true }).getAttribute('aria-checked'), 'true');
+  await shot(page, 'new-0');
+  await page.getByRole('button', { name: /^Next/ }).click();
   assert.equal(await page.getByRole('radio', { name: 'Oracle maker', exact: true }).getAttribute('aria-checked'), 'true');
   assert.ok((await page.locator('.bots-rrow').count()) >= 5, 'several market makers to pick from');
   // For someone who reads only the cost: the best bot is on top and no bot below it shows a lower cost.

@@ -67,7 +67,7 @@ function BotsHere({ m, runs }: { m: BotMarket; runs: readonly OwnRun[] }) {
             <div key={id} className={`bots-xbot${top ? ' is-best' : ''}`} role="listitem">
               <StrategyTile strategy={rc.strategy} size={32} />
               <span className="bots-xbot__t">
-                <b>{rc.name}<span className="bots-code">{rc.code}</span>{top && <StatusPill size="sm" tone="positive">best here</StatusPill>}</b>
+                <b>{rc.name}{top && <StatusPill size="sm" tone="positive">best here</StatusPill>}</b>
                 <small>{rc.line}</small>
               </span>
               <span className="bots-xbot__ev">
@@ -216,7 +216,7 @@ export function BotsExplore({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
             <span className="bots-botpick__l">Bot</span>
             <button type="button" role="radio" aria-checked={pick === 'best'} className={`bots-chip${pick === 'best' ? ' is-on' : ''}`} onClick={() => setPick('best')}>{pick === 'best' && <Icon name="check" size={12} />}<b>Best for each market</b></button>
             {recipesOf('market').map((rc) => (
-              <button key={rc.id} type="button" role="radio" aria-checked={pick === rc.id} className={`bots-chip${pick === rc.id ? ' is-on' : ''}`} onClick={() => setPick(rc.id)}>{pick === rc.id && <Icon name="check" size={12} />}<b>{rc.name}</b><small>{rc.code}</small></button>
+              <button key={rc.id} type="button" role="radio" aria-checked={pick === rc.id} className={`bots-chip${pick === rc.id ? ' is-on' : ''}`} onClick={() => setPick(rc.id)}>{pick === rc.id && <Icon name="check" size={12} />}<b>{rc.name}</b></button>
             ))}
           </div>
           <div className="bots-toolbar">
@@ -270,7 +270,7 @@ export function BotsExplore({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
                             </span>
                           </td>
                           <td className={`right num bots-strong ${bpCls(c)}`}>{fmtBpUsd(c)}<small className="bots-range">{fmtBpUsd(m.estCostLowBps + shift)} to {fmtBpUsd(m.estCostHighBps + shift)}</small></td>
-                          <td><span className="bots-xbotcell"><StrategyTile strategy={rc.strategy} size={22} /><span><b>{rc.name}</b><small>{rc.code}{pick === 'best' && row && row.n > 1 ? ` · of ${row.n}` : ''}</small></span></span></td>
+                          <td><span className="bots-xbotcell"><StrategyTile strategy={rc.strategy} size={22} /><span><b>{rc.name}</b>{pick === 'best' && row && row.n > 1 && <small>best of {row.n}</small>}</span></span></td>
                           <td className="right"><span className="bots-share"><ProgressBar value={m.takers.t1002} max={1} size="sm" color={TAKER_COLORS.patient} label="Uninformed flow share" /><b>{Math.round(m.takers.t1002 * 100)}%</b></span></td>
                           <td className="right"><span className="bots-share"><ProgressBar value={m.takers.t23342} max={1} size="sm" color={TAKER_COLORS.fast} label="Informed flow share" /><b>{Math.round(m.takers.t23342 * 100)}%</b></span></td>
                           <td className="right num dim">{m.spreadBps < 0.05 ? '<0.1' : m.spreadBps.toFixed(1)} bp</td>

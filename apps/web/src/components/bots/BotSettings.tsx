@@ -33,9 +33,9 @@ function Row({ label, hint, children, wide, tag }: { label: ReactNode; hint?: Re
   );
 }
 
-/** "R10" when a field holds the measured default, else a reset to it. */
+/** "Default" when a field holds the measured default, else a reset to it. */
 function R10Tag({ on, reset }: { on: boolean; reset: () => void }) {
-  return on ? <span className="bots-r10">R10</span> : <button type="button" className="bots-r10 is-off" onClick={reset} title="Back to R10's value">Reset</button>;
+  return on ? <span className="bots-r10">Default</span> : <button type="button" className="bots-r10 is-off" onClick={reset} title="Back to the default">Reset</button>;
 }
 
 /** A card for one safeguard: title, its switch, a line, and its settings when on. */
