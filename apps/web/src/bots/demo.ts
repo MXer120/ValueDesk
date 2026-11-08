@@ -69,7 +69,7 @@ function viewOf(s: Seed, now: number): AlgoView {
   const startedAt = now - s.hours * 3_600_000;
   const ended = s.status === 'cancelled' || s.status === 'failed' || s.status === 'done';
   const endedAt = ended ? now - 2 * 3_600_000 : null;
-  const d = { ...draftFor(s.strategy, 'balanced', s.symbol), label: s.name, paper: !!s.paper, gate: !!s.gate, orderUsd: 20, maxInventoryUsd: 60, maxLossUsd: 5 };
+  const d = { ...draftFor(s.strategy, 'balanced', s.symbol), label: s.name, paper: !!s.paper, gate: !!s.gate, orderUsd: 20, maxInventoryUsd: 60, maxLossUsd: s.status === 'failed' ? 3 : 50, ...(s.id === 'demo-btc' ? { volumeTargetUsd: 250_000 } : {}) };
   const spec = parseAlgoSpec(specOf(d, s.price));
   // The book's series: a point every 5 min, volume rising with the hours, PnL a noisy walk toward -cost x volume.
   const series: Array<[number, number, number, number]> = [];
