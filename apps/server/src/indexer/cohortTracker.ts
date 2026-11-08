@@ -1327,7 +1327,7 @@ export class CohortTracker {
       recordMs: this.recordMs,
       liqMs: this.liqMs,
       printsSkipped: this.printsSkipped,
-      liq: { crossedQueued: this.crossedQueued, oi: this.oiLast, boost: this.liqBoost, due: Object.fromEntries(this.liqDue), live: { ready: this.liveReady, pending: this.live.pending, ms: this.liveMs, readers: this.feed.readers, error: this.feed.lastError }, nowAt: this.lastNowAt || null, since: this.startedAt },
+      liq: { crossedQueued: this.crossedQueued, oi: this.oiLast, boost: this.liqBoost, due: Object.fromEntries(this.liqDue), live: { ready: this.liveReady, pending: this.live.pending, ms: this.liveMs, readers: this.feed.readers, error: this.feed.lastError }, nowAt: this.lastNowAt || null, since: this.startedAt, stepT: this.lastLiqT || null },
       hlc: { queued: this.hlc.size, done: this.hlc.done, failed: this.hlc.failed, lastError: this.hlc.lastError },
       pnl: { perpSince: this.perpSince, due: this.pnlDue, flows: this.pnlFlow.size, imported: this.pnlImported },
       levels: { open: this.levelState?.size ?? null, lastRows: this.levelRows },

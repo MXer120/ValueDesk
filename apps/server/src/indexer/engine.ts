@@ -899,6 +899,8 @@ export class Indexer {
       heldPartials: this.store.heldPartials,
       checkpoint: this.store.checkpointStatus,
       flushBacklog: this.writes.backlog,
+      // How long the oldest of those steps has waited (ms): the status page's write target (statusModel.ts FRESH_TARGETS).
+      flushOldestMs: this.writes.oldestWaitMs,
       streamUnderRest: this.store.streamUnderRest,
       retention: this.store.retention(this.now()),
       sodexBreaks: this.sodexBreaks.length,

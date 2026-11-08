@@ -59,6 +59,8 @@ export interface FlowStatus {
   dayThrough: number;
   lastFlushMs: number;
   lastError: string | null;
+  /** The newest trade time added (ms; 0: none since the start): how far the trade flow is behind (statusModel.ts FRESH_TARGETS). */
+  newestT: number;
 }
 
 export class FlowRecorder {
@@ -67,6 +69,7 @@ export class FlowRecorder {
   /** Party ids of SoDEX / Lighter accounts whose address is not known yet. */
   private unresolved = new Map<number, { venue: Venue; key: string }>();
   private open = new Map<string, Open>();
+  private newestT = 0;
   private hourThrough: number;
   private dayThrough: number;
   /** Hours (mid|t) to sum again: a late print landed in them. */
@@ -130,6 +133,7 @@ export class FlowRecorder {
       o.prints.push({ t: p.t, px: p.px, sz: p.sz, buyer, seller, taker });
       o.dirty = true;
       this.stats.prints++;
+      if (p.t > this.newestT) this.newestT = p.t;
     } catch (e) {
       this.lastError = `add: ${String(e)}`;
     }
@@ -447,6 +451,7 @@ export class FlowRecorder {
       dayThrough: this.dayThrough,
       lastFlushMs: this.stats.lastFlushMs,
       lastError: this.lastError,
+      newestT: this.newestT,
     };
   }
 

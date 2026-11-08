@@ -20,12 +20,14 @@ import { basename, join } from 'node:path';
 import { noticeLive, overallShown, shownState, type Notice, type OverallShown, type ServiceId, type ServiceState, type ShownState, type StatusReport } from '../ops/statusModel.js';
 import { whyText } from '../ops/indexerJudge.js';
 import { indexerHealth } from '../hosted.js';
-import type { LastChecks } from '../ops/status.js';
+import type { FreshDay, LastChecks } from '../ops/status.js';
 
 export interface StatusSources {
   report: () => unknown;
   /** The prober's last round with its reasons (ops/status.ts StatusStore.lastChecks). */
   checks?: () => LastChecks | null;
+  /** The indexer's freshness per UTC day, newest first (ops/status.ts StatusStore.freshDays): the daily view. */
+  freshDays?: () => FreshDay[];
   indexer: () => unknown;
   brake: () => unknown;
   errors: () => unknown[];
@@ -186,5 +188,6 @@ export async function statusOfEverything(s: StatusSources, now = Date.now()) {
     releases: settle(() => releasesIn(s.home)),
     system: settle(() => systemInfo(s.dataDir)),
     clientErrors: settle(s.errors),
+    freshDays: s.freshDays ? settle(s.freshDays) : null,
   };
 }
