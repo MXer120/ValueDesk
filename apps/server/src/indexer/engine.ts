@@ -30,7 +30,7 @@ import { gatewayWeightLimit, gatewayWeightSpent } from '../valuedesk/sodex/gatew
 import { knownAddress, resolveIds, seedAddress } from '../valuedesk/sodex/resolver.js';
 import { cooldownLeftMs } from '../valuedesk/sodex/util.js';
 import { VENUES, WINDOWS, type BoardWindow, type Venue, type Window } from '../valuedesk/types.js';
-import { pickBoard, spanCovers, tradeCheck, type Candidate, type TradeCheck } from './boards.js';
+import { pickBoardAsync, spanCovers, tradeCheck, type Candidate, type TradeCheck } from './boards.js';
 import { hlCandidates, hlChartWindows, hlQuickCheck, hlSyncFills } from './hlSource.js';
 import { Lane } from './lanes.js';
 import { ArcusVenue } from './ext/arcus.js';
@@ -1877,7 +1877,7 @@ export class Indexer {
     const cands = venue === 'sodex' && this.suspectSodex.size ? [...raw].filter((c) => !this.suspectSodex.has(c.address)) : raw;
     // HL publishes volume per window; 0 means no trade. SoDEX's figure is not
     // known to include spot, so there every candidate gets a real check.
-    const res = pickBoard(cands, (c) => this.check(venue, c.address, window, from, now), {
+    const res = await pickBoardAsync(cands, (c) => this.check(venue, c.address, window, from, now), {
       filter,
       side,
       size: BOARD_SIZE,

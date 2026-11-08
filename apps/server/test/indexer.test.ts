@@ -4,7 +4,7 @@
  */
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mergeBoards, pickBoard, spanCovers, tradeCheck, type Candidate } from '../src/indexer/boards.js';
+import { mergeBoards, pickBoard, pickBoardAsync, PICK_SLICE_MS, spanCovers, tradeCheck, type Candidate } from '../src/indexer/boards.js';
 import { pnlSince } from '../src/indexer/hlSource.js';
 import { sodexCloseRow, sodexFillRow } from '../src/indexer/sodexSource.js';
 import { IndexStore, type FillRow } from '../src/indexer/store.js';
@@ -338,15 +338,19 @@ test('store: a drop below the stream rows keeps them; one over them drops them; 
   s.close();
 });
 
-test('store: a drop that removes nothing keeps the partial-day sums (they were all cleared on every page synced)', async () => {
+test('store: a drop keeps every other partial-day sum; the wallet’s own day is read again through its version (they were all cleared on every page synced)', async () => {
   const s = new IndexStore(':memory:');
   s.putFills([fill({ id: 'r1', t: B + 100, oid: '5', src: 1 }), fill({ id: 's1', t: B + 500, src: 0 })]);
   const memo = (s as unknown as { partialMemo: Map<string, unknown> }).partialMemo;
+  const ver = (s as unknown as { dayVersion: Map<string, number> }).dayVersion;
+  const dk = `hyperliquid|0xa|${Math.floor(B / 86_400_000)}`;
   memo.set('kept', undefined);
   await s.dropStreamRowsAsync('hyperliquid', '0xa', 0, B + 200, async () => {});
   assert.ok(memo.has('kept'), 'nothing dropped: kept');
+  const before = ver.get(dk) ?? 0;
   await s.dropStreamRowsAsync('hyperliquid', '0xa', 0, B + 1_000, async () => {});
-  assert.ok(!memo.has('kept'), 'rows dropped: cleared');
+  assert.ok(memo.has('kept'), 'rows dropped: other sums kept');
+  assert.ok((ver.get(dk) ?? 0) > before, 'the day that lost rows has a new version, so its memo key no longer matches');
   s.close();
 });
 
@@ -357,4 +361,20 @@ test('a board window\'s stats start holds for a quarter of an hour (engine.ts st
   assert.equal(statsFrom('7d', now + 60_000), statsFrom('7d', now), 'a minute later: the same start');
   assert.ok(windowStart('7d', now) - statsFrom('7d', now) < q, 'at most 15 minutes earlier');
   assert.equal(statsFrom('all', now), 0);
+});
+
+test('pickBoardAsync picks what pickBoard picks, giving the thread back while slow checks run', async () => {
+  const cands: Candidate[] = Array.from({ length: 400 }, (_, i) => ({ address: `0x${i.toString(16).padStart(40, '0')}`, pnl: 1_000 - i, volume: 10 }));
+  const verdict = (c: Candidate) => (Number.parseInt(c.address.slice(-3), 16) % 7 === 0 ? 'yes' : Number.parseInt(c.address.slice(-3), 16) % 11 === 0 ? 'unknown' : 'no') as 'yes' | 'no' | 'unknown';
+  const o = { filter: 'active' as const, side: 'top' as const, size: 30, maxPending: 20 };
+  const sync = pickBoard(cands, verdict, o);
+  let turns = 0;
+  const tick = setInterval(() => { turns++; }, 1);
+  // Each check holds the thread ~1 ms: 400 of them are ~20 slices.
+  const slow = (c: Candidate) => { const t = performance.now(); while (performance.now() - t < 1) { /* a cold read */ } return verdict(c); };
+  const async = await pickBoardAsync(cands, slow, o);
+  clearInterval(tick);
+  assert.deepEqual(async, sync);
+  assert.ok(sync.scanned > 2 * PICK_SLICE_MS, `scanned ${sync.scanned}`);
+  assert.ok(turns >= 2, `the loop ran ${turns} times meanwhile`);
 });
