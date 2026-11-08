@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { COPY_FEE_MAX, copyFeeFor, effectiveLeverage, feePercent, normaliseCountry, regionPolicy } from '../src/index.ts';
+import { BOT_FEE_LADDER, botFeeFor, COPY_FEE_MAX, copyFeeFor, effectiveLeverage, feePercent, normaliseCountry, regionPolicy } from '../src/index.ts';
 
 test('the US, its territories and sanctioned countries are blocked, declared or seen', () => {
   for (const c of ['US', 'PR', 'GU', 'IR', 'KP', 'RU', 'CU', 'SY', 'BY']) assert.equal(regionPolicy(c).allowed, false, c);
@@ -58,4 +58,16 @@ test('the copy fee ladder by 14-day volume', () => {
   assert.equal(COPY_FEE_MAX, 25);
   assert.equal(feePercent(25), '0.025%');
   assert.equal(feePercent(10), '0.01%');
+});
+
+test('bot fee ladder (owner 2026-11-08): 0.5 bp under $100K down to 0.1 bp, whole tenths only; VIP the lowest', () => {
+  assert.equal(botFeeFor(null), 5);
+  assert.equal(botFeeFor(99_999), 5);
+  assert.equal(botFeeFor(100_000), 4);
+  assert.equal(botFeeFor(250_000), 3);
+  assert.equal(botFeeFor(500_000), 2);
+  assert.equal(botFeeFor(3_000_000), 2, 'most users');
+  assert.equal(botFeeFor(10_000_000), 1);
+  assert.equal(botFeeFor(0, { vip: true }), 1);
+  assert.ok(BOT_FEE_LADDER.every((x) => Number.isInteger(x.fee) && x.fee <= 5), 'SoDEX takes whole tenths; the terms cap 0.5 bp');
 });

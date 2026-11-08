@@ -38,6 +38,10 @@ import {
   canonicalSettings,
   copyFeeFor,
   BOT_FEE,
+  BOT_FEE_LADDER,
+  BOT_FEE_VIP,
+  BETA_VIP_DAYS,
+  botFeeFor,
   normaliseCountry,
   parseAlgoSpec,
   parseSettings,
@@ -358,7 +362,8 @@ export class ExecutorService {
       factory: deps.factory,
       log: deps.log,
       sinkFor: (a) => this.algoSink(a),
-      builderRate: (a) => (cfg.builderId > 0 ? (a.spec?.bot === true ? BOT_FEE : copyFeeFor(this.volumeOf(a.owner))) / 100_000 : 0),
+      // Bots: the bot ladder by 14-day volume; VIP, or beta in its first 30 days, the lowest step (policy.ts botFeeFor).
+      builderRate: (a) => (cfg.builderId > 0 ? (a.spec?.bot === true ? botFeeFor(this.volumeOf(a.owner), { vip: this.botVip(a.owner) }) : copyFeeFor(this.volumeOf(a.owner))) / 100_000 : 0),
       problem: async (a) => this.guard.holdOf({ kind: 'algo', id: a.id, owner: a.owner }) ?? this.algoProblem(a),
       brake: () => this.brakeText('algos'),
       // The copy region rules, from the country declared with the terms and the one the request came from.
@@ -441,7 +446,7 @@ export class ExecutorService {
       keyName: this.keyName,
       keyImport: { alg: KEY_IMPORT_ALG, publicKey: this.secrets.importPublicKey(), info: importInfo(this.executorId, '<owner>') },
       algos: { maxPerOwner: this.cfg.maxAlgosPerOwner },
-      bots: { fee: BOT_FEE },
+      bots: { fee: BOT_FEE, ladder: BOT_FEE_LADDER, vipFee: BOT_FEE_VIP, betaVipDays: BETA_VIP_DAYS },
       features: [...EXECUTOR_FEATURES],
       brake: this.brakeView(),
     };
@@ -986,6 +991,19 @@ export class ExecutorService {
     return this.betaListed(owner);
   }
 
+  /**
+   * VIP for the bot fee, as known now (sync, for the fee of each order): a wallet on the beta list in the first
+   * BETA_VIP_DAYS after its first bot here (the beta answer is the cached one; a fresh read is started when stale).
+   * VIP by volume (vip.ts) joins here once VIP ships.
+   */
+  private botVip(owner: string): boolean {
+    const hit = this.betaCache.get(owner.toLowerCase());
+    if (!hit || Date.now() - hit.at >= 60_000) void this.betaListed(owner);
+    if (!hit?.listed) return false;
+    const first = Math.min(...this.algos.list(owner).filter((x) => x.spec?.bot === true).map((x) => x.createdAt));
+    return Number.isFinite(first) && Date.now() - first < BETA_VIP_DAYS * 86_400_000;
+  }
+
   /** The beta list, asked of the API server (EXECUTOR_BETA_URL) and kept a minute; unreadable: not listed (fails closed). */
   private betaCache = new Map<string, { at: number; listed: boolean }>();
   private async betaListed(owner: string): Promise<boolean> {
@@ -1013,9 +1031,14 @@ export class ExecutorService {
     return listed;
   }
 
-  /** The builder fee on an algo's orders, tenths of a bp: a bot's is BOT_FEE, every other algo's the copy ladder's. */
+  /** The builder fee on an algo's orders, tenths of a bp: a bot's from the bot ladder (botFeeFor), every other algo's the copy ladder's. */
   private async algoFee(a: AlgoRecord): Promise<number> {
-    return a.spec?.bot === true ? BOT_FEE : copyFeeFor(await this.freshVolume(a.owner));
+    if (a.spec?.bot === true) {
+      const vol = await this.freshVolume(a.owner);
+      await this.betaListed(a.owner);
+      return botFeeFor(vol, { vip: this.botVip(a.owner) });
+    }
+    return copyFeeFor(await this.freshVolume(a.owner));
   }
 
   /** The sink of an algo: the key this wallet registered for this executor, its fee (algoFee) as the builder. */

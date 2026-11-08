@@ -897,3 +897,22 @@
 .bots-rc__coins > *:first-child { margin-left: 0; }
 .bots-rc__coins b { display: inline-grid; place-items: center; width: 28px; height: 28px; background: rgb(var(--ink) / 0.1); font-size: 11px; font-weight: 600; }
 .bots-hchart__tz { font-family: var(--font-num); color: var(--dim); }
+.bots-rrow.is-blocked { opacity: 0.5; cursor: not-allowed; }
+.bots-rrow.is-blocked:hover { background: rgb(var(--ink) / 0.015); }
+.bots-rc__brand { display: grid; place-items: center; flex: none; width: 44px; height: 44px; border-radius: 12px; background: rgb(var(--ink) / 0.06); }
+/* Trading hours v2: band, drag, quick picks, the sentence. */
+.bots-hchart__band { fill: rgb(var(--ink) / 0.07); pointer-events: none; }
+.bots-hchart__drag { fill: rgb(var(--ink) / 0.14); pointer-events: none; }
+.bots-hchart__dot { fill: var(--text); pointer-events: none; }
+.bots-hchart svg { touch-action: none; user-select: none; }
+.bots-hchart__key i.is-band { width: 12px; height: 8px; border-radius: 2px; background: rgb(var(--ink) / 0.16); }
+.bots-tgate__picks { display: flex; flex-wrap: wrap; gap: 6px; }
+.bots-tgate__say { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 13px; line-height: 1.5; }
+.bots-tgate__w { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 4px 0 10px; border-radius: 9999px; background: rgb(var(--ink) / 0.06); color: var(--muted); font-size: 12px; }
+.bots-tgate__w b { font-family: var(--font-num); font-weight: 500; color: var(--text); }
+.bots-tgate__w button { display: grid; place-items: center; width: 18px; height: 18px; border: 0; border-radius: 50%; background: transparent; color: var(--muted); cursor: pointer; }
+.bots-tgate__w button:hover { background: rgb(var(--ink) / 0.1); color: var(--text); }
+.bots-tgate__list { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.bots-tgate__list li { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 8px; background: rgb(var(--ink) / 0.04); font-size: 12.5px; }
+.bots-tgate__list li input { width: 68px; }
+.bots-tgate__say > span { flex: none; }

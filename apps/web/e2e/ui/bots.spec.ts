@@ -173,7 +173,7 @@ h.test('a practice market maker: set up, New bot with the gate, its page, settin
   // Trading hours: the hourly-move chart, a session preset, and the mode said plainly.
   await page.getByRole('switch', { name: 'Trading hours' }).click();
   await page.getByRole('img', { name: /How much the price moves at each hour/ }).waitFor();
-  assert.ok(await page.getByText('Pause during them', { exact: true }).isVisible());
+  assert.ok(await page.getByText('Skip set hours', { exact: true }).isVisible());
   await until(page, async () => (await page.locator('.bots-rc__line', { hasText: 'Pause hours' }).count()) === 1, 'the hours in the estimate');
   await shot(page, 'new-3');
   await page.getByRole('switch', { name: 'Trading hours' }).click();

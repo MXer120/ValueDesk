@@ -216,5 +216,26 @@ export function copyFeeFor(volumeUsd: number | null | undefined, ladder: readonl
  */
 export const BOT_FEE = 1;
 
+/**
+ * THE BOT FEE LADDER (owner 2026-11-08, replacing the flat BOT_FEE): tenths of a bp by 14-day volume, from 0.5 bp
+ * down to 0.1 bp in steps SoDEX can carry (a builder fee is a whole number of tenths), most users at 0.2 bp. VIP pays
+ * the lowest step; a wallet on the beta list is VIP for its first 30 days (BETA_VIP_DAYS, from its first bot).
+ * The terms name 0.5 bp: the top step stays within them. Not live until the executor that uses it ships.
+ */
+export const BOT_FEE_LADDER: readonly CopyFeeStep[] = [
+  { fromUsd: 0, fee: 5 },
+  { fromUsd: 100_000, fee: 4 },
+  { fromUsd: 250_000, fee: 3 },
+  { fromUsd: 500_000, fee: 2 },
+  { fromUsd: 10_000_000, fee: 1 },
+];
+export const BOT_FEE_VIP = 1;
+export const BETA_VIP_DAYS = 30;
+
+/** The bot fee for a wallet: VIP (or beta in its first 30 days) the lowest step, else by its 14-day volume. */
+export function botFeeFor(volumeUsd: number | null | undefined, o: { vip?: boolean } = {}): number {
+  return o.vip ? BOT_FEE_VIP : copyFeeFor(volumeUsd, BOT_FEE_LADDER);
+}
+
 /** Tenths of a bp -> '0.025%'. */
 export const feePercent = (tenthsBps: number): string => `${(tenthsBps / 1000).toFixed(tenthsBps % 10 === 0 ? 2 : 3)}%`;

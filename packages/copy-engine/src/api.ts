@@ -362,7 +362,8 @@ export interface ExecutorInfo {
   /** It also runs algo orders (TWAP, VWAP, ...) with the same key; absent on an older executor. */
   algos?: { maxPerOwner: number };
   /** It runs bots (feature 'bots'): the builder fee on their orders, tenths of a bp. Absent on an older executor. */
-  bots?: { fee: number };
+  /** fee: the old flat bot fee (kept for older pages); ladder: the bot fee by 14-day volume (policy.ts BOT_FEE_LADDER). */
+  bots?: { fee: number; ladder?: ReadonlyArray<{ fromUsd: number; fee: number }>; vipFee?: number; betaVipDays?: number };
   /**
    * A SoDEX API key the follower made themselves can be brought here: its private key
    * encrypted to `publicKey` (ECDH P-256, HKDF-SHA256 with `info` - '<owner>' replaced by

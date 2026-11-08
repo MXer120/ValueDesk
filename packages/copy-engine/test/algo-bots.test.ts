@@ -30,6 +30,7 @@ import {
   FairBasis,
   PATIENT_TAKER_ACCOUNT,
   quietWindowAt,
+  checkSizes,
   newsAt,
   nyseHolidays,
   lseHolidays,
@@ -635,7 +636,11 @@ test('grid: rests on every level but the gap; a buy filled puts a sell one level
 
 test('grid: a level the price is through waits instead of being refused; sizes reach SoDEX\'s minimum', async () => {
   const r = await rig();
-  await assert.rejects(add(r, { kind: 'grid', low: 59_000, high: 61_000, levels: 5, orderUsd: 10, spacing: 'linear' }), /under SoDEX's \$10 minimum/, 'no silent resizing: refused in words');
+  // Owner 2026-11-08: a bot thinks in USD; a level the step puts under SoDEX's minimum goes out at it, said in a note.
+  const low = await add(r, { kind: 'grid', low: 59_000, high: 61_000, levels: 5, orderUsd: 10, spacing: 'linear' });
+  assert.ok(low.id);
+  assert.ok(checkSizes(low.spec, MKT, { price: 60_000, seed: 1, now: clock }).notes.some((n) => n.includes("SoDEX's minimum")));
+  await r.rt.cancel(low.id);
   const a = await add(r, { kind: 'grid', low: 59_000, high: 61_000, levels: 5, orderUsd: 11, spacing: 'linear' });
   r.market.set(60_600, 60_602);
   await step(r, a.id);
