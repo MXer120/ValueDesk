@@ -21,6 +21,7 @@ import { useBotMarkets, bpToPerMillion } from '../../bots/data';
 import { goBots, type BotsView } from '../../bots/routes';
 import { draftOfSpec, patchOf } from '../../bots/presets';
 import { botName } from './botWords';
+import { BotsVip } from './BotsVip';
 import { BotsHead, isLive, type BotsCtx } from './BotsPage';
 import { Button, EmptyState, IconTile, Panel, ProgressBar, Shell, ShellHeader, StatCard, StatusPill, type IconName, type Tone } from './kit/kit';
 
@@ -143,6 +144,7 @@ export function BotsSavings({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
         </Shell>
       ) : (
         <>
+          <BotsVip ctx={ctx} />
           <Shell className="bots-kpis">
             <ShellHeader icon="piggy" title="Where you stand" subtitle={basis ? `At ${basis}` : 'Start a bot to see savings at its pace'} />
             <div className="bots-kpigrid is-5">

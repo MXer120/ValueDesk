@@ -127,6 +127,28 @@ export class Secrets {
     return sealWith(this.kek, network, owner, address, privateKey);
   }
 
+  /**
+   * VIP move: a key this executor holds, sealed to another executor of ours as an import envelope (the same format
+   * a browser sends, KEY_IMPORT_ALG, bound to that executor's id and the wallet). Never in the clear on the wire.
+   */
+  sealTo(network: string, owner: string, address: string, sealed: string, peer: { publicKey: string; executorId: string }): ImportEnvelope {
+    const pk = openWith(this.kek, network, owner, address, sealed);
+    const eph = generateKeyPairSync('ec', { namedCurve: 'P-256' });
+    const peerKey = createPublicKey({ key: Buffer.from(peer.publicKey, 'base64url'), format: 'der', type: 'spki' });
+    const shared = diffieHellman({ privateKey: eph.privateKey, publicKey: peerKey });
+    const key = Buffer.from(hkdfSync('sha256', shared, Buffer.alloc(0), importInfo(peer.executorId, owner), 32));
+    try {
+      const iv = randomBytes(12);
+      const c = createCipheriv('aes-256-gcm', key, iv);
+      const ct = Buffer.concat([c.update(pk), c.final(), c.getAuthTag()]);
+      return { epk: eph.publicKey.export({ type: 'spki', format: 'der' }).toString('base64url'), iv: iv.toString('base64url'), ct: ct.toString('base64url') };
+    } finally {
+      pk.fill(0);
+      shared.fill(0);
+      key.fill(0);
+    }
+  }
+
   /** The signing key for a sealed record. Throws when it does not open, or opens to another address. */
   open(network: string, owner: string, address: string, sealed: string, registration: { name: string; expiresAt: number | null }): SigningKeyRef {
     const pk = openWith(this.kek, network, owner, address, sealed);

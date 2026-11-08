@@ -57,9 +57,11 @@ export type CopyAction =
   /** Start an algo order (TWAP, VWAP, ...): the payload is its spec, as the wallet displays it. */
   | 'algo-start'
   /** Pause, resume or cancel an algo order, or cancel all of them. */
-  | 'algo-action';
+  | 'algo-action'
+  /** Move this wallet's bots to the VIP executor (payload {to: 'vip'}): one signature, run server to server. */
+  | 'vip-move';
 
-export const COPY_ACTIONS: readonly CopyAction[] = ['session', 'accept-terms', 'accept-site-terms', 'create-key', 'delete-key', 'subscribe', 'update', 'pause', 'resume', 'stop', 'stop-all', 'algo-start', 'algo-action'];
+export const COPY_ACTIONS: readonly CopyAction[] = ['session', 'accept-terms', 'accept-site-terms', 'create-key', 'delete-key', 'subscribe', 'update', 'pause', 'resume', 'stop', 'stop-all', 'algo-start', 'algo-action', 'vip-move'];
 
 export const COPY_REQUEST_FIELDS = [
   { name: 'action', type: 'string' },
@@ -364,6 +366,8 @@ export interface ExecutorInfo {
   /** It runs bots (feature 'bots'): the builder fee on their orders, tenths of a bp. Absent on an older executor. */
   /** fee: the old flat bot fee (kept for older pages); ladder: the bot fee by 14-day volume (policy.ts BOT_FEE_LADDER). */
   bots?: { fee: number; ladder?: ReadonlyArray<{ fromUsd: number; fee: number }>; vipFee?: number; betaVipDays?: number };
+  /** VIP (apps/executor vip.ts): this executor's tier, and whether it can move a wallet's bots to the VIP one. */
+  vip?: { tier: 'standard' | 'vip'; canMove: boolean; location: string; /** Moves without the VIP check (tests, local runs). */ open?: boolean };
   /**
    * A SoDEX API key the follower made themselves can be brought here: its private key
    * encrypted to `publicKey` (ECDH P-256, HKDF-SHA256 with `info` - '<owner>' replaced by
@@ -418,6 +422,20 @@ export interface MeResponse {
   policy: RegionPolicy;
   key: KeyInfo | null;
   copies: CopyView[];
+  /** Its bots moved to the VIP executor (the page then talks to that one). Absent on an older executor. */
+  movedTo?: 'vip' | null;
+}
+
+/** A VIP move as its owner reads it (POST /vip/move starts it, GET /vip/move follows it). */
+export interface VipMoveView {
+  id: string;
+  state: 'running' | 'done' | 'failed';
+  startedAt: number;
+  endedAt: number | null;
+  steps: Array<{ id: string; label: string; state: 'wait' | 'run' | 'done' | 'fail'; ms: number | null; note?: string }>;
+  bots: number;
+  error: string | null;
+  session: { token: string; expiresAt: number } | null;
 }
 
 export interface ActivityResponse {

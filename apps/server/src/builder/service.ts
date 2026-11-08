@@ -104,6 +104,11 @@ function countedOf(cfg: TiersConfig, store: BuilderStore | null, w: WalletRow | 
   }
 }
 
+/** VIP: the window and the two bars (owner 2026-11-08: ">1m 14day volume and/or >1% of valuedesk bot volume"). */
+export const VIP_DAYS = 14;
+export const VIP_MIN_USD = 1_000_000;
+export const VIP_MIN_SHARE = 0.01;
+
 export class BuilderService {
   readonly tiers: TiersSource;
   readonly keys: KeySource;
@@ -212,6 +217,21 @@ export class BuilderService {
     if (!store) return null;
     const w = store.windowMicro(builder, address, dayOf(this.now()) - (days - 1));
     return (w.perps + w.spot) / 1e6;
+  }
+
+  /**
+   * VIP (owner 2026-11-08): over $1M of counted volume in 14 days, or over 1% of all ValueDesk's. A wallet's
+   * volume and its share, or null while the ledger is not open or no builder is set.
+   */
+  vipOf(address: string, days = VIP_DAYS): { volumeUsd: number; totalUsd: number; share: number } | null {
+    const store = this.store;
+    const cfg = this.tiers.current();
+    if (!store || !cfg?.builderId) return null;
+    const from = dayOf(this.now()) - (days - 1);
+    const w = store.windowMicro(cfg.builderId, address, from);
+    const volumeUsd = (w.perps + w.spot) / 1e6;
+    const totalUsd = store.totalWindowMicro(cfg.builderId, from) / 1e6;
+    return { volumeUsd, totalUsd, share: totalUsd > 0 ? volumeUsd / totalUsd : 0 };
   }
 
   /**

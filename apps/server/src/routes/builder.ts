@@ -16,7 +16,7 @@
 import { timingSafeEqual } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { clientKey } from '../hosted.js';
-import { builderService, type BuilderService } from '../builder/service.js';
+import { VIP_DAYS, VIP_MIN_SHARE, VIP_MIN_USD, builderService, type BuilderService } from '../builder/service.js';
 import { ADDRESS_RE, NONCE_RE } from '../builder/terms.js';
 import { SANCTIONED_WALLET_REASON, isSanctionedAddress } from '../builder/sanctions.js';
 import { AdminStore } from '../admin/store.js';
@@ -126,6 +126,30 @@ export async function builderRoutes(app: FastifyInstance, opts: BuilderRouteOpti
    * service.ts liveBotFor), so a page told "listed" by anyone else still starts nothing real.
    * It says whether one address is listed, never who is.
    */
+  /**
+   * GET /api/vs/bots/vip?address=0x...  ->  {ok, eligible, volumeUsd, minUsd, share, minShare, days}
+   *
+   * VIP (owner 2026-11-08): the bots of a wallet with over $1M of counted volume in 14 days, or over 1% of all
+   * ValueDesk's, may move to the VIP executor (AWS Tokyo). What the page shows as progress, and what both executors
+   * ask before a move. A wallet's builder volume is public on SoDEX already; it says nothing of anyone else.
+   */
+  app.get('/api/vs/bots/vip', async (req, reply) => {
+    reply.header('Cache-Control', 'private, max-age=30');
+    const q = (req.query ?? {}) as Record<string, unknown>;
+    if (typeof q.address !== 'string' || !ADDRESS_RE.test(q.address)) return reply.code(400).send({ ok: false, error: 'a valid 0x wallet address is required' });
+    const v = service.vipOf(q.address.toLowerCase());
+    if (!v) return reply.code(503).send({ ok: false, code: 'unavailable', error: 'the builder ledger is not open' });
+    return {
+      ok: true,
+      eligible: v.volumeUsd >= VIP_MIN_USD || v.share >= VIP_MIN_SHARE,
+      volumeUsd: v.volumeUsd,
+      minUsd: VIP_MIN_USD,
+      share: v.share,
+      minShare: VIP_MIN_SHARE,
+      days: VIP_DAYS,
+    };
+  });
+
   app.get('/api/vs/beta/listed', async (req, reply) => {
     reply.header('Cache-Control', 'private, max-age=30');
     const q = (req.query ?? {}) as Record<string, unknown>;

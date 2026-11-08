@@ -297,6 +297,13 @@ export function createExecutorServer(svc: ExecutorService, cfg: ExecutorConfig, 
         if (!cfg.builderToken || !safeEqual(cfg.builderToken, token)) throw new ApiError(404, 'path', 'not found');
         return send(res, 200, { users: svc.db.usersSummary() });
       }
+      // VIP (vip.ts): the standard executor's move, followed by its owner; the VIP executor's internal import.
+      if (req.method === 'GET' && route === '/vip/move') return send(res, 200, { job: svc.vipJob(svc.authenticate(bearer(req))) });
+      if (req.method === 'POST' && route === '/internal/vip/import') {
+        const token = String(req.headers['x-internal-token'] ?? '');
+        if (!cfg.builderToken || !safeEqual(cfg.builderToken, token)) throw new ApiError(404, 'path', 'not found');
+        return send(res, 200, await svc.vipImport(await readJson(req)));
+      }
       if (req.method === 'GET' && route === '/me') return send(res, 200, svc.me(svc.authenticate(bearer(req)), ctx));
       if (req.method === 'GET' && route === '/consents') return send(res, 200, { consents: svc.consents(svc.authenticate(bearer(req))) });
       if (req.method === 'GET' && route === '/algos') {
@@ -335,6 +342,7 @@ export function createExecutorServer(svc: ExecutorService, cfg: ExecutorConfig, 
       if (route === '/keys/import') return send(res, 200, { key: await svc.importKey(keyCheck(svc.authenticate(bearer(req))), body as { name?: unknown; envelope?: unknown }, ctx) });
       if (route === '/algos') return send(res, 200, await svc.algoStart(body.request, ctx));
       if (route === '/algos/action') return send(res, 200, await svc.algoAct(body.request, ctx));
+      if (route === '/vip/move') return send(res, 200, { job: svc.vipMove(body.request, ctx) });
       throw new ApiError(404, 'path', 'not found');
     } catch (e) {
       const err = e instanceof ApiError ? e : new ApiError(500, 'internal', 'Something went wrong in the executor.');

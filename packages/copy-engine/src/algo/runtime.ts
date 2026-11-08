@@ -796,6 +796,49 @@ export class AlgoRuntime {
     return a;
   }
 
+  /**
+   * VIP move, the receiving side: an algo another executor of ours ran (its record, book and children as they were,
+   * paused with its quotes pulled), taken in under the same id. Live children it still names are asked about on
+   * SoDEX, as after a restart. Resume it to go on.
+   */
+  async adopt(rec: AlgoRecord): Promise<AlgoRecord> {
+    if (this.algos.has(rec.id)) throw new Error('This algo is here already.');
+    const a = structuredClone(rec);
+    for (const c of a.children) {
+      this.byClOrd.set(c.clOrdID, a.id);
+      if (LIVE.has(c.state) && !a.spec.paper) c.state = 'unknown';
+      if (a.spec.paper && LIVE.has(c.state)) {
+        c.state = 'done';
+        c.cancelling = false;
+      }
+    }
+    this.algos.set(a.id, a);
+    await this.save(a);
+    await this.event(a, 'info', 'Moved to the VIP servers: it goes on from here with the same book.');
+    this.syncWatch();
+    this.host.onChange?.(a.id);
+    return a;
+  }
+
+  /**
+   * VIP move, the sending side: the algo now runs on the VIP executor. Its quotes are pulled (it was paused for the
+   * move) and it ends here without closing anything: what it holds is the new one's.
+   */
+  async handOver(id: string, reason: string): Promise<AlgoRecord> {
+    const a = this.need(id);
+    if (FINAL_STATUSES.has(a.status)) return a;
+    await this.pullResting(a);
+    a.status = 'cancelled';
+    a.statusReason = reason;
+    a.endedAt = Date.now();
+    a.updatedAt = a.endedAt;
+    await this.save(a);
+    await this.event(a, 'status', reason);
+    this.syncWatch();
+    this.host.onChange?.(a.id);
+    return a;
+  }
+
   async resume(id: string): Promise<AlgoRecord> {
     const a = this.need(id);
     if (a.status !== 'paused') return a;

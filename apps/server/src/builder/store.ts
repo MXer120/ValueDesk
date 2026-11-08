@@ -400,6 +400,12 @@ export class BuilderStore {
     return out;
   }
 
+  /** Counted volume of every wallet together from UTC day `fromDay` on (the VIP share's whole). */
+  totalWindowMicro(builder: number, fromDay: number): number {
+    const r = this.q('SELECT sum(micro) AS m FROM days WHERE builder = ? AND day >= ?').get(builder, fromDay) as Row | undefined;
+    return Math.min(Number.MAX_SAFE_INTEGER, num(r?.m ?? 0));
+  }
+
   /** Add one step's volume to its days, and let go of days no window reaches any more. Inside a transaction. */
   private addDays(builder: number, address: string, engine: Engine, byDay: ReadonlyMap<number, number>): void {
     if (!byDay.size) return;

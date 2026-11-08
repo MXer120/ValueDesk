@@ -65,6 +65,7 @@ import {
   type CopyView,
   type CreateKeyPayload,
   type ExecutorInfo,
+  type TermsRecord,
   type FetchLike,
   type KeyInfo,
   type Logger,
@@ -82,7 +83,7 @@ import {
 } from '../../../packages/copy-engine/src/index.ts';
 import { SODEX_CHAIN_ID, createMemoryNonceManager, privateKeyToAddress, type BuilderParams, type SigningKeyRef } from '../../../packages/sodex-core/src/index.ts';
 import { liveAlgosFor, type ExecutorConfig } from './config.ts';
-import { sqlite, type ExecutorDb, type KeyRow } from './db.ts';
+import { sqlite, type ConsentRow, type ExecutorDb, type KeyRow } from './db.ts';
 import { auditedAlgoSink, auditedOrderSink } from './audited.ts';
 import { Brake, type BrakeState } from './brake.ts';
 import { WriteLatency, type BotLatencyResponse } from './latency.ts';
@@ -93,6 +94,7 @@ import { plainSockets } from './feed/binance.ts';
 import { BinanceReference } from './feed/reference.ts';
 import { DEFAULT_FEED_PATH } from './feed/ring.ts';
 import { CalendarFeed } from './calendar.ts';
+import { newVipJob, vipJobView, vipStep, type VipJob } from './vip.ts';
 
 /** The pairing code's letters: no 0/O, 1/I/L, so it reads back from a terminal without doubt. */
 const PAIR_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
@@ -448,6 +450,7 @@ export class ExecutorService {
       algos: { maxPerOwner: this.cfg.maxAlgosPerOwner },
       bots: { fee: BOT_FEE, ladder: BOT_FEE_LADDER, vipFee: BOT_FEE_VIP, betaVipDays: BETA_VIP_DAYS },
       features: [...EXECUTOR_FEATURES],
+      vip: { tier: this.cfg.tier, canMove: this.cfg.tier === 'standard' && !!this.cfg.vipUrl, location: this.cfg.location, open: this.cfg.vipOpen },
       brake: this.brakeView(),
     };
   }
@@ -637,7 +640,152 @@ export class ExecutorService {
         .map((s) => this.runtime.view(s.id))
         .filter((v): v is CopyView => v !== null)
         .sort((a, b) => b.subscription.createdAt - a.subscription.createdAt),
+      movedTo: this.db.moved(owner)?.tier === 'vip' ? 'vip' : null,
     };
+  }
+
+  /* -------------------------------------------------------------- VIP ----- */
+
+  private vipJobs = new Map<string, VipJob>();
+
+  /** Start moving the signer's bots to the VIP executor (vip.ts). One job per wallet at a time. */
+  vipMove(req: unknown, ctx: RequestContext): VipJob {
+    const { owner } = this.accept(req, 'vip-move', ctx);
+    if (this.cfg.tier !== 'standard' || !this.cfg.vipUrl) throw new ApiError(404, 'vip', 'The VIP servers are not set up on this executor.');
+    const cur = this.vipJobs.get(owner);
+    if (cur?.state === 'running') return vipJobView(cur);
+    const job = newVipJob(owner);
+    this.vipJobs.set(owner, job);
+    void this.runVipMove(job).catch(() => undefined);
+    return vipJobView(job);
+  }
+
+  /** The wallet's last move, as it stands. */
+  vipJob(owner: string): VipJob | null {
+    const j = this.vipJobs.get(owner);
+    return j ? vipJobView(j) : null;
+  }
+
+  private async vipEligible(owner: string): Promise<{ ok: boolean; why: string }> {
+    if (this.cfg.vipOpen) return { ok: true, why: 'open' };
+    if (!this.cfg.vipCheckUrl) return { ok: false, why: 'VIP status cannot be checked here.' };
+    const u = new URL(this.cfg.vipCheckUrl);
+    u.searchParams.set('address', owner);
+    const res = await this.deps.fetch(u.toString(), { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(5_000) });
+    const b = JSON.parse(await res.text()) as { ok?: boolean; eligible?: boolean; volumeUsd?: number; minUsd?: number };
+    if (!res.ok || !b.ok) throw new Error('VIP status could not be read. Try again in a moment.');
+    return b.eligible ? { ok: true, why: 'eligible' } : { ok: false, why: `Not VIP yet: ${Math.round(b.volumeUsd ?? 0).toLocaleString('en-US')} of $${Math.round(b.minUsd ?? 1_000_000).toLocaleString('en-US')} in 14 days.` };
+  }
+
+  private async runVipMove(job: VipJob): Promise<void> {
+    const owner = job.owner;
+    const vip = this.cfg.vipUrl!.replace(/\/+$/, '');
+    const token = this.cfg.builderToken ?? '';
+    const bots = this.algos.list(owner).filter((a) => a.spec?.bot === true && !FINAL_STATUSES.has(a.status));
+    job.bots = bots.length;
+    const paused: string[] = [];
+    let handed = false;
+    try {
+      await vipStep(job, 'check', async () => {
+        const e = await this.vipEligible(owner);
+        if (!e.ok) throw new Error(e.why);
+        if (this.runtime.list(owner).some((s) => s.status !== 'stopped')) throw new Error('Stop your copies first: they keep their key on these servers.');
+        if (this.algos.list(owner).some((a) => a.spec?.bot !== true && !FINAL_STATUSES.has(a.status))) throw new Error('Let your algo orders finish first: only bots move.');
+        if (!this.db.key(owner, 'active') && bots.some((a) => !a.spec.paper)) throw new Error('Set up your SoDEX key first.');
+      });
+      await vipStep(job, 'pause', async () => {
+        for (const a of bots) {
+          if (a.status === 'paused') continue;
+          await this.algos.pause(a.id);
+          paused.push(a.id);
+        }
+      });
+      const envelope = await vipStep(job, 'seal', async () => {
+        const res = await this.deps.fetch(`${vip}/info`, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(5_000) });
+        const info = JSON.parse(await res.text()) as { executorId?: string; keyImport?: { publicKey?: string }; vip?: { tier?: string } };
+        if (!res.ok || info.vip?.tier !== 'vip' || !info.keyImport?.publicKey) throw new Error('The VIP servers did not answer.');
+        if (info.executorId !== this.executorId) throw new Error('The VIP servers run under another executor id.');
+        // Practice bots only, no key here: nothing to seal.
+        const k = this.db.key(owner, 'active');
+        return k ? { key: k, envelope: this.secrets.sealTo(this.cfg.network, owner, k.address, k.sealed, { publicKey: info.keyImport.publicKey, executorId: this.executorId }) } : null;
+      });
+      const answer = await vipStep(job, 'send', async () => {
+        const res = await this.deps.fetch(`${vip}/internal/vip/import`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'X-Internal-Token': token },
+          body: JSON.stringify({
+            owner,
+            key: envelope ? { name: envelope.key.name, address: envelope.key.address, expiresAt: envelope.key.expiresAt, envelope: envelope.envelope } : null,
+            record: this.db.ownerRecord(owner),
+            algos: bots.map((a) => this.algos.get(a.id)),
+            resume: bots.filter((a) => a.status !== 'paused' || paused.includes(a.id)).map((a) => a.id),
+          }),
+          signal: AbortSignal.timeout(15_000),
+        });
+        const b = JSON.parse(await res.text()) as { ok?: boolean; error?: string; session?: { token: string; expiresAt: number } };
+        if (!res.ok || !b.ok) throw new Error(b.error ?? `The VIP servers answered HTTP ${res.status}.`);
+        handed = true;
+        return b;
+      });
+      await vipStep(job, 'start', async () => {
+        job.session = answer.session ?? null;
+      });
+      await vipStep(job, 'finish', async () => {
+        for (const a of bots) await this.algos.handOver(a.id, 'Moved to the VIP servers (AWS Tokyo).');
+        this.db.deleteKeys(owner);
+        this.forgetSigner(owner);
+        this.db.setMoved(owner, 'vip');
+        this.deps.log.info('vip: moved', { owner, bots: bots.length, ms: Date.now() - job.startedAt });
+      });
+      job.state = 'done';
+    } catch (e) {
+      job.state = 'failed';
+      job.error ??= e instanceof Error ? e.message : String(e);
+      // Not taken by the VIP side: back to what it was here.
+      if (!handed) for (const id of paused) await this.algos.resume(id).catch(() => undefined);
+      this.deps.log.warn('vip: move failed', { owner, error: job.error, handed });
+    } finally {
+      job.endedAt = Date.now();
+    }
+  }
+
+  /** The VIP executor's side of a move (internal: the standard executor asks, with the internal token). */
+  async vipImport(body: unknown): Promise<{ ok: true; session: { token: string; expiresAt: number }; started: number }> {
+    if (this.cfg.tier !== 'vip') throw new ApiError(404, 'path', 'not found');
+    const b = body as { owner?: unknown; key?: { name?: unknown; address?: unknown; expiresAt?: unknown; envelope?: unknown }; record?: { terms?: unknown; consents?: unknown }; algos?: unknown; resume?: unknown };
+    const owner = typeof b.owner === 'string' && /^0x[0-9a-f]{40}$/.test(b.owner) ? b.owner : null;
+    if (!owner || (b.key && (typeof b.key.name !== 'string' || typeof b.key.address !== 'string'))) throw new ApiError(400, 'vip', 'A move needs the wallet (and its key, when it has one).');
+    return this.serial(owner, async () => {
+      if (b.key) {
+      const pk = this.secrets.openImport(this.executorId, owner, b.key!.envelope as ImportEnvelope);
+      try {
+        const address = privateKeyToAddress(pk).toLowerCase();
+        if (address !== String(b.key!.address).toLowerCase()) throw new ApiError(400, 'vip', 'The key does not match.');
+        const now = Date.now();
+        const expiresAt = typeof b.key!.expiresAt === 'number' ? b.key!.expiresAt : null;
+        this.db.putKey({ owner, slot: 'pending', address, name: String(b.key!.name), sealed: this.secrets.seal(this.cfg.network, owner, address, pk), createdAt: now, expiresAt, registered: true, checkedAt: now });
+        this.db.promoteKey(owner);
+        this.forgetSigner(owner);
+      } finally {
+        pk.fill(0);
+      }
+      }
+      if (b.record?.terms) this.db.setTerms(owner, b.record.terms as TermsRecord);
+      for (const c of Array.isArray(b.record?.consents) ? (b.record!.consents as ConsentRow[]) : []) if (c.owner === owner) this.db.addConsent(c);
+      const resume = new Set(Array.isArray(b.resume) ? (b.resume as string[]) : []);
+      let started = 0;
+      for (const rec of Array.isArray(b.algos) ? (b.algos as AlgoRecord[]) : []) {
+        if (!rec || rec.owner !== owner || rec.spec?.bot !== true) continue;
+        await this.algos.adopt(rec);
+        if (resume.has(rec.id)) {
+          await this.algos.resume(rec.id);
+          started++;
+        }
+      }
+      this.db.setMoved(owner, null);
+      this.deps.log.info('vip: took in', { owner, bots: started });
+      return { ok: true as const, session: this.secrets.issueSession(owner, SESSION_TTL_MS), started };
+    });
   }
 
   /* ------------------------------------------------------------- keys ----- */

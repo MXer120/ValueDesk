@@ -22,6 +22,7 @@ import {
   type SessionGrant,
   type SignedCopyRequest,
   type SiteTermsRecord,
+  type VipMoveView,
 } from '@copy-engine';
 import { getChainId, signTypedData, type Eip1193Provider } from '../wallet';
 
@@ -70,10 +71,22 @@ export async function signCopy(provider: Eip1193Provider, owner: string, executo
 const sessionKey = (base: string, owner: string) => `vd.copy.session:${base}:${owner.toLowerCase()}`;
 
 export class ExecutorClient {
+  private at: string;
   constructor(
-    readonly base: string,
+    base: string,
     readonly kind: 'hosted' | 'self',
-  ) {}
+  ) {
+    this.at = base;
+  }
+
+  get base(): string {
+    return this.at;
+  }
+
+  /** VIP: the hosted client talks to the VIP executor from now on (its own tokens, its own data). */
+  setBase(base: string): void {
+    this.at = base;
+  }
 
   private async call<T>(method: 'GET' | 'POST', path: string, o: { body?: unknown; token?: string | null; pairing?: string | null } = {}): Promise<T> {
     const headers: Record<string, string> = { Accept: 'application/json' };
@@ -175,6 +188,48 @@ export class ExecutorClient {
   deleteKey = (request: SignedCopyRequest) => this.call<MeResponse>('POST', '/keys/delete', { body: { request } });
   subscribe = (request: SignedCopyRequest) => this.call<CopyView>('POST', '/copies', { body: { request } });
   act = (request: SignedCopyRequest) => this.call<{ copies: CopyView[] }>('POST', '/copies/action', { body: { request } });
+  /** VIP: start moving this wallet's bots (standard executor), and follow it. */
+  vipMove = (request: SignedCopyRequest) => this.call<{ job: VipMoveView }>('POST', '/vip/move', { body: { request } });
+  vipJob = (token: string) => this.call<{ job: VipMoveView | null }>('GET', '/vip/move', { token });
+  health = () => this.call<{ ok: boolean }>('GET', '/health');
 }
 
 export const hostedExecutor = new ExecutorClient(HOSTED_BASE, 'hosted');
+
+/**
+ * VIP (owner 2026-11-08): a wallet whose bots moved to the VIP executor (AWS Tokyo) talks to it through this base;
+ * the edge routes it there as /api/copy to the standard one. Which wallet moved is the standard executor's record
+ * (MeResponse.movedTo); this browser keeps it too, so the page goes there first.
+ */
+export const VIP_BASE = '/api/copy-vip/v1';
+const VIP_KEY = 'vs.vip.moved';
+export const vipClient = new ExecutorClient(VIP_BASE, 'hosted');
+export function vipMoved(owner: string): boolean {
+  try {
+    return (localStorage.getItem(VIP_KEY) ?? '').split(',').includes(owner.toLowerCase());
+  } catch {
+    return false;
+  }
+}
+export function setVipMoved(owner: string, on: boolean): void {
+  try {
+    const xs = new Set((localStorage.getItem(VIP_KEY) ?? '').split(',').filter(Boolean));
+    if (on) xs.add(owner.toLowerCase());
+    else xs.delete(owner.toLowerCase());
+    localStorage.setItem(VIP_KEY, [...xs].join(','));
+  } catch {
+    /* private mode: the standard executor's record still sends the page there */
+  }
+}
+/** Point the hosted client at the wallet's executor: VIP when it moved there. */
+export function pointHostedAt(owner: string | null): void {
+  hostedExecutor.setBase(owner && vipMoved(owner) ? VIP_BASE : HOSTED_BASE);
+}
+/** Keep a session token the VIP executor issued in a move (no second signature). */
+export function keepVipSession(owner: string, g: { token: string; expiresAt: number }): void {
+  try {
+    sessionStorage.setItem(sessionKey(VIP_BASE, owner.toLowerCase()), JSON.stringify(g));
+  } catch {
+    /* private mode */
+  }
+}

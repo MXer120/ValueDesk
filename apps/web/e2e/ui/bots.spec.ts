@@ -278,3 +278,43 @@ h.test('a practice market maker: set up, New bot with the gate, its page, settin
   assert.deepEqual(signedKinds(wallet, mark), ['copy-sign-in'], 'returning wallet: sign in only, no second terms signature');
   assert.equal(await again.getByRole('checkbox', { name: /^I am at least 18/ }).count(), 0, 'no terms form');
 }, { path: '/bots', timeout: 300_000 });
+
+h.test('VIP: a practice bot moves to the VIP executor with one signature, full screen, in under 20 seconds, and runs on', async ({ page, wallet }) => {
+  if (await comingSoon(page)) return;
+  await connectWallet(page);
+  await page.getByRole('heading', { name: 'Bots', exact: true }).waitFor();
+  await setUp(page, wallet);
+  await go(page, 'New bot', 'New bot');
+  const next = page.getByRole('button', { name: /^Next/ });
+  for (let i = 0; i < 6; i++) await next.click();
+  await page.getByRole('button', { name: 'Start practice bot', exact: true }).click();
+  await page.getByRole('dialog', { name: /^Start / }).getByRole('button', { name: 'Start practice bot', exact: true }).click();
+  await page.waitForURL((u) => /^\/bots\/[^/]+$/.test(u.pathname) && !['/bots/new', '/bots/explore', '/bots/savings'].includes(u.pathname), { timeout: 30_000 });
+  const id = new URL(page.url()).pathname.split('/')[2]!;
+  await until(page, async () => (await headState(page)).includes('Running'), 'it runs', 30_000);
+
+  await go(page, 'Savings', 'Savings');
+  const panel = page.locator('.bots-vip');
+  await panel.getByRole('button', { name: 'Move to VIP', exact: true }).waitFor({ state: 'visible', timeout: 20_000 });
+  await shot(page, 'vip-panel');
+  const mark = wallet.mark();
+  await panel.getByRole('button', { name: 'Move to VIP', exact: true }).click();
+  await page.getByRole('dialog', { name: /Move your bots to the VIP servers/ }).getByRole('button', { name: 'Move to VIP', exact: true }).click();
+  const scene = page.locator('.bots-vipmove');
+  await scene.waitFor({ state: 'visible' });
+  await page.waitForTimeout(700);
+  await shot(page, 'vip-moving');
+  await page.locator('.bots-vipmove.is-done').waitFor({ state: 'visible', timeout: 20_000 });
+  const secs = Number((await scene.locator('.bots-vipmove__clock b').textContent())?.replace(/[^0-9.]/g, ''));
+  assert.ok(secs > 0 && secs < 20, `moved in ${secs} s`);
+  await page.waitForTimeout(1_200);
+  await shot(page, 'vip-done');
+  assert.equal(wallet.since(mark).filter((r) => r.outcome === 'signed').length, 1, 'one signature');
+  await scene.getByRole('button', { name: 'Done', exact: true }).click();
+  await panel.getByText('VIP · AWS Tokyo').waitFor({ state: 'visible', timeout: 20_000 });
+
+  // The same bot, same id, running on the VIP executor.
+  await page.goto(new URL(`/bots/${id}`, page.url()).toString());
+  await until(page, async () => (await headState(page)).includes('Running'), 'it runs on VIP', 30_000);
+  await shot(page, 'vip-bot');
+}, { path: '/bots', timeout: 300_000 });

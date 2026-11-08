@@ -10,7 +10,7 @@ import { join } from 'node:path';
  */
 import { secp256k1 } from '@noble/curves/secp256k1';
 import { bytesToHex, hexToBytes, privateKeyToAddress } from '../../../packages/sodex-core/src/index.ts';
-import { BOT_FEE, COPY_FEE_LADDER, COPY_TERMS_VERSION, buildCopyRequest, copyRequestDigest, type AlgoRecord, type CopyAction, type FetchLike, type WebSocketLike } from '../../../packages/copy-engine/src/index.ts';
+import { BETA_VIP_DAYS, BOT_FEE, BOT_FEE_LADDER, BOT_FEE_VIP, COPY_FEE_LADDER, COPY_TERMS_VERSION, buildCopyRequest, copyRequestDigest, type AlgoRecord, type CopyAction, type FetchLike, type WebSocketLike } from '../../../packages/copy-engine/src/index.ts';
 import { loadConfig, type ExecutorConfig } from '../src/config.ts';
 import { ExecutorDb } from '../src/db.ts';
 import { Secrets } from '../src/secrets.ts';
@@ -74,16 +74,15 @@ const code = async (p: Promise<unknown> | (() => unknown)): Promise<string> => {
   }
 };
 
-test('bots: the executor advertises them and their fee; their orders carry 0.1 bp, every other algo the copy ladder', async () => {
+test('bots: the executor advertises them and their fee ladder; a bot is charged by the bot ladder (0.5 bp with no volume known), every other algo the copy ladder', async () => {
   const { svc, cleanup } = make();
   const ctx = { viewerCountry: 'SG' };
   const info = svc.info(ctx);
   assert.ok(info.features?.includes('bots'));
-  assert.deepEqual(info.bots, { fee: BOT_FEE });
-  assert.equal(BOT_FEE, 1);
+  assert.deepEqual(info.bots, { fee: BOT_FEE, ladder: BOT_FEE_LADDER, vipFee: BOT_FEE_VIP, betaVipDays: BETA_VIP_DAYS });
   const fee = (spec: Record<string, unknown>) => (svc as unknown as { algoFee(a: Pick<AlgoRecord, 'owner' | 'spec'>): Promise<number> }).algoFee({ owner: '0x' + '1'.repeat(40), spec: spec as never });
-  assert.equal(await fee({ kind: 'mm', bot: true }), BOT_FEE);
-  assert.equal(await fee({ kind: 'dca', bot: true }), BOT_FEE, 'a bot DCA stored before they left the Bots page keeps the bot fee');
+  assert.equal(await fee({ kind: 'mm', bot: true }), BOT_FEE_LADDER[0]!.fee);
+  assert.equal(await fee({ kind: 'dca', bot: true }), BOT_FEE_LADDER[0]!.fee, 'a bot DCA stored before they left the Bots page keeps the bot fee');
   assert.equal(await fee({ kind: 'dca' }), COPY_FEE_LADDER[0]!.fee, 'a plain DCA stays on the copy ladder');
   assert.equal(await fee({ kind: 'twap' }), COPY_FEE_LADDER[0]!.fee);
   await cleanup();

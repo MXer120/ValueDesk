@@ -59,6 +59,8 @@ CREATE TABLE IF NOT EXISTS keys (
   PRIMARY KEY (owner, slot)
 ) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS terms (owner TEXT PRIMARY KEY, json TEXT NOT NULL) WITHOUT ROWID;
+-- A wallet whose bots moved to the VIP executor (the page then talks to that one).
+CREATE TABLE IF NOT EXISTS moves (owner TEXT PRIMARY KEY, tier TEXT NOT NULL, at INTEGER NOT NULL) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS consents (
   seq INTEGER PRIMARY KEY AUTOINCREMENT,
   owner TEXT NOT NULL,
@@ -491,6 +493,27 @@ export class ExecutorDb implements CopyStore, AlgoStore, LatencyStore {
 
   setTerms(owner: string, t: TermsRecord): void {
     this.q('INSERT INTO terms (owner, json) VALUES (?, ?) ON CONFLICT (owner) DO UPDATE SET json = excluded.json').run(owner, JSON.stringify(t));
+  }
+
+  /* ---------------------------------------------------------- moves ----- */
+
+  moved(owner: string): { tier: string; at: number } | null {
+    const r = this.q('SELECT tier, at FROM moves WHERE owner = ?').get(owner) as Row | undefined;
+    return r ? { tier: String(r.tier), at: Number(r.at) } : null;
+  }
+
+  setMoved(owner: string, tier: string | null): void {
+    if (tier === null) this.q('DELETE FROM moves WHERE owner = ?').run(owner);
+    else this.q('INSERT INTO moves (owner, tier, at) VALUES (?, ?, ?) ON CONFLICT (owner) DO UPDATE SET tier = excluded.tier, at = excluded.at').run(owner, tier, Date.now());
+  }
+
+  /** A wallet's signed record (its terms and every request it signed), for a VIP move. */
+  ownerRecord(owner: string): { terms: unknown; consents: ConsentRow[] } {
+    const rows = this.q('SELECT owner, action, digest, signature, chain_id, payload, nonce, at, viewer_country FROM consents WHERE owner = ? ORDER BY seq').all(owner) as Row[];
+    return {
+      terms: this.terms(owner),
+      consents: rows.map((r) => ({ owner: String(r.owner), action: String(r.action), digest: String(r.digest), signature: String(r.signature), chainId: Number(r.chain_id), payload: String(r.payload), nonce: String(r.nonce), at: Number(r.at), viewerCountry: r.viewer_country === null ? null : String(r.viewer_country) })),
+    };
   }
 
   /* ------------------------------------------------------- consents ----- */

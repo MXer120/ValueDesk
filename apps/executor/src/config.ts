@@ -79,6 +79,16 @@ export interface ExecutorConfig {
    * EXECUTOR_BUILDER_URL (same server); neither: no calendar, and a news gate stays open (it says so).
    */
   calendarUrl: string | null;
+  /**
+   * VIP (vip.ts): EXECUTOR_TIER 'standard' (default) or 'vip' (the AWS Tokyo box). A standard executor with
+   * EXECUTOR_VIP_URL (the VIP executor's API base, e.g. https://vip.internal/api/copy/v1) offers the move; it asks
+   * EXECUTOR_VIP_CHECK_URL (else the builder URL's server /api/vs/bots/vip) whether a wallet is VIP, unless
+   * EXECUTOR_VIP_OPEN=1 (tests, local runs). Both sides use EXECUTOR_BUILDER_TOKEN as the internal token.
+   */
+  tier: 'standard' | 'vip';
+  vipUrl: string | null;
+  vipCheckUrl: string | null;
+  vipOpen: boolean;
   localAddress: string | null;
   logLevel: 'debug' | 'info' | 'warn' | 'error';
   /** The executor id requests are signed for; null = the default (hosted: by network; self: its own, kept in its data). */
@@ -152,6 +162,17 @@ export function calendarUrlFrom(raw: string | undefined, builderRaw: string | un
   return u.toString();
 }
 
+/** EXECUTOR_VIP_CHECK_URL, else the builder URL's server with /api/vs/bots/vip. */
+export function vipCheckUrlFrom(raw: string | undefined, builderRaw: string | undefined): string | null {
+  if (raw?.trim()) return builderUrl(raw);
+  const b = builderUrl(builderRaw);
+  if (!b) return null;
+  const u = new URL(b);
+  u.pathname = '/api/vs/bots/vip';
+  u.search = '';
+  return u.toString();
+}
+
 /** EXECUTOR_LIVE_ALGOS_WALLETS: unset is no wallet; '*' every wallet; else a list of addresses. */
 export function liveAlgoWalletsFrom(raw: string | undefined): readonly string[] | '*' {
   const s = raw?.trim() ?? '';
@@ -214,6 +235,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ExecutorConfig
     builderToken: env.EXECUTOR_BUILDER_TOKEN?.trim() || null,
     betaUrl: betaUrlFrom(env.EXECUTOR_BETA_URL, env.EXECUTOR_BUILDER_URL),
     calendarUrl: calendarUrlFrom(env.EXECUTOR_CALENDAR_URL, env.EXECUTOR_BUILDER_URL),
+    tier: env.EXECUTOR_TIER?.trim() === 'vip' ? 'vip' : 'standard',
+    vipUrl: env.EXECUTOR_VIP_URL?.trim() ? builderUrl(env.EXECUTOR_VIP_URL) : null,
+    vipCheckUrl: vipCheckUrlFrom(env.EXECUTOR_VIP_CHECK_URL, env.EXECUTOR_BUILDER_URL),
+    vipOpen: env.EXECUTOR_VIP_OPEN?.trim() === '1',
     localAddress: env.EXECUTOR_LOCAL_ADDRESS?.trim() || null,
     logLevel: level === 'debug' || level === 'warn' || level === 'error' ? level : 'info',
     executorId,

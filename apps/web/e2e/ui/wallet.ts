@@ -31,8 +31,8 @@ import type { BrowserContext, Page } from 'playwright-core';
 import { generatePrivateKey } from 'viem/accounts';
 import { createKeyProvider, type KeyProvider, type ProviderEvent, type TypedDataSeen } from '../live/provider';
 
-export type Signable = 'trading-key' | 'builder' | 'site-terms' | 'copy-terms' | 'copy-sign-in' | 'copy-key' | 'algo' | 'username';
-export const SIGNABLE: readonly Signable[] = ['trading-key', 'builder', 'site-terms', 'copy-terms', 'copy-sign-in', 'copy-key', 'algo', 'username'];
+export type Signable = 'trading-key' | 'builder' | 'site-terms' | 'copy-terms' | 'copy-sign-in' | 'copy-key' | 'algo' | 'username' | 'vip-move';
+export const SIGNABLE: readonly Signable[] = ['trading-key', 'builder', 'site-terms', 'copy-terms', 'copy-sign-in', 'copy-key', 'algo', 'username', 'vip-move'];
 
 /** Which of the allowed signatures this typed data is, or null. */
 export function signableOf(td: Pick<TypedDataSeen, 'primaryType' | 'message'>): Signable | null {
@@ -46,6 +46,7 @@ export function signableOf(td: Pick<TypedDataSeen, 'primaryType' | 'message'>): 
     if (action === 'session') return 'copy-sign-in';
     if (action === 'create-key') return 'copy-key';
     if (action === 'algo-start' || action === 'algo-action') return 'algo';
+    if (action === 'vip-move') return 'vip-move';
   }
   return null;
 }

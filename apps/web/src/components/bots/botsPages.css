@@ -916,3 +916,88 @@
 .bots-tgate__list li { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 8px; background: rgb(var(--ink) / 0.04); font-size: 12.5px; }
 .bots-tgate__list li input { width: 68px; }
 .bots-tgate__say > span { flex: none; }
+
+/* VIP servers (BotsVip): the panel. */
+.bots-vip__b { display: flex; flex-direction: column; gap: 14px; }
+.bots-vip__bars { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.bots-vip__bars > div { display: flex; flex-direction: column; gap: 6px; }
+.bots-vip__bars span { font-size: 12px; color: var(--muted); }
+.bots-vip__bars b { font-family: var(--font-num); font-size: 13px; font-weight: 500; }
+.bots-vip__perks { display: flex; flex-wrap: wrap; gap: 8px 18px; margin: 0; padding: 0; list-style: none; font-size: 12.5px; color: var(--muted); }
+.bots-vip__perks li { display: inline-flex; align-items: center; gap: 6px; }
+.bots-vip__perks svg { color: var(--pos); }
+.bots-vip__act { display: flex; align-items: center; gap: 12px; }
+.bots-vip__on { display: flex; align-items: center; gap: 14px; }
+.bots-vip__on p { margin: 0; font-size: 13px; color: var(--muted); }
+.bots-vip__badge { display: grid; place-items: center; flex: none; width: 44px; height: 44px; border-radius: 12px; background: color-mix(in srgb, var(--pos) 16%, transparent); color: var(--pos); }
+@media (max-width: 720px) { .bots-vip__bars { grid-template-columns: minmax(0, 1fr); } }
+
+/* VIP move, full screen below the navbar and beside the rail. */
+.bots-vipmove { position: fixed; z-index: 60; top: var(--navbar-h, 56px); left: var(--rail-w, 68px); right: 0; bottom: 0; display: grid; place-items: center; overflow: auto; background: var(--tf-bg, #0b0b0c); animation: vipIn 420ms var(--tf-ease, ease) both; }
+@media (max-width: 900px) { .bots-vipmove { left: 0; } }
+.bots-vipmove__bg { position: absolute; inset: 0; pointer-events: none; background:
+  radial-gradient(60% 50% at 50% 42%, color-mix(in srgb, var(--pos) 10%, transparent), transparent 70%),
+  linear-gradient(rgb(var(--ink) / 0.035) 1px, transparent 1px) 0 0 / 40px 40px,
+  linear-gradient(90deg, rgb(var(--ink) / 0.035) 1px, transparent 1px) 0 0 / 40px 40px;
+  mask-image: radial-gradient(80% 70% at 50% 45%, #000 40%, transparent 100%); }
+.bots-vipmove.is-done .bots-vipmove__bg { animation: vipGlow 1.6s var(--tf-ease, ease) both; }
+.bots-vipmove__in { position: relative; display: flex; flex-direction: column; align-items: center; gap: 22px; width: min(960px, 100%); padding: 32px 24px; }
+.bots-vipmove__head { display: flex; flex-direction: column; align-items: center; gap: 10px; text-align: center; animation: vipUp 500ms 80ms var(--tf-ease, ease) both; }
+.bots-vipmove__head h2 { margin: 0; font-size: 26px; font-weight: 600; letter-spacing: -0.01em; }
+.bots-vipmove__head p { margin: 0; max-width: 520px; font-size: 14px; color: var(--muted); }
+.bots-vipmove__stage { width: 100%; animation: vipUp 500ms 160ms var(--tf-ease, ease) both; }
+.bots-vipmove__stage svg { display: block; width: 100%; height: auto; overflow: visible; }
+.bots-vipmove__track { fill: none; stroke: rgb(var(--ink) / 0.1); stroke-width: 2; }
+.bots-vipmove__flow { fill: none; stroke-width: 2.5; stroke-linecap: round; stroke-dasharray: 2 14; opacity: 0.25; transition: opacity 300ms; }
+.bots-vipmove__flow.is-on { opacity: 1; animation: vipDash 0.9s linear infinite; }
+.bots-vipmove.is-done .bots-vipmove__flow { opacity: 0.6; stroke-dasharray: none; }
+.bots-vipmove__pkt circle { fill: var(--pos); filter: drop-shadow(0 0 6px color-mix(in srgb, var(--pos) 80%, transparent)); }
+.bots-vipmove__pkt { transition: opacity 400ms; }
+.bots-vipmove__node text { fill: var(--text); font-family: var(--font-num); font-size: 15px; font-weight: 600; text-anchor: middle; letter-spacing: 0.06em; }
+.bots-vipmove__core { fill: rgb(var(--ink) / 0.08); stroke: rgb(var(--ink) / 0.28); stroke-width: 1.5; transition: fill 400ms, stroke 400ms; }
+.bots-vipmove__halo { fill: none; stroke: rgb(var(--ink) / 0.12); stroke-width: 1; }
+.bots-vipmove__node.is-from .bots-vipmove__halo { animation: vipPulse 1.8s ease-out infinite; transform-origin: center; transform-box: fill-box; }
+.bots-vipmove__node.is-from.is-off { opacity: 0.4; transition: opacity 500ms; }
+.bots-vipmove__node.is-from.is-off .bots-vipmove__halo { animation: none; }
+.bots-vipmove__node.is-to .bots-vipmove__core { stroke: color-mix(in srgb, var(--pos) 55%, transparent); }
+.bots-vipmove__node.is-to.is-lit .bots-vipmove__core { fill: color-mix(in srgb, var(--pos) 22%, transparent); stroke: var(--pos); }
+.bots-vipmove__ring { fill: none; stroke: var(--pos); stroke-width: 2; opacity: 0; transform-origin: center; transform-box: fill-box; }
+.bots-vipmove__node.is-to.is-lit .bots-vipmove__ring { animation: vipBurst 1.2s var(--tf-ease, ease) both; }
+.bots-vipmove__node.is-to .bots-vipmove__halo { stroke: color-mix(in srgb, var(--pos) 30%, transparent); }
+.bots-vipmove__sites { display: grid; grid-template-columns: 1fr auto 1fr; align-items: start; margin-top: -14px; padding: 0 6%; }
+.bots-vipmove__sites > span { display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
+.bots-vipmove__sites > span:last-child { align-items: flex-end; text-align: right; }
+.bots-vipmove__sites small { color: var(--muted); font-size: 12px; }
+.bots-vipmove__sites > .bots-vipmove__clock { align-items: center; }
+.bots-vipmove__clock b { font-family: var(--font-num); font-size: 40px; font-weight: 500; line-height: 1; letter-spacing: -0.02em; }
+.bots-vipmove__clock b small { margin-left: 2px; font-size: 18px; color: var(--muted); }
+.bots-vipmove.is-done .bots-vipmove__clock b { color: var(--pos); }
+.bots-vipmove__steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; width: 100%; margin: 0; padding: 0; list-style: none; animation: vipUp 500ms 240ms var(--tf-ease, ease) both; }
+.bots-vipmove__steps li { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 10px; background: rgb(var(--ink) / 0.03); border: 1px solid var(--panel-line); font-size: 13px; color: var(--dim); transition: color 250ms, background-color 250ms, border-color 250ms; }
+.bots-vipmove__steps li.is-run { color: var(--text); border-color: rgb(var(--ink) / 0.22); background: rgb(var(--ink) / 0.05); }
+.bots-vipmove__steps li.is-done { color: var(--text); }
+.bots-vipmove__steps li.is-fail { color: var(--neg); border-color: color-mix(in srgb, var(--neg) 45%, transparent); }
+.bots-vipmove__dot { display: grid; place-items: center; flex: none; width: 24px; height: 24px; border-radius: 50%; background: rgb(var(--ink) / 0.07); }
+.bots-vipmove__steps li.is-run .bots-vipmove__dot { animation: vipSpin 1s linear infinite; background: conic-gradient(var(--pos) 0 25%, rgb(var(--ink) / 0.08) 25% 100%); }
+.bots-vipmove__steps li.is-run .bots-vipmove__dot svg { animation: vipSpin 1s linear infinite reverse; }
+.bots-vipmove__steps li.is-done .bots-vipmove__dot { background: color-mix(in srgb, var(--pos) 22%, transparent); color: var(--pos); animation: vipPop 320ms var(--tf-ease, ease) both; }
+.bots-vipmove__lab { flex: 1; min-width: 0; }
+.bots-vipmove__ms { font-family: var(--font-num); font-size: 12px; color: var(--muted); }
+.bots-vipmove__act { animation: vipUp 400ms var(--tf-ease, ease) both; }
+@media (max-width: 720px) {
+  .bots-vipmove__steps { grid-template-columns: minmax(0, 1fr); }
+  .bots-vipmove__head h2 { font-size: 21px; }
+  .bots-vipmove__clock b { font-size: 30px; }
+  .bots-vipmove__sites { padding: 0; }
+}
+@keyframes vipIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes vipUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+@keyframes vipDash { to { stroke-dashoffset: -32; } }
+@keyframes vipPulse { 0% { transform: scale(0.8); opacity: 0.9; } 100% { transform: scale(1.35); opacity: 0; } }
+@keyframes vipBurst { 0% { transform: scale(0.7); opacity: 1; } 100% { transform: scale(2.1); opacity: 0; } }
+@keyframes vipGlow { 0% { filter: brightness(1); } 40% { filter: brightness(1.8); } 100% { filter: brightness(1.15); } }
+@keyframes vipSpin { to { transform: rotate(360deg); } }
+@keyframes vipPop { 0% { transform: scale(0.6); } 70% { transform: scale(1.12); } 100% { transform: scale(1); } }
+@media (prefers-reduced-motion: reduce) {
+  .bots-vipmove, .bots-vipmove *, .bots-vipmove__bg { animation: none !important; }
+}

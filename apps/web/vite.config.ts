@@ -292,6 +292,8 @@ export default defineConfig({
     proxy: DEV_PROD ? {
       // VS_DEV_EXECUTOR=local: production's data with a local executor (apps/executor on 8799), for tests that
       // must not reach the production executor (the Bots e2e). Listed first: the first matching prefix wins.
+      // VIP (copy/executor.ts VIP_BASE): the local VIP executor on 8800 (launch config bots-wt-executor-vip), as /api/copy.
+      ...(process.env.VS_DEV_EXECUTOR === 'local' ? { '/api/copy-vip': { target: 'http://127.0.0.1:8800', changeOrigin: true, rewrite: (p: string) => p.replace(/^\/api\/copy-vip/, '/api/copy') } } : {}),
       ...(process.env.VS_DEV_EXECUTOR === 'local' ? { '/api/copy': { target: 'http://127.0.0.1:8799', changeOrigin: true } } : {}),
       '/api': {
         target: PROD_SITE,
@@ -317,6 +319,11 @@ export default defineConfig({
         },
       },
     } : {
+      '/api/copy-vip': {
+        target: 'http://127.0.0.1:8800',
+        changeOrigin: true,
+        rewrite: (p: string) => p.replace(/^\/api\/copy-vip/, '/api/copy'),
+      },
       // The copy executor (apps/executor, `npm start` there): hosted, the edge routes these the same way.
       '/api/copy': {
         target: 'http://127.0.0.1:8799',

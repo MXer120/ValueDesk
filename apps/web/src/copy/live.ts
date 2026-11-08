@@ -21,6 +21,7 @@ import {
   type CopyView,
   type ExecutorInfo,
   type MeResponse,
+  type VipMoveView,
 } from '@copy-engine';
 import { tradingConfig } from '../trading/config';
 import { sodexAccountId } from '../trading/session';
@@ -28,7 +29,7 @@ import type { Eip1193Provider } from '../wallet';
 import { logger } from '../log';
 import { pollEvery } from '../exchange/visibility';
 import { BROWSER_KEY_NAME, browserCopier, type BrowserKey, type CopierRole, type PendingConfirm } from './browserCopier';
-import { DEFAULT_SELF_URL, ExecutorClient, ExecutorError, hostedExecutor, selfBase, selfUrlProblem, signCopy } from './executor';
+import { DEFAULT_SELF_URL, ExecutorClient, ExecutorError, VIP_BASE, hostedExecutor, keepVipSession, selfBase, selfUrlProblem, setVipMoved, signCopy, pointHostedAt } from './executor';
 import { MAX_BROWSER_KEY_DAYS, approveCopyFee, copyFeeApproval, copyKeyRegistered, registerCopyKey, revokeCopyKey } from './sodexSetup';
 import { acceptCopyTerms, adoptRecordedTerms, localTerms, recordPendingTerms, sendTermsTo, type LocalTerms } from './terms';
 import { requireTermsOrThrow } from '../legal/acceptance';
@@ -145,6 +146,8 @@ export async function setCopyWallet(owner: string | null, p: Eip1193Provider | n
     hosted: { ...emptySide(), info: state.hosted.info, infoError: state.hosted.infoError },
     self: { ...emptySide(), url: state.self.url, info: state.self.info, infoError: state.self.infoError },
   });
+  // VIP: a wallet whose bots moved talks to the VIP executor.
+  pointHostedAt(o);
   await browserCopier.follow(o);
   syncBrowser();
   if (o) {
@@ -176,6 +179,37 @@ async function refreshBrowserKey(): Promise<void> {
   set({ browser: { ...state.browser, keyRegistered: r ? r.ok : null } });
 }
 
+/* ---------------------------------------------------------------- VIP ----- */
+
+/** Move this wallet's bots to the VIP executor: one signature; the standard executor runs it (apps/executor vip.ts). */
+export async function startVipMove(): Promise<VipMoveView> {
+  const { owner, provider: p } = needWallet();
+  const info = state.hosted.info;
+  if (!info?.vip?.canMove) throw new Error('The VIP servers are not set up yet.');
+  // Followed with a read token from the standard executor: one now, if this tab has none.
+  await hostedExecutor.session(p, owner, info.executorId);
+  const { job } = await hostedExecutor.vipMove(await signCopy(p, owner, info.executorId, 'vip-move', { to: 'vip' }));
+  return job;
+}
+
+/** The move as it stands (the standard executor's answer). */
+export async function readVipMove(): Promise<VipMoveView | null> {
+  const owner = state.owner;
+  const t = owner ? hostedExecutor.token(owner) : null;
+  if (!t) return null;
+  return (await hostedExecutor.vipJob(t)).job;
+}
+
+/** A move that finished: the page talks to the VIP executor from now on, with the token it issued. */
+export function finishVipMove(job: VipMoveView): void {
+  const owner = state.owner;
+  if (!owner || job.state !== 'done') return;
+  if (job.session) keepVipSession(owner, job.session);
+  setVipMoved(owner, true);
+  pointHostedAt(owner);
+  void refreshHosted();
+}
+
 /* ------------------------------------------------------------- hosted ----- */
 
 export async function refreshHosted(): Promise<void> {
@@ -196,6 +230,13 @@ async function loadMe(mode: 'hosted' | 'self', token: string): Promise<void> {
   if (!client) return;
   try {
     const me = await client.me(token);
+    // The standard executor says this wallet moved to VIP (another browser moved it): go there.
+    if (mode === 'hosted' && me.movedTo === 'vip' && state.owner && hostedExecutor.base !== VIP_BASE) {
+      setVipMoved(state.owner, true);
+      pointHostedAt(state.owner);
+      void refreshHosted();
+      return;
+    }
     set({ [mode]: { ...state[mode], me, signedIn: true } } as Partial<LiveCopy>);
     // Accepted in another browser: ValueDesk's record of the current terms counts here too.
     if (mode === 'hosted' && !state.terms && state.owner === me.owner.toLowerCase()) {
