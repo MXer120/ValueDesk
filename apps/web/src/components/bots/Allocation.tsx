@@ -87,25 +87,25 @@ export function useAllocation(ctx: BotsCtx): Allocation {
 
 /* ------------------------------------------------------------------ the panel ----- */
 
-/** Blocks of the account: 100, so one block is 1%. */
-const CELLS = 100;
-
-/** The account as CELLS blocks: each copy and bot its share, in its colour, the rest free. */
-function Blocks({ a }: { a: Allocation }) {
-  const items = [...a.copies, ...a.bots];
-  const scale = Math.max(a.equity ?? 0, a.used, 1);
-  // Cumulative rounding: the blocks add up to the share in use, each item at least one block when it holds anything.
-  const cells: Array<MarginItem | null> = [];
-  let acc = 0;
-  for (const x of items) {
-    const end = Math.max(cells.length + 1, Math.round(((acc + x.usd) / scale) * CELLS));
-    acc += x.usd;
-    while (cells.length < Math.min(CELLS, end)) cells.push(x);
-  }
-  while (cells.length < CELLS) cells.push(null);
+/**
+ * The account as one line (owner 2026-11-08: "detailed should just be a line"): each segment its share, the rest the
+ * free track. When copies and bots set aside more than the account holds, the line runs to what they set aside, the
+ * account's edge is marked, and the part past it is red.
+ */
+function MarginLine({ a, segs }: { a: Allocation; segs: Array<{ id: string; usd: number; color: string; label: string }> }) {
+  const eq = a.equity ?? 0;
+  const scale = Math.max(eq, a.used, 1);
+  const over = a.equity !== null && a.used > eq + 1e-6;
+  const pct = (x: number) => `${(x / scale) * 100}%`;
   return (
-    <div className="mg-blocks" role="img" aria-label={`${fmtUsd(a.used, 0)} set aside of ${a.equity === null ? 'an unknown amount' : fmtUsd(a.equity, 0)}, in blocks of ${fmtUsd(scale / CELLS, 0)}`}>
-      {cells.map((x, i) => <i key={i} className={x ? `is-${x.kind}` : 'is-free'} style={x ? { background: x.color, animationDelay: `${i * 5}ms` } : { animationDelay: `${i * 5}ms` }} title={x ? `${x.label}: ${fmtUsd(x.usd, 0)}` : 'Free'} />)}
+    <div className="mg-line">
+      <div className="bots-alloc__bar mg-bar" role="img" aria-label={`${fmtUsd(a.used, 0)} set aside of ${a.equity === null ? 'an unknown amount' : fmtUsd(eq, 0)}`}>
+        {segs.filter((x) => x.usd > 0).map((x) => <i key={x.id} style={{ width: pct(x.usd), background: x.color }} title={`${x.label}: ${fmtUsd(x.usd, 0)}`} />)}
+        {over && <b className="mg-over" style={{ left: pct(eq), width: pct(a.used - eq) }} aria-hidden="true" />}
+      </div>
+      {over && (
+        <span className={`mg-edge${over ? ' is-over' : ''}`} style={{ left: pct(eq) }}><i aria-hidden="true" />Account {fmtUsd(eq, 0)}</span>
+      )}
     </div>
   );
 }
@@ -127,8 +127,6 @@ export function MarginPanel({ a, note, className }: { a: Allocation; note?: stri
   const [view, setView] = useStored<'simple' | 'detailed'>('vs.margin.view', 'simple');
   const eq = a.equity;
   const over = eq !== null && a.used > eq + 1e-6;
-  const scale = Math.max(eq ?? 0, a.used, 1);
-  const pct = (x: number) => `${(x / scale) * 100}%`;
   return (
     <Shell className={`bots-alloc mg${className ? ` ${className}` : ''}`}>
       <ShellHeader
@@ -148,13 +146,10 @@ export function MarginPanel({ a, note, className }: { a: Allocation; note?: stri
           <span><small><i className="is-free" />Free</small><b className={over ? 'neg' : ''}>{a.free === null ? DASH : fmtUsd(a.free, 0)}</b></span>
         </div>
         {view === 'simple' ? (
-          <div className="bots-alloc__bar mg-bar" role="img" aria-label={`Copy trading ${fmtUsd(a.copyUsd, 0)}, bots ${fmtUsd(a.botUsd, 0)}, free ${a.free === null ? 'unknown' : fmtUsd(a.free, 0)}`}>
-            {a.copyUsd > 0 && <i style={{ width: pct(a.copyUsd), background: COPY_COLOR }} title={`Copy trading: ${fmtUsd(a.copyUsd, 0)}`} />}
-            {a.botUsd > 0 && <i style={{ width: pct(a.botUsd), background: BOT_COLOR }} title={`Bots: ${fmtUsd(a.botUsd, 0)}`} />}
-          </div>
+          <MarginLine a={a} segs={[{ id: 'copy', usd: a.copyUsd, color: COPY_COLOR, label: 'Copy trading' }, { id: 'bots', usd: a.botUsd, color: BOT_COLOR, label: 'Bots' }]} />
         ) : (
           <>
-            <Blocks a={a} />
+            <MarginLine a={a} segs={[...a.copies, ...a.bots]} />
             <div className="mg-groups">
               <section>
                 <h4><i style={{ background: COPY_COLOR }} />Copy trading <b>{fmtUsd(a.copyUsd, 0)}</b></h4>
@@ -168,6 +163,7 @@ export function MarginPanel({ a, note, className }: { a: Allocation; note?: stri
             <div className="mg-free"><i className="is-free" aria-hidden="true" /><span>Free for new bots and copies</span><b className={over ? 'neg' : ''}>{a.free === null ? DASH : fmtUsd(a.free, 0)}</b><small>{eq ? `${Math.round(((a.free ?? 0) / eq) * 100)}%` : ''}</small></div>
           </>
         )}
+        {over && <p className="bots-err mg-why">Set aside counts what your bots may hold (their holding cap) and their quotes at full value, and each copy's allocation: {fmtUsd(a.used, 0)} against a {fmtUsd(eq!, 0)} account. At full holding they would trade on leverage. Lower a bot's size or holding cap, or add funds.</p>}
         {note ? <p className="bots-fine">{note}</p> : a.practice > 0 ? <p className="bots-fine">{a.practice} practice bot{a.practice === 1 ? '' : 's'} set nothing aside (they would need {fmtUsd(a.practiceUsd, 0)} for real).</p> : null}
       </Panel>
     </Shell>

@@ -322,7 +322,7 @@ h.test('VIP: a practice bot moves to the VIP executor with one signature, full s
   const margin = page.locator('.pf-margin');
   await margin.waitFor({ state: 'visible', timeout: 30_000 });
   await margin.getByText('Detailed', { exact: true }).click();
-  await margin.locator('.mg-blocks').waitFor({ state: 'visible' });
+  await margin.locator('.mg-line').waitFor({ state: 'visible' });
   await shot(page, 'portfolio-margin');
   assert.deepEqual(signedKinds(wallet, before), [], 'Portfolio reads the margin without a signature');
   await page.goto(botUrl);

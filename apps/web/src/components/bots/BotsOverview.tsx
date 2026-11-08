@@ -11,7 +11,9 @@ import { SetupProgress } from '../../copy/CopySetupSheet';
 import { openConnectDialog } from '../account/connect';
 import { CoinIcon } from '../CoinIcon';
 import { SeriesChart, type ChartSeries } from '../datachart/SeriesChart';
-import { fleetSeries, fleetTotals } from '../../bots/fleet';
+import { cleanUsd, fleetSeries, fleetTotals, fleetWindow, foldRuns } from '../../bots/fleet';
+import { useStored } from '../../hooks';
+import { ErrorBoundary } from '../ErrorBoundary';
 import { STRATEGIES, STRATEGY_INFO, botFeeWords, costPerMillion, draftFor, strategyOf, type Strategy } from '../../bots/presets';
 import { useBotLatency } from '../../bots/data';
 import { hostedExecutor } from '../../copy/executor';
@@ -103,7 +105,7 @@ type Span = '1h' | '6h' | '24h' | '7d' | 'all';
 const SPAN_MS: Record<Span, number | null> = { '1h': 3_600_000, '6h': 6 * 3_600_000, '24h': 86_400_000, '7d': 7 * 86_400_000, all: null };
 
 /** Volume and net PnL of every bot together: timeframes, series on and off, and the whole card full screen. */
-export function FleetChart({ bots, title = 'Volume and net PnL', series: given }: { bots: AlgoView[]; title?: string; series?: { volume: Array<[number, number]>; pnl: Array<[number, number]> } }) {
+export function FleetChart({ bots, title = 'Volume and net PnL', series: given }: { bots: AlgoView[]; title?: string; series?: { volume: Array<[number, number]>; pnl: Array<[number, number]>; fees: Array<[number, number]> } }) {
   const [span, setSpan] = useState<Span>('24h');
   const [showVol, setShowVol] = useState(true);
   const [showPnl, setShowPnl] = useState(true);
@@ -125,7 +127,11 @@ export function FleetChart({ bots, title = 'Volume and net PnL', series: given }
   // became a forest of thin spikes), the net PnL as its last value in each.
   const series = useMemo<ChartSeries[]>(() => {
     const vol = s.volume.filter((p) => p[0] >= from);
-    const pnl = s.pnl.filter((p) => p[0] >= from);
+    // The net PnL within the timeframe (owner 2026-11-08): zero where the timeframe starts, not the total since the
+    // first bot - the value before the window is taken off every point, and the line starts at the window's edge.
+    const base = cut ? (s.pnl.filter((p) => p[0] < from).at(-1)?.[1] ?? 0) : 0;
+    const pnl: Array<[number, number]> = s.pnl.filter((p) => p[0] >= from).map(([t, v]) => [t, v - base]);
+    if (cut && pnl.length && s.pnl.some((p) => p[0] < from)) pnl.unshift([from, 0]);
     const first = vol[0]?.[0] ?? Date.now();
     const width = (cut ?? Math.max(3_600_000, Date.now() - first)) / 50;
     const steps = [300_000, 600_000, 900_000, 1_800_000, 3_600_000, 2 * 3_600_000, 4 * 3_600_000, 6 * 3_600_000, 12 * 3_600_000, 86_400_000];
@@ -144,7 +150,8 @@ export function FleetChart({ bots, title = 'Volume and net PnL', series: given }
   const sums = useMemo(() => {
     const vol = s.volume.filter((p) => p[0] >= from).reduce((t, p) => t + p[1], 0);
     const pnl = s.pnl.filter((p) => p[0] >= from);
-    const before = s.pnl.filter((p) => p[0] < from).at(-1)?.[1] ?? (pnl[0]?.[1] ?? 0);
+    // Before the window: the last value then; a fleet that started inside the window started at 0.
+    const before = s.pnl.filter((p) => p[0] < from).at(-1)?.[1] ?? 0;
     const moved = pnl.length ? pnl[pnl.length - 1]![1] - (cut ? before : 0) : 0;
     return { vol, moved, per: vol >= 1 ? (-moved / vol) * 1_000_000 : null };
   }, [s, from, cut]);
@@ -213,6 +220,21 @@ function knownHere(address: string): boolean {
   }
 }
 
+/** Sign in, and while the wallet is open the button says it waits for the approval there (owner 2026-11-08). */
+function SignInButton({ ctx }: { ctx: BotsCtx }) {
+  const [waiting, setWaiting] = useState(false);
+  const go = async () => {
+    setWaiting(true);
+    try { await ctx.signIn(); } finally { setWaiting(false); }
+  };
+  return (
+    <span className="bots-signin">
+      <Button variant="primary" icon="wallet" loading={waiting} onClick={() => void go()}>{waiting ? 'Waiting for your wallet…' : 'Sign in'}</Button>
+      {waiting && <small className="bots-fine" role="status">Approve the sign-in in your wallet. It is a free signature and changes nothing.</small>}
+    </span>
+  );
+}
+
 function Setup({ ctx }: { ctx: BotsCtx }) {
   // Signed out (a new browser, or 30 days on): one read signature, never the terms again - they are on record.
   if (ctx.address && ctx.supported && !ctx.seen) {
@@ -223,7 +245,7 @@ function Setup({ ctx }: { ctx: BotsCtx }) {
           <p className="bots-setup__line">{knownHere(ctx.address)
             ? 'Your bots keep running. Sign in to see them and to pause, stop or close them. It changes nothing and lasts 30 days in this browser.'
             : 'It shows your bots, or the setup if this wallet has none yet. It changes nothing and lasts 30 days in this browser.'}</p>
-          <Button variant="primary" icon="wallet" onClick={() => void ctx.signIn()}>Sign in</Button>
+          <SignInButton ctx={ctx} />
         </Panel>
       </Shell>
     );
@@ -278,7 +300,7 @@ function TileControls({ v, ctx }: { v: AlgoView; ctx: BotsCtx }) {
   );
 }
 
-function BotTile({ v, ctx }: { v: AlgoView; ctx: BotsCtx }) {
+function BotTile({ v, ctx, runs = 1 }: { v: AlgoView; ctx: BotsCtx; runs?: number }) {
   const st = strategyOf(v.algo.spec) ?? 'maker';
   const b = v.bot;
   const state = botState(v);
@@ -304,6 +326,7 @@ function BotTile({ v, ctx }: { v: AlgoView; ctx: BotsCtx }) {
           </div>
           <span className="bots-tile__pills">
             {v.algo.spec.paper && <StatusPill size="sm" tone="brand">Practice</StatusPill>}
+            {runs > 1 && <StatusPill size="sm" title={`${runs} stopped runs of this bot, added up`}>{runs} runs</StatusPill>}
             <StatePill s={state} size="sm" />
           </span>
         </div>
@@ -317,7 +340,7 @@ function BotTile({ v, ctx }: { v: AlgoView; ctx: BotsCtx }) {
         <dl className="bots-tile__nums">
           <div><dt>Volume</dt><dd>{b ? fmtUsd(b.volume, 0) : DASH}</dd></div>
           <div><dt>Per $1M</dt><dd className={costCls(b?.costPerMillion)}>{fmtCost(b?.costPerMillion)}</dd></div>
-          <div><dt>Holding</dt><dd>{b ? fmtUsd(b.inventoryUsd, 0) : DASH}{cap ? <small> / {fmtUsd(cap, 0)}</small> : null}</dd></div>
+          <div><dt>Holding</dt><dd>{!b || ended ? DASH : fmtUsd(cleanUsd(b.inventoryUsd), 0)}{cap && !ended ? <small> / {fmtUsd(cap, 0)}</small> : null}</dd></div>
         </dl>
         {cap && !ended ? <ProgressBar value={hold} max={cap} size="sm" tone={hold / cap > 0.8 ? 'warning' : 'neutral'} kind="meter" label="Holding against its cap" className="bots-tile__bar" /> : <span className="bots-tile__bar is-none" />}
         <div className="bots-tile__foot">
@@ -335,26 +358,29 @@ export function BotsOverview({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
   const [q, setQ] = useState('');
   const [sort, setSort] = useState<{ k: SortKey; desc: boolean }>({ k: 'started', desc: true });
   const [page, setPage] = useState(0);
+  const [fleetSpan, setFleetSpan] = useStored<Span>('vs.bots.fleetSpan', '24h');
   const [layout, setLayout] = useState<Layout | null>(null);
   const t = useMemo(() => fleetTotals(bots), [bots]);
+  // The list: a bot's stopped runs folded into one row (foldRuns); the figures above still count every bot.
+  const folded = useMemo(() => foldRuns(bots, botName), [bots]);
   const s = useMemo(() => fleetSeries(bots, Date.now()), [bots]);
   const floor = costPerMillion(draftFor('market'), null, null, ctx.feeTenths);
   const lay: Layout = layout ?? (bots.length > 12 ? 'list' : 'tiles');
 
   const counts = useMemo(() => {
-    const c = { all: bots.length, running: 0, paused: 0, ended: 0 };
-    for (const v of bots) {
+    const c = { all: folded.list.length, running: 0, paused: 0, ended: 0 };
+    for (const v of folded.list) {
       const st = botState(v);
       if (st === 'running' || st === 'waiting' || st === 'closing') c.running++;
       else if (st === 'paused') c.paused++;
       else c.ended++;
     }
     return c;
-  }, [bots]);
+  }, [folded]);
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
-    const list = bots.filter((v) => {
+    const list = folded.list.filter((v) => {
       const st = botState(v);
       if (show === 'running' && !(st === 'running' || st === 'waiting' || st === 'closing')) return false;
       if (show === 'paused' && st !== 'paused') return false;
@@ -380,7 +406,7 @@ export function BotsOverview({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
       const c = typeof x === 'string' ? x.localeCompare(String(y)) : x - (y as number);
       return sort.desc ? -c : c;
     });
-  }, [bots, show, q, sort]);
+  }, [folded, show, q, sort]);
   const pages = Math.max(1, Math.ceil(filtered.length / PAGE));
   const at = Math.min(page, pages - 1);
   const rows = filtered.slice(at * PAGE, at * PAGE + PAGE);
@@ -402,9 +428,13 @@ export function BotsOverview({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
   // Signed in shows the bots and their stop buttons; only starting new ones waits for the setup (ctx.ready).
   const ready = ctx.seen;
   const val = (x: string) => (ready ? x : DASH);
-  const trendVol = s.volume.map((p) => p[1]);
-  const trendPnl = s.pnl.map((p) => p[1]);
-  const pnlTone = t.netPnl > 0.004 ? 'positive' : t.netPnl < -0.004 ? 'negative' : undefined;
+  // The Fleet panel's timeframe (24 hours by default): volume, net PnL (at the mark), fees and cost in it; volume and
+  // PnL sparklines both as running totals inside it.
+  const fw = useMemo(() => fleetWindow(s, SPAN_MS[fleetSpan] ? Date.now() - SPAN_MS[fleetSpan]! : -Infinity), [s, fleetSpan]);
+  const trendVol = fw.volTrend;
+  const trendPnl = fw.pnlTrend;
+  const pnlTone = fw.netPnl > 0.004 ? 'positive' : fw.netPnl < -0.004 ? 'negative' : undefined;
+  const stopped = t.bots - t.running;
 
   return (
     <>
@@ -420,29 +450,33 @@ export function BotsOverview({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
         ) : undefined}
       />
 
-      {(ctx.address || ctx.demo) && <BotsVip ctx={ctx} strip />}
+      {(ctx.address || ctx.demo) && <ErrorBoundary name="VIP" bare><BotsVip ctx={ctx} strip /></ErrorBoundary>}
 
       {!ctx.ready && (!ctx.seen || !bots.length) && <Setup ctx={ctx} />}
 
+      <ErrorBoundary name="Fleet">
       <Shell className="bots-kpis">
-        <ShellHeader icon="robot" title="Fleet" subtitle={ready ? `${t.running} of ${t.bots} running` : 'Your bots, together'} />
+        <ShellHeader icon="robot" title="Fleet" subtitle={ready ? `${t.running} running${stopped ? ` · ${stopped} stopped` : ''}` : 'Your bots, together'} aside={<Segmented value={fleetSpan} label="Fleet timeframe" onChange={setFleetSpan} options={[{ value: '24h', label: '24H' }, { value: '7d', label: '7D' }, { value: 'all', label: 'All' }]} />} />
         <div className="bots-kpigrid">
-          <StatCard index={0} label="Running" value={ready ? `${t.running}` : DASH} hint={ready ? `of ${t.bots} bots` : undefined} />
-          <StatCard index={1} label="Volume" value={val(fmtUsd(t.volume, 0))} trend={ready ? trendVol : undefined} />
-          <StatCard index={2} label="Net PnL" value={val(fmtPnl(t.netPnl))} valueTone={ready ? pnlTone : undefined} trend={ready ? trendPnl : undefined} trendTone={pnlTone ?? 'neutral'} hint="After every fee" />
-          <StatCard index={3} label="Per $1M" value={val(fmtCost(t.costPerMillion))} valueTone={ready ? costTone(t.costPerMillion) : undefined} hint="What the volume cost, net" />
-          <StatCard index={4} label="Fees paid" value={val(fmtUsd(t.tradeFees + t.builderFees, 2))} hint={`At least ${fmtUsd(floor.fees, 0)} per $1M`} />
-          <StatCard index={5} label="Holding" value={val(fmtUsd(t.holdingUsd, 0))} hint="From their own fills" />
+          <StatCard index={0} label="Running" value={ready ? `${t.running}` : DASH} hint={ready ? (stopped ? `${stopped} stopped` : `of ${t.bots} bots`) : undefined} />
+          <StatCard index={1} label="Volume" value={val(fmtUsd(fw.volume, 0))} trend={ready ? trendVol : undefined} />
+          <StatCard index={2} label="Net PnL" value={val(fmtPnl(fw.netPnl))} valueTone={ready ? pnlTone : undefined} trend={ready ? trendPnl : undefined} trendTone={pnlTone ?? 'neutral'} hint="After every fee, open positions at the mark" />
+          <StatCard index={3} label="Per $1M" value={val(fmtCost(fw.costPerMillion))} valueTone={ready ? costTone(fw.costPerMillion) : undefined} hint="What the volume cost, net" />
+          <StatCard index={4} label="Fees paid" value={val(fmtUsd(fw.fees, 2))} hint={`At least ${fmtUsd(floor.fees, 0)} per $1M`} />
+          <StatCard index={5} label="Holding" value={val(fmtUsd(cleanUsd(t.holdingUsd), 0))} hint="Running bots, now" />
         </div>
       </Shell>
 
+      </ErrorBoundary>
+
       <div className="bots-two">
-        <LatencyCard marks={marks} ctx={ctx} />
-        <FleetChart bots={ready ? bots : []} />
+        <ErrorBoundary name="Latency"><LatencyCard marks={marks} ctx={ctx} /></ErrorBoundary>
+        <ErrorBoundary name="Volume and net PnL"><FleetChart bots={ready ? bots : []} /></ErrorBoundary>
       </div>
 
-      {ready && <AllocationPanel ctx={ctx} />}
+      {ready && <ErrorBoundary name="Margin"><AllocationPanel ctx={ctx} /></ErrorBoundary>}
 
+      <ErrorBoundary name="Your bots">
       {!ready || (!bots.length && !ctx.loading) ? (
         <Shell className="bots-listcard">
           <ShellHeader icon="layers" title="Strategies" subtitle="Maker fee only, never the spread" />
@@ -482,7 +516,7 @@ export function BotsOverview({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
                 {!filtered.length ? (
                   <EmptyState icon="search" title={q ? 'No bot matches' : show === 'running' ? 'No bot running' : show === 'paused' ? 'No bot paused' : 'No stopped bot'} description={q ? 'Try another name or market.' : 'Start one with New bot.'} />
                 ) : lay === 'tiles' ? (
-                  <ul className="bots-tiles">{rows.map((v) => <BotTile key={v.algo.id} v={v} ctx={ctx} />)}</ul>
+                  <ul className="bots-tiles">{rows.map((v) => <BotTile key={v.algo.id} v={v} ctx={ctx} runs={folded.runs.get(v.algo.id)} />)}</ul>
                 ) : (
                   <div className="bots-tablewrap">
                     <table className="bots-table">
@@ -511,7 +545,7 @@ export function BotsOverview({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
                                   <BotAvatar symbol={v.algo.spec.symbol} strategy={st} size={30} />
                                   <span className="bots-who__t">
                                     <b>{botName(v)}</b>
-                                    <small>{STRATEGY_INFO[st].name}{v.algo.spec.kind === 'mm' && (v.algo.spec.stillBps ?? 0) > 0 ? ' · gate' : ''} · {v.algo.spec.paper ? 'practice' : 'real orders'}</small>
+                                    <small>{STRATEGY_INFO[st].name}{v.algo.spec.kind === 'mm' && (v.algo.spec.stillBps ?? 0) > 0 ? ' · gate' : ''} · {v.algo.spec.paper ? 'practice' : 'real orders'}{(folded.runs.get(v.algo.id) ?? 1) > 1 ? ` · ${folded.runs.get(v.algo.id)} runs` : ''}</small>
                                   </span>
                                 </span>
                               </td>
@@ -520,7 +554,7 @@ export function BotsOverview({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
                               <td className="right num" data-k="Volume">{b ? fmtUsd(b.volume, 2) : DASH}</td>
                               <td className={`right num ${b && b.netPnl > 0.004 ? 'pos' : b && b.netPnl < -0.004 ? 'neg' : ''}`} data-k="Net PnL">{fmtPnl(b?.netPnl)}</td>
                               <td className={`right num ${costCls(b?.costPerMillion)}`} data-k="Per $1M">{fmtCost(b?.costPerMillion)}</td>
-                              <td className="right num" data-k="Holding">{b ? fmtUsd(b.inventoryUsd, 2) : DASH}</td>
+                              <td className="right num" data-k="Holding">{!b || !isLive(v) ? DASH : fmtUsd(cleanUsd(b.inventoryUsd), 2)}</td>
                               <td className="right num dim" data-k="Started">{new Date(v.algo.startedAt ?? v.algo.createdAt).toISOString().slice(5, 16).replace('T', ' ')}</td>
                               <td className="right"><Controls v={v} ctx={ctx} /></td>
                             </tr>
@@ -542,6 +576,7 @@ export function BotsOverview({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
           </Panel>
         </Shell>
       )}
+      </ErrorBoundary>
     </>
   );
 }

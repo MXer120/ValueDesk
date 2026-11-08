@@ -1487,3 +1487,14 @@ html[data-glass] .bots-page { background: transparent; }
 .vipshare__note { margin: 10px 0 0; font-size: 12.5px; color: #f6dc8e; }
 .vipshare__act .vipx-later { display: inline-flex; align-items: center; gap: 6px; }
 .vipshare__act .vipx-icon { width: 40px; height: 40px; }
+
+/* Margin as one line with the account's edge (Allocation.tsx MarginLine). */
+.mg-line { position: relative; padding-bottom: 20px; }
+.mg-line .mg-bar { position: relative; overflow: hidden; }
+.mg-over { position: absolute; top: 0; bottom: 0; background: repeating-linear-gradient(135deg, rgba(239, 74, 60, 0.85) 0 6px, rgba(239, 74, 60, 0.45) 6px 12px); }
+.mg-edge { position: absolute; top: -3px; display: flex; flex-direction: column; align-items: center; transform: translateX(-50%); font-size: 11px; color: var(--muted); white-space: nowrap; pointer-events: none; }
+.mg-edge i { width: 2px; height: 14px; border-radius: 1px; background: rgb(var(--ink) / 0.7); margin-bottom: 3px; }
+.mg-edge.is-over { color: var(--neg); }
+.mg-edge.is-over i { background: var(--neg); }
+.mg-why { margin: 0; font-size: 12.5px; }
+.bots-signin { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 10px; }

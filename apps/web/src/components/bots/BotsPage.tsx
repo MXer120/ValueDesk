@@ -16,6 +16,7 @@
  */
 import { playVip } from '../../bots/vipDemo';
 import { BotsVip } from './BotsVip';
+import { ErrorBoundary } from '../ErrorBoundary';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { AlgoView } from '@copy-engine';
 import { FINAL_STATUSES } from '@copy-engine';
@@ -152,7 +153,12 @@ function BotsPageOpen({ address, provider }: { address: string | null; provider:
   const view = useBotsView();
   const live = useLiveCopy(address, provider);
   const signedIn = readiness(live, 'hosted').connected;
-  const { bots, loading, error, start, act, stopAll, update, focus } = useBots(address, signedIn);
+  const { bots: read, loading, error, start, act, stopAll, update, focus } = useBots(address, signedIn);
+  // A stopped bot holds nothing any more (it closed or handed over what it held; a test runner may have flattened it),
+  // and an amount under half a cent is 0, not -0.00 (owner 2026-11-08).
+  const bots = useMemo(() => read.map((v) => (!v.bot ? v : FINAL_STATUSES.has(v.algo.status)
+    ? { ...v, bot: { ...v.bot, inventory: 0, inventoryUsd: 0, orders: [] } }
+    : Math.abs(v.bot.inventoryUsd) < 0.005 ? { ...v, bot: { ...v.bot, inventoryUsd: 0 } } : v)), [read]);
   // The bot whose page is open is read every second.
   const focusId = view.page === 'bot' ? view.id : null;
   useEffect(() => { focus(focusId); }, [focus, focusId]);
@@ -386,9 +392,11 @@ function BotsPageOpen({ address, provider }: { address: string | null; provider:
             <Switch checked={demo} onChange={setDemo} label="Demo data" />
           </div>
         )}
-        {settling && !demo && view.page !== 'explore' ? <BotsSettling /> : page}
+        {/* One section failing never takes the Bots pages down (owner 2026-11-08): the page has its own boundary, reset
+            when another page is opened, and the Overview one per panel. */}
+        <ErrorBoundary key={view.page} name="This page" bare>{settling && !demo && view.page !== 'explore' ? <BotsSettling /> : page}</ErrorBoundary>
       </div>
-      {BOTS_ON && <BotsVip ctx={c} stage />}
+      {BOTS_ON && <ErrorBoundary name="VIP" bare><BotsVip ctx={c} stage /></ErrorBoundary>}
       <BotSetupSheet open={!!setup} onClose={() => setSetup(null)} live={live} paper={setup?.paper ?? true} />
       {dialog}
     </div>

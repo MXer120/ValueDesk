@@ -20,6 +20,8 @@ interface Props {
   /** Shown in the fallback so the user knows which panel failed. */
   name: string;
   children: ReactNode;
+  /** No heading over the fallback (a whole page, or a section with its own title around it). */
+  bare?: boolean;
 }
 
 interface State {
@@ -48,7 +50,7 @@ export class ErrorBoundary extends Component<Props, State> {
 
     return (
       <section className="panel">
-        <h2>{this.props.name}</h2>
+        {!this.props.bare && <h2>{this.props.name}</h2>}
         <LoadFailed what={this.props.name} onRetry={this.retry} crashed />
       </section>
     );
@@ -56,6 +58,6 @@ export class ErrorBoundary extends Component<Props, State> {
 }
 
 /** Convenience wrapper so App stays readable. */
-export const Guarded = ({ name, children }: Props) => (
-  <ErrorBoundary name={name}>{children}</ErrorBoundary>
+export const Guarded = ({ name, children, bare }: Props) => (
+  <ErrorBoundary name={name} bare={bare}>{children}</ErrorBoundary>
 );

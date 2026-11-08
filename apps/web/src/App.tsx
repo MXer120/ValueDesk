@@ -639,7 +639,7 @@ function AppShell() {
         )}
 
         {shown === 'bots' && (
-          <Guarded name="Bots"><BotsPage address={address} provider={provider} /></Guarded>
+          <Guarded name="Bots" bare><BotsPage address={address} provider={provider} /></Guarded>
         )}
 
 
