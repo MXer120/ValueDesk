@@ -9,7 +9,9 @@
  *
  * Markets are public (no wallet). The last answer stays on screen while the next one is out.
  */
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { api } from '../api';
+import { useTickers } from '../hooks';
 import { pollEvery } from '../exchange/visibility';
 
 export interface BotMarket {
@@ -101,8 +103,70 @@ function usePolled<T>(url: string | null, everyMs: number, check: (x: unknown) =
 const isMarkets = (x: unknown): x is BotMarketsResponse => !!x && typeof x === 'object' && Array.isArray((x as BotMarketsResponse).markets) && typeof (x as BotMarketsResponse).fee === 'object';
 const isLatency = (x: unknown): x is BotLatencyResponse => !!x && typeof x === 'object' && Array.isArray((x as BotLatencyResponse).regions);
 
-export const useBotMarkets = (window: '24h' | '7d' = '24h', enabled = true): Read<BotMarketsResponse> =>
+const rawBotMarkets = (window: '24h' | '7d', enabled: boolean): Read<BotMarketsResponse> =>
   usePolled(enabled ? `/api/vs/bots/markets?window=${window}` : null, 5 * 60_000, isMarkets);
+
+/**
+ * The markets' activity (volume per hour) from SoDEX's own figures (owner 2026-11-08: "activity per h needs to be
+ * actually accurate... and update live"): our trade recorder can miss prints on a market (SOL read about a fifth of
+ * SoDEX's 24 h volume), so the per-hour volume is SoDEX's - 24h: its live 24-hour quote volume (tickers, every 30 s)
+ * / 24; 7d: the sum of its last 168 hourly candles / 168 (fetched four at a time, kept 15 minutes). The other figures
+ * (who takes, spread, moves, cost) stay the server's, refreshed every 5 minutes.
+ */
+export function useBotMarkets(window: '24h' | '7d' = '24h', enabled = true): Read<BotMarketsResponse> {
+  const r = rawBotMarkets(window, enabled);
+  const tick = useTickers('perps', { enabled: enabled && window === '24h', pollMs: 30_000 });
+  // The busiest first: the rows a page shows first get SoDEX's 7-day figure first.
+  const symbols = useMemo(() => [...(r.data?.markets ?? [])].sort((x, y) => y.volumeUsdH - x.volumeUsdH).map((m) => m.symbol), [r.data]);
+  const week = useVolume7d(enabled && window === '7d' ? symbols : []);
+  return useMemo(() => {
+    if (!r.data) return r;
+    const t = (tick.data as { tickers?: Array<{ symbol?: string; quoteVolume?: string | number }> } | null)?.tickers;
+    const day = new Map<string, number>();
+    if (Array.isArray(t)) for (const x of t) { const q = Number(x.quoteVolume); if (x.symbol && Number.isFinite(q)) day.set(x.symbol, q / 24); }
+    const of = (m: BotMarket): number | undefined => (window === '24h' ? day.get(m.symbol) : week.get(m.symbol));
+    if (!day.size && !week.size) return r;
+    return { ...r, data: { ...r.data, markets: r.data.markets.map((m) => { const v = of(m); return v === undefined ? m : { ...m, volumeUsdH: v }; }) } };
+  }, [r, tick.data, week, window]);
+}
+
+const WEEK_TTL = 15 * 60_000;
+const weekCache = new Map<string, { at: number; usdH: number }>();
+const weekPending = new Set<string>();
+
+/** SoDEX's 7-day volume per hour for these markets: the last 168 hourly candles' quote volume, four reads at a time. */
+function useVolume7d(symbols: readonly string[]): Map<string, number> {
+  const [, bump] = useState(0);
+  const key = symbols.join(',');
+  useEffect(() => {
+    if (!symbols.length) return;
+    let live = true;
+    const due = symbols.filter((s) => { const c = weekCache.get(s); return (!c || Date.now() - c.at > WEEK_TTL) && !weekPending.has(s); });
+    let i = 0;
+    const next = async (): Promise<void> => {
+      while (live && i < due.length) {
+        const s = due[i++]!;
+        weekPending.add(s);
+        try {
+          const r = await api.klines('perps', s, '1h', 168);
+          const rows = (r as { klines?: Array<{ q?: string | number }> }).klines ?? [];
+          const sum = rows.reduce((t, k) => t + (Number(k.q) || 0), 0);
+          if (rows.length) weekCache.set(s, { at: Date.now(), usdH: sum / rows.length });
+        } catch { /* left as the server's */ }
+        weekPending.delete(s);
+        if (live && i % 4 === 0) bump((n) => n + 1);
+      }
+      if (live) bump((n) => n + 1);
+    };
+    void Promise.all([next(), next(), next(), next()]);
+    const t = window.setInterval(() => bump((n) => n + 1), WEEK_TTL);
+    return () => { live = false; window.clearInterval(t); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+  const out = new Map<string, number>();
+  for (const s of symbols) { const c = weekCache.get(s); if (c) out.set(s, c.usdH); }
+  return out;
+}
 
 /** This wallet's own bots' latency, or one bot's (`bot`); nothing is read without its session (token null). */
 export const useBotLatency = (hours: number, token: string | null, bot?: string): Read<BotLatencyResponse> =>

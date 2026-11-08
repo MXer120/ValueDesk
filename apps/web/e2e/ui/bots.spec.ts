@@ -218,7 +218,8 @@ h.test('a practice market maker: set up, New bot with the gate, its page, settin
   await page.waitForURL((u) => /^\/bots\/[^/]+$/.test(u.pathname) && u.pathname !== `/bots/${first}`, { timeout: 30_000 });
   assert.deepEqual(signedKinds(wallet, mark), ['algo'], 'one signature to restart');
   const id = new URL(page.url()).pathname.split('/')[2]!;
-  await until(page, async () => (await headState(page)).includes('Running'), 'the new one runs', 40_000);
+  // A clean restart's new bot can wait on its oracle price first (the local executor's feed warming up): 90 s.
+  await until(page, async () => (await headState(page)).includes('Running'), 'the new one runs', 90_000);
   assert.equal(await page.locator('.bots-head').getByText('Gate on', { exact: true }).count(), 0, 'the gate is off');
 
   // Pause and resume.
