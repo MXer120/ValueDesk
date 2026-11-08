@@ -1,5 +1,5 @@
 /**
- * VIP servers (owner 2026-11-08): a wallet with over $1M of 14-day volume, or over 1% of ValueDesk's, may move its
+ * VIP servers (owner 2026-11-08): a wallet with $1M of its own 14-day volume may move its
  * bots to the VIP executor on AWS Tokyo. The panel shows how close the wallet is; the move is one signature, run
  * server to server (apps/executor vip.ts), and the page follows it full screen: the two server sites, the bots
  * travelling between them, each step as it lands and the clock (the owner's bar: under 20 seconds).
@@ -13,7 +13,7 @@ import { useConfirm } from '../Modal';
 import type { BotsCtx } from './BotsPage';
 import { Button, Icon, Panel, ProgressBar, Shell, ShellHeader, StatusPill } from './kit/kit';
 
-interface Eligibility { eligible: boolean; volumeUsd: number; minUsd: number; share: number; minShare: number; days: number }
+interface Eligibility { eligible: boolean; volumeUsd: number; minUsd: number; days: number }
 
 /** The wallet's VIP standing (server routes/builder.ts /api/vs/bots/vip); null while unknown or unreadable. */
 function useEligibility(address: string | null): Eligibility | null {
@@ -184,13 +184,12 @@ export function BotsVip({ ctx }: { ctx: BotsCtx }) {
   };
 
   const volPct = el ? Math.min(1, el.volumeUsd / el.minUsd) : 0;
-  const sharePct = el ? Math.min(1, el.share / el.minShare) : 0;
   return (
     <>
       {dialog}
       {open && <MoveScene job={job} from={fromAt} to="AWS Tokyo" onClose={() => { setOpen(false); setJob(null); }} />}
       <Shell className="bots-vip">
-        <ShellHeader icon="bolt" title="VIP servers" subtitle={onVip ? 'Your bots run on AWS Tokyo.' : 'Over $1M in 14 days, or over 1% of all ValueDesk volume.'} aside={onVip ? <StatusPill tone="positive" dot>VIP · AWS Tokyo</StatusPill> : el?.eligible ? <StatusPill tone="positive" dot>Unlocked</StatusPill> : null} />
+        <ShellHeader icon="bolt" title="VIP servers" subtitle={onVip ? 'Your bots run on AWS Tokyo.' : 'Unlocks at $1M of your volume in 14 days.'} aside={onVip ? <StatusPill tone="positive" dot>VIP · AWS Tokyo</StatusPill> : el?.eligible ? <StatusPill tone="positive" dot>Unlocked</StatusPill> : null} />
         <Panel className="bots-vip__b">
           {onVip ? (
             <div className="bots-vip__on">
@@ -199,16 +198,11 @@ export function BotsVip({ ctx }: { ctx: BotsCtx }) {
             </div>
           ) : (
             <>
-              <div className="bots-vip__bars">
+              <div className="bots-vip__bars is-one">
                 <div>
                   <span>14-day volume</span>
                   <ProgressBar value={volPct} max={1} size="md" color="var(--pos)" label="14-day volume toward VIP" />
                   <b>{el ? `${fmtUsd(el.volumeUsd, 0)} of ${fmtUsd(el.minUsd, 0)}` : '—'}</b>
-                </div>
-                <div>
-                  <span>Share of ValueDesk volume</span>
-                  <ProgressBar value={sharePct} max={1} size="md" color="var(--pos)" label="Share of ValueDesk volume toward VIP" />
-                  <b>{el ? `${(el.share * 100).toFixed(2)}% of ${(el.minShare * 100).toFixed(0)}%` : '—'}</b>
                 </div>
               </div>
               <ul className="bots-vip__perks">
@@ -220,7 +214,7 @@ export function BotsVip({ ctx }: { ctx: BotsCtx }) {
               <div className="bots-vip__act">
                 <Button variant="primary" size="md" icon="bolt" disabled={!canMove || !ctx.ready} onClick={() => void move()}>Move to VIP</Button>
                 {!info?.vip?.canMove && <small className="bots-fine">The VIP servers open soon.</small>}
-                {info?.vip?.canMove && !canMove && <small className="bots-fine">Unlocks at either bar.</small>}
+                {info?.vip?.canMove && !canMove && <small className="bots-fine">Unlocks at $1M in 14 days.</small>}
               </div>
             </>
           )}

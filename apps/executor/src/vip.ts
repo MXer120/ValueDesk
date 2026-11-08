@@ -1,5 +1,5 @@
 /**
- * VIP move (owner 2026-11-08): a wallet with over $1M of 14-day volume, or over 1% of ValueDesk's, moves its bots
+ * VIP move (owner 2026-11-08): a wallet with $1M of its own 14-day volume moves its bots
  * from the standard executor to the VIP one (AWS Tokyo) with ONE signature, server to server, in seconds:
  *
  *   check   the API server says the wallet is VIP (EXECUTOR_VIP_CHECK_URL); no copy or algo order of its runs here

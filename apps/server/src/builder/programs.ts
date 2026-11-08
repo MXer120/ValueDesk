@@ -1,7 +1,7 @@
 /**
  * The ValueDesk builder fee a wallet pays on each product, past its volume tier (owner 2026-11-08):
  *
- *   VIP        over $1M of counted volume in 14 days, or over 1% of all ValueDesk's (BuilderService.vipOf):
+ *   VIP        $1M of the wallet's own counted volume in 14 days (BuilderService.vipOf):
  *              the lowest tier on every product - the site's futures and spot orders, copy trading and bots
  *   programs   set on the dev page for one or many wallets: a fee (tenths of a bp, never below 0) or "VIP" on
  *              some products, from a time, until a time or until ended by hand ("VIP for 30 days", "0 for the

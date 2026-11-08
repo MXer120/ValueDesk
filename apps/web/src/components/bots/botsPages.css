@@ -1146,3 +1146,4 @@ html[data-glass] .bots-page { background: transparent; }
 .bots-stopmenu__menu.menu-popup { left: auto; right: 0; }
 .bots-stopmenu__row.menu-row { height: auto; min-height: 0; padding: 9px 10px; align-items: flex-start; }
 .bots-stopmenu__row + .bots-stopmenu__row { margin-top: 2px; }
+.bots-vip__bars.is-one { grid-template-columns: minmax(0, 1fr); }

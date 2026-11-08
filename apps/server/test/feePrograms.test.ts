@@ -94,11 +94,11 @@ test('admin store: programs for many wallets, the running ones by wallet and tim
   assert.equal(s.feePrograms().length, 2);
 });
 
-test('VIP: $1M in 14 days, or 1% of ValueDesk from $100K of its own (while ValueDesk is small, 1% is little)', () => {
-  assert.ok(isVip({ volumeUsd: 1_000_000, share: 0.001 }));
-  assert.ok(isVip({ volumeUsd: 150_000, share: 0.02 }));
-  assert.ok(!isVip({ volumeUsd: 1_750, share: 1 }), 'the only wallet, but small');
-  assert.ok(!isVip({ volumeUsd: 999_999, share: 0.009 }));
+test('VIP: $1M of the wallet\'s own 14-day volume, nothing else (owner 2026-11-08)', () => {
+  assert.ok(isVip({ volumeUsd: 1_000_000 }));
+  assert.ok(isVip({ volumeUsd: 4_500_000 }));
+  assert.ok(!isVip({ volumeUsd: 999_999 }));
+  assert.ok(!isVip({ volumeUsd: 0 }));
   assert.ok(!isVip(null));
 });
 

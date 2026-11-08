@@ -108,14 +108,11 @@ function countedOf(cfg: TiersConfig, store: BuilderStore | null, w: WalletRow | 
   }
 }
 
-/** VIP: the window and the two bars (owner 2026-11-08: ">1m 14day volume and/or >1% of valuedesk bot volume"). */
+/** VIP (owner 2026-11-08, "No its $1m of 14day volume. ignore the 1% thing"): $1M of the wallet's own counted volume in 14 days. */
 export const VIP_DAYS = 14;
 export const VIP_MIN_USD = 1_000_000;
-export const VIP_MIN_SHARE = 0.01;
-/** The share rule counts only from this much of the wallet's own 14-day volume (while ValueDesk is small, 1% is little). */
-export const VIP_SHARE_FLOOR_USD = 100_000;
-/** VIP by the owner's two bars, the share one above its floor. */
-export const isVip = (v: { volumeUsd: number; share: number } | null): boolean => !!v && (v.volumeUsd >= VIP_MIN_USD || (v.share >= VIP_MIN_SHARE && v.volumeUsd >= VIP_SHARE_FLOOR_USD));
+/** VIP by the wallet's own 14-day volume. */
+export const isVip = (v: { volumeUsd: number } | null): boolean => !!v && v.volumeUsd >= VIP_MIN_USD;
 
 export class BuilderService {
   readonly tiers: TiersSource;
@@ -235,21 +232,13 @@ export class BuilderService {
    * VIP (owner 2026-11-08): over $1M of counted volume in 14 days, or over 1% of all ValueDesk's. A wallet's
    * volume and its share, or null while the ledger is not open or no builder is set.
    */
-  private totalAt: { at: number; from: number; usd: number } | null = null;
-
-    vipOf(address: string, days = VIP_DAYS): { volumeUsd: number; totalUsd: number; share: number } | null {
+  /** A wallet's own counted volume over the VIP window, or null while the ledger is not open or no builder is set. */
+  vipOf(address: string, days = VIP_DAYS): { volumeUsd: number } | null {
     const store = this.store;
     const cfg = this.tiers.current();
     if (!store || !cfg?.builderId) return null;
-    const from = dayOf(this.now()) - (days - 1);
-    const w = store.windowMicro(cfg.builderId, address, from);
-    const volumeUsd = (w.perps + w.spot) / 1e6;
-    // The whole is read at most once a minute (a sum over every wallet's days), each wallet's own every time.
-    const t = this.totalAt;
-    const fresh = !!t && t.from === from && this.now() - t.at < 60_000;
-    const totalUsd = fresh ? t!.usd : store.totalWindowMicro(cfg.builderId, from) / 1e6;
-    if (!fresh) this.totalAt = { at: this.now(), from, usd: totalUsd };
-    return { volumeUsd, totalUsd, share: totalUsd > 0 ? volumeUsd / totalUsd : 0 };
+    const w = store.windowMicro(cfg.builderId, address, dayOf(this.now()) - (days - 1));
+    return { volumeUsd: (w.perps + w.spot) / 1e6 };
   }
 
   /**
@@ -298,7 +287,7 @@ export class BuilderService {
     }
   }
 
-  /** Whether a wallet is VIP now (over $1M in 14 days, or over 1% of ValueDesk's): read from the ledger on every ask. */
+  /** Whether a wallet is VIP now ($1M of its own volume in 14 days): read from the ledger on every ask. */
   vipNow(address: string): boolean {
     return isVip(this.vipOf(address.toLowerCase()));
   }
