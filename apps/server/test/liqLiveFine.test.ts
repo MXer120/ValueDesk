@@ -206,3 +206,28 @@ test('every coin keeps its fine layer, and a reprice that leaves a position in i
   apply(freshHeld, ff);
   same(held, new Map([...freshHeld].map(([v, m]) => [v, new Map([...m].map(([i, row]) => [i, [row[1]!, row[2]!, row[3]!, row[4]!]]))])), 'as an engine built fresh');
 });
+
+test('a backlog of feed frames is worked off in slices (the API thread given back between them), ending where one piece would', async () => {
+  const { LiqFeedState } = await import('../src/indexer/liqFeed.js');
+  const coins = 400;
+  const rows = (k: number) => Array.from({ length: 300 }, (_, i) => [i, 1000 + k + i, 500 + i, 1, 1]);
+  let burst = '';
+  for (let k = 0; k < coins; k++) burst += `${JSON.stringify({ t: 'd', coin: `C${k}`, p: 100 + k, st: 1, ep: 1, whole: true, v: { hyperliquid: { b: rows(k) } } })}\n`;
+  burst += `${JSON.stringify({ t: 'tick', at: 1, ready: true })}\n`;
+  // Split mid-line, as a socket does.
+  const cut = Math.floor(burst.length / 3) + 7;
+  const s = new LiqFeedState();
+  let ticks = 0;
+  s.on('tick', () => { ticks++; });
+  s.data(burst.slice(0, cut));
+  s.data(burst.slice(cut));
+  // Not all of it at once: the rest waits for the next turns.
+  const first = s.coins.size;
+  let turns = 0;
+  while (ticks === 0 && turns < 10_000) { await new Promise<void>((r) => setImmediate(r)); turns++; }
+  assert.equal(ticks, 1);
+  assert.equal(s.coins.size, coins);
+  assert.equal(s.ready, true);
+  assert.equal(s.coins.get('C7')!.v.get('hyperliquid')!.b.get(3)![0], 1010);
+  assert.ok(first < coins || turns === 0, `first=${first} turns=${turns}`);
+});

@@ -26,6 +26,8 @@ export const LIQ_FEED_PORT = Number(process.env.VALUESCAN_LIQ_FEED_PORT) || 8796
 const HOST = '127.0.0.1';
 /** A reader that falls this far behind is dropped (it reconnects and gets every coin whole). */
 const MAX_BUFFERED = 32 * 1024 * 1024;
+/** The API reads the feed in slices of this much work, giving its thread back between them. */
+const FEED_SLICE_MS = 8;
 
 // --- indexer side --------------------------------------------------------------------------
 
@@ -165,6 +167,9 @@ export class LiqFeedState extends EventEmitter {
       this.connected = false;
       this.ready = false;
       this.buf = '';
+      // What the old socket left unread belongs to the coins that are cleared on the next connect.
+      this.queue = [];
+      this.qi = 0;
       if (this.stopped) return;
       this.timer = setTimeout(() => this.connect(), this.backoff);
       this.timer.unref?.();
@@ -174,15 +179,33 @@ export class LiqFeedState extends EventEmitter {
     sock.on('close', retry);
   }
 
-  /** Frames as they arrive (exported for tests). */
+  /**
+   * Frames as they arrive (exported for tests). Worked off in FEED_SLICE_MS slices with the socket paused between them
+   * (2026-11-08: after any hold of the API thread the indexer's backlog came in as megabytes at once, and this read all
+   * of it in one piece, cutting the buffer again for every line - 6.4 s, and the next hold right behind the last).
+   */
   data(chunk: string): void {
     mark('liq:feed');
-    this.buf += chunk;
+    const s = this.buf + chunk;
+    let start = 0;
     let i: number;
-    while ((i = this.buf.indexOf('\n')) >= 0) {
-      const line = this.buf.slice(0, i);
-      this.buf = this.buf.slice(i + 1);
-      if (!line) continue;
+    while ((i = s.indexOf('\n', start)) >= 0) {
+      if (i > start) this.queue.push(s.slice(start, i));
+      start = i + 1;
+    }
+    this.buf = start ? s.slice(start) : s;
+    this.drain();
+  }
+
+  private queue: string[] = [];
+  private qi = 0;
+  private draining = false;
+
+  private drain(): void {
+    if (this.draining) return;
+    const t0 = performance.now();
+    while (this.qi < this.queue.length) {
+      const line = this.queue[this.qi++]!;
       let f: { t?: string } & Record<string, unknown>;
       try { f = JSON.parse(line); } catch { continue; }
       if (f.t === 'd') this.apply(f as unknown as LiveDelta);
@@ -191,7 +214,20 @@ export class LiqFeedState extends EventEmitter {
         this.lastAt = Date.now();
         this.emit('tick', Number(f.at) || Date.now());
       }
+      if (this.qi < this.queue.length && performance.now() - t0 >= FEED_SLICE_MS) {
+        this.draining = true;
+        this.sock?.pause();
+        setImmediate(() => {
+          this.draining = false;
+          mark('liq:feed');
+          this.drain();
+        });
+        return;
+      }
     }
+    this.queue = [];
+    this.qi = 0;
+    if (this.sock?.isPaused()) this.sock.resume();
   }
 
   private apply(d: LiveDelta): void {
