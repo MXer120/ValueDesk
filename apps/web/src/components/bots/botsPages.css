@@ -832,3 +832,22 @@
   .bots-xbot__n { grid-column: 2; align-items: flex-start; }
 }
 @media (max-width: 720px) { .bots-wsub:not(.is-on) { display: none; } .bots-wsub.is-on::before { content: none; } .bots-wsteps__subs { flex-wrap: nowrap; white-space: nowrap; } }
+
+/* New bot v5: the picker for someone new (owner 2026-11-08): cost as the one number, the rest in a word each. */
+.bots-rrow__facts { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 6px; }
+.bots-vol { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; color: var(--muted); }
+.bots-vol__bars { display: inline-flex; align-items: flex-end; gap: 2px; height: 12px; }
+.bots-vol__bars i { width: 4px; border-radius: 1px; background: rgb(var(--ink) / 0.14); }
+.bots-vol__bars i:nth-child(1) { height: 5px; }
+.bots-vol__bars i:nth-child(2) { height: 8px; }
+.bots-vol__bars i:nth-child(3) { height: 12px; }
+.bots-vol__bars i.is-on { background: var(--text, rgb(var(--ink) / 0.8)); }
+.bots-rrow__how { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--panel-line); }
+.bots-rrow__howk { display: inline-flex; align-items: center; gap: 8px; font-size: 11px; font-weight: 500; color: var(--dim); text-transform: uppercase; letter-spacing: 0.04em; }
+.bots-rrow .bots-strow__n b { font-size: 20px; }
+.bots-rrow .bots-strow__n small + small { margin-top: 1px; }
+.bots-rrow.is-best:not(.is-on) { background: rgb(var(--ink) / 0.025); }
+.bots-rrow__nc { font-size: 11.5px; color: var(--dim); }
+.bots-rc__line.is-off .bots-rc__ll, .bots-rc__line.is-off .bots-rc__bar { opacity: 0.45; }
+.bots-pickhint { display: flex; align-items: flex-start; gap: 8px; margin: 2px 0 12px; font-size: 12.5px; line-height: 1.45; color: var(--muted); }
+.bots-pickhint svg { flex: none; margin-top: 2px; color: var(--dim); }

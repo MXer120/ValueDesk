@@ -139,6 +139,12 @@ h.test('a practice market maker: set up, New bot with the gate, its page, settin
   assert.equal(await page.getByRole('tab', { name: /Market maker/ }).getAttribute('aria-selected'), 'true');
   assert.equal(await page.getByRole('radio', { name: 'Oracle maker', exact: true }).getAttribute('aria-checked'), 'true');
   assert.ok((await page.locator('.bots-rrow').count()) >= 5, 'several market makers to pick from');
+  // For someone who reads only the cost: the best bot is on top and no bot below it shows a lower cost.
+  const costs = await page.locator('.bots-rrow').evaluateAll((els) => els.map((e) => ({ best: e.classList.contains('is-best'), v: ((t) => (t.startsWith('+') ? -1 : 1) * Number(t.replace(/[^0-9.]/g, '')))(e.querySelector('.bots-strow__n b')?.textContent ?? '') })));
+  if (costs.some((c) => c.best)) {
+    assert.ok(costs[0]!.best, 'the best bot comes first');
+    assert.ok(costs.every((c) => Number.isNaN(c.v) || c.v >= costs[0]!.v), `no cheaper bot below the best: ${JSON.stringify(costs)}`);
+  }
   await shot(page, 'new-1');
   const next = page.getByRole('button', { name: /^Next/ });
   await next.click();

@@ -37,10 +37,23 @@ test('the market gate: the reading over calm minutes, and the time it quotes', (
   assert.equal(e.lines.find((l) => l.id === 'gate')?.source, 'market');
 });
 
-test('the gate with too few calm fills: the backtest figure, said so', () => {
+test('the gate with too few calm fills: the backtest saving is shown, not counted (not proven live)', () => {
   const e = estimate({ ...r10(), gate: true }, { ...M, gateCostBps: null, gateShare: null });
-  assert.ok(Math.abs(e.bp! - (1.6 + RECIPE.r10g.deltaBps)) < 1e-9);
-  assert.equal(e.lines.find((l) => l.id === 'gate')?.source, 'tests');
+  assert.equal(e.bp, 1.6);
+  const g = e.lines.find((l) => l.id === 'gate');
+  assert.equal(g?.source, 'tests');
+  assert.equal(g?.counted, false);
+  assert.equal(g?.bp, RECIPE.r10g.deltaBps);
+});
+
+test('a saving only tests show is not counted; an extra cost from tests is', () => {
+  const s1 = estimate({ ...r10(), ...RECIPE.s1.params }, M);
+  assert.equal(s1.bp, 1.6);
+  assert.equal(s1.lines.find((l) => l.id === 'bot')?.counted, false);
+  const n5 = estimate({ ...r10(), ...RECIPE.n5.params }, M);
+  assert.ok(n5.bp! > 1.6);
+  // So the cheapest shown is the best: ties go to the simpler bot (R10 ahead of S1).
+  assert.equal(bestOf(rankRecipes({ ...M, gateCostBps: null }, draftFor('market')))!.id, 'r10');
 });
 
 test('the flow gate: its bucket (the window scales the threshold); pause drops, shrink keeps it smaller', () => {

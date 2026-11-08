@@ -31,6 +31,8 @@ export interface Recipe {
   /** The test name, shown small. */
   code: string;
   line: string;
+  /** For someone new: what it is good for, in one plain sentence. */
+  plain: string;
   /** The draft fields this bot sets over the strategy's defaults. */
   params: Partial<BotDraft>;
   /** Against R10 on the same market (bp; negative is cheaper), and its volume against R10's. */
@@ -50,6 +52,7 @@ export const RECIPES: readonly Recipe[] = [
   {
     id: 'r10', category: 'market', strategy: 'market', name: 'Oracle maker', code: 'R10', tag: 'Recommended',
     line: 'Rests at the best price for up to 10 s and pulls a quote the oracle moved through.',
+    plain: 'Our default. Proven in live trading on BTC and ETH.',
     params: { ...R10, noFair: false, gate: false },
     deltaBps: 0, volumeX: 1, oracle: true, proof: 'proven',
     evidence: [
@@ -61,6 +64,7 @@ export const RECIPES: readonly Recipe[] = [
   {
     id: 'r10g', category: 'market', strategy: 'market', name: 'Calm oracle maker', code: 'R10 + gate',
     line: 'The oracle maker, quoting only after a calm minute.',
+    plain: 'The default, but it sits out when the price jumps around. Trades less.',
     params: { ...R10, noFair: false, ...GATE },
     deltaBps: -0.08, volumeX: 0.65, oracle: true, proof: 'tested',
     evidence: [
@@ -71,6 +75,7 @@ export const RECIPES: readonly Recipe[] = [
   {
     id: 's1', category: 'market', strategy: 'market', name: 'Skewed oracle maker', code: 'S1',
     line: 'The oracle maker, stepping its adding side back one tick as it holds.',
+    plain: 'The default, leaning against what it holds. Only a few test runs so far.',
     params: { ...R10, noFair: false, gate: false, skewTicks: 1 },
     deltaBps: -0.1, volumeX: 1, oracle: true, proof: 'early',
     evidence: [{ kind: 'live', what: 'BTC live, 2 rounds', bp: 1.76 }],
@@ -78,6 +83,7 @@ export const RECIPES: readonly Recipe[] = [
   {
     id: 'n5', category: 'market', strategy: 'market', name: 'Touch maker', code: 'N5',
     line: 'Rests at the best price for up to 5 s; reads the oracle only for the gate.',
+    plain: 'A simpler version that waits at the best price. Trades less.',
     params: { ...R10, restS: 5, noFair: true, gate: false },
     deltaBps: 0.1, volumeX: 0.68, oracle: true, proof: 'tested',
     evidence: [
@@ -88,6 +94,7 @@ export const RECIPES: readonly Recipe[] = [
   {
     id: 'n5g', category: 'market', strategy: 'market', name: 'Calm touch maker', code: 'N5 + gate',
     line: 'The touch maker, quoting only after a calm minute.',
+    plain: 'The simpler version, sitting out when the price jumps around.',
     params: { ...R10, restS: 5, noFair: true, ...GATE },
     deltaBps: -0.09, volumeX: 0.65, oracle: true, proof: 'tested',
     evidence: [{ kind: 'replay', what: 'BTC replay, 3 days', bp: 1.87 }],
@@ -95,6 +102,7 @@ export const RECIPES: readonly Recipe[] = [
   {
     id: 'touch', category: 'market', strategy: 'maker', name: 'Book maker', code: 'Plain',
     line: 'Quotes off SoDEX\'s own book, no oracle. Runs on every market.',
+    plain: 'Works on every market and trades the most, but usually costs more.',
     params: { offsetTicks: 0, chaseTicks: 1, minRepriceMs: 1_000, skewTicks: 0, gate: false },
     deltaBps: 0.45, volumeX: 1.2, oracle: false, proof: 'tested',
     evidence: [
@@ -105,6 +113,7 @@ export const RECIPES: readonly Recipe[] = [
   {
     id: 'grid', category: 'grid', strategy: 'grid', name: 'Range grid', code: 'Grid',
     line: 'Buys low and sells high on levels in a range. Earns every swing inside it.',
+    plain: 'Buys lower and sells higher inside a price range you set.',
     params: {},
     deltaBps: 0, volumeX: 1, oracle: false, proof: 'tested', evidence: [],
   },
@@ -112,8 +121,8 @@ export const RECIPES: readonly Recipe[] = [
 
 export const RECIPE: Record<RecipeId, Recipe> = Object.fromEntries(RECIPES.map((r) => [r.id, r])) as Record<RecipeId, Recipe>;
 export const CATEGORIES: Array<{ id: Category; name: string; line: string }> = [
-  { id: 'market', name: 'Market maker', line: 'A buy and a sell resting at the best price. Maker fee only.' },
-  { id: 'grid', name: 'Grid', line: 'Levels in a price range.' },
+  { id: 'market', name: 'Market maker', line: 'Builds trading volume at the lowest cost.' },
+  { id: 'grid', name: 'Grid', line: 'Buys low and sells high in a price range.' },
 ];
 export const recipesOf = (c: Category): Recipe[] => RECIPES.filter((r) => r.category === c);
 

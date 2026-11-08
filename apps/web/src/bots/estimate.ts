@@ -17,10 +17,15 @@
 import type { AlgoView } from '@copy-engine';
 import type { BotMarket } from './data';
 import type { BotDraft, QuietWindow } from './presets';
-import { RECIPE, recipeOfDraft, recipeOfSpec, type RecipeId } from './recipes';
+import { RECIPE, recipeOfDraft, recipeOfSpec, type Recipe, type RecipeId } from './recipes';
 
 export type Source = 'market' | 'tests' | 'yours' | 'none';
-export interface EstLine { id: string; label: string; bp: number | null; source: Source; note?: string }
+/**
+ * One line of the estimate. `counted: false`: a saving only our backtests or a few live rounds show, on a bot not yet
+ * proven live; shown, but not taken off the estimate (owner 2026-11-08: people read the cost alone, so the cost holds
+ * only what is measured; an extra cost from tests still counts).
+ */
+export interface EstLine { id: string; label: string; bp: number | null; source: Source; note?: string; counted?: boolean }
 export interface BotEstimate {
   /** All-in per $1M, bp (negative earns); null: no reading on this market. */
   bp: number | null;
@@ -36,6 +41,9 @@ export interface BotEstimate {
 
 /** USD of the wallet's own volume that weighs as much as the market's reading. */
 export const PRIOR_USD = 250_000;
+const NOT_COUNTED = 'Our tests show this saving; not counted until proven live';
+/** A saving (negative) that only tests show, on a bot not proven live: shown, not counted. */
+const unproven = (delta: number, rc: Recipe): boolean => delta < 0 && rc.proof !== 'proven';
 /** The fleet's bias needs more: it is the same bias carried to other markets. */
 const FLEET_PRIOR_USD = 1_000_000;
 
@@ -128,8 +136,10 @@ export function estimate(d: BotDraft, m: BotMarket | null, runs: readonly OwnRun
   const own = noOracle ? RECIPE.touch : r;
   const botDelta = d.gate && !noOracle ? (rid === 'n5g' ? RECIPE.n5g.deltaBps - RECIPE.r10g.deltaBps : 0) : own.deltaBps;
   const botX = d.gate && !noOracle ? (rid === 'n5g' ? RECIPE.n5g.volumeX / RECIPE.r10g.volumeX : 1) : own.volumeX;
-  if (own.id !== 'r10' && Math.abs(botDelta) >= 0.005) lines.push({ id: 'bot', label: own.name, bp: botDelta, source: noOracle && r.oracle ? 'none' : 'tests', note: noOracle && r.oracle ? 'No oracle here: the book maker runs' : undefined });
-  bp += botDelta;
+  // A saving from tests counts only once the bot is proven live; an extra cost always counts.
+  const botCounted = !unproven(botDelta, d.gate && !noOracle ? RECIPE.n5g : own);
+  if (own.id !== 'r10' && Math.abs(botDelta) >= 0.005) lines.push({ id: 'bot', label: own.name, bp: botDelta, source: noOracle && r.oracle ? 'none' : 'tests', note: noOracle && r.oracle ? 'No oracle here: the book maker runs' : botCounted ? undefined : NOT_COUNTED, counted: botCounted });
+  if (botCounted) bp += botDelta;
   x *= botX;
 
   if (d.gate && !noOracle) {
@@ -139,8 +149,9 @@ export function estimate(d: BotDraft, m: BotMarket | null, runs: readonly OwnRun
       bp += g;
       x *= m.gateShare ?? 1;
     } else {
-      lines.push({ id: 'gate', label: 'Market gate', bp: RECIPE.r10g.deltaBps, source: 'tests', note: 'Too few calm fills here: the backtest\'s figure' });
-      bp += RECIPE.r10g.deltaBps;
+      const ok = !unproven(RECIPE.r10g.deltaBps, RECIPE.r10g);
+      lines.push({ id: 'gate', label: 'Market gate', bp: RECIPE.r10g.deltaBps, source: 'tests', note: ok ? 'Too few calm fills here: the backtest\'s figure' : `Too few calm fills here. ${NOT_COUNTED}`, counted: ok });
+      if (ok) bp += RECIPE.r10g.deltaBps;
       x *= RECIPE.r10g.volumeX;
     }
   }
@@ -212,16 +223,11 @@ export function rankRecipes(m: BotMarket, base: BotDraft, runs: readonly OwnRun[
 }
 
 /**
- * The best of a ranked list: the cheapest on what is measured. A bot is credited only with an edge this market's own
- * fills, the wallet's own bots or repeated live runs show: a figure carried over from a backtest elsewhere (a 'tests'
- * line) or an early bot's few rounds is shown, but not called best. Ties go to the simpler bot (the list's order).
+ * The best of a ranked list: the cheapest. The estimate already leaves out savings not measured on this market or
+ * proven live (EstLine.counted), so the cheapest number is the best bot. Ties (to the dollar per $1M) go to the simpler.
  */
 export function bestOf<T extends { id: RecipeId; est: BotEstimate }>(ranked: readonly T[]): T | null {
   const ids = Object.keys(RECIPE) as RecipeId[];
-  const credited = (x: T): number => {
-    if (x.est.bp === null) return 99;
-    if (RECIPE[x.id].proof === 'proven') return x.est.bp;
-    return x.est.bp - x.est.lines.filter((l) => l.source === 'tests' && (l.bp ?? 0) < 0).reduce((a, l) => a + l.bp!, 0);
-  };
-  return [...ranked].sort((a, b) => credited(a) - credited(b) || ids.indexOf(a.id) - ids.indexOf(b.id))[0] ?? null;
+  const r = (x: T): number => (x.est.bp === null ? 99 : Math.round(x.est.bp * 100) / 100);
+  return [...ranked].sort((a, b) => r(a) - r(b) || ids.indexOf(a.id) - ids.indexOf(b.id))[0] ?? null;
 }

@@ -23,7 +23,7 @@ import { useBotMarkets, bpToPerMillion, type BotMarket } from '../../bots/data';
 import { goBots, type BotsView } from '../../bots/routes';
 import { STRATEGY_INFO, costPerMillion, draftFor, gridRange, specOf, type BotDraft, type Strategy } from '../../bots/presets';
 import { CATEGORIES, RECIPE, recipeOfDraft, recipesOf, type Category, type Recipe, type RecipeId } from '../../bots/recipes';
-import { estimate, ownRuns, type BotEstimate, type EstLine, type OwnRun } from '../../bots/estimate';
+import { bestOf, estimate, ownRuns, type BotEstimate, type EstLine, type OwnRun } from '../../bots/estimate';
 import { BotAvatar, StrategyTile } from './BotIcon';
 import { BotSettings, NameField, SEC_NAMES, type Sec } from './BotSettings';
 import { BotsHead, type BotsCtx } from './BotsPage';
@@ -35,7 +35,6 @@ export const bpCls = (bp: number | null | undefined): string => (bp === null || 
 const CONF_TONE = { high: 'positive', medium: 'warning', low: 'neutral' } as const;
 /** Who takes small makers' quotes: uninformed flow (1002, cheap to fill), informed flow (23342, about 1 bp a fill). */
 export const TAKER_COLORS = { patient: 'var(--pos)', fast: 'var(--neg)', other: 'rgb(var(--ink) / 0.28)' };
-const PROOF = { proven: { tone: 'positive', label: 'Proven live' }, tested: { tone: 'neutral', label: 'Tested' }, early: { tone: 'warning', label: 'Early' } } as const;
 const SOURCE: Record<EstLine['source'], string> = { market: 'This market\'s trades', tests: 'Our live runs and backtests', yours: 'Your own bots', none: 'Not measured here' };
 
 /** Who takes small makers' quotes on a market. */
@@ -187,26 +186,50 @@ function MarketStep({ picked, toggle, markets, costOf }: { picked: string[]; tog
   );
 }
 
-/** One bot to pick: what it is, what it was measured at, what it is estimated to do on the market. */
-function RecipeRow({ rc, on, pick, est, market }: { rc: Recipe; on: boolean; pick: () => void; est: BotEstimate | null; market: string }) {
+/** How much a bot trades against the default, in a word and three bars (owner 2026-11-08: for someone new). */
+const volumeWord = (x: number): { n: 1 | 2 | 3; word: string } => (x >= 1.1 ? { n: 3, word: 'Trades the most' } : x >= 0.9 ? { n: 2, word: 'Trades normally' } : { n: 1, word: 'Trades less' });
+const TRACK = { proven: { tone: 'positive', label: 'Proven live' }, tested: { tone: 'neutral', label: 'Tested' }, early: { tone: 'warning', label: 'New' } } as const;
+/** A cost per $1M without the sign wall: a cost reads as a plain amount, earnings in green with a plus. */
+const costText = (bp: number): { v: string; k: string; cls: string } => (bp < 0 ? { v: `+${fmtUsd(-bpToPerMillion(bp), 0)}`, k: 'earned per $1M traded', cls: 'pos' } : { v: fmtUsd(bpToPerMillion(bp), 0), k: 'cost per $1M traded', cls: '' });
+
+/**
+ * One bot to pick, read at a glance (owner 2026-11-08: "they will only read the cost and decide off of that"): a plain
+ * sentence, the cost as the one number, how much it trades and how well it is tested in a word each; the test name and
+ * the runs behind it open only on the picked bot.
+ */
+function RecipeRow({ rc, on, pick, est, market, best }: { rc: Recipe; on: boolean; pick: () => void; est: BotEstimate | null; market: string; best: boolean }) {
+  const coin = market.replace(/-USD$/, '');
+  const vol = est ? volumeWord(est.volumeX) : null;
+  const c = est && est.bp !== null ? costText(est.bp) : null;
+  const nc = est?.lines.filter((l) => l.counted === false && l.bp !== null) ?? [];
+  const extra = nc.length ? nc.reduce((t, l) => t + l.bp!, 0) : null;
   return (
-    <button type="button" role="radio" aria-checked={on} aria-label={rc.name} className={`bots-strow bots-rrow${on ? ' is-on' : ''}`} onClick={pick}>
+    <button type="button" role="radio" aria-checked={on} aria-label={rc.name} className={`bots-strow bots-rrow${on ? ' is-on' : ''}${best ? ' is-best' : ''}`} onClick={pick}>
       <span className={`bots-radio${on ? ' is-on' : ''}`} aria-hidden="true" />
       <StrategyTile strategy={rc.strategy} size={40} />
       <span className="bots-strow__t">
-        <b>{rc.name}<span className="bots-code">{rc.code}</span>{rc.tag && <StatusPill size="sm" tone="positive">{rc.tag}</StatusPill>}</b>
-        <small>{rc.line}</small>
-        {rc.evidence.length > 0 && (
-          <span className="bots-rrow__ev">
-            {rc.evidence.slice(0, 3).map((e) => <span key={e.what} className={`bots-ev is-${e.kind}`}><i aria-hidden="true" />{e.what}<b className={bpCls(e.bp)}>{fmtBpUsd(e.bp)}</b></span>)}
-            <StatusPill size="sm" tone={PROOF[rc.proof].tone}>{PROOF[rc.proof].label}</StatusPill>
+        <b>{rc.name}{best && <StatusPill size="sm" tone="positive" dot>Best on {coin}</StatusPill>}</b>
+        <small>{rc.plain}</small>
+        {rc.category === 'market' && (
+          <span className="bots-rrow__facts">
+            {vol && <span className="bots-vol" title={`${Math.round(est!.volumeX * 100)}% of the default's volume`}><i className="bots-vol__bars" aria-hidden="true">{[1, 2, 3].map((k) => <i key={k} className={k <= vol.n ? 'is-on' : ''} />)}</i>{vol.word}</span>}
+            <StatusPill size="sm" tone={TRACK[rc.proof].tone}>{TRACK[rc.proof].label}</StatusPill>
+          </span>
+        )}
+        {on && rc.evidence.length > 0 && (
+          <span className="bots-rrow__how">
+            <span className="bots-rrow__howk">How we know<span className="bots-code">{rc.code}</span></span>
+            <span className="bots-rrow__ev">
+              {rc.evidence.slice(0, 3).map((e) => { const x = costText(e.bp); return <span key={e.what} className={`bots-ev is-${e.kind}`}><i aria-hidden="true" />{e.what}<b className={x.cls}>{x.v}</b></span>; })}
+            </span>
+            {extra !== null && <small className="bots-rrow__nc">Our tests show it about {fmtUsd(bpToPerMillion(-extra), 0)} cheaper. Not in the cost until it is proven live.</small>}
           </span>
         )}
       </span>
       <span className="bots-strow__n">
-        {est && est.bp !== null
-          ? <><b className={bpCls(est.bp)}>{fmtBpUsd(est.bp)}</b><small>per $1M on {market.replace(/-USD$/, '')}</small>{rc.id !== 'r10' && <small>{Math.round(est.volumeX * 100)}% volume</small>}</>
-          : <><b className="dim">{DASH}</b><small>{rc.category === 'grid' ? 'set by its range' : 'no reading'}</small></>}
+        {c
+          ? <><b className={c.cls}>{c.v}</b><small>{c.k}</small><small>on {coin}</small></>
+          : <><b className="dim">{DASH}</b><small>{rc.category === 'grid' ? 'set by its range' : 'not enough trades yet'}</small></>}
       </span>
     </button>
   );
@@ -248,7 +271,7 @@ function Receipt({ d, eff, picked, markets, feeBps, paper, floor, runs, children
   const high = grid ? null : avg((e) => e.high);
   const volX = avg((e) => e.volumeX) ?? 1;
   // The lines, averaged over the picked markets: fees, price moves, then the bot and each safeguard.
-  const lines: Array<{ id: string; label: string; bp: number | null; source: EstLine['source']; note?: string }> = [];
+  const lines: Array<{ id: string; label: string; bp: number | null; source: EstLine['source']; note?: string; counted?: boolean }> = [];
   if (grid) {
     lines.push({ id: 'fees', label: 'Fees', bp: feeBps, source: 'market' });
     lines.push({ id: 'steps', label: 'Grid steps', bp: floor.edge !== null ? -floor.edge / 100 : null, source: 'market' });
@@ -259,7 +282,7 @@ function Receipt({ d, eff, picked, markets, feeBps, paper, floor, runs, children
     for (const id of ids) {
       const ls = known.map((x) => x.e.lines.find((l) => l.id === id)).filter((l): l is EstLine => !!l);
       const vals = ls.map((l) => l.bp).filter((x): x is number => x !== null);
-      lines.push({ id, label: ls[0]!.label, bp: vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null, source: ls[0]!.source, note: ls.length === 1 ? ls[0]!.note : undefined });
+      lines.push({ id, label: ls[0]!.label, bp: vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null, source: ls[0]!.source, note: ls.length === 1 ? ls[0]!.note : undefined, counted: ls[0]!.counted });
     }
   }
   const maxAbs = Math.max(0.5, ...lines.map((l) => Math.abs(l.bp ?? 0)));
@@ -300,10 +323,10 @@ function Receipt({ d, eff, picked, markets, feeBps, paper, floor, runs, children
       {lines.length > 0 && (
         <section className="bots-rc__sum" aria-label="How it adds up">
           {lines.map((l) => (
-            <div key={l.id} className="bots-rc__line" title={`${SOURCE[l.source]}${l.note ? ` · ${l.note}` : ''}`}>
+            <div key={l.id} className={`bots-rc__line${l.counted === false ? ' is-off' : ''}`} title={`${SOURCE[l.source]}${l.note ? ` · ${l.note}` : ''}`}>
               <span className="bots-rc__ll"><i className={`bots-src is-${l.source}`} aria-hidden="true" />{l.label}</span>
               <LineBar bp={l.bp} max={maxAbs} />
-              <b className={bpCls(l.bp)}>{l.bp === null ? 'n/a' : fmtBpUsd(l.bp)}</b>
+              <b className={l.counted === false ? 'dim' : bpCls(l.bp)}>{l.bp === null ? 'n/a' : fmtBpUsd(l.bp)}</b>
               {l.note && <small className="bots-rc__note">{l.note}</small>}
             </div>
           ))}
@@ -427,7 +450,11 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
     setD((x) => fromRecipe(id, x.symbol, x));
     if (RECIPE[id].strategy === 'grid') setPicked((xs) => xs.slice(0, 1));
   };
-  const nextLabel = place.step === 2 && place.part !== parts[parts.length - 1] ? `Next: ${SEC_NAMES[parts[parts.indexOf(place.part!) + 1]!]}` : 'Next';
+  // The picker: the best on this market first (credited only for measured edges: bestOf), then cheapest first.
+  const scored = recipesOf(cat).map((rc) => ({ id: rc.id, rc, e: est && rc.category === 'market' ? estimate(effectiveDraft(fromRecipe(rc.id, d.symbol, d), est), est, runs) : null }));
+  const bestId = cat === 'market' && est ? bestOf(scored.filter((x): x is typeof x & { e: BotEstimate } => !!x.e && x.e.bp !== null).map((x) => ({ id: x.id, est: x.e })))?.id ?? null : null;
+  const rows = [...scored].sort((a, b) => (a.id === bestId ? -1 : b.id === bestId ? 1 : (a.e?.bp ?? 99) - (b.e?.bp ?? 99)));
+  const nextLabel =place.step === 2 && place.part !== parts[parts.length - 1] ? `Next: ${SEC_NAMES[parts[parts.indexOf(place.part!) + 1]!]}` : 'Next';
 
   return (
     <>
@@ -460,7 +487,7 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
         <div className="bots-wizard__main">
           {place.step === 0 && (
             <Shell>
-              <ShellHeader icon="layers" title="Bot" subtitle="A category, then one of its bots. Each one is a setting we tested." />
+              <ShellHeader icon="layers" title="Pick a bot" subtitle={cat === 'grid' ? 'Trades inside a price range you set.' : 'Lower cost is better.'} />
               <div className="bots-cats" role="tablist" aria-label="Category">
                 {CATEGORIES.map((c) => {
                   const on = cat === c.id;
@@ -474,16 +501,10 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
                   );
                 })}
               </div>
+              {cat === 'market' && <p className="bots-pickhint"><Icon name="coins" size={13} />The cost is what you pay in fees and price moves for every $1M your bot trades on {d.symbol.replace(/-USD$/, '')}. The best bot is the cheapest one we can stand behind.</p>}
               <div className="bots-strows" role="radiogroup" aria-label="Bot">
-                {recipesOf(cat).map((rc) => (
-                  <RecipeRow
-                    key={rc.id}
-                    rc={rc}
-                    on={rid === rc.id}
-                    pick={() => pickRecipe(rc.id)}
-                    market={d.symbol}
-                    est={est && rc.category === 'market' ? estimate(effectiveDraft({ ...fromRecipe(rc.id, d.symbol, d) }, est), est, runs) : null}
-                  />
+                {rows.map(({ rc, e }) => (
+                  <RecipeRow key={rc.id} rc={rc} on={rid === rc.id} pick={() => pickRecipe(rc.id)} market={d.symbol} est={e} best={rc.id === bestId} />
                 ))}
               </div>
             </Shell>
