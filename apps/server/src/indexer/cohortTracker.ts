@@ -653,6 +653,10 @@ const PNL_SCAN_MS = 5 * 60_000;
 const PERP_SINCE_META = 'cohort_pnl_perp_since';
 const PNL_FLOW_META = 'cohort_pnl_flow';
 const PNL_FLOW_SAVE_MS = 5 * 60_000;
+/** Changed flows written per transaction (saveFlows), the loop free between batches. */
+const FLOW_SAVE_BATCH = 2_000;
+/** Members written or dropped per transaction (saveMembers): 5,000 random inserts into the member table held the indexer 10-17 s (profiles 2026-11-08). */
+const MEMBER_SAVE_BATCH = 1_000;
 /** A position's level is logged again once it moved this much (relative), or its USD this much: the history draws 0.25% cells. */
 /** Set once every open position has been written with the extra fields (logLevels). */
 const LIQ_LOG_FULL_META = 'liq_log_full_v2';
@@ -967,8 +971,15 @@ export class CohortTracker {
     this.perpSince = Number(s.getMeta(PERP_SINCE_META)) || 0;
     if (!this.perpSince) { this.perpSince = now; s.setMeta(PERP_SINCE_META, String(now)); }
     try {
-      const saved = JSON.parse(s.getMeta(PNL_FLOW_META) ?? '{}') as Record<string, [number, number]>;
-      for (const [a, [flow, u0]] of Object.entries(saved)) if (Number.isFinite(flow) && Number.isFinite(u0)) this.pnlFlow.set(a, { flow, u0 });
+      const rows = s.pnlFlowRows();
+      for (const r of rows) if (Number.isFinite(r.flow) && Number.isFinite(r.u0)) this.pnlFlow.set(r.address, { flow: r.flow, u0: r.u0 });
+      if (!rows.length) {
+        // Before the table (2026-11-08): the whole map as one meta value; carried over by the next save.
+        const saved = JSON.parse(s.getMeta(PNL_FLOW_META) ?? '{}') as Record<string, [number, number]>;
+        for (const [a, [flow, u0]] of Object.entries(saved)) {
+          if (Number.isFinite(flow) && Number.isFinite(u0)) { this.pnlFlow.set(a, { flow, u0 }); this.flowDirty.add(a); }
+        }
+      }
     } catch { /* starts afresh: the PnL stands as read until the next read */ }
     void loadSeeds().then((r) => { this.seeds = r.seeds; this.seedsAt = r.at; }).catch((e) => (this.lastError = `archive seeds: ${String(e)}`));
     void loadReadList().then((r) => { this.readList = r; }).catch((e) => (this.lastError = `archive read list: ${String(e)}`));
@@ -1029,15 +1040,59 @@ export class CohortTracker {
     this.stateReader?.stop();
     this.feed.stop();
     this.flush();
-    this.saveFlows();
+    this.saveFlowsNow();
   }
 
-  /** The PnL flows to the index (they survive a restart; a write that fails keeps the last). */
-  private saveFlows(): void {
+  /** Accounts whose flow moved, started or ended since the last save. */
+  private flowDirty = new Set<string>();
+  private flowSaving = false;
+
+  /** The next batch of changed flows as rows, and the accounts whose flow ended (taken out of flowDirty). */
+  private takeFlows(max: number): { rows: Array<[string, number, number]>; gone: string[] } {
+    const rows: Array<[string, number, number]> = [];
+    const gone: string[] = [];
+    for (const a of this.flowDirty) {
+      if (rows.length + gone.length >= max) break;
+      this.flowDirty.delete(a);
+      const f = this.pnlFlow.get(a);
+      if (f) rows.push([a, Math.round(f.flow * 100) / 100, Math.round(f.u0 * 100) / 100]);
+      else gone.push(a);
+    }
+    return { rows, gone };
+  }
+
+  /**
+   * The changed PnL flows to the index in batches of FLOW_SAVE_BATCH, the loop free between them (they survive a
+   * restart; a batch that fails goes back to flowDirty for the next save).
+   */
+  private async saveFlows(): Promise<void> {
+    if (this.flowSaving) return;
+    this.flowSaving = true;
     try {
-      const out: Record<string, [number, number]> = {};
-      for (const [a, f] of this.pnlFlow) out[a] = [Math.round(f.flow * 100) / 100, Math.round(f.u0 * 100) / 100];
-      this.d.store.setMeta(PNL_FLOW_META, JSON.stringify(out));
+      while (this.flowDirty.size) {
+        const { rows, gone } = this.takeFlows(FLOW_SAVE_BATCH);
+        try {
+          this.d.store.putPnlFlows(rows, gone);
+        } catch (e) {
+          for (const [a] of rows) this.flowDirty.add(a);
+          for (const a of gone) this.flowDirty.add(a);
+          this.lastError = `pnl flows: ${String(e)}`;
+          return;
+        }
+        await new Promise<void>((ok) => setImmediate(ok));
+      }
+    } finally {
+      this.flowSaving = false;
+    }
+  }
+
+  /** At stop: every changed flow at once. */
+  private saveFlowsNow(): void {
+    try {
+      while (this.flowDirty.size) {
+        const { rows, gone } = this.takeFlows(FLOW_SAVE_BATCH * 10);
+        this.d.store.putPnlFlows(rows, gone);
+      }
     } catch (e) {
       this.lastError = `pnl flows: ${String(e)}`;
     }
@@ -1065,7 +1120,7 @@ export class CohortTracker {
   /** A Hyperliquid account's flow since its perp PnL read moves by `x` (none before its first read). */
   private addFlow(address: string, x: number): void {
     const f = this.pnlFlow.get(address);
-    if (f && Number.isFinite(x)) f.flow += x;
+    if (f && Number.isFinite(x)) { f.flow += x; this.flowDirty.add(address); }
   }
 
   // --- the streams ----------------------------------------------------------------------
@@ -1424,7 +1479,7 @@ export class CohortTracker {
           for (const row of rows) {
             done.set(row.address, { ...row, at });
             const b = books?.get(row.address);
-            if (row.pnl != null) this.pnlFlow.set(row.address, { flow: 0, u0: b ? this.unrealized('hyperliquid', b) : 0 });
+            if (row.pnl != null) { this.pnlFlow.set(row.address, { flow: 0, u0: b ? this.unrealized('hyperliquid', b) : 0 }); this.flowDirty.add(row.address); }
             n++;
           }
         }
@@ -1500,6 +1555,7 @@ export class CohortTracker {
           const book = this.books.get('hyperliquid')?.get(address);
           if (row.pnl != null) this.pnlFlow.set(address, { flow: 0, u0: book ? this.unrealized('hyperliquid', book) : 0 });
           else this.pnlFlow.delete(address);
+          this.flowDirty.add(address);
           return PNL_READ_COST;
         },
       });
@@ -1548,15 +1604,15 @@ export class CohortTracker {
     let saved = this.savedMembers.get(venue);
     if (!saved) { saved = new Set(this.d.store.cohortMemberAddresses(venue)); this.savedMembers.set(venue, saved); }
     const gone = saved.size && members.size >= MEMBERS_KEPT_MIN * saved.size ? [...saved].filter((a) => !members.has(a)) : [];
-    for (let i = 0; i < gone.length; i += 5_000) {
-      this.d.store.dropCohortMembers(venue, gone.slice(i, i + 5_000));
+    for (let i = 0; i < gone.length; i += MEMBER_SAVE_BATCH) {
+      this.d.store.dropCohortMembers(venue, gone.slice(i, i + MEMBER_SAVE_BATCH));
       await new Promise<void>((r) => setImmediate(r));
       mark('coh:plan');
     }
     for (const a of gone) { saved.delete(a); this.memberSig.delete(`${venue}|${a}`); }
     for (const a of members.keys()) saved.add(a);
-    for (let i = 0; i < changed.length; i += 5_000) {
-      this.d.store.putCohortMembers(venue, changed.slice(i, i + 5_000), this.d.now());
+    for (let i = 0; i < changed.length; i += MEMBER_SAVE_BATCH) {
+      this.d.store.putCohortMembers(venue, changed.slice(i, i + MEMBER_SAVE_BATCH), this.d.now());
       await new Promise<void>((r) => setImmediate(r));
       mark('coh:plan');
     }

@@ -308,6 +308,7 @@ export interface WindowStats {
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS cohort_pnl_flow (address TEXT PRIMARY KEY, flow REAL NOT NULL, u0 REAL NOT NULL) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS accounts (
   venue TEXT NOT NULL, address TEXT NOT NULL, account_id INTEGER, label TEXT,
   account_value REAL, av_at INTEGER,
@@ -3294,6 +3295,27 @@ export class IndexStore {
       );
       let rev = this.takeRevs(rows.length);
       for (const r of rows) ins.run(venue, r.address, r.pnl, r.equity, r.label, at, r.pnl1d ?? null, r.pnl7d ?? null, r.pnl30d ?? null, rev++);
+    });
+  }
+
+  /** Every Hyperliquid account's PnL flow since its perp PnL read, as saved (cohortTracker). */
+  pnlFlowRows(): Array<{ address: string; flow: number; u0: number }> {
+    return this.q('SELECT address, flow, u0 FROM cohort_pnl_flow').all() as Array<{ address: string; flow: number; u0: number }>;
+  }
+
+  /**
+   * Flows that changed since the last save, and accounts whose flow ended. Row by row (2026-11-08: the whole map as one
+   * 11 MB meta value every 5 min was the biggest single share of the indexer's 10-30 s stalls).
+   */
+  putPnlFlows(rows: ReadonlyArray<readonly [string, number, number]>, gone: readonly string[] = []): void {
+    if (!rows.length && !gone.length) return;
+    this.tx(() => {
+      const ins = this.q('INSERT OR REPLACE INTO cohort_pnl_flow (address, flow, u0) VALUES (?, ?, ?)');
+      for (const [a, flow, u0] of rows) ins.run(a, flow, u0);
+      if (gone.length) {
+        const del = this.q('DELETE FROM cohort_pnl_flow WHERE address = ?');
+        for (const a of gone) del.run(a);
+      }
     });
   }
 
