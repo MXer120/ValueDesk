@@ -44,6 +44,7 @@ import { explorerPath, orderFacts, readExplorerTx } from './explorer.js';
 import type { BuilderStore, Evidence, WalletRow } from './store.js';
 import { mayPrune } from '../retention.js';
 import { COPY_LADDER_DAYS, ENGINE_ORDER_ID, copyLadderFee } from './tiers.js';
+import { botLadderFee } from './programs.js';
 
 // --- budgets and bounds ---------------------------------------------------------------
 
@@ -173,6 +174,11 @@ export interface VerifierOptions {
   lookbackMs?: number;
   /** Called when a wallet's counted volume or flags changed: its fee may have. */
   onChange?: (address: string) => void;
+  /**
+   * The lowest fee VIP or a fee program allowed this wallet's engine orders (copy, bots) at a time, tenths of a bp
+   * (Infinity: none) - BuilderService.loweredFor. An engine order paying it is not underpaid.
+   */
+  engineFloor?: (address: string, at: number) => number;
 }
 
 /**
@@ -788,7 +794,10 @@ export class Verifier {
     let owed = siteOwed;
     if (row.clOrdID !== null && ENGINE_ORDER_ID.test(row.clOrdID)) {
       const v = this.store.windowMicro(builder, w.address, dayOf(facts.createdAt) - (COPY_LADDER_DAYS - 1));
-      owed = Math.min(siteOwed, copyLadderFee((v.perps + v.spot) / 1e6));
+      const usd = (v.perps + v.spot) / 1e6;
+      // An engine order is a copy's or an algo's - a bot's too (all 'va-'): the lower of the two ladders, and of what
+      // VIP or a fee program allowed when it was placed (owner 2026-11-08). Lenient, never stricter.
+      owed = Math.min(siteOwed, copyLadderFee(usd), botLadderFee(usd), this.o.engineFloor?.(w.address, facts.createdAt) ?? Infinity);
     }
     const keys = this.store.keysOf(w.address);
     const verdict = judgeOrder(row, facts, { builderId: builder, owed, appKeys: new Set(keys.keys()), since: this.store.since() });

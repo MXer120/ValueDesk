@@ -27,6 +27,7 @@ import { Analytics } from './pages/Analytics';
 import { Status } from './pages/Status';
 import { Audit } from './pages/Audit';
 import { Beta } from './pages/Beta';
+import { Fees } from './pages/Fees';
 import { Board } from './pages/Board';
 
 const PAGES: Array<{ id: string; label: string; render: (arg: string) => ReactNode }> = [
@@ -38,6 +39,7 @@ const PAGES: Array<{ id: string; label: string; render: (arg: string) => ReactNo
   { id: 'analytics', label: 'Analytics', render: () => <Analytics /> },
   { id: 'status', label: 'Status', render: () => <Status /> },
   { id: 'beta', label: 'Beta', render: () => <Beta /> },
+  { id: 'fees', label: 'Fees', render: () => <Fees /> },
   { id: 'audit', label: 'Audit', render: () => <Audit /> },
 ];
 

@@ -447,6 +447,32 @@ test('beta list: a signed add and remove, for exactly that wallet, audited; the 
   assert.deepEqual(kinds, ['beta.add:false', 'beta.add:false', 'beta.add:false', 'beta.add:true', 'beta.add:true', 'beta.remove:true']);
 });
 
+// --- fee programs -----------------------------------------------------------------------------------
+
+test('fee programs: a signed start for several wallets, never below 0, audited; a signed end; the list reads them', async () => {
+  const s = await suite();
+  const auth = await s.login();
+  const [x, y] = [newWallet().address.toLowerCase(), newWallet().address.toLowerCase()];
+  const from = Date.now();
+  const payload = { addresses: [x, y], products: ['copy', 'bots'], fee: 0, from, until: from + 7 * 86_400_000, label: 'Launch week' };
+  assert.equal((await s.post('/api/admin/fees/add', payload, auth)).statusCode, 403, 'unsigned');
+  assert.equal((await s.post('/api/admin/fees/add', { ...payload, fee: -3, action: action(s.admin, 'fees.add', '2 wallets', { ...payload, fee: -3 }) }, auth)).statusCode, 400, 'below 0');
+  assert.equal((await s.post('/api/admin/fees/add', { ...payload, products: [], action: action(s.admin, 'fees.add', '2 wallets', { ...payload, products: [] }) }, auth)).statusCode, 400, 'no product');
+  const add = await s.post('/api/admin/fees/add', { ...payload, action: action(s.admin, 'fees.add', '2 wallets', payload) }, auth);
+  assert.equal(add.statusCode, 200, add.body);
+  assert.equal(add.json().ids.length, 2);
+  const vip = { addresses: [x], products: ['perps', 'spot', 'copy', 'bots'], fee: 'vip', from, until: from + 30 * 86_400_000, label: 'VIP 30 days' };
+  assert.equal((await s.post('/api/admin/fees/add', { ...vip, action: action(s.admin, 'fees.add', x, vip) }, auth)).statusCode, 200);
+  const list = (await s.post('/api/admin/fees', {}, auth)).json().programs as Array<{ id: number; address: string; fee: number; label: string }>;
+  assert.equal(list.length, 3);
+  assert.ok(list.some((g) => g.address === x && g.fee === -1 && g.label === 'VIP 30 days'), JSON.stringify(list));
+  const id = list.find((g) => g.address === y)!.id;
+  const end = await s.post('/api/admin/fees/end', { id, action: action(s.admin, 'fees.end', String(id), { id }) }, auth);
+  assert.equal(end.json().ended, true);
+  const kinds = s.store.auditRows({ limit: 20 }).filter((r) => r.kind.startsWith('fees.')).map((r) => `${r.kind}:${r.ok}`).reverse();
+  assert.deepEqual(kinds, ['fees.add:false', 'fees.add:true', 'fees.add:true', 'fees.end:true']);
+});
+
 // --- the kanban board ------------------------------------------------------------------------------
 
 test('board: the owner adds and moves when signed in, no signature per card; a session marks reviewed only quoting the owner', async () => {

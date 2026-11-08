@@ -45,7 +45,7 @@ test('builder volume: the token holder gets the wallet\'s volume in the window, 
   try {
     const r = await app.inject({ method: 'GET', url: `/api/vs/builder/volume?address=${WALLET.toUpperCase().replace('0X', '0x')}&builder=${BUILDER}&days=14`, headers: { 'x-internal-token': TOKEN } });
     assert.equal(r.statusCode, 200);
-    assert.deepEqual(r.json(), { ok: true, usd: 1_750, days: 14 });
+    assert.deepEqual(r.json(), { ok: true, usd: 1_750, days: 14, vip: false, fees: { copy: null, bots: null } });
     assert.equal(r.headers['cache-control'], 'no-store, no-transform');
     const all = await app.inject({ method: 'GET', url: `/api/vs/builder/volume?address=${WALLET}&builder=${BUILDER}&days=30`, headers: { 'x-internal-token': TOKEN } });
     assert.equal(all.json().usd, 11_749);
@@ -61,7 +61,7 @@ test('builder volume: a read by the executor enrolls a wallet the ledger does no
     const stranger = '0x00000000000000000000000000000000000000a1';
     assert.equal(svc.verifier!.queues.approvals, 0);
     const r = await app.inject({ method: 'GET', url: `/api/vs/builder/volume?address=${stranger}&builder=${BUILDER}&days=14`, headers: { 'x-internal-token': TOKEN } });
-    assert.deepEqual(r.json(), { ok: true, usd: 0, days: 14 });
+    assert.deepEqual(r.json(), { ok: true, usd: 0, days: 14, vip: false, fees: { copy: null, bots: null } });
     assert.equal(svc.verifier!.queues.approvals, 1, 'its approval is read next; approved, it gets a row and is verified');
     // Refused reads leave nothing.
     await app.inject({ method: 'GET', url: `/api/vs/builder/volume?address=0x00000000000000000000000000000000000000a2&builder=${BUILDER}` });

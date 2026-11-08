@@ -246,7 +246,8 @@ const VOLUMES_MAX = 20_000;
 
 const SESSION_TTL_MS = 12 * 60 * 60_000;
 /** How long a follower's volume (the copy fee step) is used before it is read again. */
-const VOLUME_TTL_MS = 10 * 60_000;
+/** The volume and the fee perks (VIP, programs) of a wallet are read again this often (owner 2026-11-08: a program reaches orders within minutes). */
+const VOLUME_TTL_MS = 2 * 60_000;
 /**
  * A key SoDEX does not list is read this many times, KEY_READ_GAP_MS apart,
  * before anything is refused or taken away for it (one stale backend answered
@@ -285,6 +286,29 @@ export class ExecutorService {
   /** What SoDEX refused, and the copies and algos held for it (guard.ts). */
   readonly guard: ErrorGuard;
   private readonly volumes = new Map<string, { usd: number | null; at: number }>();
+  /**
+   * VIP and the dev page's fee programs for copy trading and bots (owner 2026-11-08), from the same read as the
+   * volume (GET /api/vs/builder/volume): the fee and until when. A program's end is checked on every order, so it
+   * stops counting the moment it ends, whatever the cache.
+   */
+  private readonly perks = new Map<string, { vip: boolean; copy: { fee: number; until: number | null } | null; bots: { fee: number; until: number | null } | null }>();
+
+  /** A product's lowered fee for the wallet now (Infinity: none). */
+  private perkFee(owner: string, p: 'copy' | 'bots'): number {
+    const x = this.perks.get(owner)?.[p];
+    if (!x || (x.until !== null && x.until <= Date.now())) return Infinity;
+    return Math.max(0, x.fee);
+  }
+
+  /** The copy fee: the ladder by volume, or lower (VIP, a program). */
+  private copyFee(owner: string, volume: number | null): number {
+    return Math.min(copyFeeFor(volume), this.perkFee(owner, 'copy'));
+  }
+
+  /** The bot fee: the bot ladder by volume (VIP or beta's first 30 days the lowest step), or lower (a program). */
+  private botFee(owner: string, volume: number | null): number {
+    return Math.min(botFeeFor(volume, { vip: this.botVip(owner) || this.perks.get(owner)?.vip === true }), this.perkFee(owner, 'bots'));
+  }
   private readonly volumeReads = new Map<string, Promise<number | null>>();
   private builderDb: DatabaseSync | null = null;
   /** Self-hosted, not yet paired: the code printed at start. */
@@ -340,7 +364,7 @@ export class ExecutorService {
       hlMode: cfg.kind === 'hosted' ? 'firehose' : 'user',
       log: deps.log,
       sinkFor: (s) => this.sinkFor(s),
-      builderFor: async (s) => (cfg.builderId > 0 ? { id: cfg.builderId, fee: copyFeeFor(await this.freshVolume(s.owner)) } : null),
+      builderFor: async (s) => (cfg.builderId > 0 ? { id: cfg.builderId, fee: this.copyFee(s.owner, await this.freshVolume(s.owner)) } : null),
       // The stricter of the country declared when the copy started and the one in the wallet's current terms.
       policyFor: (s) => screenPolicy(this.policyNow(s.owner, s.country, s.observedCountry), s.owner, s.settings.leader.address),
       keyProblem: async (s) => this.guard.holdOf({ kind: 'copy', id: s.id, owner: s.owner }) ?? this.keyProblem(s.owner),
@@ -366,7 +390,7 @@ export class ExecutorService {
       log: deps.log,
       sinkFor: (a) => this.algoSink(a),
       // Bots: the bot ladder by 14-day volume; VIP, or beta in its first 30 days, the lowest step (policy.ts botFeeFor).
-      builderRate: (a) => (cfg.builderId > 0 ? (a.spec?.bot === true ? botFeeFor(this.volumeOf(a.owner), { vip: this.botVip(a.owner) }) : copyFeeFor(this.volumeOf(a.owner))) / 100_000 : 0),
+      builderRate: (a) => (cfg.builderId > 0 ? (a.spec?.bot === true ? this.botFee(a.owner, this.volumeOf(a.owner)) : this.copyFee(a.owner, this.volumeOf(a.owner))) / 100_000 : 0),
       problem: async (a) => this.guard.holdOf({ kind: 'algo', id: a.id, owner: a.owner }) ?? this.algoProblem(a),
       brake: () => this.brakeText('algos'),
       // The copy region rules, from the country declared with the terms and the one the request came from.
@@ -1185,9 +1209,9 @@ export class ExecutorService {
     if (a.spec?.bot === true) {
       const vol = await this.freshVolume(a.owner);
       await this.betaListed(a.owner);
-      return botFeeFor(vol, { vip: this.botVip(a.owner) });
+      return this.botFee(a.owner, vol);
     }
-    return copyFeeFor(await this.freshVolume(a.owner));
+    return this.copyFee(a.owner, await this.freshVolume(a.owner));
   }
 
   /** The sink of an algo: the key this wallet registered for this executor, its fee (algoFee) as the builder. */
@@ -1474,14 +1498,19 @@ export class ExecutorService {
       if (this.cfg.builderToken) headers['X-Internal-Token'] = this.cfg.builderToken;
       if (this.cfg.originSecrets[0]) headers['X-Origin-Verify'] = this.cfg.originSecrets[0];
       const res = await this.deps.fetch(u.toString(), { headers, signal: AbortSignal.timeout(5_000) });
-      let body: { ok?: boolean; usd?: unknown } | null = null;
+      let body: { ok?: boolean; usd?: unknown; vip?: unknown; fees?: { copy?: unknown; bots?: unknown } } | null = null;
       try {
-        body = JSON.parse(await res.text()) as { ok?: boolean; usd?: unknown };
+        body = JSON.parse(await res.text()) as { ok?: boolean; usd?: unknown; vip?: unknown; fees?: { copy?: unknown; bots?: unknown } };
       } catch {
         body = null;
       }
       if (!res.ok || !body?.ok || typeof body.usd !== 'number' || !Number.isFinite(body.usd)) throw new Error(`HTTP ${res.status}`);
       this.rememberVolume(owner, body.usd);
+      const perk = (x: unknown) => {
+        const o = x as { fee?: unknown; until?: unknown } | null | undefined;
+        return o && typeof o.fee === 'number' && Number.isFinite(o.fee) ? { fee: o.fee, until: typeof o.until === 'number' ? o.until : null } : null;
+      };
+      this.perks.set(owner, { vip: body.vip === true, copy: perk(body.fees?.copy), bots: perk(body.fees?.bots) });
       return body.usd;
     } catch (e) {
       this.deps.log.warn('copy fee: the builder volume could not be read', { owner, error: String(e) });

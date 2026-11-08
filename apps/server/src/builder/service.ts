@@ -16,6 +16,8 @@
  * With no configuration file the feature is off: no database is opened, no
  * timer but the one that looks for the file, and the answer says so.
  */
+import { AdminStore, type FeeProgram } from '../admin/store.js';
+import { lowered, soonestEnd, type Lowered } from './programs.js';
 import { channelFrom } from '../beta/gate.js';
 import { NET, NETWORK } from '../config.js';
 import { sodex } from '../sodex/rest.js';
@@ -66,6 +68,8 @@ export interface TermsRequest {
 }
 
 export interface BuilderServiceOptions {
+  /** A wallet's running fee programs (the dev page's, admin/store.ts); default: the admin store on this server. */
+  programs?: (address: string, now: number) => FeeProgram[];
   tiersPath: string;
   keyPath: string;
   dbPath: string;
@@ -108,6 +112,10 @@ function countedOf(cfg: TiersConfig, store: BuilderStore | null, w: WalletRow | 
 export const VIP_DAYS = 14;
 export const VIP_MIN_USD = 1_000_000;
 export const VIP_MIN_SHARE = 0.01;
+/** The share rule counts only from this much of the wallet's own 14-day volume (while ValueDesk is small, 1% is little). */
+export const VIP_SHARE_FLOOR_USD = 100_000;
+/** VIP by the owner's two bars, the share one above its floor. */
+export const isVip = (v: { volumeUsd: number; share: number } | null): boolean => !!v && (v.volumeUsd >= VIP_MIN_USD || (v.share >= VIP_MIN_SHARE && v.volumeUsd >= VIP_SHARE_FLOOR_USD));
 
 export class BuilderService {
   readonly tiers: TiersSource;
@@ -185,6 +193,10 @@ export class BuilderService {
         explorerPerMin: this.o.explorerPerMin,
         lookbackMs: this.o.lookbackMs,
         onChange: (address) => this.settled(address),
+        engineFloor: (address, at) => {
+          const l = this.loweredFor(address, at);
+          return Math.min(l.fees.copy?.fee ?? Infinity, l.fees.bots?.fee ?? Infinity);
+        },
       });
       this.runtime = { store, verifier };
       this.openFailedAt = 0;
@@ -223,14 +235,20 @@ export class BuilderService {
    * VIP (owner 2026-11-08): over $1M of counted volume in 14 days, or over 1% of all ValueDesk's. A wallet's
    * volume and its share, or null while the ledger is not open or no builder is set.
    */
-  vipOf(address: string, days = VIP_DAYS): { volumeUsd: number; totalUsd: number; share: number } | null {
+  private totalAt: { at: number; from: number; usd: number } | null = null;
+
+    vipOf(address: string, days = VIP_DAYS): { volumeUsd: number; totalUsd: number; share: number } | null {
     const store = this.store;
     const cfg = this.tiers.current();
     if (!store || !cfg?.builderId) return null;
     const from = dayOf(this.now()) - (days - 1);
     const w = store.windowMicro(cfg.builderId, address, from);
     const volumeUsd = (w.perps + w.spot) / 1e6;
-    const totalUsd = store.totalWindowMicro(cfg.builderId, from) / 1e6;
+    // The whole is read at most once a minute (a sum over every wallet's days), each wallet's own every time.
+    const t = this.totalAt;
+    const fresh = !!t && t.from === from && this.now() - t.at < 60_000;
+    const totalUsd = fresh ? t!.usd : store.totalWindowMicro(cfg.builderId, from) / 1e6;
+    if (!fresh) this.totalAt = { at: this.now(), from, usd: totalUsd };
     return { volumeUsd, totalUsd, share: totalUsd > 0 ? volumeUsd / totalUsd : 0 };
   }
 
@@ -252,7 +270,12 @@ export class BuilderService {
    * history gets no row: owing the default is what having no row means.
    */
   private settle(cfg: TiersConfig, store: BuilderStore | null, address: string, w: WalletRow | null, now: number, counted = countedOf(cfg, store, w, now)): Decision {
-    const d = decide(cfg, address, factsOf(w, counted), now);
+    const d0 = decide(cfg, address, factsOf(w, counted), now);
+    // VIP and the dev page's programs: the lower of them and the tier, per engine (programs.ts).
+    const lw = this.loweredFor(address, now);
+    const perps = Math.min(d0.fee.perps, lw.fees.perps?.fee ?? Infinity);
+    const spot = Math.min(d0.fee.spot, lw.fees.spot?.fee ?? Infinity);
+    const d: Decision = perps !== d0.fee.perps || spot !== d0.fee.spot ? { ...d0, fee: { perps, spot }, flags: d0.flags.includes('override') ? d0.flags : [...d0.flags, 'override'] } : d0;
     if (store) {
       try {
         this.noteDefault(cfg, store, now);
@@ -263,6 +286,27 @@ export class BuilderService {
       }
     }
     return d;
+  }
+
+  /** The wallet's running programs (never throws: an unreadable store means none; no source given, none). */
+  private programsOf(address: string, now: number): FeeProgram[] {
+    try {
+      return this.o.programs ? this.o.programs(address, now) : [];
+    } catch (e) {
+      this.o.log.warn({ err: e instanceof Error ? e.message : String(e) }, 'builder tiers: fee programs could not be read');
+      return [];
+    }
+  }
+
+  /** Whether a wallet is VIP now (over $1M in 14 days, or over 1% of ValueDesk's): read from the ledger on every ask. */
+  vipNow(address: string): boolean {
+    return isVip(this.vipOf(address.toLowerCase()));
+  }
+
+  /** What VIP and the running programs lower each product to, for this wallet now (programs.ts). */
+  loweredFor(address: string, now = this.now()): Lowered {
+    const a = address.toLowerCase();
+    return lowered(this.programsOf(a, now), this.vipNow(a), this.tiers.current(), now);
   }
 
   /** A wallet's volume or flags changed: put its fee on record now, not when it next asks. */
@@ -316,7 +360,11 @@ export class BuilderService {
       }
     }
     const signer = this.keys.current();
-    const fields = { chain: this.o.chainId, builderId: cfg.builderId, address: req.address, perps: d.fee.perps, spot: d.fee.spot, nonce: req.nonce, issued: now, ttl: TERMS_TTL_MS };
+    // A lowered fee that ends sooner than the terms would last: the terms end with it (the page asks again then,
+    // and gets the tier's fee), never sooner than a minute.
+    const ends = soonestEnd(this.loweredFor(req.address, now), ['perps', 'spot']);
+    const ttl = ends === null ? TERMS_TTL_MS : Math.max(60_000, Math.min(TERMS_TTL_MS, ends - now));
+    const fields = { chain: this.o.chainId, builderId: cfg.builderId, address: req.address, perps: d.fee.perps, spot: d.fee.spot, nonce: req.nonce, issued: now, ttl };
     const perps = counted.perps;
     const spot = counted.spot;
     return {
@@ -387,7 +435,10 @@ let instance: BuilderService | null = null;
 export function builderService(log: LogLike = consoleLog): BuilderService {
   if (!instance) {
     const days = Number(process.env.VALUESCAN_BUILDER_LOOKBACK_DAYS);
+    let admin: AdminStore | null = null;
     instance = new BuilderService({
+      // The dev page's fee programs, from the admin store on this server.
+      programs: (address, at) => (admin ??= new AdminStore()).activeFeePrograms(address, at),
       tiersPath: tiersPath(),
       keyPath: termsKeyPath(),
       dbPath: builderDbPath(),

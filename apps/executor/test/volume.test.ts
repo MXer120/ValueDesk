@@ -71,3 +71,26 @@ test('volume: two reads at once share one request; a failure keeps the last answ
 test('volume: a builder URL that is not https is refused at start', () => {
   assert.throws(() => loadConfig({ EXECUTOR_KIND: 'hosted', EXECUTOR_EDGE: 'none', EXECUTOR_BUILDER_URL: 'http://api.example/x', EXECUTOR_DATA_DIR: tmpdir() }), /https/);
 });
+
+test('fees: VIP and a program from the same read lower copy and bot fees; a program stops counting the moment it ends', async () => {
+  const until = Date.now() + 60_000;
+  const { svc, fresh, cleanup } = make(() => ({ status: 200, body: { ok: true, usd: 50_000, days: 14, vip: false, fees: { copy: { fee: 0, until }, bots: null } } }));
+  const fee = (spec: Record<string, unknown>) => (svc as unknown as { algoFee(a: { owner: string; spec: unknown }): Promise<number> }).algoFee({ owner: OWNER, spec });
+  await fresh(OWNER);
+  assert.equal(await fee({ kind: 'twap' }), 0, 'copy and algo orders: the program, 0');
+  assert.equal(await fee({ kind: 'mm', bot: true }), 5, 'bots: not in the program, the bot ladder ($50K: 0.5 bp)');
+  const realNow = Date.now;
+  Date.now = () => until + 1;
+  try {
+    assert.equal((svc as unknown as { copyFee(o: string, v: number | null): number }).copyFee(OWNER, 50_000), 25, 'ended: back on the copy ladder');
+  } finally {
+    Date.now = realNow;
+  }
+  cleanup();
+  const v = make(() => ({ status: 200, body: { ok: true, usd: 50_000, days: 14, vip: true, fees: { copy: { fee: 10, until: null }, bots: { fee: 1, until: null } } } }));
+  await v.fresh(OWNER);
+  const vfee = (spec: Record<string, unknown>) => (v.svc as unknown as { algoFee(a: { owner: string; spec: unknown }): Promise<number> }).algoFee({ owner: OWNER, spec });
+  assert.equal(await vfee({ kind: 'mm', bot: true }), 1, 'VIP: the lowest bot step');
+  assert.equal(await vfee({ kind: 'twap' }), 10, 'VIP: the lowest copy step');
+  v.cleanup();
+});

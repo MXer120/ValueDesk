@@ -55,6 +55,10 @@ import {
   ADMIN_SESSION_TTL_MS, BUILDER_WALLET, adminBearer, adminOriginsFrom, adminPasswordPath, adminWalletsFrom, checkAdminAction, checkAdminSignIn,
   newSessionToken, passwordIsSet, readPasswordHash, verifyPassword,
 } from '../admin/auth.js';
+import { builderService } from '../builder/service.js';
+import { VIP_PROGRAM_FEE, botLadderFee } from '../builder/programs.js';
+import { COPY_LADDER_DAYS, copyLadderFee } from '../builder/tiers.js';
+import { FEE_PRODUCTS, type FeeProduct } from '../admin/store.js';
 import { AdminStore, BOARD_DETAIL_MAX, BOARD_STATUSES, BOARD_TITLE_MAX, TICKET_STATUSES, type BoardStatus, type TicketStatus } from '../admin/store.js';
 import { builderOverview, builderUsers, syncFeeOrders } from '../admin/builderStats.js';
 import { statusOfEverything, type StatusSources } from '../admin/statusView.js';
@@ -523,6 +527,66 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOptions 
     const removed = store().removeBetaWallet(address);
     store().audit({ kind: 'beta.remove', ok: true, wallet: s.wallet, client: clientKey(req.ip), country: countryOf(req), detail: { address, removed } }, now());
     return { ok: true, removed, wallets: store().betaWallets() };
+  });
+
+  // --- fee programs (owner 2026-11-08: lower fees for chosen wallets, for a while) ---------------
+  // A fee in tenths of a bp (0 and up) or "vip" (the lowest tier of each product), on some of perps, spot, copy and
+  // bots, from a time until a time (or until ended). The lowest of tier, programs and VIP is paid; the server and the
+  // executor work it out on every read, so an ended program puts the wallet back on its volume tier by itself.
+  app.post('/api/admin/fees', { bodyLimit: 1024 }, async () => ({ ok: true, programs: store().feePrograms(), products: FEE_PRODUCTS }));
+
+  app.post('/api/admin/fees/lookup', { bodyLimit: 4 * 1024 }, async (req, reply) => {
+    const b = bodyOf(req);
+    const address = typeof b.address === 'string' ? b.address.trim().toLowerCase() : '';
+    if (!/^0x[0-9a-f]{40}$/.test(address)) return reply.code(400).send({ ok: false, error: 'address must be a 0x wallet address' });
+    const svc = builderService();
+    const cfg = svc.tiers.current();
+    const t = now();
+    const terms = svc.terms({ address, nonce: '0'.repeat(32), client: 'admin', hint: false });
+    const vol14 = cfg ? svc.volumeUsd(cfg.builderId, address, COPY_LADDER_DAYS) : null;
+    const lw = svc.loweredFor(address, t);
+    const tierFee = { perps: terms.ok && 'fee' in terms ? terms.fee.perps : null, spot: terms.ok && 'fee' in terms ? terms.fee.spot : null, copy: copyLadderFee(vol14 ?? 0), bots: botLadderFee(vol14 ?? 0) };
+    const pays = Object.fromEntries(FEE_PRODUCTS.map((p) => {
+      const low = lw.fees[p];
+      // perps/spot: the terms already carry the lowered fee (BuilderService.settle); copy/bots as the executor works it out.
+      const fee = p === 'perps' || p === 'spot' ? tierFee[p] : Math.min(tierFee[p], low?.fee ?? Infinity);
+      return [p, { fee, why: low && (fee === low.fee) ? low.why : 'Volume tier', until: low && fee === low.fee ? low.until : null }];
+    }));
+    return { ok: true, address, vip: lw.vip, vip14dUsd: svc.vipOf(address)?.volumeUsd ?? null, volume14dUsd: vol14, pays, programs: store().feePrograms().filter((g) => g.address === address) };
+  });
+
+  app.post('/api/admin/fees/add', { bodyLimit: 64 * 1024 }, async (req, reply) => {
+    const b = bodyOf(req);
+    const bad = (error: string) => reply.code(400).send({ ok: false, error });
+    const raw = Array.isArray(b.addresses) ? b.addresses : [];
+    const addresses = [...new Set(raw.map((x) => (typeof x === 'string' ? x.trim().toLowerCase() : '')))];
+    if (!addresses.length || addresses.length > 500) return bad('give 1 to 500 wallet addresses');
+    if (addresses.some((a) => !/^0x[0-9a-f]{40}$/.test(a))) return bad('every address must be a 0x wallet address');
+    const products = Array.isArray(b.products) ? [...new Set(b.products.filter((p): p is FeeProduct => (FEE_PRODUCTS as readonly unknown[]).includes(p)))] : [];
+    if (!products.length) return bad('choose at least one product: perps, spot, copy, bots');
+    const fee = b.fee === 'vip' ? VIP_PROGRAM_FEE : Number(b.fee);
+    if (fee !== VIP_PROGRAM_FEE && (!Number.isInteger(fee) || fee < 0 || fee > 2000)) return bad('fee must be "vip" or a whole number of tenths of a bp, 0 or more');
+    const from = b.from === undefined || b.from === null ? now() : Number(b.from);
+    const until = b.until === undefined || b.until === null ? null : Number(b.until);
+    if (!Number.isSafeInteger(from) || (until !== null && (!Number.isSafeInteger(until) || until <= from))) return bad('from and until must be times in ms, until after from');
+    const label = typeof b.label === 'string' ? b.label.replace(/\s+/g, ' ').trim().slice(0, 80) : '';
+    const payload = { addresses, products, fee: b.fee === 'vip' ? 'vip' : fee, from, until, label };
+    if (!signed(req, reply, 'fees.add', addresses.length === 1 ? addresses[0]! : `${addresses.length} wallets`, payload)) return reply;
+    const s = session(req);
+    const ids = store().addFeePrograms({ addresses, products, fee, from, until, label, by: s.wallet }, now());
+    store().audit({ kind: 'fees.add', ok: true, wallet: s.wallet, client: clientKey(req.ip), country: countryOf(req), detail: { ...payload, ids } }, now());
+    return { ok: true, ids, programs: store().feePrograms() };
+  });
+
+  app.post('/api/admin/fees/end', { bodyLimit: 4 * 1024 }, async (req, reply) => {
+    const b = bodyOf(req);
+    const id = Number(b.id);
+    if (!Number.isSafeInteger(id) || id <= 0) return reply.code(400).send({ ok: false, error: 'id must be a program id' });
+    if (!signed(req, reply, 'fees.end', String(id), { id })) return reply;
+    const s = session(req);
+    const ended = store().endFeeProgram(id, now());
+    store().audit({ kind: 'fees.end', ok: true, wallet: s.wallet, client: clientKey(req.ip), country: countryOf(req), detail: { id, ended } }, now());
+    return { ok: true, ended, programs: store().feePrograms() };
   });
 
   // --- the kanban board (sessions write through tools/board.ts) ---------------------------------

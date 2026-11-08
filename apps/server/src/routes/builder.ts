@@ -16,7 +16,7 @@
 import { timingSafeEqual } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { clientKey } from '../hosted.js';
-import { VIP_DAYS, VIP_MIN_SHARE, VIP_MIN_USD, builderService, type BuilderService } from '../builder/service.js';
+import { VIP_DAYS, VIP_MIN_SHARE, VIP_MIN_USD, VIP_SHARE_FLOOR_USD, builderService, isVip, type BuilderService } from '../builder/service.js';
 import { ADDRESS_RE, NONCE_RE } from '../builder/terms.js';
 import { SANCTIONED_WALLET_REASON, isSanctionedAddress } from '../builder/sanctions.js';
 import { AdminStore } from '../admin/store.js';
@@ -91,7 +91,10 @@ export async function builderRoutes(app: FastifyInstance, opts: BuilderRouteOpti
     // The executor trades for this wallet: have the ledger verify it (a follower with no tab open is otherwise never counted).
     service.hint(q.address.toLowerCase(), 'executor');
     if (usd === null) return reply.code(503).send({ ok: false, code: 'unavailable', error: 'the builder ledger is not open' });
-    return { ok: true, usd, days };
+    // VIP and the dev page's programs for the executor's products (copy trading, bots): fee, until when (programs.ts).
+    const lw = service.loweredFor(q.address.toLowerCase());
+    const pick = (p: 'copy' | 'bots') => (lw.fees[p] ? { fee: lw.fees[p]!.fee, until: lw.fees[p]!.until } : null);
+    return { ok: true, usd, days, vip: lw.vip, fees: { copy: pick('copy'), bots: pick('bots') } };
   });
 
   /**
@@ -141,7 +144,8 @@ export async function builderRoutes(app: FastifyInstance, opts: BuilderRouteOpti
     if (!v) return reply.code(503).send({ ok: false, code: 'unavailable', error: 'the builder ledger is not open' });
     return {
       ok: true,
-      eligible: v.volumeUsd >= VIP_MIN_USD || v.share >= VIP_MIN_SHARE,
+      eligible: isVip(v),
+      shareFloorUsd: VIP_SHARE_FLOOR_USD,
       volumeUsd: v.volumeUsd,
       minUsd: VIP_MIN_USD,
       share: v.share,

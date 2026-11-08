@@ -75,6 +75,21 @@ CREATE TABLE IF NOT EXISTS beta_wallets (
   added_at INTEGER NOT NULL,
   added_by TEXT NOT NULL
 ) WITHOUT ROWID;
+-- Fee programs (owner 2026-11-08): a lower ValueDesk builder fee for one wallet on some products for a while (VIP
+-- for 30 days, 0 for a launch week...). Never below 0; the lowest of the wallet's tier, its programs and VIP wins,
+-- and when a program ends the wallet is back on its tier by itself (builder/programs.ts).
+CREATE TABLE IF NOT EXISTS fee_programs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  address TEXT NOT NULL,
+  products TEXT NOT NULL,
+  fee INTEGER NOT NULL,
+  from_at INTEGER NOT NULL,
+  until_at INTEGER,
+  label TEXT NOT NULL,
+  added_at INTEGER NOT NULL,
+  added_by TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS fee_programs_address ON fee_programs (address);
 CREATE TABLE IF NOT EXISTS board_cards (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   title TEXT NOT NULL,
@@ -181,6 +196,38 @@ const GENESIS = '0'.repeat(64);
 /** The hash a row is chained with: everything it says, and the hash before it. */
 const rowHash = (r: { at: number; kind: string; ok: boolean; wallet: string | null; client: string | null; country: string | null; detail: string | null }, prev: string): string =>
   sha256(JSON.stringify([prev, r.at, r.kind, r.ok ? 1 : 0, r.wallet, r.client, r.country, r.detail]));
+
+/** The products a fee program can lower: the site's own futures and spot orders, copy trading and bots. */
+export type FeeProduct = 'perps' | 'spot' | 'copy' | 'bots';
+export const FEE_PRODUCTS: readonly FeeProduct[] = ['perps', 'spot', 'copy', 'bots'];
+
+export interface FeeProgram {
+  id: number;
+  address: string;
+  products: FeeProduct[];
+  /** Tenths of a basis point (0 = no ValueDesk fee), or -1: VIP, the lowest tier of each product (builder/programs.ts). */
+  fee: number;
+  from: number;
+  /** Null: until ended by hand. */
+  until: number | null;
+  label: string;
+  addedAt: number;
+  addedBy: string;
+}
+
+function programOf(r: Record<string, unknown>): FeeProgram {
+  return {
+    id: Number(r.id),
+    address: String(r.address),
+    products: String(r.products).split(',').filter((x): x is FeeProduct => (FEE_PRODUCTS as readonly string[]).includes(x)),
+    fee: Number(r.fee),
+    from: Number(r.from_at),
+    until: r.until_at === null || r.until_at === undefined ? null : Number(r.until_at),
+    label: String(r.label),
+    addedAt: Number(r.added_at),
+    addedBy: String(r.added_by),
+  };
+}
 
 export class AdminStore {
   private readonly db: DatabaseSync;
@@ -381,6 +428,33 @@ export class AdminStore {
 
   removeBetaWallet(address: string): boolean {
     return Number(this.db.prepare('DELETE FROM beta_wallets WHERE address = ?').run(address.toLowerCase()).changes) > 0;
+  }
+
+  // --- fee programs ----------------------------------------------------------------------------
+
+  /** Every program, newest first (ended ones too, for the record). */
+  feePrograms(): FeeProgram[] {
+    const rows = this.db.prepare('SELECT * FROM fee_programs ORDER BY added_at DESC, id DESC LIMIT 2000').all() as Array<Record<string, unknown>>;
+    return rows.map(programOf);
+  }
+
+  /** The programs of one wallet that are running at `now`. */
+  activeFeePrograms(address: string, now = Date.now()): FeeProgram[] {
+    const rows = this.db.prepare('SELECT * FROM fee_programs WHERE address = ? AND from_at <= ? AND (until_at IS NULL OR until_at > ?)').all(address.toLowerCase(), now, now) as Array<Record<string, unknown>>;
+    return rows.map(programOf);
+  }
+
+  /** One program per wallet, the same for each; their ids. */
+  addFeePrograms(p: { addresses: readonly string[]; products: readonly FeeProduct[]; fee: number; from: number; until: number | null; label: string; by: string }, now = Date.now()): number[] {
+    const ins = this.db.prepare('INSERT INTO fee_programs (address, products, fee, from_at, until_at, label, added_at, added_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+    const ids: number[] = [];
+    for (const a of p.addresses) ids.push(Number(ins.run(a.toLowerCase(), p.products.join(','), p.fee === -1 ? -1 : Math.max(0, Math.round(p.fee)), p.from, p.until, p.label, now, p.by.toLowerCase()).lastInsertRowid));
+    return ids;
+  }
+
+  /** End a program now (kept on record, ended); false when there is no such running program. */
+  endFeeProgram(id: number, now = Date.now()): boolean {
+    return Number(this.db.prepare('UPDATE fee_programs SET until_at = ? WHERE id = ? AND (until_at IS NULL OR until_at > ?)').run(now, id, now).changes) > 0;
   }
 
   // --- the kanban board --------------------------------------------------------------------------
