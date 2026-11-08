@@ -253,6 +253,41 @@ h.test('Total Value counts each dollar once, and copies and bots have no bucket'
   }
 }, { storage, timeout: 240_000 });
 
+/** Incognito on the amounts, in one look; the chart opens on PnL. (The address stays: the setup reads it.) */
+const privateStorage = (mode: string) => ({
+  ...storage,
+  'ot.privacy': JSON.stringify({ equity: true, funds: true, pnl: true }),
+  'ot.privacy.mode': JSON.stringify(mode),
+  'vs.pf.chart.view': JSON.stringify('pnl'),
+});
+
+for (const mode of ['blur', 'stars'] as const) {
+  h.test(`Incognito (${mode}): the PnL chart keeps its shape, its y axis and hover value are hidden`, async ({ page: p, wallet, ctx, origin }) => {
+    await holdHistory(p, wallet.address, true);
+    await enableTrading({ page: p, wallet, ctx }, { balance: 1000 });
+    await fakeHistory(ctx);
+    await p.goto(new URL('/portfolio', origin).href);
+    await clearOverlays(p);
+    const chart = p.locator('.pfx-chart');
+    await chart.locator('.pf-chart__line').first().waitFor({ timeout: 20_000 });
+    const labels = await chart.locator('.pf-chart__ylabel').allTextContents();
+    assert.ok(labels.length >= 2, 'the axis still has its ticks');
+    if (mode === 'stars') assert.ok(labels.every((l) => /^\*+$/.test(l)), `asterisks only: ${labels.join(' | ')}`);
+    else assert.equal(await chart.locator('.pf-chart__ylabel.is-blur').count(), labels.length, 'every label blurred');
+    // Hover: the day stays, the amount is masked.
+    await chart.evaluate((el) => el.scrollIntoView({ block: 'center' }));
+    await p.waitForTimeout(300);
+    const box = (await chart.locator('.pf-chart__svg').boundingBox())!;
+    await p.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.4);
+    const tip = chart.locator('.pf-chart__tip');
+    await tip.waitFor();
+    const val = await tip.locator('.pf-chart__tipval').innerText();
+    assert.ok(!/\$\d/.test(val) || mode === 'blur', `hover value hidden: ${val}`);
+    if (mode === 'blur') assert.equal(await tip.locator('.pf-chart__tipval .mask--blur').count(), 1, 'hover value blurred');
+    await shot(p, `privacy-${mode}`, false);
+  }, { storage: privateStorage(mode), timeout: 120_000 });
+}
+
 h.test('History notification: paused it stays up with its parts, resumed it reads to the end and goes', async ({ page: p, wallet, ctx, origin }) => {
   await holdHistory(p, wallet.address, true);
   await enableTrading({ page: p, wallet, ctx }, { balance: 1000 });

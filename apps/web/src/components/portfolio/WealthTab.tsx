@@ -117,7 +117,7 @@ function WealthChart({ address }: { address: string | null }) {
       {!address ? <div className="pf-chart pf-chart--empty"><p>Connect a wallet to chart your Wealth.</p></div>
         : history.error && !history.data ? <div className="pf-chart pf-chart--empty"><ReadFailed what="Wealth history" error={history.error} onRetry={history.refresh} /></div>
         : history.loading && !history.data ? <div className="pf-chart pf-chart--empty"><p><span className="pf-spin" aria-hidden="true" />Reading</p></div>
-        : win ? <EquityCurve win={win} tone={view === 'value' ? 'equity' : 'pnl'} level={view === 'value'} compactAxis clean />
+        : win ? <EquityCurve win={win} tone={view === 'value' ? 'equity' : 'pnl'} level={view === 'value'} compactAxis clean privacy={view === 'value' ? 'funds' : 'pnl'} />
         : <div className="pf-chart pf-chart--empty"><p>Nothing to chart yet in this range.</p></div>}
     </Card>
   );

@@ -2184,7 +2184,7 @@ function ValueCard({ m, address, equity, historyNote, liveEquity }: {
         : !equity.accountId ? <div className="pf-chart pf-chart--empty"><p>No SoDEX account for this wallet.</p></div>
         : equityCurve ? (
           <>
-            <EquityCurve win={equityCurve} tone="equity" />
+            <EquityCurve win={equityCurve} tone="equity" privacy="equity" />
           </>
         )
         : <div className="pf-chart pf-chart--empty"><p>Fewer than two daily points in {equityPeriod}.</p></div>}
@@ -2270,6 +2270,7 @@ function PerformanceChartCard({
    * fill-derived curve - and every other option swaps in the venue's published
    * series without changing anything else about the card. */
   const [airdrops, setAirdrops] = useStored<boolean>('ot.pf.pnl.airdrops', false);
+  const maskPnl = useMask('pnl');
   /** Chart or calendar of daily PnL - remembered. */
   const [view, setView] = useStored<'chart' | 'calendar'>('vs.pf.pnl.view', 'chart');
   const venueCurve = venue.points && !historyNote
@@ -2309,7 +2310,7 @@ function PerformanceChartCard({
       <div className="pf-readout">
         <span className="pf-readout__label">{SERIES.find(([id]) => id === mode)?.[1]} P&amp;L · {period}</span>
         <span className={`pf-readout__value ${change === null ? '' : signClass(change)}`}>
-          {change === null ? DASH : fmtSigned(change)}
+          {maskPnl(change === null ? DASH : fmtSigned(change))}
         </span>
 
       </div>
@@ -2320,7 +2321,7 @@ function PerformanceChartCard({
         : venue.error ? <div className="pf-chart pf-chart--empty"><ReadFailed what="PnL history" error={venue.error} /></div>
         : !venue.accountId ? <div className="pf-chart pf-chart--empty"><p>No SoDEX account for this wallet.</p></div>
         : view === 'calendar' ? <CrossFadeCal points={venue.points ?? []} mode={mode} />
-        : venueCurve ? <EquityCurve win={venueCurve} />
+        : venueCurve ? <EquityCurve win={venueCurve} privacy="pnl" />
         : <div className="pf-chart pf-chart--empty"><p>Fewer than two daily points in {period}.</p></div>}
 
       <div className="pf-statstrip">
@@ -3226,7 +3227,7 @@ function PortfolioChart({ c }: { c: PortfolioContext }) {
       action={<PeriodSeg period={c.period} onPeriod={c.setPeriod} label="Chart period" />}
     >
       {curve ? (
-        <EquityCurve win={curve} tone="equity" />
+        <EquityCurve win={curve} tone="equity" privacy="equity" />
       ) : (
         <p className="pf-note">
           {c.address ? 'Loading the venue series…' : 'Connect a wallet to see the curve.'}

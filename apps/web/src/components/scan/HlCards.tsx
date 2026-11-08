@@ -423,7 +423,7 @@ export function HlValueCard({ hl, title = 'Account value' }: { hl: HlState; titl
       </div>
 
       {why ? <ChartBlocked hl={hl} text={why} />
-        : curve ? <EquityCurve win={curve} tone="equity" compactAxis />
+        : curve ? <EquityCurve win={curve} tone="equity" compactAxis privacy="equity" />
         : <ChartBlocked hl={hl} text="No account value history" />}
 
       <div className="pf-statstrip">
@@ -493,7 +493,7 @@ export function HlPnlCard({ hl, title = 'Performance' }: { hl: HlState; title?: 
       </div>
 
       {why ? <ChartBlocked hl={hl} text={why} />
-        : curve ? <EquityCurve win={curve} compactAxis />
+        : curve ? <EquityCurve win={curve} compactAxis privacy="pnl" />
         : <ChartBlocked hl={hl} text="No PnL history" />}
 
       <div className="pf-statstrip">

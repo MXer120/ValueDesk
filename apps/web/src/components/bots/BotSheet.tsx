@@ -83,7 +83,7 @@ export function Overview({ v, actions }: { v: AlgoView; actions: ReactNode }) {
         <Kpi k="Holding" v={b ? fmtUsd(b.inventoryUsd, 2) : DASH} hint="What it holds from its own fills, at the price now." />
       </div>
       <figure className="bots-chart">
-        {hasData ? <SeriesChart series={series} height={210} daily={false} /> : <p className="oe-hint bots-chart__wait">The chart starts after its first 15 minutes: volume as bars, net PnL as the line, one point every 5 minutes.</p>}
+        {hasData ? <SeriesChart series={series} height={210} daily={false} privacy="pnl" /> : <p className="oe-hint bots-chart__wait">The chart starts after its first 15 minutes: volume as bars, net PnL as the line, one point every 5 minutes.</p>}
         <figcaption><span className="bots-key is-vol" />Volume per interval<span className="bots-key is-pnl" />Net PnL</figcaption>
       </figure>
       <div className="bots-split">

@@ -112,7 +112,7 @@ export const MODE_HINTS: Record<PrivacyMode, string> = {
  * data, which is the reason people choose them.
  */
 const SAFE_DIGITS = '0123456789';
-function safeText(sample: string): string {
+export function safeText(sample: string): string {
   /* Same shape, no information: digits become a fixed rotating sequence rather
      than a random one, so the placeholder does not shimmer on every render. */
   let i = 0;

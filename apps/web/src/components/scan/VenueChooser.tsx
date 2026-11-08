@@ -58,7 +58,7 @@ export function VenueChooser({
             </span>
             <span className="scan-choose__chart">
               <span className="scan-choose__meta">PnL</span>
-              {card.curve ? <EquityCurve win={card.curve} compactAxis /> : <span className="scan-choose__dash">{DASH}</span>}
+              {card.curve ? <EquityCurve win={card.curve} compactAxis privacy="pnl" /> : <span className="scan-choose__dash">{DASH}</span>}
             </span>
             <span className="scan-choose__when">
               <span className="scan-choose__meta">Last active</span>

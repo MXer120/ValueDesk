@@ -7,7 +7,7 @@
  * formatters. Styles: Portfolio.css.
  */
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
-import { Private, useMask, usePrivacy, type PrivacyKey } from '../../privacy';
+import { Private, safeText, useMask, usePrivacy, type PrivacyKey, type PrivacyMode } from '../../privacy';
 import { DASH, MINUS, fmtUsd, signClass } from '../../format';
 import { dotGrid, timeTicks } from './timeTicks';
 import '../Portfolio.css';
@@ -375,8 +375,26 @@ export function EquityCurve(props: Parameters<typeof EquityCurveInner>[0]) {
   return <Private k="charts"><EquityCurveInner {...props} /></Private>;
 }
 
-function EquityCurveInner({ win, unit = 'usd', tone = 'pnl', compactAxis = false, level = false, clean = false }: {
+/**
+ * One y-axis label under incognito (owner 2026-11-08: "privacy mode also needs to blurr/hide the y axis"). The axis
+ * says how much as plainly as a headline figure, so it is hidden with the figure's own category, in the chosen mode.
+ * As with `useMask`, the real value never reaches the page: blur and pixelate draw a stand-in, not the number.
+ */
+function MaskedTick({ x, y, sample, mode, mosaic }: { x: number; y: number; sample: string; mode: PrivacyMode; mosaic: string }) {
+  const w = Math.max(18, sample.length * 5.6);
+  if (mode === 'stars') return <text x={x} y={y} className="pf-chart__ylabel">{'*'.repeat(Math.min(8, Math.max(3, sample.replace(/[^\w]/g, '').length)))}</text>;
+  if (mode === 'blackout') return <rect x={x} y={y - 8} width={w} height={10} rx={2} className="pf-chart__mask" />;
+  if (mode === 'pixelate') return <rect x={x} y={y - 8} width={w} height={10} rx={2} fill={`url(#${mosaic})`} />;
+  return <text x={x} y={y} className="pf-chart__ylabel is-blur">{safeText(sample)}</text>;
+}
+
+function EquityCurveInner({ win, unit = 'usd', tone = 'pnl', compactAxis = false, level = false, clean = false, privacy }: {
   win: CurveWindow;
+  /**
+   * The category the curve's AMOUNTS belong to. Under it the y-axis labels and the hover value are hidden while the
+   * shape stays (the `charts` category hides the whole curve). Leave it out for a curve that is not the user's own.
+   */
+  privacy?: PrivacyKey;
   unit?: 'usd' | 'pct';
   /**
    * 'pnl' colours gains green. 'equity' draws them white instead - an account
@@ -406,6 +424,9 @@ function EquityCurveInner({ win, unit = 'usd', tone = 'pnl', compactAxis = false
   clean?: boolean;
 }) {
   const pts = win.points;
+  const priv = usePrivacy();
+  const hidden = privacy !== undefined && priv.isHidden(privacy);
+  const maskTip = useMask(privacy ?? 'funds');
   const [hover, setHover] = useState<number | null>(null);
   const boxRef = useRef<HTMLDivElement>(null);
   const [box, setBox] = useState({ w: 0, h: 0 });
@@ -574,7 +595,7 @@ function EquityCurveInner({ win, unit = 'usd', tone = 'pnl', compactAxis = false
         width={W}
         height={H}
         role="img"
-        aria-label={`${pts.length} points, ending at ${fmtV(last)} relative to the start of the period`}
+        aria-label={hidden ? `${pts.length} points` : `${pts.length} points, ending at ${fmtV(last)} relative to the start of the period`}
         onMouseMove={onMove}
         onMouseLeave={() => setHover(null)}
       >
@@ -587,6 +608,13 @@ function EquityCurveInner({ win, unit = 'usd', tone = 'pnl', compactAxis = false
             <stop offset="0%" stopColor="var(--neg)" stopOpacity="0" />
             <stop offset="100%" stopColor="var(--neg)" stopOpacity="0.22" />
           </linearGradient>
+          {hidden && priv.mode === 'pixelate' && (
+            <pattern id={`${uid}-mz`} width="5" height="5" patternUnits="userSpaceOnUse">
+              <rect width="5" height="5" className="pf-chart__mosaic" />
+              <rect width="2.5" height="2.5" className="pf-chart__mosaic is-lit" />
+              <rect x="2.5" y="2.5" width="2.5" height="2.5" className="pf-chart__mosaic is-lit" />
+            </pattern>
+          )}
           {clean && (
             <>
               {([[ID.dotGround, 'none'], [ID.dotUp, 'pos'], [ID.dotDown, 'neg']] as const).map(([id, tone]) => (
@@ -632,19 +660,22 @@ function EquityCurveInner({ win, unit = 'usd', tone = 'pnl', compactAxis = false
           </>
         )}
 
-        {shown.map((t) => (
-          <g key={t}>
-            {!clean && (
-              <line
-                x1="0" y1={y(t)} x2={PLOT_W} y2={y(t)}
-                className={t === 0 && !level ? 'pf-chart__zero' : 'pf-chart__grid'}
-              />
-            )}
-            <text x={PLOT_W + 5} y={y(t) + 3} className="pf-chart__ylabel">
-              {clean && unit === 'usd' && niceStep >= 1 ? wholeUsd(t) : compactAxis && unit === 'usd' ? fmtCompactUsd(t) : fmtV(t)}
-            </text>
-          </g>
-        ))}
+        {shown.map((t) => {
+          const label = clean && unit === 'usd' && niceStep >= 1 ? wholeUsd(t) : compactAxis && unit === 'usd' ? fmtCompactUsd(t) : fmtV(t);
+          return (
+            <g key={t}>
+              {!clean && (
+                <line
+                  x1="0" y1={y(t)} x2={PLOT_W} y2={y(t)}
+                  className={t === 0 && !level ? 'pf-chart__zero' : 'pf-chart__grid'}
+                />
+              )}
+              {hidden
+                ? <MaskedTick x={PLOT_W + 5} y={y(t) + 3} sample={label} mode={priv.mode} mosaic={`${uid}-mz`} />
+                : <text x={PLOT_W + 5} y={y(t) + 3} className="pf-chart__ylabel">{label}</text>}
+            </g>
+          );
+        })}
 
         {/* Fills first, then the strokes on top, so a run's own line is never
             dimmed by the next run's translucent area. */}
@@ -712,7 +743,7 @@ function EquityCurveInner({ win, unit = 'usd', tone = 'pnl', compactAxis = false
           }}
         >
           <span className="pf-chart__tipday">{clean && tTo - tFrom <= 2 * 86_400_000 ? `${fmtDay(h.t)}, ${new Date(h.t).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}` : fmtDay(h.t)}</span>
-          <span className={`pf-chart__tipval ${clean ? sideOf(h.v) : level ? '' : signClass(h.v)}`}>{fmtV(h.v)}</span>
+          <span className={`pf-chart__tipval ${clean ? sideOf(h.v) : level ? '' : signClass(h.v)}`}>{hidden ? maskTip(fmtV(h.v)) : fmtV(h.v)}</span>
         </div>
       )}
     </div>

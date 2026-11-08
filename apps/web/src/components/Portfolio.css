@@ -826,6 +826,11 @@
 .pf-chart__ylabel,
 .pf-chart__xlabel {
   fill: var(--muted); font-size: var(--fs-label);}
+/* Incognito on the y axis (parts.tsx MaskedTick): the same four looks as `.mask--*` in styles.css. */
+.pf-chart__ylabel.is-blur { filter: blur(3px); user-select: none; }
+.pf-chart__mask { fill: var(--muted); opacity: 0.85; }
+.pf-chart__mosaic { fill: var(--panel-line); }
+.pf-chart__mosaic.is-lit { fill: var(--muted); opacity: 0.35; }
 .pf-chart__cursor { stroke: var(--muted); stroke-width: 1; opacity: 0.5; }
 .pf-chart__dot.pos { fill: var(--pos); }
 .pf-chart__dot.neg { fill: var(--neg); }

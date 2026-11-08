@@ -168,7 +168,7 @@ export function FleetChart({ bots, title = 'Volume and net PnL', series: given, 
       </div>
       <Panel className="bots-chartpanel">
         {enough
-          ? <SeriesChart key={`${span}-${full}`} series={series} height={full ? Math.max(320, window.innerHeight - 150) : 232} daily={false} magnet />
+          ? <SeriesChart key={`${span}-${full}`} series={series} height={full ? Math.max(320, window.innerHeight - 150) : 232} daily={false} magnet privacy="pnl" />
           : <EmptyState icon="chart" title={bots.length ? 'Not enough points yet' : empty?.title ?? 'No bot yet'} description={bots.length ? 'A point every 5 minutes. Try a longer timeframe.' : empty?.line ?? 'Start a bot to chart it here.'} />}
       </Panel>
     </Shell>

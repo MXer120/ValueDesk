@@ -93,6 +93,7 @@ import { crosshairLabel, timeTicks, type TimeZoneMode } from '../../chart/timeAx
 import { logger } from '../../log';
 import { fmtPlain, localize } from '../../numStyle';
 import { followNumStyle } from '../../chart/klineNumbers';
+import { useMask, usePrivacy, type PrivacyKey } from '../../privacy';
 import './SeriesChart.css';
 
 const log = logger('chart');
@@ -634,8 +635,16 @@ function ladderTicks(params: Parameters<AxisCreateTicksCallback>[0], format: (v:
 
 /** The ticks for one axis: our ladder on a linear scale, the trading chart's
  *  dense ticks on the log one (pixels are not linear in value there). */
-const ticksFor = (format: () => (v: number) => string, kind: ScaleKind): AxisCreateTicksCallback => (params) =>
-  (kind === 'linear' ? ladderTicks(params, format()) : null) ?? denseTicks(params);
+const ticksFor = (format: () => (v: number) => string, kind: ScaleKind, masked: () => boolean): AxisCreateTicksCallback => (params) => {
+  const ticks = (kind === 'linear' ? ladderTicks(params, format()) : null) ?? denseTicks(params);
+  return masked() ? ticks.map((t) => ({ ...t, text: MASKED_TICK })) : ticks;
+};
+
+/**
+ * A label under incognito (owner 2026-11-08: the y axis of the user's own charts is hidden too). A canvas cannot
+ * blur one label, so every mode reads as asterisks here; the real value is never drawn.
+ */
+const MASKED_TICK = '***';
 
 const YEAR_MS = 365 * DAY;
 /** The range buttons' spans: the history on screen up to the newest point. */
@@ -687,8 +696,13 @@ let uidSeq = 0;
  * wheel and a drag then reach every point of it, and a new span is one eased
  * move to it. A double click goes back to the span.
  */
-export function SeriesChart({ series, height = 220, daily = true, span = null, magnet: magnetOn = false }: {
+export function SeriesChart({ series, height = 220, daily = true, span = null, magnet: magnetOn = false, privacy }: {
   series: ChartSeries[];
+  /**
+   * The category the amounts belong to, for a chart of the user's own (the bots). Under it the axis labels, the
+   * crosshair's value tag and the legend are hidden while the shape stays. Left out for market data.
+   */
+  privacy?: PrivacyKey;
   height?: number;
   daily?: boolean;
   span?: number | null;
@@ -697,6 +711,11 @@ export function SeriesChart({ series, height = 220, daily = true, span = null, m
 }) {
   const magnetRef = useRef(magnetOn);
   magnetRef.current = magnetOn;
+  const priv = usePrivacy();
+  const hidden = privacy !== undefined && priv.isHidden(privacy);
+  const hiddenRef = useRef(hidden);
+  hiddenRef.current = hidden;
+  const maskLegend = useMask(privacy ?? 'funds');
   const host = useRef<HTMLDivElement>(null);
   /** The span asked for now, and the one the view was last put on. */
   const spanNow = useRef<number | null>(span);
@@ -786,16 +805,16 @@ export function SeriesChart({ series, height = 220, daily = true, span = null, m
     const leftFormat = () => formatOf(model.current?.left ?? []);
     const def = priceAxis(c);
     if (def) {
-      const text = (v: number) => rightFormat()(v);
+      const text = (v: number) => (hiddenRef.current ? MASKED_TICK : rightFormat()(v));
       // displayValueToText is the axis template's label hook; klinecharts merges
       // it from an override like createTicks, though its types leave it out.
-      c.overrideYAxis({ paneId: CANDLE_PANE_ID, id: def.id, name: mode.current, createTicks: ticksFor(rightFormat, kind), displayValueToText: text } as YAxisOverride);
+      c.overrideYAxis({ paneId: CANDLE_PANE_ID, id: def.id, name: mode.current, createTicks: ticksFor(rightFormat, kind, () => hiddenRef.current), displayValueToText: text } as YAxisOverride);
       const axis = priceAxis(c);
       if (axis) c.overrideYAxis({ paneId: CANDLE_PANE_ID, id: axis.id, createRange: f.wrap(templateRange(axis.createRange), kind) });
     }
     if (m?.left.length && leftAxis(c)) {
-      const text = (v: number) => leftFormat()(v);
-      c.overrideYAxis({ paneId: CANDLE_PANE_ID, id: ids.leftAxis, name: mode.current, position: 'left', createTicks: ticksFor(leftFormat, kind), displayValueToText: text } as YAxisOverride);
+      const text = (v: number) => (hiddenRef.current ? MASKED_TICK : leftFormat()(v));
+      c.overrideYAxis({ paneId: CANDLE_PANE_ID, id: ids.leftAxis, name: mode.current, position: 'left', createTicks: ticksFor(leftFormat, kind, () => hiddenRef.current), displayValueToText: text } as YAxisOverride);
       const axis = leftAxis(c);
       if (axis) {
         const base = LEFT_TEMPLATES.get(axis.createRange) ?? axis.createRange;
@@ -1036,6 +1055,12 @@ export function SeriesChart({ series, height = 220, daily = true, span = null, m
       setReady(false);
     };
   }, [ids, fitNow, readPlotLeft, magnet]);
+
+  // Incognito switched: restate the axes so their labels are drawn (or hidden) again.
+  useEffect(() => {
+    const c = chart.current;
+    if (c && ready && privacy !== undefined) applyAxes(c);
+  }, [hidden, ready, privacy, applyAxes]);
 
   // --- the data ---------------------------------------------------------------
   useEffect(() => {
@@ -1297,7 +1322,7 @@ export function SeriesChart({ series, height = 220, daily = true, span = null, m
             <span key={it.key} className="dc-legend__item">
               <i style={{ background: it.color }} />
               {it.title && <span className="dc-legend__name">{it.title}</span>}
-              <b>{it.text}</b>
+              <b>{hidden ? maskLegend(it.text) : it.text}</b>
             </span>
           ))}
         </div>

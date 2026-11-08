@@ -257,7 +257,7 @@ function ChartCard({ c, h24 }: { c: PortfolioContext; h24: ChartPoint[] | null }
         : c.venue.progress ? empty(<><span className="pf-spin" aria-hidden="true" />Reading</>)
         : !c.venue.accountId ? empty('No SoDEX account for this wallet yet.')
         : view === 'calendar' ? <CrossFadeCal points={c.venue.points ?? []} mode="pnl-total" />
-        : win ? <EquityCurve win={view === 'value' ? atLevel(win) : win} tone={view === 'value' ? 'equity' : 'pnl'} level={view === 'value'} compactAxis clean />
+        : win ? <EquityCurve win={view === 'value' ? atLevel(win) : win} tone={view === 'value' ? 'equity' : 'pnl'} level={view === 'value'} compactAxis clean privacy={view === 'value' ? 'funds' : 'pnl'} />
         : empty(`Fewer than two points in ${range === 'ALL' ? 'this history' : range.toLowerCase()}.`)}
     </Card>
   );
