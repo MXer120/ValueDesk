@@ -194,20 +194,15 @@ test('A3 margin: a live copy subscribed (or its allocation raised) counts the ru
 
 /* ---------------------------------------------------------- A3 one market ----- */
 
-test('A3 market: several bots share a market at one leverage, beside a position the wallet holds; a live algo or a copy on it still refuses - saying what to stop', async () => {
+test('A3 market: a real bot is refused where the wallet holds a position, runs a live algo, or runs a copy that trades the coin - saying what to stop', async () => {
   const w = new Wallet();
   const h = make({ EXECUTOR_LIVE_ALGOS_WALLETS: w.address });
   await ready(h, w);
-  // A position the bot did not open: left alone, so the bot starts (owner 2026-11-08).
   h.w.positions[w.address] = [{ s: 'BTC-USD', sz: '0.01' }];
-  const first = await start(h, w, { ...MM, leverage: 3 }, 2);
-  // A second bot on BTC at the same leverage starts; at another it is refused, naming the first one's.
-  assert.equal(await code(start(h, w, { ...MM, leverage: 3 }, 3)), 'ok', 'a second bot on the same market');
-  const lv = await refusal(start(h, w, { ...MM, leverage: 5 }, 4));
-  assert.equal(`${lv.status}:${lv.code}`, '409:bot-leverage');
-  assert.match(lv.message, /uses 3x\. Bots on one market share one leverage: set 3x/);
-  assert.equal(lv.detail?.leverage, 3);
-  assert.ok(lv.detail?.algoId === first.algo.id || typeof lv.detail?.algoId === 'string');
+  const e = await refusal(start(h, w, MM));
+  assert.equal(`${e.status}:${e.code}`, '409:market-position');
+  assert.match(e.message, /You hold a BTC-USD position \(0\.01\) that this bot did not open\. Close it first/);
+  assert.deepEqual(e.detail, { symbol: 'BTC-USD', size: 0.01 });
   h.w.positions[w.address] = [];
   // A live TWAP on ETH: a bot on ETH is refused, one on BTC is not.
   const twap = await start(h, w, { kind: 'twap', symbol: 'ETH-USD', side: 'buy', quantity: '0.1', durationMs: 600_000, slices: 10, exec: { style: 'taker', slippageBps: 20 } }, 5);
@@ -217,12 +212,12 @@ test('A3 market: several bots share a market at one leverage, beside a position 
   // A copy whose allow list names BTC.
   const settings = canonicalSettings(parseSettings({ leader: { venue: 'sodex', address: LEADER }, assetAllow: ['BTC'], paper: false, allocationUsd: 100 }));
   const c = await h.svc.subscribe(w.sign(h.svc.executorId, 'subscribe', { settings, termsVersion: COPY_TERMS_VERSION }), ctx);
-  const b = await refusal(start(h, w, { ...MM, leverage: 3 }, 7));
+  const b = await refusal(start(h, w, MM, 7));
   assert.equal(`${b.status}:${b.code}`, '409:market-copy');
   assert.match(b.message, /Stop that copy/);
   assert.equal(b.detail?.copyId, c.subscription.id);
   await h.svc.act(w.sign(h.svc.executorId, 'stop', { id: c.subscription.id, close: false }), ctx);
-  assert.equal(await code(start(h, w, { ...MM, leverage: 3 }, 8)), 'ok', 'with the copy stopped it starts');
+  assert.equal(await code(start(h, w, MM, 8)), 'ok', 'with the copy stopped it starts');
   await h.cleanup();
 });
 

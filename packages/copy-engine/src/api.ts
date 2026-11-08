@@ -437,8 +437,8 @@ export interface MeResponse {
 
 /**
  * An executor's refusal as the web reads it: `{ ok: false, code, error, detail? }`. A bot's codes (service.ts
- * BotRefusalCode): key, account, beta, limit, bot-capacity, margin, margin-unknown, bot-leverage, market-copy,
- * market-algo, vip-moving, moved. `detail` carries figures for some of them (margin: needUsd,
+ * BotRefusalCode): key, account, beta, limit, bot-capacity, margin, margin-unknown, bot-market, market-copy,
+ * market-algo, market-position, vip-moving, moved. `detail` carries figures for some of them (margin: needUsd,
  * freeUsd, reservedUsd, equityUsd; market-*: the copy, algo or position in the way).
  */
 export interface ExecutorRefusal {

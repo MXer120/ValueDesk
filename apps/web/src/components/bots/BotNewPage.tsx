@@ -140,8 +140,9 @@ type MSort = 'best' | 'activity' | 'uninformed' | 'spread';
 /** The markets, ranked; tick one or several. Activity is the market's own volume per hour (a bot's size does not change it). */
 function MarketStep({ picked, toggle, markets, costOf, running, real }: {
   picked: string[]; toggle: (s: string) => void; markets: BotMarket[] | null; costOf: (m: BotMarket) => number | null;
-  /** Markets where the wallet already runs a real bot (a new one there shares that bot's leverage). */
-  running: ReadonlyMap<string, number | null>;
+  /** Markets where the wallet already runs a real bot (one real bot per market: the executor refuses a second). */
+  running: ReadonlySet<string>;
+  /** Starting real bots: those markets cannot be picked. */
   real: boolean;
 }) {
   const [q, setQ] = useState('');
@@ -172,17 +173,18 @@ function MarketStep({ picked, toggle, markets, costOf, running, real }: {
     const on = picked.includes(symbol);
     const c = m ? costOf(m) : null;
     const busy = running.has(symbol);
-    const flip = () => toggle(symbol);
-    const lev = running.get(symbol);
+    // A market a real bot already trades: a real one cannot be added (ticked ones can still be unticked).
+    const locked = real && busy && !on;
+    const flip = () => { if (!locked) toggle(symbol); };
     return (
-      <tr key={symbol} role="checkbox" aria-checked={on} aria-label={symbol} tabIndex={0} title={busy ? `You already run a real bot here${lev ? ` at ${lev}x` : ''}. A new one runs next to it${real ? ' at the same leverage' : ''}.` : undefined} className={`bots-row${on ? ' is-picked' : ''}`} onClick={flip} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); flip(); } }}>
+      <tr key={symbol} role="checkbox" aria-checked={on} aria-disabled={locked || undefined} aria-label={symbol} tabIndex={0} title={busy ? (real ? 'You already run a real bot here. Stop it first, or run this one as practice.' : 'You already run a real bot here.') : undefined} className={`bots-row${on ? ' is-picked' : ''}${locked ? ' is-blocked' : ''}`} onClick={flip} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); flip(); } }}>
         <td className="bots-mt__pick"><span className={`bots-tick${on ? ' is-on' : ''}`} aria-hidden="true">{on && <Icon name="check" size={11} />}</span></td>
         <td>
           <span className="bots-mt__name">
             <CoinIcon coin={symbol} size={22} />
             <span><b>{symbol.replace(/-USD$/, '')}</b><small>{symbol}</small></span>
             {symbol === best && <StatusPill size="sm" tone="positive">best</StatusPill>}
-            {busy && <StatusPill size="sm" tone="neutral" dot>running</StatusPill>}
+            {busy && <StatusPill size="sm" tone={real ? 'warning' : 'neutral'} dot>running</StatusPill>}
             {m?.lead === null && <StatusPill size="sm">no oracle</StatusPill>}
             {!m && <StatusPill size="sm">little traded</StatusPill>}
           </span>
@@ -499,23 +501,10 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
     }
   }, [levCap, lev.held, lev.loaded, d.leverage]);
 
-  // Markets a real bot of this wallet already trades, with the leverage it set. Several bots may share a market
-  // (owner 2026-11-08), at the one leverage SoDEX keeps per market and account.
-  const runningReal = useMemo(() => {
-    const out = new Map<string, number | null>();
-    for (const v of ctx.bots) if (v.algo.spec.bot && !v.algo.spec.paper && !FINAL_STATUSES.has(v.algo.status)) out.set(v.algo.spec.symbol, v.algo.spec.leverage ?? null);
-    return out;
-  }, [ctx.bots]);
-  // A real bot joining a market another one trades takes its leverage.
-  const shared = paper ? [] : picked.filter((x) => runningReal.has(x));
-  const sharedLevs = [...new Set(shared.map((x) => runningReal.get(x) ?? null))];
-  useEffect(() => {
-    const one = sharedLevs.length === 1 ? sharedLevs[0] : null;
-    // Within this market's and region's cap (the clamp above), so the two never pull against each other.
-    const want = one === null || one === undefined ? null : levCap !== null ? clampLeverage(one, levCap) : one;
-    if (want !== null && d.leverage !== want) setD((x) => ({ ...x, leverage: want }));
-  }, [sharedLevs.join(','), d.leverage, levCap]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Markets a real bot of this wallet already trades (the executor's one real bot per market).
+  const runningReal = useMemo(() => new Set(ctx.bots.filter((v) => v.algo.spec.bot && !v.algo.spec.paper && !FINAL_STATUSES.has(v.algo.status)).map((v) => v.algo.spec.symbol)), [ctx.bots]);
   const toggle = (s: string) => {
+    if (!paper && runningReal.has(s) && !picked.includes(s)) return;
     setPicked((xs) => (xs.includes(s) ? (xs.length > 1 ? xs.filter((x) => x !== s) : xs) : grid ? [s] : [...xs, s].slice(0, 8)));
   };
   const runs = useMemo(() => ownRuns(ctx.bots, markets.data?.markets ?? null), [ctx.bots, markets.data]);
@@ -551,8 +540,7 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
   const hostedCopyUsd = alloc.copies.filter((c) => !c.mode || c.mode === 'hosted').reduce((t, c) => t + c.usd, 0);
   const free = alloc.equity === null ? null : Math.max(0, alloc.equity - alloc.botUsd - hostedCopyUsd);
   const short = !paper && free !== null && needAll > free + 1e-6 ? needAll - free : 0;
-  // Markets whose running bots set different leverages cannot be started together (one leverage per start).
-  const clash = sharedLevs.length > 1 ? shared : [];
+  const clash = paper ? [] : picked.filter((x) => runningReal.has(x));
   const whyNot: string | null =
     !ctx.address ? 'Connect your wallet to start a bot.'
     : why ? why
@@ -561,7 +549,7 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
     : grid && !range ? 'Waiting for the price to set the range.'
     : allErrors.length ? 'Fix the order size first (see Review).'
     : !paper && d.leverage === null ? "Reading the market's leverage and your account…"
-    : clash.length ? `Your bots on ${clash.map((x) => x.replace(/-USD$/, '')).join(', ')} use different leverages, and a new bot shares its market's. Start these markets one at a time.`
+    : clash.length ? `You already run a real bot on ${clash.map((x) => x.replace(/-USD$/, '')).join(', ')}. Stop it, untick it, or turn on Practice.`
     : short > 0 ? `Needs ${fmtUsd(needAll, 0)} of margin, ${fmtUsd(free ?? 0, 0)} is free.`
     : null;
   const can = whyNot === null;
@@ -733,8 +721,7 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
                 <NameField d={d} set={set} />
                 {allErrors.map((e) => <p key={e} className="bots-err" role="alert">{e} <button type="button" className="bots-link" onClick={() => act('size')}>Change the size</button></p>)}
                 {allNotes.map((e) => <p key={e} className="bots-note"><Icon name="warning" size={13} />{e} The margin below counts that size.</p>)}
-                {clash.length > 0 && <p className="bots-err" role="alert">Your bots on {clash.map((x) => x.replace(/-USD$/, '')).join(', ')} use different leverages. A new bot shares its market's leverage, so start these markets one at a time.</p>}
-                {!clash.length && shared.length > 0 && <p className="bots-fine">Runs next to your bot on {shared.map((x) => x.replace(/-USD$/, '')).join(', ')} at its {sharedLevs[0] ?? ''}x leverage (one leverage per market). Each bot unwinds only what it traded itself; your own position there is left alone.</p>}
+                {clash.length > 0 && <p className="bots-err" role="alert">You already run a real bot on {clash.map((x) => x.replace(/-USD$/, '')).join(', ')}: one real bot per market. Untick {clash.length === 1 ? 'it' : 'them'} in Markets, stop the other bot, or turn on Practice.</p>}
                 {short > 0 && <p className="bots-err" role="alert">{many ? 'These bots' : 'This bot'} would set aside {fmtUsd(needAll, 0)}, but only {fmtUsd(free ?? 0, 0)} of your futures account is free ({[alloc.botUsd > 0 ? `${fmtUsd(alloc.botUsd, 0)} with your other bots` : '', hostedCopyUsd > 0 ? `${fmtUsd(hostedCopyUsd, 0)} with copy trading` : ''].filter(Boolean).join(', ') || 'nothing set aside yet'}). Lower the size or max holding, deposit more, or stop a bot or a copy. <button type="button" className="bots-link" onClick={() => requestDeposit()}>Deposit</button></p>}
                 {why && ctx.address && <p className="bots-note">{why} <button type="button" className="bots-link" onClick={() => ctx.setup(paper)}>Set up</button></p>}
                 {!ctx.address && <p className="bots-note">Connect your wallet to start a bot.</p>}

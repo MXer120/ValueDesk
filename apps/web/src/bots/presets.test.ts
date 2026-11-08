@@ -249,7 +249,7 @@ test('an executor refusal reads as a sentence with the one thing to do', () => {
   assert.equal(refusalOf('key', 'x').action, 'setup');
   assert.equal(refusalOf('account', 'x').action, 'deposit');
   assert.equal(refusalOf('margin', 'x').label, 'Deposit');
-  assert.equal(refusalOf('bot-leverage', 'x').label, 'Change the leverage');
+  assert.equal(refusalOf('bot-market', 'x').label, 'Stop the other bot');
   assert.equal(refusalOf('paper-only', 'x').label, 'Ask on Discord');
   assert.equal(refusalOf('beta', 'x').label, 'Ask on Discord');
   assert.equal(refusalOf('live-cap', 'x').action, 'discord');

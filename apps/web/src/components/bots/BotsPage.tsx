@@ -139,9 +139,10 @@ export function refusalOf(e: unknown, act: { setup: () => void; deposit: () => v
     case 'limit': return n('limit', 'This wallet runs as many bots and algo orders as it may. Stop one to start another.');
     case 'margin': return n('margin', `${said} Lower its size or holding cap, stop another bot, or add funds.`, { label: 'Deposit', run: act.deposit });
     case 'margin-unknown': return n('margin-unknown', 'SoDEX did not tell your account balance just now, so the margin could not be checked. Try again in a moment.');
-    case 'bot-leverage': return n('bot-leverage', said, algoId ? { label: 'Open that bot', run: () => act.open(algoId) } : undefined);
+    case 'bot-market': return n('bot-market', said, algoId ? { label: 'Open that bot', run: () => act.open(algoId) } : undefined);
     case 'market-copy': return n('market-copy', `${said} Stop that copy in Copy trading, or pick another market.`);
     case 'market-algo': return n('market-algo', `${said} Cancel it in Trade, or pick another market.`);
+    case 'market-position': return n('market-position', `${said} Close it in Trade, or pick another market.`);
     case 'bot-capacity':
     case 'live-cap': return n('bot-capacity', 'The servers run as many bots with real orders as they safely can right now. Try again later, or start it as practice.');
     case 'vip-moving':
