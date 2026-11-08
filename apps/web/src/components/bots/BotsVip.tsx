@@ -20,17 +20,31 @@ import { BrandMark } from '../BrandMark';
 
 interface Eligibility { eligible: boolean; volumeUsd: number; minUsd: number; days: number; promo?: { until: number | null; label: string } | null }
 
-/** The wallet's VIP standing (server routes/builder.ts /api/vs/bots/vip); null while unknown or unreadable. */
+/** Set when the server has no VIP read yet (an API older than this page answers 404): said, not shown as dashes. */
+let vipReadMissing = false;
+
+/**
+ * The wallet's VIP standing (server routes/builder.ts /api/vs/bots/vip), read again every minute while the page is
+ * shown so the progress follows the wallet's trading; null while unknown or unreadable.
+ */
 function useEligibility(address: string | null): Eligibility | null {
   const [e, setE] = useState<Eligibility | null>(null);
+  const [, force] = useState(0);
   useEffect(() => {
     if (!address) return setE(null);
     let live = true;
-    fetch(`/api/vs/bots/vip?address=${address.toLowerCase()}`, { headers: { Accept: 'application/json' } })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((b: (Eligibility & { ok?: boolean }) | null) => { if (live) setE(b?.ok ? b : null); })
-      .catch(() => live && setE(null));
-    return () => { live = false; };
+    const read = () => {
+      if (document.visibilityState === 'hidden') return;
+      fetch(`/api/vs/bots/vip?address=${address.toLowerCase()}`, { headers: { Accept: 'application/json' } })
+        .then((r) => { const was = vipReadMissing; vipReadMissing = r.status === 404; if (live && was !== vipReadMissing) force((n) => n + 1); return r.ok ? r.json() : null; })
+        .then((b: (Eligibility & { ok?: boolean }) | null) => { if (live && b?.ok) setE(b); })
+        .catch(() => undefined);
+    };
+    read();
+    const t = window.setInterval(read, 60_000);
+    const onShow = () => { if (document.visibilityState === 'visible') read(); };
+    document.addEventListener('visibilitychange', onShow);
+    return () => { live = false; window.clearInterval(t); document.removeEventListener('visibilitychange', onShow); };
   }, [address]);
   return e;
 }
@@ -381,7 +395,7 @@ export function BotsVip({ ctx, compact, stage, strip }: { ctx: BotsCtx; compact?
       <div className="vipstrip" role="group" aria-label="VIP">
         <GoldMark size={22} />
         <b className="vipstrip__t">{onVip ? 'VIP' : vip ? 'VIP unlocked' : 'Become VIP'}</b>
-        {!vip && <><GoldBar value={volPct} /><span className="vipstrip__n"><em>{el ? fmtUsd(el.volumeUsd, 0) : '—'}</em> of {fmtUsd(el?.minUsd ?? 1_000_000, 0)} in 14 days</span></>}
+        {!vip && <><GoldBar value={volPct} /><span className="vipstrip__n">{el ? <><em>{fmtUsd(el.volumeUsd, 0)}</em> of {fmtUsd(el.minUsd, 0)} in 14 days</> : vipReadMissing ? 'Your progress shows with the next release' : <>$1M of your volume in 14 days</>}</span></>}
         {vip && <span className="vipstrip__n">{onVip ? 'Your bots run on the VIP servers.' : el?.promo ? 'The lowest fees everywhere, and VIP servers.' : 'Bot fees slashed, and VIP servers.'}</span>}
         <button type="button" className="vipstrip__go" onClick={() => goBots({ page: 'savings' })}>{vip && !onVip ? 'Move to VIP' : 'Perks'}<Icon name="arrowRight" size={13} /></button>
       </div>
@@ -406,6 +420,7 @@ export function BotsVip({ ctx, compact, stage, strip }: { ctx: BotsCtx; compact?
             <>
               <div className="bots-vip__prog">
                 <div className="bots-vip__nums"><b>{el ? fmtUsd(el.volumeUsd, 0) : '—'}</b><span>of {fmtUsd(el?.minUsd ?? 1_000_000, 0)} in 14 days</span><em>{el ? `${Math.floor(volPct * 100)}%` : ''}</em></div>
+                {!el && vipReadMissing && <small className="bots-fine">Your counted volume shows here with the next release of the servers.</small>}
                 <GoldBar value={volPct} />
                 {el && !el.eligible && <small className="bots-fine">{fmtUsd(Math.max(0, el.minUsd - el.volumeUsd), 0)} to go.</small>}
               </div>

@@ -2,7 +2,7 @@ import { createLogger, defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import type { IncomingHttpHeaders } from 'node:http';
+import { request as httpRequest, type IncomingHttpHeaders } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { homedir, platform } from 'node:os';
 import { join } from 'node:path';
@@ -168,6 +168,45 @@ const ADMIN_PAGE = process.env.VS_WEB_PAGE === 'admin';
  * compute them from. Serves <dir>/bm-24h.json and bm-7d.json at /api/vs/bots/markets (and <dir>/latency.json at
  * /api/copy/v1/bots/latency with VS_BOTS_LATENCY=1). Never in a build.
  */
+/**
+ * Dev only (VS_DEV_TEST_EXECUTOR=http://127.0.0.1:18799, the tunnel to the AWS test box): while that executor answers,
+ * /api/copy goes there instead of production, so a live test (the test wallet's bots on the test box) shows on
+ * localhost with its real volume, PnL, fees and orders (owner 2026-11-08: "fix the data sync"). Probed every 5 s;
+ * when the tunnel is down, requests fall through to the usual proxy (production). Never in a build.
+ */
+function devTestExecutor(): Plugin {
+  const base = process.env.VS_DEV_TEST_EXECUTOR?.trim();
+  return {
+    name: 'vs-dev-test-executor',
+    apply: 'serve',
+    configureServer(server) {
+      if (!base || !/^http:\/\/(127\.0\.0\.1|localhost):\d+$/.test(base)) return;
+      const target = new URL(base);
+      let up = false;
+      const probe = () => {
+        const q = httpRequest({ host: target.hostname, port: target.port, path: '/api/copy/v1/info', method: 'GET', timeout: 2500 }, (res) => { up = res.statusCode === 200; res.resume(); });
+        q.on('timeout', () => { up = false; q.destroy(); });
+        q.on('error', () => { up = false; });
+        q.end();
+      };
+      probe();
+      const timer = setInterval(probe, 5000);
+      server.httpServer?.on('close', () => clearInterval(timer));
+      server.middlewares.use((req, res, next) => {
+        if (!up || !req.url || !req.url.startsWith('/api/copy/')) return next();
+        const headers = { ...req.headers, host: target.host };
+        delete headers[TOKEN_HEADER];
+        const out = httpRequest({ host: target.hostname, port: target.port, path: req.url, method: req.method, headers }, (pres) => {
+          res.writeHead(pres.statusCode ?? 502, { ...pres.headers, 'x-vs-dev-executor': 'test' });
+          pres.pipe(res);
+        });
+        out.on('error', () => { up = false; if (!res.headersSent) { res.statusCode = 502; res.end(JSON.stringify({ error: 'the test executor did not answer' })); } });
+        req.pipe(out);
+      });
+    },
+  };
+}
+
 function botsFixtures(): Plugin {
   const dir = process.env.VS_BOTS_FIXTURES?.trim();
   return {
@@ -197,7 +236,7 @@ function botsFixtures(): Plugin {
 
 export default defineConfig({
   customLogger: logger,
-  plugins: [react(), trackAppOrigin(), preloadPalette(), thirdPartyLicences(), botsFixtures()],
+  plugins: [react(), trackAppOrigin(), preloadPalette(), thirdPartyLicences(), devTestExecutor(), botsFixtures()],
   define: { __VS_BUILD__: JSON.stringify(buildId()) },
   /*
    * The EIP-712 signing layer is SHARED with the backend, not copied.
