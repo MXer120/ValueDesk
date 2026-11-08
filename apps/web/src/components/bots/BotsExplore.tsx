@@ -10,6 +10,7 @@
  * of them on its own reading (bots/estimate.ts, which also learns from the wallet's own bots).
  */
 import { Fragment, useMemo, useState } from 'react';
+import { GLOSSARY } from '../../bots/glossary';
 import { DASH, fmtUsd } from '../../format';
 import { CoinIcon } from '../CoinIcon';
 import { useBotMarkets, type BotMarket } from '../../bots/data';
@@ -268,9 +269,9 @@ export function BotsExplore({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
                     {head('symbol', 'Market', false)}
                     {head('cost', 'Per $1M', true, `What $1M of ${pick === 'best' ? 'the best bot' : pickName}'s volume is estimated to do here, all-in`)}
                     {head('bot', pick === 'best' ? 'Best bot' : 'Bot', false)}
-                    {head('uninformed', 'Uninformed', true, "Share of small makers' fills taken by uninformed flow (cheap)")}
-                    {head('informed', 'Informed', true, 'Share taken by informed flow (about 1 bp a fill)', 'xc-b')}
-                    {head('spread', 'Spread', true, undefined, 'xc-a')}
+                    {head('uninformed', 'Uninformed', true, `Share of small makers' fills it took. ${GLOSSARY.uninformed}`)}
+                    {head('informed', 'Informed', true, `Share of small makers' fills it took. ${GLOSSARY.informed}`, 'xc-b')}
+                    {head('spread', 'Spread', true, GLOSSARY.spread, 'xc-a')}
                     {head('vol', 'Moves', true, 'How far the price travels per hour', 'xc-a')}
                     {head('activity', 'Activity / h', true, "The market's traded volume per hour", 'xc-b')}
                     <th className="right"><span className="tf-sr">Configure</span></th>

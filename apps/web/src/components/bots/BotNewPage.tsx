@@ -12,6 +12,7 @@
  * each safeguard, the wallet's own bots: bots/estimate.ts), what will run, and the balance it needs.
  */
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { GLOSSARY } from '../../bots/glossary';
 import { FINAL_STATUSES, parseAlgoSpec, regionPolicy, type MarketInfo } from '@copy-engine';
 import { requestDeposit } from '../account/actions';
 import { BETA_APPLY_URL } from '../../beta/access';
@@ -60,8 +61,8 @@ export function Takers({ m }: { m: BotMarket }) {
         ]}
       />
       <div className="bots-takers__key">
-        <span title="Uninformed flow: its fills cost makers little."><i style={{ background: TAKER_COLORS.patient }} />Uninformed <b>{Math.round(m.takers.t1002 * 100)}%</b></span>
-        <span title="Informed flow: its fills cost about 1 bp each."><i style={{ background: TAKER_COLORS.fast }} />Informed <b>{Math.round(m.takers.t23342 * 100)}%</b></span>
+        <span title={GLOSSARY.uninformed}><i style={{ background: TAKER_COLORS.patient }} />Uninformed <b>{Math.round(m.takers.t1002 * 100)}%</b></span>
+        <span title={GLOSSARY.informed}><i style={{ background: TAKER_COLORS.fast }} />Informed <b>{Math.round(m.takers.t23342 * 100)}%</b></span>
         <span><i style={{ background: TAKER_COLORS.other }} />Others <b>{Math.round(m.takers.other * 100)}%</b></span>
       </div>
     </div>

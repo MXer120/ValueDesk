@@ -29,6 +29,7 @@ import { BotAvatar, BotIcon } from './BotIcon';
 import { botSeries } from './BotSheet';
 import { BotSettings, NameField } from './BotSettings';
 import { StopMenu } from './StopMenu';
+import { Term } from './Term';
 import { BotAllocation } from './Allocation';
 import { TAKER_COLORS, effectiveDraft } from './BotNewPage';
 import { estimate, feeAdjOf, ownRuns } from '../../bots/estimate';
@@ -336,9 +337,9 @@ export function BotDetail({ ctx, view, id }: { ctx: BotsCtx; view: BotsView; id:
         <div className="bots-kpigrid is-5">
           <StatCard index={0} label="Net PnL" value={fmtPnl(b?.netPnl)} valueTone={pnlTone} trend={trendPnl} trendTone={pnlTone ?? 'neutral'} hint="After fees" />
           <StatCard index={1} label="Volume" value={b ? fmtUsd(b.volume, 0) : DASH} trend={trendVol} hint={b ? `${b.fills.toLocaleString('en-US')} fills · ${Math.round(b.makerShare * 100)}% maker` : undefined} />
-          <StatCard index={2} label="Per $1M" value={fmtCost(b?.costPerMillion)} valueTone={costTone(b?.costPerMillion)} hint={estBps !== null ? `Estimate ${fmtCost(estBps * 100)}` : undefined} />
+          <StatCard index={2} label={<Term t="perMillion">Per $1M</Term>} value={fmtCost(b?.costPerMillion)} valueTone={costTone(b?.costPerMillion)} hint={estBps !== null ? `Estimate ${fmtCost(estBps * 100)}` : undefined} />
           <StatCard index={3} label="Fees paid" value={b ? fmtUsd(b.tradeFees + b.builderFees, 2) : DASH} hint={`SoDEX's and ValueDesk's (yours now ${botFeeWords(ctx.feeTenths)})`} />
-          <StatCard index={4} label="Holding" value={!b || ended ? DASH : fmtUsd(b.inventoryUsd, 2)} hint={!b || ended ? (ended ? 'Stopped: it manages nothing now' : undefined) : b.inventoryUsd > 0.005 ? 'Long' : b.inventoryUsd < -0.005 ? 'Short' : 'Flat'} goal={cap && !ended ? { ratio: Math.min(1, hold / cap), label: `Cap ${fmtUsd(cap, 0)}` } : undefined} />
+          <StatCard index={4} label={<Term t="holding">Holding</Term>} value={!b || ended ? DASH : fmtUsd(b.inventoryUsd, 2)} hint={!b || ended ? (ended ? 'Stopped: it manages nothing now' : undefined) : b.inventoryUsd > 0.005 ? 'Long' : b.inventoryUsd < -0.005 ? 'Short' : 'Flat'} goal={cap && !ended ? { ratio: Math.min(1, hold / cap), label: `Cap ${fmtUsd(cap, 0)}` } : undefined} />
         </div>
       </Shell>
 

@@ -145,6 +145,7 @@
  * exactly the argument for sharing the element instead of re-implementing it.)
  */
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
+import { InfoDot } from './InfoDot';
 import { PrefsIcon } from './PrefsIcon';
 import { useLatched } from './motion';
 import type { PanelDefinition } from '../dashboard/types';
@@ -2908,13 +2909,8 @@ const CheckGlyph = () => (
   <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M3.5 8.4 6.6 11.4 12.6 4.8" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
 );
 
-export function InfoDot({ title }: { title: string }) {
-  return (
-    <span className="pfa__info" title={title} aria-label={title}>
-      <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><circle cx="8" cy="8" r="6.2" fill="none" stroke="currentColor" strokeWidth="1.2" /><path d="M8 7.2v4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" /><circle cx="8" cy="5" r="0.8" fill="currentColor" /></svg>
-    </span>
-  );
-}
+// The (i) moved to its own module so the Bots pages use it without loading this one (owner 2026-11-08 glossary).
+export { InfoDot };
 
 /** The detail sheet: every place the money is, coin by coin, the fee rate, and the account-value chart. */
 function EquityDetails({ c, eq, vol }: { c: PortfolioContext; eq: EquityParts; vol: number | null }) {

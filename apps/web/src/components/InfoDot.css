@@ -1,0 +1,2 @@
+.pfa__info { display: inline-grid; place-items: center; color: var(--dim); cursor: help; }
+.pfa__info:hover, .pfa__info:focus-visible { color: var(--muted); }

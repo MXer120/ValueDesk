@@ -13,6 +13,7 @@
  * and one press away. Built from the Bots kit.
  */
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { Term } from './Term';
 import { fmtUsd } from '../../format';
 import { FLOW_DEFAULT, GATE_DEFAULT, NEWS_DEFAULT, QUIET_PRESETS, R10, botNeedUsd, type BotDraft } from '../../bots/presets';
 import type { AlgoSpec } from '@copy-engine';
@@ -71,7 +72,7 @@ function LeverageRow({ d, set, lev, max }: { d: BotDraft; set: (p: Partial<BotDr
   const margin = botNeedUsd(spec);
   const lower = lev.open && lev.held !== null && now !== null && now < lev.held;
   return (
-    <Row label="Leverage" wide hint={<>Sets aside about <b>{fmtUsd(margin, 0)}</b> of margin {now === null ? 'at 1× (reading your account)' : `at ${now}×`}. Up to {max}× here.</>}>
+    <Row label={<Term t="margin">Leverage</Term>} wide hint={<>Sets aside about <b>{fmtUsd(margin, 0)}</b> of margin {now === null ? 'at 1× (reading your account)' : `at ${now}×`}. Up to {max}× here.</>}>
       <div className="bots-sizeline">
         <Slider label="Leverage slider" value={shown} min={1} max={max} step={1} onChange={(x) => set({ leverage: Math.round(x) })} minLabel="1×" maxLabel={`${max}×`} />
         <NumberField label="Leverage" hideLabel value={now} onChange={(x) => x !== null && set({ leverage: Math.max(1, Math.min(max, Math.round(x))) })} unit="×" className="bots-sizeline__n" />
@@ -188,7 +189,7 @@ export function BotSettings({ d, set, range, mark, liveAllowed, noLead, hidePrac
             {sizeErrors.slice(1).map((e) => <p key={e} className="bots-err" role="alert">{e}</p>)}
           </Row>
           {mm && (
-            <Row label="Max holding" hint={`${holdX.toFixed(1)}× the order: the most it holds either way. At the cap it only unwinds.`}>
+            <Row label={<Term t="holding">Max holding</Term>} hint={`${holdX.toFixed(1)}× the order: the most it holds either way. At the cap it only unwinds.`}>
               <div className="bots-sizeline">
                 <Slider label="Max holding slider" value={Math.min(10, Math.max(1, ratio))} min={1} max={10} step={0.5} onChange={(x) => setHold(Math.round(d.orderUsd * x))} minLabel="1×" maxLabel="10×" />
                 <NumberField label="Max holding" hideLabel value={d.maxInventoryUsd} onChange={(v) => v !== null && setHold(v)} unit="USD" className="bots-sizeline__n" />
@@ -211,7 +212,7 @@ export function BotSettings({ d, set, range, mark, liveAllowed, noLead, hidePrac
           <Row label="Run for" hint="Stops by itself after this long.">
             <Segmented label="Run for" value={d.runHours === null ? 'open' : [1, 8, 24, 168].includes(d.runHours) ? String(d.runHours) : 'x'} onChange={(v) => v !== 'x' && set({ runHours: v === 'open' ? null : Number(v) })} options={[{ value: 'open', label: 'Until stopped' }, { value: '1', label: '1h' }, { value: '8', label: '8h' }, { value: '24', label: '24h' }, { value: '168', label: '7d' }, ...(d.runHours === null || [1, 8, 24, 168].includes(d.runHours) ? [] : [{ value: 'x', label: `${d.runHours}h` }])]} />
           </Row>
-          <Row label="On stop" hint={d.onStop === 'close' ? 'When it stops, it sells or buys back what it holds.' : 'When it stops, what it holds stays open in your account.'}>
+          <Row label={<Term t="ioc">On stop</Term>} hint={d.onStop === 'close' ? 'When it stops, it sells or buys back what it holds.' : 'When it stops, what it holds stays open in your account.'}>
             <Segmented label="When it stops" value={d.onStop} options={[{ value: 'close', label: 'Close position' }, { value: 'keep', label: 'Keep it' }]} onChange={(v) => set({ onStop: v })} />
           </Row>
           {d.strategy === 'grid' && (
@@ -226,7 +227,7 @@ export function BotSettings({ d, set, range, mark, liveAllowed, noLead, hidePrac
         <div className="bots-quoting">
           <div className="bots-fgrid">
             {market && (
-              <Row label="Follow the oracle" tag={<R10Tag on={!d.noFair} reset={() => set({ noFair: false })} />} hint={d.noFair ? 'Rests at the best price; the oracle only feeds the market gate.' : 'Pulls a quote the oracle moved through.'}>
+              <Row label={<Term t="oracle">Follow the oracle</Term>} tag={<R10Tag on={!d.noFair} reset={() => set({ noFair: false })} />} hint={d.noFair ? 'Rests at the best price; the oracle only feeds the market gate.' : 'Pulls a quote the oracle moved through.'}>
                 <Segmented label="Follow the oracle" value={d.noFair ? 'touch' : 'oracle'} onChange={(v) => set({ noFair: v === 'touch' })} options={[{ value: 'oracle', label: 'Follow oracle' }, { value: 'touch', label: 'Touch only' }]} />
               </Row>
             )}
@@ -235,7 +236,7 @@ export function BotSettings({ d, set, range, mark, liveAllowed, noLead, hidePrac
                 <Segmented label="Longest rest" value={[5, 10, 20, 30].includes(d.restS) ? String(d.restS) : 'x'} onChange={(v) => v !== 'x' && set({ restS: Number(v) })} options={[{ value: '5', label: '5s' }, { value: '10', label: '10s' }, { value: '20', label: '20s' }, { value: '30', label: '30s' }, ...([5, 10, 20, 30].includes(d.restS) ? [] : [{ value: 'x', label: `${d.restS}s` }])]} />
               </Row>
             )}
-            <Row label="Quote at" tag={<R10Tag on={d.offsetTicks === R10.offsetTicks} reset={() => set({ offsetTicks: R10.offsetTicks })} />} hint="A step is the smallest price move on this market (a tick).">
+            <Row label={<Term t="touch">Quote at</Term>} tag={<R10Tag on={d.offsetTicks === R10.offsetTicks} reset={() => set({ offsetTicks: R10.offsetTicks })} />} hint="A step is the smallest price move on this market (a tick).">
               <Segmented label="Quote at" value={d.offsetTicks < 0 ? 'inside' : d.offsetTicks > 0 ? 'back' : 'touch'} options={[{ value: 'inside', label: '1 step better' }, { value: 'touch', label: 'Best price' }, { value: 'back', label: '1 step back' }]} onChange={(v) => set({ offsetTicks: v === 'inside' ? -1 : v === 'back' ? 1 : 0 })} />
             </Row>
           </div>
@@ -249,7 +250,7 @@ export function BotSettings({ d, set, range, mark, liveAllowed, noLead, hidePrac
           {adv && (
             <div className="bots-fgrid bots-adv__body">
               {market && !d.noFair && (
-                <Row label="Distance from oracle" tag={<R10Tag on={d.refBps === 0} reset={() => set({ refBps: 0 })} />} hint="Where the side that adds to what it holds rests, in bp (1 bp = 0.01%). 0: at SoDEX's best price.">
+                <Row label={<Term t="bp">Distance from oracle</Term>} tag={<R10Tag on={d.refBps === 0} reset={() => set({ refBps: 0 })} />} hint="Where the side that adds to what it holds rests, in bp (1 bp = 0.01%). 0: at SoDEX's best price.">
                   <NumberField label="Rest" value={d.refBps} onChange={(v) => set({ refBps: Math.max(0, Math.min(50, v ?? 0)) })} unit="bp" />
                 </Row>
               )}
@@ -264,10 +265,10 @@ export function BotSettings({ d, set, range, mark, liveAllowed, noLead, hidePrac
               <Row label="Re-price at most every" tag={<R10Tag on={d.minRepriceMs === R10.minRepriceMs} reset={() => set({ minRepriceMs: R10.minRepriceMs })} />}>
                 <Segmented label="Re-price" value={[1000, 2000, 5000].includes(d.minRepriceMs) ? String(d.minRepriceMs) : 'x'} onChange={(v) => v !== 'x' && set({ minRepriceMs: Number(v) })} options={[{ value: '1000', label: '1s' }, { value: '2000', label: '2s' }, { value: '5000', label: '5s' }, ...([1000, 2000, 5000].includes(d.minRepriceMs) ? [] : [{ value: 'x', label: `${d.minRepriceMs / 1000}s` }])]} />
               </Row>
-              <Row label="Re-quote after the price moves" tag={<R10Tag on={d.chaseTicks === R10.chaseTicks} reset={() => set({ chaseTicks: R10.chaseTicks })} />} hint="Moves its quotes once the best price moved this many steps.">
+              <Row label={<Term t="tick">Re-quote after the price moves</Term>} tag={<R10Tag on={d.chaseTicks === R10.chaseTicks} reset={() => set({ chaseTicks: R10.chaseTicks })} />} hint="Moves its quotes once the best price moved this many steps.">
                 <NumberField label="After" value={d.chaseTicks} onChange={(v) => set({ chaseTicks: Math.max(1, Math.min(1000, Math.round(v ?? 1))) })} unit="ticks" />
               </Row>
-              <Row label="Step back when holding" tag={<R10Tag on={d.skewTicks === R10.skewTicks} reset={() => set({ skewTicks: R10.skewTicks })} />} hint="At the cap, the side that would add more steps back this many steps.">
+              <Row label={<Term t="skew">Step back when holding</Term>} tag={<R10Tag on={d.skewTicks === R10.skewTicks} reset={() => set({ skewTicks: R10.skewTicks })} />} hint="At the cap, the side that would add more steps back this many steps.">
                 <NumberField label="Skew" value={d.skewTicks} onChange={(v) => set({ skewTicks: Math.max(0, Math.round(v ?? 0)) })} unit="ticks" />
               </Row>
               <Row label="Pause on fast moves" tag={<R10Tag on={d.moveGuard === 0} reset={() => set({ moveGuard: 0 })} />} hint="The side the price runs into waits once it moved this many steps in 2 seconds.">
@@ -292,7 +293,7 @@ export function BotSettings({ d, set, range, mark, liveAllowed, noLead, hidePrac
           {mm && (
             <Guard icon="robot" title="Flow gate" line="Pause when uninformed flow dries up" on={d.flowOn} set={(on) => set({ flowOn: on, ...(on && !d.flowMinUsd ? FLOW_DEFAULT : {}) })}>
               <div className="bots-fgrid is-2">
-                <Row label="Uninformed flow under">
+                <Row label={<Term t="uninformed">Uninformed flow under</Term>}>
                   <Segmented label="Flow threshold" value={[100_000, 250_000, 500_000, 1_000_000].includes(d.flowMinUsd) ? String(d.flowMinUsd) : 'x'} onChange={(v) => v !== 'x' && set({ flowMinUsd: Number(v) })} options={[{ value: '100000', label: '$100K' }, { value: '250000', label: '$250K' }, { value: '500000', label: '$500K' }, { value: '1000000', label: '$1M' }, ...([100_000, 250_000, 500_000, 1_000_000].includes(d.flowMinUsd) ? [] : [{ value: 'x', label: fmtUsd(d.flowMinUsd, 0) }])]} />
                 </Row>
                 <Row label="In the last">
