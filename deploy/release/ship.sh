@@ -435,6 +435,42 @@ release_on() {   # host, units (comma list)
   die "$units on $host: not shipped"
 }
 
+# THE FREEZE GATE (2026-11-08): v0.2.193 passed every check and then froze the API thread 4-11 s about 200 times an
+# hour (two outages the next morning). A release that answers /api/health once is not proof; this watches the API's
+# own stall log (loopWatch, "api thread stalled") for FREEZE_WATCH_S after the restart and rolls the server-1 parts
+# back when it froze FREEZE_MAX_LONG times over 4 s, or twice over 8 s (the health check's limit). The first 60 s
+# (start-up: caches, the index opening) do not count. Only shortened, never skipped: SHIP_FREEZE_WATCH_S >= 120.
+FREEZE_WATCH_S="${SHIP_FREEZE_WATCH_S:-600}"
+[ "$FREEZE_WATCH_S" -ge 120 ] 2>/dev/null || FREEZE_WATCH_S=120
+FREEZE_MAX_LONG=3
+freeze_count() {   # since (journalctl time) -> "<over 4 s> <over 8 s> <longest ms>"
+  remote "$S1" "sudo journalctl --namespace=pii -u valuescan-api --since '$1' --no-pager -o cat 2>/dev/null | grep -o '\"stallMs\":[0-9]*' | cut -d: -f2" \
+    | awk '{ if ($1 >= 4000) a++; if ($1 >= 8000) b++; if ($1 > m) m = $1 } END { printf "%d %d %d\n", a, b, m }'
+}
+freeze_gate() {   # units (comma list) on server 1
+  local units="$1" since left n4 n8 longest
+  # From the API's start plus the 60 s of start-up.
+  since="$(remote "$S1" "date -u -d \"\$(systemctl show valuescan-api -p ActiveEnterTimestamp --value)\" +%s")"
+  since="$(remote "$S1" "date -u -d '@$(( since + 60 ))' '+%F %T'")"
+  note "freeze gate: watching the API's stalls for $FREEZE_WATCH_S s (from $since UTC)"
+  left="$FREEZE_WATCH_S"
+  while [ "$left" -gt 0 ]; do
+    sleep 30; left=$(( left - 30 ))
+    read -r n4 n8 longest < <(freeze_count "$since" || echo "0 0 0")
+    if [ "${n4:-0}" -ge "$FREEZE_MAX_LONG" ] || [ "${n8:-0}" -ge 2 ]; then
+      note "!! the API froze $n4 times over 4 s ($n8 over 8 s, longest ${longest} ms) after $TAG - rolling back $units"
+      if remote "$S1" "sudo /opt/valuescan/bin/release.sh --rollback --units=$units"; then
+        notice_done rolled_back "The update was rolled back; everything runs as before."
+      else
+        note "!! the rollback failed too - look at it now: deploy/release/remote.sh, docs/INCIDENT-RUNBOOK.md"
+        NOTICE_OK=0
+      fi
+      die "$units on server 1: the API froze after the restart, not shipped"
+    fi
+  done
+  done_note "freeze gate: $FREEZE_WATCH_S s, ${n4:-0} stalls over 4 s, longest ${longest:-0} ms"
+}
+
 if [ ${#U1[@]} -gt 0 ] || [ ${#U2[@]} -gt 0 ] || [ "$STA" = 1 ] || [ "$FEED" = 1 ] || [ "$BIN" = 1 ]; then need_tarball; fi
 
 # Both servers' tarball and scripts first (one upload after the other: the laptop's cap): maint.sh and brake.sh
@@ -499,6 +535,7 @@ if [ ${#U1[@]} -gt 0 ] || [ "$STA" = 1 ]; then
       WARNED=1
     fi
   fi
+  if want api; then freeze_gate "$(IFS=,; echo "${S1U[*]}")"; fi
 fi
 
 # --- 6b. the copy executor, guarded ---------------------------------------------------------------
