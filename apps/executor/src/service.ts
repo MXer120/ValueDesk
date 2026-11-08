@@ -881,6 +881,71 @@ export class ExecutorService {
   }
   private vipSweepAt = 0;
 
+  /**
+   * The operator's overview of this executor (owner 2026-11-08: "usage of our infrastructure + bot volume across all
+   * valuedesk users"): what runs here against its caps, the shared SoDEX budget, and the bots' volume, PnL and fees
+   * (all wallets together, real and practice apart). Read by server 1's admin suite with the internal token.
+   */
+  infraStats(now = Date.now()): Record<string, unknown> {
+    const all = this.algos.list();
+    const bots = all.filter((a) => a.spec?.bot === true);
+    const liveBots = bots.filter((a) => !FINAL_STATUSES.has(a.status));
+    const real = liveBots.filter((a) => !a.spec.paper);
+    // Volume over the last 24 h: its volume now less its volume at the last 5-minute point before then (none: all of it).
+    const vol24 = (a: AlgoRecord): number => {
+      const b = a.book;
+      if (!b) return 0;
+      const before = [...(b.series ?? [])].reverse().find((p) => p[0] < now - 86_400_000);
+      return Math.max(0, b.buyValue + b.sellValue - (before ? before[1] : 0));
+    };
+    const sum = (xs: AlgoRecord[]) => {
+      let volume = 0, volume24h = 0, net = 0, tradeFees = 0, builderFees = 0, fills = 0;
+      for (const a of xs) {
+        const b = a.book;
+        if (!b) continue;
+        const v = this.algos.view(a.id)?.bot;
+        volume += b.buyValue + b.sellValue;
+        volume24h += vol24(a);
+        net += v?.netPnl ?? 0;
+        tradeFees += b.tradeFees;
+        builderFees += b.builderFees;
+        fills += b.fills;
+      }
+      return { volume, volume24h, netPnl: net, tradeFees, builderFees, fills };
+    };
+    const realAll = bots.filter((a) => !a.spec.paper);
+    const markets = new Map<string, { symbol: string; live: number; volume: number; volume24h: number }>();
+    for (const a of realAll) {
+      const m = markets.get(a.spec.symbol) ?? { symbol: a.spec.symbol, live: 0, volume: 0, volume24h: 0 };
+      if (!FINAL_STATUSES.has(a.status)) m.live++;
+      m.volume += a.book ? a.book.buyValue + a.book.sellValue : 0;
+      m.volume24h += vol24(a);
+      markets.set(a.spec.symbol, m);
+    }
+    const budget = this.sodex.budget as unknown as { used(now?: number): number; perMinute: number; cooldownLeft?(): number };
+    const socket = (this.algos as unknown as { socketWallets?: () => { followed: number; polled: number } }).socketWallets?.() ?? null;
+    return {
+      at: now,
+      tier: this.cfg.tier,
+      location: this.cfg.location,
+      liveBots: real.length,
+      maxLiveBots: this.cfg.maxLiveBots,
+      practiceBots: liveBots.length - real.length,
+      pausedBots: real.filter((a) => a.status === 'paused').length,
+      closingBots: real.filter((a) => !!a.k.closing).length,
+      botWallets: new Set(real.map((a) => a.owner)).size,
+      algos: all.filter((a) => a.spec?.bot !== true && !FINAL_STATUSES.has(a.status) && !a.spec.paper).length,
+      copies: this.runtime.list().filter((c) => c.status !== 'stopped' && !c.settings.paper).length,
+      maxAlgosPerOwner: this.cfg.maxAlgosPerOwner,
+      socket: socket ? { ...socket, max: 10 } : null,
+      budget: { used: Math.round(budget.used(now)), perMinute: budget.perMinute, cooldownMs: budget.cooldownLeft?.() ?? 0 },
+      real: sum(realAll),
+      practice: sum(bots.filter((a) => a.spec.paper)),
+      markets: [...markets.values()].sort((x, y) => y.volume24h - x.volume24h || y.volume - x.volume).slice(0, 40),
+      vipMoves: this.db.vipJobs<VipJob>().filter((j) => now - j.startedAt < 7 * 86_400_000).map((j) => ({ direction: j.direction ?? 'up', state: j.state, outcome: j.outcome ?? null, at: j.startedAt })),
+    };
+  }
+
   /** The wallet's last move, as it stands (this process's, else the db's: a move from before a restart). */
   vipJob(owner: string): VipJob | null {
     const j = this.vipJobs.get(owner) ?? this.db.vipJobs<VipJob>(owner)[0] ?? null;

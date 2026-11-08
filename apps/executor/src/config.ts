@@ -254,7 +254,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ExecutorConfig
     keyTtlDaysMax: Number.isFinite(ttl) && ttl >= 1 ? Math.min(Math.floor(ttl), 180) : 180,
     maxCopiesPerOwner: Math.max(1, Math.min(50, Number(env.EXECUTOR_MAX_COPIES ?? 10) || 10)),
     maxAlgosPerOwner: Math.max(1, Math.min(100, Number(env.EXECUTOR_MAX_ALGOS ?? 20) || 20)),
-    maxLiveBots: Math.max(1, Math.min(1000, Math.floor(Number(env.EXECUTOR_MAX_LIVE_BOTS ?? 10)) || 10)),
+    // 20 live bots per server (owner 2026-11-08): up to 10 wallets get their fills pushed on the account socket, the
+    // others are read by REST, a wallet first when a public print names it (runtime.ts onPrint).
+    maxLiveBots: Math.max(1, Math.min(1000, Math.floor(Number(env.EXECUTOR_MAX_LIVE_BOTS ?? 20)) || 20)),
     builderDb: env.EXECUTOR_BUILDER_DB?.trim() || null,
     builderUrl: builderUrl(env.EXECUTOR_BUILDER_URL),
     builderToken: env.EXECUTOR_BUILDER_TOKEN?.trim() || null,

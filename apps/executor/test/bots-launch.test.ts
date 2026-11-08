@@ -227,7 +227,7 @@ test('A7: a hard cap on real bots per executor (EXECUTOR_MAX_LIVE_BOTS), every w
   const a = new Wallet();
   const b = new Wallet();
   const h = make({ EXECUTOR_LIVE_ALGOS_WALLETS: `${a.address},${b.address}`, EXECUTOR_MAX_LIVE_BOTS: '1' });
-  assert.equal(loadConfig({ EXECUTOR_EDGE: 'none' }).maxLiveBots, 10, 'default 10');
+  assert.equal(loadConfig({ EXECUTOR_EDGE: 'none' }).maxLiveBots, 20, 'default 20 (owner 2026-11-08)');
   await ready(h, a);
   await ready(h, b);
   await start(h, a, MM);
@@ -680,4 +680,20 @@ test('VIP both ways: a failed read of VIP status moves nobody back; without EXEC
   assert.equal(loadConfig({ EXECUTOR_EDGE: 'none', EXECUTOR_TIER: 'vip', EXECUTOR_STD_URL: 'https://std.test/x' }).stdPubkey, null);
   assert.throws(() => loadConfig({ EXECUTOR_EDGE: 'none', EXECUTOR_STD_PUBKEY: 'short!' }), /EXECUTOR_STD_PUBKEY/);
   await p.cleanup();
+});
+
+test('infra stats (owner 2026-11-08): live bots against the cap of 20, practice apart, the SoDEX budget, bot totals per market', async () => {
+  const w = new Wallet();
+  const h = make({ EXECUTOR_LIVE_ALGOS_WALLETS: w.address });
+  await ready(h, w);
+  await start(h, w, { ...MM, leverage: 3 }, 2);
+  await start(h, w, { ...MM, symbol: 'ETH-USD', paper: true }, 3);
+  const s = h.svc.infraStats() as { liveBots: number; maxLiveBots: number; practiceBots: number; botWallets: number; budget: { perMinute: number }; markets: Array<{ symbol: string; live: number }> };
+  assert.equal(s.liveBots, 1);
+  assert.equal(s.maxLiveBots, 20);
+  assert.equal(s.practiceBots, 1);
+  assert.equal(s.botWallets, 1);
+  assert.ok(s.budget.perMinute > 0);
+  assert.deepEqual(s.markets.map((m) => [m.symbol, m.live]), [['BTC-USD', 1]]);
+  await h.cleanup();
 });

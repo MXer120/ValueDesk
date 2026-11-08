@@ -303,6 +303,12 @@ export function createExecutorServer(svc: ExecutorService, cfg: ExecutorConfig, 
         if (!cfg.builderToken || !safeEqual(cfg.builderToken, token)) throw new ApiError(404, 'path', 'not found');
         return send(res, 200, { users: svc.db.usersSummary() });
       }
+      // The admin suite's infrastructure overview (server 1 asks, with its internal token): caps, budget, bot totals.
+      if (req.method === 'GET' && route === '/internal/stats') {
+        const token = String(req.headers['x-internal-token'] ?? '');
+        if (!cfg.builderToken || !safeEqual(cfg.builderToken, token)) throw new ApiError(404, 'path', 'not found');
+        return send(res, 200, { ok: true, stats: svc.infraStats() });
+      }
       // VIP (vip.ts): the standard executor's move, followed by its owner; the VIP executor's internal import.
       if (req.method === 'GET' && route === '/vip/move') return send(res, 200, { job: svc.vipJob(svc.authenticate(bearer(req))) });
       if (req.method === 'POST' && route === '/internal/vip/import') {

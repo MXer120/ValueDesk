@@ -4276,8 +4276,30 @@ export class AlgoRuntime {
     }
   }
 
+  /** For the operator's overview (executor /internal/stats): the wallets with live orders the socket follows, and the rest read by REST. */
+  socketWallets(): { followed: number; polled: number } {
+    const follows = this.market.followsOrders?.bind(this.market);
+    const owners = new Set([...this.algos.values()].filter((a) => !a.spec.paper && !FINAL_STATUSES.has(a.status)).map((a) => a.owner));
+    let followed = 0;
+    for (const o of owners) if (!follows || follows(o)) followed++;
+    return { followed, polled: owners.size - followed };
+  }
+
   private onPrint(p: Print): void {
     const taker = p.taker === 'buy' ? p.buyer : p.seller;
+    // A print naming a wallet the socket does not follow (over SoDEX's 10 wallets per IP on account channels): its orders
+    // are read by REST next, ahead of the queue - its fill is booked within about a second, not when its turn comes
+    // (owner 2026-11-08: 20 live bots per server, whatever the number of wallets).
+    const follows = this.market.followsOrders?.bind(this.market);
+    if (follows) {
+      for (const a of this.algos.values()) {
+        if (a.spec.paper || a.spec.symbol !== p.symbol || FINAL_STATUSES.has(a.status) || follows(a.owner)) continue;
+        if (p.buyer === a.accountId || p.seller === a.accountId) {
+          this.resync.add(a.id);
+          this.polledAt.delete(a.id);
+        }
+      }
+    }
     const f = this.flow.get(p.symbol);
     if (f) {
       const gated = [...this.algos.values()].some((a) => a.spec.kind === 'mm' && a.spec.flowGate && a.spec.symbol === p.symbol && (a.status === 'running' || a.status === 'waiting'));

@@ -114,6 +114,8 @@ export interface AdminRouteOptions {
   internal?: readonly string[];
   /** Every wallet the copy executor knows (tests); default a GET of its /internal/users, kept a minute. */
   executorUsers?: () => Promise<ExecutorUser[] | null>;
+  /** The executors' overview (tests); default liveExecutorStats. */
+  executorStats?: () => Promise<Array<{ name: string; ok: boolean; stats: Record<string, unknown> | null }>>;
   /** Copy the ledger's counted orders every FEE_SYNC_MS (off in tests). */
   syncTimer?: boolean;
   now?: () => number;
@@ -216,6 +218,38 @@ export async function liveExecutorUsers(env: Readonly<Record<string, string | un
     }
   }
   executorCache = { at: now, value };
+  return value;
+}
+
+/**
+ * The executors' own overview (GET /internal/stats, apps/executor service.ts infraStats): the standard one
+ * (VALUESCAN_ADMIN_EXECUTOR_URL) and, when set, the VIP one (VALUESCAN_ADMIN_VIP_URL). Same token and origin secret as
+ * the user list; 30 s cache; an executor that does not answer is listed as such (owner 2026-11-08: infrastructure and
+ * bot volume across all users on the dev pages).
+ */
+let infraCache: { at: number; value: Array<{ name: string; ok: boolean; stats: Record<string, unknown> | null }> } | null = null;
+export async function liveExecutorStats(env: Readonly<Record<string, string | undefined>> = process.env, now = Date.now()): Promise<Array<{ name: string; ok: boolean; stats: Record<string, unknown> | null }>> {
+  if (infraCache && now - infraCache.at < 30_000) return infraCache.value;
+  const token = env.VALUESCAN_INTERNAL_TOKEN?.trim() ?? '';
+  const secret = env.VALUESCAN_ORIGIN_SECRET?.split(',')[0]?.trim() ?? '';
+  const targets = [
+    { name: 'Standard (server 2)', base: env.VALUESCAN_ADMIN_EXECUTOR_URL?.trim() || 'https://13-140-77-201.sslip.io' },
+    ...(env.VALUESCAN_ADMIN_VIP_URL?.trim() ? [{ name: 'VIP (AWS Tokyo)', base: env.VALUESCAN_ADMIN_VIP_URL.trim() }] : []),
+  ];
+  const value = await Promise.all(targets.map(async (t) => {
+    if (!token) return { name: t.name, ok: false, stats: null };
+    try {
+      const r = await fetch(`${t.base.replace(/\/+$/, '')}/api/copy/v1/internal/stats`, {
+        signal: AbortSignal.timeout(8_000),
+        headers: { accept: 'application/json', 'X-Internal-Token': token, ...(secret ? { 'X-Origin-Verify': secret } : {}) },
+      });
+      const j = (await r.json()) as { stats?: unknown };
+      return r.ok && isRecord(j.stats) ? { name: t.name, ok: true, stats: j.stats } : { name: t.name, ok: false, stats: null };
+    } catch {
+      return { name: t.name, ok: false, stats: null };
+    }
+  }));
+  infraCache = { at: now, value };
   return value;
 }
 
@@ -480,6 +514,8 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOptions 
     const a = opts.analytics();
     return { ok: true, analytics: a.summary(to - days * DAY, to, t), recent: a.recentVisits(50) };
   });
+
+  app.post('/api/admin/infra', { bodyLimit: 1024 }, async () => ({ ok: true, executors: await (opts.executorStats ?? (() => liveExecutorStats()))().catch(() => []) }));
 
   app.post('/api/admin/status', { bodyLimit: 1024 }, async () => {
     if (!opts.status) return { ok: true, status: null };
