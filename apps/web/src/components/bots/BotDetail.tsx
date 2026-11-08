@@ -155,8 +155,8 @@ function SettingsTab({ v, ctx }: { v: AlgoView; ctx: BotsCtx }) {
             <b>{n ? `${n} change${n === 1 ? '' : 's'}` : 'No change yet'}</b>
             <small>{!n ? 'Edit any setting above.' : patch ? 'Save changes the running bot: nothing restarts, nothing is closed.' : 'This change makes it another bot (its market, its type, or practice and real): a restart applies it.'}</small>
           </span>
-          {patch ? (
-            <Button variant="go" icon="check" disabled={busy !== null} loading={busy === 'save'} onClick={() => void save()}>Save</Button>
+          {patch || !n ? (
+            <Button variant="go" icon="check" disabled={!patch || busy !== null} loading={busy === 'save'} onClick={() => void save()}>Save</Button>
           ) : (
             <>
               <Button variant="secondary" icon="bolt" disabled={!n || busy !== null} loading={busy === 'takeover'} onClick={() => void restart('takeover')} title={holds ? 'Starts now and keeps its position.' : 'Starts now.'}>Instant restart</Button>
