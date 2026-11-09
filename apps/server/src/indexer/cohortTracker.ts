@@ -196,6 +196,8 @@ const XYZ_SCALE_UNKNOWN: MarketScale = { scale: 1, growth: true };
 const liveBudget = (pending: number): number => (pending > 10_000 ? LIVE_BUDGET_MAX_MS : LIVE_BUDGET_MS);
 export const LIQ_NOW_MS = 2 * 60_000;
 export const LIQ_STEP_MS = 15 * 60_000;
+/** A step write still going after this is let go (recordLiq): two steps' time. */
+export const LIQ_STEP_STUCK_MS = 30 * 60_000;
 /** Kept 30 days; past 3 days only the hourly ones. */
 const LIQ_KEEP_MS = 30 * DAY_MS;
 const LIQ_THIN_MS = 3 * DAY_MS;
@@ -665,6 +667,10 @@ export class CohortTracker {
   /** A 15-minute step's writes are in flight (writeLiqStep): the next step waits, the heatmap rows do not. */
   private liqStepWriting = false;
   private liqStepMs = 0;
+  /** When the step being written began, the last step asked for, and what the heatmap thread answered to it. */
+  private liqStepSince = 0;
+  private liqStepAskedT = 0;
+  private liqStepOut: string | null = null;
   private lastNowAt = 0;
   /** How long the last liquidation pass took (status). */
   private liqMs = 0;
@@ -1141,7 +1147,8 @@ export class CohortTracker {
       recordMs: this.recordMs,
       liqMs: this.liqMs,
       printsSkipped: this.printsSkipped,
-      liq: { crossedQueued: this.crossedQueued, oi: this.oiLast, boost: this.liqBoost, due: Object.fromEntries(this.liqDue), live, nowAt: this.lastNowAt || null, since: this.startedAt, stepT: this.lastLiqT || null },
+      liq: { crossedQueued: this.crossedQueued, oi: this.oiLast, boost: this.liqBoost, due: Object.fromEntries(this.liqDue), live, nowAt: this.lastNowAt || null, since: this.startedAt, stepT: this.lastLiqT || null,
+        stepWritingSince: this.liqStepWriting ? this.liqStepSince : null, stepMs: this.liqStepMs || null, stepAskedT: this.liqStepAskedT || null, stepOut: this.liqStepOut },
       thread: { cohorts: this.cohortThreaded, ranHere: this.cohortInline },
       hlc: { queued: this.hlc.size, done: this.hlc.done, failed: this.hlc.failed, lastError: this.hlc.lastError },
       pnl: { perpSince: this.perpSince, due: this.pnlDue, flows: this.pnlFlow.size, imported: this.pnlImported },
@@ -2136,7 +2143,14 @@ export class CohortTracker {
       const t = Math.floor(now / LIQ_STEP_MS) * LIQ_STEP_MS;
       // A step whose writes are still going holds back only the next STEP, never the 2-minute heatmap rows:
       // both used to wait on one flag, and a 45-min step write left the heatmap frozen as long (2026-11-09 00:15).
+      // A step write that never settles must not hold back every step after it (2026-11-09: none for 7 h, no error said):
+      // past LIQ_STEP_STUCK_MS it is let go, said in the log, and the next step goes (it rewrites its own rows).
+      if (this.liqStepWriting && Date.now() - this.liqStepSince > LIQ_STEP_STUCK_MS) {
+        console.warn(`[indexer] liq step: the write begun ${Math.round((Date.now() - this.liqStepSince) / 60_000)} min ago has not settled; the next step goes`);
+        this.liqStepWriting = false;
+      }
       const stepT = t > this.lastLiqT && !this.liqStepWriting ? t : null;
+      if (stepT !== null) this.liqStepAskedT = stepT;
       const ticks = new Map<string, number>();
       if (stepT !== null) for (const [sym, tick] of marketsNow('sodex')?.ticks ?? []) ticks.set(liqCoin(sym), tick);
       let init: { cur: ReturnType<IndexStore['liqCur']>; addrs: Map<string, number> } | undefined;
@@ -2149,13 +2163,17 @@ export class CohortTracker {
       const full = stepT !== null && !s.getMeta(LIQ_LOG_FULL_META);
       const askedAt = Date.now();
       const out = await this.live.step({ now, t: stepT, coins: [...this.sodexCoins], ticks, full, ...(init ? { init } : {}) });
+      if (stepT !== null) this.liqStepOut = !out.ready ? 'not ready' : !out.now ? 'no levels' : out.step ? 'step' : 'no step';
       if (!out.ready || !out.now) return;
       s.putLiqNow(now, out.now);
       this.lastNowAt = now;
       const step = out.step;
       if (stepT === null || !step) return;
       this.liqStepWriting = true;
-      void this.writeLiqStep(stepT, step, full, now, askedAt).finally(() => { this.liqStepWriting = false; });
+      this.liqStepSince = Date.now();
+      const mine = this.liqStepSince;
+      // Only this write clears the flag: one let go as stuck must not clear a newer one's when it settles at last.
+      void this.writeLiqStep(stepT, step, full, now, askedAt).finally(() => { if (this.liqStepSince === mine) this.liqStepWriting = false; });
     } catch (e) {
       this.lastError = `liquidations: ${String(e)}`;
     } finally {
