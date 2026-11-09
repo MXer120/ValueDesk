@@ -170,8 +170,9 @@ export function startStandby(path = defaultDbPath(), o: { exit: (code: number) =
     // The held rows: written by the outgoing process after it let go of the lock.
     void until(() => (readJson<{ pid: number }>(paths.heldDone)?.pid === a.by) || !alive(a.by), 15 * 60_000, 500).then(() => {
       if (!existsSync(paths.heldDone)) log(`handover: pid ${a.by} ended without saying its held rows are written; reading what is there`);
-      try { running.store.loadHeldLate(); } catch (e) { console.warn(`[indexer] handover: held rows not read: ${String(e)}`); }
-      removeFiles(paths.heldDone);
+      // A slice at a time: 29M rows read in one go held the thread 293 s (2026-11-09).
+      return running.store.loadHeldLateAsync().catch((e) => console.warn(`[indexer] handover: held rows not read: ${String(e)}`))
+        .finally(() => removeFiles(paths.heldDone));
     });
     if (stopAfter) {
       // Stopped while taking over: the buffer goes in first, then the classic stop writes or spills it.

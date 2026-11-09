@@ -83,6 +83,8 @@ const COHORT_SLICE_ROWS = 500;
 const COHORT_MIX_SLICE_ROWS = 50;
 const MIX_LAST_T_META = 'cohort_mix_last_t';
 const LIQ_HIST_LAST_T_META = 'liq_hist_last_t';
+/** The held rows read late (a handover) hand the thread back this often (ms). */
+const HELD_SLICE_MS = 20;
 /**
  * The writer connection's page cache at most, in KiB (PRAGMA cache_size). Its own memory: nothing else on the machine can
  * push it out, as a backup's reads did to the OS's cache (a 413 s stall, 2026-11-05). Taken as used; the server has 46 GB.
@@ -1086,6 +1088,60 @@ export class IndexStore {
   loadHeldLate(): void {
     if (this.readOnly || this.path === ':memory:') return;
     this.loadHeld();
+  }
+
+  /**
+   * loadHeldLate a slice at a time, the thread handed back every HELD_SLICE_MS: read in one go, 29M rows held the
+   * indexer's thread 293 s (2026-11-09 17:24, the gate rolled the release back). The streams run meanwhile: a day one
+   * writes to before its rows are in is left out as in the one-go read, and one written to after is not used (partialDay
+   * checks a held day's version), so a reader never sees stale rows.
+   */
+  async loadHeldLateAsync(): Promise<void> {
+    if (this.readOnly || this.path === ':memory:') return;
+    const file = this.heldPath();
+    if (!existsSync(file)) return;
+    let rows = 0;
+    let stale = 0;
+    let days = 0;
+    try {
+      const buf = readFileSync(file);
+      const hl = buf.readUInt32LE(0);
+      const head = JSON.parse(buf.subarray(4, 4 + hl).toString('utf8')) as { format: string; days: Array<{ dk: string; from: number; n: number; syms: string[] }> };
+      if (head.format !== HELD_FORMAT) return;
+      let off = 4 + hl;
+      const take = <T extends Float64Array | Int8Array | Uint16Array>(make: (n: number) => T, n: number): T => {
+        const a = make(n);
+        const bytes = a.byteLength;
+        if (off + bytes > buf.length) throw new Error('short file');
+        new Uint8Array(a.buffer).set(buf.subarray(off, off + bytes));
+        off += bytes;
+        return a;
+      };
+      let turn = Date.now();
+      for (const d of head.days) {
+        const f64 = (n: number) => new Float64Array(n);
+        const i8 = (n: number) => new Int8Array(n);
+        const h: HeldRows = {
+          ver: 0, from: d.from, n: d.n, syms: d.syms,
+          t: take(f64, d.n), v: take(f64, d.n), pnl: take(f64, d.n), fee: take(f64, d.n),
+          side: take(i8, d.n), src: take(i8, d.n), sym: take((n) => new Uint16Array(n), d.n),
+        };
+        days++;
+        if ((this.dayVersion.get(d.dk) ?? 0) !== 0 || this.held.has(d.dk)) stale += h.n;
+        else { this.held.set(d.dk, h); this.heldRows += h.n; rows += h.n; }
+        if (Date.now() - turn >= HELD_SLICE_MS) {
+          await new Promise<void>((r) => setImmediate(r));
+          turn = Date.now();
+        }
+      }
+      if (off !== buf.length) throw new Error('long file');
+      console.log(`[index] held rows read: ${days} days, ${rows} rows${stale ? ` (${stale} more left out: written to since)` : ''}`);
+    } catch (e) {
+      this.dropHeld();
+      console.warn(`[index] held rows not read: ${String(e)}`);
+    } finally {
+      try { rmSync(file, { force: true }); } catch { /* gone */ }
+    }
   }
 
   private checkpointer: Checkpointer | null = null;
