@@ -46,21 +46,15 @@ const fail = (msg) => {
   process.exit(1);
 };
 
-/**
- * Row counts of the small tables a restore drill compares (index-drill.sh): BACKUP_COUNT_TABLES, space-separated.
- * Small ones only - count(*) walks a whole table.
- */
-const COUNT_TABLES = (process.env.BACKUP_COUNT_TABLES ?? 'meta board_meta coverage').split(/\s+/).filter((t) => /^\w+$/.test(t));
-
-/** Open read-only, run the quick integrity check (`full`: integrity_check), describe what is inside. */
-function inspect(file, full = false) {
+/** Open read-only, run the quick integrity check, describe what is inside. */
+function inspect(file) {
   const db = new DatabaseSync(file, { readOnly: true });
   try {
     db.exec('PRAGMA busy_timeout = 30000');
     // SQLite's 2 MB page cache read the 46 GB copy's pages over and over: over 70 GB read, past 90 min, in the first run
     // of the byte copy (2026-11-05). This connection reads only the copy, so 4 GB costs nothing else.
     db.exec('PRAGMA cache_size = -4000000');
-    const rows = db.prepare(full ? 'PRAGMA integrity_check' : 'PRAGMA quick_check').all();
+    const rows = db.prepare('PRAGMA quick_check').all();
     const verdict = rows.map((r) => Object.values(r)[0]).join('; ');
     if (verdict !== 'ok') return { ok: false, verdict };
     const one = (sql) => {
@@ -79,10 +73,6 @@ function inspect(file, full = false) {
       boards: one('SELECT count(*) FROM board_meta'),
       // Small tables only: counting the fills of a multi-gigabyte index would take minutes.
       coverage: one('SELECT count(*) FROM coverage'),
-      check: full ? 'integrity_check' : 'quick_check',
-      freelist: one('PRAGMA freelist_count'),
-      tables: one("SELECT count(*) FROM sqlite_master WHERE type = 'table'"),
-      counts: Object.fromEntries(COUNT_TABLES.map((t) => [t, one(`SELECT count(*) FROM "${t}"`)])),
     };
   } finally {
     db.close();
@@ -91,10 +81,9 @@ function inspect(file, full = false) {
 
 const args = process.argv.slice(2);
 if (args[0] === '--check') {
-  const full = args.includes('--full');
-  const file = resolve(args.slice(1).find((a) => a !== '--full') ?? fail('usage: backup-index.mjs --check <file.db> [--full]'));
+  const file = resolve(args[1] ?? fail('usage: backup-index.mjs --check <file.db>'));
   if (!existsSync(file)) fail(`${file} does not exist`);
-  const r = inspect(file, full);
+  const r = inspect(file);
   console.log(JSON.stringify({ file, ...r }));
   process.exit(r.ok ? 0 : 1);
 }

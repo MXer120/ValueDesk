@@ -285,9 +285,7 @@ index_set() {   # force
   fi
   new_run
   # Already compressed: tar it with its .sha256, encrypt without zstd.
-  tar -C "$INDEX_BACKUP_DIR" -cf - "$newest" \
-    $( [ -f "$INDEX_BACKUP_DIR/$newest.sha256" ] && echo "$newest.sha256" ) \
-    $( [ -f "$INDEX_BACKUP_DIR/$newest.meta.json" ] && echo "$newest.meta.json" ) | send index tar "$newest"
+  tar -C "$INDEX_BACKUP_DIR" -cf - "$newest" $( [ -f "$INDEX_BACKUP_DIR/$newest.sha256" ] && echo "$newest.sha256" ) | send index tar "$newest"
 }
 
 archive_set() {   # force

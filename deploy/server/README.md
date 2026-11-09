@@ -16,10 +16,7 @@ deploy/server/
     release.sh             install a release, switch to it, restart what changed in order, roll back
     backup.sh              one index backup to S3 or the data volume (run nightly by a timer);
                            --executor: the copy executor's database
-    backup-index.mjs       the executor's consistent copy (and --check: integrity + figures of any copy)
-    wal-ship.mjs           the index's WAL shipper: a replica from the WAL, short read transactions only;
-                           `snapshot` gives backup.sh a consistent copy of the replica (valuescan-walship.service)
-    index-drill.mjs        the index restore drill: restore a backup into a scratch dir, verify, delete
+    backup-index.mjs       the consistent copy itself (VACUUM INTO, read-only)
     restore.sh             put a backup (or a seed) in place
     healthcheck.mjs        one health pass (run every minute by a timer); alerts to Telegram
     telegram.mjs           sends a Telegram message (the health check, the off-server copies, the uptime watcher),
@@ -87,8 +84,7 @@ role (`docs/deploy/EC2-VERCEL.md`). On that instance:
 | `valuescan-api.service` | `node --import tsx src/index.ts` as `valuescan`, hosted mode, `VALUESCAN_INDEXER=0`, `127.0.0.1:8797` | always, after 3 s | restarting it is cheap |
 | `valuescan-executor.service` | `node --import tsx src/main.ts` in `apps/executor` as `valuescan-executor`, `EXECUTOR_KIND=hosted`, `127.0.0.1:8799` | always, after 5 s | the hosted copy executor; its own user, so nothing that runs as `valuescan` can read its keys; independent of the API (no dependency on it) |
 | `caddy.service` | Caddy as `caddy`, ports 80 and 443 | on failure | TLS for the origin name; passes on only requests that carry the origin secret; `/api/copy/*` to the executor, the rest to the API |
-| `valuescan-walship.service` | `wal-ship.mjs run` as `valuescan`: the index replica in `WALSHIP_DIR`, from the WAL | on failure, after 30 s | NOT enabled by bootstrap (owner step, docs/deploy/BACKUPS.md); MemoryHigh 1G, CPUQuota 100%; restart only when `wal-ship.mjs` changed |
-| `valuescan-backup.timer` -> `.service` | `backup.sh`, 03:17 UTC, I/O-throttled, MemoryHigh 6G | - | catches up after a stop; wants the next one; the index from the replica (needs `valuescan-walship`) |
+| `valuescan-backup.timer` -> `.service` | `backup.sh`, 03:17 UTC, I/O-throttled | - | catches up after a stop; wants the next one |
 | `valuescan-executor-backup.service` | `backup.sh --executor` as `valuescan-executor`, after the index backup | - | the executor's database only, never `kek` or `session.key` |
 | `valuescan-health.timer` -> `.service` | `healthcheck.mjs`, every minute | - | alerts on a change of state (Telegram) |
 | `valuescan-offsite.timer` -> `.service` | `backup-offsite.sh run`, every 15 minutes, as root with a narrow capability set | - | does nothing without `/etc/valuescan/offsite.env` |
@@ -213,13 +209,9 @@ From the workstation, without a shell on the instance:
   encrypted to the other server - `backup-offsite.sh`, `docs/deploy/BACKUPS.md`. Nothing
   else on the instance is state (code comes from a release, configuration from this
   directory and `deploy/contabo`, certificates are re-issued).
-- **How (index, since 2026-11-09):** a snapshot of the WAL shipper's replica
-  (`wal-ship.mjs`, `valuescan-walship.service`; docs/deploy/BACKUPS.md, "The index: WAL
-  shipping") - the live file is not read and no read transaction on it lasts more than
-  tens of milliseconds. The old copy (`backup-index.mjs`: one read transaction for the
-  whole copy) starved the indexer for 2 h on 2026-11-08; backup.sh refuses it for the
-  index unless `BACKUP_ALLOW_LIVE_COPY=1`. The executor's small database still goes
-  through `backup-index.mjs`. The copy is integrity-checked, compressed with zstd and streamed to
+- **How:** `backup-index.mjs` opens the database read-only and runs `VACUUM INTO`,
+  one read transaction - a consistent copy while the indexer keeps writing. The
+  copy is integrity-checked, compressed with zstd and streamed to
   `s3://<ops bucket>/backups/valuescan-index-<UTC time>.db.zst`, with a `.sha256`
   of the uncompressed file next to it. (`sqlite3 .backup` is not used: the backup
   API restarts whenever another connection writes, and the indexer writes every

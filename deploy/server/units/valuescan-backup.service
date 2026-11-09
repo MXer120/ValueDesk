@@ -2,9 +2,8 @@
 #
 # One consistent copy of the index database to S3, or to the data volume on an
 # instance without an ops bucket (deploy/server/bin/backup.sh).
-# The copy is a snapshot of the WAL shipper's replica (valuescan-walship.service,
-# wal-ship.mjs): the live file is not read. Without WALSHIP_DIR backup.sh refuses
-# the index unless BACKUP_ALLOW_LIVE_COPY=1 (the old one-read-transaction copy). Retention in S3 is the bucket's lifecycle rule (this
+# The copy is taken with VACUUM INTO from a read-only connection, so the indexer
+# keeps writing while it runs. Retention in S3 is the bucket's lifecycle rule (this
 # unit cannot delete a backup there); on the data volume backup.sh keeps BACKUP_KEEP.
 #
 # The copy executor's database is part of the same nightly backup: this unit wants
@@ -35,11 +34,6 @@ CPUWeight=20
 IOWeight=20
 IOReadBandwidthMax=/var/lib/valuescan 40M
 IOWriteBandwidthMax=/var/lib/valuescan 40M
-# The check and the compression read the whole 50 GB snapshot: the page cache that fills is charged to this unit and
-# reclaimed here first, so it does not push the live index out of memory (it did, 2026-11-08). The check's own SQLite
-# cache is 4 GB (backup-index.mjs).
-MemoryHigh=6G
-MemoryMax=8G
 
 # --- hardening ---
 NoNewPrivileges=yes

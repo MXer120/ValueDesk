@@ -116,9 +116,6 @@ if [ "$YES" != 1 ]; then
 fi
 
 log "stopping the API and the indexer"
-# The WAL shipper follows the file being replaced: stopped too, and started after (it then copies the new file once).
-walship=0
-if "$SYSTEMCTL" is-active --quiet valuescan-walship.service 2>/dev/null; then walship=1; "$SYSTEMCTL" stop valuescan-walship.service; fi
 "$SYSTEMCTL" stop valuescan-api.service valuescan-indexer.service
 
 aside=""
@@ -153,7 +150,6 @@ log "starting the indexer, then the API"
 "$SYSTEMCTL" start valuescan-indexer.service || log "the indexer did not start (is a release installed?)"
 sleep "${INDEXER_SETTLE_S:-5}"
 "$SYSTEMCTL" start valuescan-api.service || log "the API did not start (is a release installed?)"
-[ "$walship" = 1 ] && { "$SYSTEMCTL" start valuescan-walship.service || log "the WAL shipper did not start: systemctl status valuescan-walship"; }
 
 ok=0
 for _ in $(seq 1 30); do
