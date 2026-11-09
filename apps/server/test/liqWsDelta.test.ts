@@ -15,7 +15,11 @@ test('a delta from the changed cells only is the sum walking every bucket gives,
   const feed = liqFeed();
   const rows = (n: number, off: number) => Array.from({ length: n }, (_, i) => [i * 3, 100 + off + i, 50 + i, 1, 1]);
   const fine = (n: number) => Array.from({ length: n }, (_, i) => [1000 + i, 10 + i, 5, 1, 1]);
+  // A large frame is written in turns (liqFeed.ts, 2026-11-09): read the coin once its change is out, not right after the
+  // hand-in - GitHub's runner was slow enough to read it before the first turn (v0.2.201's CI).
+  const applied = new Promise((r) => feed.once('change', r));
   feed.data(`${JSON.stringify({ t: 'd', coin: 'BTC', p: 1, st: 1, ep: 1, whole: true, v: { hyperliquid: { b: rows(2000, 0) }, sodex: { b: rows(1500, 7) } }, f: { st: 1, lo: 1000, hi: 3000, ep: 1, whole: true, v: { hyperliquid: fine(1500), sodex: fine(900) } } })}\n`);
+  await applied;
   const brute = (k: number, idx: Set<number>) => {
     const out = new Map<number, number[]>();
     for (const v of ['hyperliquid', 'sodex'] as const) {
