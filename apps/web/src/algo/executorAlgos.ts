@@ -118,7 +118,7 @@ export async function startOn(mode: ExecutorMode, spec: unknown, seed: number, r
 }
 
 /** Pause, resume or cancel one algo on an executor (or cancel all there): one wallet signature. */
-export async function actOn(mode: ExecutorMode, op: 'pause' | 'resume' | 'cancel' | 'cancel-all' | 'archive', id?: string, o: { now?: boolean; how?: 'close' | 'instant' | 'keep' } = {}): Promise<AlgoView[]> {
+export async function actOn(mode: ExecutorMode, op: 'pause' | 'resume' | 'cancel' | 'cancel-all' | 'archive' | 'close-rest', id?: string, o: { now?: boolean; how?: 'close' | 'instant' | 'keep' } = {}): Promise<AlgoView[]> {
   const { owner, provider } = needWallet();
   const client = clientFor(mode);
   const info = getLiveCopy()[mode].info;

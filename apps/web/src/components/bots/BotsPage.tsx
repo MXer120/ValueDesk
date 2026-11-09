@@ -85,6 +85,8 @@ export interface BotsCtx {
    */
   stop: (v: AlgoView, how?: StopHow | 'ask' | 'now') => Promise<void>;
   remove: (v: AlgoView) => Promise<void>;
+  /** Close what an ended bot left under SoDEX's minimum order (BotView.leftover): a top-up, then all of it. */
+  closeRest: (v: AlgoView) => Promise<void>;
   /** Every running bot, the same three ways as one bot ('keep' when not given). */
   stopAll: (how?: StopHow) => Promise<void>;
   /** A stopped bot again, or a practice bot with real orders: New bot opens filled with its settings. */
@@ -374,6 +376,16 @@ function BotsPageOpen({ address, provider }: { address: string | null; provider:
       const closes = way !== 'keep' && holding;
       await run(v.algo.id, () => stopAs(v, way), closes ? (way === 'instant' ? 'Stopping: closing what it holds now.' : 'Stopping: closing what it holds.') : 'Bot stopped.');
     },
+    closeRest: async (v) => {
+      const lo = v.bot?.leftover;
+      if (!lo) return;
+      const ok = await confirm({
+        title: 'Close the rest?',
+        body: `${fmtUsd(lo.usd, 2)} ${lo.side} is left on SoDEX, under its minimum order of ${fmtUsd(lo.minUsd, 2)}. The bot first adds about ${fmtUsd(lo.minUsd, 2)} on the same side, then closes all of it at once: two small taker trades, a few cents in fees.`,
+        confirmLabel: 'Close the rest',
+      });
+      if (ok) await run(v.algo.id, () => act('close-rest', v.algo.id), 'Closing the rest: a top-up, then all of it.');
+    },
     remove: async (v) => {
       const ok = await confirm({ title: `Delete ${botName(v)}?`, body: 'It leaves your list. Its record and log stay kept on the executor.', confirmLabel: 'Delete', danger: true });
       if (ok) await run(v.algo.id, async () => {
@@ -458,6 +470,7 @@ function BotsPageOpen({ address, provider }: { address: string | null; provider:
       resume: async (v) => { set(v.algo.id, (x) => status(x, 'running', null)); said('Resumed'); },
       stop: async (v) => { set(v.algo.id, (x) => status(x, 'cancelled', 'Stopped by you.')); said('Stopped'); },
       remove: async (v) => { setDemoList((l) => l.filter((x) => x.algo.id !== v.algo.id)); if (view.page === 'bot') goBots({ page: 'overview' }); said('Deleted'); },
+      closeRest: async () => said('Closed the rest'),
       stopAll: async () => { setDemoList((l) => l.map((x) => (FINAL_STATUSES.has(x.algo.status) ? x : status(x, 'cancelled', 'Stopped by you.')))); said('Every bot stopped'); },
       runAgain: (v, real) => { said(real ? 'Run with real orders' : 'Run again'); goBots({ page: 'new', market: v.algo.spec.symbol, kind: strategyOf(v.algo.spec) ?? null }); },
       pauseAll: async (list) => { for (const v of list) set(v.algo.id, (x) => status(x, 'paused', 'Paused by you.')); said(`${list.length} paused`); },

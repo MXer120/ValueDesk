@@ -2176,6 +2176,12 @@ export class ExecutorService {
         touched = [await this.algos.resume(a.id).catch(fail)];
       } else if (op === 'cancel') touched = [await this.algos.cancel(a.id, { now: payload.now === true, keep: payload.how === 'keep', close: payload.how === 'close' || payload.how === 'instant' }).catch(fail)];
       else if (op === 'archive') touched = [await this.algos.archive(a.id).catch(fail)];
+      else if (op === 'close-rest') {
+        // It trades (a top-up, then the close): the brake and the terms as for a resume.
+        if (!a.spec.paper) this.needNoBrake('algos');
+        this.needTerms(owner, ctx);
+        touched = [await this.algos.closeRest(a.id).catch(fail)];
+      }
       else if (op === 'update') {
         // A bigger size is more trading: the terms in force are needed, as for a resume.
         if (!a.spec.paper) this.needNoBrake('algos');

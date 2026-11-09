@@ -341,7 +341,7 @@ export interface AlgoStartPayload {
 
 export interface AlgoActionPayload {
   /** 'archive' (feature 'bots'): an ended algo leaves the wallet's list; its record and log stay kept. */
-  op: 'pause' | 'resume' | 'cancel' | 'cancel-all' | 'update' | 'archive';
+  op: 'pause' | 'resume' | 'cancel' | 'cancel-all' | 'update' | 'archive' | 'close-rest';
   /** Every op but 'cancel-all'. */
   id?: string;
   /**

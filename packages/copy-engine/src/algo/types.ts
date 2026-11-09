@@ -883,6 +883,8 @@ export interface BotView {
   minOrderUsd?: number | null;
   /** When its holding last matched SoDEX's position on the market (ms; the position check, BOT_POSITION_CHECK_MS). Absent: not yet. */
   matchedAt?: number | null;
+  /** What it left on SoDEX under the minimum order when it ended (closeRest closes it). */
+  leftover?: { qty: number; side: 'long' | 'short'; usd: number; minUsd: number; at: number };
   /** The Watchdog: every part that keeps it running, checked as the view is taken. Absent on an older executor. */
   health?: BotHealth;
   /** Its quotes or levels on SoDEX now. */

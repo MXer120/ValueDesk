@@ -355,7 +355,15 @@ interface BotClosing {
   /** After any refusal of the close, the next one waits until then (doubling: `backMs`). */
   retryAt?: number;
   backMs?: number;
+  /** "Close the rest" (closeRest): first this much more on the same side, so the whole is over SoDEX's minimum order. */
+  topUp?: number;
 }
+
+/**
+ * What a bot left on SoDEX when it ended: under SoDEX's minimum order, it could not be closed alone (owner 2026-11-09:
+ * "make sure the user is aware ... and has the option to increase position size to then close it fully").
+ */
+export interface BotLeftover { qty: number; side: 'long' | 'short'; usd: number; minUsd: number; at: number }
 
 const dec = (n: number): string => canonicalDecimal(numberToPlainString(Number(n.toPrecision(12))));
 
@@ -664,6 +672,43 @@ export class AlgoRuntime {
    * price came past its line (bots.ts pastFair) - before the next step, and before SoDEX's takers who watch Binance
    * reach it. Only cancels: new quotes go out with the steps.
    */
+  /** A leftover under SoDEX's minimum: kept on the bot (its page offers to close it), said in its log and the bell. */
+  private noteLeftover(a: AlgoRecord, m: MarketInfo, inv: number, mk: number): void {
+    const qty = Math.abs(inv);
+    const lo: BotLeftover = { qty, side: inv > 0 ? 'long' : 'short', usd: qty * mk, minUsd: minChildQty(m, mk) * mk, at: Date.now() };
+    a.k.leftover = lo;
+    this.dirty.add(a.id);
+    const text = `${dec(qty)} ${m.base} (about $${lo.usd.toFixed(2)}, ${lo.side}) is left on SoDEX: under its minimum order ($${lo.minUsd.toFixed(2)}), it cannot be closed by itself. "Close the rest" on the bot's page adds to it and closes it all.`;
+    void this.event(a, 'info', text);
+    this.host.onNotice?.({ id: `algo:${a.id}:leftover:${lo.at}`, owner: a.owner, source: 'algo', ref: a.id, kind: 'closed', grade: 'warn', title: `${algoName(a)}: a small position is left`, body: text, at: lo.at, paper: !!a.spec.paper });
+  }
+
+  /**
+   * Close what an ended bot left under SoDEX's minimum (BotLeftover): the bot closes again - first a top-up on the same
+   * side so the whole is over the minimum (a taker order), then the whole at once (a capped taker, reduce-only).
+   */
+  async closeRest(id: string): Promise<AlgoRecord> {
+    const a = this.need(id);
+    const lo = a.k.leftover as BotLeftover | undefined;
+    if (!a.spec.bot || !lo || !FINAL_STATUSES.has(a.status)) throw new Error('This bot has nothing left to close.');
+    const m = this.markets.get(a.spec.symbol);
+    const mk = this.market.mark(a.spec.symbol)?.mark ?? null;
+    if (!m || mk === null) throw new Error('No price for this market right now: try again in a moment.');
+    // The top-up: the minimum order and one step more, so the whole closes in one order.
+    const topUp = minChildQty(m, mk) + Number(m.stepSize);
+    delete a.k.leftover;
+    a.k.closing = { status: a.status, reason: 'The rest is closed.', at: Date.now() - BOT_CLOSE_REST_MS, topUp } satisfies BotClosing;
+    a.status = 'running';
+    a.statusReason = null;
+    a.endedAt = null;
+    a.updatedAt = Date.now();
+    await this.save(a);
+    await this.event(a, 'info', `Closing the rest: ${dec(topUp)} ${m.base} more on the same side (about $${(topUp * mk).toFixed(2)}), then all of it at once.`);
+    this.syncWatch();
+    this.host.onChange?.(a.id);
+    return a;
+  }
+
   /** Every running bot on a market, stepped soon (stepSoon): its book or its oracle moved. */
   private stepBotsOn(symbol: string): void {
     if (!this.running) return;
@@ -1498,6 +1543,7 @@ export class AlgoRuntime {
       // SoDEX's minimum order at the mark now (USD): the page counts margin on it as the executor does (audit 2026-11-09).
       minOrderUsd: (() => { const m = this.markets.get(a.spec.symbol); return m && px > 0 ? minChildQty(m, px) * px : null; })(),
       matchedAt: typeof a.k.posOkAt === 'number' ? a.k.posOkAt : null,
+      ...(a.k.leftover ? { leftover: a.k.leftover as BotLeftover } : {}),
       health: this.botHealth(a),
       orders: this.live(a).filter((c) => c.tif !== 'ioc' && !c.cancelling).map((c) => ({ side: c.side, price: c.price, quantity: c.quantity - c.filled, tag: c.tag })),
       closing: !!a.k.closing,
@@ -2240,7 +2286,10 @@ export class AlgoRuntime {
     const m = this.markets.get(s.symbol);
     const held = Math.abs(bookInventory(a.book));
     const px = this.market.mark(s.symbol)?.mark ?? null;
-    if (!m || held < Number(m.stepSize) || (px !== null && held < minChildQty(m, px) - 1e-12)) return false;
+    if (!m || held < Number(m.stepSize) || (px !== null && held < minChildQty(m, px) - 1e-12)) {
+      if (m && px !== null && held >= Number(m.stepSize)) this.noteLeftover(a, m, bookInventory(a.book), px);
+      return false;
+    }
     const closing: BotClosing = { status, reason, at: now ? Date.now() - BOT_CLOSE_REST_MS : Date.now() };
     a.k.closing = closing;
     // Paused, it would never close (nothing is sent for a paused algo): the close is what runs now.
@@ -2289,10 +2338,21 @@ export class AlgoRuntime {
     const qty = floorStep(Math.abs(inv), m);
     const rejects = closing.rejects ?? 0;
     const gone = rejects >= BOT_CLOSE_MAX_REFUSALS;
-    if (!live.length && (qty < minChildQty(m, mk) - 1e-12 || gone)) {
+    if (!live.length && (qty < minChildQty(m, mk) - 1e-12 || gone) && !closing.topUp) {
       const left = qty >= Number(m.stepSize) ? ` ${dec(qty)} ${m.base} is left${gone ? ' (SoDEX refused to reduce it: the position is not there any more)' : ' (under SoDEX\'s minimum order)'}.` : '';
       delete a.k.closing;
+      if (!gone && qty >= Number(m.stepSize)) this.noteLeftover(a, m, inv, mk);
       return this.end(a, closing.status, `${closing.reason}${left}`);
+    }
+    // "Close the rest": the top-up first (same side, so the whole is over the minimum), then the close as usual.
+    if (closing.topUp && !live.length) {
+      const up = floorStep(closing.topUp, m);
+      const side: Side = inv >= 0 ? 'buy' : 'sell';
+      const px = takerPrice(side, q, BOT_CLOSE_SLIP_BPS, m, mk, null);
+      delete closing.topUp;
+      this.dirty.add(a.id);
+      if (px !== null && up > 0) await this.send(a, m, [{ side, price: px, quantity: up, tif: 'ioc', tag: 'close-topup', reduceOnly: false }]);
+      return;
     }
     if (live.length && !live.some((c) => c.tag.startsWith('close'))) return;
     const side: Side = inv > 0 ? 'sell' : 'buy';
