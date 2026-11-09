@@ -9,7 +9,8 @@
  *   - recorded by ValueDesk's executor (its record of who accepted which terms,
  *     in every mode), and
  *   - handed to a self-hosted executor when one is used.
- * A new terms version needs a new signature.
+ * A new terms version needs a new signature. A wallet that accepted the current terms in another browser is not
+ * asked again: once it signs in to ValueDesk's executor, that record counts here too (adoptRecordedTerms).
  */
 import {
   COPY_TERMS_EXECUTOR,
@@ -20,6 +21,7 @@ import {
   type AcceptTermsPayload,
   type RegionPolicy,
   type SignedCopyRequest,
+  type TermsRecord,
 } from '@copy-engine';
 import { bytesToHex, keccak256, utf8 } from '@sodex-core';
 import { COPY_TERMS } from '../legal/copyTerms';
@@ -39,7 +41,8 @@ export interface LocalTerms {
   acceptedAt: number;
   /** ValueDesk's executor has the record. */
   recorded: boolean;
-  request: SignedCopyRequest;
+  /** The signed acceptance; null when it was signed in another browser and only the executor's record is here. */
+  request: SignedCopyRequest | null;
 }
 
 const key = (owner: string) => `vd.copy.terms:${owner.toLowerCase()}`;
@@ -95,10 +98,21 @@ export async function acceptCopyTerms(o: { provider: Eip1193Provider; owner: str
   return t;
 }
 
+/**
+ * ValueDesk's executor already records this wallet's acceptance of the CURRENT terms (signed in another browser,
+ * or on another of our addresses): keep it here, so the setup does not ask for the same signature twice.
+ */
+export function adoptRecordedTerms(owner: string, r: TermsRecord | null): LocalTerms | null {
+  if (!r || r.termsVersion !== COPY_TERMS_VERSION || r.termsHash !== COPY_TERMS_HASH) return null;
+  const t: LocalTerms = { termsVersion: r.termsVersion, termsHash: r.termsHash, country: r.country, acceptedAt: r.acceptedAt, recorded: true, request: null };
+  save(owner.toLowerCase(), t);
+  return t;
+}
+
 /** Send a not-yet-recorded acceptance to ValueDesk again (on load). */
 export async function recordPendingTerms(owner: string): Promise<void> {
   const t = localTerms(owner);
-  if (!t || t.recorded) return;
+  if (!t || t.recorded || !t.request) return;
   try {
     await hostedExecutor.acceptTerms(t.request);
     save(owner, { ...t, recorded: true });
@@ -112,6 +126,7 @@ export async function recordPendingTerms(owner: string): Promise<void> {
 export async function sendTermsTo(client: ExecutorClient, owner: string): Promise<void> {
   const t = localTerms(owner);
   if (!t) throw new Error('Accept the copy trading terms first.');
+  if (!t.request) throw new Error('Your copier needs the signed terms: accept them once in this browser.');
   try {
     await client.acceptTerms(t.request);
   } catch (e) {

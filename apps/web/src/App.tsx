@@ -10,7 +10,6 @@ import { askTrade } from './components/TradeConfirm';
 import { useAsync, useConnState, useMediaQuery, useSession, useStored, useSymbols } from './hooks';
 import { hub } from './ws';
 import { Guarded } from './components/ErrorBoundary';
-import { BETA_CHANNEL } from './algo/liveAlgos';
 import { ShortcutsDialog, openShortcuts } from './components/ShortcutsDialog';
 import { CommandPalette, loadPalette, openPalette, paletteReady } from './components/palette/lazyPalette';
 import type { TradeContext } from './dashboard';
@@ -640,7 +639,7 @@ function AppShell() {
         )}
 
         {shown === 'bots' && (
-          <Guarded name="Bots"><BotsPage address={address} provider={provider} /></Guarded>
+          <Guarded name="Bots" bare><BotsPage address={address} provider={provider} /></Guarded>
         )}
 
 

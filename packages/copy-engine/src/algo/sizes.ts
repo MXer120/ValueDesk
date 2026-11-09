@@ -241,7 +241,15 @@ export function checkSizes(s: AlgoSpec, m: MarketInfo, ctx: SizeContext): SizeCh
     }
     case 'mm': {
       if (!px) break;
-      out.errors.push(...oneOrder(floorStep(s.orderUsd / px, m), px, m, 'Each quote'));
+      // The bot thinks in USD: a quote the step would put under SoDEX's minimum goes out at the minimum (mmQuotes),
+      // so that is a note, not an error. Only a quote over SoDEX's largest is refused.
+      const q = floorStep(s.orderUsd / px, m);
+      const minQ = minChildQty(m, px);
+      // A max holding under one quote at its real size could never quote the side that adds: the bot would hold
+      // nothing and trade nothing, or (as it was before) hold several times what the trader set. Refused.
+      if (s.maxInventoryUsd < minQ * px - 1e-9) out.errors.push(`Your max holding (${money(s.maxInventoryUsd)}) is under one quote here: each quote goes out at ${minWords(m, px)}. Raise the max holding to at least ${moneyUp(minQ * px)}.`);
+      else if (q < minQ - 1e-12) out.notes.push(`Each quote goes out at SoDEX's minimum here, about ${moneyUp(minQ * px)}.`);
+      else out.errors.push(...oneOrder(q, px, m, 'Each quote'));
       break;
     }
     case 'grid': {
@@ -251,7 +259,10 @@ export function checkSizes(s: AlgoSpec, m: MarketInfo, ctx: SizeContext): SizeCh
         break;
       }
       const low = prices[0]!;
-      out.errors.push(...oneOrder(floorStep(s.orderUsd / low, m), low, m, "Each level's order"));
+      // As the volume maker: a level under SoDEX's minimum goes out at it (gridQty).
+      const q = floorStep(s.orderUsd / low, m);
+      if (q < minChildQty(m, low) - 1e-12) out.notes.push(`Each level goes out at SoDEX's minimum here, about ${moneyUp(minChildQty(m, low) * low)}.`);
+      else out.errors.push(...oneOrder(q, low, m, "Each level's order"));
       break;
     }
     case 'swarm': {

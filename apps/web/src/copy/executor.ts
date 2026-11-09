@@ -6,7 +6,8 @@
  * (packages/copy-engine/src/api.ts): the wallet shows the action and the exact
  * payload, the executor checks the signature and keeps it as the record of
  * the instruction. Reads use a session token from one signed 'session'
- * request, kept in this tab's sessionStorage until it expires.
+ * request, kept in this browser's localStorage until it expires (owner 2026-11-08: a new tab or a restart must not
+ * ask for a signature again; the token only reads, every change is signed on its own).
  */
 import type { KeyImportEnvelope } from './keyImport';
 import {
@@ -22,7 +23,12 @@ import {
   type SessionGrant,
   type SignedCopyRequest,
   type SiteTermsRecord,
+  type VipMoveView,
+  DELEGABLE_ACTIONS,
+  DELEGATION_TTL_MS,
+  copyRequestDigest,
 } from '@copy-engine';
+import { bytesToHex, hexToBytes } from '@sodex-core';
 import { getChainId, signTypedData, type Eip1193Provider } from '../wallet';
 
 export const HOSTED_BASE = '/api/copy/v1';
@@ -34,6 +40,8 @@ export class ExecutorError extends Error {
     message: string,
     readonly status: number,
     readonly code: string,
+    /** Figures that go with a refusal (a bot's margin, the bot already on that market), as the executor sent them. */
+    readonly detail: Record<string, unknown> | null = null,
   ) {
     super(message);
   }
@@ -63,17 +71,151 @@ export function selfUrlProblem(url: string): string | null {
 export async function signCopy(provider: Eip1193Provider, owner: string, executor: string, action: CopyAction, payload: unknown): Promise<SignedCopyRequest> {
   const chainId = await getChainId(provider);
   const req = buildCopyRequest({ action, owner, executor, payload, chainId });
+  // Everyday actions (start, stop, pause, save, sign-in...) are signed by this browser's day key: the wallet signs
+  // once a day at most (owner 2026-11-08). The terms and a trading key always take the wallet itself.
+  if (DELEGABLE_ACTIONS.has(action)) {
+    const day = await dayKey(provider, owner, executor, chainId);
+    if (day) {
+      const sig = new Uint8Array(await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, day.key, new Uint8Array(hexToBytes(copyRequestDigest(req) as `0x${string}`))));
+      return { ...req, signature: bytesToHex(sig), delegation: day.approval };
+    }
+  }
   const signature = await signTypedData(provider, owner, copyRequestTypedData(req));
   return { ...req, signature };
 }
 
-const sessionKey = (base: string, owner: string) => `vd.copy.session:${base}:${owner.toLowerCase()}`;
+/**
+ * The day key (owner 2026-11-08, hardened 2026-11-09): a P-256 key made by this browser's WebCrypto as NON-extractable,
+ * so its private part can be used to sign but never read out - not by a script on the page either. The wallet approves
+ * its public key with one 'delegate' signature, valid 24 h (DELEGATION_TTL_MS) for this executor id. Kept in IndexedDB
+ * (a CryptoKey survives there as itself); a new one is approved once it has less than ten minutes left. It signs only
+ * DELEGABLE_ACTIONS; the executor checks the approval on every request (verifyCopyRequest) and refuses approvals from
+ * before a revocation (revokeDayKeys). No WebCrypto or IndexedDB (an old browser, a locked-down profile): the wallet
+ * signs each action as before.
+ */
+interface DayKey { key: CryptoKey; approval: SignedCopyRequest; expiresAt: number }
+const dayKeyName = (executor: string, owner: string, chainId: number) => `vd.copy.daykey:${executor}:${chainId}:${owner.toLowerCase()}`;
+const dayKeys = new Map<string, DayKey>();
+const dayKeyPending = new Map<string, Promise<DayKey | null>>();
+const DAY_DB = 'vd-daykeys';
+function dayDb(): Promise<IDBDatabase | null> {
+  return new Promise((resolve) => {
+    try {
+      const open = indexedDB.open(DAY_DB, 1);
+      open.onupgradeneeded = () => open.result.createObjectStore('keys');
+      open.onsuccess = () => resolve(open.result);
+      open.onerror = () => resolve(null);
+    } catch {
+      resolve(null);
+    }
+  });
+}
+async function dayDbDo<T>(mode: IDBTransactionMode, fn: (s: IDBObjectStore) => IDBRequest<T>): Promise<T | null> {
+  const db = await dayDb();
+  if (!db) return null;
+  return new Promise((resolve) => {
+    try {
+      const r = fn(db.transaction('keys', mode).objectStore('keys'));
+      r.onsuccess = () => resolve(r.result);
+      r.onerror = () => resolve(null);
+    } catch {
+      resolve(null);
+    }
+  });
+}
+async function dayKey(provider: Eip1193Provider, owner: string, executor: string, chainId: number): Promise<DayKey | null> {
+  if (typeof crypto === 'undefined' || !crypto.subtle || typeof indexedDB === 'undefined') return null;
+  const name = dayKeyName(executor, owner, chainId);
+  const fresh = (d: DayKey | null | undefined): d is DayKey => !!d && d.expiresAt - Date.now() > 10 * 60_000 && !!d.key && !!d.approval;
+  const held = dayKeys.get(name);
+  if (fresh(held)) return held;
+  const stored = (await dayDbDo<DayKey>('readonly', (s) => s.get(name) as IDBRequest<DayKey>)) ?? null;
+  if (fresh(stored)) {
+    dayKeys.set(name, stored);
+    return stored;
+  }
+  // One approval at a time: actions that wait on it all use the same key.
+  const pending = dayKeyPending.get(name);
+  if (pending) return pending;
+  const make = (async (): Promise<DayKey | null> => {
+    let pair: CryptoKeyPair;
+    try {
+      pair = (await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign', 'verify'])) as CryptoKeyPair;
+    } catch {
+      return null;
+    }
+    const pub = bytesToHex(new Uint8Array(await crypto.subtle.exportKey('raw', pair.publicKey)));
+    const expiresAt = Date.now() + DELEGATION_TTL_MS - 60_000;
+    const req = buildCopyRequest({ action: 'delegate', owner, executor, payload: { alg: 'p256', key: pub, expiresAt }, chainId, ttlMs: DELEGATION_TTL_MS - 60_000 });
+    const signature = await signTypedData(provider, owner, copyRequestTypedData(req));
+    const d: DayKey = { key: pair.privateKey, approval: { ...req, signature }, expiresAt };
+    dayKeys.set(name, d);
+    await dayDbDo('readwrite', (s) => s.put(d, name));
+    return d;
+  })();
+  dayKeyPending.set(name, make);
+  try {
+    return await make;
+  } finally {
+    dayKeyPending.delete(name);
+  }
+}
+
+/** Forget this browser's day keys for a wallet (sign-out, a refused approval): the next action asks the wallet again. */
+export function forgetDayKeys(owner: string): void {
+  const o = owner.toLowerCase();
+  for (const k of [...dayKeys.keys()]) if (k.endsWith(`:${o}`)) dayKeys.delete(k);
+  void (async () => {
+    const keys = (await dayDbDo<IDBValidKey[]>('readonly', (s) => s.getAllKeys())) ?? [];
+    for (const k of keys) if (typeof k === 'string' && k.endsWith(`:${o}`)) await dayDbDo('readwrite', (s) => s.delete(k));
+  })();
+}
+
+/**
+ * Revoke every day key of this wallet on an executor, on every device (a wallet signature): approvals signed before
+ * now are refused there from now on. This browser's own are forgotten too.
+ */
+export async function revokeDayKeys(provider: Eip1193Provider, owner: string, executor: string, client: ExecutorClient): Promise<void> {
+  const chainId = await getChainId(provider);
+  const req = buildCopyRequest({ action: 'delegate', owner, executor, payload: { revoke: true }, chainId });
+  const signature = await signTypedData(provider, owner, copyRequestTypedData(req));
+  await client.revokeDayKeys({ ...req, signature });
+  forgetDayKeys(owner);
+}
+
+/**
+ * Where a read token is kept: per base, executor and wallet (owner 2026-11-08: "i need to sign in multiple times a
+ * day"). Keyed by the executor's id too, so two executors behind one base (production and the test box on localhost,
+ * or an executor replaced behind the same address) each keep their own token instead of discarding the other's.
+ */
+const sessionKey = (base: string, owner: string, id?: string | null) => `vd.copy.session:${base}${id ? `#${id}` : ''}:${owner.toLowerCase()}`;
+/** The id of the executor last seen behind a base, so a token can be looked up before /info answers again. */
+const lastIdKey = (base: string) => `vd.copy.exec:${base}`;
 
 export class ExecutorClient {
+  private at: string;
   constructor(
-    readonly base: string,
+    base: string,
     readonly kind: 'hosted' | 'self',
-  ) {}
+  ) {
+    this.at = base;
+  }
+
+  get base(): string {
+    return this.at;
+  }
+
+  /**
+   * VIP: the hosted client talks to the VIP executor from now on (its own tokens, its own data). The executor id
+   * and the wallet the last token was for belong to the old base: dropped, so a token is never filed under the
+   * other executor's id (audit A5).
+   */
+  setBase(base: string): void {
+    if (base === this.at) return;
+    this.at = base;
+    this.id = null;
+    this.ownerCache = null;
+  }
 
   private async call<T>(method: 'GET' | 'POST', path: string, o: { body?: unknown; token?: string | null; pairing?: string | null } = {}): Promise<T> {
     const headers: Record<string, string> = { Accept: 'application/json' };
@@ -105,14 +247,32 @@ export class ExecutorClient {
       /* not JSON */
     }
     if (!res.ok) {
-      const d = (data ?? {}) as { error?: string; code?: string };
-      if (res.status === 401 && d.code === 'session') this.forget();
-      throw new ExecutorError(d.error || `The executor answered HTTP ${res.status}.`, res.status, d.code || 'http');
+      const d = (data ?? {}) as { error?: string; code?: string; detail?: unknown };
+      if (res.status === 401 && d.code === 'session') this.forgetSession();
+      throw new ExecutorError(d.error || `The executor answered HTTP ${res.status}.`, res.status, d.code || 'http', d.detail && typeof d.detail === 'object' ? (d.detail as Record<string, unknown>) : null);
     }
     return data as T;
   }
 
-  info = () => this.call<ExecutorInfo>('GET', '/info');
+  info = async (): Promise<ExecutorInfo> => {
+    const i = await this.call<ExecutorInfo>('GET', '/info');
+    if (i?.executorId) {
+      this.id = i.executorId;
+      try { localStorage.setItem(lastIdKey(this.base), i.executorId); } catch { /* private mode */ }
+    }
+    return i;
+  };
+
+  /** The executor behind this base, as its /info last said (null until it answered). */
+  private id: string | null = null;
+  /** The executor id behind this base (last /info), for keys another base's token is kept under. */
+  executorIdNow(): string | null {
+    return this.idNow();
+  }
+  private idNow(): string | null {
+    if (this.id) return this.id;
+    try { return localStorage.getItem(lastIdKey(this.base)); } catch { return null; }
+  }
 
   /* ---------------------------------------------------------- session ----- */
 
@@ -120,7 +280,18 @@ export class ExecutorClient {
 
   token(owner: string): string | null {
     try {
-      const raw = sessionStorage.getItem(sessionKey(this.base, owner));
+      // A token from before 2026-11-08 sits in this tab's sessionStorage: carried over once, no new signature.
+      const id = this.idNow();
+      const key = sessionKey(this.base, owner, id);
+      // Carried over once, no new signature: a token from before 2026-11-08 (this tab's sessionStorage), or one kept
+      // without the executor's id (it is tried, and dropped if the executor refuses it).
+      const old = sessionStorage.getItem(sessionKey(this.base, owner));
+      if (old) { localStorage.setItem(key, old); sessionStorage.removeItem(sessionKey(this.base, owner)); }
+      if (id) {
+        const legacy = localStorage.getItem(sessionKey(this.base, owner));
+        if (legacy) { if (!localStorage.getItem(key)) localStorage.setItem(key, legacy); localStorage.removeItem(sessionKey(this.base, owner)); }
+      }
+      const raw = localStorage.getItem(key);
       if (!raw) return null;
       const g = JSON.parse(raw) as SessionGrant;
       if (!(g.expiresAt > Date.now() + 60_000)) return null;
@@ -131,10 +302,11 @@ export class ExecutorClient {
     }
   }
 
-  private forget(): void {
+  /** Drop the read token kept for the wallet last signed in here (the executor refused it). */
+  forgetSession(): void {
     if (!this.ownerCache) return;
     try {
-      sessionStorage.removeItem(sessionKey(this.base, this.ownerCache));
+      localStorage.removeItem(sessionKey(this.base, this.ownerCache, this.idNow()));
     } catch {
       /* private mode */
     }
@@ -147,9 +319,9 @@ export class ExecutorClient {
     const request = await signCopy(provider, owner, executorId, 'session', {});
     const g = await this.call<SessionGrant>('POST', '/session', { body: { request }, pairing });
     try {
-      sessionStorage.setItem(sessionKey(this.base, owner), JSON.stringify(g));
+      localStorage.setItem(sessionKey(this.base, owner, this.id ?? executorId), JSON.stringify(g));
     } catch {
-      /* private mode: one signature per load */
+      /* storage refused: one signature per load */
     }
     this.ownerCache = owner;
     return g.token;
@@ -175,6 +347,72 @@ export class ExecutorClient {
   deleteKey = (request: SignedCopyRequest) => this.call<MeResponse>('POST', '/keys/delete', { body: { request } });
   subscribe = (request: SignedCopyRequest) => this.call<CopyView>('POST', '/copies', { body: { request } });
   act = (request: SignedCopyRequest) => this.call<{ copies: CopyView[] }>('POST', '/copies/action', { body: { request } });
+  /** VIP: start moving this wallet's bots (standard executor), and follow it. */
+  vipMove = (request: SignedCopyRequest) => this.call<{ job: VipMoveView }>('POST', '/vip/move', { body: { request } });
+  vipJob = (token: string) => this.call<{ job: VipMoveView | null }>('GET', '/vip/move', { token });
+  revokeDayKeys = (request: SignedCopyRequest) => this.call<{ ok: true; revokedBefore: number }>('POST', '/daykeys/revoke', { body: { request } });
+  health = () => this.call<{ ok: boolean }>('GET', '/health');
 }
 
 export const hostedExecutor = new ExecutorClient(HOSTED_BASE, 'hosted');
+/**
+ * The standard executor whatever the hosted client points at: a VIP move is followed here to its end, also after
+ * the hosted client has switched to the VIP base (same base, so the same kept token).
+ */
+export const standardExecutor = new ExecutorClient(HOSTED_BASE, 'hosted');
+
+/**
+ * The wallet's bot fee and VIP standing as the executor's /me says it (contract 2026-11-08: `bots`, tenths of a bp).
+ * Read defensively: an executor from before it says nothing, and the page falls back to the ladder's first step.
+ */
+export interface MeBots { feeTenths: number; vip: boolean; until: number | null }
+export function meBots(me: MeResponse | null | undefined): MeBots | null {
+  const b = (me as (MeResponse & { bots?: Partial<MeBots> | null }) | null | undefined)?.bots;
+  if (!b || typeof b.feeTenths !== 'number' || !Number.isFinite(b.feeTenths) || b.feeTenths < 0) return null;
+  return { feeTenths: b.feeTenths, vip: b.vip === true, until: typeof b.until === 'number' ? b.until : null };
+}
+
+/**
+ * VIP (owner 2026-11-08): a wallet whose bots moved to the VIP executor (AWS Tokyo) talks to it through this base;
+ * the edge routes it there as /api/copy to the standard one. Which wallet moved is the standard executor's record
+ * (MeResponse.movedTo); this browser keeps it too, so the page goes there first.
+ */
+export const VIP_BASE = '/api/copy-vip/v1';
+const VIP_KEY = 'vs.vip.moved';
+export const vipClient = new ExecutorClient(VIP_BASE, 'hosted');
+export function vipMoved(owner: string): boolean {
+  try {
+    return (localStorage.getItem(VIP_KEY) ?? '').split(',').includes(owner.toLowerCase());
+  } catch {
+    return false;
+  }
+}
+export function setVipMoved(owner: string, on: boolean): void {
+  try {
+    const xs = new Set((localStorage.getItem(VIP_KEY) ?? '').split(',').filter(Boolean));
+    if (on) xs.add(owner.toLowerCase());
+    else xs.delete(owner.toLowerCase());
+    localStorage.setItem(VIP_KEY, [...xs].join(','));
+  } catch {
+    /* private mode: the standard executor's record still sends the page there */
+  }
+}
+/**
+ * Keep a read token one executor issued for the other in a move (no second signature): the VIP one's after a move up,
+ * the standard one's after a move back. `id`: the executor id both run under (the key the client reads first).
+ */
+export function keepSessionAt(base: string, owner: string, id: string | null, g: { token: string; expiresAt: number }): void {
+  try {
+    localStorage.setItem(sessionKey(base, owner.toLowerCase(), id), JSON.stringify(g));
+  } catch {
+    /* private mode */
+  }
+}
+/** Keep a session token the VIP executor issued in a move (no second signature). */
+export function keepVipSession(owner: string, g: { token: string; expiresAt: number }): void {
+  try {
+    localStorage.setItem(sessionKey(VIP_BASE, owner.toLowerCase()), JSON.stringify(g));
+  } catch {
+    /* private mode */
+  }
+}

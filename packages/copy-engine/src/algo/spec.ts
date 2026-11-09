@@ -10,6 +10,7 @@
 import { canonicalDecimal } from '../../../sodex-core/src/index.ts';
 import { DEFAULT_EXEC, withinLimit } from './math.ts';
 import { isOracleVenue } from '../oracle.ts';
+import { validZone } from './bots.ts';
 import {
   ALGO_KINDS,
   type AlgoBase,
@@ -17,6 +18,9 @@ import {
   type AlgoSpec,
   type BotLimits,
   type MmSpec,
+  type FlowGate,
+  type QuietWindow,
+  type NewsGate,
   BOT_KINDS,
   type ScaleSpec,
   type SweepSpec,
@@ -58,7 +62,7 @@ export const ALGO_LIMITS = {
   trailing: { trailPct: { min: 0.001, max: 0.5 }, chaseMs: { min: 1_000, max: 10 * MIN } },
   basket: { legs: { min: 2, max: 10 }, legUsd: { min: 10, max: 10_000_000 } },
   sweep: { slippageBps: { min: 1, max: 1_000 }, roundMs: { min: 500, max: MIN }, timeoutMs: { min: 5_000, max: DAY } },
-  mm: { orderUsd: { min: 10, max: 100_000 }, maxInventoryUsd: { min: 10, max: 1_000_000 }, offsetTicks: { min: -1, max: 1_000 }, chaseTicks: { min: 1, max: 1_000 }, minRepriceMs: { min: 1_000, max: MIN }, skewTicks: { min: 0, max: 1_000 }, edgeBps: { min: 0, max: 100 }, queueGuard: { min: 0, max: 0.5 }, levels: { min: 1, max: 5 }, moveGuard: { min: 0, max: 100 }, refBps: { min: 0, max: 50 }, pullBps: { min: 0, max: 20 } },
+  mm: { orderUsd: { min: 10, max: 100_000 }, maxInventoryUsd: { min: 10, max: 1_000_000 }, offsetTicks: { min: -1, max: 1_000 }, chaseTicks: { min: 1, max: 1_000 }, minRepriceMs: { min: 1_000, max: MIN }, skewTicks: { min: 0, max: 1_000 }, edgeBps: { min: 0, max: 100 }, queueGuard: { min: 0, max: 0.5 }, levels: { min: 1, max: 5 }, moveGuard: { min: 0, max: 100 }, refBps: { min: 0, max: 50 }, pullBps: { min: 0, max: 20 }, placeBps: { min: 0, max: 20 }, calmBps: { min: 0, max: 20 }, calmMs: { min: 50, max: 10_000 }, stillBps: { min: 0, max: 500 }, stillMs: { min: 1_000, max: 120_000 }, restMs: { min: 500, max: 120_000 }, flowMinUsd: { min: 1_000, max: 100_000_000 }, flowWindowMs: { min: MIN, max: HOUR }, flowShrink: { min: 0.1, max: 1 }, quietWindows: 6 },
   grid: { levels: { min: 3, max: 60 }, orderUsd: { min: 10, max: 100_000 } },
   bot: { volumeTargetUsd: { min: 100, max: 1e10 }, maxLossUsd: { min: 1, max: 1e8 } },
   exitPct: { min: 0.001, max: 10 },
@@ -154,6 +158,72 @@ function oneOf<T extends string>(o: Obj, key: string, label: string, allowed: re
   return fallback;
 }
 
+/** MmSpec.flowGate: null when absent (or null). */
+function flowGate(o: Obj, e: Errors): FlowGate | null {
+  const raw = o.flowGate;
+  if (raw === undefined || raw === null) return null;
+  if (!isObj(raw)) {
+    e.flowGate = 'The patient-taker gate must be an object (minUsd, windowMs, action, shrink).';
+    return null;
+  }
+  const L = ALGO_LIMITS.mm;
+  const minUsd = num(raw, 'minUsd', 'Patient-taker volume', L.flowMinUsd, e, 'flowGate.minUsd');
+  const windowMs = raw.windowMs === undefined || raw.windowMs === null ? 600_000 : int(raw, 'windowMs', 'Patient-taker window', L.flowWindowMs, e, 'flowGate.windowMs');
+  const action = oneOf(raw, 'action', 'When it is quiet', ['pause', 'shrink'] as const, 'pause', e, 'flowGate.action');
+  const shrink = raw.shrink === undefined || raw.shrink === null ? 0.5 : num(raw, 'shrink', 'Smaller size', L.flowShrink, e, 'flowGate.shrink');
+  return { minUsd, windowMs, action, shrink };
+}
+
+const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+/** MmSpec.quiet: null when absent, null or empty. */
+function quietWindows(o: Obj, e: Errors): QuietWindow[] | null {
+  const raw = o.quiet;
+  if (raw === undefined || raw === null) return null;
+  if (!Array.isArray(raw)) {
+    e.quiet = 'Quiet windows must be a list.';
+    return null;
+  }
+  if (!raw.length) return null;
+  const most = ALGO_LIMITS.mm.quietWindows;
+  if (raw.length > most) {
+    e.quiet = `At most ${most} quiet windows.`;
+    return null;
+  }
+  const out: QuietWindow[] = [];
+  raw.forEach((w: unknown, i) => {
+    const path = `quiet.${i}`;
+    if (!isObj(w)) {
+      e[path] = `Quiet window ${i + 1} must be an object (from, to, zone, days).`;
+      return;
+    }
+    for (const k of ['from', 'to'] as const) if (typeof w[k] !== 'string' || !HHMM.test(w[k] as string)) e[`${path}.${k}`] = `Quiet window ${i + 1}: ${k === 'from' ? 'the start' : 'the end'} must be a time like 09:30 (24 h).`;
+    if (typeof w.from === 'string' && w.from === w.to) e[`${path}.to`] = `Quiet window ${i + 1}: the end must differ from the start.`;
+    // utc, new_york, london, or any IANA time zone (owner 2026-11-08: time zones everywhere).
+    const z = w.zone === undefined || w.zone === null || w.zone === '' ? 'utc' : w.zone;
+    if (!validZone(z)) e[`${path}.zone`] = `Quiet window ${i + 1}: the time zone must be utc, new_york, london or a time zone name such as Europe/Berlin.`;
+    const zone = validZone(z) ? z : 'utc';
+    const days = oneOf(w, 'days', `Quiet window ${i + 1}: the days`, ['all', 'weekdays', 'trading'] as const, 'all', e, `${path}.days`);
+    out.push({ from: String(w.from), to: String(w.to), zone, days });
+  });
+  return out;
+}
+
+/** MmSpec.news: null when absent or null. */
+function newsGate(o: Obj, e: Errors): NewsGate | null {
+  const raw = o.news;
+  if (raw === undefined || raw === null) return null;
+  if (!isObj(raw)) {
+    e.news = 'The news gate must be an object (beforeMin, afterMin, level).';
+    return null;
+  }
+  const beforeMin = int(raw, 'beforeMin', 'Minutes before a release', { min: 0, max: 240 }, e, 'news.beforeMin');
+  const afterMin = int(raw, 'afterMin', 'Minutes after a release', { min: 0, max: 240 }, e, 'news.afterMin');
+  if (beforeMin + afterMin <= 0) e['news.afterMin'] = 'The news gate needs some minutes before or after a release.';
+  const level = oneOf(raw, 'level', 'Which releases', ['high', 'medium'] as const, 'high', e, 'news.level');
+  return { beforeMin, afterMin, level };
+}
+
 const bool = (o: Obj, key: string, fallback = false): boolean => (typeof o[key] === 'boolean' ? (o[key] as boolean) : fallback);
 
 const SYMBOL = /^[A-Z0-9]{1,24}-USD$/;
@@ -247,14 +317,22 @@ function base(o: Obj, kind: AlgoKind, e: Errors): AlgoBase {
   return b;
 }
 
-/** A bot's limits: volume target, loss limit, end time, what happens to what it holds when it stops. */
-function botLimits(o: Obj, e: Errors): BotLimits {
+/**
+ * A bot's limits: volume target, loss limit, end time, what happens to what it holds when it stops. A real bot
+ * (not practice) must have a loss limit (audit 2026-11-08): it trades unattended with real money, and the loss
+ * limit is what stops it when the market runs against what it holds.
+ */
+function botLimits(o: Obj, e: Errors, paper: boolean): BotLimits {
   const L = ALGO_LIMITS.bot;
+  const maxLossUsd = opt(o, 'maxLossUsd', 'Loss limit', L.maxLossUsd, e);
+  if (!paper && maxLossUsd === null && !e.maxLossUsd) e.maxLossUsd = 'A real bot needs a loss limit: set the most it may lose before it stops.';
   return {
     volumeTargetUsd: opt(o, 'volumeTargetUsd', 'Volume target', L.volumeTargetUsd, e),
-    maxLossUsd: opt(o, 'maxLossUsd', 'Loss limit', L.maxLossUsd, e),
+    maxLossUsd,
     endAt: time(o, 'endAt', 'End time', e),
     onStop: oneOf(o, 'onStop', 'When it stops', ['close', 'keep'] as const, 'close', e),
+    // Post-only unless switched off (kept out of the spec while on, so a spec from before reads the same).
+    ...(o.postOnly === false ? { postOnly: false as const } : o.postOnly === undefined || o.postOnly === true || o.postOnly === null ? {} : (e.postOnly = 'Post-only is on or off (true or false).', {})),
   };
 }
 
@@ -638,7 +716,7 @@ export function checkAlgoSpec(input: unknown, depth = 0): AlgoSpecCheck {
       if (b.reduceOnly) e.reduceOnly = 'A volume maker quotes both sides: it cannot be reduce-only.';
       spec = {
         ...b,
-        ...botLimits(o, e),
+        ...botLimits(o, e, b.paper),
         kind,
         side: 'buy',
         orderUsd,
@@ -661,8 +739,35 @@ export function checkAlgoSpec(input: unknown, depth = 0): AlgoSpecCheck {
           (spec as MmSpec).ref = 'binance';
           if (o.refBps !== undefined && o.refBps !== null && Number(o.refBps) !== 0) (spec as MmSpec).refBps = num(o, 'refBps', 'Distance from the Binance price', L.refBps, e);
           if (o.pullBps !== undefined && o.pullBps !== null && Number(o.pullBps) !== 0) (spec as MmSpec).pullBps = num(o, 'pullBps', 'Pull distance', L.pullBps, e);
+          if (o.placeBps !== undefined && o.placeBps !== null && Number(o.placeBps) !== 0) (spec as MmSpec).placeBps = num(o, 'placeBps', 'Send distance', L.placeBps, e);
+          if (o.calmBps !== undefined && o.calmBps !== null && Number(o.calmBps) !== 0) {
+            (spec as MmSpec).calmBps = num(o, 'calmBps', 'Calm move', L.calmBps, e);
+            if (o.calmMs !== undefined && o.calmMs !== null) (spec as MmSpec).calmMs = int(o, 'calmMs', 'Calm window', L.calmMs, e);
+          }
+          if (o.stillBps !== undefined && o.stillBps !== null && Number(o.stillBps) !== 0) {
+            (spec as MmSpec).stillBps = num(o, 'stillBps', 'Still market', L.stillBps, e);
+            if (o.stillMs !== undefined && o.stillMs !== null) (spec as MmSpec).stillMs = int(o, 'stillMs', 'Still window', L.stillMs, e);
+          }
+          if (o.restMs !== undefined && o.restMs !== null && Number(o.restMs) !== 0) (spec as MmSpec).restMs = int(o, 'restMs', 'Longest rest', L.restMs, e);
+          if (o.noFair === true) (spec as MmSpec).noFair = true;
+          if (o.pauseAfter !== undefined && o.pauseAfter !== null && Number(o.pauseAfter) !== 0) {
+            (spec as MmSpec).pauseAfter = int(o, 'pauseAfter', 'Pause after account', { min: 1, max: 100_000_000 }, e);
+            (spec as MmSpec).pauseMs = int(o, 'pauseMs', 'Pause', L.restMs, e);
+          }
         }
       }
+      // With or without ref; only when set, so a spec without them keeps its canonical text.
+      const gate = flowGate(o, e);
+      if (gate) (spec as MmSpec).flowGate = gate;
+      const quiet = quietWindows(o, e);
+      if (quiet) (spec as MmSpec).quiet = quiet;
+      // Trade only inside the windows: needs at least one.
+      if (o.quietOnly === true) {
+        if (quiet) (spec as MmSpec).quietOnly = true;
+        else e.quiet = 'Trading only in set hours needs at least one window.';
+      }
+      const news = newsGate(o, e);
+      if (news) (spec as MmSpec).news = news;
       break;
     }
     case 'grid': {
@@ -673,7 +778,7 @@ export function checkAlgoSpec(input: unknown, depth = 0): AlgoSpecCheck {
       if (b.reduceOnly) e.reduceOnly = 'A grid buys and sells: it cannot be reduce-only.';
       spec = {
         ...b,
-        ...botLimits(o, e),
+        ...botLimits(o, e, b.paper),
         kind,
         side: 'buy',
         low,

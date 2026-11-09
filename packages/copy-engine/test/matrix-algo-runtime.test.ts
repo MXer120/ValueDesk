@@ -966,8 +966,8 @@ const WORKING: Record<AlgoKind, Record<string, unknown>> = {
   // Under a limit far below the book: nothing fills while it works.
   sweep: { kind: 'sweep', quantity: '0.004', slippageBps: 10, roundMs: 500, reference: 'mark', limitPrice: 59_000 },
   // Bots: they quote until stopped; 'keep' so a cancel ends one at once, as every other kind's does.
-  mm: { kind: 'mm', orderUsd: 30, maxInventoryUsd: 120, onStop: 'keep' },
-  grid: { kind: 'grid', low: 59_000, high: 61_000, levels: 6, orderUsd: 30, onStop: 'keep' },
+  mm: { kind: 'mm', maxLossUsd: 1_000_000, orderUsd: 30, maxInventoryUsd: 120, onStop: 'keep' },
+  grid: { kind: 'grid', maxLossUsd: 1_000_000, low: 59_000, high: 61_000, levels: 6, orderUsd: 30, onStop: 'keep' },
 };
 
 const family = (r: Rig, id: string) => [id, ...r.rt.list().filter((x) => x.parentId === id).map((x) => x.id)];

@@ -10,7 +10,8 @@ export interface AlgoStore {
   saveAlgo(a: AlgoRecord): Promise<void>;
   addAlgoEvent(e: AlgoEvent): Promise<void>;
   /** Newest first. */
-  algoEvents(q: { algoId?: string; owner?: string; limit?: number; before?: number }): Promise<AlgoEvent[]>;
+  /** `after`: only lines newer than this (ms), for a live tail that reads nothing when nothing happened. */
+  algoEvents(q: { algoId?: string; owner?: string; limit?: number; before?: number; after?: number }): Promise<AlgoEvent[]>;
 }
 
 export class MemoryAlgoStore implements AlgoStore {
@@ -31,13 +32,14 @@ export class MemoryAlgoStore implements AlgoStore {
     if (this.log.length > this.maxEvents) this.log.splice(0, this.log.length - this.maxEvents);
   }
 
-  async algoEvents(q: { algoId?: string; owner?: string; limit?: number; before?: number }): Promise<AlgoEvent[]> {
+  async algoEvents(q: { algoId?: string; owner?: string; limit?: number; before?: number; after?: number }): Promise<AlgoEvent[]> {
     const out: AlgoEvent[] = [];
     for (let i = this.log.length - 1; i >= 0 && out.length < (q.limit ?? 200); i--) {
       const e = this.log[i]!;
       if (q.algoId && e.algoId !== q.algoId) continue;
       if (q.owner && e.owner !== q.owner) continue;
       if (q.before !== undefined && e.at >= q.before) continue;
+      if (q.after !== undefined && e.at <= q.after) continue;
       out.push(e);
     }
     return out;

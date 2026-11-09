@@ -21,6 +21,7 @@ import {
   type CopyView,
   type ExecutorInfo,
   type MeResponse,
+  type VipMoveView,
 } from '@copy-engine';
 import { tradingConfig } from '../trading/config';
 import { sodexAccountId } from '../trading/session';
@@ -28,9 +29,9 @@ import type { Eip1193Provider } from '../wallet';
 import { logger } from '../log';
 import { pollEvery } from '../exchange/visibility';
 import { BROWSER_KEY_NAME, browserCopier, type BrowserKey, type CopierRole, type PendingConfirm } from './browserCopier';
-import { DEFAULT_SELF_URL, ExecutorClient, ExecutorError, hostedExecutor, selfBase, selfUrlProblem, signCopy } from './executor';
+import { DEFAULT_SELF_URL, ExecutorClient, ExecutorError, HOSTED_BASE, VIP_BASE, hostedExecutor, keepSessionAt, keepVipSession, selfBase, selfUrlProblem, setVipMoved, signCopy, standardExecutor, vipMoved } from './executor';
 import { MAX_BROWSER_KEY_DAYS, approveCopyFee, copyFeeApproval, copyKeyRegistered, registerCopyKey, revokeCopyKey } from './sodexSetup';
-import { acceptCopyTerms, localTerms, recordPendingTerms, sendTermsTo, type LocalTerms } from './terms';
+import { acceptCopyTerms, adoptRecordedTerms, localTerms, recordPendingTerms, sendTermsTo, type LocalTerms } from './terms';
 import { requireTermsOrThrow } from '../legal/acceptance';
 import { track } from '../analytics/usage';
 
@@ -145,6 +146,10 @@ export async function setCopyWallet(owner: string | null, p: Eip1193Provider | n
     hosted: { ...emptySide(), info: state.hosted.info, infoError: state.hosted.infoError },
     self: { ...emptySide(), url: state.self.url, info: state.self.info, infoError: state.self.infoError },
   });
+  // VIP: a wallet whose bots moved talks to the VIP executor.
+  pointHostedAt(o);
+  // A move followed for the wallet before belongs to it only.
+  if (vipFollow.owner !== o) setVip({ owner: o, job: null, error: null, following: false, stalled: false });
   await browserCopier.follow(o);
   syncBrowser();
   if (o) {
@@ -176,6 +181,147 @@ async function refreshBrowserKey(): Promise<void> {
   set({ browser: { ...state.browser, keyRegistered: r ? r.ok : null } });
 }
 
+/* ---------------------------------------------------------------- VIP ----- */
+
+/**
+ * Point the hosted client at the wallet's executor (VIP when its bots moved there). A change of executor clears what
+ * the page knew of the old one (its info, /me and sign-in): the next refresh reads the new one (audit A5).
+ */
+export function pointHostedAt(owner: string | null): void {
+  const base = owner && vipMoved(owner) ? VIP_BASE : HOSTED_BASE;
+  if (hostedExecutor.base === base) return;
+  hostedExecutor.setBase(base);
+  set({ hosted: emptySide() });
+}
+
+/**
+ * The VIP move as this page follows it (audit A6): kept here, outside React, so leaving the Bots page or closing the
+ * scene never stops the follow - a move that is done always switches this browser to the VIP executor.
+ */
+export interface VipFollow {
+  owner: string | null;
+  job: VipMoveView | null;
+  /** Why starting or following failed (shown by the scene and the panel). */
+  error: string | null;
+  /** The follow loop is running. */
+  following: boolean;
+  /** No answer for too long, or the deadline passed: the page stopped following (the move may still finish). */
+  stalled: boolean;
+}
+let vipFollow: VipFollow = { owner: null, job: null, error: null, following: false, stalled: false };
+const vipListeners = new Set<() => void>();
+function setVip(patch: Partial<VipFollow>): void {
+  vipFollow = { ...vipFollow, ...patch };
+  for (const fn of vipListeners) fn();
+}
+export const getVipFollow = (): VipFollow => vipFollow;
+export function subscribeVipFollow(fn: () => void): () => void {
+  vipListeners.add(fn);
+  return () => vipListeners.delete(fn);
+}
+export const useVipFollow = (): VipFollow => useSyncExternalStore(subscribeVipFollow, getVipFollow, getVipFollow);
+/** Clear an ended or stalled move from the page (the scene's Close). A move still being followed keeps going. */
+export function dismissVipMove(): void {
+  if (vipFollow.following) return;
+  setVip({ job: null, error: null, stalled: false });
+}
+
+/** How often, how long and how many empty reads in a row the follow takes before it stops and says so. */
+export const VIP_POLL_MS = 250;
+export const VIP_DEADLINE_MS = 3 * 60_000;
+export const VIP_MAX_NULLS = 20;
+
+/** Move this wallet's bots to the VIP executor: one signature; the standard executor runs it (apps/executor vip.ts). */
+export async function startVipMove(): Promise<VipMoveView> {
+  const { owner, provider: p } = needWallet();
+  const info = state.hosted.info;
+  if (!info?.vip?.canMove) throw new Error('The VIP servers are not set up yet.');
+  if (vipFollow.following && vipFollow.owner === owner) throw new Error('A move is already running.');
+  setVip({ owner, job: null, error: null, stalled: false });
+  try {
+    // Followed with a read token from the standard executor: one now, if this tab has none.
+    await hostedExecutor.session(p, owner, info.executorId);
+    const { job } = await hostedExecutor.vipMove(await signCopy(p, owner, info.executorId, 'vip-move', { to: 'vip' }));
+    setVip({ job });
+    if (job.state === 'done') finishVipMove(job);
+    else if (job.state === 'running') void followVipMove(owner);
+    else setVip({ error: job.error ?? 'The move stopped.' });
+    return job;
+  } catch (e) {
+    setVip({ error: e instanceof Error ? e.message : String(e) });
+    throw e;
+  }
+}
+
+/** The move as it stands (the standard executor's answer, whatever the hosted client points at now). */
+export async function readVipMove(owner = state.owner): Promise<VipMoveView | null> {
+  const t = owner ? standardExecutor.token(owner) : null;
+  if (!t) return null;
+  return (await standardExecutor.vipJob(t)).job;
+}
+
+/**
+ * Follow a move to its end: every quarter second until it is done or failed; a done move switches the page to the
+ * VIP executor. Stops (stalled) after VIP_DEADLINE_MS, or VIP_MAX_NULLS empty or failed reads in a row.
+ */
+export async function followVipMove(owner: string): Promise<void> {
+  if (vipFollow.following && vipFollow.owner === owner) return;
+  setVip({ owner, following: true, stalled: false });
+  const until = Date.now() + VIP_DEADLINE_MS;
+  let nulls = 0;
+  try {
+    for (;;) {
+      if (state.owner !== owner) return;
+      const j = await readVipMove(owner).catch(() => null);
+      if (state.owner !== owner) return;
+      if (j) {
+        nulls = 0;
+        setVip({ job: j });
+        if (j.state === 'done') { finishVipMove(j); return; }
+        if (j.state === 'failed') { setVip({ error: j.error ?? 'The move stopped.' }); return; }
+      } else if (++nulls >= VIP_MAX_NULLS) {
+        setVip({ stalled: true });
+        return;
+      }
+      if (Date.now() > until) { setVip({ stalled: true }); return; }
+      await new Promise((r) => setTimeout(r, VIP_POLL_MS));
+    }
+  } finally {
+    if (vipFollow.owner === owner) setVip({ following: false });
+  }
+}
+
+/**
+ * On page load (and after each hosted refresh): a move this wallet started before, maybe in a tab that closed - a
+ * running one is followed again, a done one switches the page to VIP (the standard executor keeps the job in memory).
+ */
+export async function resumeVipMove(): Promise<void> {
+  const owner = state.owner;
+  if (!owner || vipMoved(owner) || vipFollow.following) return;
+  const j = await readVipMove(owner).catch(() => null);
+  if (!j || state.owner !== owner || vipFollow.following) return;
+  if (j.state === 'running') {
+    setVip({ owner, job: j, error: null, stalled: false });
+    void followVipMove(owner);
+  } else if (j.state === 'done' && j.direction !== 'down' && state.hosted.me?.movedTo === 'vip') {
+    // Only while the standard server still says the wallet's bots are on VIP: after a move back its last job is still
+    // the old move up, and following that sent the page to VIP again, and back, until both servers rate-limited it
+    // (live run 2026-11-09).
+    setVip({ owner, job: j });
+    finishVipMove(j);
+  }
+}
+
+/** A move that finished: the page talks to the VIP executor from now on, with the token it issued. */
+export function finishVipMove(job: VipMoveView): void {
+  const owner = state.owner;
+  if (!owner || job.state !== 'done') return;
+  if (job.session) keepVipSession(owner, job.session);
+  setVipMoved(owner, true);
+  pointHostedAt(owner);
+  void refreshHosted();
+}
+
 /* ------------------------------------------------------------- hosted ----- */
 
 export async function refreshHosted(): Promise<void> {
@@ -188,16 +334,62 @@ export async function refreshHosted(): Promise<void> {
     return;
   }
   const token = state.owner ? hostedExecutor.token(state.owner) : null;
-  if (token) await loadMe('hosted', token);
+  // No token (it expired, the executor refused it, another executor): signed out, so the page offers Sign in again
+  // instead of showing an empty list (audit A5).
+  if (!token) { markSignedOut('hosted'); return; }
+  await loadMe('hosted', token);
+  // A VIP move started before (another tab, a closed page): followed to its end.
+  if (hostedExecutor.base === HOSTED_BASE) void resumeVipMove();
+}
+
+/** The executor's sign-in for this wallet is gone: the page says so (Sign in) rather than showing nothing. */
+export function markSignedOut(mode: 'hosted' | 'self'): void {
+  const side = state[mode];
+  if (!side.signedIn && !side.me) return;
+  set({ [mode]: { ...side, me: null, signedIn: false } } as Partial<LiveCopy>);
 }
 
 async function loadMe(mode: 'hosted' | 'self', token: string): Promise<void> {
   const client = mode === 'hosted' ? hostedExecutor : selfClient;
   if (!client) return;
+  // The answer counts only for the wallet and the executor it was asked for (a switch meanwhile drops it).
+  const owner = state.owner;
+  const base = client.base;
+  const current = () => state.owner === owner && client.base === base && (mode === 'hosted' ? hostedExecutor : selfClient) === client;
   try {
     const me = await client.me(token);
+    if (!current()) return;
+    // The standard executor says this wallet moved to VIP (another browser moved it): go there.
+    if (mode === 'hosted' && me.movedTo === 'vip' && state.owner && hostedExecutor.base !== VIP_BASE) {
+      setVipMoved(state.owner, true);
+      pointHostedAt(state.owner);
+      void refreshHosted();
+      return;
+    }
+    // The VIP executor says the bots moved back to standard (VIP ended): go back there, with the read token the move
+    // brought from the standard side when it has one (else one signature there, as for any sign-in).
+    if (mode === 'hosted' && me.movedTo === 'standard' && state.owner && hostedExecutor.base === VIP_BASE) {
+      const owner2 = state.owner;
+      try {
+        const j = (await hostedExecutor.vipJob(token)).job;
+        if (j?.direction === 'down' && j.session) keepSessionAt(HOSTED_BASE, owner2, hostedExecutor.executorIdNow(), j.session);
+      } catch {
+        /* no token: a sign-in there */
+      }
+      if (!current()) return;
+      setVipMoved(owner2, false);
+      pointHostedAt(owner2);
+      void refreshHosted();
+      return;
+    }
     set({ [mode]: { ...state[mode], me, signedIn: true } } as Partial<LiveCopy>);
+    // Accepted in another browser: ValueDesk's record of the current terms counts here too.
+    if (mode === 'hosted' && !state.terms && state.owner === me.owner.toLowerCase()) {
+      const t = adoptRecordedTerms(me.owner, me.terms);
+      if (t) set({ terms: t });
+    }
   } catch (e) {
+    if (!current()) return;
     if (e instanceof ExecutorError && (e.status === 401 || e.status === 403)) set({ [mode]: { ...state[mode], me: null, signedIn: false } } as Partial<LiveCopy>);
     else log.warn(`copy: ${mode} executor read failed`, { error: String(e) });
   }
@@ -253,7 +445,8 @@ export async function refreshSelf(): Promise<void> {
     return;
   }
   const token = state.owner ? selfClient.token(state.owner) : null;
-  if (token) await loadMe('self', token);
+  if (!token) { markSignedOut('self'); return; }
+  await loadMe('self', token);
 }
 
 /* --------------------------------------------------------------- steps ----- */
@@ -563,8 +756,12 @@ export function useLiveCopy(owner: string | null, p: Eip1193Provider | null): Li
       if (!state.owner) return;
       const th = hostedExecutor.token(state.owner);
       if (th) void loadMe('hosted', th);
-      const ts = selfClient?.token(state.owner);
-      if (ts) void loadMe('self', ts);
+      else markSignedOut('hosted');
+      if (selfClient) {
+        const ts = selfClient.token(state.owner);
+        if (ts) void loadMe('self', ts);
+        else markSignedOut('self');
+      }
     });
     return () => {
       poll?.();

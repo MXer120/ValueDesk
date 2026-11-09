@@ -453,6 +453,11 @@ export interface BotLimits {
   /** Stop at this time. null = until stopped. */
   endAt: number | null;
   onStop: BotStop;
+  /**
+   * false: its quotes and grid levels go out as plain limit orders, which may trade at once as a taker (and pay the
+   * taker fee); absent: post-only (the default, owner 2026-11-08: changeable per bot in its advanced settings).
+   */
+  postOnly?: false;
 }
 
 /**
@@ -516,6 +521,90 @@ export interface MmSpec extends AlgoBase, BotLimits {
   refBps?: number;
   /** With `ref`: a quote of the adding side within this many bp of the fair price (or through it) is pulled (default 0). */
   pullBps?: number;
+  /**
+   * With `ref`: a NEW quote of the adding side goes out only this many bp from the fair price (0: pullBps decides).
+   * An order takes about 350 ms to reach SoDEX's book, so one sent right at the line is past it on arrival: on the
+   * live hours of 2026-11-04 over 90% of fills came with the fair price already past the quote, taken by the big maker.
+   * Pickier to send than to keep: what rests stays until pullBps.
+   */
+  placeBps?: number;
+  /** With `ref`: no new quote on the adding side while the reference moved this many bp at it over calmMs (0: off). */
+  calmBps?: number;
+  /** The window of calmBps, ms (default 500). */
+  calmMs?: number;
+  /**
+   * With `ref`: no new quote on the adding side unless the reference's path (every move, up or down) over stillMs is under
+   * this many bp (0: off). The makers that SoDEX's flow fills rather than its sniper rest only in a still market.
+   */
+  stillBps?: number;
+  /** The window of stillBps, ms (default 60,000). */
+  stillMs?: number;
+  /** With `ref`: after this account takes on the market, the adding side is pulled and not quoted for pauseMs. */
+  pauseAfter?: number;
+  /** With `ref`: the quotes rest at the touch, with no limit at the fair price and no pull on it; the reference only feeds stillBps. */
+  noFair?: boolean;
+  pauseMs?: number;
+  /** With `ref`: a resting quote is cancelled this long after it went out, wherever the price is (0: off). */
+  restMs?: number;
+  /**
+   * The patient-taker gate (absent: off; with or without `ref`). The patient taker (bots.ts PATIENT_TAKER_ACCOUNT,
+   * SoDEX account 1002) is the taker whose fills cost a maker little. While what it took on this market over the last
+   * windowMs is under minUsd the gate is closed: 'pause' pulls the quotes and holds, 'shrink' quotes orderUsd x shrink
+   * (never under SoDEX's minimum). For the first windowMs it watches a market the gate stays open.
+   */
+  flowGate?: FlowGate;
+  /** Quiet windows (absent: none; at most 6; with or without `ref`): inside one the quotes are pulled and it holds. */
+  quiet?: QuietWindow[];
+  /** true: the windows are the hours it trades in, and outside all of them it holds (absent: it pauses inside them). */
+  quietOnly?: boolean;
+  /** The news gate (absent: off): held from beforeMin before to afterMin after each timed US release of its level. */
+  news?: NewsGate;
+}
+
+/** MmSpec.news. */
+export interface NewsGate {
+  beforeMin: number;
+  afterMin: number;
+  /** 'high': CPI, jobs, FOMC, GDP, PCE; 'medium' adds PPI, JOLTS, ISM, retail sales and the like. */
+  level: 'high' | 'medium';
+}
+
+/** A dated release the host knows of (the economic calendar), for MmSpec.news. */
+export interface NewsEvent {
+  time: number;
+  short: string;
+  importance: 'high' | 'medium' | 'low';
+  /** Only the date is known: the gate skips it. */
+  allDay?: boolean;
+}
+
+/** MmSpec.flowGate. */
+export interface FlowGate {
+  /** USD the patient taker took here over windowMs under which the gate is closed (1,000..100,000,000). */
+  minUsd: number;
+  /** The window, ms (60,000..3,600,000; default 600,000). */
+  windowMs: number;
+  /** Closed: pull and hold, or quote smaller. */
+  action: 'pause' | 'shrink';
+  /** 'shrink': the share of orderUsd quoted while closed (0.1..1; default 0.5). Kept with 'pause' too. */
+  shrink: number;
+}
+
+/** MmSpec.quiet: from 'HH:MM' to 'HH:MM' (24 h, crossing midnight when from > to) in a zone's local time. */
+export interface QuietWindow {
+  from: string;
+  to: string;
+  /**
+   * UTC, the local time (DST included) of New York or London, or any IANA time zone ('Europe/Berlin',
+   * 'Asia/Kolkata': the bot's owner's own clock, its daylight saving followed). Owner 2026-11-08: time zones everywhere.
+   */
+  zone: 'utc' | 'new_york' | 'london' | (string & {});
+  /**
+   * Every day, Monday to Friday in that zone, or 'trading': the exchange's trading days there (NYSE for New York, the
+   * London Stock Exchange for London, Monday to Friday for UTC and any other zone), holidays skipped. A window past
+   * midnight goes by the day it began.
+   */
+  days: 'all' | 'weekdays' | 'trading';
 }
 
 /**
@@ -580,7 +669,14 @@ export interface ChildOrder {
   price: number;
   quantity: number;
   tif: ChildTif;
+  /** It only makes the algo's OWN position smaller (a bot: its own holding, never more). */
   reduceOnly: boolean;
+  /**
+   * Whether SoDEX's reduce-only flag went with it. SoDEX judges that flag against the account's whole position on the
+   * market, so a bot that shares its market (another bot, an order, your own position) unwinds its own holding without
+   * it: the bot's own book bounds the size instead (runtime.ts send, owner 2026-11-08). Absent: same as reduceOnly.
+   */
+  exchReduceOnly?: boolean;
   filled: number;
   /** Sum of fill qty x price. */
   value: number;
@@ -675,8 +771,26 @@ export interface BotBook {
   tradeFees: number;
   builderFees: number;
   fills: number;
+  /**
+   * What it took over from the bot it replaced (a restart that keeps the position, runtime NewAlgo.takeOver): that
+   * bot's holding, signed, and its value at the price of the hand-over. Counted in what it holds and in its PnL (from
+   * the hand-over price, so it starts at zero), never in its volume.
+   */
+  carryQty?: number;
+  carryValue?: number;
+  /**
+   * The mark when it ended. An ended bot is valued at it, not at the mark now: what it kept (a "keep" stop, Stop all)
+   * is no longer its to manage, so its PnL and series stop moving at the stop.
+   */
+  endMark?: number;
   /** [time, volume so far, net PnL at the mark then, fees so far] - one point every few minutes, thinned as it grows. */
   series: Array<[number, number, number, number]>;
+  /**
+   * Who took its quotes, USD (owner 2026-11-08: the bot page shows the bot's own split, not the market's): the
+   * uninformed taker (account 1002), the informed one (23342), everyone else. From the trade stream, where a print
+   * names both accounts; a practice fill counts the print it filled against.
+   */
+  takers?: { t1002: number; t23342: number; other: number };
 }
 
 export type AlgoEventKind = 'status' | 'order' | 'fill' | 'cancel' | 'skip' | 'error' | 'info';
@@ -694,6 +808,10 @@ export interface AlgoEvent {
   price: number | null;
   qty: number | null;
   paper: boolean;
+  /** The order's kind (post-only, IOC...) for an order, cancel or fill line; absent on older lines. */
+  tif?: ChildTif;
+  /** A fill: whether it rested (maker) or took. */
+  maker?: boolean;
 }
 
 /** What a trader sees of one algo. */
@@ -745,8 +863,12 @@ export interface BotView {
   costPerMillion: number | null;
   fills: number;
   mark: number | null;
+  /** SoDEX's minimum order on its market at the mark now, USD (null: not known). Absent on an older executor. */
+  minOrderUsd?: number | null;
   /** Its quotes or levels on SoDEX now. */
   orders: Array<{ side: Side; price: number; quantity: number; tag: string }>;
   /** Stopping: closing what it holds. */
   closing: boolean;
+  /** Who took its quotes, USD (BotBook.takers); absent until a fill is seen on the trade stream. */
+  takers?: { t1002: number; t23342: number; other: number };
 }

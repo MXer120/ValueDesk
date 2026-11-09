@@ -35,6 +35,7 @@ export function sqlite(): typeof import('node:sqlite') {
   if (!m?.DatabaseSync) throw new Error(`The ValueDesk copier needs Node.js 22.13 or newer (this is ${process.version}). Get it from https://nodejs.org, then start it again.`);
   return m;
 }
+import type { LatencyRow, LatencyStore } from './latency.ts';
 import type { ActivityEntry, AlgoEvent, AlgoRecord, AlgoStore, CopyStore, EngineNotice, SubState, Subscription, TermsRecord } from '../../../packages/copy-engine/src/index.ts';
 
 const SCHEMA = `
@@ -58,6 +59,16 @@ CREATE TABLE IF NOT EXISTS keys (
   PRIMARY KEY (owner, slot)
 ) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS terms (owner TEXT PRIMARY KEY, json TEXT NOT NULL) WITHOUT ROWID;
+-- A wallet whose bots moved to the VIP executor (the page then talks to that one).
+CREATE TABLE IF NOT EXISTS moves (owner TEXT PRIMARY KEY, tier TEXT NOT NULL, at INTEGER NOT NULL) WITHOUT ROWID;
+-- The beta list's last answer per wallet (server 1, /api/vs/builder/beta): a server-1 outage keeps the last known
+-- answer instead of holding every real bot; only an explicit "not listed" holds them.
+CREATE TABLE IF NOT EXISTS beta (owner TEXT PRIMARY KEY, listed INTEGER NOT NULL, at INTEGER NOT NULL) WITHOUT ROWID;
+-- VIP moves (vip.ts): the sending side's jobs, so a restart can say how a move ended; the receiving side's imports,
+-- so the sender can ask how one it could not confirm ended (a timeout), and one it gave up on never runs late.
+CREATE TABLE IF NOT EXISTS vip_jobs (id TEXT PRIMARY KEY, owner TEXT NOT NULL, json TEXT NOT NULL, updated_at INTEGER NOT NULL) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS vip_jobs_owner ON vip_jobs (owner, updated_at);
+CREATE TABLE IF NOT EXISTS vip_imports (job TEXT PRIMARY KEY, owner TEXT NOT NULL, state TEXT NOT NULL, json TEXT NOT NULL, at INTEGER NOT NULL) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS consents (
   seq INTEGER PRIMARY KEY AUTOINCREMENT,
   owner TEXT NOT NULL,
@@ -94,6 +105,11 @@ CREATE TABLE IF NOT EXISTS audit (
 CREATE INDEX IF NOT EXISTS audit_owner ON audit (owner, at);
 CREATE INDEX IF NOT EXISTS audit_ref ON audit (ref);
 CREATE INDEX IF NOT EXISTS audit_at ON audit (at);
+-- Signed-write latency to SoDEX per region, 10-minute bucket and kind (latency.ts): a histogram "bin:count,...".
+-- Read back for 48 h on start (GET /api/copy/v1/bots/latency); nothing deletes a row for being old.
+CREATE TABLE IF NOT EXISTS write_latency (
+  region TEXT NOT NULL, t INTEGER NOT NULL, kind TEXT NOT NULL, n INTEGER NOT NULL, hist TEXT NOT NULL,
+  PRIMARY KEY (region, t, kind)) WITHOUT ROWID;
 `;
 
 /** One row of the audit log. */
@@ -222,7 +238,7 @@ function alive(pid: number): boolean {
   }
 }
 
-export class ExecutorDb implements CopyStore, AlgoStore {
+export class ExecutorDb implements CopyStore, AlgoStore, LatencyStore {
   readonly db: SqliteDb;
   private stmts = new Map<string, StatementSync>();
 
@@ -323,6 +339,31 @@ export class ExecutorDb implements CopyStore, AlgoStore {
     return s;
   }
 
+  /* ---------------------------------------------------- write latency ----- */
+
+  /** A bucket's histograms, replacing what was there (the open bucket is written again as it grows). */
+  saveLatency(rows: LatencyRow[]): void {
+    const s = this.q('INSERT INTO write_latency (region, t, kind, n, hist) VALUES (?, ?, ?, ?, ?) ON CONFLICT (region, t, kind) DO UPDATE SET n = excluded.n, hist = excluded.hist');
+    this.db.exec('BEGIN');
+    try {
+      for (const r of rows) s.run(r.region, r.t, r.kind, r.n, r.hist);
+      this.db.exec('COMMIT');
+    } catch (e) {
+      this.db.exec('ROLLBACK');
+      throw e;
+    }
+  }
+
+  loadLatency(since: number): LatencyRow[] {
+    return (this.q('SELECT region, t, kind, n, hist FROM write_latency WHERE t >= ? ORDER BY t').all(since) as Row[]).map((r) => ({
+      region: String(r.region),
+      t: Number(r.t),
+      kind: String(r.kind) as LatencyRow['kind'],
+      n: Number(r.n),
+      hist: String(r.hist),
+    }));
+  }
+
   /* ----------------------------------------------------------- meta ----- */
 
   meta(k: string): string | null {
@@ -406,12 +447,13 @@ export class ExecutorDb implements CopyStore, AlgoStore {
     this.q('INSERT OR IGNORE INTO algo_events (id, algo_id, owner, at, json) VALUES (?, ?, ?, ?, ?)').run(e.id, e.algoId, e.owner, e.at, JSON.stringify(e));
   }
 
-  async algoEvents(q: { algoId?: string; owner?: string; limit?: number; before?: number }): Promise<AlgoEvent[]> {
+  async algoEvents(q: { algoId?: string; owner?: string; limit?: number; before?: number; after?: number }): Promise<AlgoEvent[]> {
     const limit = Math.max(1, Math.min(1000, q.limit ?? 200));
     const before = q.before ?? Number.MAX_SAFE_INTEGER;
+    const after = q.after ?? -1;
     const rows = q.algoId
-      ? (this.q('SELECT json FROM algo_events WHERE algo_id = ? AND at < ? ORDER BY at DESC, id DESC LIMIT ?').all(q.algoId, before, limit) as Row[])
-      : (this.q('SELECT json FROM algo_events WHERE owner = ? AND at < ? ORDER BY at DESC, id DESC LIMIT ?').all(q.owner ?? '', before, limit) as Row[]);
+      ? (this.q('SELECT json FROM algo_events WHERE algo_id = ? AND at < ? AND at > ? ORDER BY at DESC, id DESC LIMIT ?').all(q.algoId, before, after, limit) as Row[])
+      : (this.q('SELECT json FROM algo_events WHERE owner = ? AND at < ? AND at > ? ORDER BY at DESC, id DESC LIMIT ?').all(q.owner ?? '', before, after, limit) as Row[]);
     return rows.map((r) => JSON.parse(String(r.json)) as AlgoEvent);
   }
 
@@ -460,6 +502,61 @@ export class ExecutorDb implements CopyStore, AlgoStore {
 
   setTerms(owner: string, t: TermsRecord): void {
     this.q('INSERT INTO terms (owner, json) VALUES (?, ?) ON CONFLICT (owner) DO UPDATE SET json = excluded.json').run(owner, JSON.stringify(t));
+  }
+
+  /* ---------------------------------------------------------- moves ----- */
+
+  moved(owner: string): { tier: string; at: number } | null {
+    const r = this.q('SELECT tier, at FROM moves WHERE owner = ?').get(owner) as Row | undefined;
+    return r ? { tier: String(r.tier), at: Number(r.at) } : null;
+  }
+
+  setMoved(owner: string, tier: string | null): void {
+    if (tier === null) this.q('DELETE FROM moves WHERE owner = ?').run(owner);
+    else this.q('INSERT INTO moves (owner, tier, at) VALUES (?, ?, ?) ON CONFLICT (owner) DO UPDATE SET tier = excluded.tier, at = excluded.at').run(owner, tier, Date.now());
+  }
+
+  /* ----------------------------------------------------------- beta ----- */
+
+  /** The beta list's last answer for a wallet (null: never answered). */
+  betaAnswer(owner: string): { listed: boolean; at: number } | null {
+    const r = this.q('SELECT listed, at FROM beta WHERE owner = ?').get(owner.toLowerCase()) as Row | undefined;
+    return r ? { listed: Number(r.listed) === 1, at: Number(r.at) } : null;
+  }
+
+  setBetaAnswer(owner: string, listed: boolean, at = Date.now()): void {
+    this.q('INSERT INTO beta (owner, listed, at) VALUES (?, ?, ?) ON CONFLICT (owner) DO UPDATE SET listed = excluded.listed, at = excluded.at').run(owner.toLowerCase(), listed ? 1 : 0, at);
+  }
+
+  /* ------------------------------------------------------- vip moves ----- */
+
+  saveVipJob(j: { id: string; owner: string }): void {
+    this.q('INSERT INTO vip_jobs (id, owner, json, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT (id) DO UPDATE SET json = excluded.json, updated_at = excluded.updated_at').run(j.id, j.owner, JSON.stringify(j), Date.now());
+  }
+
+  /** Every move job (newest first), or one wallet's. */
+  vipJobs<T>(owner?: string): T[] {
+    const rows = owner ? (this.q('SELECT json FROM vip_jobs WHERE owner = ? ORDER BY updated_at DESC').all(owner) as Row[]) : (this.q('SELECT json FROM vip_jobs ORDER BY updated_at DESC').all() as Row[]);
+    return rows.map((r) => JSON.parse(String(r.json)) as T);
+  }
+
+  /** The receiving side's record of one move: 'running', 'done', 'failed' or 'abandoned' (the sender gave up on it first). */
+  vipImport(job: string): { owner: string; state: string; data: Record<string, unknown>; at: number } | null {
+    const r = this.q('SELECT owner, state, json, at FROM vip_imports WHERE job = ?').get(job) as Row | undefined;
+    return r ? { owner: String(r.owner), state: String(r.state), data: JSON.parse(String(r.json)) as Record<string, unknown>, at: Number(r.at) } : null;
+  }
+
+  setVipImport(job: string, owner: string, state: string, data: Record<string, unknown> = {}): void {
+    this.q('INSERT INTO vip_imports (job, owner, state, json, at) VALUES (?, ?, ?, ?, ?) ON CONFLICT (job) DO UPDATE SET state = excluded.state, json = excluded.json, at = excluded.at').run(job, owner, state, JSON.stringify(data), Date.now());
+  }
+
+  /** A wallet's signed record (its terms and every request it signed), for a VIP move. */
+  ownerRecord(owner: string): { terms: unknown; consents: ConsentRow[] } {
+    const rows = this.q('SELECT owner, action, digest, signature, chain_id, payload, nonce, at, viewer_country FROM consents WHERE owner = ? ORDER BY seq').all(owner) as Row[];
+    return {
+      terms: this.terms(owner),
+      consents: rows.map((r) => ({ owner: String(r.owner), action: String(r.action), digest: String(r.digest), signature: String(r.signature), chainId: Number(r.chain_id), payload: String(r.payload), nonce: String(r.nonce), at: Number(r.at), viewerCountry: r.viewer_country === null ? null : String(r.viewer_country) })),
+    };
   }
 
   /* ------------------------------------------------------- consents ----- */

@@ -24,6 +24,8 @@
  * Trade a Futures / Spot switch, a divider, then the pages; the wallet at the
  * end. Below 761px there is no rail and the bar carries them again.
  */
+import { BOTS_ON } from '../bots/routes';
+import { BotsNavSeg } from './bots/BotsNavSeg';
 import { Identicon } from './Identicon';
 import { useUsername } from '../onboarding/profile';
 import { fmtDecimalString } from '../numStyle';
@@ -134,7 +136,9 @@ export function NavBar({
      is exactly how a masked address would have leaked in one place while being
      hidden in another. */
   const maskAddr = useAddressMask();
-  const botsOpen = useBetaAccess(address);
+  // Local builds of the Bots section (BOTS_ON) open it for any wallet, as BotsPage does.
+  const listedForBots = useBetaAccess(address);
+  const botsOpen = BOTS_ON || listedForBots;
   const addrRoot = useRef<HTMLDivElement>(null);
   const addrHover = useHoverMenu(addrRoot);
   const addrMenu = addrHover.open;
@@ -194,6 +198,10 @@ export function NavBar({
     </div>
   ) : null;
 
+  /* Bots: the section's pages in the same switch and slot (BotsNavSeg), only where the section is built in. */
+  const onBots = BOTS_ON && tab === 'bots';
+  const botsSeg = BOTS_ON ? <BotsNavSeg active={onBots} /> : null;
+
   return (
     <header ref={bar} className={`navbar${rail ? ' navbar--rail' : ''}`}>
       {/* The bar's ground over the page that scrolls behind it: blur bands under a tint (shell.css). */}
@@ -210,6 +218,14 @@ export function NavBar({
           <div className={`nav-seg-slot${onTrade ? ' is-on' : ''}`} aria-hidden={!onTrade}>
             <div className="nav-seg-slot__in">
               {marketType}
+              <span className="nav-div" aria-hidden="true" />
+            </div>
+          </div>
+        )}
+        {rail && botsSeg && (
+          <div className={`nav-seg-slot${onBots ? ' is-on' : ''}`} aria-hidden={!onBots}>
+            <div className="nav-seg-slot__in">
+              {botsSeg}
               <span className="nav-div" aria-hidden="true" />
             </div>
           </div>
@@ -262,6 +278,11 @@ export function NavBar({
         {!rail && marketType && (
           <div className={`nav-seg-slot nav-seg-slot--bar${onTrade ? ' is-on' : ''}`} aria-hidden={!onTrade}>
             <div className="nav-seg-slot__in">{marketType}</div>
+          </div>
+        )}
+        {!rail && botsSeg && (
+          <div className={`nav-seg-slot nav-seg-slot--bar${onBots ? ' is-on' : ''}`} aria-hidden={!onBots}>
+            <div className="nav-seg-slot__in">{botsSeg}</div>
           </div>
         )}
 

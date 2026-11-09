@@ -6,6 +6,7 @@
  *
  *   GET  /api/copy/v1/info                       what this executor is (public)
  *   GET  /api/copy/v1/health                     liveness (public)
+ *   GET  /api/copy/v1/bots/latency               Bearer: this wallet's own signed-write latency to SoDEX, ?hours=1..48 (docs/BOTS-UI.md)
  *   POST /api/copy/v1/session                    {request: session}          -> a read token
  *   POST /api/copy/v1/terms                      {request: accept-terms}
  *   POST /api/copy/v1/site-terms                 {request: accept-site-terms}  (hosted: ValueDesk's own terms, recorded)
@@ -34,6 +35,7 @@ import { timingSafeEqual } from 'node:crypto';
 import { isIP } from 'node:net';
 import { copyRequestDigest, normaliseCountry, type Logger } from '../../../packages/copy-engine/src/index.ts';
 import type { ExecutorConfig } from './config.ts';
+import { clampHours } from './latency.ts';
 import { ApiError, type ExecutorService, type RequestContext } from './service.ts';
 
 const BODY_LIMIT = 64 * 1024;
@@ -226,11 +228,17 @@ export function createExecutorServer(svc: ExecutorService, cfg: ExecutorConfig, 
   };
 
   /** A log page's `limit` (1-1000, default 200) and `before` (a time); anything else is a 400. */
-  const page = (url: URL): { limit: number; before?: number } => {
+  const page = (url: URL): { limit: number; before?: number; after?: number } => {
     const l = url.searchParams.get('limit');
     const b = url.searchParams.get('before');
+    const af = url.searchParams.get('after');
     const limit = l === null ? 200 : Number(l);
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 1000) throw new ApiError(400, 'limit', 'limit must be a whole number from 1 to 1000.');
+    if (af !== null) {
+      const after = Number(af);
+      if (!Number.isSafeInteger(after) || after < 0) throw new ApiError(400, 'after', 'after must be a time in milliseconds.');
+      return { limit, after };
+    }
     if (b === null) return { limit };
     const before = Number(b);
     if (!Number.isSafeInteger(before) || before < 0) throw new ApiError(400, 'before', 'before must be a time in milliseconds.');
@@ -286,12 +294,33 @@ export function createExecutorServer(svc: ExecutorService, cfg: ExecutorConfig, 
 
       if (req.method === 'GET' && route === '/info') return send(res, 200, svc.info(ctx));
       if (req.method === 'GET' && route === '/health') return send(res, 200, svc.health());
+      // Public like /info: no token, no signature; a read (240/min per client), no-store (the chart reads every few seconds).
+      if (req.method === 'GET' && route === '/bots/latency') return send(res, 200, svc.botLatency(svc.authenticate(bearer(req)), clampHours(url.searchParams.get('hours')), url.searchParams.get('bot')));
       // The admin suite's user list (server 1 asks, with its internal token): every wallet this executor
       // knows. No token configured, or the wrong one: the route does not exist.
       if (req.method === 'GET' && route === '/internal/users') {
         const token = String(req.headers['x-internal-token'] ?? '');
         if (!cfg.builderToken || !safeEqual(cfg.builderToken, token)) throw new ApiError(404, 'path', 'not found');
         return send(res, 200, { users: svc.db.usersSummary() });
+      }
+      // The admin suite's infrastructure overview (server 1 asks, with its internal token): caps, budget, bot totals.
+      if (req.method === 'GET' && route === '/internal/stats') {
+        const token = String(req.headers['x-internal-token'] ?? '');
+        if (!cfg.builderToken || !safeEqual(cfg.builderToken, token)) throw new ApiError(404, 'path', 'not found');
+        return send(res, 200, { ok: true, stats: svc.infraStats() });
+      }
+      // VIP (vip.ts): the standard executor's move, followed by its owner; the VIP executor's internal import.
+      if (req.method === 'GET' && route === '/vip/move') return send(res, 200, { job: svc.vipJob(svc.authenticate(bearer(req))) });
+      if (req.method === 'POST' && route === '/internal/vip/import') {
+        const token = String(req.headers['x-internal-token'] ?? '');
+        if (!cfg.vipToken || !safeEqual(cfg.vipToken, token)) throw new ApiError(404, 'path', 'not found');
+        return send(res, 200, await svc.vipImport(await readJson(req)));
+      }
+      // The standard side asks how a move it could not confirm ended (a send that timed out): never resumed on a guess.
+      if (req.method === 'POST' && route === '/internal/vip/import/status') {
+        const token = String(req.headers['x-internal-token'] ?? '');
+        if (!cfg.vipToken || !safeEqual(cfg.vipToken, token)) throw new ApiError(404, 'path', 'not found');
+        return send(res, 200, svc.vipImportStatus(await readJson(req)));
       }
       if (req.method === 'GET' && route === '/me') return send(res, 200, svc.me(svc.authenticate(bearer(req)), ctx));
       if (req.method === 'GET' && route === '/consents') return send(res, 200, { consents: svc.consents(svc.authenticate(bearer(req))) });
@@ -305,6 +334,12 @@ export function createExecutorServer(svc: ExecutorService, cfg: ExecutorConfig, 
         const owner = svc.authenticate(bearer(req));
         const grades = (url.searchParams.get('grades') ?? '').split(',').filter(Boolean);
         return send(res, 200, { notices: svc.notices(owner, { ...page(url), grades }) });
+      }
+      // One bot, without its series (the page keeps the series it has): what its page reads every second.
+      const algoOne = /^\/algos\/([A-Za-z0-9_-]{1,40})$/.exec(route);
+      if (req.method === 'GET' && algoOne && algoOne[1] !== 'action') {
+        const v = svc.algoOne(svc.authenticate(bearer(req)), algoOne[1]!);
+        return send(res, 200, { algo: url.searchParams.get('series') === '0' ? withoutSeries([v])[0] : v });
       }
       const algoEv = /^\/algos\/([A-Za-z0-9_-]{1,40})\/events$/.exec(route);
       if (req.method === 'GET' && algoEv) {
@@ -321,6 +356,7 @@ export function createExecutorServer(svc: ExecutorService, cfg: ExecutorConfig, 
       const body = (await readJson(req)) as { request?: unknown };
       signed = signedOf(body.request);
       if (route === '/session') return send(res, 200, svc.session(body.request, ctx));
+      if (route === '/daykeys/revoke') return send(res, 200, svc.revokeDayKeys(body.request, ctx));
       if (route === '/terms') return send(res, 200, svc.acceptTerms(body.request, ctx));
       if (route === '/site-terms') return send(res, 200, svc.acceptSiteTerms(body.request, ctx));
       if (route === '/keys') return send(res, 200, svc.createKey(body.request, ctx));
@@ -331,11 +367,13 @@ export function createExecutorServer(svc: ExecutorService, cfg: ExecutorConfig, 
       if (route === '/keys/import') return send(res, 200, { key: await svc.importKey(keyCheck(svc.authenticate(bearer(req))), body as { name?: unknown; envelope?: unknown }, ctx) });
       if (route === '/algos') return send(res, 200, await svc.algoStart(body.request, ctx));
       if (route === '/algos/action') return send(res, 200, await svc.algoAct(body.request, ctx));
+      if (route === '/vip/move') return send(res, 200, { job: svc.vipMove(body.request, ctx) });
       throw new ApiError(404, 'path', 'not found');
     } catch (e) {
       const err = e instanceof ApiError ? e : new ApiError(500, 'internal', 'Something went wrong in the executor.');
       if (!(e instanceof ApiError)) log.error('executor: request failed', { path, error: String(e) });
-      send(res, err.status, { ok: false, code: err.code, error: err.message });
+      // A refusal's figures (a bot's margin: what it needs, what is free) go with it, for the page to show.
+      send(res, err.status, { ok: false, code: err.code, error: err.message, ...(err.detail ? { detail: err.detail } : {}) });
     } finally {
       if (path !== `${PREFIX}/health`) log.debug('request', { method: req.method, path, ms: Date.now() - t0, status: res.statusCode });
       // Every write, and every read that was refused, into the audit log: who asked for what, from where, and the answer.

@@ -10,7 +10,7 @@ import { join } from 'node:path';
  */
 import { secp256k1 } from '@noble/curves/secp256k1';
 import { bytesToHex, hexToBytes, privateKeyToAddress } from '../../../packages/sodex-core/src/index.ts';
-import { BOT_FEE, COPY_FEE_LADDER, COPY_TERMS_VERSION, buildCopyRequest, copyRequestDigest, type AlgoRecord, type CopyAction, type FetchLike, type WebSocketLike } from '../../../packages/copy-engine/src/index.ts';
+import { BETA_VIP_DAYS, BOT_FEE, BOT_FEE_LADDER, BOT_FEE_VIP, COPY_FEE_LADDER, COPY_TERMS_VERSION, buildCopyRequest, copyRequestDigest, type AlgoRecord, type CopyAction, type FetchLike, type WebSocketLike } from '../../../packages/copy-engine/src/index.ts';
 import { loadConfig, type ExecutorConfig } from '../src/config.ts';
 import { ExecutorDb } from '../src/db.ts';
 import { Secrets } from '../src/secrets.ts';
@@ -74,16 +74,15 @@ const code = async (p: Promise<unknown> | (() => unknown)): Promise<string> => {
   }
 };
 
-test('bots: the executor advertises them and their fee; their orders carry 0.1 bp, every other algo the copy ladder', async () => {
+test('bots: the executor advertises them and their fee ladder; a bot is charged by the bot ladder (0.5 bp with no volume known), every other algo the copy ladder', async () => {
   const { svc, cleanup } = make();
   const ctx = { viewerCountry: 'SG' };
   const info = svc.info(ctx);
   assert.ok(info.features?.includes('bots'));
-  assert.deepEqual(info.bots, { fee: BOT_FEE });
-  assert.equal(BOT_FEE, 1);
+  assert.deepEqual(info.bots, { fee: BOT_FEE, ladder: BOT_FEE_LADDER, vipFee: BOT_FEE_VIP, betaVipDays: BETA_VIP_DAYS });
   const fee = (spec: Record<string, unknown>) => (svc as unknown as { algoFee(a: Pick<AlgoRecord, 'owner' | 'spec'>): Promise<number> }).algoFee({ owner: '0x' + '1'.repeat(40), spec: spec as never });
-  assert.equal(await fee({ kind: 'mm', bot: true }), BOT_FEE);
-  assert.equal(await fee({ kind: 'dca', bot: true }), BOT_FEE, 'a bot DCA stored before they left the Bots page keeps the bot fee');
+  assert.equal(await fee({ kind: 'mm', bot: true }), BOT_FEE_LADDER[0]!.fee);
+  assert.equal(await fee({ kind: 'dca', bot: true }), BOT_FEE_LADDER[0]!.fee, 'a bot DCA stored before they left the Bots page keeps the bot fee');
   assert.equal(await fee({ kind: 'dca' }), COPY_FEE_LADDER[0]!.fee, 'a plain DCA stays on the copy ladder');
   assert.equal(await fee({ kind: 'twap' }), COPY_FEE_LADDER[0]!.fee);
   await cleanup();
@@ -98,7 +97,7 @@ test('bots: a practice bot starts for anyone; a live one only for the wallets re
   assert.equal(v.algo.spec.kind, 'mm');
   assert.equal(v.algo.spec.bot, true);
   assert.ok(v.bot, 'its view carries the bot figures');
-  assert.equal(await code(svc.algoStart(w.sign(svc.executorId, 'algo-start', { spec: { ...MM, paper: false }, seed: 3 }), ctx)), '403:paper-only');
+  assert.equal(await code(svc.algoStart(w.sign(svc.executorId, 'algo-start', { spec: { ...MM, maxLossUsd: 50, paper: false }, seed: 3 }), ctx)), '403:beta');
   // Several practice bots on one market are fine (nothing reaches SoDEX).
   await svc.algoStart(w.sign(svc.executorId, 'algo-start', { spec: { kind: 'grid', symbol: 'BTC-USD', low: 50_000, high: 70_000, levels: 10, orderUsd: 20, paper: true }, seed: 4 }), ctx);
   assert.equal(svc.algoList(w.address).length, 2);
@@ -147,14 +146,14 @@ test('bots: real bots only for a listed wallet, on the beta site or the main one
   const beta = { viewerCountry: 'SG', channel: 'beta' as const };
   const main = { viewerCountry: 'SG', channel: 'main' as const };
   for (const x of [w, other]) svc.acceptTerms(x.sign(svc.executorId, 'accept-terms', TERMS), main);
-  const live = { ...MM, paper: false };
+  const live = { ...MM, maxLossUsd: 50, paper: false };
   BETA = [w.address];
   // Listed, from beta or from the main site: past the gate - it stops at the key it has not registered yet.
   assert.equal(await code(svc.algoStart(w.sign(svc.executorId, 'algo-start', { spec: live, seed: 1 }), beta)), '412:key');
   assert.equal(await code(svc.algoStart(w.sign(svc.executorId, 'algo-start', { spec: live, seed: 2 }), main)), '412:key');
   // A wallet that is not listed: refused from either.
-  assert.equal(await code(svc.algoStart(other.sign(svc.executorId, 'algo-start', { spec: live, seed: 3 }), beta)), '403:paper-only');
-  assert.equal(await code(svc.algoStart(other.sign(svc.executorId, 'algo-start', { spec: live, seed: 6 }), main)), '403:paper-only');
+  assert.equal(await code(svc.algoStart(other.sign(svc.executorId, 'algo-start', { spec: live, seed: 3 }), beta)), '403:beta');
+  assert.equal(await code(svc.algoStart(other.sign(svc.executorId, 'algo-start', { spec: live, seed: 6 }), main)), '403:beta');
   // A live algo that is not a bot is not opened by the beta list.
   assert.equal(await code(svc.algoStart(w.sign(svc.executorId, 'algo-start', { spec: { kind: 'twap', symbol: 'BTC-USD', side: 'buy', quantity: '0.01', durationMs: 600_000, slices: 10 }, seed: 4 }), beta)), '403:paper-only');
   await cleanup();
@@ -163,7 +162,7 @@ test('bots: real bots only for a listed wallet, on the beta site or the main one
   const b = make({ EXECUTOR_BUILDER_URL: 'http://127.0.0.1:9/api/vs/builder/volume', EXECUTOR_BUILDER_TOKEN: 't' });
   const z = new Wallet();
   b.svc.acceptTerms(z.sign(b.svc.executorId, 'accept-terms', TERMS), main);
-  assert.equal(await code(b.svc.algoStart(z.sign(b.svc.executorId, 'algo-start', { spec: live, seed: 5 }), beta)), '403:paper-only');
+  assert.equal(await code(b.svc.algoStart(z.sign(b.svc.executorId, 'algo-start', { spec: live, seed: 5 }), beta)), '403:beta');
   await b.cleanup();
   BETA = [];
 });

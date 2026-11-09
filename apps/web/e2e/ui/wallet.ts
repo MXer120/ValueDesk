@@ -20,6 +20,7 @@
  *   copy-terms    CopyRequest 'accept-terms'    (the copy terms)
  *   copy-sign-in  CopyRequest 'session'         (signing in to an executor)
  *   algo          CopyRequest 'algo-start' / 'algo-action' (a practice algo or bot on an executor: start, pause, edit, stop)
+ *   day-key       CopyRequest 'delegate'        (once a day: the browser key that then signs sign-in, starts, stops...)
  *   copy-key      CopyRequest 'create-key'      (an executor makes the copy key it
  *                                                then asks SoDEX to register: copy/live.ts approveKey)
  * Every transaction, every personal_sign and any other typed data is refused
@@ -31,8 +32,8 @@ import type { BrowserContext, Page } from 'playwright-core';
 import { generatePrivateKey } from 'viem/accounts';
 import { createKeyProvider, type KeyProvider, type ProviderEvent, type TypedDataSeen } from '../live/provider';
 
-export type Signable = 'trading-key' | 'builder' | 'site-terms' | 'copy-terms' | 'copy-sign-in' | 'copy-key' | 'algo' | 'username';
-export const SIGNABLE: readonly Signable[] = ['trading-key', 'builder', 'site-terms', 'copy-terms', 'copy-sign-in', 'copy-key', 'algo', 'username'];
+export type Signable = 'trading-key' | 'builder' | 'site-terms' | 'copy-terms' | 'copy-sign-in' | 'copy-key' | 'algo' | 'username' | 'vip-move' | 'day-key';
+export const SIGNABLE: readonly Signable[] = ['trading-key', 'builder', 'site-terms', 'copy-terms', 'copy-sign-in', 'copy-key', 'algo', 'username', 'vip-move', 'day-key'];
 
 /** Which of the allowed signatures this typed data is, or null. */
 export function signableOf(td: Pick<TypedDataSeen, 'primaryType' | 'message'>): Signable | null {
@@ -46,6 +47,9 @@ export function signableOf(td: Pick<TypedDataSeen, 'primaryType' | 'message'>): 
     if (action === 'session') return 'copy-sign-in';
     if (action === 'create-key') return 'copy-key';
     if (action === 'algo-start' || action === 'algo-action') return 'algo';
+    if (action === 'vip-move') return 'vip-move';
+    // The day key (owner 2026-11-08): the one wallet signature a day; the browser's key signs the everyday actions.
+    if (action === 'delegate') return 'day-key';
   }
   return null;
 }

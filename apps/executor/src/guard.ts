@@ -35,12 +35,17 @@
 import type { AlgoRecord, AlgoSink, ChildRequest, ChildResult, MarginChoice, MarketInfo, OrderSink, SendResult, StopOrder, StopRequest, WeightBudget } from '../../../packages/copy-engine/src/index.ts';
 import type { BuilderParams } from '../../../packages/sodex-core/src/index.ts';
 
-export type RejectClass = 'key' | 'margin' | 'limit' | 'account-rate' | 'size' | 'gone' | 'unknown' | 'ip-rate' | 'local';
+export type RejectClass = 'key' | 'margin' | 'limit' | 'account-rate' | 'size' | 'gone' | 'unknown' | 'ip-rate' | 'local' | 'post-only' | 'nonce';
 
 /** Sort one refusal text (SoDEX's words, or the local gate's "Not sent: ..."). SoDEX does not document them, so this reads loosely. */
 export function classifyRejection(error: string | null | undefined): RejectClass {
   const e = String(error ?? '');
-  if (/^Not sent:/i.test(e)) return /order rate/i.test(e) ? 'account-rate' : 'local';
+  // A local refusal of any kind - the order rate included - never left: waited out, never a strike (research 2026-11-09).
+  if (/^Not sent:/i.test(e)) return 'local';
+  // The touch moved under a post-only quote: re-priced on the next step; a market maker sees many (research 2026-11-09).
+  if (/post[- _]?only|would (immediately )?(take|cross|match|trade)|immediately (match|execute)|maker only/i.test(e)) return 'post-only';
+  // A nonce out of order: nothing executed, the next write is fine.
+  if (/nonce/i.test(e)) return 'nonce';
   if (/HTTP 429|error code:?\s*1015/i.test(e)) return 'ip-rate';
   // What the order was for is already gone: a close of a position SoDEX closed meanwhile (its stop, a liquidation:
   // "position not found: 1", the only refusal on ValueDesk's executor on 2026-10-29/30, alerted as unknown) or a cancel
@@ -95,6 +100,8 @@ const COPY_POLICY: Record<RejectClass, Policy> = {
   unknown: { strikes: 5, holdMs: 15 * 60_000, words: 'SoDEX refused several orders' },
   'ip-rate': { strikes: 0, holdMs: 0, words: '' },
   local: { strikes: 0, holdMs: 0, words: '' },
+  'post-only': { strikes: 0, holdMs: 0, words: '' },
+  nonce: { strikes: 0, holdMs: 0, words: '' },
 };
 
 /** Algos hold themselves on limits and end after 25 refusals in a row; only these hold here. */

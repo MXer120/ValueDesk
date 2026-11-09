@@ -38,6 +38,20 @@ import {
   canonicalSettings,
   copyFeeFor,
   BOT_FEE,
+  botReserveUsd,
+  copyReserveUsd,
+  botMarginUsd,
+  BOT_FEE_LADDER,
+  BOT_FEE_VIP,
+  BETA_VIP_DAYS,
+  botFeeFor,
+  ALGO_NAMES,
+  algoSymbols,
+  coinOf,
+  minChildQty,
+  sodexNamesFor,
+  type AlgoSpec,
+  type MarketInfo,
   normaliseCountry,
   parseAlgoSpec,
   parseSettings,
@@ -61,6 +75,7 @@ import {
   type CopyView,
   type CreateKeyPayload,
   type ExecutorInfo,
+  type TermsRecord,
   type FetchLike,
   type KeyInfo,
   type Logger,
@@ -78,15 +93,18 @@ import {
 } from '../../../packages/copy-engine/src/index.ts';
 import { SODEX_CHAIN_ID, createMemoryNonceManager, privateKeyToAddress, type BuilderParams, type SigningKeyRef } from '../../../packages/sodex-core/src/index.ts';
 import { liveAlgosFor, type ExecutorConfig } from './config.ts';
-import { sqlite, type ExecutorDb, type KeyRow } from './db.ts';
+import { sqlite, type ConsentRow, type ExecutorDb, type KeyRow } from './db.ts';
 import { auditedAlgoSink, auditedOrderSink } from './audited.ts';
 import { Brake, type BrakeState } from './brake.ts';
+import { WriteLatency, type BotLatencyResponse } from './latency.ts';
 import { KEY_IMPORT_ALG, importInfo, type ImportEnvelope, type Secrets } from './secrets.ts';
 import { ErrorGuard, guardedAlgoSink, guardedOrderSink, type GuardTarget } from './guard.ts';
 import { shortWallet, type Alerts } from './alerts.ts';
 import { plainSockets } from './feed/binance.ts';
 import { BinanceReference } from './feed/reference.ts';
 import { DEFAULT_FEED_PATH } from './feed/ring.ts';
+import { CalendarFeed } from './calendar.ts';
+import { VIP_SWEEP_MS, downgradedToday, newVipJob, vipJobView, vipStep, type VipJob } from './vip.ts';
 
 /** The pairing code's letters: no 0/O, 1/I/L, so it reads back from a terminal without doubt. */
 const PAIR_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
@@ -153,7 +171,7 @@ function algoPatch(raw: unknown): AlgoUpdatePatch {
     out.label = r.label as string | null;
   }
   // A bot's sizes, distances and limits: each of its type here, its range judged by the spec parser (AlgoRuntime.update).
-  for (const k of ['orderUsd', 'maxInventoryUsd', 'offsetTicks', 'chaseTicks', 'minRepriceMs', 'skewTicks', 'edgeBps', 'queueGuard', 'levels', 'moveGuard', 'refBps', 'pullBps'] as const) {
+  for (const k of ['orderUsd', 'maxInventoryUsd', 'offsetTicks', 'chaseTicks', 'minRepriceMs', 'skewTicks', 'edgeBps', 'queueGuard', 'levels', 'moveGuard', 'refBps', 'pullBps', 'placeBps', 'calmBps', 'calmMs', 'stillBps', 'stillMs', 'restMs'] as const) {
     if (r[k] === undefined) continue;
     if (!(typeof r[k] === 'number' && Number.isFinite(r[k]))) throw new ApiError(400, 'patch', `${k} must be a number.`);
     out[k] = r[k] as number;
@@ -171,6 +189,52 @@ function algoPatch(raw: unknown): AlgoUpdatePatch {
     if (r.outOfRange !== 'wait' && r.outOfRange !== 'stop') throw new ApiError(400, 'patch', 'outOfRange must be wait or stop.');
     out.outOfRange = r.outOfRange;
   }
+  // A volume maker's patient-taker gate and quiet windows: their shape here, their values judged by the spec parser (AlgoRuntime.update).
+  if (r.flowGate !== undefined) {
+    if (r.flowGate !== null && (typeof r.flowGate !== 'object' || Array.isArray(r.flowGate))) throw new ApiError(400, 'patch', 'flowGate must be an object or null.');
+    out.flowGate = r.flowGate as AlgoUpdatePatch['flowGate'];
+  }
+  if (r.quiet !== undefined) {
+    if (r.quiet !== null && !Array.isArray(r.quiet)) throw new ApiError(400, 'patch', 'quiet must be a list or null.');
+    out.quiet = r.quiet as AlgoUpdatePatch['quiet'];
+  }
+  if (r.quietOnly !== undefined) {
+    if (r.quietOnly !== null && typeof r.quietOnly !== 'boolean') throw new ApiError(400, 'patch', 'quietOnly must be true, false or null.');
+    out.quietOnly = r.quietOnly as boolean | null;
+  }
+  if (r.news !== undefined) {
+    if (r.news !== null && (typeof r.news !== 'object' || Array.isArray(r.news))) throw new ApiError(400, 'patch', 'news must be an object or null.');
+    out.news = r.news as AlgoUpdatePatch['news'];
+  }
+  // The rest of a bot's settings (owner 2026-11-08: everything saves in place): their shape here, their values judged
+  // by the spec parser (AlgoRuntime.update).
+  if (r.ref !== undefined) {
+    if (r.ref !== null && r.ref !== 'binance') throw new ApiError(400, 'patch', 'ref must be binance or null.');
+    out.ref = r.ref as 'binance' | null;
+  }
+  for (const k of ['noFair', 'postOnly'] as const) {
+    if (r[k] === undefined) continue;
+    if (typeof r[k] !== 'boolean') throw new ApiError(400, 'patch', `${k} must be true or false.`);
+    out[k] = r[k] as boolean;
+  }
+  for (const k of ['pauseAfter', 'pauseMs', 'leverage'] as const) {
+    if (r[k] === undefined) continue;
+    if (r[k] !== null && !(typeof r[k] === 'number' && Number.isFinite(r[k]) && (r[k] as number) > 0)) throw new ApiError(400, 'patch', `${k} must be a positive number or null.`);
+    out[k] = r[k] as number | null;
+  }
+  if (r.marginMode !== undefined) {
+    if (r.marginMode !== null && r.marginMode !== 'cross' && r.marginMode !== 'isolated') throw new ApiError(400, 'patch', 'marginMode must be cross, isolated or null.');
+    out.marginMode = r.marginMode as 'cross' | 'isolated' | null;
+  }
+  for (const k of ['low', 'high'] as const) {
+    if (r[k] === undefined) continue;
+    if (!(typeof r[k] === 'number' && Number.isFinite(r[k]) && (r[k] as number) > 0)) throw new ApiError(400, 'patch', `${k} must be a positive number.`);
+    out[k] = r[k] as number;
+  }
+  if (r.spacing !== undefined) {
+    if (r.spacing !== 'linear' && r.spacing !== 'geometric') throw new ApiError(400, 'patch', 'spacing must be linear or geometric.');
+    out.spacing = r.spacing;
+  }
   return out;
 }
 
@@ -179,10 +243,58 @@ export class ApiError extends Error {
     readonly status: number,
     readonly code: string,
     message: string,
+    /** Figures that go with a refusal (a bot's margin: needed, free), for the page; never anything secret. */
+    readonly detail?: Record<string, unknown>,
   ) {
     super(message);
   }
 }
+
+/**
+ * The bot refusals' codes (owner 2026-11-08: plain words for bot users, and a code the web maps to a button):
+ *   key              no trading key here yet          -> "Approve the trading key"
+ *   account          no SoDEX account yet              -> "Deposit to SoDEX"
+ *   beta             real bots are beta-only           -> "Ask on Discord" (practice stays open)
+ *   limit            the wallet's algo/bot limit       -> stop one
+ *   bot-capacity     this executor's real-bot cap      -> try later / practice
+ *   margin           the account cannot hold it        -> detail {needUsd, freeUsd, reservedUsd, equityUsd}; lower size
+ *   margin-unknown   SoDEX's balance did not answer    -> try again
+ *   bot-market       another bot of the wallet on it   -> stop that bot (detail {algoId})
+ *   market-copy      a copy trades that market         -> stop the copy (detail {copyId})
+ *   market-algo      an algo order runs on it          -> cancel it (detail {algoId})
+ *   market-position  a position the bot did not open   -> close it (detail {symbol, size})
+ *   vip-moving       a VIP move runs for the wallet    -> wait
+ *   moved            the wallet's bots run on VIP      -> open the VIP servers
+ */
+export type BotRefusalCode = 'key' | 'account' | 'beta' | 'limit' | 'bot-capacity' | 'margin' | 'margin-unknown' | 'bot-market' | 'market-copy' | 'market-algo' | 'market-position' | 'vip-moving' | 'moved';
+
+const usd = (x: number) => `$${Math.round(x).toLocaleString('en-US')}`;
+
+/** A wallet's perks (VIP, programs) unread this long are dropped: a program ended on server 1 stops counting here too. */
+const PERKS_STALE_MS = 6 * 60 * 60_000;
+/** At most this many wallets' perks, beta answers and maker fees are kept in memory (the db keeps the beta answers). */
+const WALLET_CACHE_MAX = 20_000;
+/** A wallet's own SoDEX maker fee (GET .../fee-rate, weight 2) is read again after this. */
+const MAKER_FEE_TTL_MS = 6 * 60 * 60_000;
+/** The beta answer is asked again after this; a failed read keeps the last answer (memory, else the db). */
+const BETA_TTL_MS = 60_000;
+/** Notices before a trading key that real bots use expires: ~24 h and ~1 h before. */
+const KEY_WARN = [{ ms: 24 * 60 * 60_000, tag: '24h', words: 'in about 24 hours' }, { ms: 60 * 60_000, tag: '1h', words: 'within the hour' }] as const;
+/** A VIP move's send waits this long for the VIP side's answer; past it the outcome is asked, never guessed. */
+const VIP_SEND_MS = 15_000;
+
+/** Delete-then-set keeps a Map in last-used order; past `max` the oldest goes. */
+export function remember<K, V>(m: Map<K, V>, k: K, v: V, max = WALLET_CACHE_MAX): void {
+  m.delete(k);
+  if (m.size >= max) {
+    const oldest = m.keys().next().value;
+    if (oldest !== undefined) m.delete(oldest);
+  }
+  m.set(k, v);
+}
+
+/** botMarginUsd with the market's minimum order and the region's leverage ceiling (the engine's newer signature; an older one ignores them). */
+const marginOf = botMarginUsd as unknown as (s: AlgoSpec, minOrderUsd?: number, ceiling?: number) => number;
 
 export interface RequestContext {
   /** Two-letter country of the viewer's IP, from the edge (hosted only). */
@@ -218,9 +330,11 @@ const SIGNER_IDLE_MS = 2 * 60_000;
 /** At most this many followers' volumes are remembered (the rest is read again). */
 const VOLUMES_MAX = 20_000;
 
-const SESSION_TTL_MS = 12 * 60 * 60_000;
+/** A read token (it changes nothing: every write is signed on its own). 30 days, owner 2026-11-08: "as minimal changes as possible where users need to re-sign". */
+const SESSION_TTL_MS = 30 * 24 * 60 * 60_000;
 /** How long a follower's volume (the copy fee step) is used before it is read again. */
-const VOLUME_TTL_MS = 10 * 60_000;
+/** The volume and the fee perks (VIP, programs) of a wallet are read again this often (owner 2026-11-08: a program reaches orders within minutes). */
+const VOLUME_TTL_MS = 2 * 60_000;
 /**
  * A key SoDEX does not list is read this many times, KEY_READ_GAP_MS apart,
  * before anything is refused or taken away for it (one stale backend answered
@@ -246,7 +360,11 @@ export class ExecutorService {
   readonly algos: AlgoRuntime;
   /** The Binance-led maker's reference (feed/reference.ts); null on a self-hosted executor. */
   readonly reference: BinanceReference | null;
+  /** The economic calendar, for a bot's news gate (calendar.ts); null without a calendar URL. */
+  readonly calendar: CalendarFeed | null;
   readonly sodex: SodexClient;
+  /** Signed-write latency to SoDEX per 10 min (latency.ts), for GET /bots/latency. */
+  readonly latency: WriteLatency;
   private readonly hyperliquid: HyperliquidClient;
   private readonly nonces = createMemoryNonceManager();
   private readonly paper = new PaperSink();
@@ -255,6 +373,51 @@ export class ExecutorService {
   /** What SoDEX refused, and the copies and algos held for it (guard.ts). */
   readonly guard: ErrorGuard;
   private readonly volumes = new Map<string, { usd: number | null; at: number }>();
+  /**
+   * VIP and the dev page's fee programs for copy trading and bots (owner 2026-11-08), from the same read as the
+   * volume (GET /api/vs/builder/volume): the fee and until when. A program's end is checked on every order, so it
+   * stops counting the moment it ends, whatever the cache.
+   */
+  private readonly perks = new Map<string, { vip: boolean; copy: { fee: number; until: number | null } | null; bots: { fee: number; until: number | null } | null; at: number }>();
+
+  /** The wallet's perks as last read, while that read is not older than PERKS_STALE_MS (VIP and programs end with it). */
+  private freshPerks(owner: string, now = Date.now()) {
+    const p = this.perks.get(owner);
+    return p && now - p.at < PERKS_STALE_MS ? p : null;
+  }
+
+  /** A product's lowered fee for the wallet now (Infinity: none). */
+  private perkFee(owner: string, p: 'copy' | 'bots'): number {
+    const now = Date.now();
+    const x = this.freshPerks(owner, now)?.[p];
+    if (!x || (x.until !== null && x.until <= now)) return Infinity;
+    return Math.max(0, x.fee);
+  }
+
+  /** The copy fee: the ladder by volume, or lower (VIP, a program). */
+  private copyFee(owner: string, volume: number | null): number {
+    return Math.min(copyFeeFor(volume), this.perkFee(owner, 'copy'));
+  }
+
+  /**
+   * The bot fee: the bot ladder by volume, or lower - VIP by volume, and server 1's programs (the beta's 30 days of VIP
+   * from the wallet's listing is one: `fees.bots` with its end). One source for the beta VIP: server 1's (owner
+   * 2026-11-08); the executor no longer counts its own 30 days from the first bot.
+   */
+  private botFee(owner: string, volume: number | null): number {
+    return Math.min(botFeeFor(volume, { vip: this.freshPerks(owner)?.vip === true }), this.perkFee(owner, 'bots'));
+  }
+
+  /** The wallet's bot fee as /me shows it: tenths of a bp, whether it is VIP's, until when a lowered fee lasts. */
+  private botFeeView(owner: string): NonNullable<MeResponse['bots']> {
+    const now = Date.now();
+    const vol = this.volumeOf(owner);
+    const fee = this.botFee(owner, vol);
+    const p = this.freshPerks(owner, now);
+    const perk = p?.bots && (p.bots.until === null || p.bots.until > now) ? p.bots : null;
+    const byPerk = perk !== null && Math.max(0, perk.fee) === fee && fee < botFeeFor(vol, { vip: p?.vip === true });
+    return { feeTenths: fee, vip: p?.vip === true || (perk !== null && perk.fee <= BOT_FEE_VIP), until: byPerk ? perk.until : null };
+  }
   private readonly volumeReads = new Map<string, Promise<number | null>>();
   private builderDb: DatabaseSync | null = null;
   /** Self-hosted, not yet paired: the code printed at start. */
@@ -292,7 +455,14 @@ export class ExecutorService {
       if (now) deps.log.warn('executor: the emergency brake is ON', { copies: now.copies, algos: now.algos, reason: now.reason });
       else if (before) deps.log.warn('executor: the emergency brake is off', {});
     });
-    this.sodex = new SodexClient({ network: cfg.network, fetch: deps.fetch });
+    // Every signed write's time to answer, always on (GET /bots/latency): one region now, the array takes more.
+    this.latency = new WriteLatency([{ id: 'tokyo', label: 'Tokyo · SoDEX', where: cfg.location }], db, Date.now, (e) => deps.log.warn('executor: write latency not recorded', { error: String(e) }));
+    const logWrites = process.env.EXECUTOR_LOG_WRITES === '1';
+    // The official route (/trade/orders) unless EXECUTOR_SODEX_DOOR names the fast door: the default stays official.
+    this.sodex = new SodexClient({ network: cfg.network, fetch: deps.fetch, fastDoor: process.env.EXECUTOR_SODEX_DOOR === 'exchange' ? true : process.env.EXECUTOR_SODEX_DOOR === 'exchange-key' ? 'with-key' : false, raceCopies: Number(process.env.EXECUTOR_SODEX_RACE) || 1, lanesByMarket: process.env.EXECUTOR_SODEX_LANES === '1', onWrite: (w) => {
+      this.latency.record('tokyo', w);
+      if (logWrites) deps.log.info('write', w);
+    } });
     this.hyperliquid = new HyperliquidClient(deps.fetch);
     this.runtime = new CopyRuntime({
       store: db,
@@ -303,7 +473,7 @@ export class ExecutorService {
       hlMode: cfg.kind === 'hosted' ? 'firehose' : 'user',
       log: deps.log,
       sinkFor: (s) => this.sinkFor(s),
-      builderFor: async (s) => (cfg.builderId > 0 ? { id: cfg.builderId, fee: copyFeeFor(await this.freshVolume(s.owner)) } : null),
+      builderFor: async (s) => (cfg.builderId > 0 ? { id: cfg.builderId, fee: this.copyFee(s.owner, await this.freshVolume(s.owner)) } : null),
       // The stricter of the country declared when the copy started and the one in the wallet's current terms.
       policyFor: (s) => screenPolicy(this.policyNow(s.owner, s.country, s.observedCountry), s.owner, s.settings.leader.address),
       keyProblem: async (s) => this.guard.holdOf({ kind: 'copy', id: s.id, owner: s.owner }) ?? this.keyProblem(s.owner),
@@ -320,14 +490,24 @@ export class ExecutorService {
     const oracleFeed = new OracleFeed({ fetch: deps.fetch });
     // The Binance-led maker's reference: the box's shared Binance feed (valuescan-feed), own sockets while it is down. Hosted only.
     this.reference = cfg.kind === 'hosted' ? new BinanceReference({ path: process.env.EXECUTOR_FEED_PATH || DEFAULT_FEED_PATH, factory: plainSockets, log: deps.log }) : null;
+    this.calendar = cfg.calendarUrl ? new CalendarFeed({ url: cfg.calendarUrl, fetch: deps.fetch, log: deps.log }) : null;
+    // Host calls the engine reads when it has them (A1, 2026-11-08): the active key's expiry (a bot pulls its quotes
+    // before it), the wallet's own SoDEX maker fee in bp for booked fees (null: the market's base rate). Spread, so an
+    // engine without them still compiles.
+    const botHost = {
+      keyExpiresAt: (owner: string): number | null => this.db.key(owner.toLowerCase(), 'active')?.expiresAt ?? null,
+      makerFeeFor: (owner: string, _symbol: string): number | null => this.makerFeeFor(owner),
+    };
     this.algos = new AlgoRuntime({
+      ...botHost,
       store: db,
       sodex: this.sodex,
       network: cfg.network,
       factory: deps.factory,
       log: deps.log,
       sinkFor: (a) => this.algoSink(a),
-      builderRate: (a) => (cfg.builderId > 0 ? (a.spec?.bot === true ? BOT_FEE : copyFeeFor(this.volumeOf(a.owner))) / 100_000 : 0),
+      // Bots: the bot ladder by 14-day volume; VIP, or beta in its first 30 days, the lowest step (policy.ts botFeeFor).
+      builderRate: (a) => (cfg.builderId > 0 ? (a.spec?.bot === true ? this.botFee(a.owner, this.volumeOf(a.owner)) : this.copyFee(a.owner, this.volumeOf(a.owner))) / 100_000 : 0),
       problem: async (a) => this.guard.holdOf({ kind: 'algo', id: a.id, owner: a.owner }) ?? this.algoProblem(a),
       brake: () => this.brakeText('algos'),
       // The copy region rules, from the country declared with the terms and the one the request came from.
@@ -336,6 +516,8 @@ export class ExecutorService {
       // Hyperliquid, OKX and Bybit, each read at most once a second per coin for every algo here.
       oracle: (coin) => oracleFeed.quotes(coin),
       ...(this.reference ? { reference: this.reference } : {}),
+      // A bot's news gate: the API server's economic calendar, read every 30 minutes.
+      events: () => this.calendar?.events() ?? null,
       // An algo failed, stopped, held or finished: kept for the follower to read after signing in.
       onNotice: (n) => db.addNotice(n),
       confirmGapMs: deps.readGapMs,
@@ -343,7 +525,17 @@ export class ExecutorService {
   }
 
   async start(): Promise<void> {
-    this.signerSweep ??= setInterval(() => this.sweepSigners(), 30_000);
+    this.latency.start();
+    this.calendar?.start();
+    this.signerSweep ??= setInterval(() => {
+      this.sweepSigners();
+      this.warnKeyExpiry();
+      if (this.canMoveBack() && Date.now() - this.vipSweepAt >= (this.cfg.vipSweepMs ?? VIP_SWEEP_MS)) {
+        this.vipSweepAt = Date.now();
+        void this.sweepVip().catch((e) => this.deps.log.warn('vip: sweep failed', { error: String(e) }));
+      }
+    }, 30_000);
+    this.failInterruptedVipJobs();
     this.signerSweep.unref?.();
     // The per-IP rate limit, to the operator: SoDEX's 429 / Cloudflare 1015 opens a cooldown for every wallet here.
     this.sodex.budget.onEvent = (e) => {
@@ -366,10 +558,12 @@ export class ExecutorService {
     this.signerSweep = null;
     await this.algos.stop();
     this.reference?.stop();
+    this.calendar?.stop();
     await this.runtime.stop();
     // Last: a stop still signs (what a step had on its way, the bots' cancels), and a wiped key signs nothing valid.
     for (const owner of [...this.signers.keys()]) this.forgetSigner(owner, true);
     this.builderDb?.close();
+    this.latency.stop();
   }
 
   private selfId(): string {
@@ -404,8 +598,9 @@ export class ExecutorService {
       keyName: this.keyName,
       keyImport: { alg: KEY_IMPORT_ALG, publicKey: this.secrets.importPublicKey(), info: importInfo(this.executorId, '<owner>') },
       algos: { maxPerOwner: this.cfg.maxAlgosPerOwner },
-      bots: { fee: BOT_FEE },
+      bots: { fee: BOT_FEE, ladder: BOT_FEE_LADDER, vipFee: BOT_FEE_VIP, betaVipDays: BETA_VIP_DAYS },
       features: [...EXECUTOR_FEATURES],
+      vip: { tier: this.cfg.tier, canMove: this.cfg.tier === 'standard' && !!this.cfg.vipUrl && !!this.cfg.vipToken && !!this.cfg.vipPubkey, canMoveBack: this.canMoveBack(), location: this.cfg.location, open: this.cfg.vipOpen },
       brake: this.brakeView(),
     };
   }
@@ -479,7 +674,7 @@ export class ExecutorService {
     const termsWide = want === 'accept-terms' && q?.action === 'accept-terms' && q.executor === COPY_TERMS_EXECUTOR;
     // ValueDesk's own terms always name SITE_TERMS_EXECUTOR: one statement, whoever records it.
     const siteTerms = want === 'accept-site-terms';
-    const v = verifyCopyRequest(req, { executor: siteTerms ? SITE_TERMS_EXECUTOR : termsWide ? COPY_TERMS_EXECUTOR : this.executorId });
+    const v = verifyCopyRequest(req, { executor: siteTerms ? SITE_TERMS_EXECUTOR : termsWide ? COPY_TERMS_EXECUTOR : this.executorId, revokedBefore: (o) => Number(this.db.meta(`daykeys-revoked:${o}`) ?? 0) });
     if (!v.ok) throw new ApiError(401, 'signature', v.error);
     const r = req as SignedCopyRequest;
     const wanted = Array.isArray(want) ? want : [want];
@@ -524,6 +719,22 @@ export class ExecutorService {
       payload: (v.payload && typeof v.payload === 'object' ? v.payload : {}) as Record<string, unknown>,
       consent: { action: r.action, digest: v.digest, signature: r.signature, chainId: r.chainId, payload: r.payload, at },
     };
+  }
+
+  /**
+   * Revoke every day key the wallet approved before now (owner 2026-11-09 security review): a wallet-signed 'delegate'
+   * with payload {revoke: true}. A day key is never stored here - its approval travels with each request - so the
+   * revocation is a time: approvals signed before it are refused (verifyCopyRequest revokedBefore). Wallet only.
+   */
+  revokeDayKeys(req: unknown, ctx: RequestContext): { ok: true; revokedBefore: number } {
+    const r = req as Partial<SignedCopyRequest> | null;
+    if (r?.delegation !== undefined) throw new ApiError(401, 'signature', 'Only the wallet itself can revoke its day keys.');
+    const { owner, payload } = this.accept(req, 'delegate', ctx);
+    if (payload.revoke !== true) throw new ApiError(400, 'payload', 'A revocation says {revoke: true}.');
+    const at = Date.now();
+    this.db.setMeta(`daykeys-revoked:${owner}`, String(at));
+    this.deps.log.info('day keys revoked', { owner });
+    return { ok: true, revokedBefore: at };
   }
 
   session(req: unknown, ctx: RequestContext): SessionGrant {
@@ -595,7 +806,478 @@ export class ExecutorService {
         .map((s) => this.runtime.view(s.id))
         .filter((v): v is CopyView => v !== null)
         .sort((a, b) => b.subscription.createdAt - a.subscription.createdAt),
+      movedTo: this.movedAway(owner),
+      bots: this.botFeeView(owner),
     };
+  }
+
+  /* -------------------------------------------------------------- VIP ----- */
+
+  private vipJobs = new Map<string, VipJob>();
+
+  /** A move of this wallet's bots is under way (A6: its starts, resumes and changes wait for it; stops never do). */
+  private vipMoving(owner: string): boolean {
+    return this.vipJobs.get(owner)?.state === 'running';
+  }
+
+  /**
+   * Start moving the signer's bots to the VIP executor (vip.ts). One job per wallet at a time, run inside the
+   * wallet's queue (serial): nothing else of the wallet's runs in between, and a start or resume asked meanwhile is
+   * refused (vip-moving). The job is kept in the db at every step.
+   */
+  vipMove(req: unknown, ctx: RequestContext): VipJob {
+    const { owner } = this.accept(req, 'vip-move', ctx);
+    if (this.cfg.tier !== 'standard' || !this.cfg.vipUrl || !this.cfg.vipToken || !this.cfg.vipPubkey) throw new ApiError(404, 'vip', 'The VIP servers are not set up on this executor.');
+    const cur = this.vipJobs.get(owner);
+    if (cur?.state === 'running') return vipJobView(cur);
+    if (this.db.moved(owner)?.tier === 'vip') throw new ApiError(409, 'moved', 'Your bots run on the VIP servers already.');
+    const job = newVipJob(owner);
+    this.vipJobs.set(owner, job);
+    this.db.saveVipJob(job);
+    void this.serial(owner, () => this.runVipMove(job)).catch(() => undefined);
+    return vipJobView(job);
+  }
+
+  /** Where the wallet's bots run when it is not here: the other executor's tier, else null. */
+  private movedAway(owner: string): 'vip' | 'standard' | null {
+    const t = this.db.moved(owner)?.tier;
+    return (t === 'vip' || t === 'standard') && t !== this.cfg.tier ? t : null;
+  }
+
+  /** This executor takes moves in: the VIP one (up), or a standard one paired with a VIP one (back). */
+  private takesMoves(): boolean {
+    return this.cfg.tier === 'vip' || !!this.cfg.vipUrl;
+  }
+
+  /** The VIP executor can move wallets back (vip.ts BACK): the standard one's URL, its pinned key and the token. */
+  private canMoveBack(): boolean {
+    return this.cfg.tier === 'vip' && !!this.cfg.stdUrl && !!this.cfg.vipToken && !!this.cfg.stdPubkey;
+  }
+
+  /**
+   * Move a wallet's bots back to the standard executor (VIP side; vip.ts BACK). At most one move back per wallet per
+   * UTC day (a second the same day returns null and moves nothing); none while another move of the wallet runs.
+   */
+  vipMoveBack(owner: string, reason: string, now = Date.now()): VipJob | null {
+    if (!this.canMoveBack()) return null;
+    if (this.vipMoving(owner) || this.movedAway(owner)) return null;
+    if (downgradedToday([...(this.vipJobs.has(owner) ? [this.vipJobs.get(owner)!] : []), ...this.db.vipJobs<VipJob>(owner)], now)) return null;
+    const job = newVipJob(owner, 'down', reason);
+    this.vipJobs.set(owner, job);
+    this.db.saveVipJob(job);
+    void this.serial(owner, () => this.runVipMove(job)).catch(() => undefined);
+    return vipJobView(job);
+  }
+
+  /**
+   * VIP side, every VIP_SWEEP_MS: each wallet with bots running here is asked about (vipEligible, twice, a moment
+   * apart: one answer never moves anyone); one that is no longer VIP moves back (vipMoveBack: once a UTC day). A read
+   * that fails moves nobody. Returns the jobs started.
+   */
+  async sweepVip(now = Date.now()): Promise<VipJob[]> {
+    if (!this.canMoveBack() || this.cfg.vipOpen) return [];
+    const owners = new Set(this.algos.list().filter((a) => a.spec?.bot === true && !FINAL_STATUSES.has(a.status)).map((a) => a.owner));
+    const out: VipJob[] = [];
+    for (const owner of owners) {
+      if (this.movedAway(owner) || this.vipMoving(owner)) continue;
+      if (downgradedToday(this.db.vipJobs<VipJob>(owner), now)) continue;
+      try {
+        const a = await this.vipEligible(owner);
+        if (a.ok) continue;
+        await sleep(this.deps.readGapMs ?? 2_000);
+        const b = await this.vipEligible(owner);
+        if (b.ok) continue;
+        const j = this.vipMoveBack(owner, b.why, now);
+        if (j) out.push(j);
+      } catch (e) {
+        this.deps.log.warn('vip: status read failed; nobody moved back', { owner, error: String(e) });
+      }
+    }
+    return out;
+  }
+  private vipSweepAt = 0;
+
+  /**
+   * The operator's overview of this executor (owner 2026-11-08: "usage of our infrastructure + bot volume across all
+   * valuedesk users"): what runs here against its caps, the shared SoDEX budget, and the bots' volume, PnL and fees
+   * (all wallets together, real and practice apart). Read by server 1's admin suite with the internal token.
+   */
+  infraStats(now = Date.now()): Record<string, unknown> {
+    const all = this.algos.list();
+    const bots = all.filter((a) => a.spec?.bot === true);
+    const liveBots = bots.filter((a) => !FINAL_STATUSES.has(a.status));
+    const real = liveBots.filter((a) => !a.spec.paper);
+    // Volume over the last 24 h: its volume now less its volume at the last 5-minute point before then (none: all of it).
+    const vol24 = (a: AlgoRecord): number => {
+      const b = a.book;
+      if (!b) return 0;
+      const before = [...(b.series ?? [])].reverse().find((p) => p[0] < now - 86_400_000);
+      return Math.max(0, b.buyValue + b.sellValue - (before ? before[1] : 0));
+    };
+    const sum = (xs: AlgoRecord[]) => {
+      let volume = 0, volume24h = 0, net = 0, tradeFees = 0, builderFees = 0, fills = 0;
+      for (const a of xs) {
+        const b = a.book;
+        if (!b) continue;
+        const v = this.algos.view(a.id)?.bot;
+        volume += b.buyValue + b.sellValue;
+        volume24h += vol24(a);
+        net += v?.netPnl ?? 0;
+        tradeFees += b.tradeFees;
+        builderFees += b.builderFees;
+        fills += b.fills;
+      }
+      return { volume, volume24h, netPnl: net, tradeFees, builderFees, fills };
+    };
+    const realAll = bots.filter((a) => !a.spec.paper);
+    const markets = new Map<string, { symbol: string; live: number; volume: number; volume24h: number }>();
+    for (const a of realAll) {
+      const m = markets.get(a.spec.symbol) ?? { symbol: a.spec.symbol, live: 0, volume: 0, volume24h: 0 };
+      if (!FINAL_STATUSES.has(a.status)) m.live++;
+      m.volume += a.book ? a.book.buyValue + a.book.sellValue : 0;
+      m.volume24h += vol24(a);
+      markets.set(a.spec.symbol, m);
+    }
+    const budget = this.sodex.budget as unknown as { used(now?: number): number; perMinute: number; cooldownLeft?(): number };
+    const socket = (this.algos as unknown as { socketWallets?: () => { followed: number; polled: number } }).socketWallets?.() ?? null;
+    return {
+      at: now,
+      tier: this.cfg.tier,
+      location: this.cfg.location,
+      liveBots: real.length,
+      maxLiveBots: this.cfg.maxLiveBots,
+      practiceBots: liveBots.length - real.length,
+      pausedBots: real.filter((a) => a.status === 'paused').length,
+      closingBots: real.filter((a) => !!a.k.closing).length,
+      botWallets: new Set(real.map((a) => a.owner)).size,
+      algos: all.filter((a) => a.spec?.bot !== true && !FINAL_STATUSES.has(a.status) && !a.spec.paper).length,
+      copies: this.runtime.list().filter((c) => c.status !== 'stopped' && !c.settings.paper).length,
+      maxAlgosPerOwner: this.cfg.maxAlgosPerOwner,
+      socket: socket ? { ...socket, max: 10 } : null,
+      budget: { used: Math.round(budget.used(now)), perMinute: budget.perMinute, cooldownMs: budget.cooldownLeft?.() ?? 0 },
+      real: sum(realAll),
+      practice: sum(bots.filter((a) => a.spec.paper)),
+      markets: [...markets.values()].sort((x, y) => y.volume24h - x.volume24h || y.volume - x.volume).slice(0, 40),
+      vipMoves: this.db.vipJobs<VipJob>().filter((j) => now - j.startedAt < 7 * 86_400_000).map((j) => ({ direction: j.direction ?? 'up', state: j.state, outcome: j.outcome ?? null, at: j.startedAt })),
+    };
+  }
+
+  /** The wallet's last move, as it stands (this process's, else the db's: a move from before a restart). */
+  vipJob(owner: string): VipJob | null {
+    const j = this.vipJobs.get(owner) ?? this.db.vipJobs<VipJob>(owner)[0] ?? null;
+    return j ? vipJobView(j) : null;
+  }
+
+  /**
+   * At start: a move the db still has as running was cut by a restart. Where its bots run is not known here (the VIP
+   * side may have taken them), so they stay paused, the job says so, and the operator is told. Never resumed on a guess.
+   */
+  private failInterruptedVipJobs(): void {
+    for (const j of this.db.vipJobs<VipJob>()) {
+      if (j.state !== 'running') continue;
+      j.state = 'failed';
+      j.outcome = 'unknown';
+      j.endedAt = Date.now();
+      j.error = 'The standard servers restarted during the move. Your bots stay paused until ValueDesk has checked where they run.';
+      this.db.saveVipJob(j);
+      this.deps.log.warn('vip: a move was cut by a restart', { owner: j.owner, job: j.id });
+      this.deps.alerts?.raise('vip-move-unknown', `owner:${j.owner}`, `A VIP move of ${shortWallet(j.owner)} (job ${j.id}) was cut by a restart; its bots are paused here. Check the VIP side's import (POST /internal/vip/import/status) before resuming or finishing it.`);
+    }
+  }
+
+  private async vipEligible(owner: string): Promise<{ ok: boolean; why: string }> {
+    if (this.cfg.vipOpen) return { ok: true, why: 'open' };
+    if (!this.cfg.vipCheckUrl) return { ok: false, why: 'VIP status cannot be checked here.' };
+    const u = new URL(this.cfg.vipCheckUrl);
+    u.searchParams.set('address', owner);
+    const res = await this.deps.fetch(u.toString(), { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(5_000) });
+    const b = JSON.parse(await res.text()) as { ok?: boolean; eligible?: boolean; volumeUsd?: number; minUsd?: number };
+    if (!res.ok || !b.ok) throw new Error('VIP status could not be read. Try again in a moment.');
+    return b.eligible ? { ok: true, why: 'eligible' } : { ok: false, why: `Not VIP yet: ${Math.round(b.volumeUsd ?? 0).toLocaleString('en-US')} of $${Math.round(b.minUsd ?? 1_000_000).toLocaleString('en-US')} in 14 days.` };
+  }
+
+  /**
+   * How the VIP side's import of this job ended, asked after a send that was not answered cleanly (a timeout, an
+   * error). `abandon`: an import of this job not begun yet never begins (the VIP side keeps the job as abandoned), so
+   * the answer is final. 'running' is asked again a few times; no answer at all is 'unknown'.
+   */
+  private async vipImportOutcome(vip: string, token: string, job: VipJob): Promise<{ state: 'done' | 'failed' | 'abandoned' | 'unknown'; session?: { token: string; expiresAt: number } | null }> {
+    for (let i = 0; i < 5; i++) {
+      if (i) await sleep(this.deps.readGapMs ?? 2_000);
+      try {
+        const res = await this.deps.fetch(`${vip}/internal/vip/import/status`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'X-Internal-Token': token },
+          body: JSON.stringify({ owner: job.owner, job: job.id, abandon: true }),
+          signal: AbortSignal.timeout(5_000),
+        });
+        const b = JSON.parse(await res.text()) as { ok?: boolean; state?: string; session?: { token: string; expiresAt: number } | null };
+        if (!res.ok || !b.ok) continue;
+        if (b.state === 'done') return { state: 'done', session: b.session ?? null };
+        if (b.state === 'failed' || b.state === 'abandoned') return { state: b.state };
+      } catch {
+        /* asked again */
+      }
+    }
+    return { state: 'unknown' };
+  }
+
+  private async runVipMove(job: VipJob): Promise<void> {
+    const owner = job.owner;
+    // Up: this standard executor hands to the VIP one. Down (vip.ts BACK): this VIP executor hands back to the standard one.
+    const down = job.direction === 'down';
+    const vip = (down ? this.cfg.stdUrl! : this.cfg.vipUrl!).replace(/\/+$/, '');
+    const token = this.cfg.vipToken ?? '';
+    const pinned = down ? this.cfg.stdPubkey! : this.cfg.vipPubkey!;
+    const there = down ? 'standard' : 'VIP';
+    const pinName = down ? 'EXECUTOR_STD_PUBKEY' : 'EXECUTOR_VIP_PUBKEY';
+    const bots = this.algos.list(owner).filter((a) => a.spec?.bot === true && !FINAL_STATUSES.has(a.status));
+    job.bots = bots.length;
+    const paused: string[] = [];
+    let handed = false;
+    let unknown = false;
+    const step = async <T>(id: Parameters<typeof vipStep>[1], fn: () => Promise<T>): Promise<T> => {
+      try {
+        return await vipStep(job, id, fn);
+      } finally {
+        this.db.saveVipJob(job);
+      }
+    };
+    try {
+      await step('check', async () => {
+        // Up needs VIP; down happens because it ended (sweepVip asked already).
+        if (!down) {
+          const e = await this.vipEligible(owner);
+          if (!e.ok) throw new Error(e.why);
+        }
+        if (this.runtime.list(owner).some((s) => s.status !== 'stopped')) throw new Error('Stop your copies first: they keep their key on these servers.');
+        if (this.algos.list(owner).some((a) => a.spec?.bot !== true && !FINAL_STATUSES.has(a.status))) throw new Error('Let your algo orders finish first: only bots move.');
+        if (!this.db.key(owner, 'active') && bots.some((a) => !a.spec.paper)) throw new Error('Set up your SoDEX key first.');
+      });
+      await step('pause', async () => {
+        for (const a of bots) {
+          if (a.status === 'paused') continue;
+          await this.algos.pause(a.id);
+          paused.push(a.id);
+        }
+      });
+      const envelope = await step('seal', async () => {
+        const res = await this.deps.fetch(`${vip}/info`, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(5_000) });
+        const info = JSON.parse(await res.text()) as { executorId?: string; keyImport?: { publicKey?: string }; vip?: { tier?: string } };
+        if (!res.ok || info.vip?.tier !== (down ? 'standard' : 'vip') || !info.keyImport?.publicKey) throw new Error(`The ${there} servers did not answer.`);
+        if (info.executorId !== this.executorId) throw new Error(`The ${there} servers run under another executor id.`);
+        // The key is sealed to the pinned public key only (EXECUTOR_VIP_PUBKEY / EXECUTOR_STD_PUBKEY), never to one read over the wire.
+        if (info.keyImport.publicKey !== pinned) {
+          this.deps.alerts?.raise('vip-key-mismatch', '', `The ${there} servers' /info shows an import key that is not ${pinName}; no key was sent (move of ${shortWallet(owner)}).`);
+          throw new Error(`The ${there} servers did not prove who they are. Nothing was sent; your bots stay here.`);
+        }
+        // Practice bots only, no key here: nothing to seal.
+        const k = this.db.key(owner, 'active');
+        return k ? { key: k, envelope: this.secrets.sealTo(this.cfg.network, owner, k.address, k.sealed, { publicKey: pinned, executorId: this.executorId }) } : null;
+      });
+      const answer = await step('send', async () => {
+        type Answer = { ok?: boolean; error?: string; session?: { token: string; expiresAt: number } };
+        let res = null as { ok: boolean; status: number; text(): Promise<string> } | null;
+        let b = null as Answer | null;
+        try {
+          res = await this.deps.fetch(`${vip}/internal/vip/import`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'X-Internal-Token': token },
+            body: JSON.stringify({
+              owner,
+              job: job.id,
+              key: envelope ? { name: envelope.key.name, address: envelope.key.address, expiresAt: envelope.key.expiresAt, envelope: envelope.envelope } : null,
+              record: this.db.ownerRecord(owner),
+              algos: bots.map((a) => this.algos.get(a.id)),
+              resume: bots.filter((a) => a.status !== 'paused' || paused.includes(a.id)).map((a) => a.id),
+            }),
+            signal: AbortSignal.timeout(VIP_SEND_MS),
+          });
+          b = JSON.parse(await res.text()) as Answer;
+        } catch {
+          b = null;
+        }
+        if (res?.ok && b?.ok) {
+          handed = true;
+          return b;
+        }
+        // Not answered cleanly (a timeout, an error, a refusal): the VIP side is asked how its import ended - and one
+        // not begun is given up there, so it never starts late. Only its answer decides; no answer is 'unknown'.
+        const o = await this.vipImportOutcome(vip, token, job);
+        if (o.state === 'done') {
+          handed = true;
+          return { ok: true, session: o.session ?? undefined };
+        }
+        if (o.state === 'unknown') {
+          unknown = true;
+          throw new Error(`The ${there} servers did not confirm the move. Your bots stay paused until ValueDesk has checked where they run.`);
+        }
+        throw new Error(b?.error ?? (res ? `The ${there} servers answered HTTP ${res.status}.` : `The ${there} servers did not answer.`));
+      });
+      await step('start', async () => {
+        job.session = answer?.session ?? null;
+      });
+      await step('finish', async () => {
+        for (const a of bots) await this.algos.handOver(a.id, down ? `Moved back to the standard servers: ${job.reason ?? 'VIP ended'}` : 'Moved to the VIP servers.');
+        this.db.deleteKeys(owner);
+        this.forgetSigner(owner);
+        this.db.setMoved(owner, down ? 'standard' : 'vip');
+        this.deps.log.info(down ? 'vip: moved back' : 'vip: moved', { owner, bots: bots.length, ms: Date.now() - job.startedAt });
+      });
+      job.state = 'done';
+      job.outcome = 'moved';
+    } catch (e) {
+      job.state = 'failed';
+      job.error ??= e instanceof Error ? e.message : String(e);
+      if (handed) job.outcome = 'moved';
+      else if (unknown) {
+        job.outcome = 'unknown';
+        this.deps.alerts?.raise('vip-move-unknown', `owner:${owner}`, `A ${down ? 'move back to standard' : 'VIP move'} of ${shortWallet(owner)} (job ${job.id}) was not confirmed by the ${there} side; its ${bots.length} bot(s) stay paused here. Check that side's import (POST /internal/vip/import/status) before resuming or finishing it.`);
+      } else {
+        job.outcome = 'not-moved';
+        // Not taken by the VIP side (its answer says so): back to what it was here - but never under the brake.
+        const brake = this.brakeText('algos');
+        if (brake) job.error = `${job.error} Your bots stay paused: ${brake}`;
+        else for (const id of paused) await this.algos.resume(id).catch(() => undefined);
+      }
+      this.deps.log.warn('vip: move failed', { owner, error: job.error, handed, unknown });
+    } finally {
+      job.endedAt = Date.now();
+      this.db.saveVipJob(job);
+    }
+  }
+
+  /**
+   * The VIP executor's side of a move (internal: the standard executor asks, with the internal token). Idempotent and
+   * all-or-nothing: an id already taken in (and running here) is skipped; every bot is adopted before any resumes; a
+   * failure part-way hands the ones adopted by this call back (ended here, nothing closed) and restores the key that
+   * was here. The job's outcome is kept (vipImportStatus); a job the sender gave up on is refused.
+   */
+  async vipImport(body: unknown): Promise<{ ok: true; session: { token: string; expiresAt: number }; started: number; held: number }> {
+    // The VIP side takes a move up; a standard side paired with a VIP one (EXECUTOR_VIP_URL) takes a move back.
+    if (!this.takesMoves()) throw new ApiError(404, 'path', 'not found');
+    if (!body || typeof body !== 'object' || Array.isArray(body)) throw new ApiError(400, 'vip', 'A move needs a body: the wallet, its key and its bots.');
+    const b = body as { owner?: unknown; job?: unknown; key?: { name?: unknown; address?: unknown; expiresAt?: unknown; envelope?: unknown } | null; record?: { terms?: unknown; consents?: unknown }; algos?: unknown; resume?: unknown };
+    const owner = typeof b.owner === 'string' && /^0x[0-9a-f]{40}$/.test(b.owner) ? b.owner : null;
+    if (!owner || (b.key && (typeof b.key.name !== 'string' || typeof b.key.address !== 'string'))) throw new ApiError(400, 'vip', 'A move needs the wallet (and its key, when it has one).');
+    const job = typeof b.job === 'string' && /^[0-9a-f]{16}$/.test(b.job) ? b.job : null;
+    if (!job) throw new ApiError(400, 'vip', 'A move needs its job id.');
+    const recs = Array.isArray(b.algos) ? (b.algos as AlgoRecord[]) : [];
+    if (recs.some((r) => !r || typeof r !== 'object' || typeof r.id !== 'string' || r.owner !== owner || r.spec?.bot !== true)) throw new ApiError(400, 'vip', 'A move carries only the wallet\'s own bots.');
+    const kept = this.db.vipImport(job);
+    if (kept && kept.owner !== owner) throw new ApiError(409, 'vip', 'This move belongs to another wallet.');
+    if (kept?.state === 'abandoned') throw new ApiError(409, 'vip-abandoned', 'The standard servers gave this move up. Start the move again.');
+    if (kept?.state === 'running') throw new ApiError(409, 'vip-running', 'This move is being taken in right now.');
+    if (kept?.state === 'done') {
+      const d = kept.data as { started?: number; held?: number };
+      return { ok: true, session: this.secrets.issueSession(owner, SESSION_TTL_MS), started: Number(d.started) || 0, held: Number(d.held) || 0 };
+    }
+    // Marked before anything waits: a status question from now on sees it running, never "not begun".
+    this.db.setVipImport(job, owner, 'running');
+    return this.serial(owner, async () => {
+      const prevKey = this.db.key(owner, 'active');
+      const adopted: string[] = [];
+      let keyChanged = false;
+      try {
+        if (b.key) {
+          const pk = this.secrets.openImport(this.executorId, owner, b.key.envelope as ImportEnvelope);
+          try {
+            const address = privateKeyToAddress(pk).toLowerCase();
+            if (address !== String(b.key.address).toLowerCase()) throw new ApiError(400, 'vip', 'The key does not match.');
+            const now = Date.now();
+            const expiresAt = typeof b.key.expiresAt === 'number' ? b.key.expiresAt : null;
+            this.db.putKey({ owner, slot: 'pending', address, name: String(b.key.name), sealed: this.secrets.seal(this.cfg.network, owner, address, pk), createdAt: now, expiresAt, registered: true, checkedAt: now });
+            this.db.promoteKey(owner);
+            keyChanged = true;
+            this.forgetSigner(owner);
+          } finally {
+            pk.fill(0);
+          }
+        }
+        if (b.record?.terms) this.db.setTerms(owner, b.record.terms as TermsRecord);
+        // Consents are append-only and kept once (their digest): a retry adds nothing twice.
+        for (const c of Array.isArray(b.record?.consents) ? (b.record!.consents as ConsentRow[]) : []) if (c.owner === owner) this.db.addConsent(c);
+        for (const rec of recs) {
+          const here = this.algos.get(rec.id);
+          // Handed over from here in an earlier move (up then back, or back then up): it comes home (adopt replaces it).
+          const home = here !== null && here !== undefined && here.owner === owner && FINAL_STATUSES.has(here.status) && here.k.handedOver === true;
+          if (here && !home) {
+            // Taken in by an earlier try of this move and still running here: skipped, not doubled.
+            if (here.owner !== owner || FINAL_STATUSES.has(here.status)) throw new ApiError(409, 'vip', `Bot ${rec.id} has ended here already; it cannot be taken in again.`);
+            continue;
+          }
+          await this.algos.adopt(rec, this.cfg.tier === 'vip' ? 'Moved to the VIP servers: it goes on from here with the same book.' : 'Moved back to the standard servers: it goes on from here with the same book.');
+          adopted.push(rec.id);
+        }
+      } catch (e) {
+        for (const id of adopted) await this.algos.handOver(id, 'The move to the VIP servers was rolled back: this bot stays on the standard servers.').catch(() => undefined);
+        if (keyChanged) {
+          this.forgetSigner(owner);
+          if (prevKey) this.db.putKey(prevKey);
+          else this.db.deleteKeys(owner);
+        }
+        const error = e instanceof Error ? e.message : String(e);
+        this.db.setVipImport(job, owner, 'failed', { error, rolledBack: adopted.length });
+        this.deps.log.warn('vip: take-in failed and was rolled back', { owner, job, error, rolledBack: adopted.length });
+        throw e instanceof ApiError ? e : new ApiError(500, 'vip', `The move could not be taken in: ${error}`);
+      }
+      // Every bot is here: only now do they resume - and never under the brake (they stay paused, and say so).
+      const resume = new Set(Array.isArray(b.resume) ? (b.resume as unknown[]).filter((x): x is string => typeof x === 'string') : []);
+      const brake = this.brakeText('algos');
+      let started = 0;
+      let held = 0;
+      for (const rec of recs) {
+        if (!resume.has(rec.id)) continue;
+        if (brake) {
+          held++;
+          continue;
+        }
+        try {
+          await this.algos.resume(rec.id);
+          started++;
+        } catch (e) {
+          held++;
+          this.deps.log.warn('vip: a bot taken in did not resume', { owner, algo: rec.id, error: String(e) });
+        }
+      }
+      this.db.setMoved(owner, null);
+      this.db.setVipImport(job, owner, 'done', { started, held, ids: recs.map((r) => r.id) });
+      // Moved back: the wallet is told here, where its page now reads.
+      if (this.cfg.tier === 'standard') {
+        this.db.addNotice({
+          id: `vip-back:${job}`, owner, source: 'algo', ref: recs[0]?.id ?? owner, kind: 'vip-back', grade: 'info',
+          title: 'Your bots moved back to the standard servers',
+          body: `VIP needs $1M of your own volume in 14 days (or a VIP program). ${recs.length} bot${recs.length === 1 ? '' : 's'} moved back with ${recs.length === 1 ? 'its' : 'their'} books and keep running here. You can move to VIP again any time you qualify.`,
+          at: Date.now(), paper: false,
+        });
+      }
+      this.deps.log.info('vip: took in', { owner, job, bots: recs.length, started, held });
+      return { ok: true as const, session: this.secrets.issueSession(owner, SESSION_TTL_MS), started, held };
+    });
+  }
+
+  /**
+   * How a move's take-in ended, for the standard side after a send it could not confirm: 'done' (with a fresh read
+   * token for the wallet), 'failed', 'running', or 'abandoned'. `abandon`: a job not begun here is marked abandoned,
+   * so its import - should it still arrive - is refused (vipImport), and the answer is final.
+   */
+  vipImportStatus(body: unknown): { ok: true; state: string; session?: { token: string; expiresAt: number } } {
+    if (!this.takesMoves()) throw new ApiError(404, 'path', 'not found');
+    const b = (body && typeof body === 'object' ? body : {}) as { owner?: unknown; job?: unknown; abandon?: unknown };
+    const owner = typeof b.owner === 'string' && /^0x[0-9a-f]{40}$/.test(b.owner) ? b.owner : null;
+    const job = typeof b.job === 'string' && /^[0-9a-f]{16}$/.test(b.job) ? b.job : null;
+    if (!owner || !job) throw new ApiError(400, 'vip', 'Name the wallet and the move.');
+    const kept = this.db.vipImport(job);
+    if (!kept) {
+      if (b.abandon === true) {
+        this.db.setVipImport(job, owner, 'abandoned');
+        return { ok: true, state: 'abandoned' };
+      }
+      return { ok: true, state: 'unknown' };
+    }
+    if (kept.owner !== owner) throw new ApiError(404, 'vip', 'No such move.');
+    if (kept.state === 'done') return { ok: true, state: 'done', session: this.secrets.issueSession(owner, SESSION_TTL_MS) };
+    return { ok: true, state: kept.state };
   }
 
   /* ------------------------------------------------------------- keys ----- */
@@ -792,6 +1474,57 @@ export class ExecutorService {
     else setTimeout(() => hit.ref.privateKey.fill(0), 5_000).unref?.();
   }
 
+  /**
+   * A1: a notice ~24 h and ~1 h before the trading key that the wallet's real bots use expires (the engine pulls
+   * their quotes shortly before it; after it nothing of theirs can be cancelled here). Once per key and step: the
+   * notice id names the key's address and expiry, and the db keeps a notice once.
+   */
+  warnKeyExpiry(now = Date.now()): void {
+    const owners = new Map<string, AlgoRecord>();
+    for (const a of this.algos.list()) if (a.spec?.bot === true && !a.spec.paper && !FINAL_STATUSES.has(a.status) && !owners.has(a.owner)) owners.set(a.owner, a);
+    for (const [owner, a] of owners) {
+      const k = this.db.key(owner, 'active');
+      if (!k?.expiresAt || k.expiresAt <= now) continue;
+      const left = k.expiresAt - now;
+      // The nearest step only: a key found with 40 minutes left gets the 1 h notice, not both.
+      const step = [...KEY_WARN].reverse().find((w) => left <= w.ms);
+      if (!step) continue;
+      const id = `key-expiry:${step.tag}:${owner}:${k.address}:${k.expiresAt}`;
+      if (this.keyWarned.has(id)) continue;
+      remember(this.keyWarned, id, true, 5_000);
+      const when = new Date(k.expiresAt).toISOString().replace('T', ' ').slice(0, 16);
+      this.db.addNotice({
+        id, owner, source: 'algo', ref: a.id, kind: 'key-expiry', grade: step.tag === '1h' ? 'error' : 'warn',
+        title: `Your trading key expires ${step.words}`,
+        body: `The key your real bots trade with expires at ${when} UTC. Shortly before that they pull their quotes and stop placing orders. Approve a new key in setup to keep them running.`,
+        at: now, paper: false,
+      });
+    }
+  }
+  private readonly keyWarned = new Map<string, true>();
+
+  /**
+   * The wallet's own SoDEX maker fee in bp (GET /perps/accounts/{a}/fee-rate, weight 2), for the engine's booked
+   * fees: the last answer (sync), read again in the background after MAKER_FEE_TTL_MS. null until the first answer.
+   */
+  private readonly makerFees = new Map<string, { bp: number | null; at: number }>();
+  private makerFeeFor(owner: string): number | null {
+    const o = owner.toLowerCase();
+    const hit = this.makerFees.get(o);
+    if (!hit || Date.now() - hit.at >= MAKER_FEE_TTL_MS) {
+      // Marked as read now, so one read goes out per wallet and TTL, however often the engine asks.
+      remember(this.makerFees, o, { bp: hit?.bp ?? null, at: Date.now() });
+      void this.sodex
+        .get<{ makerFeeRate?: unknown } | null>(`/api/v1/perps/accounts/${o}/fee-rate`, 2, 1)
+        .then((r) => {
+          const rate = Number(r?.makerFeeRate);
+          if (r?.makerFeeRate !== undefined && r?.makerFeeRate !== null && Number.isFinite(rate)) remember(this.makerFees, o, { bp: rate * 10_000, at: Date.now() });
+        })
+        .catch(() => undefined);
+    }
+    return hit?.bp ?? null;
+  }
+
   /** Keys idle for SIGNER_IDLE_MS are wiped; a key in use was handed out moments ago and is never one of them. */
   private sweepSigners(now = Date.now()): void {
     for (const [owner, h] of this.signers) if (now - h.usedAt >= SIGNER_IDLE_MS) this.forgetSigner(owner);
@@ -840,7 +1573,24 @@ export class ExecutorService {
 
   async subscribe(req: unknown, ctx: RequestContext): Promise<CopyView> {
     const accepted = this.accept(req, 'subscribe', ctx);
+    // A copy keeps its key here: none starts while the wallet's bots move to the VIP servers.
+    if (this.vipMoving(accepted.owner)) throw new ApiError(409, 'vip-moving', 'Your bots are moving to the VIP servers right now. Wait for the move to finish, then try again.');
     return this.serial(accepted.owner, () => this.subscribeAccepted(accepted, ctx));
+  }
+
+  /**
+   * A3: a live copy's allocation (new, or raised by a signed update) counts the wallet's running real bots' margin
+   * too - together they set aside no more than the account holds. A wallet with no real bot running is not checked
+   * here (copies alone keep their own rules).
+   */
+  private async copyMargin(owner: string, copy: { id: string | null; usd: number }): Promise<void> {
+    const r = await this.reservedOf(owner, { copy });
+    if (!r.nBots) return;
+    const acct = await this.accountOf(owner);
+    if (r.bots + r.copies > acct.equity + 1e-6) {
+      const free = Math.max(0, acct.equity - (r.bots + r.copies - copy.usd));
+      throw new ApiError(409, 'margin', `This copy sets aside ${usd(copy.usd)}, but only ${usd(free)} of your ${usd(acct.equity)} futures balance is free: your ${r.nBots} running ${r.nBots === 1 ? 'bot holds' : 'bots hold'} ${usd(r.bots)} as margin. Lower the allocation, or stop a bot.`, this.marginDetail(copy.usd, { bots: r.bots, copies: r.copies - copy.usd }, acct.equity));
+    }
   }
 
   private async subscribeAccepted({ owner, payload, consent }: ReturnType<ExecutorService['accept']>, ctx: RequestContext): Promise<CopyView> {
@@ -867,6 +1617,7 @@ export class ExecutorService {
       if (!k || !k.registered) throw new ApiError(412, 'key', 'Register the copy key on SoDEX first (copy setup, "Approve agent").');
       accountId = await this.sodex.accountId(owner);
       if (!accountId) throw new ApiError(412, 'account', 'This wallet has no SoDEX account yet. Deposit first.');
+      await this.copyMargin(owner, { id: null, usd: Math.max(0, Number(settings.allocationUsd) || 0) });
     }
     const t = this.db.terms(owner)!;
     const now = Date.now();
@@ -919,6 +1670,8 @@ export class ExecutorService {
           throw new ApiError(400, 'settings', e instanceof SettingsError ? e.message : String(e));
         }
         this.screen(owner, settings.leader.address);
+        // A bigger live allocation counts the wallet's running real bots too (A3).
+        if (!settings.paper && s.status !== 'stopped' && Number(settings.allocationUsd) > copyReserveUsd(s) + 1e-9) await this.copyMargin(owner, { id: s.id, usd: Number(settings.allocationUsd) });
         touched = [await this.runtime.update(s.id, { settings, consent }).catch(fail)];
       } else if (action === 'pause') touched = [await this.runtime.pause(s.id).catch(fail)];
       else if (action === 'resume') {
@@ -949,14 +1702,17 @@ export class ExecutorService {
     return this.betaListed(owner);
   }
 
-  /** The beta list, asked of the API server (EXECUTOR_BETA_URL) and kept a minute; unreadable: not listed (fails closed). */
+  /**
+   * The beta list, asked of the API server (EXECUTOR_BETA_URL) and kept a minute. Every answer is also kept in the
+   * db (A2, 2026-11-08): a read that fails answers the last known one, however old - so a server-1 outage does not
+   * hold every real bot. null: never answered (and unreadable now).
+   */
   private betaCache = new Map<string, { at: number; listed: boolean }>();
-  private async betaListed(owner: string): Promise<boolean> {
+  private async betaAnswer(owner: string): Promise<boolean | null> {
     const o = owner.toLowerCase();
     const hit = this.betaCache.get(o);
-    if (hit && Date.now() - hit.at < 60_000) return hit.listed;
-    if (!this.cfg.betaUrl) return false;
-    let listed = false;
+    if (hit && Date.now() - hit.at < BETA_TTL_MS) return hit.listed;
+    if (!this.cfg.betaUrl) return null;
     try {
       const u = new URL(this.cfg.betaUrl);
       u.searchParams.set('address', o);
@@ -965,20 +1721,30 @@ export class ExecutorService {
       if (this.cfg.originSecrets[0]) headers['X-Origin-Verify'] = this.cfg.originSecrets[0];
       const res = await this.deps.fetch(u.toString(), { headers, signal: AbortSignal.timeout(5_000) });
       const body = JSON.parse(await res.text()) as { ok?: boolean; listed?: unknown };
-      if (!res.ok || !body.ok) throw new Error(`HTTP ${res.status}`);
-      listed = body.listed === true;
+      if (!res.ok || !body.ok || typeof body.listed !== 'boolean') throw new Error(`HTTP ${res.status}`);
+      const listed = body.listed;
+      const now = Date.now();
+      remember(this.betaCache, o, { at: now, listed });
+      const kept = this.db.betaAnswer(o);
+      // Written when it changes, else every 10 minutes (the time the last answer was confirmed).
+      if (!kept || kept.listed !== listed || now - kept.at >= 10 * 60_000) this.db.setBetaAnswer(o, listed, now);
+      return listed;
     } catch (e) {
-      this.deps.log.warn('bots: the beta list could not be read', { owner: o, error: String(e) });
-      // A read that failed keeps the last answer for a while (no flapping hold on a blip), else not listed.
-      if (hit && Date.now() - hit.at < 10 * 60_000) return hit.listed;
+      this.deps.log.warn('bots: the beta list could not be read; the last known answer stands', { owner: o, error: String(e) });
+      const last = hit ?? this.db.betaAnswer(o);
+      return last ? last.listed : null;
     }
-    this.betaCache.set(o, { at: Date.now(), listed });
-    return listed;
   }
 
-  /** The builder fee on an algo's orders, tenths of a bp: a bot's is BOT_FEE, every other algo's the copy ladder's. */
+  /** For a new real bot: listed now, or last known listed when the list does not answer (never answered: refused). */
+  private async betaListed(owner: string): Promise<boolean> {
+    return (await this.betaAnswer(owner)) === true;
+  }
+
+  /** The builder fee on an algo's orders, tenths of a bp: a bot's from the bot ladder (botFeeFor), every other algo's the copy ladder's. */
   private async algoFee(a: AlgoRecord): Promise<number> {
-    return a.spec?.bot === true ? BOT_FEE : copyFeeFor(await this.freshVolume(a.owner));
+    if (a.spec?.bot === true) return this.botFee(a.owner, await this.freshVolume(a.owner));
+    return this.copyFee(a.owner, await this.freshVolume(a.owner));
   }
 
   /** The sink of an algo: the key this wallet registered for this executor, its fee (algoFee) as the builder. */
@@ -1004,7 +1770,8 @@ export class ExecutorService {
     const key = await this.keyProblem(a.owner);
     if (key) return key;
     // A real bot runs while its wallet may run one: taken off the beta list, it is held (its quotes pulled) until it is back.
-    if (a.spec?.bot === true && !a.spec.paper && !liveAlgosFor(this.cfg, a.owner) && !(await this.betaListed(a.owner))) return 'Held: real bots are for beta testers only, and this wallet is not on the beta list.';
+    // Only an explicit "not listed" holds it: a list that does not answer keeps the last known answer (A2).
+    if (a.spec?.bot === true && !a.spec.paper && !liveAlgosFor(this.cfg, a.owner) && (await this.betaAnswer(a.owner)) === false) return 'Held: real bots are for beta testers only, and this wallet is no longer on the beta list.';
     if (this.cfg.builderId > 0) {
       const fee = await this.algoFee(a);
       const approved = await this.sodex.builderApproval(a.owner, this.cfg.builderId);
@@ -1038,9 +1805,129 @@ export class ExecutorService {
     return atStart;
   }
 
+  /* ------------------------------------------------- bot margin and markets ----- */
+
+  /** SoDEX's market list, kept 10 minutes (a real bot's start and its margin need each market's minimum order). */
+  private marketCache: { at: number; rows: MarketInfo[] } | null = null;
+
+  /**
+   * The smallest order SoDEX takes on each market, in USD at the mark now (minChildQty: a step, the minimum quantity,
+   * the minimum value): a bot's quote is raised to it, so its margin counts it (botMarginUsd's minOrderUsd). A market
+   * not read is left out (the margin then counts the bot's own sizes).
+   */
+  /**
+   * A bot's order is at least SoDEX's minimum order on its market (owner 2026-11-08: such a bot cannot be configured;
+   * the engine no longer gets to raise every quote behind the user's back). Unreadable minimums let it through (the
+   * engine still raises a quote to the minimum, and the cap and margin count that real size).
+   */
+  private async needOrderOverMinimum(symbol: string, orderUsd: number): Promise<void> {
+    const min = (await this.minOrderUsd([symbol])).get(symbol);
+    if (min !== undefined && orderUsd < min - 0.005) {
+      throw new ApiError(400, 'size', `The order size ($${orderUsd.toFixed(2)}) is under SoDEX's minimum order on ${symbol} (about $${(Math.ceil(min * 100) / 100).toFixed(2)}). Raise it to at least that.`, { symbol, minUsd: min });
+    }
+  }
+
+  private async minOrderUsd(symbols: readonly string[]): Promise<Map<string, number>> {
+    const out = new Map<string, number>();
+    if (!symbols.length) return out;
+    try {
+      if (!this.marketCache || Date.now() - this.marketCache.at > 10 * 60_000) this.marketCache = { at: Date.now(), rows: await this.sodex.markets() };
+      const marks = await this.sodex.markPrices();
+      for (const sym of new Set(symbols)) {
+        const m = this.marketCache.rows.find((r) => r.name === sym);
+        const px = marks.find((r) => r.symbol === sym)?.price;
+        if (m && px && px > 0) out.set(sym, minChildQty(m, px) * px);
+      }
+    } catch (e) {
+      this.deps.log.warn('bots: market minimums could not be read; margin counts the bots\' own sizes', { error: String(e) });
+    }
+    return out;
+  }
+
+  /** The region's leverage ceiling for a wallet starting something now (EEA 2x), or undefined. */
+  private ceilingFor(owner: string, ctx: RequestContext): number | undefined {
+    const t = this.db.terms(owner);
+    return this.policyNow(owner, t?.country ?? null, normaliseCountry(ctx.viewerCountry)).maxLeverage ?? undefined;
+  }
+
+  /** The wallet's futures account: equity and positions. Unreadable: a 503 (a real bot's margin is never guessed). */
+  private async accountOf(owner: string): Promise<{ equity: number; positions: Record<string, { size: number }> }> {
+    try {
+      const f = await this.sodex.follower(owner);
+      if (!Number.isFinite(f.equity)) throw new Error('no equity');
+      return { equity: f.equity, positions: f.positions };
+    } catch {
+      throw new ApiError(503, 'margin-unknown', 'Your SoDEX balance could not be read just now, so the margin this needs cannot be checked. Try again in a moment.');
+    }
+  }
+
+  /**
+   * What the wallet already sets aside (owner 2026-11-08, smart margining): its running real bots' margin (each at
+   * its leverage, its market's minimum order and its region ceiling) and its live copies' allocations. `skipAlgo`:
+   * the bot being changed or replaced; `copy`: a copy's allocation as it would be (id null: a new one).
+   */
+  private async reservedOf(owner: string, o: { skipAlgo?: string; copy?: { id: string | null; usd: number } } = {}): Promise<{ bots: number; nBots: number; copies: number }> {
+    const running = this.algos.list(owner).filter((x) => x.spec?.bot === true && !x.spec.paper && !FINAL_STATUSES.has(x.status) && x.id !== o.skipAlgo);
+    const mins = await this.minOrderUsd(running.map((x) => x.spec.symbol));
+    // Bots: no region ceiling, only the market's maximum (owner 2026-11-08).
+    const bots = running.reduce((t, x) => t + marginOf(x.spec, mins.get(x.spec.symbol)), 0);
+    let copies = 0;
+    for (const c of this.runtime.list(owner)) copies += o.copy && c.id === o.copy.id ? o.copy.usd : copyReserveUsd(c);
+    if (o.copy && o.copy.id === null) copies += o.copy.usd;
+    return { bots, nBots: running.length, copies };
+  }
+
+  /** The figures of a margin refusal, for the page (ApiError.detail). */
+  private marginDetail(need: number, r: { bots: number; copies: number }, equity: number): Record<string, unknown> {
+    const reserved = r.bots + r.copies;
+    return { needUsd: need, reservedUsd: reserved, botsUsd: r.bots, copiesUsd: r.copies, equityUsd: equity, freeUsd: Math.max(0, equity - reserved) };
+  }
+
+  /**
+   * A3: a real bot does not share its market with anything else of the wallet's - its inventory, cap and close come
+   * from its own fills, so another copy, algo or position on that market would be traded as if it were the bot's.
+   * `old`: the bot a restart replaces (what it holds is the new one's to take over or close).
+   */
+  private marketConflict(owner: string, spec: AlgoSpec, live: AlgoRecord[], positions: Record<string, { size: number }> | null, old: AlgoRecord | null): void {
+    const sym = spec.symbol;
+    const coin = coinOf('sodex', sym);
+    const algo = live.find((x) => x.spec?.bot !== true && !x.spec.paper && algoSymbols(x.spec).includes(sym));
+    if (algo) throw new ApiError(409, 'market-algo', `Your ${ALGO_NAMES[algo.spec.kind] ?? 'algo'} order on ${sym} is still running. Let it finish or cancel it, then start the bot.`, { algoId: algo.id, symbol: sym });
+    for (const c of this.runtime.list(owner)) {
+      if (c.status === 'stopped' || c.settings.paper) continue;
+      const v = this.runtime.view(c.id);
+      const holds = !!v?.positions.some((p) => p.symbol === sym && p.size !== 0);
+      const leaderHolds = Object.entries(v?.leader.positions ?? {}).some(([ls, size]) => size !== 0 && sodexNamesFor(c.settings.leader.venue, ls).includes(sym));
+      const named = c.settings.assetAllow.includes(coin) && !c.settings.assetDeny.includes(coin);
+      if (holds || leaderHolds || named) {
+        const who = `${c.settings.leader.address.slice(0, 6)}…${c.settings.leader.address.slice(-4)}`;
+        throw new ApiError(409, 'market-copy', `Your copy of ${who} trades ${sym}. Stop that copy, or start the bot on another market: both would trade the same position.`, { copyId: c.id, symbol: sym });
+      }
+    }
+    const pos = positions?.[sym];
+    if (pos && pos.size !== 0 && !(old && old.spec.symbol === sym)) {
+      throw new ApiError(409, 'market-position', `You hold a ${sym} position (${pos.size}) that this bot did not open. Close it first, or pick another market: a bot only manages what it opened itself.`, { symbol: sym, size: pos.size });
+    }
+  }
+
+  /** Real bots running on this executor, every wallet together (A7). */
+  private liveBotCount(skip?: string): number {
+    return this.algos.list().filter((x) => x.spec?.bot === true && !x.spec.paper && !FINAL_STATUSES.has(x.status) && x.id !== skip).length;
+  }
+
+  /** A wallet whose bots moved to the VIP executor starts none here; one whose move runs starts nothing until it ends. */
+  private needNotMoved(owner: string): void {
+    if (this.vipMoving(owner)) throw new ApiError(409, 'vip-moving', 'Your bots are moving to the VIP servers right now. Wait for the move to finish, then try again. Stopping a bot still works.');
+    const away = this.movedAway(owner);
+    if (away === 'vip') throw new ApiError(409, 'moved', 'Your bots run on the VIP servers now. Start and manage them there.');
+    if (away === 'standard') throw new ApiError(409, 'moved', 'Your bots moved back to the standard servers (VIP ended). Start and manage them there.');
+  }
+
   /** Start an algo order for the wallet that signed it. */
   async algoStart(req: unknown, ctx: RequestContext): Promise<AlgoView> {
     const accepted = this.accept(req, 'algo-start', ctx);
+    // Refused at once while a VIP move runs (not queued behind it to start afterwards).
+    if (this.vipMoving(accepted.owner)) this.needNotMoved(accepted.owner);
     return this.serial(accepted.owner, () => this.algoStartAccepted(accepted, ctx));
   }
 
@@ -1055,20 +1942,40 @@ export class ExecutorService {
     }
     const seed = Number(payload.seed);
     if (!Number.isSafeInteger(seed) || seed < 0 || seed > 0xffffffff) throw new ApiError(400, 'seed', 'seed must be a 32-bit whole number.');
-    const live = this.algos.list(owner).filter((a) => !FINAL_STATUSES.has(a.status));
+    if (spec.bot) this.needNotMoved(owner);
+    if (spec.kind === 'mm' || spec.kind === 'grid') await this.needOrderOverMinimum(spec.symbol, spec.orderUsd);
+    // A restart (feature 'bot-restart'): the bot it replaces is this wallet's own bot; a take-over keeps its market and mode.
+    const r = payload.restart as { from?: unknown; how?: unknown } | undefined;
+    let old: AlgoRecord | null = null;
+    let how: 'clean' | 'takeover' | null = null;
+    if (r !== undefined && r !== null) {
+      if (typeof r !== 'object' || typeof r.from !== 'string' || (r.how !== 'clean' && r.how !== 'takeover')) throw new ApiError(400, 'restart', "restart must be { from: a bot's id, how: 'clean' or 'takeover' }.");
+      old = this.algos.get(r.from) ?? null;
+      how = r.how;
+      if (!old || old.owner !== owner || !old.spec.bot) throw new ApiError(404, 'algo', 'No such bot to restart.');
+      if (!spec.bot) throw new ApiError(400, 'restart', 'A bot restarts as a bot.');
+      if (how === 'takeover' && (old.spec.symbol !== spec.symbol || old.spec.paper !== spec.paper)) throw new ApiError(400, 'restart', 'Taking over keeps the market and practice or real orders. Use the normal restart to change them.');
+      if (FINAL_STATUSES.has(old.status) && how === 'takeover') throw new ApiError(409, 'restart', 'That bot has ended: start a new one instead.');
+    }
+    const live = this.algos.list(owner).filter((a) => !FINAL_STATUSES.has(a.status) && a.id !== old?.id);
     // A basket runs as itself and one algo per market (its legs, which count as they will run); a conditional's algo takes its place when it fires.
     const adds = 1 + (spec.kind === 'basket' ? spec.legs.length : 0);
     if (live.length + adds > this.cfg.maxAlgosPerOwner) {
+      if (spec.bot) throw new ApiError(429, 'limit', `You already run ${live.length} bots and orders here; ${this.cfg.maxAlgosPerOwner} is the most at once. Stop one first.`);
       throw new ApiError(429, 'limit', adds > 1 ? `At most ${this.cfg.maxAlgosPerOwner} algo orders run at once here, and this basket runs ${adds} (itself and one per market). ${live.length ? 'Cancel one first, or use fewer markets.' : 'Use fewer markets.'}` : `At most ${this.cfg.maxAlgosPerOwner} algo orders run at once here. Cancel one first.`);
     }
     // One live bot per wallet and market: two would quote against each other's orders and share one position.
     if ((spec.kind === 'mm' || spec.kind === 'grid') && !spec.paper) {
       const other = live.find((x) => (x.spec.kind === 'mm' || x.spec.kind === 'grid') && !x.spec.paper && x.spec.symbol === spec.symbol);
-      if (other) throw new ApiError(409, 'bot-market', `A bot of yours already trades ${spec.symbol}${other.spec.label ? ` ("${other.spec.label}")` : ''}. Stop it first, or choose another market.`);
+      if (other) throw new ApiError(409, 'bot-market', `A bot of yours already trades ${spec.symbol}${other.spec.label ? ` ("${other.spec.label}")` : ''}. Stop it first, or choose another market.`, { algoId: other.id, symbol: spec.symbol });
     }
-    // Real BOTS: the wallets real algos are on for (the test follower), else beta.valuedesk.so for a wallet on the beta list.
+    // Real BOTS: the wallets real algos are on for (the test follower), else a wallet on the beta list (either site).
     if (spec.bot && !spec.paper && !(await this.liveBotFor(owner, ctx))) {
-      throw new ApiError(403, 'paper-only', 'Real bots run on beta.valuedesk.so for beta testers only for now. Turn on Practice to run one against the live market.');
+      throw new ApiError(403, 'beta', 'Real bots are for beta testers for now: ask on Discord to join. Practice runs the same bot against the live market.');
+    }
+    // A7: this executor's hard cap on real bots (every wallet together): past it they would starve each other's fills.
+    if (spec.bot && !spec.paper && this.liveBotCount(old?.id) >= this.cfg.maxLiveBots) {
+      throw new ApiError(429, 'bot-capacity', `This server already runs as many real bots as it can take (${this.cfg.maxLiveBots}). Try again later, or run this one as Practice.`);
     }
     // Real orders are off unless this executor is set to take them from every wallet (EXECUTOR_LIVE_ALGOS=1)
     // or from this one (EXECUTOR_LIVE_ALGOS_WALLETS) - for the algo itself and for one a conditional would start.
@@ -1078,14 +1985,58 @@ export class ExecutorService {
       this.needNoBrake('algos');
       await this.verifyKey(owner, { confirm: true });
       const k = this.db.key(owner, 'active');
-      if (!k || !k.registered) throw new ApiError(412, 'key', 'Register this executor\'s key on SoDEX first (copy setup, "Approve agent").');
+      if (!k || !k.registered) {
+        if (spec.bot) throw new ApiError(412, 'key', 'Set up real orders: approve the trading key first.');
+        throw new ApiError(412, 'key', 'Register this executor\'s key on SoDEX first (copy setup, "Approve agent").');
+      }
       accountId = await this.sodex.accountId(owner);
-      if (!accountId) throw new ApiError(412, 'account', 'This wallet has no SoDEX account yet. Deposit first.');
+      if (!accountId) throw new ApiError(412, 'account', spec.bot ? 'Deposit to SoDEX first: this wallet has no SoDEX account yet.' : 'This wallet has no SoDEX account yet. Deposit first.');
+      if (spec.bot) {
+        // A3: nothing else of the wallet's on this market (an algo or a copy: no read needed; a position: read now).
+        this.marketConflict(owner, spec, live, null, old);
+        const acct = await this.accountOf(owner);
+        this.marketConflict(owner, spec, live, acct.positions, old);
+        // Smart margining (owner 2026-11-08): the wallet's real bots (their margin at their leverage, the market's
+        // minimum order and the region ceiling) and its live copies (their allocation) set aside no more than it holds.
+        const r = await this.reservedOf(owner, { skipAlgo: old?.id });
+        const need = marginOf(spec, (await this.minOrderUsd([spec.symbol])).get(spec.symbol));
+        if (r.bots + r.copies + need > acct.equity + 1e-6) {
+          const free = Math.max(0, acct.equity - r.bots - r.copies);
+          const held = [...(r.nBots ? [`${r.nBots} running ${r.nBots === 1 ? 'bot' : 'bots'} ${usd(r.bots)}`] : []), ...(r.copies > 0 ? [`copy trading ${usd(r.copies)}`] : [])];
+          throw new ApiError(409, 'margin', `This bot needs ${usd(need)} of margin, but only ${usd(free)} of your ${usd(acct.equity)} futures balance is free${held.length ? ` (${held.join(', ')} already set aside)` : ''}. Lower its order size, levels or max holding, or stop another bot or copy.`, this.marginDetail(need, r, acct.equity));
+        }
+      }
+    }
+    // The old bot stops first, the way the restart says: closing what it holds (clean), or keeping it for the new one.
+    if (old && !FINAL_STATUSES.has(old.status)) {
+      const stopAs = how === 'clean' ? 'close' : 'keep';
+      try {
+        // The choice rides on the stop (no update first): an old bot already closing keeps closing on a clean restart
+        // and the new one waits for it (audit 2026-11-09: it was ended with its position left).
+        await this.algos.cancel(old.id, stopAs === 'keep' ? { keep: true } : { close: true });
+      } catch (e) {
+        throw new ApiError(409, 'restart', `The old bot could not be stopped: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+    // The checks it passed, for its activity (owner 2026-11-08: a status channel per bot; no server details there).
+    const checks: string[] = [];
+    if (spec.kind === 'mm' || spec.kind === 'grid') {
+      checks.push(`${spec.symbol} is trading on SoDEX, and the order size is at least its minimum order.`);
+      if (!spec.paper) {
+        checks.push('Your trading key is approved and your SoDEX account was found.');
+        checks.push('Beta access and a place on the servers.');
+        checks.push(`Nothing else of yours trades ${spec.symbol} (no other bot, position, copy or algo order).`);
+        checks.push('Your free margin covers what it sets aside.');
+      }
     }
     let a: AlgoRecord;
     try {
       const t = this.db.terms(owner);
-      a = await this.algos.add({ owner, accountId, mode: this.cfg.kind, spec, consent, seed, country: t?.country ?? null, observedCountry: normaliseCountry(ctx.viewerCountry) });
+      a = await this.algos.add({
+        checks,
+        owner, accountId, mode: this.cfg.kind, spec, consent, seed, country: t?.country ?? null, observedCountry: normaliseCountry(ctx.viewerCountry),
+        ...(old && how === 'takeover' ? { takeOver: old.id } : old && !FINAL_STATUSES.has(old.status) ? { after: old.id } : {}),
+      });
     } catch (e) {
       throw new ApiError(400, 'algo', e instanceof Error ? e.message : String(e));
     }
@@ -1096,7 +2047,29 @@ export class ExecutorService {
   /** Pause, resume or cancel one of the wallet's algos, or cancel all of them (the kill switch). */
   async algoAct(req: unknown, ctx: RequestContext): Promise<{ algos: AlgoView[] }> {
     const accepted = this.accept(req, 'algo-action', ctx);
+    // A resume or a change while a VIP move runs is refused at once; a stop, a pause or a cancel always goes through.
+    if ((accepted.payload.op === 'resume' || accepted.payload.op === 'update') && this.vipMoving(accepted.owner)) this.needNotMoved(accepted.owner);
     return this.serial(accepted.owner, () => this.algoActAccepted(accepted, ctx));
+  }
+
+  /**
+   * A3: a signed change that makes a real bot need more margin (a bigger order size, max holding or more levels; a
+   * lower leverage) passes the same check as its start: the wallet's other bots and copies plus its new need fit in
+   * what the account holds. A change that needs no more is never refused for margin.
+   */
+  private async updateMargin(owner: string, a: AlgoRecord, patch: AlgoUpdatePatch, ctx: RequestContext): Promise<void> {
+    if (a.spec?.bot !== true || a.spec.paper || FINAL_STATUSES.has(a.status)) return;
+    const next = { ...a.spec, ...patch } as AlgoSpec;
+    const min = (await this.minOrderUsd([a.spec.symbol])).get(a.spec.symbol);
+    const before = marginOf(a.spec, min);
+    const need = marginOf(next, min);
+    if (!(need > before + 1e-9)) return;
+    const acct = await this.accountOf(owner);
+    const r = await this.reservedOf(owner, { skipAlgo: a.id });
+    if (r.bots + r.copies + need > acct.equity + 1e-6) {
+      const free = Math.max(0, acct.equity - r.bots - r.copies);
+      throw new ApiError(409, 'margin', `This change needs ${usd(need)} of margin for the bot (now ${usd(before)}), but only ${usd(free)} of your ${usd(acct.equity)} futures balance is free for it. Keep a smaller order size, fewer levels or a lower max holding, or stop another bot or copy.`, this.marginDetail(need, r, acct.equity));
+    }
   }
 
   private async algoActAccepted({ owner, payload }: ReturnType<ExecutorService['accept']>, ctx: RequestContext): Promise<{ algos: AlgoView[] }> {
@@ -1111,16 +2084,19 @@ export class ExecutorService {
       if (!a || a.owner !== owner) throw new ApiError(404, 'algo', 'No such algo order.');
       if (op === 'pause') touched = [await this.algos.pause(a.id).catch(fail)];
       else if (op === 'resume') {
+        if (a.spec?.bot === true) this.needNotMoved(owner);
         if (!a.spec.paper) this.needNoBrake('algos');
         this.needTerms(owner, ctx);
         touched = [await this.algos.resume(a.id).catch(fail)];
-      } else if (op === 'cancel') touched = [await this.algos.cancel(a.id).catch(fail)];
+      } else if (op === 'cancel') touched = [await this.algos.cancel(a.id, { now: payload.now === true, keep: payload.how === 'keep', close: payload.how === 'close' || payload.how === 'instant' }).catch(fail)];
       else if (op === 'archive') touched = [await this.algos.archive(a.id).catch(fail)];
       else if (op === 'update') {
         // A bigger size is more trading: the terms in force are needed, as for a resume.
         if (!a.spec.paper) this.needNoBrake('algos');
         this.needTerms(owner, ctx);
-        touched = [await this.algos.update(a.id, algoPatch(payload.patch)).catch(fail)];
+        const patch = algoPatch(payload.patch);
+        await this.updateMargin(owner, a, patch, ctx);
+        touched = [await this.algos.update(a.id, patch).catch(fail)];
       } else throw new ApiError(400, 'op', 'op must be pause, resume, cancel, cancel-all, update or archive.');
     }
     return { algos: touched.map((a) => this.algos.view(a.id)).filter((v): v is AlgoView => v !== null) };
@@ -1129,6 +2105,29 @@ export class ExecutorService {
   /** What the wallet should hear of: its copies' and algos' notices, newest first (db.ts notices). */
   notices(owner: string, q: { limit?: number; before?: number; grades?: readonly string[] }): EngineNotice[] {
     return this.db.notices(owner, q);
+  }
+
+  /**
+   * GET /bots/latency: the signed-write latency of this wallet's own SoDEX accounts (those its bots trade in), never
+   * another wallet's or the executor's whole flow. A wallet whose bots only practise has no account here: empty.
+   */
+  botLatency(owner: string, hours: number, botId?: string | null): BotLatencyResponse {
+    if (botId) {
+      // One bot: its account's writes on its market (one live bot per account and market). A practice bot sends none.
+      const a = this.algos.get(botId);
+      if (!a || a.owner !== owner) throw new ApiError(404, 'algo', 'No such bot.');
+      const sid = this.algos.marketId(a.spec.symbol);
+      return this.latency.view(hours, a.accountId > 0 && sid ? [a.accountId] : [], sid ?? undefined);
+    }
+    const ids = [...new Set(this.algos.list(owner).map((a) => a.accountId).filter((x) => x > 0))];
+    return this.latency.view(hours, ids);
+  }
+
+  /** One of the wallet's algos (the bot page's live read, every second while it is open). */
+  algoOne(owner: string, id: string): AlgoView {
+    const a = this.algos.get(id);
+    if (!a || a.owner !== owner) throw new ApiError(404, 'algo', 'No such algo order.');
+    return this.algos.view(id)!;
   }
 
   algoList(owner: string): AlgoView[] {
@@ -1140,10 +2139,12 @@ export class ExecutorService {
       .filter((v): v is AlgoView => v !== null);
   }
 
-  async algoEvents(owner: string, id: string, q: { limit?: number; before?: number }): Promise<AlgoEvent[]> {
+  async algoEvents(owner: string, id: string, q: { limit?: number; before?: number; after?: number }): Promise<AlgoEvent[]> {
     const a = this.algos.get(id);
     if (!a || a.owner !== owner) throw new ApiError(404, 'algo', 'No such algo order.');
-    return this.algos.events(id, { limit: q.limit ?? 200, before: q.before });
+    // A bot's log is read a page at a time (owner 2026-11-08: no bulk copy of how a bot works): at most 50 lines.
+    const most = a.spec?.bot === true ? 50 : 1000;
+    return this.algos.events(id, { limit: Math.min(most, q.limit ?? 200), before: q.before, after: q.after });
   }
 
   /** Every signed instruction of this wallet (newest first): the follower's own record. */
@@ -1198,14 +2199,19 @@ export class ExecutorService {
       if (this.cfg.builderToken) headers['X-Internal-Token'] = this.cfg.builderToken;
       if (this.cfg.originSecrets[0]) headers['X-Origin-Verify'] = this.cfg.originSecrets[0];
       const res = await this.deps.fetch(u.toString(), { headers, signal: AbortSignal.timeout(5_000) });
-      let body: { ok?: boolean; usd?: unknown } | null = null;
+      let body: { ok?: boolean; usd?: unknown; vip?: unknown; fees?: { copy?: unknown; bots?: unknown } } | null = null;
       try {
-        body = JSON.parse(await res.text()) as { ok?: boolean; usd?: unknown };
+        body = JSON.parse(await res.text()) as { ok?: boolean; usd?: unknown; vip?: unknown; fees?: { copy?: unknown; bots?: unknown } };
       } catch {
         body = null;
       }
       if (!res.ok || !body?.ok || typeof body.usd !== 'number' || !Number.isFinite(body.usd)) throw new Error(`HTTP ${res.status}`);
       this.rememberVolume(owner, body.usd);
+      const perk = (x: unknown) => {
+        const o = x as { fee?: unknown; until?: unknown } | null | undefined;
+        return o && typeof o.fee === 'number' && Number.isFinite(o.fee) ? { fee: o.fee, until: typeof o.until === 'number' ? o.until : null } : null;
+      };
+      remember(this.perks, owner, { vip: body.vip === true, copy: perk(body.fees?.copy), bots: perk(body.fees?.bots), at: Date.now() });
       return body.usd;
     } catch (e) {
       this.deps.log.warn('copy fee: the builder volume could not be read', { owner, error: String(e) });

@@ -16,7 +16,7 @@
 import { timingSafeEqual } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { clientKey } from '../hosted.js';
-import { builderService, type BuilderService } from '../builder/service.js';
+import { VIP_DAYS, VIP_MIN_USD, builderService, isVip, type BuilderService } from '../builder/service.js';
 import { ADDRESS_RE, NONCE_RE } from '../builder/terms.js';
 import { SANCTIONED_WALLET_REASON, isSanctionedAddress } from '../builder/sanctions.js';
 import { AdminStore } from '../admin/store.js';
@@ -91,7 +91,10 @@ export async function builderRoutes(app: FastifyInstance, opts: BuilderRouteOpti
     // The executor trades for this wallet: have the ledger verify it (a follower with no tab open is otherwise never counted).
     service.hint(q.address.toLowerCase(), 'executor');
     if (usd === null) return reply.code(503).send({ ok: false, code: 'unavailable', error: 'the builder ledger is not open' });
-    return { ok: true, usd, days };
+    // VIP and the dev page's programs for the executor's products (copy trading, bots): fee, until when (programs.ts).
+    const lw = service.loweredFor(q.address.toLowerCase());
+    const pick = (p: 'copy' | 'bots') => (lw.fees[p] ? { fee: lw.fees[p]!.fee, until: lw.fees[p]!.until } : null);
+    return { ok: true, usd, days, vip: lw.vip, fees: { copy: pick('copy'), bots: pick('bots') } };
   });
 
   /**
@@ -126,6 +129,26 @@ export async function builderRoutes(app: FastifyInstance, opts: BuilderRouteOpti
    * service.ts liveBotFor), so a page told "listed" by anyone else still starts nothing real.
    * It says whether one address is listed, never who is.
    */
+  /**
+   * GET /api/vs/bots/vip?address=0x...  ->  {ok, eligible, volumeUsd, minUsd, days, promo}
+   *
+   * VIP (owner 2026-11-08): a wallet with $1M of its own counted volume in 14 days - the lowest bot fee - or one on a
+   * VIP program (the beta's 30 days: promo {until, label}, the lowest fee on every product). Either may move its bots
+   * to the VIP executor. What the page shows as progress, and what the executors
+   * ask before a move. A wallet's builder volume is public on SoDEX already; it says nothing of anyone else.
+   */
+  app.get('/api/vs/bots/vip', async (req, reply) => {
+    reply.header('Cache-Control', 'private, max-age=30');
+    const q = (req.query ?? {}) as Record<string, unknown>;
+    if (typeof q.address !== 'string' || !ADDRESS_RE.test(q.address)) return reply.code(400).send({ ok: false, error: 'a valid 0x wallet address is required' });
+    const v = service.vipOf(q.address.toLowerCase());
+    if (!v) return reply.code(503).send({ ok: false, code: 'unavailable', error: 'the builder ledger is not open' });
+    // A VIP program (fee VIP_PROGRAM_FEE: the beta's 30 days, or one from the dev page) - told by its fee, not its label.
+    const g = service.vipProgramOf(q.address.toLowerCase());
+    const promo = g ? { until: g.until, label: g.label || 'VIP program' } : null;
+    return { ok: true, eligible: isVip(v) || !!promo, volumeUsd: v.volumeUsd, minUsd: VIP_MIN_USD, days: VIP_DAYS, promo };
+  });
+
   app.get('/api/vs/beta/listed', async (req, reply) => {
     reply.header('Cache-Control', 'private, max-age=30');
     const q = (req.query ?? {}) as Record<string, unknown>;

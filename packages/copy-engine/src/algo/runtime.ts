@@ -26,7 +26,7 @@ import { MarketBook, notListedLine, snapPrice } from '../markets.ts';
 import type { RegionPolicy } from '../policy.ts';
 import type { SodexClient } from '../sodex.ts';
 import type { MarketInfo } from '../types.ts';
-import { AlgoFeed, type AlgoMarket, type OrderUpdate, type Print } from './feed.ts';
+import { AlgoFeed, BOT_QUOTE_MAX_AGE_MS, type AlgoMarket, type OrderUpdate, type Print } from './feed.ts';
 import {
   DAY_MS,
   adaptiveShare,
@@ -54,16 +54,17 @@ import {
   type TrailState,
 } from './math.ts';
 import { combineOracle, type OracleVenue, type VenueQuote } from '../oracle.ts';
-import { algoClosedNotice, algoNotice, type EngineNotice } from '../notices.ts';
+import { algoClosedNotice, algoName, algoNotice, type EngineNotice } from '../notices.ts';
 import { SWEEP_MAX_AGE_MS, sweepRefFor, sweepStep } from './sweep.ts';
 import { bandRefused, exitLevels, scaleLadder, swarmClips, twapSchedule, vwapSchedule } from './plan.ts';
 import { checkLimits, limitLeverage, oiHeadroom, oiRoomWords, positionCapUsd, limitRefusal, type AlgoLimitNotice, type LimitRefusal } from './limits.ts';
 import { checkSizes, coins, maxWords, minWords, money } from './sizes.ts';
 import type { AlgoSink, ChildRequest, ChildResult, StopRequest } from './sink.ts';
 import { ALGO_NAMES, algoClosesOnly, algoQuantity, algoSymbols, opensPosition, parseAlgoSpec } from './spec.ts';
+import { countsAsFailure, refusalKind, refusalWords } from './refusals.ts';
 import type { AlgoStore } from './store.ts';
 import type { AlgoUpdatePatch } from '../api.ts';
-import { bookFill, bookGross, bookInventory, bookNet, bookVolume, costPerMillion, emptyBook, gridAfterFill, gridPrices, gridQty, gridStart, mmQuotes, pastFair, sampleBook, type GridSide } from './bots.ts';
+import { bookFill, bookGross, bookInventory, bookNet, bookVolume, botQuoteUsd, costPerMillion, emptyBook, gridPrices, gridQty, gridStart, mmQuotes, pastFair, PATIENT_TAKER_ACCOUNT, INFORMED_TAKER_ACCOUNT, newsAt, quietWindowAt, quietWords, sampleBook, usdWords, windowWords, type GridSide } from './bots.ts';
 import { FairBasis, REF_MAX_AGE_MS, type ReferenceSource } from './reference.ts';
 import {
   FINAL_STATUSES,
@@ -80,6 +81,7 @@ import {
   type Condition,
   type ExecSpec,
   type Side,
+  type NewsEvent,
 } from './types.ts';
 
 export const ALGO_TICK_MS = 500;
@@ -91,6 +93,18 @@ const STOP_DRAIN_MS = 8_000;
 const STOP_PULL_MS = 4_000;
 /** While a bot is held with quotes that would not cancel (a key SoDEX refuses), how often it tries again. */
 const HELD_PULL_MS = 5_000;
+/**
+ * A bot pulls its quotes and sends nothing that opens this long before its trading key expires (AlgoHost
+ * keyExpiresAt): the cancels must go out while the key still signs. Reduce-only closes still go until it expires.
+ */
+const KEY_EXPIRY_PULL_MS = 10 * 60_000;
+/** A bot's close SoDEX refused waits this long before the next (doubling to BOT_CLOSE_RETRY_MAX_MS): no refusal per step. */
+const BOT_CLOSE_RETRY_MS = 1_000;
+const BOT_CLOSE_RETRY_MAX_MS = 30_000;
+/** A close refused this many times for the position (reduce-only: nothing left to reduce) ends the close. */
+const BOT_CLOSE_MAX_REFUSALS = 3;
+/** A refusal that says the position is not there to reduce (as opposed to a post-only price that would take). */
+const POSITION_REFUSAL = /reduce[ -]?only|no position|position (is )?(not|does not|doesn't)|exceeds? (the )?position|position size|position.*(zero|empty|closed)/i;
 /** An IOC with no final update after this is looked up on SoDEX. */
 const STALE_IOC_MS = 8_000;
 /** A request with no answer after this is `unknown`. */
@@ -113,6 +127,15 @@ const UNLISTED_SETTLE_MS = 20 * 60_000;
 const FILLS_PAGE = 100;
 const DONE_KEPT = 60;
 const MAX_CONSEC_REJECTS = 25;
+/** A bot whose unknown refusals reached MAX_CONSEC_REJECTS this many times (each followed by a wait) closes what it holds and stops: the last resort. */
+const BOT_FAIL_ROUNDS = 4;
+/** A bot's wait after MAX_CONSEC_REJECTS unknown refusals: this, doubling, at most BOT_FAIL_WAIT_MAX_MS. */
+const BOT_FAIL_WAIT_MS = 60_000;
+const BOT_FAIL_WAIT_MAX_MS = 15 * 60_000;
+/** A bot's side that adds waits this long after a margin refusal (the reducing side goes on). */
+const BOT_MARGIN_WAIT_MS = 30_000;
+/** A refused leverage change is asked again no sooner than this, doubling to 15 min (it was re-sent every step). */
+const LEVERAGE_RETRY_MS = 60_000;
 /** A refusal by SoDEX's open-interest cap, position limit or open-order cap holds the algo this long (doubling, at most 15 min)... */
 const LIMIT_RETRY_MS = 60_000;
 /** ...and stops it at the this-many-th with no fill in between: no retry storm against a limit. */
@@ -122,6 +145,10 @@ const LIMIT_WORDS_MS = 10 * 60_000;
 const PROBLEM_RECHECK_MS = 60_000;
 /** pollOrders: at most one REST read of open orders this often for the whole runtime (60 a minute, a fraction of the per-IP budget)... */
 const ORDER_POLL_SPACING_MS = 1_000;
+/** After a restart or a drop (resync), orders are read this often instead, so 20 bots are known again in seconds. */
+const ORDER_RESYNC_SPACING_MS = 200;
+/** A real bot's holding is checked against the account's position this often (positionConfirmed: reads that agree). */
+const BOT_POSITION_CHECK_MS = 30_000;
 /** ...each algo at most this often... */
 const ORDER_POLL_MIN_MS = 3_000;
 /** ...and the socket's places are given out again (by what each wallet has on the book) this often. */
@@ -130,6 +157,17 @@ const ORDER_WATCH_EVERY_MS = 30_000;
 const LATE_MS = 30_000;
 /** After a taker child that filled nothing, the next one waits this long. */
 const TAKER_RETRY_MS = 1_000;
+
+/** The list in a uniformly random order, in place (Fisher-Yates). Measured with the copy: about 2 us for 100 items on the bot box. */
+function shuffled<T>(list: T[]): T[] {
+  for (let i = list.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const x = list[i]!;
+    list[i] = list[j]!;
+    list[j] = x;
+  }
+  return list;
+}
 
 /** One DCA installment (k.inst): its number, its own size and due time, what its settled children filled (each counted once). */
 interface DcaInstallment {
@@ -172,6 +210,16 @@ export interface AlgoHost {
   sinkFor(a: AlgoRecord): AlgoSink | null;
   /** The builder fee on this algo's orders, as a fraction of the notional (for the fee estimate). */
   builderRate?(a: AlgoRecord): number;
+  /**
+   * SoDEX's maker fee for this wallet on this market, bp (its fee tier), or null when not known. Booked on every
+   * resting fill instead of the market's base maker fee. Absent: the market's base rate.
+   */
+  makerFeeFor?(owner: string, symbol: string): number | null;
+  /**
+   * When the wallet's trading key expires (ms), or null (no expiry known). KEY_EXPIRY_PULL_MS before it a live bot
+   * pulls its quotes while the key still signs, sends nothing that opens, and warns the trader once to renew it.
+   */
+  keyExpiresAt?(owner: string): number | null;
   /** Why a live algo cannot trade right now (key, region, approval), or null. It waits while there is one. */
   problem?(a: AlgoRecord): Promise<string | null>;
   /**
@@ -198,6 +246,8 @@ export interface AlgoHost {
   /** Volume candles (default: SoDEX REST). */
   candles?(symbol: string, interval: string, startTime: number, endTime: number): Promise<Candle[]>;
   /** Order lookups (default: SoDEX REST). `history` reads are drip-limited; the runtime asks rarely. */
+  /** The economic calendar's releases around now (cached by the host, read every tick), for MmSpec.news; absent: none. */
+  events?(): readonly NewsEvent[] | null;
   lookup?(a: AlgoRecord, symbol: string, history: boolean): Promise<Array<{ clOrdID: string; orderId: string; status: string; executedQty: number; executedValue: number }>>;
   /**
    * A sweep's outside reference: every oracle venue's quote for the coin
@@ -231,6 +281,18 @@ export interface NewAlgo {
   id?: string;
   country?: string | null;
   observedCountry?: string | null;
+  /**
+   * A bot's restart (executor: algo-start with `restart`). `after`: it waits until that bot (the old one) has ended,
+   * then starts fresh. `takeOver`: the same wait (the old one only pulls its orders), then it carries what the old one
+   * held (BotBook.carryQty) and trades it on. Both name a bot of the same wallet; the executor checks that.
+   */
+  after?: string;
+  takeOver?: string;
+  /**
+   * What was checked before it started (the executor's start checks, owner 2026-11-08: the user sees a bot's checks
+   * in its activity, as one line each): written to its log right after "placed".
+   */
+  checks?: readonly string[];
 }
 
 const LIVE: ReadonlySet<ChildOrder['state']> = new Set(['sending', 'open', 'unknown']);
@@ -253,9 +315,12 @@ const EXITS_MAX_REFUSALS = 5;
 const UPDATABLE: ReadonlySet<string> = new Set(['limitPrice', 'upper', 'lower', 'maxSpreadBps', 'label', 'quantity']);
 /** ...and on a running bot (its market, range and levels are what it is: a different one is a new bot). */
 const BOT_UPDATABLE: Readonly<Record<'mm' | 'grid', ReadonlySet<string>>> = {
-  mm: new Set(['label', 'maxSpreadBps', 'upper', 'lower', 'orderUsd', 'maxInventoryUsd', 'offsetTicks', 'chaseTicks', 'minRepriceMs', 'skewTicks', 'edgeBps', 'queueGuard', 'levels', 'moveGuard', 'refBps', 'pullBps', 'volumeTargetUsd', 'maxLossUsd', 'endAt', 'onStop']),
-  grid: new Set(['label', 'maxSpreadBps', 'upper', 'lower', 'orderUsd', 'volumeTargetUsd', 'maxLossUsd', 'endAt', 'onStop', 'outOfRange']),
+  // Everything but the market, the kind and practice or real (owner 2026-11-08: every setting saves in place, no restart).
+  mm: new Set(['ref', 'noFair', 'placeBps', 'calmBps', 'calmMs', 'pauseAfter', 'pauseMs', 'leverage', 'marginMode', 'postOnly', 'label', 'maxSpreadBps', 'upper', 'lower', 'orderUsd', 'maxInventoryUsd', 'offsetTicks', 'chaseTicks', 'minRepriceMs', 'skewTicks', 'edgeBps', 'queueGuard', 'levels', 'moveGuard', 'refBps', 'pullBps', 'placeBps', 'calmBps', 'calmMs', 'stillBps', 'stillMs', 'restMs', 'flowGate', 'quiet', 'quietOnly', 'news', 'volumeTargetUsd', 'maxLossUsd', 'endAt', 'onStop']),
+  grid: new Set(['low', 'high', 'levels', 'spacing', 'leverage', 'marginMode', 'postOnly', 'label', 'maxSpreadBps', 'upper', 'lower', 'orderUsd', 'volumeTargetUsd', 'maxLossUsd', 'endAt', 'onStop', 'outOfRange']),
 };
+/** How long the patient taker's prints are kept per market (the longest flowGate window). */
+const FLOW_KEEP_MS = 3_600_000;
 /** A bot closing what it holds rests at the touch this long before it takes... */
 const BOT_CLOSE_REST_MS = 60_000;
 /** ...and then takes with at most this slippage. */
@@ -276,10 +341,17 @@ interface BotClosing {
   status: AlgoStatus;
   reason: string;
   at: number;
+  /** Refusals in a row that said the position is not there to reduce (POSITION_REFUSAL); an accepted close resets it. */
   rejects?: number;
+  /** After any refusal of the close, the next one waits until then (doubling: `backMs`). */
+  retryAt?: number;
+  backMs?: number;
 }
 
 const dec = (n: number): string => canonicalDecimal(numberToPlainString(Number(n.toPrecision(12))));
+
+/** '2026-11-08 14:30 UTC'. */
+const utcWords = (ms: number): string => `${new Date(ms).toISOString().slice(0, 16).replace('T', ' ')} UTC`;
 
 /** A price on the tick: as it is when it is on it (float dust aside), else rounded the trader's way (a buy down, a sell up). */
 function onTick(p: number, side: Side, tickSize: string): number {
@@ -322,8 +394,20 @@ export class AlgoRuntime {
   private socketWasUp = false;
   /** Algos that raised a hold in the step now running (steps of one algo never overlap). */
   private heldNow = new Set<string>();
-  /** When a held bot last tried to pull its quotes (pullHeldQuotes). */
+  /** When an account a bot pauses after last took: market:account -> ms. */
+  private takerAt = new Map<string, number>();
+  /**
+   * What the patient taker (PATIENT_TAKER_ACCOUNT) took per market, for MmSpec.flowGate: USD per second, oldest first,
+   * an hour at most (the longest window), and since when it is watched. Kept only while a running or held volume
+   * maker on that market has a gate (onPrint drops it otherwise).
+   */
+  private flow = new Map<string, { since: number; b: Array<[number, number]> }>();
+  /** When a held bot last tried to pull its quotes (pullHeldQuotes), or an ended one its stray quotes (sweepEnded). */
   private heldPullAt = new Map<string, number>();
+  /** When a cancel without a key here was last said in an algo's log (once every 10 min, not per try). */
+  private noSinkSaid = new Map<string, number>();
+  /** The last reason SoDEX gave refusing an algo's child (a bot's close tells a post-only refusal from a position one). */
+  private lastRefusal = new Map<string, string>();
   private eventSeq = 0;
   /** Each owner's positions and account, read at most every few seconds (conditions, closes, the leverage ceiling); `from`: when that read left. */
   private positionsOf = new Map<string, { at: number; from?: number; data: Record<string, { size: number; entry: number; leverage?: number }>; loading: boolean }>();
@@ -340,6 +424,8 @@ export class AlgoRuntime {
   private exitsFlatSince = new Map<string, number>();
   /** Algos whose position reads disagreed: not read again for a decision before this (positionConfirmed). */
   private confirmRetryAt = new Map<string, number>();
+  /** Bots whose refused reduce-only order is being checked against the account's position (reduceRefused). */
+  private reduceChecks = new Set<string>();
   private paper = new Map<string, PaperOrder>();
   private timers: unknown[] = [];
   private running = false;
@@ -347,12 +433,15 @@ export class AlgoRuntime {
   private oracleQuotes = new Map<string, { quotes: VenueQuote[]; at: number; busy: boolean; first: number }>();
   /** The Binance-led makers' basis per market (reference.ts). */
   private fairs = new Map<string, FairBasis>();
+  /** The reference's mids of the last seconds per market, oldest first, for calmBps. */
+  private refTrail = new Map<string, Array<[number, number]>>();
 
   constructor(private readonly host: AlgoHost) {
     if (host.market) this.market = host.market;
     else {
       if (!host.factory) throw new Error('an algo runtime needs a market feed or a WebSocket factory');
-      this.market = new AlgoFeed({ network: host.network, factory: host.factory, log: host.log });
+      // A still market's quote is kept fresh by REST (bots hold on a quote older than BOT_QUOTE_MAX_AGE_MS).
+      this.market = new AlgoFeed({ network: host.network, factory: host.factory, log: host.log, bookTickers: () => host.sodex.get<unknown>('/api/v1/perps/markets/bookTickers') });
     }
     this.market.onOrder((u) => this.onOrderUpdate(u));
     this.market.onPrint((p) => this.onPrint(p));
@@ -379,6 +468,17 @@ export class AlgoRuntime {
       if (FINAL_STATUSES.has(a.status)) {
         // A child it left resting on purpose (a conditional's limit, a chase left at its price) still fills: its fills still count and move its exits.
         for (const c of this.keptLive(a)) this.byClOrd.set(c.clOrdID, a.id);
+        // A bot's quote its end could not cancel (no key here, a cancel that failed) may still rest: followed, asked
+        // of SoDEX and cancelled again (sweepEnded) - a paper one rests nowhere and is over.
+        for (const c of this.strayLive(a)) {
+          if (a.spec.paper) {
+            c.state = 'done';
+            c.cancelling = false;
+            continue;
+          }
+          this.byClOrd.set(c.clOrdID, a.id);
+          c.state = 'unknown';
+        }
         continue;
       }
       for (const c of a.children) {
@@ -439,7 +539,7 @@ export class AlgoRuntime {
     // How much each wallet has on SoDEX's book: the socket's few places (feed.ts ACCOUNT_USERS_PER_IP) go to the most first.
     const weight = new Map<string, number>();
     for (const a of this.algos.values()) {
-      const exits = this.liveExits(a).length > 0 || this.keptLive(a).length > 0;
+      const exits = this.liveExits(a).length > 0 || this.keptLive(a).length > 0 || this.strayLive(a).length > 0;
       if (FINAL_STATUSES.has(a.status) && !exits) continue;
       for (const s of algoSymbols(a.spec)) symbols.add(s);
       if (a.spec.paper) continue;
@@ -470,6 +570,32 @@ export class AlgoRuntime {
     return b.fair(refMid);
   }
 
+  /** How far the reference moved over the last `ms`, bp (+ up). 0 with too little history. */
+  private refMove(market: string, ms: number, now: number): number {
+    const trail = this.refTrail.get(market);
+    if (!trail || trail.length < 2) return 0;
+    const last = trail[trail.length - 1]!;
+    let from = last;
+    for (const x of trail) {
+      if (x[0] >= now - ms) {
+        from = x;
+        break;
+      }
+    }
+    return ((last[1] - from[1]) / from[1]) * 10_000;
+  }
+
+  /** The reference's path over the last `ms`, bp: every move, either way. null while the trail does not reach that far back. */
+  private refPath(market: string, ms: number, now: number): number | null {
+    const trail = this.refTrail.get(market);
+    if (!trail?.length || trail[0]![0] > now - ms) return null;
+    let path = 0;
+    for (let i = 1; i < trail.length; i++) {
+      if (trail[i]![0] >= now - ms) path += Math.abs(trail[i]![1] - trail[i - 1]![1]) / trail[i]![1];
+    }
+    return path * 10_000;
+  }
+
   /**
    * A reference tick (the fast pull): every running Binance-led maker on that market cancels at once a quote the fair
    * price came past its line (bots.ts pastFair) - before the next step, and before SoDEX's takers who watch Binance
@@ -477,20 +603,29 @@ export class AlgoRuntime {
    */
   private onReference(market: string): void {
     if (!this.running) return;
+    const rq = this.host.reference?.quote(market);
+    if (rq) {
+      let trail = this.refTrail.get(market);
+      if (!trail) this.refTrail.set(market, (trail = []));
+      trail.push([rq.at, (rq.bid + rq.ask) / 2]);
+      while (trail.length > 2 && trail[1]![0] < rq.at - 120_000) trail.shift();
+    }
     const q = this.market.quote(market);
     const m = this.markets.get(market);
     if (!q || !m) return;
     const now = Date.now();
     let fair: number | null | undefined;
+    const pulls: Array<[AlgoRecord, ChildOrder[]]> = [];
     for (const a of this.algos.values()) {
       const s = a.spec;
-      if (s.kind !== 'mm' || !s.ref || s.symbol !== market || a.status !== 'running') continue;
+      if (s.kind !== 'mm' || !s.ref || s.noFair || s.symbol !== market || a.status !== 'running') continue;
       if (fair === undefined) fair = this.fairFor(market, q, now);
       if (fair === null) return;
       const inv = bookInventory(a.book!);
       const stale = this.live(a).filter((c) => c.state === 'open' && !c.cancelling && c.tif !== 'ioc' && pastFair(c.side, c.price, fair!, c.side === 'buy' ? inv >= 0 : inv <= 0, s.pullBps ?? 0));
-      if (stale.length) void this.cancelChildren(a, m, stale).catch((e) => this.host.log.warn('algo: fast pull failed', { algo: a.id, error: String(e) }));
+      if (stale.length) pulls.push([a, stale]);
     }
+    for (const [a, stale] of shuffled(pulls)) void this.cancelChildren(a, m, stale).catch((e) => this.host.log.warn('algo: fast pull failed', { algo: a.id, error: String(e) }));
   }
 
   /**
@@ -504,7 +639,7 @@ export class AlgoRuntime {
    * (settleStale), so no fill is lost.
    */
   async pollOrders(now = Date.now()): Promise<void> {
-    if (this.polling || now - this.lastPollAt < ORDER_POLL_SPACING_MS) return;
+    if (this.polling || now - this.lastPollAt < (this.resync.size ? ORDER_RESYNC_SPACING_MS : ORDER_POLL_SPACING_MS)) return;
     if (now - this.watchedAt >= ORDER_WATCH_EVERY_MS) {
       this.watchedAt = now;
       this.syncWatch();
@@ -568,6 +703,17 @@ export class AlgoRuntime {
     return kept.length ? a.children.filter((c) => kept.includes(c.clOrdID) && LIVE.has(c.state)) : [];
   }
 
+  /**
+   * An ended bot's children still live that it did not leave on purpose: quotes its end could not cancel (no key
+   * here, a cancel SoDEX refused or that threw) or whose fate SoDEX has not told. Nothing steps an ended bot, so
+   * they are asked of SoDEX and cancelled again on a timer (sweepEnded) until none is left.
+   */
+  private strayLive(a: AlgoRecord): ChildOrder[] {
+    if (!a.spec.bot || !FINAL_STATUSES.has(a.status)) return [];
+    const kept = (a.k.kept as string[] | undefined) ?? [];
+    return a.children.filter((c) => LIVE.has(c.state) && !kept.includes(c.clOrdID));
+  }
+
   /** Paused or ended: nothing new may be sent for it. */
   private stopped(a: AlgoRecord): boolean {
     return FINAL_STATUSES.has(a.status) || a.status === 'paused';
@@ -577,6 +723,11 @@ export class AlgoRuntime {
 
   get(id: string): AlgoRecord | null {
     return this.algos.get(id) ?? null;
+  }
+
+  /** A market's SoDEX id, from the listed markets (null when not listed or not read yet). */
+  marketId(symbol: string): number | null {
+    return this.markets.get(symbol)?.id ?? null;
   }
 
   list(owner?: string): AlgoRecord[] {
@@ -631,6 +782,8 @@ export class AlgoRuntime {
       observedCountry: n.observedCountry ?? null,
       k: {},
     };
+    if (n.takeOver) { a.k.after = n.takeOver; a.k.takeOver = n.takeOver; }
+    else if (n.after) a.k.after = n.after;
     // Every child an order SoDEX takes, as the ticket said (sizes.ts): under its smallest or over its largest is refused, never merged or split.
     await this.startSizes(a);
     await this.startLimits(a);
@@ -641,8 +794,10 @@ export class AlgoRuntime {
     this.algos.set(a.id, a);
     await this.host.store.saveAlgo(a);
     this.syncWatch();
-    const what = spec.kind === 'basket' ? `Basket of ${spec.legs.length} markets` : `${ALGO_NAMES[spec.kind]} ${spec.side === 'buy' ? 'buy' : 'sell'} on ${spec.symbol}`;
+    // A bot has no side of its own: "Market maker on BTC-USD", never "Volume maker buy" (audit 2026-11-08).
+    const what = spec.kind === 'basket' ? `Basket of ${spec.legs.length} markets` : spec.kind === 'mm' ? `Market maker on ${spec.symbol}` : spec.kind === 'grid' ? `Grid on ${spec.symbol}` : `${ALGO_NAMES[spec.kind]} ${spec.side === 'buy' ? 'buy' : 'sell'} on ${spec.symbol}`;
     await this.event(a, 'status', `${what} placed${spec.paper ? ' (paper: nothing is sent)' : ''}.`);
+    for (const c of n.checks ?? []) await this.event(a, 'info', `Check passed: ${c}`);
     this.host.onChange?.(a.id);
     return a;
   }
@@ -714,10 +869,61 @@ export class AlgoRuntime {
     const a = this.need(id);
     if (FINAL_STATUSES.has(a.status)) throw new Error('This algo has ended.');
     if (a.status === 'paused') return a;
+    // A close is what stands between what it holds and an unmanaged position: it is not paused (stop it again to
+    // leave the position as it is).
+    if (a.k.closing) throw new Error('It is closing what it holds: a close cannot be paused. Stop it again to leave the position as it is.');
     a.k.pausedFrom = a.status;
     await this.setStatus(a, 'paused', 'Paused by you.');
     await this.pullResting(a);
     for (const c of this.linkedOf(a)) if (!FINAL_STATUSES.has(c.status)) await this.pause(c.id);
+    return a;
+  }
+
+  /**
+   * VIP move, the receiving side: an algo another executor of ours ran (its record, book and children as they were,
+   * paused with its quotes pulled), taken in under the same id. Live children it still names are asked about on
+   * SoDEX, as after a restart. Resume it to go on.
+   */
+  async adopt(rec: AlgoRecord, note = 'Moved to the VIP servers: it goes on from here with the same book.'): Promise<AlgoRecord> {
+    const here = this.algos.get(rec.id);
+    // A bot this side handed over earlier (a move up, then back, or back and up again) comes home: the record that
+    // arrives carries everything since, so it replaces the ended one. Any other record here refuses.
+    if (here && !(FINAL_STATUSES.has(here.status) && here.k.handedOver === true)) throw new Error('This algo is here already.');
+    const a = JSON.parse(JSON.stringify(rec)) as AlgoRecord;
+    for (const c of a.children) {
+      this.byClOrd.set(c.clOrdID, a.id);
+      if (LIVE.has(c.state) && !a.spec.paper) c.state = 'unknown';
+      if (a.spec.paper && LIVE.has(c.state)) {
+        c.state = 'done';
+        c.cancelling = false;
+      }
+    }
+    delete a.k.handedOver;
+    this.algos.set(a.id, a);
+    await this.save(a);
+    await this.event(a, 'info', note);
+    this.syncWatch();
+    this.host.onChange?.(a.id);
+    return a;
+  }
+
+  /**
+   * VIP move, the sending side: the algo now runs on the VIP executor. Its quotes are pulled (it was paused for the
+   * move) and it ends here without closing anything: what it holds is the new one's.
+   */
+  async handOver(id: string, reason: string): Promise<AlgoRecord> {
+    const a = this.need(id);
+    if (FINAL_STATUSES.has(a.status)) return a;
+    await this.pullResting(a);
+    a.status = 'cancelled';
+    a.statusReason = reason;
+    a.k.handedOver = true;
+    a.endedAt = Date.now();
+    a.updatedAt = a.endedAt;
+    await this.save(a);
+    await this.event(a, 'status', reason);
+    this.syncWatch();
+    this.host.onChange?.(a.id);
     return a;
   }
 
@@ -749,7 +955,7 @@ export class AlgoRuntime {
    * stays filled, and its exits stay on SoDEX to protect that (the log says so).
    * `pullAll` (the kill switch) pulls its exits and anything it left resting too.
    */
-  async cancel(id: string, o: { pullAll?: boolean } = {}): Promise<AlgoRecord> {
+  async cancel(id: string, o: { pullAll?: boolean; now?: boolean; keep?: boolean; close?: boolean } = {}): Promise<AlgoRecord> {
     const a = this.need(id);
     if (FINAL_STATUSES.has(a.status)) {
       // An ended algo keeps only what protects or finishes what it filled (its exits, a child left resting): cancelling it pulls those.
@@ -758,7 +964,19 @@ export class AlgoRuntime {
     }
     for (const c of this.linkedOf(a)) if (!FINAL_STATUSES.has(c.status)) await this.cancel(c.id, o);
     // A bot set to close what it holds stops by closing it first (the next steps); a second stop, or the kill switch, ends it at once.
-    if (!o.pullAll && !a.k.closing && (await this.stopBot(a, 'cancelled', 'Stopped by you.'))) return a;
+    // `now` (Instant stop): the close takes at once (a capped taker) instead of resting at the touch first.
+    // `keep` / `close`: this stop's choice over the bot's On stop setting (the stop menu), with no settings change
+    // first - a stop never waits behind the brake, the terms or a move (audit 2026-11-09).
+    if (a.spec.bot && (o.keep || o.close) && (a.spec.kind === 'mm' || a.spec.kind === 'grid')) {
+      const want = o.keep ? 'keep' : 'close';
+      if (a.spec.onStop !== want) {
+        (a.spec as { onStop: string }).onStop = want;
+        await this.save(a);
+      }
+    }
+    // A bot already closing that is stopped again with `close` keeps closing (a second Clean stop never orphans it).
+    if (a.k.closing && o.close && !o.pullAll) return a;
+    if (!o.pullAll && !a.k.closing && (await this.stopBot(a, 'cancelled', 'Stopped by you.', o.now === true))) return a;
     await this.end(a, 'cancelled', a.k.closing ? 'Stopped by you; what it still holds is left as it is.' : a.spec.bot ? 'Stopped by you.' : 'Cancelled by you.');
     if (o.pullAll) {
       for (const c of this.linkedOf(a)) if (this.hasLeftovers(c)) await this.pullLeftovers(c);
@@ -786,7 +1004,7 @@ export class AlgoRuntime {
 
   /** Whether an ended algo still has something on SoDEX (or the paper book): live exits, or a child it left resting. */
   private hasLeftovers(a: AlgoRecord): boolean {
-    return this.liveExits(a).some((x) => !x.cancelling) || this.keptLive(a).some((c) => !c.cancelling);
+    return this.liveExits(a).some((x) => !x.cancelling) || this.keptLive(a).some((c) => !c.cancelling) || this.strayLive(a).some((c) => !c.cancelling);
   }
 
   /** Cancel an ended algo's live exits and kept children; its exits are not placed again. Its final status stays. */
@@ -867,14 +1085,43 @@ export class AlgoRuntime {
       const taking = this.live(a).filter((c) => c.tif === 'ioc' || c.cancelling || c.state === 'unknown').reduce((x, c) => x + Math.max(0, c.quantity - c.filled), 0);
       if (a.filled + taking >= want - 1e-12) throw new Error(`An order is filling right now: the new size must be more than ${dec(a.filled + taking)}.`);
     }
-    const spec = parseAlgoSpec(next);
+    let spec: AlgoSpec;
+    try {
+      spec = parseAlgoSpec(next);
+    } catch (e) {
+      // A real bot started before the loss limit was required (audit 2026-11-08) is still changed - and stopped, and
+      // restarted - without one, as it ran; the rule binds new bots and any change that sets a limit (audit 2026-11-09).
+      const legacy = a.spec.bot && !a.spec.paper && (a.spec as { maxLossUsd?: number | null }).maxLossUsd == null && next.maxLossUsd == null && /loss limit/i.test(String(e instanceof Error ? e.message : e));
+      if (!legacy) throw e;
+      spec = { ...parseAlgoSpec({ ...next, paper: true }), paper: false } as AlgoSpec;
+    }
     a.spec = spec;
+    // A grid's new order size applies to every level: the per-level sizes its fills set are dropped (audit 2026-11-09:
+    // they kept the old size for good after the first fill).
+    if (spec.kind === 'grid' && 'orderUsd' in patch) delete a.k.gz;
+    // A grid's new range, levels or spacing: laid out again around the price now (what it holds stays in its book);
+    // every level resting is pulled below and placed again (owner 2026-11-08: no restart for any setting).
+    const relayout = spec.kind === 'grid' && ['low', 'high', 'levels', 'spacing'].some((k) => k in patch);
+    if (relayout && spec.kind === 'grid') {
+      const m = this.markets.get(spec.symbol);
+      if (m) {
+        const prices = gridPrices(spec, m.tickSize);
+        const q = this.market.quote(spec.symbol);
+        const px = this.market.mark(spec.symbol)?.mark ?? (q ? mid(q) : (spec.low + spec.high) / 2);
+        a.k.gp = prices;
+        a.k.gs = gridStart(prices, px);
+        delete a.k.gz;
+        delete a.k.gretry;
+      }
+    }
     // A bot's new sizes and distances apply at once: what rests is pulled, and placed again as they say.
-    if ((spec.kind === 'mm' || spec.kind === 'grid') && ['orderUsd', 'offsetTicks', 'skewTicks', 'maxInventoryUsd', 'edgeBps'].some((k) => k in patch)) {
+    if ((spec.kind === 'mm' || spec.kind === 'grid') && (relayout || ['orderUsd', 'offsetTicks', 'skewTicks', 'maxInventoryUsd', 'edgeBps', 'postOnly', 'ref', 'noFair', 'refBps', 'leverage'].some((k) => k in patch))) {
       const m = this.markets.get(spec.symbol);
       const resting = this.live(a).filter((c) => c.tif !== 'ioc' && !c.cancelling);
       if (m && resting.length) await this.cancelChildren(a, m, resting);
     }
+    // A bot switched to or from the oracle watches (or stops watching) the Binance feed for its market now.
+    if ('ref' in patch) this.syncWatch();
     const after = this.targetOf(a);
     if (patch.quantity !== undefined && before !== null && after !== null && a.startedAt !== null && (spec.kind === 'twap' || spec.kind === 'vwap')) {
       // A schedule spreads the change over what is still to come (from the next slice on): nothing extra is due at once.
@@ -928,8 +1175,8 @@ export class AlgoRuntime {
     return base * share + due;
   }
 
-  async events(id: string, q: { limit?: number; before?: number } = {}): Promise<AlgoEvent[]> {
-    return this.host.store.algoEvents({ algoId: id, limit: q.limit ?? 200, before: q.before });
+  async events(id: string, q: { limit?: number; before?: number; after?: number } = {}): Promise<AlgoEvent[]> {
+    return this.host.store.algoEvents({ algoId: id, limit: q.limit ?? 200, before: q.before, after: q.after });
   }
 
   /* ---------------------------------------------------------------- views ----- */
@@ -983,6 +1230,7 @@ export class AlgoRuntime {
         ? `${live[0]!.tif === 'ioc' ? 'Taking' : 'Resting'} ${live[0]!.quantity - live[0]!.filled} at ${live[0]!.price}`
         : `${live.length} orders working`
       : null;
+    const gate = a.spec.kind === 'mm' && !FINAL_STATUSES.has(a.status) ? (a.k.mgate as string | undefined) : undefined;
     return {
       algo: a,
       target,
@@ -993,7 +1241,7 @@ export class AlgoRuntime {
       marketVwap,
       nextAt,
       endsAt,
-      working,
+      working: gate ? (working ? `${working} \u00b7 ${gate}` : gate) : working,
       triggerPrice: s.kind === 'trailing' ? ((a.k.stop as number | undefined) ?? null) : null,
       conditions: s.kind === 'conditional' ? s.conditions.map((c, i) => ({ text: this.describeCondition(c), ok: Boolean((a.k.ok as boolean[] | undefined)?.[i]) })) : null,
       exits: (a.exitOrders ?? []).length
@@ -1008,7 +1256,9 @@ export class AlgoRuntime {
   private botView(a: AlgoRecord): BotView {
     const b = a.book ?? emptyBook();
     const q = this.market.quote(a.spec.symbol);
-    const mark = this.market.mark(a.spec.symbol)?.mark ?? (q ? mid(q) : a.filled > 0 ? a.filledValue / a.filled : null);
+    // An ended bot at the mark it ended at (BotBook.endMark): what it kept no longer moves its figures.
+    const ended = FINAL_STATUSES.has(a.status) && b.endMark !== undefined ? b.endMark : null;
+    const mark = ended ?? this.market.mark(a.spec.symbol)?.mark ?? (q ? mid(q) : a.filled > 0 ? a.filledValue / a.filled : null);
     const px = mark ?? 0;
     const volume = bookVolume(b);
     return {
@@ -1023,8 +1273,11 @@ export class AlgoRuntime {
       costPerMillion: costPerMillion(b, px),
       fills: b.fills,
       mark,
+      // SoDEX's minimum order at the mark now (USD): the page counts margin on it as the executor does (audit 2026-11-09).
+      minOrderUsd: (() => { const m = this.markets.get(a.spec.symbol); return m && px > 0 ? minChildQty(m, px) * px : null; })(),
       orders: this.live(a).filter((c) => c.tif !== 'ioc' && !c.cancelling).map((c) => ({ side: c.side, price: c.price, quantity: c.quantity - c.filled, tag: c.tag })),
       closing: !!a.k.closing,
+      ...(b.takers ? { takers: { ...b.takers } } : {}),
     };
   }
 
@@ -1042,7 +1295,9 @@ export class AlgoRuntime {
   /** One step for every live algo (the timer calls this; tests call it directly). */
   tick(now = Date.now()): void {
     this.checkPaperExits();
-    for (const a of this.algos.values()) {
+    // A fresh order every step: bots at one price queue in the order their orders leave, so a fixed order would keep the
+    // earliest-added users at the front of the queue for good.
+    for (const a of shuffled([...this.algos.values()])) {
       // An ended algo is not stepped, but its exits still follow what it filled (a resize whose cancel came late, a refusal tried
       // again), and are held against its position: gone, closed outside it, they are cancelled instead (watchExits).
       if (FINAL_STATUSES.has(a.status)) {
@@ -1050,6 +1305,13 @@ export class AlgoRuntime {
         if (m && this.exitsWatchDue(a, now)) void this.watchExits(a, m, now).catch((e) => this.host.log.error('algo: exits watch failed', { algo: a.id, error: String(e) }));
         else if (m && !this.exitsWatching.has(a.id) && !this.exitsUnchecked(a) && this.exitsDue(a, now)) {
           void this.syncExits(a, m, true).catch((e) => this.host.log.error('algo: exits failed', { algo: a.id, error: String(e) }));
+        }
+        if (this.sweepDue(a, now)) {
+          this.heldPullAt.set(a.id, now);
+          this.busy.add(a.id);
+          void this.sweepEnded(a, now)
+            .catch((e) => this.host.log.warn('algo: ended bot sweep failed', { algo: a.id, error: String(e) }))
+            .finally(() => this.busy.delete(a.id));
         }
       }
       if (FINAL_STATUSES.has(a.status) || this.busy.has(a.id)) continue;
@@ -1083,10 +1345,13 @@ export class AlgoRuntime {
     const s = a.spec;
     const m = this.markets.get(s.symbol);
     if (!m) {
-      if (this.markets.size) await this.end(a, 'failed', `${s.symbol} is no longer listed on SoDEX perps.`);
+      if (this.markets.size) await this.endBot(a, 'failed', `${s.symbol} is no longer listed on SoDEX perps.`);
       return;
     }
     await this.settleStale(a, m, now);
+    // A bot's own limits (loss limit, end time, volume target) and its close come before every hold below: a held bot
+    // still holds a position, and the reduce-only close only makes it smaller (audit 2026-11-08).
+    if (s.bot && a.status !== 'scheduled' && (await this.botGuard(a, m, now))) return;
     if (a.status === 'paused') {
       await this.pullResting(a);
       return;
@@ -1116,18 +1381,33 @@ export class AlgoRuntime {
         await this.hold(a, `Held: ${policy.reason ?? 'not available in your region.'}`);
         return;
       }
+      // The trading key runs out soon: the quotes come off while it still signs, and nothing new opens.
+      const expires = s.bot ? this.keyExpiring(a, now) : null;
+      if (expires !== null) {
+        await this.pullHeldQuotes(a, now);
+        await this.keyExpiryWarn(a, expires);
+        await this.hold(a, `Held: the trading key expires at ${utcWords(expires)}. Renew it to go on.`);
+        return;
+      }
     }
-    // SoDEX refused it at one of its limits (onLimit): nothing goes out until the wait is over.
-    if (typeof a.k.limitUntil === 'number' && now < a.k.limitUntil) {
+    // SoDEX refused it at one of its limits (onLimit): nothing goes out until the wait is over. A bot keeps quoting the
+    // side that reduces what it holds; only what opens waits (send).
+    if (typeof a.k.limitUntil === 'number' && now < a.k.limitUntil && !a.spec.bot) {
       await this.pullHeldQuotes(a, now);
       await this.hold(a, String(a.k.limitReason ?? 'Held: a SoDEX limit is reached.'));
+      return;
+    }
+    // A bot that kept being refused for reasons nothing here handles waits a while (sendOutcome), quotes pulled.
+    if (a.spec.bot && !a.k.closing && typeof a.k.failUntil === 'number' && now < a.k.failUntil) {
+      await this.pullHeldQuotes(a, now);
+      await this.hold(a, `Held: SoDEX kept refusing its orders; it tries again at ${utcWords(a.k.failUntil)}.`);
       return;
     }
     if (m.status !== 'TRADING') {
       await this.hold(a, `SoDEX is not trading ${m.name} right now.`);
       return;
     }
-    const q = this.market.quote(s.symbol);
+    const q = this.quoteOf(a, now);
     if (!q) {
       await this.pullHeldQuotes(a, now);
       await this.hold(a, 'Waiting for a price from SoDEX.');
@@ -1145,7 +1425,7 @@ export class AlgoRuntime {
     if (b) {
       const words = `the price is ${b.which === 'upper' ? 'at or above' : 'at or below'} your ${b.which} bound of ${b.price}`;
       if (b.then === 'stop' || s.kind === 'scale') {
-        await this.end(a, this.isDone(a, m) ? 'done' : 'expired', `Stopped: ${words}.`);
+        await this.endBot(a, this.isDone(a, m) ? 'done' : 'expired', `Stopped: ${words}.`);
         return;
       }
       if (b.then === 'hold') {
@@ -1321,6 +1601,20 @@ export class AlgoRuntime {
   private async ready(a: AlgoRecord, now: number): Promise<boolean> {
     const s = a.spec;
     if (s.startAt !== null && now < s.startAt) return false;
+    // A restart: the bot it replaces ends first (closing what it holds, or only pulling its orders for a take-over).
+    if (typeof a.k.after === 'string') {
+      const old = this.algos.get(a.k.after);
+      // Not before the old one has nothing live on SoDEX either: a late fill of its quotes would be missing from what
+      // a take-over carries (a snapshot of its book taken now).
+      if (old && (!FINAL_STATUSES.has(old.status) || this.live(old).length)) {
+        if (!a.k.afterSaid) {
+          a.k.afterSaid = true;
+          this.dirty.add(a.id);
+          await this.event(a, 'info', a.k.takeOver ? 'Waits for the old bot to pull its orders, then takes over what it holds.' : 'Waits for the old bot to close what it holds, then starts.');
+        }
+        return false;
+      }
+    }
     if (s.triggerPrice !== null) {
       const mk = this.market.mark(s.symbol)?.mark ?? null;
       if (mk === null) return false;
@@ -1396,6 +1690,18 @@ export class AlgoRuntime {
       a.k.waveAt = now;
     }
     if (s.bot) a.book ??= emptyBook();
+    // A take-over restart: what the old bot holds now becomes this one's, valued at the price now (its PnL starts at 0).
+    if (s.bot && typeof a.k.takeOver === 'string') {
+      const old = this.algos.get(a.k.takeOver);
+      const qty = old?.book ? bookInventory(old.book) : 0;
+      const px = this.market.mark(s.symbol)?.mark ?? a.arrival;
+      if (old && old.spec.symbol === s.symbol && qty !== 0 && px !== null && px > 0) {
+        a.book!.carryQty = qty;
+        a.book!.carryValue = qty * px;
+        await this.event(a, 'info', `Took over ${qty > 0 ? 'a long' : 'a short'} of ${Math.abs(qty)} from the old bot, at ${px}.`);
+      }
+      delete a.k.takeOver;
+    }
     if (FINAL_STATUSES.has(a.status)) return false;
     if (a.status === 'paused') {
       // Paused while it was starting: it is set up, and resumes as running.
@@ -1539,19 +1845,152 @@ export class AlgoRuntime {
    */
   /* ------------------------------------------------------------- the bots ----- */
 
+  /** The book quote a step works from: a bot's no older than BOT_QUOTE_MAX_AGE_MS (it rests at the touch), other algos' the feed's. */
+  private quoteOf(a: AlgoRecord, now: number): Quote | null {
+    const q = this.market.quote(a.spec.symbol);
+    if (q && a.spec.bot && now - q.at > BOT_QUOTE_MAX_AGE_MS) return null;
+    return q;
+  }
+
+  /** When a live bot's trading key expires, once that is KEY_EXPIRY_PULL_MS away or less; else null. */
+  private keyExpiring(a: AlgoRecord, now: number): number | null {
+    if (a.spec.paper || !this.host.keyExpiresAt) return null;
+    const at = this.host.keyExpiresAt(a.owner);
+    return at !== null && Number.isFinite(at) && now >= at - KEY_EXPIRY_PULL_MS ? at : null;
+  }
+
+  /** Told once per expiry time (a renewed key that runs out again is told again): the bell and the log. */
+  private async keyExpiryWarn(a: AlgoRecord, at: number): Promise<void> {
+    if (a.k.keyWarned === at) return;
+    a.k.keyWarned = at;
+    this.dirty.add(a.id);
+    const text = `The trading key expires at ${utcWords(at)}: renew it. Its quotes are pulled and nothing new opens; a close of what it holds still goes out until then.`;
+    await this.event(a, 'error', text);
+    try {
+      this.host.onNotice?.({ id: `algo:${a.id}:key-expiry:${at}`, owner: a.owner, source: 'algo', ref: a.id, kind: 'key-expiry', grade: 'warn', title: `${algoName(a)}: the trading key expires soon`, body: text, at: Date.now(), paper: !!a.spec.paper });
+    } catch (e) {
+      this.host.log.warn('algo: notice not taken', { error: String(e) });
+    }
+  }
+
+  /**
+   * Every step of a bot that has begun, before any hold: its limits on every step (a held bot still holds what it
+   * holds), and its close - reduce-only, so it runs under the holds that stop new quotes (the brake, a key problem,
+   * the region, a SoDEX limit wait). Only what makes a close impossible waits: no price, a market not trading, an
+   * expired key - and the trader's own pause. true: the step is handled here (closing, or ended).
+   */
+  private async botGuard(a: AlgoRecord, m: MarketInfo, now: number): Promise<boolean> {
+    const q = this.quoteOf(a, now);
+    const mk = this.market.mark(a.spec.symbol)?.mark ?? (q ? mid(q) : null);
+    const b = (a.book ??= emptyBook());
+    if (mk !== null && sampleBook(b, mk, now)) this.dirty.add(a.id);
+    if (!a.k.closing && mk !== null) await this.checkOutside(a, m, mk, now);
+    if (!a.k.closing) await this.botLimitsHit(a, mk, now);
+    if (FINAL_STATUSES.has(a.status)) return true;
+    if (!a.k.closing) return false;
+    if (a.status === 'paused') {
+      await this.pullResting(a);
+      return true;
+    }
+    const expires = this.keyExpiring(a, now);
+    if (expires !== null && now >= expires) {
+      await this.hold(a, 'Held: the trading key expired. Renew it so it can close what it holds.');
+      return true;
+    }
+    if (m.status !== 'TRADING') {
+      await this.hold(a, `SoDEX is not trading ${m.name} right now; it closes what it holds once it does.`);
+      return true;
+    }
+    if (!q || mk === null) {
+      await this.hold(a, 'Waiting for a price from SoDEX to close what it holds.');
+      return true;
+    }
+    this.heldNow.delete(a.id);
+    await this.stepBotClose(a, m, q, mk, now);
+    if (!this.heldNow.has(a.id) && !FINAL_STATUSES.has(a.status)) await this.run(a);
+    return true;
+  }
+
+  /**
+   * The bot's holding against the account's position on its market (owner 2026-11-08: "position closed outside it -
+   * handle it well"). A bot runs only where nothing else of the wallet trades, so the two agree unless something
+   * outside it moved the position: a close by hand, a liquidation, a stop. Every BOT_POSITION_CHECK_MS, when nothing
+   * of its own is in flight, the position is read until the reads agree (positionConfirmed), then:
+   *   - closed outside (flat): the bot's holding is booked closed at the mark (its PnL stays what it was at that price),
+   *     and it quotes on from flat - its resting quotes are pulled and placed again;
+   *   - reduced outside (same side, smaller): booked down to what the account holds;
+   *   - grown or turned outside (a trade by hand): left alone - that position is yours, the bot manages its own part
+   *     only (said once).
+   * Each case is in its log and a notice.
+   */
+  private async checkOutside(a: AlgoRecord, m: MarketInfo, mk: number, now: number): Promise<void> {
+    if (a.spec.paper || !a.book || a.status !== 'running') return;
+    if (now - Number(a.k.posCheckAt ?? 0) < BOT_POSITION_CHECK_MS) return;
+    // Something of its own in flight (sending, unknown, a cancel, a fill seconds ago): its own fills explain a gap.
+    if (this.live(a).some((c) => c.state !== 'open' || c.cancelling) || now - Number(a.k.lastFillAt ?? 0) < 5_000) return;
+    a.k.posCheckAt = now;
+    const inv = bookInventory(a.book);
+    const pos = await this.positionConfirmed(a, a.spec.symbol);
+    if (pos === null || pos === 'disagree') return;
+    const step = Number(m.stepSize);
+    if (Math.abs(pos - inv) < step / 2) {
+      delete a.k.outsideSaid;
+      return;
+    }
+    const same = Math.sign(pos) === Math.sign(inv) || Math.abs(pos) < step / 2;
+    if (Math.abs(inv) >= step / 2 && same && Math.abs(pos) < Math.abs(inv)) {
+      // Closed or reduced outside: book the difference closed at the mark.
+      const gone = inv - pos;
+      a.book.carryQty = (a.book.carryQty ?? 0) - gone;
+      a.book.carryValue = (a.book.carryValue ?? 0) - gone * mk;
+      this.dirty.add(a.id);
+      await this.pullResting(a);
+      const flat = Math.abs(pos) < step / 2;
+      const text = flat
+        ? `Its ${m.name} position (${dec(Math.abs(inv))} ${m.base}) was closed outside it (by hand, a stop or a liquidation): booked closed at ${dec(mk)}. It quotes on from flat.`
+        : `Its ${m.name} position was reduced outside it, from ${dec(inv)} to ${dec(pos)} ${m.base}: the difference is booked closed at ${dec(mk)}.`;
+      await this.event(a, 'info', text);
+      this.host.onNotice?.({ id: `algo:${a.id}:closed:${now}`, owner: a.owner, source: 'algo', ref: a.id, kind: 'closed', grade: 'warn', title: `${algoName(a)}: position ${flat ? 'closed' : 'reduced'} outside it`, body: text, at: now, paper: false });
+      return;
+    }
+    if (!a.k.outsideSaid) {
+      a.k.outsideSaid = true;
+      this.dirty.add(a.id);
+      await this.event(a, 'info', `Your ${m.name} position (${dec(pos)} ${m.base}) is more than this bot holds (${dec(inv)}): the rest is yours, and the bot manages only its own part.`);
+    }
+  }
+
+  /**
+   * How a bot ends when it is not the trader's stop: its limits, a refusal limit, a bound, a delisting. Through
+   * its own close setting (stopBot) like any other stop - ended directly it left what it holds without a loss limit.
+   * A bot already closing goes on closing (its close ends it).
+   */
+  private async endBot(a: AlgoRecord, status: AlgoStatus, reason: string): Promise<void> {
+    if (a.spec.bot && a.k.closing) return;
+    if (a.spec.bot && (await this.stopBot(a, status, reason))) return;
+    await this.end(a, status, reason);
+  }
+
   /**
    * A bot reached one of its limits, or was stopped: with `onStop: 'close'` and something held, it pulls its
    * quotes and closes that first (stepBotClose). Returns whether it is now closing (false: end it here).
    */
-  private async stopBot(a: AlgoRecord, status: AlgoStatus, reason: string): Promise<boolean> {
+  private async stopBot(a: AlgoRecord, status: AlgoStatus, reason: string, now = false, force = false): Promise<boolean> {
     const s = a.spec;
-    if (!(s.kind === 'mm' || s.kind === 'grid') || s.onStop !== 'close' || !a.book) return false;
+    // `force`: the last resort (tooManyRefusals, a delisting) closes whatever On stop says.
+    if (!(s.kind === 'mm' || s.kind === 'grid') || (s.onStop !== 'close' && !force) || !a.book) return false;
     const m = this.markets.get(s.symbol);
     const held = Math.abs(bookInventory(a.book));
     const px = this.market.mark(s.symbol)?.mark ?? null;
     if (!m || held < Number(m.stepSize) || (px !== null && held < minChildQty(m, px) - 1e-12)) return false;
-    const closing: BotClosing = { status, reason, at: Date.now() };
+    const closing: BotClosing = { status, reason, at: now ? Date.now() - BOT_CLOSE_REST_MS : Date.now() };
     a.k.closing = closing;
+    // Paused, it would never close (nothing is sent for a paused algo): the close is what runs now.
+    if (a.status === 'paused') {
+      delete a.k.pausedFrom;
+      a.status = 'running';
+      a.statusReason = null;
+    }
     await this.pullResting(a);
     await this.save(a);
     await this.event(a, 'info', `${reason} Closing what it holds: ${dec(held)} ${m.base}.`);
@@ -1560,16 +1999,17 @@ export class AlgoRuntime {
   }
 
   /** A bot's limits, checked every step: true when it stopped (or began closing). */
-  private async botLimitsHit(a: AlgoRecord, mk: number, now: number): Promise<boolean> {
-    const s = a.spec as Extract<AlgoSpec, { kind: 'mm' | 'grid' }>;
+  private async botLimitsHit(a: AlgoRecord, mk: number | null, now: number): Promise<boolean> {
+    const s = a.spec;
+    if (s.kind !== 'mm' && s.kind !== 'grid') return false;
     const b = (a.book ??= emptyBook());
     let hit: { status: AlgoStatus; reason: string } | null = null;
     if (s.volumeTargetUsd !== null && bookVolume(b) >= s.volumeTargetUsd) hit = { status: 'done', reason: `Reached its volume target of ${money(s.volumeTargetUsd)}.` };
-    else if (s.maxLossUsd !== null && bookNet(b, mk) <= -s.maxLossUsd) hit = { status: 'expired', reason: `Stopped at its loss limit: net PnL ${money(bookNet(b, mk))} (limit -${money(s.maxLossUsd)}).` };
+    // The loss limit needs a price: with none (no mark, no book) it is checked on the next step that has one.
+    else if (s.maxLossUsd !== null && mk !== null && bookNet(b, mk) <= -s.maxLossUsd) hit = { status: 'expired', reason: `Stopped at its loss limit: net PnL ${money(bookNet(b, mk))} (limit -${money(s.maxLossUsd)}).` };
     else if (s.endAt !== null && now >= s.endAt) hit = { status: 'expired', reason: 'Its end time came.' };
     if (!hit) return false;
-    sampleBook(b, mk, now, true);
-    if (!(await this.stopBot(a, hit.status, hit.reason))) await this.end(a, hit.status, hit.reason);
+    await this.endBot(a, hit.status, hit.reason);
     return true;
   }
 
@@ -1577,7 +2017,9 @@ export class AlgoRuntime {
    * Closing what a stopping bot holds (its own fills, never more: reduce-only): post-only at the touch,
    * re-priced as it moves, for BOT_CLOSE_REST_MS; then a taker within BOT_CLOSE_SLIP_BPS. It ends with the
    * status it was stopping for once what is left is under SoDEX's minimum, or once SoDEX refused the close
-   * three times (the position is not there any more: closed outside the bot).
+   * BOT_CLOSE_MAX_REFUSALS times in a row for the position (reduce-only with nothing to reduce: closed outside the
+   * bot). A post-only close the touch moved under, a rate limit or a margin answer is no sign of that: it only
+   * waits a moment (retryAt) and goes again.
    */
   private async stepBotClose(a: AlgoRecord, m: MarketInfo, q: Quote, mk: number, now: number): Promise<void> {
     const closing = a.k.closing as BotClosing;
@@ -1588,10 +2030,10 @@ export class AlgoRuntime {
     if (stray.length) await this.cancelChildren(a, m, stray);
     const qty = floorStep(Math.abs(inv), m);
     const rejects = closing.rejects ?? 0;
-    if (!live.length && (qty < minChildQty(m, mk) - 1e-12 || rejects >= 3)) {
-      const left = qty >= Number(m.stepSize) ? ` ${dec(qty)} ${m.base} is left${rejects >= 3 ? ' (SoDEX shows nothing more to close)' : ' (under SoDEX\'s minimum order)'}.` : '';
+    const gone = rejects >= BOT_CLOSE_MAX_REFUSALS;
+    if (!live.length && (qty < minChildQty(m, mk) - 1e-12 || gone)) {
+      const left = qty >= Number(m.stepSize) ? ` ${dec(qty)} ${m.base} is left${gone ? ' (SoDEX refused to reduce it: the position is not there any more)' : ' (under SoDEX\'s minimum order)'}.` : '';
       delete a.k.closing;
-      sampleBook(b, mk, now, true);
       return this.end(a, closing.status, `${closing.reason}${left}`);
     }
     if (live.length && !live.some((c) => c.tag.startsWith('close'))) return;
@@ -1604,6 +2046,7 @@ export class AlgoRuntime {
       if (taking || (Math.abs(mine.price - want) / Number(m.tickSize) >= 1 && !this.atOwnTouch(side, mine.price, q) && now - mine.placedAt >= 2_000)) await this.cancelChildren(a, m, [mine]);
       return;
     }
+    if (now < (closing.retryAt ?? 0)) return;
     let price = taking ? takerPrice(side, q, BOT_CLOSE_SLIP_BPS, m, mk, null) : makerPrice(side, q, 0, null, m, null);
     if (price === null) return;
     let take = taking;
@@ -1620,19 +2063,83 @@ export class AlgoRuntime {
         }
       }
     }
-    const before = a.rejects;
+    // A refusal (in the answer: send; later on the socket: onOrderUpdate) is booked by botRefused.
     await this.send(a, m, [{ side, price, quantity: qty, tif: take ? 'ioc' : 'gtx', tag: take ? 'close (take)' : 'close', reduceOnly: true }]);
-    if (a.rejects > before && a.k.closing) (a.k.closing as BotClosing).rejects = rejects + 1;
   }
 
   /**
-   * The nearest price another user's bot rests at, on the side a taker `side` of this bot would fill against (the
-   * highest bid for a sell, the lowest ask for a buy), live bots against live, practice against practice; null: none.
+   * A bot's order SoDEX refused. A reduce-only one refused for the position ("nothing to reduce"): the account's
+   * position is read (confirmed) - none there, the bot's holding was closed outside it (a close counts that toward
+   * giving up, as before); one there, it is a position the bot did not open (yours, or what is left of one), so from
+   * now on the bot unwinds without SoDEX's flag, its own book bounding the size, and never touches the rest
+   * (owner 2026-11-08). Any other refused close just waits a moment (closeRefused).
+   */
+  private botRefused(a: AlgoRecord, c: ChildOrder, reason: string): void {
+    if (!a.spec.bot) return;
+    const closing = a.k.closing as BotClosing | undefined;
+    const isClose = !!closing && c.tag.startsWith('close');
+    if (!a.spec.paper && c.reduceOnly && c.exchReduceOnly !== false && POSITION_REFUSAL.test(reason)) {
+      if (isClose) closing!.retryAt = Date.now() + BOT_CLOSE_RETRY_MS;
+      void this.reduceRefused(a, isClose, reason);
+      return;
+    }
+    if (isClose) this.closeRefused(closing!, reason);
+  }
+
+  private async reduceRefused(a: AlgoRecord, isClose: boolean, reason: string): Promise<void> {
+    if (this.reduceChecks.has(a.id)) return;
+    this.reduceChecks.add(a.id);
+    try {
+      const pos = await this.positionConfirmed(a, a.spec.symbol);
+      const closing = a.k.closing as BotClosing | undefined;
+      if (pos === null || pos === 'disagree' || Math.abs(pos) <= 1e-12) {
+        if (isClose && closing) this.closeRefused(closing, reason);
+        return;
+      }
+      if (a.k.plainReduce !== true) {
+        a.k.plainReduce = true;
+        this.dirty.add(a.id);
+        await this.event(a, 'info', `Your ${a.spec.symbol} position (${dec(pos)}) is not only this bot's: from now on it unwinds only what it bought or sold itself and leaves the rest of the position alone.`);
+      }
+      if (isClose && closing) this.closeTaken(closing);
+    } finally {
+      this.reduceChecks.delete(a.id);
+    }
+  }
+
+  /** Whether another of the wallet's running algos or bots (real with real, practice with practice) trades this bot's market. */
+  private sharesMarket(a: AlgoRecord): boolean {
+    for (const x of this.algos.values()) {
+      if (x.id === a.id || x.owner !== a.owner || !!x.spec.paper !== !!a.spec.paper || FINAL_STATUSES.has(x.status)) continue;
+      if (algoSymbols(x.spec).includes(a.spec.symbol)) return true;
+    }
+    return false;
+  }
+
+  /** SoDEX took a close (it rests or filled): the refusal count and the wait start over. */
+  private closeTaken(c: BotClosing): void {
+    delete c.rejects;
+    delete c.retryAt;
+    delete c.backMs;
+  }
+
+  /** A refused close: counted toward giving up only when SoDEX said the position is not there to reduce; it waits a moment either way. */
+  private closeRefused(c: BotClosing, reason: string): void {
+    if (POSITION_REFUSAL.test(reason)) c.rejects = (c.rejects ?? 0) + 1;
+    c.backMs = Math.min(BOT_CLOSE_RETRY_MAX_MS, (c.backMs ?? BOT_CLOSE_RETRY_MS / 2) * 2);
+    c.retryAt = Date.now() + c.backMs;
+  }
+
+  /**
+   * The nearest price another bot rests at - another user's (never into their bot, terms 2026-11-02) or another of
+   * this wallet's on the same market (never trading with itself, owner 2026-11-08) - on the side a taker `side` of this
+   * bot would fill against (the highest bid for a sell, the lowest ask for a buy), live bots against live, practice
+   * against practice; null: none.
    */
   otherBotWall(a: AlgoRecord, symbol: string, side: Side): number | null {
     let wall: number | null = null;
     for (const x of this.algos.values()) {
-      if (x.owner === a.owner || !x.spec.bot || x.spec.symbol !== symbol || x.spec.paper !== a.spec.paper || FINAL_STATUSES.has(x.status)) continue;
+      if (x.id === a.id || !x.spec.bot || x.spec.symbol !== symbol || x.spec.paper !== a.spec.paper || FINAL_STATUSES.has(x.status)) continue;
       for (const c of x.children) {
         if (!LIVE.has(c.state) || c.tif === 'ioc' || c.side === side) continue;
         if (wall === null || (side === 'sell' ? c.price > wall : c.price < wall)) wall = c.price;
@@ -1644,11 +2151,63 @@ export class AlgoRuntime {
   /** Volume maker: one post-only bid and one post-only ask where mmQuotes puts them (bots.ts). */
   private async stepMm(a: AlgoRecord, m: MarketInfo, q: Quote, mk: number, now: number): Promise<void> {
     const s = a.spec as Extract<AlgoSpec, { kind: 'mm' }>;
-    if (await this.botLimitsHit(a, mk, now)) return;
+    // Its limits were checked before the holds (botGuard).
     if (s.maxSpreadBps !== null && spreadBps(q) > s.maxSpreadBps) {
       await this.pullResting(a);
       return this.hold(a, `Held: the spread (${spreadBps(q).toFixed(1)} bp) is wider than your ${s.maxSpreadBps} bp.`);
     }
+    // A quiet window: pulled and held; when it ends the hold ends and it quotes again. With quietOnly the windows are
+    // the hours it trades in, and it holds outside all of them.
+    const qw = quietWindowAt(s.quiet, now);
+    if (s.quietOnly ? !qw : qw) {
+      this.setGateNote(a, undefined);
+      await this.pullResting(a);
+      return this.hold(a, s.quietOnly ? `Paused: outside your trading hours (${(s.quiet ?? []).map(quietWords).join(', ')}).` : `Paused: quiet window ${quietWords(qw!)}.`);
+    }
+    // The news gate: held around each timed release of its level (the host's calendar). No calendar here: it stays open.
+    if (s.news) {
+      const events = this.host.events?.() ?? null;
+      if (events === null) await this.noteOnce(a, 'newsnone', 'News gate: no economic calendar on this host, so it stays open.');
+      else {
+        const ev = newsAt(s.news, events, now);
+        if (ev) {
+          this.setGateNote(a, undefined);
+          await this.pullResting(a);
+          return this.hold(a, `Paused: ${ev.short} at ${new Date(ev.time).toISOString().slice(11, 16)} UTC (news gate).`, 'Paused: news gate');
+        }
+      }
+    }
+    // The patient-taker gate: closed while what PATIENT_TAKER_ACCOUNT took here over its window is under minUsd.
+    let shrink = 1;
+    let gateNote: string | undefined;
+    if (s.flowGate) {
+      const g = s.flowGate;
+      const took = this.flowTook(s.symbol, g.windowMs, now);
+      if (took === null) {
+        gateNote = `Patient-taker gate open while it watches its first ${windowWords(g.windowMs)}`;
+        await this.noteOnce(a, 'flowfresh', `Patient-taker gate: watching this market from now; it stays open until it has ${windowWords(g.windowMs)} of history.`);
+      } else if (took < g.minUsd) {
+        const why = `the patient taker traded ${usdWords(took)} here in the last ${windowWords(g.windowMs)} (under your ${usdWords(g.minUsd)})`;
+        if (g.action === 'pause') {
+          this.setGateNote(a, undefined);
+          await this.pullResting(a);
+          return this.hold(a, `Paused: ${why}.`, 'Paused: the patient taker traded');
+        }
+        shrink = g.shrink;
+        gateNote = `Quoting smaller, ${usdWords(s.orderUsd * shrink)} a side: ${why}`;
+      }
+    }
+    this.setGateNote(a, gateNote);
+    // Shrunk or back to full size: what rests goes, and is placed again at the new size.
+    const shrunk = shrink < 1;
+    if (Boolean(a.k.mshrunk) !== shrunk) {
+      a.k.mshrunk = shrunk;
+      this.dirty.add(a.id);
+      const resting = this.live(a).filter((c) => c.tif !== 'ioc' && !c.cancelling);
+      if (resting.length) await this.cancelChildren(a, m, resting);
+    }
+    // The size quoted (the spec stays as signed); mmQuotes keeps each quote at SoDEX's minimum at least.
+    const sz = shrunk ? { ...s, orderUsd: s.orderUsd * shrink } : s;
     const inv = bookInventory(a.book!);
     const tick = Number(m.tickSize);
     // The Binance-led maker: no fair price (no feed here, or it went quiet), no quotes.
@@ -1661,19 +2220,19 @@ export class AlgoRuntime {
     const ago = (s.moveGuard ?? 0) > 0 ? this.market.priceAgo(s.symbol, 'mid', 2_000) : null;
     const moved = ago ? (mid(q) - ago) / tick : 0;
     const movesInto = (side: Side) => (s.moveGuard ?? 0) > 0 && (side === 'sell' ? moved >= s.moveGuard! : moved <= -s.moveGuard!) && (side === 'buy' ? inv >= 0 : inv <= 0);
-    const want = mmQuotes(s, q, m, inv, mk, fair).filter((x) => !movesInto(x.side));
+    const want = mmQuotes(sz, q, m, inv, mk, s.noFair ? null : fair).filter((x) => !movesInto(x.side));
     // A ladder's front line: where a quote may stand at most (the touch, the skew and the edge as they are now, with no
     // step back). A ladder quote the touch came to is kept up to it - near the front of that queue is where its fills
     // are the bounce (a level that holds), not the sweep - and only one past it is pulled.
-    const front = (s.levels ?? 1) > 1 ? mmQuotes({ ...s, offsetTicks: Math.min(0, s.offsetTicks), queueGuard: 0 }, q, m, inv, mk, fair) : want;
+    const front = (s.levels ?? 1) > 1 ? mmQuotes({ ...sz, offsetTicks: Math.min(0, s.offsetTicks), queueGuard: 0 }, q, m, inv, mk, s.noFair ? null : fair) : want;
     // What it would quote without the guards: a side missing only because of a guard is pulled no sooner than half
     // a second after it went out, and quoted again no sooner than minRepriceMs after (no cancel storm on a queue or a
     // price that flickers around the line).
-    const unguarded = (s.queueGuard ?? 0) > 0 || (s.moveGuard ?? 0) > 0 ? mmQuotes({ ...s, queueGuard: 0 }, q, m, inv, mk, fair) : want;
+    const unguarded = (s.queueGuard ?? 0) > 0 || (s.moveGuard ?? 0) > 0 ? mmQuotes({ ...sz, queueGuard: 0 }, q, m, inv, mk, s.noFair ? null : fair) : want;
     const guardedAt = { ...((a.k.mguard as Record<string, number> | undefined) ?? {}) };
     const levels = Math.max(1, s.levels ?? 1);
     const live = this.live(a);
-    const send: Array<{ side: Side; price: number; quantity: number; tif: ChildTif; tag: string }> = [];
+    const send: Array<{ side: Side; price: number; quantity: number; tif: ChildTif; tag: string; reduceOnly?: boolean }> = [];
     const pull: ChildOrder[] = [];
     for (const side of ['buy', 'sell'] as const) {
       const w = want.find((x) => x.side === side);
@@ -1689,15 +2248,31 @@ export class AlgoRuntime {
         continue;
       }
       if (!standing.length && !mine.length && (guardedAt[side] ?? 0) + s.minRepriceMs > now) continue;
+      // The volatility gate (stillBps) closed: what rests on the side that adds is pulled at once, not left until its
+      // rest time ends (audit 2026-11-09: "pauses the moment the price moves fast").
+      const addsHere = side === 'buy' ? inv >= 0 : inv <= 0;
+      if (addsHere && fair !== null && (s.stillBps ?? 0) > 0) {
+        const path = this.refPath(s.symbol, s.stillMs ?? 60_000, now);
+        if (path === null || path >= s.stillBps!) {
+          pull.push(...standing.filter((c) => c.state === 'open' && c.tif !== 'ioc'));
+          continue;
+        }
+      }
       // How many quotes this side may have resting: one, or up to the ladder - never more than the cap could take
-      // (the adding side) or than it holds (the unwinding side) if all of them filled.
+      // (the adding side) or than it holds (the unwinding side) if all of them filled. Counted at each quote's real
+      // size (SoDEX's minimum where that is above the order size), not the order size it was set to.
       const adds = side === 'buy' ? inv >= 0 : inv <= 0;
-      const room = adds ? Math.floor((s.maxInventoryUsd - Math.abs(inv) * mk) / s.orderUsd + 1e-9) : Math.ceil((Math.abs(inv) * mk) / s.orderUsd - 1e-9);
+      const each = botQuoteUsd(sz.orderUsd, m, w.price);
+      const room = adds ? Math.floor((s.maxInventoryUsd - Math.abs(inv) * mk) / each + 1e-9) : Math.ceil((Math.abs(inv) * mk) / each - 1e-9);
       const allowed = Math.max(1, Math.min(levels, room));
       const kept: ChildOrder[] = [];
       for (const c of [...standing].sort((x, y) => (side === 'buy' ? y.price - x.price : x.price - y.price))) {
         if (c.state !== 'open' || c.tif === 'ioc') {
           kept.push(c);
+          continue;
+        }
+        if ((s.restMs ?? 0) > 0 && now - c.placedAt >= s.restMs!) {
+          pull.push(c);
           continue;
         }
         const off = Math.abs(c.price - w.price) / tick;
@@ -1719,39 +2294,93 @@ export class AlgoRuntime {
       }
       // More than it may have: the farthest go.
       while (kept.length > allowed) pull.push(kept.pop()!);
+      // The adding side never rests more than is left to the cap (owner 2026-11-08): what rests past it (the holding
+      // grew since they went out) is pulled from the farthest, and placed again smaller on a later step.
+      const capLeftUsd = adds ? Math.max(0, s.maxInventoryUsd - Math.abs(inv) * mk) : Infinity;
+      if (adds) {
+        const usdOf = (c: ChildOrder) => Math.max(0, c.quantity - c.filled) * c.price;
+        while (kept.length && kept.reduce((t, c) => t + usdOf(c), 0) > capLeftUsd + 1e-9) pull.push(kept.pop()!);
+      }
       // A cancel not confirmed yet - sent before or now - still counts (it may still fill); and one quote at the price wanted is enough.
       const cancelling = mine.length - kept.length;
       if (kept.length + cancelling >= allowed || kept.some((c) => Math.abs(c.price - w.price) < tick / 2)) continue;
       // A side SoDEX refused waits (3 s, doubling to a minute) instead of going out again every step.
       if (Number((a.k.mretry as Record<string, number> | undefined)?.[side] ?? 0) > now) continue;
-      // The unwinding side's new quote: what is left to unwind after the ones already resting.
+      // The unwinding side's new quote: what is left to unwind after the ones already resting - never raised past it
+      // (reduce-only, with the resting ones it never adds up to more than it holds); under SoDEX's minimum it waits.
       const restingQty = kept.reduce((x, c) => x + Math.max(0, c.quantity - c.filled), 0);
-      const qty = adds ? w.quantity : Math.min(w.quantity, Math.max(minChildQty(m, w.price), floorStep(Math.abs(inv) - restingQty, m)));
-      if (!adds && restingQty >= Math.abs(inv) - 1e-12) continue;
-      send.push({ side, price: w.price, quantity: qty, tif: 'gtx', tag: side === 'buy' ? 'bid' : 'ask' });
+      // The adding side: what is left to the cap after the quotes resting there, as close to it as the lot allows.
+      const keptUsd = kept.reduce((x, c) => x + Math.max(0, c.quantity - c.filled) * c.price, 0);
+      const qty = adds ? Math.min(w.quantity, floorStep(Math.max(0, capLeftUsd - keptUsd) / w.price, m)) : Math.min(w.quantity, floorStep(Math.abs(inv) - restingQty, m));
+      if (adds && qty < minChildQty(m, w.price) - 1e-12) continue;
+      if (!adds && (restingQty >= Math.abs(inv) - 1e-12 || qty < minChildQty(m, w.price) - 1e-12)) continue;
+      // Pickier to send than to keep (the adding side): far enough from fair for the time an order takes to land, and not while the reference runs at it.
+      if (fair !== null && adds) {
+        const away = ((side === 'buy' ? fair - w.price : w.price - fair) / fair) * 10_000;
+        if (away < (s.placeBps ?? 0) - 1e-9) continue;
+        if ((s.calmBps ?? 0) > 0) {
+          const mv = this.refMove(s.symbol, s.calmMs ?? 500, now);
+          if (side === 'buy' ? mv <= -s.calmBps! : mv >= s.calmBps!) continue;
+        }
+        if (s.pauseAfter && now - (this.takerAt.get(`${s.symbol}:${s.pauseAfter}`) ?? -Infinity) < (s.pauseMs ?? 0)) continue;
+        if ((s.stillBps ?? 0) > 0) {
+          const path = this.refPath(s.symbol, s.stillMs ?? 60_000, now);
+          if (path === null || path >= s.stillBps!) continue;
+        }
+      }
+      send.push({ side, price: w.price, quantity: qty, tif: s.postOnly === false ? 'gtc' : 'gtx', tag: side === 'buy' ? 'bid' : 'ask', ...(adds ? {} : { reduceOnly: true }) });
     }
     a.k.mguard = guardedAt;
     if (pull.length) await this.cancelChildren(a, m, pull);
     if (!send.length || this.stopped(a)) return;
     const sent = await this.send(a, m, send);
+    // Refused in the answer: backs off now. A refusal later on the socket backs off in onOrderUpdate, and a quote
+    // SoDEX took (it rests, or filled) starts the doubling over there.
+    for (const c of sent) if (c.state === 'done' && c.filled <= 1e-12) this.mmBackOff(a, c.side);
+  }
+
+  /**
+   * A volume maker side SoDEX refused waits before it goes out again: half a second first (most refusals are post-only
+   * ones - the touch moved under the quote - and the next step prices from the fresh book); a refusal that repeats (a
+   * 429) doubles to a minute. The same whether the refusal came in the answer or later on the socket.
+   */
+  private mmBackOff(a: AlgoRecord, side: Side): void {
     const back = { ...((a.k.mback as Record<string, number> | undefined) ?? {}) };
     const at = { ...((a.k.mretry as Record<string, number> | undefined) ?? {}) };
-    for (const c of sent) {
-      if (c.state === 'done' && c.filled <= 1e-12) {
-        // Half a second first: most refusals are post-only ones (the touch moved under the quote), and the next step
-        // prices from the fresh book; a refusal that repeats (a 429) still doubles to a minute.
-        back[c.side] = Math.min(60_000, (back[c.side] ?? MM_RETRY_MS / 2) * 2);
-        at[c.side] = Date.now() + back[c.side]!;
-      } else delete back[c.side];
-    }
+    back[side] = Math.min(60_000, (back[side] ?? MM_RETRY_MS / 2) * 2);
+    at[side] = Date.now() + back[side]!;
     a.k.mback = back;
     a.k.mretry = at;
+    this.dirty.add(a.id);
+  }
+
+  /**
+   * USD the patient taker took on `symbol` over the last `windowMs`, or null while it has watched the market for less
+   * than that (the gate stays open then: a fresh bot is not paused for lack of history). Starts watching on the first call.
+   */
+  private flowTook(symbol: string, windowMs: number, now: number): number | null {
+    let f = this.flow.get(symbol);
+    if (!f) {
+      f = { since: now, b: [] };
+      this.flow.set(symbol, f);
+    }
+    if (now - f.since < windowMs) return null;
+    let sum = 0;
+    for (let i = f.b.length - 1; i >= 0 && f.b[i]![0] > now - windowMs; i--) sum += f.b[i]![1];
+    return sum;
+  }
+
+  /** A volume maker's gate line in its working text (view): set, changed or cleared. */
+  private setGateNote(a: AlgoRecord, text: string | undefined): void {
+    if (a.k.mgate === text) return;
+    if (text === undefined) delete a.k.mgate;
+    else a.k.mgate = text;
+    this.dirty.add(a.id);
   }
 
   /** Grid: every level with a side rests there post-only; a fill moves the gap (onChildDone, bots.ts gridAfterFill). */
   private async stepGrid(a: AlgoRecord, m: MarketInfo, q: Quote, mk: number, now: number): Promise<void> {
     const s = a.spec as Extract<AlgoSpec, { kind: 'grid' }>;
-    if (await this.botLimitsHit(a, mk, now)) return;
     const prices = a.k.gp as number[];
     const sides = a.k.gs as GridSide[];
     if ((mk < s.low || mk > s.high) && s.outOfRange === 'stop') {
@@ -1779,7 +2408,10 @@ export class AlgoRuntime {
       const p = prices[i]!;
       // Post-only: a level the price is at or through waits until it would rest (SoDEX would refuse it).
       if (want === 'buy' ? p >= q.ask : p <= q.bid) continue;
-      send.push({ side: want, price: p, quantity: gridQty(s.orderUsd, p, m), tif: 'gtx', tag: `grid ${i + 1}/${n}` });
+      // Its size: a level's own (what is left of it after a partial fill, or a counterpart for what filled), else the grid's.
+      const qty = this.gridLevelQty(a, i, p, m);
+      if (qty < minChildQty(m, p) - 1e-12) continue;
+      send.push({ side: want, price: p, quantity: qty, tif: (a.spec as { postOnly?: false }).postOnly === false ? 'gtc' : 'gtx', tag: `grid ${i + 1}/${n}` });
     }
     if (pull.length) await this.cancelChildren(a, m, pull);
     // One signed batch a step, at most 50 orders (the rest the next step).
@@ -1799,6 +2431,47 @@ export class AlgoRuntime {
     }
     a.k.gback = back;
     a.k.gretry = at;
+  }
+
+  /** What a grid level rests now: its own size where a fill set one (k.gz), else the grid's order size at its price. */
+  private gridLevelQty(a: AlgoRecord, i: number, price: number, m: MarketInfo): number {
+    const gz = a.k.gz as number[] | undefined;
+    const own = gz?.[i];
+    return typeof own === 'number' ? floorStep(own, m) : gridQty((a.spec as Extract<AlgoSpec, { kind: 'grid' }>).orderUsd, price, m);
+  }
+
+  /**
+   * A grid level's child is over having filled `filled` of it on `side`: that much moves to the level beyond (a buy
+   * filled at i puts a sell at i+1, a sell at i a buy at i-1), what it did not fill stays on its level. Filled whole,
+   * this is bots.ts gridAfterFill (the level becomes the gap). Cut short after a partial fill (a pause, a re-size, a
+   * refusal), its counterpart is placed for the part that filled - before, that part was never sold back.
+   */
+  private gridFilled(a: AlgoRecord, i: number, side: Side, placed: number, filled: number): void {
+    const sides = [...(a.k.gs as GridSide[])];
+    const prices = a.k.gp as number[] | undefined;
+    const m = this.markets.get(a.spec.symbol);
+    if (!prices || !m) return;
+    const gz = ((a.k.gz as number[] | undefined) ?? sides.map((x, k) => (x ? gridQty((a.spec as Extract<AlgoSpec, { kind: 'grid' }>).orderUsd, prices[k]!, m) : 0))).slice();
+    // What the level is to rest is its own size (a counterpart may have been added while this child rested), not only
+    // what this child was placed for.
+    const left = floorStep(Math.max(0, (gz[i] ?? placed) - filled), m);
+    // Under SoDEX's minimum what is left cannot rest: the level is done (the gap), as when it filled whole.
+    if (left < minChildQty(m, prices[i]!) - 1e-12) {
+      sides[i] = null;
+      gz[i] = 0;
+    } else gz[i] = left;
+    const j = side === 'buy' ? i + 1 : i - 1;
+    const other: Side = side === 'buy' ? 'sell' : 'buy';
+    if (j >= 0 && j < sides.length) {
+      if (sides[j] === other) gz[j] = (gz[j] ?? 0) + filled;
+      else if (sides[j] === null) {
+        sides[j] = other;
+        gz[j] = filled;
+      }
+    }
+    a.k.gs = sides;
+    a.k.gz = gz;
+    this.dirty.add(a.id);
   }
 
   private atOwnTouch(side: Side, price: number, q: Quote): boolean {
@@ -2699,42 +3372,95 @@ export class AlgoRuntime {
       await this.hold(a, 'The trading key for this algo is not available here.');
       return [];
     }
+    // A bot under a margin or limit wait (refusal handling): what adds waits, what reduces goes out.
+    if (s.bot && !s.paper) {
+      const until = Math.max(Number(a.k.marginUntil ?? 0), Number(a.k.limitUntil ?? 0));
+      if (until > Date.now()) {
+        list = list.filter((x) => x.reduceOnly ?? s.reduceOnly);
+        if (!list.length) return [];
+      }
+    }
+    const opening = list.some((x) => !(x.reduceOnly ?? s.reduceOnly));
     const brake = s.paper ? null : this.host.brake?.(a) ?? null;
-    if (brake) {
+    // A bot's close is reduce-only: it only makes a position smaller, as an exit does, so the brake lets it through.
+    if (brake && (opening || !(s.bot && a.k.closing))) {
       await this.hold(a, `Held: ${brake}`);
       return [];
     }
-    const opening = list.some((x) => !(x.reduceOnly ?? s.reduceOnly));
+    // The trading key runs out soon: nothing that opens goes out (a close still does, until it expires).
+    if (opening && s.bot && this.keyExpiring(a, Date.now()) !== null) {
+      await this.hold(a, 'Held: the trading key expires soon. Renew it to go on.');
+      return [];
+    }
     // The region's leverage ceiling (EEA 2x): on the leverage set, and on the gross exposure an opening child may reach.
-    const ceiling = !s.paper ? (this.host.policyFor?.(a)?.maxLeverage ?? null) : null;
+    // Bots: no region ceiling, only the market's maximum (owner 2026-11-08). Algo orders keep their region's.
+    const ceiling = !s.paper && !s.bot ? (this.host.policyFor?.(a)?.maxLeverage ?? null) : null;
     const leverage = ceiling !== null ? Math.min(s.leverage ?? ceiling, ceiling) : s.leverage;
     const lev = leverage !== null ? Math.min(leverage, m.maxLeverage) : null;
     const want = lev !== null ? `${lev}|${s.marginMode ?? 'cross'}` : null;
     // Per algo: each sets its leverage and margin mode at its first opening child. Shared by the wallet's algos on the
     // market, one algo trusted what an earlier one set although the follower may have changed it since (the same
     // live run as the copier's: an isolated position opened on cross, 2026-10-30).
+    // A refused leverage change waits before it is asked again (research 2026-11-09: it was re-sent every step).
+    if (sink && opening && lev !== null && s.bot && this.leverageSet.get(`${a.id}|${m.name}`) !== want && Number(a.k.levRetryAt ?? 0) > Date.now()) {
+      await this.hold(a, `Held: SoDEX did not set ${lev}x on ${m.name} yet; trying again at ${utcWords(Number(a.k.levRetryAt))}.`);
+      return [];
+    }
     if (sink && opening && lev !== null && this.leverageSet.get(`${a.id}|${m.name}`) !== want) {
       this.leverageSet.set(`${a.id}|${m.name}`, want!);
-      await sink.setLeverage(a, m, lev, s.marginMode ?? 'cross').catch((e) => {
-        // Not set: the next opening child asks again.
-        this.leverageSet.delete(`${a.id}|${m.name}`);
-        this.event(a, 'error', `Leverage not set: ${e instanceof Error ? e.message : String(e)}`);
-      });
+      const refused = await sink.setLeverage(a, m, lev, s.marginMode ?? 'cross').then(
+        async () => {
+          delete a.k.levBack;
+          delete a.k.levRetryAt;
+          if (s.bot) await this.event(a, 'info', `Check passed: leverage ${lev}x ${s.marginMode ?? 'cross'} set on ${m.name}.`);
+          return null;
+        },
+        async (e: unknown) => {
+          // Not set: an opening child asks again after a wait (a minute, doubling to 15).
+          this.leverageSet.delete(`${a.id}|${m.name}`);
+          const back = Math.min(15 * 60_000, Number(a.k.levBack ?? LEVERAGE_RETRY_MS / 2) * 2);
+          a.k.levBack = back;
+          a.k.levRetryAt = Date.now() + back;
+          const why = e instanceof Error ? e.message : String(e);
+          await this.event(a, 'error', `Leverage not set: ${why}`);
+          return why;
+        },
+      );
+      // A bot does not trade at a leverage it did not set (the account's own, up to 20x, is not what the trader signed):
+      // what opens waits, and the next step asks again.
+      if (refused !== null && s.bot) {
+        await this.hold(a, `Held: SoDEX did not set ${lev}x ${s.marginMode ?? 'cross'} on ${m.name} (${refused}); nothing opens until it does. Trying again.`);
+        return [];
+      }
     }
     if (opening && ceiling !== null) {
       const acct = await this.accountOf(a);
       const room = acct ? acct.equity * ceiling - acct.gross : null;
-      const notional = list.reduce((x, c) => x + (c.reduceOnly ?? s.reduceOnly ? 0 : c.quantity * c.price), 0);
-      if (room === null || notional > room) {
-        // One child is cut down to fit; a batch (a ladder, a wave) waits until it fits whole.
-        const one = list.length === 1 ? list[0]! : null;
-        const fit = one && room !== null && room > 0 ? floorStep(room / one.price, m) : 0;
-        if (!one || fit < minChildQty(m, one.price)) {
-          await this.hold(a, room === null ? 'Held: your account could not be read for the leverage cap of your region.' : `Held: the ${ceiling}x leverage cap for your region is reached.`);
-          return [];
+      // Each side on its own: a volume maker's bid and ask are not both filled into the same exposure (one fills, the
+      // other is then the side that unwinds), so the larger side is what the exposure may grow by.
+      const fits: typeof list = [];
+      let cut = false;
+      for (const side of ['buy', 'sell'] as const) {
+        const mine = list.filter((c) => c.side === side);
+        const notional = mine.reduce((x, c) => x + (c.reduceOnly ?? s.reduceOnly ? 0 : c.quantity * c.price), 0);
+        if (!mine.length || notional <= 0 || (room !== null && notional <= room)) {
+          fits.push(...mine);
+          continue;
         }
-        list = [{ ...one, quantity: fit }];
+        // One opening child of the side is cut down to fit; several (a ladder, a wave) wait until they fit whole.
+        const open = mine.filter((c) => !(c.reduceOnly ?? s.reduceOnly));
+        const one = open.length === 1 ? open[0]! : null;
+        const fit = one && room !== null && room > 0 ? floorStep(room / one.price, m) : 0;
+        fits.push(...mine.filter((c) => c.reduceOnly ?? s.reduceOnly));
+        if (one && fit >= minChildQty(m, one.price)) fits.push({ ...one, quantity: fit });
+        else cut = true;
       }
+      if (!fits.some((x) => !(x.reduceOnly ?? s.reduceOnly)) && cut) {
+        await this.hold(a, room === null ? 'Held: your account could not be read for the leverage cap of your region.' : `Held: the ${ceiling}x leverage cap for your region is reached.`);
+        if (!fits.length) return [];
+      }
+      list = fits;
+      if (!list.length) return [];
     }
     if (opening) {
       const fit = await this.fitLimits(a, m, list, leverage);
@@ -2743,13 +3469,16 @@ export class AlgoRuntime {
     }
     if (this.stopped(a)) return [];
     if (opening && ceiling !== null) {
-      // Counted at once, so the next child before the next read does not overshoot.
+      // Counted at once, so the next child before the next read does not overshoot: the larger side (see above).
       const row = this.accounts.get(a.owner);
-      if (row) row.gross += list.reduce((x, c) => x + (c.reduceOnly ?? s.reduceOnly ? 0 : c.quantity * c.price), 0);
+      const sideUsd = (side: Side) => list.reduce((x, c) => x + (c.side !== side || (c.reduceOnly ?? s.reduceOnly) ? 0 : c.quantity * c.price), 0);
+      if (row) row.gross += Math.max(sideUsd('buy'), sideUsd('sell'));
     }
     const now = Date.now();
     const children: ChildOrder[] = [];
     const reqs: ChildRequest[] = [];
+    // A real bot that shares its market, or found a position there it did not open, unwinds without SoDEX's flag.
+    const plain = !s.paper && !!s.bot && (a.k.plainReduce === true || this.sharesMarket(a));
     for (const x of list) {
       const clOrdID = this.clOrdIdFor(a);
       // On SoDEX's tick, never worse for the trader: a price a trader typed (an iceberg's, a bracket's or a
@@ -2757,8 +3486,9 @@ export class AlgoRuntime {
       const price = Number(dec(onTick(x.price, x.side, m.tickSize)));
       const quantity = Number(dec(x.quantity));
       const c: ChildOrder = { clOrdID, orderId: null, side: x.side, price, quantity, tif: x.tif, reduceOnly: x.reduceOnly ?? s.reduceOnly, filled: 0, value: 0, state: 'sending', placedAt: now, updatedAt: now, cancelling: false, tag: x.tag };
+      if (plain && c.reduceOnly) c.exchReduceOnly = false;
       children.push(c);
-      reqs.push({ clOrdID, side: c.side, price: dec(price), quantity: dec(quantity), tif: c.tif, reduceOnly: c.reduceOnly });
+      reqs.push({ clOrdID, side: c.side, price: dec(price), quantity: dec(quantity), tif: c.tif, reduceOnly: c.exchReduceOnly ?? c.reduceOnly });
       a.children.push(c);
       this.byClOrd.set(clOrdID, a.id);
     }
@@ -2788,6 +3518,7 @@ export class AlgoRuntime {
       if (r.ok) {
         if (c.state === 'sending') c.state = 'open';
         a.k.consecRejects = 0;
+        if (a.k.failRounds) delete a.k.failRounds;
       } else if (r.outcomeUnknown) {
         if (c.state === 'sending') c.state = 'unknown';
         await this.event(a, 'error', `No answer from SoDEX for ${c.tag}; checking what happened (never re-sent).`, c);
@@ -2795,8 +3526,10 @@ export class AlgoRuntime {
         c.state = 'done';
         c.cancelling = false;
         a.rejects++;
-        a.k.consecRejects = Number(a.k.consecRejects ?? 0) + 1;
-        await this.event(a, 'error', `SoDEX refused ${c.tag}: ${r.error}`, c);
+        this.lastRefusal.set(a.id, r.error ?? '');
+        this.refusalSeen(a, c, r.error ?? '');
+        await this.event(a, 'error', s.bot ? `SoDEX refused ${c.tag}: ${refusalWords(refusalKind(r.error))}.` : `SoDEX refused ${c.tag}: ${r.error}`, c);
+        this.botRefused(a, c, r.error ?? '');
         limit ??= limitRefusal(r.error, m.name);
       }
     }
@@ -2806,11 +3539,18 @@ export class AlgoRuntime {
       const late = children.filter((c) => c.tif !== 'ioc' && c.state !== 'done' && !kept.includes(c.clOrdID));
       const again = children.filter((c) => c.tif !== 'ioc' && !kept.includes(c.clOrdID) && results.some((r) => r.clOrdID === c.clOrdID && (r.ok || r.outcomeUnknown)));
       for (const c of late) c.cancelling = true;
-      if (again.length) await sink!.cancel(a, m, again.map((c) => c.clOrdID)).catch((e) => this.event(a, 'error', `Cancel failed: ${e instanceof Error ? e.message : String(e)}`));
+      if (again.length) {
+        await sink!.cancel(a, m, again.map((c) => c.clOrdID)).catch((e) => {
+          // Not cancelled: they rest on, and are cancelled again (an ended bot's sweep, the next pull) - not left "cancelling".
+          for (const c of late) c.cancelling = false;
+          return this.event(a, 'error', `Cancel failed: ${e instanceof Error ? e.message : String(e)}`);
+        });
+      }
     }
     await this.save(a);
     if (limit) await this.onLimit(a, limit);
-    if (Number(a.k.consecRejects ?? 0) >= MAX_CONSEC_REJECTS) await this.end(a, 'failed', `SoDEX refused ${MAX_CONSEC_REJECTS} orders in a row; stopped. The last reason is in the log.`);
+    // A bot's close has its own refusal count (stepBotClose): refusals while it closes do not end it with the position open.
+    if (Number(a.k.consecRejects ?? 0) >= MAX_CONSEC_REJECTS && !(s.bot && a.k.closing)) await this.tooManyRefusals(a);
     this.host.onChange?.(a.id);
     return children;
   }
@@ -2823,6 +3563,22 @@ export class AlgoRuntime {
    * paper fills' (paper); the open interest the feed's.
    */
   private async fitLimits(a: AlgoRecord, m: MarketInfo, list: Array<{ side: Side; price: number; quantity: number; tif: ChildTif; tag: string; reduceOnly?: boolean }>, leverage: number | null): Promise<typeof list | null> {
+    const s = a.spec;
+    const open = list.filter((c) => !(c.reduceOnly ?? s.reduceOnly));
+    if (new Set(open.map((c) => c.side)).size <= 1) return this.fitSide(a, m, list, leverage);
+    // A two-sided batch (a volume maker's bid and ask): each side against the limits on its own - a sell against a long
+    // only makes it smaller, so a long at its limit still quotes the ask. Checked as one side (the first child's), the
+    // bid held the ask back, or the ask's size was counted as the bid's.
+    const out = list.filter((c) => c.reduceOnly ?? s.reduceOnly);
+    for (const side of ['buy', 'sell'] as const) {
+      const fit = await this.fitSide(a, m, open.filter((c) => c.side === side), leverage);
+      if (fit) out.push(...fit);
+    }
+    return out.length ? out : null;
+  }
+
+  /** fitLimits for children that open on one side (and any reduce-only ones with them). */
+  private async fitSide(a: AlgoRecord, m: MarketInfo, list: Array<{ side: Side; price: number; quantity: number; tif: ChildTif; tag: string; reduceOnly?: boolean }>, leverage: number | null): Promise<typeof list | null> {
     const s = a.spec;
     const open = list.filter((c) => !(c.reduceOnly ?? s.reduceOnly));
     if (!open.length || (!m.marginTiers?.length && !m.openInterestCap && !m.openInterestCapUSD)) return list;
@@ -2911,10 +3667,13 @@ export class AlgoRuntime {
    */
   private async onLimit(a: AlgoRecord, lim: LimitRefusal): Promise<void> {
     if (FINAL_STATUSES.has(a.status)) return;
+    // A bot's close is reduce-only: a limit on what opens is not what refused it, and it is not held for one.
+    if (a.spec.bot && a.k.closing) return;
     const n = Number(a.k.limitHits ?? 0) + 1;
     a.k.limitHits = n;
-    if (n >= LIMIT_MAX_HITS) {
-      await this.end(a, 'failed', `Stopped: ${lim.text} SoDEX refused it ${n} times with nothing filled in between.`);
+    // A bot never ends for a limit (owner 2026-11-08): what adds waits (a minute doubling to 15), what reduces goes on.
+    if (n >= LIMIT_MAX_HITS && !a.spec.bot) {
+      await this.endBot(a, 'failed', `Stopped: ${lim.text} SoDEX refused it ${n} times with nothing filled in between.`);
       return;
     }
     const wait = Math.min(LIMIT_RETRY_MS * 2 ** (n - 1), 15 * 60_000);
@@ -2927,7 +3686,50 @@ export class AlgoRuntime {
     a.k.limitReason = `Held: ${lim.text}${room} Trying again in ${Math.round(wait / 60_000)} min.`;
     this.dirty.add(a.id);
     if (m) await this.limitNotice(a, m, lim.kind, 'held', `SoDEX refused an order: ${lim.text}${room} It tries again in ${Math.round(wait / 60_000)} min.`);
+    if (a.spec.bot) {
+      await this.event(a, 'info', `${lim.text}${room} New orders wait ${Math.round(wait / 60_000)} min; what it holds is still unwound.`);
+      return;
+    }
     await this.hold(a, a.k.limitReason as string);
+  }
+
+  /**
+   * A refusal seen (in the answer or on the socket): only one nothing else handles counts toward MAX_CONSEC_REJECTS
+   * (refusals.ts); a bot's margin refusal makes what adds wait a moment. The full text goes to the host's log only.
+   */
+  private refusalSeen(a: AlgoRecord, c: ChildOrder, text: string): void {
+    const kind = refusalKind(text);
+    // Algo orders count every refusal as before; a bot only what nothing here handles (owner 2026-11-08).
+    if (!a.spec.bot || countsAsFailure(kind)) a.k.consecRejects = Number(a.k.consecRejects ?? 0) + 1;
+    if (a.spec.bot && kind === 'margin' && !c.reduceOnly) a.k.marginUntil = Date.now() + BOT_MARGIN_WAIT_MS;
+    this.host.log.warn('algo: SoDEX refused a child', { algo: a.id, owner: a.owner, symbol: a.spec.symbol, tag: c.tag, kind, text });
+    this.dirty.add(a.id);
+  }
+
+  /**
+   * MAX_CONSEC_REJECTS refusals in a row that nothing here handles. An algo order ends. A bot waits instead (its
+   * quotes pulled, a minute doubling to 15) and tries again; only after BOT_FAIL_ROUNDS such rounds does it close what
+   * it holds - whatever its On stop says - and stop (owner 2026-11-08: never stop with its position or quotes left).
+   */
+  private async tooManyRefusals(a: AlgoRecord): Promise<void> {
+    if (!a.spec.bot) {
+      await this.endBot(a, 'failed', `SoDEX refused ${MAX_CONSEC_REJECTS} orders in a row; stopped. The last reason is in the log.`);
+      return;
+    }
+    const rounds = Number(a.k.failRounds ?? 0) + 1;
+    a.k.failRounds = rounds;
+    a.k.consecRejects = 0;
+    if (rounds >= BOT_FAIL_ROUNDS) {
+      const reason = `Stopped: SoDEX kept refusing its orders (${rounds} rounds of ${MAX_CONSEC_REJECTS}, with waits between). It closed what it held first.`;
+      this.host.log.error?.('bot: last resort, closing and stopping', { algo: a.id, owner: a.owner, symbol: a.spec.symbol, last: this.lastRefusal.get(a.id) ?? '' });
+      if (!(await this.stopBot(a, 'failed', reason, false, true))) await this.end(a, 'failed', reason);
+      return;
+    }
+    const wait = Math.min(BOT_FAIL_WAIT_MAX_MS, BOT_FAIL_WAIT_MS * 2 ** (rounds - 1));
+    a.k.failUntil = Date.now() + wait;
+    this.dirty.add(a.id);
+    await this.pullResting(a);
+    await this.event(a, 'error', `SoDEX refused ${MAX_CONSEC_REJECTS} orders in a row. It waits ${Math.round(wait / 60_000)} min with its quotes pulled, then goes on (round ${rounds} of ${BOT_FAIL_ROUNDS}; after the last it closes what it holds and stops).`);
   }
 
   private async cancelChildren(a: AlgoRecord, m: MarketInfo, list: ChildOrder[]): Promise<void> {
@@ -2943,7 +3745,17 @@ export class AlgoRuntime {
       return;
     }
     const sink = this.host.sinkFor(a);
-    if (!sink) return;
+    if (!sink) {
+      // No key here: nothing was cancelled, so nothing is "cancelling" - they still rest, and are cancelled again once
+      // the key is back (a held bot's pulls, an ended bot's sweep). Marked cancelling they were never asked about again.
+      for (const c of open) c.cancelling = false;
+      const said = this.noSinkSaid.get(a.id) ?? 0;
+      if (Date.now() - said >= 10 * 60_000) {
+        this.noSinkSaid.set(a.id, Date.now());
+        await this.event(a, 'error', `Could not cancel ${open.length} order${open.length === 1 ? '' : 's'}: the trading key for it is not available here. Tried again until they are gone.`);
+      }
+      return;
+    }
     try {
       await sink.cancel(a, m, open.map((c) => c.clOrdID));
     } catch (e) {
@@ -2955,6 +3767,26 @@ export class AlgoRuntime {
   /** A live bot with quotes of its own on the book. Not while it closes what it holds: that order only protects, as a stop does (brake.ts). */
   private quotesNeedManaging(a: AlgoRecord): boolean {
     return (a.spec.kind === 'mm' || a.spec.kind === 'grid') && !a.spec.paper && !FINAL_STATUSES.has(a.status) && !a.k.closing;
+  }
+
+  /**
+   * Whether an ended bot has a child to settle or cancel again now: one not cancelling (its cancel never left or
+   * failed), one SoDEX has not told of, or a cancel unconfirmed for long - every HELD_PULL_MS at most.
+   */
+  private sweepDue(a: AlgoRecord, now: number): boolean {
+    if (a.spec.paper || this.busy.has(a.id) || now - (this.heldPullAt.get(a.id) ?? -Infinity) < HELD_PULL_MS) return false;
+    return this.strayLive(a).some((c) => !c.cancelling || c.state === 'unknown' || now - c.updatedAt > STALE_IOC_MS);
+  }
+
+  /** An ended bot's stray children: what SoDEX says of them is booked (settleStale), what still rests is cancelled again. */
+  private async sweepEnded(a: AlgoRecord, now: number): Promise<void> {
+    const m = this.markets.get(a.spec.symbol);
+    if (!m) return;
+    await this.settleStale(a, m, now);
+    const left = this.strayLive(a).filter((c) => !c.cancelling);
+    if (left.length) await this.cancelChildren(a, m, left);
+    if (!this.strayLive(a).length) this.syncWatch();
+    this.dirty.add(a.id);
   }
 
   /** A held step returns before it re-prices, so a held bot's quotes would go stale on the book: they come off, and it quotes again when the hold ends. */
@@ -3027,17 +3859,33 @@ export class AlgoRuntime {
         void this.event(a, 'error', `SoDEX ${how} ${c.tag} at ${c.price}${u.reason ? `: ${u.reason}` : ''}; it no longer rests (nothing filled).`, c);
       }
       if (c.tif === 'ioc' && c.filled <= 1e-12) a.k.missAt = Date.now();
+      const closing = a.k.closing as BotClosing | undefined;
       if (u.status === 'REJECTED' && was !== 'done') {
         a.rejects++;
-        a.k.consecRejects = Number(a.k.consecRejects ?? 0) + 1;
-        void this.event(a, 'error', `SoDEX rejected ${c.tag}${u.reason ? `: ${u.reason}` : ''}.`, c);
+        this.refusalSeen(a, c, u.reason ?? '');
+        void this.event(a, 'error', a.spec.bot ? `SoDEX rejected ${c.tag}: ${refusalWords(refusalKind(u.reason))}.` : `SoDEX rejected ${c.tag}${u.reason ? `: ${u.reason}` : ''}.`, c);
+        if (Number(a.k.consecRejects ?? 0) >= MAX_CONSEC_REJECTS && a.spec.bot && !a.k.closing) void this.tooManyRefusals(a);
         const lim = limitRefusal(u.reason, a.spec.symbol);
         if (lim) void this.onLimit(a, lim);
         // A grid level refused (a post-only the price reached meanwhile) goes out again after a moment, not on the next step.
         if (a.spec.kind === 'grid' && gridLevelOf(c) >= 0) a.k.gretry = { ...((a.k.gretry as Record<string, number> | undefined) ?? {}), [gridLevelOf(c)]: Date.now() + GRID_RETRY_MS };
-      }
+        // A volume maker's quote refused later (on the socket, not in the answer) backs off as one refused in the answer does (stepMm).
+        if (a.spec.kind === 'mm' && (c.tag === 'bid' || c.tag === 'ask')) this.mmBackOff(a, c.side);
+        this.botRefused(a, c, u.reason ?? '');
+      } else if (closing && c.tag.startsWith('close') && c.filled > 1e-12) this.closeTaken(closing);
       this.onChildDone(a, c);
-    } else if (c.state === 'sending' || c.state === 'unknown') c.state = 'open';
+    } else {
+      if (c.state === 'sending' || c.state === 'unknown') c.state = 'open';
+      // SoDEX took the close (it rests, or filled): the position is there, so the refusals so far said nothing about it.
+      const closing = a.k.closing as BotClosing | undefined;
+      if (closing && c.tag.startsWith('close')) this.closeTaken(closing);
+      // SoDEX took a volume maker's quote: its side's next refusal waits half a second again.
+      if (a.spec.kind === 'mm' && (c.tag === 'bid' || c.tag === 'ask') && (a.k.mback as Record<string, number> | undefined)?.[c.side] !== undefined) {
+        const back = { ...(a.k.mback as Record<string, number>) };
+        delete back[c.side];
+        a.k.mback = back;
+      }
+    }
     // A resting child that turns up after its algo ended is cancelled (unless it was left on purpose).
     if (FINAL_STATUSES.has(a.status) && c.state === 'open' && c.tif !== 'ioc' && !c.cancelling && !((a.k.kept as string[] | undefined) ?? []).includes(c.clOrdID)) {
       const m = this.markets.get(a.spec.symbol);
@@ -3074,14 +3922,18 @@ export class AlgoRuntime {
     const isMaker = maker ?? c.tif !== 'ioc';
     if (isMaker) a.makerQty += dq;
     const m = this.markets.get(a.spec.symbol);
-    const rate = (isMaker ? (m?.makerFee ?? (m?.takerFee ?? 0.0004) / 2) : (m?.takerFee ?? 0.0004)) + (this.host.builderRate?.(a) ?? 0);
+    // A resting fill pays the wallet's own maker fee where the host knows its tier (bp), else the market's base rate.
+    const tier = isMaker ? (this.host.makerFeeFor?.(a.owner, a.spec.symbol) ?? null) : null;
+    const tradeRate = isMaker ? (tier !== null && Number.isFinite(tier) ? tier / 10_000 : (m?.makerFee ?? (m?.takerFee ?? 0.0004) / 2)) : (m?.takerFee ?? 0.0004);
+    const rate = tradeRate + (this.host.builderRate?.(a) ?? 0);
     a.fees += dv * rate;
     if (a.spec.bot) {
       a.book ??= emptyBook();
-      bookFill(a.book, c.side, dq, dv, isMaker, isMaker ? (m?.makerFee ?? (m?.takerFee ?? 0.0004) / 2) : (m?.takerFee ?? 0.0004), this.host.builderRate?.(a) ?? 0);
+      a.k.lastFillAt = Date.now();
+      bookFill(a.book, c.side, dq, dv, isMaker, tradeRate, this.host.builderRate?.(a) ?? 0);
     }
     if (a.k.consecRejects) a.k.consecRejects = 0;
-    void this.event(a, 'fill', `Filled ${dec(dq)} @ ${(dv / dq).toPrecision(8).replace(/\.?0+$/, '')}${isMaker ? ' (maker)' : ''}.`, { ...c, quantity: dq, price: dv / dq });
+    void this.event(a, 'fill', `Filled ${dec(dq)} @ ${(dv / dq).toPrecision(8).replace(/\.?0+$/, '')}.`, { ...c, quantity: dq, price: dv / dq }, isMaker);
   }
 
   /* --------------------------------------------------------------- exits ----- */
@@ -3471,9 +4323,9 @@ export class AlgoRuntime {
       const i = gridLevelOf(c);
       const sides = a.k.gs as GridSide[] | undefined;
       if (i < 0 || !sides) return;
-      // Filled whole: the level becomes the gap and the next one over takes the other side. Cut short (a pause, a re-size,
-      // a refusal: onOrderUpdate holds it back a moment) the level keeps its side and goes out again.
-      if (c.filled >= c.quantity - 1e-12 && sides[i] === c.side) a.k.gs = gridAfterFill(sides, i, c.side);
+      // What filled moves to the level beyond, what did not stays (gridFilled). Cut short with nothing filled (a pause, a
+      // re-size, a refusal: onOrderUpdate holds it back a moment) the level keeps its side and goes out again.
+      if (c.filled > 1e-12 && sides[i] === c.side) this.gridFilled(a, i, c.side, c.quantity, c.filled);
       return;
     }
     if (a.spec.kind !== 'iceberg') return;
@@ -3490,7 +4342,52 @@ export class AlgoRuntime {
     }
   }
 
+  /** For the operator's overview (executor /internal/stats): the wallets with live orders the socket follows, and the rest read by REST. */
+  socketWallets(): { followed: number; polled: number } {
+    const follows = this.market.followsOrders?.bind(this.market);
+    const owners = new Set([...this.algos.values()].filter((a) => !a.spec.paper && !FINAL_STATUSES.has(a.status)).map((a) => a.owner));
+    let followed = 0;
+    for (const o of owners) if (!follows || follows(o)) followed++;
+    return { followed, polled: owners.size - followed };
+  }
+
   private onPrint(p: Print): void {
+    const taker = p.taker === 'buy' ? p.buyer : p.seller;
+    // A print naming a wallet the socket does not follow (over SoDEX's 10 wallets per IP on account channels): its orders
+    // are read by REST next, ahead of the queue - its fill is booked within about a second, not when its turn comes
+    // (owner 2026-11-08: 20 live bots per server, whatever the number of wallets).
+    const follows = this.market.followsOrders?.bind(this.market);
+    if (follows) {
+      for (const a of this.algos.values()) {
+        if (a.spec.paper || a.spec.symbol !== p.symbol || FINAL_STATUSES.has(a.status) || follows(a.owner)) continue;
+        if (p.buyer === a.accountId || p.seller === a.accountId) {
+          this.resync.add(a.id);
+          this.polledAt.delete(a.id);
+        }
+      }
+    }
+    const f = this.flow.get(p.symbol);
+    if (f) {
+      const gated = [...this.algos.values()].some((a) => a.spec.kind === 'mm' && a.spec.flowGate && a.spec.symbol === p.symbol && (a.status === 'running' || a.status === 'waiting'));
+      if (!gated) this.flow.delete(p.symbol);
+      else if (taker === PATIENT_TAKER_ACCOUNT) {
+        const now = Date.now();
+        const sec = Math.floor(now / 1_000) * 1_000;
+        const last = f.b[f.b.length - 1];
+        if (last && last[0] === sec) last[1] += p.qty * p.price;
+        else f.b.push([sec, p.qty * p.price]);
+        while (f.b.length && f.b[0]![0] <= now - FLOW_KEEP_MS) f.b.shift();
+      }
+    }
+    for (const a of this.algos.values()) {
+      const s = a.spec;
+      if (s.kind !== 'mm' || s.pauseAfter !== taker || s.symbol !== p.symbol || a.status !== 'running' || !a.book) continue;
+      this.takerAt.set(`${s.symbol}:${taker}`, Date.now());
+      const m = this.markets.get(s.symbol);
+      const inv = bookInventory(a.book);
+      const adding = this.live(a).filter((c) => c.state === 'open' && !c.cancelling && c.tif !== 'ioc' && (c.side === 'buy' ? inv >= 0 : inv <= 0));
+      if (m && adding.length) void this.cancelChildren(a, m, adding).catch((e) => this.host.log.warn('algo: pause pull failed', { algo: a.id, error: String(e) }));
+    }
     for (const a of this.algos.values()) {
       if (a.status !== 'running' && a.status !== 'waiting') continue;
       if (a.spec.symbol !== p.symbol || a.startedAt === null || p.at < a.startedAt) continue;
@@ -3499,7 +4396,27 @@ export class AlgoRuntime {
       a.marketValue += p.qty * p.price;
       this.dirty.add(a.id);
     }
+    // A bot's own fill: the other side of the print is who took its quote. Only a bot that runs and had begun by the
+    // print: an ended bot of the same account on the same market (a restart) was credited the new one's fills.
+    if (p.buyer >= 0 && p.seller >= 0) {
+      for (const a of this.algos.values()) {
+        if ((a.spec.kind !== 'mm' && a.spec.kind !== 'grid') || a.spec.paper || a.spec.symbol !== p.symbol || !a.book) continue;
+        if (FINAL_STATUSES.has(a.status) || a.startedAt === null || p.at < a.startedAt) continue;
+        if (taker === a.accountId || (p.buyer !== a.accountId && p.seller !== a.accountId)) continue;
+        this.countTaker(a, taker, p.qty * p.price);
+      }
+    }
     if (this.paper.size) this.paperOnPrint(p);
+  }
+
+  /** BotBook.takers: one fill's USD to the taker that took it. */
+  private countTaker(a: AlgoRecord, taker: number, usd: number): void {
+    if (!a.book || !(usd > 0)) return;
+    const t = (a.book.takers ??= { t1002: 0, t23342: 0, other: 0 });
+    if (taker === PATIENT_TAKER_ACCOUNT) t.t1002 += usd;
+    else if (taker === INFORMED_TAKER_ACCOUNT) t.t23342 += usd;
+    else t.other += usd;
+    this.dirty.add(a.id);
   }
 
   /**
@@ -3849,18 +4766,31 @@ export class AlgoRuntime {
     timers.after(0, () => this.onOrderUpdate({ clOrdID, orderId: `paper-${clOrdID}`, symbol: o?.symbol ?? a?.spec.symbol ?? '', status: 'CANCELED', filledQty: o?.filled ?? c?.filled ?? 0, filledValue: o?.value ?? c?.value ?? 0, maker: null, reason: null, at: Date.now() }));
   }
 
-  /** A resting paper order fills as the tape trades through its price (a sell print at or under a buy, and so on). */
+  /**
+   * A resting paper order fills as the tape trades through its price (a sell print at or under a buy, and so on).
+   * A practice bot's order is held to what live would give it (audit 2026-11-08): only a print through its price
+   * fills it (at the price, the queue there was ahead of it), and each print's size is given out once across the
+   * practice bots' orders it went through, best price first and then in the order they were placed - one print no
+   * longer filled each of them in full.
+   */
   private paperOnPrint(p: Print): void {
-    for (const o of this.paper.values()) {
-      if (o.symbol !== p.symbol) continue;
-      const through = o.side === 'buy' ? p.price <= o.price && p.taker === 'sell' : p.price >= o.price && p.taker === 'buy';
-      if (!through) continue;
-      const q = Math.min(o.left, p.qty);
+    const isBot = (o: PaperOrder) => this.algos.get(o.algoId)?.spec.bot === true;
+    const hit = [...this.paper.values()].filter((o) => o.symbol === p.symbol && (isBot(o) ? (o.side === 'buy' ? p.price < o.price - 1e-12 && p.taker === 'sell' : p.price > o.price + 1e-12 && p.taker === 'buy') : o.side === 'buy' ? p.price <= o.price && p.taker === 'sell' : p.price >= o.price && p.taker === 'buy'));
+    if (!hit.length) return;
+    // Best price first (a sell print reaches the highest bid first); Array.sort is stable, so equal prices keep their order.
+    hit.sort((x, y) => (x.side === 'buy' ? y.price - x.price : x.price - y.price));
+    let size = p.qty;
+    for (const o of hit) {
+      const bot = isBot(o);
+      if (bot && size <= 1e-12) continue;
+      const q = Math.min(o.left, bot ? size : p.qty);
+      if (bot) size -= q;
       o.left -= q;
       o.filled += q;
       o.value += q * o.price;
       const a = this.algos.get(o.algoId);
       if (a) this.paperPosition(a, o.side, q);
+      if (a && (a.spec.kind === 'mm' || a.spec.kind === 'grid')) this.countTaker(a, p.taker === 'buy' ? p.buyer : p.seller, q * o.price);
       const done = o.left <= 1e-12;
       if (done) this.paper.delete(o.clOrdID);
       this.onOrderUpdate({ clOrdID: o.clOrdID, orderId: `paper-${o.clOrdID}`, symbol: o.symbol, status: done ? 'FILLED' : 'PARTIALLY_FILLED', filledQty: o.filled, filledValue: o.value, maker: true, reason: null, at: p.at });
@@ -3904,10 +4834,19 @@ export class AlgoRuntime {
     await this.event(a, 'info', text);
   }
 
-  private async hold(a: AlgoRecord, reason: string): Promise<void> {
+  /** `same`: a reason that changes as it holds (a figure in it) - while held for one starting so, the line updates with no new event. */
+  private async hold(a: AlgoRecord, reason: string, same?: string): Promise<void> {
     this.heldNow.add(a.id);
     // Paused or ended meanwhile: that stands; a hold does not overwrite it.
     if (this.stopped(a)) return;
+    if (same && a.status === 'waiting' && a.statusReason?.startsWith(same)) {
+      if (a.statusReason !== reason) {
+        a.statusReason = reason;
+        this.dirty.add(a.id);
+        this.host.onChange?.(a.id);
+      }
+      return;
+    }
     if (a.status === 'scheduled') {
       if (a.statusReason !== reason) {
         a.statusReason = reason;
@@ -3945,6 +4884,16 @@ export class AlgoRuntime {
     // What it filled keeps its exits, sized to the final fill - whatever the reason it ended.
     const m = this.markets.get(a.spec.symbol);
     if (m && a.spec.exits && a.filled > 0) await this.syncExits(a, m, true);
+    if (a.spec.bot && a.book) {
+      // Its last point (a manual stop dropped up to BOT_SAMPLE_MS of it), and the mark it is valued at from now on:
+      // what it kept is no longer its to manage, so its PnL stops at the stop.
+      const q = this.market.quote(a.spec.symbol);
+      const mk = this.market.mark(a.spec.symbol)?.mark ?? (q ? mid(q) : null);
+      if (mk !== null && mk > 0) {
+        sampleBook(a.book, mk, Date.now(), true);
+        a.book.endMark = mk;
+      }
+    }
     a.status = status;
     a.statusReason = reason;
     a.endedAt = Date.now();
@@ -3978,8 +4927,18 @@ export class AlgoRuntime {
     }
   }
 
-  private async event(a: AlgoRecord, kind: AlgoEventKind, text: string, c?: Partial<ChildOrder>): Promise<void> {
+  private async event(a: AlgoRecord, kind: AlgoEventKind, raw: string, c?: Partial<ChildOrder>, maker?: boolean): Promise<void> {
     const at = Date.now();
+    // A bot's activity shows plain words for an error (owner 2026-11-08): the text an exchange or a server gave stays in
+    // the executor's own log, never on the page.
+    let text = raw;
+    if (a.spec.bot && kind === 'error') {
+      const m = /^(.*?(?:failed|not set|refused [^:]*|rejected [^:]*|could not be cancelled)): (.+)$/i.exec(raw);
+      if (m) {
+        text = /^step failed$/i.test(m[1]!) ? 'Something went wrong on our side; it goes on, and we see the details in our server log.' : `${m[1]}: ${refusalWords(refusalKind(m[2]))}.`;
+        this.host.log.warn('bot: error', { algo: a.id, owner: a.owner, symbol: a.spec.symbol, text: raw });
+      }
+    }
     const e: AlgoEvent = {
       // Sorts by time, then by the order it was written: lines of one millisecond keep their order.
       id: `e${at.toString(36)}${(++this.eventSeq).toString(36).padStart(6, '0')}${randomId().slice(0, 4)}`,
@@ -3993,6 +4952,8 @@ export class AlgoRuntime {
       price: c?.price ?? null,
       qty: c?.quantity ?? null,
       paper: a.spec.paper,
+      ...(c?.tif ? { tif: c.tif } : {}),
+      ...(maker !== undefined ? { maker } : {}),
     };
     await this.host.store.addAlgoEvent(e).catch((err) => this.host.log.error('algo: event not saved', { error: String(err) }));
   }

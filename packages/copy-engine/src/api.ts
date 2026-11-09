@@ -18,10 +18,13 @@
  * Reads use a short-lived session token obtained with one signed 'session'
  * request.
  */
-import { ZERO_ADDRESS, bytesToHex, hashTypedData, hexToBytes, recoverAddress, type TypedData } from '../../sodex-core/src/index.ts';
+import { ZERO_ADDRESS, bytesToHex, hashTypedData, hexToBytes, recoverAddress, signDigest, type TypedData } from '../../sodex-core/src/index.ts';
+import { p256 } from '@noble/curves/p256';
+import { sha256 } from '@noble/hashes/sha256';
 import type { RegionPolicy } from './policy.ts';
 import type { CopyView } from './runtime.ts';
 import type { ActivityEntry, CopyMode, CopySettings } from './types.ts';
+import type { FlowGate, NewsGate, QuietWindow } from './algo/types.ts';
 
 export const COPY_DOMAIN = { name: 'ValueDesk Copy', version: '1' } as const;
 
@@ -56,9 +59,24 @@ export type CopyAction =
   /** Start an algo order (TWAP, VWAP, ...): the payload is its spec, as the wallet displays it. */
   | 'algo-start'
   /** Pause, resume or cancel an algo order, or cancel all of them. */
-  | 'algo-action';
+  | 'algo-action'
+  /** Move this wallet's bots to the VIP executor (payload {to: 'vip'}): one signature, run server to server. */
+  | 'vip-move'
+  /**
+   * Let a key this browser made sign this wallet's everyday actions for at most a day (payload {key, expiresAt}):
+   * the one wallet signature a day (owner 2026-11-08: "not every action should need a sign ... once per day max").
+   */
+  | 'delegate';
 
-export const COPY_ACTIONS: readonly CopyAction[] = ['session', 'accept-terms', 'accept-site-terms', 'create-key', 'delete-key', 'subscribe', 'update', 'pause', 'resume', 'stop', 'stop-all', 'algo-start', 'algo-action'];
+export const COPY_ACTIONS: readonly CopyAction[] = ['session', 'accept-terms', 'accept-site-terms', 'create-key', 'delete-key', 'subscribe', 'update', 'pause', 'resume', 'stop', 'stop-all', 'algo-start', 'algo-action', 'vip-move', 'delegate'];
+
+/**
+ * What a day key (action 'delegate') may sign: the everyday actions. Never the terms, a trading key's creation or
+ * removal, or another delegation - those always take the wallet itself.
+ */
+export const DELEGABLE_ACTIONS: ReadonlySet<CopyAction> = new Set<CopyAction>(['session', 'subscribe', 'update', 'pause', 'resume', 'stop', 'stop-all', 'algo-start', 'algo-action', 'vip-move']);
+/** How long a day key lives at most. */
+export const DELEGATION_TTL_MS = 24 * 60 * 60_000;
 
 export const COPY_REQUEST_FIELDS = [
   { name: 'action', type: 'string' },
@@ -84,6 +102,11 @@ export interface CopyRequest {
 export interface SignedCopyRequest extends CopyRequest {
   /** 0x + 65 bytes (r, s, v). */
   signature: string;
+  /**
+   * Signed by a day key, not the wallet: the wallet's own signed 'delegate' request naming that key, valid now. Only
+   * for DELEGABLE_ACTIONS (verifyCopyRequest).
+   */
+  delegation?: SignedCopyRequest;
 }
 
 /** JSON with object keys sorted at every level: the exact text a wallet shows and signs. */
@@ -132,7 +155,7 @@ export const REQUEST_TTL_MS = 5 * 60_000;
 export const TERMS_TTL_MS = 365 * 86_400_000;
 /** An acceptance of terms - the copy terms or ValueDesk's own: a statement, valid a year. */
 export const isStatement = (action: CopyAction): boolean => action === 'accept-terms' || action === 'accept-site-terms';
-const MAX_WINDOW_MS = (action: CopyAction): number => (isStatement(action) ? TERMS_TTL_MS + 86_400_000 : 60 * 60_000);
+const MAX_WINDOW_MS = (action: CopyAction): number => (isStatement(action) ? TERMS_TTL_MS + 86_400_000 : action === 'delegate' ? DELEGATION_TTL_MS + 60_000 : 60 * 60_000);
 
 /** Build an unsigned request for `action` with `payload`, valid for `ttlMs`. */
 export function buildCopyRequest(o: { action: CopyAction; owner: string; executor: string; payload: unknown; chainId: number; now?: number; ttlMs?: number }): CopyRequest {
@@ -157,7 +180,7 @@ const ADDRESS = /^0x[0-9a-f]{40}$/;
  * that the owner's wallet signed exactly these fields. Replay of a nonce is
  * the caller's to refuse (it knows which nonces it has seen).
  */
-export function verifyCopyRequest(r: unknown, o: { executor: string; now?: number; maxAgeMs?: number }): VerifyResult {
+export function verifyCopyRequest(r: unknown, o: { executor: string; now?: number; maxAgeMs?: number; revokedBefore?: (owner: string) => number }): VerifyResult {
   const now = o.now ?? Date.now();
   if (!r || typeof r !== 'object') return { ok: false, error: 'missing signed request' };
   const q = r as Record<string, unknown>;
@@ -171,14 +194,16 @@ export function verifyCopyRequest(r: unknown, o: { executor: string; now?: numbe
   if (typeof q.deadline !== 'string' || !/^\d{1,16}$/.test(q.deadline)) return { ok: false, error: 'deadline must be a decimal string' };
   const chainId = Number(q.chainId);
   if (!Number.isSafeInteger(chainId) || chainId <= 0) return { ok: false, error: 'chainId must be a positive integer' };
-  if (typeof q.signature !== 'string' || !/^0x[0-9a-fA-F]{130}$/.test(q.signature)) return { ok: false, error: 'signature must be 65 bytes of hex' };
+  // 65 bytes: the wallet (or a secp256k1 day key); 64 bytes: a P-256 day key (WebCrypto, r||s).
+  if (typeof q.signature !== 'string' || !/^0x([0-9a-fA-F]{130}|[0-9a-fA-F]{128})$/.test(q.signature)) return { ok: false, error: 'signature must be 65 bytes of hex' };
   const nonce = Number(q.nonce);
   const deadline = Number(q.deadline);
   // Expired: either it waited too long, or the signer's clock is behind - then signing again gives the same answer.
   if (deadline < now) return { ok: false, error: "this request has expired; sign it again (if it keeps happening, check your computer's clock: it may be behind)" };
   if (deadline - nonce > MAX_WINDOW_MS(action)) return { ok: false, error: 'this request is valid for longer than allowed' };
   const skew = o.maxAgeMs ?? 15 * 60_000;
-  if (nonce - now > skew || (!isStatement(action) && now - nonce > skew)) return { ok: false, error: 'the request time is too far from now; check your clock' };
+  // A delegation is signed once and used all day: its deadline bounds it, not its age.
+  if (nonce - now > skew || (!isStatement(action) && action !== 'delegate' && now - nonce > skew)) return { ok: false, error: 'the request time is too far from now; check your clock' };
   let payload: unknown;
   try {
     payload = JSON.parse(q.payload);
@@ -188,14 +213,47 @@ export function verifyCopyRequest(r: unknown, o: { executor: string; now?: numbe
   if (canonicalJSON(payload) !== q.payload) return { ok: false, error: 'payload is not in canonical form' };
   const req: CopyRequest = { action, owner, executor: o.executor, payload: q.payload, nonce: q.nonce, deadline: q.deadline, chainId };
   const digest = copyRequestDigest(req);
-  let signer: string;
-  try {
-    signer = recoverAddress(hexToBytes(digest), hexToBytes(q.signature)).toLowerCase();
-  } catch {
-    return { ok: false, error: 'the signature cannot be read' };
+  const p256Sig = q.signature.length === 130;
+  let signer = '';
+  if (!p256Sig) {
+    try {
+      signer = recoverAddress(hexToBytes(digest), hexToBytes(q.signature)).toLowerCase();
+    } catch {
+      return { ok: false, error: 'the signature cannot be read' };
+    }
   }
-  if (signer !== owner) return { ok: false, error: 'the signature is not from this wallet' };
+  if (p256Sig || signer !== owner) {
+    // A day key's signature: the wallet's delegation must name this key, for this executor, and be valid now.
+    const d = q.delegation as SignedCopyRequest | undefined;
+    if (!d || !DELEGABLE_ACTIONS.has(action)) return { ok: false, error: 'the signature is not from this wallet' };
+    if (d.action !== 'delegate' || (d as { delegation?: unknown }).delegation !== undefined) return { ok: false, error: 'the day key\'s approval is not a delegation' };
+    const dv = verifyCopyRequest(d, { executor: o.executor, now, maxAgeMs: o.maxAgeMs });
+    if (!dv.ok) return { ok: false, error: `the day key's approval does not hold: ${dv.error}` };
+    if (d.owner.toLowerCase() !== owner) return { ok: false, error: 'the day key was approved by another wallet' };
+    const p = dv.payload as { key?: unknown; expiresAt?: unknown; alg?: unknown };
+    if (typeof p.key !== 'string') return { ok: false, error: 'the signature is not from this wallet or its day key' };
+    if (p256Sig) {
+      // A P-256 day key (WebCrypto ECDSA with SHA-256 over the digest; its private key never leaves the browser's crypto).
+      if (p.alg !== 'p256') return { ok: false, error: 'the signature is not from this wallet or its day key' };
+      let ok = false;
+      try {
+        ok = p256.verify(hexToBytes(q.signature), sha256(hexToBytes(digest)), hexToBytes(p.key), { lowS: false, prehash: false });
+      } catch {
+        ok = false;
+      }
+      if (!ok) return { ok: false, error: 'the signature is not from this wallet or its day key' };
+    } else if (p.alg !== undefined || p.key.toLowerCase() !== signer) return { ok: false, error: 'the signature is not from this wallet or its day key' };
+    if (typeof p.expiresAt !== 'number' || !(p.expiresAt > now) || p.expiresAt - Number(d.nonce) > DELEGATION_TTL_MS + 60_000) return { ok: false, error: 'the day key has expired; approve a new one with your wallet' };
+    // Revoked by the wallet (signed out everywhere): every day key approved before then is refused.
+    if (o.revokedBefore && Number(d.nonce) < o.revokedBefore(owner)) return { ok: false, error: 'this day key was revoked; approve a new one with your wallet' };
+  }
   return { ok: true, digest, payload };
+}
+
+/** Sign a request with a day key (a 32-byte secp256k1 private key): 0x + r, s, v as the wallet would. */
+export function signCopyRequestWithKey(r: CopyRequest, privateKey: Uint8Array): string {
+  const wire = signDigest(hexToBytes(copyRequestDigest(r)), privateKey, 0);
+  return bytesToHex(wire.slice(1));
 }
 
 /* --------------------------------------------------------------- payloads ----- */
@@ -273,6 +331,12 @@ export interface UpdatePayload {
 export interface AlgoStartPayload {
   spec: Record<string, unknown>;
   seed: number;
+  /**
+   * A bot's restart with new settings (feature 'bot-restart'): the bot it replaces, and how.
+   *   'clean'     the old bot stops and closes what it holds (resting first); the new one starts once it has ended
+   *   'takeover'  the old bot only pulls its orders; the new one starts at once and trades on what it held (same market)
+   */
+  restart?: { from: string; how: 'clean' | 'takeover' };
 }
 
 export interface AlgoActionPayload {
@@ -307,17 +371,40 @@ export interface AlgoUpdatePatch {
   moveGuard?: number;
   refBps?: number;
   pullBps?: number;
+  placeBps?: number;
+  calmBps?: number;
+  calmMs?: number;
+  stillBps?: number;
+  stillMs?: number;
+  restMs?: number;
+  /** A volume maker's patient-taker gate and quiet windows (null: off); checked by the spec parser. */
+  flowGate?: FlowGate | null;
+  quiet?: QuietWindow[] | null;
+  quietOnly?: boolean | null;
+  news?: NewsGate | null;
   volumeTargetUsd?: number | null;
   maxLossUsd?: number | null;
   endAt?: number | null;
   onStop?: 'close' | 'keep';
   outOfRange?: 'wait' | 'stop';
+  /** Every setting saves in place (owner 2026-11-08): the oracle, the gate's pause, leverage, post-only, a grid's range. */
+  ref?: 'binance' | null;
+  noFair?: boolean;
+  pauseAfter?: number | null;
+  pauseMs?: number | null;
+  leverage?: number | null;
+  marginMode?: 'cross' | 'isolated' | null;
+  postOnly?: boolean;
+  low?: number;
+  high?: number;
+  spacing?: 'linear' | 'geometric';
 }
 
 /** The fields of an AlgoUpdatePatch, for checking a signed one. */
 export const ALGO_UPDATE_FIELDS: ReadonlyArray<keyof AlgoUpdatePatch> = [
   'quantity', 'limitPrice', 'maxSpreadBps', 'label',
-  'orderUsd', 'maxInventoryUsd', 'offsetTicks', 'chaseTicks', 'minRepriceMs', 'skewTicks', 'edgeBps', 'queueGuard', 'levels', 'moveGuard', 'refBps', 'pullBps', 'volumeTargetUsd', 'maxLossUsd', 'endAt', 'onStop', 'outOfRange',
+  'orderUsd', 'maxInventoryUsd', 'offsetTicks', 'chaseTicks', 'minRepriceMs', 'skewTicks', 'edgeBps', 'queueGuard', 'levels', 'moveGuard', 'refBps', 'pullBps', 'placeBps', 'calmBps', 'calmMs', 'stillBps', 'stillMs', 'restMs', 'flowGate', 'quiet', 'quietOnly', 'news', 'volumeTargetUsd', 'maxLossUsd', 'endAt', 'onStop', 'outOfRange',
+  'ref', 'noFair', 'pauseAfter', 'pauseMs', 'leverage', 'marginMode', 'postOnly', 'low', 'high', 'spacing',
 ];
 
 /* -------------------------------------------------------------- responses ----- */
@@ -344,7 +431,10 @@ export interface ExecutorInfo {
   /** It also runs algo orders (TWAP, VWAP, ...) with the same key; absent on an older executor. */
   algos?: { maxPerOwner: number };
   /** It runs bots (feature 'bots'): the builder fee on their orders, tenths of a bp. Absent on an older executor. */
-  bots?: { fee: number };
+  /** fee: the old flat bot fee (kept for older pages); ladder: the bot fee by 14-day volume (policy.ts BOT_FEE_LADDER). */
+  bots?: { fee: number; ladder?: ReadonlyArray<{ fromUsd: number; fee: number }>; vipFee?: number; betaVipDays?: number };
+  /** VIP (apps/executor vip.ts): this executor's tier, and whether it can move a wallet's bots to the VIP one. */
+  vip?: { tier: 'standard' | 'vip'; canMove: boolean; /** The VIP executor moves wallets that lost VIP back to the standard one (once a UTC day). */ canMoveBack?: boolean; location: string; /** Moves without the VIP check (tests, local runs). */ open?: boolean };
   /**
    * A SoDEX API key the follower made themselves can be brought here: its private key
    * encrypted to `publicKey` (ECDH P-256, HKDF-SHA256 with `info` - '<owner>' replaced by
@@ -369,7 +459,7 @@ export interface ExecutorInfo {
  * 'counter': the rules may carry direction 'counter' (planner.ts).
  * 'site-terms': it records 'accept-site-terms' (POST /site-terms); the site sends no record to one without it.
  */
-export const EXECUTOR_FEATURES = ['counter', 'site-terms', 'key-import', 'algo-update', 'bots', 'multiplier'] as const;
+export const EXECUTOR_FEATURES = ['counter', 'site-terms', 'key-import', 'algo-update', 'bots', 'multiplier', 'bot-restart'] as const;
 
 export interface SessionGrant {
   token: string;
@@ -399,6 +489,48 @@ export interface MeResponse {
   policy: RegionPolicy;
   key: KeyInfo | null;
   copies: CopyView[];
+  /**
+   * Its bots run on the other executor: 'vip' (read on the standard one after a move up) or 'standard' (read on the VIP
+   * one after a move back). The page then talks to that one. Absent on an older executor.
+   */
+  movedTo?: 'vip' | 'standard' | null;
+  /**
+   * The wallet's bot fee now (the executor's botFee: the bot ladder by its 14-day volume, or lower by VIP or a fee
+   * program such as the beta's 30 days): tenths of a bp, whether it is VIP's, and until when a lowered fee lasts
+   * (null: no end, or the ladder's own step). Absent on an older executor.
+   */
+  bots?: { feeTenths: number; vip: boolean; until: number | null };
+}
+
+/**
+ * An executor's refusal as the web reads it: `{ ok: false, code, error, detail? }`. A bot's codes (service.ts
+ * BotRefusalCode): key, account, beta, limit, bot-capacity, margin, margin-unknown, bot-market, market-copy,
+ * market-algo, market-position, vip-moving, moved. `detail` carries figures for some of them (margin: needUsd,
+ * freeUsd, reservedUsd, equityUsd; market-*: the copy, algo or position in the way).
+ */
+export interface ExecutorRefusal {
+  ok: false;
+  code: string;
+  error: string;
+  detail?: Record<string, unknown>;
+}
+
+/** A VIP move as its owner reads it (POST /vip/move starts it, GET /vip/move follows it). */
+export interface VipMoveView {
+  id: string;
+  state: 'running' | 'done' | 'failed';
+  startedAt: number;
+  endedAt: number | null;
+  steps: Array<{ id: string; label: string; state: 'wait' | 'run' | 'done' | 'fail'; ms: number | null; note?: string }>;
+  bots: number;
+  error: string | null;
+  session: { token: string; expiresAt: number } | null;
+  /** How it ended for the bots: moved, not-moved (resumed here), unknown (paused here until checked). Absent on an older executor. */
+  outcome?: 'moved' | 'not-moved' | 'unknown';
+  /** up: to VIP (the wallet asked); down: back to standard (VIP ended, at most once a UTC day). Absent: up. */
+  direction?: 'up' | 'down';
+  /** Why it moved back (the API server's words). */
+  reason?: string;
 }
 
 export interface ActivityResponse {

@@ -26,7 +26,7 @@ import { defaultFlowPath, flowReader, type FlowMarket, type FlowStore } from './
 import { existsSync } from 'node:fs';
 import { coinOf } from '../valuedesk/cohorts/model.js';
 import { venueChecks, type CheckMarket } from './venueCheck.js';
-import { LedgerStore, activityDays, coverageOf, joinSpans, ledgerPathFor, provenSpans, subtractSpans, type ActivityDay, type VenueCoverage } from './ledger.js';
+import { LedgerStore, SETTLE_MS, SLOT_MS, activityDays, coverageOf, joinSpans, ledgerPathFor, provenSpans, slotDown, slotUp, subtractSpans, type ActivityDay, type VenueCoverage } from './ledger.js';
 
 /** The longest window one read sums (a 1M candle is 31 days). */
 export const MAX_WINDOW_MS = 400 * DAY_MS;
@@ -297,6 +297,28 @@ function ledgerReader(): LedgerStore | null {
     try { l?.close(); } catch { /* never opened */ }
   }
   return ledger;
+}
+
+/**
+ * The spans of [from, to) in which the flow does NOT hold every SoDEX print of `symbol`, as the ledger compared them
+ * (ledger.ts): 5-minute slots short or over SoDEX's count, slots SoDEX gave no count for, and time the ledger has not
+ * reached. Sorted, joined, not capped (coverageOf caps its list for the page). null when there is no ledger to ask:
+ * the caller then has nothing to leave out. Slots still forming (SETTLE_MS) are not judged.
+ */
+export function flowHoles(symbol: string, from: number, to: number, now = Date.now()): Array<[number, number]> | null {
+  const l = ledgerReader();
+  if (!l) return null;
+  const a = slotDown(from);
+  const b = Math.min(slotUp(to), slotDown(now - SETTLE_MS));
+  if (!(a < b)) return [];
+  const w = l.window(symbol, a, b);
+  const m = w.market;
+  if (!m) return [[a, b]];
+  const spans: Array<[number, number]> = [];
+  if (m.checkedTo < b) spans.push([Math.max(a, m.checkedTo), b]);
+  if (!m.backDone && m.checkedFrom > a) spans.push([a, Math.min(b, m.checkedFrom)]);
+  for (const s of w.off) spans.push([s.t, s.t + SLOT_MS]);
+  return joinSpans(spans);
 }
 
 /** Tests: forget the reader. */

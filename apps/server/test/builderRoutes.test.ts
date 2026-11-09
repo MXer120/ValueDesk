@@ -353,3 +353,41 @@ test('route: with volumeDays the tiers go by the last 14 days - older volume no 
     await app.close();
   }
 });
+
+test('route: /api/vs/bots/vip tells a VIP program by its fee (VIP_PROGRAM_FEE), never by its label', async () => {
+  const dir = join(DIR, `case-${caseNo++}`);
+  mkdirSync(dir, { recursive: true });
+  const tiersPath = join(dir, 'builder-tiers.json');
+  const keyPath = join(dir, 'builder-terms.key');
+  writeFileSync(tiersPath, JSON.stringify(testTiers(BUILDER)));
+  writeNewKeyFile(keyPath);
+  const clock = new Clock();
+  const now = clock.now();
+  const VIPW = addr(0xa1);
+  const LABELLED = addr(0xa2);
+  const BOTH = addr(0xa3);
+  const prog = (address: string, fee: number, label: string, until: number | null) => ({ id: 1, address, products: ['perps', 'spot', 'copy', 'bots'] as Array<'perps' | 'spot' | 'copy' | 'bots'>, fee, from: now - 1, until, label, addedAt: now, addedBy: 'test' });
+  const programs = (a: string) =>
+    a === VIPW ? [prog(a, -1, 'Launch week', now + 86_400_000)]
+    : a === LABELLED ? [prog(a, 3, 'VIP friends', null)]
+    : a === BOTH ? [prog(a, -1, 'Beta VIP', now + 1_000), prog(a, -1, '', null)]
+    : [];
+  const svc = new BuilderService({ tiersPath, keyPath, dbPath: join(dir, 'builder.db'), chainId: CHAIN, io: new FakeSodex(clock), log: new MemoryLog(), now: clock.now, programs });
+  svc.load();
+  OPEN.push(svc);
+  const app = await appFor(svc);
+  try {
+    await get(app, `address=${VIPW}&nonce=${NONCE}`); // opens the ledger
+    const vip = async (a: string) => (await app.inject({ method: 'GET', url: `/api/vs/bots/vip?address=${a}` })).json();
+    const a = await vip(VIPW);
+    assert.equal(a.eligible, true);
+    assert.deepEqual(a.promo, { until: now + 86_400_000, label: 'Launch week' }, 'a VIP program whose label does not say VIP');
+    const b = await vip(LABELLED);
+    assert.equal(b.promo, null, 'a plain fee program labelled "VIP" is not VIP');
+    assert.equal(b.eligible, false);
+    const c = await vip(BOTH);
+    assert.deepEqual(c.promo, { until: null, label: 'VIP program' }, 'of two, the longest; an empty label reads "VIP program"');
+  } finally {
+    await app.close();
+  }
+});

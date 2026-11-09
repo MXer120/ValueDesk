@@ -29,6 +29,10 @@
  *   EXECUTOR_KEY_TTL_DAYS    the longest key lifetime a follower may register (default and at most 180)
  *   EXECUTOR_MAX_COPIES      copies per wallet (default 10)
  *   EXECUTOR_MAX_ALGOS       live algo orders (TWAP, VWAP, ...) per wallet (default 20)
+ *   EXECUTOR_MAX_LIVE_BOTS   real (non-practice) bots running on this executor, all wallets together (default 10:
+ *                            ~10 bots with pushed fills per IP, measured 2026-11-05); a start past it is a 429
+ *   EXECUTOR_VIP_PUBKEY      standard tier: the VIP executor's key-import public key (base64url SPKI, as its /info
+ *                            shows it); a move seals the wallet's key only to this key, never to one read over the wire
  *   EXECUTOR_BUILDER_DB      hosted: the builder ledger (read-only) the copy fee tier is read from, when
  *                            it is on this server
  *   EXECUTOR_BUILDER_URL     hosted: or the API server's GET /api/vs/builder/volume, when the ledger is on
@@ -63,6 +67,8 @@ export interface ExecutorConfig {
   keyTtlDaysMax: number;
   maxCopiesPerOwner: number;
   maxAlgosPerOwner: number;
+  /** Real bots running on this executor, every wallet together (EXECUTOR_MAX_LIVE_BOTS, default 10). */
+  maxLiveBots: number;
   builderDb: string | null;
   /** The API's builder volume route and its internal token (the ledger on another server). */
   builderUrl: string | null;
@@ -74,6 +80,33 @@ export interface ExecutorConfig {
    * wallets real algos are on for (EXECUTOR_LIVE_ALGOS_WALLETS: the test follower).
    */
   betaUrl: string | null;
+  /**
+   * EXECUTOR_CALENDAR_URL: the API server's /api/vs/calendar (public), for a bot's news gate. Unset: derived from
+   * EXECUTOR_BUILDER_URL (same server); neither: no calendar, and a news gate stays open (it says so).
+   */
+  calendarUrl: string | null;
+  /**
+   * VIP (vip.ts): EXECUTOR_TIER 'standard' (default) or 'vip' (the AWS Tokyo box). A standard executor with
+   * EXECUTOR_VIP_URL (the VIP executor's API base, e.g. https://vip.internal/api/copy/v1) offers the move; it asks
+   * EXECUTOR_VIP_CHECK_URL (else the builder URL's server /api/vs/bots/vip) whether a wallet is VIP, unless
+   * EXECUTOR_VIP_OPEN=1 (tests, local runs). Both sides share EXECUTOR_VIP_TOKEN (its own secret, not the API
+   * server's internal token: a leaked VIP token reads nothing on the API server). Unset: no move.
+   */
+  tier: 'standard' | 'vip';
+  vipToken: string | null;
+  vipUrl: string | null;
+  vipCheckUrl: string | null;
+  vipOpen: boolean;
+  /** EXECUTOR_VIP_PUBKEY: the VIP executor's pinned key-import public key; unset: no move (the key would go to whatever /info says). */
+  vipPubkey: string | null;
+  /**
+   * The VIP executor's way back (vip.ts BACK): EXECUTOR_STD_URL (the standard executor's API base, https or loopback)
+   * and EXECUTOR_STD_PUBKEY (its pinned key-import public key). Either unset: no wallet is moved back.
+   */
+  stdUrl: string | null;
+  stdPubkey: string | null;
+  /** How often the VIP side asks about its wallets (EXECUTOR_VIP_SWEEP_MS, default 10 min, at least 30 s: tests and live runs). */
+  vipSweepMs: number;
   localAddress: string | null;
   logLevel: 'debug' | 'info' | 'warn' | 'error';
   /** The executor id requests are signed for; null = the default (hosted: by network; self: its own, kept in its data). */
@@ -136,6 +169,36 @@ export function betaUrlFrom(raw: string | undefined, builderRaw: string | undefi
   return u.toString();
 }
 
+/** EXECUTOR_CALENDAR_URL, else the builder URL's server with /api/vs/calendar. */
+export function calendarUrlFrom(raw: string | undefined, builderRaw: string | undefined): string | null {
+  if (raw?.trim()) return builderUrl(raw);
+  const b = builderUrl(builderRaw);
+  if (!b) return null;
+  const u = new URL(b);
+  u.pathname = '/api/vs/calendar';
+  u.search = '';
+  return u.toString();
+}
+
+/** EXECUTOR_VIP_CHECK_URL, else the builder URL's server with /api/vs/bots/vip. */
+export function vipCheckUrlFrom(raw: string | undefined, builderRaw: string | undefined): string | null {
+  if (raw?.trim()) return builderUrl(raw);
+  const b = builderUrl(builderRaw);
+  if (!b) return null;
+  const u = new URL(b);
+  u.pathname = '/api/vs/bots/vip';
+  u.search = '';
+  return u.toString();
+}
+
+/** EXECUTOR_VIP_PUBKEY: a base64url SPKI (a P-256 public key is 91 bytes, ~122 characters); unset: null. */
+export function vipPubkeyFrom(raw: string | undefined, name = 'EXECUTOR_VIP_PUBKEY'): string | null {
+  const v = raw?.trim();
+  if (!v) return null;
+  if (!/^[A-Za-z0-9_-]{60,400}$/.test(v)) throw new Error(`${name} must be the other executor's key-import public key (base64url, as its /info shows keyImport.publicKey)`);
+  return v;
+}
+
 /** EXECUTOR_LIVE_ALGOS_WALLETS: unset is no wallet; '*' every wallet; else a list of addresses. */
 export function liveAlgoWalletsFrom(raw: string | undefined): readonly string[] | '*' {
   const s = raw?.trim() ?? '';
@@ -193,10 +256,23 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ExecutorConfig
     keyTtlDaysMax: Number.isFinite(ttl) && ttl >= 1 ? Math.min(Math.floor(ttl), 180) : 180,
     maxCopiesPerOwner: Math.max(1, Math.min(50, Number(env.EXECUTOR_MAX_COPIES ?? 10) || 10)),
     maxAlgosPerOwner: Math.max(1, Math.min(100, Number(env.EXECUTOR_MAX_ALGOS ?? 20) || 20)),
+    // 20 live bots per server (owner 2026-11-08): up to 10 wallets get their fills pushed on the account socket, the
+    // others are read by REST, a wallet first when a public print names it (runtime.ts onPrint).
+    maxLiveBots: Math.max(1, Math.min(1000, Math.floor(Number(env.EXECUTOR_MAX_LIVE_BOTS ?? 20)) || 20)),
     builderDb: env.EXECUTOR_BUILDER_DB?.trim() || null,
     builderUrl: builderUrl(env.EXECUTOR_BUILDER_URL),
     builderToken: env.EXECUTOR_BUILDER_TOKEN?.trim() || null,
     betaUrl: betaUrlFrom(env.EXECUTOR_BETA_URL, env.EXECUTOR_BUILDER_URL),
+    calendarUrl: calendarUrlFrom(env.EXECUTOR_CALENDAR_URL, env.EXECUTOR_BUILDER_URL),
+    tier: env.EXECUTOR_TIER?.trim() === 'vip' ? 'vip' : 'standard',
+    vipToken: env.EXECUTOR_VIP_TOKEN?.trim() || null,
+    vipUrl: env.EXECUTOR_VIP_URL?.trim() ? builderUrl(env.EXECUTOR_VIP_URL) : null,
+    vipCheckUrl: vipCheckUrlFrom(env.EXECUTOR_VIP_CHECK_URL, env.EXECUTOR_BUILDER_URL),
+    vipOpen: env.EXECUTOR_VIP_OPEN?.trim() === '1',
+    vipPubkey: vipPubkeyFrom(env.EXECUTOR_VIP_PUBKEY),
+    stdUrl: env.EXECUTOR_STD_URL?.trim() ? builderUrl(env.EXECUTOR_STD_URL) : null,
+    stdPubkey: vipPubkeyFrom(env.EXECUTOR_STD_PUBKEY, 'EXECUTOR_STD_PUBKEY'),
+    vipSweepMs: Math.max(30_000, Math.floor(Number(env.EXECUTOR_VIP_SWEEP_MS ?? 600_000)) || 600_000),
     localAddress: env.EXECUTOR_LOCAL_ADDRESS?.trim() || null,
     logLevel: level === 'debug' || level === 'warn' || level === 'error' ? level : 'info',
     executorId,

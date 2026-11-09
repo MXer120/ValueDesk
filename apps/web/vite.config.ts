@@ -2,7 +2,7 @@ import { createLogger, defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import type { IncomingHttpHeaders } from 'node:http';
+import { request as httpRequest, type IncomingHttpHeaders } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { homedir, platform } from 'node:os';
 import { join } from 'node:path';
@@ -162,9 +162,95 @@ const buildId = (): string => {
 /** The second build (tools/build-admin.mjs): the admin page alone, added to the site's dist. */
 const ADMIN_PAGE = process.env.VS_WEB_PAGE === 'admin';
 
+/**
+ * Dev only (VS_BOTS_FIXTURES=<dir>): the Bots section's market estimates from a saved answer of the real computation
+ * (apps/server flow/botMarkets.ts over production's recorded trades), since a laptop's API has no trade history to
+ * compute them from. Serves <dir>/bm-24h.json and bm-7d.json at /api/vs/bots/markets (and <dir>/latency.json at
+ * /api/copy/v1/bots/latency with VS_BOTS_LATENCY=1). Never in a build.
+ */
+/**
+ * Dev only (VS_DEV_TEST_EXECUTOR=http://127.0.0.1:18799, the tunnel to the AWS test box): while that executor answers,
+ * /api/copy goes there instead of production, so a live test (the test wallet's bots on the test box) shows on
+ * localhost with its real volume, PnL, fees and orders (owner 2026-11-08: "fix the data sync"). Probed every 5 s;
+ * when the tunnel is down, requests fall through to the usual proxy (production). Never in a build.
+ */
+function devTestExecutor(): Plugin {
+  const base = process.env.VS_DEV_TEST_EXECUTOR?.trim();
+  return {
+    name: 'vs-dev-test-executor',
+    apply: 'serve',
+    configureServer(server) {
+      if (!base || !/^http:\/\/(127\.0\.0\.1|localhost):\d+$/.test(base)) return;
+      const target = new URL(base);
+      let up = false;
+      // The first probe's answer, waited for by the requests that arrive before it (a page loaded with the dev server
+      // went to production for its first reads, then to the test box: two executors, two sign-ins).
+      const probe = (): Promise<void> => new Promise((done) => {
+        const q = httpRequest({ host: target.hostname, port: target.port, path: '/api/copy/v1/info', method: 'GET', timeout: 2500 }, (res) => { up = res.statusCode === 200; res.resume(); res.on('end', () => done()); res.on('error', () => done()); });
+        q.on('timeout', () => { up = false; q.destroy(); done(); });
+        q.on('error', () => { up = false; done(); });
+        q.end();
+      });
+      const first = probe();
+      const timer = setInterval(() => { void probe(); }, 5000);
+      server.httpServer?.on('close', () => clearInterval(timer));
+      server.middlewares.use((req, res, next) => {
+        if (!req.url || !req.url.startsWith('/api/copy/')) return next();
+        void first.then(() => {
+          if (!up) return next();
+          const headers = { ...req.headers, host: target.host };
+          delete headers[TOKEN_HEADER];
+          const out = httpRequest({ host: target.hostname, port: target.port, path: req.url, method: req.method, headers }, (pres) => {
+            res.writeHead(pres.statusCode ?? 502, { ...pres.headers, 'x-vs-dev-executor': 'test' });
+            pres.pipe(res);
+            // The test box broke off mid-answer: the browser's response ends too, never left hanging.
+            pres.on('error', () => res.destroy());
+            pres.on('aborted', () => res.destroy());
+          });
+          out.on('error', () => {
+            up = false;
+            if (!res.headersSent) { res.statusCode = 502; res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ error: 'the test executor did not answer' })); }
+            else res.destroy();
+          });
+          // The browser went away (a closed tab, an aborted read): the request to the test box stops as well.
+          res.on('close', () => { if (!res.writableFinished) out.destroy(); });
+          req.pipe(out);
+        });
+      });
+    },
+  };
+}
+
+function botsFixtures(): Plugin {
+  const dir = process.env.VS_BOTS_FIXTURES?.trim();
+  return {
+    name: 'vs-bots-fixtures',
+    apply: 'serve',
+    configureServer(server) {
+      if (!dir) return;
+      server.middlewares.use((req, res, next) => {
+        // The executor's latency too, when VS_BOTS_LATENCY=1: a real series saved from the test box's live runs (a
+        // laptop's executor sends no order to SoDEX, so its chart is empty).
+        if (req.url?.startsWith('/api/copy/v1/bots/latency') && process.env.VS_BOTS_LATENCY === '1' && existsSync(join(dir, 'latency.json'))) {
+          res.setHeader('Content-Type', 'application/json');
+          res.setHeader('Cache-Control', 'no-store');
+          return res.end(readFileSync(join(dir, 'latency.json')));
+        }
+        if (!req.url?.startsWith('/api/vs/bots/markets')) return next();
+        const w = new URL(req.url, 'http://x').searchParams.get('window') === '7d' ? '7d' : '24h';
+        const f = join(dir, `bm-${w}.json`);
+        if (!existsSync(f)) return next();
+        res.setHeader('Content-Type', 'application/json');
+        res.setHeader('Cache-Control', 'no-store');
+        res.end(readFileSync(f));
+      });
+    },
+  };
+}
+
 export default defineConfig({
   customLogger: logger,
-  plugins: [react(), trackAppOrigin(), preloadPalette(), thirdPartyLicences()],
+  plugins: [react(), trackAppOrigin(), preloadPalette(), thirdPartyLicences(), devTestExecutor(), botsFixtures()],
   define: { __VS_BUILD__: JSON.stringify(buildId()) },
   /*
    * The EIP-712 signing layer is SHARED with the backend, not copied.
@@ -257,6 +343,11 @@ export default defineConfig({
     // Proxy keeps the browser same-origin, so there is no CORS preflight on the
     // hot path and the WebSocket upgrade works without extra configuration.
     proxy: DEV_PROD ? {
+      // VS_DEV_EXECUTOR=local: production's data with a local executor (apps/executor on 8799), for tests that
+      // must not reach the production executor (the Bots e2e). Listed first: the first matching prefix wins.
+      // VIP (copy/executor.ts VIP_BASE): the local VIP executor on 8800 (launch config bots-wt-executor-vip), as /api/copy.
+      ...(process.env.VS_DEV_EXECUTOR === 'local' ? { '/api/copy-vip': { target: 'http://127.0.0.1:8800', changeOrigin: true, rewrite: (p: string) => p.replace(/^\/api\/copy-vip/, '/api/copy') } } : {}),
+      ...(process.env.VS_DEV_EXECUTOR === 'local' ? { '/api/copy': { target: 'http://127.0.0.1:8799', changeOrigin: true } } : {}),
       '/api': {
         target: PROD_SITE,
         changeOrigin: true,
@@ -281,6 +372,11 @@ export default defineConfig({
         },
       },
     } : {
+      '/api/copy-vip': {
+        target: 'http://127.0.0.1:8800',
+        changeOrigin: true,
+        rewrite: (p: string) => p.replace(/^\/api\/copy-vip/, '/api/copy'),
+      },
       // The copy executor (apps/executor, `npm start` there): hosted, the edge routes these the same way.
       '/api/copy': {
         target: 'http://127.0.0.1:8799',
