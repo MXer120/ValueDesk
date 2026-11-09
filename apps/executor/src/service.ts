@@ -414,7 +414,12 @@ export class ExecutorService {
    * 2026-11-08); the executor no longer counts its own 30 days from the first bot.
    */
   private botFee(owner: string, volume: number | null): number {
-    return Math.min(botFeeFor(volume, { vip: this.freshPerks(owner)?.vip === true }), this.perkFee(owner, 'bots'));
+    return Math.min(botFeeFor(volume, { vip: this.freshPerks(owner)?.vip === true || this.vipListed(owner) }), this.perkFee(owner, 'bots'));
+  }
+
+  /** A wallet EXECUTOR_VIP_WALLETS names: VIP whatever its volume. */
+  private vipListed(owner: string): boolean {
+    return (this.cfg.vipWallets ?? []).includes(owner.toLowerCase());
   }
 
   /** The wallet's bot fee as /me shows it: tenths of a bp, whether it is VIP's, until when a lowered fee lasts. */
@@ -425,7 +430,7 @@ export class ExecutorService {
     const p = this.freshPerks(owner, now);
     const perk = p?.bots && (p.bots.until === null || p.bots.until > now) ? p.bots : null;
     const byPerk = perk !== null && Math.max(0, perk.fee) === fee && fee < botFeeFor(vol, { vip: p?.vip === true });
-    return { feeTenths: fee, vip: p?.vip === true || (perk !== null && perk.fee <= BOT_FEE_VIP), until: byPerk ? perk.until : null };
+    return { feeTenths: fee, vip: p?.vip === true || this.vipListed(owner) || (perk !== null && perk.fee <= BOT_FEE_VIP), until: byPerk ? perk.until : null };
   }
   private readonly volumeReads = new Map<string, Promise<number | null>>();
   private builderDb: DatabaseSync | null = null;
@@ -1005,6 +1010,7 @@ export class ExecutorService {
 
   private async vipEligible(owner: string): Promise<{ ok: boolean; why: string }> {
     if (this.cfg.vipOpen) return { ok: true, why: 'open' };
+    if (this.vipListed(owner)) return { ok: true, why: 'listed' };
     if (!this.cfg.vipCheckUrl) return { ok: false, why: 'VIP status cannot be checked here.' };
     const u = new URL(this.cfg.vipCheckUrl);
     u.searchParams.set('address', owner);
