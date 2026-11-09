@@ -39,7 +39,9 @@ import {
   type LiveCopy,
 } from './live';
 import { MAX_BROWSER_KEY_DAYS } from './sodexSetup';
+import { TermsChangedError } from './terms';
 import { ModeCards } from './ModeCards';
+import { Button as KitButton, Icon as KitIcon, NumberField as KitNumber, Segmented as KitSegmented } from '../components/bots/kit/kit';
 import '../components/funds/funds.css';
 import './copy.css';
 import { fmtPlain, localize } from '../numStyle';
@@ -103,6 +105,11 @@ function ActBtn({ label, onClick, primary, disabled, busy, submit = false }: { l
   );
 }
 
+/** The Bots section's look (bots kit): the same action, in its silver / dark buttons. */
+function KitAct({ label, onClick, primary, disabled, busy, submit = false }: { label: string; onClick: () => void; primary: boolean; disabled?: boolean; busy?: boolean; submit?: boolean }) {
+  return <KitButton type={submit ? 'submit' : 'button'} variant={primary ? 'primary' : 'secondary'} loading={busy} disabled={disabled} onClick={onClick}>{label}</KitButton>;
+}
+
 export interface CopySetupSheetProps {
   open: boolean;
   onClose: () => void;
@@ -142,12 +149,45 @@ export function setupSteps(live: LiveCopy, mode: CopyModeId, paper?: boolean, bo
 }
 
 /**
+ * The setup's main action while the steps are not done, for the host's bottom button: the terms signature (owner
+ * 2026-11-09: no "Sign and accept" of its own in the terms step - the bottom button accepts). null: nothing to do
+ * there (the button stays "Finish the steps").
+ */
+export interface SetupPrimary {
+  label: string;
+  disabled: boolean;
+  busy: boolean;
+  run: () => void;
+}
+
+/** A host's bottom button: Done when ready, else the setup's main action, else "Finish the steps" (off). */
+export function SetupPrimaryButton({ ready, primary, doneLabel = 'Done', onDone, kit = false }: { ready: boolean; primary: SetupPrimary | null; doneLabel?: string; onDone: () => void; kit?: boolean }) {
+  if (kit) {
+    return ready || !primary
+      ? <KitButton variant="primary" size="md" disabled={!ready} onClick={onDone}>{ready ? doneLabel : 'Finish the steps'}</KitButton>
+      : <KitButton variant="primary" size="md" disabled={primary.disabled} loading={primary.busy} onClick={primary.run}>{primary.label}</KitButton>;
+  }
+  if (ready || !primary) {
+    return <button type="button" className="fx-cta" disabled={!ready} onClick={onDone}>{ready ? doneLabel : 'Finish the steps'}</button>;
+  }
+  return (
+    <button type="button" className="fx-cta" disabled={primary.disabled || primary.busy} onClick={primary.run}>
+      {primary.busy ? <span className="fx-spin" aria-hidden="true" /> : null}
+      {primary.label}
+    </button>
+  );
+}
+
+/**
  * The steps of one mode, each with its own action: connect, sign in or pair,
  * terms, copy fee, copy key. Used by the setup sheet, by the copy modal's
- * second step and, worded for bots (`bots`), by the Bots page's setup.
+ * second step and, worded for bots (`bots`), by the Bots page's setup. With `onPrimary`, the terms are signed by
+ * the host's bottom button (SetupPrimaryButton), not by a button in the step.
  */
-export function CopySetupSteps({ mode, live, paper, bots, hideDone = false }: { mode: CopyModeId; live: LiveCopy; paper?: boolean; bots?: boolean; hideDone?: boolean }) {
+export function CopySetupSteps({ mode, live, paper, bots, hideDone = false, onPrimary }: { mode: CopyModeId; live: LiveCopy; paper?: boolean; bots?: boolean; hideDone?: boolean; onPrimary?: (p: SetupPrimary | null) => void }) {
   const [error, setError] = useState<string | null>(null);
+  // Not an error: the terms changed while the setup was open, and the new text is shown to sign.
+  const [termsNote, setTermsNote] = useState<string | null>(null);
   const [working, setWorking] = useState<string | null>(null);
   const [termsOpen, setTermsOpen] = useState(false);
   // The country the edge saw (or the executor, which reads the same header) - never picked by the follower (owner, 2026-10-28).
@@ -156,17 +196,25 @@ export function CopySetupSteps({ mode, live, paper, bots, hideDone = false }: { 
   const [ticks, setTicks] = useState<Record<string, boolean>>({});
   const [selfUrl, setSelfUrl] = useState(live.self.url || DEFAULT_SELF_URL);
   const [pairing, setPairing] = useState('');
-  const [days, setDays] = useState<number>(mode === 'browser' ? MAX_BROWSER_KEY_DAYS : 30);
+  // null: the longest the executor allows (owner 2026-11-09: keys hold as long as allowed); a pick or a typed number otherwise.
+  const [daysPick, setDays] = useState<number | null>(null);
   // A key the follower made on SoDEX themselves (hosted and self-hosted): its name and private key.
   const [own, setOwn] = useState<{ open: boolean; name: string; key: string }>({ open: false, name: '', key: '' });
+  // A key lifetime typed in (owner 2026-11-09: the picks plus a custom number of days).
+  const [customDays, setCustomDays] = useState(false);
+  const [keyMore, setKeyMore] = useState(false);
+  // Bots draw the steps' buttons in the Bots section's kit (owner 2026-11-09: the bot setup in the section's style).
+  const Act = bots ? KitAct : ActBtn;
 
   useEffect(() => {
-    setDays(mode === 'browser' ? MAX_BROWSER_KEY_DAYS : 30);
+    setDays(null);
     setError(null);
   }, [mode]);
 
   const r = readiness(live, mode);
   const owner = live.owner;
+  const maxDays = mode === 'browser' ? MAX_BROWSER_KEY_DAYS : (mode === 'hosted' ? live.hosted : live.self).info?.keyTtlDaysMax ?? 180;
+  const days = daysPick === null ? maxDays : Math.min(daysPick, maxDays);
   const policy = regionPolicy(live.terms?.country ?? (country || null), live.viewerCountry);
   const blocked = !!live.terms && !policy.allowed;
   const allTicked = COPY_STATEMENTS.every((s) => ticks[s.id]);
@@ -174,12 +222,14 @@ export function CopySetupSteps({ mode, live, paper, bots, hideDone = false }: { 
 
   const run = async (what: string, fn: () => Promise<void>, ok?: string) => {
     setError(null);
+    setTermsNote(null);
     setWorking(what);
     try {
       await fn();
       if (ok) notify('ok', ok);
     } catch (e) {
-      if (!isRejection(e)) setError(e instanceof Error ? e.message : String(e));
+      if (e instanceof TermsChangedError) setTermsNote(e.message);
+      else if (!isRejection(e)) setError(e instanceof Error ? e.message : String(e));
     } finally {
       setWorking(null);
     }
@@ -194,11 +244,26 @@ export function CopySetupSteps({ mode, live, paper, bots, hideDone = false }: { 
   const n = (id: string) => shown.findIndex((s) => s.id === id) + 1;
 
   const ladder = COPY_FEE_LADDER.map((s) => `${localize(feePercent(s.fee))}${s.fromUsd ? ` from $${(s.fromUsd / 1e6 >= 1 ? `${fmtPlain(s.fromUsd / 1e6)}M` : `${fmtPlain(s.fromUsd / 1e3)}k`)}` : ''}`).join(', ');
-  const keyDays = mode === 'browser' ? [1, 3, 7] : [7, 30, 90, 180];
+  const keyDays = mode === 'browser' ? [1, 3, 7] : [...new Set([7, 30, 90, maxDays])].filter((d) => d <= maxDays).sort((a, b) => a - b);
   const keyHolder = mode === 'browser' ? 'only this browser' : mode === 'hosted' ? 'the ValueDesk executor in Tokyo' : 'your copier';
   const what = bots ? 'bots' : 'copies';
   // Bots: the terms step signs in to the executor as well (no step of its own).
   const termsDone = bots ? r.terms && r.connected : r.terms;
+
+  // Signing the terms: the bottom button of the host (onPrimary), or the step's own button without one.
+  const termsForm = !r.terms && termsOpen && (!bots || r.connected);
+  const canAccept = !!country && allTicked && regionPolicy(country, live.viewerCountry).allowed;
+  const acceptNow = () => void run('terms', async () => {
+    await acceptTerms(country);
+    if (bots && !getLiveCopy().hosted.signedIn) await signIn('hosted');
+  }, bots ? 'Terms accepted.' : 'Copy trading terms accepted.');
+  const acceptLabel = 'Sign and accept the terms';
+  useEffect(() => {
+    if (!onPrimary) return;
+    onPrimary(termsForm ? { label: acceptLabel, disabled: !canAccept, busy: working === 'terms', run: acceptNow } : null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onPrimary, termsForm, canAccept, working, country, bots]);
+  useEffect(() => () => onPrimary?.(null), [onPrimary]);
 
   return (
     <HideDone.Provider value={hideDone}>
@@ -215,7 +280,7 @@ export function CopySetupSteps({ mode, live, paper, bots, hideDone = false }: { 
               ? `${owner.slice(0, 6)}…${owner.slice(-4)} - its SoDEX account is the one your ${what} trade in.`
               : `The wallet whose SoDEX account your ${what} trade in.`
         }
-        action={(!owner || !live.canSign) && <ActBtn label={owner ? 'Reconnect' : 'Connect'} primary onClick={() => void openConnectDialog()} />}
+        action={(!owner || !live.canSign) && <Act label={owner ? 'Reconnect' : 'Connect'} primary onClick={() => void openConnectDialog()} />}
       />
 
       {mode === 'hosted' && !bots && (
@@ -233,7 +298,7 @@ export function CopySetupSteps({ mode, live, paper, bots, hideDone = false }: { 
           }
           action={
             !r.connected && (
-              <ActBtn label="Sign in" primary={current === 'signin'} disabled={!owner || !live.hosted.info} busy={working === 'signin'} onClick={() => void run('signin', () => signIn('hosted'))} />
+              <Act label="Sign in" primary={current === 'signin'} disabled={!owner || !live.hosted.info} busy={working === 'signin'} onClick={() => void run('signin', () => signIn('hosted'))} />
             )
           }
         />
@@ -259,7 +324,7 @@ export function CopySetupSteps({ mode, live, paper, bots, hideDone = false }: { 
             <div className="cs-form">
               <div className="cs-row">
                 <input className="fx-input" value={selfUrl} onChange={(e) => setSelfUrl(e.target.value)} placeholder={DEFAULT_SELF_URL} spellCheck={false} aria-label="Copier address" />
-                <ActBtn label="Find" primary={!live.self.info} busy={working === 'find'} onClick={() => void run('find', async () => void (await connectSelf(selfUrl)))} />
+                <Act label="Find" primary={!live.self.info} busy={working === 'find'} onClick={() => void run('find', async () => void (await connectSelf(selfUrl)))} />
               </div>
               {live.self.info && (
                 <div className="cs-row">
@@ -302,17 +367,17 @@ export function CopySetupSteps({ mode, live, paper, bots, hideDone = false }: { 
           !r.terms
             ? bots && !r.connected
               // Sign in first: the executor's record of an earlier acceptance then counts, and nobody signs the terms twice.
-              ? <ActBtn label="Continue" primary={current === 'terms'} disabled={!owner || !live.hosted.info} busy={working === 'signin'} onClick={() => void run('signin', async () => {
+              ? <Act label="Continue" primary={current === 'terms'} disabled={!owner || !live.hosted.info} busy={working === 'signin'} onClick={() => void run('signin', async () => {
                   await signIn('hosted');
                   if (!getLiveCopy().terms) setTermsOpen(true);
                 })} />
-              : !termsOpen && <ActBtn label="Review" primary={current === 'terms'} disabled={!owner} onClick={() => setTermsOpen(true)} />
+              : !termsOpen && <Act label="Review" primary={current === 'terms'} disabled={!owner} onClick={() => setTermsOpen(true)} />
             : bots && !r.connected && (
-              <ActBtn label="Continue" primary={current === 'terms'} disabled={!owner || !live.hosted.info} busy={working === 'signin'} onClick={() => void run('signin', () => signIn('hosted'))} />
+              <Act label="Continue" primary={current === 'terms'} disabled={!owner || !live.hosted.info} busy={working === 'signin'} onClick={() => void run('signin', () => signIn('hosted'))} />
             )
         }
       >
-        {!r.terms && termsOpen && (!bots || r.connected) && (
+        {termsForm && (
           <div className="cs-form">
             <ul className="cs-risks">
               {(bots ? BOT_RISK_SUMMARY : COPY_RISK_SUMMARY).map((t) => (
@@ -340,16 +405,10 @@ export function CopySetupSteps({ mode, live, paper, bots, hideDone = false }: { 
                 </label>
               ))}
             </div>
-            <ActBtn
-              label="Sign and accept"
-              primary
-              disabled={!country || !allTicked || !regionPolicy(country, live.viewerCountry).allowed}
-              busy={working === 'terms'}
-              onClick={() => void run('terms', async () => {
-                await acceptTerms(country);
-                if (bots && !getLiveCopy().hosted.signedIn) await signIn('hosted');
-              }, bots ? 'Terms accepted.' : 'Copy trading terms accepted.')}
-            />
+            {termsNote && <p className="fx-note fx-note--warn" role="status">{termsNote}</p>}
+            {onPrimary
+              ? <p className="fx-note">{allTicked ? 'Accept with the button below: one wallet signature.' : 'Tick each statement, then accept with the button below.'}</p>
+              : <Act label={acceptLabel} primary disabled={!canAccept} busy={working === 'terms'} onClick={acceptNow} />}
           </div>
         )}
         {blocked && <p className="fx-note fx-note--err">{policy.reason}</p>}
@@ -370,7 +429,7 @@ export function CopySetupSteps({ mode, live, paper, bots, hideDone = false }: { 
                 ? `Bot orders pay 0.1 to 0.5 bp of their value by your 14-day volume (0.2 bp from $500K; VIP and new beta testers 0.1 bp), instead of any other ValueDesk fee. SoDEX charges it; you approve up to ${localize(feePercent(COPY_FEE_MAX))} and can revoke it.`
                 : `Copied orders pay ${ladder} of their value (by your 14-day volume). SoDEX charges it; you approve up to ${localize(feePercent(COPY_FEE_MAX))} and can revoke it.`
           }
-          action={!r.fee && <ActBtn label="Approve" primary={current === 'fee'} disabled={!owner} busy={working === 'fee'} onClick={() => void run('fee', approveFee, bots ? 'Fee approved on SoDEX.' : 'Copy fee approved on SoDEX.')} />}
+          action={!r.fee && <Act label="Approve" primary={current === 'fee'} disabled={!owner} busy={working === 'fee'} onClick={() => void run('fee', approveFee, bots ? 'Fee approved on SoDEX.' : 'Copy fee approved on SoDEX.')} />}
         />
       )}
 
@@ -385,13 +444,21 @@ export function CopySetupSteps({ mode, live, paper, bots, hideDone = false }: { 
               ? mode === 'browser'
                 ? `Registered until ${new Date(live.browser.key!.expiresAt).toLocaleString('en-US', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}.`
                 : `Registered${side?.me?.key?.expiresAt ? ` until ${new Date(side.me.key.expiresAt).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' })}` : ''}.`
-              : `A SoDEX key for perps only, held by ${keyHolder}. It trades your ${what}; per SoDEX it can also move funds between your own SoDEX accounts and your wallet, never to anyone else.`
+              : bots
+                ? 'A SoDEX key that places your bots\' orders. One wallet signature.'
+                : `A SoDEX key for perps only, held by ${keyHolder}. It trades your ${what}; per SoDEX it can also move funds between your own SoDEX accounts and your wallet, never to anyone else.`
           }
           action={
             r.key ? (
-              <button type="button" className="fx-link fx-link--warn" disabled={!!working} onClick={() => void run('revoke', () => revokeKey(mode, false), 'Copy key revoked on SoDEX.')}>
-                Revoke
-              </button>
+              <span className="cs-keyacts">
+                {/* Within 14 days of its end: renew here, for the longest lifetime; the old key trades on until the new one is registered. */}
+                {mode !== 'browser' && side?.me?.key?.expiresAt && side.me.key.expiresAt - Date.now() < 14 * 86_400_000 && (
+                  <Act label="Renew" primary disabled={!owner || !r.connected} busy={working === 'renew'} onClick={() => void run('renew', () => approveKey(mode, maxDays), bots ? 'Trading key renewed. Your bots never stopped.' : 'Copy key renewed.')} />
+                )}
+                <button type="button" className="fx-link fx-link--warn" disabled={!!working} onClick={() => void run('revoke', () => revokeKey(mode, false), 'Copy key revoked on SoDEX.')}>
+                  Revoke
+                </button>
+              </span>
             ) : (
               <ActBtn
                 label="Approve"
@@ -405,15 +472,41 @@ export function CopySetupSteps({ mode, live, paper, bots, hideDone = false }: { 
         >
           {!r.key && (
             <div className="cs-form">
-              {mode === 'hosted' && current === 'key' && <p className="fx-note fx-note--warn">{bots ? BOT_HOSTED_KEY_NOTICE : HOSTED_KEY_NOTICE}</p>}
-              <div className="cs-days" role="group" aria-label="Key lifetime">
+              {mode === 'hosted' && current === 'key' && (bots ? (
+                // Three facts, the full disclosure one tap away (owner 2026-11-09: far less text).
+                <div className="cs-keyfacts">
+                  <ul>
+                    <li><KitIcon name="shield" size={14} />Kept encrypted on ValueDesk's server; it places your bots' orders.</li>
+                    <li><KitIcon name="wallet" size={14} />SoDEX lets it move funds only between your own accounts and wallet.</li>
+                    <li><KitIcon name="clock" size={14} />Revoke it on SoDEX any time. Shorter is safer.</li>
+                  </ul>
+                  <button type="button" className="bots-link" aria-expanded={keyMore} onClick={() => setKeyMore((x) => !x)}>{keyMore ? 'Less' : 'More about the key'}</button>
+                  {keyMore && <p className="fx-note">{BOT_HOSTED_KEY_NOTICE}</p>}
+                </div>
+              ) : <p className="fx-note fx-note--warn">{HOSTED_KEY_NOTICE}</p>)}
+              <div className="cs-days">
                 <span className="fx-note">Valid for</span>
-                {keyDays.map((d) => (
-                  <button key={d} type="button" className={`pf-ctl${days === d ? ' is-on' : ''}`} onClick={() => setDays(d)}>
-                    {d} {d === 1 ? 'day' : 'days'}
-                  </button>
-                ))}
+                {bots ? (
+                  <>
+                    <KitSegmented
+                      label="Key lifetime"
+                      value={customDays ? 'custom' : String(days)}
+                      onChange={(x) => { if (x === 'custom') setCustomDays(true); else { setCustomDays(false); setDays(Number(x)); } }}
+                      options={[...keyDays.map((d) => ({ value: String(d), label: `${d}d` })), { value: 'custom', label: 'Custom' }]}
+                    />
+                    {customDays && <KitNumber label="Days" hideLabel value={days} unit="days" onChange={(x) => x !== null && setDays(Math.min(maxDays, Math.max(1, Math.round(x))))} />}
+                  </>
+                ) : (
+                  <span role="group" aria-label="Key lifetime" className="cs-days__picks">
+                    {keyDays.map((d) => (
+                      <button key={d} type="button" className={`pf-ctl${days === d ? ' is-on' : ''}`} aria-pressed={days === d} onClick={() => setDays(d)}>
+                        {d} {d === 1 ? 'day' : 'days'}
+                      </button>
+                    ))}
+                  </span>
+                )}
               </div>
+              {bots && customDays && <p className="fx-note">1 to {maxDays} days.</p>}
               {mode === 'browser' && (
                 <p className="fx-note">At most {MAX_BROWSER_KEY_DAYS} days in a browser. When it runs out, copying stops until you approve a new one.</p>
               )}
@@ -439,7 +532,7 @@ export function CopySetupSteps({ mode, live, paper, bots, hideDone = false }: { 
                       </p>
                       <input className="fx-input" value={own.name} onChange={(e) => setOwn((o) => ({ ...o, name: e.target.value }))} placeholder="Key name, as SoDEX shows it" aria-label="Key name" spellCheck={false} autoComplete="off" maxLength={64} />
                       <input className="fx-input" type="password" value={own.key} onChange={(e) => setOwn((o) => ({ ...o, key: e.target.value }))} placeholder="Private key (0x...)" aria-label="Private key" spellCheck={false} autoComplete="off" />
-                      <ActBtn label="Use this key" primary disabled={!owner || !r.connected || !r.terms || !own.name.trim() || !own.key.trim()} busy={working === 'key'} onClick={() => {}} submit />
+                      <Act label="Use this key" primary disabled={!owner || !r.connected || !r.terms || !own.name.trim() || !own.key.trim()} busy={working === 'key'} onClick={() => {}} submit />
                     </form>
                   )}
                 </div>
@@ -479,6 +572,7 @@ export function SetupProgress({ live, mode, paper, bots }: { live: LiveCopy; mod
 
 export function CopySetupSheet({ open, onClose, mode, onMode, live, onStart, startLabel, paper }: CopySetupSheetProps) {
   const [error, setError] = useState<string | null>(null);
+  const [primary, setPrimary] = useState<SetupPrimary | null>(null);
   const [starting, setStarting] = useState(false);
   useEffect(() => {
     if (open) setError(null);
@@ -492,14 +586,16 @@ export function CopySetupSheet({ open, onClose, mode, onMode, live, onStart, sta
       <ModeCards value={mode} onChange={onMode} />
 
       <SetupProgress live={live} mode={mode} paper={paper} />
-      <CopySetupSteps mode={mode} live={live} paper={paper} />
+      <CopySetupSteps mode={mode} live={live} paper={paper} onPrimary={setPrimary} />
       {error && <p className="fx-note fx-note--err" role="alert">{error}</p>}
 
       <div className="cs-actions">
         <button type="button" className="fx-cta fx-cta--ghost" onClick={onClose}>
           {ready ? 'Close' : 'Cancel'}
         </button>
-        {onStart ? (
+        {!ready && primary ? (
+          <SetupPrimaryButton ready={false} primary={primary} onDone={onClose} />
+        ) : onStart ? (
           <button
             type="button"
             className="fx-cta"
@@ -515,9 +611,7 @@ export function CopySetupSheet({ open, onClose, mode, onMode, live, onStart, sta
             {starting ? 'Starting…' : startLabel ?? 'Start copying'}
           </button>
         ) : (
-          <button type="button" className="fx-cta" disabled={!ready} onClick={onClose}>
-            {ready ? 'Done' : 'Finish the steps'}
-          </button>
+          <SetupPrimaryButton ready={ready} primary={primary} onDone={onClose} />
         )}
       </div>
     </Modal>

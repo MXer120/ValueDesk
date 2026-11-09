@@ -286,6 +286,9 @@ export async function signMessage(
   await signPreflight?.(provider, 'personal_sign');
   const other = await otherActiveAccount(provider, address);
   if (other) throw new WalletError(wrongAccountText(other, address));
+  // Counted up and down around the wallet's own prompt (walletPrompting): the two halves were in different functions,
+  // and a typed-data signature left the count up for good.
+  setPrompting(1);
   try {
     return await withTimeout(
       provider.request({ method: 'personal_sign', params: [hex, address] }),
@@ -294,6 +297,8 @@ export async function signMessage(
   } catch (e) {
     if (e instanceof WalletError) throw e;
     wrap(e);
+  } finally {
+    setPrompting(-1);
   }
 }
 
@@ -350,6 +355,22 @@ export async function recoverTypedSigner(typedData: unknown, signature: string):
   }
 }
 
+/**
+ * How many typed-data signatures the wallet is showing right now (owner 2026-11-09: a button must not say "Starting…"
+ * while the wallet still waits for a signature). A tiny store: walletPrompting() / onWalletPrompting().
+ */
+let prompting = 0;
+const promptListeners = new Set<() => void>();
+const setPrompting = (d: number) => {
+  prompting = Math.max(0, prompting + d);
+  for (const fn of promptListeners) fn();
+};
+export const walletPrompting = (): boolean => prompting > 0;
+export function onWalletPrompting(fn: () => void): () => void {
+  promptListeners.add(fn);
+  return () => { promptListeners.delete(fn); };
+}
+
 export async function signTypedData(
   provider: Eip1193Provider,
   address: string,
@@ -360,6 +381,7 @@ export async function signTypedData(
   const other = await otherActiveAccount(provider, address, accounts);
   if (other) throw new WalletError(wrongAccountText(other, address));
   let signature: string;
+  setPrompting(1);
   try {
     signature = await withTimeout(
       provider.request({
@@ -372,6 +394,8 @@ export async function signTypedData(
   } catch (e) {
     if (e instanceof WalletError) throw e;
     wrap(e);
+  } finally {
+    setPrompting(-1);
   }
   // The wallet may still have signed as another account (it switched while the prompt was open, or
   // reports one account and signs with another): caught here, in words, before the server refuses it.

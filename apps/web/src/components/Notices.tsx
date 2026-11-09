@@ -17,6 +17,7 @@ import {
   gradeOf, markNoticesRead, notices, subscribeNotices, syncSystemNotices, unreadImportant, type Notice,
 } from '../notices';
 import { openFeedback } from '../feedback/FeedbackButton';
+import { renewKeyFromBell } from '../bots/routes';
 import { heldSession, signInFeedback } from '../feedback/session';
 import { syncNotices } from '../engineNotices';
 import { useStored } from '../hooks';
@@ -158,6 +159,9 @@ export function Notices({ address }: { address: string | null }) {
                         <span className="navnotes__k">{n.title}</span>
                         <span className="navnotes__b">{n.body}</span>
                         <span className="navnotes__t">{whenOf(n)}</span>
+                        {n.action === 'renew-key' && (
+                          <button type="button" className="navnotes__act" onClick={() => { close(); renewKeyFromBell(); }}>Renew the key</button>
+                        )}
                       </span>
                     )}
                   </li>

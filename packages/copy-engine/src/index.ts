@@ -21,6 +21,7 @@ export * from './priceGuard.ts';
 export * from './oracle.ts';
 export * from './algo/index.ts';
 export * from './notices.ts';
+export * from './terms/index.ts';
 
 /** Shown by every copier and sent in the executor's info. 1.1: counter-trading. */
 export const COPY_ENGINE_VERSION = '1.1.0';

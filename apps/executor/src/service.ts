@@ -25,6 +25,8 @@ import {
   COPY_FEE_WINDOW_DAYS,
   COPY_TERMS_EXECUTOR,
   COPY_TERMS_VERSION,
+  currentCopyTerms,
+  type CopyTermsServed,
   EXECUTOR_FEATURES,
   SITE_TERMS_EXECUTOR,
   CopyRuntime,
@@ -278,8 +280,13 @@ const WALLET_CACHE_MAX = 20_000;
 const MAKER_FEE_TTL_MS = 6 * 60 * 60_000;
 /** The beta answer is asked again after this; a failed read keeps the last answer (memory, else the db). */
 const BETA_TTL_MS = 60_000;
-/** Notices before a trading key that real bots use expires: ~24 h and ~1 h before. */
-const KEY_WARN = [{ ms: 24 * 60 * 60_000, tag: '24h', words: 'in about 24 hours' }, { ms: 60 * 60_000, tag: '1h', words: 'within the hour' }] as const;
+/** Notices before a trading key that real bots or copies use expires: 14 days, 3 days, ~24 h and ~1 h before (owner 2026-11-09). */
+const KEY_WARN = [
+  { ms: 14 * 86_400_000, tag: '14d', words: 'in 14 days' },
+  { ms: 3 * 86_400_000, tag: '3d', words: 'in 3 days' },
+  { ms: 24 * 60 * 60_000, tag: '24h', words: 'in about 24 hours' },
+  { ms: 60 * 60_000, tag: '1h', words: 'within the hour' },
+] as const;
 /** A VIP move's send waits this long for the VIP side's answer; past it the outcome is asked, never guessed. */
 const VIP_SEND_MS = 15_000;
 
@@ -752,10 +759,17 @@ export class ExecutorService {
     return owner;
   }
 
+  /** The copy terms in force here - version, hash and the text itself - for the web to show and sign exactly. */
+  copyTerms(): CopyTermsServed {
+    return currentCopyTerms();
+  }
+
   acceptTerms(req: unknown, ctx: RequestContext): MeResponse {
     const { owner, payload } = this.accept(req, 'accept-terms', ctx);
     const p = payload as Partial<AcceptTermsPayload>;
-    if (p.termsVersion !== COPY_TERMS_VERSION) throw new ApiError(400, 'terms-version', `These are the copy terms of ${COPY_TERMS_VERSION}; reload the page and accept them again.`);
+    // The web signs the version and text this executor serves (/info termsVersion, GET /terms/copy) and, on this
+    // refusal, fetches them and asks again in the same flow: never a reload (owner 2026-11-09).
+    if (p.termsVersion !== COPY_TERMS_VERSION) throw new ApiError(400, 'terms-version', `ValueDesk's copy terms are now version ${COPY_TERMS_VERSION}. Read them and sign that version.`);
     if (typeof p.termsHash !== 'string' || !/^0x[0-9a-f]{64}$/.test(p.termsHash)) throw new ApiError(400, 'terms-hash', 'termsHash must be the keccak256 of the terms text.');
     const country = normaliseCountry(p.country);
     if (!country) throw new ApiError(400, 'country', 'Choose your country of residence.');
@@ -1283,7 +1297,10 @@ export class ExecutorService {
   /* ------------------------------------------------------------- keys ----- */
 
   private keyInfo(owner: string): KeyInfo | null {
-    const k = this.db.key(owner, 'pending') ?? this.db.key(owner, 'active');
+    // The active key while it is good (a renewal under way, or one left half done, never reads as "no key"), else the
+    // pending one being set up, else the active one as it is (expired or refused).
+    const active = this.db.key(owner, 'active');
+    const k = (active && this.trustedKey(active) ? active : null) ?? this.db.key(owner, 'pending') ?? active;
     return k ? { address: k.address, name: k.name, expiresAt: k.expiresAt, registered: k.registered, createdAt: k.createdAt } : null;
   }
 
@@ -1333,17 +1350,30 @@ export class ExecutorService {
     });
   }
 
-  /** A new key for the follower to register on SoDEX (the previous one keeps trading until the new one is registered). */
+  /**
+   * A new key for the follower to register on SoDEX. The lifetime is the longest allowed unless the wallet asks for
+   * less (owner 2026-11-09: keys hold as long as allowed). A renewal never interrupts running bots or copies: SoDEX
+   * replaces a key registered under the same name, so while the active key is still good the new one takes the other
+   * of two names (keyNameFor) - the old key keeps trading until the new one is registered and promoted.
+   */
   createKey(req: unknown, ctx: RequestContext): { address: string; name: string; maxDays: number; days: number } {
     const { owner, payload } = this.accept(req, 'create-key', ctx);
     this.needTerms(owner, ctx);
     const p = payload as Partial<CreateKeyPayload>;
-    const days = Math.floor(Number(p.days));
+    const days = p.days === undefined || p.days === null ? this.cfg.keyTtlDaysMax : Math.floor(Number(p.days));
     if (!Number.isFinite(days) || days < 1 || days > this.cfg.keyTtlDaysMax) throw new ApiError(400, 'days', `A key may live 1 to ${this.cfg.keyTtlDaysMax} days.`);
+    const name = this.keyNameFor(owner);
     const { address, sealed } = this.secrets.newKey(this.cfg.network, owner);
-    this.db.putKey({ owner, slot: 'pending', address, name: this.keyName, sealed, createdAt: Date.now(), expiresAt: null, registered: false, checkedAt: null });
-    this.deps.log.info('copy key created', { owner, key: address });
-    return { address, name: this.keyName, maxDays: this.cfg.keyTtlDaysMax, days };
+    this.db.putKey({ owner, slot: 'pending', address, name, sealed, createdAt: Date.now(), expiresAt: null, registered: false, checkedAt: null });
+    this.deps.log.info('copy key created', { owner, key: address, name });
+    return { address, name, maxDays: this.cfg.keyTtlDaysMax, days };
+  }
+
+  /** The name a new key registers under: the other one than the active key's while that key is still good. */
+  keyNameFor(owner: string): string {
+    const active = this.db.key(owner, 'active');
+    if (!active || !this.trustedKey(active)) return this.keyName;
+    return active.name === this.keyName ? `${this.keyName}-b` : this.keyName;
   }
 
   /**
@@ -1480,8 +1510,10 @@ export class ExecutorService {
    * notice id names the key's address and expiry, and the db keeps a notice once.
    */
   warnKeyExpiry(now = Date.now()): void {
-    const owners = new Map<string, AlgoRecord>();
-    for (const a of this.algos.list()) if (a.spec?.bot === true && !a.spec.paper && !FINAL_STATUSES.has(a.status) && !owners.has(a.owner)) owners.set(a.owner, a);
+    // Wallets whose key real bots or live copies use (a copy stops copying when its key expires too).
+    const owners = new Map<string, { source: 'algo' | 'copy'; ref: string }>();
+    for (const a of this.algos.list()) if (a.spec?.bot === true && !a.spec.paper && !FINAL_STATUSES.has(a.status) && !owners.has(a.owner)) owners.set(a.owner, { source: 'algo', ref: a.id });
+    for (const c of this.runtime.list()) if (c.status !== 'stopped' && !c.settings.paper && !owners.has(c.owner)) owners.set(c.owner, { source: 'copy', ref: c.id });
     for (const [owner, a] of owners) {
       const k = this.db.key(owner, 'active');
       if (!k?.expiresAt || k.expiresAt <= now) continue;
@@ -1494,9 +1526,9 @@ export class ExecutorService {
       remember(this.keyWarned, id, true, 5_000);
       const when = new Date(k.expiresAt).toISOString().replace('T', ' ').slice(0, 16);
       this.db.addNotice({
-        id, owner, source: 'algo', ref: a.id, kind: 'key-expiry', grade: step.tag === '1h' ? 'error' : 'warn',
+        id, owner, source: a.source, ref: a.ref, kind: 'key-expiry', grade: step.tag === '1h' ? 'error' : 'warn',
         title: `Your trading key expires ${step.words}`,
-        body: `The key your real bots trade with expires at ${when} UTC. Shortly before that they pull their quotes and stop placing orders. Approve a new key in setup to keep them running.`,
+        body: `The key your real ${a.source === 'algo' ? 'bots trade' : 'copies trade'} with expires at ${when} UTC. Renew it now: they keep running on the old key until the new one is registered.`,
         at: now, paper: false,
       });
     }
@@ -1596,7 +1628,7 @@ export class ExecutorService {
   private async subscribeAccepted({ owner, payload, consent }: ReturnType<ExecutorService['accept']>, ctx: RequestContext): Promise<CopyView> {
     if (this.cfg.kind === 'hosted' && !this.cfg.open) throw new ApiError(503, 'closed', 'The ValueDesk executor takes no new copies right now. Running copies continue.');
     this.needTerms(owner, ctx);
-    if (payload.termsVersion !== COPY_TERMS_VERSION) throw new ApiError(400, 'terms-version', 'Reload the page: the copy terms changed.');
+    if (payload.termsVersion !== COPY_TERMS_VERSION) throw new ApiError(400, 'terms-version', `ValueDesk's copy terms are now version ${COPY_TERMS_VERSION}. Accept them in the setup, then start again.`);
     let settings;
     try {
       settings = parseSettings(payload.settings);

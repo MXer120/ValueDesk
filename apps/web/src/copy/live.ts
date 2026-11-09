@@ -14,7 +14,6 @@
 import { parsePrivateKey, sealForImport } from './keyImport';
 import { useEffect, useSyncExternalStore } from 'react';
 import {
-  COPY_TERMS_VERSION,
   canonicalSettings,
   type ActivityEntry,
   type CopySettings,
@@ -31,7 +30,7 @@ import { pollEvery } from '../exchange/visibility';
 import { BROWSER_KEY_NAME, browserCopier, type BrowserKey, type CopierRole, type PendingConfirm } from './browserCopier';
 import { DEFAULT_SELF_URL, ExecutorClient, ExecutorError, HOSTED_BASE, VIP_BASE, hostedExecutor, keepSessionAt, keepVipSession, selfBase, selfUrlProblem, setVipMoved, signCopy, standardExecutor, vipMoved } from './executor';
 import { MAX_BROWSER_KEY_DAYS, approveCopyFee, copyFeeApproval, copyKeyRegistered, registerCopyKey, revokeCopyKey } from './sodexSetup';
-import { acceptCopyTerms, adoptRecordedTerms, localTerms, recordPendingTerms, sendTermsTo, type LocalTerms } from './terms';
+import { acceptCopyTerms, activeCopyTerms, adoptRecordedTerms, followExecutorTerms, localTerms, recordPendingTerms, sendTermsTo, type LocalTerms } from './terms';
 import { requireTermsOrThrow } from '../legal/acceptance';
 import { track } from '../analytics/usage';
 
@@ -328,7 +327,9 @@ export async function refreshHosted(): Promise<void> {
   try {
     const info = await hostedExecutor.info();
     browserCopier.viewerCountry = info.viewerCountry;
-    set({ hosted: { ...state.hosted, info, infoError: null }, viewerCountry: info.viewerCountry });
+    // The terms in force are the executor's version (never this build's when they differ): what the setup signs.
+    const termsMoved = await followExecutorTerms(info);
+    set({ hosted: { ...state.hosted, info, infoError: null }, viewerCountry: info.viewerCountry, ...(termsMoved ? { terms: localTerms(state.owner) } : {}) });
   } catch (e) {
     set({ hosted: { ...state.hosted, infoError: e instanceof Error ? e.message : String(e) } });
     return;
@@ -598,7 +599,7 @@ export async function startCopy(mode: CopyModeId, settings: CopySettings): Promi
   }
   if ((settings.multiplier ?? 1) !== 1 && !supportsMultiplier(state, mode)) throw new Error(multiplierRefusal(mode));
   if (mode === 'browser') {
-    await browserCopier.start({ owner, settings, country: t.country, termsVersion: COPY_TERMS_VERSION });
+    await browserCopier.start({ owner, settings, country: t.country, termsVersion: t.termsVersion });
     syncBrowser();
     track('copy.start', { mode, direction: settings.direction });
     return;
@@ -608,7 +609,7 @@ export async function startCopy(mode: CopyModeId, settings: CopySettings): Promi
   if (!client || !info) throw new Error('Connect to the executor first.');
   if (mode === 'self') await sendTermsTo(client, owner);
   await busyWith('wallet', async () => {
-    await client.subscribe(await signCopy(p, owner, info.executorId, 'subscribe', { settings: canonicalSettings(settings), termsVersion: COPY_TERMS_VERSION }));
+    await client.subscribe(await signCopy(p, owner, info.executorId, 'subscribe', { settings: canonicalSettings(settings), termsVersion: state.terms?.termsVersion ?? activeCopyTerms().termsVersion }));
   });
   const token = client.token(owner);
   if (token) await loadMe(mode, token);

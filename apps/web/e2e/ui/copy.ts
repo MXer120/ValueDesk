@@ -28,13 +28,15 @@ export function copy(page: Page) {
     async titles(): Promise<string[]> {
       return (await modal.locator('.cs-step__t').allTextContents()).map((s) => s.trim());
     },
-    /** Review > the four copy statements > Sign and accept; then ValueDesk's own terms in front of them. */
+    /** Review > the four copy statements > the bottom button "Sign and accept the terms"; then ValueDesk's own terms in front of them. */
     async acceptTerms(wallet: TestWallet): Promise<void> {
       const mark = wallet.mark();
       await c.step('Accept the copy trading terms').getByRole('button', { name: 'Review', exact: true }).click();
-      const sign = modal.getByRole('button', { name: 'Sign and accept', exact: true });
+      // The terms are accepted with the dialog's bottom button, never with one in the step (owner 2026-11-09).
+      assert.equal(await c.step('Accept the copy trading terms').getByRole('button', { name: /Sign and accept/ }).count(), 0, 'no accept button in the step');
+      const sign = modal.getByRole('button', { name: 'Sign and accept the terms', exact: true });
       for (const s of [/^I am at least 18/, /^I am not a US person/, /^I chose the trader/, /^I have read the copy trading terms/]) {
-        assert.ok(await sign.isDisabled(), 'Sign and accept waits for every statement');
+        assert.ok(await sign.isDisabled(), 'the bottom button waits for every statement');
         await modal.getByRole('checkbox', { name: s }).check();
       }
       await sign.click();

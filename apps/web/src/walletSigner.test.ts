@@ -66,3 +66,11 @@ test('a signer the wallet does not hold is left to the server (no false alarm fr
 test('a wallet that does not list accounts still signs', async () => {
   assert.equal(typeof (await signTypedData(wallet([], keyA), A, td)), 'string');
 });
+
+test('the wallet-prompt count goes back to zero after a signature, signed or refused', async () => {
+  const { walletPrompting } = await import('./wallet.ts');
+  await signTypedData(wallet([A], keyA), A, td);
+  assert.equal(walletPrompting(), false, 'after a signature');
+  await assert.rejects(signTypedData({ request: async ({ method }) => { if (method === 'eth_accounts') return [A]; throw { code: 4001 }; } }, A, td));
+  assert.equal(walletPrompting(), false, 'after a refusal');
+});

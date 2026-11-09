@@ -180,7 +180,7 @@ export function createTestBridge(): VsTestBridge {
       // As the runners charge it: an algo child activeBuilder's fee for the wallet (browserAlgos.ts), a copy the ladder's top step.
       builder: cfg.builder ? { id: cfg.builder.id, algoFee: activeBuilder(cfg.builder) ? feeNow('perps', wallet) : 0, copyFee: browserCopyFee() } : null,
       brake: cfg.brake,
-      copyTerms: { version: engine.COPY_TERMS_VERSION, hash: terms.COPY_TERMS_HASH },
+      copyTerms: { version: terms.activeCopyTerms().termsVersion, hash: terms.activeCopyTerms().termsHash },
       viewerCountry: s.viewerCountry,
       // As browserAlgos.ts policyFor decides it for a new algo.
       policy: engine.regionPolicy(terms.localTerms(wallet)?.country ?? null, s.viewerCountry),

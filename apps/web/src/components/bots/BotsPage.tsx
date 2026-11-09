@@ -22,8 +22,9 @@ import type { AlgoView } from '@copy-engine';
 import { FINAL_STATUSES } from '@copy-engine';
 import type { Eip1193Provider } from '../../wallet';
 import { fmtUsd } from '../../format';
-import { useLiveCopy, readiness, signIn as signInExecutor } from '../../copy/live';
-import { COPY_TERMS_VERSION } from '@copy-engine';
+import { useLiveCopy, readiness, signIn as signInExecutor, approveKey } from '../../copy/live';
+import { RENEW_KEY_EVENT, RENEW_KEY_FLAG } from '../../bots/routes';
+import { activeCopyTerms } from '../../copy/terms';
 import { liveBotsFor } from '../../algo/liveAlgos';
 import { notify } from '../../toast';
 import { useConfirm } from '../Modal';
@@ -165,7 +166,8 @@ export function BotsNoticeBar({ n, onClose }: { n: BotsNotice; onClose?: () => v
 }
 
 /** Days before the trading key expires that the page starts to say so. */
-const KEY_WARN_MS = 7 * 86_400_000;
+const KEY_WARN_MS = 14 * 86_400_000;
+
 
 const STATE_TONE: Record<BotState, Tone> = { running: 'positive', waiting: 'warning', paused: 'neutral', closing: 'warning', ended: 'neutral', failed: 'negative' };
 
@@ -247,10 +249,10 @@ function BotsPageOpen({ address, provider }: { address: string | null; provider:
   // A new version of terms the wallet accepted before: the setup opens once as a popup, over the bots (which stay
   // visible and stoppable). A first visit gets the "Start here" card instead.
   const recorded = live.hosted.me?.terms ?? null;
-  const outdated = seen && !!recorded && recorded.termsVersion !== COPY_TERMS_VERSION && !live.terms;
+  const outdated = seen && !!recorded && recorded.termsVersion !== activeCopyTerms().termsVersion && !live.terms;
   useEffect(() => {
     if (!outdated || !address) return;
-    const k = `vd.bots.termsPopup:${address.toLowerCase()}:${COPY_TERMS_VERSION}`;
+    const k = `vd.bots.termsPopup:${address.toLowerCase()}:${activeCopyTerms().termsVersion}`;
     try { if (sessionStorage.getItem(k)) return; sessionStorage.setItem(k, '1'); } catch { /* private mode */ }
     setSetup({ paper: true });
   }, [outdated, address]);
@@ -491,8 +493,36 @@ function BotsPageOpen({ address, provider }: { address: string | null; provider:
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [base]);
 
+  // Renew the trading key right where it is said (owner 2026-11-09): the longest lifetime, one go, no setup sheet.
+  // Running bots keep trading on the old key until SoDEX lists the new one (the executor registers it under its
+  // other name). A failure opens the setup with the key step, where the reason is shown.
+  const [renewing, setRenewing] = useState(false);
+  const renewKey = async () => {
+    if (renewing) return;
+    setRenewing(true);
+    try {
+      await approveKey('hosted', live.hosted.info?.keyTtlDaysMax ?? 180);
+      notify('ok', 'Trading key renewed. Your bots never stopped.');
+    } catch (e) {
+      const m = e instanceof Error ? e.message : String(e);
+      if (!/reject|denied|cancel/i.test(m)) { notify('error', m); setSetup({ paper: false }); }
+    } finally {
+      setRenewing(false);
+    }
+  };
+  useEffect(() => {
+    const go = () => { try { sessionStorage.removeItem(RENEW_KEY_FLAG); } catch { /* private mode */ } void renewKey(); };
+    let flagged = false;
+    try { flagged = sessionStorage.getItem(RENEW_KEY_FLAG) === '1'; } catch { /* private mode */ }
+    if (flagged && seen) go();
+    window.addEventListener(RENEW_KEY_EVENT, go);
+    return () => window.removeEventListener(RENEW_KEY_EVENT, go);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seen]);
   // The trading key's end, said before it comes (audit B): real bots stop sending orders once it has expired.
-  const keyEnds = live.hosted.me?.key?.registered ? live.hosted.me.key.expiresAt : null;
+  // A real bot running without a usable key (expired, or a renewal left half done) reads as expired: renew right here.
+  const keyGone = !demo && seen && !readiness(live, 'hosted').key && bots.some((v) => !v.algo.spec.paper && !FINAL_STATUSES.has(v.algo.status));
+  const keyEnds = live.hosted.me?.key?.registered ? live.hosted.me.key.expiresAt : keyGone ? 0 : null;
   const realLive = bots.some((v) => !v.algo.spec.paper && !FINAL_STATUSES.has(v.algo.status));
   const [keyNow] = useState(() => Date.now());
   const keyWarn: BotsNotice | null = !demo && seen && keyEnds !== null && keyEnds - keyNow < KEY_WARN_MS && (realLive || keyEnds - keyNow < 3 * 86_400_000) && (view.page === 'overview' || view.page === 'bot')
@@ -500,9 +530,9 @@ function BotsPageOpen({ address, provider }: { address: string | null; provider:
         id: 'key-expiry',
         tone: keyEnds <= keyNow ? 'negative' : 'warning',
         text: keyEnds <= keyNow
-          ? 'Your trading key has expired: real bots cannot send or pull orders. Renew it now.'
-          : `Your trading key expires in ${Math.max(1, Math.round((keyEnds - keyNow) / 86_400_000))} day${Math.round((keyEnds - keyNow) / 86_400_000) === 1 ? '' : 's'} (${new Date(keyEnds).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}). Real bots stop sending orders then: renew it before.`,
-        action: { label: 'Renew', run: () => setSetup({ paper: false }) },
+          ? 'Your trading key has expired: real bots cannot send or pull orders. Renew it now (one wallet signature).'
+          : `Your trading key expires in ${Math.max(1, Math.round((keyEnds - keyNow) / 86_400_000))} day${Math.round((keyEnds - keyNow) / 86_400_000) === 1 ? '' : 's'} (${new Date(keyEnds).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}). Renew it now: your bots keep running on the old key until the new one is registered.`,
+        action: { label: renewing ? 'Waiting for your wallet…' : `Renew for ${live.hosted.info?.keyTtlDaysMax ?? 180} days`, run: () => void renewKey() },
       }
     : null;
 

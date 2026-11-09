@@ -28,7 +28,7 @@ import { DASH, fmt, fmtUsd, shortAddr } from '../../format';
 import { notify } from '../../toast';
 import { WalletError } from '../../wallet';
 import { VENUE_LABEL, vsApi, type TraderRow } from '../../vsApi';
-import { CopySetupSteps, STEP_DONE_LABEL, SetupProgress, copyReady, setupSteps } from '../../copy/CopySetupSheet';
+import { CopySetupSteps, STEP_DONE_LABEL, SetupPrimaryButton, SetupProgress, copyReady, setupSteps, type SetupPrimary } from '../../copy/CopySetupSheet';
 import { ModeCards } from '../../copy/ModeCards';
 import { startCopy, supportsCounter, supportsMultiplier } from '../../copy/live';
 import { EquityChart } from './EquityChart';
@@ -109,6 +109,8 @@ export function CopyModal({ c, open, row, onClose, onStarted }: CopyModalProps) 
       .finally(() => setStarting(false));
   };
 
+  // The terms are accepted with the bottom button while the setup asks for them (owner 2026-11-09).
+  const [primary, setPrimary] = useState<SetupPrimary | null>(null);
   const footer = (
     <div className="cpy-mfoot">
       <span className="cpy-v2prog">
@@ -135,14 +137,14 @@ export function CopyModal({ c, open, row, onClose, onStarted }: CopyModalProps) 
         ) : (
           <>
             <button type="button" className="fx-cta fx-cta--ghost" onClick={() => setStep(1)}>Back</button>
-            <button
+            {!ready && primary ? <SetupPrimaryButton ready={false} primary={primary} onDone={() => {}} /> : <button
               type="button"
               className={`fx-cta cpy-mstart cpy-mstart--${counter ? 'counter' : 'copy'}`}
               disabled={!ready || !c.copySettings || starting}
               onClick={start}
             >
               {starting ? 'Starting…' : startLabel(c.setup.paper, counter)}
-            </button>
+            </button>}
           </>
         )}
       </span>
@@ -153,7 +155,7 @@ export function CopyModal({ c, open, row, onClose, onStarted }: CopyModalProps) 
     <Modal open={open} title={title} onClose={onClose} size="lg" className="fx cpy-modal cpy-modal--v2" footer={footer} onBack={step === 2 ? () => setStep(1) : undefined}>
       <div key={step} className={`cpy-stepview cpy-stepview--${dir.current}`}>
         {/* Said only once the executor has answered: before that, its features are not known. */}
-        {step === 1 ? <RulesStep c={c} row={row} errs={errs} /> : <RunStep c={c} multBlocked={multBlocked && c.runOn !== 'browser' && !!c.live[c.runOn].info} />}
+        {step === 1 ? <RulesStep c={c} row={row} errs={errs} /> : <RunStep c={c} multBlocked={multBlocked && c.runOn !== 'browser' && !!c.live[c.runOn].info} onPrimary={setPrimary} />}
       </div>
       {error && <p className="fx-note fx-note--err" role="alert">{error}</p>}
     </Modal>
@@ -453,7 +455,7 @@ function SlideField({ value, min, max, step, unit, onChange, error, label }: {
 
 /* ============================================================ step 2 ====== */
 
-function RunStep({ c, multBlocked }: { c: CopyContext; multBlocked: boolean }) {
+function RunStep({ c, multBlocked, onPrimary }: { c: CopyContext; multBlocked: boolean; onPrimary: (p: SetupPrimary | null) => void }) {
   const uid = useId().replace(/:/g, '');
   const wallet = c.wallet;
   /* The wallet's SoDEX account value: a number, 'none' (no SoDEX account yet), 'error', or null while it loads. */
@@ -547,7 +549,7 @@ function RunStep({ c, multBlocked }: { c: CopyContext; multBlocked: boolean }) {
           <p className="fx-note">The copy sizes its positions against this amount. It stays in your SoDEX account: nothing is moved.</p>
         </div>
 
-        <Needs c={c} />
+        <Needs c={c} onPrimary={onPrimary} />
 
         <p className="fx-note">
           You choose the trader and every rule; ValueDesk never holds your funds. Not investment advice: past results do not predict future
@@ -562,7 +564,7 @@ function RunStep({ c, multBlocked }: { c: CopyContext; multBlocked: boolean }) {
  * that once dont show it"): the steps done before (terms, sign-in, key, fee approval) are
  * a line of pills; with everything done, the pills and "Ready" are all there is.
  */
-function Needs({ c }: { c: CopyContext }) {
+function Needs({ c, onPrimary }: { c: CopyContext; onPrimary: (p: SetupPrimary | null) => void }) {
   const steps = setupSteps(c.live, c.runOn, c.setup.paper);
   const done = steps.filter((x) => x.done);
   const left = steps.length - done.length;
@@ -585,7 +587,7 @@ function Needs({ c }: { c: CopyContext }) {
       {left > 0 && (
         <>
           <SetupProgress live={c.live} mode={c.runOn} paper={c.setup.paper} />
-          <CopySetupSteps mode={c.runOn} live={c.live} paper={c.setup.paper} hideDone />
+          <CopySetupSteps mode={c.runOn} live={c.live} paper={c.setup.paper} hideDone onPrimary={onPrimary} />
         </>
       )}
     </section>

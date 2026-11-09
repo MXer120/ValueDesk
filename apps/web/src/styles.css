@@ -3311,3 +3311,6 @@ button.coh-pick__btn,
 /* SoDEX's products while they are in beta (NavMore.tsx): a button that opens the Discord, with the pill at its end. */
 .navmore__row.is-access { width: 100%; border: 0; background: none; font: inherit; text-align: left; cursor: pointer; }
 .navmore__access { margin-left: auto; flex: none; }
+/* A notice's one-click fix (key-expiry: renew the trading key). */
+.navnotes__act { align-self: flex-start; margin-top: 4px; height: 24px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; background: none; color: var(--text); font: inherit; font-size: var(--fs-xs); font-weight: 600; cursor: pointer; }
+.navnotes__act:hover { background: rgb(var(--ink) / 0.06); }

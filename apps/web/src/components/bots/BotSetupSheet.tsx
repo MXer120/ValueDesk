@@ -9,9 +9,10 @@
 import { useState } from 'react';
 import { revokeDayKeysOn } from '../../algo/executorAlgos';
 import { readiness, type LiveCopy } from '../../copy/live';
-import { CopySetupSteps, SetupProgress, copyReady } from '../../copy/CopySetupSheet';
+import { CopySetupSteps, SetupPrimaryButton, SetupProgress, copyReady, type SetupPrimary } from '../../copy/CopySetupSheet';
 import { botFeeWords } from '../../bots/presets';
 import { Modal } from '../Modal';
+import { Button } from './kit/kit';
 import '../funds/funds.css';
 import '../../copy/copy.css';
 
@@ -41,6 +42,8 @@ export function botReady(live: LiveCopy, paper: boolean): { ready: boolean; why:
 export function BotSetupSheet({ open, onClose, live, paper }: { open: boolean; onClose: () => void; live: LiveCopy; paper: boolean }) {
   const ready = botReady(live, paper).ready;
   const [revoke, setRevoke] = useState<'idle' | 'busy' | 'done' | string>('idle');
+  // The terms are accepted with the bottom button (owner 2026-11-09), not with one in the step.
+  const [primary, setPrimary] = useState<SetupPrimary | null>(null);
   const doRevoke = async () => {
     setRevoke('busy');
     try {
@@ -51,24 +54,23 @@ export function BotSetupSheet({ open, onClose, live, paper }: { open: boolean; o
     }
   };
   return (
-    <Modal open={open} title="Bot setup" onClose={onClose} size="md" className="fx cs-sheet">
+    <Modal open={open} title="Bot setup" onClose={onClose} size="md" className="fx cs-sheet tf bots-setupsheet">
       <p className="cs-sub">
         Bots trade in your own SoDEX account, run around the clock by ValueDesk.{' '}
         {paper ? 'A practice bot needs the terms only; real orders add the fee and a trading key.' : 'Real orders need the fee and a trading key as well.'}
       </p>
       <SetupProgress live={live} mode="hosted" paper={paper} bots />
-      <CopySetupSteps mode="hosted" live={live} paper={paper} bots />
+      <CopySetupSteps mode="hosted" live={live} paper={paper} bots onPrimary={setPrimary} />
       {live.hosted.signedIn && (
         <p className="cs-sub" role="note">
-          Your wallet signs at most once a day: it approves a key this browser keeps (it cannot be read out), which then
-          signs your bot actions for up to 24 hours. Used a device you no longer trust?{' '}
+          After one wallet signature, this browser signs your bot actions for 24 hours. Lost a device?{' '}
           <button type="button" className="bots-link" disabled={revoke === 'busy'} onClick={() => void doRevoke()}>Revoke every day key</button>
           {revoke === 'done' ? ' Done: every device asks your wallet again.' : revoke !== 'idle' && revoke !== 'busy' ? ` Not revoked: ${revoke}` : ''}
         </p>
       )}
       <div className="cs-actions">
-        <button type="button" className="fx-cta fx-cta--ghost" onClick={onClose}>{ready ? 'Close' : 'Cancel'}</button>
-        <button type="button" className="fx-cta" disabled={!ready} onClick={onClose}>{ready ? 'Done' : 'Finish the steps'}</button>
+        <Button variant="secondary" size="md" onClick={onClose}>{ready ? 'Close' : 'Cancel'}</Button>
+        <SetupPrimaryButton kit ready={ready} primary={primary} onDone={onClose} />
       </div>
     </Modal>
   );

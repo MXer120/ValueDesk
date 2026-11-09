@@ -60,3 +60,12 @@ export function useBotsView(): BotsView {
 }
 
 export const isSubPage = (seg: string): boolean => SUBS.has(seg);
+
+/** The bell's "Renew the key" (Notices.tsx, key-expiry notices): the Bots page renews the trading key once it is open. */
+export const RENEW_KEY_FLAG = 'vd.bots.renewKey';
+export const RENEW_KEY_EVENT = 'vd:bots-renew-key';
+export function renewKeyFromBell(): void {
+  try { sessionStorage.setItem(RENEW_KEY_FLAG, '1'); } catch { /* private mode: the event below still reaches an open page */ }
+  goBots({ page: 'overview' });
+  window.dispatchEvent(new Event(RENEW_KEY_EVENT));
+}

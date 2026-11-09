@@ -50,14 +50,22 @@ async function setUp(page: Page, wallet: TestWallet): Promise<void> {
   if (await cont.count()) await cont.click();
   await sheet.getByRole('checkbox', { name: /^I am at least 18/ }).waitFor({ state: 'visible', timeout: 30_000 });
   assert.equal(await sheet.getByText(/EU and EEA/).count(), 0, 'no copy leverage note in the bot setup');
+  // One button at the bottom accepts (owner 2026-11-09): none in the step, and it waits for every statement.
+  const accept = sheet.getByRole('button', { name: 'Sign and accept the terms', exact: true });
+  await accept.waitFor({ state: 'visible', timeout: 10_000 });
+  assert.equal(await step('Accept the terms').getByRole('button', { name: /Sign and accept/ }).count(), 0, 'no accept button in the terms step');
+  assert.equal(await sheet.getByRole('button', { name: 'Finish the steps', exact: true }).count(), 0, 'the bottom button is the accept button now');
+  assert.ok(await accept.isDisabled(), 'accept waits for the statements');
   for (const s of [/^I am at least 18/, /^I am not a US person/, /^I chose every bot/, /^I have read the terms and risk disclosure/]) await sheet.getByRole('checkbox', { name: s }).check();
-  await sheet.getByRole('button', { name: 'Sign and accept', exact: true }).click();
+  await until(page, () => accept.isEnabled(), 'every statement ticked: accept is on');
+  await accept.click();
   const site = page.getByRole('dialog', { name: 'Sign the terms to continue' });
   await site.waitFor({ state: 'visible' });
   await site.getByRole('checkbox', { name: /^I confirm that/ }).check();
   await site.getByRole('button', { name: 'Only necessary', exact: true }).click();
   await toast(page, 'Terms accepted.').waitFor({ state: 'visible', timeout: 30_000 });
   await sheet.getByText('Ready to run bots').waitFor({ state: 'visible', timeout: 20_000 });
+  await sheet.getByRole('button', { name: 'Done', exact: true }).waitFor({ state: 'visible' });
   // The day key (owner 2026-11-08): the sign-in asks the wallet for it once; the terms always take the wallet itself.
   assert.deepEqual(wallet.since(mark).filter((r) => r.outcome === 'signed').map((r) => r.kind), ['day-key', 'site-terms', 'copy-terms']);
   await sheet.locator('.cs-actions').getByRole('button', { name: 'Close', exact: true }).click();
