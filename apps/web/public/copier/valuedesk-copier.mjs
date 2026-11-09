@@ -4100,6 +4100,7 @@ function loadConfig(env = process.env) {
     stdPubkey: vipPubkeyFrom(env.EXECUTOR_STD_PUBKEY, "EXECUTOR_STD_PUBKEY"),
     vipSweepMs: Math.max(3e4, Math.floor(Number(env.EXECUTOR_VIP_SWEEP_MS ?? 6e5)) || 6e5),
     localAddress: env.EXECUTOR_LOCAL_ADDRESS?.trim() || null,
+    wsAddresses: (env.EXECUTOR_WS_ADDRESSES ?? "").split(",").map((x) => x.trim()).filter(Boolean),
     logLevel: level === "debug" || level === "warn" || level === "error" ? level : "info",
     executorId,
     liveAlgos: env.EXECUTOR_LIVE_ALGOS === "1",
@@ -10227,7 +10228,9 @@ var LiveSocket = class {
     if (this.upSince !== null) this.o.onState?.(false);
     this.upSince = null;
     if (ws) {
-      ws.onopen = ws.onmessage = ws.onclose = ws.onerror = null;
+      ws.onopen = ws.onmessage = ws.onclose = null;
+      ws.onerror = () => {
+      };
       try {
         ws.close();
       } catch {
@@ -15387,6 +15390,30 @@ var AlgoFeed = class {
         for (const cb of this.stateCbs) cb(up);
       }
     });
+    for (const [k, factory] of (o.accountFactories ?? []).entries()) {
+      const x = { socket: null, owners: /* @__PURE__ */ new Set(), subscribed: /* @__PURE__ */ new Set() };
+      x.socket = new LiveSocket({
+        url: `${origin}/ws/perps`,
+        factory,
+        ping: '{"op":"ping"}',
+        name: `sodex-account-${k + 1}`,
+        log: o.log,
+        subscribe: (send, fresh) => {
+          if (fresh) x.subscribed = /* @__PURE__ */ new Set();
+          let id = 9e3;
+          for (const w of [...x.subscribed]) if (!x.owners.has(w)) {
+            send({ op: "unsubscribe", id: id++, params: { channel: "accountOrderUpdate", user: w } });
+            x.subscribed.delete(w);
+          }
+          for (const w of x.owners) if (!x.subscribed.has(w)) {
+            send({ op: "subscribe", id: id++, params: { channel: "accountOrderUpdate", user: w } });
+            x.subscribed.add(w);
+          }
+        },
+        onMessage: (m) => this.handle(m)
+      });
+      this.extras.push(x);
+    }
   }
   o;
   socket;
@@ -15405,10 +15432,17 @@ var AlgoFeed = class {
   orderCbs = [];
   stateCbs = [];
   sampler = null;
+  /** The extra account sockets (accountFactories): each follows its own wallets, account channels only. */
+  extras = [];
   refreshing = false;
   refreshedAt = 0;
+  /** Wallets the sockets can follow at once (every socket's places). */
+  get accountCapacity() {
+    return Math.max(0, this.o.maxAccountUsers ?? ACCOUNT_USERS_PER_IP) * (1 + this.extras.length);
+  }
   start() {
     this.socket.start();
+    for (const x of this.extras) x.socket.start();
     this.sampler ??= timers.every(500, () => {
       const now = Date.now();
       if (now - this.sampledAt >= 1e3) this.sample(now);
@@ -15417,6 +15451,7 @@ var AlgoFeed = class {
   }
   stop() {
     this.socket.stop();
+    for (const x of this.extras) x.socket.stop();
     timers.cancel(this.sampler);
     this.sampler = null;
   }
@@ -15433,9 +15468,27 @@ var AlgoFeed = class {
     this.symbols = s;
     this.owners = w;
     if (changed) this.socket.resubscribe();
+    const rest = want.filter((x) => !w.has(x));
+    const left = new Set(rest);
+    for (const x of this.extras) {
+      const keep = [...x.owners].filter((o) => left.has(o)).slice(0, cap);
+      const next = new Set(keep);
+      for (const o of keep) left.delete(o);
+      x.owners = next;
+    }
+    for (const x of this.extras) for (const o of [...left]) if (x.owners.size < cap) {
+      x.owners.add(o);
+      left.delete(o);
+    }
+    for (const x of this.extras) {
+      const diff = [...x.owners].some((o) => !x.subscribed.has(o)) || [...x.subscribed].some((o) => !x.owners.has(o));
+      if (diff) x.socket.resubscribe();
+    }
   }
   followsOrders(owner) {
-    return this.socket.up && this.subscribed.owners.has(owner.toLowerCase());
+    const o = owner.toLowerCase();
+    if (this.socket.up && this.subscribed.owners.has(o)) return true;
+    return this.extras.some((x) => x.socket.up && x.subscribed.has(o));
   }
   subscribeAll(send, fresh) {
     if (fresh) {
@@ -15780,18 +15833,48 @@ var KeyAlgoSink = class {
       return stops.map((s) => ({ clOrdID: s.clOrdID, ok: false, orderId: null, error: describe2(e), outcomeUnknown: unknown }));
     }
   }
-  async cancel(a, market, clOrdIDs) {
-    if (!clOrdIDs.length) return;
+  /**
+   * Cancels of one account that arrive together (a market-wide move pulling a wallet's quotes on several markets) go
+   * out as ONE signed request (owner 2026-11-09, Katana's rule: per-symbol cancels in a burst ran past the rate limit
+   * and pulls came late). Each caller gets its own orders' outcome: the ids SoDEX answered as gone, or an error naming
+   * only its orders that SoDEX did not cancel.
+   */
+  pending = /* @__PURE__ */ new Map();
+  cancel(a, market, clOrdIDs) {
+    if (!clOrdIDs.length) return Promise.resolve();
+    return new Promise((resolve2, reject) => {
+      let b = this.pending.get(a.accountId);
+      if (!b) {
+        b = { a, rows: [], waiters: [] };
+        this.pending.set(a.accountId, b);
+        void Promise.resolve().then(() => this.flushCancels(a.accountId));
+      }
+      for (const clOrdID of clOrdIDs) b.rows.push({ symbolID: market.id, clOrdID });
+      b.waiters.push({ ids: [...clOrdIDs], resolve: resolve2, reject });
+    });
+  }
+  async flushCancels(accountId) {
+    const b = this.pending.get(accountId);
+    this.pending.delete(accountId);
+    if (!b) return;
     let data;
     try {
-      data = await this.signAndSend(perpsActions.cancelOrder(a.accountId, clOrdIDs.map((clOrdID) => ({ symbolID: market.id, clOrdID }))));
+      data = await this.signAndSend(perpsActions.cancelOrder(accountId, b.rows));
     } catch (e) {
-      if (e instanceof SodexApiError && GONE.test(e.message)) return [...clOrdIDs];
-      throw e;
+      if (e instanceof SodexApiError && GONE.test(e.message)) {
+        for (const w of b.waiters) w.resolve([...w.ids]);
+        return;
+      }
+      for (const w of b.waiters) w.reject(e);
+      return;
     }
+    const gone = new Set(cancelGone(data));
     const bad = cancelFailures(data);
-    if (bad.length) throw new Error(`SoDEX did not cancel ${bad.length} order${bad.length === 1 ? "" : "s"}: ${bad.join("; ")}`);
-    return cancelGone(data);
+    for (const w of b.waiters) {
+      const mine = bad.filter((x) => w.ids.some((id) => x.startsWith(`${id}:`)) || !b.rows.some((r) => x.startsWith(`${r.clOrdID}:`)));
+      if (mine.length) w.reject(new Error(`SoDEX did not cancel ${mine.length} order${mine.length === 1 ? "" : "s"}: ${mine.join("; ")}`));
+      else w.resolve(w.ids.filter((id) => gone.has(id)));
+    }
   }
   async setLeverage(a, market, leverage, margin) {
     await this.signAndSend(leverageAction(a.accountId, market, leverage, margin));
@@ -15964,7 +16047,7 @@ var AlgoRuntime = class {
     if (host2.market) this.market = host2.market;
     else {
       if (!host2.factory) throw new Error("an algo runtime needs a market feed or a WebSocket factory");
-      this.market = new AlgoFeed({ network: host2.network, factory: host2.factory, log: host2.log, bookTickers: () => host2.sodex.get("/api/v1/perps/markets/bookTickers") });
+      this.market = new AlgoFeed({ network: host2.network, factory: host2.factory, log: host2.log, bookTickers: () => host2.sodex.get("/api/v1/perps/markets/bookTickers"), ...host2.accountFactories?.length ? { accountFactories: host2.accountFactories } : {} });
     }
     this.market.onOrder((u) => this.onOrderUpdate(u));
     this.market.onPrint((p) => this.onPrint(p));
@@ -16135,7 +16218,7 @@ var AlgoRuntime = class {
       if (a.spec.paper) continue;
       const live = this.live(a);
       const resting = live.filter((c) => c.tif !== "ioc").length + this.liveExits(a).length;
-      weight.set(a.owner, (weight.get(a.owner) ?? 0) + 1 + live.length * 10 + resting * 100);
+      weight.set(a.owner, (weight.get(a.owner) ?? 0) + 1 + live.length * 10 + resting * 100 + (a.spec.bot && !FINAL_STATUSES.has(a.status) ? 1e9 : 0));
     }
     const owners = [...weight.entries()].sort((x, y) => y[1] - x[1] || (x[0] < y[0] ? -1 : 1)).map(([o]) => o);
     this.market.watch([...symbols], owners);
@@ -19700,6 +19783,11 @@ var AlgoRuntime = class {
       a.k.refillAt = Date.now() + Math.max(0, jitter2(s.refillMs, s.refillJitter, makeRng(a.seed ^ a.childCount)));
     }
   }
+  /** Wallets SoDEX's account sockets can follow at once (feed.ts accountCapacity): 10 per socket address. */
+  accountCapacity() {
+    const f = this.market;
+    return typeof f.accountCapacity === "number" ? f.accountCapacity : 10;
+  }
   /** For the operator's overview (executor /internal/stats): the wallets with live orders the socket follows, and the rest read by REST. */
   socketWallets() {
     const follows = this.market.followsOrders?.bind(this.market);
@@ -21977,6 +22065,8 @@ var BinanceBooks = class {
   }
   o;
   sockets = [];
+  /** Each socket's group of symbols (same index as `sockets`). */
+  groupOf = [];
   /** The newest update id per symbol: a copy's later arrival of the same update is dropped. */
   seen = /* @__PURE__ */ new Map();
   /** Ticks per copy that won the race, and duplicates dropped (for the feed's stats). */
@@ -22003,6 +22093,7 @@ var BinanceBooks = class {
           name: `binance books ${copy}`
         });
         this.sockets.push(socket);
+        this.groupOf.push(g2);
         socket.start();
       }
     }
@@ -22010,6 +22101,24 @@ var BinanceBooks = class {
   stop() {
     for (const s of this.sockets) s.stop();
     this.sockets = [];
+    this.groupOf = [];
+  }
+  /**
+   * Every group of symbols has a socket up (owner 2026-11-09, Katana's feed rule): then a symbol without a tick is a
+   * market that did not move, not a feed that went quiet. The feed writes its heartbeat only while this holds.
+   */
+  get allUp() {
+    if (!this.sockets.length) return false;
+    const groups = /* @__PURE__ */ new Map();
+    this.sockets.forEach((s, i) => {
+      const k = (this.groupOf[i] ?? []).join(",");
+      groups.set(k, (groups.get(k) ?? false) || s.up);
+    });
+    return [...groups.values()].every(Boolean);
+  }
+  /** A socket that carries this Binance symbol is up. */
+  upFor(symbol2) {
+    return this.sockets.some((s, i) => s.up && (this.groupOf[i] ?? []).includes(symbol2));
   }
   /** At least one socket is up. */
   get up() {
@@ -22040,6 +22149,8 @@ var POLL_MS = 2;
 var FALLBACK_AFTER_MS = 500;
 var RETURN_AFTER_MS = 3e3;
 var CONFIRM_AFTER_MS = 600;
+var STILL_AFTER_MS = 400;
+var STILL_BEAT_MS = 500;
 var CONFIRM_EVERY_MS = 250;
 var CONFIRM_MAX = 6;
 var BINANCE_FAPI = "https://fapi.binance.com";
@@ -22140,6 +22251,24 @@ var BinanceReference = class {
     }));
     return n;
   }
+  /**
+   * A still market, kept as a price (owner 2026-11-09: "STILL getting held waiting for the Binance price - fix this once
+   * and for all"; Katana's feed rule): while the source of a market is provably connected - the shared ring's heartbeat
+   * is fresh (the producer beats only while every stream is up), or our own socket for it is up - a market that sent
+   * no tick did not move. Its last price is confirmed now (`still`, from `stillSince`). Called on every check (250 ms).
+   */
+  keepStill(nowMs) {
+    const ringLive = !!this.reader && !this.ownAll && this.reader.alive(STILL_BEAT_MS);
+    for (const m of this.watched) {
+      const q = this.quotes.get(m);
+      if (!q || nowMs - q.at < STILL_AFTER_MS) continue;
+      const sym = binanceSymbolOf(m);
+      const viaRing = ringLive && !!this.reader?.bySymbol.has(m) && !(this.own && this.ownFor.split(",").includes(m));
+      const viaOwn = !!this.own && !!sym && this.own.upFor(sym) && this.ownFor.split(",").includes(m);
+      if (!viaRing && !viaOwn) continue;
+      this.quotes.set(m, { bid: q.bid, ask: q.ask, at: nowMs, still: true, stillSince: q.stillSince ?? q.at });
+    }
+  }
   /** Every tick the ring has for a watched market, into the quotes (and the listeners). */
   poll() {
     const r = this.reader;
@@ -22190,6 +22319,7 @@ var BinanceReference = class {
         this.o.log.warn("reference: shared feed reopen failed", { error: String(e) });
       }
     }
+    this.keepStill(Date.now());
     const alive2 = this.reader?.alive(FALLBACK_AFTER_MS) ?? false;
     const missing = [...this.watched].filter((m) => !this.reader?.bySymbol.has(m));
     const now = Date.now();
@@ -22255,7 +22385,7 @@ var BinanceReference = class {
   }
   set(market, q) {
     const prev = this.quotes.get(market);
-    if (prev && prev.at > q.at) return;
+    if (prev && prev.at > q.at && !(prev.still && q.at >= (prev.stillSince ?? 0))) return;
     this.quotes.set(market, q);
     for (const cb of this.listeners) cb(market);
   }
@@ -22588,6 +22718,7 @@ var ExecutorService = class {
       sodex: this.sodex,
       network: cfg.network,
       factory: deps.factory,
+      ...deps.accountFactories?.length ? { accountFactories: deps.accountFactories } : {},
       log: deps.log,
       sinkFor: (a) => this.algoSink(a),
       // Bots: the bot ladder by 14-day volume; VIP, or beta in its first 30 days, the lowest step (policy.ts botFeeFor).
@@ -24063,6 +24194,13 @@ var ExecutorService = class {
       const other = live.find((x) => (x.spec.kind === "mm" || x.spec.kind === "grid") && !x.spec.paper && x.spec.symbol === spec.symbol);
       if (other) throw new ApiError(409, "bot-market", `A bot of yours already trades ${spec.symbol}${other.spec.label ? ` ("${other.spec.label}")` : ""}. Stop it first, or choose another market.`, { algoId: other.id, symbol: spec.symbol });
     }
+    if (spec.bot && !spec.paper) {
+      const botWallets = new Set(this.algos.list().filter((x) => x.spec?.bot === true && !x.spec.paper && !FINAL_STATUSES.has(x.status)).map((x) => x.owner));
+      if (!botWallets.has(owner) && botWallets.size + 1 > this.algos.accountCapacity()) {
+        this.deps.alerts?.raise("bot-health", "slots", `A real bot of ${shortWallet(owner)} was refused: all ${this.algos.accountCapacity()} live socket places are taken by bot wallets. Add an address to EXECUTOR_WS_ADDRESSES.`);
+        throw new ApiError(503, "bot-capacity", "Every live connection for real bots on this server is in use right now. Try again in a little while, or start a practice bot.");
+      }
+    }
     if (spec.bot && !spec.paper && !await this.liveBotFor(owner, ctx)) {
       throw new ApiError(403, "beta", "Real bots are for beta testers for now: ask on Discord to join. Practice runs the same bot against the live market.");
     }
@@ -24784,7 +24922,8 @@ async function main() {
     }
   };
   verifyAudit();
-  svc = new ExecutorService(cfg, db, secrets, { fetch: out.fetch, factory: out.factory, log, alerts });
+  const accountFactories = cfg.wsAddresses.map((a) => egress(a).factory);
+  svc = new ExecutorService(cfg, db, secrets, { fetch: out.fetch, factory: out.factory, log, alerts, accountFactories });
   if (cfg.kind === "self") {
     const shownHost = cfg.host === "0.0.0.0" || cfg.host === "::" ? "127.0.0.1" : cfg.host;
     process.stdout.write(selfBanner({ url: `http://${shownHost}:${cfg.port}`, dataDir: cfg.dataDir, owner: svc.owner(), code: svc.pairingCode }));

@@ -343,11 +343,11 @@ test('writer thread: a stall of this thread longer than the hang limit does not 
   const d = dir();
   const s = new IndexStore(join(d, 'x.db'), { aggRefreshMs: 0 });
   try {
-    s.startWriter({ force: true, targetMs: 2, maxRows: 100, hungMs: 300 });
+    s.startWriter({ force: true, targetMs: 2, maxRows: 100, hungMs: 1_500 });
     await until('thread up', () => s.writerStatus!.running);
     const done = s.putFillsAsync(fills(30_000, { tag: 'w', wallets: 100 }));
     // This thread blocked well past hungMs while the writer works and posts answers (2026-11-09: an 81 s stall here).
-    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1_500);
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 4_000);
     await done;
     assert.equal(s.writerStatus!.restarts, 0, 'not ended as hung');
     assert.equal(s.writerStatus!.inlineOps, 0, 'nothing written on this thread');
