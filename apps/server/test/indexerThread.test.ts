@@ -303,6 +303,29 @@ test('checkpoint thread: under a writer that never pauses the WAL starts over an
   }
 });
 
+test('checkpoint thread: no full checkpoint while the passive run left more than restartMaxBehind frames (it would hold the write lock while it copies them: 34 s on production 2026-11-09)', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'vs-ckpt-'));
+  const path = join(dir, 'i.db');
+  const store = new IndexStore(path);
+  try {
+    store.startCheckpointer({ everyMs: 20, restartFrames: 400, restartGapMs: 50, restartMaxBehind: -1 });
+    await until('thread up', () => store.checkpointStatus?.running === true);
+    let i = 0;
+    const start = Date.now();
+    while (Date.now() - start < 2_000) {
+      store.putFills(Array.from({ length: 150 }, () => fill(i++)));
+      await new Promise((r) => setImmediate(r));
+    }
+    const st = store.checkpointStatus!;
+    assert.ok(st.runs > 5, 'the passive runs went on');
+    assert.equal(st.fulls, 0, `no full run: ${JSON.stringify(st)}`);
+    assert.equal((store.db.prepare('SELECT COUNT(*) AS n FROM fills').get() as { n: number }).n, i);
+  } finally {
+    store.close();
+    rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 });
+  }
+});
+
 test('Lighter at the start: a wallet with tens of thousands of sub-accounts takes no time, and every index is found', async () => {
   const { LighterVenue } = await import('../src/indexer/ext/lighter.js');
   const was = process.env.VALUESCAN_INDEX_STREAMS;

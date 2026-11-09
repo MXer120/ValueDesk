@@ -1090,7 +1090,7 @@ export class IndexStore {
   private checkpointer: Checkpointer | null = null;
 
   /** The WAL's checkpoints go to a thread of their own (checkpointer.ts). The production writer only. */
-  startCheckpointer(o: { everyMs?: number; restartFrames?: number; restartGapMs?: number } = {}): void {
+  startCheckpointer(o: { everyMs?: number; restartFrames?: number; restartGapMs?: number; restartMaxBehind?: number } = {}): void {
     if (this.readOnly || this.path === ':memory:' || this.checkpointer) return;
     this.checkpointer = new Checkpointer(this.path, (on) => {
       this.db.exec(`PRAGMA wal_autocheckpoint = ${on ? WAL_CHECKPOINT_PAGES : 0}`);
