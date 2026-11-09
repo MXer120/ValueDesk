@@ -27,6 +27,7 @@ import { SiteGate } from './legal/LegalGate';
 import { AnalyticsPrompt } from './legal/AnalyticsPrompt';
 import { loadViewerGeo } from './legal/geo';
 import { startAnalytics } from './analytics/usage';
+import { startVercelInsights } from './analytics/vercel';
 import { startAttention } from './attention';
 import { bootLanguage } from './i18n/store';
 import './styles.css';
@@ -56,6 +57,8 @@ captureBoot();
 void loadViewerGeo();
 // ValueDesk's own usage analytics (analytics/usage.ts): nothing at all - no storage, no request - until the visitor allows it.
 startAnalytics();
+// Vercel Web Analytics and Speed Insights (analytics/vercel.ts): www only, under the same consent, nothing before it.
+startVercelInsights();
 startAttention();
 // window.__vsTest for the UI specs (testBridge.ts): the dev server only - a production build drops this branch and the module.
 if (import.meta.env.DEV) void import('./testBridge').then((m) => m.installTestBridge());

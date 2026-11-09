@@ -182,8 +182,10 @@ test('a whole live run against the fake: every step runs, every check passes (or
     assert.ok(['pass', 'finding'].includes(byId.get(id)?.status ?? ''), `${id}: ${byId.get(id)?.status} ${byId.get(id)?.detail}`);
   }
   assert.equal(w.historyReads.length, 4, `history reads: ${w.historyReads.map((x) => x.path).join(', ')}`);
-  // The limiter's gap is 25 ms here; what the fake sees of it varies with the timer under load.
-  for (let i = 1; i < w.historyReads.length; i++) assert.ok(w.historyReads[i]!.at - w.historyReads[i - 1]!.at >= 15, 'one history read per gap');
+  // The limiter's gap is 25 ms here. Checked on the limiter's own stamps: when the fake receives a request depends on the
+  // runner's other work (a loaded CI box let two arrive 12 ms apart on 2026-11-07 although they left 25 ms apart).
+  const reads = report.historyReads as Array<{ at: number }>;
+  for (let i = 1; i < reads.length; i++) assert.ok(reads[i]!.at - reads[i - 1]!.at >= 24, `one history read per gap: ${reads.map((x) => x.at).join(', ')}`);
   assert.equal(report.historyReads.length, 4);
   // Where the money went.
   assert.equal(w.aid, 777, 'the first deposit opened the account');

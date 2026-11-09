@@ -79,6 +79,32 @@ export function clearFlowCaches(): void {
   answers.clear();
 }
 
+/**
+ * A chunk's rows: its last full write, then (a slot still forming, written by the recorder's thread) its tail - the prints
+ * since, readable within about a second (store.ts flow_tail). A tail is never cached: its slot has not settled.
+ */
+function slotRows(s: FlowStore, mid: number, from: number, to: number): Array<{ t: number; n: number; data: Uint8Array; tail?: true }> {
+  return snapshot(s, () => {
+    const rows: Array<{ t: number; n: number; data: Uint8Array; tail?: true }> = s.chunks(mid, from, to);
+    for (const r of s.tails(mid, from, to)) rows.push({ ...r, tail: true });
+    return rows;
+  });
+}
+
+/**
+ * Both reads in one transaction: a full write between them moves a tail's prints into its chunk, and read apart the two
+ * could miss them (or, the other way round, count them twice).
+ */
+function snapshot<T>(s: FlowStore, read: () => T): T {
+  if (s.db.isTransaction) return read();
+  s.db.exec('BEGIN');
+  try {
+    return read();
+  } finally {
+    s.db.exec('COMMIT');
+  }
+}
+
 /** A slot that can no longer change: its end passed long enough ago for the last flush. */
 const settled = (end: number, now: number): boolean => end + CLOSE_MS + FLUSH_MS + 5_000 <= now;
 
@@ -93,7 +119,8 @@ function cachedSums(s: FlowStore, level: 'hour' | 'day', mid: number, t: number,
   return d;
 }
 
-function cachedChunk(mid: number, t: number, n: number, data: Uint8Array, now: number): PrintCols {
+function cachedChunk(mid: number, t: number, n: number, data: Uint8Array, now: number, tail = false): PrintCols {
+  if (tail) return decodeChunk(data);
   const k = `${mid}|${t}|${n}`;
   const hit = chunkCache.get(k);
   if (hit) return hit;
@@ -142,8 +169,8 @@ async function sumWindow(s: FlowStore, m: FlowMarket, from: number, to: number, 
   let prints = 0;
   for (const p of plan(from, to, days, hours)) {
     if (p.level === 'chunk') {
-      for (const c of s.chunks(m.id, Math.floor(p.from / CHUNK_MS) * CHUNK_MS, p.to)) {
-        prints += addPrints(into, cachedChunk(m.id, c.t, c.n, c.data, now), p.from, p.to);
+      for (const c of slotRows(s, m.id, Math.floor(p.from / CHUNK_MS) * CHUNK_MS, p.to)) {
+        prints += addPrints(into, cachedChunk(m.id, c.t, c.n, c.data, now, c.tail), p.from, p.to);
         if (Date.now() - budget.at > YIELD_MS) { await nextTurn(); budget.at = Date.now(); }
       }
     } else {
@@ -323,12 +350,15 @@ async function heldPerSlot(s: FlowStore, m: CheckMarket, unit: 'prints' | 'volum
   const out = new Map<number, number>();
   const add = (t: number, v: number) => { const k = Math.floor(t / slotMs) * slotMs; out.set(k, (out.get(k) ?? 0) + v); };
   if (unit === 'prints') {
-    for (const c of s.chunkCounts(m.id, a, b)) add(c.t, c.n);
+    snapshot(s, () => {
+      for (const c of s.chunkCounts(m.id, a, b)) add(c.t, c.n);
+      for (const c of s.tailCounts(m.id, a, b)) add(c.t, c.n);
+    });
     return out;
   }
   const budget = { at: Date.now() };
-  for (const c of s.chunks(m.id, a, b)) {
-    const p = cachedChunk(m.id, c.t, c.n, c.data, now);
+  for (const c of slotRows(s, m.id, a, b)) {
+    const p = cachedChunk(m.id, c.t, c.n, c.data, now, c.tail);
     let sum = 0;
     for (let i = 0; i < p.n; i++) sum += p.sz[i]!;
     add(c.t, sum);
@@ -392,12 +422,17 @@ export function activityCoverage(from: number, to: number, now = Date.now()): { 
   return { days: activityDays(l?.days(fromDay, toDay) ?? [], fromDay, toDay, today, l?.markets() ?? []), checked: !!l };
 }
 
-export async function flowWindow(ask: FlowAsk, now = Date.now()): Promise<FlowWindow | null> {
+/**
+ * `maxAgeMs`: how old a kept answer of a window still forming may be. The HTTP route takes 5 s (a crowd polling one candle
+ * costs one read per 5 s); the live channel (routes/liveHub.ts) asks with 0 once its slots' print count moved, so a print
+ * goes out as soon as it is readable - and every HTTP reader after it gets that fresher answer too.
+ */
+export async function flowWindow(ask: FlowAsk, now = Date.now(), maxAgeMs = 5_000): Promise<FlowWindow | null> {
   const s = flowReader();
   if (!s) return null;
   const key = JSON.stringify(['w', ask]);
   const hit = answers.get(key);
-  if (hit && (hit.final || now - hit.at < 5_000)) return hit.body as FlowWindow;
+  if (hit && (hit.final || now - hit.at < maxAgeMs)) return hit.body as FlowWindow;
   const markets = marketsOf(s, ask.coin, ask.venues, ask.kind);
   const sums: WalletSums = new Map();
   const budget = { at: Date.now() };
@@ -427,6 +462,35 @@ export async function flowWindow(ask: FlowAsk, now = Date.now()): Promise<FlowWi
   };
   answers.set(key, { at: now, final, body });
   return body;
+}
+
+/** How far back flowStamp looks: the slot forming and the one before (a late print, a catch-up of the last minutes). */
+const STAMP_BACK_MS = 2 * CHUNK_MS;
+/** Files that have the recorder thread's flow_tail (rt/flow): its prints are readable before the chunk is written again. */
+const hasTail = new WeakMap<FlowStore, boolean>();
+
+/**
+ * The prints a window holds in its newest slots, summed over its markets: chunks plus (when the recorder runs on its own
+ * thread and writes flow_tail) their tails. A print that lands moves it; a tail folded into its chunk does not. The live
+ * channel (routes/liveHub.ts) reads this every 500 ms per subscribed window - two indexed COUNT-like reads per market - and
+ * builds the window again only when it moved. Null: no flow file.
+ */
+export function flowStamp(ask: Pick<FlowAsk, 'coin' | 'venues' | 'kind' | 'from' | 'to'>, now = Date.now()): number | null {
+  const s = flowReader();
+  if (!s) return null;
+  const from = Math.max(ask.from, Math.floor((now - STAMP_BACK_MS) / CHUNK_MS) * CHUNK_MS);
+  if (from >= ask.to) return 0;
+  let tail = hasTail.get(s);
+  if (tail === undefined) {
+    tail = !!s.db.prepare(`SELECT 1 AS x FROM sqlite_master WHERE type = 'table' AND name = 'flow_tail'`).get();
+    hasTail.set(s, tail);
+  }
+  let n = 0;
+  for (const m of marketsOf(s, ask.coin, ask.venues, ask.kind)) {
+    for (const c of s.chunkCounts(m.id, from, ask.to)) n += c.n;
+    if (tail) n += Number((s.db.prepare('SELECT COALESCE(SUM(n), 0) AS n FROM flow_tail WHERE mid = ? AND t >= ? AND t < ?').get(m.id, from, ask.to) as { n: number }).n);
+  }
+  return n;
 }
 
 /** Party ids whose address or account id contains `q` (at most a few thousand). */
@@ -494,8 +558,8 @@ export async function flowWalletFills(ask: WalletAsk, now = Date.now()): Promise
           const d = cachedSums(s, 'hour', m.id, h, now);
           if (d && !d.sums.has(p.id)) continue;
         }
-        for (const c of s.chunks(m.id, Math.max(h, Math.floor(ask.from / CHUNK_MS) * CHUNK_MS), Math.min(h + HOUR_MS, ask.to))) {
-          if (!walletFillsOf(out, cachedChunk(m.id, c.t, c.n, c.data, now), p.id, ask.from, ask.to, MAX_FILLS)) { capped = true; break; }
+        for (const c of slotRows(s, m.id, Math.max(h, Math.floor(ask.from / CHUNK_MS) * CHUNK_MS), Math.min(h + HOUR_MS, ask.to))) {
+          if (!walletFillsOf(out, cachedChunk(m.id, c.t, c.n, c.data, now, c.tail), p.id, ask.from, ask.to, MAX_FILLS)) { capped = true; break; }
           if (Date.now() - budget.at > YIELD_MS) { await nextTurn(); budget.at = Date.now(); }
         }
       }

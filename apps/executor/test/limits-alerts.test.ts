@@ -310,6 +310,8 @@ test('guard: refusals sorted into classes', () => {
     ['order not found', 'gone'],
     ['order already filled', 'gone'],
     ['order already canceled', 'gone'],
+    ['internal error: cannot update margin mode with open positions', 'gone'],
+    ['SoDEX did not cancel 1 order: order rejected: OrderNotFound', 'gone'],
     ['code 77', 'unknown'],
   ];
   for (const [text, want] of cases) assert.equal(classifyRejection(text), want, text);

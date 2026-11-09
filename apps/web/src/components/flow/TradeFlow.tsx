@@ -22,7 +22,8 @@ import { useLatched } from '../motion';
 import type { FlowWindow, FlowWindowRow, WalletFillsBody } from '@sign/flow/read.js';
 import type { VenueCoverage } from '@sign/flow/ledger.js';
 import type { FlowRole, FlowSide, FlowSort } from '@sign/flow/codec.js';
-import { vsApi, VENUE_LABEL, type Venue } from '../../vsApi';
+import { vsApi, vsPaths, VENUE_LABEL, type Venue } from '../../vsApi';
+import { useLiveRead } from '../../live/useLiveRead';
 import { usePolled } from '../explore/cohorts/parts';
 import { fmtCount, fmtPx, fmtUsdExact, fmtUsdShort } from '../explore/model';
 import { fmtNum } from '../../numStyle';
@@ -186,15 +187,18 @@ export function TradeFlowView({ symbol, spot, interval, at, end, onPick, onClose
 
   const kind = spot ? 'spot' as const : 'perp' as const;
   const key = `${coin}|${kind}|${venues.join(',')}|${win.from}|${win.to}|${role}|${side}|${sort}|${limit}|${query}`;
-  const fetcher = useCallback(
-    (s: AbortSignal) => vsApi.flow({ coin, venues, kind, from: win.from, to: win.to, role, side, sort, limit, ...(query.length >= 3 ? { q: query } : {}) }, s),
+  const ask = useMemo(
+    () => ({ coin, venues, kind, from: win.from, to: win.to, role, side, sort, limit, ...(query.length >= 3 ? { q: query } : {}) }),
     [key], // eslint-disable-line react-hooks/exhaustive-deps
   );
-  // A candle still forming is read again every 15 s (the recorder's flush); a closed one once.
-  // One already closed, once: a venue's count comes within 30 minutes and the catch-up can still fill it for hours, so a recent
-  // one that is not final is read again now and then, silently: only a known shortfall is said.
+  const fetcher = useCallback((s: AbortSignal) => vsApi.flow(ask, s), [ask]);
+  // Pushed from server 1 while the live socket is up (live/useLiveRead.ts, server routes/liveHub.ts): a print shows within
+  // about half a second of being readable (2026-11-09: it took 15-30 s polled through Vercel). Without the socket: a candle
+  // still forming is read again every 15 s (the recorder's flush); a closed one once. One already closed, once: a venue's
+  // count comes within 30 minutes and the catch-up can still fill it for hours, so a recent one that is not final is read
+  // again now and then, silently (the socket does the same server-side): only a known shortfall is said.
   const [recheck, setRecheck] = useState(0);
-  const r = usePolled<FlowWindow>(key, fetcher, live ? 15_000 : recheck);
+  const r = useLiveRead<FlowWindow>(key, vsPaths.flow(ask), fetcher, live ? 15_000 : recheck);
   // The previous candle's answer while this one loads is not this candle's: skeletons, not "No trades".
   const d = r.stale ? null : r.data;
   useEffect(() => {
@@ -218,7 +222,11 @@ export function TradeFlowView({ symbol, spot, interval, at, end, onPick, onClose
       <div className="tfl-candle" aria-live="polite">
         <b>{windowText(win)}</b>
         {count > 1 && <span>{fmtCount(count)} candles</span>}
-        {live && <span className="tfl-forming">Forming</span>}
+        {live && (
+          <span className="tfl-forming" title={r.streaming ? 'Streaming: each print shows as it lands' : 'Refreshed every 15 seconds'}>
+            {r.streaming && <i className="tfl-dot" aria-hidden="true" />}Forming
+          </span>
+        )}
       </div>
 
       <div className="tfl-views">

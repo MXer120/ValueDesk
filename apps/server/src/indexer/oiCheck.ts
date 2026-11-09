@@ -90,6 +90,46 @@ export function oiRereads(
   return due.slice(0, limit).map((d) => d.address);
 }
 
+export interface OiAsk { coin: string; limit: number; sides?: { long: boolean; short: boolean }; gapAt?: number }
+
+/**
+ * oiRereads for several coins of one venue in ONE pass over its books, a slice at a time (cohortCore.ts: on the heatmap
+ * thread, or the indexer's): coin by coin it was a pass over every book of the venue per coin over. Each list is what
+ * oiRereads gives for its ask (same order, same ties).
+ */
+export async function oiRereadsMany(
+  books: Iterable<[string, { at: number; pos: ReadonlyMap<string, { szi: number }> }]>,
+  asks: readonly OiAsk[], coinOf: (symbol: string) => string, now: number,
+  breathe: () => Promise<void>, sliceMs: number,
+): Promise<string[][]> {
+  const due = asks.map(() => [] as Array<{ address: string; before: boolean; size: number; at: number }>);
+  const byCoin = new Map<string, number[]>();
+  asks.forEach((a, i) => byCoin.set(a.coin, [...(byCoin.get(a.coin) ?? []), i]));
+  const size = asks.map(() => 0);
+  let t0 = Date.now();
+  for (const [address, b] of books) {
+    if (Date.now() - t0 > sliceMs) { await breathe(); t0 = Date.now(); }
+    if (now - b.at < OI_REREAD_MIN_AGE_MS) continue;
+    size.fill(0);
+    let any = false;
+    for (const [symbol, p] of b.pos) {
+      if (!p.szi) continue;
+      const which = byCoin.get(coinOf(symbol));
+      if (!which) continue;
+      for (const i of which) {
+        const sides = asks[i]!.sides ?? { long: true, short: true };
+        if ((p.szi > 0 && sides.long) || (p.szi < 0 && sides.short)) { size[i]! += Math.abs(p.szi); any = true; }
+      }
+    }
+    if (!any) continue;
+    for (let i = 0; i < asks.length; i++) if (size[i]! > 0) due[i]!.push({ address, before: b.at < (asks[i]!.gapAt ?? 0), size: size[i]!, at: b.at });
+  }
+  return due.map((d, i) => {
+    d.sort((a, b) => (a.before !== b.before ? (a.before ? -1 : 1) : b.size - a.size || a.at - b.at));
+    return d.slice(0, asks[i]!.limit).map((x) => x.address);
+  });
+}
+
 /** The status's view: per venue, the worst ratio and the coins over, worst first (at most `max`). */
 export function oiStatus(rows: readonly OiRow[], max = 10): Partial<Record<Venue, { worst: number; over: number; coins: Array<{ coin: string; ratio: number; long: number; short: number; oi: number }> }>> {
   const out: Partial<Record<Venue, { worst: number; over: number; coins: Array<{ coin: string; ratio: number; long: number; short: number; oi: number }> }>> = {};

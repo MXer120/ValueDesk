@@ -195,3 +195,21 @@ test('the wallet history from the steps the index holds equals the one read from
   assert.equal(bad.snapT, t0 + 4 * Q);
   s.close();
 });
+
+test('the newest history step is kept in meta: a start reads it without scanning the table (81 s start-up stall, 2026-11-09)', async () => {
+  const { IndexStore } = await import('../src/indexer/store.js');
+  const s = new IndexStore(join(dir, 'last.db'));
+  try {
+    assert.equal(s.liqHistLastT(), 0, 'empty');
+    s.putLiqHist(3 * Q, [['BTC', '{}'], ['ETH', '{}']]);
+    s.putLiqHist(2 * Q, [['SOL', '{}']]);
+    assert.equal(s.getMeta('liq_hist_last_t'), String(3 * Q), 'an older step written later does not move it back');
+    s.db.exec('DELETE FROM liq_hist');
+    assert.equal(s.liqHistLastT(), 3 * Q, 'read from meta, not the table');
+    s.db.exec("DELETE FROM meta WHERE key = 'liq_hist_last_t'");
+    s.putLiqHist(5 * Q, [['BTC', '{}']]);
+    assert.equal(s.liqHistLastT(), 5 * Q);
+  } finally {
+    s.close();
+  }
+});

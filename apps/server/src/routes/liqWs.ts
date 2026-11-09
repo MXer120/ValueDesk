@@ -25,12 +25,14 @@
  * subscribes again when it zooms): the stream is summed to it, so a liquidation price
  * moving within a drawn bar costs nothing, and a bar goes out again only once its USD
  * moved SEND_MOVE (measured on BTC at the server's 0.02% buckets: ~130 changes a
- * second, nearly all hops between neighbours). One subscription per connection (a new
+ * second, nearly all hops between neighbours). Besides it, up to liveHub.ts MAX_SUBS live channels ({op:"live"}: the
+ * Trade flow's forming candle, the cohort pages). One heatmap subscription per connection (a new
  * one replaces it); viewers of the same coin, venues and width share one computation. On the instance, Caddy passes this
  * path through without the origin secret the rest of the API needs (a browser
  * cannot connect through Vercel's functions), with the viewer's own address for
  * the per-address limit; the API checks the site Origin itself.
  */
+import { mark } from '../indexer/busy.js';
 import type { FastifyInstance } from 'fastify';
 import type { WebSocket } from 'ws';
 import { VENUES, type Venue } from '../valuedesk/types.js';
@@ -39,6 +41,7 @@ import { liqFeed, type CoinChange } from '../indexer/liqFeed.js';
 import { heatOf, liqHeatmap, liveSrc } from '../indexer/liqRead.js';
 import { marketsNow } from '../valuedesk/liquidations/rules.js';
 import { FINE_MAX_BUCKETS, addRow, trimRow, type LiqRow } from '../valuedesk/liquidations/levels.js';
+import type { LiveHub } from './liveHub.js';
 
 export const LIQ_WS_PATH = '/ws/liq';
 const MAX_CONNECTIONS = Number(process.env.VALUESCAN_LIQ_WS_MAX) || 5_000;
@@ -94,7 +97,17 @@ const subOf = new WeakMap<WebSocket, string>();
 const perAddress = new Map<string, number>();
 let connections = 0;
 /** Coin -> venue -> changed bucket indices since the last tick; and venues whose coverage moved. */
-const pending = new Map<string, { b: Map<Venue, Set<number>>; c: Set<Venue>; whole: boolean; f: Map<Venue, Set<number>>; fWhole: boolean }>();
+type Pending = Map<string, { b: Map<Venue, Set<number>>; c: Set<Venue>; whole: boolean; f: Map<Venue, Set<number>>; fWhole: boolean }>;
+let pending: Pending = new Map();
+/**
+ * The ticks' sends, worked off a few groups at a time (FAN_SLICE_MS, then the thread given back): every minute each coin's
+ * fine layer comes whole and every group of it gets its window again, a walk of up to a few hundred thousand cells and
+ * a JSON of each - all groups in one piece was part of the API's "liq:feed" stalls (2026-11-09 stall profiles: the feed
+ * and this fan-out 7.7 s in one). The same messages as sent in one piece, in the same order per group.
+ */
+const FAN_SLICE_MS = 8;
+const fanJobs: Array<{ ch: Pending; now: number; gs: Group[]; i: number }> = [];
+let fanning = false;
 let wired = false;
 
 const send = (ws: WebSocket, msg: unknown) => {
@@ -126,13 +139,29 @@ function fineRows(g: Group, only: Set<number> | null): Map<number, LiqRow> {
   const out = new Map<number, LiqRow>();
   const f = liqFeed().coins.get(g.coin)?.f;
   if (!f || !g.fine) return out;
+  const put = (j: number, y: number[]) => {
+    const row = [j, ...y] as LiqRow;
+    const x = out.get(j);
+    if (x) addRow(x, row); else out.set(j, row);
+  };
+  const fk = g.fine.k;
   for (const v of g.venues) {
-    for (const [i, y] of f.v.get(v) ?? []) {
+    const held = f.v.get(v);
+    if (!held) continue;
+    if (only && only.size * fk < held.size) {
+      // Only the streamed cells' own sources looked up (2026-11-08: the whole fine layer was walked every second).
+      for (const j of only) {
+        for (let i = j * fk; i < (j + 1) * fk; i++) {
+          const y = held.get(i);
+          if (y && fineIdx(g, f.st, i) === j) put(j, y);
+        }
+      }
+      continue;
+    }
+    for (const [i, y] of held) {
       const j = fineIdx(g, f.st, i);
       if (j === null || (only && !only.has(j))) continue;
-      const row = [j, ...y] as LiqRow;
-      const x = out.get(j);
-      if (x) addRow(x, row); else out.set(j, row);
+      put(j, y);
     }
   }
   return out;
@@ -184,14 +213,21 @@ function deltaFor(g: Group, ch: { b: Map<Venue, Set<number>>; c: Set<Venue> }): 
   for (const v of g.venues) for (const i of ch.b.get(v) ?? []) idx.add(Math.floor(i / g.k));
   const now = new Map<number, LiqRow>();
   if (idx.size) {
+    const put = (j: number, y: number[]) => {
+      // y is the row without its index: shifted one place, as the row it was.
+      const row = [j, ...y] as LiqRow;
+      const x = now.get(j);
+      if (x) addRow(x, row); else now.set(j, row);
+    };
     for (const v of g.venues) {
-      for (const [i, y] of c.v.get(v)?.b ?? []) {
-        const j = Math.floor(i / g.k);
-        if (!idx.has(j)) continue;
-        // y is the row without its index: shifted one place, as the row it was.
-        const row = [j, ...y] as LiqRow;
-        const x = now.get(j);
-        if (x) addRow(x, row); else now.set(j, row);
+      const held = c.v.get(v)?.b;
+      if (!held) continue;
+      // Every second, per group: only the changed buckets' own cells looked up, not every bucket of the venue walked
+      // (2026-11-08) - unless the changed cells outnumber what is held.
+      if (idx.size * g.k < held.size) {
+        for (const j of idx) for (let i = j * g.k; i < (j + 1) * g.k; i++) { const y = held.get(i); if (y) put(j, y); }
+      } else {
+        for (const [i, y] of held) { const j = Math.floor(i / g.k); if (idx.has(j)) put(j, y); }
       }
     }
   }
@@ -219,12 +255,14 @@ function wire(): void {
     if (!p) { p = { b: new Map(), c: new Set(), whole: false, f: new Map(), fWhole: false }; pending.set(ch.coin, p); }
     if (ch.whole) p.whole = true;
     if (ch.fine?.whole) p.fWhole = true;
-    for (const [v, idx] of ch.fine?.venues ?? []) {
+    // Laid out anew (the coin or its fine layer): the tick sends it whole, the indices are not read (a fine layer whole is
+    // every cell: 250,000 for BTC each minute, put into sets for nothing).
+    for (const [v, idx] of p.fWhole ? [] : ch.fine?.venues ?? []) {
       let s = p.f.get(v);
       if (!s) { s = new Set(); p.f.set(v, s); }
       for (const i of idx) s.add(i);
     }
-    for (const [v, idx] of ch.venues) {
+    for (const [v, idx] of p.whole ? [] : ch.venues) {
       let s = p.b.get(v);
       if (!s) { s = new Set(); p.b.set(v, s); }
       for (const i of idx) s.add(i);
@@ -232,27 +270,10 @@ function wire(): void {
     for (const v of ch.covered) p.c.add(v);
   });
   feed.on('tick', () => {
-    const now = Date.now();
-    for (const g of groups.values()) {
-      if (!g.conns.size) continue;
-      const ch = pending.get(g.coin);
-      // The fine layer laid out anew (the price moved a tenth): its step and reach, and the window whole again.
-      if (ch?.fWhole) {
-        const fm = fineMeta(g.coin);
-        if (fm) for (const ws of g.conns) send(ws, { t: 'fm', coin: g.coin, ...fm });
-        const msg = g.fine ? fineSnapshot(g) : null;
-        if (msg) for (const ws of g.conns) send(ws, msg);
-      } else if (ch && g.fine) {
-        const msg = fineDeltaFor(g, ch.f);
-        if (msg) for (const ws of g.conns) send(ws, msg);
-      }
-      // A new layout (the price left half to twice the old) goes out whole.
-      if (ch?.whole || now - g.snapAt >= SNAP_MS) { void pushSnap(g); continue; }
-      if (!ch) continue;
-      const msg = deltaFor(g, ch);
-      if (msg) for (const ws of g.conns) send(ws, msg);
-    }
-    pending.clear();
+    mark('liq:ws');
+    fanJobs.push({ ch: pending, now: Date.now(), gs: [...groups.values()], i: 0 });
+    pending = new Map();
+    if (!fanning) fanOut();
   });
   // Without the feed (the indexer elsewhere or restarting) the snapshots still come, from the minute rows.
   const t = setInterval(() => {
@@ -261,6 +282,45 @@ function wire(): void {
     for (const g of groups.values()) if (g.conns.size && now - g.snapAt >= SNAP_MS) void pushSnap(g);
   }, 5_000);
   t.unref?.();
+}
+
+/** The ticks' sends, a slice at a time. */
+function fanOut(): void {
+  fanning = true;
+  const t0 = performance.now();
+  while (fanJobs.length) {
+    const job = fanJobs[0]!;
+    while (job.i < job.gs.length) {
+      tickGroup(job.gs[job.i++]!, job.ch, job.now);
+      if (performance.now() - t0 >= FAN_SLICE_MS && (job.i < job.gs.length || fanJobs.length > 1)) {
+        setImmediate(() => { mark('liq:ws'); fanOut(); });
+        return;
+      }
+    }
+    fanJobs.shift();
+  }
+  fanning = false;
+}
+
+/** One group's sends for a tick. */
+function tickGroup(g: Group, pend: Pending, now: number): void {
+  if (!g.conns.size) return;
+  const ch = pend.get(g.coin);
+  // The fine layer laid out anew (the price moved a tenth): its step and reach, and the window whole again.
+  if (ch?.fWhole) {
+    const fm = fineMeta(g.coin);
+    if (fm) for (const ws of g.conns) send(ws, { t: 'fm', coin: g.coin, ...fm });
+    const msg = g.fine ? fineSnapshot(g) : null;
+    if (msg) for (const ws of g.conns) send(ws, msg);
+  } else if (ch && g.fine) {
+    const msg = fineDeltaFor(g, ch.f);
+    if (msg) for (const ws of g.conns) send(ws, msg);
+  }
+  // A new layout (the price left half to twice the old) goes out whole.
+  if (ch?.whole || now - g.snapAt >= SNAP_MS) { void pushSnap(g); return; }
+  if (!ch) return;
+  const msg = deltaFor(g, ch);
+  if (msg) for (const ws of g.conns) send(ws, msg);
 }
 
 async function pushSnap(g: Group): Promise<void> {
@@ -318,8 +378,13 @@ function fineAsk(coin: string, x: { k?: unknown; from?: unknown; to?: unknown } 
   return { k, from, to };
 }
 
-/** The route. `originOk`: the site's own origins (hosted) or the local dev ones. */
-export function liqWsRoute(app: FastifyInstance, originOk: (origin: string | undefined) => boolean): void {
+/**
+ * The route. `originOk`: the site's own origins (hosted) or the local dev ones. `live`: the live channels the same socket
+ * carries beside its one heatmap subscription (liveHub.ts: the Trade flow's forming candle, the cohort pages) - one
+ * socket per tab instead of one per feature, through the same origin check, address limit and message budget, and the
+ * one path Caddy lets through without the origin secret (deploy/server/caddy/Caddyfile.template), so nothing changes there.
+ */
+export function liqWsRoute(app: FastifyInstance, originOk: (origin: string | undefined) => boolean, live?: LiveHub): void {
   wire();
   app.get('/ws/liq', { websocket: true }, (socket: WebSocket, req) => {
     // The address as the rate limits key it (hosted.ts clientKey): an IPv6 client by its /64, or one
@@ -341,8 +406,10 @@ export function liqWsRoute(app: FastifyInstance, originOk: (origin: string | und
     socket.on('pong', () => { alive = true; });
     socket.on('message', (raw: Buffer) => {
       if (++msgs > MAX_MSGS || raw.length > 1024) { socket.close(1008, 'slow down'); return; }
-      let m: { op?: string; coin?: unknown; venues?: unknown; k?: unknown; fine?: { k?: unknown; from?: unknown; to?: unknown } | null };
+      let m: { op?: string; coin?: unknown; venues?: unknown; k?: unknown; fine?: { k?: unknown; from?: unknown; to?: unknown } | null; id?: unknown; path?: unknown };
       try { m = JSON.parse(raw.toString()); } catch { return; }
+      if (!m || typeof m !== 'object') return;
+      if (live?.message(socket, m)) return;
       if (m.op === 'unsub') { leave(socket); return; }
       if (m.op !== 'sub') return;
       const coin = String(m.coin ?? '').trim().toUpperCase();
@@ -357,6 +424,7 @@ export function liqWsRoute(app: FastifyInstance, originOk: (origin: string | und
       clearInterval(window);
       clearInterval(ping);
       leave(socket);
+      live?.leave(socket);
       connections--;
       const n = (perAddress.get(who) ?? 1) - 1;
       if (n > 0) perAddress.set(who, n); else perAddress.delete(who);
@@ -374,3 +442,6 @@ export const _liveHeat = (coin: string, venues: readonly Venue[]) => {
   const src = liveSrc(coin);
   return src ? heatOf(coin, venues, src, new Map(venues.map((v) => [v, marketsNow(v)]))) : null;
 };
+/** Tests: one group's delta and fine rows as the tick builds them. */
+export const _deltaFor = deltaFor;
+export const _fineRows = fineRows;

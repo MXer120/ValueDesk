@@ -286,6 +286,18 @@ test('the held rows go to the next writer through a file beside the index: its f
   const want = await read(a, later);
   a.close();
   assert.ok(existsSync(file), 'written as the writer closes');
+  // Read late, a slice at a time (a handover, standby.ts): the same days and figures as the one-go read below.
+  const { copyFileSync } = await import('node:fs');
+  copyFileSync(file, `${file}.keep`);
+  const late = new IndexStore(path, { aggRefreshMs: 0, deferHeld: true });
+  assert.equal((late as unknown as Held).heldPartials.days, 0, 'not read at the start');
+  await late.loadHeldLateAsync();
+  assert.ok(!existsSync(file), 'taken');
+  assert.deepEqual({ days: (late as unknown as Held).heldPartials.days, rows: (late as unknown as Held).heldPartials.rows }, { days: 1, rows: rows.filter((r) => r.t >= first).length });
+  assert.deepEqual(await read(late, later), want, 'the same figures read in slices');
+  (late as unknown as { held: Map<string, unknown> }).held.clear();
+  late.close();
+  copyFileSync(`${file}.keep`, file);
   const b = new IndexStore(path, { aggRefreshMs: 0 });
   assert.ok(!existsSync(file), 'taken by the next writer');
   const given = (b as unknown as Held).heldPartials;

@@ -15,7 +15,8 @@
  *     (green up, amber degraded, orange partly down, red down, blue maintenance,
  *     grey no data). Each bar tells its day on hover, focus (arrow keys move along
  *     the days) or a tap: the date, the uptime, the minutes down or degraded and
- *     that day's incidents and maintenance.
+ *     that day's incidents and maintenance. Under the indexer, how current each of its datasets is against its
+ *     target (FreshList): a dot (green within, amber behind, grey no figure), the figure and the target.
  * Everything the owner wrote is shown as text (React escapes it), never as markup.
  * Read again every minute while the tab is visible.
  *
@@ -25,9 +26,9 @@
 import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import { openFeedback } from '../feedback/FeedbackButton';
 import {
-  OVERALL_SHOWN_TEXT, SERVICE_LINE, SHOWN_TEXT, STAGE_TEXT, componentNames, dayDetail, fmtUptime, fmtUtc, heroTone, loadStatus,
+  FRESH_STATE_TEXT, OVERALL_SHOWN_TEXT, SERVICE_LINE, freshName, freshTarget, freshValue, SHOWN_TEXT, STAGE_TEXT, componentNames, dayDetail, fmtUptime, fmtUtc, heroTone, loadStatus,
   noticeDuration, noticeKindText, noticePhase, noticeTimes, overallShown, shownState, splitNotices,
-  type DayDetail, type HeroTone, type Notice, type NoticePhase, type ShownState, type StatusView,
+  type DayDetail, type Freshness, type HeroTone, type Notice, type NoticePhase, type ShownState, type StatusView,
 } from './statusData';
 import './status.css';
 
@@ -253,6 +254,36 @@ export function DayBars({ days, label }: { days: DayDetail[]; label: string }) {
   );
 }
 
+/**
+ * How current each of the indexer's datasets is, from the last check: one slim row each (the past notices' row
+ * style), its state as a dot - never a coloured edge - and in words for screen readers.
+ */
+export function FreshList({ fresh }: { fresh: Freshness }) {
+  return (
+    <div className="st-fresh">
+      <p className="st-fresh__head">
+        <span>How current the data is</span>
+        <time dateTime={new Date(fresh.at).toISOString()}>checked {time(fresh.at)}</time>
+      </p>
+      <ul className="st-fresh__list" aria-label="How current the indexer's data is">
+        {fresh.items.map((i) => (
+          <li key={i.id} className={`st-fresh__item is-${i.state}`} title={`${freshName(i.id)}: ${FRESH_STATE_TEXT[i.state]}`}>
+            <i className="st-fresh__dot" aria-hidden="true" />
+            <span className="st-fresh__name">
+              <b>{freshName(i.id)}</b>
+              <small>{freshTarget(i)}</small>
+            </span>
+            <span className="st-fresh__val">
+              {freshValue(i)}
+              <span className="st-fresh__sr">, {FRESH_STATE_TEXT[i.state].toLowerCase()}</span>
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 type NoticeTab = 'current' | 'past';
 
 /** The headline: icon, state, which services it is about, and when it was last checked. */
@@ -427,6 +458,7 @@ export function StatusPage() {
                     <span className="st-scale__pct">{fmtUptime(s.uptime)} uptime</span>
                     <span>Today</span>
                   </div>
+                  {s.id === 'indexer' && report.freshness && <FreshList fresh={report.freshness} />}
                 </li>
               );
             })}

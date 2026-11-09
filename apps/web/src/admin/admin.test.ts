@@ -51,7 +51,7 @@ test('sign-in: the wallet signs once, the password goes beside it, and the serve
   } finally {
     globalThis.fetch = realFetch;
   }
-  assert.deepEqual(calls, ['eth_chainId', 'eth_signTypedData_v4']);
+  assert.deepEqual(calls, ['eth_chainId', 'eth_accounts', 'eth_signTypedData_v4']);
   assert.equal(sent[0]!.url, '/api/admin/session');
   assert.equal(sent[0]!.body.password, 'a password long enough');
   assert.deepEqual(checkAdminSignIn(sent[0]!.body.signIn, [c.address]).ok, true);

@@ -62,9 +62,13 @@
  * `src/indexer/compact.ts` is run once with the indexer stopped.
  */
 import { DatabaseSync, type StatementSync } from 'node:sqlite';
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeSync, writevSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { Checkpointer, type CheckpointStatus } from './checkpointer.js';
+import {
+  ACTIVITY_DAY, ACTIVITY_HOUR, CTL_WANT, FILL_UPSERT, LIQ_ADDR_INSERT, LIQ_CUR_DELETE, LIQ_CUR_INSERT, LIQ_LOG_INSERT, WRITER_DONE_META, WriterThread, writerThreadOn,
+  type ActivityWire, type LiqChangedWire, type LiqClosedWire, type WriterAnswer, type WriterPending, type WriterStatus,
+} from './writerThread.js';
 import { deviceKeyPath } from '../deviceKey.js';
 import { VENUES, type BoardWindow, type Venue } from '../valuedesk/types.js';
 import type { BoardFilter, Side } from './windows.js';
@@ -72,11 +76,25 @@ import { closeRuns, type CloseFill } from '../valuedesk/winRate.js';
 import { mayPrune } from '../retention.js';
 
 export const SCHEMA_VERSION = 1;
+/** Meta keys: the newest t of cohort_series and cohort_mix (lastT). */
+const SERIES_LAST_T_META = 'cohort_series_last_t';
+/** Rows per transaction of a sliced cohort write (putCohortSeriesSliced / putCohortMixSliced). */
+const COHORT_SLICE_ROWS = 500;
+const COHORT_MIX_SLICE_ROWS = 50;
+const MIX_LAST_T_META = 'cohort_mix_last_t';
+const LIQ_HIST_LAST_T_META = 'liq_hist_last_t';
+/** The held rows read late (a handover) hand the thread back this often (ms). */
+const HELD_SLICE_MS = 20;
 /**
  * The writer connection's page cache at most, in KiB (PRAGMA cache_size). Its own memory: nothing else on the machine can
  * push it out, as a backup's reads did to the OS's cache (a 413 s stall, 2026-11-05). Taken as used; the server has 46 GB.
  */
 export const WRITER_CACHE_KB = 6 * 1024 * 1024;
+// With the writer thread (writerThread.ts) two connections write, and SQLite empties a connection's page cache whenever the
+// other commits. PRAGMA mmap_size was tried against that on 2026-11-09 (writeBench.ts -mmap modes) and is NOT set: node's
+// SQLite is built with SQLITE_MAX_MMAP_SIZE 0x7fff0000, so only the first 2 GiB of the 50 GB file could be mapped, and on
+// the bench's 1.6 GB file (all of it mapped) it cut the reads' p99 from 0.5-0.85 ms to 0.37-0.41 ms but not the board-like
+// reads' (p99 1.8-4.2 ms against 2.2-3.4 ms). It would also turn a disk read error into SIGBUS instead of an SQLite error.
 
 export function defaultDbPath(): string {
   return process.env.VALUESCAN_INDEX_DB?.trim() || join(dirname(deviceKeyPath()), 'valuescan-index.db');
@@ -160,6 +178,8 @@ export interface WalletFillRow {
   fee: number | null;
   closed_pnl: number | null;
   oid: string | null;
+  /** 1: from the venue's REST answer; 0: a public-stream print (indexer/walletFills.ts answers REST rows only). */
+  src: number;
 }
 
 export interface CloseRow {
@@ -306,6 +326,7 @@ export interface WindowStats {
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS cohort_pnl_flow (address TEXT PRIMARY KEY, flow REAL NOT NULL, u0 REAL NOT NULL) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS accounts (
   venue TEXT NOT NULL, address TEXT NOT NULL, account_id INTEGER, label TEXT,
   account_value REAL, av_at INTEGER,
@@ -676,6 +697,8 @@ const HELD_DAY_MAX = 5_000_000;
  * starts. Tied to the scan's own SQL: a release that reads the fills differently starts cold.
  */
 const HELD_FILE = 'held-partial-days.bin';
+/** Arrays per writev call (IOV_MAX on Linux is 1,024). */
+const HELD_IOV = 1_024;
 const HELD_FORMAT = 'held-1|SELECT t, symbol, side, px * sz AS v, closed_pnl, fee, src FROM fills ORDER BY t';
 /** Rows per scan step: a few ms of work. */
 const SCAN_CHUNK = 1_000;
@@ -755,9 +778,17 @@ const WAL_LIMIT_BYTES = 1024 * 1024 * 1024;
  * for a full checkpoint. Past Checkpointer's HUNG_MS, so a hung thread is ended first: an error here would lose a write.
  */
 const WRITER_BUSY_MS = 200_000;
+/** A write transaction part (lock wait, body, commit) longer than this is logged (tx). */
+const SLOW_TX_MS = 5_000;
 const WAL_CHECKPOINT_PAGES = 16_000;
 /** Rows per transaction when a history page is written a slice at a time: 2,000 rows were seconds of the thread. */
 const FILL_SLICE = 50;
+/**
+ * Wallets whose "day rows exist" and "frozen up to" answers are kept (aggReady, frozenTo). At 50,000 a flush naming more
+ * wallets than that emptied them over and over, and every row asked SQLite again: in writeBench.ts (200,000 wallets) those
+ * two lookups were 2.7 s of the 3.2 s this thread spent on a 200,000-row write. A key and a number each: tens of MB.
+ */
+const WALLET_MEMO_MAX = 500_000;
 
 /** A settled stretch of one trader's old days: summed, frozen, then deleted. */
 interface FreezeJob {
@@ -818,9 +849,21 @@ export const liqTurnMs = (elapsedMs: number): number => Math.min(600, 100 + (500
 /**
  * In key order (aid, coin, venue): each insert lands next to the last in the log's and the state's
  * b-trees instead of on a page of its own (dev, 30k rows: 2.1 s -> 0.66 s, with the cache 0.36 s).
+ * (LIQ_LOG_INSERT itself lives in writerThread.ts, which runs the same statement.)
  */
-const LIQ_LOG_INSERT = `INSERT OR REPLACE INTO liq_log (aid, coin, venue, t, side, liq, usd, sym, sz, entry, mark, iso, lev, eq, cash, read_at)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+/** Statements that write: counted while they run (IndexStore.writing). */
+const WRITE_SQL = /^\s*(INSERT|UPDATE|DELETE|REPLACE)\b/i;
+/** What the store keeps about an op it gave the writer thread. */
+interface WriterExtra {
+  /** Fills: for each row, the row it was copied from (-1: none; takeFills). */
+  derived?: number[];
+  /** Days of the op's rows (inflightDays), released when it settles. */
+  days?: string[];
+  /** A liq step as asked, for writing it here if the thread is gone. */
+  liq?: { t: number; newAddrs: readonly string[]; changed: ReadonlyArray<{ aid: number | string; coin: string; venue: number; side: number; liq: number; usd: number } & LiqLogExtra>; closed: ReadonlyArray<{ aid: number; coin: string; venue: number; mark?: number | null }> };
+  /** Never spilled again (a part replayed from the spill: still there until its transaction). */
+  replay?: boolean;
+}
 const finiteOrNull = (v: number | null | undefined): number | null => (v === undefined || v === null || !Number.isFinite(v) ? null : v);
 
 function liqLogOrder<T extends { aid: number | string; coin: string; venue: number }>(rows: readonly T[]): T[] {
@@ -837,6 +880,13 @@ export class IndexStore {
   private aggReady = new Map<string, boolean>();
   /** `venue|address|day` whose aggregate is behind its fills. */
   private dirtyDays = new Set<string>();
+  /** `venue|address|day` -> ops with rows of that day sent to the writer thread and not settled (writerThread.ts). */
+  private inflightDays = new Map<string, number>();
+  private writer: WriterThread<WriterExtra> | null = null;
+  /** The writer thread's control array, while one runs: this thread's writes are counted in it (writing()). */
+  private ctl: Int32Array | null = null;
+  /** How long a stop waits for the writer thread to park before it ends it (writerThread.ts stopSync). */
+  private writerStopWaitMs = 15_000;
   /**
    * Traders whose aggregates are being built, a slice of days at a time
    * (buildAggregates): `next` is the start of the next slice, `end` where the
@@ -915,13 +965,16 @@ export class IndexStore {
    * the file. A file the writer has not brought to this code's schema yet is
    * for the caller to refuse (schemaReady).
    */
-  constructor(readonly path: string = defaultDbPath(), opts: { readOnly?: boolean; aggRefreshMs?: number; retainDays?: number } = {}) {
+  constructor(readonly path: string = defaultDbPath(), opts: { readOnly?: boolean; aggRefreshMs?: number; retainDays?: number; deferHeld?: boolean } = {}) {
     if (path !== ':memory:' && !opts.readOnly) mkdirSync(dirname(path), { recursive: true });
     this.db = new DatabaseSync(path, opts.readOnly ? { readOnly: true } : {});
     this.readOnly = !!opts.readOnly;
     this.aggRefreshMs = opts.aggRefreshMs ?? 10 * 60_000;
     this.retainDays = opts.retainDays ?? retainDays();
     this.db.exec('PRAGMA busy_timeout = 5000');
+    // Sorts and DISTINCT / GROUP BY b-trees in memory, not in temp files on the disk the index already keeps busy
+    // (pnlRanked's ORDER BY over up to ~100k rows, hasTrades' DISTINCT; 2026-11-08).
+    this.db.exec('PRAGMA temp_store = MEMORY');
     if (!opts.readOnly) {
       this.db.exec(`PRAGMA busy_timeout = ${WRITER_BUSY_MS}`);
       // Only takes effect on a file with no table yet: pages freed later can then be
@@ -967,7 +1020,8 @@ export class IndexStore {
         this.totalsSaved = JSON.stringify(this.totals);
       }
     } catch { /* a file from before the retention: nothing in flight */ }
-    if (!this.readOnly && path !== ':memory:') this.loadHeld();
+    // A handover (handover.ts): the outgoing process writes its held rows after it let go of the lock; loadHeldLate reads them.
+    if (!this.readOnly && path !== ':memory:' && !opts.deferHeld) this.loadHeld();
   }
 
   /** Every SoDEX wallet with what the index recorded of it: the wallet backfill's order. */
@@ -980,25 +1034,278 @@ export class IndexStore {
     });
   }
 
-  /** `lap`: called after each step with its name (the stop's timing line, worker.ts). */
-  close(lap: (step: string) => void = () => {}): void {
+  /**
+   * `lap`: called after each step with its name (the stop's timing line, worker.ts).
+   *
+   * `exiting`: the process ends right after (worker.ts), so the connection is left open instead of closed. The stop of
+   * 2026-11-08 22:46 took 351 s, 228 s of it in `database close`: the connection that closes last runs a checkpoint of the
+   * whole WAL into the 50 GB file and deletes the WAL (measured here: a 50 MB WAL 149 ms, the same close with a second
+   * connection open 1 ms). Every committed transaction is in the WAL already, so leaving it is safe: the next start goes on
+   * from it and the checkpoint thread copies it then. A connection left open at a process exit is not closed (no
+   * checkpoint, tested), and the writer thread's, closed as its thread ends, is not the last while this one is open.
+   */
+  close(lap: (step: string) => void = () => {}, o: { exiting?: boolean } = {}): void {
+    // Rows the writer thread holds still: written here (the indexer's stop has spilled them already: engine.stop).
+    this.stopWriter();
+    lap('writer thread');
     this.checkpointer?.stop();
     this.checkpointer = null;
     lap('checkpoint thread');
     if (!this.readOnly && this.path !== ':memory:') this.saveHeld();
     lap('held rows');
+    if (o.exiting && !this.readOnly && this.path !== ':memory:') {
+      lap('database left open for the exit');
+      return;
+    }
     this.db.close();
     lap('database close');
+  }
+
+  /**
+   * A handover's outgoing side (handover.ts), before it lets go of the writer lock: the writer thread (its rows spilled
+   * by engine.stop already) and the checkpoint thread stopped, the connection left open for the exit. The held rows
+   * are a file, not the index: writeHeld writes them after the lock is gone, while the incoming process already writes.
+   */
+  releaseForHandover(lap: (step: string) => void = () => {}): void {
+    this.stopWriter();
+    lap('writer thread');
+    this.checkpointer?.stop();
+    this.checkpointer = null;
+    lap('checkpoint thread');
+  }
+
+  /** The held rows to their file now (close() does it on a classic stop). Rows held: how many were written. */
+  writeHeld(): number {
+    if (this.readOnly || this.path === ':memory:') return 0;
+    this.saveHeld();
+    return this.heldRows;
+  }
+
+  /**
+   * A handover's incoming side: the outgoing process's held rows, once it has written them. A day this process wrote to
+   * meanwhile is left out (its version moved on: the rows held would be stale), the rest is used as after a classic start.
+   */
+  loadHeldLate(): void {
+    if (this.readOnly || this.path === ':memory:') return;
+    this.loadHeld();
+  }
+
+  /**
+   * loadHeldLate a slice at a time, the thread handed back every HELD_SLICE_MS: read in one go, 29M rows held the
+   * indexer's thread 293 s (2026-11-09 17:24, the gate rolled the release back). The streams run meanwhile: a day one
+   * writes to before its rows are in is left out as in the one-go read, and one written to after is not used (partialDay
+   * checks a held day's version), so a reader never sees stale rows.
+   */
+  async loadHeldLateAsync(): Promise<void> {
+    if (this.readOnly || this.path === ':memory:') return;
+    const file = this.heldPath();
+    if (!existsSync(file)) return;
+    let rows = 0;
+    let stale = 0;
+    let days = 0;
+    try {
+      const buf = readFileSync(file);
+      const hl = buf.readUInt32LE(0);
+      const head = JSON.parse(buf.subarray(4, 4 + hl).toString('utf8')) as { format: string; days: Array<{ dk: string; from: number; n: number; syms: string[] }> };
+      if (head.format !== HELD_FORMAT) return;
+      let off = 4 + hl;
+      const take = <T extends Float64Array | Int8Array | Uint16Array>(make: (n: number) => T, n: number): T => {
+        const a = make(n);
+        const bytes = a.byteLength;
+        if (off + bytes > buf.length) throw new Error('short file');
+        new Uint8Array(a.buffer).set(buf.subarray(off, off + bytes));
+        off += bytes;
+        return a;
+      };
+      let turn = Date.now();
+      for (const d of head.days) {
+        const f64 = (n: number) => new Float64Array(n);
+        const i8 = (n: number) => new Int8Array(n);
+        const h: HeldRows = {
+          ver: 0, from: d.from, n: d.n, syms: d.syms,
+          t: take(f64, d.n), v: take(f64, d.n), pnl: take(f64, d.n), fee: take(f64, d.n),
+          side: take(i8, d.n), src: take(i8, d.n), sym: take((n) => new Uint16Array(n), d.n),
+        };
+        days++;
+        if ((this.dayVersion.get(d.dk) ?? 0) !== 0 || this.held.has(d.dk)) stale += h.n;
+        else { this.held.set(d.dk, h); this.heldRows += h.n; rows += h.n; }
+        if (Date.now() - turn >= HELD_SLICE_MS) {
+          await new Promise<void>((r) => setImmediate(r));
+          turn = Date.now();
+        }
+      }
+      if (off !== buf.length) throw new Error('long file');
+      console.log(`[index] held rows read: ${days} days, ${rows} rows${stale ? ` (${stale} more left out: written to since)` : ''}`);
+    } catch (e) {
+      this.dropHeld();
+      console.warn(`[index] held rows not read: ${String(e)}`);
+    } finally {
+      try { rmSync(file, { force: true }); } catch { /* gone */ }
+    }
   }
 
   private checkpointer: Checkpointer | null = null;
 
   /** The WAL's checkpoints go to a thread of their own (checkpointer.ts). The production writer only. */
-  startCheckpointer(o: { everyMs?: number; restartFrames?: number; restartGapMs?: number } = {}): void {
+  startCheckpointer(o: { everyMs?: number; restartFrames?: number; restartGapMs?: number; restartMaxBehind?: number } = {}): void {
     if (this.readOnly || this.path === ':memory:' || this.checkpointer) return;
     this.checkpointer = new Checkpointer(this.path, (on) => {
       this.db.exec(`PRAGMA wal_autocheckpoint = ${on ? WAL_CHECKPOINT_PAGES : 0}`);
+      this.writer?.setAutoCheckpoint(on ? WAL_CHECKPOINT_PAGES : 0);
     }, o);
+  }
+
+  // --- the writer thread (writerThread.ts) ------------------------------------------------------
+
+  /**
+   * The bulk writes (fills, activity, the liquidation change log) go to a thread of their own from here on. The running
+   * indexer only (worker.ts); off with VALUESCAN_WRITER_THREAD=0 and in the tests unless `force`.
+   */
+  startWriter(o: { force?: boolean; targetMs?: number; maxRows?: number; hungMs?: number; restartAfterMs?: number; cacheKb?: number; stopWaitMs?: number } = {}): boolean {
+    this.writerStopWaitMs = o.stopWaitMs ?? 15_000;
+    if (this.readOnly || this.path === ':memory:' || this.writer) return false;
+    if (!o.force && !writerThreadOn()) return false;
+    // Made here, before the thread can be asked to replay a part of it.
+    this.spillTable();
+    this.writer = new WriterThread<WriterExtra>(this.path, {
+      rows: (p, from, to, changed) => this.writerRows(p, from, to, changed),
+      inline: (p, from) => this.writerInline(p, from),
+      settled: (p) => this.writerSettled(p),
+      committed: () => this.getMeta(WRITER_DONE_META),
+      locked: (fn) => this.tx(fn),
+      log: (line) => console.warn(line),
+    }, {
+      cacheKb: o.cacheKb ?? WRITER_CACHE_KB, busyMs: WRITER_BUSY_MS, walLimit: WAL_LIMIT_BYTES,
+      autoCkpt: this.checkpointer?.state.running ? 0 : WAL_CHECKPOINT_PAGES,
+      targetMs: o.targetMs, maxRows: o.maxRows, hungMs: o.hungMs, restartAfterMs: o.restartAfterMs,
+    });
+    this.ctl = this.writer.ctl;
+    return true;
+  }
+
+  /** True while ops go to the writer thread (false: no thread, or it is down and every write is inline). */
+  get writerOn(): boolean {
+    return !!this.writer?.on;
+  }
+
+  /** A writer thread was started and not stopped (it may be down for a minute after a death). */
+  get hasWriter(): boolean {
+    return this.writer !== null;
+  }
+
+  get writerStatus(): WriterStatus | null {
+    return this.writer?.state ?? null;
+  }
+
+  /** For a test: the writer thread dies. */
+  killWriter(): Promise<number> {
+    return this.writer ? this.writer.kill() : Promise.resolve(0);
+  }
+
+  private sendFills(rows: FillRow[], derived: number[], spillId?: number): Promise<WriterAnswer> {
+    const w = this.writer!;
+    const due = new Uint8Array(rows.length);
+    const days = new Set<string>();
+    // Asked once a wallet: aggIsReady's memo holds 50,000 wallets, and a flush of a busy hour names more.
+    const ready = new Map<string, boolean>();
+    for (let i = 0; i < rows.length; i++) {
+      const f = rows[i]!;
+      const wk = `${f.venue}|${f.address}`;
+      days.add(`${wk}|${Math.floor(f.t / DAY)}`);
+      // What markDay would decide for a changed row: the thread writes the mark with the fill (frozen days were refused).
+      let r = ready.get(wk);
+      if (r === undefined) ready.set(wk, (r = !this.readOnly && this.aggIsReady(f.venue, f.address)));
+      if (r) due[i] = 1;
+    }
+    const list = this.holdDays(days);
+    return w.send({ kind: 'fills', rows, due, spillId }, rows.length, { derived, days: list, replay: spillId !== undefined });
+  }
+
+  private holdDays(days: Set<string>): string[] {
+    for (const d of days) this.inflightDays.set(d, (this.inflightDays.get(d) ?? 0) + 1);
+    return [...days];
+  }
+
+  /** Rows [from, to) of an op are in the file: what putFills did in its transaction for the ones that changed, done now. */
+  private writerRows(p: WriterPending<WriterExtra>, from: number, to: number, changed: readonly number[] | null): void {
+    if (p.op.kind !== 'fills') return;
+    const rows = p.op.rows as FillRow[];
+    const due = p.op.due;
+    const idx: number[] = changed ? [...changed] : Array.from({ length: to - from }, (_, k) => from + k);
+    if (!idx.length) return;
+    for (const a of new Set(idx.map((i) => `${rows[i]!.venue}|${rows[i]!.address}`))) {
+      const [venue, address] = a.split('|') as [Venue, string];
+      this.bump(venue, address);
+    }
+    // A drop of the wallet's old rows begun since the rows were sent: they are wanted after all (keepWallet, as at insert).
+    if (this.dropping.size) for (const i of idx) this.keepWallet(rows[i]!.venue, rows[i]!.address, rows[i]!.t);
+    // `changed` null (the thread died before its answer): every row is taken as changed; the marks on disk are those of
+    // the rows that did, so the others are written here.
+    // Once a day, with its earliest changed row: everything markDay decides from a row's time is "some row at or before",
+    // and a day's version is a cache key. Per row it was most of this thread's share of a write (writeBench.ts).
+    const first = new Map<string, number>();
+    for (const i of idx) {
+      const f = rows[i]!;
+      const dk = `${f.venue}|${f.address}|${Math.floor(f.t / DAY)}`;
+      const at = first.get(dk);
+      if (at === undefined || f.t < rows[at]!.t) first.set(dk, i);
+    }
+    for (const i of first.values()) this.markDay(rows[i]!.venue, rows[i]!.address, rows[i]!.t, changed !== null && due[i] === 1);
+  }
+
+  /** What is left of an op written on this thread (the writer thread is gone). */
+  private writerInline(p: WriterPending<WriterExtra>, from: number): WriterAnswer {
+    const op = p.op;
+    if (op.kind === 'liqLog') {
+      const l = p.extra.liq!;
+      return { ids: [...this.putLiqLog(l.t, l.newAddrs, l.changed, l.closed)] };
+    }
+    const spillId = op.spillId;
+    this.tx(() => {
+      if (spillId !== undefined && Number(this.q('DELETE FROM write_spill WHERE id = ?').run(spillId).changes) === 0) return;
+      if (op.kind === 'fills') this.writeFillRows((op.rows as FillRow[]).slice(from));
+      else this.addActivity((op.rows as Array<ActivityWire & { venue: Venue }>).slice(from));
+    });
+    return {};
+  }
+
+  private writerSettled(p: WriterPending<WriterExtra>): void {
+    for (const d of p.extra.days ?? []) {
+      const n = (this.inflightDays.get(d) ?? 1) - 1;
+      if (n <= 0) this.inflightDays.delete(d);
+      else this.inflightDays.set(d, n);
+    }
+  }
+
+  /**
+   * Stop the writer thread now (writerThread.ts stopSync). `spill`: gets the rows it did not write - fills (copies whose
+   * original was not written either left out: the replay copies them again) and activity - and runs holding the write lock,
+   * so they go to the spill in the transaction that settles what the thread wrote. Without `spill` they are written here.
+   * Replayed parts stay in the spill; a liq step not written is refused (the tracker writes it again from the same state).
+   */
+  stopWriter(spill?: (rows: { fills: FillRow[]; activity: Array<{ venue: Venue; acct: string; hour: number; trades: number; volume: number }> }) => void): void {
+    const w = this.writer;
+    if (!w) return;
+    this.writer = null;
+    try {
+      w.stopSync(!spill ? null : (left) => {
+        const fills: FillRow[] = [];
+        const activity: Array<{ venue: Venue; acct: string; hour: number; trades: number; volume: number }> = [];
+        for (const p of left) {
+          if (p.extra.replay) continue;
+          if (p.op.kind === 'fills') {
+            const rows = p.op.rows as FillRow[];
+            const derived = p.extra.derived ?? [];
+            for (let i = p.done; i < p.n; i++) if (!((derived[i] ?? -1) >= p.done)) fills.push(rows[i]!);
+          } else if (p.op.kind === 'activity') {
+            activity.push(...(p.op.rows as Array<ActivityWire & { venue: Venue }>).slice(p.done));
+          }
+        }
+        spill({ fills, activity });
+      }, this.writerStopWaitMs);
+    } finally {
+      this.ctl = null;
+    }
   }
 
   get checkpointStatus(): CheckpointStatus | null {
@@ -1036,9 +1343,24 @@ export class IndexStore {
       len.writeUInt32LE(head.length);
       const fd = openSync(tmp, 'w');
       try {
-        writeSync(fd, len);
-        writeSync(fd, head);
-        for (const [, h] of keep) for (const a of IndexStore.heldArrays(h)) writeSync(fd, a);
+        // Many arrays to a call (writev), not one write each: seven per held day, up to hundreds of thousands of calls.
+        let batch: Uint8Array[] = [len, head];
+        const flush = () => {
+          for (let i = 0; i < batch.length; i += HELD_IOV) {
+            const part = batch.slice(i, i + HELD_IOV);
+            let want = 0;
+            for (const b of part) want += b.byteLength;
+            const n = writevSync(fd, part);
+            // A short write (rare, a full disk): the rest one at a time, which writeSync carries on to the end.
+            if (n < want) writeSync(fd, Buffer.concat(part).subarray(n));
+          }
+          batch = [];
+        };
+        for (const [, h] of keep) {
+          for (const a of IndexStore.heldArrays(h)) if (a.byteLength) batch.push(a);
+          if (batch.length >= HELD_IOV * 64) flush();
+        }
+        flush();
       } finally {
         closeSync(fd);
       }
@@ -1080,10 +1402,16 @@ export class IndexStore {
         rows += d.n;
       }
       if (off !== buf.length) throw new Error('long file');
-      // Day versions start at 0 in this process; the first row written for a day moves it on.
-      for (const [dk, h] of held) this.held.set(dk, h);
-      this.heldRows = rows;
-      console.log(`[index] held rows read: ${held.length} days, ${rows} rows`);
+      // Day versions start at 0 in this process; the first row written for a day moves it on. Read late (a handover), a
+      // day already written to here is left out: its rows held are older than what the fills say now.
+      let stale = 0;
+      for (const [dk, h] of held) {
+        if ((this.dayVersion.get(dk) ?? 0) !== 0 || this.held.has(dk)) { stale += h.n; continue; }
+        this.held.set(dk, h);
+      }
+      rows -= stale;
+      this.heldRows += rows;
+      console.log(`[index] held rows read: ${held.length} days, ${rows} rows${stale ? ` (${stale} more left out: written to since)` : ''}`);
     } catch (e) {
       this.dropHeld();
       console.warn(`[index] held rows not read: ${String(e)}`);
@@ -1277,9 +1605,48 @@ export class IndexStore {
     let s = this.stmts.get(sql);
     if (!s) {
       s = this.db.prepare(sql);
+      if (!this.readOnly && WRITE_SQL.test(sql)) this.counted(s);
       this.stmts.set(sql, s);
     }
     return s;
+  }
+
+  /** A writing statement's runs counted in `ctl[WANT]` (writing()): the writer thread lets them in first. */
+  private counted(s: StatementSync): void {
+    const run = s.run.bind(s);
+    const get = s.get.bind(s);
+    const all = s.all.bind(s);
+    type Any = (...a: never[]) => unknown;
+    const wrap = <F extends Any>(f: F): F => ((...a: Parameters<F>) => this.writing(() => f(...a))) as F;
+    s.run = wrap(run);
+    s.get = wrap(get);
+    s.all = wrap(all);
+  }
+
+  /**
+   * A write of this thread, counted while it waits for the lock and runs, so the writer thread commits at once and starts
+   * nothing new meanwhile (writerThread.ts). Free with no thread; inside a transaction the transaction counts.
+   *
+   * Counted: every statement q() prepares that starts INSERT / UPDATE / DELETE / REPLACE (checked 2026-11-09: every q()
+   * statement of the store starts with SELECT, PRAGMA freelist_count or one of those four), every tx(), spillTable() and
+   * reclaimStep()'s incremental_vacuum. Not counted, and why that is fine:
+   *   - the constructor's schema, columns and migrations: they run before startWriter, with no thread to wait for;
+   *   - PRAGMA wal_autocheckpoint / cache_size switches: settings of the connection, no lock;
+   *   - the checkpoint thread's FULL checkpoint (checkpointer.ts): it holds the lock 250 ms at most, against either writer;
+   *   - compact.ts: offline, the indexer stopped; flow/ledgerWorker.ts opens the index read-only;
+   *   - tests that write through `store.db` directly.
+   * A write added through `this.db.prepare` or `this.db.exec` instead of q() / tx() would wait for the thread uncounted
+   * (a transaction of the thread, TARGET_MS, in place of a row and a commit): use q() or tx(), or wrap it in writing().
+   */
+  private writing<T>(fn: () => T): T {
+    const c = this.ctl;
+    if (!c || this.depth > 0) return fn();
+    Atomics.add(c, CTL_WANT, 1);
+    try {
+      return fn();
+    } finally {
+      if (Atomics.sub(c, CTL_WANT, 1) === 1) Atomics.notify(c, CTL_WANT);
+    }
   }
 
   private depth = 0;
@@ -1294,18 +1661,40 @@ export class IndexStore {
         this.depth--;
       }
     }
-    this.db.exec('BEGIN IMMEDIATE');
-    this.depth = 1;
-    try {
-      const out = fn();
-      this.db.exec('COMMIT');
-      return out;
-    } catch (e) {
-      this.db.exec('ROLLBACK');
-      throw e;
-    } finally {
-      this.depth = 0;
-    }
+    return this.writing(() => {
+      // Timed (2026-11-08): single small writes held the indexer's thread 93 s and 161 s, the whole budget of a turn being
+      // 2 s - a lock, the disk or the work? Any part over SLOW_TX_MS is logged with its split.
+      const t0 = performance.now();
+      this.db.exec('BEGIN IMMEDIATE');
+      const t1 = performance.now();
+      this.noteLockWait(t1 - t0);
+      this.depth = 1;
+      try {
+        const out = fn();
+        const t2 = performance.now();
+        this.db.exec('COMMIT');
+        const t3 = performance.now();
+        if (t1 - t0 > SLOW_TX_MS || t2 - t1 > SLOW_TX_MS || t3 - t2 > SLOW_TX_MS) {
+          console.log(`[indexer] slow write: lock wait ${Math.round(t1 - t0)} ms, body ${Math.round(t2 - t1)} ms, commit ${Math.round(t3 - t2)} ms, checkpoint ${this.checkpointer?.state.running ? 'thread' : 'writer'}`);
+        }
+        return out;
+      } catch (e) {
+        this.db.exec('ROLLBACK');
+        throw e;
+      } finally {
+        this.depth = 0;
+      }
+    });
+  }
+
+  /** This thread's waits for the write lock (BEGIN IMMEDIATE), for the status and writeBench.ts. */
+  readonly lockWaits = { n: 0, maxMs: 0, over100: 0, samples: null as number[] | null };
+  private noteLockWait(ms: number): void {
+    const w = this.lockWaits;
+    w.n++;
+    if (ms > w.maxMs) w.maxMs = ms;
+    if (ms > 100) w.over100++;
+    w.samples?.push(ms);
   }
 
   // --- meta ------------------------------------------------------------------
@@ -1373,40 +1762,50 @@ export class IndexStore {
    * (`xyz:*`) are also filed under `tradexyz`, which is ranked on its own.
    */
   putFills(input: readonly FillRow[]): void {
-    if (!input.length) return;
-    const maxT = Date.now() + MAX_AHEAD_MS;
+    const rows = this.takeFills(input);
+    if (rows.length) this.writeFillRows(rows);
+  }
+
+  /**
+   * The rows of `input` the index takes, as putFills always chose them (and the xyz copies it files under trade.xyz).
+   * `derived`: for each row taken, the index of the row it was copied from (-1: none), so a stop spills a copy only when
+   * its original was written already.
+   */
+  private takeFills(input: readonly FillRow[], derived?: number[]): FillRow[] {
     const rows: FillRow[] = [];
-    const take = (f: FillRow): void => {
+    if (!input.length) return rows;
+    const maxT = Date.now() + MAX_AHEAD_MS;
+    const take = (f: FillRow, from: number): boolean => {
       // A time no venue can have produced (0, seconds, microseconds): never stored.
-      if (!(f.t >= MIN_ROW_T && f.t <= maxT)) return this.noteBad(f.venue, f.address, f.id, f.t);
+      if (!(f.t >= MIN_ROW_T && f.t <= maxT)) {
+        this.noteBad(f.venue, f.address, f.id, f.t);
+        return false;
+      }
       if (f.src === 0 && this.restAnswered(f.venue, f.address, f.t)) {
         this.streamUnderRest++;
-        return;
+        return false;
       }
       // The day is frozen: its rows were complete when they were summed, so this is a re-read of one of them.
       if (this.frozenDay(f.venue, f.address, Math.floor(f.t / DAY))) {
         this.totals.late++;
-        return;
+        return false;
       }
       rows.push(f);
+      derived?.push(from);
+      return true;
     };
     for (const f of input) {
-      take(f);
-      if (f.venue === 'hyperliquid' && f.symbol.startsWith(XYZ)) take({ ...f, venue: 'tradexyz' });
+      const took = take(f, -1);
+      if (f.venue === 'hyperliquid' && f.symbol.startsWith(XYZ)) take({ ...f, venue: 'tradexyz' }, took ? rows.length - 1 : -1);
     }
-    if (!rows.length) return;
     if (this.dropping.size) for (const f of rows) this.keepWallet(f.venue, f.address, f.t);
-    const ins = this.q(
-      `INSERT INTO fills (venue, address, id, t, symbol, side, px, sz, fee, closed_pnl, oid, src)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT (venue, address, id) DO UPDATE SET
-         t = excluded.t, symbol = excluded.symbol, side = excluded.side, px = excluded.px, sz = excluded.sz,
-         fee = excluded.fee, closed_pnl = excluded.closed_pnl, oid = excluded.oid, src = excluded.src
-       WHERE excluded.src > fills.src OR (excluded.src = fills.src AND (
-         excluded.t IS NOT fills.t OR excluded.symbol IS NOT fills.symbol OR excluded.side IS NOT fills.side OR
-         excluded.px IS NOT fills.px OR excluded.sz IS NOT fills.sz OR excluded.fee IS NOT fills.fee OR
-         excluded.closed_pnl IS NOT fills.closed_pnl OR excluded.oid IS NOT fills.oid))`,
-    );
+    return rows;
+  }
+
+  /** Rows putFills took, written on this thread in one transaction with what changed rows mark. */
+  private writeFillRows(rows: readonly FillRow[]): void {
+    if (!rows.length) return;
+    const ins = this.q(FILL_UPSERT);
     // Only a row that is new or differs marks its day (and its trader's version): a re-read of rows
     // already held changed nothing, yet marked every day it touched dirty - and dropped the day sums
     // kept to go on from (liveDays), so a market maker's day was summed whole again on every read.
@@ -1424,8 +1823,22 @@ export class IndexStore {
     });
   }
 
+  /**
+   * putFills through the writer thread (writerThread.ts): the rows are chosen here and now, written there, and what the
+   * changed ones mark is done here when the answer comes. Resolves once every row is in the file. With the thread off,
+   * putFills itself, within the call.
+   */
+  async putFillsAsync(input: readonly FillRow[]): Promise<void> {
+    if (!this.writer?.on) return this.putFills(input);
+    const derived: number[] = [];
+    const rows = this.takeFills(input, derived);
+    if (rows.length) await this.sendFills(rows, derived);
+  }
+
   /** putFills a slice at a time, `pause()` between: one page of a busy trader's history is 2,000 rows, written from the caller's turn. */
   async putFillsSliced(input: readonly FillRow[], pause: () => Promise<void>): Promise<void> {
+    // The writer thread takes the page whole: its transactions are cut by time there, and this thread is not held.
+    if (this.writer?.on) return this.putFillsAsync(input);
     for (let i = 0; i < input.length; i += FILL_SLICE) {
       if (i) await pause();
       this.putFills(input.slice(i, i + FILL_SLICE));
@@ -1477,11 +1890,18 @@ export class IndexStore {
    * (indexer/walletFills.ts).
    */
   walletFillRows(venue: Venue, address: string, fromT: number, toT: number, limit: number, beforeId?: string): WalletFillRow[] {
-    const cols = 'SELECT id, t, symbol, side, px, sz, fee, closed_pnl, oid FROM fills INDEXED BY fills_t WHERE venue = ? AND address = ? AND t >= ? AND t <= ?';
+    const cols = 'SELECT id, t, symbol, side, px, sz, fee, closed_pnl, oid, src FROM fills INDEXED BY fills_t WHERE venue = ? AND address = ? AND t >= ? AND t <= ?';
     const rows = beforeId === undefined
       ? this.q(`${cols} ORDER BY t DESC, id DESC LIMIT ?`).all(venue, address, fromT, toT, limit)
       : this.q(`${cols} AND (t < ? OR id < ?) ORDER BY t DESC, id DESC LIMIT ?`).all(venue, address, fromT, toT, toT, beforeId, limit);
     return rows as unknown as WalletFillRow[];
+  }
+
+  /** The signed size each symbol's fills in (fromT, toT] add up to - a walk of fills_t over that span. Read-only (indexer/walletFills.ts positionsAt). */
+  fillsNetBySymbol(venue: Venue, address: string, fromT: number, toT: number): Array<{ symbol: string; net: number }> {
+    if (!(toT > fromT)) return [];
+    return this.q('SELECT symbol, SUM(CASE WHEN side > 0 THEN sz ELSE -sz END) AS net FROM fills INDEXED BY fills_t WHERE venue = ? AND address = ? AND t > ? AND t <= ? GROUP BY symbol')
+      .all(venue, address, fromT, toT) as Array<{ symbol: string; net: number }>;
   }
 
   /** The time of the wallet's newest fills row of any source (null: none) - one step down fills_t. Read-only (indexer/walletFills.ts lastTrades). */
@@ -1501,6 +1921,16 @@ export class IndexStore {
    * if the two touch or overlap; otherwise the newer range wins (the gap is
    * refilled by the next backfill).
    */
+  /**
+   * The held range's last REST check moved to `now` without a read: the stream covers it to now (hlSyncFills). The range
+   * and the wallet's version stay (nothing new was stored, so no board figure needs summing again).
+   */
+  touchRest(venue: Venue, address: string, kind: HistoryKind, now: number): void {
+    if (this.readOnly) return;
+    if (venue === 'hyperliquid' && kind === 'fills') this.touchRest('tradexyz', address, kind, now);
+    this.q('UPDATE coverage SET rest_at = ? WHERE venue = ? AND address = ? AND kind = ? AND rest_at < ?').run(now, venue, address, kind, now);
+  }
+
   addCoverage(venue: Venue, address: string, kind: HistoryKind, span: { fromT: number; toT: number; exhausted?: boolean; capped?: boolean }, now: number): Coverage {
     // A Hyperliquid fill history is also the xyz dex's history over the same span.
     if (venue === 'hyperliquid' && kind === 'fills') this.addCoverage('tradexyz', address, kind, span, now);
@@ -1592,7 +2022,7 @@ export class IndexStore {
     if (d === undefined) {
       const r = this.q('SELECT MAX(day) AS d FROM fill_day WHERE venue = ? AND address = ? AND frozen = 1').get(venue, address) as { d: number | null } | undefined;
       d = r?.d == null ? 0 : r.d + 1;
-      if (this.frozenTo.size > 50_000) this.frozenTo.clear();
+      if (this.frozenTo.size > WALLET_MEMO_MAX) this.frozenTo.clear();
       this.frozenTo.set(k, d);
     }
     return d;
@@ -1661,11 +2091,12 @@ export class IndexStore {
     if (hit !== undefined) return hit;
     const ready = !!this.q('SELECT 1 AS x FROM fill_agg WHERE venue = ? AND address = ?').get(venue, address);
     this.aggReady.set(k, ready);
-    if (this.aggReady.size > 50_000) this.aggReady.clear();
+    if (this.aggReady.size > WALLET_MEMO_MAX) this.aggReady.clear();
     return ready;
   }
 
-  private markDay(venue: Venue, address: string, t: number): void {
+  /** `onDisk`: the writer thread wrote the day's `fill_dirty` row with the fill (writerThread.ts); only the memory is behind. */
+  private markDay(venue: Venue, address: string, t: number, onDisk = false): void {
     if (this.readOnly) return;
     const d = Math.floor(t / DAY);
     const dk = `${venue}|${address}|${d}`;
@@ -1687,7 +2118,10 @@ export class IndexStore {
     const b = this.building.get(`${venue}|${address}`) ?? this.rebuilding.get(`${venue}|${address}`);
     if (b) b.touched.add(d);
     // Day rows exist: this one is behind its fills from now on.
-    if (this.aggIsReady(venue, address)) this.dirty(venue, address, d);
+    if (this.aggIsReady(venue, address)) {
+      if (onDisk) this.dirtyDays.add(`${venue}|${address}|${d}`);
+      else this.dirty(venue, address, d);
+    }
   }
 
   /**
@@ -1704,7 +2138,11 @@ export class IndexStore {
 
   /** The day's row is level with its fills again (unless a row arrived since it was summed). */
   private clean(venue: Venue, address: string, day: number): void {
-    if (this.dirtyDays.has(`${venue}|${address}|${day}`)) return;
+    const k = `${venue}|${address}|${day}`;
+    if (this.dirtyDays.has(k)) return;
+    // Rows of the day are with the writer thread: its mark may be in the file already and the answer not here yet. Gone
+    // now, the day's row would be short for good should the process die before the answer.
+    if (this.inflightDays.has(k)) return;
     this.q('DELETE FROM fill_dirty WHERE venue = ? AND address = ? AND day = ?').run(venue, address, day);
   }
 
@@ -2482,8 +2920,10 @@ export class IndexStore {
       // or not, and the boards summed every trader's first day again from the fills: partialDayAsync
       // was 44% of the indexer's thread in that night's production profile.
       if (gone > 0) {
+        // Only this wallet's days in the range moved; every other memo entry still stands (2026-11-08: the clear of all
+        // of them on each drop - most Hyperliquid pages of a tracked wallet - had every board candidate's first day
+        // summed again from the fills).
         this.markRange(v, address, fromT, toT, first);
-        this.partialMemo.clear();
         // Held rows are not cleared: markRange has moved the version of every day that lost rows.
       }
     }
@@ -2830,6 +3270,10 @@ export class IndexStore {
     let done = false;
     while (!(done = this.step(j.scan)) && !over()) { /* next chunk */ }
     if (!done) return;
+    // Rows of the stretch still with the writer thread: frozen now, they would land behind the day rows, never counted.
+    if (!j.stale && this.inflightDays.size) {
+      for (let d = j.lo; d < j.hi && !j.stale; d++) if (this.inflightDays.has(`${j.venue}|${j.address}|${d}`)) j.stale = true;
+    }
     if (j.stale) {
       // Rows changed under the sum (a read in progress): sum again, a few times at most, else the next sweep.
       if (++j.tries > 3) {
@@ -3013,7 +3457,7 @@ export class IndexStore {
     const free = Number((this.q('PRAGMA freelist_count').get() as { freelist_count?: number } | undefined)?.freelist_count) || 0;
     const n = Math.min(maxPages, free - reservePages);
     if (n <= 0) return 0;
-    this.db.exec(`PRAGMA incremental_vacuum(${n})`);
+    this.writing(() => this.db.exec(`PRAGMA incremental_vacuum(${n})`));
     this.totals.reclaimedPages += n;
     return n;
   }
@@ -3031,20 +3475,21 @@ export class IndexStore {
    */
   addActivity(rows: ReadonlyArray<{ venue: Venue; acct: string; hour: number; trades: number; volume: number }>): void {
     if (!rows.length) return;
-    const hour = this.q(
-      `INSERT INTO activity_hour (venue, acct, hour, trades, volume) VALUES (?, ?, ?, ?, ?)
-       ON CONFLICT (venue, hour, acct) DO UPDATE SET trades = trades + excluded.trades, volume = volume + excluded.volume`,
-    );
-    const day = this.q(
-      `INSERT INTO activity_day (venue, acct, day, trades, volume) VALUES (?, ?, ?, ?, ?)
-       ON CONFLICT (venue, day, acct) DO UPDATE SET trades = trades + excluded.trades, volume = volume + excluded.volume`,
-    );
+    const hour = this.q(ACTIVITY_HOUR);
+    const day = this.q(ACTIVITY_DAY);
     this.tx(() => {
       for (const r of rows) {
         hour.run(r.venue, r.acct, r.hour, r.trades, r.volume);
         day.run(r.venue, r.acct, Math.floor(r.hour / 24), r.trades, r.volume);
       }
     });
+  }
+
+  /** addActivity through the writer thread; resolves once every row is in the file. With the thread off, addActivity now. */
+  async addActivityAsync(rows: ReadonlyArray<{ venue: Venue; acct: string; hour: number; trades: number; volume: number }>): Promise<void> {
+    if (!rows.length) return;
+    if (!this.writer?.on) return this.addActivity(rows);
+    await this.writer.send({ kind: 'activity', rows: rows as ActivityWire[] }, rows.length, {});
   }
 
   /**
@@ -3262,6 +3707,27 @@ export class IndexStore {
     });
   }
 
+  /** Every Hyperliquid account's PnL flow since its perp PnL read, as saved (cohortTracker). */
+  pnlFlowRows(): Array<{ address: string; flow: number; u0: number }> {
+    return this.q('SELECT address, flow, u0 FROM cohort_pnl_flow').all() as Array<{ address: string; flow: number; u0: number }>;
+  }
+
+  /**
+   * Flows that changed since the last save, and accounts whose flow ended. Row by row (2026-11-08: the whole map as one
+   * 11 MB meta value every 5 min was the biggest single share of the indexer's 10-30 s stalls).
+   */
+  putPnlFlows(rows: ReadonlyArray<readonly [string, number, number]>, gone: readonly string[] = []): void {
+    if (!rows.length && !gone.length) return;
+    this.tx(() => {
+      const ins = this.q('INSERT OR REPLACE INTO cohort_pnl_flow (address, flow, u0) VALUES (?, ?, ?)');
+      for (const [a, flow, u0] of rows) ins.run(a, flow, u0);
+      if (gone.length) {
+        const del = this.q('DELETE FROM cohort_pnl_flow WHERE address = ?');
+        for (const a of gone) del.run(a);
+      }
+    });
+  }
+
   /** Every address a venue's member table holds. */
   cohortMemberAddresses(venue: Venue): string[] {
     return (this.q('SELECT address FROM cohort_member WHERE venue = ?').all(venue) as Array<{ address: string }>).map((r) => r.address);
@@ -3380,6 +3846,7 @@ export class IndexStore {
     this.tx(() => {
       const ins = this.q('INSERT OR REPLACE INTO cohort_series (scope, cohort, t, lng, shrt, wallets, covered, src) VALUES (?, ?, ?, ?, ?, 0, 0, ?)');
       for (const r of rows) ins.run(r.scope, r.cohort, r.t, r.long, r.short, r.rebuilt ? 1 : 0);
+      this.keepLastT(SERIES_LAST_T_META, rows);
     });
   }
 
@@ -3397,8 +3864,7 @@ export class IndexStore {
   }
 
   cohortSeriesLastT(): number {
-    const r = this.q('SELECT MAX(t) AS t FROM cohort_series').get() as { t: number | null } | undefined;
-    return r?.t ?? 0;
+    return this.lastT(SERIES_LAST_T_META, 'cohort_series');
   }
 
   pruneCohortSeries(beforeT: number): void {
@@ -3409,7 +3875,50 @@ export class IndexStore {
     this.tx(() => {
       const ins = this.q('INSERT OR REPLACE INTO cohort_mix (scope, cohort, t, data, src) VALUES (?, ?, ?, ?, ?)');
       for (const r of rows) ins.run(r.scope, r.cohort, r.t, r.data, r.rebuilt ? 1 : 0);
+      this.keepLastT(MIX_LAST_T_META, rows);
     });
+  }
+
+  /**
+   * putCohortSeries / putCohortMix a few rows per transaction with `pause` between (2026-11-09 12:16, v0.2.202's first
+   * start: a cohort record writing its missed hours held the indexer's thread 43 s in one transaction, 37% of it
+   * garbage collection, and the indexer gate rolled the release back). Each slice keeps the last-t meta as before.
+   */
+  async putCohortSeriesSliced(rows: ReadonlyArray<{ scope: string; cohort: string; t: number; long: number; short: number; rebuilt?: boolean }>, pause: () => Promise<void>): Promise<void> {
+    for (let i = 0; i < rows.length; i += COHORT_SLICE_ROWS) {
+      if (i) await pause();
+      this.putCohortSeries(rows.slice(i, i + COHORT_SLICE_ROWS));
+    }
+  }
+
+  async putCohortMixSliced(rows: ReadonlyArray<{ scope: string; cohort: string; t: number; data: string; rebuilt?: boolean }>, pause: () => Promise<void>): Promise<void> {
+    // A mix row carries a JSON blob per cohort: fewer of them a slice.
+    for (let i = 0; i < rows.length; i += COHORT_MIX_SLICE_ROWS) {
+      if (i) await pause();
+      this.putCohortMix(rows.slice(i, i + COHORT_MIX_SLICE_ROWS));
+    }
+  }
+
+  /** The newest t written to a cohort table, kept in meta (inside the write's transaction). */
+  private keepLastT(key: string, rows: ReadonlyArray<{ t: number }>): void {
+    let t = 0;
+    for (const r of rows) if (r.t > t) t = r.t;
+    if (!t) return;
+    const was = Number(this.getMeta(key)) || 0;
+    if (t > was) this.setMeta(key, String(t));
+  }
+
+  /**
+   * The newest t of a cohort table: from meta, or once by MAX(t) - a scan of the whole table, as its key starts with
+   * scope and cohort (2026-11-08: 22% and 16% of a 27 s start-up stall for cohort_mix and cohort_series).
+   */
+  private lastT(key: string, table: 'cohort_series' | 'cohort_mix'): number {
+    const kept = Number(this.getMeta(key));
+    if (kept > 0) return kept;
+    const r = this.q(`SELECT MAX(t) AS t FROM ${table}`).get() as { t: number | null } | undefined;
+    const t = r?.t ?? 0;
+    if (t) this.setMeta(key, String(t));
+    return t;
   }
 
   /** Hourly per-coin and per-sector [long, short] of a cohort. */
@@ -3460,8 +3969,7 @@ export class IndexStore {
   }
 
   cohortMixLastT(): number {
-    const r = this.q('SELECT MAX(t) AS t FROM cohort_mix').get() as { t: number | null } | undefined;
-    return r?.t ?? 0;
+    return this.lastT(MIX_LAST_T_META, 'cohort_mix');
   }
 
   pruneCohortMix(beforeT: number): void {
@@ -3474,6 +3982,7 @@ export class IndexStore {
     this.tx(() => {
       const ins = this.q('INSERT OR REPLACE INTO liq_hist (coin, t, data) VALUES (?, ?, ?)');
       for (const [coin, data] of rows) ins.run(coin, t, data);
+      if (rows.length) this.keepLastT(LIQ_HIST_LAST_T_META, [{ t }]);
     });
   }
 
@@ -3558,12 +4067,29 @@ export class IndexStore {
 
   /** The coins of the newest snapshot. */
   liqHistCoins(): string[] {
-    return (this.q('SELECT coin FROM liq_hist WHERE t = (SELECT MAX(t) FROM liq_hist)').all() as Array<{ coin: string }>).map((r) => r.coin);
+    // Walked coin by coin on the primary key (coin, t): two seeks per coin. `WHERE t = (SELECT MAX(t))` scanned the whole
+    // table twice - 0.57 s on server 1 with it cached (2026-11-07), on the API's thread, on every history answer.
+    const next = this.q('SELECT coin FROM liq_hist WHERE coin > ? ORDER BY coin LIMIT 1');
+    const last = this.q('SELECT MAX(t) AS t FROM liq_hist WHERE coin = ?');
+    const newest: Array<{ coin: string; t: number }> = [];
+    for (let r = next.get('') as { coin: string } | undefined; r; r = next.get(r.coin) as { coin: string } | undefined) {
+      newest.push({ coin: r.coin, t: Number((last.get(r.coin) as { t: number | null }).t ?? 0) });
+    }
+    const top = Math.max(0, ...newest.map((x) => x.t));
+    return newest.filter((x) => x.t === top).map((x) => x.coin);
   }
 
+  /**
+   * The newest step: from meta, or once by MAX(t) - a scan of the whole table (its key starts with the coin): 27 s of an
+   * 81 s start-up stall on 2026-11-09, every stream's socket waiting.
+   */
   liqHistLastT(): number {
+    const kept = Number(this.getMeta(LIQ_HIST_LAST_T_META));
+    if (kept > 0) return kept;
     const r = this.q('SELECT MAX(t) AS t FROM liq_hist').get() as { t: number | null } | undefined;
-    return r?.t ?? 0;
+    const t = r?.t ?? 0;
+    if (t) this.setMeta(LIQ_HIST_LAST_T_META, String(t));
+    return t;
   }
 
   /** Drop everything before `beforeT`, and between it and `thinBeforeT` all but the hourly snapshots (and their fine layers). */
@@ -3622,7 +4148,7 @@ export class IndexStore {
     changed = liqLogOrder(changed);
     closed = liqLogOrder(closed);
     this.tx(() => {
-      const addr = this.q('INSERT INTO liq_addr (address) VALUES (?) ON CONFLICT (address) DO UPDATE SET address = excluded.address RETURNING id');
+      const addr = this.q(LIQ_ADDR_INSERT);
       for (const a of newAddrs) {
         const r = addr.get(a) as { id: number };
         ids.set(a, r.id);
@@ -3636,12 +4162,12 @@ export class IndexStore {
   private liqChangedRow(t: number, aid: number, c: { coin: string; venue: number; side: number; liq: number; usd: number } & LiqLogExtra): void {
     this.q(LIQ_LOG_INSERT).run(aid, c.coin, c.venue, t, c.side, c.liq, c.usd, c.sym ?? null, finiteOrNull(c.sz), finiteOrNull(c.entry), finiteOrNull(c.mark),
       c.iso === undefined || c.iso === null ? null : c.iso ? 1 : 0, finiteOrNull(c.lev), finiteOrNull(c.eq), finiteOrNull(c.cash), finiteOrNull(c.readAt));
-    this.q('INSERT OR REPLACE INTO liq_cur (aid, coin, venue, side, liq, usd, t) VALUES (?, ?, ?, ?, ?, ?, ?)').run(aid, c.coin, c.venue, c.side, c.liq, c.usd, t);
+    this.q(LIQ_CUR_INSERT).run(aid, c.coin, c.venue, c.side, c.liq, c.usd, t);
   }
 
   private liqClosedRow(t: number, c: { aid: number; coin: string; venue: number; mark?: number | null }): void {
     this.q(LIQ_LOG_INSERT).run(c.aid, c.coin, c.venue, t, 0, 0, 0, null, 0, null, finiteOrNull(c.mark), null, null, null, null, null);
-    this.q('DELETE FROM liq_cur WHERE aid = ? AND coin = ? AND venue = ?').run(c.aid, c.coin, c.venue);
+    this.q(LIQ_CUR_DELETE).run(c.aid, c.coin, c.venue);
   }
 
   /**
@@ -3657,6 +4183,15 @@ export class IndexStore {
     pause: () => Promise<void>,
     now: () => number = Date.now,
   ): Promise<Map<string, number>> {
+    // The writer thread takes the step whole (its transactions cut by time there): 54 min for one step on 2026-11-08, on
+    // this thread a slice at a time between everything else.
+    if (this.writer?.on) {
+      const wire: LiqChangedWire[] = changed.map((c) => [c.aid, c.coin, c.venue, c.side, c.liq, c.usd, c.sym ?? null, finiteOrNull(c.sz), finiteOrNull(c.entry), finiteOrNull(c.mark),
+        c.iso === undefined || c.iso === null ? null : c.iso ? 1 : 0, finiteOrNull(c.lev), finiteOrNull(c.eq), finiteOrNull(c.cash), finiteOrNull(c.readAt)]);
+      const gone: LiqClosedWire[] = closed.map((c) => [c.aid, c.coin, c.venue, finiteOrNull(c.mark)]);
+      const a = await this.writer.send({ kind: 'liqLog', t, newAddrs: [...newAddrs], changed: wire, closed: gone }, wire.length + gone.length, { liq: { t, newAddrs, changed, closed } });
+      return new Map(a.ids ?? []);
+    }
     const ids = this.putLiqLog(t, newAddrs, [], []);
     const known = liqLogOrder(changed.map((c) => (typeof c.aid === 'number' ? c : { ...c, aid: ids.get(c.aid)! })));
     const gone = liqLogOrder(closed);
@@ -3997,8 +4532,11 @@ export class IndexStore {
   // by the writer when first needed, not in SCHEMA: a reader's schemaReady must not wait for it.
 
   private spillTable(): void {
-    this.db.exec('CREATE TABLE IF NOT EXISTS write_spill (id INTEGER PRIMARY KEY, kind TEXT NOT NULL, rows TEXT NOT NULL)');
+    if (this.spillMade) return;
+    this.writing(() => this.db.exec('CREATE TABLE IF NOT EXISTS write_spill (id INTEGER PRIMARY KEY, kind TEXT NOT NULL, rows TEXT NOT NULL)'));
+    this.spillMade = true;
   }
+  private spillMade = false;
 
   /** Parts of rows, in the order they were to be written, in one transaction. */
   spillWrites(parts: ReadonlyArray<{ kind: 'fills'; rows: readonly FillRow[] } | { kind: 'activity'; rows: ReadonlyArray<{ venue: Venue; acct: string; hour: number; trades: number; volume: number }> }>): void {
@@ -4027,6 +4565,26 @@ export class IndexStore {
       else throw new Error(`write_spill ${id}: unknown kind ${r.kind}`);
       this.q('DELETE FROM write_spill WHERE id = ?').run(id);
     });
+  }
+
+  /**
+   * replaySpill through the writer thread: the part's rows and its removal in one transaction there, as here. A stop before
+   * that leaves the part in the spill (it is not spilled again). With the thread off, replaySpill now.
+   */
+  async replaySpillAsync(id: number): Promise<void> {
+    if (!this.writer?.on) return this.replaySpill(id);
+    const r = this.q('SELECT kind, rows FROM write_spill WHERE id = ?').get(id) as { kind: string; rows: string } | undefined;
+    if (!r) return;
+    const rows = JSON.parse(r.rows) as unknown[];
+    if (r.kind === 'fills') {
+      const derived: number[] = [];
+      // Every row refused (all late, say): the part still goes, in the thread's transaction with no row.
+      await this.sendFills(this.takeFills(rows as FillRow[], derived), derived, id);
+    } else if (r.kind === 'activity') {
+      await this.writer.send({ kind: 'activity', rows: rows as ActivityWire[], spillId: id }, rows.length, { replay: true });
+    } else {
+      throw new Error(`write_spill ${id}: unknown kind ${r.kind}`);
+    }
   }
 
   /** Board rows for an address across every board (a trader's standing). */

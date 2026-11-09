@@ -8,7 +8,7 @@
  * major, major to critical): that is news again. The data service not answering at all is
  * a card of its own, from this tab's polls (SiteNoticeBanner.tsx useHealthDown).
  */
-import { IMPACT_TEXT, fmtUtc, healthNoticesOf, type HealthNotice } from './statusData';
+import { fmtUtc, healthNoticesOf, incidentTitle, type HealthNotice } from './statusData';
 import { STATUS_SERVICES, type ServiceId } from '@sign/ops/statusModel.js';
 import { clockOf } from './maintState';
 
@@ -79,7 +79,7 @@ export function incidentView(n: HealthNotice, timeZone?: string): IncidentView {
   const utcClock = clockOf(n.startsAt, 'UTC');
   return {
     tone: impact === 'critical' ? 'down' : 'warn',
-    title: impact === 'critical' ? 'Outage' : `${IMPACT_TEXT[impact]} incident`,
+    title: incidentTitle(impact),
     line: n.title.length > 120 ? `${n.title.slice(0, 119)}…` : n.title,
     since: local === utcClock ? `Since ${utc}` : `Since ${utc} (${local} your time)`,
     rows: (n.components ?? []).map((id) => ({ id, name: NAME.get(id) ?? id, state: STATE_OF[impact], impact: impact === 'critical' ? 'down' : 'partial' })),

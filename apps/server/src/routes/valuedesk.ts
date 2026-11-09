@@ -30,11 +30,12 @@
  *   GET /api/vs/lbrow?venue=hyperliquid&address   (one leaderboard row from the index)
  *   GET /api/vs/wallet/fills?venue&address&from&to&limit   (a tracked wallet's fills from the index, up to what it holds - indexer/walletFills.ts)
  *   GET /api/vs/last-trades?venue=hyperliquid&addresses=a,b   (each wallet's newest indexed fill time: the copy cards' hint - indexer/walletFills.ts)
+ *   GET /api/vs/copy/cards?w=30d&keys=venue:0x...,...   (the Copy page's cards read ahead by the server, with their age - valuedesk/copyCards.ts)
  *   GET /api/vs/index/status   (the indexer's full diagnostics; never on a hosted server)
  *   GET /api/vs/index/health   (its health in numbers, for monitoring on the instance)
  */
 import { walletHistoryFor } from '../indexer/walletHistory.js';
-import { LAST_TRADES_MAX, lastTrades, walletFills } from '../indexer/walletFills.js';
+import { LAST_TRADES_MAX, lastTrades, walletFillsJson } from '../indexer/walletFills.js';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import {
   CORE_VENUES,
@@ -54,13 +55,16 @@ import { hlInfo, hlLeaderboardRow, hyperliquidProvider } from '../valuedesk/hype
 import { hlPriceSeries } from '../valuedesk/hyperliquid/price.js';
 import { ACCOUNT_DETAIL, arcusProvider, lighterProvider, nameSpotFills, tradexyzProvider } from '../valuedesk/extra/providers.js';
 import { applyCachedCurves, attachPodiumCurves } from '../valuedesk/curves.js';
-import { attachStats, markSodexTrades, type SodexTradeNote, boardPage, cohortDetail, cohortFocus, cohortMap, cohortWallets, cohortsReady, cohortsRead, excludedNow, indexerStatus, indexerStatusJudged, netPage } from '../indexer/read.js';
+import { CARDS_PER_REQUEST, CARD_VENUES, copyCards, isCardWindow } from '../valuedesk/copyCards.js';
+import { attachStats, markSodexTrades, type SodexTradeNote, boardPage, indexerStatus, indexerStatusJudged, netPage } from '../indexer/read.js';
+import { cohortJob, type CohortJob } from '../indexer/cohortThread.js';
 import { booksOverOi } from '../indexer/read.js';
 import { isCohortId, isSector, type CohortFilter, type CohortRange, type WalletSort } from '../valuedesk/cohorts/model.js';
-import { fineAskOf, fineDrawOf, isLiqRange, levFilterOf, liqAt, liqHeatmap, liqHeatmapFine, liqHeatmapOf, liqHistory, liqHistoryFine, liqWallets, walletHistoryFine, walletLiqs } from '../indexer/liqRead.js';
+import { fineAskOf, fineDrawOf, isLiqRange, levFilterOf, liqHeatmap } from '../indexer/liqRead.js';
+import { LiqBusy, liqJob, okJson } from '../indexer/liqHistThread.js';
 import { TILE_FINAL_CACHE, TILE_INDEX_CACHE, TILE_WALLET_CACHE, keepLiqMetasWarm, liqTile, liqTileIndex, liqTileIndexOf, liqTileOf, tileAskOf } from '../indexer/liqTiles.js';
 import { watchAddresses } from '../indexer/host.js';
-import { MAX_WINDOW_MS, activityCoverage, flowWalletFills, flowWindow, type MarketKind } from '../flow/read.js';
+import { MAX_WINDOW_MS, activityCoverage, flowWalletFills, flowWindow, type FlowAsk, type MarketKind } from '../flow/read.js';
 import type { FlowRole, FlowSide, FlowSort } from '../flow/codec.js';
 import { botMarkets, keepBotMarketsWarm } from '../flow/botMarkets.js';
 import { BOARD_WINDOWS, type BoardWindow } from '../valuedesk/types.js';
@@ -127,6 +131,46 @@ function flowWindowOf(q: Q): { coin: string; venues: Venue[]; kind: MarketKind; 
   return { coin, venues: cohortVenues(q), kind: q.kind === 'spot' ? 'spot' : 'perp', from, to: Math.min(to, Date.now() + 60_000) };
 }
 
+/**
+ * What a live channel (routes/liveHub.ts, on the /ws/liq socket) asks for, from the very path and query the web would
+ * read over HTTP: the same parsing as the routes below, so a pushed answer is the route's answer. Null: not a path that
+ * is pushed (the browser keeps polling it). Throws (statusCode 400) on a bad query, as the route would.
+ */
+export type LiveAsk =
+  | { kind: 'flow'; ask: FlowAsk }
+  | { kind: 'cohort'; job: CohortJob };
+
+export function liveAskOf(path: string, q: Q): LiveAsk | null {
+  switch (path) {
+    case '/api/vs/flow': {
+      const ask = flowWindowOf(q);
+      const role: FlowRole = q.role === 'taker' || q.role === 'maker' ? q.role : 'all';
+      const side: FlowSide = q.side === 'buy' || q.side === 'sell' ? q.side : 'all';
+      const sort: FlowSort = q.sort === 'fills' || q.sort === 'net' || q.sort === 'buy' || q.sort === 'sell' ? q.sort : 'volume';
+      const limit = Math.max(1, Math.min(500, Math.floor(Number(q.limit) || 100)));
+      const search = (q.q ?? '').trim().slice(0, 64);
+      return { kind: 'flow', ask: { ...ask, role, side, sort, limit, ...(search.length >= 3 ? { q: search } : {}) } };
+    }
+    case '/api/vs/cohorts':
+      return { kind: 'cohort', job: { op: 'cohorts', venues: cohortVenues(q), f: cohortFilter(q) } };
+    case '/api/vs/cohorts/map':
+      return { kind: 'cohort', job: { op: 'map', venues: cohortVenues(q), cohort: isCohortId(q.cohort) ? q.cohort : null } };
+    case '/api/vs/cohorts/detail': {
+      if (!isCohortId(q.cohort)) throw bad('Unknown cohort');
+      const range: CohortRange = q.range === '1d' || q.range === '30d' ? q.range : '7d';
+      return { kind: 'cohort', job: { op: 'detail', venues: cohortVenues(q), cohort: q.cohort, range, f: cohortFilter(q) } };
+    }
+    case '/api/vs/cohorts/focus': {
+      const f = cohortFilter(q);
+      if (!f.coin && !f.sector) throw bad('Name a coin or a sector');
+      const range: CohortRange = q.range === '1d' || q.range === '30d' ? q.range : '7d';
+      return { kind: 'cohort', job: { op: 'focus', venues: cohortVenues(q), f, range } };
+    }
+    default:
+      return null;
+  }
+}
+
 function venueOf(q: Q, allowAll: true): Venue | 'all';
 function venueOf(q: Q, allowAll: false): Venue;
 function venueOf(q: Q, allowAll: boolean): Venue | 'all' {
@@ -153,9 +197,21 @@ function numOf(v: string | undefined): number | undefined {
   return Number.isFinite(n) ? n : undefined;
 }
 
+/**
+ * A cohort job (indexer/cohortThread.ts): the cohorts and the heatmap answers that read the books run on their own
+ * thread, and their JSON comes back whole - this thread neither builds nor parses it.
+ */
+async function sendCohortJob(reply: FastifyReply, job: CohortJob) {
+  const json = await cohortJob(job);
+  if (json === null) return fail(reply, new NotAvailable('The index is not running yet'));
+  return reply.type('application/json; charset=utf-8').send(json);
+}
+
 function fail(reply: FastifyReply, e: unknown) {
   const err = e as Error & { statusCode?: number };
   if (err.statusCode === 400) return reply.code(400).send({ ok: false, error: err.message });
+  // The liquidation history's thread is full or an ask ran too long (indexer/liqHistThread.ts): ask again shortly.
+  if (e instanceof LiqBusy) return reply.code(503).header('Retry-After', '5').send({ ok: false, code: 'busy', error: err.message });
   const code = e instanceof NotAvailable ? 'not_available' : 'upstream';
   return reply.code(200).send({ ok: false, code, error: err.message });
 }
@@ -200,11 +256,13 @@ export async function valuedeskRoutes(app: FastifyInstance) {
       const q = req.query as Q;
       const from = numOf(q.from);
       const to = numOf(q.to);
-      return await walletFills(venueOf(q, false), addressOf(q), {
+      // Sent as the kept JSON text (indexer/walletFills.ts THE KEPT ANSWERS): 5,000 fills are not serialized again per ask.
+      const body = await walletFillsJson(venueOf(q, false), addressOf(q), {
         ...(from !== undefined ? { from: Math.trunc(from) } : {}),
         ...(to !== undefined ? { to: Math.trunc(to) } : {}),
         limit: intOf(q.limit, 2000, 1, 100_000),
       });
+      return reply.type('application/json; charset=utf-8').send(body);
     } catch (e) {
       return fail(reply, e);
     }
@@ -218,7 +276,25 @@ export async function valuedeskRoutes(app: FastifyInstance) {
       const venue = venueOf(q, false);
       const list = (q.addresses ?? '').split(',').map((a) => a.trim().toLowerCase()).filter((a) => ADDRESS_RE.test(a));
       if (!list.length) throw bad('addresses= is required');
-      return { ok: true, at: lastTrades(venue, [...new Set(list)].slice(0, LAST_TRADES_MAX)) };
+      return { ok: true, at: await lastTrades(venue, [...new Set(list)].slice(0, LAST_TRADES_MAX)) };
+    } catch (e) {
+      return fail(reply, e);
+    }
+  });
+
+  // The Copy page's cards for one window, read ahead by this process (valuedesk/copyCards.ts): `w=7d|30d|all`,
+  // `keys=venue:0x...,...` up to 50. A card not held is left out (the browser reads the venue); each held one says its age.
+  app.get('/api/vs/copy/cards', async (req, reply) => {
+    try {
+      const q = req.query as Q;
+      const w = q.w ?? '30d';
+      if (!isCardWindow(w)) throw bad('w must be 7d, 30d or all');
+      const wallets = [...new Set((q.keys ?? '').split(','))].flatMap((k) => {
+        const [v, a] = k.trim().toLowerCase().split(':');
+        return v && a && (CARD_VENUES as readonly string[]).includes(v) && ADDRESS_RE.test(a) ? [{ venue: v as Venue, address: a }] : [];
+      }).slice(0, CARDS_PER_REQUEST);
+      if (!wallets.length) throw bad('keys= is required');
+      return { ok: true, w, cards: copyCards()?.answer(w, wallets) ?? {} };
     } catch (e) {
       return fail(reply, e);
     }
@@ -527,10 +603,7 @@ export async function valuedeskRoutes(app: FastifyInstance) {
   app.get('/api/vs/cohorts', async (req, reply) => {
     try {
       const q = req.query as Q;
-      await cohortsReady();
-      const body = cohortsRead(cohortVenues(q), cohortFilter(q));
-      if (!body) return fail(reply, new NotAvailable('The index is not running yet'));
-      return { ok: true, ...body };
+      return await sendCohortJob(reply, { op: 'cohorts', venues: cohortVenues(q), f: cohortFilter(q) });
     } catch (e) {
       return fail(reply, e);
     }
@@ -550,11 +623,12 @@ export async function valuedeskRoutes(app: FastifyInstance) {
       const ws = walletsOf(q);
       const fine = fineAskOf(q);
       if (typeof fine === 'string') throw bad(fine);
-      // The wallet filter and exact steps read the cohort load: never an old one (read.ts STALE_MAX_MS).
-      if (ws.length || fine) await cohortsReady();
+      // The wallet filter and exact steps read the cohort load (its thread; never an old load, read.ts STALE_MAX_MS).
       const side = q.side === 'long' || q.side === 'short' ? q.side : null;
-      const body = fine ? await liqHeatmapFine(coin, cohortVenues(q), fine, { wallets: new Set(ws), side, lev: levFilterOf(q.lev) })
-        : ws.length ? await liqHeatmapOf(coin, cohortVenues(q), ws) : await liqHeatmap(coin, cohortVenues(q));
+      const lev = levFilterOf(q.lev);
+      if (fine) return await sendCohortJob(reply, { op: 'liqFine', coin, venues: cohortVenues(q), ask: fine, wallets: ws, side, lev: lev ? [...lev] : null });
+      if (ws.length) return await sendCohortJob(reply, { op: 'liqOf', coin, venues: cohortVenues(q), wallets: ws });
+      const body = await liqHeatmap(coin, cohortVenues(q));
       if (!body) return fail(reply, new NotAvailable('The index is not running yet'));
       return { ok: true, ...body, overOi: booksOverOi(cohortVenues(q), coin) };
     } catch (e) {
@@ -572,10 +646,8 @@ export async function valuedeskRoutes(app: FastifyInstance) {
       if (!coin) throw bad('coin= is required');
       if (q.side !== 'long' && q.side !== 'short') throw bad('side= must be long or short');
       if (!(from >= 0) || !(to > from)) throw bad('from= and to= must be a price range');
-      await cohortsReady();
-      const body = await liqWallets(coin, cohortVenues(q), q.side, from, to, 25, walletsOf(q), levFilterOf(q.lev));
-      if (!body) return fail(reply, new NotAvailable('The index is not running yet'));
-      return { ok: true, ...body };
+      const lev = levFilterOf(q.lev);
+      return await sendCohortJob(reply, { op: 'liqWallets', coin, venues: cohortVenues(q), side: q.side, from, to, limit: 25, wallets: walletsOf(q), lev: lev ? [...lev] : null });
     } catch (e) {
       return fail(reply, e);
     }
@@ -587,10 +659,7 @@ export async function valuedeskRoutes(app: FastifyInstance) {
       const q = req.query as Q;
       const ws = walletsOf(q);
       if (!ws.length) throw bad('wallets= is required: up to 10 0x addresses, comma separated');
-      await cohortsReady();
-      const body = await walletLiqs(ws, cohortVenues(q));
-      if (!body) return fail(reply, new NotAvailable('The index is not running yet'));
-      return { ok: true, wallets: ws, asOf: body.asOf, positions: body.positions };
+      return await sendCohortJob(reply, { op: 'positions', venues: cohortVenues(q), wallets: ws });
     } catch (e) {
       return fail(reply, e);
     }
@@ -621,28 +690,30 @@ export async function valuedeskRoutes(app: FastifyInstance) {
         const t1 = Number.isFinite(v) ? Math.max(t0 - 1, Math.min(Number(q.t1), v)) : Number(q.t1);
         // Some wallets: their positions from the change log at each snapshot the index lists, as at
         // the snapshots' own step (liqRead.ts walletHistoryFine); kept as the wallet tiles are.
+        // Built on the liquidation history's own thread (indexer/liqHistThread.ts): never on this one.
         if (ws.length) {
           const draw = fineDrawOf(q, fine.step);
           if (typeof draw === 'string') throw bad(draw);
           const venues = cohortVenues(q);
           const idx = await liqTileIndex(coin, venues);
-          const body = walletHistoryFine(coin, venues, ws, (idx?.points ?? []).filter((x) => x.t >= t0 && x.t <= t1), fine, draw);
+          const snaps = (idx?.points ?? []).filter((x) => x.t >= t0 && x.t <= t1).map((x) => ({ t: x.t, p: x.p }));
+          const body = okJson(await liqJob({ kind: 'walletFine', coin, venues: [...venues], wallets: [...ws], snaps, ask: fine, draw }));
           if (!body) return fail(reply, new NotAvailable('The index is not running yet'));
           reply.header('Cache-Control', TILE_WALLET_CACHE);
-          return { ok: true, ...body };
+          return reply.type('application/json; charset=utf-8').send(body);
         }
         // A tile of the historical view (`every=` / `pool=`, liqRead.ts FineDraw): one ending before
         // the slot still filling (no `v=`) never changes, and is kept a day as the snapshots' tiles are.
         const draw = fineDrawOf(q, fine.step);
         if (typeof draw === 'string') throw bad(draw);
-        const body = liqHistoryFine(coin, cohortVenues(q), t0, t1, fine, draw);
+        const body = okJson(await liqJob({ kind: 'fine', coin, venues: [...cohortVenues(q)], t0, t1, ask: fine, draw }));
         if (!body) return fail(reply, new NotAvailable('The index is not running yet'));
         if (draw) reply.header('Cache-Control', q.v === undefined && t1 < Date.now() - 30 * 60_000 ? TILE_FINAL_CACHE : TILE_INDEX_CACHE);
-        return { ok: true, ...body };
+        return reply.type('application/json; charset=utf-8').send(body);
       }
-      const body = liqHistory(coin, cohortVenues(q), isLiqRange(q.range) ? q.range : '1d', ws);
+      const body = okJson(await liqJob({ kind: 'history', coin, venues: [...cohortVenues(q)], range: isLiqRange(q.range) ? q.range : '1d', wallets: [...ws], known: null }));
       if (!body) return fail(reply, new NotAvailable('The index is not running yet'));
-      return { ok: true, ...body };
+      return reply.type('application/json; charset=utf-8').send(body);
     } catch (e) {
       return fail(reply, e);
     }
@@ -694,9 +765,9 @@ export async function valuedeskRoutes(app: FastifyInstance) {
       if (!(t > 0) || t > Date.now() + 60_000) throw bad('t= must be a time in ms, not in the future');
       if (!(from >= 0) || !(to > from)) throw bad('from= and to= must be a price range');
       const side = q.side === 'long' || q.side === 'short' ? q.side : 'both';
-      const body = liqAt(coin, cohortVenues(q), t, from, to, side, walletsOf(q), 100, levFilterOf(q.lev));
+      const body = okJson(await liqJob({ kind: 'at', coin, venues: [...cohortVenues(q)], t, from, to, side, wallets: [...walletsOf(q)], limit: 100, lev: levFilterOf(q.lev) }));
       if (!body) return fail(reply, new NotAvailable('The index is not running yet'));
-      return { ok: true, ...body };
+      return reply.type('application/json; charset=utf-8').send(body);
     } catch (e) {
       return fail(reply, e);
     }
@@ -782,10 +853,7 @@ export async function valuedeskRoutes(app: FastifyInstance) {
       const q = req.query as Q;
       if (!isCohortId(q.cohort)) return fail(reply, new NotAvailable('Unknown cohort'));
       const range: CohortRange = q.range === '1d' || q.range === '30d' ? q.range : '7d';
-      await cohortsReady();
-      const body = cohortDetail(cohortVenues(q), q.cohort, range, cohortFilter(q));
-      if (!body) return fail(reply, new NotAvailable('The index is not running yet'));
-      return { ok: true, ...body };
+      return await sendCohortJob(reply, { op: 'detail', venues: cohortVenues(q), cohort: q.cohort, range, f: cohortFilter(q) });
     } catch (e) {
       return fail(reply, e);
     }
@@ -847,8 +915,7 @@ export async function valuedeskRoutes(app: FastifyInstance) {
    */
   app.get('/api/vs/excluded', async (_req, reply) => {
     try {
-      await cohortsReady();
-      return { ok: true, wallets: excludedNow() };
+      return await sendCohortJob(reply, { op: 'excluded' });
     } catch (e) {
       return fail(reply, e);
     }
@@ -870,10 +937,7 @@ export async function valuedeskRoutes(app: FastifyInstance) {
   app.get('/api/vs/cohorts/map', async (req, reply) => {
     try {
       const q = req.query as Q;
-      await cohortsReady();
-      const body = cohortMap(cohortVenues(q), isCohortId(q.cohort) ? q.cohort : null);
-      if (!body) return fail(reply, new NotAvailable('The index is not running yet'));
-      return { ok: true, ...body };
+      return await sendCohortJob(reply, { op: 'map', venues: cohortVenues(q), cohort: isCohortId(q.cohort) ? q.cohort : null });
     } catch (e) {
       return fail(reply, e);
     }
@@ -886,10 +950,7 @@ export async function valuedeskRoutes(app: FastifyInstance) {
       const f = cohortFilter(q);
       if (!f.coin && !f.sector) return fail(reply, new NotAvailable('Name a coin or a sector'));
       const range: CohortRange = q.range === '1d' || q.range === '30d' ? q.range : '7d';
-      await cohortsReady();
-      const body = cohortFocus(cohortVenues(q), f, range);
-      if (!body) return fail(reply, new NotAvailable('The index is not running yet'));
-      return { ok: true, ...body };
+      return await sendCohortJob(reply, { op: 'focus', venues: cohortVenues(q), f, range });
     } catch (e) {
       return fail(reply, e);
     }
@@ -903,12 +964,9 @@ export async function valuedeskRoutes(app: FastifyInstance) {
       const sort: WalletSort = WALLET_SORTS.find((x) => x === q.sort) ?? 'equity';
       // `range` (1d | 7d | 30d, default 30d): the window of the PnL and win-rate columns. Membership stays all-time.
       const range: WalletRange = COHORT_RANGES.find((x) => x === q.range) ?? '30d';
-      await cohortsReady();
-      const body = cohortWallets(cohortVenues(q), q.cohort, cohortFilter(q), {
+      return await sendCohortJob(reply, { op: 'wallets', venues: cohortVenues(q), cohort: q.cohort, f: cohortFilter(q), o: {
         sort, dir: q.dir === 'asc' ? 'asc' : 'desc', offset: intOf(q.offset, 0, 0, 1_000_000), limit: intOf(q.limit, 50, 1, 200), range,
-      });
-      if (!body) return fail(reply, new NotAvailable('The index is not running yet'));
-      return { ok: true, ...body };
+      } });
     } catch (e) {
       return fail(reply, e);
     }

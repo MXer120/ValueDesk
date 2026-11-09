@@ -1,7 +1,7 @@
 /**
  * The incident notification: an open incident of the status page as a card in the
  * notifications' corner, as the maintenance notice is (MaintNote.tsx) - not a bar across
- * the top (owner, 2026-10-29). Amber for a minor or major incident, red for an outage and
+ * the top (owner, 2026-10-29). Amber for a minor incident or a partial outage, red for an outage and
  * for the data service not answering at all. Hover, keyboard focus or a tap opens what
  * each service goes through, the latest words, since when, and the status page link. It
  * goes when the incident is resolved, or by the X (until it gets worse). The logic and

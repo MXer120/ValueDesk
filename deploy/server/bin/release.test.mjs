@@ -18,3 +18,11 @@ test('a release restarts only the units whose code changed: web and tests change
   assert.equal(r.status, 0, `${r.stdout}\n${r.stderr}`);
   assert.match(r.stdout, /pass 23 fail 0/);
 });
+
+test('an indexer release is a handover where the unit has the supervisor, and a classic restart when it fails, times out or is switched off', { skip: SKIP }, () => {
+  // The state file is read with node: the one running this test, first on PATH.
+  const path = `${dirname(process.execPath)}${process.platform === 'win32' ? ';' : ':'}${process.env.PATH ?? ''}`;
+  const r = spawnSync('bash', [join(HERE, 'release-handover.test.sh'), join(HERE, 'release.sh')], { encoding: 'utf8', env: { ...process.env, PATH: path } });
+  assert.equal(r.status, 0, `${r.stdout}\n${r.stderr}`);
+  assert.match(r.stdout, /pass 7 fail 0/);
+});

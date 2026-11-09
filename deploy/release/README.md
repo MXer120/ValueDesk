@@ -17,7 +17,40 @@ restarts, and finally `main` - so Vercel publishes the web after the servers it 
 header of `ship.sh` lists every step and what each restart costs (measured: no failed
 request for the web, the API or the executor; the indexer's boards are about two minutes
 staler). Units, Caddy and env templates are never shipped: it names them, and
-`bootstrap-instance.sh` installs them. Every ship is a line in `deploy/.out/ships.log`.
+`bootstrap-instance.sh` installs them. Every ship is a line in `deploy/.out/ships.log`; its
+last column is the time each phase took (also printed at the end: `phases (min:s): ...`).
+
+**What runs side by side** (2026-11-09; a release took 45-60 min, nearly all of it one wait after
+another). Nothing is switched earlier and no check is shorter; only the waiting overlaps:
+
+| While | Now also | Off with |
+|---|---|---|
+| CI runs (~10 min) | the tarball goes to both servers and is installed beside the running release (`release.sh --install-only`: npm ci, import checks, nothing switched) - where the server's `release.sh` is the tag's | `SHIP_EARLY_INSTALL=0` |
+| CI runs | Vercel builds the web as a staged production deployment (`vercel-web.mjs`); after the servers it is promoted in seconds instead of an 8-10 min build of main | `SHIP_EARLY_WEB=0` |
+| server 1 restarts and its gates watch (10-20 min) | server 2's executor step with all its guards; told to switch nothing should server 1 stop the ship first | `SHIP_EXECUTOR_PARALLEL=0` |
+| CI failed | a rerun of the failed job, once, when only a known network flake failed (`ci-flake.mjs`) | - |
+
+A CI failure after the early install leaves `/opt/valuescan/releases/<tag>` installed but not
+current: it runs nowhere, a rerun of the same tag uses it, `release.sh`'s prune removes it later.
+A web build that fails on Vercel stops the ship before anything restarts.
+
+**Owner, once, for the early web** (without it ship.sh builds through main as before):
+
+1. A Vercel access token (vercel.com -> Account Settings -> Tokens, scope: the team or account
+   of the project `valuedesk`) into `~/.valuescan/vercel-token` (or `VERCEL_TOKEN`). The
+   project's team: `VERCEL_TEAM_ID=team_...` when it is a team's; another project name:
+   `VERCEL_PROJECT`.
+2. The trial - it stages the commit that is ALREADY live and checks Vercel gives it no domain,
+   so even a failed trial changes nothing on the site:
+   ```
+   git fetch origin main && git push origin +origin/main:refs/heads/ship
+   node deploy/release/vercel-web.mjs trial "$(git rev-parse origin/main)" MXer120/ValueDesk
+   ```
+   "trial passed" writes `~/.valuescan/vercel-early.ok`; from then on `ship.sh --dry-run`
+   shows "the web live: Vercel's promote of the early build". A ship that ever sees a staged
+   build go live by itself removes the mark again.
+3. For the CI rerun the GitHub token needs "Actions: read and write" on the repository
+   (without it the gate stops as before).
 
 **The maintenance notice.** A ship that restarts anything posts one maintenance on the
 status page (`status.sh ship <tag> --parts=...`, `apps/server/src/ops/shipNotice.ts`): each

@@ -16,6 +16,7 @@ import {
 } from '../../vsApi';
 import type { Eip1193Provider } from '../../wallet';
 import { simulate, toSimFills, type Reconstruction, type SimResult } from './sim';
+import { indexPositions } from '../../indexFills';
 import { checkSettings, regionPolicy, type CopySettings } from '@copy-engine';
 import { readiness, startCopy as startLiveCopy, useLiveCopy, type CopyModeId, type LiveCopy } from '../../copy/live';
 import {
@@ -33,6 +34,33 @@ import {
  * capped answer is still contiguous up to now.
  */
 export const FILL_LIMIT = 5_000;
+
+/* ------------------------------------------------------------ prefetch ---- */
+
+/*
+ * MILLISECONDS FROM THE CLICK (2026-11-07, owner: "for all users charts arrive in milliseoncds. Both chart & pnl
+ * expectation for copy trading. Always."). A card's hover or focus starts the exact reads its copy setup takes - the
+ * 30-day fills and the profile, shared by vsApi for a minute - so they are usually in before the click. The card's own
+ * row says the trader's account value (the index's row, which the Hyperliquid profile itself uses), kept here so the
+ * first replay can size Mirror before the profile arrives.
+ */
+const equityHints = new Map<string, number>();
+const hintKey = (venue: Venue, address: string) => `${venue}|${address.toLowerCase()}`;
+
+/** The fills request of a copy setup opened now (the same edges as useCopyContext's). */
+function copyFillsArgs(): { from: number | undefined; limit: number } {
+  const now5 = Math.floor(Date.now() / 300_000) * 300_000;
+  return { from: windowStart('30d', now5) ?? undefined, limit: FILL_LIMIT };
+}
+
+export function prefetchCopy(venue: Venue, address: string, accountValue?: number | null): void {
+  // The two venues a copy follows; the others have no copy setup to open.
+  if (!isAddress(address) || (venue !== 'hyperliquid' && venue !== 'sodex')) return;
+  if (typeof accountValue === 'number' && Number.isFinite(accountValue) && accountValue > 0) equityHints.set(hintKey(venue, address), accountValue);
+  if (equityHints.size > 500) equityHints.delete(equityHints.keys().next().value!);
+  void vsApi.fills(venue, address, copyFillsArgs()).catch(() => {});
+  void vsApi.trader(venue, address).catch(() => {});
+}
 
 /* ---------------------------------------------------------------- load ----- */
 
@@ -226,6 +254,7 @@ export function useCopyContext({ address, provider, onScan }: CopyPageProps): Co
    * every page load a fresh walk.
    */
   const fetchWindow: Window = win === 'all' ? 'all' : '30d';
+  // (prefetchCopy asks with the same edges for 30D, so a hovered card's read is this one.)
   const fillsKey = leader ? `${venue}|${leader}|${fetchWindow}` : null;
   const now5 = useMemo(() => Math.floor(Date.now() / 300_000) * 300_000, [fillsKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const from = windowStart(fetchWindow, now5);
@@ -249,7 +278,9 @@ export function useCopyContext({ address, provider, onScan }: CopyPageProps): Co
     if (!fills.data) return null;
     // Positions are needed to recover each fill's position-before; without
     // them (venue did not answer yet, or at all) the engine rebuilds forward.
-    const positions = profile.data ? profile.data.positions : profile.loading ? undefined : null;
+    // Until the venue's profile arrives, the index's positions at the fills' end when it sent them (indexFills.ts
+    // indexPositions): the replay runs at once and again on the venue's.
+    const positions = profile.data ? profile.data.positions : profile.loading ? (indexPositions(fills.data) ?? undefined) : null;
     if (positions === undefined) return null;
     const out = toSimFills(venue, fills.data, { positions });
     // A coin SoDEX doesn't list is never copied, so the backtest leaves its fills out as a live copy would.
@@ -261,6 +292,7 @@ export function useCopyContext({ address, provider, onScan }: CopyPageProps): Co
     result: null, busy: false, error: null, fillCount: 0, truncated: false, reconstruction: null, inWorker: false,
   });
   const runId = useRef(0);
+  const lastRun = useRef('');
 
   useEffect(() => {
     if (!prepared || Object.keys(parsed.errors).length) {
@@ -276,6 +308,9 @@ export function useCopyContext({ address, provider, onScan }: CopyPageProps): Co
     const start = startAt === null || clipped ? undefined : startAt;
     setSim((s) => ({ ...s, busy: true, error: null }));
     const p = profile.data;
+    // The first replay of a trader at once; a change of rules or of what it runs on waits a moment for the next.
+    const first = lastRun.current !== `${venue}|${leader}|${fills.data === null ? '' : 'f'}`;
+    lastRun.current = `${venue}|${leader}|${fills.data === null ? '' : 'f'}`;
     const timer = window.setTimeout(() => {
       try {
         // The region's leverage cap binds the replay as it binds the live copy (EEA 2x).
@@ -284,7 +319,7 @@ export function useCopyContext({ address, provider, onScan }: CopyPageProps): Co
         const out = simulate(prepared.fills, config, {
           leader: leader ? { venue, address: leader } : undefined,
           startAt: start,
-          leaderEquity: p?.summary.accountValue ?? undefined,
+          leaderEquity: p?.summary.accountValue ?? (leader ? equityHints.get(hintKey(venue, leader)) : undefined) ?? undefined,
           leaderEquitySeries: p?.equity[win] ?? p?.equity.all ?? undefined,
           fixedNotionalUsd: parsed.fixedNotionalUsd,
           builderFeeTenthsBps: COPY_BUILDER_TENTHS_BPS,
@@ -309,7 +344,7 @@ export function useCopyContext({ address, provider, onScan }: CopyPageProps): Co
         if (runId.current === id) logLoadFailure('Backtest', e);
         if (runId.current === id) setSim((s) => ({ ...s, result: null, busy: false, error: e instanceof Error ? e.message : String(e) }));
       }
-    }, 250);
+    }, first ? 0 : 250);
     return () => window.clearTimeout(timer);
   }, [prepared, parsed, leader, venue, win, startAt, profile.data, fills.data, live.terms?.country, live.viewerCountry]);
 

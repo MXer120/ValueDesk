@@ -10,6 +10,13 @@
  *   flow_chunk    one market's raw prints in one 5-minute slot (codec.ts encodeChunk)
  *   flow_hour     one market's per-wallet sums of one hour (codec.ts encodeSums)
  *   flow_day      the same per UTC day
+ *   flow_tail     the prints of a chunk still forming that came after its last full write (same packing as a chunk,
+ *                 replaced every ~0.5 s by the recorder's thread, gone with the next full write): the newest candle is
+ *                 readable within a second without rewriting the whole chunk that often (flow/thread.ts)
+ *   flow_sent     per chunk, the newest print number (of the indexer's run `session`) that its chunk + tail hold,
+ *                 written in the same transaction: what the indexer still holds unconfirmed is told apart from what is
+ *                 on disk, after a thread restart too (flow/thread.ts). Bookkeeping, not data: rows the indexer has
+ *                 seen confirmed are dropped.
  *
  * NOTHING HERE IS DELETED FOR BEING OLD (owner 2026-10-28, retention.ts): there is no prune.
  * A chunk is rewritten while its slot fills (every FLUSH_MS) and once more for a print that comes
@@ -43,6 +50,12 @@ CREATE TABLE IF NOT EXISTS flow_hour (
   PRIMARY KEY (mid, t));
 CREATE TABLE IF NOT EXISTS flow_day (
   mid INTEGER NOT NULL, t INTEGER NOT NULL, wallets INTEGER NOT NULL, prints INTEGER NOT NULL, data BLOB NOT NULL,
+  PRIMARY KEY (mid, t));
+CREATE TABLE IF NOT EXISTS flow_tail (
+  mid INTEGER NOT NULL, t INTEGER NOT NULL, n INTEGER NOT NULL, data BLOB NOT NULL,
+  PRIMARY KEY (mid, t));
+CREATE TABLE IF NOT EXISTS flow_sent (
+  mid INTEGER NOT NULL, t INTEGER NOT NULL, session TEXT NOT NULL, seq INTEGER NOT NULL,
   PRIMARY KEY (mid, t));
 `;
 const TABLES = ['meta', 'flow_market', 'flow_party', 'flow_chunk', 'flow_hour', 'flow_day'];
@@ -177,6 +190,77 @@ export class FlowStore {
   /** Prints per chunk of a market with from <= t < to, without their blobs. */
   chunkCounts(mid: number, from: number, to: number): Array<{ t: number; n: number }> {
     return this.q('SELECT t, n FROM flow_chunk WHERE mid = ? AND t >= ? AND t < ?').all(mid, from, to) as unknown as Array<{ t: number; n: number }>;
+  }
+
+  /** A file from before flow_tail (a reader opened ahead of the new writer) has none: nothing is forming there. */
+  private hasTail: boolean | null = null;
+
+  private tailsReadable(): boolean {
+    if (this.hasTail === true) return true;
+    this.hasTail = !!this.q(`SELECT 1 AS x FROM sqlite_master WHERE type = 'table' AND name = 'flow_tail'`).get();
+    return this.hasTail;
+  }
+
+  /** The prints of chunks still forming written since their last full write (flow_tail), from <= t < to. */
+  tails(mid: number, from: number, to: number): Array<{ t: number; n: number; data: Uint8Array }> {
+    if (!this.tailsReadable()) return [];
+    return this.q('SELECT t, n, data FROM flow_tail WHERE mid = ? AND t >= ? AND t < ? ORDER BY t').all(mid, from, to) as unknown as Array<{ t: number; n: number; data: Uint8Array }>;
+  }
+
+  tailCounts(mid: number, from: number, to: number): Array<{ t: number; n: number }> {
+    if (!this.tailsReadable()) return [];
+    return this.q('SELECT t, n FROM flow_tail WHERE mid = ? AND t >= ? AND t < ?').all(mid, from, to) as unknown as Array<{ t: number; n: number }>;
+  }
+
+  putTail(mid: number, t: number, n: number, data: Uint8Array): void {
+    this.q('INSERT INTO flow_tail (mid, t, n, data) VALUES (?, ?, ?, ?) ON CONFLICT (mid, t) DO UPDATE SET n = excluded.n, data = excluded.data').run(mid, t, n, data);
+  }
+
+  dropTail(mid: number, t: number): void {
+    this.q('DELETE FROM flow_tail WHERE mid = ? AND t = ?').run(mid, t);
+  }
+
+  allTails(): Array<{ mid: number; t: number; data: Uint8Array }> {
+    return this.q('SELECT mid, t, data FROM flow_tail').all() as unknown as Array<{ mid: number; t: number; data: Uint8Array }>;
+  }
+
+  /**
+   * A slot as one read (one statement, so one snapshot of a file the recorder's thread writes meanwhile): its chunk, its
+   * tail, and the newest print number of `session` they hold (-1: none of that run).
+   */
+  slot(mid: number, t: number, session: string): { chunk: Uint8Array | null; tail: Uint8Array | null; seq: number } {
+    const r = this.q(`SELECT c.data AS chunk, l.data AS tail, s.seq AS seq, s.session AS session
+      FROM (SELECT ? AS mid, ? AS t) k
+      LEFT JOIN flow_chunk c ON c.mid = k.mid AND c.t = k.t
+      LEFT JOIN flow_tail l ON l.mid = k.mid AND l.t = k.t
+      LEFT JOIN flow_sent s ON s.mid = k.mid AND s.t = k.t`).get(mid, t) as { chunk: Uint8Array | null; tail: Uint8Array | null; seq: number | null; session: string | null };
+    return { chunk: r.chunk ?? null, tail: r.tail ?? null, seq: r.session === session && r.seq !== null ? r.seq : -1 };
+  }
+
+  putSent(mid: number, t: number, session: string, seq: number): void {
+    this.q('INSERT INTO flow_sent (mid, t, session, seq) VALUES (?, ?, ?, ?) ON CONFLICT (mid, t) DO UPDATE SET session = excluded.session, seq = excluded.seq').run(mid, t, session, seq);
+  }
+
+  /** The newest print number of `session` the slot holds on disk (-1: none). */
+  sent(mid: number, t: number, session: string): number {
+    const r = this.q('SELECT session, seq FROM flow_sent WHERE mid = ? AND t = ?').get(mid, t) as { session: string; seq: number } | undefined;
+    return r && r.session === session ? r.seq : -1;
+  }
+
+  /** Rows no longer needed: another run's, and this run's the indexer has seen confirmed (`through`). */
+  dropSent(session: string, through: number): void {
+    this.q('DELETE FROM flow_sent WHERE session <> ? OR seq <= ?').run(session, through);
+  }
+
+  /** The market's id, or undefined (a reader: nothing is created). */
+  findMarket(venue: Venue, symbol: string): number | undefined {
+    const r = this.q('SELECT id FROM flow_market WHERE venue = ? AND symbol = ?').get(venue, symbol) as { id: number } | undefined;
+    return r?.id;
+  }
+
+  findParty(venue: Venue, key: string): number | undefined {
+    const r = this.q('SELECT id FROM flow_party WHERE venue = ? AND key = ?').get(venue, key) as { id: number } | undefined;
+    return r?.id;
   }
 
   /** Which markets have chunks in [from, to). */

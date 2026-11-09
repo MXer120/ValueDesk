@@ -39,6 +39,7 @@ import { isIP } from 'node:net';
 import type { FastifyInstance } from 'fastify';
 import { KeyedLimiter, type Limit } from './rateLimit.js';
 import { isSiteOrigin, normaliseOrigin } from './origin.js';
+import type { FreshId } from './ops/statusModel.js';
 
 // --- the allow-list ------------------------------------------------------------
 
@@ -169,6 +170,8 @@ export const HOSTED_ROUTES: readonly HostedRoute[] = [
   { method: 'GET', url: '/api/vs/wallet/fills', cls: 'read' },
   // The copy cards' hint: each Hyperliquid wallet's newest indexed fill time, one index step per wallet, kept a minute.
   { method: 'GET', url: '/api/vs/last-trades', cls: 'read' },
+  // The Copy page's cards read ahead by the server (valuedesk/copyCards.ts): held answers only, no upstream read per request.
+  { method: 'GET', url: '/api/vs/copy/cards', cls: 'read' },
   // The public status page (routes/status.ts, ops/status.ts): one report for everyone, rebuilt at most every 30 s.
   { method: 'GET', url: '/api/vs/status', cls: 'read' },
   { method: 'GET', url: '/api/vs/status/feed', cls: 'read' },
@@ -227,6 +230,7 @@ export const HOSTED_ROUTES: readonly HostedRoute[] = [
   { method: 'POST', url: '/api/admin/builder', cls: 'admin' },
   { method: 'POST', url: '/api/admin/users', cls: 'admin' },
   { method: 'POST', url: '/api/admin/analytics', cls: 'admin' },
+  { method: 'POST', url: '/api/admin/overview', cls: 'admin' },
   { method: 'POST', url: '/api/admin/status', cls: 'admin' },
   { method: 'POST', url: '/api/admin/audit', cls: 'admin' },
   { method: 'POST', url: '/api/admin/page-error', cls: 'admin' },
@@ -724,6 +728,14 @@ export interface IndexerHealth {
      */
     oiPct?: Record<string, number | null>;
   } | null;
+  /** Write steps queued and not run yet (the indexer's flushBacklog). Null: not published. */
+  flushBacklog: number | null;
+  /**
+   * How current each dataset is, in ms as of `at` (what each figure is and its target: ops/statusModel.ts
+   * FRESH_TARGETS). Null for a figure the indexer does not publish (one older than 2026-11-09 has no liqStep, flow
+   * or writes) or has none of yet (no heatmap write, no trade, no build since its start).
+   */
+  fresh: Record<Exclude<FreshId, 'hl'>, number | null>;
 }
 
 /** A venue or lane name. Never an address (0x...), a path or anything long. */
@@ -780,6 +792,36 @@ export function indexerHealth(status: unknown): IndexerHealth | null {
     lastBuildMs: amount(status.lastBuildMs),
     errorSinceStart: Boolean(status.lastError),
     liq: liqHealth(status.cohorts),
+    flushBacklog: amount(status.flushBacklog),
+    fresh: freshHealth(status),
+  };
+}
+
+/** The heatmap's levels are written every 2 min (cohortTracker.ts LIQ_NOW_MS); a history step rides on that write. */
+const LIQ_WRITE_MS = 2 * 60_000;
+/** The liquidation history's and the cohorts' step (cohortTracker.ts LIQ_STEP_MS, SERIES_STEP_MS). */
+const STEP_MS = 15 * 60_000;
+
+function freshHealth(status: Record<string, unknown>): IndexerHealth['fresh'] {
+  const at = stamp(status.at);
+  const cohorts = isRecord(status.cohorts) ? status.cohorts : {};
+  const liq = isRecord(cohorts.liq) ? cohorts.liq : {};
+  const flow = isRecord(status.flow) ? status.flow : {};
+  // From a time to `at`; from when the next is due to `at` (0 before it is due). Null without either.
+  const since = (t: number | null): number | null => (at !== null && t !== null ? Math.max(0, at - t) : null);
+  const late = (due: number | null): number | null => (at !== null && due !== null ? Math.max(0, at - due) : null);
+  const nowAt = stamp(liq.nowAt);
+  const stepT = stamp(liq.stepT);
+  const seriesT = stamp(cohorts.lastSeriesT);
+  return {
+    liqNow: late(nowAt === null ? null : nowAt + LIQ_WRITE_MS),
+    liqStep: late(stepT === null ? null : stepT + STEP_MS + LIQ_WRITE_MS),
+    flow: since(stamp(flow.newestT)),
+    writes: amount(status.flushOldestMs),
+    cohorts: late(seriesT === null ? null : seriesT + STEP_MS),
+    // The same age the probe judges (ops/status.ts indexerState): this process's build, else the last process's (a new
+    // process before its first build shows that one's boards), else the newest board on disk.
+    boards: since(stamp(status.lastBuildAt) || stamp(status.prevBuildAt) || stamp(status.boardsAt)),
   };
 }
 

@@ -26,6 +26,8 @@ const RESTART_FRAMES = 64_000;
 const RESTART_GAP_MS = 30_000;
 /** How long it may wait for the write lock and for readers, holding up the writer meanwhile. */
 const RESTART_WAIT_MS = 250;
+/** Frames PASSIVE may leave behind for a FULL run to go ahead (2,000 x 4 KiB = 8 MB: well under a second of copying). */
+const RESTART_MAX_BEHIND = 2_000;
 
 // Plain JavaScript in a string: the thread needs no TypeScript loader, in production or in a test.
 const CODE = `
@@ -44,8 +46,12 @@ setInterval(() => {
   try {
     const r = ask.get();
     let fullMs, fullBusy;
-    if (r.log >= workerData.restartFrames && Date.now() - fullAt >= workerData.restartGapMs) {
-      ask.get();
+    // A FULL run holds the write lock while it copies what PASSIVE left behind: with the writer thread busy that was up
+    // to 34 s (fullMaxMs 34,341 on production 2026-11-09 13:56), every write of the indexer and the writer waiting on it.
+    // So only when the PASSIVE run just before left at most restartMaxBehind frames: the lock is then held for well under
+    // a second. Otherwise the next round tries again (the WAL file only grows past its limit meanwhile, nothing is held).
+    const r2 = r.log >= workerData.restartFrames && Date.now() - fullAt >= workerData.restartGapMs ? ask.get() : null;
+    if (r2 && r2.log - r2.checkpointed <= workerData.restartMaxBehind) {
       db.exec('PRAGMA busy_timeout = ' + workerData.restartWaitMs);
       const f0 = Date.now();
       try {
@@ -93,7 +99,7 @@ export class Checkpointer {
   constructor(
     private readonly path: string,
     private readonly writerChecks: (on: boolean) => void,
-    private readonly o: { everyMs?: number; hungMs?: number; restartAfterMs?: number; restartFrames?: number; restartGapMs?: number } = {},
+    private readonly o: { everyMs?: number; hungMs?: number; restartAfterMs?: number; restartFrames?: number; restartGapMs?: number; restartMaxBehind?: number } = {},
   ) {
     this.start();
     this.watch = setInterval(() => {
@@ -104,7 +110,7 @@ export class Checkpointer {
 
   private start(): void {
     if (this.stopped) return;
-    const w = new Worker(CODE, { eval: true, execArgv: [], workerData: { path: this.path, everyMs: this.o.everyMs ?? CHECKPOINT_EVERY_MS, restartFrames: this.o.restartFrames ?? RESTART_FRAMES, restartGapMs: this.o.restartGapMs ?? RESTART_GAP_MS, restartWaitMs: RESTART_WAIT_MS } });
+    const w = new Worker(CODE, { eval: true, execArgv: [], workerData: { path: this.path, everyMs: this.o.everyMs ?? CHECKPOINT_EVERY_MS, restartFrames: this.o.restartFrames ?? RESTART_FRAMES, restartGapMs: this.o.restartGapMs ?? RESTART_GAP_MS, restartWaitMs: RESTART_WAIT_MS, restartMaxBehind: this.o.restartMaxBehind ?? RESTART_MAX_BEHIND } });
     w.unref();
     this.worker = w;
     this.lastAt = Date.now();

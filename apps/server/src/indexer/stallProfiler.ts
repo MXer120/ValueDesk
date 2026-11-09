@@ -15,8 +15,15 @@ import { join } from 'node:path';
 
 export const STALL_MS = 5_000;
 export const GAP_MS = 10 * 60_000;
+/** A stall this long is written inside GAP_MS too, when it is over twice the last one written. */
+export const BIG_STALL_MS = 30_000;
 const SAMPLE_US = 10_000;
-const SEGMENT_MS = 60_000;
+/**
+ * 30 minutes, not one (2026-11-07): every cut starts the profiler again, and Profiler.start walks the heap on the thread
+ * it profiles - 0.3 s with a 0.5 GB heap on a dev machine, 3.6 s on the production API (2+ GB). Once a minute that was a
+ * stall of its own. A segment of 30 minutes at 10 ms is ~180k samples (a few MB); a dump still keeps only KEEP_MS.
+ */
+const SEGMENT_MS = 30 * 60_000;
 const KEEP_MS = 60_000;
 const MAX_FILES = 20;
 
@@ -140,10 +147,15 @@ export class StallProfiler {
   /** Each loop-lag tick: a stall long enough, and none written lately, writes the last minute. */
   onLag(lateMs: number, now = Date.now()): void {
     if (lateMs < (this.o.stallMs ?? STALL_MS) || !this.session || this.busy) return;
-    if (this.lastDump && now - this.lastDump < (this.o.gapMs ?? GAP_MS)) return;
+    // A long stall is written even inside the gap (2026-11-08: a 161 s stall of the indexer, every Lighter and Arcus
+    // stream cut, came 5 min after an 8 s one had been written - and left no samples at all).
+    const big = lateMs >= BIG_STALL_MS && lateMs > 2 * this.lastDumpMs;
+    if (this.lastDump && now - this.lastDump < (this.o.gapMs ?? GAP_MS) && !big) return;
     this.lastDump = now;
+    this.lastDumpMs = lateMs;
     void this.dump(lateMs, now);
   }
+  private lastDumpMs = 0;
 
   private async dump(lateMs: number, now: number): Promise<void> {
     const before = this.kept;
@@ -155,7 +167,7 @@ export class StallProfiler {
       const file = join(this.dir, `${this.name}-${new Date(now).toISOString().replace(/[:.]/g, '-')}-${Math.round(lateMs / 1000)}s.cpuprofile`);
       writeFileSync(file, JSON.stringify(merged));
       this.lastFile = file;
-      (this.o.log ?? ((l: string) => console.log(l)))(`[indexer] thread stalled ${Math.round(lateMs / 1000)} s: the last minute of samples is in ${file}`);
+      (this.o.log ?? ((l: string) => console.log(l)))(`[${this.name.replace(/-stall$/, '')}] thread stalled ${Math.round(lateMs / 1000)} s: the last minute of samples is in ${file}`);
       this.prune();
     } catch (e) {
       this.lastError = String(e);

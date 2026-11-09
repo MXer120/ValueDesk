@@ -180,7 +180,31 @@ at all:
   synced tree).
 - Status: `GET /api/vs/index/status` (lanes, streams, last build). The standalone
   process also logs one status line per minute.
-- Run exactly **one** indexer per database file.
+- Run exactly **one** indexer per database file. Enforced since 2026-11-09: the writer holds a kernel lock on
+  `<index>.writer-lock` (`indexer/writerLock.ts`) for as long as it writes; a second writer exits 73 and names the holder.
+
+### Handover restarts (2026-11-09, `indexer/handover.ts`)
+
+Production runs the indexer under a supervisor (`indexer/supervisor.ts`, the unit's main process). `systemctl reload
+valuescan-indexer` starts the release `current` points to **beside** the running indexer, as a standby:
+
+1. the standby (no index connection, no feed port, ~80 MB locally) writes `<index>.handover-hello.json`, opens all four
+   venues' sockets and buffers every print. Lighter subscribes at 500 ms a market (two processes at 330 ms drew
+   Lighter's "Too Many Websocket Messages!", measured 2026-11-09).
+2. Hyperliquid allows 1,000 trade subscriptions **per IP** (measured: two sockets asking for 697 markets each got 1,000
+   acks between them). So its markets move across in batches of 150: the standby subscribes, and once Hyperliquid
+   confirms, the running indexer unsubscribes them (`handover-hl-lend` / `-hl-lent`). No market is ever unsubscribed in
+   both. If the standby goes away, the running one subscribes them again.
+3. the standby asks (`handover-request`, with the time its buffer starts per venue). The running indexer takes it
+   (renames it), stops as on SIGTERM, writes `handover-boundary` (every print id it took since then, per venue), lets go
+   of the writer lock, then writes its held rows (a file) and exits.
+4. the standby takes the lock, opens the index, replays the spill, and applies its buffer: prints in the boundary are
+   skipped, all others applied - exactly once in fills, activity (with "one trade per account and block" carried over),
+   who traded and the cohorts. Its sockets then feed the engine directly.
+
+While handing over, `indexer_status` carries `handover` instead of `stopping` (the status page judges it as it is). Any
+failure before step 3 leaves the running indexer alone and the standby exits 75; `release.sh` then restarts classically.
+The supervisor writes where a handover stands to `/var/lib/valuescan/state/indexer-handover.json`.
 
 ## Budgets (per IP)
 

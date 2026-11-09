@@ -22,6 +22,7 @@
  * Nothing here signs, trades or moves funds; every request is a public read.
  */
 import { WalletBackfill, WalletHistoryDb } from './walletHistory.js';
+import { activeAccountsAsync } from './activeScan.js';
 import { pageSource } from '../history.js';
 import { hlInfo, hlLeaderboard } from '../valuedesk/hyperliquid/index.js';
 import type { LbSnapshot } from '../valuedesk/hyperliquid/leaderboard.js';
@@ -30,7 +31,7 @@ import { gatewayWeightLimit, gatewayWeightSpent } from '../valuedesk/sodex/gatew
 import { knownAddress, resolveIds, seedAddress } from '../valuedesk/sodex/resolver.js';
 import { cooldownLeftMs } from '../valuedesk/sodex/util.js';
 import { VENUES, WINDOWS, type BoardWindow, type Venue, type Window } from '../valuedesk/types.js';
-import { pickBoard, spanCovers, tradeCheck, type Candidate, type TradeCheck } from './boards.js';
+import { pickBoardAsync, spanCovers, tradeCheck, type Candidate, type TradeCheck } from './boards.js';
 import { hlCandidates, hlChartWindows, hlQuickCheck, hlSyncFills } from './hlSource.js';
 import { Lane } from './lanes.js';
 import { ArcusVenue } from './ext/arcus.js';
@@ -45,13 +46,14 @@ import { hlCoinName } from '../valuedesk/extra/account.js';
 import { accountValue as fetchAccountValue, chartWindows, lookupPnl, peekTrades, syncCloses, syncLists, syncTrades } from './sodexSource.js';
 import type { BoardRow, Coverage, HistoryKind, IndexStore, TraderStatsRow, TraderWin } from './store.js';
 import { winRateOf } from '../valuedesk/winRate.js';
-import { HlStream, SodexStream, streamLog, type ArcusWsTrade, type Print } from './streams.js';
+import { HlStream, SodexStream, streamLog, type ArcusWsTrade, type Dedup, type Print } from './streams.js';
+import { BoundaryFilter, FILTER_TAIL_MS, FROM_MARGIN_MS, KEEP_IDS, PrintTap, type Boundary, type PrintBuffer } from './handover.js';
+import { sourceFactory, type Sources } from './printSources.js';
 import { SodexCatchup } from './sodexCatchup.js';
 import { ArcusCatchup } from './arcusCatchup.js';
 import { startLedgerThread, type LedgerThread } from '../flow/ledgerWorker.js';
 import { mayPrune } from '../retention.js';
-import { FlowRecorder } from '../flow/recorder.js';
-import { FlowStore } from '../flow/store.js';
+import { startFlow, type FlowFeed } from '../flow/thread.js';
 import { dirname, join } from 'node:path';
 import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { StallProfiler } from './stallProfiler.js';
@@ -141,7 +143,20 @@ export const INDEXER_ENV = {
   walletBackfillPerMin: () => {
     const asked = Number(process.env.VALUESCAN_WALLET_BACKFILL);
     if (!(asked > 0)) return 0;
-    return Math.max(0.1, Math.min(asked, SODEX_HISTORY_PAIR_PER_MIN - INDEXER_ENV.sodexChecksPerMin() - (INDEXER_ENV.sodexTradesEnabled() ? INDEXER_ENV.sodexTradesPerMin() : 0)));
+    return Math.max(0.1, Math.min(asked, SODEX_HISTORY_PAIR_PER_MIN - INDEXER_ENV.sodexChecksPerMin() - (INDEXER_ENV.sodexTradesEnabled() ? INDEXER_ENV.sodexTradesPerMin() : INDEXER_ENV.sodexLeaderTradesPerMin())));
+  },
+  /**
+   * SoDEX `/trades` pages a minute for the Copy page's leaders only (the 'any' boards of COPY_WINDOWS, top and worst),
+   * back COPY_BACK_DAYS, while the boards' full backfill above is off: their copy setup then replays the index's fills
+   * (/api/vs/wallet/fills) instead of walking SoDEX in the browser, a couple of pages a minute per visitor. What the
+   * board's trade checks leave of SODEX_HISTORY_PAIR_PER_MIN, and never above it: 0.5 with the checks' 1 (1.5 of 2). 0 turns it off.
+   */
+  sodexLeaderTradesPerMin: () => {
+    const raw = process.env.VALUESCAN_INDEX_SODEX_LEADER_TRADES;
+    const asked = raw === undefined || raw.trim() === '' ? 0.5 : Number(raw);
+    if (!(asked > 0)) return 0;
+    const left = SODEX_HISTORY_PAIR_PER_MIN - INDEXER_ENV.sodexChecksPerMin();
+    return left >= 0.05 ? Math.max(0.05, Math.min(asked, left)) : 0;
   },
   /** How far back `/trades` reaches for a SoDEX board member (days). The stream covers everything after. */
   sodexTradesBackDays: () => envNum('VALUESCAN_INDEX_SODEX_TRADES_DAYS', 30, 1, 400),
@@ -154,6 +169,17 @@ export const INDEXER_ENV = {
   /** Set to 0 to run without the live streams (REST only). */
   streams: () => process.env.VALUESCAN_INDEX_STREAMS !== '0',
 };
+
+/** The Copy page's windows (web copy/gridModel.ts GRID_WINDOWS): their 'any' boards, top and worst, are its leaders. */
+export const COPY_WINDOWS: ReadonlySet<BoardWindow> = new Set(['7d', '30d', 'all']);
+/** How far back a SoDEX copy leader's fills are read (the copy setup replays 30 days for 24H, 7D and 30D). */
+export const COPY_BACK_DAYS = 30;
+/** The fills one copy setup replays (web copy/useCopy.ts FILL_LIMIT): a leader holding this many since its held start needs no older page. */
+export const COPY_FILLS = 5_000;
+/** A copy leader's place in the leader backfill: the default view's (30D top) first, then 30D worst, 7D, All. */
+export function copyLeaderPrio(window: BoardWindow, side: Side, i: number): number {
+  return (window === '30d' ? 3_000 : window === '7d' ? 2_000 : 1_000) + (side === 'top' ? 500 : 0) + Math.max(0, 100 - i);
+}
 
 const REBUILD_MS = 60_000;
 /** Per-trader answers are reused this long unless the trader's data changed. */
@@ -251,6 +277,8 @@ const ADVANCE_MS = 30_000;
 const RANK_BACK_MS = DAY_MS;
 /** Indexed wallets per venue whose figures are refreshed per pass beyond the boards (trader_stats). */
 const STATS_SWEEP = 50;
+/** The most one build spends on sweepStats (all venues together); VALUESCAN_INDEX_SWEEP_MS, 30 s to 30 min. */
+const sweepBudgetMs = () => envNum('VALUESCAN_INDEX_SWEEP_MS', 4 * 60_000, 30_000, 30 * 60_000);
 const STATS_WINDOWS: readonly BoardWindow[] = ['1d', '7d', '30d', 'all'];
 /** History kinds whose fills the streams write for a tracked wallet. */
 const STREAM_KINDS: Record<Venue, HistoryKind[]> = { hyperliquid: ['fills'], tradexyz: ['fills'], sodex: ['perps', 'spot'], lighter: ['fills'], arcus: ['fills'] };
@@ -349,6 +377,19 @@ type UnwrittenPart =
  */
 const WARM_FILE = 'warm-cache.json';
 const WARM_FORMAT = 'warm-1';
+/** A handover's buffer is applied this long at a time, the loop let in between (sockets keep delivering to its end). */
+const HANDOVER_SLICE_MS = 20;
+
+/** What a handover's standby hands the engine (handover.ts): its sockets, what they buffered, and the boundary. */
+export interface HandoverStart {
+  tap: PrintTap;
+  buffer: PrintBuffer;
+  sources: Sources;
+  /** The outgoing process's (null: it ended without one - a crash midway). */
+  boundary: Boundary | null;
+  /** Buffered prints older than this are snapshots of what the outgoing process took. */
+  floor: number;
+}
 const WARM_MAX_AGE_MS = MAX_REUSE_MS;
 
 interface PickStats {
@@ -374,9 +415,17 @@ export class Indexer {
    */
   private sodexBreaks: Array<{ from: number; to: number; since: number }> = [];
   readonly strades: Lane;
+  /** SoDEX Copy page leaders (copyLeaderPrio), with the build that last listed them. */
+  private copyLeaders = new Map<string, { prio: number; at: number }>();
+  /** `h:<engine>:<address>` -> the held start at which the leader was found to hold COPY_FILLS fills (queueLeaderTrades). */
+  private leaderDeep = new Map<string, number>();
   readonly sdata: Lane;
   private hlStream: HlStream | null = null;
   private sodexStream: SodexStream | null = null;
+  /** Where sockets this engine adopts or a test factory makes deliver (printSources.ts). */
+  private readonly tap = new PrintTap();
+  /** The handover this process started from: what its buffer held and what the boundary did (status, tests). */
+  handover: { prints: number; applyMs: number; dropped: number; filter: string; at: number } | null = null;
   private timers: NodeJS.Timeout[] = [];
   private walletBackfill: WalletBackfill | null = null;
   private listSnap: Partial<Record<Window, number>> = {};
@@ -408,6 +457,10 @@ export class Indexer {
   private unwritten = new Set<UnwrittenPart>();
   /** A stop is moving the unwritten rows to the spill: the flush only queues. */
   private spilling = false;
+  /** Flushes through the writer thread, each one's rest after the one before (flushThrough). */
+  private flushChain: Promise<void> = Promise.resolve();
+  /** When the last flush took its rows (a stop moves the streams' span to it). */
+  private lastFlushAt = 0;
   /** Rows the last stop spilled (its timing line). */
   private spilledRows = 0;
   /** Samples the thread all the time and keeps the last minute when it stalls (stallProfiler.ts). */
@@ -443,8 +496,8 @@ export class Indexer {
   readonly cohorts: CohortTracker;
   /** SoDEX account id -> address, for stream prints (they carry ids). */
   private sodexAddrOf = new Map<number, string>();
-  /** Every print kept for the per-candle breakdown (flow/recorder.ts); off with VALUESCAN_FLOW=0. */
-  flow: FlowRecorder | null = null;
+  /** Every print kept for the per-candle breakdown (flow/recorder.ts, on its own thread: flow/thread.ts); off with VALUESCAN_FLOW=0. */
+  flow: FlowFeed | null = null;
   private sodexCatchup: SodexCatchup | null = null;
   private arcusCatchup: ArcusCatchup | null = null;
   private coverageLedger: LedgerThread | null = null;
@@ -462,12 +515,17 @@ export class Indexer {
   /** Board key -> the hour its ranks were last snapshotted. */
   private rankSnapAt = new Map<string, number>();
   private statsSweep = Object.fromEntries(VENUES.map((v) => [v, 0])) as Record<Venue, number>;
+  /** Which venue sweepStats starts with this build. */
+  private sweepTurn = 0;
   private pendingStats: TraderStatsRow[] = [];
   /** SoDEX accounts whose analytics booked a balance as profit (sodex/mappers.ts chartSuspect). */
   private suspectSodex = new Set<string>();
 
   constructor(readonly store: IndexStore, private readonly now: () => number = Date.now) {
-    this.hl = new Lane({ name: 'hl', perMin: INDEXER_ENV.hlWeightPerMin() });
+    this.tap.sink = (p) => this.onPrint(p);
+    // The read's own time counts toward its rest (2026-11-08: 12,148 weight in 2.6 h, ~78 of the 200 a minute it may spend -
+    // each page's write takes seconds on the busy thread, and the full rest came on top). Still at most perMin on average.
+    this.hl = new Lane({ name: 'hl', perMin: INDEXER_ENV.hlWeightPerMin(), creditTaskTime: true });
     // SoDEX gateway lanes count requests. Both stand back while any cooldown
     // runs (the trading UI shares the IP) or this process has spent a third of
     // the gateway's minute (the limit SoDEX reports: 6000 on 2026-10-31), and
@@ -480,7 +538,13 @@ export class Indexer {
     // is set). Each task reads ONE page (syncTrades maxPages: 1) and the lane then
     // rests, so its rate is `perMin`, capped at SODEX_HISTORY_PAIR_PER_MIN: the
     // measured /trades + /orders/history counter (~4 per 60 s per IP, then 1015).
-    this.strades = new Lane({ name: 'strades', perMin: INDEXER_ENV.sodexTradesPerMin(), gate: sodexGate, rateLimitPauseMs: 30 * 60_000 });
+    // With that off, the same lane reads the Copy page's leaders only (sodexLeaderTradesPerMin, queueHistory).
+    this.strades = new Lane({
+      name: 'strades',
+      perMin: INDEXER_ENV.sodexTradesEnabled() ? INDEXER_ENV.sodexTradesPerMin() : Math.max(0.05, INDEXER_ENV.sodexLeaderTradesPerMin()),
+      gate: sodexGate,
+      rateLimitPauseMs: 30 * 60_000,
+    });
     this.sdata = new Lane({ name: 'sdata', perMin: INDEXER_ENV.sodexDataPerMin(), gate: () => cooldownLeftMs() });
     const lighter = this.ext.get('lighter') as LighterVenue;
     const arcus = this.ext.get('arcus') as ArcusVenue;
@@ -498,8 +562,13 @@ export class Indexer {
     });
   }
 
-  start(): void {
+  /**
+   * `handover`: this process takes over from a running one (handover.ts) - its sockets are the standby's, already up, and
+   * what they buffered goes in through the boundary once everything else has started.
+   */
+  start(opts: { handover?: HandoverStart } = {}): void {
     this.stopped = false;
+    const pre: Sources | null = opts.handover?.sources ?? sourceFactory()?.(this.tap.emit) ?? null;
     // What keeps the thread before the sockets can open is named in the journal: a restart's gap is mostly this.
     let lapAt = Date.now();
     const lap = (name: string) => {
@@ -551,25 +620,34 @@ export class Indexer {
     this.strades.start();
     this.sdata.start();
     for (const x of this.ext.values()) {
-      x.start({ store: this.store, now: this.now, streamSince: (v) => this.streamSince(v), onPrint: (p) => this.onPrint(p), hlLane: this.hl });
+      x.start({
+        store: this.store, now: this.now, streamSince: (v) => this.streamSince(v), onPrint: (p) => this.onPrint(p), hlLane: this.hl,
+        // A standby without a socket for one (Lighter's market list not read yet): the venue opens its own, as on any start.
+        ...(pre ? { adopt: { lighter: pre.lighter ?? (opts.handover ? undefined : null), arcus: pre.arcus ?? (opts.handover ? undefined : null) } } : {}),
+      });
     }
     lap('lanes and venues');
-    if (INDEXER_ENV.streams() && process.env.VALUESCAN_FLOW !== '0' && !this.flow) {
+    if ((INDEXER_ENV.streams() || pre) && process.env.VALUESCAN_FLOW !== '0' && !this.flow) {
       try {
         const path = process.env.VALUESCAN_FLOW_DB?.trim() || join(dirname(this.store.path), 'valuescan-flow.db');
-        this.flow = new FlowRecorder(new FlowStore(path), (venue, acct) =>
+        this.flow = startFlow(path, (venue, acct) =>
           venue === 'sodex' ? this.sodexAddrOf.get(Number(acct)) ?? null : this.ext.get(venue)?.addressOf?.(acct) ?? null);
       } catch (e) {
         this.lastError = `flow: ${String(e)}`;
       }
     }
     lap('who traded recorder');
-    if (INDEXER_ENV.streams()) {
-      this.hlStream = new HlStream((p) => this.onPrint(p));
-      this.sodexStream = new SodexStream((p) => this.onPrint(p));
-      this.hlStream.start();
-      this.sodexStream.start();
-      if (this.flow && process.env.VALUESCAN_SODEX_CATCHUP !== '0') {
+    if (INDEXER_ENV.streams() || pre) {
+      if (pre) {
+        this.hlStream = pre.hyperliquid;
+        this.sodexStream = pre.sodex;
+      } else {
+        this.hlStream = new HlStream((p) => this.onPrint(p));
+        this.sodexStream = new SodexStream((p) => this.onPrint(p));
+        this.hlStream.start();
+        this.sodexStream.start();
+      }
+      if (this.flow && this.sodexStream && process.env.VALUESCAN_SODEX_CATCHUP !== '0') {
         const stream = this.sodexStream;
         const flow = this.flow;
         this.sodexCatchup = new SodexCatchup((rows) => this.heldChecked(flow, () => stream.catchUp(rows, (prints) => flow.missing(prints))), streamLog);
@@ -585,13 +663,13 @@ export class Indexer {
           (rows) => this.heldChecked(flow, () => arcus.catchUp(rows as ArcusWsTrade[], (prints) => flow.missingNear(prints, ARCUS_NEAR_MS), sink)),
           streamLog,
           {
-            load: () => { try { return JSON.parse(flow.store.getMeta(ARCUS_CATCHUP_META) ?? '{}') as Record<string, number>; } catch { return {}; } },
-            save: (through) => flow.store.setMeta(ARCUS_CATCHUP_META, JSON.stringify(through)),
+            load: () => { try { return JSON.parse(flow.getMeta(ARCUS_CATCHUP_META) ?? '{}') as Record<string, number>; } catch { return {}; } },
+            save: (through) => flow.setMeta(ARCUS_CATCHUP_META, JSON.stringify(through)),
           },
         );
         this.arcusCatchup.start();
       }
-      if (this.flow && process.env.VALUESCAN_SODEX_LEDGER !== '0') this.coverageLedger = startLedgerThread({ flow: this.flow.store.path, index: this.store.path }, streamLog);
+      if (this.flow && process.env.VALUESCAN_SODEX_LEDGER !== '0') this.coverageLedger = startLedgerThread({ flow: this.flow.path, index: this.store.path }, streamLog);
     }
     const backfillRate = INDEXER_ENV.walletBackfillPerMin();
     if (backfillRate > 0) {
@@ -639,7 +717,9 @@ export class Indexer {
     }, PRUNE_START_MS);
     prune.unref?.();
     this.timers.push(prune);
-    every(REBUILD_MS, () => this.rebuild(), 'rebuild');
+    // VALUESCAN_INDEX_BUILD=0: no board builds (the handover test runs real indexer processes with no venue to read).
+    const builds = process.env.VALUESCAN_INDEX_BUILD !== '0';
+    if (builds) every(REBUILD_MS, () => this.rebuild(), 'rebuild');
     try {
       this.gcWatch = new PerformanceObserver((list) => {
         for (const e of list.getEntries()) noteGc(performance.timeOrigin + e.startTime, e.duration);
@@ -674,7 +754,100 @@ export class Indexer {
     lap('streams and timers');
     if (process.env.VALUESCAN_INDEX_COHORTS !== '0') this.cohorts.start();
     lap('cohorts');
-    setTimeout(() => void this.rebuild().catch((e) => (this.lastError = String(e))), 3_000).unref?.();
+    if (builds) setTimeout(() => void this.rebuild().catch((e) => (this.lastError = String(e))), 3_000).unref?.();
+    if (opts.handover) this.applyHandover(opts.handover);
+  }
+
+  /**
+   * The standby's buffer through the boundary (handover.ts BoundaryFilter), a slice at a time with the loop let in: the
+   * sockets keep adding to the buffer until it is empty, then deliver here directly, through the filter for
+   * FILTER_TAIL_MS more. The outgoing process's "one trade per account and block" goes on here, and the flow recorder
+   * trusts the boundary instead of its restart check.
+   */
+  private applyHandover(h: HandoverStart): void {
+    const filter = new BoundaryFilter(h.boundary, h.floor);
+    for (const [k, v] of h.boundary?.lastOrder ?? []) this.lastOrder.set(k, v);
+    if (h.boundary) {
+      const froms = Object.values(h.boundary.venues).map((v) => v!.from);
+      this.flow?.continueHandover(froms.length ? Math.min(...froms) : h.boundary.stoppedAt);
+    }
+    // Every Hyperliquid market on this socket now: the outgoing one's subscriptions went with its socket.
+    this.hlStream?.takeAll?.();
+    for (const after of [5_000, 30_000]) {
+      const t = setTimeout(() => {
+        const n = this.hlStream?.subscribeMissing?.() ?? 0;
+        if (n) streamLog(`handover: ${n} Hyperliquid markets not confirmed ${after / 1000} s after the takeover, asked again`);
+      }, after);
+      t.unref?.();
+      this.timers.push(t);
+    }
+    const buf = h.buffer.prints;
+    const t0 = Date.now();
+    let i = 0;
+    let tail = true;
+    const step = () => {
+      if (this.stopped) return;
+      const end = Date.now() + HANDOVER_SLICE_MS;
+      while (i < buf.length && Date.now() < end) {
+        const p = buf[i++]!;
+        if (filter.admit(p)) this.onPrint(p);
+      }
+      if (i < buf.length) { setImmediate(step); return; }
+      buf.length = 0;
+      h.tap.sink = (p) => { if (!tail || filter.admit(p)) this.onPrint(p); };
+      this.handover = { prints: i, applyMs: Date.now() - t0, dropped: h.buffer.dropped, filter: filter.line(), at: Date.now() };
+      streamLog(`handover: ${i} buffered prints through the boundary in ${Date.now() - t0} ms${h.buffer.dropped ? ` (${h.buffer.dropped} NOT buffered: over the cap)` : ''}${h.boundary ? '' : ' (no boundary: the outgoing process ended without one)'}: ${filter.line() || 'none'}`);
+      const t = setTimeout(() => {
+        tail = false;
+        streamLog(`handover: boundary filter off after ${Math.round(FILTER_TAIL_MS / 60_000)} min: ${filter.line()}`);
+      }, FILTER_TAIL_MS);
+      t.unref?.();
+      this.timers.push(t);
+    };
+    step();
+  }
+
+  /** Each socket's memory of print ids, by venue (a handover names them). */
+  private dedups(): Partial<Record<Venue, Dedup>> {
+    const out: Partial<Record<Venue, Dedup>> = {};
+    if (this.hlStream) out.hyperliquid = this.hlStream.dedup;
+    if (this.sodexStream) out.sodex = this.sodexStream.dedup;
+    for (const [v, x] of this.ext) {
+      const d = x.dedup?.();
+      if (d) out[v] = d;
+    }
+    return out;
+  }
+
+  /** A standby said hello (handover.ts): from now on keep every id it may buffer. */
+  prepareHandover(): void {
+    for (const d of Object.values(this.dedups())) d!.keepAtLeast(KEEP_IDS);
+  }
+
+  /** The standby has these Hyperliquid markets: stop taking them here. */
+  lendHl(coins: readonly string[]): void {
+    this.hlStream?.lend?.(coins);
+  }
+
+  /** The standby went away: every lent market back here. */
+  unlendHl(): number {
+    return this.hlStream?.unlendAll?.() ?? 0;
+  }
+
+  /**
+   * After stop(), for the standby: per venue every print id taken at its `from` (less FROM_MARGIN_MS) or later and the time
+   * it can no longer name prints before, and the "one trade per account and block" memory over the same span.
+   */
+  handoverBoundary(from: Partial<Record<Venue, number>>, now = Date.now()): Pick<Boundary, 'venues' | 'lastOrder'> {
+    const venues: Boundary['venues'] = {};
+    let min = Infinity;
+    for (const [v, d] of Object.entries(this.dedups()) as Array<[Venue, Dedup]>) {
+      const f = from[v] ?? now;
+      venues[v] = { from: f, ids: d.since(f - FROM_MARGIN_MS), forgotThrough: d.forgotThrough };
+      min = Math.min(min, f);
+    }
+    const lastOrder = [...this.lastOrder].filter(([, tag]) => Number(tag.slice(0, tag.indexOf('|'))) >= min - FROM_MARGIN_MS);
+    return { venues, lastOrder };
   }
 
   /**
@@ -704,13 +877,24 @@ export class Indexer {
     lap('cohorts');
     // The rows still waiting go to the spill in one sequential write (store.spillWrites), not into the fills a slice at a
     // time: written out here, a backlog of minutes of rows took minutes of the stop. The next start writes them first.
-    const backlog = this.writes.backlog;
+    const backlog = this.writes.backlog + (this.store.writerStatus?.pendingOps ?? 0);
     this.spilling = true;
     try {
+      const thread = this.store.writerOn;
       this.flush();
       this.spillUnwritten();
       lap(`write backlog (${backlog} steps; spilled ${this.spilledRows} rows)`);
       this.writes.drain();
+      if (thread && this.lastFlushAt) {
+        // What the drain did for an inline flush, for the flushes the thread was writing: the streams' span moves (their rows
+        // are written or spilled; the held ranges stay where they are), and the stats waiting go in.
+        try {
+          this.store.tx(() => this.trackStreams(this.lastFlushAt));
+          this.writeStats();
+        } catch (e) {
+          this.lastError = `stop: ${String(e)}`;
+        }
+      }
     } finally {
       this.spilling = false;
     }
@@ -719,7 +903,6 @@ export class Indexer {
     lap('warm cache');
     if (this.flow) {
       this.flow.stop();
-      try { this.flow.store.close(); } catch { /* closed */ }
       this.flow = null;
     }
     lap('who traded recorder');
@@ -776,6 +959,8 @@ export class Indexer {
     for (const venue of VENUES) {
       const up = this.socketOf(venue);
       if (up === null) continue;
+      // Markets lent to a standby (handover.ts): their prints go to it, not here, until it takes over or gives them back.
+      if ((venue === 'hyperliquid' || venue === 'tradexyz') && (this.hlStream?.lentCount ?? 0) > 0) continue;
       // Lighter prints name sub-accounts: only wallets whose indices are known get their prints.
       this.store.advanceCoverage(venue, STREAM_KINDS[venue], up, now, venue === 'lighter');
     }
@@ -858,6 +1043,10 @@ export class Indexer {
       heldPartials: this.store.heldPartials,
       checkpoint: this.store.checkpointStatus,
       flushBacklog: this.writes.backlog,
+      writer: this.store.writerStatus,
+      lockWaits: { n: this.store.lockWaits.n, maxMs: Math.round(this.store.lockWaits.maxMs), over100: this.store.lockWaits.over100 },
+      // How long the oldest of those steps has waited (ms): the status page's write target (statusModel.ts FRESH_TARGETS).
+      flushOldestMs: this.writes.oldestWaitMs,
       streamUnderRest: this.store.streamUnderRest,
       retention: this.store.retention(this.now()),
       sodexBreaks: this.sodexBreaks.length,
@@ -869,6 +1058,8 @@ export class Indexer {
         ...Object.fromEntries([...this.trackedExt].map(([v, s]) => [v, s.size])),
       },
       lastBuildAt: this.lastBuildAt,
+      prevBuildAt: this.prevBuildAt,
+      handover: this.handover,
       lastBuildMs: this.lastBuildMs,
       lastBuildVenueMs: this.lastBuildVenueMs,
       lastBuildStepMs: this.lastBuildStepMs,
@@ -882,7 +1073,7 @@ export class Indexer {
   // --- streams ----------------------------------------------------------------------
 
   /** `missing` answers "none" when it cannot read a chunk. For a read that must not count as having looked. */
-  private heldChecked(flow: FlowRecorder, run: () => Print[]): Print[] {
+  private heldChecked(flow: FlowFeed, run: () => Print[]): Print[] {
     const was = flow.lastError;
     flow.lastError = null;
     const added = run();
@@ -945,6 +1136,7 @@ export class Indexer {
     const fills = inKeyOrder(this.pendingFills);
     this.pendingFills = [];
     const at = this.now();
+    if (this.store.writerOn) return this.flushThrough(rows, fills, at);
     // A write that failed: this flush's coverage does not move, as the rows it speaks for are not held.
     let failed = false;
     const write = (fn: () => void) => () => {
@@ -995,19 +1187,61 @@ export class Indexer {
   }
 
   /**
+   * A flush with the writer thread on (writerThread.ts): all of it in one op of activity and one of fills, not FLUSH_FILLS
+   * steps - that cut was only there so this thread was never held long, and the thread cuts its transactions by time. The
+   * rest of the flush (day sums, coverage, stats) runs here once both are answered, flushes in the order they were taken:
+   * what the coverage claims is in the file by then. A stop spills what is not (store.stopWriter).
+   */
+  private flushThrough(rows: Array<{ venue: Venue; acct: string; hour: number; trades: number; volume: number }>, fills: import('./store.js').FillRow[], at: number): void {
+    const sent = Promise.allSettled([this.store.addActivityAsync(rows), this.store.putFillsAsync(fills)]);
+    this.lastFlushAt = at;
+    this.flushChain = this.flushChain.then(() => sent).then((r) => {
+      const bad = r.find((x): x is PromiseRejectedResult => x.status === 'rejected');
+      if (bad) this.lastError = `flush: ${String(bad.reason)}`;
+      if (this.stopped) return;
+      this.writes.add([
+        () => { if (!this.stopped) this.store.flushAggregates(40); },
+        () => {
+          if (bad) return;
+          this.store.tx(() => {
+            this.trackStreams(at);
+            this.advanceCoverage(at);
+          });
+        },
+        () => this.writeStats(),
+      ]);
+    });
+  }
+
+  private writeStats(): void {
+    if (!this.pendingStats.length) return;
+    const stats = this.pendingStats;
+    this.pendingStats = [];
+    this.store.putTraderStats(stats);
+  }
+
+  /**
    * At a stop: every row not written yet goes to the spill in one transaction, and the steps that would have written them
-   * do nothing. Should the spill fail, they are written as before (the drain after it).
+   * do nothing. Should the spill fail, they are written as before (the drain after it). With the writer thread, its rows
+   * not written go in the same transaction, which holds the write lock while it settles what the thread wrote.
    */
   private spillUnwritten(): void {
     const parts = [...this.unwritten];
-    if (!parts.length) return;
-    // The fills of every waiting flush in one key order, cut again into FLUSH_FILLS: the next start writes each wallet's
-    // rows of the whole backlog together (stable: copies of one id keep their order).
-    const fills = inKeyOrder(parts.flatMap((p) => (p.kind === 'fills' ? p.rows : [])));
-    const out: Parameters<IndexStore['spillWrites']>[0][number][] = parts.flatMap((p) => (p.kind === 'activity' ? [{ kind: 'activity' as const, rows: p.rows }] : []));
-    for (let i = 0; i < fills.length; i += FLUSH_FILLS) out.push({ kind: 'fills', rows: fills.slice(i, i + FLUSH_FILLS) });
-    try {
+    const thread = this.store.hasWriter;
+    if (!parts.length && !thread) return;
+    const spill = (more: { fills: import('./store.js').FillRow[]; activity: Array<{ venue: Venue; acct: string; hour: number; trades: number; volume: number }> }) => {
+      // The fills of every waiting flush in one key order, cut again into FLUSH_FILLS: the next start writes each wallet's
+      // rows of the whole backlog together (stable: copies of one id keep their order).
+      const fills = inKeyOrder([...parts.flatMap((p) => (p.kind === 'fills' ? p.rows : [])), ...more.fills]);
+      const out: Parameters<IndexStore['spillWrites']>[0][number][] = parts.flatMap((p) => (p.kind === 'activity' ? [{ kind: 'activity' as const, rows: p.rows }] : []));
+      for (let i = 0; i < more.activity.length; i += FLUSH_ACTIVITY) out.push({ kind: 'activity', rows: more.activity.slice(i, i + FLUSH_ACTIVITY) });
+      for (let i = 0; i < fills.length; i += FLUSH_FILLS) out.push({ kind: 'fills', rows: fills.slice(i, i + FLUSH_FILLS) });
       this.store.spillWrites(out);
+      this.spilledRows += more.fills.length + more.activity.length;
+    };
+    try {
+      if (thread) this.store.stopWriter(spill);
+      else spill({ fills: [], activity: [] });
     } catch (e) {
       this.lastError = `spill: ${String(e)}`;
       console.warn(`[indexer] stop: spill failed, writing the rows instead: ${String(e)}`);
@@ -1036,7 +1270,12 @@ export class Indexer {
     if (!parts.length) return 0;
     let rows = 0;
     for (const p of parts) rows += p.rows;
-    this.writes.add(parts.map((p) => () => { if (!this.stopped) this.store.replaySpill(p.id); }));
+    if (this.store.writerOn) {
+      // Sent now, ahead of anything new (the thread writes in the order sent). A stop before one is written leaves it there.
+      for (const p of parts) void this.store.replaySpillAsync(p.id).catch((e) => { if (!this.stopped) this.lastError = `spill replay: ${String(e)}`; });
+    } else {
+      this.writes.add(parts.map((p) => () => { if (!this.stopped) this.store.replaySpill(p.id); }));
+    }
     console.log(`[indexer] start: ${rows} rows spilled by the last stop, written first (${parts.length} parts)`);
     return rows;
   }
@@ -1085,6 +1324,11 @@ export class Indexer {
 
   /** The last process's build time, until this one has built (loadWarm). */
   private warmBuildMs = 0;
+  /**
+   * When the last process's last build ended (loadWarm): the boards on disk are that build's until this one's first ends,
+   * so the status says how old they really are (ops/status.ts), not "no build yet".
+   */
+  prevBuildAt = 0;
 
   private warmPath(): string | null {
     return this.store.path === ':memory:' ? null : join(dirname(this.store.path), WARM_FILE);
@@ -1108,7 +1352,7 @@ export class Indexer {
         if (!venue || !address) continue;
         entries.push([k, e.at, e.ver === this.store.version(venue as Venue, address) ? 1 : 0, e.value]);
       }
-      writeFileSync(tmp, JSON.stringify({ format: WARM_FORMAT, savedAt: now, buildMs: this.lastBuildMs, entries }));
+      writeFileSync(tmp, JSON.stringify({ format: WARM_FORMAT, savedAt: now, buildMs: this.lastBuildMs, builtAt: this.lastBuildAt || this.prevBuildAt, entries }));
       renameSync(tmp, file);
     } catch (e) {
       console.warn(`[indexer] warm cache not written: ${String(e)}`);
@@ -1121,7 +1365,7 @@ export class Indexer {
     const file = this.warmPath();
     if (!file || !existsSync(file)) return 0;
     try {
-      const j = JSON.parse(readFileSync(file, 'utf8')) as { format?: string; buildMs?: number; entries?: Array<[string, number, 0 | 1, unknown]> };
+      const j = JSON.parse(readFileSync(file, 'utf8')) as { format?: string; buildMs?: number; builtAt?: number; entries?: Array<[string, number, 0 | 1, unknown]> };
       if (j.format !== WARM_FORMAT || !Array.isArray(j.entries)) return 0;
       const now = this.now();
       let n = 0;
@@ -1132,6 +1376,7 @@ export class Indexer {
         n++;
       }
       this.warmBuildMs = Number(j.buildMs) || 0;
+      this.prevBuildAt = Number(j.builtAt) || 0;
       return n;
     } catch (e) {
       console.warn(`[indexer] warm cache not read: ${String(e)}`);
@@ -1252,7 +1497,7 @@ export class Indexer {
     if (ext) return ext.queueCheck(address, from, prio);
     const now = this.now();
     if (venue === 'hyperliquid') {
-      this.hl.add({ key: `q:${address}`, prio, run: () => hlQuickCheck(this.store, address, from, this.now()) });
+      this.hl.add({ key: `q:${address}`, prio, run: () => hlQuickCheck(this.store, address, from, this.now(), this.socketOf('hyperliquid')) });
       return;
     }
     // SoDEX: closed positions first (not rate limited like /trades), which prove trades but
@@ -1326,7 +1571,7 @@ export class Indexer {
           key: `h:${address}`,
           prio: readPrio(prio, need),
           run: async () => {
-            const r = await hlSyncFills(this.store, address, this.now(), { maxPages: 1, now: this.now() });
+            const r = await hlSyncFills(this.store, address, this.now(), { maxPages: 1, now: this.now(), streamSince: this.socketOf('hyperliquid') });
             return r.pages * 20 + Math.ceil(r.rows / 20);
           },
         });
@@ -1341,7 +1586,7 @@ export class Indexer {
           run: async () => {
             const f = this.histFrom.get(key) ?? from;
             this.histFrom.delete(key);
-            const r = await hlSyncFills(this.store, address, f, { maxPages: 6, now: this.now() });
+            const r = await hlSyncFills(this.store, address, f, { maxPages: 6, now: this.now(), streamSince: this.socketOf('hyperliquid') });
             return r.pages * 20 + Math.ceil(r.rows / 20);
           },
         });
@@ -1372,8 +1617,11 @@ export class Indexer {
         },
       });
     }
-    // Fills: the stream records them from now on. /trades only when explicitly enabled.
-    if (!INDEXER_ENV.sodexTradesEnabled()) return;
+    // Fills: the stream records them from now on. /trades only when explicitly enabled - or, for the Copy page's leaders, at their own drip.
+    if (!INDEXER_ENV.sodexTradesEnabled()) {
+      this.queueLeaderTrades(address, now);
+      return;
+    }
     const back = Math.max(from, now - INDEXER_ENV.sodexTradesBackDays() * DAY_MS);
     for (const engine of ['perps', 'spot'] as const) {
       if (this.strades.has(`h:${engine}:${address}`)) continue;
@@ -1382,6 +1630,38 @@ export class Indexer {
       this.strades.add({
         key: `h:${engine}:${address}`,
         prio,
+        run: async () => (await syncTrades(this.store, address, engine, back, { maxPages: 1, now: this.now() })).pages,
+      });
+    }
+  }
+
+  /**
+   * A SoDEX Copy page leader's fills back COPY_BACK_DAYS, one `/trades` page a task on the strades lane at
+   * sodexLeaderTradesPerMin: newest first (syncTrades), each engine until its held span reaches the start, the venue
+   * has nothing older, or the wallet holds COPY_FILLS fills since that span's start (the copy setup's replay is then
+   * answered from the index: walletFills covers a window whose newest FILL_LIMIT fills it holds). Then the stream keeps
+   * it, and a gap is read again from where it ends. Not a leader, or the drip off: nothing.
+   */
+  private queueLeaderTrades(address: string, now: number): void {
+    const leader = this.copyLeaders.get(address);
+    if (!leader || INDEXER_ENV.sodexLeaderTradesPerMin() <= 0) return;
+    const back = now - COPY_BACK_DAYS * DAY_MS;
+    for (const engine of ['perps', 'spot'] as const) {
+      const key = `h:${engine}:${address}`;
+      if (this.strades.has(key)) continue;
+      const cov = this.store.coverage('sodex', address, engine);
+      const current = !!cov && spanCovers({ ...cov, fromT: Math.min(cov.fromT, back) }, back, now, { staleMs: RESYNC_MS, streamSince: this.streamSince('sodex') });
+      if (current && (cov!.fromT <= back || cov!.exhausted)) continue;
+      // Counted at most once per held start (up to COPY_FILLS rows of one wallet), not on every build.
+      if (current && this.leaderDeep.get(key) === cov!.fromT) continue;
+      if (current && this.store.hasTrades('sodex', address, cov!.fromT, COPY_FILLS) >= COPY_FILLS) {
+        this.leaderDeep.set(key, cov!.fromT);
+        if (this.leaderDeep.size > 5_000) this.leaderDeep.delete(this.leaderDeep.keys().next().value!);
+        continue;
+      }
+      this.strades.add({
+        key,
+        prio: leader.prio,
         run: async () => (await syncTrades(this.store, address, engine, back, { maxPages: 1, now: this.now() })).pages,
       });
     }
@@ -1454,7 +1734,7 @@ export class Indexer {
     if (now - (this.lookupScanAt[w] ?? 0) < LOOKUP_SCAN_MS) return;
     this.lookupScanAt[w] = now;
     const from = windowStart(w, now);
-    const active = this.store.activeAccounts('sodex', HOUR_WINDOWS.has(w) ? { hour: hourOf(from) } : { day: dayOf(from) }, 1, LOOKUP_ACTIVE);
+    const active = await activeAccountsAsync(this.store, 'sodex', HOUR_WINDOWS.has(w) ? { hour: hourOf(from) } : { day: dayOf(from) }, 1, LOOKUP_ACTIVE);
     if (!active.length) return;
     const ids = active.map((a) => Number(a.acct)).filter((n) => Number.isInteger(n) && n > 0);
     const known = this.store.accountIds('sodex');
@@ -1804,7 +2084,7 @@ export class Indexer {
     const cands = venue === 'sodex' && this.suspectSodex.size ? [...raw].filter((c) => !this.suspectSodex.has(c.address)) : raw;
     // HL publishes volume per window; 0 means no trade. SoDEX's figure is not
     // known to include spot, so there every candidate gets a real check.
-    const res = pickBoard(cands, (c) => this.check(venue, c.address, window, from, now), {
+    const res = await pickBoardAsync(cands, (c) => this.check(venue, c.address, window, from, now), {
       filter,
       side,
       size: BOARD_SIZE,
@@ -1833,6 +2113,13 @@ export class Indexer {
       if (first !== null && now - first >= HOUR_MS) ref = this.store.boardRanksAt(key, first);
     }
 
+    if (venue === 'sodex' && filter === 'any' && COPY_WINDOWS.has(window)) {
+      res.picks.forEach((c, i) => {
+        const p = copyLeaderPrio(window, side, i);
+        const was = this.copyLeaders.get(c.address);
+        this.copyLeaders.set(c.address, { prio: was && was.at === now ? Math.max(was.prio, p) : p, at: now });
+      });
+    }
     const rows: BoardRow[] = res.picks.map((c, i) => {
       // Every pick is read in full over its window; the leaderboard's opening boards first.
       const prio = rowPrio(window, side, i, base - i);
@@ -1939,13 +2226,27 @@ export class Indexer {
    * round-robin, so every indexed wallet is refreshed within the hour.
    */
   private async sweepStats(now: number): Promise<void> {
-    for (const venue of VENUES) {
+    // A TIME BUDGET (2026-11-08): this ran inside the build to the end, 23 min of a 55 min build (busy wallets' fills read
+    // whole per window), and builds of 50-70 min tripped "boards not rebuilt for over an hour" though every board was
+    // written. Now each venue gets its share of SWEEP_BUDGET_MS and the round-robin carries on from there next build;
+    // the venue that starts rotates, so none is always last.
+    const t0 = Date.now();
+    const order = VENUES.map((_, j) => VENUES[(j + this.sweepTurn) % VENUES.length]!);
+    this.sweepTurn = (this.sweepTurn + 1) % VENUES.length;
+    for (let vi = 0; vi < order.length; vi++) {
+      const venue = order[vi]!;
       const all = this.store.indexedAddresses(venue);
       if (!all.length) continue;
+      // What is left of the budget, shared by the venues still to go.
+      const until = Date.now() + Math.max(0, (sweepBudgetMs() - (Date.now() - t0)) / (order.length - vi));
       let i = this.statsSweep[venue] % all.length;
-      for (let k = 0; k < Math.min(STATS_SWEEP, all.length); k++, i = (i + 1) % all.length) {
+      for (let k = 0; k < Math.min(STATS_SWEEP, all.length) && Date.now() < until; k++, i = (i + 1) % all.length) {
         const address = all[i]!;
+        const w0 = Date.now();
         for (const window of STATS_WINDOWS) {
+          // Inside a wallet too (2026-11-08: one sweep ran 546 s against its 4 min): a market maker's windows each read
+          // their partial first day, and on the busy thread that ran on for minutes. The rest of its windows come next time.
+          if (Date.now() >= until) break;
           const from = statsFrom(window, now);
           this.step = `sweep ${venue}`;
           const st = await this.pickStatsAsync(venue, address, window, from, now);
@@ -1955,6 +2256,7 @@ export class Indexer {
             wins: st.stats.wins, closes: st.stats.closes, winExact: st.wrExact, winFrom: st.wrFrom, at: now,
           });
         }
+        if (Date.now() - w0 > 60_000) console.log(`[indexer] sweep: ${venue} ${address} took ${Math.round((Date.now() - w0) / 1000)} s`);
         await this.breathe();
       }
       this.statsSweep[venue] = i;
@@ -2092,6 +2394,8 @@ export class Indexer {
     const wantHl = want.get('hyperliquid')!;
     const wantSodex = want.get('sodex')!;
     for (const [venue, set] of want) for (const a of set) this.wanted.set(`${venue}|${a}`, now);
+    // A leader no Copy page board listed in this build is not read for it any more (its queued page goes with retain below if no board wants it).
+    for (const [a, l] of this.copyLeaders) if (l.at < now) this.copyLeaders.delete(a);
     this.trackedHl = new Set([...wantHl, ...this.store.indexedAddresses('hyperliquid')]);
     for (const venue of this.ext.keys()) {
       this.trackedExt.set(venue, new Set([...want.get(venue)!, ...this.store.indexedAddresses(venue)]));

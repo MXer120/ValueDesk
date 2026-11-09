@@ -32,7 +32,7 @@ import { statsRoutes } from './routes/stats.js';
 import { scanRoutes } from './routes/scan.js';
 import { profileOnSignal } from './indexer/cpuProfile.js';
 import { pointsAuthRoutes } from './routes/pointsAuth.js';
-import { keepValuedeskWarm, valuedeskRoutes } from './routes/valuedesk.js';
+import { keepValuedeskWarm, liveAskOf, valuedeskRoutes } from './routes/valuedesk.js';
 import { builderRoutes } from './routes/builder.js';
 import { betaRoutes } from './routes/beta.js';
 import { BetaList, BetaTokens, channelFrom, installBetaGate } from './beta/gate.js';
@@ -45,6 +45,7 @@ import { analyticsRoutes, analyticsStore } from './routes/analytics.js';
 import { profileRoutes } from './routes/profiles.js';
 import { adminOriginsFrom } from './admin/auth.js';
 import { fetchExecutorHealth } from './admin/statusView.js';
+import { swr } from './admin/swr.js';
 import { openLedger } from './admin/builderStats.js';
 import { builderDbPath, dataDir } from './builder/paths.js';
 import { builderService } from './builder/service.js';
@@ -58,12 +59,14 @@ import { KeystoreError } from './keystore.js';
 import * as ks from './keystore.js';
 import { isAllowedOrigin, isSiteOrigin } from './origin.js';
 import { liqWsRoute } from './routes/liqWs.js';
+import { defaultLiveHub } from './routes/liveHub.js';
 import { CHAIN } from './sodex/chain.js';
 import { localToken, localTokenPath, tokenMatches, LOCAL_TOKEN_HEADER, TOKEN_REQUIRED } from './localToken.js';
 import { ElevationError, revokeAllElevations } from './elevation.js';
 import { classify, take } from './rateLimit.js';
 import { perfPlugin } from './perf.js';
 import { installLocalHostGate } from './localHost.js';
+import { LoopWatch } from './loopWatch.js';
 
 
 // A CPU profile on demand (indexer/cpuProfile.ts): `sudo systemctl kill -s SIGUSR2 --kill-whom=main valuescan-api`. The API sat at 77-92% of a core
@@ -87,6 +90,16 @@ const app = Fastify({
   // Hosted: a slow client may not hold a connection open indefinitely.
   ...(HOSTED ? { requestTimeout: 30_000 } : {}),
 });
+
+// The event loop watched (loopWatch.ts): stalls of 1 s or more logged with what started them, a profile of a long one,
+// requests of 2 s or more logged by route pattern, the counts in /api/health. 2026-11-07: three minutes of "Data API
+// not answering" with no line saying why. Hosted, the profiles go where the SIGUSR2 ones go (VALUESCAN_STALL_PROFILE=0: none).
+const loopWatch = new LoopWatch((obj, msg) => app.log.warn(obj, msg), {
+  profileDir: process.env.VALUESCAN_STALL_PROFILE === '0' || (!HOSTED && process.env.VALUESCAN_STALL_PROFILE !== '1')
+    ? null
+    : process.env.VALUESCAN_PROFILE_DIR?.trim() || '/var/lib/valuescan/state/profiles',
+});
+loopWatch.install(app);
 
 // Local mode answers only to a loopback Host (DNS rebinding, audit S-12). First, so that
 // nothing - not even a CORS preflight - answers to a Host that is not ours. Hosted: no-op.
@@ -116,7 +129,17 @@ if (!SERVER_SIGNING) installServerSigningGate(app);
 // The hub is a local-only feature: hosted, the web opens its own streams.
 // Client messages are small subscribe/unsubscribe ops; 64 KiB is far above them.
 // The hub is local-only (below); hosted mode serves one WebSocket, the live liquidation heatmap (routes/liqWs.ts).
-await app.register(websocket, { options: { maxPayload: HOSTED ? 4 * 1024 : 64 * 1024 } });
+// Downstream compression, offered to the browser (2026-11-09, measured in test/liveFlowWs.test.ts): a Trade flow patch on a
+// 100-row candle averages 5.6 KB raw, 1.5 KB deflated (a new wallet moves every row's share); the whole answer 33 KB -> 3.4 KB;
+// a heatmap snapshot ~90 KB is mostly digits too. Only messages over 1 KB are compressed (small deltas cost no CPU), and no
+// context is kept between messages, so a connection holds no zlib window while idle. This is the browser inflating our
+// frames - not the indexer's upstream sockets, where deflate stays off (inflate stalls, 2026-11-06).
+await app.register(websocket, {
+  options: {
+    maxPayload: HOSTED ? 4 * 1024 : 64 * 1024,
+    perMessageDeflate: { threshold: 1024, serverNoContextTakeover: true, clientNoContextTakeover: true, zlibDeflateOptions: { level: 6 } },
+  },
+});
 
 /** One error shape for the whole API, with an actionable hint where we have one. */
 app.setErrorHandler((err, _req, reply) => {
@@ -186,8 +209,10 @@ app.get('/api/health', async () => (HOSTED
   // Hosted: only what the web reads (trading/config.ts configureFromHealth).
   // No upstream URLs, budgets, hub or stream stats - the latter name every
   // wallet whose account stream is open.
-  ? { ok: true, network: NETWORK, chainId: NET.chainId, mainnetWritesAllowed: NETWORK === 'testnet' || ALLOW_MAINNET_WRITES, brake: siteBrake(), notices: siteNotices() }
+  // `loop`: the API's own thread (loopWatch.ts) - stalls counted, the longest, the last one's start label; no personal data.
+  ? { ok: true, network: NETWORK, chainId: NET.chainId, mainnetWritesAllowed: NETWORK === 'testnet' || ALLOW_MAINNET_WRITES, brake: siteBrake(), notices: siteNotices(), loop: loopWatch.health() }
   : {
+  loop: loopWatch.health(),
   ok: true,
   network: NETWORK,
   chainId: NET.chainId,
@@ -263,6 +288,10 @@ await app.register(profileRoutes, {
 let adminLedger: ReturnType<typeof openLedger> = null;
 let adminStatusDb: StatusStore | null = null;
 let adminErrorsDb: ClientErrorStore | null = null;
+const adminExecutorHealth = swr(
+  () => fetchExecutorHealth(process.env.VALUESCAN_ADMIN_EXECUTOR_HEALTH_URL?.trim() || 'https://www.valuedesk.so/api/copy/v1/health'),
+  { freshMs: 15_000, maxStaleMs: 5 * 60_000 },
+);
 await app.register(adminRoutes, {
   hosted: HOSTED,
   origins: ADMIN_ORIGINS,
@@ -271,10 +300,13 @@ await app.register(adminRoutes, {
   tiers: () => builderService().tiers.current(),
   status: {
     report: () => (adminStatusDb ??= new StatusStore()).report(),
+    checks: () => (adminStatusDb ??= new StatusStore()).lastChecks(),
+    freshDays: () => (adminStatusDb ??= new StatusStore()).freshDays(),
     indexer: indexerStatus,
     brake: () => siteBrake(),
-    errors: () => (adminErrorsDb ??= new ClientErrorStore()).top({ limit: 50, order: 'recent' }),
-    executor: () => fetchExecutorHealth(process.env.VALUESCAN_ADMIN_EXECUTOR_HEALTH_URL?.trim() || 'https://www.valuedesk.so/api/copy/v1/health'),
+    errors: () => (adminErrorsDb ??= new ClientErrorStore()).top({ limit: 20, order: 'recent' }),
+    // Up to 5 s through the site and two servers: answered from the last read (15 s fresh), refreshed behind it.
+    executor: () => adminExecutorHealth.get().then(({ value, at }) => ({ ...(value as object), readAt: at })),
     home: process.env.VS_HOME?.trim() || '/opt/valuescan',
     dataDir: dataDir(),
   },
@@ -285,7 +317,8 @@ await app.register(adminRoutes, {
 // --- browser websocket -------------------------------------------------------
 
 // The live liquidation heatmap: public, read-only; the site's own origins only (hosted), or the local ones.
-liqWsRoute(app, (origin) => (HOSTED ? isSiteOrigin(origin, SITE_ORIGINS) : isAllowedOrigin(origin, ALLOWED_ORIGINS)));
+// The same socket carries the live channels (routes/liveHub.ts): the Trade flow's forming candle and the cohort pages.
+liqWsRoute(app, (origin) => (HOSTED ? isSiteOrigin(origin, SITE_ORIGINS) : isAllowedOrigin(origin, ALLOWED_ORIGINS)), await defaultLiveHub(liveAskOf));
 
 if (!HOSTED) app.get('/ws', { websocket: true }, (socket, req) => {
   const origin = req.headers.origin;
@@ -532,13 +565,15 @@ for (const sig of ['SIGINT', 'SIGTERM'] as const) {
 }
 
 await app.listen({ host: HOST, port: PORT });
+loopWatch.start();
 
 // Cohorts: the first load is built from behind a few seconds after the start
 // (indexer/read.ts warmCohorts), so a restart does not leave the first visitor -
 // and, the read being synchronous, the whole API with them - waiting for it.
 setTimeout(() => {
-  void Promise.all([import('./indexer/read.js'), import('./valuedesk/types.js')])
-    .then(([r, t]) => r.warmCohorts(t.VENUES))
+  // On the cohort thread (indexer/cohortThread.ts), where every cohort read runs.
+  void Promise.all([import('./indexer/cohortThread.js'), import('./valuedesk/types.js')])
+    .then(([c, t]) => c.cohortJob({ op: 'warm', venues: [...t.VENUES] }))
     .catch((e) => app.log.warn({ err: e }, 'cohorts warm-up failed'));
 }, 3_000).unref();
 
@@ -546,6 +581,25 @@ setTimeout(() => {
 // (explore.ts keepExploreWarm, screener.ts keepScreenerWarm) - after a release the first visitor
 // waited for a whole build: Explore 14.7 s, the screener 6.8 s.
 keepValuedeskWarm();
+
+// The Copy page's cards read ahead of visitors (valuedesk/copyCards.ts): on a hosted server unless
+// VALUESCAN_COPY_CARDS=0 (a laptop only with VALUESCAN_COPY_CARDS=1: it spends the venues' budgets of its address).
+if (HOSTED ? process.env.VALUESCAN_COPY_CARDS !== '0' : ['1', 'follow'].includes(process.env.VALUESCAN_COPY_CARDS?.trim() ?? '')) {
+  const { startCopyCards } = await import('./valuedesk/copyCards.js');
+  const { join } = await import('node:path');
+  startCopyCards(process.env.VALUESCAN_COPY_CARDS_FILE?.trim() || join(dataDir(), 'copy-cards.json'));
+}
+
+// The copy leaders' fills kept ready for the copy setup's replay (indexer/walletFills.ts warmCopyFills; owner
+// 2026-11-07: "sub second"): read from the index once, then topped up with the rows since. No venue read.
+// Wherever this process reads an index, unless VALUESCAN_COPY_FILLS_WARM=0.
+if (process.env.VALUESCAN_COPY_FILLS_WARM !== '0') {
+  const [{ warmCopyFills }, { indexLeaders }] = await Promise.all([import('./indexer/walletFills.js'), import('./valuedesk/copyCards.js')]);
+  // 30D first, then 7D, then All; both sides (the page shows traders to copy and to counter).
+  const order = { '30d': 0, '7d': 1, all: 2 } as Record<string, number>;
+  const { join } = await import('node:path');
+  warmCopyFills(() => indexLeaders().sort((a, b) => (order[a.window] ?? 9) - (order[b.window] ?? 9) || a.i - b.i), 5_000, join(dataDir(), 'copy-fills'));
+}
 
 // Official economic results at the release second (valuedesk/releases.ts): one
 // watcher in this process, hosted or not; idle but for a minute's look at the

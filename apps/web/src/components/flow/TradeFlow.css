@@ -116,7 +116,12 @@
   white-space: nowrap;
 }
 .tfl-candle b { color: var(--text); font-size: var(--fs-xs); font-weight: 600; }
-.tfl-forming { color: var(--pos); }
+.tfl-forming { display: inline-flex; align-items: center; gap: 5px; color: var(--pos); }
+/* Streaming (the live socket): the heatmap's Live dot (LiqHeatmap.css .lqm-dot.is-on), same size, colour and pulse. */
+.tfl-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--pos); align-self: center; animation: tfl-pulse 1.6s ease-in-out infinite; }
+@keyframes tfl-pulse { 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .tfl-dot { animation: none; } }
+:root[data-still] .tfl-dot { animation: none; }
 
 /* --- summary: labels over values, as the market strip above the chart ----------------------------- */
 .tfl-sum {

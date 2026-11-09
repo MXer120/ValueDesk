@@ -20,7 +20,8 @@ import {
   type CohortCard, type CohortDef, type CohortDetailResponse, type CohortFilter, type CohortId, type CohortRange,
   type CohortWalletRow, type CohortWalletsResponse, type CohortsResponse, type Lean, type Sector, type WalletSort,
 } from '@sign/valuedesk/cohorts/model.js';
-import { SCAN_VENUES, vsApi, type Venue } from '../../../vsApi';
+import { SCAN_VENUES, vsApi, vsPaths, type Venue } from '../../../vsApi';
+import { useLiveRead } from '../../../live/useLiveRead';
 import { useStored, useSymbols } from '../../../hooks';
 import { DASH, marketName, shortAddr } from '../../../format';
 import { winRateView } from '../../../winRateView';
@@ -392,7 +393,8 @@ function Detail({
   const showTables = v.show('detail', 'tables');
   const [tab, setTab] = useState<'wallets' | 'markets'>('wallets');
   const key = `${venues.join(',')}|${id}|${range}|${filter.sector ?? ''}|${filter.coin ?? ''}`;
-  const r = usePolled<CohortDetailResponse>(key, (signal) => vsApi.cohortDetail(venues, id, range, filter, signal));
+  // Pushed with each new cohort load while the live socket is up (live/useLiveRead.ts); else polled every minute.
+  const r = useLiveRead<CohortDetailResponse>(key, vsPaths.cohortDetail(venues, id, range, filter), (signal) => vsApi.cohortDetail(venues, id, range, filter, signal), POLL_MS);
   const [total, setTotal] = useState<number | null>(null);
   const st = r.data?.cohort ?? null;
   const points = useMemo(
@@ -585,7 +587,8 @@ export function Cohorts({ onScan, onOpenSymbol, embedded = false }: { onScan: (a
   };
 
   const listKey = `${venues.join(',')}|${filter.sector ?? ''}|${filter.coin ?? ''}`;
-  const list = usePolled<CohortsResponse>(listKey, (signal) => vsApi.cohorts(venues, filter, signal));
+  // Pushed with each new cohort load while the live socket is up (live/useLiveRead.ts); else polled every minute.
+  const list = useLiveRead<CohortsResponse>(listKey, vsPaths.cohorts(venues, filter), (signal) => vsApi.cohorts(venues, filter, signal), POLL_MS);
   // The asset list outlives a filter change (it is the scope's, unfiltered).
   const [coins, setCoins] = useState<CohortsResponse['coins']>([]);
   useEffect(() => { if (list.data?.coins.length) setCoins(list.data.coins); }, [list.data]);

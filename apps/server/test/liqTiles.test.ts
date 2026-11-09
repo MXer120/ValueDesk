@@ -308,3 +308,70 @@ test('the scales: the buffer and numeric sort give what the filter, map and comp
   assert.equal(sc[1], T.robustMax95(rows.map((x) => (x[1] > 0 ? x[3] ?? 0 : 0) + (x[2] > 0 ? x[6] ?? 0 : 0))));
   assert.equal(T.snapScales([] as never)[0], 0);
 });
+
+test('on the snapshot reader thread (production): the index and a tile are the same as read inline, and nothing is read on this thread', async () => {
+  const { IndexStore } = await import('../src/indexer/store.js');
+  const T = await import('../src/indexer/liqTiles.js');
+  const R = await import('../src/indexer/liqReadThread.js');
+  const s = new IndexStore(process.env.VALUESCAN_INDEX_DB!);
+  const t0 = Math.floor((Date.now() - 8 * H) / Q) * Q;
+  for (let i = 0; i < 5; i++) s.putLiqHist(t0 + i * H, [['APT', JSON.stringify(snapOf(5 + i * 0.02, 0.01, 700 + i))]]);
+  const reads = ['liqHistMeta', 'liqHistMetaSlow', 'liqHistAt', 'liqHistCoins'] as const;
+  const kept = reads.map((k) => IndexStore.prototype[k]);
+  try {
+    T.resetLiqTiles();
+    const inline = (await T.liqTileIndex('APT', ['hyperliquid', 'sodex']))!;
+    const ask = { tl: 0, tt: Math.floor(t0 / T.tileMs(0)) * T.tileMs(0), pl: 0, band: 0, bw: inline.bw };
+    const inlineTile = (await T.liqTile('APT', ['hyperliquid', 'sodex'], ask))!;
+    T.resetLiqTiles();
+    process.env.VALUESCAN_LIQ_THREAD = '1';
+    // Any of these on this thread would be the stall this fixes (2026-11-07).
+    for (const k of reads) (IndexStore.prototype as unknown as Record<string, unknown>)[k] = () => { throw new Error(`${k} ran on the API thread`); };
+    const threaded = (await T.liqTileIndex('APT', ['hyperliquid', 'sodex']))!;
+    const threadedTile = (await T.liqTile('APT', ['hyperliquid', 'sodex'], ask))!;
+    assert.deepEqual(threaded, inline);
+    assert.deepEqual(threadedTile, inlineTile);
+    assert.equal(threaded.points.length, 5);
+    assert.ok(R.liqReadStats.done >= 3, JSON.stringify(R.liqReadStats));
+  } finally {
+    reads.forEach((k, i) => { (IndexStore.prototype as unknown as Record<string, unknown>)[k] = kept[i]; });
+    delete process.env.VALUESCAN_LIQ_THREAD;
+    await R.stopLiqReadThread();
+    s.close();
+    T.resetLiqTiles();
+  }
+});
+
+test('the metas file is written in slices, byte for byte the one-piece write of before, one save at a time', async () => {
+  const { readFileSync } = await import('node:fs');
+  const T = await import('../src/indexer/liqTiles.js');
+  process.env.VALUESCAN_LIQ_METAS_FILE = join(dir, 'metas-sliced.bin');
+  try {
+    T.resetLiqTiles();
+    // Three chunks' worth and more, over several keys.
+    const W = 21;
+    for (let c = 0; c < 7; c++) {
+      const byT = new Map<number, { t: number; n: number; p: number; st: number; sc: Float64Array }>();
+      for (let k = 0; k < 3_001 + c; k++) byT.set(1e12 + k * 9e5, { t: 1e12 + k * 9e5, n: k, p: c + k / 7, st: 0.01 * (c + 1), sc: Float64Array.from({ length: W }, (_, j) => j * k + c) });
+      T._liqMetasHeld.set(`C${c}|hyperliquid,sodex`, byT);
+    }
+    // The write before (v0.2.198 saveLiqMetas), into a buffer.
+    const keys: Array<[string, number]> = [];
+    let total = 0;
+    for (const [vk, byT] of T._liqMetasHeld) { keys.push([vk, byT.size]); total += byT.size; }
+    const nums = new Float64Array(total * (4 + W));
+    let o = 0;
+    for (const byT of T._liqMetasHeld.values()) for (const m of byT.values()) { nums[o] = m.t; nums[o + 1] = m.n; nums[o + 2] = m.p; nums[o + 3] = m.st; nums.set(m.sc, o + 4); o += 4 + W; }
+    const head = Buffer.from(JSON.stringify({ v: 2, w: 4 + W, keys }), 'utf8');
+    const pre = Buffer.alloc(Math.ceil((4 + head.length) / 8) * 8);
+    pre.writeUInt32LE(head.length, 0);
+    head.copy(pre, 4);
+    const want = Buffer.concat([pre, Buffer.from(nums.buffer)]);
+    // Two asked at once: both done, the file whole.
+    await Promise.all([T.saveLiqMetas(), T.saveLiqMetas()]);
+    assert.ok(readFileSync(process.env.VALUESCAN_LIQ_METAS_FILE).equals(want));
+  } finally {
+    delete process.env.VALUESCAN_LIQ_METAS_FILE;
+    T.resetLiqTiles();
+  }
+});

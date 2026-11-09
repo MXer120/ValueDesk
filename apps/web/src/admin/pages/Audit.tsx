@@ -1,5 +1,5 @@
 /** The admin audit log (admin/store.ts, hash-chained) and the open sessions. Signing everyone out is in the navbar's menu. */
-import { ago, short, when } from '../format';
+import { ago, duration, short, when } from '../format';
 import { Empty, Note, Page, Pill, Section, useAdmin } from '../ui';
 import type { AuditRow, OpenSession } from '../types';
 
@@ -14,7 +14,20 @@ const KIND: Record<string, string> = {
   'ticket.reply': 'Answered a ticket',
   'ticket.status': 'Changed a ticket\'s status',
   'page.error': 'The page hit an error',
+  'beta.add': 'Gave beta access',
+  'beta.remove': 'Took beta access',
+  'board.add': 'Planned a card',
+  'board.move': 'Moved a card',
 };
+
+/** A row's detail in words: the wallet or ticket it was about first, the rest after. */
+function detailOf(d: Record<string, unknown> | null): string {
+  if (!d) return '';
+  return Object.entries(d)
+    .filter(([, v]) => v !== '' && v !== null && v !== undefined)
+    .map(([k, v]) => `${k}: ${typeof v === 'string' && /^0x[0-9a-f]{40}$/.test(v) ? short(v) : typeof v === 'object' ? JSON.stringify(v) : String(v)}`)
+    .join(' · ');
+}
 
 export function Audit() {
   const audit = useAdmin<{ rows: AuditRow[]; chain: { rows: number; brokenAt: number | null } }>('audit');
@@ -30,18 +43,23 @@ export function Audit() {
       wide
     >
       {audit.error && <Section><Note kind="error">{audit.error}</Note></Section>}
-      <Section title="Open sessions" aside={<span className="st-ms">each ends 24 h after its sign-in</span>} flush>
-        <div className="dv-sheet">
-          <table className="dv-table">
-            <thead><tr><th>Session</th><th>Wallet</th><th>Since</th><th>Ends</th><th>Client</th><th>Country</th></tr></thead>
-            <tbody>{(me.data?.sessions ?? []).map((s) => <tr key={s.id}><td className="dv-mono">{s.id}</td><td className="dv-mono">{short(s.wallet)}</td><td>{when(s.createdAt)}</td><td>{when(s.expiresAt)}</td><td className="dv-mono">{s.client}</td><td>{s.country ?? '–'}</td></tr>)}</tbody>
-          </table>
-        </div>
+      {me.error && !audit.error && <Section><Note kind="error">Open sessions: {me.error}</Note></Section>}
+      <Section title="Open sessions" aside={<span className="st-ms">each ends 24 h after its sign-in</span>}>
+        <ul className="dv-rows">
+          {(me.data?.sessions ?? []).map((s) => (
+            <li key={s.id}>
+              <span className="dv-rows__name"><span className="dv-mono">{short(s.wallet)}</span>{me.data?.expiresAt === s.expiresAt && <span className="dv-tag is-on">This one</span>}</span>
+              <span className="st-ms">{s.country ?? 'country unknown'} · since {ago(s.createdAt)}</span>
+              <span className="dv-rows__fig" title={when(s.expiresAt)}>ends in {duration(s.expiresAt - Date.now())}</span>
+            </li>
+          ))}
+        </ul>
+        {me.data && !me.data.sessions.length && <Empty>No open session.</Empty>}
       </Section>
       <Section title="Log" aside={refused ? <Pill tone="warn">{refused} refused in 24 h</Pill> : undefined} flush>
         <div className="dv-sheet">
           <table className="dv-table">
-            <thead><tr><th>When</th><th>What</th><th>Result</th><th>Wallet</th><th>Client</th><th>Country</th><th>Detail</th></tr></thead>
+            <thead><tr><th>When</th><th>What</th><th>Result</th><th>Wallet</th><th>Country</th><th>Detail</th></tr></thead>
             <tbody>
               {(audit.data?.rows ?? []).map((r) => (
                 <tr key={r.id}>
@@ -49,9 +67,8 @@ export function Audit() {
                   <td>{KIND[r.kind] ?? r.kind}</td>
                   <td>{r.ok ? <Pill tone="pos">Done</Pill> : <Pill tone="neg">Refused</Pill>}</td>
                   <td className="dv-mono">{short(r.wallet)}</td>
-                  <td className="dv-mono">{r.client ?? '–'}</td>
                   <td>{r.country ?? '–'}</td>
-                  <td className="dv-quiet">{r.detail ? Object.entries(r.detail).map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : String(v)}`).join(' · ') : ''}</td>
+                  <td className="dv-quiet dv-cell-wrap" title={r.client ? `client ${r.client}` : undefined}>{detailOf(r.detail)}</td>
                 </tr>
               ))}
             </tbody>

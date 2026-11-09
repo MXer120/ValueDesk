@@ -15,7 +15,8 @@ import {
   COHORT_BY_ID, PNL_COHORTS, SECTORS, SIZE_COHORTS, leanOf, longShare, sectorOf,
   type CohortFilter, type CohortFocusResponse, type CohortId, type CohortMapResponse, type CohortRange, type Sector,
 } from '@sign/valuedesk/cohorts/model.js';
-import { vsApi, type Venue } from '../../../vsApi';
+import { vsApi, vsPaths, type Venue } from '../../../vsApi';
+import { useLiveRead } from '../../../live/useLiveRead';
 import { useStored } from '../../../hooks';
 import { DASH, marketName } from '../../../format';
 import { CoinIcon } from '../../CoinIcon';
@@ -25,7 +26,7 @@ import { CohortIcon } from './CohortIcon';
 import { COHORT_COLOR } from './cohortStyle';
 import { MarketMap } from './MarketMap';
 import { MultiLeanChart, shareAt } from './MultiLeanChart';
-import { BiasPill, LeanPill, Meter, OverOiNote, Picker, pctText, usePolled } from './parts';
+import { BiasPill, LeanPill, Meter, OverOiNote, POLL_MS, Picker, pctText, usePolled } from './parts';
 import { Treemap } from './Treemap';
 import { PriceChart, toCandles, type PriceKind } from './PriceChart';
 import { AllHidden, useCohortView } from './view';
@@ -46,7 +47,8 @@ export function MarketMapPage({
 }) {
   const [who, setWho] = useState<CohortId | null>(null);
   const key = `${venues.join(',')}|${who ?? 'all'}`;
-  const r = usePolled<CohortMapResponse>(key, (signal) => vsApi.cohortMap(venues, who, signal));
+  // Pushed with each new cohort load while the live socket is up (live/useLiveRead.ts); else polled every minute.
+  const r = useLiveRead<CohortMapResponse>(key, vsPaths.cohortMap(venues, who), (signal) => vsApi.cohortMap(venues, who, signal), POLL_MS);
   const d = r.data;
   const long = d ? d.sectors.reduce((n, s) => n + s.long, 0) : 0;
   const short = d ? d.sectors.reduce((n, s) => n + s.short, 0) : 0;
@@ -138,7 +140,7 @@ export function FocusPage({
   /** The chart's hovered time: the table shows each cohort as it stood then. */
   const [at, setAt] = useState<number | null>(null);
   const key = `${venues.join(',')}|${focus.coin ?? ''}|${focus.sector ?? ''}|${range}`;
-  const r = usePolled<CohortFocusResponse>(key, (signal) => vsApi.cohortFocus(venues, focus, range, signal));
+  const r = useLiveRead<CohortFocusResponse>(key, vsPaths.cohortFocus(venues, focus, range), (signal) => vsApi.cohortFocus(venues, focus, range, signal), POLL_MS);
   const d = r.data;
   const t = d?.total;
   const name = focus.coin ? marketName(focus.coin) : SECTOR_LABEL[focus.sector!];

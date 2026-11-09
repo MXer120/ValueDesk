@@ -27,6 +27,11 @@
  * after STATUS_KEEP_DAYS. A minute the prober did not run - this server down, a
  * restart - has no sample: the page shows it as no data, never as up.
  *
+ * The indexer's round also carries how current each of its datasets is (statusModel.ts FRESH_TARGETS,
+ * indexerJudge.ts freshnessOf): the last round's figures go on the page (report().freshness), and each UTC
+ * day keeps, per dataset, the minutes past half its target, the minutes past it and the worst figure
+ * (freshDays: the admin suite's daily view). Past half a target is logged once as it starts, nothing more.
+ *
  * Each round's samples also feed the automatic incidents (ops/statusAuto.ts): an
  * outage the probes see gets its entry on the page, in the feed and in the app's
  * banner without anyone posting it.
@@ -55,7 +60,8 @@ import { NoticeStore, healthNoticeReader } from './statusNotices.js';
 import { AutoIncidents, REPLAYED_KEY } from './statusAuto.js';
 import type { HealthNotice } from './statusModel.js';
 import { mayPrune } from '../retention.js';
-import { IndexerJudge } from './indexerJudge.js';
+import { IndexerJudge, type FreshReading } from './indexerJudge.js';
+import { FRESH_IDS, FRESH_TARGETS, freshItems, type FreshId, type Freshness } from './statusModel.js';
 
 export const PROBE_EVERY_MS = 60_000;
 export const PROBE_TIMEOUT_MS = 10_000;
@@ -83,7 +89,21 @@ export interface Sample {
    * incident's words. Not kept in the record.
    */
   why?: string[];
+  /** How current the indexer's datasets are (indexer only, when its status was fresh enough to judge). */
+  fresh?: FreshReading;
 }
+
+/** One UTC day's freshness tally per dataset: minutes past half its target, minutes past it, the worst figure (ms). */
+export type FreshDay = { day: string; items: Partial<Record<FreshId, { warnMin: number; overMin: number; worstMs: number }>> };
+const LAST_FRESH_KEY = 'last_fresh';
+const FRESH_DAY_KEY = 'fresh_day:';
+
+/** The last probe round as the admin suite reads it (StatusStore.lastChecks). */
+export interface LastChecks {
+  at: number;
+  checks: Array<{ service: ServiceId; state: Exclude<ServiceState, 'unknown'>; ms: number | null; why: string[] }>;
+}
+const LAST_CHECKS_KEY = 'last_checks';
 
 export const statusDbPath = (): string => process.env.VALUESCAN_STATUS_DB?.trim() || join(dataDir(), 'status.db');
 
@@ -166,7 +186,13 @@ export class StatusStore {
       for (const s of samples) {
         if (Number(add.run(s.service, minute, STATE_CODE[s.state], s.ms).changes) === 0) continue;
         tally.run(s.service, day, s.state === 'up' ? 1 : 0, s.state === 'degraded' ? 1 : 0, s.state === 'down' ? 1 : 0);
+        if (s.fresh) this.tallyFresh(day, s.fresh);
       }
+      // The page's freshness: this round's, or none when the indexer's status could not be judged.
+      const ix = samples.find((s) => s.service === 'indexer');
+      if (ix) this.notices.setMeta(LAST_FRESH_KEY, JSON.stringify(ix.fresh ? { at: minute * 60_000, items: freshItems(ix.fresh.values) } : null));
+      // The round's verdicts with their reasons, for the admin suite only (lastChecks): never on the public page.
+      this.notices.setMeta(LAST_CHECKS_KEY, JSON.stringify({ at: minute * 60_000, checks: samples.map((s) => ({ service: s.service, state: s.state, ms: s.ms, why: s.why ?? [] })) }));
       if (mayPrune('status')) this.db.prepare('DELETE FROM samples WHERE minute < ?').run(Math.floor((now - SAMPLE_KEEP_MS) / 60_000));
       if (mayPrune('status')) this.db.prepare('DELETE FROM days WHERE day < ?').run(utcDay(now - STATUS_KEEP_DAYS * 86_400_000));
       this.db.exec('COMMIT');
@@ -176,11 +202,70 @@ export class StatusStore {
     }
   }
 
+  private tallyFresh(day: string, f: FreshReading): void {
+    const key = FRESH_DAY_KEY + day;
+    let items: FreshDay['items'] = {};
+    try {
+      items = (JSON.parse(this.notices.getMeta(key) ?? '{}') as FreshDay['items']) ?? {};
+    } catch {
+      /* a broken tally starts again */
+    }
+    for (const id of FRESH_IDS) {
+      const v = f.values[id];
+      if (v === null || v === undefined) continue;
+      const t = (items[id] ??= { warnMin: 0, overMin: 0, worstMs: 0 });
+      if (f.over.includes(id)) t.overMin += 1;
+      else if (f.warn.includes(id)) t.warnMin += 1;
+      t.worstMs = Math.max(t.worstMs, Math.round(v));
+    }
+    this.notices.setMeta(key, JSON.stringify(items));
+  }
+
+  /** The last `days` UTC days' freshness tallies, newest first (days without one left out): the daily view. */
+  freshDays(days = 7, now = Date.now()): FreshDay[] {
+    const out: FreshDay[] = [];
+    for (const day of lastDays(now, days).reverse()) {
+      const raw = this.notices.getMeta(FRESH_DAY_KEY + day);
+      if (!raw) continue;
+      try {
+        out.push({ day, items: JSON.parse(raw) as FreshDay['items'] });
+      } catch {
+        /* left out */
+      }
+    }
+    return out;
+  }
+
+  /** The last round's freshness, when that round is recent (STALE_MS). */
+  private lastFresh(now: number): Freshness | null {
+    try {
+      const v = JSON.parse(this.notices.getMeta(LAST_FRESH_KEY) ?? 'null') as Freshness | null;
+      return v && typeof v.at === 'number' && Array.isArray(v.items) && now - v.at <= STALE_MS ? v : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * The last probe round: each service's verdict and what made it not up (indexer: indexerJudge.ts codes,
+   * e.g. `stream:arcus`, `lane:hl`, `lag`, `stopping`). The admin suite shows which check failed; the
+   * public report never carries it. Null before the first round of a prober that writes it.
+   */
+  lastChecks(): LastChecks | null {
+    try {
+      const v = JSON.parse(this.notices.getMeta(LAST_CHECKS_KEY) ?? 'null') as LastChecks | null;
+      return v && typeof v.at === 'number' && Array.isArray(v.checks) ? v : null;
+    } catch {
+      return null;
+    }
+  }
+
   /** What the page shows: every service's last sample and its last STATUS_DAYS days. */
   report(now = Date.now()): StatusReport {
     const days = lastDays(now, STATUS_DAYS);
     const tallies = this.db.prepare('SELECT day, up, degraded, down FROM days WHERE service = ? AND day >= ?');
     const last = this.db.prepare('SELECT minute, state, ms FROM samples WHERE service = ? ORDER BY minute DESC LIMIT 1');
+    const fresh = this.lastFresh(now);
     return {
       ok: true,
       at: now,
@@ -205,6 +290,7 @@ export class StatusStore {
         };
       }),
       notices: this.notices.shown(now),
+      ...(fresh ? { freshness: fresh } : {}),
     };
   }
 
@@ -482,7 +568,7 @@ async function timedRetry(fetchImpl: Fetch, url: string, headers: Record<string,
  */
 export const INDEXER_RECHECK_MS = 35_000;
 
-type IndexerSeen = { state: 'up' | 'degraded' | 'down'; why: string[] };
+type IndexerSeen = { state: 'up' | 'degraded' | 'down'; why: string[]; fresh?: FreshReading };
 
 function indexerState(status: () => unknown, now: () => number, judge: IndexerJudge): IndexerSeen {
   let h = null;
@@ -495,7 +581,9 @@ function indexerState(status: () => unknown, now: () => number, judge: IndexerJu
   }
   const age = h?.at ? now() - h.at : null;
   // The indexer says it is stopping (a release, a restart): maintenance, not an incident (statusAuto.ts),
-  // for as long as a stop takes at most (11-06: 36 s to 19.5 min).
+  // for as long as a stop takes at most (11-06: 36 s to 19.5 min). A handover (indexer/handover.ts) publishes
+  // `handover` instead: the standby's sockets hold every print while the old process stops, so its row (the last
+  // status before the stop, the standby's sockets as streams) is judged as it is, and goes stale like any other.
   if (h && age !== null && age <= INDEXER_STOP_MAX_MS && (raw as { stopping?: unknown }).stopping === true) return { state: 'degraded', why: ['stopping'] };
   if (!h || age === null || age > INDEXER_STALE_MS) {
     // Not publishing, but the boards it wrote are under an hour old: what users see is still recent.
@@ -508,11 +596,19 @@ function indexerState(status: () => unknown, now: () => number, judge: IndexerJu
   const streams = Object.entries(h.streams);
   if (!streams.length) why.push('stream:');
   for (const [venue, up] of streams) if (!up) why.push(`stream:${venue}`);
-  // Boards hours old under a green page: 11.3 h on 2026-11-04 with most of that day counted as up.
-  if (typeof h.lastBuildAt === 'number' && h.lastBuildAt > 0 && now() - h.lastBuildAt > INDEXER_BOARDS_OLD_MS) why.push('boards');
+  // Boards hours old under a green page: 11.3 h on 2026-11-04 with most of that day counted as up. Until a new process's
+  // first build ends (15-90 min after the restarts of 2026-11-08) the boards shown are the last process's: their age is
+  // that build's (prevBuildAt, engine.ts loadWarm), else the newest board on disk - not "no build yet, so fine".
+  // (h.lastBuildAt already falls back to boardsAt: hosted.ts indexerHealth. The process's own build comes first here.)
+  const { lastBuildAt: own, prevBuildAt: prev } = raw as { lastBuildAt?: unknown; prevBuildAt?: unknown };
+  const builtAt = typeof own === 'number' && own > 0 ? own
+    : typeof prev === 'number' && prev > 0 ? prev
+    : typeof h.lastBuildAt === 'number' ? h.lastBuildAt : 0;
+  if (builtAt > 0 && now() - builtAt > INDEXER_BOARDS_OLD_MS) why.push('boards');
   // Lanes that have work and finish none, reads failing, the thread far behind (ops/indexerJudge.ts).
-  why.push(...judge.judge(h, now()));
-  return { state: why.length ? 'degraded' : 'up', why };
+  // Over an hour old is said as `boards` already: not twice.
+  for (const code of judge.judge(h, now())) if (!(code === 'fresh:boards' && why.includes('boards'))) why.push(code);
+  return { state: why.length ? 'degraded' : 'up', why, ...(judge.lastFresh ? { fresh: judge.lastFresh } : {}) };
 }
 
 async function probeIndexer(status: () => unknown, now: () => number, recheckMs: number, judge: IndexerJudge): Promise<IndexerSeen> {
@@ -538,14 +634,20 @@ export async function probeAll(o: {
     o.indexerStatus ? probeIndexer(o.indexerStatus, now, o.indexerRecheckMs ?? INDEXER_RECHECK_MS, o.indexerJudge ?? new IndexerJudge()) : null,
   ]);
   const out: Sample[] = [];
-  out.push({
-    service: 'website',
-    state: web && web.res.status === 200 && /text\/html/i.test(web.res.headers.get('content-type') ?? '') ? 'up' : 'down',
-    ms: web?.ms ?? null,
-  });
-  out.push({ service: 'api', state: api && api.res.status === 200 && jsonOk(api.body) === true ? 'up' : 'down', ms: api?.ms ?? null });
+  // Vercel turned THIS PROBE away (`x-vercel-mitigated`, its attack protection against the prober's own address): the
+  // site answered everyone else (2026-11-09 15:28: 403 to server 1 only, 200 from everywhere else, and the page showed
+  // the website and the API down). That minute says nothing about the site: no sample, not a down one.
+  const blocked = (a: Awaited<ReturnType<typeof timed>>): boolean => !!a && a.res.status !== 200 && !!a.res.headers.get('x-vercel-mitigated');
+  if (!blocked(web)) {
+    out.push({
+      service: 'website',
+      state: web && web.res.status === 200 && /text\/html/i.test(web.res.headers.get('content-type') ?? '') ? 'up' : 'down',
+      ms: web?.ms ?? null,
+    });
+  }
+  if (!blocked(api)) out.push({ service: 'api', state: api && api.res.status === 200 && jsonOk(api.body) === true ? 'up' : 'down', ms: api?.ms ?? null });
   out.push({ service: 'executor', state: exec.state, ms: exec.ms });
-  if (indexer) out.push({ service: 'indexer', state: indexer.state, ms: null, ...(indexer.why.length ? { why: indexer.why } : {}) });
+  if (indexer) out.push({ service: 'indexer', state: indexer.state, ms: null, ...(indexer.why.length ? { why: indexer.why } : {}), ...(indexer.fresh ? { fresh: indexer.fresh } : {}) });
   return out;
 }
 
@@ -590,6 +692,8 @@ export function startStatusProber(o: {
   }
   let running = false;
   const indexerJudge = new IndexerJudge();
+  // The datasets past half their target in the last round: each is logged once, as it gets there.
+  let warned = new Set<FreshId>();
   const tick = async (): Promise<void> => {
     // One round at a time: a slow round is never overlapped by the next.
     if (running) return;
@@ -600,6 +704,14 @@ export function startStatusProber(o: {
     const started = Date.now();
     try {
       const samples = await probeAll({ targets, fetch: o.fetch, indexerStatus: o.indexerStatus, indexerJudge });
+      const fresh = samples.find((s) => s.service === 'indexer')?.fresh;
+      const now = new Set<FreshId>(fresh ? [...fresh.warn, ...fresh.over] : []);
+      for (const id of now) {
+        if (warned.has(id)) continue;
+        const target = FRESH_TARGETS.find((t) => t.id === id)!;
+        o.log?.warn({ dataset: id, ms: fresh!.values[id], targetMs: target.budgetMs, over: fresh!.over.includes(id) }, `status: indexer ${id} past ${fresh!.over.includes(id) ? 'its' : 'half its'} freshness target`);
+      }
+      warned = now;
       const at = started;
       store.record(samples, at);
       store.auto.observe(Math.floor(at / 60_000), samples, Date.now());
