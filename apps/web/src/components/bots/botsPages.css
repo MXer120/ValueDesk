@@ -1679,3 +1679,4 @@ tr.bots-row.is-blocked:hover, .bots-table tbody tr.bots-row.is-blocked:hover { b
   .bots-mm__set { flex-wrap: wrap; }
   .bots-mm__sp { display: none; }
 }
+.bots-rg__unit { fill: var(--dim); font-weight: 400; letter-spacing: 0; text-transform: none; }

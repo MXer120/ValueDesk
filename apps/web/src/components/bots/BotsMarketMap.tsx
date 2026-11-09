@@ -5,7 +5,7 @@
  * score there (what $1M of the best bot - or the picked one - is estimated to do, all-in). Under it, the window's hours:
  * the part the trade recorder holds and the part it did not record, hatched as the latency chart's idle stretches.
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { BotMarket } from '../../bots/data';
 import { fmtUsd } from '../../format';
 import { fmtBpUsd } from './BotNewPage';
@@ -140,6 +140,8 @@ export function MarketMap({ markets, absent = [], scoreOf, feeBps, window: win, 
   const suppress = useRef(false);
   const z = ZOOMS[zi]!;
   const set = (p: Partial<typeof prefs>) => setPrefs((x) => { const n = { ...x, ...p }; try { localStorage.setItem(PREF_KEY, JSON.stringify(n)); } catch { /* private mode */ } return n; });
+  // Measured before the first paint, so the first frame is never drawn at the default width (wider than a phone).
+  useLayoutEffect(() => { const el = vp.current; if (el && el.clientWidth > 0) setW(Math.max(240, el.clientWidth)); }, []);
   useEffect(() => {
     const el = vp.current;
     if (!el || typeof ResizeObserver === 'undefined') return;
@@ -265,7 +267,7 @@ export function MarketMap({ markets, absent = [], scoreOf, feeBps, window: win, 
               <span className="dim">{fmtUsd(hv.m.volumeUsdH, 0)}/h traded · uninformed {Math.round(hv.m.takers.t1002 * 100)}% · informed {Math.round(hv.m.takers.t23342 * 100)}% · volatility {Math.round(hv.m.volBpsH)} bp/h</span>
             </>
           ) : <><b>{hv.base}</b><span className="dim">No trades in {winWords}</span></>
-        ) : <span className="dim">{prefs.size === 'activity' ? 'Size: activity in the window.' : 'Every tile the same size.'} Point at or tap a tile for its figures; a click opens it in the list. Zoom with the buttons or Ctrl + wheel / pinch, then drag or scroll to move.</span>}
+        ) : null}
       </div>
       <div className="bots-mm__key" aria-hidden>
         {KEY[prefs.colour].map(([cls, words]) => <span key={cls}><i className={cls} />{words}</span>)}

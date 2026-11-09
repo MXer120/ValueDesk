@@ -5,7 +5,7 @@
  * share informed flow took (it picks off quotes, about 1 bp a fill), and how far the price moved. A maker's cost follows
  * these two more than any setting: on 2026-11-09 uninformed flow stopped and every maker on SoDEX paid ~$220+ per $1M.
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { DASH, fmtUsd } from '../../format';
 import { useBotRegime, type BotWindow, type RegimeHour } from '../../bots/data';
 import { WINDOW_H } from './BotsMarketMap';
@@ -45,7 +45,7 @@ export function conditionOf(bs: readonly RegimeHour[], typicalBps: number | null
   return { label: 'Mixed', tone: 'warning', why: 'Some uninformed flow' };
 }
 
-const H_FLOW = 128, H_GAP = 26, H_MOVE = 56, PAD = { l: 8, r: 44, t: 8, b: 22 };
+const H_FLOW = 128, H_GAP = 38, H_MOVE = 56, PAD = { l: 2, r: 46, t: 10, b: 24 };
 
 /**
  * Two lanes over the same buckets. Top: what share of the bucket's traded volume each kind of flow took, stacked from the
@@ -60,6 +60,8 @@ function Chart({ hours, win, stepMs }: { hours: readonly RegimeHour[]; win: BotW
   const [at, setAt] = useState<number | null>(null);
   const wrap = useRef<HTMLDivElement>(null);
   const [w, setW] = useState(720);
+  // Measured before the first paint, so the first frame is never drawn at the default width (wider than a phone).
+  useLayoutEffect(() => { const el = wrap.current; if (el && el.clientWidth > 0) setW(Math.max(240, el.clientWidth)); }, []);
   useEffect(() => {
     const el = wrap.current;
     if (!el || typeof ResizeObserver === 'undefined') return;
@@ -96,15 +98,11 @@ function Chart({ hours, win, stepMs }: { hours: readonly RegimeHour[]; win: BotW
   const h = at === null ? null : hours[at] ?? null;
   const hm = (t: number) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
   const when = (t: number) => `${new Date(t).toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' })}, ${hm(t)}${stepMs < 3_600_000 ? `–${hm(t + stepMs)}` : ''}`;
-  const last = hours[n - 1];
   const tipLeft = h && at !== null ? Math.min(Math.max(x0(at) + step / 2, 110), w - 110) : 0;
   return (
     <div className="bots-rg" ref={wrap}>
       <div className="bots-rg__head">
         <span className="bots-rg__lane">Who took the volume</span>
-        {last && last.volumeUsd !== null && (
-          <span className="bots-rg__now">Latest {stepMs >= 3_600_000 ? "hour" : `${Math.round(stepMs / 60_000)} min`} <b style={{ color: TAKER_COLORS.patient }}>{pct(shareOf(last, 't1002Usd'))}</b> uninformed · <b style={{ color: TAKER_COLORS.fast }}>{pct(shareOf(last, 't23342Usd'))}</b> informed</span>
-        )}
       </div>
       <div className="bots-rg__plot">
         <svg width={w} height={H} viewBox={`0 0 ${w} ${H}`} className="bots-rg__svg" role="img"
@@ -146,8 +144,7 @@ function Chart({ hours, win, stepMs }: { hours: readonly RegimeHour[]; win: BotW
               </g>
             );
           })}
-          <text x={PAD.l} y={moveTop - 8} className="bots-rg__lanet">Volatility</text>
-          <text x={w - PAD.r + 8} y={moveTop - 8} className="bots-rg__ax">bp/h</text>
+          <text x={PAD.l} y={moveTop - 14} className="bots-rg__lanet">Volatility <tspan className="bots-rg__unit">bp/h</tspan></text>
           {[0, scale.top / 2, scale.top].map((v) => (
             <g key={`m${v}`}>
               <line x1={PAD.l} x2={w - PAD.r} y1={moveY(v)} y2={moveY(v)} className={v === 0 ? 'bots-rg__base' : 'bots-rg__grid'} />
