@@ -52,7 +52,7 @@ test('down three minutes opens a major incident from the first bad minute; up fi
   s.close();
 });
 
-test('degraded ten minutes opens a minor incident; going down makes it major', () => {
+test('degraded ten minutes opens a minor incident; going down keeps the indexer minor (only the figures fall behind)', () => {
   const s = store();
   let m = play(s, 'indexer', rep(AUTO.degradedMin - 1, 'degraded'));
   assert.equal(s.notices.all().length, 0);
@@ -62,7 +62,7 @@ test('degraded ten minutes opens a minor incident; going down makes it major', (
   assert.equal(n!.title, 'Indexer degraded - figures may be behind');
   play(s, 'indexer', rep(AUTO.downMin, 'down'), m);
   const up = s.notices.get(n!.id)!;
-  assert.equal(up.impact, 'major');
+  assert.equal(up.impact, 'minor', 'the indexer down is never major');
   assert.equal(up.title, 'Indexer not publishing - data is not current');
   assert.equal(s.notices.all().length, 1, 'the same incident, not a second');
   s.close();

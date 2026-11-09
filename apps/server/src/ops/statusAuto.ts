@@ -108,6 +108,13 @@ const minutes = (a: number, b: number): string => {
 
 const blankTrack = (): Track => ({ id: null, worst: null, badFrom: null, downFrom: null, upFrom: null, quiet: false });
 
+/**
+ * How bad an automatic incident is. The indexer down is never "major" (owner 2026-11-09: "errors are still named super
+ * drastically 'Major incident' when it's really just the indexer being down"): the site, trading and copies go on; only
+ * figures fall behind. The Data API, the website or the executor down is major.
+ */
+export const impactOf = (svc: ServiceId, bad: Bad): 'major' | 'minor' => (bad === 'down' && svc !== 'indexer' ? 'major' : 'minor');
+
 export class AutoIncidents {
   private s: AutoState;
 
@@ -159,7 +166,7 @@ export class AutoIncidents {
     const from = Math.max(fromMs, at - BACK_MS);
     if (this.covered(svc, from, at)) return null;
     const n = this.notices.create({
-      kind: 'incident', title: TITLE[svc][bad], components: [svc], impact: bad === 'down' ? 'major' : 'minor',
+      kind: 'incident', title: TITLE[svc][bad], components: [svc], impact: impactOf(svc, bad),
       startsAt: from, text: openText(svc, bad, from, why), stage: 'investigating',
     }, at);
     this.s.ids.push(n.id);
@@ -248,7 +255,7 @@ export class AutoIncidents {
         return;
       }
       if (downLong && t.worst !== 'down') {
-        this.notices.update(t.id, { impact: 'major', title: TITLE[svc].down, text: `Not answering at all since ${fmtUtc(t.downFrom! * 60_000)}.` }, at);
+        this.notices.update(t.id, { impact: impactOf(svc, 'down'), title: TITLE[svc].down, text: `Not answering at all since ${fmtUtc(t.downFrom! * 60_000)}.` }, at);
         t.worst = 'down';
       }
       // Something else is behind as well: said once, as an update to the same incident.
