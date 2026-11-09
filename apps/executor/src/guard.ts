@@ -50,7 +50,8 @@ export function classifyRejection(error: string | null | undefined): RejectClass
   // What the order was for is already gone: a close of a position SoDEX closed meanwhile (its stop, a liquidation:
   // "position not found: 1", the only refusal on ValueDesk's executor on 2026-10-29/30, alerted as unknown) or a cancel
   // of an order that filled or was cancelled. The engines book it themselves (refusedNoPosition, the cancel's next read).
-  if (/position not found|no (open )?position|order (not found|never placed)|already (filled|canceled|cancelled|closed)|unknown order/i.test(e)) return 'gone';
+  // SoDEX also writes it as one word: "order rejected: OrderNotFound" (2026-11-09 15:29, an algo's cancel: an ops FAILURE alert for nothing).
+  if (/position not found|no (open )?position|order ?(not ?found|never placed)|already (filled|canceled|cancelled|closed)|unknown order/i.test(e)) return 'gone';
   // A margin-mode change on a market where the wallet already holds a position: SoDEX keeps that position's mode and the
   // copy goes on in it (copy-engine runtime.ts ensureLeverage). Nothing for the operator: two "Order refused" alerts on
   // 2026-11-09 04:46 were this, a follower's own BTC position when the copy started.

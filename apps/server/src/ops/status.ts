@@ -634,12 +634,18 @@ export async function probeAll(o: {
     o.indexerStatus ? probeIndexer(o.indexerStatus, now, o.indexerRecheckMs ?? INDEXER_RECHECK_MS, o.indexerJudge ?? new IndexerJudge()) : null,
   ]);
   const out: Sample[] = [];
-  out.push({
-    service: 'website',
-    state: web && web.res.status === 200 && /text\/html/i.test(web.res.headers.get('content-type') ?? '') ? 'up' : 'down',
-    ms: web?.ms ?? null,
-  });
-  out.push({ service: 'api', state: api && api.res.status === 200 && jsonOk(api.body) === true ? 'up' : 'down', ms: api?.ms ?? null });
+  // Vercel turned THIS PROBE away (`x-vercel-mitigated`, its attack protection against the prober's own address): the
+  // site answered everyone else (2026-11-09 15:28: 403 to server 1 only, 200 from everywhere else, and the page showed
+  // the website and the API down). That minute says nothing about the site: no sample, not a down one.
+  const blocked = (a: Awaited<ReturnType<typeof timed>>): boolean => !!a && a.res.status !== 200 && !!a.res.headers.get('x-vercel-mitigated');
+  if (!blocked(web)) {
+    out.push({
+      service: 'website',
+      state: web && web.res.status === 200 && /text\/html/i.test(web.res.headers.get('content-type') ?? '') ? 'up' : 'down',
+      ms: web?.ms ?? null,
+    });
+  }
+  if (!blocked(api)) out.push({ service: 'api', state: api && api.res.status === 200 && jsonOk(api.body) === true ? 'up' : 'down', ms: api?.ms ?? null });
   out.push({ service: 'executor', state: exec.state, ms: exec.ms });
   if (indexer) out.push({ service: 'indexer', state: indexer.state, ms: null, ...(indexer.why.length ? { why: indexer.why } : {}), ...(indexer.fresh ? { fresh: indexer.fresh } : {}) });
   return out;

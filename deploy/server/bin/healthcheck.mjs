@@ -159,7 +159,7 @@ function getJson(path, headers = {}, base = API_URL) {
         try {
           body = JSON.parse(text);
         } catch { /* not JSON */ }
-        resolve({ status: res.statusCode, body, bytes: text.length, type: String(res.headers['content-type'] ?? '') });
+        resolve({ status: res.statusCode, body, bytes: text.length, type: String(res.headers['content-type'] ?? ''), mitigated: String(res.headers['x-vercel-mitigated'] ?? '') });
       });
     });
     req.on('timeout', () => req.destroy(new Error('timeout after 8 s')));
@@ -351,7 +351,10 @@ await Promise.all(PEERS.map(async (p) => {
     }
     const headers = p.gated && SECRET ? { 'x-origin-verify': SECRET } : {};
     const r = await getJson(u.pathname + u.search, headers, `${u.protocol}//${u.host}`);
-    if (r.status < 200 || r.status > 299) results[name] = { ok: false, note: `${u.host}${u.pathname} answered ${r.status}` };
+    // Vercel's attack protection turned THIS server's address away (x-vercel-mitigated): everyone else gets the site
+    // (2026-11-09 15:28: 403 to server 1 only). A warning, not a FAILURE: it says nothing about the site.
+    if (r.status !== 200 && r.mitigated) results[name] = { ok: true, warn: true, note: `${u.host}${u.pathname} turned this server away (Vercel: ${r.mitigated}), not judged` };
+    else if (r.status < 200 || r.status > 299) results[name] = { ok: false, note: `${u.host}${u.pathname} answered ${r.status}` };
     else if (r.body && r.body.ok === false) results[name] = { ok: false, note: `${u.host}${u.pathname} answered ok:false` };
     else results[name] = { ok: true, note: `${u.host}${u.pathname} ${r.status}${r.body ? '' : `, ${r.bytes} bytes`}` };
   } catch (e) {
