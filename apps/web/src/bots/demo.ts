@@ -151,13 +151,13 @@ function viewOf(s: Seed, now: number): AlgoView {
           ? [
             { id: 'loop', label: 'Bot loop', state: 'ok', value: 'last step 0.4 s ago' },
             { id: 'service', label: 'ValueDesk service', state: 'ok', value: 'running' },
-            { id: 'book', label: 'SoDEX price', state: 'ok', value: '0.2 s old' },
+            { id: 'book', label: 'SoDEX price', state: 'ok', value: 'live, last change 0.2 s ago' },
             s.strategy === 'grid'
               ? { id: 'oracle', label: 'Oracle price', state: 'off', value: 'not used by this bot' }
-              : { id: 'oracle', label: 'Oracle price', state: 'ok', value: '0.1 s old' },
+              : { id: 'oracle', label: 'Oracle price', state: 'ok', value: 'live, last change 0.1 s ago' },
             { id: 'fills', label: 'Fills booked', state: 'ok', value: '180 ms after the trade' },
             { id: 'orders', label: 'Order updates', state: 'ok', value: 'live from SoDEX, 140 ms late' },
-            { id: 'position', label: 'Holding = SoDEX', state: 'ok', value: 'matched 12 s ago' },
+            { id: 'position', label: 'Holding = SoDEX', state: 'ok', value: 'matched 4 s ago' },
             { id: 'key', label: 'Trading key', state: 'ok', value: '164 days left' },
             { id: 'refusals', label: 'SoDEX refusals (1 h)', state: 'ok', value: '3 handled' },
             { id: 'hold', label: 'Quoting', state: 'ok', value: 'quoting' },

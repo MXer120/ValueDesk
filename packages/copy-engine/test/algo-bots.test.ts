@@ -976,10 +976,11 @@ test('Binance-led maker: stillBps sends only in a still market, restMs cancels w
     await step(r, a.id);
     assert.equal(r.ex.cancelled.length, 0, 'younger than restMs: it rests');
   }
-  // Binance runs 3 bp up and back: nearly back at the same price, but the path is 6 bp.
+  // Binance runs 3 bp up and back over two seconds: nearly back at the same price, but the per-second path is 6 bp.
+  // (Up and back inside one second is bid/ask bounce, not a move: the path counts each second's last mid.)
   clockTick(800);
   ref.tick(60_018.5, 60_019.5);
-  clockTick(50);
+  clockTick(1_000);
   ref.tick(60_000.5, 60_001.5);
   clockTick(150);
   ref.tick(60_000.5, 60_001.5);
@@ -1556,4 +1557,31 @@ test('Watchdog: a running bot reports its loop, the service, the SoDEX price, th
   await settle();
   const hs = r.rt.view(a.id)!.bot!.health!;
   assert.deepEqual(hs.checks.map((c) => c.state), ['off']);
+});
+
+test('calm gate on a lively market (owner 2026-11-09, HYPE: no order in an hour): the limit rises to the market\'s usual minute, so it quotes in its calmer minutes; the wait is said and shown', async () => {
+  const ref = new FakeRef();
+  const r = await rig(ref);
+  const a = await add(r, { ...MM, ref: 'binance', chaseTicks: 40, stillBps: 5, stillMs: 60_000 });
+  // Seven minutes of a market that moves ~3 bp every second (a 60 s path of ~180 bp, far over 5 bp).
+  let px = 60_000.5;
+  let placedEarly = 0;
+  for (let i = 0; i < 420; i++) {
+    px += (i % 2 ? 18 : -18);
+    ref.tick(px, px + 1);
+    clockTick(1_000);
+    await step(r, a.id);
+    if (i === 100) placedEarly = r.ex.placed.length;
+  }
+  assert.equal(placedEarly, 0, 'under the bot\'s own 5 bp it waits while the market\'s usual minute is not known yet');
+  const ev = await r.rt.events(a.id, { limit: 500 });
+  assert.ok(ev.some((x) => x.kind === 'info' && /Waiting for a calm market/.test(x.text)), 'the wait is said, not silent');
+  // Then the market calms below its own usual minute: it quotes.
+  for (let i = 0; i < 70; i++) {
+    px += (i % 2 ? 6 : -6);
+    ref.tick(px, px + 1);
+    clockTick(1_000);
+    await step(r, a.id);
+  }
+  assert.ok(r.ex.placed.length > 0, 'quotes once the market is calmer than its usual minute');
 });
