@@ -12278,7 +12278,7 @@ function checkAlgoSpec(input, depth = 0) {
         if (o.ref !== "binance") e.ref = "The reference must be binance.";
         else {
           spec.ref = "binance";
-          if (o.refBps !== void 0 && o.refBps !== null && Number(o.refBps) !== 0) spec.refBps = num3(o, "refBps", "Distance from the Binance price", L.refBps, e);
+          if (o.refBps !== void 0 && o.refBps !== null && Number(o.refBps) !== 0) spec.refBps = num3(o, "refBps", "Distance from the oracle price", L.refBps, e);
           if (o.pullBps !== void 0 && o.pullBps !== null && Number(o.pullBps) !== 0) spec.pullBps = num3(o, "pullBps", "Pull distance", L.pullBps, e);
           if (o.placeBps !== void 0 && o.placeBps !== null && Number(o.placeBps) !== 0) spec.placeBps = num3(o, "placeBps", "Send distance", L.placeBps, e);
           if (o.calmBps !== void 0 && o.calmBps !== null && Number(o.calmBps) !== 0) {
@@ -15485,7 +15485,9 @@ var AlgoFeed = class {
         const bidSz = toNum(r.B);
         const askSz = toNum(r.A);
         if (s && bid !== null && ask !== null && bid > 0 && ask > 0 && ask >= bid) {
+          const prev = this.quotes.get(s);
           this.quotes.set(s, { bid, ask, at: now, ...bidSz !== null && bidSz >= 0 ? { bidSz } : {}, ...askSz !== null && askSz >= 0 ? { askSz } : {} });
+          if (!prev || prev.bid !== bid || prev.ask !== ask) for (const cb of this.quoteCbs) cb(s);
         }
       }
       return;
@@ -15654,6 +15656,10 @@ var AlgoFeed = class {
     }
     return { qty: qty2, usd: usd2 };
   }
+  quoteCbs = [];
+  onQuote(cb) {
+    this.quoteCbs.push(cb);
+  }
   onPrint(cb) {
     this.printCbs.push(cb);
   }
@@ -15725,7 +15731,11 @@ function readBatch(data, orders) {
     return { clOrdID: o.clOrdID, ok: true, orderId: row.orderID !== void 0 ? String(row.orderID) : null, error: null, outcomeUnknown: false };
   });
 }
-var GONE = /not found|unknown order|does not exist|already/i;
+var GONE = /not ?found|unknown ?order|does ?not ?exist|already/i;
+function cancelGone(data) {
+  const list = Array.isArray(data) ? data : unwrapList(data, "orders");
+  return failedOrders(list).filter((r) => GONE.test(r.error ?? "") && r.clOrdID).map((r) => String(r.clOrdID));
+}
 function cancelFailures(data) {
   const list = Array.isArray(data) ? data : unwrapList(data, "orders");
   return failedOrders(list).filter((r) => !GONE.test(r.error ?? "")).map((r) => `${r.clOrdID ? `${r.clOrdID}: ` : ""}${r.error || `code ${r.code}`}`);
@@ -15776,11 +15786,12 @@ var KeyAlgoSink = class {
     try {
       data = await this.signAndSend(perpsActions.cancelOrder(a.accountId, clOrdIDs.map((clOrdID) => ({ symbolID: market.id, clOrdID }))));
     } catch (e) {
-      if (e instanceof SodexApiError && GONE.test(e.message)) return;
+      if (e instanceof SodexApiError && GONE.test(e.message)) return [...clOrdIDs];
       throw e;
     }
     const bad = cancelFailures(data);
     if (bad.length) throw new Error(`SoDEX did not cancel ${bad.length} order${bad.length === 1 ? "" : "s"}: ${bad.join("; ")}`);
+    return cancelGone(data);
   }
   async setLeverage(a, market, leverage, margin) {
     await this.signAndSend(leverageAction(a.accountId, market, leverage, margin));
@@ -15836,6 +15847,7 @@ function refusalWords(k) {
 // ../../packages/copy-engine/src/algo/reference.ts
 var BASIS_HALF_LIFE_MS = 3e4;
 var REF_MAX_AGE_MS = 2e3;
+var REF_GRACE_MS = 3e3;
 var FairBasis = class {
   basis = null;
   at = 0;
@@ -15862,6 +15874,7 @@ var FairBasis = class {
 
 // ../../packages/copy-engine/src/algo/runtime.ts
 var ALGO_TICK_MS = 500;
+var BOT_EVENT_MIN_MS = 50;
 var FLUSH_MS = 2e3;
 var MARKETS_REFRESH_MS2 = 10 * 6e4;
 var STOP_DRAIN_MS = 8e3;
@@ -15892,6 +15905,7 @@ var PROBLEM_RECHECK_MS = 6e4;
 var ORDER_POLL_SPACING_MS = 1e3;
 var ORDER_RESYNC_SPACING_MS = 200;
 var BOT_POSITION_CHECK_MS = 3e4;
+var SAID_EVERY_MS = 1e4;
 var ORDER_POLL_MIN_MS = 3e3;
 var ORDER_WATCH_EVERY_MS = 3e4;
 var LATE_MS = 3e4;
@@ -16023,6 +16037,21 @@ var AlgoRuntime = class {
   oracleQuotes = /* @__PURE__ */ new Map();
   /** The Binance-led makers' basis per market (reference.ts). */
   fairs = /* @__PURE__ */ new Map();
+  /** The Watchdog's figures per bot: its last step, how late SoDEX's order updates arrive, the last hour's refusals by kind. */
+  wd = /* @__PURE__ */ new Map();
+  wdOf(id) {
+    let w = this.wd.get(id);
+    if (!w) this.wd.set(id, w = { stepAt: 0, lagMs: null, fillLagMs: null, refusals: [] });
+    return w;
+  }
+  /** A fill booked `lag` ms after SoDEX's trade (the Watchdog's "fills booked" line), smoothed. */
+  fillLag(a, lag) {
+    if (!(lag >= 0) || lag > 12e4) return;
+    const w = this.wdOf(a.id);
+    w.fillLagMs = w.fillLagMs === null ? lag : w.fillLagMs * 0.8 + lag * 0.2;
+  }
+  /** When each market last had a fair price (fairFor): a gap under REF_GRACE_MS keeps the quotes resting. */
+  fairAt = /* @__PURE__ */ new Map();
   /** The reference's mids of the last seconds per market, oldest first, for calmBps. */
   refTrail = /* @__PURE__ */ new Map();
   /* ------------------------------------------------------------ lifecycle ----- */
@@ -16065,6 +16094,7 @@ var AlgoRuntime = class {
     }
     this.market.start();
     this.host.reference?.onQuote((market) => this.onReference(market));
+    this.market.onQuote?.((symbol2) => this.stepBotsOn(symbol2));
     this.syncWatch();
     if (this.host.autoTick !== false) {
       this.timers.push(
@@ -16077,6 +16107,8 @@ var AlgoRuntime = class {
   async stop() {
     this.running = false;
     for (const t of this.timers) timers.cancel(t);
+    for (const t of this.stepTimers.values()) timers.cancel(t);
+    this.stepTimers.clear();
     this.timers = [];
     for (let i = 0; this.busy.size && i < STOP_DRAIN_MS / 25; i++) await new Promise((r) => timers.after(25, () => r(void 0)));
     const pulls = [...this.algos.values()].filter((a) => this.quotesNeedManaging(a) && a.mode === "hosted").map((a) => this.pullResting(a).catch((e) => this.host.log.warn("algo: pull on stop failed", { algo: a.id, error: String(e) })));
@@ -16124,6 +16156,7 @@ var AlgoRuntime = class {
     if (!b) this.fairs.set(symbol2, b = new FairBasis());
     const refMid = (r.bid + r.ask) / 2;
     b.update(mid(q), refMid, now);
+    this.fairAt.set(symbol2, now);
     return b.fair(refMid);
   }
   /** How far the reference moved over the last `ms`, bp (+ up). 0 with too little history. */
@@ -16155,6 +16188,42 @@ var AlgoRuntime = class {
    * price came past its line (bots.ts pastFair) - before the next step, and before SoDEX's takers who watch Binance
    * reach it. Only cancels: new quotes go out with the steps.
    */
+  /** Every running bot on a market, stepped soon (stepSoon): its book or its oracle moved. */
+  stepBotsOn(symbol2) {
+    if (!this.running) return;
+    for (const a of this.algos.values()) if (a.spec.bot && a.spec.symbol === symbol2 && a.status === "running") this.stepSoon(a);
+  }
+  /**
+   * A bot's step now, on an update rather than on the next tick (owner 2026-11-09: "run on every update, as latency
+   * optimized as possible"). Coalesced: one step per BOT_EVENT_MIN_MS at most, and an update during a step steps again
+   * right after it. Its re-pricing interval (minRepriceMs) still decides how often its orders actually change. Not in
+   * tests that drive the clock themselves (autoTick false).
+   */
+  stepTimers = /* @__PURE__ */ new Map();
+  stepAgain = /* @__PURE__ */ new Set();
+  eventStepAt = /* @__PURE__ */ new Map();
+  stepSoon(a) {
+    if (this.host.autoTick === false || FINAL_STATUSES.has(a.status) || a.status === "paused") return;
+    if (this.busy.has(a.id)) {
+      this.stepAgain.add(a.id);
+      return;
+    }
+    if (this.stepTimers.has(a.id)) return;
+    const wait = Math.max(0, BOT_EVENT_MIN_MS - (Date.now() - (this.eventStepAt.get(a.id) ?? 0)));
+    const t = timers.after(wait, () => {
+      this.stepTimers.delete(a.id);
+      if (!this.running || this.busy.has(a.id) || FINAL_STATUSES.has(a.status)) return;
+      this.eventStepAt.set(a.id, Date.now());
+      this.busy.add(a.id);
+      void this.step(a, Date.now()).catch((e) => this.host.log.error("algo: an event step failed", { algo: a.id, error: String(e) })).finally(() => this.stepDone(a));
+    });
+    this.stepTimers.set(a.id, t);
+  }
+  /** A step ended: an update that came during it steps the bot again now. */
+  stepDone(a) {
+    this.busy.delete(a.id);
+    if (this.stepAgain.delete(a.id)) this.stepSoon(a);
+  }
   onReference(market) {
     if (!this.running) return;
     const rq = this.host.reference?.quote(market);
@@ -16180,6 +16249,7 @@ var AlgoRuntime = class {
       if (stale.length) pulls.push([a, stale]);
     }
     for (const [a, stale] of shuffled(pulls)) void this.cancelChildren(a, m, stale).catch((e) => this.host.log.warn("algo: fast pull failed", { algo: a.id, error: String(e) }));
+    for (const a of this.algos.values()) if (a.spec.bot && a.spec.kind === "mm" && a.spec.ref && a.spec.symbol === market && a.status === "running") this.stepSoon(a);
   }
   /**
    * Orders of wallets the socket does not follow (SoDEX lets one IP follow 10;
@@ -16730,6 +16800,105 @@ var AlgoRuntime = class {
     };
   }
   /** A bot's figures at the mark now (the mid, else its average fill, while no mark is known). */
+  /**
+   * Orders SoDEX answered "not found" on cancel: filled or cancelled already. Said in the activity (owner 2026-11-09:
+   * "don't just hide errors if they exist"), settled from SoDEX's own record of them at once, never cancelled again.
+   */
+  async saidGone(a, list) {
+    if (!list.length) return;
+    for (const c of list) c.updatedAt = Date.now() - STALE_IOC_MS - 1;
+    this.dirty.add(a.id);
+    await this.saidOnce(a, "gone", "info", `SoDEX had already filled or cancelled ${list.map((c) => c.tag).join(" and ")} when the cancel arrived: its fills are taken from SoDEX's record, nothing is cancelled again.`, list[0]);
+  }
+  /**
+   * One activity line per kind of thing a bot handles, at most every SAID_EVERY_MS: what happened in between is
+   * counted into the next line ("and N more like it"), so a busy market shows what happens without a wall of lines.
+   */
+  saidAt = /* @__PURE__ */ new Map();
+  async saidOnce(a, key2, kind, text, c) {
+    const k = `${a.id}|${key2}`;
+    const now = Date.now();
+    const last = this.saidAt.get(k);
+    if (last && now - last.at < SAID_EVERY_MS) {
+      last.more++;
+      return;
+    }
+    const more = last?.more ?? 0;
+    this.saidAt.set(k, { at: now, more: 0 });
+    if (this.saidAt.size > 5e3) this.saidAt.delete(this.saidAt.keys().next().value);
+    await this.event(a, kind, more ? `${text} (and ${more} more like it in the ${Math.round((now - last.at) / 1e3)} s before)` : text, c);
+  }
+  /**
+   * A bot's refusal in its activity (owner 2026-11-09: users see no error that is ours to handle). What the bot handles
+   * itself - a post-only price that moved, SoDEX asking to slow down, an out-of-order nonce, a send held back here, a
+   * reduce with nothing left - is counted for the Watchdog and logged, not shown. What the user can act on (margin,
+   * a limit, the key, a halted market) is an info line; only what nothing handles stays an error.
+   */
+  async botRefusalEvent(a, c, verb, reason) {
+    const k = refusalKind(reason);
+    const w = this.wdOf(a.id);
+    const now = Date.now();
+    w.refusals.push([now, k]);
+    while (w.refusals.length && w.refusals[0][0] < now - 36e5) w.refusals.shift();
+    if (w.refusals.length > 2e3) w.refusals.splice(0, w.refusals.length - 2e3);
+    if (k === "post-only" || k === "rate" || k === "nonce" || k === "local" || k === "position") {
+      await this.saidOnce(a, `refusal:${k}`, "info", `SoDEX ${verb} ${c.tag}: ${refusalWords(k)}.`, c);
+      return;
+    }
+    await this.event(a, countsAsFailure(k) ? "error" : "info", `SoDEX ${verb} ${c.tag}: ${refusalWords(k)}.`, c);
+  }
+  /** The Watchdog (owner 2026-11-09): every part that keeps the bot running, checked now. */
+  botHealth(a) {
+    const now = Date.now();
+    const s = a.spec;
+    const ended = FINAL_STATUSES.has(a.status);
+    const w = this.wd.get(a.id);
+    const secs = (ms) => ms < 1e4 ? `${(ms / 1e3).toFixed(1)} s` : ms < 12e4 ? `${Math.round(ms / 1e3)} s` : `${Math.round(ms / 6e4)} min`;
+    const checks = [];
+    const add = (c) => checks.push(c);
+    if (ended) {
+      add({ id: "loop", label: "Bot loop", state: "off", value: "stopped" });
+      return { at: now, checks };
+    }
+    const stepAge = w?.stepAt ? now - w.stepAt : null;
+    add({ id: "loop", label: "Bot loop", state: stepAge === null ? "off" : stepAge < 5e3 ? "ok" : stepAge < 3e4 ? "warn" : "bad", value: stepAge === null ? "starting" : `last step ${secs(stepAge)} ago` });
+    const brake = s.paper ? null : this.host.brake?.(a) ?? null;
+    add({ id: "service", label: "ValueDesk service", state: brake ? "warn" : "ok", value: brake ? `paused: ${brake}` : "running" });
+    const q = this.market.quote(s.symbol);
+    const qAge = q ? now - q.at : null;
+    add({ id: "book", label: "SoDEX price", state: qAge === null ? "bad" : qAge <= BOT_QUOTE_MAX_AGE_MS ? "ok" : "warn", value: qAge === null ? "no price yet" : `${secs(qAge)} old` });
+    if (s.kind === "mm" && s.ref) {
+      const r = this.host.reference?.quote(s.symbol) ?? null;
+      const rAge = r ? now - r.at : null;
+      const still = !!r?.still && rAge !== null && rAge <= REF_MAX_AGE_MS;
+      add({
+        id: "oracle",
+        label: "Oracle price",
+        state: !this.host.reference || rAge === null ? "bad" : rAge <= REF_MAX_AGE_MS ? "ok" : rAge <= REF_GRACE_MS ? "warn" : "bad",
+        value: !this.host.reference ? "not available here" : rAge === null ? "no price yet" : still ? `still market, unchanged ${secs(now - (r.stillSince ?? r.at))}, confirmed ${secs(rAge)} ago` : rAge <= REF_GRACE_MS ? `live, ${secs(rAge)} old` : `feed stale: no price for ${secs(rAge)}`
+      });
+    } else add({ id: "oracle", label: "Oracle price", state: "off", value: "not used by this bot" });
+    if (!s.paper) {
+      const follows = this.market.followsOrders?.(a.owner) ?? true;
+      const lag = w?.lagMs ?? null;
+      const fl = w?.fillLagMs ?? null;
+      add({ id: "fills", label: "Fills booked", state: fl === null ? "off" : fl <= 1e3 ? "ok" : fl <= 5e3 ? "warn" : "bad", value: fl === null ? "no fill yet" : `${Math.round(fl)} ms after the trade` });
+      add({ id: "orders", label: "Order updates", state: !follows ? "warn" : lag !== null && lag > 3e3 ? "warn" : "ok", value: `${follows ? "live from SoDEX" : "read every few seconds (live slots full)"}${lag !== null ? `, ${Math.round(lag)} ms late` : ""}` });
+      const matched = typeof a.k.posOkAt === "number" ? a.k.posOkAt : null;
+      add({ id: "position", label: "Holding = SoDEX", state: matched === null ? "off" : now - matched < 3 * BOT_POSITION_CHECK_MS ? "ok" : "warn", value: matched === null ? "first check within a minute" : `matched ${secs(now - matched)} ago` });
+      const key2 = this.host.keyExpiresAt?.(a.owner) ?? null;
+      const left = key2 !== null ? key2 - now : null;
+      add({ id: "key", label: "Trading key", state: left === null ? "off" : left <= 0 ? "bad" : left < 14 * 864e5 ? "warn" : "ok", value: left === null ? "not known" : left <= 0 ? "expired" : `${Math.max(1, Math.floor(left / 864e5))} days left` });
+      const hour = (w?.refusals ?? []).filter((x) => x[0] >= now - 36e5);
+      const bad = hour.filter((x) => countsAsFailure(x[1])).length;
+      const handled = hour.length - bad;
+      add({ id: "refusals", label: "SoDEX refusals (1 h)", state: bad > 0 ? "warn" : "ok", value: hour.length ? `${handled} handled${bad ? `, ${bad} unexpected` : ""}` : "none" });
+    }
+    if (a.status === "waiting" || (a.statusReason ?? "").startsWith("Held")) add({ id: "hold", label: "Quoting", state: "warn", value: a.statusReason ?? "waiting" });
+    else if (a.status === "running") add({ id: "hold", label: "Quoting", state: "ok", value: a.k.closing ? "closing what it holds" : "quoting" });
+    else add({ id: "hold", label: "Quoting", state: "off", value: a.status === "paused" ? "paused by you" : a.status });
+    return { at: now, checks };
+  }
   botView(a) {
     const b = a.book ?? emptyBook();
     const q = this.market.quote(a.spec.symbol);
@@ -16754,6 +16923,8 @@ var AlgoRuntime = class {
         const m = this.markets.get(a.spec.symbol);
         return m && px2 > 0 ? minChildQty(m, px2) * px2 : null;
       })(),
+      matchedAt: typeof a.k.posOkAt === "number" ? a.k.posOkAt : null,
+      health: this.botHealth(a),
       orders: this.live(a).filter((c) => c.tif !== "ioc" && !c.cancelling).map((c) => ({ side: c.side, price: c.price, quantity: c.quantity - c.filled, tag: c.tag })),
       closing: !!a.k.closing,
       ...b.takers ? { takers: { ...b.takers } } : {}
@@ -16790,7 +16961,7 @@ var AlgoRuntime = class {
         this.host.log.error("algo: a step failed", { algo: a.id, error: String(e) });
         await this.event(a, "error", `Step failed: ${e instanceof Error ? e.message : String(e)}`).catch(() => {
         });
-      }).finally(() => this.busy.delete(a.id));
+      }).finally(() => this.stepDone(a));
     }
     void this.pollOrders(now).catch((e) => this.host.log.warn("algo: order poll failed", { error: String(e) }));
   }
@@ -16809,6 +16980,7 @@ var AlgoRuntime = class {
   }
   async step(a, now) {
     const s = a.spec;
+    if (s.bot) this.wdOf(a.id).stepAt = now;
     const m = this.markets.get(s.symbol);
     if (!m) {
       if (this.markets.size) await this.endBot(a, "failed", `${s.symbol} is no longer listed on SoDEX perps.`);
@@ -17262,7 +17434,7 @@ var AlgoRuntime = class {
     a.k.keyWarned = at;
     this.dirty.add(a.id);
     const text = `The trading key expires at ${utcWords(at)}: renew it. Its quotes are pulled and nothing new opens; a close of what it holds still goes out until then.`;
-    await this.event(a, "error", text);
+    await this.event(a, a.spec.bot ? "info" : "error", text);
     try {
       this.host.onNotice?.({ id: `algo:${a.id}:key-expiry:${at}`, owner: a.owner, source: "algo", ref: a.id, kind: "key-expiry", grade: "warn", title: `${algoName(a)}: the trading key expires soon`, body: text, at: Date.now(), paper: !!a.spec.paper });
     } catch (e) {
@@ -17323,12 +17495,18 @@ var AlgoRuntime = class {
     if (now - Number(a.k.posCheckAt ?? 0) < BOT_POSITION_CHECK_MS) return;
     if (this.live(a).some((c) => c.state !== "open" || c.cancelling) || now - Number(a.k.lastFillAt ?? 0) < 5e3) return;
     a.k.posCheckAt = now;
-    const inv = bookInventory(a.book);
+    let inv = bookInventory(a.book);
     const pos = await this.positionConfirmed(a, a.spec.symbol);
     if (pos === null || pos === "disagree") return;
     const step = Number(m.stepSize);
+    if (Math.abs(pos - inv) >= step / 2) {
+      await this.reconcileOwnFills(a, m);
+      inv = bookInventory(a.book);
+    }
     if (Math.abs(pos - inv) < step / 2) {
       delete a.k.outsideSaid;
+      a.k.posOkAt = now;
+      this.dirty.add(a.id);
       return;
     }
     const same = Math.sign(pos) === Math.sign(inv) || Math.abs(pos) < step / 2;
@@ -17348,6 +17526,27 @@ var AlgoRuntime = class {
       a.k.outsideSaid = true;
       this.dirty.add(a.id);
       await this.event(a, "info", `Your ${m.name} position (${dec3(pos)} ${m.base}) is more than this bot holds (${dec3(inv)}): the rest is yours, and the bot manages only its own part.`);
+    }
+  }
+  /** SoDEX's trades of the bot's children (those it still keeps), booked where they show more than it has. */
+  async reconcileOwnFills(a, m) {
+    if (!a.children.length) return;
+    const since = Math.min(...a.children.map((c) => c.placedAt)) - EXITS_FILLS_SLACK_MS;
+    let fills;
+    try {
+      fills = await this.host.sodex.fills(a.owner, m.name, since);
+    } catch (e) {
+      this.host.log.warn("algo: fills read for the position check failed", { algo: a.id, error: String(e) });
+      return;
+    }
+    for (const c of a.children) {
+      const own = fills.filter((f) => f.clOrdID === c.clOrdID);
+      if (!own.length) continue;
+      const qty2 = own.reduce((x, f) => x + f.qty, 0);
+      if (qty2 > c.filled + 1e-12) {
+        this.applyFill(a, c, Math.min(qty2, c.quantity), own.reduce((x, f) => x + f.qty * f.price, 0), null);
+        await this.event(a, "info", `SoDEX's trades show ${c.tag} filled ${dec3(c.filled)}: booked (its update had not come).`, c);
+      }
     }
   }
   /**
@@ -17579,8 +17778,11 @@ var AlgoRuntime = class {
     const tick = Number(m.tickSize);
     const fair = s.ref ? this.fairFor(s.symbol, q, now) : null;
     if (s.ref && fair === null) {
+      if (now - (this.fairAt.get(s.symbol) ?? -Infinity) < REF_GRACE_MS) return;
       await this.pullResting(a);
-      return this.hold(a, this.host.reference ? "Held: waiting for the Binance price (it quotes only with a fresh one)." : "Held: the Binance-led maker runs on the ValueDesk executor only.");
+      const r = this.host.reference?.quote(s.symbol) ?? null;
+      const age = r ? Math.round((now - r.at) / 1e3) : null;
+      return this.hold(a, this.host.reference ? `Held: the oracle feed is stale${age !== null ? ` (no fresh price for ${age} s)` : " (no price yet)"}; it quotes again once one comes.` : "Held: the oracle maker runs on the ValueDesk executor only.");
     }
     const ago = (s.moveGuard ?? 0) > 0 ? this.market.priceAgo(s.symbol, "mid", 2e3) : null;
     const moved = ago ? (mid(q) - ago) / tick : 0;
@@ -18661,7 +18863,10 @@ var AlgoRuntime = class {
           a.k.levBack = back;
           a.k.levRetryAt = Date.now() + back;
           const why = e instanceof Error ? e.message : String(e);
-          await this.event(a, "error", `Leverage not set: ${why}`);
+          if (s.bot) {
+            this.host.log.warn("bot: leverage not set", { algo: a.id, symbol: m.name, error: why });
+            await this.event(a, "info", `Leverage not set yet (${refusalWords(refusalKind(why))}); asked again in ${Math.round(back / 6e4)} min.`);
+          } else await this.event(a, "error", `Leverage not set: ${why}`);
           return why;
         }
       );
@@ -18748,14 +18953,15 @@ var AlgoRuntime = class {
         if (a.k.failRounds) delete a.k.failRounds;
       } else if (r.outcomeUnknown) {
         if (c.state === "sending") c.state = "unknown";
-        await this.event(a, "error", `No answer from SoDEX for ${c.tag}; checking what happened (never re-sent).`, c);
+        await this.event(a, s.bot ? "info" : "error", `No answer from SoDEX for ${c.tag} yet; checking what happened (never re-sent).`, c);
       } else {
         c.state = "done";
         c.cancelling = false;
         a.rejects++;
         this.lastRefusal.set(a.id, r.error ?? "");
         this.refusalSeen(a, c, r.error ?? "");
-        await this.event(a, "error", s.bot ? `SoDEX refused ${c.tag}: ${refusalWords(refusalKind(r.error))}.` : `SoDEX refused ${c.tag}: ${r.error}`, c);
+        if (s.bot) await this.botRefusalEvent(a, c, "refused", r.error ?? "");
+        else await this.event(a, "error", `SoDEX refused ${c.tag}: ${r.error}`, c);
         this.botRefused(a, c, r.error ?? "");
         limit ??= limitRefusal(r.error, m.name);
       }
@@ -18960,10 +19166,16 @@ var AlgoRuntime = class {
       return;
     }
     try {
-      await sink.cancel(a, m, open.map((c) => c.clOrdID));
+      const gone = await sink.cancel(a, m, open.map((c) => c.clOrdID));
+      if (Array.isArray(gone) && gone.length) await this.saidGone(a, open.filter((c) => gone.includes(c.clOrdID)));
     } catch (e) {
+      const said2 = e instanceof Error ? e.message : String(e);
+      if (GONE.test(said2)) {
+        await this.saidGone(a, open);
+        return;
+      }
       for (const c of open) c.cancelling = false;
-      await this.event(a, "error", `Cancel failed: ${e instanceof Error ? e.message : String(e)}`);
+      await this.event(a, "error", `Cancel failed: ${said2}`);
     }
   }
   /** A live bot with quotes of its own on the book. Not while it closes what it holds: that order only protects, as a stop does (brake.ts). */
@@ -19027,7 +19239,17 @@ var AlgoRuntime = class {
     }
     const before = a.filled;
     const was = c.state;
+    const grew = u.filledQty > c.filled + 1e-12;
+    if (a.spec.bot && u.at > 0) {
+      const lag = Math.max(0, Date.now() - u.at);
+      if (lag < 12e4) {
+        const w = this.wdOf(a.id);
+        w.lagMs = w.lagMs === null ? lag : w.lagMs * 0.8 + lag * 0.2;
+      }
+      if (grew) this.fillLag(a, Date.now() - u.at);
+    }
     this.applyFill(a, c, u.filledQty, u.filledValue, u.maker);
+    if (a.spec.bot) this.stepSoon(a);
     if (a.filled > before && a.k.limitHits) delete a.k.limitHits;
     if (a.filled > before && FINAL_STATUSES.has(a.status) && a.spec.exits) {
       const m = this.markets.get(a.spec.symbol);
@@ -19050,7 +19272,8 @@ var AlgoRuntime = class {
       if (u.status === "REJECTED" && was !== "done") {
         a.rejects++;
         this.refusalSeen(a, c, u.reason ?? "");
-        void this.event(a, "error", a.spec.bot ? `SoDEX rejected ${c.tag}: ${refusalWords(refusalKind(u.reason))}.` : `SoDEX rejected ${c.tag}${u.reason ? `: ${u.reason}` : ""}.`, c);
+        if (a.spec.bot) void this.botRefusalEvent(a, c, "rejected", u.reason ?? "");
+        else void this.event(a, "error", `SoDEX rejected ${c.tag}${u.reason ? `: ${u.reason}` : ""}.`, c);
         if (Number(a.k.consecRejects ?? 0) >= MAX_CONSEC_REJECTS && a.spec.bot && !a.k.closing) void this.tooManyRefusals(a);
         const lim = limitRefusal(u.reason, a.spec.symbol);
         if (lim) void this.onLimit(a, lim);
@@ -19487,6 +19710,7 @@ var AlgoRuntime = class {
   }
   onPrint(p) {
     const taker = p.taker === "buy" ? p.buyer : p.seller;
+    this.bookOwnPrint(p, taker);
     const follows = this.market.followsOrders?.bind(this.market);
     if (follows) {
       for (const a of this.algos.values()) {
@@ -19536,6 +19760,31 @@ var AlgoRuntime = class {
       }
     }
     if (this.paper.size) this.paperOnPrint(p);
+  }
+  /**
+   * A public print naming a bot's account as the MAKER at the price of exactly one of its resting quotes on that side:
+   * that quote filled, so it is booked now (owner 2026-11-09: the inventory must be SoDEX's at all times). The order
+   * update that follows carries the same cumulative size and adds nothing (applyFill only adds above what is booked).
+   * Without this the bot booked the fill only when the update came - up to seconds later for a wallet read by REST -
+   * and meanwhile re-priced and cancelled a quote that had already filled ("OrderNotFound", KORU). Two of its quotes at
+   * that price and side (never with distinct ladder prices): nothing is guessed, the update books it.
+   */
+  bookOwnPrint(p, taker) {
+    for (const a of this.algos.values()) {
+      if (!a.spec.bot || a.spec.paper || a.spec.symbol !== p.symbol || FINAL_STATUSES.has(a.status) || a.startedAt === null || p.at < a.startedAt) continue;
+      if (taker === a.accountId || p.buyer !== a.accountId && p.seller !== a.accountId) continue;
+      const side = p.buyer === a.accountId ? "buy" : "sell";
+      const m = this.markets.get(p.symbol);
+      const tick = m ? Number(m.tickSize) : 0;
+      const at = a.children.filter((c2) => LIVE.has(c2.state) && c2.side === side && c2.tif !== "ioc" && Math.abs(c2.price - p.price) <= tick / 2 + 1e-12 && c2.filled < c2.quantity - 1e-12);
+      if (at.length !== 1) continue;
+      const c = at[0];
+      const cum = Math.min(c.quantity, c.filled + p.qty);
+      this.applyFill(a, c, cum, c.value + (cum - c.filled) * p.price, true);
+      if (p.at > 0) this.fillLag(a, Date.now() - p.at);
+      if (cum >= c.quantity - 1e-12) c.cancelling = true;
+      this.dirty.add(a.id);
+    }
   }
   /** BotBook.takers: one fill's USD to the taker that took it. */
   countTaker(a, taker, usd2) {
@@ -20661,6 +20910,7 @@ var COPY_ENGINE_VERSION = "1.1.0";
 
 // src/latency.ts
 var LATENCY_BUCKET_MS = 6e5;
+var LATENCY_NOW_MS = 6e4;
 var LATENCY_KEEP_MS = 48 * 36e5;
 var KINDS = ["place", "cancel"];
 var accountLogId = (regionId, accountId, symbolId) => symbolId ? `${regionId}:${accountId}:${symbolId}` : `${regionId}:${accountId}`;
@@ -20888,8 +21138,12 @@ var WriteLatency = class {
         const all = b ? new Hist().merge(b.place).merge(b.cancel) : new Hist();
         buckets.push({ t, n: all.n, p50: all.quantile(0.5), p95: all.quantile(0.95), p99: all.quantile(0.99) });
       }
-      const recent = new Hist();
-      for (const s of log.recent) if (s.at > at - LATENCY_BUCKET_MS) recent.add(s.ms);
+      let recent = new Hist();
+      for (const s of log.recent) if (s.at > at - LATENCY_NOW_MS) recent.add(s.ms);
+      if (recent.n < 5) {
+        recent = new Hist();
+        for (const s of log.recent) if (s.at > at - LATENCY_BUCKET_MS) recent.add(s.ms);
+      }
       const hour = emptyBucket();
       for (const [t, b] of log.buckets) {
         if (t + LATENCY_BUCKET_MS <= at - 36e5) continue;
@@ -21120,7 +21374,7 @@ function classifyRejection(error) {
   if (/post[- _]?only|would (immediately )?(take|cross|match|trade)|immediately (match|execute)|maker only/i.test(e)) return "post-only";
   if (/nonce/i.test(e)) return "nonce";
   if (/HTTP 429|error code:?\s*1015/i.test(e)) return "ip-rate";
-  if (/position not found|no (open )?position|order (not found|never placed)|already (filled|canceled|cancelled|closed)|unknown order/i.test(e)) return "gone";
+  if (/position not found|no (open )?position|order ?(not ?found|never placed)|already (filled|canceled|cancelled|closed)|unknown order/i.test(e)) return "gone";
   if (/cannot (update|change) margin mode|margin mode[^.]*open position/i.test(e)) return "gone";
   if (/api[\s_-]?key[^.]*(not found|invalid|expired|revoked|unknown)|key not found|unknown api key|no (copy|trading) key|signature (rejected|invalid|mismatch|verification)|invalid signature|unauthori[sz]ed|trading key has expired/i.test(e)) return "key";
   if (/insufficient|not enough (margin|balance|collateral|funds)|margin (is )?(insufficient|not enough)|available (balance|margin)/i.test(e)) return "margin";
@@ -21336,7 +21590,9 @@ var LABEL = {
   "audit-broken": "AUDIT CHAIN BROKEN",
   "queue-slow": "CLOSES AND STOPS WAITING",
   "vip-move-unknown": "VIP MOVE NOT CONFIRMED",
-  "vip-key-mismatch": "VIP KEY DOES NOT MATCH"
+  "vip-key-mismatch": "VIP KEY DOES NOT MATCH",
+  "bot-health": "BOT UNHEALTHY (our side)",
+  "bot-health-ok": "Bot healthy again"
 };
 var LABELS = {
   maintenance: "\u{1F527} MAINTENANCE",
@@ -21361,7 +21617,9 @@ var CLASS = {
   "audit-broken": "failure",
   "queue-slow": "failure",
   "vip-move-unknown": "failure",
-  "vip-key-mismatch": "failure"
+  "vip-key-mismatch": "failure",
+  "bot-health": "failure",
+  "bot-health-ok": "recovered"
 };
 var head = (c, what) => `${LABELS[c]} \xB7 ${what}`;
 var shortWallet = (a) => /^0x[0-9a-fA-F]{40}$/.test(a) ? `${a.slice(0, 6)}\u2026${a.slice(-4)}` : a;
@@ -21781,9 +22039,9 @@ import { existsSync as existsSync4 } from "node:fs";
 var POLL_MS = 2;
 var FALLBACK_AFTER_MS = 500;
 var RETURN_AFTER_MS = 3e3;
-var CONFIRM_AFTER_MS = 1200;
-var CONFIRM_EVERY_MS = 1e3;
-var CONFIRM_MAX = 8;
+var CONFIRM_AFTER_MS = 600;
+var CONFIRM_EVERY_MS = 250;
+var CONFIRM_MAX = 6;
 var BINANCE_FAPI = "https://fapi.binance.com";
 var binanceSymbolOf = (market) => {
   const m = /^([A-Z0-9]+)-USD$/.exec(market);
@@ -21807,7 +22065,8 @@ var BinanceReference = class {
   poller = null;
   checker = null;
   confirmer = null;
-  confirming = false;
+  /** Markets with a confirm on the way (one at a time each). */
+  confirming = /* @__PURE__ */ new Set();
   /** For the status line: ticks from the ring and from the own sockets. */
   stats = { ring: 0, own: 0, lost: 0, confirmed: 0 };
   watch(markets) {
@@ -21854,31 +22113,31 @@ var BinanceReference = class {
    */
   async confirmStill(now = Date.now()) {
     const f = this.o.fetch;
-    if (!f || this.confirming || !this.watched.size) return 0;
-    const still = [...this.watched].map((m) => ({ m, at: this.quotes.get(m)?.at ?? 0 })).filter((x) => now - x.at >= CONFIRM_AFTER_MS).sort((a, b) => a.at - b.at).slice(0, CONFIRM_MAX);
+    if (!f || !this.watched.size) return 0;
+    const still = [...this.watched].filter((m) => !this.confirming.has(m)).map((m) => ({ m, at: this.quotes.get(m)?.at ?? 0 })).filter((x) => now - x.at >= CONFIRM_AFTER_MS).sort((a, b) => a.at - b.at).slice(0, Math.max(0, CONFIRM_MAX - this.confirming.size));
     if (!still.length) return 0;
-    this.confirming = true;
     let n = 0;
-    try {
-      await Promise.all(still.map(async ({ m }) => {
-        const sym = binanceSymbolOf(m);
-        if (!sym) return;
-        try {
-          const r = await f(`${BINANCE_FAPI}/fapi/v1/ticker/bookTicker?symbol=${sym}`, { signal: AbortSignal.timeout(1500) });
-          if (!r.ok) return;
-          const j = await r.json();
-          const bid = Number(j?.bidPrice);
-          const ask = Number(j?.askPrice);
-          if (!(bid > 0) || !(ask > 0) || ask < bid) return;
-          this.set(m, { bid, ask, at: Date.now() });
-          this.stats.confirmed++;
-          n++;
-        } catch {
-        }
-      }));
-    } finally {
-      this.confirming = false;
-    }
+    await Promise.all(still.map(async ({ m }) => {
+      const sym = binanceSymbolOf(m);
+      if (!sym) return;
+      this.confirming.add(m);
+      try {
+        const r = await f(`${BINANCE_FAPI}/fapi/v1/ticker/bookTicker?symbol=${sym}`, { signal: AbortSignal.timeout(1500) });
+        if (!r.ok) return;
+        const j = await r.json();
+        const bid = Number(j?.bidPrice);
+        const ask = Number(j?.askPrice);
+        if (!(bid > 0) || !(ask > 0) || ask < bid) return;
+        const prev = this.quotes.get(m);
+        const still2 = !!prev && prev.bid === bid && prev.ask === ask;
+        this.set(m, { bid, ask, at: Date.now(), still: still2, ...still2 ? { stillSince: prev.stillSince ?? prev.at } : {} });
+        this.stats.confirmed++;
+        n++;
+      } catch {
+      } finally {
+        this.confirming.delete(m);
+      }
+    }));
     return n;
   }
   /** Every tick the ring has for a watched market, into the quotes (and the listeners). */
@@ -22430,6 +22689,7 @@ var ExecutorService = class {
     this.signerSweep ??= setInterval(() => {
       this.sweepSigners();
       this.warnKeyExpiry();
+      this.watchBotHealth();
       if (this.canMoveBack() && Date.now() - this.vipSweepAt >= (this.cfg.vipSweepMs ?? VIP_SWEEP_MS)) {
         this.vipSweepAt = Date.now();
         void this.sweepVip().catch((e) => this.deps.log.warn("vip: sweep failed", { error: String(e) }));
@@ -23350,6 +23610,45 @@ var ExecutorService = class {
   }
   keyWarned = /* @__PURE__ */ new Map();
   /**
+   * The operator's alerts for what is ours to fix (owner 2026-11-09), never the user's: every 30 s each running real
+   * bot's Watchdog (runtime botHealth) is read, and a check on our side - its loop, SoDEX's or the oracle's price, the
+   * order updates, how late fills are booked, refusals nothing handles - that is bad on two sweeps in a row (30 s+)
+   * raises a 🚨 FAILURE with the bot, the check and its figure; a 'recovered' follows when it is good again. The user's
+   * own matters (the key, margin, a hold they chose, a pause) never alert. The alerts' own dedupe holds repeats.
+   */
+  watchBotHealth(now = Date.now()) {
+    const OURS = /* @__PURE__ */ new Set(["loop", "book", "oracle", "orders", "fills", "refusals"]);
+    const seen = /* @__PURE__ */ new Set();
+    for (const a of this.algos.list()) {
+      if (a.spec?.bot !== true || a.spec.paper || FINAL_STATUSES.has(a.status) || a.status === "paused") continue;
+      const h = this.algos.view(a.id)?.bot?.health;
+      if (!h) continue;
+      for (const c of h.checks) {
+        if (!OURS.has(c.id)) continue;
+        const key2 = `${a.id}|${c.id}`;
+        const bad = c.state === "bad" || c.id === "refusals" && c.state === "warn";
+        if (bad) {
+          seen.add(key2);
+          const since = this.healthBad.get(key2);
+          if (since === void 0) this.healthBad.set(key2, { at: now, said: false });
+          else if (!since.said && now - since.at >= 25e3) {
+            since.said = true;
+            this.deps.alerts?.raise("bot-health", `bot:${a.id}:${c.id}`, `${a.spec.symbol} bot ${a.id} of ${shortWallet(a.owner)}: ${c.label} - ${c.value} (for ${Math.round((now - since.at) / 1e3)} s).`);
+          }
+        }
+      }
+    }
+    for (const [key2, v] of this.healthBad) {
+      if (seen.has(key2)) continue;
+      this.healthBad.delete(key2);
+      if (v.said) {
+        const [id, check] = key2.split("|");
+        this.deps.alerts?.raise("bot-health-ok", `bot:${id}:${check}`, `Bot ${id}: ${check} is healthy again.`);
+      }
+    }
+  }
+  healthBad = /* @__PURE__ */ new Map();
+  /**
    * The wallet's own SoDEX maker fee in bp (GET /perps/accounts/{a}/fee-rate, weight 2), for the engine's booked
    * fees: the last answer (sync), read again in the background after MAKER_FEE_TTL_MS. null until the first answer.
    */
@@ -24028,6 +24327,13 @@ var ExecutorService = class {
 // src/server.ts
 var BODY_LIMIT = 64 * 1024;
 var PREFIX = "/api/copy/v1";
+function liveSig(v) {
+  const b = v.bot;
+  return JSON.stringify([v.algo.status, v.algo.statusReason, v.algo.filled, v.working ?? null, b ? [b.volume, b.netPnl, b.inventory, b.fills, b.closing, b.mark, b.matchedAt, b.orders, b.health?.checks?.map((c) => `${c.state}:${c.value}`)] : null]);
+}
+var STREAMS_PER_OWNER = 4;
+var STREAM_EVERY_MS = 250;
+var STREAM_KEEPALIVE_MS = 15e3;
 function withoutSeries(views) {
   return views.map((v) => v.algo.book ? { ...v, algo: { ...v.algo, book: { ...v.algo.book, series: [] } } } : v);
 }
@@ -24163,6 +24469,7 @@ function createExecutorServer(svc, cfg, log) {
       if (req.headers["access-control-request-private-network"] === "true") res.setHeader("Access-Control-Allow-Private-Network", "true");
     }
   };
+  const streams = /* @__PURE__ */ new Map();
   const send = (res, status, body) => {
     const text = JSON.stringify(body);
     res.writeHead(status, {
@@ -24256,6 +24563,48 @@ function createExecutorServer(svc, cfg, log) {
       }
       if (req.method === "GET" && route === "/me") return send(res, 200, svc.me(svc.authenticate(bearer(req)), ctx));
       if (req.method === "GET" && route === "/consents") return send(res, 200, { consents: svc.consents(svc.authenticate(bearer(req))) });
+      if (req.method === "GET" && route === "/algos/stream") {
+        const owner = svc.authenticate(bearer(req));
+        const open = streams.get(owner) ?? 0;
+        if (open >= STREAMS_PER_OWNER) throw new ApiError(429, "streams", "Too many live streams for this wallet; close a tab.");
+        streams.set(owner, open + 1);
+        res.writeHead(200, { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-store, no-transform", Connection: "keep-alive", "X-Accel-Buffering": "no", "X-Content-Type-Options": "nosniff" });
+        const sigs = /* @__PURE__ */ new Map();
+        const push = () => {
+          try {
+            const views = withoutSeries(svc.algoList(owner));
+            const changed = views.filter((v) => {
+              const s = liveSig(v);
+              if (sigs.get(v.algo.id) === s) return false;
+              sigs.set(v.algo.id, s);
+              return true;
+            });
+            const gone = [...sigs.keys()].filter((id) => !views.some((v) => v.algo.id === id));
+            for (const id of gone) sigs.delete(id);
+            if (changed.length || gone.length) res.write(`data: ${JSON.stringify({ at: Date.now(), algos: changed, gone })}
+
+`);
+          } catch (e) {
+            res.write(`event: error
+data: ${JSON.stringify({ error: e instanceof ApiError ? e.code : "error" })}
+
+`);
+          }
+        };
+        push();
+        const tick = setInterval(push, STREAM_EVERY_MS);
+        const alive2 = setInterval(() => res.write(": keep-alive\n\n"), STREAM_KEEPALIVE_MS);
+        const close = () => {
+          clearInterval(tick);
+          clearInterval(alive2);
+          const n = (streams.get(owner) ?? 1) - 1;
+          if (n > 0) streams.set(owner, n);
+          else streams.delete(owner);
+        };
+        req.on("close", close);
+        res.on("error", close);
+        return;
+      }
       if (req.method === "GET" && route === "/algos") {
         const algos = svc.algoList(svc.authenticate(bearer(req)));
         if (url.searchParams.get("series") === "0") return send(res, 200, { algos: withoutSeries(algos), noSeries: true });
