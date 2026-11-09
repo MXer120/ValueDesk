@@ -312,7 +312,8 @@ test('checkpoint thread: no full checkpoint while the passive run left more than
     await until('thread up', () => store.checkpointStatus?.running === true);
     let i = 0;
     const start = Date.now();
-    while (Date.now() - start < 2_000) {
+    // At least 2 s and 6 passive runs (15 s at most): a loaded CI runner managed fewer than 6 in 2 s (v0.2.205 CI).
+    while (Date.now() - start < 2_000 || (store.checkpointStatus!.runs <= 5 && Date.now() - start < 15_000)) {
       store.putFills(Array.from({ length: 150 }, () => fill(i++)));
       await new Promise((r) => setImmediate(r));
     }
