@@ -1650,3 +1650,32 @@ tr.bots-row.is-blocked:hover, .bots-table tbody tr.bots-row.is-blocked:hover { b
   .bots-rg__ctl { justify-content: flex-start; width: 100%; }
   .bots-rg__pick { flex: 1 1 auto; }
 }
+
+/* Market map: settings bar, zoomable viewport, colour keys */
+.bots-mm__bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
+.bots-mm__set { display: inline-flex; align-items: center; gap: 8px; }
+.bots-mm__set > span { font-size: 11px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--dim); }
+.bots-mm__sp { flex: 1; }
+.bots-mm__zoom { display: inline-flex; align-items: center; height: 32px; padding: 2px; border-radius: 9999px; background: rgb(var(--ink) / 0.05); }
+.bots-mm__zoom button { height: 28px; min-width: 28px; padding: 0 9px; border: 0; border-radius: 9999px; background: none; color: var(--text); font: inherit; font-size: 15px; font-weight: 500; cursor: pointer; }
+.bots-mm__zoom button:hover:not(:disabled) { background: rgb(var(--ink) / 0.08); }
+.bots-mm__zoom button:disabled { opacity: 0.35; cursor: default; }
+.bots-mm__zoom button.is-reset { font-size: 12.5px; color: var(--dim); }
+.bots-mm__zoom > span { min-width: 34px; text-align: center; font-family: var(--font-num); font-size: 12px; color: var(--dim); }
+.bots-mm__vp { position: relative; width: 100%; overflow: hidden; border-radius: 10px; overscroll-behavior: contain; }
+.bots-mm__vp.is-zoomed { overflow: auto; cursor: grab; scrollbar-width: thin; }
+.bots-mm__vp.is-zoomed:active { cursor: grabbing; }
+.bots-mm__vp .bots-mm__map { border-radius: 0; overflow: visible; }
+.bots-mm__t.is-empty { background-image: repeating-linear-gradient(45deg, rgb(var(--ink) / 0.02) 0 4px, rgb(var(--ink) / 0.07) 4px 6px) !important; color: var(--dim); cursor: default; }
+.bots-mm__key i.is-empty { background: repeating-linear-gradient(45deg, rgb(var(--ink) / 0.04) 0 2px, rgb(var(--ink) / 0.16) 2px 3px); }
+.bots-mm__key i.is-u { background: color-mix(in srgb, var(--pos) 75%, transparent); }
+.bots-mm__key i.is-u-lo { background: color-mix(in srgb, var(--pos) 15%, rgb(var(--ink) / 0.06)); }
+.bots-mm__key i.is-f { background: color-mix(in srgb, var(--neg) 75%, transparent); }
+.bots-mm__key i.is-f-lo { background: color-mix(in srgb, var(--neg) 15%, rgb(var(--ink) / 0.06)); }
+.bots-mm__key i.is-v { background: color-mix(in srgb, var(--warn) 70%, transparent); }
+.bots-mm__key i.is-v-lo { background: color-mix(in srgb, var(--warn) 15%, rgb(var(--ink) / 0.06)); }
+@media (max-width: 700px) {
+  .bots-mm__bar { gap: 8px; }
+  .bots-mm__set { flex-wrap: wrap; }
+  .bots-mm__sp { display: none; }
+}

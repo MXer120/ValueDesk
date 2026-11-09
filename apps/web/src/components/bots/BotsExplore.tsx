@@ -226,6 +226,15 @@ export function BotsExplore({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
   const costOf = (m: BotMarket) => rows.get(m.symbol)?.bp ?? m.estCostBps;
   const scoreOf = useCallback((m: BotMarket) => rows.get(m.symbol)?.bp ?? m.estCostBps, [rows]);
   // The recorder's held hours in this window: the most any market holds (null: a server that does not say).
+  // The map shows every market, whatever the list's filters: the window's, and the 7 d list's that did not trade in it
+  // (owner 2026-11-10: "all markets displayed in every timeframe").
+  const week = useBotMarkets('7d', win !== '7d');
+  const mapMarkets = r.data?.markets ?? [];
+  const absent = useMemo(() => {
+    if (win === '7d' || !r.data) return [];
+    const have = new Set(r.data.markets.map((m) => m.symbol));
+    return (week.data?.markets ?? []).filter((m) => !have.has(m.symbol)).map((m) => ({ symbol: m.symbol, base: m.base }));
+  }, [win, r.data, week.data]);
   const heldH = useMemo(() => { const xs = (r.data?.markets ?? []).map((m) => m.heldH).filter((x): x is number => typeof x === 'number'); return xs.length ? Math.max(...xs) : null; }, [r.data]);
   const windowPick = <Segmented value={win} label="Window" onChange={setWin} options={[{ value: '1h', label: '1h' }, { value: '6h', label: '6h' }, { value: '24h', label: '24h' }, { value: '7d', label: '7d' }]} />;
   const openRow = (symbol: string) => {
@@ -263,7 +272,7 @@ export function BotsExplore({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
         <ShellHeader
           icon="grid"
           title="Market map"
-          subtitle={`Every market by activity, coloured by ${pick === 'best' ? 'its best bot' : pickName}'s cost per $1M`}
+          subtitle={`Every market in the window; the score is ${pick === 'best' ? 'its best bot' : pickName}'s cost per $1M`}
           aside={windowPick}
         />
         <Panel className="bots-mm__panel">
@@ -274,7 +283,7 @@ export function BotsExplore({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
           ) : (
             <>
               <Coverage window={win} heldH={heldH} />
-              {list.length ? <MarketMap markets={list} scoreOf={scoreOf} feeBps={feeBps} window={win} onOpen={openRow} /> : <EmptyState compact icon="search" title="No market matches" description="Loosen the filters below." />}
+              {mapMarkets.length || absent.length ? <MarketMap markets={mapMarkets} absent={absent} scoreOf={scoreOf} feeBps={feeBps} window={win} onOpen={openRow} /> : <EmptyState compact icon="search" title="No market traded" description="Nothing was recorded in this window." />}
             </>
           )}
         </Panel>
