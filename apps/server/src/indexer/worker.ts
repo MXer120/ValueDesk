@@ -85,7 +85,8 @@ export function runIndexer(path = defaultDbPath()): Running {
       // Still `stopping`: the process is about to end, and the next start replaces the row at once.
       publish();
       lap('status published');
-      store.close(lap);
+      // Both callers end the process right after: the connection is left open, no checkpoint of the WAL on the way out.
+      store.close(lap, { exiting: true });
       lap.done();
     },
   };

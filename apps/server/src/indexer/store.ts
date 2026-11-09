@@ -62,7 +62,7 @@
  * `src/indexer/compact.ts` is run once with the indexer stopped.
  */
 import { DatabaseSync, type StatementSync } from 'node:sqlite';
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeSync, writevSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { Checkpointer, type CheckpointStatus } from './checkpointer.js';
 import {
@@ -686,6 +686,8 @@ const HELD_DAY_MAX = 5_000_000;
  * starts. Tied to the scan's own SQL: a release that reads the fills differently starts cold.
  */
 const HELD_FILE = 'held-partial-days.bin';
+/** Arrays per writev call (IOV_MAX on Linux is 1,024). */
+const HELD_IOV = 1_024;
 const HELD_FORMAT = 'held-1|SELECT t, symbol, side, px * sz AS v, closed_pnl, fee, src FROM fills ORDER BY t';
 /** Rows per scan step: a few ms of work. */
 const SCAN_CHUNK = 1_000;
@@ -1012,8 +1014,17 @@ export class IndexStore {
     });
   }
 
-  /** `lap`: called after each step with its name (the stop's timing line, worker.ts). */
-  close(lap: (step: string) => void = () => {}): void {
+  /**
+   * `lap`: called after each step with its name (the stop's timing line, worker.ts).
+   *
+   * `exiting`: the process ends right after (worker.ts), so the connection is left open instead of closed. The stop of
+   * 2026-11-08 22:46 took 351 s, 228 s of it in `database close`: the connection that closes last runs a checkpoint of the
+   * whole WAL into the 50 GB file and deletes the WAL (measured here: a 50 MB WAL 149 ms, the same close with a second
+   * connection open 1 ms). Every committed transaction is in the WAL already, so leaving it is safe: the next start goes on
+   * from it and the checkpoint thread copies it then. A connection left open at a process exit is not closed (no
+   * checkpoint, tested), and the writer thread's, closed as its thread ends, is not the last while this one is open.
+   */
+  close(lap: (step: string) => void = () => {}, o: { exiting?: boolean } = {}): void {
     // Rows the writer thread holds still: written here (the indexer's stop has spilled them already: engine.stop).
     this.stopWriter();
     lap('writer thread');
@@ -1022,6 +1033,10 @@ export class IndexStore {
     lap('checkpoint thread');
     if (!this.readOnly && this.path !== ':memory:') this.saveHeld();
     lap('held rows');
+    if (o.exiting && !this.readOnly && this.path !== ':memory:') {
+      lap('database left open for the exit');
+      return;
+    }
     this.db.close();
     lap('database close');
   }
@@ -1211,9 +1226,24 @@ export class IndexStore {
       len.writeUInt32LE(head.length);
       const fd = openSync(tmp, 'w');
       try {
-        writeSync(fd, len);
-        writeSync(fd, head);
-        for (const [, h] of keep) for (const a of IndexStore.heldArrays(h)) writeSync(fd, a);
+        // Many arrays to a call (writev), not one write each: seven per held day, up to hundreds of thousands of calls.
+        let batch: Uint8Array[] = [len, head];
+        const flush = () => {
+          for (let i = 0; i < batch.length; i += HELD_IOV) {
+            const part = batch.slice(i, i + HELD_IOV);
+            let want = 0;
+            for (const b of part) want += b.byteLength;
+            const n = writevSync(fd, part);
+            // A short write (rare, a full disk): the rest one at a time, which writeSync carries on to the end.
+            if (n < want) writeSync(fd, Buffer.concat(part).subarray(n));
+          }
+          batch = [];
+        };
+        for (const [, h] of keep) {
+          for (const a of IndexStore.heldArrays(h)) if (a.byteLength) batch.push(a);
+          if (batch.length >= HELD_IOV * 64) flush();
+        }
+        flush();
       } finally {
         closeSync(fd);
       }
