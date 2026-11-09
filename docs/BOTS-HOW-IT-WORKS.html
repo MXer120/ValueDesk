@@ -1,0 +1,693 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>ValueDesk Bots: how they work</title>
+<style>
+@page { size: A4; margin: 16mm 15mm 16mm 15mm; }
+:root { --ink:#14171c; --mut:#5b6472; --line:#d9dee5; --soft:#f3f5f8; --blue:#3b6fe0; --green:#1f9d63; --red:#d2453b; --amber:#c98a10; --violet:#7b5cd6; }
+* { box-sizing:border-box; }
+body { font-family:"Segoe UI", system-ui, sans-serif; color:var(--ink); font-size:10.2pt; line-height:1.45; margin:0; }
+h1 { font-size:24pt; margin:0 0 4px; letter-spacing:-.3px; }
+h2 { font-size:15pt; margin:0 0 8px; padding-top:2px; border-bottom:2px solid var(--ink); padding-bottom:4px; }
+h3 { font-size:11.5pt; margin:14px 0 4px; }
+p { margin:4px 0 8px; }
+.sec { break-before:page; }
+.mut { color:var(--mut); }
+table { border-collapse:collapse; width:100%; margin:6px 0 10px; font-size:9.2pt; }
+th, td { border:1px solid var(--line); padding:4px 6px; vertical-align:top; text-align:left; }
+th { background:var(--soft); font-weight:600; }
+td.n, th.n { text-align:right; white-space:nowrap; }
+.box { background:var(--soft); border:1px solid var(--line); border-radius:6px; padding:8px 10px; margin:8px 0; }
+.warn { background:#fff6e6; border-color:#f0d9a8; }
+.pill { display:inline-block; border-radius:10px; padding:0 7px; font-size:8.4pt; font-weight:600; border:1px solid currentColor; }
+.p-g { color:var(--green); } .p-a { color:var(--amber); } .p-r { color:var(--red); } .p-b { color:var(--blue); } .p-v { color:var(--violet); }
+code { font-family:Consolas, monospace; font-size:8.8pt; background:var(--soft); padding:0 3px; border-radius:3px; }
+.formula { font-family:Consolas, monospace; font-size:9.6pt; background:#eef3ff; border:1px solid #cddafc; border-radius:6px; padding:6px 10px; margin:6px 0; }
+svg { display:block; margin:6px auto 10px; max-width:100%; }
+svg text { font-family:"Segoe UI", sans-serif; }
+ul, ol { margin:4px 0 8px; padding-left:20px; } li { margin:2px 0; }
+.cols { display:flex; gap:12px; } .cols > div { flex:1; }
+.toc li { margin:1px 0; }
+.cap { font-size:8.6pt; color:var(--mut); text-align:center; margin-top:-6px; margin-bottom:10px; }
+</style></head><body>
+
+<!-- ============================================================ COVER -->
+<h1>ValueDesk Bots</h1>
+<p style="font-size:12pt;margin:0 0 2px">How they work, every part, with the exact numbers in the code</p>
+<p class="mut">Branch <code>feat/bots</code> (commits up to df579f7e), written 2026-11-08 for the owner's review, updated 2026-11-09 with your second round of decisions (section 19 lists every change). Not shipped. Nothing here has run with real money after the audit fixes.</p>
+
+<div class="box">
+<b>How to read this.</b> Every number is read from the code (file in brackets). <span class="pill p-a">Not verified live</span> marks rules that exist in code but were never seen working against SoDEX. Section 18 has your answers from today and what is still open.
+</div>
+
+<h3>Contents</h3>
+<ol class="toc">
+<li>The whole picture: who does what</li>
+<li>Who may run a bot, and every check at start</li>
+<li>The bot types (settings, evidence)</li>
+<li>Sizes, presets and defaults</li>
+<li>The market maker, step by step</li>
+<li>Where a quote goes (price rules)</li>
+<li>Holding cap and unwinding (reduce-only)</li>
+<li>Safeguards (holds)</li>
+<li>The grid</li>
+<li>Limits, leverage and margin</li>
+<li>Stopping, pausing and automatic ends</li>
+<li>Changing a running bot</li>
+<li>Fees</li>
+<li>The numbers on the pages</li>
+<li>Practice bots</li>
+<li>VIP servers and the move</li>
+<li>The pages, screen by screen</li>
+<li>Refusals, notices, and what is still open</li>
+</ol>
+
+<h3>The rules in one page</h3>
+<table>
+<tr><th style="width:32%">Rule</th><th>Exact behaviour</th></tr>
+<tr><td>Post-only by default</td><td>Quotes and grid levels are post-only (maker fee only) unless a bot's Advanced settings switch Order type to Limit (may take, taker fee). The stop's close is the only other taker order (at most 30 bp through the price).</td></tr>
+<tr><td>Bots run on our servers</td><td>The executor trades with your delegated SoDEX trading key. Closing the browser does not stop a bot.</td></tr>
+<tr><td>Loss limit</td><td>Required for real bots. Net PnL after all fees, open position at mark, ≤ −limit → the bot stops and closes. Checked every 500 ms, also while held or paused.</td></tr>
+<tr><td>Holding cap</td><td>Near the cap the adding quote shrinks to exactly what is left (on SoDEX's lot, never past the cap); resting adds past it are pulled and placed again smaller. Under one minimum order left: nothing adds, it only unwinds.</td></tr>
+<tr><td>Unwinding never flips</td><td>The unwinding quote is reduce-only and never larger than what the bot holds.</td></tr>
+<tr><td>Spread limit</td><td>On by default at 20 bp: wider than that → quotes pulled, nothing placed.</td></tr>
+<tr><td>Clean stop</td><td>Post-only close at the best price for 60 s, then a reduce-only taker order within 30 bp.</td></tr>
+<tr><td>Bot fee</td><td>0.3 bp under $100k, 0.2 bp from $100k, 0.1 bp from $500k (14-day volume); VIP 0.1 bp. Plus SoDEX's maker fee (1.2 bp at tier 0).</td></tr>
+<tr><td>Capacity</td><td>20 live real bots per executor, 20 algos per wallet. One real bot per market: none where you hold a position, run another bot, a copy or an algo order.</td></tr>
+<tr><td>Leverage</td><td>Only SoDEX's market maximum caps it. Auto (default): the lowest leverage at which the bot's margin fits your free margin; set by hand, Auto turns off.</td></tr>
+<tr><td>Signatures</td><td>Your wallet signs at most once a day (a day key in this browser signs starts, stops, saves, sign-ins, the VIP move). The terms and the trading key always take the wallet.</td></tr>
+<tr><td>Refusals</td><td>A bot never stops for a refusal it understands (post-only, margin, limits, rate, nonce). 25 unknown refusals in a row: it waits with quotes pulled (1 min doubling to 15); only after 4 rounds does it close what it holds and stop.</td></tr>
+</table>
+
+<!-- ============================================================ 1 -->
+<div class="sec"><h2>1. The whole picture: who does what</h2>
+<svg width="700" height="300" viewBox="0 0 700 300">
+ <defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#14171c"/></marker></defs>
+ <rect x="10" y="20" width="150" height="110" rx="8" fill="#eef3ff" stroke="#3b6fe0"/>
+ <text x="85" y="42" text-anchor="middle" font-weight="700" font-size="13">Your browser</text>
+ <text x="85" y="62" text-anchor="middle" font-size="10">valuedesk.so / Bots</text>
+ <text x="85" y="80" text-anchor="middle" font-size="10">signs instructions</text>
+ <text x="85" y="96" text-anchor="middle" font-size="10">with your wallet</text>
+ <text x="85" y="112" text-anchor="middle" font-size="10">reads bot state</text>
+ <rect x="270" y="20" width="170" height="110" rx="8" fill="#eaf7f0" stroke="#1f9d63"/>
+ <text x="355" y="42" text-anchor="middle" font-weight="700" font-size="13">Executor</text>
+ <text x="355" y="60" text-anchor="middle" font-size="10">standard: server 2, Tokyo</text>
+ <text x="355" y="76" text-anchor="middle" font-size="10">VIP: AWS Tokyo</text>
+ <text x="355" y="94" text-anchor="middle" font-size="10">runs every bot, 500 ms step</text>
+ <text x="355" y="110" text-anchor="middle" font-size="10">holds the trading key</text>
+ <rect x="540" y="20" width="150" height="110" rx="8" fill="#f6f0ff" stroke="#7b5cd6"/>
+ <text x="615" y="42" text-anchor="middle" font-weight="700" font-size="13">SoDEX</text>
+ <text x="615" y="62" text-anchor="middle" font-size="10">perps order book</text>
+ <text x="615" y="80" text-anchor="middle" font-size="10">your futures account</text>
+ <text x="615" y="96" text-anchor="middle" font-size="10">fills, positions,</text>
+ <text x="615" y="112" text-anchor="middle" font-size="10">balances</text>
+ <line x1="160" y1="60" x2="268" y2="60" stroke="#14171c" marker-end="url(#ar)"/>
+ <text x="214" y="54" text-anchor="middle" font-size="9">signed request</text>
+ <line x1="268" y1="95" x2="160" y2="95" stroke="#14171c" marker-end="url(#ar)"/>
+ <text x="214" y="89" text-anchor="middle" font-size="9">state, log, fills</text>
+ <line x1="440" y1="60" x2="538" y2="60" stroke="#14171c" marker-end="url(#ar)"/>
+ <text x="489" y="54" text-anchor="middle" font-size="9">post-only orders</text>
+ <line x1="538" y1="95" x2="440" y2="95" stroke="#14171c" marker-end="url(#ar)"/>
+ <text x="489" y="89" text-anchor="middle" font-size="9">book, trades, fills</text>
+ <rect x="270" y="180" width="170" height="90" rx="8" fill="#fff6e6" stroke="#c98a10"/>
+ <text x="355" y="202" text-anchor="middle" font-weight="700" font-size="13">Server 1 (API)</text>
+ <text x="355" y="220" text-anchor="middle" font-size="10">beta list, fee programs, VIP</text>
+ <text x="355" y="236" text-anchor="middle" font-size="10">market stats (trade recorder)</text>
+ <text x="355" y="252" text-anchor="middle" font-size="10">news calendar</text>
+ <line x1="355" y1="178" x2="355" y2="132" stroke="#14171c" marker-end="url(#ar)"/>
+ <text x="362" y="160" font-size="9">beta answer, news, fee tier</text>
+ <rect x="540" y="180" width="150" height="90" rx="8" fill="#f3f5f8" stroke="#5b6472"/>
+ <text x="615" y="202" text-anchor="middle" font-weight="700" font-size="13">Binance futures</text>
+ <text x="615" y="222" text-anchor="middle" font-size="10">the "oracle" price</text>
+ <text x="615" y="238" text-anchor="middle" font-size="10">(fair price for</text>
+ <text x="615" y="254" text-anchor="middle" font-size="10">oracle settings)</text>
+ <line x1="540" y1="210" x2="442" y2="120" stroke="#14171c" marker-end="url(#ar)"/>
+ <line x1="160" y1="230" x2="268" y2="230" stroke="#14171c" marker-end="url(#ar)"/>
+ <text x="85" y="226" text-anchor="middle" font-size="10">Explore, New bot</text>
+ <text x="85" y="242" text-anchor="middle" font-size="10">estimates read here</text>
+</svg>
+<ul>
+<li><b>A bot</b> is an algo record with <code>bot: true</code>, kind <code>mm</code> (market maker) or <code>grid</code> (packages/copy-engine/src/algo). It lives in the executor, never in the browser.</li>
+<li><b>The trading key</b>: a SoDEX agent key you approved once. It can place and cancel orders and set leverage; it cannot withdraw. The executor never has your wallet's own key.</li>
+<li><b>Every change</b> (start, stop, pause, save, restart, VIP move) is a request your wallet signs. Reads use a 30-day read-only session token, so you sign in once a month per executor, not per action.</li>
+<li><b>The step</b>: the executor runs every bot every 500 ms (<code>ALGO_TICK_MS</code>) and also on each book or trade update of its market.</li>
+<li><b>Restart safe</b>: bots, their orders and their books are stored in the executor's database and resume after a restart. While the executor is down, resting quotes stay on SoDEX (SoDEX has no cancel-on-disconnect).</li>
+</ul>
+</div>
+
+<!-- ============================================================ 2 -->
+<div class="sec"><h2>2. Who may run a bot, and every check at start</h2>
+<p>A real bot passes these checks in this order. The first that fails refuses the start with a code; the page turns each code into one sentence and a button.</p>
+<svg width="700" height="420" viewBox="0 0 700 420">
+ <defs><marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#14171c"/></marker></defs>
+ <g font-size="10">
+ <rect x="230" y="4" width="240" height="26" rx="13" fill="#14171c"/><text x="350" y="21" fill="#fff" text-anchor="middle" font-weight="600">Start a real bot (signed)</text>
+ <!-- checks -->
+ <g>
+  <rect x="200" y="42" width="300" height="26" rx="5" fill="#f3f5f8" stroke="#5b6472"/><text x="350" y="59" text-anchor="middle">Signature, terms accepted, region allows it</text>
+  <rect x="200" y="78" width="300" height="26" rx="5" fill="#f3f5f8" stroke="#5b6472"/><text x="350" y="95" text-anchor="middle">Trading key registered and not expiring</text>
+  <rect x="200" y="114" width="300" height="26" rx="5" fill="#f3f5f8" stroke="#5b6472"/><text x="350" y="131" text-anchor="middle">SoDEX account exists</text>
+  <rect x="200" y="150" width="300" height="26" rx="5" fill="#f3f5f8" stroke="#5b6472"/><text x="350" y="167" text-anchor="middle">Wallet on the beta list (or test allowlist)</text>
+  <rect x="200" y="186" width="300" height="26" rx="5" fill="#f3f5f8" stroke="#5b6472"/><text x="350" y="203" text-anchor="middle">Under 20 algos for this wallet</text>
+  <rect x="200" y="222" width="300" height="26" rx="5" fill="#f3f5f8" stroke="#5b6472"/><text x="350" y="239" text-anchor="middle">Under 20 live real bots on this executor</text>
+  <rect x="200" y="258" width="300" height="26" rx="5" fill="#f3f5f8" stroke="#5b6472"/><text x="350" y="275" text-anchor="middle">Market free (no other bot, position, copy or algo order)</text>
+  <rect x="200" y="294" width="300" height="26" rx="5" fill="#f3f5f8" stroke="#5b6472"/><text x="350" y="311" text-anchor="middle">Margin fits (account readable, all reserves ≤ equity)</text>
+  <rect x="200" y="330" width="300" height="26" rx="5" fill="#f3f5f8" stroke="#5b6472"/><text x="350" y="347" text-anchor="middle">No VIP move running right now</text>
+  <rect x="230" y="374" width="240" height="30" rx="15" fill="#1f9d63"/><text x="350" y="393" fill="#fff" text-anchor="middle" font-weight="600">Bot runs</text>
+ </g>
+ <g stroke="#14171c"><line x1="350" y1="30" x2="350" y2="41" marker-end="url(#ar2)"/><line x1="350" y1="68" x2="350" y2="77" marker-end="url(#ar2)"/><line x1="350" y1="104" x2="350" y2="113" marker-end="url(#ar2)"/><line x1="350" y1="140" x2="350" y2="149" marker-end="url(#ar2)"/><line x1="350" y1="176" x2="350" y2="185" marker-end="url(#ar2)"/><line x1="350" y1="212" x2="350" y2="221" marker-end="url(#ar2)"/><line x1="350" y1="248" x2="350" y2="257" marker-end="url(#ar2)"/><line x1="350" y1="284" x2="350" y2="293" marker-end="url(#ar2)"/><line x1="350" y1="320" x2="350" y2="329" marker-end="url(#ar2)"/><line x1="350" y1="356" x2="350" y2="373" marker-end="url(#ar2)"/></g>
+ <!-- refusal codes right -->
+ <g fill="#d2453b" font-size="9.5">
+  <text x="510" y="95">→ key  "Approve the trading key"</text>
+  <text x="510" y="131">→ account  "Deposit to SoDEX"</text>
+  <text x="510" y="167">→ beta  "Ask on Discord" (practice open)</text>
+  <text x="510" y="203">→ limit  stop one</text>
+  <text x="510" y="239">→ bot-capacity  try later</text>
+  <text x="510" y="263">→ bot-market / market-position /</text>
+  <text x="510" y="276">   market-copy / market-algo</text>
+  <text x="510" y="305">→ margin (need, free shown)</text>
+  <text x="510" y="318">→ margin-unknown  try again</text>
+  <text x="510" y="347">→ vip-moving / moved</text>
+ </g>
+ <g fill="#5b6472" font-size="9.5">
+  <text x="10" y="167">Beta answer kept in the</text><text x="10" y="180">executor's db: only an explicit</text><text x="10" y="193">"not listed" holds a bot.</text>
+  <text x="10" y="275">Inherit a position: Instant restart</text>
+  <text x="10" y="305">Practice skips beta, capacity,</text><text x="10" y="318">market and margin checks.</text>
+ </g>
+ </g>
+</svg>
+<div class="box"><b>Practice is open to beta wallets</b> with no money checks. Non-beta wallets see the Bots pages with a Get access (Discord) screen.</div>
+<h3>The trading key</h3>
+<ul>
+<li>Approved once on SoDEX; it has an expiry. Wallet notices <b>24 h</b> and <b>1 h</b> before expiry, and a Renew banner on the Bots pages.</li>
+<li><b>From 10 minutes before expiry</b>: every bot pulls its quotes and opens nothing; reduce-only closes still go out until the key expires. <span class="pill p-a">Not verified live</span></li>
+<li>After expiry (or revocation) the bots are held with "key" until a new key is approved.</li>
+</ul>
+</div>
+
+<!-- ============================================================ 3 -->
+<div class="sec"><h2>3. The bot types</h2>
+<p>New bot step 1 picks <b>Market maker</b> or <b>Grid</b>. Step 3 (market maker only) picks one of six settings. Cost differences are against the Oracle maker (R10) on the same market. (apps/web/src/bots/recipes.ts, presets.ts)</p>
+<table>
+<tr><th>Name</th><th>What it does differently</th><th class="n">Cost vs R10</th><th class="n">Volume vs R10</th><th>Evidence</th><th>Badge</th></tr>
+<tr><td><b>Oracle maker</b> (R10)<br><span class="mut">default, recommended</span></td><td>Quotes at the best price, priced off Binance. A quote rests at most 10 s. Chase 40 ticks, re-price after 1 s, no skew.</td><td class="n">0</td><td class="n">1.00×</td><td>ETH live 5 rounds 1.18 bp; BTC live 11 rounds 1.84 bp; BTC replay 3 d 1.96 bp; KORU live 11 rounds 1.61 bp (today)</td><td><span class="pill p-g">Proven live</span></td></tr>
+<tr><td><b>Calm oracle maker</b></td><td>R10 + volatility gate: the adding side is only placed if Binance moved &lt; 12 bp over the last 60 s.</td><td class="n">−0.08 bp</td><td class="n">0.65×</td><td>Replay</td><td><span class="pill">Tested</span></td></tr>
+<tr><td><b>Skewed oracle maker</b> (S1)</td><td>R10 + skew 1 tick: the adding side steps back as the holding grows.</td><td class="n">−0.10 bp</td><td class="n">1.00×</td><td>BTC live 2 rounds 1.76 bp</td><td><span class="pill p-a">New</span></td></tr>
+<tr><td><b>Touch maker</b> (N5)</td><td>Rests at the best price up to 5 s; Binance is used only for the gate, not for pricing.</td><td class="n">+0.10 bp</td><td class="n">0.68×</td><td>ETH live 5 rounds 1.28 bp</td><td><span class="pill">Tested</span></td></tr>
+<tr><td><b>Calm touch maker</b></td><td>N5 + the 12 bp / 60 s gate.</td><td class="n">−0.09 bp</td><td class="n">0.65×</td><td>Replay</td><td><span class="pill">Tested</span></td></tr>
+<tr><td><b>Book maker</b> (plain)</td><td>No oracle. Quotes off SoDEX's own book: offset 0, chase 1 tick, re-price after 1 s, no skew. The only choice on markets Binance does not list.</td><td class="n">+0.45 bp</td><td class="n">1.20×</td><td>BTC live 2.28 bp; KORU live 1 round −3.59 bp</td><td><span class="pill">Tested</span></td></tr>
+<tr><td><b>Range grid</b></td><td>Buy and sell levels in a price range (section 9).</td><td class="n">–</td><td class="n">–</td><td>No live runs</td><td><span class="pill p-a">New</span></td></tr>
+</table>
+<div class="box"><b>"bp" (basis point)</b> = 0.01%. A cost of 1.84 bp means $184 paid per $1,000,000 traded, after all fees and price moves.<br>
+<b>Oracle</b> = Binance futures price of the same coin, used as the fair price. <b>Touch</b> = the best bid or ask. <b>Tick</b> = the market's smallest price step.</div>
+<h3>Every market maker setting, with R10's value</h3>
+<table>
+<tr><th>Setting (code)</th><th>Meaning</th><th class="n">R10</th></tr>
+<tr><td>offsetTicks</td><td>Ticks from the best price. 0 = at the best price; −1 = one tick inside when the spread is ≥ 2 ticks.</td><td class="n">0</td></tr>
+<tr><td>skewTicks</td><td>How far the adding side steps back at full holding (scaled by holding ÷ cap).</td><td class="n">0</td></tr>
+<tr><td>chaseTicks</td><td>A resting quote is re-priced when the best price moved away from it by this many ticks.</td><td class="n">40</td></tr>
+<tr><td>minRepriceMs</td><td>Minimum time between re-prices of a side.</td><td class="n">1,000 ms</td></tr>
+<tr><td>restMs</td><td>A quote is pulled after resting this long (then placed fresh).</td><td class="n">10,000 ms</td></tr>
+<tr><td>refBps / pullBps</td><td>Oracle settings: adding side at this distance from the Binance price (0 = at the touch); not quoted within pullBps of it.</td><td class="n">0 / 0</td></tr>
+<tr><td>levels</td><td>Quotes per side (ladder).</td><td class="n">1</td></tr>
+<tr><td>queueGuard, moveGuard, edgeBps</td><td>Optional: skip the adding side when our share of the queue is small; hold after a fast 2 s move; minimum distance from mid/mark.</td><td class="n">off</td></tr>
+<tr><td>placeBps / calm, stillBps / stillMs</td><td>The volatility gate (Calm settings): 12 bp over 60 s.</td><td class="n">off</td></tr>
+</table>
+</div>
+
+<!-- ============================================================ 4 -->
+<div class="sec"><h2>4. Sizes, presets and defaults</h2>
+<p>New bot step 4 "Size &amp; risk" starts from a preset. Every number can be changed. (presets.ts PRESET_VALUES)</p>
+<table>
+<tr><th></th><th class="n">Order size</th><th class="n">Max holding</th><th class="n">Loss limit</th><th>Grid range</th><th class="n">Grid levels</th></tr>
+<tr><td>Market maker Steady</td><td class="n">$12</td><td class="n">$24</td><td class="n">$3</td><td>–</td><td class="n">–</td></tr>
+<tr><td>Market maker Balanced</td><td class="n">$50</td><td class="n">$150</td><td class="n">$10</td><td>–</td><td class="n">–</td></tr>
+<tr><td>Market maker Active</td><td class="n">$150</td><td class="n">$450</td><td class="n">$30</td><td>–</td><td class="n">–</td></tr>
+<tr><td>Grid Steady</td><td class="n">$15 / level</td><td class="n">levels × order</td><td class="n">$5</td><td>±3%</td><td class="n">10</td></tr>
+<tr><td>Grid Balanced</td><td class="n">$25 / level</td><td class="n">levels × order</td><td class="n">$15</td><td>±2%</td><td class="n">16</td></tr>
+<tr><td>Grid Active</td><td class="n">$40 / level</td><td class="n">levels × order</td><td class="n">$40</td><td>±1%</td><td class="n">24</td></tr>
+</table>
+<div class="box warn"><b>SoDEX minimum order.</b> If a market's minimum order is larger than your order size, each quote goes out at the minimum. The holding cap and margin are computed on that real size, and the page says so before you start. A cap smaller than one minimum quote is refused.</div>
+<h3>Defaults of a new bot (presets.ts draftFor)</h3>
+<table>
+<tr><th>Setting</th><th>Default</th></tr>
+<tr><td>Practice</td><td>On (you switch to real orders)</td></tr>
+<tr><td>Spread limit</td><td>On, 20 bp</td></tr>
+<tr><td>Leverage</td><td>What your account already uses on that market, else 3×; capped by the market's maximum and your region (EEA 2×)</td></tr>
+<tr><td>On stop</td><td>Close what it holds (clean)</td></tr>
+<tr><td>Grid out of range</td><td>Wait</td></tr>
+<tr><td>Volatility gate (Calm)</td><td>12 bp over 60 s</td></tr>
+<tr><td>News gate</td><td>Off; when on: 2 min before to 10 min after, high importance only</td></tr>
+<tr><td>Flow gate</td><td>Off; when on: under $250,000 from the uninformed taker in 10 min → pause (or shrink to 50%)</td></tr>
+<tr><td>Trading hours</td><td>Off</td></tr>
+<tr><td>Run for / Stop after trading</td><td>Off</td></tr>
+</table>
+<h3>New bot, the five steps</h3>
+<svg width="700" height="80" viewBox="0 0 700 80">
+ <g font-size="10" text-anchor="middle">
+ <rect x="5" y="10" width="125" height="50" rx="8" fill="#eef3ff" stroke="#3b6fe0"/><text x="67" y="31" font-weight="700">1 Bot type</text><text x="67" y="47">Market maker / Grid</text>
+ <rect x="145" y="10" width="125" height="50" rx="8" fill="#eef3ff" stroke="#3b6fe0"/><text x="207" y="31" font-weight="700">2 Markets</text><text x="207" y="47">one or several</text>
+ <rect x="285" y="10" width="125" height="50" rx="8" fill="#eef3ff" stroke="#3b6fe0"/><text x="347" y="31" font-weight="700">3 Preset</text><text x="347" y="47">the six settings (MM)</text>
+ <rect x="425" y="10" width="125" height="50" rx="8" fill="#eef3ff" stroke="#3b6fe0"/><text x="487" y="27" font-weight="700">4 Settings</text><text x="487" y="41">Size &amp; risk · Quoting</text><text x="487" y="53">· Safeguards</text>
+ <rect x="565" y="10" width="125" height="50" rx="8" fill="#eaf7f0" stroke="#1f9d63"/><text x="627" y="31" font-weight="700">5 Review</text><text x="627" y="47">name, sign, start</text>
+ </g>
+ <text x="350" y="76" text-anchor="middle" font-size="9" fill="#5b6472">A grid skips Preset and Quoting. Several markets start one bot each; a partial failure reports which started.</text>
+</svg>
+</div>
+
+<!-- ============================================================ 5 -->
+<div class="sec"><h2>5. The market maker, step by step</h2>
+<p>Every 500 ms and on every market update, each market maker runs this. (runtime.ts botGuard, stepMm; bots.ts mmQuotes)</p>
+<svg width="700" height="520" viewBox="0 0 700 520">
+ <defs><marker id="a5" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#14171c"/></marker></defs>
+ <g font-size="10">
+ <rect x="215" y="5" width="270" height="34" rx="6" fill="#ffecea" stroke="#d2453b"/><text x="350" y="20" text-anchor="middle" font-weight="700">1. Limits</text><text x="350" y="33" text-anchor="middle">loss limit · end time · volume target</text>
+ <text x="500" y="20" fill="#d2453b">hit → end, through "On stop" (section 11)</text>
+ <rect x="215" y="55" width="270" height="34" rx="6" fill="#fff6e6" stroke="#c98a10"/><text x="350" y="70" text-anchor="middle" font-weight="700">2. Account holds</text><text x="350" y="83" text-anchor="middle">paused · brake · key · region · beta · SoDEX limit</text>
+ <rect x="215" y="105" width="270" height="34" rx="6" fill="#fff6e6" stroke="#c98a10"/><text x="350" y="120" text-anchor="middle" font-weight="700">3. Market holds</text><text x="350" y="133" text-anchor="middle">not trading · no price (quote older than 3 s)</text>
+ <rect x="215" y="155" width="270" height="34" rx="6" fill="#fff6e6" stroke="#c98a10"/><text x="350" y="170" text-anchor="middle" font-weight="700">4. Spread limit</text><text x="350" y="183" text-anchor="middle">spread &gt; limit (default 20 bp)</text>
+ <rect x="215" y="205" width="270" height="34" rx="6" fill="#fff6e6" stroke="#c98a10"/><text x="350" y="220" text-anchor="middle" font-weight="700">5. Trading hours</text><text x="350" y="233" text-anchor="middle">inside a "skip" window / outside "only"</text>
+ <rect x="215" y="255" width="270" height="34" rx="6" fill="#fff6e6" stroke="#c98a10"/><text x="350" y="270" text-anchor="middle" font-weight="700">6. News gate</text><text x="350" y="283" text-anchor="middle">2 min before → 10 min after a release</text>
+ <rect x="215" y="305" width="270" height="34" rx="6" fill="#fff6e6" stroke="#c98a10"/><text x="350" y="320" text-anchor="middle" font-weight="700">7. Flow gate</text><text x="350" y="333" text-anchor="middle">uninformed flow &lt; $250k / 10 min → pause or ×0.5</text>
+ <rect x="215" y="355" width="270" height="34" rx="6" fill="#fff6e6" stroke="#c98a10"/><text x="350" y="370" text-anchor="middle" font-weight="700">8. Oracle fresh</text><text x="350" y="383" text-anchor="middle">oracle settings need a fresh Binance price</text>
+ <rect x="215" y="405" width="270" height="34" rx="6" fill="#eef3ff" stroke="#3b6fe0"/><text x="350" y="420" text-anchor="middle" font-weight="700">9. Compute quotes</text><text x="350" y="433" text-anchor="middle">price rules (6) · cap and unwinding (7)</text>
+ <rect x="215" y="455" width="270" height="44" rx="6" fill="#eaf7f0" stroke="#1f9d63"/><text x="350" y="470" text-anchor="middle" font-weight="700">10. Place / re-price / pull</text><text x="350" y="483" text-anchor="middle">post-only · rest 10 s · chase 40 ticks</text><text x="350" y="495" text-anchor="middle">gate 12 bp/60 s for new adding quotes (Calm)</text>
+ <g stroke="#14171c"><line x1="350" y1="39" x2="350" y2="54" marker-end="url(#a5)"/><line x1="350" y1="89" x2="350" y2="104" marker-end="url(#a5)"/><line x1="350" y1="139" x2="350" y2="154" marker-end="url(#a5)"/><line x1="350" y1="189" x2="350" y2="204" marker-end="url(#a5)"/><line x1="350" y1="239" x2="350" y2="254" marker-end="url(#a5)"/><line x1="350" y1="289" x2="350" y2="304" marker-end="url(#a5)"/><line x1="350" y1="339" x2="350" y2="354" marker-end="url(#a5)"/><line x1="350" y1="389" x2="350" y2="404" marker-end="url(#a5)"/><line x1="350" y1="439" x2="350" y2="454" marker-end="url(#a5)"/></g>
+ <rect x="20" y="150" width="170" height="120" rx="8" fill="#fff6e6" stroke="#c98a10" stroke-dasharray="4 3"/>
+ <text x="105" y="172" text-anchor="middle" font-weight="700">Any hold (2-8)</text>
+ <text x="105" y="190" text-anchor="middle">pull resting quotes</text>
+ <text x="105" y="205" text-anchor="middle">place nothing new</text>
+ <text x="105" y="220" text-anchor="middle">keep the position</text>
+ <text x="105" y="235" text-anchor="middle">step 1 still runs</text>
+ <text x="105" y="250" text-anchor="middle">shown as "held: why"</text>
+ <g stroke="#c98a10" stroke-dasharray="3 3"><line x1="215" y1="72" x2="190" y2="160"/><line x1="215" y1="372" x2="190" y2="262"/></g>
+ <text x="500" y="70" fill="#5b6472">brake: reduce-only closes still go out</text>
+ <text x="500" y="320" fill="#5b6472">flow gate: shrink mode halves size</text>
+ </g>
+</svg>
+<p class="cap">Step 1 runs before every hold: a held or paused bot still stops at its loss limit, end time or volume target.</p>
+<h3>Re-pricing rules (step 10)</h3>
+<table>
+<tr><th>Situation</th><th>What happens</th></tr>
+<tr><td>Quote has rested <code>restMs</code> (R10 10 s, N5 5 s)</td><td>Pulled, then placed fresh at the current price.</td></tr>
+<tr><td>Best price moved away by ≥ <code>chaseTicks</code> (R10 40)</td><td>Re-priced, no sooner than <code>minRepriceMs</code> (1 s) after the last.</td></tr>
+<tr><td>Price came to the quote from behind (our quote is now ahead of the touch)</td><td>Pulled after 250 ms.</td></tr>
+<tr><td>SoDEX refused a side (post-only would take, etc.)</td><td>That side waits 3 s, doubling up to 60 s while refused.</td></tr>
+<tr><td>25 refusals in a row</td><td>The bot ends (through On stop).</td></tr>
+<tr><td>SoDEX rate limit refusal</td><td>Held and retried; the 4th ends the bot (through On stop).</td></tr>
+<tr><td>Ladder (levels &gt; 1)</td><td>More levels per side, only as far as the cap leaves room.</td></tr>
+</table>
+<p class="mut">Quiet markets: when the stream sends no update, the book's best prices are refreshed by REST at most every 1.5 s; a price older than 3 s counts as no price. <span class="pill p-a">REST format not verified live</span></p>
+</div>
+
+<!-- ============================================================ 6 -->
+<div class="sec"><h2>6. Where a quote goes (price rules)</h2>
+<svg width="700" height="300" viewBox="0 0 700 300">
+ <g font-size="10">
+ <text x="120" y="18" text-anchor="middle" font-weight="700">SoDEX book</text>
+ <!-- asks -->
+ <g><rect x="60" y="30" width="120" height="20" fill="#ffecea"/><text x="70" y="44">ask 100.05</text>
+ <rect x="60" y="52" width="120" height="20" fill="#ffecea"/><text x="70" y="66">ask 100.04</text>
+ <rect x="60" y="74" width="120" height="20" fill="#ffd7d3" stroke="#d2453b"/><text x="70" y="88" font-weight="700">best ask 100.03</text>
+ <rect x="60" y="106" width="120" height="20" fill="#d9f2e5" stroke="#1f9d63"/><text x="70" y="120" font-weight="700">best bid 100.00</text>
+ <rect x="60" y="128" width="120" height="20" fill="#eaf7f0"/><text x="70" y="142">bid 99.99</text>
+ <rect x="60" y="150" width="120" height="20" fill="#eaf7f0"/><text x="70" y="164">bid 99.98</text></g>
+ <text x="120" y="100" text-anchor="middle" fill="#5b6472" font-size="9">spread 3 ticks = 3 bp</text>
+ <!-- our quotes -->
+ <rect x="200" y="74" width="150" height="20" rx="4" fill="#fff" stroke="#d2453b" stroke-width="2"/><text x="208" y="88">our ask 100.03 (offset 0)</text>
+ <rect x="200" y="106" width="150" height="20" rx="4" fill="#fff" stroke="#1f9d63" stroke-width="2"/><text x="208" y="120">our bid 100.00 (offset 0)</text>
+ <text x="210" y="190" fill="#5b6472">offset −1 → bid 100.01 / ask 100.02</text>
+ <text x="210" y="204" fill="#5b6472">(one tick inside, only if spread ≥ 2 ticks)</text>
+ <!-- oracle -->
+ <line x1="380" y1="30" x2="380" y2="180" stroke="#7b5cd6"/>
+ <text x="390" y="40" font-weight="700" fill="#7b5cd6">Oracle (Binance) cases</text>
+ <text x="390" y="62">A. Binance 100.015 (between): both sides quoted.</text>
+ <text x="390" y="80">B. Binance 99.99 (below our bid): the bid would buy</text>
+ <text x="390" y="94">   above fair → the <b>adding</b> bid is not quoted.</text>
+ <text x="390" y="112">C. Long and Binance 99.99: the unwinding ask</text>
+ <text x="390" y="126">   is still quoted, never below fair.</text>
+ <text x="390" y="144">D. No fresh Binance price: held (section 5, step 8).</text>
+ <text x="390" y="168" fill="#5b6472">Book maker: no oracle, cases B-D do not apply.</text>
+ </g>
+ <!-- skew -->
+ <g font-size="10">
+ <text x="20" y="232" font-weight="700">Skew (S1, skewTicks 1): adding side steps back</text>
+ <rect x="20" y="242" width="660" height="40" rx="6" fill="#f3f5f8" stroke="#d9dee5"/>
+ <text x="30" y="258">ticks back = round(|holding ÷ cap| × skewTicks), adding side only.</text>
+ <text x="30" y="274">Example: cap $150, long $90, skew 1 → round(0.6 × 1) = 1 → the bid sits 1 tick below the best bid. The ask stays at the touch.</text>
+ </g>
+</svg>
+<ul>
+<li>A quote is never at or through the other side of the book (post-only would be refused).</li>
+<li>Size = order size ÷ price, rounded to the market's lot, raised to SoDEX's minimum if that is larger.</li>
+<li>Edge guard (<code>edgeBps</code>, optional) measures from the safer of mid and mark.</li>
+<li>Queue guard (optional): the adding side is skipped while our share of the queue at our price is below the setting.</li>
+<li>Move guard (optional): after the mid moved this many ticks in 2 s, new adding quotes wait.</li>
+</ul>
+</div>
+
+<!-- ============================================================ 7 -->
+<div class="sec"><h2>7. Holding cap and unwinding (reduce-only)</h2>
+<p>"Holding" is what the bot holds from <b>its own fills</b> (buys − sells), not the account's position. (bots.ts mmQuotes, bookInventory)</p>
+<svg width="700" height="230" viewBox="0 0 700 230">
+ <g font-size="10">
+ <line x1="60" y1="110" x2="640" y2="110" stroke="#14171c"/>
+ <g text-anchor="middle"><text x="60" y="130">−$150</text><text x="205" y="130">−$75</text><text x="350" y="130">0</text><text x="495" y="130">+$75</text><text x="640" y="130">+$150</text></g>
+ <rect x="60" y="96" width="580" height="28" fill="none"/>
+ <line x1="60" y1="96" x2="60" y2="124" stroke="#d2453b" stroke-width="3"/><line x1="640" y1="96" x2="640" y2="124" stroke="#d2453b" stroke-width="3"/>
+ <text x="60" y="88" text-anchor="middle" fill="#d2453b" font-weight="700">cap (short)</text><text x="640" y="88" text-anchor="middle" fill="#d2453b" font-weight="700">cap (long)</text>
+ <circle cx="534" cy="110" r="7" fill="#3b6fe0"/><text x="534" y="80" text-anchor="middle" fill="#3b6fe0" font-weight="700">holding +$95</text>
+ <text x="350" y="160" text-anchor="middle">Balanced: order $50, cap $150. Long $95: one more $50 buy → $145 ≤ 150, the bid is quoted.</text>
+ <text x="350" y="176" text-anchor="middle">Long $110: one more buy → $160 &gt; 150, the bid is <b>not</b> quoted; only the ask (unwinding) is.</text>
+ <text x="350" y="200" text-anchor="middle">Unwinding ask: reduce-only, size ≤ what it holds ($95 → at most $95, so it ends flat, never short).</text>
+ <text x="350" y="216" text-anchor="middle">A holding below SoDEX's minimum order cannot be quoted; it stays until the stop closes it.</text>
+ </g>
+</svg>
+<div class="box"><b>One real bot per market</b> (your decision 2026-11-09, reverting the evening before): a bot starts only where you hold no position and run no other bot, copy or algo order. A bot inherits a position only from the bot it replaces (Instant restart). Its holding is checked against your account every 30 s: closed or reduced outside it (by hand, a stop, a liquidation) is booked closed at the mark with a notice, and it quotes on from what is left; a position you add by hand is left alone and said once.</div>
+</div>
+
+<!-- ============================================================ 8 -->
+<div class="sec"><h2>8. Safeguards (holds)</h2>
+<table>
+<tr><th style="width:17%">Safeguard</th><th>Trigger</th><th>What the bot does</th><th>Default</th><th>Bot types</th></tr>
+<tr><td><b>Spread limit</b></td><td>Spread wider than X bp</td><td>Market maker: pulls all quotes, places none. Grid: places no new levels (resting levels stay)</td><td>On, 20 bp, custom bp allowed</td><td>All</td></tr>
+<tr><td><b>Volatility gate</b> (Calm)</td><td>Binance moved ≥ 12 bp over the last 60 s</td><td>New adding quotes wait; unwinding continues</td><td>Part of the Calm settings</td><td>MM</td></tr>
+<tr><td><b>Trading hours</b></td><td>Inside a "skip" window, or outside a "trade only" window</td><td>Pulls quotes, places none</td><td>Off</td><td>MM</td></tr>
+<tr><td><b>News gate</b></td><td>From 2 min before to 10 min after a release of the chosen importance (our calendar)</td><td>Pulls quotes, places none</td><td>Off; high importance</td><td>MM</td></tr>
+<tr><td><b>Flow gate</b></td><td>SoDEX account 1002 (uninformed taker) traded under $250k on this market in the last 10 min</td><td>Pause, or shrink sizes to 50%</td><td>Off</td><td>MM</td></tr>
+<tr><td><b>Oracle fresh</b></td><td>No Binance price</td><td>Holds</td><td>Always for oracle settings</td><td>MM</td></tr>
+<tr><td><b>No price</b></td><td>Best prices older than 3 s</td><td>Holds</td><td>Always</td><td>All</td></tr>
+<tr><td><b>Market not trading</b></td><td>SoDEX halts or delists</td><td>Holds; delisting ends the bot through On stop</td><td>Always</td><td>All</td></tr>
+</table>
+<h3>Trading hours in detail</h3>
+<ul>
+<li>Windows are set in <b>any time zone</b>: your own (chosen hours stay those hours of your clock across daylight saving), New York, London, UTC, or any other IANA zone. NYSE and LSE holidays are computed; other zones count Monday to Friday as trading days.</li>
+<li>Two modes: <b>skip these hours</b> (default) or <b>trade only in these hours</b> (<code>quietOnly</code>).</li>
+<li>The page shows each window also in your own clock. Half-hour time zones (e.g. UTC+5:30) are shown exactly.</li>
+<li>Explore's hour profile, its read time, Started on Overview and the latency chart show your own clock (built 2026-11-08, 2c50c9e9).</li>
+</ul>
+<h3>Who are 1002 and 23342?</h3>
+<p>SoDEX account <b>1002</b> trades in large, slow, price-insensitive flow: being filled by it is cheap for a maker ("uninformed flow"). Account <b>23342</b> takes quotes just before the price moves: being filled by it costs about 0.86 bp ("informed flow"). Explore shows each market's split. Figures from our maker runs 2026-11-04.</p>
+</div>
+
+<!-- ============================================================ 9 -->
+<div class="sec"><h2>9. The grid</h2>
+<svg width="700" height="330" viewBox="0 0 700 330">
+ <g font-size="10">
+ <text x="170" y="18" text-anchor="middle" font-weight="700">Start (price 100)</text>
+ <text x="520" y="18" text-anchor="middle" font-weight="700">After the buy at 99 fills</text>
+ <g id="lv">
+ </g>
+ <!-- left grid -->
+ <g>
+  <line x1="60" y1="40" x2="280" y2="40" stroke="#d2453b"/><text x="290" y="44">102 sell</text>
+  <line x1="60" y1="80" x2="280" y2="80" stroke="#d2453b"/><text x="290" y="84">101 sell</text>
+  <line x1="60" y1="120" x2="280" y2="120" stroke="#9aa3ae" stroke-dasharray="4 4"/><text x="290" y="124">100 gap</text>
+  <line x1="60" y1="160" x2="280" y2="160" stroke="#1f9d63"/><text x="290" y="164">99 buy</text>
+  <line x1="60" y1="200" x2="280" y2="200" stroke="#1f9d63"/><text x="290" y="204">98 buy</text>
+  <circle cx="170" cy="120" r="6" fill="#3b6fe0"/>
+ </g>
+ <!-- right grid -->
+ <g>
+  <line x1="385" y1="40" x2="605" y2="40" stroke="#d2453b"/><text x="612" y="44">102 sell</text>
+  <line x1="385" y1="80" x2="605" y2="80" stroke="#d2453b"/><text x="612" y="84">101 sell</text>
+  <line x1="385" y1="120" x2="605" y2="120" stroke="#d2453b" stroke-width="2.5"/><text x="612" y="124" font-weight="700">100 sell (new)</text>
+  <line x1="385" y1="160" x2="605" y2="160" stroke="#9aa3ae" stroke-dasharray="4 4"/><text x="612" y="164">99 gap</text>
+  <line x1="385" y1="200" x2="605" y2="200" stroke="#1f9d63"/><text x="612" y="204">98 buy</text>
+  <circle cx="495" cy="160" r="6" fill="#3b6fe0"/>
+ </g>
+ <text x="350" y="245" text-anchor="middle">A buy filled at level i → a sell at level i+1. A sell filled at level i → a buy at level i−1.</text>
+ <text x="350" y="262" text-anchor="middle">Each round trip (buy 99, sell 100) earns one step minus fees. A partial fill gets a counterpart for the filled part.</text>
+ <text x="350" y="290" text-anchor="middle" font-weight="700">Out of range</text>
+ <text x="350" y="306" text-anchor="middle">"Wait" (default): levels stay; below the range the grid can hold every buy level (levels × order).</text>
+ <text x="350" y="322" text-anchor="middle">"Stop": the grid ends through On stop.</text>
+ </g>
+</svg>
+<ul>
+<li>Levels: linear (equal price steps) or geometric (equal % steps), rounded to the tick. At start, buys below the price, sells above, the level nearest the price left empty (the gap).</li>
+<li>Size per level: order size ÷ level price, at least SoDEX's minimum.</li>
+<li>All levels are post-only. A level whose price the market is at or through waits. A refused level waits 3 s, doubling to 60 s. At most 50 orders per batch.</li>
+<li>Applies: spread limit, loss limit, end time, volume target, leverage, margin. Not for grids: trading hours, news gate, flow gate, oracle, holding cap.</li>
+<li>Margin set aside: levels × order ÷ leverage.</li>
+</ul>
+</div>
+
+<!-- ============================================================ 10 -->
+<div class="sec"><h2>10. Limits, leverage and margin</h2>
+<h3>Limits (checked every step, also while held or paused)</h3>
+<table>
+<tr><th>Limit</th><th>Ends the bot when</th><th>Required</th></tr>
+<tr><td>Loss limit</td><td>Net PnL ≤ −limit (after SoDEX and ValueDesk fees, open position at the mark)</td><td>Yes for real bots</td></tr>
+<tr><td>Run for (end time)</td><td>Now ≥ end time</td><td>No</td></tr>
+<tr><td>Stop after trading (volume target)</td><td>Volume (both sides) ≥ target</td><td>No</td></tr>
+</table>
+<p>All three end through the bot's On stop setting (section 11). The bot page's <b>Limits</b> card shows how close it is to each (built 2026-11-08): loss used of the limit (amber past 50%, red past 80%), time left, volume of the target.</p>
+<h3>Leverage</h3>
+<ul>
+<li>Set on the market before the bot's first opening order. Only SoDEX's market maximum caps it (no region cap, no 3x default). <b>Auto</b> (default): the lowest whole leverage at which the bot's margin fits your free margin with a tenth to spare; 1x for practice. Set by hand, Auto turns off; Auto puts it back.</li>
+<li>If SoDEX refuses the leverage change, the bot opens nothing and asks again after 1 min, doubling to 15 min (no more every 500 ms); reduce-only orders still go out. Leverage saves in place on a running bot.</li>
+<li>SoDEX leverage is per market per account, so it also applies to your own position there and to every bot on that market (they share it). SoDEX accepted a higher leverage on an open position in our runs; a lower one <span class="pill p-a">not verified live</span>.</li>
+</ul>
+<h3>Margin a bot sets aside</h3>
+<div class="formula">market maker: margin = (max holding + 2 × real quote size × levels) ÷ leverage<br>grid: margin = levels × real order size ÷ leverage</div>
+<div class="box"><b>Worked example.</b> Balanced market maker, order $50, cap $150, 1 level, 3×: (150 + 2 × 50 × 1) ÷ 3 = <b>$83.33</b>.<br>Same on a market with a $100 minimum order: (150 + 2 × 100) ÷ 3 = $116.67, but a $150 cap is under two minimum quotes, so the page warns; under one minimum quote it is refused.<br>Grid Balanced, 16 levels × $25 at 3×: 400 ÷ 3 = <b>$133.33</b>.</div>
+<h3>The margin check</h3>
+<svg width="700" height="90" viewBox="0 0 700 90">
+ <g font-size="10">
+ <rect x="20" y="20" width="660" height="30" fill="#f3f5f8" stroke="#d9dee5"/>
+ <rect x="20" y="20" width="150" height="30" fill="#c9cfd8"/><text x="95" y="39" text-anchor="middle">Your positions</text>
+ <rect x="170" y="20" width="160" height="30" fill="#5b8def"/><text x="250" y="39" text-anchor="middle" fill="#fff">Copy trading</text>
+ <rect x="330" y="20" width="180" height="30" fill="#1f9d63"/><text x="420" y="39" text-anchor="middle" fill="#fff">Bots (this one last)</text>
+ <text x="595" y="39" text-anchor="middle">free</text>
+ <text x="20" y="68">Futures account value (equity) = the whole bar. A start or size increase is refused if positions + copies + bots + this bot &gt; equity,</text>
+ <text x="20" y="82">or if SoDEX's balance cannot be read (margin-unknown). The Bots page shows the same bar, left to right: perps, copy, bots.</text>
+ </g>
+</svg>
+</div>
+
+<!-- ============================================================ 11 -->
+<div class="sec"><h2>11. Stopping, pausing and automatic ends</h2>
+<h3>Clean stop (default "Close what it holds")</h3>
+<svg width="700" height="170" viewBox="0 0 700 170">
+ <g font-size="10">
+ <line x1="40" y1="70" x2="660" y2="70" stroke="#14171c"/>
+ <g text-anchor="middle"><text x="40" y="90">0 s</text><text x="400" y="90">60 s</text><text x="640" y="90">done</text></g>
+ <rect x="40" y="40" width="360" height="24" fill="#eaf7f0" stroke="#1f9d63"/><text x="220" y="56" text-anchor="middle">post-only close at the best price, re-priced as it moves (≥1 tick, every 2 s)</text>
+ <rect x="400" y="40" width="240" height="24" fill="#fff6e6" stroke="#c98a10"/><text x="520" y="56" text-anchor="middle">reduce-only IOC, at most 30 bp through</text>
+ <text x="40" y="20" font-weight="700">Stop signed → quotes pulled at once, stray orders cancelled</text>
+ <text x="40" y="115">• Ends when what is left is below SoDEX's minimum order, or SoDEX says 3 times there is no position to reduce.</text>
+ <text x="40" y="131">• A refused post-only close retries after 1 s, doubling to 30 s. The taker order stops one tick short of another user's bot.</text>
+ <text x="40" y="147">• Runs under the brake, a key problem and the other holds (it only makes the position smaller).</text>
+ <text x="40" y="163">• Not under: pause (not allowed while closing), expired key, market not trading, no price (it waits).</text>
+ </g>
+</svg>
+<table>
+<tr><th style="width:20%">Way to end</th><th>What happens to quotes and position</th></tr>
+<tr><td><b>Clean stop</b></td><td>As above. Typical: flat within 60 s; worst case 30 bp slippage on what is left.</td></tr>
+<tr><td><b>Instant stop</b></td><td>Skips the 60 s post-only phase: reduce-only IOC at once.</td></tr>
+<tr><td><b>Stop, keep positions</b></td><td>Quotes pulled, bot ends. The position stays in your account, unmanaged. The bot's PnL freezes at the stop.</td></tr>
+<tr><td><b>Stop all</b></td><td>The same three choices for every running bot, bots only (your other algo orders and their stop-losses are not touched).</td></tr>
+<tr><td><b>Pause</b></td><td>Quotes pulled, position kept, nothing placed. Limits still checked: a paused bot at its loss limit still closes. Resume continues.</td></tr>
+<tr><td><b>Automatic ends</b></td><td>Loss limit, end time, volume target, delisting, grid out of range with "stop": through the bot's On stop. Refusals never end a bot directly: margin and limit refusals make only the adding side wait; 25 unknown refusals in a row make it wait (quotes pulled); after the 4th such round it closes what it holds, whatever On stop says, and stops.</td></tr>
+<tr><td><b>Brake</b> (operator kill switch on the server)</td><td>Quotes pulled, nothing opens; reduce-only closes go out.</td></tr>
+<tr><td><b>Key expiring</b></td><td>From 10 min before expiry: quotes pulled, nothing opens; closes until expiry.</td></tr>
+<tr><td><b>Executor crash</b></td><td>Quotes rest on SoDEX until it restarts (no cancel-on-disconnect). After restart: every open order is read again every 200 ms (20 bots in about 4 s); stray orders of ended bots swept every 5 s.</td></tr>
+<tr><td><b>Position closed outside</b> (by hand, a stop, a liquidation)</td><td>Checked every 30 s: booked closed at the mark (PnL unchanged), quotes placed again from what is left, a log line and a notice.</td></tr>
+</table>
+</div>
+
+<!-- ============================================================ 12 -->
+<div class="sec"><h2>12. Changing a running bot</h2>
+<table>
+<tr><th>Change</th><th>How</th><th>Position</th></tr>
+<tr><td>Every setting: name, limits, run time, On stop, spread limit, sizes, cap, offsets, chase, rest, skew, gates, hours, news, flow, the oracle, leverage, order type (MM); also a grid's range, levels and spacing (laid out again around the price, its holding kept)</td><td><b>Save</b>: updated in place, no restart. A size or cap increase is margin-checked. A closing bot takes no change until it has stopped.</td><td>Kept</td></tr>
+<tr><td>Market, bot type, practice ↔ real</td><td><b>Restart</b> (one signature): <b>Clean restart</b> = old bot closes, new starts flat. <b>Instant restart</b> = the new bot takes over the old one's position on the same market, after the old one has no live orders.</td><td>Closed / taken over</td></tr>
+<tr><td>Stopped or practice bot</td><td><b>Run again</b> / <b>Run with real orders</b>: opens New bot pre-filled.</td><td>–</td></tr>
+</table>
+</div>
+
+<!-- ============================================================ 13 -->
+<div class="sec" style="break-before:auto;margin-top:18px"><h2>13. Fees</h2>
+<p>Each fill pays SoDEX's maker fee (1.2 bp at SoDEX tier 0; booked at your own rate when the executor can read it) plus the <b>ValueDesk bot fee</b> (builder fee) by your 14-day counted volume. (policy.ts BOT_FEE_LADDER)</p>
+<table>
+<tr><th>14-day volume</th><th class="n">Bot fee</th><th>Your table (owner 2026-11-09)</th></tr>
+<tr><td>under $100k</td><td class="n"><b>0.3 bp</b></td><td>0.3 bp</td></tr>
+<tr><td>$100k – $500k</td><td class="n"><b>0.2 bp</b></td><td>0.25 bp ($100k), 0.20 bp ($250k)</td></tr>
+<tr><td>$500k and more</td><td class="n"><b>0.1 bp</b></td><td>0.15 / 0.12 / 0.10 bp ($500k / $1M / $10M)</td></tr>
+<tr><td>VIP</td><td class="n"><b>0.1 bp</b></td><td></td></tr>
+</table>
+<p class="mut">SoDEX carries builder fees in whole tenths of a bp, so your table is rounded down (you chose: never more than the table). The trade page's fee schedule shows this table under ValueDesk, like the copy-trading one.</p>
+<table>
+<tr><th>Who</th><th>Bot fee</th></tr>
+<tr><td>Beta-listed wallets</td><td>VIP on every product for 30 days from their listing date (server 1's program)</td></tr>
+<tr><td>VIP by milestone ($1M own volume in 14 days)</td><td>0.1 bp + VIP servers</td></tr>
+<tr><td>Everyone else</td><td>The ladder above</td></tr>
+</table>
+<div class="box"><b>Cost per $1M at tier 0, fees only:</b> SoDEX 1.2 bp + bot fee 0.3 bp = 1.5 bp = <b>$150</b> per $1M. At VIP: 1.3 bp = $130. Price moves come on top (or off): R10 on BTC came to 1.84 bp all-in at the 0.1 bp fee.</div>
+</div>
+
+<!-- ============================================================ 14 -->
+<div class="sec"><h2>14. The numbers on the pages</h2>
+<div class="formula">volume  = buy value + sell value<br>
+holding = bought qty − sold qty (+ taken-over qty)<br>
+gross   = sell value − buy value − taken-over value + holding × mark<br>
+net PnL = gross − SoDEX fees − ValueDesk fees<br>
+cost    = −net ÷ volume × 10,000 bp   ( = −net ÷ volume × $1,000,000 per $1M )</div>
+<div class="box"><b>Worked example.</b> Buy 1 ETH at 3,000.00, sell 1 at 3,001.00. Volume $6,001. Gross +$1.00. SoDEX 1.2 bp × 6,001 = $0.72; bot fee 0.5 bp = $0.30. Net = 1.00 − 0.72 − 0.30 = <b>−$0.02</b>. Cost = 0.02 ÷ 6,001 × 10,000 = <b>0.03 bp</b> ($3 per $1M).</div>
+<table>
+<tr><th>Figure</th><th>Meaning</th></tr>
+<tr><td>Net PnL</td><td>After all fees, open position at the mark. Also back in time: each chart point (every 5 min, max 1,500, older half thinned) is net at that moment's mark.</td></tr>
+<tr><td>Per $1M / cost</td><td>What $1M of volume cost. Positive = paid; negative = earned.</td></tr>
+<tr><td>Volume</td><td>Both sides, USD.</td></tr>
+<tr><td>Holding</td><td>The bot's own position from its fills; fleet shows long and short apart (not netted).</td></tr>
+<tr><td>Fleet totals</td><td>Real bots only; practice listed apart; paused counted apart from running. Windows 1H / 6H / 24H / 7D / All.</td></tr>
+<tr><td>Stopped bot</td><td>PnL frozen at the stop (incl. a "keep" stop's open position at that mark).</td></tr>
+<tr><td>Estimates (New bot, Explore)</td><td>Per market, from our recorder's trades over 24 h or 7 d: who took small makers' quotes, 30 s markout, recorder gaps left out. Activity per hour from SoDEX's own volume. Fee = your own bot fee.</td></tr>
+<tr><td>Savings (VIP page)</td><td>What the lower fee would have saved on your bots' real volume.</td></tr>
+</table>
+</div>
+
+<!-- ============================================================ 15 -->
+<div class="sec" style="break-before:auto;margin-top:18px"><h2>15. Practice bots</h2>
+<ul>
+<li>Same engine, same rules, live SoDEX book and trades; nothing is sent. Fees are booked as if real.</li>
+<li>A practice order fills only when a real trade prints <b>through</b> its price (not at it). Each print's size is shared first-come across practice orders.</li>
+<li>No queue position is modelled, so practice is still somewhat <b>better than live</b>.</li>
+<li>Practice skips beta, capacity, market and margin checks; loss limit optional.</li>
+<li>"Run with real orders" opens New bot with the same settings.</li>
+</ul>
+</div>
+
+<!-- ============================================================ 16 -->
+<div class="sec"><h2>16. VIP servers and the move</h2>
+<p>VIP executor: AWS Tokyo, closer to SoDEX (orders take effect faster). Eligible: $1M own 14-day volume, or a VIP program (beta 30 days).</p>
+<svg width="700" height="330" viewBox="0 0 700 330">
+ <defs><marker id="a16" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#14171c"/></marker></defs>
+ <g font-size="10">
+ <text x="100" y="18" text-anchor="middle" font-weight="700">Browser</text>
+ <text x="350" y="18" text-anchor="middle" font-weight="700">Standard executor</text>
+ <text x="600" y="18" text-anchor="middle" font-weight="700">VIP executor</text>
+ <g stroke="#9aa3ae" stroke-dasharray="3 3"><line x1="100" y1="25" x2="100" y2="320"/><line x1="350" y1="25" x2="350" y2="320"/><line x1="600" y1="25" x2="600" y2="320"/></g>
+ <g stroke="#14171c">
+  <line x1="100" y1="45" x2="348" y2="45" marker-end="url(#a16)"/>
+  <line x1="350" y1="105" x2="598" y2="105" marker-end="url(#a16)"/>
+  <line x1="600" y1="165" x2="352" y2="165" marker-end="url(#a16)"/>
+  <line x1="350" y1="225" x2="102" y2="225" marker-end="url(#a16)"/>
+ </g>
+ <text x="225" y="40" text-anchor="middle">1. one signature: move</text>
+ <rect x="360" y="55" width="230" height="38" rx="4" fill="#fff6e6"/><text x="368" y="70">2. pause the wallet's bots (quotes pulled),</text><text x="368" y="84">seal the trading key to the pinned VIP key</text>
+ <text x="475" y="100" text-anchor="middle">3. bots + books + sealed key</text>
+ <rect x="450" y="115" width="140" height="38" rx="4" fill="#eaf7f0"/><text x="458" y="130">4. VIP adopts all (all</text><text x="458" y="144">or nothing), resumes</text>
+ <text x="475" y="160" text-anchor="middle">5. "adopted"</text>
+ <rect x="360" y="175" width="230" height="38" rx="4" fill="#f3f5f8"/><text x="368" y="190">6. releases the bots (standard keeps</text><text x="368" y="204">ended records only)</text>
+ <text x="225" y="220" text-anchor="middle">7. done → page reads from VIP</text>
+ <text x="20" y="258" font-weight="700">Safety</text>
+ <text x="20" y="274">• Serialized: nothing else for the wallet runs during a move; a retry with the same request is the same move.</text>
+ <text x="20" y="290">• A lost answer (timeout) is asked about at VIP, never guessed. Partial adoption is rolled back. Nothing resumes under the brake.</text>
+ <text x="20" y="306">• Needs EXECUTOR_VIP_PUBKEY on the standard executor (production: not set yet → moves stay off).</text>
+ <text x="20" y="322">• Moving back: the VIP side checks every 10 min and moves a wallet that lost VIP back (once per UTC day).</text>
+ </g>
+</svg>
+<div class="box"><b>Both ways</b> (built 2026-11-08, 46da38f0):
+<ul>
+<li>The VIP executor asks the API server about each wallet whose bots run there <b>every 10 minutes</b>, twice a moment apart; a failed read moves nobody.</li>
+<li>A wallet no longer VIP (under $1M in 14 days and no VIP program) moves back: same steps, key sealed to the pinned <code>EXECUTOR_STD_PUBKEY</code>, sent to <code>EXECUTOR_STD_URL</code>.</li>
+<li><b>At most one move back per wallet per UTC day.</b> Moving up is never limited (it still needs VIP).</li>
+<li>Round trips work: a bot that comes home replaces its own ended record. The wallet gets a notice on the standard side; the page follows by itself, using the read token the move brought.</li>
+<li>Production needs on the VIP box: <code>EXECUTOR_STD_URL</code>, <code>EXECUTOR_STD_PUBKEY</code> (else nobody is moved back). On the standard box: <code>EXECUTOR_VIP_PUBKEY</code>.</li>
+</ul></div>
+</div>
+
+<!-- ============================================================ 17 -->
+<div class="sec"><h2>17. The pages, screen by screen</h2>
+<table>
+<tr><th style="width:16%">Page</th><th>What is on it</th></tr>
+<tr><td><b>Overview</b></td><td>Fleet cards (net PnL, volume, cost per $1M, running / paused / practice counts, long and short holding), fleet chart with windows, margin bar (perps, copy, bots, free), bot tiles (sparkline, state pill, menu: open, pause, stop options), Stop all, key-expiry banner.</td></tr>
+<tr><td><b>New bot</b></td><td>The five steps (section 4). Markets list with estimates (cost, activity per hour, informed vs uninformed flow), preset cards with evidence badges, settings in three parts, Review with margin set aside, fees, warnings. Markets you already run are marked.</td></tr>
+<tr><td><b>Bot page</b></td><td>Header (market, type, state, practice/real), PnL chart, performance (net, volume, cost, holding, fees paid), settings with Save, Restart, Stop menu, log (every order, fill, hold, refusal; paged without gaps).</td></tr>
+<tr><td><b>Explore</b></td><td>Every market: activity, spread, cost estimate, who takes (1002 / 23342 / others), over 24 h or 7 d; "Well read" filter hides markets with thin data.</td></tr>
+<tr><td><b>Savings / VIP</b></td><td>Your bot fee and tier, progress to $1M, savings, latency chart standard vs VIP, the move with its full-screen scene, share card.</td></tr>
+</table>
+<h3>Refusal and notice texts</h3>
+<p>Each refusal code from section 2 shows one sentence and one button (Approve key, Deposit, Ask on Discord, Change the leverage, Stop the copy, Cancel the algo, Try again, Reload). Bot words (bp, oracle, best price, tick, skew, spread, informed/uninformed flow, per $1M, holding, margin, IOC) carry an info dot with a one-line explanation. Bot notices reach the bell: failed, stopped, ended, done, paused (not by you), position closed outside, key expiring.</p>
+</div>
+
+<!-- ============================================================ 18 -->
+<div class="sec"><h2>18. What the audit fixed, and what is still open</h2>
+<h3>Fixed today (commits 909c5ec4, 138edac7, ce894deb)</h3>
+<ul>
+<li><b>No orders left on SoDEX:</b> failed cancels retried; stopped bots' leftover orders swept every 5 s; quotes pulled 10 min before key expiry with warnings 24 h and 1 h ahead; SoDEX batch replies read correctly.</li>
+<li><b>No position left without a loss limit:</b> every ending goes through On stop; the close no longer gives up after ordinary refusals; limits checked while held; closes pass the brake; real bots need a loss limit.</li>
+<li><b>Risk as signed:</b> cap and margin on the real order size; refused leverage holds the bot; margin checked on start and size increases, refused when the account cannot be read, EEA 2× and copies counted; copies and algo orders keep bots off their market; 10 live bots per server. (One bot per market was lifted later the same day: section 7.)</li>
+<li><b>Signed settings match the screen:</b> grid end time, spread limit, restarts keep the end time, presets keep your settings, leverage capped per market, multi-market starts report partial results.</li>
+<li><b>Bots never disappear:</b> expired sign-in shows Sign in; a stop cannot be undone on screen; failed stops always shown.</li>
+<li><b>VIP move:</b> cannot double-run; lost answers checked with VIP; key only to the pinned VIP key; scene survives page changes.</li>
+<li><b>Numbers:</b> your own bot fee everywhere; practice not in real totals; paused apart; holding not netted; log complete; stopped PnL frozen.</li>
+<li><b>Changing and stopping:</b> Save in place; Run again / Run with real orders; Stop all with three options; refusal sentences with buttons; Renew banner; plain help text.</li>
+</ul>
+<h3>Your answers today, status</h3>
+<table>
+<tr><th>#</th><th>Item</th><th>Your answer</th><th>Status</th></tr>
+<tr><td>1</td><td>Cancel-on-disconnect, crash alert</td><td>SoDEX side, ignore</td><td>Dropped</td></tr>
+<tr><td>2</td><td>Email / Telegram / push alerts</td><td>No (never suggest again)</td><td>Dropped</td></tr>
+<tr><td>3</td><td>Bots vs positions not opened by a bot</td><td>Untouchable; a bot reduces only what it added, long and short</td><td><span class="pill p-g">Built</span> f8489bbc</td></tr>
+<tr><td>4</td><td>One "close all" action</td><td>Not yet</td><td>Parked</td></tr>
+<tr><td>5</td><td>VIP move both ways</td><td>Std ↔ VIP end to end; downgrade below $1M once per UTC day; upgrades always</td><td><span class="pill p-g">Built</span> 46da38f0</td></tr>
+<tr><td>6</td><td>Time zones</td><td>Everywhere</td><td><span class="pill p-g">Built</span> 2c50c9e9</td></tr>
+<tr><td>7</td><td>Progress to limits</td><td>Yes</td><td><span class="pill p-g">Built</span> 1d8f6ccc</td></tr>
+<tr><td>8</td><td>"Stop the other bot" in New bot</td><td>No: several bots per market (via 3)</td><td><span class="pill p-g">Built</span> f8489bbc</td></tr>
+<tr><td>9</td><td>CSV, restore deleted, copy log line</td><td>No</td><td>Dropped</td></tr>
+<tr><td>10</td><td>Glossary tooltips</td><td>Yes</td><td><span class="pill p-g">Built</span> 609336a2</td></tr>
+<tr><td>11</td><td>Sticky Back/Next/Start on phones</td><td>Remind me</td><td>On the board</td></tr>
+<tr><td>12</td><td>Practice vs real as its own step</td><td>Remind me</td><td>On the board</td></tr>
+</table>
+<p class="mut">How answers 3 + 8 were built: section 7.</p>
+<h3>Other open points</h3>
+<ul>
+<li>Grid under the spread limit keeps its resting levels (the market maker pulls). Pull them too?</li>
+<li>Grid has no holding cap besides levels × order.</li>
+<li>Production needs <code>EXECUTOR_VIP_PUBKEY</code>; <code>EXECUTOR_MAX_LIVE_BOTS</code> default 10.</li>
+<li><span class="pill p-a">Not verified live</span>: REST book-ticker format, key-expiry pull, lowering leverage on an open position, VIP move in production. One small live check on the test wallet before shipping.</li>
+<li>Light mode for the Bots pages later.</li>
+</ul>
+</div>
+
+<div class="sec"><h2>19. Changes of 2026-11-09 (your second round)</h2>
+<table>
+<tr><th>Your point</th><th>What is built</th><th>Commit</th></tr>
+<tr><td>Post-only changeable per bot</td><td>Advanced settings → Order type: Post-only (default) or Limit (may take, taker fee). Saves in place.</td><td>11ad9038</td></tr>
+<tr><td>Holding cap: pull or shrink, as close as possible, never above</td><td>Adding quote = what is left to the cap on SoDEX's lot; resting adds past the cap pulled and re-placed smaller.</td><td>cc77d3f6</td></tr>
+<tr><td>Unwinding: only the bot's part</td><td>Unwinding and closes capped at the bot's own fills; one bot per market keeps that equal to its position.</td><td>cc77d3f6</td></tr>
+<tr><td>Dev overview of infrastructure and bot volume</td><td>dev.valuedesk.so → Bots &amp; servers: live bots of 20, wallets on the socket of 10, SoDEX weight/min, copies, algos, real and practice volume (24 h, all time), users' net PnL, our bot fees, per market, VIP moves.</td><td>e1395567</td></tr>
+<tr><td>Sign once a day max</td><td>Day key: one wallet signature a day; the browser key signs everyday actions; terms and the trading key still take the wallet.</td><td>76de417e</td></tr>
+<tr><td>Event-based steps</td><td>Already so: every 500 ms and on every SoDEX book/trade update and every Binance tick for oracle bots.</td><td>–</td></tr>
+<tr><td>Restart safe, migrations, inherit only its own</td><td>Restart reads all orders again fast (200 ms each); a bot takes over only the position of the bot it replaces; VIP moves carry its book both ways.</td><td>1be20952</td></tr>
+<tr><td>20 bots per server</td><td>Cap 20; up to 10 wallets pushed, the rest by REST, a wallet first when a public print names it.</td><td>e1395567</td></tr>
+<tr><td>VIP: refuse only during a move</td><td>Starts are refused only while a move runs; on VIP bots start there as normal.</td><td>–</td></tr>
+<tr><td>Under-minimum orders impossible</td><td>New bot errors and the executor refuses ('size'); no silent raise.</td><td>cc77d3f6</td></tr>
+<tr><td>Handle all refusals</td><td>Classified (post-only, position, margin, limit, rate, local, nonce, key, halt, price, unknown); only unknown/price count; waits, never stops, last resort close.</td><td>8d57d4c5</td></tr>
+<tr><td>One bot per market, no position, copy or algo; inherit via settings</td><td>Restored; inherit through Instant restart.</td><td>60581496</td></tr>
+<tr><td>Leverage auto from sizing, user-settable, SoDEX cap only</td><td>Auto from free margin; region cap and 3x default removed for bots.</td><td>cc77d3f6</td></tr>
+<tr><td>Start checks visible; errors plain</td><td>"Check passed" lines in Activity; error lines in plain words, server text in our log only.</td><td>a187ac67</td></tr>
+<tr><td>Smarter rate limits, never stop with position or quotes</td><td>Rate and local refusals never counted; last resort closes then stops.</td><td>8d57d4c5</td></tr>
+<tr><td>Executor crash</td><td>Fast re-read of all orders after restart; stray sweep; position check. SoDEX's schedule-cancel (dead-man switch) exists in its docs but cancels every order of the account; not used.</td><td>1be20952</td></tr>
+<tr><td>Closed outside</td><td>Booked at the mark, notice, quotes on.</td><td>1be20952</td></tr>
+<tr><td>All settings hot reload</td><td>Everything but market, type and practice/real saves in place; the bar shows Save, restarts only when needed.</td><td>11ad9038, df579f7e</td></tr>
+<tr><td>Fee tiers + trade page table</td><td>0.3 / 0.2 / 0.1 bp, VIP 0.1 bp; Bots table in the fee schedule.</td><td>1aafe018, dfceb922</td></tr>
+<tr><td>VIP both ways</td><td>Built earlier (46da38f0): back below $1M, once per UTC day; up always.</td><td>46da38f0</td></tr>
+<tr><td>Leverage caps removed</td><td>Bots: SoDEX's market maximum only.</td><td>cc77d3f6</td></tr>
+</table>
+<h3>The UI + code audit (11 findings, all fixed)</h3>
+<ol>
+<li>Stop all → keep cancelled every algo order of the wallet and their stop-losses. Now bots only.</li>
+<li>Clean restart of a bot already closing ended it with the position open. Now it keeps closing; edits wait.</li>
+<li>A grid's new order size stopped applying after its first fill (and margin was counted at the new size). Fixed.</li>
+<li>A stop with another choice than On stop first sent a settings update, which the brake, the terms, the region or a move could block. The choice now rides on the stop.</li>
+<li>Real bots started before the loss-limit rule could not be changed at all. Now they can.</li>
+<li>The margin panel counted a bot at its order size, the executor at SoDEX's minimum. Same now.</li>
+<li>The volatility gate kept resting quotes up to the rest time although it says it pauses at once. Now it pulls the side that adds at once.</li>
+<li>The end time grew by up to 59 min on each save or restart. Fixed.</li>
+<li>Several executor refusal codes had no sentence or button. All mapped.</li>
+<li>The Limits card said "stops and closes" for bots set to keep. Fixed.</li>
+<li>Run again dropped the run time. Fixed.</li>
+</ol>
+</div>
+</body></html>
