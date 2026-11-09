@@ -10,6 +10,8 @@ the web is built by `deploy/release/build-web.sh`.
 | `package.mjs` | writes `<dir>/.vercel/output` from a build: `static/`, `config.json` (the routes), the function |
 | `api-proxy.cjs` | the function behind `/api/*` (Node.js, `hnd1` - Tokyo, next to the instance in ap-northeast-1; `fra1` until 2026-10-23): to `https://<origin>` with the origin secret and the viewer's address |
 | `vercel.test.mjs` | `node --test deploy/vercel/vercel.test.mjs` |
+| `ignore-build.sh` | Vercel's Ignored Build Step: each project builds only its branch, and `main` only when `web-changed.mjs` finds a file of the site changed since the last deployment (`VS_ALWAYS_BUILD=1` builds every push) |
+| `web-changed.mjs` | does a commit range change the site's build input? (both pages' run-time import graph, apps/web, packages, the build and route files); `web-changed.test.mjs` |
 
 ```
 deploy/release/publish-vercel.sh <tag> --out=/c/Temp/valuedesk-deploy            # prepare
