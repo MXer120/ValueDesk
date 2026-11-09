@@ -19,6 +19,8 @@
  * request.
  */
 import { ZERO_ADDRESS, bytesToHex, hashTypedData, hexToBytes, recoverAddress, signDigest, type TypedData } from '../../sodex-core/src/index.ts';
+import { p256 } from '@noble/curves/p256';
+import { sha256 } from '@noble/hashes/sha256';
 import type { RegionPolicy } from './policy.ts';
 import type { CopyView } from './runtime.ts';
 import type { ActivityEntry, CopyMode, CopySettings } from './types.ts';
@@ -178,7 +180,7 @@ const ADDRESS = /^0x[0-9a-f]{40}$/;
  * that the owner's wallet signed exactly these fields. Replay of a nonce is
  * the caller's to refuse (it knows which nonces it has seen).
  */
-export function verifyCopyRequest(r: unknown, o: { executor: string; now?: number; maxAgeMs?: number }): VerifyResult {
+export function verifyCopyRequest(r: unknown, o: { executor: string; now?: number; maxAgeMs?: number; revokedBefore?: (owner: string) => number }): VerifyResult {
   const now = o.now ?? Date.now();
   if (!r || typeof r !== 'object') return { ok: false, error: 'missing signed request' };
   const q = r as Record<string, unknown>;
@@ -192,7 +194,8 @@ export function verifyCopyRequest(r: unknown, o: { executor: string; now?: numbe
   if (typeof q.deadline !== 'string' || !/^\d{1,16}$/.test(q.deadline)) return { ok: false, error: 'deadline must be a decimal string' };
   const chainId = Number(q.chainId);
   if (!Number.isSafeInteger(chainId) || chainId <= 0) return { ok: false, error: 'chainId must be a positive integer' };
-  if (typeof q.signature !== 'string' || !/^0x[0-9a-fA-F]{130}$/.test(q.signature)) return { ok: false, error: 'signature must be 65 bytes of hex' };
+  // 65 bytes: the wallet (or a secp256k1 day key); 64 bytes: a P-256 day key (WebCrypto, r||s).
+  if (typeof q.signature !== 'string' || !/^0x([0-9a-fA-F]{130}|[0-9a-fA-F]{128})$/.test(q.signature)) return { ok: false, error: 'signature must be 65 bytes of hex' };
   const nonce = Number(q.nonce);
   const deadline = Number(q.deadline);
   // Expired: either it waited too long, or the signer's clock is behind - then signing again gives the same answer.
@@ -210,13 +213,16 @@ export function verifyCopyRequest(r: unknown, o: { executor: string; now?: numbe
   if (canonicalJSON(payload) !== q.payload) return { ok: false, error: 'payload is not in canonical form' };
   const req: CopyRequest = { action, owner, executor: o.executor, payload: q.payload, nonce: q.nonce, deadline: q.deadline, chainId };
   const digest = copyRequestDigest(req);
-  let signer: string;
-  try {
-    signer = recoverAddress(hexToBytes(digest), hexToBytes(q.signature)).toLowerCase();
-  } catch {
-    return { ok: false, error: 'the signature cannot be read' };
+  const p256Sig = q.signature.length === 130;
+  let signer = '';
+  if (!p256Sig) {
+    try {
+      signer = recoverAddress(hexToBytes(digest), hexToBytes(q.signature)).toLowerCase();
+    } catch {
+      return { ok: false, error: 'the signature cannot be read' };
+    }
   }
-  if (signer !== owner) {
+  if (p256Sig || signer !== owner) {
     // A day key's signature: the wallet's delegation must name this key, for this executor, and be valid now.
     const d = q.delegation as SignedCopyRequest | undefined;
     if (!d || !DELEGABLE_ACTIONS.has(action)) return { ok: false, error: 'the signature is not from this wallet' };
@@ -224,9 +230,22 @@ export function verifyCopyRequest(r: unknown, o: { executor: string; now?: numbe
     const dv = verifyCopyRequest(d, { executor: o.executor, now, maxAgeMs: o.maxAgeMs });
     if (!dv.ok) return { ok: false, error: `the day key's approval does not hold: ${dv.error}` };
     if (d.owner.toLowerCase() !== owner) return { ok: false, error: 'the day key was approved by another wallet' };
-    const p = dv.payload as { key?: unknown; expiresAt?: unknown };
-    if (typeof p.key !== 'string' || p.key.toLowerCase() !== signer) return { ok: false, error: 'the signature is not from this wallet or its day key' };
+    const p = dv.payload as { key?: unknown; expiresAt?: unknown; alg?: unknown };
+    if (typeof p.key !== 'string') return { ok: false, error: 'the signature is not from this wallet or its day key' };
+    if (p256Sig) {
+      // A P-256 day key (WebCrypto ECDSA with SHA-256 over the digest; its private key never leaves the browser's crypto).
+      if (p.alg !== 'p256') return { ok: false, error: 'the signature is not from this wallet or its day key' };
+      let ok = false;
+      try {
+        ok = p256.verify(hexToBytes(q.signature), sha256(hexToBytes(digest)), hexToBytes(p.key), { lowS: false, prehash: false });
+      } catch {
+        ok = false;
+      }
+      if (!ok) return { ok: false, error: 'the signature is not from this wallet or its day key' };
+    } else if (p.alg !== undefined || p.key.toLowerCase() !== signer) return { ok: false, error: 'the signature is not from this wallet or its day key' };
     if (typeof p.expiresAt !== 'number' || !(p.expiresAt > now) || p.expiresAt - Number(d.nonce) > DELEGATION_TTL_MS + 60_000) return { ok: false, error: 'the day key has expired; approve a new one with your wallet' };
+    // Revoked by the wallet (signed out everywhere): every day key approved before then is refused.
+    if (o.revokedBefore && Number(d.nonce) < o.revokedBefore(owner)) return { ok: false, error: 'this day key was revoked; approve a new one with your wallet' };
   }
   return { ok: true, digest, payload };
 }

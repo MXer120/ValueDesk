@@ -6,6 +6,8 @@
  *   practice   connect, terms
  *   real       connect, terms, fee (the wallet's own bot fee, /me bots.feeTenths), trading key
  */
+import { useState } from 'react';
+import { revokeDayKeysOn } from '../../algo/executorAlgos';
 import { readiness, type LiveCopy } from '../../copy/live';
 import { CopySetupSteps, SetupProgress, copyReady } from '../../copy/CopySetupSheet';
 import { botFeeWords } from '../../bots/presets';
@@ -38,6 +40,16 @@ export function botReady(live: LiveCopy, paper: boolean): { ready: boolean; why:
 
 export function BotSetupSheet({ open, onClose, live, paper }: { open: boolean; onClose: () => void; live: LiveCopy; paper: boolean }) {
   const ready = botReady(live, paper).ready;
+  const [revoke, setRevoke] = useState<'idle' | 'busy' | 'done' | string>('idle');
+  const doRevoke = async () => {
+    setRevoke('busy');
+    try {
+      await revokeDayKeysOn('hosted');
+      setRevoke('done');
+    } catch (e) {
+      setRevoke(e instanceof Error ? e.message : String(e));
+    }
+  };
   return (
     <Modal open={open} title="Bot setup" onClose={onClose} size="md" className="fx cs-sheet">
       <p className="cs-sub">
@@ -46,6 +58,14 @@ export function BotSetupSheet({ open, onClose, live, paper }: { open: boolean; o
       </p>
       <SetupProgress live={live} mode="hosted" paper={paper} bots />
       <CopySetupSteps mode="hosted" live={live} paper={paper} bots />
+      {live.hosted.signedIn && (
+        <p className="cs-sub" role="note">
+          Your wallet signs at most once a day: it approves a key this browser keeps (it cannot be read out), which then
+          signs your bot actions for up to 24 hours. Used a device you no longer trust?{' '}
+          <button type="button" className="bots-link" disabled={revoke === 'busy'} onClick={() => void doRevoke()}>Revoke every day key</button>
+          {revoke === 'done' ? ' Done: every device asks your wallet again.' : revoke !== 'idle' && revoke !== 'busy' ? ` Not revoked: ${revoke}` : ''}
+        </p>
+      )}
       <div className="cs-actions">
         <button type="button" className="fx-cta fx-cta--ghost" onClick={onClose}>{ready ? 'Close' : 'Cancel'}</button>
         <button type="button" className="fx-cta" disabled={!ready} onClick={onClose}>{ready ? 'Done' : 'Finish the steps'}</button>

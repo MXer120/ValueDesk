@@ -221,8 +221,8 @@ test("gate: an account's opening orders stop at 90% of SoDEX's 20/s and 600/min;
 });
 
 test('gate: what a signed write is, from its body', () => {
-  assert.deepEqual(writeShape('DELETE', '/api/v1/perps/trade/orders', '{"accountID":42,"cancels":[{"symbolID":1},{"symbolID":2}]}'), { accountId: 42, orders: 2, priority: 'protect' });
-  assert.deepEqual(writeShape('POST', '/api/v1/perps/trade/orders', '{"accountID":42,"symbolID":1,"orders":[{"reduceOnly":true},{"reduceOnly":true}]}'), { accountId: 42, orders: 2, priority: 'protect' });
+  assert.deepEqual(writeShape('DELETE', '/api/v1/perps/trade/orders', '{"accountID":42,"cancels":[{"symbolID":1},{"symbolID":2}]}'), { accountId: 42, orders: 2, priority: 'protect', symbolId: 1 });
+  assert.deepEqual(writeShape('POST', '/api/v1/perps/trade/orders', '{"accountID":42,"symbolID":1,"orders":[{"reduceOnly":true},{"reduceOnly":true}]}'), { accountId: 42, orders: 2, priority: 'protect', symbolId: 1 });
   assert.equal(writeShape('POST', '/api/v1/perps/trade/orders', '{"accountID":42,"orders":[{"reduceOnly":true},{"reduceOnly":false}]}').priority, 'open', 'a flip (close + open) is an opening');
   assert.equal(writeShape('POST', '/api/v1/perps/trade/leverage', '{"accountID":42}').priority, 'open');
   assert.equal(writeShape('POST', '/x', 'not json').accountId, 0);

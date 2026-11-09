@@ -356,6 +356,7 @@ export function createExecutorServer(svc: ExecutorService, cfg: ExecutorConfig, 
       const body = (await readJson(req)) as { request?: unknown };
       signed = signedOf(body.request);
       if (route === '/session') return send(res, 200, svc.session(body.request, ctx));
+      if (route === '/daykeys/revoke') return send(res, 200, svc.revokeDayKeys(body.request, ctx));
       if (route === '/terms') return send(res, 200, svc.acceptTerms(body.request, ctx));
       if (route === '/site-terms') return send(res, 200, svc.acceptSiteTerms(body.request, ctx));
       if (route === '/keys') return send(res, 200, svc.createKey(body.request, ctx));

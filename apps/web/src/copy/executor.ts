@@ -26,10 +26,9 @@ import {
   type VipMoveView,
   DELEGABLE_ACTIONS,
   DELEGATION_TTL_MS,
-  signCopyRequestWithKey,
+  copyRequestDigest,
 } from '@copy-engine';
-import { bytesToHex, hexToBytes, privateKeyToAddress } from '@sodex-core';
-import { secp256k1 } from '@noble/curves/secp256k1';
+import { bytesToHex, hexToBytes } from '@sodex-core';
 import { getChainId, signTypedData, type Eip1193Provider } from '../wallet';
 
 export const HOSTED_BASE = '/api/copy/v1';
@@ -76,56 +75,82 @@ export async function signCopy(provider: Eip1193Provider, owner: string, executo
   // once a day at most (owner 2026-11-08). The terms and a trading key always take the wallet itself.
   if (DELEGABLE_ACTIONS.has(action)) {
     const day = await dayKey(provider, owner, executor, chainId);
-    if (day) return { ...req, signature: signCopyRequestWithKey(req, day.key), delegation: day.approval };
+    if (day) {
+      const sig = new Uint8Array(await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, day.key, new Uint8Array(hexToBytes(copyRequestDigest(req) as `0x${string}`))));
+      return { ...req, signature: bytesToHex(sig), delegation: day.approval };
+    }
   }
   const signature = await signTypedData(provider, owner, copyRequestTypedData(req));
   return { ...req, signature };
 }
 
 /**
- * The day key: a secp256k1 key made in this browser, approved by the wallet with one 'delegate' signature, valid 24 h
- * (DELEGATION_TTL_MS) for this executor id. Kept in localStorage (a new one is approved once it has less than ten
- * minutes left, or when storage is refused). It can sign only DELEGABLE_ACTIONS; the executor checks the approval on
- * every request (verifyCopyRequest), so nothing about it is stored there.
+ * The day key (owner 2026-11-08, hardened 2026-11-09): a P-256 key made by this browser's WebCrypto as NON-extractable,
+ * so its private part can be used to sign but never read out - not by a script on the page either. The wallet approves
+ * its public key with one 'delegate' signature, valid 24 h (DELEGATION_TTL_MS) for this executor id. Kept in IndexedDB
+ * (a CryptoKey survives there as itself); a new one is approved once it has less than ten minutes left. It signs only
+ * DELEGABLE_ACTIONS; the executor checks the approval on every request (verifyCopyRequest) and refuses approvals from
+ * before a revocation (revokeDayKeys). No WebCrypto or IndexedDB (an old browser, a locked-down profile): the wallet
+ * signs each action as before.
  */
-interface DayKey { key: Uint8Array; approval: SignedCopyRequest; expiresAt: number }
+interface DayKey { key: CryptoKey; approval: SignedCopyRequest; expiresAt: number }
 const dayKeyName = (executor: string, owner: string, chainId: number) => `vd.copy.daykey:${executor}:${chainId}:${owner.toLowerCase()}`;
 const dayKeys = new Map<string, DayKey>();
 const dayKeyPending = new Map<string, Promise<DayKey | null>>();
+const DAY_DB = 'vd-daykeys';
+function dayDb(): Promise<IDBDatabase | null> {
+  return new Promise((resolve) => {
+    try {
+      const open = indexedDB.open(DAY_DB, 1);
+      open.onupgradeneeded = () => open.result.createObjectStore('keys');
+      open.onsuccess = () => resolve(open.result);
+      open.onerror = () => resolve(null);
+    } catch {
+      resolve(null);
+    }
+  });
+}
+async function dayDbDo<T>(mode: IDBTransactionMode, fn: (s: IDBObjectStore) => IDBRequest<T>): Promise<T | null> {
+  const db = await dayDb();
+  if (!db) return null;
+  return new Promise((resolve) => {
+    try {
+      const r = fn(db.transaction('keys', mode).objectStore('keys'));
+      r.onsuccess = () => resolve(r.result);
+      r.onerror = () => resolve(null);
+    } catch {
+      resolve(null);
+    }
+  });
+}
 async function dayKey(provider: Eip1193Provider, owner: string, executor: string, chainId: number): Promise<DayKey | null> {
+  if (typeof crypto === 'undefined' || !crypto.subtle || typeof indexedDB === 'undefined') return null;
   const name = dayKeyName(executor, owner, chainId);
-  const fresh = (d: DayKey | null | undefined): d is DayKey => !!d && d.expiresAt - Date.now() > 10 * 60_000;
+  const fresh = (d: DayKey | null | undefined): d is DayKey => !!d && d.expiresAt - Date.now() > 10 * 60_000 && !!d.key && !!d.approval;
   const held = dayKeys.get(name);
   if (fresh(held)) return held;
-  try {
-    const raw = localStorage.getItem(name);
-    if (raw) {
-      const j = JSON.parse(raw) as { key: string; approval: SignedCopyRequest; expiresAt: number };
-      const d: DayKey = { key: hexToBytes(j.key as `0x${string}`), approval: j.approval, expiresAt: j.expiresAt };
-      if (fresh(d)) {
-        dayKeys.set(name, d);
-        return d;
-      }
-    }
-  } catch {
-    /* unreadable: a new one */
+  const stored = (await dayDbDo<DayKey>('readonly', (s) => s.get(name) as IDBRequest<DayKey>)) ?? null;
+  if (fresh(stored)) {
+    dayKeys.set(name, stored);
+    return stored;
   }
   // One approval at a time: actions that wait on it all use the same key.
   const pending = dayKeyPending.get(name);
   if (pending) return pending;
   const make = (async (): Promise<DayKey | null> => {
-    const key = secp256k1.utils.randomPrivateKey();
-    const address = privateKeyToAddress(key).toLowerCase();
-    const expiresAt = Date.now() + DELEGATION_TTL_MS - 60_000;
-    const req = buildCopyRequest({ action: 'delegate', owner, executor, payload: { key: address, expiresAt }, chainId, ttlMs: DELEGATION_TTL_MS - 60_000 });
-    const signature = await signTypedData(provider, owner, copyRequestTypedData(req));
-    const d: DayKey = { key, approval: { ...req, signature }, expiresAt };
-    dayKeys.set(name, d);
+    let pair: CryptoKeyPair;
     try {
-      localStorage.setItem(name, JSON.stringify({ key: bytesToHex(key), approval: d.approval, expiresAt }));
+      pair = (await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign', 'verify'])) as CryptoKeyPair;
     } catch {
-      /* private mode: kept in this tab only */
+      return null;
     }
+    const pub = bytesToHex(new Uint8Array(await crypto.subtle.exportKey('raw', pair.publicKey)));
+    const expiresAt = Date.now() + DELEGATION_TTL_MS - 60_000;
+    const req = buildCopyRequest({ action: 'delegate', owner, executor, payload: { alg: 'p256', key: pub, expiresAt }, chainId, ttlMs: DELEGATION_TTL_MS - 60_000 });
+    const signature = await signTypedData(provider, owner, copyRequestTypedData(req));
+    const d: DayKey = { key: pair.privateKey, approval: { ...req, signature }, expiresAt };
+    dayKeys.set(name, d);
+    await dayDbDo('readwrite', (s) => s.put(d, name));
     return d;
   })();
   dayKeyPending.set(name, make);
@@ -140,14 +165,22 @@ async function dayKey(provider: Eip1193Provider, owner: string, executor: string
 export function forgetDayKeys(owner: string): void {
   const o = owner.toLowerCase();
   for (const k of [...dayKeys.keys()]) if (k.endsWith(`:${o}`)) dayKeys.delete(k);
-  try {
-    for (let i = localStorage.length - 1; i >= 0; i--) {
-      const k = localStorage.key(i);
-      if (k && k.startsWith('vd.copy.daykey:') && k.endsWith(`:${o}`)) localStorage.removeItem(k);
-    }
-  } catch {
-    /* private mode */
-  }
+  void (async () => {
+    const keys = (await dayDbDo<IDBValidKey[]>('readonly', (s) => s.getAllKeys())) ?? [];
+    for (const k of keys) if (typeof k === 'string' && k.endsWith(`:${o}`)) await dayDbDo('readwrite', (s) => s.delete(k));
+  })();
+}
+
+/**
+ * Revoke every day key of this wallet on an executor, on every device (a wallet signature): approvals signed before
+ * now are refused there from now on. This browser's own are forgotten too.
+ */
+export async function revokeDayKeys(provider: Eip1193Provider, owner: string, executor: string, client: ExecutorClient): Promise<void> {
+  const chainId = await getChainId(provider);
+  const req = buildCopyRequest({ action: 'delegate', owner, executor, payload: { revoke: true }, chainId });
+  const signature = await signTypedData(provider, owner, copyRequestTypedData(req));
+  await client.revokeDayKeys({ ...req, signature });
+  forgetDayKeys(owner);
 }
 
 /**
@@ -317,6 +350,7 @@ export class ExecutorClient {
   /** VIP: start moving this wallet's bots (standard executor), and follow it. */
   vipMove = (request: SignedCopyRequest) => this.call<{ job: VipMoveView }>('POST', '/vip/move', { body: { request } });
   vipJob = (token: string) => this.call<{ job: VipMoveView | null }>('GET', '/vip/move', { token });
+  revokeDayKeys = (request: SignedCopyRequest) => this.call<{ ok: true; revokedBefore: number }>('POST', '/daykeys/revoke', { body: { request } });
   health = () => this.call<{ ok: boolean }>('GET', '/health');
 }
 

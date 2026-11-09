@@ -11,7 +11,7 @@
  */
 import { liveBotsFor, requirePaperAlgo } from './liveAlgos';
 import type { AlgoEvent, AlgoUpdatePatch, AlgoView } from '@copy-engine';
-import { ExecutorClient, ExecutorError, hostedExecutor, selfBase, signCopy } from '../copy/executor';
+import { ExecutorClient, ExecutorError, hostedExecutor, selfBase, signCopy, revokeDayKeys } from '../copy/executor';
 import { requireTermsOrThrow } from '../legal/acceptance';
 import { getLiveCopy, markSignedOut, readiness, type CopyModeId } from '../copy/live';
 import { algoProvider } from './algoBus';
@@ -125,6 +125,18 @@ export async function actOn(mode: ExecutorMode, op: 'pause' | 'resume' | 'cancel
   if (!client || !info) throw new Error('That executor is not connected.');
   const request = await signCopy(provider, owner, info.executorId, 'algo-action', id ? { op, id, ...(o.now ? { now: true } : {}), ...(o.how ? { how: o.how } : {}) } : { op });
   return (await call<{ algos: AlgoView[] }>(client, 'POST', '/algos/action', { body: { request } })).algos;
+}
+
+/**
+ * Revoke every day key of the wallet on that executor, on every device (one wallet signature): approvals signed before
+ * now are refused there from now on (security review 2026-11-09).
+ */
+export async function revokeDayKeysOn(mode: ExecutorMode): Promise<void> {
+  const { owner, provider } = needWallet();
+  const client = clientFor(mode);
+  const info = getLiveCopy()[mode].info;
+  if (!client || !info) throw new Error('That executor is not connected.');
+  await revokeDayKeys(provider, owner, info.executorId, client);
 }
 
 /** Whether that executor can change a running algo (its info names 'algo-update'). */

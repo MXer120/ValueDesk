@@ -674,7 +674,7 @@ export class ExecutorService {
     const termsWide = want === 'accept-terms' && q?.action === 'accept-terms' && q.executor === COPY_TERMS_EXECUTOR;
     // ValueDesk's own terms always name SITE_TERMS_EXECUTOR: one statement, whoever records it.
     const siteTerms = want === 'accept-site-terms';
-    const v = verifyCopyRequest(req, { executor: siteTerms ? SITE_TERMS_EXECUTOR : termsWide ? COPY_TERMS_EXECUTOR : this.executorId });
+    const v = verifyCopyRequest(req, { executor: siteTerms ? SITE_TERMS_EXECUTOR : termsWide ? COPY_TERMS_EXECUTOR : this.executorId, revokedBefore: (o) => Number(this.db.meta(`daykeys-revoked:${o}`) ?? 0) });
     if (!v.ok) throw new ApiError(401, 'signature', v.error);
     const r = req as SignedCopyRequest;
     const wanted = Array.isArray(want) ? want : [want];
@@ -719,6 +719,22 @@ export class ExecutorService {
       payload: (v.payload && typeof v.payload === 'object' ? v.payload : {}) as Record<string, unknown>,
       consent: { action: r.action, digest: v.digest, signature: r.signature, chainId: r.chainId, payload: r.payload, at },
     };
+  }
+
+  /**
+   * Revoke every day key the wallet approved before now (owner 2026-11-09 security review): a wallet-signed 'delegate'
+   * with payload {revoke: true}. A day key is never stored here - its approval travels with each request - so the
+   * revocation is a time: approvals signed before it are refused (verifyCopyRequest revokedBefore). Wallet only.
+   */
+  revokeDayKeys(req: unknown, ctx: RequestContext): { ok: true; revokedBefore: number } {
+    const r = req as Partial<SignedCopyRequest> | null;
+    if (r?.delegation !== undefined) throw new ApiError(401, 'signature', 'Only the wallet itself can revoke its day keys.');
+    const { owner, payload } = this.accept(req, 'delegate', ctx);
+    if (payload.revoke !== true) throw new ApiError(400, 'payload', 'A revocation says {revoke: true}.');
+    const at = Date.now();
+    this.db.setMeta(`daykeys-revoked:${owner}`, String(at));
+    this.deps.log.info('day keys revoked', { owner });
+    return { ok: true, revokedBefore: at };
   }
 
   session(req: unknown, ctx: RequestContext): SessionGrant {
