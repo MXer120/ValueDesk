@@ -8,6 +8,14 @@
  *     back for RETURN_AFTER_MS -> they close and the ring takes over again;
  *   - a restarted producer writes a NEW file: the path is looked at again every second and opened anew;
  *   - a market the feed does not carry is served by the own sockets only.
+ *
+ * A STILL market (owner 2026-11-09, MCD): Binance pushes a book tick only when the book changes, so a quiet market -
+ * a stock perpetual outside US hours - sends nothing for many seconds while its price is perfectly good, and the
+ * engine's 2 s freshness rule (REF_MAX_AGE_MS) held the bot "waiting for the Binance price" for as long as it stayed
+ * still. Now a watched market silent for CONFIRM_AFTER_MS is confirmed by one REST read of Binance's book
+ * (fapi bookTicker, weight 2), at most CONFIRM_MAX markets a round, every CONFIRM_EVERY_MS: the answer is the book as
+ * it stands, so it counts as fresh when it arrives. No answer (Binance down, blocked): nothing is refreshed and the
+ * bot holds as before - a dead feed still never quotes.
  */
 import { existsSync } from 'node:fs';
 import type { Logger, WebSocketFactory } from '../../../../packages/copy-engine/src/io.ts';
@@ -18,6 +26,11 @@ import { RingReader, monoNs } from './ring.ts';
 export const POLL_MS = 2;
 export const FALLBACK_AFTER_MS = 500;
 export const RETURN_AFTER_MS = 3_000;
+export const CONFIRM_AFTER_MS = 1_200;
+export const CONFIRM_EVERY_MS = 1_000;
+export const CONFIRM_MAX = 8;
+export const BINANCE_FAPI = 'https://fapi.binance.com';
+type FetchFn = (url: string, init?: { signal?: AbortSignal }) => Promise<{ ok: boolean; json(): Promise<unknown> }>;
 
 export interface BinanceReferenceOptions {
   /** The shared ring (feed/main.ts DEFAULT_FEED_PATH). */
@@ -26,6 +39,8 @@ export interface BinanceReferenceOptions {
   log: Logger;
   /** false: no timers (tests call poll). */
   autoPoll?: boolean;
+  /** For the REST confirm of a still market (absent: no confirm). */
+  fetch?: FetchFn;
 }
 
 /** SoDEX market -> Binance USD-M symbol, for the own sockets: ETH-USD -> ETHUSDT. */
@@ -47,8 +62,10 @@ export class BinanceReference implements ReferenceSource {
   private aliveSince: number | null = null;
   private poller: ReturnType<typeof setInterval> | null = null;
   private checker: ReturnType<typeof setInterval> | null = null;
+  private confirmer: ReturnType<typeof setInterval> | null = null;
+  private confirming = false;
   /** For the status line: ticks from the ring and from the own sockets. */
-  readonly stats = { ring: 0, own: 0, lost: 0 };
+  readonly stats = { ring: 0, own: 0, lost: 0, confirmed: 0 };
 
   constructor(private readonly o: BinanceReferenceOptions) {}
 
@@ -71,7 +88,8 @@ export class BinanceReference implements ReferenceSource {
   stop(): void {
     if (this.poller) clearInterval(this.poller);
     if (this.checker) clearInterval(this.checker);
-    this.poller = this.checker = null;
+    if (this.confirmer) clearInterval(this.confirmer);
+    this.poller = this.checker = this.confirmer = null;
     this.own?.stop();
     this.own = null;
     this.reader?.close();
@@ -89,6 +107,49 @@ export class BinanceReference implements ReferenceSource {
     this.checker = setInterval(() => this.check(), 250);
     this.poller.unref?.();
     this.checker.unref?.();
+    if (this.o.fetch) {
+      this.confirmer = setInterval(() => void this.confirmStill(), CONFIRM_EVERY_MS);
+      this.confirmer.unref?.();
+    }
+  }
+
+  /**
+   * Watched markets silent for CONFIRM_AFTER_MS: Binance's book read once by REST, the oldest first, CONFIRM_MAX at
+   * most a round (a still market, not a dead feed: see the head comment). One round at a time.
+   */
+  async confirmStill(now = Date.now()): Promise<number> {
+    const f = this.o.fetch;
+    if (!f || this.confirming || !this.watched.size) return 0;
+    const still = [...this.watched]
+      .map((m) => ({ m, at: this.quotes.get(m)?.at ?? 0 }))
+      .filter((x) => now - x.at >= CONFIRM_AFTER_MS)
+      .sort((a, b) => a.at - b.at)
+      .slice(0, CONFIRM_MAX);
+    if (!still.length) return 0;
+    this.confirming = true;
+    let n = 0;
+    try {
+      await Promise.all(still.map(async ({ m }) => {
+        const sym = binanceSymbolOf(m);
+        if (!sym) return;
+        try {
+          const r = await f(`${BINANCE_FAPI}/fapi/v1/ticker/bookTicker?symbol=${sym}`, { signal: AbortSignal.timeout(1_500) });
+          if (!r.ok) return;
+          const j = (await r.json()) as { bidPrice?: unknown; askPrice?: unknown } | null;
+          const bid = Number(j?.bidPrice);
+          const ask = Number(j?.askPrice);
+          if (!(bid > 0) || !(ask > 0) || ask < bid) return;
+          this.set(m, { bid, ask, at: Date.now() });
+          this.stats.confirmed++;
+          n++;
+        } catch {
+          /* no answer: the market stays as it was (stale, so the bot holds) */
+        }
+      }));
+    } finally {
+      this.confirming = false;
+    }
+    return n;
   }
 
   /** Every tick the ring has for a watched market, into the quotes (and the listeners). */

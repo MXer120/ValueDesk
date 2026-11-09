@@ -9,7 +9,8 @@
  * Holding nothing, all three just stop it. A bot already closing offers "Stop now" (it ends, what is left stays).
  * The same menu serves a tile (`compact`: the icon only) and Stop all (`onPick` and `held`: every running bot).
  */
-import { useRef } from 'react';
+import { useRef, useSyncExternalStore } from 'react';
+import { onWalletPrompting, walletPrompting } from '../../wallet';
 import type { AlgoView } from '@copy-engine';
 import { fmtUsd } from '../../format';
 import { usePresence } from '../motion';
@@ -39,13 +40,17 @@ export function StopMenu({ v, ctx, closing, compact, onPick, held: heldAll, labe
   const root = useRef<HTMLDivElement>(null);
   const { open, close, press, hoverProps } = useHoverMenu(root);
   const pres = usePresence(open);
-  const busy = disabled || (!!v && ctx.busy === v.algo.id);
+  const mine = !!v && ctx.busy === v.algo.id;
+  const busy = disabled || mine;
+  // Said, not just greyed out (owner 2026-11-09): the wallet's prompt first, then the stop going out.
+  const signing = useSyncExternalStore(onWalletPrompting, walletPrompting);
+  const doing = mine ? (signing ? 'Waiting for your wallet…' : 'Stopping…') : null;
   const held = heldAll ?? Math.abs(v?.bot?.inventoryUsd ?? 0);
   if (closing && v) {
     // Already closing: one press ends it where it is (its own question says what stays).
     return compact
-      ? <IconButton icon="stop" label="Stop now" className="is-danger" disabled={busy} onClick={() => void ctx.stop(v, 'now')} />
-      : <button type="button" className="tf-btn is-danger is-sm" disabled={busy} onClick={() => void ctx.stop(v, 'now')}><Icon name="stop" size={14} />Stop now</button>;
+      ? <IconButton icon="stop" label={doing ?? 'Stop now'} className="is-danger" disabled={busy} aria-busy={mine || undefined} onClick={() => void ctx.stop(v, 'now')} />
+      : <button type="button" className="tf-btn is-danger is-sm" disabled={busy} aria-busy={mine || undefined} onClick={() => void ctx.stop(v, 'now')}>{mine ? <span className="tf-spin" aria-hidden="true" /> : <Icon name="stop" size={14} />}{doing ?? 'Stop now'}</button>;
   }
   const go = (how: StopHow) => () => {
     close();
@@ -55,8 +60,8 @@ export function StopMenu({ v, ctx, closing, compact, onPick, held: heldAll, labe
   const many = !!onPick;
   return (
     <div className={`bots-stopmenu${compact ? ' is-compact' : ''}`} ref={root} {...hoverProps}>
-      <button type="button" className={`tf-btn is-danger is-sm bots-stopmenu__btn${compact ? ' is-icon' : ''}${open ? ' is-open' : ''}`} disabled={busy} aria-haspopup="menu" aria-expanded={open} aria-label={compact ? label : undefined} title={compact ? label : undefined} onClick={press}>
-        <Icon name="stop" size={14} />{!compact && label}
+      <button type="button" className={`tf-btn is-danger is-sm bots-stopmenu__btn${compact ? ' is-icon' : ''}${open ? ' is-open' : ''}`} disabled={busy} aria-haspopup="menu" aria-expanded={open} aria-label={compact ? doing ?? label : undefined} title={compact ? doing ?? label : undefined} aria-busy={mine || undefined} onClick={press}>
+        {mine ? <span className="tf-spin" aria-hidden="true" /> : <Icon name="stop" size={14} />}{!compact && (doing ?? label)}
         {!compact && <svg className="bots-stopmenu__chev" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="m4 6 4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>}
       </button>
       {pres.mounted && (
