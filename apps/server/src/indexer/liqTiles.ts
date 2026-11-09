@@ -35,7 +35,7 @@
  */
 import { mark } from './busy.js';
 import { readFileSync } from 'node:fs';
-import { rename, writeFile } from 'node:fs/promises';
+import { open, rename } from 'node:fs/promises';
 import { join } from 'node:path';
 import { setImmediate as nextTurn, setTimeout as pause } from 'node:timers/promises';
 import { dataDir } from '../builder/paths.js';
@@ -383,29 +383,69 @@ function metasChanged(): void {
   saveTimer.unref?.();
 }
 
-/** Write the metas now (a temporary file renamed over the last: never half a file). */
-export async function saveLiqMetas(): Promise<void> {
+/** Metas packed per write of the file (~1.6 MB at 25 numbers each). */
+const SAVE_CHUNK = 8_192;
+let saving: Promise<void> = Promise.resolve();
+
+/**
+ * Write the metas now (a temporary file renamed over the last: never half a file); one write at a time, a second asked
+ * meanwhile writes after it. In slices (2026-11-09: one save was 10.1 s of an API stall, all of it here - every meta
+ * packed into one array of the whole file, ~130 MB at 700,000 metas, and copied once more behind the header, on a heap
+ * near its limit): the metas listed per key, then packed SAVE_CHUNK at a time into one reused array and written, the
+ * thread given back every YIELD_MS. The same bytes as before. A meta is never changed once made (a newer one replaces
+ * it in its map), so the ones listed are written as they were.
+ */
+export function saveLiqMetas(): Promise<void> {
+  saving = saving.catch(() => {}).then(writeMetas);
+  return saving;
+}
+
+async function writeMetas(): Promise<void> {
   const file = metasPath();
   if (!file) return;
+  let since = performance.now();
+  const breathe = async () => {
+    if (performance.now() - since < YIELD_MS) return;
+    await nextTurn();
+    mark('liq:metas');
+    since = performance.now();
+  };
   const keys: Array<[string, number]> = [];
-  let total = 0;
-  for (const [vk, byT] of metas) { keys.push([vk, byT.size]); total += byT.size; }
-  const nums = new Float64Array(total * META_W);
-  let o = 0;
-  for (const byT of metas.values()) {
-    for (const m of byT.values()) {
-      nums[o] = m.t; nums[o + 1] = m.n; nums[o + 2] = m.p; nums[o + 3] = m.st;
-      nums.set(m.sc, o + 4);
-      o += META_W;
-    }
+  const lists: Meta[][] = [];
+  for (const [vk, byT] of [...metas]) {
+    const list = [...byT.values()];
+    keys.push([vk, list.length]);
+    lists.push(list);
+    await breathe();
   }
   const head = Buffer.from(JSON.stringify({ v: METAS_V, w: META_W, keys }), 'utf8');
   const at = Math.ceil((4 + head.length) / 8) * 8;
   const pre = Buffer.alloc(at);
   pre.writeUInt32LE(head.length, 0);
   head.copy(pre, 4);
+  const nums = new Float64Array(SAVE_CHUNK * META_W);
+  const bytes = new Uint8Array(nums.buffer);
   try {
-    await writeFile(`${file}.tmp`, Buffer.concat([pre, Buffer.from(nums.buffer)]));
+    const fh = await open(`${file}.tmp`, 'w');
+    try {
+      await fh.write(pre);
+      let o = 0;
+      for (const list of lists) {
+        for (const m of list) {
+          nums[o] = m.t; nums[o + 1] = m.n; nums[o + 2] = m.p; nums[o + 3] = m.st;
+          nums.set(m.sc, o + 4);
+          o += META_W;
+          if (o === nums.length) {
+            await fh.write(bytes);
+            o = 0;
+            await breathe();
+          }
+        }
+      }
+      if (o) await fh.write(bytes, 0, o * 8);
+    } finally {
+      await fh.close();
+    }
     await rename(`${file}.tmp`, file);
   } catch { /* a read-only directory: the metas are rebuilt after a restart, as before */ }
 }
@@ -706,3 +746,6 @@ export async function liqTileOf(coin: string, venues: readonly Venue[], wallets:
 export function resetWalletTiles(): void {
   walletHists.clear();
 }
+
+/** Benches and tests: the metas held, per coin and venue set (snapshot time -> meta). */
+export const _liqMetasHeld = metas;

@@ -341,3 +341,37 @@ test('on the snapshot reader thread (production): the index and a tile are the s
     T.resetLiqTiles();
   }
 });
+
+test('the metas file is written in slices, byte for byte the one-piece write of before, one save at a time', async () => {
+  const { readFileSync } = await import('node:fs');
+  const T = await import('../src/indexer/liqTiles.js');
+  process.env.VALUESCAN_LIQ_METAS_FILE = join(dir, 'metas-sliced.bin');
+  try {
+    T.resetLiqTiles();
+    // Three chunks' worth and more, over several keys.
+    const W = 21;
+    for (let c = 0; c < 7; c++) {
+      const byT = new Map<number, { t: number; n: number; p: number; st: number; sc: Float64Array }>();
+      for (let k = 0; k < 3_001 + c; k++) byT.set(1e12 + k * 9e5, { t: 1e12 + k * 9e5, n: k, p: c + k / 7, st: 0.01 * (c + 1), sc: Float64Array.from({ length: W }, (_, j) => j * k + c) });
+      T._liqMetasHeld.set(`C${c}|hyperliquid,sodex`, byT);
+    }
+    // The write before (v0.2.198 saveLiqMetas), into a buffer.
+    const keys: Array<[string, number]> = [];
+    let total = 0;
+    for (const [vk, byT] of T._liqMetasHeld) { keys.push([vk, byT.size]); total += byT.size; }
+    const nums = new Float64Array(total * (4 + W));
+    let o = 0;
+    for (const byT of T._liqMetasHeld.values()) for (const m of byT.values()) { nums[o] = m.t; nums[o + 1] = m.n; nums[o + 2] = m.p; nums[o + 3] = m.st; nums.set(m.sc, o + 4); o += 4 + W; }
+    const head = Buffer.from(JSON.stringify({ v: 2, w: 4 + W, keys }), 'utf8');
+    const pre = Buffer.alloc(Math.ceil((4 + head.length) / 8) * 8);
+    pre.writeUInt32LE(head.length, 0);
+    head.copy(pre, 4);
+    const want = Buffer.concat([pre, Buffer.from(nums.buffer)]);
+    // Two asked at once: both done, the file whole.
+    await Promise.all([T.saveLiqMetas(), T.saveLiqMetas()]);
+    assert.ok(readFileSync(process.env.VALUESCAN_LIQ_METAS_FILE).equals(want));
+  } finally {
+    delete process.env.VALUESCAN_LIQ_METAS_FILE;
+    T.resetLiqTiles();
+  }
+});
