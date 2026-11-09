@@ -221,4 +221,10 @@ test('refused: a path that is not pushed, a bad query, too many subscriptions; a
   s.now += THROTTLE_MS;
   await hub.tick();
   assert.equal(slow.got.length, 1);
+  // Drained, it asks again (the same id and path): the whole answer at the current seq.
+  slow.bufferedAmount = 0;
+  hub.message(slow, { op: 'live', id: 'q', path: '/api/vs/flow?coin=BTC' });
+  assert.equal(slow.got.length, 2);
+  assert.equal(slow.got[1]!.t, 'ls');
+  assert.equal(slow.got[1]!.seq, 2);
 });

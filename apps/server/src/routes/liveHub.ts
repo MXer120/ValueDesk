@@ -127,7 +127,12 @@ export class LiveHub {
     if (!ask) { this.refuse(ws, id, 'not pushed'); return; }
     const key = ask.kind === 'flow' ? `flow|${JSON.stringify(ask.ask)}` : `cohort|${JSON.stringify(ask.job)}`;
     let mine = this.clients.get(ws);
-    if (mine?.get(id)?.key === key) return;
+    // The same read again: the browser saw a gap in `seq` (a patch skipped while its socket was full) - the whole answer.
+    if (mine?.get(id)?.key === key) {
+      const held = mine.get(id)!;
+      if (held.body !== null) this.snapshot(held, ws, id);
+      return;
+    }
     if (mine?.has(id)) this.off(ws, id);
     mine = this.clients.get(ws);
     if ((mine?.size ?? 0) >= MAX_SUBS) { this.refuse(ws, id, 'too many subscriptions'); return; }

@@ -180,6 +180,25 @@ function direct<T>(p: Promise<T>, signal?: AbortSignal): Promise<T> {
   });
 }
 
+export type FlowAskQuery = { coin: string; venues: readonly Venue[]; kind?: 'perp' | 'spot'; from: number; to: number; role: FlowRole; side: FlowSide; sort: FlowSort; limit?: number; q?: string };
+
+/**
+ * The paths (and queries) of the reads that are also pushed over the live socket (live/liveSocket.ts, server
+ * routes/liveHub.ts): the socket subscribes to the very string the HTTP read fetches, so both give the route's own answer.
+ */
+export const vsPaths = {
+  flow: (ask: FlowAskQuery) =>
+    `/api/vs/flow${qs({ coin: ask.coin, venues: ask.venues.join(','), kind: ask.kind, from: ask.from, to: ask.to, role: ask.role, side: ask.side, sort: ask.sort, limit: ask.limit, q: ask.q })}`,
+  cohorts: (venues: readonly Venue[], f: CohortFilter) =>
+    `/api/vs/cohorts${qs({ venues: venues.join(','), sector: f.sector ?? undefined, coin: f.coin ?? undefined })}`,
+  cohortDetail: (venues: readonly Venue[], cohort: CohortId, range: CohortRange, f: CohortFilter) =>
+    `/api/vs/cohorts/detail${qs({ venues: venues.join(','), cohort, range, sector: f.sector ?? undefined, coin: f.coin ?? undefined })}`,
+  cohortMap: (venues: readonly Venue[], cohort: CohortId | null) =>
+    `/api/vs/cohorts/map${qs({ venues: venues.join(','), cohort: cohort ?? undefined })}`,
+  cohortFocus: (venues: readonly Venue[], f: CohortFilter, range: CohortRange) =>
+    `/api/vs/cohorts/focus${qs({ venues: venues.join(','), sector: f.sector ?? undefined, coin: f.coin ?? undefined, range })}`,
+};
+
 export const vsApi = {
   /** What the server has read of a SoDEX wallet's own history, for the browser's walk to start from. */
   walletHistory: (address: string, kind: 'trades-perps' | 'trades-spot' | 'funding', signal?: AbortSignal) =>
@@ -283,8 +302,7 @@ export const vsApi = {
     unwrap<{ wallets: string[]; asOf?: number; positions: WalletLiq[] }>(`/api/vs/liquidations/positions${qs({ wallets: wallets.join(','), venues: venues.join(',') })}`, signal),
 
   /** Who traded `coin` in [from, to) (ms) on these venues: every wallet's volume, sides, prices and fills (server flow/read.ts). */
-  flow: (ask: { coin: string; venues: readonly Venue[]; kind?: 'perp' | 'spot'; from: number; to: number; role: FlowRole; side: FlowSide; sort: FlowSort; limit?: number; q?: string }, signal?: AbortSignal) =>
-    unwrap<FlowWindow>(`/api/vs/flow${qs({ coin: ask.coin, venues: ask.venues.join(','), kind: ask.kind, from: ask.from, to: ask.to, role: ask.role, side: ask.side, sort: ask.sort, limit: ask.limit, q: ask.q })}`, signal),
+  flow: (ask: FlowAskQuery, signal?: AbortSignal) => unwrap<FlowWindow>(vsPaths.flow(ask), signal),
   /** One wallet's fills of `coin` in [from, to) (`w`: its address or account id; `venue`: that venue's account only). */
   flowWallet: (ask: { coin: string; venues: readonly Venue[]; kind?: 'perp' | 'spot'; from: number; to: number; w: string; venue?: Venue }, signal?: AbortSignal) =>
     unwrap<WalletFillsBody>(`/api/vs/flow/wallet${qs({ coin: ask.coin, venues: ask.venues.join(','), kind: ask.kind, from: ask.from, to: ask.to, w: ask.w, venue: ask.venue })}`, signal),
@@ -295,15 +313,15 @@ export const vsApi = {
   sodexOiExcluded: (signal?: AbortSignal) => unwrap<SodexOiExcluded>('/api/vs/sodex/oi-excluded', signal),
   /** Every cohort for a set of venues (netted over them), under a sector / coin filter. */
   cohorts: (venues: readonly Venue[], f: CohortFilter, signal?: AbortSignal) =>
-    unwrap<CohortsResponse>(`/api/vs/cohorts${qs({ venues: venues.join(','), sector: f.sector ?? undefined, coin: f.coin ?? undefined })}`, signal),
+    unwrap<CohortsResponse>(vsPaths.cohorts(venues, f), signal),
   cohortDetail: (venues: readonly Venue[], cohort: CohortId, range: CohortRange, f: CohortFilter, signal?: AbortSignal) =>
-    unwrap<CohortDetailResponse>(`/api/vs/cohorts/detail${qs({ venues: venues.join(','), cohort, range, sector: f.sector ?? undefined, coin: f.coin ?? undefined })}`, signal),
+    unwrap<CohortDetailResponse>(vsPaths.cohortDetail(venues, cohort, range, f), signal),
   /** Every asset held, grouped by sector (every wallet, or one cohort's). */
   cohortMap: (venues: readonly Venue[], cohort: CohortId | null, signal?: AbortSignal) =>
-    unwrap<CohortMapResponse>(`/api/vs/cohorts/map${qs({ venues: venues.join(','), cohort: cohort ?? undefined })}`, signal),
+    unwrap<CohortMapResponse>(vsPaths.cohortMap(venues, cohort), signal),
   /** One asset or sector across every cohort. */
   cohortFocus: (venues: readonly Venue[], f: CohortFilter, range: CohortRange, signal?: AbortSignal) =>
-    unwrap<CohortFocusResponse>(`/api/vs/cohorts/focus${qs({ venues: venues.join(','), sector: f.sector ?? undefined, coin: f.coin ?? undefined, range })}`, signal),
+    unwrap<CohortFocusResponse>(vsPaths.cohortFocus(venues, f, range), signal),
   /** A coin's price over a range (Hyperliquid candles: [t, open, high, low, close], and the closes). */
   price: (coin: string, range: CohortRange, signal?: AbortSignal): Promise<{ coin: string; market: string; source: string; interval?: string; points: Array<[number, number]>; candles?: Array<[number, number, number, number, number]> }> =>
     direct(venues.price(coin, range), signal),
