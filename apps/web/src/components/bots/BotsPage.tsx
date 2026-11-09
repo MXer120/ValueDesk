@@ -27,6 +27,7 @@ import { RENEW_KEY_EVENT, RENEW_KEY_FLAG } from '../../bots/routes';
 import { activeCopyTerms } from '../../copy/terms';
 import { liveBotsFor } from '../../algo/liveAlgos';
 import { notify } from '../../toast';
+import { signInWords } from '../../bots/signIn';
 import { useConfirm } from '../Modal';
 import { useBots } from '../../bots/useBots';
 import { BOTS_ON, goBots, useBotsView, type BotsView } from '../../bots/routes';
@@ -155,6 +156,11 @@ export function refusalOf(e: unknown, act: { setup: () => void; deposit: () => v
   }
 }
 
+function signInFailed(e: unknown): void {
+  const w = signInWords(e);
+  if (w) notify('warn', w);
+}
+
 /** One notice: an icon, the sentence, its button and a close. */
 export function BotsNoticeBar({ n, onClose }: { n: BotsNotice; onClose?: () => void }) {
   return (
@@ -263,7 +269,7 @@ function BotsPageOpen({ address, provider }: { address: string | null; provider:
   const [notice, setNotice] = useState<BotsNotice | null>(null);
   useEffect(() => { setNotice(null); }, [address]);
   const signInNow = async () => {
-    try { await signInExecutor('hosted'); setNotice(null); } catch (e) { notify('error', e instanceof Error ? e.message : String(e)); }
+    try { await signInExecutor('hosted'); setNotice(null); } catch (e) { signInFailed(e); }
   };
   const said = (e: unknown) => {
     const n = refusalOf(e, { setup: () => setSetup({ paper: false }), deposit: () => requestDeposit(), beta: applyForBeta, open: (id) => goBots({ page: 'bot', id }), signIn: () => void signInNow(), vip: () => window.location.reload() });
@@ -294,7 +300,7 @@ function BotsPageOpen({ address, provider }: { address: string | null; provider:
     ready,
     seen,
     signIn: async () => {
-      try { await signInExecutor('hosted'); } catch (e) { notify('error', e instanceof Error ? e.message : String(e)); }
+      try { await signInExecutor('hosted'); } catch (e) { signInFailed(e); }
     },
     supported,
     liveAllowed: liveBotsFor(address),
