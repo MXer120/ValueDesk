@@ -97,7 +97,17 @@ const subOf = new WeakMap<WebSocket, string>();
 const perAddress = new Map<string, number>();
 let connections = 0;
 /** Coin -> venue -> changed bucket indices since the last tick; and venues whose coverage moved. */
-const pending = new Map<string, { b: Map<Venue, Set<number>>; c: Set<Venue>; whole: boolean; f: Map<Venue, Set<number>>; fWhole: boolean }>();
+type Pending = Map<string, { b: Map<Venue, Set<number>>; c: Set<Venue>; whole: boolean; f: Map<Venue, Set<number>>; fWhole: boolean }>;
+let pending: Pending = new Map();
+/**
+ * The ticks' sends, worked off a few groups at a time (FAN_SLICE_MS, then the thread given back): every minute each coin's
+ * fine layer comes whole and every group of it gets its window again, a walk of up to a few hundred thousand cells and
+ * a JSON of each - all groups in one piece was part of the API's "liq:feed" stalls (2026-11-09 stall profiles: the feed
+ * and this fan-out 7.7 s in one). The same messages as sent in one piece, in the same order per group.
+ */
+const FAN_SLICE_MS = 8;
+const fanJobs: Array<{ ch: Pending; now: number; gs: Group[]; i: number }> = [];
+let fanning = false;
 let wired = false;
 
 const send = (ws: WebSocket, msg: unknown) => {
@@ -245,12 +255,14 @@ function wire(): void {
     if (!p) { p = { b: new Map(), c: new Set(), whole: false, f: new Map(), fWhole: false }; pending.set(ch.coin, p); }
     if (ch.whole) p.whole = true;
     if (ch.fine?.whole) p.fWhole = true;
-    for (const [v, idx] of ch.fine?.venues ?? []) {
+    // Laid out anew (the coin or its fine layer): the tick sends it whole, the indices are not read (a fine layer whole is
+    // every cell: 250,000 for BTC each minute, put into sets for nothing).
+    for (const [v, idx] of p.fWhole ? [] : ch.fine?.venues ?? []) {
       let s = p.f.get(v);
       if (!s) { s = new Set(); p.f.set(v, s); }
       for (const i of idx) s.add(i);
     }
-    for (const [v, idx] of ch.venues) {
+    for (const [v, idx] of p.whole ? [] : ch.venues) {
       let s = p.b.get(v);
       if (!s) { s = new Set(); p.b.set(v, s); }
       for (const i of idx) s.add(i);
@@ -259,27 +271,9 @@ function wire(): void {
   });
   feed.on('tick', () => {
     mark('liq:ws');
-    const now = Date.now();
-    for (const g of groups.values()) {
-      if (!g.conns.size) continue;
-      const ch = pending.get(g.coin);
-      // The fine layer laid out anew (the price moved a tenth): its step and reach, and the window whole again.
-      if (ch?.fWhole) {
-        const fm = fineMeta(g.coin);
-        if (fm) for (const ws of g.conns) send(ws, { t: 'fm', coin: g.coin, ...fm });
-        const msg = g.fine ? fineSnapshot(g) : null;
-        if (msg) for (const ws of g.conns) send(ws, msg);
-      } else if (ch && g.fine) {
-        const msg = fineDeltaFor(g, ch.f);
-        if (msg) for (const ws of g.conns) send(ws, msg);
-      }
-      // A new layout (the price left half to twice the old) goes out whole.
-      if (ch?.whole || now - g.snapAt >= SNAP_MS) { void pushSnap(g); continue; }
-      if (!ch) continue;
-      const msg = deltaFor(g, ch);
-      if (msg) for (const ws of g.conns) send(ws, msg);
-    }
-    pending.clear();
+    fanJobs.push({ ch: pending, now: Date.now(), gs: [...groups.values()], i: 0 });
+    pending = new Map();
+    if (!fanning) fanOut();
   });
   // Without the feed (the indexer elsewhere or restarting) the snapshots still come, from the minute rows.
   const t = setInterval(() => {
@@ -288,6 +282,45 @@ function wire(): void {
     for (const g of groups.values()) if (g.conns.size && now - g.snapAt >= SNAP_MS) void pushSnap(g);
   }, 5_000);
   t.unref?.();
+}
+
+/** The ticks' sends, a slice at a time. */
+function fanOut(): void {
+  fanning = true;
+  const t0 = performance.now();
+  while (fanJobs.length) {
+    const job = fanJobs[0]!;
+    while (job.i < job.gs.length) {
+      tickGroup(job.gs[job.i++]!, job.ch, job.now);
+      if (performance.now() - t0 >= FAN_SLICE_MS && (job.i < job.gs.length || fanJobs.length > 1)) {
+        setImmediate(() => { mark('liq:ws'); fanOut(); });
+        return;
+      }
+    }
+    fanJobs.shift();
+  }
+  fanning = false;
+}
+
+/** One group's sends for a tick. */
+function tickGroup(g: Group, pend: Pending, now: number): void {
+  if (!g.conns.size) return;
+  const ch = pend.get(g.coin);
+  // The fine layer laid out anew (the price moved a tenth): its step and reach, and the window whole again.
+  if (ch?.fWhole) {
+    const fm = fineMeta(g.coin);
+    if (fm) for (const ws of g.conns) send(ws, { t: 'fm', coin: g.coin, ...fm });
+    const msg = g.fine ? fineSnapshot(g) : null;
+    if (msg) for (const ws of g.conns) send(ws, msg);
+  } else if (ch && g.fine) {
+    const msg = fineDeltaFor(g, ch.f);
+    if (msg) for (const ws of g.conns) send(ws, msg);
+  }
+  // A new layout (the price left half to twice the old) goes out whole.
+  if (ch?.whole || now - g.snapAt >= SNAP_MS) { void pushSnap(g); return; }
+  if (!ch) return;
+  const msg = deltaFor(g, ch);
+  if (msg) for (const ws of g.conns) send(ws, msg);
 }
 
 async function pushSnap(g: Group): Promise<void> {

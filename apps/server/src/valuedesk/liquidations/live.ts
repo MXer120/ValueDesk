@@ -356,6 +356,21 @@ export class LiqLive {
     for (const c of this.coins.values()) { c.whole = true; c.f.whole = true; }
   }
 
+  /** Coins not yet sent whole in this round of resendSome. */
+  private resendTurn: string[] = [];
+  /** The next `n` coins whole at the next flush, each in turn (the minute's refresh spread over the minute). */
+  resendSome(n: number): void {
+    for (let k = 0; k < Math.min(n, this.coins.size); k++) {
+      if (!this.resendTurn.length) this.resendTurn = [...this.coins.keys()].reverse();
+      const c = this.coins.get(this.resendTurn.pop()!);
+      if (c) { c.whole = true; c.f.whole = true; }
+    }
+  }
+
+  get coinCount(): number {
+    return this.coins.size;
+  }
+
   /** The fine layer's changed cells since the last flush (as the buckets: past SEND_MOVE only), or null. */
   private fineDelta(f: FineAgg): NonNullable<LiveDelta['f']> | null {
     if (!f.whole && !f.dirty.size) return null;

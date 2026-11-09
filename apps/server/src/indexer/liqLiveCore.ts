@@ -24,7 +24,11 @@ export const LIQ_LOG_MOVE = 0.0005;
 export const USD_LOG_MOVE = 0.002;
 /** A step's computing gives the thread back this often (the beat and the feed go on between slices). */
 const STEP_SLICE_MS = 30;
-/** Every coin whole this often: the deltas leave out moves under 1% (live.ts SEND_MOVE), this puts the API's copy back to exact. */
+/**
+ * Every coin whole this often: the deltas leave out moves under 1% (live.ts SEND_MOVE), this puts the API's copy back to
+ * exact. A few coins with each send, each once in the interval, not all of them at once (2026-11-09: every coin whole in
+ * one flush was tens of MB the API read in one go each minute - BTC's fine layer alone ~250,000 rows).
+ */
 const WHOLE_EVERY_MS = 60_000;
 /** A tick frame at least this often, deltas or not (the API's `live` wants a frame within 10 s). */
 const TICK_EVERY_MS = 1_000;
@@ -126,6 +130,8 @@ export class LiveCore {
   primed: boolean;
   private barrier: number | null = null;
   private wholeAt = 0;
+  /** Coins owed a whole send (resendSome), a fraction carried to the next send. */
+  private wholeOwed = 0;
   private sentAt = 0;
   private feedTriedAt = 0;
   ms = 0;
@@ -193,7 +199,11 @@ export class LiveCore {
   send(): void {
     const t0 = Date.now();
     if (!this.feed.listening && t0 - this.feedTriedAt >= FEED_RETRY_MS) this.start();
-    if (t0 - this.wholeAt >= WHOLE_EVERY_MS) { this.wholeAt = t0; this.live.resendAll(); }
+    // The first send: every coin (wholeAt 0); then each coin's share of the interval since the last send.
+    this.wholeOwed += Math.min(1, Math.max(0, t0 - this.wholeAt) / WHOLE_EVERY_MS) * this.live.coinCount;
+    this.wholeAt = t0;
+    const n = Math.floor(this.wholeOwed);
+    if (n > 0) { this.wholeOwed -= n; this.live.resendSome(n); }
     const deltas = this.live.flush();
     // 100 ms of slack: the indexer's beat is a 1 s interval, and one a little early must still send its frame.
     if (deltas.length || t0 - this.sentAt >= TICK_EVERY_MS - 100) {
