@@ -26,9 +26,14 @@ import { RingReader, monoNs } from './ring.ts';
 export const POLL_MS = 2;
 export const FALLBACK_AFTER_MS = 500;
 export const RETURN_AFTER_MS = 3_000;
-export const CONFIRM_AFTER_MS = 1_200;
-export const CONFIRM_EVERY_MS = 1_000;
-export const CONFIRM_MAX = 8;
+/**
+ * Confirm a market silent this long, looking every CONFIRM_EVERY_MS: a still book is confirmed every ~0.6-0.85 s, well
+ * inside the engine's 2 s limit (at 1.2 s / 1 s the confirm often came after 2 s: MCD held 312 times an hour, 2026-11-09).
+ * One request per market at a time; weight 2 each, so a still market costs ~170 of Binance's 2400 a minute.
+ */
+export const CONFIRM_AFTER_MS = 600;
+export const CONFIRM_EVERY_MS = 250;
+export const CONFIRM_MAX = 6;
 export const BINANCE_FAPI = 'https://fapi.binance.com';
 type FetchFn = (url: string, init?: { signal?: AbortSignal }) => Promise<{ ok: boolean; json(): Promise<unknown> }>;
 
@@ -63,7 +68,8 @@ export class BinanceReference implements ReferenceSource {
   private poller: ReturnType<typeof setInterval> | null = null;
   private checker: ReturnType<typeof setInterval> | null = null;
   private confirmer: ReturnType<typeof setInterval> | null = null;
-  private confirming = false;
+  /** Markets with a confirm on the way (one at a time each). */
+  private confirming = new Set<string>();
   /** For the status line: ticks from the ring and from the own sockets. */
   readonly stats = { ring: 0, own: 0, lost: 0, confirmed: 0 };
 
@@ -119,19 +125,19 @@ export class BinanceReference implements ReferenceSource {
    */
   async confirmStill(now = Date.now()): Promise<number> {
     const f = this.o.fetch;
-    if (!f || this.confirming || !this.watched.size) return 0;
+    if (!f || !this.watched.size) return 0;
     const still = [...this.watched]
+      .filter((m) => !this.confirming.has(m))
       .map((m) => ({ m, at: this.quotes.get(m)?.at ?? 0 }))
       .filter((x) => now - x.at >= CONFIRM_AFTER_MS)
       .sort((a, b) => a.at - b.at)
-      .slice(0, CONFIRM_MAX);
+      .slice(0, Math.max(0, CONFIRM_MAX - this.confirming.size));
     if (!still.length) return 0;
-    this.confirming = true;
     let n = 0;
-    try {
-      await Promise.all(still.map(async ({ m }) => {
+    await Promise.all(still.map(async ({ m }) => {
         const sym = binanceSymbolOf(m);
         if (!sym) return;
+        this.confirming.add(m);
         try {
           const r = await f(`${BINANCE_FAPI}/fapi/v1/ticker/bookTicker?symbol=${sym}`, { signal: AbortSignal.timeout(1_500) });
           if (!r.ok) return;
@@ -139,16 +145,18 @@ export class BinanceReference implements ReferenceSource {
           const bid = Number(j?.bidPrice);
           const ask = Number(j?.askPrice);
           if (!(bid > 0) || !(ask > 0) || ask < bid) return;
-          this.set(m, { bid, ask, at: Date.now() });
+          // The same book as last seen: a still market, confirmed now (not a stale feed).
+          const prev = this.quotes.get(m);
+          const still = !!prev && prev.bid === bid && prev.ask === ask;
+          this.set(m, { bid, ask, at: Date.now(), still, ...(still ? { stillSince: prev!.stillSince ?? prev!.at } : {}) });
           this.stats.confirmed++;
           n++;
         } catch {
           /* no answer: the market stays as it was (stale, so the bot holds) */
+        } finally {
+          this.confirming.delete(m);
         }
       }));
-    } finally {
-      this.confirming = false;
-    }
     return n;
   }
 

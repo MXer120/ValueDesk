@@ -537,6 +537,7 @@ export class ExecutorService {
     this.signerSweep ??= setInterval(() => {
       this.sweepSigners();
       this.warnKeyExpiry();
+      this.watchBotHealth();
       if (this.canMoveBack() && Date.now() - this.vipSweepAt >= (this.cfg.vipSweepMs ?? VIP_SWEEP_MS)) {
         this.vipSweepAt = Date.now();
         void this.sweepVip().catch((e) => this.deps.log.warn('vip: sweep failed', { error: String(e) }));
@@ -1534,6 +1535,46 @@ export class ExecutorService {
     }
   }
   private readonly keyWarned = new Map<string, true>();
+
+  /**
+   * The operator's alerts for what is ours to fix (owner 2026-11-09), never the user's: every 30 s each running real
+   * bot's Watchdog (runtime botHealth) is read, and a check on our side - its loop, SoDEX's or the oracle's price, the
+   * order updates, how late fills are booked, refusals nothing handles - that is bad on two sweeps in a row (30 s+)
+   * raises a 🚨 FAILURE with the bot, the check and its figure; a 'recovered' follows when it is good again. The user's
+   * own matters (the key, margin, a hold they chose, a pause) never alert. The alerts' own dedupe holds repeats.
+   */
+  watchBotHealth(now = Date.now()): void {
+    const OURS = new Set(['loop', 'book', 'oracle', 'orders', 'fills', 'refusals']);
+    const seen = new Set<string>();
+    for (const a of this.algos.list()) {
+      if (a.spec?.bot !== true || a.spec.paper || FINAL_STATUSES.has(a.status) || a.status === 'paused') continue;
+      const h = this.algos.view(a.id)?.bot?.health;
+      if (!h) continue;
+      for (const c of h.checks) {
+        if (!OURS.has(c.id)) continue;
+        const key = `${a.id}|${c.id}`;
+        const bad = c.state === 'bad' || (c.id === 'refusals' && c.state === 'warn');
+        if (bad) {
+          seen.add(key);
+          const since = this.healthBad.get(key);
+          if (since === undefined) this.healthBad.set(key, { at: now, said: false });
+          else if (!since.said && now - since.at >= 25_000) {
+            since.said = true;
+            this.deps.alerts?.raise('bot-health', `bot:${a.id}:${c.id}`, `${a.spec.symbol} bot ${a.id} of ${shortWallet(a.owner)}: ${c.label} - ${c.value} (for ${Math.round((now - since.at) / 1000)} s).`);
+          }
+        }
+      }
+    }
+    for (const [key, v] of this.healthBad) {
+      if (seen.has(key)) continue;
+      this.healthBad.delete(key);
+      if (v.said) {
+        const [id, check] = key.split('|');
+        this.deps.alerts?.raise('bot-health-ok', `bot:${id}:${check}`, `Bot ${id}: ${check} is healthy again.`);
+      }
+    }
+  }
+  private readonly healthBad = new Map<string, { at: number; said: boolean }>();
 
   /**
    * The wallet's own SoDEX maker fee in bp (GET /perps/accounts/{a}/fee-rate, weight 2), for the engine's booked

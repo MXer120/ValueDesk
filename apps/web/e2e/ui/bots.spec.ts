@@ -143,6 +143,9 @@ h.test('before a wallet: the sidebar Bots group, Overview, latency, Explore and 
 
 h.test('a practice market maker: set up, New bot with the gate, its page, settings, pause, stop, delete - the wallet signs once a day', async ({ page, wallet }) => {
   if (await comingSoon(page)) return;
+  // The live stream (owner 2026-11-09: push, not poll): opened once signed in, and it carries frames.
+  const streams: number[] = [];
+  page.on('response', (r) => { if (r.url().includes('/algos/stream')) streams.push(r.status()); });
   await connectWallet(page);
   await page.getByRole('heading', { name: 'Bots', exact: true }).waitFor();
   await shot(page, 'setup-needed');
@@ -209,6 +212,9 @@ h.test('a practice market maker: set up, New bot with the gate, its page, settin
   assert.ok(await page.locator('.bots-latcard').first().isVisible(), 'the bot has its latency card');
   await page.waitForTimeout(6_000);
   await shot(page, 'bot');
+  await until(page, () => streams.includes(200), 'the bots page holds the live stream open');
+  // The Watchdog is on the bot's page and says how it is.
+  await page.locator('.bots-watchdog').first().waitFor({ state: 'visible' });
 
   // Settings: the Settings tab is the form itself; a size and the gate change on the running bot (Save, one signature,
   // nothing restarts); a market or quoting change would restart it.

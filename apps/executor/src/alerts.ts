@@ -42,7 +42,9 @@ export type AlertKind =
   | 'audit-broken'
   | 'queue-slow'
   | 'vip-move-unknown'
-  | 'vip-key-mismatch';
+  | 'vip-key-mismatch'
+  | 'bot-health'
+  | 'bot-health-ok';
 
 /** Sends one plain-text message; true when it was accepted. Never throws. */
 export type AlertSender = (text: string) => Promise<boolean>;
@@ -72,6 +74,8 @@ const LABEL: Record<AlertKind, string> = {
   'queue-slow': 'CLOSES AND STOPS WAITING',
   'vip-move-unknown': 'VIP MOVE NOT CONFIRMED',
   'vip-key-mismatch': 'VIP KEY DOES NOT MATCH',
+  'bot-health': 'BOT UNHEALTHY (our side)',
+  'bot-health-ok': 'Bot healthy again',
 };
 
 /**
@@ -104,6 +108,8 @@ export const CLASS: Record<AlertKind, AlertClass> = {
   'queue-slow': 'failure',
   'vip-move-unknown': 'failure',
   'vip-key-mismatch': 'failure',
+  'bot-health': 'failure',
+  'bot-health-ok': 'recovered',
 };
 const head = (c: AlertClass, what: string): string => `${LABELS[c]} · ${what}`;
 

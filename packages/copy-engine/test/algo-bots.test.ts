@@ -920,10 +920,17 @@ test('Binance-led maker: holds without a reference; quotes off it; a Binance tic
   // The next step does not put the bid back while fair is under it.
   await step(r, a.id, 500);
   assert.equal(r.ex.side('buy').length, 0);
-  // A reference gone quiet for over 2 s: everything is pulled, and it holds.
-  const v = await step(r, a.id, 2_500);
+  // Quiet past 2 s but under REF_GRACE_MS since the last fair price (owner 2026-11-09, MCD): the ask keeps resting,
+  // nothing new is placed, no hold.
+  const placedBefore = r.ex.placed.length;
+  const g = await step(r, a.id, 2_200);
+  assert.equal(r.ex.side('sell').length, 1, 'a short gap keeps the resting quote');
+  assert.equal(r.ex.placed.length, placedBefore, 'and places nothing new');
+  assert.doesNotMatch(g.statusReason ?? '', /oracle feed is stale/);
+  // Quiet for longer: everything is pulled, and it holds.
+  const v = await step(r, a.id, 1_000);
   assert.equal(r.ex.side('sell').length, 0);
-  assert.match(v.statusReason ?? '', /Binance price/);
+  assert.match(v.statusReason ?? '', /oracle feed is stale/);
 });
 
 test('Binance-led maker: pickier to send than to keep - placeBps and calmBps hold new quotes back; what rests stays until pullBps', async () => {
@@ -1435,4 +1442,119 @@ test('every setting saves in place (owner 2026-11-08): post-only, the oracle, le
   assert.equal((gs.spec as { levels: number }).levels, 4);
   assert.equal((gs.k.gp as number[]).length, 4);
   assert.equal(gs.status, 'running');
+});
+
+/* ------------------------------------------- inventory = SoDEX (owner 2026-11-09, KORU) ----- */
+
+test('cancel-vs-fill race: a print naming the bot as maker books the fill at once; the cancel SoDEX answers OrderNotFound is no failure; the late update adds nothing; inventory = SoDEX throughout', async () => {
+  const r = await rig();
+  const a = await add(r, MM);
+  await step(r, a.id);
+  const bid = r.ex.side('buy')[0]!;
+  const q = Number(bid.quantity);
+  // SoDEX fills the bid; its order update is late (a wallet read by REST). Only the public print arrives now.
+  r.ex.resting.delete(bid.clOrdID);
+  r.ex.position += q;
+  // The public print: account 77 sold into our bid, the bot (account 42) bought as the maker.
+  for (const cb of r.market.printCbs) cb({ symbol: 'BTC-USD', price: Number(bid.price), qty: q, buyer: 42, seller: 77, taker: 'sell', at: Date.now() });
+  await settle();
+  const v1 = r.rt.view(a.id)!;
+  assert.ok(Math.abs((v1.bot?.inventory ?? 0) - r.ex.position) < 1e-12, `inventory ${v1.bot?.inventory} = SoDEX ${r.ex.position} right after the print`);
+  // The bot re-prices; a cancel of the filled bid would come back "OrderNotFound" - it is not asked to (filled in full).
+  const cancel = r.ex.cancel.bind(r.ex);
+  let notFound = 0;
+  r.ex.cancel = async (aa, mm, ids) => {
+    if (ids.includes(bid.clOrdID)) { notFound++; throw new Error('SoDEX did not cancel 1 order: order rejected: OrderNotFound'); }
+    return cancel(aa, mm, ids);
+  };
+  await r.rt.pause(a.id); // pulls every quote it thinks rests
+  await settle();
+  assert.equal(notFound, 0, 'a quote the prints filled in full is never cancelled');
+  // The late update: the same cumulative size, booked once.
+  r.market.order({ clOrdID: bid.clOrdID, status: 'FILLED', filledQty: q, filledValue: q * Number(bid.price), maker: true });
+  await settle();
+  const v2 = r.rt.view(a.id)!;
+  assert.ok(Math.abs((v2.bot?.inventory ?? 0) - r.ex.position) < 1e-12, 'no double count from the late update');
+  const errors = (await r.rt.events(a.id, { limit: 500 })).filter((x) => x.kind === 'error');
+  assert.equal(errors.length, 0, errors.map((x) => x.text).join(' | '));
+});
+
+test('a cancel SoDEX answers "OrderNotFound" is gone, not failed: no error, no retry, settled from SoDEX\'s record', async () => {
+  const r = await rig();
+  const a = await add(r, MM);
+  await step(r, a.id);
+  const ask = r.ex.side('sell')[0]!;
+  const cancel = r.ex.cancel.bind(r.ex);
+  let asked = 0;
+  r.ex.cancel = async (aa, mm, ids) => {
+    if (ids.includes(ask.clOrdID)) { asked++; r.ex.resting.delete(ask.clOrdID); throw new Error('SoDEX did not cancel 1 order: order rejected: OrderNotFound'); }
+    return cancel(aa, mm, ids);
+  };
+  await r.rt.pause(a.id); // pulls every quote: the ask's cancel is answered OrderNotFound
+  await settle();
+  await step(r, a.id, 4_000);
+  await step(r, a.id, 4_000);
+  await step(r, a.id, 4_000);
+  assert.equal(asked, 1, 'asked once, never retried');
+  const events = await r.rt.events(a.id, { limit: 500 });
+  assert.equal(events.filter((x) => x.kind === 'error').length, 0, 'no "Cancel failed"');
+  assert.ok(events.some((x) => x.kind === 'info' && /already filled or cancelled/.test(x.text)), 'said, not hidden');
+  assert.ok(Math.abs((r.rt.view(a.id)!.bot?.inventory ?? 0) - r.ex.position) < 1e-12);
+});
+
+/* ------------------------------------------------ zero errors of ours, and the Watchdog (owner 2026-11-09) ----- */
+
+test('refusals a bot handles itself are not errors in its activity; the Watchdog counts them; a margin refusal is info', async () => {
+  const r = await rig();
+  const a = await add(r, MM);
+  await step(r, a.id);
+  const [bid, ask] = [r.ex.side('buy')[0]!, r.ex.side('sell')[0]!];
+  // The price moved under a post-only quote (842 of these were "errors" on production), and a rate limit.
+  r.ex.resting.delete(bid.clOrdID);
+  r.market.order({ clOrdID: bid.clOrdID, status: 'REJECTED', reason: 'PostOnly' });
+  r.ex.resting.delete(ask.clOrdID);
+  r.market.order({ clOrdID: ask.clOrdID, status: 'REJECTED', reason: 'too many requests (429)' });
+  await settle();
+  let events = await r.rt.events(a.id, { limit: 500 });
+  assert.equal(events.filter((x) => x.kind === 'error').length, 0, events.filter((x) => x.kind === 'error').map((x) => x.text).join(' | '));
+  // Not hidden either (owner 2026-11-09): each is an info line saying what happened and what the bot did.
+  assert.ok(events.some((x) => x.kind === 'info' && /post-only/.test(x.text)), 'the post-only refusal is said');
+  assert.ok(events.some((x) => x.kind === 'info' && /slow down/.test(x.text)), 'the rate limit is said');
+  const h = r.rt.view(a.id)!.bot!.health!;
+  const ref = h.checks.find((c) => c.id === 'refusals')!;
+  assert.equal(ref.state, 'ok');
+  assert.match(ref.value, /^2 handled$/);
+  // Not enough margin: the user can act on it - an info line, not an error.
+  await step(r, a.id, 4_000);
+  const b2 = r.ex.side('buy')[0];
+  if (b2) {
+    r.ex.resting.delete(b2.clOrdID);
+    r.market.order({ clOrdID: b2.clOrdID, status: 'REJECTED', reason: 'insufficient margin' });
+    await settle();
+    events = await r.rt.events(a.id, { limit: 500 });
+    assert.equal(events.filter((x) => x.kind === 'error').length, 0);
+    assert.ok(events.some((x) => x.kind === 'info' && /not enough free margin/.test(x.text)));
+  }
+});
+
+test('Watchdog: a running bot reports its loop, the service, the SoDEX price, the oracle (off for a book maker), orders, holding, key, refusals and quoting', async () => {
+  const r = await rig();
+  const a = await add(r, MM);
+  await step(r, a.id);
+  const h = r.rt.view(a.id)!.bot!.health!;
+  const by = Object.fromEntries(h.checks.map((c) => [c.id, c]));
+  for (const id of ['loop', 'service', 'book', 'oracle', 'orders', 'position', 'key', 'refusals', 'hold']) assert.ok(by[id], `check ${id}`);
+  assert.equal(by.loop!.state, 'ok');
+  assert.equal(by.oracle!.state, 'off', 'a book maker uses no oracle');
+  assert.equal(by.book!.state, 'ok');
+  assert.equal(by.service!.state, 'ok');
+  // The brake: said as it is.
+  r.brake = 'Updating the executor';
+  assert.equal(r.rt.view(a.id)!.bot!.health!.checks.find((c) => c.id === 'service')!.state, 'warn');
+  r.brake = null;
+  // Stopped: nothing to watch.
+  await r.rt.cancel(a.id, { now: clock });
+  await settle();
+  const hs = r.rt.view(a.id)!.bot!.health!;
+  assert.deepEqual(hs.checks.map((c) => c.state), ['off']);
 });

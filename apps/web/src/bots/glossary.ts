@@ -5,7 +5,7 @@
  */
 export const GLOSSARY = {
   bp: 'Basis point: 0.01% of the price. 1 bp of $1M traded is $100.',
-  oracle: "Binance futures' price of the same coin, used as the fair price. The bot pulls a quote the oracle moved through, and never quotes the side that adds past it.",
+  oracle: "A leading exchange's futures price of the same coin, used as the fair price. The bot pulls a quote the oracle moved through, and never quotes the side that adds past it.",
   touch: 'The best price on SoDEX right now: the highest bid or the lowest ask.',
   tick: "The market's smallest price step. Distances in ticks scale with the market.",
   skew: 'As it holds more, the side that would add to the position steps back from the best price: this many ticks at full holding, fewer below it.',

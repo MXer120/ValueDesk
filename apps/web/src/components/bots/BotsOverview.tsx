@@ -26,6 +26,7 @@ import { StopMenu } from './StopMenu';
 import { AllocationPanel } from './Allocation';
 import { BotsVip } from './BotsVip';
 import { BotsHead, StatePill, isLive, type BotsCtx } from './BotsPage';
+import { FleetWatchdog } from './Watchdog';
 import { Button, EmptyState, Icon, IconButton, Panel, ProgressBar, SearchField, Segmented, Shell, ShellHeader, Skeleton, Sparkline, StatCard, StatusPill } from './kit/kit';
 
 const PAGE = 25;
@@ -463,6 +464,8 @@ export function BotsOverview({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
       </Shell>
 
       </ErrorBoundary>
+
+      <ErrorBoundary name="Watchdog"><FleetWatchdog bots={bots} name={botName} open={(id) => goBots({ page: 'bot', id })} /></ErrorBoundary>
 
       <div className="bots-two">
         <ErrorBoundary name="Latency"><LatencyCard marks={marks} ctx={ctx} /></ErrorBoundary>

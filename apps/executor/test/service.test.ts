@@ -313,3 +313,13 @@ test('self-hosted: pairing locks after 10 wrong codes, and a code typed with spa
   assert.ok(fresh.svc.session(a.sign(fresh.svc.executorId, 'session', {}), { viewerCountry: null, pairingCode: spaced }).token);
   await fresh.cleanup();
 });
+
+test('live stream: a bot is sent again only when something shown of it changes', async () => {
+  const { liveSig } = await import('../src/server.ts');
+  const v = { algo: { status: 'running', statusReason: null, filled: 1 }, working: '2 orders', bot: { volume: 10, netPnl: 0.1, inventory: 0, fills: 1, closing: false, mark: 100, matchedAt: 1, orders: [{ side: 'buy', price: 99 }], health: { checks: [{ state: 'ok', value: 'live' }] } } };
+  const s0 = liveSig(v);
+  assert.equal(liveSig({ ...v }), s0, 'the same view: no frame');
+  assert.notEqual(liveSig({ ...v, bot: { ...v.bot, orders: [{ side: 'buy', price: 98 }] } }), s0, 'an order moved');
+  assert.notEqual(liveSig({ ...v, bot: { ...v.bot, health: { checks: [{ state: 'warn', value: 'feed stale' }] } } }), s0, 'its health changed');
+  assert.notEqual(liveSig({ ...v, algo: { ...v.algo, status: 'paused' } }), s0, 'its status changed');
+});

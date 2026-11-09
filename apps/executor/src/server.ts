@@ -42,6 +42,21 @@ const BODY_LIMIT = 64 * 1024;
 const PREFIX = '/api/copy/v1';
 
 /** The list as GET /algos?series=0 answers it: the same, each bot's book without its series. */
+/**
+ * What of a bot the page shows changes when this does (the live stream sends a bot only then): its state, its
+ * figures, its orders, its health. Not its series (the stream never carries them).
+ */
+export function liveSig(v: { algo: { status: string; statusReason: string | null; filled: number; updatedAt?: number }; working?: string | null; bot?: unknown }): string {
+  const b = v.bot as { volume?: number; netPnl?: number; inventory?: number; fills?: number; closing?: boolean; mark?: number | null; matchedAt?: number | null; orders?: unknown; health?: { checks?: Array<{ state: string; value: string }> } } | null | undefined;
+  return JSON.stringify([v.algo.status, v.algo.statusReason, v.algo.filled, v.working ?? null, b ? [b.volume, b.netPnl, b.inventory, b.fills, b.closing, b.mark, b.matchedAt, b.orders, b.health?.checks?.map((c) => `${c.state}:${c.value}`)] : null]);
+}
+
+/** Live streams open per wallet at most (a page holds one; a few tabs are fine). */
+export const STREAMS_PER_OWNER = 4;
+/** How often a stream looks for changes, and the keep-alive comment that holds proxies open. */
+export const STREAM_EVERY_MS = 250;
+export const STREAM_KEEPALIVE_MS = 15_000;
+
 export function withoutSeries<T extends { algo: { book?: { series: unknown[] } } }>(views: readonly T[]): T[] {
   return views.map((v) => (v.algo.book ? { ...v, algo: { ...v.algo, book: { ...v.algo.book, series: [] } } } : v));
 }
@@ -216,6 +231,8 @@ export function createExecutorServer(svc: ExecutorService, cfg: ExecutorConfig, 
     }
   };
 
+  /** Live streams open per wallet (GET /algos/stream). */
+  const streams = new Map<string, number>();
   const send = (res: ServerResponse, status: number, body: unknown): void => {
     const text = JSON.stringify(body);
     res.writeHead(status, {
@@ -325,6 +342,46 @@ export function createExecutorServer(svc: ExecutorService, cfg: ExecutorConfig, 
       }
       if (req.method === 'GET' && route === '/me') return send(res, 200, svc.me(svc.authenticate(bearer(req)), ctx));
       if (req.method === 'GET' && route === '/consents') return send(res, 200, { consents: svc.consents(svc.authenticate(bearer(req))) });
+      // The bots page's live stream (owner 2026-11-09: "push updates instead of polling"): server-sent events, the
+      // wallet's bots as the page reads them (no series) - all at once, then each again as soon as anything shown of
+      // it changes (looked for every STREAM_EVERY_MS), and a keep-alive comment. The page falls back to its polls.
+      if (req.method === 'GET' && route === '/algos/stream') {
+        const owner = svc.authenticate(bearer(req));
+        const open = streams.get(owner) ?? 0;
+        if (open >= STREAMS_PER_OWNER) throw new ApiError(429, 'streams', 'Too many live streams for this wallet; close a tab.');
+        streams.set(owner, open + 1);
+        res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-store, no-transform', Connection: 'keep-alive', 'X-Accel-Buffering': 'no', 'X-Content-Type-Options': 'nosniff' });
+        const sigs = new Map<string, string>();
+        const push = (): void => {
+          try {
+            const views = withoutSeries(svc.algoList(owner));
+            const changed = views.filter((v) => {
+              const s = liveSig(v as never);
+              if (sigs.get(v.algo.id) === s) return false;
+              sigs.set(v.algo.id, s);
+              return true;
+            });
+            const gone = [...sigs.keys()].filter((id) => !views.some((v) => v.algo.id === id));
+            for (const id of gone) sigs.delete(id);
+            if (changed.length || gone.length) res.write(`data: ${JSON.stringify({ at: Date.now(), algos: changed, gone })}\n\n`);
+          } catch (e) {
+            res.write(`event: error\ndata: ${JSON.stringify({ error: e instanceof ApiError ? e.code : 'error' })}\n\n`);
+          }
+        };
+        push();
+        const tick = setInterval(push, STREAM_EVERY_MS);
+        const alive = setInterval(() => res.write(': keep-alive\n\n'), STREAM_KEEPALIVE_MS);
+        const close = (): void => {
+          clearInterval(tick);
+          clearInterval(alive);
+          const n = (streams.get(owner) ?? 1) - 1;
+          if (n > 0) streams.set(owner, n);
+          else streams.delete(owner);
+        };
+        req.on('close', close);
+        res.on('error', close);
+        return;
+      }
       if (req.method === 'GET' && route === '/algos') {
         const algos = svc.algoList(svc.authenticate(bearer(req)));
         // The Bots page reads every 5 s, and a bot's series is up to 1,500 points: 6 MB a read at 100 bots.

@@ -43,7 +43,7 @@ export const STRATEGY_INFO: Record<Strategy, { name: string; kind: AlgoSpec['kin
     line: 'Rests a buy and a sell at the best price, priced off the oracle, and earns the spread. The lowest cost per $1M we measured.',
     how: [
       'Keeps one buy and one sell resting at the best price, for up to 10 seconds each, then places it again.',
-      'Reads the oracle (Binance futures, where prices move first): a quote the oracle moved through is pulled at once.',
+      'Reads the oracle (a leading futures price, which moves first): a quote the oracle moved through is pulled at once.',
       'Every fill rests on the book: the maker fee, never the spread. What it holds is unwound first.',
     ],
     risk: 'If the price runs one way it holds up to the cap and the move counts against it. The loss limit stops it. It holds while the oracle price is not fresh.',
@@ -62,16 +62,16 @@ export const STRATEGY_INFO: Record<Strategy, { name: string; kind: AlgoSpec['kin
     best: 'BTC: the cheapest in our live runs (about $210 per $1M).',
   },
   lead: {
-    name: 'Binance-led maker',
+    name: 'Oracle-led maker',
     kind: 'mm',
-    line: 'The volume maker, priced off Binance. Pulls a quote the moment Binance moves through it.',
+    line: 'The volume maker, priced off the oracle. Pulls a quote the moment the oracle moves through it.',
     how: [
-      'Reads Binance futures, where prices move first, and SoDEX\'s gap to it: that is the fair price.',
+      'Reads the oracle, which moves first, and SoDEX\'s gap to it: that is the fair price.',
       'Rests at the best price only while it is safely on its side of the fair price, or a set distance from it.',
-      'A Binance move that reaches a quote cancels it at once, before the next step.',
+      'An oracle move that reaches a quote cancels it at once, before the next step.',
     ],
-    risk: 'Like the volume maker: up to the cap either way, the move counts against it, the loss limit stops it. It holds while Binance\'s price is not fresh.',
-    best: 'Liquid coins Binance lists: BTC, ETH, SOL.',
+    risk: 'Like the volume maker: up to the cap either way, the move counts against it, the loss limit stops it. It holds while the oracle price is not fresh.',
+    best: 'Liquid coins with an oracle: BTC, ETH, SOL.',
   },
   grid: {
     name: 'Grid',
@@ -708,4 +708,14 @@ export function cheapestMakerMarkets(
     out.push({ symbol: t.symbol, spreadBps, captureBps, costPerMillion: fees - (captureBps / 2) * 100, volumeUsd: vol });
   }
   return out.sort((a, b) => a.costPerMillion - b.costPerMillion).slice(0, o.limit ?? 6);
+}
+
+/**
+ * The spread limit a bot starts with on a market (owner 2026-11-09): about 1.5x the market's typical spread from
+ * SoDEX's book, rounded up to 5 bp, never under the 20 bp default - so a thin market (KORU ~29 bp) quotes instead of
+ * waiting. null: the market's spread is not known from the book (the default stands).
+ */
+export function suggestedSpreadBps(m: { spreadBps: number; spreadFrom?: 'book' | 'prints' } | null | undefined): number | null {
+  if (!m || m.spreadFrom !== 'book' || !(m.spreadBps > 0)) return null;
+  return Math.max(20, Math.ceil((m.spreadBps * 1.5) / 5) * 5);
 }

@@ -43,6 +43,7 @@ import { flowHoles, kindOf } from './read.js';
 import { coinOf } from '../valuedesk/cohorts/model.js';
 import { symbols as sodexSymbols, type Symbol as SodexSymbol } from '../sodex/symbols.js';
 import { findSymbol } from '../sodex/symbolRef.js';
+import { shareUnder, startSampling, stopSampling, typicalBps } from './bookSpread.js';
 
 export type BotWindow = '24h' | '7d';
 
@@ -68,6 +69,8 @@ export interface BotMarket {
   flowGate?: Array<{ minUsd: number; costBps: number | null; share: number }>;
   /** The spread limit: the same over the fills while the last measured spread was at most maxBps. */
   spreadGate?: Array<{ maxBps: number; costBps: number | null; share: number }>;
+  /** Where spreadBps and the spread gate's shares come from: SoDEX's book (sampled, bookSpread.ts) or the prints. */
+  spreadFrom?: 'book' | 'prints';
   capacityUsdH: number;
   confidence: 'high' | 'medium' | 'low';
   weekdayCostBps: number | null; weekendCostBps: number | null;
@@ -643,18 +646,32 @@ export async function botMarkets(window: BotWindow): Promise<BotMarketsResponse 
   const s = flowReader();
   if (!s) return null;
   askedAt = Date.now();
+  startSampling();
   let c = kept;
   if (!c) c = await refresh(s);
   else if (Date.now() - c.at > BOT_MARKETS_TTL) void refresh(s).catch(() => { /* the kept answer stands */ });
   const lead = await binanceSymbols();
-  const markets = lead ? c.rows[window].map((m) => ({ ...m, lead: lead.has(binanceSymbolOf(m.symbol) ?? '') ? ('binance' as const) : null })) : c.rows[window];
+  const withLead = lead ? c.rows[window].map((m) => ({ ...m, lead: lead.has(binanceSymbolOf(m.symbol) ?? '') ? ('binance' as const) : null })) : c.rows[window];
+  // SoDEX's sampled book, where there are enough samples: the real spread and the share of time a limit lets a bot
+  // quote. The print-based figures only where the book has not been sampled long enough yet.
+  const from = Date.now() - (window === '24h' ? 24 : 7 * 24) * 3_600_000;
+  const markets = withLead.map((m) => {
+    const typical = typicalBps(m.symbol, from);
+    if (typical === null) return { ...m, spreadFrom: 'prints' as const };
+    return {
+      ...m,
+      spreadBps: Math.round(typical * 100) / 100,
+      spreadFrom: 'book' as const,
+      ...(m.spreadGate ? { spreadGate: m.spreadGate.map((g) => ({ ...g, share: Math.round((shareUnder(m.symbol, g.maxBps, from) ?? g.share) * 100) / 100 })) } : {}),
+    };
+  });
   return { at: c.at, window, fee: c.fee, markets };
 }
 
 /** Kept warm every 5 min while someone asked in the last 30 min (nothing runs on a server nobody asks). */
 export function keepBotMarketsWarm(): () => void {
   const timer = setInterval(() => {
-    if (Date.now() - askedAt > 30 * 60_000) return;
+    if (Date.now() - askedAt > 30 * 60_000) { stopSampling(); return; }
     const s = flowReader();
     if (s) void refresh(s).catch(() => { /* next round */ });
   }, BOT_MARKETS_TTL);

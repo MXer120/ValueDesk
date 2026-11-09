@@ -172,3 +172,22 @@ test('routes: a malformed bot address is an unknown bot, not a page that throws'
   assert.deepEqual(botsViewFor('/bots/%E0'), { page: 'bot', id: '%E0' });
   assert.deepEqual(botsViewFor('/bots/a%20b'), { page: 'bot', id: 'a b' });
 });
+
+test('a stopped bot keeps its totals (owner 2026-11-09, KORU): a series read before its fills is replaced by one full read, and never counts 0', () => {
+  const end = T0 + 4 * 60_000;
+  // Read while running: only its start point (it samples every 5 min; it ran 4).
+  const had = { algo: { id: 'k', status: 'running', book: { fills: 0, series: [[T0, 0, 0, 0]] } }, bot: { volume: 0, fills: 0 } } as unknown as AlgoView;
+  // Stopped with fills; the 5 s read carries no series.
+  const stopped = { algo: { id: 'k', status: 'cancelled', endedAt: end, updatedAt: end, book: { fills: 10, series: [] } }, bot: { volume: 426.42, netPnl: -0.6, tradeFees: 0.08, builderFees: 0.0138, fills: 10 } } as unknown as AlgoView;
+  assert.equal(keepSeries([stopped], [had]), null, 'the series from before its end is not kept: the next read asks for it');
+  // Even with that series on screen, the fleet counts the bot's figures at its end, not 0.
+  const shown = { ...stopped, algo: { ...stopped.algo, book: { fills: 10, series: [[T0, 0, 0, 0]] } } } as unknown as AlgoView;
+  const s = fleetSeries([shown], end + 3_600_000, M);
+  const w = fleetWindow(s, -Infinity);
+  assert.ok(Math.abs(w.volume - 426.42) < 1e-6, `volume ${w.volume}`);
+  assert.ok(Math.abs(w.netPnl - -0.6) < 1e-9);
+  // The full read with its end point: kept as it is, the same totals.
+  const full = { ...stopped, algo: { ...stopped.algo, book: { fills: 10, series: [[T0, 0, 0, 0], [end, 426.42, -0.6, 0.0938]] } } } as unknown as AlgoView;
+  assert.ok(keepSeries([stopped], [full]));
+  assert.ok(Math.abs(fleetWindow(fleetSeries([full], end + 3_600_000, M), -Infinity).volume - 426.42) < 1e-6);
+});

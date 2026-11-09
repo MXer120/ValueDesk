@@ -15,6 +15,8 @@
  */
 
 export const LATENCY_BUCKET_MS = 600_000;
+/** The window of the "now" figure (view): the last minute's writes. */
+export const LATENCY_NOW_MS = 60_000;
 export const LATENCY_KEEP_MS = 48 * 3_600_000;
 export type WriteKind = 'place' | 'cancel';
 const KINDS: readonly WriteKind[] = ['place', 'cancel'];
@@ -324,8 +326,14 @@ export class WriteLatency {
         const all = b ? new Hist().merge(b.place).merge(b.cancel) : new Hist();
         buckets.push({ t, n: all.n, p50: all.quantile(0.5), p95: all.quantile(0.95), p99: all.quantile(0.99) });
       }
-      const recent = new Hist();
-      for (const s of log.recent) if (s.at > at - LATENCY_BUCKET_MS) recent.add(s.ms);
+      // "Now" is the last minute (owner 2026-11-09: the figure did not move); with fewer than 5 writes in it, the
+      // last 10 minutes, so a quiet bot still shows a figure.
+      let recent = new Hist();
+      for (const s of log.recent) if (s.at > at - LATENCY_NOW_MS) recent.add(s.ms);
+      if (recent.n < 5) {
+        recent = new Hist();
+        for (const s of log.recent) if (s.at > at - LATENCY_BUCKET_MS) recent.add(s.ms);
+      }
       const hour = emptyBucket();
       for (const [t, b] of log.buckets) {
         if (t + LATENCY_BUCKET_MS <= at - 3_600_000) continue;

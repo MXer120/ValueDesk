@@ -59,3 +59,19 @@ test('at most CONFIRM_MAX markets a round, the stillest first', async () => {
   assert.equal(asked.length, CONFIRM_MAX);
   ref.stop();
 });
+
+test('a still market is marked still (the same book confirmed again), a moved one is not: a still market is no stale feed', async () => {
+  let book = { bidPrice: '277.11', askPrice: '277.27' };
+  const { ref } = make(() => book);
+  ref.watch(['MCD-USD']);
+  await ref.confirmStill();
+  assert.equal(ref.quote('MCD-USD')!.still, false, 'the first read has nothing to compare with');
+  await ref.confirmStill(Date.now() + CONFIRM_AFTER_MS + 10);
+  const q = ref.quote('MCD-USD')!;
+  assert.equal(q.still, true);
+  assert.ok(q.stillSince! <= q.at);
+  book = { bidPrice: '277.20', askPrice: '277.30' };
+  await ref.confirmStill(Date.now() + 2 * (CONFIRM_AFTER_MS + 10));
+  assert.equal(ref.quote('MCD-USD')!.still, false, 'the book moved');
+  ref.stop();
+});

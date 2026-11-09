@@ -14,6 +14,13 @@ export interface RefQuote {
   ask: number;
   /** When it was received, ms since the epoch. */
   at: number;
+  /**
+   * The book had not moved: a REST read confirmed the same best bid and ask (owner 2026-11-09: a still market is no
+   * stale feed). Absent / false: a tick that moved, from the feed.
+   */
+  still?: boolean;
+  /** Since when the price has not moved (ms), while `still`. */
+  stillSince?: number;
 }
 
 export interface ReferenceSource {
@@ -28,6 +35,12 @@ export interface ReferenceSource {
 export const BASIS_HALF_LIFE_MS = 30_000;
 /** A reference quote older than this is no price: the maker holds instead of quoting off it. */
 export const REF_MAX_AGE_MS = 2_000;
+/**
+ * A reference gap shorter than this keeps the maker's resting quotes and places nothing new; only a longer one holds
+ * it and pulls them (owner 2026-11-09: MCD held ~312 times an hour for well under a second each, every hold pulling
+ * and re-placing both quotes). The quotes rest at a fair price of at most this long ago.
+ */
+export const REF_GRACE_MS = 3_000;
 
 /** One market's basis, from pairs of SoDEX and reference mids. */
 export class FairBasis {

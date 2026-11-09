@@ -144,6 +144,26 @@ function viewOf(s: Seed, now: number): AlgoView {
           : [{ side: 'buy' as const, price: onTick(s.price - half, s.price, -1), quantity: Math.round((20 / s.price) * 1e5) / 1e5, tag: 'b' }, { side: 'sell' as const, price: onTick(s.price + half, s.price, 1), quantity: Math.round((20 / s.price) * 1e5) / 1e5, tag: 's' }]
         : [],
       closing: false,
+      // The Watchdog as a healthy example bot reads it (an oracle maker; a grid or book maker has none).
+      health: {
+        at: now,
+        checks: live
+          ? [
+            { id: 'loop', label: 'Bot loop', state: 'ok', value: 'last step 0.4 s ago' },
+            { id: 'service', label: 'ValueDesk service', state: 'ok', value: 'running' },
+            { id: 'book', label: 'SoDEX price', state: 'ok', value: '0.2 s old' },
+            s.strategy === 'grid'
+              ? { id: 'oracle', label: 'Oracle price', state: 'off', value: 'not used by this bot' }
+              : { id: 'oracle', label: 'Oracle price', state: 'ok', value: '0.1 s old' },
+            { id: 'fills', label: 'Fills booked', state: 'ok', value: '180 ms after the trade' },
+            { id: 'orders', label: 'Order updates', state: 'ok', value: 'live from SoDEX, 140 ms late' },
+            { id: 'position', label: 'Holding = SoDEX', state: 'ok', value: 'matched 12 s ago' },
+            { id: 'key', label: 'Trading key', state: 'ok', value: '164 days left' },
+            { id: 'refusals', label: 'SoDEX refusals (1 h)', state: 'ok', value: '3 handled' },
+            { id: 'hold', label: 'Quoting', state: 'ok', value: 'quoting' },
+          ]
+          : [{ id: 'loop', label: 'Bot loop', state: 'off', value: 'stopped' }],
+      },
       // Example split: a bot that earns was taken mostly by uninformed flow.
       takers: vol > 0 ? { t1002: vol * (pnl > 0 ? 0.62 : 0.34), t23342: vol * (pnl > 0 ? 0.24 : 0.55), other: vol * (pnl > 0 ? 0.14 : 0.11) } : undefined,
     },

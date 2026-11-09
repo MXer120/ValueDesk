@@ -29,6 +29,7 @@ import { BotAvatar, BotIcon } from './BotIcon';
 import { botSeries } from './BotSheet';
 import { BotSettings, NameField } from './BotSettings';
 import { StopMenu } from './StopMenu';
+import { Watchdog } from './Watchdog';
 import { Term } from './Term';
 import { BotAllocation } from './Allocation';
 import { TAKER_COLORS, effectiveDraft } from './BotNewPage';
@@ -243,6 +244,13 @@ function leftWords(ms: number): string {
  * position at the price now, as the engine checks it), its end time, its volume target. Each one set gets a bar;
  * the loss bar turns amber past half and red past 80%.
  */
+/** When the holding last matched SoDEX's position (the executor's check every 30 s): ", matches SoDEX 20 s ago". */
+function matchedWords(at: number | null | undefined, now = Date.now()): string {
+  if (!at) return '';
+  const s = Math.max(0, Math.round((now - at) / 1000));
+  return `, matches SoDEX ${s < 60 ? `${s} s` : s < 3600 ? `${Math.round(s / 60)} min` : `${Math.round(s / 3600)} h`} ago`;
+}
+
 export function LimitsProgress({ v }: { v: AlgoView }) {
   const s = v.algo.spec as AlgoView['algo']['spec'] & { maxLossUsd?: number | null; volumeTargetUsd?: number | null; endAt?: number | null };
   const b = v.bot;
@@ -341,7 +349,7 @@ export function BotDetail({ ctx, view, id }: { ctx: BotsCtx; view: BotsView; id:
           <StatCard index={1} label="Volume" value={b ? fmtUsd(b.volume, 0) : DASH} trend={trendVol} hint={b ? `${b.fills.toLocaleString('en-US')} fills · ${Math.round(b.makerShare * 100)}% maker` : undefined} />
           <StatCard index={2} label={<Term t="perMillion">Per $1M</Term>} value={fmtCost(b?.costPerMillion)} valueTone={costTone(b?.costPerMillion)} hint={estBps !== null ? `Estimate ${fmtCost(estBps * 100)}` : undefined} />
           <StatCard index={3} label="Fees paid" value={b ? fmtUsd(b.tradeFees + b.builderFees, 2) : DASH} hint={`SoDEX's and ValueDesk's (yours now ${botFeeWords(ctx.feeTenths)})`} />
-          <StatCard index={4} label={<Term t="holding">Holding</Term>} value={!b || ended ? DASH : fmtUsd(b.inventoryUsd, 2)} hint={!b || ended ? (ended ? 'Stopped: it manages nothing now' : undefined) : b.inventoryUsd > 0.005 ? 'Long' : b.inventoryUsd < -0.005 ? 'Short' : 'Flat'} goal={cap && !ended ? { ratio: Math.min(1, hold / cap), label: `Cap ${fmtUsd(cap, 0)}` } : undefined} />
+          <StatCard index={4} label={<Term t="holding">Holding</Term>} value={!b || ended ? DASH : fmtUsd(b.inventoryUsd, 2)} hint={!b || ended ? (ended ? 'Stopped: it manages nothing now' : undefined) : `${b.inventoryUsd > 0.005 ? 'Long' : b.inventoryUsd < -0.005 ? 'Short' : 'Flat'}${matchedWords(b.matchedAt)}`} goal={cap && !ended ? { ratio: Math.min(1, hold / cap), label: `Cap ${fmtUsd(cap, 0)}` } : undefined} />
         </div>
       </Shell>
 
@@ -360,6 +368,7 @@ export function BotDetail({ ctx, view, id }: { ctx: BotsCtx; view: BotsView; id:
             <FleetChart bots={[v]} title="Performance" />
           </div>
           <aside className="bots-dgrid__side">
+            {!ended && <Watchdog v={v} />}
             <LatencyCard ctx={ctx} bot={v.algo.id} practice={v.algo.spec.paper} compact marks={v.algo.startedAt ? [{ t: v.algo.startedAt, label: 'Started' }] : []} />
             {!ended && (
               <Shell className="bots-sidecard is-plain">

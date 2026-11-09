@@ -1568,3 +1568,15 @@ tr.bots-row.is-blocked:hover, .bots-table tbody tr.bots-row.is-blocked:hover { b
 .cs-keyfacts li { display: flex; align-items: flex-start; gap: 8px; }
 .cs-keyfacts li svg { flex: none; margin-top: 2px; color: var(--tf-muted); }
 .cs-keyfacts .bots-link { font-size: 12px; color: var(--tf-muted); }
+
+/* --- Watchdog (Watchdog.tsx, owner 2026-11-09): one line per check, a pill with its dot and the figure beside it --- */
+.bots-wd { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.bots-wd__row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; }
+.bots-wd__row .tf-pill { flex: none; }
+.bots-wd__v { min-width: 0; font-size: 12px; color: var(--tf-muted); text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.bots-wd__row.is-warn .bots-wd__v, .bots-wd__row.is-bad .bots-wd__v { color: var(--tf-fg); white-space: normal; }
+.bots-wd__row.is-off { opacity: 0.6; }
+.bots-wd__bot { border: 0; padding: 0; background: none; cursor: pointer; flex: none; }
+.bots-wd__bot:hover .tf-pill { filter: brightness(1.15); }
+.bots-watchdog.is-fleet .bots-wd { gap: 6px; }
+.bots-watchdog.is-fleet .bots-wd { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 8px 32px; }

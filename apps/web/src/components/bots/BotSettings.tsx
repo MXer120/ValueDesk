@@ -21,6 +21,7 @@ import { HoursGate } from './HoursGate';
 import { RECIPE, recipeOfDraft } from '../../bots/recipes';
 import type { BotLeverage } from '../../bots/leverage';
 import { Button, Field, Icon, NumberField, Segmented, Slider, StatusPill, Switch, Tabs, TextInput } from './kit/kit';
+import { useTickers } from '../../hooks';
 
 const TARGETS = [null, 50_000, 250_000, 1_000_000] as const;
 const tgtKey = (v: number | null): string => (v === null ? 'none' : TARGETS.includes(v as never) ? String(v) : 'custom');
@@ -45,14 +46,30 @@ function R10Tag({ on, reset }: { on: boolean; reset: () => void }) {
 const SPREAD_PICKS = [10, 20, 50];
 
 /** The spread limit: 10, 20 (the default) or 50 bp, or any whole number of bp typed in (owner 2026-11-08). */
-function SpreadPick({ d, set }: { d: BotDraft; set: (p: Partial<BotDraft>) => void }) {
+function SpreadPick({ d, set, symbol }: { d: BotDraft; set: (p: Partial<BotDraft>) => void; symbol?: string | null }) {
   const v = d.maxSpreadBps ?? 20;
   const [custom, setCustom] = useState(!SPREAD_PICKS.includes(v));
+  // The market's spread now, from SoDEX's book (owner 2026-11-09: KORU's ~29 bp book never quoted under a 20 bp
+  // limit, and the bot said only "held"). The tickers poll is shared with the rest of the app.
+  const tickers = useTickers('perps', { pollMs: 15_000, enabled: !!symbol });
+  const t = symbol ? (tickers.data?.tickers ?? []).find((x) => x.symbol === symbol) : undefined;
+  const bid = Number(t?.bidPx);
+  const ask = Number(t?.askPx);
+  const now = bid > 0 && ask > bid ? ((ask - bid) / ((ask + bid) / 2)) * 10_000 : null;
+  const coin = symbol ? symbol.replace(/-USD$/, '') : '';
   return (
-    <div className="bots-spreadpick">
-      <Segmented label="Pause if the spread is over" value={custom ? 'custom' : String(v)} onChange={(x) => { if (x === 'custom') setCustom(true); else { setCustom(false); set({ maxSpreadBps: Number(x) }); } }} options={[...SPREAD_PICKS.map((b) => ({ value: String(b), label: `${b} bp` })), { value: 'custom', label: 'Custom' }]} />
-      {custom && <NumberField label="Spread limit" hideLabel value={v} onChange={(x) => x !== null && x >= 1 && set({ maxSpreadBps: Math.round(x) })} unit="bp" />}
-    </div>
+    <>
+      <div className="bots-spreadpick">
+        <Segmented label="Pause if the spread is over" value={custom ? 'custom' : String(v)} onChange={(x) => { if (x === 'custom') setCustom(true); else { setCustom(false); set({ maxSpreadBps: Number(x) }); } }} options={[...SPREAD_PICKS.map((b) => ({ value: String(b), label: `${b} bp` })), { value: 'custom', label: 'Custom' }]} />
+        {custom && <NumberField label="Spread limit" hideLabel value={v} onChange={(x) => x !== null && x >= 1 && set({ maxSpreadBps: Math.round(x) })} unit="bp" />}
+      </div>
+      {now !== null && (
+        <p className={`bots-note${now > v ? ' is-warn' : ''}`}>
+          {coin}'s spread is {now.toFixed(1)} bp now
+          {now > v ? `: over this limit, so the bot would wait. Raise it to at least ${Math.ceil((now * 1.2) / 5) * 5} bp, or turn the limit off.` : '.'}
+        </p>
+      )}
+    </>
   );
 }
 
@@ -344,7 +361,7 @@ export function BotSettings({ d, set, range, mark, liveAllowed, noLead, hidePrac
             </Guard>
           )}
           <Guard icon="layers" title="Spread limit" line="Pauses while the gap between the best buy and sell is wider than this (1 bp = 0.01%)" on={d.maxSpreadBps !== null} set={(on) => set({ maxSpreadBps: on ? 20 : null })}>
-            <SpreadPick d={d} set={set} />
+            <SpreadPick d={d} set={set} symbol={d.symbol} />
           </Guard>
           {noLead && d.strategy === 'market' && <p className="bots-note"><StatusPill size="sm">no oracle</StatusPill> The volatility gate needs the oracle and is off here.</p>}
         </div>
