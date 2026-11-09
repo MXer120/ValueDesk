@@ -1094,7 +1094,17 @@ export class ExecutorService {
         }
       });
       const envelope = await step('seal', async () => {
-        const res = await this.deps.fetch(`${vip}/info`, { headers: this.peerHeaders({ Accept: 'application/json' }), signal: AbortSignal.timeout(5_000) });
+        // A read, nothing changes: asked up to 3 times (2026-11-09: one 5 s timeout, the next reads took 0.05-0.5 s, failed a live move).
+        let res!: { ok: boolean; status: number; text(): Promise<string> };
+        for (let i = 0; ; i++) {
+          try {
+            res = await this.deps.fetch(`${vip}/info`, { headers: this.peerHeaders({ Accept: 'application/json' }), signal: AbortSignal.timeout(8_000) });
+            break;
+          } catch (e) {
+            if (i >= 2) throw e;
+            await sleep(this.deps.readGapMs ?? 1_000);
+          }
+        }
         const info = JSON.parse(await res.text()) as { executorId?: string; keyImport?: { publicKey?: string }; vip?: { tier?: string } };
         if (!res.ok || info.vip?.tier !== (down ? 'standard' : 'vip') || !info.keyImport?.publicKey) throw new Error(`The ${there} servers did not answer.`);
         if (info.executorId !== this.executorId) throw new Error(`The ${there} servers run under another executor id.`);
