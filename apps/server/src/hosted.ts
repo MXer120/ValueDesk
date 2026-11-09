@@ -209,6 +209,11 @@ export const HOSTED_ROUTES: readonly HostedRoute[] = [
   { method: 'GET', url: '/api/vs/builder/beta', cls: 'read' },
   // Whether one wallet is on the beta list, for the page (routes/builder.ts): what it offers, never what runs.
   { method: 'GET', url: '/api/vs/beta/listed', cls: 'read' },
+  // Bots (routes/valuedesk.ts, routes/builder.ts): what a new maker bot would pay per market, the market
+  // conditions board, and one wallet's VIP progress. About markets or one asked-for wallet, nobody else.
+  { method: 'GET', url: '/api/vs/bots/markets', cls: 'read' },
+  { method: 'GET', url: '/api/vs/bots/regime', cls: 'read' },
+  { method: 'GET', url: '/api/vs/bots/vip', cls: 'read' },
   // Deep links by SoDEX account id: the index's leaderboard map, on-chain as a fallback.
   { method: 'GET', url: '/api/feed/account', cls: 'upstream' },
   // Global, not per-user (until the web reads alpha-biz directly).
