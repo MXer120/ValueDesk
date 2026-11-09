@@ -530,7 +530,7 @@ export class ExecutorService {
     this.signerSweep ??= setInterval(() => {
       this.sweepSigners();
       this.warnKeyExpiry();
-      if (this.canMoveBack() && Date.now() - this.vipSweepAt >= VIP_SWEEP_MS) {
+      if (this.canMoveBack() && Date.now() - this.vipSweepAt >= (this.cfg.vipSweepMs ?? VIP_SWEEP_MS)) {
         this.vipSweepAt = Date.now();
         void this.sweepVip().catch((e) => this.deps.log.warn('vip: sweep failed', { error: String(e) }));
       }

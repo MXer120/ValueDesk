@@ -105,6 +105,8 @@ export interface ExecutorConfig {
    */
   stdUrl: string | null;
   stdPubkey: string | null;
+  /** How often the VIP side asks about its wallets (EXECUTOR_VIP_SWEEP_MS, default 10 min, at least 30 s: tests and live runs). */
+  vipSweepMs: number;
   localAddress: string | null;
   logLevel: 'debug' | 'info' | 'warn' | 'error';
   /** The executor id requests are signed for; null = the default (hosted: by network; self: its own, kept in its data). */
@@ -270,6 +272,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ExecutorConfig
     vipPubkey: vipPubkeyFrom(env.EXECUTOR_VIP_PUBKEY),
     stdUrl: env.EXECUTOR_STD_URL?.trim() ? builderUrl(env.EXECUTOR_STD_URL) : null,
     stdPubkey: vipPubkeyFrom(env.EXECUTOR_STD_PUBKEY, 'EXECUTOR_STD_PUBKEY'),
+    vipSweepMs: Math.max(30_000, Math.floor(Number(env.EXECUTOR_VIP_SWEEP_MS ?? 600_000)) || 600_000),
     localAddress: env.EXECUTOR_LOCAL_ADDRESS?.trim() || null,
     logLevel: level === 'debug' || level === 'warn' || level === 'error' ? level : 'info',
     executorId,
