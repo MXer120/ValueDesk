@@ -79,9 +79,12 @@ export type LiqClosedWire = [number, string, number, number | null];
 
 export type WriterOp =
   /** `due[i]` = 1: row i's day takes a `fill_dirty` mark if the row changes. `spillId`: a spilled part, left in one transaction with its rows. */
-  | { kind: 'fills'; rows: FillWire[]; due: Uint8Array; spillId?: number }
+  | { kind: 'fills'; rows: FillWire[]; due: Uint8Array; spillId?: number; prio?: boolean }
   | { kind: 'activity'; rows: ActivityWire[]; spillId?: number }
   | { kind: 'liqLog'; t: number; newAddrs: string[]; changed: LiqChangedWire[]; closed: LiqClosedWire[] };
+
+/** A wallet read's rows: written ahead of the stream rows, and named in meta.writer_done never (see the thread's queue). */
+export const isPrio = (op: WriterOp): boolean => op.kind === 'fills' && op.prio === true;
 
 export interface WriterAnswer {
   /** liqLog: the ids given to its new addresses. */
@@ -96,6 +99,8 @@ export interface WriterPending<X = unknown> {
   done: number;
   /** The store's own about the op (what to spill, what to release). */
   extra: X;
+  /** A wallet read's op handed to a new thread after a death: its answers' `changed` is not trusted. */
+  resent?: boolean;
   resolve: (a: WriterAnswer) => void;
   reject: (e: Error) => void;
 }
@@ -199,9 +204,11 @@ port.on('message', (m) => {
   // A liq step goes ahead of the stream rows (after any step already there): behind a backlog of millions of rows it waited
   // hours (2026-11-09, the heatmap's history 4.7 h behind). It may: a step is written again whole where it stands (it
   // replaces its own rows), meta.writer_done names stream ops only, and their order among themselves stays.
-  if (m.kind === 'liqLog') {
+  // A wallet read's rows (prio) the same: its lane waited behind the stream backlog, and the HL reads and the boards with
+  // it (2026-11-09: 110 min). Re-written whole after a death too: an upsert of the same rows changes nothing.
+  if (m.kind === 'liqLog' || m.prio) {
     let at = 0;
-    while (at < queue.length && queue[at].kind === 'liqLog') at++;
+    while (at < queue.length && (queue[at].kind === 'liqLog' || queue[at].prio)) at++;
     queue.splice(at, 0, m);
   } else queue.push(m);
   kick();
@@ -305,7 +312,7 @@ function pump() {
     // The last stream op of the transaction: every one before it (in seq order) is in the file. A step (ahead of them,
     // out of seq order) names nothing: with only a step in the transaction the row stays as it was.
     let last = null;
-    for (let k = out.length - 1; k >= 0 && !last; k--) if (out[k].op.kind !== 'liqLog') last = out[k];
+    for (let k = out.length - 1; k >= 0 && !last; k--) if (out[k].op.kind !== 'liqLog' && !out[k].op.prio) last = out[k];
     if (last) DONE.run(last.seq + ':' + last.to);
   } catch (e) {
     try { db.exec('ROLLBACK'); } catch (x) {}
@@ -455,7 +462,8 @@ export class WriterThread<X = unknown> {
     if (to > p.done) {
       // Rows of an op are answered in order; a range this side has already settled (after a death) is not done twice.
       const lo = Math.max(from, p.done);
-      this.apply(p, lo, to, m.changed ? m.changed.filter((i) => i >= lo) : null);
+      // An op handed on after a death: rows the dead thread had committed come back unchanged - all taken as changed.
+      this.apply(p, lo, to, m.changed && !p.resent ? m.changed.filter((i) => i >= lo) : null);
     }
     if (m.final) this.finish(p, { ids: m.ids });
   }
@@ -522,7 +530,7 @@ export class WriterThread<X = unknown> {
     for (const p of [...this.pending]) {
       if (p.seq > s) break;
       // A liq step's ids came only with its answer: written again where it stands, which replaces the same rows.
-      if (p.op.kind === 'liqLog') continue;
+      if (p.op.kind === 'liqLog' || isPrio(p.op)) continue;
       const upTo = p.seq < s ? p.n : Math.min(p.n, d);
       if (upTo > p.done) this.apply(p, p.done, upTo, null);
       if (p.done >= p.n) this.finish(p, {});
@@ -553,11 +561,19 @@ export class WriterThread<X = unknown> {
       this.hooks.log(`[indexer] writer thread ended (${this.state.lastError ?? 'no error'}): ${left.length} ops (${rows} rows) handed to a new thread`);
       this.start();
       // A liq step again whole (its ids come with its answer; it replaces its own rows), a stream op from its committed row.
-      for (const p of left) this.port!.postMessage({ ...p.op, seq: p.seq, n: p.n, from: p.op.kind === 'liqLog' ? 0 : p.done });
+      for (const p of left) {
+        if (isPrio(p.op)) p.resent = true;
+        this.port!.postMessage({ ...p.op, seq: p.seq, n: p.n, from: p.op.kind === 'liqLog' ? 0 : p.done });
+      }
       return;
     }
     this.hooks.log(`[indexer] writer thread ended (${this.state.lastError ?? 'no error'}): ${left.length} ops written here, and every write until it is back`);
-    for (const p of left) this.runInline(p);
+    for (const p of left) {
+      const from = p.done;
+      this.runInline(p);
+      // A wallet read's rows the dead thread had committed are unchanged when written again here: all taken as changed.
+      if (isPrio(p.op) && p.done >= p.n) { try { this.hooks.rows(p, from, p.n, null); } catch (e) { this.state.lastError = `answer: ${String(e)}`; } }
+    }
     this.retry = setTimeout(() => this.start(), this.o.restartAfterMs ?? RESTART_AFTER_MS);
     this.retry.unref();
   }

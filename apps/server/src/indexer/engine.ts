@@ -1193,7 +1193,7 @@ export class Indexer {
    * what the coverage claims is in the file by then. A stop spills what is not (store.stopWriter).
    */
   private flushThrough(rows: Array<{ venue: Venue; acct: string; hour: number; trades: number; volume: number }>, fills: import('./store.js').FillRow[], at: number): void {
-    const sent = Promise.allSettled([this.store.addActivityAsync(rows), this.store.putFillsAsync(fills)]);
+    const sent = Promise.allSettled([this.store.addActivityAsync(rows), this.store.putFillsAsync(fills, { stream: true })]);
     this.lastFlushAt = at;
     this.flushChain = this.flushChain.then(() => sent).then((r) => {
       const bad = r.find((x): x is PromiseRejectedResult => x.status === 'rejected');
