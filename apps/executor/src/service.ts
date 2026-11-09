@@ -315,6 +315,8 @@ export interface RequestContext {
 export interface ServiceDeps {
   fetch: FetchLike;
   factory: WebSocketFactory;
+  /** Extra sockets for SoDEX account channels, one per local address (EXECUTOR_WS_ADDRESSES): 10 more wallets each. */
+  accountFactories?: WebSocketFactory[];
   log: Logger;
   /** The operator's alerts (alerts.ts); none: nothing is sent. */
   alerts?: Alerts;
@@ -511,6 +513,7 @@ export class ExecutorService {
       sodex: this.sodex,
       network: cfg.network,
       factory: deps.factory,
+      ...(deps.accountFactories?.length ? { accountFactories: deps.accountFactories } : {}),
       log: deps.log,
       sinkFor: (a) => this.algoSink(a),
       // Bots: the bot ladder by 14-day volume; VIP, or beta in its first 30 days, the lowest step (policy.ts botFeeFor).
@@ -2041,6 +2044,16 @@ export class ExecutorService {
     if ((spec.kind === 'mm' || spec.kind === 'grid') && !spec.paper) {
       const other = live.find((x) => (x.spec.kind === 'mm' || x.spec.kind === 'grid') && !x.spec.paper && x.spec.symbol === spec.symbol);
       if (other) throw new ApiError(409, 'bot-market', `A bot of yours already trades ${spec.symbol}${other.spec.label ? ` ("${other.spec.label}")` : ''}. Stop it first, or choose another market.`, { algoId: other.id, symbol: spec.symbol });
+    }
+    // A real bot is always followed on SoDEX's live socket (owner 2026-11-09: "our bots always need to be connected via
+    // ws. Always."): a new wallet beyond the sockets' places (10 per address, EXECUTOR_WS_ADDRESSES) is refused here, and
+    // the operator is told, rather than run on REST reads.
+    if (spec.bot && !spec.paper) {
+      const botWallets = new Set(this.algos.list().filter((x) => x.spec?.bot === true && !x.spec.paper && !FINAL_STATUSES.has(x.status)).map((x) => x.owner));
+      if (!botWallets.has(owner) && botWallets.size + 1 > this.algos.accountCapacity()) {
+        this.deps.alerts?.raise('bot-health', 'slots', `A real bot of ${shortWallet(owner)} was refused: all ${this.algos.accountCapacity()} live socket places are taken by bot wallets. Add an address to EXECUTOR_WS_ADDRESSES.`);
+        throw new ApiError(503, 'bot-capacity', 'Every live connection for real bots on this server is in use right now. Try again in a little while, or start a practice bot.');
+      }
     }
     // Real BOTS: the wallets real algos are on for (the test follower), else a wallet on the beta list (either site).
     if (spec.bot && !spec.paper && !(await this.liveBotFor(owner, ctx))) {

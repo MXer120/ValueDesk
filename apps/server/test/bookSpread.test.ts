@@ -4,7 +4,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { MIN_SAMPLES, addSamples, clearSamples, shareUnder, spreadsOf, typicalBps } from '../src/flow/bookSpread.ts';
+import { MIN_SAMPLES, addSamples, clearSamples, shareUnder, spreadsOf, typicalBps } from '../src/flow/bookSpread.js';
 
 test('a bookTickers answer becomes each market\'s spread in bp; bad rows are left out', () => {
   const m = spreadsOf([{ symbol: 'KORU-USD', bidPx: '7.56', askPx: '7.57' }, { symbol: 'X-USD', bidPx: '0', askPx: '1' }, { symbol: 'Y-USD', bidPx: '2', askPx: '1' }]);

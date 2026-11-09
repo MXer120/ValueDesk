@@ -219,20 +219,53 @@ export class KeyAlgoSink implements AlgoSink {
     }
   }
 
-  async cancel(a: AlgoRecord, market: MarketInfo, clOrdIDs: string[]): Promise<void | string[]> {
-    if (!clOrdIDs.length) return;
+  /**
+   * Cancels of one account that arrive together (a market-wide move pulling a wallet's quotes on several markets) go
+   * out as ONE signed request (owner 2026-11-09, Katana's rule: per-symbol cancels in a burst ran past the rate limit
+   * and pulls came late). Each caller gets its own orders' outcome: the ids SoDEX answered as gone, or an error naming
+   * only its orders that SoDEX did not cancel.
+   */
+  private pending = new Map<number, { a: AlgoRecord; rows: Array<{ symbolID: number; clOrdID: string }>; waiters: Array<{ ids: string[]; resolve: (v: string[]) => void; reject: (e: unknown) => void }> }>();
+  cancel(a: AlgoRecord, market: MarketInfo, clOrdIDs: string[]): Promise<void | string[]> {
+    if (!clOrdIDs.length) return Promise.resolve();
+    return new Promise<string[]>((resolve, reject) => {
+      let b = this.pending.get(a.accountId);
+      if (!b) {
+        b = { a, rows: [], waiters: [] };
+        this.pending.set(a.accountId, b);
+        // The same turn of the event loop: whatever else is cancelled for this account now joins this request.
+        void Promise.resolve().then(() => this.flushCancels(a.accountId));
+      }
+      for (const clOrdID of clOrdIDs) b.rows.push({ symbolID: market.id, clOrdID });
+      b.waiters.push({ ids: [...clOrdIDs], resolve, reject });
+    });
+  }
+
+  private async flushCancels(accountId: number): Promise<void> {
+    const b = this.pending.get(accountId);
+    this.pending.delete(accountId);
+    if (!b) return;
     let data: unknown;
     try {
-      data = await this.signAndSend(perpsActions.cancelOrder(a.accountId, clOrdIDs.map((clOrdID) => ({ symbolID: market.id, clOrdID }))));
+      data = await this.signAndSend(perpsActions.cancelOrder(accountId, b.rows));
     } catch (e) {
       // The whole cancel answered "gone": every order in it was filled or cancelled already.
-      if (e instanceof SodexApiError && GONE.test(e.message)) return [...clOrdIDs];
-      throw e;
+      if (e instanceof SodexApiError && GONE.test(e.message)) {
+        for (const w of b.waiters) w.resolve([...w.ids]);
+        return;
+      }
+      for (const w of b.waiters) w.reject(e);
+      return;
     }
-    // A batch the envelope calls a success can still refuse some rows: those orders rest on, so the caller must know.
+    const gone = new Set(cancelGone(data));
     const bad = cancelFailures(data);
-    if (bad.length) throw new Error(`SoDEX did not cancel ${bad.length} order${bad.length === 1 ? '' : 's'}: ${bad.join('; ')}`);
-    return cancelGone(data);
+    for (const w of b.waiters) {
+      // A batch the envelope calls a success can still refuse some rows: those orders rest on, so their caller must know.
+      // A refused row that names no order cannot be placed: every caller of the request hears of it.
+      const mine = bad.filter((x) => w.ids.some((id) => x.startsWith(`${id}:`)) || !b.rows.some((r) => x.startsWith(`${r.clOrdID}:`)));
+      if (mine.length) w.reject(new Error(`SoDEX did not cancel ${mine.length} order${mine.length === 1 ? '' : 's'}: ${mine.join('; ')}`));
+      else w.resolve(w.ids.filter((id) => gone.has(id)));
+    }
   }
 
   async setLeverage(a: AlgoRecord, market: MarketInfo, leverage: number, margin: MarginChoice): Promise<void> {

@@ -39,6 +39,8 @@
  *                            another server (with EXECUTOR_BUILDER_TOKEN = its VALUESCAN_INTERNAL_TOKEN)
  *   EXECUTOR_LOCAL_ADDRESS   send every request and socket to SoDEX / Hyperliquid from this local
  *                            IP (an address of its own, so another process's rate limit cannot stop copies)
+ *   EXECUTOR_WS_ADDRESSES    hosted: more local addresses (comma-separated, e.g. IPv6 of this server) for extra SoDEX
+ *                            account sockets: SoDEX follows 10 wallets per IP, so each adds 10 bot wallets that stay live
  *   EXECUTOR_ALLOWED_HOSTS   self: host names (comma-separated) besides loopback and IP literals that
  *                            requests may name in their Host header (DNS-rebinding guard)
  *   ALERT_TELEGRAM_TOKEN     the operator's alerts (alerts.ts): a bot token and the chat it writes to,
@@ -108,6 +110,8 @@ export interface ExecutorConfig {
   /** How often the VIP side asks about its wallets (EXECUTOR_VIP_SWEEP_MS, default 10 min, at least 30 s: tests and live runs). */
   vipSweepMs: number;
   localAddress: string | null;
+  /** Extra local addresses for SoDEX account sockets (EXECUTOR_WS_ADDRESSES). */
+  wsAddresses: string[];
   logLevel: 'debug' | 'info' | 'warn' | 'error';
   /** The executor id requests are signed for; null = the default (hosted: by network; self: its own, kept in its data). */
   executorId: string | null;
@@ -274,6 +278,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ExecutorConfig
     stdPubkey: vipPubkeyFrom(env.EXECUTOR_STD_PUBKEY, 'EXECUTOR_STD_PUBKEY'),
     vipSweepMs: Math.max(30_000, Math.floor(Number(env.EXECUTOR_VIP_SWEEP_MS ?? 600_000)) || 600_000),
     localAddress: env.EXECUTOR_LOCAL_ADDRESS?.trim() || null,
+    wsAddresses: (env.EXECUTOR_WS_ADDRESSES ?? '').split(',').map((x) => x.trim()).filter(Boolean),
     logLevel: level === 'debug' || level === 'warn' || level === 'error' ? level : 'info',
     executorId,
     liveAlgos: env.EXECUTOR_LIVE_ALGOS === '1',

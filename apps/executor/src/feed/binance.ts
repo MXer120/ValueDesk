@@ -55,6 +55,8 @@ export interface BinanceBooksOptions {
 
 export class BinanceBooks {
   private sockets: LiveSocket[] = [];
+  /** Each socket's group of symbols (same index as `sockets`). */
+  private groupOf: string[][] = [];
   /** The newest update id per symbol: a copy's later arrival of the same update is dropped. */
   private readonly seen = new Map<string, number>();
   /** Ticks per copy that won the race, and duplicates dropped (for the feed's stats). */
@@ -85,6 +87,7 @@ export class BinanceBooks {
           name: `binance books ${copy}`,
         });
         this.sockets.push(socket);
+        this.groupOf.push(g);
         socket.start();
       }
     }
@@ -93,6 +96,26 @@ export class BinanceBooks {
   stop(): void {
     for (const s of this.sockets) s.stop();
     this.sockets = [];
+    this.groupOf = [];
+  }
+
+  /**
+   * Every group of symbols has a socket up (owner 2026-11-09, Katana's feed rule): then a symbol without a tick is a
+   * market that did not move, not a feed that went quiet. The feed writes its heartbeat only while this holds.
+   */
+  get allUp(): boolean {
+    if (!this.sockets.length) return false;
+    const groups = new Map<string, boolean>();
+    this.sockets.forEach((s, i) => {
+      const k = (this.groupOf[i] ?? []).join(',');
+      groups.set(k, (groups.get(k) ?? false) || s.up);
+    });
+    return [...groups.values()].every(Boolean);
+  }
+
+  /** A socket that carries this Binance symbol is up. */
+  upFor(symbol: string): boolean {
+    return this.sockets.some((s, i) => s.up && (this.groupOf[i] ?? []).includes(symbol));
   }
 
   /** At least one socket is up. */

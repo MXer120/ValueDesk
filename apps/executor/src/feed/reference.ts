@@ -32,6 +32,10 @@ export const RETURN_AFTER_MS = 3_000;
  * One request per market at a time; weight 2 each, so a still market costs ~170 of Binance's 2400 a minute.
  */
 export const CONFIRM_AFTER_MS = 600;
+/** A market's last price is kept as a still market's after this long without a tick, while its source is connected. */
+export const STILL_AFTER_MS = 400;
+/** The ring's heartbeat counts as fresh this long (it beats every 100 ms while every stream is up). */
+export const STILL_BEAT_MS = 500;
 export const CONFIRM_EVERY_MS = 250;
 export const CONFIRM_MAX = 6;
 export const BINANCE_FAPI = 'https://fapi.binance.com';
@@ -160,6 +164,25 @@ export class BinanceReference implements ReferenceSource {
     return n;
   }
 
+  /**
+   * A still market, kept as a price (owner 2026-11-09: "STILL getting held waiting for the Binance price - fix this once
+   * and for all"; Katana's feed rule): while the source of a market is provably connected - the shared ring's heartbeat
+   * is fresh (the producer beats only while every stream is up), or our own socket for it is up - a market that sent
+   * no tick did not move. Its last price is confirmed now (`still`, from `stillSince`). Called on every check (250 ms).
+   */
+  private keepStill(nowMs: number): void {
+    const ringLive = !!this.reader && !this.ownAll && this.reader.alive(STILL_BEAT_MS);
+    for (const m of this.watched) {
+      const q = this.quotes.get(m);
+      if (!q || nowMs - q.at < STILL_AFTER_MS) continue;
+      const sym = binanceSymbolOf(m);
+      const viaRing = ringLive && !!this.reader?.bySymbol.has(m) && !(this.own && this.ownFor.split(',').includes(m));
+      const viaOwn = !!this.own && !!sym && this.own.upFor(sym) && this.ownFor.split(',').includes(m);
+      if (!viaRing && !viaOwn) continue;
+      this.quotes.set(m, { bid: q.bid, ask: q.ask, at: nowMs, still: true, stillSince: q.stillSince ?? q.at });
+    }
+  }
+
   /** Every tick the ring has for a watched market, into the quotes (and the listeners). */
   poll(): void {
     const r = this.reader;
@@ -212,6 +235,7 @@ export class BinanceReference implements ReferenceSource {
         this.o.log.warn('reference: shared feed reopen failed', { error: String(e) });
       }
     }
+    this.keepStill(Date.now());
     const alive = this.reader?.alive(FALLBACK_AFTER_MS) ?? false;
     const missing = [...this.watched].filter((m) => !this.reader?.bySymbol.has(m));
     const now = Date.now();
@@ -282,7 +306,9 @@ export class BinanceReference implements ReferenceSource {
 
   private set(market: string, q: RefQuote): void {
     const prev = this.quotes.get(market);
-    if (prev && prev.at > q.at) return;
+    // Older than what is there is dropped - except over a still market's confirmation (stamped "now" by keepStill or a
+    // REST read): a real tick received after the last real one always counts, so no move is ever lost.
+    if (prev && prev.at > q.at && !(prev.still && q.at >= (prev.stillSince ?? 0))) return;
     this.quotes.set(market, q);
     for (const cb of this.listeners) cb(market);
   }
