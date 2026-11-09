@@ -772,6 +772,12 @@ const SLOW_TX_MS = 5_000;
 const WAL_CHECKPOINT_PAGES = 16_000;
 /** Rows per transaction when a history page is written a slice at a time: 2,000 rows were seconds of the thread. */
 const FILL_SLICE = 50;
+/**
+ * Wallets whose "day rows exist" and "frozen up to" answers are kept (aggReady, frozenTo). At 50,000 a flush naming more
+ * wallets than that emptied them over and over, and every row asked SQLite again: in writeBench.ts (200,000 wallets) those
+ * two lookups were 2.7 s of the 3.2 s this thread spent on a 200,000-row write. A key and a number each: tens of MB.
+ */
+const WALLET_MEMO_MAX = 500_000;
 
 /** A settled stretch of one trader's old days: summed, frozen, then deleted. */
 interface FreezeJob {
@@ -1058,7 +1064,7 @@ export class IndexStore {
    * The bulk writes (fills, activity, the liquidation change log) go to a thread of their own from here on. The running
    * indexer only (worker.ts); off with VALUESCAN_WRITER_THREAD=0 and in the tests unless `force`.
    */
-  startWriter(o: { force?: boolean; targetMs?: number; maxRows?: number; hungMs?: number; restartAfterMs?: number } = {}): boolean {
+  startWriter(o: { force?: boolean; targetMs?: number; maxRows?: number; hungMs?: number; restartAfterMs?: number; cacheKb?: number } = {}): boolean {
     if (this.readOnly || this.path === ':memory:' || this.writer) return false;
     if (!o.force && !writerThreadOn()) return false;
     // Made here, before the thread can be asked to replay a part of it.
@@ -1071,7 +1077,7 @@ export class IndexStore {
       locked: (fn) => this.tx(fn),
       log: (line) => console.warn(line),
     }, {
-      cacheKb: WRITER_CACHE_KB, busyMs: WRITER_BUSY_MS, walLimit: WAL_LIMIT_BYTES,
+      cacheKb: o.cacheKb ?? WRITER_CACHE_KB, busyMs: WRITER_BUSY_MS, walLimit: WAL_LIMIT_BYTES,
       autoCkpt: this.checkpointer?.state.running ? 0 : WAL_CHECKPOINT_PAGES,
       targetMs: o.targetMs, maxRows: o.maxRows, hungMs: o.hungMs, restartAfterMs: o.restartAfterMs,
     });
@@ -1102,12 +1108,16 @@ export class IndexStore {
     const w = this.writer!;
     const due = new Uint8Array(rows.length);
     const days = new Set<string>();
+    // Asked once a wallet: aggIsReady's memo holds 50,000 wallets, and a flush of a busy hour names more.
+    const ready = new Map<string, boolean>();
     for (let i = 0; i < rows.length; i++) {
       const f = rows[i]!;
-      const dk = `${f.venue}|${f.address}|${Math.floor(f.t / DAY)}`;
-      days.add(dk);
+      const wk = `${f.venue}|${f.address}`;
+      days.add(`${wk}|${Math.floor(f.t / DAY)}`);
       // What markDay would decide for a changed row: the thread writes the mark with the fill (frozen days were refused).
-      if (!this.readOnly && this.aggIsReady(f.venue, f.address)) due[i] = 1;
+      let r = ready.get(wk);
+      if (r === undefined) ready.set(wk, (r = !this.readOnly && this.aggIsReady(f.venue, f.address)));
+      if (r) due[i] = 1;
     }
     const list = this.holdDays(days);
     return w.send({ kind: 'fills', rows, due, spillId }, rows.length, { derived, days: list, replay: spillId !== undefined });
@@ -1133,7 +1143,16 @@ export class IndexStore {
     if (this.dropping.size) for (const i of idx) this.keepWallet(rows[i]!.venue, rows[i]!.address, rows[i]!.t);
     // `changed` null (the thread died before its answer): every row is taken as changed; the marks on disk are those of
     // the rows that did, so the others are written here.
-    for (const i of idx) this.markDay(rows[i]!.venue, rows[i]!.address, rows[i]!.t, changed !== null && due[i] === 1);
+    // Once a day, with its earliest changed row: everything markDay decides from a row's time is "some row at or before",
+    // and a day's version is a cache key. Per row it was most of this thread's share of a write (writeBench.ts).
+    const first = new Map<string, number>();
+    for (const i of idx) {
+      const f = rows[i]!;
+      const dk = `${f.venue}|${f.address}|${Math.floor(f.t / DAY)}`;
+      const at = first.get(dk);
+      if (at === undefined || f.t < rows[at]!.t) first.set(dk, i);
+    }
+    for (const i of first.values()) this.markDay(rows[i]!.venue, rows[i]!.address, rows[i]!.t, changed !== null && due[i] === 1);
   }
 
   /** What is left of an op written on this thread (the writer thread is gone). */
@@ -1888,7 +1907,7 @@ export class IndexStore {
     if (d === undefined) {
       const r = this.q('SELECT MAX(day) AS d FROM fill_day WHERE venue = ? AND address = ? AND frozen = 1').get(venue, address) as { d: number | null } | undefined;
       d = r?.d == null ? 0 : r.d + 1;
-      if (this.frozenTo.size > 50_000) this.frozenTo.clear();
+      if (this.frozenTo.size > WALLET_MEMO_MAX) this.frozenTo.clear();
       this.frozenTo.set(k, d);
     }
     return d;
@@ -1957,7 +1976,7 @@ export class IndexStore {
     if (hit !== undefined) return hit;
     const ready = !!this.q('SELECT 1 AS x FROM fill_agg WHERE venue = ? AND address = ?').get(venue, address);
     this.aggReady.set(k, ready);
-    if (this.aggReady.size > 50_000) this.aggReady.clear();
+    if (this.aggReady.size > WALLET_MEMO_MAX) this.aggReady.clear();
     return ready;
   }
 
