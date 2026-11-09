@@ -919,10 +919,17 @@ test('Binance-led maker: holds without a reference; quotes off it; a Binance tic
   // The next step does not put the bid back while fair is under it.
   await step(r, a.id, 500);
   assert.equal(r.ex.side('buy').length, 0);
-  // A reference gone quiet for over 2 s: everything is pulled, and it holds.
-  const v = await step(r, a.id, 2_500);
+  // Quiet past 2 s but under REF_GRACE_MS since the last fair price (owner 2026-11-09, MCD): the ask keeps resting,
+  // nothing new is placed, no hold.
+  const placedBefore = r.ex.placed.length;
+  const g = await step(r, a.id, 2_200);
+  assert.equal(r.ex.side('sell').length, 1, 'a short gap keeps the resting quote');
+  assert.equal(r.ex.placed.length, placedBefore, 'and places nothing new');
+  assert.doesNotMatch(g.statusReason ?? '', /oracle price/);
+  // Quiet for longer: everything is pulled, and it holds.
+  const v = await step(r, a.id, 1_000);
   assert.equal(r.ex.side('sell').length, 0);
-  assert.match(v.statusReason ?? '', /Binance price/);
+  assert.match(v.statusReason ?? '', /oracle price/);
 });
 
 test('Binance-led maker: pickier to send than to keep - placeBps and calmBps hold new quotes back; what rests stays until pullBps', async () => {

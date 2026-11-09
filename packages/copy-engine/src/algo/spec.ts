@@ -737,7 +737,7 @@ export function checkAlgoSpec(input: unknown, depth = 0): AlgoSpecCheck {
         if (o.ref !== 'binance') e.ref = 'The reference must be binance.';
         else {
           (spec as MmSpec).ref = 'binance';
-          if (o.refBps !== undefined && o.refBps !== null && Number(o.refBps) !== 0) (spec as MmSpec).refBps = num(o, 'refBps', 'Distance from the Binance price', L.refBps, e);
+          if (o.refBps !== undefined && o.refBps !== null && Number(o.refBps) !== 0) (spec as MmSpec).refBps = num(o, 'refBps', 'Distance from the oracle price', L.refBps, e);
           if (o.pullBps !== undefined && o.pullBps !== null && Number(o.pullBps) !== 0) (spec as MmSpec).pullBps = num(o, 'pullBps', 'Pull distance', L.pullBps, e);
           if (o.placeBps !== undefined && o.placeBps !== null && Number(o.placeBps) !== 0) (spec as MmSpec).placeBps = num(o, 'placeBps', 'Send distance', L.placeBps, e);
           if (o.calmBps !== undefined && o.calmBps !== null && Number(o.calmBps) !== 0) {

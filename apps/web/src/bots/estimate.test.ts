@@ -157,3 +157,11 @@ test('the spread limit moves the book maker\'s estimate too (it is sent for ever
   const plain = { ...draftFor('maker', 'balanced', 'ETH-USD'), ...RECIPE.touch.params, maxSpreadBps: 5 };
   assert.ok(estimate(plain, M).lines.some((l) => l.id === 'spread'));
 });
+
+test('a maker on the oracle without a rest time is never shown as the book maker (owner 2026-11-09, MCD)', () => {
+  const s = { ...parseAlgoSpec({ kind: 'mm', symbol: 'MCD-USD', orderUsd: 60, maxInventoryUsd: 270, maxLossUsd: 5, ref: 'binance' }), bot: true } as AlgoSpec;
+  assert.notEqual(recipeOfSpec(s), 'touch');
+  assert.equal(RECIPE[recipeOfSpec(s)].oracle, true, 'named as an oracle maker');
+  const book = { ...parseAlgoSpec({ kind: 'mm', symbol: 'MCD-USD', orderUsd: 60, maxInventoryUsd: 270, maxLossUsd: 5 }), bot: true } as AlgoSpec;
+  assert.equal(recipeOfSpec(book), 'touch');
+});

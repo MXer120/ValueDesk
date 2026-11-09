@@ -130,7 +130,10 @@ export const recipesOf = (c: Category): Recipe[] => RECIPES.filter((r) => r.cate
 export function recipeOfSpec(s: AlgoSpec): RecipeId {
   if (s.kind === 'grid') return 'grid';
   if (s.kind !== 'mm') return 'r10';
-  if (!s.ref || !s.restMs) return 'touch';
+  // No oracle: the book maker. An oracle without a rest time (the older oracle-led maker) is closest to R10, never
+  // the book maker - it holds when the oracle goes quiet, which the book maker never does (owner 2026-11-09, MCD).
+  if (!s.ref) return 'touch';
+  if (!s.restMs) return 'r10';
   const gated = (s.stillBps ?? 0) > 0;
   if (s.noFair) return gated ? 'n5g' : 'n5';
   if (gated) return 'r10g';

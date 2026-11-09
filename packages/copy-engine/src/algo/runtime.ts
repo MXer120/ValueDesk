@@ -65,7 +65,7 @@ import { countsAsFailure, refusalKind, refusalWords } from './refusals.ts';
 import type { AlgoStore } from './store.ts';
 import type { AlgoUpdatePatch } from '../api.ts';
 import { bookFill, bookGross, bookInventory, bookNet, bookVolume, botQuoteUsd, costPerMillion, emptyBook, gridPrices, gridQty, gridStart, mmQuotes, pastFair, PATIENT_TAKER_ACCOUNT, INFORMED_TAKER_ACCOUNT, newsAt, quietWindowAt, quietWords, sampleBook, usdWords, windowWords, type GridSide } from './bots.ts';
-import { FairBasis, REF_MAX_AGE_MS, type ReferenceSource } from './reference.ts';
+import { FairBasis, REF_GRACE_MS, REF_MAX_AGE_MS, type ReferenceSource } from './reference.ts';
 import {
   FINAL_STATUSES,
   SLIP_FROM_NAMES,
@@ -433,6 +433,8 @@ export class AlgoRuntime {
   private oracleQuotes = new Map<string, { quotes: VenueQuote[]; at: number; busy: boolean; first: number }>();
   /** The Binance-led makers' basis per market (reference.ts). */
   private fairs = new Map<string, FairBasis>();
+  /** When each market last had a fair price (fairFor): a gap under REF_GRACE_MS keeps the quotes resting. */
+  private fairAt = new Map<string, number>();
   /** The reference's mids of the last seconds per market, oldest first, for calmBps. */
   private refTrail = new Map<string, Array<[number, number]>>();
 
@@ -567,6 +569,7 @@ export class AlgoRuntime {
     if (!b) this.fairs.set(symbol, (b = new FairBasis()));
     const refMid = (r.bid + r.ask) / 2;
     b.update(mid(q), refMid, now);
+    this.fairAt.set(symbol, now);
     return b.fair(refMid);
   }
 
@@ -2213,8 +2216,10 @@ export class AlgoRuntime {
     // The Binance-led maker: no fair price (no feed here, or it went quiet), no quotes.
     const fair = s.ref ? this.fairFor(s.symbol, q, now) : null;
     if (s.ref && fair === null) {
+      // A short gap (a still Binance book between confirms, a blip): what rests stays, nothing new is placed.
+      if (now - (this.fairAt.get(s.symbol) ?? -Infinity) < REF_GRACE_MS) return;
       await this.pullResting(a);
-      return this.hold(a, this.host.reference ? 'Held: waiting for the Binance price (it quotes only with a fresh one).' : 'Held: the Binance-led maker runs on the ValueDesk executor only.');
+      return this.hold(a, this.host.reference ? 'Held: waiting for a fresh oracle price (it quotes only with one).' : 'Held: the oracle maker runs on the ValueDesk executor only.');
     }
     // The move guard: the mid's move over the last 2 s, in ticks; the side it moves toward waits where it would add.
     const ago = (s.moveGuard ?? 0) > 0 ? this.market.priceAgo(s.symbol, 'mid', 2_000) : null;
