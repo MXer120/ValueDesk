@@ -1118,7 +1118,7 @@ export class ExecutorService {
         job.session = answer?.session ?? null;
       });
       await step('finish', async () => {
-        for (const a of bots) await this.algos.handOver(a.id, down ? `Moved back to the standard servers: ${job.reason ?? 'VIP ended'}` : 'Moved to the VIP servers (AWS Tokyo).');
+        for (const a of bots) await this.algos.handOver(a.id, down ? `Moved back to the standard servers: ${job.reason ?? 'VIP ended'}` : 'Moved to the VIP servers.');
         this.db.deleteKeys(owner);
         this.forgetSigner(owner);
         this.db.setMoved(owner, down ? 'standard' : 'vip');

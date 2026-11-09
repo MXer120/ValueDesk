@@ -303,7 +303,10 @@ export async function resumeVipMove(): Promise<void> {
   if (j.state === 'running') {
     setVip({ owner, job: j, error: null, stalled: false });
     void followVipMove(owner);
-  } else if (j.state === 'done') {
+  } else if (j.state === 'done' && j.direction !== 'down' && state.hosted.me?.movedTo === 'vip') {
+    // Only while the standard server still says the wallet's bots are on VIP: after a move back its last job is still
+    // the old move up, and following that sent the page to VIP again, and back, until both servers rate-limited it
+    // (live run 2026-11-09).
     setVip({ owner, job: j });
     finishVipMove(j);
   }
