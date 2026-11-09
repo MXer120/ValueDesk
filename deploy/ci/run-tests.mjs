@@ -254,10 +254,14 @@ if (isMain) {
   console.log(`run-tests: ${suites.length} suites, ${JOBS} at a time; logs in deploy/.out/ci/`);
   const t0 = Date.now();
   const results = new Array(suites.length);
+  // The deploy suite drives real shell scripts (fake ssh, openssl, temporary homes): beside another suite on the laptop
+  // 20 of its 149 failed (the test gate's --jobs=2, 2026-11-09), alone all passed. It runs last, by itself.
+  const alone = new Set(suites.map((s, i) => (s.id.startsWith('deploy') ? i : -1)).filter((i) => i >= 0));
+  const order = [...suites.keys()].filter((i) => !alone.has(i));
   let next = 0;
   const worker = async () => {
-    while (next < suites.length) {
-      const i = next++;
+    while (next < order.length) {
+      const i = order[next++];
       const r = await runSuite(suites[i]);
       results[i] = r;
       console.log(`${r.ok ? 'PASS' : 'FAIL'}  ${r.id.padEnd(24)} ${fmt(r.ms).padStart(10)}  ${r.detail}`);
@@ -270,7 +274,11 @@ if (isMain) {
       }
     }
   };
-  await Promise.all(Array.from({ length: Math.min(JOBS, suites.length) }, worker));
+  await Promise.all(Array.from({ length: Math.min(JOBS, Math.max(1, order.length)) }, worker));
+  order.length = 0;
+  order.push(...alone);
+  next = 0;
+  await worker();
   const failed = results.filter((r) => !r.ok);
   const total = Date.now() - t0;
   console.log(`run-tests: ${failed.length ? 'FAILED' : 'all passed'} - ${results.length - failed.length} of ${results.length} suites passed in ${fmt(total)}${failed.length ? `; failed: ${failed.map((r) => r.id).join(', ')}` : ''}`);
