@@ -15,6 +15,8 @@ import { useTickers } from '../hooks';
 import { pollEvery } from '../exchange/visibility';
 
 export interface BotMarket {
+  /** Hours of the window the trade recorder holds for this market (absent from servers before 2026-11-09). */
+  heldH?: number;
   symbol: string;
   base: string;
   tick: number;
@@ -48,7 +50,7 @@ export interface BotMarket {
 
 export interface BotMarketsResponse {
   at: number;
-  window: '24h' | '7d';
+  window: BotWindow;
   fee: { makerBps: number; builderBps: number };
   markets: BotMarket[];
 }
@@ -105,7 +107,17 @@ function usePolled<T>(url: string | null, everyMs: number, check: (x: unknown) =
 const isMarkets = (x: unknown): x is BotMarketsResponse => !!x && typeof x === 'object' && Array.isArray((x as BotMarketsResponse).markets) && typeof (x as BotMarketsResponse).fee === 'object';
 const isLatency = (x: unknown): x is BotLatencyResponse => !!x && typeof x === 'object' && Array.isArray((x as BotLatencyResponse).regions);
 
-const rawBotMarkets = (window: '24h' | '7d', enabled: boolean): Read<BotMarketsResponse> =>
+/** One hour of the regime board (server flow/botMarkets.ts RegimeHour): volumeUsd null = the hour is not recorded whole. */
+export interface RegimeHour { t: number; volumeUsd: number | null; t1002Usd: number; t23342Usd: number; volBps: number }
+export interface BotRegimeResponse { at: number; symbol: string; markets: string[]; hours: RegimeHour[] }
+const isRegime = (x: unknown): x is BotRegimeResponse => !!x && typeof x === 'object' && Array.isArray((x as BotRegimeResponse).hours) && Array.isArray((x as BotRegimeResponse).markets);
+/** The regime board (Explore): who takes and how much the price moves, hour by hour over 7 days, one market or 'ALL'. */
+export const useBotRegime = (symbol: string): Read<BotRegimeResponse> =>
+  usePolled(`/api/vs/bots/regime?symbol=${encodeURIComponent(symbol)}`, 5 * 60_000, isRegime);
+
+/** The estimate's windows (server flow/botMarkets.ts; 1h and 6h from 2026-11-09). */
+export type BotWindow = '1h' | '6h' | '24h' | '7d';
+const rawBotMarkets = (window: BotWindow, enabled: boolean): Read<BotMarketsResponse> =>
   usePolled(enabled ? `/api/vs/bots/markets?window=${window}` : null, 5 * 60_000, isMarkets);
 
 /**
@@ -115,7 +127,7 @@ const rawBotMarkets = (window: '24h' | '7d', enabled: boolean): Read<BotMarketsR
  * / 24; 7d: the sum of its last 168 hourly candles / 168 (fetched four at a time, kept 15 minutes). The other figures
  * (who takes, spread, moves, cost) stay the server's, refreshed every 5 minutes.
  */
-export function useBotMarkets(window: '24h' | '7d' = '24h', enabled = true): Read<BotMarketsResponse> {
+export function useBotMarkets(window: BotWindow = '24h', enabled = true): Read<BotMarketsResponse> {
   const r = rawBotMarkets(window, enabled);
   const tick = useTickers('perps', { enabled: enabled && window === '24h', pollMs: 30_000 });
   // The busiest first: the rows a page shows first get SoDEX's 7-day figure first.
@@ -126,7 +138,8 @@ export function useBotMarkets(window: '24h' | '7d' = '24h', enabled = true): Rea
     const t = (tick.data as { tickers?: Array<{ symbol?: string; quoteVolume?: string | number }> } | null)?.tickers;
     const day = new Map<string, number>();
     if (Array.isArray(t)) for (const x of t) { const q = Number(x.quoteVolume); if (x.symbol && Number.isFinite(q)) day.set(x.symbol, q / 24); }
-    const of = (m: BotMarket): number | undefined => (window === '24h' ? day.get(m.symbol) : week.get(m.symbol));
+    // SoDEX's own figure exists for 24 h and 7 d; 1 h and 6 h keep the server's (from the recorded prints).
+    const of = (m: BotMarket): number | undefined => (window === '24h' ? day.get(m.symbol) : window === '7d' ? week.get(m.symbol) : undefined);
     if (!day.size && !week.size) return r;
     return { ...r, data: { ...r.data, markets: r.data.markets.map((m) => { const v = of(m); return v === undefined ? m : { ...m, volumeUsdH: v }; }) } };
   }, [r, tick.data, week, window]);
@@ -171,10 +184,11 @@ function useVolume7d(symbols: readonly string[]): Map<string, number> {
 }
 
 /** This wallet's own bots' latency, or one bot's (`bot`); nothing is read without its session (token null). */
-export const useBotLatency = (hours: number, token: string | null, bot?: string): Read<BotLatencyResponse> =>
+export const useBotLatency = (hours: number, token: string | null, bot?: string, base = '/api/copy/v1'): Read<BotLatencyResponse> =>
   // Every 5 s while the page shows it (owner 2026-11-09: the latency and the "no orders" stretches did not move): the
-  // open 10-minute bucket and the last minute's figure change with every write.
-  usePolled(token ? `/api/copy/v1/bots/latency?hours=${hours}${bot ? `&bot=${encodeURIComponent(bot)}` : ''}` : null, 5_000, isLatency, token);
+  // open 10-minute bucket and the last minute's figure change with every write. `base`: the executor the wallet's bots
+  // run on (VIP after a move: the standard executor has none of their orders - owner 2026-11-09, no data while they ran).
+  usePolled(token ? `${base}/bots/latency?hours=${hours}${bot ? `&bot=${encodeURIComponent(bot)}` : ''}` : null, 5_000, isLatency, token);
 
 /** A cost in bp, per $1M: 1.30 bp is $130. */
 export const bpToPerMillion = (bp: number): number => bp * 100;

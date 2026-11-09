@@ -236,6 +236,15 @@ function botsFixtures(): Plugin {
           res.setHeader('Cache-Control', 'no-store');
           return res.end(readFileSync(join(dir, 'latency.json')));
         }
+        // The regime board (Explore): <dir>/regime.json holds one answer per symbol and 'ALL', from real recorded prints.
+        if (req.url?.startsWith('/api/vs/bots/regime') && existsSync(join(dir, 'regime.json'))) {
+          const sym = (new URL(req.url, 'http://x').searchParams.get('symbol') ?? 'ALL').toUpperCase();
+          const all = JSON.parse(readFileSync(join(dir, 'regime.json'), 'utf8')) as Record<string, unknown>;
+          const hit = all[sym] ?? { ok: true, at: Date.now(), symbol: sym, markets: (all.ALL as { markets?: string[] } | undefined)?.markets ?? [], hours: [] };
+          res.setHeader('Content-Type', 'application/json');
+          res.setHeader('Cache-Control', 'no-store');
+          return res.end(JSON.stringify(hit));
+        }
         if (!req.url?.startsWith('/api/vs/bots/markets')) return next();
         const w = new URL(req.url, 'http://x').searchParams.get('window') === '7d' ? '7d' : '24h';
         const f = join(dir, `bm-${w}.json`);

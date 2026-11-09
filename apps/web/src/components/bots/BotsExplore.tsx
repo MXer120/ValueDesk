@@ -9,7 +9,7 @@
  * (bots/recipes.ts). The table shows the best bot on each market, or one bot everywhere; an open market compares all
  * of them on its own reading (bots/estimate.ts, which also learns from the wallet's own bots).
  */
-import { Fragment, useMemo, useState } from 'react';
+import { Fragment, useCallback, useMemo, useState } from 'react';
 import { GLOSSARY } from '../../bots/glossary';
 import { DASH, fmtUsd } from '../../format';
 import { CoinIcon } from '../CoinIcon';
@@ -21,6 +21,8 @@ import { StrategyTile } from './BotIcon';
 import { goBots, type BotsView } from '../../bots/routes';
 import { BotsHead, type BotsCtx } from './BotsPage';
 import { CONF_HINT, CONF_WORDS, TAKER_COLORS, Takers, bpCls, fmtBpUsd } from './BotNewPage';
+import { MarketConditions } from './BotsRegime';
+import { Coverage, MarketMap, type MapWindow } from './BotsMarketMap';
 import { Button, Checkbox, EmptyState, Icon, Panel, ProgressBar, SearchField, Segmented, Shell, ShellHeader, Skeleton, StatCard, StatusPill } from './kit/kit';
 
 type Key = 'cost' | 'bot' | 'uninformed' | 'informed' | 'spread' | 'vol' | 'activity' | 'symbol';
@@ -167,14 +169,16 @@ function Detail({ m, feeBps, runs, feeAdj = 0 }: { m: BotMarket; feeBps: number;
 type Pick = 'best' | RecipeId;
 
 export function BotsExplore({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
-  const [win, setWin] = useState<'24h' | '7d'>('24h');
+  const [win, setWin] = useState<MapWindow>('24h');
   const [pick, setPick] = useState<Pick>('best');
   const [q, setQ] = useState('');
   const [onlySure, setOnlySure] = useState(true);
   const [activity, setActivity] = useState<'any' | '100k' | '1m'>('any');
   const [sort, setSort] = useState<{ k: Key; desc: boolean }>({ k: 'cost', desc: false });
   const [open, setOpen] = useState<string | null>(null);
-  const r = useBotMarkets(win);
+  const rAny = useBotMarkets(win);
+  // A server from before the 1 h / 6 h windows answers 24 h to them: never shown as the window asked for.
+  const r = rAny.data && rAny.data.window !== win ? { ...rAny, data: null, error: rAny.error ?? 'this window is not on the server yet' } : rAny;
   const feeBps = r.data ? r.data.fee.makerBps + r.data.fee.builderBps : 1.3;
   const runs = useMemo(() => ownRuns(ctx.bots, r.data?.markets ?? null), [ctx.bots, r.data]);
   // The wallet's own bot fee in every estimate (the server's reading is at the flat fee).
@@ -220,6 +224,14 @@ export function BotsExplore({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
     });
   }, [r.data, q, onlySure, sort, rows, activity]);
   const costOf = (m: BotMarket) => rows.get(m.symbol)?.bp ?? m.estCostBps;
+  const scoreOf = useCallback((m: BotMarket) => rows.get(m.symbol)?.bp ?? m.estCostBps, [rows]);
+  // The recorder's held hours in this window: the most any market holds (null: a server that does not say).
+  const heldH = useMemo(() => { const xs = (r.data?.markets ?? []).map((m) => m.heldH).filter((x): x is number => typeof x === 'number'); return xs.length ? Math.max(...xs) : null; }, [r.data]);
+  const windowPick = <Segmented value={win} label="Window" onChange={setWin} options={[{ value: '1h', label: '1h' }, { value: '6h', label: '6h' }, { value: '24h', label: '24h' }, { value: '7d', label: '7d' }]} />;
+  const openRow = (symbol: string) => {
+    setOpen(symbol);
+    requestAnimationFrame(() => document.querySelector(`[data-sym="${CSS.escape(symbol)}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }));
+  };
   const best = list.length ? [...list].sort((a, b) => costOf(a) - costOf(b))[0] : null;
   const pickName = pick === 'best' ? 'Best bot' : RECIPE[pick].name;
   // A column's class says when it goes on a narrow screen (botsPages.css, the table's container): xc-a first, xc-b next.
@@ -245,12 +257,35 @@ export function BotsExplore({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
         </div>
       </Shell>
 
+      <MarketConditions />
+
+      <Shell className="bots-mapcard">
+        <ShellHeader
+          icon="grid"
+          title="Market map"
+          subtitle={`Every market by activity, coloured by ${pick === 'best' ? 'its best bot' : pickName}'s cost per $1M`}
+          aside={windowPick}
+        />
+        <Panel className="bots-mm__panel">
+          {r.error && !r.data ? (
+            <EmptyState compact tone="error" icon="warning" title="Map unavailable" description={`No estimates for ${win} (${r.error}).`} actions={<Button onClick={r.refresh}>Retry</Button>} />
+          ) : !r.data ? (
+            <Skeleton className="bots-mm__skel" />
+          ) : (
+            <>
+              <Coverage window={win} heldH={heldH} />
+              {list.length ? <MarketMap markets={list} scoreOf={scoreOf} feeBps={feeBps} window={win} onOpen={openRow} /> : <EmptyState compact icon="search" title="No market matches" description="Loosen the filters below." />}
+            </>
+          )}
+        </Panel>
+      </Shell>
+
       <Shell className="bots-listcard">
         <ShellHeader
           icon="list"
           title="Markets"
           subtitle="Open one for its cost, flow and hours"
-          aside={<Segmented value={win} label="Window" onChange={setWin} options={[{ value: '24h', label: '24h' }, { value: '7d', label: '7d' }]} />}
+          aside={windowPick}
         />
         <Panel className="bots-listpanel">
           <div className="bots-botpick" role="radiogroup" aria-label="Bot">
@@ -299,7 +334,7 @@ export function BotsExplore({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
                     const isOpen = open === m.symbol;
                     return (
                       <Fragment key={m.symbol}>
-                        <tr className={`bots-row${isOpen ? ' is-open' : ''}`} tabIndex={0} aria-expanded={isOpen} onClick={() => setOpen(isOpen ? null : m.symbol)} onKeyDown={(e) => { if (e.key === 'Enter' && e.target === e.currentTarget) setOpen(isOpen ? null : m.symbol); }}>
+                        <tr data-sym={m.symbol} className={`bots-row${isOpen ? ' is-open' : ''}`} tabIndex={0} aria-expanded={isOpen} onClick={() => setOpen(isOpen ? null : m.symbol)} onKeyDown={(e) => { if (e.key === 'Enter' && e.target === e.currentTarget) setOpen(isOpen ? null : m.symbol); }}>
                           <td><Icon name="arrowRight" size={12} className="bots-chev" /></td>
                           <td>
                             <span className="bots-mt__name">

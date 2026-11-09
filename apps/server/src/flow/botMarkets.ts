@@ -45,7 +45,10 @@ import { symbols as sodexSymbols, type Symbol as SodexSymbol } from '../sodex/sy
 import { findSymbol } from '../sodex/symbolRef.js';
 import { shareUnder, startSampling, stopSampling, typicalBps } from './bookSpread.js';
 
-export type BotWindow = '24h' | '7d';
+export type BotWindow = '1h' | '6h' | '24h' | '7d';
+export const BOT_WINDOWS: readonly BotWindow[] = ['1h', '6h', '24h', '7d'];
+/** Each window's length (h). */
+export const WINDOW_H: Record<BotWindow, number> = { '1h': 1, '6h': 6, '24h': 24, '7d': 168 };
 
 export interface BotMarket {
   symbol: string;
@@ -219,6 +222,9 @@ interface Fills {
 
 export interface WindowStats {
   volumeUsdH: number;
+  /** Hours of the window the flow holds for this market (since its first print, less unrecorded spans): the market map
+   * shows the rest of the window as not recorded. */
+  heldH: number;
   spreadBps: number;
   volBpsH: number;
   takers: BotMarket['takers'];
@@ -236,8 +242,20 @@ export interface WindowStats {
   watched?: Array<{ id: number; fills: number; costBps: number }>;
 }
 
+/**
+ * One UTC hour of a market for the regime board (Explore, owner 2026-11-09: "a market board made out of 1002 share and
+ * volatility"): all prints whose taker is known (USD), of it taken by 1002 and by 23342, and the volatility as in
+ * volBpsH (|moves| of the mid sampled at each minute's end, bp, over the hour). Hours the flow does not hold whole are
+ * left out (null volume).
+ */
+export interface RegimeHour { t: number; volumeUsd: number | null; t1002Usd: number; t23342Usd: number; volBps: number }
+
 export interface MarketAnalysis {
   price: number;
+  w1: WindowStats;
+  w6: WindowStats;
+  /** The 7 d window hour by hour, oldest first (the regime board). */
+  series: RegimeHour[];
   w24: WindowStats;
   w7: WindowStats;
   weekdayCostBps: number | null;
@@ -281,6 +299,8 @@ const dowOf = (t: number): number => (Math.floor(t / DAY_MS) + 4) % 7;
 export async function analyzeMarket(p: PrintCols, o: AnalyzeOpts, yieldNow: () => Promise<void> | undefined = yielder()): Promise<MarketAnalysis | null> {
   const from7 = o.now - W7;
   const from24 = o.now - W24;
+  const from6 = o.now - 6 * HOUR_MS;
+  const from1 = o.now - HOUR_MS;
   const fee = o.makerBps + o.builderBps;
   const holes = o.holes ?? [];
   const held = (t: number): boolean => !holes.length || !inSpans(holes, t);
@@ -302,8 +322,11 @@ export async function analyzeMarket(p: PrintCols, o: AnalyzeOpts, yieldNow: () =
   // Spread samples (consecutive prints of opposite taker side within 2 s), and all-print volume per window and hour.
   const gapT: number[] = [];
   const gapV: number[] = [];
-  let vol24 = 0, vol7 = 0;
+  let vol24 = 0, vol7 = 0, vol6 = 0, vol1 = 0;
   const volByHod = new Float64Array(24);
+  const h0 = Math.floor(from7 / HOUR_MS);
+  const nh = Math.max(1, Math.floor((o.now - 1) / HOUR_MS) - h0 + 1);
+  const hTot = new Float64Array(nh), h1002 = new Float64Array(nh), h23342 = new Float64Array(nh);
   let prevTaker = 0, prevPx = NaN, prevT = -Infinity;
   for (let i = i0; i < p.n; i++) {
     if ((i & 4095) === 0) await yieldNow();
@@ -317,7 +340,18 @@ export async function analyzeMarket(p: PrintCols, o: AnalyzeOpts, yieldNow: () =
       const ntl = px * p.sz[i]!;
       vol7 += ntl;
       if (t >= from24) vol24 += ntl;
+      if (t >= from6) vol6 += ntl;
+      if (t >= from1) vol1 += ntl;
       { const k = Math.floor(t / HOUR_MS) % 24; volByHod[k] = volByHod[k]! + ntl; }
+      if (tk === TAKER_BUYER || tk === TAKER_SELLER) {
+        const hi = Math.floor(t / HOUR_MS) - h0;
+        if (hi >= 0 && hi < nh) {
+          hTot[hi] = hTot[hi]! + ntl;
+          const who = tk === TAKER_BUYER ? p.buyer[i]! : p.seller[i]!;
+          if (who === o.id1002) h1002[hi] = h1002[hi]! + ntl;
+          else if (who === o.id23342) h23342[hi] = h23342[hi]! + ntl;
+        }
+      }
       if (tk && prevTaker && tk !== prevTaker && t - prevT <= SPREAD_PAIR_MS && px > 0) {
         gapT.push(t);
         gapV.push((Math.abs(px - prevPx) / px) * 1e4);
@@ -470,6 +504,7 @@ export async function analyzeMarket(p: PrintCols, o: AnalyzeOpts, yieldNow: () =
     const high = hc.length ? weightedPercentile(hc, hv, 0.9) : est;
     const st: WindowStats = {
       volumeUsdH: r2(volume / hours),
+      heldH: r2(hours),
       spreadBps: r2(spreadOf(from)),
       volBpsH: r2(volOf(from)),
       // Who takes makers OUR size: their fills by taker (all makers' when there is none). 23342 is the dominant
@@ -504,6 +539,9 @@ export async function analyzeMarket(p: PrintCols, o: AnalyzeOpts, yieldNow: () =
   const a7 = await stats(from7, vol7);
   await yieldNow();
   const a24 = await stats(from24, vol24);
+  await yieldNow();
+  const a6 = await stats(from6, vol6);
+  const a1 = await stats(from1, vol1);
 
   // The 7 d profile: weekday / weekend and the hour of day, small makers by the 7 d dominant set.
   const split = [{ v: 0, mk: 0, n: 0 }, { v: 0, mk: 0, n: 0 }];
@@ -525,11 +563,29 @@ export async function analyzeMarket(p: PrintCols, o: AnalyzeOpts, yieldNow: () =
     const b = Math.min((h + 1) * HOUR_MS, o.now);
     if (b > a) hodCount[h % 24] = hodCount[h % 24]! + (b - a - overlapMs(holes, a, b)) / HOUR_MS;
   }
+  // The regime board: the 7 d window hour by hour (from the market's first hour on).
+  const series: RegimeHour[] = [];
+  for (let hi = Math.max(0, Math.floor(firstT / HOUR_MS) - h0); hi < nh; hi++) {
+    const a = (h0 + hi) * HOUR_MS, b = Math.min(a + HOUR_MS, o.now);
+    const whole = overlapMs(holes, a, b) === 0;
+    let sum = 0, prev = NaN;
+    for (let t = a - 1; t < b; t += 60_000) {
+      const s = Math.floor(t / 1000) - s0;
+      if (s < 0 || s >= ns) continue;
+      const m = mid[s]!;
+      if (prev > 0 && m > 0) sum += (Math.abs(m - prev) / prev) * 1e4;
+      prev = m;
+    }
+    series.push({ t: a, volumeUsd: whole ? Math.round(hTot[hi]!) : null, t1002Usd: Math.round(h1002[hi]!), t23342Usd: Math.round(h23342[hi]!), volBps: r2(sum) });
+  }
   const costOf = (x: { v: number; mk: number; n: number }, min: number): number | null => (x.n >= min && x.v > 0 ? r2(fee - x.mk / x.v) : null);
   return {
     price: p.px[lastI]!,
+    series,
     w24: a24.st,
     w7: a7.st,
+    w6: a6.st,
+    w1: a1.st,
     weekdayCostBps: costOf(split[0]!, SPLIT_MIN_FILLS),
     weekendCostBps: costOf(split[1]!, SPLIT_MIN_FILLS),
     hourly: hod.map((x, h) => ({ h, costBps: costOf(x, HOURLY_MIN_FILLS), volumeUsdH: r2(hodCount[h]! > 0 ? volByHod[h]! / hodCount[h]! : 0) })),
@@ -551,7 +607,7 @@ export function concatCols(parts: readonly PrintCols[]): PrintCols {
 
 /** One market's row from its analysis. */
 export function rowOf(symbol: string, base: string, tick: number, a: MarketAnalysis, window: BotWindow): BotMarket {
-  const w = window === '7d' ? a.w7 : a.w24;
+  const w = window === '7d' ? a.w7 : window === '6h' ? a.w6 : window === '1h' ? a.w1 : a.w24;
   return {
     symbol, base, tick,
     tickBps: a.price > 0 && tick > 0 ? r2((tick / a.price) * 1e4) : 0,
@@ -575,7 +631,9 @@ interface Computed {
   at: number;
   fee: { makerBps: number; builderBps: number };
   /** Rows with trades in each window (a market whose prints are all older than 24 h is in 7d only). */
-  rows: { '24h': BotMarket[]; '7d': BotMarket[] };
+  rows: Record<BotWindow, BotMarket[]>;
+  /** The regime board's hours per market (SoDEX name). */
+  series: Map<string, RegimeHour[]>;
 }
 
 /** Calibration rows from the last compute (BOTS_MARKETS_WATCH only). */
@@ -600,7 +658,8 @@ async function compute(s: FlowStore, now: number): Promise<Computed> {
   const active = new Set(s.marketsWithChunks(Math.floor(from / CHUNK_MS) * CHUNK_MS, now + 1));
   const markets = s.markets().filter((m) => m.venue === 'sodex' && kindOf(m.symbol) === 'perp' && active.has(m.id));
   const y = yielder();
-  const rows: Computed['rows'] = { '24h': [], '7d': [] };
+  const rows: Computed['rows'] = { '1h': [], '6h': [], '24h': [], '7d': [] };
+  const series: Computed['series'] = new Map();
   for (const m of markets) {
     const parts: PrintCols[] = [];
     // A day of blobs at a time: never all 7 d of compressed chunks at once.
@@ -622,10 +681,13 @@ async function compute(s: FlowStore, now: number): Promise<Computed> {
     const tick = Number(sym?.tickSize) || 0;
     const name = sym?.name ?? m.symbol;
     rows['7d'].push(rowOf(name, base, tick, a, '7d'));
+    series.set(name, a.series);
     if (a.w24.volumeUsdH > 0) rows['24h'].push(rowOf(name, base, tick, a, '24h'));
+    if (a.w6.volumeUsdH > 0) rows['6h'].push(rowOf(name, base, tick, a, '6h'));
+    if (a.w1.volumeUsdH > 0) rows['1h'].push(rowOf(name, base, tick, a, '1h'));
   }
-  for (const k of ['24h', '7d'] as const) rows[k].sort((a, b) => a.estCostBps - b.estCostBps);
-  return { at: now, fee: { makerBps: r2(common), builderBps: BOT_BUILDER_BPS }, rows };
+  for (const k of BOT_WINDOWS) rows[k].sort((a, b) => a.estCostBps - b.estCostBps);
+  return { at: now, fee: { makerBps: r2(common), builderBps: BOT_BUILDER_BPS }, rows, series };
 }
 
 let kept: Computed | null = null;
@@ -654,7 +716,7 @@ export async function botMarkets(window: BotWindow): Promise<BotMarketsResponse 
   const withLead = lead ? c.rows[window].map((m) => ({ ...m, lead: lead.has(binanceSymbolOf(m.symbol) ?? '') ? ('binance' as const) : null })) : c.rows[window];
   // SoDEX's sampled book, where there are enough samples: the real spread and the share of time a limit lets a bot
   // quote. The print-based figures only where the book has not been sampled long enough yet.
-  const from = Date.now() - (window === '24h' ? 24 : 7 * 24) * 3_600_000;
+  const from = Date.now() - WINDOW_H[window] * 3_600_000;
   const markets = withLead.map((m) => {
     const typical = typicalBps(m.symbol, from);
     if (typical === null) return { ...m, spreadFrom: 'prints' as const };
@@ -666,6 +728,45 @@ export async function botMarkets(window: BotWindow): Promise<BotMarketsResponse 
     };
   });
   return { at: c.at, window, fee: c.fee, markets };
+}
+
+export interface BotRegimeResponse {
+  at: number;
+  /** 'ALL' or a SoDEX market. */
+  symbol: string;
+  /** Markets the board can show, by 7 d volume (largest first). */
+  markets: string[];
+  /** Hour by hour, oldest first. ALL: volumes summed, volatility weighted by each market's volume in that hour. */
+  hours: RegimeHour[];
+}
+
+/** The regime board (Explore): one market's 7 d hour by hour, or every market together ('ALL'). Null: no flow here. */
+export async function botRegime(symbol: string): Promise<BotRegimeResponse | null> {
+  const s = flowReader();
+  if (!s) return null;
+  askedAt = Date.now();
+  let c = kept;
+  if (!c) c = await refresh(s);
+  else if (Date.now() - c.at > BOT_MARKETS_TTL) void refresh(s).catch(() => { /* the kept answer stands */ });
+  const markets = [...c.rows['7d']].sort((a, b) => b.volumeUsdH - a.volumeUsdH).map((m) => m.symbol).filter((m) => c!.series.has(m));
+  const want = symbol.toUpperCase();
+  if (want !== 'ALL') {
+    const one = c.series.get(markets.find((m) => m.toUpperCase() === want) ?? '');
+    return one ? { at: c.at, symbol: markets.find((m) => m.toUpperCase() === want)!, markets, hours: one } : { at: c.at, symbol: want, markets, hours: [] };
+  }
+  const by = new Map<number, { v: number; held: boolean; a: number; b: number; w: number; wv: number }>();
+  for (const m of markets) {
+    for (const h of c.series.get(m)!) {
+      const x = by.get(h.t) ?? { v: 0, held: true, a: 0, b: 0, w: 0, wv: 0 };
+      if (h.volumeUsd === null) x.held = false; else x.v += h.volumeUsd;
+      x.a += h.t1002Usd; x.b += h.t23342Usd;
+      const w = h.volumeUsd ?? 0;
+      x.w += w; x.wv += w * h.volBps;
+      by.set(h.t, x);
+    }
+  }
+  const hours = [...by].sort((a, b) => a[0] - b[0]).map(([t, x]) => ({ t, volumeUsd: x.held ? Math.round(x.v) : null, t1002Usd: Math.round(x.a), t23342Usd: Math.round(x.b), volBps: r2(x.w > 0 ? x.wv / x.w : 0) }));
+  return { at: c.at, symbol: 'ALL', markets, hours };
 }
 
 /** Kept warm every 5 min while someone asked in the last 30 min (nothing runs on a server nobody asks). */
