@@ -264,6 +264,22 @@ export function setSignPreflight(
 }
 
 /**
+ * How many signature prompts (typed data or a message) the wallet is showing right now (owner 2026-11-09: a button must not say "Starting…"
+ * while the wallet still waits for a signature). Each signing function counts up and down around its own prompt. A tiny store: walletPrompting() / onWalletPrompting().
+ */
+let prompting = 0;
+const promptListeners = new Set<() => void>();
+const setPrompting = (d: number) => {
+  prompting = Math.max(0, prompting + d);
+  for (const fn of promptListeners) fn();
+};
+export const walletPrompting = (): boolean => prompting > 0;
+export function onWalletPrompting(fn: () => void): () => void {
+  promptListeners.add(fn);
+  return () => { promptListeners.delete(fn); };
+}
+
+/**
  * `personal_sign` of a plain-text message.
  *
  * Distinct from `signTypedData` because the two are not interchangeable: EIP-712
@@ -284,6 +300,7 @@ export async function signMessage(
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('')}`;
   await signPreflight?.(provider, 'personal_sign');
+  setPrompting(1);
   try {
     return await withTimeout(
       provider.request({ method: 'personal_sign', params: [hex, address] }),
@@ -295,22 +312,6 @@ export async function signMessage(
   } finally {
     setPrompting(-1);
   }
-}
-
-/**
- * How many typed-data signatures the wallet is showing right now (owner 2026-11-09: a button must not say "Starting…"
- * while the wallet still waits for a signature). A tiny store: walletPrompting() / onWalletPrompting().
- */
-let prompting = 0;
-const promptListeners = new Set<() => void>();
-const setPrompting = (d: number) => {
-  prompting = Math.max(0, prompting + d);
-  for (const fn of promptListeners) fn();
-};
-export const walletPrompting = (): boolean => prompting > 0;
-export function onWalletPrompting(fn: () => void): () => void {
-  promptListeners.add(fn);
-  return () => { promptListeners.delete(fn); };
 }
 
 export async function signTypedData(
@@ -332,6 +333,8 @@ export async function signTypedData(
   } catch (e) {
     if (e instanceof WalletError) throw e;
     wrap(e);
+  } finally {
+    setPrompting(-1);
   }
 }
 
