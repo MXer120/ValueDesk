@@ -107,13 +107,20 @@ function usePolled<T>(url: string | null, everyMs: number, check: (x: unknown) =
 const isMarkets = (x: unknown): x is BotMarketsResponse => !!x && typeof x === 'object' && Array.isArray((x as BotMarketsResponse).markets) && typeof (x as BotMarketsResponse).fee === 'object';
 const isLatency = (x: unknown): x is BotLatencyResponse => !!x && typeof x === 'object' && Array.isArray((x as BotLatencyResponse).regions);
 
-/** One hour of the regime board (server flow/botMarkets.ts RegimeHour): volumeUsd null = the hour is not recorded whole. */
+/**
+ * One bucket of the regime board (server flow/botMarkets.ts RegimeHour): volumeUsd null = not recorded whole; volBps is
+ * the volatility in bp per hour, whatever the bucket's length.
+ */
 export interface RegimeHour { t: number; volumeUsd: number | null; t1002Usd: number; t23342Usd: number; volBps: number }
-export interface BotRegimeResponse { at: number; symbol: string; markets: string[]; hours: RegimeHour[] }
+export interface BotRegimeResponse {
+  at: number; symbol: string; markets: string[]; hours: RegimeHour[];
+  /** From servers of 2026-11-10 on; older ones answer 7 days by the hour. */
+  window?: BotWindow; stepMs?: number; typicalVolBps?: number | null;
+}
 const isRegime = (x: unknown): x is BotRegimeResponse => !!x && typeof x === 'object' && Array.isArray((x as BotRegimeResponse).hours) && Array.isArray((x as BotRegimeResponse).markets);
-/** The regime board (Explore): who takes and how much the price moves, hour by hour over 7 days, one market or 'ALL'. */
-export const useBotRegime = (symbol: string): Read<BotRegimeResponse> =>
-  usePolled(`/api/vs/bots/regime?symbol=${encodeURIComponent(symbol)}`, 5 * 60_000, isRegime);
+/** The regime board (Explore): who takes and how volatile, bucket by bucket over the window, one market or 'ALL'. */
+export const useBotRegime = (symbol: string, window: BotWindow = '7d'): Read<BotRegimeResponse> =>
+  usePolled(`/api/vs/bots/regime?symbol=${encodeURIComponent(symbol)}&window=${window}`, window === '1h' ? 60_000 : 5 * 60_000, isRegime);
 
 /** The estimate's windows (server flow/botMarkets.ts; 1h and 6h from 2026-11-09). */
 export type BotWindow = '1h' | '6h' | '24h' | '7d';

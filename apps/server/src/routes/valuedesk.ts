@@ -744,7 +744,7 @@ export async function valuedeskRoutes(app: FastifyInstance) {
   });
 
   /**
-   * The regime board (Explore): the last 7 d hour by hour for one SoDEX market or all of them (`symbol=ALL`): market
+   * The regime board (Explore): the last `window=1h|6h|24h|7d` bucket by bucket for one SoDEX market or all of them (`symbol=ALL`): market
    * volume, what 1002 and 23342 took, volatility (flow/botMarkets.ts botRegime). Same 5 min answer as /bots/markets.
    */
   app.get('/api/vs/bots/regime', async (req, reply) => {
@@ -752,7 +752,8 @@ export async function valuedeskRoutes(app: FastifyInstance) {
       const q = req.query as Q;
       const symbol = (q.symbol ?? 'ALL').trim();
       if (!/^[A-Za-z0-9]{1,20}(-[A-Za-z]{1,8})?$/.test(symbol)) throw bad('symbol= must be ALL or a SoDEX market');
-      const body = await botRegime(symbol);
+      const win = q.window === '1h' || q.window === '6h' || q.window === '24h' ? q.window : '7d';
+      const body = await botRegime(symbol, win);
       if (!body) return fail(reply, new NotAvailable('The trade flow is not recorded yet'));
       reply.header('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
       return { ok: true, ...body };

@@ -158,7 +158,7 @@ function Detail({ m, feeBps, runs, feeAdj = 0 }: { m: BotMarket; feeBps: number;
         <dl className="bots-xd__grid is-4">
           <div><dt>Activity</dt><dd>{fmtUsd(m.volumeUsdH, 0)}/h</dd></div>
           <div><dt>Spread</dt><dd>{m.spreadBps.toFixed(2)} bp</dd></div>
-          <div><dt>Moves</dt><dd>{Math.round(m.volBpsH)} bp/h</dd></div>
+          <div><dt>Volatility</dt><dd>{Math.round(m.volBpsH)} bp/h</dd></div>
           <div><dt>Tick</dt><dd>{m.tickBps.toFixed(2)} bp</dd></div>
         </dl>
       </section>
@@ -320,7 +320,7 @@ export function BotsExplore({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
                     {head('uninformed', 'Uninformed', true, `Share of small makers' fills it took. ${GLOSSARY.uninformed}`)}
                     {head('informed', 'Informed', true, `Share of small makers' fills it took. ${GLOSSARY.informed}`, 'xc-b')}
                     {head('spread', 'Spread', true, GLOSSARY.spread, 'xc-a')}
-                    {head('vol', 'Moves', true, 'How far the price travels per hour', 'xc-a')}
+                    {head('vol', 'Volatility', true, 'How far the price travels per hour (bp)', 'xc-a')}
                     {head('activity', 'Activity / h', true, "The market's traded volume per hour", 'xc-b')}
                     <th className="right"><span className="tf-sr">Configure</span></th>
                   </tr>

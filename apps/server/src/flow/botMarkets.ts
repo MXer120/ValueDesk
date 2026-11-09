@@ -250,12 +250,22 @@ export interface WindowStats {
  */
 export interface RegimeHour { t: number; volumeUsd: number | null; t1002Usd: number; t23342Usd: number; volBps: number }
 
+/**
+ * A market's last 7 d minute by minute (the regime board's raw form; buckets are cut from it per window): traded
+ * volume with a known taker, of it 1002's and 23342's, |move| of the mid over the minute (bp), and whether the flow
+ * holds the minute whole. Index 0 is the minute starting at m0 * 60 000.
+ */
+export interface MinuteSeries { m0: number; tot: Float32Array; u: Float32Array; f: Float32Array; vol: Float32Array; held: Uint8Array }
+
+/** The board's windows and the bucket each is cut into. */
+export const REGIME_STEP_MIN: Record<BotWindow, number> = { '1h': 5, '6h': 5, '24h': 15, '7d': 60 };
+
 export interface MarketAnalysis {
   price: number;
   w1: WindowStats;
   w6: WindowStats;
-  /** The 7 d window hour by hour, oldest first (the regime board). */
-  series: RegimeHour[];
+  /** The 7 d window minute by minute (the regime board). */
+  series: MinuteSeries;
   w24: WindowStats;
   w7: WindowStats;
   weekdayCostBps: number | null;
@@ -324,9 +334,9 @@ export async function analyzeMarket(p: PrintCols, o: AnalyzeOpts, yieldNow: () =
   const gapV: number[] = [];
   let vol24 = 0, vol7 = 0, vol6 = 0, vol1 = 0;
   const volByHod = new Float64Array(24);
-  const h0 = Math.floor(from7 / HOUR_MS);
-  const nh = Math.max(1, Math.floor((o.now - 1) / HOUR_MS) - h0 + 1);
-  const hTot = new Float64Array(nh), h1002 = new Float64Array(nh), h23342 = new Float64Array(nh);
+  const m0 = Math.floor(from7 / 60_000);
+  const nm = Math.max(1, Math.floor((o.now - 1) / 60_000) - m0 + 1);
+  const mTot = new Float32Array(nm), m1002 = new Float32Array(nm), m23342 = new Float32Array(nm);
   let prevTaker = 0, prevPx = NaN, prevT = -Infinity;
   for (let i = i0; i < p.n; i++) {
     if ((i & 4095) === 0) await yieldNow();
@@ -344,12 +354,12 @@ export async function analyzeMarket(p: PrintCols, o: AnalyzeOpts, yieldNow: () =
       if (t >= from1) vol1 += ntl;
       { const k = Math.floor(t / HOUR_MS) % 24; volByHod[k] = volByHod[k]! + ntl; }
       if (tk === TAKER_BUYER || tk === TAKER_SELLER) {
-        const hi = Math.floor(t / HOUR_MS) - h0;
-        if (hi >= 0 && hi < nh) {
-          hTot[hi] = hTot[hi]! + ntl;
+        const mi = Math.floor(t / 60_000) - m0;
+        if (mi >= 0 && mi < nm) {
+          mTot[mi] = mTot[mi]! + ntl;
           const who = tk === TAKER_BUYER ? p.buyer[i]! : p.seller[i]!;
-          if (who === o.id1002) h1002[hi] = h1002[hi]! + ntl;
-          else if (who === o.id23342) h23342[hi] = h23342[hi]! + ntl;
+          if (who === o.id1002) m1002[mi] = m1002[mi]! + ntl;
+          else if (who === o.id23342) m23342[mi] = m23342[mi]! + ntl;
         }
       }
       if (tk && prevTaker && tk !== prevTaker && t - prevT <= SPREAD_PAIR_MS && px > 0) {
@@ -563,21 +573,22 @@ export async function analyzeMarket(p: PrintCols, o: AnalyzeOpts, yieldNow: () =
     const b = Math.min((h + 1) * HOUR_MS, o.now);
     if (b > a) hodCount[h % 24] = hodCount[h % 24]! + (b - a - overlapMs(holes, a, b)) / HOUR_MS;
   }
-  // The regime board: the 7 d window hour by hour (from the market's first hour on).
-  const series: RegimeHour[] = [];
-  for (let hi = Math.max(0, Math.floor(firstT / HOUR_MS) - h0); hi < nh; hi++) {
-    const a = (h0 + hi) * HOUR_MS, b = Math.min(a + HOUR_MS, o.now);
-    const whole = overlapMs(holes, a, b) === 0;
-    let sum = 0, prev = NaN;
-    for (let t = a - 1; t < b; t += 60_000) {
-      const s = Math.floor(t / 1000) - s0;
-      if (s < 0 || s >= ns) continue;
-      const m = mid[s]!;
-      if (prev > 0 && m > 0) sum += (Math.abs(m - prev) / prev) * 1e4;
-      prev = m;
+  // The regime board: the 7 d window minute by minute. A minute before the market's first print, or one the flow does
+  // not hold whole, is not held. Its move: the mid at its end against the mid at the previous minute's end.
+  const mVol = new Float32Array(nm), mHeld = new Uint8Array(nm);
+  {
+    const firstM = Math.floor(firstT / 60_000) - m0;
+    let prev = NaN;
+    for (let mi = 0; mi < nm; mi++) {
+      const a = (m0 + mi) * 60_000;
+      const s = Math.floor((a + 59_999) / 1000) - s0;
+      const m = s >= 0 && s < ns ? mid[s]! : NaN;
+      if (prev > 0 && m > 0) mVol[mi] = (Math.abs(m - prev) / prev) * 1e4;
+      if (m > 0) prev = m;
+      mHeld[mi] = mi >= firstM && overlapMs(holes, a, Math.min(a + 60_000, o.now)) === 0 ? 1 : 0;
     }
-    series.push({ t: a, volumeUsd: whole ? Math.round(hTot[hi]!) : null, t1002Usd: Math.round(h1002[hi]!), t23342Usd: Math.round(h23342[hi]!), volBps: r2(sum) });
   }
+  const series: MinuteSeries = { m0, tot: mTot, u: m1002, f: m23342, vol: mVol, held: mHeld };
   const costOf = (x: { v: number; mk: number; n: number }, min: number): number | null => (x.n >= min && x.v > 0 ? r2(fee - x.mk / x.v) : null);
   return {
     price: p.px[lastI]!,
@@ -632,8 +643,8 @@ interface Computed {
   fee: { makerBps: number; builderBps: number };
   /** Rows with trades in each window (a market whose prints are all older than 24 h is in 7d only). */
   rows: Record<BotWindow, BotMarket[]>;
-  /** The regime board's hours per market (SoDEX name). */
-  series: Map<string, RegimeHour[]>;
+  /** The regime board's minutes per market (SoDEX name). */
+  series: Map<string, MinuteSeries>;
 }
 
 /** Calibration rows from the last compute (BOTS_MARKETS_WATCH only). */
@@ -734,14 +745,57 @@ export interface BotRegimeResponse {
   at: number;
   /** 'ALL' or a SoDEX market. */
   symbol: string;
+  window: BotWindow;
+  /** Each bucket's length (ms): 5 min for 1h and 6h, 15 min for 24h, an hour for 7d. */
+  stepMs: number;
   /** Markets the board can show, by 7 d volume (largest first). */
   markets: string[];
-  /** Hour by hour, oldest first. ALL: volumes summed, volatility weighted by each market's volume in that hour. */
+  /**
+   * Bucket by bucket over the window, oldest first (the field keeps its first name). volBps is in bp per hour (the
+   * bucket's minute moves scaled to an hour), so every window reads on one scale. A bucket not held whole: volume null.
+   * ALL: volumes summed, volatility weighted by each market's volume in the bucket.
+   */
   hours: RegimeHour[];
+  /** The typical hour's volatility over 7 d (median, bp/h): what "calm" is measured against. */
+  typicalVolBps: number | null;
 }
 
-/** The regime board (Explore): one market's 7 d hour by hour, or every market together ('ALL'). Null: no flow here. */
-export async function botRegime(symbol: string): Promise<BotRegimeResponse | null> {
+/** One market's buckets over the last `win` from its minutes (bp per hour volatility; null volume when not held whole). */
+export function bucketsOf(ms: MinuteSeries, now: number, win: BotWindow): RegimeHour[] {
+  const step = REGIME_STEP_MIN[win];
+  const endM = Math.floor(now / 60_000);
+  const lastB = Math.floor(endM / step) * step;            // the bucket now runs in
+  const firstB = lastB - (WINDOW_H[win] * 60) + step;
+  const out: RegimeHour[] = [];
+  for (let b = firstB; b <= lastB; b += step) {
+    let tot = 0, u = 0, f = 0, vol = 0, n = 0;
+    const due = Math.min(step, endM - b + 1);               // the running bucket has had fewer minutes
+    for (let m = b; m < b + due; m++) {
+      const i = m - ms.m0;
+      if (i < 0 || i >= ms.tot.length || !ms.held[i]) continue;
+      tot += ms.tot[i]!; u += ms.u[i]!; f += ms.f[i]!; vol += ms.vol[i]!; n++;
+    }
+    // Held: at least half its minutes are (a short recorder gap does not blank a bucket; a missing hour does).
+    out.push({ t: b * 60_000, volumeUsd: n > 0 && n >= due / 2 ? Math.round(tot) : null, t1002Usd: Math.round(u), t23342Usd: Math.round(f), volBps: r2(n > 0 ? (vol / n) * 60 : 0) });
+  }
+  return out;
+}
+
+/** The median hour's volatility over the series (bp/h), from held hours only. */
+export function typicalOf(ms: MinuteSeries): number | null {
+  const hours: number[] = [];
+  for (let i = 0; i + 60 <= ms.tot.length; i += 60) {
+    let v = 0, n = 0;
+    for (let j = i; j < i + 60; j++) if (ms.held[j]) { v += ms.vol[j]!; n++; }
+    if (n >= 50) hours.push((v / n) * 60);
+  }
+  if (!hours.length) return null;
+  hours.sort((a, b) => a - b);
+  return r2(hours[hours.length >> 1]!);
+}
+
+/** The regime board (Explore): one market's window bucket by bucket, or every market together ('ALL'). Null: no flow here. */
+export async function botRegime(symbol: string, win: BotWindow = '7d'): Promise<BotRegimeResponse | null> {
   const s = flowReader();
   if (!s) return null;
   askedAt = Date.now();
@@ -749,24 +803,40 @@ export async function botRegime(symbol: string): Promise<BotRegimeResponse | nul
   if (!c) c = await refresh(s);
   else if (Date.now() - c.at > BOT_MARKETS_TTL) void refresh(s).catch(() => { /* the kept answer stands */ });
   const markets = [...c.rows['7d']].sort((a, b) => b.volumeUsdH - a.volumeUsdH).map((m) => m.symbol).filter((m) => c!.series.has(m));
+  const base = { at: c.at, window: win, stepMs: REGIME_STEP_MIN[win] * 60_000, markets };
   const want = symbol.toUpperCase();
   if (want !== 'ALL') {
-    const one = c.series.get(markets.find((m) => m.toUpperCase() === want) ?? '');
-    return one ? { at: c.at, symbol: markets.find((m) => m.toUpperCase() === want)!, markets, hours: one } : { at: c.at, symbol: want, markets, hours: [] };
+    const name = markets.find((m) => m.toUpperCase() === want);
+    const one = name ? c.series.get(name) : undefined;
+    return one ? { ...base, symbol: name!, hours: bucketsOf(one, c.at, win), typicalVolBps: typicalOf(one) } : { ...base, symbol: want, hours: [], typicalVolBps: null };
   }
+  return { ...base, symbol: 'ALL', ...regimeAll(c.series, markets, c.at, win) };
+}
+
+/** Every market together: volumes summed, volatility weighted by each market's volume in the bucket (and the typical hour's by its window volume). */
+export function regimeAll(series: ReadonlyMap<string, MinuteSeries>, markets: readonly string[], now: number, win: BotWindow): { hours: RegimeHour[]; typicalVolBps: number | null } {
+  // A bucket is held when any market holds it (a market listed or recorded later does not blank the others).
   const by = new Map<number, { v: number; held: boolean; a: number; b: number; w: number; wv: number }>();
+  const typ: Array<[number, number]> = [];
   for (const m of markets) {
-    for (const h of c.series.get(m)!) {
-      const x = by.get(h.t) ?? { v: 0, held: true, a: 0, b: 0, w: 0, wv: 0 };
-      if (h.volumeUsd === null) x.held = false; else x.v += h.volumeUsd;
-      x.a += h.t1002Usd; x.b += h.t23342Usd;
-      const w = h.volumeUsd ?? 0;
-      x.w += w; x.wv += w * h.volBps;
+    const ms = series.get(m);
+    if (!ms) continue;
+    const tv = typicalOf(ms);
+    let wsum = 0;
+    for (const h of bucketsOf(ms, now, win)) {
+      const x = by.get(h.t) ?? { v: 0, held: false, a: 0, b: 0, w: 0, wv: 0 };
+      if (h.volumeUsd !== null) {
+        x.held = true; x.v += h.volumeUsd;
+        x.a += h.t1002Usd; x.b += h.t23342Usd;
+        x.w += h.volumeUsd; x.wv += h.volumeUsd * h.volBps; wsum += h.volumeUsd;
+      }
       by.set(h.t, x);
     }
+    if (tv !== null && wsum > 0) typ.push([tv, wsum]);
   }
   const hours = [...by].sort((a, b) => a[0] - b[0]).map(([t, x]) => ({ t, volumeUsd: x.held ? Math.round(x.v) : null, t1002Usd: Math.round(x.a), t23342Usd: Math.round(x.b), volBps: r2(x.w > 0 ? x.wv / x.w : 0) }));
-  return { at: c.at, symbol: 'ALL', markets, hours };
+  const tw = typ.reduce((a, [, w]) => a + w, 0);
+  return { hours, typicalVolBps: tw > 0 ? r2(typ.reduce((a, [v, w]) => a + v * w, 0) / tw) : null };
 }
 
 /** Kept warm every 5 min while someone asked in the last 30 min (nothing runs on a server nobody asks). */

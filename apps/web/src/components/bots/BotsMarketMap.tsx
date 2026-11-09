@@ -105,7 +105,7 @@ export function MarketMap({ markets, scoreOf, feeBps, window: win, onOpen, heigh
           <>
             <b>{hv.m.base}</b>
             <span>{hv.bp === null ? 'No estimate' : <><b>{fmtBpUsd(hv.bp)}</b> per $1M</>}</span>
-            <span className="dim">{fmtUsd(hv.m.volumeUsdH, 0)}/h traded · uninformed {Math.round(hv.m.takers.t1002 * 100)}% · informed {Math.round(hv.m.takers.t23342 * 100)}% · {Math.round(hv.m.volBpsH)} bp/h moves</span>
+            <span className="dim">{fmtUsd(hv.m.volumeUsdH, 0)}/h traded · uninformed {Math.round(hv.m.takers.t1002 * 100)}% · informed {Math.round(hv.m.takers.t23342 * 100)}% · volatility {Math.round(hv.m.volBpsH)} bp/h</span>
           </>
         ) : <span className="dim">Tile size: activity in the window. Colour: what $1M of the bot is estimated to do there. Point at or tap a tile for its figures; a click opens it in the list.</span>}
       </div>

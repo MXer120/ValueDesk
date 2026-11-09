@@ -1636,3 +1636,17 @@ tr.bots-row.is-blocked:hover, .bots-table tbody tr.bots-row.is-blocked:hover { b
 .bots-cov__held { background: color-mix(in srgb, var(--pos) 26%, transparent); }
 .bots-cov__words { display: flex; justify-content: space-between; font-size: 10.5px; color: rgb(var(--ink) / 0.45); }
 @media (max-width: 700px) { .bots-mm__skel { height: 280px; } }
+
+/* Market conditions: the header's controls (the market dropdown styled as the window switch's pill, side by side) */
+.bots-rg__ctl { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.bots-rg__pick { display: inline-flex; align-items: center; gap: 8px; height: 32px; min-width: 132px; padding: 0 10px 0 12px; border: 0; border-radius: 9999px; background: rgb(var(--ink) / 0.05); color: var(--tf-fg, var(--text)); font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; white-space: nowrap; transition: background 150ms ease, box-shadow 150ms ease; }
+.bots-rg__pick:hover { background: rgb(var(--ink) / 0.08); }
+.bots-rg__pick[aria-expanded='true'] { background: rgb(var(--ink) / 0.08); box-shadow: inset 0 0 0 1px rgb(var(--ink) / 0.18); }
+.bots-rg__pick .fx-sel__v { display: inline-flex; align-items: center; gap: 7px; min-width: 0; }
+.bots-rg__pick .fx-sel__v > span { overflow: hidden; text-overflow: ellipsis; }
+.bots-rg__pick svg:last-child { margin-left: auto; opacity: 0.55; }
+.bots-rg__kpis { margin-bottom: 0; }
+@media (max-width: 700px) {
+  .bots-rg__ctl { justify-content: flex-start; width: 100%; }
+  .bots-rg__pick { flex: 1 1 auto; }
+}
