@@ -874,6 +874,8 @@ export class IndexStore {
   private writer: WriterThread<WriterExtra> | null = null;
   /** The writer thread's control array, while one runs: this thread's writes are counted in it (writing()). */
   private ctl: Int32Array | null = null;
+  /** How long a stop waits for the writer thread to park before it ends it (writerThread.ts stopSync). */
+  private writerStopWaitMs = 15_000;
   /**
    * Traders whose aggregates are being built, a slice of days at a time
    * (buildAggregates): `next` is the start of the next slice, `end` where the
@@ -1064,7 +1066,8 @@ export class IndexStore {
    * The bulk writes (fills, activity, the liquidation change log) go to a thread of their own from here on. The running
    * indexer only (worker.ts); off with VALUESCAN_WRITER_THREAD=0 and in the tests unless `force`.
    */
-  startWriter(o: { force?: boolean; targetMs?: number; maxRows?: number; hungMs?: number; restartAfterMs?: number; cacheKb?: number } = {}): boolean {
+  startWriter(o: { force?: boolean; targetMs?: number; maxRows?: number; hungMs?: number; restartAfterMs?: number; cacheKb?: number; stopWaitMs?: number } = {}): boolean {
+    this.writerStopWaitMs = o.stopWaitMs ?? 15_000;
     if (this.readOnly || this.path === ':memory:' || this.writer) return false;
     if (!o.force && !writerThreadOn()) return false;
     // Made here, before the thread can be asked to replay a part of it.
@@ -1204,7 +1207,7 @@ export class IndexStore {
           }
         }
         spill({ fills, activity });
-      });
+      }, this.writerStopWaitMs);
     } finally {
       this.ctl = null;
     }
@@ -1522,6 +1525,17 @@ export class IndexStore {
   /**
    * A write of this thread, counted while it waits for the lock and runs, so the writer thread commits at once and starts
    * nothing new meanwhile (writerThread.ts). Free with no thread; inside a transaction the transaction counts.
+   *
+   * Counted: every statement q() prepares that starts INSERT / UPDATE / DELETE / REPLACE (checked 2026-11-09: every q()
+   * statement of the store starts with SELECT, PRAGMA freelist_count or one of those four), every tx(), spillTable() and
+   * reclaimStep()'s incremental_vacuum. Not counted, and why that is fine:
+   *   - the constructor's schema, columns and migrations: they run before startWriter, with no thread to wait for;
+   *   - PRAGMA wal_autocheckpoint / cache_size switches: settings of the connection, no lock;
+   *   - the checkpoint thread's FULL checkpoint (checkpointer.ts): it holds the lock 250 ms at most, against either writer;
+   *   - compact.ts: offline, the indexer stopped; flow/ledgerWorker.ts opens the index read-only;
+   *   - tests that write through `store.db` directly.
+   * A write added through `this.db.prepare` or `this.db.exec` instead of q() / tx() would wait for the thread uncounted
+   * (a transaction of the thread, TARGET_MS, in place of a row and a commit): use q() or tx(), or wrap it in writing().
    */
   private writing<T>(fn: () => T): T {
     const c = this.ctl;

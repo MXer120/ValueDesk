@@ -2,14 +2,19 @@
  * The indexer's fill writes inline (50-row steps on its one thread) against the writer thread (indexer/writerThread.ts).
  *
  *   node --import tsx tools/writeBench.ts [--fills=5000000] [--addrs=200000] [--rate=3000] [--secs=60] [--drain=300000]
- *        [--cacheMb=256] [--mode=both|inline|thread] [--checkpointer=1] [--ownWrites=1] [--dir=<folder>]
+ *        [--cacheMb=256] [--mode=inline,thread,thread-mmap] [--mmapMb=65536] [--mmapCacheMb=<cacheMb>] [--checkpointer=1]
+ *        [--ownWrites=1] [--dir=<folder>]
  *
  * Builds a scratch index once (`--fills` rows over `--addrs` wallets and 30 days, random ids as Hyperliquid's are; kept in
  * `--dir` for the next run), then for each mode, through the real Indexer.flush every 5 s:
  *   steady  `--rate` stream rows a second for `--secs`, while this thread does a small write every 250 ms (as the day sums
  *           do) and 200 reads of a wallet's rows a second: this thread's busy share (eventLoopUtilization), its waits for
  *           the write lock (p50 / p99 / max), its reads' time, rows written a second and the backlog every 5 s;
+ *           Once a second also a board-like pass: 50 wallets' windowStats (7d), realized (30d) and closeEvidence (30d), the
+ *           reads a board build and the stats sweep make; the time per wallet is reported.
  *   drain   `--drain` rows in one flush: how long until all are written, and this thread's busy share meanwhile.
+ * A mode with `-mmap` sets PRAGMA mmap_size = `--mmapMb` on this thread's connection and its page cache to `--mmapCacheMb`:
+ * pages another connection's commit made stale are then read through the mapping, not copied by a read call.
  * `--cacheMb` sets the page cache of both connections: the production writer has 6 GB against a 50 GB file, so a laptop's
  * small file only behaves alike with a cache of a like share.
  */
@@ -26,7 +31,9 @@ const RATE = Number(arg('rate', '3000'));
 const SECS = Number(arg('secs', '60'));
 const DRAIN = Number(arg('drain', '300000'));
 const CACHE_KB = Number(arg('cacheMb', '256')) * 1024;
-const MODE = arg('mode', 'both');
+const MODES = arg('mode', 'inline,thread,thread-mmap').split(',');
+const MMAP_BYTES = Number(arg('mmapMb', '65536')) * 1024 * 1024;
+const MMAP_CACHE_KB = Number(arg('mmapCacheMb', String(CACHE_KB / 1024))) * 1024;
 /** The checkpoint thread as in production (checkpointer.ts); 0: each writer checkpoints for itself. */
 const CHECKPOINTER = arg('checkpointer', '1') !== '0';
 /** This thread's own small write every 250 ms; 0: none (each one empties the other connection's page cache). */
@@ -75,9 +82,12 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 interface Ix { pendingFills: FillRow[]; flush(): void; writes: { backlog: number } }
 
-async function run(mode: 'inline' | 'thread'): Promise<void> {
+async function run(name: string): Promise<void> {
+  const mode = name.startsWith('thread') ? 'thread' : 'inline';
+  const mmap = name.endsWith('-mmap');
   const store = new IndexStore(PATH, { aggRefreshMs: 600_000 });
-  store.db.exec(`PRAGMA cache_size = -${CACHE_KB}`);
+  store.db.exec(`PRAGMA cache_size = -${mmap ? MMAP_CACHE_KB : CACHE_KB}`);
+  store.db.exec(`PRAGMA mmap_size = ${mmap ? MMAP_BYTES : 0}`);
   if (CHECKPOINTER) store.startCheckpointer();
   if (mode === 'thread') store.startWriter({ force: true, cacheKb: CACHE_KB });
   const ix = new Indexer(store, () => Date.now()) as unknown as Ix;
@@ -86,7 +96,7 @@ async function run(mode: 'inline' | 'thread'): Promise<void> {
   const put = store.putFills.bind(store);
   store.putFills = (rows) => { put(rows); inlineDone += rows.length; };
   const done = () => (mode === 'thread' ? store.writerStatus!.rows : inlineDone);
-  const tag = `${mode}${Date.now()}-`;
+  const tag = `${name}${Date.now()}-`;
   let made = 0;
   const make = (n: number) => {
     const now = Date.now();
@@ -110,6 +120,10 @@ async function run(mode: 'inline' | 'thread'): Promise<void> {
   let next = t0;
   // Sampled halfway between flushes (they run every 5 s from the start), so a sample is not just the rows still unflushed.
   let lastSample = t0 - 2_500;
+  const board: number[] = [];
+  let boardAt = t0;
+  const from7 = Date.now() - 7 * DAY;
+  const from30 = Date.now() - 30 * DAY;
   while (Date.now() - t0 < SECS * 1_000) {
     next += 100;
     make(Math.round(RATE / 10));
@@ -120,6 +134,17 @@ async function run(mode: 'inline' | 'thread'): Promise<void> {
       probe.get(addr(Math.floor(rnd() ** 2 * ADDRS)));
       reads.push(performance.now() - r0);
     }
+    if (Date.now() - boardAt >= 1_000) {
+      boardAt = Date.now();
+      for (let k = 0; k < 50; k++) {
+        const a = addr(Math.floor(rnd() ** 2 * ADDRS));
+        const b0 = performance.now();
+        store.windowStats('hyperliquid', a, from7);
+        store.realized('hyperliquid', a, from30);
+        store.closeEvidence('hyperliquid', a, from30);
+        board.push(performance.now() - b0);
+      }
+    }
     if (Date.now() - lastSample >= 5_000) { lastSample = Date.now(); backlog.push(String(made - done())); }
     await sleep(Math.max(0, next - Date.now()));
   }
@@ -127,9 +152,10 @@ async function run(mode: 'inline' | 'thread'): Promise<void> {
   const secs = (Date.now() - t0) / 1_000;
   const waits = store.lockWaits.samples;
   store.lockWaits.samples = null;
-  console.log(`${mode} steady: ${RATE} rows/s offered for ${SECS} s; written ${Math.round(done() / secs)} rows/s; this thread busy ${(elu.utilization * 100).toFixed(1)}%;` +
+  console.log(`${name} steady: ${RATE} rows/s offered for ${SECS} s; written ${Math.round(done() / secs)} rows/s; this thread busy ${(elu.utilization * 100).toFixed(1)}%;` +
     ` its lock wait p50 ${pct(waits, 0.5).toFixed(1)} ms, p99 ${pct(waits, 0.99).toFixed(1)} ms, max ${pct(waits, 1).toFixed(1)} ms (${waits.length} writes);` +
     ` its reads (a wallet's rows) p50 ${(pct(reads, 0.5) * 1000).toFixed(0)} us, p99 ${(pct(reads, 0.99) * 1000).toFixed(0)} us;` +
+    ` board reads a wallet p50 ${pct(board, 0.5).toFixed(2)} ms, p99 ${pct(board, 0.99).toFixed(2)} ms, mean ${(board.reduce((x, y) => x + y, 0) / Math.max(1, board.length)).toFixed(2)} ms;` +
     ` backlog every 5 s: ${backlog.join(' ')}`);
   // Let the steady rows finish, then the drain.
   while (made - done() > 0) { ix.flush(); await sleep(200); }
@@ -142,12 +168,12 @@ async function run(mode: 'inline' | 'thread'): Promise<void> {
   while (done() - before < DRAIN) await sleep(20);
   const dms = Date.now() - d0;
   const de = performance.eventLoopUtilization(e0);
-  console.log(`${mode} drain: ${DRAIN} rows in ${(dms / 1000).toFixed(1)} s = ${Math.round(DRAIN / (dms / 1000))} rows/s; this thread busy ${(de.utilization * 100).toFixed(1)}%` +
+  console.log(`${name} drain: ${DRAIN} rows in ${(dms / 1000).toFixed(1)} s = ${Math.round(DRAIN / (dms / 1000))} rows/s; this thread busy ${(de.utilization * 100).toFixed(1)}%` +
     (mode === 'thread' ? `; transactions ${store.writerStatus!.txs}, longest ${store.writerStatus!.maxTxMs} ms` : ''));
   clearInterval(own);
   store.close();
 }
 
 build();
-for (const m of MODE === 'both' ? (['inline', 'thread'] as const) : [MODE as 'inline' | 'thread']) await run(m);
+for (const m of MODES) await run(m);
 process.exit(0);

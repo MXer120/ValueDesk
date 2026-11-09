@@ -183,6 +183,15 @@ port.on('message', (m) => {
   if (m.ckpt !== undefined) { try { db.exec('PRAGMA wal_autocheckpoint = ' + m.ckpt); } catch (e) {} return; }
   // A stop finds the thread idle (no transaction to end): parked at once. A busy one sees the flag between rows.
   if (m.stop) { if (Atomics.load(ctl, STOP)) park(); return; }
+  // A test's hung thread: a transaction holding the lock and one row, and a loop that never looks at the stop flag.
+  if (m.hang) {
+    db.exec('BEGIN IMMEDIATE');
+    FILL.run('hyperliquid', '0xhang', 'hang', Date.now(), 'BTC', 1, 1, 1, null, null, null, 0);
+    const end = Date.now() + m.hang;
+    while (Date.now() < end) { /* hung */ }
+    db.exec('ROLLBACK');
+    return;
+  }
   m.done = 0;
   queue.push(m);
   kick();
@@ -521,6 +530,11 @@ export class WriterThread<X = unknown> {
     this.retry.unref();
   }
 
+  /** For a test: the thread holds the write lock in a transaction for `ms` and does not look at the stop flag meanwhile. */
+  hangForTest(ms: number): void {
+    this.port?.postMessage({ hang: ms });
+  }
+
   /** For a test: the thread dies (as a crash would, mid-transaction or not). */
   kill(): Promise<number> {
     return this.worker ? this.worker.terminate() : Promise.resolve(0);
@@ -543,8 +557,15 @@ export class WriterThread<X = unknown> {
       Atomics.store(this.ctl, CTL_STOP, 1);
       Atomics.notify(this.ctl, CTL_WANT);
       this.port?.postMessage({ stop: true });
+      this.drain();
       if (Atomics.load(this.ctl, CTL_PARKED) === 0 && Atomics.wait(this.ctl, CTL_PARKED, 0, waitMs) === 'timed-out') {
-        this.hooks.log(`[indexer] writer thread did not park in ${waitMs} ms: taking the write lock from it`);
+        // Hung (or in a transaction far past TARGET_MS): ended. Termination stops its JavaScript at once and its connection
+        // closes as the thread ends, which rolls back the transaction it had open and frees the write lock that the lock
+        // below waits for. What it had committed meta.writer_done says; the rest is spilled or written here: no row lost.
+        // (Stuck inside SQLite itself, say on a dead disk, it ends when that call returns: the lock waits WRITER_BUSY_MS.)
+        this.hooks.log(`[indexer] writer thread did not park in ${waitMs} ms: ended, and the write lock taken from it`);
+        this.state.lastError = `did not park in ${waitMs} ms`;
+        void w.terminate();
       }
       this.drain();
     }

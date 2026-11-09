@@ -331,3 +331,41 @@ test("writer thread: this thread's writes wait for a row and a commit, not a tra
     rmSync(d, { recursive: true, force: true, maxRetries: 40, retryDelay: 50 });
   }
 });
+
+test('writer thread: a stop that finds it hung ends it, takes the lock, and spills exactly what it did not write', async () => {
+  const d = dir();
+  const path = join(d, 'x.db');
+  const s = new IndexStore(path, { aggRefreshMs: 0 });
+  s.startWriter({ force: true, stopWaitMs: 300 });
+  const w = (s as unknown as { writer: { hangForTest(ms: number): void } }).writer;
+  try {
+    const first = fills(2_000, { tag: 'a' });
+    await s.putFillsAsync(first);
+    // Hung for a minute in a transaction holding the lock and a row of its own; an op queued behind it.
+    w.hangForTest(60_000);
+    const later = fills(3_000, { tag: 'b' });
+    const p = s.putFillsAsync(later);
+    p.catch(() => {});
+    await sleep(100);
+    let spilled: FillRow[] = [];
+    const t0 = Date.now();
+    s.stopWriter((x) => {
+      spilled = x.fills;
+      s.spillWrites([{ kind: 'fills', rows: x.fills }]);
+    });
+    const ms = Date.now() - t0;
+    assert.ok(ms < 10_000, `the stop took ${ms} ms, not the minute of the hang`);
+    await assert.rejects(p, /stopped/);
+    assert.equal(count(s, "SELECT COUNT(*) AS n FROM fills WHERE id = 'hang'"), 0, 'its open transaction rolled back');
+    assert.equal(count(s, "SELECT COUNT(*) AS n FROM fills WHERE id LIKE 'a%'"), 2_000 + Math.ceil(2_000 / 9), 'what it wrote stays');
+    assert.equal(count(s, "SELECT COUNT(*) AS n FROM fills WHERE id LIKE 'b%'"), 0);
+    assert.equal(spilled.length, later.length, 'every row it did not write, once (originals: the replay copies the xyz rows again)');
+    s.close();
+    const s2 = new IndexStore(path, { aggRefreshMs: 0 });
+    for (const part of s2.spilledWrites()) s2.replaySpill(part.id);
+    assert.equal(count(s2, "SELECT COUNT(*) AS n FROM fills WHERE id LIKE 'b%'"), 3_000 + Math.ceil(3_000 / 9));
+    s2.close();
+  } finally {
+    rmSync(d, { recursive: true, force: true, maxRetries: 40, retryDelay: 50 });
+  }
+});
