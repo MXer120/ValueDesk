@@ -260,12 +260,21 @@ handover_field() {
   node -e "try { const v = JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8'))[process.argv[2]]; process.stdout.write(v == null ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v)); } catch { }" "$HANDOVER_STATE" "$1" 2>/dev/null || true
 }
 
-# The unit runs through the supervisor (it has ExecReload) and is running, and handovers are not switched off.
+# The running main process's command line. NOT the unit file's ExecStart: after the new unit is installed and
+# daemon-reload'ed, systemd shows the new ExecStart while the process started from the old one still runs - and a
+# SIGHUP to a bare indexer (no supervisor) would end it without its stop.
+main_cmdline() {
+  local pid
+  pid="$("$SYSTEMCTL" show -p MainPID --value valuescan-indexer.service 2>/dev/null || true)"
+  [ -n "$pid" ] && [ "$pid" != 0 ] && [ -r "/proc/$pid/cmdline" ] && tr '\0' ' ' < "/proc/$pid/cmdline"
+}
+
+# The unit has ExecReload, is running, its main process IS the supervisor, and handovers are not switched off.
 handover_capable() {
   [ "${VS_INDEXER_HANDOVER:-1}" != 0 ] || return 1
   "$SYSTEMCTL" is-active --quiet valuescan-indexer.service || return 1
   "$SYSTEMCTL" show -p ExecReload --value valuescan-indexer.service 2>/dev/null | grep -q 'kill' || return 1
-  "$SYSTEMCTL" show -p ExecStart --value valuescan-indexer.service 2>/dev/null | grep -q 'supervisor' || return 1
+  main_cmdline | grep -q 'indexer/supervisor' || return 1
 }
 
 # 0: the new indexer writes. 1: it did not take over (the old one still runs, or nothing does): restart classically.

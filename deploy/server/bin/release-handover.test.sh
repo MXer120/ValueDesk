@@ -37,6 +37,9 @@ fake_systemctl() {
   esac
 }
 SYSTEMCTL=fake_systemctl
+# The running process: the supervisor, except where a scenario says it is still a bare indexer (the unit file already
+# new after daemon-reload, the process from before it).
+main_cmdline() { if [ "$SCEN" = bare-process ]; then echo 'node --import tsx src/indexer/main.ts'; else echo 'node --import tsx src/indexer/supervisor.ts --max-old-space-size=8192 src/indexer/main.ts'; fi; }
 
 pass=0; fail=0
 check() {  # name, scenario, expected actions, expected log pattern[, env]
@@ -51,6 +54,7 @@ check "handover done" promoted "reload" "handover done in 1 s: pid 4242 (release
 check "handover failed: classic restart" failed "reload restart" "handover failed after 1 s: the running indexer did not take"
 check "no answer in time: classic restart" silent "reload restart" "not done in 3 s (last phase: standby)"
 check "a unit without the supervisor: classic only" classic-unit "restart" "restarting the indexer"
+check "new unit file, process from the old one: classic, no SIGHUP" bare-process "restart" "restarting the indexer"
 VS_INDEXER_HANDOVER=0 check "handovers switched off: classic only" promoted "restart" "restarting the indexer"
 rm -f "$HANDOVER_STATE"
 check "first handover (no state file yet)" promoted "reload" "handover done"

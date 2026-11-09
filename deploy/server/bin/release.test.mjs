@@ -24,5 +24,5 @@ test('an indexer release is a handover where the unit has the supervisor, and a 
   const path = `${dirname(process.execPath)}${process.platform === 'win32' ? ';' : ':'}${process.env.PATH ?? ''}`;
   const r = spawnSync('bash', [join(HERE, 'release-handover.test.sh'), join(HERE, 'release.sh')], { encoding: 'utf8', env: { ...process.env, PATH: path } });
   assert.equal(r.status, 0, `${r.stdout}\n${r.stderr}`);
-  assert.match(r.stdout, /pass 6 fail 0/);
+  assert.match(r.stdout, /pass 7 fail 0/);
 });
