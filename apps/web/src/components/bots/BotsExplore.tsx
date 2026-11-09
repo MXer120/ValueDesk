@@ -65,6 +65,19 @@ const PROOF = { proven: { tone: 'positive', label: 'Proven live' }, tested: { to
 const BASE = draftFor('market');
 
 /**
+ * When the estimates were computed. Fresh: the time and the refresh; older than 15 minutes, the date and how old, so a
+ * stale answer never passes for today's market (owner 2026-11-09: the activity did not match the market - a 43 h old
+ * answer read as "00:15 · every 5 minutes").
+ */
+function readWords(at: number, now = Date.now()): string {
+  const d = new Date(at);
+  const age = now - at;
+  if (age < 15 * 60_000) return `Read ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · every 5 minutes`;
+  const ago = age < 2 * 3_600_000 ? `${Math.round(age / 60_000)} min` : `${Math.round(age / 3_600_000)} h`;
+  return `From ${d.toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} · ${ago} old, not today's market`;
+}
+
+/**
  * Every bot on one market, cheapest first: pick one to see its results here (owner 2026-11-08: "users cant switch
  * between bots on koru to view different results"). The pick shows its cost per $1M with its range, how much it
  * trades, how the estimate adds up and what our tests measured; Configure starts it.
@@ -223,7 +236,7 @@ export function BotsExplore({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
       <BotsHead view={view} title="Explore" sub="What every bot does per $1M on every market, from the market's own trades." />
 
       <Shell className="bots-kpis">
-        <ShellHeader icon="compass" title="Every market, estimated" subtitle={r.data ? `Read ${new Date(r.data.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · every 5 minutes` : 'Reading the markets…'} />
+        <ShellHeader icon="compass" title="Every market, estimated" subtitle={r.data ? readWords(r.data.at) : 'Reading the markets…'} />
         <div className="bots-kpigrid is-4">
           <StatCard index={0} label="Markets read" value={r.data ? String(r.data.markets.length) : DASH} hint={`${list.length} match the filters`} />
           <StatCard index={1} label="Best per $1M" value={best ? fmtBpUsd(costOf(best)) : DASH} valueTone={best ? (costOf(best) < 0 ? 'positive' : 'negative') : undefined} hint={best ? `${best.base}, ${RECIPE[rows.get(best.symbol)?.id ?? 'r10'].name}` : undefined} />
