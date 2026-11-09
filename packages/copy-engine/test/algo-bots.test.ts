@@ -1554,7 +1554,7 @@ test('Watchdog: a running bot reports its loop, the service, the SoDEX price, th
   assert.equal(r.rt.view(a.id)!.bot!.health!.checks.find((c) => c.id === 'service')!.state, 'warn');
   r.brake = null;
   // Stopped: nothing to watch.
-  await r.rt.cancel(a.id, { now: clock });
+  await r.rt.cancel(a.id, { now: true });
   await settle();
   const hs = r.rt.view(a.id)!.bot!.health!;
   assert.deepEqual(hs.checks.map((c) => c.state), ['off']);
@@ -1594,7 +1594,7 @@ test('a stop that leaves less than SoDEX\'s minimum (owner 2026-11-09, 1.51 USDC
   const bid = r.ex.side('buy')[0]!;
   r.ex.fill(bid.clOrdID, 0.00005); // $3 held: under the $10 minimum order
   await settle();
-  await r.rt.cancel(a.id, { now: clock, close: true });
+  await r.rt.cancel(a.id, { now: true, close: true });
   await settle();
   for (let i = 0; i < 3; i++) await step(r, a.id, 1_000);
   const ended = r.rt.view(a.id)!;
