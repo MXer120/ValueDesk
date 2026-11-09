@@ -84,6 +84,11 @@ const MIX_LAST_T_META = 'cohort_mix_last_t';
  * push it out, as a backup's reads did to the OS's cache (a 413 s stall, 2026-11-05). Taken as used; the server has 46 GB.
  */
 export const WRITER_CACHE_KB = 6 * 1024 * 1024;
+// With the writer thread (writerThread.ts) two connections write, and SQLite empties a connection's page cache whenever the
+// other commits. PRAGMA mmap_size was tried against that on 2026-11-09 (writeBench.ts -mmap modes) and is NOT set: node's
+// SQLite is built with SQLITE_MAX_MMAP_SIZE 0x7fff0000, so only the first 2 GiB of the 50 GB file could be mapped, and on
+// the bench's 1.6 GB file (all of it mapped) it cut the reads' p99 from 0.5-0.85 ms to 0.37-0.41 ms but not the board-like
+// reads' (p99 1.8-4.2 ms against 2.2-3.4 ms). It would also turn a disk read error into SIGBUS instead of an SQLite error.
 
 export function defaultDbPath(): string {
   return process.env.VALUESCAN_INDEX_DB?.trim() || join(dirname(deviceKeyPath()), 'valuescan-index.db');
