@@ -61,6 +61,10 @@ export function FleetWatchdog({ bots, name, open }: { bots: readonly AlgoView[];
   if (!live.length) return null;
   const all = live.flatMap((v) => v.bot!.health!.checks);
   const sum = watchdogSummary(all);
+  // Bots with the same name (seven "live-test bot.makers") are told apart by their market.
+  const seen = new Map<string, number>();
+  for (const v of live) seen.set(name(v), (seen.get(name(v)) ?? 0) + 1);
+  const label = (v: AlgoView) => ((seen.get(name(v)) ?? 0) > 1 ? `${name(v)} · ${v.algo.spec.symbol.replace(/-USD$/, '')}` : name(v));
   return (
     <Shell className="bots-watchdog is-fleet">
       <ShellHeader
@@ -78,7 +82,7 @@ export function FleetWatchdog({ bots, name, open }: { bots: readonly AlgoView[];
             return (
               <li key={v.algo.id} className={`bots-wd__row is-${w?.state ?? 'ok'}`}>
                 <button type="button" className="bots-wd__bot" onClick={() => open(v.algo.id)}>
-                  <StatusPill size="sm" tone={s.tone} dot>{name(v)}</StatusPill>
+                  <StatusPill size="sm" tone={s.tone} dot>{label(v)}</StatusPill>
                 </button>
                 <span className="bots-wd__v">{w ? `${w.label}: ${w.value}` : `${checks.filter((c) => c.state === 'ok').length} checks pass`}</span>
               </li>
