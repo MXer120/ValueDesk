@@ -387,8 +387,8 @@ test('the key file is in no release, no backup and not in the repository', () =>
   const backup = readFileSync(join(root, 'deploy', 'server', 'bin', 'backup.sh'), 'utf8');
   assert.ok(!/builder|\.key|\.pem/.test(backup), 'the backup script names no key and no builder file');
   const uploads = backup.split('\n').filter((l) => /aws s3 cp/.test(l));
-  assert.equal(uploads.length, 2);
-  for (const l of uploads) assert.match(l, /\| aws s3 cp - "s3:\/\/\$OPS_BUCKET\/\$key(\.sha256)?"/, 'only the index copy and its checksum are uploaded');
+  assert.equal(uploads.length, 3);
+  for (const l of uploads) assert.match(l, /\| aws s3 cp - "s3:\/\/\$OPS_BUCKET\/\$key(\.sha256|\.meta\.json)?"/, 'only the index copy, its checksum and its figures (.meta.json, the restore drill checks them) are uploaded');
   // The example environment does not put the key anywhere a release or the web would pick it up.
   const env = readFileSync(join(root, 'deploy', 'server', 'env', 'api.env.example'), 'utf8');
   assert.match(env, /builder-terms\.key/);
