@@ -318,7 +318,7 @@ test('writer thread: a liq step goes ahead of a stream backlog, and every stream
     const changed = Array.from({ length: 2_000 }, (_, i) => ({ aid: i % 4 === 0 ? `0xq${i}` : 100_000 + i, coin: 'BTC', venue: 0, side: 1, liq: 50 + i, usd: 500 + i }));
     const fresh = [...new Set(changed.flatMap((c) => (typeof c.aid === 'string' ? [c.aid] : [])))];
     let filled = 0;
-    const streams = backlog.map((rows) => s.putFillsAsync(rows).then(() => { filled++; }));
+    const streams = backlog.map((rows) => s.putFillsAsync(rows, { stream: true }).then(() => { filled++; }));
     // Sent after 60k stream rows: answered while they are still being written (2026-11-09: the step waited 4.7 h).
     const ids = await s.putLiqLogSliced(t, fresh, changed, [], async () => {});
     assert.equal(filled, 0, 'the step was written before the stream backlog');
@@ -442,6 +442,30 @@ test('writer thread: a stop that finds it hung ends it, takes the lock, and spil
     assert.equal(count(s2, "SELECT COUNT(*) AS n FROM fills WHERE id LIKE 'b%'"), 3_000 + Math.ceil(3_000 / 9));
     s2.close();
   } finally {
+    rmSync(d, { recursive: true, force: true, maxRetries: 40, retryDelay: 50 });
+  }
+});
+
+test('writer thread: a wallet read goes ahead of the stream backlog and lands with it once, across a death', async () => {
+  const d = dir();
+  const ref = new IndexStore(join(d, 'ref.db'), { aggRefreshMs: 0 });
+  const s = new IndexStore(join(d, 'x.db'), { aggRefreshMs: 0 });
+  try {
+    s.startWriter({ force: true, targetMs: 2, maxRows: 100, restartAfterMs: 60_000 });
+    const stream = [fills(25_000, { tag: 'a', wallets: 100 }), fills(25_000, { tag: 'b', wallets: 100 })];
+    const read = fills(2_000, { tag: 'r', wallets: 3, src: 1 });
+    let streamed = 0;
+    const flushes = stream.map((rows) => s.putFillsAsync(rows, { stream: true }).then(() => { streamed++; }));
+    // A lane's read sent after 50k stream rows (2026-11-09: the HL lane waited 110 min behind them).
+    await s.putFillsAsync(read);
+    assert.equal(streamed, 0, 'the read was answered before the stream backlog');
+    await s.killWriter();
+    await Promise.all(flushes);
+    for (const rows of [...stream, read]) ref.putFills(rows);
+    assert.deepEqual(table(s, 'SELECT * FROM fills ORDER BY venue, address, id'), table(ref, 'SELECT * FROM fills ORDER BY venue, address, id'), 'every row once');
+  } finally {
+    ref.close();
+    s.close();
     rmSync(d, { recursive: true, force: true, maxRetries: 40, retryDelay: 50 });
   }
 });

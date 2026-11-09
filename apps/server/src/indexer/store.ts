@@ -1202,7 +1202,7 @@ export class IndexStore {
     return this.writer ? this.writer.kill() : Promise.resolve(0);
   }
 
-  private sendFills(rows: FillRow[], derived: number[], spillId?: number): Promise<WriterAnswer> {
+  private sendFills(rows: FillRow[], derived: number[], spillId?: number, prio = false): Promise<WriterAnswer> {
     const w = this.writer!;
     const due = new Uint8Array(rows.length);
     const days = new Set<string>();
@@ -1218,7 +1218,7 @@ export class IndexStore {
       if (r) due[i] = 1;
     }
     const list = this.holdDays(days);
-    return w.send({ kind: 'fills', rows, due, spillId }, rows.length, { derived, days: list, replay: spillId !== undefined });
+    return w.send({ kind: 'fills', rows, due, spillId, ...(prio && spillId === undefined ? { prio: true } : {}) }, rows.length, { derived, days: list, replay: spillId !== undefined });
   }
 
   private holdDays(days: Set<string>): string[] {
@@ -1828,11 +1828,12 @@ export class IndexStore {
    * changed ones mark is done here when the answer comes. Resolves once every row is in the file. With the thread off,
    * putFills itself, within the call.
    */
-  async putFillsAsync(input: readonly FillRow[]): Promise<void> {
+  async putFillsAsync(input: readonly FillRow[], o: { stream?: boolean } = {}): Promise<void> {
     if (!this.writer?.on) return this.putFills(input);
     const derived: number[] = [];
     const rows = this.takeFills(input, derived);
-    if (rows.length) await this.sendFills(rows, derived);
+    // A wallet read (not the streams' flush): ahead of the stream backlog, so its lane is not held behind it.
+    if (rows.length) await this.sendFills(rows, derived, undefined, !o.stream);
   }
 
   /** putFills a slice at a time, `pause()` between: one page of a busy trader's history is 2,000 rows, written from the caller's turn. */
