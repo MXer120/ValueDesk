@@ -25,6 +25,10 @@ export function keepSeries(views: readonly AlgoView[], before: readonly AlgoView
     }
     const series = kept.get(v.algo.id);
     if (!series) return null;
+    // Ended since the series was read: its last point (written at the end) is not here yet - one full read (owner
+    // 2026-11-09: a stopped bot showed 0 volume and PnL, its series kept from before its fills).
+    const endedAt = FINAL_STATUSES.has(v.algo.status) ? v.algo.endedAt ?? v.algo.updatedAt : null;
+    if (endedAt !== null && (!series.length || series[series.length - 1]![0] < endedAt - 1_000) && (v.bot?.fills ?? 0) > 0) return null;
     out.push({ ...v, algo: { ...v.algo, book: { ...book, series } } });
   }
   return out;
@@ -183,6 +187,13 @@ export function fleetSeries(views: readonly AlgoView[], now: number, step = BOT_
       const pts = [...(v.algo.book?.series ?? [])];
       // The figures now, for a bot still running whose last point is older than a minute.
       if (v.bot && !FINAL_STATUSES.has(v.algo.status) && (!pts.length || now - pts[pts.length - 1]![0] > 60_000)) pts.push([now, v.bot.volume, v.bot.netPnl, v.bot.tradeFees + v.bot.builderFees]);
+      // An ended bot whose series stops short of its figures (its final point not read yet): the figures at its end.
+      else if (v.bot && FINAL_STATUSES.has(v.algo.status)) {
+        const end = Number(v.algo.endedAt ?? v.algo.updatedAt);
+        const lp = pts[pts.length - 1];
+        const t = Number.isFinite(end) ? Math.max(end, lp ? lp[0] + 1 : end) : lp ? lp[0] + 1 : null;
+        if (t !== null && v.bot.volume > (lp ? lp[1] : 0) + 1e-6) pts.push([t, v.bot.volume, v.bot.netPnl, v.bot.tradeFees + v.bot.builderFees]);
+      }
       return pts;
     })
     .filter((p) => p.length > 0);
