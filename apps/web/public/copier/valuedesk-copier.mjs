@@ -21781,6 +21781,10 @@ import { existsSync as existsSync4 } from "node:fs";
 var POLL_MS = 2;
 var FALLBACK_AFTER_MS = 500;
 var RETURN_AFTER_MS = 3e3;
+var CONFIRM_AFTER_MS = 1200;
+var CONFIRM_EVERY_MS = 1e3;
+var CONFIRM_MAX = 8;
+var BINANCE_FAPI = "https://fapi.binance.com";
 var binanceSymbolOf = (market) => {
   const m = /^([A-Z0-9]+)-USD$/.exec(market);
   return m ? `${m[1]}USDT` : null;
@@ -21802,8 +21806,10 @@ var BinanceReference = class {
   aliveSince = null;
   poller = null;
   checker = null;
+  confirmer = null;
+  confirming = false;
   /** For the status line: ticks from the ring and from the own sockets. */
-  stats = { ring: 0, own: 0, lost: 0 };
+  stats = { ring: 0, own: 0, lost: 0, confirmed: 0 };
   watch(markets) {
     const next = new Set(markets);
     if (next.size === this.watched.size && [...next].every((m) => this.watched.has(m))) return;
@@ -21820,7 +21826,8 @@ var BinanceReference = class {
   stop() {
     if (this.poller) clearInterval(this.poller);
     if (this.checker) clearInterval(this.checker);
-    this.poller = this.checker = null;
+    if (this.confirmer) clearInterval(this.confirmer);
+    this.poller = this.checker = this.confirmer = null;
     this.own?.stop();
     this.own = null;
     this.reader?.close();
@@ -21836,6 +21843,43 @@ var BinanceReference = class {
     this.checker = setInterval(() => this.check(), 250);
     this.poller.unref?.();
     this.checker.unref?.();
+    if (this.o.fetch) {
+      this.confirmer = setInterval(() => void this.confirmStill(), CONFIRM_EVERY_MS);
+      this.confirmer.unref?.();
+    }
+  }
+  /**
+   * Watched markets silent for CONFIRM_AFTER_MS: Binance's book read once by REST, the oldest first, CONFIRM_MAX at
+   * most a round (a still market, not a dead feed: see the head comment). One round at a time.
+   */
+  async confirmStill(now = Date.now()) {
+    const f = this.o.fetch;
+    if (!f || this.confirming || !this.watched.size) return 0;
+    const still = [...this.watched].map((m) => ({ m, at: this.quotes.get(m)?.at ?? 0 })).filter((x) => now - x.at >= CONFIRM_AFTER_MS).sort((a, b) => a.at - b.at).slice(0, CONFIRM_MAX);
+    if (!still.length) return 0;
+    this.confirming = true;
+    let n = 0;
+    try {
+      await Promise.all(still.map(async ({ m }) => {
+        const sym = binanceSymbolOf(m);
+        if (!sym) return;
+        try {
+          const r = await f(`${BINANCE_FAPI}/fapi/v1/ticker/bookTicker?symbol=${sym}`, { signal: AbortSignal.timeout(1500) });
+          if (!r.ok) return;
+          const j = await r.json();
+          const bid = Number(j?.bidPrice);
+          const ask = Number(j?.askPrice);
+          if (!(bid > 0) || !(ask > 0) || ask < bid) return;
+          this.set(m, { bid, ask, at: Date.now() });
+          this.stats.confirmed++;
+          n++;
+        } catch {
+        }
+      }));
+    } finally {
+      this.confirming = false;
+    }
+    return n;
   }
   /** Every tick the ring has for a watched market, into the quotes (and the listeners). */
   poll() {
@@ -22273,7 +22317,7 @@ var ExecutorService = class {
       confirmGapMs: deps.readGapMs
     });
     const oracleFeed = new OracleFeed({ fetch: deps.fetch });
-    this.reference = cfg.kind === "hosted" ? new BinanceReference({ path: process.env.EXECUTOR_FEED_PATH || DEFAULT_FEED_PATH, factory: plainSockets, log: deps.log }) : null;
+    this.reference = cfg.kind === "hosted" ? new BinanceReference({ path: process.env.EXECUTOR_FEED_PATH || DEFAULT_FEED_PATH, factory: plainSockets, log: deps.log, fetch: deps.fetch }) : null;
     this.calendar = cfg.calendarUrl ? new CalendarFeed({ url: cfg.calendarUrl, fetch: deps.fetch, log: deps.log }) : null;
     const botHost = {
       keyExpiresAt: (owner) => this.db.key(owner.toLowerCase(), "active")?.expiresAt ?? null,
