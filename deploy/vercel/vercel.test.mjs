@@ -390,6 +390,12 @@ test('the copy executor: POST under /api/copy/ only, body and token through, the
       assert.equal(seen.at(-1).headers.authorization, 'Bearer t');
       assert.equal(seen.at(-1).headers['x-viewer-country'], undefined, 'no country from Vercel: none at all');
 
+      // The VIP executor's paths the same (2026-11-09: a POST there was a 405 here).
+      const vip = await request(port, '/api/copy-vip/v1/session', { method: 'POST', body: signed, headers: { 'content-type': 'application/json', authorization: 'Bearer 0xabc.123.sig', 'x-vercel-ip-country': 'de' } });
+      assert.equal(vip.status, 200, vip.body.toString());
+      assert.equal(seen.at(-1).url, '/api/copy-vip/v1/session');
+      assert.equal(seen.at(-1).headers['x-viewer-country'], 'DE');
+      assert.equal(seen.at(-1).headers.authorization, 'Bearer 0xabc.123.sig');
       // Outside /api/copy/ nothing of it: no POST, no token, no country.
       const before = seen.length;
       const post = await request(port, '/api/vs/leaderboard', { method: 'POST', body: '{}', headers: { 'content-type': 'application/json' } });

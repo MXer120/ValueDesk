@@ -130,7 +130,13 @@ const SELF = '/api/__vs_proxy';
 /** Answered here: where the viewer is, as Vercel's edge sees it. */
 const GEO_PATH = '/api/edge/geo';
 
-const isCopyPath = (path) => String(path ?? '').startsWith(COPY_PREFIX);
+/**
+ * The VIP executor's paths (server 1's Caddy sends /api/copy-vip/* to it as /api/copy/*): the same executor API, so
+ * the same rules - POST, the token, the viewer's country, never cached (2026-11-09: the first live move to VIP could
+ * not sign in there, "405 method not allowed" from this proxy).
+ */
+const COPY_VIP_PREFIX = '/api/copy-vip/';
+const isCopyPath = (path) => String(path ?? '').startsWith(COPY_PREFIX) || String(path ?? '').startsWith(COPY_VIP_PREFIX);
 /**
  * Feedback (a visitor's own conversation, its screenshots), client error reports and a signed-in
  * wallet's inbox (apps/server/src/routes/reports.ts, ops/inbox.ts): POST passes, the thread token or
