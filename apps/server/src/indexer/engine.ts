@@ -439,6 +439,10 @@ export class Indexer {
   private unwritten = new Set<UnwrittenPart>();
   /** A stop is moving the unwritten rows to the spill: the flush only queues. */
   private spilling = false;
+  /** Flushes through the writer thread, each one's rest after the one before (flushThrough). */
+  private flushChain: Promise<void> = Promise.resolve();
+  /** When the last flush took its rows (a stop moves the streams' span to it). */
+  private lastFlushAt = 0;
   /** Rows the last stop spilled (its timing line). */
   private spilledRows = 0;
   /** Samples the thread all the time and keeps the last minute when it stalls (stallProfiler.ts). */
@@ -745,13 +749,24 @@ export class Indexer {
     lap('cohorts');
     // The rows still waiting go to the spill in one sequential write (store.spillWrites), not into the fills a slice at a
     // time: written out here, a backlog of minutes of rows took minutes of the stop. The next start writes them first.
-    const backlog = this.writes.backlog;
+    const backlog = this.writes.backlog + (this.store.writerStatus?.pendingOps ?? 0);
     this.spilling = true;
     try {
+      const thread = this.store.writerOn;
       this.flush();
       this.spillUnwritten();
       lap(`write backlog (${backlog} steps; spilled ${this.spilledRows} rows)`);
       this.writes.drain();
+      if (thread && this.lastFlushAt) {
+        // What the drain did for an inline flush, for the flushes the thread was writing: the streams' span moves (their rows
+        // are written or spilled; the held ranges stay where they are), and the stats waiting go in.
+        try {
+          this.store.tx(() => this.trackStreams(this.lastFlushAt));
+          this.writeStats();
+        } catch (e) {
+          this.lastError = `stop: ${String(e)}`;
+        }
+      }
     } finally {
       this.spilling = false;
     }
@@ -899,6 +914,8 @@ export class Indexer {
       heldPartials: this.store.heldPartials,
       checkpoint: this.store.checkpointStatus,
       flushBacklog: this.writes.backlog,
+      writer: this.store.writerStatus,
+      lockWaits: { n: this.store.lockWaits.n, maxMs: Math.round(this.store.lockWaits.maxMs), over100: this.store.lockWaits.over100 },
       streamUnderRest: this.store.streamUnderRest,
       retention: this.store.retention(this.now()),
       sodexBreaks: this.sodexBreaks.length,
@@ -986,6 +1003,7 @@ export class Indexer {
     const fills = inKeyOrder(this.pendingFills);
     this.pendingFills = [];
     const at = this.now();
+    if (this.store.writerOn) return this.flushThrough(rows, fills, at);
     // A write that failed: this flush's coverage does not move, as the rows it speaks for are not held.
     let failed = false;
     const write = (fn: () => void) => () => {
@@ -1036,19 +1054,61 @@ export class Indexer {
   }
 
   /**
+   * A flush with the writer thread on (writerThread.ts): all of it in one op of activity and one of fills, not FLUSH_FILLS
+   * steps - that cut was only there so this thread was never held long, and the thread cuts its transactions by time. The
+   * rest of the flush (day sums, coverage, stats) runs here once both are answered, flushes in the order they were taken:
+   * what the coverage claims is in the file by then. A stop spills what is not (store.stopWriter).
+   */
+  private flushThrough(rows: Array<{ venue: Venue; acct: string; hour: number; trades: number; volume: number }>, fills: import('./store.js').FillRow[], at: number): void {
+    const sent = Promise.allSettled([this.store.addActivityAsync(rows), this.store.putFillsAsync(fills)]);
+    this.lastFlushAt = at;
+    this.flushChain = this.flushChain.then(() => sent).then((r) => {
+      const bad = r.find((x): x is PromiseRejectedResult => x.status === 'rejected');
+      if (bad) this.lastError = `flush: ${String(bad.reason)}`;
+      if (this.stopped) return;
+      this.writes.add([
+        () => { if (!this.stopped) this.store.flushAggregates(40); },
+        () => {
+          if (bad) return;
+          this.store.tx(() => {
+            this.trackStreams(at);
+            this.advanceCoverage(at);
+          });
+        },
+        () => this.writeStats(),
+      ]);
+    });
+  }
+
+  private writeStats(): void {
+    if (!this.pendingStats.length) return;
+    const stats = this.pendingStats;
+    this.pendingStats = [];
+    this.store.putTraderStats(stats);
+  }
+
+  /**
    * At a stop: every row not written yet goes to the spill in one transaction, and the steps that would have written them
-   * do nothing. Should the spill fail, they are written as before (the drain after it).
+   * do nothing. Should the spill fail, they are written as before (the drain after it). With the writer thread, its rows
+   * not written go in the same transaction, which holds the write lock while it settles what the thread wrote.
    */
   private spillUnwritten(): void {
     const parts = [...this.unwritten];
-    if (!parts.length) return;
-    // The fills of every waiting flush in one key order, cut again into FLUSH_FILLS: the next start writes each wallet's
-    // rows of the whole backlog together (stable: copies of one id keep their order).
-    const fills = inKeyOrder(parts.flatMap((p) => (p.kind === 'fills' ? p.rows : [])));
-    const out: Parameters<IndexStore['spillWrites']>[0][number][] = parts.flatMap((p) => (p.kind === 'activity' ? [{ kind: 'activity' as const, rows: p.rows }] : []));
-    for (let i = 0; i < fills.length; i += FLUSH_FILLS) out.push({ kind: 'fills', rows: fills.slice(i, i + FLUSH_FILLS) });
-    try {
+    const thread = this.store.hasWriter;
+    if (!parts.length && !thread) return;
+    const spill = (more: { fills: import('./store.js').FillRow[]; activity: Array<{ venue: Venue; acct: string; hour: number; trades: number; volume: number }> }) => {
+      // The fills of every waiting flush in one key order, cut again into FLUSH_FILLS: the next start writes each wallet's
+      // rows of the whole backlog together (stable: copies of one id keep their order).
+      const fills = inKeyOrder([...parts.flatMap((p) => (p.kind === 'fills' ? p.rows : [])), ...more.fills]);
+      const out: Parameters<IndexStore['spillWrites']>[0][number][] = parts.flatMap((p) => (p.kind === 'activity' ? [{ kind: 'activity' as const, rows: p.rows }] : []));
+      for (let i = 0; i < more.activity.length; i += FLUSH_ACTIVITY) out.push({ kind: 'activity', rows: more.activity.slice(i, i + FLUSH_ACTIVITY) });
+      for (let i = 0; i < fills.length; i += FLUSH_FILLS) out.push({ kind: 'fills', rows: fills.slice(i, i + FLUSH_FILLS) });
       this.store.spillWrites(out);
+      this.spilledRows += more.fills.length + more.activity.length;
+    };
+    try {
+      if (thread) this.store.stopWriter(spill);
+      else spill({ fills: [], activity: [] });
     } catch (e) {
       this.lastError = `spill: ${String(e)}`;
       console.warn(`[indexer] stop: spill failed, writing the rows instead: ${String(e)}`);
@@ -1077,7 +1137,12 @@ export class Indexer {
     if (!parts.length) return 0;
     let rows = 0;
     for (const p of parts) rows += p.rows;
-    this.writes.add(parts.map((p) => () => { if (!this.stopped) this.store.replaySpill(p.id); }));
+    if (this.store.writerOn) {
+      // Sent now, ahead of anything new (the thread writes in the order sent). A stop before one is written leaves it there.
+      for (const p of parts) void this.store.replaySpillAsync(p.id).catch((e) => { if (!this.stopped) this.lastError = `spill replay: ${String(e)}`; });
+    } else {
+      this.writes.add(parts.map((p) => () => { if (!this.stopped) this.store.replaySpill(p.id); }));
+    }
     console.log(`[indexer] start: ${rows} rows spilled by the last stop, written first (${parts.length} parts)`);
     return rows;
   }

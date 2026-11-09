@@ -197,7 +197,7 @@ export class ArcusVenue implements ExtVenue {
       spent += 20;
       // Fills with no usable time take their neighbour's before anything is stored or paged on.
       const list = fixFillTimes(page, now);
-      store.putFills(this.rows(address, list));
+      await store.putFillsAsync(this.rows(address, list));
       for (const f of list) oldest = Math.min(oldest, f.t);
       if (page.length < limit) {
         store.addCoverage('arcus', address, 'fills', { fromT: from, toT: now, exhausted: from === 0 }, now);

@@ -234,7 +234,7 @@ export class LighterVenue implements ExtVenue {
       for (let p = 0; p < maxPages; p++) {
         const r = await lighterTrades(i, { limit, cursor }, this.pacer);
         spent++;
-        store.putFills(this.rows(address, own, r.trades, symbols));
+        await store.putFillsAsync(this.rows(address, own, r.trades, symbols));
         for (const t of r.trades) oldest = Math.min(oldest, t.t);
         if (!r.next) { reachedStart = true; break; }
         if (oldest < from) break;

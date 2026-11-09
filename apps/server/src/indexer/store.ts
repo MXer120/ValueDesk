@@ -65,6 +65,10 @@ import { DatabaseSync, type StatementSync } from 'node:sqlite';
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { Checkpointer, type CheckpointStatus } from './checkpointer.js';
+import {
+  ACTIVITY_DAY, ACTIVITY_HOUR, CTL_WANT, FILL_UPSERT, LIQ_ADDR_INSERT, LIQ_CUR_DELETE, LIQ_CUR_INSERT, LIQ_LOG_INSERT, WRITER_DONE_META, WriterThread, writerThreadOn,
+  type ActivityWire, type LiqChangedWire, type LiqClosedWire, type WriterAnswer, type WriterPending, type WriterStatus,
+} from './writerThread.js';
 import { deviceKeyPath } from '../deviceKey.js';
 import { VENUES, type BoardWindow, type Venue } from '../valuedesk/types.js';
 import type { BoardFilter, Side } from './windows.js';
@@ -826,9 +830,21 @@ export const liqTurnMs = (elapsedMs: number): number => Math.min(600, 100 + (500
 /**
  * In key order (aid, coin, venue): each insert lands next to the last in the log's and the state's
  * b-trees instead of on a page of its own (dev, 30k rows: 2.1 s -> 0.66 s, with the cache 0.36 s).
+ * (LIQ_LOG_INSERT itself lives in writerThread.ts, which runs the same statement.)
  */
-const LIQ_LOG_INSERT = `INSERT OR REPLACE INTO liq_log (aid, coin, venue, t, side, liq, usd, sym, sz, entry, mark, iso, lev, eq, cash, read_at)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+/** Statements that write: counted while they run (IndexStore.writing). */
+const WRITE_SQL = /^\s*(INSERT|UPDATE|DELETE|REPLACE)\b/i;
+/** What the store keeps about an op it gave the writer thread. */
+interface WriterExtra {
+  /** Fills: for each row, the row it was copied from (-1: none; takeFills). */
+  derived?: number[];
+  /** Days of the op's rows (inflightDays), released when it settles. */
+  days?: string[];
+  /** A liq step as asked, for writing it here if the thread is gone. */
+  liq?: { t: number; newAddrs: readonly string[]; changed: ReadonlyArray<{ aid: number | string; coin: string; venue: number; side: number; liq: number; usd: number } & LiqLogExtra>; closed: ReadonlyArray<{ aid: number; coin: string; venue: number; mark?: number | null }> };
+  /** Never spilled again (a part replayed from the spill: still there until its transaction). */
+  replay?: boolean;
+}
 const finiteOrNull = (v: number | null | undefined): number | null => (v === undefined || v === null || !Number.isFinite(v) ? null : v);
 
 function liqLogOrder<T extends { aid: number | string; coin: string; venue: number }>(rows: readonly T[]): T[] {
@@ -845,6 +861,11 @@ export class IndexStore {
   private aggReady = new Map<string, boolean>();
   /** `venue|address|day` whose aggregate is behind its fills. */
   private dirtyDays = new Set<string>();
+  /** `venue|address|day` -> ops with rows of that day sent to the writer thread and not settled (writerThread.ts). */
+  private inflightDays = new Map<string, number>();
+  private writer: WriterThread<WriterExtra> | null = null;
+  /** The writer thread's control array, while one runs: this thread's writes are counted in it (writing()). */
+  private ctl: Int32Array | null = null;
   /**
    * Traders whose aggregates are being built, a slice of days at a time
    * (buildAggregates): `next` is the start of the next slice, `end` where the
@@ -993,6 +1014,9 @@ export class IndexStore {
 
   /** `lap`: called after each step with its name (the stop's timing line, worker.ts). */
   close(lap: (step: string) => void = () => {}): void {
+    // Rows the writer thread holds still: written here (the indexer's stop has spilled them already: engine.stop).
+    this.stopWriter();
+    lap('writer thread');
     this.checkpointer?.stop();
     this.checkpointer = null;
     lap('checkpoint thread');
@@ -1009,7 +1033,147 @@ export class IndexStore {
     if (this.readOnly || this.path === ':memory:' || this.checkpointer) return;
     this.checkpointer = new Checkpointer(this.path, (on) => {
       this.db.exec(`PRAGMA wal_autocheckpoint = ${on ? WAL_CHECKPOINT_PAGES : 0}`);
+      this.writer?.setAutoCheckpoint(on ? WAL_CHECKPOINT_PAGES : 0);
     }, o);
+  }
+
+  // --- the writer thread (writerThread.ts) ------------------------------------------------------
+
+  /**
+   * The bulk writes (fills, activity, the liquidation change log) go to a thread of their own from here on. The running
+   * indexer only (worker.ts); off with VALUESCAN_WRITER_THREAD=0 and in the tests unless `force`.
+   */
+  startWriter(o: { force?: boolean; targetMs?: number; maxRows?: number; hungMs?: number; restartAfterMs?: number } = {}): boolean {
+    if (this.readOnly || this.path === ':memory:' || this.writer) return false;
+    if (!o.force && !writerThreadOn()) return false;
+    // Made here, before the thread can be asked to replay a part of it.
+    this.spillTable();
+    this.writer = new WriterThread<WriterExtra>(this.path, {
+      rows: (p, from, to, changed) => this.writerRows(p, from, to, changed),
+      inline: (p, from) => this.writerInline(p, from),
+      settled: (p) => this.writerSettled(p),
+      committed: () => this.getMeta(WRITER_DONE_META),
+      locked: (fn) => this.tx(fn),
+      log: (line) => console.warn(line),
+    }, {
+      cacheKb: WRITER_CACHE_KB, busyMs: WRITER_BUSY_MS, walLimit: WAL_LIMIT_BYTES,
+      autoCkpt: this.checkpointer?.state.running ? 0 : WAL_CHECKPOINT_PAGES,
+      targetMs: o.targetMs, maxRows: o.maxRows, hungMs: o.hungMs, restartAfterMs: o.restartAfterMs,
+    });
+    this.ctl = this.writer.ctl;
+    return true;
+  }
+
+  /** True while ops go to the writer thread (false: no thread, or it is down and every write is inline). */
+  get writerOn(): boolean {
+    return !!this.writer?.on;
+  }
+
+  /** A writer thread was started and not stopped (it may be down for a minute after a death). */
+  get hasWriter(): boolean {
+    return this.writer !== null;
+  }
+
+  get writerStatus(): WriterStatus | null {
+    return this.writer?.state ?? null;
+  }
+
+  /** For a test: the writer thread dies. */
+  killWriter(): Promise<number> {
+    return this.writer ? this.writer.kill() : Promise.resolve(0);
+  }
+
+  private sendFills(rows: FillRow[], derived: number[], spillId?: number): Promise<WriterAnswer> {
+    const w = this.writer!;
+    const due = new Uint8Array(rows.length);
+    const days = new Set<string>();
+    for (let i = 0; i < rows.length; i++) {
+      const f = rows[i]!;
+      const dk = `${f.venue}|${f.address}|${Math.floor(f.t / DAY)}`;
+      days.add(dk);
+      // What markDay would decide for a changed row: the thread writes the mark with the fill (frozen days were refused).
+      if (!this.readOnly && this.aggIsReady(f.venue, f.address)) due[i] = 1;
+    }
+    const list = this.holdDays(days);
+    return w.send({ kind: 'fills', rows, due, spillId }, rows.length, { derived, days: list, replay: spillId !== undefined });
+  }
+
+  private holdDays(days: Set<string>): string[] {
+    for (const d of days) this.inflightDays.set(d, (this.inflightDays.get(d) ?? 0) + 1);
+    return [...days];
+  }
+
+  /** Rows [from, to) of an op are in the file: what putFills did in its transaction for the ones that changed, done now. */
+  private writerRows(p: WriterPending<WriterExtra>, from: number, to: number, changed: readonly number[] | null): void {
+    if (p.op.kind !== 'fills') return;
+    const rows = p.op.rows as FillRow[];
+    const due = p.op.due;
+    const idx: number[] = changed ? [...changed] : Array.from({ length: to - from }, (_, k) => from + k);
+    if (!idx.length) return;
+    for (const a of new Set(idx.map((i) => `${rows[i]!.venue}|${rows[i]!.address}`))) {
+      const [venue, address] = a.split('|') as [Venue, string];
+      this.bump(venue, address);
+    }
+    // A drop of the wallet's old rows begun since the rows were sent: they are wanted after all (keepWallet, as at insert).
+    if (this.dropping.size) for (const i of idx) this.keepWallet(rows[i]!.venue, rows[i]!.address, rows[i]!.t);
+    // `changed` null (the thread died before its answer): every row is taken as changed; the marks on disk are those of
+    // the rows that did, so the others are written here.
+    for (const i of idx) this.markDay(rows[i]!.venue, rows[i]!.address, rows[i]!.t, changed !== null && due[i] === 1);
+  }
+
+  /** What is left of an op written on this thread (the writer thread is gone). */
+  private writerInline(p: WriterPending<WriterExtra>, from: number): WriterAnswer {
+    const op = p.op;
+    if (op.kind === 'liqLog') {
+      const l = p.extra.liq!;
+      return { ids: [...this.putLiqLog(l.t, l.newAddrs, l.changed, l.closed)] };
+    }
+    const spillId = op.spillId;
+    this.tx(() => {
+      if (spillId !== undefined && Number(this.q('DELETE FROM write_spill WHERE id = ?').run(spillId).changes) === 0) return;
+      if (op.kind === 'fills') this.writeFillRows((op.rows as FillRow[]).slice(from));
+      else this.addActivity((op.rows as Array<ActivityWire & { venue: Venue }>).slice(from));
+    });
+    return {};
+  }
+
+  private writerSettled(p: WriterPending<WriterExtra>): void {
+    for (const d of p.extra.days ?? []) {
+      const n = (this.inflightDays.get(d) ?? 1) - 1;
+      if (n <= 0) this.inflightDays.delete(d);
+      else this.inflightDays.set(d, n);
+    }
+  }
+
+  /**
+   * Stop the writer thread now (writerThread.ts stopSync). `spill`: gets the rows it did not write - fills (copies whose
+   * original was not written either left out: the replay copies them again) and activity - and runs holding the write lock,
+   * so they go to the spill in the transaction that settles what the thread wrote. Without `spill` they are written here.
+   * Replayed parts stay in the spill; a liq step not written is refused (the tracker writes it again from the same state).
+   */
+  stopWriter(spill?: (rows: { fills: FillRow[]; activity: Array<{ venue: Venue; acct: string; hour: number; trades: number; volume: number }> }) => void): void {
+    const w = this.writer;
+    if (!w) return;
+    this.writer = null;
+    try {
+      w.stopSync(!spill ? null : (left) => {
+        const fills: FillRow[] = [];
+        const activity: Array<{ venue: Venue; acct: string; hour: number; trades: number; volume: number }> = [];
+        for (const p of left) {
+          if (p.extra.replay) continue;
+          if (p.op.kind === 'fills') {
+            const rows = p.op.rows as FillRow[];
+            const derived = p.extra.derived ?? [];
+            for (let i = p.done; i < p.n; i++) if (!((derived[i] ?? -1) >= p.done)) fills.push(rows[i]!);
+          } else if (p.op.kind === 'activity') {
+            activity.push(...(p.op.rows as Array<ActivityWire & { venue: Venue }>).slice(p.done));
+          }
+        }
+        spill({ fills, activity });
+      });
+    } finally {
+      this.ctl = null;
+    }
   }
 
   get checkpointStatus(): CheckpointStatus | null {
@@ -1288,9 +1452,37 @@ export class IndexStore {
     let s = this.stmts.get(sql);
     if (!s) {
       s = this.db.prepare(sql);
+      if (!this.readOnly && WRITE_SQL.test(sql)) this.counted(s);
       this.stmts.set(sql, s);
     }
     return s;
+  }
+
+  /** A writing statement's runs counted in `ctl[WANT]` (writing()): the writer thread lets them in first. */
+  private counted(s: StatementSync): void {
+    const run = s.run.bind(s);
+    const get = s.get.bind(s);
+    const all = s.all.bind(s);
+    type Any = (...a: never[]) => unknown;
+    const wrap = <F extends Any>(f: F): F => ((...a: Parameters<F>) => this.writing(() => f(...a))) as F;
+    s.run = wrap(run);
+    s.get = wrap(get);
+    s.all = wrap(all);
+  }
+
+  /**
+   * A write of this thread, counted while it waits for the lock and runs, so the writer thread commits at once and starts
+   * nothing new meanwhile (writerThread.ts). Free with no thread; inside a transaction the transaction counts.
+   */
+  private writing<T>(fn: () => T): T {
+    const c = this.ctl;
+    if (!c || this.depth > 0) return fn();
+    Atomics.add(c, CTL_WANT, 1);
+    try {
+      return fn();
+    } finally {
+      if (Atomics.sub(c, CTL_WANT, 1) === 1) Atomics.notify(c, CTL_WANT);
+    }
   }
 
   private depth = 0;
@@ -1305,27 +1497,40 @@ export class IndexStore {
         this.depth--;
       }
     }
-    // Timed (2026-11-08): single small writes held the indexer's thread 93 s and 161 s, the whole budget of a turn being
-    // 2 s - a lock, the disk or the work? Any part over SLOW_TX_MS is logged with its split.
-    const t0 = performance.now();
-    this.db.exec('BEGIN IMMEDIATE');
-    const t1 = performance.now();
-    this.depth = 1;
-    try {
-      const out = fn();
-      const t2 = performance.now();
-      this.db.exec('COMMIT');
-      const t3 = performance.now();
-      if (t1 - t0 > SLOW_TX_MS || t2 - t1 > SLOW_TX_MS || t3 - t2 > SLOW_TX_MS) {
-        console.log(`[indexer] slow write: lock wait ${Math.round(t1 - t0)} ms, body ${Math.round(t2 - t1)} ms, commit ${Math.round(t3 - t2)} ms, checkpoint ${this.checkpointer?.state.running ? 'thread' : 'writer'}`);
+    return this.writing(() => {
+      // Timed (2026-11-08): single small writes held the indexer's thread 93 s and 161 s, the whole budget of a turn being
+      // 2 s - a lock, the disk or the work? Any part over SLOW_TX_MS is logged with its split.
+      const t0 = performance.now();
+      this.db.exec('BEGIN IMMEDIATE');
+      const t1 = performance.now();
+      this.noteLockWait(t1 - t0);
+      this.depth = 1;
+      try {
+        const out = fn();
+        const t2 = performance.now();
+        this.db.exec('COMMIT');
+        const t3 = performance.now();
+        if (t1 - t0 > SLOW_TX_MS || t2 - t1 > SLOW_TX_MS || t3 - t2 > SLOW_TX_MS) {
+          console.log(`[indexer] slow write: lock wait ${Math.round(t1 - t0)} ms, body ${Math.round(t2 - t1)} ms, commit ${Math.round(t3 - t2)} ms, checkpoint ${this.checkpointer?.state.running ? 'thread' : 'writer'}`);
+        }
+        return out;
+      } catch (e) {
+        this.db.exec('ROLLBACK');
+        throw e;
+      } finally {
+        this.depth = 0;
       }
-      return out;
-    } catch (e) {
-      this.db.exec('ROLLBACK');
-      throw e;
-    } finally {
-      this.depth = 0;
-    }
+    });
+  }
+
+  /** This thread's waits for the write lock (BEGIN IMMEDIATE), for the status and writeBench.ts. */
+  readonly lockWaits = { n: 0, maxMs: 0, over100: 0, samples: null as number[] | null };
+  private noteLockWait(ms: number): void {
+    const w = this.lockWaits;
+    w.n++;
+    if (ms > w.maxMs) w.maxMs = ms;
+    if (ms > 100) w.over100++;
+    w.samples?.push(ms);
   }
 
   // --- meta ------------------------------------------------------------------
@@ -1393,40 +1598,50 @@ export class IndexStore {
    * (`xyz:*`) are also filed under `tradexyz`, which is ranked on its own.
    */
   putFills(input: readonly FillRow[]): void {
-    if (!input.length) return;
-    const maxT = Date.now() + MAX_AHEAD_MS;
+    const rows = this.takeFills(input);
+    if (rows.length) this.writeFillRows(rows);
+  }
+
+  /**
+   * The rows of `input` the index takes, as putFills always chose them (and the xyz copies it files under trade.xyz).
+   * `derived`: for each row taken, the index of the row it was copied from (-1: none), so a stop spills a copy only when
+   * its original was written already.
+   */
+  private takeFills(input: readonly FillRow[], derived?: number[]): FillRow[] {
     const rows: FillRow[] = [];
-    const take = (f: FillRow): void => {
+    if (!input.length) return rows;
+    const maxT = Date.now() + MAX_AHEAD_MS;
+    const take = (f: FillRow, from: number): boolean => {
       // A time no venue can have produced (0, seconds, microseconds): never stored.
-      if (!(f.t >= MIN_ROW_T && f.t <= maxT)) return this.noteBad(f.venue, f.address, f.id, f.t);
+      if (!(f.t >= MIN_ROW_T && f.t <= maxT)) {
+        this.noteBad(f.venue, f.address, f.id, f.t);
+        return false;
+      }
       if (f.src === 0 && this.restAnswered(f.venue, f.address, f.t)) {
         this.streamUnderRest++;
-        return;
+        return false;
       }
       // The day is frozen: its rows were complete when they were summed, so this is a re-read of one of them.
       if (this.frozenDay(f.venue, f.address, Math.floor(f.t / DAY))) {
         this.totals.late++;
-        return;
+        return false;
       }
       rows.push(f);
+      derived?.push(from);
+      return true;
     };
     for (const f of input) {
-      take(f);
-      if (f.venue === 'hyperliquid' && f.symbol.startsWith(XYZ)) take({ ...f, venue: 'tradexyz' });
+      const took = take(f, -1);
+      if (f.venue === 'hyperliquid' && f.symbol.startsWith(XYZ)) take({ ...f, venue: 'tradexyz' }, took ? rows.length - 1 : -1);
     }
-    if (!rows.length) return;
     if (this.dropping.size) for (const f of rows) this.keepWallet(f.venue, f.address, f.t);
-    const ins = this.q(
-      `INSERT INTO fills (venue, address, id, t, symbol, side, px, sz, fee, closed_pnl, oid, src)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT (venue, address, id) DO UPDATE SET
-         t = excluded.t, symbol = excluded.symbol, side = excluded.side, px = excluded.px, sz = excluded.sz,
-         fee = excluded.fee, closed_pnl = excluded.closed_pnl, oid = excluded.oid, src = excluded.src
-       WHERE excluded.src > fills.src OR (excluded.src = fills.src AND (
-         excluded.t IS NOT fills.t OR excluded.symbol IS NOT fills.symbol OR excluded.side IS NOT fills.side OR
-         excluded.px IS NOT fills.px OR excluded.sz IS NOT fills.sz OR excluded.fee IS NOT fills.fee OR
-         excluded.closed_pnl IS NOT fills.closed_pnl OR excluded.oid IS NOT fills.oid))`,
-    );
+    return rows;
+  }
+
+  /** Rows putFills took, written on this thread in one transaction with what changed rows mark. */
+  private writeFillRows(rows: readonly FillRow[]): void {
+    if (!rows.length) return;
+    const ins = this.q(FILL_UPSERT);
     // Only a row that is new or differs marks its day (and its trader's version): a re-read of rows
     // already held changed nothing, yet marked every day it touched dirty - and dropped the day sums
     // kept to go on from (liveDays), so a market maker's day was summed whole again on every read.
@@ -1444,8 +1659,22 @@ export class IndexStore {
     });
   }
 
+  /**
+   * putFills through the writer thread (writerThread.ts): the rows are chosen here and now, written there, and what the
+   * changed ones mark is done here when the answer comes. Resolves once every row is in the file. With the thread off,
+   * putFills itself, within the call.
+   */
+  async putFillsAsync(input: readonly FillRow[]): Promise<void> {
+    if (!this.writer?.on) return this.putFills(input);
+    const derived: number[] = [];
+    const rows = this.takeFills(input, derived);
+    if (rows.length) await this.sendFills(rows, derived);
+  }
+
   /** putFills a slice at a time, `pause()` between: one page of a busy trader's history is 2,000 rows, written from the caller's turn. */
   async putFillsSliced(input: readonly FillRow[], pause: () => Promise<void>): Promise<void> {
+    // The writer thread takes the page whole: its transactions are cut by time there, and this thread is not held.
+    if (this.writer?.on) return this.putFillsAsync(input);
     for (let i = 0; i < input.length; i += FILL_SLICE) {
       if (i) await pause();
       this.putFills(input.slice(i, i + FILL_SLICE));
@@ -1702,7 +1931,8 @@ export class IndexStore {
     return ready;
   }
 
-  private markDay(venue: Venue, address: string, t: number): void {
+  /** `onDisk`: the writer thread wrote the day's `fill_dirty` row with the fill (writerThread.ts); only the memory is behind. */
+  private markDay(venue: Venue, address: string, t: number, onDisk = false): void {
     if (this.readOnly) return;
     const d = Math.floor(t / DAY);
     const dk = `${venue}|${address}|${d}`;
@@ -1724,7 +1954,10 @@ export class IndexStore {
     const b = this.building.get(`${venue}|${address}`) ?? this.rebuilding.get(`${venue}|${address}`);
     if (b) b.touched.add(d);
     // Day rows exist: this one is behind its fills from now on.
-    if (this.aggIsReady(venue, address)) this.dirty(venue, address, d);
+    if (this.aggIsReady(venue, address)) {
+      if (onDisk) this.dirtyDays.add(`${venue}|${address}|${d}`);
+      else this.dirty(venue, address, d);
+    }
   }
 
   /**
@@ -1741,7 +1974,11 @@ export class IndexStore {
 
   /** The day's row is level with its fills again (unless a row arrived since it was summed). */
   private clean(venue: Venue, address: string, day: number): void {
-    if (this.dirtyDays.has(`${venue}|${address}|${day}`)) return;
+    const k = `${venue}|${address}|${day}`;
+    if (this.dirtyDays.has(k)) return;
+    // Rows of the day are with the writer thread: its mark may be in the file already and the answer not here yet. Gone
+    // now, the day's row would be short for good should the process die before the answer.
+    if (this.inflightDays.has(k)) return;
     this.q('DELETE FROM fill_dirty WHERE venue = ? AND address = ? AND day = ?').run(venue, address, day);
   }
 
@@ -2869,6 +3106,10 @@ export class IndexStore {
     let done = false;
     while (!(done = this.step(j.scan)) && !over()) { /* next chunk */ }
     if (!done) return;
+    // Rows of the stretch still with the writer thread: frozen now, they would land behind the day rows, never counted.
+    if (!j.stale && this.inflightDays.size) {
+      for (let d = j.lo; d < j.hi && !j.stale; d++) if (this.inflightDays.has(`${j.venue}|${j.address}|${d}`)) j.stale = true;
+    }
     if (j.stale) {
       // Rows changed under the sum (a read in progress): sum again, a few times at most, else the next sweep.
       if (++j.tries > 3) {
@@ -3052,7 +3293,7 @@ export class IndexStore {
     const free = Number((this.q('PRAGMA freelist_count').get() as { freelist_count?: number } | undefined)?.freelist_count) || 0;
     const n = Math.min(maxPages, free - reservePages);
     if (n <= 0) return 0;
-    this.db.exec(`PRAGMA incremental_vacuum(${n})`);
+    this.writing(() => this.db.exec(`PRAGMA incremental_vacuum(${n})`));
     this.totals.reclaimedPages += n;
     return n;
   }
@@ -3070,20 +3311,21 @@ export class IndexStore {
    */
   addActivity(rows: ReadonlyArray<{ venue: Venue; acct: string; hour: number; trades: number; volume: number }>): void {
     if (!rows.length) return;
-    const hour = this.q(
-      `INSERT INTO activity_hour (venue, acct, hour, trades, volume) VALUES (?, ?, ?, ?, ?)
-       ON CONFLICT (venue, hour, acct) DO UPDATE SET trades = trades + excluded.trades, volume = volume + excluded.volume`,
-    );
-    const day = this.q(
-      `INSERT INTO activity_day (venue, acct, day, trades, volume) VALUES (?, ?, ?, ?, ?)
-       ON CONFLICT (venue, day, acct) DO UPDATE SET trades = trades + excluded.trades, volume = volume + excluded.volume`,
-    );
+    const hour = this.q(ACTIVITY_HOUR);
+    const day = this.q(ACTIVITY_DAY);
     this.tx(() => {
       for (const r of rows) {
         hour.run(r.venue, r.acct, r.hour, r.trades, r.volume);
         day.run(r.venue, r.acct, Math.floor(r.hour / 24), r.trades, r.volume);
       }
     });
+  }
+
+  /** addActivity through the writer thread; resolves once every row is in the file. With the thread off, addActivity now. */
+  async addActivityAsync(rows: ReadonlyArray<{ venue: Venue; acct: string; hour: number; trades: number; volume: number }>): Promise<void> {
+    if (!rows.length) return;
+    if (!this.writer?.on) return this.addActivity(rows);
+    await this.writer.send({ kind: 'activity', rows: rows as ActivityWire[] }, rows.length, {});
   }
 
   /**
@@ -3713,7 +3955,7 @@ export class IndexStore {
     changed = liqLogOrder(changed);
     closed = liqLogOrder(closed);
     this.tx(() => {
-      const addr = this.q('INSERT INTO liq_addr (address) VALUES (?) ON CONFLICT (address) DO UPDATE SET address = excluded.address RETURNING id');
+      const addr = this.q(LIQ_ADDR_INSERT);
       for (const a of newAddrs) {
         const r = addr.get(a) as { id: number };
         ids.set(a, r.id);
@@ -3727,12 +3969,12 @@ export class IndexStore {
   private liqChangedRow(t: number, aid: number, c: { coin: string; venue: number; side: number; liq: number; usd: number } & LiqLogExtra): void {
     this.q(LIQ_LOG_INSERT).run(aid, c.coin, c.venue, t, c.side, c.liq, c.usd, c.sym ?? null, finiteOrNull(c.sz), finiteOrNull(c.entry), finiteOrNull(c.mark),
       c.iso === undefined || c.iso === null ? null : c.iso ? 1 : 0, finiteOrNull(c.lev), finiteOrNull(c.eq), finiteOrNull(c.cash), finiteOrNull(c.readAt));
-    this.q('INSERT OR REPLACE INTO liq_cur (aid, coin, venue, side, liq, usd, t) VALUES (?, ?, ?, ?, ?, ?, ?)').run(aid, c.coin, c.venue, c.side, c.liq, c.usd, t);
+    this.q(LIQ_CUR_INSERT).run(aid, c.coin, c.venue, c.side, c.liq, c.usd, t);
   }
 
   private liqClosedRow(t: number, c: { aid: number; coin: string; venue: number; mark?: number | null }): void {
     this.q(LIQ_LOG_INSERT).run(c.aid, c.coin, c.venue, t, 0, 0, 0, null, 0, null, finiteOrNull(c.mark), null, null, null, null, null);
-    this.q('DELETE FROM liq_cur WHERE aid = ? AND coin = ? AND venue = ?').run(c.aid, c.coin, c.venue);
+    this.q(LIQ_CUR_DELETE).run(c.aid, c.coin, c.venue);
   }
 
   /**
@@ -3748,6 +3990,15 @@ export class IndexStore {
     pause: () => Promise<void>,
     now: () => number = Date.now,
   ): Promise<Map<string, number>> {
+    // The writer thread takes the step whole (its transactions cut by time there): 54 min for one step on 2026-11-08, on
+    // this thread a slice at a time between everything else.
+    if (this.writer?.on) {
+      const wire: LiqChangedWire[] = changed.map((c) => [c.aid, c.coin, c.venue, c.side, c.liq, c.usd, c.sym ?? null, finiteOrNull(c.sz), finiteOrNull(c.entry), finiteOrNull(c.mark),
+        c.iso === undefined || c.iso === null ? null : c.iso ? 1 : 0, finiteOrNull(c.lev), finiteOrNull(c.eq), finiteOrNull(c.cash), finiteOrNull(c.readAt)]);
+      const gone: LiqClosedWire[] = closed.map((c) => [c.aid, c.coin, c.venue, finiteOrNull(c.mark)]);
+      const a = await this.writer.send({ kind: 'liqLog', t, newAddrs: [...newAddrs], changed: wire, closed: gone }, wire.length + gone.length, { liq: { t, newAddrs, changed, closed } });
+      return new Map(a.ids ?? []);
+    }
     const ids = this.putLiqLog(t, newAddrs, [], []);
     const known = liqLogOrder(changed.map((c) => (typeof c.aid === 'number' ? c : { ...c, aid: ids.get(c.aid)! })));
     const gone = liqLogOrder(closed);
@@ -4088,8 +4339,11 @@ export class IndexStore {
   // by the writer when first needed, not in SCHEMA: a reader's schemaReady must not wait for it.
 
   private spillTable(): void {
-    this.db.exec('CREATE TABLE IF NOT EXISTS write_spill (id INTEGER PRIMARY KEY, kind TEXT NOT NULL, rows TEXT NOT NULL)');
+    if (this.spillMade) return;
+    this.writing(() => this.db.exec('CREATE TABLE IF NOT EXISTS write_spill (id INTEGER PRIMARY KEY, kind TEXT NOT NULL, rows TEXT NOT NULL)'));
+    this.spillMade = true;
   }
+  private spillMade = false;
 
   /** Parts of rows, in the order they were to be written, in one transaction. */
   spillWrites(parts: ReadonlyArray<{ kind: 'fills'; rows: readonly FillRow[] } | { kind: 'activity'; rows: ReadonlyArray<{ venue: Venue; acct: string; hour: number; trades: number; volume: number }> }>): void {
@@ -4118,6 +4372,26 @@ export class IndexStore {
       else throw new Error(`write_spill ${id}: unknown kind ${r.kind}`);
       this.q('DELETE FROM write_spill WHERE id = ?').run(id);
     });
+  }
+
+  /**
+   * replaySpill through the writer thread: the part's rows and its removal in one transaction there, as here. A stop before
+   * that leaves the part in the spill (it is not spilled again). With the thread off, replaySpill now.
+   */
+  async replaySpillAsync(id: number): Promise<void> {
+    if (!this.writer?.on) return this.replaySpill(id);
+    const r = this.q('SELECT kind, rows FROM write_spill WHERE id = ?').get(id) as { kind: string; rows: string } | undefined;
+    if (!r) return;
+    const rows = JSON.parse(r.rows) as unknown[];
+    if (r.kind === 'fills') {
+      const derived: number[] = [];
+      // Every row refused (all late, say): the part still goes, in the thread's transaction with no row.
+      await this.sendFills(this.takeFills(rows as FillRow[], derived), derived, id);
+    } else if (r.kind === 'activity') {
+      await this.writer.send({ kind: 'activity', rows: rows as ActivityWire[], spillId: id }, rows.length, { replay: true });
+    } else {
+      throw new Error(`write_spill ${id}: unknown kind ${r.kind}`);
+    }
   }
 
   /** Board rows for an address across every board (a trader's standing). */

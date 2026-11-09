@@ -229,7 +229,7 @@ export function syncTrades(
     async (q) => {
       const list = await tradesPage(engine, address, { limit: TRADES_PAGE, startTime: q.startTime, endTime: q.endTime });
       const rows = list.flatMap((t) => sodexFillRow(address, t) ?? []);
-      store.putFills(rows);
+      await store.putFillsAsync(rows);
       return rows.map((r) => ({ t: r.t, put: () => {} }));
     },
     fromT,
@@ -241,7 +241,7 @@ export function syncTrades(
 export async function peekTrades(store: IndexStore, address: string, engine: 'perps' | 'spot', fromT: number, now: number, limit = 20): Promise<void> {
   const list = await tradesPage(engine, address, { limit, startTime: fromT });
   const rows = list.flatMap((t) => sodexFillRow(address, t) ?? []);
-  store.putFills(rows);
+  await store.putFillsAsync(rows);
   // A short page is the whole window: nothing else happened since `fromT`.
   if (list.length < limit) store.addCoverage('sodex', address, engine, { fromT, toT: now, exhausted: fromT === 0 }, now);
 }

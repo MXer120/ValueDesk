@@ -186,7 +186,7 @@ export async function hlQuickCheck(store: IndexStore, address: string, fromT: nu
   );
   const list = Array.isArray(page) ? page : [];
   const rows = list.flatMap((f) => hlFillRow(address, f) ?? []);
-  store.putFills(rows);
+  await store.putFillsAsync(rows);
   const lastT = rows.reduce((m, r) => Math.max(m, r.t), sliceFrom);
   store.addCoverage(
     'hyperliquid',
@@ -268,7 +268,7 @@ export async function hlSubAccountFills(store: IndexStore, master: string, fromT
       { background: true, timeoutMs: 25_000 },
     );
     const got = (Array.isArray(page) ? page : []).flatMap((f) => hlFillRow(master, f) ?? []);
-    store.putFills(got);
+    await store.putFillsAsync(got);
     cost += 20 + Math.ceil(got.length / 20);
     if (store.orderCount('hyperliquid', master, fromT) >= 2) break;
   }

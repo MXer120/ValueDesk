@@ -44,9 +44,11 @@ export function runIndexer(path = defaultDbPath()): Running {
   const t0 = Date.now();
   const store = new IndexStore(path);
   const t1 = Date.now();
+  // The bulk writes on their own thread (writerThread.ts), before the engine starts: the last stop's spill goes through it.
+  const writer = store.startWriter();
   const indexer = new Indexer(store);
   const t2 = Date.now();
-  console.log(`[indexer] start: store ${t1 - t0} ms, engine ${t2 - t1} ms`);
+  console.log(`[indexer] start: store ${t1 - t0} ms, engine ${t2 - t1} ms, writer thread ${writer ? 'on' : 'off'}`);
   indexer.start();
   /** When a stop began (0: running). Published from its first moment, so the status page can say maintenance, not down. */
   let stoppingSince = 0;
