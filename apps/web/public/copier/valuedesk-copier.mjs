@@ -42,9 +42,9 @@ var __toESM = (mod2, isNodeMode, target) => (target = mod2 != null ? __create(__
   mod2
 ));
 
-// ../../../node_modules/ws/lib/constants.js
+// ../../node_modules/ws/lib/constants.js
 var require_constants = __commonJS({
-  "../../../node_modules/ws/lib/constants.js"(exports, module) {
+  "../../node_modules/ws/lib/constants.js"(exports, module) {
     "use strict";
     var BINARY_TYPES = ["nodebuffer", "arraybuffer", "fragments"];
     var hasBlob = typeof Blob !== "undefined";
@@ -65,9 +65,9 @@ var require_constants = __commonJS({
   }
 });
 
-// ../../../node_modules/node-gyp-build/node-gyp-build.js
+// ../../node_modules/node-gyp-build/node-gyp-build.js
 var require_node_gyp_build = __commonJS({
-  "../../../node_modules/node-gyp-build/node-gyp-build.js"(exports, module) {
+  "../../node_modules/node-gyp-build/node-gyp-build.js"(exports, module) {
     var fs = __require("fs");
     var path = __require("path");
     var os = __require("os");
@@ -234,9 +234,9 @@ var require_node_gyp_build = __commonJS({
   }
 });
 
-// ../../../node_modules/node-gyp-build/index.js
+// ../../node_modules/node-gyp-build/index.js
 var require_node_gyp_build2 = __commonJS({
-  "../../../node_modules/node-gyp-build/index.js"(exports, module) {
+  "../../node_modules/node-gyp-build/index.js"(exports, module) {
     var runtimeRequire = typeof __webpack_require__ === "function" ? __non_webpack_require__ : __require;
     if (typeof runtimeRequire.addon === "function") {
       module.exports = runtimeRequire.addon.bind(runtimeRequire);
@@ -246,9 +246,9 @@ var require_node_gyp_build2 = __commonJS({
   }
 });
 
-// ../../../node_modules/bufferutil/fallback.js
+// ../../node_modules/bufferutil/fallback.js
 var require_fallback = __commonJS({
-  "../../../node_modules/bufferutil/fallback.js"(exports, module) {
+  "../../node_modules/bufferutil/fallback.js"(exports, module) {
     "use strict";
     var mask = (source, mask2, output, offset, length) => {
       for (var i = 0; i < length; i++) {
@@ -265,9 +265,9 @@ var require_fallback = __commonJS({
   }
 });
 
-// ../../../node_modules/bufferutil/index.js
+// ../../node_modules/bufferutil/index.js
 var require_bufferutil = __commonJS({
-  "../../../node_modules/bufferutil/index.js"(exports, module) {
+  "../../node_modules/bufferutil/index.js"(exports, module) {
     "use strict";
     try {
       module.exports = require_node_gyp_build2()(__dirname);
@@ -277,9 +277,9 @@ var require_bufferutil = __commonJS({
   }
 });
 
-// ../../../node_modules/ws/lib/buffer-util.js
+// ../../node_modules/ws/lib/buffer-util.js
 var require_buffer_util = __commonJS({
-  "../../../node_modules/ws/lib/buffer-util.js"(exports, module) {
+  "../../node_modules/ws/lib/buffer-util.js"(exports, module) {
     "use strict";
     var { EMPTY_BUFFER } = require_constants();
     var FastBuffer = Buffer[Symbol.species];
@@ -352,9 +352,9 @@ var require_buffer_util = __commonJS({
   }
 });
 
-// ../../../node_modules/ws/lib/limiter.js
+// ../../node_modules/ws/lib/limiter.js
 var require_limiter = __commonJS({
-  "../../../node_modules/ws/lib/limiter.js"(exports, module) {
+  "../../node_modules/ws/lib/limiter.js"(exports, module) {
     "use strict";
     var kDone = /* @__PURE__ */ Symbol("kDone");
     var kRun = /* @__PURE__ */ Symbol("kRun");
@@ -402,9 +402,9 @@ var require_limiter = __commonJS({
   }
 });
 
-// ../../../node_modules/ws/lib/permessage-deflate.js
+// ../../node_modules/ws/lib/permessage-deflate.js
 var require_permessage_deflate = __commonJS({
-  "../../../node_modules/ws/lib/permessage-deflate.js"(exports, module) {
+  "../../node_modules/ws/lib/permessage-deflate.js"(exports, module) {
     "use strict";
     var zlib = __require("zlib");
     var bufferUtil = require_buffer_util();
@@ -785,9 +785,9 @@ var require_permessage_deflate = __commonJS({
   }
 });
 
-// ../../../node_modules/utf-8-validate/fallback.js
+// ../../node_modules/utf-8-validate/fallback.js
 var require_fallback2 = __commonJS({
-  "../../../node_modules/utf-8-validate/fallback.js"(exports, module) {
+  "../../node_modules/utf-8-validate/fallback.js"(exports, module) {
     "use strict";
     function isValidUTF8(buf) {
       const len = buf.length;
@@ -822,9 +822,9 @@ var require_fallback2 = __commonJS({
   }
 });
 
-// ../../../node_modules/utf-8-validate/index.js
+// ../../node_modules/utf-8-validate/index.js
 var require_utf_8_validate = __commonJS({
-  "../../../node_modules/utf-8-validate/index.js"(exports, module) {
+  "../../node_modules/utf-8-validate/index.js"(exports, module) {
     "use strict";
     try {
       module.exports = require_node_gyp_build2()(__dirname);
@@ -834,9 +834,9 @@ var require_utf_8_validate = __commonJS({
   }
 });
 
-// ../../../node_modules/ws/lib/validation.js
+// ../../node_modules/ws/lib/validation.js
 var require_validation = __commonJS({
-  "../../../node_modules/ws/lib/validation.js"(exports, module) {
+  "../../node_modules/ws/lib/validation.js"(exports, module) {
     "use strict";
     var { isUtf8 } = __require("buffer");
     var { hasBlob } = require_constants();
@@ -1035,9 +1035,9 @@ var require_validation = __commonJS({
   }
 });
 
-// ../../../node_modules/ws/lib/receiver.js
+// ../../node_modules/ws/lib/receiver.js
 var require_receiver = __commonJS({
-  "../../../node_modules/ws/lib/receiver.js"(exports, module) {
+  "../../node_modules/ws/lib/receiver.js"(exports, module) {
     "use strict";
     var { Writable } = __require("stream");
     var PerMessageDeflate2 = require_permessage_deflate();
@@ -1658,9 +1658,9 @@ var require_receiver = __commonJS({
   }
 });
 
-// ../../../node_modules/ws/lib/sender.js
+// ../../node_modules/ws/lib/sender.js
 var require_sender = __commonJS({
-  "../../../node_modules/ws/lib/sender.js"(exports, module) {
+  "../../node_modules/ws/lib/sender.js"(exports, module) {
     "use strict";
     var { Duplex } = __require("stream");
     var { randomFillSync } = __require("crypto");
@@ -2151,9 +2151,9 @@ var require_sender = __commonJS({
   }
 });
 
-// ../../../node_modules/ws/lib/event-target.js
+// ../../node_modules/ws/lib/event-target.js
 var require_event_target = __commonJS({
-  "../../../node_modules/ws/lib/event-target.js"(exports, module) {
+  "../../node_modules/ws/lib/event-target.js"(exports, module) {
     "use strict";
     var { kForOnEventAttribute, kListener } = require_constants();
     var kCode = /* @__PURE__ */ Symbol("kCode");
@@ -2380,9 +2380,9 @@ var require_event_target = __commonJS({
   }
 });
 
-// ../../../node_modules/ws/lib/extension.js
+// ../../node_modules/ws/lib/extension.js
 var require_extension = __commonJS({
-  "../../../node_modules/ws/lib/extension.js"(exports, module) {
+  "../../node_modules/ws/lib/extension.js"(exports, module) {
     "use strict";
     var { tokenChars } = require_validation();
     function push(dest, name, elem) {
@@ -2533,9 +2533,9 @@ var require_extension = __commonJS({
   }
 });
 
-// ../../../node_modules/ws/lib/websocket.js
+// ../../node_modules/ws/lib/websocket.js
 var require_websocket = __commonJS({
-  "../../../node_modules/ws/lib/websocket.js"(exports, module) {
+  "../../node_modules/ws/lib/websocket.js"(exports, module) {
     "use strict";
     var EventEmitter = __require("events");
     var https = __require("https");
@@ -3429,9 +3429,9 @@ var require_websocket = __commonJS({
   }
 });
 
-// ../../../node_modules/ws/lib/stream.js
+// ../../node_modules/ws/lib/stream.js
 var require_stream = __commonJS({
-  "../../../node_modules/ws/lib/stream.js"(exports, module) {
+  "../../node_modules/ws/lib/stream.js"(exports, module) {
     "use strict";
     var WebSocket2 = require_websocket();
     var { Duplex } = __require("stream");
@@ -3527,9 +3527,9 @@ var require_stream = __commonJS({
   }
 });
 
-// ../../../node_modules/ws/lib/subprotocol.js
+// ../../node_modules/ws/lib/subprotocol.js
 var require_subprotocol = __commonJS({
-  "../../../node_modules/ws/lib/subprotocol.js"(exports, module) {
+  "../../node_modules/ws/lib/subprotocol.js"(exports, module) {
     "use strict";
     var { tokenChars } = require_validation();
     function parse(header) {
@@ -3572,9 +3572,9 @@ var require_subprotocol = __commonJS({
   }
 });
 
-// ../../../node_modules/ws/lib/websocket-server.js
+// ../../node_modules/ws/lib/websocket-server.js
 var require_websocket_server = __commonJS({
-  "../../../node_modules/ws/lib/websocket-server.js"(exports, module) {
+  "../../node_modules/ws/lib/websocket-server.js"(exports, module) {
     "use strict";
     var EventEmitter = __require("events");
     var http = __require("http");
@@ -4034,6 +4034,11 @@ function vipPubkeyFrom(raw, name = "EXECUTOR_VIP_PUBKEY") {
   if (!/^[A-Za-z0-9_-]{60,400}$/.test(v)) throw new Error(`${name} must be the other executor's key-import public key (base64url, as its /info shows keyImport.publicKey)`);
   return v;
 }
+function vipWalletsFrom(raw) {
+  const list = (raw ?? "").split(",").map((a) => a.trim().toLowerCase()).filter(Boolean);
+  for (const a of list) if (!ADDRESS.test(a)) throw new Error(`EXECUTOR_VIP_WALLETS holds "${a.slice(0, 12)}...", which is not a wallet address`);
+  return list;
+}
 function liveAlgoWalletsFrom(raw) {
   const s = raw?.trim() ?? "";
   if (!s) return [];
@@ -4095,6 +4100,7 @@ function loadConfig(env = process.env) {
     vipUrl: env.EXECUTOR_VIP_URL?.trim() ? builderUrl(env.EXECUTOR_VIP_URL) : null,
     vipCheckUrl: vipCheckUrlFrom(env.EXECUTOR_VIP_CHECK_URL, env.EXECUTOR_BUILDER_URL),
     vipOpen: env.EXECUTOR_VIP_OPEN?.trim() === "1",
+    vipWallets: vipWalletsFrom(env.EXECUTOR_VIP_WALLETS),
     vipPubkey: vipPubkeyFrom(env.EXECUTOR_VIP_PUBKEY),
     stdUrl: env.EXECUTOR_STD_URL?.trim() ? builderUrl(env.EXECUTOR_STD_URL) : null,
     stdPubkey: vipPubkeyFrom(env.EXECUTOR_STD_PUBKEY, "EXECUTOR_STD_PUBKEY"),
@@ -4116,7 +4122,7 @@ function loadConfig(env = process.env) {
 import { Agent, request as httpsRequest } from "node:https";
 import { isIPv6 } from "node:net";
 
-// ../../../node_modules/ws/wrapper.mjs
+// ../../node_modules/ws/wrapper.mjs
 var import_stream = __toESM(require_stream(), 1);
 var import_extension = __toESM(require_extension(), 1);
 var import_permessage_deflate = __toESM(require_permessage_deflate(), 1);
@@ -4728,7 +4734,7 @@ var enginePath = (engine) => `/api/v1/${engine}`;
 var DomainName = { spot: "spot", perps: "futures", universal: "universal" };
 var engineDomainName = (engine) => engine === "spot" ? DomainName.spot : DomainName.perps;
 
-// ../../../node_modules/@noble/hashes/esm/_u64.js
+// ../../node_modules/@noble/hashes/esm/_u64.js
 var U32_MASK64 = /* @__PURE__ */ BigInt(2 ** 32 - 1);
 var _32n = /* @__PURE__ */ BigInt(32);
 function fromBig(n, le = false) {
@@ -4751,7 +4757,7 @@ var rotlSL = (h, l, s) => l << s | h >>> 32 - s;
 var rotlBH = (h, l, s) => l << s - 32 | h >>> 64 - s;
 var rotlBL = (h, l, s) => h << s - 32 | l >>> 64 - s;
 
-// ../../../node_modules/@noble/hashes/esm/utils.js
+// ../../node_modules/@noble/hashes/esm/utils.js
 function isBytes(a) {
   return a instanceof Uint8Array || ArrayBuffer.isView(a) && a.constructor.name === "Uint8Array";
 }
@@ -4825,7 +4831,7 @@ function createHasher(hashCons) {
   return hashC;
 }
 
-// ../../../node_modules/@noble/hashes/esm/sha3.js
+// ../../node_modules/@noble/hashes/esm/sha3.js
 var _0n = BigInt(0);
 var _1n = BigInt(1);
 var _2n = BigInt(2);
@@ -5006,7 +5012,7 @@ var Keccak = class _Keccak extends Hash {
 var gen = (suffix, blockLen, outputLen) => createHasher(() => new Keccak(blockLen, suffix, outputLen));
 var keccak_256 = /* @__PURE__ */ (() => gen(1, 136, 256 / 8))();
 
-// ../../../node_modules/@noble/curves/node_modules/@noble/hashes/esm/_assert.js
+// ../../node_modules/@noble/curves/node_modules/@noble/hashes/esm/_assert.js
 function anumber2(n) {
   if (!Number.isSafeInteger(n) || n < 0)
     throw new Error("positive integer expected, got " + n);
@@ -5040,11 +5046,11 @@ function aoutput2(out, instance) {
   }
 }
 
-// ../../../node_modules/@noble/curves/node_modules/@noble/hashes/esm/cryptoNode.js
+// ../../node_modules/@noble/curves/node_modules/@noble/hashes/esm/cryptoNode.js
 import * as nc from "node:crypto";
 var crypto = nc && typeof nc === "object" && "webcrypto" in nc ? nc.webcrypto : nc && typeof nc === "object" && "randomBytes" in nc ? nc : void 0;
 
-// ../../../node_modules/@noble/curves/node_modules/@noble/hashes/esm/utils.js
+// ../../node_modules/@noble/curves/node_modules/@noble/hashes/esm/utils.js
 var createView2 = (arr) => new DataView(arr.buffer, arr.byteOffset, arr.byteLength);
 var rotr2 = (word2, shift) => word2 << 32 - shift | word2 >>> shift;
 function utf8ToBytes2(str2) {
@@ -5097,7 +5103,7 @@ function randomBytes(bytesLength = 32) {
   throw new Error("crypto.getRandomValues must be defined");
 }
 
-// ../../../node_modules/@noble/curves/node_modules/@noble/hashes/esm/_md.js
+// ../../node_modules/@noble/curves/node_modules/@noble/hashes/esm/_md.js
 function setBigUint64(view, byteOffset, value, isLE2) {
   if (typeof view.setBigUint64 === "function")
     return view.setBigUint64(byteOffset, value, isLE2);
@@ -5199,7 +5205,7 @@ var HashMD = class extends Hash2 {
   }
 };
 
-// ../../../node_modules/@noble/curves/node_modules/@noble/hashes/esm/sha256.js
+// ../../node_modules/@noble/curves/node_modules/@noble/hashes/esm/sha256.js
 var SHA256_K = /* @__PURE__ */ new Uint32Array([
   1116352408,
   1899447441,
@@ -5349,7 +5355,7 @@ var SHA256 = class extends HashMD {
 };
 var sha256 = /* @__PURE__ */ wrapConstructor(() => new SHA256());
 
-// ../../../node_modules/@noble/curves/node_modules/@noble/hashes/esm/hmac.js
+// ../../node_modules/@noble/curves/node_modules/@noble/hashes/esm/hmac.js
 var HMAC = class extends Hash2 {
   constructor(hash, _key) {
     super();
@@ -5414,7 +5420,7 @@ var HMAC = class extends Hash2 {
 var hmac = (hash, key2, message) => new HMAC(hash, key2).update(message).digest();
 hmac.create = (hash, key2) => new HMAC(hash, key2);
 
-// ../../../node_modules/@noble/curves/esm/abstract/utils.js
+// ../../node_modules/@noble/curves/esm/abstract/utils.js
 var utils_exports = {};
 __export(utils_exports, {
   aInRange: () => aInRange,
@@ -5682,7 +5688,7 @@ function memoized(fn) {
   };
 }
 
-// ../../../node_modules/@noble/curves/esm/abstract/modular.js
+// ../../node_modules/@noble/curves/esm/abstract/modular.js
 var _0n3 = BigInt(0);
 var _1n3 = BigInt(1);
 var _2n3 = /* @__PURE__ */ BigInt(2);
@@ -5958,7 +5964,7 @@ function mapHashToField(key2, fieldOrder, isLE2 = false) {
   return isLE2 ? numberToBytesLE(reduced, fieldLen) : numberToBytesBE(reduced, fieldLen);
 }
 
-// ../../../node_modules/@noble/curves/esm/abstract/curve.js
+// ../../node_modules/@noble/curves/esm/abstract/curve.js
 var _0n4 = BigInt(0);
 var _1n4 = BigInt(1);
 function constTimeNegate(condition2, item) {
@@ -6185,7 +6191,7 @@ function validateBasic(curve) {
   });
 }
 
-// ../../../node_modules/@noble/curves/esm/abstract/weierstrass.js
+// ../../node_modules/@noble/curves/esm/abstract/weierstrass.js
 function validateSigVerOpts(opts) {
   if (opts.lowS !== void 0)
     abool("lowS", opts.lowS);
@@ -7054,7 +7060,7 @@ function weierstrass(curveDef) {
   };
 }
 
-// ../../../node_modules/@noble/curves/esm/_shortw_utils.js
+// ../../node_modules/@noble/curves/esm/_shortw_utils.js
 function getHash(hash) {
   return {
     hash,
@@ -7067,7 +7073,7 @@ function createCurve(curveDef, defHash) {
   return { ...create(defHash), create };
 }
 
-// ../../../node_modules/@noble/curves/esm/secp256k1.js
+// ../../node_modules/@noble/curves/esm/secp256k1.js
 var secp256k1P = BigInt("0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f");
 var secp256k1N = BigInt("0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141");
 var _1n6 = BigInt(1);
@@ -14418,7 +14424,7 @@ var CopyRuntime = class {
   }
 };
 
-// ../../../node_modules/@noble/curves/esm/p256.js
+// ../../node_modules/@noble/curves/esm/p256.js
 var Fp256 = Field(BigInt("0xffffffff00000001000000000000000000000000ffffffffffffffffffffffff"));
 var CURVE_A = Fp256.create(BigInt("-3"));
 var CURVE_B = BigInt("0x5ac635d8aa3a93e7b3ebbd55769886bc651d06b0cc53b0f63bce3c3e27d2604b");
@@ -14437,7 +14443,7 @@ var p256 = createCurve({
   lowS: false
 }, sha256);
 
-// ../../../node_modules/@noble/hashes/esm/_md.js
+// ../../node_modules/@noble/hashes/esm/_md.js
 function setBigUint642(view, byteOffset, value, isLE2) {
   if (typeof view.setBigUint64 === "function")
     return view.setBigUint64(byteOffset, value, isLE2);
@@ -14557,7 +14563,7 @@ var SHA256_IV2 = /* @__PURE__ */ Uint32Array.from([
   1541459225
 ]);
 
-// ../../../node_modules/@noble/hashes/esm/sha2.js
+// ../../node_modules/@noble/hashes/esm/sha2.js
 var SHA256_K2 = /* @__PURE__ */ Uint32Array.from([
   1116352408,
   1899447441,
@@ -14697,7 +14703,7 @@ var SHA2562 = class extends HashMD2 {
 };
 var sha2562 = /* @__PURE__ */ createHasher(() => new SHA2562());
 
-// ../../../node_modules/@noble/hashes/esm/sha256.js
+// ../../node_modules/@noble/hashes/esm/sha256.js
 var sha2563 = sha2562;
 
 // ../../packages/copy-engine/src/api.ts
@@ -15987,7 +15993,7 @@ var LIMIT_WORDS_MS = 10 * 6e4;
 var PROBLEM_RECHECK_MS = 6e4;
 var ORDER_POLL_SPACING_MS = 1e3;
 var ORDER_RESYNC_SPACING_MS = 200;
-var BOT_POSITION_CHECK_MS = 1e4;
+var BOT_POSITION_CHECK_MS = 5e3;
 var SAID_EVERY_MS = 1e4;
 var ORDER_POLL_MIN_MS = 3e3;
 var ORDER_WATCH_EVERY_MS = 3e4;
@@ -16111,6 +16117,9 @@ var AlgoRuntime = class {
   exitsFlatSince = /* @__PURE__ */ new Map();
   /** Algos whose position reads disagreed: not read again for a decision before this (positionConfirmed). */
   confirmRetryAt = /* @__PURE__ */ new Map();
+  /** Bots whose position read runs now (checkOutside), and the gaps those reads confirmed, for the step to act on. */
+  posReading = /* @__PURE__ */ new Set();
+  posGaps = /* @__PURE__ */ new Map();
   /** Bots whose refused reduce-only order is being checked against the account's position (reduceRefused). */
   reduceChecks = /* @__PURE__ */ new Set();
   paper = /* @__PURE__ */ new Map();
@@ -17646,24 +17655,57 @@ var AlgoRuntime = class {
    */
   async checkOutside(a, m, mk2, now) {
     if (a.spec.paper || !a.book || a.status !== "running") return;
-    if (now - Number(a.k.posCheckAt ?? 0) < BOT_POSITION_CHECK_MS) return;
-    const busy = this.live(a).some((c) => c.state !== "open" || c.cancelling) || now - Number(a.k.lastFillAt ?? 0) < 5e3;
+    const got = this.posGaps.get(a.id);
+    if (got) {
+      this.posGaps.delete(a.id);
+      await this.actOnGap(a, m, mk2, now, got);
+    }
+    if (now - Number(a.k.posCheckAt ?? 0) < BOT_POSITION_CHECK_MS || this.posReading.has(a.id)) return;
     a.k.posCheckAt = now;
-    let inv = bookInventory(a.book);
-    const pos = await this.positionConfirmed(a, a.spec.symbol);
-    if (pos === null || pos === "disagree") return;
+    this.posReading.add(a.id);
+    void this.readPosition(a, m).catch((e) => this.host.log.warn("algo: position check failed", { algo: a.id, error: String(e) })).finally(() => this.posReading.delete(a.id));
+  }
+  /** Busy: its own orders in flight or a fill seconds ago - a gap then may be those, not something outside it. */
+  posBusy(a, now = Date.now()) {
+    return this.live(a).some((c) => c.state !== "open" || c.cancelling) || now - Number(a.k.lastFillAt ?? 0) < 5e3;
+  }
+  /**
+   * One read of SoDEX's position: equal to the bot's holding as it stood before or after the read = matched (a stale
+   * backend reads a different size, not the same one). A gap is read again until the reads agree (positionConfirmed)
+   * and handed to the step (posGaps), which acts on it only if nothing of its own moved the holding meanwhile.
+   */
+  async readPosition(a, m) {
+    if (!a.book) return;
     const step = Number(m.stepSize);
-    if (busy && Math.abs(pos - bookInventory(a.book)) >= step / 2) return;
+    const inv0 = bookInventory(a.book);
+    const busy0 = this.posBusy(a);
+    const first = await this.positionOf(a, a.spec.symbol);
+    if (first === null || a.status !== "running" || !a.book) return;
+    const inv1 = bookInventory(a.book);
+    if (Math.abs(first - inv0) < step / 2 || Math.abs(first - inv1) < step / 2) return this.posMatched(a);
+    const pos = await this.positionConfirmed(a, a.spec.symbol);
+    if (pos === null || pos === "disagree" || a.status !== "running" || !a.book) return;
+    const inv2 = bookInventory(a.book);
+    if (Math.abs(pos - inv2) < step / 2) return this.posMatched(a);
+    this.posGaps.set(a.id, { pos, inv: inv2, busy: busy0 || this.posBusy(a) || Math.abs(inv2 - inv0) >= step / 2 });
+  }
+  posMatched(a) {
+    delete a.k.outsideSaid;
+    a.k.posOkAt = Date.now();
+    this.dirty.add(a.id);
+  }
+  async actOnGap(a, m, mk2, now, got) {
+    if (!a.book) return;
+    const pos = got.pos;
+    let inv = bookInventory(a.book);
+    const step = Number(m.stepSize);
+    if (Math.abs(pos - inv) < step / 2) return this.posMatched(a);
+    if (got.busy || this.posBusy(a, now) || Math.abs(inv - got.inv) >= step / 2) return;
     if (Math.abs(pos - inv) >= step / 2) {
       await this.reconcileOwnFills(a, m);
       inv = bookInventory(a.book);
     }
-    if (Math.abs(pos - inv) < step / 2) {
-      delete a.k.outsideSaid;
-      a.k.posOkAt = now;
-      this.dirty.add(a.id);
-      return;
-    }
+    if (Math.abs(pos - inv) < step / 2) return this.posMatched(a);
     const same = Math.sign(pos) === Math.sign(inv) || Math.abs(pos) < step / 2;
     if (Math.abs(inv) >= step / 2 && same && Math.abs(pos) < Math.abs(inv)) {
       const gone = inv - pos;
@@ -22890,7 +22932,11 @@ var ExecutorService = class {
    * 2026-11-08); the executor no longer counts its own 30 days from the first bot.
    */
   botFee(owner, volume) {
-    return Math.min(botFeeFor(volume, { vip: this.freshPerks(owner)?.vip === true }), this.perkFee(owner, "bots"));
+    return Math.min(botFeeFor(volume, { vip: this.freshPerks(owner)?.vip === true || this.vipListed(owner) }), this.perkFee(owner, "bots"));
+  }
+  /** A wallet EXECUTOR_VIP_WALLETS names: VIP whatever its volume. */
+  vipListed(owner) {
+    return (this.cfg.vipWallets ?? []).includes(owner.toLowerCase());
   }
   /** The wallet's bot fee as /me shows it: tenths of a bp, whether it is VIP's, until when a lowered fee lasts. */
   botFeeView(owner) {
@@ -22900,7 +22946,7 @@ var ExecutorService = class {
     const p = this.freshPerks(owner, now);
     const perk = p?.bots && (p.bots.until === null || p.bots.until > now) ? p.bots : null;
     const byPerk = perk !== null && Math.max(0, perk.fee) === fee && fee < botFeeFor(vol, { vip: p?.vip === true });
-    return { feeTenths: fee, vip: p?.vip === true || perk !== null && perk.fee <= BOT_FEE_VIP, until: byPerk ? perk.until : null };
+    return { feeTenths: fee, vip: p?.vip === true || this.vipListed(owner) || perk !== null && perk.fee <= BOT_FEE_VIP, until: byPerk ? perk.until : null };
   }
   volumeReads = /* @__PURE__ */ new Map();
   builderDb = null;
@@ -23331,12 +23377,20 @@ var ExecutorService = class {
       this.deps.alerts?.raise("vip-move-unknown", `owner:${j.owner}`, `A VIP move of ${shortWallet(j.owner)} (job ${j.id}) was cut by a restart; its bots are paused here. Check the VIP side's import (POST /internal/vip/import/status) before resuming or finishing it.`);
     }
   }
+  /**
+   * Headers for a call to the other executor (or server 1): with the origin secret, so the other side's edge gate
+   * (Caddy, the executor's own check) lets it through - both executors share the origin secrets.
+   */
+  peerHeaders(h) {
+    return this.cfg.originSecrets[0] ? { ...h, "X-Origin-Verify": this.cfg.originSecrets[0] } : h;
+  }
   async vipEligible(owner) {
     if (this.cfg.vipOpen) return { ok: true, why: "open" };
+    if (this.vipListed(owner)) return { ok: true, why: "listed" };
     if (!this.cfg.vipCheckUrl) return { ok: false, why: "VIP status cannot be checked here." };
     const u = new URL(this.cfg.vipCheckUrl);
     u.searchParams.set("address", owner);
-    const res = await this.deps.fetch(u.toString(), { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(5e3) });
+    const res = await this.deps.fetch(u.toString(), { headers: this.peerHeaders({ Accept: "application/json" }), signal: AbortSignal.timeout(5e3) });
     const b = JSON.parse(await res.text());
     if (!res.ok || !b.ok) throw new Error("VIP status could not be read. Try again in a moment.");
     return b.eligible ? { ok: true, why: "eligible" } : { ok: false, why: `Not VIP yet: ${Math.round(b.volumeUsd ?? 0).toLocaleString("en-US")} of $${Math.round(b.minUsd ?? 1e6).toLocaleString("en-US")} in 14 days.` };
@@ -23352,7 +23406,7 @@ var ExecutorService = class {
       try {
         const res = await this.deps.fetch(`${vip}/internal/vip/import/status`, {
           method: "POST",
-          headers: { "Content-Type": "application/json", Accept: "application/json", "X-Internal-Token": token },
+          headers: this.peerHeaders({ "Content-Type": "application/json", Accept: "application/json", "X-Internal-Token": token }),
           body: JSON.stringify({ owner: job.owner, job: job.id, abandon: true }),
           signal: AbortSignal.timeout(5e3)
         });
@@ -23403,7 +23457,7 @@ var ExecutorService = class {
         }
       });
       const envelope = await step("seal", async () => {
-        const res = await this.deps.fetch(`${vip}/info`, { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(5e3) });
+        const res = await this.deps.fetch(`${vip}/info`, { headers: this.peerHeaders({ Accept: "application/json" }), signal: AbortSignal.timeout(5e3) });
         const info = JSON.parse(await res.text());
         if (!res.ok || info.vip?.tier !== (down ? "standard" : "vip") || !info.keyImport?.publicKey) throw new Error(`The ${there} servers did not answer.`);
         if (info.executorId !== this.executorId) throw new Error(`The ${there} servers run under another executor id.`);
@@ -23420,7 +23474,7 @@ var ExecutorService = class {
         try {
           res = await this.deps.fetch(`${vip}/internal/vip/import`, {
             method: "POST",
-            headers: { "Content-Type": "application/json", Accept: "application/json", "X-Internal-Token": token },
+            headers: this.peerHeaders({ "Content-Type": "application/json", Accept: "application/json", "X-Internal-Token": token }),
             body: JSON.stringify({
               owner,
               job: job.id,
@@ -24945,6 +24999,7 @@ async function main() {
     throw new Error(`This Node.js (${process.version}) has no WebSocket; the copier needs Node.js 22.13 or newer.`);
   }
   let svc = null;
+  let ready = false;
   let db = null;
   let stopping = false;
   const shutdown = async (why, code = 0) => {
@@ -24977,7 +25032,7 @@ async function main() {
   const server = createExecutorServer(
     new Proxy({}, {
       get: (_t, prop) => {
-        if (!svc) throw new ApiError(503, "starting", "The executor is starting; try again in a moment.");
+        if (!svc || !ready && prop !== "health") throw new ApiError(503, "starting", "The executor is starting; try again in a moment.");
         const v = svc[prop];
         return typeof v === "function" ? v.bind(svc) : v;
       }
@@ -25030,6 +25085,7 @@ async function main() {
   }
   db.audit("process", null, null, { event: "start", pid: process.pid, kind: cfg.kind, id: svc.executorId, network: cfg.network, liveAlgos: cfg.liveAlgos, liveAlgoWallets: cfg.liveAlgoWallets, brake: svc.brake.current() });
   await svc.start();
+  ready = true;
   log.info("executor up", { kind: cfg.kind, id: svc.executorId, network: cfg.network, listen: `${cfg.host}:${cfg.port}`, data: cfg.dataDir, egress: out.localAddress ?? "default route", liveAlgos: cfg.liveAlgos, liveAlgoWallets: cfg.liveAlgoWallets });
   const prune = setInterval(() => {
     try {
