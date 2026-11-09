@@ -179,7 +179,30 @@
 .st-row__body { padding: 2px 14px 14px 12px; }
 .st-row__body .st-notice__meta { margin: 0 0 12px 20px; }
 
+/* How current the indexer's datasets are (FreshList): slim rows like the past notices', two to a line, the
+   state on a dot. */
+.st-fresh { margin-top: 14px; }
+.st-fresh__head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; margin: 0 0 8px; color: var(--text); font-size: 12px; font-weight: 550; }
+.st-fresh__head time { color: var(--dim); font-family: var(--font-num); font-size: 11px; font-weight: 400; }
+.st-fresh__list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; margin: 0; padding: 0; list-style: none; }
+.st-fresh__item {
+  --st-tone: var(--pos);
+  position: relative; display: grid; grid-template-columns: 8px minmax(0, 1fr) auto; align-items: center; gap: 12px;
+  min-height: 42px; padding: 6px 12px; border-radius: var(--radius-md); background: rgb(var(--ink) / 0.025);
+}
+.st-fresh__item.is-behind { --st-tone: var(--warn); }
+.st-fresh__item.is-unknown { --st-tone: var(--dim); }
+.st-fresh__dot { width: 7px; height: 7px; border-radius: 50%; background: var(--st-tone); }
+.st-fresh__item.is-behind .st-fresh__dot { box-shadow: 0 0 0 3px color-mix(in srgb, var(--st-tone) 25%, transparent); }
+.st-fresh__name { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.st-fresh__name b { overflow: hidden; color: var(--text); font-size: 13px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.st-fresh__name small { overflow: hidden; color: var(--dim); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.st-fresh__val { color: var(--muted); font-family: var(--font-num); font-size: 12px; white-space: nowrap; }
+.st-fresh__item.is-behind .st-fresh__val { color: var(--warn); }
+.st-fresh__sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
 @media (max-width: 560px) {
+  .st-fresh__list { grid-template-columns: minmax(0, 1fr); }
   .st-bars { gap: 1px; height: 26px; }
   .st-bar { min-width: 1px; border-radius: 1px; }
   .st-hero { grid-template-columns: auto 1fr; padding: 16px var(--sp-3); }

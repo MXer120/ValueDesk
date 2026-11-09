@@ -10,15 +10,16 @@
  * page came from it.
  */
 import {
-  IMPACT_TEXT, STAGE_TEXT, STATUS_SERVICES, dayToneWith, fmtUtc, fmtWindow, minutesExpected, noticeLive, noticePhase,
-  noticeSpan, noticesOnDay, overallOf, overallShown, parseNotice, shownState,
-  type DayTone, type DayToneShown, type DayTuple, type HealthNotice, type Notice, type NoticePhase, type ServiceId,
+  FRESH_TARGETS, IMPACT_TEXT, STAGE_TEXT, STATUS_SERVICES, dayToneWith, fmtAge, fmtUtc, fmtWindow, minutesExpected, noticeLive, noticePhase,
+  noticeSpan, noticesOnDay, overallOf, overallShown, parseFreshness, parseNotice, shownState,
+  type DayTone, type FreshId, type FreshItem, type FreshState, type Freshness, type DayToneShown, type DayTuple, type HealthNotice, type Notice, type NoticePhase, type ServiceId,
   type ServiceState, type StatusReport, type Overall, type OverallShown, type ShownState,
 } from '@sign/ops/statusModel.js';
 import { fmtFixed } from '../numStyle';
 
 export type { Overall, OverallShown, ShownState };
 export { overallOf, overallShown, shownState };
+export type { FreshItem, FreshState, Freshness };
 export type { DayTone, DayToneShown, DayTuple, HealthNotice, Notice, NoticePhase, ServiceState, StatusReport };
 export { IMPACT_TEXT, STAGE_TEXT, fmtUtc, fmtWindow, noticeLive, noticePhase };
 
@@ -63,7 +64,10 @@ export async function loadStatus(f: typeof fetch = fetch, now = Date.now): Promi
   if (r && r.status === 200 && isReport(r.body)) {
     // Checked one by one: a notice that is not one is left out, the rest still shows.
     const notices = (Array.isArray(r.body.notices) ? r.body.notices : []).map(parseNotice).filter((n): n is Notice => n !== null);
-    return { kind: 'report', report: { ...r.body, notices } };
+    // Checked too: a server older than the freshness figures sends none, and the page shows none.
+    const { freshness: rawFresh, ...rest } = r.body;
+    const freshness = parseFreshness(rawFresh);
+    return { kind: 'report', report: { ...rest, notices, ...(freshness ? { freshness } : {}) } };
   }
   return { kind: 'unreachable', at: now(), executor: await checkExecutor(f, now) };
 }
@@ -211,3 +215,30 @@ export function healthNoticeText(n: HealthNotice): string {
   if (n.phase === 'in_progress') return `Maintenance in progress: ${title}${typeof n.endsAt === 'number' ? `, until ${fmtUtc(n.endsAt, { date: false })}` : ''}`;
   return `Scheduled maintenance: ${title}, ${typeof n.endsAt === 'number' ? fmtWindow(n.startsAt, n.endsAt) : fmtUtc(n.startsAt)}`;
 }
+
+// --- how current the indexer's data is (under the Indexer, StatusPage.tsx FreshList) -------------
+
+const FRESH_BY_ID = new Map(FRESH_TARGETS.map((t) => [t.id, t]));
+
+/** A dataset's name for visitors. */
+export const freshName = (id: FreshId): string => FRESH_BY_ID.get(id)?.name ?? id;
+
+/** What a dataset's figure says: "On time", "None waiting", "Moving", "3 min late", "12 s behind", or "No data". */
+export function freshValue(i: FreshItem): string {
+  if (i.ms === null) return 'No data';
+  const measure = FRESH_BY_ID.get(i.id)?.measure ?? 'old';
+  const zero = ZERO_TEXT[measure];
+  if (i.ms < 1_000 && zero) return zero;
+  return `${fmtAge(i.ms)} ${measure}`;
+}
+
+/** Under a second of a figure that counts lateness, a wait or a stall: said in words, not "0 s late". */
+const ZERO_TEXT: Record<string, string> = { late: 'On time', waiting: 'None waiting', 'without progress': 'Moving' };
+
+/** "Target: at most 2 min late". */
+export function freshTarget(i: FreshItem): string {
+  const measure = FRESH_BY_ID.get(i.id)?.measure ?? 'old';
+  return `Target: at most ${fmtAge(i.budgetMs)} ${measure}`;
+}
+
+export const FRESH_STATE_TEXT: Record<FreshState, string> = { ok: 'Within target', behind: 'Behind target', unknown: 'No data' };

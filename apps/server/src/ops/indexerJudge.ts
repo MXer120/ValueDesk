@@ -23,10 +23,17 @@
  *                  stalls of 15 s or more were logged in 156 of 10,080 minutes, and in 5 of 10 minutes
  *                  only on 11-05 14:32-16:28 (59 minutes), all of it inside ship windows.
  *
+ *   fresh:<id>     a dataset past its target (statusModel.ts FRESH_TARGETS: the heatmap, the liquidation history,
+ *                  who traded, the index's writes, cohorts, boards). Past half of it: `warn` only (Freshness),
+ *                  which the prober logs and tallies for the day, and nothing else. Hyperliquid's lane has its
+ *                  figure here (progressMs) and no code of its own: `lane:hl` says it at 15 min, before its 30.
+ *                  A figure the indexer does not publish is null and judged as nothing (an older indexer).
+ *
  * The readings are kept in this process only: a prober restart starts the windows again, and an
  * indexer restart (its counts start at zero) starts them again for every lane.
  */
 import type { IndexerHealth } from '../hosted.js';
+import { FRESH_TARGETS, FRESH_WARN_SHARE, type FreshId } from './statusModel.js';
 
 const MIN = 60_000;
 export const LANE_STALL_MS: Readonly<Record<string, number>> = { hl: 15 * MIN, sgw: 20 * MIN, scheck: 40 * MIN, strades: 40 * MIN, sdata: 15 * MIN };
@@ -41,6 +48,29 @@ export const LAG_OF = 10;
 const GAP_MS = 5 * MIN;
 const KEEP_MS = 45 * MIN;
 
+/** One reading's freshness: each figure (ms, null: none), those past their target, those past half of it only. */
+export interface FreshReading {
+  values: Record<FreshId, number | null>;
+  over: FreshId[];
+  warn: FreshId[];
+}
+
+/** The figures against their targets (FRESH_TARGETS). `hl`: IndexerJudge.progressMs. */
+export function freshnessOf(h: IndexerHealth, hlProgressMs: number | null): FreshReading {
+  const f = h.fresh ?? {};
+  const values = { ...f, hl: hlProgressMs } as Record<FreshId, number | null>;
+  const over: FreshId[] = [];
+  const warn: FreshId[] = [];
+  for (const { id, budgetMs } of FRESH_TARGETS) {
+    const v = values[id] ?? null;
+    values[id] = v;
+    if (v === null) continue;
+    if (v > budgetMs) over.push(id);
+    else if (v > budgetMs * FRESH_WARN_SHARE) warn.push(id);
+  }
+  return { values, over, warn };
+}
+
 interface Reading {
   minute: number;
   at: number;
@@ -50,10 +80,12 @@ interface Reading {
 
 export class IndexerJudge {
   private readings: Reading[] = [];
+  /** The last reading's freshness (judge), for the record and the page (ops/status.ts). */
+  lastFresh: FreshReading | null = null;
 
   /**
    * Record this reading (one per prober minute: a second one in the same minute replaces it) and
-   * say what is behind, as codes (whyText): `lane:<name>`, `fail:<name>`, `lag`.
+   * say what is behind, as codes (whyText): `lane:<name>`, `fail:<name>`, `lag`, `fresh:<dataset>`.
    */
   judge(h: IndexerHealth, now: number): string[] {
     const minute = Math.floor(now / MIN);
@@ -68,7 +100,26 @@ export class IndexerJudge {
     }
     const recent = this.readings.filter((x) => x.minute > minute - LAG_OF);
     if (recent.filter((x) => x.lag !== null && x.lag >= LAG_LIMIT_MS).length >= LAG_MINUTES) why.push('lag');
+    this.lastFresh = freshnessOf(h, this.progressMs('hl'));
+    // hl has no code of its own: lane:hl says the same, sooner.
+    for (const id of this.lastFresh.over) if (id !== 'hl') why.push(`fresh:${id}`);
     return why;
+  }
+
+  /**
+   * How long a lane has had work queued in every reading and finished none (ms): 0 when it has nothing queued or
+   * moved in the last reading, null when there is no reading of it. Restarts and holes start it again (run).
+   */
+  progressMs(name: string): number | null {
+    const run = this.run(name);
+    const now = run[0];
+    if (!now) return null;
+    let since = now.at;
+    for (const x of run) {
+      if (!x.queued || x.done !== now.done) break;
+      since = x.at;
+    }
+    return now.queued ? now.at - since : 0;
   }
 
   /** The readings back from the newest that one process made one after another, newest first. */
@@ -120,6 +171,16 @@ const LANE: Record<string, [string, string]> = {
   sdata: ['SoDEX PnL, rank and account value reads', 'some SoDEX leaderboard figures may be hours old'],
 };
 
+/** A dataset past its target (FRESH_TARGETS), for users. */
+const FRESH_TEXT: Partial<Record<FreshId, string>> = {
+  liqNow: 'the liquidation heatmap is behind: its levels have not been updated for over 3 minutes',
+  liqStep: 'the liquidation history is behind: its latest 15-minute step is late',
+  flow: 'who traded is behind: the newest trade recorded is over a minute old',
+  writes: 'the indexer is behind saving what comes in: new trades may take a while to show on wallet pages',
+  cohorts: 'cohort figures are behind: their latest 15-minute update is late',
+  boards: 'the leaderboards have not been rebuilt for over 15 minutes',
+};
+
 /** One code (IndexerJudge.judge, ops/status.ts indexerState) in plain words, or null for one not known. */
 export function whyText(code: string): string | null {
   const [kind, name = ''] = code.split(':');
@@ -137,6 +198,8 @@ export function whyText(code: string): string | null {
       return 'the indexer has stopped publishing new data: the figures shown are from its last update, under an hour ago';
     case 'stopping':
       return 'the indexer is restarting';
+    case 'fresh':
+      return FRESH_TEXT[name as FreshId] ?? 'some figures are behind';
     case 'lag':
       return 'the indexer is running behind: live figures such as the liquidation heatmap and who traded may lag';
     default:

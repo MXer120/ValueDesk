@@ -6,7 +6,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { isStatusPath, legalForPath, tabForPath } from '../router';
-import { checkExecutor, dayDetail, fmtUptime, loadStatus, overallOf } from './statusData';
+import { checkExecutor, dayDetail, fmtUptime, freshTarget, freshValue, loadStatus, overallOf } from './statusData';
 import { setNumStyle } from '../numStyle';
 
 // These cases read the en-US format (1,234.56); the app's default (1.234,56) is checked separately.
@@ -43,6 +43,37 @@ test('the report, when the status service answers - and nothing else is asked', 
   const v = await loadStatus(respond({ '/api/vs/status': { status: 200, body: REPORT } }, seen));
   assert.equal(v.kind, 'report');
   assert.deepEqual(seen, ['/api/vs/status']);
+});
+
+test('freshness: shown when the report has it, checked item by item; an older server sends none and none is shown', async () => {
+  const freshness = { at: T0, items: [
+    { id: 'writes', ms: 12_000, budgetMs: 10_000, state: 'behind' },
+    { id: 'liqStep', ms: null, budgetMs: 120_000, state: 'unknown' },
+    { id: 'made-up', ms: 1, budgetMs: 1, state: 'ok' },
+    { id: 'flow', ms: 'soon', budgetMs: 60_000, state: 'ok' },
+  ] };
+  const v = await loadStatus(respond({ '/api/vs/status': { status: 200, body: { ...REPORT, freshness } } }));
+  assert.equal(v.kind, 'report');
+  assert.deepEqual(v.kind === 'report' && v.report.freshness, { at: T0, items: freshness.items.slice(0, 2) });
+  const old = await loadStatus(respond({ '/api/vs/status': { status: 200, body: REPORT } }));
+  assert.equal(old.kind === 'report' && 'freshness' in old.report, false);
+  const bad = await loadStatus(respond({ '/api/vs/status': { status: 200, body: { ...REPORT, freshness: { at: 'x', items: [] } } } }));
+  assert.equal(bad.kind === 'report' && 'freshness' in bad.report, false);
+});
+
+test('freshness: each figure in words, with its target', () => {
+  const item = (id: 'liqNow' | 'liqStep' | 'flow' | 'writes' | 'cohorts' | 'boards' | 'hl', ms: number | null, budgetMs = 60_000) =>
+    ({ id, ms, budgetMs, state: ms === null ? 'unknown' as const : ms > budgetMs ? 'behind' as const : 'ok' as const });
+  assert.equal(freshValue(item('liqStep', 0)), 'On time');
+  assert.equal(freshValue(item('liqStep', 190_000)), '3 min late');
+  assert.equal(freshValue(item('writes', 400)), 'None waiting');
+  assert.equal(freshValue(item('writes', 12_000)), '12 s waiting');
+  assert.equal(freshValue(item('hl', 0)), 'Moving');
+  assert.equal(freshValue(item('flow', 3_000)), '3 s behind');
+  assert.equal(freshValue(item('boards', 0)), '0 s old');
+  assert.equal(freshValue(item('boards', 6 * 60_000)), '6 min old');
+  assert.equal(freshValue(item('cohorts', null)), 'No data');
+  assert.equal(freshTarget(item('boards', 1, 15 * 60_000)), 'Target: at most 15 min old');
 });
 
 test('unreachable: the page says so and asks the executor itself', async () => {

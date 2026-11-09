@@ -39,6 +39,7 @@ import { isIP } from 'node:net';
 import type { FastifyInstance } from 'fastify';
 import { KeyedLimiter, type Limit } from './rateLimit.js';
 import { isSiteOrigin, normaliseOrigin } from './origin.js';
+import type { FreshId } from './ops/statusModel.js';
 
 // --- the allow-list ------------------------------------------------------------
 
@@ -727,6 +728,14 @@ export interface IndexerHealth {
      */
     oiPct?: Record<string, number | null>;
   } | null;
+  /** Write steps queued and not run yet (the indexer's flushBacklog). Null: not published. */
+  flushBacklog: number | null;
+  /**
+   * How current each dataset is, in ms as of `at` (what each figure is and its target: ops/statusModel.ts
+   * FRESH_TARGETS). Null for a figure the indexer does not publish (one older than 2026-11-09 has no liqStep, flow
+   * or writes) or has none of yet (no heatmap write, no trade, no build since its start).
+   */
+  fresh: Record<Exclude<FreshId, 'hl'>, number | null>;
 }
 
 /** A venue or lane name. Never an address (0x...), a path or anything long. */
@@ -783,6 +792,34 @@ export function indexerHealth(status: unknown): IndexerHealth | null {
     lastBuildMs: amount(status.lastBuildMs),
     errorSinceStart: Boolean(status.lastError),
     liq: liqHealth(status.cohorts),
+    flushBacklog: amount(status.flushBacklog),
+    fresh: freshHealth(status),
+  };
+}
+
+/** The heatmap's levels are written every 2 min (cohortTracker.ts LIQ_NOW_MS); a history step rides on that write. */
+const LIQ_WRITE_MS = 2 * 60_000;
+/** The liquidation history's and the cohorts' step (cohortTracker.ts LIQ_STEP_MS, SERIES_STEP_MS). */
+const STEP_MS = 15 * 60_000;
+
+function freshHealth(status: Record<string, unknown>): IndexerHealth['fresh'] {
+  const at = stamp(status.at);
+  const cohorts = isRecord(status.cohorts) ? status.cohorts : {};
+  const liq = isRecord(cohorts.liq) ? cohorts.liq : {};
+  const flow = isRecord(status.flow) ? status.flow : {};
+  // From a time to `at`; from when the next is due to `at` (0 before it is due). Null without either.
+  const since = (t: number | null): number | null => (at !== null && t !== null ? Math.max(0, at - t) : null);
+  const late = (due: number | null): number | null => (at !== null && due !== null ? Math.max(0, at - due) : null);
+  const nowAt = stamp(liq.nowAt);
+  const stepT = stamp(liq.stepT);
+  const seriesT = stamp(cohorts.lastSeriesT);
+  return {
+    liqNow: late(nowAt === null ? null : nowAt + LIQ_WRITE_MS),
+    liqStep: late(stepT === null ? null : stepT + STEP_MS + LIQ_WRITE_MS),
+    flow: since(stamp(flow.newestT)),
+    writes: amount(status.flushOldestMs),
+    cohorts: late(seriesT === null ? null : seriesT + STEP_MS),
+    boards: since(stamp(status.lastBuildAt) || stamp(status.boardsAt)),
   };
 }
 

@@ -914,6 +914,8 @@ export class Indexer {
       flushBacklog: this.writes.backlog,
       writer: this.store.writerStatus,
       lockWaits: { n: this.store.lockWaits.n, maxMs: Math.round(this.store.lockWaits.maxMs), over100: this.store.lockWaits.over100 },
+      // How long the oldest of those steps has waited (ms): the status page's write target (statusModel.ts FRESH_TARGETS).
+      flushOldestMs: this.writes.oldestWaitMs,
       streamUnderRest: this.store.streamUnderRest,
       retention: this.store.retention(this.now()),
       sodexBreaks: this.sodexBreaks.length,

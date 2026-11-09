@@ -290,6 +290,7 @@ await app.register(adminRoutes, {
   status: {
     report: () => (adminStatusDb ??= new StatusStore()).report(),
     checks: () => (adminStatusDb ??= new StatusStore()).lastChecks(),
+    freshDays: () => (adminStatusDb ??= new StatusStore()).freshDays(),
     indexer: indexerStatus,
     brake: () => siteBrake(),
     errors: () => (adminErrorsDb ??= new ClientErrorStore()).top({ limit: 20, order: 'recent' }),

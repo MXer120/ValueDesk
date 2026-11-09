@@ -33,6 +33,8 @@
 #   6. the maintenance notice (THE NOTICE below), then server 1: release.sh --units=<indexer,api - those that
 #      changed>, waiting for the indexer to publish again; server 2: release.sh --units=executor. A
 #      unit that does not come back healthy is rolled back to the release before at once, and ship.sh stops;
+#      after server 1's restart, the freeze gate (the API's thread) and the indexer gate (its published status:
+#      write backlog, thread, publishing) watch for 10 minutes side by side and roll server 1 back the same way;
 #   7. main moves to the tag (fast-forward) - Vercel builds and publishes the web - and, when the web changed,
 #      it waits for GitHub to show that Production deployment as successful and the site answering.
 #      The web goes last on purpose: what it calls already runs the new code when it appears.
@@ -447,28 +449,81 @@ freeze_count() {   # since (journalctl time) -> "<over 4 s> <over 8 s> <longest 
   remote "$S1" "sudo journalctl --namespace=pii -u valuescan-api --since '$1' --no-pager -o cat 2>/dev/null | grep -o '\"stallMs\":[0-9]*' | cut -d: -f2" \
     | awk '{ if ($1 >= 4000) a++; if ($1 >= 8000) b++; if ($1 > m) m = $1 } END { printf "%d %d %d\n", a, b, m }'
 }
-freeze_gate() {   # units (comma list) on server 1
-  local units="$1" since left n4 n8 longest
+FREEZE_SINCE="" n4=0 n8=0 longest=0
+freeze_start() {
   # From the API's start plus the 60 s of start-up.
-  since="$(remote "$S1" "date -u -d \"\$(systemctl show valuescan-api -p ActiveEnterTimestamp --value)\" +%s")"
-  since="$(remote "$S1" "date -u -d '@$(( since + 60 ))' '+%F %T'")"
-  note "freeze gate: watching the API's stalls for $FREEZE_WATCH_S s (from $since UTC)"
-  left="$FREEZE_WATCH_S"
-  while [ "$left" -gt 0 ]; do
-    sleep 30; left=$(( left - 30 ))
-    read -r n4 n8 longest < <(freeze_count "$since" || echo "0 0 0")
-    if [ "${n4:-0}" -ge "$FREEZE_MAX_LONG" ] || [ "${n8:-0}" -ge 2 ]; then
-      note "!! the API froze $n4 times over 4 s ($n8 over 8 s, longest ${longest} ms) after $TAG - rolling back $units"
-      if remote "$S1" "sudo /opt/valuescan/bin/release.sh --rollback --units=$units"; then
-        notice_done rolled_back "The update was rolled back; everything runs as before."
-      else
-        note "!! the rollback failed too - look at it now: deploy/release/remote.sh, docs/INCIDENT-RUNBOOK.md"
-        NOTICE_OK=0
-      fi
-      die "$units on server 1: the API froze after the restart, not shipped"
-    fi
+  FREEZE_SINCE="$(remote "$S1" "date -u -d \"\$(systemctl show valuescan-api -p ActiveEnterTimestamp --value)\" +%s")"
+  FREEZE_SINCE="$(remote "$S1" "date -u -d '@$(( FREEZE_SINCE + 60 ))' '+%F %T'")"
+  note "freeze gate: watching the API's stalls for $FREEZE_WATCH_S s (from $FREEZE_SINCE UTC)"
+}
+freeze_check() {   # units (comma list) on server 1
+  local units="$1"
+  read -r n4 n8 longest < <(freeze_count "$FREEZE_SINCE" || echo "0 0 0")
+  if [ "${n4:-0}" -ge "$FREEZE_MAX_LONG" ] || [ "${n8:-0}" -ge 2 ]; then
+    note "!! the API froze $n4 times over 4 s ($n8 over 8 s, longest ${longest} ms) after $TAG - rolling back $units"
+    gate_rollback "$units"
+    die "$units on server 1: the API froze after the restart, not shipped"
+  fi
+}
+gate_rollback() {   # units (comma list) on server 1
+  if remote "$S1" "sudo /opt/valuescan/bin/release.sh --rollback --units=$1"; then
+    notice_done rolled_back "The update was rolled back; everything runs as before."
+  else
+    note "!! the rollback failed too - look at it now: deploy/release/remote.sh, docs/INCIDENT-RUNBOOK.md"
+    NOTICE_OK=0
+  fi
+}
+
+# THE INDEXER GATE (2026-11-09): releases and restarts of the indexer made ~70% of all bad minutes on 2026-11-08 (6-17
+# min stops, a slow first build), and its write backlog reached 883,699 rows before anything said so. Once it publishes
+# again, this reads its published status (meta indexer_status) once a minute for INDEXER_WATCH_MIN minutes and rolls
+# the server-1 parts back, as the freeze gate does, when its write backlog rose 3 minutes in a row (to 100 steps or
+# more, SHIP_INDEXER_BACKLOG_MIN), its thread paused 15 s or more in 3 minutes in a row, or its status is over 180 s
+# old (deploy/release/indexer-gate.mjs). Only shortened, never skipped: SHIP_INDEXER_WATCH_MIN >= 3 (the 3-minute
+# rules). An indexer that never published again is not watched: ship.sh already says so and warns.
+INDEXER_WATCH_MIN="${SHIP_INDEXER_WATCH_MIN:-10}"
+[ "$INDEXER_WATCH_MIN" -ge 3 ] 2>/dev/null || INDEXER_WATCH_MIN=3
+INDEXER_GATE_FILE=""
+indexer_reading() {   # one line of JSON: the server's clock and what the indexer last published
+  remote "$S1" 'sudo /opt/node/current/bin/node --disable-warning=ExperimentalWarning -' <<'EOF'
+const { DatabaseSync } = require('node:sqlite');
+const d = new DatabaseSync('/var/lib/valuescan/index/valuescan-index.db', { readOnly: true });
+const r = d.prepare("select * from meta where key = 'indexer_status'").get();
+const s = r ? JSON.parse(Object.values(r)[1]) : {};
+console.log(JSON.stringify({ now: Date.now(), at: s.at ?? null, backlog: s.flushBacklog ?? null, lag: s.loopLagMs?.lastMinute ?? null }));
+EOF
+}
+indexer_check() {   # units (comma list) on server 1
+  local units="$1" line verdict
+  # A reading that did not come (ssh, the index busy) is left out: one lost read is not the indexer's fault.
+  line="$(indexer_reading 2>/dev/null | tail -1 || true)"
+  case "$line" in '{'*) printf '%s\n' "$line" >> "$INDEXER_GATE_FILE" ;; *) note "  (indexer gate: no reading this minute)"; return 0 ;; esac
+  verdict="$(node deploy/release/indexer-gate.mjs "$INDEXER_GATE_FILE" || echo "ok: not judged")"
+  case "$verdict" in
+    rollback:*)
+      note "!! the indexer ${verdict#rollback: } after $TAG - rolling back $units"
+      gate_rollback "$units"
+      die "$units on server 1: the indexer ${verdict#rollback: } after the restart, not shipped"
+      ;;
+  esac
+}
+
+# The watches after server 1's restart, side by side (one after the other would take 20 min instead of 10).
+server1_gates() {   # units (comma list) on server 1
+  local units="$1" t=0 end=0 api=0 ix=0 ixs=$(( INDEXER_WATCH_MIN * 60 ))
+  if want api; then api=1; end="$FREEZE_WATCH_S"; freeze_start; fi
+  if want indexer && [ -n "${built:-}" ]; then
+    ix=1; [ "$ixs" -le "$end" ] || end="$ixs"
+    mkdir -p "$OUT_DIR"; INDEXER_GATE_FILE="$OUT_DIR/indexer-gate-$TAG.jsonl"; : > "$INDEXER_GATE_FILE"
+    note "indexer gate: watching its published status for $INDEXER_WATCH_MIN min"
+  fi
+  while [ "$t" -lt "$end" ]; do
+    sleep 30; t=$(( t + 30 ))
+    if [ "$api" = 1 ] && [ "$t" -le "$FREEZE_WATCH_S" ]; then freeze_check "$units"; fi
+    if [ "$ix" = 1 ] && [ "$t" -le "$ixs" ] && [ $(( t % 60 )) = 0 ]; then indexer_check "$units"; fi
   done
-  done_note "freeze gate: $FREEZE_WATCH_S s, ${n4:-0} stalls over 4 s, longest ${longest:-0} ms"
+  [ "$api" = 0 ] || done_note "freeze gate: $FREEZE_WATCH_S s, ${n4:-0} stalls over 4 s, longest ${longest:-0} ms"
+  [ "$ix" = 0 ] || done_note "indexer gate: $INDEXER_WATCH_MIN min, $(node deploy/release/indexer-gate.mjs "$INDEXER_GATE_FILE" | sed 's/^ok: //')"
 }
 
 if [ ${#U1[@]} -gt 0 ] || [ ${#U2[@]} -gt 0 ] || [ "$STA" = 1 ] || [ "$FEED" = 1 ] || [ "$BIN" = 1 ]; then need_tarball; fi
@@ -535,7 +590,7 @@ if [ ${#U1[@]} -gt 0 ] || [ "$STA" = 1 ]; then
       WARNED=1
     fi
   fi
-  if want api; then freeze_gate "$(IFS=,; echo "${S1U[*]}")"; fi
+  if want api || want indexer; then server1_gates "$(IFS=,; echo "${S1U[*]}")"; fi
 fi
 
 # --- 6b. the copy executor, guarded ---------------------------------------------------------------

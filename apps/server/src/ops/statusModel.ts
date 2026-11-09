@@ -37,6 +37,11 @@ export interface StatusReport {
   services: ServiceStatus[];
   /** Open and upcoming incidents and maintenance, and those closed in the last NOTICE_SHOW_DAYS days; newest first. */
   notices?: Notice[];
+  /**
+   * How current each of the indexer's datasets is, from the last probe round (FRESH_TARGETS). Absent when that round
+   * is older than a few minutes, or the prober is older than this field.
+   */
+  freshness?: Freshness;
 }
 
 export const STATUS_DAYS = 90;
@@ -472,4 +477,100 @@ export function overallShown(states: readonly ShownState[]): OverallShown {
   if (states.includes('degraded')) return 'degraded';
   if (states.includes('maintenance')) return 'maintenance';
   return overallOf(states.filter((s): s is ServiceState => s !== 'maintenance' && s !== 'partial'));
+}
+
+// --- how current the indexer's data is: targets per dataset ------------------------------------
+//
+// Production 2026-11-08: incidents fired only once the boards were over an hour old, while the write backlog
+// reached 883,699 rows and one liquidation step took 54 minutes with nothing said. Each dataset has a target
+// here; past it the indexer is degraded (ops/indexerJudge.ts `fresh:<id>`), past half of it the prober only
+// logs it and counts it in the day's tally (ops/status.ts StatusStore.freshDays), never on the public page.
+
+export const FRESH_IDS = ['liqNow', 'liqStep', 'flow', 'writes', 'cohorts', 'boards', 'hl'] as const;
+export type FreshId = (typeof FRESH_IDS)[number];
+
+export interface FreshTarget {
+  id: FreshId;
+  /** The dataset, for visitors. */
+  name: string;
+  /** What the number is, for visitors. */
+  measure: string;
+  budgetMs: number;
+}
+
+const FRESH_MIN = 60_000;
+/**
+ * The targets. What each number is (hosted.ts indexerHealth `fresh`, the judge for `hl`):
+ *   liqNow   how late the heatmap's levels are past their 2-minute write (cohortTracker.ts LIQ_NOW_MS): its age
+ *            minus 2 min. The owner's "60 s old" cannot hold with a write every 2 min by design.
+ *   liqStep  how late the liquidation history's 15-minute step is: its mark plus the 2 min until the write it
+ *            rides on (recordLiq), to now, while the step is not stored.
+ *   flow     the newest trade the trade flow recorded, to now.
+ *   writes   how long the oldest row handed to the index's writes has waited (slicedWork.ts oldestWaitMs).
+ *   cohorts  how late the cohorts' 15-minute series is: its mark to now, minus the 15 min until the next is due.
+ *   boards   the last board build, to now (over an hour stays the hard `boards` reason, ops/status.ts).
+ *   hl       how long the Hyperliquid wallet lane has had work queued and finished none (ops/indexerJudge.ts).
+ *            No held-end figure is published to judge by; `lane:hl` already calls it degraded at 15 min.
+ */
+export const FRESH_TARGETS: readonly FreshTarget[] = [
+  { id: 'liqNow', name: 'Liquidation heatmap', measure: 'late', budgetMs: FRESH_MIN },
+  { id: 'liqStep', name: 'Liquidation history', measure: 'late', budgetMs: 2 * FRESH_MIN },
+  { id: 'flow', name: 'Who traded', measure: 'behind', budgetMs: FRESH_MIN },
+  { id: 'writes', name: 'Wallet trades saved', measure: 'waiting', budgetMs: 10_000 },
+  { id: 'cohorts', name: 'Cohorts', measure: 'late', budgetMs: 5 * FRESH_MIN },
+  { id: 'boards', name: 'Leaderboards', measure: 'old', budgetMs: 15 * FRESH_MIN },
+  { id: 'hl', name: 'Hyperliquid wallet reads', measure: 'without progress', budgetMs: 30 * FRESH_MIN },
+];
+
+/** Past this share of its target a dataset is early-warned: logged and tallied, never shown or alerted. */
+export const FRESH_WARN_SHARE = 0.5;
+
+/** ok: within its target; behind: past it; unknown: no figure (an indexer that does not publish it yet, a start). */
+export type FreshState = 'ok' | 'behind' | 'unknown';
+
+export interface FreshItem {
+  id: FreshId;
+  /** The figure (ms), or null when there is none. */
+  ms: number | null;
+  budgetMs: number;
+  state: FreshState;
+}
+
+export interface Freshness {
+  /** The probe round it is from. */
+  at: number;
+  items: FreshItem[];
+}
+
+export const freshState = (ms: number | null, budgetMs: number): FreshState => (ms === null ? 'unknown' : ms > budgetMs ? 'behind' : 'ok');
+
+/** The page's items from one round's figures, in FRESH_TARGETS order. */
+export function freshItems(values: Partial<Record<FreshId, number | null>>): FreshItem[] {
+  return FRESH_TARGETS.map(({ id, budgetMs }) => {
+    const v = values[id];
+    const ms = typeof v === 'number' && Number.isFinite(v) ? Math.max(0, Math.round(v)) : null;
+    return { id, ms, budgetMs, state: freshState(ms, budgetMs) };
+  });
+}
+
+/** Freshness as GET /api/vs/status sent it, checked field by field; null for anything else. */
+export function parseFreshness(v: unknown): Freshness | null {
+  const f = v as { at?: unknown; items?: unknown } | null;
+  if (!f || typeof f.at !== 'number' || !Array.isArray(f.items)) return null;
+  const known = new Set<string>(FRESH_IDS);
+  const items = f.items.filter((x): x is FreshItem => {
+    const i = x as FreshItem | null;
+    return !!i && known.has(i.id) && (i.ms === null || (typeof i.ms === 'number' && Number.isFinite(i.ms)))
+      && typeof i.budgetMs === 'number' && (i.state === 'ok' || i.state === 'behind' || i.state === 'unknown');
+  });
+  return items.length ? { at: f.at, items } : null;
+}
+
+/** "8 s", "2 min", "1 h 5 min": a freshness figure as the page writes it. */
+export function fmtAge(ms: number): string {
+  const s = Math.round(ms / 1000);
+  if (s < 60) return `${s} s`;
+  const m = Math.round(ms / 60_000);
+  if (m < 60) return `${m} min`;
+  return m % 60 === 0 ? `${m / 60} h` : `${Math.floor(m / 60)} h ${m % 60} min`;
 }
