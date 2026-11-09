@@ -51,8 +51,7 @@ import { SodexCatchup } from './sodexCatchup.js';
 import { ArcusCatchup } from './arcusCatchup.js';
 import { startLedgerThread, type LedgerThread } from '../flow/ledgerWorker.js';
 import { mayPrune } from '../retention.js';
-import { FlowRecorder } from '../flow/recorder.js';
-import { FlowStore } from '../flow/store.js';
+import { startFlow, type FlowFeed } from '../flow/thread.js';
 import { dirname, join } from 'node:path';
 import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { StallProfiler } from './stallProfiler.js';
@@ -474,8 +473,8 @@ export class Indexer {
   readonly cohorts: CohortTracker;
   /** SoDEX account id -> address, for stream prints (they carry ids). */
   private sodexAddrOf = new Map<number, string>();
-  /** Every print kept for the per-candle breakdown (flow/recorder.ts); off with VALUESCAN_FLOW=0. */
-  flow: FlowRecorder | null = null;
+  /** Every print kept for the per-candle breakdown (flow/recorder.ts, on its own thread: flow/thread.ts); off with VALUESCAN_FLOW=0. */
+  flow: FlowFeed | null = null;
   private sodexCatchup: SodexCatchup | null = null;
   private arcusCatchup: ArcusCatchup | null = null;
   private coverageLedger: LedgerThread | null = null;
@@ -598,7 +597,7 @@ export class Indexer {
     if (INDEXER_ENV.streams() && process.env.VALUESCAN_FLOW !== '0' && !this.flow) {
       try {
         const path = process.env.VALUESCAN_FLOW_DB?.trim() || join(dirname(this.store.path), 'valuescan-flow.db');
-        this.flow = new FlowRecorder(new FlowStore(path), (venue, acct) =>
+        this.flow = startFlow(path, (venue, acct) =>
           venue === 'sodex' ? this.sodexAddrOf.get(Number(acct)) ?? null : this.ext.get(venue)?.addressOf?.(acct) ?? null);
       } catch (e) {
         this.lastError = `flow: ${String(e)}`;
@@ -626,13 +625,13 @@ export class Indexer {
           (rows) => this.heldChecked(flow, () => arcus.catchUp(rows as ArcusWsTrade[], (prints) => flow.missingNear(prints, ARCUS_NEAR_MS), sink)),
           streamLog,
           {
-            load: () => { try { return JSON.parse(flow.store.getMeta(ARCUS_CATCHUP_META) ?? '{}') as Record<string, number>; } catch { return {}; } },
-            save: (through) => flow.store.setMeta(ARCUS_CATCHUP_META, JSON.stringify(through)),
+            load: () => { try { return JSON.parse(flow.getMeta(ARCUS_CATCHUP_META) ?? '{}') as Record<string, number>; } catch { return {}; } },
+            save: (through) => flow.setMeta(ARCUS_CATCHUP_META, JSON.stringify(through)),
           },
         );
         this.arcusCatchup.start();
       }
-      if (this.flow && process.env.VALUESCAN_SODEX_LEDGER !== '0') this.coverageLedger = startLedgerThread({ flow: this.flow.store.path, index: this.store.path }, streamLog);
+      if (this.flow && process.env.VALUESCAN_SODEX_LEDGER !== '0') this.coverageLedger = startLedgerThread({ flow: this.flow.path, index: this.store.path }, streamLog);
     }
     const backfillRate = INDEXER_ENV.walletBackfillPerMin();
     if (backfillRate > 0) {
@@ -760,7 +759,6 @@ export class Indexer {
     lap('warm cache');
     if (this.flow) {
       this.flow.stop();
-      try { this.flow.store.close(); } catch { /* closed */ }
       this.flow = null;
     }
     lap('who traded recorder');
@@ -923,7 +921,7 @@ export class Indexer {
   // --- streams ----------------------------------------------------------------------
 
   /** `missing` answers "none" when it cannot read a chunk. For a read that must not count as having looked. */
-  private heldChecked(flow: FlowRecorder, run: () => Print[]): Print[] {
+  private heldChecked(flow: FlowFeed, run: () => Print[]): Print[] {
     const was = flow.lastError;
     flow.lastError = null;
     const added = run();
