@@ -709,3 +709,13 @@ export function cheapestMakerMarkets(
   }
   return out.sort((a, b) => a.costPerMillion - b.costPerMillion).slice(0, o.limit ?? 6);
 }
+
+/**
+ * The spread limit a bot starts with on a market (owner 2026-11-09): about 1.5x the market's typical spread from
+ * SoDEX's book, rounded up to 5 bp, never under the 20 bp default - so a thin market (KORU ~29 bp) quotes instead of
+ * waiting. null: the market's spread is not known from the book (the default stands).
+ */
+export function suggestedSpreadBps(m: { spreadBps: number; spreadFrom?: 'book' | 'prints' } | null | undefined): number | null {
+  if (!m || m.spreadFrom !== 'book' || !(m.spreadBps > 0)) return null;
+  return Math.max(20, Math.ceil((m.spreadBps * 1.5) / 5) * 5);
+}

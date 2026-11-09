@@ -145,7 +145,10 @@ export class BinanceReference implements ReferenceSource {
           const bid = Number(j?.bidPrice);
           const ask = Number(j?.askPrice);
           if (!(bid > 0) || !(ask > 0) || ask < bid) return;
-          this.set(m, { bid, ask, at: Date.now() });
+          // The same book as last seen: a still market, confirmed now (not a stale feed).
+          const prev = this.quotes.get(m);
+          const still = !!prev && prev.bid === bid && prev.ask === ask;
+          this.set(m, { bid, ask, at: Date.now(), still, ...(still ? { stillSince: prev!.stillSince ?? prev!.at } : {}) });
           this.stats.confirmed++;
           n++;
         } catch {

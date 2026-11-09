@@ -850,7 +850,7 @@ export interface AlgoView {
  * it. 'off': not used by this bot (a book maker has no oracle), or not known yet.
  */
 export interface BotHealthCheck {
-  id: 'loop' | 'book' | 'oracle' | 'orders' | 'position' | 'key' | 'refusals' | 'service' | 'hold';
+  id: 'loop' | 'book' | 'oracle' | 'orders' | 'fills' | 'position' | 'key' | 'refusals' | 'service' | 'hold';
   label: string;
   state: 'ok' | 'warn' | 'bad' | 'off';
   value: string;

@@ -75,7 +75,8 @@ export interface AlgoSink {
   /** Exits (take-profit / stop-loss) on one market, one signed batch. */
   placeStops(a: AlgoRecord, market: MarketInfo, stops: StopRequest[]): Promise<ChildResult[]>;
   /** Cancel by client order id. An order already gone is not an error. */
-  cancel(a: AlgoRecord, market: MarketInfo, clOrdIDs: string[]): Promise<void>;
+  /** Resolves with the client ids SoDEX answered as gone already (filled or cancelled before): void = none known. */
+  cancel(a: AlgoRecord, market: MarketInfo, clOrdIDs: string[]): Promise<void | string[]>;
   setLeverage(a: AlgoRecord, market: MarketInfo, leverage: number, margin: MarginChoice): Promise<void>;
 }
 
@@ -159,6 +160,12 @@ export function readBatch(data: unknown, orders: readonly ChildRequest[]): Child
  */
 export const GONE = /not ?found|unknown ?order|does ?not ?exist|already/i;
 
+/** The client ids of a cancel's answer SoDEX answered as gone already (filled or cancelled before the cancel). */
+export function cancelGone(data: unknown): string[] {
+  const list = Array.isArray(data) ? (data as OrderResult[]) : unwrapList<OrderResult>(data, 'orders');
+  return failedOrders(list).filter((r) => GONE.test(r.error ?? '') && r.clOrdID).map((r) => String(r.clOrdID));
+}
+
 /**
  * The rows of a cancel's answer SoDEX refused for another reason than the order being gone (an order it found and
  * did not cancel: it may still fill). Empty: every order is cancelled or gone.
@@ -212,18 +219,20 @@ export class KeyAlgoSink implements AlgoSink {
     }
   }
 
-  async cancel(a: AlgoRecord, market: MarketInfo, clOrdIDs: string[]): Promise<void> {
+  async cancel(a: AlgoRecord, market: MarketInfo, clOrdIDs: string[]): Promise<void | string[]> {
     if (!clOrdIDs.length) return;
     let data: unknown;
     try {
       data = await this.signAndSend(perpsActions.cancelOrder(a.accountId, clOrdIDs.map((clOrdID) => ({ symbolID: market.id, clOrdID }))));
     } catch (e) {
-      if (e instanceof SodexApiError && GONE.test(e.message)) return;
+      // The whole cancel answered "gone": every order in it was filled or cancelled already.
+      if (e instanceof SodexApiError && GONE.test(e.message)) return [...clOrdIDs];
       throw e;
     }
     // A batch the envelope calls a success can still refuse some rows: those orders rest on, so the caller must know.
     const bad = cancelFailures(data);
     if (bad.length) throw new Error(`SoDEX did not cancel ${bad.length} order${bad.length === 1 ? '' : 's'}: ${bad.join('; ')}`);
+    return cancelGone(data);
   }
 
   async setLeverage(a: AlgoRecord, market: MarketInfo, leverage: number, margin: MarginChoice): Promise<void> {

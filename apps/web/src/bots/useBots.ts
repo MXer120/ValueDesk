@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { FINAL_STATUSES, type AlgoEvent, type AlgoUpdatePatch, type AlgoView } from '@copy-engine';
 import { actOn, eventsOn, listBotsOn, startOn, updateOn, viewOn } from '../algo/executorAlgos';
+import { hostedExecutor } from '../copy/executor';
 import { pollEvery } from '../exchange/visibility';
 import { newSeed } from '@copy-engine';
 import { keepActed, keepSeries, mergeLog } from './fleet';
@@ -20,6 +21,40 @@ export const BOT_LIVE_MS = 1_000;
  * series samples every 5 minutes, and its newest point is drawn from the figures anyway (fleet.ts, BotSheet.tsx).
  */
 export const BOTS_SERIES_MS = 60_000;
+/** While the live stream is up, the list is still read this often (its series, and a check on the stream). */
+export const BOTS_STREAM_POLL_MS = 30_000;
+
+/**
+ * The executor's live stream of this wallet's bots (GET /algos/stream, server-sent events; owner 2026-11-09: push, not
+ * poll): every bot once, then each again as soon as anything shown of it changes. Read with fetch so the session token
+ * goes in a header. Resolves when the stream ends; throws when it cannot open.
+ */
+async function readStream(url: string, token: string, signal: AbortSignal, onOpen: () => void, onFrame: (f: { at: number; algos: AlgoView[]; gone: string[] }) => void): Promise<void> {
+  const r = await fetch(url, { headers: { Authorization: `Bearer ${token}`, Accept: 'text/event-stream' }, signal, cache: 'no-store' });
+  if (!r.ok || !r.body) throw new Error(`HTTP ${r.status}`);
+  onOpen();
+  const reader = r.body.pipeThrough(new TextDecoderStream()).getReader();
+  let buf = '';
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) return;
+    buf += value;
+    let i: number;
+    while ((i = buf.indexOf('\n\n')) >= 0) {
+      const block = buf.slice(0, i);
+      buf = buf.slice(i + 2);
+      if (/^event: error/m.test(block)) continue;
+      const data = block.split('\n').filter((l) => l.startsWith('data: ')).map((l) => l.slice(6)).join('\n');
+      if (!data) continue;
+      try {
+        const f = JSON.parse(data) as { at?: number; algos?: AlgoView[]; gone?: string[] };
+        onFrame({ at: Number(f.at) || Date.now(), algos: Array.isArray(f.algos) ? f.algos : [], gone: Array.isArray(f.gone) ? f.gone : [] });
+      } catch {
+        /* a frame this page cannot read: the next poll brings the list */
+      }
+    }
+  }
+}
 
 export interface BotsState {
   bots: AlgoView[];
@@ -101,10 +136,17 @@ export function useBots(owner: string | null, signedIn: boolean): BotsState {
   const refreshRef = useRef(refresh);
   refreshRef.current = refresh;
 
+  // The live stream: while it is up the polls only back it up (the list every BOTS_STREAM_POLL_MS, no per-second read).
+  const streaming = useRef(false);
+  const lastListAt = useRef(0);
   useEffect(() => {
     setLoading(true);
-    void refresh();
-    const stop = pollEvery(BOTS_POLL_MS, () => void refresh());
+    void refresh().then(() => { lastListAt.current = Date.now(); });
+    const stop = pollEvery(BOTS_POLL_MS, () => {
+      if (streaming.current && Date.now() - lastListAt.current < BOTS_STREAM_POLL_MS) return;
+      lastListAt.current = Date.now();
+      void refresh();
+    });
     return () => {
       gen.current++;
       stop();
@@ -118,6 +160,55 @@ export function useBots(owner: string | null, signedIn: boolean): BotsState {
     for (const v of views) byId.set(v.algo.id, v);
     show(sortBots([...byId.values()].filter((v) => !v.algo.k.archived)));
   }, [show]);
+  useEffect(() => {
+    if (!owner || !signedIn) return;
+    const token = hostedExecutor.token(owner);
+    if (!token) return;
+    const g = gen.current;
+    const ctl = new AbortController();
+    let alive = true;
+    void (async () => {
+      let tries = 0;
+      while (alive) {
+        try {
+          await readStream(`${hostedExecutor.base}/algos/stream`, token, ctl.signal, () => { streaming.current = true; tries = 0; }, (f) => {
+            if (!alive || g !== gen.current) return;
+            const byId = new Map(shown.current.map((v) => [v.algo.id, v]));
+            let unknown = false;
+            for (const v of f.algos) {
+              if (v.algo.spec.bot !== true) continue;
+              // A bot this page acted on after the frame was taken keeps what the action brought.
+              const at = actedAt.current.get(v.algo.id);
+              if (at !== undefined && at >= f.at) continue;
+              const had = byId.get(v.algo.id);
+              if (!had) unknown = true;
+              const series = had?.algo.book?.series;
+              byId.set(v.algo.id, series && v.algo.book ? { ...v, algo: { ...v.algo, book: { ...v.algo.book, series } } } : v);
+            }
+            for (const id of f.gone) byId.delete(id);
+            show(sortBots([...byId.values()].filter((v) => !v.algo.k.archived)));
+            // A bot new to this page (started elsewhere), or one that ended: one full read brings its series.
+            if (unknown || f.algos.some((v) => FINAL_STATUSES.has(v.algo.status) && !FINAL_STATUSES.has(shown.current.find((x) => x.algo.id === v.algo.id)?.algo.status ?? 'running'))) {
+              seriesAt.current = 0;
+              void refreshRef.current();
+            }
+          });
+        } catch {
+          /* closed, refused, a proxy that does not stream: the polls carry on */
+        }
+        streaming.current = false;
+        if (!alive) return;
+        tries = Math.min(tries + 1, 6);
+        await new Promise((r) => setTimeout(r, 1_000 * 2 ** tries));
+      }
+    })();
+    return () => {
+      alive = false;
+      streaming.current = false;
+      ctl.abort();
+    };
+  }, [owner, signedIn, show]);
+
   /** An action on these bots: stamped before it is sent and again when its answer is on screen. */
   const acting = useCallback(async (ids: string[], send: () => Promise<AlgoView[]>) => {
     const g = gen.current;
@@ -158,7 +249,8 @@ export function useBots(owner: string | null, signedIn: boolean): BotsState {
         merge([series && v.algo.book ? { ...v, algo: { ...v.algo, book: { ...v.algo.book, series } } } : v], g);
       }).catch(() => undefined);
     };
-    const stop = pollEvery(BOT_LIVE_MS, read);
+    // The stream brings this bot as it changes: the per-second read only while the stream is down.
+    const stop = pollEvery(BOT_LIVE_MS, () => { if (!streaming.current) read(); });
     return () => { live = false; stop(); };
   }, [focus, owner, signedIn, merge]);
 

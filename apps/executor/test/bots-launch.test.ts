@@ -739,3 +739,32 @@ test('keys (owner 2026-11-09): the longest lifetime by default; a renewal takes 
   assert.equal(third.days, 30, 'a shorter lifetime asked for is kept');
   await h.cleanup();
 });
+
+test('ops alerts for our side (owner 2026-11-09): a bot check bad on two sweeps raises bot-health once, recovered when good; the user\'s own (key) never', async () => {
+  const w = new Wallet();
+  const h = make({ EXECUTOR_LIVE_ALGOS_WALLETS: w.address });
+  await ready(h, w);
+  const v = await start(h, w, MM);
+  const id = v.algo.id;
+  const real = h.svc.algos.view.bind(h.svc.algos);
+  let oracle: 'ok' | 'bad' = 'bad';
+  (h.svc.algos as unknown as { view: (x: string) => unknown }).view = (x: string) => {
+    const r = real(x) as { bot?: { health?: { checks: Array<{ id: string; state: string; label: string; value: string }> } } } | null;
+    if (r?.bot?.health) r.bot.health.checks = [
+      { id: 'oracle', label: 'Oracle price', state: oracle, value: oracle === 'bad' ? 'feed stale: no price for 40 s' : 'live' },
+      { id: 'key', label: 'Trading key', state: 'bad', value: 'expired' },
+    ];
+    return r;
+  };
+  const t0 = Date.now();
+  h.svc.watchBotHealth(t0);
+  assert.equal(h.alerts.filter((k) => k === 'bot-health').length, 0, 'not on the first sweep');
+  h.svc.watchBotHealth(t0 + 30_000);
+  h.svc.watchBotHealth(t0 + 60_000);
+  assert.equal(h.alerts.filter((k) => k === 'bot-health').length, 1, `once, for the oracle - never for the key (status ${h.svc.algos.get(id)?.status}, alerts ${h.alerts.join(',')})`);
+  oracle = 'ok';
+  h.svc.watchBotHealth(t0 + 90_000);
+  assert.equal(h.alerts.filter((k) => k === 'bot-health-ok').length, 1);
+  assert.ok(id);
+  await h.cleanup();
+});

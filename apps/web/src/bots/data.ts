@@ -35,6 +35,8 @@ export interface BotMarket {
   flowGate?: Array<{ minUsd: number; costBps: number | null; share: number }>;
   /** The spread limit's reading per limit (bp). */
   spreadGate?: Array<{ maxBps: number; costBps: number | null; share: number }>;
+  /** Where spreadBps comes from: SoDEX's sampled book, or the prints (a thin market's prints read about 0). */
+  spreadFrom?: 'book' | 'prints';
   capacityUsdH: number;
   confidence: 'high' | 'medium' | 'low';
   weekdayCostBps: number | null;
@@ -170,7 +172,9 @@ function useVolume7d(symbols: readonly string[]): Map<string, number> {
 
 /** This wallet's own bots' latency, or one bot's (`bot`); nothing is read without its session (token null). */
 export const useBotLatency = (hours: number, token: string | null, bot?: string): Read<BotLatencyResponse> =>
-  usePolled(token ? `/api/copy/v1/bots/latency?hours=${hours}${bot ? `&bot=${encodeURIComponent(bot)}` : ''}` : null, 60_000, isLatency, token);
+  // Every 5 s while the page shows it (owner 2026-11-09: the latency and the "no orders" stretches did not move): the
+  // open 10-minute bucket and the last minute's figure change with every write.
+  usePolled(token ? `/api/copy/v1/bots/latency?hours=${hours}${bot ? `&bot=${encodeURIComponent(bot)}` : ''}` : null, 5_000, isLatency, token);
 
 /** A cost in bp, per $1M: 1.30 bp is $130. */
 export const bpToPerMillion = (bp: number): number => bp * 100;

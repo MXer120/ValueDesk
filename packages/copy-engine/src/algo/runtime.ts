@@ -88,6 +88,8 @@ import {
 } from './types.ts';
 
 export const ALGO_TICK_MS = 500;
+/** A bot is stepped on an update at most this often (stepSoon); the tick still steps it every ALGO_TICK_MS. */
+export const BOT_EVENT_MIN_MS = 50;
 const FLUSH_MS = 2_000;
 const MARKETS_REFRESH_MS = 10 * 60_000;
 /** On stop, how long a step that is placing or cancelling an order is waited for. */
@@ -152,6 +154,8 @@ const ORDER_POLL_SPACING_MS = 1_000;
 const ORDER_RESYNC_SPACING_MS = 200;
 /** A real bot's holding is checked against the account's position this often (positionConfirmed: reads that agree). */
 const BOT_POSITION_CHECK_MS = 30_000;
+/** A handled event of one kind is said at most this often per bot; the ones in between are counted into it (saidOnce). */
+const SAID_EVERY_MS = 10_000;
 /** ...each algo at most this often... */
 const ORDER_POLL_MIN_MS = 3_000;
 /** ...and the socket's places are given out again (by what each wallet has on the book) this often. */
@@ -437,11 +441,17 @@ export class AlgoRuntime {
   /** The Binance-led makers' basis per market (reference.ts). */
   private fairs = new Map<string, FairBasis>();
   /** The Watchdog's figures per bot: its last step, how late SoDEX's order updates arrive, the last hour's refusals by kind. */
-  private wd = new Map<string, { stepAt: number; lagMs: number | null; refusals: Array<[number, RefusalKind]> }>();
-  private wdOf(id: string): { stepAt: number; lagMs: number | null; refusals: Array<[number, RefusalKind]> } {
+  private wd = new Map<string, { stepAt: number; lagMs: number | null; fillLagMs: number | null; refusals: Array<[number, RefusalKind]> }>();
+  private wdOf(id: string): { stepAt: number; lagMs: number | null; fillLagMs: number | null; refusals: Array<[number, RefusalKind]> } {
     let w = this.wd.get(id);
-    if (!w) this.wd.set(id, (w = { stepAt: 0, lagMs: null, refusals: [] }));
+    if (!w) this.wd.set(id, (w = { stepAt: 0, lagMs: null, fillLagMs: null, refusals: [] }));
     return w;
+  }
+  /** A fill booked `lag` ms after SoDEX's trade (the Watchdog's "fills booked" line), smoothed. */
+  private fillLag(a: AlgoRecord, lag: number): void {
+    if (!(lag >= 0) || lag > 120_000) return;
+    const w = this.wdOf(a.id);
+    w.fillLagMs = w.fillLagMs === null ? lag : w.fillLagMs * 0.8 + lag * 0.2;
   }
   /** When each market last had a fair price (fairFor): a gap under REF_GRACE_MS keeps the quotes resting. */
   private fairAt = new Map<string, number>();
@@ -511,6 +521,8 @@ export class AlgoRuntime {
     }
     this.market.start();
     this.host.reference?.onQuote((market) => this.onReference(market));
+    // Bots act on every update (owner 2026-11-09): a change of their market's best prices steps them at once.
+    this.market.onQuote?.((symbol) => this.stepBotsOn(symbol));
     this.syncWatch();
     if (this.host.autoTick !== false) {
       this.timers.push(
@@ -524,6 +536,8 @@ export class AlgoRuntime {
   async stop(): Promise<void> {
     this.running = false;
     for (const t of this.timers) timers.cancel(t);
+    for (const t of this.stepTimers.values()) timers.cancel(t);
+    this.stepTimers.clear();
     this.timers = [];
     // A step may be placing or cancelling an order right now: let it finish and
     // record what it did, so the next start resumes from the truth (bounded: the
@@ -614,6 +628,47 @@ export class AlgoRuntime {
    * price came past its line (bots.ts pastFair) - before the next step, and before SoDEX's takers who watch Binance
    * reach it. Only cancels: new quotes go out with the steps.
    */
+  /** Every running bot on a market, stepped soon (stepSoon): its book or its oracle moved. */
+  private stepBotsOn(symbol: string): void {
+    if (!this.running) return;
+    for (const a of this.algos.values()) if (a.spec.bot && a.spec.symbol === symbol && a.status === 'running') this.stepSoon(a);
+  }
+
+  /**
+   * A bot's step now, on an update rather than on the next tick (owner 2026-11-09: "run on every update, as latency
+   * optimized as possible"). Coalesced: one step per BOT_EVENT_MIN_MS at most, and an update during a step steps again
+   * right after it. Its re-pricing interval (minRepriceMs) still decides how often its orders actually change. Not in
+   * tests that drive the clock themselves (autoTick false).
+   */
+  private stepTimers = new Map<string, unknown>();
+  private stepAgain = new Set<string>();
+  private eventStepAt = new Map<string, number>();
+  private stepSoon(a: AlgoRecord): void {
+    if (this.host.autoTick === false || FINAL_STATUSES.has(a.status) || a.status === 'paused') return;
+    if (this.busy.has(a.id)) {
+      this.stepAgain.add(a.id);
+      return;
+    }
+    if (this.stepTimers.has(a.id)) return;
+    const wait = Math.max(0, BOT_EVENT_MIN_MS - (Date.now() - (this.eventStepAt.get(a.id) ?? 0)));
+    const t = timers.after(wait, () => {
+      this.stepTimers.delete(a.id);
+      if (!this.running || this.busy.has(a.id) || FINAL_STATUSES.has(a.status)) return;
+      this.eventStepAt.set(a.id, Date.now());
+      this.busy.add(a.id);
+      void this.step(a, Date.now())
+        .catch((e) => this.host.log.error('algo: an event step failed', { algo: a.id, error: String(e) }))
+        .finally(() => this.stepDone(a));
+    });
+    this.stepTimers.set(a.id, t);
+  }
+
+  /** A step ended: an update that came during it steps the bot again now. */
+  private stepDone(a: AlgoRecord): void {
+    this.busy.delete(a.id);
+    if (this.stepAgain.delete(a.id)) this.stepSoon(a);
+  }
+
   private onReference(market: string): void {
     if (!this.running) return;
     const rq = this.host.reference?.quote(market);
@@ -639,6 +694,8 @@ export class AlgoRuntime {
       if (stale.length) pulls.push([a, stale]);
     }
     for (const [a, stale] of shuffled(pulls)) void this.cancelChildren(a, m, stale).catch((e) => this.host.log.warn('algo: fast pull failed', { algo: a.id, error: String(e) }));
+    // And the makers that quote off the oracle re-price on its tick, not on the next tick of the loop.
+    for (const a of this.algos.values()) if (a.spec.bot && a.spec.kind === 'mm' && a.spec.ref && a.spec.symbol === market && a.status === 'running') this.stepSoon(a);
   }
 
   /**
@@ -1267,6 +1324,36 @@ export class AlgoRuntime {
 
   /** A bot's figures at the mark now (the mid, else its average fill, while no mark is known). */
   /**
+   * Orders SoDEX answered "not found" on cancel: filled or cancelled already. Said in the activity (owner 2026-11-09:
+   * "don't just hide errors if they exist"), settled from SoDEX's own record of them at once, never cancelled again.
+   */
+  private async saidGone(a: AlgoRecord, list: ChildOrder[]): Promise<void> {
+    if (!list.length) return;
+    for (const c of list) c.updatedAt = Date.now() - STALE_IOC_MS - 1;
+    this.dirty.add(a.id);
+    await this.saidOnce(a, 'gone', 'info', `SoDEX had already filled or cancelled ${list.map((c) => c.tag).join(' and ')} when the cancel arrived: its fills are taken from SoDEX's record, nothing is cancelled again.`, list[0]);
+  }
+
+  /**
+   * One activity line per kind of thing a bot handles, at most every SAID_EVERY_MS: what happened in between is
+   * counted into the next line ("and N more like it"), so a busy market shows what happens without a wall of lines.
+   */
+  private saidAt = new Map<string, { at: number; more: number }>();
+  private async saidOnce(a: AlgoRecord, key: string, kind: AlgoEventKind, text: string, c?: Partial<ChildOrder>): Promise<void> {
+    const k = `${a.id}|${key}`;
+    const now = Date.now();
+    const last = this.saidAt.get(k);
+    if (last && now - last.at < SAID_EVERY_MS) {
+      last.more++;
+      return;
+    }
+    const more = last?.more ?? 0;
+    this.saidAt.set(k, { at: now, more: 0 });
+    if (this.saidAt.size > 5_000) this.saidAt.delete(this.saidAt.keys().next().value!);
+    await this.event(a, kind, more ? `${text} (and ${more} more like it in the ${Math.round((now - last!.at) / 1000)} s before)` : text, c);
+  }
+
+  /**
    * A bot's refusal in its activity (owner 2026-11-09: users see no error that is ours to handle). What the bot handles
    * itself - a post-only price that moved, SoDEX asking to slow down, an out-of-order nonce, a send held back here, a
    * reduce with nothing left - is counted for the Watchdog and logged, not shown. What the user can act on (margin,
@@ -1279,8 +1366,11 @@ export class AlgoRuntime {
     w.refusals.push([now, k]);
     while (w.refusals.length && w.refusals[0]![0] < now - 3_600_000) w.refusals.shift();
     if (w.refusals.length > 2_000) w.refusals.splice(0, w.refusals.length - 2_000);
+    // Handled by the bot itself (a price that moved under a post-only quote, SoDEX asking to slow down, an out-of-order
+    // nonce, a send held back here, nothing left to reduce): said as what it is - an info line, never hidden - and
+    // folded when it repeats. What the user can act on is an info line too; what nothing handles stays an error.
     if (k === 'post-only' || k === 'rate' || k === 'nonce' || k === 'local' || k === 'position') {
-      this.host.log.debug?.('bot: refusal handled', { algo: a.id, tag: c.tag, kind: k, reason });
+      await this.saidOnce(a, `refusal:${k}`, 'info', `SoDEX ${verb} ${c.tag}: ${refusalWords(k)}.`, c);
       return;
     }
     await this.event(a, countsAsFailure(k) ? 'error' : 'info', `SoDEX ${verb} ${c.tag}: ${refusalWords(k)}.`, c);
@@ -1313,12 +1403,20 @@ export class AlgoRuntime {
     if (s.kind === 'mm' && s.ref) {
       const r = this.host.reference?.quote(s.symbol) ?? null;
       const rAge = r ? now - r.at : null;
-      add({ id: 'oracle', label: 'Oracle price', state: !this.host.reference || rAge === null ? 'bad' : rAge <= REF_MAX_AGE_MS ? 'ok' : rAge <= REF_GRACE_MS ? 'warn' : 'bad', value: !this.host.reference ? 'not available here' : rAge === null ? 'no price yet' : `${secs(rAge)} old` });
+      // A still market (the book confirmed unchanged) is healthy: said as still, not as an old price.
+      const still = !!r?.still && rAge !== null && rAge <= REF_MAX_AGE_MS;
+      add({
+        id: 'oracle', label: 'Oracle price',
+        state: !this.host.reference || rAge === null ? 'bad' : rAge <= REF_MAX_AGE_MS ? 'ok' : rAge <= REF_GRACE_MS ? 'warn' : 'bad',
+        value: !this.host.reference ? 'not available here' : rAge === null ? 'no price yet' : still ? `still market, unchanged ${secs(now - (r!.stillSince ?? r!.at))}, confirmed ${secs(rAge)} ago` : rAge <= REF_GRACE_MS ? `live, ${secs(rAge)} old` : `feed stale: no price for ${secs(rAge)}`,
+      });
     } else add({ id: 'oracle', label: 'Oracle price', state: 'off', value: 'not used by this bot' });
     // Its orders: SoDEX's socket (pushed) or read by REST, and how late the updates arrive.
     if (!s.paper) {
       const follows = this.market.followsOrders?.(a.owner) ?? true;
       const lag = w?.lagMs ?? null;
+      const fl = w?.fillLagMs ?? null;
+      add({ id: 'fills', label: 'Fills booked', state: fl === null ? 'off' : fl <= 1_000 ? 'ok' : fl <= 5_000 ? 'warn' : 'bad', value: fl === null ? 'no fill yet' : `${Math.round(fl)} ms after the trade` });
       add({ id: 'orders', label: 'Order updates', state: !follows ? 'warn' : lag !== null && lag > 3_000 ? 'warn' : 'ok', value: `${follows ? 'live from SoDEX' : 'read every few seconds (live slots full)'}${lag !== null ? `, ${Math.round(lag)} ms late` : ''}` });
       // Its holding against SoDEX's position.
       const matched = typeof a.k.posOkAt === 'number' ? a.k.posOkAt : null;
@@ -1410,7 +1508,7 @@ export class AlgoRuntime {
           this.host.log.error('algo: a step failed', { algo: a.id, error: String(e) });
           await this.event(a, 'error', `Step failed: ${e instanceof Error ? e.message : String(e)}`).catch(() => {});
         })
-        .finally(() => this.busy.delete(a.id));
+        .finally(() => this.stepDone(a));
     }
     // Wallets beyond the socket's places, and all of them after a drop: their orders by REST.
     void this.pollOrders(now).catch((e) => this.host.log.warn('algo: order poll failed', { error: String(e) }));
@@ -2336,7 +2434,10 @@ export class AlgoRuntime {
       // A short gap (a still Binance book between confirms, a blip): what rests stays, nothing new is placed.
       if (now - (this.fairAt.get(s.symbol) ?? -Infinity) < REF_GRACE_MS) return;
       await this.pullResting(a);
-      return this.hold(a, this.host.reference ? 'Held: waiting for a fresh oracle price (it quotes only with one).' : 'Held: the oracle maker runs on the ValueDesk executor only.');
+      // No price at all for longer than the grace: the oracle feed is stale (a still market is confirmed, not this).
+      const r = this.host.reference?.quote(s.symbol) ?? null;
+      const age = r ? Math.round((now - r.at) / 1000) : null;
+      return this.hold(a, this.host.reference ? `Held: the oracle feed is stale${age !== null ? ` (no fresh price for ${age} s)` : ' (no price yet)'}; it quotes again once one comes.` : 'Held: the oracle maker runs on the ValueDesk executor only.');
     }
     // The move guard: the mid's move over the last 2 s, in ticks; the side it moves toward waits where it would add.
     const ago = (s.moveGuard ?? 0) > 0 ? this.market.priceAgo(s.symbol, 'mid', 2_000) : null;
@@ -3885,14 +3986,14 @@ export class AlgoRuntime {
       return;
     }
     try {
-      await sink.cancel(a, m, open.map((c) => c.clOrdID));
+      const gone = await sink.cancel(a, m, open.map((c) => c.clOrdID));
+      if (Array.isArray(gone) && gone.length) await this.saidGone(a, open.filter((c) => gone.includes(c.clOrdID)));
     } catch (e) {
       const said = e instanceof Error ? e.message : String(e);
       // Gone already (filled or cancelled, SoDEX's "OrderNotFound"): no failure and no retry. It stays cancelling and is
       // settled from SoDEX's own record of it at once (settleStale reads its executed size: open orders, then history).
       if (GONE.test(said)) {
-        for (const c of open) c.updatedAt = Date.now() - STALE_IOC_MS - 1;
-        this.dirty.add(a.id);
+        await this.saidGone(a, open);
         return;
       }
       for (const c of open) c.cancelling = false;
@@ -3972,11 +4073,16 @@ export class AlgoRuntime {
     const before = a.filled;
     const was = c.state;
     // How late SoDEX's order updates reach us (the Watchdog): a smoothed figure, from the update's own time.
+    const grew = u.filledQty > c.filled + 1e-12;
     if (a.spec.bot && u.at > 0) {
       const lag = Math.max(0, Date.now() - u.at);
       if (lag < 120_000) { const w = this.wdOf(a.id); w.lagMs = w.lagMs === null ? lag : w.lagMs * 0.8 + lag * 0.2; }
+      // Booked by this update (the print had not already): trade to booked.
+      if (grew) this.fillLag(a, Date.now() - u.at);
     }
     this.applyFill(a, c, u.filledQty, u.filledValue, u.maker);
+    // Its own order moved (a fill, a refusal, a cancel done): the bot acts on it now.
+    if (a.spec.bot) this.stepSoon(a);
     // Something filled: SoDEX's limits let it through, so a refusal before counts no more.
     if (a.filled > before && a.k.limitHits) delete a.k.limitHits;
     // A fill that lands after the algo ended still gets its exits resized.
@@ -4572,6 +4678,7 @@ export class AlgoRuntime {
       const c = at[0]!;
       const cum = Math.min(c.quantity, c.filled + p.qty);
       this.applyFill(a, c, cum, c.value + (cum - c.filled) * p.price, true);
+      if (p.at > 0) this.fillLag(a, Date.now() - p.at);
       // Filled in full by the prints: never cancelled (it is gone); its update or the order read settles it.
       if (cum >= c.quantity - 1e-12) c.cancelling = true;
       this.dirty.add(a.id);

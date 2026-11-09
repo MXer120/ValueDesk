@@ -925,11 +925,11 @@ test('Binance-led maker: holds without a reference; quotes off it; a Binance tic
   const g = await step(r, a.id, 2_200);
   assert.equal(r.ex.side('sell').length, 1, 'a short gap keeps the resting quote');
   assert.equal(r.ex.placed.length, placedBefore, 'and places nothing new');
-  assert.doesNotMatch(g.statusReason ?? '', /oracle price/);
+  assert.doesNotMatch(g.statusReason ?? '', /oracle feed is stale/);
   // Quiet for longer: everything is pulled, and it holds.
   const v = await step(r, a.id, 1_000);
   assert.equal(r.ex.side('sell').length, 0);
-  assert.match(v.statusReason ?? '', /oracle price/);
+  assert.match(v.statusReason ?? '', /oracle feed is stale/);
 });
 
 test('Binance-led maker: pickier to send than to keep - placeBps and calmBps hold new quotes back; what rests stays until pullBps', async () => {
@@ -1497,6 +1497,7 @@ test('a cancel SoDEX answers "OrderNotFound" is gone, not failed: no error, no r
   assert.equal(asked, 1, 'asked once, never retried');
   const events = await r.rt.events(a.id, { limit: 500 });
   assert.equal(events.filter((x) => x.kind === 'error').length, 0, 'no "Cancel failed"');
+  assert.ok(events.some((x) => x.kind === 'info' && /already filled or cancelled/.test(x.text)), 'said, not hidden');
   assert.ok(Math.abs((r.rt.view(a.id)!.bot?.inventory ?? 0) - r.ex.position) < 1e-12);
 });
 
@@ -1515,6 +1516,9 @@ test('refusals a bot handles itself are not errors in its activity; the Watchdog
   await settle();
   let events = await r.rt.events(a.id, { limit: 500 });
   assert.equal(events.filter((x) => x.kind === 'error').length, 0, events.filter((x) => x.kind === 'error').map((x) => x.text).join(' | '));
+  // Not hidden either (owner 2026-11-09): each is an info line saying what happened and what the bot did.
+  assert.ok(events.some((x) => x.kind === 'info' && /post-only/.test(x.text)), 'the post-only refusal is said');
+  assert.ok(events.some((x) => x.kind === 'info' && /slow down/.test(x.text)), 'the rate limit is said');
   const h = r.rt.view(a.id)!.bot!.health!;
   const ref = h.checks.find((c) => c.id === 'refusals')!;
   assert.equal(ref.state, 'ok');

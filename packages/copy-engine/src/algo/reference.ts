@@ -14,6 +14,13 @@ export interface RefQuote {
   ask: number;
   /** When it was received, ms since the epoch. */
   at: number;
+  /**
+   * The book had not moved: a REST read confirmed the same best bid and ask (owner 2026-11-09: a still market is no
+   * stale feed). Absent / false: a tick that moved, from the feed.
+   */
+  still?: boolean;
+  /** Since when the price has not moved (ms), while `still`. */
+  stillSince?: number;
 }
 
 export interface ReferenceSource {

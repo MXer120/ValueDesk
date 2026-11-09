@@ -26,7 +26,7 @@ import { useHistory } from '../algo/liveData';
 import { CoinIcon } from '../CoinIcon';
 import { useBotMarkets, bpToPerMillion, type BotMarket } from '../../bots/data';
 import { goBots, type BotsView } from '../../bots/routes';
-import { STRATEGY_INFO, autoLeverage, clampLeverage, draftOfSpec, costPerMillion, gridRange, leverageCap, planMarkets, refusalOf, type BotDraft, type RefusalAction, type Strategy } from '../../bots/presets';
+import { STRATEGY_INFO, autoLeverage, clampLeverage, draftOfSpec, costPerMillion, gridRange, leverageCap, planMarkets, refusalOf, suggestedSpreadBps, type BotDraft, type RefusalAction, type Strategy } from '../../bots/presets';
 import { CATEGORIES, RECIPE, draftOfRecipe, recipeOfDraft, recipesOf, type Category, type Recipe, type RecipeId } from '../../bots/recipes';
 import { bestOf, estimate, feeAdjOf, ownRuns, type BotEstimate, type EstLine, type OwnRun } from '../../bots/estimate';
 import { BotAvatar, StrategyTile } from './BotIcon';
@@ -645,6 +645,10 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
   const bestId = cat === 'market' && pickedMs.length ? bestOf(scored.filter((x): x is typeof x & { e: BotEstimate } => !!x.e && x.e.bp !== null).map((x) => ({ id: x.id, est: x.e })))?.id ?? null : null;
   const blockedRows = recipesOf(cat).filter(blocked);
   const rows = [...scored].sort((a, b) => (a.id === bestId ? -1 : b.id === bestId ? 1 : (a.e?.bp ?? 99) - (b.e?.bp ?? 99)));
+  // The spread limit from the picked markets' real spread (the widest of them), while it is still the untouched default.
+  const spreadHint = pickedMs.map((m) => suggestedSpreadBps(m)).filter((x): x is number => x !== null);
+  const spreadSuggest = spreadHint.length ? Math.max(...spreadHint) : null;
+  useEffect(() => { if (spreadSuggest !== null && d.maxSpreadBps === 20 && spreadSuggest !== 20) setD((x) => (x.maxSpreadBps === 20 ? { ...x, maxSpreadBps: spreadSuggest } : x)); }, [spreadSuggest]); // eslint-disable-line react-hooks/exhaustive-deps
   // Markets without an oracle picked while an oracle preset is on: the book maker takes over.
   useEffect(() => { if (cat === 'market' && noOracle.length && RECIPE[rid].oracle) setD((x) => fromRecipe('touch', x.symbol, x)); }, [cat, noOracle.length, rid]); // eslint-disable-line react-hooks/exhaustive-deps
   const nextLabel = place.step === 3 && place.part !== parts[parts.length - 1] ? `Next: ${PART_NAMES[parts[parts.indexOf(place.part!) + 1]!]}` : 'Next';

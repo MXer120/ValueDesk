@@ -86,6 +86,8 @@ export interface AlgoMarket {
   onPrint(cb: (p: Print) => void): void;
   onOrder(cb: (u: OrderUpdate) => void): void;
   onState(cb: (up: boolean) => void): void;
+  /** A market's best bid or ask changed (owner 2026-11-09: bots act on every update). Absent: a test's fake. */
+  onQuote?(cb: (symbol: string) => void): void;
 }
 
 /** A quote older than this is not a price. */
@@ -266,7 +268,9 @@ export class AlgoFeed implements AlgoMarket {
         const bidSz = toNum(r.B);
         const askSz = toNum(r.A);
         if (s && bid !== null && ask !== null && bid > 0 && ask > 0 && ask >= bid) {
+          const prev = this.quotes.get(s);
           this.quotes.set(s, { bid, ask, at: now, ...(bidSz !== null && bidSz >= 0 ? { bidSz } : {}), ...(askSz !== null && askSz >= 0 ? { askSz } : {}) });
+          if (!prev || prev.bid !== bid || prev.ask !== ask) for (const cb of this.quoteCbs) cb(s);
         }
       }
       return;
@@ -445,6 +449,11 @@ export class AlgoFeed implements AlgoMarket {
       usd += list[i]!.usd;
     }
     return { qty, usd };
+  }
+
+  private quoteCbs: Array<(symbol: string) => void> = [];
+  onQuote(cb: (symbol: string) => void): void {
+    this.quoteCbs.push(cb);
   }
 
   onPrint(cb: (p: Print) => void): void {
