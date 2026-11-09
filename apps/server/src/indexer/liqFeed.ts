@@ -31,6 +31,9 @@ const FEED_SLICE_MS = 8;
 
 // --- indexer side --------------------------------------------------------------------------
 
+/** One try a second for this many seconds to bind the feed port (LiqFeedServer.start). */
+const BIND_TRIES = 60;
+
 export class LiqFeedServer {
   private server: net.Server | null = null;
   private clients = new Set<net.Socket>();
@@ -39,9 +42,14 @@ export class LiqFeedServer {
   /** `onReader`: a reader connected - the engine should send every coin whole next. */
   constructor(private readonly onReader: () => void, private readonly port = LIQ_FEED_PORT) {}
 
+  /** Tries left to bind the port while another process still holds it (a handover: the outgoing one lets it go). */
+  private tries = 0;
+  private retry?: NodeJS.Timeout;
+
   start(): void {
     if (this.server) return;
     this.lastError = null;
+    if (!this.tries) this.tries = BIND_TRIES;
     const srv = net.createServer((sock) => {
       sock.setNoDelay(true);
       this.clients.add(sock);
@@ -51,16 +59,24 @@ export class LiqFeedServer {
       this.onReader();
     });
     srv.on('error', (e) => {
-      // Another indexer holds the port (two dev servers on one machine): no live feed from this one.
-      // Or the heatmap thread was just started again and the old one's socket is not closed yet (liqLiveCore.ts retries).
+      // Another indexer holds the port: a handover's outgoing process for a moment more (handover.ts), so try again every
+      // second for a minute; two dev servers on one machine: no live feed from this one after that. Or the heatmap thread
+      // was just started again and the old one's socket is not closed yet (liqLiveCore.ts retries).
       this.lastError = String(e);
       if (this.server === srv) this.server = null;
+      if ((e as NodeJS.ErrnoException).code === 'EADDRINUSE' && --this.tries > 0) {
+        this.retry = setTimeout(() => this.start(), 1_000);
+        this.retry.unref?.();
+      }
     });
+    srv.on('listening', () => { this.lastError = null; this.tries = 0; });
     srv.listen(this.port, HOST);
     this.server = srv;
   }
 
   stop(): void {
+    if (this.retry) clearTimeout(this.retry);
+    this.tries = 0;
     for (const c of this.clients) c.destroy();
     this.clients.clear();
     this.server?.close();

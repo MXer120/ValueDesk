@@ -39,6 +39,8 @@ export interface FlowFeed {
   setMeta(key: string, value: string): void;
   tick(): void;
   status(): FlowFeedStatus;
+  /** A handover (indexer/handover.ts): the boundary says which prints the last process held, so no restart check, and the run goes on from `from`. */
+  continueHandover(from: number): void;
   /** Everything handed over is written; the file is closed. */
   stop(): void;
 }
@@ -85,6 +87,7 @@ export class InlineFlow implements FlowFeed {
   setMeta(key: string, value: string): void { this.rec.store.setMeta(key, value); }
   tick(): void { this.rec.tick(); }
   status(): FlowFeedStatus { return { ...this.rec.status(), thread: null }; }
+  continueHandover(from: number): void { this.rec.continueHandover(from); }
   stop(): void {
     this.rec.stop();
     try { this.rec.store.close(); } catch { /* closed */ }
@@ -112,6 +115,7 @@ interface Batch { seq0: number; items: Wire[] }
 type ToThread =
   | { type: 'prints'; seq0: number; items: Wire[]; resent?: boolean; confirmed: number }
   | { type: 'meta'; key: string; value: string }
+  | { type: 'handover'; from: number }
   | { type: 'addresses'; list: Array<[Venue, string, string]> }
   | { type: 'stop' }
   | { type: 'crash'; mode: 'now' | 'midBatch' | 'afterFlush'; at?: number };
@@ -210,6 +214,9 @@ function runThread(d: ThreadData): void {
       }
       case 'meta':
         try { store.setMeta(m.key, m.value); } catch (e) { rec.lastError = `meta: ${String(e)}`; }
+        return;
+      case 'handover':
+        rec.continueHandover(m.from);
         return;
       case 'addresses':
         for (const [venue, key, addr] of m.list) answered.set(`${venue}|${key}`, addr);
@@ -315,6 +322,8 @@ export class FlowThread implements FlowFeed {
     this.alive = true;
     this.startedAt = Date.now();
     this.lastMsgAt = Date.now();
+    // A thread started again after a handover continues the same run (meta `runs`).
+    if (this.handoverFrom !== null) w.postMessage({ type: 'handover', from: this.handoverFrom } satisfies ToThread);
     w.on('message', (m: FromThread) => {
       if (this.worker !== w) return;
       this.lastMsgAt = Date.now();
@@ -505,8 +514,16 @@ export class FlowThread implements FlowFeed {
     }
   }
 
+  /** Set by a handover: the boundary already decided which prints the last process held. */
+  private handoverFrom: number | null = null;
+
+  continueHandover(from: number): void {
+    this.handoverFrom = from;
+    this.worker?.postMessage({ type: 'handover', from } satisfies ToThread);
+  }
+
   repeatOfHeld(p: Print): boolean {
-    if (p.t >= this.repeats.runStart) return false;
+    if (this.handoverFrom !== null || p.t >= this.repeats.runStart) return false;
     try {
       return this.repeats.check(this.view(), p);
     } catch (e) {

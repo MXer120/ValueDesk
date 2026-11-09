@@ -58,7 +58,8 @@
 # and SoDEX are back in seconds; Lighter needs 3.5-8 minutes to re-subscribe its
 # ~220 markets, and that gap has to be re-read for the traders on the boards.
 # When a release changes nothing the indexer runs (routes, perf, hosted gate),
-# use --api-only.
+# use --api-only. Since 2026-11-09 an indexer restart is a handover where the unit supports it (THE HANDOVER below):
+# the new process subscribes beside the old one, so none of that gap remains; the classic restart is its fallback.
 #
 # THE BETA API (beta.valuedesk.so, valuescan-api-beta.service, port 8798): it runs from its own
 # link, /opt/valuescan/beta-current, which only --beta moves - so a beta release never touches
@@ -244,7 +245,71 @@ restart_indexer_and_api() {
   restart_api
 }
 
+# THE HANDOVER (apps/server/src/indexer/handover.ts, 2026-11-09). Restarts and releases were ~70% of the indexer's bad
+# minutes since 2026-10-26: a stop of 6-17 min, Lighter's resubscribe, and every print in between missing. Instead,
+# `systemctl reload` makes the unit's supervisor start the new release BESIDE the running indexer: it opens its sockets,
+# buffers every print, and takes over writing when the running one has stopped and let go of the writer lock. The
+# supervisor writes where it stands to $HANDOVER_STATE; this waits for `promoted` (done) or `failed`, and on failure,
+# or no answer in HANDOVER_WAIT_S, does the classic restart below. VS_INDEXER_HANDOVER=0 (ops.local.env): always classic.
+HANDOVER_STATE="${HANDOVER_STATE:-/var/lib/valuescan/state/indexer-handover.json}"
+HANDOVER_WAIT_S="${HANDOVER_WAIT_S:-1500}"
+
+# One field of the handover state file ('' when there is none).
+handover_field() {
+  [ -f "$HANDOVER_STATE" ] || { printf ''; return 0; }
+  node -e "try { const v = JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8'))[process.argv[2]]; process.stdout.write(v == null ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v)); } catch { }" "$HANDOVER_STATE" "$1" 2>/dev/null || true
+}
+
+# The running main process's command line. NOT the unit file's ExecStart: after the new unit is installed and
+# daemon-reload'ed, systemd shows the new ExecStart while the process started from the old one still runs - and a
+# SIGHUP to a bare indexer (no supervisor) would end it without its stop.
+main_cmdline() {
+  local pid
+  pid="$("$SYSTEMCTL" show -p MainPID --value valuescan-indexer.service 2>/dev/null || true)"
+  [ -n "$pid" ] && [ "$pid" != 0 ] && [ -r "/proc/$pid/cmdline" ] && tr '\0' ' ' < "/proc/$pid/cmdline"
+}
+
+# The unit has ExecReload, is running, its main process IS the supervisor, and handovers are not switched off.
+handover_capable() {
+  [ "${VS_INDEXER_HANDOVER:-1}" != 0 ] || return 1
+  "$SYSTEMCTL" is-active --quiet valuescan-indexer.service || return 1
+  "$SYSTEMCTL" show -p ExecReload --value valuescan-indexer.service 2>/dev/null | grep -q 'kill' || return 1
+  main_cmdline | grep -q 'indexer/supervisor' || return 1
+}
+
+# 0: the new indexer writes. 1: it did not take over (the old one still runs, or nothing does): restart classically.
+handover_indexer() {
+  local before seq phase i
+  before="$(handover_field seq)"
+  log "handing the indexer over (the new process opens its sockets beside the running one and takes over when it has stopped: no gap)"
+  "$SYSTEMCTL" reload valuescan-indexer.service || { log "!! systemctl reload failed"; return 1; }
+  for i in $(seq 1 "$HANDOVER_WAIT_S"); do
+    seq="$(handover_field seq)"; phase="$(handover_field phase)"
+    if [ -n "$seq" ] && [ "$seq" != "$before" ]; then
+      case "$phase" in
+        promoted)
+          log "handover done in ${i} s: pid $(handover_field activePid) (release $(handover_field activeRelease)) writes the index; $(handover_field timings)"
+          return 0 ;;
+        failed)
+          log "!! handover failed after ${i} s: $(handover_field reason)"
+          return 1 ;;
+      esac
+    fi
+    if [ $((i % 60)) = 0 ]; then log "handover: ${phase:-starting} after ${i} s (journalctl -u valuescan-indexer -f)"; fi
+    sleep 1
+  done
+  log "!! handover not done in ${HANDOVER_WAIT_S} s (last phase: ${phase:-none})"
+  return 1
+}
+
 restart_indexer() {
+  if handover_capable; then
+    if handover_indexer; then
+      "$SYSTEMCTL" is-active --quiet valuescan-indexer.service || die "the indexer stopped after the handover - journalctl -u valuescan-indexer -n 80"
+      return 0
+    fi
+    log "!! falling back to the classic restart (stop, then start)"
+  fi
   log "restarting the indexer (its Lighter stream needs minutes to be whole again)"
   "$SYSTEMCTL" restart valuescan-indexer.service
   wait_active valuescan-indexer.service 30 || die "the indexer did not become active - journalctl -u valuescan-indexer -n 80"

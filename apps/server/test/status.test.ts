@@ -97,6 +97,16 @@ test('probes: a process with no build yet is judged by when the boards were writ
   assert.equal(await stateOf(T0 - 61 * MIN), 'degraded');
 });
 
+test('probes: a new process before its first build is judged by the last process\'s build (prevBuildAt), and a handover row is not `stopping`', async () => {
+  const stateOf = async (extra: Record<string, unknown>) => (await probeAll({ targets: TARGETS, fetch: fakeFetch(ALL_UP), now: () => T0, indexerRecheckMs: 0, indexerStatus: () => ({
+    at: T0 - 5_000, streams: { sodex: 1, hyperliquid: 1 }, lastBuildAt: 0, ...extra,
+  }) })).find((s) => s.service === 'indexer')!;
+  assert.equal((await stateOf({ prevBuildAt: T0 - 10 * MIN, boardsAt: T0 - 90 * MIN })).state, 'up', 'the last build is 10 min old');
+  assert.deepEqual((await stateOf({ prevBuildAt: T0 - 61 * MIN })).why, ['boards'], 'over an hour: said, though this process has not built yet');
+  const handing = await stateOf({ lastBuildAt: T0 - 5 * MIN, handover: { to: 2, since: T0 - 20_000 } });
+  assert.equal(handing.state, 'up', 'handing over: the standby holds every print');
+});
+
 test('probes: an indexer stream back by the next status is up; down in both is degraded; a stale status is down at once', async () => {
   const healthy = { sodex: true, hyperliquid: true };
   const sequence = (...streams: Array<Record<string, boolean>>) => {

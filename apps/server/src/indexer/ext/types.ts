@@ -5,7 +5,7 @@
  */
 import type { BoardWindow, Venue } from '../../valuedesk/types.js';
 import type { Lane } from '../lanes.js';
-import type { Print } from '../streams.js';
+import type { ArcusStream, Dedup, LighterStream, Print } from '../streams.js';
 import type { IndexStore } from '../store.js';
 
 export interface ExtContext {
@@ -17,6 +17,11 @@ export interface ExtContext {
   onPrint: (p: Print) => void;
   /** The Hyperliquid /info lane (trade.xyz reads its fills from Hyperliquid). */
   hlLane: Lane;
+  /**
+   * Sockets opened before this start (a handover's standby, handover.ts), already delivering to `onPrint`: used as they
+   * are. Left out: the adapter opens its own as before; null: none.
+   */
+  adopt?: { lighter?: LighterStream | null; arcus?: ArcusStream | null };
 }
 
 export interface ExtVenue {
@@ -26,6 +31,8 @@ export interface ExtVenue {
   stop(): void;
   /** When the adapter's own socket came up (null = no stream or down). */
   socketSince(): number | null;
+  /** Its socket's memory of print ids (a handover names them), if it has a socket. */
+  dedup?(): Dedup | null;
   /** Called on every board pass: keep the venue's PnL inputs fresh. */
   refresh(now: number): void | Promise<void>;
   /** Whether the PnL behind the window's boards has loaded. */
