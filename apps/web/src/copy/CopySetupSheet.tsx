@@ -196,7 +196,8 @@ export function CopySetupSteps({ mode, live, paper, bots, hideDone = false, onPr
   const [ticks, setTicks] = useState<Record<string, boolean>>({});
   const [selfUrl, setSelfUrl] = useState(live.self.url || DEFAULT_SELF_URL);
   const [pairing, setPairing] = useState('');
-  const [days, setDays] = useState<number>(mode === 'browser' ? MAX_BROWSER_KEY_DAYS : 30);
+  // null: the longest the executor allows (owner 2026-11-09: keys hold as long as allowed); a pick or a typed number otherwise.
+  const [daysPick, setDays] = useState<number | null>(null);
   // A key the follower made on SoDEX themselves (hosted and self-hosted): its name and private key.
   const [own, setOwn] = useState<{ open: boolean; name: string; key: string }>({ open: false, name: '', key: '' });
   // A key lifetime typed in (owner 2026-11-09: the picks plus a custom number of days).
@@ -206,12 +207,14 @@ export function CopySetupSteps({ mode, live, paper, bots, hideDone = false, onPr
   const Act = bots ? KitAct : ActBtn;
 
   useEffect(() => {
-    setDays(mode === 'browser' ? MAX_BROWSER_KEY_DAYS : 30);
+    setDays(null);
     setError(null);
   }, [mode]);
 
   const r = readiness(live, mode);
   const owner = live.owner;
+  const maxDays = mode === 'browser' ? MAX_BROWSER_KEY_DAYS : (mode === 'hosted' ? live.hosted : live.self).info?.keyTtlDaysMax ?? 180;
+  const days = daysPick === null ? maxDays : Math.min(daysPick, maxDays);
   const policy = regionPolicy(live.terms?.country ?? (country || null), live.viewerCountry);
   const blocked = !!live.terms && !policy.allowed;
   const allTicked = COPY_STATEMENTS.every((s) => ticks[s.id]);
@@ -241,8 +244,7 @@ export function CopySetupSteps({ mode, live, paper, bots, hideDone = false, onPr
   const n = (id: string) => shown.findIndex((s) => s.id === id) + 1;
 
   const ladder = COPY_FEE_LADDER.map((s) => `${localize(feePercent(s.fee))}${s.fromUsd ? ` from $${(s.fromUsd / 1e6 >= 1 ? `${fmtPlain(s.fromUsd / 1e6)}M` : `${fmtPlain(s.fromUsd / 1e3)}k`)}` : ''}`).join(', ');
-  const keyDays = mode === 'browser' ? [1, 3, 7] : [7, 30, 90, 180];
-  const maxDays = mode === 'browser' ? MAX_BROWSER_KEY_DAYS : side?.info?.keyTtlDaysMax ?? 180;
+  const keyDays = mode === 'browser' ? [1, 3, 7] : [...new Set([7, 30, 90, maxDays])].filter((d) => d <= maxDays).sort((a, b) => a - b);
   const keyHolder = mode === 'browser' ? 'only this browser' : mode === 'hosted' ? 'the ValueDesk executor in Tokyo' : 'your copier';
   const what = bots ? 'bots' : 'copies';
   // Bots: the terms step signs in to the executor as well (no step of its own).
@@ -448,9 +450,15 @@ export function CopySetupSteps({ mode, live, paper, bots, hideDone = false, onPr
           }
           action={
             r.key ? (
-              <button type="button" className="fx-link fx-link--warn" disabled={!!working} onClick={() => void run('revoke', () => revokeKey(mode, false), 'Copy key revoked on SoDEX.')}>
-                Revoke
-              </button>
+              <span className="cs-keyacts">
+                {/* Within 14 days of its end: renew here, for the longest lifetime; the old key trades on until the new one is registered. */}
+                {mode !== 'browser' && side?.me?.key?.expiresAt && side.me.key.expiresAt - Date.now() < 14 * 86_400_000 && (
+                  <Act label="Renew" primary disabled={!owner || !r.connected} busy={working === 'renew'} onClick={() => void run('renew', () => approveKey(mode, maxDays), bots ? 'Trading key renewed. Your bots never stopped.' : 'Copy key renewed.')} />
+                )}
+                <button type="button" className="fx-link fx-link--warn" disabled={!!working} onClick={() => void run('revoke', () => revokeKey(mode, false), 'Copy key revoked on SoDEX.')}>
+                  Revoke
+                </button>
+              </span>
             ) : (
               <ActBtn
                 label="Approve"

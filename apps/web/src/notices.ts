@@ -25,6 +25,8 @@ export interface Notice {
   grade?: NoticeGrade;
   owner?: string;
   origin?: NoticeOrigin;
+  /** A one-click fix the row offers: 'renew-key' renews the trading key on the Bots page (key-expiry notices). */
+  action?: 'renew-key';
 }
 
 const KIND_GRADE: Record<NoticeKind, NoticeGrade> = { deposit: 'info', withdraw: 'info', error: 'error', system: 'warn', info: 'info', reply: 'info', algo: 'warn', copy: 'warn' };

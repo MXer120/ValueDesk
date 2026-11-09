@@ -25,6 +25,7 @@ export function noticeRow(n: EngineNotice, origin: NoticeOrigin): Omit<Notice, '
   return {
     id: n.id, time: n.at, kind: n.source, grade: n.grade, owner: n.owner, origin,
     title: n.paper ? `${n.title} (paper)` : n.title, body: n.body, important: n.grade !== 'info',
+    ...(n.kind === 'key-expiry' ? { action: 'renew-key' as const } : {}),
   };
 }
 

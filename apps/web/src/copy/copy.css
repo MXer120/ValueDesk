@@ -182,3 +182,4 @@
 .cs-days__picks .pf-ctl { height: 24px; padding: 0 10px; border: 1px solid transparent; border-radius: 6px; background: none; color: var(--muted); font: inherit; font-size: var(--fs-xs); font-weight: 500; cursor: pointer; }
 .cs-days__picks .pf-ctl:hover:not(.is-on) { color: var(--text); }
 .cs-days__picks .pf-ctl.is-on { color: var(--text); border-color: var(--text); background: color-mix(in srgb, var(--text) 7%, transparent); }
+.cs-keyacts { display: inline-flex; align-items: center; gap: 10px; }

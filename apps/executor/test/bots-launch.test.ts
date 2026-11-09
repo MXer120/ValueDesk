@@ -697,3 +697,45 @@ test('infra stats (owner 2026-11-08): live bots against the cap of 20, practice 
   assert.deepEqual(s.markets.map((m) => [m.symbol, m.live]), [['BTC-USD', 1]]);
   await h.cleanup();
 });
+
+test('keys (owner 2026-11-09): the longest lifetime by default; a renewal takes the other name, so the old key trades on until the new one is registered; notices 14 and 3 days ahead', async () => {
+  const w = new Wallet();
+  const h = make({ EXECUTOR_LIVE_ALGOS_WALLETS: w.address });
+  h.svc.acceptTerms(w.sign(h.svc.executorId, 'accept-terms', TERMS()), { viewerCountry: 'SG' });
+  // No lifetime asked: the cap (180 days here).
+  const first = h.svc.createKey(w.sign(h.svc.executorId, 'create-key', { accountId: 42 }), ctx);
+  assert.equal(first.days, first.maxDays);
+  assert.equal(first.maxDays, 180);
+  assert.equal(first.name, 'vd-copy-tokyo');
+  const exp1 = Date.now() + 10 * 86_400_000;
+  h.w.keys[w.address] = [{ name: first.name, publicKey: first.address, expiresAt: exp1 }];
+  assert.equal((await h.svc.verifyKey(w.address))!.registered, true);
+  h.w.equity[w.address] = 10_000;
+  await start(h, w, MM);
+  // 10 days left: the 14-day notice, once; 2 days left: the 3-day one.
+  h.svc.warnKeyExpiry();
+  h.svc.warnKeyExpiry();
+  let n = h.db.notices(w.address).filter((x) => x.kind === 'key-expiry');
+  assert.equal(n.length, 1);
+  assert.match(n[0]!.title, /expires in 14 days/);
+  assert.match(n[0]!.body, /keep running on the old key/);
+  h.svc.warnKeyExpiry(exp1 - 2 * 86_400_000);
+  n = h.db.notices(w.address).filter((x) => x.kind === 'key-expiry');
+  assert.equal(n.length, 2);
+  assert.match(n[0]!.title, /expires in 3 days/);
+  // Renewal while the old key is good: the other name, so registering it does not replace the old key on SoDEX.
+  const second = h.svc.createKey(w.sign(h.svc.executorId, 'create-key', { accountId: 42 }, Date.now() + 1), ctx);
+  assert.equal(second.name, 'vd-copy-tokyo-b');
+  assert.equal(h.db.key(w.address, 'active')!.address, first.address, 'the old key stays active until the new one is registered');
+  h.w.keys[w.address] = [
+    { name: first.name, publicKey: first.address, expiresAt: exp1 },
+    { name: second.name, publicKey: second.address, expiresAt: Date.now() + 180 * 86_400_000 },
+  ];
+  assert.equal((await h.svc.verifyKey(w.address))!.registered, true);
+  assert.equal(h.db.key(w.address, 'active')!.address, second.address, 'promoted once SoDEX lists it');
+  // The next renewal goes back to the first name.
+  const third = h.svc.createKey(w.sign(h.svc.executorId, 'create-key', { accountId: 42, days: 30 }, Date.now() + 2), ctx);
+  assert.equal(third.name, 'vd-copy-tokyo');
+  assert.equal(third.days, 30, 'a shorter lifetime asked for is kept');
+  await h.cleanup();
+});
