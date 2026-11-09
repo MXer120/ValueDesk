@@ -1553,7 +1553,7 @@ test('Watchdog: a running bot reports its loop, the service, the SoDEX price, th
   assert.equal(r.rt.view(a.id)!.bot!.health!.checks.find((c) => c.id === 'service')!.state, 'warn');
   r.brake = null;
   // Stopped: nothing to watch.
-  await r.rt.cancel(a.id, { now: clock });
+  await r.rt.cancel(a.id, { now: true });
   await settle();
   const hs = r.rt.view(a.id)!.bot!.health!;
   assert.deepEqual(hs.checks.map((c) => c.state), ['off']);
