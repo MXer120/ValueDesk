@@ -867,6 +867,9 @@ export class CohortTracker {
   private liqAccDirty = false;
   private lastLiqT = 0;
   private liqRecording = false;
+  /** A 15-minute step's writes are in flight (writeLiqStep): the next step waits, the heatmap rows do not. */
+  private liqStepWriting = false;
+  private liqStepMs = 0;
   private lastNowAt = 0;
   /** How long the last liquidation pass took (status). */
   private liqMs = 0;
@@ -2400,7 +2403,9 @@ export class CohortTracker {
       if (!this.live.ready) return;
       const s = this.d.store;
       const t = Math.floor(now / LIQ_STEP_MS) * LIQ_STEP_MS;
-      const stepT = t > this.lastLiqT ? t : null;
+      // A step whose writes are still going holds back only the next STEP, never the 2-minute heatmap rows:
+      // both used to wait on one flag, and a 45-min step write left the heatmap frozen as long (2026-11-09 00:15).
+      const stepT = t > this.lastLiqT && !this.liqStepWriting ? t : null;
       const ticks = new Map<string, number>();
       if (stepT !== null) for (const [sym, tick] of marketsNow('sodex')?.ticks ?? []) ticks.set(liqCoin(sym), tick);
       let init: { cur: ReturnType<IndexStore['liqCur']>; addrs: Map<string, number> } | undefined;
@@ -2418,6 +2423,20 @@ export class CohortTracker {
       this.lastNowAt = now;
       const step = out.step;
       if (stepT === null || !step) return;
+      this.liqStepWriting = true;
+      void this.writeLiqStep(stepT, step, full, now, askedAt).finally(() => { this.liqStepWriting = false; });
+    } catch (e) {
+      this.lastError = `liquidations: ${String(e)}`;
+    } finally {
+      this.liqRecording = false;
+      this.liqMs = Date.now() - started;
+    }
+  }
+
+  /** A step's writes, in today's order, beside the heatmap rows (recordLiq goes on writing those meanwhile). */
+  private async writeLiqStep(stepT: number, step: NonNullable<Awaited<ReturnType<CohortTracker['live']['step']>>['step']>, full: boolean, now: number, askedAt: number): Promise<void> {
+    const s = this.d.store;
+    try {
       const loggingAt = Date.now();
       // Every position's level at the same step, as a change log (the history's wallet filter).
       // Before the snapshot: a snapshot at `t` says the step is there, and its log is by then whole.
@@ -2446,8 +2465,7 @@ export class CohortTracker {
     } catch (e) {
       this.lastError = `liquidations: ${String(e)}`;
     } finally {
-      this.liqRecording = false;
-      this.liqMs = Date.now() - started;
+      this.liqStepMs = Date.now() - askedAt;
     }
   }
 
