@@ -50,7 +50,7 @@ export function LatencyCard({ marks = [], ctx, bot, practice, compact }: { marks
   const [hours, setHours] = useState<'6' | '24' | '48'>('24');
   const [region, setRegion] = useState<string>('all');
   const token = ctx.address && ctx.live.hosted.signedIn ? hostedExecutor.token(ctx.address) : null;
-  const real = useBotLatency(48, ctx.demo ? null : token, bot);
+  const real = useBotLatency(48, ctx.demo ? null : token, bot, hostedExecutor.base);
   const demoLat = useMemo(() => (ctx.demo ? demoLatency(Date.now(), bot ? bot.length : 3) : null), [ctx.demo, bot]);
   const lat = demoLat ? { data: demoLat, error: null, loading: false, refresh: () => {} } : real;
   const regions = lat.data?.regions ?? [];

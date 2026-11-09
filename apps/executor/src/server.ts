@@ -39,6 +39,11 @@ import { clampHours } from './latency.ts';
 import { ApiError, type ExecutorService, type RequestContext } from './service.ts';
 
 const BODY_LIMIT = 64 * 1024;
+/**
+ * The VIP import (a wallet's bots with their books, orders and series, and its key): far over a request's 64 KB - 7 small
+ * bots were refused "too large" on the first live move (2026-11-09). Read only after the VIP token is checked.
+ */
+export const VIP_IMPORT_LIMIT = 32 * 1024 * 1024;
 const PREFIX = '/api/copy/v1';
 
 /** The list as GET /algos?series=0 answers it: the same, each bot's book without its series. */
@@ -154,12 +159,12 @@ function safeEqual(a: string, b: string): boolean {
   return x.length === y.length && timingSafeEqual(x, y);
 }
 
-async function readJson(req: IncomingMessage): Promise<unknown> {
+async function readJson(req: IncomingMessage, limit = BODY_LIMIT): Promise<unknown> {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const c of req) {
     size += (c as Buffer).length;
-    if (size > BODY_LIMIT) throw new ApiError(413, 'too-large', 'The request is too large.');
+    if (size > limit) throw new ApiError(413, 'too-large', 'The request is too large.');
     chunks.push(c as Buffer);
   }
   if (!size) return {};
@@ -332,7 +337,7 @@ export function createExecutorServer(svc: ExecutorService, cfg: ExecutorConfig, 
       if (req.method === 'POST' && route === '/internal/vip/import') {
         const token = String(req.headers['x-internal-token'] ?? '');
         if (!cfg.vipToken || !safeEqual(cfg.vipToken, token)) throw new ApiError(404, 'path', 'not found');
-        return send(res, 200, await svc.vipImport(await readJson(req)));
+        return send(res, 200, await svc.vipImport(await readJson(req, VIP_IMPORT_LIMIT)));
       }
       // The standard side asks how a move it could not confirm ended (a send that timed out): never resumed on a guess.
       if (req.method === 'POST' && route === '/internal/vip/import/status') {

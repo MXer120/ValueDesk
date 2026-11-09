@@ -66,7 +66,7 @@ import { TILE_FINAL_CACHE, TILE_INDEX_CACHE, TILE_WALLET_CACHE, keepLiqMetasWarm
 import { watchAddresses } from '../indexer/host.js';
 import { MAX_WINDOW_MS, activityCoverage, flowWalletFills, flowWindow, type FlowAsk, type MarketKind } from '../flow/read.js';
 import type { FlowRole, FlowSide, FlowSort } from '../flow/codec.js';
-import { botMarkets, keepBotMarketsWarm } from '../flow/botMarkets.js';
+import { botMarkets, botRegime, keepBotMarketsWarm } from '../flow/botMarkets.js';
 import { BOARD_WINDOWS, type BoardWindow } from '../valuedesk/types.js';
 import { buildExplore, keepExploreWarm } from '../valuedesk/explore.js';
 import { buildScreener, keepScreenerWarm } from '../valuedesk/screener.js';
@@ -799,13 +799,32 @@ export async function valuedeskRoutes(app: FastifyInstance) {
 
   /**
    * What a new small market-making bot pays per $1M all-in on every SoDEX perp, from public prints (flow/botMarkets.ts,
-   * docs/BOTS-UI.md): fees minus the 30 s markout of the market's small makers. `window=24h|7d`. Kept 5 min.
+   * docs/BOTS-UI.md): fees minus the 30 s markout of the market's small makers. `window=1h|6h|24h|7d`. Kept 5 min.
    */
   app.get('/api/vs/bots/markets', async (req, reply) => {
     try {
       const q = req.query as Q;
-      const window = q.window === '7d' ? '7d' : '24h';
+      const window = q.window === '7d' || q.window === '6h' || q.window === '1h' ? q.window : '24h';
       const body = await botMarkets(window);
+      if (!body) return fail(reply, new NotAvailable('The trade flow is not recorded yet'));
+      reply.header('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
+      return { ok: true, ...body };
+    } catch (e) {
+      return fail(reply, e);
+    }
+  });
+
+  /**
+   * The regime board (Explore): the last `window=1h|6h|24h|7d` bucket by bucket for one SoDEX market or all of them (`symbol=ALL`): market
+   * volume, what 1002 and 23342 took, volatility (flow/botMarkets.ts botRegime). Same 5 min answer as /bots/markets.
+   */
+  app.get('/api/vs/bots/regime', async (req, reply) => {
+    try {
+      const q = req.query as Q;
+      const symbol = (q.symbol ?? 'ALL').trim();
+      if (!/^[A-Za-z0-9]{1,20}(-[A-Za-z]{1,8})?$/.test(symbol)) throw bad('symbol= must be ALL or a SoDEX market');
+      const win = q.window === '1h' || q.window === '6h' || q.window === '24h' ? q.window : '7d';
+      const body = await botRegime(symbol, win);
       if (!body) return fail(reply, new NotAvailable('The trade flow is not recorded yet'));
       reply.header('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
       return { ok: true, ...body };

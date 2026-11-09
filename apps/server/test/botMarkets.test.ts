@@ -143,3 +143,32 @@ test('a recorder outage (a span the coverage ledger marks short) is left out of 
   // The small makers' fills of the outage are not counted either.
   assert.ok(fixed!.w24.smallMakers.fills < naive!.w24.smallMakers.fills);
 });
+
+test('1h and 6h windows, minute series and the regime buckets', async () => {
+  const { cols } = market();
+  const now = T0 + N * 1000 + 200_000; // 23 min of prints, ending 200 s before now
+  const a = await analyzeMarket(cols, { now, makerBps: MAKER_BPS, builderBps: BOT_BUILDER_BPS, id1002: P1002, id23342: P23342 }, () => undefined);
+  assert.ok(a);
+  // Every window holds the same prints; the held hours are the market's span since its first print, never the window's.
+  for (const w of [a.w1, a.w6, a.w24, a.w7]) close(w.heldH, (now - T0) / 3_600_000, 0.01);
+  close(a.w1.volumeUsdH, a.w24.volumeUsdH, 0.5);
+  // Minutes: all taker volume, of it 1002's (it takes the dominant maker's quotes and half the small makers').
+  const ms = a.series;
+  const tot = ms.tot.reduce((x, y) => x + y, 0), u = ms.u.reduce((x, y) => x + y, 0);
+  const all = Array.from({ length: cols.n }, (_, i) => cols.px[i]! * cols.sz[i]!).reduce((x, y) => x + y, 0);
+  close(tot, all, all * 1e-5);
+  assert.ok(u / tot > 0.9, `1002 share ${u / tot}`);
+  // The jump of 30 bp shows as volatility in its minute.
+  const jm = Math.floor((T0 + J * 1000) / 60_000) - ms.m0;
+  assert.ok(ms.vol[jm]! > 25 || ms.vol[jm + 1]! > 25, 'the jump minute moves');
+  const { bucketsOf } = await import('../src/flow/botMarkets.js');
+  const b1 = bucketsOf(ms, now, '1h');
+  assert.equal(b1.length, 12);
+  assert.equal(b1[1]!.t - b1[0]!.t, 5 * 60_000);
+  // Buckets before the first print are not held; the ones with prints are.
+  assert.equal(b1[0]!.volumeUsd, null);
+  assert.ok(b1.filter((b) => b.volumeUsd !== null).length >= 4);
+  assert.equal(bucketsOf(ms, now, '6h').length, 72);
+  assert.equal(bucketsOf(ms, now, '24h').length, 96);
+  assert.equal(bucketsOf(ms, now, '7d').length, 168);
+});

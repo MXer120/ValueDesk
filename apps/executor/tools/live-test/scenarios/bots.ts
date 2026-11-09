@@ -34,6 +34,13 @@ const tuning = (name: string): Record<string, unknown> => {
   }
 };
 const MM_TUNING = tuning('LIVE_BOT_MM');
+/**
+ * What a new bot quotes with in the product (web bots/presets.ts: strategy 'market' = R10, the best of the live tests,
+ * and the setting Explore estimates every market with; maxSpreadBps 20 on by default). bot.makers runs this unless
+ * LIVE_BOT_MM says otherwise (owner 2026-11-09: "default settings should be the best of live/tests" - an evening run on
+ * a hand-made chase-every-second setting tested nothing the product or Explore offers).
+ */
+const PRODUCT_MM = { ref: 'binance', restMs: 10_000, offsetTicks: 0, skewTicks: 0, chaseTicks: 40, minRepriceMs: 1_000, maxSpreadBps: 20 } as const;
 const GRID_TUNING = tuning('LIVE_BOT_GRID');
 
 const ended = (v: AlgoView) => ['done', 'cancelled', 'expired', 'failed'].includes(v.algo.status);
@@ -154,12 +161,30 @@ export const BOT_SCENARIOS: Scenario[] = [
       const started: AlgoView[] = [];
       try {
         for (const symbol of BOT_SYMBOLS) {
-          started.push(await t.start({ kind: 'mm', symbol, orderUsd: t.U, maxInventoryUsd: 3 * t.U, skewTicks: 3, chaseTicks: 1, minRepriceMs: 1_000, maxLossUsd: 2, volumeTargetUsd: 10_000 * t.U, onStop: 'close', ...MM_TUNING }));
+          started.push(await t.start({ kind: 'mm', symbol, orderUsd: t.U, maxInventoryUsd: 2 * t.U, ...PRODUCT_MM, maxLossUsd: 2, volumeTargetUsd: 10_000 * t.U, onStop: 'close', ...MM_TUNING }));
         }
       } catch (e) {
         // One refused start (margin, a market conflict) must not leave the others running past the scenario.
         for (const v0 of started) await t.exec.algoAct('cancel', v0.algo.id).catch(() => undefined);
         throw e;
+      }
+      // LIVE_BOT_VIP=1 (owner 2026-11-09, the bots live as VIP): the wallet's one signed move hands them all to the VIP
+      // executor; they run, stop and are reported there (at the VIP bot fee).
+      if (process.env.LIVE_BOT_VIP === '1') {
+        const target = t.exec as unknown as { moveToVip?: () => Promise<{ job: Record<string, unknown>; ms: number }>; me(): Promise<{ bots?: { feeTenths: number; vip: boolean } }> };
+        if (!target.moveToVip) throw new Error('LIVE_BOT_VIP=1 needs --target hosted');
+        await new Promise((r) => setTimeout(r, 45_000)); // quoting first: the move takes resting orders across
+        const before = await Promise.all(started.map((x) => t.view(x.algo.id)));
+        const { job, ms } = await target.moveToVip();
+        t.check(job.state === 'done', `moved to VIP with one signature in ${ms} ms (job ${String(job.id ?? '')})`);
+        const after = await Promise.all(started.map((x) => t.view(x.algo.id)));
+        for (let i = 0; i < after.length; i++) {
+          const a0 = before[i]!, a1 = after[i]!;
+          t.check(a1.algo.status === 'running' || ended(a1), `${a1.algo.spec.symbol}: runs on VIP (${a1.algo.status})`);
+          t.check(Math.abs((a1.bot?.inventory ?? 0) - (a0.bot?.inventory ?? 0)) < 1e-9 || (a1.bot?.volume ?? 0) > (a0.bot?.volume ?? 0), `${a1.algo.spec.symbol}: its book came along (holding ${a0.bot?.inventory ?? 0} -> ${a1.bot?.inventory ?? 0})`);
+        }
+        const fee = (await target.me()).bots;
+        t.check(fee?.vip === true && fee.feeTenths === 1, `the wallet pays the VIP bot fee on VIP (${JSON.stringify(fee)})`);
       }
       // All run the same minutes; then each stops (closing what it holds) and is reported on its own market.
       for (const end = Date.now() + RUN_MS; Date.now() < end; ) {

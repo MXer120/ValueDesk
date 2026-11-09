@@ -270,6 +270,8 @@ export class SelfTarget extends ExecutorClient implements ExecutorTarget {
 
 /** ValueDesk's executor, as the site reaches it: Vercel's function adds the origin secret and the viewer's country. */
 export const HOSTED_BASE = 'https://www.valuedesk.so/api/copy/v1';
+/** ValueDesk's VIP executor (AWS Tokyo), behind the same site: server 1's Caddy sends /api/copy-vip/* there. */
+export const HOSTED_VIP_BASE = 'https://www.valuedesk.so/api/copy-vip/v1';
 
 /**
  * Spaces requests so that no minute holds more than `perMinute` of them: one
@@ -345,9 +347,30 @@ export class HostedTarget extends ExecutorClient implements ExecutorTarget {
   constructor(
     wallet: CopyWallet,
     mode: Mode,
-    readonly base: string = HOSTED_BASE,
+    public base: string = HOSTED_BASE,
   ) {
     super({ base }, wallet, '', mode, hostedOptions());
+  }
+
+  /**
+   * The wallet's bots move to the VIP executor with its one signed 'vip-move' (the Savings page's move, owner
+   * 2026-11-09: "runner has no production VIP move - add this then"); the job is followed until it ends. Done: this
+   * target talks to the VIP executor from now on (its views, cancels and the cleanup go there). Returns the job and
+   * the standard side's movedTo after it.
+   */
+  async moveToVip(vipBase = HOSTED_VIP_BASE): Promise<{ job: Record<string, unknown>; ms: number }> {
+    const t0 = Date.now();
+    let job = ((await this.post<{ job: Record<string, unknown> | null }>('/vip/move', 'vip-move', {})).job ?? {}) as Record<string, unknown>;
+    while ((!job.state || job.state === 'running') && Date.now() - t0 < 120_000) {
+      await new Promise((r) => setTimeout(r, 1_000));
+      job = ((await this.call<{ job: Record<string, unknown> | null }>('GET', '/vip/move', undefined, true)).job ?? {}) as Record<string, unknown>;
+    }
+    if (job.state !== 'done') throw new Error(`the VIP move ended ${String(job.state ?? 'unanswered')}: ${String(job.error ?? '')}`);
+    this.base = vipBase;
+    this.rebase(vipBase);
+    const i = await this.info();
+    if ((i as { vip?: { tier?: string } }).vip?.tier !== 'vip') throw new Error(`${vipBase} does not answer as the VIP executor`);
+    return { job, ms: Date.now() - t0 };
   }
 
   get where(): string {

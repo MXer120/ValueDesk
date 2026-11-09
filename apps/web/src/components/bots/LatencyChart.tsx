@@ -95,9 +95,16 @@ export function LatencyChart({ buckets, bucketMs, regionLabel, marks = [], hours
     return () => ro.disconnect();
   }, []);
 
-  const end = buckets.length ? buckets[buckets.length - 1]!.t + bucketMs : Date.now();
+  // The window always ends now (owner 2026-11-09: it stopped at the last bucket with orders, so "no orders" since then
+  // never showed), and every bucket of it is drawn: one the answer leaves out is a bucket without orders.
+  const end = Math.max(Math.floor(Date.now() / bucketMs) * bucketMs + bucketMs, buckets.length ? buckets[buckets.length - 1]!.t + bucketMs : 0);
   const start = end - hours * 3_600_000;
-  const shown = useMemo(() => buckets.filter((b) => b.t >= start), [buckets, start]);
+  const shown = useMemo(() => {
+    const by = new Map(buckets.map((b) => [b.t, b]));
+    const out: LatencyBucket[] = [];
+    for (let t = start; t < end; t += bucketMs) out.push(by.get(t) ?? { t, n: 0, p50: null, p95: null, p99: null });
+    return out;
+  }, [buckets, start, end, bucketMs]);
   // The scale follows p95 (the line that matters); a rare p99 spike is drawn at the top rather than flattening the rest.
   const p95max = Math.max(...shown.map((b) => b.p95 ?? b.p50 ?? 0));
   const { top, step } = niceScale(Math.max(50, p95max * 1.45));

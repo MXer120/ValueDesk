@@ -20,15 +20,27 @@ const DAY = 86_400_000;
 
 /** Make the executor's key, register it on SoDEX with the follower's wallet, and wait until the executor reads it as registered. */
 export async function registerExecutorKey(t: T): Promise<void> {
-  const k = await t.exec.createKey(1);
+  // The hosted executor is production: its key is the wallet's real one (the owner renews it in the app). A run never
+  // swaps it for a one-day key (2026-11-09: a --target hosted run cut the owner's renewed key to a day); a key that still
+  // has 3 days is kept, else the new one lives 30 days.
+  if (t.env.target.name === 'hosted') {
+    const now = await t.exec.verifyKey();
+    if (now?.registered && now.expiresAt && now.expiresAt - Date.now() > 3 * DAY) {
+      t.check(true, `the hosted executor's key ${now.address} stays (expires ${new Date(now.expiresAt).toISOString()}): a run does not shorten it`);
+      return;
+    }
+  }
+  const hosted = t.env.target.name === 'hosted';
+  const k = await t.exec.createKey(hosted ? 30 : 1);
+  const days = hosted ? k.days : 1;
   t.check(/^0x[0-9a-f]{40}$/.test(k.address), `the executor made a key ${k.address} (${k.name})`);
   await t.live('the key is registered on SoDEX and the executor reads it as registered', async () => {
-    const { expiresAt } = await t.env.follower!.registerKey(k.name, k.address, 1);
+    const { expiresAt } = await t.env.follower!.registerKey(k.name, k.address, days);
     const key = await t.waitFor('the executor sees the key on SoDEX', async () => {
       const x = await t.exec.verifyKey();
       return x?.registered && x.address.toLowerCase() === k.address.toLowerCase() ? x : null;
     }, { timeoutMs: 60_000, everyMs: 3_000 });
-    t.check(key.expiresAt !== null && Math.abs(key.expiresAt - expiresAt) < 120_000 && key.expiresAt <= Date.now() + DAY + 60_000, 'it expires within a day, as registered', { expiresAt: key.expiresAt });
+    t.check(key.expiresAt !== null && Math.abs(key.expiresAt - expiresAt) < 120_000 && key.expiresAt <= Date.now() + days * DAY + 60_000, `it expires within ${days} day(s), as registered`, { expiresAt: key.expiresAt });
     const listed = await t.env.reads.apiKeys(t.env.followerAddress);
     t.check(listed.some((r) => r.name === k.name && r.publicKey.toLowerCase() === k.address.toLowerCase()), `SoDEX lists ${k.name} on the follower's perps account`);
   });

@@ -236,8 +236,21 @@ function botsFixtures(): Plugin {
           res.setHeader('Cache-Control', 'no-store');
           return res.end(readFileSync(join(dir, 'latency.json')));
         }
+        // The regime board (Explore): <dir>/regime.json holds one answer per 'SYMBOL|window' and 'ALL|window' (make-recorded.ts:
+        // the server's own code over server 2's recorded prints).
+        if (req.url?.startsWith('/api/vs/bots/regime') && existsSync(join(dir, 'regime.json'))) {
+          const q = new URL(req.url, 'http://x').searchParams;
+          const sym = (q.get('symbol') ?? 'ALL').toUpperCase();
+          const win = q.get('window') ?? '7d';
+          const all = JSON.parse(readFileSync(join(dir, 'regime.json'), 'utf8')) as Record<string, unknown>;
+          const hit = all[`${sym}|${win}`] ?? all[sym] ?? { ok: true, at: Date.now(), symbol: sym, window: win, markets: (all[`ALL|${win}`] as { markets?: string[] } | undefined)?.markets ?? [], hours: [] };
+          res.setHeader('Content-Type', 'application/json');
+          res.setHeader('Cache-Control', 'no-store');
+          return res.end(JSON.stringify(hit));
+        }
         if (!req.url?.startsWith('/api/vs/bots/markets')) return next();
-        const w = new URL(req.url, 'http://x').searchParams.get('window') === '7d' ? '7d' : '24h';
+        const asked = new URL(req.url, 'http://x').searchParams.get('window');
+        const w = asked === '7d' || asked === '6h' || asked === '1h' ? asked : '24h';
         const f = join(dir, `bm-${w}.json`);
         if (!existsSync(f)) return next();
         res.setHeader('Content-Type', 'application/json');
