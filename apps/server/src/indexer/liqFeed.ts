@@ -41,6 +41,7 @@ export class LiqFeedServer {
 
   start(): void {
     if (this.server) return;
+    this.lastError = null;
     const srv = net.createServer((sock) => {
       sock.setNoDelay(true);
       this.clients.add(sock);
@@ -51,8 +52,9 @@ export class LiqFeedServer {
     });
     srv.on('error', (e) => {
       // Another indexer holds the port (two dev servers on one machine): no live feed from this one.
+      // Or the heatmap thread was just started again and the old one's socket is not closed yet (liqLiveCore.ts retries).
       this.lastError = String(e);
-      this.server = null;
+      if (this.server === srv) this.server = null;
     });
     srv.listen(this.port, HOST);
     this.server = srv;
@@ -67,6 +69,11 @@ export class LiqFeedServer {
 
   get readers(): number {
     return this.clients.size;
+  }
+
+  /** Listening (or about to): false after the port was refused, until `start` is called again. */
+  get listening(): boolean {
+    return this.server !== null;
   }
 
   send(deltas: readonly LiveDelta[], tick: { at: number; ready: boolean }): void {
