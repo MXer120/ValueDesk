@@ -10,7 +10,8 @@ import { signMessage, signTypedData, walletPrompting, type Eip1193Provider } fro
 const ADDR = '0x' + '11'.repeat(20);
 function provider(answer: () => Promise<unknown>): { p: Eip1193Provider; seen: boolean[] } {
   const seen: boolean[] = [];
-  const p = { request: async () => { seen.push(walletPrompting()); return answer(); } } as unknown as Eip1193Provider;
+  // The account check before a prompt (eth_accounts, wallet.ts walletAccounts) is no prompt: only the signature calls count.
+  const p = { request: async ({ method }: { method: string }) => { if (method === 'eth_accounts') return []; seen.push(walletPrompting()); return answer(); } } as unknown as Eip1193Provider;
   return { p, seen };
 }
 
