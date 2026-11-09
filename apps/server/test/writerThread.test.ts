@@ -303,6 +303,39 @@ test('writer thread: the change log step gives the same rows and ids as on this 
   }
 });
 
+test('writer thread: a liq step goes ahead of a stream backlog, and every stream row still lands once, in order, across a death', async () => {
+  const d = dir();
+  const path = join(d, 'x.db');
+  const ref = new IndexStore(join(d, 'ref.db'), { aggRefreshMs: 0 });
+  const s = new IndexStore(path, { aggRefreshMs: 0 });
+  try {
+    s.startWriter({ force: true, targetMs: 2, maxRows: 100, restartAfterMs: 60_000 });
+    const backlog = [fills(20_000, { tag: 'a', wallets: 100 }), fills(20_000, { tag: 'b', wallets: 100 }), fills(20_000, { tag: 'c', wallets: 100, px: 300 })];
+    const t = Date.now();
+    const changed = Array.from({ length: 2_000 }, (_, i) => ({ aid: i % 4 === 0 ? `0xq${i}` : 100_000 + i, coin: 'BTC', venue: 0, side: 1, liq: 50 + i, usd: 500 + i }));
+    const fresh = [...new Set(changed.flatMap((c) => (typeof c.aid === 'string' ? [c.aid] : [])))];
+    let filled = 0;
+    const streams = backlog.map((rows) => s.putFillsAsync(rows).then(() => { filled++; }));
+    // Sent after 60k stream rows: answered while they are still being written (2026-11-09: the step waited 4.7 h).
+    const ids = await s.putLiqLogSliced(t, fresh, changed, [], async () => {});
+    assert.equal(filled, 0, 'the step was written before the stream backlog');
+    assert.equal(ids.size, fresh.length);
+    assert.equal(count(s, 'SELECT COUNT(*) AS n FROM liq_log WHERE t = ?', t), changed.length);
+    // A death mid-backlog: meta.writer_done names stream ops only, so the store settles exactly what is in the file.
+    await s.killWriter();
+    await Promise.all(streams);
+    for (const rows of backlog) ref.putFills(rows);
+    assert.deepEqual(table(s, 'SELECT * FROM fills ORDER BY venue, address, id'), table(ref, 'SELECT * FROM fills ORDER BY venue, address, id'), 'every stream row once');
+    // Another step after the death: still ids and rows.
+    const again = await s.putLiqLogSliced(t + 1, ['0xlate'], [{ aid: '0xlate', coin: 'ETH', venue: 0, side: -1, liq: 9, usd: 90 }], [], async () => {});
+    assert.equal(again.size, 1);
+  } finally {
+    ref.close();
+    s.close();
+    rmSync(d, { recursive: true, force: true, maxRetries: 40, retryDelay: 50 });
+  }
+});
+
 test("writer thread: this thread's writes wait for a row and a commit, not a transaction", async () => {
   const d = dir();
   const s = new IndexStore(join(d, 'x.db'), { aggRefreshMs: 0 });

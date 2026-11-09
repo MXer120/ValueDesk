@@ -193,7 +193,14 @@ port.on('message', (m) => {
     return;
   }
   m.done = 0;
-  queue.push(m);
+  // A liq step goes ahead of the stream rows (after any step already there): behind a backlog of millions of rows it waited
+  // hours (2026-11-09, the heatmap's history 4.7 h behind). It may: a step is written again whole where it stands (it
+  // replaces its own rows), meta.writer_done names stream ops only, and their order among themselves stays.
+  if (m.kind === 'liqLog') {
+    let at = 0;
+    while (at < queue.length && queue[at].kind === 'liqLog') at++;
+    queue.splice(at, 0, m);
+  } else queue.push(m);
   kick();
 });
 const cmp = (a, b) => a[0] - b[0] || (a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0) || a[2] - b[2];
@@ -292,8 +299,11 @@ function pump() {
       qi++;
       if (enough()) break;
     }
-    const last = out[out.length - 1];
-    DONE.run(last.seq + ':' + last.to);
+    // The last stream op of the transaction: every one before it (in seq order) is in the file. A step (ahead of them,
+    // out of seq order) names nothing: with only a step in the transaction the row stays as it was.
+    let last = null;
+    for (let k = out.length - 1; k >= 0 && !last; k--) if (out[k].op.kind !== 'liqLog') last = out[k];
+    if (last) DONE.run(last.seq + ':' + last.to);
   } catch (e) {
     try { db.exec('ROLLBACK'); } catch (x) {}
     for (const o of out) if (o.op.kind === 'liqLog' && o.from === 0) { o.op.list = null; o.op.idList = null; }
@@ -429,8 +439,9 @@ export class WriterThread<X = unknown> {
       this.state.maxLockMs = Math.max(this.state.maxLockMs, m.tx.lockMs);
     }
     if (m.bad) { this.state.badRows += m.bad; this.state.lastError = `bad row: ${m.error}`; }
-    const p = this.pending[0];
-    if (!p || p.seq !== m.seq) return;
+    // In order, except a liq step the thread took ahead of the stream rows.
+    const p = this.pending[0]?.seq === m.seq ? this.pending[0] : this.pending.find((x) => x.seq === m.seq);
+    if (!p) return;
     const from = m.from!;
     const to = m.to!;
     if (to > p.done) {
