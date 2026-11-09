@@ -284,6 +284,8 @@ export async function signMessage(
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('')}`;
   await signPreflight?.(provider, 'personal_sign');
+  const other = await otherActiveAccount(provider, address);
+  if (other) throw new WalletError(wrongAccountText(other, address));
   try {
     return await withTimeout(
       provider.request({ method: 'personal_sign', params: [hex, address] }),
@@ -295,14 +297,71 @@ export async function signMessage(
   }
 }
 
+const shortAddr = (a: string): string => `${a.slice(0, 6)}…${a.slice(-4)}`;
+
+/** The wrong-account message: says which account the wallet used and which one to switch to. */
+export function wrongAccountText(used: string, wanted: string): string {
+  return `Your wallet is using ${shortAddr(used)}, not ${shortAddr(wanted)}. Switch your wallet to ${shortAddr(wanted)} and sign again.`;
+}
+
+/**
+ * The account the wallet would sign with, when it says (null: it does not, or it lists `address`).
+ *
+ * Many wallets sign with whatever account is active in the wallet and ignore the address in the
+ * request (WalletConnect wallets, Rabby, OKX, Phantom...). Someone who switched accounts in the
+ * wallet after connecting then signs as the other account, and the server answers "the signature is
+ * not from this wallet" (owner, 2026-11-09), with no hint of what to do.
+ */
+async function walletAccounts(provider: Eip1193Provider): Promise<string[]> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const accounts = (await Promise.race([
+      provider.request({ method: 'eth_accounts' }),
+      new Promise<null>((r) => { timer = setTimeout(() => r(null), 5_000); }),
+    ])) as unknown;
+    return Array.isArray(accounts) ? accounts.filter((a): a is string => typeof a === 'string').map((a) => a.toLowerCase()) : [];
+  } catch {
+    // A wallet that cannot answer must not block a signature that would have worked.
+    return [];
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function otherActiveAccount(provider: Eip1193Provider, address: string, accounts?: string[]): Promise<string | null> {
+  const list = accounts ?? (await walletAccounts(provider));
+  if (!list.length || list.includes(address.toLowerCase())) return null;
+  return list[0]!;
+}
+
+/**
+ * Who signed `typedData` (null: not readable here - a smart-contract wallet's longer signature, or an
+ * odd typed-data shape; the server then decides as before). The secp256k1 code loads only when asked.
+ */
+export async function recoverTypedSigner(typedData: unknown, signature: string): Promise<string | null> {
+  try {
+    if (!/^0x[0-9a-fA-F]{130}$/.test(signature)) return null;
+    const { hashTypedData, recoverAddress } = await import('../../../packages/sodex-core/src/eip712.ts');
+    const bytes = new Uint8Array(65);
+    for (let i = 0; i < 65; i++) bytes[i] = Number.parseInt(signature.slice(2 + i * 2, 4 + i * 2), 16);
+    return recoverAddress(hashTypedData(typedData as Parameters<typeof hashTypedData>[0]), bytes);
+  } catch {
+    return null;
+  }
+}
+
 export async function signTypedData(
   provider: Eip1193Provider,
   address: string,
   typedData: unknown,
 ): Promise<string> {
   await signPreflight?.(provider, 'eth_signTypedData_v4');
+  const accounts = await walletAccounts(provider);
+  const other = await otherActiveAccount(provider, address, accounts);
+  if (other) throw new WalletError(wrongAccountText(other, address));
+  let signature: string;
   try {
-    return await withTimeout(
+    signature = await withTimeout(
       provider.request({
         method: 'eth_signTypedData_v4',
         // Some wallets require the JSON string form rather than an object.
@@ -314,6 +373,16 @@ export async function signTypedData(
     if (e instanceof WalletError) throw e;
     wrap(e);
   }
+  // The wallet may still have signed as another account (it switched while the prompt was open, or
+  // reports one account and signs with another): caught here, in words, before the server refuses it.
+  // Only when the signer is an account the wallet itself holds (asked again: it may have switched), so a
+  // typed-data shape this digest reads differently from the wallet can never raise a false alarm.
+  const signer = (await recoverTypedSigner(typedData, signature))?.toLowerCase();
+  if (signer && signer !== address.toLowerCase()) {
+    const now = await walletAccounts(provider);
+    if (now.includes(signer) || accounts.includes(signer)) throw new WalletError(wrongAccountText(signer, address));
+  }
+  return signature;
 }
 
 export interface AddChainParams {
