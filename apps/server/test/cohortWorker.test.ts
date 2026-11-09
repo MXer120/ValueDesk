@@ -279,7 +279,9 @@ function tracker(w: World, threaded: boolean, store: Record<string, unknown>): T
 test('the tracker\'s history step: threaded writes what inline writes', async () => {
   const written = (into: { series?: unknown; mix?: unknown }) => ({
     putCohortSeries: (rows: unknown) => { into.series = rows; },
+    putCohortSeriesSliced: async (rows: unknown) => { into.series = rows; },
     putCohortMix: (rows: unknown) => { into.mix = rows; },
+    putCohortMixSliced: async (rows: unknown) => { into.mix = rows; },
     getMeta: () => null,
   });
   const a: { series?: unknown; mix?: unknown } = {};
@@ -324,7 +326,7 @@ test('status() costs nothing with 300k books, 100k archive holders and a 300k re
 test('a pass the heatmap thread cannot run (it is down) runs on this thread: the history is still written', async () => {
   const a: { series?: unknown } = {};
   const b: { series?: unknown } = {};
-  const store = (into: { series?: unknown }) => ({ putCohortSeries: (rows: unknown) => { into.series = rows; }, putCohortMix: () => {}, getMeta: () => null });
+  const store = (into: { series?: unknown }) => ({ putCohortSeries: (rows: unknown) => { into.series = rows; }, putCohortSeriesSliced: async (rows: unknown) => { into.series = rows; }, putCohortMix: () => {}, putCohortMixSliced: async () => {}, getMeta: () => null });
   const inline = tracker(W, false, store(a));
   const threaded = tracker(W, true, store(b));
   threaded.live.start();

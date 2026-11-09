@@ -10,7 +10,10 @@
 // stops and a slow first build), and the write backlog reached 883,699 rows before anything said so. A release that
 // publishes once is not proof. Rolled back when, in the readings so far:
 //   stale     the newest reading's status is over STALE_MS old (it publishes every 30 s: its thread or its worker is stuck);
-//   lag       the thread's worst pause in the minute was LAG_MS or more in each of the last LAG_MINUTES readings;
+//   lag       the thread's worst pause in the minute was LAG_MS or more in each of the last LAG_MINUTES readings, counted
+//             only from LAG_GRACE_MS after the first reading: every start (the old release's too) catches up first - books
+//             loaded, missed cohort hours written, the last stop's spill replayed - with pauses of 10-60 s (v0.2.200 and
+//             v0.2.202 on 2026-11-09 were rolled back for exactly that, v0.2.198 shows the same at its starts);
 //   backlog   the write backlog rose in each of the last BACKLOG_RISES minutes and stands at BACKLOG_MIN steps or more
 //             (a handful of steps going up is noise: a whole flush is a few steps).
 // A field the status does not have (null) is judged as nothing.
@@ -21,6 +24,7 @@ import { fileURLToPath } from 'node:url';
 export const STALE_MS = 180_000;
 export const LAG_MS = 15_000;
 export const LAG_MINUTES = 3;
+export const LAG_GRACE_MS = 10 * 60_000;
 export const BACKLOG_RISES = 3;
 export const BACKLOG_MIN = Number(process.env.SHIP_INDEXER_BACKLOG_MIN) > 0 ? Number(process.env.SHIP_INDEXER_BACKLOG_MIN) : 100;
 
@@ -31,6 +35,7 @@ export function judgeIndexerGate(readings, o = {}) {
   const staleMs = o.staleMs ?? STALE_MS;
   const lagMs = o.lagMs ?? LAG_MS;
   const lagMinutes = o.lagMinutes ?? LAG_MINUTES;
+  const graceMs = o.lagGraceMs ?? LAG_GRACE_MS;
   const rises = o.backlogRises ?? BACKLOG_RISES;
   const backlogMin = o.backlogMin ?? BACKLOG_MIN;
   // A line that is no reading (no server clock) is left out.
@@ -40,7 +45,7 @@ export function judgeIndexerGate(readings, o = {}) {
   if (last.at === null || last.now - last.at > staleMs) {
     return { rollback: true, why: last.at === null ? 'published no status' : `published no status for ${Math.round((last.now - last.at) / 1000)} s` };
   }
-  const lags = rs.slice(-lagMinutes);
+  const lags = rs.filter((r) => r.now - rs[0].now >= graceMs).slice(-lagMinutes);
   if (lags.length === lagMinutes && lags.every((r) => r.lag !== null && r.lag >= lagMs)) {
     return { rollback: true, why: `held its thread ${Math.round(lagMs / 1000)} s or more in each of the last ${lagMinutes} minutes (worst ${Math.max(...lags.map((r) => r.lag))} ms)` };
   }

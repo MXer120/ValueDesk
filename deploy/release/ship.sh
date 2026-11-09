@@ -483,7 +483,7 @@ gate_rollback() {   # units (comma list) on server 1
 # more, SHIP_INDEXER_BACKLOG_MIN), its thread paused 15 s or more in 3 minutes in a row, or its status is over 180 s
 # old (deploy/release/indexer-gate.mjs). Only shortened, never skipped: SHIP_INDEXER_WATCH_MIN >= 3 (the 3-minute
 # rules). An indexer that never published again is not watched: ship.sh already says so and warns.
-INDEXER_WATCH_MIN="${SHIP_INDEXER_WATCH_MIN:-10}"
+INDEXER_WATCH_MIN="${SHIP_INDEXER_WATCH_MIN:-20}"   # 20: the pause rule counts from minute 10 on (indexer-gate.mjs LAG_GRACE_MS)
 [ "$INDEXER_WATCH_MIN" -ge 3 ] 2>/dev/null || INDEXER_WATCH_MIN=3
 INDEXER_GATE_FILE=""
 indexer_reading() {   # one line of JSON: the server's clock and what the indexer last published

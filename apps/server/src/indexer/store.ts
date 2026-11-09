@@ -78,6 +78,9 @@ import { mayPrune } from '../retention.js';
 export const SCHEMA_VERSION = 1;
 /** Meta keys: the newest t of cohort_series and cohort_mix (lastT). */
 const SERIES_LAST_T_META = 'cohort_series_last_t';
+/** Rows per transaction of a sliced cohort write (putCohortSeriesSliced / putCohortMixSliced). */
+const COHORT_SLICE_ROWS = 500;
+const COHORT_MIX_SLICE_ROWS = 50;
 const MIX_LAST_T_META = 'cohort_mix_last_t';
 /**
  * The writer connection's page cache at most, in KiB (PRAGMA cache_size). Its own memory: nothing else on the machine can
@@ -3817,6 +3820,26 @@ export class IndexStore {
       for (const r of rows) ins.run(r.scope, r.cohort, r.t, r.data, r.rebuilt ? 1 : 0);
       this.keepLastT(MIX_LAST_T_META, rows);
     });
+  }
+
+  /**
+   * putCohortSeries / putCohortMix a few rows per transaction with `pause` between (2026-11-09 12:16, v0.2.202's first
+   * start: a cohort record writing its missed hours held the indexer's thread 43 s in one transaction, 37% of it
+   * garbage collection, and the indexer gate rolled the release back). Each slice keeps the last-t meta as before.
+   */
+  async putCohortSeriesSliced(rows: ReadonlyArray<{ scope: string; cohort: string; t: number; long: number; short: number; rebuilt?: boolean }>, pause: () => Promise<void>): Promise<void> {
+    for (let i = 0; i < rows.length; i += COHORT_SLICE_ROWS) {
+      if (i) await pause();
+      this.putCohortSeries(rows.slice(i, i + COHORT_SLICE_ROWS));
+    }
+  }
+
+  async putCohortMixSliced(rows: ReadonlyArray<{ scope: string; cohort: string; t: number; data: string; rebuilt?: boolean }>, pause: () => Promise<void>): Promise<void> {
+    // A mix row carries a JSON blob per cohort: fewer of them a slice.
+    for (let i = 0; i < rows.length; i += COHORT_MIX_SLICE_ROWS) {
+      if (i) await pause();
+      this.putCohortMix(rows.slice(i, i + COHORT_MIX_SLICE_ROWS));
+    }
   }
 
   /** The newest t written to a cohort table, kept in meta (inside the write's transaction). */

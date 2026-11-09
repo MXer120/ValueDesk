@@ -26,6 +26,25 @@ test('flows are upserted row by row and ended flows leave the table', async () =
   }
 });
 
+test('sliced cohort writes put every row and the newest time, in several transactions with pauses between', async () => {
+  const { IndexStore } = await import('../src/indexer/store.js');
+  const store = new IndexStore(join(dir, 'sliced.db'));
+  try {
+    const series = Array.from({ length: 1_234 }, (_, i) => ({ scope: 'all', cohort: `c${i % 40}`, t: 900 * (1 + Math.floor(i / 40)), long: i, short: -i }));
+    const mix = Array.from({ length: 123 }, (_, i) => ({ scope: 'all', cohort: `c${i}`, t: 3_600 * (1 + (i % 7)), data: `{"i":${i}}` }));
+    let pauses = 0;
+    const pause = async () => { pauses++; };
+    await store.putCohortSeriesSliced(series, pause);
+    await store.putCohortMixSliced(mix, pause);
+    assert.ok(pauses >= 4, `paused ${pauses} times`);
+    assert.equal(store.cohortSeries('all', 0).length, series.length);
+    assert.equal(store.cohortSeriesLastT(), Math.max(...series.map((r) => r.t)));
+    assert.equal(store.cohortMixLastT(), Math.max(...mix.map((r) => r.t)));
+  } finally {
+    store.close();
+  }
+});
+
 test('the newest cohort series and mix time is kept by the writes, not scanned', async () => {
   const { IndexStore } = await import('../src/indexer/store.js');
   const store = new IndexStore(join(dir, 'lastT.db'));

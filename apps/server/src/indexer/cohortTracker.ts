@@ -380,7 +380,8 @@ const PERP_SINCE_META = 'cohort_pnl_perp_since';
 const PNL_FLOW_META = 'cohort_pnl_flow';
 const PNL_FLOW_SAVE_MS = 5 * 60_000;
 /** Changed flows written per transaction (saveFlows), the loop free between batches. */
-const FLOW_SAVE_BATCH = 2_000;
+// 500, not 2,000 (2026-11-09 12:20, v0.2.202's first start: a stall of 63 s began in this save, beside the writer thread holding the lock).
+const FLOW_SAVE_BATCH = 500;
 /** Members written or dropped per transaction (saveMembers): 5,000 random inserts into the member table held the indexer 10-17 s (profiles 2026-11-08). */
 const MEMBER_SAVE_BATCH = 1_000;
 /** Set once every open position has been written with the extra fields (logLevels; the moves that log a level again: liqLiveCore.ts). */
@@ -1719,8 +1720,8 @@ export class CohortTracker {
     r.check = checkEdges(rebuilt, recorded);
     for (let t = r.span.from; t <= r.span.to; t += HOUR_MS) {
       const h = rebuildHour(t, wallets, price, bridges, true);
-      s.putCohortSeries(h.series);
-      s.putCohortMix(h.mix);
+      await s.putCohortSeriesSliced(h.series, breath);
+      await s.putCohortMixSliced(h.mix, breath);
       await breath();
     }
   }
@@ -2231,12 +2232,12 @@ export class CohortTracker {
       const { series, mix } = await this.pass<RecordOut>({ op: 'record', ask }, () => recordCompute(this.view, ask, () => this.breatheRecord(), RECORD_SLICE_MS));
       const s = this.d.store;
       if (seriesT > this.lastSeriesT) {
-        s.putCohortSeries(series);
+        await s.putCohortSeriesSliced(series, () => this.breatheRecord());
         if (mayPrune('cohort-history')) s.pruneCohortSeries(now - SERIES_KEEP_MS);
         this.lastSeriesT = seriesT;
       }
       if (doMix) {
-        s.putCohortMix(mix);
+        await s.putCohortMixSliced(mix, () => this.breatheRecord());
         if (mayPrune('cohort-history')) s.pruneCohortMix(now - SERIES_KEEP_MS);
         this.lastMixT = mixT;
       }

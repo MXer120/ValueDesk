@@ -40,11 +40,21 @@ test('the write backlog rising three minutes in a row rolls back; a flat minute 
   assert.equal(judgeIndexerGate(minutes([{ backlog: 10 }, { backlog: 20 }, { backlog: 40 }, { backlog: BACKLOG_MIN - 1 }])).rollback, false);
 });
 
-test('the thread held 15 s or more three minutes in a row rolls back', () => {
-  const v = judgeIndexerGate(minutes([{ lag: 300 }, { lag: LAG_MS }, { lag: 22_000 }, { lag: 16_000 }]));
+test('the thread held 15 s or more three minutes in a row rolls back (past the start-up grace)', () => {
+  const v = judgeIndexerGate(minutes([{ lag: 300 }, { lag: LAG_MS }, { lag: 22_000 }, { lag: 16_000 }]), { lagGraceMs: 0 });
   assert.equal(v.rollback, true);
   assert.match(v.why, /each of the last 3 minutes \(worst 22000 ms\)/);
-  assert.equal(judgeIndexerGate(minutes([{ lag: LAG_MS }, { lag: LAG_MS - 1 }, { lag: LAG_MS }])).rollback, false);
+  assert.equal(judgeIndexerGate(minutes([{ lag: LAG_MS }, { lag: LAG_MS - 1 }, { lag: LAG_MS }]), { lagGraceMs: 0 }).rollback, false);
+});
+
+test('pauses in the first 10 minutes are the start catching up (v0.2.202, 2026-11-09: 14-63 s); from minute 10 they count', () => {
+  const startUp = Array.from({ length: 10 }, () => ({ lag: 40_000 }));
+  assert.equal(judgeIndexerGate(minutes(startUp)).rollback, false, 'held every minute while it catches up: not judged');
+  assert.equal(judgeIndexerGate(minutes([...startUp, { lag: 300 }, { lag: 500 }])).rollback, false, 'then ordinary');
+  const v = judgeIndexerGate(minutes([...startUp, { lag: 20_000 }, { lag: 18_000 }, { lag: 16_000 }]));
+  assert.equal(v.rollback, true, 'still held three minutes after the grace');
+  // The other rules know no grace: a stale status or a rising backlog in the first minutes rolls back as before.
+  assert.equal(judgeIndexerGate(minutes([{ backlog: 50 }, { backlog: 300 }, { backlog: 900 }, { backlog: 2_400 }])).rollback, true);
 });
 
 test('a status over 180 s old rolls back at once; none at all too', () => {
