@@ -819,7 +819,9 @@ function freshHealth(status: Record<string, unknown>): IndexerHealth['fresh'] {
     flow: since(stamp(flow.newestT)),
     writes: amount(status.flushOldestMs),
     cohorts: late(seriesT === null ? null : seriesT + STEP_MS),
-    boards: since(stamp(status.lastBuildAt) || stamp(status.boardsAt)),
+    // The same age the probe judges (ops/status.ts indexerState): this process's build, else the last process's (a new
+    // process before its first build shows that one's boards), else the newest board on disk.
+    boards: since(stamp(status.lastBuildAt) || stamp(status.prevBuildAt) || stamp(status.boardsAt)),
   };
 }
 
