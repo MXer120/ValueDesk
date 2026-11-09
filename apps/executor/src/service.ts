@@ -25,6 +25,8 @@ import {
   COPY_FEE_WINDOW_DAYS,
   COPY_TERMS_EXECUTOR,
   COPY_TERMS_VERSION,
+  currentCopyTerms,
+  type CopyTermsServed,
   EXECUTOR_FEATURES,
   SITE_TERMS_EXECUTOR,
   CopyRuntime,
@@ -752,10 +754,17 @@ export class ExecutorService {
     return owner;
   }
 
+  /** The copy terms in force here - version, hash and the text itself - for the web to show and sign exactly. */
+  copyTerms(): CopyTermsServed {
+    return currentCopyTerms();
+  }
+
   acceptTerms(req: unknown, ctx: RequestContext): MeResponse {
     const { owner, payload } = this.accept(req, 'accept-terms', ctx);
     const p = payload as Partial<AcceptTermsPayload>;
-    if (p.termsVersion !== COPY_TERMS_VERSION) throw new ApiError(400, 'terms-version', `These are the copy terms of ${COPY_TERMS_VERSION}; reload the page and accept them again.`);
+    // The web signs the version and text this executor serves (/info termsVersion, GET /terms/copy) and, on this
+    // refusal, fetches them and asks again in the same flow: never a reload (owner 2026-11-09).
+    if (p.termsVersion !== COPY_TERMS_VERSION) throw new ApiError(400, 'terms-version', `ValueDesk's copy terms are now version ${COPY_TERMS_VERSION}. Read them and sign that version.`);
     if (typeof p.termsHash !== 'string' || !/^0x[0-9a-f]{64}$/.test(p.termsHash)) throw new ApiError(400, 'terms-hash', 'termsHash must be the keccak256 of the terms text.');
     const country = normaliseCountry(p.country);
     if (!country) throw new ApiError(400, 'country', 'Choose your country of residence.');
@@ -1596,7 +1605,7 @@ export class ExecutorService {
   private async subscribeAccepted({ owner, payload, consent }: ReturnType<ExecutorService['accept']>, ctx: RequestContext): Promise<CopyView> {
     if (this.cfg.kind === 'hosted' && !this.cfg.open) throw new ApiError(503, 'closed', 'The ValueDesk executor takes no new copies right now. Running copies continue.');
     this.needTerms(owner, ctx);
-    if (payload.termsVersion !== COPY_TERMS_VERSION) throw new ApiError(400, 'terms-version', 'Reload the page: the copy terms changed.');
+    if (payload.termsVersion !== COPY_TERMS_VERSION) throw new ApiError(400, 'terms-version', `ValueDesk's copy terms are now version ${COPY_TERMS_VERSION}. Accept them in the setup, then start again.`);
     let settings;
     try {
       settings = parseSettings(payload.settings);

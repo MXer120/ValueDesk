@@ -39,6 +39,7 @@ import {
   type LiveCopy,
 } from './live';
 import { MAX_BROWSER_KEY_DAYS } from './sodexSetup';
+import { TermsChangedError } from './terms';
 import { ModeCards } from './ModeCards';
 import '../components/funds/funds.css';
 import './copy.css';
@@ -142,12 +143,40 @@ export function setupSteps(live: LiveCopy, mode: CopyModeId, paper?: boolean, bo
 }
 
 /**
+ * The setup's main action while the steps are not done, for the host's bottom button: the terms signature (owner
+ * 2026-11-09: no "Sign and accept" of its own in the terms step - the bottom button accepts). null: nothing to do
+ * there (the button stays "Finish the steps").
+ */
+export interface SetupPrimary {
+  label: string;
+  disabled: boolean;
+  busy: boolean;
+  run: () => void;
+}
+
+/** A host's bottom button: Done when ready, else the setup's main action, else "Finish the steps" (off). */
+export function SetupPrimaryButton({ ready, primary, doneLabel = 'Done', onDone }: { ready: boolean; primary: SetupPrimary | null; doneLabel?: string; onDone: () => void }) {
+  if (ready || !primary) {
+    return <button type="button" className="fx-cta" disabled={!ready} onClick={onDone}>{ready ? doneLabel : 'Finish the steps'}</button>;
+  }
+  return (
+    <button type="button" className="fx-cta" disabled={primary.disabled || primary.busy} onClick={primary.run}>
+      {primary.busy ? <span className="fx-spin" aria-hidden="true" /> : null}
+      {primary.label}
+    </button>
+  );
+}
+
+/**
  * The steps of one mode, each with its own action: connect, sign in or pair,
  * terms, copy fee, copy key. Used by the setup sheet, by the copy modal's
- * second step and, worded for bots (`bots`), by the Bots page's setup.
+ * second step and, worded for bots (`bots`), by the Bots page's setup. With `onPrimary`, the terms are signed by
+ * the host's bottom button (SetupPrimaryButton), not by a button in the step.
  */
-export function CopySetupSteps({ mode, live, paper, bots, hideDone = false }: { mode: CopyModeId; live: LiveCopy; paper?: boolean; bots?: boolean; hideDone?: boolean }) {
+export function CopySetupSteps({ mode, live, paper, bots, hideDone = false, onPrimary }: { mode: CopyModeId; live: LiveCopy; paper?: boolean; bots?: boolean; hideDone?: boolean; onPrimary?: (p: SetupPrimary | null) => void }) {
   const [error, setError] = useState<string | null>(null);
+  // Not an error: the terms changed while the setup was open, and the new text is shown to sign.
+  const [termsNote, setTermsNote] = useState<string | null>(null);
   const [working, setWorking] = useState<string | null>(null);
   const [termsOpen, setTermsOpen] = useState(false);
   // The country the edge saw (or the executor, which reads the same header) - never picked by the follower (owner, 2026-10-28).
@@ -174,12 +203,14 @@ export function CopySetupSteps({ mode, live, paper, bots, hideDone = false }: { 
 
   const run = async (what: string, fn: () => Promise<void>, ok?: string) => {
     setError(null);
+    setTermsNote(null);
     setWorking(what);
     try {
       await fn();
       if (ok) notify('ok', ok);
     } catch (e) {
-      if (!isRejection(e)) setError(e instanceof Error ? e.message : String(e));
+      if (e instanceof TermsChangedError) setTermsNote(e.message);
+      else if (!isRejection(e)) setError(e instanceof Error ? e.message : String(e));
     } finally {
       setWorking(null);
     }
@@ -199,6 +230,21 @@ export function CopySetupSteps({ mode, live, paper, bots, hideDone = false }: { 
   const what = bots ? 'bots' : 'copies';
   // Bots: the terms step signs in to the executor as well (no step of its own).
   const termsDone = bots ? r.terms && r.connected : r.terms;
+
+  // Signing the terms: the bottom button of the host (onPrimary), or the step's own button without one.
+  const termsForm = !r.terms && termsOpen && (!bots || r.connected);
+  const canAccept = !!country && allTicked && regionPolicy(country, live.viewerCountry).allowed;
+  const acceptNow = () => void run('terms', async () => {
+    await acceptTerms(country);
+    if (bots && !getLiveCopy().hosted.signedIn) await signIn('hosted');
+  }, bots ? 'Terms accepted.' : 'Copy trading terms accepted.');
+  const acceptLabel = 'Sign and accept the terms';
+  useEffect(() => {
+    if (!onPrimary) return;
+    onPrimary(termsForm ? { label: acceptLabel, disabled: !canAccept, busy: working === 'terms', run: acceptNow } : null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onPrimary, termsForm, canAccept, working, country, bots]);
+  useEffect(() => () => onPrimary?.(null), [onPrimary]);
 
   return (
     <HideDone.Provider value={hideDone}>
@@ -312,7 +358,7 @@ export function CopySetupSteps({ mode, live, paper, bots, hideDone = false }: { 
             )
         }
       >
-        {!r.terms && termsOpen && (!bots || r.connected) && (
+        {termsForm && (
           <div className="cs-form">
             <ul className="cs-risks">
               {(bots ? BOT_RISK_SUMMARY : COPY_RISK_SUMMARY).map((t) => (
@@ -340,16 +386,10 @@ export function CopySetupSteps({ mode, live, paper, bots, hideDone = false }: { 
                 </label>
               ))}
             </div>
-            <ActBtn
-              label="Sign and accept"
-              primary
-              disabled={!country || !allTicked || !regionPolicy(country, live.viewerCountry).allowed}
-              busy={working === 'terms'}
-              onClick={() => void run('terms', async () => {
-                await acceptTerms(country);
-                if (bots && !getLiveCopy().hosted.signedIn) await signIn('hosted');
-              }, bots ? 'Terms accepted.' : 'Copy trading terms accepted.')}
-            />
+            {termsNote && <p className="fx-note fx-note--warn" role="status">{termsNote}</p>}
+            {onPrimary
+              ? <p className="fx-note">{allTicked ? 'Accept with the button below: one wallet signature.' : 'Tick each statement, then accept with the button below.'}</p>
+              : <ActBtn label={acceptLabel} primary disabled={!canAccept} busy={working === 'terms'} onClick={acceptNow} />}
           </div>
         )}
         {blocked && <p className="fx-note fx-note--err">{policy.reason}</p>}
@@ -479,6 +519,7 @@ export function SetupProgress({ live, mode, paper, bots }: { live: LiveCopy; mod
 
 export function CopySetupSheet({ open, onClose, mode, onMode, live, onStart, startLabel, paper }: CopySetupSheetProps) {
   const [error, setError] = useState<string | null>(null);
+  const [primary, setPrimary] = useState<SetupPrimary | null>(null);
   const [starting, setStarting] = useState(false);
   useEffect(() => {
     if (open) setError(null);
@@ -492,14 +533,16 @@ export function CopySetupSheet({ open, onClose, mode, onMode, live, onStart, sta
       <ModeCards value={mode} onChange={onMode} />
 
       <SetupProgress live={live} mode={mode} paper={paper} />
-      <CopySetupSteps mode={mode} live={live} paper={paper} />
+      <CopySetupSteps mode={mode} live={live} paper={paper} onPrimary={setPrimary} />
       {error && <p className="fx-note fx-note--err" role="alert">{error}</p>}
 
       <div className="cs-actions">
         <button type="button" className="fx-cta fx-cta--ghost" onClick={onClose}>
           {ready ? 'Close' : 'Cancel'}
         </button>
-        {onStart ? (
+        {!ready && primary ? (
+          <SetupPrimaryButton ready={false} primary={primary} onDone={onClose} />
+        ) : onStart ? (
           <button
             type="button"
             className="fx-cta"
@@ -515,9 +558,7 @@ export function CopySetupSheet({ open, onClose, mode, onMode, live, onStart, sta
             {starting ? 'Starting…' : startLabel ?? 'Start copying'}
           </button>
         ) : (
-          <button type="button" className="fx-cta" disabled={!ready} onClick={onClose}>
-            {ready ? 'Done' : 'Finish the steps'}
-          </button>
+          <SetupPrimaryButton ready={ready} primary={primary} onDone={onClose} />
         )}
       </div>
     </Modal>

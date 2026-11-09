@@ -14,6 +14,7 @@ import {
   buildCopyRequest,
   copyRequestTypedData,
   type ActivityEntry,
+  type CopyTermsServed,
   type CopyAction,
   type CopyView,
   type EngineNotice,
@@ -355,6 +356,8 @@ export class ExecutorClient {
   /** VIP: start moving this wallet's bots (standard executor), and follow it. */
   vipMove = (request: SignedCopyRequest) => this.call<{ job: VipMoveView }>('POST', '/vip/move', { body: { request } });
   vipJob = (token: string) => this.call<{ job: VipMoveView | null }>('GET', '/vip/move', { token });
+  /** The copy terms in force on this executor: version, hash and text (executors with 'terms-doc'). */
+  copyTerms = () => this.call<CopyTermsServed>('GET', '/terms/copy');
   revokeDayKeys = (request: SignedCopyRequest) => this.call<{ ok: true; revokedBefore: number }>('POST', '/daykeys/revoke', { body: { request } });
   health = () => this.call<{ ok: boolean }>('GET', '/health');
 }

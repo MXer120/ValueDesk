@@ -293,6 +293,7 @@ export function createExecutorServer(svc: ExecutorService, cfg: ExecutorConfig, 
       const route = path.slice(PREFIX.length);
 
       if (req.method === 'GET' && route === '/info') return send(res, 200, svc.info(ctx));
+      if (req.method === 'GET' && route === '/terms/copy') return send(res, 200, svc.copyTerms());
       if (req.method === 'GET' && route === '/health') return send(res, 200, svc.health());
       // Public like /info: no token, no signature; a read (240/min per client), no-store (the chart reads every few seconds).
       if (req.method === 'GET' && route === '/bots/latency') return send(res, 200, svc.botLatency(svc.authenticate(bearer(req)), clampHours(url.searchParams.get('hours')), url.searchParams.get('bot')));

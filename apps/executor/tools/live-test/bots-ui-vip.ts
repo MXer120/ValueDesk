@@ -475,7 +475,7 @@ async function finishSetupSheet(step: string): Promise<void> {
     if (await statement.isVisible().catch(() => false)) {
       for (const s of [/^I am at least 18/, /^I am not a US person/, /^I chose every bot/, /^I have read the terms and risk disclosure/]) await sheet.getByRole('checkbox', { name: s }).check();
       await shot(`${step}-terms-form`);
-      await sheet.getByRole('button', { name: 'Sign and accept', exact: true }).click();
+      await sheet.getByRole('button', { name: 'Sign and accept the terms', exact: true }).click();
       const site = p.getByRole('dialog', { name: 'Sign the terms to continue' });
       if (await site.waitFor({ state: 'visible', timeout: 15_000 }).then(() => true).catch(() => false)) {
         await site.getByRole('checkbox', { name: /^I confirm that/ }).check();

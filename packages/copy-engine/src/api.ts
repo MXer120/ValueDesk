@@ -458,10 +458,11 @@ export interface ExecutorInfo {
  * 'bots': it runs the bot kinds (volume maker, grid) and bot DCAs at the bot fee (policy.ts BOT_FEE).
  * 'counter': the rules may carry direction 'counter' (planner.ts).
  * 'site-terms': it records 'accept-site-terms' (POST /site-terms); the site sends no record to one without it.
+ * 'terms-doc': GET /terms/copy serves the copy terms in force here (version, hash, text) for the web to sign exactly.
  * 'day-key': it accepts requests signed by a wallet-approved day key (SignedCopyRequest.delegation); the site signs
  * with the wallet itself for an executor without it (an older release refuses a 64-byte signature).
  */
-export const EXECUTOR_FEATURES = ['counter', 'site-terms', 'key-import', 'algo-update', 'bots', 'multiplier', 'bot-restart', 'day-key'] as const;
+export const EXECUTOR_FEATURES = ['counter', 'site-terms', 'key-import', 'algo-update', 'bots', 'multiplier', 'bot-restart', 'day-key', 'terms-doc'] as const;
 
 export interface SessionGrant {
   token: string;

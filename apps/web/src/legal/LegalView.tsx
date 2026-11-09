@@ -12,12 +12,13 @@
  * step. While a page still holds an `[[OWNER: ...]]` placeholder it says
  * "Draft - not yet legally reviewed", and the placeholders are highlighted.
  */
-import { useLayoutEffect, useRef, type MouseEvent, type ReactNode } from 'react';
+import { useLayoutEffect, useRef, useSyncExternalStore, type MouseEvent, type ReactNode } from 'react';
 import { LEGAL_LABELS, LEGAL_PAGES, legalForPath, type LegalPage } from '../router';
 import { ANALYTICS_SECTION_TITLE, EMBED_SECTION_TITLE, REOWN_SECTION_TITLE } from './cookies';
 import { LEGAL_DOCS } from './docs';
 import { AnalyticsSwitch, EmbedSwitches, ReownSwitch } from './LegalGate';
-import { MARKER_INLINE, isDraft, type Block } from './model';
+import { MARKER_INLINE, isDraft, type Block, type LegalDoc } from './model';
+import { activeCopyTerms, onActiveCopyTerms } from '../copy/terms';
 import './legal.css';
 import { useLanguage } from '../i18n/store';
 
@@ -29,7 +30,9 @@ export interface LegalViewProps {
 
 export function LegalView({ page, onOpen }: LegalViewProps) {
   const lang = useLanguage();
-  const doc = LEGAL_DOCS[page];
+  // The copy terms: the version in force on ValueDesk's executor - the text the setup signs (copy/terms.ts).
+  const copyTerms = useSyncExternalStore(onActiveCopyTerms, activeCopyTerms);
+  const doc = page === 'copy-terms' ? (copyTerms.doc as LegalDoc) : LEGAL_DOCS[page];
   const draft = isDraft(doc);
   const root = useRef<HTMLElement>(null);
 

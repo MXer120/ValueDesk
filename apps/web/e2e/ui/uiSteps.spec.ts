@@ -153,7 +153,7 @@ async function browserCopiesReady(env: TestEnv): Promise<void> {
   if (await review.isVisible()) {
     await review.click();
     for (const s of [/^I am at least 18/, /^I am not a US person/, /^I chose the trader/, /^I have read the copy trading terms/]) await c.modal.getByRole('checkbox', { name: s }).check();
-    await c.modal.getByRole('button', { name: 'Sign and accept', exact: true }).click();
+    await c.modal.getByRole('button', { name: 'Sign and accept the terms', exact: true }).click();
     await toast(page, 'Copy trading terms accepted.').waitFor({ state: 'visible', timeout: 30_000 });
   }
   for (const step of ['Approve the copy fee', 'Approve the copy key']) {

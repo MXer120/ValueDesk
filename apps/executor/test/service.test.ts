@@ -13,6 +13,7 @@ import {
   buildCopyRequest,
   canonicalSettings,
   copyRequestDigest,
+  copyTermsHash,
   parseSettings,
   type CopyAction,
   type FetchLike,
@@ -118,6 +119,31 @@ test('terms: every statement, a country, and a region that allows copying', asyn
   const me = svc.acceptTerms(w.sign(svc.executorId, 'accept-terms', { ...TERMS, country: 'DE' }), { viewerCountry: 'DE' });
   assert.equal(me.policy.maxLeverage, 2);
   assert.equal(me.terms?.country, 'DE');
+  await cleanup();
+});
+
+test('terms versions: the executor serves the text in force; another version is refused without asking for a reload', async () => {
+  const { svc, cleanup } = make({ EXECUTOR_KIND: 'hosted' });
+  const w = new Wallet();
+  const served = svc.copyTerms();
+  assert.equal(served.termsVersion, COPY_TERMS_VERSION);
+  assert.equal(served.termsHash, copyTermsHash(served.doc), 'the hash is of the text served');
+  assert.equal(svc.info({ viewerCountry: null }).termsVersion, COPY_TERMS_VERSION);
+  assert.ok(svc.info({ viewerCountry: null }).features?.includes('terms-doc'), 'the web knows it can ask for the text');
+  // A web build on another version (older or newer): refused with code terms-version, which the web answers by
+  // taking this executor's version and text (copy/terms.ts) - the message never says "reload".
+  let refusal: unknown = null;
+  try {
+    svc.acceptTerms(w.sign(svc.executorId, 'accept-terms', { ...TERMS, termsVersion: '2026-11-02' }), { viewerCountry: 'SG' });
+  } catch (e) {
+    refusal = e;
+  }
+  assert.ok(refusal instanceof ApiError && refusal.code === 'terms-version');
+  assert.doesNotMatch((refusal as Error).message, /reload/i);
+  assert.match((refusal as Error).message, new RegExp(COPY_TERMS_VERSION));
+  // Signed with the version and hash it serves: accepted.
+  const me = svc.acceptTerms(w.sign(svc.executorId, 'accept-terms', { ...TERMS, termsHash: served.termsHash }), { viewerCountry: 'SG' });
+  assert.equal(me.terms?.termsVersion, COPY_TERMS_VERSION);
   await cleanup();
 });
 

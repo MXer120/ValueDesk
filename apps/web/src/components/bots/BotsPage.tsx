@@ -23,7 +23,7 @@ import { FINAL_STATUSES } from '@copy-engine';
 import type { Eip1193Provider } from '../../wallet';
 import { fmtUsd } from '../../format';
 import { useLiveCopy, readiness, signIn as signInExecutor } from '../../copy/live';
-import { COPY_TERMS_VERSION } from '@copy-engine';
+import { activeCopyTerms } from '../../copy/terms';
 import { liveBotsFor } from '../../algo/liveAlgos';
 import { notify } from '../../toast';
 import { useConfirm } from '../Modal';
@@ -247,10 +247,10 @@ function BotsPageOpen({ address, provider }: { address: string | null; provider:
   // A new version of terms the wallet accepted before: the setup opens once as a popup, over the bots (which stay
   // visible and stoppable). A first visit gets the "Start here" card instead.
   const recorded = live.hosted.me?.terms ?? null;
-  const outdated = seen && !!recorded && recorded.termsVersion !== COPY_TERMS_VERSION && !live.terms;
+  const outdated = seen && !!recorded && recorded.termsVersion !== activeCopyTerms().termsVersion && !live.terms;
   useEffect(() => {
     if (!outdated || !address) return;
-    const k = `vd.bots.termsPopup:${address.toLowerCase()}:${COPY_TERMS_VERSION}`;
+    const k = `vd.bots.termsPopup:${address.toLowerCase()}:${activeCopyTerms().termsVersion}`;
     try { if (sessionStorage.getItem(k)) return; sessionStorage.setItem(k, '1'); } catch { /* private mode */ }
     setSetup({ paper: true });
   }, [outdated, address]);
