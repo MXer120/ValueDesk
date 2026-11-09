@@ -34,6 +34,13 @@ const tuning = (name: string): Record<string, unknown> => {
   }
 };
 const MM_TUNING = tuning('LIVE_BOT_MM');
+/**
+ * What a new bot quotes with in the product (web bots/presets.ts: strategy 'market' = R10, the best of the live tests,
+ * and the setting Explore estimates every market with; maxSpreadBps 20 on by default). bot.makers runs this unless
+ * LIVE_BOT_MM says otherwise (owner 2026-11-09: "default settings should be the best of live/tests" - an evening run on
+ * a hand-made chase-every-second setting tested nothing the product or Explore offers).
+ */
+const PRODUCT_MM = { ref: 'binance', restMs: 10_000, offsetTicks: 0, skewTicks: 0, chaseTicks: 40, minRepriceMs: 1_000, maxSpreadBps: 20 } as const;
 const GRID_TUNING = tuning('LIVE_BOT_GRID');
 
 const ended = (v: AlgoView) => ['done', 'cancelled', 'expired', 'failed'].includes(v.algo.status);
@@ -154,7 +161,7 @@ export const BOT_SCENARIOS: Scenario[] = [
       const started: AlgoView[] = [];
       try {
         for (const symbol of BOT_SYMBOLS) {
-          started.push(await t.start({ kind: 'mm', symbol, orderUsd: t.U, maxInventoryUsd: 3 * t.U, skewTicks: 3, chaseTicks: 1, minRepriceMs: 1_000, maxLossUsd: 2, volumeTargetUsd: 10_000 * t.U, onStop: 'close', ...MM_TUNING }));
+          started.push(await t.start({ kind: 'mm', symbol, orderUsd: t.U, maxInventoryUsd: 2 * t.U, ...PRODUCT_MM, maxLossUsd: 2, volumeTargetUsd: 10_000 * t.U, onStop: 'close', ...MM_TUNING }));
         }
       } catch (e) {
         // One refused start (margin, a market conflict) must not leave the others running past the scenario.
