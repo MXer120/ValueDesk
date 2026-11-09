@@ -153,7 +153,7 @@ const ORDER_POLL_SPACING_MS = 1_000;
 /** After a restart or a drop (resync), orders are read this often instead, so 20 bots are known again in seconds. */
 const ORDER_RESYNC_SPACING_MS = 200;
 /** A real bot's holding is checked against the account's position this often (positionConfirmed: reads that agree). */
-const BOT_POSITION_CHECK_MS = 10_000;
+const BOT_POSITION_CHECK_MS = 5_000;
 /** A handled event of one kind is said at most this often per bot; the ones in between are counted into it (saidOnce). */
 const SAID_EVERY_MS = 10_000;
 /** ...each algo at most this often... */
@@ -441,6 +441,9 @@ export class AlgoRuntime {
   private exitsFlatSince = new Map<string, number>();
   /** Algos whose position reads disagreed: not read again for a decision before this (positionConfirmed). */
   private confirmRetryAt = new Map<string, number>();
+  /** Bots whose position read runs now (checkOutside), and the gaps those reads confirmed, for the step to act on. */
+  private posReading = new Set<string>();
+  private posGaps = new Map<string, { pos: number; inv: number; busy: boolean }>();
   /** Bots whose refused reduce-only order is being checked against the account's position (reduceRefused). */
   private reduceChecks = new Set<string>();
   private paper = new Map<string, PaperOrder>();
@@ -2196,30 +2199,70 @@ export class AlgoRuntime {
    */
   private async checkOutside(a: AlgoRecord, m: MarketInfo, mk: number, now: number): Promise<void> {
     if (a.spec.paper || !a.book || a.status !== 'running') return;
-    if (now - Number(a.k.posCheckAt ?? 0) < BOT_POSITION_CHECK_MS) return;
-    // Read every BOT_POSITION_CHECK_MS whatever is in flight (owner 2026-11-09: "matched 2 min ago" - a busy maker always
-    // has a send or a cancel out, so skipping then meant almost never). A match counts at once; a gap while its own
-    // orders are in flight (or a fill seconds ago) may be those, so it is only acted on when nothing is.
-    const busy = this.live(a).some((c) => c.state !== 'open' || c.cancelling) || now - Number(a.k.lastFillAt ?? 0) < 5_000;
+    // A gap the background read confirmed (readPosition) is acted on here, in the step: it changes the book.
+    const got = this.posGaps.get(a.id);
+    if (got) {
+      this.posGaps.delete(a.id);
+      await this.actOnGap(a, m, mk, now, got);
+    }
+    if (now - Number(a.k.posCheckAt ?? 0) < BOT_POSITION_CHECK_MS || this.posReading.has(a.id)) return;
+    // The read runs beside the step, never in it (owner 2026-11-09: "Bot loop: last step 5.3 s ago", "matched minutes
+    // ago"): two REST reads 2 s apart held the step - and so the quotes - for seconds every check.
     a.k.posCheckAt = now;
-    let inv = bookInventory(a.book);
-    const pos = await this.positionConfirmed(a, a.spec.symbol);
-    if (pos === null || pos === 'disagree') return;
+    this.posReading.add(a.id);
+    void this.readPosition(a, m)
+      .catch((e) => this.host.log.warn('algo: position check failed', { algo: a.id, error: String(e) }))
+      .finally(() => this.posReading.delete(a.id));
+  }
+
+  /** Busy: its own orders in flight or a fill seconds ago - a gap then may be those, not something outside it. */
+  private posBusy(a: AlgoRecord, now = Date.now()): boolean {
+    return this.live(a).some((c) => c.state !== 'open' || c.cancelling) || now - Number(a.k.lastFillAt ?? 0) < 5_000;
+  }
+
+  /**
+   * One read of SoDEX's position: equal to the bot's holding as it stood before or after the read = matched (a stale
+   * backend reads a different size, not the same one). A gap is read again until the reads agree (positionConfirmed)
+   * and handed to the step (posGaps), which acts on it only if nothing of its own moved the holding meanwhile.
+   */
+  private async readPosition(a: AlgoRecord, m: MarketInfo): Promise<void> {
+    if (!a.book) return;
     const step = Number(m.stepSize);
-    if (busy && Math.abs(pos - bookInventory(a.book)) >= step / 2) return;
+    const inv0 = bookInventory(a.book);
+    const busy0 = this.posBusy(a);
+    const first = await this.positionOf(a, a.spec.symbol);
+    if (first === null || a.status !== 'running' || !a.book) return;
+    const inv1 = bookInventory(a.book);
+    if (Math.abs(first - inv0) < step / 2 || Math.abs(first - inv1) < step / 2) return this.posMatched(a);
+    const pos = await this.positionConfirmed(a, a.spec.symbol);
+    if (pos === null || pos === 'disagree' || a.status !== 'running' || !a.book) return;
+    const inv2 = bookInventory(a.book);
+    if (Math.abs(pos - inv2) < step / 2) return this.posMatched(a);
+    this.posGaps.set(a.id, { pos, inv: inv2, busy: busy0 || this.posBusy(a) || Math.abs(inv2 - inv0) >= step / 2 });
+  }
+
+  private posMatched(a: AlgoRecord): void {
+    delete a.k.outsideSaid;
+    a.k.posOkAt = Date.now();
+    this.dirty.add(a.id);
+  }
+
+  private async actOnGap(a: AlgoRecord, m: MarketInfo, mk: number, now: number, got: { pos: number; inv: number; busy: boolean }): Promise<void> {
+    if (!a.book) return;
+    const pos = got.pos;
+    let inv = bookInventory(a.book);
+    const step = Number(m.stepSize);
+    if (Math.abs(pos - inv) < step / 2) return this.posMatched(a);
+    // Its own orders were in flight, or the holding moved since the read: the gap may be those - the next check sees.
+    if (got.busy || this.posBusy(a, now) || Math.abs(inv - got.inv) >= step / 2) return;
     if (Math.abs(pos - inv) >= step / 2) {
       // A gap: first SoDEX's trades of the bot's own orders (by client id) - a fill its updates missed is booked, so
       // only what is left is outside it (owner 2026-11-09: the bot's inventory is SoDEX's).
       await this.reconcileOwnFills(a, m);
       inv = bookInventory(a.book);
     }
-    if (Math.abs(pos - inv) < step / 2) {
-      delete a.k.outsideSaid;
-      a.k.posOkAt = now;
-      this.dirty.add(a.id);
-      return;
-    }
-    const same = Math.sign(pos) === Math.sign(inv) || Math.abs(pos) < step / 2;
+    if (Math.abs(pos - inv) < step / 2) return this.posMatched(a);
+    const same =Math.sign(pos) === Math.sign(inv) || Math.abs(pos) < step / 2;
     if (Math.abs(inv) >= step / 2 && same && Math.abs(pos) < Math.abs(inv)) {
       // Closed or reduced outside: book the difference closed at the mark.
       const gone = inv - pos;
