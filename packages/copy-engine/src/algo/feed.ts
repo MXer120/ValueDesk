@@ -130,6 +130,11 @@ export interface AlgoFeedOptions {
   /** Wallets one socket (one IP) may follow on account channels (default ACCOUNT_USERS_PER_IP). */
   maxAccountUsers?: number;
   /**
+   * More sockets for account channels only, each leaving from its own address (owner 2026-11-09: "our bots always need
+   * to be connected via ws. Always."): SoDEX's limit is per IP, so each one follows another maxAccountUsers wallets.
+   */
+  accountFactories?: WebSocketFactory[];
+  /**
    * SoDEX's best prices of every market by REST (GET /api/v1/perps/markets/bookTickers). The socket's bookTicker
    * may stay silent while a market does not move: a watched quote that ages is read here (refreshQuotes), so a still
    * market keeps a fresh price. Absent: socket only.
@@ -162,6 +167,8 @@ export class AlgoFeed implements AlgoMarket {
   private orderCbs: Array<(u: OrderUpdate) => void> = [];
   private stateCbs: Array<(up: boolean) => void> = [];
   private sampler: unknown = null;
+  /** The extra account sockets (accountFactories): each follows its own wallets, account channels only. */
+  private extras: Array<{ socket: LiveSocket; owners: Set<string>; subscribed: Set<string> }> = [];
   private refreshing = false;
   private refreshedAt = 0;
 
@@ -179,10 +186,34 @@ export class AlgoFeed implements AlgoMarket {
         for (const cb of this.stateCbs) cb(up);
       },
     });
+    for (const [k, factory] of (o.accountFactories ?? []).entries()) {
+      const x = { socket: null as unknown as LiveSocket, owners: new Set<string>(), subscribed: new Set<string>() };
+      x.socket = new LiveSocket({
+        url: `${origin}/ws/perps`,
+        factory,
+        ping: '{"op":"ping"}',
+        name: `sodex-account-${k + 1}`,
+        log: o.log,
+        subscribe: (send, fresh) => {
+          if (fresh) x.subscribed = new Set();
+          let id = 9_000;
+          for (const w of [...x.subscribed]) if (!x.owners.has(w)) { send({ op: 'unsubscribe', id: id++, params: { channel: 'accountOrderUpdate', user: w } }); x.subscribed.delete(w); }
+          for (const w of x.owners) if (!x.subscribed.has(w)) { send({ op: 'subscribe', id: id++, params: { channel: 'accountOrderUpdate', user: w } }); x.subscribed.add(w); }
+        },
+        onMessage: (m) => this.handle(m),
+      });
+      this.extras.push(x);
+    }
+  }
+
+  /** Wallets the sockets can follow at once (every socket's places). */
+  get accountCapacity(): number {
+    return Math.max(0, this.o.maxAccountUsers ?? ACCOUNT_USERS_PER_IP) * (1 + this.extras.length);
   }
 
   start(): void {
     this.socket.start();
+    for (const x of this.extras) x.socket.start();
     this.sampler ??= timers.every(500, () => {
       const now = Date.now();
       if (now - this.sampledAt >= 1_000) this.sample(now);
@@ -192,6 +223,7 @@ export class AlgoFeed implements AlgoMarket {
 
   stop(): void {
     this.socket.stop();
+    for (const x of this.extras) x.socket.stop();
     timers.cancel(this.sampler);
     this.sampler = null;
   }
@@ -211,10 +243,26 @@ export class AlgoFeed implements AlgoMarket {
     this.symbols = s;
     this.owners = w;
     if (changed) this.socket.resubscribe();
+    // The rest on the extra sockets, in order: each keeps the wallets it follows, the free places go in order.
+    const rest = want.filter((x) => !w.has(x));
+    const left = new Set(rest);
+    for (const x of this.extras) {
+      const keep = [...x.owners].filter((o) => left.has(o)).slice(0, cap);
+      const next = new Set(keep);
+      for (const o of keep) left.delete(o);
+      x.owners = next;
+    }
+    for (const x of this.extras) for (const o of [...left]) if (x.owners.size < cap) { x.owners.add(o); left.delete(o); }
+    for (const x of this.extras) {
+      const diff = [...x.owners].some((o) => !x.subscribed.has(o)) || [...x.subscribed].some((o) => !x.owners.has(o));
+      if (diff) x.socket.resubscribe();
+    }
   }
 
   followsOrders(owner: string): boolean {
-    return this.socket.up && this.subscribed.owners.has(owner.toLowerCase());
+    const o = owner.toLowerCase();
+    if (this.socket.up && this.subscribed.owners.has(o)) return true;
+    return this.extras.some((x) => x.socket.up && x.subscribed.has(o));
   }
 
   private subscribeAll(send: (m: unknown) => void, fresh: boolean): void {

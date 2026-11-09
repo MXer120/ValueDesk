@@ -75,7 +75,9 @@ async function main(): Promise<void> {
     },
   });
   books.start();
-  const beat = setInterval(() => ring.beat(), 100);
+  // The heartbeat only while every symbol's stream is connected (Katana's rule, owner 2026-11-09): a reader then takes
+  // a symbol without a tick for a still market, and a silent heartbeat for a feed it cannot trust.
+  const beat = setInterval(() => { if (books.allUp) ring.beat(); }, 100);
   const stats = setInterval(() => {
     log.info('feed', { symbols: symbols.length, written, sizeOnly: same, raced: books.dropped, won: books.won, up: books.up, head: Number(ring.published) });
     written = same = 0;

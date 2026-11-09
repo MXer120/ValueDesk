@@ -125,7 +125,11 @@ export class LiveSocket {
     if (this.upSince !== null) this.o.onState?.(false);
     this.upSince = null;
     if (ws) {
-      ws.onopen = ws.onmessage = ws.onclose = ws.onerror = null;
+      ws.onopen = ws.onmessage = ws.onclose = null;
+      // An error handler stays (owner 2026-11-09: "EXECUTOR STOPPING ON AN ERROR - WebSocket was closed before the
+      // connection was established"): the `ws` package answers close() on a socket still connecting with an 'error'
+      // event, and an error event with no listener is an uncaught exception that stops the process.
+      ws.onerror = () => { /* dropped on purpose: nothing to do */ };
       try {
         ws.close();
       } catch {

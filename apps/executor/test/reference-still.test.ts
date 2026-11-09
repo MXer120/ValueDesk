@@ -75,3 +75,37 @@ test('a still market is marked still (the same book confirmed again), a moved on
   assert.equal(ref.quote('MCD-USD')!.still, false, 'the book moved');
   ref.stop();
 });
+
+test('Katana\'s rule: while the market\'s socket is connected, a market with no tick keeps its price as a still market; a tick after it always counts; a dropped socket lets it age', async () => {
+  const opened: Array<{ onopen: (() => void) | null; onmessage: ((e: { data: string }) => void) | null; onclose: (() => void) | null; readyState: number; send(): void; close(): void }> = [];
+  const factory = () => {
+    const ws = { readyState: 1, onopen: null as (() => void) | null, onmessage: null as ((e: { data: string }) => void) | null, onclose: null as (() => void) | null, onerror: null, send() {}, close() {} };
+    opened.push(ws as never);
+    return ws as never;
+  };
+  const ref = new BinanceReference({ path: 'Z:/no/such/ring', factory, log: silent, autoPoll: false });
+  ref.watch(['HYPE-USD']); // not in any ring: its own socket
+  assert.ok(opened.length >= 1);
+  for (const ws of opened) ws.onopen?.();
+  const tick = (bid: number, ask: number, u: number) => { for (const ws of opened) ws.onmessage?.({ data: JSON.stringify({ data: { s: 'HYPEUSDT', b: String(bid), a: String(ask), B: '1', A: '1', E: Date.now(), u } }) }); };
+  tick(40.1, 40.11, 1);
+  const first = ref.quote('HYPE-USD')!;
+  assert.equal(first.bid, 40.1);
+  // Quiet for longer than the still threshold: the check keeps it as a still market, fresh.
+  await new Promise((r) => setTimeout(r, 450));
+  ref.check();
+  const still = ref.quote('HYPE-USD')!;
+  assert.equal(still.still, true);
+  assert.ok(Date.now() - still.at < 100, 'confirmed now');
+  assert.equal(still.bid, 40.1);
+  // A real move right after: counted, even though its receipt time is a moment older than the confirmation.
+  tick(40.2, 40.21, 2);
+  assert.equal(ref.quote('HYPE-USD')!.bid, 40.2);
+  assert.ok(!ref.quote('HYPE-USD')!.still);
+  // The socket drops: nothing keeps it fresh any more.
+  for (const ws of opened) ws.onclose?.();
+  await new Promise((r) => setTimeout(r, 450));
+  ref.check();
+  assert.ok(Date.now() - ref.quote('HYPE-USD')!.at >= 400, 'it ages: a dropped feed is not a still market');
+  ref.stop();
+});

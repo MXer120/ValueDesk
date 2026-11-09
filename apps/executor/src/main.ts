@@ -154,7 +154,9 @@ async function main(): Promise<void> {
     }
   };
   verifyAudit();
-  svc = new ExecutorService(cfg, db, secrets, { fetch: out.fetch, factory: out.factory, log, alerts });
+  // One more account socket per extra address: SoDEX follows 10 wallets per IP (bots always live, owner 2026-11-09).
+  const accountFactories = cfg.wsAddresses.map((a) => egress(a).factory);
+  svc = new ExecutorService(cfg, db, secrets, { fetch: out.fetch, factory: out.factory, log, alerts, accountFactories });
   if (cfg.kind === 'self') {
     const shownHost = cfg.host === '0.0.0.0' || cfg.host === '::' ? '127.0.0.1' : cfg.host;
     process.stdout.write(selfBanner({ url: `http://${shownHost}:${cfg.port}`, dataDir: cfg.dataDir, owner: svc.owner(), code: svc.pairingCode }));

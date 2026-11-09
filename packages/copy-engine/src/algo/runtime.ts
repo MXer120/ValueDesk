@@ -269,6 +269,8 @@ export interface AlgoHost {
    * Absent: such a maker holds.
    */
   reference?: ReferenceSource;
+  /** Extra sockets for SoDEX account channels, each from its own address (AlgoFeedOptions.accountFactories). */
+  accountFactories?: WebSocketFactory[];
   log: Logger;
   onChange?(id: string): void;
   /** An algo failed, ended, finished, or was stopped or held without the follower asking (notices.ts): the bell, the inbox. */
@@ -463,7 +465,7 @@ export class AlgoRuntime {
     else {
       if (!host.factory) throw new Error('an algo runtime needs a market feed or a WebSocket factory');
       // A still market's quote is kept fresh by REST (bots hold on a quote older than BOT_QUOTE_MAX_AGE_MS).
-      this.market = new AlgoFeed({ network: host.network, factory: host.factory, log: host.log, bookTickers: () => host.sodex.get<unknown>('/api/v1/perps/markets/bookTickers') });
+      this.market = new AlgoFeed({ network: host.network, factory: host.factory, log: host.log, bookTickers: () => host.sodex.get<unknown>('/api/v1/perps/markets/bookTickers'), ...(host.accountFactories?.length ? { accountFactories: host.accountFactories } : {}) });
     }
     this.market.onOrder((u) => this.onOrderUpdate(u));
     this.market.onPrint((p) => this.onPrint(p));
@@ -571,7 +573,8 @@ export class AlgoRuntime {
       if (a.spec.paper) continue;
       const live = this.live(a);
       const resting = live.filter((c) => c.tif !== 'ioc').length + this.liveExits(a).length;
-      weight.set(a.owner, (weight.get(a.owner) ?? 0) + 1 + live.length * 10 + resting * 100);
+      // A real bot's wallet always comes first (owner 2026-11-09: "our bots always need to be connected via ws").
+      weight.set(a.owner, (weight.get(a.owner) ?? 0) + 1 + live.length * 10 + resting * 100 + (a.spec.bot && !FINAL_STATUSES.has(a.status) ? 1e9 : 0));
     }
     const owners = [...weight.entries()].sort((x, y) => y[1] - x[1] || (x[0] < y[0] ? -1 : 1)).map(([o]) => o);
     this.market.watch([...symbols], owners);
@@ -4588,6 +4591,12 @@ export class AlgoRuntime {
       const s = a.spec;
       a.k.refillAt = Date.now() + Math.max(0, jitter(s.refillMs, s.refillJitter, makeRng(a.seed ^ a.childCount)));
     }
+  }
+
+  /** Wallets SoDEX's account sockets can follow at once (feed.ts accountCapacity): 10 per socket address. */
+  accountCapacity(): number {
+    const f = this.market as { accountCapacity?: number };
+    return typeof f.accountCapacity === 'number' ? f.accountCapacity : 10;
   }
 
   /** For the operator's overview (executor /internal/stats): the wallets with live orders the socket follows, and the rest read by REST. */
