@@ -36,7 +36,7 @@
  * 2026-11-02: bots (the Bots page) - what they do, that they can lose, no wash trading, no fills between different
  * users' bots, and their 0.5 bp fee in place of the normal one (owner, 2026-11-02; charged 0.1 bp since 2026-11-04, BOT_FEE).
  */
-export const COPY_TERMS_VERSION = '2026-11-02';
+export const COPY_TERMS_VERSION = '2026-11-09';
 
 /** US and its territories (US persons). */
 export const US_REGIONS: readonly string[] = ['US', 'PR', 'VI', 'GU', 'AS', 'MP', 'UM'];
