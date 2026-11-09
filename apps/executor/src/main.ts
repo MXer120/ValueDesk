@@ -70,6 +70,8 @@ async function main(): Promise<void> {
   }
 
   let svc: ExecutorService | null = null;
+  /** Its algos and copies loaded (svc.start done): before, a read would list a wallet's bots as missing. */
+  let ready = false;
   let db: ExecutorDb | null = null;
   let stopping = false;
   const shutdown = async (why: string, code = 0) => {
@@ -106,7 +108,9 @@ async function main(): Promise<void> {
   const server = createExecutorServer(
     new Proxy({} as ExecutorService, {
       get: (_t, prop) => {
-        if (!svc) throw new ApiError(503, 'starting', 'The executor is starting; try again in a moment.');
+        // Until it has loaded every bot and copy (svc.start), only its health answers: a list read before would leave
+        // bots out (2026-11-09: a release's restart, and the overnight run read "the executor does not list" its bot).
+        if (!svc || (!ready && prop !== 'health')) throw new ApiError(503, 'starting', 'The executor is starting; try again in a moment.');
         const v = (svc as unknown as Record<string | symbol, unknown>)[prop];
         return typeof v === 'function' ? (v as (...a: unknown[]) => unknown).bind(svc) : v;
       },
@@ -163,6 +167,7 @@ async function main(): Promise<void> {
   }
   db.audit('process', null, null, { event: 'start', pid: process.pid, kind: cfg.kind, id: svc.executorId, network: cfg.network, liveAlgos: cfg.liveAlgos, liveAlgoWallets: cfg.liveAlgoWallets, brake: svc.brake.current() });
   await svc.start();
+  ready = true;
   log.info('executor up', { kind: cfg.kind, id: svc.executorId, network: cfg.network, listen: `${cfg.host}:${cfg.port}`, data: cfg.dataDir, egress: out.localAddress ?? 'default route', liveAlgos: cfg.liveAlgos, liveAlgoWallets: cfg.liveAlgoWallets });
 
   const prune = setInterval(() => {

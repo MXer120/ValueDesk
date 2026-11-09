@@ -92,6 +92,18 @@ __ORIGIN_SITE_ADDRESSES__ {
 	handle @edge {
 		# Past the gate, by path. Nested handle blocks are mutually exclusive like
 		# the outer ones: the first that matches is the only one that runs.
+		# The VIP executor (owner 2026-11-09 full VIP migration): AWS Tokyo, behind its own
+		# Caddy with the same origin-secret gate. The browser reads /api/copy-vip/v1/* after a
+		# wallet moved there (web copy/executor.ts VIP_BASE); the path goes on as /api/copy/v1/*.
+		handle /api/copy-vip/* {
+			uri replace /api/copy-vip/ /api/copy/ 1
+			reverse_proxy https://54-249-40-203.sslip.io {
+				header_up Host {upstream_hostport}
+				lb_try_duration 20s
+				lb_try_interval 250ms
+			}
+		}
+
 		# The copy executor (apps/executor): every path it serves is under
 		# /api/copy/v1/. Caddy's path matcher ignores case; the edge forwards paths
 		# exactly, and the executor answers 404 for a path it does not know.

@@ -1047,8 +1047,8 @@ test('spec: flowGate and quiet parse with their defaults, with or without ref; a
   const s = parseAlgoSpec({ kind: 'mm', maxLossUsd: 1_000_000, symbol: 'BTC-USD', orderUsd: 50, maxInventoryUsd: 200, flowGate: { minUsd: 25_000 }, quiet: [{ from: '09:20', to: '09:45', zone: 'new_york' }] });
   if (s.kind !== 'mm') return assert.fail('mm');
   assert.deepEqual(s.flowGate, { minUsd: 25_000, windowMs: 600_000, action: 'pause', shrink: 0.5 });
-  assert.deepEqual(s.quiet, [{ from: '09:20', to: '09:45', zone: 'new_york', days: 'all' }]);
-  const r = parseAlgoSpec({ kind: 'mm', maxLossUsd: 1_000_000, symbol: 'BTC-USD', orderUsd: 50, maxInventoryUsd: 200, ref: 'binance', flowGate: { minUsd: 1_000, windowMs: 60_000, action: 'shrink', shrink: 0.25 }, quiet: [{ from: '23:00', to: '01:00', zone: 'london', days: 'weekdays' }] });
+  assert.deepEqual(s.quiet, [{ from: '09:20', to: '09:45', zone: 'new_york', days: 'all' as const }]);
+  const r = parseAlgoSpec({ kind: 'mm', maxLossUsd: 1_000_000, symbol: 'BTC-USD', orderUsd: 50, maxInventoryUsd: 200, ref: 'binance', flowGate: { minUsd: 1_000, windowMs: 60_000, action: 'shrink', shrink: 0.25 }, quiet: [{ from: '23:00', to: '01:00', zone: 'london', days: 'weekdays' as const }] });
   if (r.kind !== 'mm') return assert.fail('mm');
   assert.deepEqual(r.flowGate, { minUsd: 1_000, windowMs: 60_000, action: 'shrink', shrink: 0.25 });
   assert.equal(r.quiet![0]!.days, 'weekdays');
@@ -1081,7 +1081,7 @@ test('spec: flowGate and quiet refusals name the field', () => {
 });
 
 test('quiet windows: New York and London local time across DST; weekdays; a window past midnight goes by the day it began', () => {
-  const ny = [{ from: '09:20', to: '09:45', zone: 'new_york', days: 'all' }] as const;
+  const ny = [{ from: '09:20', to: '09:45', zone: 'new_york', days: 'all' as const }] as const;
   // 09:30 New York is 14:30 UTC in winter (EST), 13:30 UTC in summer (EDT).
   assert.ok(quietWindowAt([...ny], Date.UTC(2026, 0, 15, 14, 30)));
   assert.equal(quietWindowAt([...ny], Date.UTC(2026, 0, 15, 13, 30)), null);
@@ -1095,11 +1095,11 @@ test('quiet windows: New York and London local time across DST; weekdays; a wind
   assert.ok(quietWindowAt([...ny], Date.UTC(2026, 0, 15, 14, 20)));
   assert.equal(quietWindowAt([...ny], Date.UTC(2026, 0, 15, 14, 45)), null);
   // Weekdays: Saturday 17 January 2026 is not one.
-  const wk = [{ from: '09:20', to: '09:45', zone: 'new_york', days: 'weekdays' }] as const;
+  const wk = [{ from: '09:20', to: '09:45', zone: 'new_york', days: 'weekdays' as const }] as const;
   assert.ok(quietWindowAt([...wk], Date.UTC(2026, 0, 16, 14, 30)));
   assert.equal(quietWindowAt([...wk], Date.UTC(2026, 0, 17, 14, 30)), null);
   // 23:00-01:00 UTC on weekdays: Saturday 00:30 is Friday's window; Monday 00:30 would be Sunday's.
-  const night = [{ from: '23:00', to: '01:00', zone: 'utc', days: 'weekdays' }] as const;
+  const night = [{ from: '23:00', to: '01:00', zone: 'utc', days: 'weekdays' as const }] as const;
   assert.ok(quietWindowAt([...night], Date.UTC(2026, 0, 17, 0, 30)));
   assert.equal(quietWindowAt([...night], Date.UTC(2026, 0, 19, 0, 30)), null);
   assert.ok(quietWindowAt([...night], Date.UTC(2026, 0, 19, 23, 30)));
@@ -1117,7 +1117,7 @@ test('trading days: NYSE and London holidays by rule; a trading-days window skip
   assert.ok(!nyseHolidays(2028).has('2027-12-31') && !nyseHolidays(2028).has('2028-01-03'));
   // London 2026: Easter Monday 6 April, bank holidays 4 May, 25 May, 31 August; Boxing Day on a Saturday is Monday 28 December.
   for (const d of ['2026-01-01', '2026-04-03', '2026-04-06', '2026-05-04', '2026-05-25', '2026-08-31', '2026-12-25', '2026-12-28']) assert.ok(lseHolidays(2026).has(d), d);
-  const open = [{ from: '09:25', to: '09:50', zone: 'new_york', days: 'trading' }] as const;
+  const open = [{ from: '09:25', to: '09:50', zone: 'new_york', days: 'trading' as const }] as const;
   // Thursday 26 November 2026 (Thanksgiving) is skipped; Wednesday the 25th is not. 09:30 EST = 14:30 UTC.
   assert.equal(quietWindowAt([...open], Date.UTC(2026, 10, 26, 14, 30)), null);
   assert.ok(quietWindowAt([...open], Date.UTC(2026, 10, 25, 14, 30)));
@@ -1248,12 +1248,12 @@ test('volume maker update: flowGate and quiet change on a running bot, checked l
   const r = await rig();
   const a = await add(r, MM);
   await step(r, a.id);
-  await r.rt.update(a.id, { quiet: [{ from: '08:00', to: '09:00', zone: 'utc', days: 'all' }] });
+  await r.rt.update(a.id, { quiet: [{ from: '08:00', to: '09:00', zone: 'utc', days: 'all' as const }] });
   const held = await step(r, a.id, 500);
   assert.equal(held.status, 'waiting');
   assert.equal(r.ex.resting.size, 0);
   await assert.rejects(r.rt.update(a.id, { flowGate: { minUsd: 10, windowMs: 60_000, action: 'pause', shrink: 0.5 } }));
-  await assert.rejects(r.rt.update(a.id, { quiet: [{ from: '08:00', to: '08:00', zone: 'utc', days: 'all' }] }));
+  await assert.rejects(r.rt.update(a.id, { quiet: [{ from: '08:00', to: '08:00', zone: 'utc', days: 'all' as const }] }));
   await r.rt.update(a.id, { quiet: null, flowGate: { minUsd: 5_000, windowMs: 120_000, action: 'shrink', shrink: 0.5 } });
   const s = r.rt.get(a.id)!.spec as { quiet?: unknown; flowGate?: unknown };
   assert.equal(s.quiet, undefined);
@@ -1406,8 +1406,8 @@ test('trading hours in any time zone (owner 2026-11-08): the own clock of the ow
   assert.equal(validZone('Mars/Olympus'), false);
   assert.equal(validZone('../etc'), false);
   const e = (quiet: unknown) => checkAlgoSpec({ kind: 'mm', symbol: 'BTC-USD', orderUsd: 50, maxInventoryUsd: 200, maxLossUsd: 10, quiet }).errors;
-  assert.equal(e([{ from: '09:00', to: '10:00', zone: 'Asia/Tokyo', days: 'all' }])['quiet.0.zone'], undefined);
-  assert.match(e([{ from: '09:00', to: '10:00', zone: 'Mars/Olympus', days: 'all' }])['quiet.0.zone'] ?? '', /time zone name such as Europe\/Berlin/);
+  assert.equal(e([{ from: '09:00', to: '10:00', zone: 'Asia/Tokyo', days: 'all' as const }])['quiet.0.zone'], undefined);
+  assert.match(e([{ from: '09:00', to: '10:00', zone: 'Mars/Olympus', days: 'all' as const }])['quiet.0.zone'] ?? '', /time zone name such as Europe\/Berlin/);
 });
 
 test('volume maker near the cap (owner 2026-11-08): the adding quote shrinks to what is left to the cap, never past it; under one minimum order it waits', () => {

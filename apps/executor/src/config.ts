@@ -98,6 +98,11 @@ export interface ExecutorConfig {
   vipToken: string | null;
   vipUrl: string | null;
   vipCheckUrl: string | null;
+  /**
+   * EXECUTOR_VIP_WALLETS: wallets that are VIP whatever their volume - they may move, are never moved back for volume,
+   * and pay the VIP bot fee (owner 2026-11-09: the overnight live test runs "as a vip ... at vip fee"). Unset: none.
+   */
+  vipWallets: readonly string[];
   vipOpen: boolean;
   /** EXECUTOR_VIP_PUBKEY: the VIP executor's pinned key-import public key; unset: no move (the key would go to whatever /info says). */
   vipPubkey: string | null;
@@ -203,6 +208,13 @@ export function vipPubkeyFrom(raw: string | undefined, name = 'EXECUTOR_VIP_PUBK
   return v;
 }
 
+/** EXECUTOR_VIP_WALLETS: a list of addresses (no '*': EXECUTOR_VIP_OPEN is that). */
+export function vipWalletsFrom(raw: string | undefined): readonly string[] {
+  const list = (raw ?? '').split(',').map((a) => a.trim().toLowerCase()).filter(Boolean);
+  for (const a of list) if (!ADDRESS.test(a)) throw new Error(`EXECUTOR_VIP_WALLETS holds "${a.slice(0, 12)}...", which is not a wallet address`);
+  return list;
+}
+
 /** EXECUTOR_LIVE_ALGOS_WALLETS: unset is no wallet; '*' every wallet; else a list of addresses. */
 export function liveAlgoWalletsFrom(raw: string | undefined): readonly string[] | '*' {
   const s = raw?.trim() ?? '';
@@ -273,6 +285,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ExecutorConfig
     vipUrl: env.EXECUTOR_VIP_URL?.trim() ? builderUrl(env.EXECUTOR_VIP_URL) : null,
     vipCheckUrl: vipCheckUrlFrom(env.EXECUTOR_VIP_CHECK_URL, env.EXECUTOR_BUILDER_URL),
     vipOpen: env.EXECUTOR_VIP_OPEN?.trim() === '1',
+    vipWallets: vipWalletsFrom(env.EXECUTOR_VIP_WALLETS),
     vipPubkey: vipPubkeyFrom(env.EXECUTOR_VIP_PUBKEY),
     stdUrl: env.EXECUTOR_STD_URL?.trim() ? builderUrl(env.EXECUTOR_STD_URL) : null,
     stdPubkey: vipPubkeyFrom(env.EXECUTOR_STD_PUBKEY, 'EXECUTOR_STD_PUBKEY'),

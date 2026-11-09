@@ -187,6 +187,8 @@ interface Rig {
   policy: RegionPolicy | null;
   equity: number;
   notices: EngineNotice[];
+  /** While set, SoDEX's position read waits on it (a slow REST read). */
+  posGate?: Promise<void> | null;
 }
 
 async function rig(o: { market?: MarketInfo } = {}): Promise<Rig> {
@@ -195,7 +197,7 @@ async function rig(o: { market?: MarketInfo } = {}): Promise<Rig> {
   const r: Rig = { rt: null as unknown as AlgoRuntime, market, ex: new Exchange(market), store: new MemoryAlgoStore(), brake: null, noSink: false, keyExp: null, makerBp: null, policy: null, equity: 1_000_000, notices: [] };
   const sodex = {
     markets: async () => [mkt],
-    follower: async () => ({ equity: r.equity, positions: { 'BTC-USD': { size: r.ex.position, entry: 60_000, leverage: 1, leverageReported: true } } }),
+    follower: async () => (r.posGate && (await r.posGate), { equity: r.equity, positions: { 'BTC-USD': { size: r.ex.position, entry: 60_000, leverage: 1, leverageReported: true } } }),
     fills: async () => [],
     get: async () => [],
   } as unknown as SodexClient;
@@ -587,6 +589,24 @@ test('notices: a bot is named by its label, else "Market maker / Grid on SYMBOL"
   assert.equal(algoName(a), 'Market maker on BTC-USD');
   const g = await add(r, { kind: 'grid', low: 59_000, high: 61_000, levels: 5, orderUsd: 30, maxLossUsd: 100, label: 'My grid' });
   assert.equal(algoName(g), 'My grid');
+});
+
+test('the position check runs beside the step, never in it: a slow SoDEX read holds no step (owner 2026-11-09: "last step 5.3 s ago")', async () => {
+  const r = await rig();
+  const a = await holding(r);
+  let open!: () => void;
+  r.posGate = new Promise<void>((res) => (open = res));
+  const t0 = clock;
+  await step(r, a.id, 31_000); // starts the read; must not wait for it
+  await step(r, a.id, 1_000);
+  await step(r, a.id, 1_000);
+  assert.equal(clock - t0, 33_000, 'three steps ran while the read was out');
+  const w = r.rt.view(a.id)!.bot!;
+  assert.equal(w.matchedAt ?? null, null, 'not matched before SoDEX answered');
+  r.posGate = null;
+  open();
+  await settle();
+  assert.ok(typeof r.rt.view(a.id)!.bot!.matchedAt === 'number', 'one read equal to its holding = matched');
 });
 
 test('a bot whose position was closed outside it (by hand, a stop, a liquidation): booked closed at the mark, PnL unchanged, quotes on from flat (owner 2026-11-08)', async () => {

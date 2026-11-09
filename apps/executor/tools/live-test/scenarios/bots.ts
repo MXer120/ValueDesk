@@ -152,8 +152,14 @@ export const BOT_SCENARIOS: Scenario[] = [
     },
     async run(t) {
       const started: AlgoView[] = [];
-      for (const symbol of BOT_SYMBOLS) {
-        started.push(await t.start({ kind: 'mm', symbol, orderUsd: t.U, maxInventoryUsd: 3 * t.U, skewTicks: 3, chaseTicks: 1, minRepriceMs: 1_000, maxLossUsd: 2, volumeTargetUsd: 10_000 * t.U, onStop: 'close', ...MM_TUNING }));
+      try {
+        for (const symbol of BOT_SYMBOLS) {
+          started.push(await t.start({ kind: 'mm', symbol, orderUsd: t.U, maxInventoryUsd: 3 * t.U, skewTicks: 3, chaseTicks: 1, minRepriceMs: 1_000, maxLossUsd: 2, volumeTargetUsd: 10_000 * t.U, onStop: 'close', ...MM_TUNING }));
+        }
+      } catch (e) {
+        // One refused start (margin, a market conflict) must not leave the others running past the scenario.
+        for (const v0 of started) await t.exec.algoAct('cancel', v0.algo.id).catch(() => undefined);
+        throw e;
       }
       // All run the same minutes; then each stops (closing what it holds) and is reported on its own market.
       for (const end = Date.now() + RUN_MS; Date.now() < end; ) {
