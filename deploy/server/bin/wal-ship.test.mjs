@@ -41,7 +41,8 @@ import { DatabaseSync } from 'node:sqlite';
 import { Worker } from 'node:worker_threads';
 import { statSync } from 'node:fs';
 const file = process.argv[2];
-const GAP = process.env.WRITER_GAP_MS === undefined ? -1 : Number(process.env.WRITER_GAP_MS);
+let GAP = process.env.WRITER_GAP_MS === undefined ? -1 : Number(process.env.WRITER_GAP_MS);
+const GAP0 = GAP;
 const db = new DatabaseSync(file);
 db.exec('PRAGMA busy_timeout = 5000');
 db.exec('PRAGMA synchronous = NORMAL');
@@ -133,6 +134,8 @@ const stats = () => {
 };
 process.on('message', (m) => {
   if (m === 'phase') { process.send({ phase: stats() }); lat = []; bigLat = []; maxWal = 0; txns = 0; rolledBack = 0; big = 0; vacuums = 0; ck.postMessage('reset'); }
+  if (m === 'nonstop') { GAP = 0; process.send({ gap: 0 }); }
+  if (m === 'pauses') { GAP = GAP0; process.send({ gap: GAP0 }); }
   if (m === 'stop') {
     stopped = true;
     setTimeout(() => { ck.terminate(); const s = stats(); db.close(); process.send({ stopped: s }); process.exit(0); }, 50);
@@ -208,12 +211,12 @@ function startWriter(dir, file) {
   writeFileSync(w, WRITER);
   const p = spawn(NODE, ['--disable-warning=ExperimentalWarning', w, file], { stdio: ['ignore', 'inherit', 'inherit', 'ipc'] });
   const ask = (msg, key) => new Promise((res) => {
-    const on = (m) => { if (m && m[key]) { p.off('message', on); res(m[key]); } };
+    const on = (m) => { if (m && typeof m === 'object' && key in m) { p.off('message', on); res(m[key]); } };
     p.on('message', on);
     p.send(msg);
   });
   const ready = new Promise((res) => p.once('message', (m) => m === 'ready' && res()));
-  return { p, ready, phase: () => ask('phase', 'phase'), stop: () => ask('stop', 'stopped') };
+  return { p, ready, phase: () => ask('phase', 'phase'), stop: () => ask('stop', 'stopped'), nonstop: () => ask('nonstop', 'gap'), pauses: () => ask('pauses', 'gap') };
 }
 
 const ENV = {
@@ -223,6 +226,9 @@ const ENV = {
   WALSHIP_SPOOL_MEM_MB: '4',
   WALSHIP_SYNC_MS: '500',
   WALSHIP_STATUS_MS: '200',
+  // Scaled to this test's WAL: journal_size_limit 64 MB, FULL from 4,000 frames (production: 1 GiB, 64,000).
+  WALSHIP_YIELD_MIN_FRAMES: process.env.WALSHIP_YIELD_MIN_FRAMES ?? '1024',
+  WALSHIP_WAL_LIMIT_MB: '64',
 };
 
 function startShipper(file, dir) {
@@ -275,6 +281,14 @@ test('the WAL shipper keeps a consistent copy of a database written all the time
     await writer.phase();
     await sleep(PHASE_MS);
     report.baseline = await writer.phase(); // the writer and its checkpointer alone
+    // The same without pauses between transactions: the worst case for the WAL starting over.
+    await writer.nonstop();
+    await writer.phase();
+    await sleep(PHASE_MS);
+    report.baselineNonstop = await writer.phase();
+    await writer.pauses();
+    await sleep(1000);
+    await writer.phase();
 
     // The shipper: the base copy while the writer runs, then the WAL.
     ship = startShipper(file, rdir);
@@ -283,6 +297,25 @@ test('the WAL shipper keeps a consistent copy of a database written all the time
     report.baseCopy = status(rdir).lastBase;
     await sleep(PHASE_MS);
     report.following = await writer.phase();
+    // A non-stop writer with the shipper following: the yields must let the WAL start over.
+    {
+      await writer.nonstop();
+      await writer.phase();
+      const s0 = status(rdir);
+      await sleep(2 * PHASE_MS);
+      report.followingNonstop = await writer.phase();
+      const s1 = status(rdir);
+      report.followingNonstop.shipper = {
+        walRestarts: s1.walRestarts - s0.walRestarts,
+        yields: s1.yields - s0.yields,
+        restartsDuringYield: s1.restartsDuringYield - s0.restartsDuringYield,
+        recoveredFrames: s1.recoveredFrames - s0.recoveredFrames,
+        unpinnedShare: Math.round(((s1.yieldMs - s0.yieldMs) / (Date.parse(s1.at) - Date.parse(s0.at))) * 100) / 100,
+        rebases: s1.rebases - s0.rebases,
+        health: s1.health,
+      };
+      await writer.pauses();
+    }
 
     // Snapshot 1, while the writer runs.
     const snap1 = join(dir, 'snap1.db');
@@ -381,7 +414,7 @@ test('the WAL shipper keeps a consistent copy of a database written all the time
     }
 
     const st = status(rdir);
-    const pick = (x) => ({ frames: x.frames, mb: Math.round(x.bytes / 1e6), commits: x.commits, walRestarts: x.walRestarts, rewinds: x.rewinds, stuck: x.stuck, paused: x.paused, startCatchUpMs: x.startCatchUpMs });
+    const pick = (x) => ({ frames: x.frames, mb: Math.round(x.bytes / 1e6), commits: x.commits, walRestarts: x.walRestarts, rewinds: x.rewinds, stuck: x.stuck, paused: x.paused, startCatchUpMs: x.startCatchUpMs, yields: x.yields, restartsDuringYield: x.restartsDuringYield, recoveries: x.recoveries, recoveredFrames: x.recoveredFrames, rebases: x.rebases, health: x.health });
     report.shipper = { beforeKill: { pins: before.pins, ...pick(before) }, afterKill: { pins: beforeStop.pins, ...pick(beforeStop) } };
     ship.p.kill('SIGTERM');
     await new Promise((res) => ship.p.once('exit', res));
@@ -403,6 +436,12 @@ test('the WAL shipper keeps a consistent copy of a database written all the time
     }
     assert.equal(st.stuck + before.stuck + beforeStop.stuck, 0, 'never stuck');
     const cap = Math.max(4 * report.baseline.checkpointer.logMax, report.baseline.checkpointer.logMax + 16384);
+    // The non-stop writer: with the shipper the WAL starts over as it does without it, and stays as small.
+    const ns = report.followingNonstop;
+    assert.ok(ns.shipper.walRestarts > 0, 'the WAL started over under a non-stop writer with the shipper following');
+    assert.equal(ns.shipper.rebases, 0, 'no base copy needed: every restart during a yield was recovered and proven whole');
+    assert.ok(ns.checkpointer.logMax <= Math.max(2 * report.baselineNonstop.checkpointer.logMax, report.baselineNonstop.checkpointer.logMax + 4096),
+      `WAL ${ns.checkpointer.logMax} frames with the shipper vs ${report.baselineNonstop.checkpointer.logMax} without (non-stop writer)`);
     for (const k of ['duringBaseCopy', 'following', 'duringSnapshot', 'afterRestart']) {
       assert.ok(report[k].checkpointer.logMax <= cap, `WAL ${report[k].checkpointer.logMax} frames ${k} vs ${report.baseline.checkpointer.logMax} without the shipper`);
       if (STRICT) assert.ok(report[k].commitMs.max < 250, `the writer's longest small commit ${k}: ${report[k].commitMs.max} ms`);

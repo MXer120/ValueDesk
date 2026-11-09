@@ -187,8 +187,8 @@ over the copy's older bytes), and never again. The nightly `backup.sh` asks it f
 writes `.sha256` and a `.meta.json` (the check's figures) next to it. Everything downstream
 (the archive, `restore.sh`, the weekly off-server `index` set) is unchanged.
 
-Safety nets: a watchdog kills the shipper if its loop stalls for 2 s while a read transaction
-is open; a read transaction that ages past 1 s without the reading getting anywhere is let go
+Safety nets: the yield (below) lets the WAL start over; a watchdog kills the shipper if its loop
+stalls for 2 s while a read transaction is open; a read transaction that ages past 1 s without the reading getting anywhere is let go
 (and the base copy redone); the live database is opened read-only. Page cache: the unit runs
 under `MemoryHigh=1G`, the backup unit under `MemoryHigh=6G`, so what they read is reclaimed
 from their own cgroup, not from the indexer's (cgroup v2, AlmaLinux 9's default).
@@ -210,30 +210,88 @@ tried on 2026-11-05 and fragmented the live file for good (61 -> 1,172,730 exten
 snapshot copies blocks on first write instead, so it does not fragment the origin, but it still
 needs the 50 GB copy-out read.
 
-**Measured** (`deploy/server/bin/wal-ship.test.mjs`, 2026-11-09, Windows laptop, Node 24.22, 8
-logical CPUs at 76-90 % load from other programs; 57 MB scratch database; a writer with the
-indexer's settings and checkpoint thread (PASSIVE + FULL with a 250 ms wait), small and
-cache-spilling transactions, rollbacks, deletes, incremental vacuum; 5 s phases):
+**The yield (so the WAL can start over).** A read transaction with a positive read mark keeps
+SQLite's writer from starting the WAL over (`walRestartLog` needs every such reader gone). With
+a pin always open and a writer that never pauses, the WAL would only grow. That growth is what
+starved the indexer on 2026-11-08. So whenever the shipper has read every committed frame and
+the WAL holds 4,096 frames or more (`WALSHIP_YIELD_MIN_FRAMES`), it holds **no pin at all** for
+400 ms (`WALSHIP_YIELD_MS`). That is longer than the checkpointer's 250 ms FULL wait. It keeps
+reading every 2 ms during the window, and ends the window early once a restart is seen. Why
+this loses nothing:
+- Without a pin a checkpoint may copy frames not yet read into the main file. They stay in the
+  WAL, so the shipper still reads them.
+- Only a restart overwrites the WAL, and it does so from frame 1 upwards. After a restart, the
+  old generation's frames past the new generation's write position are still in the file,
+  byte for byte. The shipper reads that old tail with the old checksum chain and applies every
+  commit in it.
+- That is **proven whole** only when the first old frame that does not check out (position p)
+  lies at or past `k + 2`, where k is the number of frames the new generation has completed,
+  counted after the scan (it can only be writing frame k+1). A stop at the end of the file only
+  counts while the WAL is under the journal size limit (`WALSHIP_WAL_LIMIT_MB`, 1024 = the
+  indexer's `journal_size_limit`). A truncation to 0 is regrown by the new generation, which
+  p ≥ k+2 excludes.
+- Anything else is a gap: a sequence number that jumped by 2, a new generation that reached the
+  old end, a WAL at the size limit. A gap means a new base copy. **It is never a silent loss.**
+- Yields happen in follow mode only, never during a base copy.
+- The first normal pin release after a window restores the plain pin guarantee.
 
-| | writer's small commits p50 / p99 / max | frames in the WAL at a checkpoint, max | shipper read transactions |
-|---|---|---|---|
-| writer alone | 0.4 / 9.2 / 14.4 ms | 4,572 | - |
-| shipper: base copy (58 MB/s) | 0.3 / 8.1 / 8.1 ms | 5,273 | |
-| shipper: following | 0.3 / 6.2 / 15.7 ms | 5,265 | 627 until kill -9: max 38.6 ms, mean 14.7 ms, 99.9 % <= 50 ms |
-| shipper: snapshot (78 MB/s) | 0.3 / 5.3 / 5.3 ms | 6,888 | |
-| shipper: after kill -9 (resumed, no new copy) | 0.3 / 35.7 / 35.7 ms | 12,892 | 174: max 43.4 ms, 99.9 % <= 50 ms |
-| one read transaction held 5 s (the old way) | 0.3 / 6.7 / **437 ms** | 7,678 | - |
+**Measured** (`deploy/server/bin/wal-ship.test.mjs`, 2026-11-09, Windows laptop, Node 24.22,
+8 logical CPUs at 76–90% load from other programs). Setup: a 57 MB scratch database and a
+writer with the indexer's settings. The checkpoint thread runs PASSIVE every 300 ms and FULL
+from 4,000 frames at most every 2 s, with a 250 ms wait. The writer mixes small and
+cache-spilling transactions, rollbacks, deletes and incremental vacuum. Phases are 5 s, the
+non-stop phase 10 s. Yield settings are scaled to the test's 64 MB WAL limit (1,024 frames).
+Two runs:
 
-Snapshots taken while the writer ran were one committed instant (integrity_check ok; totals row =
-count/sum of the items table = the last ledger row). The final snapshot equalled the source table by
-table (SHA-256 of every row). The drill restored the zstd archive, matched its SHA-256 and
-the backup-time figures, and passed integrity_check. On the same laptop under heavier load, pins
-reached 823 ms and the writer's own baseline commits reached 615 ms, all of it timer and CPU delay (the
-debug log shows the shipper's own work per pin under 10 ms in most of them). Hence the test's tight
-bounds only with `WALSHIP_TEST_STRICT=1` on a quiet machine. **Not measured: Linux, and the 50 GB
-production file**; the base copy there takes ~35 min at 25 MB/s. A risk to watch: the WAL can only
-start over when no reader holds a positive read mark, so while the indexer writes without pauses the
-shipper delays WAL restarts (2.8x the frames after the kill -9 phase above). See "verify" below.
+| | writer's small commits p50 / p99 / max | WAL frames at a checkpoint, max |
+|---|---|---|
+| writer alone, with pauses | 0.3 / 3.6 / 3.7 ms · 0.3 / 3.1 / 3.1 | 4,787 · 4,660 |
+| writer alone, **non-stop** | 0.3 / 4.3 / 6.6 · 0.2 / 4.6 / 33 | 8,569 · 9,294 |
+| shipper: base copy (58 MB/s) | 0.3 / 2.3 / 2.3 · 0.3 / 30.7 / 30.7 | 4,964 · 5,815 |
+| shipper: following | 0.3 / 4.2 / 5.4 · 0.2 / 4.0 / 4.5 | 7,124 · 5,730 |
+| shipper: following a **non-stop** writer | 0.2 / 3.6 / 4.5 · 0.2 / 4.0 / 16 | **9,036 · 8,217** |
+| shipper: snapshot (78 MB/s) | 0.2 / 5.4 / 5.4 · 0.2 / 31.5 / 31.5 | 5,009 · 4,334 |
+| shipper: after kill -9 | 0.2 / 3.9 / 5.3 · 0.2 / 3.8 / 5.0 | 6,437 · 4,718 |
+| one read transaction held 5 s (the old way) | 0.3 / 6.4 / **435** · 0.2 / 4.2 / **324** | 12,490 · 14,713 |
+
+Against the non-stop writer, the WAL started over 5 times in each run, every time during a
+yield. 295 and 39 committed frames were read back from old tails; checkpoints had already
+copied them into the main file, so a WAL reader would otherwise have missed them. No new base
+copy was needed. The shipper held no pin 73% and 64% of the time.
+
+Read transactions while pinned: max 29.6 / 32.9 ms until the kill -9 (787 / 890 of them,
+99.9% ≤ 50 ms) and 31.3 / 25.9 ms after it. Snapshots taken while the writer ran were each one
+committed instant: integrity_check ok, and the totals row equals the count and sum of the items
+table equals the last ledger row. The final replica equalled the source table by table (SHA-256
+of every row: items 85,153 rows, ledger 1,911, totals, meta). The drill restored the zstd
+archive, matched its SHA-256 and the backup-time figures, and passed integrity_check.
+
+On the same laptop under heavier load, pins reached 823 ms and the writer's own baseline commits
+reached 615 ms, all of it timer and CPU delay. Hence the test's tight bounds apply only with
+`WALSHIP_TEST_STRICT=1` on a quiet machine. **Not measured: Linux, and the 50 GB production
+file**; the base copy there takes ~35 min at 25 MB/s.
+
+### Health signal (for the status prober)
+
+The shipper rewrites `<WALSHIP_DIR>/status.json` (`/var/lib/valuescan/backup/replica/status.json`)
+every 2 s (`WALSHIP_STATUS_MS`). The same JSON comes out of
+`node /opt/valuescan/bin/wal-ship.mjs status --dir /var/lib/valuescan/backup/replica`.
+
+| field | meaning | alert when |
+|---|---|---|
+| `at` | ISO time of this write | older than 30 s: dead or hung (systemd restarts it; a watchdog kills a stuck loop) |
+| `health.ok` | no problem below | false for more than 5 min (a base copy is reported as a problem: `mode` tells which) |
+| `health.problems` | text of each problem: not caught up for > 30 s, replica not synced for > 60 s, writer thread > 256 MB behind, a read transaction > 1 s in the last minute, mode not `follow` | |
+| `health.behindS` | seconds since everything the `-shm` calls committed was read | > 30 |
+| `health.appliedBehindFrames` | frames read but not yet in the replica | growing for minutes |
+| `mode` | `follow` (normal), `rebase` (base copy running), `starting` | `rebase` longer than the index size / `WALSHIP_BASE_MB_S` + 10 min |
+| `copy` | `{kind, done, total, mbPerS}` of a base copy or snapshot in progress | |
+| `pins.lastMinuteMaxMs`, `pins.maxMs`, `pins.p99` | read transactions on the live file | `lastMinuteMaxMs` > 250 |
+| `walBytes`, `walFrames` | the live WAL's file size, frames committed in it | `walBytes` > 1 GiB |
+| `walRestarts`, `yields`, `restartsDuringYield`, `recoveredFrames`, `lastRecovery` | the WAL starting over and what was read back from old tails | `walRestarts` flat for an hour while `walFrames` grows |
+| `rebases`, `resumes`, `lastBase` | base copies made (and why), restarts resumed | `rebases` rising without a deploy |
+| `stuck`, `errors` | read made no headway (pins let go), failed snapshots | rising |
+| `lastSyncAt`, `lastSnapshot`, `lastCaughtUpAt`, `lastCommitAt` | ISO times | |
 
 ### Enable (owner, server 1; nothing of this is switched on by a release)
 
@@ -260,11 +318,11 @@ shipper delays WAL restarts (2.8x the frames after the kill -9 phase above). See
 
 ### Verify (after enabling, and after any change)
 
-- `wal-ship.mjs status`: `mode: follow`, `lastSyncAgoS` < 10, `pins.lastMinuteMaxMs` well under 250,
-  `stuck: 0`, `appliedFrame` close to `frame`.
-- The WAL: `ls -l /var/lib/valuescan/index/valuescan-index.db-wal` and the indexer's checkpoint status
-  (`log` frames). If the WAL keeps growing past ~1 GB while the shipper runs (WAL restarts blocked), stop
-  the shipper (below) and report it.
+- `wal-ship.mjs status`: `health.ok: true`, `mode: follow`, `lastSyncAgoS` < 10, `pins.lastMinuteMaxMs`
+  well under 250, `stuck: 0`, `yields` and `walRestarts` rising over the hours (the WAL starts over).
+- The WAL: `walBytes` / `walFrames` there, or `ls -l /var/lib/valuescan/index/valuescan-index.db-wal`, and the
+  indexer's checkpoint status (`log` frames). If the WAL keeps growing past ~1 GB while the shipper runs,
+  stop the shipper (below) and report it.
 - `last-backup.json` fresh: `deploy/release/remote.sh health` (check `backup`).
 
 ### Restore

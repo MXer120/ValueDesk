@@ -25,6 +25,16 @@
 // PASSIVE checkpoints copy all but the last few milliseconds of WAL as before. The main thread only reads and checks:
 // every write, fsync and copy happens on the writer thread, so the disk never holds a pin open.
 //
+// THE YIELD. A pin with a positive read mark keeps the writer from starting the WAL over (wal.c walRestartLog wants
+// every reader gone), so with pins held always and a writer that never pauses the WAL would only grow - what starved
+// the indexer on 2026-11-08. So once every committed frame is read and the WAL holds WALSHIP_YIELD_MIN_FRAMES (4096)
+// or more, the shipper holds NO pin for WALSHIP_YIELD_MS (400 ms, longer than the checkpointer's 250 ms FULL wait),
+// reading on every 2 ms. Without a pin a checkpoint can copy unread frames into the file - harmless, they stay in the
+// WAL - and the writer can start the WAL over, overwriting from frame 1 on. Then the old generation's tail is still in
+// the file past the new generation's write position: recoverOldTail() reads it and proves it whole (p >= k + 2), or
+// declares a gap (a new base copy). Never a silent loss. The first pin after a yield ends the extra care once the
+// reading has caught up under it.
+//
 //   - First start, or after a gap it cannot prove complete: ONE base copy of the live file, read in 1 MiB pieces at
 //     WALSHIP_BASE_MB_S (25) while the WAL is followed from its first frame. Pages the WAL brings meanwhile are marked
 //     and never overwritten by the copy's older bytes, so copy + WAL is one committed instant (the fuzzy copy plus redo
@@ -69,6 +79,13 @@ const SPOOL_MEM = num('WALSHIP_SPOOL_MEM_MB', 64) * 1024 * 1024;
 const MAX_OUTSTANDING = num('WALSHIP_MAX_OUTSTANDING_MB', 512) * 1024 * 1024;
 const WATCHDOG_MS = num('WALSHIP_WATCHDOG_MS', 2000);
 const PIN_STUCK_MS = num('WALSHIP_PIN_STUCK_MS', 1000);
+// The yield: once every committed frame is read and the WAL holds YIELD_MIN_FRAMES or more, no pin at all for YIELD_MS
+// (longer than the indexer checkpointer's 250 ms FULL wait), reading on every YIELD_POLL_MS, so the WAL can start over.
+const YIELD_MS = num('WALSHIP_YIELD_MS', 400);
+const YIELD_MIN_FRAMES = num('WALSHIP_YIELD_MIN_FRAMES', 4096);
+const YIELD_POLL_MS = num('WALSHIP_YIELD_POLL_MS', 2);
+// The index's journal_size_limit (apps/server/src/indexer/store.ts WAL_LIMIT_BYTES): SQLite truncates the WAL to it.
+const WAL_LIMIT = num('WALSHIP_WAL_LIMIT_MB', 1024) * 1024 * 1024;
 const DEBUG = !!process.env.WALSHIP_DEBUG;
 
 const HOST_LE = new Uint8Array(new Uint32Array([1]).buffer)[0] === 1;
@@ -514,6 +531,7 @@ class Shipper {
     this.stats = {
       frames: 0, bytes: 0, commits: 0, rebases: 0, resumes: 0, walRestarts: 0, rewinds: 0, stuck: 0, paused: 0,
       startCatchUpMs: null, lastCommitAt: null, lastSyncAt: null, lastBase: null, lastSnapshot: null, errors: 0,
+      yields: 0, yieldMs: 0, restartsDuringYield: 0, recoveries: 0, recoveredFrames: 0, lastCaughtUpAt: null,
     };
     this.lastSaved = null;
     this.syncing = false;
@@ -620,22 +638,115 @@ class Shipper {
   }
 
   /**
-   * The WAL started over. Frames of the old generation past the last commit read here that are still in the file (the
-   * new one overwrites from its first frame on) must not hold a commit: that would be a commit never read, which the
-   * pins exclude. A check that it holds, not a mechanism.
+   * The WAL started over (new header `h`). Read what is still in the file of the old generation past the last commit
+   * read here, and hand over every committed transaction in it. SQLite starts the new generation at frame 1 and writes
+   * frame after frame, so old frames past the new generation's write position are the old bytes, whole.
+   *
+   * Pinned all along, there is nothing to find: a restart needs every frame copied into the file, and the pins hold the
+   * copying at what was read. After a yield (no pin for a moment: this.unpinnedRisk) the old generation may hold commits
+   * never read: they are read here. That is provably the whole old generation only when the first frame that does not
+   * check out (p, 1-based) lies past every position the new generation can have touched during this scan: p >= k + 2,
+   * k = frames of the new generation complete AFTER the scan (it may be writing frame k + 1, nothing beyond). A stop at
+   * the end of the file is an end only while the file is under the journal size limit (SQLite truncates to that limit,
+   * or to 0 - and then the new generation regrows it to k frames, which p >= k + 2 excludes). Anything else is a gap:
+   * the copy is made again. Never a silent loss.
    */
-  checkOldTail() {
-    const ps = this.gen.pageSize;
+  recoverOldTail(h) {
+    const g = this.gen;
+    const ps = g.pageSize;
     const fs = FRAME_HDR + ps;
+    this.dropTxn();
+    let pos = this.S;
+    let chain = [this.chainS[0], this.chainS[1]];
+    let stop = null; // 'eof' | 'invalid'
+    let recovered = 0;
+    if (!this.readBuf || this.readBuf.length !== MAX_FRAMES * fs) this.readBuf = Buffer.allocUnsafeSlow(MAX_FRAMES * fs);
+    const buf = this.readBuf;
+    while (!stop) {
+      const n = Math.floor(readFully(this.walFd, buf, buf.length, WAL_HDR + pos * fs) / fs);
+      const ops = [];
+      const commits = [];
+      const start = pos;
+      let open = 0;
+      for (let i = 0; i < n; i++) {
+        const o = i * fs;
+        if (buf.readUInt32BE(o) === 0 || buf.readUInt32BE(o + 8) !== g.salt1 || buf.readUInt32BE(o + 12) !== g.salt2) {
+          stop = 'invalid';
+          break;
+        }
+        const ck = [chain[0], chain[1]];
+        walChecksum(buf, o, 8, g.be, ck);
+        walChecksum(buf, o + FRAME_HDR, ps, g.be, ck);
+        if (ck[0] !== buf.readUInt32BE(o + 16) || ck[1] !== buf.readUInt32BE(o + 20)) {
+          stop = 'invalid';
+          break;
+        }
+        chain = ck;
+        pos++;
+        ops.push(0, this.txnId, buf.readUInt32BE(o), o + FRAME_HDR);
+        open++;
+        const commit = buf.readUInt32BE(o + 4);
+        if (commit) {
+          this.S = pos;
+          this.chainS = [ck[0], ck[1]];
+          commits.push({ txn: this.txnId, ps, dbPages: commit, gen: g, frame: pos, chain: [ck[0], ck[1]], at: now() });
+          this.txnId++;
+          recovered += open;
+          open = 0;
+          this.stats.commits++;
+          this.stats.lastCommitAt = now();
+        }
+      }
+      if (!stop && n < MAX_FRAMES) stop = 'eof';
+      if (ops.length) {
+        const ab = buf.buffer.slice(buf.byteOffset, buf.byteOffset + (pos - start) * fs);
+        this.outstanding += ab.byteLength;
+        this.worker.postMessage({ t: 'pass', buf: ab, ps, ops, commits }, [ab]);
+      }
+    }
+    // Frames after the last commit were never committed (a transaction that rolled back): dropped.
+    if (pos > this.S) {
+      this.worker.postMessage({ t: 'drop', txn: this.txnId });
+      this.txnId++;
+    }
+    this.txnTouched = false;
+    this.readPos = this.S;
+    this.chainR = [this.chainS[0], this.chainS[1]];
+    if (recovered) {
+      this.stats.recoveredFrames += recovered;
+      this.stats.recoveries++;
+    }
+    if (!this.unpinnedRisk) {
+      if (recovered) log(`recovered ${recovered} frames of WAL generation ${g.seq} after it started over (while pinned: unexpected)`);
+      return;
+    }
+    // Unpinned since the last provable point: prove the old generation was read to its end.
+    let k = 0;
+    const ck = [h.ck[0], h.ck[1]];
     const b = Buffer.allocUnsafe(fs);
-    const ck = [this.chainS[0], this.chainS[1]];
-    for (let f = this.S; ; f++) {
-      if (readFully(this.walFd, b, fs, WAL_HDR + f * fs) < fs) return;
-      if (b.readUInt32BE(8) !== this.gen.salt1 || b.readUInt32BE(12) !== this.gen.salt2) return;
-      walChecksum(b, 0, 8, this.gen.be, ck);
-      walChecksum(b, FRAME_HDR, ps, this.gen.be, ck);
-      if (ck[0] !== b.readUInt32BE(16) || ck[1] !== b.readUInt32BE(20)) return;
-      if (b.readUInt32BE(4)) throw new GapError(`the WAL started over with a commit at frame ${f + 1} never read`);
+    for (;;) {
+      if (readFully(this.walFd, b, fs, WAL_HDR + k * fs) < fs) break;
+      if (b.readUInt32BE(8) !== h.salt1 || b.readUInt32BE(12) !== h.salt2) break;
+      walChecksum(b, 0, 8, h.be, ck);
+      walChecksum(b, FRAME_HDR, ps, h.be, ck);
+      if (ck[0] !== b.readUInt32BE(16) || ck[1] !== b.readUInt32BE(20)) break;
+      k++;
+    }
+    const p = pos + 1;
+    let walSize = 0;
+    try { walSize = fstatSync(this.walFd).size; } catch { /* */ }
+    this.stats.lastRecovery = { at: iso(now()), oldEnd: p, newFrames: k, recovered, stop };
+    if (p < k + 2) throw new GapError(`the WAL started over during a yield and its new generation (${k} frames) reached the old one's end (frame ${p}): not provably whole`);
+    if (stop === 'eof' && walSize >= WAL_LIMIT) throw new GapError(`the WAL started over during a yield with the file at the journal size limit (${walSize} B): the old generation may have been cut`);
+    if (recovered) log(`WAL generation ${g.seq} ended during a yield: ${recovered} frames read from its tail (new generation at ${k} frames, old end at frame ${p})`);
+  }
+
+  /** Everything the -shm calls committed is read: the health signal's "caught up". */
+  noteCaughtUp() {
+    const s = this.shmHeader();
+    if (s) this.walFrames = s.mxFrame;
+    if (!s || !this.gen || s.mxFrame === 0 || (s.salt1 === this.gen.salt1 && s.salt2 === this.gen.salt2 && this.S >= s.mxFrame)) {
+      this.stats.lastCaughtUpAt = now();
     }
   }
 
@@ -673,8 +784,9 @@ class Shipper {
       if (h.seq !== ((this.gen.seq + 1) >>> 0) || h.pageSize !== this.gen.pageSize) {
         throw new GapError(`the WAL started over unseen (checkpoint sequence ${this.gen.seq} -> ${h.seq})`);
       }
-      this.checkOldTail();
+      this.recoverOldTail(h);
       this.stats.walRestarts++;
+      this.restartSeen = true;
       this.adopt(h);
     }
     const ps = this.gen.pageSize;
@@ -775,6 +887,9 @@ class Shipper {
   /** Throw away what was read; read the WAL from its first frame and copy the live file again. */
   startRebase(reason) {
     this.mode = 'rebase';
+    this.yieldUntil = 0;
+    this.unpinnedRisk = false;
+    this.afterYield = false;
     this.stats.rebases++;
     const need = statSync(this.dbPath).size;
     const free = freeBytes(this.dir);
@@ -892,9 +1007,23 @@ class Shipper {
     let walBytes = null;
     try { walBytes = statSync(this.walPath).size; } catch { /* */ }
     const w = this.workerState;
+    // The health signal (docs/deploy/BACKUPS.md, "Health signal"): a prober alerts when `at` stops moving (the process
+    // is dead or hung) or `health.ok` stays false.
+    const pins = this.pins.toJSON();
+    const behindS = this.stats.lastCaughtUpAt ? r1((now() - this.stats.lastCaughtUpAt) / 1000) : null;
+    const syncAgo = this.stats.lastSyncAt ? r1((now() - this.stats.lastSyncAt) / 1000) : null;
+    const problems = [];
+    if (this.mode !== 'follow') problems.push(this.mode === 'rebase' ? 'base copy running (no snapshot possible yet)' : `mode ${this.mode}`);
+    if (behindS === null || behindS > 30) problems.push(`not caught up with the WAL for ${behindS ?? '?'} s`);
+    if (this.mode === 'follow' && (syncAgo === null || syncAgo > 60)) problems.push(`replica not synced for ${syncAgo ?? '?'} s`);
+    if (this.outstanding > 256 * 1024 * 1024) problems.push(`writer thread ${Math.round(this.outstanding / 1e6)} MB behind`);
+    if (pins.lastMinuteMaxMs > 1000) problems.push(`a read transaction lasted ${pins.lastMinuteMaxMs} ms`);
     writeJsonQuick(this.statusPath, {
       at: iso(now()),
       pid: process.pid,
+      health: { ok: problems.length === 0, problems, behindS, appliedBehindFrames: this.gen && w.applied?.gen?.salt1 === this.gen.salt1 ? this.S - w.applied.frame : null },
+      walFrames: this.walFrames ?? null,
+      yielding: !!this.yieldUntil,
       mode: this.mode,
       db: this.dbPath,
       generation: this.gen,
@@ -906,12 +1035,14 @@ class Shipper {
       walBytes,
       spoolBytes: w.spoolBytes ?? 0,
       lastSyncAgoS: this.stats.lastSyncAt ? r1((now() - this.stats.lastSyncAt) / 1000) : null,
-      pins: this.pins.toJSON(),
+      pins,
       copy: w.copy ?? null,
       ...this.stats,
+      yieldMs: Math.round(this.stats.yieldMs),
       lastCommitAt: iso(this.stats.lastCommitAt),
       lastSyncAt: iso(this.stats.lastSyncAt),
-      settings: { POLL_MS, MAX_FRAMES, BASE_MB_S, SNAP_MB_S, CHUNK, SYNC_MS, SPOOL_MEM, WATCHDOG_MS, PIN_STUCK_MS },
+      lastCaughtUpAt: iso(this.stats.lastCaughtUpAt),
+      settings: { POLL_MS, MAX_FRAMES, BASE_MB_S, SNAP_MB_S, CHUNK, SYNC_MS, SPOOL_MEM, WATCHDOG_MS, PIN_STUCK_MS, YIELD_MS, YIELD_MIN_FRAMES, WAL_LIMIT },
     });
   }
 
@@ -969,15 +1100,45 @@ class Shipper {
       }
       let r;
       try {
-        if (this.held.length === 1) {
+        if (this.yieldUntil) {
+          // The yield: no pin. Reading goes on; a restart's old tail is recovered in pass().
+          this.restartSeen = false;
+          this.pass();
+          this.noteCaughtUp();
+          if (this.restartSeen) this.stats.restartsDuringYield++;
+          if (this.restartSeen || now() >= this.yieldUntil) {
+            this.stats.yieldMs += now() - this.yieldStarted;
+            this.yieldUntil = 0;
+            this.takePin();
+            this.need = this.shmHeader();
+            this.afterYield = true;
+          }
+          r = { ended: true, inYield: true };
+        } else if (this.held.length === 1) {
           this.takePin();
           this.need = this.shmHeader();
         }
-        r = this.pass();
-        if (this.held.length === 2) {
+        if (!r) r = this.pass();
+        if (!r.inYield && this.held.length === 2) {
           if (this.readEnough(r)) {
             // Everything committed before the newer pin was taken is read: the older one may go.
             this.releaseOldest();
+            this.noteCaughtUp();
+            // The pin left was taken after the yield, with everything committed up to its snapshot read since: from
+            // here the pins alone guarantee that no frame is lost again.
+            if (this.afterYield) {
+              this.afterYield = false;
+              this.unpinnedRisk = false;
+            }
+            const n = this.need;
+            if (this.mode === 'follow' && !this.unpinnedRisk && n && this.gen && n.salt1 === this.gen.salt1 && n.salt2 === this.gen.salt2
+              && n.mxFrame >= YIELD_MIN_FRAMES && this.S >= n.mxFrame) {
+              this.releaseAll();
+              this.unpinnedRisk = true;
+              this.yieldStarted = now();
+              this.yieldUntil = this.yieldStarted + YIELD_MS;
+              this.stats.yields++;
+            }
             if (!releasedOnce) {
               releasedOnce = true;
               this.stats.startCatchUpMs = Math.round(now() - t0);
@@ -1023,7 +1184,8 @@ class Shipper {
         if (DEBUG) (p.works ??= []).push(now() - tickAt);
       }
       this.lastTickEnd = now();
-      if (r.ended) setTimeout(loopSafe, POLL_MS);
+      if (this.yieldUntil) setTimeout(loopSafe, YIELD_POLL_MS);
+      else if (r.ended) setTimeout(loopSafe, POLL_MS);
       else setImmediate(loopSafe);
     };
     const loopSafe = () => {
