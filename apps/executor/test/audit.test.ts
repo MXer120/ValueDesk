@@ -335,6 +335,23 @@ test('BUG: a second executor on the same data directory is not refused (two copi
 
 /* ----------------------------------------------------- HTTP edges (coverage) ----- */
 
+test('the VIP import takes a body far over 64 KB, but only with the VIP token (2026-11-09: 7 small bots were refused "too large")', async () => {
+  const { cfg, svc, cleanup } = make({ EXECUTOR_KIND: 'hosted', EXECUTOR_EDGE: 'none', EXECUTOR_TIER: 'vip', EXECUTOR_VIP_TOKEN: 'tok' });
+  await svc.start();
+  const server = createExecutorServer(svc, cfg, silent);
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()));
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/copy/v1`;
+  const body = JSON.stringify({ owner: '0x0', job: 'j', pad: 'x'.repeat(2 * 1024 * 1024) });
+  const ok = await fetch(`${base}/internal/vip/import`, { method: 'POST', headers: { 'X-Internal-Token': 'tok', 'Content-Type': 'application/json' }, body });
+  assert.notEqual(ok.status, 413, 'a 2 MB import is read');
+  const no = await fetch(`${base}/internal/vip/import`, { method: 'POST', headers: { 'X-Internal-Token': 'wrong' }, body });
+  assert.equal(no.status, 404, 'without the token: no such route, the body is never read');
+  const big = await fetch(`${base}/session`, { method: 'POST', body: 'x'.repeat(70 * 1024) });
+  assert.equal(big.status, 413, 'every other route keeps 64 KB');
+  await new Promise<void>((r) => server.close(() => r()));
+  await cleanup();
+});
+
 test('audit: HTTP - body limit, CORS only for allowed origins, the write rate limit, a closed executor still stops copies', async () => {
   const { cfg, svc, cleanup } = make({ EXECUTOR_KIND: 'hosted', EXECUTOR_OPEN: '0', EXECUTOR_ALLOWED_ORIGINS: 'https://valuedesk.so' });
   await svc.start();
