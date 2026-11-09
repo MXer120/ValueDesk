@@ -334,12 +334,20 @@ test('on the fills read thread (production): the same answers byte for byte, and
   const { IndexStore } = await import('../src/indexer/store.js');
   const W = await import('../src/indexer/walletFills.js');
   const R = await import('../src/indexer/liqReadThread.js');
-  const urls = [`venue=hyperliquid&address=${HL}&from=${NOW - 30 * DAY}&limit=5000`, `venue=hyperliquid&address=${BUSY}&from=${NOW - 5 * DAY}&limit=5000`, `venue=hyperliquid&address=${BUSY}&from=${NOW - 5 * DAY}&limit=300`];
-  const ask = async (q: string) => (await app.inject({ method: 'GET', url: `/api/vs/wallet/fills?${q}` })).body;
+  // 2026-11-09: the held span, the books of the positions and the last-trades hints joined them on that thread.
+  const P = '0x' + '6'.repeat(40);
+  const urls = [
+    `/api/vs/wallet/fills?venue=hyperliquid&address=${HL}&from=${NOW - 30 * DAY}&limit=5000`, `/api/vs/wallet/fills?venue=hyperliquid&address=${BUSY}&from=${NOW - 5 * DAY}&limit=5000`,
+    `/api/vs/wallet/fills?venue=hyperliquid&address=${BUSY}&from=${NOW - 5 * DAY}&limit=300`, `/api/vs/wallet/fills?venue=hyperliquid&address=${P}&from=${NOW - DAY}&limit=5000`,
+    `/api/vs/wallet/fills?venue=sodex&address=${SODEX}&from=${NOW - 30 * DAY}&limit=100`, `/api/vs/wallet/fills?venue=hyperliquid&address=${UNKNOWN}&limit=100`,
+    `/api/vs/wallet/fills?venue=hyperliquid&address=${LATE}&from=${NOW - 30 * DAY}&limit=100`, `/api/vs/last-trades?venue=hyperliquid&addresses=${HL},${BUSY},${UNKNOWN},${P},${HL}`,
+  ];
+  const ask = async (u: string) => (await app.inject({ method: 'GET', url: u })).body;
   W.clearWalletFills();
   const inline: string[] = [];
   for (const q of urls) inline.push(await ask(q));
-  const reads = ['walletFillRows', 'fillsNetBySymbol'] as const;
+  assert.ok(JSON.parse(inline[3]!).positions?.length, 'a wallet with its positions');
+  const reads = ['walletFillRows', 'fillsNetBySymbol', 'coverage', 'rawFromDay', 'newestRowT', 'cohortBook'] as const;
   const kept = reads.map((k) => IndexStore.prototype[k]);
   try {
     W.clearWalletFills();

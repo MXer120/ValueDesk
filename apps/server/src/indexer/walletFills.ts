@@ -49,7 +49,10 @@ import { join } from 'node:path';
 import type { Venue, VsFill } from '../valuedesk/types.js';
 import { reader } from './reader.js';
 import { liqRead } from './liqReadThread.js';
-import type { HistoryKind, IndexStore, WalletFillRow } from './store.js';
+import type { IndexStore, WalletFillRow } from './store.js';
+import { FILL_KINDS } from './heldSpan.js';
+
+export { FILL_KINDS, heldSpan } from './heldSpan.js';
 
 const DAY_MS = 86_400_000;
 export const WALLET_FILLS_TTL_MS = 5 * 60_000;
@@ -70,31 +73,12 @@ export interface WalletFillsQuery {
 }
 
 /**
- * The venues answered, and the history kinds that together make one's fill list (the browser's read
- * merges SoDEX's two engines). Only the two a copy follows, compared fill by fill with the venues'
- * own reads (2026-11-07). Not Arcus: its held span still carries stream prints beside the REST fill
- * of the same order (both counted, 11 of 566 in a month); Lighter and trade.xyz were not compared.
+ * heldSpan (heldSpan.ts) on the 'fills' read thread: three primary-key lookups, but each a disk read when its page is
+ * not cached, on the API thread for every copy card and fills answer (2026-11-09 stall profiles). Null: not indexed.
  */
-export const FILL_KINDS: Partial<Record<Venue, readonly HistoryKind[]>> = {
-  sodex: ['perps', 'spot'],
-  hyperliquid: ['fills'],
-};
-
-/** [lo, hi]: the span whose fills the index holds completely (lo 0: from the wallet's first fill), or null when not indexed. */
-export function heldSpan(store: IndexStore, venue: Venue, address: string): { lo: number; hi: number } | null {
-  const kinds = FILL_KINDS[venue];
-  if (!kinds) return null;
-  const rawFrom = store.rawFromDay(venue, address) * DAY_MS;
-  let lo = 0;
-  let hi = Number.POSITIVE_INFINITY;
-  for (const kind of kinds) {
-    const c = store.coverage(venue, address, kind);
-    if (!c) return null;
-    const start = c.exhausted && !c.capped && c.fromT >= rawFrom ? 0 : Math.max(c.fromT, rawFrom);
-    lo = Math.max(lo, start);
-    hi = Math.min(hi, c.toT);
-  }
-  return { lo, hi };
+export async function heldSpanRead(store: IndexStore, venue: Venue, address: string): Promise<{ lo: number; hi: number } | null> {
+  if (!FILL_KINDS[venue]) return null;
+  return (await liqRead({ op: 'heldSpan', venue, address }, () => store)) ?? null;
 }
 
 /** One row as the venue reads answer it: the same members in the same order (valuedesk/hyperliquid/mappers.ts mapFill). */
@@ -227,9 +211,12 @@ const XYZ = 'xyz:';
 /** How far a book may lie from the answer's end for its positions to be said (books are read about hourly). */
 export const POSITIONS_SPAN_MS = 4 * 3_600_000;
 export async function positionsAt(store: IndexStore, venue: Venue, address: string, at: number, span: Span): Promise<Array<{ symbol: string; side: 'long' | 'short'; size: number }> | null> {
-  const books: Array<{ dex: 'main' | 'xyz'; book: ReturnType<IndexStore['cohortBook']> }> = venue === 'hyperliquid'
-    ? [{ dex: 'main', book: store.cohortBook('hyperliquid', address) }, { dex: 'xyz', book: store.cohortBook('tradexyz', address) }]
-    : venue === 'sodex' ? [{ dex: 'main', book: store.cohortBook('sodex', address) }] : [];
+  // The books read on the 'fills' thread, one message for both (they were two statements on the API thread).
+  const dexes: Array<{ dex: 'main' | 'xyz'; venue: Venue }> = venue === 'hyperliquid'
+    ? [{ dex: 'main', venue: 'hyperliquid' }, { dex: 'xyz', venue: 'tradexyz' }]
+    : venue === 'sodex' ? [{ dex: 'main', venue: 'sodex' }] : [];
+  const read = dexes.length ? (await liqRead({ op: 'cohortBooks', venues: dexes.map((d) => d.venue), address }, () => store)) ?? [] : [];
+  const books: Array<{ dex: 'main' | 'xyz'; book: ReturnType<IndexStore['cohortBook']> }> = dexes.map((d, i) => ({ dex: d.dex, book: read[i] ?? null }));
   if (!books.length || !books[0]!.book) return null;
   const size = new Map<string, number>();
   for (const { dex, book } of books) {
@@ -454,7 +441,7 @@ const coveredJson = (heldTo: number, fills: Buffer, positions: string | null = n
 export async function walletFillsJson(venue: Venue, address: string, q: WalletFillsQuery, now = Date.now(), store: IndexStore | null = reader()): Promise<string | Buffer> {
   if (q.limit > WALLET_FILLS_MAX) return JSON.stringify(notCovered('more fills than the index answers at once'));
   if (!store) return JSON.stringify(notCovered('the index is not open yet'));
-  const span = heldSpan(store, venue, address);
+  const span = await heldSpanRead(store, venue, address);
   if (!span) return JSON.stringify(notCovered('this wallet is not indexed'));
   const from = q.from ?? 0;
   if (q.to === undefined) {
@@ -507,7 +494,7 @@ export function warmCopyFills(leaders: () => Array<{ venue: Venue; address: stri
         if (seen.has(key) || !FILL_KINDS[l.venue]) continue;
         seen.add(key);
         try {
-          const span = heldSpan(store, l.venue, l.address);
+          const span = await heldSpanRead(store, l.venue, l.address);
           if (span) await newestOf(store, l.venue, l.address, limit, span, Date.now());
         } catch { /* the next pass tries again */ }
         // A rest between wallets: after a start every one is read from cold pages, and back to back they kept the
@@ -539,20 +526,25 @@ const lastKept = new Map<string, { at: number; t: number | null }>();
  * HINT for the copy cards, never shown as such. The card asks Hyperliquid for the fills since then and
  * shows the newest of those (hyperliquid/trader.ts hlPeek) - one small read where it walked up to eight
  * windows - so a stale or wrong hint costs the old walk, not a wrong figure. One step down fills_t per
- * wallet, kept a minute.
+ * wallet, kept a minute. The steps run on the 'fills' read thread, the wallets not kept in one message (2026-11-09: on the
+ * API thread, a cold page each).
  */
-export function lastTrades(venue: Venue, addresses: readonly string[], now = Date.now(), store: IndexStore | null = reader()): Record<string, number> {
+export async function lastTrades(venue: Venue, addresses: readonly string[], now = Date.now(), store: IndexStore | null = reader()): Promise<Record<string, number>> {
   const out: Record<string, number> = {};
   if (!store || venue !== 'hyperliquid') return out;
-  for (const a of addresses.slice(0, LAST_TRADES_MAX)) {
-    const key = `${venue}|${a}`;
-    let k = lastKept.get(key);
-    if (!k || now - k.at >= LAST_TTL_MS) {
-      k = { at: now, t: store.newestRowT(venue, a) };
-      if (lastKept.size >= CACHE_MAX) lastKept.delete(lastKept.keys().next().value!);
-      lastKept.set(key, k);
-    }
-    if (k.t !== null) out[a] = k.t;
+  const list = addresses.slice(0, LAST_TRADES_MAX);
+  const stale = [...new Set(list.filter((a) => { const k = lastKept.get(`${venue}|${a}`); return !k || now - k.at >= LAST_TTL_MS; }))];
+  if (stale.length) {
+    const ts = (await liqRead({ op: 'newestRowT', venue, addresses: stale }, () => store)) ?? stale.map(() => null);
+    stale.forEach((a, i) => {
+      const key = `${venue}|${a}`;
+      if (lastKept.size >= CACHE_MAX && !lastKept.has(key)) lastKept.delete(lastKept.keys().next().value!);
+      lastKept.set(key, { at: now, t: ts[i] ?? null });
+    });
+  }
+  for (const a of list) {
+    const k = lastKept.get(`${venue}|${a}`);
+    if (k && k.t !== null) out[a] = k.t;
   }
   return out;
 }

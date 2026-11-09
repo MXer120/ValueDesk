@@ -12,7 +12,8 @@
  * they ask for it, read inline as before.
  */
 import { Worker, isMainThread, parentPort, workerData } from 'node:worker_threads';
-import type { IndexStore, WalletFillRow } from './store.js';
+import type { CohortBookRow, IndexStore, WalletFillRow } from './store.js';
+import { heldSpan } from './heldSpan.js';
 import type { Venue } from '../valuedesk/types.js';
 
 /** A snapshot's meta without its time and length (liqTiles.ts metaOfData). */
@@ -29,6 +30,12 @@ export type LiqRead =
   // the heatmap's reads.
   | { op: 'fillRows'; venue: Venue; address: string; fromT: number; toT: number; limit: number; beforeId?: string }
   | { op: 'fillsNet'; venue: Venue; address: string; fromT: number; toT: number }
+  // The copy cards' and fills' small lookups (2026-11-09: API stall profiles - copyCards readCards, walletFills and
+  // /last-trades ran coverage, frozen-day, newest-row and book statements on the API thread; a cold page of each is a
+  // disk read while the indexer writes). On the 'fills' lane too.
+  | { op: 'heldSpan'; venue: Venue; address: string }
+  | { op: 'newestRowT'; venue: Venue; addresses: string[] }
+  | { op: 'cohortBooks'; venues: Venue[]; address: string }
   // The indexer's aggregate over a window of activity rows (2026-11-08: trade.xyz's all-time board and the cohort
   // members summed every account of the window on the indexer's thread, 33-74 s stalls). Its own lane ('scan').
   | { op: 'activeAccounts'; venue: Venue; from: { hour: number } | { day: number }; minTrades: number; limit: number };
@@ -38,6 +45,9 @@ type Answer<R extends LiqRead> = R extends { op: 'list' } ? Array<{ t: number; n
   : R extends { op: 'metas' } ? Array<MetaWire | null>
   : R extends { op: 'fillRows' } ? WalletFillRow[]
   : R extends { op: 'fillsNet' } ? Array<{ symbol: string; net: number }>
+  : R extends { op: 'heldSpan' } ? { lo: number; hi: number } | null
+  : R extends { op: 'newestRowT' } ? Array<number | null>
+  : R extends { op: 'cohortBooks' } ? Array<CohortBookRow | null>
   : R extends { op: 'activeAccounts' } ? Array<{ acct: string; trades: number; volume: number }>
   : Array<string | null>;
 
@@ -74,6 +84,9 @@ export function runRead(s: IndexStore, r: LiqRead): unknown {
     // Plain objects: node:sqlite rows have a null prototype, which posts fine but is spread to be safe.
     case 'fillRows': return s.walletFillRows(r.venue, r.address, r.fromT, r.toT, r.limit, r.beforeId).map((x) => ({ ...x }));
     case 'fillsNet': return s.fillsNetBySymbol(r.venue, r.address, r.fromT, r.toT).map((x) => ({ ...x }));
+    case 'heldSpan': return heldSpan(s, r.venue, r.address);
+    case 'newestRowT': return r.addresses.map((a) => s.newestRowT(r.venue, a));
+    case 'cohortBooks': return r.venues.map((v) => s.cohortBook(v, r.address));
     case 'activeAccounts': return s.activeAccounts(r.venue, r.from, r.minTrades, r.limit);
   }
 }
@@ -150,13 +163,15 @@ function thread(l: ReadLane): Worker {
   return w;
 }
 
+const FILLS_OPS = new Set<LiqRead['op']>(['fillRows', 'fillsNet', 'heldSpan', 'newestRowT', 'cohortBooks']);
+
 /** A read of the index off this thread (null: no index file yet). Fills reads go on the 'fills' lane. */
 export function liqRead<R extends LiqRead>(read: R, inline: () => IndexStore | null): Promise<Answer<R> | null> {
   if (!threadOn()) {
     const s = inline();
     return Promise.resolve(s ? (runRead(s, read) as Answer<R>) : null);
   }
-  const l: ReadLane = read.op === 'fillRows' || read.op === 'fillsNet' ? 'fills' : read.op === 'activeAccounts' ? 'scan' : 'liq';
+  const l: ReadLane = FILLS_OPS.has(read.op) ? 'fills' : read.op === 'activeAccounts' ? 'scan' : 'liq';
   const x = laneOf(l);
   const id = nextId++;
   const started = Date.now();

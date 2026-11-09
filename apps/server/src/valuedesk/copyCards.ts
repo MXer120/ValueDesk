@@ -37,7 +37,7 @@ import { setImmediate as nextTurn } from 'node:timers/promises';
 import { dirname } from 'node:path';
 import { Lane } from '../indexer/lanes.js';
 import { reader } from '../indexer/reader.js';
-import { heldSpan, lastTrades } from '../indexer/walletFills.js';
+import { heldSpanRead, lastTrades } from '../indexer/walletFills.js';
 import { cardShown, PROFILE_WINDOW, type CardShown, type PeekLike } from './cardPeek.js';
 import { baseWeight, itemWeight, type InfoLike } from './hyperliquid/info.js';
 import { hlInfo } from './hyperliquid/client.js';
@@ -427,8 +427,9 @@ export async function readCards(venue: Venue, address: string, windows: readonly
   switch (venue) {
     case 'hyperliquid': {
       const store = reader();
-      const hint = store ? (lastTrades('hyperliquid', [address], now, store)[address] ?? null) : null;
-      const span = store ? heldSpan(store, 'hyperliquid', address) : null;
+      // Both on the 'fills' read thread (2026-11-09: their statements ran on the API thread for every card read).
+      const [last, span] = store ? await Promise.all([lastTrades('hyperliquid', [address], now, store), heldSpanRead(store, 'hyperliquid', address)]) : [{} as Record<string, number>, null];
+      const hint = last[address] ?? null;
       // The newest fill Hyperliquid answered last time still stands when the index, complete to now, has none after it.
       const before = prev ? Object.values(prev.cards).find((c) => c?.lastActive != null)?.lastActive ?? null : null;
       const known = before !== null && hint === before && span !== null && span.hi >= now - HELD_SLACK_MS ? before : null;

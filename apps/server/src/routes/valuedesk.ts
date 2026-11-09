@@ -276,7 +276,7 @@ export async function valuedeskRoutes(app: FastifyInstance) {
       const venue = venueOf(q, false);
       const list = (q.addresses ?? '').split(',').map((a) => a.trim().toLowerCase()).filter((a) => ADDRESS_RE.test(a));
       if (!list.length) throw bad('addresses= is required');
-      return { ok: true, at: lastTrades(venue, [...new Set(list)].slice(0, LAST_TRADES_MAX)) };
+      return { ok: true, at: await lastTrades(venue, [...new Set(list)].slice(0, LAST_TRADES_MAX)) };
     } catch (e) {
       return fail(reply, e);
     }
