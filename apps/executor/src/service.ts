@@ -1008,13 +1008,21 @@ export class ExecutorService {
     }
   }
 
+  /**
+   * Headers for a call to the other executor (or server 1): with the origin secret, so the other side's edge gate
+   * (Caddy, the executor's own check) lets it through - both executors share the origin secrets.
+   */
+  private peerHeaders(h: Record<string, string>): Record<string, string> {
+    return this.cfg.originSecrets[0] ? { ...h, 'X-Origin-Verify': this.cfg.originSecrets[0] } : h;
+  }
+
   private async vipEligible(owner: string): Promise<{ ok: boolean; why: string }> {
     if (this.cfg.vipOpen) return { ok: true, why: 'open' };
     if (this.vipListed(owner)) return { ok: true, why: 'listed' };
     if (!this.cfg.vipCheckUrl) return { ok: false, why: 'VIP status cannot be checked here.' };
     const u = new URL(this.cfg.vipCheckUrl);
     u.searchParams.set('address', owner);
-    const res = await this.deps.fetch(u.toString(), { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(5_000) });
+    const res = await this.deps.fetch(u.toString(), { headers: this.peerHeaders({ Accept: 'application/json' }), signal: AbortSignal.timeout(5_000) });
     const b = JSON.parse(await res.text()) as { ok?: boolean; eligible?: boolean; volumeUsd?: number; minUsd?: number };
     if (!res.ok || !b.ok) throw new Error('VIP status could not be read. Try again in a moment.');
     return b.eligible ? { ok: true, why: 'eligible' } : { ok: false, why: `Not VIP yet: ${Math.round(b.volumeUsd ?? 0).toLocaleString('en-US')} of $${Math.round(b.minUsd ?? 1_000_000).toLocaleString('en-US')} in 14 days.` };
@@ -1031,7 +1039,7 @@ export class ExecutorService {
       try {
         const res = await this.deps.fetch(`${vip}/internal/vip/import/status`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'X-Internal-Token': token },
+          headers: this.peerHeaders({ 'Content-Type': 'application/json', Accept: 'application/json', 'X-Internal-Token': token }),
           body: JSON.stringify({ owner: job.owner, job: job.id, abandon: true }),
           signal: AbortSignal.timeout(5_000),
         });
@@ -1086,7 +1094,7 @@ export class ExecutorService {
         }
       });
       const envelope = await step('seal', async () => {
-        const res = await this.deps.fetch(`${vip}/info`, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(5_000) });
+        const res = await this.deps.fetch(`${vip}/info`, { headers: this.peerHeaders({ Accept: 'application/json' }), signal: AbortSignal.timeout(5_000) });
         const info = JSON.parse(await res.text()) as { executorId?: string; keyImport?: { publicKey?: string }; vip?: { tier?: string } };
         if (!res.ok || info.vip?.tier !== (down ? 'standard' : 'vip') || !info.keyImport?.publicKey) throw new Error(`The ${there} servers did not answer.`);
         if (info.executorId !== this.executorId) throw new Error(`The ${there} servers run under another executor id.`);
@@ -1106,7 +1114,7 @@ export class ExecutorService {
         try {
           res = await this.deps.fetch(`${vip}/internal/vip/import`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'X-Internal-Token': token },
+            headers: this.peerHeaders({ 'Content-Type': 'application/json', Accept: 'application/json', 'X-Internal-Token': token }),
             body: JSON.stringify({
               owner,
               job: job.id,
