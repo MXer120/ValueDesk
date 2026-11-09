@@ -496,7 +496,7 @@ export class ExecutorService {
     });
     const oracleFeed = new OracleFeed({ fetch: deps.fetch });
     // The Binance-led maker's reference: the box's shared Binance feed (valuescan-feed), own sockets while it is down. Hosted only.
-    this.reference = cfg.kind === 'hosted' ? new BinanceReference({ path: process.env.EXECUTOR_FEED_PATH || DEFAULT_FEED_PATH, factory: plainSockets, log: deps.log }) : null;
+    this.reference = cfg.kind === 'hosted' ? new BinanceReference({ path: process.env.EXECUTOR_FEED_PATH || DEFAULT_FEED_PATH, factory: plainSockets, log: deps.log, fetch: deps.fetch as never }) : null;
     this.calendar = cfg.calendarUrl ? new CalendarFeed({ url: cfg.calendarUrl, fetch: deps.fetch, log: deps.log }) : null;
     // Host calls the engine reads when it has them (A1, 2026-11-08): the active key's expiry (a bot pulls its quotes
     // before it), the wallet's own SoDEX maker fee in bp for booked fees (null: the market's base rate). Spread, so an
