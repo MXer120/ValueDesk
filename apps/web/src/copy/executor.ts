@@ -67,13 +67,16 @@ export function selfUrlProblem(url: string): string | null {
   return 'Use the copier on this computer (http://127.0.0.1:8799), or reach one on a server through an SSH tunnel to that address.';
 }
 
+/** Executors whose /info says they accept day-key signatures ('day-key'); every other one gets the wallet's own. */
+const dayKeyExecutors = new Set<string>();
+
 /** Sign one request for `executor` with the connected wallet. */
 export async function signCopy(provider: Eip1193Provider, owner: string, executor: string, action: CopyAction, payload: unknown): Promise<SignedCopyRequest> {
   const chainId = await getChainId(provider);
   const req = buildCopyRequest({ action, owner, executor, payload, chainId });
   // Everyday actions (start, stop, pause, save, sign-in...) are signed by this browser's day key: the wallet signs
   // once a day at most (owner 2026-11-08). The terms and a trading key always take the wallet itself.
-  if (DELEGABLE_ACTIONS.has(action)) {
+  if (DELEGABLE_ACTIONS.has(action) && dayKeyExecutors.has(executor)) {
     const day = await dayKey(provider, owner, executor, chainId);
     if (day) {
       const sig = new Uint8Array(await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, day.key, new Uint8Array(hexToBytes(copyRequestDigest(req) as `0x${string}`))));
@@ -258,6 +261,8 @@ export class ExecutorClient {
     const i = await this.call<ExecutorInfo>('GET', '/info');
     if (i?.executorId) {
       this.id = i.executorId;
+      if (i.features?.includes('day-key')) dayKeyExecutors.add(i.executorId);
+      else dayKeyExecutors.delete(i.executorId);
       try { localStorage.setItem(lastIdKey(this.base), i.executorId); } catch { /* private mode */ }
     }
     return i;
