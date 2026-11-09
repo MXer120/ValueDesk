@@ -83,6 +83,8 @@ const COHORT_SLICE_ROWS = 500;
 const COHORT_MIX_SLICE_ROWS = 50;
 const MIX_LAST_T_META = 'cohort_mix_last_t';
 const LIQ_HIST_LAST_T_META = 'liq_hist_last_t';
+/** Rows of a wallet's range read at a time when its stream copies are dropped (dropStreamRowsAsync). */
+const DROP_SCAN = 2_000;
 /** The held rows read late (a handover) hand the thread back this often (ms). */
 const HELD_SLICE_MS = 20;
 /**
@@ -2902,18 +2904,28 @@ export class IndexStore {
    * maker's month of stream rows is 100k+ rows: one DELETE held the loop.
    */
   async dropStreamRowsAsync(venue: Venue, address: string, fromT: number, toT: number, pause: () => Promise<void>): Promise<void> {
-    const slice = this.q(
-      `DELETE FROM fills WHERE (venue, address, id) IN (
-         SELECT venue, address, id FROM fills WHERE venue = ? AND address = ? AND src = 0 AND t >= ? AND t <= ? LIMIT 2000)`,
-    );
+    // One pass over the range by (t, id), DROP_SCAN rows a read, and a write only for a slice that holds stream rows.
+    // It was a DELETE ... IN (the first 2,000 stream rows of the range) run again until fewer came back: each run walked the
+    // range from its start through every REST row (src is not in fills_t), and each was a write transaction of its own -
+    // 39 s of a 60 s production profile on the indexer's thread (2026-11-09), holding the lock the writer thread waited on.
+    // Nearly always nothing is dropped (the REST read already replaced the copies): then nothing is written at all.
+    const scan = this.q(`SELECT id, t, src FROM fills WHERE venue = ? AND address = ? AND (t, id) > (?, ?) AND t <= ? ORDER BY t, id LIMIT ${DROP_SCAN}`);
+    const del = this.q('DELETE FROM fills WHERE venue = ? AND address = ? AND id = ? AND src = 0');
     for (const v of venue === 'hyperliquid' ? [venue, 'tradexyz' as Venue] : [venue]) {
       this.noteRestSpan(v, address, fromT, toT);
       const first = this.oldestRaw(v, address);
       let gone = 0;
+      let atT = fromT;
+      let atId = '';
       for (;;) {
-        const n = Number(slice.run(v, address, fromT, toT).changes);
-        gone += n;
-        if (n < 2000) break;
+        const rows = scan.all(v, address, atT, atId, toT) as Array<{ id: string; t: number; src: number }>;
+        if (!rows.length) break;
+        const ids = rows.filter((r) => r.src === 0).map((r) => r.id);
+        if (ids.length) this.tx(() => { for (const id of ids) gone += Number(del.run(v, address, id).changes); });
+        const last = rows[rows.length - 1]!;
+        atT = last.t;
+        atId = last.id;
+        if (rows.length < DROP_SCAN) break;
         await pause();
       }
       // The partial-day sums are keyed on their day's version, which markRange moves. Until

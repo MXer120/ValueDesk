@@ -482,3 +482,21 @@ test('store: stream rows inside a REST-read range go a slice at a time, the REST
   assert.deepEqual(left.map((r) => r.id), ['later', 'rest']);
   s.close();
 });
+
+test('store: a REST-read range with no stream rows left is read once and nothing is written (2026-11-09: 39 s a minute)', async () => {
+  const s = new IndexStore(':memory:');
+  const rows: FillRow[] = [];
+  for (let i = 0; i < 9_000; i++) rows.push(fill({ venue: 'hyperliquid', id: `r${i}`, t: T0 + i, src: 1, closedPnl: 0, oid: `o${i}` }));
+  rows.push(fill({ venue: 'hyperliquid', id: 's-late', t: T0 + 8_999, src: 0 }));
+  s.putFills(rows);
+  const changes = () => Number((s.db.prepare('SELECT total_changes() AS n').get() as { n: number }).n);
+  const before = changes();
+  let pauses = 0;
+  await s.dropStreamRowsAsync('hyperliquid', '0xa', T0, T0 + 8_998, async () => { pauses++; });
+  assert.equal(changes(), before, 'no write: only REST rows in the range');
+  assert.equal(pauses, 4, 'one pass in slices, not the range again per slice');
+  await s.dropStreamRowsAsync('hyperliquid', '0xa', T0, T0 + 9_000, async () => {});
+  assert.equal(changes() - before, 1, 'the one stream row in range goes');
+  assert.equal(Number((s.db.prepare("SELECT COUNT(*) AS n FROM fills WHERE venue = 'hyperliquid'").get() as { n: number }).n), 9_000);
+  s.close();
+});
