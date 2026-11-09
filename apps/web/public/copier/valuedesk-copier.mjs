@@ -16306,6 +16306,40 @@ var AlgoRuntime = class {
    * price came past its line (bots.ts pastFair) - before the next step, and before SoDEX's takers who watch Binance
    * reach it. Only cancels: new quotes go out with the steps.
    */
+  /** A leftover under SoDEX's minimum: kept on the bot (its page offers to close it), said in its log and the bell. */
+  noteLeftover(a, m, inv, mk2) {
+    const qty2 = Math.abs(inv);
+    const lo = { qty: qty2, side: inv > 0 ? "long" : "short", usd: qty2 * mk2, minUsd: minChildQty(m, mk2) * mk2, at: Date.now() };
+    a.k.leftover = lo;
+    this.dirty.add(a.id);
+    const text = `${dec3(qty2)} ${m.base} (about $${lo.usd.toFixed(2)}, ${lo.side}) is left on SoDEX: under its minimum order ($${lo.minUsd.toFixed(2)}), it cannot be closed by itself. "Close the rest" on the bot's page adds to it and closes it all.`;
+    void this.event(a, "info", text);
+    this.host.onNotice?.({ id: `algo:${a.id}:leftover:${lo.at}`, owner: a.owner, source: "algo", ref: a.id, kind: "closed", grade: "warn", title: `${algoName(a)}: a small position is left`, body: text, at: lo.at, paper: !!a.spec.paper });
+  }
+  /**
+   * Close what an ended bot left under SoDEX's minimum (BotLeftover): the bot closes again - first a top-up on the same
+   * side so the whole is over the minimum (a taker order), then the whole at once (a capped taker, reduce-only).
+   */
+  async closeRest(id) {
+    const a = this.need(id);
+    const lo = a.k.leftover;
+    if (!a.spec.bot || !lo || !FINAL_STATUSES.has(a.status)) throw new Error("This bot has nothing left to close.");
+    const m = this.markets.get(a.spec.symbol);
+    const mk2 = this.market.mark(a.spec.symbol)?.mark ?? null;
+    if (!m || mk2 === null) throw new Error("No price for this market right now: try again in a moment.");
+    const topUp = minChildQty(m, mk2) + Number(m.stepSize);
+    delete a.k.leftover;
+    a.k.closing = { status: a.status, reason: "The rest is closed.", at: Date.now() - BOT_CLOSE_REST_MS, topUp };
+    a.status = "running";
+    a.statusReason = null;
+    a.endedAt = null;
+    a.updatedAt = Date.now();
+    await this.save(a);
+    await this.event(a, "info", `Closing the rest: ${dec3(topUp)} ${m.base} more on the same side (about $${(topUp * mk2).toFixed(2)}), then all of it at once.`);
+    this.syncWatch();
+    this.host.onChange?.(a.id);
+    return a;
+  }
   /** Every running bot on a market, stepped soon (stepSoon): its book or its oracle moved. */
   stepBotsOn(symbol2) {
     if (!this.running) return;
@@ -17043,6 +17077,7 @@ var AlgoRuntime = class {
         return m && px2 > 0 ? minChildQty(m, px2) * px2 : null;
       })(),
       matchedAt: typeof a.k.posOkAt === "number" ? a.k.posOkAt : null,
+      ...a.k.leftover ? { leftover: a.k.leftover } : {},
       health: this.botHealth(a),
       orders: this.live(a).filter((c) => c.tif !== "ioc" && !c.cancelling).map((c) => ({ side: c.side, price: c.price, quantity: c.quantity - c.filled, tag: c.tag })),
       closing: !!a.k.closing,
@@ -17612,12 +17647,13 @@ var AlgoRuntime = class {
   async checkOutside(a, m, mk2, now) {
     if (a.spec.paper || !a.book || a.status !== "running") return;
     if (now - Number(a.k.posCheckAt ?? 0) < BOT_POSITION_CHECK_MS) return;
-    if (this.live(a).some((c) => c.state !== "open" || c.cancelling) || now - Number(a.k.lastFillAt ?? 0) < 5e3) return;
+    const busy = this.live(a).some((c) => c.state !== "open" || c.cancelling) || now - Number(a.k.lastFillAt ?? 0) < 5e3;
     a.k.posCheckAt = now;
     let inv = bookInventory(a.book);
     const pos = await this.positionConfirmed(a, a.spec.symbol);
     if (pos === null || pos === "disagree") return;
     const step = Number(m.stepSize);
+    if (busy && Math.abs(pos - bookInventory(a.book)) >= step / 2) return;
     if (Math.abs(pos - inv) >= step / 2) {
       await this.reconcileOwnFills(a, m);
       inv = bookInventory(a.book);
@@ -17688,7 +17724,10 @@ var AlgoRuntime = class {
     const m = this.markets.get(s.symbol);
     const held2 = Math.abs(bookInventory(a.book));
     const px2 = this.market.mark(s.symbol)?.mark ?? null;
-    if (!m || held2 < Number(m.stepSize) || px2 !== null && held2 < minChildQty(m, px2) - 1e-12) return false;
+    if (!m || held2 < Number(m.stepSize) || px2 !== null && held2 < minChildQty(m, px2) - 1e-12) {
+      if (m && px2 !== null && held2 >= Number(m.stepSize)) this.noteLeftover(a, m, bookInventory(a.book), px2);
+      return false;
+    }
     const closing = { status, reason, at: now ? Date.now() - BOT_CLOSE_REST_MS : Date.now() };
     a.k.closing = closing;
     if (a.status === "paused") {
@@ -17733,10 +17772,20 @@ var AlgoRuntime = class {
     const qty2 = floorStep(Math.abs(inv), m);
     const rejects = closing.rejects ?? 0;
     const gone = rejects >= BOT_CLOSE_MAX_REFUSALS;
-    if (!live.length && (qty2 < minChildQty(m, mk2) - 1e-12 || gone)) {
+    if (!live.length && (qty2 < minChildQty(m, mk2) - 1e-12 || gone) && !closing.topUp) {
       const left = qty2 >= Number(m.stepSize) ? ` ${dec3(qty2)} ${m.base} is left${gone ? " (SoDEX refused to reduce it: the position is not there any more)" : " (under SoDEX's minimum order)"}.` : "";
       delete a.k.closing;
+      if (!gone && qty2 >= Number(m.stepSize)) this.noteLeftover(a, m, inv, mk2);
       return this.end(a, closing.status, `${closing.reason}${left}`);
+    }
+    if (closing.topUp && !live.length) {
+      const up = floorStep(closing.topUp, m);
+      const side2 = inv >= 0 ? "buy" : "sell";
+      const px2 = takerPrice(side2, q, BOT_CLOSE_SLIP_BPS, m, mk2, null);
+      delete closing.topUp;
+      this.dirty.add(a.id);
+      if (px2 !== null && up > 0) await this.send(a, m, [{ side: side2, price: px2, quantity: up, tif: "ioc", tag: "close-topup", reduceOnly: false }]);
+      return;
     }
     if (live.length && !live.some((c) => c.tag.startsWith("close"))) return;
     const side = inv > 0 ? "sell" : "buy";
@@ -24361,7 +24410,11 @@ var ExecutorService = class {
         touched = [await this.algos.resume(a.id).catch(fail)];
       } else if (op === "cancel") touched = [await this.algos.cancel(a.id, { now: payload.now === true, keep: payload.how === "keep", close: payload.how === "close" || payload.how === "instant" }).catch(fail)];
       else if (op === "archive") touched = [await this.algos.archive(a.id).catch(fail)];
-      else if (op === "update") {
+      else if (op === "close-rest") {
+        if (!a.spec.paper) this.needNoBrake("algos");
+        this.needTerms(owner, ctx);
+        touched = [await this.algos.closeRest(a.id).catch(fail)];
+      } else if (op === "update") {
         if (!a.spec.paper) this.needNoBrake("algos");
         this.needTerms(owner, ctx);
         const patch = algoPatch(payload.patch);
