@@ -82,6 +82,7 @@ const SERIES_LAST_T_META = 'cohort_series_last_t';
 const COHORT_SLICE_ROWS = 500;
 const COHORT_MIX_SLICE_ROWS = 50;
 const MIX_LAST_T_META = 'cohort_mix_last_t';
+const LIQ_HIST_LAST_T_META = 'liq_hist_last_t';
 /**
  * The writer connection's page cache at most, in KiB (PRAGMA cache_size). Its own memory: nothing else on the machine can
  * push it out, as a backup's reads did to the OS's cache (a 413 s stall, 2026-11-05). Taken as used; the server has 46 GB.
@@ -3925,6 +3926,7 @@ export class IndexStore {
     this.tx(() => {
       const ins = this.q('INSERT OR REPLACE INTO liq_hist (coin, t, data) VALUES (?, ?, ?)');
       for (const [coin, data] of rows) ins.run(coin, t, data);
+      if (rows.length) this.keepLastT(LIQ_HIST_LAST_T_META, [{ t }]);
     });
   }
 
@@ -4021,9 +4023,17 @@ export class IndexStore {
     return newest.filter((x) => x.t === top).map((x) => x.coin);
   }
 
+  /**
+   * The newest step: from meta, or once by MAX(t) - a scan of the whole table (its key starts with the coin): 27 s of an
+   * 81 s start-up stall on 2026-11-09, every stream's socket waiting.
+   */
   liqHistLastT(): number {
+    const kept = Number(this.getMeta(LIQ_HIST_LAST_T_META));
+    if (kept > 0) return kept;
     const r = this.q('SELECT MAX(t) AS t FROM liq_hist').get() as { t: number | null } | undefined;
-    return r?.t ?? 0;
+    const t = r?.t ?? 0;
+    if (t) this.setMeta(LIQ_HIST_LAST_T_META, String(t));
+    return t;
   }
 
   /** Drop everything before `beforeT`, and between it and `thinBeforeT` all but the hourly snapshots (and their fine layers). */
