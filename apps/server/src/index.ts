@@ -32,7 +32,7 @@ import { statsRoutes } from './routes/stats.js';
 import { scanRoutes } from './routes/scan.js';
 import { profileOnSignal } from './indexer/cpuProfile.js';
 import { pointsAuthRoutes } from './routes/pointsAuth.js';
-import { keepValuedeskWarm, valuedeskRoutes } from './routes/valuedesk.js';
+import { keepValuedeskWarm, liveAskOf, valuedeskRoutes } from './routes/valuedesk.js';
 import { builderRoutes } from './routes/builder.js';
 import { betaRoutes } from './routes/beta.js';
 import { BetaList, BetaTokens, channelFrom, installBetaGate } from './beta/gate.js';
@@ -59,6 +59,7 @@ import { KeystoreError } from './keystore.js';
 import * as ks from './keystore.js';
 import { isAllowedOrigin, isSiteOrigin } from './origin.js';
 import { liqWsRoute } from './routes/liqWs.js';
+import { defaultLiveHub } from './routes/liveHub.js';
 import { CHAIN } from './sodex/chain.js';
 import { localToken, localTokenPath, tokenMatches, LOCAL_TOKEN_HEADER, TOKEN_REQUIRED } from './localToken.js';
 import { ElevationError, revokeAllElevations } from './elevation.js';
@@ -128,7 +129,17 @@ if (!SERVER_SIGNING) installServerSigningGate(app);
 // The hub is a local-only feature: hosted, the web opens its own streams.
 // Client messages are small subscribe/unsubscribe ops; 64 KiB is far above them.
 // The hub is local-only (below); hosted mode serves one WebSocket, the live liquidation heatmap (routes/liqWs.ts).
-await app.register(websocket, { options: { maxPayload: HOSTED ? 4 * 1024 : 64 * 1024 } });
+// Downstream compression, offered to the browser (2026-11-09, measured in test/liveFlowWs.test.ts): a Trade flow patch on a
+// 100-row candle averages 5.6 KB raw, 1.5 KB deflated (a new wallet moves every row's share); the whole answer 33 KB -> 3.4 KB;
+// a heatmap snapshot ~90 KB is mostly digits too. Only messages over 1 KB are compressed (small deltas cost no CPU), and no
+// context is kept between messages, so a connection holds no zlib window while idle. This is the browser inflating our
+// frames - not the indexer's upstream sockets, where deflate stays off (inflate stalls, 2026-11-06).
+await app.register(websocket, {
+  options: {
+    maxPayload: HOSTED ? 4 * 1024 : 64 * 1024,
+    perMessageDeflate: { threshold: 1024, serverNoContextTakeover: true, clientNoContextTakeover: true, zlibDeflateOptions: { level: 6 } },
+  },
+});
 
 /** One error shape for the whole API, with an actionable hint where we have one. */
 app.setErrorHandler((err, _req, reply) => {
@@ -305,7 +316,8 @@ await app.register(adminRoutes, {
 // --- browser websocket -------------------------------------------------------
 
 // The live liquidation heatmap: public, read-only; the site's own origins only (hosted), or the local ones.
-liqWsRoute(app, (origin) => (HOSTED ? isSiteOrigin(origin, SITE_ORIGINS) : isAllowedOrigin(origin, ALLOWED_ORIGINS)));
+// The same socket carries the live channels (routes/liveHub.ts): the Trade flow's forming candle and the cohort pages.
+liqWsRoute(app, (origin) => (HOSTED ? isSiteOrigin(origin, SITE_ORIGINS) : isAllowedOrigin(origin, ALLOWED_ORIGINS)), await defaultLiveHub(liveAskOf));
 
 if (!HOSTED) app.get('/ws', { websocket: true }, (socket, req) => {
   const origin = req.headers.origin;

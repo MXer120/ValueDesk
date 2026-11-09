@@ -370,12 +370,17 @@ export function activityCoverage(from: number, to: number, now = Date.now()): { 
   return { days: activityDays(l?.days(fromDay, toDay) ?? [], fromDay, toDay, today, l?.markets() ?? []), checked: !!l };
 }
 
-export async function flowWindow(ask: FlowAsk, now = Date.now()): Promise<FlowWindow | null> {
+/**
+ * `maxAgeMs`: how old a kept answer of a window still forming may be. The HTTP route takes 5 s (a crowd polling one candle
+ * costs one read per 5 s); the live channel (routes/liveHub.ts) asks with 0 once its slots' print count moved, so a print
+ * goes out as soon as it is readable - and every HTTP reader after it gets that fresher answer too.
+ */
+export async function flowWindow(ask: FlowAsk, now = Date.now(), maxAgeMs = 5_000): Promise<FlowWindow | null> {
   const s = flowReader();
   if (!s) return null;
   const key = JSON.stringify(['w', ask]);
   const hit = answers.get(key);
-  if (hit && (hit.final || now - hit.at < 5_000)) return hit.body as FlowWindow;
+  if (hit && (hit.final || now - hit.at < maxAgeMs)) return hit.body as FlowWindow;
   const markets = marketsOf(s, ask.coin, ask.venues, ask.kind);
   const sums: WalletSums = new Map();
   const budget = { at: Date.now() };
@@ -405,6 +410,35 @@ export async function flowWindow(ask: FlowAsk, now = Date.now()): Promise<FlowWi
   };
   answers.set(key, { at: now, final, body });
   return body;
+}
+
+/** How far back flowStamp looks: the slot forming and the one before (a late print, a catch-up of the last minutes). */
+const STAMP_BACK_MS = 2 * CHUNK_MS;
+/** Files that have the recorder thread's flow_tail (rt/flow): its prints are readable before the chunk is written again. */
+const hasTail = new WeakMap<FlowStore, boolean>();
+
+/**
+ * The prints a window holds in its newest slots, summed over its markets: chunks plus (when the recorder runs on its own
+ * thread and writes flow_tail) their tails. A print that lands moves it; a tail folded into its chunk does not. The live
+ * channel (routes/liveHub.ts) reads this every 500 ms per subscribed window - two indexed COUNT-like reads per market - and
+ * builds the window again only when it moved. Null: no flow file.
+ */
+export function flowStamp(ask: Pick<FlowAsk, 'coin' | 'venues' | 'kind' | 'from' | 'to'>, now = Date.now()): number | null {
+  const s = flowReader();
+  if (!s) return null;
+  const from = Math.max(ask.from, Math.floor((now - STAMP_BACK_MS) / CHUNK_MS) * CHUNK_MS);
+  if (from >= ask.to) return 0;
+  let tail = hasTail.get(s);
+  if (tail === undefined) {
+    tail = !!s.db.prepare(`SELECT 1 AS x FROM sqlite_master WHERE type = 'table' AND name = 'flow_tail'`).get();
+    hasTail.set(s, tail);
+  }
+  let n = 0;
+  for (const m of marketsOf(s, ask.coin, ask.venues, ask.kind)) {
+    for (const c of s.chunkCounts(m.id, from, ask.to)) n += c.n;
+    if (tail) n += Number((s.db.prepare('SELECT COALESCE(SUM(n), 0) AS n FROM flow_tail WHERE mid = ? AND t >= ? AND t < ?').get(m.id, from, ask.to) as { n: number }).n);
+  }
+  return n;
 }
 
 /** Party ids whose address or account id contains `q` (at most a few thousand). */
