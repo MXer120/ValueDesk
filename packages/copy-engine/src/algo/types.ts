@@ -865,6 +865,8 @@ export interface BotView {
   mark: number | null;
   /** SoDEX's minimum order on its market at the mark now, USD (null: not known). Absent on an older executor. */
   minOrderUsd?: number | null;
+  /** When its holding last matched SoDEX's position on the market (ms; the position check, BOT_POSITION_CHECK_MS). Absent: not yet. */
+  matchedAt?: number | null;
   /** Its quotes or levels on SoDEX now. */
   orders: Array<{ side: Side; price: number; quantity: number; tag: string }>;
   /** Stopping: closing what it holds. */

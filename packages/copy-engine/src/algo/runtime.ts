@@ -60,6 +60,7 @@ import { bandRefused, exitLevels, scaleLadder, swarmClips, twapSchedule, vwapSch
 import { checkLimits, limitLeverage, oiHeadroom, oiRoomWords, positionCapUsd, limitRefusal, type AlgoLimitNotice, type LimitRefusal } from './limits.ts';
 import { checkSizes, coins, maxWords, minWords, money } from './sizes.ts';
 import type { AlgoSink, ChildRequest, ChildResult, StopRequest } from './sink.ts';
+import { GONE } from './sink.ts';
 import { ALGO_NAMES, algoClosesOnly, algoQuantity, algoSymbols, opensPosition, parseAlgoSpec } from './spec.ts';
 import { countsAsFailure, refusalKind, refusalWords } from './refusals.ts';
 import type { AlgoStore } from './store.ts';
@@ -1278,6 +1279,7 @@ export class AlgoRuntime {
       mark,
       // SoDEX's minimum order at the mark now (USD): the page counts margin on it as the executor does (audit 2026-11-09).
       minOrderUsd: (() => { const m = this.markets.get(a.spec.symbol); return m && px > 0 ? minChildQty(m, px) * px : null; })(),
+      matchedAt: typeof a.k.posOkAt === 'number' ? a.k.posOkAt : null,
       orders: this.live(a).filter((c) => c.tif !== 'ioc' && !c.cancelling).map((c) => ({ side: c.side, price: c.price, quantity: c.quantity - c.filled, tag: c.tag })),
       closing: !!a.k.closing,
       ...(b.takers ? { takers: { ...b.takers } } : {}),
@@ -1932,12 +1934,20 @@ export class AlgoRuntime {
     // Something of its own in flight (sending, unknown, a cancel, a fill seconds ago): its own fills explain a gap.
     if (this.live(a).some((c) => c.state !== 'open' || c.cancelling) || now - Number(a.k.lastFillAt ?? 0) < 5_000) return;
     a.k.posCheckAt = now;
-    const inv = bookInventory(a.book);
+    let inv = bookInventory(a.book);
     const pos = await this.positionConfirmed(a, a.spec.symbol);
     if (pos === null || pos === 'disagree') return;
     const step = Number(m.stepSize);
+    if (Math.abs(pos - inv) >= step / 2) {
+      // A gap: first SoDEX's trades of the bot's own orders (by client id) - a fill its updates missed is booked, so
+      // only what is left is outside it (owner 2026-11-09: the bot's inventory is SoDEX's).
+      await this.reconcileOwnFills(a, m);
+      inv = bookInventory(a.book);
+    }
     if (Math.abs(pos - inv) < step / 2) {
       delete a.k.outsideSaid;
+      a.k.posOkAt = now;
+      this.dirty.add(a.id);
       return;
     }
     const same = Math.sign(pos) === Math.sign(inv) || Math.abs(pos) < step / 2;
@@ -1960,6 +1970,28 @@ export class AlgoRuntime {
       a.k.outsideSaid = true;
       this.dirty.add(a.id);
       await this.event(a, 'info', `Your ${m.name} position (${dec(pos)} ${m.base}) is more than this bot holds (${dec(inv)}): the rest is yours, and the bot manages only its own part.`);
+    }
+  }
+
+  /** SoDEX's trades of the bot's children (those it still keeps), booked where they show more than it has. */
+  private async reconcileOwnFills(a: AlgoRecord, m: MarketInfo): Promise<void> {
+    if (!a.children.length) return;
+    const since = Math.min(...a.children.map((c) => c.placedAt)) - EXITS_FILLS_SLACK_MS;
+    let fills: Awaited<ReturnType<SodexClient['fills']>>;
+    try {
+      fills = await this.host.sodex.fills(a.owner, m.name, since);
+    } catch (e) {
+      this.host.log.warn('algo: fills read for the position check failed', { algo: a.id, error: String(e) });
+      return;
+    }
+    for (const c of a.children) {
+      const own = fills.filter((f) => f.clOrdID === c.clOrdID);
+      if (!own.length) continue;
+      const qty = own.reduce((x, f) => x + f.qty, 0);
+      if (qty > c.filled + 1e-12) {
+        this.applyFill(a, c, Math.min(qty, c.quantity), own.reduce((x, f) => x + f.qty * f.price, 0), null);
+        await this.event(a, 'info', `SoDEX's trades show ${c.tag} filled ${dec(c.filled)}: booked (its update had not come).`, c);
+      }
     }
   }
 
@@ -3764,8 +3796,16 @@ export class AlgoRuntime {
     try {
       await sink.cancel(a, m, open.map((c) => c.clOrdID));
     } catch (e) {
+      const said = e instanceof Error ? e.message : String(e);
+      // Gone already (filled or cancelled, SoDEX's "OrderNotFound"): no failure and no retry. It stays cancelling and is
+      // settled from SoDEX's own record of it at once (settleStale reads its executed size: open orders, then history).
+      if (GONE.test(said)) {
+        for (const c of open) c.updatedAt = Date.now() - STALE_IOC_MS - 1;
+        this.dirty.add(a.id);
+        return;
+      }
       for (const c of open) c.cancelling = false;
-      await this.event(a, 'error', `Cancel failed: ${e instanceof Error ? e.message : String(e)}`);
+      await this.event(a, 'error', `Cancel failed: ${said}`);
     }
   }
 
@@ -4358,6 +4398,7 @@ export class AlgoRuntime {
 
   private onPrint(p: Print): void {
     const taker = p.taker === 'buy' ? p.buyer : p.seller;
+    this.bookOwnPrint(p, taker);
     // A print naming a wallet the socket does not follow (over SoDEX's 10 wallets per IP on account channels): its orders
     // are read by REST next, ahead of the queue - its fill is booked within about a second, not when its turn comes
     // (owner 2026-11-08: 20 live bots per server, whatever the number of wallets).
@@ -4412,6 +4453,32 @@ export class AlgoRuntime {
       }
     }
     if (this.paper.size) this.paperOnPrint(p);
+  }
+
+  /**
+   * A public print naming a bot's account as the MAKER at the price of exactly one of its resting quotes on that side:
+   * that quote filled, so it is booked now (owner 2026-11-09: the inventory must be SoDEX's at all times). The order
+   * update that follows carries the same cumulative size and adds nothing (applyFill only adds above what is booked).
+   * Without this the bot booked the fill only when the update came - up to seconds later for a wallet read by REST -
+   * and meanwhile re-priced and cancelled a quote that had already filled ("OrderNotFound", KORU). Two of its quotes at
+   * that price and side (never with distinct ladder prices): nothing is guessed, the update books it.
+   */
+  private bookOwnPrint(p: Print, taker: number): void {
+    for (const a of this.algos.values()) {
+      if (!a.spec.bot || a.spec.paper || a.spec.symbol !== p.symbol || FINAL_STATUSES.has(a.status) || a.startedAt === null || p.at < a.startedAt) continue;
+      if (taker === a.accountId || (p.buyer !== a.accountId && p.seller !== a.accountId)) continue;
+      const side: Side = p.buyer === a.accountId ? 'buy' : 'sell';
+      const m = this.markets.get(p.symbol);
+      const tick = m ? Number(m.tickSize) : 0;
+      const at = a.children.filter((c) => LIVE.has(c.state) && c.side === side && c.tif !== 'ioc' && Math.abs(c.price - p.price) <= tick / 2 + 1e-12 && c.filled < c.quantity - 1e-12);
+      if (at.length !== 1) continue;
+      const c = at[0]!;
+      const cum = Math.min(c.quantity, c.filled + p.qty);
+      this.applyFill(a, c, cum, c.value + (cum - c.filled) * p.price, true);
+      // Filled in full by the prints: never cancelled (it is gone); its update or the order read settles it.
+      if (cum >= c.quantity - 1e-12) c.cancelling = true;
+      this.dirty.add(a.id);
+    }
   }
 
   /** BotBook.takers: one fill's USD to the taker that took it. */

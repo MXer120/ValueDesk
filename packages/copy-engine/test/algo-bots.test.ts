@@ -1442,3 +1442,60 @@ test('every setting saves in place (owner 2026-11-08): post-only, the oracle, le
   assert.equal((gs.k.gp as number[]).length, 4);
   assert.equal(gs.status, 'running');
 });
+
+/* ------------------------------------------- inventory = SoDEX (owner 2026-11-09, KORU) ----- */
+
+test('cancel-vs-fill race: a print naming the bot as maker books the fill at once; the cancel SoDEX answers OrderNotFound is no failure; the late update adds nothing; inventory = SoDEX throughout', async () => {
+  const r = await rig();
+  const a = await add(r, MM);
+  await step(r, a.id);
+  const bid = r.ex.side('buy')[0]!;
+  const q = Number(bid.quantity);
+  // SoDEX fills the bid; its order update is late (a wallet read by REST). Only the public print arrives now.
+  r.ex.resting.delete(bid.clOrdID);
+  r.ex.position += q;
+  // The public print: account 77 sold into our bid, the bot (account 42) bought as the maker.
+  for (const cb of r.market.printCbs) cb({ symbol: 'BTC-USD', price: Number(bid.price), qty: q, buyer: 42, seller: 77, taker: 'sell', at: Date.now() });
+  await settle();
+  const v1 = r.rt.view(a.id)!;
+  assert.ok(Math.abs((v1.bot?.inventory ?? 0) - r.ex.position) < 1e-12, `inventory ${v1.bot?.inventory} = SoDEX ${r.ex.position} right after the print`);
+  // The bot re-prices; a cancel of the filled bid would come back "OrderNotFound" - it is not asked to (filled in full).
+  const cancel = r.ex.cancel.bind(r.ex);
+  let notFound = 0;
+  r.ex.cancel = async (aa, mm, ids) => {
+    if (ids.includes(bid.clOrdID)) { notFound++; throw new Error('SoDEX did not cancel 1 order: order rejected: OrderNotFound'); }
+    return cancel(aa, mm, ids);
+  };
+  await r.rt.pause(a.id); // pulls every quote it thinks rests
+  await settle();
+  assert.equal(notFound, 0, 'a quote the prints filled in full is never cancelled');
+  // The late update: the same cumulative size, booked once.
+  r.market.order({ clOrdID: bid.clOrdID, status: 'FILLED', filledQty: q, filledValue: q * Number(bid.price), maker: true });
+  await settle();
+  const v2 = r.rt.view(a.id)!;
+  assert.ok(Math.abs((v2.bot?.inventory ?? 0) - r.ex.position) < 1e-12, 'no double count from the late update');
+  const errors = (await r.rt.events(a.id, { limit: 500 })).filter((x) => x.kind === 'error');
+  assert.equal(errors.length, 0, errors.map((x) => x.text).join(' | '));
+});
+
+test('a cancel SoDEX answers "OrderNotFound" is gone, not failed: no error, no retry, settled from SoDEX\'s record', async () => {
+  const r = await rig();
+  const a = await add(r, MM);
+  await step(r, a.id);
+  const ask = r.ex.side('sell')[0]!;
+  const cancel = r.ex.cancel.bind(r.ex);
+  let asked = 0;
+  r.ex.cancel = async (aa, mm, ids) => {
+    if (ids.includes(ask.clOrdID)) { asked++; r.ex.resting.delete(ask.clOrdID); throw new Error('SoDEX did not cancel 1 order: order rejected: OrderNotFound'); }
+    return cancel(aa, mm, ids);
+  };
+  await r.rt.pause(a.id); // pulls every quote: the ask's cancel is answered OrderNotFound
+  await settle();
+  await step(r, a.id, 4_000);
+  await step(r, a.id, 4_000);
+  await step(r, a.id, 4_000);
+  assert.equal(asked, 1, 'asked once, never retried');
+  const events = await r.rt.events(a.id, { limit: 500 });
+  assert.equal(events.filter((x) => x.kind === 'error').length, 0, 'no "Cancel failed"');
+  assert.ok(Math.abs((r.rt.view(a.id)!.bot?.inventory ?? 0) - r.ex.position) < 1e-12);
+});

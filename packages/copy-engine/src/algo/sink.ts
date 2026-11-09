@@ -153,8 +153,11 @@ export function readBatch(data: unknown, orders: readonly ChildRequest[]): Child
   });
 }
 
-/** An order a cancel could not find is gone already: not an error. */
-const GONE = /not found|unknown order|does not exist|already/i;
+/**
+ * An order a cancel could not find is gone already (filled or cancelled): not an error. SoDEX says it as
+ * "OrderNotFound" too (no spaces: 2026-11-09, a KORU bot's "cancel failed" storm).
+ */
+export const GONE = /not ?found|unknown ?order|does ?not ?exist|already/i;
 
 /**
  * The rows of a cancel's answer SoDEX refused for another reason than the order being gone (an order it found and
