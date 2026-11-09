@@ -168,6 +168,24 @@ export const BOT_SCENARIOS: Scenario[] = [
         for (const v0 of started) await t.exec.algoAct('cancel', v0.algo.id).catch(() => undefined);
         throw e;
       }
+      // LIVE_BOT_VIP=1 (owner 2026-11-09, the bots live as VIP): the wallet's one signed move hands them all to the VIP
+      // executor; they run, stop and are reported there (at the VIP bot fee).
+      if (process.env.LIVE_BOT_VIP === '1') {
+        const target = t.exec as unknown as { moveToVip?: () => Promise<{ job: Record<string, unknown>; ms: number }>; me(): Promise<{ bots?: { feeTenths: number; vip: boolean } }> };
+        if (!target.moveToVip) throw new Error('LIVE_BOT_VIP=1 needs --target hosted');
+        await new Promise((r) => setTimeout(r, 45_000)); // quoting first: the move takes resting orders across
+        const before = await Promise.all(started.map((x) => t.view(x.algo.id)));
+        const { job, ms } = await target.moveToVip();
+        t.check(job.state === 'done', `moved to VIP with one signature in ${ms} ms (job ${String(job.id ?? '')})`);
+        const after = await Promise.all(started.map((x) => t.view(x.algo.id)));
+        for (let i = 0; i < after.length; i++) {
+          const a0 = before[i]!, a1 = after[i]!;
+          t.check(a1.algo.status === 'running' || ended(a1), `${a1.algo.spec.symbol}: runs on VIP (${a1.algo.status})`);
+          t.check(Math.abs((a1.bot?.inventory ?? 0) - (a0.bot?.inventory ?? 0)) < 1e-9 || (a1.bot?.volume ?? 0) > (a0.bot?.volume ?? 0), `${a1.algo.spec.symbol}: its book came along (holding ${a0.bot?.inventory ?? 0} -> ${a1.bot?.inventory ?? 0})`);
+        }
+        const fee = (await target.me()).bots;
+        t.check(fee?.vip === true && fee.feeTenths === 1, `the wallet pays the VIP bot fee on VIP (${JSON.stringify(fee)})`);
+      }
       // All run the same minutes; then each stops (closing what it holds) and is reported on its own market.
       for (const end = Date.now() + RUN_MS; Date.now() < end; ) {
         await new Promise((r) => setTimeout(r, Math.min(30_000, Math.max(0, end - Date.now()))));

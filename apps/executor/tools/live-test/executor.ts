@@ -272,7 +272,13 @@ export class ExecutorClient implements ExecutorApi {
     }
   }
 
-  private post<T>(path: string, action: CopyAction, payload: unknown): Promise<T> {
+  /** Point this client at another executor base (the VIP one after a move): a new session is signed in there. */
+  protected rebase(base: string): void {
+    (this.at as { base: string }).base = base;
+    this.token = null;
+  }
+
+  protected post<T>(path: string, action: CopyAction, payload: unknown): Promise<T> {
     if (!this.executorId) throw new Error('the executor id is not known yet: the target was not started');
     return this.call<T>('POST', path, { request: this.wallet.sign(this.executorId, action, payload) });
   }

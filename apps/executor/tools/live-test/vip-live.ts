@@ -71,8 +71,8 @@ const before = new Map<string, Any>();
 for (const id of ids) {
   const v = (await std.algo(id)) as Any;
   const open = (v.algo.children ?? []).filter((c: Any) => c.state === 'open').length;
-  before.set(id, { status: v.algo.status, inventory: v.bot?.inventory ?? 0, volume: v.bot?.volumeUsd ?? 0, open });
-  log(`before the move: ${v.algo.spec.symbol} ${v.algo.status}, ${open} order(s) resting, holding ${v.bot?.inventory ?? 0}, volume $${(v.bot?.volumeUsd ?? 0).toFixed(2)}`);
+  before.set(id, { status: v.algo.status, inventory: v.bot?.inventory ?? 0, volume: v.bot?.volume ?? 0, open });
+  log(`before the move: ${v.algo.spec.symbol} ${v.algo.status}, ${open} order(s) resting, holding ${v.bot?.inventory ?? 0}, volume $${(v.bot?.volume ?? 0).toFixed(2)}`);
 }
 const post = (std as unknown as { post<T>(p: string, a: string, b: unknown): Promise<T> }).post.bind(std);
 const call = (std as unknown as { call<T>(m: string, p: string, b?: unknown, auth?: boolean): Promise<T> }).call.bind(std);
@@ -97,9 +97,9 @@ for (const id of ids) {
   const v = (await vip.algo(id)) as Any;
   const b = before.get(id)!;
   const open = (v.algo.children ?? []).filter((c: Any) => c.state === 'open').length;
-  const ok = v.algo.status === 'running' && Math.abs((v.bot?.volumeUsd ?? 0) - b.volume) < 1e9;
+  const ok = v.algo.status === 'running' && Math.abs((v.bot?.volume ?? 0) - b.volume) < 1e9;
   if (!ok) bad++;
-  log(`${ok ? 'ok  ' : 'BAD '} on VIP: ${v.algo.spec.symbol} ${v.algo.status}, ${open} resting, holding ${v.bot?.inventory ?? 0} (was ${b.inventory}), volume $${(v.bot?.volumeUsd ?? 0).toFixed(2)} (was $${b.volume.toFixed(2)})`);
+  log(`${ok ? 'ok  ' : 'BAD '} on VIP: ${v.algo.spec.symbol} ${v.algo.status}, ${open} resting, holding ${v.bot?.inventory ?? 0} (was ${b.inventory}), volume $${(v.bot?.volume ?? 0).toFixed(2)} (was $${b.volume.toFixed(2)})`);
 }
 const vme = (await vip.me()) as Any;
 log(`VIP bot fee: ${JSON.stringify(vme.bots)}; key ${vme.key?.name} ${vme.key?.registered ? 'registered' : 'NOT registered'}`);
