@@ -39,7 +39,7 @@ test('day key (owner 2026-11-08): one wallet approval signs the everyday actions
 
 test('day key on P-256 WebCrypto (security review 2026-11-09): non-extractable key signs, the executor verifies; revoked approvals and keys of another type fail', async () => {
   const now = Date.now();
-  const pair = (await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign', 'verify'])) as CryptoKeyPair;
+  const pair = (await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign', 'verify'])) as { privateKey: Parameters<typeof crypto.subtle.sign>[1]; publicKey: Parameters<typeof crypto.subtle.sign>[1] };
   await assert.rejects(crypto.subtle.exportKey('pkcs8', pair.privateKey), 'the private key cannot be read out');
   const pub = bytesToHex(new Uint8Array(await crypto.subtle.exportKey('raw', pair.publicKey)));
   const ar = buildCopyRequest({ action: 'delegate', owner, executor: EXEC, payload: { alg: 'p256', key: pub, expiresAt: now + DELEGATION_TTL_MS - 60_000 }, chainId: 1, now, ttlMs: DELEGATION_TTL_MS - 60_000 });
