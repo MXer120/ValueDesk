@@ -1680,3 +1680,8 @@ tr.bots-row.is-blocked:hover, .bots-table tbody tr.bots-row.is-blocked:hover { b
   .bots-mm__sp { display: none; }
 }
 .bots-rg__unit { fill: var(--dim); font-weight: 400; letter-spacing: 0; text-transform: none; }
+/* Conditions: the chart's panel sits apart from the cards (the grid's own gap); a pick still loading dims what is shown. */
+.bots-regime .bots-rg__panel { margin-top: 6px; }
+.bots-rg__kpis, .bots-rg__panel { transition: opacity 160ms ease; }
+.bots-rg__kpis.is-stale, .bots-rg__panel.is-stale { opacity: 0.55; }
+.bots-rg__tip i.is-rest { background: rgb(var(--ink) / 0.28); }
