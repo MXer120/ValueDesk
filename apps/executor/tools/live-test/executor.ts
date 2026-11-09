@@ -257,6 +257,12 @@ export class ExecutorClient implements ExecutorApi {
         await new Promise((r) => setTimeout(r, 10_000));
         continue;
       }
+      // A release restarts the executor: "starting" (nothing was done) is asked again, and a read that hit the restart
+      // itself (the edge's 502/504) too - for up to ~2 min (2026-11-09: one read during a release ended an overnight run).
+      if (((res.status === 503 && data.code === 'starting') || (method === 'GET' && (res.status === 502 || res.status === 504))) && attempt < 24) {
+        await new Promise((r) => setTimeout(r, 5_000));
+        continue;
+      }
       if (res.status === 401 && auth && attempt < 1) {
         this.token = null;
         continue;
