@@ -532,7 +532,7 @@ export class FlowThread implements FlowFeed {
 
   status(): FlowFeedStatus {
     const s: FlowStatus = this.threadStatus ?? {
-      prints: 0, late: 0, open: 0, openPrints: 0, parties: 0, unresolved: 0, hourThrough: 0, dayThrough: 0, lastFlushMs: 0, lastError: null,
+      prints: 0, late: 0, open: 0, openPrints: 0, parties: 0, unresolved: 0, hourThrough: 0, dayThrough: 0, lastFlushMs: 0, lastError: null, newestT: 0,
     };
     return {
       ...s,
