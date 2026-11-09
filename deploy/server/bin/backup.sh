@@ -11,9 +11,13 @@
 #            sudo systemctl start valuescan-backup.service valuescan-executor-backup.service
 #            journalctl -t valuescan-backup -t valuescan-executor-backup -n 50
 #
-#   1. a consistent copy with VACUUM INTO from a read-only connection - the
-#      indexer (or the executor) keeps running (backup-index.mjs explains why not
-#      ".backup");
+#   1. a consistent copy. THE INDEX: a snapshot of the WAL shipper's replica
+#      (wal-ship.mjs snapshot; valuescan-walship.service must run, WALSHIP_DIR in
+#      ops.env) - the live 50 GB file is not read and no long read transaction is
+#      held on it. Copying the live file instead (backup-index.mjs: one read
+#      transaction for the whole copy, which starved the indexer for hours on
+#      2026-11-08) only with BACKUP_ALLOW_LIVE_COPY=1. THE EXECUTOR (small):
+#      backup-index.mjs as before;
 #   2. the copy is integrity-checked;
 #   3. zstd-compressed straight into s3://<ops bucket>/backups/ - or, on an
 #      instance without an ops bucket (OPS_BUCKET empty: no instance role), into
@@ -96,9 +100,24 @@ find "$STAGING" -maxdepth 1 -name "$NAME-*.db" -mmin +180 -delete 2>/dev/null ||
 cleanup() { [ "$KEEP_LOCAL" = 1 ] || rm -f "$copy"; }
 trap cleanup EXIT
 
-log "copying $SOURCE_DB ($(( db_bytes / 1048576 )) MiB) to $copy"
-report="$("$NODE" --disable-warning=ExperimentalWarning "$HERE/backup-index.mjs" "$SOURCE_DB" "$copy")"
-log "copy verified: $report"
+snap='null'
+if [ "$WHAT" = index ] && [ -n "${WALSHIP_DIR:-}" ]; then
+  log "snapshot of the WAL shipper's replica ($WALSHIP_DIR) to $copy"
+  snap="$("$NODE" --disable-warning=ExperimentalWarning "$HERE/wal-ship.mjs" snapshot --dir "$WALSHIP_DIR" --out "$copy" --timeout "${WALSHIP_SNAPSHOT_TIMEOUT_S:-14400}")" \
+    || die "the WAL shipper made no snapshot (systemctl status valuescan-walship; journalctl -u valuescan-walship -n 50)"
+  report="$("$NODE" --disable-warning=ExperimentalWarning "$HERE/backup-index.mjs" --check "$copy")" \
+    || die "the snapshot failed its check: $report"
+  log "snapshot verified: $report"
+elif [ "$WHAT" = index ] && [ "${BACKUP_ALLOW_LIVE_COPY:-0}" != 1 ]; then
+  die "WALSHIP_DIR is not set: the index is backed up from the WAL shipper's replica (docs/deploy/BACKUPS.md). Copying the live file holds one read transaction for the whole copy (it starved the indexer on 2026-11-08); BACKUP_ALLOW_LIVE_COPY=1 allows it anyway."
+else
+  log "copying $SOURCE_DB ($(( db_bytes / 1048576 )) MiB) to $copy"
+  report="$("$NODE" --disable-warning=ExperimentalWarning "$HERE/backup-index.mjs" "$SOURCE_DB" "$copy")"
+  log "copy verified: $report"
+fi
+# What the restore drill (index-drill.sh) compares a restored copy against: the check's figures, and for a
+# snapshot the WAL position it was cut at.
+meta="{\"check\":$report,\"snapshot\":$snap}"
 
 copy_bytes="$(stat -c %s "$copy")"
 sha="$(sha256sum "$copy" | awk '{print $1}')"
@@ -107,6 +126,7 @@ if [ -n "$OPS_BUCKET" ]; then
   log "uploading to s3://$OPS_BUCKET/$key"
   zstd -T1 "-$LEVEL" -q -c "$copy" | aws s3 cp - "s3://$OPS_BUCKET/$key" --expected-size "$copy_bytes" --no-progress --only-show-errors
   printf '%s  %s-%s.db\n' "$sha" "$NAME" "$stamp" | aws s3 cp - "s3://$OPS_BUCKET/$key.sha256" --only-show-errors
+  printf '%s\n' "$meta" | aws s3 cp - "s3://$OPS_BUCKET/$key.meta.json" --only-show-errors
 
   uploaded="$(aws s3api head-object --bucket "$OPS_BUCKET" --key "$key" --query ContentLength --output text)"
   [ "${uploaded:-0}" -gt 0 ] || die "the upload is not in the bucket"
@@ -120,6 +140,7 @@ else
   [ "$free_bytes" -gt "$(( copy_bytes / 2 ))" ] || die "not enough free space in $BACKUP_DIR for the compressed copy"
   zstd -T1 "-$LEVEL" -q -c "$copy" > "$key.partial"
   printf '%s  %s-%s.db\n' "$sha" "$NAME" "$stamp" > "$key.sha256"
+  printf '%s\n' "$meta" > "$key.meta.json"
   mv -f "$key.partial" "$key"
   uploaded="$(stat -c %s "$key")"
   [ "${uploaded:-0}" -gt 0 ] || die "the compressed copy is empty"
@@ -128,7 +149,7 @@ else
   find "$BACKUP_DIR" -maxdepth 1 -name "$NAME-*.db.zst.partial" -mmin +180 -delete 2>/dev/null || true
   ls -1 "$BACKUP_DIR" | grep -E "^$NAME-[0-9TZ]+\\.db\\.zst\$" | sort -r | tail -n +"$((BACKUP_KEEP + 1))" | while IFS= read -r old; do
     log "removing the older backup $old"
-    rm -f "$BACKUP_DIR/$old" "$BACKUP_DIR/$old.sha256"
+    rm -f "$BACKUP_DIR/$old" "$BACKUP_DIR/$old.sha256" "$BACKUP_DIR/$old.meta.json"
   done
 fi
 
