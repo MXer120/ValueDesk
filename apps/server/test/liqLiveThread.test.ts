@@ -46,7 +46,7 @@ class World {
     for (const v of ['hyperliquid', 'lighter']) for (const [c, p] of Object.entries(PX)) this.marks.set(`${v}|${c}`, v === 'lighter' ? p * 1.0002 : p);
   }
 
-  link(threaded: boolean, port: number): LiveLink {
+  link(threaded: boolean, port: number, hangMs?: number): LiveLink {
     const l = liveLink({
       source: {
         account: (v, a) => {
@@ -68,6 +68,7 @@ class World {
       allCoinPx: () => this.coinPx,
       wanted: () => this.wanted,
       port,
+      hangMs,
     }, threaded);
     this.links.push(l);
     return l;
@@ -130,7 +131,8 @@ test('the accounts encoding round-trips every field the engine and the change lo
   const touched: string[] = [];
   m.marks.set('hyperliquid|BTC', 80_000);
   m.applyAccounts(enc.take(), (k) => touched.push(k));
-  assert.deepEqual(touched, ['hyperliquid|0xa', 'lighter|0xb', 'lighter|0xgone']);
+  // A gone account the copy never held has nothing in the engine to take out: not touched (2026-11-09).
+  assert.deepEqual(touched, ['hyperliquid|0xa', 'lighter|0xb']);
   for (const [k, b] of books) {
     const [v, a] = k.split('|') as [Venue, string];
     const want = { cash: b.cash ?? null, priced: liqKnown(b), positions: [...b.pos].map(([symbol, p]) => { const { entry: _e, ...rest } = p; return { symbol, ...rest }; }), equity: b.equity };
@@ -138,6 +140,29 @@ test('the accounts encoding round-trips every field the engine and the change lo
     assert.deepEqual(m.extra(v, a, 'BTC'), logExtraOf({ equity: b.equity, cash: b.cash ?? null, at: b.at }, b.pos, liqCoin, 'BTC', (s) => m.marks.get(`${v}|${s}`) ?? null));
   }
   assert.equal(m.account('lighter', '0xgone', 'lighter|0xgone'), undefined);
+  // The cohorts' fields round-trip too (MirrorSource.bookOf), and the engine is touched only for what it sees: an empty
+  // book, or a venue's own account (noLive), is kept in the copy without a touch - unless it held positions the engine priced.
+  const full: Book & { collateral: number | null; spotAt: number | null; filledAt?: number; opened?: boolean; liqMiss?: boolean } = {
+    equity: 1, cash: null, at: 9, pos: new Map<string, Pos>([['BTC', { szi: 2, entry: 3 }]]), collateral: 77, spotAt: 8, filledAt: 12, opened: true, liqMiss: true,
+  };
+  const e2 = new AccountsEncoder();
+  e2.add('hyperliquid|0xc', full);
+  e2.add('hyperliquid|0xempty', { equity: 4, cash: null, at: 1, pos: new Map() });
+  e2.add('sodex|0xown', full, true);
+  touched.length = 0;
+  m.applyAccounts(e2.take(), (k) => touched.push(k));
+  assert.deepEqual(touched, ['hyperliquid|0xc']);
+  assert.deepEqual(m.bookOf(m.byVenue.get('hyperliquid')!.get('0xc')), { ...full, pos: new Map([['BTC', { szi: 2, entry: 3 }]]) });
+  assert.deepEqual(m.bookOf(m.byVenue.get('hyperliquid')!.get('0xempty')), { equity: 4, cash: null, at: 1, pos: new Map(), collateral: null, spotAt: null });
+  assert.equal(m.account('sodex', '0xown', 'sodex|0xown'), undefined, 'out of the heatmap');
+  assert.ok(m.byVenue.get('sodex')!.has('0xown'), 'kept for the cohorts');
+  const e3 = new AccountsEncoder();
+  e3.add('hyperliquid|0xc', { ...full, pos: new Map() });
+  e3.add('hyperliquid|0xempty', undefined);
+  touched.length = 0;
+  m.applyAccounts(e3.take(), (k) => touched.push(k));
+  assert.deepEqual(touched, ['hyperliquid|0xc'], 'emptied: taken out of the engine; an empty book gone: nothing to take out');
+  assert.equal(m.byVenue.get('hyperliquid')!.has('0xempty'), false);
 });
 
 /** The API's copy of the heatmap: every coin whole from a feed reader. */
@@ -394,4 +419,45 @@ test('while this thread is held for 5 s, the heatmap thread keeps pricing and se
   }
   assert.ok(ticks.length >= 4, `tick frames during the hold: ${ticks.length}`);
   assert.ok(deltasDuring > 0, 'coin deltas sent during the hold');
+});
+
+test('the watchdog: a thread that stops beating while this thread runs on time is terminated and started again, whole', async () => {
+  const w = new World();
+  const r = rng(11);
+  for (let i = 0; i < 200; i++) w.books.set(`hyperliquid|0x${(i + 0x6000).toString(16)}`, randomBook(r, Date.now()));
+  const inline = w.link(false, port());
+  const thread = w.link(true, port(), 2_000);
+  open.push(inline, thread);
+  for (const k of w.books.keys()) w.set(k, w.books.get(k)!);
+  inline.start();
+  thread.start();
+  await thread.drain();
+  await until(() => thread.ready, 10_000, 'ready');
+  // A busy loop on the thread: no heartbeat, no exit - only the watchdog ends it.
+  const t0 = Date.now();
+  (thread as unknown as { hangForTest(): void }).hangForTest();
+  await until(() => thread.status().thread!.hangs === 1, 10_000, 'the watchdog');
+  const took = Date.now() - t0;
+  assert.ok(took >= 2_000 && took < 6_000, `ended after ${took} ms (limit 2 s, checked every 500 ms)`);
+  await until(() => thread.status().thread!.restarts === 1 && thread.ready, 15_000, 'the restart');
+  assert.deepEqual(rowsOf(await thread.drain()), rowsOf(await inline.drain()), 'the new thread holds every book');
+});
+
+test('the watchdog does not end a healthy thread while this thread is held longer than its limit', async () => {
+  const w = new World();
+  const r = rng(12);
+  for (let i = 0; i < 100; i++) w.books.set(`hyperliquid|0x${(i + 0x7000).toString(16)}`, randomBook(r, Date.now()));
+  const thread = w.link(true, port(), 2_000);
+  open.push(thread);
+  for (const k of w.books.keys()) w.set(k, w.books.get(k)!);
+  thread.start();
+  await thread.drain();
+  await until(() => thread.ready, 10_000, 'ready');
+  // Held 4 s (twice the limit), as by a long SQLite write: the heartbeats wait in this thread's queue.
+  const holdFrom = Date.now();
+  while (Date.now() - holdFrom < 4_000) { /* held */ }
+  await new Promise((res) => setTimeout(res, 3_000));
+  assert.equal(thread.status().thread!.hangs, 0);
+  assert.equal(thread.status().thread!.restarts, 0);
+  assert.ok(thread.ready);
 });

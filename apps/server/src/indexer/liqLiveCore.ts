@@ -324,19 +324,43 @@ export class LiveCore {
 
 const NO_WALLETS: ReadonlySet<string> = new Set();
 
+/** How many positions the heatmap sees of an account (none of a venue's own). */
+const visible = (a: MirrorAcct): number => (a.n[3]! & A_NO_LIVE ? 0 : a.s.length);
+
+type PosFields = { szi: number; entry: number | null; iso?: number | null; lev?: number | null; fix?: number | null };
+
+/** A position from an account's numbers at `o` (MirrorSource), every field as the indexer's book holds it. */
+function posOf(n: number[], o: number): PosFields {
+  const f = n[o + 5]!;
+  const p: PosFields = { szi: n[o]!, entry: f & P_ENTRY_NULL ? null : n[o + 1]! };
+  if (f & P_ISO) p.iso = f & P_ISO_NULL ? null : n[o + 2]!;
+  if (f & P_LEV) p.lev = f & P_LEV_NULL ? null : n[o + 3]!;
+  if (f & P_FIX) p.fix = f & P_FIX_NULL ? null : n[o + 4]!;
+  return p;
+}
+
 // --- the heatmap thread's copy of the books --------------------------------------------------------
 
 /**
- * The books as the indexer hands them over, kept as lean as the engine and the change log allow: per account its
- * symbols and one array of numbers - [cash, equity, read at, flags, then per position szi, entry, iso, lev, fix,
- * flags] - with positions made as objects only when the engine prices the account (the indexer's own account() makes
- * them afresh each time too).
+ * The books as the indexer hands them over, kept as lean as the engine, the change log and the cohorts' passes
+ * (cohortCore.ts) allow: per account its symbols and one array of numbers - [cash, equity, read at, flags, collateral,
+ * spot read at, filled at, then per position szi, entry, iso, lev, fix, flags] - with positions made as objects only
+ * when the engine prices the account or a pass reads it (the indexer's own account() makes them afresh each time too).
+ * Every book is here since 2026-11-09, empty ones and a venue's own accounts too (flagged out of the heatmap:
+ * internalWallets.ts), as the cohorts count them.
  */
 interface MirrorAcct { k: string; s: string[]; n: number[] }
 
-// Account flags: cash / equity not known.
+// Account flags: cash / equity not known; collateral / spot read not known; never filled in this process; a market
+// opened since the read; a read the margin rules could not price; out of the heatmap (a venue's own account).
 const A_CASH_NULL = 1;
 const A_EQ_NULL = 2;
+const A_COLL_NULL = 4;
+const A_SPOT_NULL = 8;
+const A_FILLED_NONE = 16;
+const A_OPENED = 32;
+const A_LIQ_MISS = 64;
+const A_NO_LIVE = 128;
 // Position flags: entry null; iso / lev / fix present (absent = undefined) and null.
 const P_ENTRY_NULL = 1;
 const P_ISO = 2;
@@ -345,7 +369,7 @@ const P_LEV = 8;
 const P_LEV_NULL = 16;
 const P_FIX = 32;
 const P_FIX_NULL = 64;
-const HEAD = 4;
+const HEAD = 7;
 const PER_POS = 6;
 
 /** A book as the indexer holds it (cohortTracker.ts Book): what the encoding reads. */
@@ -354,12 +378,18 @@ export interface BookLike {
   cash?: number | null;
   at: number;
   pos: ReadonlyMap<string, { szi: number; entry: number | null; iso?: number | null; lev?: number | null; fix?: number | null }>;
+  /** What the cohorts' passes read besides (cohortTracker.ts Book). */
+  collateral?: number | null;
+  spotAt?: number | null;
+  filledAt?: number;
+  opened?: boolean;
+  liqMiss?: boolean;
 }
 
 /** Accounts on the wire: keys, then every account's symbols and numbers back to back (an account of -1 positions is gone). */
 export interface AccountsWire { k: string[]; s: string[]; n: Float64Array }
 
-/** Accounts as the wire carries them (the indexer's side): `book` undefined = gone (or left out of the heatmap). */
+/** Accounts as the wire carries them (the indexer's side): `book` undefined = gone; `noLive` = kept for the cohorts, out of the heatmap. */
 export class AccountsEncoder {
   k: string[] = [];
   s: string[] = [];
@@ -369,11 +399,14 @@ export class AccountsEncoder {
     return this.k.length;
   }
 
-  add(key: string, b: BookLike | undefined): void {
+  add(key: string, b: BookLike | undefined, noLive = false): void {
     this.k.push(key);
     if (!b) { this.n.push(-1); return; }
     const n = this.n;
-    n.push(b.pos.size, b.cash ?? 0, b.equity ?? 0, b.at, (b.cash == null ? A_CASH_NULL : 0) | (b.equity == null ? A_EQ_NULL : 0));
+    const f = (b.cash == null ? A_CASH_NULL : 0) | (b.equity == null ? A_EQ_NULL : 0) | (b.collateral == null ? A_COLL_NULL : 0)
+      | (b.spotAt == null ? A_SPOT_NULL : 0) | (b.filledAt === undefined ? A_FILLED_NONE : 0) | (b.opened ? A_OPENED : 0)
+      | (b.liqMiss ? A_LIQ_MISS : 0) | (noLive ? A_NO_LIVE : 0);
+    n.push(b.pos.size, b.cash ?? 0, b.equity ?? 0, b.at, f, b.collateral ?? 0, b.spotAt ?? 0, b.filledAt ?? 0);
     for (const [sym, p] of b.pos) {
       this.s.push(sym);
       let f = 0;
@@ -396,6 +429,8 @@ export class AccountsEncoder {
 
 export class MirrorSource implements LiveSource {
   readonly accounts = new Map<string, MirrorAcct>();
+  /** The same accounts per venue by address, in the order the indexer handed them in (the cohorts' passes go venue by venue). */
+  readonly byVenue = new Map<Venue, Map<string, MirrorAcct>>();
   readonly marks = new Map<string, number>();
   readonly coinPx = new Map<string, number>();
   readonly tiers = new Map<Venue, Map<string, Tiers>>();
@@ -405,7 +440,10 @@ export class MirrorSource implements LiveSource {
 
   constructor(private readonly coinOf: (symbol: string) => string) {}
 
-  /** Accounts in, each touched in the engine by the key string this map holds for it (one string per account, not two). */
+  /**
+   * Accounts in, each touched in the engine by the key string this map holds for it (one string per account, not two) -
+   * unless the heatmap sees nothing of it before or after (an empty book, a venue's own account): nothing to price.
+   */
   applyAccounts(w: AccountsWire, touch: (key: string) => void): void {
     let si = 0;
     let ni = 0;
@@ -413,9 +451,14 @@ export class MirrorSource implements LiveSource {
       const np = w.n[ni++]!;
       const had = this.accounts.get(k);
       const key = had ? had.k : k;
+      const before = had ? visible(had) : 0;
       if (np < 0) {
-        if (had) this.accounts.delete(key);
-        touch(key);
+        if (had) {
+          this.accounts.delete(key);
+          const j = key.indexOf('|');
+          this.byVenue.get(key.slice(0, j) as Venue)?.delete(key.slice(j + 1));
+        }
+        if (before) touch(key);
         continue;
       }
       const s = new Array<string>(np);
@@ -428,14 +471,41 @@ export class MirrorSource implements LiveSource {
         s[i] = shared;
         for (let j = 0; j < PER_POS; j++) n[HEAD + i * PER_POS + j] = w.n[ni++]!;
       }
-      if (had) { had.s = s; had.n = n; } else this.accounts.set(key, { k: key, s, n });
-      touch(key);
+      let a = had;
+      if (a) { a.s = s; a.n = n; } else {
+        a = { k: key, s, n };
+        this.accounts.set(key, a);
+        const j = key.indexOf('|');
+        const v = key.slice(0, j) as Venue;
+        let m = this.byVenue.get(v);
+        if (!m) { m = new Map(); this.byVenue.set(v, m); }
+        m.set(key.slice(j + 1), a);
+      }
+      if (before || visible(a)) touch(key);
     }
+  }
+
+  /** An account as the cohorts' passes read it (cohortTracker.ts Book), made afresh from its numbers. */
+  bookOf(x: unknown): BookLike | undefined {
+    const a = x as MirrorAcct | undefined;
+    if (!a) return undefined;
+    const n = a.n;
+    const f = n[3]!;
+    const pos = new Map<string, { szi: number; entry: number | null; iso?: number | null; lev?: number | null; fix?: number | null }>();
+    for (let i = 0; i < a.s.length; i++) pos.set(a.s[i]!, posOf(n, HEAD + i * PER_POS));
+    const b: BookLike = {
+      equity: f & A_EQ_NULL ? null : n[1]!, cash: f & A_CASH_NULL ? null : n[0]!, at: n[2]!, pos,
+      collateral: f & A_COLL_NULL ? null : n[4]!, spotAt: f & A_SPOT_NULL ? null : n[5]!,
+    };
+    if (!(f & A_FILLED_NONE)) b.filledAt = n[6]!;
+    if (f & A_OPENED) b.opened = true;
+    if (f & A_LIQ_MISS) b.liqMiss = true;
+    return b;
   }
 
   account = (_venue: Venue, _address: string, key: string): LiveAccount | undefined => {
     const a = this.accounts.get(key);
-    if (!a) return undefined;
+    if (!a || a.n[3]! & A_NO_LIVE) return undefined;
     const n = a.n;
     const positions = a.s.map((symbol, i) => {
       const o = HEAD + i * PER_POS;

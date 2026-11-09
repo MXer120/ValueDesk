@@ -13,6 +13,14 @@
  *
  * A worker that dies is started again (1 s, doubling to 30 s) and handed every input once more: the coins, tiers,
  * marks, coin prices and every book. The API's readers reconnect to the new feed server and get every coin whole.
+ *
+ * The cohorts' passes run here too (2026-11-09, cohortCore.ts: the history step, the plan, the PnL scan, the members'
+ * diff, the open interest rereads), on the same copy of the books - every book, empty ones and a venue's own accounts
+ * included - with what the indexer hands over besides (CohortIn). They run in slices between the engine's pieces.
+ *
+ * A worker that hangs is started again too (the watchdog): it sends a heartbeat every second, and one that sent
+ * nothing for VALUESCAN_THREAD_HANG_S (60 s) while this thread itself ran on time is terminated - the restart above
+ * follows. A hold of this thread (a SQLite write) delays the heartbeats it reads, so a late check here counts nothing.
  */
 import { Worker, isMainThread, parentPort, workerData } from 'node:worker_threads';
 import type { Venue } from '../valuedesk/types.js';
@@ -21,6 +29,7 @@ import type { Tiers } from '../valuedesk/liquidations/math.js';
 import type { LiqNow } from '../valuedesk/liquidations/levels.js';
 import { LIQ_FEED_PORT } from './liqFeed.js';
 import { AccountsEncoder, LiveCore, MirrorSource, type AccountsWire, type BookLike, type LiveSource, type LiveStatus, type StepAsk, type StepOut } from './liqLiveCore.js';
+import type { CohortAsk, CohortIn } from './cohortCore.js';
 
 /** The worker sends what it priced at most this often (the indexer's beat sent once a second). */
 export const FLUSH_MIN_MS = 250;
@@ -38,12 +47,26 @@ const CROSSED_MAX = 50_000;
 /** A liquidation pass or a question longer than this: given up (the next pass asks again). */
 const CALL_MS = 10 * 60_000;
 const VENUE_LIST: readonly Venue[] = ['sodex', 'hyperliquid', 'tradexyz', 'lighter', 'arcus'];
+/** The worker's heartbeat, and how long without one (this thread on time) counts as hung. */
+const HEARTBEAT_MS = 1_000;
+const hangMsOf = (): number => {
+  const s = Number(process.env.VALUESCAN_THREAD_HANG_S);
+  return Number.isFinite(s) && s >= 5 ? s * 1_000 : 60_000;
+};
+/** A cohort pass gives the heatmap thread back this often (the engine's pieces are 50 ms: WORK_CHUNK_MS). */
+const COHORT_SLICE_MS = 30;
 
 export type Totals = Map<string, Map<Venue, [number, number]>>;
 
 export interface LiveLink {
   readonly threaded: boolean;
   touch(venue: Venue, address: string): void;
+  /** A book changed in what the heatmap does not see (an empty book, a flag the plan reads): the thread's copy follows. */
+  changed(venue: Venue, address: string): void;
+  /** A cohort pass on the thread (threaded only; it waits until the thread holds every book). */
+  cohort(ask: CohortAsk): Promise<unknown>;
+  /** What the cohort passes read besides the books, to the thread (dropped while it is down: cohortState is handed to a new one). */
+  cohortIn(m: CohortIn): void;
   /** A print's price: the mark set and the engine told (live.ts mark). */
   mark(venue: Venue, symbol: string, px: number): void;
   /** A mark set without telling the engine (a saved mark at the start, a read's mark). */
@@ -56,7 +79,7 @@ export interface LiveLink {
   beat(slice: number, budgetMs: number): void;
   readonly ready: boolean;
   readonly pending: number;
-  status(): LiveStatus & { thread?: { restarts: number; sent: number; queued: number } };
+  status(): LiveStatus & { thread?: { restarts: number; hangs: number; sent: number; queued: number } };
   readonly needsLevelInit: boolean;
   step(ask: StepAsk): Promise<StepOut>;
   commit(ids: ReadonlyMap<string, number>): void;
@@ -81,7 +104,13 @@ export interface LinkDeps {
   allCoinPx: () => Iterable<[string, number]>;
   /** The coins kept (SoDEX's list): the same Set until it changes. */
   wanted: () => ReadonlySet<string>;
+  /** Threaded: a book kept for the cohorts but out of the heatmap (a venue's own account: internalWallets.ts). */
+  noLive?: (venue: Venue, address: string) => boolean;
+  /** Threaded, for a new thread: everything the cohort passes read besides the books (members, PnL read times, the archive's). */
+  cohortState?: () => CohortIn[];
   port?: number;
+  /** The watchdog's limit (tests; default VALUESCAN_THREAD_HANG_S, 60 s). */
+  hangMs?: number;
 }
 
 export function liqLiveThreadOn(): boolean {
@@ -106,6 +135,9 @@ class InlineLink implements LiveLink {
   }
 
   touch(venue: Venue, address: string): void { this.core.live.touch(venue, address); }
+  changed(): void { /* the engine reads the indexer's books in place */ }
+  cohort(): Promise<unknown> { return Promise.reject(new Error('the heatmap runs inline: the cohort passes too')); }
+  cohortIn(): void { /* the passes read the indexer's state in place */ }
   mark(venue: Venue, symbol: string, px: number): void { this.core.live.mark(venue, symbol, px); }
   price(): void { /* the engine reads the indexer's marks in place */ }
   coinPx(): void { /* and its coin prices */ }
@@ -134,13 +166,16 @@ type ToThread =
   | { t: 'in'; acc?: AccountsWire; mk?: { k: string[]; px: Float64Array; e: Uint8Array }; cp?: { k: string[]; px: Float64Array }; tiers?: Array<[Venue, Map<string, Tiers>]>; wanted?: string[] }
   | { t: 'primed' }
   | { t: 'call'; id: number; op: 'step'; ask: StepAsk }
-  | { t: 'call'; id: number; op: 'totals' | 'drain' | 'heap' }
-  | { t: 'commit'; ids: Map<string, number> };
+  | { t: 'call'; id: number; op: 'totals' | 'drain' | 'heap' | 'hang' }
+  | { t: 'call'; id: number; op: 'cohort'; ask: CohortAsk }
+  | { t: 'commit'; ids: Map<string, number> }
+  | { t: 'coh'; m: CohortIn };
 
 /** Thread -> indexer. */
 type FromThread =
   | { t: 'status'; s: LiveStatus; crossed?: { k: string[]; usd: Float64Array } }
-  | { t: 'reply'; id: number; value?: unknown; error?: string };
+  | { t: 'reply'; id: number; value?: unknown; error?: string }
+  | { t: 'hb' };
 
 class ThreadLink implements LiveLink {
   readonly threaded = true;
@@ -163,12 +198,60 @@ class ThreadLink implements LiveLink {
   private last: LiveStatus = { ready: false, pending: 0, ms: 0, readers: 0, error: null, levels: null };
   private nextId = 1;
   private calls = new Map<number, { ok: (v: unknown) => void; no: (e: Error) => void; timer: NodeJS.Timeout }>();
+  /** The watchdog: when the thread was last heard from, when this thread last checked, and the hangs it ended. */
+  private beatAt = 0;
+  private checkAt = 0;
+  private hangs = 0;
+  private watch: NodeJS.Timeout | null = null;
+  private readonly hangMs: number;
+  private readonly checkMs: number;
 
-  constructor(private readonly d: LinkDeps) {}
+  constructor(private readonly d: LinkDeps) {
+    this.hangMs = d.hangMs ?? hangMsOf();
+    this.checkMs = Math.min(5_000, Math.max(100, Math.round(this.hangMs / 4)));
+  }
 
   touch(venue: Venue, address: string): void {
     this.acc.add(`${venue}|${address}`);
     this.schedule();
+  }
+
+  changed(venue: Venue, address: string): void {
+    this.acc.add(`${venue}|${address}`);
+    this.schedule();
+  }
+
+  cohort(ask: CohortAsk): Promise<unknown> {
+    // What changed this turn first: the pass reads the books as they stand now.
+    this.flushAll();
+    return this.call<unknown>({ t: 'call', id: 0, op: 'cohort', ask });
+  }
+
+  cohortIn(m: CohortIn): void {
+    this.w?.postMessage({ t: 'coh', m } satisfies ToThread);
+  }
+
+  /** Tests: the thread made to hang (only where NODE_TEST_CONTEXT or VALUESCAN_THREAD_TEST_HANG=1 is set). */
+  hangForTest(): void {
+    void this.call({ t: 'call', id: 0, op: 'hang' }).catch(() => {});
+  }
+
+  /**
+   * Every checkMs: a thread not heard from for hangMs is terminated (the restart follows: spawn). A check that comes
+   * late by more than two of its periods means this thread was held: the heartbeats waited in its queue, the thread
+   * may well be fine, and the clock starts again.
+   */
+  private check(): void {
+    const now = Date.now();
+    const late = now - this.checkAt - this.checkMs;
+    this.checkAt = now;
+    if (late > 2 * this.checkMs) { this.beatAt = now; return; }
+    const w = this.w;
+    if (!w || now - this.beatAt < this.hangMs) return;
+    this.hangs++;
+    console.error(`[indexer] heatmap thread: no heartbeat for ${Math.round((now - this.beatAt) / 1000)} s while this thread ran on time - terminated, starting it again`);
+    this.beatAt = now;
+    void w.terminate();
   }
 
   mark(venue: Venue, symbol: string, px: number): void {
@@ -192,10 +275,15 @@ class ThreadLink implements LiveLink {
     if (this.started) return;
     this.started = true;
     this.spawn(false);
+    this.checkAt = Date.now();
+    this.watch = setInterval(() => this.check(), this.checkMs);
+    this.watch.unref();
   }
 
   async stop(): Promise<void> {
     this.stopping = true;
+    if (this.watch) clearInterval(this.watch);
+    this.watch = null;
     const w = this.w;
     this.w = null;
     this.failAll('the heatmap thread stopped');
@@ -218,7 +306,7 @@ class ThreadLink implements LiveLink {
   get pending(): number { return this.last.pending + this.acc.size; }
 
   status() {
-    return { ...this.last, ready: this.ready, pending: this.pending, thread: { restarts: this.restarts, sent: this.sent, queued: this.acc.size } };
+    return { ...this.last, ready: this.ready, pending: this.pending, thread: { restarts: this.restarts, hangs: this.hangs, sent: this.sent, queued: this.acc.size } };
   }
 
   get needsLevelInit(): boolean { return !this.levelInit; }
@@ -264,8 +352,9 @@ class ThreadLink implements LiveLink {
     // Its own heap: a lean copy of the books (~300k accounts) and the engine's buckets.
     const w = new Worker(new URL(import.meta.url), { workerData: { liqLiveThread: true, port: this.d.port ?? LIQ_FEED_PORT }, resourceLimits: { maxOldGenerationSizeMb: 2_048 } });
     this.w = w;
+    this.beatAt = Date.now();
     w.unref();
-    w.on('message', (m: FromThread) => this.onMessage(m));
+    w.on('message', (m: FromThread) => { if (this.w === w) this.beatAt = Date.now(); this.onMessage(m); });
     const gone = (e?: unknown) => {
       if (this.w !== w) return;
       this.w = null;
@@ -286,7 +375,10 @@ class ThreadLink implements LiveLink {
     this.tiersSent.clear();
     for (const [k, px] of this.d.allMarks()) if (!this.marks.has(k)) this.marks.set(k, { px, e: false });
     for (const [c, px] of this.d.allCoinPx()) if (!this.cps.has(c)) this.cps.set(c, px);
-    if (resend) for (const k of this.d.allKeys()) this.acc.add(k);
+    // Every book in the indexer's order (what waited to go is among them): the cohort passes go in that order.
+    if (resend) { this.acc.clear(); for (const k of this.d.allKeys()) this.acc.add(k); }
+    // The cohort passes' other inputs before the books: a pass waits for the books (primed), these are there by then.
+    for (const m of this.d.cohortState?.() ?? []) w.postMessage({ t: 'coh', m } satisfies ToThread);
     // The books handed in so far (at the start: all of them) are what "ready" waits for.
     this.primeOnDrain = true;
     this.beat();
@@ -294,6 +386,7 @@ class ThreadLink implements LiveLink {
   }
 
   private onMessage(m: FromThread): void {
+    if (m.t === 'hb') return;
     if (m.t === 'status') {
       this.last = m.s;
       // A thread that got as far as ready is a healthy one: the next restart waits 1 s again.
@@ -359,7 +452,9 @@ class ThreadLink implements LiveLink {
       for (const key of this.acc) {
         this.acc.delete(key);
         const j = key.indexOf('|');
-        enc.add(key, this.d.book(key.slice(0, j) as Venue, key.slice(j + 1)));
+        const v = key.slice(0, j) as Venue;
+        const a = key.slice(j + 1);
+        enc.add(key, this.d.book(v, a), this.d.noLive?.(v, a) ?? false);
         if (enc.size >= ACCOUNTS_PER_MSG) break;
       }
       m.acc = enc.take();
@@ -382,7 +477,15 @@ class ThreadLink implements LiveLink {
 if (!isMainThread && (workerData as { liqLiveThread?: boolean } | null)?.liqLiveThread) {
   const port = parentPort!;
   const { liqCoin } = await import('../valuedesk/liquidations/levels.js');
+  const { CohortMirror } = await import('./cohortCore.js');
   const mirror = new MirrorSource(liqCoin);
+  const cohorts = new CohortMirror(mirror);
+  // A cohort pass waits until every book the indexer holds is here (a pass over half the books would write half the money).
+  let primedOk: () => void = () => {};
+  const primed = new Promise<void>((r) => { primedOk = r; });
+  // The heartbeat the indexer's watchdog listens for: it stops only when this thread's loop does.
+  setInterval(() => port.postMessage({ t: 'hb' } satisfies FromThread), HEARTBEAT_MS);
+  const testHang = !!process.env.NODE_TEST_CONTEXT || process.env.VALUESCAN_THREAD_TEST_HANG === '1';
   const crossed = new Map<string, number>();
   const core = new LiveCore(mirror, {
     crossed: (venue, address, usd) => {
@@ -456,16 +559,26 @@ if (!isMainThread && (workerData as { liqLiveThread?: boolean } | null)?.liqLive
       }
       case 'primed':
         core.primed = true;
+        primedOk();
         kick();
         return;
       case 'commit':
         core.commit(m.ids);
         return;
+      case 'coh':
+        cohorts.apply(m.m);
+        return;
       case 'call': {
         const reply = (value: unknown, transfer: ArrayBuffer[] = []) => port.postMessage({ t: 'reply', id: m.id, value } satisfies FromThread, transfer);
         const fail = (e: unknown) => port.postMessage({ t: 'reply', id: m.id, error: String((e as Error)?.message ?? e) } satisfies FromThread);
         try {
-          if (m.op === 'totals') reply(core.live.totals());
+          if (m.op === 'cohort') {
+            const ask = m.ask;
+            primed.then(() => cohorts.run(ask, breathe, COHORT_SLICE_MS)).then((v) => reply(v), fail);
+          } else if (m.op === 'hang') {
+            if (testHang) for (;;) { /* a hung thread, for the watchdog's test */ }
+            fail(new Error('hang: tests only'));
+          } else if (m.op === 'totals') reply(core.live.totals());
           else if (m.op === 'heap') {
             // Tools: the thread's heap in use, after a collection where the process allows one (--expose-gc).
             (globalThis as { gc?: () => void }).gc?.();
