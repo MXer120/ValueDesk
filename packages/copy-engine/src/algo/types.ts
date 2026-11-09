@@ -845,6 +845,22 @@ export interface AlgoView {
   bot?: BotView | null;
 }
 
+/**
+ * One line of a bot's Watchdog (owner 2026-11-09): a part of what keeps it running, its state and the figure behind
+ * it. 'off': not used by this bot (a book maker has no oracle), or not known yet.
+ */
+export interface BotHealthCheck {
+  id: 'loop' | 'book' | 'oracle' | 'orders' | 'position' | 'key' | 'refusals' | 'service' | 'hold';
+  label: string;
+  state: 'ok' | 'warn' | 'bad' | 'off';
+  value: string;
+}
+export interface BotHealth {
+  /** When the executor took it (ms). */
+  at: number;
+  checks: BotHealthCheck[];
+}
+
 export interface BotView {
   /** USD traded, both sides. */
   volume: number;
@@ -867,6 +883,8 @@ export interface BotView {
   minOrderUsd?: number | null;
   /** When its holding last matched SoDEX's position on the market (ms; the position check, BOT_POSITION_CHECK_MS). Absent: not yet. */
   matchedAt?: number | null;
+  /** The Watchdog: every part that keeps it running, checked as the view is taken. Absent on an older executor. */
+  health?: BotHealth;
   /** Its quotes or levels on SoDEX now. */
   orders: Array<{ side: Side; price: number; quantity: number; tag: string }>;
   /** Stopping: closing what it holds. */

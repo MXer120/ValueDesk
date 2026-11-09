@@ -1499,3 +1499,57 @@ test('a cancel SoDEX answers "OrderNotFound" is gone, not failed: no error, no r
   assert.equal(events.filter((x) => x.kind === 'error').length, 0, 'no "Cancel failed"');
   assert.ok(Math.abs((r.rt.view(a.id)!.bot?.inventory ?? 0) - r.ex.position) < 1e-12);
 });
+
+/* ------------------------------------------------ zero errors of ours, and the Watchdog (owner 2026-11-09) ----- */
+
+test('refusals a bot handles itself are not errors in its activity; the Watchdog counts them; a margin refusal is info', async () => {
+  const r = await rig();
+  const a = await add(r, MM);
+  await step(r, a.id);
+  const [bid, ask] = [r.ex.side('buy')[0]!, r.ex.side('sell')[0]!];
+  // The price moved under a post-only quote (842 of these were "errors" on production), and a rate limit.
+  r.ex.resting.delete(bid.clOrdID);
+  r.market.order({ clOrdID: bid.clOrdID, status: 'REJECTED', reason: 'PostOnly' });
+  r.ex.resting.delete(ask.clOrdID);
+  r.market.order({ clOrdID: ask.clOrdID, status: 'REJECTED', reason: 'too many requests (429)' });
+  await settle();
+  let events = await r.rt.events(a.id, { limit: 500 });
+  assert.equal(events.filter((x) => x.kind === 'error').length, 0, events.filter((x) => x.kind === 'error').map((x) => x.text).join(' | '));
+  const h = r.rt.view(a.id)!.bot!.health!;
+  const ref = h.checks.find((c) => c.id === 'refusals')!;
+  assert.equal(ref.state, 'ok');
+  assert.match(ref.value, /^2 handled$/);
+  // Not enough margin: the user can act on it - an info line, not an error.
+  await step(r, a.id, 4_000);
+  const b2 = r.ex.side('buy')[0];
+  if (b2) {
+    r.ex.resting.delete(b2.clOrdID);
+    r.market.order({ clOrdID: b2.clOrdID, status: 'REJECTED', reason: 'insufficient margin' });
+    await settle();
+    events = await r.rt.events(a.id, { limit: 500 });
+    assert.equal(events.filter((x) => x.kind === 'error').length, 0);
+    assert.ok(events.some((x) => x.kind === 'info' && /not enough free margin/.test(x.text)));
+  }
+});
+
+test('Watchdog: a running bot reports its loop, the service, the SoDEX price, the oracle (off for a book maker), orders, holding, key, refusals and quoting', async () => {
+  const r = await rig();
+  const a = await add(r, MM);
+  await step(r, a.id);
+  const h = r.rt.view(a.id)!.bot!.health!;
+  const by = Object.fromEntries(h.checks.map((c) => [c.id, c]));
+  for (const id of ['loop', 'service', 'book', 'oracle', 'orders', 'position', 'key', 'refusals', 'hold']) assert.ok(by[id], `check ${id}`);
+  assert.equal(by.loop!.state, 'ok');
+  assert.equal(by.oracle!.state, 'off', 'a book maker uses no oracle');
+  assert.equal(by.book!.state, 'ok');
+  assert.equal(by.service!.state, 'ok');
+  // The brake: said as it is.
+  r.brake = 'Updating the executor';
+  assert.equal(r.rt.view(a.id)!.bot!.health!.checks.find((c) => c.id === 'service')!.state, 'warn');
+  r.brake = null;
+  // Stopped: nothing to watch.
+  await r.rt.cancel(a.id, { now: clock });
+  await settle();
+  const hs = r.rt.view(a.id)!.bot!.health!;
+  assert.deepEqual(hs.checks.map((c) => c.state), ['off']);
+});

@@ -29,6 +29,7 @@ import { BotAvatar, BotIcon } from './BotIcon';
 import { botSeries } from './BotSheet';
 import { BotSettings, NameField } from './BotSettings';
 import { StopMenu } from './StopMenu';
+import { Watchdog } from './Watchdog';
 import { Term } from './Term';
 import { BotAllocation } from './Allocation';
 import { TAKER_COLORS, effectiveDraft } from './BotNewPage';
@@ -367,6 +368,7 @@ export function BotDetail({ ctx, view, id }: { ctx: BotsCtx; view: BotsView; id:
             <FleetChart bots={[v]} title="Performance" />
           </div>
           <aside className="bots-dgrid__side">
+            {!ended && <Watchdog v={v} />}
             <LatencyCard ctx={ctx} bot={v.algo.id} practice={v.algo.spec.paper} compact marks={v.algo.startedAt ? [{ t: v.algo.startedAt, label: 'Started' }] : []} />
             {!ended && (
               <Shell className="bots-sidecard is-plain">
