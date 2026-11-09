@@ -82,10 +82,9 @@ import { accountLiqs, addDrift, calibrate, emptyDrift, feeCash, fillCash, fundin
 import { hlInfo } from '../valuedesk/hyperliquid/index.js';
 import { ARCUS_FEES_COST, ASK_MIN_USD, BASE_FEES, FEES_TTL_MS, HL_FEES_COST, SODEX_FEES_COST, arcusFees, fillRate, hlFees, sodexFees, spotSellRate, xyzScales, type FeeRates, type MarketScale } from './feeRates.js';
 import { marketsNow, setRulesPacers, venueMarkets } from '../valuedesk/liquidations/rules.js';
-import { fineBandWidth, fineBands, fineSnapOf, liqCoin, snapOfNow } from '../valuedesk/liquidations/levels.js';
-import { LiqLive } from '../valuedesk/liquidations/live.js';
-import { LiqFeedServer } from './liqFeed.js';
-import { deflateRawSync } from 'node:zlib';
+import { liqCoin } from '../valuedesk/liquidations/levels.js';
+import { liveLink, type LiveLink } from './liqLiveThread.js';
+import { logExtraOf } from './liqLiveCore.js';
 import { loadReadList, loadSeeds, readListDue, type Seeds } from './archiveSeed.js';
 import { mayPrune } from '../retention.js';
 import { OI_EXCESS, oiCheck, oiOver, oiRereads, oiStatus, overSides } from './oiCheck.js';
@@ -658,12 +657,8 @@ const PNL_FLOW_SAVE_MS = 5 * 60_000;
 const FLOW_SAVE_BATCH = 2_000;
 /** Members written or dropped per transaction (saveMembers): 5,000 random inserts into the member table held the indexer 10-17 s (profiles 2026-11-08). */
 const MEMBER_SAVE_BATCH = 1_000;
-/** A position's level is logged again once it moved this much (relative), or its USD this much: the history draws 0.25% cells. */
-/** Set once every open position has been written with the extra fields (logLevels). */
+/** Set once every open position has been written with the extra fields (logLevels; the moves that log a level again: liqLiveCore.ts). */
 const LIQ_LOG_FULL_META = 'liq_log_full_v2';
-const LIQ_LOG_MOVE = 0.0005;
-const USD_LOG_MOVE = 0.002;
-const NO_WALLETS: ReadonlySet<string> = new Set();
 /**
  * Cohort reads in flight at once (lanes.ts CONCURRENCY). One at a time made ~20
  * a minute; 8 made ~46 (v0.2.16, 2026-10-24), still bound by the event loop's
@@ -709,23 +704,35 @@ export class CohortTracker {
   /**
    * The live liquidation levels (valuedesk/liquidations/live.ts): every account
    * priced into its coins' buckets, re-priced when a print or a read moves its
-   * book or another of its prices moves; flushed to the API every second (liqFeed.ts).
+   * book or another of its prices moves; streamed to the API (liqFeed.ts). On its
+   * own thread (liqLiveThread.ts), which this one hands the books' changes to;
+   * inline with VALUESCAN_LIQ_LIVE_THREAD=0 and in the tests.
    */
-  readonly live = new LiqLive({
-    account: (venue, address) => {
-      // A venue's own accounts are no level on the map (internalWallets.ts).
-      if (isExcluded(venue, address)) return undefined;
-      const b = this.books.get(venue)?.get(address);
-      return b ? { cash: b.cash ?? null, priced: liqKnown(b), positions: [...b.pos].map(([symbol, p]) => ({ symbol, ...p })), equity: b.equity } : undefined;
+  readonly live: LiveLink = liveLink({
+    source: {
+      account: (venue, address) => {
+        // A venue's own accounts are no level on the map (internalWallets.ts).
+        if (isExcluded(venue, address)) return undefined;
+        const b = this.books.get(venue)?.get(address);
+        return b ? { cash: b.cash ?? null, priced: liqKnown(b), positions: [...b.pos].map(([symbol, p]) => ({ symbol, ...p })), equity: b.equity } : undefined;
+      },
+      priceOf: (venue, symbol) => this.marks.get(`${venue}|${symbol}`) ?? null,
+      tiersOf: (venue, symbol) => marketsNow(venue)?.tiers.get(symbol) ?? null,
+      priceOfCoin: (coin) => this.coinPx.get(coin)?.px ?? null,
+      wanted: (coin) => this.sodexCoins.has(coin),
+      extra: (venue, address, coin) => this.logExtra(venue, address, coin),
     },
-    priceOf: (venue, symbol) => this.marks.get(`${venue}|${symbol}`) ?? null,
-    tiersOf: (venue, symbol) => marketsNow(venue)?.tiers.get(symbol) ?? null,
-    priceOfCoin: (coin) => this.coinPx.get(coin)?.px ?? null,
-    wanted: (coin) => this.sodexCoins.has(coin),
     crossed: (venue, address, usd) => {
       const k = `${venue}|${address}`;
       if (this.crossed.size < CROSSED_MAX) this.crossed.set(k, Math.max(usd, this.crossed.get(k) ?? 0));
     },
+    now: () => this.d.now(),
+    breathe: () => this.breathe(),
+    book: (venue, address) => (isExcluded(venue, address) ? undefined : this.books.get(venue)?.get(address)),
+    allKeys: () => this.bookKeys(),
+    allMarks: () => this.marks,
+    allCoinPx: () => [...this.coinPx].map(([c, x]): [string, number] => [c, x.px]),
+    wanted: () => this.sodexCoins,
   });
   /** Per venue, the newest print time applied (saved with the books: PRINTS_THROUGH_META), and the one the saved books held at the start. */
   private printsThrough = new Map<Venue, number>();
@@ -789,13 +796,10 @@ export class CohortTracker {
     for (const sym of b.pos.keys()) if (this.sodexCoins.has(liqCoin(sym))) return true;
     return false;
   }
-  private feed = new LiqFeedServer(() => this.live.resendAll());
-  /** Every book priced into the engine once since the start. */
-  private liveReady = false;
-  /** The engine's `processed` count at which the books touched at the start are all in (liveTick). */
-  private liveBarrier: number | null = null;
-  private liveMs = 0;
-  private liveWholeAt = 0;
+  /** Every book with positions, as venue|address (a restarted heatmap thread is handed them all again). */
+  private *bookKeys(): Iterable<string> {
+    for (const v of VENUES) for (const [a, b] of this.books.get(v) ?? []) if (b.pos.size) yield `${v}|${a}`;
+  }
   /** What the boards lane lends the rebuild now. */
   private lent = 0;
   /** SoDEX perps state reads, requests / minute (weight 5 each). */
@@ -838,9 +842,7 @@ export class CohortTracker {
   private pnlDueList: Array<[string, number]> | null = null;
   private pnlDueNext = 0;
   private pnlDueAt = 0;
-  /** The change log's last logged state per position (aid|coin|venue), and the address ids (logLevels). */
-  private levelState: Map<string, { side: number; liq: number; usd: number }> | null = null;
-  private levelAddr: Map<string, number> | null = null;
+  /** When the change log was last pruned (its state lives with the engine: liqLiveCore.ts). */
   private levelPrunedAt = 0;
   /** Rows the last step wrote. */
   private levelRows = 0;
@@ -865,6 +867,9 @@ export class CohortTracker {
   private liqAccDirty = false;
   private lastLiqT = 0;
   private liqRecording = false;
+  /** A 15-minute step's writes are in flight (writeLiqStep): the next step waits, the heatmap rows do not. */
+  private liqStepWriting = false;
+  private liqStepMs = 0;
   private lastNowAt = 0;
   /** How long the last liquidation pass took (status). */
   private liqMs = 0;
@@ -951,7 +956,7 @@ export class CohortTracker {
 
   private startRest(now: number): void {
     const s = this.d.store;
-    for (const [k, px] of s.cohortMarks()) { this.marks.set(k, px); this.noteCoinPx(k, px); }
+    for (const [k, px] of s.cohortMarks()) { this.marks.set(k, px); this.live.price(k, px); this.noteCoinPx(k, px); }
     // Prints the saved books already hold: a stream's snapshot of recent prints after this start
     // must not apply them again (printApplies).
     try {
@@ -1005,7 +1010,7 @@ export class CohortTracker {
     void this.loadSpotPairs().catch((e) => (this.lastError = `spot pairs: ${String(e)}`));
     // The live engine: every book in at the start (priced a few thousand a second), then what changes.
     for (const v of VENUES) for (const [a, b] of this.books.get(v) ?? []) if (b.pos.size) this.live.touch(v, a);
-    this.feed.start();
+    this.live.start();
     every(LIVE_TICK_MS, () => this.liveTick(), 'coh:live');
     const first = setTimeout(() => void this.plan().catch((e) => (this.lastError = String(e))), 15_000);
     first.unref?.();
@@ -1039,7 +1044,7 @@ export class CohortTracker {
     this.lend(0);
     this.scoh.stop();
     this.stateReader?.stop();
-    this.feed.stop();
+    void this.live.stop();
     this.flush();
     this.saveFlowsNow();
   }
@@ -1327,10 +1332,10 @@ export class CohortTracker {
       recordMs: this.recordMs,
       liqMs: this.liqMs,
       printsSkipped: this.printsSkipped,
-      liq: { crossedQueued: this.crossedQueued, oi: this.oiLast, boost: this.liqBoost, due: Object.fromEntries(this.liqDue), live: { ready: this.liveReady, pending: this.live.pending, ms: this.liveMs, readers: this.feed.readers, error: this.feed.lastError }, nowAt: this.lastNowAt || null, since: this.startedAt },
+      liq: { crossedQueued: this.crossedQueued, oi: this.oiLast, boost: this.liqBoost, due: Object.fromEntries(this.liqDue), live: this.live.status(), nowAt: this.lastNowAt || null, since: this.startedAt },
       hlc: { queued: this.hlc.size, done: this.hlc.done, failed: this.hlc.failed, lastError: this.hlc.lastError },
       pnl: { perpSince: this.perpSince, due: this.pnlDue, flows: this.pnlFlow.size, imported: this.pnlImported },
-      levels: { open: this.levelState?.size ?? null, lastRows: this.levelRows },
+      levels: { open: this.live.status().levels, lastRows: this.levelRows },
       scoh: { queued: this.scoh.size, done: this.scoh.done, failed: this.scoh.failed, lastError: this.scoh.lastError },
       hlh: { queued: this.hlh.size, done: this.hlh.done, failed: this.hlh.failed, lastError: this.hlh.lastError, lent: this.lent },
       staleBefore: this.staleBefore,
@@ -2115,7 +2120,7 @@ export class CohortTracker {
         this.wanted.delete(`${venue}|${address}`);
         for (const [sym, px] of r.marks) {
           const mk = `${venue}|${sym}`;
-          if (!this.marks.has(mk)) { this.marks.set(mk, px); this.dirtyMarks.add(mk); }
+          if (!this.marks.has(mk)) { this.marks.set(mk, px); this.live.price(mk, px); this.dirtyMarks.add(mk); }
         }
         return READ_COST[venue] + (r.extraCost ?? 0);
       },
@@ -2275,7 +2280,10 @@ export class CohortTracker {
     const rank = LIQ_PRICE_ORDER.indexOf(key.slice(0, i) as Venue);
     const coin = liqCoin(key.slice(i + 1));
     const cur = this.coinPx.get(coin);
-    if (!cur || rank <= cur.rank) this.coinPx.set(coin, { px, rank: rank < 0 ? 99 : rank });
+    if (!cur || rank <= cur.rank) {
+      this.coinPx.set(coin, { px, rank: rank < 0 ? 99 : rank });
+      this.live.coinPx(coin, px);
+    }
   }
 
   /** Every LIVE_TICK_MS: price what changed (a bounded slice), and send the changes to the API. */
@@ -2285,8 +2293,10 @@ export class CohortTracker {
    * status (cohorts.liq.oi) and the coin's holders on that venue are read again, oldest first.
    */
   private async checkOi(): Promise<void> {
-    if (!this.liveReady) return;
-    const totals = this.live.totals();
+    if (!this.live.ready) return;
+    // The heatmap thread restarting: the next check (OI_CHECK_MS) asks again.
+    const totals = await this.live.totals().catch(() => null);
+    if (!totals) return;
     const markets = new Map<Venue, Map<string, number>>();
     const staleOi: Venue[] = [];
     // The books leave SoDEX's internal pair out, so the check must too: against the whole figure the 36 markets the pair holds
@@ -2348,110 +2358,23 @@ export class CohortTracker {
   }
 
   private liveTick(): void {
-    const t0 = Date.now();
     this.refreshSodexCoins();
     // Nothing is bucketed before SoDEX's list is known (the first seconds after a start).
     if (!this.sodexCoins.size) return;
-    // Every coin whole once a minute: the deltas leave out moves under 1% (live.ts SEND_MOVE: 1%), this puts the API's copy back to exact.
-    if (t0 - this.liveWholeAt >= 60_000) { this.liveWholeAt = t0; this.live.resendAll(); }
-    // Ready once the books waiting at the first beat (every book: start() touches them all) are
-    // priced. Waiting for nothing to be left never came on a busy day: prints touch books faster
-    // than a beat's budget prices them, and from 2026-10-27 23:16 UTC no liq_now row was written
-    // for 16 hours (the heatmap answered from that one).
-    if (this.liveBarrier === null) this.liveBarrier = this.live.processed + this.live.pending;
-    const left = this.live.work(LIVE_SLICE, liveBudget(this.live.pending));
+    // Inline: the engine's beat (prices a bounded slice, sends the changes). Threaded: the coins and tiers to the thread
+    // if they changed; it prices and sends on its own beat (liqLiveThread.ts).
+    this.live.beat(LIVE_SLICE, liveBudget(this.live.pending));
     this.rereadCrossed();
-    if (!this.liveReady && (!left || this.live.processed >= this.liveBarrier)) this.liveReady = true;
-    const deltas = this.live.flush();
-    this.feed.send(deltas, { at: this.d.now(), ready: this.liveReady });
-    this.liveMs = Date.now() - t0;
-  }
-
-  /**
-   * Every position's liquidation level into the change log (store liq_log): a row only when a
-   * position opens, flips, closes, or its level moves past LIQ_LOG_MOVE or its size past
-   * USD_LOG_MOVE since its last row - the history draws 0.25% cells, the level is the live
-   * engine's 0.02% bucket, so nothing it shows is lost. Compared with the last logged state
-   * (liq_cur, read once at the first step): a restart neither repeats every position nor misses
-   * what closed while it was down. Pruned daily to LIQ_KEEP_MS (a row superseded before then).
-   */
-  private async logLevels(t: number, coins: ReadonlySet<string>, byCoin: ReturnType<LiqLive['positionsByCoin']>): Promise<void> {
-    const s = this.d.store;
-    if (!this.levelState) {
-      // Where the log begins, for the history's details (liqRead.ts liqAt: nothing before it is by position).
-      if (!s.getMeta('liq_log_from')) s.setMeta('liq_log_from', String(s.liqLogFrom() ?? t));
-      this.levelAddr = s.liqAddrs();
-      this.levelState = new Map();
-      for (const r of s.liqCur()) this.levelState.set(`${r.aid}|${r.coin}|${r.venue}`, { side: r.side, liq: r.liq, usd: r.usd });
-    }
-    const state = this.levelState;
-    const addr = this.levelAddr!;
-    // One state per address, coin and venue: two symbols of one coin on one venue keep the larger.
-    const now = new Map<string, { aid: number | string; coin: string; venue: number; side: number; liq: number; usd: number; address: string; v: Venue } & LiqLogExtra>();
-    const fresh = new Set<string>();
-    for (const coin of coins) {
-      for (const x of byCoin.get(coin) ?? []) {
-        const vi = VENUES.indexOf(x.venue);
-        let id: number | string | undefined = addr.get(x.address);
-        if (id === undefined) { fresh.add(x.address); id = x.address; }
-        const key = `${id}|${coin}|${vi}`;
-        const usd = Math.round(x.usd);
-        const prev = now.get(key);
-        if (prev && prev.usd >= usd) continue;
-        now.set(key, { aid: id, coin, venue: vi, side: x.long ? 1 : -1, liq: +x.liq.toPrecision(8), usd, address: x.address, v: x.venue });
-      }
-    }
-    // Once: every open position written in full, so each carries the fields the log keeps since 2026-10-29
-    // (size, entry, margin, account) - not only the ones that changed since. About 170k rows, one step.
-    const full = !s.getMeta(LIQ_LOG_FULL_META);
-    const changed: Array<{ aid: number | string; coin: string; venue: number; side: number; liq: number; usd: number; address: string; v: Venue } & LiqLogExtra> = [];
-    for (const [key, x] of now) {
-      const was = state.get(key);
-      if (!full && was && was.side === x.side && Math.abs(x.liq - was.liq) <= LIQ_LOG_MOVE * was.liq && Math.abs(x.usd - was.usd) <= USD_LOG_MOVE * Math.max(1, was.usd)) continue;
-      // The rest of the position as it stands, from its book (only for the rows written).
-      changed.push(Object.assign(x, this.logExtra(x.v, x.address, x.coin)));
-    }
-    const closed: Array<{ aid: number; coin: string; venue: number; mark: number | null }> = [];
-    for (const key of state.keys()) {
-      if (now.has(key)) continue;
-      const [aid, coin, venue] = key.split('|');
-      if (!coins.has(coin!)) continue;
-      closed.push({ aid: Number(aid), coin: coin!, venue: Number(venue), mark: this.coinPx.get(coin!)?.px ?? null });
-    }
-    if (!changed.length && !closed.length) return;
-    // Everything above is one instant of the books; only the writing is spread out. The state below
-    // moves when all of it is written, so a step that fails is written again from the same comparison.
-    const ids = await s.putLiqLogSliced(t, [...fresh], changed, closed, () => this.breathe());
-    if (full) s.setMeta(LIQ_LOG_FULL_META, String(t));
-    for (const [a, id] of ids) addr.set(a, id);
-    for (const x of changed) {
-      const aid = typeof x.aid === 'number' ? x.aid : ids.get(x.aid)!;
-      state.set(`${aid}|${x.coin}|${x.venue}`, { side: x.side, liq: x.liq, usd: x.usd });
-    }
-    for (const c of closed) state.delete(`${c.aid}|${c.coin}|${c.venue}`);
-    if (t - this.levelPrunedAt >= DAY_MS) {
-      if (mayPrune('liq-log')) s.pruneLiqLog(t - LIQ_KEEP_MS);
-      this.levelPrunedAt = t;
-    }
-    this.levelRows = changed.length + closed.length;
   }
 
   /**
    * What the change log keeps of a position besides its level (store LiqLogExtra), from the
-   * account's book now: its symbol (the largest of the coin's, as the level keeps), signed size,
-   * entry, the mark, isolated or cross and the leverage, the account's equity and cross cash, and
-   * when the book was read.
+   * account's book now (liqLiveCore.ts logExtraOf; the heatmap thread reads its copy of the books the same way).
    */
   private logExtra(venue: Venue, address: string, coin: string): LiqLogExtra {
     const b = this.books.get(venue)?.get(address);
     if (!b) return {};
-    let sym: string | null = null;
-    for (const [s, p] of b.pos) if (p.szi && liqCoin(s) === coin && (sym === null || Math.abs(p.szi) > Math.abs(b.pos.get(sym)!.szi))) sym = s;
-    const acct = { eq: b.equity, cash: b.cash ?? null, readAt: b.at };
-    if (sym === null) return acct;
-    const p = b.pos.get(sym)!;
-    // LiqPos: `iso` present (a number, or null when not known) is isolated; absent is cross.
-    return { ...acct, sym, sz: p.szi, entry: p.entry, mark: this.marks.get(`${venue}|${sym}`) ?? null, iso: p.iso !== undefined, lev: p.lev ?? null };
+    return logExtraOf({ equity: b.equity, cash: b.cash ?? null, at: b.at }, b.pos, liqCoin, coin, (sym) => this.marks.get(`${venue}|${sym}`) ?? null);
   }
 
   /** Let timers and sockets run between two slices of a liquidation step. */
@@ -2460,6 +2383,16 @@ export class CohortTracker {
     mark('coh:liq');
   }
 
+  /**
+   * Every LIQ_NOW_MS: every coin's levels, as the live engine holds them, to the index file (liq_now, deflated: what
+   * the API answers from when the live feed is not there). Every LIQ_STEP_MS also a snapshot for the historical view
+   * (liq_hist, fine bands) of every coin SoDEX lists as a perp (the only coins the heatmap covers), and every
+   * position's level into the change log (store liq_log): a row only when a position opens, flips, closes, or its
+   * level or size moved (liqLiveCore.ts levelDiff). Pruned daily to LIQ_KEEP_MS (a row superseded before then).
+   *
+   * What needs the live positions is computed by the engine (on the heatmap thread: a step took 54 minutes on this
+   * thread at 99.7% busy, 2026-11-08); this thread only writes what comes back, in today's order.
+   */
   private async recordLiq(): Promise<void> {
     const now = this.d.now();
     if (this.liqRecording || !this.members.size || now - this.lastNowAt < LIQ_NOW_MS - 5_000) return;
@@ -2467,56 +2400,72 @@ export class CohortTracker {
     const started = Date.now();
     try {
       // Until every book is priced into the engine once (seconds after a start), the last rows stand.
-      if (!this.liveReady) return;
-      const rows = this.live.rows();
+      if (!this.live.ready) return;
       const s = this.d.store;
-      s.putLiqNow(now, [...rows].map(([coin, row]): [string, Uint8Array] => [coin, deflateRawSync(JSON.stringify(row))]));
-      this.lastNowAt = now;
       const t = Math.floor(now / LIQ_STEP_MS) * LIQ_STEP_MS;
-      if (t > this.lastLiqT) {
-        const keep = this.sodexCoins;
-        // One instant of every position, copied here: the slices below all read this same moment.
-        const stepAt = Date.now();
-        const byCoin = this.live.positionsByCoin(0, NO_WALLETS);
-        const positionsMs = Date.now() - stepAt;
-        const hist: Array<[string, string]> = [];
-        const fine: Array<[string, number, number, Uint8Array]> = [];
-        const ticks = new Map<string, number>();
-        for (const [sym, tick] of marketsNow('sodex')?.ticks ?? []) ticks.set(liqCoin(sym), tick);
-        let sliceAt = Date.now();
-        for (const coin of keep) {
-          const row = rows.get(coin);
-          if (!row) continue;
-          const snap = snapOfNow(row);
-          hist.push([coin, JSON.stringify(snap)]);
-          // Its fine layers over the whole range, down to the coin's tick, in price bands (levels.ts fineBands).
-          const f = fineSnapOf(row.p, snap.st, byCoin.get(coin) ?? [], ticks.get(coin) ?? 0);
-          if (f) for (const b of fineBands(f, fineBandWidth(row.p))) fine.push([coin, b.lo, b.hi, deflateRawSync(JSON.stringify(b.f))]);
-          if (Date.now() - sliceAt > SLICE_MS) {
-            await this.breathe();
-            sliceAt = Date.now();
-          }
-        }
-        const layersAt = Date.now();
-        // Every position's level at the same step, as a change log (the history's wallet filter).
-        // Before the snapshot: a snapshot at `t` says the step is there, and its log is by then whole.
-        await this.logLevels(t, keep, byCoin);
-        const loggedAt = Date.now();
-        if (fine.length) s.putLiqHistFineBands(t, fine);
-        await this.breathe();
-        if (hist.length) s.putLiqHist(t, hist);
-        // Older snapshots - and the 15-minute ones thinned to hourly - go only with the owner's word.
-        if (mayPrune('liq-history')) s.pruneLiqHist(now - LIQ_KEEP_MS, now - LIQ_THIN_MS, 60 * 60_000);
-        this.lastLiqT = t;
-        const stepMs = Date.now() - stepAt;
-        // What the step took and in which part: a step's cost grows with the positions held.
-        if (stepMs >= 5_000) console.log(`[indexer] liq step ${Math.round(stepMs / 1000)} s: positions ${positionsMs} ms, layers ${layersAt - stepAt - positionsMs} ms, log ${loggedAt - layersAt} ms (${this.levelRows} rows), snapshots ${Date.now() - loggedAt} ms`);
+      // A step whose writes are still going holds back only the next STEP, never the 2-minute heatmap rows:
+      // both used to wait on one flag, and a 45-min step write left the heatmap frozen as long (2026-11-09 00:15).
+      const stepT = t > this.lastLiqT && !this.liqStepWriting ? t : null;
+      const ticks = new Map<string, number>();
+      if (stepT !== null) for (const [sym, tick] of marketsNow('sodex')?.ticks ?? []) ticks.set(liqCoin(sym), tick);
+      let init: { cur: ReturnType<IndexStore['liqCur']>; addrs: Map<string, number> } | undefined;
+      if (stepT !== null && this.live.needsLevelInit) {
+        // Where the log begins, for the history's details (liqRead.ts liqAt: nothing before it is by position).
+        if (!s.getMeta('liq_log_from')) s.setMeta('liq_log_from', String(s.liqLogFrom() ?? t));
+        init = { cur: s.liqCur(), addrs: s.liqAddrs() };
       }
+      // Once: every open position written in full, so each carries the fields the log keeps since 2026-10-29.
+      const full = stepT !== null && !s.getMeta(LIQ_LOG_FULL_META);
+      const askedAt = Date.now();
+      const out = await this.live.step({ now, t: stepT, coins: [...this.sodexCoins], ticks, full, ...(init ? { init } : {}) });
+      if (!out.ready || !out.now) return;
+      s.putLiqNow(now, out.now);
+      this.lastNowAt = now;
+      const step = out.step;
+      if (stepT === null || !step) return;
+      this.liqStepWriting = true;
+      void this.writeLiqStep(stepT, step, full, now, askedAt).finally(() => { this.liqStepWriting = false; });
     } catch (e) {
       this.lastError = `liquidations: ${String(e)}`;
     } finally {
       this.liqRecording = false;
       this.liqMs = Date.now() - started;
+    }
+  }
+
+  /** A step's writes, in today's order, beside the heatmap rows (recordLiq goes on writing those meanwhile). */
+  private async writeLiqStep(stepT: number, step: NonNullable<Awaited<ReturnType<CohortTracker['live']['step']>>['step']>, full: boolean, now: number, askedAt: number): Promise<void> {
+    const s = this.d.store;
+    try {
+      const loggingAt = Date.now();
+      // Every position's level at the same step, as a change log (the history's wallet filter).
+      // Before the snapshot: a snapshot at `t` says the step is there, and its log is by then whole.
+      if (step.log) {
+        const ids = await s.putLiqLogSliced(stepT, step.log.fresh, step.log.changed, step.log.closed, () => this.breathe());
+        if (full) s.setMeta(LIQ_LOG_FULL_META, String(stepT));
+        this.live.commit(ids);
+        if (stepT - this.levelPrunedAt >= DAY_MS) {
+          if (mayPrune('liq-log')) s.pruneLiqLog(stepT - LIQ_KEEP_MS);
+          this.levelPrunedAt = stepT;
+        }
+        this.levelRows = step.log.changed.length + step.log.closed.length;
+      }
+      const loggedAt = Date.now();
+      if (step.fine.length) s.putLiqHistFineBands(stepT, step.fine);
+      await this.breathe();
+      if (step.hist.length) s.putLiqHist(stepT, step.hist);
+      // Older snapshots - and the 15-minute ones thinned to hourly - go only with the owner's word.
+      if (mayPrune('liq-history')) s.pruneLiqHist(now - LIQ_KEEP_MS, now - LIQ_THIN_MS, 60 * 60_000);
+      this.lastLiqT = stepT;
+      const stepMs = Date.now() - askedAt;
+      // What the step took and in which part: a step's cost grows with the positions held.
+      if (stepMs >= 5_000) {
+        console.log(`[indexer] liq step ${Math.round(stepMs / 1000)} s: computed ${loggingAt - askedAt} ms (${this.live.threaded ? 'heatmap thread' : 'inline'}: positions ${step.positionsMs} ms, layers ${step.layersMs} ms, diff ${step.diffMs} ms), log ${loggedAt - loggingAt} ms (${this.levelRows} rows), snapshots ${Date.now() - loggedAt} ms`);
+      }
+    } catch (e) {
+      this.lastError = `liquidations: ${String(e)}`;
+    } finally {
+      this.liqStepMs = Date.now() - askedAt;
     }
   }
 
