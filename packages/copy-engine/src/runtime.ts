@@ -1485,6 +1485,13 @@ export class CopyRuntime {
         this.leverageSet.set(k, { ...want, at: Date.now() });
         return true;
       } catch (e) {
+        // The follower holds a position there that this copy did not open, and the copy started before their positions
+        // were read (the check above): SoDEX keeps that position's mode, as the check above would have. Go on in it,
+        // not remembered, so the mode is set again once the market is flat (2026-11-09 04:46: BTC skipped, two alerts).
+        if (/cannot (update|change) margin mode|margin mode[^.]*open position/i.test(String(e))) {
+          this.host.log.info('copy: margin mode kept, the wallet holds a position there', { owner: s.owner, symbol: market.name });
+          return true;
+        }
         this.host.log.warn('copy: leverage not set', { owner: s.owner, symbol: market.name, leverage, attempt, error: String(e) });
       }
     }

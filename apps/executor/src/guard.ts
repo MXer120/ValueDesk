@@ -46,6 +46,10 @@ export function classifyRejection(error: string | null | undefined): RejectClass
   // "position not found: 1", the only refusal on ValueDesk's executor on 2026-10-29/30, alerted as unknown) or a cancel
   // of an order that filled or was cancelled. The engines book it themselves (refusedNoPosition, the cancel's next read).
   if (/position not found|no (open )?position|order (not found|never placed)|already (filled|canceled|cancelled|closed)|unknown order/i.test(e)) return 'gone';
+  // A margin-mode change on a market where the wallet already holds a position: SoDEX keeps that position's mode and the
+  // copy goes on in it (copy-engine runtime.ts ensureLeverage). Nothing for the operator: two "Order refused" alerts on
+  // 2026-11-09 04:46 were this, a follower's own BTC position when the copy started.
+  if (/cannot (update|change) margin mode|margin mode[^.]*open position/i.test(e)) return 'gone';
   if (/api[\s_-]?key[^.]*(not found|invalid|expired|revoked|unknown)|key not found|unknown api key|no (copy|trading) key|signature (rejected|invalid|mismatch|verification)|invalid signature|unauthori[sz]ed|trading key has expired/i.test(e)) return 'key';
   if (/insufficient|not enough (margin|balance|collateral|funds)|margin (is )?(insufficient|not enough)|available (balance|margin)/i.test(e)) return 'margin';
   if (/open[\s_-]?interest|\boi\b[^.]*\b(cap|limit|exceed)|max(imum)?[\s_-]?position|position[^.]*\b(limit|exceed|too (large|big))|risk[\s_-]?limit|too many (open )?orders|open[\s_-]?orders?[^.]*\b(limit|exceed|max)/i.test(e)) return 'limit';
