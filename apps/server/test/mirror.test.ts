@@ -50,8 +50,23 @@ test('an unknown chain yields no address rather than a wrong one', async () => {
   assert.ok(onChain === null || onChain === '', `expected nothing, got ${onChain}`);
 });
 
-test('the live registry decodes into usable routes', async () => {
-  const tokens = await remoteNativeTokens();
+test('the live registry decodes into usable routes', async (t) => {
+  // A live call to ValueChain: from GitHub's runners it has hung past the test's 20 s
+  // three runs in a row (2026-11-09) while it answered in 0.6 s from elsewhere. Not
+  // reaching it is a skip with the reason, never a pass; what it returns is still
+  // checked hard below.
+  let timer: NodeJS.Timeout | undefined;
+  const reached = await Promise.race([
+    remoteNativeTokens().then((tokens) => ({ tokens }), (err: unknown) => ({ err })),
+    new Promise<{ timeout: true }>((resolve) => { timer = setTimeout(() => resolve({ timeout: true }), 15_000); }),
+  ]).finally(() => clearTimeout(timer));
+  if ('timeout' in reached) return t.skip('ValueChain did not answer within 15 s from here');
+  if ('err' in reached) {
+    const msg = String((reached.err as Error)?.message ?? reached.err);
+    if (/fetch failed|ECONN|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|socket|network|abort/i.test(msg)) return t.skip(`ValueChain unreachable from here: ${msg}`);
+    throw reached.err;
+  }
+  const { tokens } = reached;
   assert.ok(tokens.length > 0, 'registry returned no routes');
   for (const t of tokens) {
     assert.match(t.chain, /^[A-Z_]+$/, `odd chain code: ${t.chain}`);
