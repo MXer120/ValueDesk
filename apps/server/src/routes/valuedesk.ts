@@ -64,7 +64,7 @@ import { fineAskOf, fineDrawOf, isLiqRange, levFilterOf, liqHeatmap } from '../i
 import { LiqBusy, liqJob, okJson } from '../indexer/liqHistThread.js';
 import { TILE_FINAL_CACHE, TILE_INDEX_CACHE, TILE_WALLET_CACHE, keepLiqMetasWarm, liqTile, liqTileIndex, liqTileIndexOf, liqTileOf, tileAskOf } from '../indexer/liqTiles.js';
 import { watchAddresses } from '../indexer/host.js';
-import { MAX_WINDOW_MS, activityCoverage, flowWalletFills, flowWindow, type MarketKind } from '../flow/read.js';
+import { MAX_WINDOW_MS, activityCoverage, flowWalletFills, flowWindow, type FlowAsk, type MarketKind } from '../flow/read.js';
 import type { FlowRole, FlowSide, FlowSort } from '../flow/codec.js';
 import { BOARD_WINDOWS, type BoardWindow } from '../valuedesk/types.js';
 import { buildExplore, keepExploreWarm } from '../valuedesk/explore.js';
@@ -128,6 +128,46 @@ function flowWindowOf(q: Q): { coin: string; venues: Venue[]; kind: MarketKind; 
   if (!(from > 0) || !(to > from)) throw bad('from= and to= must be a time range in ms');
   if (to - from > MAX_WINDOW_MS) throw bad('the window is longer than 400 days');
   return { coin, venues: cohortVenues(q), kind: q.kind === 'spot' ? 'spot' : 'perp', from, to: Math.min(to, Date.now() + 60_000) };
+}
+
+/**
+ * What a live channel (routes/liveHub.ts, on the /ws/liq socket) asks for, from the very path and query the web would
+ * read over HTTP: the same parsing as the routes below, so a pushed answer is the route's answer. Null: not a path that
+ * is pushed (the browser keeps polling it). Throws (statusCode 400) on a bad query, as the route would.
+ */
+export type LiveAsk =
+  | { kind: 'flow'; ask: FlowAsk }
+  | { kind: 'cohort'; job: CohortJob };
+
+export function liveAskOf(path: string, q: Q): LiveAsk | null {
+  switch (path) {
+    case '/api/vs/flow': {
+      const ask = flowWindowOf(q);
+      const role: FlowRole = q.role === 'taker' || q.role === 'maker' ? q.role : 'all';
+      const side: FlowSide = q.side === 'buy' || q.side === 'sell' ? q.side : 'all';
+      const sort: FlowSort = q.sort === 'fills' || q.sort === 'net' || q.sort === 'buy' || q.sort === 'sell' ? q.sort : 'volume';
+      const limit = Math.max(1, Math.min(500, Math.floor(Number(q.limit) || 100)));
+      const search = (q.q ?? '').trim().slice(0, 64);
+      return { kind: 'flow', ask: { ...ask, role, side, sort, limit, ...(search.length >= 3 ? { q: search } : {}) } };
+    }
+    case '/api/vs/cohorts':
+      return { kind: 'cohort', job: { op: 'cohorts', venues: cohortVenues(q), f: cohortFilter(q) } };
+    case '/api/vs/cohorts/map':
+      return { kind: 'cohort', job: { op: 'map', venues: cohortVenues(q), cohort: isCohortId(q.cohort) ? q.cohort : null } };
+    case '/api/vs/cohorts/detail': {
+      if (!isCohortId(q.cohort)) throw bad('Unknown cohort');
+      const range: CohortRange = q.range === '1d' || q.range === '30d' ? q.range : '7d';
+      return { kind: 'cohort', job: { op: 'detail', venues: cohortVenues(q), cohort: q.cohort, range, f: cohortFilter(q) } };
+    }
+    case '/api/vs/cohorts/focus': {
+      const f = cohortFilter(q);
+      if (!f.coin && !f.sector) throw bad('Name a coin or a sector');
+      const range: CohortRange = q.range === '1d' || q.range === '30d' ? q.range : '7d';
+      return { kind: 'cohort', job: { op: 'focus', venues: cohortVenues(q), f, range } };
+    }
+    default:
+      return null;
+  }
 }
 
 function venueOf(q: Q, allowAll: true): Venue | 'all';

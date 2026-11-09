@@ -96,7 +96,7 @@ export async function runCohortJob(j: CohortJob): Promise<string | null> {
 
 // The markets go as they are: a structured clone keeps the tiers' `now` (an array's own named properties are copied).
 type ToWorker = { id: number; job: CohortJob } | { id: number; markets: Map<Venue, VenueMarkets | null>; sodex: Map<string, number> | null };
-type FromWorker = { id: number; json?: string | null; error?: string } | { ask: number; venues: Venue[] } | { internal: Map<string, number> };
+type FromWorker = { id: number; json?: string | null; error?: string } | { ask: number; venues: Venue[] } | { internal: Map<string, number>; at?: number };
 
 if (!isMainThread && (workerData as { cohortThread?: boolean } | null)?.cohortThread) {
   const port = parentPort!;
@@ -127,7 +127,7 @@ if (!isMainThread && (workerData as { cohortThread?: boolean } | null)?.cohortTh
     const x = R.cohortInternal();
     if (!x || x.at === sentAt) return;
     sentAt = x.at;
-    port.postMessage({ internal: new Map(x.internal) } satisfies FromWorker);
+    port.postMessage({ internal: new Map(x.internal), at: x.at } satisfies FromWorker);
   }, 1_000).unref();
 }
 
@@ -137,6 +137,18 @@ if (!isMainThread && (workerData as { cohortThread?: boolean } | null)?.cohortTh
 export const JOB_MS = 120_000;
 
 let worker: Worker | null = null;
+/** When the load in use on the thread was built (its 'internal' message says so within a second of the swap). */
+let loadAt: number | null = null;
+
+/**
+ * When the cohort load in use was built, or null before there is one: the live channel (routes/liveHub.ts) pushes the
+ * cohort pages again when it moves (about once a minute, read.ts LOAD_TTL_MS) instead of every tab polling each minute.
+ */
+export async function cohortLoadAt(): Promise<number | null> {
+  if (cohortThreadOn()) return loadAt;
+  const R = await import('./read.js');
+  return R.cohortInternal()?.at ?? null;
+}
 let nextId = 1;
 const waiting = new Map<number, { ok: (v: string | null) => void; no: (e: Error) => void; timer: NodeJS.Timeout }>();
 export const cohortThreadStats = { done: 0, failed: 0, restarts: 0, longestMs: 0, asks: 0 };
@@ -161,6 +173,7 @@ function thread(): Worker {
   w.unref();
   w.on('message', (m: FromWorker) => {
     if ('internal' in m) {
+      if (m.at !== undefined) loadAt = m.at;
       void import('./read.js').then((R) => R.setPushedInternal(m.internal));
       return;
     }

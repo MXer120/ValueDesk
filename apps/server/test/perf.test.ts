@@ -195,9 +195,15 @@ test('index answers go out without label: null, hashed and compressed as sent; o
 });
 
 test('boards may be reused for ten seconds, and for twenty more while a cache fetches the next copy', () => {
-  for (const route of ['/api/vs/leaderboard', '/api/vs/explore', '/api/vs/cohorts', '/api/vs/cohorts/detail', '/api/vs/cohorts/map', '/api/vs/cohorts/focus', '/api/vs/cohorts/wallets', '/api/vs/screener', '/api/vs/lbrow']) {
+  for (const route of ['/api/vs/leaderboard', '/api/vs/explore', '/api/vs/screener', '/api/vs/lbrow']) {
     assert.equal(CACHE_POLICIES[route]!.cacheControl, 'public, max-age=10, stale-while-revalidate=20', route);
   }
+  // The cohort pages follow the cohort load (about a minute) and get each new one pushed (routes/liveHub.ts): 30 s + 30.
+  for (const route of ['/api/vs/cohorts', '/api/vs/cohorts/detail', '/api/vs/cohorts/map', '/api/vs/cohorts/focus', '/api/vs/cohorts/wallets']) {
+    assert.equal(CACHE_POLICIES[route]!.cacheControl, 'public, max-age=30, stale-while-revalidate=30', route);
+  }
+  // Every tab's health poll may be shared ten seconds at the edge, never stale.
+  assert.equal(CACHE_POLICIES['/api/health']!.cacheControl, 'public, max-age=10');
   for (const route of ['/api/vs/whales', '/api/vs/positioning']) assert.equal(CACHE_POLICIES[route]!.cacheControl, 'public, no-cache', route);
 });
 

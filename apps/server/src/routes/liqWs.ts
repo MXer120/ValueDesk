@@ -25,7 +25,8 @@
  * subscribes again when it zooms): the stream is summed to it, so a liquidation price
  * moving within a drawn bar costs nothing, and a bar goes out again only once its USD
  * moved SEND_MOVE (measured on BTC at the server's 0.02% buckets: ~130 changes a
- * second, nearly all hops between neighbours). One subscription per connection (a new
+ * second, nearly all hops between neighbours). Besides it, up to liveHub.ts MAX_SUBS live channels ({op:"live"}: the
+ * Trade flow's forming candle, the cohort pages). One heatmap subscription per connection (a new
  * one replaces it); viewers of the same coin, venues and width share one computation. On the instance, Caddy passes this
  * path through without the origin secret the rest of the API needs (a browser
  * cannot connect through Vercel's functions), with the viewer's own address for
@@ -40,6 +41,7 @@ import { liqFeed, type CoinChange } from '../indexer/liqFeed.js';
 import { heatOf, liqHeatmap, liveSrc } from '../indexer/liqRead.js';
 import { marketsNow } from '../valuedesk/liquidations/rules.js';
 import { FINE_MAX_BUCKETS, addRow, trimRow, type LiqRow } from '../valuedesk/liquidations/levels.js';
+import type { LiveHub } from './liveHub.js';
 
 export const LIQ_WS_PATH = '/ws/liq';
 const MAX_CONNECTIONS = Number(process.env.VALUESCAN_LIQ_WS_MAX) || 5_000;
@@ -343,8 +345,13 @@ function fineAsk(coin: string, x: { k?: unknown; from?: unknown; to?: unknown } 
   return { k, from, to };
 }
 
-/** The route. `originOk`: the site's own origins (hosted) or the local dev ones. */
-export function liqWsRoute(app: FastifyInstance, originOk: (origin: string | undefined) => boolean): void {
+/**
+ * The route. `originOk`: the site's own origins (hosted) or the local dev ones. `live`: the live channels the same socket
+ * carries beside its one heatmap subscription (liveHub.ts: the Trade flow's forming candle, the cohort pages) - one
+ * socket per tab instead of one per feature, through the same origin check, address limit and message budget, and the
+ * one path Caddy lets through without the origin secret (deploy/server/caddy/Caddyfile.template), so nothing changes there.
+ */
+export function liqWsRoute(app: FastifyInstance, originOk: (origin: string | undefined) => boolean, live?: LiveHub): void {
   wire();
   app.get('/ws/liq', { websocket: true }, (socket: WebSocket, req) => {
     // The address as the rate limits key it (hosted.ts clientKey): an IPv6 client by its /64, or one
@@ -366,8 +373,10 @@ export function liqWsRoute(app: FastifyInstance, originOk: (origin: string | und
     socket.on('pong', () => { alive = true; });
     socket.on('message', (raw: Buffer) => {
       if (++msgs > MAX_MSGS || raw.length > 1024) { socket.close(1008, 'slow down'); return; }
-      let m: { op?: string; coin?: unknown; venues?: unknown; k?: unknown; fine?: { k?: unknown; from?: unknown; to?: unknown } | null };
+      let m: { op?: string; coin?: unknown; venues?: unknown; k?: unknown; fine?: { k?: unknown; from?: unknown; to?: unknown } | null; id?: unknown; path?: unknown };
       try { m = JSON.parse(raw.toString()); } catch { return; }
+      if (!m || typeof m !== 'object') return;
+      if (live?.message(socket, m)) return;
       if (m.op === 'unsub') { leave(socket); return; }
       if (m.op !== 'sub') return;
       const coin = String(m.coin ?? '').trim().toUpperCase();
@@ -382,6 +391,7 @@ export function liqWsRoute(app: FastifyInstance, originOk: (origin: string | und
       clearInterval(window);
       clearInterval(ping);
       leave(socket);
+      live?.leave(socket);
       connections--;
       const n = (perAddress.get(who) ?? 1) - 1;
       if (n > 0) perAddress.set(who, n); else perAddress.delete(who);

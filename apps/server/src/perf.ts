@@ -72,20 +72,26 @@ export interface CachePolicy {
 const BOARD: CachePolicy = { cacheControl: 'public, max-age=10, stale-while-revalidate=20' };
 const PRICE: CachePolicy = { cacheControl: 'public, max-age=30, stale-while-revalidate=30' };
 const LIVE: CachePolicy = { cacheControl: 'public, no-cache' };
+/**
+ * The cohort pages: their numbers come from the cohort load, rebuilt about once a minute (indexer/read.ts LOAD_TTL_MS), so a
+ * 10 s edge copy only made a crowd ask the origin six times per load. 30 s + swr 30 (2026-11-09): the page gets each new load
+ * pushed over /ws/liq (routes/liveHub.ts) and reads HTTP only on opening it or while the socket is down.
+ */
+const COHORT: CachePolicy = { cacheControl: 'public, max-age=30, stale-while-revalidate=30' };
 
 /** Route PATTERN (req.routeOptions.url) -> policy. Only GET/HEAD 200s that are not {ok:false} are affected. */
 export const CACHE_POLICIES: Readonly<Record<string, CachePolicy>> = {
   '/api/vs/leaderboard': BOARD,
   '/api/vs/explore': BOARD,
   '/api/vs/wallet-history': BOARD,
-  '/api/vs/cohorts': BOARD,
-  '/api/vs/cohorts/detail': BOARD,
-  '/api/vs/cohorts/map': BOARD,
+  '/api/vs/cohorts': COHORT,
+  '/api/vs/cohorts/detail': COHORT,
+  '/api/vs/cohorts/map': COHORT,
   '/api/vs/excluded': BOARD,
   // The process holds it 15 s (valuedesk/sodex/oiExcluded.ts). No older copy on top: the pages subtract it.
   '/api/vs/sodex/oi-excluded': { cacheControl: 'public, max-age=10' },
-  '/api/vs/cohorts/focus': BOARD,
-  '/api/vs/cohorts/wallets': BOARD,
+  '/api/vs/cohorts/focus': COHORT,
+  '/api/vs/cohorts/wallets': COHORT,
   '/api/vs/screener': BOARD,
   // One Hyperliquid leaderboard row: it moves when the leaderboard file does.
   '/api/vs/lbrow': BOARD,
@@ -127,6 +133,11 @@ export const CACHE_POLICIES: Readonly<Record<string, CachePolicy>> = {
   // process, and polled every 45 s by every open tab's banner. The edge may share one answer for
   // ten seconds, so a crowd of tabs costs one /api function call per ten seconds, not one per tab.
   '/api/external/maintenance/status': { cacheControl: 'public, max-age=10' },
+  // The app's health poll (every open tab, every 30 s: App.tsx): the same for everyone (network, brake, notices, the API
+  // thread's stalls - index.ts). It had no policy, so every poll of every tab was a Vercel function call; ten seconds at the
+  // edge makes a crowd one call per ten seconds per region. No stale copy: an API that stops answering still shows within
+  // the web's HEALTH_DOWN_MS (45 s).
+  '/api/health': { cacheControl: 'public, max-age=10' },
 };
 
 export type Encoding = 'br' | 'gzip';
