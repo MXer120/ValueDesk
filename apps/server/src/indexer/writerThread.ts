@@ -64,6 +64,8 @@ const MAX_YIELD_MS = 2_000;
 /** Pending ops and no answer for this long: hung (a transaction is at most TARGET_MS of rows; a slow disk can stretch it). */
 const HUNG_MS = 120_000;
 const RESTART_AFTER_MS = 60_000;
+/** A dead thread's backlog up to this many rows is written on the indexer's thread; more goes to a new thread at once. */
+export const INLINE_MAX_ROWS = 20_000;
 
 export interface FillWire {
   venue: string; address: string; id: string; t: number; symbol: string; side: number; px: number; sz: number;
@@ -192,7 +194,8 @@ port.on('message', (m) => {
     db.exec('ROLLBACK');
     return;
   }
-  m.done = 0;
+  // From the row a dead thread had committed (an op handed on after a death), else from the start.
+  m.done = m.from > 0 ? m.from : 0;
   // A liq step goes ahead of the stream rows (after any step already there): behind a backlog of millions of rows it waited
   // hours (2026-11-09, the heatmap's history 4.7 h behind). It may: a step is written again whole where it stands (it
   // replaces its own rows), meta.writer_done names stream ops only, and their order among themselves stays.
@@ -348,6 +351,8 @@ export class WriterThread<X = unknown> {
   private lastAt = Date.now();
   private watch: NodeJS.Timeout | null = null;
   private retry: NodeJS.Timeout | null = null;
+  /** When the thread last died (0: never): two deaths within the restart pause write the backlog here. */
+  private diedAt = 0;
   readonly state: WriterStatus = { running: false, pendingOps: 0, pendingRows: 0, rows: 0, txs: 0, lastTxMs: 0, maxTxMs: 0, maxLockMs: 0, badRows: 0, restarts: 0, inlineOps: 0, lastError: null };
 
   constructor(
@@ -365,6 +370,9 @@ export class WriterThread<X = unknown> {
     this.start();
     const hung = this.o.hungMs ?? HUNG_MS;
     this.watch = setInterval(() => {
+      // The answers waiting first: after a long stall of this thread they sit unread, and a writer answering all along was
+      // ended as hung (2026-11-09 15:27: an 81 s stall here, the writer's longest lock wait 44 ms, "no answer for 169 s").
+      if (this.worker && this.pending.length && Date.now() - this.lastAt > hung) this.drain();
       if (this.worker && this.pending.length && Date.now() - this.lastAt > hung) {
         this.state.lastError = `no answer for ${Math.round((Date.now() - this.lastAt) / 1000)} s`;
         void this.worker.terminate();
@@ -535,6 +543,19 @@ export class WriterThread<X = unknown> {
       this.state.lastError = `writer_done: ${String(e)}`;
     }
     const left = [...this.pending];
+    const rows = left.reduce((n, p) => n + p.n - p.done, 0);
+    // A backlog written here would hold this thread for minutes (2026-11-09: 2.36M rows, nothing published meanwhile): past
+    // INLINE_MAX_ROWS a new thread takes the ops on from where each stands, at once - unless the last one died within the
+    // restart pause too (a thread that cannot write: then here, as always).
+    const quick = Date.now() - this.diedAt < (this.o.restartAfterMs ?? RESTART_AFTER_MS);
+    this.diedAt = Date.now();
+    if (rows > INLINE_MAX_ROWS && !quick) {
+      this.hooks.log(`[indexer] writer thread ended (${this.state.lastError ?? 'no error'}): ${left.length} ops (${rows} rows) handed to a new thread`);
+      this.start();
+      // A liq step again whole (its ids come with its answer; it replaces its own rows), a stream op from its committed row.
+      for (const p of left) this.port!.postMessage({ ...p.op, seq: p.seq, n: p.n, from: p.op.kind === 'liqLog' ? 0 : p.done });
+      return;
+    }
     this.hooks.log(`[indexer] writer thread ended (${this.state.lastError ?? 'no error'}): ${left.length} ops written here, and every write until it is back`);
     for (const p of left) this.runInline(p);
     this.retry = setTimeout(() => this.start(), this.o.restartAfterMs ?? RESTART_AFTER_MS);

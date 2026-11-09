@@ -132,7 +132,10 @@ test('writer thread: a fill and its day mark are in one transaction, in every sn
     }
     await done;
     assert.ok(looks > 3 && killedAt > 0 && killedAt < want, `looked ${looks} times, killed at ${killedAt}/${want}`);
-    assert.equal(s.writerOn, false, 'the store writes for itself until the thread is back');
+    // 40k rows behind: past INLINE_MAX_ROWS a new thread takes them on at once (2.36M rows on the indexer's thread held it
+    // 40 min on 2026-11-09); the small-backlog case (written here) is the next test.
+    assert.equal(s.writerOn, true, 'a new thread took the backlog');
+    assert.equal(s.writerStatus!.inlineOps, 0);
     assert.equal(s.writerStatus!.restarts, 1);
     assert.equal(Number((written.get() as { n: number }).n), want, 'every row once');
     assert.equal(Number((orphans.get() as { n: number }).n), 0);
@@ -329,6 +332,46 @@ test('writer thread: a liq step goes ahead of a stream backlog, and every stream
     // Another step after the death: still ids and rows.
     const again = await s.putLiqLogSliced(t + 1, ['0xlate'], [{ aid: '0xlate', coin: 'ETH', venue: 0, side: -1, liq: 9, usd: 90 }], [], async () => {});
     assert.equal(again.size, 1);
+  } finally {
+    ref.close();
+    s.close();
+    rmSync(d, { recursive: true, force: true, maxRetries: 40, retryDelay: 50 });
+  }
+});
+
+test('writer thread: a stall of this thread longer than the hang limit does not end a writer that answered meanwhile', async () => {
+  const d = dir();
+  const s = new IndexStore(join(d, 'x.db'), { aggRefreshMs: 0 });
+  try {
+    s.startWriter({ force: true, targetMs: 2, maxRows: 100, hungMs: 300 });
+    await until('thread up', () => s.writerStatus!.running);
+    const done = s.putFillsAsync(fills(30_000, { tag: 'w', wallets: 100 }));
+    // This thread blocked well past hungMs while the writer works and posts answers (2026-11-09: an 81 s stall here).
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1_500);
+    await done;
+    assert.equal(s.writerStatus!.restarts, 0, 'not ended as hung');
+    assert.equal(s.writerStatus!.inlineOps, 0, 'nothing written on this thread');
+  } finally {
+    s.close();
+    rmSync(d, { recursive: true, force: true, maxRetries: 40, retryDelay: 50 });
+  }
+});
+
+test('writer thread: a death with a big backlog hands it to a new thread at once, not to this one', async () => {
+  const d = dir();
+  const ref = new IndexStore(join(d, 'ref.db'), { aggRefreshMs: 0 });
+  const s = new IndexStore(join(d, 'x.db'), { aggRefreshMs: 0 });
+  try {
+    s.startWriter({ force: true, targetMs: 2, maxRows: 100, restartAfterMs: 60_000 });
+    const rows = fills(50_000, { tag: 'h', wallets: 100 });
+    const done = s.putFillsAsync(rows);
+    await until('some written', () => s.writerStatus!.rows > 2_000);
+    await s.killWriter();
+    await done;
+    assert.equal(s.writerStatus!.inlineOps, 0, 'the backlog went to the new thread');
+    assert.equal(s.writerStatus!.running, true);
+    ref.putFills(rows);
+    assert.deepEqual(table(s, 'SELECT * FROM fills ORDER BY venue, address, id'), table(ref, 'SELECT * FROM fills ORDER BY venue, address, id'), 'every row once');
   } finally {
     ref.close();
     s.close();
