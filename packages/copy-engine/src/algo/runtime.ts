@@ -2248,6 +2248,16 @@ export class AlgoRuntime {
         continue;
       }
       if (!standing.length && !mine.length && (guardedAt[side] ?? 0) + s.minRepriceMs > now) continue;
+      // The volatility gate (stillBps) closed: what rests on the side that adds is pulled at once, not left until its
+      // rest time ends (audit 2026-11-09: "pauses the moment the price moves fast").
+      const addsHere = side === 'buy' ? inv >= 0 : inv <= 0;
+      if (addsHere && fair !== null && (s.stillBps ?? 0) > 0) {
+        const path = this.refPath(s.symbol, s.stillMs ?? 60_000, now);
+        if (path === null || path >= s.stillBps!) {
+          pull.push(...standing.filter((c) => c.state === 'open' && c.tif !== 'ioc'));
+          continue;
+        }
+      }
       // How many quotes this side may have resting: one, or up to the ladder - never more than the cap could take
       // (the adding side) or than it holds (the unwinding side) if all of them filled. Counted at each quote's real
       // size (SoDEX's minimum where that is above the order size), not the order size it was set to.
