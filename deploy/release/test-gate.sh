@@ -8,6 +8,9 @@
 #      commit. Asked through the GitHub API with GITHUB_TOKEN (or GH_TOKEN) - a token
 #      that may read the repository's checks (fine-grained: "Checks: read-only" and
 #      "Contents: read-only" on this repository). A run still going: it waits, up to 20 min.
+#      A run that failed ONLY in a known network flake (deploy/release/ci-flake.mjs) is run again
+#      once and waited for again (the job's log needs "Actions: read", the rerun "Actions: write");
+#      without those rights it stops as before.
 #   2. Without a token or a CI result: this checkout IS the tag - HEAD is the tag's commit
 #      and nothing is changed or added under apps/, packages/, deploy/ or .github/ - and
 #      deploy/ci/run-tests.mjs passes here and now (4-6 minutes).
@@ -42,6 +45,11 @@ test_gate() {
   token="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
   repo="$(git remote get-url origin 2>/dev/null | sed -E 's#^(https://([^@/]*@)?github\.com/|git@github\.com:)##; s#\.git$##')"
   if [ -n "$token" ] && [[ "$repo" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
+    # THE ONE RERUN (2026-11-09): a CI run that failed ONLY in a known network flake (deploy/release/ci-flake.mjs
+    # KNOWN_FLAKES) is run again once, and waited for again; any other failure, or the rerun failing too, stops the
+    # release as before. `rerun_of`: the failed check runs' ids - GitHub lists them as the latest for a few seconds
+    # after the rerun was asked for, and they are not the rerun's verdict.
+    local rerun_of="" rerun_wait=0 urls ids
     while :; do
       state="$(GH_REPO="$repo" GH_SHA="$sha" GH_TOKEN_="$token" node --input-type=module -e '
         const r = await fetch(`https://api.github.com/repos/${process.env.GH_REPO}/commits/${process.env.GH_SHA}/check-runs?per_page=100`, {
@@ -51,11 +59,24 @@ test_gate() {
         const runs = ((await r.json()).check_runs ?? []).filter((c) => c.name === "test");
         if (!runs.length) console.log("none");
         else if (runs.some((c) => c.status !== "completed")) console.log("pending");
-        else console.log(runs.every((c) => c.conclusion === "success") ? "success" : `failure ${runs.map((c) => c.html_url).join(" ")}`);
+        else console.log(runs.every((c) => c.conclusion === "success") ? "success" : `failure ${runs.map((c) => c.id).join(",")} ${runs.map((c) => c.html_url).join(" ")}`);
       ')"
       case "$state" in
-        success) note "test gate: CI passed for $tag (${sha:0:12})"; return 0 ;;
-        failure*) die "test gate: CI FAILED for $tag (${sha:0:12}): ${state#failure } - fix it, tag again, release that" ;;
+        success) note "test gate: CI passed for $tag (${sha:0:12})${rerun_of:+ (on its one rerun)}"; return 0 ;;
+        failure*)
+          ids="${state#failure }"; ids="${ids%% *}"; urls="${state#failure "$ids"}"; urls="${urls# }"
+          if [ -n "$rerun_of" ] && [ "$ids" = "$rerun_of" ] && [ "$rerun_wait" -lt 300 ]; then
+            sleep 15; rerun_wait=$((rerun_wait + 15)); continue
+          fi
+          [ -z "$rerun_of" ] || die "test gate: CI FAILED for $tag (${sha:0:12}) again on its rerun: $urls - fix it, tag again, release that"
+          local verdict
+          if verdict="$(node deploy/release/ci-flake.mjs retry "$repo" $urls)"; then
+            note "test gate: CI failed only in a known network flake - ${verdict#rerun: }; its failed job runs once more"
+            rerun_of="$ids" waited=0
+            sleep 15
+            continue
+          fi
+          die "test gate: CI FAILED for $tag (${sha:0:12}): $urls - fix it, tag again, release that (${verdict:-no rerun})" ;;
         pending)
           [ "$waited" -lt 1200 ] || die "test gate: CI is still running for $tag after 20 minutes"
           [ "$waited" -gt 0 ] || note "test gate: CI is still running for $tag - waiting for it"

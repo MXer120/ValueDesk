@@ -38,7 +38,28 @@
 #   7. main moves to the tag (fast-forward) - Vercel builds and publishes the web - and, when the web changed,
 #      it waits for GitHub to show that Production deployment as successful and the site answering.
 #      The web goes last on purpose: what it calls already runs the new code when it appears.
-# Each ship is a line in deploy/.out/ships.log.
+# Each ship is a line in deploy/.out/ships.log, with the time each phase took.
+#
+# WHAT RUNS SIDE BY SIDE (2026-11-09: a release took 45-60 min, nearly all of it one wait after another). Nothing is
+# switched or restarted earlier than before, and no check is shorter; only waiting is overlapped:
+#   - WHILE CI RUNS (step 3, ~10 min): the tarball goes to both servers (step 4) and is INSTALLED beside the running
+#     release (release.sh --install-only: unpacked, npm ci, the import checks - nothing switched, nothing restarted).
+#     After CI the switch finds it installed. Only where the server's release.sh is byte for byte the tag's (else the
+#     tag's own, synced after CI, installs it as before). If CI fails, the installed release is not current and runs
+#     nowhere: a rerun of the same tag uses it ("already installed"), release.sh's prune removes it later (it keeps
+#     the 3 newest besides current, previous and whatever runs). SHIP_EARLY_INSTALL=0: install after CI as before.
+#   - WHILE CI RUNS, the web is built by Vercel as a staged production deployment (deploy/release/vercel-web.mjs: built
+#     with production's settings, not live). After the servers, Vercel's promote makes exactly that build live in
+#     seconds, then main moves (still to the tag). A build that fails is known before anything restarts: the ship stops
+#     with nothing switched. Needs a Vercel token and the one-time trial (vercel-web.mjs); without, main's build as before.
+#     SHIP_EARLY_WEB=0: main's build.
+#   - THE EXECUTOR BESIDE SERVER 1's GATES: the executor runs no code of server 1's and reads nothing the new API serves
+#     (its own database, SoDEX and its feeds; the API calls IT, for the admin pages - which already met an old executor
+#     for the 10-20 min of the gates before). So step 6b runs while server 1 restarts and its freeze and indexer gates
+#     watch (10-20 min), with every one of its own guards. Should server 1 stop the ship first, the executor is told
+#     before its brake and switch: it then switches nothing; one already switched passed its own checks and stays (the
+#     Telegram message says so). ship.sh waits for it before it ends either way. SHIP_EXECUTOR_PARALLEL=0: one after the other.
+#   - THE TEST GATE reruns a CI job that failed only in a known network flake, once (deploy/release/ci-flake.mjs).
 #
 # TELEGRAM: what a ship is, on the first line of each message (deploy/server/bin/telegram.mjs LABELS). Before
 # it restarts anything, it opens a maintenance window on both servers (maint.sh on - they watch each other):
@@ -94,6 +115,24 @@ G=(git -c windows.appendAtomically=false)
 
 say() { printf '\n== %s\n' "$*" >&2; }
 remote() { local host="$1"; shift; "${SSH[@]}" "$host" "$@"; }
+# What runs side by side (the header: WHAT RUNS SIDE BY SIDE); each 0 restores one-after-the-other.
+EARLY_INSTALL="${SHIP_EARLY_INSTALL:-1}"
+PARALLEL="${SHIP_EXECUTOR_PARALLEL:-1}"
+
+# --- the time each phase took (printed at the end and kept in ships.log) -------------------------------------------
+PHASES=() PHASE_NAME="" PHASE_T0=0
+phase() {   # name: ends the phase running now and starts this one ("" only ends it)
+  local now; now="$(date -u +%s)"
+  [ -z "$PHASE_NAME" ] || PHASES+=("$PHASE_NAME=$(( now - PHASE_T0 ))")
+  PHASE_NAME="$1"; PHASE_T0="$now"
+}
+phase_add() { PHASES+=("$1=$2"); }   # one that ran beside the others: name, seconds
+mmss() { printf '%d:%02d' $(( $1 / 60 )) $(( $1 % 60 )); }
+phase_summary() {
+  local p out=""
+  for p in ${PHASES[@]+"${PHASES[@]}"}; do out="${out:+$out, }${p%=*} $(mmss "${p##*=}")"; done
+  printf '%s' "$out"
+}
 
 # --- arguments ------------------------------------------------------------------------------------
 PARTS=() DRY=0 YES=0 TAG="" NOTICE=1 EXEC_OK=0
@@ -193,6 +232,48 @@ fi
 # Moving main deploys the web as it is at HEAD - so main moves only when the web is shipped, or has not changed.
 MOVE_MAIN=1
 if [ "$WEB" = 0 ] && [ "$(changed_since web origin/main)" != 0 ]; then MOVE_MAIN=0; fi
+# Will Vercel build main? Exit 1: the site's input changed; 0: it did not (Vercel skips it, the live site stays);
+# 2: cannot tell (it builds). deploy/vercel/web-changed.mjs, as Vercel's Ignored Build Step asks it.
+SITE_CHANGED=0
+if [ "$WEB" = 1 ] && [ "$MOVE_MAIN" = 1 ]; then node deploy/vercel/web-changed.mjs "$OLD_MAIN" "$HEAD_SHA" >/dev/null 2>&1 || SITE_CHANGED=$?; fi
+# The web built early (the header): only for a build the site needs, with a Vercel token, after the one-time trial.
+EARLY_WEB=0 EARLY_WEB_WHY=""
+if [ "$SITE_CHANGED" = 1 ]; then
+  if [ "${SHIP_EARLY_WEB:-1}" != 1 ]; then EARLY_WEB_WHY="SHIP_EARLY_WEB=0"
+  elif [ -z "${VERCEL_TOKEN:-}" ] && [ ! -s "$HOME/.valuescan/vercel-token" ]; then EARLY_WEB_WHY="no Vercel token (VERCEL_TOKEN or ~/.valuescan/vercel-token)"
+  elif [ ! -f "$HOME/.valuescan/vercel-early.ok" ]; then EARLY_WEB_WHY="the one-time trial has not passed (node deploy/release/vercel-web.mjs trial)"
+  else EARLY_WEB=1; fi
+fi
+
+# THE FLOW: what this ship does in which order, and what runs beside what (the plan shows it; ship.test.mjs reads it).
+print_flow() {
+  local s1="" s2="" during=() after="" web=""
+  [ ${#U1[@]} -eq 0 ] || s1="$(IFS=,; echo "${U1[*]}" | sed 's/,/, /g')"
+  [ "$STA" = 0 ] || s1="${s1:+$s1, }status"
+  [ ${#U2[@]} -eq 0 ] || s2="executor"
+  [ "$FEED" = 0 ] || s2="${s2:+$s2, }feed"
+  if [ -n "$s1$s2" ] || [ "$BIN" = 1 ]; then
+    if [ "$EARLY_INSTALL" = 1 ] && [ -n "$s1$s2" ]; then during+=("tarball to the servers, installed beside the running release (nothing switched)")
+    else during+=("tarball to the servers"); fi
+  fi
+  [ "$EARLY_WEB" = 0 ] || during+=("the web built on Vercel, not live")
+  note "  flow      1. tag, CI$([ ${#during[@]} = 0 ] || printf ' - meanwhile: %s' "$(IFS=';'; echo "${during[*]}" | sed 's/;/; /g')")"
+  local n=2
+  if [ -n "$s1$s2" ] || [ "$BIN" = 1 ]; then note "            $n. scripts, maintenance window"; n=$((n + 1)); fi
+  if [ -n "$s1" ] && [ -n "$s2" ] && [ "$PARALLEL" = 1 ]; then
+    after="server 1: $s1 + its gates$(! want indexer || echo " (indexer gate ${SHIP_INDEXER_WATCH_MIN:-20} min)") | beside it, server 2: $s2 (its own guards)"
+  elif [ -n "$s1" ] && [ -n "$s2" ]; then after="server 1: $s1 + its gates, then server 2: $s2"
+  elif [ -n "$s1" ]; then after="server 1: $s1 + its gates"
+  elif [ -n "$s2" ]; then after="server 2: $s2"; fi
+  if [ -n "$after" ]; then note "            $n. $after"; n=$((n + 1)); fi
+  if [ "$MOVE_MAIN" = 1 ]; then
+    if [ "$EARLY_WEB" = 1 ]; then web="the web live: Vercel's promote of the early build (seconds), main -> $TAG"
+    elif [ "$WEB" = 1 ] && [ "$SITE_CHANGED" != 0 ]; then web="main -> $TAG, Vercel builds the web (8-10 min)${EARLY_WEB_WHY:+ - not early: $EARLY_WEB_WHY}"
+    else web="main -> $TAG (no web build)"; fi
+    note "            $n. $web"
+  fi
+}
+# END FLOW
 
 # --- the plan -------------------------------------------------------------------------------------
 if [ -z "$TAG" ]; then TAG="$(git describe --exact-match --tags --match 'v[0-9]*' HEAD 2>/dev/null || true)"; fi
@@ -230,6 +311,7 @@ if [ ${#U2[@]} -gt 0 ]; then
   note "  executor now: $(printf '%s' "$EXEC0" | json 'v ? `${v.copies} copies (${v.active} active), ${v.algos} algos running, ${v.queue ? v.queue.waiting + v.queue.inFlight : "?"} orders in the send queue, brake ${v.brake ? "ON" : "off"}${v.ok ? "" : " - NOT HEALTHY NOW"}` : "NOT ANSWERING"')"
   note "  executor guards: install + preflight on a snapshot (kept), quiet send queue, brake over the restart, same copies/algos before trading resumes"
 fi
+print_flow
 [ -z "$INFRA" ] || note "  NOT SHIPPED: $INFRA - units/Caddy/env need deploy/release/bootstrap-instance.sh"
 [ "$MOVE_MAIN" = 1 ] || note "  main stays at $(git rev-parse --short origin/main): the web changed but is not shipped"
 dirty="$(git status --porcelain -- apps packages deploy/server package.json package-lock.json | grep -v '^?? deploy/\.out/' || true)"
@@ -249,8 +331,10 @@ elif [ ${#U2[@]} -gt 0 ] && [ "$EXEC_OK" != 1 ]; then
 fi
 
 START="$(date -u +%s)"
+phase "tag"
 # The commit this ship took at its start: HEAD may have moved meanwhile (another session's commit).
-log_ship() { mkdir -p "$OUT_DIR"; printf '%s\t%s\t%s\t%s\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$TAG" "${HEAD_SHA:0:7}" "$*" "${PARTS[*]}" >> "$OUT_DIR/ships.log"; }
+# The sixth column: the time of each phase (phase_summary).
+log_ship() { mkdir -p "$OUT_DIR"; phase ""; printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$TAG" "${HEAD_SHA:0:7}" "$*" "${PARTS[*]}" "$(phase_summary)" >> "$OUT_DIR/ships.log"; }
 
 # --- the maintenance window and Telegram (the header: TELEGRAM) -----------------------------------
 MAINT_ON=() STARTED=0 DONE_NOTES=() WARNED=0
@@ -278,14 +362,33 @@ maint_close() {
 }
 done_note() { DONE_NOTES+=("$*"); }
 on_exit() {
-  local rc=$?
-  [ $rc = 0 ] || log_ship "FAILED (exit $rc)"
+  local rc=$? also=""
+  # The executor beside server 1 (lane_start) is never left half-way: told to switch nothing more, and waited for.
+  if [ -n "${LANE_PID:-}" ]; then
+    : > "$LANE_ABORT"
+    note "waiting for server 2's executor step to end (it switches nothing from here on; a switch under way finishes with its own guards)"
+    lane_join
+    if [ "${LANE_SWITCHED:-0}" = 1 ] && [ "${LANE_RC:-1}" = 0 ]; then also="; the executor is on $TAG (it passed its own checks)"
+    elif [ -n "${LANE_ERROR:-}" ]; then also="; executor: $LANE_ERROR"; fi
+  fi
+  # The early web build that never went live is not kept (vercel-web.mjs never removes one that serves the site).
+  if [ -n "${WEB_DEP:-}" ] && [ "${WEB_PROMOTED:-0}" = 0 ]; then
+    note "web: the early build $WEB_DEP: $(node deploy/release/vercel-web.mjs discard "$WEB_DEP" 2>&1 || true)"
+  fi
+  if [ $rc != 0 ] && [ "${EARLY_INSTALLED:-}" != "" ] && [ "$STARTED" = 0 ]; then
+    note "installed but not current on${EARLY_INSTALLED}: /opt/valuescan/releases/$TAG runs nowhere - a rerun of $TAG uses it, release.sh's prune removes it later"
+  fi
+  if [ $rc != 0 ]; then log_ship "FAILED (exit $rc)"; note "phases (min:s): $(phase_summary)"; fi
   if [ $rc != 0 ] && [ "$STARTED" = 1 ]; then
     maint_close
     # Stopped before it was done, nothing left broken (a check refused the switch): everything runs as
     # before - not "done" (never green): the update is not what runs.
-    if [ "$NOTICE_OK" = 1 ]; then notice_done rolled_back "The update stopped before it was finished; everything runs as before."; fi
-    tell failure "$TAG stopped: ${LAST_ERROR:-ship.sh ended with exit $rc}"
+    if [ "$NOTICE_OK" = 1 ]; then
+      if [ -n "$also" ] && [ "${LANE_SWITCHED:-0}" = 1 ] && [ "${LANE_RC:-1}" = 0 ]; then
+        notice_done rolled_back "The update stopped before it was finished; the copy executor runs the update, everything else runs as before."
+      else notice_done rolled_back "The update stopped before it was finished; everything runs as before."; fi
+    fi
+    tell failure "$TAG stopped: ${LAST_ERROR:-ship.sh ended with exit $rc}$also"
   fi
 }
 trap on_exit EXIT
@@ -304,16 +407,10 @@ if [ "$NEW_TAG" = 1 ] || ! git rev-parse -q --verify "refs/tags/$TAG" >/dev/null
 fi
 refs=("refs/tags/$TAG")
 [ -z "$BRANCH" ] || [ "$BRANCH" = main ] || refs+=("HEAD:refs/heads/$BRANCH")
+# The branch Vercel builds the early web from (vercel-web.mjs THE GIT REF); a push of it deploys nothing by itself.
+[ "$EARLY_WEB" = 0 ] || refs+=("+$HEAD_SHA:refs/heads/ship")
 "${G[@]}" push -q origin "${refs[@]}"
-
-# --- 3. the test gate -----------------------------------------------------------------------------
-say "test gate"
-# GitHub creates the tag's CI run a few seconds after the push; test_gate would take "no run" for "no CI".
-for _ in $(seq 1 18); do
-  [ "$(gh_api "$REPO/actions/runs?head_sha=$HEAD_SHA" | json 'v ? v.total_count : 0')" -gt 0 ] && break
-  sleep 10
-done
-test_gate "$TAG"
+# (3. the test gate: below, after the work that runs while CI does)
 
 # --- 4.-6. the servers ----------------------------------------------------------------------------
 TARBALL=""
@@ -419,12 +516,14 @@ release_on() {   # host, units (comma list)
   if remote "$host" "sudo /opt/valuescan/bin/release.sh $TAG --units=$units --from=$INBOX/$(basename "$TARBALL") && sudo rm -f $INBOX/$(basename "$TARBALL") $INBOX/$(basename "$TARBALL").sha256"; then
     return 0
   fi
+  # Server 1 failing: the executor beside it switches nothing more (lane_stop), so the notice can say what runs.
+  [ "$host" != "$S1" ] || lane_stop
   # Only a release that was switched to is rolled back: one that failed to install left the old one running.
   cur="$(remote "$host" 'sudo /opt/valuescan/bin/release.sh --status' | sed -n 's/^current: *//p')"
   if [ "$cur" = "$TAG" ]; then
     note "!! $units did not come back on $TAG - rolling back to the release before"
     if remote "$host" "sudo /opt/valuescan/bin/release.sh --rollback --units=$units"; then
-      notice_done rolled_back "The update was rolled back; everything runs as before."
+      notice_done rolled_back "$(rolled_back_words)"
     else
       note "!! the rollback failed too - look at it now: deploy/release/remote.sh, docs/INCIDENT-RUNBOOK.md"
       NOTICE_OK=0
@@ -434,7 +533,7 @@ release_on() {   # host, units (comma list)
     fi
   else
     note "!! $TAG did not install on $host; nothing was switched (current: $cur)"
-    notice_done rolled_back "The update was not applied; everything runs as before."
+    notice_done rolled_back "$(rolled_back_words "The update was not applied")"
   fi
   die "$units on $host: not shipped"
 }
@@ -468,8 +567,9 @@ freeze_check() {   # units (comma list) on server 1
   fi
 }
 gate_rollback() {   # units (comma list) on server 1
+  lane_stop
   if remote "$S1" "sudo /opt/valuescan/bin/release.sh --rollback --units=$1"; then
-    notice_done rolled_back "The update was rolled back; everything runs as before."
+    notice_done rolled_back "$(rolled_back_words)"
   else
     note "!! the rollback failed too - look at it now: deploy/release/remote.sh, docs/INCIDENT-RUNBOOK.md"
     NOTICE_OK=0
@@ -528,72 +628,6 @@ server1_gates() {   # units (comma list) on server 1
   [ "$ix" = 0 ] || done_note "indexer gate: $INDEXER_WATCH_MIN min, $(node deploy/release/indexer-gate.mjs "$INDEXER_GATE_FILE" | sed 's/^ok: //')"
 }
 
-if [ ${#U1[@]} -gt 0 ] || [ ${#U2[@]} -gt 0 ] || [ "$STA" = 1 ] || [ "$FEED" = 1 ] || [ "$BIN" = 1 ]; then need_tarball; fi
-
-# Both servers' tarball and scripts first (one upload after the other: the laptop's cap): maint.sh and brake.sh
-# are the tag's before anything restarts.
-if [ ${#U1[@]} -gt 0 ] || [ "$STA" = 1 ] || [ "$BIN" = 1 ]; then
-  say "server 1 ($S1): upload, scripts"
-  upload "$S1"
-  sync_bin "$S1" >&2
-  [ ${#U1[@]} -gt 0 ] || [ "$STA" = 1 ] || remote "$S1" "sudo rm -f $INBOX/$(basename "$TARBALL") $INBOX/$(basename "$TARBALL").sha256"
-fi
-if [ ${#U2[@]} -gt 0 ] || [ "$FEED" = 1 ] || [ "$BIN" = 1 ]; then
-  say "server 2 ($S2): upload, scripts"
-  upload "$S2"
-  sync_bin "$S2" >&2
-  [ ${#U2[@]} -gt 0 ] || [ "$FEED" = 1 ] || remote "$S2" "sudo rm -f $INBOX/$(basename "$TARBALL") $INBOX/$(basename "$TARBALL").sha256"
-fi
-[ "$BIN" = 0 ] || done_note "scripts updated on both servers"
-
-# The maintenance window over the restarts, and the first of the two messages.
-if [ ${#U1[@]} -gt 0 ] || [ ${#U2[@]} -gt 0 ]; then
-  say "maintenance window: $TAG"
-  maint_open "$(IFS=,; echo "${U1[*]}${U1[*]:+${U2[*]:+,}}${U2[*]}")"
-  STARTED=1
-  where=""
-  if [ ${#U1[@]} -gt 0 ]; then where="$(IFS=,; echo "${U1[*]}" | sed 's/,/, /g') on server 1"; fi
-  if [ ${#U2[@]} -gt 0 ]; then where="${where:+$where; }executor on server 2"; fi
-  if [ "$WEB" = 1 ]; then where="$where; then the web"; fi
-  tell maintenance "$TAG started: $where. Health alerts about these are held until it is done (60 min at most); anything else alerts as always."
-  notice_post
-fi
-
-if [ ${#U1[@]} -gt 0 ] || [ "$STA" = 1 ]; then
-  S1U=("${U1[@]}"); [ "$STA" = 0 ] || S1U+=(status)
-  say "server 1 ($S1): ${S1U[*]}"
-  t0=0
-  if want indexer; then t0="$(remote "$S1" 'date +%s%3N')"; fi
-  release_on "$S1" "$(IFS=,; echo "${S1U[*]}")"
-  # What the old process published before it stopped does not count.
-  restarted=0
-  if want indexer; then restarted="$(remote "$S1" 'date +%s%3N')"; fi
-  if [ "$STA" = 1 ]; then done_note "status prober restarted"; fi
-  if want api; then done_note "api back"; fi
-  if want indexer; then
-    # Back when it publishes fresh status again. Not its first board build: the boards keep showing
-    # meanwhile, and that build took 40 to 110 min at midday on 2026-11-05. Waiting for it held the
-    # website behind it and turned a healthy release into "not back to normal". A build that stays
-    # old is the status page's to say (boards over an hour old count as degraded).
-    note "waiting for the indexer to publish again on $TAG"
-    built="" whole=""
-    for i in $(seq 1 30); do
-      read -r at ms conf markets down < <(indexer_state || echo "0 0 -1 -1 ?")
-      if [ -z "$built" ] && [ "${at:-0}" -gt "$restarted" ]; then built="$at"; note "indexer publishing $(( (at - t0) / 1000 )) s after the restart"; fi
-      if [ -n "$built" ] && [ "$down" = "-" ]; then whole=1; break; fi
-      sleep 10
-    done
-    if [ -n "$built" ]; then
-      done_note "indexer: publishing again $(( (built - t0) / 1000 )) s after the restart$([ -n "$whole" ] && echo ", every stream up" || echo ", streams still reconnecting: $down")"
-      notice_note "Leaderboards and cohorts keep showing; their figures catch up over the next rebuild."
-    else
-      note "!! the indexer has not published in 5 minutes after the restart - check it (deploy/release/remote.sh logs indexer)"
-      done_note "indexer: NOT publishing 5 minutes after the restart - check it (deploy/release/remote.sh logs indexer)"
-      WARNED=1
-    fi
-  fi
-  if want api || want indexer; then server1_gates "$(IFS=,; echo "${S1U[*]}")"; fi
-fi
 
 # --- 6b. the copy executor, guarded ---------------------------------------------------------------
 BRAKE_FILE=/var/lib/valuescan/brake.json
@@ -646,6 +680,8 @@ ship_executor() {
     [ "$(exec_health | json 'v && v.queue ? v.queue.waiting + v.queue.inFlight : 0')" = 0 ] && break
     sleep 2
   done
+  # Beside server 1 (lane_start): when server 1 stopped this ship meanwhile, nothing is switched here either.
+  if [ -n "${LANE_ABORT:-}" ] && [ -e "$LANE_ABORT" ]; then die "executor: not switched - server 1 stopped this ship first"; fi
   # e. the brake over the restart: the new process sends nothing until it is checked. Planned work
   #    (--maintenance): neither brake.sh nor the executor tells Telegram of it - this ship's messages do.
   BRAKE0="$(remote "$S2" "cat $BRAKE_FILE 2>/dev/null || true")"
@@ -659,26 +695,241 @@ ship_executor() {
     sleep 2
   done
   [ -n "$ok" ] || exec_rollback "after 90 s it reports $(counts "$h1") (before: $(counts "$h")), healthy: $(exec_healthy "$h1")"
+  EXEC_SWITCHED=1
   restore_brake
   note "executor on $TAG: $(counts "$h1"), the brake back as it was"
   done_note "executor: $(counts "$h1") as before, the brake back as it was$([ -n "$BRAKE0" ] && echo " (ON: it was on before)")"
 }
 
-if [ ${#U2[@]} -gt 0 ]; then
-  say "server 2 ($S2): executor"
-  ship_executor
-fi
-# The shared feed: after the executor (its release then is installed and current there: no tarball needed),
-# or on its own (installed from the tarball, current switched, nothing else restarted).
-if [ "$FEED" = 1 ]; then
-  say "server 2 ($S2): shared feed"
+# The executor's step and the shared feed's on server 2.
+exec_part() {
   if [ ${#U2[@]} -gt 0 ]; then
-    if remote "$S2" "sudo /opt/valuescan/bin/release.sh $TAG --units=feed" >&2; then done_note "shared feed restarted"
-    else note "!! the shared feed did not come back on $TAG (journalctl -u valuescan-feed); its readers use their own sockets"; done_note "shared feed NOT back - check it"; WARNED=1; fi
-  else
-    release_on "$S2" feed
-    done_note "shared feed restarted"
+    say "server 2 ($S2): executor"
+    ship_executor
   fi
+  # The shared feed: after the executor (its release then is installed and current there: no tarball needed),
+  # or on its own (installed from the tarball, current switched, nothing else restarted).
+  if [ "$FEED" = 1 ]; then
+    say "server 2 ($S2): shared feed"
+    if [ ${#U2[@]} -gt 0 ]; then
+      if remote "$S2" "sudo /opt/valuescan/bin/release.sh $TAG --units=feed" >&2; then done_note "shared feed restarted"
+      else note "!! the shared feed did not come back on $TAG (journalctl -u valuescan-feed); its readers use their own sockets"; done_note "shared feed NOT back - check it"; WARNED=1; fi
+    else
+      release_on "$S2" feed
+      done_note "shared feed restarted"
+    fi
+  fi
+}
+
+# --- server 2 beside server 1 (the header: WHAT RUNS SIDE BY SIDE) -----------------------------------------------
+# exec_part in a subshell of its own while server 1 restarts and its gates watch. Its output comes through marked
+# "[server 2]". What it would change in this shell - its done notes, the brake as it was (final_checks compares with
+# it), completing the notice - it writes to LANE_FILE, and lane_join takes it over: the notice is completed only from
+# here (it clears NOTICE_ID). Its updates of the notice (executor:down after a failed rollback, words) and the
+# brake's own Telegram message go out at once, as they did when it ran alone.
+# LANE_ABORT: server 1 stopped the ship - ship_executor then switches nothing (it looks right before its brake).
+LANE_PID="" LANE_FILE="" LANE_ABORT="" LANE_RC="" LANE_ERROR="" LANE_SWITCHED=0 EXEC_SWITCHED=0
+lane_start() {
+  mkdir -p "$OUT_DIR"
+  LANE_FILE="$OUT_DIR/ship-lane-$TAG.sh" LANE_ABORT="$OUT_DIR/ship-abort-$TAG"
+  rm -f "$LANE_FILE" "$LANE_ABORT"
+  (
+    DONE_NOTES=() LANE_NOTICES=() LANE_T0="$(date -u +%s)"
+    notice_done() { local o="$1"; shift; LANE_NOTICES+=("done|$o|$*"); }
+    lane_end() {
+      LANE_NOTES=(${DONE_NOTES[@]+"${DONE_NOTES[@]}"})
+      { declare -p LANE_NOTES LANE_NOTICES | sed 's/^declare -a /declare -ga /'
+        printf 'LANE_RC=%q\nLANE_ERROR=%q\nLANE_BRAKE0=%q\nLANE_NOTICE_OK=%q\nLANE_WARNED=%q\nLANE_SECS=%q\nLANE_SWITCHED=%q\n' \
+          "$1" "$LAST_ERROR" "$BRAKE0" "$NOTICE_OK" "$WARNED" "$(( $(date -u +%s) - LANE_T0 ))" "$EXEC_SWITCHED"
+      } > "$LANE_FILE.tmp" && mv -f "$LANE_FILE.tmp" "$LANE_FILE"
+    }
+    trap 'lane_end $?' EXIT
+    exec_part
+  ) 2>&1 | sed -u 's/^/  [server 2] /' >&2 &
+  LANE_PID=$!
+  note "server 2's step runs beside server 1 (its lines marked [server 2])"
+}
+# Waits for the lane (the sed at the end of its pipe ends with it) and takes over what it left.
+lane_join() {
+  [ -n "$LANE_PID" ] || return 0
+  local pid="$LANE_PID" e kind rest arg text
+  LANE_PID=""
+  wait "$pid" 2>/dev/null || true
+  # No result (the subshell killed): nothing about server 2 is known - not healthy, said so.
+  LANE_NOTES=() LANE_NOTICES=() LANE_RC=1 LANE_BRAKE0="$BRAKE0" LANE_NOTICE_OK=0 LANE_WARNED=1 LANE_SECS=0 LANE_SWITCHED=0
+  LANE_ERROR="server 2's step ended without a result - look at it now (release.sh --status, brake.sh status)"
+  if [ -f "$LANE_FILE" ]; then . "$LANE_FILE"; fi
+  rm -f "$LANE_FILE" "$LANE_ABORT"
+  DONE_NOTES+=(${LANE_NOTES[@]+"${LANE_NOTES[@]}"})
+  BRAKE0="$LANE_BRAKE0"
+  [ "$LANE_NOTICE_OK" = 1 ] || NOTICE_OK=0
+  [ "$LANE_WARNED" = 0 ] || WARNED=1
+  for e in ${LANE_NOTICES[@]+"${LANE_NOTICES[@]}"}; do
+    kind="${e%%|*}"; rest="${e#*|}"; arg="${rest%%|*}"; text="${rest#*|}"
+    [ "$kind" != done ] || notice_done "$arg" "$text"
+  done
+  phase_add "server 2 beside server 1" "$LANE_SECS"
+}
+# Server 1 failed: the lane switches nothing more; waited for, so the notice can say what runs.
+lane_stop() {
+  [ -n "$LANE_PID" ] || return 0
+  : > "$LANE_ABORT"
+  note "server 1 stopped: server 2's step switches nothing more (one under way finishes with its own guards); waiting for it"
+  lane_join
+}
+# The words of a server-1 rollback for the notice: the executor beside it may already run the update.
+rolled_back_words() {   # [what happened]
+  local what="${1:-The update was rolled back}"
+  if [ "${LANE_SWITCHED:-0}" = 1 ] && [ "${LANE_RC:-1}" = 0 ]; then
+    printf '%s; the copy executor runs the update (it passed its own checks), everything else runs as before.' "$what"
+  else printf '%s; everything runs as before.' "$what"; fi
+}
+
+# The site answers after its deployment.
+site_check() {
+  local code
+  # Into a file of our own: with MSYS_NO_PATHCONV (lib.sh) Windows curl takes /dev/null literally and fails (23).
+  code="$(curl -s -o "$OUT_DIR/site-check.html" -w '%{http_code}' --limit-rate 2M --max-time 20 "$SITE/" || true)"
+  rm -f "$OUT_DIR/site-check.html"
+  [ "$code" = 200 ] || die "$SITE answers $code after the deployment"
+}
+
+# --- 3.-4. while CI runs: the tarball to both servers and installed there, the web built (the header) ------------
+phase "ci + beside it"
+WEB_DEP="" WEB_PROMOTED=0 WEB_LIVE=0 WEB_EARLY_LIVE=0 EARLY_INSTALLED=""
+if [ "$EARLY_WEB" = 1 ]; then
+  say "web: built on Vercel while CI runs (staged: not live)"
+  if WEB_DEP="$(node deploy/release/vercel-web.mjs stage "$HEAD_SHA" "$REPO" "$TAG")"; then note "web: staged production deployment $WEB_DEP of ${HEAD_SHA:0:7} building"
+  else WEB_DEP=""; note "!! web: no early build - main's own build after the servers, as before"; fi
+fi
+
+# Upload (checked on arrival) and, where a release will run, install beside the running one: nothing switched.
+early_install() {   # host, 1 when a unit is released there
+  local tb="$INBOX/$(basename "$TARBALL")" same
+  upload "$1"
+  [ "$2" = 1 ] && [ "$EARLY_INSTALL" = 1 ] || return 0
+  # The server's own release.sh installs it now; the tag's comes only after CI (sync_bin), and a release already
+  # installed is not installed again. So only where the two are the same file: the same install as after CI.
+  same="$(remote "$1" "a=\$(sudo tar -xzOf $tb --wildcards '*/deploy/server/bin/release.sh' | sha256sum); b=\$(sha256sum < /opt/valuescan/bin/release.sh); [ \"\$a\" = \"\$b\" ] && echo same || echo differs" 2>/dev/null || echo unknown)"
+  if [ "$same" != same ]; then note "$1: $TAG brings another release.sh ($same): it installs $TAG after CI, as before"; return 0; fi
+  if remote "$1" "sudo /opt/valuescan/bin/release.sh $TAG --install-only --from=$tb" >&2; then
+    EARLY_INSTALLED="$EARLY_INSTALLED $1"
+  else
+    note "!! $1: $TAG did not install now - it is installed again after CI, where a failure stops the ship as before"
+  fi
+}
+NEED1=0 NEED2=0 REL1=0 REL2=0
+if [ ${#U1[@]} -gt 0 ] || [ "$STA" = 1 ]; then REL1=1; fi
+if [ ${#U2[@]} -gt 0 ] || [ "$FEED" = 1 ]; then REL2=1; fi
+if [ "$REL1" = 1 ] || [ "$BIN" = 1 ]; then NEED1=1; fi
+if [ "$REL2" = 1 ] || [ "$BIN" = 1 ]; then NEED2=1; fi
+if [ "$NEED1" = 1 ] || [ "$NEED2" = 1 ]; then
+  t_early="$(date -u +%s)"
+  need_tarball
+  # One upload after the other: the laptop's cap.
+  if [ "$NEED1" = 1 ]; then say "server 1 ($S1): upload$([ "$REL1$EARLY_INSTALL" = 11 ] && echo ", install beside the running release") while CI runs"; early_install "$S1" "$REL1"; fi
+  if [ "$NEED2" = 1 ]; then say "server 2 ($S2): upload$([ "$REL2$EARLY_INSTALL" = 11 ] && echo ", install beside the running release") while CI runs"; early_install "$S2" "$REL2"; fi
+  phase_add "beside CI: uploads + installs" $(( $(date -u +%s) - t_early ))
+fi
+
+# --- 3. the test gate -----------------------------------------------------------------------------
+say "test gate"
+# GitHub creates the tag's CI run a few seconds after the push; test_gate would take "no run" for "no CI".
+for _ in $(seq 1 18); do
+  [ "$(gh_api "$REPO/actions/runs?head_sha=$HEAD_SHA" | json 'v ? v.total_count : 0')" -gt 0 ] && break
+  sleep 10
+done
+test_gate "$TAG"
+
+# The early web after CI: a build that failed stops the ship here, before anything is switched or restarted.
+if [ -n "$WEB_DEP" ]; then
+  ws="$(node deploy/release/vercel-web.mjs wait "$WEB_DEP" 0 2>/dev/null || echo unknown)"
+  case "$ws" in
+    ERROR*) die "the web does not build on Vercel (deployment $WEB_DEP; its log is in the Vercel dashboard): nothing was switched or restarted. Ship without the web, or SHIP_EARLY_WEB=0 for main's build" ;;
+    *aliased*)
+      # Vercel gave the domains to the staged build: the web is live already. Never again without a new trial.
+      rm -f "$HOME/.valuescan/vercel-early.ok"
+      WEB_PROMOTED=1 WEB_EARLY_LIVE=1
+      note "!! web: Vercel made the staged build $WEB_DEP live by itself, before the servers - the trial mark is removed; ship.sh builds through main until vercel-web.mjs trial passes again" ;;
+    CANCELED*) note "!! web: the early build was cancelled - main's own build after the servers"; WEB_DEP="" ;;
+    *) note "web: the early build is ${ws% *}" ;;
+  esac
+fi
+
+# --- 4.-6. the servers ----------------------------------------------------------------------------
+phase "scripts"
+# Both servers' scripts first: maint.sh and brake.sh are the tag's before anything restarts.
+if [ "$NEED1" = 1 ]; then
+  say "server 1 ($S1): scripts"
+  sync_bin "$S1" >&2
+  [ "$REL1" = 1 ] || remote "$S1" "sudo rm -f $INBOX/$(basename "$TARBALL") $INBOX/$(basename "$TARBALL").sha256"
+fi
+if [ "$NEED2" = 1 ]; then
+  say "server 2 ($S2): scripts"
+  sync_bin "$S2" >&2
+  [ "$REL2" = 1 ] || remote "$S2" "sudo rm -f $INBOX/$(basename "$TARBALL") $INBOX/$(basename "$TARBALL").sha256"
+fi
+[ "$BIN" = 0 ] || done_note "scripts updated on both servers"
+
+# The maintenance window over the restarts, and the first of the two messages.
+if [ ${#U1[@]} -gt 0 ] || [ ${#U2[@]} -gt 0 ]; then
+  say "maintenance window: $TAG"
+  maint_open "$(IFS=,; echo "${U1[*]}${U1[*]:+${U2[*]:+,}}${U2[*]}")"
+  STARTED=1
+  where=""
+  if [ ${#U1[@]} -gt 0 ]; then where="$(IFS=,; echo "${U1[*]}" | sed 's/,/, /g') on server 1"; fi
+  if [ ${#U2[@]} -gt 0 ]; then where="${where:+$where; }executor on server 2"; fi
+  if [ "$WEB" = 1 ]; then where="$where; then the web"; fi
+  tell maintenance "$TAG started: $where. Health alerts about these are held until it is done (60 min at most); anything else alerts as always."
+  notice_post
+fi
+
+# Server 2 beside server 1 when both release something (the header); else one after the other, as before.
+LANE=0
+if [ "$PARALLEL" = 1 ] && [ "$REL1" = 1 ] && [ "$REL2" = 1 ]; then LANE=1; fi
+if [ "$REL1" = 1 ]; then
+  phase "server 1$([ "$LANE" = 1 ] && echo " (server 2 beside it)")"
+  [ "$LANE" = 0 ] || lane_start
+  S1U=("${U1[@]}"); [ "$STA" = 0 ] || S1U+=(status)
+  say "server 1 ($S1): ${S1U[*]}"
+  t0=0
+  if want indexer; then t0="$(remote "$S1" 'date +%s%3N')"; fi
+  release_on "$S1" "$(IFS=,; echo "${S1U[*]}")"
+  # What the old process published before it stopped does not count.
+  restarted=0
+  if want indexer; then restarted="$(remote "$S1" 'date +%s%3N')"; fi
+  if [ "$STA" = 1 ]; then done_note "status prober restarted"; fi
+  if want api; then done_note "api back"; fi
+  if want indexer; then
+    # Back when it publishes fresh status again. Not its first board build: the boards keep showing
+    # meanwhile, and that build took 40 to 110 min at midday on 2026-11-05. Waiting for it held the
+    # website behind it and turned a healthy release into "not back to normal". A build that stays
+    # old is the status page's to say (boards over an hour old count as degraded).
+    note "waiting for the indexer to publish again on $TAG"
+    built="" whole=""
+    for i in $(seq 1 30); do
+      read -r at ms conf markets down < <(indexer_state || echo "0 0 -1 -1 ?")
+      if [ -z "$built" ] && [ "${at:-0}" -gt "$restarted" ]; then built="$at"; note "indexer publishing $(( (at - t0) / 1000 )) s after the restart"; fi
+      if [ -n "$built" ] && [ "$down" = "-" ]; then whole=1; break; fi
+      sleep 10
+    done
+    if [ -n "$built" ]; then
+      done_note "indexer: publishing again $(( (built - t0) / 1000 )) s after the restart$([ -n "$whole" ] && echo ", every stream up" || echo ", streams still reconnecting: $down")"
+      notice_note "Leaderboards and cohorts keep showing; their figures catch up over the next rebuild."
+    else
+      note "!! the indexer has not published in 5 minutes after the restart - check it (deploy/release/remote.sh logs indexer)"
+      done_note "indexer: NOT publishing 5 minutes after the restart - check it (deploy/release/remote.sh logs indexer)"
+      WARNED=1
+    fi
+  fi
+  if want api || want indexer; then server1_gates "$(IFS=,; echo "${S1U[*]}")"; fi
+fi
+if [ "$LANE" = 1 ]; then
+  lane_join
+  [ "$LANE_RC" = 0 ] || die "${LANE_ERROR:-server 2: its step failed}"
+elif [ "$REL2" = 1 ]; then
+  phase "server 2"
+  exec_part
 fi
 
 # The restarts are over: what fails from here on is a failure.
@@ -697,12 +948,43 @@ if [ ${#U1[@]} -gt 0 ] || [ ${#U2[@]} -gt 0 ]; then
 fi
 
 # --- 7. the web -----------------------------------------------------------------------------------
+phase "web"
 if [ "$MOVE_MAIN" = 1 ]; then
+  # The early build (vercel-web.mjs): made live by Vercel's promote - no rebuild - and read back as production.
+  if [ -n "$WEB_DEP" ]; then
+    say "web: $TAG live (the build made while CI ran)"
+    if [ "$WEB_EARLY_LIVE" = 1 ]; then WEB_LIVE=1
+    else
+      ws="$(node deploy/release/vercel-web.mjs wait "$WEB_DEP" 900 || echo unknown)"
+      if [ "$ws" = READY ]; then
+        # From here it may serve the site: never discarded.
+        WEB_PROMOTED=1
+        if node deploy/release/vercel-web.mjs promote "$WEB_DEP" >&2; then WEB_LIVE=1
+        else note "!! web: the promote of $WEB_DEP did not check out - main's own build instead (the same commit)"; fi
+      else
+        note "!! web: the early build is '$ws' - main's own build instead"
+        # Live by itself (Vercel gave it the domains): kept, and no early build again without a new trial.
+        case "$ws" in *aliased*) WEB_PROMOTED=1; rm -f "$HOME/.valuescan/vercel-early.ok" ;; esac
+      fi
+    fi
+  fi
   say "main -> $TAG"
-  "${G[@]}" push -q origin "$HEAD_SHA:refs/heads/main"
+  if [ "$WEB_LIVE" = 1 ]; then
+    # main and ship-live in one push: Vercel's build of main finds ship-live at its commit and skips (ignore-build.sh).
+    "${G[@]}" push -q --atomic origin "$HEAD_SHA:refs/heads/main" "+$HEAD_SHA:refs/heads/ship-live"
+    site_check
+    note "web live on $SITE (promoted)"
+    done_note "web live (built while CI ran, promoted)"
+    WEB=0
+  else
+    "${G[@]}" push -q origin "$HEAD_SHA:refs/heads/main"
+  fi
+  # Only a deployment made for this push of main: an early build of the same commit (vercel-web.mjs) that did not
+  # go live may have its own GitHub deployment, minutes older.
+  MAIN_PUSHED_AT="$(date -u -d '-2 min' +%Y-%m-%dT%H:%M:%SZ)"
   # Vercel builds main only when a file of the site changed (deploy/vercel/ignore-build.sh, web-changed.mjs):
   # `web` named with no such file means no deployment to wait for - the live site already is HEAD's.
-  if [ "$WEB" = 1 ] && node deploy/vercel/web-changed.mjs "$OLD_MAIN" "$HEAD_SHA" >/dev/null 2>&1; then
+  if [ "$WEB" = 1 ] && [ "$SITE_CHANGED" = 0 ]; then
     note "web: no file of the site changed since main ${OLD_MAIN:0:7}, so Vercel skips this build; the live site stays"
     WEB=0
   fi
@@ -712,7 +994,7 @@ if [ "$MOVE_MAIN" = 1 ]; then
     for _ in $(seq 1 60); do
       # The main project's: "Production", or "Production – valuedesk" since a second Vercel project
       # (valuedesk-beta, docs/BETA.md) builds the same repository - never the beta project's.
-      id="$(gh_api "$REPO/deployments?sha=$HEAD_SHA" | json '(Array.isArray(v) ? v : []).filter((d) => /^Production( – valuedesk)?$/.test(d.environment)).map((d) => d.id)[0] ?? ""')"
+      id="$(gh_api "$REPO/deployments?sha=$HEAD_SHA" | json '(Array.isArray(v) ? v : []).filter((d) => /^Production( – valuedesk)?$/.test(d.environment) && !(d.created_at < "'"$MAIN_PUSHED_AT"'")).map((d) => d.id)[0] ?? ""')"
       if [ -n "$id" ]; then
         state="$(gh_api "$REPO/deployments/$id/statuses" | json 'v && v[0] ? v[0].state : ""')"
         case "$state" in success|failure|error) break ;; esac
@@ -720,10 +1002,7 @@ if [ "$MOVE_MAIN" = 1 ]; then
       sleep 15
     done
     [ "$state" = success ] || die "the web's Production deployment is '${state:-not there}' after 15 minutes (Vercel dashboard)"
-    # Into a file of our own: with MSYS_NO_PATHCONV (lib.sh) Windows curl takes /dev/null literally and fails (23).
-    code="$(curl -s -o "$OUT_DIR/site-check.html" -w '%{http_code}' --limit-rate 2M --max-time 20 "$SITE/" || true)"
-    rm -f "$OUT_DIR/site-check.html"
-    [ "$code" = 200 ] || die "$SITE answers $code after the deployment"
+    site_check
     note "web live on $SITE"
     done_note "web live"
   fi
@@ -732,6 +1011,7 @@ fi
 log_ship "ok"
 took="$(( ($(date -u +%s) - START) / 60 ))"
 say "shipped $TAG in $took min: ${PARTS[*]:-}$([ "$BIN" = 1 ] && echo " bin")"
+note "phases (min:s): $(phase_summary)"
 if [ "$STARTED" = 1 ]; then
   summary="$(printf '%s; ' ${DONE_NOTES[@]+"${DONE_NOTES[@]}"})"
   if [ "$WARNED" = 1 ]; then tell failure "$TAG shipped in $took min, but not all is well: ${summary%; }"
