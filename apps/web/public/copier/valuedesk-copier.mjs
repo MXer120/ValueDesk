@@ -15987,7 +15987,7 @@ var LIMIT_WORDS_MS = 10 * 6e4;
 var PROBLEM_RECHECK_MS = 6e4;
 var ORDER_POLL_SPACING_MS = 1e3;
 var ORDER_RESYNC_SPACING_MS = 200;
-var BOT_POSITION_CHECK_MS = 3e4;
+var BOT_POSITION_CHECK_MS = 1e4;
 var SAID_EVERY_MS = 1e4;
 var ORDER_POLL_MIN_MS = 3e3;
 var ORDER_WATCH_EVERY_MS = 3e4;
@@ -16261,10 +16261,45 @@ var AlgoRuntime = class {
     const trail2 = this.refTrail.get(market);
     if (!trail2?.length || trail2[0][0] > now - ms) return null;
     let path = 0;
-    for (let i = 1; i < trail2.length; i++) {
-      if (trail2[i][0] >= now - ms) path += Math.abs(trail2[i][1] - trail2[i - 1][1]) / trail2[i][1];
+    let prev = null;
+    let sec = -1;
+    let last = 0;
+    for (const [t, m] of trail2) {
+      if (t < now - ms - 1e3) {
+        prev = m;
+        continue;
+      }
+      const s = Math.floor(t / 1e3);
+      if (s !== sec) {
+        if (sec !== -1) {
+          if (prev !== null && prev > 0) path += Math.abs(last - prev) / prev;
+          prev = last;
+        }
+        sec = s;
+      }
+      last = m;
     }
+    if (sec !== -1 && prev !== null && prev > 0) path += Math.abs(last - prev) / prev;
     return path * 1e4;
+  }
+  /**
+   * The calm-market gate's limit on a market (owner 2026-11-09: the HYPE bot placed no order in an hour - a 12 bp
+   * limit tuned on BTC never opens on a coin that moves 20-60 bp a minute): the higher of the bot's stillBps and the
+   * market's own median 60 s path over the last hour, sampled every 5 s. So the gate sits out a market's busier
+   * minutes, not all of them. Until 5 minutes are sampled, the bot's own limit.
+   */
+  pathSamples = /* @__PURE__ */ new Map();
+  calmLimit(market, stillBps, ms, now) {
+    let a = this.pathSamples.get(market);
+    if (!a) this.pathSamples.set(market, a = []);
+    if (!a.length || now - a[a.length - 1][0] >= 5e3) {
+      const p = this.refPath(market, ms, now);
+      if (p !== null) a.push([now, p]);
+      while (a.length && a[0][0] < now - 36e5) a.shift();
+    }
+    if (a.length < 60) return stillBps;
+    const v = a.map((x) => x[1]).sort((x, y) => x - y);
+    return Math.max(stillBps, v[Math.floor(v.length / 2)]);
   }
   /**
    * A reference tick (the fast pull): every running Binance-led maker on that market cancels at once a quote the fair
@@ -16949,7 +16984,7 @@ var AlgoRuntime = class {
     add({ id: "service", label: "ValueDesk service", state: brake ? "warn" : "ok", value: brake ? `paused: ${brake}` : "running" });
     const q = this.market.quote(s.symbol);
     const qAge = q ? now - q.at : null;
-    add({ id: "book", label: "SoDEX price", state: qAge === null ? "bad" : qAge <= BOT_QUOTE_MAX_AGE_MS ? "ok" : "warn", value: qAge === null ? "no price yet" : `${secs(qAge)} old` });
+    add({ id: "book", label: "SoDEX price", state: qAge === null ? "bad" : qAge <= BOT_QUOTE_MAX_AGE_MS ? "ok" : "warn", value: qAge === null ? "no price yet" : `live, last change ${secs(qAge)} ago` });
     if (s.kind === "mm" && s.ref) {
       const r = this.host.reference?.quote(s.symbol) ?? null;
       const rAge = r ? now - r.at : null;
@@ -16958,7 +16993,7 @@ var AlgoRuntime = class {
         id: "oracle",
         label: "Oracle price",
         state: !this.host.reference || rAge === null ? "bad" : rAge <= REF_MAX_AGE_MS ? "ok" : rAge <= REF_GRACE_MS ? "warn" : "bad",
-        value: !this.host.reference ? "not available here" : rAge === null ? "no price yet" : still ? `still market, unchanged ${secs(now - (r.stillSince ?? r.at))}, confirmed ${secs(rAge)} ago` : rAge <= REF_GRACE_MS ? `live, ${secs(rAge)} old` : `feed stale: no price for ${secs(rAge)}`
+        value: !this.host.reference ? "not available here" : rAge === null ? "no price yet" : still ? `live, still market (no change for ${secs(now - (r.stillSince ?? r.at))})` : rAge <= REF_GRACE_MS ? `live, last change ${secs(rAge)} ago` : `feed stale: no price for ${secs(rAge)}`
       });
     } else add({ id: "oracle", label: "Oracle price", state: "off", value: "not used by this bot" });
     if (!s.paper) {
@@ -16978,6 +17013,7 @@ var AlgoRuntime = class {
       add({ id: "refusals", label: "SoDEX refusals (1 h)", state: bad > 0 ? "warn" : "ok", value: hour.length ? `${handled} handled${bad ? `, ${bad} unexpected` : ""}` : "none" });
     }
     if (a.status === "waiting" || (a.statusReason ?? "").startsWith("Held")) add({ id: "hold", label: "Quoting", state: "warn", value: a.statusReason ?? "waiting" });
+    else if (a.status === "running" && typeof a.k.calm === "string") add({ id: "hold", label: "Quoting", state: "warn", value: a.k.calm });
     else if (a.status === "running") add({ id: "hold", label: "Quoting", state: "ok", value: a.k.closing ? "closing what it holds" : "quoting" });
     else add({ id: "hold", label: "Quoting", state: "off", value: a.status === "paused" ? "paused by you" : a.status });
     return { at: now, checks };
@@ -17807,6 +17843,11 @@ var AlgoRuntime = class {
   /** Volume maker: one post-only bid and one post-only ask where mmQuotes puts them (bots.ts). */
   async stepMm(a, m, q, mk2, now) {
     const s = a.spec;
+    const hadCalm = typeof a.k.calm === "string";
+    if (hadCalm) {
+      delete a.k.calm;
+      this.dirty.add(a.id);
+    }
     if (s.maxSpreadBps !== null && spreadBps(q) > s.maxSpreadBps) {
       await this.pullResting(a);
       return this.hold(a, `Held: the spread (${spreadBps(q).toFixed(1)} bp) is wider than your ${s.maxSpreadBps} bp.`);
@@ -17895,8 +17936,14 @@ var AlgoRuntime = class {
       const addsHere = side === "buy" ? inv >= 0 : inv <= 0;
       if (addsHere && fair !== null && (s.stillBps ?? 0) > 0) {
         const path = this.refPath(s.symbol, s.stillMs ?? 6e4, now);
-        if (path === null || path >= s.stillBps) {
+        const limit = this.calmLimit(s.symbol, s.stillBps, s.stillMs ?? 6e4, now);
+        if (path === null || path >= limit) {
           pull.push(...standing.filter((c) => c.state === "open" && c.tif !== "ioc"));
+          const win = Math.round((s.stillMs ?? 6e4) / 1e3);
+          const text = path === null ? `Waiting for a calm market: it reads the oracle for ${win} s first.` : `Waiting for a calm market: the oracle moved ${path.toFixed(1)} bp in the last ${win} s (limit ${limit.toFixed(1)} bp${limit > s.stillBps ? `, this market's usual minute; yours is ${s.stillBps} bp` : ""}).`;
+          a.k.calm = text;
+          this.dirty.add(a.id);
+          if (!hadCalm) void this.saidOnce(a, "calm", "info", text);
           continue;
         }
       }
@@ -17952,7 +17999,7 @@ var AlgoRuntime = class {
         if (s.pauseAfter && now - (this.takerAt.get(`${s.symbol}:${s.pauseAfter}`) ?? -Infinity) < (s.pauseMs ?? 0)) continue;
         if ((s.stillBps ?? 0) > 0) {
           const path = this.refPath(s.symbol, s.stillMs ?? 6e4, now);
-          if (path === null || path >= s.stillBps) continue;
+          if (path === null || path >= this.calmLimit(s.symbol, s.stillBps, s.stillMs ?? 6e4, now)) continue;
         }
       }
       send.push({ side, price: w.price, quantity: qty2, tif: s.postOnly === false ? "gtc" : "gtx", tag: side === "buy" ? "bid" : "ask", ...adds ? {} : { reduceOnly: true } });
