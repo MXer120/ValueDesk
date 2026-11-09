@@ -11,6 +11,7 @@ the web is built by `deploy/release/build-web.sh`.
 | `api-proxy.cjs` | the function behind `/api/*` (Node.js, `hnd1` - Tokyo, next to the instance in ap-northeast-1; `fra1` until 2026-10-23): to `https://<origin>` with the origin secret and the viewer's address |
 | `vercel.test.mjs` | `node --test deploy/vercel/vercel.test.mjs` |
 | `ignore-build.sh` | Vercel's Ignored Build Step: each project builds only its branch, and `main` only when `web-changed.mjs` finds a file of the site changed since the last deployment (`VS_ALWAYS_BUILD=1` builds every push) |
+| `ignore-build.sh`, ship.sh's early web | the main project also builds the branch `ship` (a staged production deployment ship.sh asks for while CI runs, `deploy/release/vercel-web.mjs`), and skips main at the commit the branch `ship-live` names (built and promoted already); `ignore-build.test.mjs` |
 | `web-changed.mjs` | does a commit range change the site's build input? (both pages' run-time import graph, apps/web, packages, the build and route files); `web-changed.test.mjs` |
 
 ```
