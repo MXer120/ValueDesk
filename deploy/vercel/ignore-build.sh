@@ -17,8 +17,39 @@ case "${VERCEL_URL:-}" in
   valuedesk-*) want=main ;;
   *) want="main beta" ;;
 esac
-for w in $want; do
-  [ "$ref" = "$w" ] && { echo "building $ref"; exit 1; }
-done
-echo "skipped: this project serves only '$want', not '$ref'"
-exit 0
+served=0
+for w in $want; do [ "$ref" = "$w" ] && served=1; done
+if [ "$served" = 0 ]; then
+  echo "skipped: this project serves only '$want', not '$ref'"
+  exit 0
+fi
+
+# main: only when the site itself changed since the last deployment that went live (owner 2026-11-09:
+# cut hosting cost). Half the pushes of main change only the servers (16 of 32, 2026-11-05..11-08), and
+# each rebuilt the same site: 2-2.5 build minutes and another 118 MB deployment kept. ship.sh waits for a
+# Production deployment only when parts.mjs finds a web change, and web-changed.mjs builds on a wider set
+# than that, so a skipped build is never one ship.sh waits for. Anything it cannot tell builds.
+# `beta` always builds: ship-beta.sh waits for every beta push, and its pushes are rare.
+# VERCEL_GIT_PREVIOUS_SHA: the commit of this branch's last successful deployment (set only for an
+# Ignored Build Step); a skipped push leaves it where it was, so the next range still covers it.
+# VS_ALWAYS_BUILD=1 (a Vercel environment variable) builds every push of main again.
+prev="${VERCEL_GIT_PREVIOUS_SHA:-}"
+sha="${VERCEL_GIT_COMMIT_SHA:-}"
+if [ "$ref" != main ] || [ -z "$prev" ] || [ -z "$sha" ] || [ "${VS_ALWAYS_BUILD:-0}" = 1 ]; then
+  echo "building $ref"
+  exit 1
+fi
+# Vercel clones shallow: fetch the previous commit alone when it is not here (a diff needs both trees only).
+if ! git cat-file -e "$prev^{commit}" 2>/dev/null; then
+  git fetch -q --no-tags --depth=1 origin "$prev" 2>/dev/null || true
+fi
+if ! git cat-file -e "$prev^{commit}" 2>/dev/null || ! command -v node >/dev/null 2>&1; then
+  echo "building $ref (cannot compare with the last deployment ${prev:0:8})"
+  exit 1
+fi
+if node deploy/vercel/web-changed.mjs "$prev" "$sha"; then
+  echo "skipped: the site is the same as in the last deployment (${prev:0:8}), which stays live"
+  exit 0
+fi
+echo "building $ref"
+exit 1

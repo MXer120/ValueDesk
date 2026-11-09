@@ -133,6 +133,8 @@ counts() { printf '%s' "$1" | json 'v && typeof v.copies === "number" ? `${v.cop
 say "what runs where"
 "${G[@]}" fetch -q origin main --tags
 HEAD_SHA="$(git rev-parse HEAD)"
+# main as it is before this ship moves it: what Vercel's Ignored Build Step compares with (step 7).
+OLD_MAIN="$(git rev-parse origin/main)"
 BRANCH="$(git symbolic-ref --short -q HEAD || true)"
 "${G[@]}" merge-base --is-ancestor origin/main HEAD || die "HEAD does not contain origin/main: bring this branch up to date with main first"
 st1="$(remote "$S1" 'sudo /opt/valuescan/bin/release.sh --status' 2>/dev/null)" || die "server 1 ($S1) does not answer"
@@ -698,6 +700,12 @@ fi
 if [ "$MOVE_MAIN" = 1 ]; then
   say "main -> $TAG"
   "${G[@]}" push -q origin "$HEAD_SHA:refs/heads/main"
+  # Vercel builds main only when a file of the site changed (deploy/vercel/ignore-build.sh, web-changed.mjs):
+  # `web` named with no such file means no deployment to wait for - the live site already is HEAD's.
+  if [ "$WEB" = 1 ] && node deploy/vercel/web-changed.mjs "$OLD_MAIN" "$HEAD_SHA" >/dev/null 2>&1; then
+    note "web: no file of the site changed since main ${OLD_MAIN:0:7}, so Vercel skips this build; the live site stays"
+    WEB=0
+  fi
   if [ "$WEB" = 1 ]; then
     note "waiting for Vercel's Production deployment of ${HEAD_SHA:0:7}"
     state=""
