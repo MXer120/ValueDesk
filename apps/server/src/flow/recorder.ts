@@ -79,6 +79,10 @@ export class FlowRecorder {
   private repeats = new Map<string, Map<string, number>>();
   private repeatsAt = 0;
   private runStart: number;
+  /** The run this process continues in meta `runs` (a handover: the one before it, no gap between them). */
+  private runFrom: number;
+  /** A handover's boundary already says which prints the last process held (handover.ts): no restart check. */
+  private repeatCheck = true;
   private stats = { prints: 0, late: 0, lastFlushMs: 0 };
   lastError: string | null = null;
 
@@ -96,6 +100,7 @@ export class FlowRecorder {
     this.hourThrough = Number(store.getMeta('hour_through')) || Math.floor(t / HOUR_MS) * HOUR_MS;
     this.dayThrough = Number(store.getMeta('day_through')) || Math.floor(t / DAY_MS) * DAY_MS;
     this.runStart = t;
+    this.runFrom = t;
     this.repeatsAt = t;
     if (!store.getMeta('since')) store.setMeta('since', String(t));
   }
@@ -236,7 +241,7 @@ export class FlowRecorder {
    * minutes, when the snapshots are in.
    */
   repeatOfHeld(p: Print): boolean {
-    if (p.t >= this.runStart) return false;
+    if (!this.repeatCheck || p.t >= this.runStart) return false;
     try {
       const venue: Venue = p.venue === 'hyperliquid' && p.symbol.startsWith('xyz:') ? 'tradexyz' : p.venue;
       const mid = this.markets.get(`${venue}|${p.symbol}`);
@@ -345,14 +350,27 @@ export class FlowRecorder {
     if (wrote) this.stats.lastFlushMs = Date.now() - t0;
   }
 
+  /**
+   * A handover (indexer/handover.ts): the outgoing process named every print it held, so the restart check is off, and
+   * when its run reached the buffer's first print (`from`) this run goes on as that one in meta `runs`: there is no gap.
+   */
+  continueHandover(from: number): void {
+    this.repeatCheck = false;
+    try {
+      const runs = JSON.parse(this.store.getMeta('runs') ?? '[]') as Array<[number, number]>;
+      const last = runs[runs.length - 1];
+      if (last && last[1] >= from) this.runFrom = last[0];
+    } catch { /* a new run, as before */ }
+  }
+
   /** Keep meta `runs` ([start, last seen] per run, newest last): the gaps between runs are hours with no prints recorded. */
   private noteRun(now: number): void {
     this.lastRun = now;
     let runs: Array<[number, number]> = [];
     try { runs = JSON.parse(this.store.getMeta('runs') ?? '[]') as Array<[number, number]>; } catch { runs = []; }
     const last = runs[runs.length - 1];
-    if (last && last[0] === this.runStart) last[1] = now;
-    else runs.push([this.runStart, now]);
+    if (last && last[0] === this.runFrom) last[1] = now;
+    else runs.push([this.runFrom, now]);
     this.store.setMeta('runs', JSON.stringify(runs.slice(-500)));
   }
 

@@ -518,7 +518,9 @@ function indexerState(status: () => unknown, now: () => number, judge: IndexerJu
   }
   const age = h?.at ? now() - h.at : null;
   // The indexer says it is stopping (a release, a restart): maintenance, not an incident (statusAuto.ts),
-  // for as long as a stop takes at most (11-06: 36 s to 19.5 min).
+  // for as long as a stop takes at most (11-06: 36 s to 19.5 min). A handover (indexer/handover.ts) publishes
+  // `handover` instead: the standby's sockets hold every print while the old process stops, so its row (the last
+  // status before the stop, the standby's sockets as streams) is judged as it is, and goes stale like any other.
   if (h && age !== null && age <= INDEXER_STOP_MAX_MS && (raw as { stopping?: unknown }).stopping === true) return { state: 'degraded', why: ['stopping'] };
   if (!h || age === null || age > INDEXER_STALE_MS) {
     // Not publishing, but the boards it wrote are under an hour old: what users see is still recent.
@@ -531,8 +533,15 @@ function indexerState(status: () => unknown, now: () => number, judge: IndexerJu
   const streams = Object.entries(h.streams);
   if (!streams.length) why.push('stream:');
   for (const [venue, up] of streams) if (!up) why.push(`stream:${venue}`);
-  // Boards hours old under a green page: 11.3 h on 2026-11-04 with most of that day counted as up.
-  if (typeof h.lastBuildAt === 'number' && h.lastBuildAt > 0 && now() - h.lastBuildAt > INDEXER_BOARDS_OLD_MS) why.push('boards');
+  // Boards hours old under a green page: 11.3 h on 2026-11-04 with most of that day counted as up. Until a new process's
+  // first build ends (15-90 min after the restarts of 2026-11-08) the boards shown are the last process's: their age is
+  // that build's (prevBuildAt, engine.ts loadWarm), else the newest board on disk - not "no build yet, so fine".
+  // (h.lastBuildAt already falls back to boardsAt: hosted.ts indexerHealth. The process's own build comes first here.)
+  const { lastBuildAt: own, prevBuildAt: prev } = raw as { lastBuildAt?: unknown; prevBuildAt?: unknown };
+  const builtAt = typeof own === 'number' && own > 0 ? own
+    : typeof prev === 'number' && prev > 0 ? prev
+    : typeof h.lastBuildAt === 'number' ? h.lastBuildAt : 0;
+  if (builtAt > 0 && now() - builtAt > INDEXER_BOARDS_OLD_MS) why.push('boards');
   // Lanes that have work and finish none, reads failing, the thread far behind (ops/indexerJudge.ts).
   why.push(...judge.judge(h, now()));
   return { state: why.length ? 'degraded' : 'up', why };

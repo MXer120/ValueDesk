@@ -24,7 +24,7 @@ import { WINDOWS } from '../../valuedesk/types.js';
 import { Pacer } from '../../valuedesk/extra/http.js';
 import { LIGHTER_PAGE, LIGHTER_WS, lighterAccounts, lighterActiveMarkets, lighterLeaderboard, lighterMarkets, lighterTrades, type LighterTrade } from '../../valuedesk/extra/lighter.js';
 import { Lane } from '../lanes.js';
-import { LighterStream } from '../streams.js';
+import { LighterStream, type Dedup } from '../streams.js';
 import type { FillRow, IndexStore } from '../store.js';
 import type { ExtContext, ExtVenue } from './types.js';
 
@@ -65,7 +65,10 @@ export class LighterVenue implements ExtVenue {
       if (list) list.push(idx);
       else this.indicesOf.set(address, [idx]);
     }
-    if (process.env.VALUESCAN_INDEX_STREAMS !== '0') {
+    if (ctx.adopt?.lighter !== undefined) {
+      // A handover's standby opened it (handover.ts): subscribed already, delivering to the engine.
+      this.stream = ctx.adopt.lighter;
+    } else if (process.env.VALUESCAN_INDEX_STREAMS !== '0') {
       this.stream = new LighterStream(ctx.onPrint, () => lighterActiveMarkets(this.pacer), LIGHTER_WS);
       void this.stream.start().catch(() => {
         // No market list: try again in a minute.
@@ -100,6 +103,10 @@ export class LighterVenue implements ExtVenue {
   /** Up only once every active market's channel is confirmed. */
   socketSince(): number | null {
     return this.stream?.since ?? null;
+  }
+
+  dedup(): Dedup | null {
+    return this.stream?.dedup ?? null;
   }
 
   /** Remember which wallet a set of sub-account indices belongs to (from any read). */

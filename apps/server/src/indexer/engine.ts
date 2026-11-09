@@ -46,7 +46,9 @@ import { hlCoinName } from '../valuedesk/extra/account.js';
 import { accountValue as fetchAccountValue, chartWindows, lookupPnl, peekTrades, syncCloses, syncLists, syncTrades } from './sodexSource.js';
 import type { BoardRow, Coverage, HistoryKind, IndexStore, TraderStatsRow, TraderWin } from './store.js';
 import { winRateOf } from '../valuedesk/winRate.js';
-import { HlStream, SodexStream, streamLog, type ArcusWsTrade, type Print } from './streams.js';
+import { HlStream, SodexStream, streamLog, type ArcusWsTrade, type Dedup, type Print } from './streams.js';
+import { BoundaryFilter, FILTER_TAIL_MS, FROM_MARGIN_MS, KEEP_IDS, PrintTap, type Boundary, type PrintBuffer } from './handover.js';
+import { sourceFactory, type Sources } from './printSources.js';
 import { SodexCatchup } from './sodexCatchup.js';
 import { ArcusCatchup } from './arcusCatchup.js';
 import { startLedgerThread, type LedgerThread } from '../flow/ledgerWorker.js';
@@ -376,6 +378,19 @@ type UnwrittenPart =
  */
 const WARM_FILE = 'warm-cache.json';
 const WARM_FORMAT = 'warm-1';
+/** A handover's buffer is applied this long at a time, the loop let in between (sockets keep delivering to its end). */
+const HANDOVER_SLICE_MS = 20;
+
+/** What a handover's standby hands the engine (handover.ts): its sockets, what they buffered, and the boundary. */
+export interface HandoverStart {
+  tap: PrintTap;
+  buffer: PrintBuffer;
+  sources: Sources;
+  /** The outgoing process's (null: it ended without one - a crash midway). */
+  boundary: Boundary | null;
+  /** Buffered prints older than this are snapshots of what the outgoing process took. */
+  floor: number;
+}
 const WARM_MAX_AGE_MS = MAX_REUSE_MS;
 
 interface PickStats {
@@ -408,6 +423,10 @@ export class Indexer {
   readonly sdata: Lane;
   private hlStream: HlStream | null = null;
   private sodexStream: SodexStream | null = null;
+  /** Where sockets this engine adopts or a test factory makes deliver (printSources.ts). */
+  private readonly tap = new PrintTap();
+  /** The handover this process started from: what its buffer held and what the boundary did (status, tests). */
+  handover: { prints: number; applyMs: number; dropped: number; filter: string; at: number } | null = null;
   private timers: NodeJS.Timeout[] = [];
   private walletBackfill: WalletBackfill | null = null;
   private listSnap: Partial<Record<Window, number>> = {};
@@ -504,6 +523,7 @@ export class Indexer {
   private suspectSodex = new Set<string>();
 
   constructor(readonly store: IndexStore, private readonly now: () => number = Date.now) {
+    this.tap.sink = (p) => this.onPrint(p);
     // The read's own time counts toward its rest (2026-11-08: 12,148 weight in 2.6 h, ~78 of the 200 a minute it may spend -
     // each page's write takes seconds on the busy thread, and the full rest came on top). Still at most perMin on average.
     this.hl = new Lane({ name: 'hl', perMin: INDEXER_ENV.hlWeightPerMin(), creditTaskTime: true });
@@ -543,8 +563,13 @@ export class Indexer {
     });
   }
 
-  start(): void {
+  /**
+   * `handover`: this process takes over from a running one (handover.ts) - its sockets are the standby's, already up, and
+   * what they buffered goes in through the boundary once everything else has started.
+   */
+  start(opts: { handover?: HandoverStart } = {}): void {
     this.stopped = false;
+    const pre: Sources | null = opts.handover?.sources ?? sourceFactory()?.(this.tap.emit) ?? null;
     // What keeps the thread before the sockets can open is named in the journal: a restart's gap is mostly this.
     let lapAt = Date.now();
     const lap = (name: string) => {
@@ -596,10 +621,14 @@ export class Indexer {
     this.strades.start();
     this.sdata.start();
     for (const x of this.ext.values()) {
-      x.start({ store: this.store, now: this.now, streamSince: (v) => this.streamSince(v), onPrint: (p) => this.onPrint(p), hlLane: this.hl });
+      x.start({
+        store: this.store, now: this.now, streamSince: (v) => this.streamSince(v), onPrint: (p) => this.onPrint(p), hlLane: this.hl,
+        // A standby without a socket for one (Lighter's market list not read yet): the venue opens its own, as on any start.
+        ...(pre ? { adopt: { lighter: pre.lighter ?? (opts.handover ? undefined : null), arcus: pre.arcus ?? (opts.handover ? undefined : null) } } : {}),
+      });
     }
     lap('lanes and venues');
-    if (INDEXER_ENV.streams() && process.env.VALUESCAN_FLOW !== '0' && !this.flow) {
+    if ((INDEXER_ENV.streams() || pre) && process.env.VALUESCAN_FLOW !== '0' && !this.flow) {
       try {
         const path = process.env.VALUESCAN_FLOW_DB?.trim() || join(dirname(this.store.path), 'valuescan-flow.db');
         this.flow = new FlowRecorder(new FlowStore(path), (venue, acct) =>
@@ -609,12 +638,17 @@ export class Indexer {
       }
     }
     lap('who traded recorder');
-    if (INDEXER_ENV.streams()) {
-      this.hlStream = new HlStream((p) => this.onPrint(p));
-      this.sodexStream = new SodexStream((p) => this.onPrint(p));
-      this.hlStream.start();
-      this.sodexStream.start();
-      if (this.flow && process.env.VALUESCAN_SODEX_CATCHUP !== '0') {
+    if (INDEXER_ENV.streams() || pre) {
+      if (pre) {
+        this.hlStream = pre.hyperliquid;
+        this.sodexStream = pre.sodex;
+      } else {
+        this.hlStream = new HlStream((p) => this.onPrint(p));
+        this.sodexStream = new SodexStream((p) => this.onPrint(p));
+        this.hlStream.start();
+        this.sodexStream.start();
+      }
+      if (this.flow && this.sodexStream && process.env.VALUESCAN_SODEX_CATCHUP !== '0') {
         const stream = this.sodexStream;
         const flow = this.flow;
         this.sodexCatchup = new SodexCatchup((rows) => this.heldChecked(flow, () => stream.catchUp(rows, (prints) => flow.missing(prints))), streamLog);
@@ -684,7 +718,9 @@ export class Indexer {
     }, PRUNE_START_MS);
     prune.unref?.();
     this.timers.push(prune);
-    every(REBUILD_MS, () => this.rebuild(), 'rebuild');
+    // VALUESCAN_INDEX_BUILD=0: no board builds (the handover test runs real indexer processes with no venue to read).
+    const builds = process.env.VALUESCAN_INDEX_BUILD !== '0';
+    if (builds) every(REBUILD_MS, () => this.rebuild(), 'rebuild');
     try {
       this.gcWatch = new PerformanceObserver((list) => {
         for (const e of list.getEntries()) noteGc(performance.timeOrigin + e.startTime, e.duration);
@@ -719,7 +755,100 @@ export class Indexer {
     lap('streams and timers');
     if (process.env.VALUESCAN_INDEX_COHORTS !== '0') this.cohorts.start();
     lap('cohorts');
-    setTimeout(() => void this.rebuild().catch((e) => (this.lastError = String(e))), 3_000).unref?.();
+    if (builds) setTimeout(() => void this.rebuild().catch((e) => (this.lastError = String(e))), 3_000).unref?.();
+    if (opts.handover) this.applyHandover(opts.handover);
+  }
+
+  /**
+   * The standby's buffer through the boundary (handover.ts BoundaryFilter), a slice at a time with the loop let in: the
+   * sockets keep adding to the buffer until it is empty, then deliver here directly, through the filter for
+   * FILTER_TAIL_MS more. The outgoing process's "one trade per account and block" goes on here, and the flow recorder
+   * trusts the boundary instead of its restart check.
+   */
+  private applyHandover(h: HandoverStart): void {
+    const filter = new BoundaryFilter(h.boundary, h.floor);
+    for (const [k, v] of h.boundary?.lastOrder ?? []) this.lastOrder.set(k, v);
+    if (h.boundary) {
+      const froms = Object.values(h.boundary.venues).map((v) => v!.from);
+      this.flow?.continueHandover(froms.length ? Math.min(...froms) : h.boundary.stoppedAt);
+    }
+    // Every Hyperliquid market on this socket now: the outgoing one's subscriptions went with its socket.
+    this.hlStream?.takeAll?.();
+    for (const after of [5_000, 30_000]) {
+      const t = setTimeout(() => {
+        const n = this.hlStream?.subscribeMissing?.() ?? 0;
+        if (n) streamLog(`handover: ${n} Hyperliquid markets not confirmed ${after / 1000} s after the takeover, asked again`);
+      }, after);
+      t.unref?.();
+      this.timers.push(t);
+    }
+    const buf = h.buffer.prints;
+    const t0 = Date.now();
+    let i = 0;
+    let tail = true;
+    const step = () => {
+      if (this.stopped) return;
+      const end = Date.now() + HANDOVER_SLICE_MS;
+      while (i < buf.length && Date.now() < end) {
+        const p = buf[i++]!;
+        if (filter.admit(p)) this.onPrint(p);
+      }
+      if (i < buf.length) { setImmediate(step); return; }
+      buf.length = 0;
+      h.tap.sink = (p) => { if (!tail || filter.admit(p)) this.onPrint(p); };
+      this.handover = { prints: i, applyMs: Date.now() - t0, dropped: h.buffer.dropped, filter: filter.line(), at: Date.now() };
+      streamLog(`handover: ${i} buffered prints through the boundary in ${Date.now() - t0} ms${h.buffer.dropped ? ` (${h.buffer.dropped} NOT buffered: over the cap)` : ''}${h.boundary ? '' : ' (no boundary: the outgoing process ended without one)'}: ${filter.line() || 'none'}`);
+      const t = setTimeout(() => {
+        tail = false;
+        streamLog(`handover: boundary filter off after ${Math.round(FILTER_TAIL_MS / 60_000)} min: ${filter.line()}`);
+      }, FILTER_TAIL_MS);
+      t.unref?.();
+      this.timers.push(t);
+    };
+    step();
+  }
+
+  /** Each socket's memory of print ids, by venue (a handover names them). */
+  private dedups(): Partial<Record<Venue, Dedup>> {
+    const out: Partial<Record<Venue, Dedup>> = {};
+    if (this.hlStream) out.hyperliquid = this.hlStream.dedup;
+    if (this.sodexStream) out.sodex = this.sodexStream.dedup;
+    for (const [v, x] of this.ext) {
+      const d = x.dedup?.();
+      if (d) out[v] = d;
+    }
+    return out;
+  }
+
+  /** A standby said hello (handover.ts): from now on keep every id it may buffer. */
+  prepareHandover(): void {
+    for (const d of Object.values(this.dedups())) d!.keepAtLeast(KEEP_IDS);
+  }
+
+  /** The standby has these Hyperliquid markets: stop taking them here. */
+  lendHl(coins: readonly string[]): void {
+    this.hlStream?.lend?.(coins);
+  }
+
+  /** The standby went away: every lent market back here. */
+  unlendHl(): number {
+    return this.hlStream?.unlendAll?.() ?? 0;
+  }
+
+  /**
+   * After stop(), for the standby: per venue every print id taken at its `from` (less FROM_MARGIN_MS) or later and the time
+   * it can no longer name prints before, and the "one trade per account and block" memory over the same span.
+   */
+  handoverBoundary(from: Partial<Record<Venue, number>>, now = Date.now()): Pick<Boundary, 'venues' | 'lastOrder'> {
+    const venues: Boundary['venues'] = {};
+    let min = Infinity;
+    for (const [v, d] of Object.entries(this.dedups()) as Array<[Venue, Dedup]>) {
+      const f = from[v] ?? now;
+      venues[v] = { from: f, ids: d.since(f - FROM_MARGIN_MS), forgotThrough: d.forgotThrough };
+      min = Math.min(min, f);
+    }
+    const lastOrder = [...this.lastOrder].filter(([, tag]) => Number(tag.slice(0, tag.indexOf('|'))) >= min - FROM_MARGIN_MS);
+    return { venues, lastOrder };
   }
 
   /**
@@ -832,6 +961,8 @@ export class Indexer {
     for (const venue of VENUES) {
       const up = this.socketOf(venue);
       if (up === null) continue;
+      // Markets lent to a standby (handover.ts): their prints go to it, not here, until it takes over or gives them back.
+      if ((venue === 'hyperliquid' || venue === 'tradexyz') && (this.hlStream?.lentCount ?? 0) > 0) continue;
       // Lighter prints name sub-accounts: only wallets whose indices are known get their prints.
       this.store.advanceCoverage(venue, STREAM_KINDS[venue], up, now, venue === 'lighter');
     }
@@ -927,6 +1058,8 @@ export class Indexer {
         ...Object.fromEntries([...this.trackedExt].map(([v, s]) => [v, s.size])),
       },
       lastBuildAt: this.lastBuildAt,
+      prevBuildAt: this.prevBuildAt,
+      handover: this.handover,
       lastBuildMs: this.lastBuildMs,
       lastBuildVenueMs: this.lastBuildVenueMs,
       lastBuildStepMs: this.lastBuildStepMs,
@@ -1191,6 +1324,11 @@ export class Indexer {
 
   /** The last process's build time, until this one has built (loadWarm). */
   private warmBuildMs = 0;
+  /**
+   * When the last process's last build ended (loadWarm): the boards on disk are that build's until this one's first ends,
+   * so the status says how old they really are (ops/status.ts), not "no build yet".
+   */
+  prevBuildAt = 0;
 
   private warmPath(): string | null {
     return this.store.path === ':memory:' ? null : join(dirname(this.store.path), WARM_FILE);
@@ -1214,7 +1352,7 @@ export class Indexer {
         if (!venue || !address) continue;
         entries.push([k, e.at, e.ver === this.store.version(venue as Venue, address) ? 1 : 0, e.value]);
       }
-      writeFileSync(tmp, JSON.stringify({ format: WARM_FORMAT, savedAt: now, buildMs: this.lastBuildMs, entries }));
+      writeFileSync(tmp, JSON.stringify({ format: WARM_FORMAT, savedAt: now, buildMs: this.lastBuildMs, builtAt: this.lastBuildAt || this.prevBuildAt, entries }));
       renameSync(tmp, file);
     } catch (e) {
       console.warn(`[indexer] warm cache not written: ${String(e)}`);
@@ -1227,7 +1365,7 @@ export class Indexer {
     const file = this.warmPath();
     if (!file || !existsSync(file)) return 0;
     try {
-      const j = JSON.parse(readFileSync(file, 'utf8')) as { format?: string; buildMs?: number; entries?: Array<[string, number, 0 | 1, unknown]> };
+      const j = JSON.parse(readFileSync(file, 'utf8')) as { format?: string; buildMs?: number; builtAt?: number; entries?: Array<[string, number, 0 | 1, unknown]> };
       if (j.format !== WARM_FORMAT || !Array.isArray(j.entries)) return 0;
       const now = this.now();
       let n = 0;
@@ -1238,6 +1376,7 @@ export class Indexer {
         n++;
       }
       this.warmBuildMs = Number(j.buildMs) || 0;
+      this.prevBuildAt = Number(j.builtAt) || 0;
       return n;
     } catch (e) {
       console.warn(`[indexer] warm cache not read: ${String(e)}`);

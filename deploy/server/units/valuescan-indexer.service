@@ -27,11 +27,23 @@ EnvironmentFile=-/etc/valuescan/indexer.local.env
 # The heap is set, not left to Node: it derives one from MemoryMax, and at the
 # old 1800M that was ~690 MB - the indexer outgrew it and crashed every 16-26
 # minutes, before most board builds could finish (Tokyo, 2026-10-23).
-ExecStart=/opt/node/current/bin/node --max-old-space-size=1536 --disable-warning=ExperimentalWarning --import tsx src/indexer/main.ts
+#
+# A SUPERVISOR RUNS THE INDEXER (src/indexer/supervisor.ts): everything after supervisor.ts is the indexer's own
+# command line. `systemctl reload` (SIGHUP) starts the next indexer from /opt/valuescan/current BESIDE the running one;
+# it opens its trade sockets, buffers every print, and takes over writing the moment the running one lets go of the
+# writer lock (src/indexer/handover.ts): no gap in the prints, no cold stop. release.sh uses it for indexer releases and
+# falls back to `systemctl restart` (the classic stop and start) when it fails. Both processes run in this one cgroup
+# while they overlap, so MemoryMax still bounds them together.
+ExecStart=/opt/node/current/bin/node --disable-warning=ExperimentalWarning --import tsx src/indexer/supervisor.ts --max-old-space-size=1536 --disable-warning=ExperimentalWarning --import tsx src/indexer/main.ts
+ExecReload=/bin/kill -HUP $MAINPID
+# The link, not the release it points to now: each new indexer starts from the release `current` names then.
+Environment=VS_INDEXER_DIR=/opt/valuescan/current/apps/server
+Environment=VS_INDEXER_STATE=/var/lib/valuescan/state/indexer-handover.json
 Restart=always
 # Slow restarts: a crash loop must not hammer the exchanges with reconnects.
 RestartSec=30
-# SIGTERM: the indexer flushes, publishes its status and closes the database.
+# SIGTERM: the indexer flushes, publishes its status and closes the database. It goes to every process of the unit
+# (KillMode=control-group): the indexer, a standby if one runs, and the supervisor, which ends after them.
 KillSignal=SIGTERM
 # Room to write the held rows on the way out (store.ts saveHeld, up to about 1 GB): killed before that,
 # the next start reads every first day from the fills again.

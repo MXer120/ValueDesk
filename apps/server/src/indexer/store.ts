@@ -959,7 +959,7 @@ export class IndexStore {
    * the file. A file the writer has not brought to this code's schema yet is
    * for the caller to refuse (schemaReady).
    */
-  constructor(readonly path: string = defaultDbPath(), opts: { readOnly?: boolean; aggRefreshMs?: number; retainDays?: number } = {}) {
+  constructor(readonly path: string = defaultDbPath(), opts: { readOnly?: boolean; aggRefreshMs?: number; retainDays?: number; deferHeld?: boolean } = {}) {
     if (path !== ':memory:' && !opts.readOnly) mkdirSync(dirname(path), { recursive: true });
     this.db = new DatabaseSync(path, opts.readOnly ? { readOnly: true } : {});
     this.readOnly = !!opts.readOnly;
@@ -1014,7 +1014,8 @@ export class IndexStore {
         this.totalsSaved = JSON.stringify(this.totals);
       }
     } catch { /* a file from before the retention: nothing in flight */ }
-    if (!this.readOnly && path !== ':memory:') this.loadHeld();
+    // A handover (handover.ts): the outgoing process writes its held rows after it let go of the lock; loadHeldLate reads them.
+    if (!this.readOnly && path !== ':memory:' && !opts.deferHeld) this.loadHeld();
   }
 
   /** Every SoDEX wallet with what the index recorded of it: the wallet backfill's order. */
@@ -1052,6 +1053,35 @@ export class IndexStore {
     }
     this.db.close();
     lap('database close');
+  }
+
+  /**
+   * A handover's outgoing side (handover.ts), before it lets go of the writer lock: the writer thread (its rows spilled
+   * by engine.stop already) and the checkpoint thread stopped, the connection left open for the exit. The held rows
+   * are a file, not the index: writeHeld writes them after the lock is gone, while the incoming process already writes.
+   */
+  releaseForHandover(lap: (step: string) => void = () => {}): void {
+    this.stopWriter();
+    lap('writer thread');
+    this.checkpointer?.stop();
+    this.checkpointer = null;
+    lap('checkpoint thread');
+  }
+
+  /** The held rows to their file now (close() does it on a classic stop). Rows held: how many were written. */
+  writeHeld(): number {
+    if (this.readOnly || this.path === ':memory:') return 0;
+    this.saveHeld();
+    return this.heldRows;
+  }
+
+  /**
+   * A handover's incoming side: the outgoing process's held rows, once it has written them. A day this process wrote to
+   * meanwhile is left out (its version moved on: the rows held would be stale), the rest is used as after a classic start.
+   */
+  loadHeldLate(): void {
+    if (this.readOnly || this.path === ':memory:') return;
+    this.loadHeld();
   }
 
   private checkpointer: Checkpointer | null = null;
@@ -1312,10 +1342,16 @@ export class IndexStore {
         rows += d.n;
       }
       if (off !== buf.length) throw new Error('long file');
-      // Day versions start at 0 in this process; the first row written for a day moves it on.
-      for (const [dk, h] of held) this.held.set(dk, h);
-      this.heldRows = rows;
-      console.log(`[index] held rows read: ${held.length} days, ${rows} rows`);
+      // Day versions start at 0 in this process; the first row written for a day moves it on. Read late (a handover), a
+      // day already written to here is left out: its rows held are older than what the fills say now.
+      let stale = 0;
+      for (const [dk, h] of held) {
+        if ((this.dayVersion.get(dk) ?? 0) !== 0 || this.held.has(dk)) { stale += h.n; continue; }
+        this.held.set(dk, h);
+      }
+      rows -= stale;
+      this.heldRows += rows;
+      console.log(`[index] held rows read: ${held.length} days, ${rows} rows${stale ? ` (${stale} more left out: written to since)` : ''}`);
     } catch (e) {
       this.dropHeld();
       console.warn(`[index] held rows not read: ${String(e)}`);

@@ -97,26 +97,46 @@ export const hasFreshPrint = (list: unknown, timeOf: (t: never) => unknown, now 
   return false;
 };
 
-/** Remembers the last `cap` ids. */
+/**
+ * Remembers the last `cap` ids, each with its print's time. The times are for a handover (handover.ts): the outgoing
+ * indexer names every print it took since a time, and up to when it can no longer say (`forgotThrough`), so the incoming
+ * one applies exactly the rest of what its own sockets buffered.
+ */
 export class Dedup {
-  private set = new Set<string>();
-  constructor(private readonly cap = 200_000) {}
+  private seen = new Map<string, number>();
+  /** The newest print time among the ids dropped for the cap (0: none dropped). */
+  forgotThrough = 0;
+  constructor(private cap = 200_000) {}
   has(id: string): boolean {
-    return this.set.has(id);
+    return this.seen.has(id);
   }
   /** True the first time an id is seen. */
-  add(id: string): boolean {
-    if (this.set.has(id)) return false;
-    this.set.add(id);
-    if (this.set.size > this.cap) {
-      // Sets iterate in insertion order: drop the oldest tenth.
+  add(id: string, t = 0): boolean {
+    if (this.seen.has(id)) return false;
+    this.seen.set(id, t);
+    if (this.seen.size > this.cap) {
+      // Maps iterate in insertion order: drop the oldest tenth.
       let n = Math.floor(this.cap / 10);
-      for (const k of this.set) {
-        this.set.delete(k);
+      for (const [k, at] of this.seen) {
+        this.seen.delete(k);
+        if (at > this.forgotThrough) this.forgotThrough = at;
         if (--n <= 0) break;
       }
     }
     return true;
+  }
+  /** Keep at least this many from now on (a handover is coming: what the incoming indexer buffers must stay nameable). */
+  keepAtLeast(cap: number): void {
+    if (cap > this.cap) this.cap = cap;
+  }
+  /** The ids of prints at `from` or later. */
+  since(from: number): string[] {
+    const out: string[] = [];
+    for (const [id, t] of this.seen) if (t >= from) out.push(id);
+    return out;
+  }
+  get size(): number {
+    return this.seen.size;
   }
 }
 
@@ -201,6 +221,14 @@ export class LiveSocket {
       ws.on('error', () => {});
       ws.terminate();
     }
+  }
+
+  /** One message on the live socket now; false while it is not open. */
+  send(msg: unknown): boolean {
+    const ws = this.ws;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+    ws.send(JSON.stringify(msg));
+    return true;
   }
 
   /** Resubscribe on the live socket (the market list changed). */
@@ -351,37 +379,128 @@ const isHlFresh = (msg: unknown): boolean => {
   return m?.channel === 'trades' && hasFreshPrint(m.data, (t: { time?: unknown }) => t?.time);
 };
 
+/**
+ * Hyperliquid counts trade subscriptions PER IP, at most 1,000 (measured 2026-11-09: two sockets from one address asking
+ * for all 697 markets got 1,000 acks between them and "Cannot subscribe to more than 1000 channels." for the other 394).
+ * So a handover's standby cannot simply subscribe everything beside the running indexer: markets move across in batches
+ * (standby.ts moveHlMarkets) - the standby subscribes some (`take`), and once Hyperliquid confirmed them the running
+ * process lets them go (`lend`: unsubscribed, and not subscribed again on a reconnect), so no market is ever without a
+ * socket.
+ */
+export const HL_SUBSCRIPTION_LIMIT = 1_000;
+
 export class HlStream {
   private socket: LiveSocket;
   private markets: string[] = [];
   private subscribed = new Set<string>();
-  private dedup = new Dedup();
+  /** The ids this stream took (a handover names them: handover.ts). */
+  readonly dedup = new Dedup();
   private refreshTimer?: NodeJS.Timeout;
   private retryTimer?: NodeJS.Timeout;
+  /** Markets handed to a standby (running side): not subscribed here until `unlendAll`. */
+  private lent = new Set<string>();
+  /** When lent markets came back: the stream counts as reconnected then (their prints meanwhile went to the standby). */
+  private backAt = 0;
+  /** Standby side: subscribe only the markets taken so far (null: all of them, as usual). */
+  private only: Set<string> | null;
+  /** Markets Hyperliquid confirmed (subscriptionResponse) on the current socket. */
+  readonly acked = new Set<string>();
+  /** Hyperliquid's refusals on the current socket (its 1,000 per IP): how many. */
+  refusals = 0;
 
-  constructor(private readonly onPrint: (p: Print) => void, url = HL_WS_URL) {
+  constructor(private readonly onPrint: (p: Print) => void, url = HL_WS_URL, o: { gradual?: boolean } = {}) {
+    this.only = o.gradual ? new Set() : null;
     this.socket = new LiveSocket(
       url,
       JSON.stringify({ method: 'ping' }),
       async (send) => {
-        if (!this.markets.length) {
-          const { markets, partial } = await hlMarkets(true);
-          this.markets = markets;
-          if (partial) this.refreshSoon();
-        }
+        await this.marketList();
         this.subscribed.clear();
+        this.acked.clear();
+        this.refusals = 0;
         for (const coin of this.markets) {
+          if (this.lent.has(coin) || (this.only && !this.only.has(coin))) continue;
           send({ method: 'subscribe', subscription: { type: 'trades', coin } });
           this.subscribed.add(coin);
         }
       },
       (msg) => this.handle(msg),
-      { name: 'hyperliquid', log: streamLog, isData: isHlFresh, dataSilentMs: HL_DATA_SILENT_MS },
+      // Every market lent (a handover under way), or a standby that took none yet: no data is expected, and the silence
+      // must not reconnect the socket.
+      { name: 'hyperliquid', log: streamLog, isData: isHlFresh, dataSilentMs: HL_DATA_SILENT_MS, dataExpected: () => this.subscribed.size > 0 },
     );
   }
 
+  /** The market list (read once, as the socket's first subscribe does). */
+  async marketList(): Promise<string[]> {
+    if (!this.markets.length) {
+      const { markets, partial } = await hlMarkets(true);
+      this.markets = markets;
+      if (partial) this.refreshSoon();
+    }
+    return this.markets;
+  }
+
   get since(): number | null {
-    return this.socket.upSince;
+    const up = this.socket.upSince;
+    return up === null ? null : Math.max(up, this.backAt);
+  }
+
+  /** How many markets are lent to a standby now. */
+  get lentCount(): number {
+    return this.lent.size;
+  }
+
+  /** Running side: stop receiving these markets (the standby has them). */
+  lend(coins: readonly string[]): void {
+    for (const coin of coins) {
+      if (this.lent.has(coin)) continue;
+      this.lent.add(coin);
+      if (this.subscribed.delete(coin)) this.socket.send({ method: 'unsubscribe', subscription: { type: 'trades', coin } });
+    }
+  }
+
+  /** Running side: the standby went away - every lent market subscribed again here. */
+  unlendAll(): number {
+    const n = this.lent.size;
+    if (!n) return 0;
+    const back = [...this.lent];
+    this.lent.clear();
+    this.backAt = Date.now();
+    for (const coin of back) {
+      if (this.socket.send({ method: 'subscribe', subscription: { type: 'trades', coin } })) this.subscribed.add(coin);
+    }
+    return n;
+  }
+
+  /** Standby side: subscribe these markets too. */
+  take(coins: readonly string[]): void {
+    if (!this.only) return;
+    for (const coin of coins) {
+      this.only.add(coin);
+      if (this.socket.send({ method: 'subscribe', subscription: { type: 'trades', coin } })) this.subscribed.add(coin);
+    }
+  }
+
+  /** Standby side, once it writes: every market not confirmed yet as well, and a reconnect subscribes all. */
+  takeAll(): void {
+    if (!this.only) return;
+    const rest = this.markets.filter((c) => !this.acked.has(c));
+    this.only = null;
+    for (const coin of rest) {
+      if (this.socket.send({ method: 'subscribe', subscription: { type: 'trades', coin } })) this.subscribed.add(coin);
+    }
+  }
+
+  /** Every market not confirmed (nor lent) asked for again; how many. After a takeover, the old socket's may be freed late. */
+  subscribeMissing(): number {
+    if (this.only) return 0;
+    let n = 0;
+    for (const coin of this.markets) {
+      if (this.acked.has(coin) || this.lent.has(coin)) continue;
+      if (this.socket.send({ method: 'subscribe', subscription: { type: 'trades', coin } })) { this.subscribed.add(coin); n++; }
+    }
+    return n;
   }
 
   start(): void {
@@ -392,7 +511,7 @@ export class HlStream {
 
   private refresh(): void {
     void hlMarkets().then(({ markets, partial }) => {
-      if (markets.length && markets.some((c) => !this.subscribed.has(c))) {
+      if (markets.length && markets.some((c) => !this.subscribed.has(c) && !this.lent.has(c) && (!this.only || this.only.has(c)))) {
         this.markets = markets;
         this.socket.resubscribe();
       }
@@ -418,10 +537,22 @@ export class HlStream {
   /** One raw message. Public for tests. */
   handle(msg: unknown): void {
     const m = msg as { channel?: string; data?: unknown };
+    if (m?.channel === 'subscriptionResponse') {
+      const d = m.data as { method?: string; subscription?: { coin?: unknown } } | undefined;
+      const coin = d?.subscription?.coin;
+      if (d?.method === 'subscribe' && typeof coin === 'string') this.acked.add(coin);
+      else if (d?.method === 'unsubscribe' && typeof coin === 'string') this.acked.delete(coin);
+      return;
+    }
+    if (m?.channel === 'error') {
+      // "Cannot subscribe to more than 1000 channels." names no market: the ones never acked are the refused ones.
+      this.refusals++;
+      return;
+    }
     if (m?.channel !== 'trades' || !Array.isArray(m.data)) return;
     for (const t of m.data as HlWsTrade[]) {
       const p = hlPrint(t);
-      if (p && this.dedup.add(p.id)) this.onPrint(p);
+      if (p && this.dedup.add(p.id, p.t)) this.onPrint(p);
     }
   }
 }
@@ -496,7 +627,8 @@ const isSodexFresh = (msg: unknown): boolean => {
 
 export class SodexStream {
   private sockets: LiveSocket[];
-  private dedup = new Dedup();
+  /** The ids this stream took (a handover names them: handover.ts). */
+  readonly dedup = new Dedup();
   /** The last good list: a failed REST call never takes a live feed down. */
   private symbols: Partial<Record<'perps' | 'spot', string[]>> = {};
 
@@ -544,7 +676,7 @@ export class SodexStream {
     if (m?.channel !== 'trade' || !Array.isArray(m.data)) return;
     for (const t of m.data as SodexWsTrade[]) {
       const p = sodexPrint(t);
-      if (p && this.dedup.add(p.id)) this.onPrint(p);
+      if (p && this.dedup.add(p.id, p.t)) this.onPrint(p);
     }
   }
 
@@ -567,7 +699,7 @@ function catchUpRows<R>(rows: readonly R[], print: (r: R) => Print | null, dedup
   }
   const added: Print[] = [];
   for (const p of missing(fresh)) {
-    if (!dedup.add(p.id)) continue;
+    if (!dedup.add(p.id, p.t)) continue;
     sink(p);
     added.push(p);
   }
@@ -623,7 +755,8 @@ const isArcusFresh = (msg: unknown): boolean => {
 
 export class ArcusStream {
   private socket: LiveSocket;
-  private dedup = new Dedup();
+  /** The ids this stream took (a handover names them: handover.ts). */
+  readonly dedup = new Dedup();
   /**
    * The last good list. A failed market read used to end the socket with nothing logged, each time: 302 closes and
    * 305 silent minutes from 2026-11-01 to 11-06 while the REST side was slow.
@@ -664,7 +797,7 @@ export class ArcusStream {
     if (m?.type !== 'channel_data' || m.channel !== 'trades' || !Array.isArray(m.contents)) return;
     for (const t of m.contents as ArcusWsTrade[]) {
       const p = arcusPrint(t);
-      if (p && this.dedup.add(p.id)) this.onPrint(p);
+      if (p && this.dedup.add(p.id, p.t)) this.onPrint(p);
     }
   }
 
@@ -746,7 +879,8 @@ export class LighterStream {
   /** A full socket with no fresh print this long is deaf. */
   private static readonly DATA_SILENT_MS = 180_000;
   private sockets: LiveSocket[] = [];
-  private dedup = new Dedup();
+  /** The ids this stream took (a handover names them: handover.ts). */
+  readonly dedup = new Dedup();
   private groups: number[][] = [];
   private confirmed: Array<Set<number>> = [];
   private sentAt: Array<Map<number, number>> = [];
@@ -904,7 +1038,7 @@ export class LighterStream {
       if (!Array.isArray(list)) continue;
       for (const t of list as LighterWsTrade[]) {
         const p = lighterPrint(t, (id) => this.symbols.get(id) ?? null);
-        if (p && this.dedup.add(p.id)) this.onPrint(p);
+        if (p && this.dedup.add(p.id, p.t)) this.onPrint(p);
       }
     }
   }

@@ -30,7 +30,7 @@ import {
 import { Lane } from '../lanes.js';
 import { activeAccountsAsync } from '../activeScan.js';
 import { MIN_ROW_T, type FillRow } from '../store.js';
-import { ArcusStream, type ArcusWsTrade, type Print } from '../streams.js';
+import { ArcusStream, type ArcusWsTrade, type Dedup, type Print } from '../streams.js';
 import { dayOf, DAY_MS } from '../windows.js';
 import type { ExtContext, ExtVenue } from './types.js';
 
@@ -93,7 +93,10 @@ export class ArcusVenue implements ExtVenue {
   start(ctx: ExtContext): void {
     this.ctx = ctx;
     this.lane.start();
-    if (process.env.VALUESCAN_INDEX_STREAMS !== '0') {
+    if (ctx.adopt?.arcus !== undefined) {
+      // A handover's standby opened it (handover.ts): subscribed already, delivering to the engine.
+      this.stream = ctx.adopt.arcus;
+    } else if (process.env.VALUESCAN_INDEX_STREAMS !== '0') {
       this.stream = new ArcusStream(ctx.onPrint, () => arcusMarkets(this.pacer), ARCUS_WS);
       this.stream.start();
     }
@@ -106,6 +109,10 @@ export class ArcusVenue implements ExtVenue {
 
   socketSince(): number | null {
     return this.stream?.since ?? null;
+  }
+
+  dedup(): Dedup | null {
+    return this.stream?.dedup ?? null;
   }
 
   /** Rows read over REST, through the stream's own memory of ids (indexer/arcusCatchup.ts). */
