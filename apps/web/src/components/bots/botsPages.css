@@ -1541,3 +1541,27 @@ tr.bots-row.is-blocked:hover, .bots-table tbody tr.bots-row.is-blocked:hover { b
 
 /* A bot word with its glossary dot (Term). */
 .bots-term { display: inline-flex; align-items: center; gap: 4px; }
+
+/* --- Bot setup (BotSetupSheet, owner 2026-11-09): the copy setup's steps in the Bots kit's layers and controls --- */
+.modal.bots-setupsheet { background: var(--tf-surface); border-radius: 22px; }
+.bots-setupsheet .cs-sub { color: var(--tf-muted); font-size: 13px; line-height: 1.5; }
+.bots-setupsheet .cs-steps { gap: 6px; }
+.bots-setupsheet .cs-step { border-radius: 16px; padding: 14px 16px; }
+.bots-setupsheet .cs-step.is-current { background: var(--tf-inset); box-shadow: none; }
+.bots-setupsheet .cs-step__t { font-weight: 500; font-size: 15px; }
+.bots-setupsheet .cs-step__d, .bots-setupsheet .fx-note { color: var(--tf-muted); }
+.bots-setupsheet .cs-step__dot { border-color: rgb(var(--ink) / 0.18); }
+.bots-setupsheet .cs-step.is-current .cs-step__dot { border-color: var(--tf-fg); background: rgb(var(--ink) / 0.06); }
+.bots-setupsheet .cs-risks { color: var(--tf-muted); }
+.bots-setupsheet .cs-checks { gap: 8px; padding: 10px 12px; border-radius: 12px; background: rgb(var(--ink) / 0.04); }
+.bots-setupsheet .cs-days { gap: 10px; }
+.bots-setupsheet .cs-days .tf-num { width: 120px; height: 32px; border-radius: 9999px; background: rgb(var(--ink) / 0.05); }
+.bots-setupsheet .cs-actions { gap: 8px; margin-top: 4px; }
+.bots-setupsheet .cs-actions .tf-btn { width: 100%; justify-content: center; }
+.bots-setupsheet .cs-progress__bar { background: rgb(var(--ink) / 0.08); }
+/* the trading key: three facts, the full text one tap away */
+.cs-keyfacts { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 10px 12px; border-radius: 12px; background: rgb(var(--ink) / 0.04); }
+.cs-keyfacts ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; font-size: 13px; line-height: 1.4; }
+.cs-keyfacts li { display: flex; align-items: flex-start; gap: 8px; }
+.cs-keyfacts li svg { flex: none; margin-top: 2px; color: var(--tf-muted); }
+.cs-keyfacts .bots-link { font-size: 12px; color: var(--tf-muted); }

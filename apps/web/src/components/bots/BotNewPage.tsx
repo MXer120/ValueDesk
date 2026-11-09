@@ -11,7 +11,8 @@
  * The receipt on the right: the estimate per $1M with its range, how it adds up (the market's reading, the bot,
  * each safeguard, the wallet's own bots: bots/estimate.ts), what will run, and the balance it needs.
  */
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { onWalletPrompting, walletPrompting } from '../../wallet';
 import { GLOSSARY } from '../../bots/glossary';
 import { FINAL_STATUSES, parseAlgoSpec, regionPolicy, type MarketInfo } from '@copy-engine';
 import { requestDeposit } from '../account/actions';
@@ -428,7 +429,6 @@ function Receipt({ d, eff, picked, markets, feeBps, feeAdj, paper, floor, runs, 
         <div><span>Sets aside</span><b className={!paper && free !== null && need > free ? 'neg' : ''}>about {fmtUsd(need, 0)}</b></div>
         <div title="Your futures account less what your real bots and copies set aside."><span>Free for bots</span><b>{free === null ? DASH : fmtUsd(free, 0)}</b></div>
         {ownUsd >= 1 && <div title="Margin your own open positions hold now. Not set aside for bots, but it moves with them."><span>Your positions use</span><b>{fmtUsd(ownUsd, 0)}</b></div>}
-        <div title="Your wallet approves a key in this browser once a day; it signs your bot actions until then."><span>Wallet signatures</span><b>at most 1 a day</b></div>
       </footer>
       {children}
     </div>
@@ -537,6 +537,19 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
   const hostedCopyUsd = alloc.copies.filter((c) => !c.mode || c.mode === 'hosted').reduce((t, c) => t + c.usd, 0);
   const free = alloc.equity === null ? null : Math.max(0, alloc.equity - alloc.botUsd - hostedCopyUsd);
   const short = !paper && free !== null && needAll > free + 1e-6 ? needAll - free : 0;
+  // The size check itself (owner 2026-11-09: settings must not take more size than the margin can carry): an error on
+  // the size step, with the size that fits, so Next waits for it - not only a refusal at Start.
+  const levNow = Math.max(1, d.leverage ?? 1);
+  const atCap = levCap !== null && levNow >= levCap;
+  const fit = short > 0 && needAll > 0 ? (free ?? 0) / needAll : 1;
+  const marginError: string | null = short > 0
+    ? `Needs about ${fmtUsd(needAll, 0)} of margin at ${levNow}x, but ${fmtUsd(free ?? 0, 0)} is free. `
+      + (grid
+        ? `Lower the order size to about ${fmtUsd(Math.floor(d.orderUsd * fit), 0)}`
+        : `Lower Max holding to about ${fmtUsd(Math.floor(d.maxInventoryUsd * fit), 0)}`)
+      + `${atCap ? '' : ', raise the leverage'}, or deposit more.`
+    : null;
+  const sizeProblems = marginError ? [...sizeErrors, marginError] : sizeErrors;
   // Auto leverage (owner 2026-11-08): what the bots may hold and quote at 1x, against what is free.
   const reserveAll = plans.reduce((t, x) => t + x.marginUsd * Math.max(1, d.leverage ?? 1), 0);
   const autoLev = autoLeverage(reserveAll, paper ? null : free, levCap);
@@ -563,7 +576,7 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
     const list = [...picked];
     const ok = await confirm({
       title: many ? `Start ${list.length} bots?` : `Start ${d.label.trim() || `${RECIPE[rid].name} ${d.symbol.replace(/-USD$/, '')}`}?`,
-      body: `${RECIPE[rid].name} on ${list.join(', ')}, ${fmtUsd(d.orderUsd, 0)} orders${grid ? '' : `, up to ${fmtUsd(d.maxInventoryUsd, 0)} held each`}${d.maxLossUsd !== null ? `, stops at a ${fmtUsd(d.maxLossUsd, 0)} loss` : ''}.${allNotes.length ? ` ${allNotes.join(' ')}` : ''} ${paper ? 'Practice: no orders are sent.' : `Real orders in your SoDEX account, about ${fmtUsd(needAll, 0)} of margin set aside.`}${' Your wallet signs at most once a day; this browser signs the rest.'}`,
+      body: `${RECIPE[rid].name} on ${list.join(', ')}, ${fmtUsd(d.orderUsd, 0)} orders${grid ? '' : `, up to ${fmtUsd(d.maxInventoryUsd, 0)} held each`}${d.maxLossUsd !== null ? `, stops at a ${fmtUsd(d.maxLossUsd, 0)} loss` : ''}.${allNotes.length ? ` ${allNotes.join(' ')}` : ''} ${paper ? 'Practice: no orders are sent.' : `Real orders in your SoDEX account, about ${fmtUsd(needAll, 0)} of margin set aside.`}`,
       confirmLabel: paper ? (many ? `Start ${list.length} practice bots` : 'Start practice bot') : (many ? `Start ${list.length} bots` : 'Start bot'),
     });
     if (!ok) return;
@@ -610,11 +623,13 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
     }
   };
 
+  // While the wallet shows a signature (the day key's approval), the button says so instead of "Starting…".
+  const signing = useSyncExternalStore(onWalletPrompting, walletPrompting);
   const last = places.length - 1;
   const next = () => setAt((s) => Math.min(last, s + 1));
   const back = () => setAt((s) => Math.max(0, s - 1));
   const goStep = (i: number) => { const k = places.findIndex((p) => p.step === i); if (k >= 0 && k <= at) setAt(k); };
-  const startLabel = busy ? 'Starting…' : paper ? (picked.length > 1 ? `Start ${picked.length} practice bots` : 'Start practice bot') : (picked.length > 1 ? `Start ${picked.length} bots` : 'Start bot');
+  const startLabel = busy && signing ? 'Waiting for your wallet…' : busy ? 'Starting…' : paper ? (picked.length > 1 ? `Start ${picked.length} practice bots` : 'Start practice bot') : (picked.length > 1 ? `Start ${picked.length} bots` : 'Start bot');
   const parts = places.filter((p) => p.step === 3).map((p) => p.part!);
   const pickRecipe = (id: RecipeId) => {
     setD((x) => fromRecipe(id, x.symbol, x));
@@ -712,7 +727,7 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
             <Shell>
               <ShellHeader icon="gear" title={PART_NAMES[place.part!]} subtitle={place.part === 'size' ? (picked.length > 1 ? `The same for all ${picked.length} markets.` : 'Uses your SoDEX futures USDC.') : place.part === 'quote' ? `${RECIPE[rid].name}'s values, marked Default where they are unchanged.` : 'Each one moves the estimate on the right.'} />
               <Panel className="bots-sizepanel">
-                <BotSettings d={d} set={set} range={range} mark={mark} liveAllowed={ctx.liveAllowed} noLead={noLead} part={place.part as Sec} hidePractice={place.part !== 'size'} lev={levCap === null ? undefined : { ...lev, max: levCap }} sizeErrors={sizeErrors} sizeNotes={sizeNotes} />
+                <BotSettings d={d} set={set} range={range} mark={mark} liveAllowed={ctx.liveAllowed} noLead={noLead} part={place.part as Sec} hidePractice={place.part !== 'size'} lev={levCap === null ? undefined : { ...lev, max: levCap }} sizeErrors={sizeProblems} sizeNotes={sizeNotes} />
               </Panel>
             </Shell>
           )}
@@ -749,7 +764,7 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
               <div className="bots-sidepanel__act">
                 {at > 0 && <Button variant="secondary" size="md" icon="arrowLeft" onClick={back}>Back</Button>}
                 {at < last
-                  ? <Button variant="primary" size="md" className="bots-stepper__next" onClick={next}>{nextLabel}<Icon name="arrowRight" size={14} /></Button>
+                  ? <Button variant="primary" size="md" className="bots-stepper__next" disabled={place.step === 3 && place.part === 'size' && sizeProblems.length > 0} title={place.step === 3 && sizeProblems.length ? sizeProblems[0] : undefined} onClick={next}>{nextLabel}<Icon name="arrowRight" size={14} /></Button>
                   : <Button variant="go" size="md" className="bots-stepper__next" icon="play" loading={busy} disabled={!can || busy} title={whyNot ?? undefined} onClick={() => void start()}>{startLabel}</Button>}
               </div>
               {at === last && whyNot && !busy && <p className="bots-fine" role="status">{whyNot}{why && ctx.address ? <> <button type="button" className="bots-link" onClick={() => ctx.setup(paper)}>Set up</button></> : null}</p>}

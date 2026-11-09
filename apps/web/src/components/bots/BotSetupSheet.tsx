@@ -12,6 +12,7 @@ import { readiness, type LiveCopy } from '../../copy/live';
 import { CopySetupSteps, SetupPrimaryButton, SetupProgress, copyReady, type SetupPrimary } from '../../copy/CopySetupSheet';
 import { botFeeWords } from '../../bots/presets';
 import { Modal } from '../Modal';
+import { Button } from './kit/kit';
 import '../funds/funds.css';
 import '../../copy/copy.css';
 
@@ -53,7 +54,7 @@ export function BotSetupSheet({ open, onClose, live, paper }: { open: boolean; o
     }
   };
   return (
-    <Modal open={open} title="Bot setup" onClose={onClose} size="md" className="fx cs-sheet">
+    <Modal open={open} title="Bot setup" onClose={onClose} size="md" className="fx cs-sheet tf bots-setupsheet">
       <p className="cs-sub">
         Bots trade in your own SoDEX account, run around the clock by ValueDesk.{' '}
         {paper ? 'A practice bot needs the terms only; real orders add the fee and a trading key.' : 'Real orders need the fee and a trading key as well.'}
@@ -62,15 +63,14 @@ export function BotSetupSheet({ open, onClose, live, paper }: { open: boolean; o
       <CopySetupSteps mode="hosted" live={live} paper={paper} bots onPrimary={setPrimary} />
       {live.hosted.signedIn && (
         <p className="cs-sub" role="note">
-          Your wallet signs at most once a day: it approves a key this browser keeps (it cannot be read out), which then
-          signs your bot actions for up to 24 hours. Used a device you no longer trust?{' '}
+          After one wallet signature, this browser signs your bot actions for 24 hours. Lost a device?{' '}
           <button type="button" className="bots-link" disabled={revoke === 'busy'} onClick={() => void doRevoke()}>Revoke every day key</button>
           {revoke === 'done' ? ' Done: every device asks your wallet again.' : revoke !== 'idle' && revoke !== 'busy' ? ` Not revoked: ${revoke}` : ''}
         </p>
       )}
       <div className="cs-actions">
-        <button type="button" className="fx-cta fx-cta--ghost" onClick={onClose}>{ready ? 'Close' : 'Cancel'}</button>
-        <SetupPrimaryButton ready={ready} primary={primary} onDone={onClose} />
+        <Button variant="secondary" size="md" onClick={onClose}>{ready ? 'Close' : 'Cancel'}</Button>
+        <SetupPrimaryButton kit ready={ready} primary={primary} onDone={onClose} />
       </div>
     </Modal>
   );
