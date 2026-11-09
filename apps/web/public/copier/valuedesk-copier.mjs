@@ -42,9 +42,9 @@ var __toESM = (mod2, isNodeMode, target) => (target = mod2 != null ? __create(__
   mod2
 ));
 
-// node_modules/ws/lib/constants.js
+// ../../../node_modules/ws/lib/constants.js
 var require_constants = __commonJS({
-  "node_modules/ws/lib/constants.js"(exports, module) {
+  "../../../node_modules/ws/lib/constants.js"(exports, module) {
     "use strict";
     var BINARY_TYPES = ["nodebuffer", "arraybuffer", "fragments"];
     var hasBlob = typeof Blob !== "undefined";
@@ -65,9 +65,9 @@ var require_constants = __commonJS({
   }
 });
 
-// node_modules/node-gyp-build/node-gyp-build.js
+// ../../../node_modules/node-gyp-build/node-gyp-build.js
 var require_node_gyp_build = __commonJS({
-  "node_modules/node-gyp-build/node-gyp-build.js"(exports, module) {
+  "../../../node_modules/node-gyp-build/node-gyp-build.js"(exports, module) {
     var fs = __require("fs");
     var path = __require("path");
     var os = __require("os");
@@ -234,9 +234,9 @@ var require_node_gyp_build = __commonJS({
   }
 });
 
-// node_modules/node-gyp-build/index.js
+// ../../../node_modules/node-gyp-build/index.js
 var require_node_gyp_build2 = __commonJS({
-  "node_modules/node-gyp-build/index.js"(exports, module) {
+  "../../../node_modules/node-gyp-build/index.js"(exports, module) {
     var runtimeRequire = typeof __webpack_require__ === "function" ? __non_webpack_require__ : __require;
     if (typeof runtimeRequire.addon === "function") {
       module.exports = runtimeRequire.addon.bind(runtimeRequire);
@@ -246,9 +246,9 @@ var require_node_gyp_build2 = __commonJS({
   }
 });
 
-// node_modules/bufferutil/fallback.js
+// ../../../node_modules/bufferutil/fallback.js
 var require_fallback = __commonJS({
-  "node_modules/bufferutil/fallback.js"(exports, module) {
+  "../../../node_modules/bufferutil/fallback.js"(exports, module) {
     "use strict";
     var mask = (source, mask2, output, offset, length) => {
       for (var i = 0; i < length; i++) {
@@ -265,9 +265,9 @@ var require_fallback = __commonJS({
   }
 });
 
-// node_modules/bufferutil/index.js
+// ../../../node_modules/bufferutil/index.js
 var require_bufferutil = __commonJS({
-  "node_modules/bufferutil/index.js"(exports, module) {
+  "../../../node_modules/bufferutil/index.js"(exports, module) {
     "use strict";
     try {
       module.exports = require_node_gyp_build2()(__dirname);
@@ -277,9 +277,9 @@ var require_bufferutil = __commonJS({
   }
 });
 
-// node_modules/ws/lib/buffer-util.js
+// ../../../node_modules/ws/lib/buffer-util.js
 var require_buffer_util = __commonJS({
-  "node_modules/ws/lib/buffer-util.js"(exports, module) {
+  "../../../node_modules/ws/lib/buffer-util.js"(exports, module) {
     "use strict";
     var { EMPTY_BUFFER } = require_constants();
     var FastBuffer = Buffer[Symbol.species];
@@ -352,9 +352,9 @@ var require_buffer_util = __commonJS({
   }
 });
 
-// node_modules/ws/lib/limiter.js
+// ../../../node_modules/ws/lib/limiter.js
 var require_limiter = __commonJS({
-  "node_modules/ws/lib/limiter.js"(exports, module) {
+  "../../../node_modules/ws/lib/limiter.js"(exports, module) {
     "use strict";
     var kDone = /* @__PURE__ */ Symbol("kDone");
     var kRun = /* @__PURE__ */ Symbol("kRun");
@@ -402,9 +402,9 @@ var require_limiter = __commonJS({
   }
 });
 
-// node_modules/ws/lib/permessage-deflate.js
+// ../../../node_modules/ws/lib/permessage-deflate.js
 var require_permessage_deflate = __commonJS({
-  "node_modules/ws/lib/permessage-deflate.js"(exports, module) {
+  "../../../node_modules/ws/lib/permessage-deflate.js"(exports, module) {
     "use strict";
     var zlib = __require("zlib");
     var bufferUtil = require_buffer_util();
@@ -785,9 +785,9 @@ var require_permessage_deflate = __commonJS({
   }
 });
 
-// node_modules/utf-8-validate/fallback.js
+// ../../../node_modules/utf-8-validate/fallback.js
 var require_fallback2 = __commonJS({
-  "node_modules/utf-8-validate/fallback.js"(exports, module) {
+  "../../../node_modules/utf-8-validate/fallback.js"(exports, module) {
     "use strict";
     function isValidUTF8(buf) {
       const len = buf.length;
@@ -822,9 +822,9 @@ var require_fallback2 = __commonJS({
   }
 });
 
-// node_modules/utf-8-validate/index.js
+// ../../../node_modules/utf-8-validate/index.js
 var require_utf_8_validate = __commonJS({
-  "node_modules/utf-8-validate/index.js"(exports, module) {
+  "../../../node_modules/utf-8-validate/index.js"(exports, module) {
     "use strict";
     try {
       module.exports = require_node_gyp_build2()(__dirname);
@@ -834,9 +834,9 @@ var require_utf_8_validate = __commonJS({
   }
 });
 
-// node_modules/ws/lib/validation.js
+// ../../../node_modules/ws/lib/validation.js
 var require_validation = __commonJS({
-  "node_modules/ws/lib/validation.js"(exports, module) {
+  "../../../node_modules/ws/lib/validation.js"(exports, module) {
     "use strict";
     var { isUtf8 } = __require("buffer");
     var { hasBlob } = require_constants();
@@ -1035,9 +1035,9 @@ var require_validation = __commonJS({
   }
 });
 
-// node_modules/ws/lib/receiver.js
+// ../../../node_modules/ws/lib/receiver.js
 var require_receiver = __commonJS({
-  "node_modules/ws/lib/receiver.js"(exports, module) {
+  "../../../node_modules/ws/lib/receiver.js"(exports, module) {
     "use strict";
     var { Writable } = __require("stream");
     var PerMessageDeflate2 = require_permessage_deflate();
@@ -1658,9 +1658,9 @@ var require_receiver = __commonJS({
   }
 });
 
-// node_modules/ws/lib/sender.js
+// ../../../node_modules/ws/lib/sender.js
 var require_sender = __commonJS({
-  "node_modules/ws/lib/sender.js"(exports, module) {
+  "../../../node_modules/ws/lib/sender.js"(exports, module) {
     "use strict";
     var { Duplex } = __require("stream");
     var { randomFillSync } = __require("crypto");
@@ -2151,9 +2151,9 @@ var require_sender = __commonJS({
   }
 });
 
-// node_modules/ws/lib/event-target.js
+// ../../../node_modules/ws/lib/event-target.js
 var require_event_target = __commonJS({
-  "node_modules/ws/lib/event-target.js"(exports, module) {
+  "../../../node_modules/ws/lib/event-target.js"(exports, module) {
     "use strict";
     var { kForOnEventAttribute, kListener } = require_constants();
     var kCode = /* @__PURE__ */ Symbol("kCode");
@@ -2380,9 +2380,9 @@ var require_event_target = __commonJS({
   }
 });
 
-// node_modules/ws/lib/extension.js
+// ../../../node_modules/ws/lib/extension.js
 var require_extension = __commonJS({
-  "node_modules/ws/lib/extension.js"(exports, module) {
+  "../../../node_modules/ws/lib/extension.js"(exports, module) {
     "use strict";
     var { tokenChars } = require_validation();
     function push(dest, name, elem) {
@@ -2533,16 +2533,16 @@ var require_extension = __commonJS({
   }
 });
 
-// node_modules/ws/lib/websocket.js
+// ../../../node_modules/ws/lib/websocket.js
 var require_websocket = __commonJS({
-  "node_modules/ws/lib/websocket.js"(exports, module) {
+  "../../../node_modules/ws/lib/websocket.js"(exports, module) {
     "use strict";
     var EventEmitter = __require("events");
     var https = __require("https");
     var http = __require("http");
     var net = __require("net");
     var tls = __require("tls");
-    var { randomBytes: randomBytes4, createHash: createHash2 } = __require("crypto");
+    var { randomBytes: randomBytes5, createHash: createHash2 } = __require("crypto");
     var { Duplex, Readable } = __require("stream");
     var { URL: URL2 } = __require("url");
     var PerMessageDeflate2 = require_permessage_deflate();
@@ -3080,7 +3080,7 @@ var require_websocket = __commonJS({
         }
       }
       const defaultPort = isSecure ? 443 : 80;
-      const key2 = randomBytes4(16).toString("base64");
+      const key2 = randomBytes5(16).toString("base64");
       const request = isSecure ? https.request : http.request;
       const protocolSet = /* @__PURE__ */ new Set();
       let perMessageDeflate;
@@ -3429,9 +3429,9 @@ var require_websocket = __commonJS({
   }
 });
 
-// node_modules/ws/lib/stream.js
+// ../../../node_modules/ws/lib/stream.js
 var require_stream = __commonJS({
-  "node_modules/ws/lib/stream.js"(exports, module) {
+  "../../../node_modules/ws/lib/stream.js"(exports, module) {
     "use strict";
     var WebSocket2 = require_websocket();
     var { Duplex } = __require("stream");
@@ -3527,9 +3527,9 @@ var require_stream = __commonJS({
   }
 });
 
-// node_modules/ws/lib/subprotocol.js
+// ../../../node_modules/ws/lib/subprotocol.js
 var require_subprotocol = __commonJS({
-  "node_modules/ws/lib/subprotocol.js"(exports, module) {
+  "../../../node_modules/ws/lib/subprotocol.js"(exports, module) {
     "use strict";
     var { tokenChars } = require_validation();
     function parse(header) {
@@ -3572,9 +3572,9 @@ var require_subprotocol = __commonJS({
   }
 });
 
-// node_modules/ws/lib/websocket-server.js
+// ../../../node_modules/ws/lib/websocket-server.js
 var require_websocket_server = __commonJS({
-  "node_modules/ws/lib/websocket-server.js"(exports, module) {
+  "../../../node_modules/ws/lib/websocket-server.js"(exports, module) {
     "use strict";
     var EventEmitter = __require("events");
     var http = __require("http");
@@ -3973,10 +3973,10 @@ var require_websocket_server = __commonJS({
   }
 });
 
-// apps/executor/src/main.ts
+// src/main.ts
 import { join as join3 } from "node:path";
 
-// apps/executor/src/config.ts
+// src/config.ts
 import { existsSync } from "node:fs";
 import { homedir, platform } from "node:os";
 import { join, resolve } from "node:path";
@@ -4009,6 +4009,30 @@ function betaUrlFrom(raw, builderRaw) {
   u.pathname = u.pathname.replace(/\/volume$/, "/beta");
   u.search = "";
   return u.toString();
+}
+function calendarUrlFrom(raw, builderRaw) {
+  if (raw?.trim()) return builderUrl(raw);
+  const b = builderUrl(builderRaw);
+  if (!b) return null;
+  const u = new URL(b);
+  u.pathname = "/api/vs/calendar";
+  u.search = "";
+  return u.toString();
+}
+function vipCheckUrlFrom(raw, builderRaw) {
+  if (raw?.trim()) return builderUrl(raw);
+  const b = builderUrl(builderRaw);
+  if (!b) return null;
+  const u = new URL(b);
+  u.pathname = "/api/vs/bots/vip";
+  u.search = "";
+  return u.toString();
+}
+function vipPubkeyFrom(raw, name = "EXECUTOR_VIP_PUBKEY") {
+  const v = raw?.trim();
+  if (!v) return null;
+  if (!/^[A-Za-z0-9_-]{60,400}$/.test(v)) throw new Error(`${name} must be the other executor's key-import public key (base64url, as its /info shows keyImport.publicKey)`);
+  return v;
 }
 function liveAlgoWalletsFrom(raw) {
   const s = raw?.trim() ?? "";
@@ -4058,10 +4082,23 @@ function loadConfig(env = process.env) {
     keyTtlDaysMax: Number.isFinite(ttl) && ttl >= 1 ? Math.min(Math.floor(ttl), 180) : 180,
     maxCopiesPerOwner: Math.max(1, Math.min(50, Number(env.EXECUTOR_MAX_COPIES ?? 10) || 10)),
     maxAlgosPerOwner: Math.max(1, Math.min(100, Number(env.EXECUTOR_MAX_ALGOS ?? 20) || 20)),
+    // 20 live bots per server (owner 2026-11-08): up to 10 wallets get their fills pushed on the account socket, the
+    // others are read by REST, a wallet first when a public print names it (runtime.ts onPrint).
+    maxLiveBots: Math.max(1, Math.min(1e3, Math.floor(Number(env.EXECUTOR_MAX_LIVE_BOTS ?? 20)) || 20)),
     builderDb: env.EXECUTOR_BUILDER_DB?.trim() || null,
     builderUrl: builderUrl(env.EXECUTOR_BUILDER_URL),
     builderToken: env.EXECUTOR_BUILDER_TOKEN?.trim() || null,
     betaUrl: betaUrlFrom(env.EXECUTOR_BETA_URL, env.EXECUTOR_BUILDER_URL),
+    calendarUrl: calendarUrlFrom(env.EXECUTOR_CALENDAR_URL, env.EXECUTOR_BUILDER_URL),
+    tier: env.EXECUTOR_TIER?.trim() === "vip" ? "vip" : "standard",
+    vipToken: env.EXECUTOR_VIP_TOKEN?.trim() || null,
+    vipUrl: env.EXECUTOR_VIP_URL?.trim() ? builderUrl(env.EXECUTOR_VIP_URL) : null,
+    vipCheckUrl: vipCheckUrlFrom(env.EXECUTOR_VIP_CHECK_URL, env.EXECUTOR_BUILDER_URL),
+    vipOpen: env.EXECUTOR_VIP_OPEN?.trim() === "1",
+    vipPubkey: vipPubkeyFrom(env.EXECUTOR_VIP_PUBKEY),
+    stdUrl: env.EXECUTOR_STD_URL?.trim() ? builderUrl(env.EXECUTOR_STD_URL) : null,
+    stdPubkey: vipPubkeyFrom(env.EXECUTOR_STD_PUBKEY, "EXECUTOR_STD_PUBKEY"),
+    vipSweepMs: Math.max(3e4, Math.floor(Number(env.EXECUTOR_VIP_SWEEP_MS ?? 6e5)) || 6e5),
     localAddress: env.EXECUTOR_LOCAL_ADDRESS?.trim() || null,
     logLevel: level === "debug" || level === "warn" || level === "error" ? level : "info",
     executorId,
@@ -4074,11 +4111,11 @@ function loadConfig(env = process.env) {
   };
 }
 
-// apps/executor/src/net.ts
+// src/net.ts
 import { Agent, request as httpsRequest } from "node:https";
 import { isIPv6 } from "node:net";
 
-// node_modules/ws/wrapper.mjs
+// ../../../node_modules/ws/wrapper.mjs
 var import_stream = __toESM(require_stream(), 1);
 var import_extension = __toESM(require_extension(), 1);
 var import_permessage_deflate = __toESM(require_permessage_deflate(), 1);
@@ -4089,7 +4126,7 @@ var import_websocket = __toESM(require_websocket(), 1);
 var import_websocket_server = __toESM(require_websocket_server(), 1);
 var wrapper_default = import_websocket.default;
 
-// apps/executor/src/net.ts
+// src/net.ts
 function egress(localAddress) {
   if (!localAddress) {
     return {
@@ -4145,7 +4182,7 @@ function egress(localAddress) {
   return { fetch: bound2, factory, localAddress };
 }
 
-// apps/executor/src/db.ts
+// src/db.ts
 import { createHash } from "node:crypto";
 import { chmodSync, existsSync as existsSync2, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
@@ -4180,6 +4217,16 @@ CREATE TABLE IF NOT EXISTS keys (
   PRIMARY KEY (owner, slot)
 ) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS terms (owner TEXT PRIMARY KEY, json TEXT NOT NULL) WITHOUT ROWID;
+-- A wallet whose bots moved to the VIP executor (the page then talks to that one).
+CREATE TABLE IF NOT EXISTS moves (owner TEXT PRIMARY KEY, tier TEXT NOT NULL, at INTEGER NOT NULL) WITHOUT ROWID;
+-- The beta list's last answer per wallet (server 1, /api/vs/builder/beta): a server-1 outage keeps the last known
+-- answer instead of holding every real bot; only an explicit "not listed" holds them.
+CREATE TABLE IF NOT EXISTS beta (owner TEXT PRIMARY KEY, listed INTEGER NOT NULL, at INTEGER NOT NULL) WITHOUT ROWID;
+-- VIP moves (vip.ts): the sending side's jobs, so a restart can say how a move ended; the receiving side's imports,
+-- so the sender can ask how one it could not confirm ended (a timeout), and one it gave up on never runs late.
+CREATE TABLE IF NOT EXISTS vip_jobs (id TEXT PRIMARY KEY, owner TEXT NOT NULL, json TEXT NOT NULL, updated_at INTEGER NOT NULL) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS vip_jobs_owner ON vip_jobs (owner, updated_at);
+CREATE TABLE IF NOT EXISTS vip_imports (job TEXT PRIMARY KEY, owner TEXT NOT NULL, state TEXT NOT NULL, json TEXT NOT NULL, at INTEGER NOT NULL) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS consents (
   seq INTEGER PRIMARY KEY AUTOINCREMENT,
   owner TEXT NOT NULL,
@@ -4216,6 +4263,11 @@ CREATE TABLE IF NOT EXISTS audit (
 CREATE INDEX IF NOT EXISTS audit_owner ON audit (owner, at);
 CREATE INDEX IF NOT EXISTS audit_ref ON audit (ref);
 CREATE INDEX IF NOT EXISTS audit_at ON audit (at);
+-- Signed-write latency to SoDEX per region, 10-minute bucket and kind (latency.ts): a histogram "bin:count,...".
+-- Read back for 48 h on start (GET /api/copy/v1/bots/latency); nothing deletes a row for being old.
+CREATE TABLE IF NOT EXISTS write_latency (
+  region TEXT NOT NULL, t INTEGER NOT NULL, kind TEXT NOT NULL, n INTEGER NOT NULL, hist TEXT NOT NULL,
+  PRIMARY KEY (region, t, kind)) WITHOUT ROWID;
 `;
 var AUDIT_GENESIS = "0".repeat(64);
 function auditHash(prev, r) {
@@ -4359,6 +4411,28 @@ var ExecutorDb = class {
     if (!s) this.stmts.set(sql, s = this.db.prepare(sql));
     return s;
   }
+  /* ---------------------------------------------------- write latency ----- */
+  /** A bucket's histograms, replacing what was there (the open bucket is written again as it grows). */
+  saveLatency(rows2) {
+    const s = this.q("INSERT INTO write_latency (region, t, kind, n, hist) VALUES (?, ?, ?, ?, ?) ON CONFLICT (region, t, kind) DO UPDATE SET n = excluded.n, hist = excluded.hist");
+    this.db.exec("BEGIN");
+    try {
+      for (const r of rows2) s.run(r.region, r.t, r.kind, r.n, r.hist);
+      this.db.exec("COMMIT");
+    } catch (e) {
+      this.db.exec("ROLLBACK");
+      throw e;
+    }
+  }
+  loadLatency(since) {
+    return this.q("SELECT region, t, kind, n, hist FROM write_latency WHERE t >= ? ORDER BY t").all(since).map((r) => ({
+      region: String(r.region),
+      t: Number(r.t),
+      kind: String(r.kind),
+      n: Number(r.n),
+      hist: String(r.hist)
+    }));
+  }
   /* ----------------------------------------------------------- meta ----- */
   meta(k) {
     const r = this.q("SELECT v FROM meta WHERE k = ?").get(k);
@@ -4427,7 +4501,8 @@ var ExecutorDb = class {
   async algoEvents(q) {
     const limit = Math.max(1, Math.min(1e3, q.limit ?? 200));
     const before = q.before ?? Number.MAX_SAFE_INTEGER;
-    const rows2 = q.algoId ? this.q("SELECT json FROM algo_events WHERE algo_id = ? AND at < ? ORDER BY at DESC, id DESC LIMIT ?").all(q.algoId, before, limit) : this.q("SELECT json FROM algo_events WHERE owner = ? AND at < ? ORDER BY at DESC, id DESC LIMIT ?").all(q.owner ?? "", before, limit);
+    const after = q.after ?? -1;
+    const rows2 = q.algoId ? this.q("SELECT json FROM algo_events WHERE algo_id = ? AND at < ? AND at > ? ORDER BY at DESC, id DESC LIMIT ?").all(q.algoId, before, after, limit) : this.q("SELECT json FROM algo_events WHERE owner = ? AND at < ? AND at > ? ORDER BY at DESC, id DESC LIMIT ?").all(q.owner ?? "", before, after, limit);
     return rows2.map((r) => JSON.parse(String(r.json)));
   }
   /* ----------------------------------------------------------- keys ----- */
@@ -4467,6 +4542,49 @@ var ExecutorDb = class {
   }
   setTerms(owner, t) {
     this.q("INSERT INTO terms (owner, json) VALUES (?, ?) ON CONFLICT (owner) DO UPDATE SET json = excluded.json").run(owner, JSON.stringify(t));
+  }
+  /* ---------------------------------------------------------- moves ----- */
+  moved(owner) {
+    const r = this.q("SELECT tier, at FROM moves WHERE owner = ?").get(owner);
+    return r ? { tier: String(r.tier), at: Number(r.at) } : null;
+  }
+  setMoved(owner, tier) {
+    if (tier === null) this.q("DELETE FROM moves WHERE owner = ?").run(owner);
+    else this.q("INSERT INTO moves (owner, tier, at) VALUES (?, ?, ?) ON CONFLICT (owner) DO UPDATE SET tier = excluded.tier, at = excluded.at").run(owner, tier, Date.now());
+  }
+  /* ----------------------------------------------------------- beta ----- */
+  /** The beta list's last answer for a wallet (null: never answered). */
+  betaAnswer(owner) {
+    const r = this.q("SELECT listed, at FROM beta WHERE owner = ?").get(owner.toLowerCase());
+    return r ? { listed: Number(r.listed) === 1, at: Number(r.at) } : null;
+  }
+  setBetaAnswer(owner, listed, at = Date.now()) {
+    this.q("INSERT INTO beta (owner, listed, at) VALUES (?, ?, ?) ON CONFLICT (owner) DO UPDATE SET listed = excluded.listed, at = excluded.at").run(owner.toLowerCase(), listed ? 1 : 0, at);
+  }
+  /* ------------------------------------------------------- vip moves ----- */
+  saveVipJob(j) {
+    this.q("INSERT INTO vip_jobs (id, owner, json, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT (id) DO UPDATE SET json = excluded.json, updated_at = excluded.updated_at").run(j.id, j.owner, JSON.stringify(j), Date.now());
+  }
+  /** Every move job (newest first), or one wallet's. */
+  vipJobs(owner) {
+    const rows2 = owner ? this.q("SELECT json FROM vip_jobs WHERE owner = ? ORDER BY updated_at DESC").all(owner) : this.q("SELECT json FROM vip_jobs ORDER BY updated_at DESC").all();
+    return rows2.map((r) => JSON.parse(String(r.json)));
+  }
+  /** The receiving side's record of one move: 'running', 'done', 'failed' or 'abandoned' (the sender gave up on it first). */
+  vipImport(job) {
+    const r = this.q("SELECT owner, state, json, at FROM vip_imports WHERE job = ?").get(job);
+    return r ? { owner: String(r.owner), state: String(r.state), data: JSON.parse(String(r.json)), at: Number(r.at) } : null;
+  }
+  setVipImport(job, owner, state, data = {}) {
+    this.q("INSERT INTO vip_imports (job, owner, state, json, at) VALUES (?, ?, ?, ?, ?) ON CONFLICT (job) DO UPDATE SET state = excluded.state, json = excluded.json, at = excluded.at").run(job, owner, state, JSON.stringify(data), Date.now());
+  }
+  /** A wallet's signed record (its terms and every request it signed), for a VIP move. */
+  ownerRecord(owner) {
+    const rows2 = this.q("SELECT owner, action, digest, signature, chain_id, payload, nonce, at, viewer_country FROM consents WHERE owner = ? ORDER BY seq").all(owner);
+    return {
+      terms: this.terms(owner),
+      consents: rows2.map((r) => ({ owner: String(r.owner), action: String(r.action), digest: String(r.digest), signature: String(r.signature), chainId: Number(r.chain_id), payload: String(r.payload), nonce: String(r.nonce), at: Number(r.at), viewerCountry: r.viewer_country === null ? null : String(r.viewer_country) }))
+    };
   }
   /* ------------------------------------------------------- consents ----- */
   /** Record a signed request. False when this exact request was already used (a replay). */
@@ -4585,12 +4703,12 @@ function keyOf(r) {
   };
 }
 
-// apps/executor/src/secrets.ts
+// src/secrets.ts
 import { createCipheriv, createDecipheriv, createHmac, createPrivateKey, createPublicKey, diffieHellman, generateKeyPairSync, hkdfSync, randomBytes as randomBytes2, timingSafeEqual } from "node:crypto";
 import { chmodSync as chmodSync2, existsSync as existsSync3, mkdirSync as mkdirSync2, readFileSync as readFileSync2, writeFileSync as writeFileSync2 } from "node:fs";
 import { join as join2 } from "node:path";
 
-// packages/sodex-core/src/network.ts
+// ../../packages/sodex-core/src/network.ts
 var ENGINES = ["spot", "perps"];
 var SODEX_CHAIN_ID = {
   mainnet: 286623,
@@ -4609,7 +4727,7 @@ var enginePath = (engine) => `/api/v1/${engine}`;
 var DomainName = { spot: "spot", perps: "futures", universal: "universal" };
 var engineDomainName = (engine) => engine === "spot" ? DomainName.spot : DomainName.perps;
 
-// node_modules/@noble/hashes/esm/_u64.js
+// ../../../node_modules/@noble/hashes/esm/_u64.js
 var U32_MASK64 = /* @__PURE__ */ BigInt(2 ** 32 - 1);
 var _32n = /* @__PURE__ */ BigInt(32);
 function fromBig(n, le = false) {
@@ -4632,7 +4750,7 @@ var rotlSL = (h, l, s) => l << s | h >>> 32 - s;
 var rotlBH = (h, l, s) => l << s - 32 | h >>> 64 - s;
 var rotlBL = (h, l, s) => h << s - 32 | l >>> 64 - s;
 
-// node_modules/@noble/hashes/esm/utils.js
+// ../../../node_modules/@noble/hashes/esm/utils.js
 function isBytes(a) {
   return a instanceof Uint8Array || ArrayBuffer.isView(a) && a.constructor.name === "Uint8Array";
 }
@@ -4667,6 +4785,12 @@ function clean(...arrays) {
     arrays[i].fill(0);
   }
 }
+function createView(arr) {
+  return new DataView(arr.buffer, arr.byteOffset, arr.byteLength);
+}
+function rotr(word2, shift) {
+  return word2 << 32 - shift | word2 >>> shift;
+}
 var isLE = /* @__PURE__ */ (() => new Uint8Array(new Uint32Array([287454020]).buffer)[0] === 68)();
 function byteSwap(word2) {
   return word2 << 24 & 4278190080 | word2 << 8 & 16711680 | word2 >>> 8 & 65280 | word2 >>> 24 & 255;
@@ -4700,7 +4824,7 @@ function createHasher(hashCons) {
   return hashC;
 }
 
-// node_modules/@noble/hashes/esm/sha3.js
+// ../../../node_modules/@noble/hashes/esm/sha3.js
 var _0n = BigInt(0);
 var _1n = BigInt(1);
 var _2n = BigInt(2);
@@ -4881,7 +5005,7 @@ var Keccak = class _Keccak extends Hash {
 var gen = (suffix, blockLen, outputLen) => createHasher(() => new Keccak(blockLen, suffix, outputLen));
 var keccak_256 = /* @__PURE__ */ (() => gen(1, 136, 256 / 8))();
 
-// node_modules/@noble/curves/node_modules/@noble/hashes/esm/_assert.js
+// ../../../node_modules/@noble/curves/node_modules/@noble/hashes/esm/_assert.js
 function anumber2(n) {
   if (!Number.isSafeInteger(n) || n < 0)
     throw new Error("positive integer expected, got " + n);
@@ -4915,13 +5039,13 @@ function aoutput2(out, instance) {
   }
 }
 
-// node_modules/@noble/curves/node_modules/@noble/hashes/esm/cryptoNode.js
+// ../../../node_modules/@noble/curves/node_modules/@noble/hashes/esm/cryptoNode.js
 import * as nc from "node:crypto";
 var crypto = nc && typeof nc === "object" && "webcrypto" in nc ? nc.webcrypto : nc && typeof nc === "object" && "randomBytes" in nc ? nc : void 0;
 
-// node_modules/@noble/curves/node_modules/@noble/hashes/esm/utils.js
-var createView = (arr) => new DataView(arr.buffer, arr.byteOffset, arr.byteLength);
-var rotr = (word2, shift) => word2 << 32 - shift | word2 >>> shift;
+// ../../../node_modules/@noble/curves/node_modules/@noble/hashes/esm/utils.js
+var createView2 = (arr) => new DataView(arr.buffer, arr.byteOffset, arr.byteLength);
+var rotr2 = (word2, shift) => word2 << 32 - shift | word2 >>> shift;
 function utf8ToBytes2(str2) {
   if (typeof str2 !== "string")
     throw new Error("utf8ToBytes expected string, got " + typeof str2);
@@ -4972,7 +5096,7 @@ function randomBytes(bytesLength = 32) {
   throw new Error("crypto.getRandomValues must be defined");
 }
 
-// node_modules/@noble/curves/node_modules/@noble/hashes/esm/_md.js
+// ../../../node_modules/@noble/curves/node_modules/@noble/hashes/esm/_md.js
 function setBigUint64(view, byteOffset, value, isLE2) {
   if (typeof view.setBigUint64 === "function")
     return view.setBigUint64(byteOffset, value, isLE2);
@@ -4999,7 +5123,7 @@ var HashMD = class extends Hash2 {
     this.pos = 0;
     this.destroyed = false;
     this.buffer = new Uint8Array(blockLen);
-    this.view = createView(this.buffer);
+    this.view = createView2(this.buffer);
   }
   update(data) {
     aexists2(this);
@@ -5009,7 +5133,7 @@ var HashMD = class extends Hash2 {
     for (let pos = 0; pos < len; ) {
       const take = Math.min(blockLen - this.pos, len - pos);
       if (take === blockLen) {
-        const dataView = createView(data);
+        const dataView = createView2(data);
         for (; blockLen <= len - pos; pos += blockLen)
           this.process(dataView, pos);
         continue;
@@ -5042,7 +5166,7 @@ var HashMD = class extends Hash2 {
       buffer[i] = 0;
     setBigUint64(view, blockLen - 8, BigInt(this.length * 8), isLE2);
     this.process(view, 0);
-    const oview = createView(out);
+    const oview = createView2(out);
     const len = this.outputLen;
     if (len % 4)
       throw new Error("_sha2: outputLen should be aligned to 32bit");
@@ -5074,7 +5198,7 @@ var HashMD = class extends Hash2 {
   }
 };
 
-// node_modules/@noble/curves/node_modules/@noble/hashes/esm/sha256.js
+// ../../../node_modules/@noble/curves/node_modules/@noble/hashes/esm/sha256.js
 var SHA256_K = /* @__PURE__ */ new Uint32Array([
   1116352408,
   1899447441,
@@ -5185,15 +5309,15 @@ var SHA256 = class extends HashMD {
     for (let i = 16; i < 64; i++) {
       const W15 = SHA256_W[i - 15];
       const W2 = SHA256_W[i - 2];
-      const s0 = rotr(W15, 7) ^ rotr(W15, 18) ^ W15 >>> 3;
-      const s1 = rotr(W2, 17) ^ rotr(W2, 19) ^ W2 >>> 10;
+      const s0 = rotr2(W15, 7) ^ rotr2(W15, 18) ^ W15 >>> 3;
+      const s1 = rotr2(W2, 17) ^ rotr2(W2, 19) ^ W2 >>> 10;
       SHA256_W[i] = s1 + SHA256_W[i - 7] + s0 + SHA256_W[i - 16] | 0;
     }
     let { A, B, C, D, E, F, G, H } = this;
     for (let i = 0; i < 64; i++) {
-      const sigma1 = rotr(E, 6) ^ rotr(E, 11) ^ rotr(E, 25);
+      const sigma1 = rotr2(E, 6) ^ rotr2(E, 11) ^ rotr2(E, 25);
       const T1 = H + sigma1 + Chi(E, F, G) + SHA256_K[i] + SHA256_W[i] | 0;
-      const sigma0 = rotr(A, 2) ^ rotr(A, 13) ^ rotr(A, 22);
+      const sigma0 = rotr2(A, 2) ^ rotr2(A, 13) ^ rotr2(A, 22);
       const T2 = sigma0 + Maj(A, B, C) | 0;
       H = G;
       G = F;
@@ -5224,7 +5348,7 @@ var SHA256 = class extends HashMD {
 };
 var sha256 = /* @__PURE__ */ wrapConstructor(() => new SHA256());
 
-// node_modules/@noble/curves/node_modules/@noble/hashes/esm/hmac.js
+// ../../../node_modules/@noble/curves/node_modules/@noble/hashes/esm/hmac.js
 var HMAC = class extends Hash2 {
   constructor(hash, _key) {
     super();
@@ -5289,7 +5413,7 @@ var HMAC = class extends Hash2 {
 var hmac = (hash, key2, message) => new HMAC(hash, key2).update(message).digest();
 hmac.create = (hash, key2) => new HMAC(hash, key2);
 
-// node_modules/@noble/curves/esm/abstract/utils.js
+// ../../../node_modules/@noble/curves/esm/abstract/utils.js
 var utils_exports = {};
 __export(utils_exports, {
   aInRange: () => aInRange,
@@ -5557,7 +5681,7 @@ function memoized(fn) {
   };
 }
 
-// node_modules/@noble/curves/esm/abstract/modular.js
+// ../../../node_modules/@noble/curves/esm/abstract/modular.js
 var _0n3 = BigInt(0);
 var _1n3 = BigInt(1);
 var _2n3 = /* @__PURE__ */ BigInt(2);
@@ -5833,7 +5957,7 @@ function mapHashToField(key2, fieldOrder, isLE2 = false) {
   return isLE2 ? numberToBytesLE(reduced, fieldLen) : numberToBytesBE(reduced, fieldLen);
 }
 
-// node_modules/@noble/curves/esm/abstract/curve.js
+// ../../../node_modules/@noble/curves/esm/abstract/curve.js
 var _0n4 = BigInt(0);
 var _1n4 = BigInt(1);
 function constTimeNegate(condition2, item) {
@@ -6060,7 +6184,7 @@ function validateBasic(curve) {
   });
 }
 
-// node_modules/@noble/curves/esm/abstract/weierstrass.js
+// ../../../node_modules/@noble/curves/esm/abstract/weierstrass.js
 function validateSigVerOpts(opts) {
   if (opts.lowS !== void 0)
     abool("lowS", opts.lowS);
@@ -6818,7 +6942,7 @@ function weierstrass(curveDef) {
   function prepSig(msgHash, privateKey, opts = defaultSigOpts) {
     if (["recovered", "canonical"].some((k) => k in opts))
       throw new Error("sign() legacy options not supported");
-    const { hash, randomBytes: randomBytes4 } = CURVE;
+    const { hash, randomBytes: randomBytes5 } = CURVE;
     let { lowS, prehash, extraEntropy: ent } = opts;
     if (lowS == null)
       lowS = true;
@@ -6830,7 +6954,7 @@ function weierstrass(curveDef) {
     const d = normPrivateKeyToScalar(privateKey);
     const seedArgs = [int2octets(d), int2octets(h1int)];
     if (ent != null && ent !== false) {
-      const e = ent === true ? randomBytes4(Fp.BYTES) : ent;
+      const e = ent === true ? randomBytes5(Fp.BYTES) : ent;
       seedArgs.push(ensureBytes("extraEntropy", e));
     }
     const seed = concatBytes2(...seedArgs);
@@ -6929,7 +7053,7 @@ function weierstrass(curveDef) {
   };
 }
 
-// node_modules/@noble/curves/esm/_shortw_utils.js
+// ../../../node_modules/@noble/curves/esm/_shortw_utils.js
 function getHash(hash) {
   return {
     hash,
@@ -6942,7 +7066,7 @@ function createCurve(curveDef, defHash) {
   return { ...create(defHash), create };
 }
 
-// node_modules/@noble/curves/esm/secp256k1.js
+// ../../../node_modules/@noble/curves/esm/secp256k1.js
 var secp256k1P = BigInt("0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f");
 var secp256k1N = BigInt("0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141");
 var _1n6 = BigInt(1);
@@ -7016,7 +7140,7 @@ var secp256k1 = createCurve({
 var _0n6 = BigInt(0);
 var Point = secp256k1.ProjectivePoint;
 
-// packages/sodex-core/src/eip712.ts
+// ../../packages/sodex-core/src/eip712.ts
 var SignatureType = {
   /** Exchange actions (orders, cancels, transfers, revokeAPIKey) - engine-specific domain. */
   EIP712: 1,
@@ -7267,7 +7391,7 @@ function recoverAddress(digest, rsv) {
 }
 var privateKeyToAddress = (privateKey) => bytesToHex2(keccak_256(secp256k1.getPublicKey(privateKey, false).slice(1)).slice(12));
 
-// packages/sodex-core/src/decimal.ts
+// ../../packages/sodex-core/src/decimal.ts
 var DECIMAL_RE = /^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$/;
 var DecimalError = class extends Error {
 };
@@ -7356,7 +7480,7 @@ function unscaleFromInt(n, scale) {
   return canonicalDecimal((neg ? "-" : "") + out);
 }
 
-// packages/sodex-core/src/actions.ts
+// ../../packages/sodex-core/src/actions.ts
 var OrderSide = { BUY: 1, SELL: 2 };
 var OrderType = { LIMIT: 1, MARKET: 2 };
 var TimeInForce = { GTC: 1, FOK: 2, IOC: 3, GTX: 4 };
@@ -7547,7 +7671,7 @@ var perpsActions = {
   cancelTwapOrder: (accountID, symbolID, orderID) => act("perps", "cancelTwapOrder", cancelTwapOrder(accountID, symbolID, orderID))
 };
 
-// packages/sodex-core/src/keys.ts
+// ../../packages/sodex-core/src/keys.ts
 function defaultRandom(length) {
   const c = globalThis.crypto;
   if (!c?.getRandomValues) throw new Error("no CSPRNG available (globalThis.crypto.getRandomValues)");
@@ -7574,7 +7698,7 @@ var MAX_TRADING_KEY_TTL_MS = 7 * DAY_MS;
 var MIN_TRADING_KEY_TTL_MS = 5 * 6e4;
 var isKeyExpired = (expiresAt, now = Date.now()) => !!expiresAt && expiresAt <= now;
 
-// packages/sodex-core/src/nonce.ts
+// ../../packages/sodex-core/src/nonce.ts
 var NONCE_WINDOW = { pastMs: 2 * DAY_MS, futureMs: DAY_MS };
 var DEFAULT_NONCE_WINDOW_MARGIN_MS = 6e4;
 var NonceWindowError = class extends RangeError {
@@ -7786,7 +7910,7 @@ var Manager = class {
 };
 var createMemoryNonceManager = (opts = {}) => new Manager({ ...opts, storage: null, channel: null, locks: null }, false);
 
-// packages/sodex-core/src/request.ts
+// ../../packages/sodex-core/src/request.ts
 var HEADER = {
   key: "X-API-Key",
   sign: "X-API-Sign",
@@ -7853,7 +7977,7 @@ async function signAndBuildWithNonceManager(action2, key2, opts) {
   return signAndBuild(action2, ref, { ...opts, nonce });
 }
 
-// packages/sodex-core/src/builders.ts
+// ../../packages/sodex-core/src/builders.ts
 var asRate = (v) => {
   const n = typeof v === "number" ? v : typeof v === "string" && /^\d+$/.test(v.trim()) ? Number(v) : NaN;
   return Number.isSafeInteger(n) && n > 0 ? n : null;
@@ -7876,7 +8000,7 @@ function approvedBuilderRates(data, builderID) {
   return out;
 }
 
-// packages/sodex-core/src/envelope.ts
+// ../../packages/sodex-core/src/envelope.ts
 var SodexApiError = class extends Error {
   constructor(code, message, httpStatus, path, body) {
     super(message);
@@ -7979,7 +8103,7 @@ function reportedRateLimit(get) {
   return { limit, remaining: rem !== null && rem <= limit ? rem : null };
 }
 
-// apps/executor/src/secrets.ts
+// src/secrets.ts
 function secretFile(dir, name) {
   mkdirSync2(dir, { recursive: true, mode: 448 });
   const path = join2(dir, name);
@@ -8061,6 +8185,27 @@ var Secrets = class {
   seal(network, owner, address, privateKey) {
     return sealWith(this.kek, network, owner, address, privateKey);
   }
+  /**
+   * VIP move: a key this executor holds, sealed to another executor of ours as an import envelope (the same format
+   * a browser sends, KEY_IMPORT_ALG, bound to that executor's id and the wallet). Never in the clear on the wire.
+   */
+  sealTo(network, owner, address, sealed, peer) {
+    const pk = openWith(this.kek, network, owner, address, sealed);
+    const eph = generateKeyPairSync("ec", { namedCurve: "P-256" });
+    const peerKey = createPublicKey({ key: Buffer.from(peer.publicKey, "base64url"), format: "der", type: "spki" });
+    const shared = diffieHellman({ privateKey: eph.privateKey, publicKey: peerKey });
+    const key2 = Buffer.from(hkdfSync("sha256", shared, Buffer.alloc(0), importInfo(peer.executorId, owner), 32));
+    try {
+      const iv = randomBytes2(12);
+      const c = createCipheriv("aes-256-gcm", key2, iv);
+      const ct = Buffer.concat([c.update(pk), c.final(), c.getAuthTag()]);
+      return { epk: eph.publicKey.export({ type: "spki", format: "der" }).toString("base64url"), iv: iv.toString("base64url"), ct: ct.toString("base64url") };
+    } finally {
+      pk.fill(0);
+      shared.fill(0);
+      key2.fill(0);
+    }
+  }
   /** The signing key for a sealed record. Throws when it does not open, or opens to another address. */
   open(network, owner, address, sealed, registration) {
     const pk = openWith(this.kek, network, owner, address, sealed);
@@ -8127,12 +8272,12 @@ function openWith(kek, network, owner, address, sealed) {
   return pk;
 }
 
-// apps/executor/src/server.ts
+// src/server.ts
 import { createServer } from "node:http";
 import { timingSafeEqual as timingSafeEqual3 } from "node:crypto";
 import { isIP } from "node:net";
 
-// packages/copy-engine/src/io.ts
+// ../../packages/copy-engine/src/io.ts
 var WS_OPEN = 1;
 var host = globalThis;
 function unref(h) {
@@ -8167,7 +8312,7 @@ function randomId(prefix = "") {
   return prefix + s.slice(0, 16);
 }
 
-// packages/copy-engine/src/confirm.ts
+// ../../packages/copy-engine/src/confirm.ts
 var CONFIRM_READS = 2;
 var CONFIRM_GAP_MS = 2e3;
 async function confirmRead(first, read, view, o = {}) {
@@ -8191,8 +8336,8 @@ async function confirmRead(first, read, view, o = {}) {
 }
 var sizeView = (n) => n === null || n === void 0 ? "unread" : String(Number((n || 0).toPrecision(12)));
 
-// packages/copy-engine/src/policy.ts
-var COPY_TERMS_VERSION = "2026-11-02";
+// ../../packages/copy-engine/src/policy.ts
+var COPY_TERMS_VERSION = "2026-11-09";
 var US_REGIONS = ["US", "PR", "VI", "GU", "AS", "MP", "UM"];
 var UK_CA_REGIONS = ["GB", "CA"];
 var CLOSE_ONLY_REGIONS = [...US_REGIONS, ...UK_CA_REGIONS];
@@ -8308,8 +8453,20 @@ function copyFeeFor(volumeUsd, ladder = COPY_FEE_LADDER) {
   return fee;
 }
 var BOT_FEE = 1;
+var BOT_FEE_LADDER = [
+  // Owner 2026-11-09: 0.3 / 0.25 / 0.20 / 0.15 / 0.12 / 0.10 bp at $0 / $100k / $250k / $500k / $1M / $10M, rounded
+  // down to the whole tenths SoDEX carries (never more than the table): 0.3 bp, 0.2 bp from $100k, 0.1 bp from $500k.
+  { fromUsd: 0, fee: 3 },
+  { fromUsd: 1e5, fee: 2 },
+  { fromUsd: 5e5, fee: 1 }
+];
+var BOT_FEE_VIP = 1;
+var BETA_VIP_DAYS = 30;
+function botFeeFor(volumeUsd, o = {}) {
+  return o.vip ? BOT_FEE_VIP : copyFeeFor(volumeUsd, BOT_FEE_LADDER);
+}
 
-// packages/copy-engine/src/sanctionsList.ts
+// ../../packages/copy-engine/src/sanctionsList.ts
 var SANCTIONED_ADDRESSES = [
   "0x002471b8a185f9980708d0eaec5b289714f56f8d",
   "0x0330070fd38ec3bb94f58fa55d40368271e9e54a",
@@ -8407,7 +8564,7 @@ var SANCTIONED_ADDRESSES = [
   "0xfec8a60023265364d066a1212fde3930f6ae8da7"
 ];
 
-// packages/copy-engine/src/sanctions.ts
+// ../../packages/copy-engine/src/sanctions.ts
 function screenPolicy(policy, ...addresses) {
   const hit = sanctionedOf(addresses);
   if (hit === null) return policy;
@@ -8427,7 +8584,7 @@ function sanctionedOf(addresses) {
 var SANCTIONED_WALLET_REASON = "This wallet address is on a sanctions list, so ValueDesk cannot be used with it. If you believe this is a mistake, contact us at the address in the Impressum.";
 var SANCTIONED_LEADER_REASON = "This trader's wallet address is on a sanctions list, so it cannot be copied through ValueDesk.";
 
-// packages/copy-engine/src/settings.ts
+// ../../packages/copy-engine/src/settings.ts
 var ADDRESS2 = /^0x[0-9a-f]{40}$/;
 var COIN = /^[A-Z0-9]{1,20}$/;
 var DEFAULT_SETTINGS = {
@@ -8570,7 +8727,7 @@ var SettingsError = class extends Error {
   name = "SettingsError";
 };
 
-// packages/copy-engine/src/markets.ts
+// ../../packages/copy-engine/src/markets.ts
 var num = (v, fallback = NaN) => {
   const n = typeof v === "string" ? Number(v) : typeof v === "number" ? v : NaN;
   return Number.isFinite(n) ? n : fallback;
@@ -8758,7 +8915,7 @@ var snapPrice = (p, m) => {
   return s === "0" ? m.tickSize : s;
 };
 
-// packages/copy-engine/src/planner.ts
+// ../../packages/copy-engine/src/planner.ts
 var FLAT_EPS = 1e-9;
 var isFlat = (x) => !Number.isFinite(x) || Math.abs(x) < FLAT_EPS;
 var sign = (x) => isFlat(x) ? 0 : x > 0 ? 1 : -1;
@@ -9134,7 +9291,7 @@ function applyFill(state, symbol2, side, qty2, price2, fee, at) {
   else state.owned[symbol2] = { size: next, entry: price2, openedAt: at };
 }
 
-// packages/copy-engine/src/sodex.ts
+// ../../packages/copy-engine/src/sodex.ts
 var OutcomeUnknownError = class extends Error {
   name = "OutcomeUnknownError";
   outcomeUnknown = true;
@@ -9406,7 +9563,7 @@ var SendQueue = class {
     return { waiting: this.items.length, byClass, oldestMs: this.items.length ? now - oldest : 0, inFlight: this.busy.size, cooldownMs: this.budget.cooldownLeft(now), sent: this.sentN, resent: this.resentN };
   }
   /** Send `run` (one signed write) under the queue's rules. */
-  submit(cls, accountId, orders, run, path = "") {
+  submit(cls, accountId, orders, run, path = "", lane = accountId) {
     const weight = 1 + Math.floor(orders / 40);
     const now = Date.now();
     if (cls === "open") {
@@ -9422,15 +9579,15 @@ var SendQueue = class {
     }
     if (cls === "leverage" && this.items.length >= QUEUE_CAP) return Promise.reject(new LocalRefusal(`the send queue is full (${this.items.length} waiting); closes and stops go first`, path));
     return new Promise((resolve2, reject) => {
-      this.items.push({ seq: ++this.seq, cls, accountId, orders, weight, at: now, run, resolve: resolve2, reject });
+      this.items.push({ seq: ++this.seq, cls, accountId, lane, orders, weight, at: now, run, resolve: resolve2, reject });
       this.pump();
     });
   }
   /** The next item that may leave: per account only its oldest, and only when that account has nothing in flight; then class, then age. */
   candidates() {
     const heads = /* @__PURE__ */ new Map();
-    for (const it of this.items) if (!heads.has(it.accountId)) heads.set(it.accountId, it);
-    return [...heads.values()].filter((it) => !this.busy.has(it.accountId)).sort((a, b) => SEND_CLASSES.indexOf(a.cls) - SEND_CLASSES.indexOf(b.cls) || a.seq - b.seq);
+    for (const it of this.items) if (!heads.has(it.lane)) heads.set(it.lane, it);
+    return [...heads.values()].filter((it) => !this.busy.has(it.lane)).sort((a, b) => SEND_CLASSES.indexOf(a.cls) - SEND_CLASSES.indexOf(b.cls) || a.seq - b.seq);
   }
   schedule(ms) {
     timers.cancel(this.timer);
@@ -9482,7 +9639,7 @@ var SendQueue = class {
   }
   dispatch(it, now, probe) {
     this.items.splice(this.items.indexOf(it), 1);
-    this.busy.add(it.accountId);
+    this.busy.add(it.lane);
     this.budget.charge(it.weight, now);
     this.rate.book(it.accountId, it.orders, now);
     this.sentN++;
@@ -9496,7 +9653,7 @@ var SendQueue = class {
         } else it.reject(e);
       }
     ).finally(() => {
-      this.busy.delete(it.accountId);
+      this.busy.delete(it.lane);
       if (probe) this.probing = false;
       this.pump();
     });
@@ -9515,6 +9672,16 @@ var ALLOWED_WRITES = [
   { method: "DELETE", path: "/api/v1/perps/trade/orders" },
   { method: "POST", path: "/api/v1/perps/trade/leverage" }
 ];
+var cancelLane = 1e9;
+var laneOf = (accountId, method, body) => {
+  if (method === "DELETE") return ++cancelLane;
+  try {
+    const p = JSON.parse(body ?? "{}");
+    return accountId * 1e4 + (Number(p.symbolID) || 0);
+  } catch {
+    return accountId;
+  }
+};
 function writeShape(method, path, body) {
   let p = {};
   try {
@@ -9523,12 +9690,14 @@ function writeShape(method, path, body) {
     p = {};
   }
   const accountId = Number(p.accountID) || 0;
-  if (method === "DELETE") return { accountId, orders: Array.isArray(p.cancels) ? p.cancels.length : 1, priority: "protect" };
+  const first = (x) => Array.isArray(x) && x[0] && typeof x[0] === "object" ? Number(x[0].symbolID) || 0 : 0;
+  const symbolId = Number(p.symbolID) || first(p.orders) || first(p.cancels);
+  if (method === "DELETE") return { accountId, orders: Array.isArray(p.cancels) ? p.cancels.length : 1, priority: "protect", symbolId };
   if (Array.isArray(p.orders)) {
     const all = p.orders;
-    return { accountId, orders: all.length, priority: all.length > 0 && all.every((o) => o && o.reduceOnly === true) ? "protect" : "open" };
+    return { accountId, orders: all.length, priority: all.length > 0 && all.every((o) => o && o.reduceOnly === true) ? "protect" : "open", symbolId };
   }
-  return { accountId, orders: 1, priority: "open" };
+  return { accountId, orders: 1, priority: "open", symbolId };
 }
 function retryAfterMs(v, now = Date.now()) {
   if (!v) return null;
@@ -9543,6 +9712,10 @@ function isIpRateLimited(status, text) {
 var SodexClient = class {
   network;
   gateway;
+  fastDoor;
+  raceCopies;
+  lanesByMarket;
+  onWrite;
   budget;
   accountRate;
   /** Every signed write leaves through it (SendQueue). */
@@ -9555,6 +9728,10 @@ var SodexClient = class {
   constructor(o) {
     this.network = o.network;
     this.gateway = (o.gateway ?? GATEWAY_ORIGIN[o.network]).replace(/\/+$/, "");
+    this.fastDoor = o.fastDoor ?? false;
+    this.raceCopies = Math.max(1, Math.min(5, o.raceCopies ?? 1));
+    this.lanesByMarket = o.lanesByMarket === true;
+    this.onWrite = o.onWrite;
     this.fetch = o.fetch;
     this.budget = o.budget ?? new WeightBudget();
     this.accountRate = o.accountRate ?? new AccountRate();
@@ -9634,16 +9811,52 @@ var SodexClient = class {
       throw new LocalRefusal(`${req.method} ${req.gatewayPath} is not an action this copier sends`, req.gatewayPath, "not-allowed");
     }
     const shape = writeShape(req.method, req.gatewayPath, req.body);
-    return this.queue.submit(sendClass(req.method, req.gatewayPath, shape.priority), shape.accountId, shape.orders, () => this.transmit(req), req.gatewayPath);
+    return this.queue.submit(sendClass(req.method, req.gatewayPath, shape.priority), shape.accountId, shape.orders, /* @__PURE__ */ ((enqueued) => () => this.transmit(req, enqueued, shape.accountId, shape.symbolId))(Date.now()), req.gatewayPath, this.lanesByMarket ? laneOf(shape.accountId, req.method, req.body) : shape.accountId);
+  }
+  /** The request as it goes out: as built, or through the fast door (fastDoor) when it is a perps order or cancel. */
+  wire(req) {
+    const type = req.gatewayPath === "/api/v1/perps/trade/orders" ? req.method === "POST" ? "newOrder" : "cancelOrder" : null;
+    if (!this.fastDoor || !type) return [this.gateway + req.gatewayPath, { method: req.method, headers: req.headers, body: req.body }];
+    const body = `{"type":"${type}","params":${req.body},"nonce":${req.headers["X-API-Nonce"]},"signature":"${req.headers["X-API-Sign"]}","signatureChainID":${req.headers["X-API-Chain"]}}`;
+    return [`${this.gateway}/api/v1/perps/exchange`, { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json", ...this.fastDoor === "with-key" && req.headers["X-API-Key"] ? { "X-API-Key": req.headers["X-API-Key"] } : {} }, body }];
+  }
+  /** The same signed bytes on several connections: the first answer that is not "nonce already used" counts. */
+  async race(url, init) {
+    return new Promise((resolve2, reject) => {
+      let open = this.raceCopies;
+      let settled = false;
+      let last = null;
+      for (let i = 0; i < this.raceCopies; i++) {
+        void this.fetch(url, init).then(async (r) => {
+          const text = await r.text().catch(() => "");
+          const answer = { status: r.status, ok: r.ok, text: async () => text, ...r.headers ? { headers: r.headers } : {} };
+          last = answer;
+          if (!settled && !/nonce already used/i.test(text)) {
+            settled = true;
+            resolve2(answer);
+          }
+        }).catch((e) => {
+          if (open === 1 && !last && !settled) reject(e);
+        }).finally(() => {
+          open--;
+          if (open === 0 && !settled) {
+            settled = true;
+            if (last) resolve2(last);
+            else reject(new Error("every copy failed"));
+          }
+        });
+      }
+    });
   }
   /** One signed write on the wire (the queue decides when). */
-  async transmit(req) {
+  async transmit(req, enqueued = Date.now(), accountId = 0, symbolId = 0) {
     const ctl = abortController();
     const timer = timers.after(this.writeTimeoutMs, () => ctl.abort());
     const sentAt = Date.now();
     let res;
     try {
-      res = await this.fetch(this.gateway + req.gatewayPath, { method: req.method, headers: req.headers, body: req.body, signal: ctl.signal });
+      const [url, init] = this.wire(req);
+      res = this.raceCopies > 1 && req.gatewayPath === "/api/v1/perps/trade/orders" ? await this.race(url, { ...init, signal: ctl.signal }) : await this.fetch(url, { ...init, signal: ctl.signal });
     } catch (e) {
       this.unreached(e);
       throw new OutcomeUnknownError(`SoDEX did not answer (${String(e).slice(0, 120)}); the request may still have executed.`);
@@ -9651,6 +9864,7 @@ var SodexClient = class {
       timers.cancel(timer);
     }
     const text = await res.text().catch(() => "");
+    this.onWrite?.({ method: req.method, path: req.gatewayPath, queueMs: sentAt - enqueued, wireMs: Date.now() - sentAt, status: res.status, accountId, symbolId });
     this.observe(res, text, req.gatewayPath, sentAt);
     if (isIpRateLimited(res.status, text)) throw new IpRateLimitedError(req.gatewayPath);
     const unreadable = res.status < 400 && text.trim() !== "" && !/^[\[{]/.test(text.trim());
@@ -9919,7 +10133,7 @@ function hlSpotCollateral(st, px2) {
   return sum;
 }
 
-// packages/copy-engine/src/socket.ts
+// ../../packages/copy-engine/src/socket.ts
 var LiveSocket = class {
   constructor(o) {
     this.o = o;
@@ -10050,7 +10264,7 @@ var LiveSocket = class {
   }
 };
 
-// packages/copy-engine/src/feeds.ts
+// ../../packages/copy-engine/src/feeds.ts
 var COALESCE_MS = 150;
 var key = (l) => `${l.venue}:${l.address.toLowerCase()}`;
 var LeaderBook = class {
@@ -10496,7 +10710,7 @@ var HyperliquidFeed = class {
   }
 };
 
-// packages/copy-engine/src/orders.ts
+// ../../packages/copy-engine/src/orders.ts
 function intentsAction(accountId, market, intents, builder) {
   return perpsActions.newOrder(
     accountId,
@@ -10618,7 +10832,7 @@ var PaperSink = class {
   }
 };
 
-// packages/copy-engine/src/algo/math.ts
+// ../../packages/copy-engine/src/algo/math.ts
 var DAY_MS2 = 864e5;
 function makeRng(seed) {
   let a = seed >>> 0;
@@ -10843,7 +11057,7 @@ function trail(s, side, price2, o) {
   return { state: { armed, extreme }, stop, fired };
 }
 
-// packages/copy-engine/src/oracle.ts
+// ../../packages/copy-engine/src/oracle.ts
 var ORACLE_VENUES = [
   "binanceFutures",
   "binanceSpot",
@@ -11119,7 +11333,302 @@ var OracleFeed = class {
   }
 };
 
-// packages/copy-engine/src/algo/types.ts
+// ../../packages/copy-engine/src/algo/bots.ts
+var BOT_SAMPLE_MS = 5 * 6e4;
+var BOT_SERIES_MAX = 1500;
+var emptyBook = () => ({ buyQty: 0, buyValue: 0, sellQty: 0, sellValue: 0, makerValue: 0, takerValue: 0, tradeFees: 0, builderFees: 0, fills: 0, series: [] });
+function bookFill(b, side, qty2, value, maker, tradeRate, builderRate) {
+  if (!(qty2 > 0) || !(value > 0)) return;
+  if (side === "buy") {
+    b.buyQty += qty2;
+    b.buyValue += value;
+  } else {
+    b.sellQty += qty2;
+    b.sellValue += value;
+  }
+  if (maker) b.makerValue += value;
+  else b.takerValue += value;
+  b.tradeFees += value * tradeRate;
+  b.builderFees += value * builderRate;
+  b.fills++;
+}
+var bookVolume = (b) => b.buyValue + b.sellValue;
+var bookInventory = (b) => b.buyQty - b.sellQty + (b.carryQty ?? 0);
+var bookGross = (b, mark) => b.sellValue - b.buyValue - (b.carryValue ?? 0) + bookInventory(b) * mark;
+var bookNet = (b, mark) => bookGross(b, mark) - b.tradeFees - b.builderFees;
+function costPerMillion(b, mark) {
+  const v = bookVolume(b);
+  return v >= 1 ? -bookNet(b, mark) / v * 1e6 : null;
+}
+function sampleBook(b, mark, now, force = false) {
+  const last = b.series[b.series.length - 1];
+  if (!force && last && now - last[0] < BOT_SAMPLE_MS) return false;
+  b.series.push([now, round2(bookVolume(b)), round4(bookNet(b, mark)), round4(b.tradeFees + b.builderFees)]);
+  if (b.series.length > BOT_SERIES_MAX) {
+    const half = Math.floor(b.series.length / 2);
+    b.series = [...b.series.slice(0, half).filter((_, i) => i % 2 === 0), ...b.series.slice(half)];
+  }
+  return true;
+}
+var round2 = (x) => Math.round(x * 100) / 100;
+var round4 = (x) => Math.round(x * 1e4) / 1e4;
+function gridPrices(s, tickSize) {
+  const n = s.levels;
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const t = n === 1 ? 0 : i / (n - 1);
+    const p = s.spacing === "geometric" ? s.low * Math.pow(s.high / s.low, t) : s.low + (s.high - s.low) * t;
+    const snapped = i === 0 ? snapUp(p, tickSize) : snapDown(p, tickSize);
+    if (!out.length || snapped > out[out.length - 1] + 1e-12) out.push(snapped);
+  }
+  return out;
+}
+function gridStart(prices, ref) {
+  let gap = 0;
+  for (let i = 1; i < prices.length; i++) if (Math.abs(prices[i] - ref) < Math.abs(prices[gap] - ref)) gap = i;
+  return prices.map((_, i) => i < gap ? "buy" : i > gap ? "sell" : null);
+}
+function gridQty(orderUsd, price2, m) {
+  return Math.max(floorStep(orderUsd / price2, m), minChildQty(m, price2));
+}
+function botQuoteUsd(orderUsd, m, price2) {
+  return price2 > 0 ? Math.max(orderUsd, minChildQty(m, price2) * price2) : orderUsd;
+}
+function mmQuotes(s, q, m, inventory, mark, fair = null) {
+  const tick = Number(m.tickSize);
+  const invUsd = inventory * mark;
+  const ratio = Math.max(-1, Math.min(1, invUsd / s.maxInventoryUsd));
+  const out = [];
+  const room = Math.round((q.ask - q.bid) / tick);
+  for (const side of ["buy", "sell"]) {
+    const adds = side === "buy" ? inventory >= 0 : inventory <= 0;
+    if (adds && Math.abs(invUsd) >= s.maxInventoryUsd - 1e-9) continue;
+    const share = queueShare(q, side);
+    if (adds && (s.queueGuard ?? 0) > 0 && share !== null && share < s.queueGuard) continue;
+    const skew = adds ? Math.round(Math.abs(ratio) * s.skewTicks) : 0;
+    const inside = s.offsetTicks < 0 && room >= 2 ? 1 : 0;
+    const off = Math.max(0, s.offsetTicks) + skew;
+    let price2 = side === "buy" ? q.bid - off * tick + inside * tick : q.ask + off * tick - inside * tick;
+    const edge = s.edgeBps ?? 0;
+    if (edge > 0) {
+      const midP = (q.bid + q.ask) / 2;
+      const markP = mark > 0 ? mark : midP;
+      price2 = side === "buy" ? Math.min(price2, Math.min(midP, markP) * (1 - edge / 1e4) - skew * tick) : Math.max(price2, Math.max(midP, markP) * (1 + edge / 1e4) + skew * tick);
+    }
+    if (fair !== null && fair > 0) {
+      const at = refLine(side, fair, adds ? s.refBps ?? 0 : (s.refBps ?? 0) / 4);
+      if ((s.refBps ?? 0) > 0) price2 = side === "buy" ? at - skew * tick : at + skew * tick;
+      const line = adds ? refLine(side, fair, s.pullBps ?? 0) : fair;
+      if (adds && (s.refBps ?? 0) <= 0 && (side === "buy" ? price2 > line + 1e-12 : price2 < line - 1e-12)) continue;
+      price2 = side === "buy" ? Math.min(price2, line) : Math.max(price2, line);
+    }
+    price2 = side === "buy" ? Math.min(price2, q.ask - tick) : Math.max(price2, q.bid + tick);
+    price2 = side === "buy" ? snapDown(price2, m.tickSize) : snapUp(price2, m.tickSize);
+    if (!(price2 > 0)) continue;
+    let qty2 = Math.max(floorStep(s.orderUsd / price2, m), minChildQty(m, price2));
+    if (adds) {
+      const left = floorStep(Math.max(0, s.maxInventoryUsd - Math.abs(invUsd)) / price2, m);
+      qty2 = Math.min(qty2, left);
+      if (qty2 < minChildQty(m, price2) - 1e-12) continue;
+      out.push({ side, price: price2, quantity: qty2 });
+      continue;
+    }
+    qty2 = Math.min(qty2, floorStep(Math.abs(inventory), m));
+    if (qty2 < minChildQty(m, price2) - 1e-12) continue;
+    out.push({ side, price: price2, quantity: qty2, reduceOnly: true });
+  }
+  return out;
+}
+var refLine = (side, fair, bps) => side === "buy" ? fair * (1 - bps / 1e4) : fair * (1 + bps / 1e4);
+function pastFair(side, price2, fair, adds, pullBps) {
+  const line = refLine(side, fair, adds ? pullBps : 0);
+  return side === "buy" ? price2 > line + 1e-12 : price2 < line - 1e-12;
+}
+function queueShare(q, side) {
+  const own = side === "buy" ? q.bidSz : q.askSz;
+  const other = side === "buy" ? q.askSz : q.bidSz;
+  if (own === void 0 || other === void 0 || !(own + other > 0)) return null;
+  return own / (own + other);
+}
+var PATIENT_TAKER_ACCOUNT = 1002;
+var INFORMED_TAKER_ACCOUNT = 23342;
+var ZONES = { utc: "UTC", new_york: "America/New_York", london: "Europe/London" };
+var ZONE_WORDS = { utc: "UTC", new_york: "New York", london: "London" };
+var ianaZone = (zone) => ZONES[zone] ?? zone;
+var zoneWords = (zone) => ZONE_WORDS[zone] ?? (zone.split("/").pop() ?? zone).replace(/_/g, " ");
+var zoneOk = /* @__PURE__ */ new Map();
+function validZone(zone) {
+  if (typeof zone !== "string" || zone.length > 64) return false;
+  if (zone in ZONES) return true;
+  if (!/^[A-Za-z][A-Za-z0-9_+-]*(\/[A-Za-z0-9_+-]+){0,2}$/.test(zone)) return false;
+  let ok = zoneOk.get(zone);
+  if (ok === void 0) {
+    try {
+      new Intl.DateTimeFormat("en-US", { timeZone: zone });
+      ok = true;
+    } catch {
+      ok = false;
+    }
+    zoneOk.set(zone, ok);
+  }
+  return ok;
+}
+var DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+var formats = /* @__PURE__ */ new Map();
+function zoneTime(at, zone) {
+  let f = formats.get(zone);
+  if (!f) {
+    f = new Intl.DateTimeFormat("en-US", { timeZone: ianaZone(zone), hourCycle: "h23", hour: "2-digit", minute: "2-digit", weekday: "short", year: "numeric", month: "2-digit", day: "2-digit" });
+    formats.set(zone, f);
+  }
+  let h = 0;
+  let m = 0;
+  let wd = 0;
+  let y = "1970";
+  let mo = "01";
+  let dd = "01";
+  for (const p of f.formatToParts(new Date(at))) {
+    if (p.type === "hour") h = Number(p.value) % 24;
+    else if (p.type === "minute") m = Number(p.value);
+    else if (p.type === "weekday") wd = Math.max(0, DAYS.indexOf(p.value));
+    else if (p.type === "year") y = p.value;
+    else if (p.type === "month") mo = p.value;
+    else if (p.type === "day") dd = p.value;
+  }
+  return { minutes: h * 60 + m, weekday: wd, date: `${y}-${mo}-${dd}` };
+}
+var ymd = (y, m, d) => `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+var dow = (y, m, d) => new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+var shiftDay = (y, m, d, by) => {
+  const t = new Date(Date.UTC(y, m - 1, d + by));
+  return ymd(t.getUTCFullYear(), t.getUTCMonth() + 1, t.getUTCDate());
+};
+function nthWeekday(y, m, wd, n) {
+  if (n > 0) return ymd(y, m, 1 + (wd - dow(y, m, 1) + 7) % 7 + (n - 1) * 7);
+  const days = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  return ymd(y, m, days - (dow(y, m, days) - wd + 7) % 7);
+}
+function easter(y) {
+  const a = y % 19;
+  const b = Math.floor(y / 100);
+  const c = y % 100;
+  const d = Math.floor(b / 4);
+  const e = b % 4;
+  const f = Math.floor((b + 8) / 25);
+  const g2 = Math.floor((b - f + 1) / 3);
+  const h = (19 * a + b - d - g2 + 15) % 30;
+  const i = Math.floor(c / 4);
+  const k = c % 4;
+  const l = (32 + 2 * e + 2 * i - h - k) % 7;
+  const m = Math.floor((a + 11 * h + 22 * l) / 451);
+  return [Math.floor((h + l - 7 * m + 114) / 31), (h + l - 7 * m + 114) % 31 + 1];
+}
+var usObserved = (y, m, d) => {
+  const w = dow(y, m, d);
+  return w === 6 ? shiftDay(y, m, d, -1) : w === 0 ? shiftDay(y, m, d, 1) : ymd(y, m, d);
+};
+var holidayCache = /* @__PURE__ */ new Map();
+function nyseHolidays(y) {
+  const key2 = `ny${y}`;
+  const hit = holidayCache.get(key2);
+  if (hit) return hit;
+  const [em, ed] = easter(y);
+  const s = new Set([
+    dow(y, 1, 1) === 6 ? "" : usObserved(y, 1, 1),
+    nthWeekday(y, 1, 1, 3),
+    nthWeekday(y, 2, 1, 3),
+    shiftDay(y, em, ed, -2),
+    nthWeekday(y, 5, 1, -1),
+    ...y >= 2022 ? [usObserved(y, 6, 19)] : [],
+    usObserved(y, 7, 4),
+    nthWeekday(y, 9, 1, 1),
+    nthWeekday(y, 11, 4, 4),
+    usObserved(y, 12, 25)
+  ].filter(Boolean));
+  holidayCache.set(key2, s);
+  return s;
+}
+function lseHolidays(y) {
+  const key2 = `ldn${y}`;
+  const hit = holidayCache.get(key2);
+  if (hit) return hit;
+  const [em, ed] = easter(y);
+  const ny = dow(y, 1, 1);
+  const xmas = dow(y, 12, 25);
+  const xs = xmas === 6 ? [ymd(y, 12, 27), ymd(y, 12, 28)] : xmas === 0 ? [ymd(y, 12, 26), ymd(y, 12, 27)] : xmas === 5 ? [ymd(y, 12, 25), ymd(y, 12, 28)] : [ymd(y, 12, 25), ymd(y, 12, 26)];
+  const s = /* @__PURE__ */ new Set([
+    ny === 6 ? ymd(y, 1, 3) : ny === 0 ? ymd(y, 1, 2) : ymd(y, 1, 1),
+    shiftDay(y, em, ed, -2),
+    shiftDay(y, em, ed, 1),
+    nthWeekday(y, 5, 1, 1),
+    nthWeekday(y, 5, 1, -1),
+    nthWeekday(y, 8, 1, -1),
+    ...xs
+  ]);
+  holidayCache.set(key2, s);
+  return s;
+}
+function tradingDay(zone, date, weekday) {
+  if (weekday === 0 || weekday === 6) return false;
+  const y = Number(date.slice(0, 4));
+  if (zone === "new_york") return !nyseHolidays(y).has(date);
+  if (zone === "london") return !lseHolidays(y).has(date);
+  return true;
+}
+var minutesOf = (hhmm) => Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3, 5));
+function quietWindowAt(windows, at) {
+  for (const w of windows ?? []) {
+    const { minutes: minutes2, weekday, date } = zoneTime(at, w.zone);
+    const from = minutesOf(w.from);
+    const to = minutesOf(w.to);
+    const dayOk = (back) => {
+      if (w.days === "all") return true;
+      const d = back ? (weekday + 6) % 7 : weekday;
+      if (w.days === "weekdays") return d >= 1 && d <= 5;
+      return tradingDay(w.zone, back ? zoneTime(at - 864e5, w.zone).date : date, d);
+    };
+    const inside = from < to ? minutes2 >= from && minutes2 < to && dayOk(false) : minutes2 >= from && dayOk(false) || minutes2 < to && dayOk(true);
+    if (inside) return w;
+  }
+  return null;
+}
+function botReserveUsd(s, minOrderUsd) {
+  const each = s.kind === "mm" || s.kind === "grid" ? Math.max(s.orderUsd, minOrderUsd ?? 0) : 0;
+  if (s.kind === "mm") return s.maxInventoryUsd + 2 * each * Math.max(1, s.levels ?? 1);
+  if (s.kind === "grid") return each * s.levels;
+  return 0;
+}
+function botMarginUsd(s, minOrderUsd, ceiling) {
+  const own = s.leverage ?? 1;
+  const lev = Math.max(1, Math.floor(ceiling !== null && ceiling !== void 0 && ceiling > 0 ? Math.min(own, ceiling) : own));
+  return botReserveUsd(s, minOrderUsd) / lev;
+}
+function copyReserveUsd(c) {
+  if (c.status === "stopped" || c.settings.paper) return 0;
+  return Math.max(0, Number(c.settings.allocationUsd) || 0);
+}
+function newsAt(gate, events, at) {
+  if (!gate) return null;
+  for (const ev of events) {
+    if (ev.allDay || ev.importance === "low" || gate.level === "high" && ev.importance !== "high") continue;
+    if (at >= ev.time - gate.beforeMin * 6e4 && at < ev.time + gate.afterMin * 6e4) return ev;
+  }
+  return null;
+}
+var quietWords = (w) => `${w.from}\u2013${w.to} ${zoneWords(w.zone)}`;
+function usdWords(x) {
+  const a = Math.abs(x);
+  const cut = (n, d) => n.toFixed(d).replace(/\.0+$/, "");
+  if (a < 1e3) return `$${Math.round(x)}`;
+  if (a < 1e6) return `$${cut(x / 1e3, a < 1e4 ? 1 : 0)}k`;
+  return `$${cut(x / 1e6, a < 1e7 ? 1 : 0)}M`;
+}
+var windowWords = (ms) => {
+  const min = Math.round(ms / 6e4);
+  return min % 60 === 0 ? `${min / 60} h` : `${min} min`;
+};
+
+// ../../packages/copy-engine/src/algo/types.ts
 var ALGO_KINDS = ["twap", "vwap", "pov", "iceberg", "chase", "scale", "dca", "swarm", "conditional", "trailing", "basket", "bracket", "sweep", "mm", "grid"];
 var BOT_KINDS = ["mm", "grid"];
 var SLIP_FROM = ["touch", "mid", "mark", "index", "oracleMid", "oracleFair"];
@@ -11133,7 +11642,7 @@ var SLIP_FROM_NAMES = {
 };
 var FINAL_STATUSES = /* @__PURE__ */ new Set(["done", "cancelled", "expired", "failed"]);
 
-// packages/copy-engine/src/algo/spec.ts
+// ../../packages/copy-engine/src/algo/spec.ts
 var AlgoSpecError = class extends Error {
   constructor(message, errors) {
     super(message);
@@ -11158,7 +11667,7 @@ var ALGO_LIMITS = {
   trailing: { trailPct: { min: 1e-3, max: 0.5 }, chaseMs: { min: 1e3, max: 10 * MIN } },
   basket: { legs: { min: 2, max: 10 }, legUsd: { min: 10, max: 1e7 } },
   sweep: { slippageBps: { min: 1, max: 1e3 }, roundMs: { min: 500, max: MIN }, timeoutMs: { min: 5e3, max: DAY } },
-  mm: { orderUsd: { min: 10, max: 1e5 }, maxInventoryUsd: { min: 10, max: 1e6 }, offsetTicks: { min: -1, max: 1e3 }, chaseTicks: { min: 1, max: 1e3 }, minRepriceMs: { min: 1e3, max: MIN }, skewTicks: { min: 0, max: 1e3 }, edgeBps: { min: 0, max: 100 }, queueGuard: { min: 0, max: 0.5 }, levels: { min: 1, max: 5 }, moveGuard: { min: 0, max: 100 }, refBps: { min: 0, max: 50 }, pullBps: { min: 0, max: 20 } },
+  mm: { orderUsd: { min: 10, max: 1e5 }, maxInventoryUsd: { min: 10, max: 1e6 }, offsetTicks: { min: -1, max: 1e3 }, chaseTicks: { min: 1, max: 1e3 }, minRepriceMs: { min: 1e3, max: MIN }, skewTicks: { min: 0, max: 1e3 }, edgeBps: { min: 0, max: 100 }, queueGuard: { min: 0, max: 0.5 }, levels: { min: 1, max: 5 }, moveGuard: { min: 0, max: 100 }, refBps: { min: 0, max: 50 }, pullBps: { min: 0, max: 20 }, placeBps: { min: 0, max: 20 }, calmBps: { min: 0, max: 20 }, calmMs: { min: 50, max: 1e4 }, stillBps: { min: 0, max: 500 }, stillMs: { min: 1e3, max: 12e4 }, restMs: { min: 500, max: 12e4 }, flowMinUsd: { min: 1e3, max: 1e8 }, flowWindowMs: { min: MIN, max: HOUR }, flowShrink: { min: 0.1, max: 1 }, quietWindows: 6 },
   grid: { levels: { min: 3, max: 60 }, orderUsd: { min: 10, max: 1e5 } },
   bot: { volumeTargetUsd: { min: 100, max: 1e10 }, maxLossUsd: { min: 1, max: 1e8 } },
   exitPct: { min: 1e-3, max: 10 },
@@ -11237,6 +11746,64 @@ function oneOf(o, key2, label, allowed, fallback, e, path = key2) {
   if (typeof v === "string" && allowed.includes(v)) return v;
   e[path] = `${label} must be one of ${allowed.join(", ")}.`;
   return fallback;
+}
+function flowGate(o, e) {
+  const raw = o.flowGate;
+  if (raw === void 0 || raw === null) return null;
+  if (!isObj(raw)) {
+    e.flowGate = "The patient-taker gate must be an object (minUsd, windowMs, action, shrink).";
+    return null;
+  }
+  const L = ALGO_LIMITS.mm;
+  const minUsd = num3(raw, "minUsd", "Patient-taker volume", L.flowMinUsd, e, "flowGate.minUsd");
+  const windowMs = raw.windowMs === void 0 || raw.windowMs === null ? 6e5 : int(raw, "windowMs", "Patient-taker window", L.flowWindowMs, e, "flowGate.windowMs");
+  const action2 = oneOf(raw, "action", "When it is quiet", ["pause", "shrink"], "pause", e, "flowGate.action");
+  const shrink = raw.shrink === void 0 || raw.shrink === null ? 0.5 : num3(raw, "shrink", "Smaller size", L.flowShrink, e, "flowGate.shrink");
+  return { minUsd, windowMs, action: action2, shrink };
+}
+var HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
+function quietWindows(o, e) {
+  const raw = o.quiet;
+  if (raw === void 0 || raw === null) return null;
+  if (!Array.isArray(raw)) {
+    e.quiet = "Quiet windows must be a list.";
+    return null;
+  }
+  if (!raw.length) return null;
+  const most = ALGO_LIMITS.mm.quietWindows;
+  if (raw.length > most) {
+    e.quiet = `At most ${most} quiet windows.`;
+    return null;
+  }
+  const out = [];
+  raw.forEach((w, i) => {
+    const path = `quiet.${i}`;
+    if (!isObj(w)) {
+      e[path] = `Quiet window ${i + 1} must be an object (from, to, zone, days).`;
+      return;
+    }
+    for (const k of ["from", "to"]) if (typeof w[k] !== "string" || !HHMM.test(w[k])) e[`${path}.${k}`] = `Quiet window ${i + 1}: ${k === "from" ? "the start" : "the end"} must be a time like 09:30 (24 h).`;
+    if (typeof w.from === "string" && w.from === w.to) e[`${path}.to`] = `Quiet window ${i + 1}: the end must differ from the start.`;
+    const z = w.zone === void 0 || w.zone === null || w.zone === "" ? "utc" : w.zone;
+    if (!validZone(z)) e[`${path}.zone`] = `Quiet window ${i + 1}: the time zone must be utc, new_york, london or a time zone name such as Europe/Berlin.`;
+    const zone = validZone(z) ? z : "utc";
+    const days = oneOf(w, "days", `Quiet window ${i + 1}: the days`, ["all", "weekdays", "trading"], "all", e, `${path}.days`);
+    out.push({ from: String(w.from), to: String(w.to), zone, days });
+  });
+  return out;
+}
+function newsGate(o, e) {
+  const raw = o.news;
+  if (raw === void 0 || raw === null) return null;
+  if (!isObj(raw)) {
+    e.news = "The news gate must be an object (beforeMin, afterMin, level).";
+    return null;
+  }
+  const beforeMin = int(raw, "beforeMin", "Minutes before a release", { min: 0, max: 240 }, e, "news.beforeMin");
+  const afterMin = int(raw, "afterMin", "Minutes after a release", { min: 0, max: 240 }, e, "news.afterMin");
+  if (beforeMin + afterMin <= 0) e["news.afterMin"] = "The news gate needs some minutes before or after a release.";
+  const level = oneOf(raw, "level", "Which releases", ["high", "medium"], "high", e, "news.level");
+  return { beforeMin, afterMin, level };
 }
 var bool = (o, key2, fallback = false) => typeof o[key2] === "boolean" ? o[key2] : fallback;
 var SYMBOL = /^[A-Z0-9]{1,24}-USD$/;
@@ -11319,13 +11886,17 @@ function base(o, kind, e) {
   if (b.upper && b.lower && b.upper.price <= b.lower.price) e.upper = "The upper bound must be above the lower bound.";
   return b;
 }
-function botLimits(o, e) {
+function botLimits(o, e, paper) {
   const L = ALGO_LIMITS.bot;
+  const maxLossUsd = opt(o, "maxLossUsd", "Loss limit", L.maxLossUsd, e);
+  if (!paper && maxLossUsd === null && !e.maxLossUsd) e.maxLossUsd = "A real bot needs a loss limit: set the most it may lose before it stops.";
   return {
     volumeTargetUsd: opt(o, "volumeTargetUsd", "Volume target", L.volumeTargetUsd, e),
-    maxLossUsd: opt(o, "maxLossUsd", "Loss limit", L.maxLossUsd, e),
+    maxLossUsd,
     endAt: time(o, "endAt", "End time", e),
-    onStop: oneOf(o, "onStop", "When it stops", ["close", "keep"], "close", e)
+    onStop: oneOf(o, "onStop", "When it stops", ["close", "keep"], "close", e),
+    // Post-only unless switched off (kept out of the spec while on, so a spec from before reads the same).
+    ...o.postOnly === false ? { postOnly: false } : o.postOnly === void 0 || o.postOnly === true || o.postOnly === null ? {} : (e.postOnly = "Post-only is on or off (true or false).", {})
   };
 }
 var SOURCES = ["mark", "last", "mid", "index"];
@@ -11689,7 +12260,7 @@ function checkAlgoSpec(input, depth = 0) {
       if (b.reduceOnly) e.reduceOnly = "A volume maker quotes both sides: it cannot be reduce-only.";
       spec = {
         ...b,
-        ...botLimits(o, e),
+        ...botLimits(o, e, b.paper),
         kind,
         side: "buy",
         orderUsd,
@@ -11709,8 +12280,33 @@ function checkAlgoSpec(input, depth = 0) {
           spec.ref = "binance";
           if (o.refBps !== void 0 && o.refBps !== null && Number(o.refBps) !== 0) spec.refBps = num3(o, "refBps", "Distance from the Binance price", L.refBps, e);
           if (o.pullBps !== void 0 && o.pullBps !== null && Number(o.pullBps) !== 0) spec.pullBps = num3(o, "pullBps", "Pull distance", L.pullBps, e);
+          if (o.placeBps !== void 0 && o.placeBps !== null && Number(o.placeBps) !== 0) spec.placeBps = num3(o, "placeBps", "Send distance", L.placeBps, e);
+          if (o.calmBps !== void 0 && o.calmBps !== null && Number(o.calmBps) !== 0) {
+            spec.calmBps = num3(o, "calmBps", "Calm move", L.calmBps, e);
+            if (o.calmMs !== void 0 && o.calmMs !== null) spec.calmMs = int(o, "calmMs", "Calm window", L.calmMs, e);
+          }
+          if (o.stillBps !== void 0 && o.stillBps !== null && Number(o.stillBps) !== 0) {
+            spec.stillBps = num3(o, "stillBps", "Still market", L.stillBps, e);
+            if (o.stillMs !== void 0 && o.stillMs !== null) spec.stillMs = int(o, "stillMs", "Still window", L.stillMs, e);
+          }
+          if (o.restMs !== void 0 && o.restMs !== null && Number(o.restMs) !== 0) spec.restMs = int(o, "restMs", "Longest rest", L.restMs, e);
+          if (o.noFair === true) spec.noFair = true;
+          if (o.pauseAfter !== void 0 && o.pauseAfter !== null && Number(o.pauseAfter) !== 0) {
+            spec.pauseAfter = int(o, "pauseAfter", "Pause after account", { min: 1, max: 1e8 }, e);
+            spec.pauseMs = int(o, "pauseMs", "Pause", L.restMs, e);
+          }
         }
       }
+      const gate = flowGate(o, e);
+      if (gate) spec.flowGate = gate;
+      const quiet = quietWindows(o, e);
+      if (quiet) spec.quiet = quiet;
+      if (o.quietOnly === true) {
+        if (quiet) spec.quietOnly = true;
+        else e.quiet = "Trading only in set hours needs at least one window.";
+      }
+      const news = newsGate(o, e);
+      if (news) spec.news = news;
       break;
     }
     case "grid": {
@@ -11721,7 +12317,7 @@ function checkAlgoSpec(input, depth = 0) {
       if (b.reduceOnly) e.reduceOnly = "A grid buys and sells: it cannot be reduce-only.";
       spec = {
         ...b,
-        ...botLimits(o, e),
+        ...botLimits(o, e, b.paper),
         kind,
         side: "buy",
         low,
@@ -11808,12 +12404,13 @@ var ALGO_NAMES = {
   grid: "Grid"
 };
 
-// packages/copy-engine/src/notices.ts
+// ../../packages/copy-engine/src/notices.ts
 var leaderShort = (s) => `${s.settings.leader.address.slice(0, 6)}\u2026${s.settings.leader.address.slice(-4)}`;
 var mk = (n) => ({ ...n, id: `${n.source}:${n.ref}:${n.kind}:${n.at}` });
 function algoName(a) {
   const s = a.spec;
   if (s.kind === "basket") return `Basket of ${s.legs.length} markets`;
+  if (s.kind === "mm" || s.kind === "grid") return s.label ?? `${s.kind === "mm" ? "Market maker" : "Grid"} on ${s.symbol}`;
   return `${ALGO_NAMES[s.kind]} ${"side" in s && s.side === "sell" ? "sell" : "buy"} on ${"symbol" in s ? s.symbol : ""}`.trim();
 }
 function algoNotice(a, status, reason, at = Date.now()) {
@@ -11927,7 +12524,7 @@ function copyDelistedNotice(s, symbol2, size, at = Date.now()) {
 }
 var delistedDetail = (symbol2, size) => `${symbol2} is no longer listed on SoDEX. The copy still holds a ${size > 0 ? "long" : "short"} position of ${px(Math.abs(size))} there, and ValueDesk will not trade it any more: the copy does not close, reduce or add to it. What to do with it is yours to decide on SoDEX.`;
 
-// packages/copy-engine/src/runtime.ts
+// ../../packages/copy-engine/src/runtime.ts
 var RECONCILE_MS = 6e4;
 var FOLLOWER_REFRESH_MS = 3e4;
 var GUARD_MS = 2e3;
@@ -13068,6 +13665,10 @@ var CopyRuntime = class {
         this.leverageSet.set(k, { ...want, at: Date.now() });
         return true;
       } catch (e) {
+        if (/cannot (update|change) margin mode|margin mode[^.]*open position/i.test(String(e))) {
+          this.host.log.info("copy: margin mode kept, the wallet holds a position there", { owner: s.owner, symbol: market.name });
+          return true;
+        }
         this.host.log.warn("copy: leverage not set", { owner: s.owner, symbol: market.name, leverage, attempt, error: String(e) });
       }
     }
@@ -13814,11 +14415,295 @@ var CopyRuntime = class {
   }
 };
 
-// packages/copy-engine/src/api.ts
+// ../../../node_modules/@noble/curves/esm/p256.js
+var Fp256 = Field(BigInt("0xffffffff00000001000000000000000000000000ffffffffffffffffffffffff"));
+var CURVE_A = Fp256.create(BigInt("-3"));
+var CURVE_B = BigInt("0x5ac635d8aa3a93e7b3ebbd55769886bc651d06b0cc53b0f63bce3c3e27d2604b");
+var p256 = createCurve({
+  a: CURVE_A,
+  // Equation params: a, b
+  b: CURVE_B,
+  Fp: Fp256,
+  // Field: 2n**224n * (2n**32n-1n) + 2n**192n + 2n**96n-1n
+  // Curve order, total count of valid points in the field
+  n: BigInt("0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551"),
+  // Base (generator) point (x, y)
+  Gx: BigInt("0x6b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c296"),
+  Gy: BigInt("0x4fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f5"),
+  h: BigInt(1),
+  lowS: false
+}, sha256);
+
+// ../../../node_modules/@noble/hashes/esm/_md.js
+function setBigUint642(view, byteOffset, value, isLE2) {
+  if (typeof view.setBigUint64 === "function")
+    return view.setBigUint64(byteOffset, value, isLE2);
+  const _32n2 = BigInt(32);
+  const _u32_max = BigInt(4294967295);
+  const wh = Number(value >> _32n2 & _u32_max);
+  const wl = Number(value & _u32_max);
+  const h = isLE2 ? 4 : 0;
+  const l = isLE2 ? 0 : 4;
+  view.setUint32(byteOffset + h, wh, isLE2);
+  view.setUint32(byteOffset + l, wl, isLE2);
+}
+function Chi2(a, b, c) {
+  return a & b ^ ~a & c;
+}
+function Maj2(a, b, c) {
+  return a & b ^ a & c ^ b & c;
+}
+var HashMD2 = class extends Hash {
+  constructor(blockLen, outputLen, padOffset, isLE2) {
+    super();
+    this.finished = false;
+    this.length = 0;
+    this.pos = 0;
+    this.destroyed = false;
+    this.blockLen = blockLen;
+    this.outputLen = outputLen;
+    this.padOffset = padOffset;
+    this.isLE = isLE2;
+    this.buffer = new Uint8Array(blockLen);
+    this.view = createView(this.buffer);
+  }
+  update(data) {
+    aexists(this);
+    data = toBytes(data);
+    abytes(data);
+    const { view, buffer, blockLen } = this;
+    const len = data.length;
+    for (let pos = 0; pos < len; ) {
+      const take = Math.min(blockLen - this.pos, len - pos);
+      if (take === blockLen) {
+        const dataView = createView(data);
+        for (; blockLen <= len - pos; pos += blockLen)
+          this.process(dataView, pos);
+        continue;
+      }
+      buffer.set(data.subarray(pos, pos + take), this.pos);
+      this.pos += take;
+      pos += take;
+      if (this.pos === blockLen) {
+        this.process(view, 0);
+        this.pos = 0;
+      }
+    }
+    this.length += data.length;
+    this.roundClean();
+    return this;
+  }
+  digestInto(out) {
+    aexists(this);
+    aoutput(out, this);
+    this.finished = true;
+    const { buffer, view, blockLen, isLE: isLE2 } = this;
+    let { pos } = this;
+    buffer[pos++] = 128;
+    clean(this.buffer.subarray(pos));
+    if (this.padOffset > blockLen - pos) {
+      this.process(view, 0);
+      pos = 0;
+    }
+    for (let i = pos; i < blockLen; i++)
+      buffer[i] = 0;
+    setBigUint642(view, blockLen - 8, BigInt(this.length * 8), isLE2);
+    this.process(view, 0);
+    const oview = createView(out);
+    const len = this.outputLen;
+    if (len % 4)
+      throw new Error("_sha2: outputLen should be aligned to 32bit");
+    const outLen = len / 4;
+    const state = this.get();
+    if (outLen > state.length)
+      throw new Error("_sha2: outputLen bigger than state");
+    for (let i = 0; i < outLen; i++)
+      oview.setUint32(4 * i, state[i], isLE2);
+  }
+  digest() {
+    const { buffer, outputLen } = this;
+    this.digestInto(buffer);
+    const res = buffer.slice(0, outputLen);
+    this.destroy();
+    return res;
+  }
+  _cloneInto(to) {
+    to || (to = new this.constructor());
+    to.set(...this.get());
+    const { blockLen, buffer, length, finished, destroyed, pos } = this;
+    to.destroyed = destroyed;
+    to.finished = finished;
+    to.length = length;
+    to.pos = pos;
+    if (length % blockLen)
+      to.buffer.set(buffer);
+    return to;
+  }
+  clone() {
+    return this._cloneInto();
+  }
+};
+var SHA256_IV2 = /* @__PURE__ */ Uint32Array.from([
+  1779033703,
+  3144134277,
+  1013904242,
+  2773480762,
+  1359893119,
+  2600822924,
+  528734635,
+  1541459225
+]);
+
+// ../../../node_modules/@noble/hashes/esm/sha2.js
+var SHA256_K2 = /* @__PURE__ */ Uint32Array.from([
+  1116352408,
+  1899447441,
+  3049323471,
+  3921009573,
+  961987163,
+  1508970993,
+  2453635748,
+  2870763221,
+  3624381080,
+  310598401,
+  607225278,
+  1426881987,
+  1925078388,
+  2162078206,
+  2614888103,
+  3248222580,
+  3835390401,
+  4022224774,
+  264347078,
+  604807628,
+  770255983,
+  1249150122,
+  1555081692,
+  1996064986,
+  2554220882,
+  2821834349,
+  2952996808,
+  3210313671,
+  3336571891,
+  3584528711,
+  113926993,
+  338241895,
+  666307205,
+  773529912,
+  1294757372,
+  1396182291,
+  1695183700,
+  1986661051,
+  2177026350,
+  2456956037,
+  2730485921,
+  2820302411,
+  3259730800,
+  3345764771,
+  3516065817,
+  3600352804,
+  4094571909,
+  275423344,
+  430227734,
+  506948616,
+  659060556,
+  883997877,
+  958139571,
+  1322822218,
+  1537002063,
+  1747873779,
+  1955562222,
+  2024104815,
+  2227730452,
+  2361852424,
+  2428436474,
+  2756734187,
+  3204031479,
+  3329325298
+]);
+var SHA256_W2 = /* @__PURE__ */ new Uint32Array(64);
+var SHA2562 = class extends HashMD2 {
+  constructor(outputLen = 32) {
+    super(64, outputLen, 8, false);
+    this.A = SHA256_IV2[0] | 0;
+    this.B = SHA256_IV2[1] | 0;
+    this.C = SHA256_IV2[2] | 0;
+    this.D = SHA256_IV2[3] | 0;
+    this.E = SHA256_IV2[4] | 0;
+    this.F = SHA256_IV2[5] | 0;
+    this.G = SHA256_IV2[6] | 0;
+    this.H = SHA256_IV2[7] | 0;
+  }
+  get() {
+    const { A, B, C, D, E, F, G, H } = this;
+    return [A, B, C, D, E, F, G, H];
+  }
+  // prettier-ignore
+  set(A, B, C, D, E, F, G, H) {
+    this.A = A | 0;
+    this.B = B | 0;
+    this.C = C | 0;
+    this.D = D | 0;
+    this.E = E | 0;
+    this.F = F | 0;
+    this.G = G | 0;
+    this.H = H | 0;
+  }
+  process(view, offset) {
+    for (let i = 0; i < 16; i++, offset += 4)
+      SHA256_W2[i] = view.getUint32(offset, false);
+    for (let i = 16; i < 64; i++) {
+      const W15 = SHA256_W2[i - 15];
+      const W2 = SHA256_W2[i - 2];
+      const s0 = rotr(W15, 7) ^ rotr(W15, 18) ^ W15 >>> 3;
+      const s1 = rotr(W2, 17) ^ rotr(W2, 19) ^ W2 >>> 10;
+      SHA256_W2[i] = s1 + SHA256_W2[i - 7] + s0 + SHA256_W2[i - 16] | 0;
+    }
+    let { A, B, C, D, E, F, G, H } = this;
+    for (let i = 0; i < 64; i++) {
+      const sigma1 = rotr(E, 6) ^ rotr(E, 11) ^ rotr(E, 25);
+      const T1 = H + sigma1 + Chi2(E, F, G) + SHA256_K2[i] + SHA256_W2[i] | 0;
+      const sigma0 = rotr(A, 2) ^ rotr(A, 13) ^ rotr(A, 22);
+      const T2 = sigma0 + Maj2(A, B, C) | 0;
+      H = G;
+      G = F;
+      F = E;
+      E = D + T1 | 0;
+      D = C;
+      C = B;
+      B = A;
+      A = T1 + T2 | 0;
+    }
+    A = A + this.A | 0;
+    B = B + this.B | 0;
+    C = C + this.C | 0;
+    D = D + this.D | 0;
+    E = E + this.E | 0;
+    F = F + this.F | 0;
+    G = G + this.G | 0;
+    H = H + this.H | 0;
+    this.set(A, B, C, D, E, F, G, H);
+  }
+  roundClean() {
+    clean(SHA256_W2);
+  }
+  destroy() {
+    this.set(0, 0, 0, 0, 0, 0, 0, 0);
+    clean(this.buffer);
+  }
+};
+var sha2562 = /* @__PURE__ */ createHasher(() => new SHA2562());
+
+// ../../../node_modules/@noble/hashes/esm/sha256.js
+var sha2563 = sha2562;
+
+// ../../packages/copy-engine/src/api.ts
 var COPY_DOMAIN = { name: "ValueDesk Copy", version: "1" };
 var COPY_TERMS_EXECUTOR = "valuedesk-copy-terms";
 var SITE_TERMS_EXECUTOR = "valuedesk-site-terms";
-var COPY_ACTIONS = ["session", "accept-terms", "accept-site-terms", "create-key", "delete-key", "subscribe", "update", "pause", "resume", "stop", "stop-all", "algo-start", "algo-action"];
+var COPY_ACTIONS = ["session", "accept-terms", "accept-site-terms", "create-key", "delete-key", "subscribe", "update", "pause", "resume", "stop", "stop-all", "algo-start", "algo-action", "vip-move", "delegate"];
+var DELEGABLE_ACTIONS = /* @__PURE__ */ new Set(["session", "subscribe", "update", "pause", "resume", "stop", "stop-all", "algo-start", "algo-action", "vip-move"]);
+var DELEGATION_TTL_MS = 24 * 60 * 6e4;
 var COPY_REQUEST_FIELDS = [
   { name: "action", type: "string" },
   { name: "owner", type: "address" },
@@ -13860,7 +14745,7 @@ var copyRequestDigest = (r) => bytesToHex2(hashTypedData(copyRequestTypedData(r)
 var REQUEST_TTL_MS = 5 * 6e4;
 var TERMS_TTL_MS = 365 * 864e5;
 var isStatement = (action2) => action2 === "accept-terms" || action2 === "accept-site-terms";
-var MAX_WINDOW_MS = (action2) => isStatement(action2) ? TERMS_TTL_MS + 864e5 : 60 * 6e4;
+var MAX_WINDOW_MS = (action2) => isStatement(action2) ? TERMS_TTL_MS + 864e5 : action2 === "delegate" ? DELEGATION_TTL_MS + 6e4 : 60 * 6e4;
 var ADDRESS3 = /^0x[0-9a-f]{40}$/;
 function verifyCopyRequest(r, o) {
   const now = o.now ?? Date.now();
@@ -13876,13 +14761,13 @@ function verifyCopyRequest(r, o) {
   if (typeof q.deadline !== "string" || !/^\d{1,16}$/.test(q.deadline)) return { ok: false, error: "deadline must be a decimal string" };
   const chainId = Number(q.chainId);
   if (!Number.isSafeInteger(chainId) || chainId <= 0) return { ok: false, error: "chainId must be a positive integer" };
-  if (typeof q.signature !== "string" || !/^0x[0-9a-fA-F]{130}$/.test(q.signature)) return { ok: false, error: "signature must be 65 bytes of hex" };
+  if (typeof q.signature !== "string" || !/^0x([0-9a-fA-F]{130}|[0-9a-fA-F]{128})$/.test(q.signature)) return { ok: false, error: "signature must be 65 bytes of hex" };
   const nonce = Number(q.nonce);
   const deadline = Number(q.deadline);
   if (deadline < now) return { ok: false, error: "this request has expired; sign it again (if it keeps happening, check your computer's clock: it may be behind)" };
   if (deadline - nonce > MAX_WINDOW_MS(action2)) return { ok: false, error: "this request is valid for longer than allowed" };
   const skew = o.maxAgeMs ?? 15 * 6e4;
-  if (nonce - now > skew || !isStatement(action2) && now - nonce > skew) return { ok: false, error: "the request time is too far from now; check your clock" };
+  if (nonce - now > skew || !isStatement(action2) && action2 !== "delegate" && now - nonce > skew) return { ok: false, error: "the request time is too far from now; check your clock" };
   let payload;
   try {
     payload = JSON.parse(q.payload);
@@ -13892,13 +14777,37 @@ function verifyCopyRequest(r, o) {
   if (canonicalJSON(payload) !== q.payload) return { ok: false, error: "payload is not in canonical form" };
   const req = { action: action2, owner, executor: o.executor, payload: q.payload, nonce: q.nonce, deadline: q.deadline, chainId };
   const digest = copyRequestDigest(req);
-  let signer;
-  try {
-    signer = recoverAddress(hexToBytes2(digest), hexToBytes2(q.signature)).toLowerCase();
-  } catch {
-    return { ok: false, error: "the signature cannot be read" };
+  const p256Sig = q.signature.length === 130;
+  let signer = "";
+  if (!p256Sig) {
+    try {
+      signer = recoverAddress(hexToBytes2(digest), hexToBytes2(q.signature)).toLowerCase();
+    } catch {
+      return { ok: false, error: "the signature cannot be read" };
+    }
   }
-  if (signer !== owner) return { ok: false, error: "the signature is not from this wallet" };
+  if (p256Sig || signer !== owner) {
+    const d = q.delegation;
+    if (!d || !DELEGABLE_ACTIONS.has(action2)) return { ok: false, error: "the signature is not from this wallet" };
+    if (d.action !== "delegate" || d.delegation !== void 0) return { ok: false, error: "the day key's approval is not a delegation" };
+    const dv = verifyCopyRequest(d, { executor: o.executor, now, maxAgeMs: o.maxAgeMs });
+    if (!dv.ok) return { ok: false, error: `the day key's approval does not hold: ${dv.error}` };
+    if (d.owner.toLowerCase() !== owner) return { ok: false, error: "the day key was approved by another wallet" };
+    const p = dv.payload;
+    if (typeof p.key !== "string") return { ok: false, error: "the signature is not from this wallet or its day key" };
+    if (p256Sig) {
+      if (p.alg !== "p256") return { ok: false, error: "the signature is not from this wallet or its day key" };
+      let ok = false;
+      try {
+        ok = p256.verify(hexToBytes2(q.signature), sha2563(hexToBytes2(digest)), hexToBytes2(p.key), { lowS: false, prehash: false });
+      } catch {
+        ok = false;
+      }
+      if (!ok) return { ok: false, error: "the signature is not from this wallet or its day key" };
+    } else if (p.alg !== void 0 || p.key.toLowerCase() !== signer) return { ok: false, error: "the signature is not from this wallet or its day key" };
+    if (typeof p.expiresAt !== "number" || !(p.expiresAt > now) || p.expiresAt - Number(d.nonce) > DELEGATION_TTL_MS + 6e4) return { ok: false, error: "the day key has expired; approve a new one with your wallet" };
+    if (o.revokedBefore && Number(d.nonce) < o.revokedBefore(owner)) return { ok: false, error: "this day key was revoked; approve a new one with your wallet" };
+  }
   return { ok: true, digest, payload };
 }
 var ALGO_UPDATE_FIELDS = [
@@ -13918,130 +14827,35 @@ var ALGO_UPDATE_FIELDS = [
   "moveGuard",
   "refBps",
   "pullBps",
+  "placeBps",
+  "calmBps",
+  "calmMs",
+  "stillBps",
+  "stillMs",
+  "restMs",
+  "flowGate",
+  "quiet",
+  "quietOnly",
+  "news",
   "volumeTargetUsd",
   "maxLossUsd",
   "endAt",
   "onStop",
-  "outOfRange"
+  "outOfRange",
+  "ref",
+  "noFair",
+  "pauseAfter",
+  "pauseMs",
+  "leverage",
+  "marginMode",
+  "postOnly",
+  "low",
+  "high",
+  "spacing"
 ];
-var EXECUTOR_FEATURES = ["counter", "site-terms", "key-import", "algo-update", "bots", "multiplier"];
+var EXECUTOR_FEATURES = ["counter", "site-terms", "key-import", "algo-update", "bots", "multiplier", "bot-restart"];
 
-// packages/copy-engine/src/algo/bots.ts
-var BOT_SAMPLE_MS = 5 * 6e4;
-var BOT_SERIES_MAX = 1500;
-var emptyBook = () => ({ buyQty: 0, buyValue: 0, sellQty: 0, sellValue: 0, makerValue: 0, takerValue: 0, tradeFees: 0, builderFees: 0, fills: 0, series: [] });
-function bookFill(b, side, qty2, value, maker, tradeRate, builderRate) {
-  if (!(qty2 > 0) || !(value > 0)) return;
-  if (side === "buy") {
-    b.buyQty += qty2;
-    b.buyValue += value;
-  } else {
-    b.sellQty += qty2;
-    b.sellValue += value;
-  }
-  if (maker) b.makerValue += value;
-  else b.takerValue += value;
-  b.tradeFees += value * tradeRate;
-  b.builderFees += value * builderRate;
-  b.fills++;
-}
-var bookVolume = (b) => b.buyValue + b.sellValue;
-var bookInventory = (b) => b.buyQty - b.sellQty;
-var bookGross = (b, mark) => b.sellValue - b.buyValue + bookInventory(b) * mark;
-var bookNet = (b, mark) => bookGross(b, mark) - b.tradeFees - b.builderFees;
-function costPerMillion(b, mark) {
-  const v = bookVolume(b);
-  return v >= 1 ? -bookNet(b, mark) / v * 1e6 : null;
-}
-function sampleBook(b, mark, now, force = false) {
-  const last = b.series[b.series.length - 1];
-  if (!force && last && now - last[0] < BOT_SAMPLE_MS) return false;
-  b.series.push([now, round2(bookVolume(b)), round4(bookNet(b, mark)), round4(b.tradeFees + b.builderFees)]);
-  if (b.series.length > BOT_SERIES_MAX) {
-    const half = Math.floor(b.series.length / 2);
-    b.series = [...b.series.slice(0, half).filter((_, i) => i % 2 === 0), ...b.series.slice(half)];
-  }
-  return true;
-}
-var round2 = (x) => Math.round(x * 100) / 100;
-var round4 = (x) => Math.round(x * 1e4) / 1e4;
-function gridPrices(s, tickSize) {
-  const n = s.levels;
-  const out = [];
-  for (let i = 0; i < n; i++) {
-    const t = n === 1 ? 0 : i / (n - 1);
-    const p = s.spacing === "geometric" ? s.low * Math.pow(s.high / s.low, t) : s.low + (s.high - s.low) * t;
-    const snapped = i === 0 ? snapUp(p, tickSize) : snapDown(p, tickSize);
-    if (!out.length || snapped > out[out.length - 1] + 1e-12) out.push(snapped);
-  }
-  return out;
-}
-function gridStart(prices, ref) {
-  let gap = 0;
-  for (let i = 1; i < prices.length; i++) if (Math.abs(prices[i] - ref) < Math.abs(prices[gap] - ref)) gap = i;
-  return prices.map((_, i) => i < gap ? "buy" : i > gap ? "sell" : null);
-}
-function gridAfterFill(sides, i, filled) {
-  const out = [...sides];
-  out[i] = null;
-  const j = filled === "buy" ? i + 1 : i - 1;
-  if (j >= 0 && j < out.length) out[j] = filled === "buy" ? "sell" : "buy";
-  return out;
-}
-function gridQty(orderUsd, price2, m) {
-  return Math.max(floorStep(orderUsd / price2, m), minChildQty(m, price2));
-}
-function mmQuotes(s, q, m, inventory, mark, fair = null) {
-  const tick = Number(m.tickSize);
-  const invUsd = inventory * mark;
-  const ratio = Math.max(-1, Math.min(1, invUsd / s.maxInventoryUsd));
-  const out = [];
-  const room = Math.round((q.ask - q.bid) / tick);
-  for (const side of ["buy", "sell"]) {
-    const adds = side === "buy" ? inventory >= 0 : inventory <= 0;
-    if (adds && Math.abs(invUsd) + s.orderUsd > s.maxInventoryUsd + 1e-9) continue;
-    const share = queueShare(q, side);
-    if (adds && (s.queueGuard ?? 0) > 0 && share !== null && share < s.queueGuard) continue;
-    const skew = adds ? Math.round(Math.abs(ratio) * s.skewTicks) : 0;
-    const inside = s.offsetTicks < 0 && room >= 2 ? 1 : 0;
-    const off = Math.max(0, s.offsetTicks) + skew;
-    let price2 = side === "buy" ? q.bid - off * tick + inside * tick : q.ask + off * tick - inside * tick;
-    const edge = s.edgeBps ?? 0;
-    if (edge > 0) {
-      const midP = (q.bid + q.ask) / 2;
-      const markP = mark > 0 ? mark : midP;
-      price2 = side === "buy" ? Math.min(price2, Math.min(midP, markP) * (1 - edge / 1e4) - skew * tick) : Math.max(price2, Math.max(midP, markP) * (1 + edge / 1e4) + skew * tick);
-    }
-    if (fair !== null && fair > 0) {
-      const at = refLine(side, fair, adds ? s.refBps ?? 0 : (s.refBps ?? 0) / 4);
-      if ((s.refBps ?? 0) > 0) price2 = side === "buy" ? at - skew * tick : at + skew * tick;
-      const line = adds ? refLine(side, fair, s.pullBps ?? 0) : fair;
-      if (adds && (s.refBps ?? 0) <= 0 && (side === "buy" ? price2 > line + 1e-12 : price2 < line - 1e-12)) continue;
-      price2 = side === "buy" ? Math.min(price2, line) : Math.max(price2, line);
-    }
-    price2 = side === "buy" ? Math.min(price2, q.ask - tick) : Math.max(price2, q.bid + tick);
-    price2 = side === "buy" ? snapDown(price2, m.tickSize) : snapUp(price2, m.tickSize);
-    if (!(price2 > 0)) continue;
-    let qty2 = floorStep(s.orderUsd / price2, m);
-    if (!adds && Math.abs(inventory) > 0 && Math.abs(inventory) < qty2) qty2 = floorStep(Math.abs(inventory), m);
-    qty2 = Math.max(qty2, minChildQty(m, price2));
-    out.push({ side, price: price2, quantity: qty2 });
-  }
-  return out;
-}
-var refLine = (side, fair, bps) => side === "buy" ? fair * (1 - bps / 1e4) : fair * (1 + bps / 1e4);
-function pastFair(side, price2, fair, adds, pullBps) {
-  const line = refLine(side, fair, adds ? pullBps : 0);
-  return side === "buy" ? price2 > line + 1e-12 : price2 < line - 1e-12;
-}
-function queueShare(q, side) {
-  const own = side === "buy" ? q.bidSz : q.askSz;
-  const other = side === "buy" ? q.askSz : q.bidSz;
-  if (own === void 0 || other === void 0 || !(own + other > 0)) return null;
-  return own / (own + other);
-}
-
-// packages/copy-engine/src/algo/sizes.ts
+// ../../packages/copy-engine/src/algo/sizes.ts
 function money(n) {
   const a = Math.abs(n);
   const sign2 = n < 0 ? "-" : "";
@@ -14185,7 +14999,11 @@ function checkSizes(s, m, ctx) {
     }
     case "mm": {
       if (!px2) break;
-      out.errors.push(...oneOrder(floorStep(s.orderUsd / px2, m), px2, m, "Each quote"));
+      const q = floorStep(s.orderUsd / px2, m);
+      const minQ = minChildQty(m, px2);
+      if (s.maxInventoryUsd < minQ * px2 - 1e-9) out.errors.push(`Your max holding (${money(s.maxInventoryUsd)}) is under one quote here: each quote goes out at ${minWords(m, px2)}. Raise the max holding to at least ${moneyUp(minQ * px2)}.`);
+      else if (q < minQ - 1e-12) out.notes.push(`Each quote goes out at SoDEX's minimum here, about ${moneyUp(minQ * px2)}.`);
+      else out.errors.push(...oneOrder(q, px2, m, "Each quote"));
       break;
     }
     case "grid": {
@@ -14195,7 +15013,9 @@ function checkSizes(s, m, ctx) {
         break;
       }
       const low = prices[0];
-      out.errors.push(...oneOrder(floorStep(s.orderUsd / low, m), low, m, "Each level's order"));
+      const q = floorStep(s.orderUsd / low, m);
+      if (q < minChildQty(m, low) - 1e-12) out.notes.push(`Each level goes out at SoDEX's minimum here, about ${moneyUp(minChildQty(m, low) * low)}.`);
+      else out.errors.push(...oneOrder(q, low, m, "Each level's order"));
       break;
     }
     case "swarm": {
@@ -14358,7 +15178,7 @@ function closeNote(pos, share, m, px2, out) {
   if (take > maxQ + 1e-12) out.notes.push(`Closing about ${money(take * px2)} is over ${maxWords(m, px2)}: it closes in ${Math.ceil(take / maxQ - 1e-9)} orders, one after the other.`);
 }
 
-// packages/copy-engine/src/algo/limits.ts
+// ../../packages/copy-engine/src/algo/limits.ts
 var OI_NEAR_SHARE = 0.8;
 function positionCapUsd(m, leverage) {
   const tiers = m.marginTiers;
@@ -14435,7 +15255,7 @@ function oiRoomWords(m, head2, price2) {
   return `Open interest on ${m.name} is at ${used}% of SoDEX's cap: about ${money(head2.room * price2)} (${coins2(head2.room)} ${m.base}) can still be added market-wide.`;
 }
 
-// packages/copy-engine/src/algo/sweep.ts
+// ../../packages/copy-engine/src/algo/sweep.ts
 var SWEEP_MAX_AGE_MS = 5e3;
 function sweepRefFor(s, quotes, sodex, now, maxAgeMs = SWEEP_MAX_AGE_MS) {
   const kind = s.reference ?? "oracleMid";
@@ -14478,7 +15298,7 @@ function sweepStep(s) {
   return { type: "send", price: price2, qty: qty2 };
 }
 
-// packages/copy-engine/src/algo/plan.ts
+// ../../packages/copy-engine/src/algo/plan.ts
 function exitLevels(side, x, avg) {
   const sign2 = side === "buy" ? 1 : -1;
   return {
@@ -14539,8 +15359,11 @@ function bandRefused(side, children, m, ref) {
   return children.filter((c) => c.price !== null && (side === "buy" ? c.price > ref * (1 + m.buyLimitUpRatio) + 1e-9 : c.price < ref * (1 - m.sellLimitDownRatio) - 1e-9)).length;
 }
 
-// packages/copy-engine/src/algo/feed.ts
+// ../../packages/copy-engine/src/algo/feed.ts
 var QUOTE_MAX_AGE_MS = 15e3;
+var BOT_QUOTE_MAX_AGE_MS = 3e3;
+var QUOTE_REFRESH_AGE_MS = 1e3;
+var QUOTE_REFRESH_EVERY_MS = 1500;
 var HISTORY_MS = 60 * 6e4;
 var toNum = (v) => {
   const n = typeof v === "string" ? Number(v) : typeof v === "number" ? v : NaN;
@@ -14582,9 +15405,15 @@ var AlgoFeed = class {
   orderCbs = [];
   stateCbs = [];
   sampler = null;
+  refreshing = false;
+  refreshedAt = 0;
   start() {
     this.socket.start();
-    this.sampler ??= timers.every(1e3, () => this.sample());
+    this.sampler ??= timers.every(500, () => {
+      const now = Date.now();
+      if (now - this.sampledAt >= 1e3) this.sample(now);
+      void this.refreshQuotes(now);
+    });
   }
   stop() {
     this.socket.stop();
@@ -14725,7 +15554,42 @@ var AlgoFeed = class {
       }
     }
   }
+  /**
+   * Watched markets whose quote is older than QUOTE_REFRESH_AGE_MS (a still market the socket says nothing about, or
+   * a subscription that went quiet) read their best prices by REST - at most every QUOTE_REFRESH_EVERY_MS, one read
+   * for all of them. A REST answer never overwrites a socket quote newer than the read.
+   */
+  async refreshQuotes(now = Date.now()) {
+    if (!this.o.bookTickers || this.refreshing || now - this.refreshedAt < QUOTE_REFRESH_EVERY_MS || !this.symbols.size) return;
+    const stale = [...this.symbols].filter((s) => now - (this.quotes.get(s)?.at ?? 0) > QUOTE_REFRESH_AGE_MS);
+    if (!stale.length) return;
+    this.refreshing = true;
+    this.refreshedAt = now;
+    try {
+      const data = await this.o.bookTickers();
+      const list = Array.isArray(data) ? data : data?.bookTickers ?? [];
+      const at = Date.now();
+      for (const r of list) {
+        const s = typeof r.symbol === "string" ? r.symbol.toUpperCase() : typeof r.s === "string" ? r.s.toUpperCase() : null;
+        if (!s || !stale.includes(s)) continue;
+        const bid = toNum(r.bidPx ?? r.bidPrice ?? r.b);
+        const ask = toNum(r.askPx ?? r.askPrice ?? r.a);
+        if (bid === null || ask === null || !(bid > 0) || !(ask >= bid)) continue;
+        const prev = this.quotes.get(s);
+        if (prev && prev.at >= now) continue;
+        const bidSz = toNum(r.bidSz ?? r.bidQty ?? r.B);
+        const askSz = toNum(r.askSz ?? r.askQty ?? r.A);
+        this.quotes.set(s, { bid, ask, at, ...bidSz !== null && bidSz >= 0 ? { bidSz } : {}, ...askSz !== null && askSz >= 0 ? { askSz } : {} });
+      }
+    } catch (e) {
+      this.o.log?.warn("algo feed: best prices by REST failed", { error: String(e) });
+    } finally {
+      this.refreshing = false;
+    }
+  }
+  sampledAt = 0;
   sample(now = Date.now()) {
+    this.sampledAt = now;
     for (const s of this.symbols) {
       const q = this.quote(s);
       const m = this.marks.get(s);
@@ -14783,12 +15647,12 @@ var AlgoFeed = class {
     if (!list) return { qty: 0, usd: 0 };
     const from = Date.now() - windowMs;
     let qty2 = 0;
-    let usd = 0;
+    let usd2 = 0;
     for (let i = list.length - 1; i >= 0 && list[i].t >= from; i--) {
       qty2 += list[i].q;
-      usd += list[i].usd;
+      usd2 += list[i].usd;
     }
-    return { qty: qty2, usd };
+    return { qty: qty2, usd: usd2 };
   }
   onPrint(cb) {
     this.printCbs.push(cb);
@@ -14801,7 +15665,7 @@ var AlgoFeed = class {
   }
 };
 
-// packages/copy-engine/src/algo/sink.ts
+// ../../packages/copy-engine/src/algo/sink.ts
 var TIF = { ioc: TimeInForce.IOC, gtx: TimeInForce.GTX, gtc: TimeInForce.GTC };
 function stopsAction(accountId, market, stops, builder) {
   return perpsActions.newOrder(
@@ -14845,19 +15709,26 @@ function childrenAction(accountId, market, orders, builder) {
 }
 var describe2 = (e) => e instanceof SodexApiError ? `${e.message}${e.hint ? ` (${e.hint})` : ""}` : e instanceof Error ? e.message : String(e);
 function readBatch(data, orders) {
-  const list = Array.isArray(data) ? data : unwrapList(data, "orders");
-  const failed = new Set(failedOrders(list).map((r) => r.clOrdID));
+  const list = (Array.isArray(data) ? data : unwrapList(data, "orders")).filter((r) => r && typeof r === "object");
+  const ids = new Set(orders.map((o) => o.clOrdID));
+  const bad = failedOrders(list);
+  const failed = new Set(bad.map((r) => r.clOrdID));
+  const whole = bad.find((r) => !r.clOrdID || !ids.has(r.clOrdID)) ?? null;
   return orders.map((o) => {
     const row = list.find((r) => r.clOrdID === o.clOrdID);
-    const bad = failed.has(o.clOrdID);
-    return {
-      clOrdID: o.clOrdID,
-      ok: !bad,
-      orderId: row?.orderID !== void 0 ? String(row.orderID) : null,
-      error: bad ? row?.error || `code ${row?.code}` : null,
-      outcomeUnknown: false
-    };
+    const own = failed.has(o.clOrdID);
+    if (own || whole && !(row && row.code === 0)) {
+      const r = own ? row : whole;
+      return { clOrdID: o.clOrdID, ok: false, orderId: null, error: r?.error || `code ${r?.code}`, outcomeUnknown: false };
+    }
+    if (!row) return { clOrdID: o.clOrdID, ok: false, orderId: null, error: "SoDEX answered without a row for this order", outcomeUnknown: true };
+    return { clOrdID: o.clOrdID, ok: true, orderId: row.orderID !== void 0 ? String(row.orderID) : null, error: null, outcomeUnknown: false };
   });
+}
+var GONE = /not found|unknown order|does not exist|already/i;
+function cancelFailures(data) {
+  const list = Array.isArray(data) ? data : unwrapList(data, "orders");
+  return failedOrders(list).filter((r) => !GONE.test(r.error ?? "")).map((r) => `${r.clOrdID ? `${r.clOrdID}: ` : ""}${r.error || `code ${r.code}`}`);
 }
 var KeyAlgoSink = class {
   constructor(client, key2, nonces, chainId, builder) {
@@ -14901,19 +15772,68 @@ var KeyAlgoSink = class {
   }
   async cancel(a, market, clOrdIDs) {
     if (!clOrdIDs.length) return;
+    let data;
     try {
-      await this.signAndSend(perpsActions.cancelOrder(a.accountId, clOrdIDs.map((clOrdID) => ({ symbolID: market.id, clOrdID }))));
+      data = await this.signAndSend(perpsActions.cancelOrder(a.accountId, clOrdIDs.map((clOrdID) => ({ symbolID: market.id, clOrdID }))));
     } catch (e) {
-      if (e instanceof SodexApiError && /not found|unknown order|does not exist|already/i.test(e.message)) return;
+      if (e instanceof SodexApiError && GONE.test(e.message)) return;
       throw e;
     }
+    const bad = cancelFailures(data);
+    if (bad.length) throw new Error(`SoDEX did not cancel ${bad.length} order${bad.length === 1 ? "" : "s"}: ${bad.join("; ")}`);
   }
   async setLeverage(a, market, leverage, margin) {
     await this.signAndSend(leverageAction(a.accountId, market, leverage, margin));
   }
 };
 
-// packages/copy-engine/src/algo/reference.ts
+// ../../packages/copy-engine/src/algo/refusals.ts
+var RULES = [
+  ["local", /^not sent\b/i],
+  ["post-only", /post[- _]?only|would (immediately )?(take|cross|match|trade)|immediately (match|execute)|maker only|gtx/i],
+  ["position", /reduce[- ]?only|no position|position (is )?(not|does not|doesn't)|position not found|exceeds? (the )?position|position size|position.*(zero|empty|closed)/i],
+  ["rate", /\b429\b|1015|rate[- ]?limit|too many|quota|weight|order rate|throttl/i],
+  ["nonce", /nonce/i],
+  ["key", /api key|signature|agent|unauthori[sz]ed|not approved|expired|forbidden|\b401\b|\b403\b/i],
+  ["margin", /margin|insufficient|not enough|balance|equity|available/i],
+  ["limit", /open interest|\boi\b|position limit|max(imum)? position|notional cap|risk limit/i],
+  ["halt", /halt|not trading|suspend|delist|closed market|market (is )?closed/i],
+  ["price", /tick|lot|step size|price band|price limit|limit (up|down)|min(imum)? (qty|quantity|notional|size|order)|precision|invalid price|invalid quantity/i]
+];
+function refusalKind(text) {
+  const t = String(text ?? "");
+  for (const [kind, re] of RULES) if (re.test(t)) return kind;
+  return "unknown";
+}
+var countsAsFailure = (k) => k === "unknown" || k === "price";
+function refusalWords(k) {
+  switch (k) {
+    case "post-only":
+      return "the price moved as it was placed (post-only); placed again at the new price";
+    case "position":
+      return "nothing left to reduce on SoDEX";
+    case "margin":
+      return "not enough free margin on SoDEX; new orders wait, closing goes on";
+    case "limit":
+      return "a SoDEX position or open-interest limit; new orders wait, closing goes on";
+    case "rate":
+      return "SoDEX asked to slow down; it waits and goes on";
+    case "local":
+      return "held back here to keep within SoDEX's limits; it goes on";
+    case "nonce":
+      return "a request arrived out of order; sent again";
+    case "key":
+      return "the trading key was not accepted; renew it in setup";
+    case "halt":
+      return "the market is not trading now";
+    case "price":
+      return "SoDEX refused the price or size; re-checking the market";
+    default:
+      return "SoDEX refused it; the details are in our server log";
+  }
+}
+
+// ../../packages/copy-engine/src/algo/reference.ts
 var BASIS_HALF_LIFE_MS = 3e4;
 var REF_MAX_AGE_MS = 2e3;
 var FairBasis = class {
@@ -14940,13 +15860,18 @@ var FairBasis = class {
   }
 };
 
-// packages/copy-engine/src/algo/runtime.ts
+// ../../packages/copy-engine/src/algo/runtime.ts
 var ALGO_TICK_MS = 500;
 var FLUSH_MS = 2e3;
 var MARKETS_REFRESH_MS2 = 10 * 6e4;
 var STOP_DRAIN_MS = 8e3;
 var STOP_PULL_MS = 4e3;
 var HELD_PULL_MS = 5e3;
+var KEY_EXPIRY_PULL_MS = 10 * 6e4;
+var BOT_CLOSE_RETRY_MS = 1e3;
+var BOT_CLOSE_RETRY_MAX_MS = 3e4;
+var BOT_CLOSE_MAX_REFUSALS = 3;
+var POSITION_REFUSAL = /reduce[ -]?only|no position|position (is )?(not|does not|doesn't)|exceeds? (the )?position|position size|position.*(zero|empty|closed)/i;
 var STALE_IOC_MS = 8e3;
 var SENDING_MAX_MS = 2e4;
 var HISTORY_EVERY_MS = 2e4;
@@ -14955,15 +15880,31 @@ var UNLISTED_SETTLE_MS = 20 * 6e4;
 var FILLS_PAGE = 100;
 var DONE_KEPT = 60;
 var MAX_CONSEC_REJECTS = 25;
+var BOT_FAIL_ROUNDS = 4;
+var BOT_FAIL_WAIT_MS = 6e4;
+var BOT_FAIL_WAIT_MAX_MS = 15 * 6e4;
+var BOT_MARGIN_WAIT_MS = 3e4;
+var LEVERAGE_RETRY_MS = 6e4;
 var LIMIT_RETRY_MS = 6e4;
 var LIMIT_MAX_HITS = 4;
 var LIMIT_WORDS_MS = 10 * 6e4;
 var PROBLEM_RECHECK_MS = 6e4;
 var ORDER_POLL_SPACING_MS = 1e3;
+var ORDER_RESYNC_SPACING_MS = 200;
+var BOT_POSITION_CHECK_MS = 3e4;
 var ORDER_POLL_MIN_MS = 3e3;
 var ORDER_WATCH_EVERY_MS = 3e4;
 var LATE_MS = 3e4;
 var TAKER_RETRY_MS = 1e3;
+function shuffled(list) {
+  for (let i = list.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const x = list[i];
+    list[i] = list[j];
+    list[j] = x;
+  }
+  return list;
+}
 var POSITIONS_MS = 5e3;
 var ACCOUNT_MS = 1e4;
 var EXITS_RESIZE_MS = 5e3;
@@ -14983,9 +15924,11 @@ var EXITS_RETRY_MS = 3e4;
 var EXITS_MAX_REFUSALS = 5;
 var UPDATABLE = /* @__PURE__ */ new Set(["limitPrice", "upper", "lower", "maxSpreadBps", "label", "quantity"]);
 var BOT_UPDATABLE = {
-  mm: /* @__PURE__ */ new Set(["label", "maxSpreadBps", "upper", "lower", "orderUsd", "maxInventoryUsd", "offsetTicks", "chaseTicks", "minRepriceMs", "skewTicks", "edgeBps", "queueGuard", "levels", "moveGuard", "refBps", "pullBps", "volumeTargetUsd", "maxLossUsd", "endAt", "onStop"]),
-  grid: /* @__PURE__ */ new Set(["label", "maxSpreadBps", "upper", "lower", "orderUsd", "volumeTargetUsd", "maxLossUsd", "endAt", "onStop", "outOfRange"])
+  // Everything but the market, the kind and practice or real (owner 2026-11-08: every setting saves in place, no restart).
+  mm: /* @__PURE__ */ new Set(["ref", "noFair", "placeBps", "calmBps", "calmMs", "pauseAfter", "pauseMs", "leverage", "marginMode", "postOnly", "label", "maxSpreadBps", "upper", "lower", "orderUsd", "maxInventoryUsd", "offsetTicks", "chaseTicks", "minRepriceMs", "skewTicks", "edgeBps", "queueGuard", "levels", "moveGuard", "refBps", "pullBps", "placeBps", "calmBps", "calmMs", "stillBps", "stillMs", "restMs", "flowGate", "quiet", "quietOnly", "news", "volumeTargetUsd", "maxLossUsd", "endAt", "onStop"]),
+  grid: /* @__PURE__ */ new Set(["low", "high", "levels", "spacing", "leverage", "marginMode", "postOnly", "label", "maxSpreadBps", "upper", "lower", "orderUsd", "volumeTargetUsd", "maxLossUsd", "endAt", "onStop", "outOfRange"])
 };
+var FLOW_KEEP_MS = 36e5;
 var BOT_CLOSE_REST_MS = 6e4;
 var BOT_CLOSE_SLIP_BPS = 30;
 var GRID_RETRY_MS = 3e3;
@@ -14995,6 +15938,7 @@ var gridLevelOf = (c) => {
   return x ? Number(x[1]) - 1 : -1;
 };
 var dec3 = (n) => canonicalDecimal(numberToPlainString(Number(n.toPrecision(12))));
+var utcWords = (ms) => `${new Date(ms).toISOString().slice(0, 16).replace("T", " ")} UTC`;
 function onTick(p, side, tickSize) {
   const k = p / Number(tickSize);
   if (Math.abs(k - Math.round(k)) < 1e-6) return snapNearest(p, tickSize);
@@ -15006,7 +15950,7 @@ var AlgoRuntime = class {
     if (host2.market) this.market = host2.market;
     else {
       if (!host2.factory) throw new Error("an algo runtime needs a market feed or a WebSocket factory");
-      this.market = new AlgoFeed({ network: host2.network, factory: host2.factory, log: host2.log });
+      this.market = new AlgoFeed({ network: host2.network, factory: host2.factory, log: host2.log, bookTickers: () => host2.sodex.get("/api/v1/perps/markets/bookTickers") });
     }
     this.market.onOrder((u) => this.onOrderUpdate(u));
     this.market.onPrint((p) => this.onPrint(p));
@@ -15040,8 +15984,20 @@ var AlgoRuntime = class {
   socketWasUp = false;
   /** Algos that raised a hold in the step now running (steps of one algo never overlap). */
   heldNow = /* @__PURE__ */ new Set();
-  /** When a held bot last tried to pull its quotes (pullHeldQuotes). */
+  /** When an account a bot pauses after last took: market:account -> ms. */
+  takerAt = /* @__PURE__ */ new Map();
+  /**
+   * What the patient taker (PATIENT_TAKER_ACCOUNT) took per market, for MmSpec.flowGate: USD per second, oldest first,
+   * an hour at most (the longest window), and since when it is watched. Kept only while a running or held volume
+   * maker on that market has a gate (onPrint drops it otherwise).
+   */
+  flow = /* @__PURE__ */ new Map();
+  /** When a held bot last tried to pull its quotes (pullHeldQuotes), or an ended one its stray quotes (sweepEnded). */
   heldPullAt = /* @__PURE__ */ new Map();
+  /** When a cancel without a key here was last said in an algo's log (once every 10 min, not per try). */
+  noSinkSaid = /* @__PURE__ */ new Map();
+  /** The last reason SoDEX gave refusing an algo's child (a bot's close tells a post-only refusal from a position one). */
+  lastRefusal = /* @__PURE__ */ new Map();
   eventSeq = 0;
   /** Each owner's positions and account, read at most every few seconds (conditions, closes, the leverage ceiling); `from`: when that read left. */
   positionsOf = /* @__PURE__ */ new Map();
@@ -15058,6 +16014,8 @@ var AlgoRuntime = class {
   exitsFlatSince = /* @__PURE__ */ new Map();
   /** Algos whose position reads disagreed: not read again for a decision before this (positionConfirmed). */
   confirmRetryAt = /* @__PURE__ */ new Map();
+  /** Bots whose refused reduce-only order is being checked against the account's position (reduceRefused). */
+  reduceChecks = /* @__PURE__ */ new Set();
   paper = /* @__PURE__ */ new Map();
   timers = [];
   running = false;
@@ -15065,6 +16023,8 @@ var AlgoRuntime = class {
   oracleQuotes = /* @__PURE__ */ new Map();
   /** The Binance-led makers' basis per market (reference.ts). */
   fairs = /* @__PURE__ */ new Map();
+  /** The reference's mids of the last seconds per market, oldest first, for calmBps. */
+  refTrail = /* @__PURE__ */ new Map();
   /* ------------------------------------------------------------ lifecycle ----- */
   async start() {
     if (this.running) return;
@@ -15078,6 +16038,15 @@ var AlgoRuntime = class {
       }
       if (FINAL_STATUSES.has(a.status)) {
         for (const c of this.keptLive(a)) this.byClOrd.set(c.clOrdID, a.id);
+        for (const c of this.strayLive(a)) {
+          if (a.spec.paper) {
+            c.state = "done";
+            c.cancelling = false;
+            continue;
+          }
+          this.byClOrd.set(c.clOrdID, a.id);
+          c.state = "unknown";
+        }
         continue;
       }
       for (const c of a.children) {
@@ -15128,7 +16097,7 @@ var AlgoRuntime = class {
     const symbols = /* @__PURE__ */ new Set();
     const weight = /* @__PURE__ */ new Map();
     for (const a of this.algos.values()) {
-      const exits2 = this.liveExits(a).length > 0 || this.keptLive(a).length > 0;
+      const exits2 = this.liveExits(a).length > 0 || this.keptLive(a).length > 0 || this.strayLive(a).length > 0;
       if (FINAL_STATUSES.has(a.status) && !exits2) continue;
       for (const s of algoSymbols(a.spec)) symbols.add(s);
       if (a.spec.paper) continue;
@@ -15157,6 +16126,30 @@ var AlgoRuntime = class {
     b.update(mid(q), refMid, now);
     return b.fair(refMid);
   }
+  /** How far the reference moved over the last `ms`, bp (+ up). 0 with too little history. */
+  refMove(market, ms, now) {
+    const trail2 = this.refTrail.get(market);
+    if (!trail2 || trail2.length < 2) return 0;
+    const last = trail2[trail2.length - 1];
+    let from = last;
+    for (const x of trail2) {
+      if (x[0] >= now - ms) {
+        from = x;
+        break;
+      }
+    }
+    return (last[1] - from[1]) / from[1] * 1e4;
+  }
+  /** The reference's path over the last `ms`, bp: every move, either way. null while the trail does not reach that far back. */
+  refPath(market, ms, now) {
+    const trail2 = this.refTrail.get(market);
+    if (!trail2?.length || trail2[0][0] > now - ms) return null;
+    let path = 0;
+    for (let i = 1; i < trail2.length; i++) {
+      if (trail2[i][0] >= now - ms) path += Math.abs(trail2[i][1] - trail2[i - 1][1]) / trail2[i][1];
+    }
+    return path * 1e4;
+  }
   /**
    * A reference tick (the fast pull): every running Binance-led maker on that market cancels at once a quote the fair
    * price came past its line (bots.ts pastFair) - before the next step, and before SoDEX's takers who watch Binance
@@ -15164,20 +16157,29 @@ var AlgoRuntime = class {
    */
   onReference(market) {
     if (!this.running) return;
+    const rq = this.host.reference?.quote(market);
+    if (rq) {
+      let trail2 = this.refTrail.get(market);
+      if (!trail2) this.refTrail.set(market, trail2 = []);
+      trail2.push([rq.at, (rq.bid + rq.ask) / 2]);
+      while (trail2.length > 2 && trail2[1][0] < rq.at - 12e4) trail2.shift();
+    }
     const q = this.market.quote(market);
     const m = this.markets.get(market);
     if (!q || !m) return;
     const now = Date.now();
     let fair;
+    const pulls = [];
     for (const a of this.algos.values()) {
       const s = a.spec;
-      if (s.kind !== "mm" || !s.ref || s.symbol !== market || a.status !== "running") continue;
+      if (s.kind !== "mm" || !s.ref || s.noFair || s.symbol !== market || a.status !== "running") continue;
       if (fair === void 0) fair = this.fairFor(market, q, now);
       if (fair === null) return;
       const inv = bookInventory(a.book);
       const stale = this.live(a).filter((c) => c.state === "open" && !c.cancelling && c.tif !== "ioc" && pastFair(c.side, c.price, fair, c.side === "buy" ? inv >= 0 : inv <= 0, s.pullBps ?? 0));
-      if (stale.length) void this.cancelChildren(a, m, stale).catch((e) => this.host.log.warn("algo: fast pull failed", { algo: a.id, error: String(e) }));
+      if (stale.length) pulls.push([a, stale]);
     }
+    for (const [a, stale] of shuffled(pulls)) void this.cancelChildren(a, m, stale).catch((e) => this.host.log.warn("algo: fast pull failed", { algo: a.id, error: String(e) }));
   }
   /**
    * Orders of wallets the socket does not follow (SoDEX lets one IP follow 10;
@@ -15190,7 +16192,7 @@ var AlgoRuntime = class {
    * (settleStale), so no fill is lost.
    */
   async pollOrders(now = Date.now()) {
-    if (this.polling || now - this.lastPollAt < ORDER_POLL_SPACING_MS) return;
+    if (this.polling || now - this.lastPollAt < (this.resync.size ? ORDER_RESYNC_SPACING_MS : ORDER_POLL_SPACING_MS)) return;
     if (now - this.watchedAt >= ORDER_WATCH_EVERY_MS) {
       this.watchedAt = now;
       this.syncWatch();
@@ -15247,6 +16249,16 @@ var AlgoRuntime = class {
     const kept = a.k.kept ?? [];
     return kept.length ? a.children.filter((c) => kept.includes(c.clOrdID) && LIVE.has(c.state)) : [];
   }
+  /**
+   * An ended bot's children still live that it did not leave on purpose: quotes its end could not cancel (no key
+   * here, a cancel SoDEX refused or that threw) or whose fate SoDEX has not told. Nothing steps an ended bot, so
+   * they are asked of SoDEX and cancelled again on a timer (sweepEnded) until none is left.
+   */
+  strayLive(a) {
+    if (!a.spec.bot || !FINAL_STATUSES.has(a.status)) return [];
+    const kept = a.k.kept ?? [];
+    return a.children.filter((c) => LIVE.has(c.state) && !kept.includes(c.clOrdID));
+  }
   /** Paused or ended: nothing new may be sent for it. */
   stopped(a) {
     return FINAL_STATUSES.has(a.status) || a.status === "paused";
@@ -15254,6 +16266,10 @@ var AlgoRuntime = class {
   /* ------------------------------------------------------------- the API ----- */
   get(id) {
     return this.algos.get(id) ?? null;
+  }
+  /** A market's SoDEX id, from the listed markets (null when not listed or not read yet). */
+  marketId(symbol2) {
+    return this.markets.get(symbol2)?.id ?? null;
   }
   list(owner) {
     const o = owner?.toLowerCase();
@@ -15306,6 +16322,10 @@ var AlgoRuntime = class {
       observedCountry: n.observedCountry ?? null,
       k: {}
     };
+    if (n.takeOver) {
+      a.k.after = n.takeOver;
+      a.k.takeOver = n.takeOver;
+    } else if (n.after) a.k.after = n.after;
     await this.startSizes(a);
     await this.startLimits(a);
     if (spec.triggerPrice !== null) {
@@ -15315,8 +16335,9 @@ var AlgoRuntime = class {
     this.algos.set(a.id, a);
     await this.host.store.saveAlgo(a);
     this.syncWatch();
-    const what = spec.kind === "basket" ? `Basket of ${spec.legs.length} markets` : `${ALGO_NAMES[spec.kind]} ${spec.side === "buy" ? "buy" : "sell"} on ${spec.symbol}`;
+    const what = spec.kind === "basket" ? `Basket of ${spec.legs.length} markets` : spec.kind === "mm" ? `Market maker on ${spec.symbol}` : spec.kind === "grid" ? `Grid on ${spec.symbol}` : `${ALGO_NAMES[spec.kind]} ${spec.side === "buy" ? "buy" : "sell"} on ${spec.symbol}`;
     await this.event(a, "status", `${what} placed${spec.paper ? " (paper: nothing is sent)" : ""}.`);
+    for (const c of n.checks ?? []) await this.event(a, "info", `Check passed: ${c}`);
     this.host.onChange?.(a.id);
     return a;
   }
@@ -15379,10 +16400,55 @@ var AlgoRuntime = class {
     const a = this.need(id);
     if (FINAL_STATUSES.has(a.status)) throw new Error("This algo has ended.");
     if (a.status === "paused") return a;
+    if (a.k.closing) throw new Error("It is closing what it holds: a close cannot be paused. Stop it again to leave the position as it is.");
     a.k.pausedFrom = a.status;
     await this.setStatus(a, "paused", "Paused by you.");
     await this.pullResting(a);
     for (const c of this.linkedOf(a)) if (!FINAL_STATUSES.has(c.status)) await this.pause(c.id);
+    return a;
+  }
+  /**
+   * VIP move, the receiving side: an algo another executor of ours ran (its record, book and children as they were,
+   * paused with its quotes pulled), taken in under the same id. Live children it still names are asked about on
+   * SoDEX, as after a restart. Resume it to go on.
+   */
+  async adopt(rec, note = "Moved to the VIP servers: it goes on from here with the same book.") {
+    const here = this.algos.get(rec.id);
+    if (here && !(FINAL_STATUSES.has(here.status) && here.k.handedOver === true)) throw new Error("This algo is here already.");
+    const a = JSON.parse(JSON.stringify(rec));
+    for (const c of a.children) {
+      this.byClOrd.set(c.clOrdID, a.id);
+      if (LIVE.has(c.state) && !a.spec.paper) c.state = "unknown";
+      if (a.spec.paper && LIVE.has(c.state)) {
+        c.state = "done";
+        c.cancelling = false;
+      }
+    }
+    delete a.k.handedOver;
+    this.algos.set(a.id, a);
+    await this.save(a);
+    await this.event(a, "info", note);
+    this.syncWatch();
+    this.host.onChange?.(a.id);
+    return a;
+  }
+  /**
+   * VIP move, the sending side: the algo now runs on the VIP executor. Its quotes are pulled (it was paused for the
+   * move) and it ends here without closing anything: what it holds is the new one's.
+   */
+  async handOver(id, reason) {
+    const a = this.need(id);
+    if (FINAL_STATUSES.has(a.status)) return a;
+    await this.pullResting(a);
+    a.status = "cancelled";
+    a.statusReason = reason;
+    a.k.handedOver = true;
+    a.endedAt = Date.now();
+    a.updatedAt = a.endedAt;
+    await this.save(a);
+    await this.event(a, "status", reason);
+    this.syncWatch();
+    this.host.onChange?.(a.id);
     return a;
   }
   async resume(id) {
@@ -15418,7 +16484,15 @@ var AlgoRuntime = class {
       return a;
     }
     for (const c of this.linkedOf(a)) if (!FINAL_STATUSES.has(c.status)) await this.cancel(c.id, o);
-    if (!o.pullAll && !a.k.closing && await this.stopBot(a, "cancelled", "Stopped by you.")) return a;
+    if (a.spec.bot && (o.keep || o.close) && (a.spec.kind === "mm" || a.spec.kind === "grid")) {
+      const want = o.keep ? "keep" : "close";
+      if (a.spec.onStop !== want) {
+        a.spec.onStop = want;
+        await this.save(a);
+      }
+    }
+    if (a.k.closing && o.close && !o.pullAll) return a;
+    if (!o.pullAll && !a.k.closing && await this.stopBot(a, "cancelled", "Stopped by you.", o.now === true)) return a;
     await this.end(a, "cancelled", a.k.closing ? "Stopped by you; what it still holds is left as it is." : a.spec.bot ? "Stopped by you." : "Cancelled by you.");
     if (o.pullAll) {
       for (const c of this.linkedOf(a)) if (this.hasLeftovers(c)) await this.pullLeftovers(c);
@@ -15444,7 +16518,7 @@ var AlgoRuntime = class {
   }
   /** Whether an ended algo still has something on SoDEX (or the paper book): live exits, or a child it left resting. */
   hasLeftovers(a) {
-    return this.liveExits(a).some((x) => !x.cancelling) || this.keptLive(a).some((c) => !c.cancelling);
+    return this.liveExits(a).some((x) => !x.cancelling) || this.keptLive(a).some((c) => !c.cancelling) || this.strayLive(a).some((c) => !c.cancelling);
   }
   /** Cancel an ended algo's live exits and kept children; its exits are not placed again. Its final status stays. */
   async pullLeftovers(a) {
@@ -15513,13 +16587,35 @@ var AlgoRuntime = class {
       const taking = this.live(a).filter((c) => c.tif === "ioc" || c.cancelling || c.state === "unknown").reduce((x, c) => x + Math.max(0, c.quantity - c.filled), 0);
       if (a.filled + taking >= want - 1e-12) throw new Error(`An order is filling right now: the new size must be more than ${dec3(a.filled + taking)}.`);
     }
-    const spec = parseAlgoSpec(next);
+    let spec;
+    try {
+      spec = parseAlgoSpec(next);
+    } catch (e) {
+      const legacy = a.spec.bot && !a.spec.paper && a.spec.maxLossUsd == null && next.maxLossUsd == null && /loss limit/i.test(String(e instanceof Error ? e.message : e));
+      if (!legacy) throw e;
+      spec = { ...parseAlgoSpec({ ...next, paper: true }), paper: false };
+    }
     a.spec = spec;
-    if ((spec.kind === "mm" || spec.kind === "grid") && ["orderUsd", "offsetTicks", "skewTicks", "maxInventoryUsd", "edgeBps"].some((k) => k in patch)) {
+    if (spec.kind === "grid" && "orderUsd" in patch) delete a.k.gz;
+    const relayout = spec.kind === "grid" && ["low", "high", "levels", "spacing"].some((k) => k in patch);
+    if (relayout && spec.kind === "grid") {
+      const m = this.markets.get(spec.symbol);
+      if (m) {
+        const prices = gridPrices(spec, m.tickSize);
+        const q = this.market.quote(spec.symbol);
+        const px2 = this.market.mark(spec.symbol)?.mark ?? (q ? mid(q) : (spec.low + spec.high) / 2);
+        a.k.gp = prices;
+        a.k.gs = gridStart(prices, px2);
+        delete a.k.gz;
+        delete a.k.gretry;
+      }
+    }
+    if ((spec.kind === "mm" || spec.kind === "grid") && (relayout || ["orderUsd", "offsetTicks", "skewTicks", "maxInventoryUsd", "edgeBps", "postOnly", "ref", "noFair", "refBps", "leverage"].some((k) => k in patch))) {
       const m = this.markets.get(spec.symbol);
       const resting = this.live(a).filter((c) => c.tif !== "ioc" && !c.cancelling);
       if (m && resting.length) await this.cancelChildren(a, m, resting);
     }
+    if ("ref" in patch) this.syncWatch();
     const after = this.targetOf(a);
     if (patch.quantity !== void 0 && before !== null && after !== null && a.startedAt !== null && (spec.kind === "twap" || spec.kind === "vwap")) {
       const steps = a.k.resize ?? [];
@@ -15567,7 +16663,7 @@ var AlgoRuntime = class {
     return base2 * share + due;
   }
   async events(id, q = {}) {
-    return this.host.store.algoEvents({ algoId: id, limit: q.limit ?? 200, before: q.before });
+    return this.host.store.algoEvents({ algoId: id, limit: q.limit ?? 200, before: q.before, after: q.after });
   }
   /* ---------------------------------------------------------------- views ----- */
   view(id) {
@@ -15614,6 +16710,7 @@ var AlgoRuntime = class {
     if (s.startAt && a.status === "scheduled") nextAt = s.startAt;
     const live = a.children.filter((c) => LIVE.has(c.state));
     const working = live.length ? live.length === 1 ? `${live[0].tif === "ioc" ? "Taking" : "Resting"} ${live[0].quantity - live[0].filled} at ${live[0].price}` : `${live.length} orders working` : null;
+    const gate = a.spec.kind === "mm" && !FINAL_STATUSES.has(a.status) ? a.k.mgate : void 0;
     return {
       algo: a,
       target,
@@ -15624,7 +16721,7 @@ var AlgoRuntime = class {
       marketVwap,
       nextAt,
       endsAt,
-      working,
+      working: gate ? working ? `${working} \xB7 ${gate}` : gate : working,
       triggerPrice: s.kind === "trailing" ? a.k.stop ?? null : null,
       conditions: s.kind === "conditional" ? s.conditions.map((c, i) => ({ text: this.describeCondition(c), ok: Boolean(a.k.ok?.[i]) })) : null,
       exits: (a.exitOrders ?? []).length ? (a.exitOrders ?? []).filter((x) => LIVE.has(x.state) || x.filled > 0).map((x) => ({ kind: x.exit ?? "sl", price: x.price, quantity: x.quantity, filled: x.filled, live: LIVE.has(x.state) })) : null,
@@ -15636,7 +16733,8 @@ var AlgoRuntime = class {
   botView(a) {
     const b = a.book ?? emptyBook();
     const q = this.market.quote(a.spec.symbol);
-    const mark = this.market.mark(a.spec.symbol)?.mark ?? (q ? mid(q) : a.filled > 0 ? a.filledValue / a.filled : null);
+    const ended = FINAL_STATUSES.has(a.status) && b.endMark !== void 0 ? b.endMark : null;
+    const mark = ended ?? this.market.mark(a.spec.symbol)?.mark ?? (q ? mid(q) : a.filled > 0 ? a.filledValue / a.filled : null);
     const px2 = mark ?? 0;
     const volume = bookVolume(b);
     return {
@@ -15651,8 +16749,14 @@ var AlgoRuntime = class {
       costPerMillion: costPerMillion(b, px2),
       fills: b.fills,
       mark,
+      // SoDEX's minimum order at the mark now (USD): the page counts margin on it as the executor does (audit 2026-11-09).
+      minOrderUsd: (() => {
+        const m = this.markets.get(a.spec.symbol);
+        return m && px2 > 0 ? minChildQty(m, px2) * px2 : null;
+      })(),
       orders: this.live(a).filter((c) => c.tif !== "ioc" && !c.cancelling).map((c) => ({ side: c.side, price: c.price, quantity: c.quantity - c.filled, tag: c.tag })),
-      closing: !!a.k.closing
+      closing: !!a.k.closing,
+      ...b.takers ? { takers: { ...b.takers } } : {}
     };
   }
   /** The base quantity the algo is to fill, as far as it is known. */
@@ -15667,12 +16771,17 @@ var AlgoRuntime = class {
   /** One step for every live algo (the timer calls this; tests call it directly). */
   tick(now = Date.now()) {
     this.checkPaperExits();
-    for (const a of this.algos.values()) {
+    for (const a of shuffled([...this.algos.values()])) {
       if (FINAL_STATUSES.has(a.status)) {
         const m = this.markets.get(a.spec.symbol);
         if (m && this.exitsWatchDue(a, now)) void this.watchExits(a, m, now).catch((e) => this.host.log.error("algo: exits watch failed", { algo: a.id, error: String(e) }));
         else if (m && !this.exitsWatching.has(a.id) && !this.exitsUnchecked(a) && this.exitsDue(a, now)) {
           void this.syncExits(a, m, true).catch((e) => this.host.log.error("algo: exits failed", { algo: a.id, error: String(e) }));
+        }
+        if (this.sweepDue(a, now)) {
+          this.heldPullAt.set(a.id, now);
+          this.busy.add(a.id);
+          void this.sweepEnded(a, now).catch((e) => this.host.log.warn("algo: ended bot sweep failed", { algo: a.id, error: String(e) })).finally(() => this.busy.delete(a.id));
         }
       }
       if (FINAL_STATUSES.has(a.status) || this.busy.has(a.id)) continue;
@@ -15702,10 +16811,11 @@ var AlgoRuntime = class {
     const s = a.spec;
     const m = this.markets.get(s.symbol);
     if (!m) {
-      if (this.markets.size) await this.end(a, "failed", `${s.symbol} is no longer listed on SoDEX perps.`);
+      if (this.markets.size) await this.endBot(a, "failed", `${s.symbol} is no longer listed on SoDEX perps.`);
       return;
     }
     await this.settleStale(a, m, now);
+    if (s.bot && a.status !== "scheduled" && await this.botGuard(a, m, now)) return;
     if (a.status === "paused") {
       await this.pullResting(a);
       return;
@@ -15731,17 +16841,29 @@ var AlgoRuntime = class {
         await this.hold(a, `Held: ${policy.reason ?? "not available in your region."}`);
         return;
       }
+      const expires = s.bot ? this.keyExpiring(a, now) : null;
+      if (expires !== null) {
+        await this.pullHeldQuotes(a, now);
+        await this.keyExpiryWarn(a, expires);
+        await this.hold(a, `Held: the trading key expires at ${utcWords(expires)}. Renew it to go on.`);
+        return;
+      }
     }
-    if (typeof a.k.limitUntil === "number" && now < a.k.limitUntil) {
+    if (typeof a.k.limitUntil === "number" && now < a.k.limitUntil && !a.spec.bot) {
       await this.pullHeldQuotes(a, now);
       await this.hold(a, String(a.k.limitReason ?? "Held: a SoDEX limit is reached."));
+      return;
+    }
+    if (a.spec.bot && !a.k.closing && typeof a.k.failUntil === "number" && now < a.k.failUntil) {
+      await this.pullHeldQuotes(a, now);
+      await this.hold(a, `Held: SoDEX kept refusing its orders; it tries again at ${utcWords(a.k.failUntil)}.`);
       return;
     }
     if (m.status !== "TRADING") {
       await this.hold(a, `SoDEX is not trading ${m.name} right now.`);
       return;
     }
-    const q = this.market.quote(s.symbol);
+    const q = this.quoteOf(a, now);
     if (!q) {
       await this.pullHeldQuotes(a, now);
       await this.hold(a, "Waiting for a price from SoDEX.");
@@ -15757,7 +16879,7 @@ var AlgoRuntime = class {
     if (b) {
       const words = `the price is ${b.which === "upper" ? "at or above" : "at or below"} your ${b.which} bound of ${b.price}`;
       if (b.then === "stop" || s.kind === "scale") {
-        await this.end(a, this.isDone(a, m) ? "done" : "expired", `Stopped: ${words}.`);
+        await this.endBot(a, this.isDone(a, m) ? "done" : "expired", `Stopped: ${words}.`);
         return;
       }
       if (b.then === "hold") {
@@ -15915,6 +17037,17 @@ var AlgoRuntime = class {
   async ready(a, now) {
     const s = a.spec;
     if (s.startAt !== null && now < s.startAt) return false;
+    if (typeof a.k.after === "string") {
+      const old = this.algos.get(a.k.after);
+      if (old && (!FINAL_STATUSES.has(old.status) || this.live(old).length)) {
+        if (!a.k.afterSaid) {
+          a.k.afterSaid = true;
+          this.dirty.add(a.id);
+          await this.event(a, "info", a.k.takeOver ? "Waits for the old bot to pull its orders, then takes over what it holds." : "Waits for the old bot to close what it holds, then starts.");
+        }
+        return false;
+      }
+    }
     if (s.triggerPrice !== null) {
       const mk2 = this.market.mark(s.symbol)?.mark ?? null;
       if (mk2 === null) return false;
@@ -15985,6 +17118,17 @@ var AlgoRuntime = class {
       a.k.waveAt = now;
     }
     if (s.bot) a.book ??= emptyBook();
+    if (s.bot && typeof a.k.takeOver === "string") {
+      const old = this.algos.get(a.k.takeOver);
+      const qty2 = old?.book ? bookInventory(old.book) : 0;
+      const px2 = this.market.mark(s.symbol)?.mark ?? a.arrival;
+      if (old && old.spec.symbol === s.symbol && qty2 !== 0 && px2 !== null && px2 > 0) {
+        a.book.carryQty = qty2;
+        a.book.carryValue = qty2 * px2;
+        await this.event(a, "info", `Took over ${qty2 > 0 ? "a long" : "a short"} of ${Math.abs(qty2)} from the old bot, at ${px2}.`);
+      }
+      delete a.k.takeOver;
+    }
     if (FINAL_STATUSES.has(a.status)) return false;
     if (a.status === "paused") {
       a.k.pausedFrom = "running";
@@ -16100,19 +17244,140 @@ var AlgoRuntime = class {
    * off that touch would chase its own price.
    */
   /* ------------------------------------------------------------- the bots ----- */
+  /** The book quote a step works from: a bot's no older than BOT_QUOTE_MAX_AGE_MS (it rests at the touch), other algos' the feed's. */
+  quoteOf(a, now) {
+    const q = this.market.quote(a.spec.symbol);
+    if (q && a.spec.bot && now - q.at > BOT_QUOTE_MAX_AGE_MS) return null;
+    return q;
+  }
+  /** When a live bot's trading key expires, once that is KEY_EXPIRY_PULL_MS away or less; else null. */
+  keyExpiring(a, now) {
+    if (a.spec.paper || !this.host.keyExpiresAt) return null;
+    const at = this.host.keyExpiresAt(a.owner);
+    return at !== null && Number.isFinite(at) && now >= at - KEY_EXPIRY_PULL_MS ? at : null;
+  }
+  /** Told once per expiry time (a renewed key that runs out again is told again): the bell and the log. */
+  async keyExpiryWarn(a, at) {
+    if (a.k.keyWarned === at) return;
+    a.k.keyWarned = at;
+    this.dirty.add(a.id);
+    const text = `The trading key expires at ${utcWords(at)}: renew it. Its quotes are pulled and nothing new opens; a close of what it holds still goes out until then.`;
+    await this.event(a, "error", text);
+    try {
+      this.host.onNotice?.({ id: `algo:${a.id}:key-expiry:${at}`, owner: a.owner, source: "algo", ref: a.id, kind: "key-expiry", grade: "warn", title: `${algoName(a)}: the trading key expires soon`, body: text, at: Date.now(), paper: !!a.spec.paper });
+    } catch (e) {
+      this.host.log.warn("algo: notice not taken", { error: String(e) });
+    }
+  }
+  /**
+   * Every step of a bot that has begun, before any hold: its limits on every step (a held bot still holds what it
+   * holds), and its close - reduce-only, so it runs under the holds that stop new quotes (the brake, a key problem,
+   * the region, a SoDEX limit wait). Only what makes a close impossible waits: no price, a market not trading, an
+   * expired key - and the trader's own pause. true: the step is handled here (closing, or ended).
+   */
+  async botGuard(a, m, now) {
+    const q = this.quoteOf(a, now);
+    const mk2 = this.market.mark(a.spec.symbol)?.mark ?? (q ? mid(q) : null);
+    const b = a.book ??= emptyBook();
+    if (mk2 !== null && sampleBook(b, mk2, now)) this.dirty.add(a.id);
+    if (!a.k.closing && mk2 !== null) await this.checkOutside(a, m, mk2, now);
+    if (!a.k.closing) await this.botLimitsHit(a, mk2, now);
+    if (FINAL_STATUSES.has(a.status)) return true;
+    if (!a.k.closing) return false;
+    if (a.status === "paused") {
+      await this.pullResting(a);
+      return true;
+    }
+    const expires = this.keyExpiring(a, now);
+    if (expires !== null && now >= expires) {
+      await this.hold(a, "Held: the trading key expired. Renew it so it can close what it holds.");
+      return true;
+    }
+    if (m.status !== "TRADING") {
+      await this.hold(a, `SoDEX is not trading ${m.name} right now; it closes what it holds once it does.`);
+      return true;
+    }
+    if (!q || mk2 === null) {
+      await this.hold(a, "Waiting for a price from SoDEX to close what it holds.");
+      return true;
+    }
+    this.heldNow.delete(a.id);
+    await this.stepBotClose(a, m, q, mk2, now);
+    if (!this.heldNow.has(a.id) && !FINAL_STATUSES.has(a.status)) await this.run(a);
+    return true;
+  }
+  /**
+   * The bot's holding against the account's position on its market (owner 2026-11-08: "position closed outside it -
+   * handle it well"). A bot runs only where nothing else of the wallet trades, so the two agree unless something
+   * outside it moved the position: a close by hand, a liquidation, a stop. Every BOT_POSITION_CHECK_MS, when nothing
+   * of its own is in flight, the position is read until the reads agree (positionConfirmed), then:
+   *   - closed outside (flat): the bot's holding is booked closed at the mark (its PnL stays what it was at that price),
+   *     and it quotes on from flat - its resting quotes are pulled and placed again;
+   *   - reduced outside (same side, smaller): booked down to what the account holds;
+   *   - grown or turned outside (a trade by hand): left alone - that position is yours, the bot manages its own part
+   *     only (said once).
+   * Each case is in its log and a notice.
+   */
+  async checkOutside(a, m, mk2, now) {
+    if (a.spec.paper || !a.book || a.status !== "running") return;
+    if (now - Number(a.k.posCheckAt ?? 0) < BOT_POSITION_CHECK_MS) return;
+    if (this.live(a).some((c) => c.state !== "open" || c.cancelling) || now - Number(a.k.lastFillAt ?? 0) < 5e3) return;
+    a.k.posCheckAt = now;
+    const inv = bookInventory(a.book);
+    const pos = await this.positionConfirmed(a, a.spec.symbol);
+    if (pos === null || pos === "disagree") return;
+    const step = Number(m.stepSize);
+    if (Math.abs(pos - inv) < step / 2) {
+      delete a.k.outsideSaid;
+      return;
+    }
+    const same = Math.sign(pos) === Math.sign(inv) || Math.abs(pos) < step / 2;
+    if (Math.abs(inv) >= step / 2 && same && Math.abs(pos) < Math.abs(inv)) {
+      const gone = inv - pos;
+      a.book.carryQty = (a.book.carryQty ?? 0) - gone;
+      a.book.carryValue = (a.book.carryValue ?? 0) - gone * mk2;
+      this.dirty.add(a.id);
+      await this.pullResting(a);
+      const flat = Math.abs(pos) < step / 2;
+      const text = flat ? `Its ${m.name} position (${dec3(Math.abs(inv))} ${m.base}) was closed outside it (by hand, a stop or a liquidation): booked closed at ${dec3(mk2)}. It quotes on from flat.` : `Its ${m.name} position was reduced outside it, from ${dec3(inv)} to ${dec3(pos)} ${m.base}: the difference is booked closed at ${dec3(mk2)}.`;
+      await this.event(a, "info", text);
+      this.host.onNotice?.({ id: `algo:${a.id}:closed:${now}`, owner: a.owner, source: "algo", ref: a.id, kind: "closed", grade: "warn", title: `${algoName(a)}: position ${flat ? "closed" : "reduced"} outside it`, body: text, at: now, paper: false });
+      return;
+    }
+    if (!a.k.outsideSaid) {
+      a.k.outsideSaid = true;
+      this.dirty.add(a.id);
+      await this.event(a, "info", `Your ${m.name} position (${dec3(pos)} ${m.base}) is more than this bot holds (${dec3(inv)}): the rest is yours, and the bot manages only its own part.`);
+    }
+  }
+  /**
+   * How a bot ends when it is not the trader's stop: its limits, a refusal limit, a bound, a delisting. Through
+   * its own close setting (stopBot) like any other stop - ended directly it left what it holds without a loss limit.
+   * A bot already closing goes on closing (its close ends it).
+   */
+  async endBot(a, status, reason) {
+    if (a.spec.bot && a.k.closing) return;
+    if (a.spec.bot && await this.stopBot(a, status, reason)) return;
+    await this.end(a, status, reason);
+  }
   /**
    * A bot reached one of its limits, or was stopped: with `onStop: 'close'` and something held, it pulls its
    * quotes and closes that first (stepBotClose). Returns whether it is now closing (false: end it here).
    */
-  async stopBot(a, status, reason) {
+  async stopBot(a, status, reason, now = false, force = false) {
     const s = a.spec;
-    if (!(s.kind === "mm" || s.kind === "grid") || s.onStop !== "close" || !a.book) return false;
+    if (!(s.kind === "mm" || s.kind === "grid") || s.onStop !== "close" && !force || !a.book) return false;
     const m = this.markets.get(s.symbol);
     const held2 = Math.abs(bookInventory(a.book));
     const px2 = this.market.mark(s.symbol)?.mark ?? null;
     if (!m || held2 < Number(m.stepSize) || px2 !== null && held2 < minChildQty(m, px2) - 1e-12) return false;
-    const closing = { status, reason, at: Date.now() };
+    const closing = { status, reason, at: now ? Date.now() - BOT_CLOSE_REST_MS : Date.now() };
     a.k.closing = closing;
+    if (a.status === "paused") {
+      delete a.k.pausedFrom;
+      a.status = "running";
+      a.statusReason = null;
+    }
     await this.pullResting(a);
     await this.save(a);
     await this.event(a, "info", `${reason} Closing what it holds: ${dec3(held2)} ${m.base}.`);
@@ -16122,21 +17387,23 @@ var AlgoRuntime = class {
   /** A bot's limits, checked every step: true when it stopped (or began closing). */
   async botLimitsHit(a, mk2, now) {
     const s = a.spec;
+    if (s.kind !== "mm" && s.kind !== "grid") return false;
     const b = a.book ??= emptyBook();
     let hit = null;
     if (s.volumeTargetUsd !== null && bookVolume(b) >= s.volumeTargetUsd) hit = { status: "done", reason: `Reached its volume target of ${money(s.volumeTargetUsd)}.` };
-    else if (s.maxLossUsd !== null && bookNet(b, mk2) <= -s.maxLossUsd) hit = { status: "expired", reason: `Stopped at its loss limit: net PnL ${money(bookNet(b, mk2))} (limit -${money(s.maxLossUsd)}).` };
+    else if (s.maxLossUsd !== null && mk2 !== null && bookNet(b, mk2) <= -s.maxLossUsd) hit = { status: "expired", reason: `Stopped at its loss limit: net PnL ${money(bookNet(b, mk2))} (limit -${money(s.maxLossUsd)}).` };
     else if (s.endAt !== null && now >= s.endAt) hit = { status: "expired", reason: "Its end time came." };
     if (!hit) return false;
-    sampleBook(b, mk2, now, true);
-    if (!await this.stopBot(a, hit.status, hit.reason)) await this.end(a, hit.status, hit.reason);
+    await this.endBot(a, hit.status, hit.reason);
     return true;
   }
   /**
    * Closing what a stopping bot holds (its own fills, never more: reduce-only): post-only at the touch,
    * re-priced as it moves, for BOT_CLOSE_REST_MS; then a taker within BOT_CLOSE_SLIP_BPS. It ends with the
    * status it was stopping for once what is left is under SoDEX's minimum, or once SoDEX refused the close
-   * three times (the position is not there any more: closed outside the bot).
+   * BOT_CLOSE_MAX_REFUSALS times in a row for the position (reduce-only with nothing to reduce: closed outside the
+   * bot). A post-only close the touch moved under, a rate limit or a margin answer is no sign of that: it only
+   * waits a moment (retryAt) and goes again.
    */
   async stepBotClose(a, m, q, mk2, now) {
     const closing = a.k.closing;
@@ -16147,10 +17414,10 @@ var AlgoRuntime = class {
     if (stray.length) await this.cancelChildren(a, m, stray);
     const qty2 = floorStep(Math.abs(inv), m);
     const rejects = closing.rejects ?? 0;
-    if (!live.length && (qty2 < minChildQty(m, mk2) - 1e-12 || rejects >= 3)) {
-      const left = qty2 >= Number(m.stepSize) ? ` ${dec3(qty2)} ${m.base} is left${rejects >= 3 ? " (SoDEX shows nothing more to close)" : " (under SoDEX's minimum order)"}.` : "";
+    const gone = rejects >= BOT_CLOSE_MAX_REFUSALS;
+    if (!live.length && (qty2 < minChildQty(m, mk2) - 1e-12 || gone)) {
+      const left = qty2 >= Number(m.stepSize) ? ` ${dec3(qty2)} ${m.base} is left${gone ? " (SoDEX refused to reduce it: the position is not there any more)" : " (under SoDEX's minimum order)"}.` : "";
       delete a.k.closing;
-      sampleBook(b, mk2, now, true);
       return this.end(a, closing.status, `${closing.reason}${left}`);
     }
     if (live.length && !live.some((c) => c.tag.startsWith("close"))) return;
@@ -16163,6 +17430,7 @@ var AlgoRuntime = class {
       if (taking || Math.abs(mine.price - want) / Number(m.tickSize) >= 1 && !this.atOwnTouch(side, mine.price, q) && now - mine.placedAt >= 2e3) await this.cancelChildren(a, m, [mine]);
       return;
     }
+    if (now < (closing.retryAt ?? 0)) return;
     let price2 = taking ? takerPrice(side, q, BOT_CLOSE_SLIP_BPS, m, mk2, null) : makerPrice(side, q, 0, null, m, null);
     if (price2 === null) return;
     let take = taking;
@@ -16177,18 +17445,76 @@ var AlgoRuntime = class {
         }
       }
     }
-    const before = a.rejects;
     await this.send(a, m, [{ side, price: price2, quantity: qty2, tif: take ? "ioc" : "gtx", tag: take ? "close (take)" : "close", reduceOnly: true }]);
-    if (a.rejects > before && a.k.closing) a.k.closing.rejects = rejects + 1;
   }
   /**
-   * The nearest price another user's bot rests at, on the side a taker `side` of this bot would fill against (the
-   * highest bid for a sell, the lowest ask for a buy), live bots against live, practice against practice; null: none.
+   * A bot's order SoDEX refused. A reduce-only one refused for the position ("nothing to reduce"): the account's
+   * position is read (confirmed) - none there, the bot's holding was closed outside it (a close counts that toward
+   * giving up, as before); one there, it is a position the bot did not open (yours, or what is left of one), so from
+   * now on the bot unwinds without SoDEX's flag, its own book bounding the size, and never touches the rest
+   * (owner 2026-11-08). Any other refused close just waits a moment (closeRefused).
+   */
+  botRefused(a, c, reason) {
+    if (!a.spec.bot) return;
+    const closing = a.k.closing;
+    const isClose = !!closing && c.tag.startsWith("close");
+    if (!a.spec.paper && c.reduceOnly && c.exchReduceOnly !== false && POSITION_REFUSAL.test(reason)) {
+      if (isClose) closing.retryAt = Date.now() + BOT_CLOSE_RETRY_MS;
+      void this.reduceRefused(a, isClose, reason);
+      return;
+    }
+    if (isClose) this.closeRefused(closing, reason);
+  }
+  async reduceRefused(a, isClose, reason) {
+    if (this.reduceChecks.has(a.id)) return;
+    this.reduceChecks.add(a.id);
+    try {
+      const pos = await this.positionConfirmed(a, a.spec.symbol);
+      const closing = a.k.closing;
+      if (pos === null || pos === "disagree" || Math.abs(pos) <= 1e-12) {
+        if (isClose && closing) this.closeRefused(closing, reason);
+        return;
+      }
+      if (a.k.plainReduce !== true) {
+        a.k.plainReduce = true;
+        this.dirty.add(a.id);
+        await this.event(a, "info", `Your ${a.spec.symbol} position (${dec3(pos)}) is not only this bot's: from now on it unwinds only what it bought or sold itself and leaves the rest of the position alone.`);
+      }
+      if (isClose && closing) this.closeTaken(closing);
+    } finally {
+      this.reduceChecks.delete(a.id);
+    }
+  }
+  /** Whether another of the wallet's running algos or bots (real with real, practice with practice) trades this bot's market. */
+  sharesMarket(a) {
+    for (const x of this.algos.values()) {
+      if (x.id === a.id || x.owner !== a.owner || !!x.spec.paper !== !!a.spec.paper || FINAL_STATUSES.has(x.status)) continue;
+      if (algoSymbols(x.spec).includes(a.spec.symbol)) return true;
+    }
+    return false;
+  }
+  /** SoDEX took a close (it rests or filled): the refusal count and the wait start over. */
+  closeTaken(c) {
+    delete c.rejects;
+    delete c.retryAt;
+    delete c.backMs;
+  }
+  /** A refused close: counted toward giving up only when SoDEX said the position is not there to reduce; it waits a moment either way. */
+  closeRefused(c, reason) {
+    if (POSITION_REFUSAL.test(reason)) c.rejects = (c.rejects ?? 0) + 1;
+    c.backMs = Math.min(BOT_CLOSE_RETRY_MAX_MS, (c.backMs ?? BOT_CLOSE_RETRY_MS / 2) * 2);
+    c.retryAt = Date.now() + c.backMs;
+  }
+  /**
+   * The nearest price another bot rests at - another user's (never into their bot, terms 2026-11-02) or another of
+   * this wallet's on the same market (never trading with itself, owner 2026-11-08) - on the side a taker `side` of this
+   * bot would fill against (the highest bid for a sell, the lowest ask for a buy), live bots against live, practice
+   * against practice; null: none.
    */
   otherBotWall(a, symbol2, side) {
     let wall = null;
     for (const x of this.algos.values()) {
-      if (x.owner === a.owner || !x.spec.bot || x.spec.symbol !== symbol2 || x.spec.paper !== a.spec.paper || FINAL_STATUSES.has(x.status)) continue;
+      if (x.id === a.id || !x.spec.bot || x.spec.symbol !== symbol2 || x.spec.paper !== a.spec.paper || FINAL_STATUSES.has(x.status)) continue;
       for (const c of x.children) {
         if (!LIVE.has(c.state) || c.tif === "ioc" || c.side === side) continue;
         if (wall === null || (side === "sell" ? c.price > wall : c.price < wall)) wall = c.price;
@@ -16199,11 +17525,56 @@ var AlgoRuntime = class {
   /** Volume maker: one post-only bid and one post-only ask where mmQuotes puts them (bots.ts). */
   async stepMm(a, m, q, mk2, now) {
     const s = a.spec;
-    if (await this.botLimitsHit(a, mk2, now)) return;
     if (s.maxSpreadBps !== null && spreadBps(q) > s.maxSpreadBps) {
       await this.pullResting(a);
       return this.hold(a, `Held: the spread (${spreadBps(q).toFixed(1)} bp) is wider than your ${s.maxSpreadBps} bp.`);
     }
+    const qw = quietWindowAt(s.quiet, now);
+    if (s.quietOnly ? !qw : qw) {
+      this.setGateNote(a, void 0);
+      await this.pullResting(a);
+      return this.hold(a, s.quietOnly ? `Paused: outside your trading hours (${(s.quiet ?? []).map(quietWords).join(", ")}).` : `Paused: quiet window ${quietWords(qw)}.`);
+    }
+    if (s.news) {
+      const events = this.host.events?.() ?? null;
+      if (events === null) await this.noteOnce(a, "newsnone", "News gate: no economic calendar on this host, so it stays open.");
+      else {
+        const ev = newsAt(s.news, events, now);
+        if (ev) {
+          this.setGateNote(a, void 0);
+          await this.pullResting(a);
+          return this.hold(a, `Paused: ${ev.short} at ${new Date(ev.time).toISOString().slice(11, 16)} UTC (news gate).`, "Paused: news gate");
+        }
+      }
+    }
+    let shrink = 1;
+    let gateNote;
+    if (s.flowGate) {
+      const g2 = s.flowGate;
+      const took = this.flowTook(s.symbol, g2.windowMs, now);
+      if (took === null) {
+        gateNote = `Patient-taker gate open while it watches its first ${windowWords(g2.windowMs)}`;
+        await this.noteOnce(a, "flowfresh", `Patient-taker gate: watching this market from now; it stays open until it has ${windowWords(g2.windowMs)} of history.`);
+      } else if (took < g2.minUsd) {
+        const why = `the patient taker traded ${usdWords(took)} here in the last ${windowWords(g2.windowMs)} (under your ${usdWords(g2.minUsd)})`;
+        if (g2.action === "pause") {
+          this.setGateNote(a, void 0);
+          await this.pullResting(a);
+          return this.hold(a, `Paused: ${why}.`, "Paused: the patient taker traded");
+        }
+        shrink = g2.shrink;
+        gateNote = `Quoting smaller, ${usdWords(s.orderUsd * shrink)} a side: ${why}`;
+      }
+    }
+    this.setGateNote(a, gateNote);
+    const shrunk = shrink < 1;
+    if (Boolean(a.k.mshrunk) !== shrunk) {
+      a.k.mshrunk = shrunk;
+      this.dirty.add(a.id);
+      const resting = this.live(a).filter((c) => c.tif !== "ioc" && !c.cancelling);
+      if (resting.length) await this.cancelChildren(a, m, resting);
+    }
+    const sz = shrunk ? { ...s, orderUsd: s.orderUsd * shrink } : s;
     const inv = bookInventory(a.book);
     const tick = Number(m.tickSize);
     const fair = s.ref ? this.fairFor(s.symbol, q, now) : null;
@@ -16214,9 +17585,9 @@ var AlgoRuntime = class {
     const ago = (s.moveGuard ?? 0) > 0 ? this.market.priceAgo(s.symbol, "mid", 2e3) : null;
     const moved = ago ? (mid(q) - ago) / tick : 0;
     const movesInto = (side) => (s.moveGuard ?? 0) > 0 && (side === "sell" ? moved >= s.moveGuard : moved <= -s.moveGuard) && (side === "buy" ? inv >= 0 : inv <= 0);
-    const want = mmQuotes(s, q, m, inv, mk2, fair).filter((x) => !movesInto(x.side));
-    const front = (s.levels ?? 1) > 1 ? mmQuotes({ ...s, offsetTicks: Math.min(0, s.offsetTicks), queueGuard: 0 }, q, m, inv, mk2, fair) : want;
-    const unguarded = (s.queueGuard ?? 0) > 0 || (s.moveGuard ?? 0) > 0 ? mmQuotes({ ...s, queueGuard: 0 }, q, m, inv, mk2, fair) : want;
+    const want = mmQuotes(sz, q, m, inv, mk2, s.noFair ? null : fair).filter((x) => !movesInto(x.side));
+    const front = (s.levels ?? 1) > 1 ? mmQuotes({ ...sz, offsetTicks: Math.min(0, s.offsetTicks), queueGuard: 0 }, q, m, inv, mk2, s.noFair ? null : fair) : want;
+    const unguarded = (s.queueGuard ?? 0) > 0 || (s.moveGuard ?? 0) > 0 ? mmQuotes({ ...sz, queueGuard: 0 }, q, m, inv, mk2, s.noFair ? null : fair) : want;
     const guardedAt = { ...a.k.mguard ?? {} };
     const levels = Math.max(1, s.levels ?? 1);
     const live = this.live(a);
@@ -16236,13 +17607,26 @@ var AlgoRuntime = class {
         continue;
       }
       if (!standing.length && !mine.length && (guardedAt[side] ?? 0) + s.minRepriceMs > now) continue;
+      const addsHere = side === "buy" ? inv >= 0 : inv <= 0;
+      if (addsHere && fair !== null && (s.stillBps ?? 0) > 0) {
+        const path = this.refPath(s.symbol, s.stillMs ?? 6e4, now);
+        if (path === null || path >= s.stillBps) {
+          pull.push(...standing.filter((c) => c.state === "open" && c.tif !== "ioc"));
+          continue;
+        }
+      }
       const adds = side === "buy" ? inv >= 0 : inv <= 0;
-      const room = adds ? Math.floor((s.maxInventoryUsd - Math.abs(inv) * mk2) / s.orderUsd + 1e-9) : Math.ceil(Math.abs(inv) * mk2 / s.orderUsd - 1e-9);
+      const each = botQuoteUsd(sz.orderUsd, m, w.price);
+      const room = adds ? Math.floor((s.maxInventoryUsd - Math.abs(inv) * mk2) / each + 1e-9) : Math.ceil(Math.abs(inv) * mk2 / each - 1e-9);
       const allowed = Math.max(1, Math.min(levels, room));
       const kept = [];
       for (const c of [...standing].sort((x, y) => side === "buy" ? y.price - x.price : x.price - y.price)) {
         if (c.state !== "open" || c.tif === "ioc") {
           kept.push(c);
+          continue;
+        }
+        if ((s.restMs ?? 0) > 0 && now - c.placedAt >= s.restMs) {
+          pull.push(c);
           continue;
         }
         const off = Math.abs(c.price - w.price) / tick;
@@ -16254,39 +17638,85 @@ var AlgoRuntime = class {
           continue;
         }
         const old = now - c.placedAt >= s.minRepriceMs;
-        const back2 = (side === "buy" ? w.price - c.price : c.price - w.price) / tick;
-        const tooFar = levels > 1 ? back2 > levels - 1 + 1e-9 : off >= s.chaseTicks - 1e-9 && !this.atOwnTouch(side, c.price, q);
+        const back = (side === "buy" ? w.price - c.price : c.price - w.price) / tick;
+        const tooFar = levels > 1 ? back > levels - 1 + 1e-9 : off >= s.chaseTicks - 1e-9 && !this.atOwnTouch(side, c.price, q);
         if (old && tooFar) pull.push(c);
         else kept.push(c);
       }
       while (kept.length > allowed) pull.push(kept.pop());
+      const capLeftUsd = adds ? Math.max(0, s.maxInventoryUsd - Math.abs(inv) * mk2) : Infinity;
+      if (adds) {
+        const usdOf = (c) => Math.max(0, c.quantity - c.filled) * c.price;
+        while (kept.length && kept.reduce((t, c) => t + usdOf(c), 0) > capLeftUsd + 1e-9) pull.push(kept.pop());
+      }
       const cancelling = mine.length - kept.length;
       if (kept.length + cancelling >= allowed || kept.some((c) => Math.abs(c.price - w.price) < tick / 2)) continue;
       if (Number(a.k.mretry?.[side] ?? 0) > now) continue;
       const restingQty = kept.reduce((x, c) => x + Math.max(0, c.quantity - c.filled), 0);
-      const qty2 = adds ? w.quantity : Math.min(w.quantity, Math.max(minChildQty(m, w.price), floorStep(Math.abs(inv) - restingQty, m)));
-      if (!adds && restingQty >= Math.abs(inv) - 1e-12) continue;
-      send.push({ side, price: w.price, quantity: qty2, tif: "gtx", tag: side === "buy" ? "bid" : "ask" });
+      const keptUsd = kept.reduce((x, c) => x + Math.max(0, c.quantity - c.filled) * c.price, 0);
+      const qty2 = adds ? Math.min(w.quantity, floorStep(Math.max(0, capLeftUsd - keptUsd) / w.price, m)) : Math.min(w.quantity, floorStep(Math.abs(inv) - restingQty, m));
+      if (adds && qty2 < minChildQty(m, w.price) - 1e-12) continue;
+      if (!adds && (restingQty >= Math.abs(inv) - 1e-12 || qty2 < minChildQty(m, w.price) - 1e-12)) continue;
+      if (fair !== null && adds) {
+        const away = (side === "buy" ? fair - w.price : w.price - fair) / fair * 1e4;
+        if (away < (s.placeBps ?? 0) - 1e-9) continue;
+        if ((s.calmBps ?? 0) > 0) {
+          const mv = this.refMove(s.symbol, s.calmMs ?? 500, now);
+          if (side === "buy" ? mv <= -s.calmBps : mv >= s.calmBps) continue;
+        }
+        if (s.pauseAfter && now - (this.takerAt.get(`${s.symbol}:${s.pauseAfter}`) ?? -Infinity) < (s.pauseMs ?? 0)) continue;
+        if ((s.stillBps ?? 0) > 0) {
+          const path = this.refPath(s.symbol, s.stillMs ?? 6e4, now);
+          if (path === null || path >= s.stillBps) continue;
+        }
+      }
+      send.push({ side, price: w.price, quantity: qty2, tif: s.postOnly === false ? "gtc" : "gtx", tag: side === "buy" ? "bid" : "ask", ...adds ? {} : { reduceOnly: true } });
     }
     a.k.mguard = guardedAt;
     if (pull.length) await this.cancelChildren(a, m, pull);
     if (!send.length || this.stopped(a)) return;
     const sent = await this.send(a, m, send);
+    for (const c of sent) if (c.state === "done" && c.filled <= 1e-12) this.mmBackOff(a, c.side);
+  }
+  /**
+   * A volume maker side SoDEX refused waits before it goes out again: half a second first (most refusals are post-only
+   * ones - the touch moved under the quote - and the next step prices from the fresh book); a refusal that repeats (a
+   * 429) doubles to a minute. The same whether the refusal came in the answer or later on the socket.
+   */
+  mmBackOff(a, side) {
     const back = { ...a.k.mback ?? {} };
     const at = { ...a.k.mretry ?? {} };
-    for (const c of sent) {
-      if (c.state === "done" && c.filled <= 1e-12) {
-        back[c.side] = Math.min(6e4, (back[c.side] ?? MM_RETRY_MS / 2) * 2);
-        at[c.side] = Date.now() + back[c.side];
-      } else delete back[c.side];
-    }
+    back[side] = Math.min(6e4, (back[side] ?? MM_RETRY_MS / 2) * 2);
+    at[side] = Date.now() + back[side];
     a.k.mback = back;
     a.k.mretry = at;
+    this.dirty.add(a.id);
+  }
+  /**
+   * USD the patient taker took on `symbol` over the last `windowMs`, or null while it has watched the market for less
+   * than that (the gate stays open then: a fresh bot is not paused for lack of history). Starts watching on the first call.
+   */
+  flowTook(symbol2, windowMs, now) {
+    let f = this.flow.get(symbol2);
+    if (!f) {
+      f = { since: now, b: [] };
+      this.flow.set(symbol2, f);
+    }
+    if (now - f.since < windowMs) return null;
+    let sum = 0;
+    for (let i = f.b.length - 1; i >= 0 && f.b[i][0] > now - windowMs; i--) sum += f.b[i][1];
+    return sum;
+  }
+  /** A volume maker's gate line in its working text (view): set, changed or cleared. */
+  setGateNote(a, text) {
+    if (a.k.mgate === text) return;
+    if (text === void 0) delete a.k.mgate;
+    else a.k.mgate = text;
+    this.dirty.add(a.id);
   }
   /** Grid: every level with a side rests there post-only; a fill moves the gap (onChildDone, bots.ts gridAfterFill). */
   async stepGrid(a, m, q, mk2, now) {
     const s = a.spec;
-    if (await this.botLimitsHit(a, mk2, now)) return;
     const prices = a.k.gp;
     const sides = a.k.gs;
     if ((mk2 < s.low || mk2 > s.high) && s.outOfRange === "stop") {
@@ -16312,7 +17742,9 @@ var AlgoRuntime = class {
       if ((retry[i] ?? 0) > now) continue;
       const p = prices[i];
       if (want === "buy" ? p >= q.ask : p <= q.bid) continue;
-      send.push({ side: want, price: p, quantity: gridQty(s.orderUsd, p, m), tif: "gtx", tag: `grid ${i + 1}/${n}` });
+      const qty2 = this.gridLevelQty(a, i, p, m);
+      if (qty2 < minChildQty(m, p) - 1e-12) continue;
+      send.push({ side: want, price: p, quantity: qty2, tif: a.spec.postOnly === false ? "gtc" : "gtx", tag: `grid ${i + 1}/${n}` });
     }
     if (pull.length) await this.cancelChildren(a, m, pull);
     if (!send.length || this.stopped(a)) return;
@@ -16329,6 +17761,42 @@ var AlgoRuntime = class {
     }
     a.k.gback = back;
     a.k.gretry = at;
+  }
+  /** What a grid level rests now: its own size where a fill set one (k.gz), else the grid's order size at its price. */
+  gridLevelQty(a, i, price2, m) {
+    const gz = a.k.gz;
+    const own = gz?.[i];
+    return typeof own === "number" ? floorStep(own, m) : gridQty(a.spec.orderUsd, price2, m);
+  }
+  /**
+   * A grid level's child is over having filled `filled` of it on `side`: that much moves to the level beyond (a buy
+   * filled at i puts a sell at i+1, a sell at i a buy at i-1), what it did not fill stays on its level. Filled whole,
+   * this is bots.ts gridAfterFill (the level becomes the gap). Cut short after a partial fill (a pause, a re-size, a
+   * refusal), its counterpart is placed for the part that filled - before, that part was never sold back.
+   */
+  gridFilled(a, i, side, placed, filled) {
+    const sides = [...a.k.gs];
+    const prices = a.k.gp;
+    const m = this.markets.get(a.spec.symbol);
+    if (!prices || !m) return;
+    const gz = (a.k.gz ?? sides.map((x, k) => x ? gridQty(a.spec.orderUsd, prices[k], m) : 0)).slice();
+    const left = floorStep(Math.max(0, (gz[i] ?? placed) - filled), m);
+    if (left < minChildQty(m, prices[i]) - 1e-12) {
+      sides[i] = null;
+      gz[i] = 0;
+    } else gz[i] = left;
+    const j = side === "buy" ? i + 1 : i - 1;
+    const other = side === "buy" ? "sell" : "buy";
+    if (j >= 0 && j < sides.length) {
+      if (sides[j] === other) gz[j] = (gz[j] ?? 0) + filled;
+      else if (sides[j] === null) {
+        sides[j] = other;
+        gz[j] = filled;
+      }
+    }
+    a.k.gs = sides;
+    a.k.gz = gz;
+    this.dirty.add(a.id);
   }
   atOwnTouch(side, price2, q) {
     return side === "buy" ? price2 >= q.bid : price2 <= q.ask;
@@ -16448,17 +17916,17 @@ var AlgoRuntime = class {
         await this.event(a, "skip", `Order ${done + skipped} of ${s.orders} skipped: the price ${mk2} is ${s.side === "buy" ? "above" : "below"} your limit.`);
         continue;
       }
-      let usd = s.perOrderUsd;
+      let usd2 = s.perOrderUsd;
       const avg = a.filled > 0 ? a.filledValue / a.filled : null;
       if (s.dipPct !== null && avg !== null && (s.side === "buy" ? px2 <= avg * (1 - s.dipPct) : px2 >= avg * (1 + s.dipPct))) {
-        usd *= s.dipMultiplier;
+        usd2 *= s.dipMultiplier;
         await this.event(a, "info", `Dip boost: ${s.dipMultiplier}x this order (the price is ${(Math.abs(px2 / avg - 1) * 100).toFixed(1)}% from your average).`);
       }
-      usd = Math.min(usd, budget - spent);
-      const raw = floorStep(usd / px2, m);
-      const qty2 = raw < minChildQty(m, px2) && usd >= m.minNotional - 1e-9 ? minChildQty(m, px2) : raw;
+      usd2 = Math.min(usd2, budget - spent);
+      const raw = floorStep(usd2 / px2, m);
+      const qty2 = raw < minChildQty(m, px2) && usd2 >= m.minNotional - 1e-9 ? minChildQty(m, px2) : raw;
       done++;
-      spent += usd;
+      spent += usd2;
       target += qty2;
       insts.push({ n: done, qty: qty2, at: start + (done + skipped - 1) * s.intervalMs, filled: 0, counted: [] });
     }
@@ -17153,36 +18621,80 @@ var AlgoRuntime = class {
       await this.hold(a, "The trading key for this algo is not available here.");
       return [];
     }
+    if (s.bot && !s.paper) {
+      const until = Math.max(Number(a.k.marginUntil ?? 0), Number(a.k.limitUntil ?? 0));
+      if (until > Date.now()) {
+        list = list.filter((x) => x.reduceOnly ?? s.reduceOnly);
+        if (!list.length) return [];
+      }
+    }
+    const opening = list.some((x) => !(x.reduceOnly ?? s.reduceOnly));
     const brake = s.paper ? null : this.host.brake?.(a) ?? null;
-    if (brake) {
+    if (brake && (opening || !(s.bot && a.k.closing))) {
       await this.hold(a, `Held: ${brake}`);
       return [];
     }
-    const opening = list.some((x) => !(x.reduceOnly ?? s.reduceOnly));
-    const ceiling = !s.paper ? this.host.policyFor?.(a)?.maxLeverage ?? null : null;
+    if (opening && s.bot && this.keyExpiring(a, Date.now()) !== null) {
+      await this.hold(a, "Held: the trading key expires soon. Renew it to go on.");
+      return [];
+    }
+    const ceiling = !s.paper && !s.bot ? this.host.policyFor?.(a)?.maxLeverage ?? null : null;
     const leverage = ceiling !== null ? Math.min(s.leverage ?? ceiling, ceiling) : s.leverage;
     const lev = leverage !== null ? Math.min(leverage, m.maxLeverage) : null;
     const want = lev !== null ? `${lev}|${s.marginMode ?? "cross"}` : null;
+    if (sink && opening && lev !== null && s.bot && this.leverageSet.get(`${a.id}|${m.name}`) !== want && Number(a.k.levRetryAt ?? 0) > Date.now()) {
+      await this.hold(a, `Held: SoDEX did not set ${lev}x on ${m.name} yet; trying again at ${utcWords(Number(a.k.levRetryAt))}.`);
+      return [];
+    }
     if (sink && opening && lev !== null && this.leverageSet.get(`${a.id}|${m.name}`) !== want) {
       this.leverageSet.set(`${a.id}|${m.name}`, want);
-      await sink.setLeverage(a, m, lev, s.marginMode ?? "cross").catch((e) => {
-        this.leverageSet.delete(`${a.id}|${m.name}`);
-        this.event(a, "error", `Leverage not set: ${e instanceof Error ? e.message : String(e)}`);
-      });
+      const refused = await sink.setLeverage(a, m, lev, s.marginMode ?? "cross").then(
+        async () => {
+          delete a.k.levBack;
+          delete a.k.levRetryAt;
+          if (s.bot) await this.event(a, "info", `Check passed: leverage ${lev}x ${s.marginMode ?? "cross"} set on ${m.name}.`);
+          return null;
+        },
+        async (e) => {
+          this.leverageSet.delete(`${a.id}|${m.name}`);
+          const back = Math.min(15 * 6e4, Number(a.k.levBack ?? LEVERAGE_RETRY_MS / 2) * 2);
+          a.k.levBack = back;
+          a.k.levRetryAt = Date.now() + back;
+          const why = e instanceof Error ? e.message : String(e);
+          await this.event(a, "error", `Leverage not set: ${why}`);
+          return why;
+        }
+      );
+      if (refused !== null && s.bot) {
+        await this.hold(a, `Held: SoDEX did not set ${lev}x ${s.marginMode ?? "cross"} on ${m.name} (${refused}); nothing opens until it does. Trying again.`);
+        return [];
+      }
     }
     if (opening && ceiling !== null) {
       const acct = await this.accountOf(a);
       const room = acct ? acct.equity * ceiling - acct.gross : null;
-      const notional = list.reduce((x, c) => x + (c.reduceOnly ?? s.reduceOnly ? 0 : c.quantity * c.price), 0);
-      if (room === null || notional > room) {
-        const one = list.length === 1 ? list[0] : null;
-        const fit = one && room !== null && room > 0 ? floorStep(room / one.price, m) : 0;
-        if (!one || fit < minChildQty(m, one.price)) {
-          await this.hold(a, room === null ? "Held: your account could not be read for the leverage cap of your region." : `Held: the ${ceiling}x leverage cap for your region is reached.`);
-          return [];
+      const fits = [];
+      let cut = false;
+      for (const side of ["buy", "sell"]) {
+        const mine = list.filter((c) => c.side === side);
+        const notional = mine.reduce((x, c) => x + (c.reduceOnly ?? s.reduceOnly ? 0 : c.quantity * c.price), 0);
+        if (!mine.length || notional <= 0 || room !== null && notional <= room) {
+          fits.push(...mine);
+          continue;
         }
-        list = [{ ...one, quantity: fit }];
+        const open = mine.filter((c) => !(c.reduceOnly ?? s.reduceOnly));
+        const one = open.length === 1 ? open[0] : null;
+        const fit = one && room !== null && room > 0 ? floorStep(room / one.price, m) : 0;
+        fits.push(...mine.filter((c) => c.reduceOnly ?? s.reduceOnly));
+        if (one && fit >= minChildQty(m, one.price)) fits.push({ ...one, quantity: fit });
+        else cut = true;
       }
+      if (!fits.some((x) => !(x.reduceOnly ?? s.reduceOnly)) && cut) {
+        await this.hold(a, room === null ? "Held: your account could not be read for the leverage cap of your region." : `Held: the ${ceiling}x leverage cap for your region is reached.`);
+        if (!fits.length) return [];
+      }
+      list = fits;
+      if (!list.length) return [];
     }
     if (opening) {
       const fit = await this.fitLimits(a, m, list, leverage);
@@ -17192,18 +18704,21 @@ var AlgoRuntime = class {
     if (this.stopped(a)) return [];
     if (opening && ceiling !== null) {
       const row = this.accounts.get(a.owner);
-      if (row) row.gross += list.reduce((x, c) => x + (c.reduceOnly ?? s.reduceOnly ? 0 : c.quantity * c.price), 0);
+      const sideUsd = (side) => list.reduce((x, c) => x + (c.side !== side || (c.reduceOnly ?? s.reduceOnly) ? 0 : c.quantity * c.price), 0);
+      if (row) row.gross += Math.max(sideUsd("buy"), sideUsd("sell"));
     }
     const now = Date.now();
     const children = [];
     const reqs = [];
+    const plain2 = !s.paper && !!s.bot && (a.k.plainReduce === true || this.sharesMarket(a));
     for (const x of list) {
       const clOrdID = this.clOrdIdFor(a);
       const price2 = Number(dec3(onTick(x.price, x.side, m.tickSize)));
       const quantity = Number(dec3(x.quantity));
       const c = { clOrdID, orderId: null, side: x.side, price: price2, quantity, tif: x.tif, reduceOnly: x.reduceOnly ?? s.reduceOnly, filled: 0, value: 0, state: "sending", placedAt: now, updatedAt: now, cancelling: false, tag: x.tag };
+      if (plain2 && c.reduceOnly) c.exchReduceOnly = false;
       children.push(c);
-      reqs.push({ clOrdID, side: c.side, price: dec3(price2), quantity: dec3(quantity), tif: c.tif, reduceOnly: c.reduceOnly });
+      reqs.push({ clOrdID, side: c.side, price: dec3(price2), quantity: dec3(quantity), tif: c.tif, reduceOnly: c.exchReduceOnly ?? c.reduceOnly });
       a.children.push(c);
       this.byClOrd.set(clOrdID, a.id);
     }
@@ -17230,6 +18745,7 @@ var AlgoRuntime = class {
       if (r.ok) {
         if (c.state === "sending") c.state = "open";
         a.k.consecRejects = 0;
+        if (a.k.failRounds) delete a.k.failRounds;
       } else if (r.outcomeUnknown) {
         if (c.state === "sending") c.state = "unknown";
         await this.event(a, "error", `No answer from SoDEX for ${c.tag}; checking what happened (never re-sent).`, c);
@@ -17237,8 +18753,10 @@ var AlgoRuntime = class {
         c.state = "done";
         c.cancelling = false;
         a.rejects++;
-        a.k.consecRejects = Number(a.k.consecRejects ?? 0) + 1;
-        await this.event(a, "error", `SoDEX refused ${c.tag}: ${r.error}`, c);
+        this.lastRefusal.set(a.id, r.error ?? "");
+        this.refusalSeen(a, c, r.error ?? "");
+        await this.event(a, "error", s.bot ? `SoDEX refused ${c.tag}: ${refusalWords(refusalKind(r.error))}.` : `SoDEX refused ${c.tag}: ${r.error}`, c);
+        this.botRefused(a, c, r.error ?? "");
         limit ??= limitRefusal(r.error, m.name);
       }
     }
@@ -17247,11 +18765,16 @@ var AlgoRuntime = class {
       const late = children.filter((c) => c.tif !== "ioc" && c.state !== "done" && !kept.includes(c.clOrdID));
       const again = children.filter((c) => c.tif !== "ioc" && !kept.includes(c.clOrdID) && results.some((r) => r.clOrdID === c.clOrdID && (r.ok || r.outcomeUnknown)));
       for (const c of late) c.cancelling = true;
-      if (again.length) await sink.cancel(a, m, again.map((c) => c.clOrdID)).catch((e) => this.event(a, "error", `Cancel failed: ${e instanceof Error ? e.message : String(e)}`));
+      if (again.length) {
+        await sink.cancel(a, m, again.map((c) => c.clOrdID)).catch((e) => {
+          for (const c of late) c.cancelling = false;
+          return this.event(a, "error", `Cancel failed: ${e instanceof Error ? e.message : String(e)}`);
+        });
+      }
     }
     await this.save(a);
     if (limit) await this.onLimit(a, limit);
-    if (Number(a.k.consecRejects ?? 0) >= MAX_CONSEC_REJECTS) await this.end(a, "failed", `SoDEX refused ${MAX_CONSEC_REJECTS} orders in a row; stopped. The last reason is in the log.`);
+    if (Number(a.k.consecRejects ?? 0) >= MAX_CONSEC_REJECTS && !(s.bot && a.k.closing)) await this.tooManyRefusals(a);
     this.host.onChange?.(a.id);
     return children;
   }
@@ -17263,6 +18786,18 @@ var AlgoRuntime = class {
    * paper fills' (paper); the open interest the feed's.
    */
   async fitLimits(a, m, list, leverage) {
+    const s = a.spec;
+    const open = list.filter((c) => !(c.reduceOnly ?? s.reduceOnly));
+    if (new Set(open.map((c) => c.side)).size <= 1) return this.fitSide(a, m, list, leverage);
+    const out = list.filter((c) => c.reduceOnly ?? s.reduceOnly);
+    for (const side of ["buy", "sell"]) {
+      const fit = await this.fitSide(a, m, open.filter((c) => c.side === side), leverage);
+      if (fit) out.push(...fit);
+    }
+    return out.length ? out : null;
+  }
+  /** fitLimits for children that open on one side (and any reduce-only ones with them). */
+  async fitSide(a, m, list, leverage) {
     const s = a.spec;
     const open = list.filter((c) => !(c.reduceOnly ?? s.reduceOnly));
     if (!open.length || !m.marginTiers?.length && !m.openInterestCap && !m.openInterestCapUSD) return list;
@@ -17344,10 +18879,11 @@ var AlgoRuntime = class {
    */
   async onLimit(a, lim) {
     if (FINAL_STATUSES.has(a.status)) return;
+    if (a.spec.bot && a.k.closing) return;
     const n = Number(a.k.limitHits ?? 0) + 1;
     a.k.limitHits = n;
-    if (n >= LIMIT_MAX_HITS) {
-      await this.end(a, "failed", `Stopped: ${lim.text} SoDEX refused it ${n} times with nothing filled in between.`);
+    if (n >= LIMIT_MAX_HITS && !a.spec.bot) {
+      await this.endBot(a, "failed", `Stopped: ${lim.text} SoDEX refused it ${n} times with nothing filled in between.`);
       return;
     }
     const wait = Math.min(LIMIT_RETRY_MS * 2 ** (n - 1), 15 * 6e4);
@@ -17359,7 +18895,47 @@ var AlgoRuntime = class {
     a.k.limitReason = `Held: ${lim.text}${room} Trying again in ${Math.round(wait / 6e4)} min.`;
     this.dirty.add(a.id);
     if (m) await this.limitNotice(a, m, lim.kind, "held", `SoDEX refused an order: ${lim.text}${room} It tries again in ${Math.round(wait / 6e4)} min.`);
+    if (a.spec.bot) {
+      await this.event(a, "info", `${lim.text}${room} New orders wait ${Math.round(wait / 6e4)} min; what it holds is still unwound.`);
+      return;
+    }
     await this.hold(a, a.k.limitReason);
+  }
+  /**
+   * A refusal seen (in the answer or on the socket): only one nothing else handles counts toward MAX_CONSEC_REJECTS
+   * (refusals.ts); a bot's margin refusal makes what adds wait a moment. The full text goes to the host's log only.
+   */
+  refusalSeen(a, c, text) {
+    const kind = refusalKind(text);
+    if (!a.spec.bot || countsAsFailure(kind)) a.k.consecRejects = Number(a.k.consecRejects ?? 0) + 1;
+    if (a.spec.bot && kind === "margin" && !c.reduceOnly) a.k.marginUntil = Date.now() + BOT_MARGIN_WAIT_MS;
+    this.host.log.warn("algo: SoDEX refused a child", { algo: a.id, owner: a.owner, symbol: a.spec.symbol, tag: c.tag, kind, text });
+    this.dirty.add(a.id);
+  }
+  /**
+   * MAX_CONSEC_REJECTS refusals in a row that nothing here handles. An algo order ends. A bot waits instead (its
+   * quotes pulled, a minute doubling to 15) and tries again; only after BOT_FAIL_ROUNDS such rounds does it close what
+   * it holds - whatever its On stop says - and stop (owner 2026-11-08: never stop with its position or quotes left).
+   */
+  async tooManyRefusals(a) {
+    if (!a.spec.bot) {
+      await this.endBot(a, "failed", `SoDEX refused ${MAX_CONSEC_REJECTS} orders in a row; stopped. The last reason is in the log.`);
+      return;
+    }
+    const rounds = Number(a.k.failRounds ?? 0) + 1;
+    a.k.failRounds = rounds;
+    a.k.consecRejects = 0;
+    if (rounds >= BOT_FAIL_ROUNDS) {
+      const reason = `Stopped: SoDEX kept refusing its orders (${rounds} rounds of ${MAX_CONSEC_REJECTS}, with waits between). It closed what it held first.`;
+      this.host.log.error?.("bot: last resort, closing and stopping", { algo: a.id, owner: a.owner, symbol: a.spec.symbol, last: this.lastRefusal.get(a.id) ?? "" });
+      if (!await this.stopBot(a, "failed", reason, false, true)) await this.end(a, "failed", reason);
+      return;
+    }
+    const wait = Math.min(BOT_FAIL_WAIT_MAX_MS, BOT_FAIL_WAIT_MS * 2 ** (rounds - 1));
+    a.k.failUntil = Date.now() + wait;
+    this.dirty.add(a.id);
+    await this.pullResting(a);
+    await this.event(a, "error", `SoDEX refused ${MAX_CONSEC_REJECTS} orders in a row. It waits ${Math.round(wait / 6e4)} min with its quotes pulled, then goes on (round ${rounds} of ${BOT_FAIL_ROUNDS}; after the last it closes what it holds and stops).`);
   }
   async cancelChildren(a, m, list) {
     const open = list.filter((c) => LIVE.has(c.state) && !c.cancelling);
@@ -17374,7 +18950,15 @@ var AlgoRuntime = class {
       return;
     }
     const sink = this.host.sinkFor(a);
-    if (!sink) return;
+    if (!sink) {
+      for (const c of open) c.cancelling = false;
+      const said2 = this.noSinkSaid.get(a.id) ?? 0;
+      if (Date.now() - said2 >= 10 * 6e4) {
+        this.noSinkSaid.set(a.id, Date.now());
+        await this.event(a, "error", `Could not cancel ${open.length} order${open.length === 1 ? "" : "s"}: the trading key for it is not available here. Tried again until they are gone.`);
+      }
+      return;
+    }
     try {
       await sink.cancel(a, m, open.map((c) => c.clOrdID));
     } catch (e) {
@@ -17385,6 +18969,24 @@ var AlgoRuntime = class {
   /** A live bot with quotes of its own on the book. Not while it closes what it holds: that order only protects, as a stop does (brake.ts). */
   quotesNeedManaging(a) {
     return (a.spec.kind === "mm" || a.spec.kind === "grid") && !a.spec.paper && !FINAL_STATUSES.has(a.status) && !a.k.closing;
+  }
+  /**
+   * Whether an ended bot has a child to settle or cancel again now: one not cancelling (its cancel never left or
+   * failed), one SoDEX has not told of, or a cancel unconfirmed for long - every HELD_PULL_MS at most.
+   */
+  sweepDue(a, now) {
+    if (a.spec.paper || this.busy.has(a.id) || now - (this.heldPullAt.get(a.id) ?? -Infinity) < HELD_PULL_MS) return false;
+    return this.strayLive(a).some((c) => !c.cancelling || c.state === "unknown" || now - c.updatedAt > STALE_IOC_MS);
+  }
+  /** An ended bot's stray children: what SoDEX says of them is booked (settleStale), what still rests is cancelled again. */
+  async sweepEnded(a, now) {
+    const m = this.markets.get(a.spec.symbol);
+    if (!m) return;
+    await this.settleStale(a, m, now);
+    const left = this.strayLive(a).filter((c) => !c.cancelling);
+    if (left.length) await this.cancelChildren(a, m, left);
+    if (!this.strayLive(a).length) this.syncWatch();
+    this.dirty.add(a.id);
   }
   /** A held step returns before it re-prices, so a held bot's quotes would go stale on the book: they come off, and it quotes again when the hold ends. */
   async pullHeldQuotes(a, now) {
@@ -17444,16 +19046,29 @@ var AlgoRuntime = class {
         void this.event(a, "error", `SoDEX ${how} ${c.tag} at ${c.price}${u.reason ? `: ${u.reason}` : ""}; it no longer rests (nothing filled).`, c);
       }
       if (c.tif === "ioc" && c.filled <= 1e-12) a.k.missAt = Date.now();
+      const closing = a.k.closing;
       if (u.status === "REJECTED" && was !== "done") {
         a.rejects++;
-        a.k.consecRejects = Number(a.k.consecRejects ?? 0) + 1;
-        void this.event(a, "error", `SoDEX rejected ${c.tag}${u.reason ? `: ${u.reason}` : ""}.`, c);
+        this.refusalSeen(a, c, u.reason ?? "");
+        void this.event(a, "error", a.spec.bot ? `SoDEX rejected ${c.tag}: ${refusalWords(refusalKind(u.reason))}.` : `SoDEX rejected ${c.tag}${u.reason ? `: ${u.reason}` : ""}.`, c);
+        if (Number(a.k.consecRejects ?? 0) >= MAX_CONSEC_REJECTS && a.spec.bot && !a.k.closing) void this.tooManyRefusals(a);
         const lim = limitRefusal(u.reason, a.spec.symbol);
         if (lim) void this.onLimit(a, lim);
         if (a.spec.kind === "grid" && gridLevelOf(c) >= 0) a.k.gretry = { ...a.k.gretry ?? {}, [gridLevelOf(c)]: Date.now() + GRID_RETRY_MS };
-      }
+        if (a.spec.kind === "mm" && (c.tag === "bid" || c.tag === "ask")) this.mmBackOff(a, c.side);
+        this.botRefused(a, c, u.reason ?? "");
+      } else if (closing && c.tag.startsWith("close") && c.filled > 1e-12) this.closeTaken(closing);
       this.onChildDone(a, c);
-    } else if (c.state === "sending" || c.state === "unknown") c.state = "open";
+    } else {
+      if (c.state === "sending" || c.state === "unknown") c.state = "open";
+      const closing = a.k.closing;
+      if (closing && c.tag.startsWith("close")) this.closeTaken(closing);
+      if (a.spec.kind === "mm" && (c.tag === "bid" || c.tag === "ask") && a.k.mback?.[c.side] !== void 0) {
+        const back = { ...a.k.mback };
+        delete back[c.side];
+        a.k.mback = back;
+      }
+    }
     if (FINAL_STATUSES.has(a.status) && c.state === "open" && c.tif !== "ioc" && !c.cancelling && !(a.k.kept ?? []).includes(c.clOrdID)) {
       const m = this.markets.get(a.spec.symbol);
       if (m) void this.cancelChildren(a, m, [c]);
@@ -17485,14 +19100,17 @@ var AlgoRuntime = class {
     const isMaker = maker ?? c.tif !== "ioc";
     if (isMaker) a.makerQty += dq;
     const m = this.markets.get(a.spec.symbol);
-    const rate = (isMaker ? m?.makerFee ?? (m?.takerFee ?? 4e-4) / 2 : m?.takerFee ?? 4e-4) + (this.host.builderRate?.(a) ?? 0);
+    const tier = isMaker ? this.host.makerFeeFor?.(a.owner, a.spec.symbol) ?? null : null;
+    const tradeRate = isMaker ? tier !== null && Number.isFinite(tier) ? tier / 1e4 : m?.makerFee ?? (m?.takerFee ?? 4e-4) / 2 : m?.takerFee ?? 4e-4;
+    const rate = tradeRate + (this.host.builderRate?.(a) ?? 0);
     a.fees += dv * rate;
     if (a.spec.bot) {
       a.book ??= emptyBook();
-      bookFill(a.book, c.side, dq, dv, isMaker, isMaker ? m?.makerFee ?? (m?.takerFee ?? 4e-4) / 2 : m?.takerFee ?? 4e-4, this.host.builderRate?.(a) ?? 0);
+      a.k.lastFillAt = Date.now();
+      bookFill(a.book, c.side, dq, dv, isMaker, tradeRate, this.host.builderRate?.(a) ?? 0);
     }
     if (a.k.consecRejects) a.k.consecRejects = 0;
-    void this.event(a, "fill", `Filled ${dec3(dq)} @ ${(dv / dq).toPrecision(8).replace(/\.?0+$/, "")}${isMaker ? " (maker)" : ""}.`, { ...c, quantity: dq, price: dv / dq });
+    void this.event(a, "fill", `Filled ${dec3(dq)} @ ${(dv / dq).toPrecision(8).replace(/\.?0+$/, "")}.`, { ...c, quantity: dq, price: dv / dq }, isMaker);
   }
   /* --------------------------------------------------------------- exits ----- */
   /**
@@ -17844,7 +19462,7 @@ var AlgoRuntime = class {
       const i = gridLevelOf(c);
       const sides = a.k.gs;
       if (i < 0 || !sides) return;
-      if (c.filled >= c.quantity - 1e-12 && sides[i] === c.side) a.k.gs = gridAfterFill(sides, i, c.side);
+      if (c.filled > 1e-12 && sides[i] === c.side) this.gridFilled(a, i, c.side, c.quantity, c.filled);
       return;
     }
     if (a.spec.kind !== "iceberg") return;
@@ -17859,7 +19477,48 @@ var AlgoRuntime = class {
       a.k.refillAt = Date.now() + Math.max(0, jitter2(s.refillMs, s.refillJitter, makeRng(a.seed ^ a.childCount)));
     }
   }
+  /** For the operator's overview (executor /internal/stats): the wallets with live orders the socket follows, and the rest read by REST. */
+  socketWallets() {
+    const follows = this.market.followsOrders?.bind(this.market);
+    const owners = new Set([...this.algos.values()].filter((a) => !a.spec.paper && !FINAL_STATUSES.has(a.status)).map((a) => a.owner));
+    let followed = 0;
+    for (const o of owners) if (!follows || follows(o)) followed++;
+    return { followed, polled: owners.size - followed };
+  }
   onPrint(p) {
+    const taker = p.taker === "buy" ? p.buyer : p.seller;
+    const follows = this.market.followsOrders?.bind(this.market);
+    if (follows) {
+      for (const a of this.algos.values()) {
+        if (a.spec.paper || a.spec.symbol !== p.symbol || FINAL_STATUSES.has(a.status) || follows(a.owner)) continue;
+        if (p.buyer === a.accountId || p.seller === a.accountId) {
+          this.resync.add(a.id);
+          this.polledAt.delete(a.id);
+        }
+      }
+    }
+    const f = this.flow.get(p.symbol);
+    if (f) {
+      const gated = [...this.algos.values()].some((a) => a.spec.kind === "mm" && a.spec.flowGate && a.spec.symbol === p.symbol && (a.status === "running" || a.status === "waiting"));
+      if (!gated) this.flow.delete(p.symbol);
+      else if (taker === PATIENT_TAKER_ACCOUNT) {
+        const now = Date.now();
+        const sec = Math.floor(now / 1e3) * 1e3;
+        const last = f.b[f.b.length - 1];
+        if (last && last[0] === sec) last[1] += p.qty * p.price;
+        else f.b.push([sec, p.qty * p.price]);
+        while (f.b.length && f.b[0][0] <= now - FLOW_KEEP_MS) f.b.shift();
+      }
+    }
+    for (const a of this.algos.values()) {
+      const s = a.spec;
+      if (s.kind !== "mm" || s.pauseAfter !== taker || s.symbol !== p.symbol || a.status !== "running" || !a.book) continue;
+      this.takerAt.set(`${s.symbol}:${taker}`, Date.now());
+      const m = this.markets.get(s.symbol);
+      const inv = bookInventory(a.book);
+      const adding = this.live(a).filter((c) => c.state === "open" && !c.cancelling && c.tif !== "ioc" && (c.side === "buy" ? inv >= 0 : inv <= 0));
+      if (m && adding.length) void this.cancelChildren(a, m, adding).catch((e) => this.host.log.warn("algo: pause pull failed", { algo: a.id, error: String(e) }));
+    }
     for (const a of this.algos.values()) {
       if (a.status !== "running" && a.status !== "waiting") continue;
       if (a.spec.symbol !== p.symbol || a.startedAt === null || p.at < a.startedAt) continue;
@@ -17868,7 +19527,24 @@ var AlgoRuntime = class {
       a.marketValue += p.qty * p.price;
       this.dirty.add(a.id);
     }
+    if (p.buyer >= 0 && p.seller >= 0) {
+      for (const a of this.algos.values()) {
+        if (a.spec.kind !== "mm" && a.spec.kind !== "grid" || a.spec.paper || a.spec.symbol !== p.symbol || !a.book) continue;
+        if (FINAL_STATUSES.has(a.status) || a.startedAt === null || p.at < a.startedAt) continue;
+        if (taker === a.accountId || p.buyer !== a.accountId && p.seller !== a.accountId) continue;
+        this.countTaker(a, taker, p.qty * p.price);
+      }
+    }
     if (this.paper.size) this.paperOnPrint(p);
+  }
+  /** BotBook.takers: one fill's USD to the taker that took it. */
+  countTaker(a, taker, usd2) {
+    if (!a.book || !(usd2 > 0)) return;
+    const t = a.book.takers ??= { t1002: 0, t23342: 0, other: 0 };
+    if (taker === PATIENT_TAKER_ACCOUNT) t.t1002 += usd2;
+    else if (taker === INFORMED_TAKER_ACCOUNT) t.t23342 += usd2;
+    else t.other += usd2;
+    this.dirty.add(a.id);
   }
   /**
    * Settle children SoDEX has not told us about: an IOC with no final update,
@@ -18186,18 +19862,30 @@ var AlgoRuntime = class {
     const c = a?.children.find((x) => x.clOrdID === clOrdID);
     timers.after(0, () => this.onOrderUpdate({ clOrdID, orderId: `paper-${clOrdID}`, symbol: o?.symbol ?? a?.spec.symbol ?? "", status: "CANCELED", filledQty: o?.filled ?? c?.filled ?? 0, filledValue: o?.value ?? c?.value ?? 0, maker: null, reason: null, at: Date.now() }));
   }
-  /** A resting paper order fills as the tape trades through its price (a sell print at or under a buy, and so on). */
+  /**
+   * A resting paper order fills as the tape trades through its price (a sell print at or under a buy, and so on).
+   * A practice bot's order is held to what live would give it (audit 2026-11-08): only a print through its price
+   * fills it (at the price, the queue there was ahead of it), and each print's size is given out once across the
+   * practice bots' orders it went through, best price first and then in the order they were placed - one print no
+   * longer filled each of them in full.
+   */
   paperOnPrint(p) {
-    for (const o of this.paper.values()) {
-      if (o.symbol !== p.symbol) continue;
-      const through = o.side === "buy" ? p.price <= o.price && p.taker === "sell" : p.price >= o.price && p.taker === "buy";
-      if (!through) continue;
-      const q = Math.min(o.left, p.qty);
+    const isBot = (o) => this.algos.get(o.algoId)?.spec.bot === true;
+    const hit = [...this.paper.values()].filter((o) => o.symbol === p.symbol && (isBot(o) ? o.side === "buy" ? p.price < o.price - 1e-12 && p.taker === "sell" : p.price > o.price + 1e-12 && p.taker === "buy" : o.side === "buy" ? p.price <= o.price && p.taker === "sell" : p.price >= o.price && p.taker === "buy"));
+    if (!hit.length) return;
+    hit.sort((x, y) => x.side === "buy" ? y.price - x.price : x.price - y.price);
+    let size = p.qty;
+    for (const o of hit) {
+      const bot = isBot(o);
+      if (bot && size <= 1e-12) continue;
+      const q = Math.min(o.left, bot ? size : p.qty);
+      if (bot) size -= q;
       o.left -= q;
       o.filled += q;
       o.value += q * o.price;
       const a = this.algos.get(o.algoId);
       if (a) this.paperPosition(a, o.side, q);
+      if (a && (a.spec.kind === "mm" || a.spec.kind === "grid")) this.countTaker(a, p.taker === "buy" ? p.buyer : p.seller, q * o.price);
       const done = o.left <= 1e-12;
       if (done) this.paper.delete(o.clOrdID);
       this.onOrderUpdate({ clOrdID: o.clOrdID, orderId: `paper-${o.clOrdID}`, symbol: o.symbol, status: done ? "FILLED" : "PARTIALLY_FILLED", filledQty: o.filled, filledValue: o.value, maker: true, reason: null, at: p.at });
@@ -18235,9 +19923,18 @@ var AlgoRuntime = class {
     this.dirty.add(a.id);
     await this.event(a, "info", text);
   }
-  async hold(a, reason) {
+  /** `same`: a reason that changes as it holds (a figure in it) - while held for one starting so, the line updates with no new event. */
+  async hold(a, reason, same) {
     this.heldNow.add(a.id);
     if (this.stopped(a)) return;
+    if (same && a.status === "waiting" && a.statusReason?.startsWith(same)) {
+      if (a.statusReason !== reason) {
+        a.statusReason = reason;
+        this.dirty.add(a.id);
+        this.host.onChange?.(a.id);
+      }
+      return;
+    }
     if (a.status === "scheduled") {
       if (a.statusReason !== reason) {
         a.statusReason = reason;
@@ -18271,6 +19968,14 @@ var AlgoRuntime = class {
     for (const id of o.keep ?? []) this.paper.delete(id);
     const m = this.markets.get(a.spec.symbol);
     if (m && a.spec.exits && a.filled > 0) await this.syncExits(a, m, true);
+    if (a.spec.bot && a.book) {
+      const q = this.market.quote(a.spec.symbol);
+      const mk2 = this.market.mark(a.spec.symbol)?.mark ?? (q ? mid(q) : null);
+      if (mk2 !== null && mk2 > 0) {
+        sampleBook(a.book, mk2, Date.now(), true);
+        a.book.endMark = mk2;
+      }
+    }
     a.status = status;
     a.statusReason = reason;
     a.endedAt = Date.now();
@@ -18300,8 +20005,16 @@ var AlgoRuntime = class {
       this.host.onChange?.(id);
     }
   }
-  async event(a, kind, text, c) {
+  async event(a, kind, raw, c, maker) {
     const at = Date.now();
+    let text = raw;
+    if (a.spec.bot && kind === "error") {
+      const m = /^(.*?(?:failed|not set|refused [^:]*|rejected [^:]*|could not be cancelled)): (.+)$/i.exec(raw);
+      if (m) {
+        text = /^step failed$/i.test(m[1]) ? "Something went wrong on our side; it goes on, and we see the details in our server log." : `${m[1]}: ${refusalWords(refusalKind(m[2]))}.`;
+        this.host.log.warn("bot: error", { algo: a.id, owner: a.owner, symbol: a.spec.symbol, text: raw });
+      }
+    }
     const e = {
       // Sorts by time, then by the order it was written: lines of one millisecond keep their order.
       id: `e${at.toString(36)}${(++this.eventSeq).toString(36).padStart(6, "0")}${randomId().slice(0, 4)}`,
@@ -18314,20 +20027,291 @@ var AlgoRuntime = class {
       side: c?.side ?? null,
       price: c?.price ?? null,
       qty: c?.quantity ?? null,
-      paper: a.spec.paper
+      paper: a.spec.paper,
+      ...c?.tif ? { tif: c.tif } : {},
+      ...maker !== void 0 ? { maker } : {}
     };
     await this.host.store.addAlgoEvent(e).catch((err) => this.host.log.error("algo: event not saved", { error: String(err) }));
   }
 };
 
-// packages/copy-engine/src/index.ts
+// ../../packages/copy-engine/src/index.ts
 var COPY_ENGINE_VERSION = "1.1.0";
 
-// apps/executor/src/service.ts
+// src/latency.ts
+var LATENCY_BUCKET_MS = 6e5;
+var LATENCY_KEEP_MS = 48 * 36e5;
+var KINDS = ["place", "cancel"];
+var accountLogId = (regionId, accountId, symbolId) => symbolId ? `${regionId}:${accountId}:${symbolId}` : `${regionId}:${accountId}`;
+function classifyWrite(method, path) {
+  const m = method.toUpperCase();
+  const p = path.split("?")[0].toLowerCase();
+  if (!/\/trade\/orders(\/|$)/.test(p)) return null;
+  if (m === "DELETE" || /cancel/.test(p)) return "cancel";
+  if (m === "POST") return "place";
+  return null;
+}
+var LINEAR = 100;
+var RATIO = Math.log(1.01);
+var MAX_MS = 12e4;
+var MAX_BIN = LINEAR + Math.ceil(Math.log(MAX_MS / LINEAR) / RATIO);
+function binOf(ms) {
+  const v = Number.isFinite(ms) ? Math.max(0, Math.min(MAX_MS, ms)) : MAX_MS;
+  if (v < LINEAR) return Math.floor(v);
+  return Math.min(MAX_BIN, LINEAR + Math.floor(Math.log(v / LINEAR) / RATIO));
+}
+function binValue(b) {
+  if (b < LINEAR) return b + 0.5;
+  return LINEAR * Math.exp((b - LINEAR + 0.5) * RATIO);
+}
+var Hist = class _Hist {
+  bins = /* @__PURE__ */ new Map();
+  n = 0;
+  add(ms) {
+    const b = binOf(ms);
+    this.bins.set(b, (this.bins.get(b) ?? 0) + 1);
+    this.n++;
+  }
+  merge(o) {
+    for (const [b, c] of o.bins) this.bins.set(b, (this.bins.get(b) ?? 0) + c);
+    this.n += o.n;
+    return this;
+  }
+  /** Nearest rank: the bin holding the ceil(p * n)-th sample, in ms to 0.1; null when empty. */
+  quantile(p) {
+    if (!this.n) return null;
+    const rank = Math.max(1, Math.ceil(p * this.n));
+    let seen = 0;
+    for (const b of [...this.bins.keys()].sort((x, y) => x - y)) {
+      seen += this.bins.get(b);
+      if (seen >= rank) return Math.round(binValue(b) * 10) / 10;
+    }
+    return null;
+  }
+  /** "bin:count,bin:count" (compact, for the database). */
+  encode() {
+    return [...this.bins].sort((x, y) => x[0] - y[0]).map(([b, c]) => `${b}:${c}`).join(",");
+  }
+  static decode(s) {
+    const h = new _Hist();
+    for (const part of s.split(",")) {
+      const [b, c] = part.split(":").map(Number);
+      if (!Number.isSafeInteger(b) || !Number.isSafeInteger(c) || b < 0 || c <= 0) continue;
+      h.bins.set(b, (h.bins.get(b) ?? 0) + c);
+      h.n += c;
+    }
+    return h;
+  }
+};
+function clampHours(v) {
+  const n = v === null || v === void 0 || v.trim() === "" ? NaN : Number(v);
+  if (!Number.isFinite(n)) return 24;
+  return Math.max(1, Math.min(48, Math.round(n)));
+}
+var emptyBucket = () => ({ place: new Hist(), cancel: new Hist() });
+var RECENT_CAP = 5e4;
+var RegionLog = class {
+  constructor(region) {
+    this.region = region;
+  }
+  region;
+  buckets = /* @__PURE__ */ new Map();
+  /** The open bucket's start; buckets before it are closed. */
+  open = 0;
+  recent = [];
+};
+var WriteLatency = class {
+  constructor(regions, store, now = Date.now, onError = () => {
+  }) {
+    this.store = store;
+    this.now = now;
+    this.onError = onError;
+    const open = Math.floor(this.now() / LATENCY_BUCKET_MS) * LATENCY_BUCKET_MS;
+    for (const r of regions) {
+      const log = new RegionLog(r);
+      log.open = open;
+      this.logs.set(r.id, log);
+    }
+    this.load();
+  }
+  store;
+  now;
+  onError;
+  logs = /* @__PURE__ */ new Map();
+  /** Per account, keyed by accountLogId: created on its first write (or read back from the store). */
+  accounts = /* @__PURE__ */ new Map();
+  timer = null;
+  /** Read the last 48 h back from the store. */
+  load() {
+    if (!this.store) return;
+    try {
+      const since = this.now() - LATENCY_KEEP_MS;
+      for (const row of this.store.loadLatency(since)) {
+        const log = this.logs.get(row.region) ?? this.accountLog(row.region);
+        if (!log || !KINDS.includes(row.kind)) continue;
+        let b = log.buckets.get(row.t);
+        if (!b) log.buckets.set(row.t, b = emptyBucket());
+        b[row.kind] = Hist.decode(row.hist);
+      }
+    } catch (e) {
+      this.onError(e);
+    }
+  }
+  /** An account's log for a store id "region:accountId" (created when its region exists), or null. */
+  accountLog(id, create = true) {
+    const have = this.accounts.get(id);
+    if (have || !create) return have ?? null;
+    const m = /^([^:]+):(\d+)(?::(\d+))?$/.exec(id);
+    const region = m ? this.logs.get(m[1]) : void 0;
+    if (!region || Number(m[2]) <= 0) return null;
+    const log = new RegionLog({ ...region.region, id });
+    log.open = region.open;
+    this.accounts.set(id, log);
+    return log;
+  }
+  /** One answered write. Never throws. */
+  record(regionId, w) {
+    try {
+      const kind = classifyWrite(w.method, w.path);
+      const log = this.logs.get(regionId);
+      if (!kind || !log) return;
+      const ms = Math.max(0, (Number(w.queueMs) || 0) + (Number(w.wireMs) || 0));
+      const at = this.now();
+      this.add(log, kind, ms, at);
+      const aid = Number(w.accountId) || 0;
+      if (aid > 0) {
+        const own = this.accountLog(accountLogId(regionId, aid));
+        if (own) this.add(own, kind, ms, at);
+        const sid = Number(w.symbolId) || 0;
+        const bot = sid > 0 ? this.accountLog(accountLogId(regionId, aid, sid)) : null;
+        if (bot) this.add(bot, kind, ms, at);
+      }
+    } catch (e) {
+      this.onError(e);
+    }
+  }
+  add(log, kind, ms, at) {
+    this.roll(log, at);
+    let b = log.buckets.get(log.open);
+    if (!b) log.buckets.set(log.open, b = emptyBucket());
+    b[kind].add(ms);
+    log.recent.push({ at, ms });
+    while (log.recent.length && log.recent[0].at <= at - LATENCY_BUCKET_MS) log.recent.shift();
+    if (log.recent.length > RECENT_CAP) log.recent.splice(0, log.recent.length - RECENT_CAP);
+  }
+  /** Move the open bucket to now: the ones that closed are written, the ones older than 48 h leave memory. */
+  roll(log, at) {
+    const open = Math.floor(at / LATENCY_BUCKET_MS) * LATENCY_BUCKET_MS;
+    if (open === log.open) return;
+    const closed = [...log.buckets.keys()].filter((t) => t >= log.open && t < open);
+    this.save(log, closed);
+    log.open = open;
+    for (const t of log.buckets.keys()) if (t < at - LATENCY_KEEP_MS - LATENCY_BUCKET_MS) log.buckets.delete(t);
+  }
+  save(log, ts) {
+    if (!this.store || !ts.length) return;
+    try {
+      const rows2 = [];
+      for (const t of ts) {
+        const b = log.buckets.get(t);
+        if (!b) continue;
+        for (const kind of KINDS) if (b[kind].n) rows2.push({ region: log.region.id, t, kind, n: b[kind].n, hist: b[kind].encode() });
+      }
+      if (rows2.length) this.store.saveLatency(rows2);
+    } catch (e) {
+      this.onError(e);
+    }
+  }
+  /** A minute timer that writes buckets that closed while no write came. */
+  start() {
+    if (this.timer) return;
+    this.timer = setInterval(() => this.tick(), 6e4);
+    this.timer.unref?.();
+  }
+  tick() {
+    try {
+      const at = this.now();
+      for (const log of this.logs.values()) this.roll(log, at);
+      for (const [id, log] of this.accounts) {
+        this.roll(log, at);
+        if (!log.buckets.size && !log.recent.length) this.accounts.delete(id);
+      }
+    } catch (e) {
+      this.onError(e);
+    }
+  }
+  /** Write what closed and the open bucket (a stop or restart keeps it). */
+  stop() {
+    if (this.timer) clearInterval(this.timer);
+    this.timer = null;
+    this.tick();
+    for (const log of this.logs.values()) this.save(log, [log.open]);
+    for (const log of this.accounts.values()) this.save(log, [log.open]);
+  }
+  /**
+   * The chart's answer. With accountIds: only those accounts' writes, per region (a user's own bots); without: the
+   * whole region (operators, tests).
+   */
+  view(hours, accountIds, symbolId) {
+    const at = this.now();
+    const h = Math.max(1, Math.min(48, Math.round(hours) || 24));
+    const open = Math.floor(at / LATENCY_BUCKET_MS) * LATENCY_BUCKET_MS;
+    const slots = h * (36e5 / LATENCY_BUCKET_MS);
+    const regions = [];
+    for (const base2 of this.logs.values()) {
+      const log = accountIds ? mergeLogs(base2, accountIds.map((a) => this.accountLog(accountLogId(base2.region.id, a, symbolId), false)).filter((x) => !!x)) : base2;
+      const buckets = [];
+      for (let i = slots - 1; i >= 0; i--) {
+        const t = open - i * LATENCY_BUCKET_MS;
+        const b = log.buckets.get(t);
+        const all = b ? new Hist().merge(b.place).merge(b.cancel) : new Hist();
+        buckets.push({ t, n: all.n, p50: all.quantile(0.5), p95: all.quantile(0.95), p99: all.quantile(0.99) });
+      }
+      const recent = new Hist();
+      for (const s of log.recent) if (s.at > at - LATENCY_BUCKET_MS) recent.add(s.ms);
+      const hour = emptyBucket();
+      for (const [t, b] of log.buckets) {
+        if (t + LATENCY_BUCKET_MS <= at - 36e5) continue;
+        hour.place.merge(b.place);
+        hour.cancel.merge(b.cancel);
+      }
+      regions.push({
+        id: base2.region.id,
+        label: base2.region.label,
+        where: base2.region.where,
+        buckets,
+        now: { p50: recent.quantile(0.5), p95: recent.quantile(0.95), p99: recent.quantile(0.99), n: recent.n },
+        kinds: { place: { p50: hour.place.quantile(0.5), n: hour.place.n }, cancel: { p50: hour.cancel.quantile(0.5), n: hour.cancel.n } }
+      });
+      if (!accountIds) {
+        const keepFrom = log.recent.findIndex((s) => s.at > at - LATENCY_BUCKET_MS);
+        if (keepFrom > 0) log.recent.splice(0, keepFrom);
+        else if (keepFrom < 0) log.recent.length = 0;
+      }
+    }
+    return { at, bucketMs: LATENCY_BUCKET_MS, regions };
+  }
+};
+function mergeLogs(base2, logs) {
+  if (logs.length === 1) return logs[0];
+  const out = new RegionLog(base2.region);
+  out.open = base2.open;
+  for (const l of logs) {
+    for (const [t, b] of l.buckets) {
+      let o = out.buckets.get(t);
+      if (!o) out.buckets.set(t, o = emptyBucket());
+      for (const k of KINDS) o[k].merge(b[k]);
+    }
+    out.recent.push(...l.recent);
+  }
+  return out;
+}
+
+// src/service.ts
 import { randomInt, timingSafeEqual as timingSafeEqual2 } from "node:crypto";
 import { existsSync as existsSync5 } from "node:fs";
 
-// apps/executor/src/audited.ts
+// src/audited.ts
 var said = (e) => e instanceof Error ? e.message : String(e);
 var intentRow = (i) => ({ clOrdID: i.clOrdID, side: i.side, quantity: i.quantity, limitPrice: i.limitPrice, reduceOnly: i.reduceOnly, leg: i.leg, notionalUsd: i.notionalUsd, clampedBy: i.clampedBy });
 var resultRow = (r) => ({ clOrdID: r.clOrdID, ok: r.ok, orderId: r.orderId, error: r.error, outcomeUnknown: r.outcomeUnknown });
@@ -18424,7 +20408,7 @@ function auditedAlgoSink(inner, db, builderOf) {
   };
 }
 
-// apps/executor/src/brake.ts
+// src/brake.ts
 import { readFileSync as readFileSync3, statSync as statSync2 } from "node:fs";
 var READ_EVERY_MS = 1e3;
 var MAINTENANCE_BRAKE_MAX_MS = 15 * 6e4;
@@ -18508,12 +20492,15 @@ var Brake = class {
   }
 };
 
-// apps/executor/src/guard.ts
+// src/guard.ts
 function classifyRejection(error) {
   const e = String(error ?? "");
-  if (/^Not sent:/i.test(e)) return /order rate/i.test(e) ? "account-rate" : "local";
+  if (/^Not sent:/i.test(e)) return "local";
+  if (/post[- _]?only|would (immediately )?(take|cross|match|trade)|immediately (match|execute)|maker only/i.test(e)) return "post-only";
+  if (/nonce/i.test(e)) return "nonce";
   if (/HTTP 429|error code:?\s*1015/i.test(e)) return "ip-rate";
   if (/position not found|no (open )?position|order (not found|never placed)|already (filled|canceled|cancelled|closed)|unknown order/i.test(e)) return "gone";
+  if (/cannot (update|change) margin mode|margin mode[^.]*open position/i.test(e)) return "gone";
   if (/api[\s_-]?key[^.]*(not found|invalid|expired|revoked|unknown)|key not found|unknown api key|no (copy|trading) key|signature (rejected|invalid|mismatch|verification)|invalid signature|unauthori[sz]ed|trading key has expired/i.test(e)) return "key";
   if (/insufficient|not enough (margin|balance|collateral|funds)|margin (is )?(insufficient|not enough)|available (balance|margin)/i.test(e)) return "margin";
   if (/open[\s_-]?interest|\boi\b[^.]*\b(cap|limit|exceed)|max(imum)?[\s_-]?position|position[^.]*\b(limit|exceed|too (large|big))|risk[\s_-]?limit|too many (open )?orders|open[\s_-]?orders?[^.]*\b(limit|exceed|max)/i.test(e)) return "limit";
@@ -18533,7 +20520,9 @@ var COPY_POLICY = {
   gone: { strikes: 0, holdMs: 0, words: "" },
   unknown: { strikes: 5, holdMs: 15 * 6e4, words: "SoDEX refused several orders" },
   "ip-rate": { strikes: 0, holdMs: 0, words: "" },
-  local: { strikes: 0, holdMs: 0, words: "" }
+  local: { strikes: 0, holdMs: 0, words: "" },
+  "post-only": { strikes: 0, holdMs: 0, words: "" },
+  nonce: { strikes: 0, holdMs: 0, words: "" }
 };
 var ALGO_POLICY = {
   key: COPY_POLICY.key,
@@ -18701,7 +20690,7 @@ function guardedAlgoSink(inner, guard, budget, retryBudgetMs = LOCAL_RETRY_BUDGE
   };
 }
 
-// apps/executor/src/alerts.ts
+// src/alerts.ts
 import { readFileSync as readFileSync4 } from "node:fs";
 var DEDUPE_MS = 10 * 6e4;
 var PER_HOUR = 30;
@@ -18724,7 +20713,9 @@ var LABEL = {
   "crash-restart": "STARTED AFTER A CRASH",
   fatal: "EXECUTOR STOPPING ON AN ERROR",
   "audit-broken": "AUDIT CHAIN BROKEN",
-  "queue-slow": "CLOSES AND STOPS WAITING"
+  "queue-slow": "CLOSES AND STOPS WAITING",
+  "vip-move-unknown": "VIP MOVE NOT CONFIRMED",
+  "vip-key-mismatch": "VIP KEY DOES NOT MATCH"
 };
 var LABELS = {
   maintenance: "\u{1F527} MAINTENANCE",
@@ -18747,7 +20738,9 @@ var CLASS = {
   "crash-restart": "failure",
   fatal: "failure",
   "audit-broken": "failure",
-  "queue-slow": "failure"
+  "queue-slow": "failure",
+  "vip-move-unknown": "failure",
+  "vip-key-mismatch": "failure"
 };
 var head = (c, what) => `${LABELS[c]} \xB7 ${what}`;
 var shortWallet = (a) => /^0x[0-9a-fA-F]{40}$/.test(a) ? `${a.slice(0, 6)}\u2026${a.slice(-4)}` : a;
@@ -18934,7 +20927,7 @@ function maintenanceFor(file, part, now = Date.now()) {
   }
 }
 
-// apps/executor/src/feed/ring.ts
+// src/feed/ring.ts
 import { closeSync, fstatSync, ftruncateSync, openSync, readSync, renameSync, statSync as statSync3, writeSync } from "node:fs";
 var DEFAULT_FEED_PATH = "/run/valuescan-feed/binance-l1";
 var MAGIC = "ARCFEED1";
@@ -19094,7 +21087,7 @@ function decode(b, at, n) {
   };
 }
 
-// apps/executor/src/feed/binance.ts
+// src/feed/binance.ts
 var BINANCE_FUTURES_WS = "wss://fstream.binance.com";
 var plainSockets = (url) => new wrapper_default(url, { perMessageDeflate: false });
 var SYMBOLS_PER_SOCKET = 8;
@@ -19162,7 +21155,7 @@ var BinanceBooks = class {
   }
 };
 
-// apps/executor/src/feed/reference.ts
+// src/feed/reference.ts
 import { existsSync as existsSync4 } from "node:fs";
 var POLL_MS = 2;
 var FALLBACK_AFTER_MS = 500;
@@ -19344,7 +21337,120 @@ var BinanceReference = class {
   }
 };
 
-// apps/executor/src/service.ts
+// src/calendar.ts
+var EVERY_MS = 30 * 6e4;
+var RETRY_MS = 6e4;
+var CalendarFeed = class {
+  constructor(opts) {
+    this.opts = opts;
+  }
+  opts;
+  list = null;
+  timer = null;
+  /** Between start() and stop(): a read that was under way when stop() came does not arm the next one. */
+  active = false;
+  reading = false;
+  start() {
+    this.active = true;
+    if (this.timer || this.reading) return;
+    void this.read();
+  }
+  stop() {
+    this.active = false;
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
+  }
+  events() {
+    return this.list;
+  }
+  async read() {
+    let next = EVERY_MS;
+    this.timer = null;
+    this.reading = true;
+    try {
+      const now = Date.now();
+      const u = new URL(this.opts.url);
+      u.searchParams.set("from", String(now - 864e5));
+      u.searchParams.set("to", String(now + 7 * 864e5));
+      const res = await this.opts.fetch(u.toString(), { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(1e4) });
+      if (!res.ok) throw new Error(`calendar answered ${res.status}`);
+      const body = JSON.parse(await res.text());
+      const raw = body.data?.events ?? body.events ?? [];
+      this.list = raw.flatMap((x) => {
+        const e = x;
+        if (typeof e.time !== "number" || typeof e.short !== "string") return [];
+        const importance = e.importance === "high" || e.importance === "medium" ? e.importance : "low";
+        return [{ time: e.time, short: e.short, importance, allDay: e.allDay === true }];
+      });
+    } catch (err) {
+      next = RETRY_MS;
+      this.opts.log?.warn("calendar read failed; the news gate keeps the last list", { err: err instanceof Error ? err.message : String(err) });
+    } finally {
+      this.reading = false;
+    }
+    if (!this.active) return;
+    this.timer = setTimeout(() => void this.read(), next);
+    this.timer.unref?.();
+  }
+};
+
+// src/vip.ts
+import { randomBytes as randomBytes4 } from "node:crypto";
+var VIP_STEPS = [
+  { id: "check", label: "Checking your VIP status" },
+  { id: "pause", label: "Pausing your bots" },
+  { id: "seal", label: "Sealing your key to the VIP servers" },
+  { id: "send", label: "Handing over bots and books" },
+  { id: "start", label: "Starting on the VIP servers" },
+  { id: "finish", label: "Releasing the standard servers" }
+];
+var VIP_STEPS_DOWN = [
+  { id: "check", label: "VIP ended: moving back" },
+  { id: "pause", label: "Pausing your bots" },
+  { id: "seal", label: "Sealing your key to the standard servers" },
+  { id: "send", label: "Handing over bots and books" },
+  { id: "start", label: "Starting on the standard servers" },
+  { id: "finish", label: "Releasing the VIP servers" }
+];
+var VIP_SWEEP_MS = 10 * 6e4;
+var utcDay = (ms) => Math.floor(ms / 864e5);
+function downgradedToday(jobs, now) {
+  return jobs.some((j) => j.direction === "down" && utcDay(j.startedAt) === utcDay(now));
+}
+function newVipJob(owner, direction = "up", reason) {
+  return {
+    id: randomBytes4(8).toString("hex"),
+    owner,
+    direction,
+    ...reason ? { reason } : {},
+    state: "running",
+    startedAt: Date.now(),
+    endedAt: null,
+    steps: (direction === "down" ? VIP_STEPS_DOWN : VIP_STEPS).map((s) => ({ ...s, state: "wait", ms: null })),
+    bots: 0,
+    error: null,
+    session: null
+  };
+}
+async function vipStep(job, id, fn) {
+  const s = job.steps.find((x) => x.id === id);
+  s.state = "run";
+  const t0 = Date.now();
+  try {
+    const out = await fn();
+    s.state = "done";
+    s.ms = Date.now() - t0;
+    return out;
+  } catch (e) {
+    s.state = "fail";
+    s.ms = Date.now() - t0;
+    job.error = e instanceof Error ? e.message : String(e);
+    throw e;
+  }
+}
+var vipJobView = (j) => ({ ...j, steps: j.steps.map((s) => ({ ...s })) });
+
+// src/service.ts
 var PAIR_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 var PAIR_MAX_TRIES = 10;
 var PAIR_LOCK_MS = 15 * 6e4;
@@ -19388,7 +21494,7 @@ function algoPatch(raw) {
     if (r.label !== null && (typeof r.label !== "string" || r.label.length > 60)) throw new ApiError(400, "patch", "The label must be text of at most 60 characters, or null.");
     out.label = r.label;
   }
-  for (const k of ["orderUsd", "maxInventoryUsd", "offsetTicks", "chaseTicks", "minRepriceMs", "skewTicks", "edgeBps", "queueGuard", "levels", "moveGuard", "refBps", "pullBps"]) {
+  for (const k of ["orderUsd", "maxInventoryUsd", "offsetTicks", "chaseTicks", "minRepriceMs", "skewTicks", "edgeBps", "queueGuard", "levels", "moveGuard", "refBps", "pullBps", "placeBps", "calmBps", "calmMs", "stillBps", "stillMs", "restMs"]) {
     if (r[k] === void 0) continue;
     if (!(typeof r[k] === "number" && Number.isFinite(r[k]))) throw new ApiError(400, "patch", `${k} must be a number.`);
     out[k] = r[k];
@@ -19406,21 +21512,82 @@ function algoPatch(raw) {
     if (r.outOfRange !== "wait" && r.outOfRange !== "stop") throw new ApiError(400, "patch", "outOfRange must be wait or stop.");
     out.outOfRange = r.outOfRange;
   }
+  if (r.flowGate !== void 0) {
+    if (r.flowGate !== null && (typeof r.flowGate !== "object" || Array.isArray(r.flowGate))) throw new ApiError(400, "patch", "flowGate must be an object or null.");
+    out.flowGate = r.flowGate;
+  }
+  if (r.quiet !== void 0) {
+    if (r.quiet !== null && !Array.isArray(r.quiet)) throw new ApiError(400, "patch", "quiet must be a list or null.");
+    out.quiet = r.quiet;
+  }
+  if (r.quietOnly !== void 0) {
+    if (r.quietOnly !== null && typeof r.quietOnly !== "boolean") throw new ApiError(400, "patch", "quietOnly must be true, false or null.");
+    out.quietOnly = r.quietOnly;
+  }
+  if (r.news !== void 0) {
+    if (r.news !== null && (typeof r.news !== "object" || Array.isArray(r.news))) throw new ApiError(400, "patch", "news must be an object or null.");
+    out.news = r.news;
+  }
+  if (r.ref !== void 0) {
+    if (r.ref !== null && r.ref !== "binance") throw new ApiError(400, "patch", "ref must be binance or null.");
+    out.ref = r.ref;
+  }
+  for (const k of ["noFair", "postOnly"]) {
+    if (r[k] === void 0) continue;
+    if (typeof r[k] !== "boolean") throw new ApiError(400, "patch", `${k} must be true or false.`);
+    out[k] = r[k];
+  }
+  for (const k of ["pauseAfter", "pauseMs", "leverage"]) {
+    if (r[k] === void 0) continue;
+    if (r[k] !== null && !(typeof r[k] === "number" && Number.isFinite(r[k]) && r[k] > 0)) throw new ApiError(400, "patch", `${k} must be a positive number or null.`);
+    out[k] = r[k];
+  }
+  if (r.marginMode !== void 0) {
+    if (r.marginMode !== null && r.marginMode !== "cross" && r.marginMode !== "isolated") throw new ApiError(400, "patch", "marginMode must be cross, isolated or null.");
+    out.marginMode = r.marginMode;
+  }
+  for (const k of ["low", "high"]) {
+    if (r[k] === void 0) continue;
+    if (!(typeof r[k] === "number" && Number.isFinite(r[k]) && r[k] > 0)) throw new ApiError(400, "patch", `${k} must be a positive number.`);
+    out[k] = r[k];
+  }
+  if (r.spacing !== void 0) {
+    if (r.spacing !== "linear" && r.spacing !== "geometric") throw new ApiError(400, "patch", "spacing must be linear or geometric.");
+    out.spacing = r.spacing;
+  }
   return out;
 }
 var ApiError = class extends Error {
-  constructor(status, code, message) {
+  constructor(status, code, message, detail) {
     super(message);
     this.status = status;
     this.code = code;
+    this.detail = detail;
   }
   status;
   code;
+  detail;
 };
+var usd = (x) => `$${Math.round(x).toLocaleString("en-US")}`;
+var PERKS_STALE_MS = 6 * 60 * 6e4;
+var WALLET_CACHE_MAX = 2e4;
+var MAKER_FEE_TTL_MS = 6 * 60 * 6e4;
+var BETA_TTL_MS = 6e4;
+var KEY_WARN = [{ ms: 24 * 60 * 6e4, tag: "24h", words: "in about 24 hours" }, { ms: 60 * 6e4, tag: "1h", words: "within the hour" }];
+var VIP_SEND_MS = 15e3;
+function remember(m, k, v, max = WALLET_CACHE_MAX) {
+  m.delete(k);
+  if (m.size >= max) {
+    const oldest = m.keys().next().value;
+    if (oldest !== void 0) m.delete(oldest);
+  }
+  m.set(k, v);
+}
+var marginOf = botMarginUsd;
 var SIGNER_IDLE_MS = 2 * 6e4;
 var VOLUMES_MAX = 2e4;
-var SESSION_TTL_MS = 12 * 60 * 6e4;
-var VOLUME_TTL_MS = 10 * 6e4;
+var SESSION_TTL_MS = 30 * 24 * 60 * 6e4;
+var VOLUME_TTL_MS = 2 * 6e4;
 var KEY_READS = 3;
 var KEY_READ_GAP_MS = 3e3;
 var KEY_REFUSED_AT = 0;
@@ -19449,7 +21616,12 @@ var ExecutorService = class {
       if (now) deps.log.warn("executor: the emergency brake is ON", { copies: now.copies, algos: now.algos, reason: now.reason });
       else if (before) deps.log.warn("executor: the emergency brake is off", {});
     });
-    this.sodex = new SodexClient({ network: cfg.network, fetch: deps.fetch });
+    this.latency = new WriteLatency([{ id: "tokyo", label: "Tokyo \xB7 SoDEX", where: cfg.location }], db, Date.now, (e) => deps.log.warn("executor: write latency not recorded", { error: String(e) }));
+    const logWrites = process.env.EXECUTOR_LOG_WRITES === "1";
+    this.sodex = new SodexClient({ network: cfg.network, fetch: deps.fetch, fastDoor: process.env.EXECUTOR_SODEX_DOOR === "exchange" ? true : process.env.EXECUTOR_SODEX_DOOR === "exchange-key" ? "with-key" : false, raceCopies: Number(process.env.EXECUTOR_SODEX_RACE) || 1, lanesByMarket: process.env.EXECUTOR_SODEX_LANES === "1", onWrite: (w) => {
+      this.latency.record("tokyo", w);
+      if (logWrites) deps.log.info("write", w);
+    } });
     this.hyperliquid = new HyperliquidClient(deps.fetch);
     this.runtime = new CopyRuntime({
       store: db,
@@ -19460,7 +21632,7 @@ var ExecutorService = class {
       hlMode: cfg.kind === "hosted" ? "firehose" : "user",
       log: deps.log,
       sinkFor: (s) => this.sinkFor(s),
-      builderFor: async (s) => cfg.builderId > 0 ? { id: cfg.builderId, fee: copyFeeFor(await this.freshVolume(s.owner)) } : null,
+      builderFor: async (s) => cfg.builderId > 0 ? { id: cfg.builderId, fee: this.copyFee(s.owner, await this.freshVolume(s.owner)) } : null,
       // The stricter of the country declared when the copy started and the one in the wallet's current terms.
       policyFor: (s) => screenPolicy(this.policyNow(s.owner, s.country, s.observedCountry), s.owner, s.settings.leader.address),
       keyProblem: async (s) => this.guard.holdOf({ kind: "copy", id: s.id, owner: s.owner }) ?? this.keyProblem(s.owner),
@@ -19476,14 +21648,21 @@ var ExecutorService = class {
     });
     const oracleFeed = new OracleFeed({ fetch: deps.fetch });
     this.reference = cfg.kind === "hosted" ? new BinanceReference({ path: process.env.EXECUTOR_FEED_PATH || DEFAULT_FEED_PATH, factory: plainSockets, log: deps.log }) : null;
+    this.calendar = cfg.calendarUrl ? new CalendarFeed({ url: cfg.calendarUrl, fetch: deps.fetch, log: deps.log }) : null;
+    const botHost = {
+      keyExpiresAt: (owner) => this.db.key(owner.toLowerCase(), "active")?.expiresAt ?? null,
+      makerFeeFor: (owner, _symbol) => this.makerFeeFor(owner)
+    };
     this.algos = new AlgoRuntime({
+      ...botHost,
       store: db,
       sodex: this.sodex,
       network: cfg.network,
       factory: deps.factory,
       log: deps.log,
       sinkFor: (a) => this.algoSink(a),
-      builderRate: (a) => cfg.builderId > 0 ? (a.spec?.bot === true ? BOT_FEE : copyFeeFor(this.volumeOf(a.owner))) / 1e5 : 0,
+      // Bots: the bot ladder by 14-day volume; VIP, or beta in its first 30 days, the lowest step (policy.ts botFeeFor).
+      builderRate: (a) => cfg.builderId > 0 ? (a.spec?.bot === true ? this.botFee(a.owner, this.volumeOf(a.owner)) : this.copyFee(a.owner, this.volumeOf(a.owner))) / 1e5 : 0,
       problem: async (a) => this.guard.holdOf({ kind: "algo", id: a.id, owner: a.owner }) ?? this.algoProblem(a),
       brake: () => this.brakeText("algos"),
       // The copy region rules, from the country declared with the terms and the one the request came from.
@@ -19492,6 +21671,8 @@ var ExecutorService = class {
       // Hyperliquid, OKX and Bybit, each read at most once a second per coin for every algo here.
       oracle: (coin) => oracleFeed.quotes(coin),
       ...this.reference ? { reference: this.reference } : {},
+      // A bot's news gate: the API server's economic calendar, read every 30 minutes.
+      events: () => this.calendar?.events() ?? null,
       // An algo failed, stopped, held or finished: kept for the follower to read after signing in.
       onNotice: (n) => db.addNotice(n),
       confirmGapMs: deps.readGapMs
@@ -19512,7 +21693,11 @@ var ExecutorService = class {
   algos;
   /** The Binance-led maker's reference (feed/reference.ts); null on a self-hosted executor. */
   reference;
+  /** The economic calendar, for a bot's news gate (calendar.ts); null without a calendar URL. */
+  calendar;
   sodex;
+  /** Signed-write latency to SoDEX per 10 min (latency.ts), for GET /bots/latency. */
+  latency;
   hyperliquid;
   nonces = createMemoryNonceManager();
   paper = new PaperSink();
@@ -19521,6 +21706,46 @@ var ExecutorService = class {
   /** What SoDEX refused, and the copies and algos held for it (guard.ts). */
   guard;
   volumes = /* @__PURE__ */ new Map();
+  /**
+   * VIP and the dev page's fee programs for copy trading and bots (owner 2026-11-08), from the same read as the
+   * volume (GET /api/vs/builder/volume): the fee and until when. A program's end is checked on every order, so it
+   * stops counting the moment it ends, whatever the cache.
+   */
+  perks = /* @__PURE__ */ new Map();
+  /** The wallet's perks as last read, while that read is not older than PERKS_STALE_MS (VIP and programs end with it). */
+  freshPerks(owner, now = Date.now()) {
+    const p = this.perks.get(owner);
+    return p && now - p.at < PERKS_STALE_MS ? p : null;
+  }
+  /** A product's lowered fee for the wallet now (Infinity: none). */
+  perkFee(owner, p) {
+    const now = Date.now();
+    const x = this.freshPerks(owner, now)?.[p];
+    if (!x || x.until !== null && x.until <= now) return Infinity;
+    return Math.max(0, x.fee);
+  }
+  /** The copy fee: the ladder by volume, or lower (VIP, a program). */
+  copyFee(owner, volume) {
+    return Math.min(copyFeeFor(volume), this.perkFee(owner, "copy"));
+  }
+  /**
+   * The bot fee: the bot ladder by volume, or lower - VIP by volume, and server 1's programs (the beta's 30 days of VIP
+   * from the wallet's listing is one: `fees.bots` with its end). One source for the beta VIP: server 1's (owner
+   * 2026-11-08); the executor no longer counts its own 30 days from the first bot.
+   */
+  botFee(owner, volume) {
+    return Math.min(botFeeFor(volume, { vip: this.freshPerks(owner)?.vip === true }), this.perkFee(owner, "bots"));
+  }
+  /** The wallet's bot fee as /me shows it: tenths of a bp, whether it is VIP's, until when a lowered fee lasts. */
+  botFeeView(owner) {
+    const now = Date.now();
+    const vol = this.volumeOf(owner);
+    const fee = this.botFee(owner, vol);
+    const p = this.freshPerks(owner, now);
+    const perk = p?.bots && (p.bots.until === null || p.bots.until > now) ? p.bots : null;
+    const byPerk = perk !== null && Math.max(0, perk.fee) === fee && fee < botFeeFor(vol, { vip: p?.vip === true });
+    return { feeTenths: fee, vip: p?.vip === true || perk !== null && perk.fee <= BOT_FEE_VIP, until: byPerk ? perk.until : null };
+  }
   volumeReads = /* @__PURE__ */ new Map();
   builderDb = null;
   /** Self-hosted, not yet paired: the code printed at start. */
@@ -19530,7 +21755,17 @@ var ExecutorService = class {
   /** The operator's emergency brake (brake.ts): read from cfg.brakeFile. */
   brake;
   async start() {
-    this.signerSweep ??= setInterval(() => this.sweepSigners(), 3e4);
+    this.latency.start();
+    this.calendar?.start();
+    this.signerSweep ??= setInterval(() => {
+      this.sweepSigners();
+      this.warnKeyExpiry();
+      if (this.canMoveBack() && Date.now() - this.vipSweepAt >= (this.cfg.vipSweepMs ?? VIP_SWEEP_MS)) {
+        this.vipSweepAt = Date.now();
+        void this.sweepVip().catch((e) => this.deps.log.warn("vip: sweep failed", { error: String(e) }));
+      }
+    }, 3e4);
+    this.failInterruptedVipJobs();
     this.signerSweep.unref?.();
     this.sodex.budget.onEvent = (e) => {
       if (e.kind === "rate-limited") {
@@ -19550,9 +21785,11 @@ var ExecutorService = class {
     this.signerSweep = null;
     await this.algos.stop();
     this.reference?.stop();
+    this.calendar?.stop();
     await this.runtime.stop();
     for (const owner of [...this.signers.keys()]) this.forgetSigner(owner, true);
     this.builderDb?.close();
+    this.latency.stop();
   }
   selfId() {
     let id = this.db.meta("executorId");
@@ -19583,8 +21820,9 @@ var ExecutorService = class {
       keyName: this.keyName,
       keyImport: { alg: KEY_IMPORT_ALG, publicKey: this.secrets.importPublicKey(), info: importInfo(this.executorId, "<owner>") },
       algos: { maxPerOwner: this.cfg.maxAlgosPerOwner },
-      bots: { fee: BOT_FEE },
+      bots: { fee: BOT_FEE, ladder: BOT_FEE_LADDER, vipFee: BOT_FEE_VIP, betaVipDays: BETA_VIP_DAYS },
       features: [...EXECUTOR_FEATURES],
+      vip: { tier: this.cfg.tier, canMove: this.cfg.tier === "standard" && !!this.cfg.vipUrl && !!this.cfg.vipToken && !!this.cfg.vipPubkey, canMoveBack: this.canMoveBack(), location: this.cfg.location, open: this.cfg.vipOpen },
       brake: this.brakeView()
     };
   }
@@ -19646,7 +21884,7 @@ var ExecutorService = class {
     const q = req;
     const termsWide = want === "accept-terms" && q?.action === "accept-terms" && q.executor === COPY_TERMS_EXECUTOR;
     const siteTerms = want === "accept-site-terms";
-    const v = verifyCopyRequest(req, { executor: siteTerms ? SITE_TERMS_EXECUTOR : termsWide ? COPY_TERMS_EXECUTOR : this.executorId });
+    const v = verifyCopyRequest(req, { executor: siteTerms ? SITE_TERMS_EXECUTOR : termsWide ? COPY_TERMS_EXECUTOR : this.executorId, revokedBefore: (o) => Number(this.db.meta(`daykeys-revoked:${o}`) ?? 0) });
     if (!v.ok) throw new ApiError(401, "signature", v.error);
     const r = req;
     const wanted = Array.isArray(want) ? want : [want];
@@ -19691,6 +21929,21 @@ var ExecutorService = class {
       payload: v.payload && typeof v.payload === "object" ? v.payload : {},
       consent: { action: r.action, digest: v.digest, signature: r.signature, chainId: r.chainId, payload: r.payload, at }
     };
+  }
+  /**
+   * Revoke every day key the wallet approved before now (owner 2026-11-09 security review): a wallet-signed 'delegate'
+   * with payload {revoke: true}. A day key is never stored here - its approval travels with each request - so the
+   * revocation is a time: approvals signed before it are refused (verifyCopyRequest revokedBefore). Wallet only.
+   */
+  revokeDayKeys(req, ctx) {
+    const r = req;
+    if (r?.delegation !== void 0) throw new ApiError(401, "signature", "Only the wallet itself can revoke its day keys.");
+    const { owner, payload } = this.accept(req, "delegate", ctx);
+    if (payload.revoke !== true) throw new ApiError(400, "payload", "A revocation says {revoke: true}.");
+    const at = Date.now();
+    this.db.setMeta(`daykeys-revoked:${owner}`, String(at));
+    this.deps.log.info("day keys revoked", { owner });
+    return { ok: true, revokedBefore: at };
   }
   session(req, ctx) {
     const { owner } = this.accept(req, "session", ctx);
@@ -19751,8 +22004,451 @@ var ExecutorService = class {
       terms: current,
       policy: screenPolicy(regionPolicy(current?.country ?? null, ctx.viewerCountry), owner),
       key: this.keyInfo(owner),
-      copies: this.runtime.list(owner).map((s) => this.runtime.view(s.id)).filter((v) => v !== null).sort((a, b) => b.subscription.createdAt - a.subscription.createdAt)
+      copies: this.runtime.list(owner).map((s) => this.runtime.view(s.id)).filter((v) => v !== null).sort((a, b) => b.subscription.createdAt - a.subscription.createdAt),
+      movedTo: this.movedAway(owner),
+      bots: this.botFeeView(owner)
     };
+  }
+  /* -------------------------------------------------------------- VIP ----- */
+  vipJobs = /* @__PURE__ */ new Map();
+  /** A move of this wallet's bots is under way (A6: its starts, resumes and changes wait for it; stops never do). */
+  vipMoving(owner) {
+    return this.vipJobs.get(owner)?.state === "running";
+  }
+  /**
+   * Start moving the signer's bots to the VIP executor (vip.ts). One job per wallet at a time, run inside the
+   * wallet's queue (serial): nothing else of the wallet's runs in between, and a start or resume asked meanwhile is
+   * refused (vip-moving). The job is kept in the db at every step.
+   */
+  vipMove(req, ctx) {
+    const { owner } = this.accept(req, "vip-move", ctx);
+    if (this.cfg.tier !== "standard" || !this.cfg.vipUrl || !this.cfg.vipToken || !this.cfg.vipPubkey) throw new ApiError(404, "vip", "The VIP servers are not set up on this executor.");
+    const cur = this.vipJobs.get(owner);
+    if (cur?.state === "running") return vipJobView(cur);
+    if (this.db.moved(owner)?.tier === "vip") throw new ApiError(409, "moved", "Your bots run on the VIP servers already.");
+    const job = newVipJob(owner);
+    this.vipJobs.set(owner, job);
+    this.db.saveVipJob(job);
+    void this.serial(owner, () => this.runVipMove(job)).catch(() => void 0);
+    return vipJobView(job);
+  }
+  /** Where the wallet's bots run when it is not here: the other executor's tier, else null. */
+  movedAway(owner) {
+    const t = this.db.moved(owner)?.tier;
+    return (t === "vip" || t === "standard") && t !== this.cfg.tier ? t : null;
+  }
+  /** This executor takes moves in: the VIP one (up), or a standard one paired with a VIP one (back). */
+  takesMoves() {
+    return this.cfg.tier === "vip" || !!this.cfg.vipUrl;
+  }
+  /** The VIP executor can move wallets back (vip.ts BACK): the standard one's URL, its pinned key and the token. */
+  canMoveBack() {
+    return this.cfg.tier === "vip" && !!this.cfg.stdUrl && !!this.cfg.vipToken && !!this.cfg.stdPubkey;
+  }
+  /**
+   * Move a wallet's bots back to the standard executor (VIP side; vip.ts BACK). At most one move back per wallet per
+   * UTC day (a second the same day returns null and moves nothing); none while another move of the wallet runs.
+   */
+  vipMoveBack(owner, reason, now = Date.now()) {
+    if (!this.canMoveBack()) return null;
+    if (this.vipMoving(owner) || this.movedAway(owner)) return null;
+    if (downgradedToday([...this.vipJobs.has(owner) ? [this.vipJobs.get(owner)] : [], ...this.db.vipJobs(owner)], now)) return null;
+    const job = newVipJob(owner, "down", reason);
+    this.vipJobs.set(owner, job);
+    this.db.saveVipJob(job);
+    void this.serial(owner, () => this.runVipMove(job)).catch(() => void 0);
+    return vipJobView(job);
+  }
+  /**
+   * VIP side, every VIP_SWEEP_MS: each wallet with bots running here is asked about (vipEligible, twice, a moment
+   * apart: one answer never moves anyone); one that is no longer VIP moves back (vipMoveBack: once a UTC day). A read
+   * that fails moves nobody. Returns the jobs started.
+   */
+  async sweepVip(now = Date.now()) {
+    if (!this.canMoveBack() || this.cfg.vipOpen) return [];
+    const owners = new Set(this.algos.list().filter((a) => a.spec?.bot === true && !FINAL_STATUSES.has(a.status)).map((a) => a.owner));
+    const out = [];
+    for (const owner of owners) {
+      if (this.movedAway(owner) || this.vipMoving(owner)) continue;
+      if (downgradedToday(this.db.vipJobs(owner), now)) continue;
+      try {
+        const a = await this.vipEligible(owner);
+        if (a.ok) continue;
+        await sleep(this.deps.readGapMs ?? 2e3);
+        const b = await this.vipEligible(owner);
+        if (b.ok) continue;
+        const j = this.vipMoveBack(owner, b.why, now);
+        if (j) out.push(j);
+      } catch (e) {
+        this.deps.log.warn("vip: status read failed; nobody moved back", { owner, error: String(e) });
+      }
+    }
+    return out;
+  }
+  vipSweepAt = 0;
+  /**
+   * The operator's overview of this executor (owner 2026-11-08: "usage of our infrastructure + bot volume across all
+   * valuedesk users"): what runs here against its caps, the shared SoDEX budget, and the bots' volume, PnL and fees
+   * (all wallets together, real and practice apart). Read by server 1's admin suite with the internal token.
+   */
+  infraStats(now = Date.now()) {
+    const all = this.algos.list();
+    const bots = all.filter((a) => a.spec?.bot === true);
+    const liveBots = bots.filter((a) => !FINAL_STATUSES.has(a.status));
+    const real = liveBots.filter((a) => !a.spec.paper);
+    const vol24 = (a) => {
+      const b = a.book;
+      if (!b) return 0;
+      const before = [...b.series ?? []].reverse().find((p) => p[0] < now - 864e5);
+      return Math.max(0, b.buyValue + b.sellValue - (before ? before[1] : 0));
+    };
+    const sum = (xs) => {
+      let volume = 0, volume24h = 0, net = 0, tradeFees = 0, builderFees = 0, fills = 0;
+      for (const a of xs) {
+        const b = a.book;
+        if (!b) continue;
+        const v = this.algos.view(a.id)?.bot;
+        volume += b.buyValue + b.sellValue;
+        volume24h += vol24(a);
+        net += v?.netPnl ?? 0;
+        tradeFees += b.tradeFees;
+        builderFees += b.builderFees;
+        fills += b.fills;
+      }
+      return { volume, volume24h, netPnl: net, tradeFees, builderFees, fills };
+    };
+    const realAll = bots.filter((a) => !a.spec.paper);
+    const markets = /* @__PURE__ */ new Map();
+    for (const a of realAll) {
+      const m = markets.get(a.spec.symbol) ?? { symbol: a.spec.symbol, live: 0, volume: 0, volume24h: 0 };
+      if (!FINAL_STATUSES.has(a.status)) m.live++;
+      m.volume += a.book ? a.book.buyValue + a.book.sellValue : 0;
+      m.volume24h += vol24(a);
+      markets.set(a.spec.symbol, m);
+    }
+    const budget = this.sodex.budget;
+    const socket = this.algos.socketWallets?.() ?? null;
+    return {
+      at: now,
+      tier: this.cfg.tier,
+      location: this.cfg.location,
+      liveBots: real.length,
+      maxLiveBots: this.cfg.maxLiveBots,
+      practiceBots: liveBots.length - real.length,
+      pausedBots: real.filter((a) => a.status === "paused").length,
+      closingBots: real.filter((a) => !!a.k.closing).length,
+      botWallets: new Set(real.map((a) => a.owner)).size,
+      algos: all.filter((a) => a.spec?.bot !== true && !FINAL_STATUSES.has(a.status) && !a.spec.paper).length,
+      copies: this.runtime.list().filter((c) => c.status !== "stopped" && !c.settings.paper).length,
+      maxAlgosPerOwner: this.cfg.maxAlgosPerOwner,
+      socket: socket ? { ...socket, max: 10 } : null,
+      budget: { used: Math.round(budget.used(now)), perMinute: budget.perMinute, cooldownMs: budget.cooldownLeft?.() ?? 0 },
+      real: sum(realAll),
+      practice: sum(bots.filter((a) => a.spec.paper)),
+      markets: [...markets.values()].sort((x, y) => y.volume24h - x.volume24h || y.volume - x.volume).slice(0, 40),
+      vipMoves: this.db.vipJobs().filter((j) => now - j.startedAt < 7 * 864e5).map((j) => ({ direction: j.direction ?? "up", state: j.state, outcome: j.outcome ?? null, at: j.startedAt }))
+    };
+  }
+  /** The wallet's last move, as it stands (this process's, else the db's: a move from before a restart). */
+  vipJob(owner) {
+    const j = this.vipJobs.get(owner) ?? this.db.vipJobs(owner)[0] ?? null;
+    return j ? vipJobView(j) : null;
+  }
+  /**
+   * At start: a move the db still has as running was cut by a restart. Where its bots run is not known here (the VIP
+   * side may have taken them), so they stay paused, the job says so, and the operator is told. Never resumed on a guess.
+   */
+  failInterruptedVipJobs() {
+    for (const j of this.db.vipJobs()) {
+      if (j.state !== "running") continue;
+      j.state = "failed";
+      j.outcome = "unknown";
+      j.endedAt = Date.now();
+      j.error = "The standard servers restarted during the move. Your bots stay paused until ValueDesk has checked where they run.";
+      this.db.saveVipJob(j);
+      this.deps.log.warn("vip: a move was cut by a restart", { owner: j.owner, job: j.id });
+      this.deps.alerts?.raise("vip-move-unknown", `owner:${j.owner}`, `A VIP move of ${shortWallet(j.owner)} (job ${j.id}) was cut by a restart; its bots are paused here. Check the VIP side's import (POST /internal/vip/import/status) before resuming or finishing it.`);
+    }
+  }
+  async vipEligible(owner) {
+    if (this.cfg.vipOpen) return { ok: true, why: "open" };
+    if (!this.cfg.vipCheckUrl) return { ok: false, why: "VIP status cannot be checked here." };
+    const u = new URL(this.cfg.vipCheckUrl);
+    u.searchParams.set("address", owner);
+    const res = await this.deps.fetch(u.toString(), { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(5e3) });
+    const b = JSON.parse(await res.text());
+    if (!res.ok || !b.ok) throw new Error("VIP status could not be read. Try again in a moment.");
+    return b.eligible ? { ok: true, why: "eligible" } : { ok: false, why: `Not VIP yet: ${Math.round(b.volumeUsd ?? 0).toLocaleString("en-US")} of $${Math.round(b.minUsd ?? 1e6).toLocaleString("en-US")} in 14 days.` };
+  }
+  /**
+   * How the VIP side's import of this job ended, asked after a send that was not answered cleanly (a timeout, an
+   * error). `abandon`: an import of this job not begun yet never begins (the VIP side keeps the job as abandoned), so
+   * the answer is final. 'running' is asked again a few times; no answer at all is 'unknown'.
+   */
+  async vipImportOutcome(vip, token, job) {
+    for (let i = 0; i < 5; i++) {
+      if (i) await sleep(this.deps.readGapMs ?? 2e3);
+      try {
+        const res = await this.deps.fetch(`${vip}/internal/vip/import/status`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/json", "X-Internal-Token": token },
+          body: JSON.stringify({ owner: job.owner, job: job.id, abandon: true }),
+          signal: AbortSignal.timeout(5e3)
+        });
+        const b = JSON.parse(await res.text());
+        if (!res.ok || !b.ok) continue;
+        if (b.state === "done") return { state: "done", session: b.session ?? null };
+        if (b.state === "failed" || b.state === "abandoned") return { state: b.state };
+      } catch {
+      }
+    }
+    return { state: "unknown" };
+  }
+  async runVipMove(job) {
+    const owner = job.owner;
+    const down = job.direction === "down";
+    const vip = (down ? this.cfg.stdUrl : this.cfg.vipUrl).replace(/\/+$/, "");
+    const token = this.cfg.vipToken ?? "";
+    const pinned = down ? this.cfg.stdPubkey : this.cfg.vipPubkey;
+    const there = down ? "standard" : "VIP";
+    const pinName = down ? "EXECUTOR_STD_PUBKEY" : "EXECUTOR_VIP_PUBKEY";
+    const bots = this.algos.list(owner).filter((a) => a.spec?.bot === true && !FINAL_STATUSES.has(a.status));
+    job.bots = bots.length;
+    const paused = [];
+    let handed = false;
+    let unknown = false;
+    const step = async (id, fn) => {
+      try {
+        return await vipStep(job, id, fn);
+      } finally {
+        this.db.saveVipJob(job);
+      }
+    };
+    try {
+      await step("check", async () => {
+        if (!down) {
+          const e = await this.vipEligible(owner);
+          if (!e.ok) throw new Error(e.why);
+        }
+        if (this.runtime.list(owner).some((s) => s.status !== "stopped")) throw new Error("Stop your copies first: they keep their key on these servers.");
+        if (this.algos.list(owner).some((a) => a.spec?.bot !== true && !FINAL_STATUSES.has(a.status))) throw new Error("Let your algo orders finish first: only bots move.");
+        if (!this.db.key(owner, "active") && bots.some((a) => !a.spec.paper)) throw new Error("Set up your SoDEX key first.");
+      });
+      await step("pause", async () => {
+        for (const a of bots) {
+          if (a.status === "paused") continue;
+          await this.algos.pause(a.id);
+          paused.push(a.id);
+        }
+      });
+      const envelope = await step("seal", async () => {
+        const res = await this.deps.fetch(`${vip}/info`, { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(5e3) });
+        const info = JSON.parse(await res.text());
+        if (!res.ok || info.vip?.tier !== (down ? "standard" : "vip") || !info.keyImport?.publicKey) throw new Error(`The ${there} servers did not answer.`);
+        if (info.executorId !== this.executorId) throw new Error(`The ${there} servers run under another executor id.`);
+        if (info.keyImport.publicKey !== pinned) {
+          this.deps.alerts?.raise("vip-key-mismatch", "", `The ${there} servers' /info shows an import key that is not ${pinName}; no key was sent (move of ${shortWallet(owner)}).`);
+          throw new Error(`The ${there} servers did not prove who they are. Nothing was sent; your bots stay here.`);
+        }
+        const k = this.db.key(owner, "active");
+        return k ? { key: k, envelope: this.secrets.sealTo(this.cfg.network, owner, k.address, k.sealed, { publicKey: pinned, executorId: this.executorId }) } : null;
+      });
+      const answer = await step("send", async () => {
+        let res = null;
+        let b = null;
+        try {
+          res = await this.deps.fetch(`${vip}/internal/vip/import`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Accept: "application/json", "X-Internal-Token": token },
+            body: JSON.stringify({
+              owner,
+              job: job.id,
+              key: envelope ? { name: envelope.key.name, address: envelope.key.address, expiresAt: envelope.key.expiresAt, envelope: envelope.envelope } : null,
+              record: this.db.ownerRecord(owner),
+              algos: bots.map((a) => this.algos.get(a.id)),
+              resume: bots.filter((a) => a.status !== "paused" || paused.includes(a.id)).map((a) => a.id)
+            }),
+            signal: AbortSignal.timeout(VIP_SEND_MS)
+          });
+          b = JSON.parse(await res.text());
+        } catch {
+          b = null;
+        }
+        if (res?.ok && b?.ok) {
+          handed = true;
+          return b;
+        }
+        const o = await this.vipImportOutcome(vip, token, job);
+        if (o.state === "done") {
+          handed = true;
+          return { ok: true, session: o.session ?? void 0 };
+        }
+        if (o.state === "unknown") {
+          unknown = true;
+          throw new Error(`The ${there} servers did not confirm the move. Your bots stay paused until ValueDesk has checked where they run.`);
+        }
+        throw new Error(b?.error ?? (res ? `The ${there} servers answered HTTP ${res.status}.` : `The ${there} servers did not answer.`));
+      });
+      await step("start", async () => {
+        job.session = answer?.session ?? null;
+      });
+      await step("finish", async () => {
+        for (const a of bots) await this.algos.handOver(a.id, down ? `Moved back to the standard servers: ${job.reason ?? "VIP ended"}` : "Moved to the VIP servers.");
+        this.db.deleteKeys(owner);
+        this.forgetSigner(owner);
+        this.db.setMoved(owner, down ? "standard" : "vip");
+        this.deps.log.info(down ? "vip: moved back" : "vip: moved", { owner, bots: bots.length, ms: Date.now() - job.startedAt });
+      });
+      job.state = "done";
+      job.outcome = "moved";
+    } catch (e) {
+      job.state = "failed";
+      job.error ??= e instanceof Error ? e.message : String(e);
+      if (handed) job.outcome = "moved";
+      else if (unknown) {
+        job.outcome = "unknown";
+        this.deps.alerts?.raise("vip-move-unknown", `owner:${owner}`, `A ${down ? "move back to standard" : "VIP move"} of ${shortWallet(owner)} (job ${job.id}) was not confirmed by the ${there} side; its ${bots.length} bot(s) stay paused here. Check that side's import (POST /internal/vip/import/status) before resuming or finishing it.`);
+      } else {
+        job.outcome = "not-moved";
+        const brake = this.brakeText("algos");
+        if (brake) job.error = `${job.error} Your bots stay paused: ${brake}`;
+        else for (const id of paused) await this.algos.resume(id).catch(() => void 0);
+      }
+      this.deps.log.warn("vip: move failed", { owner, error: job.error, handed, unknown });
+    } finally {
+      job.endedAt = Date.now();
+      this.db.saveVipJob(job);
+    }
+  }
+  /**
+   * The VIP executor's side of a move (internal: the standard executor asks, with the internal token). Idempotent and
+   * all-or-nothing: an id already taken in (and running here) is skipped; every bot is adopted before any resumes; a
+   * failure part-way hands the ones adopted by this call back (ended here, nothing closed) and restores the key that
+   * was here. The job's outcome is kept (vipImportStatus); a job the sender gave up on is refused.
+   */
+  async vipImport(body) {
+    if (!this.takesMoves()) throw new ApiError(404, "path", "not found");
+    if (!body || typeof body !== "object" || Array.isArray(body)) throw new ApiError(400, "vip", "A move needs a body: the wallet, its key and its bots.");
+    const b = body;
+    const owner = typeof b.owner === "string" && /^0x[0-9a-f]{40}$/.test(b.owner) ? b.owner : null;
+    if (!owner || b.key && (typeof b.key.name !== "string" || typeof b.key.address !== "string")) throw new ApiError(400, "vip", "A move needs the wallet (and its key, when it has one).");
+    const job = typeof b.job === "string" && /^[0-9a-f]{16}$/.test(b.job) ? b.job : null;
+    if (!job) throw new ApiError(400, "vip", "A move needs its job id.");
+    const recs = Array.isArray(b.algos) ? b.algos : [];
+    if (recs.some((r) => !r || typeof r !== "object" || typeof r.id !== "string" || r.owner !== owner || r.spec?.bot !== true)) throw new ApiError(400, "vip", "A move carries only the wallet's own bots.");
+    const kept = this.db.vipImport(job);
+    if (kept && kept.owner !== owner) throw new ApiError(409, "vip", "This move belongs to another wallet.");
+    if (kept?.state === "abandoned") throw new ApiError(409, "vip-abandoned", "The standard servers gave this move up. Start the move again.");
+    if (kept?.state === "running") throw new ApiError(409, "vip-running", "This move is being taken in right now.");
+    if (kept?.state === "done") {
+      const d = kept.data;
+      return { ok: true, session: this.secrets.issueSession(owner, SESSION_TTL_MS), started: Number(d.started) || 0, held: Number(d.held) || 0 };
+    }
+    this.db.setVipImport(job, owner, "running");
+    return this.serial(owner, async () => {
+      const prevKey = this.db.key(owner, "active");
+      const adopted = [];
+      let keyChanged = false;
+      try {
+        if (b.key) {
+          const pk = this.secrets.openImport(this.executorId, owner, b.key.envelope);
+          try {
+            const address = privateKeyToAddress(pk).toLowerCase();
+            if (address !== String(b.key.address).toLowerCase()) throw new ApiError(400, "vip", "The key does not match.");
+            const now = Date.now();
+            const expiresAt = typeof b.key.expiresAt === "number" ? b.key.expiresAt : null;
+            this.db.putKey({ owner, slot: "pending", address, name: String(b.key.name), sealed: this.secrets.seal(this.cfg.network, owner, address, pk), createdAt: now, expiresAt, registered: true, checkedAt: now });
+            this.db.promoteKey(owner);
+            keyChanged = true;
+            this.forgetSigner(owner);
+          } finally {
+            pk.fill(0);
+          }
+        }
+        if (b.record?.terms) this.db.setTerms(owner, b.record.terms);
+        for (const c of Array.isArray(b.record?.consents) ? b.record.consents : []) if (c.owner === owner) this.db.addConsent(c);
+        for (const rec of recs) {
+          const here = this.algos.get(rec.id);
+          const home = here !== null && here !== void 0 && here.owner === owner && FINAL_STATUSES.has(here.status) && here.k.handedOver === true;
+          if (here && !home) {
+            if (here.owner !== owner || FINAL_STATUSES.has(here.status)) throw new ApiError(409, "vip", `Bot ${rec.id} has ended here already; it cannot be taken in again.`);
+            continue;
+          }
+          await this.algos.adopt(rec, this.cfg.tier === "vip" ? "Moved to the VIP servers: it goes on from here with the same book." : "Moved back to the standard servers: it goes on from here with the same book.");
+          adopted.push(rec.id);
+        }
+      } catch (e) {
+        for (const id of adopted) await this.algos.handOver(id, "The move to the VIP servers was rolled back: this bot stays on the standard servers.").catch(() => void 0);
+        if (keyChanged) {
+          this.forgetSigner(owner);
+          if (prevKey) this.db.putKey(prevKey);
+          else this.db.deleteKeys(owner);
+        }
+        const error = e instanceof Error ? e.message : String(e);
+        this.db.setVipImport(job, owner, "failed", { error, rolledBack: adopted.length });
+        this.deps.log.warn("vip: take-in failed and was rolled back", { owner, job, error, rolledBack: adopted.length });
+        throw e instanceof ApiError ? e : new ApiError(500, "vip", `The move could not be taken in: ${error}`);
+      }
+      const resume = new Set(Array.isArray(b.resume) ? b.resume.filter((x) => typeof x === "string") : []);
+      const brake = this.brakeText("algos");
+      let started = 0;
+      let held2 = 0;
+      for (const rec of recs) {
+        if (!resume.has(rec.id)) continue;
+        if (brake) {
+          held2++;
+          continue;
+        }
+        try {
+          await this.algos.resume(rec.id);
+          started++;
+        } catch (e) {
+          held2++;
+          this.deps.log.warn("vip: a bot taken in did not resume", { owner, algo: rec.id, error: String(e) });
+        }
+      }
+      this.db.setMoved(owner, null);
+      this.db.setVipImport(job, owner, "done", { started, held: held2, ids: recs.map((r) => r.id) });
+      if (this.cfg.tier === "standard") {
+        this.db.addNotice({
+          id: `vip-back:${job}`,
+          owner,
+          source: "algo",
+          ref: recs[0]?.id ?? owner,
+          kind: "vip-back",
+          grade: "info",
+          title: "Your bots moved back to the standard servers",
+          body: `VIP needs $1M of your own volume in 14 days (or a VIP program). ${recs.length} bot${recs.length === 1 ? "" : "s"} moved back with ${recs.length === 1 ? "its" : "their"} books and keep running here. You can move to VIP again any time you qualify.`,
+          at: Date.now(),
+          paper: false
+        });
+      }
+      this.deps.log.info("vip: took in", { owner, job, bots: recs.length, started, held: held2 });
+      return { ok: true, session: this.secrets.issueSession(owner, SESSION_TTL_MS), started, held: held2 };
+    });
+  }
+  /**
+   * How a move's take-in ended, for the standard side after a send it could not confirm: 'done' (with a fresh read
+   * token for the wallet), 'failed', 'running', or 'abandoned'. `abandon`: a job not begun here is marked abandoned,
+   * so its import - should it still arrive - is refused (vipImport), and the answer is final.
+   */
+  vipImportStatus(body) {
+    if (!this.takesMoves()) throw new ApiError(404, "path", "not found");
+    const b = body && typeof body === "object" ? body : {};
+    const owner = typeof b.owner === "string" && /^0x[0-9a-f]{40}$/.test(b.owner) ? b.owner : null;
+    const job = typeof b.job === "string" && /^[0-9a-f]{16}$/.test(b.job) ? b.job : null;
+    if (!owner || !job) throw new ApiError(400, "vip", "Name the wallet and the move.");
+    const kept = this.db.vipImport(job);
+    if (!kept) {
+      if (b.abandon === true) {
+        this.db.setVipImport(job, owner, "abandoned");
+        return { ok: true, state: "abandoned" };
+      }
+      return { ok: true, state: "unknown" };
+    }
+    if (kept.owner !== owner) throw new ApiError(404, "vip", "No such move.");
+    if (kept.state === "done") return { ok: true, state: "done", session: this.secrets.issueSession(owner, SESSION_TTL_MS) };
+    return { ok: true, state: kept.state };
   }
   /* ------------------------------------------------------------- keys ----- */
   keyInfo(owner) {
@@ -19932,6 +22628,56 @@ var ExecutorService = class {
     if (now) hit.ref.privateKey.fill(0);
     else setTimeout(() => hit.ref.privateKey.fill(0), 5e3).unref?.();
   }
+  /**
+   * A1: a notice ~24 h and ~1 h before the trading key that the wallet's real bots use expires (the engine pulls
+   * their quotes shortly before it; after it nothing of theirs can be cancelled here). Once per key and step: the
+   * notice id names the key's address and expiry, and the db keeps a notice once.
+   */
+  warnKeyExpiry(now = Date.now()) {
+    const owners = /* @__PURE__ */ new Map();
+    for (const a of this.algos.list()) if (a.spec?.bot === true && !a.spec.paper && !FINAL_STATUSES.has(a.status) && !owners.has(a.owner)) owners.set(a.owner, a);
+    for (const [owner, a] of owners) {
+      const k = this.db.key(owner, "active");
+      if (!k?.expiresAt || k.expiresAt <= now) continue;
+      const left = k.expiresAt - now;
+      const step = [...KEY_WARN].reverse().find((w) => left <= w.ms);
+      if (!step) continue;
+      const id = `key-expiry:${step.tag}:${owner}:${k.address}:${k.expiresAt}`;
+      if (this.keyWarned.has(id)) continue;
+      remember(this.keyWarned, id, true, 5e3);
+      const when = new Date(k.expiresAt).toISOString().replace("T", " ").slice(0, 16);
+      this.db.addNotice({
+        id,
+        owner,
+        source: "algo",
+        ref: a.id,
+        kind: "key-expiry",
+        grade: step.tag === "1h" ? "error" : "warn",
+        title: `Your trading key expires ${step.words}`,
+        body: `The key your real bots trade with expires at ${when} UTC. Shortly before that they pull their quotes and stop placing orders. Approve a new key in setup to keep them running.`,
+        at: now,
+        paper: false
+      });
+    }
+  }
+  keyWarned = /* @__PURE__ */ new Map();
+  /**
+   * The wallet's own SoDEX maker fee in bp (GET /perps/accounts/{a}/fee-rate, weight 2), for the engine's booked
+   * fees: the last answer (sync), read again in the background after MAKER_FEE_TTL_MS. null until the first answer.
+   */
+  makerFees = /* @__PURE__ */ new Map();
+  makerFeeFor(owner) {
+    const o = owner.toLowerCase();
+    const hit = this.makerFees.get(o);
+    if (!hit || Date.now() - hit.at >= MAKER_FEE_TTL_MS) {
+      remember(this.makerFees, o, { bp: hit?.bp ?? null, at: Date.now() });
+      void this.sodex.get(`/api/v1/perps/accounts/${o}/fee-rate`, 2, 1).then((r) => {
+        const rate = Number(r?.makerFeeRate);
+        if (r?.makerFeeRate !== void 0 && r?.makerFeeRate !== null && Number.isFinite(rate)) remember(this.makerFees, o, { bp: rate * 1e4, at: Date.now() });
+      }).catch(() => void 0);
+    }
+    return hit?.bp ?? null;
+  }
   /** Keys idle for SIGNER_IDLE_MS are wiped; a key in use was handed out moments ago and is never one of them. */
   sweepSigners(now = Date.now()) {
     for (const [owner, h] of this.signers) if (now - h.usedAt >= SIGNER_IDLE_MS) this.forgetSigner(owner);
@@ -19972,7 +22718,22 @@ var ExecutorService = class {
   }
   async subscribe(req, ctx) {
     const accepted = this.accept(req, "subscribe", ctx);
+    if (this.vipMoving(accepted.owner)) throw new ApiError(409, "vip-moving", "Your bots are moving to the VIP servers right now. Wait for the move to finish, then try again.");
     return this.serial(accepted.owner, () => this.subscribeAccepted(accepted, ctx));
+  }
+  /**
+   * A3: a live copy's allocation (new, or raised by a signed update) counts the wallet's running real bots' margin
+   * too - together they set aside no more than the account holds. A wallet with no real bot running is not checked
+   * here (copies alone keep their own rules).
+   */
+  async copyMargin(owner, copy) {
+    const r = await this.reservedOf(owner, { copy });
+    if (!r.nBots) return;
+    const acct = await this.accountOf(owner);
+    if (r.bots + r.copies > acct.equity + 1e-6) {
+      const free = Math.max(0, acct.equity - (r.bots + r.copies - copy.usd));
+      throw new ApiError(409, "margin", `This copy sets aside ${usd(copy.usd)}, but only ${usd(free)} of your ${usd(acct.equity)} futures balance is free: your ${r.nBots} running ${r.nBots === 1 ? "bot holds" : "bots hold"} ${usd(r.bots)} as margin. Lower the allocation, or stop a bot.`, this.marginDetail(copy.usd, { bots: r.bots, copies: r.copies - copy.usd }, acct.equity));
+    }
   }
   async subscribeAccepted({ owner, payload, consent }, ctx) {
     if (this.cfg.kind === "hosted" && !this.cfg.open) throw new ApiError(503, "closed", "The ValueDesk executor takes no new copies right now. Running copies continue.");
@@ -19998,6 +22759,7 @@ var ExecutorService = class {
       if (!k || !k.registered) throw new ApiError(412, "key", 'Register the copy key on SoDEX first (copy setup, "Approve agent").');
       accountId = await this.sodex.accountId(owner);
       if (!accountId) throw new ApiError(412, "account", "This wallet has no SoDEX account yet. Deposit first.");
+      await this.copyMargin(owner, { id: null, usd: Math.max(0, Number(settings.allocationUsd) || 0) });
     }
     const t = this.db.terms(owner);
     const now = Date.now();
@@ -20048,6 +22810,7 @@ var ExecutorService = class {
           throw new ApiError(400, "settings", e instanceof SettingsError ? e.message : String(e));
         }
         this.screen(owner, settings.leader.address);
+        if (!settings.paper && s.status !== "stopped" && Number(settings.allocationUsd) > copyReserveUsd(s) + 1e-9) await this.copyMargin(owner, { id: s.id, usd: Number(settings.allocationUsd) });
         touched = [await this.runtime.update(s.id, { settings, consent }).catch(fail)];
       } else if (action2 === "pause") touched = [await this.runtime.pause(s.id).catch(fail)];
       else if (action2 === "resume") {
@@ -20074,14 +22837,17 @@ var ExecutorService = class {
     if (liveAlgosFor(this.cfg, owner)) return true;
     return this.betaListed(owner);
   }
-  /** The beta list, asked of the API server (EXECUTOR_BETA_URL) and kept a minute; unreadable: not listed (fails closed). */
+  /**
+   * The beta list, asked of the API server (EXECUTOR_BETA_URL) and kept a minute. Every answer is also kept in the
+   * db (A2, 2026-11-08): a read that fails answers the last known one, however old - so a server-1 outage does not
+   * hold every real bot. null: never answered (and unreadable now).
+   */
   betaCache = /* @__PURE__ */ new Map();
-  async betaListed(owner) {
+  async betaAnswer(owner) {
     const o = owner.toLowerCase();
     const hit = this.betaCache.get(o);
-    if (hit && Date.now() - hit.at < 6e4) return hit.listed;
-    if (!this.cfg.betaUrl) return false;
-    let listed = false;
+    if (hit && Date.now() - hit.at < BETA_TTL_MS) return hit.listed;
+    if (!this.cfg.betaUrl) return null;
     try {
       const u = new URL(this.cfg.betaUrl);
       u.searchParams.set("address", o);
@@ -20090,18 +22856,27 @@ var ExecutorService = class {
       if (this.cfg.originSecrets[0]) headers["X-Origin-Verify"] = this.cfg.originSecrets[0];
       const res = await this.deps.fetch(u.toString(), { headers, signal: AbortSignal.timeout(5e3) });
       const body = JSON.parse(await res.text());
-      if (!res.ok || !body.ok) throw new Error(`HTTP ${res.status}`);
-      listed = body.listed === true;
+      if (!res.ok || !body.ok || typeof body.listed !== "boolean") throw new Error(`HTTP ${res.status}`);
+      const listed = body.listed;
+      const now = Date.now();
+      remember(this.betaCache, o, { at: now, listed });
+      const kept = this.db.betaAnswer(o);
+      if (!kept || kept.listed !== listed || now - kept.at >= 10 * 6e4) this.db.setBetaAnswer(o, listed, now);
+      return listed;
     } catch (e) {
-      this.deps.log.warn("bots: the beta list could not be read", { owner: o, error: String(e) });
-      if (hit && Date.now() - hit.at < 10 * 6e4) return hit.listed;
+      this.deps.log.warn("bots: the beta list could not be read; the last known answer stands", { owner: o, error: String(e) });
+      const last = hit ?? this.db.betaAnswer(o);
+      return last ? last.listed : null;
     }
-    this.betaCache.set(o, { at: Date.now(), listed });
-    return listed;
   }
-  /** The builder fee on an algo's orders, tenths of a bp: a bot's is BOT_FEE, every other algo's the copy ladder's. */
+  /** For a new real bot: listed now, or last known listed when the list does not answer (never answered: refused). */
+  async betaListed(owner) {
+    return await this.betaAnswer(owner) === true;
+  }
+  /** The builder fee on an algo's orders, tenths of a bp: a bot's from the bot ladder (botFeeFor), every other algo's the copy ladder's. */
   async algoFee(a) {
-    return a.spec?.bot === true ? BOT_FEE : copyFeeFor(await this.freshVolume(a.owner));
+    if (a.spec?.bot === true) return this.botFee(a.owner, await this.freshVolume(a.owner));
+    return this.copyFee(a.owner, await this.freshVolume(a.owner));
   }
   /** The sink of an algo: the key this wallet registered for this executor, its fee (algoFee) as the builder. */
   algoSink(a) {
@@ -20123,7 +22898,7 @@ var ExecutorService = class {
   async algoProblem(a) {
     const key2 = await this.keyProblem(a.owner);
     if (key2) return key2;
-    if (a.spec?.bot === true && !a.spec.paper && !liveAlgosFor(this.cfg, a.owner) && !await this.betaListed(a.owner)) return "Held: real bots are for beta testers only, and this wallet is not on the beta list.";
+    if (a.spec?.bot === true && !a.spec.paper && !liveAlgosFor(this.cfg, a.owner) && await this.betaAnswer(a.owner) === false) return "Held: real bots are for beta testers only, and this wallet is no longer on the beta list.";
     if (this.cfg.builderId > 0) {
       const fee = await this.algoFee(a);
       const approved = await this.sodex.builderApproval(a.owner, this.cfg.builderId);
@@ -20154,9 +22929,116 @@ var ExecutorService = class {
     if (now.maxLeverage !== null && (atStart.maxLeverage === null || now.maxLeverage < atStart.maxLeverage)) return now;
     return atStart;
   }
+  /* ------------------------------------------------- bot margin and markets ----- */
+  /** SoDEX's market list, kept 10 minutes (a real bot's start and its margin need each market's minimum order). */
+  marketCache = null;
+  /**
+   * The smallest order SoDEX takes on each market, in USD at the mark now (minChildQty: a step, the minimum quantity,
+   * the minimum value): a bot's quote is raised to it, so its margin counts it (botMarginUsd's minOrderUsd). A market
+   * not read is left out (the margin then counts the bot's own sizes).
+   */
+  /**
+   * A bot's order is at least SoDEX's minimum order on its market (owner 2026-11-08: such a bot cannot be configured;
+   * the engine no longer gets to raise every quote behind the user's back). Unreadable minimums let it through (the
+   * engine still raises a quote to the minimum, and the cap and margin count that real size).
+   */
+  async needOrderOverMinimum(symbol2, orderUsd) {
+    const min = (await this.minOrderUsd([symbol2])).get(symbol2);
+    if (min !== void 0 && orderUsd < min - 5e-3) {
+      throw new ApiError(400, "size", `The order size ($${orderUsd.toFixed(2)}) is under SoDEX's minimum order on ${symbol2} (about $${(Math.ceil(min * 100) / 100).toFixed(2)}). Raise it to at least that.`, { symbol: symbol2, minUsd: min });
+    }
+  }
+  async minOrderUsd(symbols) {
+    const out = /* @__PURE__ */ new Map();
+    if (!symbols.length) return out;
+    try {
+      if (!this.marketCache || Date.now() - this.marketCache.at > 10 * 6e4) this.marketCache = { at: Date.now(), rows: await this.sodex.markets() };
+      const marks = await this.sodex.markPrices();
+      for (const sym of new Set(symbols)) {
+        const m = this.marketCache.rows.find((r) => r.name === sym);
+        const px2 = marks.find((r) => r.symbol === sym)?.price;
+        if (m && px2 && px2 > 0) out.set(sym, minChildQty(m, px2) * px2);
+      }
+    } catch (e) {
+      this.deps.log.warn("bots: market minimums could not be read; margin counts the bots' own sizes", { error: String(e) });
+    }
+    return out;
+  }
+  /** The region's leverage ceiling for a wallet starting something now (EEA 2x), or undefined. */
+  ceilingFor(owner, ctx) {
+    const t = this.db.terms(owner);
+    return this.policyNow(owner, t?.country ?? null, normaliseCountry(ctx.viewerCountry)).maxLeverage ?? void 0;
+  }
+  /** The wallet's futures account: equity and positions. Unreadable: a 503 (a real bot's margin is never guessed). */
+  async accountOf(owner) {
+    try {
+      const f = await this.sodex.follower(owner);
+      if (!Number.isFinite(f.equity)) throw new Error("no equity");
+      return { equity: f.equity, positions: f.positions };
+    } catch {
+      throw new ApiError(503, "margin-unknown", "Your SoDEX balance could not be read just now, so the margin this needs cannot be checked. Try again in a moment.");
+    }
+  }
+  /**
+   * What the wallet already sets aside (owner 2026-11-08, smart margining): its running real bots' margin (each at
+   * its leverage, its market's minimum order and its region ceiling) and its live copies' allocations. `skipAlgo`:
+   * the bot being changed or replaced; `copy`: a copy's allocation as it would be (id null: a new one).
+   */
+  async reservedOf(owner, o = {}) {
+    const running = this.algos.list(owner).filter((x) => x.spec?.bot === true && !x.spec.paper && !FINAL_STATUSES.has(x.status) && x.id !== o.skipAlgo);
+    const mins = await this.minOrderUsd(running.map((x) => x.spec.symbol));
+    const bots = running.reduce((t, x) => t + marginOf(x.spec, mins.get(x.spec.symbol)), 0);
+    let copies = 0;
+    for (const c of this.runtime.list(owner)) copies += o.copy && c.id === o.copy.id ? o.copy.usd : copyReserveUsd(c);
+    if (o.copy && o.copy.id === null) copies += o.copy.usd;
+    return { bots, nBots: running.length, copies };
+  }
+  /** The figures of a margin refusal, for the page (ApiError.detail). */
+  marginDetail(need, r, equity) {
+    const reserved = r.bots + r.copies;
+    return { needUsd: need, reservedUsd: reserved, botsUsd: r.bots, copiesUsd: r.copies, equityUsd: equity, freeUsd: Math.max(0, equity - reserved) };
+  }
+  /**
+   * A3: a real bot does not share its market with anything else of the wallet's - its inventory, cap and close come
+   * from its own fills, so another copy, algo or position on that market would be traded as if it were the bot's.
+   * `old`: the bot a restart replaces (what it holds is the new one's to take over or close).
+   */
+  marketConflict(owner, spec, live, positions, old) {
+    const sym = spec.symbol;
+    const coin = coinOf("sodex", sym);
+    const algo = live.find((x) => x.spec?.bot !== true && !x.spec.paper && algoSymbols(x.spec).includes(sym));
+    if (algo) throw new ApiError(409, "market-algo", `Your ${ALGO_NAMES[algo.spec.kind] ?? "algo"} order on ${sym} is still running. Let it finish or cancel it, then start the bot.`, { algoId: algo.id, symbol: sym });
+    for (const c of this.runtime.list(owner)) {
+      if (c.status === "stopped" || c.settings.paper) continue;
+      const v = this.runtime.view(c.id);
+      const holds = !!v?.positions.some((p) => p.symbol === sym && p.size !== 0);
+      const leaderHolds = Object.entries(v?.leader.positions ?? {}).some(([ls, size]) => size !== 0 && sodexNamesFor(c.settings.leader.venue, ls).includes(sym));
+      const named = c.settings.assetAllow.includes(coin) && !c.settings.assetDeny.includes(coin);
+      if (holds || leaderHolds || named) {
+        const who = `${c.settings.leader.address.slice(0, 6)}\u2026${c.settings.leader.address.slice(-4)}`;
+        throw new ApiError(409, "market-copy", `Your copy of ${who} trades ${sym}. Stop that copy, or start the bot on another market: both would trade the same position.`, { copyId: c.id, symbol: sym });
+      }
+    }
+    const pos = positions?.[sym];
+    if (pos && pos.size !== 0 && !(old && old.spec.symbol === sym)) {
+      throw new ApiError(409, "market-position", `You hold a ${sym} position (${pos.size}) that this bot did not open. Close it first, or pick another market: a bot only manages what it opened itself.`, { symbol: sym, size: pos.size });
+    }
+  }
+  /** Real bots running on this executor, every wallet together (A7). */
+  liveBotCount(skip) {
+    return this.algos.list().filter((x) => x.spec?.bot === true && !x.spec.paper && !FINAL_STATUSES.has(x.status) && x.id !== skip).length;
+  }
+  /** A wallet whose bots moved to the VIP executor starts none here; one whose move runs starts nothing until it ends. */
+  needNotMoved(owner) {
+    if (this.vipMoving(owner)) throw new ApiError(409, "vip-moving", "Your bots are moving to the VIP servers right now. Wait for the move to finish, then try again. Stopping a bot still works.");
+    const away = this.movedAway(owner);
+    if (away === "vip") throw new ApiError(409, "moved", "Your bots run on the VIP servers now. Start and manage them there.");
+    if (away === "standard") throw new ApiError(409, "moved", "Your bots moved back to the standard servers (VIP ended). Start and manage them there.");
+  }
   /** Start an algo order for the wallet that signed it. */
   async algoStart(req, ctx) {
     const accepted = this.accept(req, "algo-start", ctx);
+    if (this.vipMoving(accepted.owner)) this.needNotMoved(accepted.owner);
     return this.serial(accepted.owner, () => this.algoStartAccepted(accepted, ctx));
   }
   async algoStartAccepted({ owner, payload, consent }, ctx) {
@@ -20170,17 +23052,35 @@ var ExecutorService = class {
     }
     const seed = Number(payload.seed);
     if (!Number.isSafeInteger(seed) || seed < 0 || seed > 4294967295) throw new ApiError(400, "seed", "seed must be a 32-bit whole number.");
-    const live = this.algos.list(owner).filter((a2) => !FINAL_STATUSES.has(a2.status));
+    if (spec.bot) this.needNotMoved(owner);
+    if (spec.kind === "mm" || spec.kind === "grid") await this.needOrderOverMinimum(spec.symbol, spec.orderUsd);
+    const r = payload.restart;
+    let old = null;
+    let how = null;
+    if (r !== void 0 && r !== null) {
+      if (typeof r !== "object" || typeof r.from !== "string" || r.how !== "clean" && r.how !== "takeover") throw new ApiError(400, "restart", "restart must be { from: a bot's id, how: 'clean' or 'takeover' }.");
+      old = this.algos.get(r.from) ?? null;
+      how = r.how;
+      if (!old || old.owner !== owner || !old.spec.bot) throw new ApiError(404, "algo", "No such bot to restart.");
+      if (!spec.bot) throw new ApiError(400, "restart", "A bot restarts as a bot.");
+      if (how === "takeover" && (old.spec.symbol !== spec.symbol || old.spec.paper !== spec.paper)) throw new ApiError(400, "restart", "Taking over keeps the market and practice or real orders. Use the normal restart to change them.");
+      if (FINAL_STATUSES.has(old.status) && how === "takeover") throw new ApiError(409, "restart", "That bot has ended: start a new one instead.");
+    }
+    const live = this.algos.list(owner).filter((a2) => !FINAL_STATUSES.has(a2.status) && a2.id !== old?.id);
     const adds = 1 + (spec.kind === "basket" ? spec.legs.length : 0);
     if (live.length + adds > this.cfg.maxAlgosPerOwner) {
+      if (spec.bot) throw new ApiError(429, "limit", `You already run ${live.length} bots and orders here; ${this.cfg.maxAlgosPerOwner} is the most at once. Stop one first.`);
       throw new ApiError(429, "limit", adds > 1 ? `At most ${this.cfg.maxAlgosPerOwner} algo orders run at once here, and this basket runs ${adds} (itself and one per market). ${live.length ? "Cancel one first, or use fewer markets." : "Use fewer markets."}` : `At most ${this.cfg.maxAlgosPerOwner} algo orders run at once here. Cancel one first.`);
     }
     if ((spec.kind === "mm" || spec.kind === "grid") && !spec.paper) {
       const other = live.find((x) => (x.spec.kind === "mm" || x.spec.kind === "grid") && !x.spec.paper && x.spec.symbol === spec.symbol);
-      if (other) throw new ApiError(409, "bot-market", `A bot of yours already trades ${spec.symbol}${other.spec.label ? ` ("${other.spec.label}")` : ""}. Stop it first, or choose another market.`);
+      if (other) throw new ApiError(409, "bot-market", `A bot of yours already trades ${spec.symbol}${other.spec.label ? ` ("${other.spec.label}")` : ""}. Stop it first, or choose another market.`, { algoId: other.id, symbol: spec.symbol });
     }
     if (spec.bot && !spec.paper && !await this.liveBotFor(owner, ctx)) {
-      throw new ApiError(403, "paper-only", "Real bots run on beta.valuedesk.so for beta testers only for now. Turn on Practice to run one against the live market.");
+      throw new ApiError(403, "beta", "Real bots are for beta testers for now: ask on Discord to join. Practice runs the same bot against the live market.");
+    }
+    if (spec.bot && !spec.paper && this.liveBotCount(old?.id) >= this.cfg.maxLiveBots) {
+      throw new ApiError(429, "bot-capacity", `This server already runs as many real bots as it can take (${this.cfg.maxLiveBots}). Try again later, or run this one as Practice.`);
     }
     if (!spec.bot && !liveAlgosFor(this.cfg, owner) && specsOf(spec, payload.spec).some((x) => !x.paper)) throw new ApiError(403, "paper-only", "Real algo orders are off for now. Turn on Practice run to try one against the live market.");
     let accountId = 0;
@@ -20188,14 +23088,58 @@ var ExecutorService = class {
       this.needNoBrake("algos");
       await this.verifyKey(owner, { confirm: true });
       const k = this.db.key(owner, "active");
-      if (!k || !k.registered) throw new ApiError(412, "key", `Register this executor's key on SoDEX first (copy setup, "Approve agent").`);
+      if (!k || !k.registered) {
+        if (spec.bot) throw new ApiError(412, "key", "Set up real orders: approve the trading key first.");
+        throw new ApiError(412, "key", `Register this executor's key on SoDEX first (copy setup, "Approve agent").`);
+      }
       accountId = await this.sodex.accountId(owner);
-      if (!accountId) throw new ApiError(412, "account", "This wallet has no SoDEX account yet. Deposit first.");
+      if (!accountId) throw new ApiError(412, "account", spec.bot ? "Deposit to SoDEX first: this wallet has no SoDEX account yet." : "This wallet has no SoDEX account yet. Deposit first.");
+      if (spec.bot) {
+        this.marketConflict(owner, spec, live, null, old);
+        const acct = await this.accountOf(owner);
+        this.marketConflict(owner, spec, live, acct.positions, old);
+        const r2 = await this.reservedOf(owner, { skipAlgo: old?.id });
+        const need = marginOf(spec, (await this.minOrderUsd([spec.symbol])).get(spec.symbol));
+        if (r2.bots + r2.copies + need > acct.equity + 1e-6) {
+          const free = Math.max(0, acct.equity - r2.bots - r2.copies);
+          const held2 = [...r2.nBots ? [`${r2.nBots} running ${r2.nBots === 1 ? "bot" : "bots"} ${usd(r2.bots)}`] : [], ...r2.copies > 0 ? [`copy trading ${usd(r2.copies)}`] : []];
+          throw new ApiError(409, "margin", `This bot needs ${usd(need)} of margin, but only ${usd(free)} of your ${usd(acct.equity)} futures balance is free${held2.length ? ` (${held2.join(", ")} already set aside)` : ""}. Lower its order size, levels or max holding, or stop another bot or copy.`, this.marginDetail(need, r2, acct.equity));
+        }
+      }
+    }
+    if (old && !FINAL_STATUSES.has(old.status)) {
+      const stopAs = how === "clean" ? "close" : "keep";
+      try {
+        await this.algos.cancel(old.id, stopAs === "keep" ? { keep: true } : { close: true });
+      } catch (e) {
+        throw new ApiError(409, "restart", `The old bot could not be stopped: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+    const checks = [];
+    if (spec.kind === "mm" || spec.kind === "grid") {
+      checks.push(`${spec.symbol} is trading on SoDEX, and the order size is at least its minimum order.`);
+      if (!spec.paper) {
+        checks.push("Your trading key is approved and your SoDEX account was found.");
+        checks.push("Beta access and a place on the servers.");
+        checks.push(`Nothing else of yours trades ${spec.symbol} (no other bot, position, copy or algo order).`);
+        checks.push("Your free margin covers what it sets aside.");
+      }
     }
     let a;
     try {
       const t = this.db.terms(owner);
-      a = await this.algos.add({ owner, accountId, mode: this.cfg.kind, spec, consent, seed, country: t?.country ?? null, observedCountry: normaliseCountry(ctx.viewerCountry) });
+      a = await this.algos.add({
+        checks,
+        owner,
+        accountId,
+        mode: this.cfg.kind,
+        spec,
+        consent,
+        seed,
+        country: t?.country ?? null,
+        observedCountry: normaliseCountry(ctx.viewerCountry),
+        ...old && how === "takeover" ? { takeOver: old.id } : old && !FINAL_STATUSES.has(old.status) ? { after: old.id } : {}
+      });
     } catch (e) {
       throw new ApiError(400, "algo", e instanceof Error ? e.message : String(e));
     }
@@ -20205,7 +23149,27 @@ var ExecutorService = class {
   /** Pause, resume or cancel one of the wallet's algos, or cancel all of them (the kill switch). */
   async algoAct(req, ctx) {
     const accepted = this.accept(req, "algo-action", ctx);
+    if ((accepted.payload.op === "resume" || accepted.payload.op === "update") && this.vipMoving(accepted.owner)) this.needNotMoved(accepted.owner);
     return this.serial(accepted.owner, () => this.algoActAccepted(accepted, ctx));
+  }
+  /**
+   * A3: a signed change that makes a real bot need more margin (a bigger order size, max holding or more levels; a
+   * lower leverage) passes the same check as its start: the wallet's other bots and copies plus its new need fit in
+   * what the account holds. A change that needs no more is never refused for margin.
+   */
+  async updateMargin(owner, a, patch, ctx) {
+    if (a.spec?.bot !== true || a.spec.paper || FINAL_STATUSES.has(a.status)) return;
+    const next = { ...a.spec, ...patch };
+    const min = (await this.minOrderUsd([a.spec.symbol])).get(a.spec.symbol);
+    const before = marginOf(a.spec, min);
+    const need = marginOf(next, min);
+    if (!(need > before + 1e-9)) return;
+    const acct = await this.accountOf(owner);
+    const r = await this.reservedOf(owner, { skipAlgo: a.id });
+    if (r.bots + r.copies + need > acct.equity + 1e-6) {
+      const free = Math.max(0, acct.equity - r.bots - r.copies);
+      throw new ApiError(409, "margin", `This change needs ${usd(need)} of margin for the bot (now ${usd(before)}), but only ${usd(free)} of your ${usd(acct.equity)} futures balance is free for it. Keep a smaller order size, fewer levels or a lower max holding, or stop another bot or copy.`, this.marginDetail(need, r, acct.equity));
+    }
   }
   async algoActAccepted({ owner, payload }, ctx) {
     const op = payload.op;
@@ -20219,15 +23183,18 @@ var ExecutorService = class {
       if (!a || a.owner !== owner) throw new ApiError(404, "algo", "No such algo order.");
       if (op === "pause") touched = [await this.algos.pause(a.id).catch(fail)];
       else if (op === "resume") {
+        if (a.spec?.bot === true) this.needNotMoved(owner);
         if (!a.spec.paper) this.needNoBrake("algos");
         this.needTerms(owner, ctx);
         touched = [await this.algos.resume(a.id).catch(fail)];
-      } else if (op === "cancel") touched = [await this.algos.cancel(a.id).catch(fail)];
+      } else if (op === "cancel") touched = [await this.algos.cancel(a.id, { now: payload.now === true, keep: payload.how === "keep", close: payload.how === "close" || payload.how === "instant" }).catch(fail)];
       else if (op === "archive") touched = [await this.algos.archive(a.id).catch(fail)];
       else if (op === "update") {
         if (!a.spec.paper) this.needNoBrake("algos");
         this.needTerms(owner, ctx);
-        touched = [await this.algos.update(a.id, algoPatch(payload.patch)).catch(fail)];
+        const patch = algoPatch(payload.patch);
+        await this.updateMargin(owner, a, patch, ctx);
+        touched = [await this.algos.update(a.id, patch).catch(fail)];
       } else throw new ApiError(400, "op", "op must be pause, resume, cancel, cancel-all, update or archive.");
     }
     return { algos: touched.map((a) => this.algos.view(a.id)).filter((v) => v !== null) };
@@ -20236,13 +23203,34 @@ var ExecutorService = class {
   notices(owner, q) {
     return this.db.notices(owner, q);
   }
+  /**
+   * GET /bots/latency: the signed-write latency of this wallet's own SoDEX accounts (those its bots trade in), never
+   * another wallet's or the executor's whole flow. A wallet whose bots only practise has no account here: empty.
+   */
+  botLatency(owner, hours, botId) {
+    if (botId) {
+      const a = this.algos.get(botId);
+      if (!a || a.owner !== owner) throw new ApiError(404, "algo", "No such bot.");
+      const sid = this.algos.marketId(a.spec.symbol);
+      return this.latency.view(hours, a.accountId > 0 && sid ? [a.accountId] : [], sid ?? void 0);
+    }
+    const ids = [...new Set(this.algos.list(owner).map((a) => a.accountId).filter((x) => x > 0))];
+    return this.latency.view(hours, ids);
+  }
+  /** One of the wallet's algos (the bot page's live read, every second while it is open). */
+  algoOne(owner, id) {
+    const a = this.algos.get(id);
+    if (!a || a.owner !== owner) throw new ApiError(404, "algo", "No such algo order.");
+    return this.algos.view(id);
+  }
   algoList(owner) {
     return this.algos.list(owner).filter((a) => !a.k.archived).map((a) => this.algos.view(a.id)).filter((v) => v !== null);
   }
   async algoEvents(owner, id, q) {
     const a = this.algos.get(id);
     if (!a || a.owner !== owner) throw new ApiError(404, "algo", "No such algo order.");
-    return this.algos.events(id, { limit: q.limit ?? 200, before: q.before });
+    const most = a.spec?.bot === true ? 50 : 1e3;
+    return this.algos.events(id, { limit: Math.min(most, q.limit ?? 200), before: q.before, after: q.after });
   }
   /** Every signed instruction of this wallet (newest first): the follower's own record. */
   consents(owner) {
@@ -20300,6 +23288,11 @@ var ExecutorService = class {
       }
       if (!res.ok || !body?.ok || typeof body.usd !== "number" || !Number.isFinite(body.usd)) throw new Error(`HTTP ${res.status}`);
       this.rememberVolume(owner, body.usd);
+      const perk = (x) => {
+        const o = x;
+        return o && typeof o.fee === "number" && Number.isFinite(o.fee) ? { fee: o.fee, until: typeof o.until === "number" ? o.until : null } : null;
+      };
+      remember(this.perks, owner, { vip: body.vip === true, copy: perk(body.fees?.copy), bots: perk(body.fees?.bots), at: Date.now() });
       return body.usd;
     } catch (e) {
       this.deps.log.warn("copy fee: the builder volume could not be read", { owner, error: String(e) });
@@ -20312,7 +23305,7 @@ var ExecutorService = class {
     if (!this.cfg.builderDb || !this.cfg.builderId) return null;
     const hit = this.volumes.get(owner);
     if (hit && Date.now() - hit.at < VOLUME_TTL_MS) return hit.usd;
-    let usd = null;
+    let usd2 = null;
     try {
       if (!this.builderDb) {
         if (!existsSync5(this.cfg.builderDb)) return null;
@@ -20321,7 +23314,7 @@ var ExecutorService = class {
       }
       const fromDay = Math.floor(Date.now() / 864e5) - (COPY_FEE_WINDOW_DAYS - 1);
       const r = this.builderDb.prepare("SELECT sum(micro) AS m FROM days WHERE builder = ? AND address = ? AND day >= ?").get(this.cfg.builderId, owner, fromDay);
-      usd = r && typeof r.m === "number" ? r.m / 1e6 : 0;
+      usd2 = r && typeof r.m === "number" ? r.m / 1e6 : 0;
     } catch (e) {
       this.deps.log.warn("copy fee: the builder ledger could not be read", { error: String(e) });
       try {
@@ -20330,21 +23323,21 @@ var ExecutorService = class {
       }
       this.builderDb = null;
     }
-    this.rememberVolume(owner, usd);
-    return usd;
+    this.rememberVolume(owner, usd2);
+    return usd2;
   }
   /** Bounded: anyone can sign in with a fresh wallet, so the map of volumes must not grow without end. */
-  rememberVolume(owner, usd) {
+  rememberVolume(owner, usd2) {
     this.volumes.delete(owner);
     if (this.volumes.size >= VOLUMES_MAX) {
       const oldest = this.volumes.keys().next().value;
       if (oldest !== void 0) this.volumes.delete(oldest);
     }
-    this.volumes.set(owner, { usd, at: Date.now() });
+    this.volumes.set(owner, { usd: usd2, at: Date.now() });
   }
 };
 
-// apps/executor/src/server.ts
+// src/server.ts
 var BODY_LIMIT = 64 * 1024;
 var PREFIX = "/api/copy/v1";
 function withoutSeries(views) {
@@ -20495,8 +23488,14 @@ function createExecutorServer(svc, cfg, log) {
   const page = (url) => {
     const l = url.searchParams.get("limit");
     const b = url.searchParams.get("before");
+    const af = url.searchParams.get("after");
     const limit = l === null ? 200 : Number(l);
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 1e3) throw new ApiError(400, "limit", "limit must be a whole number from 1 to 1000.");
+    if (af !== null) {
+      const after = Number(af);
+      if (!Number.isSafeInteger(after) || after < 0) throw new ApiError(400, "after", "after must be a time in milliseconds.");
+      return { limit, after };
+    }
     if (b === null) return { limit };
     const before = Number(b);
     if (!Number.isSafeInteger(before) || before < 0) throw new ApiError(400, "before", "before must be a time in milliseconds.");
@@ -20544,10 +23543,27 @@ function createExecutorServer(svc, cfg, log) {
       const route = path.slice(PREFIX.length);
       if (req.method === "GET" && route === "/info") return send(res, 200, svc.info(ctx));
       if (req.method === "GET" && route === "/health") return send(res, 200, svc.health());
+      if (req.method === "GET" && route === "/bots/latency") return send(res, 200, svc.botLatency(svc.authenticate(bearer(req)), clampHours(url.searchParams.get("hours")), url.searchParams.get("bot")));
       if (req.method === "GET" && route === "/internal/users") {
         const token = String(req.headers["x-internal-token"] ?? "");
         if (!cfg.builderToken || !safeEqual(cfg.builderToken, token)) throw new ApiError(404, "path", "not found");
         return send(res, 200, { users: svc.db.usersSummary() });
+      }
+      if (req.method === "GET" && route === "/internal/stats") {
+        const token = String(req.headers["x-internal-token"] ?? "");
+        if (!cfg.builderToken || !safeEqual(cfg.builderToken, token)) throw new ApiError(404, "path", "not found");
+        return send(res, 200, { ok: true, stats: svc.infraStats() });
+      }
+      if (req.method === "GET" && route === "/vip/move") return send(res, 200, { job: svc.vipJob(svc.authenticate(bearer(req))) });
+      if (req.method === "POST" && route === "/internal/vip/import") {
+        const token = String(req.headers["x-internal-token"] ?? "");
+        if (!cfg.vipToken || !safeEqual(cfg.vipToken, token)) throw new ApiError(404, "path", "not found");
+        return send(res, 200, await svc.vipImport(await readJson(req)));
+      }
+      if (req.method === "POST" && route === "/internal/vip/import/status") {
+        const token = String(req.headers["x-internal-token"] ?? "");
+        if (!cfg.vipToken || !safeEqual(cfg.vipToken, token)) throw new ApiError(404, "path", "not found");
+        return send(res, 200, svc.vipImportStatus(await readJson(req)));
       }
       if (req.method === "GET" && route === "/me") return send(res, 200, svc.me(svc.authenticate(bearer(req)), ctx));
       if (req.method === "GET" && route === "/consents") return send(res, 200, { consents: svc.consents(svc.authenticate(bearer(req))) });
@@ -20560,6 +23576,11 @@ function createExecutorServer(svc, cfg, log) {
         const owner = svc.authenticate(bearer(req));
         const grades = (url.searchParams.get("grades") ?? "").split(",").filter(Boolean);
         return send(res, 200, { notices: svc.notices(owner, { ...page(url), grades }) });
+      }
+      const algoOne = /^\/algos\/([A-Za-z0-9_-]{1,40})$/.exec(route);
+      if (req.method === "GET" && algoOne && algoOne[1] !== "action") {
+        const v = svc.algoOne(svc.authenticate(bearer(req)), algoOne[1]);
+        return send(res, 200, { algo: url.searchParams.get("series") === "0" ? withoutSeries([v])[0] : v });
       }
       const algoEv = /^\/algos\/([A-Za-z0-9_-]{1,40})\/events$/.exec(route);
       if (req.method === "GET" && algoEv) {
@@ -20575,6 +23596,7 @@ function createExecutorServer(svc, cfg, log) {
       const body = await readJson(req);
       signed = signedOf(body.request);
       if (route === "/session") return send(res, 200, svc.session(body.request, ctx));
+      if (route === "/daykeys/revoke") return send(res, 200, svc.revokeDayKeys(body.request, ctx));
       if (route === "/terms") return send(res, 200, svc.acceptTerms(body.request, ctx));
       if (route === "/site-terms") return send(res, 200, svc.acceptSiteTerms(body.request, ctx));
       if (route === "/keys") return send(res, 200, svc.createKey(body.request, ctx));
@@ -20585,11 +23607,12 @@ function createExecutorServer(svc, cfg, log) {
       if (route === "/keys/import") return send(res, 200, { key: await svc.importKey(keyCheck(svc.authenticate(bearer(req))), body, ctx) });
       if (route === "/algos") return send(res, 200, await svc.algoStart(body.request, ctx));
       if (route === "/algos/action") return send(res, 200, await svc.algoAct(body.request, ctx));
+      if (route === "/vip/move") return send(res, 200, { job: svc.vipMove(body.request, ctx) });
       throw new ApiError(404, "path", "not found");
     } catch (e) {
       const err = e instanceof ApiError ? e : new ApiError(500, "internal", "Something went wrong in the executor.");
       if (!(e instanceof ApiError)) log.error("executor: request failed", { path, error: String(e) });
-      send(res, err.status, { ok: false, code: err.code, error: err.message });
+      send(res, err.status, { ok: false, code: err.code, error: err.message, ...err.detail ? { detail: err.detail } : {} });
     } finally {
       if (path !== `${PREFIX}/health`) log.debug("request", { method: req.method, path, ms: Date.now() - t0, status: res.statusCode });
       if (!quiet && (req.method === "POST" || res.statusCode >= 400 && res.statusCode !== 401 && res.statusCode !== 404)) {
@@ -20602,7 +23625,7 @@ function createExecutorServer(svc, cfg, log) {
   });
 }
 
-// apps/executor/src/main.ts
+// src/main.ts
 var LEVELS = { debug: 10, info: 20, warn: 30, error: 40 };
 function logger(level) {
   const at = LEVELS[level];
