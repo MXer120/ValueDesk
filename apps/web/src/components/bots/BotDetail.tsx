@@ -54,7 +54,8 @@ function Controls({ v, ctx }: { v: AlgoView; ctx: BotsCtx }) {
         ? <Button variant="secondary" icon="play" disabled={busy} onClick={() => void ctx.resume(v)}>Resume</Button>
         : <Button variant="secondary" icon="pause" disabled={busy} onClick={() => void ctx.pause(v)}>Pause</Button>)}
       {!ended && <StopMenu v={v} ctx={ctx} closing={st === 'closing'} />}
-      {ended && <Button variant="danger" icon="trash" disabled={busy} onClick={() => void ctx.remove(v)}>Delete</Button>}
+      {ended && v.bot?.leftover && <Button variant="primary" icon="stop" disabled={busy} onClick={() => void ctx.closeRest(v)}>Close the rest</Button>}
+      {ended && <Button variant="danger" icon="trash" disabled={busy || !!v.bot?.leftover} title={v.bot?.leftover ? 'Close the rest first' : undefined} onClick={() => void ctx.remove(v)}>Delete</Button>}
       {ended && <Button variant="primary" icon="play" onClick={() => ctx.runAgain(v)}>Run again</Button>}
       {v.algo.spec.paper && ctx.liveAllowed && <Button variant={ended ? 'secondary' : 'primary'} icon="bolt" onClick={() => ctx.runAgain(v, true)} title="New bot opens with these settings, set to real orders">Run with real orders</Button>}
     </>
@@ -349,7 +350,7 @@ export function BotDetail({ ctx, view, id }: { ctx: BotsCtx; view: BotsView; id:
           <StatCard index={1} label="Volume" value={b ? fmtUsd(b.volume, 0) : DASH} trend={trendVol} hint={b ? `${b.fills.toLocaleString('en-US')} fills · ${Math.round(b.makerShare * 100)}% maker` : undefined} />
           <StatCard index={2} label={<Term t="perMillion">Per $1M</Term>} value={fmtCost(b?.costPerMillion)} valueTone={costTone(b?.costPerMillion)} hint={estBps !== null ? `Estimate ${fmtCost(estBps * 100)}` : undefined} />
           <StatCard index={3} label="Fees paid" value={b ? fmtUsd(b.tradeFees + b.builderFees, 2) : DASH} hint={`SoDEX's and ValueDesk's (yours now ${botFeeWords(ctx.feeTenths)})`} />
-          <StatCard index={4} label={<Term t="holding">Holding</Term>} value={!b || ended ? DASH : fmtUsd(b.inventoryUsd, 2)} hint={!b || ended ? (ended ? 'Stopped: it manages nothing now' : undefined) : `${b.inventoryUsd > 0.005 ? 'Long' : b.inventoryUsd < -0.005 ? 'Short' : 'Flat'}${matchedWords(b.matchedAt)}`} goal={cap && !ended ? { ratio: Math.min(1, hold / cap), label: `Cap ${fmtUsd(cap, 0)}` } : undefined} />
+          <StatCard index={4} label={<Term t="holding">Holding</Term>} value={!b || ended ? DASH : fmtUsd(b.inventoryUsd, 2)} hint={!b || ended ? (ended ? (b?.leftover ? `${fmtUsd(b.leftover.usd, 2)} ${b.leftover.side} left on SoDEX, under its minimum order: close the rest` : 'Stopped: it manages nothing now') : undefined) : `${b.inventoryUsd > 0.005 ? 'Long' : b.inventoryUsd < -0.005 ? 'Short' : 'Flat'}${matchedWords(b.matchedAt)}`} goal={cap && !ended ? { ratio: Math.min(1, hold / cap), label: `Cap ${fmtUsd(cap, 0)}` } : undefined} />
         </div>
       </Shell>
 

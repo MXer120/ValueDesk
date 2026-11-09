@@ -13,6 +13,7 @@ import {
   MemoryAlgoStore,
   silentLogger,
   checkAlgoSpec,
+  FINAL_STATUSES,
   parseAlgoSpec,
   canonicalJSON,
   emptyBook,
@@ -1585,4 +1586,36 @@ test('calm gate on a lively market (owner 2026-11-09, HYPE: no order in an hour)
     await step(r, a.id);
   }
   assert.ok(r.ex.placed.length > 0, 'quotes once the market is calmer than its usual minute');
+});
+
+test('a stop that leaves less than SoDEX\'s minimum (owner 2026-11-09, 1.51 USDC): the rest is said and kept on the bot; "Close the rest" tops it up and closes it all', async () => {
+  const r = await rig();
+  const a = await add(r, { ...MM, onStop: 'close' });
+  await step(r, a.id);
+  const bid = r.ex.side('buy')[0]!;
+  r.ex.fill(bid.clOrdID, 0.00005); // $3 held: under the $10 minimum order
+  await settle();
+  await r.rt.cancel(a.id, { now: clock, close: true });
+  await settle();
+  for (let i = 0; i < 3; i++) await step(r, a.id, 1_000);
+  const ended = r.rt.view(a.id)!;
+  assert.ok(FINAL_STATUSES.has(ended.algo.status), 'ended');
+  const lo = ended.bot!.leftover!;
+  assert.ok(lo, 'the leftover is kept on the bot');
+  assert.equal(lo.side, 'long');
+  assert.ok(Math.abs(lo.qty - 0.00005) < 1e-12);
+  assert.ok(lo.usd < lo.minUsd);
+  const ev = await r.rt.events(a.id, { limit: 500 });
+  assert.ok(ev.some((x) => /is left on SoDEX: under its minimum order/.test(x.text)), 'said in its log');
+  assert.ok(Math.abs(r.ex.position - 0.00005) < 1e-12, 'SoDEX still holds it');
+  // Close the rest: a top-up on the same side, then all of it.
+  await r.rt.closeRest(a.id);
+  for (let i = 0; i < 6; i++) await step(r, a.id, 1_000);
+  assert.ok(Math.abs(r.ex.position) < 1e-12, `flat on SoDEX (${r.ex.position})`);
+  const done = r.rt.view(a.id)!;
+  assert.ok(FINAL_STATUSES.has(done.algo.status), 'ended again');
+  assert.equal(done.bot!.leftover, undefined);
+  const last = r.ex.placed.slice(-2);
+  assert.deepEqual(last.map((o) => [o.side, o.tif, !!o.reduceOnly]), [['buy', 'ioc', false], ['sell', 'ioc', true]], 'a top-up on the same side, then one reduce-only close of all');
+  assert.ok(Math.abs(Number(last[1]!.quantity) - (0.00005 + Number(last[0]!.quantity))) < 1e-9, 'the close is the whole position');
 });
