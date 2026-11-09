@@ -2151,13 +2151,16 @@ export class AlgoRuntime {
   private async checkOutside(a: AlgoRecord, m: MarketInfo, mk: number, now: number): Promise<void> {
     if (a.spec.paper || !a.book || a.status !== 'running') return;
     if (now - Number(a.k.posCheckAt ?? 0) < BOT_POSITION_CHECK_MS) return;
-    // Something of its own in flight (sending, unknown, a cancel, a fill seconds ago): its own fills explain a gap.
-    if (this.live(a).some((c) => c.state !== 'open' || c.cancelling) || now - Number(a.k.lastFillAt ?? 0) < 5_000) return;
+    // Read every BOT_POSITION_CHECK_MS whatever is in flight (owner 2026-11-09: "matched 2 min ago" - a busy maker always
+    // has a send or a cancel out, so skipping then meant almost never). A match counts at once; a gap while its own
+    // orders are in flight (or a fill seconds ago) may be those, so it is only acted on when nothing is.
+    const busy = this.live(a).some((c) => c.state !== 'open' || c.cancelling) || now - Number(a.k.lastFillAt ?? 0) < 5_000;
     a.k.posCheckAt = now;
     let inv = bookInventory(a.book);
     const pos = await this.positionConfirmed(a, a.spec.symbol);
     if (pos === null || pos === 'disagree') return;
     const step = Number(m.stepSize);
+    if (busy && Math.abs(pos - bookInventory(a.book)) >= step / 2) return;
     if (Math.abs(pos - inv) >= step / 2) {
       // A gap: first SoDEX's trades of the bot's own orders (by client id) - a fill its updates missed is booked, so
       // only what is left is outside it (owner 2026-11-09: the bot's inventory is SoDEX's).
