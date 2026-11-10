@@ -217,7 +217,7 @@ export function draftFor(strategy: Strategy, preset: PresetId = 'balanced', symb
     strategy,
     symbol,
     label: '',
-    paper: true,
+    paper: false, // real by default (owner 2026-11-10: "remove paper option enabled per default"); a wallet that may not trade real bots is held on Practice (BotNewPage liveAllowed)
     restS: R10.restS,
     noFair: false,
     gate: false,

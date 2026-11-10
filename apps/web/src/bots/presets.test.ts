@@ -19,7 +19,7 @@ test('every strategy and preset makes a spec the engine accepts, as a bot, in pr
       const r = checkAlgoSpec(specOf(d, MARK));
       assert.ok(r.spec, `${s} ${p}: ${JSON.stringify(r.errors)}`);
       assert.equal(r.spec!.bot, true, `${s} ${p} is a bot`);
-      assert.equal(r.spec!.paper, true, `${s} ${p} starts as practice`);
+      assert.equal(r.spec!.paper, false, `${s} ${p} starts as real (owner 2026-11-10)`);
       assert.equal(strategyOf(r.spec!), s);
       assert.equal(presetOf(d), p);
     }
