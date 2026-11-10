@@ -307,6 +307,11 @@ test('the allow-list is exactly docs/ARCH-traffic.md section 5', () => {
       'POST /api/admin/board/add admin',
       'POST /api/admin/board/move admin',
       'POST /api/admin/builder admin',
+      'POST /api/admin/fees admin',
+      'POST /api/admin/fees/add admin',
+      'POST /api/admin/fees/end admin',
+      'POST /api/admin/fees/lookup admin',
+      'POST /api/admin/infra admin',
       'POST /api/admin/me admin',
       'POST /api/admin/overview admin',
       'POST /api/admin/page-error admin',
@@ -909,4 +914,14 @@ test("gates: on a hosted server the admin suite's origin passes an admin POST an
   assert.equal((await post('https://dev.valuedesk.so')).statusCode, 200);
   assert.equal((await post('https://valuedesk.so')).statusCode, 403);
   await app.close();
+});
+
+test('every admin route routes/admin.ts registers is on the production allowlist (2026-11-10: infra and fees were 404 in production)', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { HOSTED_ROUTES: routes } = await import('../src/hosted.js');
+  const src = readFileSync(new URL('../src/routes/admin.ts', import.meta.url), 'utf8');
+  const registered = [...src.matchAll(/app\.post\('(\/api\/admin\/[a-z/-]+)'/g)].map((m) => m[1]!);
+  assert.ok(registered.length > 10, 'read the routes');
+  const allowed = new Set(routes.filter((r) => r.method === 'POST').map((r) => r.url));
+  assert.deepEqual(registered.filter((u) => !allowed.has(u)), []);
 });

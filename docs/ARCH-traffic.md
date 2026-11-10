@@ -396,7 +396,9 @@ Against this inventory, HOSTED_ROUTES should be:
   session), `/me`, `/signout`, `/sessions/revoke`, `/tickets`, `/ticket`, `/ticket/image`,
   `/ticket/reply`, `/ticket/status`, `/builder`, `/users`, `/analytics`, `/status`, `/audit`,
   `/page-error` (an error the page hit, into the audit log), `/beta`, `/beta/add`, `/beta/remove` (the
-  wallets that may use beta.valuedesk.so; add and remove signed). The gate
+  wallets that may use beta.valuedesk.so; add and remove signed), `/infra` (Bots & servers: the executors'
+  own overview) and `/fees`, `/fees/add`, `/fees/end`, `/fees/lookup` (fee programs; added 2026-11-10 after
+  they were 404 in production for lack of this list). The gate
   takes only the suite's Origin for them (VALUESCAN_ADMIN_ORIGINS, never the site's); the route answers
   404 to everything while no admin password is set, needs the session on every route but the sign-in and
   a fresh `AdminAction` signature on every write. The Vercel function passes POST, `Content-Type` and

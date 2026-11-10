@@ -83,7 +83,7 @@ export function Infra() {
           )}
         </Section>
       ))}
-      {!xs.length && !r.loading && <Section><Empty>No executor is set up to be read (the internal token is missing on server 1).</Empty></Section>}
+      {!xs.length && !r.loading && !r.error && <Section><Empty>No executor answered this page.</Empty></Section>}
     </Page>
   );
 }

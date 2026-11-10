@@ -245,6 +245,13 @@ export const HOSTED_ROUTES: readonly HostedRoute[] = [
   { method: 'POST', url: '/api/admin/board', cls: 'admin' },
   { method: 'POST', url: '/api/admin/board/add', cls: 'admin' },
   { method: 'POST', url: '/api/admin/board/move', cls: 'admin' },
+  // Bots & servers (2026-11-08) and the fee programs: registered in routes/admin.ts but missing here, so production
+  // answered 404 and the dev page said "the internal token is missing" (2026-11-10). hosted.test.ts now checks both lists.
+  { method: 'POST', url: '/api/admin/infra', cls: 'admin' },
+  { method: 'POST', url: '/api/admin/fees', cls: 'admin' },
+  { method: 'POST', url: '/api/admin/fees/add', cls: 'admin' },
+  { method: 'POST', url: '/api/admin/fees/end', cls: 'admin' },
+  { method: 'POST', url: '/api/admin/fees/lookup', cls: 'admin' },
   // The beta channel's sign-in (routes/beta.ts): registered by the beta API only (VALUESCAN_CHANNEL=beta),
   // a 404 on the main one. A listed wallet's BetaSignIn for a 7-day token (beta/gate.ts).
   { method: 'POST', url: '/api/beta/session', cls: 'auth' },
