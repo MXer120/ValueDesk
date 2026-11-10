@@ -204,7 +204,7 @@ export function computeBudget(list: readonly Scenario[], i: BudgetInput): Budget
       `book now: bid ${i.book.bid} / ask ${i.book.ask}, half spread ${(hs * 1e4).toFixed(3)} bp`,
       `builder fee ${(i.builderRate * 1e4).toFixed(2)} bp on every follower order (${i.builderWhy ?? 'the copy ladder\'s top step: no 14-day volume known to a local executor'}); none on the leader's`,
       `every child order $${i.U} (SoDEX's minimum $${i.main.minNotional} plus headroom for a move during the scenario); "traded" counts opens and closes, the cleanup's close included`,
-      `margin at ${i.leverage}x (the EEA cap and the copies' 2x; an algo that keeps SoDEX's default leverage needs less), x${buffer} buffer; peaks are per scenario (each ends flat)`,
+      `margin at ${i.leverage}x (the copies' 2x; an algo that keeps SoDEX's default leverage needs less), x${buffer} buffer; peaks are per scenario (each ends flat)`,
       `price risk: a ${(risk * 100).toFixed(1)}% move on the largest scenario's exposure, either way (not a cost on average)`,
       'ETH-USD legs (baskets) are costed at the main market\'s fees (the same on SoDEX: 4 bp / 1.2 bp)',
       ...(rows.some((r) => r.lostUsd > 0)

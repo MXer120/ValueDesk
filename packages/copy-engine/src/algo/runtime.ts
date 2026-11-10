@@ -91,6 +91,8 @@ export const ALGO_TICK_MS = 500;
 /** A bot is stepped on an update at most this often (stepSoon); the tick still steps it every ALGO_TICK_MS. */
 export const BOT_EVENT_MIN_MS = 50;
 const FLUSH_MS = 2_000;
+/** How long after its update a booked fill still claims its public print (bookOwnPrint). */
+const PRINT_MATCH_MS = 30_000;
 const MARKETS_REFRESH_MS = 10 * 60_000;
 /** On stop, how long a step that is placing or cancelling an order is waited for. */
 const STOP_DRAIN_MS = 8_000;
@@ -4833,11 +4835,24 @@ export class AlgoRuntime {
       const side: Side = p.buyer === a.accountId ? 'buy' : 'sell';
       const m = this.markets.get(p.symbol);
       const tick = m ? Number(m.tickSize) : 0;
-      const at = a.children.filter((c) => LIVE.has(c.state) && c.side === side && c.tif !== 'ioc' && Math.abs(c.price - p.price) <= tick / 2 + 1e-12 && c.filled < c.quantity - 1e-12);
+      const near = (c: ChildOrder): boolean => c.side === side && c.tif !== 'ioc' && Math.abs(c.price - p.price) <= tick / 2 + 1e-12;
+      // The print of a fill SoDEX's order update booked first: it is that order's. 2026-11-10 VIP live run: the update
+      // booked a quote's fill, the bot put a new quote at the same price, and the print ~100 ms later was booked on the
+      // new quote too - 7 of 63 fills counted twice ($745 booked, $662 on SoDEX), the inventory off by the same.
+      const prior = a.children.find((c) => near(c) && c.filled - (c.printed ?? 0) > 1e-12 && Date.now() - c.updatedAt < PRINT_MATCH_MS);
+      if (prior) {
+        prior.printed = Math.min(prior.filled, (prior.printed ?? 0) + p.qty);
+        this.dirty.add(a.id);
+        continue;
+      }
+      // A quote placed after the print cannot be what it filled.
+      const at = a.children.filter((c) => LIVE.has(c.state) && near(c) && c.filled < c.quantity - 1e-12 && c.placedAt <= p.at);
       if (at.length !== 1) continue;
       const c = at[0]!;
       const cum = Math.min(c.quantity, c.filled + p.qty);
+      const was = c.filled;
       this.applyFill(a, c, cum, c.value + (cum - c.filled) * p.price, true);
+      c.printed = (c.printed ?? 0) + (c.filled - was);
       if (p.at > 0) this.fillLag(a, Date.now() - p.at);
       // Filled in full by the prints: never cancelled (it is gone); its update or the order read settles it.
       if (cum >= c.quantity - 1e-12) c.cancelling = true;

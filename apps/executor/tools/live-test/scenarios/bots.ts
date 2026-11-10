@@ -247,7 +247,7 @@ export const BOT_SCENARIOS: Scenario[] = [
     cost: (U) => ({ takerUsd: 0, makerUsd: 2 * U, peakUsd: 2 * U }),
     async run(t) {
       // Quotes a few ticks behind the touch: resting, unlikely to fill in the seconds it lives.
-      const v0 = await t.start({ kind: 'mm', orderUsd: t.U, maxInventoryUsd: 2 * t.U, offsetTicks: 20, chaseTicks: 40, minRepriceMs: 10_000, onStop: 'close' });
+      const v0 = await t.start({ kind: 'mm', orderUsd: t.U, maxInventoryUsd: 2 * t.U, offsetTicks: 20, chaseTicks: 40, minRepriceMs: 10_000, maxLossUsd: 2, onStop: 'close' });
       await t.waitFor('both quotes rest', async () => ((await t.algoOrders(v0.algo.id)).length >= 2 ? true : null), { timeoutMs: 60_000, inconclusive: true });
       const sentBefore = (await t.view(v0.algo.id)).algo.childCount;
       await t.exec.algoAct('cancel-all');
@@ -264,7 +264,7 @@ export const BOT_SCENARIOS: Scenario[] = [
     slow: false,
     cost: (U) => ({ takerUsd: 2 * U, makerUsd: 8 * U, peakUsd: 2 * U }),
     async run(t) {
-      const v0 = await t.start({ kind: 'mm', orderUsd: t.U, maxInventoryUsd: 2 * t.U, chaseTicks: 2, minRepriceMs: 3_000, onStop: 'close' });
+      const v0 = await t.start({ kind: 'mm', orderUsd: t.U, maxInventoryUsd: 2 * t.U, chaseTicks: 2, minRepriceMs: 3_000, maxLossUsd: 2, onStop: 'close' });
       await t.waitFor('both quotes rest', async () => ((await t.algoOrders(v0.algo.id)).length >= 2 ? true : null), { timeoutMs: 60_000, inconclusive: true });
       const before = await t.view(v0.algo.id);
       await t.restart({ downMs: 10_000 });

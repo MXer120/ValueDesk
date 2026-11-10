@@ -689,6 +689,11 @@ export interface ChildOrder {
   state: 'sending' | 'open' | 'done' | 'unknown';
   placedAt: number;
   updatedAt: number;
+  /**
+   * How much of `filled` a public print has been matched to (runtime.ts bookOwnPrint): a print of a fill the order
+   * update booked first belongs to this order, not to a new quote at the same price.
+   */
+  printed?: number;
   /** A cancel was sent for it. */
   cancelling: boolean;
   /** 'slice 3/40', 'clip 2', 'level 5', 'finish', 'trigger'... */

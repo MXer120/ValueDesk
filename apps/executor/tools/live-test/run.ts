@@ -526,6 +526,17 @@ async function main(): Promise<number> {
       log(`- ${s.id}: skipped (${otherLeader})`);
       continue;
     }
+    // The wallet's bots live on VIP (moved by an earlier run): the bot scenarios go there.
+    const fv = (target as { followVip?: () => Promise<boolean> }).followVip;
+    if (s.section === 'algo' && fv && (await fv.call(target))) {
+      log("  the wallet's bots run on the VIP executor: this run follows them there");
+      // VIP keeps its own record of the terms (the app signs them there for a moved wallet): accept them there too.
+      const me = await target.me();
+      if (me.terms?.termsVersion !== COPY_TERMS_VERSION) {
+        await target.acceptTerms(country, await termsHash());
+        log(`  copy terms ${COPY_TERMS_VERSION} accepted on the VIP executor`);
+      }
+    }
     if (s.leader && !hasLeader) {
       markDone(state, key(s), 'skipped', { error: `no ${leaderKeyName(leaderVenue)} in the env file` });
       tally.skipped += 1;

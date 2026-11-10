@@ -1481,6 +1481,52 @@ test('cancel-vs-fill race: a print naming the bot as maker books the fill at onc
   assert.equal(errors.length, 0, errors.map((x) => x.text).join(' | '));
 });
 
+test('update first, print later: the print of a fill the order update booked is not booked again on a new quote at the same price (VIP live 2026-11-10: 7 of 63 fills twice)', async () => {
+  const r = await rig();
+  const a = await add(r, MM);
+  await step(r, a.id);
+  const bid = r.ex.side('buy')[0]!;
+  const q = Number(bid.quantity);
+  const px = Number(bid.price);
+  const filledAt = Date.now() - 100;
+  // SoDEX fills the bid and its order update comes first.
+  r.ex.resting.delete(bid.clOrdID);
+  r.ex.position += q;
+  r.market.order({ clOrdID: bid.clOrdID, status: 'FILLED', filledQty: q, filledValue: q * px, maker: true, at: filledAt });
+  await settle();
+  // The price moves up; the bot quotes again and its new bid is at the filled bid's price.
+  for (let i = 1; i <= 6 && !r.ex.side('buy').some((o) => Number(o.price) === px); i++) {
+    r.market.set(60_000 + i, 60_002 + i);
+    await step(r, a.id, 4_000);
+  }
+  const again = r.ex.side('buy').find((o) => Number(o.price) === px);
+  // The public print of the first fill arrives now (its time: the fill's, before the new quote was placed).
+  for (const cb of r.market.printCbs) cb({ symbol: 'BTC-USD', price: px, qty: q, buyer: 42, seller: 77, taker: 'sell', at: filledAt });
+  await settle();
+  const v = r.rt.view(a.id)!;
+  assert.ok(Math.abs((v.bot?.inventory ?? 0) - r.ex.position) < 1e-12, `inventory ${v.bot?.inventory} = SoDEX ${r.ex.position}`);
+  assert.ok(Math.abs(v.algo.filled - q) < 1e-12, `filled once: ${v.algo.filled} vs ${q}`);
+  assert.ok(again, 'the setup: a new bid at the filled price');
+  assert.equal(r.rt.view(a.id)!.algo.children.find((c) => c.clOrdID === again.clOrdID)?.filled ?? 0, 0, 'the new quote filled nothing');
+  // Even with the print stamped after the new quote (clocks apart): the booked fill claims it.
+  const r2 = await rig();
+  const b = await add(r2, MM);
+  await step(r2, b.id);
+  const bid2 = r2.ex.side('buy')[0]!;
+  r2.ex.resting.delete(bid2.clOrdID);
+  r2.ex.position += q;
+  r2.market.order({ clOrdID: bid2.clOrdID, status: 'FILLED', filledQty: q, filledValue: q * Number(bid2.price), maker: true });
+  await settle();
+  for (let i = 1; i <= 6 && !r2.ex.side('buy').some((o) => o.price === bid2.price); i++) {
+    r2.market.set(60_000 + i, 60_002 + i);
+    await step(r2, b.id, 4_000);
+  }
+  assert.ok(r2.ex.side('buy').some((o) => o.price === bid2.price), 'the setup: a new bid at the filled price');
+  for (const cb of r2.market.printCbs) cb({ symbol: 'BTC-USD', price: Number(bid2.price), qty: q, buyer: 42, seller: 77, taker: 'sell', at: Date.now() + 5_000 });
+  await settle();
+  assert.ok(Math.abs((r2.rt.view(b.id)!.bot?.inventory ?? 0) - r2.ex.position) < 1e-12, 'inventory = SoDEX with the print stamped late');
+});
+
 test('a cancel SoDEX answers "OrderNotFound" is gone, not failed: no error, no retry, settled from SoDEX\'s record', async () => {
   const r = await rig();
   const a = await add(r, MM);

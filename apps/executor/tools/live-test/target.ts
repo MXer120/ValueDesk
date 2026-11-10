@@ -374,6 +374,21 @@ export class HostedTarget extends ExecutorClient implements ExecutorTarget {
   }
 
   /**
+   * A wallet whose bots already moved to VIP (an earlier run's move) is sent there by the standard executor (409 moved):
+   * this target follows it, so the bot scenarios start, read and stop on VIP. Whether it moved now.
+   */
+  async followVip(vipBase = HOSTED_VIP_BASE): Promise<boolean> {
+    if (this.base === vipBase) return false;
+    const me = (await this.me()) as { movedTo?: string | null };
+    if (me.movedTo !== 'vip') return false;
+    this.base = vipBase;
+    this.rebase(vipBase);
+    const i = await this.info();
+    if ((i as { vip?: { tier?: string } }).vip?.tier !== 'vip') throw new Error(`${vipBase} does not answer as the VIP executor`);
+    return true;
+  }
+
+  /**
    * The kill switch on the VIP executor as well (--stop). 2026-11-09 19:47 UTC: a relaunched run's start-up cleanup
    * flattened the wallet while the previous run's bots, moved to VIP, kept quoting; every close of the cleanup
    * ("lt-close-...") read on the bots as "closed outside it" for 3 minutes. Null: the VIP executor did not answer.
