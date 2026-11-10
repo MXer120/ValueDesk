@@ -24,7 +24,7 @@ const ts = require('typescript');
 const ROOTS = [join(web, 'src'), resolve(web, '../../packages/copy-engine/src'), resolve(web, '../server/src/ops/feedbackAreas.ts')];
 const SKIP_DIR = /[\\/](admin|node_modules|e2e)([\\/]|$)/;
 /* The legal documents themselves stay English; the gate and switches around them do not. */
-const SKIP_FILE = /\.(test|spec|d)\.tsx?$|logoManifest|i18n[\\/]|legal[\\/](terms|privacy|risk|copyTerms|impressum|cookies|licenses|notices|docs|model|jurisdictions)\./;
+const SKIP_FILE = /\.(test|spec|d)\.tsx?$|logoManifest|i18n[\\/]|legal[\\/](terms|privacy|risk|copyTerms|impressum|cookies|licenses|notices|docs|model|jurisdictions)\.|copy-engine[\\/]src[\\/]terms[\\/]/;
 /** Props that hold no words for people. */
 const NOT_TEXT_PROP = new Set(['className', 'style', 'href', 'src', 'd', 'id', 'key', 'type', 'role', 'name', 'rel', 'target', 'viewBox', 'fill', 'stroke', 'strokeLinecap', 'strokeLinejoin', 'transform', 'lang', 'htmlFor', 'width', 'height', 'value', 'inputMode', 'autoComplete', 'pattern', 'to', 'points', 'x', 'y', 'cx', 'cy', 'r', 'rx', 'ry', 'x1', 'x2', 'y1', 'y2', 'clipRule', 'fillRule', 'accept', 'method', 'action', 'dataKey', 'storageKey', 'loading', 'decoding', 'aria-haspopup', 'aria-current', 'aria-live', 'aria-controls', 'aria-labelledby', 'aria-describedby']);
 /** Calls whose arguments are never shown. */
