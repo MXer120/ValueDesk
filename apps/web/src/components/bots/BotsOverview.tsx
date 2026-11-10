@@ -4,6 +4,7 @@
  * or a list (many): search, filter by state, sort by any column, 25 a page, pause / resume / stop for one bot or
  * every bot shown.
  */
+import { useTheme } from '../../theme';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { FINAL_STATUSES, type AlgoView } from '@copy-engine';
 import { DASH, fmtUsd } from '../../format';
@@ -109,6 +110,8 @@ const SPAN_MS: Record<Span, number | null> = { '1h': 3_600_000, '6h': 6 * 3_600_
  * repeated here. The series is built for the timeframe (fleet.ts fleetSeries `from`), so 1H and 6H keep their points.
  */
 export function FleetChart({ bots, title = 'Volume and net PnL', series: given, empty }: { bots: AlgoView[]; title?: string; series?: FleetSeries; empty?: { title: string; line: string } }) {
+  // The bars a quiet slate on either theme (the dark slate sat heavy on the light one, 2026-11-10).
+  const light = useTheme() === 'light';
   const [span, setSpan] = useState<Span>('24h');
   const [showVol, setShowVol] = useState(true);
   const [showPnl, setShowPnl] = useState(true);
@@ -146,10 +149,10 @@ export function FleetChart({ bots, title = 'Volume and net PnL', series: given, 
     const pb = new Map<number, number>();
     for (const [t, v] of pnl) pb.set(bucket(t), v);
     const out: ChartSeries[] = [];
-    if (showVol) out.push({ key: 'vol', kind: 'bars', color: '#3d4a5c', points: [...vb.entries()].sort((x, y) => x[0] - y[0]), format: (x) => fmtUsd(x, 0), title: 'Volume' });
+    if (showVol) out.push({ key: 'vol', kind: 'bars', color: light ? '#b4bdc9' : '#3d4a5c', points: [...vb.entries()].sort((x, y) => x[0] - y[0]), format: (x) => fmtUsd(x, 0), title: 'Volume' });
     if (showPnl) out.push({ key: 'pnl', kind: 'line', area: true, color: '#00b481', negColor: '#ef4a3c', points: [...pb.entries()].sort((x, y) => x[0] - y[0]), scale: 'left', format: (x) => fmtUsd(x, 2), title: 'Net PnL' });
     return out;
-  }, [s, from, cut, showVol, showPnl]);
+  }, [s, from, cut, showVol, showPnl, light]);
   const enough = s.volume.filter((p) => p[0] >= from).length >= 3 && series.length > 0;
   return (
     <Shell className={`bots-chartcard${full ? ' is-full' : ''}`} ref={box as never}>

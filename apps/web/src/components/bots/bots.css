@@ -230,7 +230,7 @@ button.bots-link { border: 0; background: none; padding: 0; color: var(--text); 
 .bots-key { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-left: 10px; }
 .bots-key:first-child { margin-left: 0; }
 .bots-key.is-vol { background: #5b6b80; }
-.bots-key.is-pnl { height: 2px; background: #f7f7f7; }
+.bots-key.is-pnl { height: 2px; background: var(--tf-fg, #f7f7f7); }
 .bots-split { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .bots-box { padding: 12px 14px; border: 1px solid var(--panel-line); border-radius: 10px; min-width: 0; }
 .bots-box h4 { margin: 0 0 8px; font-size: var(--fs-xs); font-weight: 500; color: var(--text); }

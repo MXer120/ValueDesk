@@ -12,6 +12,7 @@ import { useMemo, useState, type ReactNode } from 'react';
 import { FINAL_STATUSES, type AlgoEvent, type AlgoView } from '@copy-engine';
 import { DASH, fmtDateTime, fmtQty, fmtTime, fmtUsd, signClass } from '../../format';
 import { Modal } from '../Modal';
+import { isLight, useTheme } from '../../theme';
 import { SeriesChart, type ChartSeries } from '../datachart/SeriesChart';
 import { BotIcon } from './BotIcon';
 import { STRATEGY_INFO, strategyOf } from '../../bots/presets';
@@ -30,7 +31,8 @@ const SecIcon = ({ children, size = 18 }: { children: ReactNode; size?: number }
 );
 
 /** Volume per interval (bars, right axis) and net PnL (line, left axis) from the bot's book. */
-export function botSeries(v: AlgoView): ChartSeries[] {
+/** `light`: the line is the page's ink, not near-white (it vanished on the light theme, 2026-11-10). */
+export function botSeries(v: AlgoView, light = isLight()): ChartSeries[] {
   const pts = v.algo.book?.series ?? [];
   const bars: Array<[number, number]> = [];
   const pnl: Array<[number, number]> = [];
@@ -47,7 +49,7 @@ export function botSeries(v: AlgoView): ChartSeries[] {
   }
   return [
     { key: 'vol', kind: 'bars', color: '#5b6b80', points: bars, format: (x) => fmtUsd(x, 0), title: 'Volume' },
-    { key: 'pnl', kind: 'line', color: '#f7f7f7', negColor: '#ef4a3c', points: pnl, scale: 'left', format: (x) => fmtUsd(x, 2), title: 'Net PnL' },
+    { key: 'pnl', kind: 'line', color: light ? '#1d2127' : '#f7f7f7', negColor: '#ef4a3c', points: pnl, scale: 'left', format: (x) => fmtUsd(x, 2), title: 'Net PnL' },
   ];
 }
 
@@ -62,7 +64,8 @@ function Kpi({ k, v, cls, hint }: { k: string; v: ReactNode; cls?: string; hint?
 
 export function Overview({ v, actions }: { v: AlgoView; actions: ReactNode }) {
   const b = v.bot;
-  const series = useMemo(() => botSeries(v), [v]);
+  const light = useTheme() === 'light';
+  const series = useMemo(() => botSeries(v, light), [v, light]);
   const fees = b ? b.tradeFees + b.builderFees : 0;
   // A point every 5 minutes (bots.ts BOT_SAMPLE_MS): three make a chart worth drawing.
   const hasData = (v.algo.book?.series.length ?? 0) >= 3;
