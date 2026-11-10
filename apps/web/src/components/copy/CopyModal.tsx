@@ -71,7 +71,11 @@ export function CopyModal({ c, open, row, onClose, onStarted }: CopyModalProps) 
   useEffect(() => (open ? holdPeeks() : undefined), [open]);
   // Paper copies are not offered here any more (owner 2026-11-07): a setup kept from before starts live.
   useEffect(() => { if (open && c.setup.paper) c.patchSetup({ paper: false }); }, [open, c.setup.paper]); // eslint-disable-line react-hooks/exhaustive-deps
+  // The terms are accepted with the bottom button while the setup asks for them (owner 2026-11-09).
+  const [primary, setPrimary] = useState<SetupPrimary | null>(null);
 
+  // Every hook above this line: one after it would be skipped while no leader is picked, and React
+  // throws #310 ("more hooks than the last render") the moment a leader is set (client error 482ee2ba).
   if (!c.leader) return null;
   const counter = c.setup.direction === 'counter';
   // A counter-trade needs a copier that knows the direction (copy/live.ts supportsCounter).
@@ -109,8 +113,6 @@ export function CopyModal({ c, open, row, onClose, onStarted }: CopyModalProps) 
       .finally(() => setStarting(false));
   };
 
-  // The terms are accepted with the bottom button while the setup asks for them (owner 2026-11-09).
-  const [primary, setPrimary] = useState<SetupPrimary | null>(null);
   const footer = (
     <div className="cpy-mfoot">
       <span className="cpy-v2prog">
