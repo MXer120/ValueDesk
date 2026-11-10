@@ -9,7 +9,7 @@
  *
  *   This browser       connect, terms, copy fee, copy key (7 days, in this browser)
  *   ValueDesk executor connect, sign in, terms, copy fee, copy key (up to 180 days, held in Tokyo)
- *   Self-hosted        connect, your copier (address + pairing code), terms, copy fee, copy key
+ *   (Self-hosted: no longer offered, owner 2026-11-10 - only the browser and the executor)
  *
  * Every action is one of the follower's own signatures; nothing is signed on
  * their behalf, nothing is pre-ticked.
@@ -24,14 +24,12 @@ import { WalletError } from '../wallet';
 import { BOT_HOSTED_KEY_NOTICE, BOT_RISK_SUMMARY, BOT_STATEMENT_LABEL, COPY_RISK_SUMMARY, COPY_STATEMENTS, HOSTED_KEY_NOTICE } from '../legal/copyTerms';
 import { countryName } from './countries';
 import { LOCATION_UNKNOWN, useViewerGeo } from '../legal/geo';
-import { DEFAULT_SELF_URL } from './executor';
 import {
   acceptTerms,
   approveFee,
   getLiveCopy,
   approveKey,
   importKey,
-  connectSelf,
   readiness,
   revokeKey,
   signIn,
@@ -194,8 +192,6 @@ export function CopySetupSteps({ mode, live, paper, bots, hideDone = false, onPr
   const geo = useViewerGeo();
   const country = geo.country ?? live.viewerCountry ?? '';
   const [ticks, setTicks] = useState<Record<string, boolean>>({});
-  const [selfUrl, setSelfUrl] = useState(live.self.url || DEFAULT_SELF_URL);
-  const [pairing, setPairing] = useState('');
   // null: the longest the executor allows (owner 2026-11-09: keys hold as long as allowed); a pick or a typed number otherwise.
   const [daysPick, setDays] = useState<number | null>(null);
   // A key the follower made on SoDEX themselves (hosted and self-hosted): its name and private key.
@@ -304,50 +300,6 @@ export function CopySetupSteps({ mode, live, paper, bots, hideDone = false, onPr
         />
       )}
 
-      {mode === 'self' && (
-        <Step
-          n={n('copier')}
-          done={r.connected}
-          current={current === 'copier'}
-          title="Connect your copier"
-          desc={
-            r.connected
-              ? `${live.self.url} - paired with this wallet.`
-              : live.self.info
-                ? live.self.info.owner
-                  ? 'Found it. Sign in to it with this wallet.'
-                  : 'Found it. Enter the pairing code it printed, then sign.'
-                : 'Run the copier (Node.js 22+), then enter its address.'
-          }
-        >
-          {!r.connected && (
-            <div className="cs-form">
-              <div className="cs-row">
-                <input className="fx-input" value={selfUrl} onChange={(e) => setSelfUrl(e.target.value)} placeholder={DEFAULT_SELF_URL} spellCheck={false} aria-label="Copier address" />
-                <Act label="Find" primary={!live.self.info} busy={working === 'find'} onClick={() => void run('find', async () => void (await connectSelf(selfUrl)))} />
-              </div>
-              {live.self.info && (
-                <div className="cs-row">
-                  {!live.self.info.owner && (
-                    <input className="fx-input" value={pairing} onChange={(e) => setPairing(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))} placeholder="Pairing code" spellCheck={false} aria-label="Pairing code" maxLength={10} autoComplete="off" />
-                  )}
-                  <ActBtn
-                    label={live.self.info.owner ? 'Sign in' : 'Pair'}
-                    primary
-                    disabled={!owner || (!live.self.info.owner && pairing.length < 8)}
-                    busy={working === 'pair'}
-                    onClick={() => void run('pair', () => signIn('self', pairing), live.self.info?.owner ? undefined : 'Your copier is paired with this wallet.')}
-                  />
-                </div>
-              )}
-              <p className="fx-note">
-                Get it: <a className="fx-link" href="/copier/valuedesk-copier.mjs" download>valuedesk-copier.mjs</a> (<a className="fx-link" href="/copier/valuedesk-copier.mjs.sha256">sha256</a>), then
-                run <code>node valuedesk-copier.mjs</code>. Open source (MIT). On a server, reach it through an SSH tunnel to 127.0.0.1:8799.
-              </p>
-            </div>
-          )}
-        </Step>
-      )}
 
       <Step
         n={n('terms')}

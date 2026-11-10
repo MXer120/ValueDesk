@@ -47,7 +47,9 @@ function useExecutorAlgos(address: string | null): { hosted: AlgoView[]; self: A
     }
     let gone = false;
     const load = async () => {
-      const [hosted, self] = await Promise.all([listOn('hosted').catch(() => []), listOn('self').catch(() => [])]);
+      // No self-hosted copier (owner 2026-11-10): the ValueDesk executor's only.
+      const hosted = await listOn('hosted').catch(() => []);
+      const self: AlgoView[] = [];
       // Bots have their own page (components/bots/): not in the Algos tab.
       const notBot = (v: AlgoView) => v.algo.spec.bot !== true;
       if (!gone) setRows({ hosted: hosted.filter(notBot), self: self.filter(notBot) });

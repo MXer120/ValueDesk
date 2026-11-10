@@ -39,7 +39,6 @@ export const LICENSES: LegalDoc = {
             '**Everything else** - React, ethers, viem, the noble cryptography libraries and the rest - under the MIT, Apache 2.0, BSD or ISC licences; see the file.',
           ],
         },
-        { p: 'The self-hosted copier (/copier/valuedesk-copier.mjs) is published under the MIT licence; the licences of the packages it contains are reproduced at the end of the file.' },
       ],
     },
     {

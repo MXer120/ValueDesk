@@ -20,7 +20,8 @@ import { licenceAllowed, packageDirOf, readPackage, renderLicences } from '../..
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '..');
 const outArg = process.argv.find((a) => a.startsWith('--out='));
-const outDir = outArg ? resolve(outArg.slice(6)) : resolve(root, '../web/public/copier');
+// Not on the site any more (owner 2026-11-10: no self-hosted copier, only the browser and the executor): dist/ by default.
+const outDir = outArg ? resolve(outArg.slice(6)) : resolve(root, 'dist/copier');
 const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
 mkdirSync(outDir, { recursive: true });
 const outfile = join(outDir, 'valuedesk-copier.mjs');

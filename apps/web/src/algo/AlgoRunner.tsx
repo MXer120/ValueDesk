@@ -38,7 +38,8 @@ export default function AlgoRunner({ address, provider }: { address: string | nu
     const check = async () => {
       if (gone || document.visibilityState !== 'visible') return;
       const [{ listOn }, { noteLimitNotices }] = await Promise.all([import('./executorAlgos'), import('./limitNotices')]);
-      for (const mode of ['hosted', 'self'] as const) {
+      // The ValueDesk executor only: no self-hosted copier (owner 2026-11-10).
+      for (const mode of ['hosted'] as const) {
         const views = await listOn(mode).catch(() => []);
         if (!gone) noteLimitNotices(views, mode === 'hosted' ? 'on the ValueDesk executor' : 'on your copier');
       }

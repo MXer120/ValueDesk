@@ -183,7 +183,6 @@ export const PRIVACY: LegalDoc = {
         { p: 'This section applies when you copy trades (see the [Copy trading terms](/copy-terms)). What is processed, and by whom, depends on where the copier runs.' },
         { p: '**In every mode**, your acceptance of the Copy trading terms - the message you signed, with the terms\' version and fingerprint, the country you declared, your statements and your wallet address - is sent to the ValueDesk executor and kept there with the country of your IP address and the time (see hosted mode below for how it is processed). To apply the regional rules, your browser also asks the executor which country your IP address belongs to; nothing is stored for that request.' },
         { p: '**Browser mode.** The copier runs in your browser tab. Your copy rules, the copy key (encrypted, valid for at most seven days), the state of each copy and its activity log are kept in your browser\'s IndexedDB (section 9) and are not sent to ValueDesk. Your browser reads the leader\'s trades from SoDEX or Hyperliquid and sends the copied orders to SoDEX directly (section 8).' },
-        { p: '**Self-hosted mode.** The executor runs on your own computer or server and keeps its data there. Apart from the acceptance of the terms (above), ValueDesk receives no key, no orders and none of its data; the ValueDesk page you control it with talks to your executor directly from your browser.' },
         { p: '**Hosted mode.** When you use the ValueDesk executor, its server processes, for your wallet:' },
         {
           ul: [

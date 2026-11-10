@@ -2,7 +2,7 @@
 // behaviour: a failing test is a confirmed bug; passing ones stay as coverage.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -380,10 +380,9 @@ test('audit: HTTP - body limit, CORS only for allowed origins, the write rate li
 
 /* --------------------------------------------- the shipped artefacts (static) ----- */
 
-test('BUG: the self-host bundle on the site is stale - it lacks the "real algo orders are off" gate of src/service.ts', () => {
-  const bundle = readFileSync(join(REPO, 'apps/web/public/copier/valuedesk-copier.mjs'), 'utf8');
-  assert.ok(readFileSync(join(APP, 'src/service.ts'), 'utf8').includes("'paper-only'"));
-  assert.ok(bundle.includes("'paper-only'") || bundle.includes('"paper-only"'), 'the bundle accepts real (non-paper) algo orders');
+test('the site offers no self-hosted copier (owner 2026-11-10: only the browser and the executor)', () => {
+  assert.equal(existsSync(join(REPO, 'apps/web/public/copier/valuedesk-copier.mjs')), false, 'no bundle to download');
+  assert.ok(!readFileSync(join(REPO, 'apps/web/src/copy/CopySetupSheet.tsx'), 'utf8').includes('valuedesk-copier.mjs'), 'no download link');
 });
 
 test('BUG: the Dockerfile cannot build - tools/bundle.mjs imports apps/web/tools/licenses.mjs, which the image never copies', () => {

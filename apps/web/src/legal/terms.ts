@@ -169,7 +169,7 @@ export const TERMS: LegalDoc = {
     {
       title: '8. Copy trading',
       blocks: [
-        { p: 'ValueDesk lets you copy the trades of public addresses on SoDEX and Hyperliquid into your own SoDEX account, under rules you set yourself: in your browser, on ValueDesk\'s hosted executor, or on an executor you run yourself. Copy trading is governed by the [Copy trading terms and risk disclosure](/copy-terms), which you accept by signing them with your wallet before your first copy. They add to these terms and prevail for copy trading. They set out the copy fee, the regional limits, what the key used for copying can do and the risks of copying; paper copies send nothing to SoDEX and carry no fee.' },
+        { p: 'ValueDesk lets you copy the trades of public addresses on SoDEX and Hyperliquid into your own SoDEX account, under rules you set yourself: in your browser or on ValueDesk\'s hosted executor. Copy trading is governed by the [Copy trading terms and risk disclosure](/copy-terms), which you accept by signing them with your wallet before your first copy. They add to these terms and prevail for copy trading. They set out the copy fee, the regional limits, what the key used for copying can do and the risks of copying; paper copies send nothing to SoDEX and carry no fee.' },
       ],
     },
     {

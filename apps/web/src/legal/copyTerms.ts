@@ -34,7 +34,7 @@
  *     browser only; an ordinary SoDEX key - the only kind that can trade - can
  *     also move funds between the owner's own accounts and wallet
  *     (packages/sodex-core/README.md, "Security notes");
- *   - a self-hosted executor reads no fee ledger, so it charges the ladder's
+ *   - (no self-hosted executor since 2026-11-10) the ladder's
  *     default (apps/executor/src/service.ts volumeOf);
  *   - (2026-10-28) the emergency brake (apps/executor/src/brake.ts): copies
  *     send nothing, live algos are held (not cancelled), algo exits are still
