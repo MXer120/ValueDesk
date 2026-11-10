@@ -471,7 +471,11 @@ export async function approveFee(): Promise<void> {
 }
 
 /** Approve the copy key of `mode` for `days`. Two signatures for an executor (its request, then SoDEX's), one for this browser. */
-export async function approveKey(mode: CopyModeId, days: number): Promise<void> {
+/**
+ * `onStep` hears which wallet request is out (1: the executor makes the key, 2: SoDEX registers it), so a page can say
+ * "2 of 2" (owner 2026-11-10: a renewal waited on the second request with nothing saying a second one was coming).
+ */
+export async function approveKey(mode: CopyModeId, days: number, onStep?: (step: 1 | 2) => void): Promise<void> {
   const { owner, provider: p } = needWallet();
   // ValueDesk's own terms first (the popup, as a gate): copy trading adds to them.
   await requireTermsOrThrow({ owner, reason: 'set up the copy key' });
@@ -496,7 +500,9 @@ export async function approveKey(mode: CopyModeId, days: number): Promise<void> 
   await busyWith('wallet', async () => {
     const id = await sodexAccountId(owner);
     if (!id) throw new Error('This wallet has no SoDEX account yet. Deposit first; the first deposit opens it.');
+    onStep?.(1);
     const created = await client.createKey(await signCopy(p, owner, info.executorId, 'create-key', { accountId: id, days }));
+    onStep?.(2);
     await registerCopyKey({ owner, provider: p, address: created.address, name: created.name, days: created.days });
   });
   // SoDEX lists a new key after a moment: ask the executor to look until it does.

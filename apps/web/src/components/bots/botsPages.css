@@ -1683,3 +1683,54 @@ tr.bots-row.is-blocked:hover, .bots-table tbody tr.bots-row.is-blocked:hover { b
   .bots-mm__sp { display: none; }
 }
 .bots-rg__unit { fill: var(--dim); font-weight: 400; letter-spacing: 0; text-transform: none; }
+/* Conditions: the chart's panel sits apart from the cards (the grid's own gap); a pick still loading dims what is shown. */
+.bots-regime .bots-rg__panel { margin-top: 6px; }
+.bots-rg__kpis, .bots-rg__panel { transition: opacity 160ms ease; }
+.bots-rg__kpis.is-stale, .bots-rg__panel.is-stale { opacity: 0.55; }
+.bots-rg__tip i.is-rest { background: rgb(var(--ink) / 0.28); }
+.bots-mm__key i.is-s0 { background: color-mix(in srgb, var(--neg) 62%, var(--tf-raised)); }
+.bots-mm__key i.is-s50 { background: color-mix(in srgb, var(--warn) 62%, var(--tf-raised)); }
+.bots-mm__key i.is-s100 { background: color-mix(in srgb, var(--pos) 62%, var(--tf-raised)); }
+.bots-mm__key i.is-none { background: rgb(var(--ink) / 0.08); }
+.bots-score { min-width: 64px; }
+.bots-rg__mark { stroke: var(--text); stroke-opacity: 0.55; stroke-width: 1; stroke-dasharray: 3 3; }
+.bots-rg__markt { font-size: 10.5px; font-weight: 600; fill: var(--text); fill-opacity: 0.8; }
+/* A bot's Analysis tab: the market's conditions over the run, then latency and problems side by side. */
+.bots-analysis { display: flex; flex-direction: column; gap: 12px; }
+.bots-analysis__row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; align-items: start; }
+@media (max-width: 1000px) { .bots-analysis__row { grid-template-columns: minmax(0, 1fr); } }
+.bots-dgrid__main > .bots-regime { margin-top: 12px; }
+
+/* A bot's Settings tab (owner 2026-11-10: "match the bot pages, way too big"): the sections as compact cards side by
+   side, each row a small title, its control and a one-line hint; the type and spacing of the bot pages' cards. */
+.bots-setshell .bots-sizepanel { padding: 10px; }
+.bots-setname { max-width: 360px; margin: 0 0 10px; }
+.bots-setname .tf-field label, .bots-setname label { font-size: 12px; color: var(--dim); }
+.bots-settings.is-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 10px; align-items: start; }
+.bots-setcard { min-width: 0; border-radius: 12px; background: rgb(var(--ink) / 0.025); border: 1px solid var(--panel-line); }
+.bots-setcard__h { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid rgb(var(--ink) / 0.06); }
+.bots-setcard__h b { font-size: 13px; font-weight: 600; }
+.bots-setcard__h .bots-stg__n { margin-left: auto; }
+.bots-setcard__i { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 7px; background: rgb(var(--ink) / 0.06); color: var(--dim); }
+.bots-setcard__b { padding: 4px 12px 10px; }
+.bots-settings.is-cards .bots-fgrid { display: flex; flex-direction: column; gap: 0; }
+.bots-settings.is-cards .bots-f { gap: 6px; padding: 10px 0; border-top: 1px solid rgb(var(--ink) / 0.06); }
+.bots-settings.is-cards .bots-fgrid > .bots-f:first-child { border-top-color: transparent; }
+.bots-settings.is-cards .bots-f__l span { color: var(--text); font-size: 12.5px; font-weight: 550; }
+.bots-settings.is-cards .bots-f__h { order: 2; margin: -2px 0 0; font-size: 11.5px; line-height: 1.4; color: var(--dim); }
+.bots-settings.is-cards .bots-f__c { order: 3; gap: 6px; }
+.bots-settings.is-cards .bots-sizeline { grid-template-columns: minmax(0, 1fr) 92px; gap: 8px; }
+.bots-settings.is-cards .bots-sizeline__n { height: 30px; }
+.bots-settings.is-cards .tf-num, .bots-settings.is-cards .tf-input { min-height: 30px; font-size: 12.5px; }
+.bots-settings.is-cards .tf-seg.is-sm { height: 28px; }
+.bots-settings.is-cards .tf-seg.is-sm .tf-seg__opt { padding: 0 10px; font-size: 12px; }
+.bots-settings.is-cards .bots-levpick { height: 24px; padding: 0 8px; font-size: 11.5px; }
+.bots-settings.is-cards .bots-guards { gap: 0; }
+.bots-settings.is-cards .bots-guard { border: 0; border-top: 1px solid rgb(var(--ink) / 0.06); border-radius: 0; background: transparent; }
+.bots-settings.is-cards .bots-guard:first-child { border-top-color: transparent; }
+.bots-settings.is-cards .bots-guard__h { padding: 10px 0; gap: 10px; }
+.bots-settings.is-cards .bots-guard__h .tf-tile { width: 26px; height: 26px; }
+.bots-settings.is-cards .bots-guard__t b { font-size: 12.5px; }
+.bots-settings.is-cards .bots-guard__t small { font-size: 11.5px; }
+.bots-settings.is-cards .bots-guard__b { padding: 0 0 10px 36px; gap: 8px; }
+.bots-settings.is-cards .bots-adv { font-size: 12px; }

@@ -10,8 +10,8 @@ import type { AlgoEvent } from '@copy-engine';
 import { fmtDateTime, fmtQty, fmtUsd } from '../../format';
 import { EmptyState, Icon, Skeleton, type Tone } from './kit/kit';
 
-type Filter = 'all' | 'fill' | 'order' | 'status';
-const FILTERS: Array<{ id: Filter; label: string }> = [{ id: 'all', label: 'Everything' }, { id: 'fill', label: 'Fills' }, { id: 'order', label: 'Quotes' }, { id: 'status', label: 'Decisions' }];
+type Filter = 'all' | 'fill' | 'order' | 'status' | 'problem';
+const FILTERS: Array<{ id: Filter; label: string }> = [{ id: 'all', label: 'Everything' }, { id: 'fill', label: 'Fills' }, { id: 'order', label: 'Quotes' }, { id: 'status', label: 'Decisions' }, { id: 'problem', label: 'Problems' }];
 
 const KIND: Record<AlgoEvent['kind'], { word: string; tone: Tone; icon: 'check' | 'layers' | 'x' | 'pause' | 'warning' | 'bolt' | 'pulse' }> = {
   fill: { word: 'Filled', tone: 'positive', icon: 'check' },
@@ -71,7 +71,7 @@ function Row({ e, open, toggle }: { e: AlgoEvent; open: boolean; toggle: () => v
   );
 }
 
-export function BotLog({ events, error, more, loading, loadMore, only }: { events: AlgoEvent[] | null; error: string | null; more: boolean; loading: boolean; loadMore: () => void; only?: 'fill' }) {
+export function BotLog({ events, error, more, loading, loadMore, only }: { events: AlgoEvent[] | null; error: string | null; more: boolean; loading: boolean; loadMore: () => void; only?: 'fill' | 'problem' }) {
   const [filter, setFilter] = useState<Filter>(only ?? 'all');
   const [open, setOpen] = useState<string | null>(null);
   const end = useRef<HTMLLIElement>(null);
@@ -86,7 +86,8 @@ export function BotLog({ events, error, more, loading, loadMore, only }: { event
   }, [more, loadMore, events]);
   if (error && !events) return <EmptyState tone="error" icon="warning" title="The log could not be read" description={error} />;
   if (!events) return <div className="bots-skels"><Skeleton className="bots-skel" /><Skeleton className="bots-skel" /><Skeleton className="bots-skel" /></div>;
-  const shown = events.filter((e) => filter === 'all' || (filter === 'fill' ? e.kind === 'fill' : filter === 'order' ? e.kind === 'order' || e.kind === 'cancel' : e.kind !== 'fill' && e.kind !== 'order' && e.kind !== 'cancel'));
+  // Problems: what SoDEX refused and where the bot had to wait (the Analysis tab's list).
+  const shown = events.filter((e) => filter === 'all' || (filter === 'fill' ? e.kind === 'fill' : filter === 'order' ? e.kind === 'order' || e.kind === 'cancel' : filter === 'problem' ? e.kind === 'error' || e.kind === 'skip' : e.kind !== 'fill' && e.kind !== 'order' && e.kind !== 'cancel'));
   return (
     <div className="bots-flog" onCopy={(ev) => ev.preventDefault()} onContextMenu={(ev) => ev.preventDefault()}>
       {!only && (
@@ -97,7 +98,7 @@ export function BotLog({ events, error, more, loading, loadMore, only }: { event
           <span className="bots-flog__live"><i aria-hidden="true" />Live</span>
         </div>
       )}
-      {!shown.length && !more ? <EmptyState compact icon="clock" title={filter === 'fill' ? 'No fill yet' : 'Nothing yet'} /> : (
+      {!shown.length && !more ? <EmptyState compact icon="clock" title={filter === 'fill' ? 'No fill yet' : filter === 'problem' ? 'No problems: nothing refused, nothing waited' : 'Nothing yet'} /> : (
         <ol className="bots-flog__list" ref={box}>
           {shown.map((e) => <Row key={e.id} e={e} open={open === e.id} toggle={() => setOpen((x) => (x === e.id ? null : e.id))} />)}
           <li ref={end} className="bots-flog__end" aria-hidden={!more}>{more ? (loading ? 'Loading older lines…' : '') : 'The start of its log'}</li>

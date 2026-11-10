@@ -128,7 +128,7 @@ function Guard({ title, line, on, set, children, icon }: { title: string; line: 
   );
 }
 
-export function BotSettings({ d, set, range, mark, liveAllowed, noLead, hidePractice, part, lev, sizeErrors = [], sizeNotes = [] }: {
+export function BotSettings({ d, set, range, mark, liveAllowed, noLead, hidePractice, part, lev, sizeErrors = [], sizeNotes = [], cards = false }: {
   d: BotDraft;
   set: (p: Partial<BotDraft>) => void;
   range: { low: number; high: number } | null;
@@ -139,6 +139,9 @@ export function BotSettings({ d, set, range, mark, liveAllowed, noLead, hidePrac
   hidePractice?: boolean;
   /** One part only, no tabs (New bot's sub-steps). */
   part?: Sec;
+  /** A bot's page (owner 2026-11-10: "redesign so it matches the bot pages, way too big"): every section at once as a
+   * compact card on a grid, no side menu. */
+  cards?: boolean;
   /** Kept for callers from before the restart flow. */
   running?: boolean;
   /** The market's leverage facts (bots/leverage.ts), `max` already under the region's ceiling; absent or no max: no leverage row. */
@@ -187,7 +190,7 @@ export function BotSettings({ d, set, range, mark, liveAllowed, noLead, hidePrac
   const cur = SECS.find((x) => x.id === sec) ?? SECS[0]!;
   // The bot page: laid out as ValueDesk's own Settings (owner 2026-11-08): the sections down the left, the chosen
   // one on a glass pane, each setting a title over its line and its control, hairlines between.
-  const body = (
+  const bodyFor = (sec: Sec) => (
     <>
 
       {sec === 'size' && (
@@ -378,7 +381,24 @@ export function BotSettings({ d, set, range, mark, liveAllowed, noLead, hidePrac
       )}
     </>
   );
+  const body = bodyFor(sec);
   if (part) return <div className="bots-settings">{body}</div>;
+  if (cards) {
+    return (
+      <div className="bots-settings is-cards">
+        {SECS.map((x) => (
+          <section key={x.id} className="bots-setcard" aria-label={x.label}>
+            <header className="bots-setcard__h">
+              <span className="bots-setcard__i"><Icon name={x.icon} size={14} /></span>
+              <b>{x.label}</b>
+              {x.count ? <em className="bots-stg__n">{x.count} on</em> : null}
+            </header>
+            <div className="bots-setcard__b">{bodyFor(x.id)}</div>
+          </section>
+        ))}
+      </div>
+    );
+  }
   return (
     <div className="bots-settings is-stg">
       <nav className="bots-stg__nav" aria-label="Settings sections">
