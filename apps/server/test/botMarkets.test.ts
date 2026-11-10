@@ -8,7 +8,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { TAKER_BUYER, TAKER_SELLER, type PrintCols } from '../src/flow/codec.js';
-import { analyzeMarket, weightedPercentile, BOT_BUILDER_BPS } from '../src/flow/botMarkets.js';
+import { analyzeMarket, weightedPercentile, BOT_BUILDER_BPS, servePlan, warmDue, BOT_MARKETS_TTL, BOT_MARKETS_MAX_AGE, BOT_MARKETS_IDLE_EVERY } from '../src/flow/botMarkets.js';
 
 const P1002 = 1, P23342 = 2, DOM = 3, OTHER_TAKER = 50;
 const T0 = 1_762_473_600_000; // a whole UTC hour
@@ -171,4 +171,21 @@ test('1h and 6h windows, minute series and the regime buckets', async () => {
   assert.equal(bucketsOf(ms, now, '6h').length, 72);
   assert.equal(bucketsOf(ms, now, '24h').length, 96);
   assert.equal(bucketsOf(ms, now, '7d').length, 168);
+});
+
+test('an old answer is never served, and the board stays warm when nobody asks (2026-11-10: 00:12 answer at 09:00)', () => {
+  const now = 1_794_300_000_000;
+  const min = 60_000;
+  assert.equal(servePlan(null, now), 'wait', 'none yet');
+  assert.equal(servePlan(now - 2 * min, now), 'serve');
+  assert.equal(servePlan(now - BOT_MARKETS_TTL - 1, now), 'serve-refresh', 'past the TTL: served, a new one behind it');
+  assert.equal(servePlan(now - BOT_MARKETS_MAX_AGE - 1, now), 'wait', 'too old to show');
+  assert.equal(servePlan(now - 9 * 60 * min, now), 'wait', 'the overnight case');
+  // Asked lately: every tick computes.
+  assert.equal(warmDue(now, now - 10 * min, now - 5 * min), true);
+  // Nobody asked: only once the answer nears the idle interval, so a 5 min timer computes every 10 min.
+  assert.equal(warmDue(now, now - 3 * 60 * min, now - 5 * min), false);
+  assert.equal(warmDue(now, now - 3 * 60 * min, now - BOT_MARKETS_IDLE_EVERY), true);
+  assert.equal(warmDue(now, 0, null), true, 'never computed');
+  assert.ok(BOT_MARKETS_IDLE_EVERY + BOT_MARKETS_TTL <= BOT_MARKETS_MAX_AGE, 'an idle answer is still young enough to serve at once');
 });
