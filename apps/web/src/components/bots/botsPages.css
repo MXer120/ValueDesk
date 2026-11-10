@@ -1690,3 +1690,10 @@ tr.bots-row.is-blocked:hover, .bots-table tbody tr.bots-row.is-blocked:hover { b
 .bots-mm__key i.is-s100 { background: color-mix(in srgb, var(--pos) 62%, var(--tf-raised)); }
 .bots-mm__key i.is-none { background: rgb(var(--ink) / 0.08); }
 .bots-score { min-width: 64px; }
+.bots-rg__mark { stroke: var(--text); stroke-opacity: 0.55; stroke-width: 1; stroke-dasharray: 3 3; }
+.bots-rg__markt { font-size: 10.5px; font-weight: 600; fill: var(--text); fill-opacity: 0.8; }
+/* A bot's Analysis tab: the market's conditions over the run, then latency and problems side by side. */
+.bots-analysis { display: flex; flex-direction: column; gap: 12px; }
+.bots-analysis__row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; align-items: start; }
+@media (max-width: 1000px) { .bots-analysis__row { grid-template-columns: minmax(0, 1fr); } }
+.bots-dgrid__main > .bots-regime { margin-top: 12px; }

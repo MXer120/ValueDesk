@@ -56,7 +56,10 @@ const H_FLOW = 128, H_GAP = 38, H_MOVE = 56, PAD = { l: 2, r: 46, t: 10, b: 24 }
 /** Where the time axis is marked per window (minutes of the viewer's own clock) and how a mark reads. */
 const TICK_MIN: Record<BotWindow, number> = { '1h': 15, '6h': 60, '24h': 360, '7d': 1440 };
 
-function Chart({ hours, win, stepMs }: { hours: readonly RegimeHour[]; win: BotWindow; stepMs: number }) {
+/** A moment drawn on the chart (a bot's start and stop): a dashed line through both lanes and its label. */
+export interface RegimeMark { t: number; label: string }
+
+function Chart({ hours, win, stepMs, marks = [] }: { hours: readonly RegimeHour[]; win: BotWindow; stepMs: number; marks?: readonly RegimeMark[] }) {
   const [at, setAt] = useState<number | null>(null);
   const wrap = useRef<HTMLDivElement>(null);
   const [w, setW] = useState(720);
@@ -159,6 +162,17 @@ function Chart({ hours, win, stepMs }: { hours: readonly RegimeHour[]; win: BotW
               {(everyDay || k % 2 === 0) && <text x={x0(i) + 4} y={H - 6} className="bots-rg__ax">{tickWords(d)}</text>}
             </g>
           ))}
+          {marks.map((mk) => {
+            const t0 = hours[0]?.t, t1 = (hours[n - 1]?.t ?? 0) + stepMs;
+            if (t0 === undefined || mk.t < t0 || mk.t > t1) return null;
+            const x = PAD.l + ((mk.t - t0) / (t1 - t0)) * plotW;
+            return (
+              <g key={`${mk.label}${mk.t}`} pointerEvents="none">
+                <line x1={x} x2={x} y1={PAD.t} y2={moveTop + H_MOVE} className="bots-rg__mark" />
+                <text x={Math.min(x + 4, w - PAD.r - 60)} y={PAD.t + 10} className="bots-rg__markt">{mk.label}</text>
+              </g>
+            );
+          })}
           {h && at !== null && (
             <g pointerEvents="none">
               <rect x={x0(at) - 1} y={PAD.t - 2} width={step + 2} height={moveTop + H_MOVE - PAD.t + 2} rx={3} className="bots-rg__cur" />
@@ -195,9 +209,14 @@ function Chart({ hours, win, stepMs }: { hours: readonly RegimeHour[]; win: BotW
 const WIN_WORDS: Record<BotWindow, string> = { '1h': 'last hour', '6h': 'last 6 hours', '24h': 'last 24 hours', '7d': 'last 7 days' };
 const STEP_WORDS = (ms: number) => (ms >= 3_600_000 ? 'hour' : `${Math.round(ms / 60_000)} min`);
 
-export function MarketConditions() {
-  const [sym, setSym] = useState<string>(ALL);
-  const [win, setWin] = useState<BotWindow>('24h');
+/**
+ * `symbol`: one market only (a bot's page: no market dropdown). `initialWindow`: the window it opens on. `marks`: moments
+ * drawn on the chart (the bot's start and stop). `title` / `subtitle`: a bot's page says whose market it is.
+ */
+export function MarketConditions({ symbol, initialWindow = '24h', marks, title = 'Market conditions', subtitle }: { symbol?: string; initialWindow?: BotWindow; marks?: readonly RegimeMark[]; title?: string; subtitle?: string } = {}) {
+  const [symPicked, setSym] = useState<string>(ALL);
+  const sym = symbol ?? symPicked;
+  const [win, setWin] = useState<BotWindow>(initialWindow);
   const r = useBotRegime(sym, win);
   // The answer for the market and window picked; while a new pick loads, the last one that matched stays on screen
   // (dimmed), so a change never blanks the board to a skeleton and back (owner 2026-11-10: "it flickers").
@@ -228,11 +247,11 @@ export function MarketConditions() {
     <Shell className="bots-regime">
       <ShellHeader
         icon="pulse"
-        title="Market conditions"
-        subtitle={`Who takes makers' quotes and how volatile the price is, ${WIN_WORDS[win]}`}
+        title={title}
+        subtitle={subtitle ?? `Who takes makers' quotes and how volatile the price is, ${WIN_WORDS[win]}`}
         aside={
           <div className="bots-rg__ctl">
-            <FxSelect value={sym} options={options} onChange={setSym} label="Market" searchable searchPlaceholder="Search markets" triggerClassName="bots-rg__pick" listMinWidth={220} listAlign="end" />
+            {!symbol && <FxSelect value={sym} options={options} onChange={setSym} label="Market" searchable searchPlaceholder="Search markets" triggerClassName="bots-rg__pick" listMinWidth={220} listAlign="end" />}
             <Segmented value={win} label="Window" onChange={setWin} options={[{ value: '1h', label: '1h' }, { value: '6h', label: '6h' }, { value: '24h', label: '24h' }, { value: '7d', label: '7d' }]} />
           </div>
         }
@@ -253,7 +272,7 @@ export function MarketConditions() {
         ) : legacy && shownWin !== '7d' && shownWin !== '24h' ? (
           <EmptyState compact icon="clock" title={`Not by the ${shownWin === '1h' ? 'minute' : 'quarter hour'} yet`} description="The data service still answers by the hour; this window fills in once it is updated." />
         ) : (
-          <Chart hours={hours} win={shownWin} stepMs={legacy ? 3_600_000 : stepMs} />
+          <Chart hours={hours} win={shownWin} stepMs={legacy ? 3_600_000 : stepMs} marks={marks} />
         )}
       </Panel>
     </Shell>
