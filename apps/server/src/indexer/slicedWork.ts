@@ -15,6 +15,10 @@ export class SlicedWork {
   private waiting = false;
   /** When the last turn ended (0: no turn is waiting for another). */
   private turnEnd = 0;
+  /** Steps ever added and ever run, and when each add came: how long the oldest waiting step has waited (oldestWaitMs). */
+  private added = 0;
+  private ran = 0;
+  private marks: Array<{ through: number; at: number }> = [];
 
   constructor(private readonly o: {
     /**
@@ -33,14 +37,32 @@ export class SlicedWork {
     return this.queue.length - this.next;
   }
 
+  /**
+   * How long the oldest step not run yet has waited (ms; 0 when none waits). Steps run in the order added, so it is
+   * the age of the oldest row a flush handed over and has not written (the status page's write target, 2026-11-09).
+   */
+  get oldestWaitMs(): number {
+    while (this.marks.length && this.marks[0]!.through <= this.ran) this.marks.shift();
+    const first = this.marks[0];
+    return first ? Math.max(0, (this.o.now ?? Date.now)() - first.at) : 0;
+  }
+
   add(steps: ReadonlyArray<() => void>): void {
+    this.mark(steps.length);
     this.queue.push(...steps);
     if (!this.waiting) this.run();
   }
 
   /** Queued behind the rest without running any of it now (a stop that hands the rows elsewhere first). */
   enqueue(steps: ReadonlyArray<() => void>): void {
+    this.mark(steps.length);
     this.queue.push(...steps);
+  }
+
+  private mark(n: number): void {
+    if (!n) return;
+    this.added += n;
+    this.marks.push({ through: this.added, at: (this.o.now ?? Date.now)() });
   }
 
   /** Everything left, now, in this call (a stop). */
@@ -54,6 +76,7 @@ export class SlicedWork {
     // Let go of a step once it runs. Kept until the queue next stood empty, every row of every flush stayed on the heap for as
     // long as a backlog lasted, and the old space it filled came back as long garbage collections (8-14 s on 2026-11-06).
     this.queue[this.next++] = NOOP;
+    this.ran++;
     try {
       s();
     } catch (e) {
@@ -68,6 +91,7 @@ export class SlicedWork {
   private reset(): void {
     this.queue = [];
     this.next = 0;
+    this.marks = [];
   }
 
   private run(): void {

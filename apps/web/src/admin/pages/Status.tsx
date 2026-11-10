@@ -1,70 +1,88 @@
 /**
- * The status of everything (admin/statusView.ts), read from what the servers already
- * publish. The services are the public Status page's own rows - its pills, its 90 day
- * bars with their tooltips (status/StatusPage.tsx DayBars) - then what only the owner
- * sees: the indexer's whole status, the executor's health, server 1, releases, brake,
- * browser errors.
+ * Status: first exactly what www.valuedesk.so/status says - the same verdict per service (admin/statusView.ts
+ * judge, with statusModel.ts shownState), its pills and 90-day bars - then what only the owner needs: why a
+ * service is not up (the prober's failed checks), the probe beside a maintenance, the indexer's lanes and
+ * streams, the executor, server 1, releases, brake and browser errors.
+ *
+ * Owner 2026-11-07: "on dev page it says indexer degraded. on production it doesnt (maintenance?)". The page
+ * showed the raw probe; the public page shows maintenance while a release's notice is open. Both now judge
+ * with one function, and the probe is shown as a detail, never as a second verdict.
  */
 import { DayBars } from '../../status/StatusPage';
-import { SERVICE_LINE, dayDetail, fmtUptime } from '../../status/statusData';
+import { SERVICE_LINE, SHOWN_TEXT, STATE_TEXT, dayDetail, fmtUptime } from '../../status/statusData';
 import { ago, bytes, duration, int, when } from '../format';
-import { Empty, JsonView, Note, Page, Pill, Section, useAdmin } from '../ui';
-import type { EverythingStatus } from '../types';
+import { Empty, Note, OVERALL_WORDS, Page, Pill, Section, ShownPill, toneOfOverall, useAdmin } from '../ui';
+import type { EverythingStatus, JudgedService } from '../types';
 
 const isErr = (v: unknown): v is { error: string } => !!v && typeof v === 'object' && 'error' in v && typeof (v as { error: unknown }).error === 'string';
 const rec = (v: unknown): Record<string, unknown> => (v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {});
 const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
-const STATE_TONE = { up: 'pos', degraded: 'warn', down: 'neg', unknown: 'dim' } as const;
-const STATE_WORD = { up: 'Operational', degraded: 'Degraded', down: 'Down', unknown: 'No data' } as const;
+
+interface IndexerView {
+  health: {
+    at: number | null;
+    streams: Record<string, boolean>;
+    loopLagMs: { lastMinute: number | null; sinceStart: number | null };
+    lanes: Record<string, { queued: number | null; done: number | null; failed: number | null; backoffMs: number | null }>;
+    lastBuildAt: number | null;
+    lastBuildMs: number | null;
+  } | null;
+  lastError: string | null;
+  stopping: boolean;
+  steps: Array<[string, number]>;
+}
 
 export function Status() {
   const r = useAdmin<{ status: EverythingStatus | null }>('status', {}, 30_000);
   const s = r.data?.status ?? null;
-  const services = s && s.report && !isErr(s.report) ? s.report.services ?? [] : [];
-  const bad = services.filter((x) => x.state === 'down' || x.state === 'degraded');
-  const execOk = !!s?.executor.reachable && !!s.executor.health?.ok;
-  const tone = !s ? 'unknown' : bad.some((x) => x.state === 'down') || !execOk ? 'down' : bad.length ? 'warn' : 'pos';
+  const judged = s?.judged ?? null;
+  const report = s && !isErr(s.report) ? s.report : null;
+  const notUp = (judged?.services ?? []).filter((x) => x.shown !== 'up' && x.shown !== 'unknown');
+  const indexerWhy = judged?.services.find((x) => x.id === 'indexer')?.why ?? [];
   return (
     <Page
-      title={!s ? 'Checking…' : tone === 'pos' ? 'All systems operational' : tone === 'warn' ? 'Partly degraded' : 'Something is down'}
-      line="Servers, indexer, executor, brake, releases and errors from browsers - read from what the servers publish, every 30 s."
-      tone={tone}
+      title={judged ? OVERALL_WORDS[judged.overall] : s ? 'Status not readable' : 'Checking…'}
+      line={notUp.length ? notUp.map((x) => `${x.name}: ${SHOWN_TEXT[x.shown]}`).join(' · ') : 'The same verdict as www.valuedesk.so/status, with the detail behind it. Every 30 s.'}
+      tone={toneOfOverall(judged?.overall)}
       loaded={r}
+      wide
     >
       {r.error && <Section><Note kind="error">{r.error}</Note></Section>}
+      {s && isErr(s.report) && <Section><Note kind="error">The status record: {s.report.error}</Note></Section>}
+      {judged && report && (
+        <ul className="st-list" aria-label="Services">
+          {judged.services.map((x) => {
+            const raw = report.services?.find((y) => y.id === x.id);
+            const notices = (report.notices ?? []) as unknown as Parameters<typeof dayDetail>[2];
+            const days = (raw?.days ?? []).map((d) => dayDetail(d, x.id as Parameters<typeof dayDetail>[1], notices, s!.at));
+            return (
+              <li key={x.id} className="st-svc">
+                <div className="st-svc__head">
+                  <div className="st-svc__name">
+                    <b>{x.name}</b>
+                    <small>{SERVICE_LINE[x.id as keyof typeof SERVICE_LINE] ?? ''}</small>
+                  </div>
+                  <div className="st-svc__now">
+                    <ShownPill state={x.shown} />
+                    {x.latencyMs !== null && x.probe !== 'unknown' && <small className="st-ms">{x.latencyMs} ms</small>}
+                  </div>
+                </div>
+                {days.length > 0 && <DayBars days={days} label={`${x.name}: ${fmtUptime(x.uptime)} uptime over the last ${days.length} days`} />}
+                <div className="st-scale" aria-hidden="true">
+                  <span>{days.length} days ago</span>
+                  <span className="st-scale__pct">{fmtUptime(x.uptime)} uptime</span>
+                  <span>Today</span>
+                </div>
+                <Behind x={x} />
+              </li>
+            );
+          })}
+        </ul>
+      )}
       {s && (
         <>
-          {isErr(s.report) ? <Section><Note kind="error">Status page: {s.report.error}</Note></Section> : (
-            <ul className="st-list" aria-label="Services">
-              {services.map((x) => {
-                // The same report the public page reads (ops/statusModel.ts StatusReport), so its own helpers apply.
-                const notices = (s.report && !isErr(s.report) ? s.report.notices ?? [] : []) as unknown as Parameters<typeof dayDetail>[2];
-                const days = (x.days ?? []).map((d) => dayDetail(d, x.id as Parameters<typeof dayDetail>[1], notices, s.at));
-                return (
-                  <li key={x.id} className="st-svc">
-                    <div className="st-svc__head">
-                      <div className="st-svc__name">
-                        <b>{x.name}</b>
-                        <small>{SERVICE_LINE[x.id as keyof typeof SERVICE_LINE] ?? ''}</small>
-                      </div>
-                      <div className="st-svc__now">
-                        <Pill tone={STATE_TONE[x.state]}>{STATE_WORD[x.state]}</Pill>
-                        {x.latencyMs !== null && x.state !== 'unknown' && <small className="st-ms">{x.latencyMs} ms</small>}
-                      </div>
-                    </div>
-                    {days.length > 0 && <DayBars days={days} label={`${x.name}: ${fmtUptime(x.uptime)} uptime over the last ${days.length} days`} />}
-                    <div className="st-scale" aria-hidden="true">
-                      <span>{days.length} days ago</span>
-                      <span className="st-scale__pct">{fmtUptime(x.uptime)} uptime</span>
-                      <span>Today</span>
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
           <Executor v={s.executor} />
-          <Indexer v={s.indexer} />
+          <Indexer v={s.indexer as unknown as IndexerView | { error: string } | null} why={indexerWhy} />
           <Server v={s.system} />
           <Releases v={s.releases} brake={s.brake} />
           <Errors v={s.clientErrors} />
@@ -74,40 +92,65 @@ export function Status() {
   );
 }
 
-function Indexer({ v }: { v: Record<string, unknown> | null }) {
+/** What only the owner sees under a service: the checks that failed, the probe when the public page shows more, the notice. */
+function Behind({ x }: { x: JudgedService }) {
+  const differs = x.probe !== x.shown && x.probe !== 'unknown';
+  if (!x.why.length && !differs && !x.notices.length) return null;
+  return (
+    <div className="dv-behind">
+      {x.notices.map((n) => (
+        <p key={n.id}><span className="dv-tag">{n.kind === 'maintenance' ? 'Maintenance' : 'Incident'}</span>{n.title}</p>
+      ))}
+      {differs && <p><span className="dv-tag">Probe</span>The last check says {STATE_TEXT[x.probe].toLowerCase()}{x.notices.length ? '; the open notice decides what the public page shows.' : '.'}</p>}
+      {x.why.map((w) => (
+        <p key={w.code}><span className="dv-tag dv-mono">{w.code}</span>{w.text}</p>
+      ))}
+      {x.checkedAt && <p className="dv-quiet">Checked {ago(x.checkedAt)}</p>}
+    </div>
+  );
+}
+
+function Indexer({ v, why }: { v: IndexerView | { error: string } | null; why: JudgedService['why'] }) {
   if (!v) return <Section title="Indexer"><Empty>No indexer status on this server.</Empty></Section>;
   if (isErr(v)) return <Section title="Indexer"><Note kind="error">{v.error}</Note></Section>;
-  const lag = rec(v.loopLagMs);
-  const steps = Object.entries(rec(v.lastBuildStepMs)).map(([k, ms]) => [k, num(ms)] as const).filter(([, ms]) => ms !== null).sort((a, b) => b[1]! - a[1]!);
-  const sockets = rec(v.sockets ?? v.streams);
-  const lanes = rec(v.lanes);
+  const h = v.health;
+  if (!h) return <Section title="Indexer"><Empty>The indexer's status row cannot be read.</Empty></Section>;
+  const stalled = new Set(why.filter((w) => w.code.startsWith('lane:')).map((w) => w.code.slice(5)));
+  const failing = new Set(why.filter((w) => w.code.startsWith('fail:')).map((w) => w.code.slice(5)));
+  const lanes = Object.entries(h.lanes);
   return (
-    <Section title="Indexer" aside={<span className="st-ms">status written {ago(num(v.at))}</span>}>
+    <Section title="Indexer" aside={<span className="st-ms">published {ago(h.at)}{v.stopping ? ' · restarting' : ''}</span>}>
       <dl className="dv-dl">
-        <div><dt>Last board build</dt><dd>{ago(num(v.lastBuildAt))} · took {duration(num(v.lastBuildMs))}</dd></div>
-        <div><dt>Event loop lag</dt><dd>{int(num(lag.lastMinute))} ms in the last minute · {int(num(lag.sinceStart))} ms worst since start</dd></div>
-        <div><dt>Streams</dt><dd>{Object.entries(sockets).map(([k, up]) => <Pill key={k} tone={up ? 'pos' : 'neg'}>{k}</Pill>)}</dd></div>
-        {typeof v.lastError === 'string' && <div><dt>Last error</dt><dd className="dv-warn">{v.lastError}</dd></div>}
+        <div><dt>Streams</dt><dd className="dv-pills">{Object.entries(h.streams).map(([k, up]) => <Pill key={k} tone={up ? 'pos' : 'neg'}>{k}</Pill>)}{!Object.keys(h.streams).length && '–'}</dd></div>
+        <div><dt>Thread lag</dt><dd className={num(h.loopLagMs.lastMinute) !== null && h.loopLagMs.lastMinute! >= 15_000 ? 'dv-warn' : undefined}>{duration(h.loopLagMs.lastMinute)} worst in the last minute · {duration(h.loopLagMs.sinceStart)} since start</dd></div>
+        <div><dt>Boards</dt><dd>built {ago(h.lastBuildAt)} in {duration(h.lastBuildMs)}</dd></div>
+        {v.lastError && <div><dt>Last error</dt><dd className="dv-warn dv-wrap">{v.lastError}</dd></div>}
       </dl>
-      <div className="dv-grid dv-grid--2">
-        {steps.length > 0 && (
-          <div className="dv-sheet">
-            <table className="dv-table">
-              <thead><tr><th>Build step</th><th className="right">Last build</th></tr></thead>
-              <tbody>{steps.slice(0, 12).map(([k, ms]) => <tr key={k}><td className="dv-mono">{k}</td><td className="right">{duration(ms)}</td></tr>)}</tbody>
-            </table>
-          </div>
-        )}
-        {Object.keys(lanes).length > 0 && (
-          <div className="dv-sheet">
-            <table className="dv-table">
-              <thead><tr><th>Lane</th><th className="right">Queued</th><th className="right">Done</th><th className="right">Failed</th></tr></thead>
-              <tbody>{Object.entries(lanes).map(([k, l]) => <tr key={k}><td className="dv-mono">{k}</td><td className="right">{int(num(rec(l).queued))}</td><td className="right">{int(num(rec(l).done))}</td><td className="right">{int(num(rec(l).failed))}</td></tr>)}</tbody>
-            </table>
-          </div>
-        )}
-      </div>
-      <details className="dv-details"><summary>The whole status row</summary><JsonView value={v} /></details>
+      {lanes.length > 0 && (
+        <div className="dv-sheet">
+          <table className="dv-table">
+            <thead><tr><th>Lane</th><th>State</th><th className="right">Queued</th><th className="right">Done</th><th className="right">Failed</th><th className="right">Backoff</th></tr></thead>
+            <tbody>
+              {lanes.map(([k, l]) => (
+                <tr key={k}>
+                  <td className="dv-mono">{k}</td>
+                  <td>{stalled.has(k) ? <Pill tone="warn">Stalled</Pill> : failing.has(k) ? <Pill tone="neg">Failing</Pill> : <Pill tone="pos">Moving</Pill>}</td>
+                  <td className="right">{int(l.queued)}</td>
+                  <td className="right">{int(l.done)}</td>
+                  <td className="right">{int(l.failed)}</td>
+                  <td className="right">{l.backoffMs ? duration(l.backoffMs) : '–'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {v.steps.length > 0 && (
+        <details className="dv-details">
+          <summary>Slowest steps of the last board build</summary>
+          <ul className="dv-rows">{v.steps.map(([k, ms]) => <li key={k}><span className="dv-rows__name dv-mono">{k}</span><span className="dv-rows__fig">{duration(ms)}</span></li>)}</ul>
+        </details>
+      )}
     </Section>
   );
 }
@@ -119,20 +162,15 @@ function Executor({ v }: { v: EverythingStatus['executor'] }) {
   return (
     <Section title="Copy & algo executor (server 2)" aside={v.reachable ? <Pill tone={h.ok ? (h.brake ? 'warn' : 'pos') : 'neg'}>{h.ok ? (h.brake ? 'Brake on' : 'Healthy') : 'Not healthy'}</Pill> : <Pill tone="neg">Not reachable</Pill>}>
       {!v.reachable ? (
-        <Note kind="error">Not reachable{v.status ? ` (HTTP ${v.status})` : v.error ? ` (${v.error})` : ''} after {int(v.ms ?? null)} ms.</Note>
+        <Note kind="error">Not reachable through the site{v.status ? ` (HTTP ${v.status})` : v.error ? ` (${v.error})` : ''} after {int(v.ms ?? null)} ms{v.readAt ? `, read ${ago(v.readAt)}` : ''}. The service row above is the prober's verdict, which counts.</Note>
       ) : (
         <dl className="dv-dl">
-          <div><dt>Answered in</dt><dd>{int(v.ms ?? null)} ms · database {h.db ? 'ok' : 'down'} · SoDEX feed {rec(h.feeds).sodex ? 'up' : 'down'}</dd></div>
+          <div><dt>Answered</dt><dd>in {int(v.ms ?? null)} ms{v.readAt ? `, read ${ago(v.readAt)}` : ''} · database {h.db ? 'ok' : 'down'} · SoDEX feed {rec(h.feeds).sodex ? 'up' : 'down'}</dd></div>
           <div><dt>Copies</dt><dd>{int(num(h.copies))} ({int(num(h.active))} active)</dd></div>
-          <div><dt>Algo orders running</dt><dd>{int(num(h.algos))}</dd></div>
+          <div><dt>Algos running</dt><dd>{int(num(h.algos))}</dd></div>
           <div><dt>Brake</dt><dd>{h.brake ? <span className="dv-warn">on: {['trading', 'copies', 'algos'].filter((k) => brake[k]).join(', ')}{typeof brake.reason === 'string' ? ` - ${brake.reason}` : ''}</span> : 'off'}</dd></div>
           {Object.keys(queue).length > 0 && (
-            <div>
-              <dt>Send queue</dt>
-              <dd>
-                {int(num(queue.waiting))} waiting · {int(num(queue.inFlight))} in flight · oldest {duration(num(queue.oldestMs))} · cooldown {duration(num(queue.cooldownMs))} · {int(num(queue.sent))} sent · {int(num(queue.resent))} resent
-              </dd>
-            </div>
+            <div><dt>Send queue</dt><dd>{int(num(queue.waiting))} waiting · {int(num(queue.inFlight))} in flight · oldest {duration(num(queue.oldestMs))}</dd></div>
           )}
         </dl>
       )}
@@ -164,7 +202,7 @@ function Releases({ v, brake }: { v: EverythingStatus['releases']; brake: Everyt
           <>
             <div><dt>Running</dt><dd className="dv-mono">{v.current ?? 'not a released server'}</dd></div>
             <div><dt>Before it</dt><dd className="dv-mono">{v.previous ?? '–'}</dd></div>
-            <div><dt>Kept</dt><dd>{v.installed.map((x) => `${x.tag} (${when(x.at)})`).join(' · ') || '–'}</dd></div>
+            <div><dt>Kept</dt><dd className="dv-wrap">{v.installed.slice(0, 6).map((x) => `${x.tag} (${when(x.at)})`).join(' · ') || '–'}</dd></div>
           </>
         )}
         <div><dt>Site brake</dt><dd>{!brake ? 'off' : isErr(brake) ? brake.error : <span className="dv-warn">on: {['trading', 'copies', 'algos'].filter((k) => (brake as Record<string, unknown>)[k]).join(', ')} - {brake.reason}</span>}</dd></div>
@@ -174,17 +212,22 @@ function Releases({ v, brake }: { v: EverythingStatus['releases']; brake: Everyt
 }
 
 function Errors({ v }: { v: EverythingStatus['clientErrors'] }) {
+  const list = isErr(v) ? [] : v.slice(0, 20);
   return (
-    <Section title="Errors browsers reported" flush>
-      {isErr(v) ? <Note kind="error">{v.error}</Note> : (
-        <div className="dv-sheet">
-          <table className="dv-table">
-            <thead><tr><th>Last</th><th>Error</th><th>Page</th><th>Browser</th><th>Build</th><th className="right">Count</th></tr></thead>
-            <tbody>{v.map((e) => <tr key={e.fp}><td>{ago(e.lastAt)}</td><td>{e.name}: {e.message}</td><td className="dv-mono">{e.lastRoute}</td><td>{e.lastBrowser}</td><td className="dv-mono">{e.lastBuild}</td><td className="right">{int(e.count)}</td></tr>)}</tbody>
-          </table>
-          {!v.length && <div className="dv-sheet__none"><Empty>No error reported.</Empty></div>}
-        </div>
-      )}
+    <Section title="Errors browsers reported" aside={!isErr(v) && v.length ? <span className="st-ms">latest {list.length} of {v.length}</span> : undefined}>
+      {isErr(v) ? <Note kind="error">{v.error}</Note> : list.length ? (
+        <ul className="dv-errs">
+          {list.map((e) => (
+            <li key={e.fp}>
+              <div className="dv-errs__top">
+                <b className="dv-wrap">{e.name}: {e.message}</b>
+                <span className="st-ms">{int(e.count)}× · {ago(e.lastAt)}</span>
+              </div>
+              <span className="dv-quiet dv-wrap"><span className="dv-mono">{e.lastRoute}</span> · {e.lastBrowser} · build <span className="dv-mono">{e.lastBuild}</span></span>
+            </li>
+          ))}
+        </ul>
+      ) : <Empty>No error reported.</Empty>}
     </Section>
   );
 }

@@ -152,6 +152,14 @@ const FLOW_MS = 10 * 60_000;
 const SPREAD_SAMPLES = 50_000;
 const YIELD_MS = 8;
 export const BOT_MARKETS_TTL = 5 * 60_000;
+/**
+ * An answer older than this is never served: the asker waits for the fresh one (~25 s on production). 2026-11-10: the
+ * board was kept warm only while someone had asked in the last 30 min, so after a quiet night the first visitor got the
+ * 00:12 answer at 09:00 and the web's next poll came 5 min later ("the most recent data point is from yesterday").
+ */
+export const BOT_MARKETS_MAX_AGE = 15 * 60_000;
+/** Kept warm this often when nobody has asked for 30 min (so the first visitor's answer is at most this old). */
+export const BOT_MARKETS_IDLE_EVERY = 10 * 60_000;
 /** The regime board's newest minutes are re-read this often from the flow (the full 7 d compute stays every 5 min). */
 export const REGIME_TAIL_EVERY = 60_000;
 /** How far back each tail pass rebuilds (from a chunk's start): late prints of the last quarter hour are picked up. */
@@ -720,6 +728,7 @@ async function compute(s: FlowStore, now: number): Promise<Computed> {
 let kept: Computed | null = null;
 let running: Promise<Computed> | null = null;
 let askedAt = 0;
+let lastFailLog = 0;
 /** The kept series with the newest minutes re-read (tail passes), and when. */
 let live: { at: number; series: Map<string, MinuteSeries> } | null = null;
 let tailing: Promise<void> | null = null;
@@ -818,22 +827,58 @@ function tail(s: FlowStore): Promise<void> {
 
 function refresh(s: FlowStore): Promise<Computed> {
   if (!running) {
-    running = compute(s, Date.now())
+    const t0 = Date.now();
+    running = compute(s, t0)
       .then((c) => { kept = c; return c; })
+      .catch((e: unknown) => {
+        // Never silent: a failing compute is what leaves the board on an old answer.
+        if (Date.now() - lastFailLog > 10 * 60_000) {
+          lastFailLog = Date.now();
+          console.warn(`[bots] market estimate failed after ${Date.now() - t0} ms; the answer from ${kept ? new Date(kept.at).toISOString() : 'nothing'} stands: ${String((e as Error)?.stack ?? e)}`);
+        }
+        throw e;
+      })
       .finally(() => { running = null; });
   }
   return running;
+}
+
+/** What a request does with the kept answer made at `keptAt` (null: none): serve it, serve it and compute anew behind it, or wait for a fresh one. */
+export function servePlan(keptAt: number | null, now: number): 'serve' | 'serve-refresh' | 'wait' {
+  if (keptAt === null || now - keptAt > BOT_MARKETS_MAX_AGE) return 'wait';
+  return now - keptAt > BOT_MARKETS_TTL ? 'serve-refresh' : 'serve';
+}
+
+/** Whether the warm timer computes now: always while someone asked in the last 30 min, else once the kept answer nears BOT_MARKETS_IDLE_EVERY. */
+export function warmDue(now: number, askedAt: number, keptAt: number | null): boolean {
+  if (now - askedAt <= 30 * 60_000) return true;
+  return keptAt === null || now - keptAt >= BOT_MARKETS_IDLE_EVERY - 30_000;
+}
+
+/** The answer to serve: the kept one while it is young (a new one computing behind it once past the TTL), else the fresh one. */
+async function current(s: FlowStore, now = Date.now()): Promise<Computed> {
+  askedAt = now;
+  const c = kept;
+  const plan = servePlan(c?.at ?? null, now);
+  if (c && plan !== 'wait') {
+    if (plan === 'serve-refresh') void refresh(s).catch(() => { /* logged; the kept answer stands */ });
+    return c;
+  }
+  // None yet, or too old to show: wait for the fresh one; if that fails, the old one is still better than nothing.
+  try {
+    return await refresh(s);
+  } catch (e) {
+    if (kept) return kept;
+    throw e;
+  }
 }
 
 /** The answer for a window: null when the flow is not recorded on this server. Fresh within 5 min; older is served while a new one computes. */
 export async function botMarkets(window: BotWindow): Promise<BotMarketsResponse | null> {
   const s = flowReader();
   if (!s) return null;
-  askedAt = Date.now();
   startSampling();
-  let c = kept;
-  if (!c) c = await refresh(s);
-  else if (Date.now() - c.at > BOT_MARKETS_TTL) void refresh(s).catch(() => { /* the kept answer stands */ });
+  const c = await current(s);
   const lead = await binanceSymbols();
   const withLead = lead ? c.rows[window].map((m) => ({ ...m, lead: lead.has(binanceSymbolOf(m.symbol) ?? '') ? ('binance' as const) : null })) : c.rows[window];
   // SoDEX's sampled book, where there are enough samples: the real spread and the share of time a limit lets a bot
@@ -912,10 +957,7 @@ export function typicalOf(ms: MinuteSeries): number | null {
 export async function botRegime(symbol: string, win: BotWindow = '7d'): Promise<BotRegimeResponse | null> {
   const s = flowReader();
   if (!s) return null;
-  askedAt = Date.now();
-  let c = kept;
-  if (!c) c = await refresh(s);
-  else if (Date.now() - c.at > BOT_MARKETS_TTL) void refresh(s).catch(() => { /* the kept answer stands */ });
+  const c = await current(s);
   if (!live || live.at < c.at || Date.now() - live.at > REGIME_TAIL_EVERY) void tail(s).catch(() => { /* the kept answer stands */ });
   const fresh = live && live.at >= c.at ? live : { at: c.at, series: c.series };
   const markets = [...c.rows['7d']].sort((a, b) => b.volumeUsdH - a.volumeUsdH).map((m) => m.symbol).filter((m) => fresh.series.has(m));
@@ -966,14 +1008,20 @@ export function regimeAll(series: ReadonlyMap<string, MinuteSeries>, markets: re
   return { hours, typicalVolBps: tw > 0 ? r2(typ.reduce((a, [v, w]) => a + v * w, 0) / tw) : null };
 }
 
-/** Kept warm every 5 min while someone asked in the last 30 min (nothing runs on a server nobody asks). */
+/**
+ * Kept warm every 5 min while someone asked in the last 30 min, and every BOT_MARKETS_IDLE_EVERY when nobody has (the
+ * book sampling stops then): the first visitor after a quiet spell gets an answer at most that old, at once. The
+ * compute gives the loop back every YIELD_MS, ~25 s of it every 10 min when idle.
+ */
 export function keepBotMarketsWarm(): () => void {
   const timer = setInterval(() => {
-    if (Date.now() - askedAt > 30 * 60_000) { stopSampling(); return; }
+    const now = Date.now();
+    if (now - askedAt > 30 * 60_000) stopSampling();
+    if (!warmDue(now, askedAt, kept?.at ?? null)) return;
     const s = flowReader();
     if (!s) return;
-    if (!kept || Date.now() - kept.at >= BOT_MARKETS_TTL - REGIME_TAIL_EVERY / 2) void refresh(s).catch(() => { /* next round */ });
-    void tail(s).catch(() => { /* next round */ });
+    if (!kept || now - kept.at >= BOT_MARKETS_TTL - 30_000) void refresh(s).catch(() => { /* logged; next round */ });
+    if (now - askedAt <= 30 * 60_000) void tail(s).catch(() => { /* next round */ });
   }, REGIME_TAIL_EVERY);
   timer.unref?.();
   return () => clearInterval(timer);

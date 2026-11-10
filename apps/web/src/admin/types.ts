@@ -97,6 +97,8 @@ export interface UserRow {
   ticket: number | null;
   /** One of our own wallets (the builder's, the owner's test wallet). */
   internal?: boolean;
+  /** On the beta list (the Access page). */
+  beta?: boolean;
 }
 
 /** The builder account's balances on SoDEX, in USD: what was put in, and the fees on top (routes/admin.ts). */
@@ -174,11 +176,52 @@ export interface Notice {
   updates: Array<{ at: number; stage: string; text?: string }>;
 }
 
+/** The public page's states (statusModel.ts ShownState): the probe with the open incidents and maintenance. */
+export type Shown = 'up' | 'degraded' | 'down' | 'unknown' | 'partial' | 'maintenance';
+export type OverallShownState = 'operational' | 'degraded' | 'outage' | 'unknown' | 'partial' | 'maintenance';
+
+/** One service as admin/statusView.ts judge() hands it: what the public page shows, the raw probe, and why. */
+export interface JudgedService {
+  id: string;
+  name: string;
+  shown: Shown;
+  probe: 'up' | 'degraded' | 'down' | 'unknown';
+  checkedAt: number | null;
+  latencyMs: number | null;
+  uptime: number | null;
+  why: Array<{ code: string; text: string }>;
+  notices: Array<{ id: number; kind: 'incident' | 'maintenance'; title: string }>;
+}
+
+export interface Judged { overall: OverallShownState; services: JudgedService[] }
+
+/** POST /api/admin/overview (routes/admin.ts): the first page, only what it shows. */
+export interface OverviewAnswer {
+  at: number;
+  status: {
+    judged: Judged | null;
+    executor: { reachable: boolean; ok: boolean; ms: number | null; readAt: number | null; brake: unknown; copies: number | null; algos: number | null } | null;
+  } | null;
+  tickets: { open: number; total: number; latest: Array<{ id: number; lastAt: number; lastText: string; category: string }> };
+  builder: {
+    builderId: number;
+    volume: BuilderOverview['volume'];
+    fees: BuilderOverview['fees'];
+    wallets: BuilderOverview['wallets'];
+    days: Array<{ day: number; volume: number; fees: number }>;
+  } | null;
+  account: BuilderAccount | null;
+  top: Array<{ address: string; volume30d: number; fees: number }>;
+  visitors: AnalyticsSummary['totals'] | null;
+  beta: number;
+}
+
 export interface EverythingStatus {
   at: number;
+  judged: Judged | null;
   report: { services?: ServiceStatus[]; notices?: Notice[]; error?: string };
   indexer: Record<string, unknown> | null;
-  executor: { reachable: boolean; ms?: number; status?: number; error?: string; health?: Record<string, unknown> };
+  executor: { reachable: boolean; ms?: number; status?: number; error?: string; readAt?: number; health?: Record<string, unknown> };
   brake: { trading: boolean; copies: boolean; algos: boolean; reason: string; since: number | null } | null | { error: string };
   releases: { current: string | null; previous: string | null; installed: Array<{ tag: string; at: number }> } | { error: string };
   system: {

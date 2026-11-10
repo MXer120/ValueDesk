@@ -31,6 +31,7 @@ import { spanCovers } from '../boards.js';
 import { hlSyncFills } from '../hlSource.js';
 import { hlInfo } from '../../valuedesk/hyperliquid/index.js';
 import { Lane } from '../lanes.js';
+import { activeAccountsAsync } from '../activeScan.js';
 import { dayOf, hourOf, INDEX_WINDOWS, windowStart } from '../windows.js';
 import type { ExtContext, ExtVenue } from './types.js';
 
@@ -97,8 +98,7 @@ export class TradexyzVenue implements ExtVenue {
       if (now - (this.computedAt[window] ?? 0) < EVERY_MS) continue;
       const from = windowStart(window, now);
       const fresh = FRESH_MS[window] ?? FRESH_DEFAULT_MS;
-      const active = store
-        .activeAccounts('tradexyz', HOUR_WINDOWS.has(window) ? { hour: hourOf(from) } : { day: dayOf(from) }, 1, PER_WINDOW)
+      const active = (await activeAccountsAsync(store, 'tradexyz', HOUR_WINDOWS.has(window) ? { hour: hourOf(from) } : { day: dayOf(from) }, 1, PER_WINDOW))
         .map((a) => a.acct);
       const rows: Array<{ address: string; pnl: number; volume: number | null }> = [];
       const order = [...new Set([...active, ...books, ...known])];

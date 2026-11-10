@@ -183,8 +183,12 @@ interface Api {
 
 const Ctx = createContext<Api | null>(null);
 
-/** Errors stay until dismissed; everything else clears itself. */
-export const TTL: Record<Severity, number> = { error: 0, warn: 12_000, info: 6_000, ok: 4_000 };
+/**
+ * Every toast clears itself. Errors used to stay until dismissed, and a few piled up for good
+ * (owner, 2026-11-09: "all notifications go away after a set time, some seem permanent"); they
+ * get the longest time.
+ */
+export const TTL: Record<Severity, number> = { error: 15_000, warn: 12_000, info: 6_000, ok: 4_000 };
 const MAX = 4;
 
 export function ToastProvider({ children }: { children: ReactNode }) {

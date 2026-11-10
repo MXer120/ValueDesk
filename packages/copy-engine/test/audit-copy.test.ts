@@ -337,7 +337,7 @@ async function ready(): Promise<void> {
 }
 
 /** A live sink that records what it is asked to do. */
-function recordingSink(o: { rejectReduce?: boolean; leverageFailsOnce?: boolean } = {}) {
+function recordingSink(o: { rejectReduce?: boolean; leverageFailsOnce?: boolean; modeLocked?: boolean } = {}) {
   const placed: Intent[][] = [];
   const stops: string[] = [];
   const cancels: string[] = [];
@@ -351,6 +351,7 @@ function recordingSink(o: { rejectReduce?: boolean; leverageFailsOnce?: boolean 
     async setLeverage() {
       leverageCalls++;
       if (o.leverageFailsOnce && leverageCalls === 1) throw new Error('SoDEX did not answer');
+      if (o.modeLocked) throw new Error('internal error: cannot update margin mode with open positions');
     },
     async placeStop(_a, _m, st) {
       stops.push(st.clOrdID);
@@ -601,6 +602,22 @@ test('BUG runtime (live): a failed leverage change is remembered as done and nev
     leaderBuys('1');
     assert.ok(await until(() => rec.placed.length === 2));
     assert.ok(rec.leverage() >= 2, `setLeverage was tried ${rec.leverage()} time(s); the first failed and the copy kept opening at the account's leverage`);
+  } finally {
+    await rt.stop();
+  }
+});
+
+test('BUG live 2026-11-09 04:46: a follower holding the market in another margin mode - the copy opens in that mode instead of skipping it', async () => {
+  const w = world();
+  const rec = recordingSink({ modeLocked: true });
+  const { rt } = runtime(w, () => rec.sink);
+  await rt.start();
+  try {
+    await rt.add(sub({}, { id: 'mode' }));
+    await ready();
+    leaderBuys('1');
+    assert.ok(await until(() => rec.placed.length === 1), 'the order went out in the mode SoDEX kept');
+    assert.equal(rec.leverage(), 1, 'asked once, not retried against a refusal that cannot change');
   } finally {
     await rt.stop();
   }

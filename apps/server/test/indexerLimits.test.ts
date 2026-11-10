@@ -30,6 +30,32 @@ test('the /trades drip is off by default and never configurable above 2 per minu
   }
 });
 
+test('the Copy leaders\' drip: 0.5 a minute by default, only what the trade checks leave of 2, off at 0', () => {
+  const keys = ['VALUESCAN_INDEX_SODEX_LEADER_TRADES', 'VALUESCAN_INDEX_SODEX_CHECKS', KEY, 'VALUESCAN_WALLET_BACKFILL'] as const;
+  const saved = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
+  try {
+    for (const k of keys) delete process.env[k];
+    assert.equal(INDEXER_ENV.sodexLeaderTradesPerMin(), 0.5);
+    assert.ok(INDEXER_ENV.sodexChecksPerMin() + INDEXER_ENV.sodexLeaderTradesPerMin() <= SODEX_HISTORY_PAIR_PER_MIN);
+    process.env.VALUESCAN_INDEX_SODEX_LEADER_TRADES = '5';
+    assert.equal(INDEXER_ENV.sodexLeaderTradesPerMin(), 1, 'capped at what the checks (1) leave');
+    process.env.VALUESCAN_INDEX_SODEX_CHECKS = '2';
+    assert.equal(INDEXER_ENV.sodexLeaderTradesPerMin(), 0, 'nothing left');
+    delete process.env.VALUESCAN_INDEX_SODEX_CHECKS;
+    process.env.VALUESCAN_INDEX_SODEX_LEADER_TRADES = '0';
+    assert.equal(INDEXER_ENV.sodexLeaderTradesPerMin(), 0);
+    // The wallet backfill gets only what checks and leaders leave.
+    process.env.VALUESCAN_INDEX_SODEX_LEADER_TRADES = '0.5';
+    process.env.VALUESCAN_WALLET_BACKFILL = '2';
+    assert.equal(INDEXER_ENV.sodexChecksPerMin() + INDEXER_ENV.sodexLeaderTradesPerMin() + INDEXER_ENV.walletBackfillPerMin(), SODEX_HISTORY_PAIR_PER_MIN);
+  } finally {
+    for (const k of keys) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+  }
+});
+
 test('at the cap, a one-page task is followed by 30 s of rest: 2 requests per 60 s', async () => {
   const saved = process.env[KEY];
   process.env[KEY] = '999';

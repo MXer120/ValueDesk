@@ -310,6 +310,9 @@
 .cpy-card__lbl { color: var(--muted); font-size: var(--fs-micro); margin-bottom: var(--sp-2); }
 .cpy-card__eq { font-family: var(--font-num); font-size: var(--fs-base); font-weight: 600; }
 .cpy-card__spark { height: 72px; }
+/* The server's curve when older than its refresh interval (TraderCard.tsx AgeHint): the header's small muted type, over the chart's corner. */
+.cpy-card__chart { display: block; position: relative; min-width: 0; }
+.cpy-card__age { position: absolute; top: 0; right: 0; color: var(--muted); font-size: var(--fs-micro); font-family: var(--font-num); white-space: nowrap; line-height: 1; }
 .cpy-card__foot { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); padding: 10px var(--sp-3) 12px; border-top: 1px solid color-mix(in srgb, var(--cpy-tint) 16%, rgb(var(--ink) / 0.05)); }
 
 .cpy-spark { display: block; width: 100%; overflow: visible; }
@@ -956,3 +959,8 @@
 .cpy-modal--v2 .cpy-dir { border-radius: 10px; }
 .cpy-modal--v2 .cpy-dir__opt { border-radius: 8px; }
 .cpy-fees__sub { display: block; margin-top: 2px; color: var(--muted); font-size: var(--fs-micro); font-family: var(--font-num); }
+
+/* The legend's swatches, outside .copy (Copy.css): they drew 0 px wide until 2026-11-07. You in your result's colour, as the line. */
+.cpy-replay__legend .copy-swatch { display: inline-block; flex: none; width: 12px; height: 2px; border-radius: 1px; background: var(--muted); }
+.cpy-replay__legend .copy-swatch--you.pos { background: var(--pos); }
+.cpy-replay__legend .copy-swatch--you.neg { background: var(--neg); }

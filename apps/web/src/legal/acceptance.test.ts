@@ -81,7 +81,7 @@ test('signing: ONE free wallet signature (typed data, no transaction) that verif
     },
   };
   const t = await signSiteTerms({ provider: wallet, owner, country: 'sg' });
-  assert.deepEqual(calls, ['eth_chainId', 'eth_signTypedData_v4'], 'a signature only - never eth_sendTransaction');
+  assert.deepEqual(calls, ['eth_chainId', 'eth_accounts', 'eth_signTypedData_v4'], 'a signature only - never eth_sendTransaction');
   const v = verifyCopyRequest(t.request, { executor: SITE_TERMS_EXECUTOR });
   assert.ok(v.ok, v.ok ? '' : v.error);
   assert.equal(t.request.action, 'accept-site-terms');

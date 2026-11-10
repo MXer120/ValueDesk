@@ -111,3 +111,17 @@ test('a rate limit pauses the lane before its next task', async () => {
   assert.ok(sleeps.includes(42_000), `paused: ${sleeps.join(',')}`);
   assert.equal(runs, 2);
 });
+
+test('a task that never settles is let go after taskMaxMs and the lane goes on (HL lane held 110 min, 2026-11-09)', async () => {
+  const lane = new Lane({ name: 't', perMin: 1e9, taskMaxMs: 50, sleep: turn });
+  let ran = 0;
+  lane.add({ key: 'xyz:hang', prio: 9, run: () => new Promise<number>(() => { /* never */ }) });
+  lane.add({ key: 'xyz:next', prio: 1, run: async () => { ran++; return 1; } });
+  lane.start();
+  const end = Date.now() + 5_000;
+  while (ran === 0 && Date.now() < end) await new Promise((r) => setTimeout(r, 10));
+  lane.stop();
+  assert.equal(ran, 1, 'the next task ran');
+  assert.equal(lane.failed, 1);
+  assert.match(lane.lastError ?? '', /xyz:hang: no answer/);
+});

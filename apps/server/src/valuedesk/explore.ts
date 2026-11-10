@@ -45,6 +45,7 @@
  * and the windows of the six tables. Everything else a pool row has - the
  * sparkline alone was a third of the answer - stays here.
  */
+import { mark } from '../indexer/busy.js';
 import {
   NotAvailable,
   type ExploreResponse,
@@ -531,6 +532,7 @@ export async function buildExplore(providers: readonly VenueProvider[]): Promise
  * just failed. Exported for tests (`now`).
  */
 export function exploreWarmTick(providers: readonly VenueProvider[], now = Date.now(), boot = false): Promise<ExploreResponse> | null {
+  mark('explore:warm');
   const key = providers.map((p) => p.venue).join(',');
   if (!boot && now - askedAt > EXPLORE_WARM_MS) return null;
   if (pending?.key === key) return null;

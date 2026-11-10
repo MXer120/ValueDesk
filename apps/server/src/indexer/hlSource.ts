@@ -70,17 +70,27 @@ const CAP_NEAR = HL_REACHABLE_FILLS - 100;
  * that reaches now; the remaining pages reach back. (Reading forward from the
  * window start first left an active trader with a range that ended weeks ago.)
  * Six pages always suffice for any address (5 x 2,000 = the cap).
+ *
+ * `streamSince`: when the trade stream's current connection began. A catch-up whose held range ends before it reads only
+ * the gap, to BRIDGE_PAST_MS past that start: the stream holds the rest (it stores every tracked wallet's prints), and the
+ * engine's advanceCoverage moves the range up to now once it reaches into the connection. Read to now instead, every
+ * restart had each wallet re-read up to 2,000 fills the index already held (2026-11-07: 87% of the board wallets' held
+ * fills over an hour old, median 19 h, the copy setup's replay walking the rest from Hyperliquid in the browser).
  */
-export async function hlSyncFills(store: IndexStore, address: string, fromT: number, o: { maxPages: number; now: number }): Promise<SyncResult> {
+export const BRIDGE_PAST_MS = 60_000;
+
+export async function hlSyncFills(store: IndexStore, address: string, fromT: number, o: { maxPages: number; now: number; streamSince?: number | null }): Promise<SyncResult> {
   let pages = 0;
   let rows = 0;
-  const run = async (lower: number, stopAt: number | null) => {
+  const run = async (lower: number, stopAt: number | null, endT: number | null = null) => {
     let start = lower;
     let firstT: number | null = null;
     let lastT = lower;
     for (;;) {
       const page = await hlInfo.post<HlFillRaw[]>(
-        { type: 'userFillsByTime', user: address, startTime: start, aggregateByTime: true },
+        endT === null
+          ? { type: 'userFillsByTime', user: address, startTime: start, aggregateByTime: true }
+          : { type: 'userFillsByTime', user: address, startTime: start, endTime: endT, aggregateByTime: true },
         { background: true, timeoutMs: 25_000 },
       );
       pages++;
@@ -94,7 +104,7 @@ export async function hlSyncFills(store: IndexStore, address: string, fromT: num
         if (r.t > lastT) lastT = r.t;
       }
       // REST now holds [start, lastT] (or to now): the stream's copies of those fills go.
-      await store.dropStreamRowsAsync('hyperliquid', address, start, list.length < HL_FILL_PAGE ? o.now : lastT, yieldLoop);
+      await store.dropStreamRowsAsync('hyperliquid', address, start, list.length < HL_FILL_PAGE ? (endT ?? o.now) : lastT, yieldLoop);
       if (list.length < HL_FILL_PAGE) return { end: 'now' as const, firstT, lastT };
       if (stopAt !== null && lastT >= stopAt) return { end: 'met' as const, firstT, lastT };
       if (pages >= o.maxPages) return { end: 'partial' as const, firstT, lastT };
@@ -122,8 +132,22 @@ export async function hlSyncFills(store: IndexStore, address: string, fromT: num
   }
   {
     if (held && held.toT < o.now) {
-      const r = await run(held.toT, null);
-      store.addCoverage('hyperliquid', address, 'fills', { fromT: held.toT, toT: r.end === 'now' ? o.now : r.lastT }, o.now);
+      const since = o.streamSince ?? null;
+      const bridgeTo = since !== null && since > held.toT ? since + BRIDGE_PAST_MS : null;
+      if (since !== null && since <= held.toT) {
+        // THE STREAM COVERS IT (2026-11-08): the held range reaches into the stream's current connection, which has every
+        // print since (the engine's advanceCoverage keeps it within 30 s of now). The REST page here asked [toT, now] and
+        // came back empty, 20 weight each: with the two-hourly resyncs that was about the whole board budget, ~6 reads a
+        // minute with 1,500 waiting. Nothing is asked; the page budget goes to the reach-back below.
+        store.touchRest('hyperliquid', address, 'fills', o.now);
+      } else if (bridgeTo !== null && bridgeTo < o.now) {
+        // Only the gap before the stream's connection; the stream's rows after it stay.
+        const r = await run(held.toT, null, bridgeTo);
+        store.addCoverage('hyperliquid', address, 'fills', { fromT: held.toT, toT: r.end === 'now' ? bridgeTo : r.lastT }, o.now);
+      } else {
+        const r = await run(held.toT, null);
+        store.addCoverage('hyperliquid', address, 'fills', { fromT: held.toT, toT: r.end === 'now' ? o.now : r.lastT }, o.now);
+      }
     }
     const cur = store.coverage('hyperliquid', address, 'fills')!;
     if (cur.fromT > fromT && !cur.exhausted && pages < o.maxPages) {
@@ -150,9 +174,9 @@ export async function hlSyncFills(store: IndexStore, address: string, fromT: num
  * there, with few rows), then the whole window (an inactive one returns few
  * rows there). Returns the weight spent.
  */
-export async function hlQuickCheck(store: IndexStore, address: string, fromT: number, now: number): Promise<number> {
+export async function hlQuickCheck(store: IndexStore, address: string, fromT: number, now: number, streamSince: number | null = null): Promise<number> {
   if (store.coverage('hyperliquid', address, 'fills')) {
-    const r = await hlSyncFills(store, address, fromT, { maxPages: 1, now });
+    const r = await hlSyncFills(store, address, fromT, { maxPages: 1, now, streamSince });
     return r.pages * 20 + Math.ceil(r.rows / 20);
   }
   const sliceFrom = Math.max(fromT, now - 10 * 60_000);
@@ -162,7 +186,7 @@ export async function hlQuickCheck(store: IndexStore, address: string, fromT: nu
   );
   const list = Array.isArray(page) ? page : [];
   const rows = list.flatMap((f) => hlFillRow(address, f) ?? []);
-  store.putFills(rows);
+  await store.putFillsAsync(rows);
   const lastT = rows.reduce((m, r) => Math.max(m, r.t), sliceFrom);
   store.addCoverage(
     'hyperliquid',
@@ -174,7 +198,7 @@ export async function hlQuickCheck(store: IndexStore, address: string, fromT: nu
   let cost = 20 + Math.ceil(list.length / 20);
   if (store.orderCount('hyperliquid', address, fromT) >= 2) return cost;
   if (sliceFrom > fromT) {
-    const r = await hlSyncFills(store, address, fromT, { maxPages: 1, now });
+    const r = await hlSyncFills(store, address, fromT, { maxPages: 1, now, streamSince });
     cost += r.pages * 20 + Math.ceil(r.rows / 20);
     if (store.orderCount('hyperliquid', address, fromT) >= 2) return cost;
   }
@@ -244,7 +268,7 @@ export async function hlSubAccountFills(store: IndexStore, master: string, fromT
       { background: true, timeoutMs: 25_000 },
     );
     const got = (Array.isArray(page) ? page : []).flatMap((f) => hlFillRow(master, f) ?? []);
-    store.putFills(got);
+    await store.putFillsAsync(got);
     cost += 20 + Math.ceil(got.length / 20);
     if (store.orderCount('hyperliquid', master, fromT) >= 2) break;
   }

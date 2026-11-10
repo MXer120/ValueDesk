@@ -17,7 +17,7 @@ import { shortAddr } from '../../format';
 import { VENUE_BRAND } from '../venueBrand';
 import { VENUE_LABEL, type BoardWindow, type TraderRow } from '../../vsApi';
 import type { Scored } from './gridModel';
-import { Avatar, CoinRow, ScoreMeter, Spark, WINDOW_SHORT, useTraderPeek } from './TraderCard';
+import { AgeHint, Avatar, CoinRow, ScoreMeter, Spark, WINDOW_SHORT, useTraderPeek } from './TraderCard';
 import { fmtSignedPct, fmtSignedUsd } from './setup';
 import { wheelOffset, wheelPlace } from './wheel';
 
@@ -185,7 +185,7 @@ export function Deck({ picks, w, total, loading, onOpen }: {
 }
 
 function DeckCard({ s, w, i, register }: { s: Scored; w: BoardWindow; i: number; register: (i: number, e: HTMLElement | null) => void }) {
-  const { ref, peek, loading } = useTraderPeek(s.row, w);
+  const { ref, peek, loading, age } = useTraderPeek(s.row, w);
   const setRef = useCallback((e: HTMLElement | null) => { ref(e); register(i, e); }, [ref, register, i]);
   const pnl = s.row.pnl[w] ?? null;
   const kind = s.score.kind;
@@ -213,7 +213,10 @@ function DeckCard({ s, w, i, register }: { s: Scored; w: BoardWindow; i: number;
       </span>
       <span className={`cpy-deck__big ${s.score.roi !== null && s.score.roi < 0 ? 'neg' : 'pos'}`}>{fmtSignedPct(s.score.roi, 1)}</span>
       <span className="cpy-deck__lbl">Return {WINDOW_SHORT[w]} · {fmtSignedUsd(pnl, 0)}</span>
-      <Spark values={peek?.spark ?? null} loading={loading} className="cpy-deck__spark" />
+      <span className="cpy-card__chart">
+        <Spark values={peek?.spark ?? null} loading={loading} className="cpy-deck__spark" />
+        <AgeHint age={age} />
+      </span>
       <span className="cpy-deck__foot">
         <ScoreMeter s={s.score} />
         <CoinRow assets={s.row.assets} max={3} />

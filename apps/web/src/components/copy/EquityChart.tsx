@@ -19,6 +19,7 @@ import { fmtUsd } from '../../format';
 import { fmtSignedUsd } from './setup';
 import type { EquityPoint } from '../../vsApi';
 import { fmtCompactUsd } from '../portfolio/parts';
+import { dotGrid } from '../portfolio/timeTicks';
 
 /** Axis money: whole dollars below $10k (the allocation scale), the portfolio's compact form above. */
 const fmtAxis = (v: number, step: number): string =>
@@ -133,6 +134,14 @@ export function EquityChart({ you, leader, base: start, pnl = false }: { you: Eq
   const h = hover;
   const last = n - 1;
 
+  if (pnl) return (
+    <BandChart
+      boxRef={boxRef} W={W} H={H} ts={ts} ys={ys} ls={ls} h={h} money={money}
+      onHover={(px, width) => setHover(px < 0 || px > width ? null : nearest(ts, t0 + (px / width) * (t1 - t0)))}
+      onLeave={() => setHover(null)}
+    />
+  );
+
   return (
     <div className="pf-chart copy-chart" ref={boxRef}>
       <svg
@@ -180,6 +189,85 @@ export function EquityChart({ you, leader, base: start, pnl = false }: { you: Eq
         )}
       </svg>
 
+      {h !== null && (
+        <div className="pf-chart__tip copy-chart__tip" style={{ left: `${Math.min(PLOT_W - 70, Math.max(70, x(ts[h]!)))}px` }}>
+          <span className="pf-chart__tipday">{fmtTip(ts[h]!)}</span>
+          <span className="copy-chart__tiprow">
+            <i className="copy-swatch copy-swatch--you" aria-hidden="true" />
+            <span className="pf-chart__tipval">{money(ys[h]!)}</span>
+          </span>
+          <span className="copy-chart__tiprow">
+            <i className="copy-swatch copy-swatch--leader" aria-hidden="true" />
+            <span className="pf-chart__tipval">{money(ls[h]!)}</span>
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+let bandIds = 0;
+
+/**
+ * The expected-PnL chart of the copy setup (owner 2026-11-07, his reference: two lines on a dotted ground, the gap
+ * between them hatched, no axes). The trader scaled to your start in gray, yours in the colour of your result; the
+ * hatch is what copying adds or costs against the trader. The figures above it carry the numbers, the hover each point's.
+ */
+function BandChart({ boxRef, W, H, ts, ys, ls, h, money, onHover, onLeave }: {
+  boxRef: React.RefObject<HTMLDivElement>; W: number; H: number; ts: number[]; ys: number[]; ls: number[]; h: number | null;
+  money: (v: number) => string; onHover: (px: number, width: number) => void; onLeave: () => void;
+}) {
+  const [id] = useState(() => `cpyband${++bandIds}`);
+  const n = ts.length;
+  const PAD = 10;
+  const PLOT_W = Math.max(1, W);
+  let lo = Math.min(...ys, ...ls);
+  let hi = Math.max(...ys, ...ls);
+  if (hi === lo) { lo -= 1; hi += 1; }
+  const y = (v: number) => PAD + (H - 2 * PAD) - ((v - lo) / (hi - lo)) * (H - 2 * PAD);
+  const t0 = ts[0]!;
+  const t1 = ts[n - 1]!;
+  const x = (t: number) => ((t - t0) / (t1 - t0)) * PLOT_W;
+  const pts = (vals: number[]) => vals.map((v, i) => `${x(ts[i]!).toFixed(1)},${y(v).toFixed(1)}`);
+  const you = pts(ys);
+  const them = pts(ls);
+  const band = `M${you.join(' L')} L${[...them].reverse().join(' L')} Z`;
+  const last = n - 1;
+  const tone = ys[last]! >= 0 ? 'pos' : 'neg';
+  const dots = dotGrid(PLOT_W, Math.min(n, 13));
+  return (
+    <div className={`pf-chart copy-chart copy-chart--band is-${tone}`} ref={boxRef}>
+      <svg
+        className="pf-chart__svg"
+        viewBox={`0 0 ${W} ${H}`}
+        width={W}
+        height={H}
+        role="img"
+        aria-label={`Replayed PnL: yours ends at ${money(ys[last]!)}, the trader scaled to your start ends at ${money(ls[last]!)}.`}
+        onMouseMove={(e) => onHover(e.clientX - e.currentTarget.getBoundingClientRect().left, PLOT_W)}
+        onMouseLeave={onLeave}
+      >
+        <defs>
+          <pattern id={`${id}-dots`} width={dots.x} height={dots.y} patternUnits="userSpaceOnUse">
+            <circle cx={dots.x / 2} cy={dots.y / 2} r="0.8" className="copy-chart__dot-ground" />
+          </pattern>
+          <pattern id={`${id}-hatch`} width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+            <line x1="0" y1="0" x2="0" y2="6" className="copy-chart__hatch" />
+          </pattern>
+        </defs>
+        <rect x="0" y="0" width={W} height={H} fill={`url(#${id}-dots)`} />
+        <path d={band} className="copy-chart__band" />
+        <path d={band} fill={`url(#${id}-hatch)`} />
+        <path d={`M${them.join(' L')}`} className="copy-chart__line copy-chart__line--leader" />
+        <path d={`M${you.join(' L')}`} className="copy-chart__line copy-chart__line--you" />
+        {h !== null && (
+          <g>
+            <line x1={x(ts[h]!)} y1={0} x2={x(ts[h]!)} y2={H} className="pf-chart__cursor" />
+            <circle cx={x(ts[h]!)} cy={y(ls[h]!)} r="2.5" className="copy-chart__dot copy-chart__dot--leader" />
+            <circle cx={x(ts[h]!)} cy={y(ys[h]!)} r="2.5" className="copy-chart__dot copy-chart__dot--you" />
+          </g>
+        )}
+      </svg>
       {h !== null && (
         <div className="pf-chart__tip copy-chart__tip" style={{ left: `${Math.min(PLOT_W - 70, Math.max(70, x(ts[h]!)))}px` }}>
           <span className="pf-chart__tipday">{fmtTip(ts[h]!)}</span>

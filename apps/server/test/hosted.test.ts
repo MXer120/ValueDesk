@@ -258,6 +258,7 @@ test('the allow-list is exactly docs/ARCH-traffic.md section 5', () => {
       'GET /api/vs/cohorts/focus read',
       'GET /api/vs/cohorts/map read',
       'GET /api/vs/cohorts/wallets read',
+      'GET /api/vs/copy/cards read',
       'GET /api/vs/etf/flows read',
       'GET /api/vs/excluded read',
       'GET /api/vs/explore read',
@@ -307,6 +308,7 @@ test('the allow-list is exactly docs/ARCH-traffic.md section 5', () => {
       'POST /api/admin/board/move admin',
       'POST /api/admin/builder admin',
       'POST /api/admin/me admin',
+      'POST /api/admin/overview admin',
       'POST /api/admin/page-error admin',
       'POST /api/admin/session admin',
       'POST /api/admin/sessions/revoke admin',
@@ -423,10 +425,17 @@ const INDEXER_STATUS = {
     lastError: `cohort flush: ${WALLET}`,
     liq: {
       boost: false, live: { ready: true, pending: 12, ms: 40, error: `liq feed: ${WALLET}` }, nowAt: 1_790_000_000_900, since: 1_789_999_000_000,
+      // The last history step: 20 min before `at`, so the next (due 15 + 2 min after it) is 3 min late.
+      stepT: 1_789_998_801_000,
       // The open interest check (checkOi): per venue the worst ratio, with coins and sizes that stay inside.
       oi: { at: 1, queued: 3, venues: { lighter: { worst: 2.0544, over: 3, coins: [{ coin: 'SOL', ratio: 2.0544, long: 177_098, short: 326_713, oi: 159_030 }] }, hyperliquid: { worst: 1.0062, over: 0, coins: [] } } },
     },
+    // The last series 10 min before `at`: the next is not due yet.
+    lastSeriesT: 1_789_999_401_000,
   },
+  flushBacklog: 7,
+  flushOldestMs: 1234.4,
+  flow: { prints: 5000, newestT: 1_790_000_001_000 - 3_000, lastError: `add: ${WALLET}` },
   at: 1_790_000_001_000,
   pid: 4242,
 };
@@ -697,7 +706,7 @@ test('index health: answered to a caller on the instance, a 404 for everyone els
   const local = await get();
   assert.equal(local.statusCode, 200);
   assert.equal(local.json().ok, true);
-  assert.deepEqual(Object.keys(local.json().status).sort(), ['at', 'errorSinceStart', 'lanes', 'lastBuildAt', 'lastBuildMs', 'liq', 'loopLagMs', 'streams']);
+  assert.deepEqual(Object.keys(local.json().status).sort(), ['at', 'errorSinceStart', 'flushBacklog', 'fresh', 'lanes', 'lastBuildAt', 'lastBuildMs', 'liq', 'loopLagMs', 'streams']);
   assert.equal((await get({ method: 'HEAD' })).statusCode, 200);
   assert.equal((await get({ headers: { host: 'localhost:8797' } })).statusCode, 200);
 
@@ -785,6 +794,8 @@ test('index health: numbers and booleans picked by name - no address, error text
     lastBuildMs: 432,
     errorSinceStart: true,
     liq: { ready: true, pending: 12, nowAt: 1_790_000_000_900, since: 1_789_999_000_000, oiPct: { lighter: 205, hyperliquid: 101 } },
+    flushBacklog: 7,
+    fresh: { liqNow: 0, liqStep: 180_000, flow: 3_000, writes: 1_234, cohorts: 0, boards: 500 },
   });
   const sent = JSON.stringify(h);
   for (const secret of ['0x', WALLET, '4242', 'pid', 'valuescan-index', '/var/lib', '429', '1015', 'locked', 'hang up', 'rebuild', 'spent', 'hlBudget', '870', 'tracked', '5000']) {
@@ -796,6 +807,8 @@ test('index health: numbers and booleans picked by name - no address, error text
   assert.deepEqual(early, {
     at: 7, streams: { sodex: true, lighter: false }, loopLagMs: { lastMinute: null, sinceStart: null }, lanes: {},
     lastBuildAt: null, lastBuildMs: 0, errorSinceStart: false, liq: null,
+    // Nothing of the freshness published: every figure null, judged as nothing (ops/indexerJudge.ts).
+    flushBacklog: null, fresh: { liqNow: null, liqStep: null, flow: null, writes: null, cohorts: null, boards: null },
   });
 
   // No status to read.
@@ -827,7 +840,10 @@ test('index health: whatever the status holds, only a name, a number or a boolea
     lastBuildAt: WALLET,
     lastBuildMs: { ms: 1 },
     lastError: { message: WALLET },
-    cohorts: { liq: { live: { ready: 'yes', pending: WALLET }, nowAt: WALLET, since: -5 } },
+    cohorts: { liq: { live: { ready: 'yes', pending: WALLET }, nowAt: WALLET, since: -5, stepT: WALLET }, lastSeriesT: { t: 1 } },
+    flushBacklog: WALLET,
+    flushOldestMs: [WALLET],
+    flow: { newestT: WALLET },
   };
   const h = indexerHealth(hostile)!;
   assert.deepEqual(h, {
@@ -843,6 +859,8 @@ test('index health: whatever the status holds, only a name, a number or a boolea
     lastBuildMs: null,
     errorSinceStart: true,
     liq: { ready: false, pending: null, nowAt: null, since: null },
+    flushBacklog: null,
+    fresh: { liqNow: null, liqStep: null, flow: null, writes: null, cohorts: null, boards: null },
   });
   for (const { path, value } of leaves(h)) {
     assert.ok(value === null || typeof value === 'number' || typeof value === 'boolean', `${path} is ${typeof value}`);

@@ -5,6 +5,7 @@
  * tick, refusals in a row (a 429 answer), a restart, the brake, a key that is no longer good, the kill switch.
  */
 import { test, beforeEach, afterEach } from 'node:test';
+import type { QuietWindow } from '../src/algo/types.ts';
 import assert from 'node:assert/strict';
 import {
   copyReserveUsd,
@@ -1389,13 +1390,13 @@ test('a bot alone on its market whose holding was closed by hand: the reduce-onl
 
 test('trading hours in any time zone (owner 2026-11-08): the own clock of the owner with its daylight saving, half-hour zones exact; unknown zones refused', () => {
   // 09:00-10:00 Berlin: 08:00 UTC in winter (CET), 07:00 UTC in summer (CEST).
-  const ber = [{ from: '09:00', to: '10:00', zone: 'Europe/Berlin', days: 'all' as const }];
+  const ber: QuietWindow[] = [{ from: '09:00', to: '10:00', zone: 'Europe/Berlin', days: 'all' }];
   assert.ok(quietWindowAt(ber, Date.UTC(2026, 0, 15, 8, 30)));
   assert.equal(quietWindowAt(ber, Date.UTC(2026, 0, 15, 7, 30)), null);
   assert.ok(quietWindowAt(ber, Date.UTC(2026, 6, 15, 7, 30)));
   assert.equal(quietWindowAt(ber, Date.UTC(2026, 6, 15, 8, 30)), null);
   // Kolkata is UTC+5:30 all year: 18:00-19:00 there is 12:30-13:30 UTC.
-  const kol = [{ from: '18:00', to: '19:00', zone: 'Asia/Kolkata', days: 'weekdays' as const }];
+  const kol: QuietWindow[] = [{ from: '18:00', to: '19:00', zone: 'Asia/Kolkata', days: 'weekdays' }];
   assert.ok(quietWindowAt(kol, Date.UTC(2026, 0, 15, 12, 45)));
   assert.equal(quietWindowAt(kol, Date.UTC(2026, 0, 15, 12, 15)), null);
   assert.equal(quietWindowAt(kol, Date.UTC(2026, 0, 17, 12, 45)), null, 'Saturday there');

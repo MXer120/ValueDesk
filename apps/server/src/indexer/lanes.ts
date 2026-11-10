@@ -61,6 +61,8 @@ export interface LaneOptions {
   shares?: ReadonlyArray<{ prefix: string; share: number }>;
   /** Tasks in flight at once (default 1: one after another). */
   concurrency?: number;
+  /** A task still running after this (ms) is let go as failed (TASK_MAX_MS). */
+  taskMaxMs?: number;
   /**
    * The time a task took counts toward its rest (one after another only). A rest on top of the task made the rate a good
    * deal lower than asked: at 6 a minute and 5-15 s a task on a busy thread, the SoDEX gateway lane did 2.4-3.9 (measured
@@ -74,6 +76,8 @@ const realSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 /** The finished tasks `shares` are judged over: several batches of a lane's parallel slots. */
 const RECENT_TASKS = 200;
+/** A lane task past this is let go: the longest real read (a whale's full history, paged) takes a few minutes. */
+export const TASK_MAX_MS = 15 * 60_000;
 
 /** A failure worth backing off from: the upstream is overloaded or slow, not the request wrong. */
 export function isTransient(err: unknown): boolean {
@@ -310,8 +314,18 @@ export class Lane {
   private async run(key: string, run: () => Promise<number>): Promise<void> {
     let cost = 1;
     const startedAt = Date.now();
+    // A task that never settles (a request with no answer and no timeout of its own) held the HL lane 110 min with 386
+    // reads waiting (2026-11-09): past taskMaxMs it counts as failed and its slot goes to the next task.
+    const max = this.o.taskMaxMs ?? TASK_MAX_MS;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
-      cost = Math.max(0, await run());
+      cost = Math.max(0, await Promise.race([
+        run(),
+        new Promise<never>((_, no) => {
+          timer = setTimeout(() => no(new Error(`${key}: no answer in ${Math.round(max / 60_000)} min, let go`)), max);
+          (timer as { unref?: () => void }).unref?.();
+        }),
+      ]));
       this.done++;
       this.transientStreak = 0;
     } catch (err) {
@@ -324,6 +338,7 @@ export class Lane {
         this.backoffUntil = Date.now() + wait;
       }
     } finally {
+      clearTimeout(timer);
       this.active.delete(key);
     }
     this.note(key, cost);

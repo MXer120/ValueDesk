@@ -10,13 +10,16 @@
  * page came from it.
  */
 import {
-  IMPACT_TEXT, STAGE_TEXT, STATUS_SERVICES, dayToneWith, fmtUtc, fmtWindow, minutesExpected, noticeLive, noticePhase,
-  noticeSpan, noticesOnDay, parseNotice,
-  type DayTone, type DayToneShown, type DayTuple, type HealthNotice, type Impact, type Notice, type NoticePhase, type ServiceId,
-  type ServiceState, type StatusReport,
+  FRESH_TARGETS, IMPACT_TEXT, STAGE_TEXT, STATUS_SERVICES, dayToneWith, fmtAge, fmtUtc, fmtWindow, minutesExpected, noticeLive, noticePhase,
+  noticeSpan, noticesOnDay, overallOf, overallShown, parseFreshness, parseNotice, shownState,
+  type DayTone, type FreshId, type FreshItem, type FreshState, type Freshness, type DayToneShown, type DayTuple, type HealthNotice, type Notice, type NoticePhase, type ServiceId,
+  type ServiceState, type StatusReport, type Overall, type OverallShown, type ShownState,
 } from '@sign/ops/statusModel.js';
 import { fmtFixed } from '../numStyle';
 
+export type { Overall, OverallShown, ShownState };
+export { overallOf, overallShown, shownState };
+export type { FreshItem, FreshState, Freshness };
 export type { DayTone, DayToneShown, DayTuple, HealthNotice, Notice, NoticePhase, ServiceState, StatusReport };
 export { IMPACT_TEXT, STAGE_TEXT, fmtUtc, fmtWindow, noticeLive, noticePhase };
 
@@ -61,20 +64,12 @@ export async function loadStatus(f: typeof fetch = fetch, now = Date.now): Promi
   if (r && r.status === 200 && isReport(r.body)) {
     // Checked one by one: a notice that is not one is left out, the rest still shows.
     const notices = (Array.isArray(r.body.notices) ? r.body.notices : []).map(parseNotice).filter((n): n is Notice => n !== null);
-    return { kind: 'report', report: { ...r.body, notices } };
+    // Checked too: a server older than the freshness figures sends none, and the page shows none.
+    const { freshness: rawFresh, ...rest } = r.body;
+    const freshness = parseFreshness(rawFresh);
+    return { kind: 'report', report: { ...rest, notices, ...(freshness ? { freshness } : {}) } };
   }
   return { kind: 'unreachable', at: now(), executor: await checkExecutor(f, now) };
-}
-
-export type Overall = 'operational' | 'degraded' | 'outage' | 'unknown';
-
-/** The headline: every known service up, any degraded, or any down. */
-export function overallOf(states: readonly ServiceState[]): Overall {
-  const known = states.filter((s) => s !== 'unknown');
-  if (!known.length) return 'unknown';
-  if (known.includes('down')) return 'outage';
-  if (known.includes('degraded')) return 'degraded';
-  return 'operational';
 }
 
 export const OVERALL_TEXT: Record<Overall, string> = {
@@ -111,45 +106,10 @@ export function fmtUptime(pct: number | null): string {
 
 // --- incidents and maintenance on the page -------------------------------------------------
 
-/** What a service's pill says: the probe's verdict, made worse by an open incident, or maintenance. */
-export type ShownState = ServiceState | 'partial' | 'maintenance';
-
-const STATE_RANK: Record<ShownState, number> = { unknown: 0, up: 1, maintenance: 2, degraded: 3, partial: 4, down: 5 };
-const IMPACT_STATE: Record<Impact, ShownState> = { minor: 'degraded', major: 'partial', critical: 'down' };
-
-/**
- * A service's state with the owner's notices: an open incident on it is at least its
- * impact (minor degraded, major partial outage, critical down); maintenance in
- * progress shows as maintenance unless an incident is open on it too.
- */
-export function shownState(probe: ServiceState, service: ServiceId, notices: readonly Notice[], now: number): ShownState {
-  let state: ShownState = probe;
-  let incident = false;
-  let maintenance = false;
-  for (const n of notices) {
-    if (!n.components.includes(service) || !noticeLive(n, now)) continue;
-    if (n.kind === 'maintenance') maintenance = true;
-    else if (n.impact) {
-      incident = true;
-      const s = IMPACT_STATE[n.impact];
-      if (STATE_RANK[s] > STATE_RANK[state]) state = s;
-    }
-  }
-  return maintenance && !incident ? 'maintenance' : state;
-}
+// What a service's pill says (shownState, overallShown) lives in @sign/ops/statusModel.ts: the admin
+// suite's Status and Overview judge with the very same code, so the two pages never disagree.
 
 export const SHOWN_TEXT: Record<ShownState, string> = { ...STATE_TEXT, partial: 'Partial outage', maintenance: 'Maintenance' };
-
-export type OverallShown = Overall | 'partial' | 'maintenance';
-
-/** The headline over the shown states: a service down outranks one partly down, then degraded, then maintenance. */
-export function overallShown(states: readonly ShownState[]): OverallShown {
-  if (states.includes('down')) return 'outage';
-  if (states.includes('partial')) return 'partial';
-  if (states.includes('degraded')) return 'degraded';
-  if (states.includes('maintenance')) return 'maintenance';
-  return overallOf(states.filter((s): s is ServiceState => s !== 'maintenance' && s !== 'partial'));
-}
 
 export const OVERALL_SHOWN_TEXT: Record<OverallShown, string> = { ...OVERALL_TEXT, partial: 'Partial outage', maintenance: 'Maintenance in progress' };
 
@@ -186,8 +146,12 @@ export function splitNotices(notices: readonly Notice[], now: number): { current
 const SERVICE_NAME = new Map<string, string>(STATUS_SERVICES.map((s) => [s.id, s.name]));
 export const componentNames = (n: Notice): string => n.components.map((c) => SERVICE_NAME.get(c) ?? c).join(', ');
 
-/** "Major incident", "Maintenance". */
-export const noticeKindText = (n: Notice): string => (n.kind === 'incident' ? `${IMPACT_TEXT[n.impact ?? 'minor']} incident` : 'Maintenance');
+/** What an incident is called by its impact: never "major incident" (owner, 2026-11-07: "Its a partial outage so just say Partial Outage"). */
+export const incidentTitle = (impact: 'minor' | 'major' | 'critical' | null | undefined): string =>
+  impact === 'critical' ? 'Outage' : impact === 'major' ? 'Partial outage' : `${IMPACT_TEXT[impact ?? 'minor']} incident`;
+
+/** "Partial outage", "Maintenance". */
+export const noticeKindText = (n: Notice): string => (n.kind === 'incident' ? incidentTitle(n.impact) : 'Maintenance');
 
 /** When it was (or is): "27 Oct 14:02 – 15:10 UTC", "since 27 Oct 14:02 UTC", a maintenance's window. */
 export function noticeTimes(n: Notice, now: number): string {
@@ -251,3 +215,30 @@ export function healthNoticeText(n: HealthNotice): string {
   if (n.phase === 'in_progress') return `Maintenance in progress: ${title}${typeof n.endsAt === 'number' ? `, until ${fmtUtc(n.endsAt, { date: false })}` : ''}`;
   return `Scheduled maintenance: ${title}, ${typeof n.endsAt === 'number' ? fmtWindow(n.startsAt, n.endsAt) : fmtUtc(n.startsAt)}`;
 }
+
+// --- how current the indexer's data is (under the Indexer, StatusPage.tsx FreshList) -------------
+
+const FRESH_BY_ID = new Map(FRESH_TARGETS.map((t) => [t.id, t]));
+
+/** A dataset's name for visitors. */
+export const freshName = (id: FreshId): string => FRESH_BY_ID.get(id)?.name ?? id;
+
+/** What a dataset's figure says: "On time", "None waiting", "Moving", "3 min late", "12 s behind", or "No data". */
+export function freshValue(i: FreshItem): string {
+  if (i.ms === null) return 'No data';
+  const measure = FRESH_BY_ID.get(i.id)?.measure ?? 'old';
+  const zero = ZERO_TEXT[measure];
+  if (i.ms < 1_000 && zero) return zero;
+  return `${fmtAge(i.ms)} ${measure}`;
+}
+
+/** Under a second of a figure that counts lateness, a wait or a stall: said in words, not "0 s late". */
+const ZERO_TEXT: Record<string, string> = { late: 'On time', waiting: 'None waiting', 'without progress': 'Moving' };
+
+/** "Target: at most 2 min late". */
+export function freshTarget(i: FreshItem): string {
+  const measure = FRESH_BY_ID.get(i.id)?.measure ?? 'old';
+  return `Target: at most ${fmtAge(i.budgetMs)} ${measure}`;
+}
+
+export const FRESH_STATE_TEXT: Record<FreshState, string> = { ok: 'Within target', behind: 'Behind target', unknown: 'No data' };

@@ -119,3 +119,20 @@
   .copy .copy-ticket.oe { --oe-inset: var(--sp-2); }
   .copy .pf-statstrip.copy-strip { margin: var(--sp-2) calc(-1 * var(--sp-2)) 0; }
 }
+
+/* The expected-PnL chart (EquityChart BandChart; owner 2026-11-07 reference): straight on the panel, a dotted ground,
+   the trader in gray, you in your result's colour, the gap between hatched. */
+.copy .pf-chart.copy-chart--band { padding: 0; border: 0; border-radius: 0; background: none; box-shadow: none; }
+.copy .copy-chart--band .copy-chart__dot-ground { fill: var(--muted); opacity: 0.35; }
+.copy .copy-chart--band .copy-chart__line { stroke-width: 1.75; stroke-linejoin: round; stroke-linecap: round; }
+.copy .copy-chart--band .copy-chart__line--leader { stroke: var(--muted); stroke-width: 1.5; opacity: 0.9; }
+.copy .copy-chart--band.is-pos .copy-chart__line--you { stroke: var(--pos); }
+.copy .copy-chart--band.is-neg .copy-chart__line--you { stroke: var(--neg); }
+.copy .copy-chart--band.is-pos .copy-chart__dot--you { fill: var(--pos); }
+.copy .copy-chart--band.is-neg .copy-chart__dot--you { fill: var(--neg); }
+.copy .copy-chart--band .copy-chart__band { fill: var(--text); fill-opacity: 0.03; stroke: none; }
+.copy .copy-chart--band .copy-chart__hatch { stroke: var(--text); stroke-width: 1; opacity: 0.16; }
+.copy .copy-chart--band.is-pos .copy-swatch--you { background: var(--pos); }
+.copy .copy-chart--band.is-neg .copy-swatch--you { background: var(--neg); }
+
+

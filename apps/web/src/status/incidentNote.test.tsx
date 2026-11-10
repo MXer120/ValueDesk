@@ -63,7 +63,7 @@ test('the card: a notification like the maintenance one, the status page inside 
   assert.doesNotMatch(html, /banner|toast__timer/, 'no bar, and it does not go by itself');
   assert.equal(I.incidentView(incident(), 'UTC').since, 'Since 29 Oct 21:00 UTC');
   const major = I.incidentView(incident({ impact: 'major' }), 'UTC');
-  assert.equal(major.title, 'Major incident');
+  assert.equal(major.title, 'Partial outage');
   assert.deepEqual(major.rows.map((r) => r.state), ['Partly down']);
   const outage = I.incidentView(incident({ impact: 'critical', components: ['api', 'indexer'] }), 'UTC');
   assert.equal(outage.tone, 'down');

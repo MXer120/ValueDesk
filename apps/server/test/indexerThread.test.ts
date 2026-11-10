@@ -280,9 +280,11 @@ test('checkpoint thread: under a writer that never pauses the WAL starts over an
     await until('thread up', () => store.checkpointStatus?.running === true);
     let i = 0;
     const sizes: number[] = [];
-    const end = Date.now() + 3_000;
+    // At least 3 s, then until a full checkpoint has finished (20 s at most): on a loaded CI box 3 s was not always enough
+    // for one to find the reader-free moment it needs (2026-11-07).
+    const start = Date.now();
     let n = 0;
-    while (Date.now() < end) {
+    while (Date.now() - start < 3_000 || (Date.now() - start < 20_000 && (store.checkpointStatus!.fulls - store.checkpointStatus!.fullsBusy) === 0)) {
       store.putFills(Array.from({ length: 150 }, () => fill(i++)));
       n++;
       if (n % 25 === 0) sizes.push(statSync(`${path}-wal`).size);
@@ -295,6 +297,30 @@ test('checkpoint thread: under a writer that never pauses the WAL starts over an
     assert.ok(sizes.length > 2, 'wrote long enough to see it');
     assert.equal((store.db.prepare('SELECT COUNT(*) AS n FROM fills').get() as { n: number }).n, i);
     assert.equal((store.db.prepare('PRAGMA busy_timeout').get() as { timeout: number }).timeout, 200_000, 'the writer waits, it never errors, on that lock');
+  } finally {
+    store.close();
+    rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 });
+  }
+});
+
+test('checkpoint thread: no full checkpoint while the passive run left more than restartMaxBehind frames (it would hold the write lock while it copies them: 34 s on production 2026-11-09)', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'vs-ckpt-'));
+  const path = join(dir, 'i.db');
+  const store = new IndexStore(path);
+  try {
+    store.startCheckpointer({ everyMs: 20, restartFrames: 400, restartGapMs: 50, restartMaxBehind: -1 });
+    await until('thread up', () => store.checkpointStatus?.running === true);
+    let i = 0;
+    const start = Date.now();
+    // At least 2 s and one passive run past the threshold (20 s at most): on GitHub's runner a passive run under this writer took seconds (v0.2.205/206 CI).
+    while (Date.now() - start < 2_000 || (store.checkpointStatus!.runs < 2 && Date.now() - start < 20_000)) {
+      store.putFills(Array.from({ length: 150 }, () => fill(i++)));
+      await new Promise((r) => setImmediate(r));
+    }
+    const st = store.checkpointStatus!;
+    assert.ok(st.runs >= 1, 'the passive runs went on');
+    assert.equal(st.fulls, 0, `no full run: ${JSON.stringify(st)}`);
+    assert.equal((store.db.prepare('SELECT COUNT(*) AS n FROM fills').get() as { n: number }).n, i);
   } finally {
     store.close();
     rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 });

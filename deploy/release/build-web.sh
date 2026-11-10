@@ -131,6 +131,12 @@ else
   note "WARNING: the legal pages still hold placeholders (listed above). Fine for a test deployment; build with --public before a launch."
 fi
 
+# Vercel's own build of a commit (deploy/vercel/build.sh) deploys apps/web/dist as it is: the release
+# tarball would only cost build seconds there (~4 s of ~2 min, 27 MB gzip nobody reads).
+if [ "$CHECKOUT" = 1 ] && [ "${VERCEL:-}" = 1 ]; then
+  note "on Vercel: no release tarball (the deployment is apps/web/dist itself)"
+  exit 0
+fi
 mkdir -p "$OUT_DIR"
 tarball="$OUT_DIR/valuescan-web-$TAG.tar.gz"
 run tar -czf "$tarball" -C "$DIST" .

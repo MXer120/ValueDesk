@@ -44,7 +44,7 @@ async function api(o = {}) {
       res.writeHead(o.siteStatus ?? 200, { 'content-type': 'text/html' });
       return res.end('<!doctype html><title>site</title>');
     }
-    if (path === '/api/health') return send(200, { ok: true, network: 'mainnet', chainId: 286623, mainnetWritesAllowed: true });
+    if (path === '/api/health') return send(200, { ok: true, network: 'mainnet', chainId: 286623, mainnetWritesAllowed: true, ...(o.loop ? { loop: o.loop } : {}) });
     if (path === '/api/copy/v1/health') {
       const e = o.executor ?? { status: 200, body: { ok: true, copies: 3, active: 2, feeds: { sodex: true } } };
       return send(e.status, e.body);
@@ -121,6 +121,19 @@ function run(env) {
 const env = (f, a, extra = {}) => ({
   API_URL: a.url, EXECUTOR_URL: a.url, VALUESCAN_INDEX_DB: f.db, HEALTH_STATE_DIR: join(f.dir, 'state'), VALUESCAN_ORIGIN_SECRET: SECRET,
   HEALTH_DISK_PCT: '100', ...extra,
+});
+
+test("the API's thread stalls are named in the api line, a recent long one as a warning", async () => {
+  const f = fixture();
+  const a = await api({ loop: { stalls: 3, longestMs: 9_400, lastMinuteMs: 6_200, last: { ms: 6_200, at: Date.now() - 20_000, by: 'req:/api/vs/liquidations/history' }, slowRequests: 2 } });
+  try {
+    const r = await run(env(f, a));
+    assert.equal(r.report.checks.api.ok, true);
+    assert.equal(r.report.checks.api.warn, true);
+    assert.match(r.report.checks.api.note, /thread stalled 3x since start, longest 9\.4 s, 6\.2 s in the last minute \(last by req:\/api\/vs\/liquidations\/history\)/);
+  } finally {
+    await a.close();
+  }
 });
 
 test('a healthy instance passes every check', async () => {

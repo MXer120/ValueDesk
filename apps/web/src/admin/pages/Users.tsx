@@ -7,8 +7,8 @@
  * The table is the leaderboard's (dv-sheet: its head, row height, number font, hover tint).
  */
 import { useMemo, useState } from 'react';
-import { ago, bp, duration, int, short, usd, usdShort } from '../format';
-import { Empty, Figure, Figures, Note, Page, Search, Section, useAdmin } from '../ui';
+import { ago, bp, duration, int, short, usd, usdShort, when } from '../format';
+import { Empty, Figure, Figures, Note, Page, Search, Section, Seg, useAdmin } from '../ui';
 import type { UserRow } from '../types';
 
 type SortKey = 'joined' | 'fees' | 'volume' | 'volume30d' | 'window' | 'lastTrade' | 'copies' | 'visits' | 'time' | 'lastSeen';
@@ -42,7 +42,7 @@ const value = (u: UserRow, k: SortKey): number => {
 };
 
 function csv(rows: UserRow[]): void {
-  const head = ['wallet', 'internal', 'first_signed', 'site_terms', 'copy_terms', 'copies', 'active_copies', 'algos', 'live_algos', 'keys', 'account', 'volume_usd', 'volume_30d_usd', 'tier_window_usd', 'fees_paid_usd', 'orders', 'tier', 'fee_perps_bp', 'fee_spot_bp', 'flags', 'last_trade', 'visits', 'active_min', 'last_seen', 'countries', 'ticket'];
+  const head = ['wallet', 'internal', 'beta', 'first_signed', 'site_terms', 'copy_terms', 'copies', 'active_copies', 'algos', 'live_algos', 'keys', 'account', 'volume_usd', 'volume_30d_usd', 'tier_window_usd', 'fees_paid_usd', 'orders', 'tier', 'fee_perps_bp', 'fee_spot_bp', 'flags', 'last_trade', 'visits', 'active_min', 'last_seen', 'countries', 'ticket'];
   const out = [head];
   for (const u of rows) {
     const b = u.builder;
@@ -50,7 +50,7 @@ function csv(rows: UserRow[]): void {
     const e = u.executor;
     const iso = (t: number | null | undefined) => (t ? new Date(t).toISOString() : '');
     out.push([
-      u.address, u.internal ? 'yes' : '', iso(e?.firstAt), iso(e?.siteTermsAt), iso(e?.copyTermsAt), String(e?.copies ?? ''), String(e?.activeCopies ?? ''), String(e?.algos ?? ''), String(e?.liveAlgos ?? ''), String(e?.keys ?? ''),
+      u.address, u.internal ? 'yes' : '', u.beta ? 'yes' : '', iso(e?.firstAt), iso(e?.siteTermsAt), iso(e?.copyTermsAt), String(e?.copies ?? ''), String(e?.activeCopies ?? ''), String(e?.algos ?? ''), String(e?.liveAlgos ?? ''), String(e?.keys ?? ''),
       String(b?.accountId ?? ''), b ? String((b.volume.perps + b.volume.spot) / 1e6) : '', b ? String(b.volume30d / 1e6) : '', b ? String(b.windowVolume / 1e6) : '',
       b ? String((b.fees.perps + b.fees.spot) / 1e6) : '', String(b?.orders ?? ''), b ? String(b.tier.index) : '', b ? String(b.tier.fee.perps / 10) : '', b ? String(b.tier.fee.spot / 10) : '',
       b?.flags.join(' ') ?? '', b?.lastTradeAt ? new Date(b.lastTradeAt).toISOString() : '', String(a?.visits ?? ''), a ? String(Math.round(a.activeMs / 60_000)) : '',
@@ -66,15 +66,27 @@ function csv(rows: UserRow[]): void {
   setTimeout(() => URL.revokeObjectURL(link.href), 1000);
 }
 
+type Filter = 'all' | 'traded' | 'copying' | 'beta' | 'internal';
+const FILTERS: ReadonlyArray<{ value: Filter; label: string; test: (u: UserRow) => boolean }> = [
+  { value: 'all', label: 'All', test: () => true },
+  { value: 'traded', label: 'Traded', test: (u) => !!u.builder && u.builder.volume.perps + u.builder.volume.spot > 0 },
+  { value: 'copying', label: 'Copying', test: (u) => !!u.executor && (u.executor.activeCopies > 0 || u.executor.liveAlgos > 0) },
+  { value: 'beta', label: 'Beta', test: (u) => !!u.beta },
+  { value: 'internal', label: 'Ours', test: (u) => !!u.internal },
+];
+
 export function Users() {
   const r = useAdmin<{ users: UserRow[]; builderId: number | null; executorRead?: boolean }>('users');
   const [sort, setSort] = useState<SortKey>('lastSeen');
   const [q, setQ] = useState('');
+  const [filter, setFilter] = useState<Filter>('all');
   const users = r.data?.users ?? [];
-  const shown = useMemo(
-    () => users.filter((u) => !q || u.address.includes(q.toLowerCase()) || String(u.builder?.accountId ?? '').includes(q)).sort((a, b) => value(b, sort) - value(a, sort)),
-    [users, sort, q],
-  );
+  const shown = useMemo(() => {
+    const f = FILTERS.find((x) => x.value === filter)!.test;
+    return users
+      .filter((u) => f(u) && (!q || u.address.includes(q.toLowerCase()) || String(u.builder?.accountId ?? '').includes(q)))
+      .sort((a, b) => value(b, sort) - value(a, sort));
+  }, [users, sort, q, filter]);
   const signed = users.filter((u) => u.executor?.siteTermsAt || u.executor?.copyTermsAt).length;
   const copying = users.filter((u) => u.executor && (u.executor.activeCopies > 0 || u.executor.liveAlgos > 0)).length;
   const traded = users.filter((u) => u.builder && u.builder.volume.perps + u.builder.volume.spot > 0).length;
@@ -85,51 +97,41 @@ export function Users() {
   );
   return (
     <Page
-      title={`${int(users.length)} wallet${users.length === 1 ? '' : 's'}`}
-      line="Every wallet ValueDesk knows: who signed the terms or copies on the executor, what the builder ledger counted on SoDEX, what analytics saw (only visitors who allowed it), who wrote feedback."
+      title={r.data ? `${int(users.length)} wallet${users.length === 1 ? '' : 's'}` : 'Users'}
+      line="Every wallet ValueDesk knows: the executor (terms, copies, algos), the builder ledger (volume, fees), analytics (only who allowed it), feedback. The CSV has every field."
       loaded={r}
       wide
       tools={
         <>
+          <Seg label="Show" value={filter} onChange={setFilter} options={FILTERS.map((f) => ({ value: f.value, label: <>{f.label} <span className="dv-count">{int(users.filter(f.test).length)}</span></> }))} />
           <Search value={q} onChange={setQ} placeholder="Search 0x… or account id" />
-          <button type="button" className="dv-btn dv-right" onClick={() => csv(shown)} disabled={!shown.length}>Download CSV</button>
+          <button type="button" className="dv-btn" onClick={() => csv(shown)} disabled={!shown.length}>CSV</button>
         </>
       }
     >
       {r.error && <Section><Note kind="error">{r.error}</Note></Section>}
-      {r.data?.executorRead === false && <Section><Note kind="warn">The copy executor (server 2) did not answer: wallets only it knows (terms signers, followers, algo owners) are missing until it does.</Note></Section>}
+      {r.data?.executorRead === false && <Section><Note kind="warn">Server 2 did not answer: wallets only the executor knows (terms signers, followers, algo owners) are missing until it does.</Note></Section>}
       <Section>
         <Figures>
-          <Figure label="Wallets known" value={int(users.length)} sub={`${int(users.filter((u) => u.internal).length)} internal`} />
           <Figure label="Signed the terms" value={int(signed)} sub={`${int(copying)} copying or running an algo`} />
-          <Figure label="Traded through ValueDesk" value={int(traded)} sub={`counted on builder ${r.data?.builderId ?? '–'}`} />
+          <Figure label="Traded through ValueDesk" value={int(traded)} sub={`builder ${r.data?.builderId ?? '–'}`} />
           <Figure label="Volume, all wallets" value={usdShort(volume)} />
-          <Figure label="Fees counted per wallet" value={usd(fees)} sub="ledger only - all income: Volume &amp; fees" />
+          <Figure label="Fees counted per wallet" value={usd(fees)} sub="the ledger's part of the income" />
         </Figures>
       </Section>
       <Section flush>
-        <div className="dv-sheet">
+        <div className="dv-sheet dv-sheet--sticky">
           <table className="dv-table">
             <thead>
               <tr>
                 <th>Wallet</th>
-                {th('joined', 'Joined')}
+                {th('lastSeen', 'Last seen')}
                 <th>Terms</th>
                 {th('copies', 'Copies · algos')}
-                <th className="right">Account</th>
-                {th('volume', 'Volume')}
-                {th('volume30d', '30 days')}
-                {th('window', 'Tier window')}
+                {th('volume30d', 'Volume 30 d')}
                 {th('fees', 'Fees paid')}
-                <th className="right">Orders</th>
-                <th>Tier · fee</th>
-                <th>Flags</th>
-                {th('lastTrade', 'Last trade')}
+                <th>Tier</th>
                 {th('visits', 'Visits')}
-                {th('time', 'Time')}
-                {th('lastSeen', 'Last seen')}
-                <th>From</th>
-                <th>Most used</th>
                 <th>Ticket</th>
               </tr>
             </thead>
@@ -139,48 +141,44 @@ export function Users() {
                 const a = u.activity;
                 const e = u.executor;
                 const seen = lastSeenOf(u);
+                const from = countriesOf(u);
                 return (
                   <tr key={u.address}>
-                    <td className="dv-mono" title={u.address}>{short(u.address)}{u.internal && <span className="dv-internal">Internal</span>}</td>
-                    <td className="right">{e?.firstAt ? ago(e.firstAt) : '–'}</td>
+                    <td title={`${u.address}${from.length ? ` · ${from.join(', ')}` : ''}`}>
+                      <span className="dv-mono">{short(u.address)}</span>
+                      {u.internal && <span className="dv-tag">Ours</span>}
+                      {u.beta && <span className="dv-tag is-on">Beta</span>}
+                      {b?.flags.length ? <span className="dv-tag is-warn" title={b.flags.join(', ')}>Flagged</span> : null}
+                    </td>
+                    <td className="right">{seen ? ago(seen) : '–'}</td>
                     <td>
                       {e?.siteTermsAt || e?.copyTermsAt ? (
                         <>
-                          {e.siteTermsAt ? <span className="dv-tag is-on" title={`site terms ${new Date(e.siteTermsAt).toLocaleString()}`}>Site</span> : null}
-                          {e.copyTermsAt ? <span className="dv-tag is-on" title={`copy terms ${new Date(e.copyTermsAt).toLocaleString()}`}>Copy</span> : null}
+                          {e.siteTermsAt ? <span className="dv-tag is-on" title={`site terms ${when(e.siteTermsAt)}`}>Site</span> : null}
+                          {e.copyTermsAt ? <span className="dv-tag is-on" title={`copy terms ${when(e.copyTermsAt)}`}>Copy</span> : null}
                         </>
                       ) : <span className="dv-quiet">–</span>}
                     </td>
                     <td className="right" title={e ? `${e.activeCopies} of ${e.copies} copies active · ${e.liveAlgos} of ${e.algos} algos running · ${e.keys} key${e.keys === 1 ? '' : 's'}` : undefined}>
                       {e && (e.copies || e.algos) ? `${e.activeCopies}/${e.copies} · ${e.liveAlgos}/${e.algos}` : '–'}
                     </td>
-                    <td className="right">{b?.accountId ?? '–'}</td>
-                    <td className="right" title={b ? `perps ${usd(b.volume.perps)} · spot ${usd(b.volume.spot)}` : undefined}>{b ? usdShort(b.volume.perps + b.volume.spot) : '–'}</td>
-                    <td className="right">{b ? usdShort(b.volume30d) : '–'}</td>
-                    <td className="right">{b ? usdShort(b.windowVolume) : '–'}</td>
+                    <td className="right" title={b ? `all time ${usdShort(b.volume.perps + b.volume.spot)} · account ${b.accountId}` : undefined}>{b ? usdShort(b.volume30d) : '–'}</td>
                     <td className="right" title={b ? `perps ${usd(b.fees.perps)} · spot ${usd(b.fees.spot)}` : undefined}>{b ? usd(b.fees.perps + b.fees.spot) : '–'}</td>
-                    <td className="right">{b ? int(b.orders) : '–'}</td>
                     <td title={b?.signedFee ? `last signed ${bp(b.signedFee.perps)} / ${bp(b.signedFee.spot)} (${ago(b.signedFee.at)})` : undefined}>
-                      {b ? <>Tier {b.tier.index} · {bp(b.tier.fee.perps)}{b.tier.fee.spot !== b.tier.fee.perps ? ` / ${bp(b.tier.fee.spot)}` : ''}</> : '–'}
+                      {b ? <>{b.tier.index} · {bp(b.tier.fee.perps)}</> : '–'}
                     </td>
-                    <td>{b?.flags.length ? <span className="dv-warn">{b.flags.join(', ')}</span> : b?.pending ? <span className="dv-quiet">{b.pending} to check</span> : <span className="dv-quiet">–</span>}</td>
-                    <td className="right">{b?.lastTradeAt ? ago(b.lastTradeAt) : '–'}</td>
-                    <td className="right">{a ? int(a.visits) : '–'}</td>
-                    <td className="right">{a ? duration(a.activeMs) : '–'}</td>
-                    <td className="right">{seen ? ago(seen) : '–'}</td>
-                    <td>{countriesOf(u).join(', ') || '–'}</td>
-                    <td className="dv-quiet">{a?.features.map((f) => `${f.key} ${f.n}`).join(', ') || '–'}</td>
+                    <td className="right" title={a ? `${duration(a.activeMs)} active` : undefined}>{a ? int(a.visits) : '–'}</td>
                     <td>{u.ticket ? <a className="st-link" href={`#/tickets/${u.ticket}`}>#{u.ticket}</a> : ''}</td>
                   </tr>
                 );
               })}
             </tbody>
           </table>
-          {!shown.length && !r.loading && <div className="dv-sheet__none"><Empty>{q ? 'No wallet matches the search.' : 'No wallet yet.'}</Empty></div>}
+          {!shown.length && (!r.loading || r.data) && <div className="dv-sheet__none"><Empty>{q ? 'No wallet matches the search.' : filter !== 'all' ? 'No wallet in this group.' : 'No wallet yet.'}</Empty></div>}
         </div>
       </Section>
       <div className="st-foot">
-        Joined, terms and copies come from the copy executor: the first signature a wallet gave there, the site's and the copy terms it accepted, its copies and algos (active or running / all). Last seen is the latest of a signature, a copy's or algo's action, a trade and a visit; From is the country declared at signing, then the edge's, then analytics'. Volume and fees come from the builder ledger: fills that paid ValueDesk's builder fee on orders the SoDEX explorer shows naming our builder at the fee owed; fee = counted notional × the order's fee. Visits and features exist only for visitors who allowed analytics and connected this wallet.
+        Last seen is the latest of a signature on the executor, a copy's or algo's action, a trade and a visit. Volume and fees come from the builder ledger: fills that paid ValueDesk's builder fee on orders the SoDEX explorer shows naming our builder at the fee owed. Hover a cell for more; the CSV has every field.
       </div>
     </Page>
   );

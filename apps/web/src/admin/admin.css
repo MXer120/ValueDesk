@@ -205,6 +205,64 @@ html, body { background: var(--bg); }
 /* The crash card (Crash.tsx). */
 .dv-crash__msg { margin: 0; color: var(--text); font-family: var(--font-num); font-size: 13px; overflow-wrap: anywhere; }
 
+/* The header's freshness line (ui.tsx freshness): a kept copy says its age, a small spinner while the server is asked. */
+.st-updated { display: inline-flex; align-items: center; gap: 6px; }
+.dv-stale { color: var(--muted); }
+.dv-spin {
+  width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid rgb(var(--ink) / 0.18); border-top-color: var(--muted);
+  animation: dv-spin 0.8s linear infinite;
+}
+@keyframes dv-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .dv-spin { animation: none; } }
+.dv-note--info { background: color-mix(in srgb, var(--pos) 8%, transparent); color: var(--text); }
+.dv-note b { font-weight: 550; }
+.dv-wrap { white-space: normal; overflow-wrap: anywhere; }
+.dv-table td.dv-cell-wrap { white-space: normal; min-width: 260px; line-height: 1.45; padding-top: 8px; padding-bottom: 8px; }
+.dv-tag.is-warn { background: color-mix(in srgb, var(--warn) 16%, transparent); color: var(--warn); }
+.dv-pills { gap: 6px !important; }
+
+/* Access (pages/Beta.tsx): what a listed wallet gets, as icon rows; the live check under the form; the list. */
+.dv-grants { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.dv-grants li { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid rgb(var(--ink) / 0.07); }
+.dv-grants li:first-child { border-top-color: transparent; padding-top: 2px; }
+.dv-grants__icon { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 10px; background: rgb(var(--ink) / 0.06); color: var(--text); }
+.dv-grants li > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.dv-grants b { color: var(--text); font-size: 13px; font-weight: 550; }
+.dv-grants span:not(.st-pill):not(.dv-grants__icon) { color: var(--muted); font-size: 12px; line-height: 1.45; }
+.dv-beta__check { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; min-height: 20px; }
+.dv-wlist { list-style: none; margin: 0; padding: 0; }
+.dv-wlist li {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 14px; padding: 10px 8px; margin: 0 -8px;
+  border-radius: var(--radius-tile); transition: background-color var(--dur-fast) var(--ease-out);
+}
+.dv-wlist li + li { box-shadow: 0 -1px 0 rgb(var(--ink) / 0.07); }
+.dv-wlist li:hover { background: var(--tint); }
+.dv-wlist li.is-new { background: color-mix(in srgb, var(--pos) 7%, transparent); }
+.dv-wlist__who { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.dv-wlist__name { display: flex; align-items: center; gap: 8px; color: var(--text); font-size: 13px; font-weight: 500; }
+.dv-wlist__addr { overflow: hidden; color: var(--muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Status (pages/Status.tsx): the detail under a service row, the browser errors. */
+.dv-behind { display: flex; flex-direction: column; gap: 4px; margin-top: 10px; padding: 10px 12px; border-radius: var(--radius-tile); background: rgb(var(--ink) / 0.035); font-size: 12px; }
+.dv-behind p { margin: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; color: var(--text); line-height: 1.45; }
+.dv-behind .dv-tag { margin-left: 0; }
+.dv-errs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.dv-errs li { display: flex; flex-direction: column; gap: 3px; padding: 9px 0; border-top: 1px solid rgb(var(--ink) / 0.07); font-size: 12px; }
+.dv-errs li:first-child { border-top-color: transparent; padding-top: 0; }
+.dv-errs__top { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.dv-errs__top b { color: var(--text); font-size: 13px; font-weight: 500; }
+.dv-errs__top .st-ms { flex: none; }
+
+/* Users: the wallet column stays put while the table scrolls sideways. */
+.dv-sheet--sticky .dv-table th:first-child, .dv-sheet--sticky .dv-table td:first-child { position: sticky; left: 0; z-index: 1; background: var(--bg-panel); }
+.dv-sheet--sticky .dv-table tbody tr:hover td:first-child { background: color-mix(in srgb, var(--bg-panel) 100%, var(--tint)); }
+
+/* The wallet menu: the theme switch and the request timings. */
+.dv-menu-seg { padding: 2px 8px 8px; }
+.dv-menu-seg .lbp-seg { width: 100%; }
+.dv-menu-seg .lbp-seg > button { flex: 1 1 0; }
+.dv-menu-timing { display: flex; justify-content: space-between; gap: 12px; padding-top: 0; padding-bottom: 2px; }
+
 /* Phone: the navbar's links scroll in one row, the cards fill the width, the chat follows its list. */
 @media (max-width: 860px) {
   .dv-navbar .navbar-inner { gap: 10px; padding: 0 12px; }
@@ -225,6 +283,14 @@ html, body { background: var(--bg); }
   .dv-charts { grid-template-columns: minmax(0, 1fr); }
   .dv-beta__address, .dv-beta__label, .dv-beta__form .dv-btn { flex: 1 1 100%; }
   .dv-figures { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .dv-grants li { grid-template-columns: 34px minmax(0, 1fr); }
+  .dv-grants li > .st-pill { grid-column: 2; justify-self: start; }
+  .dv-wlist li { grid-template-columns: minmax(0, 1fr) auto; }
+  .dv-wlist__when { grid-column: 1; grid-row: 2; }
+  .dv-wlist li .dv-btn { grid-column: 2; grid-row: 1 / span 2; }
+  .dv-tools { gap: 8px; }
+  .dv-tools .lbp-seg { max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+  .dv-errs__top { flex-direction: column; gap: 2px; }
 }
 
 /* Fees (pages/Fees.tsx): the program form and its chips. */

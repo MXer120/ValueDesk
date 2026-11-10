@@ -134,8 +134,10 @@ export function useHistTiles(coin: string | null, venues: readonly Venue[], view
   const tiled = !!coin;
   const ir = usePolled<LiqTileIndex>(tiled ? `${coin}|${vkey}|tiles` : null, (s) => vsApi.liquidationTiles(coin!, venues, s, wallets), INDEX_POLL_MS);
   const idx = tiled && ir.data && ir.data.coin === coin && !ir.stale ? ir.data : null;
-  // The one-piece history: every view while the tile route answers nothing.
-  const whole = !!coin && !!ir.error && !idx;
+  // The one-piece history: only for a server without the tile route (404). Not when the tile index failed or timed out:
+  // then every open view asked the heaviest answer there is (30 days of snapshots: BTC 64.6 MB) of a server already
+  // slow - on 2026-11-07, while tiles took 4-19 s, history asks held the API 12-53 s each.
+  const whole = !!coin && !!ir.error && !idx && /\b404\b|not found/i.test(ir.error);
   const hr = usePolled<LiqHistory>(whole ? `${coin}|${vkey}|30d|${wkey}` : null, (s) => vsApi.liquidationHistory(coin!, venues, '30d', s, wallets), 5 * 60_000);
   const hist = whole && hr.data && hr.data.coin === coin ? hr.data : null;
 

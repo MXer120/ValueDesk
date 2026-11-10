@@ -24,7 +24,7 @@ import {
   filtersActive, isCopyable, kindOf, mixKinds, normaliseFilters, normaliseVenues, scoreRows, shapeGrid, winRateLabel,
   type Category, type Filters, type GridKind, type Scored, type SortKey,
 } from './gridModel';
-import { Avatar, CoinRow, CopyButton, ScoreMeter, Spark, TraderCard, ViewButton, WINDOW_SHORT, WinRate, useTraderPeek } from './TraderCard';
+import { AgeHint, Avatar, CoinRow, CopyButton, ScoreMeter, Spark, TraderCard, ViewButton, WINDOW_SHORT, WinRate, useTraderPeek } from './TraderCard';
 import { DotWhale } from './DotWhale';
 import { fmtSignedPct, fmtSignedUsd, isAddress } from './setup';
 import { COPY_COST_BPS, WRONG_SIDE_CAP } from './copyScore';
@@ -403,7 +403,7 @@ function ListRow({ s, w, onOpen, onCopy, copying }: {
   copying: boolean;
 }) {
   const { row, score } = s;
-  const { ref, peek, loading } = useTraderPeek(row, w);
+  const { ref, peek, loading, age } = useTraderPeek(row, w);
   const pnl = row.pnl[w] ?? null;
   return (
     <tr ref={ref} className={`cpy-list__row cpy-list__row--${score.kind}`} tabIndex={0} onClick={() => onOpen(row)} onKeyDown={(e) => { if (e.key === 'Enter' && e.target === e.currentTarget) onOpen(row); }}>
@@ -418,7 +418,7 @@ function ListRow({ s, w, onOpen, onCopy, copying }: {
       <td className={`num ${pnl === null ? '' : pnl >= 0 ? 'pos' : 'neg'}`}>{fmtSignedUsd(pnl, 0)}</td>
       <td className={`num ${score.roi === null ? '' : score.roi >= 0 ? 'pos' : 'neg'}`}>{fmtSignedPct(score.roi, 1)}</td>
       <td className="num">{row.accountValue == null ? DASH : fmtUsd(row.accountValue, 0)}</td>
-      <td className="cpy-list__curve"><Spark values={peek?.spark ?? null} loading={loading} className="cpy-list__spark" /></td>
+      <td className="cpy-list__curve"><span className="cpy-card__chart"><Spark values={peek?.spark ?? null} loading={loading} className="cpy-list__spark" /><AgeHint age={age} /></span></td>
       <td className="num"><WinRate value={row.winRate} closes={row.winRateCloses} /></td>
       <td><CoinRow assets={row.assets} /></td>
       <td className="num">

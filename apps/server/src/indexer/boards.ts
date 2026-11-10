@@ -33,11 +33,36 @@ export interface Picked {
   complete: boolean;
 }
 
-export function pickBoard(
-  candidates: Iterable<Candidate>,
-  check: (c: Candidate) => TradeCheck,
-  o: { filter: BoardFilter; side?: 'top' | 'worst'; size?: number; maxPending?: number; skipZeroVolume?: boolean },
-): Picked {
+type PickOpts = { filter: BoardFilter; side?: 'top' | 'worst'; size?: number; maxPending?: number; skipZeroVolume?: boolean };
+
+export function pickBoard(candidates: Iterable<Candidate>, check: (c: Candidate) => TradeCheck, o: PickOpts): Picked {
+  const steps = pickSteps(candidates, check, o);
+  for (;;) {
+    const r = steps.next();
+    if (r.done) return r.value;
+  }
+}
+
+/**
+ * pickBoard giving the thread back every PICK_SLICE_MS (2026-11-08): each check is a few SQLite reads, and a worst/active
+ * board can check thousands of candidates whose answer is "no" (they count toward no stop) - seconds of a cold disk in
+ * one piece on the indexer's thread, its sockets unread meanwhile.
+ */
+export const PICK_SLICE_MS = 20;
+export async function pickBoardAsync(candidates: Iterable<Candidate>, check: (c: Candidate) => TradeCheck, o: PickOpts): Promise<Picked> {
+  const steps = pickSteps(candidates, check, o);
+  let since = performance.now();
+  for (;;) {
+    const r = steps.next();
+    if (r.done) return r.value;
+    if (performance.now() - since >= PICK_SLICE_MS) {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      since = performance.now();
+    }
+  }
+}
+
+function* pickSteps(candidates: Iterable<Candidate>, check: (c: Candidate) => TradeCheck, o: PickOpts): Generator<void, Picked> {
   const size = o.size ?? BOARD_SIZE;
   const maxPending = o.maxPending ?? size;
   const picks: Candidate[] = [];
@@ -66,6 +91,7 @@ export function pickBoard(
     const r = check(c);
     if (r === 'yes') picks.push(c);
     else if (r === 'unknown') pending.push(c.address);
+    yield;
   }
   // Full with nothing waiting above the last pick, or every candidate seen and checked.
   const complete = pending.length === 0 && (picks.length >= size || exhausted);

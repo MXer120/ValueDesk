@@ -18,7 +18,7 @@
   --tf-button: linear-gradient(0deg, #fff 0%, #ababab 100%);
   --tf-button-hover: linear-gradient(0deg, #fff 0%, #c2c2c2 100%);
   --tf-button-fg: #111;
-  --tf-button-edge: rgba(255, 255, 255, 0.5);
+  --tf-button-edge: rgb(255 255 255 / 0.5); /* the edge of a white button: white in both themes */
   --tf-button-shadow: 0 2px 2px 0 rgba(0, 0, 0, 0.1);
   --tf-button-2: linear-gradient(180deg, #1d1d1d 0%, #262626 100%);
   --tf-button-2-hover: linear-gradient(180deg, #242424 0%, #2d2d2d 100%);

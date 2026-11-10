@@ -97,6 +97,16 @@ test('probes: a process with no build yet is judged by when the boards were writ
   assert.equal(await stateOf(T0 - 61 * MIN), 'degraded');
 });
 
+test('probes: a new process before its first build is judged by the last process\'s build (prevBuildAt), and a handover row is not `stopping`', async () => {
+  const stateOf = async (extra: Record<string, unknown>) => (await probeAll({ targets: TARGETS, fetch: fakeFetch(ALL_UP), now: () => T0, indexerRecheckMs: 0, indexerStatus: () => ({
+    at: T0 - 5_000, streams: { sodex: 1, hyperliquid: 1 }, lastBuildAt: 0, ...extra,
+  }) })).find((s) => s.service === 'indexer')!;
+  assert.equal((await stateOf({ prevBuildAt: T0 - 10 * MIN, boardsAt: T0 - 90 * MIN })).state, 'up', 'the last build is 10 min old');
+  assert.deepEqual((await stateOf({ prevBuildAt: T0 - 61 * MIN })).why, ['boards'], 'over an hour: said, though this process has not built yet');
+  const handing = await stateOf({ lastBuildAt: T0 - 5 * MIN, handover: { to: 2, since: T0 - 20_000 } });
+  assert.equal(handing.state, 'up', 'handing over: the standby holds every print');
+});
+
 test('probes: an indexer stream back by the next status is up; down in both is degraded; a stale status is down at once', async () => {
   const healthy = { sodex: true, hyperliquid: true };
   const sequence = (...streams: Array<Record<string, boolean>>) => {
@@ -348,5 +358,37 @@ test('route: public, cached 30 s in the process and at the edge', async () => {
   t += STATUS_CACHE_MS;
   assert.equal(((await app.inject({ method: 'GET', url: '/api/vs/status' })).json() as typeof body).services[1]!.state, 'down');
   await app.close();
+  s.close();
+});
+
+// --- the admin suite reads the same judgement (admin/statusView.ts judge) -------------------------
+
+test('admin status: the dev page says what the public page says (maintenance, not the raw degraded probe), plus which check failed', async () => {
+  const { judge } = await import('../src/admin/statusView.js');
+  const { shownState } = await import('../src/ops/statusModel.js');
+  const s = store();
+  const t = Date.UTC(2026, 10, 7, 15, 20, 30);
+  s.record([
+    { service: 'website', state: 'up', ms: 80 },
+    { service: 'api', state: 'up', ms: 40 },
+    { service: 'executor', state: 'up', ms: 300 },
+    { service: 'indexer', state: 'degraded', ms: null, why: ['stopping'] },
+  ], t);
+  s.notices.create({ kind: 'maintenance', title: 'Update v0.2.190', components: ['api', 'indexer'], startsAt: t - 60_000, endsAt: t + 9 * 60_000 }, t - 60_000);
+  const report = s.report(t);
+  const j = judge(report, s.lastChecks(), t);
+  const indexer = j.services.find((x) => x.id === 'indexer')!;
+  assert.equal(indexer.probe, 'degraded');
+  assert.equal(indexer.shown, shownState('degraded', 'indexer', report.notices ?? [], t), 'the public page judges with the same function');
+  assert.equal(indexer.shown, 'maintenance');
+  assert.equal(j.overall, 'maintenance');
+  assert.deepEqual(indexer.why, [{ code: 'stopping', text: 'the indexer is restarting' }]);
+  assert.equal(indexer.notices[0]!.title, 'Update v0.2.190');
+  // The public report never carries the reasons.
+  assert.equal(JSON.stringify(report).includes('stopping'), false);
+  // A reason from an older round is not shown beside a newer sample.
+  s.record([{ service: 'indexer', state: 'up', ms: null }], t + 60_000);
+  const later = judge(s.report(t + 60_000), { at: t - 60_000, checks: [{ service: 'indexer', state: 'degraded', ms: null, why: ['lag'] }] }, t + 60_000);
+  assert.deepEqual(later.services.find((x) => x.id === 'indexer')!.why, []);
   s.close();
 });

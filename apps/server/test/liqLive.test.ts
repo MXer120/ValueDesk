@@ -171,3 +171,26 @@ test('per coin, the positions worth the minimum - and every one of a watched wal
   assert.deepEqual(got.map((x) => [x.address, x.long]).sort(), [['0xbig', true], ['0xwatched', false]]);
   for (const x of got) assert.ok(x.liq > 0 && x.usd > 0 && x.venue === 'hyperliquid');
 });
+
+test('the minute refresh goes a few coins at a time, each coin once a round, not every coin in one flush', () => {
+  const { books, live } = world();
+  books.set('hyperliquid|0xa', { cash: 90_000, priced: true, positions: [{ symbol: 'BTC', szi: -1 }] });
+  books.set('hyperliquid|0xb', { cash: 50_000, priced: true, positions: [{ symbol: 'ETH', szi: -20 }] });
+  books.set('lighter|0xc', { cash: -60_000, priced: true, positions: [{ symbol: 'BTC', szi: 1 }] });
+  for (const k of books.keys()) { const [v, a] = k.split('|') as [Venue, string]; live.touch(v, a); }
+  live.work();
+  live.flush();
+  assert.equal(live.coinCount, 2);
+  const sent: string[] = [];
+  for (let k = 0; k < 4; k++) {
+    live.resendSome(1);
+    const d = live.flush();
+    assert.equal(d.length, 1, 'one coin a send');
+    assert.ok(d[0]!.whole && d[0]!.f?.whole, 'whole, its fine layer too');
+    sent.push(d[0]!.coin);
+  }
+  assert.deepEqual(sent.slice(0, 2).sort(), ['BTC', 'ETH']);
+  assert.deepEqual(sent.slice(2).sort(), ['BTC', 'ETH'], 'each once per round');
+  live.resendSome(5);
+  assert.equal(live.flush().length, 2, 'more asked than coins: every coin once');
+});

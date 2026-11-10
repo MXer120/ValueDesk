@@ -150,8 +150,8 @@ export class LiqLive {
   private done = 0;
 
   constructor(private readonly o: {
-    /** The account now (undefined = gone). */
-    account: (venue: Venue, address: string) => LiveAccount | undefined;
+    /** The account now (undefined = gone); `key` is its `venue|address`, as touched. */
+    account: (venue: Venue, address: string, key: string) => LiveAccount | undefined;
     priceOf: (venue: Venue, symbol: string) => number | null;
     tiersOf: (venue: Venue, symbol: string) => Tiers | null;
     /** A coin's reference price (Hyperliquid's first). */
@@ -170,6 +170,14 @@ export class LiqLive {
   /** The account changed (a print, a read): re-priced at the next flush. */
   touch(venue: Venue, address: string): void {
     this.dirty.add(`${venue}|${address}`);
+  }
+
+  /**
+   * The same by its `venue|address` key, kept as given: the heatmap thread's copy of the books
+   * (liqLiveCore.ts MirrorSource) is keyed by the same string, so 300k accounts hold one copy of it, not two.
+   */
+  touchKey(key: string): void {
+    this.dirty.add(key);
   }
 
   /** A price: accounts whose other positions depend on it are re-priced once it moved a bucket's width. */
@@ -348,6 +356,21 @@ export class LiqLive {
     for (const c of this.coins.values()) { c.whole = true; c.f.whole = true; }
   }
 
+  /** Coins not yet sent whole in this round of resendSome. */
+  private resendTurn: string[] = [];
+  /** The next `n` coins whole at the next flush, each in turn (the minute's refresh spread over the minute). */
+  resendSome(n: number): void {
+    for (let k = 0; k < Math.min(n, this.coins.size); k++) {
+      if (!this.resendTurn.length) this.resendTurn = [...this.coins.keys()].reverse();
+      const c = this.coins.get(this.resendTurn.pop()!);
+      if (c) { c.whole = true; c.f.whole = true; }
+    }
+  }
+
+  get coinCount(): number {
+    return this.coins.size;
+  }
+
   /** The fine layer's changed cells since the last flush (as the buckets: past SEND_MOVE only), or null. */
   private fineDelta(f: FineAgg): NonNullable<LiveDelta['f']> | null {
     if (!f.whole && !f.dirty.size) return null;
@@ -514,7 +537,7 @@ export class LiqLive {
     const old = this.added.get(key) ?? [];
     this.added.delete(key);
     const wasMulti = this.multiOf.get(key);
-    const acct = this.o.account(venue, address);
+    const acct = this.o.account(venue, address, key);
     const ps = acct?.positions.filter((p) => p.szi) ?? [];
     if (!acct || !ps.length) {
       this.setMulti(key, wasMulti, []);
