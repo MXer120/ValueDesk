@@ -241,7 +241,7 @@ export interface VipStage { lit: (n: number) => void; fade: () => void }
  * 30 days (every product's lowest fee, until a date); otherwise the $1M milestone. The ground is the stage's, the
  * same one the move scene stands on.
  */
-function UnlockScene({ onMove, onClose, onShare, volume, promo, stage }: { onMove: () => void; onClose: () => void; onShare: () => void; volume: number | null; promo: { until: number | null } | null; stage: VipStage }) {
+function UnlockScene({ onMove, onClose, onShare, volume, promo, stage, onVip = false }: { onMove: () => void; onClose: () => void; onShare: () => void; volume: number | null; promo: { until: number | null } | null; stage: VipStage; onVip?: boolean }) {
   const days = promo?.until ? Math.max(1, Math.ceil((promo.until - Date.now()) / 86_400_000)) : null;
   const still = typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
   const [phase, setPhase] = useState<'logo' | 'gold' | 'fly' | 'card'>(still ? 'card' : 'logo');
@@ -294,8 +294,11 @@ function UnlockScene({ onMove, onClose, onShare, volume, promo, stage }: { onMov
               ? 'The lowest fees on futures, spot, copy trading and bots, the VIP servers and new features first.'
               : `${volume !== null ? fmtUsd(volume, 0) : '$1M'} traded in 14 days. Your bots pay the lowest fee and may move to the VIP servers. It holds while you stay above $1M.`}</p>
             <div className="vipx-win__act">
-              <button type="button" className="vipx-cta" onClick={leave}><Icon name="bolt" size={15} />Move my bots to VIP servers</button>
-              <button type="button" className="vipx-later" onClick={close}>Later</button>
+              {onVip
+                // Already there (owner 2026-11-10): nothing to move, the button says so and only closes the card.
+                ? <button type="button" className="vipx-cta" onClick={close}><Icon name="check" size={15} />Already on the VIP servers</button>
+                : <button type="button" className="vipx-cta" onClick={leave}><Icon name="bolt" size={15} />Move my bots to VIP servers</button>}
+              {!onVip && <button type="button" className="vipx-later" onClick={close}>Later</button>}
               <button type="button" className="vipx-icon" aria-label="Share" title="Share" onClick={onShare}><Icon name="share" size={17} /></button>
             </div>
           </div>
@@ -436,7 +439,7 @@ export function BotsVip({ ctx, compact, stage, strip }: { ctx: BotsCtx; compact?
       {(open || unlock || handoff) && <div className={`vipx-stage${fading ? ' is-fading' : ''}${handoff ? ' is-held' : ''}`} aria-hidden="true"><VipGround lit={lit} /></div>}
       {open && (stage || ctx.demo) && <MoveScene job={job} handoff={handoff} stage={stageApi} stalled={!!mine?.stalled} error={mine?.error ?? null} onShare={(secs) => setShare({ kind: 'move', bots: job?.bots ?? 1, secs })} onClose={() => { hidden.current = job?.id ?? null; setOpen(false); setJob(null); setHandoff(false); setFading(false); if (!ctx.demo) dismissVipMove(); }} />}
       {share && <VipShare what={share} onClose={() => setShare(null)} />}
-      {unlock && <UnlockScene stage={stageApi} onShare={() => setShare({ kind: 'unlock', promo: ctx.demo ? demoPromo : !!el?.promo })} promo={ctx.demo ? (demoPromo ? { until: Date.now() + 30 * 86_400_000 } : null) : el?.promo ?? null} volume={el && el.volumeUsd >= el.minUsd ? el.volumeUsd : null} onClose={() => { setUnlock(false); setFading(false); }} onMove={() => { setUnlock(false); setHandoff(true); if (ctx.demo) { setJob(demoJob(Math.max(1, ctx.bots.filter((v) => !v.algo.endedAt).length))); setOpen(true); } else void move(); }} />}
+      {unlock && <UnlockScene onVip={onVip} stage={stageApi} onShare={() => setShare({ kind: 'unlock', promo: ctx.demo ? demoPromo : !!el?.promo })} promo={ctx.demo ? (demoPromo ? { until: Date.now() + 30 * 86_400_000 } : null) : el?.promo ?? null} volume={el && el.volumeUsd >= el.minUsd ? el.volumeUsd : null} onClose={() => { setUnlock(false); setFading(false); }} onMove={() => { setUnlock(false); setHandoff(true); if (ctx.demo) { setJob(demoJob(Math.max(1, ctx.bots.filter((v) => !v.algo.endedAt).length))); setOpen(true); } else void move(); }} />}
       {!stage && <Shell className={`bots-vip${compact ? ' is-compact' : ''}`}>
         <ShellHeader icon="bolt" title={onVip ? 'VIP' : 'Become VIP'} subtitle={onVip ? 'Your bots run on the VIP servers, at the lowest bot fee.' : el?.promo ? 'Your beta VIP: the lowest fee on everything, and VIP servers.' : 'At $1M of your volume in 14 days: bot fees slashed, and VIP servers.'} aside={onVip ? <StatusPill tone="warning" dot>VIP servers</StatusPill> : el?.eligible ? <StatusPill tone="positive" dot>Unlocked</StatusPill> : null} />
         <Panel className="bots-vip__b">

@@ -49,6 +49,8 @@ export interface Toast {
   count: number;
   /** Offered as a button when the caller knows how to try again. */
   retry?: () => void;
+  /** A button doing what the message is about (e.g. "Close the rest"), in the place Retry takes. */
+  action?: { label: string; run: () => void };
   /** A trading event, drawn with its own glyph (order placed / cancelled / filled). */
   kind?: TradeKind;
   /** The coin it is about - its logo leads the card, the glyph rides on it. */
@@ -157,8 +159,8 @@ export function notifyError(source: string, e: unknown, retry?: () => void): str
   return code;
 }
 
-export function notify(severity: Severity, message: string): void {
-  emit({ severity, message });
+export function notify(severity: Severity, message: string, action?: { label: string; run: () => void }): void {
+  emit(action ? { severity, message, action } : { severity, message });
 }
 
 /**
@@ -340,6 +342,11 @@ function ToastCard({ t, onDismiss }: { t: Toast; onDismiss: (id: number) => void
           </span>
         )}
       </div>
+      {t.action && !t.retry && (
+        <button type="button" className="toast__retry" onClick={() => { close(); t.action?.run(); }}>
+          {t.action.label}
+        </button>
+      )}
       {t.retry && (
         <button type="button" className="toast__retry" onClick={() => { close(); t.retry?.(); }}>
           Retry

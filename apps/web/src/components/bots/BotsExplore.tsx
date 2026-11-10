@@ -22,10 +22,11 @@ import { goBots, type BotsView } from '../../bots/routes';
 import { BotsHead, type BotsCtx } from './BotsPage';
 import { CONF_HINT, CONF_WORDS, TAKER_COLORS, Takers, bpCls, fmtBpUsd } from './BotNewPage';
 import { MarketConditions } from './BotsRegime';
+import { SCORE_WORDS, marketScore, scoreColour } from '../../bots/score';
 import { Coverage, MarketMap, type MapWindow } from './BotsMarketMap';
 import { Button, Checkbox, EmptyState, Icon, Panel, ProgressBar, SearchField, Segmented, Shell, ShellHeader, Skeleton, StatCard, StatusPill } from './kit/kit';
 
-type Key = 'cost' | 'bot' | 'uninformed' | 'informed' | 'spread' | 'vol' | 'activity' | 'symbol';
+type Key = 'score' | 'cost' | 'bot' | 'uninformed' | 'informed' | 'spread' | 'vol' | 'activity' | 'symbol';
 const CONF_TONE = { high: 'positive', medium: 'warning', low: 'neutral' } as const;
 const bp = (x: number | null) => (x === null ? DASH : `${x >= 0 ? '+' : '−'}${Math.abs(x).toFixed(2)} bp`);
 
@@ -172,9 +173,10 @@ export function BotsExplore({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
   const [win, setWin] = useState<MapWindow>('24h');
   const [pick, setPick] = useState<Pick>('best');
   const [q, setQ] = useState('');
-  const [onlySure, setOnlySure] = useState(true);
+  // Every recorded market by default (owner 2026-11-10: "all that we record need to be visible"); the user narrows it.
+  const [onlySure, setOnlySure] = useState(false);
   const [activity, setActivity] = useState<'any' | '100k' | '1m'>('any');
-  const [sort, setSort] = useState<{ k: Key; desc: boolean }>({ k: 'cost', desc: false });
+  const [sort, setSort] = useState<{ k: Key; desc: boolean }>({ k: 'score', desc: true });
   const [open, setOpen] = useState<string | null>(null);
   const rAny = useBotMarkets(win);
   // A server from before the 1 h / 6 h windows answers 24 h to them: never shown as the window asked for.
@@ -207,6 +209,7 @@ export function BotsExplore({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
     const val = (m: BotMarket): number | string => {
       switch (sort.k) {
         case 'symbol': return m.symbol;
+        case 'score': return marketScore(cost(m), feeBps) ?? -1;
         case 'bot': return RECIPE[rows.get(m.symbol)?.id ?? 'r10'].name;
         case 'uninformed': return m.takers.t1002;
         case 'informed': return m.takers.t23342;
@@ -220,9 +223,11 @@ export function BotsExplore({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
       const x = val(a);
       const y = val(b);
       const c = typeof x === 'string' ? x.localeCompare(String(y)) : x - (y as number);
+      // Equal scores (the scale tops out at 100): the cheaper market first.
+      if (c === 0 && sort.k === 'score') return cost(a) - cost(b);
       return sort.desc ? -c : c;
     });
-  }, [r.data, q, onlySure, sort, rows, activity]);
+  }, [r.data, q, onlySure, sort, rows, activity, feeBps]);
   const costOf = (m: BotMarket) => rows.get(m.symbol)?.bp ?? m.estCostBps;
   const scoreOf = useCallback((m: BotMarket) => rows.get(m.symbol)?.bp ?? m.estCostBps, [rows]);
   // The recorder's held hours in this window: the most any market holds (null: a server that does not say).
@@ -246,7 +251,7 @@ export function BotsExplore({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
   // A column's class says when it goes on a narrow screen (botsPages.css, the table's container): xc-a first, xc-b next.
   const head = (k: Key, label: string, right = true, title?: string, cls = '') => (
     <th className={[right ? 'right' : '', cls].filter(Boolean).join(' ') || undefined} title={title} aria-sort={sort.k === k ? (sort.desc ? 'descending' : 'ascending') : undefined}>
-      <button type="button" className={`bots-th${sort.k === k ? ' is-on' : ''}`} onClick={() => setSort((s) => ({ k, desc: s.k === k ? !s.desc : k === 'uninformed' || k === 'activity' || k === 'vol' }))}>
+      <button type="button" className={`bots-th${sort.k === k ? ' is-on' : ''}`} onClick={() => setSort((s) => ({ k, desc: s.k === k ? !s.desc : k === 'score' || k === 'uninformed' || k === 'activity' || k === 'vol' }))}>
         {label}{sort.k === k && <Icon name={sort.desc ? 'down' : 'up'} size={10} />}
       </button>
     </th>
@@ -259,10 +264,10 @@ export function BotsExplore({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
       <Shell className="bots-kpis">
         <ShellHeader icon="compass" title="Every market, estimated" subtitle={r.data ? readWords(r.data.at) : 'Reading the markets…'} />
         <div className="bots-kpigrid is-4">
-          <StatCard index={0} label="Markets read" value={r.data ? String(r.data.markets.length) : DASH} hint={`${list.length} match the filters`} />
+          <StatCard index={0} label="Markets read" value={r.data ? String(r.data.markets.length) : DASH} hint={list.length === r.data?.markets.length ? 'Every SoDEX perp we record' : `${list.length} shown with your filters below`} />
           <StatCard index={1} label="Best per $1M" value={best ? fmtBpUsd(costOf(best)) : DASH} valueTone={best ? (costOf(best) < 0 ? 'positive' : 'negative') : undefined} hint={best ? `${best.base}, ${RECIPE[rows.get(best.symbol)?.id ?? 'r10'].name}` : undefined} />
           <StatCard index={2} label="Fees per $1M" value={fmtBpUsd(feeBps)} valueTone="negative" hint="SoDEX and ValueDesk" />
-          <StatCard index={3} label="Bots compared" value={String(recipesOf('market').length)} hint={runs.length ? `Learning from ${runs.length} of your bots` : 'Market makers, every market'} />
+          <StatCard index={3} label="Bots compared" value={String(recipesOf('market').length)} hint={runs.length ? `Our tests + ${runs.length} of your own bots` : 'Market makers, from our tests'} />
         </div>
       </Shell>
 
@@ -324,6 +329,7 @@ export function BotsExplore({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
                   <tr>
                     <th />
                     {head('symbol', 'Market', false)}
+                    {head('score', 'Score', true, SCORE_WORDS)}
                     {head('cost', 'Per $1M', true, `What $1M of ${pick === 'best' ? 'the best bot' : pickName}'s volume is estimated to do here, all-in`)}
                     {head('bot', pick === 'best' ? 'Best bot' : 'Bot', false)}
                     {head('uninformed', 'Uninformed', true, `Share of small makers' fills it took. ${GLOSSARY.uninformed}`)}
@@ -352,6 +358,7 @@ export function BotsExplore({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
                               {m.lead === null && <StatusPill size="sm">no oracle</StatusPill>}
                             </span>
                           </td>
+                          <td className="right"><span className="bots-share bots-score"><ProgressBar value={marketScore(c, feeBps) ?? 0} max={100} size="sm" color={scoreColour(marketScore(c, feeBps))} label="Score" /><b>{marketScore(c, feeBps) ?? DASH}</b></span></td>
                           <td className={`right num bots-strong ${bpCls(c)}`}>{fmtBpUsd(c)}<small className="bots-range">{m.confidence === 'high' ? `${fmtBpUsd(m.estCostLowBps + shift)} to ${fmtBpUsd(m.estCostHighBps + shift)}` : <span title={CONF_HINT}>{CONF_WORDS[m.confidence]}</span>}</small></td>
                           <td><span className="bots-xbotcell"><StrategyTile strategy={rc.strategy} size={22} /><span><b>{rc.name}</b>{pick === 'best' && row && row.n > 1 && <small>best of {row.n}</small>}</span></span></td>
                           <td className="right"><span className="bots-share"><ProgressBar value={m.takers.t1002} max={1} size="sm" color={TAKER_COLORS.patient} label="Uninformed flow share" /><b>{Math.round(m.takers.t1002 * 100)}%</b></span></td>
@@ -363,7 +370,7 @@ export function BotsExplore({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
                         </tr>
                         {isOpen && (
                           <tr className="bots-xdetail">
-                            <td colSpan={10}><Detail m={m} feeBps={feeBps} runs={runs} feeAdj={feeAdj} /></td>
+                            <td colSpan={11}><Detail m={m} feeBps={feeBps} runs={runs} feeAdj={feeAdj} /></td>
                           </tr>
                         )}
                       </Fragment>

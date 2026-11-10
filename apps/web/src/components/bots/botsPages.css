@@ -1685,3 +1685,8 @@ tr.bots-row.is-blocked:hover, .bots-table tbody tr.bots-row.is-blocked:hover { b
 .bots-rg__kpis, .bots-rg__panel { transition: opacity 160ms ease; }
 .bots-rg__kpis.is-stale, .bots-rg__panel.is-stale { opacity: 0.55; }
 .bots-rg__tip i.is-rest { background: rgb(var(--ink) / 0.28); }
+.bots-mm__key i.is-s0 { background: color-mix(in srgb, var(--neg) 62%, var(--tf-raised)); }
+.bots-mm__key i.is-s50 { background: color-mix(in srgb, var(--warn) 62%, var(--tf-raised)); }
+.bots-mm__key i.is-s100 { background: color-mix(in srgb, var(--pos) 62%, var(--tf-raised)); }
+.bots-mm__key i.is-none { background: rgb(var(--ink) / 0.08); }
+.bots-score { min-width: 64px; }

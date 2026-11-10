@@ -112,6 +112,7 @@ export function BotsHead({ title, sub, actions, lead }: { view?: BotsView; title
 }
 
 export type StopHow = 'close' | 'instant' | 'keep';
+const LEFTOVER_KEY = 'vs.bots.leftoverSaid';
 
 /** The ladder's first step (0.3 bp since 2026-11-09), the fee a wallet pays before its volume lowers it. */
 export const BOT_FEE_FIRST_STEP_TENTHS = 5;
@@ -433,6 +434,21 @@ function BotsPageOpen({ address, provider }: { address: string | null; provider:
     resumeAll: (list) => run('all', async () => { for (const v of list) await act('resume', v.algo.id); }, `${list.length} bot${list.length === 1 ? '' : 's'} resumed.`),
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [address, bots, loading, error, ready, seen, supported, live, busy, view, update, act, stopAll, start, confirm]);
+
+  // A stopped bot that left a remainder under SoDEX's minimum order (it cannot be closed by itself): said once per bot
+  // and browser, with the way out on the notice (owner 2026-11-10: an instant stop left one and nothing said so).
+  useEffect(() => {
+    let warned: string[] = [];
+    try { warned = JSON.parse(localStorage.getItem(LEFTOVER_KEY) ?? '[]') as string[]; } catch { /* private mode */ }
+    const fresh = bots.filter((v) => FINAL_STATUSES.has(v.algo.status) && v.bot?.leftover && !warned.includes(v.algo.id));
+    for (const v of fresh) {
+      const lo = v.bot!.leftover!;
+      notify('warn', `${botName(v)} stopped with ${fmtUsd(lo.usd, 2)} ${lo.side} still open on SoDEX, under its ${fmtUsd(lo.minUsd, 2)} minimum order: it cannot be closed alone. Close the rest adds a minimum order, then closes all of it.`, { label: 'Close the rest', run: () => void ctx.closeRest(v) });
+    }
+    if (fresh.length) {
+      try { localStorage.setItem(LEFTOVER_KEY, JSON.stringify([...warned, ...fresh.map((v) => v.algo.id)].slice(-200))); } catch { /* private mode */ }
+    }
+  }, [bots, ctx]);
 
   // Demo data (owner 2026-11-07), local builds only: on by default, the switch at the top right.
   const [demo, setDemoOn] = useState(() => BOTS_ON && demoDefault());
