@@ -111,11 +111,17 @@ const isLatency = (x: unknown): x is BotLatencyResponse => !!x && typeof x === '
  * One bucket of the regime board (server flow/botMarkets.ts RegimeHour): volumeUsd null = not recorded whole; volBps is
  * the volatility in bp per hour, whatever the bucket's length.
  */
-export interface RegimeHour { t: number; volumeUsd: number | null; t1002Usd: number; t23342Usd: number; volBps: number }
+export interface RegimeHour {
+  t: number; volumeUsd: number | null; t1002Usd: number; t23342Usd: number; volBps: number;
+  /** The other takers classed informed / uninformed by what they cost the makers they fill (servers from 2026-11-10 on). */
+  tInfUsd?: number; tUniUsd?: number;
+}
 export interface BotRegimeResponse {
   at: number; symbol: string; markets: string[]; hours: RegimeHour[];
   /** From servers of 2026-11-10 on; older ones answer 7 days by the hour. */
   window?: BotWindow; stepMs?: number; typicalVolBps?: number | null;
+  /** How many other taker accounts are classed informed / uninformed now (servers from 2026-11-10 on). */
+  classes?: { informed: number; uninformed: number; minFills: number; markoutS: number };
 }
 const isRegime = (x: unknown): x is BotRegimeResponse => !!x && typeof x === 'object' && Array.isArray((x as BotRegimeResponse).hours) && Array.isArray((x as BotRegimeResponse).markets);
 /** The regime board (Explore): who takes and how volatile, bucket by bucket over the window, one market or 'ALL'. */

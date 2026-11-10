@@ -1608,6 +1608,8 @@ tr.bots-row.is-blocked:hover, .bots-table tbody tr.bots-row.is-blocked:hover { b
 .bots-rg__key { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 11px; color: var(--dim); }
 .bots-rg__key span { display: inline-flex; align-items: center; gap: 6px; }
 .bots-rg__key i.is-rest { background: rgb(var(--ink) / 0.14); }
+.bots-rg__key em { font-style: normal; font-family: var(--font-num); color: rgb(var(--ink) / 0.42); }
+.bots-rg__tip span.is-sub { padding-left: 15px; margin-top: -3px; font-size: 11px; }
 .bots-rg__key i.is-gap { background: repeating-linear-gradient(45deg, rgb(var(--ink) / 0.04) 0 2px, rgb(var(--ink) / 0.18) 2px 3px); }
 .bots-rg__skel { height: 260px; border-radius: 10px; }
 @media (max-width: 700px) {

@@ -16,12 +16,18 @@ import { EmptyState, Button, Panel, Segmented, Shell, ShellHeader, Skeleton, Sta
 
 const ALL = 'ALL';
 const pct = (x: number | null) => (x === null ? DASH : x > 0 && x < 0.005 ? "<1%" : `${Math.round(x * 100)}%`);
-const shareOf = (h: RegimeHour, k: 't1002Usd' | 't23342Usd') => (h.volumeUsd && h.volumeUsd > 0 ? h[k] / h.volumeUsd : null);
+/**
+ * Uninformed: 1002 and the other takers classed uninformed; informed: 23342 and those classed informed (server
+ * takerClass.ts: what each costs the makers it fills, 30 s on). What neither covers is unidentified.
+ */
+type Kind = 'uni' | 'inf' | 't1002Usd' | 't23342Usd';
+const usdOf = (h: RegimeHour, k: Kind): number => (k === 'uni' ? h.t1002Usd + (h.tUniUsd ?? 0) : k === 'inf' ? h.t23342Usd + (h.tInfUsd ?? 0) : h[k]);
+const shareOf = (h: RegimeHour, k: Kind) => (h.volumeUsd && h.volumeUsd > 0 ? usdOf(h, k) / h.volumeUsd : null);
 
 /** Volume-weighted share over some hours (null when nothing traded). */
-function share(hs: readonly RegimeHour[], k: 't1002Usd' | 't23342Usd'): number | null {
+function share(hs: readonly RegimeHour[], k: Kind): number | null {
   let v = 0, x = 0;
-  for (const h of hs) if (h.volumeUsd) { v += h.volumeUsd; x += h[k]; }
+  for (const h of hs) if (h.volumeUsd) { v += h.volumeUsd; x += usdOf(h, k); }
   return v > 0 ? x / v : null;
 }
 function median(xs: number[]): number | null {
@@ -35,7 +41,7 @@ function median(xs: number[]): number | null {
  * typical hour's (7 days); poor: under 10% uninformed or over twice the typical volatility; mixed otherwise.
  */
 export function conditionOf(bs: readonly RegimeHour[], typicalBps: number | null, words = 'this window'): { label: string; tone: 'positive' | 'warning' | 'negative' | undefined; why: string } {
-  const u = share(bs, 't1002Usd');
+  const u = share(bs, 'uni');
   const vol = bs.length ? bs.reduce((a, h) => a + h.volBps, 0) / bs.length : null;
   if (u === null || vol === null) return { label: DASH, tone: undefined, why: `No trades, ${words}` };
   const rel = typicalBps && typicalBps > 0 ? vol / typicalBps : 1;
@@ -59,7 +65,7 @@ const TICK_MIN: Record<BotWindow, number> = { '1h': 15, '6h': 60, '24h': 360, '7
 /** A moment drawn on the chart (a bot's start and stop): a dashed line through both lanes and its label. */
 export interface RegimeMark { t: number; label: string }
 
-function Chart({ hours, win, stepMs, marks = [] }: { hours: readonly RegimeHour[]; win: BotWindow; stepMs: number; marks?: readonly RegimeMark[] }) {
+function Chart({ hours, win, stepMs, marks = [], classes }: { hours: readonly RegimeHour[]; win: BotWindow; stepMs: number; marks?: readonly RegimeMark[]; classes?: { informed: number; uninformed: number } }) {
   const [at, setAt] = useState<number | null>(null);
   const wrap = useRef<HTMLDivElement>(null);
   const [w, setW] = useState(720);
@@ -136,7 +142,7 @@ function Chart({ hours, win, stepMs, marks = [] }: { hours: readonly RegimeHour[
             </g>
           ))}
           {hours.map((x, i) => {
-            const u = shareOf(x, 't1002Usd'), f = shareOf(x, 't23342Usd');
+            const u = shareOf(x, 'uni'), f = shareOf(x, 'inf');
             if (u === null || f === null) return <rect key={x.t} x={x0(i)} y={PAD.t} width={step} height={H_FLOW} fill="url(#bots-rg-idle)" />;
             const rx = Math.min(1.5, bw / 3);
             return (
@@ -185,9 +191,11 @@ function Chart({ hours, win, stepMs, marks = [] }: { hours: readonly RegimeHour[
             <b>{when(h.t)}</b>
             {h.volumeUsd === null ? <span className="dim">Not fully recorded</span> : (
               <>
-                <span><i style={{ background: TAKER_COLORS.patient }} />Uninformed<b>{pct(shareOf(h, 't1002Usd'))}</b></span>
-                <span><i style={{ background: TAKER_COLORS.fast }} />Informed<b>{pct(shareOf(h, 't23342Usd'))}</b></span>
-                <span><i className="is-rest" />Unidentified<b>{pct(Math.max(0, 1 - (shareOf(h, 't1002Usd') ?? 0) - (shareOf(h, 't23342Usd') ?? 0)))}</b></span>
+                <span><i style={{ background: TAKER_COLORS.patient }} />Uninformed<b>{pct(shareOf(h, 'uni'))}</b></span>
+                {(h.tUniUsd ?? 0) > 0 && <span className="dim is-sub">1002 {pct(shareOf(h, 't1002Usd'))}, others {pct((h.tUniUsd ?? 0) / (h.volumeUsd || 1))}</span>}
+                <span><i style={{ background: TAKER_COLORS.fast }} />Informed<b>{pct(shareOf(h, 'inf'))}</b></span>
+                {(h.tInfUsd ?? 0) > 0 && <span className="dim is-sub">23342 {pct(shareOf(h, 't23342Usd'))}, others {pct((h.tInfUsd ?? 0) / (h.volumeUsd || 1))}</span>}
+                <span><i className="is-rest" />Unidentified<b>{pct(Math.max(0, 1 - (shareOf(h, 'uni') ?? 0) - (shareOf(h, 'inf') ?? 0)))}</b></span>
                 <span><i className="is-move" />Volatility<b>{Math.round(h.volBps)} bp/h</b></span>
                 <span className="dim">Traded<b>{fmtUsd(h.volumeUsd, 0)}</b></span>
               </>
@@ -196,9 +204,9 @@ function Chart({ hours, win, stepMs, marks = [] }: { hours: readonly RegimeHour[
         )}
       </div>
       <div className="bots-rg__key">
-        <span><i style={{ background: TAKER_COLORS.patient }} />Uninformed flow</span>
-        <span><i style={{ background: TAKER_COLORS.fast }} />Informed flow</span>
-        <span><i className="is-rest" />Everyone else</span>
+        <span title="1002, and accounts whose fills makers earn on 30 s later"><i style={{ background: TAKER_COLORS.patient }} />Uninformed flow{classes ? <em> 1002 + {classes.uninformed}</em> : null}</span>
+        <span title="23342, and accounts whose fills makers lose on 30 s later"><i style={{ background: TAKER_COLORS.fast }} />Informed flow{classes ? <em> 23342 + {classes.informed}</em> : null}</span>
+        <span title="Accounts with too few fills, or no clear sign either way"><i className="is-rest" />Unidentified</span>
         <span><i className="is-move" />Volatility</span>
         <span><i className="is-gap" />Not recorded</span>
       </div>
@@ -257,8 +265,8 @@ export function MarketConditions({ symbol, initialWindow = '24h', marks, title =
         }
       />
       <div className={`bots-kpigrid is-4 bots-rg__kpis${stale ? ' is-stale' : ''}`} aria-busy={stale || undefined}>
-        <StatCard index={0} label="Uninformed flow" value={pct(share(held, 't1002Usd'))} valueTone={(share(held, 't1002Usd') ?? 0) >= 0.4 ? 'positive' : undefined} hint={`${lastWords}: ${pct(share(last, 't1002Usd'))}`} />
-        <StatCard index={1} label="Informed flow" value={pct(share(held, 't23342Usd'))} valueTone={(share(held, 't23342Usd') ?? 0) >= 0.5 ? 'negative' : undefined} hint={`${lastWords}: ${pct(share(last, 't23342Usd'))}`} />
+        <StatCard index={0} label="Uninformed flow" value={pct(share(held, 'uni'))} valueTone={(share(held, 'uni') ?? 0) >= 0.4 ? 'positive' : undefined} hint={`${lastWords}: ${pct(share(last, 'uni'))}`} />
+        <StatCard index={1} label="Informed flow" value={pct(share(held, 'inf'))} valueTone={(share(held, 'inf') ?? 0) >= 0.5 ? 'negative' : undefined} hint={`${lastWords}: ${pct(share(last, 'inf'))}`} />
         <StatCard index={2} label="Volatility" value={vol !== null ? `${Math.round(vol)} bp/h` : DASH} hint={typical !== null ? `Typical hour: ${Math.round(typical)} bp/h` : undefined} />
         <StatCard index={3} label="For market makers" value={cond.label} valueTone={cond.tone === 'warning' ? undefined : cond.tone} hint={cond.why} />
       </div>
@@ -272,7 +280,7 @@ export function MarketConditions({ symbol, initialWindow = '24h', marks, title =
         ) : legacy && shownWin !== '7d' && shownWin !== '24h' ? (
           <EmptyState compact icon="clock" title={`Not by the ${shownWin === '1h' ? 'minute' : 'quarter hour'} yet`} description="The data service still answers by the hour; this window fills in once it is updated." />
         ) : (
-          <Chart hours={hours} win={shownWin} stepMs={legacy ? 3_600_000 : stepMs} marks={marks} />
+          <Chart hours={hours} win={shownWin} stepMs={legacy ? 3_600_000 : stepMs} marks={marks} classes={d?.classes} />
         )}
       </Panel>
     </Shell>

@@ -16,6 +16,7 @@ import { dirname, join } from 'node:path';
 import { NET } from '../config.js';
 import { LiveSocket, sodexPrint, type SodexWsTrade } from '../indexer/streams.js';
 import { defaultFlowPath } from './store.js';
+import { takerClasses } from './takerClass.js';
 
 export const TAPE_MINUTES = 12 * 60;
 const SAVE_EVERY_MS = 5 * 60_000;
@@ -25,18 +26,19 @@ const PAIR_MS = 10_000;
 const ID_1002 = '1002';
 const ID_23342 = '23342';
 
-export interface TapeMinute { tot: number; u: number; f: number; mid: number }
+/** inf / uni: the other takers classed informed / uninformed (takerClass.ts) when the trade came. */
+export interface TapeMinute { tot: number; u: number; f: number; inf: number; uni: number; mid: number }
 
 interface MarketTape {
   /** Minute index (ms / 60 000) each slot holds; slot = minute % TAPE_MINUTES. */
   at: Float64Array;
-  tot: Float64Array; u: Float64Array; f: Float64Array; mid: Float64Array;
+  tot: Float64Array; u: Float64Array; f: Float64Array; inf: Float64Array; uni: Float64Array; mid: Float64Array;
   lastBuy: number; lastBuyT: number; lastSell: number; lastSellT: number;
 }
 
 const newMarket = (): MarketTape => ({
   at: new Float64Array(TAPE_MINUTES).fill(-1),
-  tot: new Float64Array(TAPE_MINUTES), u: new Float64Array(TAPE_MINUTES), f: new Float64Array(TAPE_MINUTES), mid: new Float64Array(TAPE_MINUTES).fill(NaN),
+  tot: new Float64Array(TAPE_MINUTES), u: new Float64Array(TAPE_MINUTES), f: new Float64Array(TAPE_MINUTES), inf: new Float64Array(TAPE_MINUTES), uni: new Float64Array(TAPE_MINUTES), mid: new Float64Array(TAPE_MINUTES).fill(NaN),
   lastBuy: NaN, lastBuyT: -Infinity, lastSell: NaN, lastSellT: -Infinity,
 });
 
@@ -62,7 +64,7 @@ export class BoardTape {
     if (!m) this.markets.set(p.symbol, (m = newMarket()));
     const min = Math.floor(p.t / 60_000);
     const i = min % TAPE_MINUTES;
-    if (m.at[i] !== min) { m.at[i] = min; m.tot[i] = 0; m.u[i] = 0; m.f[i] = 0; m.mid[i] = NaN; }
+    if (m.at[i] !== min) { m.at[i] = min; m.tot[i] = 0; m.u[i] = 0; m.f[i] = 0; m.inf[i] = 0; m.uni[i] = 0; m.mid[i] = NaN; }
     if (p.taker === 'buyer') { m.lastBuy = p.px; m.lastBuyT = p.t; } else if (p.taker === 'seller') { m.lastSell = p.px; m.lastSellT = p.t; }
     m.mid[i] = Math.abs(m.lastBuyT - m.lastSellT) < PAIR_MS ? (m.lastBuy + m.lastSell) / 2 : p.px;
     if (!p.taker) return;
@@ -71,6 +73,11 @@ export class BoardTape {
     const who = p.taker === 'buyer' ? p.buyer : p.seller;
     if (who === ID_1002) m.u[i] = m.u[i]! + ntl;
     else if (who === ID_23342) m.f[i] = m.f[i]! + ntl;
+    else if (who) {
+      const c = takerClasses();
+      if (c.infKeys.has(who)) m.inf[i] = m.inf[i]! + ntl;
+      else if (c.uniKeys.has(who)) m.uni[i] = m.uni[i]! + ntl;
+    }
   }
 
   /** Called at each minute's end (exported for tests): the minute is held when the feed was up and delivering throughout. */
@@ -92,8 +99,8 @@ export class BoardTape {
     if (!this.held.has(minute)) return null;
     const m = this.markets.get(symbol);
     const i = minute % TAPE_MINUTES;
-    if (!m || m.at[i] !== minute) return { tot: 0, u: 0, f: 0, mid: NaN };
-    return { tot: m.tot[i]!, u: m.u[i]!, f: m.f[i]!, mid: m.mid[i]! };
+    if (!m || m.at[i] !== minute) return { tot: 0, u: 0, f: 0, inf: 0, uni: 0, mid: NaN };
+    return { tot: m.tot[i]!, u: m.u[i]!, f: m.f[i]!, inf: m.inf[i]!, uni: m.uni[i]!, mid: m.mid[i]! };
   }
 
   /** Whether the tape holds this minute at all. */
@@ -154,14 +161,14 @@ export class BoardTape {
   save(): void {
     if (!this.file) return;
     try {
-      const out: Record<string, Array<[number, number, number, number, number]>> = {};
+      const out: Record<string, number[][]> = {};
       for (const [sym, m] of this.markets) {
-        const rows: Array<[number, number, number, number, number]> = [];
-        for (let i = 0; i < TAPE_MINUTES; i++) if (m.at[i]! >= 0) rows.push([m.at[i]!, m.tot[i]!, m.u[i]!, m.f[i]!, Number.isFinite(m.mid[i]!) ? m.mid[i]! : 0]);
+        const rows: number[][] = [];
+        for (let i = 0; i < TAPE_MINUTES; i++) if (m.at[i]! >= 0) rows.push([m.at[i]!, m.tot[i]!, m.u[i]!, m.f[i]!, Number.isFinite(m.mid[i]!) ? m.mid[i]! : 0, m.inf[i]!, m.uni[i]!]);
         out[sym] = rows;
       }
       const tmp = `${this.file}.tmp`;
-      writeFileSync(tmp, gzipSync(JSON.stringify({ v: 1, held: [...this.held], markets: out })));
+      writeFileSync(tmp, gzipSync(JSON.stringify({ v: 2, held: [...this.held], markets: out })));
       renameSync(tmp, this.file);
     } catch { /* no disk: the tape lives in memory only */ }
   }
@@ -169,16 +176,16 @@ export class BoardTape {
   private load(): void {
     if (!this.file) return;
     try {
-      const j = JSON.parse(gunzipSync(readFileSync(this.file)).toString('utf8')) as { v?: number; held?: number[]; markets?: Record<string, Array<[number, number, number, number, number]>> };
-      if (j.v !== 1) return;
+      const j = JSON.parse(gunzipSync(readFileSync(this.file)).toString('utf8')) as { v?: number; held?: number[]; markets?: Record<string, number[][]> };
+      if (j.v !== 1 && j.v !== 2) return;
       const floor = Math.floor(Date.now() / 60_000) - TAPE_MINUTES;
       for (const x of j.held ?? []) if (x > floor) this.held.add(x);
       for (const [sym, rows] of Object.entries(j.markets ?? {})) {
         const m = newMarket();
-        for (const [min, tot, u, f, mid] of rows) {
+        for (const [min = 0, tot = 0, u = 0, f = 0, mid = 0, inf = 0, uni = 0] of rows) {
           if (min <= floor) continue;
           const i = min % TAPE_MINUTES;
-          m.at[i] = min; m.tot[i] = tot; m.u[i] = u; m.f[i] = f; m.mid[i] = mid > 0 ? mid : NaN;
+          m.at[i] = min; m.tot[i] = tot; m.u[i] = u; m.f[i] = f; m.inf[i] = inf; m.uni[i] = uni; m.mid[i] = mid > 0 ? mid : NaN;
         }
         this.markets.set(sym, m);
       }

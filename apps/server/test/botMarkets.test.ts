@@ -177,7 +177,7 @@ test('ALL holds a bucket only when the markets holding it carry half the volume;
   const now = Date.UTC(2026, 10, 10, 11, 0);
   const m0 = Math.floor((now - 7 * 86_400_000) / 60_000);
   const nm = Math.floor((now - 1) / 60_000) - m0 + 1;
-  const mk = (perMin: number): MinuteSeries => ({ m0, tot: new Float32Array(nm).fill(perMin), u: new Float32Array(nm), f: new Float32Array(nm), vol: new Float32Array(nm), held: new Uint8Array(nm).fill(1) });
+  const mk = (perMin: number): MinuteSeries => ({ m0, tot: new Float32Array(nm).fill(perMin), u: new Float32Array(nm), f: new Float32Array(nm), inf: new Float32Array(nm), uni: new Float32Array(nm), vol: new Float32Array(nm), held: new Uint8Array(nm).fill(1) });
   const big = mk(1000), small = mk(10);
   // The big market is not recorded over the last 20 minutes (the indexer behind): ALL must say so, not read 10 $/min.
   for (let i = nm - 20; i < nm; i++) big.held[i] = 0;
