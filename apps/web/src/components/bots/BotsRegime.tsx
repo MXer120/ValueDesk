@@ -56,7 +56,10 @@ const H_FLOW = 128, H_GAP = 38, H_MOVE = 56, PAD = { l: 2, r: 46, t: 10, b: 24 }
 /** Where the time axis is marked per window (minutes of the viewer's own clock) and how a mark reads. */
 const TICK_MIN: Record<BotWindow, number> = { '1h': 15, '6h': 60, '24h': 360, '7d': 1440 };
 
-function Chart({ hours, win, stepMs }: { hours: readonly RegimeHour[]; win: BotWindow; stepMs: number }) {
+/** A moment drawn on the chart (a bot's start and stop): a dashed line through both lanes and its label. */
+export interface RegimeMark { t: number; label: string }
+
+function Chart({ hours, win, stepMs, marks = [] }: { hours: readonly RegimeHour[]; win: BotWindow; stepMs: number; marks?: readonly RegimeMark[] }) {
   const [at, setAt] = useState<number | null>(null);
   const wrap = useRef<HTMLDivElement>(null);
   const [w, setW] = useState(720);
@@ -159,6 +162,17 @@ function Chart({ hours, win, stepMs }: { hours: readonly RegimeHour[]; win: BotW
               {(everyDay || k % 2 === 0) && <text x={x0(i) + 4} y={H - 6} className="bots-rg__ax">{tickWords(d)}</text>}
             </g>
           ))}
+          {marks.map((mk) => {
+            const t0 = hours[0]?.t, t1 = (hours[n - 1]?.t ?? 0) + stepMs;
+            if (t0 === undefined || mk.t < t0 || mk.t > t1) return null;
+            const x = PAD.l + ((mk.t - t0) / (t1 - t0)) * plotW;
+            return (
+              <g key={`${mk.label}${mk.t}`} pointerEvents="none">
+                <line x1={x} x2={x} y1={PAD.t} y2={moveTop + H_MOVE} className="bots-rg__mark" />
+                <text x={Math.min(x + 4, w - PAD.r - 60)} y={PAD.t + 10} className="bots-rg__markt">{mk.label}</text>
+              </g>
+            );
+          })}
           {h && at !== null && (
             <g pointerEvents="none">
               <rect x={x0(at) - 1} y={PAD.t - 2} width={step + 2} height={moveTop + H_MOVE - PAD.t + 2} rx={3} className="bots-rg__cur" />
@@ -173,6 +187,7 @@ function Chart({ hours, win, stepMs }: { hours: readonly RegimeHour[]; win: BotW
               <>
                 <span><i style={{ background: TAKER_COLORS.patient }} />Uninformed<b>{pct(shareOf(h, 't1002Usd'))}</b></span>
                 <span><i style={{ background: TAKER_COLORS.fast }} />Informed<b>{pct(shareOf(h, 't23342Usd'))}</b></span>
+                <span><i className="is-rest" />Unidentified<b>{pct(Math.max(0, 1 - (shareOf(h, 't1002Usd') ?? 0) - (shareOf(h, 't23342Usd') ?? 0)))}</b></span>
                 <span><i className="is-move" />Volatility<b>{Math.round(h.volBps)} bp/h</b></span>
                 <span className="dim">Traded<b>{fmtUsd(h.volumeUsd, 0)}</b></span>
               </>
@@ -194,58 +209,70 @@ function Chart({ hours, win, stepMs }: { hours: readonly RegimeHour[]; win: BotW
 const WIN_WORDS: Record<BotWindow, string> = { '1h': 'last hour', '6h': 'last 6 hours', '24h': 'last 24 hours', '7d': 'last 7 days' };
 const STEP_WORDS = (ms: number) => (ms >= 3_600_000 ? 'hour' : `${Math.round(ms / 60_000)} min`);
 
-export function MarketConditions() {
-  const [sym, setSym] = useState<string>(ALL);
-  const [win, setWin] = useState<BotWindow>('24h');
+/**
+ * `symbol`: one market only (a bot's page: no market dropdown). `initialWindow`: the window it opens on. `marks`: moments
+ * drawn on the chart (the bot's start and stop). `title` / `subtitle`: a bot's page says whose market it is.
+ */
+export function MarketConditions({ symbol, initialWindow = '24h', marks, title = 'Market conditions', subtitle }: { symbol?: string; initialWindow?: BotWindow; marks?: readonly RegimeMark[]; title?: string; subtitle?: string } = {}) {
+  const [symPicked, setSym] = useState<string>(ALL);
+  const sym = symbol ?? symPicked;
+  const [win, setWin] = useState<BotWindow>(initialWindow);
   const r = useBotRegime(sym, win);
-  const d = r.data;
+  // The answer for the market and window picked; while a new pick loads, the last one that matched stays on screen
+  // (dimmed), so a change never blanks the board to a skeleton and back (owner 2026-11-10: "it flickers").
+  const fits = (x: typeof r.data, s: string, w: BotWindow) => !!x && x.symbol.toUpperCase() === s.toUpperCase() && (x.window === undefined || x.window === w);
+  const kept = useRef<{ d: NonNullable<typeof r.data>; win: BotWindow } | null>(null);
+  if (r.data && fits(r.data, sym, win)) kept.current = { d: r.data, win };
+  const stale = !fits(r.data, sym, win) && !!kept.current;
+  const d = kept.current?.d ?? null;
+  const shownWin = kept.current?.win ?? win;
   const options: FxOption[] = useMemo(() => [{ value: ALL, label: 'All markets', icon: undefined }, ...(d?.markets ?? []).map((m) => ({ value: m, label: m.replace(/-USD$/i, ''), icon: m.replace(/-USD$/i, '') }))], [d?.markets]);
   // A server from before the windows answers 7 days by the hour to every window: cut it to the window here.
   const legacy = !!d && d.window === undefined;
   const stepMs = d?.stepMs ?? 3_600_000;
   const hours = useMemo(() => {
-    if (!d || d.symbol.toUpperCase() !== sym.toUpperCase() || (!legacy && d.window !== win)) return [];
+    if (!d) return [];
     if (!legacy) return d.hours;
-    const from = (d.hours[d.hours.length - 1]?.t ?? 0) - (WINDOW_H[win] - 1) * 3_600_000;
+    const from = (d.hours[d.hours.length - 1]?.t ?? 0) - (WINDOW_H[shownWin] - 1) * 3_600_000;
     return d.hours.filter((h) => h.t >= from);
-  }, [d, sym, win, legacy]);
+  }, [d, shownWin, legacy]);
   const held = hours.filter((h) => h.volumeUsd !== null);
   const last = held.slice(-1);
   const vol = held.length ? held.reduce((a, h) => a + h.volBps * (h.volumeUsd ?? 0), 0) / Math.max(1, held.reduce((a, h) => a + (h.volumeUsd ?? 0), 0)) : null;
   const typical = d?.typicalVolBps ?? median(held.map((h) => h.volBps));
-  const cond = conditionOf(held, typical, WIN_WORDS[win]);
-  const loading = !d || d.symbol.toUpperCase() !== sym.toUpperCase() || (!legacy && d.window !== win);
+  const cond = conditionOf(held, typical, WIN_WORDS[shownWin]);
+  const loading = !d;
   const lastWords = `Latest ${STEP_WORDS(legacy ? 3_600_000 : stepMs)}`;
   return (
     <Shell className="bots-regime">
       <ShellHeader
         icon="pulse"
-        title="Market conditions"
-        subtitle={`Who takes makers' quotes and how volatile the price is, ${WIN_WORDS[win]}`}
+        title={title}
+        subtitle={subtitle ?? `Who takes makers' quotes and how volatile the price is, ${WIN_WORDS[win]}`}
         aside={
           <div className="bots-rg__ctl">
-            <FxSelect value={sym} options={options} onChange={setSym} label="Market" searchable searchPlaceholder="Search markets" triggerClassName="bots-rg__pick" listMinWidth={220} listAlign="end" />
+            {!symbol && <FxSelect value={sym} options={options} onChange={setSym} label="Market" searchable searchPlaceholder="Search markets" triggerClassName="bots-rg__pick" listMinWidth={220} listAlign="end" />}
             <Segmented value={win} label="Window" onChange={setWin} options={[{ value: '1h', label: '1h' }, { value: '6h', label: '6h' }, { value: '24h', label: '24h' }, { value: '7d', label: '7d' }]} />
           </div>
         }
       />
-      <div className="bots-kpigrid is-4 bots-rg__kpis">
+      <div className={`bots-kpigrid is-4 bots-rg__kpis${stale ? ' is-stale' : ''}`} aria-busy={stale || undefined}>
         <StatCard index={0} label="Uninformed flow" value={pct(share(held, 't1002Usd'))} valueTone={(share(held, 't1002Usd') ?? 0) >= 0.4 ? 'positive' : undefined} hint={`${lastWords}: ${pct(share(last, 't1002Usd'))}`} />
         <StatCard index={1} label="Informed flow" value={pct(share(held, 't23342Usd'))} valueTone={(share(held, 't23342Usd') ?? 0) >= 0.5 ? 'negative' : undefined} hint={`${lastWords}: ${pct(share(last, 't23342Usd'))}`} />
         <StatCard index={2} label="Volatility" value={vol !== null ? `${Math.round(vol)} bp/h` : DASH} hint={typical !== null ? `Typical hour: ${Math.round(typical)} bp/h` : undefined} />
         <StatCard index={3} label="For market makers" value={cond.label} valueTone={cond.tone === 'warning' ? undefined : cond.tone} hint={cond.why} />
       </div>
-      <Panel className="bots-rg__panel">
+      <Panel className={`bots-rg__panel${stale ? ' is-stale' : ''}`} aria-busy={stale || undefined}>
         {r.error && !d ? (
           <EmptyState compact tone="error" icon="warning" title="Conditions unavailable" description={`The data service did not answer (${r.error}).`} actions={<Button onClick={r.refresh}>Retry</Button>} />
         ) : loading ? (
           <Skeleton className="bots-rg__skel" />
         ) : !hours.length ? (
           <EmptyState compact icon="search" title="No trades recorded here" description="Pick another market, another window or All markets." />
-        ) : legacy && win !== '7d' && win !== '24h' ? (
-          <EmptyState compact icon="clock" title={`Not by the ${win === '1h' ? 'minute' : 'quarter hour'} yet`} description="The data service still answers by the hour; this window fills in once it is updated." />
+        ) : legacy && shownWin !== '7d' && shownWin !== '24h' ? (
+          <EmptyState compact icon="clock" title={`Not by the ${shownWin === '1h' ? 'minute' : 'quarter hour'} yet`} description="The data service still answers by the hour; this window fills in once it is updated." />
         ) : (
-          <Chart hours={hours} win={win} stepMs={legacy ? 3_600_000 : stepMs} />
+          <Chart hours={hours} win={shownWin} stepMs={legacy ? 3_600_000 : stepMs} marks={marks} />
         )}
       </Panel>
     </Shell>

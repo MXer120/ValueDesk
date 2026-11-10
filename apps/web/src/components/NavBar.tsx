@@ -198,9 +198,11 @@ export function NavBar({
     </div>
   ) : null;
 
-  /* Bots: the section's pages in the same switch and slot (BotsNavSeg), only where the section is built in. */
-  const onBots = BOTS_ON && tab === 'bots';
-  const botsSeg = BOTS_ON ? <BotsNavSeg active={onBots} /> : null;
+  /* Bots: the section's pages in the same switch and slot (BotsNavSeg) wherever the section is open to this wallet - a
+     local build, or a wallet on the beta list in production (owner 2026-11-10: production had no Overview / New bot /
+     Explore / Savings). BOTS_ON stays the local switch (any wallet, demo data). */
+  const onBots = botsOpen && tab === 'bots';
+  const botsSeg = botsOpen ? <BotsNavSeg active={onBots} /> : null;
 
   return (
     <header ref={bar} className={`navbar${rail ? ' navbar--rail' : ''}`}>

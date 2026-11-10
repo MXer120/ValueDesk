@@ -9,6 +9,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { BotMarket } from '../../bots/data';
 import { fmtUsd } from '../../format';
 import { fmtBpUsd } from './BotNewPage';
+import { marketScore, scoreColour } from '../../bots/score';
 import { FxSelect } from '../funds/ui';
 import { Segmented } from './kit/kit';
 
@@ -49,13 +50,6 @@ export function squarify<T>(items: ReadonlyArray<{ v: number; it: T }>, W: numbe
   return out;
 }
 
-/** The tile's colour: green when $1M earns, amber up to the fees, red past them; stronger the further from zero. */
-function tone(bp: number | null, feeBps: number): { bg: string; cls: string } {
-  if (bp === null) return { bg: 'rgb(var(--ink) / 0.05)', cls: 'is-none' };
-  if (bp <= 0) return { bg: `color-mix(in srgb, var(--pos) ${Math.round(28 + Math.min(1, -bp / 2) * 52)}%, rgb(var(--ink) / 0.04))`, cls: 'is-earn' };
-  if (bp <= feeBps) return { bg: `color-mix(in srgb, var(--warn) ${Math.round(22 + (bp / feeBps) * 30)}%, rgb(var(--ink) / 0.04))`, cls: 'is-mid' };
-  return { bg: `color-mix(in srgb, var(--neg) ${Math.round(30 + Math.min(1, (bp - feeBps) / 2) * 50)}%, rgb(var(--ink) / 0.04))`, cls: 'is-dear' };
-}
 
 /** What sizes a tile, what colours it and in which order the tiles are laid (owner 2026-11-10: "settings to sort by
  * different things - score, activity"; "zoom in into smaller markets"; "all markets displayed in every timeframe"). */
@@ -102,13 +96,20 @@ function rowsInOrder<T>(items: ReadonlyArray<{ v: number; it: T }>, W: number, H
   return out;
 }
 
-const mix = (token: string, pct: number) => `color-mix(in srgb, ${token} ${Math.round(pct)}%, rgb(var(--ink) / 0.04))`;
+// Solid colours over the raised surface (a translucent tile let an edge it shared with its neighbour show darker).
+const mix = (token: string, pct: number) => `color-mix(in srgb, ${token} ${Math.round(pct)}%, var(--tf-raised))`;
+
+/** A tile on whole pixels: each edge rounded once, so neighbours meet exactly (fractional edges overlapped by a pixel). */
+const snap = (it: Item, c: { x: number; y: number; w: number; h: number }): Cell => {
+  const x = Math.round(c.x), y = Math.round(c.y);
+  return { ...it, x, y, w: Math.round(c.x + c.w) - x, h: Math.round(c.y + c.h) - y };
+};
 
 /** A tile's colour and the figure it shows, for the colour picked. */
 function look(it: Item, colour: MapColour, feeBps: number, maxVol: number): { bg: string; cls: string; figure: string } {
   const m = it.m;
   if (!m) return { bg: 'rgb(var(--ink) / 0.035)', cls: 'is-empty', figure: 'no trades' };
-  if (colour === 'score') { const t = tone(it.bp, feeBps); return { ...t, figure: it.bp === null ? 'no estimate' : fmtBpUsd(it.bp) }; }
+  if (colour === 'score') { const sc = marketScore(it.bp, feeBps); return { bg: scoreColour(sc), cls: 'is-score', figure: sc === null ? 'no estimate' : `${sc}` }; }
   if (colour === 'uninformed') return { bg: mix('var(--pos)', 8 + m.takers.t1002 * 72), cls: 'is-u', figure: `${Math.round(m.takers.t1002 * 100)}%` };
   if (colour === 'informed') return { bg: mix('var(--neg)', 8 + m.takers.t23342 * 72), cls: 'is-f', figure: `${Math.round(m.takers.t23342 * 100)}%` };
   const r = maxVol > 0 ? Math.log1p(m.volBpsH) / Math.log1p(maxVol) : 0;
@@ -191,17 +192,17 @@ export function MarketMap({ markets, absent = [], scoreOf, feeBps, window: win, 
     const k = key[prefs.order];
     items.sort((a, b) => { const x = k(a), y = k(b); return typeof x === 'string' ? x.localeCompare(String(y)) : (x as number) - (y as number); });
     const W = w * z, H = height * z;
-    if (prefs.size === 'equal') return grid(items, W, H).map((c) => ({ ...c.it, x: c.x, y: c.y, w: c.w, h: c.h }));
+    if (prefs.size === 'equal') return grid(items, W, H).map((c) => snap(c.it, c));
     // Every market keeps a floor of the area (0.35 %), so a quiet or empty one is still a tile to point at and zoom to.
     const total = items.reduce((a, it) => a + act(it), 0) || 1;
     const vals = items.map((it) => ({ v: Math.max(act(it), total * 0.0035), it }));
     const laid = prefs.order === 'size' ? squarify(vals, W, H) : rowsInOrder(vals, W, H);
-    return laid.map((c) => ({ ...c.it, x: c.x, y: c.y, w: c.w, h: c.h }));
+    return laid.map((c) => snap(c.it, c));
   }, [markets, absent, scoreOf, prefs, w, height, z]);
   const hv = hover ? cells.find((c) => c.symbol === hover) : null;
   const winWords = { '1h': 'the last hour', '6h': 'the last 6 hours', '24h': 'the last 24 hours', '7d': 'the last 7 days' }[win];
   const KEY: Record<MapColour, Array<[string, string]>> = {
-    score: [['is-earn', 'Earns'], ['is-mid', 'Costs up to the fees'], ['is-dear', 'Costs more than the fees'], ['is-none', 'No estimate'], ['is-empty', 'No trades']],
+    score: [['is-s0', 'Score 0: costs $230+ over the fees'], ['is-s50', '50: pays only the fees'], ['is-s100', '100: earns $300+ per $1M'], ['is-none', 'No estimate'], ['is-empty', 'No trades']],
     uninformed: [['is-u-lo', 'Little uninformed flow'], ['is-u', 'Much'], ['is-empty', 'No trades']],
     informed: [['is-f-lo', 'Little informed flow'], ['is-f', 'Much'], ['is-empty', 'No trades']],
     volatility: [['is-v-lo', 'Calm'], ['is-v', 'Volatile'], ['is-empty', 'No trades']],
@@ -263,7 +264,7 @@ export function MarketMap({ markets, absent = [], scoreOf, feeBps, window: win, 
           hv.m ? (
             <>
               <b>{hv.base}</b>
-              <span>{hv.bp === null ? 'No estimate' : <><b>{fmtBpUsd(hv.bp)}</b> per $1M</>}</span>
+              <span>{hv.bp === null ? 'No estimate' : <>Score <b>{marketScore(hv.bp, feeBps)}</b> · <b>{fmtBpUsd(hv.bp)}</b> per $1M</>}</span>
               <span className="dim">{fmtUsd(hv.m.volumeUsdH, 0)}/h traded · uninformed {Math.round(hv.m.takers.t1002 * 100)}% · informed {Math.round(hv.m.takers.t23342 * 100)}% · volatility {Math.round(hv.m.volBpsH)} bp/h</span>
             </>
           ) : <><b>{hv.base}</b><span className="dim">No trades in {winWords}</span></>

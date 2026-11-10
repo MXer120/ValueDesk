@@ -21,6 +21,7 @@ import { demoLatency } from '../../bots/demo';
 import { goBots, type BotsView } from '../../bots/routes';
 import { BotAvatar, BotIcon } from './BotIcon';
 import { LatencyChart, mergeRegions, type ChartMark } from './LatencyChart';
+import { MarketConditions } from './BotsRegime';
 import { botName, botState, fmtPnl, statusWords } from './botWords';
 import { StopMenu } from './StopMenu';
 import { AllocationPanel } from './Allocation';
@@ -222,7 +223,6 @@ export function SignInButton({ ctx }: { ctx: BotsCtx }) {
   return (
     <span className="bots-signin">
       <Button variant="primary" icon="wallet" loading={waiting} onClick={() => void go()}>{waiting ? 'Waiting for your wallet…' : 'Sign in'}</Button>
-      {waiting && <small className="bots-fine" role="status">Approve the sign-in in your wallet. It is a free signature and changes nothing.</small>}
     </span>
   );
 }
@@ -470,6 +470,7 @@ export function BotsOverview({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
       <div className="bots-two">
         <ErrorBoundary name="Latency"><LatencyCard marks={marks} ctx={ctx} /></ErrorBoundary>
         <ErrorBoundary name="Volume and net PnL"><FleetChart bots={ready ? real : []} empty={ready && t.practice.bots ? { title: 'No real bot yet', line: 'Practice bots are not charted with real money.' } : undefined} /></ErrorBoundary>
+        <ErrorBoundary name="Market conditions"><MarketConditions /></ErrorBoundary>
       </div>
 
       {ready && <ErrorBoundary name="Margin"><AllocationPanel ctx={ctx} /></ErrorBoundary>}

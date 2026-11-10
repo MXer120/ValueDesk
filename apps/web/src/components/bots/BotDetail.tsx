@@ -21,6 +21,7 @@ import { useBotLog } from '../../bots/useBots';
 import { inPlacePatch } from '../../bots/fleet';
 import { canUpdateOn } from '../../algo/executorAlgos';
 import { BotLog } from './BotLog';
+import { MarketConditions } from './BotsRegime';
 import { demoEvents } from '../../bots/demo';
 import { useBotMarkets } from '../../bots/data';
 import { goBots, type BotsView } from '../../bots/routes';
@@ -40,7 +41,7 @@ import { BotsHead, StatePill, type BotsCtx } from './BotsPage';
 import { SignInButton } from './BotsOverview';
 import { Button, EmptyState, Icon, IconButton, Inset, Panel, ProgressBar, RollingNumber, SegmentedBar, Shell, ShellHeader, Skeleton, StatCard, StatusPill, Tabs, type Tone } from './kit/kit';
 
-type Tab = 'overview' | 'settings' | 'orders' | 'trades' | 'activity';
+type Tab = 'overview' | 'analysis' | 'settings' | 'orders' | 'trades' | 'activity';
 type How = 'clean' | 'takeover';
 
 function Controls({ v, ctx }: { v: AlgoView; ctx: BotsCtx }) {
@@ -141,12 +142,12 @@ function SettingsTab({ v, ctx }: { v: AlgoView; ctx: BotsCtx }) {
   };
   return (
     <div className="bots-settingspage">
-      <Shell className="bots-stgshell">
+      <Shell className="bots-setshell">
         <ShellHeader icon="gear" title="Settings" subtitle={ended ? 'As it ran. Run it again to start a new bot with them.' : closing ? 'It is closing what it holds: settings can change again once it has stopped.' : 'Every setting saves to the running bot at once: nothing restarts, nothing is closed.'} aside={n ? <Button variant="quiet" onClick={() => setD(before)}>Undo changes</Button> : ended ? <Button variant="secondary" icon="play" onClick={() => ctx.runAgain(v)}>Run again</Button> : undefined} />
         <Panel className="bots-sizepanel">
           <fieldset className="bots-fieldset" disabled={ended || closing}>
-            <BotSettings d={d} set={(p) => setD((x) => ({ ...x, ...p }))} range={d.strategy === 'grid' ? gridRange(d, null) : null} mark={v.bot?.mark ?? null} liveAllowed={ctx.liveAllowed} hidePractice noLead={est?.lead === null} lev={{ ...lev, max: leverageCap(lev.max, regionMax) }} />
-            <NameField d={d} set={(p) => setD((x) => ({ ...x, ...p }))} />
+            <div className="bots-setname"><NameField d={d} set={(p) => setD((x) => ({ ...x, ...p }))} /></div>
+            <BotSettings cards d={d} set={(p) => setD((x) => ({ ...x, ...p }))} range={d.strategy === 'grid' ? gridRange(d, null) : null} mark={v.bot?.mark ?? null} liveAllowed={ctx.liveAllowed} hidePractice noLead={est?.lead === null} lev={{ ...lev, max: leverageCap(lev.max, regionMax) }} />
           </fieldset>
         </Panel>
       </Shell>
@@ -294,7 +295,7 @@ export function LimitsProgress({ v }: { v: AlgoView }) {
 export function BotDetail({ ctx, view, id }: { ctx: BotsCtx; view: BotsView; id: string }) {
   const v = ctx.bots.find((x) => x.algo.id === id) ?? null;
   const [tab, setTab] = useState<Tab>('overview');
-  const realEv = useBotLog(id, !!v && !ctx.demo && (tab === 'trades' || tab === 'activity'));
+  const realEv = useBotLog(id, !!v && !ctx.demo && (tab === 'trades' || tab === 'activity' || tab === 'analysis'));
   const demoEv = useMemo(() => (ctx.demo && v ? demoEvents(v) : null), [ctx.demo, v]);
   const log = demoEv ? { events: demoEv, error: null, more: false, loading: false, loadMore: () => undefined } : realEv;
   const markets = useBotMarkets('24h', !!v && v.algo.spec.kind === 'mm');
@@ -324,6 +325,11 @@ export function BotDetail({ ctx, view, id }: { ctx: BotsCtx; view: BotsView; id:
   const trendPnl = (v.algo.book?.series ?? []).map((p) => p[2]);
   const trendVol = (v.algo.book?.series ?? []).map((p) => p[1]);
   const ended = botState(v) === 'ended' || botState(v) === 'failed';
+  // The window that holds the bot's run, and its start and stop drawn on the market's chart.
+  const runFrom = v.algo.startedAt ?? v.algo.createdAt;
+  const runMs = (v.algo.endedAt ?? Date.now()) - runFrom;
+  const runWindow = runMs < 3_600_000 ? '1h' : runMs < 6 * 3_600_000 ? '6h' : runMs < 24 * 3_600_000 ? '24h' : '7d';
+  const runMarks = [{ t: runFrom, label: 'Started' }, ...(v.algo.endedAt ? [{ t: v.algo.endedAt, label: 'Stopped' }] : [])];
   // One estimate on the page: the market's, blended with this wallet's own runs (estimate.ts), as New bot shows it.
   const estBps = v.algo.spec.kind === 'mm' && markets.data ? estimate(effectiveDraft(draftOfSpec(v.algo.spec), est), est, ownRuns(ctx.bots, markets.data.markets), feeAdjOf(ctx.feeTenths, markets.data.fee.builderBps)).bp : null;
   return (
@@ -359,7 +365,7 @@ export function BotDetail({ ctx, view, id }: { ctx: BotsCtx; view: BotsView; id:
           label="Bot sections"
           value={tab}
           onChange={setTab}
-          tabs={[{ value: 'overview', label: 'Overview' }, { value: 'settings', label: 'Settings' }, { value: 'orders', label: 'Orders', count: b?.orders.length ?? 0 }, { value: 'trades', label: 'Trades' }, { value: 'activity', label: 'Activity' }]}
+          tabs={[{ value: 'overview', label: 'Overview' }, { value: 'analysis', label: 'Analysis' }, { value: 'settings', label: 'Settings' }, { value: 'orders', label: 'Orders', count: b?.orders.length ?? 0 }, { value: 'trades', label: 'Trades' }, { value: 'activity', label: 'Activity' }]}
         />
       </div>
 
@@ -367,6 +373,7 @@ export function BotDetail({ ctx, view, id }: { ctx: BotsCtx; view: BotsView; id:
         <div className="bots-dgrid">
           <div className="bots-dgrid__main">
             <FleetChart bots={[v]} title="Performance" />
+            <MarketConditions symbol={v.algo.spec.symbol} initialWindow={runWindow} marks={runMarks} title={`Market conditions on ${v.algo.spec.symbol.replace(/-USD$/i, '')}`} subtitle="Who took makers' quotes and how volatile it was while this bot ran" />
           </div>
           <aside className="bots-dgrid__side">
             {!ended && <Watchdog v={v} />}
@@ -394,8 +401,22 @@ export function BotDetail({ ctx, view, id }: { ctx: BotsCtx; view: BotsView; id:
           </aside>
         </div>
       )}
+      {tab === 'analysis' && (
+        // Analysis (owner 2026-11-10): the bot's market as it ran (who took quotes, volatility, the bot's start and stop
+        // drawn in), how fast its orders reached SoDEX, and what went wrong.
+        <div className="bots-analysis">
+          <MarketConditions symbol={v.algo.spec.symbol} initialWindow={runWindow} marks={runMarks} title={`Market conditions on ${v.algo.spec.symbol.replace(/-USD$/i, '')}`} subtitle="Who took makers' quotes and how volatile it was while this bot ran" />
+          <div className="bots-analysis__row">
+            <LatencyCard ctx={ctx} bot={v.algo.id} practice={v.algo.spec.paper} marks={v.algo.startedAt ? [{ t: v.algo.startedAt, label: 'Started' }] : []} />
+            <Shell className="bots-detailcard">
+              <ShellHeader icon="warning" title="Problems" subtitle="What SoDEX refused and where the bot had to wait" />
+              <Panel className="bots-tabpanel"><BotLog {...log} only="problem" /></Panel>
+            </Shell>
+          </div>
+        </div>
+      )}
       {tab === 'settings' && <SettingsTab v={v} ctx={ctx} />}
-      {tab !== 'overview' && tab !== 'settings' && (
+      {tab !== 'overview' && tab !== 'settings' && tab !== 'analysis' && (
         <Shell className="bots-detailcard">
           <Panel className="bots-tabpanel" role="tabpanel">
             {tab === 'orders' && <Orders v={v} />}
