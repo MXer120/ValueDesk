@@ -65,6 +65,7 @@ import { DatabaseSync, type StatementSync } from 'node:sqlite';
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeSync, writevSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { Checkpointer, type CheckpointStatus } from './checkpointer.js';
+import { DayScanPool, dayScanThreads, type DayScanResult } from './dayScanPool.js';
 import {
   ACTIVITY_DAY, ACTIVITY_HOUR, CTL_WANT, FILL_UPSERT, LIQ_ADDR_INSERT, LIQ_CUR_DELETE, LIQ_CUR_INSERT, LIQ_LOG_INSERT, WRITER_DONE_META, WriterThread, writerThreadOn,
   type ActivityWire, type LiqChangedWire, type LiqClosedWire, type WriterAnswer, type WriterPending, type WriterStatus,
@@ -694,6 +695,29 @@ type HeldRows = { ver: number; from: number; n: number; t: Float64Array; v: Floa
  */
 const HELD_ROWS_MAX = 30_000_000;
 const HELD_DAY_MAX = 5_000_000;
+
+/** Rows as the held cache keeps them, or null when the arrays could not give one back as it was read. */
+function packHeld(ver: number, from: number, rows: ScanRow[]): HeldRows | null {
+  const n = rows.length;
+  const h: HeldRows = {
+    ver, from, n, t: new Float64Array(n), v: new Float64Array(n), pnl: new Float64Array(n), fee: new Float64Array(n),
+    side: new Int8Array(n), src: new Int8Array(n), sym: new Uint16Array(n), syms: [],
+  };
+  const ix = new Map<string, number>();
+  for (let i = 0; i < n; i++) {
+    const r = rows[i]!;
+    if (!Number.isInteger(r.side) || r.side < -128 || r.side > 127 || (r.src !== 0 && r.src !== 1)) return null;
+    let k = ix.get(r.symbol);
+    if (k === undefined) {
+      if (h.syms.length >= 65_535) return null;
+      ix.set(r.symbol, (k = h.syms.length));
+      h.syms.push(r.symbol);
+    }
+    h.t[i] = r.t; h.v[i] = r.v; h.pnl[i] = r.closed_pnl ?? Number.NaN; h.fee[i] = r.fee ?? Number.NaN;
+    h.side[i] = r.side; h.src[i] = r.src; h.sym[i] = k;
+  }
+  return h;
+}
 /**
  * The held rows written beside the index when the writer stops and read back when the next one
  * starts. Tied to the scan's own SQL: a release that reads the fills differently starts cold.
@@ -1047,6 +1071,8 @@ export class IndexStore {
    * checkpoint, tested), and the writer thread's, closed as its thread ends, is not the last while this one is open.
    */
   close(lap: (step: string) => void = () => {}, o: { exiting?: boolean } = {}): void {
+    this.dayScans?.stop();
+    this.dayScans = null;
     // Rows the writer thread holds still: written here (the indexer's stop has spilled them already: engine.stop).
     this.stopWriter();
     lap('writer thread');
@@ -1069,6 +1095,8 @@ export class IndexStore {
    * are a file, not the index: writeHeld writes them after the lock is gone, while the incoming process already writes.
    */
   releaseForHandover(lap: (step: string) => void = () => {}): void {
+    this.dayScans?.stop();
+    this.dayScans = null;
     this.stopWriter();
     lap('writer thread');
     this.checkpointer?.stop();
@@ -2535,6 +2563,25 @@ export class IndexStore {
     const gone = this.rowsGone.get(wk) ?? 0;
     const key = `${wk}|${fromT}|${ver}|${gone}`;
     if (this.partialMemo.has(key)) return this.partialMemo.get(key);
+    // One read per key at a time: the boards ask for a pick's first day ahead of time (prefetchPartials) and again
+    // when they sum it, and two windows can share a start.
+    const flying = this.partialFlying.get(key);
+    if (flying) return flying;
+    const p = this.partialDayRead(venue, address, fromT, pause, { d0, dk, ver, wk, gone, key });
+    this.partialFlying.set(key, p);
+    try {
+      return await p;
+    } finally {
+      this.partialFlying.delete(key);
+    }
+  }
+  private partialFlying = new Map<string, Promise<DayAgg | undefined>>();
+
+  private async partialDayRead(
+    venue: Venue, address: string, fromT: number, pause: () => Promise<void>,
+    k: { d0: number; dk: string; ver: number; wk: string; gone: number; key: string },
+  ): Promise<DayAgg | undefined> {
+    const { d0, dk, ver, wk, gone, key } = k;
     const end = (d0 + 1) * DAY;
     const job = this.newJob(venue, address, fromT, end);
     // The start moves on every quarter (and the 1d window's first day is yesterday's last
@@ -2552,6 +2599,18 @@ export class IndexStore {
       this.heldScans++;
       if (held) this.letGo(dk);
       const gen = this.heldGen;
+      // On a reader thread when there are some (dayScanPool.ts): the same loop over the same SQL, off this thread.
+      let pooled: DayScanResult | null = null;
+      if (this.dayScans?.on) pooled = await this.dayScans.scan({ venue, address, fromT, end, keep: end <= Date.now() }).catch(() => null);
+      if (pooled) {
+        if (pooled.held && (this.dayVersion.get(dk) ?? 0) === ver && this.heldGen === gen && (this.rowsGone.get(wk) ?? 0) === gone) {
+          pooled.held.ver = ver;
+          this.putHeld(dk, pooled.held);
+        }
+        if (this.partialMemo.size >= 50_000) this.partialMemo.clear();
+        this.partialMemo.set(key, pooled.agg);
+        return pooled.agg;
+      }
       if (end <= Date.now()) job.keep = [];
       while (!this.step(job)) {
         if (job.keep && job.keep.length > HELD_DAY_MAX) job.keep = undefined;
@@ -2567,6 +2626,49 @@ export class IndexStore {
     this.partialMemo.set(key, out);
     return out;
   }
+
+  /**
+   * What partialDayAsync's own loop gives for [fromT, end), in one go: a reader thread's read (dayScanPool.ts). `keep`:
+   * the rows packed for the held cache too, when there are not over HELD_DAY_MAX of them.
+   */
+  scanDayForThread(venue: Venue, address: string, fromT: number, end: number, keep: boolean): { agg: DayAgg | undefined; held: HeldRows | null } {
+    const job = this.newJob(venue, address, fromT, end);
+    if (keep) job.keep = [];
+    while (!this.scanStep(job, SCAN_CHUNK)) {
+      if (job.keep && job.keep.length > HELD_DAY_MAX) job.keep = undefined;
+    }
+    const held = job.keep && job.keep.length <= HELD_DAY_MAX ? packHeld(0, fromT, job.keep) : null;
+    job.keep = undefined;
+    return { agg: this.finish(job).get(Math.floor(fromT / DAY)), held };
+  }
+
+  /**
+   * The first days of these wallets' windows from `fromT`, read side by side on the reader threads ahead of the board's
+   * sums (engine.ts buildBoard), which then find them done. Nothing without reader threads: the sums read inline then.
+   */
+  async prefetchPartials(venue: Venue, addresses: Iterable<string>, fromT: number, pause: () => Promise<void>): Promise<void> {
+    if (!this.dayScans?.on) return;
+    const reads: Array<Promise<unknown>> = [];
+    for (const address of addresses) {
+      if (!this.withAgg(venue, address, false)) continue;
+      if (this.firstDay(venue, address, fromT).whole) continue;
+      reads.push(this.partialDayAsync(venue, address, fromT, pause).catch(() => undefined));
+    }
+    await Promise.all(reads);
+  }
+
+  /** Reader threads for the first days (dayScanPool.ts); the writer's process only, never a reader or a test's memory file. */
+  startDayScans(threads = dayScanThreads()): boolean {
+    if (this.readOnly || this.path === ':memory:' || this.dayScans || threads <= 0) return false;
+    this.dayScans = new DayScanPool(this.path, threads);
+    return true;
+  }
+  private dayScans: DayScanPool | null = null;
+  get dayScanStatus(): { threads: number; on: boolean; flying: number; done: number; failed: number; spentMs: number } | null {
+    const p = this.dayScans;
+    return p ? { threads: p.threads, on: p.on, flying: p.flying, done: p.done, failed: p.failed, spentMs: p.spentMs } : null;
+  }
+
   private held = new Map<string, HeldRows>();
   private heldRows = 0;
   private heldGen = 0;
@@ -2576,25 +2678,13 @@ export class IndexStore {
   private heldEvicted = 0;
 
   private hold(dk: string, ver: number, from: number, rows: ScanRow[]): void {
-    const n = rows.length;
-    const h: HeldRows = {
-      ver, from, n, t: new Float64Array(n), v: new Float64Array(n), pnl: new Float64Array(n), fee: new Float64Array(n),
-      side: new Int8Array(n), src: new Int8Array(n), sym: new Uint16Array(n), syms: [],
-    };
-    const ix = new Map<string, number>();
-    for (let i = 0; i < n; i++) {
-      const r = rows[i]!;
-      // Anything the arrays could not give back as it was read is not held.
-      if (!Number.isInteger(r.side) || r.side < -128 || r.side > 127 || (r.src !== 0 && r.src !== 1)) return;
-      let k = ix.get(r.symbol);
-      if (k === undefined) {
-        if (h.syms.length >= 65_535) return;
-        ix.set(r.symbol, (k = h.syms.length));
-        h.syms.push(r.symbol);
-      }
-      h.t[i] = r.t; h.v[i] = r.v; h.pnl[i] = r.closed_pnl ?? Number.NaN; h.fee[i] = r.fee ?? Number.NaN;
-      h.side[i] = r.side; h.src[i] = r.src; h.sym[i] = k;
-    }
+    const h = packHeld(ver, from, rows);
+    if (h) this.putHeld(dk, h);
+  }
+
+  private putHeld(dk: string, h: HeldRows): void {
+    const n = h.n;
+    this.letGo(dk);
     this.held.set(dk, h);
     this.heldRows += n;
     for (const old of this.held.keys()) {

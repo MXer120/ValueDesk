@@ -92,6 +92,8 @@ export function runIndexer(path = defaultDbPath(), o: RunOptions = {}): Running 
   const t1 = Date.now();
   // The bulk writes on their own thread (writerThread.ts), before the engine starts: the last stop's spill goes through it.
   const writer = store.startWriter();
+  // First days of the board windows read on threads of their own (dayScanPool.ts): the nightly day change.
+  store.startDayScans();
   const indexer = new Indexer(store);
   const t2 = Date.now();
   console.log(`[indexer] start: store ${t1 - t0} ms, engine ${t2 - t1} ms, writer thread ${writer ? 'on' : 'off'}${o.handover ? ', taking over from a running indexer' : ''}`);

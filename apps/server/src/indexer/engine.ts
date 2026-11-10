@@ -476,6 +476,7 @@ export class Indexer {
   private streamState = Object.fromEntries(VENUES.map((v) => [v, { since: null, lastUp: 0 }])) as Record<Venue, StreamState>;
   private sodexIdOf = new Map<string, number>();
   private building = false;
+  private buildStartedAt = 0;
   private lookupScanAt: Partial<Record<Window, number>> = {};
   private cache = new Map<string, { ver: number; at: number; value: unknown }>();
   private unranked = new Map<string, number>();
@@ -1041,6 +1042,9 @@ export class Indexer {
       coverageLedger: this.coverageLedger?.status() ?? null,
       aggregates: this.store.aggBacklog,
       heldPartials: this.store.heldPartials,
+      dayScans: this.store.dayScanStatus,
+      // The build in flight: since when and where (2026-11-10: a 30+ min build showed nothing of where it was).
+      building: this.building ? { since: this.buildStartedAt, step: this.step ?? null } : null,
       checkpoint: this.store.checkpointStatus,
       flushBacklog: this.writes.backlog,
       writer: this.store.writerStatus,
@@ -1998,6 +2002,7 @@ export class Indexer {
     if (this.building || this.stopped) return;
     this.building = true;
     const t0 = Date.now();
+    this.buildStartedAt = t0;
     const steps: Record<string, number> = {};
     let ts = t0;
     const lap = (name: string) => { const t = Date.now(); steps[name] = (steps[name] ?? 0) + t - ts; ts = t; };
@@ -2098,6 +2103,9 @@ export class Indexer {
     // them, so streams, lanes and requests are never held for the whole build.
     this.step = `${venue} ${window} ${side} ${filter}`;
     const statsOf = (address: string): PickStats => this.pickStats(venue, address, window, from, now);
+    // The picks' first days side by side on the reader threads (store.ts prefetchPartials): after 00:00 UTC each was
+    // nearly a whole day read row by row here, one pick after another (98 min for the first build of 2026-11-09).
+    await this.store.prefetchPartials(venue, res.picks.map((c) => c.address), from, () => this.breathe());
     for (const c of res.picks) {
       await this.pickStatsAsync(venue, c.address, window, from, now);
       await this.tradeStateAsync(venue, c.address, window, from, now);
