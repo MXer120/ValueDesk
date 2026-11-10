@@ -531,18 +531,33 @@ function BotsPageOpen({ address, provider }: { address: string | null; provider:
   // Renew the trading key right where it is said (owner 2026-11-09): the longest lifetime, one go, no setup sheet.
   // Running bots keep trading on the old key until SoDEX lists the new one (the executor registers it under its
   // other name). A failure opens the setup with the key step, where the reason is shown.
-  const [renewing, setRenewing] = useState(false);
+  // Two wallet requests: the label counts them, and one left unanswered for 45 s is said (owner 2026-11-10: the
+  // renewal sat on "Waiting for your wallet" after the first was approved, the second never seen).
+  const [renewing, setRenewing] = useState<0 | 1 | 2 | 3>(0);
   const renewKey = async () => {
     if (renewing) return;
-    setRenewing(true);
+    setRenewing(1);
+    let step: 1 | 2 = 1;
+    let nudge = 0;
+    const arm = () => {
+      window.clearTimeout(nudge);
+      nudge = window.setTimeout(() => notify('warn', step === 1
+        ? 'Your wallet has not answered request 1 of 2 (ValueDesk makes the new key). Open your wallet and approve it.'
+        : 'Your wallet has not answered request 2 of 2 (SoDEX registers the new key). Open your wallet and approve it: the key is not renewed until then.'), 45_000);
+    };
+    arm();
     try {
-      await approveKey('hosted', live.hosted.info?.keyTtlDaysMax ?? 180);
+      await approveKey('hosted', live.hosted.info?.keyTtlDaysMax ?? 180, (k) => { step = k; setRenewing(k); arm(); });
+      window.clearTimeout(nudge);
+      setRenewing(3);
       notify('ok', 'Trading key renewed. Your bots never stopped.');
     } catch (e) {
       const m = e instanceof Error ? e.message : String(e);
-      if (!/reject|denied|cancel/i.test(m)) { notify('error', m); setSetup({ paper: false }); }
+      if (!/reject|denied|cancel/i.test(m)) { notify('error', `Renewal stopped at request ${step} of 2: ${m}`); setSetup({ paper: false }); }
+      else notify('warn', `Renewal cancelled at request ${step} of 2: the old key stays until it expires.`);
     } finally {
-      setRenewing(false);
+      window.clearTimeout(nudge);
+      setRenewing(0);
     }
   };
   useEffect(() => {
@@ -567,7 +582,7 @@ function BotsPageOpen({ address, provider }: { address: string | null; provider:
         text: keyEnds <= keyNow
           ? 'Your trading key has expired: real bots cannot send or pull orders. Renew it now (one wallet signature).'
           : `Your trading key expires in ${Math.max(1, Math.round((keyEnds - keyNow) / 86_400_000))} day${Math.round((keyEnds - keyNow) / 86_400_000) === 1 ? '' : 's'} (${new Date(keyEnds).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}). Renew it now: your bots keep running on the old key until the new one is registered.`,
-        action: { label: renewing ? 'Waiting for your wallet…' : `Renew for ${live.hosted.info?.keyTtlDaysMax ?? 180} days`, run: () => void renewKey() },
+        action: { label: renewing === 1 ? 'Approve 1 of 2 in your wallet…' : renewing === 2 ? 'Approve 2 of 2 in your wallet…' : renewing === 3 ? 'Checking with SoDEX…' : `Renew for ${live.hosted.info?.keyTtlDaysMax ?? 180} days`, run: () => void renewKey() },
       }
     : null;
 

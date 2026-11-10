@@ -28,6 +28,7 @@ import { historyLabel } from '../dashboard/storage';
 import { MENU_ICONS, TabMenu, menuAt, type TabMenuItem } from '../dashboard/tabExtras';
 import { useMoneyNotice } from './funds/moneyNotice';
 import { BOTS_ON, goBots, useBotsView, type BotsView } from '../bots/routes';
+import { useBetaAccess } from '../beta/access';
 
 export function SideBar({ address, hasLayout, dashLocked, onOpenSearch, tab, onNavigate }: {
   address: string | null;
@@ -39,6 +40,9 @@ export function SideBar({ address, hasLayout, dashLocked, onOpenSearch, tab, onN
   onNavigate: (tab: Tab) => void;
 }) {
   const terminals = useTerminals(TRADE_DASHBOARD);
+  // The Bots pages in the rail wherever the section is open to this wallet (a local build, or the beta list).
+  const botsListed = useBetaAccess(address);
+  const botsOpen = BOTS_ON || botsListed;
   const onTrade = tab === 'trade';
   const open = (id: string) => {
     activateTerminal(TRADE_DASHBOARD, id);
@@ -127,7 +131,7 @@ export function SideBar({ address, hasLayout, dashLocked, onOpenSearch, tab, onN
           </SideButton>
         </div>
       </nav>
-      {BOTS_ON && <BotsGroup on={tab === 'bots'} />}
+      {botsOpen && <BotsGroup on={tab === 'bots'} />}
       <SettingsMenu hasLayout={hasLayout} dashLocked={dashLocked} address={address} trigger={false} />
       <SideWallet address={address} onPortfolio={() => onNavigate('portfolio')} />
     </aside>

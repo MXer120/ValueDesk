@@ -222,7 +222,6 @@ export function SignInButton({ ctx }: { ctx: BotsCtx }) {
   return (
     <span className="bots-signin">
       <Button variant="primary" icon="wallet" loading={waiting} onClick={() => void go()}>{waiting ? 'Waiting for your wallet…' : 'Sign in'}</Button>
-      {waiting && <small className="bots-fine" role="status">Approve the sign-in in your wallet. It is a free signature and changes nothing.</small>}
     </span>
   );
 }
