@@ -142,12 +142,12 @@ function SettingsTab({ v, ctx }: { v: AlgoView; ctx: BotsCtx }) {
   };
   return (
     <div className="bots-settingspage">
-      <Shell className="bots-stgshell">
+      <Shell className="bots-setshell">
         <ShellHeader icon="gear" title="Settings" subtitle={ended ? 'As it ran. Run it again to start a new bot with them.' : closing ? 'It is closing what it holds: settings can change again once it has stopped.' : 'Every setting saves to the running bot at once: nothing restarts, nothing is closed.'} aside={n ? <Button variant="quiet" onClick={() => setD(before)}>Undo changes</Button> : ended ? <Button variant="secondary" icon="play" onClick={() => ctx.runAgain(v)}>Run again</Button> : undefined} />
         <Panel className="bots-sizepanel">
           <fieldset className="bots-fieldset" disabled={ended || closing}>
-            <BotSettings d={d} set={(p) => setD((x) => ({ ...x, ...p }))} range={d.strategy === 'grid' ? gridRange(d, null) : null} mark={v.bot?.mark ?? null} liveAllowed={ctx.liveAllowed} hidePractice noLead={est?.lead === null} lev={{ ...lev, max: leverageCap(lev.max, regionMax) }} />
-            <NameField d={d} set={(p) => setD((x) => ({ ...x, ...p }))} />
+            <div className="bots-setname"><NameField d={d} set={(p) => setD((x) => ({ ...x, ...p }))} /></div>
+            <BotSettings cards d={d} set={(p) => setD((x) => ({ ...x, ...p }))} range={d.strategy === 'grid' ? gridRange(d, null) : null} mark={v.bot?.mark ?? null} liveAllowed={ctx.liveAllowed} hidePractice noLead={est?.lead === null} lev={{ ...lev, max: leverageCap(lev.max, regionMax) }} />
           </fieldset>
         </Panel>
       </Shell>
